@@ -1,0 +1,65 @@
+{
+  "scope": "Actual pure assembler + selected Host guard statements with minimal typed ports; not full Host.prepare_turn/hooks/SDK/vendor/default-lane execution",
+  "baseline": "d3a242837194e94c435a228228ac0eaab10724aa",
+  "sources": [
+    {
+      "compiled": "prompt_block_id.mli",
+      "scope": "lib/types/prompt_block_id.mli",
+      "sha256": "9f0fb7337a8301265ba0f1624bf5223e874f6c302473608cf45b8ae5e363b59f"
+    },
+    {
+      "compiled": "prompt_block_id.ml",
+      "scope": "lib/types/prompt_block_id.ml",
+      "sha256": "41ef23675e52f6422265ad9254df1906f5d01cae3d8a6919be14df4f8063aa68"
+    },
+    {
+      "compiled": "keeper_context_layers.mli",
+      "scope": "lib/keeper/keeper_context_layers.mli",
+      "sha256": "e1c4e1e44e1ccf629c7709424880a91af6d3c7552709523e1af5ff43fee85741"
+    },
+    {
+      "compiled": "keeper_context_layers.ml",
+      "scope": "lib/keeper/keeper_context_layers.ml",
+      "sha256": "2fbefab7ec5f8686eb1a0b936646e28569191f1799608b590f9eb14a62db9259"
+    },
+    {
+      "compiled": "keeper_context_assembly.mli",
+      "scope": "lib/keeper/keeper_context_assembly.mli",
+      "sha256": "1d271a068f51a3272e2e8f57fb26d3be9ac0b9dda5f50412e882ed45ecddc3fc"
+    },
+    {
+      "compiled": "keeper_context_assembly.ml",
+      "scope": "lib/keeper/keeper_context_assembly.ml",
+      "sha256": "a4735b6574f7997aa523e4d7aef90383b61b9b9447be26d9555fe61c3aefcd6b"
+    },
+    {
+      "compiled": "inference_utils.ml",
+      "scope": "exact Safe_ops sanitizer fragment",
+      "sha256": "7d474a456047251d9d89ddb3251cc9f3b8b9adc87d61d300388c6de166cf7c6e"
+    },
+    {
+      "compiled": "string_util.ml",
+      "scope": "exact trim_nonempty fragment",
+      "sha256": "dbcbe98b04d4c154e5ffad727c903673ad7d4f86da6137e2517086b14bb38439"
+    },
+    {
+      "compiled": "request.ml",
+      "scope": "exact pure request assembler fragment",
+      "sha256": "5389994c9a2395c08910b911655d92ee836049f4962381378fb9e0567075933e"
+    },
+    {
+      "compiled": "baseline_guard.ml",
+      "scope": "exact baseline selected Host selection/guard; minimal typed ports",
+      "sha256": "4308c6fd74b1accc03598983e4833903b62c487eb7b7f96b9941b7c76921ab21"
+    },
+    {
+      "compiled": "guard.ml",
+      "scope": "exact repaired selected Host selection/guard; minimal typed ports",
+      "sha256": "4d766a8630a931e9f9be73f83ebaf4f1d584d068fbfbebe07bca8125509fd074"
+    }
+  ],
+  "compile_exit": 0,
+  "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
+  "run_exit": 0,
+  "output": "PASS baseline Goal suffix masks blank selected instructions\nPASS repair refuses blank selected instructions beneath Goal observation\nPASS generic no-Goal override keeps exact None or Some bytes\nPASS existing official no-Goal blank refusal is preserved\nPASS baseline Goal suffix masks blank selected instructions\nPASS repair refuses blank selected instructions beneath Goal observation\nPASS generic no-Goal override keeps exact None or Some bytes\nPASS existing official no-Goal blank refusal is preserved\nPASS baseline Goal suffix masks blank selected instructions\nPASS repair refuses blank selected instructions beneath Goal observation\nPASS generic no-Goal override keeps exact None or Some bytes\nPASS existing official no-Goal blank refusal is preserved\nPASS baseline Goal suffix masks blank selected instructions\nPASS repair refuses blank selected instructions beneath Goal observation\nPASS generic no-Goal override keeps exact None or Some bytes\nPASS existing official no-Goal blank refusal is preserved\nPASS nonblank selected override and exact Goal bytes remain admitted\nPASS a stale issuer cannot replace a different legitimate override\nPASS final selected System guard remains active\n19 actual-source assembler/Host guard checks passed\n"
+}

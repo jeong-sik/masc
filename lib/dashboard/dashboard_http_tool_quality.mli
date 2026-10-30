@@ -1,0 +1,55 @@
+(** Dashboard_http_tool_quality — operator-facing tool-quality
+    aggregation endpoint.
+
+    Reads the keeper tool-call log, classifies failure outputs into
+    canonical reason codes, and emits per-tool / per-keeper /
+    per-thinking-mode / per-hour rate tables for the
+    [/api/v1/dashboard/tool-quality] surface.
+
+    Internal helpers (the [normalize_failure_text] /
+    [classify_process_status] text classifiers, the
+    [bucket_key] / [thinking_mode_of_record] / [hour_key_of_record]
+    record projectors, the [update_rate_table] / [render_rate_table]
+    aggregation primitives, the [dashboard_surface] /
+    [source_metadata_fields] / [empty_summary] payload builders) are
+    hidden — callers consume the entry points only. *)
+
+val classify_failure_output : string -> string
+(** Map a raw tool-call failure output (which may carry an
+    [error: ] / [tool_error: ] prefix and a JSON envelope) to a
+    canonical reason code. Falls back to a normalised free-text
+    classification or to ["parse_error"] /
+    ["unknown_error"] / ["empty_output"] when nothing matches. *)
+
+val unknown_runtime_profile_bucket : string
+(** Bucket emitted by {!aggregate} when a tool-call record carries no
+    [runtime_profile] evidence at either the top level or in
+    [runtime_contract]. *)
+
+type sampling = private
+  | Window_hours of float
+  | Recent_n of int
+(** Effective data selection. A positive window reads every retained call in
+    that period; a recent count reads only the most recent calls. Constructors
+    are private so cache identity and aggregation share the selected mode. *)
+
+val select_sampling : ?n:int -> ?window_hours:float -> unit -> sampling
+(** Preserve the aggregation boundary's selection: positive [window_hours]
+    takes priority over [n]; absent/nonpositive/NaN windows select recent [n],
+    whose default is [5000]. No route-specific clamping occurs here. *)
+
+val aggregate :
+  sampling ->
+  (Yojson.Safe.t, Keeper_tool_call_log.index_error) result
+(** Build the dashboard payload from the selected retained data. The recent
+    count read goes through the
+    tool-call read index; an index that cannot be read is the [Error],
+    never a payload with zero calls. The payload includes per-tool /
+    per-keeper / per-thinking-mode / per-hour rate tables plus the
+    source-metadata envelope and the canonical
+    [dashboard_surface] tag. Typed deferred records are reported in
+    [deferred] and excluded from settled success/failure rates.
+    Readable records whose wire outcome is [unknown] or absent are reported in
+    [unsettled] and excluded from those rates. Records without an integer
+    [result_bytes], or with an unknown/wrong-typed disposition or wire token,
+    are counted in [malformed] and excluded from every other figure. *)

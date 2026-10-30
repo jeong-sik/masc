@@ -1,0 +1,14 @@
+(node:58812) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 10000ms exceeded.
+    at waitText (/Users/dancer/me/workspace/yousleepwhen/masc-runtime-observation-workspace-20261004/dashboard/evidence/2026-10-04-runtime-observation-workspace/browser-fixture.mjs:37:28)
+    at /Users/dancer/me/workspace/yousleepwhen/masc-runtime-observation-workspace-20261004/dashboard/evidence/2026-10-04-runtime-observation-workspace/browser-fixture.mjs:45:8 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v26.3.0

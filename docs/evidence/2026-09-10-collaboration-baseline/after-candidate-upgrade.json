@@ -1,0 +1,34 @@
+{
+  "pid": 30481,
+  "binary_commit": "9cc33feff4917a1ae91804771a708d4a0e75e152",
+  "binary_sha256": "0fecf2e60507d7ef760c5d83cdffbde03c5841a7e604947fdecd81b56621b97e",
+  "startup": "ready",
+  "websocket": {
+    "enabled": true,
+    "configured": true,
+    "listening": true,
+    "reachable": true,
+    "mode": "same_origin",
+    "discovery_path": "/ws",
+    "upgrade_path": "/ws",
+    "request_host": "127.0.0.1",
+    "session_count": 0,
+    "ws_url": "ws://127.0.0.1:18951/ws",
+    "same_origin_upgrade_enabled": true,
+    "same_origin_upgrade_path": "/ws",
+    "same_origin_ws_url": "ws://127.0.0.1:18951/ws"
+  },
+  "preserved_files": {
+    "tasks/backlog.json": true,
+    "tasks/goal_task_links.json": true,
+    "goals.json": true,
+    "config/runtime.toml": true,
+    "config/keepers/exhibit-editor.toml": true,
+    "config/keepers/exhibit-designer.toml": true,
+    "playground/docker/exhibit-editor/booklet.pdf": true,
+    "playground/docker/exhibit-editor/poster.png": true,
+    "playground/docker/exhibit-editor/evidence.json": true
+  },
+  "runtime_config_assigned": "glm-coding.glm-5.3",
+  "release_validated": false
+}

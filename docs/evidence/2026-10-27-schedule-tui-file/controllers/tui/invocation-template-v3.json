@@ -1,0 +1,20 @@
+{
+  "status": "TEMPLATE_NOT_EXECUTED; root and independent source delta review required before a separate second owned trial; not automatic replay",
+  "argv": [
+    "python3",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v3.py",
+    "--source-root",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+    "--native-dir",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2",
+    "--image-reference",
+    "<ROOT_SELECTED_EXISTING_IMAGE_REFERENCE>",
+    "--observation-deadline-unix",
+    "<FINITE_FUTURE_OBSERVATION_DEADLINE_UNIX>"
+  ],
+  "requires": "root and independent delta review, then one explicitly authorized owned run",
+  "controller_sha256": "3171b7d1e56f97fb8f3e8ab46bfd71cba45c3c4e9af405ccf257de02143a6c22",
+  "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42"
+}

@@ -1,0 +1,474 @@
+---
+status: reference
+---
+
+# Common Pitfalls
+
+Recurring mistakes from commit history analysis. Check this before submitting PRs.
+
+## 1. Stale References After Deletion (12 occurrences)
+
+When you delete or rename a module, these are often left behind:
+- Test files referencing the deleted module
+- `dune` file listing the deleted module name
+- CSS imports in dashboard components
+- Other modules that `open` or call the deleted module
+
+**Before deleting any `.ml` file:**
+```bash
+# Find all references
+rg "ModuleName" lib/ test/ bin/ dashboard/src/ --type-add 'dune:*.ml' -l
+```
+
+**Before deleting any `.css` file:**
+```bash
+rg "filename.css" dashboard/src/ -l
+```
+
+## 2. Eio Cooperative Scheduling (10 occurrences)
+
+This codebase uses Eio (OCaml 5.x cooperative concurrency). Common mistakes:
+
+- `Stdlib.Mutex` in Eio context → use `Eio.Mutex` (causes EDEADLK)
+- Blocking I/O (`Unix.read`, `open_in`) in Eio fibers → use `Eio.Path` or `Fs_compat`
+- Missing `Eio.Cancel.Cancelled` guard in exception handlers → re-raise it
+- Spin loops (`while true`) → use `Eio.Time.sleep` or `Eio.Condition`
+
+**Exception handler template:**
+```ocaml
+(try some_operation ()
+ with
+ | Eio.Cancel.Cancelled _ as e -> raise e  (* always re-raise *)
+ | exn -> Log.error "failed: %s" (Printexc.to_string exn))
+```
+
+## 3. Dashboard Changes Need Build Verification (38% of recent commits)
+
+Dashboard is a Preact+HTM SPA compiled with Vite. Common issues:
+- Nullable fields from API → guard with `?? default` or optional chaining
+- Signal updates with same value → cause unnecessary re-renders (use `if (sig.value !== newVal)`)
+- CSS custom properties must be defined before use
+
+**Always after dashboard changes:**
+```bash
+cd dashboard && pnpm run typecheck  # catches TypeScript errors (tsc --noEmit)
+```
+
+## 4. Test Breakage From Refactoring (6 occurrences)
+
+Tests break when:
+- Module is deleted but test still references it
+- Function signature changes but test uses old signature
+- Eio context required but test doesn't wrap in `Eio_main.run`
+
+**After any refactoring (human contributors / Keeper lanes with toolchain; external AI sessions use CI per `docs/constitution.xml`):**
+```bash
+scripts/dune-local.sh build @default  # catches compilation errors in tests
+```
+
+## 5. Silent Error Patterns — When to Log
+
+`| Error _ ->` 사용 시 side-effect 실패 삼킴에 주의.
+
+**로그 필수 (`warn`) — state를 바꾸려다 실패:**
+```ocaml
+| Error e -> Log.BoardLog.warn "notification failed: %s" e
+```
+SSE/notification 발행, 파일 쓰기, 외부 API 호출, audit 기록.
+
+**로그 선택 (`debug`) — 읽다가 실패:**
+```ocaml
+| Error e -> Log.Task.debug "task file unreadable: %s" e
+```
+디렉토리 스캔 중 개별 파일, config 파싱, runtime context 미가용.
+
+**로그 불필요 (idiomatic OCaml):**
+```ocaml
+List.filter_map (function Ok t -> Some t | Error _ -> None)
+(try int_of_string s with _ -> default)
+(try Sys.remove tmp with _ -> ())
+```
+
+**PR 체크:** `rg '\| Error _ -> \(\)' lib/` 로 새 `| Error _ -> ()` 확인.
+
+### 5.1. Naked Callback Invocation
+
+`~on_appended` 같은 callback closure를 `try/with` 없이 호출하면 callback 내부 실패가 caller의 본체까지 전파된다. Callback을 받는 함수가 실패 경계를 소유하고 있다면 cancellation은 다시 올리고 나머지 실패는 그 함수의 typed error로 보존한다.
+
+**❌ DON'T:**
+```ocaml
+on_appended ();
+Ok ()
+```
+
+**✅ DO:**
+```ocaml
+(try
+   on_appended ();
+   Ok ()
+ with
+ | Eio.Cancel.Cancelled _ as e -> raise e
+ | exn -> Error (Printexc.to_string exn))
+```
+
+**PR 체크:** `rg -nP '^\s+(let \(\) = )?on_[a-z_]+ \(\)' lib/keeper/` — match 발견 시 try/with wrap 검토.
+
+### 5.2. Cancel.Cancelled Swallow (관련: §2)
+
+`with _ -> ...` 또는 `with exn -> ...` 가 `Eio.Cancel.Cancelled`도 함께 잡으면 fiber teardown이 멎고 parent switch가 영원히 닫히지 않음.
+
+**규칙:** 모든 `with exn ->`는 첫 arm에 Cancel re-raise.
+
+```ocaml
+try ... with
+| Eio.Cancel.Cancelled _ as e -> raise e   (* 항상 첫 arm *)
+| exn -> ...
+```
+
+**PR 체크:** `rg -n 'with exn ->' lib/` 결과를 검토해 Cancel re-raise 누락 정렬.
+
+### 5.3. Drain Fire-and-Forget Without Attribution (PR #11134, 2026-04-27)
+
+`let _ = drain_turn_event_bus () in` 자체는 의도적 fire-and-forget이지만, site/outcome label 없이 drain하면 overflow 신호(burst frequency, drain miss)를 잃음.
+
+**규칙:** 의도적 ignore는 유지하되, site label과 outcome counter를 동시 emission.
+
+**❌ DON'T:**
+```ocaml
+let _ = drain_turn_event_bus () in
+```
+
+**✅ DO:**
+```ocaml
+let _ = drain_turn_event_bus ~site:"background_poll" () in
+(* drain helper가 keeper_event_bus_drain_total
+   {site, outcome} 자동 emit *)
+```
+
+**PR 체크:** `rg -n 'let _ = drain_turn_event_bus' lib/` — `~site:` 인자 없는 호출 발견 시 site label 추가.
+
+## 6. Version String Drift
+
+masc 패키지 버전의 SSOT는 `dune-project`다. `masc.opam`, ROADMAP current, CHANGELOG latest release가 같은 값으로 움직여야 하고, `scripts/check-version-truth.sh`가 이 넷의 일치를 검사한다.
+
+`packages/agent_core/lib/version.ml`은 별도 버전 라인이다 (release-please가 `x-release-please-version` 마커로 관리). `dune-project`와 일치 대상이 아니다.
+
+```bash
+# Check
+scripts/check-version-truth.sh
+```
+
+## 7. Prompt Changes Need Checkpoint Reset
+
+Keeper system prompts are cached in checkpoints. After changing prompts:
+- Existing keepers continue using the old prompt from checkpoint
+- New prompts only apply when `build_turn_prompt` overrides at runtime
+- If testing prompt changes, verify the running keeper's actual system prompt
+- Core prompt text now lives in `config/prompts/*.md`; Dashboard overrides in `Lab > Tools > Prompt Registry` only change runtime effective text and are persisted to `.masc/prompt_overrides.json`
+
+## 8. Config Module Anti-Patterns
+
+Config 모듈에서 자주 발생하는 실수:
+
+**❌ DON'T: Raw Sys.getenv 사용**
+```ocaml
+let my_value = Sys.getenv_opt "MASC_MY_FLAG" |> Option.value ~default:"false"
+```
+문제: ENV-CONTRACT 미기재, type safety 없음, 테스트 isolation 불가
+
+**✅ DO: 중앙화된 getter 사용**
+```ocaml
+(* 1. docs/ENV-CONTRACT.md "Rules for New Environment Variables"에 따라 선언
+      (기본 reload_class는 boot_static, 선언부와 operator 문서에 reload_class 기록) *)
+
+(* 2. env_config_*.ml에 typed getter — canonical default는 호출부에 inline *)
+let get_my_flag () = Env_config_core.get_bool "MASC_MY_FLAG" false
+```
+
+**❌ DON'T: 모듈 초기화 시점에 config 읽기**
+```ocaml
+let my_config = get_my_flag ()  (* module-level binding *)
+
+let process () = if my_config then ...  (* stale value *)
+```
+문제: test 격리 불가, runtime override 불가
+
+**✅ DO: 사용 시점에 config 읽기**
+```ocaml
+let process () =
+  let my_config = get_my_flag () in  (* call-site binding *)
+  if my_config then ...
+```
+
+**Result Pattern 선호:**
+```ocaml
+(* _result suffix는 (value, error message) result 반환 *)
+let get_required_path_result () =
+  Env_config_core.get_string_result "MASC_REQUIRED_PATH"
+
+(* suffix 없는 함수는 예외 발생 (편의용) *)
+let get_required_path () =
+  match get_required_path_result () with
+  | Ok path -> path
+  | Error msg -> raise (Config_error msg)
+```
+
+## 9. Test Environment Isolation
+
+Test는 production config와 격리되어야 한다.
+
+**현재 test/dune:**
+```lisp
+(env
+  (GRAPHQL_API_KEY "")
+  (ZAI_API_KEY ""))
+```
+
+**자주 발생하는 문제:**
+- Test가 parent shell env를 상속받아 실제 DB에 연결 시도
+- CI 환경에서만 실패하는 테스트 (env 차이)
+- Test 간 격리 실패 (공유 mutable state)
+
+**After adding config-dependent tests:**
+```bash
+# 1. test/dune에 필요한 env 명시
+dune build --root . test/  # fails if missing env
+
+# 2. Test 내부에서 override 필요 시 명시적으로
+let test_with_custom_config () =
+  Unix.putenv "MASC_TEST_FLAG" "true";
+  (* test code *)
+  Unix.putenv "MASC_TEST_FLAG" "false"
+```
+
+**Eio Context 필요한 Test:**
+```ocaml
+let test_with_eio () =
+  Eio_main.run @@ fun env ->
+  (* env.clock, env.fs 등 사용 *)
+  Alcotest.(check bool) "test" true result
+```
+
+문제: `Eio_main.run` 없이 Eio 함수 호출 → runtime panic
+
+## 10. Dashboard Build Dependency
+
+Dashboard는 OCaml build와 독립적으로 빌드되어야 한다.
+
+**Common Mistake:**
+```bash
+dune build --root .  # ✅ OCaml 빌드 성공
+# dashboard는 빌드되지 않음!
+./start-masc.sh --http  # dashboard가 404 또는 stale
+```
+
+**Correct Flow:**
+```bash
+# 1. OCaml 빌드
+dune build --root .
+
+# 2. Dashboard 빌드 (별도) — raw `pnpm run build` 금지: vite emptyOutDir가
+#    assets/dashboard/.build-stamp를 지우고 wrapper만 stamp를 다시 쓴다.
+#    stamp가 없으면 /health dashboard_surface가 "missing"으로 고착된다.
+scripts/build-dashboard-if-needed.sh
+
+# 또는 자동 빌드 script 사용
+./start-masc.sh --http  # pnpm 있으면 자동 빌드
+```
+
+**CI에서:**
+```bash
+scripts/build-dashboard-if-needed.sh
+# assets/dashboard/.build-stamp 기준으로 필요할 때만 재빌드하고 stamp를 갱신한다
+```
+
+**Dashboard 변경 후 반드시:**
+```bash
+cd dashboard && pnpm run typecheck   # 타입 에러 사전 감지 (비파괴)
+../scripts/build-dashboard-if-needed.sh   # 실제 빌드는 wrapper로
+```
+
+**Dev Server와 Production Build 차이 주의:**
+```bash
+# Dev server (Vite dev mode, HMR, proxy)
+cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:8935" pnpm run dev
+
+# Vite port를 5173이 아닌 값으로 바꾸면 서버 쪽 allowlist도 같이 맞춘다.
+MASC_HTTP_DEV_MUTATION_ORIGINS="http://localhost:4173" ./start-masc.sh
+
+# Production build (static assets: assets/dashboard/)
+scripts/build-dashboard-if-needed.sh
+```
+
+## 11. Health Snapshot Ratcheting
+
+Codebase health는 특정 anti-pattern 사용 횟수로 추적된다.
+
+**Current Baseline (`.ci/health-baseline.json`):**
+```json
+{
+  "lib_failwith": 21,        // lib/에서 failwith 사용
+  "lib_list_hd": 1,          // lib/에서 List.hd 사용
+  "lib_list_tl": 0,          // lib/에서 List.tl 사용
+  "lib_option_get": 0,       // lib/에서 Option.get 사용
+  "test_failwith": 520,      // test/에서 failwith 사용
+  "test_list_hd": 341        // test/에서 List.hd 사용
+}
+```
+
+**Ratcheting Rule:**
+- 현재 카운트를 초과하면 CI 실패 (`scripts/health_snapshot.sh --fail-on-lib-regression`)
+- 카운트 감소는 허용
+- 신규 anti-pattern 발견 시 baseline 업데이트
+
+**Before using partial functions:**
+```ocaml
+(* ❌ List.hd raises on empty list *)
+let first = List.hd my_list
+
+(* ✅ Pattern match is safe *)
+let first = match my_list with
+  | [] -> None
+  | x :: _ -> Some x
+
+(* ❌ Option.get raises on None *)
+let value = Option.get my_option
+
+(* ✅ Option.value with default *)
+let value = Option.value ~default:fallback my_option
+```
+
+**PR이 health regression을 일으킨 경우:**
+```bash
+# CI fails when a lib_* counter increases above .ci/health-baseline.json.
+# 두 가지 선택:
+# 1. failwith를 Result/Option pattern으로 refactor (선호)
+# 2. 정당한 사유가 있다면 baseline 업데이트 (reviewer 승인 필요)
+```
+
+## 12. Concurrent Merge Semantic Validation
+
+Git merge는 textual conflict만 감지한다. Semantic duplication은 CI가 잡아야 한다.
+
+**예시: 같은 이름의 서로 다른 정의가 다른 줄에 들어오면 merge는 통과한다**
+```
+Branch A: adds the same binding at line 95
+Branch B: adds the same binding at line 130
+Merge: both exist (no textual conflict) ← Git OK, CI should fail
+```
+
+**After editing registry-like files:**
+```bash
+# Dune files (human contributors / Keeper lanes with toolchain; external AI sessions use CI)
+scripts/dune-local.sh build @default  # fails on missing modules
+
+# Dashboard routes
+cd dashboard && pnpm run typecheck  # TypeScript type check
+```
+
+**Files requiring semantic validation:**
+- `lib/tool/tool_catalog.ml` - public tool list
+- `dune` files - module list completeness
+- Dashboard TypeScript - type consistency
+
+**Best Practice: Small, Frequent Merges**
+- Long-lived feature branches → 높은 semantic conflict 확률
+- Frequent rebase/merge → textual conflict는 많지만 semantic은 적음
+- Registry 수정은 작은 PR로 분리
+
+---
+
+## 13. Cross-FSM Coupling Discipline
+
+4 sub-FSM(KSM/KTC/KDP/KCL)이 직접 호출로 결합된 구조 — silent failure가 cross-FSM boundary에서 가장 쉽게 발생한다.
+
+### 13.1. Pure Function 불변량
+
+`Keeper_state_machine.apply_event` (`lib/keeper_registry/keeper_state_machine.mli`)는 mli에 "Pure function — no I/O"를 명시한다. 안에 counter emission을 추가하면:
+- property test의 idempotency 가 false로 깨짐
+- counter label 결정이 함수 내부로 들어가 caller-context를 잃음 (edge label 결정 사이트가 흩어짐)
+
+**규칙:** counter는 caller site에서만 emit. pure function은 transition/decision 만 반환.
+
+**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `lib/keeper_registry/keeper_state_machine.ml`). counter는 예외 없음.
+
+**PR 체크:**
+```bash
+rg -nP 'inc_counter' lib/keeper_registry/keeper_state_machine.ml
+# 기대: 0 매치
+```
+
+### 13.2. Variant 추가 시 Sweep 강제
+
+ADT variant 추가 PR이 모든 매치 사이트를 sweep 안 하면 컴파일 또는 런타임 경계가 깨진다.
+
+**규칙:** variant 정의 변경 commit과 같은 PR에 모든 match arm 업데이트.
+
+**PR 체크:**
+```bash
+# variant 추가 PR이라면, diff에 정의 파일 + ≥1 match arm 추가가 함께 있어야 함
+git diff origin/main..HEAD -- '*.ml' | rg -B 2 -A 2 '\| <NewVariant>'
+# 위 명령이 1개 이상의 match arm을 보여야 정상 (정의만 추가됐다면 sweep 누락)
+```
+
+### 13.3. TLA+ BugAction 규율
+
+SafetyInvariant 추가 시 같은 spec에 `BugAction`도 짝으로 추가, clean cfg(invariant pass) + buggy cfg(invariant violation) 양쪽 검증.
+
+- clean cfg가 통과만 하고 buggy cfg가 없으면: invariant가 진짜 버그를 잡는지 검증 0
+- buggy cfg도 통과하면: invariant가 너무 약함 (모든 상태 허용)
+- clean cfg가 fail하면: spec/invariant 모순 — 모델이 잘못됨
+
+**규칙:** `*.tla` 추가/수정 PR은 `*-buggy.cfg` 가 invariant violation으로 fail해야 정상.
+
+**PR 체크:**
+```bash
+# specs/<topic>/<Name>.tla 와 sibling -buggy*.cfg 짝 매핑 확인
+# (variant cfg 지원: -buggy.cfg, -buggy-runtime.cfg 등 -buggy* 모두 매치)
+comm -23 \
+  <(find specs -name "*.tla" | sed 's|.tla$||' | sort) \
+  <(find specs -name "*-buggy*.cfg" | sed -E 's|-buggy[^.]*\.cfg$||' | sort -u)
+# bug-model 누락된 spec 출력. 새 spec PR이라면 0줄 기대 (기존 미커버 spec은 별도 backlog)
+```
+
+### 13.4. Per-edge Counter 일치성
+
+`docs/keeper-fsm-graph.dot`에 명시된 edge와 코드에 wire된 `masc_keeper_fsm_edge_transitions_total{edge}` label이 1:1 일치해야 함. 한쪽만 추가/제거하면 graph가 거짓이거나 counter가 drift함.
+
+**규칙:** edge 추가/제거 시 graph + counter + validator script 동시 업데이트.
+
+**PR 체크:**
+```bash
+bash scripts/validate-keeper-fsm-graph.sh
+# 기대: "OK: all N documented edges are instrumented and vice versa."
+```
+
+---
+
+## Related Architecture Decision Records (ADRs)
+
+| Pitfall Section | Related Contract | Key Takeaway |
+|----------------|-------------|--------------|
+| Context handoff pattern | Keeper/agent core checkpoint and handoff docs | Context transfer uses Relay/Handoff plus keeper/agent core checkpoint paths |
+| Dashboard Control Surface | `masc_operator_*` tool 이름이 SSOT (총 7개, 원격 operator 프로파일 6개) | `masc_operator_*` 가 canonical, generic tool executor는 admin-only |
+
+---
+
+## Maintenance Notes
+
+이 문서는 git commit history 분석과 실제 발생한 문제에 기반한다.
+
+**PR 체크리스트 with this doc:**
+- [ ] 새 모듈 삭제했는가? → Section #1 체크
+- [ ] Eio context에서 작업하는가? → Section #2, #5.2 체크
+- [ ] Dashboard 변경했는가? → Section #3, #10 체크
+- [ ] 테스트 추가/변경했는가? → Section #4, #9 체크
+- [ ] Lifecycle callback closure 호출했는가? → Section #5.1 체크
+- [ ] `drain_turn_event_bus` 호출 추가했는가? → Section #5.3 체크
+- [ ] Config / 환경변수 추가·변경했는가? → Section #8, #9 체크
+- [ ] Partial function 사용했는가? → Section #11 체크
+- [ ] Registry-like file 수정했는가? → Section #12 체크
+- [ ] `keeper_state_machine` 수정했는가? → Section #13.1 체크
+- [ ] ADT variant 추가했는가? → Section #13.2 체크
+- [ ] `*.tla` 추가/수정했는가? → Section #13.3 체크
+- [ ] FSM edge counter 추가/제거했는가? → Section #13.4 체크

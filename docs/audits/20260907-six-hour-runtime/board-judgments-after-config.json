@@ -1,0 +1,128 @@
+[
+  {
+    "keeper": "openai-probe",
+    "candidate_id": "f3bb24cbeaa18563bfe88f8dc6099bf595c31aa59ff81c7077a06555d732d2ee",
+    "state": "consumed",
+    "slot_id": "glm-coding.glm-5.3-flash",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "7203cbe35214377d1b37ed298667810e",
+      "plan_fingerprint": "b740690de81e3abab80a5357ff55f67b5df28aad8e68d8d346ecc16a1676abc9",
+      "request_body_sha256": "bf05277fe4ca742615821ee7806ceadf4e171d4de9635c15077399ed2b455ee0"
+    },
+    "judged_at": 1788755426.925743,
+    "delivery": "not_relevant"
+  },
+  {
+    "keeper": "openai-probe",
+    "candidate_id": "dfbd3d6b9a37f21d85be2b9d3d2a360556765857c7eaafc684af6ef570cd74d8",
+    "state": "judged",
+    "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "7cfd040525a8cd492fd7eb9895aff4cc",
+      "plan_fingerprint": "3d8837499106bb88021143869c5706d99199a635b13bf2ed570a3a447679a828",
+      "request_body_sha256": "2ed96a36c2b531467d6032a0b396c366fa9b7ec5f2f219a9076fe8c2873cf3e7"
+    },
+    "judged_at": 1788755470.740325,
+    "delivery": null
+  },
+  {
+    "keeper": "openai-probe",
+    "candidate_id": "dfbd3d6b9a37f21d85be2b9d3d2a360556765857c7eaafc684af6ef570cd74d8",
+    "state": "consumed",
+    "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "7cfd040525a8cd492fd7eb9895aff4cc",
+      "plan_fingerprint": "3d8837499106bb88021143869c5706d99199a635b13bf2ed570a3a447679a828",
+      "request_body_sha256": "2ed96a36c2b531467d6032a0b396c366fa9b7ec5f2f219a9076fe8c2873cf3e7"
+    },
+    "judged_at": 1788755470.740325,
+    "delivery": "not_relevant"
+  },
+  {
+    "keeper": "rondo",
+    "candidate_id": "ddfddc53d72645a88acfb98babbde8ff6fdec11238b96fa7ff52b21257b0e29a",
+    "state": "judged",
+    "slot_id": "glm-coding.glm-5.3-flash",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "764e688c20320adc4ebd005c611ae4b5",
+      "plan_fingerprint": "8e045eed01c97e67c2f1437b1862cbbabf9ebb5dc1cf15bd480b8b392d2e0fa3",
+      "request_body_sha256": "d53d083390a812813eeb6f74bbce974f2cd0033f80f809dd6f6556557ce49f79"
+    },
+    "judged_at": 1788755145.860613,
+    "delivery": null
+  },
+  {
+    "keeper": "rondo",
+    "candidate_id": "ddfddc53d72645a88acfb98babbde8ff6fdec11238b96fa7ff52b21257b0e29a",
+    "state": "consumed",
+    "slot_id": "glm-coding.glm-5.3-flash",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "764e688c20320adc4ebd005c611ae4b5",
+      "plan_fingerprint": "8e045eed01c97e67c2f1437b1862cbbabf9ebb5dc1cf15bd480b8b392d2e0fa3",
+      "request_body_sha256": "d53d083390a812813eeb6f74bbce974f2cd0033f80f809dd6f6556557ce49f79"
+    },
+    "judged_at": 1788755145.860613,
+    "delivery": "enqueued_to_keeper_lane"
+  },
+  {
+    "keeper": "edgar.a.poe",
+    "candidate_id": "a0eec5ad3bab0fddfd379ae62971228e8189106243c21355e54217e504e570cc",
+    "state": "judged",
+    "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "04aa83bc337863cfc0648428559d6faf",
+      "plan_fingerprint": "4480683870e18398037d282323f651b3c034ecf06d68b3e8994219fc4e204167",
+      "request_body_sha256": "84e0662d2eea1bd0775772b1eac162a8e6d8c2b424affc76bfc9c640aafb627d"
+    },
+    "judged_at": 1788755409.048838,
+    "delivery": null
+  },
+  {
+    "keeper": "edgar.a.poe",
+    "candidate_id": "a0eec5ad3bab0fddfd379ae62971228e8189106243c21355e54217e504e570cc",
+    "state": "consumed",
+    "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "04aa83bc337863cfc0648428559d6faf",
+      "plan_fingerprint": "4480683870e18398037d282323f651b3c034ecf06d68b3e8994219fc4e204167",
+      "request_body_sha256": "84e0662d2eea1bd0775772b1eac162a8e6d8c2b424affc76bfc9c640aafb627d"
+    },
+    "judged_at": 1788755409.048838,
+    "delivery": "not_relevant"
+  },
+  {
+    "keeper": "geek-scout",
+    "candidate_id": "5adf845b20199eed058e20515e8d9604d7731c098ff0a9212ce04a914853f0c9",
+    "state": "judged",
+    "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "7e601a8321f3972ee99abf0bdd810d04",
+      "plan_fingerprint": "435ccfdefaae517b9a7e3433010282d3d0fc42486b0d7e38603c0150fa7a7b07",
+      "request_body_sha256": "05b0d1227846c4dfa4a8ade15b4f53e81fa7e5e2263b0e7e8c58d1ed11e182a0"
+    },
+    "judged_at": 1788755408.476659,
+    "delivery": null
+  },
+  {
+    "keeper": "geek-scout",
+    "candidate_id": "5adf845b20199eed058e20515e8d9604d7731c098ff0a9212ce04a914853f0c9",
+    "state": "consumed",
+    "slot_id": "ollama_cloud.deepseek-v4-flash-0731",
+    "source": {
+      "kind": "exact_attempt",
+      "call_id": "7e601a8321f3972ee99abf0bdd810d04",
+      "plan_fingerprint": "435ccfdefaae517b9a7e3433010282d3d0fc42486b0d7e38603c0150fa7a7b07",
+      "request_body_sha256": "05b0d1227846c4dfa4a8ade15b4f53e81fa7e5e2263b0e7e8c58d1ed11e182a0"
+    },
+    "judged_at": 1788755408.476659,
+    "delivery": "not_relevant"
+  }
+]

@@ -1,0 +1,16 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+
+   MASC System  9:Runtime  p:next  ‹2  ▸params  prompts  3›  HTTP [connected]   
+    overrides persist in .masc/runtime_params.json · E is advanced JSON         
+    j/k selects · PgUp/PgDn reads the complete value and contract               
+ ────────────────────────────────────────────────────────────────────────────── 
+    (unfiled) 그룹 없음 — 레지스트리가 이 param 을 어느 surface 에도 넣지 않 …  
+      ● studio.enabled                                        on                
+  ┌ Selected setting · studio.enabled · Detail 1-3/12                        ┐  
+  │   Key                                                                    │  
+  │     studio.enabled                                                       │  
+  │   Current                                                                │  
+  └──────────────────────────────────────────────────────────────────────────┘  
+
+  e / Enter:edit  E:advanced JSON  x:default / clear  Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                      

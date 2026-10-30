@@ -1,0 +1,15 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40215877213
+Complete raw log SHA256: 66b19a1f23f8c6e91a684b30aeb2aa3b9e0c3a21616ca7c06cab0416710ff5b0
+Complete raw log bytes: 182773
+Selected checkout, checkpoint assertions, failures and full-suite summary.
+
+test suite	Checkout	2026-10-25T17:19:25.2436177Z HEAD is now at 52154457 test(execution): isolate missing journal checkpoint facts without caller authority
+test suite	Test	2026-10-25T17:20:54.1346928Z ASSERT checkpoint retains actual source
+test suite	Test	2026-10-25T17:20:54.6488172Z ASSERT checkpoint persisted
+test suite	Test	2026-10-25T17:20:54.8521409Z ASSERT journal contains root checkpoint facts without a caller sink
+test suite	Test	2026-10-25T17:20:54.8534521Z   [FAIL]        provider_mock_extra         24   durable tool bus uses canoni...
+test suite	Test	2026-10-25T17:20:54.8856638Z   [FAIL]        provider_mock_extra         25   durable tool partial deliver...
+test suite	Test	2026-10-25T17:20:55.2245985Z │ [FAIL]        provider_mock_extra         24   durable tool bus uses can...  │
+test suite	Test	2026-10-25T17:20:55.2248994Z FAIL journal contains root checkpoint facts without a caller sink
+test suite	Test	2026-10-25T17:20:55.2264039Z │ [FAIL]        provider_mock_extra         25   durable tool partial deli...  │
+test suite	Test	2026-10-25T17:20:55.2285153Z 2 failures! in 1.116s. 79 tests run.

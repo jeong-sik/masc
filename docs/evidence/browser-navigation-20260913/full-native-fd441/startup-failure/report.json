@@ -1,0 +1,23 @@
+{
+  "scope": "isolated three-channel website; real live Firefox extension and native host; binary-exported progressive browser instruction and composition with typed TUI default action; persistent native TUI",
+  "steps": [],
+  "cleanup": [
+    {
+      "name": "server",
+      "pid": 56021,
+      "exit": 1
+    },
+    {
+      "name": "driver",
+      "pid": 56020,
+      "exit": 0
+    }
+  ],
+  "composition_source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+  "composition_distribution": "full package exported by this server binary",
+  "composition_file_sha256": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107",
+  "instruction_sha256": "8277e8b890542117d8f748967bf2c019cccf444bd8fa8a4aa4613d421f684671",
+  "runtime_id": "codex_subscription.gpt-5.6-luna",
+  "result": "failed",
+  "error": "owned process exited 1"
+}

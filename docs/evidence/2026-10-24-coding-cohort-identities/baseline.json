@@ -1,0 +1,14 @@
+{
+  "source_head": "62f3c0e51b17dda6b8e312adacd00ea35e9dbfa3",
+  "driver_sha256": "1046fb4e345c91e3ea826abea4e1f3a03815e77f862a5566c6e6fcfc359dcb59",
+  "scope": "actual declaration and resume shell functions; experiment validator deliberately ported to fixture; no server/provider/grader run",
+  "models": [
+    "ollama:org/model",
+    "ollama:org-model"
+  ],
+  "retained_receipt_model": "org/model",
+  "second_requested_model": "org-model",
+  "exit_code": 0,
+  "stdout": "\n[models.\"org-model\"]\napi-name = \"org/model\"\nmax-context = 32768\ntools-support = true\nstreaming = true\n\n[ollama.\"org-model\"]\nmax-concurrent = 1\n",
+  "stderr": "[coding-eval] declared runtime ollama.org-model (api-name org/model) in the isolated config copy\n[coding-eval] skip ollama-org-model-case-r1 (same experiment receipt)\n"
+}

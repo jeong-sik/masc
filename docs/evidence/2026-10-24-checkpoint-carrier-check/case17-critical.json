@@ -1,0 +1,343 @@
+{
+  "case": "test/test_verifier_review_worker execution17",
+  "case_pass_line": 1247,
+  "source_path": "source/test_verifier_review_worker.at-2c3a9f7.ml",
+  "source_head": "2c3a9f701afd57cd0f62deb853325cb0197e0432",
+  "source_lines": [
+    777,
+    862
+  ],
+  "source_sha256": "6ce0b54dc1f259c9052d3b525327d19e419766538339e91225ed01885e61fa90",
+  "phase_order_from_exact_source": [
+    "Judged",
+    "Committing",
+    "Commit_unknown"
+  ],
+  "groups": [
+    {
+      "phase": "Judged",
+      "observed_registration": false,
+      "runner_assertion_line_range": [
+        1158,
+        1173
+      ],
+      "scoped_commit_effect_expected_values_confirmed_by_successful_case": {
+        "observe": 0,
+        "apply": 0
+      },
+      "actual_assertions": [
+        {
+          "line": 1158,
+          "assertion": "fixture actually ran its original reviewer"
+        },
+        {
+          "line": 1159,
+          "assertion": "strict retained intent binds the actual host notes"
+        },
+        {
+          "line": 1160,
+          "assertion": "strict retained intent binds the actual review"
+        },
+        {
+          "line": 1161,
+          "assertion": "actual host read confirms this valid intent could apply"
+        },
+        {
+          "line": 1162,
+          "assertion": "exact missing observations cause the refusal"
+        },
+        {
+          "line": 1163,
+          "assertion": "missing observations refuse before actual host observation"
+        },
+        {
+          "line": 1164,
+          "assertion": "missing observations refuse before actual domain apply call"
+        },
+        {
+          "line": 1165,
+          "assertion": "exact missing observations cause the refusal"
+        },
+        {
+          "line": 1166,
+          "assertion": "unprovable recovery preserves the raw actual Task"
+        },
+        {
+          "line": 1167,
+          "assertion": "unprovable recovery preserves the exact owner phase and events"
+        },
+        {
+          "line": 1168,
+          "assertion": "unprovable recovery publishes no competing registry row"
+        },
+        {
+          "line": 1169,
+          "assertion": "recovery never adds another reviewer call"
+        }
+      ]
+    },
+    {
+      "phase": "Judged",
+      "observed_registration": true,
+      "runner_assertion_line_range": [
+        1174,
+        1188
+      ],
+      "scoped_commit_effect_expected_values_confirmed_by_successful_case": {
+        "observe": 2,
+        "apply": 1
+      },
+      "actual_assertions": [
+        {
+          "line": 1174,
+          "assertion": "fixture actually ran its original reviewer"
+        },
+        {
+          "line": 1175,
+          "assertion": "strict retained intent binds the actual host notes"
+        },
+        {
+          "line": 1176,
+          "assertion": "strict retained intent binds the actual review"
+        },
+        {
+          "line": 1177,
+          "assertion": "actual host read confirms this valid intent could apply"
+        },
+        {
+          "line": 1180,
+          "assertion": "observed sibling executes exactly one real domain apply"
+        },
+        {
+          "line": 1181,
+          "assertion": "observed sibling reads before and confirms after"
+        },
+        {
+          "line": 1183,
+          "assertion": "acknowledged original leaves pending discovery"
+        },
+        {
+          "line": 1184,
+          "assertion": "recovery never adds another reviewer call"
+        }
+      ]
+    },
+    {
+      "phase": "Committing",
+      "observed_registration": false,
+      "runner_assertion_line_range": [
+        1189,
+        1204
+      ],
+      "scoped_commit_effect_expected_values_confirmed_by_successful_case": {
+        "observe": 0,
+        "apply": 0
+      },
+      "actual_assertions": [
+        {
+          "line": 1189,
+          "assertion": "fixture actually ran its original reviewer"
+        },
+        {
+          "line": 1190,
+          "assertion": "strict retained intent binds the actual host notes"
+        },
+        {
+          "line": 1191,
+          "assertion": "strict retained intent binds the actual review"
+        },
+        {
+          "line": 1192,
+          "assertion": "actual host read confirms this valid intent could apply"
+        },
+        {
+          "line": 1193,
+          "assertion": "exact missing observations cause the refusal"
+        },
+        {
+          "line": 1194,
+          "assertion": "missing observations refuse before actual host observation"
+        },
+        {
+          "line": 1195,
+          "assertion": "missing observations refuse before actual domain apply call"
+        },
+        {
+          "line": 1196,
+          "assertion": "exact missing observations cause the refusal"
+        },
+        {
+          "line": 1197,
+          "assertion": "unprovable recovery preserves the raw actual Task"
+        },
+        {
+          "line": 1198,
+          "assertion": "unprovable recovery preserves the exact owner phase and events"
+        },
+        {
+          "line": 1199,
+          "assertion": "unprovable recovery publishes no competing registry row"
+        },
+        {
+          "line": 1200,
+          "assertion": "recovery never adds another reviewer call"
+        }
+      ]
+    },
+    {
+      "phase": "Committing",
+      "observed_registration": true,
+      "runner_assertion_line_range": [
+        1205,
+        1219
+      ],
+      "scoped_commit_effect_expected_values_confirmed_by_successful_case": {
+        "observe": 2,
+        "apply": 1
+      },
+      "actual_assertions": [
+        {
+          "line": 1205,
+          "assertion": "fixture actually ran its original reviewer"
+        },
+        {
+          "line": 1206,
+          "assertion": "strict retained intent binds the actual host notes"
+        },
+        {
+          "line": 1207,
+          "assertion": "strict retained intent binds the actual review"
+        },
+        {
+          "line": 1208,
+          "assertion": "actual host read confirms this valid intent could apply"
+        },
+        {
+          "line": 1211,
+          "assertion": "observed sibling executes exactly one real domain apply"
+        },
+        {
+          "line": 1212,
+          "assertion": "observed sibling reads before and confirms after"
+        },
+        {
+          "line": 1214,
+          "assertion": "acknowledged original leaves pending discovery"
+        },
+        {
+          "line": 1215,
+          "assertion": "recovery never adds another reviewer call"
+        }
+      ]
+    },
+    {
+      "phase": "Commit_unknown",
+      "observed_registration": false,
+      "runner_assertion_line_range": [
+        1220,
+        1235
+      ],
+      "scoped_commit_effect_expected_values_confirmed_by_successful_case": {
+        "observe": 0,
+        "apply": 0
+      },
+      "actual_assertions": [
+        {
+          "line": 1220,
+          "assertion": "fixture actually ran its original reviewer"
+        },
+        {
+          "line": 1221,
+          "assertion": "strict retained intent binds the actual host notes"
+        },
+        {
+          "line": 1222,
+          "assertion": "strict retained intent binds the actual review"
+        },
+        {
+          "line": 1223,
+          "assertion": "actual host read confirms this valid intent could apply"
+        },
+        {
+          "line": 1224,
+          "assertion": "exact missing observations cause the refusal"
+        },
+        {
+          "line": 1225,
+          "assertion": "missing observations refuse before actual host observation"
+        },
+        {
+          "line": 1226,
+          "assertion": "missing observations refuse before actual domain apply call"
+        },
+        {
+          "line": 1227,
+          "assertion": "exact missing observations cause the refusal"
+        },
+        {
+          "line": 1228,
+          "assertion": "unprovable recovery preserves the raw actual Task"
+        },
+        {
+          "line": 1229,
+          "assertion": "unprovable recovery preserves the exact owner phase and events"
+        },
+        {
+          "line": 1230,
+          "assertion": "unprovable recovery publishes no competing registry row"
+        },
+        {
+          "line": 1231,
+          "assertion": "recovery never adds another reviewer call"
+        }
+      ]
+    },
+    {
+      "phase": "Commit_unknown",
+      "observed_registration": true,
+      "runner_assertion_line_range": [
+        1236,
+        1246
+      ],
+      "scoped_commit_effect_expected_values_confirmed_by_successful_case": {
+        "observe": 2,
+        "apply": 1
+      },
+      "actual_assertions": [
+        {
+          "line": 1236,
+          "assertion": "fixture actually ran its original reviewer"
+        },
+        {
+          "line": 1237,
+          "assertion": "strict retained intent binds the actual host notes"
+        },
+        {
+          "line": 1238,
+          "assertion": "strict retained intent binds the actual review"
+        },
+        {
+          "line": 1239,
+          "assertion": "actual host read confirms this valid intent could apply"
+        },
+        {
+          "line": 1242,
+          "assertion": "observed sibling executes exactly one real domain apply"
+        },
+        {
+          "line": 1243,
+          "assertion": "observed sibling reads before and confirms after"
+        },
+        {
+          "line": 1245,
+          "assertion": "acknowledged original leaves pending discovery"
+        },
+        {
+          "line": 1246,
+          "assertion": "recovery never adds another reviewer call"
+        }
+      ]
+    }
+  ],
+  "measurement_boundary": "Six subscenarios inside ONE Alcotest case. Numeric values are expected-int assertions in exact source confirmed by the successful case, not separately printed metrics. One preflight actual Task read is outside scoped counters. Production-entry callbacks are not independently instrumented; that entry checks actual refusal/raw Task+Owner+registry preservation or actual Done+Approved+ACK. No Board notification delivery claimed; logs explicitly report missing notification hook."
+}

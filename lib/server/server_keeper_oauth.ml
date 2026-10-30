@@ -1,0 +1,634 @@
+(** See server_keeper_oauth.mli. *)
+
+module Provider = Keeper_oauth_provider
+module Session = Keeper_oauth_session
+module Store = Keeper_oauth_client_store
+module Declarations = Keeper_oauth_declarations
+
+open Result.Syntax
+
+(* Attach-time hops -- discovery, client registration, the code exchange --
+   are short JSON round trips of the same class as the Slack and Discord REST
+   calls and run under the shared request timeout those use. The MCP session
+   behind a catalog refresh runs under the keeper's no-progress threshold,
+   which {!Keeper_identity_tools.http_transports} owns. *)
+let rest_timeout_sec = Masc_http_client.default_request_timeout_sec
+
+let register_with ~clock ~registration_url ~client_name ~redirect_uri =
+  Keeper_oauth_registration.register
+    ~post:(Keeper_oauth_registration.http_post ~clock ~timeout_sec:rest_timeout_sec)
+    ~registration_url ~client_name ~redirect_uri ()
+
+(* Long enough for an operator to read a consent screen and decide, short
+   enough that a verifier nobody came back for does not sit around. *)
+let login_window_sec = 600.
+
+(* What the provider's consent screen calls this client. Registration names
+   the software, not the install: one masc has one client, and the Keeper it
+   is being attached to is a masc-side fact that the provider has no use
+   for. *)
+let client_name = "masc"
+
+(* In this process only, like the exchanges it holds. A restart between the
+   two halves loses the login, which is the correct outcome -- see
+   Keeper_oauth_pending. *)
+let pending_mutex = Mutex.create ()
+let pending_by_workspace = Hashtbl.create 1
+let pending_for_base_path base_path =
+  let key = base_path in
+  Mutex.lock pending_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock pending_mutex) (fun () ->
+    match Hashtbl.find_opt pending_by_workspace key with
+    | Some pending -> pending
+    | None -> let pending = Keeper_oauth_pending.create () in
+        Hashtbl.add pending_by_workspace key pending; pending)
+
+(* One path for every provider. Which login a callback belongs to is the
+   state it echoes, not the URL it arrives at, and a state is unguessable and
+   redeemable once. *)
+let callback_path = "/api/v1/keepers/oauth/callback"
+
+let redirect_uri () =
+  match Env_config_core.masc_http_base_url_result () with
+  | Error message ->
+    (* Guessing would build an authorize call the provider redirects
+       somewhere this server is not, and the operator would see the
+       provider's error rather than ours. *)
+    Error (Printf.sprintf "this server does not know its own base URL: %s" message)
+  | Ok base_url -> Ok (base_url ^ callback_path)
+;;
+
+let provider_of_id provider_id =
+  match Declarations.find provider_id with
+  | None -> Error (Printf.sprintf "no identity provider is declared as %S" provider_id)
+  | Some (Declarations.Declared provider) -> Ok provider
+  | Some (Declarations.Unreadable { problem; _ }) ->
+    Error (Printf.sprintf "the %S declaration cannot be read: %s" provider_id problem)
+;;
+
+(* Where this install keeps what it registered. Beside the workspace rather
+   than inside a Keeper: the client is the same whichever Keeper logs in. *)
+let identity_dir ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
+;;
+
+(* What this install knows about the client a login would use, and never which
+   client it is. These states must stay distinct: a lapsed registration is
+   renewed automatically by the next login, while [none] means there is no
+   app to reuse, and an unreadable store must not invite an operator to write
+   over credentials that may still be there. An app the operator typed in is
+   written with an expiry of zero, so it remains [on_file]. *)
+type client_state =
+  | Client_on_file
+  | Client_lapsed
+  | Client_none
+  | Client_problem of string
+
+let client_state ~base_path ~provider ~now =
+  match Store.load ~dir:(identity_dir ~base_path) ~provider with
+  | Ok (Some credentials) when Store.secret_expired credentials ~now ->
+    Client_lapsed
+  | Ok (Some _) -> Client_on_file
+  | Ok None -> Client_none
+  | Error problem -> Client_problem problem
+;;
+
+let client_state_to_json = function
+  | Client_on_file -> `Assoc [ "kind", `String "on_file" ]
+  | Client_lapsed -> `Assoc [ "kind", `String "lapsed" ]
+  | Client_none -> `Assoc [ "kind", `String "none" ]
+  | Client_problem problem ->
+    `Assoc [ "kind", `String "problem"; "problem", `String problem ]
+;;
+
+let declarations_json ~base_path ~now =
+  `List
+    (List.map
+       (function
+         | Declarations.Declared provider ->
+           `Assoc
+             [ "id", `String provider.Provider.id
+             ; "label", `String provider.Provider.label
+             ; ( "client_state"
+               , client_state ~base_path ~provider ~now |> client_state_to_json )
+             ]
+         | Declarations.Unreadable { id; problem } ->
+           `Assoc [ "id", `String id; "problem", `String problem ])
+       (Declarations.all ()))
+;;
+
+(* An app an operator made themselves, for a provider that registers none.
+   Kept where a registered one is kept, because it is the same thing arriving
+   by a different road: one per provider for this install, not one per
+   Keeper. A secret is optional -- some providers issue an app without one --
+   and clearing it is saying "this app has none" rather than "leave what is
+   there", so an absent field and an empty one mean the same. *)
+let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
+  let* provider = provider_of_id provider_id in
+  let trimmed = String.trim client_id in
+  if String.equal trimmed ""
+  then Error "a client id is required"
+  else
+    let client_secret =
+      match client_secret with
+      | Some secret when String.trim secret <> "" -> Some (String.trim secret)
+      | Some _ | None -> None
+    in
+    let scopes =
+      List.filter
+        (fun scope -> not (String.equal scope ""))
+        (String.split_on_char ' ' (String.trim scopes))
+    in
+    let* () =
+      Store.save ~dir:(identity_dir ~base_path) ~provider
+        { Store.client_id = trimmed
+        ; client_secret
+          (* An app the operator made and typed in here. There is no
+             registration answer to read a deadline from, and the operator is
+             the one who renews it, so this records what RFC 7591 spells "0":
+             nothing on this side expires it. Leaving it unrecorded would let
+             {!Store.secret_expired} read the operator's own app as lapsed and
+             register over it. *)
+        ; secret_expires_at = Some 0.
+        ; scopes
+        }
+    in
+    Ok
+      (`Assoc
+        [ "provider", `String provider.Provider.id
+        ; "provider_label", `String provider.Provider.label
+        ; "client_id", `String trimmed
+          (* Never the secret back. What an operator needs to know is
+             whether one is on file. *)
+        ; "has_client_secret", `Bool (client_secret <> None)
+          (* Echoed, unlike the secret: an operator needs to see what will
+             actually be asked for, and a scope list is not a credential. *)
+        ; "scopes", `List (List.map (fun scope -> `String scope) scopes)
+        ])
+;;
+
+let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
+  let base_path = config.Workspace.base_path in
+  let* provider = provider_of_id provider_id in
+  let transports = Keeper_identity_tools.http_transports ~clock in
+  match provider.Provider.credential_source with
+  | Provider.Github_cli { hostname } ->
+    (match Keeper_github_login_lane.stored_token ~config ~keeper_name:keeper ~hostname with
+     | Error
+         (( Keeper_github_login_lane.Remote_ssh_identity_on_endpoint _
+          | Keeper_github_login_lane.Keeper_meta_unreadable _ ) as refusal) ->
+       (* Neither is fixed by logging in again, so neither gets that advice. *)
+       Error (Keeper_github_login_lane.stored_token_error_to_string refusal)
+     | Error (Keeper_github_login_lane.Host_identity_unavailable _ as problem) ->
+       Error
+         (Printf.sprintf
+            "GitHub uses %s's GitHub CLI token (%s). Please switch to the GitHub tab or run 'gh auth login' to authenticate this keeper."
+            keeper
+            (Keeper_github_login_lane.stored_token_error_to_string problem))
+     | Ok _ ->
+       let* catalog =
+         Keeper_identity_tools.refresh ~mcp_post:transports.Keeper_identity_tools.mcp_post
+           ~config ~keeper_name:keeper ~provider ~now ()
+       in
+       Ok
+         (`Assoc
+           [ "keeper", `String keeper
+           ; "provider", `String provider.Provider.id
+           ; "provider_label", `String provider.Provider.label
+           ; "attached", `Bool true
+           ; "tool_count", `Int (List.length catalog.Keeper_identity_tools.tools)
+           ; ( "message"
+             , `String
+                 (Printf.sprintf
+                    "%s GitHub CLI token attached (%d tools discovered)."
+                    keeper (List.length catalog.Keeper_identity_tools.tools)) )
+           ]))
+  | Provider.Oauth_exchange ->
+    let* redirect_uri = redirect_uri () in
+    let dir = identity_dir ~base_path in
+    let* configured = Store.load ~dir ~provider in
+    let* started =
+      Result.map_error Session.start_error_to_string
+        (Session.start ~discover:transports.Keeper_identity_tools.discover
+           ~register:(register_with ~clock) ~provider ~configured ~client_name
+           ~redirect_uri ~keeper ~pending:(pending_for_base_path base_path) ~now ~ttl_sec:login_window_sec ())
+    in
+    let* () =
+      if started.Session.registered_now
+      then Store.save ~dir ~provider started.Session.credentials
+      else Ok ()
+    in
+    Ok
+      (`Assoc
+        [ "keeper", `String keeper
+        ; "provider", `String provider.Provider.id
+        ; "provider_label", `String provider.Provider.label
+        ; "authorize_url", `String started.Session.authorize_url
+        ; "attempt_id", `String started.Session.attempt_id
+        ; "registered_now", `Bool started.Session.registered_now
+        ; "expires_at", `Float (now +. login_window_sec)
+        ])
+;;
+
+let refresh_tools ~clock ~config ~keeper ~provider_id ~now =
+  let* provider = provider_of_id provider_id in
+  let* catalog =
+    Keeper_identity_tools.refresh
+      ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
+      ~config ~keeper_name:keeper ~provider ~now ()
+  in
+  Ok
+    (`Assoc
+      [ "keeper", `String keeper
+      ; "provider", `String catalog.Keeper_identity_tools.provider_id
+      ; "provider_label", `String catalog.Keeper_identity_tools.provider_label
+      ; "discovered_at", `Float catalog.Keeper_identity_tools.discovered_at
+      ; ( "tools"
+        , `List
+            (List.map
+               (fun (tool : Mcp_client.tool) -> `String tool.Mcp_client.name)
+               catalog.Keeper_identity_tools.tools) )
+      ])
+;;
+
+let attached_tools_json ~base_path ~keeper =
+  (* Read once for the listing. The screen this feeds carries the on/off
+     switch, so what it shows must be the store's answer — an unreadable
+     store is shown as a problem on each attached row, never as "on". *)
+  let switched_off =
+    Keeper_identity_switch.disabled_providers_for_keeper ~base_path
+      ~keeper_name:keeper
+  in
+  let switch_fields provider_id =
+    match switched_off with
+    | Ok off -> [ "enabled", `Bool (not (List.mem provider_id off)) ]
+    | Error problem -> [ "switch_problem", `String problem ]
+  in
+  `List
+    (List.map
+       (fun declaration ->
+         let id = Declarations.id_of declaration in
+         match declaration with
+         | Declarations.Unreadable { problem; _ } ->
+           `Assoc [ "provider", `String id; "problem", `String problem ]
+         | Declarations.Declared provider ->
+           (match
+              Keeper_identity_tools.load ~base_path ~keeper_name:keeper
+                ~provider_id:provider.Provider.id
+            with
+            | Error problem ->
+              `Assoc [ "provider", `String id; "problem", `String problem ]
+            | Ok None ->
+              `Assoc
+                [ "provider", `String id
+                ; "provider_label", `String provider.Provider.label
+                ; "attached", `Bool false
+                ; ( "also_on"
+                  , `List
+                      (List.map
+                         (fun name -> `String name)
+                         (Keeper_identity_tools.keepers_with ~base_path
+                            ~provider_id:provider.Provider.id
+                            ~excluding:keeper)) )
+                ]
+            | Ok (Some catalog) ->
+              `Assoc
+                ([ "provider", `String id
+                 ; "provider_label", `String provider.Provider.label
+                 ; "attached", `Bool true
+                 ]
+                 @ switch_fields provider.Provider.id
+                 @ [ ( "also_on"
+                     , `List
+                         (List.map
+                            (fun name -> `String name)
+                            (Keeper_identity_tools.keepers_with ~base_path
+                               ~provider_id:provider.Provider.id
+                               ~excluding:keeper)) )
+                   ; ( "discovered_at"
+                     , `Float catalog.Keeper_identity_tools.discovered_at )
+                   ; ( "tools"
+                     , `List
+                         (List.map
+                            (fun (tool : Mcp_client.tool) ->
+                              `String tool.Mcp_client.name)
+                            catalog.Keeper_identity_tools.tools) )
+                   ])))
+       (Declarations.all ()))
+;;
+
+type attached = {
+  keeper : string;
+  provider_id : string;
+  provider_label : string;
+  expires_at : float option;
+  warning : string option;
+  tool_discovery : (int, string) result;
+}
+
+let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
+  let base_path = config.Workspace.base_path in
+  (* Which provider is the exchange's own answer, not the URL's: the
+     declaration that named where these tokens go is the one that started
+     this login. *)
+  let* provider = provider_of_id finished.Session.provider_id in
+  let keeper_name = finished.Session.keeper in
+  let set_env ~name ~value =
+    Keeper_secret_projection.set_env_entry ~base_path ~keeper_name
+      ~scope:Keeper_secret_projection.Keeper_secret ~name ~value
+  in
+  let refresh_token, expires_at =
+    match finished.Session.expiry with
+    | Session.Never -> None, None
+    | Session.Renewable { expires_at; refresh_token } -> Some refresh_token, expires_at
+    | Session.Expiring_without_renewal expires_at -> None, Some expires_at
+  in
+  (* The refresh token first. Every other write can be repeated by logging in
+     again; losing this one means the Keeper works until the access token
+     expires and then stops with nothing on disk to say why.
+
+     All credential writes run inside [while_admitted]: a newer start for this
+     Keeper and provider supersedes the admitted callback only between two
+     publications, never in the middle of one, and a publication that was
+     superseded before its first write writes nothing. Superseding the table
+     entry alone would only make the final [finish] a no-op after the older
+     exchange had already overwritten the newer attempt's tokens. *)
+  let write_credentials () =
+  let* () =
+    match refresh_token with
+    | None ->
+      Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
+        ~scope:Keeper_secret_projection.Keeper_secret
+        ~container_path:provider.Provider.refresh_token_file
+    | Some value ->
+      Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
+        ~scope:Keeper_secret_projection.Keeper_secret
+        ~container_path:provider.Provider.refresh_token_file ~value
+  in
+  let* () =
+    set_env ~name:provider.Provider.access_token_env
+      ~value:finished.Session.access_token
+  in
+  (* Written even when there is no expiry, and empty is what says so. A
+     Keeper that was attached to this provider before may have a moment
+     recorded from that login; leaving it there would have the renewal check
+     read a stale clock against a credential that does not answer to it. *)
+  set_env ~name:provider.Provider.expires_at_env
+    ~value:
+      (match expires_at with
+       | None -> ""
+       | Some expires_at -> Printf.sprintf "%.0f" expires_at)
+  in
+  let* () =
+    match
+      Keeper_oauth_pending.while_admitted (pending_for_base_path base_path) ~state
+        write_credentials
+    with
+    | Some written -> written
+    | None ->
+      Error
+        "this login was superseded by a newer attempt for the same Keeper and \
+         provider; its credentials were not written"
+  in
+  (* The credentials are on disk by now, so this can fail without undoing
+     the attachment. Its outcome is carried rather than logged: the operator
+     is looking at a page right now. *)
+  let tool_discovery =
+    Result.map
+      (fun catalog -> List.length catalog.Keeper_identity_tools.tools)
+      (match Keeper_identity_tools.refresh
+         ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
+         ~config ~keeper_name ~provider ~now () with
+       | result -> result
+       | exception exn ->
+           (* All credential writes completed before discovery began. Keep
+              that fact even if discovery is cancelled or raises. *)
+           Keeper_oauth_pending.finish (pending_for_base_path base_path) ~state
+             (Ok Keeper_oauth_pending.Credentials_published_discovery_failed);
+           raise exn)
+  in
+  Ok
+    { keeper = keeper_name
+    ; provider_id = provider.Provider.id
+    ; provider_label = provider.Provider.label
+    ; expires_at
+    ; warning = Session.expiry_warning finished.Session.expiry
+    ; tool_discovery
+    }
+;;
+
+let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
+  let pending = pending_for_base_path config.Workspace.base_path in
+  let finish_result result =
+    Keeper_oauth_pending.finish pending ~state
+      (match result with
+       | Error _ -> Error ()
+       | Ok attached -> Ok (match attached.tool_discovery with
+           | Ok count -> Keeper_oauth_pending.Tools_discovered count
+           | Error _ -> Keeper_oauth_pending.Credentials_published_discovery_failed));
+    result in
+  match Session.finish
+      ~post:(Keeper_oauth_flow.http_post ~clock ~timeout_sec:rest_timeout_sec)
+      ~pending ~state ~code ~now () with
+  | Error error -> Error (Session.finish_error_to_string error)
+  | Ok finished ->
+      (match publish_finished ~clock ~config ~state ~finished ~now with
+       | result -> finish_result result
+       | exception exn ->
+           Keeper_oauth_pending.finish pending ~state (Error ());
+           raise exn)
+
+let attempt_status_json ~base_path ~now ~keeper ~provider_id ~attempt_id =
+  let fields = match Keeper_oauth_pending.status (pending_for_base_path base_path)
+      ~now ~keeper ~provider_id ~attempt_id with
+    | None -> ["kind", `String "unavailable"]
+    | Some (Awaiting_consent expires_at) -> ["kind", `String "awaiting_consent"; "expires_at", `Float expires_at]
+    | Some Callback_admitted -> ["kind", `String "callback_admitted"]
+    | Some (Completed completion) -> ["kind", `String "completed";
+        "credential_publication", `String "published";
+        "tool_discovery", (match completion with
+          | Tools_discovered count -> `Assoc ["kind", `String "discovered"; "count", `Int count]
+          | Credentials_published_discovery_failed -> `Assoc ["kind", `String "failed"])]
+    | Some Failed -> ["kind", `String "failed"]
+    | Some Expired -> ["kind", `String "expired"]
+    | Some Superseded -> ["kind", `String "superseded"] in
+  `Assoc fields
+
+let reject_callback ~base_path ~state ~now =
+  let pending = pending_for_base_path base_path in
+  match Keeper_oauth_pending.take pending ~now ~state with
+  | None -> ()
+  | Some _ -> Keeper_oauth_pending.finish pending ~state (Error ())
+
+(* Detaching one Keeper from one provider. Three separate acts, reported
+   separately because they can disagree: the local token is deleted, the
+   tool catalog that made the attachment visible to the Keeper's runtime is
+   deleted, and the provider is asked to forget the token. The first two
+   always happen; the third is best effort and its outcome is carried, not
+   assumed. An operator told "the provider could not be reached" still has a
+   Keeper with no token, which is the part this process controls. *)
+
+type revocation =
+  | Revoke_not_published
+      (** the provider publishes no revocation endpoint, or there was no
+          token of ours to revoke (a GitHub CLI provider's credential belongs
+          to [gh]) *)
+  | Revoke_revoked  (** the endpoint answered a success *)
+  | Revoke_failed of string  (** the endpoint answered a refusal, or nothing *)
+
+let revocation_to_json = function
+  | Revoke_not_published -> `Assoc [ "kind", `String "not_published" ]
+  | Revoke_revoked -> `Assoc [ "kind", `String "revoked" ]
+  | Revoke_failed detail ->
+    `Assoc [ "kind", `String "failed"; "detail", `String detail ]
+;;
+
+let disconnect_receipt_path ~base_path ~keeper_name ~provider_id =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (identity_dir ~base_path) "disconnects")
+       (Workspace_utils.safe_filename keeper_name))
+    (provider_id ^ ".json")
+;;
+
+let rec ensure_dir path =
+  if String.equal path "" || String.equal path "." || String.equal path "/"
+     || Sys.file_exists path
+  then ()
+  else (
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then ensure_dir parent;
+    try Unix.mkdir path 0o700 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+(* The receipt is the record an operator can read after the screen has moved
+   on: what was deleted, and what the provider said. Written after the local
+   deletion so a receipt never describes work that did not happen. *)
+let write_disconnect_receipt ~base_path ~keeper_name ~provider_id json =
+  let path = disconnect_receipt_path ~base_path ~keeper_name ~provider_id in
+  try
+    ensure_dir (Filename.dirname path);
+    let temp = path ^ ".tmp" in
+    Out_channel.with_open_bin temp (fun oc ->
+      Out_channel.output_string oc (Yojson.Safe.to_string json));
+    Unix.rename temp path;
+    Ok ()
+  with
+  | Unix.Unix_error (err, fn, arg) ->
+    Error (Printf.sprintf "%s: %s %s" (Unix.error_message err) fn arg)
+  | Sys_error message -> Error message
+;;
+
+let disconnect ?transports ~clock ~(config : Workspace.config) ~keeper ~provider_id
+    ~now () =
+  let base_path = config.Workspace.base_path in
+  let* provider = provider_of_id provider_id in
+  let keeper_name = keeper in
+  let scope = Keeper_secret_projection.Keeper_secret in
+  (* Read the refresh token before deleting it: it is the thing the provider
+     is asked to forget, and after the delete there is nothing left to send. *)
+  let* refresh_token =
+    Keeper_secret_projection.read_file_entry ~base_path ~keeper_name ~scope
+      ~container_path:provider.Provider.refresh_token_file
+  in
+  let* () =
+    Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name ~scope
+      ~container_path:provider.Provider.refresh_token_file
+  in
+  let* () =
+    Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
+      ~name:provider.Provider.access_token_env
+  in
+  let* () =
+    Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
+      ~name:provider.Provider.expires_at_env
+  in
+  let* tools_removed =
+    Keeper_identity_tools.forget ~base_path ~keeper_name
+      ~provider_id:provider.Provider.id
+  in
+  let had_refresh_token =
+    match refresh_token with
+    | Some value -> not (String.equal (String.trim value) "")
+    | None -> false
+  in
+  let revocation =
+    match provider.Provider.credential_source with
+    | Provider.Github_cli _ ->
+      (* [gh] minted and holds this credential; masc never wrote a token of
+         its own and cannot revoke one it does not have. Clearing the account
+         store is the operator's act, in [gh]. *)
+      Revoke_not_published
+    | Provider.Oauth_exchange when not had_refresh_token -> Revoke_not_published
+    | Provider.Oauth_exchange ->
+      let transports =
+        match transports with
+        | Some transports -> transports
+        | None -> Keeper_identity_tools.http_transports ~clock
+      in
+      (match
+         transports.Keeper_identity_tools.discover
+           ~mcp_url:provider.Provider.mcp_url
+       with
+       | Error _ ->
+         (* Discovery is how the endpoint is found at all. Without it there
+            is nowhere to send the token, which is "not attempted", not
+            "failed". *)
+         Revoke_not_published
+       | Ok discovered ->
+         (match discovered.Keeper_oauth_discovery.revocation_endpoint with
+          | None -> Revoke_not_published
+          | Some url ->
+            (* A client id the provider does not recognise would be answered
+               as a refusal; sending none is the same act for a public
+               client. An unreadable store is read as none for the same
+               reason the deletion does not depend on it. *)
+            let configured =
+              match Store.load ~dir:(identity_dir ~base_path) ~provider with
+              | Ok configured -> configured
+              | Error _ -> None
+            in
+            let client_id, client_secret =
+              match configured with
+              | Some credentials ->
+                credentials.Store.client_id, credentials.Store.client_secret
+              | None -> "", None
+            in
+            (match
+               Keeper_oauth_flow.revoke
+                 ~post:transports.Keeper_identity_tools.token_post
+                 ?client_secret ~url ~client_id
+                 ~token:(Option.value refresh_token ~default:"")
+                 ~token_type_hint:"refresh_token" ()
+             with
+             | Ok () -> Revoke_revoked
+             | Error error ->
+               Revoke_failed (Keeper_oauth_flow.revoke_error_to_string error))))
+  in
+  let receipt =
+    `Assoc
+      [ "keeper", `String keeper_name
+      ; "provider", `String provider.Provider.id
+      ; "provider_label", `String provider.Provider.label
+      ; "at", `Float now
+      ; ( "deleted"
+        , `Assoc
+            [ "refresh_token", `Bool had_refresh_token
+            ; "tool_catalog", `Bool tools_removed
+            ] )
+      ; ( "cleared_env"
+        , `List
+            [ `String provider.Provider.access_token_env
+            ; `String provider.Provider.expires_at_env
+            ] )
+      ; "revocation", revocation_to_json revocation
+      ]
+  in
+  let* () =
+    write_disconnect_receipt ~base_path ~keeper_name
+      ~provider_id:provider.Provider.id receipt
+  in
+  Ok receipt
+;;
+

@@ -1,0 +1,73 @@
+{
+  "scope": "source gates only; no typecheck/build/native execution",
+  "source_commit": "a6938d8ac7a578ea97c1decf26851eeae45def3a",
+  "diff_parent": "9048a4ac4eb03a27e6a5144e22ca14e9596e5222",
+  "results": [
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check",
+        "9048a4ac4eb03a27e6a5144e22ca14e9596e5222",
+        "a6938d8ac7a578ea97c1decf26851eeae45def3a"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "bash",
+        "scripts/ci/check-determinism-contract.sh",
+        "--base",
+        "9048a4ac4eb03a27e6a5144e22ca14e9596e5222",
+        "--head",
+        "a6938d8ac7a578ea97c1decf26851eeae45def3a"
+      ],
+      "exit_code": 0,
+      "stdout": "=== Scan: new deterministic-boundary ratchet ===\nPASS: no new deterministic-boundary debt added in 9048a4ac4eb03a27e6a5144e22ca14e9596e5222...a6938d8ac7a578ea97c1decf26851eeae45def3a, staged diff, or worktree diff\n=== Scan: deterministic branch on non-deterministic source ===\n=== Scan: permissive default on unknown input ===\nWARN: Option.value with default on potentially unknown input (sound partial?):\nlib/mcp_server_eio_protocol.ml-486-       let arguments =\nlib/mcp_server_eio_protocol.ml:487:         match Option.value ~default:`Null (Json_util.assoc_member_opt \"arguments\" payload) with\n--\nlib/mcp_server_eio_protocol.ml-1284-        else None)\nlib/mcp_server_eio_protocol.ml:1285:      |> Option.value ~default:0\n--\nlib/mcp_server_eio_call_tool.ml-314-    ~(execution_id : Ids.Execution_id.t) : unit =\nlib/mcp_server_eio_call_tool.ml:315:  let trace_id = Option.value ~default:\"runtime-mcp\" ctx.trace_id in\n--\nlib/mcp_server_eio_call_tool.ml-320-  in\nlib/mcp_server_eio_call_tool.ml:321:  let turn = Option.value ~default:0 ctx.turn in\n--\nlib/keeper/keeper_person_notes.ml-57-    | Some id when String.trim id <> \"\" ->\nlib/keeper/keeper_person_notes.ml:58:        Some (String.trim id, Option.value (field \"note\") ~default:\"\")\n--\nlib/keeper/keeper_runtime_contract.ml-179-    first_string_field [ \"action\"; \"action_key\"; \"op\"; \"cmd\"; \"command\" ] input\nlib/keeper/keeper_runtime_contract.ml:180:    |> Option.value ~default:tool_name\n--\nlib/keeper/keeper_sandbox_factory.ml-78-    let actual_network =\nlib/keeper/keeper_sandbox_factory.ml:79:      Option.value t.default_network_override ~default:effective_network\n=== Scan: catch-all permissive default ===\nWARN: catch-all branch returning Some (possible unsound default):\nlib/fs_compat/fs_compat.ml:3167:     | _ -> Some failure)\nlib/fs_compat/fs_compat.ml-3168-;;\n--\nlib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate\nlib/telemetry_unified/telemetry_unified.ml-114-\n--\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:161:        , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:162:        , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:163:        , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml-164-        , List.length values ) )\n--\nlib/dashboard/dashboard_execution_helpers.ml:43:            | _ -> Some (candidate, candidate_ts)))\nlib/dashboard/dashboard_execution_helpers.ml-44-  in\n--\nlib/server/server_dashboard_http_keeper_api.ml:1161:                  | _ -> Some entry.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1162-                None entries\n--\nlib/server/server_dashboard_http_keeper_api.ml:1893:            | _ -> Some r.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1894-          None records\n--\n=== Scan: unordered iteration in deterministic context ===\n=== DET/NDT gate: PASS ===\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/ci/check-fun-protect-finally-guard.py",
+        "--base",
+        "9048a4ac4eb03a27e6a5144e22ca14e9596e5222",
+        "--head",
+        "a6938d8ac7a578ea97c1decf26851eeae45def3a"
+      ],
+      "exit_code": 0,
+      "stdout": "Fun.protect finalizer guard passed (1 new Fun.protect line(s)).\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/ci/check-cancel-guard.py"
+      ],
+      "exit_code": 0,
+      "stdout": "cancel-guard exemptions: 119 (budget 119)\nNo wildcard catch violations found.\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/ci/check-wildcard-only-match.py"
+      ],
+      "exit_code": 0,
+      "stdout": "No wildcard-only match expressions found.\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/changelog-fragments.py",
+        "check"
+      ],
+      "exit_code": 0,
+      "stdout": "42 changelog fragment(s) OK\n",
+      "stderr": ""
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "observed_at": "2026-09-07T09:30:35.063Z",
+  "origin": "http://127.0.0.1:5178",
+  "browser": "149.0.7827.55",
+  "scope": "Current source fixture; baseline disables only row content-visibility, not a deployed binary comparison",
+  "hashes": {
+    "dashboard/src/components/chat/primitives.ts": "6060f22dbfb7eeaf0a50018d0ec87610c5ea7da7520244406835e7f43d9a738f",
+    "dashboard/src/styles/chat.css": "0e026026e399e54d11041b1088c38d6e7c8586d42ddd93d22b175ec82d2349a7",
+    "dashboard/src/styles/chat-layout.css": "f66de26ed5de68abd9012aadc379ff0a50e0c0c051fedd5d21a19b5d925cdfaf",
+    "dashboard/src/demo/chat-layout-perf-fixture.ts": "1d04fc3acfbbe6dbdafad047ae3b79836790c20d8ac19d8e3de7b28030b728ed",
+    "dashboard/pnpm-lock.yaml": "b98c40fd0522c8572e155afed6e48bfd4ef4343783735a385a564239f7033fb1"
+  },
+  "runs": [
+    {
+      "variant": "baseline",
+      "mount_ms": 156.80000001192093,
+      "state": {
+        "rows": 401,
+        "nodes": 4819,
+        "distance": 0,
+        "containment": "visible"
+      },
+      "metrics": {
+        "LayoutCount": 1,
+        "LayoutDuration": 0.073389,
+        "RecalcStyleDuration": 0.013538,
+        "ScriptDuration": 0.0023,
+        "TaskDuration": 0.177259
+      }
+    },
+    {
+      "variant": "contained",
+      "mount_ms": 63.09999996423721,
+      "state": {
+        "rows": 401,
+        "nodes": 4819,
+        "distance": 0,
+        "containment": "auto"
+      },
+      "metrics": {
+        "LayoutCount": 3,
+        "LayoutDuration": 0.0025239999999999985,
+        "RecalcStyleDuration": 0.002161999999999999,
+        "ScriptDuration": 0.002266,
+        "TaskDuration": 0.07622600000000002
+      }
+    },
+    {
+      "variant": "contained",
+      "mount_ms": 54.19999998807907,
+      "state": {
+        "rows": 401,
+        "nodes": 4819,
+        "distance": 0,
+        "containment": "auto"
+      },
+      "metrics": {
+        "LayoutCount": 3,
+        "LayoutDuration": 0.0025019999999999903,
+        "RecalcStyleDuration": 0.0018230000000000017,
+        "ScriptDuration": 0.0011920000000000004,
+        "TaskDuration": 0.06338099999999997
+      }
+    },
+    {
+      "variant": "baseline",
+      "mount_ms": 96.19999998807907,
+      "state": {
+        "rows": 401,
+        "nodes": 4819,
+        "distance": 0,
+        "containment": "visible"
+      },
+      "metrics": {
+        "LayoutCount": 1,
+        "LayoutDuration": 0.040048,
+        "RecalcStyleDuration": 0.012809999999999998,
+        "ScriptDuration": 0.0011720000000000003,
+        "TaskDuration": 0.10716500000000001
+      }
+    },
+    {
+      "variant": "baseline",
+      "mount_ms": 93,
+      "state": {
+        "rows": 401,
+        "nodes": 4819,
+        "distance": 0,
+        "containment": "visible"
+      },
+      "metrics": {
+        "LayoutCount": 1,
+        "LayoutDuration": 0.038368999999999986,
+        "RecalcStyleDuration": 0.012827999999999999,
+        "ScriptDuration": 0.001207999999999999,
+        "TaskDuration": 0.10398099999999999
+      }
+    },
+    {
+      "variant": "contained",
+      "mount_ms": 46.80000001192093,
+      "state": {
+        "rows": 401,
+        "nodes": 4819,
+        "distance": 0,
+        "containment": "auto"
+      },
+      "metrics": {
+        "LayoutCount": 3,
+        "LayoutDuration": 0.0024389999999999967,
+        "RecalcStyleDuration": 0.002128999999999999,
+        "ScriptDuration": 0.001006,
+        "TaskDuration": 0.07221700000000009
+      }
+    }
+  ],
+  "interaction": {
+    "initial": {
+      "top": 0,
+      "distance": 0,
+      "rows": 401,
+      "height": 798
+    },
+    "beforeAppend": {
+      "top": -1500,
+      "distance": 1500,
+      "rows": 401,
+      "height": 798
+    },
+    "afterAppend": {
+      "top": -1802,
+      "distance": 1802,
+      "rows": 402,
+      "height": 798
+    },
+    "anchor": {
+      "id": "layout-395",
+      "y": 318.546875
+    },
+    "anchorAfter": 318.546875,
+    "jumped": {
+      "top": 0,
+      "distance": 0,
+      "rows": 402,
+      "height": 798
+    },
+    "streaming": {
+      "top": 0,
+      "distance": 0,
+      "rows": 402,
+      "height": 798
+    },
+    "top": {
+      "top": -121150,
+      "distance": 121150,
+      "rows": 402,
+      "height": 798
+    },
+    "modal": {
+      "parent": "BODY",
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 1000
+    },
+    "shortOffset": 0,
+    "emptyOffset": 0
+  },
+  "errors": []
+}

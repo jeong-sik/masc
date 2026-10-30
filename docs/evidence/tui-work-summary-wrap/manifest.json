@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-10-03T06:55:47.485567+00:00",
+  "provenance": "local candidate fixture PTY with exact browser row replay",
+  "base_sha": "deec24d54bfd9d3f31ba40f53d8e4f490a1886b2",
+  "source_sha256": {
+    "bin/masc_tui_render.ml": "32ea4132159948a614a3f15a9e90cf17772be3d533b1ba3e05dc4bb0d3753b42",
+    "test/test_tui_surface_studio_pty.py": "a10f6fdb0b51b3760128a26336979111da4d893ec0dd72072b75fff053269477"
+  },
+  "binary_sha256": "3a1e0bbbec7459872c641613707e1973e7c6bfd3ac3ace9ceb67e28be7175a0b",
+  "frames": [
+    "work-narrow",
+    "work-narrow-60",
+    "work-short",
+    "workspace-failed-short",
+    "system-short"
+  ],
+  "before_frame": "docs/evidence/tui-keeper-coverage/work-narrow.png",
+  "surface_journeys": 2,
+  "captures": 34,
+  "live_snapshot": {
+    "captured_at": "2026-10-03T06:51:40.678748+00:00",
+    "goal_count": 27,
+    "task_backlog": {
+      "todo": 495,
+      "claimed": 0,
+      "in_progress": 14,
+      "awaiting_verification": 35,
+      "done": 317,
+      "cancelled": 217
+    },
+    "sha256": "bc6ba41fd81c02fcbe3873215f71906e8a4ffa6abc2ec959f948e35936cc3df0",
+    "candidate_replay": "PASS at60/80columns"
+  },
+  "production_installed": false
+}

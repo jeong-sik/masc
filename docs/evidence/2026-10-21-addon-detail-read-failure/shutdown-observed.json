@@ -1,0 +1,30 @@
+{
+  "at": "2026-10-21T13:58:44.053315+00:00",
+  "processes": [
+    {
+      "pid": 3632,
+      "ps_returncode": 1,
+      "output": ""
+    },
+    {
+      "pid": 4307,
+      "ps_returncode": 1,
+      "output": ""
+    },
+    {
+      "pid": 82104,
+      "ps_returncode": 1,
+      "output": ""
+    }
+  ],
+  "ports": [
+    {
+      "port": 59359,
+      "connect_ex": 61
+    },
+    {
+      "port": 59360,
+      "connect_ex": 61
+    }
+  ]
+}

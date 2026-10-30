@@ -1,0 +1,49 @@
+{
+  "execution_id": "exec-1789223431021-0129",
+  "output": {
+    "_blob": {
+      "sha256": "3bf7744345cac4b2177363c4b2532b88dd2bb3b57fc3bb810a677fb8cc0f44bc",
+      "bytes": 1345,
+      "mime": "application/vnd.masc.tool-result-manifest+json",
+      "preview": ""
+    }
+  },
+  "artifact_refs": [
+    {
+      "_blob": {
+        "sha256": "18e044a0f658da739b69c84a8a7993e9579a13c0ff4becab69071353be14659a",
+        "bytes": 12641,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    },
+    {
+      "_blob": {
+        "sha256": "5237a2dd6de137936ab964ace1c4057a8f9a78f77fb2d5f99e1d7a269c52cbcf",
+        "bytes": 12602,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    }
+  ],
+  "explicit_snapshots": {
+    "status": "stored",
+    "before": {
+      "_blob": {
+        "sha256": "5237a2dd6de137936ab964ace1c4057a8f9a78f77fb2d5f99e1d7a269c52cbcf",
+        "bytes": 12602,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    },
+    "after": {
+      "_blob": {
+        "sha256": "18e044a0f658da739b69c84a8a7993e9579a13c0ff4becab69071353be14659a",
+        "bytes": 12641,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    }
+  },
+  "observation": "artifact_refs are an unordered collection; explicit before/after are in the verified manifest"
+}

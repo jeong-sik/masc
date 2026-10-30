@@ -1,0 +1,11 @@
+{
+  "run_id": 34098251245,
+  "artifact_id": 10009693579,
+  "arch": "linux-x64",
+  "source_commit": "3d3695a1f3ac6877b674ad160077c55f78665b66",
+  "binary_sha256": "ef4b7925c9c79bd143d5a86b53e015d4d7d0b4810965092b9e751e92a8192f81",
+  "receipt_sha256": "ef9046c4b3be82a65749f097a5b582b5b475e1ffc14534c96b1d3e4eb295414e",
+  "verified_dashboard_files": 642,
+  "build_stamp": "2026-09-07T08:03:09.209Z",
+  "verification": "downloaded archive: exact binary/receipt/all declared files; no local binary execution"
+}

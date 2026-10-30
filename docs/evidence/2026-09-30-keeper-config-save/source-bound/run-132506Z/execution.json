@@ -1,0 +1,72 @@
+{
+  "scope": "Published source; local focused tests and Chromium synthetic API only",
+  "started_utc": "2026-09-30T13:25:06.891815+00:00",
+  "playwright_browsers_path": "/masc-work/jazz-developer/evidence/playwright-browser-cache",
+  "ld_library_path": "/masc-work/jazz-developer/evidence/playwright-system-libs/root/usr/lib/aarch64-linux-gnu",
+  "runs": [
+    {
+      "name": "focused-vitest",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "src/components/keeper-config-panel.test.ts",
+        "src/api/dashboard-keeper-config.test.ts",
+        "--config",
+        "vitest.config.ts",
+        "--no-file-parallelism",
+        "--maxWorkers=1"
+      ],
+      "cwd": "dashboard",
+      "started_utc": "2026-09-30T13:25:06.964558+00:00",
+      "finished_utc": "2026-09-30T13:25:09.202164+00:00",
+      "exit": 0,
+      "raw_log_sha256": "0df5268cb9f7c27689931106bad4752a07e3ad44fe49e0605c9802272fd9a1a7",
+      "compressed_log_sha256": "d49d6b68b46ca24e233ac4542ba0d70b9428e042b198a05ad230dbf95fab8915"
+    },
+    {
+      "name": "typescript",
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--noEmit",
+        "--pretty",
+        "false"
+      ],
+      "cwd": "dashboard",
+      "started_utc": "2026-09-30T13:25:09.202228+00:00",
+      "finished_utc": "2026-09-30T13:25:24.149192+00:00",
+      "exit": 0,
+      "raw_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compressed_log_sha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "name": "chromium",
+      "command": [
+        "node",
+        "docs/evidence/2026-09-30-keeper-config-save/browser.mjs",
+        "dashboard",
+        "/masc-work/jazz-developer/evidence/31173-source-bound-head-tree/browser"
+      ],
+      "cwd": ".",
+      "started_utc": "2026-09-30T13:25:24.149258+00:00",
+      "finished_utc": "2026-09-30T13:25:26.585363+00:00",
+      "exit": 0,
+      "raw_log_sha256": "4c90c14a575c6576a0deed76ed42fc6e0d902b8fa1733eb2424da965b1ab30c4",
+      "compressed_log_sha256": "05086103c97b3b4f6dccbd6922393801204c47000c4db97c878ddd60d6bed837"
+    }
+  ],
+  "source_before": {
+    "head": "056c5648b13d2c6b2829390554b4f03d093e418a",
+    "dashboard_tree": "5f4ba69bc04f29b0ef69cfa5de921c373fb697e6"
+  },
+  "source_after": {
+    "head": "056c5648b13d2c6b2829390554b4f03d093e418a",
+    "dashboard_tree": "5f4ba69bc04f29b0ef69cfa5de921c373fb697e6"
+  },
+  "source_unchanged": true,
+  "finished_utc": "2026-09-30T13:25:26.633720+00:00",
+  "passed": true
+}

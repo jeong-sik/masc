@@ -1,0 +1,17 @@
+name = "keeper_wiki_read"
+description = """
+Read a full wiki page by exact topic name.
+
+Use after \
+keeper_wiki_search identifies a relevant page, or with a known topic \
+name. Returns the full page text."""
+
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+
+[[params]]
+name = "topic"
+type = "string"
+required = true
+description = "Exact page topic name (from search results or known)"

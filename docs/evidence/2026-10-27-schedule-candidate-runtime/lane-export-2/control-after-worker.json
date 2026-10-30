@@ -1,0 +1,32 @@
+{
+  "schedule_instance_id": "01a1797b-ae9a-7000-9027-4ea8e54f328f",
+  "schedule_id": "audit-export-0cdae5209bc849f89b60733b5cbae929-control",
+  "requested_by": {
+    "id": "audit-lane-admin",
+    "kind": "human_operator",
+    "display_name": null
+  },
+  "scheduled_by": {
+    "id": "audit-lane-admin",
+    "kind": "human_operator",
+    "display_name": null
+  },
+  "requested_at": 1793039511.19473,
+  "due_at": 1793125911.19473,
+  "expires_at": null,
+  "payload": {
+    "kind": "masc.lane_act",
+    "body": {
+      "installation_id": "audit-export-0cdae5209bc849f89b60733b5cbae929",
+      "action": {
+        "kind": "export"
+      }
+    }
+  },
+  "status": "scheduled",
+  "source": "operator_request",
+  "recurrence": {
+    "kind": "one_shot"
+  },
+  "cancellation": null
+}

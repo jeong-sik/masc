@@ -1,0 +1,229 @@
+{
+  "source_base": "c5337092c70bc5cf6a615f481684810db40a7116",
+  "recorded_at_utc": "2026-10-16T23:47:18.223811+00:00",
+  "model_sha256": "38e754dbcf17f3879799272ce06b475cf933bccd21e17ddab6c83b4100bf199d",
+  "tlc_runner_jar_name": "tla2tools-1.8.0.jar",
+  "actual_tlc_banner": "TLC2 Version 2026.05.26.235334 (rev: 4ba7d88)",
+  "tlc_jar_sha256": "237332bdcc79a35c7d26efa7b82c77c85c2744591c5598673a8a45085ff2a4fb",
+  "production_sources_read": {
+    "lib/keeper/keeper_gate.ml": "e96bc005dcb201e0db375a0ba15d6d7df08db2820a3a24de9e1884ce77000883",
+    "lib/keeper/keeper_approval_queue.ml": "5e4643aca5048328e94cb7211847f874b061a811133f573179c75d77e86e572b",
+    "lib/keeper/keeper_approval_queue_state.ml": "2aca796eab87b0b7f7e8d687282e5a88746f9fdcb1dd126c21325d717af35106",
+    "lib/keeper/keeper_registry_event_queue.ml": "3a1ca47488d039b74f259f3489628a65cc5a09e19ca6f34835550e00f41a8bf1",
+    "lib/keeper_runtime/keeper_event_queue_persistence.ml": "6ecf4c8c45b79477afa6b9648d3dc1bea7de9428087df70e58af3b5662963428"
+  },
+  "cases": [
+    {
+      "case": "clean",
+      "configuration": "KeeperHitlDeferred.cfg",
+      "command_template": [
+        "<java>",
+        "-XX:+UseParallelGC",
+        "-Xmx1g",
+        "-cp",
+        "<installed-tlc-jar>",
+        "tlc2.TLC",
+        "-config",
+        "KeeperHitlDeferred.cfg",
+        "-workers",
+        "1",
+        "-deadlock",
+        "-coverage",
+        "1",
+        "KeeperHitlDeferred.tla"
+      ],
+      "source_hashes": {
+        "specs/keeper-state-machine/KeeperHitlDeferred.tla": "38e754dbcf17f3879799272ce06b475cf933bccd21e17ddab6c83b4100bf199d",
+        "specs/keeper-state-machine/KeeperHitlDeferred.cfg": "daa69277e604c94e39ed34356cbb773b60196e69dcb6de2072bbd3bff2ee3995"
+      },
+      "exit": 0,
+      "expected_exit": 0,
+      "elapsed_seconds": 0.6644915830111131,
+      "result_marker": "Model checking completed. No error has been found.",
+      "state_statistics": [
+        "159 states generated, 63 distinct states found, 0 states left on queue.",
+        "The depth of the complete state graph search is 9."
+      ],
+      "output_before_coverage": "Starting... (2026-10-17 08:46:02)\nImplied-temporal checking--satisfiability problem has 2 branches.\nComputing initial states...\nFinished computing initial states: 1 distinct state generated at 2026-10-17 08:46:02.\nProgress(9) at 2026-10-17 08:46:02: 159 states generated, 63 distinct states found, 0 states left on queue.\nChecking 2 branches of temporal properties for the complete state space with 126 total distinct states at (2026-10-17 08:46:02)\nFinished checking temporal properties in 00s at 2026-10-17 08:46:02\nModel checking completed. No error has been found.\n  Estimates of the probability that TLC did not check all reachable states\n  because two distinct states had the same fingerprint:\n  calculated (optimistic):  val = 3.3E-16",
+      "full_stdout_sha256": "c112baf037d3249a1b4c3a990c42e2d8413ee6ae06f526ff2ddc8a2474b16807",
+      "stderr": ""
+    },
+    {
+      "case": "blocking",
+      "configuration": "KeeperHitlDeferred-blocking-buggy.cfg",
+      "command_template": [
+        "<java>",
+        "-XX:+UseParallelGC",
+        "-Xmx1g",
+        "-cp",
+        "<installed-tlc-jar>",
+        "tlc2.TLC",
+        "-config",
+        "KeeperHitlDeferred-blocking-buggy.cfg",
+        "-workers",
+        "1",
+        "-deadlock",
+        "-coverage",
+        "1",
+        "KeeperHitlDeferred.tla"
+      ],
+      "source_hashes": {
+        "specs/keeper-state-machine/KeeperHitlDeferred.tla": "38e754dbcf17f3879799272ce06b475cf933bccd21e17ddab6c83b4100bf199d",
+        "specs/keeper-state-machine/KeeperHitlDeferred-blocking-buggy.cfg": "ead8b41c6c53abd6a258aee4e6892fdc939024556e4263d83f1a731885e4bc34"
+      },
+      "exit": 12,
+      "expected_exit": 12,
+      "elapsed_seconds": 0.5852343749720603,
+      "result_marker": "Invariant DeferredImmediately is violated",
+      "state_statistics": [
+        "5 states generated, 5 distinct states found, 3 states left on queue.",
+        "The depth of the complete state graph search is 2."
+      ],
+      "output_before_coverage": "Starting... (2026-10-17 08:46:02)\nComputing initial states...\nFinished computing initial states: 1 distinct state generated at 2026-10-17 08:46:02.\nError: Invariant DeferredImmediately is violated.\nError: The behavior up to this point is:\nState 1: <Initial predicate>\n/\\ consume_count = 0\n/\\ request_phase = \"absent\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"none\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 2: <SubmitBlocking line 200, col 5 to line 209, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"pending\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"none\"\n/\\ submitter_blocked = TRUE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0",
+      "full_stdout_sha256": "7c4ddfb5c7d43ae8eb2d4d072bb6f081a2f87378b8339824b65c8377d7c149e6",
+      "stderr": ""
+    },
+    {
+      "case": "consume",
+      "configuration": "KeeperHitlDeferred-consume-buggy.cfg",
+      "command_template": [
+        "<java>",
+        "-XX:+UseParallelGC",
+        "-Xmx1g",
+        "-cp",
+        "<installed-tlc-jar>",
+        "tlc2.TLC",
+        "-config",
+        "KeeperHitlDeferred-consume-buggy.cfg",
+        "-workers",
+        "1",
+        "-deadlock",
+        "-coverage",
+        "1",
+        "KeeperHitlDeferred.tla"
+      ],
+      "source_hashes": {
+        "specs/keeper-state-machine/KeeperHitlDeferred.tla": "38e754dbcf17f3879799272ce06b475cf933bccd21e17ddab6c83b4100bf199d",
+        "specs/keeper-state-machine/KeeperHitlDeferred-consume-buggy.cfg": "fcbd9c9e54e5b8776ac989fd4ee682f39e0aa3f730ea23794fd434e7cd488abc"
+      },
+      "exit": 12,
+      "expected_exit": 12,
+      "elapsed_seconds": 0.6786002090666443,
+      "result_marker": "Invariant ResolutionConsumedAtMostOnce is violated",
+      "state_statistics": [
+        "37 states generated, 26 distinct states found, 13 states left on queue.",
+        "The depth of the complete state graph search is 5."
+      ],
+      "output_before_coverage": "Starting... (2026-10-17 08:46:02)\nComputing initial states...\nFinished computing initial states: 1 distinct state generated at 2026-10-17 08:46:02.\nError: Invariant ResolutionConsumedAtMostOnce is violated.\nError: The behavior up to this point is:\nState 1: <Initial predicate>\n/\\ consume_count = 0\n/\\ request_phase = \"absent\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"none\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 2: <SubmitDeferred line 61, col 5 to line 70, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"pending\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 3: <ResolveForOrigin line 73, col 5 to line 82, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 4: <ConsumeOnce line 111, col 5 to line 121, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 1\n/\\ request_phase = \"consumed\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 5: <ConsumeAgain line 232, col 5 to line 242, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 2\n/\\ request_phase = \"consumed\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0",
+      "full_stdout_sha256": "0107623dfaffd79ec4e82997bc3027d3cb84e7fdf8cd3b5aac40316df57a8155",
+      "stderr": ""
+    },
+    {
+      "case": "wake",
+      "configuration": "KeeperHitlDeferred-wake-buggy.cfg",
+      "command_template": [
+        "<java>",
+        "-XX:+UseParallelGC",
+        "-Xmx1g",
+        "-cp",
+        "<installed-tlc-jar>",
+        "tlc2.TLC",
+        "-config",
+        "KeeperHitlDeferred-wake-buggy.cfg",
+        "-workers",
+        "1",
+        "-deadlock",
+        "-coverage",
+        "1",
+        "KeeperHitlDeferred.tla"
+      ],
+      "source_hashes": {
+        "specs/keeper-state-machine/KeeperHitlDeferred.tla": "38e754dbcf17f3879799272ce06b475cf933bccd21e17ddab6c83b4100bf199d",
+        "specs/keeper-state-machine/KeeperHitlDeferred-wake-buggy.cfg": "7826f7ef307825ca90a5858c56852aab01af2b8e75dc4b10c135502da75e3b28"
+      },
+      "exit": 12,
+      "expected_exit": 12,
+      "elapsed_seconds": 0.5627335410099477,
+      "result_marker": "Invariant ResolutionWakesOriginOnly is violated",
+      "state_statistics": [
+        "35 states generated, 24 distinct states found, 12 states left on queue.",
+        "The depth of the complete state graph search is 5."
+      ],
+      "output_before_coverage": "Starting... (2026-10-17 08:46:02)\nComputing initial states...\nFinished computing initial states: 1 distinct state generated at 2026-10-17 08:46:02.\nError: Invariant ResolutionWakesOriginOnly is violated.\nError: The behavior up to this point is:\nState 1: <Initial predicate>\n/\\ consume_count = 0\n/\\ request_phase = \"absent\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"none\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 2: <SubmitDeferred line 61, col 5 to line 70, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"pending\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 3: <ResolveForOrigin line 73, col 5 to line 82, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 4: <CommitWakeForOrigin line 85, col 5 to line 90, col 62 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 0\n/\\ wake_durable = TRUE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 5: <SignalOtherLane line 215, col 5 to line 226, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 0\n/\\ wake_durable = TRUE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"other-lane\"\n/\\ origin_progress = 0",
+      "full_stdout_sha256": "aabf203536b6904f107a01b4f8ee165ecd03ad9f67fdd09c6efb85a1e51cd156",
+      "stderr": ""
+    },
+    {
+      "case": "early-signal",
+      "configuration": "KeeperHitlDeferred-early-signal-buggy.cfg",
+      "command_template": [
+        "<java>",
+        "-XX:+UseParallelGC",
+        "-Xmx1g",
+        "-cp",
+        "<installed-tlc-jar>",
+        "tlc2.TLC",
+        "-config",
+        "KeeperHitlDeferred-early-signal-buggy.cfg",
+        "-workers",
+        "1",
+        "-deadlock",
+        "-coverage",
+        "1",
+        "KeeperHitlDeferred.tla"
+      ],
+      "source_hashes": {
+        "specs/keeper-state-machine/KeeperHitlDeferred.tla": "38e754dbcf17f3879799272ce06b475cf933bccd21e17ddab6c83b4100bf199d",
+        "specs/keeper-state-machine/KeeperHitlDeferred-early-signal-buggy.cfg": "609283bfb4c9fbce289b5200aa99f4a3f88e05e0472dfaac70d79ad5eabad87f"
+      },
+      "exit": 12,
+      "expected_exit": 12,
+      "elapsed_seconds": 0.5800330840284005,
+      "result_marker": "Invariant WakeAfterDurableEnqueue is violated",
+      "state_statistics": [
+        "18 states generated, 15 distinct states found, 9 states left on queue.",
+        "The depth of the complete state graph search is 4."
+      ],
+      "output_before_coverage": "Starting... (2026-10-17 08:46:02)\nComputing initial states...\nFinished computing initial states: 1 distinct state generated at 2026-10-17 08:46:02.\nError: Invariant WakeAfterDurableEnqueue is violated.\nError: The behavior up to this point is:\nState 1: <Initial predicate>\n/\\ consume_count = 0\n/\\ request_phase = \"absent\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"none\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 2: <SubmitDeferred line 61, col 5 to line 70, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"pending\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 3: <ResolveForOrigin line 73, col 5 to line 82, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 4: <SignalBeforeDurableEnqueue line 248, col 5 to line 254, col 62 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"origin-lane\"\n/\\ origin_progress = 0",
+      "full_stdout_sha256": "fed0598410d46be9239ae8192670ea0a75e4e78cd527bef1f42fc1bbd5124687",
+      "stderr": ""
+    },
+    {
+      "case": "restart",
+      "configuration": "KeeperHitlDeferred-restart-buggy.cfg",
+      "command_template": [
+        "<java>",
+        "-XX:+UseParallelGC",
+        "-Xmx1g",
+        "-cp",
+        "<installed-tlc-jar>",
+        "tlc2.TLC",
+        "-config",
+        "KeeperHitlDeferred-restart-buggy.cfg",
+        "-workers",
+        "1",
+        "-deadlock",
+        "-coverage",
+        "1",
+        "KeeperHitlDeferred.tla"
+      ],
+      "source_hashes": {
+        "specs/keeper-state-machine/KeeperHitlDeferred.tla": "38e754dbcf17f3879799272ce06b475cf933bccd21e17ddab6c83b4100bf199d",
+        "specs/keeper-state-machine/KeeperHitlDeferred-restart-buggy.cfg": "f404a418ab8b3f57bd742c87779519e93c5f3280aea31b6a63cc6cbea5e81688"
+      },
+      "exit": 13,
+      "expected_exit": 13,
+      "elapsed_seconds": 0.6421303749084473,
+      "result_marker": "Temporal property ResolutionEventuallyConsumed was violated",
+      "state_statistics": [
+        "207 states generated, 72 distinct states found, 0 states left on queue.",
+        "The depth of the complete state graph search is 9."
+      ],
+      "output_before_coverage": "Starting... (2026-10-17 08:46:02)\nImplied-temporal checking--satisfiability problem has 1 branches.\nComputing initial states...\nFinished computing initial states: 1 distinct state generated at 2026-10-17 08:46:02.\nProgress(9) at 2026-10-17 08:46:02: 207 states generated, 72 distinct states found, 0 states left on queue.\nChecking temporal properties for the complete state space with 72 total distinct states at (2026-10-17 08:46:02)\nError: Temporal property ResolutionEventuallyConsumed was violated.\n\nError: The following behavior constitutes a counter-example:\n\nState 1: <Initial predicate>\n/\\ consume_count = 0\n/\\ request_phase = \"absent\"\n/\\ other_progress = 0\n/\\ wake_durable = FALSE\n/\\ submit_result = \"none\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 2: <ProgressOther line 136, col 5 to line 145, col 31 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"absent\"\n/\\ other_progress = 1\n/\\ wake_durable = FALSE\n/\\ submit_result = \"none\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 0\n\nState 3: <ProgressOrigin line 124, col 5 to line 133, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"absent\"\n/\\ other_progress = 1\n/\\ wake_durable = FALSE\n/\\ submit_result = \"none\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 1\n\nState 4: <SubmitDeferred line 61, col 5 to line 70, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"pending\"\n/\\ other_progress = 1\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 1\n\nState 5: <ProgressOther line 136, col 5 to line 145, col 31 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"pending\"\n/\\ other_progress = 2\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 1\n\nState 6: <ResolveForOrigin line 73, col 5 to line 82, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 2\n/\\ wake_durable = FALSE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 1\n\nState 7: <CommitWakeForOrigin line 85, col 5 to line 90, col 62 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 2\n/\\ wake_durable = TRUE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 1\n\nState 8: <ProgressOrigin line 124, col 5 to line 133, col 30 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 2\n/\\ wake_durable = TRUE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 2\n\nState 9: <SignalOrigin line 93, col 5 to line 99, col 62 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"resolved\"\n/\\ other_progress = 2\n/\\ wake_durable = TRUE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"origin-lane\"\n/\\ origin_progress = 2\n\nState 10: <RestartForgetsDecision line 260, col 5 to line 265, col 62 of module KeeperHitlDeferred>\n/\\ consume_count = 0\n/\\ request_phase = \"pending\"\n/\\ other_progress = 2\n/\\ wake_durable = TRUE\n/\\ submit_result = \"deferred\"\n/\\ submitter_blocked = FALSE\n/\\ wake_target = \"none\"\n/\\ origin_progress = 2\n\nBack to state 8: <ResolveForOrigin line 73, col 5 to line 82, col 30 of module KeeperHitlDeferred>\n\nFinished checking temporal properties in 00s at 2026-10-17 08:46:02",
+      "full_stdout_sha256": "6146bce87306a51beda9b67fff46dcce74797ece226cf47b790fed95b7062173",
+      "stderr": ""
+    }
+  ],
+  "execution_provenance": "Direct local JVM execution in isolated temporary directories with complete unchanged model/cfg copies. Public command_template redacts host installation paths; exact commands/fullstdout retained in local run receipts.",
+  "scope": "Six focused model runs; actual source correspondence in companion guide. No OCaml build/execution, all-spec sweep, CI, formal refinement proof, live Keeper, filesystem latency or physical crash-durability claim."
+}

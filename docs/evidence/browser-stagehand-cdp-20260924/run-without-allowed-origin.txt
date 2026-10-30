@@ -1,0 +1,6 @@
++  798ms devtools port 51136
++ 1009ms browser Chrome/156.0.8071.0
++ 1050ms Extensions.loadUnpacked -> hjhcoogdpgkmdicaipfcopkjagnfailn (matches id computed from path) origins: none
++ 1228ms runtime marker {"protocolVersion":"2.0.0","serverInfo":{"name":"stagehand","version":"1.0.2"}}
++ 1237ms extension -> host request: stagehand.log (105 bytes)
+FATAL stagehand.init: {"code":-32603,"message":"CDP websocket failed to open","data":{"name":"Error"}}

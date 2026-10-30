@@ -1,0 +1,15 @@
+{
+  "binary_source_commit": "78049dd1685e531445af721c506c2e92cf3b6958",
+  "tui_sha256": "35af6ab452319a4c928889579c7c4632a2e46395fd40f88ab66f8567fae095da",
+  "test_path": "test/test_tui_browser_history.py",
+  "test_sha256": "42070ec7268311b4c37eccb4bfa977614fc25074bc059ffb81d25d663aa1b55f",
+  "harness_path": "test/test_tui_keyboard_input.py",
+  "harness_sha256": "3090ecdb5ae622c078d6c614075dd0fca6bc1ad426a6977d6c2552acb7a722e7",
+  "log": "refresh-isolation.log",
+  "exit_code": 0,
+  "cases": [
+    "connected observation navigation, action isolation, R suppression, URL edit return, palette exit",
+    "disconnected picker to history, older observation, uppercase Q exit"
+  ],
+  "scope": "Native TUI against synthetic HTTP fixtures; separate from real retained artifact API capture"
+}

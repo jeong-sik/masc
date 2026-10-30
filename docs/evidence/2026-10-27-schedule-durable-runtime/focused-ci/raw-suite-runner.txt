@@ -1,0 +1,634 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_keeper_unified_verification_surface.exe test/test_keeper_run_tools_hooks.exe 
+(cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+Warning: option "-j-std" is deprecated.
+[targeted] test/test_keeper_unified_verification_surface: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_unified_verification_surface: start 2026-10-26T20:23:13Z
+::group::{keeper_unified_verification_surface}
+Testing `keeper_unified_verification_surface'.
+This run has ID `C8B5D86V'.
+
+ASSERT admitted request is durable work input
+ASSERT request is not duplicated in the changing world frame
+ASSERT Board input is not promoted with the request
+ASSERT ordinary world context is still removed after tools
+ASSERT second provider input retains the exact request once without thinking
+ASSERT a later selected request does not reinject the earlier request
+ASSERT an empty intake does not invent or replay a scheduled request
+ASSERT each exact scheduled request survives checkpoint reload once
+ASSERT each exact scheduled request survives checkpoint reload once
+  [OK]          verification_surface          0   scheduled request survives ...
+ASSERT Ask remains reactive activity for intake
+ASSERT Ask alone supplies no Board action affordance
+ASSERT Ask alone supplies no Board action affordance
+ASSERT answer is durable input
+ASSERT answer provenance is durable
+ASSERT original Task is retained after current Task changed
+ASSERT original Goal retained
+ASSERT original asking execution retained
+ASSERT question purpose retained in full
+ASSERT answer newlines survive canonical data projection
+ASSERT literal multiline answer cannot escape its quoted input field
+ASSERT original question body reaches durable input
+ASSERT original purpose reaches durable input
+ASSERT current Task is an independent world observation
+ASSERT answer and original question are not duplicated in transient world context
+ASSERT ordinary Board content stays ephemeral
+ASSERT consumed answer is not reinserted in a fresh wake
+ASSERT one complete attributed answer remains after ten later wakes
+  [OK]          verification_surface          1   answered Ask survives later...
+ASSERT wake names both answerers in row order
+ASSERT the rows appear in the order the speaker names them
+ASSERT a wake with no answers quotes nobody
+  [OK]          verification_surface          2   autonomous wake speaker nam...
+ASSERT no task_verify affordance
+  [OK]          verification_surface          3   affordance: no keeper is of...
+ASSERT board_curation present
+  [OK]          verification_surface          4   affordance: Board activity ...
+ASSERT board_curation absent without Board activity
+  [OK]          verification_surface          5   affordance: no Board activi...
+ASSERT automation event uses neutral boundary
+ASSERT human event uses the same neutral boundary
+ASSERT metadata does not create a local authority ranking
+ASSERT configured model judges content and context
+ASSERT external effects stay behind the Gate
+ASSERT automation post kind remains context
+ASSERT human post kind remains context
+ASSERT explicit mention remains context
+ASSERT exact mention targets remain context
+  [OK]          verification_surface          6   prompt: all Board authors s...
+ASSERT prompt labels reaction board event
+ASSERT prompt includes reaction target
+ASSERT prompt includes reaction actor
+ASSERT prompt includes reaction emoji
+  [OK]          verification_surface          7   prompt: board reaction even...
+ASSERT prompt labels vote board event
+ASSERT prompt includes vote direction
+ASSERT prompt includes vote target
+ASSERT prompt includes voter
+  [OK]          verification_surface          8   prompt: board vote event re...
+ASSERT keeper diagnostic token remains in observation
+ASSERT AGENT_CORE diagnostic token remains in observation
+ASSERT observation remains intact
+  [OK]          verification_surface          9   prompt: observation tool na...
+ASSERT task_claim absent for unclaimable backlog
+  [OK]          verification_surface         10   affordance: task claim requ...
+ASSERT task_claim present for matched backlog
+  [OK]          verification_surface         11   affordance: task claim pres...
+ASSERT matched backlog trigger is explicit
+ASSERT claimable backlog is reported once
+  [OK]          verification_surface         12   trigger: absolute and match...
+ASSERT unclaimable backlog is not a claimable task trigger
+  [OK]          verification_surface         13   trigger: unclaimable backlo...
+ASSERT no pending_verification trigger
+  [OK]          verification_surface         14   trigger: no keeper wakes on...
+ASSERT due-ready schedule trigger present
+ASSERT dispatch monitor affordance present
+  [OK]          verification_surface         15   trigger: scheduled automati...
+ASSERT prompt includes schedule section
+ASSERT prompt includes ready schedule id
+  [OK]          verification_surface         16   prompt: scheduled automatio...
+ASSERT wake id newline is escaped inside one field
+ASSERT automation id newline is escaped inside one field
+ASSERT wake renderer reads the typed title
+ASSERT wake renderer reads the typed message
+  [OK]          verification_surface         17   prompt: schedule rows escap...
+ASSERT untitled wake still carries its typed pointer
+ASSERT untitled wake carries its message
+ASSERT absent title is omitted rather than fabricated
+  [OK]          verification_surface         18   prompt: absent wake title i...
+ASSERT scheduled wake has dedicated section
+ASSERT scheduled message remains complete
+ASSERT occurrence is explicitly not a Board post
+ASSERT real Board row remains present
+ASSERT scheduled occurrence absent from Board section
+ASSERT scheduled work is not typed as Board activity
+ASSERT scheduled work emits no Board trigger
+ASSERT scheduled work emits no Board response affordance
+ASSERT scheduled work emits no Board curation affordance
+  [OK]          verification_surface         19   prompt: scheduled wake is n...
+ASSERT scheduled work message is not truncated
+  [OK]          verification_surface         20   prompt: scheduled wake pres...
+ASSERT wake row carries the schedule_id pointer
+ASSERT wake row carries the exact due_at
+ASSERT wake row carries the exact payload digest
+ASSERT wake row still carries the occurrence id
+ASSERT block names the dereference tool
+ASSERT block names the current durable request semantics
+ASSERT block names the exact wake-message authority
+ASSERT block still marks occurrence_id as correlation-only
+  [OK]          verification_surface         21   prompt: scheduled wake rend...
+ASSERT header preserves every due occurrence and exact payload series
+ASSERT one derived row carries the occurrence count
+ASSERT derived row carries the first occurrence
+ASSERT derived row carries the last occurrence
+ASSERT derived row carries the first due time
+ASSERT derived row carries the last due time
+ASSERT updated payload series remains a separate row
+  [OK]          verification_surface         22   prompt: repeated schedule o...
+ASSERT untitled fallback is a plain label
+ASSERT schedule id is not smuggled into the title
+ASSERT typed pointer survives the projection
+  [OK]          verification_surface         23   prompt: untitled wake keeps...
+ASSERT system authority section is present
+ASSERT typed rejection reason is preserved
+ASSERT system LLM provenance is preserved
+ASSERT rejection reason is escaped as one field
+ASSERT rejection is not rendered as Board activity
+ASSERT rejection is not rendered as scheduled work
+ASSERT rejection does not count as Board activity
+  [OK]          verification_surface         24   prompt: completion authorit...
+ASSERT approval has its outcome section
+ASSERT approval does not also create a decisions section
+ASSERT mixed decisions count only the rejection
+ASSERT mixed outcomes count the approval
+ASSERT approved correlation appears in one row only
+  [OK]          verification_surface         25   prompt: approved outcome ap...
+ASSERT cancellation section is present
+ASSERT the canceller is named
+ASSERT the reason reaches the author
+ASSERT cancellation is not rendered as Board activity
+  [OK]          verification_surface         26   prompt: task cancellation h...
+ASSERT an absent reason carries no reason field
+ASSERT a reason given as empty still carries the field
+ASSERT the identity fields survive the omission
+ASSERT no OCaml option leaks into the prompt
+ASSERT no JSON null leaks into the prompt
+  [OK]          verification_surface         27   prompt: task cancellation w...
+ASSERT human authority kind is preserved
+ASSERT human rejection is not relabeled as system authority
+  [OK]          verification_surface         28   prompt: completion authorit...
+ASSERT own posts section present
+ASSERT own post id rendered for board get follow-up
+ASSERT own post title rendered
+  [OK]          verification_surface         29   prompt: own recent board po...
+ASSERT reply count rendered
+ASSERT vote tally rendered
+ASSERT an unanswered post says so rather than omitting the field
+  [OK]          verification_surface         30   prompt: own recent board po...
+ASSERT heading states one count only
+ASSERT no truncation notice
+ASSERT the last row is present
+ASSERT the first row is present
+  [OK]          verification_surface         31   prompt: Board Activity unde...
+ASSERT the heading states every admitted row
+ASSERT there is no hidden-row notice
+ASSERT the oldest mention is visible
+ASSERT the newest row is visible
+ASSERT an old non-mention is visible too
+  [OK]          verification_surface         32   prompt: Board Activity rend...
+ASSERT the commenter is named
+ASSERT what they said reaches the author
+ASSERT no since-own count without an own comment
+ASSERT no reply offset without an own comment
+  [OK]          verification_surface         33   prompt: a comment on your o...
+ASSERT count still rendered for a participant
+ASSERT the offset the thread read starts at is rendered
+ASSERT the oldest reply id is rendered
+ASSERT the newest reply id is rendered
+ASSERT a reply between the two ends is not listed
+ASSERT commenter still named
+  [OK]          verification_surface         34   prompt: a reply after your ...
+ASSERT Board post id is escaped inside one field
+ASSERT Board author is escaped inside one field
+ASSERT Board preview is escaped inside one field
+ASSERT own post preview is escaped inside one field
+ASSERT raw Board injection is not rendered as a new row
+  [OK]          verification_surface         35   prompt: Board and own-post ...
+ASSERT own posts section absent when empty
+  [OK]          verification_surface         36   prompt: no own recent board...
+ASSERT frame keeps its signature prefix
+ASSERT frame says the runtime assembled it
+ASSERT frame says the keeper did not retrieve it
+  [OK]          verification_surface         37   world-state frame states th...
+ASSERT approval authority is always visible
+ASSERT readable empty is explicit
+ASSERT historical pending claims lose current authority
+ASSERT effect truth stays separate
+  [OK]          verification_surface         38   prompt: complete approval a...
+ASSERT revision is visible
+ASSERT exact pending identity is visible
+ASSERT task scope is visible
+  [OK]          verification_surface         39   prompt: approval authority ...
+ASSERT partial is not rendered as zero
+ASSERT partial absence is non-authoritative
+ASSERT unavailable is not rendered as zero
+ASSERT unavailable omits internal storage detail
+ASSERT unavailable forbids current inference
+  [OK]          verification_surface         40   prompt: incomplete approval...
+ASSERT ledger digest discoverable in this turn's world frame
+ASSERT discovery never enters the durable user message
+ASSERT preview renders the same ledger read target
+ASSERT repeated observation does not accumulate history
+ASSERT missing ledger does not invent a read target
+  [OK]          verification_surface         41   workspace ledger is a fresh...
+ASSERT world_state carries the frame header
+ASSERT persisted user message is the wake marker
+ASSERT persisted user message carries no frame header
+ASSERT persisted user message carries no board observation
+  [OK]          verification_surface         42   invariant: world-state fram...
+ASSERT autonomous continuation carries the wake marker
+  [OK]          verification_surface         43   invariant: autonomous conti...
+
+Test Successful in 0.053s. 44 tests run.
+::endgroup::
+[targeted] test/test_keeper_unified_verification_surface: OK in 0s
+[targeted] test/test_keeper_run_tools_hooks: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_run_tools_hooks: start 2026-10-26T20:23:13Z
+::group::{keeper_run_tools_hooks}
+Testing `keeper_run_tools_hooks'.
+This run has ID `X7IU3FE1'.
+
+ASSERT actual offered reader selects evidence
+ASSERT projection alone is not a prepared request
+ASSERT world bytes describe returned request body
+ASSERT instruction hash describes returned request body
+ASSERT system_prompt matches request input
+ASSERT user_message matches request input
+ASSERT another request uses its own tool surface
+ASSERT world bytes describe returned request body
+ASSERT instruction hash describes returned request body
+ASSERT system_prompt matches request input
+ASSERT user_message matches request input
+ASSERT world bytes describe returned request body
+ASSERT instruction hash describes returned request body
+ASSERT system_prompt matches request input
+ASSERT user_message matches request input
+ASSERT world bytes describe returned request body
+ASSERT instruction hash describes returned request body
+ASSERT system_prompt matches request input
+ASSERT user_message matches request input
+ASSERT world bytes describe returned request body
+ASSERT instruction hash describes returned request body
+ASSERT system_prompt matches request input
+ASSERT user_message matches request input
+ASSERT world bytes describe returned request body
+ASSERT instruction hash describes returned request body
+ASSERT system_prompt matches request input
+ASSERT user_message matches request input
+ASSERT host evidence is included in the measured request
+  [OK]          post_tool_round                        0   prompt metrics mea...
+ASSERT host consumes the actual projection
+ASSERT actual renderer runs once
+ASSERT suffix preserves the exact output
+ASSERT actual rendered value is issuer-bound
+ASSERT host suffix has its own source span
+ASSERT suffix is explicitly unattributed
+ASSERT stale callback proof cannot certify new text
+  [OK]          post_tool_round                        1   actual partition a...
+ASSERT reader remains directly callable
+ASSERT live loader can obtain allowed deferred reader
+ASSERT host sees the projected request context
+ASSERT tool suppression cannot be bypassed by a defer declaration
+ASSERT host sees the projected request context
+ASSERT missing loader agent cannot promise discovery
+ASSERT host runs only for the two unavailable surfaces
+ASSERT tool result rounds retain their existing context
+ASSERT post-tool round does not rerun host retrieval
+ASSERT reader remains directly callable
+ASSERT live loader can obtain allowed deferred reader
+ASSERT host sees the projected request context
+ASSERT tool suppression cannot be bypassed by a defer declaration
+ASSERT host sees the projected request context
+ASSERT missing loader agent cannot promise discovery
+ASSERT host runs only for the two unavailable surfaces
+ASSERT tool result rounds retain their existing context
+ASSERT post-tool round does not rerun host retrieval
+  [OK]          post_tool_round                        2   request projection...
+ASSERT empty history is not post-tool
+ASSERT a turn's first round ends with the user
+ASSERT a round after tool execution ends with the tool
+ASSERT an old tool message before a new user turn does not count
+  [OK]          post_tool_round                        3   the predicate is p...
+ASSERT a first round is not a later round, whatever the history ends with
+ASSERT a round after this turn injected is a later round
+ASSERT a history that does not end on a tool is never a later round
+  [OK]          post_tool_round                        4   a first round surv...
+ASSERT cwd/file_path
+  [OK]          observation_file_path                  0   explicit cwd scope...
+ASSERT scratch/file_path
+  [OK]          observation_file_path                  1   scratch path ancho...
+ASSERT sandbox-rooted
+  [OK]          observation_file_path                  2   sandbox-rooted fil...
+ASSERT absolute
+  [OK]          observation_file_path                  3   absolute path igno...
+ASSERT absolute cwd
+  [OK]          observation_file_path                  4   absolute cwd scope...
+ASSERT bare relative
+  [OK]          observation_file_path                  5   bare relative path...
+ASSERT blank path fallback
+  [OK]          observation_file_path                  6   blank path falls b...
+ASSERT path wins
+  [OK]          observation_file_path                  7   path priority matc...
+ASSERT nested arguments path
+  [OK]          observation_file_path                  8   nested arguments p...
+ASSERT nested arguments cwd
+  [OK]          observation_file_path                  9   nested arguments r...
+ASSERT paths list
+  [OK]          observation_file_path                 10   paths list uses fi...
+ASSERT files object file_path
+  [OK]          observation_file_path                 11   files list uses fi...
+ASSERT pathless call names no document
+  [OK]          observation_file_path                 12   missing path falls...
+ASSERT only request-local evidence fields are captured
+ASSERT trigger is preserved
+ASSERT current state is preserved
+  [OK]          gate_history_slice                     0   captures only requ...
+ASSERT slice stays inside the declared budget
+ASSERT older messages were dropped
+ASSERT every message is either kept or counted
+ASSERT kept slice is not empty
+ASSERT the newest message survives
+  [OK]          gate_history_slice                     1   keeps the newest m...
+ASSERT nothing is dropped
+ASSERT every message is kept
+  [OK]          gate_history_slice                     2   short history is p...
+ASSERT every message is either kept or counted
+ASSERT only the window and its boundary are encoded
+ASSERT a history that fits is encoded once through
+ASSERT and kept whole
+  [OK]          gate_history_slice                     3   encodes only the w...
+ASSERT the orphan result is not retained
+ASSERT the dropped result is reported
+  [OK]          gate_history_slice                     4   drops a tool resul...
+ASSERT every call is retained
+ASSERT nothing had to be dropped
+ASSERT the whole turn renders in a few KB
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+ASSERT only identity, input and disposition reach the judge
+  [OK]          completed_tool_calls_evidence          0   tool payloads neve...
+ASSERT both calls are present
+ASSERT the failed call is distinguishable from the completed one
+  [OK]          completed_tool_calls_evidence          1   disposition surviv...
+ASSERT both evidence axes read one declared budget
+  [OK]          completed_tool_calls_evidence          2   both evidence axes...
+ASSERT rendered calls stay inside the declared budget
+ASSERT older calls were dropped
+ASSERT every call is either kept or counted
+ASSERT the newest call survives
+  [OK]          completed_tool_calls_evidence          3   the budget still b...
+ASSERT nothing is dropped
+ASSERT every call is kept
+  [OK]          completed_tool_calls_evidence          4   short call list is...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-f742b4 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-f742b4 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+  [OK]          observation_partition                  0   pathless call name...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-d4957c (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-f742b4 for requested path /tmp/keeper-run-tools-hooks-d4957c/.masc
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-d4957c for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+ASSERT slug
+ASSERT repo-relative path
+  [OK]          observation_partition                  1   uses project root ...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-d5277a (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-d4957c for requested path /tmp/keeper-run-tools-hooks-d5277a/.masc
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-d5277a for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+ASSERT attempted path preserved for forensics
+  [OK]          observation_partition                  2   unregistered check...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-9fcfbf (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-d5277a for requested path /tmp/keeper-run-tools-hooks-9fcfbf/.masc
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-9fcfbf for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+ASSERT slug
+ASSERT repo-relative path
+  [OK]          observation_partition                  3   Docker visible abs...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-49b11b (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-9fcfbf for requested path /tmp/keeper-run-tools-hooks-49b11b/.masc
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-49b11b for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+  [OK]          observation_partition                  4   bare relative outs...
+ASSERT receipt and activity effects share one completion order
+  [OK]          concurrent_tool_observer               0   commits receipt an...
+ASSERT a reported observer failure does not poison later receipts
+  [OK]          concurrent_tool_observer               1   releases the next ...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-a878e2 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-49b11b for requested path /tmp/keeper-run-tools-hooks-a878e2
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-a878e2 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+[2026-10-26 20:23:13] [INFO] [Keeper] keeper:cancelled-observer tool_call tool=keeper_lane_status source=tools/keeper_lane_status.toml params=[-] input_shape=[object:0] outcome=ok out_len=2
+ASSERT cancellation preempts the observation body
+ASSERT cancelled committed hook delivers exactly one receipt
+ASSERT receipt identifies the durably committed row
+[2026-10-26 20:23:13] [INFO] [Keeper] keeper:cancelled-observer tool_call tool=keeper_lane_status source=tools/keeper_lane_status.toml params=[-] input_shape=[object:0] outcome=ok out_len=2
+ASSERT cancelled observer releases the mutex for the next production hook
+ASSERT following committed hook delivers one more receipt
+  [OK]          concurrent_tool_observer               2   production hook ca...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-15f60d (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-a878e2 for requested path /tmp/keeper-run-tools-hooks-15f60d
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-15f60d for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+[2026-10-26 20:23:13] [INFO] [Keeper] keeper:stalled-observer tool_call tool=Edit source=tools/Edit.toml params=[path] input_shape=[path=string:12] outcome=ok out_len=5
+ASSERT observer receives captured attribution
+[2026-10-26 20:23:13] [INFO] [Keeper] keeper:unrelated-producer tool_call tool=Edit source=tools/Edit.toml params=[path] input_shape=[path=string:12] outcome=ok out_len=5
+ASSERT observer receives captured attribution
+ASSERT one attribution per physical execution
+ASSERT both facts readable while first observer remains suspended
+ASSERT each fact has its own actual canonical execution
+  [OK]          concurrent_tool_observer               3   canonical fact pre...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-704dd6 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-15f60d for requested path /tmp/keeper-run-tools-hooks-704dd6
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-704dd6 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper] keeper:observation-reader tool_call tool=BrowserRead params=[-] input_shape=[object:0] outcome=ok out_len=12
+[2026-10-26 20:23:13] [WARN] [Keeper/observation-reader] tool=BrowserRead log_call write failed: Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT missing log store rejects required commit
+ASSERT failed log keeps the observation for its invocation
+[2026-10-26 20:23:13] [INFO] [Keeper] keeper:observation-reader tool_call tool=BrowserRead params=[-] input_shape=[object:0] outcome=ok out_len=12
+ASSERT committed invocation releases only its carrier
+ASSERT blank provider id does not consume sibling observation
+ASSERT durable row retains exact bytes
+ASSERT receipt joins the original scheduled occurrence
+  [OK]          retained browser observation           0   production hook re...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-f7f2ba (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-704dd6 for requested path /tmp/keeper-run-tools-hooks-f7f2ba
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-f7f2ba for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper/observation-keeper] turn=0 total_turns=0 runtime_lane=runtime tokens=0 thinking_kind=none
+ASSERT keeper_turn_id
+ASSERT the session ordinal stays under turn
+  [OK]          turn observation                       0   the turn observati...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-7a7915 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-f7f2ba for requested path /tmp/keeper-run-tools-hooks-7a7915
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-7a7915 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper/ledger-keeper] turn=0 total_turns=0 runtime_lane=runtime tokens=907 thinking_kind=none
+ASSERT a reported client response is not written again
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-c3c088 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-7a7915 for requested path /tmp/keeper-run-tools-hooks-c3c088
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-c3c088 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper/ledger-keeper] turn=0 total_turns=0 runtime_lane=runtime tokens=0 thinking_kind=none
+ASSERT a client response without usage after reports
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-d9bfb9 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-c3c088 for requested path /tmp/keeper-run-tools-hooks-d9bfb9
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-d9bfb9 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper/ledger-keeper] turn=0 total_turns=0 runtime_lane=runtime tokens=0 thinking_kind=none
+ASSERT a client response no report preceded
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-b78f06 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-d9bfb9 for requested path /tmp/keeper-run-tools-hooks-b78f06
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-b78f06 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper/ledger-keeper] turn=0 total_turns=0 runtime_lane=runtime tokens=907 thinking_kind=none
+ASSERT an AGENT_CORE response is one request
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-2440c3 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-b78f06 for requested path /tmp/keeper-run-tools-hooks-2440c3
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-2440c3 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper/ledger-keeper] turn=0 total_turns=0 runtime_lane=runtime tokens=0 thinking_kind=none
+ASSERT an AGENT_CORE response without usage has no scope
+  [OK]          turn observation                       1   the completion hoo...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-5794b8 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-2440c3 for requested path /tmp/keeper-run-tools-hooks-5794b8
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-5794b8 for test executable test_keeper_run_tools_hooks.exe
+ASSERT a running count
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-b24e41 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-5794b8 for requested path /tmp/keeper-run-tools-hooks-b24e41
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-b24e41 for test executable test_keeper_run_tools_hooks.exe
+ASSERT a replaced count
+  [OK]          turn observation                       2   a client report ro...
+[2026-10-26 20:23:13] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-f436f1 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-b24e41 for requested path /tmp/keeper-run-tools-hooks-f436f1
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-f436f1 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper] keeper:plain-reader tool_call tool=masc_status source=tools/masc_status.toml params=[-] input_shape=[object:0] outcome=ok out_len=5
+ASSERT hook did not leave execution evidence in the async queue
+ASSERT history freshness changes before hook returns
+ASSERT execution row is readable before ToolCompleted publication
+  [OK]          rejected_tool_calls                    0   autonomous plain s...
+[2026-10-26 20:23:13] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-22b6c4 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-f436f1 for requested path /tmp/keeper-run-tools-hooks-22b6c4
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-22b6c4 for test executable test_keeper_run_tools_hooks.exe
+ASSERT hook did not leave execution evidence in the async queue
+ASSERT history freshness changes before hook returns
+ASSERT execution row is readable before ToolCompleted publication
+  [OK]          rejected_tool_calls                    1   autonomous rejecte...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-f6d1dd (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-22b6c4 for requested path /tmp/keeper-run-tools-hooks-f6d1dd
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-f6d1dd for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [ERROR] [Keeper] keeper:projection-failure tool_call tool=keeper_artifact_transfer source=tools/keeper_artifact_transfer.toml params=[-] input_shape=[object:0] outcome=error out_len=35 failed_params={} error_preview=tool output artifact storage failed
+ASSERT legacy success field is absent
+ASSERT typed disposition preserves the completed execution
+ASSERT wire outcome records the projection failure
+ASSERT completed execution has no fabricated failure class
+  [OK]          rejected_tool_calls                    2   projection failure...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-86b256 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-f6d1dd for requested path /tmp/keeper-run-tools-hooks-86b256
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-86b256 for test executable test_keeper_run_tools_hooks.exe
+ASSERT exactly one row
+ASSERT the tool that refused
+ASSERT recorded wire failure
+ASSERT legacy success field is absent
+ASSERT the argument object it was refused for
+ASSERT the refusal text
+  [OK]          rejected_tool_calls                    3   a call refused bef...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-cf629a (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-86b256 for requested path /tmp/keeper-run-tools-hooks-cf629a
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-cf629a for test executable test_keeper_run_tools_hooks.exe
+ASSERT post_tool_use owns that row, this hook adds none
+  [OK]          rejected_tool_calls                    4   an executed failur...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-afc8fd (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-cf629a for requested path /tmp/keeper-run-tools-hooks-afc8fd
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-afc8fd for test executable test_keeper_run_tools_hooks.exe
+ASSERT callback provider id
+ASSERT callback turn
+ASSERT callback planned index
+ASSERT callback id equals committed log id
+  [OK]          rejected_tool_calls                    5   validation callbac...
+ASSERT the index names what it could not do
+  [OK]          rejected_tool_calls                    6   an unreadable read...
+ASSERT exact trailing ids and bytes
+ASSERT a later non-tool message means no provider-bound tool result
+  [OK]          Skill delivery observation             0   keeps exact traili...
+ASSERT serialization failure has no delivery
+ASSERT failed response clears staged delivery
+ASSERT successful response commits staged runtime
+ASSERT successful response activates exact id
+ASSERT failed observer leaves no stale active id
+  [OK]          Skill delivery observation             1   requires serializa...
+ASSERT first response reaches the delivery observer
+ASSERT replayed result activates no Skill id
+  [OK]          Skill delivery observation             2   first-round cross-...
+ASSERT runtime A activates its delivered Skill
+ASSERT runtime B inherits no active Skill
+ASSERT runtime B inherits no pending delivery
+  [OK]          Skill delivery observation             3   runtime failover c...
+ASSERT adopted keeps the TOML microvm profile
+  [OK]          projection adoption                    0   keeps the admitted...
+[2026-10-26 20:23:13] [WARN] [Keeper/drift] kept the admitted meta: the registry projection could not be made effective: keeper drift rejected: sandbox_profile is required (allowed: docker, microvm, remote_ssh) (loaded from keepers/drift.toml). Add e.g. `sandbox_profile = "docker"` to the keeper TOML.
+ASSERT keeps the admitted profile when the TOML declares none
+  [OK]          projection adoption                    1   keeps the admitted...
+ASSERT follows the TOML profile when it declares docker
+  [OK]          projection adoption                    2   follows the TOML p...
+ASSERT adopted keeps the projection's paused flag
+ASSERT adopted keeps the projection's usage counters
+  [OK]          projection adoption                    3   keeps the projecti...
+ASSERT the wire content really is a marker, not the body
+ASSERT bytes are the served body's, not the marker's
+ASSERT sha is the served body's
+  [OK]          skill delivery receipts                0   a blob marker carr...
+ASSERT bytes are the content's own
+ASSERT sha is the content's own
+  [OK]          skill delivery receipts                1   a plain result is ...
+ASSERT the skill result is present
+ASSERT the batch sibling is present too
+ASSERT only the trailing tool run is taken, not the assistant line
+  [OK]          skill delivery receipts                2   a receipt is taken...
+ASSERT a result behind the model's reply is offered at its own boundary, not here
+  [OK]          skill delivery receipts                3   no trailing tool m...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-beead9 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-afc8fd for requested path /tmp/keeper-run-tools-hooks-beead9
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-beead9 for test executable test_keeper_run_tools_hooks.exe
+[2026-10-26 20:23:13] [INFO] [Keeper] keeper:codex-receipts tool_call tool=Read source=tools/Read.toml params=[-] input_shape=[object:0] outcome=ok out_len=7
+ASSERT receipt only after readable log commit
+ASSERT receipt observer does not consume event-bus join
+[2026-10-26 20:23:13] [ERROR] [Keeper] keeper:codex-receipts tool_call tool=Read source=tools/Read.toml params=[-] input_shape=[object:0] outcome=error out_len=12 failed_params={} error_preview=read refused
+ASSERT receipt only after readable log commit
+ASSERT executed error reports once before turn end
+ASSERT reused provider id keeps distinct execution receipts
+ASSERT error hooks leave join for ToolCompleted
+ASSERT receipt only after readable log commit
+ASSERT validation rejection also delivers its durable result
+ASSERT cancelled history retains all committed results
+ASSERT history uses exact live execution ids
+ASSERT cancellation cannot quarantine committed live rows
+ASSERT fallback retains prior committed history
+  [OK]          Codex result delivery                  0   committed tools re...
+ASSERT a held receipt waits for release
+ASSERT release delivers the waiting receipt
+ASSERT after release a receipt is delivered at commit
+ASSERT a second release delivers nothing again
+ASSERT an open call id cannot open a second block
+ASSERT a closed call id has no block to close
+ASSERT a reused call id reports its new block
+  [OK]          Codex result delivery                  1   official receipts ...
+[2026-10-26 20:23:13] [INFO] [Workspace] MASC base: /tmp/keeper-run-tools-hooks-4401d8 (no git root found)
+[2026-10-26 20:23:13] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-run-tools-hooks-beead9 for requested path /tmp/keeper-run-tools-hooks-4401d8
+[2026-10-26 20:23:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-run-tools-hooks-4401d8 for test executable test_keeper_run_tools_hooks.exe
+ASSERT only committed interrupted hooks emit a receipt
+ASSERT receipt check leaves the committed join for the event bus
+[2026-10-26 20:23:13] [ERROR] [Keeper] keeper:cancelled-receipt tool_call tool=Read source=tools/Read.toml params=[-] input_shape=[object:0] outcome=error out_len=12 failed_params={} error_preview=read refused
+ASSERT only committed interrupted hooks emit a receipt
+ASSERT receipt check leaves the committed join for the event bus
+ASSERT only committed interrupted hooks emit a receipt
+ASSERT receipt check leaves the committed join for the event bus
+ASSERT only committed interrupted hooks emit a receipt
+ASSERT receipt check leaves the committed join for the event bus
+  [OK]          Codex result delivery                  2   interrupted hooks ...
+ASSERT a deferred composition not yet loaded is named for keeper_tool_search
+  [OK]          Skills block                           0   a deferred composi...
+ASSERT a deferred composition already on the wire is on this turn
+  [OK]          Skills block                           1   a loaded compositi...
+ASSERT no composition tools, no block
+  [OK]          Skills block                           2   no compositions, n...
+
+Test Successful in 0.261s. 66 tests run.
+::endgroup::
+[targeted] test/test_keeper_run_tools_hooks: OK in 0s

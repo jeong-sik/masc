@@ -1,0 +1,10 @@
+\title "밤섬 – 반음 연결 연습"
+\tempo 80
+\instrument 34
+\tuning (G2 D2 A1 E1)
+\staff {score tabs}
+\ts 4 4
+:4 5.3 7.2 7.2 :8 3.2 4.2 |
+:2 5.2 {d} :4 r |
+:4 7.3 7.2 7.2 :8 5.2 4.2 |
+:2 3.2 {d} :4 r

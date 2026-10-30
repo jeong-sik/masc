@@ -1,0 +1,161 @@
+// MASC Workspace gRPC Service Definition
+//
+// Transport layer for 50+ agents.
+// Replaces SSE/HTTP polling with bidirectional streaming.
+//
+// This proto file serves as the canonical API contract.
+// OCaml implementation uses grpc-direct (no protoc codegen needed).
+
+syntax = "proto3";
+
+package masc.workspace.v1;
+
+// Agent lifecycle and workspace service.
+service MascWorkspace {
+  // Bidirectional heartbeat stream.
+  // Agent sends periodic pings; server responds with acks containing project state.
+  rpc Heartbeat(stream HeartbeatPing) returns (stream HeartbeatAck);
+
+  // Server-streaming event subscription (replaces SSE for agents).
+  // Returns a stream of workspace events: broadcasts, task changes, agent session changes.
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+
+  // Unary tool call (replaces POST /mcp tools/call).
+  // Dispatches any MCP tool and returns the result.
+  rpc ToolCall(ToolCallRequest) returns (ToolCallResponse);
+
+  // Broadcast a message to all active agents.
+  rpc Broadcast(BroadcastRequest) returns (BroadcastResponse);
+
+  // Get current project status.
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+
+}
+
+// ===== Heartbeat =====
+
+message HeartbeatPing {
+  string agent_name = 1;
+  string session_id = 2;
+  int64 timestamp_ms = 3;
+  // Optional: current task being worked on.
+  string current_task_id = 4;
+}
+
+message HeartbeatAck {
+  int64 timestamp_ms = 1;
+  int32 active_agent_count = 2;
+  int32 pending_task_count = 3;
+  // The closed set of directives this ack can carry. Each arm is exactly one
+  // constructor of Keeper_directive, so a wire value that names no arm is a
+  // decode error the type produces rather than a string the reader has to
+  // recognise. Previously these travelled as "pause" | "wakeup" |
+  // "claim:<task_id>": a prefix the decoder split on ':' and matched by name,
+  // which is how "resume" could sit in this comment for months while every
+  // client that sent it got a decode failure.
+  repeated Directive directives = 4;
+}
+
+message Directive {
+  oneof kind {
+    // Presence is the whole payload for these two; the value is ignored.
+    bool pause = 1;
+    bool wakeup = 2;
+    string claim_task_id = 3;
+  }
+}
+
+// ===== Event Subscription =====
+
+message SubscribeRequest {
+  string agent_name = 1;
+  string session_id = 2;
+  // Optional: only receive events of these types.
+  repeated string event_types = 3;
+  // Resume from this sequence number (0 = from now).
+  int64 since_seq = 4;
+}
+
+message Event {
+  int64 seq = 1;
+  string event_type = 2;
+  string source_agent = 3;
+  int64 timestamp_ms = 4;
+  // JSON-encoded event payload.
+  string payload_json = 5;
+}
+
+// ===== Tool Call =====
+
+message ToolCallRequest {
+  string agent_name = 1;
+  string session_id = 2;
+  string tool_name = 3;
+  // JSON-encoded arguments.
+  string arguments_json = 4;
+}
+
+message ToolCallResponse {
+  bool success = 1;
+  // JSON-encoded result.
+  string result_json = 2;
+  string error_message = 3;
+  int32 error_code = 4;
+}
+
+// ===== Broadcast =====
+
+message BroadcastRequest {
+  string agent_name = 1;
+  string message = 2;
+  // Optional: mention specific agents.
+  repeated string mentions = 3;
+}
+
+message BroadcastResponse {
+  bool success = 1;
+  int64 seq = 2;
+  // Exact producer identity for observing a committed broadcast.
+  optional string request_id = 3;
+  // passive | accepted | already_accepted | pending | deferred | rejected
+  // | not_persisted | outcome_unknown
+  string delivery_status = 4;
+  optional string delivery_reason = 5;
+  // persisted | not_persisted | outcome_unknown
+  string workspace_persistence_status = 6;
+  // do_not_resend | retry_allowed | outcome_unknown
+  string retry_disposition = 7;
+}
+
+// ===== Status =====
+
+message StatusRequest {
+  // Empty for now; can add filters later.
+}
+
+message StatusResponse {
+  repeated AgentInfo agents = 1;
+  repeated TaskInfo tasks = 2;
+  int32 message_count = 3;
+  string workspace_path = 4;
+}
+
+// ===== Shared Types =====
+
+message AgentInfo {
+  string name = 1;
+  string status = 2;
+  repeated string capabilities = 3;
+  int64 last_heartbeat_ms = 4;
+  int64 session_bound_at_ms = 5;
+  string current_task_id = 6;
+}
+
+message TaskInfo {
+  string id = 1;
+  string title = 2;
+  string status = 3;
+  string assigned_to = 4;
+  int32 priority = 5;
+}
+

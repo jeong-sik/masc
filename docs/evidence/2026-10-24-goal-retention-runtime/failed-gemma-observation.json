@@ -1,0 +1,508 @@
+{
+  "observed_at": "2026-10-24T13:40:27.921510+00:00",
+  "goal_id": "goal-canary-three-results",
+  "criterion_revision": "6fc65ea9f6e5a0bab8d3b3e7650b53ab",
+  "wire": [
+    {
+      "request": "request-000002.request",
+      "request_sha256": "a56e017f3e6364f7884357892b7e031b125d2750ae18ab131a31fc9cab3221c0",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_ca0ymklh",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "a00b904a0f43edbe34d28754818256c2274b9ba813a1b11d20da2f75a3e1ce71"
+    },
+    {
+      "request": "request-000003.request",
+      "request_sha256": "575c9c55ccb174460256f05ce3ea6d3a54eca72667c72e81be15daf2f5a7132b",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_pw569ly8",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "57e0f5d2378895412b13916b0bb7b41b490ebd14bb958ebb71a61bf55a67cdd3"
+    },
+    {
+      "request": "request-000004.request",
+      "request_sha256": "feaece7293008a8c863dbb0a9e2b53a0b84ece128db9815bda42be6a11ecfedd",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_ab6r7t45",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "f3a65f1110c07b2ead54e323e99f5e306df9efde8fb2d07866d13557edd4f426"
+    },
+    {
+      "request": "request-000005.request",
+      "request_sha256": "fc7773e4889113abd991639361679499e0604d4a98eedd35b446f7899ed0af1f",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_h1l5nng4",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "fa67e36a74a9222f5109eeb5fd8a53ec16f21e733214c60657b81b1dee07ff12"
+    },
+    {
+      "request": "request-000006.request",
+      "request_sha256": "6820f3beb4530588baf5dcdf423eb468cca970e8d49b5f3faee7db64aabcb7f1",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_4x60yo99",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "a16126ef63d93eaec5ab291fe07b50c87a23ce8387591de9ec320259b5e27255"
+    },
+    {
+      "request": "request-000007.request",
+      "request_sha256": "6618c58d4048f1897babe35398a95a006c139518d7725879e87ab371137fdafc",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_16knhyqi",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "e73c4f2c5dd5774b9cc7b8de61791a09e2f9bceabeeb0f5e10a02b9f4f076674"
+    },
+    {
+      "request": "request-000008.request",
+      "request_sha256": "f6543315a3ceb7c4fa0cdcd5665b80225f08b51516d9c068728a3864bae92644",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_5oup4zzr",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json, keeping beta and gamma as false"
+            }
+          }
+        }
+      ],
+      "response_sha256": "fc9a2f03c1625a7b7ee440b5c918e6cb907c79451851dbc12c3c580646acdf3f"
+    },
+    {
+      "request": "request-000009.request",
+      "request_sha256": "5575a1b01fad6f5a47b8ec76f7a7cf7b7951777c29de03eeab76d4edac47e0f3",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_w1yc1iys",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "6ac05c39136d38dc7783677fc04f5133de5e43d2fbe6fb6ab2335aca758a789e"
+    },
+    {
+      "request": "request-000010.request",
+      "request_sha256": "ed960a6835f989e506c3bdb8819ec9d77ba11e088536f6ce42f952ec17d192c0",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_97njn7dk",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json (beta/gamma=false)"
+            }
+          }
+        }
+      ],
+      "response_sha256": "93912aa67b0dbf02559dbd9630dfd5fa245dba9267a03d6950867826de7ee9aa"
+    },
+    {
+      "request": "request-000011.request",
+      "request_sha256": "395797be8c86abef4dac76e4950f847daa5e7130431e40398988a99b8ade1725",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_iar2bu4x",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json, keeping beta and gamma as false"
+            }
+          }
+        }
+      ],
+      "response_sha256": "a903702afaa1c62b8fff88a01f65476754e72090143565e43ae1009dec3232ba"
+    },
+    {
+      "request": "request-000012.request",
+      "request_sha256": "99fba3e1917c543383698c5fdb5ddb74f0b389002c017c1bf67b0f5f8e241989",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_vrl155n6",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json (beta/gamma=false)"
+            }
+          }
+        }
+      ],
+      "response_sha256": "dcbb209840f15fc080ca014881b0377d5929c228fe32a121b09aefa8dc681d44"
+    },
+    {
+      "request": "request-000013.request",
+      "request_sha256": "7ab01b394cf4b112636a6d30fbe22b7cc81ecc54359b64a55b8ca75f679a905b",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_oksmwglj",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "de2ff255b9d1cbae3c8d46fd25c83ef4fa8c82434d2b022acc2f43889f36638c"
+    },
+    {
+      "request": "request-000014.request",
+      "request_sha256": "e71eae731974c81311f676e36fa635115d62ffe7ec1428c367808fd3b3ce76af",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_4vhcf6bj",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha to true in acceptance.json, keeping beta and gamma as false"
+            }
+          }
+        }
+      ],
+      "response_sha256": "6c43adeea1bb8d2bbe8d3b6da967e54ed80d91e11b9607c94ff0431bbf217810"
+    },
+    {
+      "request": "request-000015.request",
+      "request_sha256": "701d64a19461462272b270f56bb538bb21c6fe23f0a81857be9ce6b40d21293f",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [
+        {
+          "id": "call_t1ure4wt",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "contract": {
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "strict": true
+              },
+              "goal_id": "goal-canary-three-results",
+              "priority": 1,
+              "title": "Set alpha, beta, and gamma to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "response_sha256": "42cd725793d83233b1f709f29a769a89277b4cfea32de63509e314e4c444a308"
+    },
+    {
+      "request": "request-000016.request",
+      "request_sha256": "c65133070a262e458a676664f0ce8941b432db5d50bf45dde3d9de69bed2c2dd",
+      "current_carriers": 1,
+      "criterion_in_current_carrier": true,
+      "goal_in_current_carrier": true,
+      "offered_tool_count": 33,
+      "tools": [],
+      "response_sha256": "defd4b5bc6950792cff2a81312c226d8ee995f3fd51a793ce6bf544670f6a262"
+    }
+  ],
+  "backlog": {
+    "tasks": [],
+    "pending_completion_rejections": [],
+    "delivered_completion_rejections": [],
+    "pending_completion_approvals": [],
+    "task_deletion_receipts": [],
+    "task_creation_receipts": [],
+    "last_updated": "2026-10-24T13:37:38Z",
+    "version": 1
+  },
+  "artifact": {
+    "alpha": false,
+    "beta": false,
+    "gamma": false
+  },
+  "artifact_sha256": "bf72d0c301f77c9d6d61e53874b822de08d4ad129254ff29c616b462f4cff4e1",
+  "goal_api": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.64.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"status\":\"ok\",\"generated_at\":\"2026-10-24T13:40:27Z\",\"count\":1,\"goals\":[{\"id\":\"goal-canary-three-results\",\"criterion_revision\":\"6fc65ea9f6e5a0bab8d3b3e7650b53ab\",\"title\":\"alpha, beta, gamma 세 결과를 실제 파일에서 확인한다\",\"metric\":\"playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric\",\"target_value\":\"3/3: alpha=true, beta=true, gamma=true, each persisted and reread\",\"due_date\":null,\"priority\":1,\"phase\":\"executing\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-10-24T13:37:41Z\",\"updated_at\":\"2026-10-24T13:37:41Z\",\"verification\":{\"goal_id\":\"goal-canary-three-results\",\"completion\":{\"state\":\"idle\"},\"submitted_evidence\":[],\"updated_at\":\"2026-10-24T13:40:27Z\"},\"measurement\":{\"state\":\"reported\",\"record\":{\"id\":\"bebb6825698480adbdd1d82345e3de86\",\"goal_id\":\"goal-canary-three-results\",\"criterion_revision\":\"6fc65ea9f6e5a0bab8d3b3e7650b53ab\",\"observed_value\":\"0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread\",\"evidence\":\"note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.\",\"actor\":\"goal-canary-operator\",\"recorded_at\":\"2026-10-24T13:37:41Z\"}}}],\"rollup\":{\"active_count\":1,\"verifying_count\":0,\"awaiting_confirmation_count\":0,\"done_count\":0,\"dropped_count\":0,\"paused_count\":0,\"blocked_count\":0}}",
+            "status": "ok",
+            "tool": "masc_goal_list"
+          },
+          "trace_id": "2",
+          "agent_id": "goal-canary-operator",
+          "tool": "masc_goal_list",
+          "duration_ms": 0,
+          "attempts": 1,
+          "timestamp": "2026-10-24T13:40:27Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"status\":\"ok\",\"generated_at\":\"2026-10-24T13:40:27Z\",\"count\":1,\"goals\":[{\"id\":\"goal-canary-three-results\",\"criterion_revision\":\"6fc65ea9f6e5a0bab8d3b3e7650b53ab\",\"title\":\"alpha, beta, gamma 세 결과를 실제 파일에서 확인한다\",\"metric\":\"playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric\",\"target_value\":\"3/3: alpha=true, beta=true, gamma=true, each persisted and reread\",\"due_date\":null,\"priority\":1,\"phase\":\"executing\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-10-24T13:37:41Z\",\"updated_at\":\"2026-10-24T13:37:41Z\",\"verification\":{\"goal_id\":\"goal-canary-three-results\",\"completion\":{\"state\":\"idle\"},\"submitted_evidence\":[],\"updated_at\":\"2026-10-24T13:40:27Z\"},\"measurement\":{\"state\":\"reported\",\"record\":{\"id\":\"bebb6825698480adbdd1d82345e3de86\",\"goal_id\":\"goal-canary-three-results\",\"criterion_revision\":\"6fc65ea9f6e5a0bab8d3b3e7650b53ab\",\"observed_value\":\"0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread\",\"evidence\":\"note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.\",\"actor\":\"goal-canary-operator\",\"recorded_at\":\"2026-10-24T13:37:41Z\"}}}],\"rollup\":{\"active_count\":1,\"verifying_count\":0,\"awaiting_confirmation_count\":0,\"done_count\":0,\"dropped_count\":0,\"paused_count\":0,\"blocked_count\":0}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "status": "ok",
+        "generated_at": "2026-10-24T13:40:27Z",
+        "count": 1,
+        "goals": [
+          {
+            "id": "goal-canary-three-results",
+            "criterion_revision": "6fc65ea9f6e5a0bab8d3b3e7650b53ab",
+            "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+            "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+            "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+            "due_date": null,
+            "priority": 1,
+            "phase": "executing",
+            "last_review_note": null,
+            "last_review_at": null,
+            "created_at": "2026-10-24T13:37:41Z",
+            "updated_at": "2026-10-24T13:37:41Z",
+            "verification": {
+              "goal_id": "goal-canary-three-results",
+              "completion": {
+                "state": "idle"
+              },
+              "submitted_evidence": [],
+              "updated_at": "2026-10-24T13:40:27Z"
+            },
+            "measurement": {
+              "state": "reported",
+              "record": {
+                "id": "bebb6825698480adbdd1d82345e3de86",
+                "goal_id": "goal-canary-three-results",
+                "criterion_revision": "6fc65ea9f6e5a0bab8d3b3e7650b53ab",
+                "observed_value": "0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread",
+                "evidence": "note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.",
+                "actor": "goal-canary-operator",
+                "recorded_at": "2026-10-24T13:37:41Z"
+              }
+            }
+          }
+        ],
+        "rollup": {
+          "active_count": 1,
+          "verifying_count": 0,
+          "awaiting_confirmation_count": 0,
+          "done_count": 0,
+          "dropped_count": 0,
+          "paused_count": 0,
+          "blocked_count": 0
+        }
+      }
+    }
+  }
+}

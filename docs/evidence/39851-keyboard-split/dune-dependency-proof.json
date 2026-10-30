@@ -1,0 +1,2295 @@
+[
+  {
+    "alias": "runtest-test_tui_metrics_source_status",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_approval_progress",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_chat_input_safety",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_chat_copy_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_snapshot_response_order",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_schedule.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_connectors_entry",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keeper_row_selection",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_chat_input_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_general_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_surfaces_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_overview_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_rosters_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_board_terminal_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_context_inspector",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_fixture_shutdown",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_scenario_selection",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-memory-journal",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-voice-wizard",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-code-memo",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-first-install-credential",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-exit-reason",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-mermaid-chat",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-changes-newline",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-schedule-delivery",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-schedule-source-status",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-board-compose-footer",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-msx-spectator",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-msx-retained",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-msx-retained-tick",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-msx-size",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-dos-live",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-cli-base-path",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-send-on-stop",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-quit-waiting",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-chat-retained-stop",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-ctrl-y",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-held-back-override",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-theme-scheme",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-msx-palette",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-planning-review",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-repositories",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_workspace_read_error",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_system_logs_read_error",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-project-changes",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-browser-screenshot",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-config",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-chat-clarity",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-runtime",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_runtime_read_error",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-resources",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_resources_read_error",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_resources.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-keepers-lanes",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-keeper-settings-activation",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-board-json",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-skill-usage-coverage",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-tools-purpose",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-acting-call-evidence",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_goal_confirmation_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_planning.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-fusion-history",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-dashboard-usage",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-http-badge-refresh",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-observer-reconnect",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_board_scroll",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_board_heading_width",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_board_closed_marker",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_config_paths_row",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_runtime_config_read_error",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_tab_strip_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_play_invites_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_acting_pane_floor_pty",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_fifo_admission_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_paste_pause_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_input_frame_pty",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_approvals_ring_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_batch_status_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_approval_detail_scroll_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_memory_fact_detail_pty",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_memory.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_memory_health_read_error",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_memory.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_memory_default_view_pty",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_memory.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_detail_says_what_the_lane_answers",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_search_count",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_memory.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_reading_ends",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_selection_visibility",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_browser_lane_scroll",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_browser_action_navigation",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_browser_follow",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_ask_alternative",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-tools-request-identity",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_pagination",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_tools_poll_continuity",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_payload_availability",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_measurement_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_board_answer_source",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_detail_owner",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_goal_source_availability",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_goal_proof_identity",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keyboard_input-msx-background-poll",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_browser.py",
+      "tui_keyboard_chat.py",
+      "tui_keyboard_clients.py",
+      "tui_keyboard_context.py",
+      "tui_keyboard_dashboard.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_machines.py",
+      "tui_keyboard_memory.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_planning.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_resources.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_startup.py",
+      "tui_keyboard_terminal.py",
+      "tui_keyboard_tools.py",
+      "tui_keyboard_voice.py",
+      "tui_keyboard_walk.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_browser_history",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_package_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_visual_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_operator_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_verdict_refresh_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_jev_readiness",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_chat_command_menu_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_judgement_read_error",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_verdict_request_identity_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_tool_results_pty",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_account_login_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_emblem_screen_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_chat_activity_pane_pty",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_chat_load_errors_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_skills_usage_summary",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_account_login_removal_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_activity_title_dot_belongs_to_the_strip",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_artifact_comparison",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_attention_age_column",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_board_detail_error_once",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_board_hearth_census_width",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_connector_error_once",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_feed_row_counts_events",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_fleet_reading_says_when_it_was_measured",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_input_readiness_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keeper_current_failure_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keeper_portrait_pty",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keeper_roster_window",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_keeper_schedule_error_once",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_heading_keeps_its_reading",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_run_paging",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_lane_stale_failure",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_librarian_absorb_gate",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_librarian_context_review",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_overlay_window_reading",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_planning_goal_window",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_present_timing_pty",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_region_baseline_pty",
+    "helpers": [
+      "tui_keyboard_approvals.py",
+      "tui_keyboard_board.py",
+      "tui_keyboard_fusion.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_repositories.py",
+      "tui_keyboard_runtime.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_workspace.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_runtime_account_form_pty",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_runtime_lane_editor",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_keepers.py",
+      "tui_keyboard_runtime.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_schedule_wake_error_once",
+    "helpers": [
+      "tui_keyboard_chat.py",
+      "tui_keyboard_harness.py",
+      "tui_keyboard_observer.py",
+      "tui_keyboard_schedule.py",
+      "tui_keyboard_tools.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_schedules_empty_row_names_its_key",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_schedule.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_schedules_hold_says_when_it_was_checked",
+    "helpers": [
+      "tui_keyboard_harness.py",
+      "tui_keyboard_schedule.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_skill_applicability",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_skill_create",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_stall_observation",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_tasks_title_fits_the_frame",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_termios_returns_the_keys",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  },
+  {
+    "alias": "runtest-test_tui_voice_pane_fills_its_height",
+    "helpers": [
+      "tui_keyboard_harness.py"
+    ],
+    "explicit_dependencies": true
+  }
+]

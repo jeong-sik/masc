@@ -1,0 +1,52 @@
+{
+  "schema": "masc.curator-contract-owner-evidence.v1",
+  "observed_at": "2026-10-22T04:37:45.738077+00:00",
+  "actual_source": "cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd",
+  "actual_server_pid": 77480,
+  "same_original_workspace": true,
+  "same_original_current_sha256": "619fa8737bed6d1b38e0d7e903a9fd1562f4ef6aedcae5b9fc60e19207151c85",
+  "classification_original": "01a161e3-eff3-7000-a4b8-aa8ef80fe89c",
+  "briefing_original": "01a161e4-2a50-7000-965e-934e89c4a2cb",
+  "classification_committed_and_observer_acknowledged": true,
+  "briefing_provider_answer_retained": true,
+  "briefing_domain_committed": false,
+  "briefing_recovery_fix_executed": false,
+  "off_owned_container_count": 0,
+  "worker_package_source": "1196e280ee8b1b5d2381a59210fa51246affe76e",
+  "worker_protocol_exact_server_unchanged_at_actual_host_source": true,
+  "dashboard_source": "cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd",
+  "dashboard_build_clean": true,
+  "native_tui_source": "cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd",
+  "native_selected_tests": 29,
+  "production_curator_selected_tests": {
+    "passed": 7,
+    "attempted": 15,
+    "failed": [
+      0,
+      1,
+      2,
+      3,
+      6,
+      7,
+      11,
+      12
+    ]
+  },
+  "goal54_complete": false,
+  "files": {
+    "actual-health.json": "3eb3e7e6ad8c2f85b00d5812bde0754b49e793c5eec3a74ab6e9a0f919a54457",
+    "actual-owner-error.txt": "cbb5551770fe9189a286f65fee05eb05be65e2562e2a1a97f51da41ccc942c98",
+    "briefing-before-commit.json": "716bdf62bffee3c188c8ef177817c9df970893fd7e062ca6ef6be8f4fbcfb20d",
+    "classification-ledger.json": "8edc07756d82376abafee490fca5801f2f7a7f5e6254c599a421bc1714f3097d",
+    "dashboard-cb2-worker-On.png": "37b478a9da8b468b692db0afb07f87064ee82dbdf9b79526a18a5605eec1499f",
+    "execution-results.json": "66a75af99ff08f44d76027dc222550acfc3542d5b631521c3e06f4daf0dc5062",
+    "native-package-Off.txt": "9abc4bfcc94d5990e28afa4c69fa10fe6890bf3d0d35dbe0c971bf910ca5309e",
+    "native-receipt.json": "07bfdac815ff45728f04b07e946e8f8886e282680e0ec0e81fad698521bbccf8",
+    "off-boundary.json": "4ce51fd22cd2ebf207f54067571f980e60207871b3ae7bd5a8c32515db1a3993",
+    "off-inventory.json": "b21707ec57d93c88b1065e21f8c10410bc531cedd0ebdc0fd0b0254e6edfb834",
+    "originals-after-Off.json": "c41a94b988d21a60faf23c63c453b4fd3386e560b4fb23c868d8f46b7de53801",
+    "originals-after-model-results.json": "c41a94b988d21a60faf23c63c453b4fd3386e560b4fb23c868d8f46b7de53801",
+    "owned-docker-Off.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "selected-failure-excerpt.txt": "10d43e9d05fa98d49b3bf59eaa24807901bbfb8c23ad88d762e5ac6a7a6bb107"
+  }
+}

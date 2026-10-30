@@ -1,0 +1,1166 @@
+(** Six-stage Agent turn pipeline: Input, Parse, Route, Collect, Execute, Output.
+
+    [Output] ([stage_output]) dispatches [Execute] ([stage_execute]) internally
+    on StopToolUse, so Execute is a sub-step of Output, not a stage that runs
+    between Collect and Output. This matches the dataflow diagram in
+    pipeline.mli: [Input] -> [Parse] -> [Route] -> [Collect] -> [Output]. *)
+
+open Types
+open Agent_types
+open Agent_trace
+
+let _log = Log.create ~module_name:"pipeline" ()
+
+(* Shared with Pipeline_stage_prepare via Pipeline_common (re-raises Eio
+   cancellation); the thin wrapper keeps this module's log label. *)
+let safe_publish bus event = Pipeline_common.safe_publish ~log:_log bus event
+
+open Result_syntax
+
+type api_strategy =
+  | Sync
+  | Stream of
+      { on_event : Types.sse_event -> unit
+      ; on_telemetry : (Llm_provider.Telemetry_event.t -> unit) option
+      }
+
+type turn_outcome = Pipeline_terminal_tool.turn_outcome =
+  | Complete of Types.api_response
+  | ToolsExecuted of checkpoint_stage
+  | TerminalToolCompleted of Terminal_tool_receipt.t
+
+let persist_turn_checkpoint_for_state agent stage state =
+  Agent_checkpoint_sink.persist_for_state agent stage
+    ~pending_input:agent.pending_input state
+
+(** Set lifecycle to Ready, invoke BeforeTurn hook, handle elicitation. *)
+let stage_input = Pipeline_stage_prepare.stage_input
+
+(* ── Stage 2: Parse ──────────────────────────────────────── *)
+
+
+(** Prepare the turn using current [agent.state.messages] and the given
+    [turn_params].  Centralises the [Agent_turn.prepare_turn] parameter
+    list to keep preparation behind one typed boundary. *)
+(** Invoke BeforeTurnParams hook and prepare the immutable per-turn config and
+    tools. Returns (turn_preparation, turn_config, turn_params). *)
+let stage_parse = Pipeline_stage_prepare.stage_parse
+
+(* ── Stage 3: Route ──────────────────────────────────────── *)
+
+(** Convert [Llm_provider.Http_client.http_error] into the [core_error]
+    shape the pre-[Complete] dispatch path used to surface (that path,
+    formerly [Api.create_message], was removed 2026-07-21). Keeps
+    downstream Pipeline/Retry/ContextOverflow handling source-compatible
+    now that Sync dispatch routes through {!Llm_provider.Complete.complete}.
+
+    HTTP status codes are re-classified via
+    {!Llm_provider.Retry.classify_error} so
+    ContextOverflow/RateLimited/etc. still map to the same variants. *)
+(** Sync dispatch via {!Llm_provider.Complete.complete}.  Routes all
+    provider kinds through the consolidated path so [on_request_end]
+    metrics fire and [Llm_transport.t] (set via [agent.options.transport])
+    handles CLI providers.  Streaming dispatch is likewise consolidated on
+    {!Llm_provider.Complete.complete_stream}; no legacy fallback remains. *)
+let dispatch_sync = Pipeline_stage_route.dispatch_sync
+
+let dispatch_stream = Pipeline_stage_route.dispatch_stream
+
+(** Dispatch the API call via the chosen strategy (sync or stream). *)
+let stage_route
+      ~sw
+      ?clock
+      ~turn
+      ~api_strategy
+      ?raw_trace_run
+      ?on_provider_failure
+      ?before_provider_attempt
+      ~turn_config
+      agent
+      prep
+  =
+  let ( let* ) result next = match result with
+    | Ok value -> next value
+    | Error error -> Llm_provider.Completion_outcome.before_serialization (Error error)
+  in
+  let* provider_config =
+    Pipeline_stage_route.provider_config_for_turn ?on_provider_failure ~turn_config agent
+  in
+  let result =
+    match api_strategy with
+    | Sync ->
+      Tracing.with_span
+        agent.options.tracer
+        { kind = Api_call
+        ; name = "create_message"
+        ; agent_name = agent.state.config.name
+        ; turn
+        ; extra = []
+        ; links = []
+        }
+        (fun tracer ->
+           let trace_context = Tracing.trace_context_headers tracer in
+           dispatch_sync
+             ~sw
+             ?clock
+             ~trace_context
+             ?on_provider_failure
+             ?before_provider_attempt
+             ~provider_config
+             agent
+             prep)
+    | Stream { on_event; on_telemetry } ->
+      let capture_id = Option.map Raw_trace.active_run_id raw_trace_run in
+      Tracing.with_span
+        agent.options.tracer
+        { kind = Api_call
+        ; name = "create_message_stream"
+        ; agent_name = agent.state.config.name
+        ; turn
+        ; extra = []
+        ; links = []
+        }
+        (fun tracer ->
+           let trace_context = Tracing.trace_context_headers tracer in
+           let capabilities =
+             Provider_runtime_binding.capabilities_for_provider_config provider_config in
+           if not capabilities.supports_native_streaming then begin
+             (* The full original response must reach the observer before
+                stage_collect removes or recovers tool names. Its raw block
+                indices and pre-admission inventory own Keeper's occurrences. *)
+             dispatch_sync
+               ~sw ?clock ~trace_context ?on_provider_failure
+               ?before_provider_attempt ~provider_config agent prep
+             |> Llm_provider.Completion_outcome.map_result (Result.map (fun response ->
+                  Llm_provider.Streaming.emit_synthetic_events response
+                    (Llm_provider.Complete_stream.emit_stream_event on_event);
+                  response))
+           end else
+             dispatch_stream
+               ~sw
+               ?clock
+               ~provider_config
+               ~trace_context
+               agent
+               prep
+               ~on_event
+               ?capture_id
+               ?on_telemetry
+               ?on_provider_failure
+               ?before_provider_attempt
+               ())
+  in
+  Llm_provider.Completion_outcome.map_result
+    (Result.map (fun response -> provider_config, response)) result
+;;
+
+(* ── Stage 4: Collect ────────────────────────────────────── *)
+
+(* One sentence, one builder. The turn refuses a call in two places -- before
+   tool results when nothing routed, after them when something did -- and a
+   model that reads two different wordings for one refusal has to work out
+   that they are the same refusal.
+
+   It is a plain [User] message with no metadata, which is what lets the
+   Anthropic path fold it into the tool_result message it follows
+   ([Api_common.merge_tool_result_followup_user_messages] requires
+   [is_mergeable_followup], and empty metadata satisfies it). On the OpenAI
+   path it stays its own [role: user] message after the [role: tool] ones.
+
+   What the sentence may assert is bounded by what admission actually checked:
+   the name was not in this request's tool set. It used to say the name was
+   not registered, which is a claim about the host's whole catalogue that this
+   check cannot make. A host may send a subset of the tools it knows and offer
+   a listing tool for loading the rest by name -- masc's Keepers do, and a
+   tool whose schema was left out of one request is named in that listing on
+   the same request. Telling such a model its own tool does not exist is false
+   and teaches it against a tool it is meant to use, and because this is a
+   [User] message the transcript replays that for the rest of the
+   conversation. So the sentence names the request as the scope, gives both
+   reasons a name can be missing, and points at loading before re-sending. *)
+let admission_refusal_message names : Types.message =
+  { origin = Recovery_instruction; Types.role = User
+  ; content =
+      [ Types.Text
+          (Printf.sprintf
+             "%d tool call(s) in your previous message named no tool available \
+              on that request and were not run: %s. A name can be missing \
+              because no such tool exists or because its schema was not sent \
+              on that request; if a tool for loading tools by name is offered, \
+              ask it for the name and call it again. Otherwise send an \
+              available tool name on its own and put every argument in the \
+              input object."
+             (List.length names)
+             (Agent_tools.describe_rejected_names names))
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+
+(** Accumulate usage, invoke AfterTurn hook, emit events, append
+    assistant message, and increment turn_count. *)
+let stage_collect
+      ?raw_trace_run
+      ?clock
+      ~turn
+      ~provider_config
+      ~context_message
+      agent
+      (response : Llm_provider.Types.api_response)
+  =
+  Tracing.with_span
+    agent.options.tracer
+    { kind = Hook_invoke
+    ; name = "turn:collect"
+    ; agent_name = agent.state.config.name
+    ; turn
+    ; extra = []
+    ; links = []
+    }
+    (fun _tracer ->
+       let ts = Pipeline_common.timestamp_now ?clock () in
+       (* Preserve an already-recorded first_progress_at (e.g. from streaming
+          first-token or tool-execution events). Overwriting it with the
+          collection timestamp would make latency-to-first-progress metrics
+          silently regress to the end of the turn. *)
+       (match agent.lifecycle with
+        | Some prev when Option.is_some prev.first_progress_at ->
+          set_lifecycle agent ~last_progress_at:ts Running
+        | _ -> set_lifecycle agent ~first_progress_at:ts ~last_progress_at:ts Running);
+       let* () = trace_assistant_blocks raw_trace_run response.content in
+       (* Admission runs after the raw trace and before anything derives from
+          the response, because history and tool dispatch read [response.content]
+          separately: normalizing only one of them would leave a tool_result
+          whose tool_use is absent from the transcript. The raw trace above
+          keeps the wire text, so no evidence is lost by narrowing what the
+          transcript replays. *)
+       let admission =
+         Agent_tools.admit_tool_use_names
+           (Agent_tools.build_index (Tool_set.to_list agent.tools))
+           response.content
+       in
+       let* response =
+         Types.retain_response_content
+           ~content:admission.Agent_tools.admitted
+           ~retained_indices:admission.Agent_tools.retained_content_indices response
+         |> Result.map_error (fun detail -> Error.Internal detail)
+       in
+       (match admission.Agent_tools.rejected_names with
+        | [] -> ()
+        | names ->
+          (* The names, not just how many. An operator reading a bare count
+             cannot tell a hallucinated tool from a catalog that drifted. *)
+          Log.warn
+            _log
+            "tool calls dropped before history"
+            [ Log.I ("rejected", List.length names)
+            ; Log.S ("names", Agent_tools.describe_rejected_names names)
+            ; Log.I ("turn", turn)
+            ]);
+       let usage =
+         Agent_turn.accumulate_usage
+           ~current_usage:agent.state.usage
+           ~provider_config:(Some provider_config)
+           ~response_model:(Some response.model)
+           ~response_usage:response.usage
+       in
+       (* The response enters history here, before [after_turn]: its media go
+          to the store, so a hook only sees a response that history can hold. *)
+       let* assistant_message =
+         match Types.assistant_message_of_response response with
+         | Ok message ->
+           History.of_wire_message agent.media_store message
+           |> Result.map_error (fun error -> Error.Media error)
+         | Error error ->
+           Error
+             (Error.Internal
+                ("assistant response has invalid reasoning provenance: "
+                 ^ Types.show_assistant_message_error error))
+       in
+       let after_decision =
+         invoke_hook_with_trace
+           agent
+           ?raw_trace_run
+           ~turn
+           ~hook_name:"after_turn"
+           agent.options.hooks.after_turn
+           (Hooks.AfterTurn
+              { turn
+              ; response
+              ; tool_source_map = Some admission.Agent_tools.tool_source_map
+              })
+       in
+       let* () =
+         match after_decision with
+         | Hooks.Continue -> Ok ()
+         | Hooks.HookFailed { stage; detail } ->
+           Error
+             (Pipeline_common.hook_failed_core_error
+                ~hook_name:"after_turn"
+                ~stage
+                ~tool_name:None
+                ~tool_use_id:None
+                ~detail)
+         | (Hooks.AdjustParams _ | Hooks.ElicitInput _ | Hooks.ElicitToolApproval _ | Hooks.Nudge _ | Hooks.Block _) as decision -> Error
+             (Pipeline_common.illegal_hook_decision_core_error
+                ~hook_name:"after_turn"
+                ~stage:Hooks.After_turn
+                ~decision)
+       in
+       let binds_context =
+         List.exists (fun (block : Llm_provider.Types.content_block) ->
+           match block with
+           | Thinking { signature = Some _; _ } | RedactedThinking _ -> true
+           | Thinking { signature = None; _ } | ReasoningDetails _ | Text _
+           | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+           response.content
+       in
+       let* context_message =
+         match provider_config.Llm_provider.Provider_config.kind, binds_context with
+         | Anthropic, true -> context_message
+         | Anthropic, false
+         | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> Ok None
+       in
+       let next_turn = turn + 1 in
+       (* A dropped call leaves no tool_use for a tool_result to answer, so the
+          model would otherwise see its turn vanish without a reason. The note
+          states the shape of the mistake and never the name that caused it:
+          echoing that name back is the replay this whole path exists to stop.
+          It is appended only when nothing was admitted, because a surviving
+          call's tool_result has to follow its tool_use with nothing between. *)
+       let admission_note =
+         let admitted_any_call =
+           List.exists
+             (fun (block : Llm_provider.Types.content_block) ->
+               match block with
+               | ToolUse _ -> true
+               | Text _
+               | Thinking _
+               | ReasoningDetails _
+               | RedactedThinking _
+               | ToolResult _
+               | Image _
+               | Document _
+               | Audio _ -> false)
+             response.content
+         in
+         match admission.Agent_tools.rejected_names with
+         | [] -> None
+         (* A turn that also routed something answers its refusal after the
+            tool results, in [stage_execute]. Appending here would put a User
+            message between the assistant's tool_use blocks and their
+            tool_results, which is the one place the pairing cannot take
+            one. *)
+         | _ when admitted_any_call -> None
+         | names -> Some (admission_refusal_message names)
+       in
+       let collected_messages base =
+         let with_assistant = Util.snoc base assistant_message in
+         match admission_note with
+         | None -> with_assistant
+         | Some note -> Util.snoc with_assistant note
+       in
+       (* Live state first, then the snapshot of it, as at the other two
+          mutation boundaries and as [Agent.create] documents. A sink failure
+          stops the turn here but never leaves live state behind a snapshot
+          the sink has already seen. *)
+       update_state agent (fun state ->
+         let messages =
+           match provider_config.Llm_provider.Provider_config.kind, context_message with
+           | Anthropic, Some message ->
+             Util.snoc state.messages
+               { message with
+                 origin = Historical_system_context }
+           | Anthropic, None
+           | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> state.messages
+         in
+         { state with
+           messages = collected_messages messages
+         ; provider_binding = Option.bind response.telemetry (fun telemetry -> telemetry.reasoning_source)
+         ; turn_count = next_turn
+         ; usage
+         });
+       let* () =
+         persist_turn_checkpoint_for_state
+           agent
+           After_assistant_collected
+           agent.state
+       in
+       (match agent.options.event_bus with
+        | Some bus ->
+          safe_publish
+            bus
+            { meta = Pipeline_common.event_envelope agent
+            ; payload = TurnCompleted { agent_name = agent.state.config.name; turn }
+            }
+        | None -> ());
+       (* Observability-as-default: emit per-call inference telemetry beside
+          [TurnCompleted] so token counts and decode tok/s are observable
+          without the caller wiring anything. The event's [provider] is a
+          required string, so we publish only once the provider identity is
+          known from [response.telemetry.provider_kind] — set by
+          [Complete_common.patch_telemetry] on every real completion (sync and
+          stream). A synthetic response with no telemetry has no provider to
+          attribute and no timings to report, so it is skipped rather than
+          emitted with a fabricated provider. Token/timing fields stay [None]
+          when the provider did not report them (cloud providers omit timings).
+          The nested [None -> ()] arms are explicit (no catch-all) so a future
+          telemetry field cannot be silently dropped here. *)
+       (match agent.options.event_bus with
+        | None -> ()
+        | Some bus ->
+          (match response.telemetry with
+           | None -> ()
+           | Some telemetry ->
+             (match telemetry.provider_kind with
+              | None -> ()
+              | Some provider_kind ->
+                let timings = telemetry.timings in
+                safe_publish
+                  bus
+                  { meta = Pipeline_common.event_envelope agent
+                  ; payload =
+                      InferenceTelemetry
+                        { agent_name = agent.state.config.name
+                        ; turn
+                        ; provider = Llm_provider.Provider_kind.to_string provider_kind
+                        ; model = response.model
+                        ; prompt_tokens =
+                            Option.map
+                              (fun (u : api_usage) -> u.input_tokens)
+                              response.usage
+                        ; completion_tokens =
+                            Option.map
+                              (fun (u : api_usage) -> u.output_tokens)
+                              response.usage
+                        ; prompt_ms =
+                            Option.bind timings (fun (t : inference_timings) ->
+                              t.prompt_ms)
+                        ; decode_ms =
+                            Option.bind timings (fun (t : inference_timings) ->
+                              t.predicted_ms)
+                        ; decode_tok_s =
+                            Option.bind timings (fun (t : inference_timings) ->
+                              t.predicted_per_second)
+                        }
+                  })));
+       (* The admitted response, not the wire one, is what the output stage must
+          route: dispatch reads [response.content] on its own, so handing back
+          the original here would run a call the transcript no longer records. *)
+       Ok (response, admission.Agent_tools.rejected_names))
+;;
+
+(* ── Stage 5: Execute ────────────────────────────────────── *)
+
+(** Handle tool execution and context injection. *)
+let stage_execute
+      ?raw_trace_run
+      ?before_tool_execution
+      ~turn
+      ~rejected_tool_calls
+      ~response
+      agent
+      tools
+  =
+  (* [stage_output] rejects empty StopToolUse from provider and injected
+     transports. [Nonempty.t] then prevents a silent empty [ToolsExecuted]
+     loop at compile time. *)
+  let tool_uses = Nonempty.to_list tools in
+  Tracing.with_span
+    agent.options.tracer
+    { kind = Tool_exec
+    ; name = "turn:execute"
+    ; agent_name = agent.state.config.name
+    ; turn
+    ; extra = []
+    ; links = []
+    }
+    (fun _tracer ->
+       let results, completion, failure =
+         execute_tools_with_trace
+           agent
+           raw_trace_run
+           ~turn
+           ?before_tool_execution
+           tool_uses
+         |> Pipeline_terminal_tool.unpack_execution_result
+       in
+       let* tool_results = Agent_turn.make_tool_results ~media_store:agent.media_store results in
+       let* () =
+         match tool_results with
+         | [] -> Ok ()
+         | _ ->
+           (* Commit completed effects before surfacing a terminal hook or
+              observer failure.  Updating memory first prevents same-process
+              replay even when the caller-owned checkpoint sink itself fails;
+              the checkpoint then makes the same invariant durable. *)
+           update_state agent (fun state ->
+             let with_results =
+               Util.snoc state.messages (make_message ~role:Tool tool_results)
+             in
+             (* The refusal rides in the same update as the results it follows,
+                so the checkpoint below cannot persist a turn that answered two
+                calls and stayed silent about the third. Before this, a turn
+                that routed anything at all said nothing about what it dropped:
+                the model got results for what worked and silence for the rest,
+                and its own dropped block is already gone from the transcript,
+                so silence left it nothing to correct. *)
+             let messages =
+               match rejected_tool_calls with
+               | [] -> with_results
+               | names -> Util.snoc with_results (admission_refusal_message names)
+             in
+             { state with messages });
+           let base_state = agent.state in
+           persist_turn_checkpoint_for_state agent After_tool_results_appended base_state
+       in
+       match failure with
+       | Some
+           (Agent_tools.Hook_failure
+              (Agent_tools.Hook_execution_failed
+                 { hook_name; stage; tool_name; invocation; detail })) ->
+         Error
+           (Pipeline_common.hook_failed_core_error
+              ~hook_name
+              ~stage
+              ~tool_name:(Some tool_name)
+              ~tool_use_id:(Some (Tool_contract.Invocation.tool_use_id invocation))
+              ~detail)
+       | Some (Agent_tools.Observer_failure { exception_; backtrace; _ }) ->
+         Printexc.raise_with_backtrace exception_ backtrace
+       | Some (Agent_tools.Durability_failure { invocation; detail }) ->
+         Pipeline_terminal_tool.durability_failure ~invocation ~detail
+       | None ->
+         let finish = Pipeline_terminal_tool.outcome ~response completion in
+         (match agent.options.context_injector with
+          | None -> finish After_tool_results_appended
+          | Some injector ->
+            let* injection =
+              Agent_turn.apply_context_injection
+                ~context:agent.context
+                ~messages:agent.state.messages
+                ~injector
+                ~tool_uses
+                ~results
+              |> Result.map_error (fun error ->
+                Error.Internal
+                  (Printf.sprintf
+                     "context injector failed%s: %s"
+                     (match error.Agent_turn.tool_name with
+                      | Some name -> " for tool " ^ name
+                      | None -> "")
+                     error.detail))
+            in
+            (match injection with
+             | Agent_turn.No_injection -> finish After_tool_results_appended
+             | Agent_turn.Injected messages ->
+               let injected_state = { agent.state with messages } in
+               set_state agent injected_state;
+               let* () =
+                 persist_turn_checkpoint_for_state
+                   agent
+                   After_context_injection
+                   injected_state
+               in
+               finish After_context_injection)))
+;;
+
+let replay_settled_before_checkpoint agent =
+  Pipeline_terminal_resume.replay
+    ~persist_checkpoint:(persist_turn_checkpoint_for_state agent)
+    agent
+;;
+
+(** Map stop_reason to turn_outcome. *)
+let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_calls agent response =
+  Tracing.with_span
+    agent.options.tracer
+    { kind = Hook_invoke
+    ; name = "turn:output"
+    ; agent_name = agent.state.config.name
+    ; turn
+    ; extra = []
+    ; links = []
+    }
+    (fun _tracer ->
+       match response.stop_reason with
+       | StopToolUse ->
+         let tool_uses =
+           List.filter
+             (fun (block : Llm_provider.Types.content_block) ->
+                match block with
+                | ToolUse _ -> true
+                | Text _
+                | Thinking _
+                | ReasoningDetails _
+                | RedactedThinking _
+                | ToolResult _
+                | Image _
+                | Document _
+                | Audio _ -> false)
+             response.content
+         in
+         (match Nonempty.of_list tool_uses with
+          | None when rejected_tool_calls <> [] ->
+            (* Every call this turn named no available tool, so admission kept
+               none of them (see [Agent_tools.admit_tool_use_names]). The turn
+               did reach a decision — it just routed nowhere — and the note
+               appended in [stage_collect] tells the model so. Continuing here
+               is what separates a dropped call from a dead keeper: the Gate
+               below exists for a turn that never had a tool block at all. *)
+            Ok (ToolsExecuted After_tool_results_appended)
+          | None ->
+            (* Provider parsers reconcile this shape, but public injected
+               transports return [api_response] directly. This driver Gate
+               prevents their empty [ToolsExecuted] loop. *)
+            Error
+              (Error.Agent
+                 (UnrecognizedStopReason
+                    { reason = "StopToolUse turn carried no tool block" }))
+          | Some tool_uses_nonempty ->
+            stage_execute
+              ?raw_trace_run
+              ?before_tool_execution
+              ~turn
+              ~rejected_tool_calls
+              ~response
+              agent
+              tool_uses_nonempty)
+       | UnmatchedToolCalls ->
+         (* The wire boundary has already classified this response shape as
+            malformed. Keep rejecting it; arbitrary provider terminal reasons
+            remain fail-closed in their own branch below. *)
+         Error
+           (Error.Agent
+              (UnrecognizedStopReason
+                 { reason = Types.stop_reason_to_string response.stop_reason }))
+       | EndTurn
+       | MaxTokens
+       | StopSequence
+       | Refusal
+       | ContentFilter
+       | RepetitionTruncation
+       | PauseTurn
+       | Compaction
+       | ContextWindowExceeded ->
+         let stop_decision =
+           invoke_hook_with_trace
+             agent
+             ?raw_trace_run
+             ~turn
+             ~hook_name:"on_stop"
+             agent.options.hooks.on_stop
+             (Hooks.OnStop { reason = response.stop_reason; response })
+         in
+         (match stop_decision with
+          | Hooks.Continue -> Ok (Complete response)
+          | Hooks.HookFailed { stage; detail } ->
+            Error
+              (Pipeline_common.hook_failed_core_error
+                 ~hook_name:"on_stop"
+                 ~stage
+                 ~tool_name:None
+                 ~tool_use_id:None
+                 ~detail)
+          | ( Hooks.AdjustParams _
+            | Hooks.ElicitInput _
+            | Hooks.ElicitToolApproval _
+            | Hooks.Nudge _
+            | Hooks.Block _ ) as decision ->
+            Error
+              (Pipeline_common.illegal_hook_decision_core_error
+                 ~hook_name:"on_stop"
+                 ~stage:Hooks.On_stop
+                 ~decision))
+       | Unknown reason -> Error (Error.Agent (UnrecognizedStopReason { reason })))
+;;
+
+(* ── Pipeline coordinator ────────────────────────────────── *)
+
+let tag_error stage result =
+  match result with
+  | Ok _ as ok -> ok
+  | Error e ->
+    let poly = Error_domain.of_core_error e in
+    let ctx = Error_domain.with_stage stage poly in
+    Log.warn
+      _log
+      "pipeline stage failed"
+      [ Log.S ("stage", stage); Log.S ("error", Error_domain.ctx_to_string ctx) ];
+    (* Stage context is observation-only. Return canonical [Error.t]
+       unchanged, including typed fields and provider attribution. *)
+    Error e
+;;
+
+let run_new_turn
+      ~sw
+      ?clock
+      ~api_strategy
+      ?raw_trace_run
+      ?on_provider_failure
+      ?before_tool_execution
+      ~turn
+      agent
+  =
+  Schema_observation.with_provider_turn ~ordinal:turn @@ fun () ->
+  (* [turn] is the identity [Pipeline_execution_resume.resolve] produced; it
+     owns the complete provider turn. The collect stage advances mutable agent
+     state before output/tool dispatch, so no stage reads [state.turn_count]. *)
+  (* Stage 1: Input *)
+  let* () =
+    Tracing.with_span
+      agent.options.tracer
+      { kind = Hook_invoke
+      ; name = "turn:input"
+      ; agent_name = agent.state.config.name
+      ; turn
+      ; extra = []
+      ; links = []
+      }
+      (fun _tracer -> stage_input ?raw_trace_run ?clock ~turn agent |> tag_error "input")
+  in
+  (* Stage 2: Parse *)
+  let* prep, turn_config, turn_params =
+    Tracing.with_span
+      agent.options.tracer
+      { kind = Hook_invoke
+      ; name = "turn:parse"
+      ; agent_name = agent.state.config.name
+      ; turn
+      ; extra = []
+      ; links = []
+      }
+      (fun _tracer -> stage_parse ?raw_trace_run ?clock ~turn agent |> tag_error "parse")
+  in
+  (* Stage 2.5: Async input validation *)
+  let async_guard = agent.options.guardrails_async in
+  match
+    Guardrails_async.run_input
+      async_guard.input_validators
+      prep.Agent_turn.effective_messages
+  with
+  | Guardrails_async.Fail { validator_name; reason } ->
+    Error (Error.Agent (GuardrailViolation { validator = validator_name; reason }))
+  | Guardrails_async.Pass ->
+    let* execution =
+      Pipeline_execution_scope.open_turn (Execution_context.agent_scope ()) ~ordinal:turn
+    in
+    (* Stage 3: Route exactly once. Provider [ContextOverflow] remains a typed
+       error; AGENT_CORE does not mutate the transcript or retry implicitly. *)
+    let api_outcome =
+      stage_route
+        ~sw
+        ?clock
+        ~turn
+        ~api_strategy
+        ?raw_trace_run
+        ?on_provider_failure
+        ~before_provider_attempt:
+          (Pipeline_execution_scope.before_provider_attempt execution)
+        ~turn_config
+        agent
+        prep
+      |> Llm_provider.Completion_outcome.map_result (tag_error "route")
+    in
+    let* () = Pipeline_execution_scope.record_provider_request_provenance
+      execution api_outcome.Llm_provider.Completion_outcome.request_provenance in
+    let api_result = api_outcome.Llm_provider.Completion_outcome.result in
+    (* Stage 4+5+6: Collect, Execute/Output *)
+    let outcome =
+      match api_result with
+      | Error e -> Error e
+      | Ok (provider_config, response) ->
+        (* Agent Core contract Option A: forced-tool-use enforcement removed.
+          [tool_choice] is enforced server-side by the provider, so agent core no
+          longer validates the response against a completion contract nor retries
+          to coerce a tool call (the former
+          [handle_missing_required_tool_use]/[validate_completion_contract]
+          pass). *)
+        (* Stage 3.5: Async output validation *)
+        (match Guardrails_async.run_output async_guard.output_validators response with
+         | Guardrails_async.Fail { validator_name; reason } ->
+           Error (Error.Agent (GuardrailViolation { validator = validator_name; reason }))
+         | Guardrails_async.Pass ->
+           let* () =
+             Pipeline_execution_scope.record_provider_response execution response
+             |> tag_error "response"
+           in
+           let* response, rejected_tool_calls =
+             stage_collect ?raw_trace_run ?clock ~turn ~provider_config
+               ~context_message:prep.Agent_turn.context_message agent response
+             |> tag_error "collect"
+           in
+           (match Pipeline_execution_scope.provider execution with
+            | None ->
+              stage_output
+                ?raw_trace_run
+                ?before_tool_execution
+                ~turn
+                ~rejected_tool_calls
+                agent
+                response
+            | Some provider ->
+              Execution_context.with_provider_attempt provider (fun () ->
+                stage_output
+                  ?raw_trace_run
+                  ?before_tool_execution
+                  ~turn
+                  ~rejected_tool_calls
+                  agent
+                  response))
+           |> tag_error "output")
+    in
+    (match outcome with
+     | Error _ as error -> error
+     | Ok value ->
+       Pipeline_execution_scope.close_success execution |> Result.map (fun () -> value))
+;;
+
+type turn_frontier = Pipeline_execution_resume.frontier
+
+let resolve_turn_frontier = Pipeline_execution_resume.resolve
+let turn_frontier_ordinal = Pipeline_execution_resume.frontier_ordinal
+
+(* Resume-vs-fresh dispatch (including settled-boundary replay and terminal
+   reconstruction) lives in [Pipeline_execution_resume]; this driver supplies the
+   fresh-turn continuation and the turn_outcome constructors as pure values.
+   [frontier] is the identity the caller resolved before opening its span, so
+   every continuation runs under the same ordinal. *)
+let run_turn
+      ~sw
+      ?clock
+      ~api_strategy
+      ?raw_trace_run
+      ?on_provider_failure
+      ?before_tool_execution
+      ~frontier
+      agent
+  =
+  Pipeline_execution_resume.dispatch
+    agent
+    frontier
+    (* Thread [before_tool_execution] (the provider-lease [on_yield] release) as
+         the fresh path threads it below; dropping it disabled [yield_on_tool]'s
+         release on the resume turn (lease advanced but never released). *)
+    ~execute:(fun ~turn ~response tool_uses ->
+      (* Empty, and not because a resumed turn refused nothing. The checkpoint
+         this path replays holds the ADMITTED response -- the dropped blocks
+         are already out of it -- and the names are not stored anywhere the
+         resume can read. So a turn that crashed after admission and resumed
+         re-runs its tools and says nothing about what it dropped. Carrying the
+         names would mean putting them on the checkpoint, which is a schema
+         cut; tracked separately rather than guessed at here. *)
+      stage_execute
+        ?raw_trace_run
+        ?before_tool_execution
+        ~turn
+        ~rejected_tool_calls:[]
+        ~response
+        agent
+        tool_uses)
+    ~all_pre_tool_use_blocked:(ToolsExecuted After_tool_results_appended)
+    ~tools_settled_before_checkpoint:(replay_settled_before_checkpoint agent)
+    ~tools_settled:Pipeline_terminal_tool.recovered_outcome
+    ~terminal:(fun response -> Complete response)
+    ~fresh:(fun ~turn ->
+      run_new_turn
+        ~sw
+        ?clock
+        ~api_strategy
+        ?raw_trace_run
+        ?on_provider_failure
+        ?before_tool_execution
+        ~turn
+        agent)
+;;
+
+[@@@coverage off]
+(* === Inline tests === *)
+
+let%test "last_tool_results_from empty messages" = Agent_turn.last_tool_results_from [] = []
+
+let%test "last_tool_results_from no tool results" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = User
+      ; content = [ Text "hello" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  Agent_turn.last_tool_results_from msgs = []
+;;
+
+let%test "last_tool_results_from finds tool results in last tool message" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
+      ; content = [ Text "thinking..." ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
+      ; content =
+          [ ToolResult
+              { tool_use_id = "t1"
+              ; content = "result1"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ; ToolResult
+              { tool_use_id = "t2"
+              ; content = "error msg"
+              ; outcome =
+                  Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  List.map
+    (fun (result : Hooks.history_tool_result) -> result.tool_use_id, result.content)
+    (Agent_turn.last_tool_results_from msgs)
+  = [ "t1", "result1"; "t2", "error msg" ]
+;;
+
+let%test "last_tool_results_from ignores tool results outside tool role" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = User
+      ; content =
+          [ ToolResult
+              { tool_use_id = "t1"
+              ; content = "first"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
+      ; content = [ Text "response" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = User
+      ; content = [ Text "follow up" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  Agent_turn.last_tool_results_from msgs = []
+;;
+
+let%test "tag_error passes through Ok" =
+  let result = tag_error "test_stage" (Ok 42) in
+  result = Ok 42
+;;
+
+let%test "tag_error passes through Error" =
+  let err = Error.Internal "test error" in
+  match tag_error "test_stage" (Error err) with
+  | Error e -> e = err
+  | Ok _ -> false
+;;
+
+(* --- Additional coverage tests --- *)
+
+let%test "last_tool_results_from assistant-only messages" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
+      ; content = [ Text "hello" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
+      ; content = [ Text "world" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  Agent_turn.last_tool_results_from msgs = []
+;;
+
+let%test "last_tool_results_from picks last tool-result message" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = Tool
+      ; content =
+          [ ToolResult
+              { tool_use_id = "t1"
+              ; content = "first"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
+      ; content = [ Text "mid" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
+      ; content =
+          [ ToolResult
+              { tool_use_id = "t2"
+              ; content = "second"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  List.map
+    (fun (result : Hooks.history_tool_result) -> result.content)
+    (Agent_turn.last_tool_results_from msgs)
+  = [ "second" ]
+;;
+
+let%test "last_tool_results_from ignores mixed content outside tool role" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = User
+      ; content =
+          [ Text "some text"
+          ; ToolResult
+              { tool_use_id = "t1"
+              ; content = "ok"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ; Text "more text"
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  Agent_turn.last_tool_results_from msgs = []
+;;
+
+let%test "last_tool_results_from error tool result" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = Tool
+      ; content =
+          [ ToolResult
+              { tool_use_id = "t1"
+              ; content = "fail msg"
+              ; outcome =
+                  Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  Agent_turn.last_tool_results_from msgs
+  = [ { Hooks.tool_use_id = "t1"
+      ; content = "fail msg"
+      ; outcome = Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+      ; content_blocks = None
+      }
+    ]
+;;
+
+(* --- Additional pipeline tests --- *)
+
+let%test "last_tool_results_from only non-result roles" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = System
+      ; content = [ Text "system" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
+      ; content = [ Text "reply" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  Agent_turn.last_tool_results_from msgs = []
+;;
+
+let%test "last_tool_results_from multiple tool results in one message" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = Tool
+      ; content =
+          [ ToolResult
+              { tool_use_id = "t1"
+              ; content = "r1"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ; ToolResult
+              { tool_use_id = "t2"
+              ; content = "r2"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ; ToolResult
+              { tool_use_id = "t3"
+              ; content = "r3"
+              ; outcome =
+                  Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  List.length (Agent_turn.last_tool_results_from msgs) = 3
+;;
+
+let%test "last_tool_results_from user msg with only non-tool content" =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  role = User
+      ; content =
+          [ Text "just text"; Types.ToolUse { id = "tu1"; name = "fn"; input = `Null } ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  Agent_turn.last_tool_results_from msgs = []
+;;

@@ -1,0 +1,35 @@
+ Overview  Activity  Keepers  Memory  Board  Planning  Fusion  Workspace  ▸Config
+
+   MASC Browser Lane  automation · browser  [HTTP read ok]                                                                        
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    coordinator HTTP [connected]  Scene 4.3 ms • 13 nodes                                                                         
+    Element 1/13: Channels • n/p:select • y:copy context                                                                          
+    [1/1] Beta · Team Channels (active)  [ / ]:select tab                                                                         
+    Page content · viewport only · http://127.0.0.1:55333/beta.html                                                               
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    [>1] Channels                                                                                                                 
+    [2 button/link] Alpha                                                                                                         
+    [3 button/link] Beta                                                                                                          
+    [4 button/link] Gamma                                                                                                         
+    Beta channel                                                                                                                  
+    Joon                                                                                                                          
+    2026-09-12 09:30                                                                                                              
+    Current decision: finish schema v4 migration Monday for Cedar. Owner: Joon. @Mina please confirm the client payload before    
+    migration starts.                                                                                                             
+    [9 button/link] Message link                                                                                                  
+    Coverage: currently displayed messages only.                                                                                  
+    Navigation summary                                                                                                            
+    Old cached snippet: @Mina ship Cedar on Friday.                                                                               
+    This is not the channel message list.                                                                                         
+    Text 1/14 • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane                                                                   
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+
+  Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  Ctrl-O:image  | Port: 55295
+Browser Lane · automation · browser page reader                                                                                   

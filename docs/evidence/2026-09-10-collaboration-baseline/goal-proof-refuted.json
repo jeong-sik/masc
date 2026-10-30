@@ -1,0 +1,31 @@
+{
+  "version": 3,
+  "updated_at": "2026-09-10T14:04:02Z",
+  "records": [
+    {
+      "goal_id": "exhibition-publication-baseline",
+      "completion": {
+        "state": "proof_refuted",
+        "verdict": {
+          "outcome": "refuted",
+          "reason": "측정 가능한 부분: evidence.json이 존재하고 booklet.pdf(102,608B), poster.png(86,709B), renders/page1–3.png(64,091/81,051/80,753B) 5개 파일이 실재하며 바이트 수가 기록과 일치하고, page_count=3이 기록되어 있음. 그러나 목표는 \"5개 기준 모두 충족\"이며, ① 한글 누락 글리프·텍스트 겹침/잘림 부재, ② 포스터와 책자의 제목·대상·행사 정보 일치, ③ 가상 전시 명시 및 미확정 정보 과장 금지 같은 정성 기준은 사용 가능한 읽기 도구가 PNG/PDF 바이너리를 텍스트 프리뷰로만 반환하여 렌더링 내용을 시각적으로 확인할 수 없음. 5개 기준 중 3개(파일 존재, 3페이지, evidence 기록)만 확인 가능하고 2개는 검증 불가이므로 \"모두 충족\"에는 도달하지 않음.",
+          "request_id": "2ab52c7b22e15b3e1fa4eaa4bcfdf455",
+          "criterion": {
+            "revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+            "title": "가상 전시 출판물 완성",
+            "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+            "target_value": "5개 기준 모두 충족"
+          },
+          "verification_run_id": "01a08ba1-632e-7000-8e1e-c11bc20da444",
+          "authority": {
+            "kind": "system_llm_agent",
+            "actor": "verifier_exact"
+          },
+          "evidence": "측정 가능한 부분: evidence.json이 존재하고 booklet.pdf(102,608B), poster.png(86,709B), renders/page1–3.png(64,091/81,051/80,753B) 5개 파일이 실재하며 바이트 수가 기록과 일치하고, page_count=3이 기록되어 있음. 그러나 목표는 \"5개 기준 모두 충족\"이며, ① 한글 누락 글리프·텍스트 겹침/잘림 부재, ② 포스터와 책자의 제목·대상·행사 정보 일치, ③ 가상 전시 명시 및 미확정 정보 과장 금지 같은 정성 기준은 사용 가능한 읽기 도구가 PNG/PDF 바이너리를 텍스트 프리뷰로만 반환하여 렌더링 내용을 시각적으로 확인할 수 없음. 5개 기준 중 3개(파일 존재, 3페이지, evidence 기록)만 확인 가능하고 2개는 검증 불가이므로 \"모두 충족\"에는 도달하지 않음.",
+          "recorded_at": "2026-09-10T14:04:02Z"
+        }
+      },
+      "updated_at": "2026-09-10T14:04:02Z"
+    }
+  ]
+}

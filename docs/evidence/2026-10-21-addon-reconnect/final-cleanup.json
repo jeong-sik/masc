@@ -1,0 +1,401 @@
+{
+  "configuration": {
+    "directory": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-reconnect-20261021-tzunv2o7/.masc/config/lane-addons",
+    "complete": true,
+    "issues": [],
+    "declarations": [
+      {
+        "id": "reconnect-proof",
+        "source_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-reconnect-20261021-tzunv2o7/.masc/config/lane-addons/reconnect.toml",
+        "enabled": false,
+        "source_revision": "d6a61b007bf98f56968c2ab2c5daf110d4d7889538d10a46f2c7c9f3219cacaf",
+        "desired_revision": "856b45971a45bcedceb4f10fddf85d29f8e71dea5c4e4fb42d78f6980aa307e7",
+        "applied_revision": null,
+        "instance_id": null,
+        "application": {
+          "kind": "inactive"
+        }
+      }
+    ]
+  },
+  "instances": [
+    {
+      "runtime_presence": "retained",
+      "phase": {
+        "kind": "detached"
+      },
+      "lifecycle": {
+        "kind": "detached",
+        "release": {
+          "kind": "released",
+          "engine": {
+            "kind": "docker",
+            "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+          },
+          "container_id": "b0154e7c2aa049639535e3918d93fee1dac539c05ac7e0efb9a6883c29b4fd0d"
+        }
+      },
+      "configuration": {
+        "id": "reconnect-proof",
+        "source_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-reconnect-20261021-tzunv2o7/.masc/config/lane-addons/reconnect.toml",
+        "revision": "856b45971a45bcedceb4f10fddf85d29f8e71dea5c4e4fb42d78f6980aa307e7"
+      },
+      "observation_seq": 2,
+      "instance_id": "01a15cf3-691a-7000-887b-ddb8974e8b8f",
+      "incarnation": "01a15cf3-691a-7000-887b-ddb8974e8b8f",
+      "action_schema": null,
+      "run_id": "reconnect-proof",
+      "addon_id": "vst-phrase",
+      "title": "Native MIDI phrase playback",
+      "revision": "0.1.0",
+      "engine": {
+        "kind": "docker",
+        "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+      },
+      "rows_count": 1,
+      "observation_pending": true,
+      "coalesced_wakes": 0,
+      "unchanged_source_refreshes": 0,
+      "binding": {
+        "sources": [
+          {
+            "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-reconnect-20261021-tzunv2o7/source.json",
+            "source_id": "vst-phrase",
+            "kind": "snapshot_file"
+          }
+        ]
+      },
+      "source_access": {
+        "kind": "operator_configuration"
+      },
+      "package": {
+        "id": "vst-phrase",
+        "revision": "0.1.0",
+        "title": "Native MIDI phrase playback",
+        "contributions": [
+          "observe"
+        ],
+        "image": "masc-lane-vst-phrase:0.1.0",
+        "command": [
+          "python3",
+          "server.py"
+        ],
+        "directory": "/Users/dancer/me/workspace/yousleepwhen/masc-addon-connection-observation/addons/vst-phrase",
+        "action_tool": null,
+        "state_storage": "ephemeral",
+        "tool_invocation": "direct",
+        "exported_tools": [],
+        "outputs": {
+          "phrase": {
+            "lanes": [
+              "phrase"
+            ]
+          }
+        },
+        "refresh_policy": "every_hint",
+        "model_access": "disabled",
+        "binding_schema": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source_id": {
+                    "type": "string",
+                    "const": "vst-phrase"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "snapshot_file"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Native score companion snapshot.json on this host"
+                  }
+                },
+                "required": [
+                  "source_id",
+                  "kind",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "sources"
+          ],
+          "additionalProperties": false
+        },
+        "presentation": {
+          "description": "Latest native phrase render and local player process state",
+          "readings": [
+            {
+              "lane_id": "phrase",
+              "path": [
+                "state"
+              ],
+              "label": "State",
+              "unit": null,
+              "format": "text"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "selection",
+                "name"
+              ],
+              "label": "Instrument",
+              "unit": null,
+              "format": "text"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "selection",
+                "preset_path"
+              ],
+              "label": "Preset",
+              "unit": null,
+              "format": "text"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "render",
+                "midi_sha256"
+              ],
+              "label": "MIDI SHA-256",
+              "unit": null,
+              "format": "text"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "render",
+                "duration_ms"
+              ],
+              "label": "Rendered audio",
+              "unit": "ms",
+              "format": "number"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "error"
+              ],
+              "label": "Failure",
+              "unit": null,
+              "format": "text"
+            }
+          ]
+        },
+        "skills_directory": null,
+        "resources": {
+          "cpus": 0.5,
+          "memory_bytes": 134217728,
+          "pids": 16,
+          "max_reply_bytes": 4194304
+        }
+      },
+      "visibility": {
+        "kind": "shared"
+      },
+      "container_id": "b0154e7c2aa049639535e3918d93fee1dac539c05ac7e0efb9a6883c29b4fd0d"
+    },
+    {
+      "runtime_presence": "retained",
+      "phase": {
+        "kind": "detached"
+      },
+      "lifecycle": {
+        "kind": "detached",
+        "release": {
+          "kind": "released",
+          "engine": {
+            "kind": "docker",
+            "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+          },
+          "container_id": "71f58504a85900366d9f87f34653b6dd8c23b850c2815bf87decd78f814e48d5"
+        }
+      },
+      "configuration": {
+        "id": "reconnect-proof",
+        "source_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-reconnect-20261021-tzunv2o7/.masc/config/lane-addons/reconnect.toml",
+        "revision": "856b45971a45bcedceb4f10fddf85d29f8e71dea5c4e4fb42d78f6980aa307e7"
+      },
+      "observation_seq": 1,
+      "instance_id": "01a15cf6-1580-7000-9c35-86ba0bd1b928",
+      "incarnation": "01a15cf6-1580-7000-9c35-86ba0bd1b928",
+      "action_schema": null,
+      "run_id": "reconnect-proof",
+      "addon_id": "vst-phrase",
+      "title": "Native MIDI phrase playback",
+      "revision": "0.1.0",
+      "engine": {
+        "kind": "docker",
+        "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+      },
+      "rows_count": 1,
+      "observation_pending": true,
+      "coalesced_wakes": 0,
+      "unchanged_source_refreshes": 0,
+      "binding": {
+        "sources": [
+          {
+            "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-reconnect-20261021-tzunv2o7/source.json",
+            "source_id": "vst-phrase",
+            "kind": "snapshot_file"
+          }
+        ]
+      },
+      "source_access": {
+        "kind": "operator_configuration"
+      },
+      "package": {
+        "id": "vst-phrase",
+        "revision": "0.1.0",
+        "title": "Native MIDI phrase playback",
+        "contributions": [
+          "observe"
+        ],
+        "image": "masc-lane-vst-phrase:0.1.0",
+        "command": [
+          "python3",
+          "server.py"
+        ],
+        "directory": "/Users/dancer/me/workspace/yousleepwhen/masc-addon-connection-observation/addons/vst-phrase",
+        "action_tool": null,
+        "state_storage": "ephemeral",
+        "tool_invocation": "direct",
+        "exported_tools": [],
+        "outputs": {
+          "phrase": {
+            "lanes": [
+              "phrase"
+            ]
+          }
+        },
+        "refresh_policy": "every_hint",
+        "model_access": "disabled",
+        "binding_schema": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source_id": {
+                    "type": "string",
+                    "const": "vst-phrase"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "snapshot_file"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Native score companion snapshot.json on this host"
+                  }
+                },
+                "required": [
+                  "source_id",
+                  "kind",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "sources"
+          ],
+          "additionalProperties": false
+        },
+        "presentation": {
+          "description": "Latest native phrase render and local player process state",
+          "readings": [
+            {
+              "lane_id": "phrase",
+              "path": [
+                "state"
+              ],
+              "label": "State",
+              "unit": null,
+              "format": "text"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "selection",
+                "name"
+              ],
+              "label": "Instrument",
+              "unit": null,
+              "format": "text"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "selection",
+                "preset_path"
+              ],
+              "label": "Preset",
+              "unit": null,
+              "format": "text"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "render",
+                "midi_sha256"
+              ],
+              "label": "MIDI SHA-256",
+              "unit": null,
+              "format": "text"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "render",
+                "duration_ms"
+              ],
+              "label": "Rendered audio",
+              "unit": "ms",
+              "format": "number"
+            },
+            {
+              "lane_id": "phrase",
+              "path": [
+                "error"
+              ],
+              "label": "Failure",
+              "unit": null,
+              "format": "text"
+            }
+          ]
+        },
+        "skills_directory": null,
+        "resources": {
+          "cpus": 0.5,
+          "memory_bytes": 134217728,
+          "pids": 16,
+          "max_reply_bytes": 4194304
+        }
+      },
+      "visibility": {
+        "kind": "shared"
+      },
+      "container_id": "71f58504a85900366d9f87f34653b6dd8c23b850c2815bf87decd78f814e48d5"
+    }
+  ],
+  "rows": [],
+  "coverage": []
+}

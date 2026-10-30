@@ -1,0 +1,140 @@
+{
+  "status": 200,
+  "response": {
+    "keeper": "audit-live-deepseek",
+    "count": 6,
+    "source": "tool_call_io",
+    "producer": "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp",
+    "health": "ok",
+    "coverage_gaps": [],
+    "entries": [
+      {
+        "ts": 1793020668.756327,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "agent_name": "audit-live-deepseek",
+        "tool": "keeper_tool_search",
+        "input": {
+          "names": [
+            "masc_schedule_get",
+            "masc_schedule_note_add",
+            "masc_schedule_notes_list"
+          ]
+        },
+        "output": "now callable:\n- masc_schedule_get: Read the current durable scheduled request by schedule_id. A recurring request m...\n- masc_schedule_note_add: Append a durable note to one scheduled request. Notes record why a\n- masc_schedule_notes_list: List the durable notes of one scheduled request, oldest first. Notes are",
+        "execution_id": "execution-node-3da404f393d5f7f57b22b7d0d4214857",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020670.403018,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "agent_name": "audit-live-deepseek",
+        "tool": "keeper_tool_search",
+        "input": {
+          "names": [
+            "masc_schedule_list"
+          ]
+        },
+        "output": "now callable:\n- masc_schedule_list: List schedule summary rows; masc_schedule_get reads one in full. Rows follow sch...",
+        "execution_id": "execution-node-a2c0bd33c4046591d6577cc21fc3d859",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 1
+        }
+      },
+      {
+        "ts": 1793020672.463856,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "agent_name": "audit-live-deepseek",
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second"
+        },
+        "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"limit\":50,\"notes\":[]}",
+        "execution_id": "execution-node-d9f70cc4cdc50c31de5f644227bdcce7",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 2
+        }
+      },
+      {
+        "ts": 1793020675.394597,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "agent_name": "audit-live-deepseek",
+        "tool": "masc_schedule_get",
+        "input": {
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second"
+        },
+        "output": "{\"schedule_instance_id\":\"01a1785c-22f2-7000-8c71-3ee04a1a38f2\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"requested_by\":{\"id\":\"schedule-audit-observer\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-observer\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793020666.61034,\"due_at\":1793020668.61034,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-live-deepseek\",\"message\":\"Scheduled verification: append exactly one durable note to schedule_id \\\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\\\" with body \\\"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND\\\" using masc_schedule_note_add. Read back that same schedule note, then finish. Do not post elsewhere or create work. If another authorized scheduled request arrives, retain both requests and perform each exact note once.\"}},\"status\":\"succeeded\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:17:48Z\",\"next_due_at\":null,\"next_due_at_iso\":null,\"requested_at_iso\":\"2026-10-26T13:17:46Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-live-deepseek\",\"payload_summary\":\"Scheduled verification: append exactly one durable note to schedule_id \\\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\\\" with body \\\"SCHEDULE_EFFECT_...\",\"last_wake\":{\"schedule_instance_id\":\"01a1785c-22f2-7000-8c71-3ee04a1a38f2\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"started_at\":1793020669.475385,\"finished_at\":1793020669.487687,\"due_at\":1793020668.61034,\"payload_digest\":\"36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb\",\"status\":\"succeeded\",\"detail\":{\"kind\":\"masc.keeper_wake.enqueued\",\"queue\":\"keeper_event_queue\",\"stimulus\":\"schedule_due\",\"stimulus_id\":\"b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be\",\"keeper_name\":\"audit-live-deepseek\",\"schedule_instance_id\":\"01a1785c-22f2-7000-8c71-3ee04a1a38f2\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"urgency\":\"normal\",\"post_id\":\"b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be\",\"result_delivery_policy\":\"none\",\"occurrence_status\":\"awaiting_ack\",\"activation_status\":\"signaled\",\"activation_reason\":null,\"activation_detail\":null,\"reaction_ledger_status\":\"recorded\",\"reaction_ledger_error\":null},\"error\":null}}",
+        "execution_id": "execution-node-3eed4cb9f678449466ac38b81d85f716",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 2
+        }
+      },
+      {
+        "ts": 1793020677.660456,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "agent_name": "audit-live-deepseek",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+          "body": "SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND"
+        },
+        "output": "{\"status\":\"ok\",\"note\":{\"note_id\":\"10\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"author_id\":\"audit-live-deepseek\",\"author_kind\":\"automated_actor\",\"created_at\":1793020677.656421,\"body\":\"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND\"},\"note_count\":1}",
+        "execution_id": "execution-node-fc6efe76d6627020e6b9144edccff10b",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 2
+        }
+      },
+      {
+        "ts": 1793020679.640097,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "agent_name": "audit-live-deepseek",
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second"
+        },
+        "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"limit\":50,\"notes\":[{\"note_id\":\"10\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"author_id\":\"audit-live-deepseek\",\"author_kind\":\"automated_actor\",\"created_at\":1793020677.656421,\"body\":\"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND\"}]}",
+        "execution_id": "execution-node-7eb07206fc0b101c6eb8664c20a3d36b",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 2
+        }
+      }
+    ]
+  }
+}

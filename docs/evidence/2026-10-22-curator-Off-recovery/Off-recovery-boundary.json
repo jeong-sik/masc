@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-22T05:04:38.650344+00:00",
+  "source": "db31e62fe17f92aea4919de7765f1ace65914772",
+  "owned_worker_count": 0,
+  "original_request_ids_unchanged": true,
+  "original_progress_prefix_preserved": true,
+  "existing_exact_payload_files_byte_identical": 17,
+  "new_original_run_directories": 0,
+  "new_observer_completion_payload": ".masc/exact-lane-run-payloads-v7/workspace-curator-01a161e4-2a50-7000-965e-934e89c4a2cb/output-c65270ab691201fe4684fbfa0a3fd90d73f78710d6194da54099d9e419768cf4.json",
+  "briefing_published": true,
+  "classification_and_memory_byte_identical": true,
+  "note": "Same retained model answer committed while Off. Existing 17 payload files unchanged; one new original Briefing observer completion payload is expected, not another model answer."
+}

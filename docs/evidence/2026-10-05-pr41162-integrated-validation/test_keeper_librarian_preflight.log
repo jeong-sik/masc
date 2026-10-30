@@ -1,0 +1,23 @@
+Testing `Librarian JEV preflight'.
+This run has ID `CKC6K09E'.
+
+  [OK]          real dispatch and commit          0   off-skips-jev-and-consu...
+  [OK]          real dispatch and commit          1   accepted-pass-keeps-cli...
+  [OK]          real dispatch and commit          2   accepted-no-change-fini...
+  [OK]          real dispatch and commit          3   keep-current.
+  [OK]          real dispatch and commit          4   needs-generation.
+  [OK]          real dispatch and commit          5   uncertain.
+  [OK]          real dispatch and commit          6   invalid-answer.
+  [OK]          real dispatch and commit          7   missing-option.
+  [OK]          real dispatch and commit          8   duplicate-option.
+  [OK]          real dispatch and commit          9   out-of-range.
+  [OK]          real dispatch and commit         10   inconsistent-choice.
+  [OK]          real dispatch and commit         11   invalid-total.
+  [OK]          real dispatch and commit         12   provider-failed.
+  [OK]          real dispatch and commit         13   opt-out.
+  [OK]          real dispatch and commit         14   excluded.
+  [OK]          real dispatch and commit         15   pending-context.
+  [OK]          real dispatch and commit         16   context-only.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build/_tests/Librarian JEV preflight'.
+Test Successful in 0.128s. 17 tests run.

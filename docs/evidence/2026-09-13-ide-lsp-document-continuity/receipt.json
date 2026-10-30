@@ -1,0 +1,50 @@
+{
+  "scope": "Source CodeMirror client in a real browser, real ocamllsp through a test-only adapter. Not installed MASC, Keeper execution, or MASC proxy acceptance.",
+  "passed": true,
+  "initial": {
+    "filePath": "sample.ml",
+    "scope": "[null,null,null]",
+    "language": "ocaml",
+    "version": 1,
+    "command": "/Users/dancer/.opam/5.5.0/bin/ocamllsp",
+    "connection": {
+      "kind": "connected"
+    },
+    "diagnostics": {
+      "kind": "complete",
+      "count": 2
+    }
+  },
+  "initial_markers": 2,
+  "updated": {
+    "filePath": "sample.ml",
+    "scope": "[null,null,null]",
+    "language": "ocaml",
+    "version": 2,
+    "command": "/Users/dancer/.opam/5.5.0/bin/ocamllsp",
+    "connection": {
+      "kind": "connected"
+    },
+    "diagnostics": {
+      "kind": "unversioned",
+      "count": 0
+    }
+  },
+  "visible_status": "LSP ocaml 0 reported · version unconfirmed",
+  "updated_markers": 0,
+  "final_document": {
+    "filePath": "sample.ml",
+    "scope": "[null,null,null]",
+    "language": "ocaml",
+    "version": 2,
+    "command": "/Users/dancer/.opam/5.5.0/bin/ocamllsp",
+    "connection": {
+      "kind": "connected"
+    },
+    "diagnostics": {
+      "kind": "unversioned",
+      "count": 0
+    }
+  },
+  "pageErrors": []
+}

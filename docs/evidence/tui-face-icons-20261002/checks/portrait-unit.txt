@@ -1,0 +1,17 @@
+Testing `tui_keeper_portrait'.
+This run has ID `W7P2R8C8'.
+
+  [OK]          band               0   a small pane keeps its rows for facts.
+  [OK]          band               1   no picture is no band.
+  [OK]          band               2   Item Mosaic selection changes accessor...
+  [OK]          band               3   the band is compact.
+  [OK]          band               4   the still portrait the name draws.
+  [OK]          band               5   observed facial equipment remains visi...
+  [OK]          band               6   facts stand beside the portrait.
+  [OK]          placement          0   pixels go only where the whole portrai...
+  [OK]          placement          1   the picture leaves with the detail.
+  [OK]          cache              0   the cache is bounded.
+  [OK]          cache              1   equipment replaces same Keeper pixels.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/_build/_tests/tui_keeper_portrait'.
+Test Successful in 0.428s. 11 tests run.

@@ -1,0 +1,22 @@
+{
+  "follow": {
+    "action": "follow_link",
+    "destinationUrl": "http://127.0.0.1:55637/redirect",
+    "navigationSource": {
+      "documentId": "4ab8b715ba5f2937e2aa6e9fdf3e0b81",
+      "url": "http://127.0.0.1:55637/#destination"
+    },
+    "scrollX": 0,
+    "scrollY": 0,
+    "title": "Semantic Zen fixture",
+    "url": "http://127.0.0.1:55637/#destination",
+    "urlBefore": "http://127.0.0.1:55637/#destination"
+  },
+  "first_observed_url": "http://127.0.0.1:55637/#destination",
+  "observation_attempts": 2,
+  "observation_errors": [],
+  "new_document_observed": true,
+  "observed_url": "http://127.0.0.1:55637/canonical",
+  "title": "Semantic Zen fixture",
+  "application_verified": false
+}

@@ -1,0 +1,54 @@
+{
+  "schema": "masc.goal.declared-aggregation.publication-manifest.v1",
+  "frozen_at_utc": "2026-10-25T17:29:50.577552+00:00",
+  "candidate_prompt_sha256": "529f84a6a36146eca2821e02ade8a9467b166b5d1ed25eea4b37493cc5579539",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3858,
+      "sha256": "e17380c815177a9d983a80f4f7a9f797a7396d1d0115285421b90e89d4e550de"
+    },
+    {
+      "path": "actual-tool-sequence.json",
+      "bytes": 5593,
+      "sha256": "30453a48baf42e3b02c3d8732a3a42656b33ddb01f1021d8909989d37c8bb028"
+    },
+    {
+      "path": "cohort-review.json",
+      "bytes": 18144,
+      "sha256": "e510886cf0c40af7357573267486bdb5d66d27546c91a7a6a001169fb8aa956c"
+    },
+    {
+      "path": "owned-stop.json",
+      "bytes": 273,
+      "sha256": "2f8517e7d9230f944467e7bc13b5b48fd17fd6d4985766b876d25149bdc4119e"
+    },
+    {
+      "path": "persisted-outcome.json",
+      "bytes": 3197,
+      "sha256": "2cc87ce404abf02e7df2c97457afe37622b8ae936d2deeb96e657bf20172c737"
+    },
+    {
+      "path": "previous-source-fail.json",
+      "bytes": 15046,
+      "sha256": "9076a581cd507522be3493765bc3bb4714aecea464477162f45af1526a3c8e8f"
+    },
+    {
+      "path": "private-originals-manifest.json",
+      "bytes": 9713,
+      "sha256": "e567d1fb0015b6657029071236bf90f9e9f5a549370be6b18ec44ceb3ecc0138"
+    },
+    {
+      "path": "result.json",
+      "bytes": 3265,
+      "sha256": "3af0a222667bcd3ddb29b80fa012a2d191803c9bc51bed09d7db402b83e6e840"
+    },
+    {
+      "path": "source-response.json",
+      "bytes": 6915,
+      "sha256": "ac36c95309628659b5b437727b9f525a2f3e5c6c424c40a2b52998edf4d1ca70"
+    }
+  ],
+  "file_count_excluding_manifest": 9,
+  "scope": "New single aggregation control, separate from older35b three-control cohort. Prior6373 source FAIL retained. No original11 reproof, production apply, new-head native build or causal A/B."
+}

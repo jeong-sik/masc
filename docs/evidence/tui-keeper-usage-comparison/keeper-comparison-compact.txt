@@ -1,0 +1,20 @@
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+
+   MASC Usage  15:14:00  HTTP [connected]                                       
+ ────────────────────────────────────────────────────────────────────────────── 
+   Plan    Trend    Keepers    v:next view                                      
+                                                                                
+   Keeper usage · last 1440m · recorded turn metrics · 120s old · refresh       
+   failed: fixture refresh failure                                              
+   As of 2026-10-03 00:00 UTC                                                   
+   Bars compare reported totals; each metric scales to its largest Keeper.      
+   Missing or malformed samples can understate totals; bars are not quota.      
+   Scale: tokens 1000 · cost $1.0000                                            
+                                                                                
+     alpha                                                                      
+     10 turns · read                                                            
+     Tokens  1000 · 10 reported, 0 missing                                      
+   [rows 1-10/39 · j/k to scroll]                                               
+
+  j/k:scroll  p:Usage / Telemetry  Esc:Dashboard  q:quit  …?
+ › to alpha   (i to write)                                                      

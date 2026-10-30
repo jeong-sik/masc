@@ -1,0 +1,513 @@
+(** Tests for the keeper-side Turn FSM emission boundary.
+
+    Pins the [Keeper_turn_fsm.emit_transition] surface so a future
+    refactor that drops [?prev] or renames a cancel/failure
+    variant fails compilation here, not at runtime.
+
+    The tests pin:
+    - the function exists with the documented labels
+    - the audit sink carries the typed transition record
+    - every cancel_reason and failure_reason variant is reachable
+      via the public [turn_state_label] surface so that
+      [bin/masc-trace] grouping does not silently lose a state
+*)
+
+open Masc
+module F = Keeper_turn_fsm
+module P = Otel_metric_store
+
+let run_eio f = Eio_main.run (fun _env -> f ())
+
+(* ── Compile-time signature anchor ─────────────────────────── *)
+
+let test_emit_transition_signature_stable () =
+  (* Pass concrete values so a signature drift (e.g. removing
+     [?prev], or moving [keeper_name] off labelled args) fails
+     to type-check. *)
+  run_eio (fun () ->
+    F.emit_transition
+      ~keeper_name:"alice"
+      ~turn_id:42
+      ~prev:F.Phase_gating
+      (F.Cancelled F.Cancelled_supervisor_stop);
+    F.emit_transition
+      ~keeper_name:"bob"
+      ~turn_id:0
+      (F.Failed (F.Failure_runtime_error "noop"));
+    F.emit_transition ~keeper_name:"carol" ~turn_id:1 F.Idle);
+  Alcotest.(check bool)
+    "emit_transition accepts ?prev / labelled args / int turn_id"
+    true
+    true
+;;
+
+(* The transition record's home is [Keeper_transition_audit]'s durable sink,
+   which [MASC_KEEPER_TRANSITION_LOG] points at a file here. This used to read
+   the same record out of the operator log ring, back when [emit_transition]
+   also wrote an INFO line per transition; that line was a second copy of what
+   this sink already holds, so it went and the assertion followed the record
+   to the surface that owns it. *)
+let test_emit_transition_carries_typed_record () =
+  let keeper_name = "typed-fsm-log-details" in
+  let turn_id = 92417 in
+  let sink = Filename.temp_file "masc_turn_fsm_emit" ".jsonl" in
+  Unix.putenv "MASC_KEEPER_TRANSITION_LOG" sink;
+  let ctx =
+    { F.stop_signaled_before = false; stop_signaled_after = false }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_KEEPER_TRANSITION_LOG" "";
+      try Sys.remove sink with Sys_error _ -> ())
+    (fun () ->
+      run_eio (fun () ->
+        F.emit_transition
+          ~ctx
+          ~keeper_name
+          ~turn_id
+          ~prev:F.Streaming
+          F.Completing);
+      let rows =
+        let ic = open_in sink in
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr ic)
+          (fun () ->
+            let rec read acc =
+              match input_line ic with
+              | line -> read (line :: acc)
+              | exception End_of_file -> List.rev acc
+            in
+            read [])
+      in
+      let entry =
+        rows
+        |> List.filter_map (fun line ->
+          match Yojson.Safe.from_string line with
+          | json ->
+            if Yojson.Safe.Util.(json |> member "keeper" |> to_string_option)
+               = Some keeper_name
+            then Some (Yojson.Safe.Util.member "turn_fsm_transition" json)
+            else None
+          | exception Yojson.Json_error _ -> None)
+        |> List.rev
+        |> function
+        | [] -> None
+        | newest :: _ -> Some newest
+      in
+      match entry with
+      | None -> Alcotest.fail "typed FSM transition not found in the audit sink"
+      | Some transition_json ->
+        (match
+           Keeper_transition_audit.turn_fsm_transition_of_json transition_json
+         with
+         | Error error -> Alcotest.fail error
+         | Ok transition ->
+           Alcotest.(check int) "turn id" turn_id transition.turn_fsm_turn_id;
+           Alcotest.(check string)
+             "previous state"
+             "streaming"
+             transition.turn_fsm_prev_state;
+           Alcotest.(check string)
+             "new state"
+             "completing"
+             transition.turn_fsm_new_state;
+           Alcotest.(check string)
+             "action"
+             "StreamComplete"
+             transition.turn_fsm_action;
+           Alcotest.(check (option bool))
+             "stop before"
+             (Some false)
+             transition.turn_fsm_stop_signaled_before;
+           Alcotest.(check (option bool))
+             "stop after"
+             (Some false)
+             transition.turn_fsm_stop_signaled_after))
+;;
+
+(* ── Label coverage ────────────────────────────────────────── *)
+
+let test_turn_state_labels_cover_every_variant () =
+  let pairs : (F.any_state * string) list =
+    [ F.Any F.Idle, "idle"
+    ; F.Any F.Phase_gating, "phase_gating"
+    ; F.Any F.Runtime_routing, "runtime_routing"
+    ; F.Any F.Awaiting_provider, "awaiting_provider"
+    ; F.Any F.Streaming, "streaming"
+    ; F.Any F.Awaiting_tool_result, "awaiting_tool"
+    ; F.Any F.Completing, "completing"
+    ; F.Any F.Done, "done"
+    ; F.Any (F.Failed (F.Failure_runtime_error "x")), "failed:runtime_error"
+    ; ( F.Any (F.Failed (F.Failure_provider_error { kind = "k"; detail = "d" }))
+      , "failed:provider_error" )
+    ; F.Any (F.Cancelled F.Cancelled_supervisor_stop), "cancelled:supervisor_stop"
+    ]
+  in
+  List.iter
+    (fun (s, expected) ->
+       Alcotest.(check string)
+         ("turn_state_label " ^ expected)
+         expected
+         (F.any_state_label s))
+    pairs
+;;
+
+let check_action ?ctx expected ~from_state ~to_state =
+  match F.classify_transition ?ctx ~from_state ~to_state () with
+  | Some actual ->
+    Alcotest.(check string)
+      ("transition action " ^ F.transition_action_label expected)
+      (F.transition_action_label expected)
+      (F.transition_action_label actual)
+  | None ->
+    Alcotest.failf
+      "expected transition action %s for %s -> %s"
+      (F.transition_action_label expected)
+      (F.turn_state_label from_state)
+      (F.turn_state_label to_state)
+;;
+
+let test_transition_actions_cover_tla_next () =
+  check_action F.StartTurn ~from_state:F.Idle ~to_state:F.Phase_gating;
+  check_action F.PhaseGateSkip ~from_state:F.Phase_gating ~to_state:F.Done;
+  check_action F.PhaseGateOk ~from_state:F.Phase_gating ~to_state:F.Runtime_routing;
+  check_action F.RuntimeRouted ~from_state:F.Runtime_routing ~to_state:F.Awaiting_provider;
+  check_action
+    F.RuntimeUnavailable
+    ~from_state:F.Runtime_routing
+    ~to_state:
+      (F.Failed (F.Failure_runtime_unavailable { base = "ollama"; resolved = None }));
+  check_action
+    F.ProviderError
+    ~from_state:F.Runtime_routing
+    ~to_state:
+      (F.Failed (F.Failure_provider_error { kind = "openai"; detail = "rate_limit" }));
+  check_action F.ProviderResponded ~from_state:F.Awaiting_provider ~to_state:F.Streaming;
+  check_action
+    F.ProviderTimeout
+    ~from_state:F.Awaiting_provider
+    ~to_state:(F.Cancelled F.Cancelled_provider_timeout);
+  check_action F.StreamYieldsTool ~from_state:F.Streaming ~to_state:F.Awaiting_tool_result;
+  check_action F.ToolReturned ~from_state:F.Awaiting_tool_result ~to_state:F.Streaming;
+  (* A provider timeout out of awaiting_tool is a named
+     action — ProviderTimeout's symmetric counterpart — so the audit trail
+     can say which edge ended a timed-out turn instead of falling into the
+     stop-signal arm's classified-gap WARN. *)
+  check_action
+    F.ToolTimeout
+    ~from_state:F.Awaiting_tool_result
+    ~to_state:(F.Cancelled F.Cancelled_provider_timeout);
+  check_action F.StreamComplete ~from_state:F.Streaming ~to_state:F.Completing;
+  check_action
+    F.ReceiptLost
+    ~from_state:F.Streaming
+    ~to_state:
+      (F.Failed (F.Failure_receipt_lost { primary_error = "io"; fallback_path = None }));
+  check_action
+    F.ProviderError
+    ~from_state:F.Streaming
+    ~to_state:
+      (F.Failed (F.Failure_provider_error { kind = "openai"; detail = "rate_limit" }));
+  check_action
+    F.ProviderTimeout
+    ~from_state:F.Streaming
+    ~to_state:(F.Cancelled F.Cancelled_provider_timeout);
+  check_action F.FinishTurn ~from_state:F.Completing ~to_state:F.Done;
+  check_action
+    F.ReceiptLost
+    ~from_state:F.Completing
+    ~to_state:
+      (F.Failed (F.Failure_receipt_lost { primary_error = "io"; fallback_path = None }));
+  check_action
+    F.GenericFail
+    ~from_state:F.Streaming
+    ~to_state:(F.Failed (F.Failure_runtime_error "boom"));
+  let stop_raised_ctx =
+    { F.stop_signaled_before = false; stop_signaled_after = true }
+  in
+  check_action ~ctx:stop_raised_ctx
+    F.SupervisorRequestsStop ~from_state:F.Streaming ~to_state:F.Streaming;
+  check_action
+    F.HonorStopSignal
+    ~from_state:F.Streaming
+    ~to_state:(F.Cancelled F.Cancelled_supervisor_stop);
+  check_action F.TerminalStutter ~from_state:F.Done ~to_state:F.Done
+;;
+
+let test_invalid_transition_rejected () =
+  match F.assert_transition_allowed ~from_state:F.Idle ~to_state:F.Done () with
+  | Error violation ->
+    Alcotest.(check string)
+      "invalid edge from state"
+      "idle"
+      (F.any_state_tla_symbol violation.from_state);
+    Alcotest.(check string)
+      "invalid edge to state"
+      "done"
+      (F.any_state_tla_symbol violation.to_state)
+  | Ok action ->
+    Alcotest.failf
+      "Idle -> Done unexpectedly classified as %s"
+      (F.transition_action_label action)
+;;
+
+let read_fsm_guard_count ~stage =
+  P.metric_value_or_zero P.metric_fsm_guard_violation
+    ~labels:[ "action", "KeeperTurnFSM.Next"; "stage", stage ]
+    ()
+
+let test_invalid_emit_transition_fails_closed_and_bumps_counter () =
+  let stage = "idle->done" in
+  let before = read_fsm_guard_count ~stage in
+  let raised =
+    try
+      run_eio (fun () ->
+        F.emit_transition
+          ~keeper_name:"alice"
+          ~turn_id:13457
+          ~prev:F.Idle
+          F.Done);
+      None
+    with
+    | Invalid_argument message -> Some message
+  in
+  let after = read_fsm_guard_count ~stage in
+  (* The message an operator reads in a crash dump: the edge as TLA symbols
+     and the reason, built from the typed violation at this point. *)
+  Alcotest.(check (option string))
+    "invalid emit_transition re-raises with the edge and reason"
+    (Some
+       "fsm:transition:violation keeper=alice turn=13457 from=idle to=done \
+        reason=not_in_keeper_turn_fsm_next")
+    raised;
+  Alcotest.(check (float 0.0001))
+    "invalid emit_transition bumps fsm guard counter"
+    (before +. 1.0)
+    after
+;;
+
+let test_stop_signaled_blocks_forward_transitions () =
+  let stop_active_ctx =
+    { F.stop_signaled_before = true; stop_signaled_after = true }
+  in
+  (* StartTurn must be rejected when stop_signaled is already active *)
+  (match F.classify_transition ~ctx:stop_active_ctx
+            ~from_state:F.Idle ~to_state:F.Phase_gating () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "StartTurn should be blocked by stop_signaled, got %s"
+       (F.transition_action_label action));
+  (* PhaseGateOk must be rejected when stop_signaled is active *)
+  (match F.classify_transition ~ctx:stop_active_ctx
+            ~from_state:F.Phase_gating ~to_state:F.Runtime_routing () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "PhaseGateOk should be blocked by stop_signaled, got %s"
+       (F.transition_action_label action))
+;;
+
+let test_omitted_stop_context_classifies_same_state_as_stop () =
+  (* Without the orthogonal stop context, an active-state self transition
+     classifies as [SupervisorRequestsStop]. *)
+  match F.classify_transition ~from_state:F.Streaming ~to_state:F.Streaming () with
+  | Some F.SupervisorRequestsStop -> ()
+  | None -> Alcotest.fail "omitted ctx should classify as SupervisorRequestsStop"
+  | Some action ->
+    Alcotest.failf
+      "omitted ctx should be SupervisorRequestsStop, got %s"
+      (F.transition_action_label action)
+;;
+
+let test_same_state_with_explicit_no_stop_signal_is_none () =
+  (* Once callers pass ctx explicitly, false -> false is not a stop request. *)
+  let no_signal_ctx =
+    { F.stop_signaled_before = false; F.stop_signaled_after = false }
+  in
+  (match F.classify_transition ~ctx:no_signal_ctx
+            ~from_state:F.Streaming ~to_state:F.Streaming () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "same-state with explicit no signal should be None, got %s"
+       (F.transition_action_label action))
+;;
+
+let test_supervisor_requests_stop_requires_signal_transition () =
+  (* stop_signaled staying false -> false should NOT be SupervisorRequestsStop *)
+  let no_signal_ctx =
+    { F.stop_signaled_before = false; F.stop_signaled_after = false }
+  in
+  (match F.classify_transition ~ctx:no_signal_ctx
+            ~from_state:F.Streaming ~to_state:F.Streaming () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "same-state with no signal change should be None, got %s"
+       (F.transition_action_label action));
+  (* stop_signaled already true and staying true should NOT be SupervisorRequestsStop *)
+  let signal_already_true_ctx =
+    { F.stop_signaled_before = true; F.stop_signaled_after = true }
+  in
+  (match F.classify_transition ~ctx:signal_already_true_ctx
+            ~from_state:F.Streaming ~to_state:F.Streaming () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+      "same-state with signal already true should be None, got %s"
+      (F.transition_action_label action))
+;;
+
+let test_honor_stop_signal_requires_active_signal_context () =
+  let no_signal_ctx =
+    { F.stop_signaled_before = false; F.stop_signaled_after = false }
+  in
+  (match F.classify_transition ~ctx:no_signal_ctx
+            ~from_state:F.Streaming
+            ~to_state:(F.Cancelled F.Cancelled_supervisor_stop) () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "HonorStopSignal should require active stop context, got %s"
+       (F.transition_action_label action));
+  let stop_active_ctx =
+    { F.stop_signaled_before = true; F.stop_signaled_after = true }
+  in
+  match F.classify_transition ~ctx:stop_active_ctx
+          ~from_state:F.Streaming
+          ~to_state:(F.Cancelled F.Cancelled_supervisor_stop) () with
+  | Some F.HonorStopSignal -> ()
+  | None -> Alcotest.fail "active stop context should allow HonorStopSignal"
+  | Some action ->
+    Alcotest.failf
+      "active stop context should be HonorStopSignal, got %s"
+      (F.transition_action_label action)
+;;
+
+let test_terminal_stutter_requires_unchanged_stop_context () =
+  let stop_changed_ctx =
+    { F.stop_signaled_before = false; F.stop_signaled_after = true }
+  in
+  (match F.classify_transition ~ctx:stop_changed_ctx
+            ~from_state:F.Done ~to_state:F.Done () with
+   | None -> ()
+   | Some action ->
+     Alcotest.failf
+       "TerminalStutter should reject changed stop context, got %s"
+       (F.transition_action_label action));
+  let stop_unchanged_ctx =
+    { F.stop_signaled_before = true; F.stop_signaled_after = true }
+  in
+  match F.classify_transition ~ctx:stop_unchanged_ctx
+          ~from_state:F.Done ~to_state:F.Done () with
+  | Some F.TerminalStutter -> ()
+  | None -> Alcotest.fail "unchanged terminal stop context should stutter"
+  | Some action ->
+    Alcotest.failf
+      "unchanged terminal stop context should be TerminalStutter, got %s"
+      (F.transition_action_label action)
+;;
+
+let test_cancel_reason_labels_documented () =
+  let pairs : (F.cancel_reason * string) list =
+    [ F.Cancelled_supervisor_stop, "supervisor_stop"
+    ; F.Cancelled_external, "external_cancel"
+    ; F.Cancelled_provider_timeout, "provider_timeout"
+    ; F.Cancelled_input_required, "input_required"
+    ]
+  in
+  List.iter
+    (fun (r, expected) ->
+       Alcotest.(check string)
+         ("cancel_reason " ^ expected)
+         expected
+         (F.cancel_reason_label r))
+    pairs
+;;
+
+let test_failure_reason_labels_documented () =
+  let pairs : (F.failure_reason * string) list =
+    [ ( F.Failure_runtime_unavailable { base = "ollama:7b"; resolved = None }
+      , "runtime_unavailable" )
+    ; F.Failure_provider_error { kind = "k"; detail = "d" }, "provider_error"
+    ; F.Failure_receipt_lost { primary_error = "e"; fallback_path = None }, "receipt_lost"
+    ; F.Failure_runtime_error "msg", "runtime_error"
+    ; ( F.Failure_unexpected_exception { exn = "Boom"; backtrace = None }
+      , "unexpected_exception" )
+    ]
+  in
+  List.iter
+    (fun (r, expected) ->
+       Alcotest.(check string)
+         ("failure_reason " ^ expected)
+         expected
+         (F.failure_reason_label r))
+    pairs
+;;
+
+let () =
+  Alcotest.run
+    "keeper_turn_fsm_emit"
+    [ ( "signature_anchor"
+      , [ Alcotest.test_case
+            "emit_transition surface stable"
+            `Quick
+            test_emit_transition_signature_stable
+        ; Alcotest.test_case
+            "emit_transition carries typed log details"
+            `Quick
+            test_emit_transition_carries_typed_record
+        ] )
+    ; ( "labels"
+      , [ Alcotest.test_case
+            "turn_state covers every variant"
+            `Quick
+            test_turn_state_labels_cover_every_variant
+        ; Alcotest.test_case
+            "transition actions cover TLA Next"
+            `Quick
+            test_transition_actions_cover_tla_next
+        ; Alcotest.test_case
+            "invalid transition rejected"
+            `Quick
+            test_invalid_transition_rejected
+        ; Alcotest.test_case
+            "invalid emit_transition fails closed and bumps counter"
+            `Quick
+            test_invalid_emit_transition_fails_closed_and_bumps_counter
+        ; Alcotest.test_case
+            "stop_signaled blocks forward transitions"
+            `Quick
+            test_stop_signaled_blocks_forward_transitions
+        ; Alcotest.test_case
+            "omitted stop context classifies same state as stop"
+            `Quick
+            test_omitted_stop_context_classifies_same_state_as_stop
+        ; Alcotest.test_case
+            "same-state with explicit no stop signal is None"
+            `Quick
+            test_same_state_with_explicit_no_stop_signal_is_none
+        ; Alcotest.test_case
+            "SupervisorRequestsStop requires signal transition"
+            `Quick
+            test_supervisor_requests_stop_requires_signal_transition
+        ; Alcotest.test_case
+            "HonorStopSignal requires active signal context"
+            `Quick
+            test_honor_stop_signal_requires_active_signal_context
+        ; Alcotest.test_case
+            "TerminalStutter requires unchanged stop context"
+            `Quick
+            test_terminal_stutter_requires_unchanged_stop_context
+        ; Alcotest.test_case
+            "cancel_reason labels match docs"
+            `Quick
+            test_cancel_reason_labels_documented
+        ; Alcotest.test_case
+            "failure_reason labels match docs"
+            `Quick
+            test_failure_reason_labels_documented
+        ] )
+    ]
+;;

@@ -1,0 +1,16 @@
+{
+  "parent": "806af2dc0d541ce4bf8b5dc21ecba1fd8526215f",
+  "byte_identical_pure_helpers": {
+    "queue_oldest_source_arrived_at": true,
+    "min_float_opt": true,
+    "age_seconds_json": true,
+    "queue_residence_to_yojson": true,
+    "owner_lifecycle_wire": true,
+    "owner_lifecycle_detail_json": true,
+    "keeper_summary_json": true,
+    "compact_pending_count_json": true,
+    "compact_backlog_count_json": true,
+    "backlog_summary": true
+  },
+  "limits": "Source comparisons only. Fleet projection additionally replaces already acquired discovery/path inputs with arguments; acquisition and wire semantics require independent review and executed consumer tests."
+}

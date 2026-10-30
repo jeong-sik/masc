@@ -1,0 +1,49 @@
+{
+  "policy": "All11originalartifactmembers retained. Only CIcheckoutprefix normalized; sample values, identities, timestamps, CPU and internal frame logs unchanged. Original/published hashes recorded for every member.",
+  "files": {
+    "01-baseline.frame-timing.txt": {
+      "original_sha256": "dd3e719a2a007869f051ddece9c1fbc8167fa1d257924b7b17b92013e0fc955f",
+      "published_sha256": "dd3e719a2a007869f051ddece9c1fbc8167fa1d257924b7b17b92013e0fc955f"
+    },
+    "01-baseline.json": {
+      "original_sha256": "9f51267ba5772b6477233e9db76e4c43769c03cf1ccbe047019d3ac026afb9ef",
+      "published_sha256": "9f51267ba5772b6477233e9db76e4c43769c03cf1ccbe047019d3ac026afb9ef"
+    },
+    "01-baseline.stderr.txt": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "01-baseline.stdout.txt": {
+      "original_sha256": "fab62305347f57814c6f4bee3881675e248221795b33fb16a0e0223265741bbc",
+      "published_sha256": "fab62305347f57814c6f4bee3881675e248221795b33fb16a0e0223265741bbc"
+    },
+    "01-candidate.frame-timing.txt": {
+      "original_sha256": "9f794c9900ded3f0f67a3dd6e4b83120d5b3aea54954723dfc66f3cb254939aa",
+      "published_sha256": "9f794c9900ded3f0f67a3dd6e4b83120d5b3aea54954723dfc66f3cb254939aa"
+    },
+    "01-candidate.json": {
+      "original_sha256": "5d4bd88a6c4217dae3da7cac8dcfcaa144ea9e0639a886db023337730d9b1a85",
+      "published_sha256": "5d4bd88a6c4217dae3da7cac8dcfcaa144ea9e0639a886db023337730d9b1a85"
+    },
+    "01-candidate.stderr.txt": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "01-candidate.stdout.txt": {
+      "original_sha256": "f12782e80644657ad3f1ce960612c70ed11bab5d639668a99d250249e34c1cb7",
+      "published_sha256": "f12782e80644657ad3f1ce960612c70ed11bab5d639668a99d250249e34c1cb7"
+    },
+    "baseline-identity.json": {
+      "original_sha256": "8d31c53a097fd1ddbf2514a9001112e574373a71468f02ea96c12b406c9c249c",
+      "published_sha256": "d7dafd909b424e73e5fc4ee6dfda277dbbfcb471e0f4e41fdf7f638b03e35a20"
+    },
+    "candidate-identity.json": {
+      "original_sha256": "604e15ec61c5ea940181b90a9da04d723d32d9eb51d07a4ab7d83c96286756f0",
+      "published_sha256": "c950e325183551d037b692f7d5354a3b4a67ed70d464316dad8d9d530b8dc891"
+    },
+    "summary.json": {
+      "original_sha256": "d55fb8cf5e9da9c2301022b06954feeb8aee585a0306d6ebcbec5e8e8fafde81",
+      "published_sha256": "10cdf33359940dcfca7fb52c70a99811ad8b468c67868324383b2db2edc3f895"
+    }
+  }
+}

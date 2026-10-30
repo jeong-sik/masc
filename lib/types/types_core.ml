@@ -1,0 +1,1450 @@
+type verifier_slot_kind = Catalog_slot | Cli_slot | Explicit_runtime
+
+type verifier_execution_reference =
+  | Native_execution of {call_id:string}
+  | Official_session
+(** A completion review retains this admission kind while its acquired lane runs. *)
+
+(** MASC MCP Types - Domain Model *)
+
+(* Newtypes are in ids.ml *)
+include Ids
+
+(* ============================================ *)
+(* Timestamp utilities                          *)
+(* ============================================ *)
+
+(** Timestamp utilities *)
+
+(* The clock read is not new — reading it is what [now_iso] is for. Only the
+   body around it changed, from an inline gmtime block to a call to the shared
+   writer, and the ratchet's move detector cannot match a line across that
+   reshape.
+   DET-OK *)
+let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
+
+(** Parse a strict RFC 3339 timestamp to Unix seconds. *)
+let parse_iso8601_opt value = Time_codec.parse_rfc3339_opt value
+
+(** Agent status - compile-time state machine *)
+type agent_status =
+  | Active
+  | Busy
+  | Listening
+  | Inactive
+[@@deriving show { with_path = false }, enumerate]
+
+let agent_status_to_string = function
+  | Active -> "active"
+  | Busy -> "busy"
+  | Listening -> "listening"
+  | Inactive -> "inactive"
+
+(* Alias for dashboard compatibility *)
+let string_of_agent_status = agent_status_to_string
+
+(** Issue #8372: schema enum sites used to hand-roll [agent_status] strings,
+    matching the same drift class as #8354 (task_status) and #8364 (Response).
+    [agent_status] has only nullary constructors, so a list literal is safe.
+    Adding a 5th constructor will fail compilation in [agent_status_to_string]
+    (the witness) — the test in [test_types.ml] checks that every result of
+    that function appears in [valid_agent_status_strings]. *)
+let all_agent_statuses = [ Active; Busy; Listening; Inactive ]
+let valid_agent_status_strings =
+  List.map agent_status_to_string all_agent_statuses
+
+(* Presence ordering for operator surfaces: the agent doing work outranks the
+   one merely holding a session, which outranks the one only listening. A
+   fifth constructor breaks compilation here instead of silently ranking 0,
+   which is what happens when the ordering is written over the serialized
+   strings instead. *)
+let agent_status_rank = function
+  | Busy -> 4
+  | Active -> 3
+  | Listening -> 2
+  | Inactive -> 1
+
+let agent_status_of_string_opt s = List.find_opt (fun v -> String.equal (agent_status_to_string v) s) all_of_agent_status
+
+(** [agent_status_of_string_r s] — explicit-failure parser.  Prefer this
+    over {!agent_status_of_string} (which silently maps unknown input to
+    [Active]).  The "permissive default" pattern was flagged in #10748:
+    it merges semantically distinct inputs (typo, future variant, garbage
+    payload) into a healthy "Active" presence and erases the diagnostic
+    trail.  Callers that genuinely want a default should pin it at the
+    call site so the choice is local and reviewable. *)
+let agent_status_of_string_r s : (agent_status, string) result =
+  match agent_status_of_string_opt s with
+  | Some status -> Ok status
+  | None -> Error (Printf.sprintf "unknown agent_status: %S" s)
+
+
+
+(* Custom yojson converters for lowercase JSON compatibility *)
+let agent_status_to_yojson status = `String (agent_status_to_string status)
+
+let agent_status_of_yojson = function
+  | `String s ->
+      (match agent_status_of_string_opt s with
+       | Some status -> Ok status
+       | None -> Error ("Unknown agent status: " ^ s))
+  | other ->
+      (* Mirrors the [agent_role_of_yojson] shape introduced in iter#90
+         #16927 — non-string inputs name the kind actually received so
+         operators can distinguish wrong-type ([`Int]/[`Bool] from a
+         config drift) from wrong-shape ([`Assoc]/[`Null] from a schema
+         change mid-flight) without re-parsing the offending payload. *)
+      Error
+        (Printf.sprintf
+           "agent_status_of_yojson: expected JSON string, got %s"
+           (Json_util.kind_name other))
+
+(** Agent metadata - session identification and environment info *)
+type agent_meta = {
+  session_id: string;                     (* short UUID for unique identification *)
+  agent_type: string;                     (* claude, gemini, codex *)
+  pid: int option; [@default None]        (* process ID *)
+  hostname: string option; [@default None] (* machine hostname *)
+  tty: string option; [@default None]     (* terminal identifier *)
+  parent_task: string option; [@default None] (* task that spawned this agent *)
+  keeper_name: string option; [@default None] (* stable keeper owner, when this runtime is keeper-owned *)
+  keeper_id: string option; [@default None] (* stable keeper UUID, when available *)
+} [@@deriving yojson { strict = false }, show]
+
+(** Agent info *)
+type agent = {
+  id: Agent_id.t option; [@default None]  (* permanent UUID *)
+  name: string;                           (* unique nickname: claude-swift-fox *)
+  agent_type: string; [@default "unknown"] (* original type: claude, gemini, codex *)
+  status: agent_status;
+  capabilities: string list;
+  current_task: string option; [@default None]
+  session_bound_at: string;
+  last_seen: string;
+  meta: agent_meta option; [@default None] (* session metadata *)
+} [@@deriving yojson { strict = false }, show]
+
+(* Name kept because 73 call sites reach it through [Masc_domain]; renaming
+   them to [Time_codec.rfc3339_of_unix] is tracked in #27131. *)
+let iso8601_of_unix_seconds = Time_codec.rfc3339_of_unix
+
+(** Actions an *agent* may drive on a task. A completion verdict is deliberately
+    absent: it is not an agent action. See [completion_authority]. *)
+type task_action =
+  | Claim
+  | Start
+  | Done_action
+  | Cancel
+  | Release
+  | Submit_for_verification
+[@@deriving show]
+
+let task_action_of_string s =
+  match String.lowercase_ascii s with
+  | "claim" -> Ok Claim
+  | "start" -> Ok Start
+  | "done" -> Ok Done_action
+  | "cancel" -> Ok Cancel
+  | "release" -> Ok Release
+  | "submit_for_verification" -> Ok Submit_for_verification
+  | ("approve" | "reject") as verdict ->
+    (* Explicit rejection rather than "unknown action": the caller asked for a
+       real operation that is no longer reachable from the agent action surface.
+       A trusted operator or judge boundary constructs the authority provenance
+       and calls the separate verdict entrypoint. *)
+    Error
+      (Printf.sprintf
+         "Task action %S is not an agent action: a completion verdict is issued \
+          by the completion authority (human operator or system LLM agent), not \
+          through the task action surface. A Keeper is not a verifier."
+         verdict)
+  | other -> Error (Printf.sprintf "Unknown task action: %s" other)
+
+let task_action_to_string = function
+  | Claim -> "claim"
+  | Start -> "start"
+  | Done_action -> "done"
+  | Cancel -> "cancel"
+  | Release -> "release"
+  | Submit_for_verification -> "submit_for_verification"
+
+(** All valid task actions, derived from the ADT (single source of truth). *)
+let all_task_actions =
+  [ Claim; Start; Done_action; Cancel; Release; Submit_for_verification ]
+let valid_task_action_strings = List.map task_action_to_string all_task_actions
+
+(** Provenance carried by a completion verdict. This type separates verdicts
+    from the Keeper task-action surface; it does not authenticate the embedded
+    identity. The producer boundary must construct it only after authenticating
+    an operator or accepting a typed system-LLM result. The system LLM agent
+    is not a Keeper and has no Keeper lifecycle. *)
+type completion_authority =
+  | Human_operator of { operator_id: string }
+  | System_llm_agent of { agent_run_id: string }
+[@@deriving show]
+
+(** A verdict cannot exist without an authority: both terminal outcomes are
+    carried here and consumed only by the verdict decider, which takes an
+    [completion_authority] argument. *)
+type completion_verdict =
+  | Verdict_approved
+  | Verdict_rejected of { reason: string }
+[@@deriving show]
+
+let completion_authority_actor = function
+  | Human_operator { operator_id } -> operator_id
+  | System_llm_agent { agent_run_id } -> agent_run_id
+
+let completion_authority_kind = function
+  | Human_operator _ -> "human_operator"
+  | System_llm_agent _ -> "system_llm_agent"
+
+let completion_authority_has_identity authority =
+  not (String.equal (String.trim (completion_authority_actor authority)) "")
+;;
+
+(** What the producer places before the authority: the evidence references
+    of work it believes is finished. The request record the authority reads
+    carries it. *)
+type verification_claim =
+  | Completion_evidence of { evidence_refs : string list }
+
+type task_status =
+  | Todo
+  | Claimed of { assignee: string; claimed_at: string }
+  | InProgress of { assignee: string; started_at: string }
+  | AwaitingVerification of {
+      assignee: string;
+      started_at: string;
+      submitted_at: string;
+      verification_id: string;
+        (** An obligation with no assignable satisfier. There is deliberately no
+            [phase]/verifier binding: the previous [Verifier_assigned] field made
+            whichever agent won the claim race the approver, so the obligation
+            was owned by a Keeper. The verdict comes from a
+            [completion_authority] instead, and [verification_id] is the join to
+            the evidence record it reads. *)
+    }
+  | Done of { assignee: string; completed_at: string; notes: string option }
+  | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
+[@@deriving show, eq]
+
+(* The schema and parser share one generated vocabulary. Payload-bearing
+   statuses map to it exhaustively; neither boundary needs placeholder tasks. *)
+module Task_status_tag = struct
+  type t = Todo | Claimed | In_progress | Awaiting_verification | Done | Cancelled
+  [@@deriving enumerate, eq]
+
+  let to_string = function
+    | Todo -> "todo"
+    | Claimed -> "claimed"
+    | In_progress -> "in_progress"
+    | Awaiting_verification -> "awaiting_verification"
+    | Done -> "done"
+    | Cancelled -> "cancelled"
+
+  let of_string value =
+    List.find_opt (fun tag -> String.equal (to_string tag) value) all
+end
+
+let task_status_tag = function
+  | Todo -> Task_status_tag.Todo
+  | Claimed _ -> Task_status_tag.Claimed
+  | InProgress _ -> Task_status_tag.In_progress
+  | AwaitingVerification _ -> Task_status_tag.Awaiting_verification
+  | Done _ -> Task_status_tag.Done
+  | Cancelled _ -> Task_status_tag.Cancelled
+
+let task_status_to_string status = Task_status_tag.to_string (task_status_tag status)
+
+let string_of_task_status = task_status_to_string
+
+(** Display icon for task status. Used by workspace_status and workspace_query
+    rendering. Exhaustive match — adding a constructor forces an update here. *)
+let task_status_icon = function
+  | Todo -> "📋"
+  | Claimed _ | InProgress _ -> "🔄"
+  | AwaitingVerification _ -> "🔍"
+  | Done _ -> "✅"
+  | Cancelled _ -> "🚫"
+
+(** Who acted on a Task, and in what relationship.
+
+    Every status carries an actor and a role, but a bare [string option]
+    records only the name and drops the role. Callers then disagreed about
+    what the name meant: three separate [task_assignee] implementations
+    existed, differing on [Done] (assignee or nobody) and on [Cancelled]
+    (nobody or the canceller). A completed Task therefore showed an owner on
+    one surface and none on another, and a cancelled Task named its canceller
+    as its assignee.
+
+    Naming the role makes the disagreement impossible to write: a [Canceller]
+    cannot be passed where a [Holder] is expected, and a new status has to
+    state which role it carries. The three questions callers actually ask are
+    derived below, each total over this sum. *)
+type task_actor =
+  | Unassigned
+  | Holder of string  (** Claimed or InProgress: currently doing the work. *)
+  | Submitter of string  (** AwaitingVerification: submitted, awaiting a verdict. *)
+  | Completer of string  (** Done: finished the work. *)
+  | Canceller of string  (** Cancelled: ended the work. Never its assignee. *)
+
+let task_actor_of_status = function
+  | Todo -> Unassigned
+  | Claimed { assignee; _ } -> Holder assignee
+  | InProgress { assignee; _ } -> Holder assignee
+  | AwaitingVerification { assignee; _ } -> Submitter assignee
+  | Done { assignee; _ } -> Completer assignee
+  | Cancelled { cancelled_by; _ } -> Canceller cancelled_by
+
+(** Who owes work on this Task now. [Done] and [Cancelled] owe nothing, so
+    they answer [None] even though both carry a name. Canonical
+    ownership-check helper — used by task_state, gRPC, etc. *)
+let task_assignee_of_status status =
+  match task_actor_of_status status with
+  | Holder name | Submitter name -> Some name
+  | Unassigned | Completer _ | Canceller _ -> None
+
+(** Who did or is doing the work, including after completion. Distinct from
+    ownership: a finished Task has no one responsible but does have someone
+    who finished it. [Cancelled] answers [None] — the canceller ended the work
+    rather than performing it, and travels as [cancelled_by] instead. *)
+let task_performer_of_status status =
+  match task_actor_of_status status with
+  | Holder name | Submitter name | Completer name -> Some name
+  | Unassigned | Canceller _ -> None
+
+(** Total rendering of the actor for a surface that must print something.
+    [Cancelled] surfaces its canceller and [Todo] yields "unclaimed"; neither
+    is an ownership claim. *)
+let task_display_assignee status =
+  match task_actor_of_status status with
+  | Unassigned -> "unclaimed"
+  | Holder name | Submitter name | Completer name | Canceller name -> name
+
+(** Terminal states: [Done] or [Cancelled]. No further transitions possible.
+    Exhaustive match — adding a constructor forces an update here. *)
+let task_status_is_terminal = function
+  | Done _ | Cancelled _ -> true
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+
+(** Completed state: [Done]. Distinct from [task_status_is_terminal] which
+    also includes [Cancelled]. Use this when only successful completion
+    matters (e.g. convergence ratios, reputation counting). *)
+let task_status_is_done = function
+  | Done _ -> true
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false
+
+let valid_task_status_strings =
+  List.map Task_status_tag.to_string Task_status_tag.all
+
+(* Manual yojson conversion for task_status (sum type with records) *)
+let task_status_to_yojson status =
+  let fields = match status with
+  | Todo -> []
+  | Claimed { assignee; claimed_at } ->
+      [
+        ("assignee", `String assignee);
+        ("claimed_at", `String claimed_at);
+      ]
+  | InProgress { assignee; started_at } ->
+      [
+        ("assignee", `String assignee);
+        ("started_at", `String started_at);
+      ]
+  | Done { assignee; completed_at; notes } ->
+      [
+        ("assignee", `String assignee);
+        ("completed_at", `String completed_at);
+        ("notes", Json_util.string_opt_to_json notes);
+      ]
+  | AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
+      [
+        ("assignee", `String assignee);
+        ("started_at", `String started_at);
+        ("submitted_at", `String submitted_at);
+        ("verification_id", `String verification_id);
+      ]
+  | Cancelled { cancelled_by; cancelled_at; reason } ->
+      [
+        ("cancelled_by", `String cancelled_by);
+        ("cancelled_at", `String cancelled_at);
+        ("reason", Json_util.string_opt_to_json reason);
+      ]
+  in
+  `Assoc (("status", `String (task_status_to_string status)) :: fields)
+
+let task_status_of_yojson json =
+  let req key = Json_util.get_string_with_default json ~key ~default:"" in
+  let opt key = Json_util.get_string json key in
+  (* Write-boundary format validation: a lifecycle timestamp stays the wire
+     string because no in-process consumer reads it as a time (RFC-0371
+     audit), but a missing or non-RFC 3339 value is a corrupt row. It is
+     rejected here for every status, never read as the empty string. *)
+  let clock ~status key =
+    match opt key with
+    | None -> Error (Printf.sprintf "%s requires %s" status key)
+    | Some value ->
+      (match parse_iso8601_opt value with
+       | Some _ -> Ok value
+       | None ->
+         Error (Printf.sprintf "%s %s must be RFC 3339, got %S" status key value))
+  in
+  try
+    match Task_status_tag.of_string (req "status") with
+    | Some Task_status_tag.Todo -> Ok Todo
+    | Some Task_status_tag.Claimed ->
+        Result.map
+          (fun claimed_at -> Claimed { assignee = req "assignee"; claimed_at })
+          (clock ~status:"claimed" "claimed_at")
+    | Some Task_status_tag.In_progress ->
+        Result.map
+          (fun started_at -> InProgress { assignee = req "assignee"; started_at })
+          (clock ~status:"in_progress" "started_at")
+    | Some Task_status_tag.Done ->
+        Result.map
+          (fun completed_at ->
+            Done { assignee = req "assignee"; completed_at; notes = opt "notes" })
+          (clock ~status:"done" "completed_at")
+    | Some Task_status_tag.Awaiting_verification ->
+        (* A submission has one meaning: completion. A row carrying another
+           intent must not be silently reinterpreted on a direct server start
+           that did not run the shell deployment preflight. *)
+        let has_intent = match json with
+          | `Assoc fields -> List.mem_assoc "intent" fields
+          | _ -> false
+        in
+        if has_intent then Error "awaiting_verification does not accept intent"
+        else
+        (match clock ~status:"awaiting_verification" "started_at",
+               clock ~status:"awaiting_verification" "submitted_at" with
+         | Error detail, _ | Ok _, Error detail -> Error detail
+         | Ok started_at, Ok submitted_at ->
+           Ok
+             (AwaitingVerification
+                { assignee = req "assignee"
+                ; started_at
+                ; submitted_at
+                ; verification_id = req "verification_id"
+                }))
+    | Some Task_status_tag.Cancelled ->
+        Result.map
+          (fun cancelled_at ->
+            Cancelled
+              { cancelled_by = req "cancelled_by"; cancelled_at; reason = opt "reason" })
+          (clock ~status:"cancelled" "cancelled_at")
+    | None -> Error ("Unknown task status: " ^ req "status")
+  with e -> Error (Printexc.to_string e)
+
+(** Task execution links - tie task state to runtime evidence producers *)
+type task_execution_links = {
+  operation_id : string option; [@default None]
+  session_id : string option; [@default None]
+} [@@deriving show, yojson { strict = true }, eq]
+
+(** No producer has been linked yet. A task starts here and stays here until a
+    runtime records the operation or session that carried it out. *)
+let no_execution_links = { operation_id = None; session_id = None }
+
+(** Task contract - persisted completion criteria and evidence facts.
+
+    Written once, when the task is created, and never rewritten: what counts as
+    done cannot change while the task runs. Runtime evidence producers are
+    recorded independently on the task itself as [execution_links].
+
+    [completion_contract], [required_evidence], and [verify_gate_evidence] are
+    supplied to the completion authority as task facts. The workspace FSM never
+    interprets their prose, counts entries, or derives a completion verdict. *)
+type task_contract = {
+  strict : bool; [@default false]
+  completion_contract : string list; [@default []]
+  required_evidence : string list; [@default []]
+  inspect_gate_evidence : string list; [@default []]
+  verify_gate_evidence : string list; [@default []]
+} [@@deriving show, yojson { strict = false }, eq]
+
+(** Handoff context persisted across release/reclaim cycles *)
+type task_reclaim_policy =
+  | Allow_reclaim
+  | Block_reclaim
+[@@deriving show, eq]
+
+let task_reclaim_policy_to_string = function
+  | Allow_reclaim -> "allow_reclaim"
+  | Block_reclaim -> "block_reclaim"
+
+let task_reclaim_policy_of_string = function
+  | "allow_reclaim" -> Ok Allow_reclaim
+  | "block_reclaim" -> Ok Block_reclaim
+  | value -> Error (Printf.sprintf "unknown task_reclaim_policy: %s" value)
+
+let task_reclaim_policy_to_yojson policy =
+  `String (task_reclaim_policy_to_string policy)
+
+let task_reclaim_policy_of_yojson = function
+  | `String value -> task_reclaim_policy_of_string value
+  | _ -> Error "task_reclaim_policy must be a string"
+
+type task_handoff_context = {
+  summary : string; [@default ""]
+  reason : string option; [@default None]
+  next_step : string option; [@default None]
+  failure_mode : string option; [@default None]
+  reclaim_policy : task_reclaim_policy option; [@default None]
+  evidence_refs : string list; [@default []]
+  updated_at : string option; [@default None]
+  updated_by : string option; [@default None]
+} [@@deriving show, yojson { strict = false }, eq]
+
+(** The "why" behind a transition that stopped work, from whichever argument
+    carried it. Two entry points supply it differently: [transition_task_r]
+    takes an explicit [reason], while [release_task_r] takes none at all and
+    forwards only a handoff context, which the production release tool requires
+    for a strict release. [task_handoff_context.reason] is the same concept
+    under a different argument, so it is read when the explicit one is empty.
+
+    Single definition on purpose: the committed broadcast and the author wake
+    both answer "why did this stop", and computing the answer twice let them
+    disagree about the same cancellation. Returns [None] when neither carries a
+    non-blank reason — distinct from a reason that is the empty string. *)
+let stated_reason ~(reason : string option)
+      ~(handoff_context : task_handoff_context option) : string option =
+  let non_blank value =
+    match String.trim value with
+    | "" -> None
+    | trimmed -> Some trimmed
+  in
+  (* [reason] then [summary]. A strict release is rejected without
+     [handoff_context.summary] while [reason] stays optional, so a release
+     whose whole explanation is its summary would otherwise publish a bare
+     "Released <id>" — dropping text the caller was required to supply.
+     [failure_mode] is left out: it classifies, it does not explain. *)
+  let from_handoff () =
+    match handoff_context with
+    | None -> None
+    | Some context ->
+      (match Option.bind context.reason non_blank with
+       | Some _ as reason -> reason
+       | None -> non_blank context.summary)
+  in
+  match reason with
+  | None -> from_handoff ()
+  | Some explicit ->
+    (match non_blank explicit with
+     | Some stated -> Some stated
+     | None -> from_handoff ())
+;;
+
+(** Task definition *)
+type task = {
+  id: string;
+  title: string;
+  description: string;
+  task_status: task_status; [@key "status"]
+  priority: int; [@default 3]
+  files: string list; [@default []]
+  created_at: string;
+  created_by: string option; [@default None]
+  (* RFC-0323 W2: write-once lineage pointer to the terminal task this one
+     re-runs. Set only at creation (masc_add_task); every transition carries
+     it through unchanged. Distinct from RFC-0267 goal linkage (many-to-many
+     side registry). *)
+  predecessor_task_id: string option; [@default None]
+  contract: task_contract option; [@default None]
+  (* Runtime identifiers attached after the task is created, by whichever
+     execution picks it up. Separate from [contract] so linking them never
+     touches what counts as done. *)
+  execution_links: task_execution_links; [@default no_execution_links]
+  handoff_context: task_handoff_context option; [@default None]
+  cycle_count: int; [@default 0]
+  reclaim_policy: task_reclaim_policy option; [@default None]
+  do_not_reclaim_reason: string option; [@default None]
+  (* Exact immutable Skill references are Task evidence. Their source,
+     package, name, and content revision survive every state transition and do
+     not depend on whichever catalog is current when the Task is later read. *)
+  skills: Skill_reference.t list; [@default []]
+} [@@deriving show, eq]
+
+(* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
+   Todo producer; this change removes the Done producer, so nothing can be
+   blocked-by-reclaim at claim time anymore. Claim blocks now describe the
+   task-status fact that prevents an agent claim. [reclaim_policy] survives as
+   release/cancel data plumbing only (its full retirement is a recorded
+   follow-up decision, RFC-0323 Radius Map). *)
+
+type task_claim_readiness =
+  | Claim_ready
+
+type task_claim_block =
+  | Claim_block_pending_verdict of { verification_id : string }
+  | Claim_block_not_todo of task_status
+
+type task_claim_decision =
+  | Claim_available of task_claim_readiness
+  | Claim_unavailable of task_claim_block
+
+let task_claim_readiness (_task : task) = Claim_ready
+;;
+
+let task_claim_decision_for_status task_status =
+  match task_status with
+  | Todo ->
+    (* Todo tasks are always claimable regardless of reclaim_policy.
+       reclaim_policy only gates Done -> re-claim, not Todo -> first claim.
+       task-1869: 6 TaskError fingerprints show coordination-role tasks
+       with Block_reclaim policy were blocked from claiming. *)
+    Claim_available Claim_ready
+  | AwaitingVerification { verification_id; _ } ->
+    (* A pending obligation belongs to the completion-authority lane. No
+       Keeper claim can grant verifier authority or inspect it as agent work. *)
+    Claim_unavailable (Claim_block_pending_verdict { verification_id })
+  | Done _
+  (* RFC-0323: a verified Done is terminal for every actor, regardless of
+     reclaim_policy — re-running completed work creates a NEW task linked via
+     predecessor_task_id. Retires the #23632 Done-reclaim mechanism (which
+     was production-unreachable: creation defaults the policy to None and
+     claiming wipes it). *)
+  | Claimed _
+  | InProgress _
+  | Cancelled _ ->
+    Claim_unavailable (Claim_block_not_todo task_status)
+;;
+
+let task_claim_decision (task : task) =
+  match task_claim_decision_for_status task.task_status with
+  | Claim_available Claim_ready -> Claim_available (task_claim_readiness task)
+  | Claim_unavailable block -> Claim_unavailable block
+;;
+
+let task_claim_decision_is_available task =
+  match task_claim_decision task with
+  | Claim_available _ -> true
+  | Claim_unavailable _ -> false
+;;
+
+type task_claim_next_action =
+  | Claim_now
+  | Skip_claim of task_claim_block
+
+let task_claim_next_action task =
+  match task_claim_decision task with
+  | Claim_available Claim_ready -> Claim_now
+  | Claim_unavailable block -> Skip_claim block
+;;
+
+let task_claim_next_action_is_claimable task =
+  match task_claim_next_action task with
+  | Claim_now -> true
+  | Skip_claim _ -> false
+;;
+
+(** When the Task last changed state, read from the timestamp its own status
+    carries. [Todo] has no transition of its own and falls back to creation.
+    Defined once: two byte-identical copies lived in the execution and goals
+    projections, one per surface. *)
+let task_last_transition_at (task : task) =
+  match task.task_status with
+  | Done { completed_at; _ } -> completed_at
+  | Cancelled { cancelled_at; _ } -> cancelled_at
+  | InProgress { started_at; _ } -> started_at
+  | AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Claimed { claimed_at; _ } -> claimed_at
+  | Todo -> task.created_at
+
+(* Manual yojson for task *)
+let task_to_yojson t =
+  let status_json = task_status_to_yojson t.task_status in
+  let base = [
+    ("id", `String t.id);
+    ("title", `String t.title);
+    ("description", `String t.description);
+    ("priority", `Int t.priority);
+    ("files", `List (List.map (fun s -> `String s) t.files));
+    ("created_at", `String t.created_at);
+  ] in
+  let with_created_by = match t.created_by with
+    | None -> base
+    | Some created_by -> base @ [("created_by", `String created_by)]
+  in
+  (* Omitted when no predecessor exists. *)
+  let with_predecessor = match t.predecessor_task_id with
+    | None -> with_created_by
+    | Some p -> with_created_by @ [("predecessor_task_id", `String p)]
+  in
+  let with_contract = match t.contract with
+    | None -> with_predecessor
+    | Some contract ->
+        with_predecessor @ [ ("contract", task_contract_to_yojson contract) ]
+  in
+  (* Omitted while unlinked, so a task carries the key only once an execution
+     claimed it. *)
+  let with_execution_links =
+    match t.execution_links with
+    | { operation_id = None; session_id = None } -> with_contract
+    | links ->
+        with_contract
+        @ [ ("execution_links", task_execution_links_to_yojson links) ]
+  in
+  let with_handoff_context = match t.handoff_context with
+    | None -> with_execution_links
+    | Some handoff_context ->
+        with_execution_links
+        @
+        [ ( "handoff_context",
+            task_handoff_context_to_yojson handoff_context ) ]
+  in
+  (* A zero cycle count is the implicit initial state. *)
+  let with_cycle_count =
+    if t.cycle_count = 0 then with_handoff_context
+    else with_handoff_context @ [("cycle_count", `Int t.cycle_count)]
+  in
+  let with_reclaim_policy =
+    match t.reclaim_policy with
+    | None -> with_cycle_count
+    | Some policy ->
+        with_cycle_count
+        @ [("reclaim_policy", task_reclaim_policy_to_yojson policy)]
+  in
+  let with_do_not_reclaim = match t.do_not_reclaim_reason with
+    | None -> with_reclaim_policy
+    | Some r -> with_reclaim_policy @ [("do_not_reclaim_reason", `String r)]
+  in
+  (* Omitted when the Task declares no Skill. A present value always uses the
+     canonical exact-reference wire shape. *)
+  let with_skills =
+    match t.skills with
+    | [] -> with_do_not_reclaim
+    | skills ->
+        with_do_not_reclaim
+        @ [("skills", Skill_reference.list_to_yojson skills)]
+  in
+  (* Merge status fields into task *)
+  match status_json with
+  | `Assoc status_fields -> `Assoc (with_skills @ status_fields)
+  | _ -> `Assoc with_skills
+
+(* Listing row for keeper tools: identity, ordering, and claim state without
+   the body. A live backlog row averages 2.0 KB of which handoff_context,
+   description, and contract are 89% (#29463); this carries the remaining
+   fields so a 50-row listing stays a few KB. *)
+let task_compact_to_yojson t =
+  let base = [
+    ("id", `String t.id);
+    ("title", `String t.title);
+    ("priority", `Int t.priority);
+    ("created_at", `String t.created_at);
+  ] in
+  match task_status_to_yojson t.task_status with
+  | `Assoc status_fields -> `Assoc (base @ List.remove_assoc "notes" status_fields)
+  | _ -> `Assoc base
+
+(** Outcome of decoding one optional nested field. The pre-#27499 decoder
+    folded "the key was absent" and "the key was present but its value could
+    not be decoded" into the same [None], so a dropped corruption was
+    indistinguishable from a genuinely absent field. This type keeps the two
+    apart at the decode boundary. *)
+type nested_field_outcome =
+  | Field_absent
+  | Field_decoded
+  | Field_unreadable of string
+[@@deriving show, eq]
+
+let nested_field_outcome_is_unreadable = function
+  | Field_unreadable _ -> true
+  | Field_absent | Field_decoded -> false
+
+(** Per-field decode outcome for the two nested fields whose corruption the
+    decoder drops instead of propagating ([handoff_context],
+    [reclaim_policy]). *)
+type task_decode_diagnostics =
+  { handoff_context_outcome : nested_field_outcome
+  ; reclaim_policy_outcome : nested_field_outcome
+  }
+[@@deriving show, eq]
+
+let task_decode_diagnostics_is_unreadable d =
+  nested_field_outcome_is_unreadable d.handoff_context_outcome
+  || nested_field_outcome_is_unreadable d.reclaim_policy_outcome
+
+let task_of_yojson_with_diagnostics json =
+  let req key = Json_util.get_string_with_default json ~key ~default:"" in
+  let opt key = Json_util.get_string json key in
+  let member key = Json_util.assoc_member_opt key json in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
+  try
+    let id = req "id" in
+    let title = req "title" in
+    let description = opt "description" |> Option.value ~default:"" in
+    let priority = Json_util.get_int json "priority" |> Option.value ~default:3 in
+    let files = Json_util.get_string_list json "files" in
+    let skills_result =
+      match member "skills" with
+      | None -> Ok []
+      | Some skills_json ->
+        Skill_reference.list_of_yojson skills_json
+        |> Result.map_error (fun error ->
+          let detail =
+            match error with
+            | Skill_reference.Expected_object { field } ->
+              Printf.sprintf "%s must be an object" field
+            | Expected_list _ -> "skills must be a list"
+            | Missing_field { object_name; field } ->
+              Printf.sprintf "%s.%s is required" object_name field
+            | Expected_string { object_name; field } ->
+              Printf.sprintf "%s.%s must be a string" object_name field
+            | Duplicate_field { object_name; field } ->
+              Printf.sprintf "%s.%s is duplicated" object_name field
+            | Unexpected_field { object_name; field } ->
+              Printf.sprintf "%s.%s is unexpected" object_name field
+            | Invalid_source_id source_id ->
+              Printf.sprintf "source_id %S is invalid" source_id
+            | Invalid_package_id _ -> "package_id is invalid"
+            | Invalid_content_revision _ -> "content_revision is invalid"
+            | Duplicate_reference reference ->
+              Printf.sprintf
+                "exact reference is duplicated: %s"
+                (Yojson.Safe.to_string (Skill_reference.to_yojson reference))
+          in
+          "task.skills corrupt: " ^ detail)
+    in
+    let created_at = req "created_at" in
+    let created_by = opt "created_by" in
+    (* The predecessor link is optional. *)
+    let predecessor_task_id = opt "predecessor_task_id" in
+    let contract_result =
+      match member "contract" with
+      | None | Some `Null -> Ok None
+      | Some contract_json ->
+        Result.map Option.some (task_contract_of_yojson contract_json)
+    in
+    let execution_links_result =
+      match member "execution_links" with
+      | None -> Ok no_execution_links
+      | Some links_json -> task_execution_links_of_yojson links_json
+    in
+    let handoff_context, handoff_outcome = match m "handoff_context" with
+      | `Null -> None, Field_absent
+      | handoff_json ->
+          (match task_handoff_context_of_yojson handoff_json with
+           | Ok handoff_context -> Some handoff_context, Field_decoded
+           | Error error -> None, Field_unreadable error)
+    in
+    let cycle_count = Json_util.get_int json "cycle_count" |> Option.value ~default:0 in
+    let reclaim_policy, reclaim_outcome =
+      match m "reclaim_policy" with
+      | `Null -> None, Field_absent
+      | reclaim_policy_json ->
+          (match task_reclaim_policy_of_yojson reclaim_policy_json with
+           | Ok policy -> Some policy, Field_decoded
+           | Error error -> None, Field_unreadable error)
+    in
+    let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
+    match
+      skills_result, contract_result, execution_links_result,
+      task_status_of_yojson json
+    with
+    | Ok skills, Ok contract, Ok execution_links, Ok task_status ->
+        Ok
+          ( {
+              id;
+              title;
+              description;
+              task_status;
+              priority;
+              files;
+              created_at;
+              created_by;
+              predecessor_task_id;
+              contract;
+              execution_links;
+              handoff_context;
+              cycle_count;
+              reclaim_policy;
+              do_not_reclaim_reason;
+              skills;
+            },
+            { handoff_context_outcome = handoff_outcome
+            ; reclaim_policy_outcome = reclaim_outcome
+            } )
+    | Error error, _, _, _ -> Error error
+    | _, Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
+    | _, _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)
+    | _, _, _, Error error -> Error error
+  with e -> Error (Printexc.to_string e)
+
+(** Backward-compatible decode: drops the typed per-field diagnostics.
+    Callers that must report a dropped corruption use
+    [task_of_yojson_with_diagnostics] instead. *)
+let task_of_yojson json = Result.map fst (task_of_yojson_with_diagnostics json)
+
+(** Message - broadcast or direct *)
+type message_mention_delivery =
+  | Mention_passive
+  | Mention_pending
+  | Mention_accepted
+  | Mention_rejected
+[@@deriving yojson, show]
+
+let message_mention_delivery_to_string = function
+  | Mention_passive -> "passive"
+  | Mention_pending -> "pending"
+  | Mention_accepted -> "accepted"
+  | Mention_rejected -> "rejected"
+
+(* The kinds of message this codebase writes. [message.msg_type] stays the
+   string on disk, so a row written by another build still decodes; read it
+   with [message_kind_of_string]. *)
+type message_kind =
+  | Msg_broadcast
+  | Msg_session_bound
+  | Msg_session_rebound
+  | Msg_session_ended
+  | Msg_cache_invalidated
+[@@deriving enumerate]
+
+let message_kind_to_string = function
+  | Msg_broadcast -> "broadcast"
+  | Msg_session_bound -> "session_bound"
+  | Msg_session_rebound -> "session_rebound"
+  | Msg_session_ended -> "session_ended"
+  | Msg_cache_invalidated -> "cache_invalidated"
+
+let message_kind_of_string raw =
+  List.find_opt
+    (fun kind -> String.equal (message_kind_to_string kind) raw)
+    all_of_message_kind
+
+type message = {
+  request_id: string;
+  seq: int;
+  from_agent: string; [@key "from"]
+  msg_type: string; [@key "type"] [@default "broadcast"]
+  content: string;
+  mention: string option; [@default None]
+  mention_delivery: message_mention_delivery;
+  timestamp: string;
+  trace_context: string option; [@default None]
+  expires_at: float option; [@default None]
+} [@@deriving yojson { strict = false }, show]
+
+(** Workspace state *)
+type workspace_state = {
+  protocol_version: string;
+  project: string;
+  started_at: string;
+  message_seq: int;
+  active_agents: string list;
+  paused: bool; [@default false]  (** Global pause flag - when true, orchestrator won't spawn *)
+  pause_reason: string option; [@default None]  (** Reason for pause *)
+  paused_by: string option; [@default None]  (** Who paused the workspace *)
+  paused_at: string option; [@default None]  (** When paused *)
+  search_strategy_default: string option; [@default None]
+  speculation_enabled: bool; [@default false]
+  speculation_budget: int option; [@default None]
+} [@@deriving yojson { strict = false }, show]
+
+(* ============================================ *)
+(* Tempo configuration for workspace pace control *)
+(* ============================================ *)
+
+(** Tempo mode - controls workspace execution pace *)
+type tempo_mode =
+  | Normal    (* Default speed *)
+  | Slow      (* Slow pace - careful work *)
+  | Fast      (* Fast pace - simple tasks *)
+  | Paused    (* Temporarily paused *)
+[@@deriving show { with_path = false }]
+
+let tempo_mode_to_string = function
+  | Normal -> "normal"
+  | Slow -> "slow"
+  | Fast -> "fast"
+  | Paused -> "paused"
+
+(* Alias for dashboard compatibility *)
+let string_of_tempo_mode = tempo_mode_to_string
+
+let tempo_mode_of_string = function
+  | "normal" -> Ok Normal
+  | "slow" -> Ok Slow
+  | "fast" -> Ok Fast
+  | "paused" -> Ok Paused
+  | s -> Error ("Unknown tempo mode: " ^ s)
+
+let tempo_mode_to_yojson mode = `String (tempo_mode_to_string mode)
+
+let tempo_mode_of_yojson = function
+  | `String s -> tempo_mode_of_string s
+  | other ->
+    Error
+      (Printf.sprintf "Expected string for tempo_mode (received %s)"
+         (Json_util.kind_name other))
+
+(** Tempo configuration *)
+type tempo_config = {
+  mode: tempo_mode;
+  delay_ms: int;             (* Delay between operations in milliseconds *)
+  reason: string option;     (* Why this tempo was set *)
+  set_by: string option;     (* Who set this tempo *)
+  set_at: string option;     (* When this tempo was set *)
+} [@@deriving show]
+
+let default_tempo_config = {
+  mode = Normal;
+  delay_ms = 0;
+  reason = None;
+  set_by = None;
+  set_at = None;
+}
+
+let tempo_config_to_yojson c =
+  `Assoc [
+    ("mode", tempo_mode_to_yojson c.mode);
+    ("delay_ms", `Int c.delay_ms);
+    ("reason", Json_util.string_opt_to_json c.reason);
+    ("set_by", Json_util.string_opt_to_json c.set_by);
+    ("set_at", Json_util.string_opt_to_json c.set_at);
+  ]
+
+let tempo_config_of_yojson json =
+  try
+    let mode_str = Json_util.get_string_with_default json ~key:"mode" ~default:"" in
+    let delay_ms = Json_util.get_int json "delay_ms" |> Option.value ~default:0 in
+    let reason = Json_util.get_string json "reason" in
+    let set_by = Json_util.get_string json "set_by" in
+    let set_at = Json_util.get_string json "set_at" in
+    match tempo_mode_of_string mode_str with
+    | Ok mode -> Ok { mode; delay_ms; reason; set_by; set_at }
+    | Error e -> Error e
+  with e -> Error (Printexc.to_string e)
+
+(** Backlog (task collection) *)
+type pending_completion_rejection =
+  { task_id : string
+  ; verification_id : string
+  ; producer : string
+  ; reason : string
+  ; authority : completion_authority
+  ; committed_at : string
+  }
+[@@deriving show]
+
+(** Approval delivery is committed with the completed Task. *)
+type pending_completion_approval =
+  { task_id : string
+  ; verification_id : string
+  ; producer : string
+  ; authority : completion_authority
+  ; committed_at : string
+  }
+[@@deriving show]
+
+type task_deletion_phase = Cleanup_required of string list | Cleanup_verified
+[@@deriving show]
+
+type task_deletion_receipt =
+  { deletion_id : string
+  ; deleted_task_id : string
+  ; requested_at : string
+  ; phase : task_deletion_phase
+  }
+[@@deriving show]
+
+type task_creation_request_id = string
+[@@deriving show, eq]
+
+let task_creation_request_id_of_string value =
+  if String.trim value = "" then Error "creation_request_id must be non-blank"
+  else Ok value
+let task_creation_request_id_to_string value = value
+
+type task_creation_receipt = {
+  creation_request_id : task_creation_request_id;
+  created_task_id : string;
+}
+[@@deriving show]
+
+let task_creation_receipt_to_yojson receipt =
+  `Assoc ["creation_request_id", `String receipt.creation_request_id;
+          "task_id", `String receipt.created_task_id]
+
+let task_creation_receipts_of_yojson = function
+  | `List values ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | `Assoc fields :: rest ->
+        (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
+         | ["creation_request_id", `String raw; "task_id", `String created_task_id]
+             when String.trim created_task_id <> "" ->
+           (match task_creation_request_id_of_string raw with
+            | Error error -> Error error
+            | Ok creation_request_id ->
+              decode ({creation_request_id;created_task_id} :: acc) rest)
+         | _ -> Error "malformed task creation receipt")
+      | _ -> Error "task creation receipt must be an object" in
+    decode [] values
+  | _ -> Error "backlog.task_creation_receipts must be a list"
+
+type backlog = {
+  tasks: task list;
+  pending_completion_rejections: pending_completion_rejection list;
+  delivered_completion_rejections: pending_completion_rejection list;
+  pending_completion_approvals: pending_completion_approval list;
+  task_deletion_receipts: task_deletion_receipt list;
+  task_creation_receipts: task_creation_receipt list;
+  last_updated: string;
+  version: int;
+} [@@deriving show]
+
+let pending_completion_rejection_to_yojson (pending : pending_completion_rejection) =
+  `Assoc
+    [ "task_id", `String pending.task_id
+    ; "verification_id", `String pending.verification_id
+    ; "producer", `String pending.producer
+    ; "reason", `String pending.reason
+    ; "authority", `Assoc
+        [ "kind", `String (completion_authority_kind pending.authority)
+        ; "actor", `String (completion_authority_actor pending.authority)
+        ]
+    ; "committed_at", `String pending.committed_at
+    ]
+
+let pending_completion_rejection_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+     | [ "authority", `Assoc authority_fields
+       ; "committed_at", `String committed_at
+       ; "producer", `String producer
+       ; "reason", `String reason
+       ; "task_id", `String task_id
+       ; "verification_id", `String verification_id
+       ] when List.for_all
+           (fun value -> not (String.equal (String.trim value) ""))
+           [ committed_at; producer; reason; task_id; verification_id ] ->
+       let authority =
+         match List.sort (fun (a, _) (b, _) -> String.compare a b) authority_fields with
+         | [ "actor", `String actor; "kind", `String kind ]
+           when not (String.equal (String.trim actor) "") ->
+           (match kind with
+            | "human_operator" -> Ok (Human_operator { operator_id = actor })
+            | "system_llm_agent" -> Ok (System_llm_agent { agent_run_id = actor })
+            | _ -> Error "pending rejection has unknown authority kind")
+         | _ -> Error "pending rejection has malformed authority"
+       in
+       Result.map
+         (fun authority ->
+           { task_id; verification_id; producer; reason; authority; committed_at })
+         authority
+     | _ -> Error "pending rejection requires exact non-blank identity and reason fields")
+  | _ -> Error "pending rejection must be an object"
+
+let completion_rejections_of_yojson ~field = function
+  | `List values ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        (match pending_completion_rejection_of_yojson value with
+         | Error _ as error -> error
+         | Ok pending ->
+           if List.exists
+                (fun (other : pending_completion_rejection) ->
+                  String.equal other.task_id pending.task_id)
+                acc
+           then Error ("duplicate backlog." ^ field ^ " task identity")
+           else decode (pending :: acc) rest)
+    in
+    decode [] values
+  | _ -> Error ("backlog." ^ field ^ " must be a list")
+
+let pending_completion_approval_to_yojson (pending : pending_completion_approval) =
+  `Assoc
+    [ "task_id", `String pending.task_id
+    ; "verification_id", `String pending.verification_id
+    ; "producer", `String pending.producer
+    ; "authority", `Assoc
+        [ "kind", `String (completion_authority_kind pending.authority)
+        ; "actor", `String (completion_authority_actor pending.authority)
+        ]
+    ; "committed_at", `String pending.committed_at
+    ]
+
+let pending_completion_approval_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+     | [ "authority", `Assoc authority_fields
+       ; "committed_at", `String committed_at
+       ; "producer", `String producer
+       ; "task_id", `String task_id
+       ; "verification_id", `String verification_id
+       ] when List.for_all
+           (fun value -> not (String.equal (String.trim value) ""))
+           [ committed_at; producer; task_id; verification_id ] ->
+       let authority =
+         match List.sort (fun (a, _) (b, _) -> String.compare a b) authority_fields with
+         | [ "actor", `String actor; "kind", `String kind ]
+           when not (String.equal (String.trim actor) "") ->
+           (match kind with
+            | "human_operator" -> Ok (Human_operator { operator_id = actor })
+            | "system_llm_agent" -> Ok (System_llm_agent { agent_run_id = actor })
+            | _ -> Error "pending approval has unknown authority kind")
+         | _ -> Error "pending approval has malformed authority"
+       in
+       Result.map
+         (fun authority ->
+           { task_id; verification_id; producer; authority; committed_at })
+         authority
+     | _ -> Error "pending approval requires exact non-blank identity fields")
+  | _ -> Error "pending approval must be an object"
+
+let pending_completion_approvals_of_yojson = function
+  | `List values ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        (match pending_completion_approval_of_yojson value with
+         | Error _ as error -> error
+         | Ok pending ->
+           if List.exists
+                (fun (other : pending_completion_approval) ->
+                  String.equal other.task_id pending.task_id)
+                acc
+           then Error "duplicate pending approval task identity"
+           else decode (pending :: acc) rest)
+    in
+    decode [] values
+  | _ -> Error "backlog.pending_completion_approvals must be a list"
+
+let task_deletion_receipt_to_yojson (receipt : task_deletion_receipt) =
+  `Assoc ["deletion_id", `String receipt.deletion_id;
+    "task_id", `String receipt.deleted_task_id;
+    "requested_at", `String receipt.requested_at;
+    "phase", `String (match receipt.phase with Cleanup_required _ -> "cleanup_required" | Cleanup_verified -> "cleanup_verified");
+    "cleanup_errors", `List (List.map (fun message -> `String message) (match receipt.phase with Cleanup_required errors -> errors | Cleanup_verified -> []))]
+
+let task_deletion_receipts_of_yojson = function
+  | `List values ->
+    let rec read acc = function
+      | [] -> Ok (List.rev acc)
+      | `Assoc fields :: rest ->
+        (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
+         | ["cleanup_errors", `List errors; "deletion_id", `String deletion_id;
+            "phase", `String phase; "requested_at", `String requested_at;
+            "task_id", `String deleted_task_id]
+           when List.for_all (fun value -> String.trim value <> "") [deletion_id; requested_at; deleted_task_id] ->
+           let rec strings acc = function
+             | [] -> Ok (List.rev acc)
+             | `String value :: rest -> strings (value :: acc) rest
+             | _ -> Error "deletion cleanup_errors must contain strings" in
+           let phase = match phase, strings [] errors with
+             | "cleanup_required", Ok errors -> Ok (Cleanup_required errors)
+             | "cleanup_verified", Ok [] -> Ok Cleanup_verified
+             | "cleanup_verified", Ok (_ :: _) -> Error "verified deletion cannot have cleanup errors"
+             | _, Error message -> Error message
+             | _, Ok _ -> Error "unknown deletion cleanup phase" in
+           (match phase with
+            | Ok phase ->
+              if List.exists (fun old -> String.equal old.deletion_id deletion_id) acc
+              then Error "duplicate deletion receipt identity"
+              else read ({deletion_id; deleted_task_id; requested_at; phase} :: acc) rest
+            | Error message -> Error message)
+         | _ -> Error "deletion receipt requires exact identity, phase and error fields")
+      | _ -> Error "deletion receipt must be an object" in
+    read [] values
+  | _ -> Error "task_deletion_receipts must be a list"
+
+let backlog_to_yojson b =
+  `Assoc [
+    ("tasks", `List (List.map task_to_yojson b.tasks));
+    ("pending_completion_rejections",
+      `List (List.map pending_completion_rejection_to_yojson b.pending_completion_rejections));
+    ("delivered_completion_rejections",
+      `List (List.map pending_completion_rejection_to_yojson b.delivered_completion_rejections));
+    ("pending_completion_approvals",
+      `List (List.map pending_completion_approval_to_yojson b.pending_completion_approvals));
+    ("task_deletion_receipts", `List (List.map task_deletion_receipt_to_yojson b.task_deletion_receipts));
+    ("task_creation_receipts", `List (List.map task_creation_receipt_to_yojson b.task_creation_receipts));
+    ("last_updated", `String b.last_updated);
+    ("version", `Int b.version);
+  ]
+
+(** A task whose decode dropped at least one nested field. [index] is the
+    position in [backlog.tasks]; [task_id] is the decoded id (empty when the
+    id itself was absent). *)
+type backlog_task_diagnostics =
+  { dropped_task_index : int
+  ; dropped_task_id : string
+  ; dropped_outcomes : task_decode_diagnostics
+  }
+[@@deriving show, eq]
+
+let backlog_of_yojson_with_diagnostics = function
+  | `Assoc fields ->
+    let pending_fields, fields =
+      List.partition (fun (name, _) -> String.equal name "pending_completion_rejections") fields
+    in
+    let pending_result =
+      match pending_fields with
+      | [] -> Ok []
+      | [ _, value ] -> completion_rejections_of_yojson ~field:"pending_completion_rejections" value
+      | _ -> Error "duplicate backlog.pending_completion_rejections field"
+    in
+    let delivered_fields, fields =
+      List.partition (fun (name, _) -> String.equal name "delivered_completion_rejections") fields
+    in
+    let delivered_result = match delivered_fields with
+      | [] -> Ok []
+      | [ _, value ] -> completion_rejections_of_yojson ~field:"delivered_completion_rejections" value
+      | _ -> Error "duplicate backlog.delivered_completion_rejections field" in
+    let approval_fields, fields =
+      List.partition (fun (name, _) -> String.equal name "pending_completion_approvals") fields
+    in
+    let approval_result = match approval_fields with
+      | [] -> Ok []
+      | [ _, value ] -> pending_completion_approvals_of_yojson value
+      | _ -> Error "duplicate backlog.pending_completion_approvals field" in
+    let receipt_fields, fields = List.partition (fun (name,_) -> String.equal name "task_deletion_receipts") fields in
+    let receipt_result = match receipt_fields with
+      | [] -> Ok []
+      | [_, value] -> task_deletion_receipts_of_yojson value
+      | _ -> Error "duplicate backlog.task_deletion_receipts field" in
+    let creation_fields, fields =
+      List.partition (fun (name,_) -> String.equal name "task_creation_receipts") fields in
+    let creation_result = match creation_fields with
+      | [] -> Ok []
+      | [_, value] -> task_creation_receipts_of_yojson value
+      | _ -> Error "duplicate backlog.task_creation_receipts field" in
+    let fields =
+      List.sort (fun (left, _) (right, _) -> String.compare left right) fields
+    in
+    (match fields with
+     | [ "last_updated", `String last_updated
+       ; "tasks", `List task_values
+       ; "version", version_json
+       ] when not (String.equal (String.trim last_updated) "") ->
+       let rec decode_tasks index acc diags = function
+         | [] -> Ok (List.rev acc, List.rev diags)
+         | task_json :: rest ->
+           (match task_of_yojson_with_diagnostics task_json with
+            | Ok (task, diagnostics) ->
+              let diags =
+                if task_decode_diagnostics_is_unreadable diagnostics
+                then
+                  { dropped_task_index = index
+                  ; dropped_task_id = task.id
+                  ; dropped_outcomes = diagnostics
+                  }
+                  :: diags
+                else diags
+              in
+              decode_tasks (index + 1) (task :: acc) diags rest
+            | Error message ->
+              Error
+                (Printf.sprintf
+                   "backlog.tasks[%d] corrupt: %s"
+                   index
+                   message))
+       in
+       let version_result =
+         match version_json with
+         | `Int value when value >= 1 -> Ok value
+         | `Intlit raw ->
+           (match int_of_string_opt raw with
+            | Some value when value >= 1 -> Ok value
+            | Some _ | None ->
+              Error (Printf.sprintf "backlog.version corrupt: %s" raw))
+         | other ->
+           Error
+             (Printf.sprintf
+                "backlog.version corrupt: %s"
+                (Yojson.Safe.to_string other))
+       in
+       (match decode_tasks 0 [] [] task_values, version_result, pending_result, delivered_result,
+              approval_result, receipt_result, creation_result with
+        | Ok (tasks, diagnostics), Ok version, Ok pending_completion_rejections,
+          Ok delivered_completion_rejections, Ok pending_completion_approvals,
+          Ok task_deletion_receipts, Ok task_creation_receipts ->
+          if List.exists (fun (pending : pending_completion_rejection) ->
+              List.exists (fun (delivered : pending_completion_rejection) ->
+                String.equal pending.task_id delivered.task_id) delivered_completion_rejections)
+              pending_completion_rejections
+          then Error "completion rejection task has both pending and delivered state"
+          else Ok
+            ( { tasks; pending_completion_rejections; delivered_completion_rejections;
+                pending_completion_approvals; task_deletion_receipts; task_creation_receipts;
+                last_updated; version }
+            , diagnostics )
+        | Error error, _, _, _, _, _, _ | _, Error error, _, _, _, _, _
+        | _, _, Error error, _, _, _, _ | _, _, _, Error error, _, _, _
+        | _, _, _, _, Error error, _, _ | _, _, _, _, _, Error error, _
+        | _, _, _, _, _, _, Error error -> Error error)
+     | [ "last_updated", `String _; "tasks", `List _; "version", _ ] ->
+       Error "backlog.last_updated must be a non-blank string"
+     | _ ->
+       Error
+         "backlog requires tasks, last_updated, positive version, delivered rejection state and optional delivery lists")
+  | other ->
+    Error
+      (Printf.sprintf
+         "backlog must be an object, got %s"
+         (Yojson.Safe.to_string other))
+
+(** Backward-compatible decode: drops the typed per-task diagnostics.
+    Callers that must report a dropped corruption use
+    [backlog_of_yojson_with_diagnostics] instead. *)
+let backlog_of_yojson json = Result.map fst (backlog_of_yojson_with_diagnostics json)
+
+(** SSE Session info (for tracking connected agents) *)
+type sse_session = {
+  agent_name: string;
+  connected_at: string;
+  last_activity: float; (* Unix timestamp for easy comparison *)
+  is_listening: bool;
+} [@@deriving show]
+
+(** MCP Tool result *)
+type tool_result = {
+  success: bool;
+  message: string;
+  data: Yojson.Safe.t option; [@default None]
+} [@@deriving show]
+
+let tool_result_to_yojson r =
+  let base = [
+    ("success", `Bool r.success);
+    ("message", `String r.message);
+  ] in
+  match r.data with
+  | Some d -> `Assoc (base @ [("data", d)])
+  | None -> `Assoc base
+
+(** Tool schema for MCP *)
+type tool_schema = {
+  name: string;
+  description: string;
+  input_schema: Yojson.Safe.t;
+}
+
+(** Structured result for claim_next scheduling (avoids brittle string parsing).
+    Defined here so that both Workspace_task_schedule (producer) and consumers
+    (tool_task, orchestrator) can reference the type without
+    triggering warning 34 from [include] re-export. *)
+type claim_next_result =
+  | Claim_next_claimed of {
+      task_id : string;
+      title : string;
+      priority : int;
+      message : string;
+      scope_widened : bool;
+          (** True when goal-scope was widened to all_tasks because no scoped
+              task was admission-eligible (schedule-level fallback). Lets the
+              operator distinguish a scope-overriding claim from an ordinary
+              in-scope claim. *)
+    }
+  | Claim_next_no_unclaimed
+  | Claim_next_no_eligible of
+      { excluded_count : int
+      ; scope_excluded_count : int
+      ; explicit_excluded_count : int
+      ; claim_pool_candidate_count : int
+      }
+  | Claim_next_error of string

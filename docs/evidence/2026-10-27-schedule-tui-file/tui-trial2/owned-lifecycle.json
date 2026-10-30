@@ -1,0 +1,174 @@
+[
+  {
+    "stage": "before-setup",
+    "inventory": {
+      "stage": "before-setup",
+      "observed_at": 1793055212.59665,
+      "available": true,
+      "servers": [],
+      "scope": "Current readable same-user exact native executable + exact owned base + argv/start cookie. No historical all-process/no-ever-spawn claim."
+    },
+    "startup_output": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace/.masc/logs/masc-server-61922.log",
+      "exists": false
+    },
+    "unexpected_servers": [],
+    "new_startup_attempt_file": false,
+    "no_unobserved_spawn_claim": false
+  },
+  {
+    "stage": "before-TUI",
+    "inventory": {
+      "stage": "before-TUI",
+      "observed_at": 1793055217.337327,
+      "available": true,
+      "servers": [
+        {
+          "pid": 52686,
+          "ppid": 52662,
+          "uid": 502,
+          "start_sec": 1793055213,
+          "start_usec": 85974,
+          "executable": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+          "argv": [
+            "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+            "start",
+            "--base-path",
+            "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "61921"
+          ],
+          "canonical_argv_verified": true,
+          "owned_base_field_verified": true
+        }
+      ],
+      "scope": "Current readable same-user exact native executable + exact owned base + argv/start cookie. No historical all-process/no-ever-spawn claim."
+    },
+    "startup_output": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace/.masc/logs/masc-server-61922.log",
+      "exists": false
+    },
+    "unexpected_servers": [],
+    "new_startup_attempt_file": false,
+    "no_unobserved_spawn_claim": false
+  },
+  {
+    "stage": "cleanup-before",
+    "inventory": {
+      "stage": "cleanup-before",
+      "observed_at": 1793055292.7165492,
+      "available": true,
+      "servers": [
+        {
+          "pid": 52686,
+          "ppid": 52662,
+          "uid": 502,
+          "start_sec": 1793055213,
+          "start_usec": 85974,
+          "executable": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+          "argv": [
+            "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+            "start",
+            "--base-path",
+            "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "61921"
+          ],
+          "canonical_argv_verified": true,
+          "owned_base_field_verified": true
+        }
+      ],
+      "scope": "Current readable same-user exact native executable + exact owned base + argv/start cookie. No historical all-process/no-ever-spawn claim."
+    },
+    "startup_output": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace/.masc/logs/masc-server-61922.log",
+      "exists": true,
+      "bytes_read": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "device": 16777234,
+      "inode": 4410105491,
+      "mtime_ns": 1793055217464926989,
+      "changed_during_read": false,
+      "content_retained": false,
+      "meaning": "Canonical startup-output file is opened before spawn; existence proves an attempt, not a live/successful child."
+    },
+    "unexpected_servers": [],
+    "new_startup_attempt_file": true,
+    "no_unobserved_spawn_claim": false
+  },
+  {
+    "stage": "after-TUI-stop",
+    "inventory": {
+      "stage": "after-TUI-stop",
+      "observed_at": 1793055292.875988,
+      "available": true,
+      "servers": [
+        {
+          "pid": 52686,
+          "ppid": 52662,
+          "uid": 502,
+          "start_sec": 1793055213,
+          "start_usec": 85974,
+          "executable": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+          "argv": [
+            "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+            "start",
+            "--base-path",
+            "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "61921"
+          ],
+          "canonical_argv_verified": true,
+          "owned_base_field_verified": true
+        }
+      ],
+      "scope": "Current readable same-user exact native executable + exact owned base + argv/start cookie. No historical all-process/no-ever-spawn claim."
+    },
+    "startup_output": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace/.masc/logs/masc-server-61922.log",
+      "exists": true,
+      "bytes_read": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "device": 16777234,
+      "inode": 4410105491,
+      "mtime_ns": 1793055217464926989,
+      "changed_during_read": false,
+      "content_retained": false,
+      "meaning": "Canonical startup-output file is opened before spawn; existence proves an attempt, not a live/successful child."
+    },
+    "unexpected_servers": [],
+    "new_startup_attempt_file": true,
+    "no_unobserved_spawn_claim": false
+  },
+  {
+    "stage": "cleanup-after",
+    "inventory": {
+      "stage": "cleanup-after",
+      "observed_at": 1793055293.364629,
+      "available": true,
+      "servers": [],
+      "scope": "Current readable same-user exact native executable + exact owned base + argv/start cookie. No historical all-process/no-ever-spawn claim."
+    },
+    "startup_output": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace/.masc/logs/masc-server-61922.log",
+      "exists": true,
+      "bytes_read": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "device": 16777234,
+      "inode": 4410105491,
+      "mtime_ns": 1793055217464926989,
+      "changed_during_read": false,
+      "content_retained": false,
+      "meaning": "Canonical startup-output file is opened before spawn; existence proves an attempt, not a live/successful child."
+    },
+    "unexpected_servers": [],
+    "new_startup_attempt_file": true,
+    "no_unobserved_spawn_claim": false
+  }
+]

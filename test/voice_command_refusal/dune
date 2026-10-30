@@ -1,0 +1,8 @@
+; Why a voice command did not run, told apart by what actually happened. The
+; commands are spawned for real: a name nothing installs, and a file that is
+; there without an execute bit.
+
+(test
+ (name test_voice_command_refusal)
+ (libraries alcotest eio eio_main unix masc.masc_process masc.voice_config
+  masc.voice_bridge_core))

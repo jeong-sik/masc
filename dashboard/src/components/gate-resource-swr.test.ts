@@ -1,0 +1,163 @@
+// Stale-while-revalidate guard for the Gate resource.
+//
+// gateResource backs the Gate/HITL surface. It must NOT blank its data
+// while a refresh is in flight:
+// refreshGate() runs on mount, on every auto-refresh tick, and after every
+// approve/reject. If a refetch cleared the data, the approvals queue would flash
+// its "열린 승인이 없습니다" empty state every cycle. This pins that the previous
+// data stays visible (loading=true, data=previous) until the new data arrives.
+
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { DashboardGateResponse, KeeperApprovalQueueItem } from '../types'
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(r => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+function queueItem(id: string): KeeperApprovalQueueItem {
+  return {
+    id,
+    origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+    continuation_channel: { kind: 'keeper', keeper_name: 'keeper-x' },
+    keeper_name: 'keeper-x',
+    tool_name: 'fs_write',
+    waiting_s: 10,
+    input_preview: 'x',
+    task_id: 'T-1',
+  } as KeeperApprovalQueueItem
+}
+
+function response(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
+  return {
+    generated_at: '2026-06-24T00:00:00Z',
+    approval_queue: queue,
+    approval_queue_state: { state: 'ready' },
+    recent_resolved: [],
+    recent_resolved_page: {
+      returned: 0,
+      matched: 0,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: false,
+      scan_exhausted: false,
+    },
+    recent_resolved_state: { state: 'ready' },
+    approval_rules: [],
+    approval_rules_state: { state: 'ready' },
+    keeper_modes: [],
+    keeper_modes_state: { state: 'ready' },
+    keeper_exact_lanes: [],
+    keeper_exact_lanes_state: { state: 'ready' },
+    hitl: {
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'keeper_gate_judge', slots: ['keeper_gate_judge'] },
+    },
+  }
+}
+
+async function loadGate() {
+  vi.resetModules()
+  const fetchDashboardGate = vi.fn()
+  vi.doMock('../api', () => ({
+    fetchDashboardGate,
+    resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+    retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
+    deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+    setGateMode: vi.fn().mockResolvedValue({ ok: true }),
+  }))
+  vi.doMock('../api/dashboard-gate', () => ({
+    fetchDashboardGate,
+    resolveGateApproval: vi.fn().mockResolvedValue({ ok: true }),
+    retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
+    deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+    setGateMode: vi.fn().mockResolvedValue({ ok: true }),
+  }))
+  vi.doMock('../sse-store', () => ({
+    registerGateRefresh: vi.fn(),
+    registerGateAuditReceiptObserver: vi.fn(),
+  }))
+  const signals = await import('./gate-signals')
+  const actions = await import('./gate-actions')
+  return { fetchDashboardGate, signals, actions }
+}
+
+afterEach(() => {
+  vi.resetModules()
+  vi.clearAllMocks()
+  vi.doUnmock('../api')
+  vi.doUnmock('../api/dashboard-gate')
+  vi.doUnmock('../sse-store')
+})
+
+describe('Gate resource (stale-while-revalidate)', () => {
+  it('keeps the previously loaded data visible while a refresh is in flight', async () => {
+    const { fetchDashboardGate, signals, actions } = await loadGate()
+
+    fetchDashboardGate.mockResolvedValueOnce(response([queueItem('a1')]))
+    await actions.refreshGate()
+    expect(signals.gateData.value?.approval_queue).toHaveLength(1)
+    expect(signals.gateLoading.value).toBe(false)
+
+    // Second refresh is in flight (its fetch has not resolved yet).
+    const pending = deferred<DashboardGateResponse>()
+    fetchDashboardGate.mockReturnValueOnce(pending.promise)
+    const inflight = actions.refreshGate()
+    await Promise.resolve()
+
+    // Loading is true, but the previous queue is STILL visible — not blanked.
+    expect(signals.gateLoading.value).toBe(true)
+    expect(signals.gateData.value?.approval_queue).toHaveLength(1)
+
+    // Once the refresh resolves, the new data replaces it.
+    pending.resolve(response([]))
+    await inflight
+    expect(signals.gateLoading.value).toBe(false)
+    expect(signals.gateData.value?.approval_queue).toHaveLength(0)
+  })
+
+  it('replaces stale ready data with a typed observation error when refresh fails', async () => {
+    const { fetchDashboardGate, signals, actions } = await loadGate()
+
+    fetchDashboardGate.mockResolvedValueOnce(response([queueItem('a1')]))
+    await actions.refreshGate()
+
+    fetchDashboardGate.mockRejectedValueOnce(new Error('Gate 새로고침 실패'))
+    await actions.refreshGate()
+
+    expect(signals.gateData.value).toEqual({
+      approval_queue: null,
+      approval_queue_state: {
+        state: 'observation_error',
+        code: 'observation_failed',
+        title: 'Gate observation unavailable',
+        operator_detail: 'Gate 새로고침 실패',
+        severity: 'bad',
+        icon: '!',
+      },
+      recent_resolved: null,
+      recent_resolved_page: null,
+      recent_resolved_state: {
+        state: 'unavailable',
+        stage: 'list_recent_resolved',
+        error: 'Gate 새로고침 실패',
+      },
+      approval_rules: [],
+      approval_rules_state: {
+        state: 'unavailable',
+        error: 'Gate 새로고침 실패',
+      },
+      keeper_modes: [],
+      keeper_modes_state: { state: 'unavailable', error: 'Gate 새로고침 실패' },
+      keeper_exact_lanes: [],
+      keeper_exact_lanes_state: { state: 'unavailable', error: 'Gate 새로고침 실패' },
+      hitl: null,
+    })
+    expect(signals.gateError.value).toContain('Gate 새로고침 실패')
+    expect(signals.gateLoading.value).toBe(false)
+  })
+})

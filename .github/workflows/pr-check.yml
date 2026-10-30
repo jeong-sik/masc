@@ -1,0 +1,57 @@
+name: Minimal manual checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      native-tui-source-sha:
+        description: Optional exact source SHA for a macOS arm64 TUI artifact and focused behavior tests
+        required: false
+        default: ''
+        type: string
+      native-tui-scenario:
+        description: Native behavior scope; workspace scopes also package their matching server
+        required: false
+        default: detail-ownership
+        type: choice
+        options:
+          - detail-ownership
+          - workspace-files
+          - rich-workspace
+          - rich-chat-workspace
+          - original-tool-result
+          - code-references
+          - resource-reading
+          - addon-lifecycle
+          - browser-lane
+          - source-readers
+          - code-drafts
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: Source and config syntax
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install the YAML parser
+        run: python3 -m pip install --disable-pip-version-check PyYAML
+      - name: Validate concrete source and configuration syntax
+        run: |
+          git diff --check origin/main...HEAD
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('docs/constitution.xml')"
+          bash scripts/lint/yaml-syntax.sh
+          bash scripts/check-toml-syntax.sh
+      - name: Scan the tracked tree for credentials
+        run: python3 scripts/ci/check-committed-secrets.py
+
+  native-tui:
+    if: inputs.native-tui-source-sha != ''
+    uses: ./.github/workflows/tui-native-proof.yml
+    with:
+      source-sha: ${{ inputs.native-tui-source-sha }}
+      scenario: ${{ inputs.native-tui-scenario }}

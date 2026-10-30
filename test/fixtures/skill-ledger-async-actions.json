@@ -1,0 +1,194 @@
+{
+  "schema": "masc.skill-activations/v8",
+  "workspace_key": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "session_id": "trace-one",
+  "revision": "60aee6191d6210ddec6fadd400214a064f1a467fe44b37b103a7d8f4e910a467",
+  "activations": [
+    {
+      "identity": {
+        "source_id": "workspace",
+        "package_id": "review",
+        "name": "review"
+      },
+      "content_revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "snapshot_revision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "turn_ref": "trace-one#41",
+      "runtime_id": "original-runtime",
+      "skill_tool_use_id": "composition-child-one",
+      "agent_core_turn": 41,
+      "invocation": {
+        "kind": "nested_composition",
+        "origin": {
+          "kind": "task_composition",
+          "task_ids": [
+            "task-A"
+          ]
+        },
+        "tool_name": "masc_tool_compose_run",
+        "scope": {
+          "parent_tool_use_id": "composition-async:019ffc2b-0a41-7ba2-bf58-598e0e7f711b",
+          "composition_run_id": "019ffc2b-0a41-7ba2-bf58-598e0e7f711b",
+          "alias": "child/~quoted"
+        }
+      },
+      "delivery": null,
+      "actions": [],
+      "activated_at": "2026-08-27T00:00:01Z"
+    }
+  ],
+  "transition_rejections": [],
+  "async_result_deliveries": [
+    {
+      "original_turn_ref": "trace-one#41",
+      "composition_run_id": "019ffc2b-0a41-7ba2-bf58-598e0e7f711b",
+      "logical_parent_tool_use_id": "composition-async:019ffc2b-0a41-7ba2-bf58-598e0e7f711b",
+      "request_id": "original-request-one",
+      "physical_turn_ref": "new-physical-trace#73",
+      "runtime_id": "receiving-runtime",
+      "status_invocation": {
+        "tool_use_id": "lookup-original-result",
+        "turn": 1,
+        "schedule": {
+          "planned_index": 0,
+          "batch_index": 0,
+          "batch_size": 1,
+          "execution_mode": "serial"
+        },
+        "completion": {
+          "kind": "continue_after_success"
+        }
+      },
+      "boundary": {
+        "kind": "model_response",
+        "agent_core_turn": 2
+      },
+      "receipt": {
+        "tool_use_id": "lookup-original-result",
+        "content_bytes": 12,
+        "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "presentation": "inline_result",
+      "child_activations": [
+        {
+          "skill_tool_use_id": "composition-child-one",
+          "activation_sha256": "3a0d4aa6f56c09e0843cb7dfe97ba7839209d3888910138351b5d9ec457c30c1"
+        }
+      ],
+      "observed_at": "2026-10-14T12:00:00Z"
+    },
+    {
+      "original_turn_ref": "trace-one#41",
+      "composition_run_id": "019ffc2b-0a41-7ba2-bf58-598e0e7f711b",
+      "logical_parent_tool_use_id": "composition-async:019ffc2b-0a41-7ba2-bf58-598e0e7f711b",
+      "request_id": "original-request-one",
+      "physical_turn_ref": "new-physical-trace#73",
+      "runtime_id": "receiving-runtime",
+      "status_invocation": {
+        "tool_use_id": "lookup-original-result",
+        "turn": 1,
+        "schedule": {
+          "planned_index": 0,
+          "batch_index": 0,
+          "batch_size": 1,
+          "execution_mode": "serial"
+        },
+        "completion": {
+          "kind": "continue_after_success"
+        }
+      },
+      "boundary": {
+        "kind": "official_client_result_handoff",
+        "agent_core_turn": 1
+      },
+      "receipt": {
+        "tool_use_id": "lookup-original-result",
+        "content_bytes": 12,
+        "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "presentation": "manifest_reference",
+      "child_activations": [
+        {
+          "skill_tool_use_id": "composition-child-one",
+          "activation_sha256": "3a0d4aa6f56c09e0843cb7dfe97ba7839209d3888910138351b5d9ec457c30c1"
+        }
+      ],
+      "observed_at": "2026-10-14T12:00:00Z"
+    }
+  ],
+  "async_actions": [
+    {
+      "delivery_sha256": "6efce4fb99fcbb545887f1efc51e7e6ac12f52de5ccd8f85f2adc1e9187d72ed",
+      "physical_turn_ref": "new-physical-trace#73",
+      "runtime_id": "receiving-runtime",
+      "tool_name": "keeper_artifact_read",
+      "occurrence": {
+        "kind": "sdk_result",
+        "invocation": {
+          "tool_use_id": "follow-on-call",
+          "turn": 2,
+          "schedule": {
+            "planned_index": 0,
+            "batch_index": 0,
+            "batch_size": 1,
+            "execution_mode": "serial"
+          },
+          "completion": {
+            "kind": "continue_after_success"
+          }
+        },
+        "result": {
+          "kind": "handler_returned",
+          "bytes": 12,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      },
+      "observed_at": "2026-10-14T12:00:04Z"
+    },
+    {
+      "delivery_sha256": "6efce4fb99fcbb545887f1efc51e7e6ac12f52de5ccd8f85f2adc1e9187d72ed",
+      "physical_turn_ref": "new-physical-trace#73",
+      "runtime_id": "receiving-runtime",
+      "tool_name": "keeper_artifact_read",
+      "occurrence": {
+        "kind": "sdk_result",
+        "invocation": {
+          "tool_use_id": "follow-on-call",
+          "turn": 3,
+          "schedule": {
+            "planned_index": 0,
+            "batch_index": 0,
+            "batch_size": 1,
+            "execution_mode": "serial"
+          },
+          "completion": {
+            "kind": "continue_after_success"
+          }
+        },
+        "result": {
+          "kind": "handler_errored",
+          "bytes": 7,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "recoverable": false,
+          "error_class": "deterministic"
+        }
+      },
+      "observed_at": "2026-10-14T12:00:04Z"
+    },
+    {
+      "delivery_sha256": "6efce4fb99fcbb545887f1efc51e7e6ac12f52de5ccd8f85f2adc1e9187d72ed",
+      "physical_turn_ref": "new-physical-trace#73",
+      "runtime_id": "receiving-runtime",
+      "tool_name": "native-read",
+      "occurrence": {
+        "kind": "native_started",
+        "official_turn": 0,
+        "identity": {
+          "kind": "provider_step",
+          "conversation_id": "official-session",
+          "step_index": 0
+        }
+      },
+      "observed_at": "2026-10-14T12:00:04Z"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-write-boundaries-20261005/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  43 passed (43)
+   Start at  05:03:54
+   Duration  2.67s (tests 34%, import 26%, transform 25%, environment 8%, setup 7%)
+

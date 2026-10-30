@@ -1,0 +1,11 @@
+Production source base: 90cb0ca40011d36a28b2d4583ce11561e01c993d
+No production change in this verification unit. No local Dune/project build.
+11bde344c4405a94f5bce0fb04a70f288d54c5256c7534866bdad30dd13abac7  packages/agent_core/lib/structured.ml
+12cc19c5f5c7a7129ad9bfca33e19880b263ad23cc2110583980a866b74f830b  packages/agent_core/lib/structured.mli
+4d5454e30f0715f18fa35acc2ec635f5ff740491c57a9baefb923d245329c5e6  packages/agent_core/lib/llm_provider/backend_openai_parse.ml
+cbb1ce411ebc61674e96a03ab70db0925451ae41c1f9ab152d324eee915a53b4  packages/agent_core/lib/llm_provider/backend_openai_responses.ml
+f820cf5836615b38f2f553a1562e22bc71757829ced4568b7427a98793a08d77  packages/agent_core/lib/llm_provider/backend_gemini.ml
+2c7d801d5162f8a9a1f330d99c35f6f16fafd819e4354a5a635be8c92cbdf9cc  packages/agent_core/lib/llm_provider/streaming.ml
+c797c93066d45e3c08d56f77ee1893090912b6fd2708a2136c56b8fd17b44577  packages/agent_core/lib/llm_provider/complete_stream_acc.ml
+
+Changed test source: ocamlc -stop-after parsing PASS. git diff --check PASS.

@@ -1,0 +1,31 @@
+{
+  "provenance": "Headless Chromium rendered final MCP stdio fixture output; not native host or production",
+  "preview_sha256": "7196bd7caad9de2969c40c546425a559183fc04a6b8cb0587a333cedc78f0f4f",
+  "composition_sha256": "b3c0a6199bd210f67b4f87642ea03041eb95b18d949817a6b0acb9cd5da81777",
+  "checks": [
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1100,
+      "horizontal_overflow": false,
+      "lineage_expanded": true,
+      "lineage_matches_worker": true,
+      "body_matches_worker": true,
+      "delivery_matches_worker": true,
+      "screenshot": "preview.png",
+      "sha256": "066ca646378502060c0a96053ab4afd8dad674d01502cf35bf898947d8067a33"
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "horizontal_overflow": false,
+      "lineage_expanded": true,
+      "lineage_matches_worker": true,
+      "body_matches_worker": true,
+      "delivery_matches_worker": true,
+      "screenshot": "preview-mobile.png",
+      "sha256": "0c39a4c13066dfe200fb6c91b6a3b9dab6dcc57356f7c1cd0cb0b001db4bf070"
+    }
+  ]
+}

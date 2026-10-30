@@ -1,0 +1,7 @@
+# Edit without a file change
+
+The collaboration baseline recorded identical old_string/new_string Edit calls as successful writes. In particular exec-1789044483555-007b and exec-1789044515492-0080 reference manifest dce71523712a7552b3ef8716c776ad817f78ddef9b460ee1cc148ec776d4c761: occurrences=1, bytes_written=12945, with the same before/after SHA 897b0d07f35e8f436a917e42ee920d7ad1e570fe4b20516239ea4f7abe4c2d1d. Later baseline edits differ; this finding concerns those exact calls.
+
+The patch is still validated against the actual source first, so identical replacement strings do not excuse a missing or ambiguous match. If the resulting bytes equal the source, the host path returns a typed internal Write_unchanged and the remote path returns without issuing its write request. Both expose changed=false, bytes_written=0 and the matched occurrence count. They do not replace the file, create edit snapshots, or emit file-change evidence. Ordinary call/result observations remain available. Actual changes expose changed=true.
+
+The feature tests check the actual host file's inode, mtime and bytes; absent snapshot/change evidence; missing-match rejection; and absence of a remote write frame. This is not a repetition counter, budget, or semantic text heuristic. The comparison concerns the exact patch result. No deployed runtime was changed and no local build was run; CI must establish compiled behavior.

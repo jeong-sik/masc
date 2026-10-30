@@ -1,0 +1,38 @@
+{
+  "source_head": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+  "scope": "Actual pure evidence-list and reference classifier functions with minimal declared Masc_domain record ports. The old handoff is grounded in actual request11 Task feedback; no lifecycle hook/store/transport/FS execution and no recovered4048 request.",
+  "source_files": [
+    {
+      "path": "lib/task/tool_task_completion_review.ml",
+      "source_sha256": "eaf8d55d006b3de9dc9113325861db48e43a10ee068bd3fccbab030ecc421d73"
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.ml",
+      "source_sha256": "bf536c0c5b765a6e8e20263f205eeacc0d933eb4115e10ec676731d7002a99e5"
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.ml",
+      "source_sha256": "be43bfd6f180b78f1238088e1583800d12ce5ece7105eb50545b45cf62384473"
+    },
+    {
+      "path": "lib/workspace/workspace_verification_snapshot.ml",
+      "source_sha256": "5f5123e9fc847d3a01caa077d2583aeeb41470dfb17ef529be634c881b954b7c"
+    }
+  ],
+  "probe_sha256": "25bf0bcf8e4cdaea34535da592b91582efea4c9833b3cf4b3d5522924ab3d9de",
+  "compile_exit": 0,
+  "compile_output": "",
+  "run_exit": 0,
+  "output": "PASS first capture spec merges previous rejected bare verification ref\nPASS first capture spec also retains the same valid artifact ref\nPASS bare prior verification ref is unresolvable, not a failed artifact read\nPASS actual artifact path passes producer-relative syntax\nPASS second identical claim no longer inherits the bare ref after Task handoff update\nFIRST_REF \"artifact:workspace/acceptance.json\"\nFIRST_REF \"note:Controlled operator-proxy rejection: the initial owner explicitly required only alpha=true with beta=false and gamma=false before the first Task approval. The immutable submitted artifact has all three true. Restore beta/gamma=false, reread actual bytes, and resubmit the alpha-only artifact. The narrowed model-authored contract does not erase the original owner requirement. This is a Task verification verdict, not human Goal confirmation.\"\nFIRST_REF \"note:Set alpha to true in acceptance.json with beta/gamma as false\"\nFIRST_REF \"vrf-5dd15968c9ec601c495335d00cc7b471\"\nSECOND_REF \"artifact:workspace/acceptance.json\"\nSECOND_REF \"note:Set alpha to true in acceptance.json with beta/gamma as false\"\n",
+  "probe_file": "/tmp/masc-independent-2be9-diagnosis-20261025/handoff_probe.ml",
+  "fixture_old_handoff": {
+    "summary": "Controlled operator-proxy rejection: the initial owner explicitly required only alpha=true with beta=false and gamma=false before the first Task approval. The immutable submitted artifact has all three true. Restore beta/gamma=false, reread actual bytes, and resubmit the alpha-only artifact. The narrowed model-authored contract does not erase the original owner requirement. This is a Task verification verdict, not human Goal confirmation.",
+    "reason": "Controlled operator-proxy rejection: the initial owner explicitly required only alpha=true with beta=false and gamma=false before the first Task approval. The immutable submitted artifact has all three true. Restore beta/gamma=false, reread actual bytes, and resubmit the alpha-only artifact. The narrowed model-authored contract does not erase the original owner requirement. This is a Task verification verdict, not human Goal confirmation.",
+    "evidence_refs": [
+      "vrf-5dd15968c9ec601c495335d00cc7b471"
+    ],
+    "updated_at": "2026-10-24T17:26:58Z",
+    "updated_by": "goal-canary-operator"
+  },
+  "fixture_old_handoff_source": "request-000011.request last keeper_tasks_list Tool snapshot"
+}

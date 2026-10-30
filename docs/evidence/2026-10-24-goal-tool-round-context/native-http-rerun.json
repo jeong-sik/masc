@@ -1,0 +1,10 @@
+{
+  "run": 40098831581,
+  "source_sha": "9f024959528a5c0ea12ce59f0c1a63b2a364695d",
+  "conclusion": "success",
+  "suite": "test_keeper_direct_goal_provider_wire",
+  "product_source": "1eef45b69f395b1819537c116c7df839023da110",
+  "product_delta": "empty lib/bin/dashboard/config/scripts diff",
+  "scope": "six native HTTP receiver cases including3requests Read\u2192real bundled Taskcreate\u2192final; exact Goal link persisted and Goal carrier absent from checkpoint; deterministic peer only, not real model G2/G3",
+  "log_sha256": "e32f547f4b077056fe047c3cd20e25d64f4c288cb8b44efa5e495350e3e5860b"
+}

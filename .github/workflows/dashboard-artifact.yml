@@ -1,0 +1,176 @@
+name: Dashboard artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_files:
+        description: Space-separated dashboard feature test files to verify before packaging
+        type: string
+        default: ""
+      capture_item_browser:
+        description: Verify Item account transitions in Chromium and retain fixture screenshots
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-artifact-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: Build and package dashboard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout requested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: |
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Verify Keeper activation UI and API contracts
+        working-directory: dashboard
+        run: >-
+          pnpm exec vitest run --config vitest.config.ts
+          --no-file-parallelism --maxWorkers=1
+          src/components/keeper-config-panel.test.ts
+          src/api/dashboard-keeper-config.test.ts
+          src/api/dashboard.test.ts
+          src/api/gate-keepers.test.ts
+          src/api/schemas/gate-keepers.test.ts
+          src/store-normalizers.test.ts
+          src/components/fleet-health-panel.test.ts
+          src/components/tool-monitor/tool-monitor-operations.test.ts
+          src/components/tool-monitor/tool-monitor-reactivity.test.ts
+
+      - name: Verify production bundle contract
+        working-directory: dashboard
+        run: pnpm exec vitest run --config vitest.config.ts src/dashboard-bundle-preload.test.ts
+
+      - name: Verify requested dashboard features
+        if: inputs.test_files != ''
+        working-directory: dashboard
+        env:
+          DASHBOARD_TEST_FILES: ${{ inputs.test_files }}
+        run: |
+          read -r -a test_files <<< "$DASHBOARD_TEST_FILES"
+          for test_file in "${test_files[@]}"; do
+            if [[ ! -f "$test_file" ]]; then
+              printf 'Requested dashboard test file not found: %s\n' "$test_file" >&2
+              exit 1
+            fi
+          done
+          pnpm exec vitest run --config vitest.config.ts "${test_files[@]}"
+
+      - name: Install Item proof browser
+        if: inputs.capture_item_browser
+        working-directory: dashboard
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify Item browser transitions
+        if: inputs.capture_item_browser
+        working-directory: dashboard
+        env:
+          KEEPER_ITEMS_ARTIFACT_DIR: ${{ runner.temp }}/keeper-items-browser
+          KEEPER_ITEMS_FIXTURE_URL: http://127.0.0.1:5197/dashboard/dev-fixtures/keeper-items-fixture.html
+          MASC_DASHBOARD_PROXY_TARGET: http://127.0.0.1:1
+        run: |
+          set -euo pipefail
+          mkdir -p "$KEEPER_ITEMS_ARTIFACT_DIR"
+          pnpm exec vite --host 127.0.0.1 --port 5197 --strictPort > "$KEEPER_ITEMS_ARTIFACT_DIR/vite.log" 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          curl -fsS --retry 30 --retry-connrefused --retry-delay 1 --retry-max-time 30 --max-time 5 "$KEEPER_ITEMS_FIXTURE_URL" > /dev/null
+          pnpm exec node e2e/keeper-items.mjs
+          pnpm exec node e2e/keeper-items-workspace.mjs
+          pnpm exec node e2e/keeper-items-warmup.mjs
+
+      - name: Upload Item browser evidence
+        if: always() && inputs.capture_item_browser
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: keeper-items-browser-${{ github.sha }}
+          path: ${{ runner.temp }}/keeper-items-browser/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build dashboard
+        working-directory: dashboard
+        env:
+          NODE_ENV: production
+        run: pnpm build
+
+      - name: Package bundle and source receipt
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          python3 - <<'PY'
+          import datetime
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tarfile
+
+          source_commit = subprocess.check_output(
+              ['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if source_commit != os.environ['EXPECTED_SOURCE_COMMIT']:
+              raise SystemExit('checkout differs from requested source commit')
+          bundle = Path('assets/dashboard')
+          stamp = (bundle / '.build-stamp').read_text().strip()
+          datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+          if not (bundle / 'index.html').is_file():
+              raise SystemExit('dashboard index is missing')
+          dist = Path('dist')
+          dist.mkdir(exist_ok=True)
+          archive = dist / f'masc-dashboard-{source_commit}.tar.gz'
+          # Add the directory, never a shell glob: .build-stamp must travel
+          # with the exact HTML/JS bytes. Tar preserves its build-time mtime.
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(bundle, arcname='dashboard')
+          with tarfile.open(archive, 'r:gz') as packaged:
+              if 'dashboard/.build-stamp' not in packaged.getnames():
+                  raise SystemExit('packaged dashboard has no build stamp')
+          def sha256(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+          receipt = {
+              'schema': 'masc.dashboard-artifact.v1',
+              'source_commit': source_commit,
+              'source_tree': subprocess.check_output(
+                  ['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              'workflow_run_id': os.environ['GITHUB_RUN_ID'],
+              'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'built_at': stamp,
+              'archive': archive.name,
+              'archive_sha256': sha256(archive),
+              'index_sha256': sha256(bundle / 'index.html'),
+              'lock_sha256': sha256(Path('dashboard/pnpm-lock.yaml')),
+              'node_version': subprocess.check_output(['node', '--version'], text=True).strip(),
+              'pnpm_version': subprocess.check_output(['pnpm', '--version'], text=True).strip(),
+          }
+          (dist / 'dashboard-build-receipt.json').write_text(
+              json.dumps(receipt, indent=2) + '\n')
+          (dist / 'SHA256SUMS').write_text(
+              f'{receipt["archive_sha256"]}  {archive.name}\n')
+          PY
+
+      - name: Upload dashboard bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: masc-dashboard-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error

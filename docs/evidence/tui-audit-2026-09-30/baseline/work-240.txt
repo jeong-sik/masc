@@ -1,0 +1,41 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System
+                                                                                                                                                                                          │[Recent] Changes · 2 keepers · feed closed: MCP initial
+   MASC Work  ▸Goals  Task Review  Task Verdicts  09:57:02  HTTP [connected]                                                                                                              │                   state     tool        calls  new tok
+    sort:phase/P1-P5  filter:active                                                                                                                                                       │● alpha            no events
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │· beta             no events
+    Goals: 0                                                                                                                                                                              │───────────────────────────────────────────────────────
+    Net change since this TUI's first reading 39d00h ago: Goals done +0 · Tasks done +0 · Goal reviews pending +0                                                                         │alpha · no events on this feed yet
+    Backlog: ○ todo=0 · ◐ claimed=0 · ◐ in_progress=0 · ◐ awaiting_verification=0 · ● done=0 · × cancelled=0
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    PHASE        JUDGE PRI OPEN             TITLE                                                                                                                         AGE DUE
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    (no goals)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:move  t:Goals / Tasks  p:Approvals  v:next Work tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  q:quit  …?
+ › to alpha   (i to write)

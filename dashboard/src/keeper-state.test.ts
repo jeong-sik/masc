@@ -1,0 +1,2025 @@
+import { initialKeeperResponseState } from './lib/keeper-response-state'
+import { applyKeeperStreamEvent, applyKeeperOperationTurnEvent } from './keeper-stream'
+import { describe, expect, it } from 'vitest'
+import { beforeEach } from 'vitest'
+import {
+  THREAD_ENTRY_CAP,
+  appendAssistantToolTraceArgsDelta,
+  appendAssistantToolTraceStep,
+  appendAssistantThinkingDelta,
+  appendThreadEntry,
+  attachKeeperAudioClip,
+  chatHistoryEntriesFromRest as normalizeChatHistoryEntriesFromRest,
+  finalizeAssistantEntry,
+  foldToolRowsIntoCanonical,
+  insertThreadEntryBefore,
+  isDefaultVisibleConversationEntry,
+  isToolConversationEntry,
+  isVisibleDirectConversationEntry,
+  keeperThreads,
+  markAssistantToolTraceEnded,
+  mergeServerHistoryEntries,
+  normalizeAudioClip,
+  normalizeStatusDetail as normalizeCurrentStatusDetail,
+  removeThreadEntries,
+  setStatusDetail,
+} from './keeper-state'
+import type { ChatBlock, ChatTraceStep, KeeperConversationEntry } from './types'
+import { operationDeliveryProvenance } from './keeper-delivery-provenance'
+
+type RestHistoryMessages = Parameters<typeof normalizeChatHistoryEntriesFromRest>[1]
+type RestHistoryMessage = RestHistoryMessages[number]
+type RestHistoryFixtureMessage = Omit<RestHistoryMessage, 'id'> & { id?: string }
+
+function withCurrentMessageIds(messages: RestHistoryFixtureMessage[]): RestHistoryMessages {
+  return messages.map((message, index) => ({
+    ...message,
+    id: message.id ?? `msg-fixture-${index}`,
+  }))
+}
+
+function chatHistoryEntriesFromRest(
+  keeperName: string,
+  messages: RestHistoryFixtureMessage[],
+): ReturnType<typeof normalizeChatHistoryEntriesFromRest> {
+  return normalizeChatHistoryEntriesFromRest(keeperName, withCurrentMessageIds(messages))
+}
+
+function normalizeStatusDetail(
+  name: string,
+  text: string,
+  rawStatus: unknown,
+): ReturnType<typeof normalizeCurrentStatusDetail> {
+  if (typeof rawStatus !== 'object' || rawStatus === null || Array.isArray(rawStatus)) {
+    return normalizeCurrentStatusDetail(name, text, rawStatus)
+  }
+  const record = rawStatus as Record<string, unknown>
+  const historyTail = Array.isArray(record.history_tail)
+    ? record.history_tail.map((entry, index) => (
+        typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+          ? { id: `msg-status-fixture-${index}`, ...entry }
+          : entry
+      ))
+    : record.history_tail
+  return normalizeCurrentStatusDetail(name, text, {
+    ...record,
+    history_tail: historyTail,
+  })
+}
+
+
+function requiredFixture<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('Expected fixture state to exist')
+  return value
+}
+
+describe('normalizeStatusDetail', () => {
+  it('infers and hides internal keeper history from direct comms', () => {
+    const detail = normalizeStatusDetail('sangsu', '', {
+      history_tail: [
+        {
+          role: 'user',
+          content:
+            '## Current World State\n\n### Workspace State\n- Failed tasks: 9\n- Active agents: 5\n\n### Context\n- Utilization: 72%\n- Idle: 132s',
+          ts_unix: 10,
+        },
+        {
+          role: 'assistant',
+          content: '9개 실패 태스크가 계속되는데 왜 이걸로 하냐니? 그냥 고치거나 무시하거냐.',
+          ts_unix: 11,
+        },
+        {
+          role: 'user',
+          source: 'direct_user',
+          content: '지금 상태 어때?',
+          ts_unix: 20,
+        },
+        {
+          role: 'assistant',
+          source: 'direct_assistant',
+          content: '직접 상태는 괜찮고, 대화 UI만 정리하면 됩니다.',
+          ts_unix: 21,
+        },
+      ],
+    })
+
+    expect(detail.history.map(entry => entry.source)).toEqual([
+      'world_state_prompt',
+      'internal_assistant',
+      'direct_user',
+      'direct_assistant',
+    ])
+    expect(detail.history.filter(isVisibleDirectConversationEntry).map(entry => entry.text)).toEqual([
+      '지금 상태 어때?',
+      '직접 상태는 괜찮고, 대화 UI만 정리하면 됩니다.',
+    ])
+  })
+
+  it('keeps explicit direct history visible', () => {
+    const detail = normalizeStatusDetail('sangsu', '', {
+      history_tail: [
+        {
+          role: 'user',
+          source: 'direct_user',
+          content: 'ping',
+          ts_unix: 30,
+        },
+        {
+          role: 'assistant',
+          source: 'direct_assistant',
+          content: 'pong',
+          ts_unix: 31,
+        },
+      ],
+    })
+
+    expect(detail.history.every(isVisibleDirectConversationEntry)).toBe(true)
+  })
+})
+
+describe('default conversation visibility (tool calls vs internal)', () => {
+  function mk(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
+    return {
+      id: 'e',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: '2026-06-19T00:00:00.000Z',
+      delivery: 'history',
+      streamState: null,
+      details: null,
+      ...partial,
+    }
+  }
+
+  it('surfaces tool-call rows by default but keeps them out of direct comms', () => {
+    const tool = mk({ role: 'tool', source: 'tool_result', text: '{"path":"x"}' })
+    // The "direct conversation" predicate is unchanged: tool rows are not direct comms.
+    expect(isVisibleDirectConversationEntry(tool)).toBe(false)
+    expect(isToolConversationEntry(tool)).toBe(true)
+    // The default-visible predicate (toggle off) does include them.
+    expect(isDefaultVisibleConversationEntry(tool)).toBe(true)
+  })
+
+  it('keeps truly-internal sources behind the toggle', () => {
+    for (const source of ['world_state_prompt', 'internal_assistant', 'system'] as const) {
+      const internal = mk({ source })
+      expect(isToolConversationEntry(internal)).toBe(false)
+      expect(isDefaultVisibleConversationEntry(internal)).toBe(false)
+    }
+  })
+
+  it('keeps direct user/assistant turns visible', () => {
+    expect(isDefaultVisibleConversationEntry(mk({ role: 'user', source: 'direct_user' }))).toBe(true)
+    expect(isDefaultVisibleConversationEntry(mk({ role: 'assistant', source: 'direct_assistant' }))).toBe(true)
+  })
+
+  it('surfaces typed approval lifecycle system receipts by default', () => {
+    const receipt = mk({
+      role: 'system',
+      source: 'system',
+      approvalLifecycle: {
+        approvalId: 'appr_01typed',
+        toolName: 'Execute',
+        phase: 'resolved_approved',
+        artifactSha256: null,
+      },
+    })
+    expect(isVisibleDirectConversationEntry(receipt)).toBe(false)
+    expect(isDefaultVisibleConversationEntry(receipt)).toBe(true)
+  })
+})
+
+describe('thread history merge & persistence', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+  })
+
+  function entry(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
+    return {
+      id: 'e-1',
+      role: 'user',
+      source: 'direct_user',
+      label: '사용자',
+      text: 'hello',
+      rawText: 'hello',
+      timestamp: '2026-06-10T00:00:00.000Z',
+      delivery: 'delivered',
+      streamState: null,
+      details: null,
+      ...partial,
+    }
+  }
+
+  it('keeps hydrated history when a status refresh carries no history', () => {
+    appendThreadEntry('echo', entry({ id: 'hist-1', delivery: 'history' }))
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'live', rawText: 'live' }))
+
+    // hydrateKeeperStatus fast path: include_history_tail=false → history: []
+    setStatusDetail('echo', {
+      name: 'echo',
+      diagnostic: null,
+      history: [],
+      rawText: '',
+      loadedAt: new Date().toISOString(),
+    })
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toContain('hist-1')
+    expect(ids).toContain('local-1')
+  })
+
+  it('does not duplicate a local message when server history arrives with a different timestamp', () => {
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'gg', rawText: 'gg', deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_result'), timestamp: '2026-06-10T00:00:01.000Z' }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-1', text: 'gg', rawText: 'gg', deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_result'), delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
+    ])
+
+    const matches = (keeperThreads.value.echo ?? []).filter(e => e.text === 'gg')
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.delivery).toBe('history')
+  })
+
+  it('preserves live assistant thinking trace when matching server history replaces the entry', () => {
+    appendThreadEntry('echo', entry({
+      id: 'assistant-live',
+      role: 'assistant',
+      text: 'final answer',
+      rawText: 'final answer',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_result'),
+      delivery: 'streaming',
+      streamState: 'streaming',
+    }))
+    appendAssistantThinkingDelta('echo', 'assistant-live', 'checking ')
+    appendAssistantThinkingDelta('echo', 'assistant-live', 'context')
+    finalizeAssistantEntry('echo', 'assistant-live', {
+      delivery: 'delivered',
+      streamState: null,
+    })
+
+    mergeServerHistoryEntries('echo', [
+      entry({
+        id: 'assistant-history',
+        role: 'assistant',
+        text: 'final answer',
+        rawText: 'final answer',
+        deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_result'),
+        delivery: 'history',
+        timestamp: '2026-06-10T00:00:05.000Z',
+      }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread).toHaveLength(1)
+    expect(thread[0]?.id).toBe('assistant-history')
+    expect(thread[0]?.delivery).toBe('history')
+    expect(thread[0]?.traceSteps).toEqual([
+      { kind: 'think', text: 'checking context', ts: expect.any(String) },
+    ])
+  })
+
+  it('reconciles a server failure visibly while retaining its exact live trace', () => {
+    const provenance = operationDeliveryProvenance('failed-trace-operation', 'terminal_result');
+    const traceSteps: ChatTraceStep[] = [{ kind: 'think', text: 'work before failure', ts: '2026-06-10T00:00:05.000Z' }];
+    appendThreadEntry('echo', entry({
+      id: 'live-failed-result', role: 'assistant', source: 'direct_assistant',
+      delivery: 'streaming', text: '', traceSteps, deliveryProvenance: provenance,
+    }));
+    const history = chatHistoryEntriesFromRest('echo', [{
+      id: 'server-failed-result', role: 'request_failure', content: 'request failed', ts: 1780000001,
+      delivery_provenance_status: 'valid', delivery_provenance: provenance,
+    }]);
+    mergeServerHistoryEntries('echo', history);
+    const result = requiredFixture(keeperThreads.value.echo)!;
+    expect(result).toHaveLength(1);
+    expect(result[0]?.role).toBe('system');
+    expect(result[0]?.delivery).toBe('request_failure');
+    expect(result[0]?.traceSteps).toEqual(traceSteps);
+    expect(isDefaultVisibleConversationEntry(result[0]!)).toBe(true);
+    expect(isVisibleDirectConversationEntry(result[0]!)).toBe(false);
+  });
+
+  it('retains the observed response cursor when canonical history replaces a response with no trace', () => {
+    const operationId = 'history-cursor-operation'
+    const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+    appendThreadEntry('echo', entry({ id: 'live-cursor', role: 'assistant', delivery: 'streaming', streamState: 'streaming', deliveryProvenance: provenance }))
+    const source = { kind: 'operation' as const, operationId, sequence: 10 }
+    applyKeeperStreamEvent('echo', 'live-cursor', { type: 'TEXT_MESSAGE_CONTENT', delta: 'answer',
+      textResponse: { content_generation: 4, stream_scope: 0 } }, source)
+    applyKeeperStreamEvent('echo', 'live-cursor', { type: 'RUN_FINISHED' }, { ...source, sequence: 11 })
+    const state = requiredFixture(requiredFixture(keeperThreads.value.echo)[0]).responseState
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical-cursor', role: 'assistant', text: 'answer', rawText: 'answer',
+      delivery: 'history', streamState: null, deliveryProvenance: provenance })])
+    expect(requiredFixture(requiredFixture(keeperThreads.value.echo)[0]).responseState).toBe(state)
+    expect(state).toMatchObject({ phase: 'terminal', lastSequence: 11, floor: { content_generation: 4, stream_scope: 0 } })
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 10, event: {
+      type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read',
+    } })
+    expect(requiredFixture(keeperThreads.value.echo).map(candidate => candidate.id)).toEqual(['canonical-cursor'])
+  })
+
+  it('shares the newest exact-operation cursor across duplicate canonical rows', () => {
+    const operationId = 'duplicate-owner-operation'
+    const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+    for (const [id, sequence] of [['older-local', 10], ['newer-local', 12]] as const) {
+      appendThreadEntry('echo', entry({ id, role: 'assistant', deliveryProvenance: provenance,
+        responseState: { ...initialKeeperResponseState, lastSequence: sequence, phase: 'terminal' } }))
+    }
+    mergeServerHistoryEntries('echo', ['canonical-first', 'canonical-last'].map(id => entry({
+      id, role: 'assistant', delivery: 'history', deliveryProvenance: provenance,
+    })))
+    for (const row of requiredFixture(keeperThreads.value.echo)) expect(row.responseState).toMatchObject({ lastSequence: 12, phase: 'terminal' })
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 11, event: {
+      type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read',
+    } })
+    expect(requiredFixture(keeperThreads.value.echo).every(row => row.role !== 'tool')).toBe(true)
+  })
+
+  it('preserves quarantine across exact-operation duplicates instead of granting missing ownership', () => {
+    const provenance = operationDeliveryProvenance('quarantined-owner', 'terminal_result')
+    appendThreadEntry('echo', entry({ id: 'unobserved-first', role: 'assistant', deliveryProvenance: provenance }))
+    appendThreadEntry('echo', entry({ id: 'quarantined-last', role: 'assistant', deliveryProvenance: provenance, responseState: { kind: 'unavailable' } }))
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical-quarantine', role: 'assistant', delivery: 'history', deliveryProvenance: provenance })])
+    expect(requiredFixture(requiredFixture(keeperThreads.value.echo)[0]).responseState).toEqual({ kind: 'unavailable' })
+  })
+
+  it('does not silently select contradictory same-cursor observations by row order', () => {
+    const provenance = operationDeliveryProvenance('conflicting-owner', 'terminal_result')
+    for (const [id, phase] of [['first', 'running'], ['last', 'terminal']] as const) {
+      appendThreadEntry('echo', entry({ id, role: 'assistant', deliveryProvenance: provenance,
+        responseState: { ...initialKeeperResponseState, lastSequence: 12, phase } }))
+    }
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical-conflict', role: 'assistant', delivery: 'history', deliveryProvenance: provenance })])
+    expect(requiredFixture(requiredFixture(keeperThreads.value.echo)[0]).responseState).toEqual({ kind: 'unavailable' })
+  })
+
+  it('does not transfer response ownership through turn correlation alone', () => {
+    appendThreadEntry('echo', entry({ id: 'correlated-local', role: 'assistant', turnRef: 'same-turn',
+      traceSteps: [{ kind: 'think', text: 'exposed trace' }], responseState: { kind: 'unavailable' } }))
+    mergeServerHistoryEntries('echo', [entry({ id: 'correlated-history', role: 'assistant', turnRef: 'same-turn', delivery: 'history' })])
+    expect(requiredFixture(keeperThreads.value.echo).find(candidate => candidate.id === 'correlated-history')?.responseState).toBeUndefined()
+  })
+
+  it('keeps canonical persisted trace over a stale local trace', () => {
+    const provenance = operationDeliveryProvenance('kmsg-canonical-trace', 'terminal_result')
+    appendThreadEntry('echo', entry({
+      id: 'assistant-local-stale',
+      responseState: { kind: 'unavailable' },
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      deliveryProvenance: provenance,
+      delivery: 'delivered',
+      streamState: null,
+      traceSteps: [{
+        kind: 'tool',
+        name: 'Read',
+        toolCallId: 'provider-reused',
+        toolOccurrenceId: 'tool-delivery-local-0',
+        status: 'ok',
+      }],
+    }))
+
+    const canonicalTrace: ChatTraceStep[] = [{
+      kind: 'tool',
+      name: 'Read',
+      executionId: 'exec-canonical',
+      status: 'ok',
+    }]
+    mergeServerHistoryEntries('echo', [entry({
+      id: 'assistant-history-canonical',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      deliveryProvenance: provenance,
+      delivery: 'history',
+      streamState: null,
+      traceSteps: canonicalTrace,
+    })])
+
+    const [assistant] = keeperThreads.value.echo ?? []
+    expect(assistant?.id).toBe('assistant-history-canonical')
+    expect(assistant?.traceSteps).toEqual(canonicalTrace)
+    expect(assistant?.responseState).toEqual({ kind: 'unavailable' })
+  })
+
+  it('distributes identical-text assistant turns trace 1:1 across history rows (#21748)', () => {
+    // Two local optimistic assistants with the SAME reply text but distinct
+    // thinking traces and distinct provenance. Each history row must inherit
+    // its OWN turn's trace via the exact provenance join, never the other's.
+    appendThreadEntry('echo', entry({
+      id: 'local-a',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-ra', 'terminal_result'),
+      delivery: 'delivered',
+      streamState: null,
+      timestamp: '2026-06-10T00:00:01.000Z',
+    }))
+    appendThreadEntry('echo', entry({
+      id: 'local-b',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-rb', 'terminal_result'),
+      delivery: 'delivered',
+      streamState: null,
+      timestamp: '2026-06-10T00:00:02.000Z',
+    }))
+    appendAssistantThinkingDelta('echo', 'local-a', 'first turn reasoning')
+    appendAssistantThinkingDelta('echo', 'local-b', 'second turn reasoning')
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', deliveryProvenance: operationDeliveryProvenance('kmsg-ra', 'terminal_result'), delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', deliveryProvenance: operationDeliveryProvenance('kmsg-rb', 'terminal_result'), delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    const traceTextOf = (id: string) => {
+      const step = thread.find(e => e.id === id)?.traceSteps?.[0]
+      return step && 'text' in step ? step.text : undefined
+    }
+    // Each history row carries its OWN local trace, not the other's.
+    expect(traceTextOf('hist-a')).toBe('first turn reasoning')
+    expect(traceTextOf('hist-b')).toBe('second turn reasoning')
+  })
+
+  it('uses turnRef to keep multiturn traces attached when finalize order inverts', () => {
+    // Reverse-finalize scenario: local-a is appended FIRST but finalizes
+    // LATER (ts=02); local-b is appended SECOND but finalizes EARLIER (ts=01).
+    // The server sends history chronological (earliest first): [hist-b(01), hist-a(02)].
+    // turnRef is the producer-assigned join key, so the trace follows the turn
+    // instead of append order or timestamp order.
+    appendThreadEntry('echo', entry({
+      id: 'local-a',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      streamState: null,
+      timestamp: '2026-06-10T00:00:02.000Z', // appended first, finalized LATER
+      turnRef: 'trace-x#42',
+    }))
+    appendThreadEntry('echo', entry({
+      id: 'local-b',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      streamState: null,
+      timestamp: '2026-06-10T00:00:01.000Z', // appended second, finalized EARLIER
+      turnRef: 'trace-x#41',
+    }))
+    appendAssistantThinkingDelta('echo', 'local-a', 'turn-a reasoning')
+    appendAssistantThinkingDelta('echo', 'local-b', 'turn-b reasoning')
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z', turnRef: 'trace-x#41' }),
+      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z', turnRef: 'trace-x#42' }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    const traceTextOf = (id: string) => {
+      const step = thread.find(e => e.id === id)?.traceSteps?.[0]
+      return step && 'text' in step ? step.text : undefined
+    }
+    expect(traceTextOf('hist-a')).not.toBe(traceTextOf('hist-b'))
+    expect(traceTextOf('hist-a')).toBe('turn-a reasoning')
+    expect(traceTextOf('hist-b')).toBe('turn-b reasoning')
+  })
+
+  it('converges a stream-interrupted placeholder turn through exact provenance', () => {
+    // Live stream died right after the tool events: the local assistant
+    // placeholder keeps text='' with only the accumulated tool trace and
+    // never received REPLY_DETAILS (turnRef stays null). The real reply
+    // arrives later as a REST history row. The backend stamps
+    // delivery_key.operation ('kmsg-...') on user/assistant rows, so
+    // history convergence must fold the placeholder into the history row
+    // instead of leaving a second "턴 타임라인" behind.
+    const R = 'kmsg_turn_1'
+    const traceSteps: ChatTraceStep[] = [
+      { kind: 'tool', name: 'read_file', toolCallId: 'call-1', executionId: 'exec-call-1', status: 'ok' },
+      { kind: 'tool', name: 'write_file', toolCallId: 'call-2', executionId: 'exec-call-2', status: 'ok' },
+    ]
+    appendThreadEntry('echo', entry({
+      id: `pending-user-${R}`,
+      role: 'user',
+      text: '질문',
+      rawText: '질문',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:01.000Z',
+      deliveryProvenance: operationDeliveryProvenance(R, 'accepted_user'),
+    }))
+    appendThreadEntry('echo', entry({
+      id: 'tool-call-1',
+      role: 'tool',
+      source: 'tool_result',
+      label: 'read_file',
+      text: '{"path":"a"}',
+      rawText: '{"path":"a"}',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:02.000Z',
+      toolCallId: 'call-1',
+      executionId: 'exec-call-1',
+      deliveryProvenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-1', ordinal: 0 } },
+    }))
+    appendThreadEntry('echo', entry({
+      id: 'tool-call-2',
+      role: 'tool',
+      source: 'tool_result',
+      label: 'write_file',
+      text: '{"path":"b"}',
+      rawText: '{"path":"b"}',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:03.000Z',
+      toolCallId: 'call-2',
+      executionId: 'exec-call-2',
+      deliveryProvenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-2', ordinal: 1 } },
+    }))
+    appendThreadEntry('echo', entry({
+      id: `pending-assistant-${R}`,
+      role: 'assistant',
+      text: '',
+      rawText: '',
+      delivery: 'error',
+      timestamp: '2026-06-10T00:00:04.000Z',
+      deliveryProvenance: operationDeliveryProvenance(R, 'terminal_result'),
+      traceSteps,
+    }))
+
+    const history = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: '질문', ts: 1_780_000_001, delivery_provenance: operationDeliveryProvenance(R, 'accepted_user'), delivery_provenance_status: 'valid' },
+      { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', execution_id: 'exec-call-1', tool_call_name: 'read_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-1', ordinal: 0 } }, delivery_provenance_status: 'valid' },
+      { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', execution_id: 'exec-call-2', tool_call_name: 'write_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-2', ordinal: 1 } }, delivery_provenance_status: 'valid' },
+      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_provenance: operationDeliveryProvenance(R, 'terminal_result'), delivery_provenance_status: 'valid' },
+    ])
+    mergeServerHistoryEntries('echo', history)
+
+    const thread = keeperThreads.value.echo ?? []
+    // Exactly one assistant row survives: the canonical history row.
+    const assistants = thread.filter(e => e.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]?.text).toBe('답변')
+    expect(assistants[0]?.delivery).toBe('history')
+    expect(assistants[0]?.deliveryProvenance).toEqual(
+      operationDeliveryProvenance(R, 'terminal_result'),
+    )
+    // The interrupted placeholder's live tool trace is inherited.
+    expect(assistants[0]?.traceSteps).toEqual(traceSteps)
+    // The optimistic user row converges to the history row too.
+    const users = thread.filter(e => e.role === 'user')
+    expect(users).toHaveLength(1)
+    expect(users[0]?.delivery).toBe('history')
+    expect(users[0]?.deliveryProvenance).toEqual(
+      operationDeliveryProvenance(R, 'accepted_user'),
+    )
+    // Tool rows stay single by exact delivery provenance.
+    const tools = thread.filter(e => e.role === 'tool')
+    expect(tools).toHaveLength(2)
+    expect(tools.map(tool => tool.executionId)).toEqual(['exec-call-1', 'exec-call-2'])
+  })
+
+  it('never merges a local entry that carries no provenance', () => {
+    // The role+text heuristic was removed: without provenance the
+    // local row and the history row are distinct rows, even with identical
+    // text. A text-less placeholder can no longer be reconciled by text.
+    appendThreadEntry('echo', entry({
+      id: 'local-legacy',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:01.000Z',
+    }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-legacy', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(e => e.id)).toEqual(['local-legacy', 'hist-legacy'])
+  })
+
+  it('does not use turnRef as row identity when provenance is absent', () => {
+    appendThreadEntry('echo', entry({
+      id: 'local-turn-ref',
+      role: 'assistant',
+      text: 'live wording',
+      rawText: 'live wording',
+      delivery: 'delivered',
+      turnRef: 'trace-exact#7',
+    }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({
+        id: 'history-turn-ref',
+        role: 'assistant',
+        text: 'canonical wording',
+        rawText: 'canonical wording',
+        delivery: 'history',
+        turnRef: 'trace-exact#7',
+      }),
+    ])
+
+    const assistants = (keeperThreads.value.echo ?? [])
+      .filter(candidate => candidate.role === 'assistant')
+    expect(assistants.map(entry => entry.id).sort()).toEqual([
+      'history-turn-ref',
+      'local-turn-ref',
+    ])
+  })
+
+  it('does not collapse different transcript slots from the same operation', () => {
+    appendThreadEntry('echo', entry({
+      id: 'local-user',
+      role: 'user',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-slot', 'accepted_user'),
+    }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({
+        id: 'history-assistant',
+        role: 'assistant',
+        text: 'hello',
+        rawText: 'hello',
+        delivery: 'history',
+        deliveryProvenance: operationDeliveryProvenance('kmsg-slot', 'terminal_result'),
+      }),
+    ])
+
+    expect((keeperThreads.value.echo ?? []).map(candidate => candidate.id).sort()).toEqual([
+      'history-assistant',
+      'local-user',
+    ])
+  })
+
+  it('is idempotent when canonical history is merged repeatedly', () => {
+    appendThreadEntry('echo', entry({
+      id: 'local-assistant',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-repeat', 'terminal_result'),
+    }))
+    const history = [entry({
+      id: 'history-assistant',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'history',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-repeat', 'terminal_result'),
+    })]
+
+    mergeServerHistoryEntries('echo', history)
+    mergeServerHistoryEntries('echo', history)
+
+    expect(requiredFixture(keeperThreads.value.echo)).toEqual(history)
+  })
+
+  it('does not merge same-text rows that carry different provenance', () => {
+    // Identical reply text across two distinct turns: provenance is the row
+    // identity, so the history row of one request must not claim the local
+    // row of another even when role+text coincide.
+    appendThreadEntry('echo', entry({
+      id: 'local-a',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:01.000Z',
+      deliveryProvenance: operationDeliveryProvenance('kmsg_1', 'terminal_result'),
+      turnRef: 'trace-shared#1',
+    }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z', deliveryProvenance: operationDeliveryProvenance('kmsg_2', 'terminal_result'), turnRef: 'trace-shared#1' }),
+    ])
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['local-a', 'hist-b'])
+  })
+
+  it('keeps local entries the server has not persisted yet', () => {
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'not yet saved' }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-1', text: 'old message', delivery: 'history' }),
+    ])
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['hist-1', 'local-1'])
+  })
+
+  it('preserves authored content when hydrating user and assistant history', () => {
+    const content = '    들여쓰기\nSKILL.md 설명\n\n\n끝  \n\n'
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content, ts: 1_780_000_000 },
+      { role: 'assistant', content, ts: 1_780_000_001 },
+      { role: 'assistant', content: '   \n', ts: 1_780_000_002 },
+    ])
+    expect(entries).toHaveLength(2)
+    for (const entry of entries) {
+      expect(entry.text).toBe(content)
+      expect(entry.rawText).toBe(content)
+    }
+  })
+
+  it('converts REST chat history into entries with chained sources', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { role: 'assistant', content: 'hello there', ts: 1_780_000_000 },
+    ])
+    expect(entries).toHaveLength(2)
+    expect(entries[0]?.role).toBe('user')
+    expect(entries[0]?.delivery).toBe('history')
+    expect(entries[1]?.role).toBe('assistant')
+    expect(entries[1]?.label).toBe('echo')
+    expect(entries[1]?.timestamp).toBeTruthy()
+  })
+
+  it('preserves REST chat history provenance instead of re-inferring it away', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        source: 'world_state_prompt',
+        content: 'state snapshot',
+        ts: 1_780_000_000,
+        surface: { kind: 'dashboard', session_id: 'sess-1' },
+        speaker_id: 'operator-1',
+        speaker_name: 'Operator',
+        speaker_authority: 'owner',
+      },
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from channel context',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#7',
+        conversation_id: 'discord:guild-1:channel:channel-1',
+        external_message_id: 'message-1',
+        surface: {
+          kind: 'discord',
+          guild_id: 'guild-1',
+          channel_id: 'channel-1',
+          thread_id: 'thread-1',
+        },
+      },
+    ])
+
+    expect(entries[0]?.source).toBe('world_state_prompt')
+    expect(entries[0]?.surface).toEqual({ kind: 'dashboard', session_id: 'sess-1' })
+    expect(entries[1]?.source).toBe('direct_assistant')
+    expect(entries[1]?.surface).toEqual({
+      kind: 'discord',
+      guild_id: 'guild-1',
+      channel_id: 'channel-1',
+      thread_id: 'thread-1',
+    })
+    expect(entries[1]?.turnRef).toBe('trace-rest#7')
+    expect(entries[0]?.speakerId).toBe('operator-1')
+    expect(entries[0]?.speakerName).toBe('Operator')
+    expect(entries[0]?.speakerAuthority).toBe('owner')
+    expect(entries[1]?.conversationId).toBe('discord:guild-1:channel:channel-1')
+    expect(entries[1]?.externalMessageId).toBe('message-1')
+  })
+
+  it('drops an unknown surface kind but keeps the row (closed parse)', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'row with an unknown surface',
+        ts: 1_780_000_000,
+        surface: { kind: 'telepathy', channel_id: 'c1' },
+        speaker_authority: 'external',
+      },
+      {
+        role: 'user',
+        content: 'fleet fanout row',
+        ts: 1_780_000_001,
+        surface: { kind: 'broadcast' },
+        speaker_name: 'keeper-taskmaster-agent',
+      },
+    ])
+    expect(entries).toHaveLength(2)
+    // Unknown kind never defaults: the surface is dropped, the row and its
+    // speaker fields survive — same policy as keeper_chat_store.load.
+    expect(entries[0]?.surface).toBeNull()
+    expect(entries[0]?.speakerAuthority).toBe('external')
+    expect(entries[1]?.surface).toEqual({ kind: 'broadcast' })
+  })
+
+  it('prefers backend stream contracts from REST chat history', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from retained trace',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#8',
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          turn_ref: 'trace-rest#8',
+          trace_event_count: 3,
+          reason: 'turn_ref joined to retained trajectory/internal-history events',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toEqual({
+      source: 'backend_turn_trace',
+      status: 'backend_trace_join',
+      turnRef: 'trace-rest#8',
+      traceEventCount: 3,
+      reason: 'turn_ref joined to retained trajectory/internal-history events',
+    })
+  })
+
+  it('normalizes durable backend lifecycle stream contracts from REST chat history', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply from durable lifecycle replay',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-rest#9',
+        stream_contract: {
+          source: 'backend_stream_lifecycle',
+          status: 'backend_lifecycle_replay',
+          turn_ref: 'trace-rest#9',
+          event_name: 'RUN_FINISHED',
+          lifecycle_events: [
+            'RUN_STARTED',
+            'TEXT_MESSAGE_START',
+            'TEXT_MESSAGE_END',
+            'RUN_FINISHED',
+          ],
+          reason: 'history row records durable server stream lifecycle replay',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toEqual({
+      source: 'backend_stream_lifecycle',
+      status: 'backend_lifecycle_replay',
+      turnRef: 'trace-rest#9',
+      eventName: 'RUN_FINISHED',
+      lifecycleEvents: [
+        'RUN_STARTED',
+        'TEXT_MESSAGE_START',
+        'TEXT_MESSAGE_END',
+        'RUN_FINISHED',
+      ],
+      reason: 'history row records durable server stream lifecycle replay',
+    })
+  })
+
+  it('falls back explicitly when REST chat history carries an unknown stream contract', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        source: 'direct_assistant',
+        content: 'reply',
+        ts: 1_780_000_001,
+        stream_contract: {
+          source: 'future_backend_source',
+          status: 'future_status',
+        },
+      },
+    ])
+
+    expect(entries[0]?.streamContract).toMatchObject({
+      source: 'rest_history',
+      status: 'history_without_stream_events',
+    })
+  })
+
+  it('preserves object payloads in persisted tool trace blocks', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'done',
+        ts: 1_780_000_000,
+        blocks: [
+          {
+            t: 'trace',
+            trace: [
+              {
+                kind: 'tool',
+                name: 'lookup',
+                toolCallId: 'tc-object',
+                args: { query: 'masc', limit: 2 },
+                result: { ok: true },
+              },
+            ],
+          },
+        ] as unknown as ChatBlock[],
+      },
+    ])
+
+    const traceBlock = entries[0]?.blocks?.find((block): block is Extract<ChatBlock, { t: 'trace' }> => block.t === 'trace')
+    expect(traceBlock?.trace).toEqual([
+      {
+        kind: 'tool',
+        name: 'lookup',
+        toolCallId: 'tc-object',
+        args: '{\n  "query": "masc",\n  "limit": 2\n}',
+        result: '{\n  "ok": true\n}',
+      },
+    ])
+  })
+
+  it('preserves persisted thinking/tool interleaving trace blocks on reload', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'done',
+        ts: 1_780_000_000,
+        turn_ref: 'trace-ui#12',
+        blocks: [
+          { t: 'p', html: 'done' },
+          {
+            t: 'trace',
+            trace: [
+              { kind: 'think', text: 'checking tasks', ts: '2026-07-01T00:00:00Z' },
+              {
+                kind: 'tool',
+                name: 'keeper_tasks_list',
+                tool_call_id: 'provider-1',
+                execution_id: 'exec-1',
+                status: 'ok',
+                args: {},
+                result: { ok: true },
+                ts: '2026-07-01T00:00:01Z',
+              },
+              { kind: 'think', text: 'summarizing', ts: '2026-07-01T00:00:02Z' },
+            ],
+          },
+        ] as unknown as ChatBlock[],
+      },
+    ])
+
+    const traceBlock = entries[0]?.blocks?.find((block): block is Extract<ChatBlock, { t: 'trace' }> => block.t === 'trace')
+    expect(traceBlock?.trace).toEqual([
+      { kind: 'think', text: 'checking tasks', ts: '2026-07-01T00:00:00Z' },
+      {
+        kind: 'tool',
+        name: 'keeper_tasks_list',
+        toolCallId: 'provider-1',
+        executionId: 'exec-1',
+        status: 'ok',
+        args: '{}',
+        result: '{\n  "ok": true\n}',
+        ts: '2026-07-01T00:00:01Z',
+      },
+      { kind: 'think', text: 'summarizing', ts: '2026-07-01T00:00:02Z' },
+    ])
+    expect(entries[0]?.turnRef).toBe('trace-ui#12')
+  })
+
+  it('keeps the server row id and explicit tool identities', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'run checks', ts: 1_780_000_000 },
+      {
+        id: 'tool-row-1',
+        role: 'tool',
+        content: '{"path":"x"}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_1',
+        tool_call_name: 'Read',
+        source: 'dashboard',
+      },
+      { role: 'assistant', content: 'all green', ts: 1_780_000_000 },
+    ])
+    expect(entries.map(e => e.role)).toEqual(['user', 'tool', 'assistant'])
+    const tool = entries[1]
+    expect(tool?.id).toBe('tool-row-1')
+    expect(tool?.toolCallId).toBe('toolu_1')
+    expect(tool?.source).toBe('tool_result')
+    expect(tool?.label).toBe('Read')
+    // Argument JSON must come through verbatim, not reply-formatted.
+    expect(tool?.text).toBe('{"path":"x"}')
+    expect(tool?.delivery).toBe('history')
+  })
+
+  it('preserves opaque persisted tool identity at the live stream convention', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'opaque-row',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_000,
+        tool_call_id: ' toolu_trimmed ',
+        tool_call_name: ' Read ',
+      },
+    ])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.id).toBe('opaque-row')
+    expect(entries[0]?.toolCallId).toBe(' toolu_trimmed ')
+    expect(entries[0]?.label).toBe('Read')
+  })
+
+  it('keeps canonical and delivery-only rows without provider ids', () => {
+    const key = { kind: 'operation' as const, operation_id: 'kmsg-providerless' }
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'canonical-providerless',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_000,
+        execution_id: 'exec-providerless',
+        tool_call_name: 'Read',
+        delivery_provenance: {
+          delivery_key: key,
+          transcript_slot: {
+            kind: 'tool_call',
+            execution_id: 'exec-providerless',
+            ordinal: 0,
+          },
+        },
+      },
+      {
+        id: 'delivery-providerless',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_001,
+        tool_call_name: 'Write',
+        delivery_provenance: {
+          delivery_key: key,
+          transcript_slot: { kind: 'tool_delivery', ordinal: 1 },
+        },
+      },
+    ])
+    expect(entries.map(entry => entry.id)).toEqual([
+      'canonical-providerless',
+      'delivery-providerless',
+    ])
+    expect(entries.map(entry => entry.toolCallId)).toEqual([null, null])
+    expect(entries.map(entry => entry.executionId)).toEqual([
+      'exec-providerless',
+      null,
+    ])
+  })
+
+  it('keeps reused provider ids as separate server rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'tool-row-first',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_000,
+        tool_call_id: 'reused-provider',
+        execution_id: 'exec-first',
+        tool_call_name: 'Read',
+      },
+      {
+        id: 'tool-row-second',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_001,
+        tool_call_id: 'reused-provider',
+        execution_id: 'exec-second',
+        tool_call_name: 'Write',
+      },
+    ])
+    expect(entries.map(entry => entry.id)).toEqual([
+      'tool-row-first',
+      'tool-row-second',
+    ])
+    expect(entries.map(entry => entry.executionId)).toEqual([
+      'exec-first',
+      'exec-second',
+    ])
+  })
+
+  it('rejects cross-field execution identity conflicts', () => {
+    const key = { kind: 'operation' as const, operation_id: 'kmsg-conflict' }
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'tool-conflict',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_000,
+        execution_id: 'exec-row',
+        tool_call_name: 'Read',
+        delivery_provenance: {
+          delivery_key: key,
+          transcript_slot: {
+            kind: 'tool_call',
+            execution_id: 'exec-slot',
+            ordinal: 0,
+          },
+        },
+      },
+    ])
+    expect(entries).toHaveLength(0)
+  })
+
+  it('decodes persisted attachments so uploads survive a reload', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'see this',
+        ts: 1_780_000_000,
+        attachments: [
+          { id: 'att1', type: 'image', name: 'shot.png', size: 1234, mime_type: 'image/png', data: 'BASE64' },
+          { id: 'att2', type: 'doc', name: 'notes.txt', size: 9, mime_type: 'text/plain', data: 'ZZ' },
+        ],
+      },
+    ])
+    const atts = entries[0]?.attachments ?? []
+    expect(atts).toHaveLength(2)
+    // snake_case mime_type -> camelCase mimeType, type narrowed to image/file.
+    // The decode result is byte-backed by construction (KeeperByteAttachment),
+    // so no reference arm can appear here.
+    expect(atts[0]).toMatchObject({ id: 'att1', type: 'image', mimeType: 'image/png', data: 'BASE64' })
+    const second = atts[1]
+    expect(second && !second.kind ? second.type : 'reference').toBe('file')
+  })
+
+  it('drops attachment rows missing id or data (unrenderable)', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'x',
+        ts: 1_780_000_000,
+        attachments: [{ id: '', type: 'file', name: 'n', size: 0, mime_type: '', data: 'D' }],
+      },
+    ])
+    expect(entries[0]?.attachments).toBeUndefined()
+  })
+
+  it('marks a transport_failure row as error delivery, not a saved reply', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'do it', ts: 1_780_000_000 },
+      { role: 'request_failure', content: 'Keeper request failed: timeout', ts: 1_780_000_000 },
+    ])
+    expect(entries[1]?.delivery).toBe('request_failure')
+    expect(entries[1]?.error).toBe('Keeper request failed: timeout')
+    // A normal reply on the same role stays 'history'.
+    const ok = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'done', ts: 1_780_000_000 },
+    ])
+    expect(ok[0]?.delivery).toBe('history')
+  })
+
+  it('rehydrates typed approval and replay lifecycle receipts', () => {
+    const sha256 = 'a'.repeat(64)
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'system',
+        content: '승인됨 · Execute',
+        ts: 1_780_000_000,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01typed' },
+          transcript_slot: { kind: 'approval_resolution' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01typed',
+          tool_name: 'Execute',
+          phase: 'resolved_approved',
+        },
+      },
+      {
+        role: 'system',
+        content: '승인 작업 적용 완료 · Execute',
+        ts: 1_780_000_001,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01typed' },
+          transcript_slot: { kind: 'approval_replay' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01typed',
+          tool_name: 'Execute',
+          phase: 'replay_applied',
+          artifact_ref: { _blob: { sha256, bytes: 7, mime: 'text/plain', preview: 'applied' } },
+        },
+      },
+      {
+        role: 'system',
+        content: '승인 후 후속 작업 이어가기 기록됨 · Execute',
+        ts: 1_780_000_002,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01typed' },
+          transcript_slot: { kind: 'approval_continuation' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01typed',
+          tool_name: 'Execute',
+          phase: 'continuation_recorded',
+        },
+      },
+      {
+        // #32956: the turn that received the replay failed after the
+        // provider answered; the store settles that approval as failed.
+        role: 'system',
+        content: '',
+        ts: 1_780_000_003,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_02failed' },
+          transcript_slot: { kind: 'approval_continuation' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_02failed',
+          tool_name: 'Execute',
+          phase: 'continuation_failed',
+        },
+      },
+    ])
+    expect(entries.map(entry => entry.approvalLifecycle?.phase)).toEqual([
+      'resolved_approved',
+      'replay_applied',
+      'continuation_recorded',
+      'continuation_failed',
+    ])
+    expect(entries[1]?.approvalLifecycle?.artifactSha256).toBe(sha256)
+    expect(entries.every(isDefaultVisibleConversationEntry)).toBe(true)
+    expect(entries.every(entry => entry.deliveryProvenance != null)).toBe(true)
+  })
+
+  it('keeps a Gate lifecycle row whose content is empty, and renders requested', () => {
+    // The store writes both a typed lifecycle and a prose retelling of it. Once
+    // the prose stops being written the row arrives with empty content, and the
+    // emptiness guard used to drop it before the typed field was ever read.
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'system',
+        content: '',
+        ts: 1_780_000_000,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01empty' },
+          transcript_slot: { kind: 'approval_request' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01empty',
+          tool_name: 'Execute',
+          phase: 'requested',
+        },
+      },
+      {
+        role: 'system',
+        content: '',
+        ts: 1_780_000_001,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_01empty' },
+          transcript_slot: { kind: 'approval_resolution' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_01empty',
+          tool_name: 'Execute',
+          phase: 'resolved_approved',
+        },
+      },
+    ])
+    expect(entries.map(entry => entry.approvalLifecycle?.phase)).toEqual([
+      'requested',
+      'resolved_approved',
+    ])
+    expect(entries.every(isDefaultVisibleConversationEntry)).toBe(true)
+  })
+
+  it('normalizes call_summary from Gate activity wire rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'system',
+        content: '',
+        ts: 1_780_000_000,
+        delivery_provenance: {
+          delivery_key: { kind: 'approval_lifecycle', approval_id: 'appr_summary' },
+          transcript_slot: { kind: 'approval_request' },
+        },
+        delivery_provenance_status: 'valid',
+        approval_lifecycle: {
+          approval_id: 'appr_summary',
+          tool_name: 'tool_execute',
+          phase: 'requested',
+          call_summary: 'git log --oneline -8 -- test/dune',
+        },
+      },
+    ])
+    expect(entries[0]?.approvalLifecycle?.callSummary).toBe('git log --oneline -8 -- test/dune')
+  })
+
+  it('drops a row that is empty and carries nothing of its own', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'system', content: '', ts: 1_780_000_000 },
+    ])
+    expect(entries).toEqual([])
+  })
+
+  it('prefers server-provided rich blocks for assistant rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'hello', ts: 1_780_000_000, blocks: [{ t: 'image', src: 'https://x.com/a.png' }] },
+    ])
+    expect(entries[0]?.blocks).toEqual([{ t: 'image', src: 'https://x.com/a.png' }])
+  })
+
+  it('passes a fusion block through with board_post_id required and run_id optional', () => {
+    const withRunId = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'panel concluded',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'fusion', board_post_id: 'post-1', run_id: 'fus-1' }],
+      },
+    ])
+    expect(withRunId[0]?.blocks).toEqual([{ t: 'fusion', board_post_id: 'post-1', run_id: 'fus-1' }])
+
+    const withoutRunId = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'panel concluded',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'fusion', board_post_id: 'post-2' }] as any,
+      },
+    ])
+    expect(withoutRunId[0]?.blocks).toEqual([{ t: 'fusion', board_post_id: 'post-2', run_id: undefined }])
+  })
+
+  it('drops a fusion block missing board_post_id and falls back to the local parser', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'panel concluded', ts: 1_780_000_000, blocks: [{ t: 'fusion', run_id: 'fus-orphan' }] as any },
+    ])
+    expect(entries[0]?.blocks).toEqual([{ t: 'p', html: 'panel concluded' }])
+  })
+
+  it('falls back to the local parser when server blocks are missing or empty', () => {
+    const withMissing = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'https://x.com/post', ts: 1_780_000_000 },
+    ])
+    expect(withMissing[0]?.blocks).toEqual([{ t: 'link', url: 'https://x.com/post', title: 'x.com', meta: 'x.com' }])
+    const withEmpty = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'https://x.com/post', ts: 1_780_000_000, blocks: [] },
+    ])
+    expect(withEmpty[0]?.blocks).toEqual([{ t: 'link', url: 'https://x.com/post', title: 'x.com', meta: 'x.com' }])
+  })
+
+  it('drops malformed server blocks and falls back to the local parser', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'hello', ts: 1_780_000_000, blocks: [{ t: 'unknown' }] as any },
+    ])
+    expect(entries[0]?.blocks).toEqual([{ t: 'p', html: 'hello' }])
+  })
+
+  it('preserves server-provided media blocks on user rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'https://x.com/post', ts: 1_780_000_000, blocks: [{ t: 'image', src: 'https://x.com/a.png' }] },
+    ])
+    expect(entries[0]?.blocks).toEqual([{ t: 'image', src: 'https://x.com/a.png' }])
+  })
+
+  it('drops html-bearing and forwarding payload blocks on user rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'uploaded',
+        ts: 1_780_000_000,
+        blocks: [
+          { t: 'code', html: '<img src=x onerror=alert(1)>' },
+          { t: 'svg', svg: '<svg onload=alert(1) />' },
+          {
+            t: 'attach',
+            name: 'screen.png',
+            src: 'https://x.com/screen.png',
+            svg: '<svg onload=alert(1) />',
+            data: 'RAW',
+            mimeType: 'image/svg+xml',
+          },
+        ] as any,
+      },
+    ])
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'attach', name: 'screen.png', src: 'https://x.com/screen.png' },
+    ])
+  })
+
+  it('does not locally parse user text into rich blocks', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'https://x.com/post', ts: 1_780_000_000 },
+    ])
+    expect(entries[0]?.blocks).toBeUndefined()
+  })
+
+  it('normalizes extended rich block shapes from history rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'rich reply',
+        ts: 1_780_000_000,
+        blocks: [
+          { t: 'attach', name: 'screen.png', src: 'https://x.com/screen.png', sizeBytes: 42, kind: 'image' },
+          { t: 'voice', secs: 5, wave: [0.2, 0.6], transcript: 'memo' },
+          { t: 'table', head: ['name', { v: 'count', num: true }], rows: [['a', '1']] },
+        ],
+      },
+    ])
+    expect(entries[0]?.blocks).toEqual([
+      {
+        t: 'attach',
+        name: 'screen.png',
+        src: 'https://x.com/screen.png',
+        sizeBytes: 42,
+        kind: 'image',
+      },
+      { t: 'voice', secs: 5, wave: [0.2, 0.6], transcript: 'memo' },
+      { t: 'table', head: ['name', { v: 'count', num: true }], rows: [['a', '1']] },
+    ])
+  })
+
+  it('drops tool rows that lack id or name and keeps the rest of the turn', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { role: 'tool', content: '{}', ts: 1_780_000_000, tool_call_id: 'toolu_2' },
+      { role: 'assistant', content: 'done', ts: 1_780_000_000 },
+    ])
+    expect(entries.map(e => e.role)).toEqual(['user', 'assistant'])
+    expect(entries[1]?.label).toBe('echo')
+  })
+
+  it('preserves valid turn_ref on every persisted chat-history path and rejects malformed values', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'query', ts: 1_780_000_000, turn_ref: 'trace-a#1' },
+      {
+        role: 'tool',
+        content: '{"q":1}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_turn',
+        tool_call_name: 'masc_status',
+        turn_ref: 'trace-a#1',
+      },
+      { role: 'assistant', content: 'answer', ts: 1_780_000_000, turn_ref: 'trace-a#1' },
+      { role: 'assistant', content: 'legacy answer', ts: 1_780_000_001 },
+      { role: 'user', content: 'bad user ref', ts: 1_780_000_002, turn_ref: 42 as unknown as string },
+      {
+        role: 'tool',
+        content: '{"q":2}',
+        ts: 1_780_000_003,
+        tool_call_id: 'toolu_bad_ref',
+        tool_call_name: 'masc_status',
+        turn_ref: 42 as unknown as string,
+      },
+    ])
+
+    expect(entries.map(e => e.turnRef)).toEqual([
+      'trace-a#1',
+      'trace-a#1',
+      'trace-a#1',
+      null,
+      null,
+      null,
+    ])
+  })
+
+  it('dedups a rehydrated tool row against the live tool entry', () => {
+    const provenance = {
+      delivery_key: { kind: 'operation' as const, operation_id: 'kmsg-toolu-3' },
+      transcript_slot: { kind: 'tool_delivery' as const, ordinal: 0 },
+    }
+    appendThreadEntry('echo', entry({
+      id: 'tool-delivery-reply-1-0',
+      role: 'tool',
+      source: 'tool_result',
+      text: '{"q":1}',
+      rawText: '{"q":1}',
+      delivery: 'delivered',
+      toolCallId: 'toolu_3',
+      deliveryProvenance: provenance,
+    }))
+
+    mergeServerHistoryEntries('echo', chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'query', ts: 1_780_000_000 },
+      {
+        id: 'history-toolu-3',
+        role: 'tool',
+        content: '{"q":1}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_3',
+        tool_call_name: 'masc_status',
+        delivery_provenance: provenance,
+      },
+      { role: 'assistant', content: 'answer', ts: 1_780_000_000 },
+    ]))
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.filter(e => e.role === 'tool')).toHaveLength(1)
+    expect(thread.map(e => e.role)).toEqual(['user', 'tool', 'assistant'])
+  })
+
+  it('dedups a streaming live tool row when matching history arrives', () => {
+    const provenance = {
+      delivery_key: { kind: 'operation' as const, operation_id: 'kmsg-streaming' },
+      transcript_slot: { kind: 'tool_delivery' as const, ordinal: 0 },
+    }
+    appendThreadEntry('echo', entry({
+      id: 'tool-delivery-reply-1-0',
+      role: 'tool',
+      source: 'tool_result',
+      label: 'Read',
+      text: '{"path":"x"}',
+      rawText: '{"path":"x"}',
+      delivery: 'streaming',
+      streamState: 'streaming',
+      toolCallId: 'toolu_streaming',
+      deliveryProvenance: provenance,
+    }))
+
+    mergeServerHistoryEntries('echo', chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'query', ts: 1_780_000_000 },
+      {
+        id: 'history-toolu-streaming',
+        role: 'tool',
+        content: '{"path":"x"}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_streaming',
+        tool_call_name: 'Read',
+        delivery_provenance: provenance,
+      },
+      { role: 'assistant', content: 'answer', ts: 1_780_000_000 },
+    ]))
+
+    const tools = (keeperThreads.value.echo ?? []).filter(e => e.role === 'tool')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]?.id).toBe('history-toolu-streaming')
+    expect(tools[0]?.delivery).toBe('history')
+    expect(tools[0]?.streamState).toBeNull()
+  })
+
+  it('inserts before the target entry and appends when the target is missing', () => {
+    appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
+    insertThreadEntryBefore('echo', 'reply-1', entry({ id: 'tool-1', role: 'tool', source: 'tool_result' }))
+    insertThreadEntryBefore('echo', 'missing', entry({ id: 'tail-1' }))
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['tool-1', 'reply-1', 'tail-1'])
+  })
+
+  it('does not duplicate an existing tool row when a start event repeats', () => {
+    appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
+    insertThreadEntryBefore('echo', 'reply-1', entry({ id: 'tool-1', role: 'tool', source: 'tool_result', text: '{"a":1}' }))
+    insertThreadEntryBefore('echo', 'reply-1', entry({ id: 'tool-1', role: 'tool', source: 'tool_result', text: '{"a":2}' }))
+
+    const tools = (keeperThreads.value.echo ?? []).filter(e => e.id === 'tool-1')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]?.text).toBe('{"a":1}')
+  })
+
+  it('preserves accumulated tool trace state when TOOL_CALL_START repeats', () => {
+    appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
+    appendAssistantToolTraceStep('echo', 'reply-1', {
+      toolCallId: 'tc-1',
+      toolOccurrenceId: 'tool-delivery-reply-1-0',
+      name: 'lookup',
+      ts: '2026-06-25T00:00:00.000Z',
+      agentCoreBlockIndex: 5,
+    })
+    appendAssistantToolTraceArgsDelta('echo', 'reply-1', 'tool-delivery-reply-1-0', '{"a":1}')
+    markAssistantToolTraceEnded('echo', 'reply-1', 'tool-delivery-reply-1-0')
+    appendAssistantToolTraceStep('echo', 'reply-1', {
+      toolCallId: 'tc-1',
+      toolOccurrenceId: 'tool-delivery-reply-1-0',
+      name: 'lookup-again',
+      ts: '2026-06-25T00:00:01.000Z',
+      agentCoreBlockIndex: 6,
+    })
+
+    const reply = keeperThreads.value.echo?.find(e => e.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      {
+        kind: 'tool',
+        name: 'lookup',
+        toolCallId: 'tc-1',
+        toolOccurrenceId: 'tool-delivery-reply-1-0',
+        status: 'ok',
+        args: '{"a":1}',
+        ts: '2026-06-25T00:00:00.000Z',
+        agentCoreBlockIndex: 5,
+      },
+    ])
+  })
+
+  it('removes only the requested local thread entries', () => {
+    appendThreadEntry('echo', entry({ id: 'user-1', role: 'user', text: 'question' }))
+    appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', text: '' }))
+    appendThreadEntry('echo', entry({ id: 'reply-2', role: 'assistant', text: 'answer' }))
+
+    removeThreadEntries('echo', ['reply-1', 'missing'])
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['user-1', 'reply-2'])
+  })
+
+  it('caps the thread window at THREAD_ENTRY_CAP', () => {
+    for (let i = 0; i < THREAD_ENTRY_CAP + 5; i++) {
+      appendThreadEntry('echo', entry({ id: `e-${i}`, text: `m${i}` }))
+    }
+    expect(requiredFixture(keeperThreads.value.echo)).toHaveLength(THREAD_ENTRY_CAP)
+    expect(keeperThreads.value.echo?.[0]?.id).toBe('e-5')
+  })
+
+  it('keeps local entries at the end when server history plus locals exceed the cap', () => {
+    const history = Array.from({ length: THREAD_ENTRY_CAP }, (_, i) =>
+      entry({ id: `hist-${i}`, text: `h${i}`, delivery: 'history' }),
+    )
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'live1' }))
+    appendThreadEntry('echo', entry({ id: 'optimistic-1', text: 'live2' }))
+    mergeServerHistoryEntries('echo', history)
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread).toHaveLength(THREAD_ENTRY_CAP)
+    expect(thread.at(-1)?.id).toBe('optimistic-1')
+    expect(thread.at(-2)?.id).toBe('local-1')
+  })
+
+  it('does not let autonomous history consume direct-conversation slots', () => {
+    const direct = Array.from({ length: THREAD_ENTRY_CAP }, (_, i) =>
+      entry({ id: `direct-${i}`, text: `d${i}`, delivery: 'history' }),
+    )
+    const autonomous = Array.from({ length: 25 }, (_, i) =>
+      entry({ id: `auto-${i}`, text: `a${i}`, delivery: 'history', source: 'autonomous_turn' }),
+    )
+
+    mergeServerHistoryEntries('echo', [...direct, ...autonomous])
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.filter(item => item.source !== 'autonomous_turn')).toHaveLength(THREAD_ENTRY_CAP)
+    expect(thread.filter(item => item.source === 'autonomous_turn')).toHaveLength(25)
+    expect(thread.some(item => item.id === 'direct-0')).toBe(true)
+  })
+
+  it('does not let approval lifecycle receipts consume direct-conversation slots', () => {
+    const direct = Array.from({ length: THREAD_ENTRY_CAP }, (_, i) =>
+      entry({ id: `direct-${i}`, text: `d${i}`, delivery: 'history' }),
+    )
+    const receipts = Array.from({ length: 12 }, (_, i) =>
+      entry({
+        id: `approval-${i}`,
+        role: 'system',
+        source: 'system',
+        text: '승인됨',
+        approvalLifecycle: {
+          approvalId: `appr_${i}`,
+          toolName: 'Execute',
+          phase: 'resolved_approved',
+          artifactSha256: null,
+        },
+      }),
+    )
+
+    mergeServerHistoryEntries('echo', [...direct, ...receipts])
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.filter(item => item.approvalLifecycle == null)).toHaveLength(THREAD_ENTRY_CAP)
+    expect(thread.filter(item => item.approvalLifecycle != null)).toHaveLength(12)
+    expect(thread.some(item => item.id === 'direct-0')).toBe(true)
+  })
+
+  it('sorts a stale locally-appended error into chronological position, not the bottom', () => {
+    // A live turn failed days ago and appended an error entry, which stayed at
+    // the end of the thread. Newer server history must not leave that days-old
+    // dns_failure floating at the bottom where it reads as the newest message.
+    appendThreadEntry(
+      'echo',
+      entry({ id: 'err-old', text: 'dns_failure', delivery: 'error', timestamp: '2026-06-15T00:00:00.000Z' }),
+    )
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'h-16', text: 'day 16', delivery: 'history', timestamp: '2026-06-16T00:00:00.000Z' }),
+      entry({ id: 'h-19', text: 'day 19', delivery: 'history', timestamp: '2026-06-19T00:00:00.000Z' }),
+    ])
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['err-old', 'h-16', 'h-19'])
+  })
+
+  it('keeps no-timestamp live entries at the bottom of the sorted thread', () => {
+    // A still-streaming/optimistic entry with no timestamp must sort last so the
+    // in-flight tail stays at the bottom even as older history is merged.
+    appendThreadEntry('echo', entry({ id: 'live', text: '응답 연결 중', delivery: 'sending', timestamp: null }))
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'h-19', text: 'day 19', delivery: 'history', timestamp: '2026-06-19T00:00:00.000Z' }),
+    ])
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids.at(-1)).toBe('live')
+  })
+
+  it('accepts attachment-only history rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: '',
+        ts: 1_780_000_000,
+        attachments: [
+          { id: 'att1', type: 'image', name: 'shot.png', size: 1234, mime_type: 'image/png', data: 'BASE64' },
+        ],
+      },
+    ])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.text).toBe('')
+    expect(entries[0]?.attachments).toHaveLength(1)
+  })
+
+  it('keeps a validated redacted thinking block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'thinking-only',
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'thinking', content: '', redacted: true }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.blocks).toEqual([{ t: 'thinking', content: '', redacted: true }])
+  })
+
+  it('keeps non-redacted thinking content when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'thinking-only',
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'thinking', content: 'checking state', redacted: false }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'thinking', content: 'checking state', redacted: false },
+    ])
+  })
+
+  it('keeps a validated trace block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'trace-only',
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'trace', trace: [{ kind: 'think', text: 'checking state' }] }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'trace', trace: [{ kind: 'think', text: 'checking state' }] },
+    ])
+  })
+
+  it('keeps a validated fusion block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'fusion-only',
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'fusion', board_post_id: 'post-1', run_id: 'fusion-run-1' }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'fusion', board_post_id: 'post-1', run_id: 'fusion-run-1' },
+    ])
+  })
+
+  it('keeps a typed control-status block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'status', kind: 'external_effect_pending' }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.text).toBe('')
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'status', kind: 'external_effect_pending' },
+    ])
+  })
+
+  it('keeps a typed continuation status block when assistant content is empty', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: '',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'status', kind: 'continuation_checkpoint' }],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.text).toBe('')
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'status', kind: 'continuation_checkpoint' },
+    ])
+  })
+
+  it('still drops rows that have no content and no attachments', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: '', ts: 1_780_000_000 },
+    ])
+    expect(entries).toHaveLength(0)
+  })
+})
+
+describe('R3 producer-assigned message id', () => {
+  it('keys history entries off the server-minted id when present', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { id: 'msg-0001700000000000-0', role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { id: 'msg-0001700000000000-1', role: 'assistant', content: 'hello', ts: 1_780_000_000 },
+    ])
+    expect(entries.map(e => e.id)).toEqual([
+      'msg-0001700000000000-0',
+      'msg-0001700000000000-1',
+    ])
+  })
+
+  it('rejects a row without a current producer-assigned id', () => {
+    const detail = normalizeCurrentStatusDetail('echo', '', {
+      history_tail: [{ role: 'user', content: 'same text', ts_unix: 1_780_000_000 }],
+    })
+    expect(detail.history).toHaveLength(0)
+  })
+
+  it('rejects a row with a blank producer-assigned id', () => {
+    const detail = normalizeCurrentStatusDetail('echo', '', {
+      history_tail: [{ id: ' ', role: 'user', content: 'stable', ts_unix: 1_780_000_000 }],
+    })
+    expect(detail.history).toHaveLength(0)
+  })
+})
+
+describe('RFC-0235 audio clip normalization', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+  })
+
+  function entry(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
+    return {
+      id: 'e-1',
+      role: 'user',
+      source: 'direct_user',
+      label: '사용자',
+      text: 'hello',
+      rawText: 'hello',
+      timestamp: '2026-06-10T00:00:00.000Z',
+      delivery: 'delivered',
+      streamState: null,
+      details: null,
+      ...partial,
+    }
+  }
+
+  it('normalizes snake_case history audio fields with a URL fallback', () => {
+    const clip = normalizeAudioClip({
+      token: 'clip-abc',
+      mime: 'audio/mpeg',
+      duration_sec: 7.5,
+      message_text: 'hello',
+      device_id: 'living-room',
+    })
+    expect(clip).toEqual({
+      token: 'clip-abc',
+      audioUrl: '/api/v1/voice/audio/clip-abc',
+      mime: 'audio/mpeg',
+      durationSec: 7.5,
+      messageText: 'hello',
+      deviceId: 'living-room',
+      expired: null,
+    })
+  })
+
+  it('carries the expired flag from the backend', () => {
+    const clip = normalizeAudioClip({
+      token: 'clip-expired',
+      mime: 'audio/mpeg',
+      message_text: 'hello',
+      expired: true,
+    })
+    expect(clip).toEqual({
+      token: 'clip-expired',
+      audioUrl: '/api/v1/voice/audio/clip-expired',
+      mime: 'audio/mpeg',
+      durationSec: null,
+      messageText: 'hello',
+      deviceId: null,
+      expired: true,
+    })
+  })
+
+  it('preserves an explicit audio_url from SSE payloads', () => {
+    const clip = normalizeAudioClip({
+      token: 'clip-def',
+      audioUrl: 'https://cdn.example/voice/clip-def.mp3',
+      mime: 'audio/mpeg',
+      messageText: 'hi',
+    })
+    expect(clip?.audioUrl).toBe('https://cdn.example/voice/clip-def.mp3')
+  })
+
+  it('returns null for malformed audio objects', () => {
+    expect(normalizeAudioClip(null)).toBeNull()
+    expect(normalizeAudioClip({ token: 'x' })).toBeNull()
+    expect(normalizeAudioClip({ token: 'x', mime: 42 })).toBeNull()
+  })
+
+  it('carries audio clips through REST history into conversation entries', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'hello there',
+        ts: 1_780_000_000,
+        audio: {
+          token: 'hist-clip',
+          mime: 'audio/mpeg',
+          duration_sec: 3,
+          message_text: 'hello there',
+        },
+      },
+    ])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.audio?.token).toBe('hist-clip')
+    expect(entries[0]?.audio?.audioUrl).toBe('/api/v1/voice/audio/hist-clip')
+  })
+
+  it('attaches an SSE audio clip to the matching streaming assistant entry', () => {
+    appendThreadEntry('echo', entry({
+      id: 'reply-1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      text: 'hello operator',
+      rawText: 'hello operator',
+      delivery: 'streaming',
+    }))
+    const attached = attachKeeperAudioClip('echo', {
+      token: 'live-clip',
+      mime: 'audio/mpeg',
+      message_text: 'hello operator',
+      duration_sec: 4,
+    })
+    expect(attached).toBe(true)
+    expect(keeperThreads.value.echo?.[0]?.audio?.token).toBe('live-clip')
+  })
+
+  it('does not attach when no assistant text matches', () => {
+    appendThreadEntry('echo', entry({
+      id: 'reply-1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      text: 'different text',
+      rawText: 'different text',
+    }))
+    const attached = attachKeeperAudioClip('echo', {
+      token: 'live-clip',
+      mime: 'audio/mpeg',
+      message_text: 'hello operator',
+    })
+    expect(attached).toBe(false)
+    expect(keeperThreads.value.echo?.[0]?.audio).toBeUndefined()
+  })
+})
+
+describe('foldToolRowsIntoCanonical', () => {
+  const deliveryKey = { kind: 'operation' as const, operation_id: 'fold-operation' }
+  const provenance = { delivery_key: deliveryKey, transcript_slot: { kind: 'tool_call' as const, execution_id: 'fold-execution', ordinal: 0 } }
+  const row = (id: string, extra: Partial<KeeperConversationEntry>): KeeperConversationEntry => ({
+    id, role: 'tool', source: 'tool_result', label: 'Read', text: '', delivery: 'history', ...extra })
+
+  it('replaces the live rows of one execution in place and leaves the other entries where they are', () => {
+    const later = '2026-10-12T10:00:00.000Z'
+    const earlier = '2026-10-12T09:00:00.000Z'
+    keeperThreads.value = { echo: [
+      { id: 'reply', role: 'assistant', source: 'direct_assistant', label: 'echo', text: '', rawText: '',
+        timestamp: later, delivery: 'sending', streamState: 'streaming', details: null,
+        deliveryProvenance: operationDeliveryProvenance('fold-operation', 'terminal_result'),
+        traceSteps: [{ kind: 'tool', name: 'Read', status: 'ok', ts: later, toolOccurrenceId: 'live-tool' } as ChatTraceStep] },
+      row('canonical', { text: 'stored output', deliveryProvenance: provenance, timestamp: later }),
+      row('earlier-note', { role: 'assistant', source: 'direct_assistant', timestamp: earlier }),
+      row('live-tool', { delivery: 'delivered', deliveryProvenance: provenance, toolCallId: 'provider-tool' }),
+    ] }
+    foldToolRowsIntoCanonical('echo', 'canonical')
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => entry.id)).toEqual(['reply', 'canonical', 'earlier-note'])
+    expect(thread.find(entry => entry.id === 'canonical')).toMatchObject({ toolCallId: 'provider-tool', text: 'stored output' })
+    expect(thread.find(entry => entry.id === 'reply')?.traceSteps).toMatchObject([{ toolOccurrenceId: 'canonical' }])
+  })
+
+  it('does nothing when no other row reports the execution', () => {
+    keeperThreads.value = { echo: [row('canonical', { deliveryProvenance: provenance })] }
+    const before = keeperThreads.value.echo
+    foldToolRowsIntoCanonical('echo', 'canonical')
+    expect(keeperThreads.value.echo).toBe(before)
+  })
+})

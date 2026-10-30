@@ -1,0 +1,8 @@
+{
+  "author_baseline": "661becba96bffd341e0968cce48927f360edfa19",
+  "published_reproduction_baseline": "3badb88117794510dac576bf3fc34f0336e17d8a",
+  "file": "lib/keeper/keeper_official_client_context_projection.ml",
+  "source_sha256": "0ba877d935230e9e3b5fef2ad0ae055e29b17d901b026299d9da7be2ed5dca24",
+  "reason": "use published root ancestor for independent clone reproduction; author commit is not on published root ancestry",
+  "byte_equal": true
+}

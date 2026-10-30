@@ -1,0 +1,2161 @@
+open Alcotest
+open Masc
+open Yojson.Safe.Util
+
+let with_temp_base f =
+  let base_path = Filename.temp_file "masc-krl-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o755;
+  f base_path
+;;
+
+let board_payload ?updated_at ~post_id:(_ : string) () :
+  Keeper_event_queue.stimulus_payload
+  =
+  Keeper_event_queue.Board_signal
+    { kind = Keeper_event_queue.Post_created
+    ; author = "operator"
+    ; title = "Ship reaction ledger"
+    ; content = "Please react"
+    ; hearth = None
+    ; updated_at
+    }
+;;
+
+let board_stimulus ?(post_id = "post-42") ?updated_at () :
+  Keeper_event_queue.stimulus
+  =
+  { post_id
+  ; urgency = Immediate
+  ; arrived_at = 1234.5
+  ; payload = board_payload ?updated_at ~post_id ()
+  }
+;;
+
+let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
+  Keeper_event_queue.stimulus
+  =
+  { post_id = "fusion-run:" ^ run_id
+  ; urgency = Keeper_event_queue.Normal
+  ; arrived_at = 1234.5
+  ; payload =
+      Keeper_event_queue.Fusion_completed
+        { run_id
+        ; terminal = Keeper_event_queue.Fusion_succeeded "use approach B"
+        ; board_post_id = "post-fus"
+        ; channel = Keeper_continuation_channel.unrouted "test fixture"
+        }
+  }
+;;
+
+let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
+  Keeper_event_queue.stimulus
+  =
+  { post_id = "schedule-due:" ^ schedule_id
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = 1234.5
+  ; payload =
+      Keeper_event_queue.Schedule_due
+        { occurrence_id = "schedule-due:" ^ schedule_id
+        ; schedule_instance_id = "instance-" ^ schedule_id
+        ; schedule_id
+        ; due_at = 1200.0
+        ; payload_digest = "payload-digest"
+        ; title = Some "Wake"
+        ; message = "Scheduled lane wake"
+        ; result_delivery = None
+        }
+  }
+;;
+
+let require_ok label = function
+  | Ok value -> value
+  | Error message -> failf "%s: %s" label message
+;;
+
+let check_member_string label expected key json =
+  check string label expected (json |> member key |> to_string)
+;;
+
+let check_list_has_string label expected json =
+  check bool label true
+    (json
+     |> to_list
+     |> List.exists (fun item -> String.equal expected (to_string item)))
+;;
+
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+;;
+
+let event_queue_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue-v19.json"
+;;
+
+let reaction_ledger_dir ~base_path ~keeper_name =
+  (* Ask the writer where it writes. Rebuilding the path here made a storage
+     generation bump silently point the test at an empty old namespace. *)
+  Masc.Keeper_reaction_ledger.store_dir ~base_path ~keeper_name
+;;
+
+let reaction_ledger_store ~base_path ~keeper_name =
+  Dated_jsonl.open_store (Masc.Keeper_reaction_ledger.location ~base_path ~keeper_name)
+;;
+
+let read_recent_rows ~base_path ~keeper_name ~limit =
+  match
+    Dated_jsonl.read_recent_result
+      (reaction_ledger_store ~base_path ~keeper_name)
+      limit
+  with
+  | Error error -> fail (Dated_jsonl.read_error_to_string error)
+  | Ok entries ->
+    List.map
+      (function
+        | Dated_jsonl.Parsed row -> row
+        | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+          failf
+            "unexpected malformed test row %s%s: %s"
+            path
+            (match line_number with
+             | Some value -> Printf.sprintf ":%d" value
+             | None -> "")
+            detail)
+      entries
+;;
+
+let with_state_change_observer observer f =
+  Keeper_reaction_ledger.install_state_change_observer observer;
+  Fun.protect
+    ~finally:(fun () -> Keeper_reaction_ledger.install_state_change_observer ignore)
+    f
+;;
+
+let require_complete_evidence label = function
+  | Error error ->
+    failf
+      "%s: %s"
+      label
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) -> evidence
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined { first_reason; _ }) ->
+    failf
+      "%s: quarantined (%s)"
+      label
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+;;
+
+let latest_row rows =
+  match List.rev rows with
+  | row :: _ -> row
+  | [] -> fail "expected at least one reaction ledger row"
+;;
+
+let test_event_queue_stimulus_and_turn_reaction () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "ledger-keeper" in
+  let stimulus = board_stimulus () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let rows =
+    read_recent_rows ~base_path ~keeper_name ~limit:10
+  in
+  check int "two rows persisted" 2 (List.length rows);
+  let stimulus_row = List.nth rows 0 in
+  check_member_string "stimulus schema" Masc.Keeper_reaction_ledger.schema "schema" stimulus_row;
+  check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
+  check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
+  check_member_string
+    "stimulus kind"
+    "board_signal"
+    "kind"
+    (stimulus_row |> member "stimulus");
+  let reaction_row = List.nth rows 1 in
+  check_member_string "reaction record kind" "reaction" "record_kind" reaction_row;
+  check_member_string "reaction stimulus id" "board:post-42" "stimulus_id" reaction_row;
+  check_member_string
+    "reaction kind"
+    "turn_started"
+    "kind"
+    (reaction_row |> member "reaction")
+;;
+
+(* A stimulus's evidence used to end at "a turn started at T", and what the turn
+   did was recovered by comparing that clock against the keeper's calls. The
+   closing row makes the interval and the outcome a record instead. *)
+let test_turn_finished_closes_the_interval_the_start_opened () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "ledger-keeper" in
+  let stimulus = board_stimulus ~post_id:"finish-post" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_finished
+    ~base_path
+    ~keeper_name
+    ~disposition:"completed"
+    stimulus;
+  let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
+  check int "three rows persisted" 3 (List.length rows);
+  let finished_row = List.nth rows 2 in
+  check_member_string "reaction record kind" "reaction" "record_kind" finished_row;
+  check_member_string
+    "reaction kind"
+    "turn_finished"
+    "kind"
+    (finished_row |> member "reaction");
+  check_member_string
+    "the turn's own outcome, not this writer's guess"
+    "completed"
+    "disposition"
+    (finished_row |> member "reaction");
+  (* Both halves name the same stimulus, which is what makes them an interval
+     rather than two unrelated rows. *)
+  check_member_string
+    "same stimulus as the start"
+    "board:finish-post"
+    "stimulus_id"
+    finished_row;
+  check_member_string
+    "and its own event identity"
+    "board:finish-post:reaction:turn_finished"
+    "event_id"
+    finished_row;
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path ~keeper_name ~stimulus_id:"board:finish-post"
+    |> require_complete_evidence "turn interval evidence"
+  in
+  let check_observed label seen recorded_at row =
+    check bool (label ^ " was observed") true seen;
+    check (option (float 0.)) (label ^ " keeps its recorded time")
+      (Some (row |> member "recorded_at_unix" |> to_float)) recorded_at
+  in
+  check_observed "stimulus" evidence.stimulus_seen evidence.stimulus_recorded_at
+    (List.nth rows 0);
+  check_observed "turn start" evidence.turn_started_seen evidence.turn_started_recorded_at
+    (List.nth rows 1);
+  check_observed "turn finish" evidence.turn_finished_seen evidence.turn_finished_recorded_at
+    finished_row;
+  check bool "no queue acknowledgement was observed" false evidence.event_queue_ack_seen;
+  check (option (float 0.)) "no queue acknowledgement time" None evidence.event_queue_ack_recorded_at;
+  check bool "no queue cancellation was observed" false evidence.event_queue_cancelled_seen;
+  check (option (float 0.)) "no queue cancellation time" None evidence.event_queue_cancelled_recorded_at
+;;
+
+let test_direct_append_state_change_observer_contract () =
+  let notifications = ref 0 in
+  with_state_change_observer
+    (fun () -> incr notifications)
+    (fun () ->
+       with_temp_base @@ fun base_path ->
+       let keeper_name = "observer-keeper" in
+       let stimulus = board_stimulus ~post_id:"observer-post" () in
+       Keeper_reaction_ledger.record_event_queue_stimulus
+         ~base_path
+         ~keeper_name
+         stimulus;
+       check int "successful stimulus append notifies" 1 !notifications;
+       Keeper_reaction_ledger.record_event_queue_turn_started
+         ~base_path
+         ~keeper_name
+         stimulus;
+       check int "successful turn-start append notifies" 2 !notifications;
+       let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
+       check int "both notified rows are durable" 2 (List.length rows));
+  notifications := 0;
+  with_state_change_observer
+    (fun () -> incr notifications)
+    (fun () ->
+       with_temp_base @@ fun base_path ->
+       let keeper_name = "append-failure-keeper" in
+       let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+       mkdir_p (Filename.dirname ledger_dir);
+       write_file ledger_dir "not a directory";
+       let append_failed =
+         try
+           Keeper_reaction_ledger.record_event_queue_stimulus
+             ~base_path
+             ~keeper_name
+             (board_stimulus ~post_id:"append-failure" ());
+           false
+         with
+         | _ -> true
+       in
+       check bool "ledger append fails" true append_failed;
+       check int "failed append does not notify" 0 !notifications)
+;;
+
+let test_direct_append_observer_failure_is_isolated () =
+  with_state_change_observer
+    (fun () -> failwith "observer fault")
+    (fun () ->
+       with_temp_base @@ fun base_path ->
+       let keeper_name = "observer-failure-keeper" in
+       let stimulus = board_stimulus ~post_id:"observer-failure" () in
+       Keeper_reaction_ledger.record_event_queue_stimulus
+         ~base_path
+         ~keeper_name
+         stimulus;
+       Keeper_reaction_ledger.record_event_queue_turn_started
+         ~base_path
+         ~keeper_name
+         stimulus;
+       let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
+       check int "observer failure preserves both durable rows" 2 (List.length rows))
+;;
+
+let test_current_rows_require_complete_writer_shape () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "closed-row-shape-keeper" in
+  let stimulus = board_stimulus ~post_id:"closed-row" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let rows = read_recent_rows ~base_path ~keeper_name ~limit:2 in
+  let remove_nested_field outer inner = function
+    | `Assoc fields ->
+      let nested =
+        match List.assoc_opt outer fields with
+        | Some (`Assoc nested_fields) ->
+          `Assoc (List.remove_assoc inner nested_fields)
+        | _ -> failf "missing nested object %s" outer
+      in
+      `Assoc ((outer, nested) :: List.remove_assoc outer fields)
+    | _ -> fail "ledger writer did not emit an object"
+  in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (remove_nested_field "stimulus" "urgency" (List.nth rows 0));
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (remove_nested_field "reaction" "post_id" (List.nth rows 1));
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "incomplete current rows are quarantined" 2
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reasons =
+    summary
+    |> member "quarantine_reason_counts"
+    |> to_list
+    |> List.map (fun item -> item |> member "reason" |> to_string)
+  in
+  check bool "missing stimulus urgency is typed" true
+    (List.mem "missing_stimulus_urgency" reasons);
+  check bool "missing reaction post id is typed" true
+    (List.mem "missing_reaction_post_id" reasons)
+;;
+
+let test_unknown_record_kind_is_quarantined_not_fatal () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "unknown-record-kind-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-99" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
+        ; "record_kind", `String "unexpected"
+        ; "event_id", `String "krl:unknown-record-kind-fixture"
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 5678.25
+        ; "stimulus_id", `String stimulus_id
+        ]);
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Error error ->
+    failf
+      "unknown record kind must not surface a fatal evidence read error: %s"
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "unknown record kind must be quarantined, not silently accepted"
+  | Ok
+      (Keeper_reaction_ledger.Evidence_quarantined
+        { evidence; first_reason }) ->
+    check bool "normal stimulus row still matches" true evidence.stimulus_seen;
+    check int "one row matches (the stimulus)" 1 evidence.matched_record_count;
+    check int "unknown record kind is quarantined" 1
+      evidence.quarantined_record_count;
+    check string
+      "quarantine reason is unknown record kind"
+      "unknown_record_kind"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+;;
+
+let test_summary_preserves_reaction_before_stimulus () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "out-of-order-summary" in
+  let reacted = board_stimulus ~post_id:"observed-after-reaction" () in
+  let pending = board_stimulus ~post_id:"still-needs-reaction" () in
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path ~keeper_name reacted;
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path ~keeper_name reacted;
+  let settled =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "reaction evidence survives later observation" "ok" "status" settled;
+  check int "the reacted occurrence is not pending" 0
+    (settled |> member "pending_stimulus_count" |> to_int);
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path ~keeper_name pending;
+  let mixed =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "unreacted occurrences still warn" "degraded" "status" mixed;
+  check (list string) "only the exact unreacted occurrence is pending"
+    [ "board:still-needs-reaction" ]
+    (mixed |> member "pending_stimulus_ids" |> to_list |> List.map to_string)
+;;
+
+let test_summary_marks_unreacted_and_reacted_stimuli () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "summary-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-summary" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let pending_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "pending summary status" "degraded" "status" pending_summary;
+  check bool "pending summary asks for operator visibility" true
+    (pending_summary |> member "operator_action_required" |> to_bool);
+  check int "pending stimulus count" 1
+    (pending_summary |> member "pending_stimulus_count" |> to_int);
+  check string "pending stimulus id" "board:post-summary"
+    (pending_summary
+     |> member "pending_stimulus_ids"
+     |> to_list
+     |> List.hd
+     |> to_string);
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let reacted_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "reacted summary status" "ok" "status" reacted_summary;
+  check bool "reacted summary clears operator action" false
+    (reacted_summary |> member "operator_action_required" |> to_bool);
+  check int "reacted pending stimulus count" 0
+    (reacted_summary |> member "pending_stimulus_count" |> to_int);
+  check int "turn started count" 1
+    (reacted_summary |> member "turn_started_count" |> to_int)
+;;
+
+(* The fleet verdict reads each keeper's typed status. It used to sum the
+   pending and quarantined counts back out of the JSON those summaries had
+   just been rendered into, with a string comparison behind it that nothing
+   could reach (#27560). This is the path that carries a degraded keeper up
+   with no durable-queue signal involved. *)
+let test_fleet_summary_follows_a_degraded_keeper () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "fleet-degraded-keeper" in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ~post_id:"post-fleet-degraded" ());
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "the keeper itself is degraded" "degraded" "status" summary;
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int
+    "no durable queue, so that path cannot be what degrades the fleet"
+    0
+    (fleet |> member "durable_event_queue_count" |> to_int);
+  check_member_string
+    "a degraded keeper degrades the fleet"
+    "degraded"
+    "status"
+    fleet
+;;
+
+ let test_fleet_summary_surfaces_durable_event_queue_backlog () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "durable-backlog-keeper" in
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (board_stimulus ~post_id:"post-live-backlog" ());
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (board_stimulus ~post_id:"post-live-backlog-2" ());
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (fusion_completed_stimulus ());
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string "source age does not degrade ledger integrity" "ok" "status" fleet;
+  check int "no unsupported age reason" 0
+    (fleet |> member "status_reasons" |> to_list |> List.length);
+  check bool "source age alone does not require operator action" false
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "ledger pending rows stay independent" 0
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "durable queue backlog counted" 3
+    (fleet |> member "durable_event_queue_count" |> to_int);
+  check int "durable queue pending backlog counted" 3
+    (fleet |> member "durable_event_queue_pending_count" |> to_int);
+  let keeper_queue =
+    fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_queue;
+  check int "keeper durable queue backlog counted" 3
+    (keeper_queue |> member "durable_event_queue_count" |> to_int);
+  check int "keeper durable queue pending backlog counted" 3
+    (keeper_queue |> member "durable_event_queue_pending_count" |> to_int);
+  check int "keeper immediate durable queue backlog counted" 2
+    (keeper_queue |> member "immediate_count" |> to_int);
+  let residence = keeper_queue |> member "queue_residence" in
+  check_member_string "durable queue residence is observed" "observed" "status" residence;
+  check bool "residence has its admission evidence" true
+    (residence |> member "oldest_admitted_at_unix" |> to_float > 0.0);
+  check bool "original source age remains visible" true
+    (keeper_queue |> member "oldest_source_age_seconds" |> to_int > 0);
+  let payload_counts =
+    fleet |> member "durable_event_queue_payload_counts" |> to_list
+  in
+  check bool "board_signal durable payload count is surfaced" true
+    (List.exists
+       (fun json ->
+         String.equal (json |> member "payload_kind" |> to_string) "board_signal"
+         && json |> member "count" |> to_int = 2)
+       payload_counts);
+  check bool "fusion_completed durable payload count is surfaced" true
+    (List.exists
+       (fun json ->
+         String.equal (json |> member "payload_kind" |> to_string) "fusion_completed"
+         && json |> member "count" |> to_int = 1)
+       payload_counts)
+;;
+
+let test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "durable-only-keeper" in
+  Keeper_registry_event_queue.enqueue
+    ~base_path
+    keeper_name
+    (board_stimulus ~post_id:"post-durable-only" ());
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable-only queue does not imply a reaction ledger failure"
+    "ok"
+    "status"
+    fleet;
+  check int "durable-only keeper is included in fleet count" 1
+    (fleet |> member "keeper_count" |> to_int);
+  check_list_has_string
+    "durable-only keeper name is discovered"
+    keeper_name
+    (fleet |> member "keeper_names");
+  check int "durable-only discovery counted" 1
+    (fleet |> member "durable_event_queue_discovered_keeper_count" |> to_int);
+  check_list_has_string
+    "durable-only discovery names keeper"
+    keeper_name
+    (fleet |> member "durable_event_queue_discovered_keeper_names");
+  check bool "durable-only discovery has no read error" true
+    (match fleet |> member "durable_event_queue_discovery_error" with
+     | `Null -> true
+     | _ -> false);
+  check int "durable-only queue backlog counted" 1
+    (fleet |> member "durable_event_queue_count" |> to_int);
+  let keeper_queue =
+    fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable-only queue keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_queue;
+  check int "durable-only keeper queue backlog counted" 1
+    (keeper_queue |> member "durable_event_queue_count" |> to_int)
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
+  with_temp_base @@ fun base_path ->
+  let invalid_keeper_name = "invalid keeper name" in
+  let invalid_keeper_dir =
+    Filename.concat
+      (Common.keepers_runtime_dir_of_base ~base_path)
+      invalid_keeper_name
+  in
+  mkdir_p invalid_keeper_dir;
+  write_file
+    (Filename.concat invalid_keeper_dir "event-queue-v19.json")
+    (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue discovery error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue discovery error reason is explicit"
+    "durable_event_queue_discovery_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue discovery error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue discovery error counted" 1
+    (fleet |> member "durable_event_queue_discovery_error_count" |> to_int);
+  check bool "durable queue discovery error message is surfaced" true
+    (match fleet |> member "durable_event_queue_discovery_error" with
+     | `String value -> not (String.equal value "")
+     | _ -> false);
+  check int "invalid durable queue keeper is not accepted as a keeper" 0
+    (fleet |> member "keeper_count" |> to_int)
+;;
+
+let test_fleet_summary_source_age_never_supplies_residence () =
+  List.iter (fun source_at ->
+    with_temp_base @@ fun base_path ->
+    let keeper_name = "source-age-keeper" in
+    let source = { (board_stimulus ~post_id:"source-age" ()) with
+      Keeper_event_queue.arrived_at = source_at } in
+    Keeper_registry_event_queue.enqueue ~base_path keeper_name source;
+    let snapshot_path = event_queue_snapshot_path ~base_path ~keeper_name in
+    let before = Yojson.Safe.from_file snapshot_path in
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name] ~limit_per_keeper:10 in
+    check bool "reaction health leaves durable state semantics unchanged" true
+      (Yojson.Safe.from_file snapshot_path = before);
+    check_member_string "no source-age-only ledger degradation" "ok" "status" fleet;
+    check bool "no source-age-only composite action reason" false
+      (fleet |> member "operator_action_required" |> to_bool);
+    check int "pending source remains counted" 1
+      (fleet |> member "durable_event_queue_pending_count" |> to_int);
+    let observation = fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd in
+    check (float 0.001) "source timestamp is retained verbatim" source_at
+      (observation |> member "oldest_source_arrived_at_unix" |> to_float);
+    let admission = before |> Keeper_event_queue_state.of_yojson |> Result.get_ok
+      |> Keeper_event_queue_state.pending_selections |> List.hd in
+    let expected_admission = match admission.first_admitted_at with
+      | Some time -> time | None -> Alcotest.fail "admission clock missing" in
+    check_member_string "observed residence has an admission clock"
+      "observed" "status" (observation |> member "queue_residence");
+    check (float 0.0) "residence retains actual admission, not source age"
+      expected_admission (observation |> member "queue_residence"
+        |> member "oldest_admitted_at_unix" |> to_float))
+    [1.0; Unix.gettimeofday ()]
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_read_error () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "broken-durable-queue-keeper" in
+  let path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname path);
+  write_file path "{not-json";
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue read error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue read error reason is explicit"
+    "durable_event_queue_read_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue read error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue read error counted" 1
+    (fleet |> member "durable_event_queue_read_error_count" |> to_int);
+  let keeper_error =
+    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue read error keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_error;
+  check int "keeper durable queue read error counted" 1
+    (keeper_error |> member "read_error_count" |> to_int);
+  let read_error =
+    keeper_error |> member "read_errors" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue read error kind"
+    "read_failed"
+    "kind"
+    read_error;
+  check_member_string "durable queue read error path" path "path" read_error
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "parse-broken-durable-queue-keeper" in
+  let path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname path);
+  write_file path {|{"schema":"unexpected.event.queue.schema","items":{}}|};
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string
+    "durable queue parse error makes fleet status unknown"
+    "unknown"
+    "status"
+    fleet;
+  check_list_has_string
+    "durable queue parse error reason is explicit"
+    "durable_event_queue_read_error"
+    (fleet |> member "status_reasons");
+  check bool "durable queue parse error requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "durable queue parse error counted" 1
+    (fleet |> member "durable_event_queue_read_error_count" |> to_int);
+  let keeper_error =
+    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue parse error keeper name"
+    keeper_name
+    "keeper_name"
+    keeper_error;
+  check int "keeper durable queue parse error counted" 1
+    (keeper_error |> member "read_error_count" |> to_int);
+  let read_error =
+    keeper_error |> member "read_errors" |> to_list |> List.hd
+  in
+  check_member_string
+    "durable queue parse error kind"
+    "parse_failed"
+    "kind"
+    read_error;
+  check_member_string "durable queue parse error path" path "path" read_error
+;;
+
+let test_lock_free_observation_rejects_generation_change ~full_state () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "observation-generation-change" in
+  let first = schedule_due_stimulus ~schedule_id:"before-observation" () in
+  let second = schedule_due_stimulus ~schedule_id:"during-observation" () in
+  (match
+     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+       ~base_path
+       ~keeper_name
+       first
+   with
+   | Ok _ -> ()
+   | Error error -> failf "failed to seed durable event queue: %s" error);
+  let between_samples () =
+    match
+      Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+        ~base_path ~keeper_name second
+    with
+    | Ok _ -> ()
+    | Error error -> failf "failed to mutate durable event queue: %s" error
+  in
+  let observed =
+    if full_state then
+      match Keeper_event_queue_persistence.For_testing.observe_state_result_with_interleave
+        ~between_samples ~base_path ~keeper_name with
+      | Ok _ -> fail "generation change became a coherent full state"
+      | Error read_errors ->
+        { Keeper_event_queue_persistence.pending = Keeper_event_queue.empty; read_errors }
+    else
+      Keeper_event_queue_persistence.For_testing.observe_snapshot_with_errors_with_interleave
+        ~between_samples ~base_path ~keeper_name
+  in
+  check int
+    "incoherent observation returns exactly one typed error"
+    1
+    (List.length observed.read_errors);
+  let error = List.hd observed.read_errors in
+  check string
+    "concurrent generation change is typed unavailable"
+    "incoherent_read"
+    (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string error.kind);
+  check int
+    "incoherent observation cannot return a healthy queue"
+    0
+    (Keeper_event_queue.length observed.pending)
+;;
+
+let test_unknown_reaction_is_quarantined_without_clearing_pending () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "unknown-reaction-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-unknown-reaction" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
+        ; "record_kind", `String "reaction"
+        ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1235.0
+        ; "stimulus_id", `String stimulus_id
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String "unknown_custom"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "unknown reaction summary status" "degraded" "status" summary;
+  check bool "unknown reaction requires operator action" true
+    (summary |> member "operator_action_required" |> to_bool);
+  check int "unknown reaction quarantined" 1
+    (summary |> member "quarantined_row_count" |> to_int);
+  check int "unknown reaction contributes no current reaction" 0
+    (summary |> member "reaction_count" |> to_int);
+  check int "unknown reaction cannot clear pending" 1
+    (summary |> member "pending_stimulus_count" |> to_int);
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Ok
+      (Keeper_reaction_ledger.Evidence_quarantined
+        { evidence; first_reason }) ->
+    check int "only current stimulus matches" 1 evidence.matched_record_count;
+    check int "matching invalid row is explicit" 1 evidence.quarantined_record_count;
+    check bool "invalid reaction is not a turn" false evidence.turn_started_seen;
+    check string
+      "typed quarantine reason"
+      "unknown_reaction_kind"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "matching invalid row was projected as complete evidence"
+;;
+
+let test_valid_replay_survives_damaged_event_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "damaged-replay-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-damaged-replay" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+      [ "schema", `String Keeper_reaction_ledger.schema
+      ; "record_kind", `String "reaction"
+      ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
+      ; "keeper_name", `String keeper_name
+      ; "recorded_at_unix", `Float 1235.0
+      ; "stimulus_id", `String stimulus_id
+      ; "reaction", `Assoc [ "kind", `String "unknown_custom" ]
+      ]);
+  let read () =
+    match Keeper_reaction_ledger.event_queue_reaction_evidence_result
+            ~base_path ~keeper_name ~stimulus_id with
+    | Ok (Keeper_reaction_ledger.Evidence_quarantined { evidence; _ }) -> evidence
+    | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+      fail "damaged row must remain visible after replay"
+    | Error error ->
+      fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  in
+  let damaged = read () in
+  check bool "damaged reaction is not a turn start" false damaged.turn_started_seen;
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name stimulus;
+  let check_replayed evidence =
+    check bool "valid replay starts the turn" true evidence.Keeper_reaction_ledger.turn_started_seen;
+    check int "stimulus and valid event count once" 2 evidence.matched_record_count;
+    check int "damaged event remains quarantined" 1 evidence.quarantined_record_count
+  in
+  check_replayed (read ());
+  check_replayed (read ());
+  (* Asking for a new occurrence rebuilds the cache from the ledger, so both
+     the incremental and full-read paths must reach the same evidence. *)
+  let other = board_stimulus ~post_id:"post-rebuild-after-replay" () in
+  let other_id = Keeper_reaction_ledger.stimulus_id_of_event_queue other in
+  (match Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path ~keeper_name ~stimulus_id:other_id with
+   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+     check int "unrelated occurrence has no rows" 0 evidence.matched_record_count
+   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+     fail "damaged occurrence must not quarantine an unrelated occurrence"
+   | Error error ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error));
+  check_replayed (read ())
+;;
+
+(* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
+   payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
+   covered a parse-error path that can no longer occur and was removed. *)
+
+(* RFC-0266 regression: a recorded [Fusion_completed] stimulus is a recognized
+   closed-sum kind and must NOT be miscounted as an unsupported stimulus.  The
+   prior string whitelist
+   dropped [fusion_completed] into [unsupported_stimulus_count], degrading the
+   summary on every async fusion wake.  (We assert only the unsupported counter:
+   with no reaction row the stimulus is still legitimately pending.) *)
+let test_fusion_completed_stimulus_is_supported () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "fusion-keeper" in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (fusion_completed_stimulus ());
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "fusion_completed survives the closed row decoder" 0
+    (summary |> member "quarantined_row_count" |> to_int)
+;;
+
+(* Drift guard: [stimulus_kind_of_string] must stay the inverse of
+   [stimulus_kind_to_string] for every closed-sum variant, and reject unknowns.
+   Pairs with the exhaustive match in [note_stimulus_kind] so a new variant
+   cannot silently fall back to [unsupported]. *)
+let test_stimulus_kind_string_roundtrip () =
+  let roundtrips k =
+    match
+      Keeper_reaction_ledger.stimulus_kind_of_string
+        (Keeper_reaction_ledger.stimulus_kind_to_string k)
+    with
+    | Some k' ->
+      String.equal
+        (Keeper_reaction_ledger.stimulus_kind_to_string k')
+        (Keeper_reaction_ledger.stimulus_kind_to_string k)
+    | None -> false
+  in
+  List.iter
+    (fun k ->
+      check bool "stimulus_kind round-trips through string" true (roundtrips k))
+    [ Keeper_reaction_ledger.Board_signal
+    ; Keeper_reaction_ledger.Bootstrap
+    ; Keeper_reaction_ledger.Fusion_completed
+    ; Keeper_reaction_ledger.Schedule_due
+    ; Keeper_reaction_ledger.Connector_attention
+    ; Keeper_reaction_ledger.Hitl_resolved
+    ; Keeper_reaction_ledger.Completion_authority_rejected
+    ; Keeper_reaction_ledger.Task_outcome
+    ];
+  check bool "unknown stimulus kind string is None" true
+    (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
+;;
+
+(* Drift guard: known reaction labels round-trip through the closed decoder;
+   unknown labels remain typed failures and never enter the reaction algebra. *)
+let test_reaction_kind_string_roundtrip () =
+  let roundtrips k =
+    match
+      Keeper_reaction_ledger.reaction_kind_of_string
+        (Keeper_reaction_ledger.reaction_kind_to_string k)
+    with
+    | Ok parsed ->
+      String.equal
+        (Keeper_reaction_ledger.reaction_kind_to_string parsed)
+        (Keeper_reaction_ledger.reaction_kind_to_string k)
+    | Error _ -> false
+  in
+  List.iter
+    (fun k ->
+      check bool "reaction_kind round-trips through string" true (roundtrips k))
+    [ Keeper_reaction_ledger.Turn_started
+    ; Keeper_reaction_ledger.Event_queue_ack
+    ; Keeper_reaction_ledger.Event_queue_cancelled
+    ];
+  match Keeper_reaction_ledger.reaction_kind_of_string "unknown_custom" with
+  | Error (Keeper_reaction_ledger.Unknown_reaction_kind value) ->
+    check string "unknown reaction decoder preserves evidence" "unknown_custom" value
+  | Ok _ -> fail "unknown reaction string must not decode"
+;;
+
+let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
+  with_temp_base
+  @@ fun base_path ->
+  let keeper_name = "alpha" in
+  let stimulus = board_stimulus () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let current_event_id =
+    read_recent_rows ~base_path ~keeper_name ~limit:1
+    |> latest_row
+    |> member "event_id"
+    |> to_string
+  in
+  let store = reaction_ledger_store ~base_path ~keeper_name in
+  Dated_jsonl.append
+    store
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.foreign"
+        ; "record_kind", `String "stimulus"
+        ; "event_id", `String current_event_id
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1200.0
+        ; "stimulus_id", `String stimulus_id
+        ; ( "stimulus"
+          , `Assoc
+              [ "kind", `String "board_signal"
+              ; "source", `String "keeper_event_queue"
+              ; "post_id", `String stimulus.post_id
+              ] )
+        ]);
+  Dated_jsonl.append
+    store
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.foreign"
+        ; "record_kind", `String "reaction"
+        ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1201.0
+        ; "stimulus_id", `String stimulus_id
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String "turn_started"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check
+    int
+    "only the current generation contributes"
+    1
+    (summary |> member "stimulus_count" |> to_int);
+  check int "unexpected reaction contributes zero" 0
+    (summary |> member "reaction_count" |> to_int);
+  check int "unexpected reaction cannot clear current pending" 1
+    (summary |> member "pending_stimulus_count" |> to_int);
+  check
+    int
+    "both unexpected rows are quarantined"
+    2
+    (summary |> member "quarantined_row_count" |> to_int);
+  let unexpected_reason =
+    summary |> member "quarantine_reason_counts" |> to_list |> List.hd
+  in
+  check_member_string
+    "unexpected schema reason is typed"
+    "unexpected_schema"
+    "reason"
+    unexpected_reason;
+  check int "unexpected schema reason count" 2
+    (unexpected_reason |> member "count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet exposes quarantined rows" 2
+    (fleet |> member "quarantined_row_count" |> to_int);
+  check_list_has_string
+    "fleet status names quarantine"
+    "reaction_ledger_quarantined_row"
+    (fleet |> member "status_reasons")
+;;
+
+let test_quarantine_is_keeper_local () =
+  with_temp_base
+  @@ fun base_path ->
+  let quarantined_keeper = "quarantined-keeper" in
+  let healthy_keeper = "healthy-keeper" in
+  let quarantined_stimulus = board_stimulus ~post_id:"post-quarantined" () in
+  let quarantined_stimulus_id =
+    Keeper_reaction_ledger.stimulus_id_of_event_queue quarantined_stimulus
+  in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name:quarantined_keeper
+    quarantined_stimulus;
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name:quarantined_keeper)
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.v2"
+        ; "record_kind", `String "reaction"
+        ; ( "event_id"
+          , `String (quarantined_stimulus_id ^ ":reaction:turn_started") )
+        ; "keeper_name", `String quarantined_keeper
+        ; "recorded_at_unix", `Float 1201.0
+        ; "stimulus_id", `String quarantined_stimulus_id
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String "turn_started"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  let healthy_stimulus = board_stimulus ~post_id:"post-healthy" () in
+  let healthy_stimulus_id =
+    Keeper_reaction_ledger.stimulus_id_of_event_queue healthy_stimulus
+  in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name:healthy_keeper
+    healthy_stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name:healthy_keeper
+    healthy_stimulus;
+  (match
+     Keeper_reaction_ledger.event_queue_reaction_evidence_result
+       ~base_path
+       ~keeper_name:healthy_keeper
+       ~stimulus_id:healthy_stimulus_id
+   with
+   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+     check bool "healthy keeper turn remains visible" true evidence.turn_started_seen;
+     check int "healthy keeper has no quarantine" 0 evidence.quarantined_record_count
+   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+     fail "quarantine leaked across keeper stores"
+   | Error error ->
+     fail
+       ("healthy keeper read failed: "
+        ^ Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+            error));
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ quarantined_keeper; healthy_keeper ]
+      ~limit_per_keeper:10
+  in
+  let healthy_summary =
+    fleet
+    |> member "keepers"
+    |> to_list
+    |> List.find (fun summary ->
+      String.equal (summary |> member "keeper_name" |> to_string) healthy_keeper)
+  in
+  check_member_string "healthy keeper summary stays ok" "ok" "status" healthy_summary;
+  check int "healthy keeper pending stays cleared" 0
+    (healthy_summary |> member "pending_stimulus_count" |> to_int);
+  check int "healthy keeper current reaction is preserved" 1
+    (healthy_summary |> member "reaction_count" |> to_int)
+;;
+
+let durable_files root =
+  let rec collect path =
+    if Sys.is_directory path then
+      Sys.readdir path |> Array.to_list |> List.sort String.compare
+      |> List.concat_map (fun name -> collect (Filename.concat path name))
+    else [ path, In_channel.with_open_bin path In_channel.input_all ]
+  in
+  collect root
+;;
+
+let test_full_observation_keeps_unprojected_schedule_terminal () =
+  with_temp_base @@ fun base_path ->
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let keeper_name = "schedule-observation" in
+  let source = schedule_due_stimulus () in
+  let observe () =
+    match Keeper_event_queue_persistence.observe_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error errors -> failf "full observation failed with %d errors" (List.length errors)
+  in
+  let empty = observe () in
+  check int "absent store observes empty pending" 0
+    (Keeper_event_queue.length (Keeper_event_queue_state.pending empty));
+  check int "absence creates no files" 0 (List.length (durable_files base_path));
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
+  ignore (Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+    ~base_path ~keeper_name source |> require_ok "enqueue scheduled occurrence");
+  let selection =
+    match Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+      |> require_ok "select scheduled occurrence" with
+    | [ selection ] -> selection
+    | _ -> fail "expected one exact scheduled occurrence"
+  in
+  let captured = ref None in
+  let result = Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+    ~base_path ~keeper_name ~applied_at:1235.0 ~selection
+    ~after_commit:(fun pending ->
+      (* The real transaction still owns its lock here. This read must neither
+         enter that lock again nor project/compact the committed evidence. *)
+      let before = durable_files base_path in
+      let state = observe () in
+      check int "callback pending agrees with full observed state"
+        (Keeper_event_queue.length pending)
+        (Keeper_event_queue.length (Keeper_event_queue_state.pending state));
+      check (list (pair string string)) "full observer leaves every durable byte unchanged"
+        before (durable_files base_path);
+      captured := Some state)
+    () |> require_ok "commit scheduled turn terminal"
+  in
+  let receipt = match result with
+    | Keeper_event_queue_persistence.Turn_terminal_committed
+        (Keeper_event_queue_persistence.Transition_applied receipt
+        | Keeper_event_queue_persistence.Transition_already_applied receipt) -> receipt
+    | Keeper_event_queue_persistence.Turn_terminal_committed
+        (Keeper_event_queue_persistence.Transition_committed_followup_failed { detail; _ }) -> fail detail
+    | Keeper_event_queue_persistence.Turn_selection_withdrawn -> fail "scheduled source was withdrawn"
+  in
+  let state = match !captured with Some state -> state | None -> fail "commit callback did not observe" in
+  check int "committed schedule has left pending" 0
+    (Keeper_event_queue.length (Keeper_event_queue_state.pending state));
+  (match Keeper_event_queue_state.transition_outbox state with
+   | [ entry ] ->
+     check bool "full observation retains the actual transaction receipt" true
+       (Keeper_event_queue_state.transition_receipt_equal receipt entry.receipt);
+     check bool "outbox retains exact schedule source" true (entry.stimuli = [ source ])
+   | _ -> fail "unprojected scheduled terminal was lost");
+  (match Keeper_event_queue_state.schedule_occurrences state with
+   | [ { occurrence_id; occurrence_state =
+       Occurrence_completed (Terminal_evidence_pending transition_id); _ } ] ->
+     check string "exact occurrence survives pending removal" source.post_id occurrence_id;
+     check string "pending projection names the real transition" receipt.transition_id transition_id
+   | _ -> fail "full observer concealed the pending terminal projection");
+  let evidence = Keeper_reaction_ledger.event_queue_reaction_evidence_result
+    ~base_path ~keeper_name ~stimulus_id:source.post_id in
+  (match evidence with
+   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+     check bool "dispatch exists" true evidence.stimulus_seen;
+     check bool "observation does not invent a projected ACK" false evidence.event_queue_ack_seen
+   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) | Error _ -> fail "expected readable dispatch-only ledger");
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+    ~base_path ~keeper_name ~expected_transition_id:receipt.transition_id
+    |> require_ok "project actual scheduled ACK";
+  check int "later observation sees outbox retirement" 0
+    (Keeper_event_queue_state.transition_outbox (observe ()) |> List.length);
+  let projected =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path ~keeper_name ~stimulus_id:source.post_id
+    |> require_complete_evidence "projected scheduled ACK"
+  in
+  check bool "projected ACK is observed" true projected.event_queue_ack_seen;
+  check bool "projected ACK has its recorded time" true
+    (Option.is_some projected.event_queue_ack_recorded_at)
+;;
+
+let consume_delivery_source ~base_path ~keeper_name source =
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
+  ignore (Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+    ~base_path ~keeper_name source |> require_ok "enqueue exact source");
+  let selection = match Keeper_event_queue_persistence.select_when_result
+      ~base_path ~keeper_name ~now:(Unix.gettimeofday ()) ~ready:(fun _ -> true)
+      |> require_ok "select exact source" with
+    | Some selection -> selection | None -> fail "exact source was not selectable" in
+  let receipt =
+    match Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+            ~base_path ~keeper_name ~applied_at:(Unix.gettimeofday ()) ~selection ()
+          |> require_ok "consume exact source" with
+    | Keeper_event_queue_persistence.Turn_terminal_committed
+        (Keeper_event_queue_persistence.Transition_applied receipt
+         | Keeper_event_queue_persistence.Transition_already_applied receipt) -> receipt
+    | Keeper_event_queue_persistence.Turn_terminal_committed
+        (Keeper_event_queue_persistence.Transition_committed_followup_failed { detail; _ }) -> fail detail
+    | Keeper_event_queue_persistence.Turn_selection_withdrawn -> fail "exact source was withdrawn" in
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result ~base_path ~keeper_name
+    ~expected_transition_id:receipt.transition_id |> require_ok "project exact ACK evidence";
+  let pending = Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+    |> require_ok "read consumed queue" in
+  check int "exact source is durably consumed" 0 (List.length pending)
+;;
+
+let with_consumed_delivery_source f =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "strict-delivery-keeper" in
+  let source = board_stimulus ~post_id:"consumed-exact-source" () in
+  consume_delivery_source ~base_path ~keeper_name source;
+  f ~base_path ~keeper_name ~source
+;;
+
+let delivery_seen_strict ?(not_before = 0.) ~base_path ~keeper_name source =
+  Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+    ~not_before
+    ~base_path ~keeper_name ~post_id:source.Keeper_event_queue.post_id
+    ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
+;;
+
+let require_strict_delivery label expected = function
+  | Ok seen -> check bool label expected seen
+  | Error error -> failf "%s: %s" label
+      (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error)
+;;
+
+let corrupt_exact_ack ~base_path ~keeper_name ~source corruption =
+  let store = reaction_ledger_store ~base_path ~keeper_name in
+  let paths = match Dated_jsonl.range_day_file_paths_result store
+      ~since:"1970-01-01" ~until:"9999-12-31" with
+    | Ok paths -> paths | Error error -> fail (Dated_jsonl.read_error_to_string error) in
+  let is_exact_ack line =
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      (match List.assoc_opt "record_kind" fields, List.assoc_opt "reaction" fields with
+       | Some (`String "reaction"), Some (`Assoc reaction) ->
+         List.assoc_opt "kind" reaction =
+           Some (`String (Keeper_reaction_ledger.reaction_kind_to_string Keeper_reaction_ledger.Event_queue_ack))
+         && List.assoc_opt "post_id" reaction = Some (`String source.Keeper_event_queue.post_id)
+       | _ -> false)
+    | _ -> false in
+  let path, lines = match List.find_map (fun path ->
+      let lines = In_channel.with_open_bin path In_channel.input_lines in
+      if List.exists is_exact_ack lines then Some (path, lines) else None) paths with
+    | Some file -> file | None -> fail "canonical consumed-source ACK row is missing" in
+  let original = String.concat "\n" lines ^ "\n" in
+  let changed = List.map (fun line -> if is_exact_ack line then corruption line else line) lines in
+  write_file path (String.concat "\n" changed ^ "\n");
+  fun () -> write_file path original
+;;
+
+let test_consumed_delivery_syntax_corruption_is_incomplete () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  delivery_seen_strict ~base_path ~keeper_name source |> require_strict_delivery "valid exact ACK" true;
+  let restore = corrupt_exact_ack ~base_path ~keeper_name ~source (fun _ -> "not-json") in
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete
+       { malformed_row_count; semantic_invalid_row_count; first_reason }) ->
+     check int "damaged consumed row is not absence" 1 malformed_row_count;
+     check int "syntax damage remains its own evidence" 0 semantic_invalid_row_count;
+     check string "syntax damage is typed" "malformed_json"
+       (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+   | Ok _ -> fail "strict reader approved absence after the consumed ACK was damaged");
+  Keeper_reaction_ledger.event_queue_delivery_seen_for_source_result
+    ~base_path ~keeper_name ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> function
+    | Error error -> fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    | Ok seen ->
+      check bool "permissive reader keeps its prior semantics" false seen;
+      restore ();
+      delivery_seen_strict ~base_path ~keeper_name source |> require_strict_delivery "restored ACK" true
+;;
+
+let test_consumed_delivery_semantic_corruption_is_incomplete () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let corrupt line =
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      let reaction = match List.assoc_opt "reaction" fields with
+        | Some (`Assoc fields) -> `Assoc (("kind", `String "unknown_delivery") :: List.remove_assoc "kind" fields)
+        | Some _ | None -> fail "canonical ACK has no reaction" in
+      `Assoc (("reaction", reaction) :: List.remove_assoc "reaction" fields) |> Yojson.Safe.to_string
+    | _ -> fail "canonical ACK is not an object" in
+  let restore = corrupt_exact_ack ~base_path ~keeper_name ~source corrupt in
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete
+       { malformed_row_count; semantic_invalid_row_count; first_reason }) ->
+     check int "semantic damage is not a syntax error" 0 malformed_row_count;
+     check int "damaged consumed ACK is counted" 1 semantic_invalid_row_count;
+     check string "semantic damage is typed" "unknown_reaction_kind"
+       (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+   | Ok _ -> fail "strict reader approved absence after semantic ACK corruption");
+  restore ();
+  delivery_seen_strict ~base_path ~keeper_name source |> require_strict_delivery "restored semantic ACK" true
+;;
+
+let test_exact_delivery_survives_unrelated_corruption () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let dir = Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "1970-01" in
+  mkdir_p dir;
+  write_file (Filename.concat dir "01.jsonl") "not-json\n{}\n";
+  delivery_seen_strict ~base_path ~keeper_name source
+    |> require_strict_delivery "exact valid positive overrides unrelated damaged rows" true;
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  let snapshot = match Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+      ~base_path ~keeper_name ~since:0. with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error) in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "batch snapshot preserves the canonical positive" true;
+  (match Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+      ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Ask_answered with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete _) -> ()
+   | _ -> fail "a different typed source cannot inherit another delivery proof");
+  match delivery_seen_strict ~base_path ~keeper_name unknown with
+  | Error (Keeper_reaction_ledger.Evidence_incomplete
+      { malformed_row_count; semantic_invalid_row_count; _ }) ->
+    check int "unrelated syntax damage also forbids absence" 1 malformed_row_count;
+    check int "unrelated semantic damage also forbids absence" 1 semantic_invalid_row_count
+  | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+    fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok _ -> fail "an absent source was approved through an incomplete ledger"
+;;
+
+let test_valid_complete_delivery_scan_can_prove_absence () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let snapshot = match Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+      ~base_path ~keeper_name ~since:0. with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error) in
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:unknown.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "one batch read proves valid absence" false;
+  let restore = corrupt_exact_ack ~base_path ~keeper_name ~source (fun _ -> "not-json") in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "a snapshot is immutable across later file changes" true;
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete _) -> ()
+   | _ -> fail "fresh owner evidence must reread the changed journal");
+  restore ();
+  delivery_seen_strict ~base_path ~keeper_name (board_stimulus ~post_id:"never-delivered-source" ())
+    |> require_strict_delivery "complete valid ledger proves exact absence" false
+;;
+
+let test_delivery_absence_ignores_partitions_before_the_request () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "narrowed-delivery-keeper" in
+  let dir = Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "2020-01" in
+  mkdir_p dir;
+  write_file (Filename.concat dir "01.jsonl") "not-json\n";
+  let source = board_stimulus ~post_id:"fresh-source-after-old-damage" () in
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete { malformed_row_count; _ }) ->
+     check int "an older partition still forbids absence without a floor" 1 malformed_row_count
+   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+   | Ok _ -> fail "whole-ledger absence was approved through an older damaged row");
+  delivery_seen_strict
+    ~not_before:(Unix.gettimeofday ())
+    ~base_path
+    ~keeper_name
+    source
+  |> require_strict_delivery
+       "a pre-request partition's torn write does not forbid a new delivery" false
+;;
+
+let test_delivery_absence_still_counts_damage_inside_the_request_window () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "narrowed-delivery-window-keeper" in
+  (* Let the writer open today's partition, then damage that very file, so the
+     test cannot drift from the layout the store actually uses. *)
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ~post_id:"window-filler" ());
+  let store = reaction_ledger_store ~base_path ~keeper_name in
+  let path =
+    match
+      Dated_jsonl.range_day_file_paths_result store ~since:"1970-01-01" ~until:"9999-12-31"
+    with
+    | Ok [ path ] -> path
+    | Ok _ -> fail "expected exactly one day file"
+    | Error error -> fail (Dated_jsonl.read_error_to_string error)
+  in
+  write_file path "not-json\n";
+  let source = board_stimulus ~post_id:"fresh-source-inside-window" () in
+  match
+    delivery_seen_strict
+      ~not_before:(Unix.gettimeofday ())
+      ~base_path
+      ~keeper_name
+      source
+  with
+  | Error (Keeper_reaction_ledger.Evidence_incomplete { malformed_row_count; _ }) ->
+    check int "damage inside the request window still forbids absence" 1 malformed_row_count
+  | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+    fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok _ -> fail "in-window damage was ignored by the narrowed scan"
+;;
+
+(* A delivery cannot predate the answer it delivers. Damage written before the
+   answer's day is outside the evidence window: it must not make the snapshot
+   incomplete, must not forbid absence, and must not hide a valid positive.
+   Damage inside the window keeps the strict semantics unchanged. *)
+let test_delivery_window_excludes_corruption_before_the_answer () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let dir = Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "1970-01" in
+  mkdir_p dir;
+  write_file (Filename.concat dir "01.jsonl") "not-json\n";
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  (match delivery_seen_strict ~base_path ~keeper_name unknown with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete _) -> ()
+   | _ -> fail "whole-history scan must keep the pre-answer damage as incomplete evidence");
+  let since = Unix.gettimeofday () -. 86400. in
+  let seen_since ~base_path ~keeper_name since source =
+    Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+      ~base_path ~keeper_name ~not_before:since ~post_id:source.Keeper_event_queue.post_id
+      ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
+  in
+  seen_since ~base_path ~keeper_name since source
+  |> require_strict_delivery "valid positive survives outside the damaged window" true;
+  seen_since ~base_path ~keeper_name since unknown
+  |> require_strict_delivery "pre-answer corruption cannot forbid absence" false;
+  let snapshot = match
+      Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+        ~base_path ~keeper_name ~since with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error) in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:unknown.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+  |> require_strict_delivery "bounded snapshot proves absence across its window" false
+;;
+
+let ledger_day_files ~base_path ~keeper_name =
+  match Dated_jsonl.range_day_file_paths_result
+          (reaction_ledger_store ~base_path ~keeper_name)
+          ~since:"1970-01-01" ~until:"9999-12-31" with
+  | Ok paths -> paths
+  | Error error -> fail (Dated_jsonl.read_error_to_string error)
+;;
+
+let ledger_bytes ~base_path ~keeper_name =
+  List.fold_left
+    (fun total path -> total + (Unix.stat path).Unix.st_size)
+    0 (ledger_day_files ~base_path ~keeper_name)
+;;
+
+let append_to_file path text =
+  Out_channel.with_open_gen [ Open_append; Open_wronly ] 0o644 path (fun channel ->
+    output_string channel text)
+;;
+
+let delivery_scanned_bytes () =
+  Otel_metric_store_core.metric_value_or_zero
+    Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+    ~labels:[ ("store", "reaction_ledger_delivery") ]
+    ()
+;;
+
+(* The ask answer recovery pass asks about every answered ask in turn
+   (#43299). Each answer used to read the keeper's whole ledger again, so a
+   pass cost the ledger's size times the number of asks. The ledger is read
+   once, whatever the number of sources asked about. *)
+let test_delivery_evidence_is_read_once_for_many_sources () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let since = Unix.gettimeofday () -. 86400. in
+  let seen source = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in
+  let before = delivery_scanned_bytes () in
+  seen source |> require_strict_delivery "consumed source is proven" true;
+  let first_read = delivery_scanned_bytes () -. before in
+  check (float 0.) "the first question reads the ledger's day files"
+    (float_of_int (ledger_bytes ~base_path ~keeper_name)) first_read;
+  for n = 1 to 20 do
+    seen (board_stimulus ~post_id:(Printf.sprintf "unknown-source-%d" n) ())
+    |> require_strict_delivery "an unknown source is absent" false
+  done;
+  seen source |> require_strict_delivery "consumed source is still proven" true;
+  check (float 0.) "twenty-one more questions read no bytes"
+    first_read (delivery_scanned_bytes () -. before)
+;;
+
+(* A delivery recorded after the evidence was read is seen on the next
+   question, and only the bytes written since are read. *)
+let test_delivery_evidence_reads_only_the_appended_bytes () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let since = Unix.gettimeofday () -. 86400. in
+  let seen source = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in
+  let second = board_stimulus ~post_id:"consumed-after-the-first-read" () in
+  seen source |> require_strict_delivery "first source is proven" true;
+  seen second |> require_strict_delivery "second source is not delivered yet" false;
+  let size_before = ledger_bytes ~base_path ~keeper_name in
+  consume_delivery_source ~base_path ~keeper_name second;
+  let appended = ledger_bytes ~base_path ~keeper_name - size_before in
+  check bool "consuming the second source wrote to the ledger" true (appended > 0);
+  let before = delivery_scanned_bytes () in
+  seen second |> require_strict_delivery "second source is proven once recorded" true;
+  check (float 0.) "only the appended bytes were read"
+    (float_of_int appended) (delivery_scanned_bytes () -. before);
+  seen source |> require_strict_delivery "first source is still proven" true
+;;
+
+(* The evidence kept for a file never outlives its rows or hides damage that
+   arrives later. *)
+let test_delivery_evidence_follows_the_ledger_after_it_was_read () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let since = Unix.gettimeofday () -. 86400. in
+  let seen source = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  seen source |> require_strict_delivery "proven before the change" true;
+  seen unknown |> require_strict_delivery "absent before the change" false;
+  let paths = ledger_day_files ~base_path ~keeper_name in
+  let last_path = List.nth paths (List.length paths - 1) in
+  append_to_file last_path "not-json\n";
+  (match seen unknown with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete { malformed_row_count; _ }) ->
+     check int "a damaged row appended later forbids absence" 1 malformed_row_count
+   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+   | Ok _ -> fail "damage appended after the read was ignored");
+  seen source |> require_strict_delivery "a proof survives unrelated damage" true;
+  List.iter (fun path -> write_file path "") paths;
+  seen source |> require_strict_delivery "the proof does not outlive the emptied ledger" false;
+  seen unknown |> require_strict_delivery "an emptied ledger holds no damage" false
+;;
+
+let with_delivery_evidence_pool f =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let previous = Domain_pool_ref.get () in
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      Fun.protect
+        ~finally:(fun () ->
+          match previous with
+          | Some previous -> Domain_pool_ref.set previous
+          | None -> Domain_pool_ref.clear_for_tests ())
+        (fun () -> f pool)))
+;;
+
+let test_delivery_evidence_pool_preserves_authority () =
+  with_delivery_evidence_pool (fun _pool ->
+    test_consumed_delivery_syntax_corruption_is_incomplete ();
+    test_delivery_evidence_reads_only_the_appended_bytes ();
+    test_delivery_evidence_follows_the_ledger_after_it_was_read ())
+;;
+
+let test_delivery_evidence_nested_worker_and_raw_domain () =
+  with_delivery_evidence_pool (fun pool ->
+    Domain_pool.submit_cpu ~name:__FUNCTION__ pool test_delivery_evidence_follows_the_ledger_after_it_was_read;
+    with_consumed_delivery_source (fun ~base_path ~keeper_name ~source ->
+      let since = Unix.gettimeofday () -. 86400. in
+      let seen () = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in
+      Domain.join (Domain.spawn seen)
+      |> require_strict_delivery "raw domain reads canonical delivery evidence" true))
+;;
+
+let test_syntax_error_does_not_claim_an_occurrence_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "strict-evidence-keeper" in
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  let malformed_month = Filename.concat ledger_dir "2026-01" in
+  mkdir_p malformed_month;
+  let malformed_path = Filename.concat malformed_month "01.jsonl" in
+  write_file malformed_path "not-json\n";
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"schedule:test-occurrence"
+    |> require_complete_evidence "unattributed syntax row"
+  in
+  check int "no row is assigned to the queried occurrence" 0
+    evidence.matched_record_count;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "malformed summary row is quarantined" 1
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
+  check_member_string "syntax quarantine reason" "malformed_json" "reason" reason
+;;
+
+let test_missing_identity_does_not_claim_an_occurrence_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "identity-incomplete-keeper" in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
+        ; "record_kind", `String "stimulus"
+        ; "event_id", `String "unattributed-event"
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1234.0
+        ; ( "stimulus"
+          , `Assoc
+              [ "kind", `String "schedule_due"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"schedule:test-occurrence"
+    |> require_complete_evidence "identity-less row"
+  in
+  check int "identity-less row is not assigned to the query" 0
+    evidence.matched_record_count;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "identity-less row remains operator-visible" 1
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
+  check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
+;;
+
+let test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "batch-evidence-keeper" in
+  let first = schedule_due_stimulus ~schedule_id:"batch-first" () in
+  let second = schedule_due_stimulus ~schedule_id:"batch-second" () in
+  let first_id = Keeper_reaction_ledger.stimulus_id_of_event_queue first in
+  let second_id = Keeper_reaction_ledger.stimulus_id_of_event_queue second in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    first;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    first;
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    second;
+  let batch =
+    match
+      Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+        ~base_path
+        ~keeper_name
+        ~stimulus_ids:[ second_id; first_id; second_id ]
+    with
+    | Ok batch -> batch
+    | Error error ->
+      fail
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+           error)
+  in
+  check (list string) "first-request order with duplicates collapsed"
+    [ second_id; first_id ]
+    (List.map fst batch);
+  let complete stimulus_id =
+    match List.assoc_opt stimulus_id batch with
+    | Some (Keeper_reaction_ledger.Evidence_complete evidence) -> evidence
+    | Some (Keeper_reaction_ledger.Evidence_quarantined _) ->
+      fail "batch evidence unexpectedly quarantined"
+    | None -> fail "requested batch evidence is missing"
+  in
+  let second_evidence = complete second_id in
+  check bool "second stimulus is visible" true second_evidence.stimulus_seen;
+  check bool "second turn has not started" false second_evidence.turn_started_seen;
+  check int "second has one exact row" 1 second_evidence.matched_record_count;
+  let first_evidence = complete first_id in
+  check bool "first stimulus is visible" true first_evidence.stimulus_seen;
+  check bool "first turn start is visible" true first_evidence.turn_started_seen;
+  check int "first has two exact rows" 2 first_evidence.matched_record_count;
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids:[ "" ]
+  with
+  | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id -> ()
+  | Error error ->
+    failf
+      "empty batch identity returned the wrong error: %s"
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+         error)
+  | Ok _ -> fail "empty batch identity was accepted"
+;;
+
+let test_event_id_digest_is_sha256 () =
+  let stimulus_id = "board:post-42" in
+  let expected =
+    "krl:" ^ Agent_core_sha256.(digest_string (stimulus_id ^ "|stimulus") |> to_hex)
+  in
+  let actual = Masc.Keeper_reaction_ledger.digest_id "krl" (stimulus_id ^ "|stimulus") in
+  check string "event id carries a SHA-256 digest" expected actual;
+  check
+    int
+    "and the full digest, not a truncation"
+    (String.length "krl:" + 64)
+    (String.length actual)
+;;
+
+(* The fleet summary emitted four statuses from a closed type and a fifth,
+   "unavailable", as a bare string beside it, so nothing in the code said the
+   vocabulary was five wide (#27560). These read the field the HTTP route
+   serves and check it against the exported list. *)
+let test_fleet_summary_status_vocabulary_is_closed () =
+  let status json =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "status" fields with
+       | Some (`String value) -> value
+       | _ -> Alcotest.fail "fleet summary carried no status string")
+    | _ -> Alcotest.fail "fleet summary is not an object"
+  in
+  let unavailable = status (Masc.Keeper_reaction_ledger.unavailable_fleet_summary_json ()) in
+  Alcotest.(check bool)
+    (Printf.sprintf "%S is in the declared vocabulary" unavailable)
+    true
+    (List.mem unavailable Masc.Keeper_reaction_ledger.fleet_summary_status_strings);
+  Alcotest.(check (list string))
+    "the vocabulary is exactly these five"
+    [ "empty"; "ok"; "degraded"; "unknown"; "unavailable" ]
+    Masc.Keeper_reaction_ledger.fleet_summary_status_strings
+;;
+
+(* The evidence read keeps its accumulators between calls and advances them
+   over what the ledger gained. Asking twice must not count a row twice, and
+   what a second call reports must match what a first call on the same ledger
+   reports - the same numbers a full scan gave before the cache existed. *)
+let test_repeated_evidence_reads_do_not_double_count () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "repeat-evidence-keeper" in
+    let stimulus = board_stimulus ~post_id:"post-repeat" () in
+    let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+    let read () =
+      require_complete_evidence
+        "repeated evidence read"
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path
+           ~keeper_name
+           ~stimulus_id)
+    in
+    let first = read () in
+    check int "one row after the stimulus" 1 first.matched_record_count;
+    let second = read () in
+    check int "reading again counts the same row once" 1 second.matched_record_count;
+    check bool "the stimulus is still seen" true second.stimulus_seen;
+    (* A row appended between reads is picked up by the next read. *)
+    Keeper_reaction_ledger.record_event_queue_turn_started
+      ~base_path
+      ~keeper_name
+      stimulus;
+    let third = read () in
+    check bool "the turn start appended after the first read is seen" true
+      third.turn_started_seen;
+    check int "the appended row is counted once" 2 third.matched_record_count;
+    (* A ledger asked about a second stimulus rereads from zero, and the first
+       stimulus's answer must survive that unchanged. *)
+    let other = board_stimulus ~post_id:"post-repeat-other" () in
+    let other_id = Keeper_reaction_ledger.stimulus_id_of_event_queue other in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name other;
+    (match
+       Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+         ~base_path
+         ~keeper_name
+         ~stimulus_ids:[ stimulus_id; other_id ]
+     with
+     | Error error ->
+       failf
+         "batch read after a new stimulus failed: %s"
+         (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+     | Ok pairs ->
+       check int "both stimuli answered" 2 (List.length pairs);
+       let evidence_for id =
+         require_complete_evidence "batch evidence" (Ok (List.assoc id pairs))
+       in
+       let first_again = evidence_for stimulus_id in
+       check int "the first stimulus keeps its two rows" 2
+         first_again.matched_record_count;
+       check bool "the first stimulus keeps its turn start" true
+         first_again.turn_started_seen;
+       let other_evidence = evidence_for other_id in
+       check int "the new stimulus has its one row" 1
+         other_evidence.matched_record_count))
+;;
+
+let with_warm_evidence f =
+  with_temp_base (fun base_path ->
+    let keeper_name = "cursor-integrity-keeper" in
+    let stimulus = board_stimulus ~post_id:"cursor-source" () in
+    let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+    let store = reaction_ledger_store ~base_path ~keeper_name in
+    let paths =
+      match Dated_jsonl.range_day_file_paths_result store
+              ~since:"1970-01-01" ~until:"9999-12-31" with
+      | Ok paths -> paths
+      | Error error -> fail (Dated_jsonl.read_error_to_string error)
+    in
+    let path = match paths with [path] -> path | _ -> fail "expected one day file" in
+    let read () = Keeper_reaction_ledger.event_queue_reaction_evidence_result
+        ~base_path ~keeper_name ~stimulus_id in
+    let initial = require_complete_evidence "warm" (read ()) in
+    check int "initial source present" 1 initial.matched_record_count;
+    f ~base_path ~keeper_name ~stimulus ~path ~read)
+;;
+
+let test_evidence_prune_invalidates_and_readmission_survives () =
+  with_warm_evidence (fun ~base_path ~keeper_name ~stimulus ~path ~read ->
+    Sys.remove path;
+    let pruned = require_complete_evidence "pruned" (read ()) in
+    check int "deleted source is not retained as evidence" 0 pruned.matched_record_count;
+    check bool "deleted stimulus no longer observed" false pruned.stimulus_seen;
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+    let restored = require_complete_evidence "readmitted" (read ()) in
+    check int "same source can be observed again" 1 restored.matched_record_count)
+;;
+
+let test_evidence_same_length_replacement_invalidates () =
+  with_warm_evidence (fun ~base_path:_ ~keeper_name:_ ~stimulus:_ ~path ~read ->
+    let original = Fs_compat.load_file path in
+    let replacement = path ^ ".replacement" in
+    let unrelated = "{}" ^ String.make (String.length original - 3) ' ' ^ "\n" in
+    Out_channel.with_open_bin replacement (fun channel -> output_string channel unrelated);
+    check int "replacement has the exact previous byte length"
+      (String.length original) (Unix.stat replacement).st_size;
+    Unix.rename replacement path;
+    let result = require_complete_evidence "replacement" (read ()) in
+    check int "old inode's source is not retained" 0 result.matched_record_count;
+    check string "reader never rewrites replacement evidence" unrelated
+      (Fs_compat.load_file path))
+;;
+
+let test_evidence_directory_fault_is_not_cached_success () =
+  with_warm_evidence (fun ~base_path ~keeper_name:_ ~stimulus:_ ~path ~read ->
+    let month = Filename.dirname path in
+    let saved = Filename.concat base_path "saved-month" in
+    Unix.rename month saved;
+    Out_channel.with_open_bin month (fun channel -> output_string channel "not a directory");
+    Fun.protect
+      ~finally:(fun () -> Sys.remove month; Unix.rename saved month)
+      (fun () ->
+        (match read () with
+         | Error (Keeper_reaction_ledger.Evidence_read_error
+                    (Dated_jsonl.Not_a_directory { path = actual })) ->
+           check string "typed failing month" month actual
+         | Error _ | Ok _ -> fail "directory fault was not returned as typed read failure");
+        check string "read preserves invalid directory bytes" "not a directory"
+          (Fs_compat.load_file month));
+    let recovered = require_complete_evidence "recovered" (read ()) in
+    check int "fresh read after repair counts each row once" 1 recovered.matched_record_count)
+;;
+
+let test_evidence_unreadable_file_is_not_cached_success () =
+  with_warm_evidence (fun ~base_path:_ ~keeper_name:_ ~stimulus:_ ~path ~read ->
+    Unix.chmod path 0o000;
+    Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) (fun () ->
+      (* Root can read mode 000. Verify the actual capability instead of
+         manufacturing an EACCES expectation from permission bits alone. *)
+      let readable =
+        match Unix.access path [Unix.R_OK] with
+        | () -> true
+        | exception Unix.Unix_error (Unix.EACCES, _, _) -> false
+      in
+      if readable then
+        ignore (require_complete_evidence "privileged read remains allowed" (read ()))
+      else
+        match read () with
+        | Error (Keeper_reaction_ledger.Evidence_read_error
+                   (Dated_jsonl.Io_error { operation = Open_file; path = actual; _ })) ->
+          check string "read error names the unreadable file" path actual
+        | Error _ | Ok _ -> fail "unreadable file returned cached success");
+    let restored = require_complete_evidence "permissions restored" (read ()) in
+    check int "permission repair permits a fresh exact read" 1 restored.matched_record_count)
+;;
+
+let () =
+  run
+    "keeper_reaction_ledger"
+    [ ( "ledger"
+      , [ test_case "valid replay survives a damaged event identity" `Quick
+            test_valid_replay_survives_damaged_event_identity
+        ; test_case "pruned evidence is invalidated and can return" `Quick
+            test_evidence_prune_invalidates_and_readmission_survives
+        ; test_case "same-length replacement invalidates evidence" `Quick
+            test_evidence_same_length_replacement_invalidates
+        ; test_case "directory fault is a typed read failure" `Quick
+            test_evidence_directory_fault_is_not_cached_success
+        ; test_case "unreadable evidence cannot reuse cached success" `Quick
+            test_evidence_unreadable_file_is_not_cached_success
+        ; test_case
+            "event queue stimulus and turn reaction are durable"
+            `Quick
+            test_event_queue_stimulus_and_turn_reaction
+        ; test_case
+            "turn finished closes the interval the start opened"
+            `Quick
+            test_turn_finished_closes_the_interval_the_start_opened
+        ; test_case
+            "unexpected schema rows cannot double-count current occurrences"
+            `Quick
+            test_unexpected_schema_rows_are_quarantined_without_double_counting
+        ; test_case
+            "direct append observer follows persistence"
+            `Quick
+            test_direct_append_state_change_observer_contract
+        ; test_case
+            "direct append observer failure is isolated"
+            `Quick
+            test_direct_append_observer_failure_is_isolated
+        ; test_case
+            "quarantine remains keeper-local"
+            `Quick
+            test_quarantine_is_keeper_local
+        ; test_case
+            "consumed delivery syntax damage never approves absence"
+            `Quick test_consumed_delivery_syntax_corruption_is_incomplete
+        ; test_case
+            "consumed delivery semantic damage never approves absence"
+            `Quick test_consumed_delivery_semantic_corruption_is_incomplete
+        ; test_case
+            "exact valid delivery survives unrelated corruption"
+            `Quick test_exact_delivery_survives_unrelated_corruption
+        ; test_case
+            "only a complete valid delivery scan proves absence"
+            `Quick test_valid_complete_delivery_scan_can_prove_absence
+        ; test_case
+            "delivery absence ignores partitions before the request"
+            `Quick test_delivery_absence_ignores_partitions_before_the_request
+        ; test_case
+            "delivery absence still counts damage inside the request window"
+            `Quick test_delivery_absence_still_counts_damage_inside_the_request_window
+        ; test_case
+            "delivery window excludes corruption before the answer"
+            `Quick test_delivery_window_excludes_corruption_before_the_answer
+        ; test_case "delivery evidence is read once for many sources"
+            `Quick test_delivery_evidence_is_read_once_for_many_sources
+        ; test_case "delivery evidence reads only the appended bytes"
+            `Quick test_delivery_evidence_reads_only_the_appended_bytes
+        ; test_case "delivery evidence follows the ledger after it was read"
+            `Quick test_delivery_evidence_follows_the_ledger_after_it_was_read
+        ; test_case "delivery evidence pool preserves authority"
+            `Quick test_delivery_evidence_pool_preserves_authority
+        ; test_case "delivery evidence nested worker and raw domain"
+            `Quick test_delivery_evidence_nested_worker_and_raw_domain
+        ; test_case
+            "syntax error cannot claim an occurrence identity"
+            `Quick
+            test_syntax_error_does_not_claim_an_occurrence_identity
+        ; test_case
+            "missing identity cannot claim an occurrence identity"
+            `Quick
+            test_missing_identity_does_not_claim_an_occurrence_identity
+        ; test_case
+            "current rows require complete writer shape"
+            `Quick
+            test_current_rows_require_complete_writer_shape
+        ; test_case
+            "unknown record kind is quarantined, not fatal"
+            `Quick
+            test_unknown_record_kind_is_quarantined_not_fatal
+        ; test_case
+            "summary marks unreacted and reacted stimuli"
+            `Quick
+            test_summary_marks_unreacted_and_reacted_stimuli
+        ; test_case
+            "summary preserves reaction before stimulus"
+            `Quick test_summary_preserves_reaction_before_stimulus
+        ; test_case
+            "fleet summary follows a degraded keeper"
+            `Quick
+            test_fleet_summary_follows_a_degraded_keeper
+        ; test_case
+            "fleet summary surfaces durable event queue backlog"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_backlog
+        ; test_case
+            "fleet summary discovers durable event queue backlog without meta name"
+            `Quick
+            test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name
+        ; test_case
+            "fleet summary surfaces durable event queue discovery errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_discovery_error
+        ; test_case
+            "fleet summary separates source age from unknown residence"
+            `Quick
+            test_fleet_summary_source_age_never_supplies_residence
+        ; test_case
+            "fleet summary surfaces durable event queue read errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_read_error
+        ; test_case
+            "fleet summary surfaces durable event queue parse errors"
+            `Quick
+            test_fleet_summary_surfaces_durable_event_queue_parse_error
+        ; test_case
+            "lock-free observation rejects generation change"
+            `Quick
+            (test_lock_free_observation_rejects_generation_change ~full_state:false)
+        ; test_case
+            "full-state observation rejects generation change"
+            `Quick
+            (test_lock_free_observation_rejects_generation_change ~full_state:true)
+        ; test_case
+            "full observation retains unprojected scheduled terminal under owner lock"
+            `Quick
+            test_full_observation_keeps_unprojected_schedule_terminal
+        ; test_case
+            "unknown reaction is quarantined without clearing pending"
+            `Quick
+            test_unknown_reaction_is_quarantined_without_clearing_pending
+        ; test_case
+            "fusion_completed stimulus is supported (RFC-0266)"
+            `Quick
+            test_fusion_completed_stimulus_is_supported
+        ; test_case
+            "stimulus_kind string round-trip drift guard"
+            `Quick
+            test_stimulus_kind_string_roundtrip
+        ; test_case
+            "reaction_kind string round-trip drift guard"
+            `Quick
+            test_reaction_kind_string_roundtrip
+        ; test_case
+            "reaction evidence batch indexes multiple occurrences"
+            `Quick
+            test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences
+
+        ; test_case
+            "event id digest is SHA-256"
+            `Quick
+            test_event_id_digest_is_sha256
+        ; test_case
+            "fleet summary status vocabulary is closed"
+            `Quick
+            test_fleet_summary_status_vocabulary_is_closed
+        ; test_case
+            "repeated evidence reads do not double count"
+            `Quick
+            test_repeated_evidence_reads_do_not_double_count
+        ] )
+    ]
+;;

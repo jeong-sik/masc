@@ -1,0 +1,13 @@
+name = "masc_dos_inventory"
+description = """
+List the DOS program inventory without loading or changing the shared machine.
+
+Each top-level entry is either a standalone .exe/.com file or a directory;
+directories include their direct base asset files. The result exposes base
+asset names, kinds, byte lengths and SHA-256 digests without file contents.
+asset_scope is base_inventory: this is not the effective mounted file set.
+masc_dos_load applies persisted saves afterward; saved files can replace base
+asset contents or add files, so their digests are not included here.
+"""
+additional_properties = false
+defer_loading = true

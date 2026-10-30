@@ -1,0 +1,31 @@
+name = "masc_operator_task_recovery_resolve"
+title = "Resolve Task Recovery"
+description = """
+Recover exactly one claimed or in-progress Task to todo. The observed \
+task_id, persisted assignee, and backlog version must all match; this tool \
+performs no liveness or elapsed-time inference."""
+additional_properties = false
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "expected_assignee"
+type = "string"
+required = true
+min_length = 1
+
+[[params]]
+name = "expected_version"
+type = "integer"
+required = true
+minimum = 0
+
+[[params]]
+name = "reason"
+type = "string"
+required = true
+min_length = 1

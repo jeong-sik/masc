@@ -1,0 +1,49 @@
+{
+ "schema": "masc.keeper.fusion_sandbox.live.v1",
+ "measured_at": "2026-08-17T12:30:00Z",
+ "live_endpoint": "http://127.0.0.1:8935",
+ "server_commit": "1a8be94d61",
+ "protocol": "Operator-instructed, keeper-executed (same disclosure as the other M5 receipts); every claim is cross-checked against the server log, a durable store, and where applicable the host filesystem.",
+ "fusion": {
+  "keeper": {
+   "name": "canary-10t-glmc-52-20260817",
+   "runtime": "glm-coding.glm-5.2"
+  },
+  "request_id_turn": "m5-live-fusion-1",
+  "tool_call": "masc_fusion outcome=ok, run kmsg-b0a12a8963d99edbd82d6813b6ba0845 'durably accepted (async delivery)' (masc-8935-20260817d.out.log:6250-6251, 21:07:36 KST) — the keeper turn returned the request id immediately (async boundary held)",
+  "durable_run_registry": {
+   "file": "<base-path>/.masc/fusion-runs.jsonl",
+   "register": {
+    "keeper": "canary-10t-glmc-52-20260817",
+    "preset": "trio",
+    "topology": "simple"
+   },
+   "complete": {
+    "outcome": "succeeded"
+   },
+   "same_id": "kmsg-b0a12a8963d99edbd82d6813b6ba0845"
+  },
+  "consumer_delivery": "two chat-lane messages referencing the same run id landed in the keeper's chat history; the assistant deliberation answer is 1103 chars",
+  "scope": "all-success shape only — partial/all-fail panel shapes and the ci/browser axes remain unmeasured"
+ },
+ "sandbox": {
+  "keeper": {
+   "name": "canary-sbx-docker-20260817",
+   "runtime": "glm-coding.glm-5-turbo",
+   "sandbox_profile": "docker (set at masc_keeper_up)"
+  },
+  "request_id_turn": "m5-live-sandbox-1",
+  "execute_result": {
+   "ok": true,
+   "via": "docker",
+   "requested_sandbox": "docker",
+   "exit": 0,
+   "elapsed_ms": 222,
+   "cwd": "/home/keeper/playground/canary-sbx-docker-20260817"
+  },
+  "server_log": "masc-8935-20260817d.out.log:7165 'shell_ir dispatch ... sandbox=docker status=exit=0' + :7166 tool_call Execute outcome=ok",
+  "host_isolation_probe": "the command ran 'touch /tmp/masc-sandbox-host-effect-probe-20260817 && echo ...'; the echo output came back, and the marker file does NOT exist on the host — the write landed inside the container",
+  "typed_field_rejection_observed": "masc_keeper_up rejects a sandbox_image argument with a typed 'unsupported field(s)' error — the image override exists only as internal meta",
+  "scope": "docker SUCCESS path + host isolation measured; the docker FAILURE typed-path (image/daemon failure staying a typed failure with no host effect) remains unmeasured — the default image resolved, and no operator-facing knob exists to force a bad image"
+ }
+}

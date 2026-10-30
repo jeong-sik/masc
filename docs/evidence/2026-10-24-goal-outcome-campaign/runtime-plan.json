@@ -1,0 +1,27 @@
+{
+  "source_sha": "1eef45b69f395b1819537c116c7df839023da110",
+  "build_run": 40097972842,
+  "initial_native_run": 40097972974,
+  "requested_suites": [
+    "test_keeper_direct_goal_provider_wire",
+    "test_keeper_prompt_capture",
+    "test_turn_record",
+    "test_keeper_context_layers",
+    "test_keeper_next_request_forecast",
+    "test_keeper_official_client_host",
+    "test_keeper_context_observation_projection"
+  ],
+  "fresh_experiment": {
+    "prompt_sha256": "d4472ac4e124045377033276cd63a0e4ed6c26574c788b706751ad4c7c6a0621",
+    "note": "script hash binds staged full objective with initial Read and alpha-only-before-approval scope; no Goal ID hint. Changed prompt cohort versus older canaries. Single Goal only.",
+    "model_registry_digest": "7fbdbf8f5e45a75bb122155ed546e765b4d9c53a1285f62fd9f506baa1c5a47e",
+    "node_image": "sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d"
+  },
+  "full_regression": "not requested; not run",
+  "build_conclusion": "success",
+  "http_fixture_rerun": {
+    "source_sha": "9f024959528a5c0ea12ce59f0c1a63b2a364695d",
+    "run_id": 40098831581,
+    "product_delta": "none versus runtime1eef"
+  }
+}

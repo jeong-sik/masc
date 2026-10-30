@@ -1,0 +1,41 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace (1)  22:33:29  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────
+    NAME               BRANCH       STATUS    SYNC   PATH
+ ──────────────────────────────────────────────────────────────────────────────
+    masc               main         ready     auto   /srv/masc/workspace/masc
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────
+  Path: /srv/masc/workspace/masc
+  Stored as: workspace/masc
+  Keepers: alpha
+
+  j/k:scroll  H:recent activity  Enter:browse  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)

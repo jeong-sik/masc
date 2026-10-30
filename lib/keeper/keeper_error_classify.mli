@@ -1,0 +1,155 @@
+(** Keeper_error_classify — Error classification, side-effect safety,
+    and retry constants for the unified keeper cycle.
+
+    Extracted from keeper_unified_turn.ml.
+
+    @since 0.122.0 *)
+
+(** Detect transient network errors eligible for retry.
+    Uses structured [Agent_core.Error.t] pattern matching. *)
+val is_transient_network_error : Agent_core.Error.t -> bool
+
+(** [true] when a typed internal runner exception preserves a transient
+    transport failure raised inside {!Keeper_turn_driver.runtime_runner_execute_site}.
+    An envelope without [transport_error_kind] (the exception is not known
+    to be a transport failure) is [false]; its [exn_repr] is diagnostic
+    only and is not parsed. *)
+val is_transient_internal_runner_error : Agent_core.Error.t -> bool
+
+(** Detect request body parse errors from either the provider or the API
+    (e.g. Ollama yyjson rejecting a malformed request body or the API
+    rejecting invalid JSON). The typed distinction is used for observability;
+    it never exempts a committed mutation from explicit partial-commit
+    handling. *)
+val is_server_rejected_parse_error : Agent_core.Error.t -> bool
+
+(** [true] for provider-side request-body parse rejections. *)
+val is_provider_rejected_parse_error : Agent_core.Error.t -> bool
+
+(** [true] only for an accepted provider response whose wire contract failed:
+    the [Provider_wire_error] kinds (malformed, unknown event, incomplete,
+    oversized) across SSE and NDJSON. A [Provider_reported_error] — a
+    structurally valid error envelope the provider put inside an accepted
+    response — is deliberately NOT one of these, and returns [false].
+    Used to select the diagnostic log suffix in the turn-failure path.
+    Candidate rotation eligibility and consecutive-failure accounting are
+    determined by {!Keeper_runtime_attempt}, not by this predicate. *)
+val is_provider_wire_error : Agent_core.Error.t -> bool
+
+(** [true] for model/API-side request-body parse rejections reported as
+    [InvalidRequest]. *)
+val is_model_rejected_parse_error : Agent_core.Error.t -> bool
+
+(** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
+    provider refused the request body itself (malformed payload, orphan
+    tool-call residues), so same-turn retry is futile. Rendered provider text
+    carries no recovery authority. *)
+val is_invalid_request_error : Agent_core.Error.t -> bool
+
+(** [true] for a 0-byte empty completion: the provider ended the turn with a
+    modeled, non-overflow stop_reason but returned no content. Only the typed
+    AGENT_CORE [EmptyCompletion] shape matches. A value
+    [EmptyCompletion] with an unmodeled reason is excluded, as is a known
+    context overflow; neither authorizes ordinary empty-output recovery. *)
+val is_empty_completion_error : Agent_core.Error.t -> bool
+
+(** [true] when the keeper should preserve liveness and skip consecutive
+    failure counting, even if same-turn retry is still disabled. Typed AGENT_CORE
+    turn-limit and execution-time observations are included defensively so a
+    boundary regression cannot promote them into Keeper lifecycle authority. *)
+val is_auto_recoverable_turn_error : Agent_core.Error.t -> bool
+
+(** [true] for accept-rejected responses tagged by the built-in keeper
+    progress contract as no usable text/tool/non-terminal progress. *)
+val is_accept_no_usable_progress_error : Agent_core.Error.t -> bool
+
+(** [true] when the turn runner should record the immediate
+    ["keeper cycle FAILED"] line as WARN instead of ERROR. This controls log
+    severity only; it grants no retry, admission, pause, or blocker authority. *)
+val should_warn_keeper_cycle_failed : Agent_core.Error.t -> bool
+
+(** [true] for a typed API context overflow ([ContextOverflow]) only.  An
+    [Error.Agent (UnrecognizedStopReason _)] is not classified here even when it
+    carries an overflow token: see the note in the implementation. *)
+val is_context_overflow : Agent_core.Error.t -> bool
+
+(** [true] when the error is an AGENT_CORE [InputRequired] — the agent paused
+    to request human input.  Not a failure; a special stop condition. *)
+val is_input_required_error : Agent_core.Error.t -> bool
+
+(** Extract the [InputRequired] payload from an [core_error], if any.
+    Typed companion to {!is_input_required_error} — callers that need
+    the [input_required] record (request_id, question, …) avoid a
+    separate pattern match plus [assert false] when the predicate
+    has already filtered for the constructor. *)
+val extract_input_required
+  :  Agent_core.Error.t
+  -> Agent_core.Error.input_required option
+
+(** [true] when an error represents terminal runtime exhaustion. *)
+val is_runtime_exhausted_error : Agent_core.Error.t -> bool
+
+(** Why a turn continues on the next runtime of its lane: the label on the
+    deferred lane suffix a failed turn leaves for the next one. Closed set;
+    producer-side is [keeper_error_classify]. Wire form is the lowercase
+    string via [degraded_retry_reason_to_string]. *)
+type degraded_retry_reason =
+  | Hard_quota
+  | Resumable_cli_session
+  | Runtime_candidates_filtered
+  | Runtime_exhausted
+  | Provider_capacity
+  | Rate_limit
+  | Server_error
+  | Auth_error
+  | Deferred_runtime_lane
+  | Empty_no_progress
+  | Thinking_only_no_progress
+  | Truncated_no_progress
+
+val degraded_retry_reason_to_string : degraded_retry_reason -> string
+
+type degraded_retry =
+  { next_runtime : string
+  ; fallback_reason : degraded_retry_reason
+  }
+
+(** Classifies an agent-core error into the reason label a turn records when
+    it continues on the next runtime of its lane.
+    Returns [None] for terminal errors (e.g. generic accept-rejected,
+    ambiguous post-commit) that carry no continuation label. A narrow built-in
+    progress-contract rejection is labelled only when the response was
+    thinking-only after a read-only tool.
+
+    Raw API errors that are not wrapped in a MASC internal error are also
+    labelled:
+    - [PaymentRequired] / provider [HardQuota] → ["hard_quota"]
+    - [RateLimited] provider throttles → ["rate_limit"]
+    - [Overloaded] / [CapacityExhausted] → ["provider_capacity"]
+    - API [ServerError] and transient provider [ServerError] → ["server_error"]
+    - [AuthError] → ["auth_error"]
+
+    Production callers label the deferred lane suffix
+    ([Keeper_unified_turn], [Keeper_unified_turn_execution],
+    [Keeper_agent_run]). *)
+val recoverable_runtime_failure_reason :
+  Agent_core.Error.t -> degraded_retry_reason option
+
+(** The labelled retry a deferred lane stands for: the runtime the lane names
+    next, and why the failure that deferred it is continuable. Falls back to
+    [Deferred_runtime_lane] when that failure carries no continuation reason
+    of its own. Callers: [Keeper_unified_turn] for the decision record,
+    [Keeper_agent_run] for both halves of the receipt's degraded-retry
+    report. *)
+val degraded_retry_of_deferred_lane :
+  Keeper_turn_driver.deferred_runtime_lane -> degraded_retry
+
+val is_provider_timeout_error : Agent_core.Error.t -> bool
+(** True when [err] is a typed provider-timeout class failure. Live caller:
+    [keeper_unified_turn.ml] degraded-retry classification. *)
+
+val is_receipt_lost_error : Agent_core.Error.t -> bool
+(** True when [err] indicates a receipt-lost failure (the provider
+    confirmed completion but the response payload was lost in transit).
+    Live caller: [keeper_unified_turn.ml] failure-reason classification
+    via the [EC] alias. *)

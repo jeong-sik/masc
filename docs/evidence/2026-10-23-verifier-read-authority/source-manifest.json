@@ -1,0 +1,25 @@
+{
+  "base": "a862236ceff5da8af63a9b01bfa05e1357706d07",
+  "head": "b7e699a310c1b2fb79c7add459fb4cc909210cd0",
+  "patch_sha256": "b40c7eba592792e6d9f674d337dabd76e2f6ac33d64512b4a5a3982d4fe9887a",
+  "files": {
+    "lib/keeper/keeper_sandbox_read_backend.ml": "d2d85cd9b7d1dd9747541379b2c73ed66ffe7eb380270c26de047db0aa3dead8",
+    "lib/keeper/keeper_sandbox_read_backend.mli": "8a5e729866512e1e3b9b0c9ad89f3590e388822e410fdcb9212957fd743457a7",
+    "lib/keeper/keeper_sandbox_read_runner.ml": "95488911943bde29c0b9020d3c6a02083a4b8c26f6b89286eef8e907ad0e5730",
+    "lib/keeper/keeper_sandbox_remote_checkouts.ml": "1a3dfcba7d298cd1f22ece2de72d74a29f69e0f5315e731e8188ffbaef904fb1",
+    "lib/keeper/keeper_sandbox_remote_checkouts.mli": "05906523abbc72eb6bd6c2ab3ce5a75877f02f8b7d46ec899c12de0a01da4a63",
+    "lib/keeper/keeper_sandbox_remote_lane.ml": "1486b67cb43ac13b199485945dde96c3e9ec75a1e2fbc007728c5f2cc300e269",
+    "lib/keeper/keeper_sandbox_remote_lane.mli": "a101463df703f5d2c7cbc5831991ad5586e4fa26965cb3457836193b403fdb7f",
+    "lib/keeper/keeper_tool_filesystem_runtime.ml": "7ae33186ecf1adb318e3632f377e61c3dcd5064cd1018d3f0ba4847616e92adb",
+    "lib/keeper/keeper_tool_filesystem_runtime.mli": "cb28c50269d3f44f93ce6bbb6297adb0ad1165de41edcfda91f4a02b372fe25d",
+    "lib/keeper/keeper_workspace_ops.ml": "f962e86336d2af15d06124fd99f85ca57a482fad46d33ddb298aa5cab0455bf9",
+    "lib/keeper/keeper_workspace_ops.mli": "c8ce3e8e67591a9b6ea7a717e20fed3d306e28fc5aac166bc5bb9af1901e0ff4",
+    "lib/keeper/keeper_workspace_read_ops.ml": "548bac12ae8573cb7636099c11d4ab87230d1d84b0c506b1b0bc7f2b566f9c88",
+    "lib/keeper/keeper_workspace_read_ops.mli": "a428da18c67ad19d5ec7f80f038af11560302f53b36a182e1b1ff8466450cc58",
+    "lib/verification_authority_tools.ml": "cfe3fd50f6368592d47431988a08a36f2096bdd13975f8b4f3ef7262ae43d769",
+    "lib/verification_authority_tools.mli": "7679ea94c383f43202f725e49aee20b54cddfa0db9bb3852b7912747ea1d5a37",
+    "test/test_verification_authority_tools.ml": "f73e555cb9d59780922bb916a311a68ae87bd3b794a153e7727c8ccb8cf65281",
+    "test/test_verifier_review_worker.ml": "2c9059bda7373ef0ec6ae901c3fd9fc0ced5e78168655f863077bc8afc5ce99f"
+  },
+  "scope": "Actual read authority on current owner APIs; includes actual current worker model-input fixture fix. Does not repair durable dispatch/judgment/commit frontier."
+}

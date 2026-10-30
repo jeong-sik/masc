@@ -1,0 +1,12 @@
+[
+  {
+    "label": "owned-pty-resize",
+    "at": 1793054366.8871338,
+    "cols": 120,
+    "rows": 40,
+    "signal": "SIGWINCH",
+    "pid": 30953,
+    "kernel_readback": true,
+    "ui_processing_ack": false
+  }
+]

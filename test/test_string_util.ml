@@ -1,0 +1,612 @@
+(** Tests for Masc_core.String_util UTF-8-safe truncation. *)
+
+open Alcotest
+module SU = String_util
+
+(* Regression fixture: the exact byte sequence that caused board_posts.jsonl
+   corruption (Issue #7690). `나머지 리뷰` = 15 bytes UTF-8. *)
+let korean_title = "나머지 리뷰"
+
+(* Emoji test: each 😀 is 4 bytes in UTF-8 (\xf0\x9f\x98\x80). *)
+let three_smileys = "😀😀😀"
+
+let is_valid_utf8 s =
+  (* Use Yojson's string encoder as a UTF-8 validator proxy:
+     Yojson.Safe.to_string accepts any OCaml string, but decoding
+     back and round-tripping confirms UTF-8 validity. *)
+  try
+    let encoded = Yojson.Safe.to_string (`String s) in
+    let decoded = Yojson.Safe.from_string encoded in
+    match decoded with
+    | `String s' -> s' = s
+    | _ -> false
+  with _ -> false
+
+(* ---- utf8_char_boundary ---- *)
+
+let test_boundary_ascii_in_bounds () =
+  (* ASCII: any index is a boundary *)
+  let s = "hello" in
+  check int "mid-ASCII" 3 (SU.utf8_char_boundary s 3);
+  check int "end" 5 (SU.utf8_char_boundary s 5);
+  check int "past-end clamped" 5 (SU.utf8_char_boundary s 99);
+  check int "zero" 0 (SU.utf8_char_boundary s 0)
+
+let test_boundary_korean_cuts_back () =
+  (* "나" = \xeb\x82\x98 (3 bytes), "머" = \xeb\xa8\xb8 (3 bytes) *)
+  let s = korean_title in
+  (* byte 0: start of "나" (lead) — clean boundary *)
+  check int "start" 0 (SU.utf8_char_boundary s 0);
+  (* byte 3: start of "머" — clean boundary *)
+  check int "after na" 3 (SU.utf8_char_boundary s 3);
+  (* byte 1: middle of "나" (continuation) — cut back to 0 *)
+  check int "mid-na-1" 0 (SU.utf8_char_boundary s 1);
+  (* byte 2: still in "나" — cut back to 0 *)
+  check int "mid-na-2" 0 (SU.utf8_char_boundary s 2);
+  (* byte 4: middle of "머" — cut back to 3 *)
+  check int "mid-meo-1" 3 (SU.utf8_char_boundary s 4)
+
+let test_boundary_emoji_4byte () =
+  (* Each 😀 is 4 bytes: F0 9F 98 80 *)
+  let s = three_smileys in
+  check int "start" 0 (SU.utf8_char_boundary s 0);
+  check int "after-first" 4 (SU.utf8_char_boundary s 4);
+  (* Any byte inside a 😀 sequence cuts back to nearest boundary *)
+  check int "mid-first-1" 0 (SU.utf8_char_boundary s 1);
+  check int "mid-first-2" 0 (SU.utf8_char_boundary s 2);
+  check int "mid-first-3" 0 (SU.utf8_char_boundary s 3);
+  check int "mid-second-5" 4 (SU.utf8_char_boundary s 5)
+
+(* ---- utf8_safe (the main variant API) ---- *)
+
+let test_safe_untouched_short () =
+  match SU.utf8_safe ~max_bytes:100 ~suffix:"..." "hi" with
+  | Untouched s -> check string "identity" "hi" s
+  | Truncated _ -> fail "unexpected truncation"
+
+let test_safe_truncated_ascii () =
+  match SU.utf8_safe ~max_bytes:8 ~suffix:"..." "abcdefghijklmno" with
+  | Untouched _ -> fail "should have truncated"
+  | Truncated { prefix; suffix; dropped_bytes } ->
+      check string "prefix" "abcde" prefix;
+      check string "suffix" "..." suffix;
+      check int "dropped_bytes" 10 dropped_bytes;
+      check bool "total <= max" true
+        (String.length prefix + String.length suffix <= 8)
+
+let test_safe_truncated_korean_is_valid_utf8 () =
+  (* Budget 10 bytes incl. "..." (3 bytes) → prefix budget 7 bytes.
+     Korean chars are 3 bytes each, so prefix can fit 2 chars = 6 bytes.
+     (The 7th byte would be a lead byte we cannot complete.)
+     Result: valid UTF-8 "나머..." *)
+  match SU.utf8_safe ~max_bytes:10 ~suffix:"..." korean_title with
+  | Untouched _ -> fail "should have truncated"
+  | Truncated { prefix; _ } as t ->
+      let s = SU.to_string t in
+      check bool "result valid UTF-8" true (is_valid_utf8 s);
+      (* prefix must be valid on its own *)
+      check bool "prefix valid UTF-8" true (is_valid_utf8 prefix);
+      (* Budget respected *)
+      check bool "within budget" true (String.length s <= 10)
+
+let test_safe_utf8_suffix () =
+  (* Use horizontal-ellipsis char (… = 3 bytes UTF-8) as suffix *)
+  let ellipsis = "\xe2\x80\xa6" in
+  match SU.utf8_safe ~max_bytes:12 ~suffix:ellipsis korean_title with
+  | Untouched _ -> fail "should have truncated"
+  | Truncated _ as t ->
+      let s = SU.to_string t in
+      check bool "combined valid UTF-8" true (is_valid_utf8 s);
+      check bool "within budget" true (String.length s <= 12)
+
+let test_safe_emoji_4byte_boundary () =
+  (* Budget 5 bytes, 😀 is 4 bytes. Suffix "." (1 byte) leaves 4 bytes
+     for prefix. One 😀 fits exactly. *)
+  match SU.utf8_safe ~max_bytes:5 ~suffix:"." three_smileys with
+  | Untouched _ -> fail "should have truncated"
+  | Truncated { prefix; dropped_bytes; _ } ->
+      check string "prefix is one emoji" "😀" prefix;
+      check int "dropped_bytes" 8 dropped_bytes
+
+let test_safe_empty_string () =
+  match SU.utf8_safe ~max_bytes:10 ~suffix:"..." "" with
+  | Untouched s -> check string "identity empty" "" s
+  | Truncated _ -> fail "empty should be untouched"
+
+let test_safe_zero_budget () =
+  (* max_bytes=0 with non-empty input → Truncated with empty prefix and
+     suffix as-is. to_string yields just the suffix. *)
+  match SU.utf8_safe ~max_bytes:0 ~suffix:"X" "abc" with
+  | Untouched _ -> fail "should have truncated"
+  | Truncated { prefix; suffix; dropped_bytes } ->
+      check string "empty prefix" "" prefix;
+      check string "suffix kept" "X" suffix;
+      check int "dropped all 3" 3 dropped_bytes
+
+let test_safe_suffix_longer_than_budget () =
+  (* Suffix 5 bytes but max 3. budget becomes 0 → prefix empty. *)
+  match SU.utf8_safe ~max_bytes:3 ~suffix:"....." "abcdefg" with
+  | Untouched _ -> fail "should have truncated"
+  | Truncated { prefix; _ } ->
+      check string "empty prefix when suffix>=max" "" prefix
+
+let test_was_truncated_and_to_string () =
+  let short = SU.utf8_safe ~max_bytes:100 ~suffix:"..." "hi" in
+  let long = SU.utf8_safe ~max_bytes:3 ~suffix:"..." "abcdefg" in
+  check bool "short not truncated" false (SU.was_truncated short);
+  check bool "long truncated" true (SU.was_truncated long);
+  check string "to_string short" "hi" (SU.to_string short)
+
+let test_safe_invalid_utf8_best_effort () =
+  (* Construct: valid "A" + lone lead byte \xe0 + some cont bytes.
+     Budget 2 bytes forces a cut. Any result must be valid UTF-8 or at
+     least not introduce new invalid sequences beyond the input. *)
+  let orphan = "A\xe0\x80\x80" in
+  match SU.utf8_safe ~max_bytes:2 ~suffix:"" orphan with
+  | Untouched _ -> fail "should have truncated"
+  | Truncated { prefix; _ } ->
+      (* Best-effort: ASCII "A" should be preserved, orphan dropped *)
+      check string "best-effort keeps ASCII" "A" prefix
+
+(* ---- find_substring ---- *)
+
+let check_int_option = check (option int)
+
+let test_find_substring_basic () =
+  check_int_option "first occurrence" (Some 0)
+    (SU.find_substring "abcabc" "abc");
+  check_int_option "respects pos" (Some 3)
+    (SU.find_substring ~pos:1 "abcabc" "abc");
+  check_int_option "absent" None
+    (SU.find_substring "abcabc" "z")
+
+let test_find_substring_boundaries () =
+  check_int_option "match at last valid index" (Some 2)
+    (SU.find_substring ~pos:2 "aaaa" "aa");
+  check_int_option "pos past last valid index" None
+    (SU.find_substring ~pos:3 "aaaa" "aa");
+  check_int_option "pos at end" None
+    (SU.find_substring ~pos:4 "aaaa" "a")
+
+let test_find_substring_empty_needle () =
+  check_int_option "empty returns pos" (Some 2)
+    (SU.find_substring ~pos:2 "abc" "");
+  check_int_option "empty can return end" (Some 3)
+    (SU.find_substring ~pos:3 "abc" "")
+
+let test_find_substring_rejects_negative_pos () =
+  check_raises "negative pos" (Invalid_argument
+    "String_util.find_substring: negative position")
+    (fun () -> ignore (SU.find_substring ~pos:(-1) "abc" "a"))
+
+(* ---- substring containment ---- *)
+
+let test_contains_substring_basic () =
+  check bool "middle" true (SU.contains_substring "hello world" "lo wo");
+  check bool "exact" true (SU.contains_substring "abc" "abc");
+  check bool "absent" false (SU.contains_substring "abc" "xyz");
+  check bool "needle longer" false (SU.contains_substring "ab" "abc")
+
+let test_contains_substring_empty_needle () =
+  check bool "empty needle" true (SU.contains_substring "abc" "");
+  check bool "both empty" true (SU.contains_substring "" "")
+
+let test_contains_substring_literal_metacharacters () =
+  check bool "regex chars are literal" true
+    (SU.contains_substring "literal .* needle" ".*");
+  check bool "regex wildcard is not magic" false
+    (SU.contains_substring "literal abc needle" ".*")
+
+let test_contains_substring_utf8_bytes () =
+  check bool "Korean substring" true (SU.contains_substring korean_title "머지");
+  check bool "emoji substring" true (SU.contains_substring three_smileys "😀")
+
+let test_contains_substring_ci_ascii () =
+  check bool "ASCII case-insensitive" true
+    (SU.contains_substring_ci "Keeper Board POST" "board post");
+  check bool "mixed-case needle" true
+    (SU.contains_substring_ci "sandbox profile" "BOX PRO");
+  check bool "absent" false
+    (SU.contains_substring_ci "sandbox profile" "keeper")
+
+let test_contains_substring_ci_empty_and_literal () =
+  check bool "empty needle stays false" false
+    (SU.contains_substring_ci "abc" "");
+  check bool "regex chars are literal" true
+    (SU.contains_substring_ci "literal .* needle" ".*");
+  check bool "regex wildcard is not magic" false
+    (SU.contains_substring_ci "literal abc needle" ".*")
+
+(* ---- query_tokens / contains_all_tokens_ci ---- *)
+
+(* Regression fixture (issue #20908): the memory bank note contained both
+   words in reverse order with text in between; whole-query substring
+   matching returned 0 matches for the query "소주 갑오징어". *)
+let memory_note = "갑오징어 레시피 정리, 소주 얘기가 계속 살아있는 이유"
+
+let test_query_tokens_basic () =
+  check (list string) "splits on spaces" [ "소주"; "갑오징어" ]
+    (SU.query_tokens "소주 갑오징어");
+  check (list string) "collapses runs and mixed whitespace" [ "a"; "b"; "c" ]
+    (SU.query_tokens "  a\tb\n c\r\n");
+  check (list string) "empty query has no tokens" [] (SU.query_tokens "");
+  check (list string) "whitespace-only query has no tokens" []
+    (SU.query_tokens " \t\n")
+
+let test_ascii_punctuation_tokens_basic () =
+  check (list string) "splits ASCII punctuation and lowercases"
+    [ "gate"; "2"; "src"; "main"; "ml"; "한글" ]
+    (SU.ascii_punctuation_tokens "Gate-2: src/main.ml 한글");
+  check (list string) "empty punctuation-only text has no tokens" []
+    (SU.ascii_punctuation_tokens " -- \t ./ ")
+
+let test_contains_contiguous_token_sequence () =
+  let tokens = SU.ascii_punctuation_tokens "Gate-2 checked src/main.ml and tests" in
+  check bool "contiguous sequence matches" true
+    (SU.contains_contiguous_token_sequence
+       ~haystack:tokens
+       ~needle:(SU.ascii_punctuation_tokens "src/main.ml"));
+  check bool "non-contiguous sequence rejects" false
+    (SU.contains_contiguous_token_sequence
+       ~haystack:tokens
+       ~needle:[ "src"; "tests" ]);
+  check bool "empty needle rejects" false
+    (SU.contains_contiguous_token_sequence ~haystack:tokens ~needle:[]);
+  check bool "empty haystack rejects" false
+    (SU.contains_contiguous_token_sequence ~haystack:[] ~needle:[ "src" ]);
+  check bool "single token needle matches" true
+    (SU.contains_contiguous_token_sequence ~haystack:tokens ~needle:[ "checked" ]);
+  check bool "needle longer than haystack rejects" false
+    (SU.contains_contiguous_token_sequence ~haystack:[ "src" ]
+       ~needle:[ "src"; "main" ]);
+  check bool "non-ASCII case is byte literal" false
+    (SU.contains_contiguous_token_sequence
+       ~haystack:(SU.ascii_punctuation_tokens "ΔΟΚΙΜΗ")
+       ~needle:(SU.ascii_punctuation_tokens "δοκιμη"));
+  let long_haystack =
+    List.init 20_000 (fun i ->
+      if i = 19_998 then "needle" else "tok" ^ string_of_int i)
+  in
+  check bool "long input remains stack safe" true
+    (SU.contains_contiguous_token_sequence
+       ~haystack:long_haystack
+       ~needle:[ "needle"; "tok19999" ])
+
+let test_short_query_terms_use_boundaries () =
+  List.iter (fun text ->
+    check bool ("RC excludes " ^ text) false (SU.contains_query_term_ci text "RC"))
+    ["source"; "archive"; "SRC"; "RC1"];
+  List.iter (fun text ->
+    check bool ("RC finds " ^ text) true (SU.contains_query_term_ci text "RC"))
+    ["RC"; "(rc)"; "RC-12"; "release/RC"; "RC passed"];
+  check bool "short acronym retains Korean suffix" true
+    (SU.contains_query_term_ci "RC가 성공했다" "RC");
+  check bool "phrase endpoint does not admit longer acronym" false
+    (SU.contains_query_term_ci "SRC policy" "RC policy");
+  check bool "later valid occurrence is not hidden by earlier false hit" true
+    (SU.contains_query_term_ci "source then RC" "RC");
+  check bool "CI does not select city" false (SU.contains_query_term_ci "city" "CI");
+  check bool "short digit does not select longer identifier" false
+    (SU.contains_query_term_ci "task-123" "12");
+  check bool "Korean suffix remains searchable" true
+    (SU.contains_query_term_ci "소주를" "소주");
+  check bool "long term retains substring search" true
+    (SU.contains_query_term_ci "release-candidate" "release");
+  check bool "AND fallback cannot restore short-term noise" false
+    (SU.contains_all_query_terms_ci "source policy" "RC policy");
+  check bool "AND fallback finds genuine short term" true
+    (SU.contains_all_query_terms_ci "RC current policy" "RC policy")
+
+let test_contains_all_tokens_ci_order_independent () =
+  check bool "tokens match in any order with gaps" true
+    (SU.contains_all_tokens_ci memory_note "소주 갑오징어");
+  check bool "single token still matches" true
+    (SU.contains_all_tokens_ci memory_note "갑오징어");
+  check bool "agglutinative suffix covered by substring" true
+    (SU.contains_all_tokens_ci "어제 소주를 마셨다" "소주");
+  check bool "one absent token fails the AND" false
+    (SU.contains_all_tokens_ci memory_note "소주 맥주")
+
+let test_contains_all_tokens_ci_ascii_ci_and_empty () =
+  check bool "ASCII tokens are case-insensitive" true
+    (SU.contains_all_tokens_ci "Keeper Board POST" "board KEEPER");
+  check bool "no tokens yields false like empty needle" false
+    (SU.contains_all_tokens_ci "abc" "");
+  check bool "whitespace-only query yields false" false
+    (SU.contains_all_tokens_ci "abc" "  \t")
+
+let test_starts_with_ci_basic () =
+  check bool "exact case" true
+    (SU.starts_with_ci ~prefix:"Bearer " "Bearer abc123");
+  check bool "lowercase prefix vs mixed value" true
+    (SU.starts_with_ci ~prefix:"bearer " "Bearer abc123");
+  check bool "uppercase prefix vs lowercase value" true
+    (SU.starts_with_ci ~prefix:"BEARER " "bearer abc123");
+  check bool "mismatch" false
+    (SU.starts_with_ci ~prefix:"Bearer " "Basic abc123")
+
+let test_starts_with_ci_boundaries () =
+  check bool "empty prefix matches anything" true
+    (SU.starts_with_ci ~prefix:"" "anything");
+  check bool "empty prefix matches empty string" true
+    (SU.starts_with_ci ~prefix:"" "");
+  check bool "prefix longer than string" false
+    (SU.starts_with_ci ~prefix:"hello" "hi");
+  check bool "exact length equal" true
+    (SU.starts_with_ci ~prefix:"abc" "ABC")
+
+let test_equals_ci_basic () =
+  check bool "exact" true (SU.equals_ci "Content-Type" "Content-Type");
+  check bool "case insensitive" true (SU.equals_ci "Content-Type" "content-type");
+  check bool "mixed case" true (SU.equals_ci "X-Trace-Id" "x-TRACE-id");
+  check bool "different content" false (SU.equals_ci "Content-Type" "Accept");
+  check bool "length mismatch" false (SU.equals_ci "abc" "abcd");
+  check bool "empty equals empty" true (SU.equals_ci "" "");
+  check bool "empty vs non-empty" false (SU.equals_ci "" "x")
+
+(* ---- escape_xml ---- *)
+
+let test_escape_xml_all_entities () =
+  check string "all five"
+    "a &amp; b &lt; c &gt; d &quot;e&quot; &apos;f&apos;"
+    (SU.escape_xml "a & b < c > d \"e\" 'f'")
+
+let test_escape_xml_no_op () =
+  check string "clean string" "hello world"
+    (SU.escape_xml "hello world")
+
+let test_escape_xml_empty () =
+  check string "empty" "" (SU.escape_xml "")
+
+let test_escape_xml_ampersand_first () =
+  (* [&] must be replaced first so that [&lt;] does not become
+     [&amp;lt;] — wait, actually [&lt;] input should become [&amp;lt;]
+     because the [&] is escaped.  The important thing is that
+     a plain [<] becomes [&lt;], not double-escaped. *)
+  check string "pre-escaped ampersand"
+    "&amp;lt;" (SU.escape_xml "&lt;")
+
+let test_escape_xml_no_double_escape () =
+  (* A string with only [<] should become [&lt;], not [&amp;lt;]. *)
+  check string "plain less-than" "&lt;" (SU.escape_xml "<")
+
+(* ---- Test runner ---- *)
+
+(* #26618: trim_nonempty and option_trim were separate copies of the same
+   three lines while the .mli called one a mapping of the other. A one-sided
+   edit would have split them silently -- neither had a test. The cases below
+   agree on every input, so the two cannot drift without one failing. *)
+let trim_inputs =
+  [ ""; " "; "\t\n "; "a"; " a "; "  hello world  "; "\xed\x95\x9c" ]
+;;
+
+let test_option_trim_agrees_with_trim_nonempty () =
+  List.iter
+    (fun raw ->
+      let direct = SU.trim_nonempty raw in
+      let through_option = SU.option_trim (Some raw) in
+      check
+        (option string)
+        (Printf.sprintf "option_trim (Some %S) = trim_nonempty %S" raw raw)
+        direct
+        through_option)
+    trim_inputs
+;;
+
+let test_option_trim_passes_none_through () =
+  check (option string) "None stays None" None (SU.option_trim None)
+;;
+
+let test_trim_nonempty_rejects_whitespace_only () =
+  check (option string) "empty" None (SU.trim_nonempty "");
+  check (option string) "spaces" None (SU.trim_nonempty "   ");
+  check (option string) "tabs and newlines" None (SU.trim_nonempty "\t\n\r ");
+  check (option string) "trims both ends" (Some "a b") (SU.trim_nonempty "  a b  ")
+;;
+
+let test_first_nonblank_line () =
+  check (option string) "single line" (Some "git status")
+    (SU.first_nonblank_line "git status");
+  check (option string) "first line wins" (Some "first")
+    (SU.first_nonblank_line "first\nsecond");
+  check (option string) "blank leading lines are skipped, the line is trimmed"
+    (Some "pytest -v")
+    (SU.first_nonblank_line "\n  \n  pytest -v  \nmore");
+  check (option string) "all blank is None" None (SU.first_nonblank_line "\n \t\n");
+  check (option string) "empty is None" None (SU.first_nonblank_line "");
+  let long = String.make 400 'a' in
+  check (option string) "the line is returned whole" (Some long)
+    (SU.first_nonblank_line (long ^ "\nsecond"))
+;;
+
+let test_is_lowercase_sha256_hex () =
+  let hex64 = String.concat "" (List.init 8 (fun _ -> "0123abcd")) in
+  Alcotest.(check bool) "64 lowercase hex accepted" true
+    (String_util.is_lowercase_sha256_hex hex64);
+  Alcotest.(check bool) "uppercase rejected" false
+    (String_util.is_lowercase_sha256_hex (String.uppercase_ascii hex64));
+  Alcotest.(check bool) "63 chars rejected" false
+    (String_util.is_lowercase_sha256_hex (String.sub hex64 0 63));
+  Alcotest.(check bool) "65 chars rejected" false
+    (String_util.is_lowercase_sha256_hex (hex64 ^ "0"));
+  Alcotest.(check bool) "non-hex letter rejected" false
+    (String_util.is_lowercase_sha256_hex ("z" ^ String.sub hex64 1 63));
+  Alcotest.(check bool) "empty rejected" false
+    (String_util.is_lowercase_sha256_hex "")
+
+let test_is_valid_utf8_basic () =
+  check bool "ascii" true (String_util.is_valid_utf8 "abc");
+  check bool "empty" true (String_util.is_valid_utf8 "");
+  check bool "korean" true (String_util.is_valid_utf8 "\xed\x95\x9c\xea\xb8\x80");
+  check bool "lone lead byte" false (String_util.is_valid_utf8 "\xec");
+  check bool "truncated three-byte sequence" false
+    (String_util.is_valid_utf8 "\xec\x9d")
+
+(* 2026-08-24, live keeper turn 23:23:13. [Voice_bridge] cut this message at 50
+   bytes to build [message_preview]. The cut landed inside the third byte of
+   the 17th syllable, and the codex app-server exited while decoding the tool
+   result as UTF-8, taking the turn with it. Both cuts are asserted so a
+   future regression cannot pass by matching only the new value. *)
+let test_utf8_prefix_korean_boundary () =
+  let message =
+    "\xec\x9d\x91, \xea\xb0\x80\xeb\x8a\xa5\xed\x95\xb4. \xeb\x8b\xa4\xeb\xa7\x8c \xec\xa7\x80\xea\xb8\x88\xec\x9d\x80 \xec\x8b\xa4\xec\x8b\x9c\xea\xb0\x84 \xec\xa0\x84\xed\x99\x94\xec\xb2\x98\xeb\x9f\xbc"
+  in
+  check bool "byte cut splits a character" false
+    (String_util.is_valid_utf8 (String.sub message 0 50));
+  let boundary_cut = String_util.utf8_prefix ~max_bytes:50 message in
+  check bool "boundary cut decodes" true (String_util.is_valid_utf8 boundary_cut);
+  check bool "boundary cut stays within the cap" true
+    (String.length boundary_cut <= 50);
+  check bool "boundary cut drops only the split character" true
+    (String.equal boundary_cut (String.sub message 0 49))
+
+(* [utf8_suffix] is the tail-side cut: a ring buffer keeps the last N bytes of
+   Execute output, and N bytes back from the end of a line of Hangul is the
+   middle of a syllable two times in three. *)
+let test_utf8_suffix_hangul_tail () =
+  let hangul = String.concat "" (List.init 100 (fun _ -> "\xea\xb0\x80")) in
+  check bool "a byte cut splits a character" false
+    (String_util.is_valid_utf8
+       (String.sub hangul (String.length hangul - 50) 50));
+  let tail = String_util.utf8_suffix ~max_bytes:50 hangul in
+  check bool "the tail decodes" true (String_util.is_valid_utf8 tail);
+  check int "the tail keeps every whole character that fits" 48
+    (String.length tail);
+  check bool "the tail is the end of the input" true
+    (String.ends_with ~suffix:tail hangul)
+
+let test_utf8_suffix_skips_a_partial_first_character () =
+  (* The last two bytes of one syllable, then two whole syllables: the shape
+     a ring tail has once the ring overwrote the syllable's first byte. *)
+  let ring_tail = "\xb0\x80\xea\xb0\x80\xeb\x82\x98" in
+  check string "the partial character goes, the whole ones stay"
+    "\xea\xb0\x80\xeb\x82\x98"
+    (String_util.utf8_suffix ~max_bytes:64 ring_tail);
+  check string "valid input that fits comes back as is" korean_title
+    (String_util.utf8_suffix ~max_bytes:64 korean_title);
+  check string "no budget, nothing kept" ""
+    (String_util.utf8_suffix ~max_bytes:0 korean_title)
+
+(* [utf8_complete_prefix] is the head-side cut: a head buffer keeps the first
+   N bytes of Execute output and the byte after them is gone, so only the
+   last character's own lead byte can say it was cut. *)
+let test_utf8_complete_prefix_drops_a_cut_last_character () =
+  check string "two of three Hangul bytes go" "ab"
+    (String_util.utf8_complete_prefix "ab\xea\xb0");
+  check string "three of four emoji bytes go" ""
+    (String_util.utf8_complete_prefix "\xf0\x9f\x98");
+  check string "a whole last character stays" "a\xea\xb0\x80"
+    (String_util.utf8_complete_prefix "a\xea\xb0\x80");
+  check string "ASCII stays" "abc" (String_util.utf8_complete_prefix "abc");
+  check string "empty stays" "" (String_util.utf8_complete_prefix "")
+
+let test_utf8_complete_prefix_keeps_bytes_that_are_not_utf8 () =
+  check string "continuation bytes with no lead in reach stay" "\x80\x80\x80\x80"
+    (String_util.utf8_complete_prefix "\x80\x80\x80\x80");
+  check string "a byte that opens no sequence stays" "a\xff"
+    (String_util.utf8_complete_prefix "a\xff")
+
+(* Every byte cut of valid UTF-8 leaves a valid prefix, and only the cut
+   character goes. *)
+let test_utf8_complete_prefix_every_cut_is_valid () =
+  let text = "a가😀é나€z" in
+  for cut = 0 to String.length text do
+    let head = String.sub text 0 cut in
+    let kept = String_util.utf8_complete_prefix head in
+    if not (String_util.is_valid_utf8 kept) then
+      Alcotest.failf "cut %d kept invalid %S" cut kept;
+    if String.length head - String.length kept >= 4 then
+      Alcotest.failf "cut %d dropped %d bytes" cut
+        (String.length head - String.length kept)
+  done
+
+let () =
+  run "string_util"
+    [ ( "utf8_char_boundary",
+        [ test_case "ASCII in-bounds" `Quick test_boundary_ascii_in_bounds;
+          test_case "Korean cuts back" `Quick test_boundary_korean_cuts_back;
+          test_case "Emoji 4-byte" `Quick test_boundary_emoji_4byte ] );
+      ( "utf8_safe",
+        [ test_case "short untouched" `Quick test_safe_untouched_short;
+          test_case "ASCII truncated" `Quick test_safe_truncated_ascii;
+          test_case "Korean UTF-8 valid" `Quick
+            test_safe_truncated_korean_is_valid_utf8;
+          test_case "UTF-8 suffix (ellipsis)" `Quick test_safe_utf8_suffix;
+          test_case "emoji 4-byte boundary" `Quick
+            test_safe_emoji_4byte_boundary;
+          test_case "empty string" `Quick test_safe_empty_string;
+          test_case "zero budget" `Quick test_safe_zero_budget;
+          test_case "suffix >= budget" `Quick
+            test_safe_suffix_longer_than_budget;
+          test_case "was_truncated + to_string" `Quick
+            test_was_truncated_and_to_string;
+          test_case "invalid UTF-8 best-effort" `Quick
+            test_safe_invalid_utf8_best_effort ] );
+      ( "find_substring",
+        [ test_case "basic" `Quick test_find_substring_basic;
+          test_case "boundaries" `Quick test_find_substring_boundaries;
+          test_case "empty needle" `Quick test_find_substring_empty_needle;
+          test_case "negative pos rejected" `Quick
+            test_find_substring_rejects_negative_pos ] );
+      ( "contains_substring",
+        [ test_case "basic" `Quick test_contains_substring_basic;
+          test_case "empty needle" `Quick
+            test_contains_substring_empty_needle;
+          test_case "literal metacharacters" `Quick
+            test_contains_substring_literal_metacharacters;
+          test_case "UTF-8 bytes" `Quick test_contains_substring_utf8_bytes ] );
+      ( "contains_substring_ci",
+        [ test_case "ASCII" `Quick test_contains_substring_ci_ascii;
+          test_case "empty and literal" `Quick
+            test_contains_substring_ci_empty_and_literal ] );
+      ( "contains_all_tokens_ci",
+        [ test_case "query_tokens basic" `Quick test_query_tokens_basic;
+          test_case "ascii punctuation tokens" `Quick
+            test_ascii_punctuation_tokens_basic;
+          test_case "contiguous token sequence" `Quick
+            test_contains_contiguous_token_sequence;
+          test_case "order-independent token AND" `Quick
+            test_contains_all_tokens_ci_order_independent;
+          test_case "short free-text terms use boundaries" `Quick
+            test_short_query_terms_use_boundaries;
+          test_case "ASCII ci and empty query" `Quick
+            test_contains_all_tokens_ci_ascii_ci_and_empty ] );
+      ( "starts_with_ci",
+        [ test_case "basic" `Quick test_starts_with_ci_basic;
+          test_case "boundaries" `Quick test_starts_with_ci_boundaries ] );
+      ( "equals_ci",
+        [ test_case "basic" `Quick test_equals_ci_basic ] );
+      ( "escape_xml",
+        [ test_case "all entities" `Quick test_escape_xml_all_entities;
+          test_case "no-op clean" `Quick test_escape_xml_no_op;
+          test_case "empty" `Quick test_escape_xml_empty;
+          test_case "ampersand first ordering" `Quick
+            test_escape_xml_ampersand_first;
+          test_case "no double escape" `Quick
+            test_escape_xml_no_double_escape ] );
+      ( "trim_helpers",
+        [ test_case "option_trim agrees with trim_nonempty" `Quick
+            test_option_trim_agrees_with_trim_nonempty;
+          test_case "None passes through" `Quick
+            test_option_trim_passes_none_through;
+          test_case "whitespace-only is None" `Quick
+            test_trim_nonempty_rejects_whitespace_only;
+          test_case "first_nonblank_line skips blank lines and keeps the line whole"
+            `Quick test_first_nonblank_line ] );
+      ( "sha256_hex",
+        [ test_case "canonical spelling test" `Quick
+            test_is_lowercase_sha256_hex ] );
+      ( "utf8_boundary",
+        [ test_case "is_valid_utf8 basics" `Quick test_is_valid_utf8_basic;
+          test_case "Korean 50-byte cut regression" `Quick
+            test_utf8_prefix_korean_boundary;
+          test_case "utf8_suffix cuts a Hangul tail between characters" `Quick
+            test_utf8_suffix_hangul_tail;
+          test_case "utf8_suffix skips a partial first character" `Quick
+            test_utf8_suffix_skips_a_partial_first_character;
+          test_case "utf8_complete_prefix drops a cut last character" `Quick
+            test_utf8_complete_prefix_drops_a_cut_last_character;
+          test_case "utf8_complete_prefix keeps bytes that are not UTF-8"
+            `Quick test_utf8_complete_prefix_keeps_bytes_that_are_not_utf8;
+          test_case "utf8_complete_prefix leaves every cut valid" `Quick
+            test_utf8_complete_prefix_every_cut_is_valid ] ) ]

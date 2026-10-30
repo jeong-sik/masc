@@ -1,0 +1,197 @@
+{
+  "at": 1792747424.904869,
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/lane-addons",
+    "body": null,
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "etag": "W/\"1f70badc2930\"",
+      "cache-control": "no-cache",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "3516"
+    },
+    "body": {
+      "configuration": {
+        "directory": "/tmp/masc-addon-actual-review-20261023/workspace/.masc/config/lane-addons",
+        "complete": true,
+        "issues": [],
+        "declarations": [
+          {
+            "id": "native-statistics",
+            "source_path": "/tmp/masc-addon-actual-review-20261023/workspace/.masc/config/lane-addons/native-statistics.toml",
+            "enabled": true,
+            "source_revision": "8f5e5831323611c37186f5b3f49a462ffe20e323cbb46c6e7f613248be0e1d3d",
+            "desired_revision": "a328a1fa0efd5be5553a11ff814dd9044700afb45c258f52cd3b742fe82b5e58",
+            "applied_revision": "a328a1fa0efd5be5553a11ff814dd9044700afb45c258f52cd3b742fe82b5e58",
+            "instance_id": "01a16812-b06a-7000-ad4b-4d590ec6ee25",
+            "application": {
+              "kind": "applied",
+              "instance_id": "01a16812-b06a-7000-ad4b-4d590ec6ee25"
+            },
+            "ui_category": "browser"
+          }
+        ]
+      },
+      "instances": [
+        {
+          "runtime_presence": "live",
+          "host_requests": {
+            "cycles": 0,
+            "waiting": [],
+            "issue": null
+          },
+          "instance_id": "01a16812-b06a-7000-ad4b-4d590ec6ee25",
+          "incarnation": "01a16812-b06a-7000-ad4b-4d590ec6ee25",
+          "action_schema": null,
+          "run_id": "actual-review",
+          "addon_id": "browser-role-statistics",
+          "title": "Statistics worker with Browser role",
+          "revision": "0.1.0",
+          "phase": {
+            "kind": "attached"
+          },
+          "lifecycle": {
+            "kind": "attached"
+          },
+          "execution_authority": {
+            "kind": "host_process",
+            "installation_id": "native-statistics"
+          },
+          "resolved_image": null,
+          "observation_seq": 1,
+          "rows_count": 0,
+          "observation_pending": false,
+          "coalesced_wakes": 0,
+          "unchanged_source_refreshes": 0,
+          "binding": {
+            "sources": []
+          },
+          "source_access": {
+            "kind": "operator_configuration"
+          },
+          "package": {
+            "runtime": "host_process",
+            "ui_category": "browser",
+            "id": "browser-role-statistics",
+            "revision": "0.1.0",
+            "title": "Statistics worker with Browser role",
+            "contributions": [
+              "derive"
+            ],
+            "command": [
+              "python3",
+              "server.py"
+            ],
+            "directory": "/private/tmp/masc-addon-actual-review-20261023/workspace/packages/browser-role",
+            "action_tool": null,
+            "state_storage": "ephemeral",
+            "tool_invocation": "direct",
+            "exported_tools": [],
+            "outputs": {
+              "statistics": {
+                "all_lanes": true
+              }
+            },
+            "refresh_policy": "every_hint",
+            "model_access": "disabled",
+            "binding_schema": {
+              "type": "object",
+              "properties": {
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "Latest completed named output of another installation in the same run",
+                    "properties": {
+                      "source_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Name this input carries inside the package"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "lane_output"
+                      },
+                      "installation_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Stable id of the producing installation declaration"
+                      },
+                      "output_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Named output port published by the producer"
+                      },
+                      "selection": {
+                        "type": "string",
+                        "const": "latest_completed"
+                      }
+                    },
+                    "required": [
+                      "source_id",
+                      "kind",
+                      "installation_id",
+                      "selection"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "sources"
+              ],
+              "additionalProperties": false
+            },
+            "presentation": {
+              "description": null,
+              "readings": []
+            },
+            "skills_directory": null,
+            "resources": {
+              "max_reply_bytes": 4194304
+            }
+          },
+          "visibility": {
+            "kind": "shared"
+          },
+          "configuration": {
+            "id": "native-statistics",
+            "source_path": "/tmp/masc-addon-actual-review-20261023/workspace/.masc/config/lane-addons/native-statistics.toml",
+            "revision": "a328a1fa0efd5be5553a11ff814dd9044700afb45c258f52cd3b742fe82b5e58"
+          },
+          "resource": {
+            "kind": "host_process",
+            "pid": 44581,
+            "started": "darwin:1792747417.708673"
+          }
+        }
+      ],
+      "rows": [],
+      "coverage": [
+        {
+          "source_id": "01a16812-b06a-7000-ad4b-4d590ec6ee25",
+          "incarnation": "01a16812-b06a-7000-ad4b-4d590ec6ee25",
+          "cursor": "1",
+          "complete": true,
+          "detail": null
+        },
+        {
+          "source_id": "output-statistics/input",
+          "incarnation": "unobserved",
+          "cursor": null,
+          "complete": false,
+          "detail": "No upstream output source was supplied; no count is known"
+        }
+      ]
+    }
+  }
+}

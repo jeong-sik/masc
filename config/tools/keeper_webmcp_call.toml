@@ -1,0 +1,36 @@
+name = "keeper_webmcp_call"
+description = """
+Call a WebMCP tool in a target browser page.
+
+The tool must be registered on document.modelContext. Discover available tools with keeper_webmcp_list first. Requires Chrome \
+started with --enable-features=WebMCP and --remote-debugging-port."""
+additional_properties = false
+
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 2 times in 2 turns, 1193 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 2 extra requests over the same week.
+defer_loading = true
+
+[[params]]
+name = "page"
+type = "string"
+required = true
+description = "Substring matched against open page URLs to select the target page."
+
+[[params]]
+name = "tool"
+type = "string"
+required = true
+description = "Registered WebMCP tool name on that page."
+
+[[params]]
+name = "args_json"
+type = "string"
+required = true
+description = "Arguments for the page tool as a JSON object string, e.g. {} or {\"limit\":3}."
+
+[[params]]
+name = "cdp_port"
+type = "integer"
+description = "Chrome DevTools remote debugging port. Defaults to 9222."

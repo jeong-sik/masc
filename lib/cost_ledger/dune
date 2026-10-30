@@ -1,0 +1,14 @@
+(include_subdirs no)
+
+(library
+ (name masc_cost_ledger)
+ (public_name masc.cost_ledger)
+ (wrapped false)
+ (modules cost_ledger)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries
+  dated_jsonl
+  masc_core
+  masc_types
+  yojson))

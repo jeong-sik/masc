@@ -1,0 +1,195 @@
+{
+  "at": "2026-10-24T06:33:07.037528+00:00",
+  "evidence_scope": "Existing installed server Skill editor validation, revision CAS, durable atomic save, catalog refresh, authoritative editor/disk/catalog reread. No new Keeper activation or behavioral improvement is established.",
+  "server_commit": "fd75478aa3146c4e3910773ad00336dd0adba472",
+  "before_snapshot_revision": "b242222ec14df872b580e89e2748f2b353e9111c10f2ae9d91ce2d11f6f53c7a",
+  "after_snapshot_revision": "ffa1d01a4e92358851bea1d235824892c78b87831d7c791b6fd53c93fcb7dfb8",
+  "surface_count_before": 48,
+  "surface_count_after": 48,
+  "refresh": {
+    "ok": true,
+    "snapshot_revision": "ffa1d01a4e92358851bea1d235824892c78b87831d7c791b6fd53c93fcb7dfb8",
+    "publication": "unchanged"
+  },
+  "packages": [
+    {
+      "package": "masc-merge-gate-patrol",
+      "original_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "masc-merge-gate-patrol",
+          "name": "masc-merge-gate-patrol"
+        },
+        "content_revision": "eb56ee0ced287fa7eede31fdfb8775c3458c3acaa788d5c74ed74dac45c338e2"
+      },
+      "updated_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "masc-merge-gate-patrol",
+          "name": "masc-merge-gate-patrol"
+        },
+        "content_revision": "5308c04bcbe1fe5e925da0e4fd833f4326dc2b56c1d04925aa25ff05c59d1dc8"
+      },
+      "before": {
+        "bytes": 4825,
+        "sha256": "5a8fee424333193f9b2a198bf2904d2726fc4f95b17ae15e114b5bb055b307dc",
+        "context": {
+          "body_bytes": 4195,
+          "discovery_bytes": 681,
+          "tool_schema_bytes": null
+        },
+        "usage": {
+          "invocations": 8,
+          "deliveries": 7,
+          "actions": 11
+        }
+      },
+      "after": {
+        "bytes": 3818,
+        "sha256": "804fa48ef1be06cc97bae8ed64f3a87151af97e88a032b87ece58ed907b30887",
+        "context": {
+          "body_bytes": 3470,
+          "discovery_bytes": 397,
+          "tool_schema_bytes": null
+        }
+      },
+      "save_status": "saved_and_published",
+      "save_ms": 16.925,
+      "editor_and_disk_reread_match": true,
+      "diagnostics": [],
+      "catalog_reread_match": true,
+      "backup_verified_before_write": true,
+      "contract_corrections": [
+        "Read REST stack metadata and all open PR pages",
+        "Merge complete approved Native Stack through its top PR once",
+        "Bind each included current head/base/diff to independent approval",
+        "Separate source approval from Release/Tag full CI",
+        "Use original async request receipt at a work boundary without resubmitting uncertain effects"
+      ]
+    },
+    {
+      "package": "native-stack-rebind-16-layers",
+      "original_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "native-stack-rebind-16-layers",
+          "name": "native-stack-rebind-16-layers"
+        },
+        "content_revision": "1ee8bd41639df0fb792acd06846f5ebd139c210af6d0bb59bcdd7bc81377e6ee"
+      },
+      "updated_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "native-stack-rebind-16-layers",
+          "name": "native-stack-rebind-16-layers"
+        },
+        "content_revision": "cfbd88682259575f332b6f4bb0b62383c408130928238fcb0fe4cd8b9be7687d"
+      },
+      "before": {
+        "bytes": 4338,
+        "sha256": "91b41d463a3b76f2bc922716b44d67a57b299d375df2e254655470e537c8e469",
+        "context": {
+          "body_bytes": 3815,
+          "discovery_bytes": 581,
+          "tool_schema_bytes": null
+        },
+        "usage": {
+          "invocations": 4,
+          "deliveries": 3,
+          "actions": 3
+        }
+      },
+      "after": {
+        "bytes": 3177,
+        "sha256": "467f28d737f82fdd9b86bede12ad75ea4dae51b9f28bca26d911288b0d725b79",
+        "context": {
+          "body_bytes": 2820,
+          "discovery_bytes": 413,
+          "tool_schema_bytes": null
+        }
+      },
+      "save_status": "saved_and_published",
+      "save_ms": 13.818,
+      "editor_and_disk_reread_match": true,
+      "diagnostics": [],
+      "catalog_reread_match": true,
+      "backup_verified_before_write": true,
+      "contract_corrections": [
+        "Reinspect changed review scope after restack",
+        "Remove incidental fixed stack size and lane-specific fake jq prerequisite",
+        "Use current approve-guard contract",
+        "Hand off all included approvals for one top-PR stack merge"
+      ]
+    },
+    {
+      "package": "masc-pr-adversarial-read",
+      "original_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "masc-pr-adversarial-read",
+          "name": "masc-pr-adversarial-read"
+        },
+        "content_revision": "54fa85160670649b7180bdd45c654e47db7ff9ea01d023f6c44fe43b289b6b62"
+      },
+      "updated_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "masc-pr-adversarial-read",
+          "name": "masc-pr-adversarial-read"
+        },
+        "content_revision": "2c0c6715df8be307d4f36d0cf0c3d3a6ff491562292b533045f16cc3ca29b1b5"
+      },
+      "before": {
+        "bytes": 4546,
+        "sha256": "1a454fa096834b1b1d510ff2d7a604a9ea8680a67e496b28c7518a7b8d00ad78",
+        "context": {
+          "body_bytes": 4172,
+          "discovery_bytes": 427,
+          "tool_schema_bytes": null
+        },
+        "usage": {
+          "invocations": 87,
+          "deliveries": 82,
+          "actions": 76
+        }
+      },
+      "after": {
+        "bytes": 3782,
+        "sha256": "0d69b2e12adc99da78ab61ed16d622e495ce28dd7ff3f927f7e59eabe4cc9ee7",
+        "context": {
+          "body_bytes": 3432,
+          "discovery_bytes": 401,
+          "tool_schema_bytes": null
+        }
+      },
+      "save_status": "saved_and_published",
+      "save_ms": 12.826,
+      "editor_and_disk_reread_match": true,
+      "diagnostics": [],
+      "catalog_reread_match": true,
+      "backup_verified_before_write": true,
+      "contract_corrections": [
+        "Read exact current PR source and native stack scope",
+        "Separate ordinary source review from Release/Tag full CI",
+        "Submit approval through approve-guard",
+        "Retain explicit authority and independence boundaries"
+      ]
+    }
+  ],
+  "server_executable_sha256": "3486cce9eae134f5205a972541cd6af968148bc48b3d79c67a3b2875dbfed5b9",
+  "server_runtime_instance_id": "01a16c82-18f9-7000-a253-3170e0ba30ac",
+  "managed_skill_authoring_preview": {
+    "status": "valid",
+    "diagnostics": [],
+    "reference": {
+      "identity": {
+        "source_id": "project-masc",
+        "package_id": "skill-authoring",
+        "name": "skill-authoring"
+      },
+      "content_revision": "5adab248d4cbcf01d08e82e00c47ac67f1aaeff44f439e03a31799dd368783b0"
+    },
+    "candidate_source_sha256": "0acde5925d6570549bb3c5e24551ae515282b7f65e3c15811aa43d1046c19287",
+    "written_to_runtime": false
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "verdict": "PASS_SOURCE",
+  "reviewed_at_utc": "2026-10-24T17:36:14.851258+00:00",
+  "author_head": "8266d74301eba653741fe4b0c1fafd7cbe7081f5",
+  "base_head": "e9f72f1c985761e032e0fef878ce1dc6d0111ad2",
+  "author_worktree": "/tmp/masc-completion-authority-round-context-20261025",
+  "author_clean_verified": true,
+  "full_diff_sha256": "adc1be69e3724c1bd99eb9796ec7eec92d066c19e57f966fd12894c94598b763",
+  "product_test_diff_sha256": "18e0626e2843f043a06bce1b357498e7baa6f2a4a1982c29223e6a1168d6b717",
+  "scope": "Independent source re-review of the Official Start P2 repair; no author/root edits, GitHub approval, Dune, CI watch, native suite, SDK/vendor process or model call.",
+  "p0_p2_findings": [],
+  "resolved_finding": {
+    "priority": "P2",
+    "title": "Current Completion Authority was pinned in official first System after the turn",
+    "disposition": "closed in exact canonical production composition",
+    "reason": "Host selects one post-hook issuer, accepts only the exact selected canonical System, retains Goal in standing System, and moves only the closed Completion Authority variant to Start User. Every official adapter consumes Host.start_prompt and the same prepared issuer for Resume. Event-free and changed-event next turns do not borrow prior event; no clearing User fiction is needed because the initial event is absent from standing System.",
+    "before_after_artifact": "/tmp/masc-independent-authority-review-8266-20261025/p2-before-after.json"
+  },
+  "checks": [
+    {
+      "name": "actual-source ordinary request-assembly control",
+      "baseline": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+      "baseline_checks_passed": 70,
+      "current_checks_passed": 74,
+      "scope": "pure assembler/sanitizer/modules; no HTTP receiver or production hook execution"
+    },
+    {
+      "name": "actual-source Official Start/Resume and selected Host guard statements",
+      "passed": 55,
+      "scope": "pure projection/codec/binding + exact Host.start_prompt and guard fragments with explicit typed ports, not full Host.prepare_turn"
+    },
+    {
+      "name": "independent additional controls",
+      "additional_passed": 12,
+      "combined_passed": 67,
+      "scope": "Unicode/escaped newline source+target byte offsets/hash, duplicate-looking base text preserved structurally, combined Goal+Authority blank override and one issuer read, exact no-observation owner bytes"
+    },
+    {
+      "name": "OCaml parse",
+      "passed": 24,
+      "scope": "parse only, no typing/linking"
+    },
+    {
+      "name": "git diff --check",
+      "exit": 0
+    }
+  ],
+  "production_trace": [
+    "keeper_agent_run.ml:1748 supplies a reader of this run accumulator; turn_driver forwards it to all four official runtimes.",
+    "keeper_run_tools_hooks.ml:1143 assembles canonical typed observations; 1295 publishes the accumulator before 1354 AdjustParams returns the matching system_prompt_override. This producer/hook source is byte-equal to base.",
+    "keeper_official_client_host.ml:1117 reads the composed issuer once after hooks/projection, checks exact selected issuer base/final text nonblank, then 1177 projects Start; prepared.messages are not augmented with the event.",
+    "keeper_official_client_context_projection.ml:133 splits only Completion_authority on exact canonical issued System; stale mismatch invalidates the snapshot used by both Start and Resume.",
+    "Claude runtime837/841, Codex1005/1079, Antigravity739/171, Muse1131/492 consume the prepared snapshot and shared Start composer.",
+    "Codex runtime1500-1503 binds the actual completed Developer_instructions and Turn_text slots separately. Start User source is canonical issued System, not submitted standing System. Other three adapters have no new completed-write binding claim.",
+    "PromptCapture OCaml and dashboard decoder accept the new canonical source scope field without inventing issued carrier bytes; remaining Prompt_block_id/forecast/TUI closed consumers are unchanged by this delta."
+  ],
+  "regressions_examined": [
+    "All four Goal/Authority combinations; same-event Resume; absent next event; new verification/actor keys; unchanged Goal held omission and changed Goal delivery.",
+    "None/Some-empty override structural behavior remains the unchanged canonical assembler contract; official blank policy rejects empty/whitespace selected base beneath Goal, Authority or both. No new native/generic empty override restriction is introduced.",
+    "Unique closed issuer selection and unique physical span are required. Missing/stale/absent issuer or wrong observation cannot acquire verified attribution. Equal event-looking bytes in base remain untouched.",
+    "UTF8 source offsets/hash and prefixed target occurrence offsets select exact bytes; source scope is canonical pre-transport issuer, target distinguishes Start/Resume User.",
+    "Ordinary HTTP per-tool observation retention, other Dynamic suppression and fresh-turn reset remain unchanged. No new store, permission, gate, cap, session reset or durable history write.",
+    "Every prepared_turn constructor and encoded_system_observation direct caller was searched; Muse For_testing is the only additional record constructor and supplies explicit empty Start context/None issuer."
+  ],
+  "test_fixture_limits": [
+    "Native Claude process fixture is meaningful: actual adapter Start -> same Resume -> absent -> changed captures submitted System file/stdin and one post-hook reader call, but is authored and not executed in this review.",
+    "Native Host fixture exercises full hooks/preparation and source guards; pure probe runs selected actual-source fragments only, not the complete Host.",
+    "Native HTTP receiver fixture has real transport/tool-loop assertions but explicit event fixture input; it does not prove live queue acknowledgment or completion judge production."
+  ],
+  "remaining_unproven": [
+    "Full native typing/linking and seven parent-dispatched suites",
+    "Actual vendor session/remote retention",
+    "Post-fix model behavior, approval-driven continuation, correct Goal measurement/reporting and G3 success"
+  ],
+  "unchanged_source_bindings": [
+    {
+      "file": "lib/keeper/keeper_run_prompt.ml",
+      "sha256": "54229d2bce98cbe1406952f4f6655524e5366e0b9ad1a6c8426071894a8334a0",
+      "equal_to_base": true
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_hooks.ml",
+      "sha256": "daf07438d848856718bfd665682d86045705ec9c39efc8df8bc68346ad857aff",
+      "equal_to_base": true
+    },
+    {
+      "file": "lib/keeper/keeper_agent_run.ml",
+      "sha256": "0d75fdaf0086a274dfa66a0465d74345431dd525e0fc9521be4dfd7cb1b3e114",
+      "equal_to_base": true
+    },
+    {
+      "file": "lib/keeper/keeper_turn_driver.ml",
+      "sha256": "08a1ca0a012b6f330f6aa68216abcf4064c4ec92e037bb0fd0d2b90d7e32b9d1",
+      "equal_to_base": true
+    },
+    {
+      "file": "lib/types/prompt_block_id.ml",
+      "sha256": "29d4f8d8ce8bbf3bf53fd304a4ed95e48ee609d83de2ea2f8946c78d3255268e",
+      "equal_to_base": true
+    },
+    {
+      "file": "lib/keeper/keeper_next_request_forecast.ml",
+      "sha256": "1d3f1c8f59fbc4670120544607355d5f4e83285a304cc30be1d5f3d4711ca75d",
+      "equal_to_base": true
+    },
+    {
+      "file": "dashboard/src/api/dashboard-keeper-prompt.ts",
+      "sha256": "19e1d10a9decb1dfd9d3a391b570eb04f7048f259cc44e3bcccfea3890a7e5f9",
+      "equal_to_base": true
+    },
+    {
+      "file": "lib/keeper/keeper_prompt_capture.ml",
+      "sha256": "7ddf71af4276c6f1a17bd2304066056b1bb893fdf71b06cc198dfbc6c0b150b2",
+      "equal_to_base": true
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/review.diff",
+      "sha256": "adc1be69e3724c1bd99eb9796ec7eec92d066c19e57f966fd12894c94598b763"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/product.diff",
+      "sha256": "18e0626e2843f043a06bce1b357498e7baa6f2a4a1982c29223e6a1168d6b717"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/source-check.json",
+      "sha256": "e6785fd86cd7c289bbbb0afbf73d1df126d48c877a439f656008aed9599fa162"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/probe-rerun.json",
+      "sha256": "4e78778e8ec72eb150b736360ed5c281054f1749a7ca7b9dbc9901186a758339"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/probe_retention/retention-check.json",
+      "sha256": "907e5916419593f37c23e9d5c97d1aa076e8ad04cd46ffbe83bbac2d5118497c"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/probe_retention/retention-source.json",
+      "sha256": "781f3d6165ee7f4bb6e9426e7219790290f39cb0b2c7a89e23aefa72bd954243"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/probe_official_retention/official-resume-check.json",
+      "sha256": "c3d17c20d06088bf936ab393df911389155864adbad7d2d2a4bf25d59859da2c"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/independent-controls/official-resume-check.json",
+      "sha256": "64f343d2fefe5f62e737a097abdf3863c97e49d27224f697b294fc0585243add"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/independent-controls/run.py",
+      "sha256": "2bcfcb78ef6c7edc7488067875efa52e7f7d1aa9d18823306908db0d9edc756a"
+    },
+    {
+      "path": "/tmp/masc-independent-authority-review-8266-20261025/p2-before-after.json",
+      "sha256": "12db990954fe3feaa93160ee73d73846550be64f962690dfd0a2a626be2bb556"
+    }
+  ]
+}

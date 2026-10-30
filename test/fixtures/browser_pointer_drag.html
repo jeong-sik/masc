@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8"><title>Pointer drag activation fixture</title>
+<style>
+#source {position:absolute;left:40px;top:60px;width:100px;height:80px;background:orange;touch-action:none}
+#drop {position:absolute;left:500px;top:60px;width:140px;height:80px;background:lightgreen}
+</style>
+<div id="source">Drag source</div><div id="drop">Drop target</div><output id="result">waiting</output>
+<script>
+const source = document.querySelector('#source'), drop = document.querySelector('#drop');
+let previous, activated, moved, trusted;
+source.onpointerdown = event => {
+  previous = {x:event.clientX,y:event.clientY}; activated = moved = false; trusted = event.isTrusted;
+  source.setPointerCapture(event.pointerId);
+};
+source.onpointermove = event => {
+  if (!(event.buttons & 1) || !previous) return;
+  trusted = trusted && event.isTrusted;
+  if (previous.x === event.clientX && previous.y === event.clientY) return;
+  if (activated) moved = true;
+  activated = true; previous = {x:event.clientX,y:event.clientY};
+};
+source.onpointerup = event => {
+  const box = drop.getBoundingClientRect();
+  const inside = event.clientX >= box.left && event.clientX < box.right && event.clientY >= box.top && event.clientY < box.bottom;
+  document.querySelector('#result').textContent = 'drag-accepted:' + (trusted && event.isTrusted && activated && moved && inside);
+};
+</script>

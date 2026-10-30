@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_candle_currency_pty.py", line 528, in currency_is_scoped_to_workspace_usage
+    h.run_terminal_scenario(binary, description="personal balances and workspace supply have separate screens",
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                            interact=interact, http_fixtures=fixtures, terminal_cols=80, terminal_rows=24)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_keyboard_input.py", line 2389, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_candle_currency_pty.py", line 519, in interact
+    assert not any(line in screen(output) for line in SUMMARY), "workspace supply leaked into personal Info"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: workspace supply leaked into personal Info

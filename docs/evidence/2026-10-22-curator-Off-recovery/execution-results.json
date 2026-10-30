@@ -1,0 +1,25 @@
+{
+  "source": "db31e62fe17f92aea4919de7765f1ace65914772",
+  "selected": {
+    "run": 39724191606,
+    "job": 119644244275,
+    "artifact": 12402432348,
+    "result": "success",
+    "suites": {
+      "test_workspace_memory_curator_lane": 16,
+      "test_workspace_curator_addon_commit": 63
+    }
+  },
+  "native": {
+    "run": 39724191562,
+    "job": 119644243478,
+    "artifact": 12401884161,
+    "result": "success",
+    "suites": {
+      "test_tui_lane_addons": 24,
+      "test_lane_addon_application": 5
+    }
+  },
+  "full_regression": "not run",
+  "operator_installation": "not changed"
+}

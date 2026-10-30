@@ -1,0 +1,542 @@
+(** Board — MASC internal board (Mastodon-style federation ready).
+
+    Type SSOT for the board subsystem. All public types are surfaced
+    here; the implementations live in [board_core.ml] / [board.ml] /
+    [board_dispatch.ml].
+
+    Design properties (enforced by callers, documented for readers):
+    - ID validation (no path traversal; see {!Post_id} / {!Comment_id})
+    - TTL optional (0 = permanent, default)
+    - Explicit persistence errors
+    - Cryptographic IDs (no prediction)
+    - Atomic writes (no corruption)
+    - Automatic sweeper (no manual cleanup)
+
+    @since 0.5.0 — replaces social.ml with hardened implementation *)
+
+(** {1 Error Types — No Silent Failures} *)
+
+type board_error =
+  | Invalid_id of string
+  | Post_not_found of string
+  | Comment_not_found of string
+  | Io_error of string
+  | Validation_error of string
+  | Already_voted of string
+  | Already_exists of string
+  | Unauthorized of string
+    (** Actor attempted an owner-gated mutation (e.g. editing a post they
+        do not own). Distinct from [Validation_error] so callers can map it
+        to a 403-class rejection rather than a generic input error. *)
+  | Recipient_lookup_failed of string
+    (** The declared-recipient lookup could not answer for a name in the
+        text: a Keeper's settings could not be read, or two Keepers claim one
+        alias. The write is refused and nothing is stored. *)
+[@@deriving show]
+
+(** What a Board read answers when it has no row to give: the id did not
+    parse, or nothing has it. Reads are served from the in-memory store, so no
+    read answers an I/O failure; persistence failures come from writes, as
+    {!board_error}. *)
+type board_read_error =
+  | Read_invalid_id of string
+  | Read_post_not_found of string
+  | Read_comment_not_found of string
+[@@deriving show]
+
+val board_error_of_read_error : board_read_error -> board_error
+(** For a caller that carries reads and writes in one [board_error] result. *)
+
+(** {1 Safe ID Modules — Parse, Don't Validate} *)
+
+(* The shared alphanumeric regex [^[a-zA-Z0-9_-]+$] is not exported.
+   [Post_id] and [Sub_board_id] apply it and hand back a parsed value; a
+   caller holding the raw regex could validate without parsing, which is the
+   split those modules exist to remove. [Comment_id] carries its own, stricter
+   shape.
+
+   The doc this replaces named [Board_id] and [Board_attachment_meta.Id], which
+   do not use it. *)
+
+module Post_id : sig
+  type t
+  val of_string : string -> (t, board_error) result
+  (** Validates [a-zA-Z0-9_-]+, length 1–64. *)
+  val of_string_for_read : string -> (t, board_read_error) result
+  (** The same parse, answered as a read error. *)
+  val to_string : t -> string
+  val generate : unit -> t
+  (** Cryptographic random id, prefix ["p-"]. *)
+  val json_schema_pattern : string
+  (** The [of_string] shape as a JSON Schema pattern. It mirrors the parser
+      exactly, so it never rejects an id [of_string] accepts. *)
+end
+
+module Comment_id : sig
+  type t
+  val of_string : string -> (t, board_error) result
+  (** Accepts exactly the shape {!generate} mints: ["c-"] followed by 32
+      lowercase hex characters (trimmed). Anything else is [Invalid_id] with
+      {!accepted_format} in the message. *)
+  val of_string_for_read : string -> (t, board_read_error) result
+  (** The same parse, answered as a read error. *)
+  val to_string : t -> string
+  val generate : unit -> t
+  (** Cryptographic random id, prefix ["c-"], 16 random bytes as 32 hex
+      characters. *)
+  val accepted_format : string
+  (** Human-readable shape for error messages and tool descriptions. *)
+  val json_schema_pattern : string
+  (** The same shape as a JSON Schema [pattern] regex, for tool input
+      schemas that take a comment id. *)
+end
+
+module Agent_id : sig
+  type t
+  val parse : string -> (t, board_error) result
+  (** Pure parsing of a trimmed Board identity, using {!Validation.Id_shape.parse}.
+      Rejected prose candidates do not emit validation diagnostics. *)
+  val of_string : string -> (t, board_error) result
+  (** Validates [a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?, length 1–64.
+      Trims input, delegates to {!Validation.Id_shape.validate}, and records
+      rejections. Use at external author or actor input boundaries. *)
+  val to_string : t -> string
+end
+
+(** {1 Visibility & Post Kinds} *)
+
+type visibility =
+  | Public      (** Visible to federation. *)
+  | Unlisted    (** Not in feeds, but accessible. *)
+  | Internal    (** This MASC instance only. *)
+  | Direct      (** Mentioned agents only. *)
+
+type audience =
+  | Targets of Agent_id.t list
+  | Broadcast
+  | Thread_participants
+  | Discoverable
+(** Closed Board routing authority. Target identities remain Board-level
+    {!Agent_id.t}; no Keeper dependency crosses into this library. *)
+
+type post_kind =
+  | Human_post
+  | Automation_post
+  | System_post
+[@@deriving tla]
+
+(** {1 Records — Mandatory TTL} *)
+
+(** RFC-0233 §7: typed provenance of a board post — which keeper turn produced
+    it and through which channel.  [source] is the channel's
+    [Surface_ref.lane_label] string (not the typed [Surface_ref.t], which lives
+    in the [masc] umbrella that depends on [masc_board]).  [turn_ref] and
+    [fusion_run_id] are distinct (RFC §7.6 guard #5).  Fusion run identity requires its original producer; other sub-fields are optional;
+    an all-[None] origin is represented as [origin = None]. *)
+type post_origin = {
+  turn_ref : Ids.Turn_ref.t option;
+  source : string option;
+  fusion_run_id : string option;
+  fusion_producer : string option;
+  (** Actual Fusion caller, immutable with the origin even when post.author changes. *)
+}
+
+val keeper_authored_origin :
+  ?turn_ref:Ids.Turn_ref.t -> source:string -> unit -> post_origin
+(** RFC-0233 §7: build the [origin] of a keeper-authored board post.
+    [fusion_run_id] is always [None] (fusion has its own origin at the sink);
+    [source] names the producing channel; [turn_ref] is the turn-level join key
+    and is [None] only when no mint-once-safe reference is reachable. *)
+
+type post_close_state = {
+  closed_by : Agent_id.t;
+  (** Who closed the post: the author, the operator, or a configured
+      moderator. Reopening replaces this with [None]; it does not mutate
+      the record in place. *)
+  closed_at : float;
+  successor_id : Post_id.t option;
+  (** The post that continues this thread, when the closer names one. A
+      reader following a closed thread lands here instead of a dead end. *)
+  summary : string option;
+  (** Why the thread closed / where it continues, for a reader who was not
+      there when it happened. *)
+}
+
+(** Replaced in [posts], never changed in place: a snapshot reuses the row
+    it rendered while the table holds the same physical post, so a field
+    that could change in place would leave that row stale. *)
+type post = {
+  id : Post_id.t;
+  author : Agent_id.t;
+  title : string;
+  body : string;
+  post_kind : post_kind;
+  meta_json : Yojson.Safe.t option;
+  visibility : visibility;
+  audience : audience option;
+  (** Persisted write-boundary audience. [None] grants no recipient access. *)
+  created_at : float;
+  content_updated_at: float; (* Last title, body or author change. *)
+  updated_at : float;
+  expires_at : float;
+  votes_up : int;
+  votes_down : int;
+  reply_count : int;
+  pinned : bool;
+  hearth : string option;
+  thread_id : string option;
+  origin : post_origin option;
+  closed : post_close_state option;
+  (** [None] means open (the default for every post minted before this
+      field existed, and for every open post since). A row stored without
+      this key decodes to [None]; the key is only ever written when the
+      post is actually closed. *)
+}
+
+(** Replaced in [comments], never changed in place, as [post] is. *)
+type comment = {
+  id : Comment_id.t;
+  post_id : Post_id.t;
+  parent_id : Comment_id.t option;
+  author : Agent_id.t;
+  content : string;
+  audience : audience option;
+  (** Persisted write-boundary audience. [None] grants no recipient access. *)
+  created_at : float;
+  expires_at : float;
+  votes_up : int;
+  votes_down : int;
+}
+
+type post_creation = {
+  post : post;
+  audience : audience;
+  unresolved : string list;
+}
+(** Successful post write together with the audience fixed at the same write
+    boundary. Consumers must not re-derive routing from mutable projections.
+    [unresolved] holds the names in the text that looked like addresses but
+    no Keeper declares, as the author wrote them. It is for the write
+    response only and is never stored. *)
+
+type comment_creation = {
+  comment : comment;
+  audience : audience;
+  unresolved : string list;
+}
+(** Successful comment write and its write-boundary routing authority.
+    [unresolved] is as in {!post_creation}. *)
+
+type reaction_target_type =
+  | Reaction_post
+  | Reaction_comment
+
+type reaction = {
+  target_type : reaction_target_type;
+  target_id : string;
+  user_id : Agent_id.t;
+  emoji : string;
+  created_at : float;
+}
+
+type reaction_summary = {
+  emoji : string;
+  count : int;
+  reacted : bool;
+  recent_user_ids : string list;
+}
+
+type reaction_toggle_result = {
+  target_type : reaction_target_type;
+  target_id : string;
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+  summary : reaction_summary list;
+}
+
+(** {1 SubBoard — Named spaces within the board} *)
+
+module Sub_board_id : sig
+  type t
+  val of_string : string -> (t, board_error) result
+  (** Validates [a-zA-Z0-9_-]+, length 1–64. *)
+  val to_string : t -> string
+  val generate : unit -> t
+  (** Cryptographic random id, prefix ["sb-"]. *)
+end
+
+type sub_board_access =
+  | Open          (** Anyone can post and read. *)
+  | Members_only  (** Only listed members can post; anyone can read. *)
+  | Owner_only    (** Only the owner can post; anyone can read. *)
+[@@deriving enumerate]
+
+type sub_board = {
+  id : Sub_board_id.t;
+  slug : string;
+  (** URL-safe lowercase identifier, e.g. ["announcements"]. *)
+  name : string;
+  description : string;
+  owner : Agent_id.t;
+  members : Agent_id.t list;
+  (** Agents allowed to post when [access = Members_only].  The owner is
+      always included. *)
+  access : sub_board_access;
+  created_at : float;
+  post_count : int;
+}
+
+(** {1 Read pagination and sweeper defaults} *)
+
+module Limits : sig
+  val default_comment_page_limit : int
+  (** Default number of comments returned by [masc_board_post_get] when the
+      caller names no page: the newest comments, since a reader that does not
+      know the thread yet wants its tail. *)
+  val max_comment_page_limit : int
+  (** Maximum comments returned by one [masc_board_post_get] page. *)
+  val default_ttl_hours : int
+  (** [0] — permanent (no expiry). *)
+  val sweeper_interval_sec : int
+  val sweeper_batch_size : int
+  val comment_count_cap : int
+  (** Once a post holds this many comments, the next comment is refused
+      with a successor hint ([#39356] scope extension). The count is the
+      live per-post comment list at the moment of the check, so expired
+      comments free slots again. [MASC_BOARD_COMMENT_COUNT_CAP] overrides
+      the default of 100. A value [<= 0] is an explicit opt-out: the cap
+      check is skipped and threads grow without limit. *)
+  val cap_warning_message : cap:int -> unit -> string option
+  (** [None] when [cap > 0]; otherwise [Some message] naming
+      [MASC_BOARD_COMMENT_COUNT_CAP] and the value read, so the opt-out is
+      recorded at load instead of silently doing nothing
+      (issuecomment-5858752752). Pure: takes the parsed value, touches
+      nothing else. *)
+end
+
+(** {1 Comment pages}
+
+    The one place a comment thread is cut into pages. [masc_board_post_get]
+    and the verifier's read of a submitted Board snapshot both page through
+    it, so an offset means the same thing on either surface. *)
+module Comment_page : sig
+  (** Where a page starts. [From_offset] counts from the oldest comment;
+      [Latest] is the page that ends at the newest comment; [After_comment]
+      starts right after the named comment, wherever it sits on this read. *)
+  type start =
+    | From_offset of int
+    | Latest
+    | After_comment of Comment_id.t
+
+  type request = private
+    { start : start
+    ; limit : int
+    }
+  (** Built only by {!request_of_args}: a [From_offset] is [>= 0] and
+      [1 <= limit <= Limits.max_comment_page_limit]. For [Latest], [limit] is
+      the [comment_tail] count, or {!Limits.default_comment_page_limit} when
+      the caller named no page at all; a [comment_tail] of [0] gives a
+      [Latest] request with [limit = 0], an empty page beside the post body. *)
+
+  type argument =
+    | Comment_offset
+    | Comment_limit
+    | Comment_tail
+    | After_comment_id
+
+  type request_error =
+    | Arguments_not_an_object
+    | Not_an_integer of
+        { argument : argument
+        ; given : string
+          (** The JSON kind that arrived, as {!Json_util.kind_name} names it. *)
+        }
+    | Integer_out_of_range of
+        { argument : argument
+        ; literal : string
+        }
+    | Not_a_string of
+        { argument : argument
+        ; given : string
+        }
+    | Not_a_comment_id of string
+        (** [after_comment_id] is not in the shape {!Comment_id} mints. *)
+    | Negative_offset of int
+    | Limit_out_of_bounds of int
+    | Tail_out_of_bounds of int
+    | Conflicting_arguments of
+        { given : argument
+        ; conflicts_with : argument
+        }
+        (** Two arguments that each say where the page starts, or
+            [comment_tail] beside [comment_limit]. Neither wins. *)
+
+  val request_of_args : Yojson.Safe.t -> (request, request_error) result
+  (** Reads [comment_offset], [comment_limit] (absent:
+      {!Limits.default_comment_page_limit}), [comment_tail] and
+      [after_comment_id] from a tool call's arguments. With none of the three
+      start arguments the page starts at the newest comment ([Latest]); an
+      explicit [comment_offset] (including [0]) starts at that offset, so the
+      head of a thread is read with [comment_offset=0]. A count or offset that
+      is present but is not a JSON integer is refused, so [null], ["abc"],
+      [true] and [2.9] never turn into a page; [after_comment_id] must be a
+      string in the shape {!Comment_id} mints. [comment_tail] goes alone;
+      [after_comment_id] takes a [comment_limit] and no [comment_offset]. *)
+
+  val request_error_to_string : request_error -> string
+
+  type 'a page =
+    { offset : int
+    ; items : 'a list
+    ; total : int
+    ; next_offset : int option
+      (** [None] when [items] reaches the last comment. *)
+    }
+
+  type 'a t =
+    | Page of 'a page
+    | Offset_out_of_range of
+        { requested : int
+        ; total : int
+        }
+        (** [requested] is past the end of the thread. Offset [total] is the
+            end itself: a [Page] with no items whose {!Position.line} names
+            [total], so it is never mistaken for a thread without comments.
+            Nothing past it is clamped to it. Offsets are positions in the
+            thread as it is at the read; a sweep that removes comments moves
+            every later one down, at the end as anywhere else. *)
+    | Comment_not_found of
+        { comment_id : Comment_id.t
+        ; total : int
+        }
+        (** No comment of this thread has the [After_comment] id: it was
+            never here, or a sweep removed it. *)
+
+  val select
+    :  ?fits:('a page -> bool)
+    -> comment_id_of:('a -> string option)
+    -> request
+    -> 'a list
+    -> 'a t
+  (** At most [limit] items from where [request] starts: the longest page
+      [fits] accepts, [next_offset] included, found by halving ([fits]
+      defaults to accepting every page). [comment_id_of] names an item's
+      comment id for an [After_comment] start. A [Latest] page ends at the
+      last item, so the budget trims its oldest items; a page from any other
+      start is trimmed at its end. A page never stops before its first item:
+      an item larger than the budget is delivered whole and the tool-output
+      boundary decides how it travels, so no comment becomes unreadable.
+      Every page returned is one [fits] accepted; the halving finds the
+      longest such page when [fits] stays false once it turns false, which a
+      page whose size grows with each item satisfies. A page read forward
+      grows with each item. A [Latest] page need not: an older item added to
+      it can be the parent of replies already on it, and a reply printed under
+      its parent is shorter than one that names it. Such a page may then hold
+      fewer items than would fit, never more. *)
+
+  (** Where a page sits in its thread. Both reading surfaces return it, and a
+      caller reads it back without parsing the page's text. *)
+  module Position : sig
+    type t =
+      { offset : int
+      ; returned : int
+      ; total : int
+      ; next_offset : int option
+      }
+
+    val of_page : 'a page -> t
+
+    val to_yojson : t -> Yojson.Safe.t
+    (** [{offset, returned, total, has_more, next_offset}]; [next_offset] is
+        [null] on the last page. *)
+
+    val of_yojson : Yojson.Safe.t -> t option
+    (** Total decoder: [None] for anything this module did not write. *)
+
+    val line : t -> string
+    (** The one line a text page carries, naming its range, a forward
+        [comment_offset] when present, and the preceding non-overlapping
+        [comment_offset]/[comment_limit] when older comments exist. A page at
+        the end of a non-empty thread names the thread's size at the read.
+        Every text rendering of a page uses this printer. *)
+
+    val metadata_key : string
+    (** ["masc.comment_page"]. *)
+
+    val to_metadata : t -> Yojson.Safe.t
+    (** The metadata object carrying the position under {!metadata_key}, for a
+        handler with no other metadata to merge. A tool result's text is for
+        the model; this rides beside it for a caller that continues the read. *)
+
+    val of_metadata : Yojson.Safe.t option -> t option
+    (** The position in a result's metadata: [None] for absent metadata, an
+        absent key, or a value this module did not write. *)
+  end
+end
+
+(** {1 Vote Direction} *)
+
+type vote_direction = Up | Down
+
+(** {1 In-Memory Store} *)
+
+type flusher_msg =
+  | Flush
+  | Sweep
+
+type store = {
+  (** Derived last full-load outcomes; never persisted as another authority.
+      A failed snapshot read blocks mutations that could rewrite that source. *)
+  mutable posts_load_result : (unit, string) result;
+  mutable comments_load_result : (unit, string) result;
+  mutable votes_load_result : (unit, string) result;
+  mutable reactions_load_result : (unit, string) result;
+  mutable sub_boards_load_result : (unit, string) result;
+  workspace_masc_dir : string option;
+  (** Canonical workspace directory captured before the global store is loaded.
+      Unlike environment-derived path helpers, this identity does not change
+      when a later config resolution selects another workspace. [None] denotes
+      a standalone in-memory store with no workspace review authority. *)
+  posts : (string, post) Hashtbl.t;
+  comments : (string, comment) Hashtbl.t;
+  vote_log : (string, vote_direction * float) Hashtbl.t;
+  (** #10086: value carries [(direction, cast_ts)] so the rewriter
+      preserves the original cast time on every flush. *)
+  post_count : int ref;
+  mutable last_sweep : float;
+  mutex : Eio.Mutex.t;
+  persist_mutex : Eio.Mutex.t;
+  origin_create_mutex : Eio.Mutex.t;
+  mutable karma_cache : (string * int) list option;
+  (** [None] = stale. *)
+  mutable sorted_posts_cache : post list option;
+  (** [None] = stale. *)
+  comments_by_post : (string, string list) Hashtbl.t;
+  (** post_id -> comment_id list. *)
+  reactions : (string, reaction) Hashtbl.t;
+  (** Unique reactions keyed by target type, target id, user id, and emoji. *)
+  mutable dirty_posts : bool;
+  mutable dirty_comments : bool;
+  dirty_post_ids : (string, unit) Hashtbl.t;
+  dirty_comment_ids : (string, unit) Hashtbl.t;
+  post_rows : (string, post * string) Hashtbl.t;
+  (** post_id -> the post last rendered into a snapshot and its JSONL row.
+      Posts are replaced in [posts], never changed in place, so a row kept
+      with the same physical post is still that post's row. Only the
+      snapshot writers read or change it, under [mutex]. *)
+  comment_rows : (string, comment * string) Hashtbl.t;
+  (** The same for [comments]. *)
+  mutable last_flush : float;
+  flusher_inbox : flusher_msg Eio.Stream.t;
+  sub_boards : (string, sub_board) Hashtbl.t;
+  (** Sub-board id -> sub_board record. *)
+  sub_boards_by_slug : (string, string) Hashtbl.t;
+  (** slug -> sub_board id index for O(1) slug lookup. *)
+  posts_by_turn_ref : (string, string) Hashtbl.t;
+  (** RFC-0233 §7: [Ids.Turn_ref.to_string] -> post id. Maintained on
+      create, rebuilt on load. *)
+  posts_by_run_id : (string, string) Hashtbl.t;
+  (** RFC-0233 §7: fusion run_id -> post id. Maintained on create, rebuilt
+      on load. *)
+}

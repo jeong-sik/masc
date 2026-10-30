@@ -1,0 +1,29 @@
+name = "keeper_job_result"
+description = """
+Read the original isolated job's durable result without contacting its backend or launching \
+a command. Returns Deferred until a settled result is committed. result_ready includes \
+cancellation and explicitly unavailable outputs; inspect status, phase and artifacts before \
+continuing. Replies include reconciliation state/reason from stored evidence; this read does \
+not refresh backend state. Use keeper_job_status with the same handle when reconciliation \
+is needed. A nonzero exit remains \
+an observed result with its exact exit_code. This read-only tool can be a prepared Composition \
+leaf. For an accepted async plan's recorded producer wait, server maintenance continues \
+the original ready run under current admission without a new Keeper model turn; use its \
+completion/result rather than submitting another plan. An explicit prepared-draft continuation \
+uses the same draft sha256 and original composition_run_id after its previous request settles. \
+Completed siblings are retained. A standalone result read creates no plan to resume. \
+When complete output is available, artifacts contains stdout then stderr as normalized {_blob: {...}} \
+references; use /artifacts/0/_blob/sha256 to pass stdout to keeper_artifact_read. \
+The original job's owner reconciles and delivers completion through the existing maintenance \
+pulse. After delivery, maintenance cleans the original container and private workspace; \
+the owner journal retains these result artifacts and the original source. This result read \
+itself performs no backend operation."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "job_id"
+type = "string"
+min_length = 1
+required = true
+description = "Exact durable job_id returned by keeper_job_start."

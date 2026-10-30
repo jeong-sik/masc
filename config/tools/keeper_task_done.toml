@@ -1,0 +1,64 @@
+name = "keeper_task_done"
+description = """
+Submit your claimed task for verification with a result summary and trusted \
+evidence_refs. The task must be claimed by you. This does not make the task \
+done: it moves to awaiting_verification and waits for a completion \
+authority's verdict, which no Keeper can produce. It also does not hold your \
+next claim while it waits. Every evidence_refs entry must be \
+artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, \
+fusion:<run-id>, or task:<task-id>. Artifact paths include the checkout prefix: a file at \
+repo/evidence/build.log is artifact:repo/evidence/build.log even with Execute \
+cwd=repo. The response evidence_capture names this saved request and reports \
+unreadable or truncated artifacts; submission success is not capture success. \
+Files and collaboration sources are captured at submission; \
+Board/Fusion/Task reads during review use those frozen bytes, including comments, \
+original Fusion producer identity and primary Task completion state. Task state \
+is not complete approval history or external acceptance. A note is narrative, not captured proof. \
+Pure-placeholder results ('done', 'ok', etc.) are rejected."""
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID returned by keeper_task_claim"
+min_length = 1
+
+[[params]]
+name = "result"
+type = "string"
+required = true
+description = "What was done: files changed, tests run, outcome observed"
+min_length = 1
+
+[[params]]
+name = "evidence_refs"
+type = "array"
+required = true
+items = { type = "string" }
+min_items = 1
+description = """
+Trusted references substantiating completion: artifact:<producer-root-relative-path> \
+for files, board:<post-id> for a full thread, fusion:<run-id> for original advice \
+and recorded decisions, task:<task-id> for exact committed Task state, or note:<text> for narrative. Collaboration capture must \
+succeed before submission commits; later edits, author changes and expiry do not \
+change the reviewer snapshot. A commit or URL in a note must still be inspected."""
+
+[[params]]
+name = "notes"
+type = "string"
+description = """
+Optional verification handoff notes, preserved separately from the result \
+summary. Omit when there are no additional notes. A supplied string is kept \
+verbatim; the result summary does not replace it."""
+
+[help]
+short_description = "Submit your owned task for verification with a result summary and evidence_refs."
+when_to_use = "Use when the current keeper has finished an owned task and can cite concrete evidence_refs."
+key_constraints = [
+  "Caller must own the task; no tool overrides task ownership.",
+  "Use artifact:, board:, fusion:, task:, or note: references; the verifier judges their actual contents.",
+  "The task moves to awaiting_verification, not done. Only a completion authority commits the verdict.",
+]
+details_markdown = "Issues submit_for_verification. The task waits for an operator or auto-judge verdict, which no Keeper can produce; it does not hold your next claim while it waits, and cancelling it discards the evidence you just submitted. For PR-bearing work, include the PR URL or artifact reference in evidence_refs."
+examples = ["task_id='task-123' result='Implemented the task; checks passed.' evidence_refs=['artifact:review-42']"]
+alternatives = ["masc_transition"]

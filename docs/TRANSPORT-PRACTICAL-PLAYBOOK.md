@@ -1,0 +1,136 @@
+# Transport Practical Playbook
+
+`masc`의 transport는 많지만, 다 같은 문제를 풀지 않는다. 이 문서는 실제 운영에서 어떤 경로를 우선 쓰고, 어떤 지표를 보며, 어떤 명령으로 검증하는지에 집중한다.
+
+## Quick View
+
+| 시나리오 | 권장 transport | 이유 | 대시보드에서 볼 것 |
+| --- | --- | --- | --- |
+| 현황판, wallboard, read-mostly viewer | `observer SSE` (`GET /mcp?sse_kind=observer`) | 브라우저 친화적이고 단방향 freshness에 충분함 | `SSE observer`, `queue max`, `broadcast avg` |
+| agent heartbeat, subscribe, fast fanout | `gRPC` (`:8936`) | 양방향 스트림, backlog replay, typed contract | `gRPC subscribers`, `active streams` |
+| browser/operator duplex bridge | `WebSocket` (`/ws` same-origin upgrade) **Experimental** | request/response를 한 socket에서 처리하기 좋음 | `WebSocket sessions` |
+| stateless scripting, queue trigger, worker bootstrap | `Streamable HTTP` (`POST /mcp`) | curl/harness에서 가장 단순하고 canonical | `primary path`, `recent messages`, `active ops` |
+| 브라우저 다중 탭 / 다중 stream | `HTTP/2 h2c` (`MASC_USE_H2=1` 또는 `auto`) | SSE multiplexing으로 브라우저 connection limit 회피 | `HTTP listener_mode`, `multiplex_ready` |
+
+## Dashboard
+
+### Performance choice
+
+[2026-10-22 측정](evidence/transport-performance-20261022/README.md)에서 같은
+MCP `ping`의 중앙값은 WS 0.38ms, HTTP JSON 0.75ms, finite POST SSE 0.68ms였다.
+약 81KB인 `tools/list`에서는 각각 2.05ms, 2.15ms, 2.31ms로 차이가 줄었다.
+한 바이너리·격리 workspace·인증 비활성 조건에서 각 30회 측정한 값이다.
+운영 서버에서는 Dashboard hello 인증 뒤에도 일반 MCP ping의 WS 호출이
+`-32001`로 거절됐으므로, 이 수치를 인증된 일반 MCP의 WS 전환 근거로 쓰지 않는다.
+
+지속 연결하는 Dashboard 상호작용에는 WS를 유지하고, 인증된 일반 MCP는
+Streamable HTTP를 쓴다. 단방향 observer SSE와 finite POST SSE 응답은 별개다.
+대용량 snapshot·다운로드·브라우저 렌더링과 서버 CPU/메모리는 이 실험의 측정 범위가 아니다.
+
+### Surfaces
+
+- overview: `http://127.0.0.1:8935/dashboard#/overview`
+- transport snapshot API: `http://127.0.0.1:8935/api/v1/dashboard/transport-health`
+
+이 surface는 다음을 한 번에 보여준다.
+
+- live SSE observer/agent stream 수
+- gRPC subscriber/heartbeat 상태
+- WebSocket 활성도
+- queue/backpressure hot session
+- 현재 workspace / managed unit / active operation
+- transport별 practical path 추천
+
+## Truth Harness
+
+Before changing transport health reporting, run the truth harness:
+
+```bash
+./scripts/harness/transport/verify_truth.sh
+```
+
+This is the explicit drift harness. It is included in
+`./scripts/harness/transport/run_all.sh` and therefore also runs in the CI
+transport harness suite. Run it directly when iterating on transport truth so
+reported truth vs. live probe drift fails fast without waiting for the full
+suite. It returns non-zero when those surfaces disagree.
+
+It bootstraps an isolated server when needed and compares:
+
+- `/health`
+- dashboard read model: `/api/v1/dashboard/transport-health`
+- MCP read model: `masc_transport_status`
+- live reachability probes for Streamable HTTP, observer SSE, gRPC TCP, WebSocket handshake, and h2c when advertised
+
+Mismatch output names the transport and the disagreeing surfaces, for example:
+`grpc truth mismatch: dashboard=true tool=true actual=false tcp=127.0.0.1:8936`.
+Use that output as the regression proof before and after transport truth fixes.
+
+## Recipes
+
+### 1. Streamable HTTP POST
+
+```bash
+curl -sS http://127.0.0.1:8935/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"tools/call",
+    "params":{
+      "name":"masc_status",
+      "arguments":{}
+    }
+  }'
+```
+
+### 2. Observer SSE for dashboard/wallboard
+
+```bash
+curl -N http://127.0.0.1:8935/mcp?sse_kind=observer\&session_id=playbook-observer \
+  -H 'Accept: application/json, text/event-stream'
+```
+
+### 3. HTTP/2 h2c path
+
+```bash
+MASC_USE_H2=1 ./start-masc.sh --http --port 8935
+
+curl --http2-prior-knowledge -sS http://127.0.0.1:8935/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"initialize",
+    "params":{
+      "protocolVersion":"2025-03-26",
+      "capabilities":{},
+      "clientInfo":{"name":"h2c-playbook","version":"1.0"}
+    }
+  }'
+```
+
+### 4. gRPC health and subscribe
+
+```bash
+grpcurl -plaintext 127.0.0.1:8936 list
+grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
+```
+
+`Subscribe` / `Heartbeat`는 `proto/masc_workspace.proto` 기준으로 client를 붙인다. dashboard `transport-health`에서 `subscribers`, `active_streams`가 즉시 증가해야 한다.
+
+### 5. WebSocket discovery
+
+```bash
+curl -sS http://127.0.0.1:8935/ws
+```
+
+응답에 same-origin 업그레이드 URL이 들어간다. duplex UI나 browser bridge는 이 경로를 우선 본다.
+
+## Operating Notes
+
+- queue pressure가 `watch` 이상이면 먼저 SSE `hot_sessions`를 본다.
+- `gRPC subscribers`가 높고 `broadcast avg`도 같이 오르면 fanout source는 SSE bridge일 가능성이 크다.
+- multi-node / distributed mode에서는 transport 자체보다 `managed_units`, `active_operations`, `stale_units`를 같이 봐야 한다.
+- canonical public control path는 여전히 `POST /mcp`다. WS/gRPC는 특정 latency/duplex 문제가 있을 때 올린다.

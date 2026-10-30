@@ -1,0 +1,7 @@
+# receipt: dune build @check at fixed revision (task-1532 resubmission vrf-a5770991 follow-up)
+branch=polish/task-1532-audio-expectation head=452972e23093399466abe7a0e6bf2093530a36fa
+utc=2026-09-11T19:52:56Z
+fix_commit=2c6874a (ancestor of head: yes)
+
+% dune build @check
+exit=0

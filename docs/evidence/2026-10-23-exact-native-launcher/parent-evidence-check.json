@@ -1,0 +1,10 @@
+{
+  "manifest_verified_files": 99,
+  "original_row_sha256": "9f4182463273e1d2ed5a1b9e2d728b2ccb9921589e947306823a07abe0d7699c",
+  "exact_launcher_kernel_transitions": 2,
+  "inactive_declarations": 2,
+  "retained_released_instances": 3,
+  "port_reusable": true,
+  "owned_pids_absent": true,
+  "scope": "parent direct artifact/hash/HTTP/kernel-record/cleanup review; does not replay the runtime"
+}

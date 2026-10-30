@@ -1,0 +1,86 @@
+
+(** Workspace_status_rendering — rendering logic for [masc_status].
+
+    Pure-text status summary for the [masc_status] tool.  The
+    main entry point ({!status_summary_string}) renders the
+    full operator-visible terminal block (project header,
+    snapshot line, you-line, task-binding line, planning state,
+    credential state, attention items, players,
+    quest board, messages).
+
+    Two additional helpers
+    ({!active_task_assignee}, {!assigned_task_ids}) are used by
+    [tool_workspace] for assignee-aware filtering outside the
+    rendering path.
+
+    All formatting helpers (icons, badges, take-items,
+    bool-flag) stay private — the rendered string is the
+    operator contract; intermediate atoms are not. *)
+
+val assigned_task_ids :
+  matches_you:(string -> bool) ->
+  Masc_domain.task list ->
+  string list
+(** [assigned_task_ids ~matches_you tasks] filters [tasks] to
+    those whose {!active_task_assignee} satisfies [matches_you],
+    returning their ids.  [matches_you] is caller-supplied so
+    callers can match by name OR by alias set without this
+    module knowing the identity model.
+
+    Used by [tool_workspace] to compute "the tasks assigned to you"
+    for the [masc_status] response. *)
+
+val status_summary_string :
+  ctx:Workspace_types.context ->
+  bound:bool ->
+  actual_name:string ->
+  credential_state:Workspace_types.credential_state ->
+  credential_blocked:bool ->
+  current_task:string option ->
+  agents:Masc_domain.agent list ->
+  active_tasks:Masc_domain.task list ->
+  todo_count:int ->
+  claimed_count:int ->
+  in_progress_count:int ->
+  done_count:int ->
+  cancelled_count:int ->
+  binding:Workspace_types.current_binding ->
+  attention_items:string list ->
+  state:Masc_domain.workspace_state ->
+  task_goal_index:(string, string list) Hashtbl.t ->
+  backlog:Masc_domain.backlog ->
+  string
+(** [status_summary_string] renders the full [masc_status]
+    operator-visible string.  All named arguments are
+    required — there is no convenience overload because every
+    line is a deliberate operator surface.
+
+    {2 Display caps}
+
+    - [agents]: capped at 40 displayed (with "and N
+      more" footer when exceeded).
+    - [active_tasks]: capped at 30 displayed (with "and N more"
+      footer).
+
+    The 40 / 30 caps are pinned at the contract seam — a
+    larger cap would push the snapshot off-screen on standard
+    80x24 terminals.
+
+    {2 Output structure (line order pinned)}
+
+    1. Project line
+    2. Scope + path
+    3. Snapshot line (counters)
+    4. You-line (agent / bound / owned / current)
+    5. Task binding line (assigned set / drift reason)
+    6. Planning lines (missing-task)
+    7. Credential line (only when required)
+    8. Attention block (only when non-empty)
+    9. Players block (capped at 40)
+    10. Quest Board (capped at 30)
+    11. Summary line
+    12. Messages line
+
+    The icon set (📦 / 📍 / 📁 / ⚡ / 🧭 / 🔎 / 📝 / 🔐 /
+    💡 / ⚠️ / 📌 / 📋 / 💬) is operator-visible — runbook
+    screenshots reference these symbols. *)

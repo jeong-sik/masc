@@ -1,0 +1,15 @@
+Testing `Goal notification contract'.
+This run has ID `HWUE566Y'.
+
+  [OK]          transcript          0   external notification is passive.
+  [OK]          transcript          1   Keeper fleet context is passive.
+  [OK]          transcript          2   active mention survives passive proje...
+  [OK]          identity            0   canonical.
+  [OK]          identity            1   untyped.
+  [OK]          identity            2   short.
+  [OK]          identity            3   uppercase.
+  [OK]          identity            4   nonhex.
+  [OK]          identity            5   path.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-notification-contract-89m3cqgd/_build/_tests/Goal notification contract'.
+Test Successful in 0.036s. 9 tests run.

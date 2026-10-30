@@ -1,0 +1,519 @@
+(* RFC-0412 stage 2 — since_seq replay. The journaled suffix re-folded from
+   [Projection.initial] reproduces the live SSE bytes, frame ids are journal
+   seqs (so entries that project to [None] leave gaps), the stream request
+   parser admits [since_seq] only absent or as an integer >= 0, the reconnect dedup
+   keeps an event the journal lost, and the handler-side replay never raises
+   into the server switch. *)
+
+open Masc
+module E = Keeper_chat_events
+module L = Keeper_chat_event_log
+module Blocks = Keeper_chat_blocks
+module Projection = Server_keeper_chat_agui_projection
+module Replay = Server_keeper_chat_replay
+module Stream = Server_routes_http_keeper_stream
+module Handoff = Server_keeper_stream_handoff
+
+(* Seq 3 is a connector-only block: journaled, never on the SSE wire. *)
+let events : E.keeper_chat_event list =
+  [ E.Run_started { run_id = "run-replay"; thread_id = "keeper:replay" }
+  ; E.Text_message_start { message_id = "msg-replay"; role = E.Assistant }
+  ; E.Text_delta {text="alpha "; response=Unobserved_scope (None)}
+  ; E.Status_block { kind = Blocks.Continuation_checkpoint }
+  ; E.Text_delta {text="beta "; response=Unobserved_scope (None)}
+  ; E.Text_delta {text="gamma"; response=Unobserved_scope (None)}
+  ; E.Reply_details
+      { terminal_stream_scope = None; reply = "alpha beta gamma"
+      ; turn_outcome = Keeper_turn_outcome.Visible_reply
+      ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-replay" ~absolute_turn:1
+      }
+  ; E.Text_message_end
+  ; E.Run_finished { run_id = "run-replay" }
+  ]
+
+let timestamps =
+  List.mapi (fun i _ -> 1_762_300_000.0 +. (float_of_int i *. 0.25)) events
+
+let journaled : L.journaled_event list =
+  List.mapi
+    (fun seq (ts, event) -> { L.seq; ts; event })
+    (List.combine timestamps events)
+
+let frame (seq, event) = Ag_ui.event_to_sse ~id:seq event
+
+(* What the live adapter wrote: fold every event from [initial] with its own
+   timestamp and tag each frame with the seq it was read at. *)
+let live_frames () =
+  let _, rev =
+    List.fold_left
+      (fun (projection, acc) (entry : L.journaled_event) ->
+         let projection, projected =
+           Projection.project
+             ~timestamp:entry.ts
+             ~redact_text:Fun.id
+
+             projection
+             entry.event
+         in
+         ( projection
+         , match projected with
+           | Some event -> (entry.seq, frame (entry.seq, event)) :: acc
+           | None -> acc ))
+      (Projection.initial, [])
+      journaled
+  in
+  List.rev rev
+
+let replay since_seq =
+  Replay.replay ~redact_text:Fun.id ~since_seq journaled
+
+let after seq = L.After_seq seq
+
+let seqs pairs = List.map fst pairs
+
+let test_suffix_reproduces_live_bytes () =
+  let replayed = replay (after 4) |> List.map (fun pair -> fst pair, frame pair) in
+  let expected = live_frames () |> List.filter (fun (seq, _) -> seq > 4) in
+  Alcotest.(check (list int)) "suffix seqs" [ 5; 6; 7; 8 ] (seqs replayed);
+  Alcotest.(check (list (pair int string)))
+    "suffix frames are the live frames, byte for byte"
+    expected
+    replayed
+
+let test_whole_turn_replays_everything () =
+  let replayed = replay L.Whole_turn in
+  Alcotest.(check (list int))
+    "every projected seq; 3 is absent because a status block never hits the wire"
+    [ 0; 1; 2; 4; 5; 6; 7; 8 ]
+    (seqs replayed);
+  Alcotest.(check (list string))
+    "whole-turn frames equal the live frames"
+    (live_frames () |> List.map snd)
+    (List.map frame replayed)
+
+let test_cut_at_or_past_the_end_replays_nothing () =
+  Alcotest.(check (list int)) "at the last seq" [] (seqs (replay (after 8)));
+  Alcotest.(check (list int)) "past the last seq" [] (seqs (replay (after 40)))
+
+let test_frame_id_is_the_journal_seq () =
+  List.iter
+    (fun (seq, event) ->
+       let text = frame (seq, event) in
+       let prefix = Printf.sprintf "id: %d\n" seq in
+       Alcotest.(check bool)
+         (Printf.sprintf "frame %d starts with its id line" seq)
+         true
+         (String.length text >= String.length prefix
+          && String.equal (String.sub text 0 (String.length prefix)) prefix))
+    (replay L.Whole_turn)
+
+(* The fold must start at [initial]: the delta at seq 5 carries the message
+   and run identity established at seqs 0 and 1, before the cut. Folding the
+   suffix alone from [initial] loses both, and the bytes show it. *)
+let test_projection_state_before_the_cut_is_kept () =
+  let from_cut_only =
+    Replay.replay
+      ~redact_text:Fun.id
+
+      ~since_seq:L.Whole_turn
+      (List.filter (fun (entry : L.journaled_event) -> entry.seq > 4) journaled)
+    |> List.map frame
+  in
+  let full_fold = replay (after 4) |> List.map frame in
+  Alcotest.(check bool)
+    "a suffix-only fold produces different bytes"
+    false
+    (List.equal String.equal from_cut_only full_fold);
+  Alcotest.(check (list string))
+    "the full fold equals the live suffix"
+    (live_frames () |> List.filter (fun (seq, _) -> seq > 4) |> List.map snd)
+    full_fold
+
+let body ?since_seq () =
+  let base =
+    {|"request_id":"req-replay-fixture","name":"luna","message":"hello"|}
+  in
+  match since_seq with
+  | None -> "{" ^ base ^ "}"
+  | Some raw -> "{" ^ base ^ {|,"since_seq":|} ^ raw ^ "}"
+
+let parse_ok body =
+  match Stream.For_testing.parse_request ~media_store:(Agent_core.History.Memory_store.create ()) body with
+  | Ok payload -> payload
+  | Error err -> Alcotest.fail ("expected parse to succeed: " ^ err)
+
+let position_testable =
+  let pp formatter position =
+    Format.pp_print_string formatter (L.replay_position_to_string position)
+  in
+  Alcotest.testable pp ( = )
+
+(* The wire: an absent [since_seq] is the whole turn, [n >= 0] is the last
+   seq received. There is no sentinel integer for the whole turn. *)
+let test_parser_reads_since_seq () =
+  Alcotest.(check position_testable)
+    "absent asks for the whole turn"
+    L.Whole_turn
+    (parse_ok (body ())).since_seq;
+  Alcotest.(check position_testable)
+    "a received seq"
+    (L.After_seq 12)
+    (parse_ok (body ~since_seq:"12" ())).since_seq;
+  Alcotest.(check position_testable)
+    "0 is after seq 0"
+    (L.After_seq 0)
+    (parse_ok (body ~since_seq:"0" ())).since_seq
+
+let test_parser_rejects_malformed_since_seq () =
+  List.iter
+    (fun raw ->
+       match Stream.For_testing.parse_request ~media_store:(Agent_core.History.Memory_store.create ()) (body ~since_seq:raw ()) with
+       | Ok _ -> Alcotest.fail ("since_seq " ^ raw ^ " was accepted")
+       | Error message ->
+         Alcotest.(check bool)
+           ("rejection names the field for " ^ raw)
+           true
+           (Astring.String.is_infix ~affix:"since_seq" message))
+    [ "-1"; "-2"; {|"12"|}; "1.5"; "null" ]
+
+(* The two spellings of a position are inverses: the request side omits the
+   whole turn, the response side writes it as null. *)
+let test_replay_position_round_trips_both_spellings () =
+  List.iter
+    (fun position ->
+       Alcotest.(check (option position_testable))
+         ("request spelling round-trips " ^ L.replay_position_to_string position)
+         (Some position)
+         (L.replay_position_of_wire (L.replay_position_to_wire position));
+       Alcotest.(check (option position_testable))
+         ("response spelling round-trips " ^ L.replay_position_to_string position)
+         (Some position)
+         (L.replay_position_of_yojson (L.replay_position_to_yojson position)))
+    [ L.Whole_turn; L.After_seq 0; L.After_seq 12 ];
+  Alcotest.(check (option position_testable))
+    "a negative integer is no position on the request side"
+    None
+    (L.replay_position_of_wire (Some (-1)));
+  Alcotest.(check (option position_testable))
+    "a negative integer is no position on the response side"
+    None
+    (L.replay_position_of_yojson (`Int (-1)));
+  Alcotest.(check (option position_testable))
+    "a string is no position"
+    None
+    (L.replay_position_of_yojson (`String "12"));
+  Alcotest.(check position_testable)
+    "a seq past the position advances it"
+    (L.After_seq 7)
+    (L.replay_position_advance (L.After_seq 3) 7);
+  Alcotest.(check position_testable)
+    "a seq at or before the position leaves it"
+    (L.After_seq 7)
+    (L.replay_position_advance (L.After_seq 7) 7);
+  Alcotest.(check position_testable)
+    "any seq advances the whole turn"
+    (L.After_seq 0)
+    (L.replay_position_advance L.Whole_turn 0)
+
+(* ---- handler side: typed reads, dedup, and the exception boundary ---- *)
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+
+let temp_base_path prefix =
+  Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
+
+let with_base prefix f =
+  let base_dir = temp_base_path prefix in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () -> f base_dir)
+
+let keeper_name = "replay-keeper"
+let operation_id = "req-replay-op"
+
+let write_journal ~base_dir entries =
+  let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+  List.iter
+    (fun (entry : L.journaled_event) -> L.append journal ~seq:entry.seq ~ts:entry.ts entry.event)
+    entries;
+  L.journal_path ~base_dir ~keeper_name ~operation_id
+
+let test_read_result_names_missing_corrupt_and_unreadable () =
+  with_base "keeper-chat-replay-read" (fun base_dir ->
+    let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+    (match L.read_journal_path_result path with
+     | Error (L.Journal_unsupported_version version) -> Alcotest.fail (L.version_mismatch_to_string version)
+     | Error L.Journal_missing -> ()
+     | Error (L.Journal_unreadable d) -> Alcotest.fail ("missing read as unreadable: " ^ d)
+     | Error (L.Journal_corrupt d) -> Alcotest.fail ("missing read as corrupt: " ^ d)
+     | Ok _ -> Alcotest.fail "missing journal read as entries");
+    let path = write_journal ~base_dir journaled in
+    (match L.read_journal_path_result path with
+     | Ok entries ->
+       Alcotest.(check int) "every line decodes" (List.length journaled) (List.length entries)
+     | Error _ -> Alcotest.fail "a written journal must read back");
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
+    output_string oc "this line is not an envelope\n";
+    close_out oc;
+    (match L.read_journal_path_result path with
+     | Error (L.Journal_corrupt _) -> ()
+     | Error (L.Journal_unsupported_version version) -> Alcotest.fail (L.version_mismatch_to_string version)
+     | Error L.Journal_missing -> Alcotest.fail "corrupt read as missing"
+     | Error (L.Journal_unreadable d) -> Alcotest.fail ("corrupt read as unreadable: " ^ d)
+     | Ok _ -> Alcotest.fail "a corrupt line decoded");
+    (* root reads a 0o000 file, so the classification cannot be observed there. *)
+    if Unix.geteuid () <> 0
+    then begin
+      Unix.chmod path 0o000;
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod path 0o600)
+        (fun () ->
+           match L.read_journal_path_result path with
+           | Error (L.Journal_unreadable _) -> ()
+           | Error (L.Journal_unsupported_version version) -> Alcotest.fail (L.version_mismatch_to_string version)
+           | Error L.Journal_missing -> Alcotest.fail "unreadable read as missing"
+           | Error (L.Journal_corrupt d) -> Alcotest.fail ("unreadable read as corrupt: " ^ d)
+           | Ok _ -> Alcotest.fail "an unreadable file yielded entries")
+    end)
+
+(* Seq 4's append failed (fail-open), 5's succeeded; the client reconnects
+   with since_seq = 3. The replay wrote 5. The live sink still holds 4, and
+   4 must go out: a highest-seq mark would have dropped it. *)
+let test_dedup_keeps_the_event_the_journal_lost () =
+  let replayed = Hashtbl.create 4 in
+  Hashtbl.replace replayed 5 ();
+  let is_new = Stream.For_testing.live_event_is_new ~replayed in
+  Alcotest.(check bool) "seq 4 was never replayed, so it is new" true (is_new (Some 4));
+  Alcotest.(check bool) "seq 5 was replayed, so it is a duplicate" false (is_new (Some 5));
+  Alcotest.(check bool) "seq 6 arrives live only" true (is_new (Some 6));
+  Alcotest.(check bool) "a seq-less settle event always passes" true (is_new None)
+
+(* Interrupt the first buffered send before writing its bytes, exactly where a
+   serving-domain handoff can meet a newer owner-domain publication. Calling the
+   actual sender reentrantly also fails if it holds a mutex over this effect. *)
+let test_handoff_keeps_buffered_frames_before_live () =
+  match live_frames () with
+  | first :: second :: third :: rest ->
+    let handoff = Handoff.create () in
+    let written = ref [] in
+    let injected = ref false in
+    let rec send entry =
+      if not !injected then (
+        injected := true;
+        Handoff.publish handoff ~send third;
+        Handoff.accept handoff ~send);
+      written := entry :: !written;
+      Handoff.Continue
+    in
+    Handoff.publish handoff ~send first;
+    Handoff.publish handoff ~send second;
+    Alcotest.(check int) "acceptance/replay still owns the wire" 0 (List.length !written);
+    Handoff.accept handoff ~send;
+    List.iter (Handoff.publish handoff ~send) rest;
+    Alcotest.(check (list (pair int string)))
+      "a new live frame cannot overtake either buffered frame"
+      (first :: second :: third :: rest) (List.rev !written)
+  | [] | [_] | [_; _] -> Alcotest.fail "live fixture requires three frames"
+
+let test_handoff_keeps_replay_membership_dedup () =
+  let handoff = Handoff.create () in
+  let replayed = Hashtbl.create 4 in
+  let written = ref [] in
+  let send seq =
+    if Stream.For_testing.live_event_is_new ~replayed seq
+    then written := seq :: !written;
+    Handoff.Continue
+  in
+  Handoff.publish handoff ~send (Some 4);
+  Handoff.publish handoff ~send (Some 5);
+  (* The journal missed 4, but replay wrote 5 while the live sink buffered. *)
+  Hashtbl.add replayed 5 ();
+  written := [Some 5];
+  Handoff.publish handoff ~send (Some 6);
+  Handoff.accept handoff ~send;
+  Handoff.publish handoff ~send None;
+  Alcotest.(check (list (option int)))
+    "replay duplicates drop; journal gaps and seq-less settlement survive"
+    [Some 5; Some 4; Some 6; None] (List.rev !written)
+
+let test_handoff_close_drops_pending_and_late_sinks () =
+  let rejected = Handoff.create () in
+  let written = ref [] in
+  let send value = written := value :: !written; Handoff.Continue in
+  Handoff.publish rejected ~send 1;
+  Handoff.close rejected;
+  Handoff.accept rejected ~send;
+  Handoff.publish rejected ~send 2;
+  Alcotest.(check (list int)) "rejection never activates held callbacks" [] !written;
+  let active = Handoff.create () in
+  let send_and_unsubscribe value =
+    written := value :: !written;
+    Handoff.close active;
+    (* A publisher already holding the unregistered sink must be harmless. *)
+    Handoff.publish active ~send 3;
+    Handoff.Continue
+  in
+  Handoff.publish active ~send:send_and_unsubscribe 1;
+  Handoff.publish active ~send:send_and_unsubscribe 2;
+  Handoff.accept active ~send:send_and_unsubscribe;
+  Alcotest.(check (list int)) "release drops the pending tail and captured sink" [1] !written
+
+let test_handoff_send_failure_closes_and_preserves_cancellation () =
+  let disconnected = Handoff.create () in
+  let writes = ref 0 in
+  let send _ = incr writes; Handoff.Stop in
+  Handoff.publish disconnected ~send 1;
+  Handoff.publish disconnected ~send 2;
+  Handoff.accept disconnected ~send;
+  Handoff.publish disconnected ~send 3;
+  Alcotest.(check int) "failed transport stops the queue" 1 !writes;
+  let cancelled = Handoff.create () in
+  let cancellation = Eio.Cancel.Cancelled (Failure "handoff send cancelled") in
+  let send _ = incr writes; raise cancellation in
+  Handoff.publish cancelled ~send 1;
+  Handoff.publish cancelled ~send 2;
+  Alcotest.check_raises "send cancellation propagates unchanged" cancellation
+    (fun () -> Handoff.accept cancelled ~send);
+  Handoff.publish cancelled ~send 3;
+  Handoff.accept cancelled ~send;
+  Alcotest.(check int) "cancelled sender cannot leave a restartable queue" 2 !writes
+
+(* A transport comment must never conceal an operation whose wire terminal was
+   missed. The stream closes on a durable terminal so the TUI can reconcile
+   its exact request; an unreadable store retains the old idle recovery. *)
+let test_heartbeat_preserves_terminal_reconciliation () =
+  let decide = Stream.For_testing.operation_heartbeat_decision in
+  Alcotest.(check bool) "queued operation keeps its stream" true
+    (decide (Some Keeper_owner.Chat_operation.Queued) = `Send_comment);
+  Alcotest.(check bool) "running operation keeps its stream" true
+    (decide (Some (Keeper_owner.Chat_operation.Running { started_at = 1.0 }))
+     = `Send_comment);
+  Alcotest.(check bool) "terminal operation closes for exact reconciliation" true
+    (decide (Some (Keeper_owner.Chat_operation.Succeeded
+                     { completed_at = 2.0; outcome_ref = "receipt" }))
+     = `Finish_stream);
+  Alcotest.(check bool) "unreadable operation retains idle recovery" true
+    (decide None = `Retain_idle_timeout)
+
+let test_handler_replay_matches_the_pure_fold () =
+  with_base "keeper-chat-replay-handler" (fun base_dir ->
+    ignore (write_journal ~base_dir journaled : string);
+    let frames =
+      Stream.For_testing.journal_replay_frames
+        ~base_path:base_dir
+        ~keeper_name
+        ~operation_id
+        ~since_seq:(after 4)
+      |> List.map frame
+    in
+    (* No secret is registered under this base, so the redaction the handler
+       takes is the identity on this fixture and the bytes must match. *)
+    Alcotest.(check (list string))
+      "handler replay equals the pure fold"
+      (replay (after 4) |> List.map frame)
+      frames)
+
+let test_handler_replay_degrades_to_nothing () =
+  with_base "keeper-chat-replay-degrade" (fun base_dir ->
+    let replay_frames () =
+      Stream.For_testing.journal_replay_frames
+        ~base_path:base_dir
+        ~keeper_name
+        ~operation_id
+        ~since_seq:L.Whole_turn
+    in
+    Alcotest.(check int) "missing journal replays nothing" 0 (List.length (replay_frames ()));
+    let path = write_journal ~base_dir journaled in
+    (* An append cut before its newline is not a row: the complete rows
+       replay, so a client resumes from the last seq it was handed. *)
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
+    output_string oc "{\"v\":2,\"seq\":99,\"ts\":9.0,\"event\":{\"type\":\"text_de";
+    close_out oc;
+    Alcotest.(check (list string))
+      "a torn tail replays the complete rows"
+      (replay L.Whole_turn |> List.map frame)
+      (replay_frames () |> List.map frame);
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
+    output_string oc "lta\",\"delta\":\"x\"}}\n{\"v\":2,\"seq\":100}\n";
+    close_out oc;
+    Alcotest.(check int)
+      "corrupt journal replays nothing rather than a prefix"
+      0
+      (List.length (replay_frames ())));
+  (* An empty internal diagnostic is still an actual error fact. The public
+     projection supplies its fixed safe message and keeps the terminal. *)
+  with_base "keeper-chat-replay-refused" (fun base_dir ->
+    ignore
+      (write_journal
+         ~base_dir
+         [ { L.seq = 0; ts = 1.0; event = E.Run_started { run_id = "r"; thread_id = "keeper:r" } }
+         ; { L.seq = 1; ts = 1.5; event = E.Event_error { message = "" } }
+         ]
+        : string);
+    match
+      Stream.For_testing.journal_replay_frames
+        ~base_path:base_dir
+        ~keeper_name
+        ~operation_id
+        ~since_seq:L.Whole_turn
+    with
+    | frames ->
+      Alcotest.(check int) "a safe terminal remains replayable" 2 (List.length frames)
+    | exception exn ->
+      Alcotest.fail ("replay raised into the caller: " ^ Printexc.to_string exn))
+
+let () =
+  Alcotest.run
+    "keeper_chat_replay"
+    [ ( "replay"
+      , [ Alcotest.test_case "suffix reproduces live bytes" `Quick
+            test_suffix_reproduces_live_bytes
+        ; Alcotest.test_case "the whole turn replays everything" `Quick
+            test_whole_turn_replays_everything
+        ; Alcotest.test_case "cut at or past the end replays nothing" `Quick
+            test_cut_at_or_past_the_end_replays_nothing
+        ; Alcotest.test_case "frame id is the journal seq" `Quick
+            test_frame_id_is_the_journal_seq
+        ; Alcotest.test_case "projection state before the cut is kept" `Quick
+            test_projection_state_before_the_cut_is_kept
+        ] )
+    ; ( "request"
+      , [ Alcotest.test_case "parser reads since_seq" `Quick
+            test_parser_reads_since_seq
+        ; Alcotest.test_case "parser rejects malformed since_seq" `Quick
+            test_parser_rejects_malformed_since_seq
+        ; Alcotest.test_case "a position round-trips both wire spellings" `Quick
+            test_replay_position_round_trips_both_spellings
+        ] )
+    ; ( "handler"
+      , [ Alcotest.test_case "read result names missing, corrupt and unreadable" `Quick
+            test_read_result_names_missing_corrupt_and_unreadable
+        ; Alcotest.test_case "dedup keeps the event the journal lost" `Quick
+            test_dedup_keeps_the_event_the_journal_lost
+        ; Alcotest.test_case "buffered frames precede concurrent live publication" `Quick
+            test_handoff_keeps_buffered_frames_before_live
+        ; Alcotest.test_case "handoff retains replay membership dedup" `Quick
+            test_handoff_keeps_replay_membership_dedup
+        ; Alcotest.test_case "closed handoff drops pending and late sinks" `Quick
+            test_handoff_close_drops_pending_and_late_sinks
+        ; Alcotest.test_case "send failure closes and preserves cancellation" `Quick
+            test_handoff_send_failure_closes_and_preserves_cancellation
+        ; Alcotest.test_case "heartbeat preserves terminal reconciliation" `Quick
+            test_heartbeat_preserves_terminal_reconciliation
+        ; Alcotest.test_case "handler replay matches the pure fold" `Quick
+            test_handler_replay_matches_the_pure_fold
+        ; Alcotest.test_case "handler replay degrades to nothing" `Quick
+            test_handler_replay_degrades_to_nothing
+        ] )
+    ]

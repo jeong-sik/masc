@@ -1,0 +1,36 @@
+{
+  "scope": "real Chromium production Item component/store with synthetic HTTP accounts and execution warm-up; mocked PNG503",
+  "source_sha": "4497c76d6b4ec134ce867ac621c2bb959bab43c7",
+  "browser_version": "149.0.7827.55",
+  "executionReads": [
+    {
+      "recovered": false
+    },
+    {
+      "recovered": true
+    }
+  ],
+  "accountReads": [
+    {
+      "recovered": false
+    },
+    {
+      "recovered": true
+    }
+  ],
+  "captures": [
+    {
+      "name": "item-preview-before-warmup",
+      "sha256": "4d5952ed0c05d211263e2a2cc8c490490578562edfee725657090e57685e2b8a"
+    },
+    {
+      "name": "item-workspace-warmup",
+      "sha256": "92497afdb58d580cb5d1437f392b1968e319ee2c3cb1c8153cc1194baa558dea"
+    },
+    {
+      "name": "item-workspace-recovered",
+      "sha256": "759a701bdcd396eb40660bd0d00e46810d06460ca84f71533c5523710bbdfccf"
+    }
+  ],
+  "errors": []
+}

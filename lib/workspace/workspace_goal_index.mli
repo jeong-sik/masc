@@ -1,0 +1,149 @@
+(** Workspace_goal_index — Reverse index from goal_id to linked tasks.
+
+    Provides O(1) amortized lookup for tasks linked to a goal,
+    replacing O(n) linear scans over the full task list. *)
+
+type goal_task_links_write_error = string
+
+type link_goalless_task_to_goal_error =
+  | Already_linked_to_goals of string list
+  | Link_write_failed of goal_task_links_write_error
+
+(** Build a reverse index from goal_id to its linked tasks.
+
+    [goal_task_links] is the authoritative source of goal-task
+    associations. Each entry is [(goal_id, [task_id; ...])]. Task IDs
+    are resolved against the supplied [tasks] list.
+
+    When [goal_task_links] is omitted, the index is empty. The old
+    fallback of deriving links from [task.goal_id] was removed as part
+    of the task↔goal boundary refactor. *)
+val build_goal_task_index
+  :  ?goal_task_links:(string * string list) list
+  -> Masc_domain.task list
+  -> (string, Masc_domain.task list) Hashtbl.t
+
+(** Find all tasks linked to a specific goal.
+    Returns [[]] when no tasks are linked to the given [goal_id]. *)
+val tasks_for_goal
+  :  (string, Masc_domain.task list) Hashtbl.t
+  -> goal_id:string
+  -> Masc_domain.task list
+
+(** Goals linked to one task — the reverse of {!tasks_for_goal}, over the
+    index {!build_task_goal_index_for_config} returns. [[]] means the task
+    carries no goal link. *)
+val goals_for_task
+  :  (string, string list) Hashtbl.t
+  -> task_id:string
+  -> string list
+
+(** Count open (non-terminal) tasks for a goal using a pre-built index.
+    O(k) where k = tasks linked to the goal, instead of O(n) full scan. *)
+val open_task_count_for_goal_indexed
+  :  (string, Masc_domain.task list) Hashtbl.t
+  -> goal_id:string
+  -> int
+
+(** Build a reverse-reverse index from task_id to the list of goal_ids it is
+    linked to. This is the complement of [build_goal_task_index] and is
+    useful for keeper-side lookups that need to answer “which goals does this
+    task belong to?” without storing [goal_id] on the task record. *)
+val build_task_goal_index
+  :  ?goal_task_links:(string * string list) list
+  -> unit
+  -> (string, string list) Hashtbl.t
+
+(** Path to the persistent goal-task link registry. *)
+val goal_task_links_path : Workspace_utils_backend_setup.config -> string
+
+(** Read the persistent goal-task link registry. Missing registry files are
+    treated as an empty link set. *)
+(** Goal-task links, distinguishing an empty registry from an unreadable one.
+    {!read_goal_task_links} folds both into [[]], which makes a damaged
+    registry read as "nothing is linked". A caller that renders links must be
+    able to tell those apart. *)
+val read_goal_task_links_r :
+  Workspace_utils_backend_setup.config ->
+  ((string * string list) list, string) result
+
+val read_goal_task_links :
+  Workspace_utils_backend_setup.config -> (string * string list) list
+
+val read_goal_task_links_authoritative_r :
+  Workspace_utils_backend_setup.config ->
+  ((string * string list) list, string) result
+(** Read only the primary registry. Only absence of both primary and recovery
+    means a new empty registry. A missing, unreadable, or malformed primary is
+    an error when a recovery snapshot exists. Link mutations use this reader. *)
+
+(** Persist the goal-task link registry. *)
+val write_goal_task_links :
+  Workspace_utils_backend_setup.config -> (string * string list) list -> unit
+
+val write_goal_task_links_result :
+  ?rollback_on_recovery_failure:bool ->
+  ?previous_links:(string * string list) list ->
+  Workspace_utils_backend_setup.config ->
+  (string * string list) list ->
+  (unit, goal_task_links_write_error) result
+
+val prune_links_for_goal_result :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  (unit, goal_task_links_write_error) result
+
+(** Add one task-to-goal link to the persistent registry. *)
+val link_task_to_goal_result :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  task_id:string ->
+  (unit, goal_task_links_write_error) result
+
+(** Remove one task-to-goal link from the persistent registry. *)
+val unlink_task_from_goal_result :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  task_id:string ->
+  (unit, goal_task_links_write_error) result
+
+module For_testing : sig
+  val with_before_unlink_task_from_goal :
+    (Workspace_utils_backend_setup.config ->
+     goal_id:string ->
+     task_id:string ->
+     unit) ->
+    (unit -> 'a) ->
+    'a
+end
+
+(** Add one task-to-goal link only when [task_id] has no existing goal link.
+    The read/check/write sequence runs under the goal-task-links file lock.
+    Returns [Error (Already_linked_to_goals existing_goal_ids)] when the task
+    is already linked and [Error (Link_write_failed msg)] when the registry
+    could not be durably written and verified. *)
+val link_goalless_task_to_goal :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  task_id:string ->
+  (unit, link_goalless_task_to_goal_error) result
+
+val link_tasks_to_goals_result :
+  Workspace_utils_backend_setup.config ->
+  (string * string option) list ->
+  (unit, goal_task_links_write_error) result
+
+(** Build indexes using the persistent link registry for [config]. *)
+val build_goal_task_index_for_config :
+  Workspace_utils_backend_setup.config ->
+  Masc_domain.task list ->
+  (string, Masc_domain.task list) Hashtbl.t
+
+val build_task_goal_index_for_config :
+  Workspace_utils_backend_setup.config -> (string, string list) Hashtbl.t
+
+(** Remove one Task from every Goal under the links lock. Callers deleting
+    Tasks hold the backlog lock through this operation. Primary-only mutation;
+    missing references are a no-op. *)
+val prune_links_for_task_result :
+  Workspace_utils.config -> task_id:string -> (unit, string) result

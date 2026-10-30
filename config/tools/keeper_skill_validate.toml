@@ -1,0 +1,37 @@
+name = "keeper_skill_validate"
+description = """
+Validate a proposed SKILL.md against the Skill package and composition rules.
+Pass either the exact exported artifact or draft_sha256 from keeper_composition_prepare with skill metadata, plus the proposed package directory identity. The draft checks its Keeper owner and frozen contracts and uses its frozen SKILL.md bytes. Returns static validation findings; it does not publish or execute the Skill."""
+additional_properties = false
+# 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
+# 707 B 를 매번 실었고, 09-17~23 7일간 이 도구를 부른 서로 다른
+# Keeper 턴은 7개다. 지연의 손익은 호출 수가 아니라 필요했던 턴 수로
+# 가른다(masc #32062). 지연돼도 keeper_tool_search 목록에 이름이 남고,
+# 부르면 그 턴에 스키마가 붙는다. 한 줄 요약은 그 답에 한 번 나온다.
+defer_loading = true
+
+[[params]]
+name = "artifact"
+type = "object"
+description = "Exact artifact object returned by keeper_artifact_transfer export for the proposed SKILL.md."
+
+[[params]]
+name = "draft_sha256"
+type = "string"
+description = "Exact digest of a prepared composition draft containing frozen skill metadata; replaces artifact."
+
+[[params]]
+name = "package_id"
+type = "string"
+required = true
+description = "Proposed Skill package directory identity."
+
+[[one_of]]
+required = ["artifact"]
+forbidden = ["draft_sha256"]
+description = "Validate an exported proposed SKILL.md."
+
+[[one_of]]
+required = ["draft_sha256"]
+forbidden = ["artifact"]
+description = "Validate the exact Skill source frozen in a composition draft."

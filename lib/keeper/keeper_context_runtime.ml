@@ -1,0 +1,210 @@
+(** Keeper context capacity resolution, checkpoint access, system prompts
+    and lifecycle dispatch. Working context types live in {!Keeper_types}. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+
+(* ================================================================ *)
+(* Re-export from Keeper_context_core                                *)
+(* ================================================================ *)
+
+type working_context = Keeper_types.working_context
+type session_context = Keeper_types.session_context
+
+let message_count = Keeper_context_core.message_count
+let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
+let messages_of_context = Keeper_context_core.messages_of_context
+let create = Keeper_context_core.create
+let set_system_prompt = Keeper_context_core.set_system_prompt
+let append = Keeper_context_core.append
+let create_session = Keeper_context_core.create_session
+let persist_message = Keeper_context_core.persist_message
+let persist_tool_observation = Keeper_context_core.persist_tool_observation
+
+let log_keeper_exn = Keeper_context_core.log_keeper_exn
+let context_of_agent_core_checkpoint = Keeper_context_core.context_of_agent_core_checkpoint
+let save_agent_core_checkpoint = Keeper_context_core.save_agent_core_checkpoint
+let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
+
+type checkpoint_load = Keeper_context_core.checkpoint_load =
+  | Checkpoint_loaded of working_context
+  | Checkpoint_absent
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
+
+let load_context_from_checkpoint_classified =
+  Keeper_context_core.load_context_from_checkpoint_classified
+
+(* ================================================================ *)
+
+
+(* ================================================================ *)
+(* Re-export from Keeper_post_turn                                   *)
+(* ================================================================ *)
+
+type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
+  updated_meta : keeper_meta;
+  checkpoint : Agent_core.Checkpoint.t option;
+  checkpoint_bytes : int option;
+  message_count : int;
+}
+
+type max_context_resolution = {
+  requested_override : int option;
+  primary_budget : int;
+  runtime_budget : int;
+  (* Where [runtime_budget] came from: the AGENT_CORE capability catalog, a
+     runtime.toml override, or that override clamped by the capability.
+     Dropping this rendered a runtime.toml override as "runtime_provider_cap" in keeper status JSON,
+     disguising the #25463 config drift as a provider fact. *)
+  runtime_budget_source : Runtime_instance.max_context_source;
+  requested_context_window : int;
+  effective_budget : int;
+}
+
+type max_context_resolution_error =
+  | Invalid_requested_context_override of int
+  | Runtime_context_window_unavailable of { runtime_id : string }
+
+let max_context_resolution_error_to_string = function
+  | Invalid_requested_context_override requested ->
+    Printf.sprintf "requested context override must be positive, got %d" requested
+  | Runtime_context_window_unavailable { runtime_id } ->
+    Printf.sprintf
+      "no configured runtime context window resolved for runtime id %S"
+      runtime_id
+
+type context_budget_source =
+  | Runtime_provider_cap
+  | Requested_override
+  | Requested_override_clamped_to_provider
+
+let context_budget_source_of_resolution (resolution : max_context_resolution) =
+  match resolution.requested_override with
+  | Some requested
+    when requested > 0
+         && resolution.effective_budget < resolution.requested_context_window ->
+    Requested_override_clamped_to_provider
+  | Some requested when requested > 0 -> Requested_override
+  | Some _ | None -> Runtime_provider_cap
+
+let context_budget_source_to_string = function
+  | Runtime_provider_cap -> "runtime_provider_cap"
+  | Requested_override -> "requested_override"
+  | Requested_override_clamped_to_provider ->
+    "requested_override_clamped_to_provider"
+
+let context_budget_json_of_resolution
+    ~(runtime_id : string)
+    (resolution : max_context_resolution) : Yojson.Safe.t =
+  let context_budget_source =
+    resolution
+    |> context_budget_source_of_resolution
+    |> context_budget_source_to_string
+  in
+  (* [budget_source] states which side won (runtime budget vs keeper-meta
+     requested override); [runtime_budget_source] states where the runtime
+     budget itself came from. Without the second field a runtime.toml
+     override rendered as budget_source=runtime_provider_cap under the JSON
+     key provider_context_window, which disguised the #25463 262144 config
+     drift as a provider fact for weeks. *)
+  let runtime_budget_source =
+    Runtime_instance.max_context_source_to_string resolution.runtime_budget_source
+  in
+  `Assoc
+    [ ("runtime_id", `String runtime_id)
+    ; ("provider_context_window", `Int resolution.primary_budget)
+    ; ("budget_source", `String context_budget_source)
+    ; ("runtime_budget_source", `String runtime_budget_source)
+    ; ("requested_override", Json_util.int_opt_to_json resolution.requested_override)
+    ; ("primary_budget", `Int resolution.primary_budget)
+    ; ("runtime_budget", `Int resolution.runtime_budget)
+    ; ("requested_context_window", `Int resolution.requested_context_window)
+    ; ("effective_budget", `Int resolution.effective_budget)
+    ]
+;;
+
+let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
+
+let record_lifecycle_dispatch_rejection ~keeper_name event ~error =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
+    ();
+  Log.Keeper.warn
+    "%s: keeper lifecycle dispatch rejected event=%s error=%s"
+    keeper_name
+    (Keeper_state_machine.event_to_string event)
+    error
+
+type lifecycle_dispatch_error =
+  | Transition_rejected of Keeper_state_machine.transition_error
+
+let dispatch_keeper_phase_event_result
+    ~(config : Workspace.config)
+    ~keeper_name
+    event =
+  match
+    Keeper_registry.dispatch_event
+      ~base_path:config.base_path
+      keeper_name
+      event
+  with
+  | Ok _ -> Ok ()
+  | Error err ->
+      record_lifecycle_dispatch_rejection
+        ~keeper_name
+        event
+        ~error:(Keeper_state_machine.transition_error_to_string err);
+      Error (Transition_rejected err)
+
+let dispatch_keeper_phase_event ~config ~keeper_name event =
+  dispatch_keeper_phase_event_result ~config ~keeper_name event
+  |> ignore
+
+(* ================================================================ *)
+(* Remaining functions (not extracted — small utilities)              *)
+(* ================================================================ *)
+
+let generate_trace_id = Keeper_identity.generate_trace_id
+
+let resolve_max_context_resolution_for_runtime
+      ~requested_override
+      (runtime : Runtime_instance.t)
+  =
+  match requested_override with
+  | Some requested when requested <= 0 ->
+    Error (Invalid_requested_context_override requested)
+  | Some _ | None ->
+    (match Runtime_instance.resolve_max_context_of_runtime runtime with
+     | None ->
+       Error (Runtime_context_window_unavailable { runtime_id = runtime.id })
+     | Some (runtime_budget, runtime_budget_source) ->
+       let requested_context_window =
+         match requested_override with
+         | None -> runtime_budget
+         | Some requested -> requested
+       in
+       let effective_budget = min requested_context_window runtime_budget in
+       Ok
+         { requested_override
+         ; primary_budget = runtime_budget
+         ; runtime_budget
+         ; runtime_budget_source
+         ; requested_context_window
+         ; effective_budget
+         })
+;;
+
+let resolve_max_context_resolution_for_runtime_id
+      ~requested_override
+      ~runtime_id
+  =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Error (Runtime_context_window_unavailable { runtime_id })
+  | Some runtime ->
+    resolve_max_context_resolution_for_runtime ~requested_override runtime
+
+(* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
+let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt

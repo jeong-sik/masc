@@ -1,0 +1,397 @@
+type decision_preview = string
+
+let decision_preview_max_bytes = 160
+
+(* The constructor owns the preview invariant so every entry point — the sink
+   producer and JSON replay alike — yields the same shape: control whitespace
+   flattened, trimmed, UTF-8-safely capped. Re-applying it to an already
+   bounded value is the identity, so replaying rows written by the sink keeps
+   them byte-exact. *)
+let decision_preview_of_string value =
+  value
+  |> String.map (function
+    | '\n' | '\r' | '\t' -> ' '
+    | char -> char)
+  |> String.trim
+  |> String_util.utf8_safe ~max_bytes:decision_preview_max_bytes ~suffix:"..."
+  |> String_util.to_string
+;;
+
+let decision_preview_to_string value = value
+
+type outcome =
+  | Succeeded
+  | Succeeded_with_summary of
+      { decision : decision_preview
+      ; summary : string
+      }
+  | Failed of
+      { reason : string
+      ; code : string
+      }
+
+type run_status =
+  | Running
+  | Completed of outcome
+
+type progress =
+  | Progress_accepted
+  | Progress_panel_running of { expected : int }
+  | Progress_judge_running of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+  | Progress_computed of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+  | Progress_recording_evidence of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+
+type run =
+  { run_id : string
+  ; keeper : string
+  ; preset : string
+  ; roster : Fusion_types.roster
+  ; topology : Fusion_types.fusion_topology
+  ; started_at : float
+  ; finished_at : float option
+  ; status : run_status
+  ; progress : progress option
+  }
+
+module Payload = struct
+  (* [topology] 는 요청이 고른 심의 위상이다. registry 가 보관하는 이유는 이것이
+     완료 후에도 필요한 유일한 자리이기 때문이다 — obligation payload 에도 있지만
+     그 레코드는 배달 직후 제거되므로, 완료된 run 의 위상을 되읽을 곳이 없어진다. *)
+  type registration =
+    { keeper : string
+    ; preset : string
+    ; roster : Fusion_types.roster
+    ; topology : Fusion_types.fusion_topology
+    }
+
+  type completion = { outcome : outcome; finished_at : float }
+
+  let name = "fusion_run_registry"
+  let running_noun = "run(s)"
+  let restart_reason = "worker fibers do not survive server restart"
+  let replayed_running_completion = None
+  (* Nothing here is large enough to be worth re-reading from disk: this
+     registry's live share is under a megabyte. *)
+  let shed_registration r = r
+  let shed_completion c = c
+  let completed_retention = `Latest 64
+  let retention_group = None
+
+  (* 명단 바꾸기는 바꾼 칸만 적는다. 키가 없으면 그 실행은 preset 의 그 칸을 썼다. *)
+  let registration_to_yojson registration =
+    let roster = registration.roster in
+    `Assoc
+      ([ "keeper", `String registration.keeper
+       ; "preset", `String registration.preset
+       ; ( "topology"
+         , `String (Fusion_types.fusion_topology_to_string registration.topology) )
+       ]
+       @ (match roster.Fusion_types.judge_route with
+          | None -> []
+          | Some route -> [ "judge_route", `String route ])
+       @ (match roster.Fusion_types.panel_routes with
+          | None -> []
+          | Some routes ->
+            [ "panel_routes", `List (List.map (fun route -> `String route) routes) ]))
+  ;;
+
+  let registration_of_yojson json =
+    let open Result.Syntax in
+    let* fields = Run_registry_core.Json.object_fields json in
+    (* [exact_fields] 라 topology 없는 예전 레코드는 여기서 Error 가 되고 replay 가
+       그 줄만 스킵한다(경고 1줄). 레거시 폴백을 두지 않는 이유는 registry 가 캐시성
+       데이터이기 때문이다 — running 은 재시작으로 이미 무효고 완료분은 Latest 64
+       보존이다. 폴백을 두면 "위상 미상" 이라는 새 상태를 UI 까지 끌고 가야 한다. *)
+    let* () =
+      Run_registry_core.Json.exact_fields
+        ~required:[ "keeper"; "preset"; "topology" ]
+        ~optional:[ "judge_route"; "panel_routes" ]
+        fields
+    in
+    let* keeper = Run_registry_core.Json.string_field "keeper" fields in
+    let* preset = Run_registry_core.Json.string_field "preset" fields in
+    let* judge_route = Run_registry_core.Json.optional_string_field "judge_route" fields in
+    let* panel_routes =
+      Run_registry_core.Json.optional_string_list_field "panel_routes" fields
+    in
+    let* topology_wire = Run_registry_core.Json.string_field "topology" fields in
+    match Fusion_types.fusion_topology_of_string topology_wire with
+    | None -> Error (Printf.sprintf "unknown fusion topology %S" topology_wire)
+    | Some topology ->
+      Ok { keeper; preset; roster = { Fusion_types.judge_route; panel_routes }; topology }
+  ;;
+
+  let outcome_to_yojson = function
+    | Succeeded -> `Assoc [ "outcome", `String "succeeded" ]
+    | Succeeded_with_summary { decision; summary } ->
+      `Assoc
+        [ "outcome", `String "succeeded"
+        ; "decision", `String (decision_preview_to_string decision)
+        ; "summary", `String summary
+        ]
+    | Failed { reason; code } ->
+      `Assoc
+        [ "outcome", `String "failed"
+        ; "reason", `String reason
+        ; "code", `String code
+        ]
+  ;;
+
+  let outcome_of_yojson json =
+    let open Result.Syntax in
+    let* fields = Run_registry_core.Json.object_fields json in
+    let* label = Run_registry_core.Json.string_field "outcome" fields in
+    match label with
+    | "succeeded" ->
+      let* () =
+        Run_registry_core.Json.exact_fields ~required:[ "outcome" ]
+          ~optional:[ "decision"; "summary" ] fields
+      in
+      let* decision =
+        Run_registry_core.Json.optional_string_field "decision" fields
+      in
+      let* summary =
+        Run_registry_core.Json.optional_string_field "summary" fields
+      in
+      (match decision, summary with
+       | None, None -> Ok Succeeded
+       | Some decision, Some summary ->
+         Ok
+           (Succeeded_with_summary
+              { decision = decision_preview_of_string decision; summary })
+       | Some _, None | None, Some _ ->
+         Error "succeeded fusion completion requires decision and summary together")
+    | "failed" ->
+      let* () =
+        Run_registry_core.Json.exact_fields
+          ~required:[ "outcome"; "reason"; "code" ]
+          fields
+      in
+      let* reason = Run_registry_core.Json.string_field "reason" fields in
+      let* code = Run_registry_core.Json.string_field "code" fields in
+      Ok (Failed { reason; code })
+    | other -> Error (Printf.sprintf "unknown fusion outcome %S" other)
+  ;;
+  let completion_to_yojson completion =
+    `Assoc ["result", outcome_to_yojson completion.outcome;
+            "finished_at", `Float completion.finished_at]
+
+  let completion_of_yojson json =
+    let open Result.Syntax in
+    let* fields = Run_registry_core.Json.object_fields json in
+    let* () = Run_registry_core.Json.exact_fields ~required:["result"; "finished_at"] fields in
+    let* finished_at = Run_registry_core.Json.float_field "finished_at" fields in
+    let* () = if Float.is_finite finished_at && finished_at >= 0. then Ok ()
+      else Error "Fusion finished_at must be a finite timestamp" in
+    match List.assoc_opt "result" fields with
+    | None -> Error "Fusion completion result is missing"
+    | Some result -> let* outcome = outcome_of_yojson result in Ok { outcome; finished_at }
+
+end
+
+module Store = Run_registry_core.Make (Payload)
+
+type t =
+  { store : Store.t
+  ; progress_by_run : (string, progress) Hashtbl.t
+  ; progress_mutex : Stdlib.Mutex.t
+  }
+
+let storage_filename = "fusion-runs.jsonl"
+let create ?path () =
+  { store = Store.create ?path ()
+  ; progress_by_run = Hashtbl.create 16
+  ; progress_mutex = Stdlib.Mutex.create ()
+  }
+;;
+
+let replay path =
+  { store = Store.replay_with_retained_history path
+  ; progress_by_run = Hashtbl.create 16
+  ; progress_mutex = Stdlib.Mutex.create ()
+  }
+;;
+
+let replay_status t = Store.replay_status t.store
+let max_completed_retained = Store.max_completed_retained
+let cut_replay_log ~execute path = Store.cut_replay_log ~execute path
+
+let register_running t ~run_id ~keeper ~preset ~roster ~topology ~started_at =
+  Store.register t.store ~id:run_id ~started_at
+    ~registration:{ Payload.keeper; preset; roster; topology };
+  Stdlib.Mutex.protect t.progress_mutex (fun () ->
+    Hashtbl.replace t.progress_by_run run_id Progress_accepted)
+;;
+
+let mark_progress t ~run_id ~progress =
+  match Store.get t.store ~id:run_id with
+  | Some { status = Store.Running; _ } ->
+    Stdlib.Mutex.protect t.progress_mutex (fun () ->
+      Hashtbl.replace t.progress_by_run run_id progress)
+  | Some { status = Store.Completed _; _ } | None -> ()
+;;
+
+let mark_completed t ~run_id ~outcome =
+  match Store.complete_with t.store ~id:run_id
+      ~make_completion:(fun previous ->
+        (* A durable continuation wake can fail after the sink published this
+           completion. Its retry may update the outcome projection, but it
+           cannot move the run's first terminal observation to the retry time. *)
+        let finished_at =
+          match previous with
+          | Some completion -> completion.Payload.finished_at
+          | None -> Unix.gettimeofday ()
+        in
+        { Payload.outcome; finished_at }) with
+  | `Completed ->
+    Stdlib.Mutex.protect t.progress_mutex (fun () ->
+      Hashtbl.remove t.progress_by_run run_id)
+  | `Unknown -> ()
+  | `Persistence_failed failure -> raise (Sys_error failure.detail)
+;;
+
+let run_of_entry t (entry : Store.entry) =
+  let status, progress, finished_at =
+    match entry.status with
+    | Store.Running ->
+      let progress =
+        Stdlib.Mutex.protect t.progress_mutex (fun () ->
+          Hashtbl.find_opt t.progress_by_run entry.id)
+        |> Option.value ~default:Progress_accepted
+      in
+      Running, Some progress, None
+    | Store.Completed completion -> Completed completion.outcome, None, Some completion.finished_at
+  in
+  { run_id = entry.id
+  ; keeper = entry.registration.keeper
+  ; preset = entry.registration.preset
+  ; roster = entry.registration.roster
+  ; topology = entry.registration.topology
+  ; started_at = entry.started_at
+  ; finished_at
+  ; status
+  ; progress
+  }
+;;
+
+let list_runs t =
+  let entries = Store.list_entries t.store in
+  Stdlib.Mutex.protect t.progress_mutex (fun () ->
+    Hashtbl.filter_map_inplace
+      (fun run_id progress ->
+         if
+           List.exists
+             (fun (entry : Store.entry) ->
+                String.equal entry.id run_id
+                &&
+                match entry.status with
+                | Store.Running -> true
+                | Store.Completed _ -> false)
+             entries
+         then Some progress
+         else None)
+      t.progress_by_run);
+  List.map (run_of_entry t) entries
+;;
+
+(* Fusion payloads are never shed: the bounded live entry is already complete.
+   Avoid rescanning the retained history for ordinary live HTTP/SSE reads. *)
+let get t ~run_id = Option.map (run_of_entry t) (Store.get_metadata t.store ~id:run_id)
+
+let get_for_observer t ~run_id =
+  match get t ~run_id with
+  | Some run -> Ok (Some run)
+  | None -> Store.completed_from_log t.store ~id:run_id
+      |> Result.map (Option.map (run_of_entry t))
+
+let status_label = function
+  | Running -> "running"
+  | Completed (Succeeded | Succeeded_with_summary _) -> "completed"
+  | Completed (Failed _) -> "failed"
+;;
+
+let progress_stage = function
+  | Progress_accepted -> "accepted"
+  | Progress_panel_running _ -> "panel"
+  | Progress_judge_running _ -> "judge"
+  | Progress_computed _ -> "computed"
+  | Progress_recording_evidence _ -> "recording_evidence"
+;;
+
+let progress_to_yojson = function
+  | Progress_accepted -> `Assoc []
+  | Progress_panel_running { expected } ->
+    `Assoc [ "panel_expected", `Int expected ]
+  | Progress_judge_running { expected; answered; failed }
+  | Progress_computed { expected; answered; failed }
+  | Progress_recording_evidence { expected; answered; failed } ->
+    `Assoc
+      [ "panel_expected", `Int expected
+      ; "panel_answered", `Int answered
+      ; "panel_failed", `Int failed
+      ]
+;;
+
+let run_to_yojson run =
+  let stage, progress_json =
+    match run.status, run.progress with
+    | Running, Some progress -> progress_stage progress, progress_to_yojson progress
+    | Running, None -> "accepted", `Assoc []
+    | Completed (Succeeded | Succeeded_with_summary _), None ->
+      "completed", `Null
+    | Completed (Failed _), None -> "failed", `Null
+    | Completed _, Some _ -> "completed", `Null
+  in
+  let base =
+    [ "run_id", `String run.run_id
+    ; "keeper", `String run.keeper
+    ; "preset", `String run.preset
+    ; "roster", Fusion_types.roster_to_yojson run.roster
+    ; "topology", `String (Fusion_types.fusion_topology_to_string run.topology)
+    ; "started_at", `Float run.started_at
+    ; "finished_at", (match run.finished_at with None -> `Null | Some ts -> `Float ts)
+    ; "status", `String (status_label run.status)
+    ; "stage", `String stage
+    ; "progress", progress_json
+    ]
+  in
+  let outcome_fields =
+    match run.status with
+    | Running | Completed Succeeded -> []
+    | Completed (Succeeded_with_summary { decision; summary }) ->
+      [ "decision", `String (decision_preview_to_string decision)
+      ; "summary", `String summary
+      ]
+    | Completed (Failed { reason; code }) ->
+      [ "error", `String reason; "failure_code", `String code ]
+  in
+  `Assoc (base @ outcome_fields)
+;;
+
+type global_install_error = Already_installed
+
+module Global = Run_registry_core.Global (struct
+    type nonrec t = t
+
+    let initial = create ()
+  end)
+
+let global = Global.current
+
+let install_global registry =
+  match Global.install registry with
+  | Ok () -> Ok ()
+  | Error Global.Already_installed -> Error Already_installed
+;;

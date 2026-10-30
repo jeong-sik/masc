@@ -1,0 +1,740 @@
+// @vitest-environment happy-dom
+import { h } from 'preact'
+import { render } from 'preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RuntimeMonitor } from './runtime-monitor'
+
+const apiMocks = vi.hoisted(() => ({
+  fetchDashboardRuntimeProbe: vi.fn(),
+  fetchRuntimeProviders: vi.fn(),
+  fetchRuntimeModelMetrics: vi.fn(),
+  probeOfficialClientLogin: vi.fn(),
+}))
+
+vi.mock('../api/dashboard', () => apiMocks)
+
+async function waitFor(assertion: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 20; i += 1) {
+    if (assertion()) return
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+  throw new Error(`Timed out waiting for ${label}`)
+}
+
+function parameterRows(container: HTMLElement, label: string): Element[] {
+  return Array.from(container.querySelectorAll('[aria-label="runtime parameter detail"] > div'))
+    .filter(candidate => candidate.firstElementChild?.textContent === label)
+}
+
+function parameterValue(container: HTMLElement, label: string): string | undefined {
+  return parameterRows(container, label)[0]?.lastElementChild?.textContent?.trim()
+}
+
+describe('RuntimeMonitor', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    apiMocks.probeOfficialClientLogin.mockReset()
+    apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue({
+      updated_at: '2026-05-13T13:00:00Z',
+      summary: {
+        providers: 1,
+        runtimes: 1,
+        local_models: 0,
+        cloud_models: 1,
+        cli_models: 0,
+        default_runtime_id: 'runpod_mtp.qwen',
+      },
+      providers: [
+        {
+          provider: 'runpod_mtp.qwen',
+          runtime_id: 'runpod_mtp.qwen',
+          provider_id: 'runpod_mtp',
+          provider_display_name: 'RunPod MTP',
+          model_id: 'qwen',
+          model_api_name: 'Qwen/Qwen3-32B',
+          protocol: 'openai-http',
+          transport: 'http',
+          kind: 'cloud',
+          runtime_kind: 'http',
+          auth_kind: 'env:RUNPOD_API_KEY',
+          status: 'configured',
+          available: true,
+          is_default_runtime: true,
+          max_context: 200000,
+          tools_support: true,
+          thinking_support: true,
+          streaming: true,
+          temperature: 0.7,
+          top_p: 0.91,
+          top_k: 42,
+          min_p: 0.07,
+          capabilities_declared: true,
+          max_output_tokens: 65536,
+          supports_tool_choice: true,
+          supports_required_tool_choice: true,
+          supports_named_tool_choice: true,
+          supports_parallel_tool_calls: true,
+          supports_multimodal_inputs: true,
+          supports_image_input: true,
+          supports_audio_input: true,
+          supports_video_input: false,
+          thinking_control_format: 'reasoning-effort',
+          supports_response_format_json: true,
+          supports_structured_output: true,
+          supports_system_prompt: true,
+          supports_assistant_prefill: false,
+          supports_prompt_caching: true,
+          supports_top_k: true,
+          supports_min_p: true,
+          supports_seed: true,
+          emits_usage_tokens: true,
+          model_count: 1,
+          models: ['Qwen/Qwen3-32B'],
+          parameter_policy: {
+            reasoning_toggle_wire: 'chat_template_kwargs',
+            reasoning_replay_policy: 'preserve_always',
+            requires_reasoning_replay_on_tool_call: true,
+            ignored_sampling_params: ['temperature', 'top_p'],
+            always_ignored_sampling_params: ['temperature'],
+          },
+          request_config: {
+            source: 'agent-core-provider-config',
+            provider_kind: 'openai_compat',
+            request_path: '/chat/completions',
+            request_path_targets_responses_api: false,
+            max_tokens: 65536,
+            max_context: 131072,
+            temperature: null,
+            top_p: null,
+            top_k: 40,
+            min_p: 0.05,
+            has_system_prompt: true,
+            enable_thinking: true,
+            preserve_thinking: false,
+            clear_thinking: true,
+            resolved_reasoning_effort: 'high',
+            glm_clear_thinking: true,
+            glm_replay_reasoning: true,
+            tool_stream: true,
+            tool_choice: { kind: 'required' },
+            disable_parallel_tool_use: true,
+            response_format: { kind: 'json_schema', has_schema: true },
+            has_output_schema: true,
+            cache_system_prompt: true,
+            has_model_capabilities_override: true,
+            keep_alive: '30m',
+            internal_model_rotation_count: 2,
+            num_ctx: 131072,
+            seed: 1234567,
+            has_previous_response_id: true,
+            connect_timeout_s: 120.125,
+          },
+          effective_capabilities: {
+            source: 'agent-core-provider-config-model',
+            max_context_tokens: 131072,
+            max_output_tokens: 65536,
+            supports_tools: true,
+            supports_tool_choice: true,
+            supports_required_tool_choice: true,
+            supports_named_tool_choice: true,
+            supports_parallel_tool_calls: true,
+            supports_runtime_mcp_tools: true,
+            supports_runtime_tool_events: true,
+            assistant_tool_content_format: 'null',
+            supports_reasoning: true,
+            accepted_reasoning_efforts: ['low', 'medium', 'high'],
+            thinking_control_format: 'chat-template-kwargs',
+            preserve_thinking_control_format: 'chat-template-kwargs-preserve-thinking',
+            reasoning_output_format: 'split-reasoning-fields',
+            reasoning_streaming_format: {
+              kind: 'delta-reasoning-field',
+              field: 'reasoning_content',
+            },
+            reasoning_replay_override: 'preserve-always',
+            supports_response_format_json: true,
+            supports_structured_output: true,
+            supports_multimodal_inputs: true,
+            supports_image_input: true,
+            supports_audio_input: true,
+            supports_video_input: false,
+            modality_priority: 'visual-first',
+            task: 'transcription',
+            supports_native_streaming: true,
+            supports_system_prompt: true,
+            supports_assistant_prefill: false,
+            supports_prompt_caching: true,
+            supports_top_k: true,
+            supports_min_p: true,
+            supports_seed: true,
+            ignored_sampling_parameters: ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty'],
+            emits_usage_tokens: true,
+            supported_models: ['Qwen/Qwen3-32B'],
+          },
+          declared_spec: {
+            source: 'runtime.toml',
+            provider: {
+              id: 'runpod_mtp',
+              display_name: 'RunPod MTP',
+              protocol: 'openai-compatible-http',
+              api_format: 'chat-completions',
+              transport: 'http',
+              auth_kind: 'env:RUNPOD_API_KEY',
+              is_non_interactive: true,
+              has_capabilities: true,
+              behavior_capabilities: {
+                supports_inline_tools: true,
+                argv_prompt_preflight: true,
+                uses_anthropic_caching: true,
+              },
+              custom_header_count: 2,
+              connect_timeout_s: 120.375,
+              exact_body_timeout_s: 0.125,
+            },
+            model: {
+              id: 'qwen',
+              api_name: 'Qwen/Qwen3-32B',
+              tools_support: true,
+              max_context: 128000,
+              thinking_support: true,
+              preserve_thinking: false,
+              streaming: true,
+              temperature: 0.65,
+              top_p: 0.91,
+              top_k: 42,
+              min_p: 0.07,
+              capabilities: {
+                source: 'runtime.toml',
+                max_output_tokens: 65536,
+                supports_tool_choice: true,
+                supports_required_tool_choice: true,
+                supports_named_tool_choice: true,
+                supports_parallel_tool_calls: true,
+                thinking_control_format: 'chat-template-kwargs',
+                supports_image_input: true,
+                supports_audio_input: true,
+                supports_video_input: false,
+                supports_multimodal_inputs: true,
+                supports_response_format_json: true,
+                supports_structured_output: true,
+                supports_system_prompt: true,
+                supports_assistant_prefill: false,
+                supports_prompt_caching: true,
+                supports_top_k: true,
+                supports_min_p: true,
+                supports_seed: true,
+                emits_usage_tokens: true,
+              },
+            },
+            binding: {
+              provider_id: 'runpod_mtp',
+              model_id: 'qwen',
+              is_default: true,
+              max_concurrent: 4,
+              price_input: 0.1,
+              price_output: 0.2,
+              keep_alive: '30m',
+              num_ctx: 131072,
+            },
+          },
+          source: 'runtime.toml',
+          endpoint_url: 'https://example.invalid/v1',
+          note: 'verified by runtime discovery',
+        },
+      ],
+    })
+    apiMocks.fetchRuntimeModelMetrics.mockReset().mockResolvedValue({
+      window_minutes: 30,
+      bucket_minutes: 5,
+      total_entries: 0,
+      total_error_entries: 0,
+      latency_buckets: [],
+      models: [],
+    })
+    apiMocks.fetchDashboardRuntimeProbe.mockReset().mockResolvedValue({
+      generated_at: '2026-06-06T02:47:31Z',
+      refreshed_at_unix: 1780714051,
+      cache_ttl_sec: 30,
+      cache_age_sec: 0,
+      cache_hit: false,
+      refresh_state: 'served_stale',
+      probe: {
+        source: 'runtime.toml',
+        status: 'reachable',
+        checked_at: '2026-06-06T02:47:31Z',
+        probe_ok: true,
+        summary: {
+          runtimes: 1,
+          probed: 1,
+          reachable: 1,
+          failed: 0,
+          skipped: 0,
+          default_runtime_id: 'runpod_mtp.qwen',
+        },
+        providers: [
+          {
+            runtime_id: 'runpod_mtp.qwen',
+            provider_id: 'runpod_mtp',
+            provider_display_name: 'RunPod MTP',
+            model_id: 'qwen',
+            model_api_name: 'Qwen/Qwen3-32B',
+            protocol: 'openai-compatible-http',
+            runtime_kind: 'http',
+            transport: 'http',
+            auth_kind: 'env:RUNPOD_API_KEY',
+            status: 'reachable',
+            reachable: true,
+            http_status: 200,
+            latency_ms: 42.5,
+            model_count: 1,
+            content_type: 'application/json',
+            downloaded_bytes: 128,
+            credential_required: true,
+            auth_present: true,
+            endpoint_url: 'https://example.invalid/v1',
+            probe_url: 'https://example.invalid/v1/models',
+            error: null,
+            checked_at: '2026-06-06T02:47:31Z',
+          },
+        ],
+        errors: [],
+        observations: ['runtime.toml provider reachability: 1 reachable, 0 failed, 0 skipped'],
+        limitations: ['Probe checks provider metadata endpoints only; it does not send a completion request.'],
+      },
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('shows runtime.toml binding identity on provider status cards', async () => {
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime binding',
+    )
+
+    expect(container.textContent).toContain('runpod_mtp.qwen')
+    expect(container.textContent).toContain('runpod_mtp')
+    expect(container.textContent).toContain('Qwen/Qwen3-32B')
+  })
+
+  it('separates configured inventory from live provider reachability', async () => {
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'live reachability summary',
+    )
+
+    expect(container.textContent).toContain('available')
+    expect(container.textContent).toContain('live reachable')
+    expect(container.textContent).toContain('http · 200')
+    expect(container.textContent).toContain('latency · 42.5 ms')
+    expect(container.textContent).toContain('models · 1')
+    expect(container.textContent).toContain('auth · present')
+    expect(container.querySelector('article.v2-monitoring-card')).not.toBeNull()
+  })
+
+  it('embeds an explicit subscription probe only for official-client protocols', async () => {
+    const baseline = await apiMocks.fetchRuntimeProviders()
+    apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue({
+      ...baseline,
+      providers: [{
+        ...baseline.providers[0],
+        provider: 'codex.codex',
+        runtime_id: 'codex.codex',
+        provider_id: 'codex',
+        protocol: 'codex-app-server',
+        runtime_kind: 'cli',
+        model_api_name: 'gpt-5.3-codex-spark',
+        status: 'configured_unverified',
+        available: false,
+      }],
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.querySelector('[data-testid="official-client-login-probe-codex.codex"]') != null,
+      'official-client login probe',
+    )
+
+    expect(apiMocks.probeOfficialClientLogin).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('gpt-5.3-codex-spark')
+    expect(container.textContent).toContain('configured · unverified')
+  })
+
+  it('surfaces declared and effective provider/model parameter facts', async () => {
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime parameter facts',
+    )
+
+    expect(container.textContent).toContain('params · wire:chat_template_kwargs')
+    expect(container.textContent).toContain(
+      'request · kind:openai_compat · source:agent-core-provider-config · path:/chat/completions',
+    )
+    expect(container.textContent).toContain('system-prompt')
+    expect(container.textContent).toContain('assistant-prefill off')
+    expect(container.textContent).toContain('preserve:off')
+    expect(container.textContent).toContain('glm:replay')
+    expect(container.textContent).toContain('tool-stream:on')
+    expect(container.textContent).toContain('cap-override')
+    expect(container.textContent).toContain('rotation:2')
+    expect(container.textContent).toContain('declared · api:chat-completions')
+    expect(container.textContent).toContain('auth:env:RUNPOD_API_KEY')
+    expect(container.textContent).toContain('snapshot · source:runtime.toml')
+    expect(container.textContent).toContain('protocol:openai-http')
+    expect(container.textContent).toContain('model-temp:0.7')
+    expect(container.textContent).toContain('model-top_p:0.91')
+    expect(container.textContent).toContain('model-top_k:42')
+    expect(container.textContent).toContain('model-min_p:0.07')
+    expect(container.textContent).toContain('caps:declared')
+    expect(container.textContent).toContain('format:json,schema')
+    expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
+    expect(container.textContent).toContain('sampling:top_k,min_p,seed')
+    expect(container.textContent).toContain('tools:on · thinking:on · streaming:on')
+    expect(container.textContent).toContain('multimodal:on · image:on · audio:on · video:off')
+    expect(container.textContent).toContain('thinking-control:reasoning-effort')
+    expect(container.textContent).toContain(
+      'controls:tool-choice,required,named,parallel,system-prompt,assistant-prefill off,prompt-cache,usage',
+    )
+    expect(container.textContent).toContain('note:verified by runtime discovery')
+    expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
+    expect(container.textContent).toContain(
+      'controls:tool-choice,required,named,parallel,system-prompt,assistant-prefill off,prompt-cache,usage',
+    )
+    expect(container.textContent).toContain('price-in:0.1')
+    expect(container.textContent).toContain('effective · source:agent-core-provider-config-model · ctx:131072 · out:65536')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model · ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
+    expect(container.textContent).toContain('runtime-mcp-tools')
+    expect(container.textContent).toContain('reasoning · effort:low,medium,high')
+    expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
+    expect(container.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
+    expect(container.textContent).toContain('input:multimodal,image,audio')
+    expect(container.textContent).toContain('modality:visual-first')
+    expect(container.textContent).toContain('tool-content:null')
+    expect(container.textContent).toContain('wire:chat-template-kwargs · preserve:chat-template-kwargs-preserve-thinking')
+    expect(container.textContent).toContain('preserve:chat-template-kwargs-preserve-thinking')
+    expect(container.textContent).toContain('task:transcription · native-stream')
+  })
+
+  it('uses provider snapshot model count and auth kind when the live probe request fails', async () => {
+    apiMocks.fetchDashboardRuntimeProbe.mockRejectedValueOnce(new Error('runtime probe unavailable'))
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime snapshot fallback facts',
+    )
+
+    expect(container.textContent).toContain('models · 1')
+    expect(container.textContent).toContain('auth · env:RUNPOD_API_KEY')
+    expect(container.textContent).toContain('snapshot · source:runtime.toml')
+  })
+
+  it.each([
+    { binding: 1000000, provider: 400000, model: 272000, expected: 1000000, source: 'binding' },
+    { binding: 128000, provider: 400000, model: 272000, expected: 128000, source: 'binding' },
+    { binding: null, provider: 400000, model: 272000, expected: 400000, source: 'provider' },
+    { binding: undefined, provider: undefined, model: 272000, expected: 272000, source: 'model' },
+    { binding: null, provider: 400000, model: null, expected: 400000, source: 'provider' },
+    { binding: null, provider: null, model: null, expected: null, source: null },
+  ])('shows the selected declared context and each scope: $source', async (context) => {
+    const baseline = await apiMocks.fetchRuntimeProviders()
+    const provider = baseline.providers[0]
+    apiMocks.fetchRuntimeProviders.mockResolvedValue({
+      ...baseline,
+      providers: [{
+        ...provider,
+        declared_spec: {
+          ...provider.declared_spec,
+          provider: { ...provider.declared_spec.provider, max_context: context.provider },
+          model: { ...provider.declared_spec.model, max_context: context.model },
+          binding: { ...provider.declared_spec.binding, max_context: context.binding },
+        },
+      }],
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('declared ·') ?? false,
+      'scoped context declarations',
+    )
+    const summary = Array.from(container.querySelectorAll('div'))
+      .find(element => element.textContent?.startsWith('declared ·'))?.textContent
+    if (context.expected == null) {
+      expect(summary).not.toContain(' · ctx:')
+      expect(summary).not.toContain('ctx-source:')
+    } else {
+      expect(summary).toContain(`ctx:${context.expected} · ctx-source:${context.source}`)
+    }
+    expect(parameterValue(container, 'declared provider · context')).toBe(
+      context.provider == null ? undefined : context.provider.toLocaleString('en-US'),
+    )
+    // One row per declared fact: a repeated label reads as two facts.
+    expect(parameterRows(container, 'declared provider · context')).toHaveLength(
+      context.provider == null ? 0 : 1,
+    )
+    expect(parameterValue(container, 'binding · context')).toBe(
+      context.binding == null ? undefined : context.binding.toLocaleString('en-US'),
+    )
+  })
+
+  it('renders parameter facts as structured request declared and effective rows', async () => {
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime parameter detail rows',
+    )
+
+    expect(container.querySelector('[aria-label="runtime parameter detail"]')).not.toBeNull()
+    expect(container.textContent).toContain('policy · replay on tool call')
+    expect(container.textContent).toContain('required')
+    expect(container.textContent).toContain('request · source')
+    expect(container.textContent).toContain('agent-core-provider-config')
+    expect(container.textContent).toContain('request · system prompt')
+    expect(container.textContent).toContain('declared provider · capabilities block')
+    expect(container.textContent).toContain('declared model · capability source')
+    expect(container.textContent).toContain('binding · provider.model')
+    expect(container.textContent).toContain('runpod_mtp,qwen')
+    expect(container.textContent).toContain('effective · source')
+    expect(container.textContent).toContain('agent-core-provider-config-model')
+    expect(container.textContent).toContain('effective · max context')
+    expect(container.textContent).toContain('131,072')
+    expect(parameterValue(container, 'effective · max context')).toBe('131,072')
+    expect(parameterValue(container, 'declared model · temperature')).toBe('0.65')
+    expect(parameterValue(container, 'request · seed')).toBe('1234567')
+    expect(parameterValue(container, 'request · connect timeout')).toBe('120.125')
+    expect(parameterValue(container, 'declared provider · connect timeout')).toBe('120.375')
+    expect(parameterValue(container, 'declared provider · Exact timeout (s)')).toBe('0.125')
+    expect(container.textContent).toContain('Exact timeout:0.125s')
+    expect(container.textContent).toContain('effective · tools')
+    expect(container.textContent).toContain('tools,tool-choice,required,named,parallel,runtime-mcp,runtime-events')
+    expect(container.textContent).toContain('effective · reasoning')
+    expect(container.textContent).toContain('reasoning,effort low,medium,high')
+    expect(container.textContent).toContain('effective · thinking wire')
+    expect(container.textContent).toContain('chat-template-kwargs')
+    expect(container.textContent).toContain('effective · preserve wire')
+    expect(container.textContent).toContain('chat-template-kwargs-preserve-thinking')
+    expect(container.textContent).toContain('effective · modality priority')
+    expect(container.textContent).toContain('visual-first')
+    expect(container.textContent).toContain('effective · tool content')
+    expect(container.textContent).toContain('null')
+    expect(container.textContent).toContain('effective · task')
+    expect(container.textContent).toContain('transcription')
+    expect(container.textContent).toContain('effective · controls')
+    expect(container.textContent).toContain('native-stream,system-prompt')
+    expect(container.textContent).toContain('effective · ignored sampling')
+    expect(container.textContent).toContain('temperature,top_p,presence_penalty,frequency_penalty')
+  })
+
+  it.each([
+    [1200, '1200'],
+    [1200.5, '1200.5'],
+    [NaN, '--'],
+    [Infinity, '--'],
+    [-Infinity, '--'],
+    [null, undefined],
+    [undefined, undefined],
+  ])('shows setting values without count formatting for %s', async (value, expected) => {
+    const baseline = await apiMocks.fetchRuntimeProviders()
+    apiMocks.fetchRuntimeProviders.mockResolvedValue({
+      ...baseline,
+      providers: baseline.providers.map((provider: typeof baseline.providers[number]) => ({
+        ...provider,
+        request_config: { ...provider.request_config, connect_timeout_s: value },
+        declared_spec: {
+          ...provider.declared_spec,
+          provider: { ...provider.declared_spec.provider, connect_timeout_s: value, exact_body_timeout_s: value },
+        },
+      })),
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime parameter missing or non-finite value',
+    )
+    expect(parameterValue(container, 'request · connect timeout')).toBe(expected)
+    expect(parameterValue(container, 'declared provider · connect timeout')).toBe(expected)
+    expect(parameterValue(container, 'declared provider · Exact timeout (s)')).toBe(expected)
+    expect(parameterValue(container, 'effective · max context')).toBe('131,072')
+  })
+
+  it.each([
+    { totalInput: 256, paired: { input_tokens: 256, cache_read_tokens: 128, sample_count: 1 } },
+    { totalInput: 1024, paired: { input_tokens: 256, cache_read_tokens: 128, sample_count: 1 } },
+    { totalInput: 1024, paired: null },
+  ])('shows paired cache usage separately from total input $totalInput', async ({ totalInput, paired }) => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValueOnce({
+      window_minutes: 30,
+      bucket_minutes: 5,
+      total_entries: 1,
+      total_error_entries: 0,
+      latency_buckets: [],
+      models: [
+        {
+          model_id: 'runtime_lane_cache',
+          entry_count: 1,
+          success_count: 1,
+          error_count: 0,
+          avg_tok_per_sec: 20,
+          p50_tok_per_sec: 20,
+          p95_tok_per_sec: 20,
+          avg_latency_ms: 500,
+          p95_latency_ms: 500,
+          total_input_tokens: totalInput,
+          cached_input: paired,
+          total_output_tokens: 64,
+          total_cache_read_tokens: 128,
+          total_cache_creation_tokens: 16,
+          total_cost_usd: 0.01,
+          avg_tool_calls_per_turn: 0,
+          total_tool_calls: 0,
+          top_tools: [],
+          recent_entries: [
+            {
+              ts_unix: 1780714051,
+              outcome: 'success',
+              stop_reason: 'stop',
+              turn_lane: 'text_only',
+              input_tokens: 256,
+              output_tokens: 64,
+              cache_read_tokens: 128,
+              cache_creation_tokens: 16,
+              latency_ms: 500,
+              cost_usd: 0.01,
+              tools_count: 0,
+              usage_reported: true,
+              telemetry_reported: true,
+            },
+          ],
+          buckets: [],
+        },
+      ],
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime_lane_cache') ?? false,
+      'runtime model metric card',
+    )
+
+    const button = Array.from(container.querySelectorAll('button'))
+      .find((el) => el.textContent?.includes('recent 1 turns'))
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await waitFor(
+      () => container.textContent?.includes('cache r/w') ?? false,
+      'recent entry cache column',
+    )
+    expect(container.textContent).toContain('128/16')
+    if (paired) {
+      expect(container.textContent).toContain('cached input 50.0% (128 / 256 tokens) · 1 reported samples')
+    } else {
+      expect(container.textContent).not.toContain('cached input 12.5%')
+      expect(container.textContent).not.toContain('reported samples')
+    }
+  })
+
+  it('shows one missing-data reason when recent cache tokens are absent', async () => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValueOnce({
+      window_minutes: 30,
+      bucket_minutes: 5,
+      total_entries: 1,
+      total_error_entries: 0,
+      latency_buckets: [],
+      models: [
+        {
+          model_id: 'runtime_lane_missing_cache',
+          entry_count: 1,
+          success_count: 1,
+          error_count: 0,
+          total_input_tokens: null,
+          total_output_tokens: null,
+          total_cache_read_tokens: null,
+          total_cache_creation_tokens: null,
+          total_cost_usd: null,
+          avg_tool_calls_per_turn: 0,
+          total_tool_calls: 0,
+          coverage_status: 'none',
+          primary_coverage_reason: 'missing_usage_and_inference',
+          top_tools: [],
+          recent_entries: [
+            {
+              ts_unix: 1780714051,
+              outcome: 'success',
+              stop_reason: 'stop',
+              turn_lane: 'text_only',
+              input_tokens: null,
+              output_tokens: null,
+              cache_read_tokens: null,
+              cache_creation_tokens: null,
+              latency_ms: null,
+              cost_usd: null,
+              tools_count: 0,
+              usage_reported: false,
+              telemetry_reported: true,
+              coverage_reason: 'missing_usage_and_inference',
+              coverage_stage: 'agentCore',
+            },
+          ],
+          buckets: [],
+        },
+      ],
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime_lane_missing_cache') ?? false,
+      'runtime model metric card',
+    )
+
+    const button = Array.from(container.querySelectorAll('button'))
+      .find((el) => el.textContent?.includes('recent 1 turns'))
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    await waitFor(
+      () => container.textContent?.includes('cache r/w') ?? false,
+      'recent entry cache column',
+    )
+    expect(container.textContent).toContain('no-usage')
+    expect(container.textContent).not.toContain('no-usage/no-usage')
+  })
+
+  it('renders the latest agentCore telemetry sample from the push-fed read model', async () => {
+    const { latestAgentCoreTelemetrySample } = await import('../agent-core-telemetry-store')
+    latestAgentCoreTelemetrySample.value = {
+      provider_id: 'runtime',
+      model_id: 'runtime',
+      ttfb_ms: 121.4,
+      total_duration_ms: 845.2,
+      throughput_tokens_per_s: 42.1,
+      cost_usd: 0.003,
+      status_kind: 'success',
+      recorded_at: 1_712_000_000.5,
+    }
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]') != null,
+      'agentCore latest telemetry sample line',
+    )
+
+    const line = container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]')?.textContent ?? ''
+    expect(line).toContain('agentCore latest · runtime')
+    expect(line).toContain('ttfb 121ms')
+    expect(line).toContain('total 845ms')
+    expect(line).toContain('42.1 tok/s')
+    expect(line).toContain('success')
+    latestAgentCoreTelemetrySample.value = null
+  })
+
+  it('omits the agentCore telemetry sample line before any push arrives', async () => {
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
+      'runtime binding',
+    )
+
+    expect(container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]')).toBeNull()
+  })
+})

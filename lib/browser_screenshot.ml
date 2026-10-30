@@ -1,0 +1,61 @@
+open Result.Syntax
+let persist ?native_options ~base_path ~keeper_name json =
+  let string key = match json with
+    | `Assoc fields -> (match List.assoc_opt key fields with
+        | Some (`String value) -> Ok value | _ -> Error ("screenshot missing " ^ key))
+    | _ -> Error "screenshot must be an object" in
+  let* encoded = string "data" in
+  let* url = string "url" in
+  let* title = string "title" in
+  let* tab_id = match json with
+    | `Assoc fields -> (match List.assoc_opt "tabId" fields with
+        | Some (`Int id) when id >= 0 -> Ok id | _ -> Error "screenshot missing tabId")
+    | _ -> Error "screenshot must be an object" in
+  let* connection_fields = match json with
+    (* Direct pixel persistence may omit routing metadata. Never invent an identity. *)
+    | `Assoc fields -> Browser_lane.connection_fields_of_json fields
+    | _ -> Error "screenshot must be an object" in
+  let* capture_fields=match native_options,json with
+    | None,`Assoc fields when not (List.mem_assoc "captureOptions" fields)
+        && (match List.assoc_opt "scope" fields with None|Some (`String "viewport") -> true | Some _ -> false) ->
+        Ok ["scope",`String "viewport"]
+    | Some expected,`Assoc fields when not (List.mem_assoc "viewport" fields)
+        && List.assoc_opt "scope" fields=Some (`String "page") ->
+        let* observed=Browser_lane.Capture.of_optional_json (List.assoc_opt "captureOptions" fields) in
+        if observed=Some expected then Ok ["scope",`String "page";
+          "captureOptions",Browser_lane.Capture.to_json expected]
+        else Error "native screenshot options do not match the original request"
+    | (Some _|None),_ -> Error "screenshot scope does not match the original request" in
+  let* observation_fields = match json with
+    | `Assoc fields ->
+      let* viewport_fields = match List.assoc_opt "viewport" fields with
+        | None -> Ok []
+        | Some value ->
+          let* viewport = Browser_lane.Pointer.viewport_of_json value in
+          Ok ["viewport", Browser_lane.Pointer.viewport_to_json viewport] in
+      let invalid_source = "invalid screenshot source" in
+      let* source_fields = match List.assoc_opt "source" fields with
+        | None -> Ok []
+        | Some (`String raw) ->
+          (match Browser_lane.Lane_name.of_wire raw with
+           | Some lane -> Ok ["source", `String (Browser_lane.Lane_name.to_wire lane)]
+           | None -> Error invalid_source)
+        | Some _ -> Error invalid_source in
+      Ok (source_fields @ viewport_fields)
+    | _ -> Error "screenshot must be an object" in
+  let max_bytes = Keeper_vision_tool.max_image_bytes () in
+  if String.length encoded > ((max_bytes + 2) / 3) * 4 then Error "screenshot exceeds Vision image size limit"
+  else
+    let* bytes = match Base64.decode encoded with Ok bytes -> Ok bytes | Error (`Msg _) -> Error "invalid screenshot base64" in
+    let* () = Keeper_vision_tool.validate_image_size bytes in
+    let* mime = Keeper_vision_tool.sniff_image_media_type bytes in
+    if mime <> "image/png" then Error "browser screenshot must be PNG"
+    else
+      let* width, height = match Keeper_image_dimensions.image_dimensions bytes with
+        | Some (width,height) when width > 0 && height > 0 -> Ok (width,height)
+        | _ -> Error "invalid screenshot dimensions" in
+      let* handle = Keeper_vision_tool.store_frame ~base_path ~keeper_name bytes in
+      Ok (`Assoc (connection_fields @ observation_fields @ capture_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
+        "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
+        "title", `String title; "width", `Int width; "height", `Int height;
+        "bytes", `Int (String.length bytes)]))

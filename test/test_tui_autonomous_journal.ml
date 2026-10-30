@@ -1,0 +1,142 @@
+open Alcotest
+
+module Log = Masc_tui_keeper_chat_log
+module Journal = Masc.Keeper_chat_event_log
+module E = Masc.Keeper_chat_events
+module Types = Masc_tui_types
+module Observer = Masc_tui_observer
+
+let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-journal-fixture" ~absolute_turn:7
+let source = Log.Autonomous_turn turn_ref
+
+let test_source_routes_and_decodes () =
+  let raw = Ids.Turn_ref.to_string turn_ref in
+  let page = `Assoc ["schema", `String "masc.keeper_turn_events.v1";
+    "turn_ref", `String raw; "events", `List []; "has_more", `Bool false;
+    "next_since_seq", `Null; "next_since_offset", `Int 0] in
+  (match Log.decode_events_page page with
+   | Ok decoded -> check bool "autonomous source retained" true (decoded.source = source)
+   | Error detail -> fail detail);
+  check string "autonomous URL has no operation query"
+    ("/api/v1/keepers/alpha/turns/" ^ raw ^ "/events?limit=20&since_seq=4")
+    (Log.journal_path ~encode_value:Fun.id ~keeper_name:"alpha" ~source
+       ~since_seq:(Journal.After_seq 4) ~since_offset:Journal.first_row ~limit:20);
+  check string "operation URL remains separate"
+    "/api/v1/keepers/alpha/chat/events?operation_id=op-1&since_seq=4&limit=20"
+    (Log.journal_path ~encode_value:Fun.id ~keeper_name:"alpha" ~source:(Log.Operation "op-1")
+       ~since_seq:(Journal.After_seq 4) ~since_offset:Journal.first_row ~limit:20);
+  let log = Log.create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
+  check bool "log retains typed provenance" true (Log.source log = source);
+  check string "display key joins persisted turn rows" raw (Log.request_id log)
+
+let test_notification_only_triggers_journal_read () =
+  let wire = "data: " ^ Yojson.Safe.to_string (`Assoc [
+    "type", `String "keeper_turn_stream_event"; "name", `String "alpha";
+    "turn_ref", `String (Ids.Turn_ref.to_string turn_ref);
+    "seq", `Int 2; "ts_unix", `Float 12.]) ^ "\n\n" in
+  let events = Observer.feed (Observer.create ()) wire in
+  (match events with
+   | [{Observer.decoded=Event (Keeper_turn_stream_frame {keeper="alpha"; turn_ref=observed; seq=2; at=12.}); _}] ->
+       check bool "exact autonomous turn observed" true (observed = turn_ref)
+   | _ -> fail "autonomous journal growth was not decoded");
+  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
+  let line seq ts event : Journal.journaled_event = {seq; ts; event} in
+  let lines = [line 0 10. (E.Run_started {run_id="autonomous-run"; thread_id="keeper:alpha"});
+    line 1 11. (E.Text_delta {text="first"; response=Unobserved_scope (None)})] in
+  ignore (Types.turn_log_add_journaled log lines);
+  Types.hold_settled_log state log;
+  (match Types.journal_follow_for_source state ~keeper_name:"alpha" ~source
+      ~seq:(Some 2) ~at:12. with
+   | Types.Follow_read {since_seq=Journal.After_seq 1; _} -> ()
+   | _ -> fail "notification did not resume after the last journal position");
+  check int "notice itself appended no content" 2 (List.length (Log.entries log.tl_log));
+  ignore (Types.turn_log_add_journaled log (lines @ [line 2 12. (E.Text_delta {text=" second"; response=Unobserved_scope (None)})]));
+  let texts = Log.entries log.tl_log |> List.filter_map (fun entry ->
+    match entry.Log.delta with
+    | Masc_tui_keeper_chat_live.Text { text; response = _ } -> Some text
+    | _ -> None) in
+  check (list string) "journal overlap keeps ordered text once" ["first"; " second"] texts
+
+let test_cold_open_discovery () =
+  let running : Masc.Tui_decode.keeper_turn_row =
+    {ktr_keeper_name="alpha"; ktr_chat_control_token=None;
+     ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=10.;
+       interrupt_token="stop-token"; turn_ref=Some turn_ref; preview=None}} in
+  check bool "current turn discovered without observer event" true
+    (Types.autonomous_journal_candidates ~keeper_name:"alpha" [running] = [source, 10.]);
+  check int "other keeper excluded" 0
+    (List.length (Types.autonomous_journal_candidates ~keeper_name:"other" [running]));
+  let json = `List [`Assoc ["role", `String "assistant";
+    "autonomous_turn", `Assoc ["turn_id", `String (Ids.Turn_ref.to_string turn_ref)];
+    "content", `String "done"; "ts", `Float 12. ]] in
+  (match Masc_tui_keeper_chat_history.rows_of_json json with
+   | Error detail -> fail detail
+   | Ok decoded ->
+       check bool "history names its autonomous journal" true
+         (List.mem source (List.filter_map Types.journal_source_of_history decoded.rows)));
+  check int "held source not fetched twice" 0
+    (List.length (Types.journal_source_fetch_targets ~keeper_name:"alpha" ~held:["alpha", source]
+       ~unavailable:[] [source, 10.; source, 12.]))
+
+let test_autonomous_checkpoint_closes_its_source () =
+  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
+  Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
+  Types.turn_log_add ~now:11. log ~seq:(Some 1)
+    (Masc_tui_keeper_chat_live.Reply_details {terminal_stream_scope = None; reply="";
+      turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+      turn_ref=Ids.Turn_ref.to_string turn_ref});
+  Types.turn_log_add ~now:12. log ~seq:(Some 2) Masc_tui_keeper_chat_live.Run_finished;
+  Log.commit log.tl_log;
+  Types.hold_settled_log state log;
+  check bool "autonomous checkpoint has ended" true
+    (Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Stream_ended);
+  check bool "recorded end owns the completed turn" true (Types.turn_log_holds_the_turn log);
+  check bool "not an open operation awaiting continuation" false
+    (Masc_tui_keeper_chat_transcript.awaiting_continuation log.tl_transcript);
+  (match Types.journal_follow_for_source state ~keeper_name:"alpha"
+      ~source ~seq:None ~at:13. with
+   | Types.Follow_nothing -> ()
+   | _ -> fail "ended autonomous checkpoint requested another journal read")
+
+let test_history_closes_only_matching_autonomous_progress () =
+  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
+  Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
+  Types.hold_settled_log state log;
+  let raw = Ids.Turn_ref.to_string turn_ref in
+  let row : Types.msg_entry = {
+    me_keeper_name="alpha"; me_role=Message_autonomous;
+    me_identity=Persisted_row "autonomous-final"; me_turn_phase=Turn_output;
+    me_turn_sequence=None; me_operation_seq=0; me_text="done";
+    me_images=[]; me_media=[]; me_memory_summary=None;
+    me_journal=[]; me_memory_pass=Masc_tui_message_layout.No_pass;
+    me_gate=None; me_submitted_at=None; me_tool_block=None; me_skill_block=[];
+    me_timestamp=""; me_request_id=raw; me_execution_source=Some (Log.Operation raw);
+    me_at=12. } in
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- [row];
+  check bool "equal display id from another source cannot close progress" false
+    (Types.observed_log_has_ended state log);
+  state.msg_loaded <- [{row with me_execution_source=Some source}];
+  check bool "durable autonomous output closes visual progress" true
+    (Types.observed_log_has_ended state log);
+  check bool "history never settles the partial journal" false (Types.turn_log_holds_the_turn log);
+  (match Types.journal_follow_for_source state ~keeper_name:"alpha" ~source ~seq:(Some 2) ~at:13. with
+   | Types.Follow_read _ -> ()
+   | _ -> fail "visual closure retired journal replay");
+  let direct = {row with me_role=Message_keeper} in
+  let autonomous = {row with me_execution_source=Some source} in
+  check int "same serialized ids retain separate timeline turns" 2
+    (List.length (Types.chat_timeline_slots [direct; autonomous]));
+  check bool "distinct sources do not share a rail" true
+    (List.map snd (Types.mark_turn_edges [direct; autonomous]) = [Types.Turn_alone; Types.Turn_alone])
+
+let () =
+  run "TUI autonomous journal"
+    ["consumer", [test_case "typed history closes visuals without retiring replay" `Quick test_history_closes_only_matching_autonomous_progress;
+      test_case "typed sources select separate routes" `Quick test_source_routes_and_decodes;
+      test_case "observer only triggers ordered journal reads" `Quick test_notification_only_triggers_journal_read;
+      test_case "cold open discovers current and historical journals" `Quick test_cold_open_discovery;
+      test_case "autonomous checkpoint closes its journal source" `Quick test_autonomous_checkpoint_closes_its_source]]

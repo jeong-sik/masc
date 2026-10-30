@@ -1,0 +1,13 @@
+# receipt: opam-pin-external-deps.sh --check (task-1535 local switch drift probe)
+branch=polish/task-1535-cohttp-eio-floor head=51aa01684964e05c7a472e07a65f9c0acf4ba99e
+utc=2026-09-11T20:57:27Z
+% bash scripts/opam-pin-external-deps.sh --check
+[opam-pin] ERROR: OCaml 5.5.0 detected; MASC requires exactly 5.5.1
+[opam-pin] repair: eval "$(opam env --switch=5.5.1 --set-switch)"
+[opam-pin] continuing to the pin comparison; the switch below is the drifted one
+[opam-pin] the active switch does not carry these pins:
+[opam-pin]   ocaml-msx: not pinned; expected https://github.com/jeong-sik/ocaml-msx.git#870e61063e08ca4a0b15b939cb72a1c11aade1d3
+[opam-pin]   cohttp-eio: not pinned; expected https://github.com/jeong-sik/ocaml-cohttp.git#45ecbe94b2a6e9a49e5ce11a9f69127833814d46
+[opam-pin] the installed build is not the one this repo expects
+[opam-pin] repair: bash scripts/opam-pin-external-deps.sh --install
+exit=1

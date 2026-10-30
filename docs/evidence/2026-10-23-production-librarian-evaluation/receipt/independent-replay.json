@@ -1,0 +1,53 @@
+{
+  "source_state": "All extracted source/dataset bytes match recorded commit blobs",
+  "source_commit": "9ed280ba2a16b5f82e58b3201eaddb9b77560a6a",
+  "all_extracted_sources_match_commit": true,
+  "local_warning_checks": {
+    "actual_evaluator_and_runtime_fragments": "+4+32+69; warnerror +a",
+    "ports_and_fixture": "+a-4-27-32-40-41-42-70; no whole module typing claim"
+  },
+  "captured_at_utc": "2026-10-23T12:29:43.808380+00:00",
+  "script_sha256": "14a8613a1bb5529d94e13e444415383ca84d9b008d950940c362544ba4551306",
+  "cases_sha256": "601cbc8a6cd35af6ba150c3b27889fde1156361e2ec90f729e33cb9201214b35",
+  "compile_argv": [
+    "ocamlfind",
+    "ocamlc",
+    "-package",
+    "yojson,digestif.ocaml,ppx_deriving_yojson.runtime",
+    "-linkpkg",
+    "-ppx",
+    "/Users/dancer/.opam/5.5.1/lib/ppx_deriving/ppx_deriving /Users/dancer/.opam/5.5.1/lib/ppx_deriving_yojson/ppx_deriving_yojson.cma",
+    "-w",
+    "+a-4-27-32-40-41-42-70",
+    "-o",
+    "probe.exe",
+    "probe.ml"
+  ],
+  "compile_exit": 0,
+  "compile_stdout": "",
+  "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
+  "ports": [
+    "SDK Checkpoint.message_to_json delegates to actual capture codec (not real checkpoint bytes)",
+    "Memory fact/Goal/Task external domain codecs are opaque JSON ports",
+    "Turn boundary/range authority and snapshot capture/save/load/restore are explicit typed fixture ports; no actual snapshot correctness tested",
+    "Prompt renderer/preflight/provider run_pass are explicit SDK ports surrounding the actual preparation capture and actual inference wrapper",
+    "Provider request-wire observation is unit; generate/judge are injected effects"
+  ],
+  "actual": [
+    "Entire evaluator ML/MLI",
+    "Entire capture codec",
+    "Entire unread identity/validation module",
+    "Atom annotation/classification/digest fragments",
+    "Actual prompt preparation capture assignment and infer_working_state wrapper",
+    "Actual report type codecs and judge_request_for"
+  ],
+  "scope": "Source-fragment bytecode execution only. No paid provider, native MASC, actual snapshot/range authority, full module typing, Dune or CI.",
+  "run_argv": [
+    "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-38062-review-evidence-20261023-c8vaok33/production-evaluation-public-replay/probe.exe",
+    "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-38062-review-evidence-20261023-c8vaok33/production-evaluation-public-replay/executed-source/benchmarks/data/librarian_production_synthetic.json",
+    "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-38062-review-evidence-20261023-c8vaok33/production-evaluation-public-replay/observations.json"
+  ],
+  "run_exit": 0,
+  "run_stdout": "63 assertions PASS\n",
+  "run_stderr": ""
+}

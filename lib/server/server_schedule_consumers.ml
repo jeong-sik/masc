@@ -1,0 +1,1492 @@
+(* TEL-OK: concrete wake-delivery receipts are returned to [Schedule_runner];
+   the server maintenance loop logs aggregate dispatch counts for runtime
+   telemetry. *)
+
+let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
+let lane_act_handed_over_kind = "masc.lane_act.handed_over"
+let keeper_event_queue_label = "keeper_event_queue"
+let reaction_ledger_recorded_label = "recorded"
+let reaction_ledger_record_failed_label = "record_failed"
+
+open Result.Syntax
+
+let terminal_dispatch_result result =
+  Result.map_error
+    (fun detail -> Schedule_runner.Terminal_dispatch_rejection detail)
+    result
+;;
+
+let unsupported_payload_labels ~phase = [ "phase", phase ]
+
+let record_unsupported_payload_dispatch _request rejection =
+  match rejection with
+  | Schedule_payload_projection.Dispatch_unsupported_kind _ ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_schedule_payload_unsupported_total
+      ~labels:(unsupported_payload_labels ~phase:"dispatch")
+      ()
+  | Schedule_payload_projection.Dispatch_invalid_payload _
+  | Schedule_payload_projection.Dispatch_invalid_supported_payload _ -> ()
+;;
+
+(* Consumer-local: rejects blank strings, so only the raw field lookup is
+   shared with the schedule domain. *)
+let string_field name fields =
+  let* value = Schedule_domain.assoc_field name fields in
+  match value with
+  | `String value when String.trim value <> "" -> Ok value
+  | `String _ -> Error (name ^ " must be non-empty")
+  | _ -> Error ("expected string field: " ^ name)
+;;
+
+let optional_string_field name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) ->
+    let value = String.trim value in
+    if String.equal value "" then Ok None else Ok (Some value)
+  | Some _ -> Error ("expected string field: " ^ name)
+;;
+
+let keeper_name_field name fields =
+  let* value = string_field name fields in
+  if Schedule_supported_kinds.valid_keeper_wake_target_name value
+  then Ok value
+  else Error (Schedule_supported_kinds.keeper_wake_target_name_error ~field:name)
+;;
+
+let keeper_queue_urgency_of_schedule_urgency = function
+  | Schedule_supported_kinds.Keeper_wake_immediate -> Keeper_event_queue.Immediate
+  | Schedule_supported_kinds.Keeper_wake_normal -> Keeper_event_queue.Normal
+  | Schedule_supported_kinds.Keeper_wake_low -> Keeper_event_queue.Low
+;;
+
+type keeper_wake_reaction_ledger_status =
+  | Keeper_wake_reaction_ledger_recorded
+  | Keeper_wake_reaction_ledger_record_failed of string
+
+let keeper_wake_reaction_ledger_status_to_string = function
+  | Keeper_wake_reaction_ledger_recorded -> reaction_ledger_recorded_label
+  | Keeper_wake_reaction_ledger_record_failed _ -> reaction_ledger_record_failed_label
+;;
+
+let keeper_wake_reaction_ledger_error = function
+  | Keeper_wake_reaction_ledger_recorded -> None
+  | Keeper_wake_reaction_ledger_record_failed reason -> Some reason
+;;
+
+let keeper_wake_reaction_ledger_status_of_fields fields =
+  let* status = optional_string_field "reaction_ledger_status" fields in
+  let* detail = optional_string_field "reaction_ledger_error" fields in
+  match status, detail with
+  | None, None -> Ok None
+  | Some value, None when String.equal value reaction_ledger_recorded_label ->
+    Ok (Some Keeper_wake_reaction_ledger_recorded)
+  | Some value, Some reason
+    when String.equal value reaction_ledger_record_failed_label ->
+    Ok (Some (Keeper_wake_reaction_ledger_record_failed reason))
+  | Some value, _
+    when not
+      (String.equal value reaction_ledger_recorded_label
+       || String.equal value reaction_ledger_record_failed_label) ->
+    Error ("unsupported reaction_ledger_status: " ^ value)
+  | None, Some _ ->
+    Error "reaction_ledger_error requires reaction_ledger_status=record_failed"
+  | Some value, Some _
+    when String.equal value reaction_ledger_recorded_label ->
+    Error "reaction_ledger_status=recorded requires reaction_ledger_error=null"
+  | Some value, None
+    when String.equal value reaction_ledger_record_failed_label ->
+    Error "reaction_ledger_status=record_failed requires reaction_ledger_error"
+  | Some _, _ -> Error "noncanonical reaction ledger receipt"
+;;
+
+let keeper_wake_reaction_ledger_status_json_fields = function
+  | None -> [ "reaction_ledger_status", `Null; "reaction_ledger_error", `Null ]
+  | Some status ->
+    [ "reaction_ledger_status"
+    , `String (keeper_wake_reaction_ledger_status_to_string status)
+    ; ( "reaction_ledger_error"
+      , match keeper_wake_reaction_ledger_error status with
+        | None -> `Null
+        | Some reason -> `String reason )
+    ]
+;;
+
+type keeper_wake_occurrence_status =
+  | Keeper_wake_awaiting_ack
+  | Keeper_wake_already_acked
+  | Keeper_wake_already_failed
+  | Keeper_wake_already_cancelled
+
+type keeper_wake_result_delivery_policy =
+  | Keeper_wake_result_delivery_none
+  | Keeper_wake_result_delivery_reply_to_origin
+
+let keeper_wake_result_delivery_policy_to_string = function
+  | Keeper_wake_result_delivery_none -> "none"
+  | Keeper_wake_result_delivery_reply_to_origin -> "reply_to_origin"
+;;
+
+let keeper_wake_result_delivery_policy_of_fields fields =
+  let* policy = optional_string_field "result_delivery_policy" fields in
+  match policy with
+  | None -> Ok Keeper_wake_result_delivery_none
+  | Some "none" -> Ok Keeper_wake_result_delivery_none
+  | Some "reply_to_origin" -> Ok Keeper_wake_result_delivery_reply_to_origin
+  | Some value -> Error ("unsupported result_delivery_policy: " ^ value)
+;;
+
+let keeper_wake_occurrence_status_to_string = function
+  | Keeper_wake_awaiting_ack -> "awaiting_ack"
+  | Keeper_wake_already_acked -> "already_acked"
+  | Keeper_wake_already_failed -> "already_failed"
+  | Keeper_wake_already_cancelled -> "already_cancelled"
+;;
+
+let keeper_wake_occurrence_status_of_string = function
+  | "awaiting_ack" -> Ok Keeper_wake_awaiting_ack
+  | "already_acked" -> Ok Keeper_wake_already_acked
+  | "already_failed" -> Ok Keeper_wake_already_failed
+  | "already_cancelled" -> Ok Keeper_wake_already_cancelled
+  | value -> Error ("unsupported occurrence_status: " ^ value)
+;;
+
+type keeper_wake_activation_deferred_reason =
+  | Keeper_wake_activation_lifecycle_denied of string
+  | Keeper_wake_activation_autoboot_disabled
+  | Keeper_wake_activation_proactive_disabled
+  | Keeper_wake_activation_shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+  | Keeper_wake_activation_owner_unknown of string
+  | Keeper_wake_activation_owner_not_current of string
+  | Keeper_wake_activation_unregistered
+  | Keeper_wake_activation_not_running of Keeper_state_machine.phase
+
+type keeper_wake_activation_outcome =
+  | Keeper_wake_activation_signaled
+  | Keeper_wake_activation_deferred of keeper_wake_activation_deferred_reason
+  | Keeper_wake_activation_not_required
+
+let keeper_wake_activation_deferred_reason_fields = function
+  | Keeper_wake_activation_lifecycle_denied detail ->
+    "lifecycle_denied", Some detail
+  | Keeper_wake_activation_autoboot_disabled -> "autoboot_disabled", None
+  | Keeper_wake_activation_proactive_disabled -> "proactive_disabled", None
+  | Keeper_wake_activation_shutdown_fenced operation_id ->
+    ( "shutdown_fenced"
+    , Some (Keeper_shutdown_types.Operation_id.to_string operation_id) )
+  | Keeper_wake_activation_owner_unknown detail -> "owner_unknown", Some detail
+  | Keeper_wake_activation_owner_not_current detail ->
+    "owner_not_current", Some detail
+  | Keeper_wake_activation_unregistered -> "unregistered", None
+  | Keeper_wake_activation_not_running phase ->
+    "not_running", Some (Keeper_state_machine.phase_to_string phase)
+;;
+
+let keeper_wake_activation_deferred_reason_of_fields fields =
+  let* reason = string_field "activation_reason" fields in
+  let* detail = optional_string_field "activation_detail" fields in
+  match reason, detail with
+  | "lifecycle_denied", Some detail ->
+    Ok (Keeper_wake_activation_lifecycle_denied detail)
+  | "autoboot_disabled", None -> Ok Keeper_wake_activation_autoboot_disabled
+  | "proactive_disabled", None -> Ok Keeper_wake_activation_proactive_disabled
+  | "shutdown_fenced", Some operation_id ->
+    Keeper_shutdown_types.Operation_id.of_string operation_id
+    |> Result.map (fun operation_id ->
+      Keeper_wake_activation_shutdown_fenced operation_id)
+  | "owner_unknown", Some detail ->
+    Ok (Keeper_wake_activation_owner_unknown detail)
+  | "owner_not_current", Some detail ->
+    Ok (Keeper_wake_activation_owner_not_current detail)
+  | "unregistered", None -> Ok Keeper_wake_activation_unregistered
+  | "not_running", Some phase ->
+    (match Keeper_state_machine.phase_of_string phase with
+     | Some phase -> Ok (Keeper_wake_activation_not_running phase)
+     | None -> Error ("unsupported activation_detail phase: " ^ phase))
+  | ( "lifecycle_denied"
+    | "shutdown_fenced"
+    | "owner_unknown"
+    | "owner_not_current"
+    | "not_running" ), None ->
+    Error ("activation_detail is required for activation_reason: " ^ reason)
+  | ( "autoboot_disabled"
+    | "proactive_disabled"
+    | "unregistered" ), Some _ ->
+    Error ("activation_detail must be null for activation_reason: " ^ reason)
+  | reason, _ -> Error ("unsupported activation_reason: " ^ reason)
+;;
+
+let keeper_wake_activation_outcome_of_fields fields =
+  let* status = string_field "activation_status" fields in
+  let* reason = optional_string_field "activation_reason" fields in
+  let* detail = optional_string_field "activation_detail" fields in
+  match status, reason, detail with
+  | "signaled", None, None -> Ok Keeper_wake_activation_signaled
+  | "not_required", None, None -> Ok Keeper_wake_activation_not_required
+  | "deferred", Some _, _ ->
+    let* reason = keeper_wake_activation_deferred_reason_of_fields fields in
+    Ok (Keeper_wake_activation_deferred reason)
+  | ("signaled" | "not_required"), _, _ ->
+    Error
+      ("activation_status=" ^ status
+       ^ " requires activation_reason=null and activation_detail=null")
+  | "deferred", None, _ ->
+    Error "activation_status=deferred requires activation_reason"
+  | value, _, _ -> Error ("unsupported activation_status: " ^ value)
+;;
+
+let keeper_wake_activation_outcome_json_fields = function
+  | Keeper_wake_activation_signaled ->
+    [ "activation_status", `String "signaled"
+    ; "activation_reason", `Null
+    ; "activation_detail", `Null
+    ]
+  | Keeper_wake_activation_not_required ->
+    [ "activation_status", `String "not_required"
+    ; "activation_reason", `Null
+    ; "activation_detail", `Null
+    ]
+  | Keeper_wake_activation_deferred reason ->
+    let reason, detail = keeper_wake_activation_deferred_reason_fields reason in
+    [ "activation_status", `String "deferred"
+    ; "activation_reason", `String reason
+    ; ( "activation_detail"
+      , match detail with
+        | None -> `Null
+        | Some detail -> `String detail )
+    ]
+;;
+
+type dispatch_receipt =
+  | Keeper_wake_enqueued of
+      { keeper_name : string
+      ; schedule_instance_id : string
+      ; schedule_id : string
+      ; urgency : string
+      ; post_id : string
+      ; queue : string
+      ; stimulus : string
+      ; stimulus_id : string option
+      ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
+      ; result_delivery_policy : keeper_wake_result_delivery_policy
+      ; occurrence_status : keeper_wake_occurrence_status
+      ; activation_outcome : keeper_wake_activation_outcome
+      }
+  | Lane_act_handed_over of
+      { installation_id : string
+      ; instance_id : string
+      ; request_id : string
+      ; schedule_instance_id : string
+      ; schedule_id : string
+      }
+
+let dispatch_receipt_of_detail = function
+  | `Assoc fields ->
+    let* kind = string_field "kind" fields in
+    if String.equal kind lane_act_handed_over_kind
+    then
+      let* installation_id = string_field "installation_id" fields in
+      let* instance_id = string_field "instance_id" fields in
+      let* request_id = string_field "request_id" fields in
+      let* schedule_instance_id = string_field "schedule_instance_id" fields in
+      let* schedule_id = string_field "schedule_id" fields in
+      Ok
+        (Lane_act_handed_over
+           { installation_id; instance_id; request_id; schedule_instance_id; schedule_id })
+    else if String.equal kind keeper_wake_enqueued_kind
+    then
+      let* keeper_name = keeper_name_field "keeper_name" fields in
+      let* schedule_instance_id = string_field "schedule_instance_id" fields in
+      let* schedule_id = string_field "schedule_id" fields in
+      let* urgency = string_field "urgency" fields in
+      let* post_id = string_field "post_id" fields in
+      let* queue = string_field "queue" fields in
+      let* stimulus = string_field "stimulus" fields in
+      let* stimulus_id = optional_string_field "stimulus_id" fields in
+      let* reaction_ledger_status =
+        keeper_wake_reaction_ledger_status_of_fields fields
+      in
+      let* result_delivery_policy =
+        keeper_wake_result_delivery_policy_of_fields fields
+      in
+      let* occurrence_status =
+        let* value = string_field "occurrence_status" fields in
+        keeper_wake_occurrence_status_of_string value
+      in
+      let* activation_outcome =
+        keeper_wake_activation_outcome_of_fields fields
+      in
+      let* () =
+        match occurrence_status, activation_outcome with
+        | Keeper_wake_awaiting_ack,
+          ( Keeper_wake_activation_signaled
+          | Keeper_wake_activation_deferred _ ) ->
+          Ok ()
+        | Keeper_wake_awaiting_ack, Keeper_wake_activation_not_required ->
+          Error "awaiting_ack occurrence requires an activation outcome"
+        | ( Keeper_wake_already_acked
+          | Keeper_wake_already_failed
+          | Keeper_wake_already_cancelled ),
+          Keeper_wake_activation_not_required ->
+          Ok ()
+        | ( Keeper_wake_already_acked
+          | Keeper_wake_already_failed
+          | Keeper_wake_already_cancelled ),
+          _ ->
+          Error "terminal occurrence requires activation_status=not_required"
+      in
+      Ok
+        (Keeper_wake_enqueued
+           { keeper_name
+           ; schedule_instance_id
+           ; schedule_id
+           ; urgency
+           ; post_id
+           ; queue
+           ; stimulus
+           ; stimulus_id
+           ; reaction_ledger_status
+           ; result_delivery_policy
+           ; occurrence_status
+           ; activation_outcome
+           })
+    else Error ("unsupported schedule dispatch receipt kind: " ^ kind)
+  | _ -> Error "schedule dispatch receipt detail must be an object"
+;;
+
+let dispatch_receipt_to_yojson = function
+  | Keeper_wake_enqueued
+      { keeper_name
+      ; schedule_instance_id
+      ; schedule_id
+      ; urgency
+      ; post_id
+      ; queue
+      ; stimulus
+      ; stimulus_id
+      ; reaction_ledger_status
+      ; result_delivery_policy
+      ; occurrence_status
+      ; activation_outcome
+      } ->
+    `Assoc
+      ([ "kind", `String keeper_wake_enqueued_kind
+       ; "queue", `String queue
+       ; "stimulus", `String stimulus
+       ; ( "stimulus_id"
+         , match stimulus_id with
+           | None -> `Null
+           | Some value -> `String value )
+       ; "keeper_name", `String keeper_name
+       ; "schedule_instance_id", `String schedule_instance_id
+       ; "schedule_id", `String schedule_id
+       ; "urgency", `String urgency
+       ; "post_id", `String post_id
+       ; ( "result_delivery_policy"
+         , `String
+             (keeper_wake_result_delivery_policy_to_string
+                result_delivery_policy) )
+       ; ( "occurrence_status"
+         , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
+       ]
+       @ keeper_wake_activation_outcome_json_fields activation_outcome
+       @ keeper_wake_reaction_ledger_status_json_fields reaction_ledger_status)
+  | Lane_act_handed_over
+      { installation_id; instance_id; request_id; schedule_instance_id; schedule_id } ->
+    `Assoc
+      [ "kind", `String lane_act_handed_over_kind
+      ; "installation_id", `String installation_id
+      ; "instance_id", `String instance_id
+      ; "request_id", `String request_id
+      ; "schedule_instance_id", `String schedule_instance_id
+      ; "schedule_id", `String schedule_id
+      ]
+;;
+
+let accepts request =
+  match Schedule_payload_projection.dispatch_view_detailed request with
+  | Ok (_kind, _payload) -> Ok ()
+  | Error rejection ->
+    record_unsupported_payload_dispatch request rejection;
+    Error (Schedule_payload_projection.dispatch_rejection_message rejection)
+;;
+
+let body_keeper_name payload =
+  let* keeper_name =
+    Schedule_payload_projection.body_required_string payload "keeper_name"
+  in
+  if Schedule_supported_kinds.valid_keeper_wake_target_name keeper_name
+  then Ok keeper_name
+  else
+    Error
+      (Schedule_supported_kinds.keeper_wake_target_name_error ~field:"keeper_name")
+;;
+
+let body_keeper_wake_urgency payload =
+  let* raw = Schedule_payload_projection.body_optional_string payload "urgency" in
+  match raw with
+  | None -> Ok None
+  | Some value ->
+    let* urgency = Schedule_supported_kinds.keeper_wake_urgency_of_string value in
+    Ok (Some urgency)
+;;
+
+let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
+  try
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+    Keeper_wake_reaction_ledger_recorded
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Keeper_wake_reaction_ledger_record_failed
+      (Printf.sprintf
+         "failed to persist keeper reaction ledger stimulus: %s"
+         (Printexc.to_string exn))
+;;
+
+let ensure_keeper_wake_stimulus_recorded
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+  =
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Ok (Keeper_reaction_ledger.Evidence_complete { stimulus_seen = true; _ }) ->
+    Keeper_wake_reaction_ledger_recorded
+  | Ok (Keeper_reaction_ledger.Evidence_complete { stimulus_seen = false; _ }) ->
+    record_keeper_wake_stimulus ~base_path ~keeper_name stimulus
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined { first_reason; _ }) ->
+    Keeper_wake_reaction_ledger_record_failed
+      (Printf.sprintf
+         "scheduled keeper reaction ledger evidence is quarantined: %s"
+         (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
+  | Error error ->
+    Keeper_wake_reaction_ledger_record_failed
+      (Printf.sprintf
+         "failed to read scheduled keeper reaction ledger evidence: %s"
+         (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+            error))
+;;
+
+type keeper_wake_acceptance =
+  | Wake_required
+  | Already_pending of string
+  | Already_acked
+  | Already_failed of string
+  | Already_cancelled
+
+let activation_deferred_of_paused_dead = function
+  | Keeper_activation_readiness.Persisted_lifecycle_denied denial ->
+    Keeper_wake_activation_lifecycle_denied
+      (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+  | Keeper_activation_readiness.Runtime_terminal phase ->
+    Keeper_wake_activation_lifecycle_denied
+      ("runtime_" ^ Keeper_state_machine.phase_to_string phase)
+;;
+
+(* What the metadata store said about the Keeper a due occurrence would
+   wake, read once before the durable queue is touched. *)
+type owner_meta_read =
+  | Owner_meta_answered of (Keeper_meta_contract.keeper_meta, string) result
+      (* [Ok]: the store holds this Keeper, overlaid with its declaration.
+         [Error]: the file exists but the store or the overlay failed on
+         it; the string is that failure. *)
+  | Owner_meta_not_current of string
+      (* The store holds a file under this name that this binary does not
+         decode as current. Boot re-materialises the Keeper from its
+         declaration, so the stimulus is enqueued and consumed then; the
+         string is the decode detail. *)
+  | Owner_meta_unavailable of string
+      (* The store did not answer; the string is that failure. *)
+
+(* Whether the store was consulted for this occurrence. *)
+type owner_meta_preflight =
+  | Owner_meta_consulted of owner_meta_read
+  | Owner_meta_not_consulted
+      (* The occurrence is already terminal: activation is not required
+         and its evidence reconciles without the store. *)
+
+let owner_absent_rejection keeper_name =
+  Printf.sprintf
+    "scheduled keeper wake target is absent from the keeper store keeper=%s"
+    keeper_name
+;;
+
+(* No file under this name rejects this occurrence: no Keeper can consume
+   the stimulus, so nothing is enqueued. A recurring schedule keeps its next
+   occurrence, when the owner may exist. A file the store holds but cannot
+   decode as current, and a store that did not answer, keep the stimulus with
+   a typed deferral rather than declaring the owner absent. *)
+let read_owner_meta config keeper_name =
+  match
+    Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
+      Keeper_meta_store.read_effective_meta_presence config keeper_name)
+  with
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Ok
+      (Owner_meta_unavailable
+         ("durable keeper metadata read failed: "
+          ^ Executor_pool_ref.strict_submit_error_to_string
+              (Executor_pool_ref.Work_failed failure)))
+  | Error
+      ((Executor_pool_ref.Pool_unavailable
+       | Executor_pool_ref.Caller_not_in_eio
+       | Executor_pool_ref.Submission_failed _) as error) ->
+    Ok
+      (Owner_meta_unavailable
+         ("durable keeper metadata read unavailable: "
+          ^ Executor_pool_ref.strict_submit_error_to_string error))
+  | Ok (Ok Keeper_meta_store.Meta_absent) ->
+    Error
+      (Schedule_runner.Occurrence_dispatch_rejection
+         (owner_absent_rejection keeper_name))
+  | Ok (Ok (Keeper_meta_store.Meta_present meta)) ->
+    Ok (Owner_meta_answered (Ok meta))
+  | Ok (Ok (Keeper_meta_store.Meta_not_current detail)) ->
+    Ok (Owner_meta_not_current detail)
+  | Ok (Error detail) -> Ok (Owner_meta_answered (Error detail))
+;;
+
+let activation_outcome_for_required_wake ~base_path ~keeper_name owner_meta =
+  let classify meta_result =
+    let admission =
+      Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
+    in
+    let runtime =
+      Keeper_activation_readiness.owner_runtime_of_registry_entry
+        (Keeper_registry.get ~base_path keeper_name)
+    in
+    (match admission with
+     | Error error ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_owner_unknown
+            (Keeper_owner_registry.lookup_error_to_string error))
+     | Ok shutdown_operation_id ->
+    (match
+       Keeper_activation_readiness.classify_durable_demand_execution
+         ~shutdown_operation_id
+         ~runtime
+         meta_result
+     with
+     | Keeper_activation_readiness.Retained_disabled
+         Keeper_activation_readiness.Retained_autoboot_disabled ->
+       Keeper_wake_activation_deferred
+         Keeper_wake_activation_autoboot_disabled
+     | Keeper_activation_readiness.Retained_disabled
+         Keeper_activation_readiness.Retained_proactive_disabled ->
+       Keeper_wake_activation_deferred
+         Keeper_wake_activation_proactive_disabled
+     | Keeper_activation_readiness.Paused_dead reason ->
+       Keeper_wake_activation_deferred
+         (activation_deferred_of_paused_dead reason)
+     | Keeper_activation_readiness.Shutdown_fenced operation_id ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_shutdown_fenced operation_id)
+     | Keeper_activation_readiness.Unknown detail ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_owner_unknown detail)
+     | Keeper_activation_readiness.Recoverable ->
+       (match runtime with
+        | Keeper_activation_readiness.Owner_unregistered ->
+          Keeper_wake_activation_deferred Keeper_wake_activation_unregistered
+        | Keeper_activation_readiness.Owner_registered { phase; _ } ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_not_running phase))
+     | Keeper_activation_readiness.Executable ->
+       (match
+          Keeper_registry.wakeup_running
+            ~intent:Keeper_registry.Scheduled_signal
+            ~base_path
+            keeper_name
+        with
+        | Keeper_registry.Signaled -> Keeper_wake_activation_signaled
+        | Keeper_registry.Deferred_unregistered ->
+          Keeper_wake_activation_deferred Keeper_wake_activation_unregistered
+        | Keeper_registry.Deferred_not_running phase ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_not_running phase)
+        | Keeper_registry.Deferred_lifecycle denial ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_lifecycle_denied
+               (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))))
+  in
+  match owner_meta with
+  | Owner_meta_unavailable detail ->
+    Keeper_wake_activation_deferred (Keeper_wake_activation_owner_unknown detail)
+  | Owner_meta_not_current detail ->
+    Keeper_wake_activation_deferred
+      (Keeper_wake_activation_owner_not_current detail)
+  | Owner_meta_answered meta_result -> classify meta_result
+;;
+
+let log_activation_outcome ~schedule_id ~keeper_name = function
+  | Keeper_wake_activation_signaled
+  | Keeper_wake_activation_not_required -> ()
+  | Keeper_wake_activation_deferred reason ->
+    let reason, detail = keeper_wake_activation_deferred_reason_fields reason in
+    (match detail with
+     | None ->
+       Log.Keeper.info
+         "schedule stimulus retained without owner activation schedule_id=%s keeper=%s reason=%s"
+         schedule_id
+         keeper_name
+         reason
+     | Some detail ->
+       Log.Keeper.info
+         "schedule stimulus retained without owner activation schedule_id=%s keeper=%s reason=%s detail=%s"
+         schedule_id
+         keeper_name
+         reason
+         detail)
+;;
+
+let retryable_dispatch_failure detail =
+  Error (Schedule_runner.Retryable_dispatch_failure detail)
+;;
+
+let accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+      acceptance
+  =
+  match
+    ensure_keeper_wake_stimulus_recorded
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+  with
+  | Keeper_wake_reaction_ledger_recorded -> Ok acceptance
+  | Keeper_wake_reaction_ledger_record_failed detail ->
+    retryable_dispatch_failure detail
+;;
+
+type resolved_occurrence_disposition =
+  | Pending_at of string * Keeper_event_queue_state.schedule_occurrence_source
+  | Transfer_projecting_at of string * string * Keeper_event_queue_state.schedule_occurrence_source
+  | Terminal_completed_at of
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * Keeper_event_queue_state.occurrence_terminal_evidence
+  | Terminal_failed_at of
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * string
+      * Keeper_event_queue_state.occurrence_terminal_evidence
+  | Terminal_cancelled_at of
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * string
+      * Keeper_event_queue_state.occurrence_terminal_evidence
+  | Absent_at of string
+
+let terminal_evidence_equal left right =
+  match left, right with
+  | Keeper_event_queue_state.Terminal_evidence_recorded,
+    Keeper_event_queue_state.Terminal_evidence_recorded -> true
+  | Keeper_event_queue_state.Terminal_evidence_pending left,
+    Keeper_event_queue_state.Terminal_evidence_pending right ->
+    String.equal left right
+  | Keeper_event_queue_state.Terminal_evidence_recorded,
+    Keeper_event_queue_state.Terminal_evidence_pending _
+  | Keeper_event_queue_state.Terminal_evidence_pending _,
+    Keeper_event_queue_state.Terminal_evidence_recorded -> false
+;;
+
+let occurrence_state_equal left right =
+  match left, right with
+  | Keeper_event_queue_state.Occurrence_pending,
+    Keeper_event_queue_state.Occurrence_pending -> true
+  | Keeper_event_queue_state.Occurrence_completed left,
+    Keeper_event_queue_state.Occurrence_completed right ->
+    terminal_evidence_equal left right
+  | Keeper_event_queue_state.Occurrence_failed (left_reason, left_evidence),
+    Keeper_event_queue_state.Occurrence_failed (right_reason, right_evidence)
+  | Keeper_event_queue_state.Occurrence_cancelled (left_reason, left_evidence),
+    Keeper_event_queue_state.Occurrence_cancelled (right_reason, right_evidence) ->
+    String.equal left_reason right_reason
+    && terminal_evidence_equal left_evidence right_evidence
+  | Keeper_event_queue_state.Occurrence_transfer_projecting_to left,
+    Keeper_event_queue_state.Occurrence_transfer_projecting_to right
+  | Keeper_event_queue_state.Occurrence_transferred_to left,
+    Keeper_event_queue_state.Occurrence_transferred_to right -> String.equal left right
+  | ( Keeper_event_queue_state.Occurrence_pending
+    | Keeper_event_queue_state.Occurrence_transfer_projecting_to _
+    | Keeper_event_queue_state.Occurrence_transferred_to _
+    | Keeper_event_queue_state.Occurrence_completed _
+    | Keeper_event_queue_state.Occurrence_failed _
+    | Keeper_event_queue_state.Occurrence_cancelled _ )
+    , _ -> false
+;;
+
+let durable_occurrence_index state =
+  let index = Hashtbl.create 16 in
+  let add (occurrence : Keeper_event_queue_state.schedule_occurrence) =
+    match Hashtbl.find_opt index occurrence.occurrence_id with
+    | None ->
+      Hashtbl.add index occurrence.occurrence_id occurrence;
+      Ok ()
+    | Some (existing : Keeper_event_queue_state.schedule_occurrence) ->
+      let incarnation_order =
+        Int64.compare
+          occurrence.occurrence_incarnation
+          existing.occurrence_incarnation
+      in
+      if incarnation_order > 0
+      then (
+        Hashtbl.replace index occurrence.occurrence_id occurrence;
+        Ok ())
+      else if incarnation_order < 0
+      then Ok ()
+      else if existing.occurrence_source = occurrence.occurrence_source
+              && occurrence_state_equal
+                   existing.occurrence_state
+                   occurrence.occurrence_state
+      then Ok ()
+      else
+      Error
+        (Printf.sprintf
+           "conflicting durable queue dispositions for occurrence %s incarnation %Ld"
+           occurrence.occurrence_id
+           occurrence.occurrence_incarnation)
+  in
+  let rec add_all = function
+    | [] -> Ok ()
+    | occurrence :: rest ->
+      let* () = add occurrence in
+      add_all rest
+  in
+  let* () = add_all (Keeper_event_queue_state.schedule_occurrences state) in
+  Ok index
+;;
+
+let owner_index_result cache ~read_state ~base_path keeper_name =
+  match Hashtbl.find_opt cache keeper_name with
+  | Some result -> result
+  | None ->
+    let result =
+      let* state =
+        read_state ~base_path keeper_name
+        |> Result.map_error (fun detail ->
+          Printf.sprintf
+            "scheduled keeper wake durable state read failed keeper=%s: %s"
+            keeper_name
+            detail)
+      in
+      durable_occurrence_index state
+    in
+    Hashtbl.add cache keeper_name result;
+    result
+;;
+
+let rec resolve_durable_occurrence
+          cache
+          ~read_state
+          ~base_path
+          ~occurrence_id
+          ~visited
+          keeper_name
+  =
+  if List.exists (String.equal keeper_name) visited
+  then Error ("durable queue transfer cycle at keeper " ^ keeper_name)
+  else
+    let* index = owner_index_result cache ~read_state ~base_path keeper_name in
+    let resolve_transfer target =
+      let target_was_cached = Hashtbl.mem cache target in
+      let resolve_target () =
+        resolve_durable_occurrence
+          cache
+          ~read_state
+          ~base_path
+          ~occurrence_id
+          ~visited:(keeper_name :: visited)
+          target
+      in
+      let* target_disposition = resolve_target () in
+      match target_disposition with
+      | Absent_at _ when target_was_cached ->
+        (* A cached target snapshot may predate the transfer commit. *)
+        Hashtbl.remove cache target;
+        resolve_target ()
+      | (Pending_at (_, _) | Transfer_projecting_at (_, _, _) | Terminal_completed_at (_, _, _) | Terminal_failed_at (_, _, _, _) | Terminal_cancelled_at (_, _, _, _) | Absent_at _) as disposition -> Ok disposition
+    in
+    let disposition_of_occurrence
+          (occurrence : Keeper_event_queue_state.schedule_occurrence)
+      =
+      let source = occurrence.occurrence_source in
+      match occurrence.occurrence_state with
+      | Keeper_event_queue_state.Occurrence_pending ->
+        Ok (Pending_at (keeper_name, source))
+      | Keeper_event_queue_state.Occurrence_completed evidence ->
+        Ok (Terminal_completed_at (keeper_name, source, evidence))
+      | Keeper_event_queue_state.Occurrence_failed (reason, evidence) ->
+        Ok (Terminal_failed_at (keeper_name, source, reason, evidence))
+      | Keeper_event_queue_state.Occurrence_cancelled (reason, evidence) ->
+        Ok (Terminal_cancelled_at (keeper_name, source, reason, evidence))
+      | Keeper_event_queue_state.Occurrence_transfer_projecting_to target ->
+        (* The source outbox is the sole durable authority until projection
+           retires it. Reading or activating the target here would turn a valid
+           pre-commit absence into either false loss or a speculative wake. *)
+        Ok (Transfer_projecting_at (keeper_name, target, source))
+      | Keeper_event_queue_state.Occurrence_transferred_to target ->
+        resolve_transfer target
+    in
+    match Hashtbl.find_opt index occurrence_id with
+    | Some occurrence -> disposition_of_occurrence occurrence
+    | None ->
+      (* A retired queue witness is read by exact occurrence id. A new
+         occurrence does one small file lookup, and a damaged receipt cannot
+         be mistaken for absence and re-executed. *)
+      (match
+        Keeper_reaction_ledger.schedule_occurrence_receipt_result
+          ~base_path ~keeper_name ~occurrence_id
+      with
+      | Error detail -> Error detail
+      | Ok None -> Ok (Absent_at keeper_name)
+      | Ok (Some witness) ->
+        (match Keeper_event_queue_state.schedule_occurrence_of_witness witness with
+         | Some occurrence -> disposition_of_occurrence occurrence
+         | None ->
+           Error
+             ("schedule occurrence receipt is not a scheduled source: "
+              ^ occurrence_id)))
+;;
+
+let resolved_occurrence_owner = function
+  | Pending_at (owner, _)
+  | Terminal_completed_at (owner, _, _)
+  | Terminal_failed_at (owner, _, _, _)
+  | Terminal_cancelled_at (owner, _, _, _)
+  | Absent_at owner -> owner
+  | Transfer_projecting_at (source, _, _) -> source
+;;
+
+let resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id =
+  resolve_durable_occurrence
+    (Hashtbl.create 4)
+    ~read_state:Keeper_registry_event_queue.durable_state_result
+    ~base_path
+    ~occurrence_id:stimulus_id
+    ~visited:[]
+    keeper_name
+;;
+
+let resolve_keeper_wake_occurrences_with ~read_state ~base_path occurrences =
+  let cache = Hashtbl.create 4 in
+  List.map
+    (fun (keeper_name, stimulus_id) ->
+       keeper_name, stimulus_id,
+       resolve_durable_occurrence cache ~read_state ~base_path
+         ~occurrence_id:stimulus_id ~visited:[] keeper_name)
+    occurrences
+;;
+
+let accept_keeper_wake_occurrence
+      ?intake_token
+      ~base_path
+      ~keeper_name
+      ~expected_owner
+      ~stimulus_id
+      ~now
+      ~(wake : Keeper_event_queue.scheduled_wake)
+      stimulus
+  =
+  let exact_stimulus_for_source = function
+    | Keeper_event_queue_state.Full_source durable_stimulus -> Ok durable_stimulus
+    | Keeper_event_queue_state.Compact_source
+        { post_id; urgency; arrived_at; source_ref } ->
+      let durable_stimulus =
+        { stimulus with Keeper_event_queue.arrived_at }
+      in
+      (match Keeper_event_queue.scheduled_wake stimulus with
+       | Some _
+         when String.equal stimulus.post_id post_id
+              && stimulus.urgency = urgency
+              && String.equal
+                   (Keeper_event_queue_state.source_snapshot_ref
+                      durable_stimulus)
+                   source_ref ->
+         Ok durable_stimulus
+       | Some _ | None ->
+         retryable_dispatch_failure
+           (Printf.sprintf
+              "scheduled keeper wake compact source conflicts occurrence=%s source_ref=%s"
+              stimulus_id
+              source_ref))
+  in
+  let accept_terminal
+        ~owner
+        ~durable_stimulus
+        ~evidence
+        acceptance
+    =
+    let* durable_stimulus = exact_stimulus_for_source durable_stimulus in
+    let* () =
+      match evidence with
+      | Keeper_event_queue_state.Terminal_evidence_recorded -> Ok ()
+      | Keeper_event_queue_state.Terminal_evidence_pending transition_id ->
+        Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+          ~base_path
+          ~keeper_name:owner
+          ~expected_transition_id:transition_id
+        |> Result.map_error (fun detail ->
+          Schedule_runner.Retryable_dispatch_failure detail)
+    in
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      acceptance
+  in
+  match
+    resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id
+  with
+  | Error detail -> retryable_dispatch_failure detail
+  | Ok disposition
+    when not
+           (String.equal
+              expected_owner
+              (resolved_occurrence_owner disposition)) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake owner changed while acquiring intake fence expected=%s actual=%s"
+         expected_owner
+         (resolved_occurrence_owner disposition))
+  | Ok (Transfer_projecting_at (source, target, _)) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake transfer projection pending source=%s target=%s"
+         source
+         target)
+  | Ok (Pending_at (owner, durable_stimulus)) ->
+    (* A prior attempt may have committed the queue entry and then failed the
+       independent reaction-ledger append. Verify the exact stimulus identity
+       and repair only an absent row before reporting durable acceptance. *)
+    let* durable_stimulus = exact_stimulus_for_source durable_stimulus in
+    accept_with_recorded_stimulus
+      ~base_path
+      ~keeper_name:owner
+      ~stimulus_id
+      durable_stimulus
+      (Already_pending owner)
+  | Ok (Terminal_completed_at (owner, durable_stimulus, evidence)) ->
+    accept_terminal ~owner ~durable_stimulus ~evidence Already_acked
+  | Ok (Terminal_failed_at (owner, durable_stimulus, reason, evidence)) ->
+    accept_terminal
+      ~owner
+      ~durable_stimulus
+      ~evidence
+      (Already_failed reason)
+  | Ok (Terminal_cancelled_at (owner, durable_stimulus, _, evidence)) ->
+    accept_terminal ~owner ~durable_stimulus ~evidence Already_cancelled
+  | Ok (Absent_at owner) when not (String.equal owner keeper_name) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake transferred owner is missing occurrence owner=%s occurrence=%s"
+         owner
+         stimulus_id)
+  | Ok (Absent_at _) ->
+    (* A recurring schedule advances as soon as its wake is enqueued
+       ([Schedule_store.accept_running]), so while the keeper's autonomous
+       lane does not run, one pending occurrence per period accumulates for
+       one schedule -- 31 for msx-retro-mania on 2026-09-14 -- and the turn
+       that finally runs reads them all as one batch. The occurrence firing
+       now is the current one; the earlier pending ones are superseded by it
+       and are cancelled with that reason before it is enqueued, so the queue
+       holds at most one pending occurrence per schedule and every skipped
+       firing is a durable cancellation rather than a silent drop. Cancel
+       first, then enqueue: if the enqueue fails, the dispatch is retried and
+       the current occurrence lands then; the earlier ones were superseded by
+       its firing either way. *)
+    let* () =
+      match
+        Keeper_registry_event_queue.cancel_scheduled_wakes_result
+          ~base_path
+          keeper_name
+          ~applied_at:now
+          ~schedule_ids:[ wake.schedule_id ]
+          ~reason:
+            (Printf.sprintf
+               "superseded by occurrence %s of the same schedule"
+               wake.occurrence_id)
+      with
+      | Ok 0 -> Ok ()
+      | Ok superseded ->
+        Log.Keeper.info
+          "schedule wake superseded %d pending occurrence(s) schedule_id=%s keeper=%s occurrence=%s"
+          superseded
+          wake.schedule_id
+          keeper_name
+          wake.occurrence_id;
+        Ok ()
+      | Error detail ->
+        retryable_dispatch_failure
+          ("scheduled keeper wake could not supersede earlier occurrences: " ^ detail)
+    in
+    (match
+       Keeper_registry_event_queue.enqueue_stimulus_durable_result
+         ?intake_token
+         ~base_path
+         keeper_name
+         stimulus
+     with
+     | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+       retryable_dispatch_failure
+         ("scheduled keeper wake durable enqueue failed: " ^ detail)
+     | Keeper_registry_event_queue.Stimulus_enqueued
+     | Keeper_registry_event_queue.Stimulus_already_present ->
+       (match record_keeper_wake_stimulus ~base_path ~keeper_name stimulus with
+        | Keeper_wake_reaction_ledger_recorded -> Ok Wake_required
+        | Keeper_wake_reaction_ledger_record_failed detail ->
+          retryable_dispatch_failure detail))
+;;
+
+let keeper_wake_stimulus_for_occurrence
+      ~(request : Schedule_domain.schedule_request)
+      ~occurrence_id ~due_at ~arrived_at
+  =
+  let* kind, payload =
+    Schedule_payload_projection.dispatch_view_detailed request
+    |> Result.map_error Schedule_payload_projection.dispatch_rejection_message
+  in
+  let* () = match kind with
+    | Schedule_payload_projection.Keeper_wake -> Ok ()
+    | Schedule_payload_projection.Lane_act -> Error "schedule is not a keeper wake"
+  in
+  let* keeper_name = body_keeper_name payload in
+  let* message = Schedule_payload_projection.body_required_string payload "message" in
+  let* title = Schedule_payload_projection.body_optional_string payload "title" in
+  let* result_delivery = Schedule_payload_projection.body_result_delivery payload in
+  let* urgency = body_keeper_wake_urgency payload in
+  (* DET-OK: absent schema-v1 urgency uses the dispatch contract default;
+     invalid urgency was rejected by the shared decoder above. *)
+  let urgency = urgency
+    |> Option.value ~default:Schedule_supported_kinds.default_keeper_wake_urgency
+    |> keeper_queue_urgency_of_schedule_urgency
+  in
+  let wake : Keeper_event_queue.scheduled_wake =
+    { occurrence_id
+    ; schedule_instance_id = request.schedule_instance_id
+    ; schedule_id = request.schedule_id
+    ; due_at
+    ; payload_digest = Schedule_domain.payload_digest request.payload
+    ; title; message; result_delivery
+    }
+  in
+  Ok (keeper_name,
+      { Keeper_event_queue.post_id = occurrence_id; urgency; arrived_at
+      ; payload = Keeper_event_queue.Schedule_due wake })
+;;
+
+let dispatch_keeper_wake
+      config
+      ~now
+      (signal : Schedule_runner.wake_signal)
+      (request : Schedule_domain.schedule_request)
+      ~commit_acceptance
+      _payload
+  =
+  let base_path = config.Workspace_utils.base_path in
+  let* keeper_name, stimulus =
+    terminal_dispatch_result
+      (keeper_wake_stimulus_for_occurrence ~request
+         ~occurrence_id:(Schedule_occurrence_id.to_string signal.occurrence_id)
+         ~due_at:request.due_at ~arrived_at:now)
+  in
+  let* wake =
+    match Keeper_event_queue.scheduled_wake stimulus with
+    | Some wake -> Ok wake
+    | None -> terminal_dispatch_result (Error "decoded keeper wake has no scheduled source")
+  in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  let* initial_disposition =
+    match resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id with
+    | Ok disposition -> Ok disposition
+    | Error detail -> retryable_dispatch_failure detail
+  in
+  let intake_owner = resolved_occurrence_owner initial_disposition in
+  (* The store is consulted only where enqueue or owner activation can
+     follow. A terminal occurrence reconciles its evidence and commits an
+     acceptance without it. *)
+  let* owner_meta =
+    match initial_disposition with
+    | Terminal_completed_at _ | Terminal_failed_at _ | Terminal_cancelled_at _ ->
+      Ok Owner_meta_not_consulted
+    | Pending_at _ | Absent_at _ | Transfer_projecting_at _ ->
+      read_owner_meta config intake_owner
+      |> Result.map (fun read -> Owner_meta_consulted read)
+  in
+  let dispatch_while_fenced intake_token =
+    let* acceptance =
+      accept_keeper_wake_occurrence
+        ~intake_token
+        ~base_path
+        ~keeper_name
+        ~expected_owner:intake_owner
+        ~stimulus_id
+        ~now
+        ~wake
+        stimulus
+    in
+    let occurrence_status =
+      match acceptance with
+      | Wake_required | Already_pending _ -> Keeper_wake_awaiting_ack
+      | Already_acked -> Keeper_wake_already_acked
+      | Already_failed _ -> Keeper_wake_already_failed
+      | Already_cancelled -> Keeper_wake_already_cancelled
+    in
+    let activation_keeper_name =
+      match acceptance with
+      | Already_pending owner -> owner
+      | Wake_required | Already_acked | Already_failed _ | Already_cancelled ->
+        keeper_name
+    in
+    (* [accept_keeper_wake_occurrence] rejects an owner that differs from
+       [intake_owner], so [owner_meta] is the activation Keeper's answer. *)
+    let* activation_outcome =
+      match acceptance, owner_meta with
+      | (Already_acked | Already_failed _ | Already_cancelled), _ ->
+        Ok Keeper_wake_activation_not_required
+      | (Wake_required | Already_pending _), Owner_meta_consulted consulted ->
+        Ok
+          (activation_outcome_for_required_wake
+             ~base_path
+             ~keeper_name:activation_keeper_name
+             consulted)
+      | (Wake_required | Already_pending _), Owner_meta_not_consulted ->
+        (* The occurrence was terminal when resolved and is not under the
+           fence; the retry resolves it again and consults the store. *)
+        retryable_dispatch_failure
+          (Printf.sprintf
+             "scheduled keeper wake occurrence left its terminal disposition \
+              while acquiring intake fence keeper=%s occurrence=%s"
+             activation_keeper_name
+             stimulus_id)
+    in
+    (* Every outcome commits acceptance once the stimulus is durable, whatever
+       happened to the owner's activation. For a paused, offline, crashed,
+       restarting or draining owner the stimulus waits in its durable queue
+       and the first turn of its next fiber reads it, the same way a paused
+       owner reads it after resume. Nothing on the schedule side starts that
+       fiber; the wake receipt names the deferral reason for the operator.
+       Retrying the dispatch instead leaves the schedule to cycle
+       due -> running -> due on every runner tick for as long as the owner
+       stays down. Pending occurrences stay bounded per schedule: an interval
+       heartbeat holds its next firing in the runner ([defer_wake]), and any
+       other firing supersedes the earlier pending one
+       ([accept_keeper_wake_occurrence]). *)
+    log_activation_outcome
+      ~schedule_id:request.schedule_id
+      ~keeper_name:activation_keeper_name
+      activation_outcome;
+    let detail =
+      `Assoc
+        ([ "kind", `String keeper_wake_enqueued_kind
+         ; "queue", `String keeper_event_queue_label
+         ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+         ; "stimulus_id", `String stimulus_id
+         ; "keeper_name", `String keeper_name
+         ; "schedule_instance_id", `String request.schedule_instance_id
+         ; "schedule_id", `String request.schedule_id
+         ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+         ; "post_id", `String stimulus.post_id
+         ; ( "result_delivery_policy"
+           , `String
+               (match wake.result_delivery with
+                | None -> "none"
+                | Some _ -> "reply_to_origin") )
+         ; ( "occurrence_status"
+           , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
+         ]
+         @ keeper_wake_activation_outcome_json_fields activation_outcome
+         @ keeper_wake_reaction_ledger_status_json_fields
+             (Some Keeper_wake_reaction_ledger_recorded))
+    in
+    match acceptance with
+    | Wake_required
+    | Already_pending _
+    | Already_acked
+    | Already_failed _
+    | Already_cancelled ->
+      let* acceptance_commit = commit_acceptance detail in
+      Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
+  in
+  match
+    Keeper_shutdown_intake_fence.run_durable_intake_if_open
+      ~base_path
+      ~keeper_name:intake_owner
+      dispatch_while_fenced
+  with
+  | Keeper_shutdown_intake_fence.Intake_committed result -> result
+  | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+         intake_owner
+         (Keeper_shutdown_types.Operation_id.to_string operation_id))
+;;
+
+(* RFC operator-quiz §4.7. The schedule's scheduler acts with the access a
+   direct masc_lane_act call of theirs would have. The occurrence id is the
+   receipt's request id, so a redelivered occurrence finds its receipt. The
+   occurrence succeeds once the receipt is durable; whether the worker ran the
+   action is the receipt's to say. *)
+let lane_act_access (actor : Schedule_domain.actor) =
+  match actor.kind with
+  | Schedule_domain.Human_operator -> Lane_addon_sources.Operator_configuration
+  | Schedule_domain.Automated_actor -> Lane_addon_sources.Keeper actor.id
+  | Schedule_domain.System -> Lane_addon_sources.Unauthenticated
+;;
+
+let lane_act_dispatch_error = function
+  | Lane_addon_runtime.Scheduled_act_failed detail ->
+    Schedule_runner.Retryable_dispatch_failure ("lane_act store failure: " ^ detail)
+  | Lane_addon_runtime.Scheduled_act_refused reason ->
+    let message =
+      let label = Lane_addon_runtime.scheduled_act_refusal_label reason in
+      match reason with
+      | Lane_addon_runtime.Action_refused detail -> Printf.sprintf "lane_act %s: %s" label detail
+      | Lane_addon_runtime.Declarations_unread | Lane_addon_runtime.Declarations_incomplete
+      | Lane_addon_runtime.Declaration_missing | Lane_addon_runtime.Declaration_disabled
+      | Lane_addon_runtime.No_live_instance | Lane_addon_runtime.Request_id_reused ->
+        "lane_act " ^ label
+    in
+    (match reason with
+     (* The first reading of the declarations has not happened yet in this
+        process: the next tick finds it. *)
+     | Lane_addon_runtime.Declarations_unread -> Schedule_runner.Retryable_dispatch_failure message
+     | Lane_addon_runtime.Declarations_incomplete | Lane_addon_runtime.Declaration_missing
+     | Lane_addon_runtime.Declaration_disabled | Lane_addon_runtime.No_live_instance
+     | Lane_addon_runtime.Request_id_reused | Lane_addon_runtime.Action_refused _ ->
+       Schedule_runner.Occurrence_dispatch_rejection message)
+;;
+
+let dispatch_lane_act config (signal : Schedule_runner.wake_signal)
+      (request : Schedule_domain.schedule_request) ~commit_acceptance payload
+  =
+  let* installation_id, action =
+    Schedule_payload_projection.lane_act_body payload |> terminal_dispatch_result
+  in
+  let requester =
+    Printf.sprintf "schedule:%s:%s" request.schedule_id request.scheduled_by.id
+  in
+  let* (receipt : Lane_addon_action.receipt) =
+    Lane_addon_runtime.scheduled_act ~config ~access:(lane_act_access request.scheduled_by)
+      ~requester ~declaration_id:installation_id
+      ~request_id:(Schedule_occurrence_id.to_string signal.occurrence_id) ~action
+    |> Result.map_error lane_act_dispatch_error
+  in
+  let detail =
+    dispatch_receipt_to_yojson
+      (Lane_act_handed_over
+         { installation_id
+         ; instance_id = receipt.instance_id
+         ; request_id = receipt.request_id
+         ; schedule_instance_id = request.schedule_instance_id
+         ; schedule_id = request.schedule_id
+         })
+  in
+  let* acceptance_commit = commit_acceptance detail in
+  Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
+;;
+
+let dispatch config ~now signal request ~commit_acceptance =
+  match Schedule_payload_projection.dispatch_view_detailed request with
+  | Error rejection ->
+    Error
+      (Schedule_runner.Terminal_dispatch_rejection
+         (Schedule_payload_projection.dispatch_rejection_message rejection))
+  | Ok (kind, payload) ->
+    (match kind with
+     | Schedule_payload_projection.Keeper_wake ->
+       dispatch_keeper_wake config ~now signal request ~commit_acceptance payload
+     | Schedule_payload_projection.Lane_act ->
+       dispatch_lane_act config signal request ~commit_acceptance payload)
+;;
+
+let cancel_keeper_schedules config ~keeper_name =
+  let should_cancel (request : Schedule_domain.schedule_request) =
+    match Schedule_payload_projection.dispatch_view_detailed request with
+    | Ok (Schedule_payload_projection.Keeper_wake, payload) ->
+      (match body_keeper_name payload with
+       | Error _ -> false
+       | Ok target -> String.equal target keeper_name)
+    (* A Lane action acts with its scheduler's access ([lane_act_access]), so
+       one a Keeper scheduled ends with that Keeper. *)
+    | Ok (Schedule_payload_projection.Lane_act, _) ->
+      (match request.scheduled_by.kind with
+       | Schedule_domain.Automated_actor -> String.equal request.scheduled_by.id keeper_name
+       | Schedule_domain.Human_operator | Schedule_domain.System -> false)
+    | Error _ -> false
+  in
+  (* Cancel propagation (task-370): the queue drain must see the schedule
+     ledger before the schedules leave it, so it runs first. Removing the
+     ledger rows first would orphan pending queue stimuli whose only schedule
+     authority is the request being cancelled. *)
+  let schedule_ids =
+    let state = Schedule_store.read_state config in
+    List.filter_map
+      (fun (request : Schedule_domain.schedule_request) ->
+         if should_cancel request then Some request.schedule_id else None)
+      state.schedules
+  in
+  let applied_at = Unix.gettimeofday () in
+  let withdrawal = match schedule_ids with
+   | [] -> Ok ()
+   | _ ->
+     (match
+        Keeper_registry_event_queue.cancel_scheduled_wakes_result
+          ~base_path:config.Workspace_utils.base_path
+          keeper_name
+          ~applied_at
+          ~schedule_ids
+          ~reason:"schedule cancelled; enqueued utterance withdrawn"
+      with
+      | Ok 0 -> Ok ()
+      | Ok n ->
+        Log.Keeper.info
+          "cancel_keeper_schedules: withdrew %d pending queue stimulus for \
+           keeper=%s"
+          n
+          keeper_name;
+        Ok ()
+      | Error detail ->
+        Error (Schedule_store.Persistence_failed
+          ("scheduled wake withdrawal failed: " ^ detail))) in
+  Result.bind withdrawal (fun () -> Schedule_store.cancel_matching config ~should_cancel)
+;;
+
+(* Self-clock heartbeat schedules (#36213). A [result_delivery = None] interval
+   schedule tracks no per-occurrence deliverable — it only wakes the keeper — so
+   firing a fresh occurrence while the previous one is still unconsumed just
+   piles the keeper's queue: emission runs on the wall clock, consumption on the
+   keeper's turn cadence, and a keeper that cannot keep up accumulates one
+   occurrence per period without bound (msx-retro-mania reached 30 on
+   2026-09-14). Holding the schedule at its current due until the keeper drains
+   the pending occurrence makes emission track consumption: at most one pending
+   occurrence per instance, and [next_due_after ~now] then skips missed ticks to
+   a single catch-up rather than backfilling them.
+
+   Only heartbeat interval schedules self-clock. A schedule that delivers a
+   result, and every non-interval kind, keeps firing on each due; each new
+   firing supersedes the earlier pending occurrence of the same schedule
+   ([accept_keeper_wake_occurrence]). The pending
+   check reads the keeper's own event queue (the authoritative unconsumed
+   signal), so it does not depend on the reaction-ledger ack transition. A queue
+   read failure is fail-open (fire as before) so a transient read never starves
+   the schedule. *)
+let self_clock_holds config ~occurrence_id (request : Schedule_domain.schedule_request) =
+  match request.Schedule_domain.recurrence with
+  | Schedule_domain.Interval _ ->
+    (match Schedule_payload_projection.result_delivery request with
+     | Ok None ->
+       (match Schedule_payload_projection.wake_keeper_name request with
+        | None -> false
+        | Some keeper_name ->
+          let base_path = config.Workspace_utils.base_path in
+          (match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+           | Error _ -> false
+           | Ok queue ->
+             List.exists
+               (fun stimulus ->
+                  match Keeper_event_queue.scheduled_wake stimulus with
+                  | Some wake ->
+                    String.equal
+                      wake.Keeper_event_queue.schedule_instance_id
+                      request.Schedule_domain.schedule_instance_id
+                    (* Enqueue can commit before activation or the schedule's
+                       acceptance fails. Retrying that exact occurrence repairs
+                       the remaining work; only an earlier occurrence holds a
+                       new wake back. *)
+                    && not (String.equal wake.occurrence_id
+                              (Schedule_occurrence_id.to_string occurrence_id))
+                  | None -> false)
+               (Keeper_event_queue.to_list queue)))
+     | Ok (Some _) | Error _ -> false)
+  | Schedule_domain.One_shot | Schedule_domain.Daily _ | Schedule_domain.Cron _ -> false
+;;
+
+(* A fenced Keeper refuses every intake. Dispatching would mark the schedule
+   [Running], and a purge's completion cannot cancel a [Running] schedule, so
+   the hold keeps it [Due] (#34642). The fence checked is the requested
+   Keeper's; a wake transferred elsewhere is still refused at dispatch by its
+   resolved owner's fence. *)
+let target_intake_fence_hold config (request : Schedule_domain.schedule_request) =
+  match Schedule_payload_projection.wake_keeper_name request with
+  | None -> None
+  | Some keeper_name ->
+    Keeper_shutdown_intake_fence.shutdown_operation_id
+      ~base_path:config.Workspace_utils.base_path
+      ~keeper_name
+    |> Option.map (fun operation_id ->
+      Schedule_runner.Target_intake_fenced
+        { target = keeper_name
+        ; fence_owner = Keeper_shutdown_types.Operation_id.to_string operation_id
+        })
+;;
+
+(* Once per tick and per fenced Keeper, after the tick has settled every
+   schedule, ask the operation that holds the fence to walk its finalization
+   again. The fence is read again here rather than parsed back from the hold,
+   so the ask goes to whoever holds it now. It rides on the tick that already
+   found the hold, so it adds no clock of its own (RFC-0433). *)
+let fenced_targets (held : Schedule_runner.held list) =
+  held
+  |> List.filter_map (fun ({ reason; _ } : Schedule_runner.held) ->
+    match reason with
+    | Schedule_runner.Target_intake_fenced { target; _ } -> Some target
+    | Schedule_runner.Previous_occurrence_unconsumed -> None)
+  |> List.sort_uniq String.compare
+;;
+
+let resume_fenced_owners config ~newly_held held =
+  let newly_fenced_targets = fenced_targets newly_held in
+  fenced_targets held
+  |> List.iter (fun keeper_name ->
+    match
+      Keeper_shutdown_intake_fence.shutdown_operation_id
+        ~base_path:config.Workspace_utils.base_path
+        ~keeper_name
+    with
+    | None -> ()
+    | Some operation_id ->
+      (match
+       Keeper_shutdown_runtime.redrive_finalization ~config ~keeper_name ~operation_id
+       with
+       | Ok ( Keeper_shutdown_runtime.Redrive_started
+            | Keeper_shutdown_runtime.Redrive_already_active ) -> ()
+       | Ok (Keeper_shutdown_runtime.Redrive_not_in_process phase) ->
+         if List.mem keeper_name newly_fenced_targets
+         then
+           Log.Keeper.warn
+             "held schedule cannot resume its fence owner in this process: keeper=%s operation=%s phase=%s"
+             keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string operation_id)
+             (Keeper_shutdown_types.phase_to_string phase)
+       | Error error ->
+         Log.Keeper.warn
+           "held schedule could not ask its fence owner to resume: keeper=%s operation=%s error=%s"
+           keeper_name
+           (Keeper_shutdown_types.Operation_id.to_string operation_id)
+           (Keeper_shutdown_runtime.redrive_error_to_string error)))
+;;
+
+let defer_wake config ~occurrence_id request =
+  match target_intake_fence_hold config request with
+  | Some _ as fenced -> fenced
+  | None ->
+    if self_clock_holds config ~occurrence_id request
+    then Some Schedule_runner.Previous_occurrence_unconsumed
+    else None
+;;
+
+let consumer : Schedule_runner.consumer = { accepts; dispatch; defer_wake }

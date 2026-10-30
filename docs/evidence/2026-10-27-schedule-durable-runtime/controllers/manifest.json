@@ -1,0 +1,89 @@
+{
+  "schema": "masc.selected-runtime-submanifest.v1",
+  "scope": "controllers",
+  "source_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+  "inputs": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v2.py",
+      "sha256": "3b587c0c19d98301da5c07c76e70abb80a857b804191f21180784dfa66855095",
+      "bytes": 56769
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v5.py",
+      "sha256": "af564ff36a2886f988d96ed5eb2d433aff1dc85eb4ba0d125e8f10a96eceb995",
+      "bytes": 67009
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v3.py",
+      "sha256": "945566b248ccb38f86e3ee911b9420e444aa8fea655bebfacaf91e3b9426cd90",
+      "bytes": 64282
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v4.py",
+      "sha256": "f20e2f10ccbcf1cbc4b5fe4b98c5168ca36db450cc72d71da4b8cfca192f7123",
+      "bytes": 66633
+    }
+  ],
+  "outputs": [
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/controllers/probe_real_busy_after_effect_c2_v2.py.txt",
+        "sha256": "3b587c0c19d98301da5c07c76e70abb80a857b804191f21180784dfa66855095",
+        "bytes": 56769
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v2.py",
+          "sha256": "3b587c0c19d98301da5c07c76e70abb80a857b804191f21180784dfa66855095",
+          "bytes": 56769
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/controllers/probe_real_busy_after_effect_c2_v5.py.txt",
+        "sha256": "af564ff36a2886f988d96ed5eb2d433aff1dc85eb4ba0d125e8f10a96eceb995",
+        "bytes": 67009
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v5.py",
+          "sha256": "af564ff36a2886f988d96ed5eb2d433aff1dc85eb4ba0d125e8f10a96eceb995",
+          "bytes": 67009
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/controllers/intermediate-controller-identities.json",
+        "sha256": "84ddaedf1230738dc49b674bc871cd2d365c36ca5438b573fead823f20fbc046",
+        "bytes": 702
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v3.py",
+          "sha256": "945566b248ccb38f86e3ee911b9420e444aa8fea655bebfacaf91e3b9426cd90",
+          "bytes": 64282
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v4.py",
+          "sha256": "f20e2f10ccbcf1cbc4b5fe4b98c5168ca36db450cc72d71da4b8cfca192f7123",
+          "bytes": 66633
+        }
+      ],
+      "transformation": "hash/byte inventory only; source bodies omitted"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/controllers/README.md",
+        "sha256": "9c8de5ab323516861dcc30bce180d22c76479154c0cb09ca9bd62b41883e4762",
+        "bytes": 719
+      },
+      "inputs": [],
+      "transformation": "new narrative of the explicitly bounded selected evidence"
+    }
+  ],
+  "limits": "Input paths locate current original files. Retained copies and new derivatives have separate hashes. Historical nested checkpoint/HTTP digests are observations, not claims those full original bytes remain available."
+}

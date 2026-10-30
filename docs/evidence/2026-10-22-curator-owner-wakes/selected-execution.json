@@ -1,0 +1,46 @@
+{
+  "run": 39674624863,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39674624863",
+  "head": "af9e1eeefe9b8b17fe82c643e9344aa3df87416a",
+  "status": "completed",
+  "conclusion": "success",
+  "minimal": true,
+  "eio_backend": "posix",
+  "suites": [
+    {
+      "suite": "test_workspace_curator_addon_commit",
+      "passed": 15
+    },
+    {
+      "suite": "test_workspace_curator_addon_contract",
+      "passed": 5
+    },
+    {
+      "suite": "test_workspace_memory_curator_lane",
+      "passed": 34
+    },
+    {
+      "suite": "test_workspace_memory_briefing",
+      "passed": 9
+    },
+    {
+      "suite": "test_lane_addon_request_progress",
+      "passed": 7
+    },
+    {
+      "suite": "test_lane_addon_request_discovery",
+      "passed": 7
+    },
+    {
+      "suite": "test_lane_addon_host_cycle",
+      "passed": 52
+    },
+    {
+      "suite": "test_lane_addon_exact_runner",
+      "passed": 18
+    }
+  ],
+  "total": 147,
+  "log_excerpt_sha256": "641c1b3adc545a638fd95048d1ff68c9be97a08034367f6fd9a0d5e62ec64d1c",
+  "scope": "compiled selected fixtures, not current typed-size layer, live installation, actual provider/browser or complete E02"
+}

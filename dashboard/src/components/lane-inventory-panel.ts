@@ -1,0 +1,220 @@
+import { html } from 'htm/preact'
+import { laneAddonApplicationText } from './lane-addon-connection'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import { fetchLaneInventory, type AddonExactOutput, type LaneInventory, type LaneInventoryRow } from '../api/lane-inventory'
+import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
+import { RouteLink } from './common/route-link'
+import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
+import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
+import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
+import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
+import { laneTargetFor, laneTargetParams, sameLaneTarget, type LaneNavigationTarget } from '../lib/lane-navigation'
+import { categoryGroup, categoryLabel, groupAddonCategories, inventoryCategory, type AddonCategoryFilter } from '../lib/lane-addon-category'
+import { LaneAddonCategoryFilter } from './lane-addon-category-filter'
+
+const button = 'rounded border border-[var(--color-border-default)] px-3 py-2 disabled:opacity-50'
+const machineActivityText = { on: 'New execution and input enabled', off: 'Off · machine state retained',
+  unobserved: 'Activity configuration unavailable' }
+const machinePublicationText = { no_screen: 'No screen observed', stable: 'Stable screen published',
+  running: 'Machine running', unavailable: 'Worker observation unavailable' } as const
+function browserAddonText(
+  addon: { kind: 'absent' | 'off' | 'not_running' } | { kind: 'unavailable'; detail: string }): string {
+  switch (addon.kind) {
+    case 'absent': return 'No browser Add-on'
+    case 'off': return 'Browser Add-on switched off'
+    case 'not_running': return 'Browser Add-on declared on, not running'
+    case 'unavailable': return `Browser Add-on unavailable · ${addon.detail}`
+  }
+}
+function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
+  const state = row.state
+  switch (state.kind) {
+    case 'exact': {
+      const selection = row.selection
+      const lane = selection.kind === 'exact'
+        ? snapshot.exact_snapshot.lanes.find(item => item.laneId === selection.lane_id) : undefined
+      const config = state.configuration
+      return [config.kind === 'configured'
+        ? `${config.admitted_slots.length} HTTP · ${config.cli_slots.length} CLI admitted`
+        : config.kind === 'off' ? 'Off · candidate configuration retained; accepted runs finish'
+          : `${config.kind}: ${config.detail}`,
+      ...(lane ? [`${lane.status} · ${lane.runningCount} running · ${lane.retainedRunCount} retained runs`] : [])]
+    }
+    case 'browser_clients': return [
+      state.addon.kind === 'observed' ? `${state.addon.connected_clients} connected clients` : browserAddonText(state.addon)]
+    case 'browser_executor': return [
+      state.addon.kind === 'observed'
+        ? (state.addon.registered ? 'Executor registered · session activity unverified' : 'Executor not registered')
+        : browserAddonText(state.addon),
+      'Executable and profile paths apply at server startup.']
+    case 'machine': return [machineActivityText[state.activity],
+      machinePublicationText[state.publication]]
+    case 'package': {
+      const declared = state.declaration
+      const desired = declared === null ? 'Manual attachment'
+        : declared.kind === 'valid' ? `${declared.enabled ? 'Configured on' : 'Configured off'} · ${laneAddonApplicationText(declared.application)}`
+          : declared.kind === 'invalid' ? `Invalid declaration: ${declared.messages.join('; ')}`
+            : declared.kind === 'absent' ? 'Declaration absent · cleanup unconfirmed' : 'Declaration not observed'
+      return [desired, ...state.instances.map(instance => `${instance.presence} ${instance.phase.kind} · ${instance.instance_id}`
+        + (instance.phase.kind === 'failed' ? ` · ${instance.phase.message}` : ''))]
+    }
+  }
+}
+
+function AddonModelRoutes({ installation, outputs }: { installation: string; outputs: readonly AddonExactOutput[] }) {
+  if (!outputs.length) return null
+  return html`<section aria-label="Exact-output model routes" class="space-y-2">
+    <h4 class="font-semibold">Exact-output model routes</h4>
+    <p>Installation: <code>${installation}</code></p>
+    <p>Models are configured per installation and output in${' '}
+      <code>runtime.addon_exact_lanes</code>. Package activity and worker presence are separate observations.</p>
+    ${outputs.map(output => {
+      const config = output.configuration
+      return html`<section key=${output.output} aria-label=${`Model route for ${output.output}`} class="space-y-1">
+        <h5>${output.output}</h5>
+        <p>${output.source === 'declared' ? 'Declared package output'
+          : 'Table only · no declared package output; not an execution capability'}</p>
+        ${config.kind === 'configured' ? html`
+          <p>Admitted HTTP: ${config.admitted_slots.join(' → ') || 'none'}</p>
+          <p>CLI fallbacks: ${config.cli_slots.join(' → ') || 'none'}</p>
+          <p>Declared HTTP: ${config.declared_slots.join(' → ') || 'none'}</p>
+          <p>Declared CLI: ${config.declared_cli_slots.join(' → ') || 'none'}</p>
+          ${config.dropped_slots.length ? html`<p>Dropped HTTP: ${config.dropped_slots.join(', ')}</p>` : null}
+          ${config.admission_error !== null ? html`<p role="status">${config.admission_error}</p>` : null}
+        ` : config.kind === 'off' ? html`
+          <p>Model route off · declared candidates retained</p>
+          <p>Declared HTTP: ${config.declared_slots.join(' → ') || 'none'}</p>
+          <p>Declared CLI: ${config.declared_cli_slots.join(' → ') || 'none'}</p>
+        ` : html`<p role="status">${config.kind}: ${config.detail}</p>`}
+      </section>`
+    })}
+    <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Open Runtime configuration<//>
+  </section>`
+}
+
+function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snapshot: LaneInventory; authority: ExecutionWorkspaceAuthority }) {
+  const selection = row.selection
+  const target = laneTargetFor(row, authority.workspaceRoot)
+  const exactLane = selection.kind === 'exact'
+    ? snapshot.exact_snapshot.lanes.find(lane => lane.laneId === selection.lane_id) : undefined
+  return html`<section aria-label=${`Details for ${row.label}`} class="rounded border border-[var(--color-border-default)] p-4 space-y-3">
+    <h3 class="font-semibold">${row.label}</h3><p>${row.purpose}</p><code class="break-all">${row.id}</code>
+    ${row.state.kind === 'package' && html`<p>역할: ${categoryLabel(inventoryCategory(row))}
+      ${row.state.declaration === null ? ' · 실행 당시 패키지' : ' · 현재 선언'}</p>
+      ${row.state.instances.map(instance => html`<p key=${instance.instance_id}>실행 당시 역할:
+        ${categoryLabel(categoryGroup(instance.ui_category))} · ${instance.instance_id}</p>`)}`}
+    ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
+    ${row.state.kind === 'package' && row.state.declaration?.kind === 'valid'
+      ? html`<${AddonModelRoutes} installation=${row.state.declaration.installation_id} outputs=${row.state.declaration.exact_outputs} />` : null}
+    ${exactLane ? html`<${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
+    ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}
+    ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
+      <${RouteLink} tab="monitoring" params=${laneTargetParams(target, true)}>Exact runs and diagnostics<//>
+      <${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Runtime settings · Lane candidates<//>
+    </div>` : selection.kind === 'declaration' || selection.kind === 'manual_instance' ? html`<div class="space-y-2">
+      ${selection.kind === 'declaration' ? html`<p class="break-all">${selection.source_path}</p>` : html`<p>Incarnation: ${selection.incarnation}</p>`}
+      <${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Manage package declarations and retained observations<//>
+    </div>` : selection.kind === 'browser' ? html`<${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Runtime settings · Browser paths<//>`
+      : html`<${RouteLink} tab="monitoring" params=${laneTargetParams(target)}>Runtime settings · Machine configuration<//><p>Use the TUI detail or operator tools to load, inspect or restore this machine.</p>`}
+    <details><summary>Observed configuration and worker details</summary>
+      <pre class="whitespace-pre-wrap break-all">${JSON.stringify(row.state, null, 2)}</pre>
+    </details>
+    ${selection.kind === 'exact' ? html`<details><summary>Exact retained reading</summary>
+      <pre class="whitespace-pre-wrap break-all">${JSON.stringify(snapshot.exact_snapshot.lanes.find(lane => lane.laneId === selection.lane_id), null, 2)}</pre>
+    </details>` : null}
+  </section>`
+}
+
+/** The operator inventory is a separate read; displaying it never starts workers. */
+export function LaneInventoryPanel() {
+  const authority = executionWorkspaceAuthority.value
+  const observationRevision = exactLaneObservationRevision(authority)
+  const machineRevision = machineLaneObservationRevision(authority)
+  const [reading, setReading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [received, setReceived] = useState<{ authority: ExecutionWorkspaceAuthority; value: LaneInventory } | null>(null)
+  const [verifying, setVerifying] = useState(false)
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState<AddonCategoryFilter>('all')
+  const [selected, setSelected] = useState<{ id: string; target: LaneNavigationTarget } | null>(null)
+  const request = useRef<AbortController | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const details = useRef<HTMLDivElement | null>(null)
+  const snapshot = received?.authority === authority ? received.value : null
+  async function verifyWorkspace() {
+    const requested = executionWorkspaceAuthority.peek()
+    setVerifying(true); setError(null)
+    try { await refreshExecution({ force: true }) }
+    catch (failure) {
+      if (executionWorkspaceAuthority.peek() === requested) setError(String(failure))
+    } finally { setVerifying(false) }
+  }
+  async function refresh() {
+    if (!mounted.current) return
+    request.current?.abort()
+    const requestedAuthority = executionWorkspaceAuthority.peek()
+    if (requestedAuthority === null) return
+    const controller = new AbortController(); request.current = controller
+    setReading(true); setError(null)
+    try {
+      const value = await fetchLaneInventory(controller.signal)
+      if (!controller.signal.aborted && executionWorkspaceAuthority.peek() === requestedAuthority) {
+        setReceived({ authority: requestedAuthority, value })
+      }
+    } catch (failure) {
+      if (!controller.signal.aborted && executionWorkspaceAuthority.peek() === requestedAuthority) {
+        setError(failure instanceof Error ? failure.message : String(failure))
+      }
+    } finally {
+      if (!controller.signal.aborted && executionWorkspaceAuthority.peek() === requestedAuthority) setReading(false)
+    }
+  }
+  useEffect(() => {
+    setSelected(null); setQuery(''); setCategory('all'); setError(null); setReading(false)
+  }, [authority])
+  useEffect(() => {
+    request.current?.abort()
+    if (authority !== null) void refresh()
+    return () => request.current?.abort()
+  }, [authority, observationRevision, machineRevision])
+  const search = query.trim().toLocaleLowerCase()
+  const rows = snapshot?.rows.filter(row => [row.id, row.label, row.purpose].some(value => value.toLocaleLowerCase().includes(search))) ?? []
+  const groups = groupAddonCategories(rows, inventoryCategory, category)
+  const candidate = snapshot?.rows.find(row => row.id === selected?.id)
+  const detail = candidate && selected && authority
+    && sameLaneTarget(selected.target, laneTargetFor(candidate, authority.workspaceRoot)) ? candidate : undefined
+  useEffect(() => { if (selected !== null) details.current?.focus() }, [selected])
+  return html`<section aria-label="All Lanes" class="space-y-4">
+    <header class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-xl font-semibold">All Lanes</h2>
+      <p>Built-in Lane kinds, package declarations and manual workers.</p></div>
+      <button class=${button} onClick=${refresh} disabled=${reading || authority === null}>Refresh Lanes</button></header>
+    ${authority === null ? html`<div><p role="status">Verify the current workspace to read its Lanes.</p>
+      <button class=${button} onClick=${verifyWorkspace} disabled=${verifying}>${verifying ? 'Verifying workspace…' : 'Verify workspace'}</button></div>` : null}
+    ${reading ? html`<p role="status">Reading Lane inventory…</p>` : null}
+    ${error ? html`<p role="alert">${error}${snapshot ? ' · Showing the previous reading; current state is unverified.' : ''}</p>` : null}
+    ${snapshot ? html`<div class="space-y-2">
+      <p>Observed ${new Date(snapshot.observed_at * 1000).toISOString()} · ${snapshot.rows.length} inventory rows</p>
+      <p>Package read: ${snapshot.package_read.complete ? 'complete' : 'incomplete'} · ${snapshot.package_read.owner_present ? 'manager present' : 'manager not observed'}</p>
+      <p>Exact run reading: ${snapshot.exact_snapshot.exactRunProjectionCount} of ${snapshot.exact_snapshot.exactRunSourceTotal}${snapshot.exact_snapshot.exactRunProjectionTruncated ? ' · truncated' : ''}</p>
+      ${snapshot.package_read.issues.map(issue => html`<p role="alert" class="break-all">${issue.source_path}: ${issue.message}</p>`)}
+    </div>` : null}
+    <label class="block">Find a Lane<input class="block w-full rounded border bg-transparent p-2" type="search" value=${query}
+      onInput=${(event: Event) => setQuery((event.currentTarget as HTMLInputElement).value)} /></label>
+    <${LaneAddonCategoryFilter} label="Lane 역할 필터" value=${category} onChange=${setCategory} />
+    ${snapshot && detail && authority ? html`<div ref=${details} tabIndex=${-1}><${LaneDetails} row=${detail} snapshot=${snapshot} authority=${authority} /></div>`
+      : selected && snapshot ? html`<p role="status">The selected Lane is absent from this reading.</p>` : null}
+    ${snapshot && !groups.length ? html`<p>No Lanes match this search and role.</p>` : null}
+    ${snapshot && groups.map(group => html`<section key=${group.category} class="space-y-3" aria-label=${`Lanes · ${categoryLabel(group.category)}`}>
+      <h3 class="font-semibold">${categoryLabel(group.category)}</h3>
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+      ${group.items.map(row => html`<article key=${row.id} class="min-w-0 rounded border border-[var(--color-border-default)] p-4 space-y-2">
+        <h3 class="font-semibold">${row.label}</h3><p class="break-all">${row.id}</p><p>${row.purpose}</p>
+        ${stateLines(row, snapshot).map(line => html`<p class="break-all">${line}</p>`)}
+        <button class=${button} aria-pressed=${detail?.id === row.id}
+          onClick=${() => { if (authority !== null) setSelected({ id: row.id, target: laneTargetFor(row, authority.workspaceRoot) }) }}>Inspect ${row.label}</button>
+      </article>`)}
+      </div>
+    </section>`)}
+  </section>`
+}

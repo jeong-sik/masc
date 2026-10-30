@@ -1,0 +1,34 @@
+Focused frontend tests
+
+ RUN  v5.0.2 /private/tmp/masc-gate-keeper-schema-20261023/dashboard
+
+
+ Test Files  6 passed (6)
+      Tests  129 passed (129)
+   Start at  22:08:10
+   Duration  29.00s (tests 57%, import 17%, environment 12%, setup 9%, transform 6%)
+
+    Isolate  6 workers spawned · ~822ms startup each (spawn + environment, per file)
+             at least ~4.11s faster with isolate: false — reuses workers across files instead of one per file
+
+
+TypeScript
+
+> masc-dashboard@1.0.0 typecheck /private/tmp/masc-gate-keeper-schema-20261023/dashboard
+> tsc --noEmit
+
+
+Changed-file ESLint
+No diagnostics.
+
+Build identity
+{"schema":"masc.dashboard-build.v1","source_commit":"0f73b0b1086cbab9190d6d4f8222579d04d11740"}
+
+Build completion excerpt
+../assets/dashboard/assets/index-SwngtnJY.js                                   875.86 kB │ gzip: 249.64 kB │ map: 3,611.59 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 30.10s

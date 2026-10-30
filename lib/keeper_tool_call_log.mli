@@ -1,0 +1,526 @@
+(** Keeper_tool_call_log — Full I/O logging for keeper tool calls.
+
+    Persists complete tool call records to [.masc/tool_calls/YYYY-MM/DD.jsonl].
+    Used by dashboard tool-call inspector for debugging.
+
+    @since 2.249.0 *)
+
+val max_output_len : int
+(** Bytes of a record's serialized output that reach disk; the rest is cut with
+    a [...(truncated)] suffix. Exposed because payload builders order their
+    fields against it — an unbounded field placed before a diagnostic one takes
+    the diagnostic away with it (see
+    [Keeper_tool_composition_surface.failure_payload]). *)
+
+val invocation_execution_id :
+  invocation:Agent_core.Tool_contract.Invocation.t -> Ids.Execution_id.t
+(** Journalled invocations use the canonical Core node identity, including
+    after reader reconstruction. Non-journalled invocations mint one weakly
+    owned product identity per exact live SDK invocation. Provider ids alone
+    never join occurrences. *)
+
+val set_truncation_info :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  original_bytes:int ->
+  ?truncated_to:int ->
+  unit ->
+  unit
+(** [set_truncation_info ~invocation ~original_bytes ?truncated_to ()]
+    records pre-truncation output size for the exact invocation. Called by
+    the tool handler wrapper before returning the (possibly truncated)
+    result to AGENT_CORE. Physical invocation identity preserves isolation even
+    when a provider emits blank or repeated tool-use ids. Weak ownership lets a
+    cancelled invocation release its pending observation. *)
+
+val consume_truncation_info :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  int * int option
+(** [consume_truncation_info ~invocation ()] returns
+    [(original_bytes, truncated_to)] for the exact invocation and clears
+    the pending state. Returns [(0, None)] when no truncation info
+    was set (e.g. AGENT_CORE-internal tool call that bypassed the wrapper). *)
+
+val set_disposition :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  disposition:(unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
+  unit
+(** [set_disposition ~invocation ~disposition] records the typed outcome for
+    the exact invocation, alongside {!set_truncation_info} and for the same
+    reason: the boundary between the masc dispatch and the hook that writes
+    the row narrows the value, and the hook cannot get it back. AGENT_CORE
+    hands the hook a [tool_result] that cannot represent [Deferred] and whose
+    error class is a different taxonomy from [tool_failure_class]. *)
+
+val consume_disposition :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition option
+(** [consume_disposition ~invocation ()] returns the typed outcome for the
+    exact invocation and clears it. [None] for a call that did not come
+    through the masc dispatch boundary. *)
+
+val set_file_change_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  evidence:Keeper_file_change_evidence.t ->
+  artifact_refs:Tool_output.artifact_ref list ->
+  unit
+(** Preserve producer-owned file line evidence for the exact physical
+    invocation until the post-tool hook constructs its tool-call row. *)
+
+val consume_file_change_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  Keeper_file_change_evidence.t option
+(** Return and clear file change evidence for the exact invocation. *)
+
+val peek_file_change_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  Keeper_file_change_evidence.t option
+(** Return file change evidence without clearing it. The post-tool hook uses
+    this to build a synchronous row and consumes it only after commit. *)
+
+val peek_file_change_artifact_refs :
+  invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
+(** Producer-owned snapshot references, retained with line evidence until row commit. *)
+
+val set_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> Tool_output.artifact_ref list -> unit
+val peek_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
+val clear_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> unit -> unit
+(** Observer-owned references cross the model projection without entering its
+    data. The logging hook clears them only after its durable row commits. *)
+
+type turn_ctx_cell = Keeper_tool_call_log_context.cell
+(** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
+    [run_turn] invocation and threaded to every context reader of the
+    same run, so concurrent runs of one keeper cannot overwrite each
+    other's attribution. *)
+
+val create_turn_ctx_cell : unit -> turn_ctx_cell
+
+val set_turn_context :
+  cell:turn_ctx_cell ->
+  ?agent_name:string ->
+  ?turn_kind:Turn_record.turn_kind ->
+  ?lane:string ->
+  ?tool_choice:string ->
+  ?thinking_enabled:bool ->
+  ?prompt_fingerprint:string ->
+  ?trace_id:string ->
+  ?session_id:string ->
+  ?turn:int ->
+  ?keeper_turn_id:int ->
+  ?task_id:string ->
+  ?sandbox_profile:string ->
+  ?sandbox_root:string ->
+  ?sandbox_roots:string list ->
+  ?network_mode:string ->
+  ?runtime_profile:string ->
+  ?answer_source_ids:string list ->
+  unit ->
+  unit
+(** [set_turn_context ~cell ...] stores the current effective turn policy
+    for subsequent tool-call logs emitted during this run. *)
+
+val get_turn_context :
+  cell:turn_ctx_cell ->
+  unit ->string option * string option * bool option * string option * string option * string option * int option * int option * string option * string option * string option
+(** Returns [(lane, tool_choice, thinking_enabled, trace_id,
+    prompt_fingerprint, session_id, turn, keeper_turn_id, task_id,
+    sandbox_profile, network_mode)] for
+    the run, or [None] values when no turn context has
+    been recorded. *)
+
+val runtime_observability_contract_json_for_call :
+  keeper_name:string ->
+  cell:turn_ctx_cell ->
+  unit ->
+  Yojson.Safe.t
+(** [runtime_observability_contract_json_for_call ~keeper_name ~cell ()]
+    returns the observability projection from the run's turn context. *)
+
+val action_radius_json_for_call :
+  cell:turn_ctx_cell ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  duration_ms:float ->
+  ?error:string ->
+  unit ->
+  Yojson.Safe.t
+(** [action_radius_json_for_call ...] derives the canonical action radius
+    from a keeper tool call and its current sandbox context. *)
+
+val route_evidence_json_of_tool_io :
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  output_text:string ->
+  execution_evidence:Yojson.Safe.t option ->
+  Yojson.Safe.t option
+(** [route_evidence_json_of_tool_io] extracts first-class route proof from a
+    keeper tool call. Descriptor-backed calls always include descriptor route
+    fields such as [descriptor_id], [public_name], [canonical_name], [executor],
+    [backend], [sandbox], evaluation-only [eval_tags], and policy labels.
+    Runtime route/status fields such as [via], [sandbox_profile],
+    [network_mode], [status], and redacted command/cwd/path are added when
+    present, from the output or, for a completed Execute, from its
+    [execution_evidence]. Composition surface tools are not descriptor-backed;
+    their RFC-0386 [tool_kind] is picked up from the tool's own result payload
+    when present. *)
+
+val execution_evidence_metadata : (string * Yojson.Safe.t) list -> Yojson.Safe.t
+(** Tool-result metadata carrying a completed Execute's audit fields (shell
+    receipts, sandbox labels, a captured stream's output completeness). A
+    direct call's metadata reaches the tool-call hook and is not part of the
+    provider request, so these fields are recorded without being sent to the
+    model (#39035). A composition node's model-facing result still carries its
+    whole node result, metadata included. *)
+
+val execution_evidence_of_metadata : Yojson.Safe.t option -> Yojson.Safe.t option
+(** The audit object {!execution_evidence_metadata} put in tool-result
+    metadata, or [None] when the metadata carries none. *)
+
+val init : base_path:string -> unit -> unit
+(** [init ~base_path ()] creates the Dated_jsonl store under
+    [<base>/.masc]. Call once at startup. The server's prune pass removes its day files
+    by age. *)
+
+val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+(** [start_flush_fiber ~sw ~clock] enables bounded asynchronous appends and
+    starts a background drain fiber. Callers that only invoke [init] keep the
+    legacy synchronous append behavior, which is useful for CLI and tests. *)
+
+type flush_completion =
+  | All_committed
+  | All_committed_with_post_commit_failures of exn * exn list
+
+val flush_committed : unit -> flush_completion
+(** Drain under the shared append lock. Post-commit failures are retained in
+    the receipt while draining continues; an uncommitted failure requeues its
+    row and raises. Cancellation always propagates. A returned receipt means
+    the drain reached an empty queue with every taken row committed. *)
+
+val flush_now : unit -> unit
+(** Drain queued asynchronous appends immediately. Intended for shutdown and
+    focused tests. An uncommitted failure requeues the row and raises. Post-commit failures
+    are raised after draining the remaining rows; returning
+    normally means every row taken by this drain committed. *)
+
+val store : unit -> Dated_jsonl.t option
+(** [store ()] is the initialized durable store, if any. *)
+
+val store_dir : unit -> string option
+(** [store_dir ()] returns the initialized durable store directory, if any. *)
+
+val current_log_path : unit -> string option
+(** [current_log_path ()] returns today's JSONL file path for the initialized
+    durable store, if any. The file may not exist yet when no tool call has
+    been appended today. *)
+
+val configured_masc_root : unit -> string option
+(** [configured_masc_root ()] returns the MASC root passed to [init], even if
+    the store failed to open. Runtime sidecars use this to keep their durable
+    projections under the same root. *)
+
+val committed_revision : keeper_name:string -> int
+(** Monotonic in-process revision of one keeper, advanced exactly after each
+    successful durable tool-call append for that keeper; 0 before its first.
+    Readers use it to invalidate that keeper's derived caches without making
+    the persistence owner depend on a dashboard module. *)
+
+type record_kind =
+  | Tool_call
+  | Composition_run
+  | Lifecycle_event
+
+type committed_call = private
+  { record_kind : record_kind
+  ; keeper_name : string
+  ; tool_name : string
+  ; execution_id : Ids.Execution_id.t option
+  ; tool_use_id : string option
+  ; trace_id : string option
+  ; task_id : string option
+  ; keeper_turn_id : int option
+  ; composition_node_id : string option
+  ; parent_tool_use_id : string option
+  }
+(** Original producer identities after a durable append. Missing identities
+    remain [None]; this metadata carries no Tool input/output or model text. *)
+
+type commit_observer
+val make_commit_observer : (committed_call -> unit) -> commit_observer
+val with_commit_observer : commit_observer -> (unit -> 'a) -> 'a
+(** Eio-fiber scope inherited by its children, isolated from sibling scopes.
+    Opting into durable observation requires synchronous appends in this scope,
+    including direct SDK calls and native composition leaves. In this scope an
+    unavailable store or a failed append raises from [log_call], even for a
+    row that would otherwise be queued or dropped, so a caller with no handler
+    of its own fails its Tool call. No event is
+    delivered for an unavailable store or failed append. This changes observer
+    I/O cost; matched timing comparisons must use the same observer mode. *)
+val capture_commit_observer : (unit -> 'a) -> unit -> 'a
+(** Capture this exact observer scope for an actor/owner handoff. An absent
+    source observer stays absent even when another scope invokes the closure. *)
+val failed_commit_deliveries : commit_observer -> int
+(** Non-cancellation sink failures are counted and do not turn a committed Tool
+    effect into failure/retry. A consumer with failures must retain a coverage
+    gap. Cancellation propagates; committed rows retain their original truth. *)
+
+val record_kind_of_string : string -> record_kind option
+val log_call :
+  keeper_name:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  output_text:string ->
+  duration_ms:float ->
+  wire_outcome:Tool_result.tool_call_outcome ->
+  ?record_kind:record_kind ->
+  ?model:string ->
+  ?agent_name:string ->
+  ?turn_kind:Turn_record.turn_kind ->
+  ?lane:string ->
+  ?tool_choice:string ->
+  ?thinking_enabled:bool ->
+  ?prompt_fingerprint:string ->
+  ?execution_id:Ids.Execution_id.t ->
+  ?tool_observation:Tool_observation.t ->
+  ?physical_execution_id:Ids.Execution_id.t ->
+  ?tool_use_id:string ->
+  ?planned_index:int ->
+  ?batch_index:int ->
+  ?batch_size:int ->
+  ?execution_mode:Agent_core.Tool_contract.execution_mode ->
+  ?typed_result:Tool_result.result ->
+  ?disposition:
+    (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
+  ?file_change_evidence:Keeper_file_change_evidence.t ->
+  ?execution_evidence:Yojson.Safe.t ->
+  ?artifact_refs:Tool_output.artifact_ref list ->
+  ?composition_tool:string ->
+  ?skill_reference:Skill_reference.t ->
+  ?composition_run_id:string ->
+  ?composition_node_id:string ->
+  ?composition_execution:Keeper_tool_composition_catalog.execution_mode ->
+  ?composition_tool_kind:Keeper_tool_descriptor.tool_kind ->
+  ?parent_tool_use_id:string ->
+  ?trace_id:string ->
+  ?session_id:string ->
+  ?turn:int ->
+  ?keeper_turn_id:int ->
+  ?task_id:string ->
+  ?sandbox_profile:string ->
+  ?sandbox_root:string ->
+  ?sandbox_roots:string list ->
+  ?network_mode:string ->
+  ?runtime_profile:string ->
+  ?answer_source_ids:string list ->
+  ?result_bytes:int ->
+  ?truncated_to:int ->
+  ?input_fingerprint:string ->
+  ?output_fingerprint:string ->
+  ?on_committed:(unit -> unit) ->
+  unit ->
+  unit
+(** [log_call ...] persists a single tool call record with full I/O.
+    [input_fingerprint] / [output_fingerprint] are the I/O identity the loop
+    guard's cross-cycle seed (task-627) reads back off the row; computed from
+    the raw input and output at the call boundary, not from the row's redacted
+    and truncated [input]/[output]. A row without them cannot match a live
+    call and the seed skips it.
+    [record_kind] defaults to [Tool_call]; [Composition_run] is the explicit
+    terminal aggregate for a composition and must not be interpreted as a
+    second physical invocation. [Lifecycle_event] is an opening or progress
+    marker, not an invocation outcome, and quality aggregators exclude it. A
+    step inside an invocation, such as a vision candidate arm starting or
+    ending, is one even when it carries the step's own outcome, so a reader
+    branches on [record_kind] before it reads an outcome.
+    [skill_reference], when present, is the exact published Skill revision
+    that produced the run; clients must not infer it from the mutable
+    composition tool name.
+    [tool_observation] freezes producer-owned attribution, physical turn and
+    progress declaration in this same authoritative row. It forces a synchronous
+    append, independently of any observational sink or bounded queue. Its absence
+    means this producer supplied no immutable attribution; readers cannot infer it.
+    [execution_id] is the RFC-0233 canonical join key; ordinary SDK calls share
+    it with their trajectory row. A Composition node retains this logical
+    identity across result rechecks. [physical_execution_id] identifies the
+    exact dispatched invocation instead: a fresh result recheck has a new one,
+    while repeated callbacks on the same opaque invocation share one. Absence
+    does not prove a physical call; no identity is inferred from a logical node
+    or provider id. [tool_use_id] is the provider call id for the
+    same execution (when the dispatch lane has one) — the key that the
+    agent_core:tool_called/agent_core:tool_completed event rows also carry. Blank and
+    repeated provider ids remain meaningful when scoped by [turn] and
+    [planned_index], so they are persisted unchanged. [batch_index],
+    [batch_size], and [execution_mode] preserve Agent Core's actual schedule
+    rather than inferring concurrency from timing. [wire_outcome] is the
+    separate AGENT_CORE response projection; it does not replace the MASC
+    execution [disposition]. It is required: a caller that did not observe
+    the projection passes [Tool_result.Unknown] itself, so no call site can
+    leave the field to a default. A completed or deferred execution may therefore
+    have [wire_outcome=error] when result delivery fails afterwards.
+    No parallel [success] boolean is accepted or persisted: readers consume
+    [disposition] for execution truth and [wire_outcome] for response truth.
+    [typed_result] serializes the producer-owned disposition when it is
+    available. Any canonical normalized artifact references in its typed data
+    are also persisted as actual JSON under [artifact_refs], keeping the
+    content-addressed blobs visible to offline maintenance without parsing a
+    JSON-bearing model-output string. Those GC roots deliberately carry an
+    empty preview; model/UI preview projection remains owned by [output]. The
+    composition fields are an explicit observation envelope supplied by the
+    typed plan executor; readers must not reconstruct them from [tool_use_id]
+    or tool-name strings. [file_change_evidence] is producer-owned typed data,
+    persisted independently of the truncated opaque [output] preview.
+    [execution_evidence] is a completed Execute's audit object from
+    {!execution_evidence_of_metadata}, recorded as [execution_evidence] after
+    the same secret redaction and per-leaf bound as [input]; route evidence
+    reads the redacted object. The model's [output] carries only the unusual
+    parts of it.
+    Explicit [artifact_refs] and [typed_result]'s retained artifacts require a
+    synchronous append even without a callback; an unavailable store or failed
+    append raises rather than losing their receipt in the preview queue.
+    [on_committed], when supplied, also forces the synchronous
+    append boundary and runs only after that append succeeds. It is intended
+    for exact completion notifications whose readers must not race the
+    asynchronous log queue. [turn_kind] names which turn made the call —
+    a submitted operation's turn or the keeper's own autonomous cycle —
+    so a reader can join calls to a submission instead of inferring the
+    boundary from timestamps that a concurrent autonomous turn overlaps.
+    Output is truncated to 4000 bytes. [model] is a compatibility input only;
+    non-empty values are redacted to the neutral runtime lane. [runtime_profile]
+    is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
+    [thinking_enabled]) capture the effective tool
+    selection context. [result_bytes] is the original output size before
+    any observation-only log preview truncation. [truncated_to] records the
+    retained preview size when one exists; it never describes mutation of the
+    Tool result delivered to the Keeper. Best-effort (failures logged). *)
+
+type index_error = Index_unavailable of string
+(** The derived read index (RFC-0437) could not be opened, advanced, or read
+    back; the string is the index's own detail. Every reader below returns it
+    rather than an empty list, so a caller can tell a ledger with no rows from
+    a ledger it could not read. *)
+
+val read_after :
+  keeper_name:string -> after:Keeper_tool_call_index.frontier ->
+  project:(Yojson.Safe.t -> 'a option) ->
+  ('a Keeper_tool_call_index.batch, index_error) result
+(** Read authoritative tool-call rows after the per-file append frontier. *)
+
+val current_frontier :
+  keeper_name:string -> (Keeper_tool_call_index.frontier, index_error) result
+(** Capture committed append positions. This does not flush queued rows. *)
+
+val read_addressed :
+  base_path:string -> codebase:string -> ?keeper_name:string ->
+  limit:int -> offset:int -> unit -> (Yojson.Safe.t list, index_error) result
+(** Read canonical addressed tool facts for the explicit workspace. Facts with
+    producer observations committed synchronously; no IDE sink is consulted.
+    Source/index corruption is an error, not an empty activity page. *)
+
+val read_recent :
+  ?keeper_name:string ->
+  ?n:int ->
+  unit ->
+  (Yojson.Safe.t list, index_error) result
+(** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
+    oldest first, optionally only one keeper's. Default [n=100].
+
+    The answer is exact: [n] rows come back whenever the store holds [n] for
+    that keeper, so a short answer means the store is short. It used to be a
+    tail scan with a keeper filter, which returned 454 rows for a request of
+    500 and left the caller unable to tell that from a keeper that had made
+    no more calls.
+
+    Answered from the derived read index (RFC-0437), which advances itself to
+    the store's current end before the query and names rows the store is then
+    read for - the store stays the authority. An index that cannot be built
+    or read is [Error (Index_unavailable detail)] rather than fallen back from
+    or answered as empty, so there is one read path and its failure is the
+    caller's to state. An unconfigured store is [Ok []]. *)
+
+val read_over_scan_factor : int
+(** Scan multiplier for callers that share one fleet read
+    ({!read_recent_rows} + {!filter_rows_for_keeper}) instead of asking per
+    keeper: to end up with [n] rows from one keeper such a read must cover
+    [n * read_over_scan_factor] fleet rows, and it is still a scan, so the
+    coverage it buys is approximate.
+
+    {!read_recent} no longer applies it. That read goes through the index and
+    is exact. *)
+
+val read_recent_rows : n:int -> unit -> (Yojson.Safe.t list, index_error) result
+(** [read_recent_rows ~n ()] returns the [n] most recent fleet-wide rows
+    with no keeper filter. One shared read serves every per-keeper
+    {!filter_rows_for_keeper} derivation, instead of each keeper
+    re-parsing the store. Read through the same index as {!read_recent},
+    with the same [Error] on an index that cannot be read. *)
+
+val filter_rows_for_keeper :
+  keeper_name:string -> n:int -> Yojson.Safe.t list -> Yojson.Safe.t list
+(** [filter_rows_for_keeper ~keeper_name ~n rows] is [read_recent]'s
+    keeper filter applied to an already-read row window: rows whose
+    ["keeper"] field equals [keeper_name], order preserved, truncated to
+    the last [n]. *)
+
+val file_change_tally :
+  ?keeper_name:string ->
+  window_hours:float ->
+  unit ->
+  Keeper_tool_call_file_change.tally
+(** The file changes in the trailing [window_hours], as a sealed tally.
+
+    Reads only what the store gained since the last call with the same
+    [(keeper_name, window_hours)]: the store is append-only per day file, so a
+    caller ten seconds apart reads the appended bytes rather than the window.
+    Measured 2026-09-06, a 24h window was 242MB against about 15MB appended in
+    a busy hour.
+
+    The carried tally is dropped and refolded when the window's day range moves
+    — an unreadable row carries no timestamp, so a folded tally cannot drop
+    what aged out. That happens once a day; the repeats this exists for happen
+    within one. *)
+
+val carried_entry_answers :
+  entry_since_ts:float ->
+  entry_oldest_row_ts:float option ->
+  since_ts:float ->
+  since:string ->
+  bool
+(** Whether a tally folded against [entry_since_ts], whose oldest counted row
+    is [entry_oldest_row_ts], still answers for a window whose floor is now
+    [since_ts] over the day range starting [since].
+
+    A folded tally cannot drop a row — an unreadable row carries no timestamp —
+    so it stays usable only while nothing it counted has fallen behind the
+    floor. Exposed because the read that uses it needs a clock and this does
+    not. *)
+
+val read_window :
+  ?keeper_name:string ->
+  window_hours:float ->
+  unit ->
+  Yojson.Safe.t list
+(** [read_window ?keeper_name ~window_hours ()] returns entries within the
+    trailing [window_hours]. Non-positive windows return [[]]. *)
+
+val read_latest :
+  ?keeper_name:string ->
+  unit ->
+  Yojson.Safe.t option
+(** [read_latest ?keeper_name ()] returns the newest matching entry, if any.
+    Uses a small raw-line scan so hot-path callers can avoid materializing
+    a larger recent-entry window when they only need the latest tool. *)
+
+val reset_for_testing : unit -> unit
+(** Resets the in-memory store reference. For unit tests only. *)
+
+val pending_truncation_count_for_testing : unit -> int
+(** Number of live invocation-scoped truncation observations. Test only. *)
+
+val pending_file_change_evidence_count_for_testing : unit -> int
+(** Number of live invocation-scoped file change observations. Test only. *)
+
+val queued_count_for_testing : unit -> int
+(** Number of queued asynchronous append records. For unit tests only. *)

@@ -1,0 +1,25 @@
+{
+  "observed_at": "2026-09-07T10:51:48.054530+00:00",
+  "root": "/Users/dancer/me/.masc/keepers",
+  "read_only": true,
+  "totals": {
+    "databases": 21,
+    "rows": 1013,
+    "nonterminal": 0,
+    "input_digest_mismatches": 0,
+    "invalid_timestamps": 0,
+    "read_errors": 1
+  },
+  "limits": [
+    "Hashes existing canonical stored input_json bytes; does not reserialize payloads or publish their contents.",
+    "No full schema-object, source_json, migration, running binary, scheduler or power-loss verification.",
+    "Snapshots were read separately while the runtime remained active."
+  ],
+  "uninitialized_candidate": {
+    "keeper_directory": "tool_usage",
+    "file_bytes": 0,
+    "schema_objects": [],
+    "keeper_toml_exists": false,
+    "classification": "uninitialized file in tool-usage metrics directory; not a validated operation journal"
+  }
+}

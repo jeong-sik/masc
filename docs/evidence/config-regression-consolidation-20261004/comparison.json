@@ -1,0 +1,20 @@
+{
+  "canonical_k1": "4b87f3d73ca7212ad0d883a20467bf7b56cef962",
+  "canonical_k2": "d465e05bdce78cce11fcebc5993d61835a8b2625",
+  "duplicates": [
+    {
+      "pr": 41060,
+      "head": "95bac64e3918a191c66507515975437feb3e8235",
+      "own_change_parent": "c90981f0181aa22005d1e74ce94e47ee0877809e",
+      "own_diff_sha256": "c69a54cf270b7ff641d34de16ce0107f7e6326d93e7e6b736567f1d2b205ea24",
+      "native_stack": null
+    },
+    {
+      "pr": 41062,
+      "head": "deeef1dbf7ea16c1ed0759f7eefa34e182647215",
+      "own_change_parent": "95bac64e3918a191c66507515975437feb3e8235",
+      "own_diff_sha256": "db4eff9d136d44f975a85353160b9a33566ff8cda13e3d031734ce96a7fe1536",
+      "native_stack": null
+    }
+  ]
+}

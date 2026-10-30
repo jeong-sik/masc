@@ -1,0 +1,37 @@
+{
+  "source_command": [
+    "gh",
+    "run",
+    "view",
+    "40355689343",
+    "--repo",
+    "jeong-sik/masc",
+    "--log-failed"
+  ],
+  "source_sha256": "c595d639263cc24926b55949aa01d7e5b5d2eff6a1868b9b3cea0ec78b974f43",
+  "source_bytes": 31143,
+  "selection": "Exact original line numbers and contents from the gh-rendered failed-job log. Only the test fixture type diagnostic is retained; long compiler command lines are omitted.",
+  "scope": "Compilation stopped before suite execution; this is not a failing runtime recovery assertion.",
+  "artifact_metadata": [
+    {
+      "id": 12663954994,
+      "node_id": "MDg6QXJ0aWZhY3QxMjY2Mzk1NDk5NA==",
+      "name": "suite-runner-log",
+      "size_in_bytes": 4971,
+      "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12663954994",
+      "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12663954994/zip",
+      "expired": false,
+      "digest": "sha256:cd15769030d59773faf674d3fe086ef26a4b6a9ede3701634b389039cc96be06",
+      "created_at": "2026-10-26T16:10:20Z",
+      "updated_at": "2026-10-26T16:10:20Z",
+      "expires_at": "2026-11-09T16:10:19Z",
+      "workflow_run": {
+        "id": 40355689343,
+        "repository_id": 1136640865,
+        "head_repository_id": 1136640865,
+        "head_branch": "fix/schedule-startup-recovery-20261027",
+        "head_sha": "3fdf8c35554b3d35b6bed57b6ef62495bba09fd8"
+      }
+    }
+  ]
+}

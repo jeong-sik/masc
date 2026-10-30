@@ -1,0 +1,67 @@
+[
+  {
+    "file": "lib/auth/auth.mli",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "lib/auth/auth_credential_base.ml",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "lib/auth/auth_credential_token.ml",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "lib/auth/auth_credential_token.mli",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "lib/play/play_invite.ml",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "lib/play/play_invite.mli",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "lib/server/server_routes_http_routes_play.ml",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "test/test_play_credential_transaction.ml",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "test/test_play_invite.ml",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "lib/keeper/keeper_dos_controller.ml",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "lib/keeper/keeper_dos_controller.mli",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "test/test_dos_input_routes.ml",
+    "exit": 0,
+    "output": ""
+  },
+  {
+    "file": "test/test_dos_tools.ml",
+    "exit": 0,
+    "output": ""
+  }
+]

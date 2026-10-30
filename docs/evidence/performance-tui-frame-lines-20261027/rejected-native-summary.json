@@ -1,0 +1,197 @@
+{
+  "schema": "masc.frame-lines-native-carrier-descriptive-summary.v1",
+  "correctness": {
+    "kind": "correctness",
+    "cases": 5473,
+    "roles": 2,
+    "input_unchanged_and_outputs_survive_mutation": true
+  },
+  "environment": {
+    "kind": "environment",
+    "ocaml_version": "5.5.1",
+    "word_size": 64,
+    "backend": "native extracted helper only; MASC integration not run",
+    "wall_clock": "Unix.gettimeofday not monotonic",
+    "allocation": "Gc.allocated_bytes counter delta includes measurement overhead"
+  },
+  "raw_records": 32,
+  "rows": [
+    {
+      "stratum": "empty",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 16.0192,
+          "candidate": 0.0192
+        },
+        "cpu_delta_s": {
+          "baseline": 9.700000000000001e-09,
+          "candidate": 2.4e-09
+        },
+        "wall_delta_s": {
+          "baseline": 7.350450000000001e-08,
+          "candidate": 2.408e-09
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -99.88014382740711,
+        "cpu_delta_s": -75.25773195876289,
+        "wall_delta_s": -96.72401009462006
+      }
+    },
+    {
+      "stratum": "LF",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 128.0192,
+          "candidate": 112.0192
+        },
+        "cpu_delta_s": {
+          "baseline": 1.8999999999999998e-08,
+          "candidate": 1.1600000000000001e-08
+        },
+        "wall_delta_s": {
+          "baseline": 1.9002e-08,
+          "candidate": 1.16825e-08
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -12.498125281207829,
+        "cpu_delta_s": -38.947368421052616,
+        "wall_delta_s": -38.519629512682876
+      }
+    },
+    {
+      "stratum": "row120",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 368.048,
+          "candidate": 232.048
+        },
+        "cpu_delta_s": {
+          "baseline": 1.8575e-07,
+          "candidate": 2.86e-07
+        },
+        "wall_delta_s": {
+          "baseline": 2.2375575e-07,
+          "candidate": 2.9569875e-07
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -36.95170195191931,
+        "cpu_delta_s": 53.97039030955584,
+        "wall_delta_s": 32.152469824797805
+      }
+    },
+    {
+      "stratum": "screen40x120",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 12264.192,
+          "candidate": 7408.192
+        },
+        "cpu_delta_s": {
+          "baseline": 7.055e-06,
+          "candidate": 1.1643999999999999e-05
+        },
+        "wall_delta_s": {
+          "baseline": 9.126902000000001e-06,
+          "candidate": 1.2526751e-05
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -39.59494437138622,
+        "cpu_delta_s": 65.04606661941882,
+        "wall_delta_s": 37.250854671168796
+      }
+    },
+    {
+      "stratum": "blank40x120",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 12264.192,
+          "candidate": 7408.192
+        },
+        "cpu_delta_s": {
+          "baseline": 6.304e-06,
+          "candidate": 1.1273e-05
+        },
+        "wall_delta_s": {
+          "baseline": 6.30188e-06,
+          "candidate": 1.1271954e-05
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -39.59494437138622,
+        "cpu_delta_s": 78.82296954314721,
+        "wall_delta_s": 78.8665287184142
+      }
+    },
+    {
+      "stratum": "unicode40",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 16384.192,
+          "candidate": 9328.192
+        },
+        "cpu_delta_s": {
+          "baseline": 9.058e-06,
+          "candidate": 1.5913e-05
+        },
+        "wall_delta_s": {
+          "baseline": 9.055137e-06,
+          "candidate": 1.6142129999999998e-05
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -43.06590157146596,
+        "cpu_delta_s": 75.67895782733495,
+        "wall_delta_s": 78.26488986306886
+      }
+    },
+    {
+      "stratum": "ANSI40",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 13024.192,
+          "candidate": 7728.192
+        },
+        "cpu_delta_s": {
+          "baseline": 7.307e-06,
+          "candidate": 1.2633000000000001e-05
+        },
+        "wall_delta_s": {
+          "baseline": 8.229971e-06,
+          "candidate": 1.2633084999999998e-05
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -40.662791211923164,
+        "cpu_delta_s": 72.88901053784045,
+        "wall_delta_s": 53.50096616379327
+      }
+    },
+    {
+      "stratum": "tall300x120",
+      "per_call": {
+        "allocation_delta_bytes": {
+          "baseline": 91560.96,
+          "candidate": 55248.96
+        },
+        "cpu_delta_s": {
+          "baseline": 5.6735000000000005e-05,
+          "candidate": 9.895999999999999e-05
+        },
+        "wall_delta_s": {
+          "baseline": 6.502031999999999e-05,
+          "candidate": 0.00010475039499999999
+        }
+      },
+      "change_percent": {
+        "allocation_delta_bytes": -39.65882402281496,
+        "cpu_delta_s": 74.42495813871504,
+        "wall_delta_s": 61.10409022902379
+      }
+    }
+  ],
+  "scope": "Two phases/role, stdlib/Unix-only local extracted native helper with default5.5.1 flags; probes/nonmonotonicwall/sharedhost/ABBA limits, no MASC integration/nativeTUI/SLO."
+}

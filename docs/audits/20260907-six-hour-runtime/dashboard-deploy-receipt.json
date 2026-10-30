@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-07T05:15:17.626547+00:00",
+  "source_commit": "fe702d71daefc1f87de1434202e4c9de17d7711c",
+  "runtime_commit": "fe702d71daefc1f87de1434202e4c9de17d7711c",
+  "workflow_run_id": "34085743562",
+  "archive_sha256": "ab0b613eb6593547595e731b797b54d35e4d3471c47096bf8c506499ec020271",
+  "destination": "/Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard",
+  "index_sha256": "8e3b1f76c3619a1ea72494125e462bd1b3b4c49d72ba8fd5cf5c0870b35adb61",
+  "build_stamp": "2026-09-07T05:11:29.507Z",
+  "stamp_mtime_preserved": true,
+  "verified_artifact_files": 642,
+  "replaced_files": [
+    ".build-stamp"
+  ],
+  "new_files": [],
+  "prior_asset_files_retained": true,
+  "backup_path": "/private/tmp/masc-dashboard-bundle-fe702d71/prior-files",
+  "runtime_restarted": false
+}

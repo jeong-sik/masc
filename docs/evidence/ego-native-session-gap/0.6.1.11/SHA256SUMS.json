@@ -1,0 +1,18 @@
+{
+  "space.json": "bc38a3893804782b5ebdbb62d19115c9d70b64e3905260f5b51ff4d442d77d86",
+  "server.py": "6f903e5f15a8534eaedb0ed43ea8a4d02deecde48c7c9200857eb17966c870c8",
+  "index.html": "a5b816315c193ae8e26fb179ded36d3407ef92db0786e301e341d8c4b978f751",
+  "dialog-gap-final.png": "13be3e07f43b343b4a6b0057ae95b5cd7d088b79d2df3dbee8cc235bdb3d05cf",
+  "server.json": "f6d099138987bb23e0d70f33cb38d4a90671306b685cba0be5fcbe00f8649e32",
+  "cleanup-selected.json": "686ad5e53a32fbe420cbd3dfbc1bd4ad408163285e0655949005faabbc703957",
+  "sdk-version-observation.json": "b68e5413db7780a3e3ebce7a6190243ac291d768b4e1cb0ef40b9da3a3af1da2",
+  "post-stop-observation.json": "e4b2aaa687f4129a6e260d6dab572d22bdef905de5d5786fa2a41619cb82cd81",
+  "round-02-observer.mjs": "4f760a955be1bf42f83261c3a51cfc4aa76a394e6c44f7b18071db1c3d61e1f6",
+  "round-01-guardian.mjs": "2688f66f5e3031b4f7146b58d4fccb10f0626322d283bfd210a1010f7320b1d5",
+  "README.md": "ce4fa645beb13e763cfcbd178d875f77790d368898246e607f01014b395f02a1",
+  "observation-before-release.json": "35c7979c264c74b802bda9d3a5ff589f332332af0791cfd78bce355a9ed1d898",
+  "round-03-finish.mjs": "c26fe6f1dae18f2c4f967a55a0701f23535f8133e3e868d5f42a591bd1fbf572",
+  "guardian-finished.json": "9f26bc4ee1bc6563c58416ae4146567fdb3e6268e326ef74dcd6b9106d2a875b",
+  "guardian-ready.json": "476ee70ea877f0d63162dc7650c33d885aefdf6999590e3d7637b269640422df",
+  "observer-finished.json": "91865796f284c6de1237a2bd822dde326cb49af0de366acc38d09b3fd5f70c80"
+}

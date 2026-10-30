@@ -1,0 +1,66 @@
+# Release-evidence install smoke runtime config.
+#
+# Copied verbatim into the isolated base path by scripts/release-evidence.sh.
+# It lives here as a file, not as a heredoc inside that script, so
+# test_runtime_config_validity can check it against
+# Server_runtime_bootstrap.mandatory_exact_output_lane_ids. A heredoc is
+# invisible to the compiler and to every test, which is how the
+# hitl_auto_judge lane requirement added in #25671 reached main unnoticed and
+# failed every push for ~29 hours (#25663).
+#
+# Nothing here contacts a provider: every endpoint is an isolated dead port and
+# release-evidence.sh sets MASC_KEEPER_AUTONOMOUS_ENABLED=false. This fixture
+# only proves the installed binary boots and serves /health.
+
+[runtime]
+# The default model id must be known to the AGENT_CORE capability catalog, or the
+# startup capability gate (missing_runtime_model_capabilities ->
+# Missing_catalog_models, RFC-0206)
+# refuses to boot (a fixture model named "smoke" is absent from the catalog and
+# was rejected, breaking this evidence step on every OCaml push to main).
+# deepseek-v4-flash is the catalog-known fleet default; the provider endpoint
+# below is an isolated dead port. The [models.deepseek-v4-flash] block mirrors
+# config/runtime.toml's shape so the runtime resolves; its model id is what the
+# gate matches against the catalog.
+default = "ollama_cloud.deepseek-v4-flash"
+
+# Startup requires every id in Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+# to be declared here with a non-empty slot list; it synthesizes nothing. A slot
+# names a runtime binding from this same file, so the only slot this fixture can
+# offer is the binding it declares below.
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["ollama_cloud.deepseek-v4-flash"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["ollama_cloud.deepseek-v4-flash"]
+
+[providers.ollama_cloud]
+display-name = "Release Evidence Smoke"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+# Exact-output slots above run on this provider, and a slot whose provider
+# declares no exact-body-timeout-s is left out at boot (#38779). Nothing here is
+# ever answered, so the value only has to be a valid deadline.
+exact-body-timeout-s = 1200.0
+
+# Synthetic authorization for the loopback model fixture. This smoke never
+# reaches Ollama Cloud, so inheriting that catalog row's environment credential
+# would make the hermetic first-turn proof depend on OLLAMA_CLOUD_API_KEY.
+[providers.ollama_cloud.credentials]
+type = "inline"
+value = "release-evidence-loopback"
+
+[models.deepseek-v4-flash]
+# config/runtime.toml declares this on the same row: ollama.com /v1 turns
+# reasoning on when a request carries no control, so a row that says
+# nothing about reasoning is refused before dispatch (#36412) -- here that
+# refusal ended the first Keeper turn before the fixture model saw a request.
+reasoning-uncontrolled = true
+api-name = "deepseek-v4-flash"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[ollama_cloud.deepseek-v4-flash]
+is-default = true
+max-concurrent = 1

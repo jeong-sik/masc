@@ -1,0 +1,79 @@
+{
+  "schema": "masc.independent-source-review-verdict.v2",
+  "reviewer": "/root/concurrent_probe_review",
+  "parent_revision": "4ac6dce147d735d74440263ad79071da34d77878",
+  "app_api_authority": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "diff_sha256": "edbc65cd679a6a5c3d57da12136635a0b42cec832ee5d0d51c046f46f1b0ddeb",
+  "files": [
+    {
+      "path": "scripts/harness/perf/README-keeper-scale-session.md",
+      "sha256": "0ab3b926cde79ef7cd325733b489fc5d2cd2d7cddc18fd324367d6ff1ec8b36e",
+      "bytes": 5494,
+      "lines": 94,
+      "parent_sha256": "b85d749288a6c56ab3048a7184ec5402215d39a37d1e9ad63c0763071f6541a0"
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_fault_probe.py",
+      "sha256": "bb788cb70fe91301f922b5b8aedc257f039e92b5a87fefebe3b6beb0e34b5822",
+      "bytes": 14182,
+      "lines": 240,
+      "parent_sha256": "39813847175b0ad83c92a904bd159533af5e96d318a286fc19af3e8d48cee9e8"
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_packet_audit.py",
+      "sha256": "e355de804fbf64d9f52237f9ffdb3ba0e1c04fe424a1874f674fb6fad2b739f0",
+      "bytes": 26417,
+      "lines": 408,
+      "parent_sha256": "d90322b27342bc392913a831678ec155f9bac1975eb6963ec6c1e305165383a5"
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_session.py",
+      "sha256": "c9e8f173d4e69b4c63d3472c15d8b7377501875d4b6f455028e899288662f9da",
+      "bytes": 55094,
+      "lines": 1013,
+      "parent_sha256": "ab5157338bea4e3f019bac7c5f856d135f8f9875b00b6624a2a1178b73000f29"
+    }
+  ],
+  "verdict": "CHANGES_REQUESTED",
+  "counts": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 1
+  },
+  "findings": [
+    {
+      "id": "P2-1",
+      "title": "Correct batch follower public leader-state projection rejected",
+      "producer": "scripts/harness/perf/keeper_scale_session.py:212",
+      "reader": "scripts/harness/perf/keeper_scale_packet_audit.py:178",
+      "fault_fixture": "scripts/harness/perf/keeper_scale_fault_probe.py:91",
+      "required_before_native_scale_run": true
+    }
+  ],
+  "prior_findings": {
+    "original_base_deletion": "resolved",
+    "original_source_input_digest_gap": "substantially addressed; new public state projection regression blocks readiness"
+  },
+  "allowed_python_fault_probe": {
+    "exit_code": 0,
+    "cases": 24,
+    "passed": true,
+    "masc_processes_started": 0
+  },
+  "projection_counterexample": {
+    "pure_python_observations": 5,
+    "main_and_reader_false_rejection_reproduced": true,
+    "masc_processes_started": 0
+  },
+  "canonical_evidence": {
+    "recorded_rows_independently_read_and_recomputed": 8,
+    "all_bytes_and_hashes_match": true,
+    "reviewer_reran_ocaml": false,
+    "general_json_codec_equivalence": false
+  },
+  "native_performance_pass": false,
+  "formal_github_approval": false,
+  "target_source_edits": 0,
+  "ci_network_queries": 0,
+  "local_dune_builds": 0
+}

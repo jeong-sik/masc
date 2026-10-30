@@ -1,0 +1,9 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/integrate-activity-review-responses-20261005/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  46 passed (46)
+   Start at  06:58:12
+   Duration  2.10s (tests 29%, import 26%, transform 25%, environment 13%, setup 8%)
+

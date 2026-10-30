@@ -1,0 +1,34 @@
+{
+  "baseline": "c60d967b19a96d01523d830a777df0c39703c7cc",
+  "candidate": "e45b749a7cd8e2cbdcbec85cca60b86e4c9915be",
+  "PR_source_head": "343af811a81dae76d0f4844bec1d92b115a64264",
+  "product_diff": [
+    "lib/dashboard/dashboard_cache.ml",
+    "lib/dashboard/dashboard_cache.mli"
+  ],
+  "all_candidate_changed_paths": [
+    "changelog.d/39344.md",
+    "docs/evidence/dashboard-json-cache-2026-09-27/README.md",
+    "docs/evidence/dashboard-json-cache-2026-09-27/cleanup.json",
+    "docs/evidence/dashboard-json-cache-2026-09-27/diagnostic-session.py",
+    "docs/evidence/dashboard-json-cache-2026-09-27/diagnostic-summary.json",
+    "docs/evidence/dashboard-json-cache-2026-09-27/files.json",
+    "docs/evidence/dashboard-json-cache-2026-09-27/identity.json",
+    "docs/evidence/dashboard-json-cache-2026-09-27/observations.json",
+    "docs/evidence/dashboard-json-cache-2026-09-27/runtime-fixture.toml",
+    "lib/dashboard/dashboard_cache.ml",
+    "lib/dashboard/dashboard_cache.mli",
+    "test/test_dashboard_cache.ml"
+  ],
+  "file_sha256": {
+    "lib/dashboard/dashboard_cache.ml": {
+      "e45b749a7cd8e2cbdcbec85cca60b86e4c9915be": "b891566fbeda01298addeaf1bd4a84284ef47c0613a0fec3e36f84599b8bc8a4",
+      "343af811a81dae76d0f4844bec1d92b115a64264": "b891566fbeda01298addeaf1bd4a84284ef47c0613a0fec3e36f84599b8bc8a4"
+    },
+    "lib/dashboard/dashboard_cache.mli": {
+      "e45b749a7cd8e2cbdcbec85cca60b86e4c9915be": "a7d8bfea36eaa594cead32d32ee33a10705e77b9b163165ffe45f360ef968b14",
+      "343af811a81dae76d0f4844bec1d92b115a64264": "a7d8bfea36eaa594cead32d32ee33a10705e77b9b163165ffe45f360ef968b14"
+    }
+  },
+  "scope": "Only Dashboard_cache implementation and interface differ in product source between the two artifact arms. Both files match the PR source head. The probe test inherits 16 lines of prepared-snapshot coverage from its baseline that are absent from the PR base; the retained patch records that difference. New JSON-cache scenarios match. Other differences are evidence and changelog. Both arms already include inline sanitizer and prepared first-response reuse; neither includes shared backlog encoding. The two probe artifacts do not claim whole-repository identity with the PR base."
+}

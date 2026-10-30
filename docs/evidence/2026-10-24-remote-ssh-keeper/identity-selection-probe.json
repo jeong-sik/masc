@@ -1,0 +1,28 @@
+{
+  "scope": "actual diagnostic prefix via AST; ssh -G config resolution only",
+  "version": "OpenSSH_10.3p1, LibreSSL 3.3.6",
+  "before_missing": {
+    "identityfiles": [
+      "~/.ssh/id_rsa",
+      "~/.ssh/id_ecdsa",
+      "~/.ssh/id_ecdsa_sk",
+      "~/.ssh/id_ed25519",
+      "~/.ssh/id_ed25519_sk"
+    ],
+    "stderr": "Warning: Identity file /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-dedicated-identity-lg38wito/missing-endpoint.key not accessible: No such file or directory."
+  },
+  "after_missing": {
+    "identityfiles": [
+      "none"
+    ],
+    "stderr": "Warning: Identity file /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-dedicated-identity-lg38wito/missing-endpoint.key not accessible: No such file or directory."
+  },
+  "after_existing": {
+    "identityfiles": [
+      "none",
+      "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-dedicated-identity-lg38wito/missing-endpoint.key"
+    ],
+    "stderr": ""
+  },
+  "source": "https://man.openbsd.org/ssh_config#IdentityFile"
+}

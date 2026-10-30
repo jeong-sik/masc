@@ -1,0 +1,53 @@
+name = "masc_decide"
+description = """
+Ask an Ollama System One decision model (/v1/systemone) up to 64 typed \
+questions about one shared state text and get probabilities back. Question \
+types: choice (pick one of 2-255 options), noul (probability of true), score \
+(0..N-1 against an ordered rubric). Each question is \
+{\\"type\\": \\"choice\\"|\\"noul\\"|\\"score\\", \\"instructions\\": string, \\"criteria\\": ...}: \
+for choice an object of option key to description, for score an ordered array \
+of rubric strings lowest first, for noul an optional object with true/false \
+descriptions. Backends: local Ollama (default model nimble) or cloud (default \
+clef:cloud, charged per input token). Confidence is distribution \
+concentration, not calibrated correctness: use it to rank and screen, not to \
+justify a verdict."""
+
+[[params]]
+name = "state"
+type = "string"
+required = true
+description = """
+The material every question is answered against. Not chat messages: a plain \
+text (or JSON-as-text) description of the situation."""
+
+[[params]]
+name = "questions"
+type = "object"
+required = true
+description = """
+Question name to question object. Names are 1-100 chars of ASCII letters, \
+digits, underscore, dot or hyphen. 1-64 questions per call."""
+
+[[params]]
+name = "backend"
+type = "string"
+enum = ["local", "cloud"]
+description = """
+local hits the machine's Ollama at 127.0.0.1:11434 (free); cloud hits \
+ollama.com and charges usage credits per input token. Default: local."""
+
+[[params]]
+name = "model"
+type = "string"
+description = """
+Override the backend's decision model (default nimble locally, clef:cloud on \
+cloud)."""
+
+[[params]]
+name = "timeout_sec"
+type = "integer"
+minimum = 1
+maximum = 120
+description = """
+Whole-call timeout in seconds. Values outside [1, 120] are rejected, not \
+reduced."""

@@ -1,0 +1,10 @@
+now=1790785856 skipped_malformed_lines=0
+arrivals_24h=18338 distinct_events_24h=776
+distinct_groups_24h=2644 distinct_groups_by_hour_24h=6830
+settled_24h_by_source={'exact_attempt': 7122, 'vendor_system_one': 3260}
+llm_calls_24h=7122 candidates_per_llm_call={1: 7122}
+not_relevant_share_all_time=0.717 over 59744
+settled_latency_h_24h p50=13.5 p90=25.7 (settled candidates only; waiting ones are not in it)
+executable_waiting=16627 executable_groups=2497 operator_held=2140
+partitions_by_state={'settled': 57535, 'blocked': 2130, 'completed': 22, 'running_unbound': 22, 'ready': 16554, 'running_bound': 3}
+llm_same_group_adjacent_change_rate_all_time=0.052 over 37242 (adjacent verdicts are on different signals, so this is not a consistency score)

@@ -1,0 +1,29 @@
+{
+  "recorded_unix": 1793054747.95872,
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_file_effect_c2_v4.py",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2",
+    "--binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+    "--native-binding",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/c2-native-binding.json",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--provider",
+    "ollama_cloud",
+    "--observation-deadline-unix",
+    "1793055647.958587",
+    "--guest-shim",
+    "/Users/dancer/me/.masc/microvm/shim/masc-exec-shim",
+    "--guest-shim-sidecar",
+    "/Users/dancer/me/.masc/microvm/shim/masc-exec-shim.sha256"
+  ],
+  "controller_sha256": "b3a4911710fd67e690a0d9ea2e435eb8dcdf40e027ce7e49678b8430cf29d446",
+  "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "review": "root full delta + adversarial independent bounded source-only PASS",
+  "change_from_trial1": "explicit verified local ELFarm64 guest shim and matching sidecar copied only into fresh owned base before server; original FAIL preserved",
+  "limit": "Asset release/source provenance unknown; actual protocol compatibility not established by preflight",
+  "deadline_policy": "observation only; no automatic replay/model switch/restart/forcedkill"
+}

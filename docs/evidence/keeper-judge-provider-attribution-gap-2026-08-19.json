@@ -1,0 +1,30 @@
+{
+  "captured_at": "2026-08-19T08:47:00Z",
+  "purpose": "Judge 행 'provider별 미측정'을 채우려 시도했고, 채울 수 없는 이유를 확정했다",
+  "attempt": "judge 실행마다 어느 provider/모델이 판정했는지를 라이브 스토어에서 찾으려 했다.",
+  "what_the_stores_hold": {
+    "fusion_runs": {
+      "path": "<base-path>/.masc/fusion-runs.jsonl",
+      "events": 32,
+      "register_fields": ["keeper", "preset", "topology"],
+      "complete_fields": ["outcome"],
+      "reading": "preset(trio/quorum/council)과 topology(simple/judge_of_judges/staged)는 남지만 provider도 모델명도 없다."
+    },
+    "tool_calls": {
+      "path": "<base-path>/.masc/tool_calls/2026-08/*.jsonl",
+      "masc_fusion": 19,
+      "masc_fusion_status": 67,
+      "model_field_values": { "runtime": 86 },
+      "reading": "모든 fusion 호출의 model 필드가 리터럴 'runtime'이다. 실제 provider로 해석되지 않는다."
+    },
+    "keeper_meta": {
+      "path": "<base-path>/.masc/keepers/<name>.json",
+      "checked": ["rondo", "analyst", "sangsu"],
+      "reading": "runtime/runtime_id/last_runtime/preferred_runtime 어느 필드도 없다."
+    }
+  },
+  "callers": { "rondo": 5, "canary-fusion-feature-20260813-2138": 4, "analyst": 2, "sangsu": 1, "canary-10t-glmc-52-20260817": 1, "rw-e0-collab-202608-research": 1 },
+  "verdict": "Judge 행의 provider 축은 현재 스토어로 측정 불가다. fusion 실행 기록은 preset과 topology까지만 남기고, 판정을 수행한 provider/모델은 어느 스토어에도 귀속되지 않는다.",
+  "what_would_close_it": "fusion register 또는 complete 이벤트에 판정 노드별 resolved runtime/model을 남기는 것이 선행 조건이다. 그 전까지 이 축은 '측정 불가 + 선행 조건'으로 남긴다 — Multi Lane duration을 같은 형태로 닫은 선례가 있다.",
+  "adjacent_fact": "매트릭스가 이미 기록한 'live 판정 1건(glm-5-turbo)'은 당시 운영자가 직접 관측한 값이지 스토어에서 재구성한 것이 아니다. 그래서 지금 같은 방법으로는 재현되지 않는다."
+}

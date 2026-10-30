@@ -1,0 +1,15 @@
+{
+  "source_commit": "215517f229fd74c5300ee7fc4aae91f29da1db4c",
+  "ci_run": 34194081312,
+  "artifact_checkpoint": "installed-first-turn/checkpoint.json",
+  "canonical_checkpoint": ".masc/traces/trace-1788848457823-00000/trace-1788848457823-00000.json",
+  "session_id": "trace-1788848457823-00000",
+  "checkpoint_sha256": "856bb2273255e13d9b3263be61d7d63b5d0086829c2f6ea60a1fa389fd03cbef",
+  "message_roles": [
+    "user",
+    "assistant",
+    "tool",
+    "assistant"
+  ],
+  "result": "PASS"
+}

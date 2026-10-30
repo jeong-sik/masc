@@ -1,0 +1,25 @@
+{
+  "source": "12c001e55e27c7a9340ae27f956e112fd5360c76",
+  "server_worker_sdk": {
+    "server": {
+      "pid": 43339,
+      "state": "absent"
+    },
+    "worker": {
+      "pid": 43401,
+      "state": "absent"
+    },
+    "sdk": {
+      "pid": 43543,
+      "state": "absent"
+    }
+  },
+  "fixture": {
+    "pid": 44000,
+    "state": "absent"
+  },
+  "space_id": 30,
+  "space_state": "absent_after_normal_shutdown",
+  "extra_sdk_signal": false,
+  "production_installation_changed": false
+}

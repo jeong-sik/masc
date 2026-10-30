@@ -1,0 +1,53 @@
+{
+  "observed_at": "2026-09-09T20:27:18.179055+00:00",
+  "operation_id": "kmsg-9d59bec8dc0996607feaaecb1d4c7af1",
+  "binary_commit": "c08357ea1f78f1a04564cc96dbd2f38eb8c4e857",
+  "private_journal_sha256": "79911710727c2fe245c57a654c5363e52230b8eb780a77aa5b3d0990a2516f9b",
+  "event_count": 11369,
+  "approval_events": [
+    {
+      "seq": 11088,
+      "ts": 1788985231.566476,
+      "event": {
+        "type": "tool_approval_requested",
+        "tool_call_id": "call_d705d64694fe413584194e4d",
+        "tool_call_name": "Write",
+        "question": "Run Write on decision_flow.svg?",
+        "because": "this call reaches outside masc",
+        "file_path": "decision_flow.svg",
+        "content_bytes": 8810,
+        "args_sha256": "04843161596e6ec74b19d2cac7ce8c72f7f9666c6bbdc149d273e090c7b48a9d"
+      }
+    },
+    {
+      "seq": 11089,
+      "ts": 1788985411.570629,
+      "event": {
+        "type": "tool_approval_settled",
+        "tool_call_id": "call_d705d64694fe413584194e4d",
+        "outcome": "timed_out"
+      }
+    },
+    {
+      "seq": 11368,
+      "ts": 1788985419.855737,
+      "event": {
+        "type": "tool_approval_requested",
+        "tool_call_id": "call_0d5951208fec422d8b8b3bf8",
+        "tool_call_name": "Write",
+        "question": "Run Write on _probe.txt?",
+        "because": "this call reaches outside masc",
+        "file_path": "_probe.txt",
+        "content_bytes": 4,
+        "args_sha256": "a0f4fc77c46211e5659c0d2439fbdfe91f59c893aa8f3c192b66e3b06e02f375"
+      }
+    }
+  ],
+  "host_approval": {
+    "id": "appr_01a087d2-0781-7000-b673-fa5e69181ef0",
+    "decision": "approve",
+    "source": "auto_judge",
+    "replay_observed": false
+  },
+  "artifact_creation_verified": false
+}

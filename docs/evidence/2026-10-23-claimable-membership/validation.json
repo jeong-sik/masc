@@ -1,0 +1,361 @@
+{
+  "base": "e09b9c981afb16843c071366c5d9724fd4026d96",
+  "runner_sha256": "50dfa9f8ef92c3df801e35cbbdfb7e721fc3a570fa256490b18a03ad1d2ba616",
+  "executables": {
+    "baseline": "4a3a9ad9aaf88d77854440fb48196d788c82878b9d2b0e12fa84ba7369884244",
+    "candidate": "68fca44f92c672eb96a7a6963d2a2cb37d4b77284278e8b63a1023d030b8b342"
+  },
+  "fixtures": {
+    "front-0.sqlite3": "f2802aede3c7c70f1c74c9465a3aa48373dc1e80744d32d0b19565c48842d874",
+    "front-256.sqlite3": "791ad6de4b4a390fe5be4044ee58a172341bf85f6fdcc8baacb5d7e89775c521",
+    "front-1.sqlite3": "87a715d55b518bf5c6861d2f8f2ab05aa62f72d988d8f7a39968861a1dd30241",
+    "prefix-256.sqlite3": "5aaa1a1768d045408c1b6d95a1eaf68c136bbe58b165ce393ce0afd4049afcad",
+    "prefix-1024.sqlite3": "03b3b3cebb74876d0deb8b8957112a1b3a4291bf42945361547cabe6921bdf38",
+    "prefix-1.sqlite3": "3550bfd2feaff33db17a2b450a90fe9b6e72471c8ee968835481f91746ea673b",
+    "front-1024.sqlite3": "326d9313c8e7883bb4e17d673938432b01b081a2b22155e4ecf3b9704a78e61e",
+    "prefix-32.sqlite3": "2e590c866cde9faa449fbedbf52fd0e8f32d61eb7ada7a3a2a371ae5e9609f16",
+    "prefix-0.sqlite3": "f2802aede3c7c70f1c74c9465a3aa48373dc1e80744d32d0b19565c48842d874",
+    "front-32.sqlite3": "1d8a4d7e0054995dce0be1b4ad210571907dffd955b95f643ac3dd36eaba9546"
+  },
+  "summary": [
+    {
+      "deferred_rows": 0,
+      "layout": "prefix",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 0.040583,
+        "p95_ms": 0.094625,
+        "p50_allocated_bytes": 7440.0
+      },
+      "candidate": {
+        "p50_ms": 0.040625,
+        "p95_ms": 0.12525,
+        "p50_allocated_bytes": 7400.0
+      },
+      "p50_change_pct": 0.10349160978735394
+    },
+    {
+      "deferred_rows": 0,
+      "layout": "prefix",
+      "observation_time": 100.0,
+      "baseline": {
+        "p50_ms": 0.038625,
+        "p95_ms": 0.101875,
+        "p50_allocated_bytes": 7440.0
+      },
+      "candidate": {
+        "p50_ms": 0.050417,
+        "p95_ms": 0.105917,
+        "p50_allocated_bytes": 7400.0
+      },
+      "p50_change_pct": 30.529449838187706
+    },
+    {
+      "deferred_rows": 0,
+      "layout": "front",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 0.040333,
+        "p95_ms": 0.14675,
+        "p50_allocated_bytes": 7440.0
+      },
+      "candidate": {
+        "p50_ms": 0.047709,
+        "p95_ms": 0.113041,
+        "p50_allocated_bytes": 7400.0
+      },
+      "p50_change_pct": 18.287754444251615
+    },
+    {
+      "deferred_rows": 1,
+      "layout": "prefix",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 0.084708,
+        "p95_ms": 0.257458,
+        "p50_allocated_bytes": 51504.0
+      },
+      "candidate": {
+        "p50_ms": 0.082042,
+        "p95_ms": 0.140958,
+        "p50_allocated_bytes": 51464.0
+      },
+      "p50_change_pct": -3.147282429050391
+    },
+    {
+      "deferred_rows": 1,
+      "layout": "prefix",
+      "observation_time": 100.0,
+      "baseline": {
+        "p50_ms": 0.081666,
+        "p95_ms": 0.188125,
+        "p50_allocated_bytes": 45672.0
+      },
+      "candidate": {
+        "p50_ms": 0.074958,
+        "p95_ms": 0.139042,
+        "p50_allocated_bytes": 45632.0
+      },
+      "p50_change_pct": -8.21394460362942
+    },
+    {
+      "deferred_rows": 1,
+      "layout": "front",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 0.068333,
+        "p95_ms": 0.102416,
+        "p50_allocated_bytes": 45712.0
+      },
+      "candidate": {
+        "p50_ms": 0.071042,
+        "p95_ms": 0.126083,
+        "p50_allocated_bytes": 45712.0
+      },
+      "p50_change_pct": 3.9644095824857617
+    },
+    {
+      "deferred_rows": 32,
+      "layout": "prefix",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 0.721834,
+        "p95_ms": 0.8835,
+        "p50_allocated_bytes": 1417488.0
+      },
+      "candidate": {
+        "p50_ms": 0.734125,
+        "p95_ms": 1.158792,
+        "p50_allocated_bytes": 1422608.0
+      },
+      "p50_change_pct": 1.7027460607286438
+    },
+    {
+      "deferred_rows": 32,
+      "layout": "prefix",
+      "observation_time": 100.0,
+      "baseline": {
+        "p50_ms": 0.647292,
+        "p95_ms": 0.78875,
+        "p50_allocated_bytes": 1230864.0
+      },
+      "candidate": {
+        "p50_ms": 0.645292,
+        "p95_ms": 0.979458,
+        "p50_allocated_bytes": 1230824.0
+      },
+      "p50_change_pct": -0.3089795640916271
+    },
+    {
+      "deferred_rows": 32,
+      "layout": "front",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 0.660292,
+        "p95_ms": 1.013542,
+        "p50_allocated_bytes": 1232144.0
+      },
+      "candidate": {
+        "p50_ms": 0.639542,
+        "p95_ms": 0.797,
+        "p50_allocated_bytes": 1238544.0
+      },
+      "p50_change_pct": -3.142549054054866
+    },
+    {
+      "deferred_rows": 256,
+      "layout": "prefix",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 5.801875,
+        "p95_ms": 7.368458,
+        "p50_allocated_bytes": 11287824.0
+      },
+      "candidate": {
+        "p50_ms": 5.558417,
+        "p95_ms": 6.741333,
+        "p50_allocated_bytes": 11346320.0
+      },
+      "p50_change_pct": -4.196195195518682
+    },
+    {
+      "deferred_rows": 256,
+      "layout": "prefix",
+      "observation_time": 100.0,
+      "baseline": {
+        "p50_ms": 4.943625,
+        "p95_ms": 8.001292,
+        "p50_allocated_bytes": 9794832.0
+      },
+      "candidate": {
+        "p50_ms": 5.056167,
+        "p95_ms": 5.685125,
+        "p50_allocated_bytes": 9794792.0
+      },
+      "p50_change_pct": 2.27650762345446
+    },
+    {
+      "deferred_rows": 256,
+      "layout": "front",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 5.297916,
+        "p95_ms": 9.536958,
+        "p50_allocated_bytes": 9805072.0
+      },
+      "candidate": {
+        "p50_ms": 5.109459,
+        "p95_ms": 5.960333,
+        "p50_allocated_bytes": 9873808.0
+      },
+      "p50_change_pct": -3.557191167243867
+    },
+    {
+      "deferred_rows": 1024,
+      "layout": "prefix",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 30.635458,
+        "p95_ms": 37.582875,
+        "p50_allocated_bytes": 45128976.0
+      },
+      "candidate": {
+        "p50_ms": 23.700208,
+        "p95_ms": 26.99,
+        "p50_allocated_bytes": 45411728.0
+      },
+      "p50_change_pct": -22.637983737667643
+    },
+    {
+      "deferred_rows": 1024,
+      "layout": "prefix",
+      "observation_time": 100.0,
+      "baseline": {
+        "p50_ms": 22.376625,
+        "p95_ms": 44.379458,
+        "p50_allocated_bytes": 39157008.0
+      },
+      "candidate": {
+        "p50_ms": 20.661,
+        "p95_ms": 23.355208,
+        "p50_allocated_bytes": 39156968.0
+      },
+      "p50_change_pct": -7.667040941160696
+    },
+    {
+      "deferred_rows": 1024,
+      "layout": "front",
+      "observation_time": 5.0,
+      "baseline": {
+        "p50_ms": 21.898583,
+        "p95_ms": 25.622209,
+        "p50_allocated_bytes": 39197968.0
+      },
+      "candidate": {
+        "p50_ms": 20.5375,
+        "p95_ms": 25.555958,
+        "p50_allocated_bytes": 39521680.0
+      },
+      "p50_change_pct": -6.21539302337506
+    }
+  ],
+  "candidate_source_sha256": {
+    "lib/keeper_chat_operations/keeper_chat_operation_store.ml": "e5201b6cd1815cb167afd56821005289615a79a97722040415576732656f4797",
+    "lib/keeper_chat_operations/keeper_chat_operation_store.mli": "cad937d0b018eff776bb5e65bc6a0bea8790f6376099ab4b5fbaeadfa9cd5420",
+    "test/keeper_chat_operations/dune": "de9f8eb3814a40fb36fbac032d5c4044404dc1e3b4a8e5b8dc202084828df786",
+    "test/keeper_chat_operations/keeper_claimable_membership_bench.ml": "50dfa9f8ef92c3df801e35cbbdfb7e721fc3a570fa256490b18a03ad1d2ba616"
+  },
+  "baseline_production_sha256": {
+    "lib/keeper_chat_operations/keeper_chat_operation_store.ml": "ecb58334cba8550f647f36ce704ce2053869886d9cb502db82bed8d391cf4b25",
+    "lib/keeper_chat_operations/keeper_chat_operation_store.mli": "f5a022851ff45338ee30fda829d735875620e2297ee2451a8089d1bd5c998c8e"
+  },
+  "log_sha256": {
+    "final-baseline-round1.jsonl": "d89b34cf7752c5a75e714796b1eb917160cd07d88cea5ac490d00ebcfdd4dd8f",
+    "final-baseline-round2.jsonl": "1cae4f0e3b7e25a7b54d253d4bec03c2f0ee6102ff1b2db081e95b0e2b0c6492",
+    "final-baseline-round3.jsonl": "95c3569d67e14d1ed38af6724d0ce629cd38bc0c28168d62c97023356327f4be",
+    "final-candidate-round1.jsonl": "1ff0fe62fbf10d46a797184e6489b9519d600ad19cd819c1ad81f265432eda09",
+    "final-candidate-round2.jsonl": "0961f0c924168f23d852ac8f9bb16828eaf962fd9d79a9575ded14f5c8a3ad9b",
+    "final-candidate-round3.jsonl": "be2ad1e76be9d42f8cdc460c215d4a57ce613ef37536556b5125989aed11a39f",
+    "final-baseline-control-front-5.jsonl": "6ec0e9dd36d13646d098af06eccc1e29d67b97ab1fa404761d289da740304211",
+    "final-baseline-control-prefix-100.jsonl": "d435630e0bd3de9e2eba7445b396329dab4e4ffa46484401f08e5e65167f9ace",
+    "final-baseline-control-prefix-5.jsonl": "626100efef33aafcccee6f338593c5fae7293736a4b276202b87285f3b77cb8a",
+    "final-candidate-control-front-5.jsonl": "6ec0e9dd36d13646d098af06eccc1e29d67b97ab1fa404761d289da740304211",
+    "final-candidate-control-prefix-100.jsonl": "d435630e0bd3de9e2eba7445b396329dab4e4ffa46484401f08e5e65167f9ace",
+    "final-candidate-control-prefix-5.jsonl": "626100efef33aafcccee6f338593c5fae7293736a4b276202b87285f3b77cb8a",
+    "candidate-test_keeper_chat_operation_store.log": "c3fb9595ac034bb6b4ef3d5337f5f1a2e1bdda2ffa4a2c7b383c13b1e8047b46",
+    "candidate-test_keeper_direct_gate_wait.log": "b87c36ef257892c88cc9e08bd80d1d24715d7957cc7c8b70a3b2f4a11955fe27",
+    "candidate-test_keeper_direct_runtime_continuation.log": "4ff1769c0a74a510db30c258dfcac46186a59fa50107740ea7509ac139715797",
+    "candidate-test_keeper_semantic_execution_store.log": "b524c3880c3a873b61d96cd86314f212052a1645a9277e3a5c31f615ae768e97"
+  },
+  "execution_order": [
+    [
+      "baseline",
+      "candidate"
+    ],
+    [
+      "candidate",
+      "baseline"
+    ],
+    [
+      "baseline",
+      "candidate"
+    ]
+  ],
+  "warmup_reads_per_case": 5,
+  "measured_reads_per_case_per_round": 41,
+  "rounds": 3,
+  "aggregation": "median of the three per-round p50 (or p95), not a pooled quantile",
+  "gc": "full_major before each timed read; that preceding collection excluded; collections during the read included",
+  "clock": "Mtime_clock counter",
+  "host": "macOS-26.6.1-arm64-arm-64bit-Mach-O",
+  "focused_tests": {
+    "test_keeper_direct_runtime_continuation": 17,
+    "test_keeper_direct_gate_wait": 12,
+    "test_keeper_chat_operation_store": 18,
+    "test_keeper_semantic_execution_store": 26
+  },
+  "focused_test_executable_sha256": {
+    "test_keeper_direct_runtime_continuation": "267664e375877ed81edbc866ca65651a9865d5b2a8b6cca1b4dd64f7f692cbf1",
+    "test_keeper_direct_gate_wait": "01da07e3b486df631a1550ee445bf1b8831292d474cfe8f4825855a5460b13c4",
+    "test_keeper_chat_operation_store": "16293da1072c8594342ae7c16228fcaa83eb160c15690a93b464e985f48f311a",
+    "test_keeper_semantic_execution_store": "8c5f8195baf22de39165f793712d59c39bd410ffa07748e80e32040c5563d10b"
+  },
+  "actual_claim_controls": {
+    "per_version": 15,
+    "versions": [
+      "baseline",
+      "candidate"
+    ],
+    "isolated_fixture_copies": true,
+    "fixture_hashes_unchanged_after_measurement": true
+  },
+  "explicit_dependency_relink": {
+    "mtime_libraries": [
+      "mtime",
+      "mtime.clock"
+    ],
+    "baseline_sha256": "4a3a9ad9aaf88d77854440fb48196d788c82878b9d2b0e12fa84ba7369884244",
+    "candidate_sha256": "68fca44f92c672eb96a7a6963d2a2cb37d4b77284278e8b63a1023d030b8b342",
+    "both_equal_measured_executables": true
+  },
+  "build_commands": {
+    "baseline": "opam exec --switch=5.5.1 -- dune build test/keeper_chat_operations/keeper_claimable_membership_bench.exe (original production store with identical candidate runner and executable stanza)",
+    "candidate": "opam exec --switch=5.5.1 -- dune build test/keeper_chat_operations/keeper_claimable_membership_bench.exe test/keeper_chat_operations/test_keeper_direct_runtime_continuation.exe test/keeper_chat_operations/test_keeper_direct_gate_wait.exe test/keeper_chat_operations/test_keeper_chat_operation_store.exe test/keeper_chat_operations/test_keeper_semantic_execution_store.exe",
+    "exit_codes": {
+      "baseline": 0,
+      "candidate": 0,
+      "explicit_baseline_relink": 0,
+      "explicit_candidate_relink": 0
+    }
+  },
+  "latest_full_regression": {
+    "run_id": null,
+    "head": null,
+    "TARGET_SUITES": null,
+    "state": "not inspected; full regression not run for this candidate"
+  },
+  "ci": "not run",
+  "installed": "not installed",
+  "operational_latency": "not measured",
+  "scope": "warm synchronous has_claimable_queued read; priority/cohort performance not measured"
+}

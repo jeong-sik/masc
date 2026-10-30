@@ -1,0 +1,72 @@
+{
+  "is_derivative": true,
+  "source_member": {
+    "name": "ci-run-tests.log",
+    "path": "artifacts/schedule-durable-candidate-20261027/test40409087814/member-0.txt",
+    "bytes": 5158,
+    "sha256": "6b454b71058f1821c31abc03f02065dfc2871e07cc9ec6d9e6234f7a337d0498"
+  },
+  "transformation": "1-based log lines after stripping ANSI SGR sequences",
+  "selected_lines": [
+    {
+      "line": 11,
+      "text": "ASSERT late A cannot replace B's page"
+    },
+    {
+      "line": 12,
+      "text": "ASSERT late A error is not B's error"
+    },
+    {
+      "line": 14,
+      "text": "ASSERT older generation cannot regress the current page"
+    },
+    {
+      "line": 15,
+      "text": "ASSERT failed refresh retains the last read"
+    },
+    {
+      "line": 19,
+      "text": "ASSERT chat target owns its schedules even while roster selects B"
+    },
+    {
+      "line": 20,
+      "text": "ASSERT another Keeper cannot replace chat observation"
+    },
+    {
+      "line": 22,
+      "text": "  [OK]          a read in flight          0   schedule responses follow targe..."
+    },
+    {
+      "line": 68,
+      "text": "  [OK]          a read in flight          1   offscreen completion and late p..."
+    },
+    {
+      "line": 73,
+      "text": "  [OK]          a read in flight          2   logs keep repainting after stat..."
+    },
+    {
+      "line": 77,
+      "text": "  [OK]          a read in flight          3   the elapsed needs a start."
+    },
+    {
+      "line": 80,
+      "text": "  [OK]          a read in flight          4   two reads are timed apart."
+    },
+    {
+      "line": 85,
+      "text": "  [OK]          a read in flight          5   a background read does not rese..."
+    },
+    {
+      "line": 89,
+      "text": "  [OK]          a read in flight          6   the same tab for two keepers is..."
+    },
+    {
+      "line": 94,
+      "text": "  [OK]          a read in flight          7   the wait ends when the answer a..."
+    }
+  ],
+  "case_count": 8,
+  "fail": 0,
+  "skip": 0,
+  "scope": "Existing target/generation/wait-state production decisions; not visible UI, PTY or full CI."
+}

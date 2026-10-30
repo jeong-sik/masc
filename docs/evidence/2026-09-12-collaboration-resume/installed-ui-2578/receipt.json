@@ -1,0 +1,1823 @@
+{
+  "observed_at": "2026-09-12T11:28:10.204Z",
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "runtime_build": {
+    "release_version": "0.35.13",
+    "binary_version": "0.35.13",
+    "commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "commit_source": "embedded",
+    "binary_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "ec8e45b98440645b975959060e81a1cb69495f78835d7e42c400ffd4c793e2ef",
+    "binary_commit_unix_ts": 1789210878,
+    "binary_commit_age_seconds": 1609,
+    "executable_path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183/masc",
+    "executable_dir": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183",
+    "runtime_instance_id": "01a0955f-9536-7000-b3ef-639e00e0d2bb",
+    "started_at": "2026-09-12T11:27:44Z",
+    "uptime_seconds": 23
+  },
+  "runtime_overall_status": "warning",
+  "assets": [
+    {
+      "name": "index.html",
+      "status": 200,
+      "sha256": "bbaf2874c8c04e3f19df2ed6565a3ee605c52828162b9ee8315e3c9556438ab6",
+      "bytes": 621
+    },
+    {
+      "name": "assets/index-D9SkATDf.js",
+      "status": 200,
+      "sha256": "974c15e150f7a49e4fc7c16f00581f8a64cb469b93733b1274ea4a40f38f9ffa",
+      "bytes": 766381
+    },
+    {
+      "name": "assets/vendor-DoibHDuM.js",
+      "status": 200,
+      "sha256": "c48c1e4f60608ec27faf09ab584d8aaf596a9a0f9acf8cbf9d6fc7932c8db1ff",
+      "bytes": 30250
+    },
+    {
+      "name": "assets/index-Dt0fLdQb.css",
+      "status": 200,
+      "sha256": "dd457a4b6da7bdd71bbc7b9a21dc5e6fe59d460bd8822875ef7de4848894a48a",
+      "bytes": 1324101
+    },
+    {
+      "name": "assets/preload-helper-cC-D59TZ.js",
+      "status": 200,
+      "sha256": "a0fe96b42dde4d53a567a44fbb1a4be77056bcf2fe4826166d0809bb1cefe465",
+      "bytes": 1264
+    },
+    {
+      "name": "assets/checkbox-Dr6HchMD.js",
+      "status": 200,
+      "sha256": "a666fcfa2623657c61c4d59f36a7c5761d1f9985a4b81d7d1bcda071884926cb",
+      "bytes": 2770
+    },
+    {
+      "name": "assets/work-CrRpxvDY.js",
+      "status": 200,
+      "sha256": "c0484b1e3388590039788b3654b3d8fc92fe4b908dcf913fd4998759814bb6e1",
+      "bytes": 184304
+    },
+    {
+      "name": "assets/actions-JMs5_w0Q.js",
+      "status": 200,
+      "sha256": "d5d2605188e665d8331cc1258ad0cb2cea8bf7c3f386fb99dd67dcd24d60a98d",
+      "bytes": 4821
+    },
+    {
+      "name": "assets/board-surface-CgGsyQQK.js",
+      "status": 200,
+      "sha256": "10d8c29717c8063c04e65e51258987bda419d83ef16aed55de48de16b08319d0",
+      "bytes": 116383
+    },
+    {
+      "name": "assets/rich-content-fcg_a5nr.js",
+      "status": 200,
+      "sha256": "7c8f77da9643a367d1d53c2508e548783b5bfe64e819ed9735076663b53e4900",
+      "bytes": 6523
+    },
+    {
+      "name": "assets/chevron-left-DGckSLjM.js",
+      "status": 200,
+      "sha256": "1b0abc5df70f86f3431859137ce9cf73bdc6759ef94a28dcb6937547fb403eda",
+      "bytes": 127
+    },
+    {
+      "name": "assets/index-D1UutkaU.js",
+      "status": 200,
+      "sha256": "e683f0efceee2182a31925e511965b73245539a44ec28f5d90a34f13aafa102f",
+      "bytes": 10996
+    },
+    {
+      "name": "assets/chevron-right-CuduOV5N.js",
+      "status": 200,
+      "sha256": "2d7e49485db49b5b3e991de29c1397015eb10df968c8ba4120695297d508527c",
+      "bytes": 127
+    },
+    {
+      "name": "assets/markdown-CFxXtXGa.js",
+      "status": 200,
+      "sha256": "d9353d8e2fdb9553b70cd4ebad594506bf94dfe804cd44e77021353c4e538f72",
+      "bytes": 2992
+    },
+    {
+      "name": "assets/keeper-utils-ZST-F9P-.js",
+      "status": 200,
+      "sha256": "35978185ce7c75b4a41d8faf8ed1d98ab4384f73e62623e890fdab414e494f9e",
+      "bytes": 197
+    },
+    {
+      "name": "assets/operator-actions-a2EbT2ny.js",
+      "status": 200,
+      "sha256": "fbfb71406a2155e5980e3ab25fa1e69bde638f9205584d0332d38bc004e5c70c",
+      "bytes": 1772
+    },
+    {
+      "name": "assets/composer-v2-CE74d-pg.js",
+      "status": 200,
+      "sha256": "c6d00d550c12f7d07f107d1443768a33aed2c77bcb4dc5fb8db891c262bcbb23",
+      "bytes": 17862
+    },
+    {
+      "name": "assets/refresh-cw-Dlc9bFrm.js",
+      "status": 200,
+      "sha256": "f38f9d9cced0230993837e93156e4d1e9a65f1719582746bac4cc762639950b3",
+      "bytes": 318
+    },
+    {
+      "name": "assets/voice-input-apOehZ90.js",
+      "status": 200,
+      "sha256": "0fe88de9d20e4d903b67a4af749ec68a26a2dea6bfd433377ed0ac46a2506c62",
+      "bytes": 5881
+    },
+    {
+      "name": "assets/keeper-turn-inspector-drawer-D65pGNYD.js",
+      "status": 200,
+      "sha256": "c4b00be539f4a96d3300f23c216d43a804f9af47730d1b8fc20fdc6548cd609d",
+      "bytes": 1628
+    },
+    {
+      "name": "assets/keeper-turn-inspector-DfMBuN-E.js",
+      "status": 200,
+      "sha256": "4b1f1d4b725dc155f1f8aa6efae1feaef146dccb3430ed5b84c9a6b746f1a5a6",
+      "bytes": 35443
+    },
+    {
+      "name": "assets/fusion-meta-MJ0nN8AF.js",
+      "status": 200,
+      "sha256": "9790ed9dda3e136bd917d029ec56dcc41ab76ee1eecec8618694d27e2a0df30a",
+      "bytes": 2971
+    },
+    {
+      "name": "assets/dashboard-turn-records-sDonyKSM.js",
+      "status": 200,
+      "sha256": "38943f605fe6f87d58922301974e91b27ca76033c16d7170f129fc136b42aa6b",
+      "bytes": 13781
+    },
+    {
+      "name": "assets/fusion-judge-format-BSXFEB4q.js",
+      "status": 200,
+      "sha256": "e6c677148eb36bd2d1eabaa3bd970449c79512ff6b430ec89185e061b0007572",
+      "bytes": 678
+    },
+    {
+      "name": "assets/trash-2-CeKgNrVb.js",
+      "status": 200,
+      "sha256": "c7765b8ea9d41e5571b68261d71c26cc837e226d88ab86506b9c4811e1bd5d64",
+      "bytes": 325
+    },
+    {
+      "name": "assets/goal-helpers-DOEwm7IV.js",
+      "status": 200,
+      "sha256": "8b88504c8115176d16ca82a1f4f349b6a95a1ac7dfda958e8b667d3636ad123a",
+      "bytes": 3004
+    },
+    {
+      "name": "assets/task-search-text-DdCXjocZ.js",
+      "status": 200,
+      "sha256": "28fb448646495261e92fea486b9e9c73a1690c16f31933c1c9cd767c3f651129",
+      "bytes": 1728
+    },
+    {
+      "name": "assets/task-detail-state-DyrV9Tz3.js",
+      "status": 200,
+      "sha256": "18c19a96e08134e5737472b3d3b0320185d4deb63b7366d3a134ad308bfb5035",
+      "bytes": 5285
+    },
+    {
+      "name": "assets/fsm-hub-types-BUXw8Q4W.js",
+      "status": 200,
+      "sha256": "89857cbb7b6f0d54459b8fdd283e1a77348243b550487bb999473d59c1faf51f",
+      "bytes": 4696
+    },
+    {
+      "name": "assets/tk-BpzD04gQ.js",
+      "status": 200,
+      "sha256": "4ede391d53116025b1d5191c02a91f91f2305c0482d7e18fc018264261531fb4",
+      "bytes": 927
+    },
+    {
+      "name": "assets/dashboard-misc-BT66FhTp.js",
+      "status": 200,
+      "sha256": "44b4e3e9cab94988aa1700f7a6bbbedcb6327df1d613415979668f30030b1882",
+      "bytes": 6755
+    },
+    {
+      "name": "assets/dashboard-verification-runs-CXX6GeeZ.js",
+      "status": 200,
+      "sha256": "8984dc1f9a0abdadf123ab9b96747477eab3e4ef29989572693aa5cd788054c9",
+      "bytes": 4350
+    },
+    {
+      "name": "assets/section-nav-C60EUCvj.js",
+      "status": 200,
+      "sha256": "7fdff80bc2f85078c134852a8ec51a493200626225c772aa05bc22d58a4fa15c",
+      "bytes": 1183
+    },
+    {
+      "name": "assets/virtual-list-DP5-D9tg.js",
+      "status": 200,
+      "sha256": "9a26d8dc71913c7daacb9dd0aace571f91181371eba1c229d42a6bcf01558f6e",
+      "bytes": 4221
+    },
+    {
+      "name": "assets/gate-refresh-BlSJlnGs.js",
+      "status": 200,
+      "sha256": "6b8e453cde929486b4f6ca0304bd85f6732c7fed2c801e57550fdbe984138d38",
+      "bytes": 374
+    },
+    {
+      "name": "assets/fonts/JetBrainsMono-400-latin.woff2",
+      "status": 200,
+      "sha256": "2c32b9b3ee358c119e210f6f5195f9bd34894d78a785ff2e95d60e718e400af4",
+      "bytes": 31340
+    },
+    {
+      "name": "assets/fonts/Cinzel-Regular.ttf",
+      "status": 200,
+      "sha256": "f4d83d34d1f6c741193e4acf4b3dff9531e5a67b6aa65228d00a7db72a4e0f34",
+      "bytes": 125468
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-119.woff2",
+      "status": 200,
+      "sha256": "994289a67b5f65801130b59217ecc8ce98e963cd1c34bbe56c984e829db71a1f",
+      "bytes": 16668
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-117.woff2",
+      "status": 200,
+      "sha256": "e89faf36222bbb664dd5c28e8969d6817faaf100d1ca532f294084591cc9c9b7",
+      "bytes": 14420
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-118.woff2",
+      "status": 200,
+      "sha256": "0136b09150b3ef19b74dd55e2fc73a9e267a4da4ed3615542a191485da5afbf4",
+      "bytes": 14668
+    },
+    {
+      "name": "assets/mission-signals-oQ6rBChq.js",
+      "status": 200,
+      "sha256": "ecd8d19977027b3552e4ca1ed2d1b9454ec7957e92ab995e6f10f2f97cb7f2c0",
+      "bytes": 247
+    },
+    {
+      "name": "assets/tab-refresh-CVgjR9sW.js",
+      "status": 200,
+      "sha256": "55c18300b36c1b791ac18e9d7720ce87af486835d8921952c8cf1f3c68c3233c",
+      "bytes": 4530
+    },
+    {
+      "name": "assets/mission-actions-DKE1TvvF.js",
+      "status": 200,
+      "sha256": "cd6ca4a8ca6f3d5b1c3ee3143fc4a9b58bf217462e9c8079c7b625ab724d067c",
+      "bytes": 5730
+    },
+    {
+      "name": "assets/dashboard-config-DSIlatJt.js",
+      "status": 200,
+      "sha256": "3c056e720b1e34a45f0f0873c55a9fa1f12335c9654a46541be4e7eae665b206",
+      "bytes": 2948
+    },
+    {
+      "name": "assets/effect-http-B5ODBA2T.js",
+      "status": 200,
+      "sha256": "003540bb122b8d7db76b26df19f31a7302c63fbf8a0f781888c0b8dae0f0e438",
+      "bytes": 567
+    },
+    {
+      "name": "assets/effect-runtime-D2IbD7gF.js",
+      "status": 200,
+      "sha256": "4fdf6bcba4a90ab7b44dd200288c080ac41596afc630693d7452f9d57f3a514a",
+      "bytes": 175090
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-116.woff2",
+      "status": 200,
+      "sha256": "afc33bf7e12515219591d71d3adbb65f167652833878dc0e8da579884c7d6c39",
+      "bytes": 16172
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-115.woff2",
+      "status": 200,
+      "sha256": "cfa10935430d3a4f42fe20bc87c7c00a0db62f9c1c5232ca78dab85c7582e2fc",
+      "bytes": 16288
+    },
+    {
+      "name": "assets/dashboard-mission-DqQMo00B.js",
+      "status": 200,
+      "sha256": "001359e800fe237a44f79ab217786446b73c53d8302da5caa873b07eceffc3bd",
+      "bytes": 533
+    },
+    {
+      "name": "assets/runtime-probe-Drw_6Pp9.js",
+      "status": 200,
+      "sha256": "36fef874b1166bb1a079d72a8058f849cdcb4569eb2444bc889f7438edd50dc8",
+      "bytes": 2298
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-112.woff2",
+      "status": 200,
+      "sha256": "bd4ba71c927a5394c7e4488d6e36a6f79b85fa5829d22a459e2e658819788934",
+      "bytes": 16444
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-109.woff2",
+      "status": 200,
+      "sha256": "fe94b8bb12395b3ae8b2af3949c9e7728d2a4166af989481e07f1ba1558c5b0c",
+      "bytes": 17988
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-114.woff2",
+      "status": 200,
+      "sha256": "746cbcb44fd668936a78967f7f7bd8bb9fe0e891a378487c8d0d99c563c9590e",
+      "bytes": 16176
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-110.woff2",
+      "status": 200,
+      "sha256": "bcd2f60fc886a27757d803cdaaf2cd6c68c357127dcda6979f6737c9ebd0e72d",
+      "bytes": 17604
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-113.woff2",
+      "status": 200,
+      "sha256": "78b1216a934a85e788a0f22cb4d8c73a681111edbe121e3d34428ab85209dadf",
+      "bytes": 16492
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-111.woff2",
+      "status": 200,
+      "sha256": "01c12e158ee141ecc24a7a240d316690d91b856e434258ad791e51b1d2026f6d",
+      "bytes": 17416
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-96.woff2",
+      "status": 200,
+      "sha256": "aef244f8aff4261bd4fc130444e28bbe0aace87f2cd6b923031b15a1861b3a05",
+      "bytes": 21268
+    }
+  ],
+  "goal_responses": [
+    {
+      "path": "/api/v1/dashboard/goals",
+      "query": "",
+      "status": 200,
+      "body": {
+        "generated_at": "2026-09-12T11:28:09Z",
+        "approval_queue_state": {
+          "state": "ready"
+        },
+        "tree": [
+          {
+            "id": "exhibition-publication-baseline",
+            "title": "가상 전시 출판물 완성",
+            "verification": {
+              "goal_id": "exhibition-publication-baseline",
+              "completion": {
+                "state": "proof_proven",
+                "verdict": {
+                  "outcome": "proven",
+                  "reason": null,
+                  "request_id": "03d1e4d404bc00f3e2c475e9ccf023d4",
+                  "criterion": {
+                    "revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+                    "title": "가상 전시 출판물 완성",
+                    "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+                    "target_value": "5개 기준 모두 충족"
+                  },
+                  "verification_run_id": "01a0953c-5e01-7000-9ed9-1003a66990c1",
+                  "authority": {
+                    "kind": "system_llm_agent",
+                    "actor": "verifier_exact"
+                  },
+                  "evidence": "실제 측정값은 5/5 기준 충족이다: booklet.pdf는 102608 bytes, SHA256 ebabc3f7...로 정확히 3페이지이며 page1~3 PNG의 bytes/SHA256이 PDF 렌더 및 evidence.json과 모두 일치했고, poster.png도 86709 bytes, SHA256 2b2f022a...로 기록과 일치했다. 직접 연 시각물에서 제목·대상·일시·장소·입장료가 일치하고 한글 누락·겹침·잘림이 없으며 가상 행사임을 명시해 target인 5개 모두 충족에 도달했다.",
+                  "recorded_at": "2026-09-12T10:50:26Z"
+                }
+              },
+              "updated_at": "2026-09-12T10:50:26Z"
+            },
+            "phase": "awaiting_confirmation",
+            "phase_color": "#f59e0b",
+            "goal_fsm": {
+              "state": "awaiting_confirmation",
+              "source": "goal.phase",
+              "state_kind": "awaiting_confirmation",
+              "next_actions": [
+                "drop",
+                "reopen"
+              ],
+              "activity_observation": "runtime"
+            },
+            "priority": 3,
+            "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+            "target_value": "5개 기준 모두 충족",
+            "due_date": null,
+            "tasks": [
+              {
+                "id": "task-001",
+                "title": "가상 전시 안내 책자와 포스터 제작",
+                "status": "done",
+                "status_color": "#4ade80",
+                "priority": 3,
+                "assignee": "exhibit-editor",
+                "is_terminal": true,
+                "created_at": "2026-09-10T12:16:46Z",
+                "updated_at": "2026-09-10T13:47:07Z"
+              }
+            ],
+            "task_count": 1,
+            "task_done_count": 1,
+            "task_summary": {
+              "total": 1,
+              "done": 1,
+              "open": 0,
+              "terminal": 1,
+              "awaiting_verification": 0,
+              "cancelled": 0,
+              "unassigned": 0,
+              "completion_pct": 100,
+              "by_status": {
+                "todo": 0,
+                "claimed": 0,
+                "in_progress": 0,
+                "awaiting_verification": 0,
+                "done": 1,
+                "cancelled": 0
+              }
+            },
+            "timeline_events": [
+              {
+                "ts": "2026-09-10T14:03:24Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=verifying by exhibit-editor",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-10T14:04:02Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=executing by verifier_exact",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-12T09:12:15Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=verifying by admin",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-12T10:07:13Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=executing by verifier_exact",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-12T10:49:16Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=verifying by admin",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-12T10:50:26Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=awaiting_confirmation by verifier_exact",
+                "severity": "ok"
+              }
+            ],
+            "children": [],
+            "child_count": 0,
+            "last_activity_at": "2026-09-12T11:28:07Z",
+            "stagnation_seconds": 2,
+            "activity_observation": "runtime",
+            "linked_keeper_names": [
+              "exhibit-editor"
+            ],
+            "pending_approval_count": 0,
+            "latest_keeper_ref": "exhibit-editor",
+            "latest_turn_ref": 384,
+            "created_at": "2026-09-10T12:16:35Z",
+            "updated_at": "2026-09-12T10:50:26Z"
+          }
+        ],
+        "summary": {
+          "total_goals": 1,
+          "active_goals": 0,
+          "phase_counts": {
+            "executing": 0,
+            "verifying": 0,
+            "awaiting_confirmation": 1,
+            "completed": 0,
+            "dropped": 0
+          },
+          "total_tasks": 1,
+          "done_tasks": 1,
+          "pending_approvals": 0
+        }
+      }
+    },
+    {
+      "path": "/api/v1/dashboard/goals/detail",
+      "query": "?goal_id=exhibition-publication-baseline",
+      "status": 200,
+      "body": {
+        "generated_at": "2026-09-12T11:28:09Z",
+        "approval_queue_state": {
+          "state": "ready"
+        },
+        "goal": {
+          "id": "exhibition-publication-baseline",
+          "title": "가상 전시 출판물 완성",
+          "verification": {
+            "goal_id": "exhibition-publication-baseline",
+            "completion": {
+              "state": "proof_proven",
+              "verdict": {
+                "outcome": "proven",
+                "reason": null,
+                "request_id": "03d1e4d404bc00f3e2c475e9ccf023d4",
+                "criterion": {
+                  "revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+                  "title": "가상 전시 출판물 완성",
+                  "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+                  "target_value": "5개 기준 모두 충족"
+                },
+                "verification_run_id": "01a0953c-5e01-7000-9ed9-1003a66990c1",
+                "authority": {
+                  "kind": "system_llm_agent",
+                  "actor": "verifier_exact"
+                },
+                "evidence": "실제 측정값은 5/5 기준 충족이다: booklet.pdf는 102608 bytes, SHA256 ebabc3f7...로 정확히 3페이지이며 page1~3 PNG의 bytes/SHA256이 PDF 렌더 및 evidence.json과 모두 일치했고, poster.png도 86709 bytes, SHA256 2b2f022a...로 기록과 일치했다. 직접 연 시각물에서 제목·대상·일시·장소·입장료가 일치하고 한글 누락·겹침·잘림이 없으며 가상 행사임을 명시해 target인 5개 모두 충족에 도달했다.",
+                "recorded_at": "2026-09-12T10:50:26Z"
+              }
+            },
+            "updated_at": "2026-09-12T10:50:26Z"
+          },
+          "phase": "awaiting_confirmation",
+          "phase_color": "#f59e0b",
+          "goal_fsm": {
+            "state": "awaiting_confirmation",
+            "source": "goal.phase",
+            "state_kind": "awaiting_confirmation",
+            "next_actions": [
+              "drop",
+              "reopen"
+            ],
+            "activity_observation": "runtime"
+          },
+          "priority": 3,
+          "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+          "target_value": "5개 기준 모두 충족",
+          "due_date": null,
+          "tasks": [
+            {
+              "id": "task-001",
+              "title": "가상 전시 안내 책자와 포스터 제작",
+              "status": "done",
+              "status_color": "#4ade80",
+              "priority": 3,
+              "assignee": "exhibit-editor",
+              "is_terminal": true,
+              "created_at": "2026-09-10T12:16:46Z",
+              "updated_at": "2026-09-10T13:47:07Z"
+            }
+          ],
+          "task_count": 1,
+          "task_done_count": 1,
+          "task_summary": {
+            "total": 1,
+            "done": 1,
+            "open": 0,
+            "terminal": 1,
+            "awaiting_verification": 0,
+            "cancelled": 0,
+            "unassigned": 0,
+            "completion_pct": 100,
+            "by_status": {
+              "todo": 0,
+              "claimed": 0,
+              "in_progress": 0,
+              "awaiting_verification": 0,
+              "done": 1,
+              "cancelled": 0
+            }
+          },
+          "timeline_events": [
+            {
+              "ts": "2026-09-10T14:03:24Z",
+              "kind": "goal_phase",
+              "lane": "goal",
+              "title": "Goal Phase",
+              "summary": "phase=verifying by exhibit-editor",
+              "severity": "ok"
+            },
+            {
+              "ts": "2026-09-10T14:04:02Z",
+              "kind": "goal_phase",
+              "lane": "goal",
+              "title": "Goal Phase",
+              "summary": "phase=executing by verifier_exact",
+              "severity": "ok"
+            },
+            {
+              "ts": "2026-09-12T09:12:15Z",
+              "kind": "goal_phase",
+              "lane": "goal",
+              "title": "Goal Phase",
+              "summary": "phase=verifying by admin",
+              "severity": "ok"
+            },
+            {
+              "ts": "2026-09-12T10:07:13Z",
+              "kind": "goal_phase",
+              "lane": "goal",
+              "title": "Goal Phase",
+              "summary": "phase=executing by verifier_exact",
+              "severity": "ok"
+            },
+            {
+              "ts": "2026-09-12T10:49:16Z",
+              "kind": "goal_phase",
+              "lane": "goal",
+              "title": "Goal Phase",
+              "summary": "phase=verifying by admin",
+              "severity": "ok"
+            },
+            {
+              "ts": "2026-09-12T10:50:26Z",
+              "kind": "goal_phase",
+              "lane": "goal",
+              "title": "Goal Phase",
+              "summary": "phase=awaiting_confirmation by verifier_exact",
+              "severity": "ok"
+            }
+          ],
+          "children": [],
+          "child_count": 0,
+          "last_activity_at": "2026-09-12T11:28:07Z",
+          "stagnation_seconds": 2,
+          "activity_observation": "runtime",
+          "linked_keeper_names": [
+            "exhibit-editor"
+          ],
+          "pending_approval_count": 0,
+          "latest_keeper_ref": "exhibit-editor",
+          "latest_turn_ref": 384,
+          "created_at": "2026-09-10T12:16:35Z",
+          "updated_at": "2026-09-12T10:50:26Z"
+        },
+        "linked_tasks": [
+          {
+            "id": "task-001",
+            "title": "가상 전시 안내 책자와 포스터 제작",
+            "status": "done",
+            "status_color": "#4ade80",
+            "priority": 3,
+            "assignee": "exhibit-editor",
+            "is_terminal": true,
+            "created_at": "2026-09-10T12:16:46Z",
+            "updated_at": "2026-09-10T13:47:07Z"
+          }
+        ],
+        "linked_keepers": [
+          {
+            "name": "exhibit-editor",
+            "current_task_id": null,
+            "sandbox_profile": "docker",
+            "network_mode": "inherit",
+            "runtime_id": "glm-coding.glm-5.3",
+            "runtime_outcome": "completed",
+            "latest_execution_outcome": "receipt_done",
+            "latest_execution_at": "2026-09-12T11:24:49Z",
+            "latest_receipt": {
+              "schema": "keeper.execution_receipt.v1",
+              "recorded_at": "2026-09-12T11:24:49Z",
+              "keeper_name": "exhibit-editor",
+              "trace_id": "trace-1789042595401-00001",
+              "turn_count": 384,
+              "agent_core_turn_count": 658,
+              "current_task_id": null,
+              "outcome": "receipt_done",
+              "terminal_reason_code": "yielded_to_operation_queued:658",
+              "operator_disposition": "pass",
+              "operator_disposition_reason": "healthy",
+              "runtime_contract": {
+                "keeper_name": "exhibit-editor",
+                "trace_id": "trace-1789042595401-00001",
+                "session_id": "trace-1789042595401-00001",
+                "generation": null,
+                "keeper_turn_id": 384,
+                "task_id": null,
+                "goal_ids": [],
+                "sandbox_profile": "docker",
+                "sandbox_root": "/home/keeper/playground/exhibit-editor",
+                "sandbox_roots": [],
+                "path_resolution": {
+                  "read_implicit_cwd": false,
+                  "read_explicit_cwd_supported": true,
+                  "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+                  "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+                  "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+                  "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+                },
+                "network_mode": "none",
+                "runtime_profile": "glm-coding.glm-5.3"
+              },
+              "action_radius": {
+                "tool_name": "keeper_turn",
+                "action_key": "run_turn",
+                "target_kind": "keeper",
+                "target_path": "/home/keeper/playground/exhibit-editor",
+                "sandbox_target": "docker",
+                "observed_paths": [
+                  "/home/keeper/playground/exhibit-editor"
+                ],
+                "success": true,
+                "duration_ms": 36000,
+                "error": null
+              },
+              "response_text_present": false,
+              "completion_contract_result": "unknown",
+              "actionable_signal": "has_board_activity",
+              "tool_surface": {
+                "turn_lane": "tool_optional"
+              },
+              "sandbox": {
+                "kind": "docker",
+                "sandbox_root": "/home/keeper/playground/exhibit-editor",
+                "network_mode": "none"
+              },
+              "runtime": {
+                "name": "glm-coding.glm-5.3",
+                "selected_model": "glm-5.3",
+                "attempt_count": 1,
+                "lane_attempt_count": 1,
+                "fallback_applied": false,
+                "outcome": "completed",
+                "agent_core_internal_runtime_allowed": false,
+                "degraded_retry_applied": false,
+                "degraded_retry_runtime": null,
+                "fallback_reason": null,
+                "rotation_attempts": []
+              },
+              "stop_reason": "yielded_to_operation_queued:658",
+              "error": null,
+              "started_at": "2026-09-12T11:24:13Z",
+              "ended_at": "2026-09-12T11:24:49Z",
+              "extra_system_context_digest": "6fa31fa5e1d72e50c976b86133caae22558bff140fc21b1333cb6f616149f27f",
+              "extra_system_context_injected_size": 54933,
+              "extra_system_context_computed_size": 54933
+            },
+            "runtime_trust": {
+              "trace_id": "trace-1789042595401-00001",
+              "turn_id": 384,
+              "phase": "failing",
+              "raw_phase": "failing",
+              "current_task_id": null,
+              "active_model": "glm-5.3",
+              "selected_model": "glm-5.3",
+              "runtime_contract": {
+                "sandbox_profile": "docker",
+                "network_mode": "inherit",
+                "backend": "docker",
+                "sandbox_target": "docker",
+                "task_id": null
+              },
+              "runtime_blockers": {
+                "runtime_blocker_class": "turn_failures",
+                "runtime_blocker_summary": "Keeper turn failed 13 consecutive cycle(s); inspect the last runtime error before retry.",
+                "runtime_blocker_facts": {
+                  "source": "keeper_runtime.last_runtime_attempt",
+                  "runtime_id": "glm-coding.glm-5.3",
+                  "last_runtime_attempt": null
+                }
+              },
+              "disposition": "Alert",
+              "disposition_reason": "unknown_runtime_blocker",
+              "operator_disposition": "unknown",
+              "operator_disposition_reason": "unknown_runtime_blocker",
+              "needs_attention": true,
+              "attention_reason": "runtime_blocked",
+              "next_human_action": "inspect_runtime_blocker",
+              "approval_queue_state": {
+                "state": "ready"
+              },
+              "approval": {
+                "state": "allowed",
+                "queue_state": {
+                  "state": "ready"
+                },
+                "pending_count": 0,
+                "decision_source": "always_allowed",
+                "latest_event_kind": "gate_allowed",
+                "latest_event_at": "2026-09-12T11:28:07Z",
+                "rule_id": null,
+                "pending_first": null
+              },
+              "execution": {
+                "completion_contract_result": "unknown",
+                "provider_attempt_count": 1,
+                "provider_fallback_applied": false,
+                "provider_selected_model": "glm-5.3",
+                "runtime_outcome": "completed",
+                "sandbox_summary": "docker / none",
+                "sandbox_root": "/home/keeper/playground/exhibit-editor",
+                "completion_observation_summary": "unknown",
+                "latest_receipt_at": "2026-09-12T11:24:49Z"
+              },
+              "latest_terminal_reason": {
+                "code": "turn_failures",
+                "disposition": "turn_failures",
+                "source": "runtime_blocker",
+                "severity": "bad",
+                "summary": "Keeper turn failed 13 consecutive cycle(s); inspect the last runtime error before retry.",
+                "next_action": "inspect_latest_error"
+              },
+              "latest_next_action": "inspect_latest_error",
+              "pending_approval_count": 0,
+              "pending_approvals": [],
+              "latest_decision": {
+                "ts_unix": 1789212487.471943,
+                "event": "tool_exec",
+                "keeper_name": "exhibit-editor",
+                "tool": "tool_execute",
+                "duration_ms": 402,
+                "result_bytes": 642,
+                "disposition": "completed",
+                "tool_use_id": "call_0a2addd7a91440358feb6fc4",
+                "turn": 658,
+                "planned_index": 1,
+                "batch_index": 1,
+                "batch_size": 1,
+                "execution_mode": "serial"
+              },
+              "latest_tool_call": {
+                "ts": 1789212487.472338,
+                "record_kind": "tool_call",
+                "keeper": "exhibit-editor",
+                "tool": "Execute",
+                "input": {
+                  "argv": [
+                    "sh",
+                    "-c",
+                    "wc -c < build_publication.py; sha256sum build_publication.py"
+                  ],
+                  "cwd": "."
+                },
+                "output": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"not_observed\",\"receipts\":[]},\"cwd\":\"/home/keeper/playground/exhibit-editor\",\"execution_location\":{\"cwd\":\"/home/keeper/playground/exhibit-editor\",\"cwd_source\":\"explicit_cwd\",\"scope\":\"playground_root\",\"playground_root\":\"/home/keeper/playground/exhibit-editor\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output_completeness\":\"complete\",\"output\":\"15999\\n178ff1f3638a9cb9e7516c0abeec1df59173f2ee7e250824754cf741f7ef5af3  build_publication.py\\n\",\"typed\":true,\"execution_time_ms\":239,\"requested_sandbox\":\"docker\",\"via\":\"docker\",\"sandbox_profile\":\"docker\"}",
+                "success": true,
+                "duration_ms": 404.34885025024414,
+                "runtime_contract": {
+                  "keeper_name": "exhibit-editor",
+                  "trace_id": "trace-1789042595401-00001",
+                  "session_id": "trace-1789042595401-00001",
+                  "generation": null,
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "sandbox_profile": "docker",
+                  "sandbox_root": "/home/keeper/playground/exhibit-editor",
+                  "sandbox_roots": [
+                    ".masc/playground/docker/exhibit-editor/"
+                  ],
+                  "path_resolution": {
+                    "read_implicit_cwd": false,
+                    "read_explicit_cwd_supported": true,
+                    "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+                    "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+                    "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+                    "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+                  },
+                  "network_mode": "none",
+                  "runtime_profile": "glm-coding.glm-5.3"
+                },
+                "action_radius": {
+                  "tool_name": "Execute",
+                  "action_key": "Execute",
+                  "target_kind": "directory",
+                  "target_path": ".",
+                  "sandbox_target": "docker",
+                  "observed_paths": [
+                    "."
+                  ],
+                  "success": true,
+                  "duration_ms": 404.34885025024414,
+                  "error": null
+                },
+                "route_evidence": {
+                  "descriptor_id": "agent.execute",
+                  "capability_id": "tool_execute",
+                  "keeper_model_projection": "preferred_public_name",
+                  "public_name": "Execute",
+                  "canonical_name": "tool_execute",
+                  "description": "Run one command inside the Keeper sandbox. Give exactly one of argv or script: argv is one non-empty argv process vector run without a shell, tokens verbatim, and script is one line handed to a real shell. cwd is a relative path inside the path jail, and MASC never interprets program or subcommand meaning. A call runs to completion or stops at timeout_sec; there is no background task lifecycle. In auto mode an enforced Observe run returns its actual exit status and output, including failed writes; this never authorizes execution outside Observe. Use intent=request_effect when the command needs persistent writes or network effects: the configured Gate decides permission before effect execution. A nonzero exit alone is not a permission request.",
+                  "executor": "shell_ir",
+                  "backend": "sandbox_process",
+                  "sandbox": "backend_selected",
+                  "runtime_handler": "tool_execute",
+                  "execution": "serial",
+                  "tool_kind": "atomic",
+                  "composable_output": {
+                    "kind": "json",
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "status": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string"
+                            },
+                            "code": {
+                              "type": "integer"
+                            },
+                            "signal": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "output": {
+                          "type": "string"
+                        },
+                        "output_artifact": {
+                          "type": "object",
+                          "properties": {
+                            "_blob": {
+                              "type": "object",
+                              "properties": {
+                                "sha256": {
+                                  "type": "string"
+                                },
+                                "bytes": {
+                                  "type": "integer"
+                                },
+                                "mime": {
+                                  "type": "string"
+                                },
+                                "preview": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sha256",
+                                "bytes",
+                                "mime",
+                                "preview"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "_blob"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "stdout_artifact": {
+                          "type": "object",
+                          "properties": {
+                            "_blob": {
+                              "type": "object",
+                              "properties": {
+                                "sha256": {
+                                  "type": "string"
+                                },
+                                "bytes": {
+                                  "type": "integer"
+                                },
+                                "mime": {
+                                  "type": "string"
+                                },
+                                "preview": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sha256",
+                                "bytes",
+                                "mime",
+                                "preview"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "_blob"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "stderr_artifact": {
+                          "type": "object",
+                          "properties": {
+                            "_blob": {
+                              "type": "object",
+                              "properties": {
+                                "sha256": {
+                                  "type": "string"
+                                },
+                                "bytes": {
+                                  "type": "integer"
+                                },
+                                "mime": {
+                                  "type": "string"
+                                },
+                                "preview": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sha256",
+                                "bytes",
+                                "mime",
+                                "preview"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "_blob"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "output_completeness": {
+                          "type": "string"
+                        },
+                        "typed": {
+                          "type": "boolean"
+                        },
+                        "execution_time_ms": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "status",
+                        "typed",
+                        "execution_time_ms"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "receipt_labels": {
+                    "descriptor_id": "agent.execute",
+                    "capability_id": "tool_execute",
+                    "keeper_model_projection": "preferred_public_name",
+                    "public_name": "Execute",
+                    "canonical_name": "tool_execute",
+                    "executor": "shell_ir",
+                    "backend": "sandbox_process",
+                    "sandbox": "backend_selected",
+                    "runtime_handler": "tool_execute",
+                    "execution": "serial",
+                    "composable_output": "opaque",
+                    "input_schema_source": "descriptor_owned"
+                  },
+                  "eval_tags": [],
+                  "readonly": null,
+                  "cwd_scope": "keeper_sandbox",
+                  "polling_read": false,
+                  "status": {
+                    "kind": "exit",
+                    "code": 0
+                  },
+                  "sandbox_profile": "docker",
+                  "via": "docker",
+                  "cwd": "[REDACTED]",
+                  "command": "[REDACTED]",
+                  "tool_name": "Execute"
+                },
+                "agent_name": "exhibit-editor",
+                "model": "runtime",
+                "runtime_profile": "glm-coding.glm-5.3",
+                "turn_kind": "direct",
+                "lane": "tool_optional",
+                "prompt_fingerprint": "ed13f446e638787f3e6a94a2dc35c6994e471f6d1f71d795d4b9c62f286a6343",
+                "execution_id": "exec-1789212487472-0002",
+                "tool_use_id": "call_0a2addd7a91440358feb6fc4",
+                "planned_index": 1,
+                "batch_index": 1,
+                "batch_size": 1,
+                "execution_mode": "serial",
+                "disposition": "completed",
+                "trace_id": "trace-1789042595401-00001",
+                "session_id": "trace-1789042595401-00001",
+                "turn": 658,
+                "keeper_turn_id": 384,
+                "sandbox_profile": "docker",
+                "network_mode": "none",
+                "result_bytes": 642
+              },
+              "latest_receipt": {
+                "schema": "keeper.execution_receipt.v1",
+                "recorded_at": "2026-09-12T11:24:49Z",
+                "keeper_name": "exhibit-editor",
+                "trace_id": "trace-1789042595401-00001",
+                "turn_count": 384,
+                "agent_core_turn_count": 658,
+                "current_task_id": null,
+                "outcome": "receipt_done",
+                "terminal_reason_code": "yielded_to_operation_queued:658",
+                "operator_disposition": "pass",
+                "operator_disposition_reason": "healthy",
+                "runtime_contract": {
+                  "keeper_name": "exhibit-editor",
+                  "trace_id": "trace-1789042595401-00001",
+                  "session_id": "trace-1789042595401-00001",
+                  "generation": null,
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "sandbox_profile": "docker",
+                  "sandbox_root": "/home/keeper/playground/exhibit-editor",
+                  "sandbox_roots": [],
+                  "path_resolution": {
+                    "read_implicit_cwd": false,
+                    "read_explicit_cwd_supported": true,
+                    "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+                    "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+                    "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+                    "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+                  },
+                  "network_mode": "none",
+                  "runtime_profile": "glm-coding.glm-5.3"
+                },
+                "action_radius": {
+                  "tool_name": "keeper_turn",
+                  "action_key": "run_turn",
+                  "target_kind": "keeper",
+                  "target_path": "/home/keeper/playground/exhibit-editor",
+                  "sandbox_target": "docker",
+                  "observed_paths": [
+                    "/home/keeper/playground/exhibit-editor"
+                  ],
+                  "success": true,
+                  "duration_ms": 36000,
+                  "error": null
+                },
+                "response_text_present": false,
+                "completion_contract_result": "unknown",
+                "actionable_signal": "has_board_activity",
+                "tool_surface": {
+                  "turn_lane": "tool_optional"
+                },
+                "sandbox": {
+                  "kind": "docker",
+                  "sandbox_root": "/home/keeper/playground/exhibit-editor",
+                  "network_mode": "none"
+                },
+                "runtime": {
+                  "name": "glm-coding.glm-5.3",
+                  "selected_model": "glm-5.3",
+                  "attempt_count": 1,
+                  "lane_attempt_count": 1,
+                  "fallback_applied": false,
+                  "outcome": "completed",
+                  "agent_core_internal_runtime_allowed": false,
+                  "degraded_retry_applied": false,
+                  "degraded_retry_runtime": null,
+                  "fallback_reason": null,
+                  "rotation_attempts": []
+                },
+                "stop_reason": "yielded_to_operation_queued:658",
+                "error": null,
+                "started_at": "2026-09-12T11:24:13Z",
+                "ended_at": "2026-09-12T11:24:49Z",
+                "extra_system_context_digest": "6fa31fa5e1d72e50c976b86133caae22558bff140fc21b1333cb6f616149f27f",
+                "extra_system_context_injected_size": 54933,
+                "extra_system_context_computed_size": 54933
+              },
+              "latest_causal_event": {
+                "kind": "tool_call",
+                "ts": "2026-09-12T11:28:07Z",
+                "ts_unix": 1789212487.472338,
+                "observed_at": "2026-09-12T11:28:07Z",
+                "observed_at_unix": 1789212487.472338,
+                "observation_only": false,
+                "trace_id": "trace-1789042595401-00001",
+                "keeper_turn_id": 384,
+                "task_id": null,
+                "goal_ids": [],
+                "title": "Tool · Execute",
+                "summary": "Execute succeeded in 404ms",
+                "severity": "ok",
+                "next_human_action": null
+              },
+              "causal_timeline": [
+                {
+                  "kind": "tool_call",
+                  "ts": "2026-09-12T11:28:07Z",
+                  "ts_unix": 1789212487.472338,
+                  "observed_at": "2026-09-12T11:28:07Z",
+                  "observed_at_unix": 1789212487.472338,
+                  "observation_only": false,
+                  "trace_id": "trace-1789042595401-00001",
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Tool · Execute",
+                  "summary": "Execute succeeded in 404ms",
+                  "severity": "ok",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "approval_gate_allowed",
+                  "ts": "2026-09-12T11:28:07Z",
+                  "ts_unix": 1789212487.225958,
+                  "observed_at": "2026-09-12T11:28:07Z",
+                  "observed_at_unix": 1789212487.225958,
+                  "observation_only": false,
+                  "trace_id": null,
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Approval Gate · tool_execute",
+                  "summary": "gate allowed the call · keeper=exhibit-editor",
+                  "severity": "ok",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "tool_call",
+                  "ts": "2026-09-12T11:28:06Z",
+                  "ts_unix": 1789212486.967891,
+                  "observed_at": "2026-09-12T11:28:06Z",
+                  "observed_at_unix": 1789212486.967891,
+                  "observation_only": false,
+                  "trace_id": "trace-1789042595401-00001",
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Tool · Read",
+                  "summary": "Read succeeded in 266ms",
+                  "severity": "ok",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "transition",
+                  "ts": "2026-09-12T11:27:54Z",
+                  "ts_unix": 1789212474.178202,
+                  "observed_at": "2026-09-12T11:27:54Z",
+                  "observed_at_unix": 1789212474.178202,
+                  "observation_only": false,
+                  "trace_id": null,
+                  "keeper_turn_id": null,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Transition · turn_failed",
+                  "summary": "running -> failing via turn_failed; outcome=applied",
+                  "severity": "info",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "transition",
+                  "ts": "2026-09-12T11:27:54Z",
+                  "ts_unix": 1789212474.086329,
+                  "observed_at": "2026-09-12T11:27:54Z",
+                  "observed_at_unix": 1789212474.086329,
+                  "observation_only": false,
+                  "trace_id": null,
+                  "keeper_turn_id": null,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Transition · fiber_started",
+                  "summary": "offline -> running via fiber_started; outcome=applied",
+                  "severity": "info",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "approval_resolved",
+                  "ts": "2026-09-12T11:27:49Z",
+                  "ts_unix": 1789212469.03507,
+                  "observed_at": "2026-09-12T11:27:49Z",
+                  "observed_at_unix": 1789212469.03507,
+                  "observation_only": false,
+                  "trace_id": null,
+                  "keeper_turn_id": 373,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Approval · tool_execute",
+                  "summary": "approval approve · keeper=exhibit-editor",
+                  "severity": "ok",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "approval_resolved",
+                  "ts": "2026-09-12T11:27:48Z",
+                  "ts_unix": 1789212468.994851,
+                  "observed_at": "2026-09-12T11:27:48Z",
+                  "observed_at_unix": 1789212468.994851,
+                  "observation_only": false,
+                  "trace_id": null,
+                  "keeper_turn_id": 142,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Approval · tool_execute",
+                  "summary": "approval approve · keeper=exhibit-editor",
+                  "severity": "ok",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "tool_call",
+                  "ts": "2026-09-12T11:24:49Z",
+                  "ts_unix": 1789212289.695033,
+                  "observed_at": "2026-09-12T11:24:49Z",
+                  "observed_at_unix": 1789212289.695033,
+                  "observation_only": false,
+                  "trace_id": "trace-1789042595401-00001",
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Tool · keeper_artifact_read",
+                  "summary": "keeper_artifact_read succeeded in 3ms",
+                  "severity": "ok",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "execution_receipt",
+                  "ts": "2026-09-12T11:24:49Z",
+                  "ts_unix": 1789212289,
+                  "observed_at": "2026-09-12T11:24:49Z",
+                  "observed_at_unix": 1789212289,
+                  "observation_only": false,
+                  "trace_id": "trace-1789042595401-00001",
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Execution Receipt",
+                  "summary": "receipt_done · completion_observation=unknown · runtime=completed",
+                  "severity": "ok",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "terminal_reason",
+                  "ts": "2026-09-12T11:24:49Z",
+                  "ts_unix": 1789212289,
+                  "observed_at": "2026-09-12T11:24:49Z",
+                  "observed_at_unix": 1789212289,
+                  "observation_only": false,
+                  "trace_id": "trace-1789042595401-00001",
+                  "keeper_turn_id": null,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Terminal Reason",
+                  "summary": "keeper turn ended with yielded_to_operation_queued:658",
+                  "severity": "bad",
+                  "next_human_action": "inspect_latest_error"
+                },
+                {
+                  "kind": "tool_call",
+                  "ts": "2026-09-12T11:19:11Z",
+                  "ts_unix": 1789211951.673312,
+                  "observed_at": "2026-09-12T11:19:11Z",
+                  "observed_at_unix": 1789211951.673312,
+                  "observation_only": false,
+                  "trace_id": "trace-1789042595401-00001",
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Tool · masc_board_post_get",
+                  "summary": "masc_board_post_get succeeded in 21ms",
+                  "severity": "ok",
+                  "next_human_action": null
+                },
+                {
+                  "kind": "tool_call",
+                  "ts": "2026-09-12T11:13:20Z",
+                  "ts_unix": 1789211600.620984,
+                  "observed_at": "2026-09-12T11:13:20Z",
+                  "observed_at_unix": 1789211600.620984,
+                  "observation_only": false,
+                  "trace_id": "trace-1789042595401-00001",
+                  "keeper_turn_id": 384,
+                  "task_id": null,
+                  "goal_ids": [],
+                  "title": "Tool · masc_goal_list",
+                  "summary": "masc_goal_list succeeded in 1ms",
+                  "severity": "ok",
+                  "next_human_action": null
+                }
+              ],
+              "last_event_bus_correlation": null
+            },
+            "latest_causal_event": {
+              "kind": "tool_call",
+              "ts": "2026-09-12T11:28:07Z",
+              "ts_unix": 1789212487.472338,
+              "observed_at": "2026-09-12T11:28:07Z",
+              "observed_at_unix": 1789212487.472338,
+              "observation_only": false,
+              "trace_id": "trace-1789042595401-00001",
+              "keeper_turn_id": 384,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Tool · Execute",
+              "summary": "Execute succeeded in 404ms",
+              "severity": "ok",
+              "next_human_action": null
+            }
+          }
+        ],
+        "approvals": [],
+        "execution_receipts": [
+          {
+            "schema": "keeper.execution_receipt.v1",
+            "recorded_at": "2026-09-12T11:24:49Z",
+            "keeper_name": "exhibit-editor",
+            "trace_id": "trace-1789042595401-00001",
+            "turn_count": 384,
+            "agent_core_turn_count": 658,
+            "current_task_id": null,
+            "outcome": "receipt_done",
+            "terminal_reason_code": "yielded_to_operation_queued:658",
+            "operator_disposition": "pass",
+            "operator_disposition_reason": "healthy",
+            "runtime_contract": {
+              "keeper_name": "exhibit-editor",
+              "trace_id": "trace-1789042595401-00001",
+              "session_id": "trace-1789042595401-00001",
+              "generation": null,
+              "keeper_turn_id": 384,
+              "task_id": null,
+              "goal_ids": [],
+              "sandbox_profile": "docker",
+              "sandbox_root": "/home/keeper/playground/exhibit-editor",
+              "sandbox_roots": [],
+              "path_resolution": {
+                "read_implicit_cwd": false,
+                "read_explicit_cwd_supported": true,
+                "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+                "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+                "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+                "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+              },
+              "network_mode": "none",
+              "runtime_profile": "glm-coding.glm-5.3"
+            },
+            "action_radius": {
+              "tool_name": "keeper_turn",
+              "action_key": "run_turn",
+              "target_kind": "keeper",
+              "target_path": "/home/keeper/playground/exhibit-editor",
+              "sandbox_target": "docker",
+              "observed_paths": [
+                "/home/keeper/playground/exhibit-editor"
+              ],
+              "success": true,
+              "duration_ms": 36000,
+              "error": null
+            },
+            "response_text_present": false,
+            "completion_contract_result": "unknown",
+            "actionable_signal": "has_board_activity",
+            "tool_surface": {
+              "turn_lane": "tool_optional"
+            },
+            "sandbox": {
+              "kind": "docker",
+              "sandbox_root": "/home/keeper/playground/exhibit-editor",
+              "network_mode": "none"
+            },
+            "runtime": {
+              "name": "glm-coding.glm-5.3",
+              "selected_model": "glm-5.3",
+              "attempt_count": 1,
+              "lane_attempt_count": 1,
+              "fallback_applied": false,
+              "outcome": "completed",
+              "agent_core_internal_runtime_allowed": false,
+              "degraded_retry_applied": false,
+              "degraded_retry_runtime": null,
+              "fallback_reason": null,
+              "rotation_attempts": []
+            },
+            "stop_reason": "yielded_to_operation_queued:658",
+            "error": null,
+            "started_at": "2026-09-12T11:24:13Z",
+            "ended_at": "2026-09-12T11:24:49Z",
+            "extra_system_context_digest": "6fa31fa5e1d72e50c976b86133caae22558bff140fc21b1333cb6f616149f27f",
+            "extra_system_context_injected_size": 54933,
+            "extra_system_context_computed_size": 54933
+          }
+        ],
+        "timeline": [
+          {
+            "ts": "2026-09-12T11:28:07Z",
+            "kind": "keeper_runtime",
+            "lane": "keeper:exhibit-editor",
+            "title": "exhibit-editor · Tool · Execute",
+            "summary": "Execute succeeded in 404ms",
+            "severity": "ok"
+          },
+          {
+            "ts": "2026-09-12T10:50:26Z",
+            "kind": "goal_phase",
+            "lane": "goal",
+            "title": "Goal Phase",
+            "summary": "phase=awaiting_confirmation by verifier_exact",
+            "severity": "ok"
+          },
+          {
+            "ts": "2026-09-12T10:49:16Z",
+            "kind": "goal_phase",
+            "lane": "goal",
+            "title": "Goal Phase",
+            "summary": "phase=verifying by admin",
+            "severity": "ok"
+          },
+          {
+            "ts": "2026-09-12T10:07:13Z",
+            "kind": "goal_phase",
+            "lane": "goal",
+            "title": "Goal Phase",
+            "summary": "phase=executing by verifier_exact",
+            "severity": "ok"
+          },
+          {
+            "ts": "2026-09-12T09:12:15Z",
+            "kind": "goal_phase",
+            "lane": "goal",
+            "title": "Goal Phase",
+            "summary": "phase=verifying by admin",
+            "severity": "ok"
+          },
+          {
+            "ts": "2026-09-10T14:04:02Z",
+            "kind": "goal_phase",
+            "lane": "goal",
+            "title": "Goal Phase",
+            "summary": "phase=executing by verifier_exact",
+            "severity": "ok"
+          },
+          {
+            "ts": "2026-09-10T14:03:24Z",
+            "kind": "goal_phase",
+            "lane": "goal",
+            "title": "Goal Phase",
+            "summary": "phase=verifying by exhibit-editor",
+            "severity": "ok"
+          },
+          {
+            "ts": "2026-09-10T13:47:07Z",
+            "kind": "task",
+            "lane": "task:task-001",
+            "title": "가상 전시 안내 책자와 포스터 제작",
+            "summary": "done · completed by exhibit-editor",
+            "severity": "ok"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/v1/dashboard/goals",
+      "query": "",
+      "status": 200,
+      "body": {
+        "generated_at": "2026-09-12T11:28:09Z",
+        "approval_queue_state": {
+          "state": "ready"
+        },
+        "tree": [
+          {
+            "id": "exhibition-publication-baseline",
+            "title": "가상 전시 출판물 완성",
+            "verification": {
+              "goal_id": "exhibition-publication-baseline",
+              "completion": {
+                "state": "proof_proven",
+                "verdict": {
+                  "outcome": "proven",
+                  "reason": null,
+                  "request_id": "03d1e4d404bc00f3e2c475e9ccf023d4",
+                  "criterion": {
+                    "revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+                    "title": "가상 전시 출판물 완성",
+                    "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+                    "target_value": "5개 기준 모두 충족"
+                  },
+                  "verification_run_id": "01a0953c-5e01-7000-9ed9-1003a66990c1",
+                  "authority": {
+                    "kind": "system_llm_agent",
+                    "actor": "verifier_exact"
+                  },
+                  "evidence": "실제 측정값은 5/5 기준 충족이다: booklet.pdf는 102608 bytes, SHA256 ebabc3f7...로 정확히 3페이지이며 page1~3 PNG의 bytes/SHA256이 PDF 렌더 및 evidence.json과 모두 일치했고, poster.png도 86709 bytes, SHA256 2b2f022a...로 기록과 일치했다. 직접 연 시각물에서 제목·대상·일시·장소·입장료가 일치하고 한글 누락·겹침·잘림이 없으며 가상 행사임을 명시해 target인 5개 모두 충족에 도달했다.",
+                  "recorded_at": "2026-09-12T10:50:26Z"
+                }
+              },
+              "updated_at": "2026-09-12T10:50:26Z"
+            },
+            "phase": "awaiting_confirmation",
+            "phase_color": "#f59e0b",
+            "goal_fsm": {
+              "state": "awaiting_confirmation",
+              "source": "goal.phase",
+              "state_kind": "awaiting_confirmation",
+              "next_actions": [
+                "drop",
+                "reopen"
+              ],
+              "activity_observation": "runtime"
+            },
+            "priority": 3,
+            "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+            "target_value": "5개 기준 모두 충족",
+            "due_date": null,
+            "tasks": [
+              {
+                "id": "task-001",
+                "title": "가상 전시 안내 책자와 포스터 제작",
+                "status": "done",
+                "status_color": "#4ade80",
+                "priority": 3,
+                "assignee": "exhibit-editor",
+                "is_terminal": true,
+                "created_at": "2026-09-10T12:16:46Z",
+                "updated_at": "2026-09-10T13:47:07Z"
+              }
+            ],
+            "task_count": 1,
+            "task_done_count": 1,
+            "task_summary": {
+              "total": 1,
+              "done": 1,
+              "open": 0,
+              "terminal": 1,
+              "awaiting_verification": 0,
+              "cancelled": 0,
+              "unassigned": 0,
+              "completion_pct": 100,
+              "by_status": {
+                "todo": 0,
+                "claimed": 0,
+                "in_progress": 0,
+                "awaiting_verification": 0,
+                "done": 1,
+                "cancelled": 0
+              }
+            },
+            "timeline_events": [
+              {
+                "ts": "2026-09-10T14:03:24Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=verifying by exhibit-editor",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-10T14:04:02Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=executing by verifier_exact",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-12T09:12:15Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=verifying by admin",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-12T10:07:13Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=executing by verifier_exact",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-12T10:49:16Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=verifying by admin",
+                "severity": "ok"
+              },
+              {
+                "ts": "2026-09-12T10:50:26Z",
+                "kind": "goal_phase",
+                "lane": "goal",
+                "title": "Goal Phase",
+                "summary": "phase=awaiting_confirmation by verifier_exact",
+                "severity": "ok"
+              }
+            ],
+            "children": [],
+            "child_count": 0,
+            "last_activity_at": "2026-09-12T11:28:07Z",
+            "stagnation_seconds": 2,
+            "activity_observation": "runtime",
+            "linked_keeper_names": [
+              "exhibit-editor"
+            ],
+            "pending_approval_count": 0,
+            "latest_keeper_ref": "exhibit-editor",
+            "latest_turn_ref": 384,
+            "created_at": "2026-09-10T12:16:35Z",
+            "updated_at": "2026-09-12T10:50:26Z"
+          }
+        ],
+        "summary": {
+          "total_goals": 1,
+          "active_goals": 0,
+          "phase_counts": {
+            "executing": 0,
+            "verifying": 0,
+            "awaiting_confirmation": 1,
+            "completed": 0,
+            "dropped": 0
+          },
+          "total_tasks": 1,
+          "done_tasks": 1,
+          "pending_approvals": 0
+        }
+      }
+    },
+    {
+      "path": "/api/v1/goals/confirmation",
+      "query": "?goal_id=exhibition-publication-baseline",
+      "status": 200,
+      "body": {
+        "goal": {
+          "id": "exhibition-publication-baseline",
+          "criterion_revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+          "title": "가상 전시 출판물 완성",
+          "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+          "target_value": "5개 기준 모두 충족",
+          "due_date": null,
+          "priority": 3,
+          "phase": "awaiting_confirmation",
+          "last_review_note": null,
+          "last_review_at": "2026-09-12T10:50:26Z",
+          "created_at": "2026-09-10T12:16:35Z",
+          "updated_at": "2026-09-12T10:50:26Z"
+        },
+        "verification": {
+          "goal_id": "exhibition-publication-baseline",
+          "completion": {
+            "state": "proof_proven",
+            "verdict": {
+              "outcome": "proven",
+              "reason": null,
+              "request_id": "03d1e4d404bc00f3e2c475e9ccf023d4",
+              "criterion": {
+                "revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+                "title": "가상 전시 출판물 완성",
+                "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+                "target_value": "5개 기준 모두 충족"
+              },
+              "verification_run_id": "01a0953c-5e01-7000-9ed9-1003a66990c1",
+              "authority": {
+                "kind": "system_llm_agent",
+                "actor": "verifier_exact"
+              },
+              "evidence": "실제 측정값은 5/5 기준 충족이다: booklet.pdf는 102608 bytes, SHA256 ebabc3f7...로 정확히 3페이지이며 page1~3 PNG의 bytes/SHA256이 PDF 렌더 및 evidence.json과 모두 일치했고, poster.png도 86709 bytes, SHA256 2b2f022a...로 기록과 일치했다. 직접 연 시각물에서 제목·대상·일시·장소·입장료가 일치하고 한글 누락·겹침·잘림이 없으며 가상 행사임을 명시해 target인 5개 모두 충족에 도달했다.",
+              "recorded_at": "2026-09-12T10:50:26Z"
+            }
+          },
+          "updated_at": "2026-09-12T10:50:26Z"
+        }
+      }
+    }
+  ],
+  "errors": [],
+  "failures": [],
+  "blocked": [
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/logs/tool-host-failures"
+    }
+  ],
+  "scope": "Actual installed server assets compared with paired release hashes; actual authenticated Goal GETs. Writes and WebSockets blocked. No human completion confirmation or full-dashboard health claim."
+}

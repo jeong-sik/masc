@@ -1,0 +1,45 @@
+{
+  "observed_at": "2026-09-07T14:55:28.886681+00:00",
+  "health_available": true,
+  "status": "ok",
+  "overall_status": "warning",
+  "build": {
+    "binary_commit": "0799f02f796a647b4ef1fac57f54a064d7d3c6db",
+    "executable_sha256": "7bb2bc118c0d56fe0f9c71e0920b60c16edcbd926dee36fab4c05423f16bd003",
+    "started_at": "2026-09-07T14:54:10Z",
+    "runtime_instance_id": "01a07c5c-c911-7000-995c-33675037016c"
+  },
+  "paths": {
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc"
+  },
+  "dashboard_surface": {
+    "status": "stale",
+    "installed_release": null,
+    "build_source_commit": null,
+    "index_sha256": "88f9f3310c5da16202532fd9a854448abcbfffe9e202b5f1fe9d36aca9ef0ff1",
+    "recovery": {
+      "kind": "build_in_place",
+      "reason": "unbound_assets_stale",
+      "restart_required": false
+    }
+  },
+  "verified_listener_pid": 61803,
+  "root_start_attempt": {
+    "pid": 62279,
+    "outcome": "rejected: existing BasePath owner61803",
+    "successful_runtime_start": false,
+    "config_or_binary_modified": false
+  },
+  "limits": [
+    "Readiness/health and listening PID are observed; sustained Keeper progress and browser proof remain separate."
+  ],
+  "binary_source_inclusion": {
+    "journal": true,
+    "input": true,
+    "checkpoint": true,
+    "http429": true,
+    "schema": true,
+    "access": true
+  }
+}

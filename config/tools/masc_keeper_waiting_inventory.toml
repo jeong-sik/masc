@@ -1,0 +1,6 @@
+name = "masc_keeper_waiting_inventory"
+description = """
+Return the canonical keeper waiting inventory read model: what each keeper \
+is waiting on, source counts, global waiting rows, and supported state \
+labels."""
+additional_properties = false

@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-07T06:36:24.988074+00:00",
+  "started_pid": 54584,
+  "pid_lookup_exit_code": 1,
+  "pid_present": false,
+  "port": 8935,
+  "listener_pids": [
+    21975
+  ],
+  "graceful_completion_exit_code_not_observed": true
+}

@@ -1,0 +1,1063 @@
+{
+  "runs": {
+    "34715042787": {
+      "id": 34715042787,
+      "name": "Test",
+      "head_sha": "f4fba831a416244c7a868d8ec79283f0ce7a409d",
+      "head_branch": "feat/workspace-memory-curator-lane-20260913",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34715042787",
+      "run_started_at": "2026-09-12T19:44:29Z",
+      "updated_at": "2026-09-12T20:06:46Z",
+      "artifacts_url": "https://api.github.com/repos/jeong-sik/masc/actions/runs/34715042787/artifacts"
+    },
+    "34715381353": {
+      "id": 34715381353,
+      "name": "Test",
+      "head_sha": "a7855af2f7640edffd2c23ae752b6f1e37e610d2",
+      "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+      "status": "queued",
+      "conclusion": null,
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34715381353",
+      "run_started_at": "2026-09-12T19:51:28Z",
+      "updated_at": "2026-09-12T19:51:28Z",
+      "artifacts_url": "https://api.github.com/repos/jeong-sik/masc/actions/runs/34715381353/artifacts"
+    },
+    "34715841997": {
+      "id": 34715841997,
+      "name": "Test",
+      "head_sha": "e6f38bfa11714f00fb6ef2d334e04bafde6be34c",
+      "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+      "status": "queued",
+      "conclusion": null,
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34715841997",
+      "run_started_at": "2026-09-12T20:01:14Z",
+      "updated_at": "2026-09-12T20:01:14Z",
+      "artifacts_url": "https://api.github.com/repos/jeong-sik/masc/actions/runs/34715841997/artifacts"
+    },
+    "34715381302": {
+      "id": 34715381302,
+      "name": "Release",
+      "head_sha": "a7855af2f7640edffd2c23ae752b6f1e37e610d2",
+      "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+      "status": "in_progress",
+      "conclusion": null,
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/34715381302",
+      "run_started_at": "2026-09-12T19:51:28Z",
+      "updated_at": "2026-09-12T20:00:08Z",
+      "artifacts_url": "https://api.github.com/repos/jeong-sik/masc/actions/runs/34715381302/artifacts"
+    }
+  },
+  "parent_jobs": {
+    "total_count": 1,
+    "jobs": [
+      {
+        "id": 103610671180,
+        "run_id": 34715042787,
+        "workflow_name": "Test",
+        "head_branch": "feat/workspace-memory-curator-lane-20260913",
+        "run_url": "https://api.github.com/repos/jeong-sik/masc/actions/runs/34715042787",
+        "run_attempt": 1,
+        "node_id": "CR_kwDOQ7_DYc8AAAAYH61gTA",
+        "head_sha": "f4fba831a416244c7a868d8ec79283f0ce7a409d",
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/jobs/103610671180",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/34715042787/job/103610671180",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-09-12T19:44:30Z",
+        "started_at": "2026-09-12T19:54:42Z",
+        "completed_at": "2026-09-12T20:06:46Z",
+        "name": "test suite",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-09-12T19:54:43Z",
+            "completed_at": "2026-09-12T19:54:44Z"
+          },
+          {
+            "name": "Free disk space",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-09-12T19:54:44Z",
+            "completed_at": "2026-09-12T19:56:04Z"
+          },
+          {
+            "name": "Checkout",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-09-12T19:56:04Z",
+            "completed_at": "2026-09-12T19:56:12Z"
+          },
+          {
+            "name": "Check source text integrity",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-09-12T19:56:12Z",
+            "completed_at": "2026-09-12T19:56:12Z"
+          },
+          {
+            "name": "Suite runner self-test",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-09-12T19:56:12Z",
+            "completed_at": "2026-09-12T19:56:15Z"
+          },
+          {
+            "name": "Setup OCaml toolchain",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-09-12T19:56:15Z",
+            "completed_at": "2026-09-12T19:56:34Z"
+          },
+          {
+            "name": "Pin external OCaml dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-09-12T19:56:34Z",
+            "completed_at": "2026-09-12T19:56:46Z"
+          },
+          {
+            "name": "Install system and OCaml dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-09-12T19:56:46Z",
+            "completed_at": "2026-09-12T19:57:20Z"
+          },
+          {
+            "name": "Make pnpm available to the suites that read a dashboard PATH",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-09-12T19:57:20Z",
+            "completed_at": "2026-09-12T19:57:22Z"
+          },
+          {
+            "name": "Test",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-09-12T19:57:22Z",
+            "completed_at": "2026-09-12T20:00:42Z"
+          },
+          {
+            "name": "Exercise creative artifacts in the built Keeper image",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11,
+            "started_at": "2026-09-12T20:00:42Z",
+            "completed_at": "2026-09-12T20:00:45Z"
+          },
+          {
+            "name": "Upload creative artifact proof",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12,
+            "started_at": "2026-09-12T20:00:45Z",
+            "completed_at": "2026-09-12T20:00:46Z"
+          },
+          {
+            "name": "Upload the suite runner log",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13,
+            "started_at": "2026-09-12T20:00:46Z",
+            "completed_at": "2026-09-12T20:00:48Z"
+          },
+          {
+            "name": "Run the suites that need no build",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 14,
+            "started_at": "2026-09-12T20:00:48Z",
+            "completed_at": "2026-09-12T20:06:42Z"
+          },
+          {
+            "name": "File the scheduled failure as an issue",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 15,
+            "started_at": "2026-09-12T20:06:42Z",
+            "completed_at": "2026-09-12T20:06:42Z"
+          },
+          {
+            "name": "Post Setup OCaml toolchain",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 29,
+            "started_at": "2026-09-12T20:06:42Z",
+            "completed_at": "2026-09-12T20:06:42Z"
+          },
+          {
+            "name": "Post Checkout",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 30,
+            "started_at": "2026-09-12T20:06:42Z",
+            "completed_at": "2026-09-12T20:06:42Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 31,
+            "started_at": "2026-09-12T20:06:42Z",
+            "completed_at": "2026-09-12T20:06:42Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/jeong-sik/masc/check-runs/103610671180",
+        "labels": [
+          "ubuntu-latest"
+        ],
+        "runner_id": 1001597133,
+        "runner_name": "GitHub Actions 1001597133",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      }
+    ]
+  },
+  "arm_job": {
+    "id": 103611571007,
+    "run_id": 34715381302,
+    "workflow_name": "Release",
+    "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+    "run_url": "https://api.github.com/repos/jeong-sik/masc/actions/runs/34715381302",
+    "run_attempt": 1,
+    "node_id": "CR_kwDOQ7_DYc8AAAAYH7sbPw",
+    "head_sha": "a7855af2f7640edffd2c23ae752b6f1e37e610d2",
+    "url": "https://api.github.com/repos/jeong-sik/masc/actions/jobs/103611571007",
+    "html_url": "https://github.com/jeong-sik/masc/actions/runs/34715381302/job/103611571007",
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-09-12T19:51:29Z",
+    "started_at": "2026-09-12T19:56:36Z",
+    "completed_at": "2026-09-12T20:09:32Z",
+    "name": "build (macos-14, macos-arm64)",
+    "steps": [
+      {
+        "name": "Set up job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 1,
+        "started_at": "2026-09-12T19:56:36Z",
+        "completed_at": "2026-09-12T19:56:37Z"
+      },
+      {
+        "name": "Run actions/checkout@v7",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 2,
+        "started_at": "2026-09-12T19:56:37Z",
+        "completed_at": "2026-09-12T19:56:47Z"
+      },
+      {
+        "name": "Check version truth",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 3,
+        "started_at": "2026-09-12T19:56:47Z",
+        "completed_at": "2026-09-12T19:56:47Z"
+      },
+      {
+        "name": "Installer behavior (terminal wizard and upgrades)",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 4,
+        "started_at": "2026-09-12T19:56:47Z",
+        "completed_at": "2026-09-12T19:56:53Z"
+      },
+      {
+        "name": "Setup OCaml",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 5,
+        "started_at": "2026-09-12T19:56:53Z",
+        "completed_at": "2026-09-12T19:57:36Z"
+      },
+      {
+        "name": "Install native dependencies (macOS)",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 6,
+        "started_at": "2026-09-12T19:57:36Z",
+        "completed_at": "2026-09-12T19:57:42Z"
+      },
+      {
+        "name": "Pin private dependencies",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 7,
+        "started_at": "2026-09-12T19:57:42Z",
+        "completed_at": "2026-09-12T19:57:58Z"
+      },
+      {
+        "name": "Refresh apt index",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 8,
+        "started_at": "2026-09-12T19:57:58Z",
+        "completed_at": "2026-09-12T19:57:58Z"
+      },
+      {
+        "name": "Install ripgrep",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 9,
+        "started_at": "2026-09-12T19:57:58Z",
+        "completed_at": "2026-09-12T19:57:58Z"
+      },
+      {
+        "name": "Install dependencies",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 10,
+        "started_at": "2026-09-12T19:57:58Z",
+        "completed_at": "2026-09-12T19:58:15Z"
+      },
+      {
+        "name": "Build (macOS)",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 11,
+        "started_at": "2026-09-12T19:58:15Z",
+        "completed_at": "2026-09-12T20:01:09Z"
+      },
+      {
+        "name": "Build at the glibc floor (Linux, container)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 12,
+        "started_at": "2026-09-12T20:01:09Z",
+        "completed_at": "2026-09-12T20:01:09Z"
+      },
+      {
+        "name": "Record runtime probe binaries",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 13,
+        "started_at": "2026-09-12T20:01:09Z",
+        "completed_at": "2026-09-12T20:01:09Z"
+      },
+      {
+        "name": "Upload runtime probe binaries",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 14,
+        "started_at": "2026-09-12T20:01:09Z",
+        "completed_at": "2026-09-12T20:01:15Z"
+      },
+      {
+        "name": "Runtime setup validates each supported connection",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 15,
+        "started_at": "2026-09-12T20:01:15Z",
+        "completed_at": "2026-09-12T20:01:22Z"
+      },
+      {
+        "name": "First conversation setup CLI",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 16,
+        "started_at": "2026-09-12T20:01:22Z",
+        "completed_at": "2026-09-12T20:01:29Z"
+      },
+      {
+        "name": "Keeper creation CLI exits after HTTP response",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 17,
+        "started_at": "2026-09-12T20:01:29Z",
+        "completed_at": "2026-09-12T20:01:30Z"
+      },
+      {
+        "name": "Sandbox image CLI runtime routing",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 18,
+        "started_at": "2026-09-12T20:01:30Z",
+        "completed_at": "2026-09-12T20:01:31Z"
+      },
+      {
+        "name": "General sandbox image and guest tool smoke",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 19,
+        "started_at": "2026-09-12T20:01:31Z",
+        "completed_at": "2026-09-12T20:01:31Z"
+      },
+      {
+        "name": "Assert Linux binaries carry no dynamic SQLite",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 20,
+        "started_at": "2026-09-12T20:01:31Z",
+        "completed_at": "2026-09-12T20:01:31Z"
+      },
+      {
+        "name": "Set up Node for dashboard assets",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 21,
+        "started_at": "2026-09-12T20:01:31Z",
+        "completed_at": "2026-09-12T20:01:31Z"
+      },
+      {
+        "name": "Build dashboard assets",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 22,
+        "started_at": "2026-09-12T20:01:31Z",
+        "completed_at": "2026-09-12T20:02:05Z"
+      },
+      {
+        "name": "Source quickstart onboarding smoke",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 23,
+        "started_at": "2026-09-12T20:02:05Z",
+        "completed_at": "2026-09-12T20:02:08Z"
+      },
+      {
+        "name": "Release binary smoke (boot + README drift)",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 24,
+        "started_at": "2026-09-12T20:02:08Z",
+        "completed_at": "2026-09-12T20:02:10Z"
+      },
+      {
+        "name": "Terminal UI binary smoke (dynamic link)",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 25,
+        "started_at": "2026-09-12T20:02:10Z",
+        "completed_at": "2026-09-12T20:02:10Z"
+      },
+      {
+        "name": "Package binary",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 26,
+        "started_at": "2026-09-12T20:02:10Z",
+        "completed_at": "2026-09-12T20:02:10Z"
+      },
+      {
+        "name": "Assert shipped Linux binaries meet the glibc floor",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 27,
+        "started_at": "2026-09-12T20:02:10Z",
+        "completed_at": "2026-09-12T20:02:10Z"
+      },
+      {
+        "name": "Bundle relocatable macOS libraries and Python",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 28,
+        "started_at": "2026-09-12T20:02:10Z",
+        "completed_at": "2026-09-12T20:02:39Z"
+      },
+      {
+        "name": "Bundle Linux Python",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 29,
+        "started_at": "2026-09-12T20:02:39Z",
+        "completed_at": "2026-09-12T20:02:39Z"
+      },
+      {
+        "name": "Package binary-matched dashboard distribution",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 30,
+        "started_at": "2026-09-12T20:02:39Z",
+        "completed_at": "2026-09-12T20:02:44Z"
+      },
+      {
+        "name": "Build exec shim (static )",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 31,
+        "started_at": "2026-09-12T20:02:44Z",
+        "completed_at": "2026-09-12T20:02:44Z"
+      },
+      {
+        "name": "Record unverified native preflight provenance",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 32,
+        "started_at": "2026-09-12T20:02:44Z",
+        "completed_at": "2026-09-12T20:02:44Z"
+      },
+      {
+        "name": "Upload unverified native preflight files",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 33,
+        "started_at": "2026-09-12T20:02:44Z",
+        "completed_at": "2026-09-12T20:02:54Z"
+      },
+      {
+        "name": "Generate release evidence bundle",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 34,
+        "started_at": "2026-09-12T20:02:54Z",
+        "completed_at": "2026-09-12T20:07:57Z"
+      },
+      {
+        "name": "Installer smoke (offline)",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 35,
+        "started_at": "2026-09-12T20:07:57Z",
+        "completed_at": "2026-09-12T20:08:38Z"
+      },
+      {
+        "name": "Fresh Ubuntu installation (no OCaml or checkout dependencies)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 36,
+        "started_at": "2026-09-12T20:08:38Z",
+        "completed_at": "2026-09-12T20:08:38Z"
+      },
+      {
+        "name": "Upload failed installation diagnostics",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 37,
+        "started_at": "2026-09-12T20:08:38Z",
+        "completed_at": "2026-09-12T20:08:38Z"
+      },
+      {
+        "name": "Upload artifact",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 38,
+        "started_at": "2026-09-12T20:08:38Z",
+        "completed_at": "2026-09-12T20:08:47Z"
+      },
+      {
+        "name": "Post Set up Node for dashboard assets",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 74,
+        "started_at": "2026-09-12T20:08:47Z",
+        "completed_at": "2026-09-12T20:08:47Z"
+      },
+      {
+        "name": "Post Setup OCaml",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 75,
+        "started_at": "2026-09-12T20:08:47Z",
+        "completed_at": "2026-09-12T20:09:29Z"
+      },
+      {
+        "name": "Post Run actions/checkout@v7",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 76,
+        "started_at": "2026-09-12T20:09:29Z",
+        "completed_at": "2026-09-12T20:09:30Z"
+      },
+      {
+        "name": "Complete job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 77,
+        "started_at": "2026-09-12T20:09:30Z",
+        "completed_at": "2026-09-12T20:09:30Z"
+      }
+    ],
+    "check_run_url": "https://api.github.com/repos/jeong-sik/masc/check-runs/103611571007",
+    "labels": [
+      "macos-14"
+    ],
+    "runner_id": 1001597147,
+    "runner_name": "GitHub Actions 1001597147",
+    "runner_group_id": 0,
+    "runner_group_name": "GitHub Actions"
+  },
+  "release_artifacts": {
+    "total_count": 5,
+    "artifacts": [
+      {
+        "id": 10304658526,
+        "node_id": "MDg6QXJ0aWZhY3QxMDMwNDY1ODUyNg==",
+        "name": "preflight-native-macos-arm64-attempt-1",
+        "size_in_bytes": 134542029,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10304658526",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10304658526/zip",
+        "expired": false,
+        "digest": "sha256:39ee3d3b7ebcc1e3d21b5988abeeb2e3298766a2d2fa7a809269e8ca51a1b128",
+        "created_at": "2026-09-12T20:02:54Z",
+        "updated_at": "2026-09-12T20:02:54Z",
+        "expires_at": "2026-09-19T20:02:44Z",
+        "workflow_run": {
+          "id": 34715381302,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+          "head_sha": "a7855af2f7640edffd2c23ae752b6f1e37e610d2"
+        }
+      },
+      {
+        "id": 10304558704,
+        "node_id": "MDg6QXJ0aWZhY3QxMDMwNDU1ODcwNA==",
+        "name": "runtime-probe-macos-arm64-a7855af2f7640edffd2c23ae752b6f1e37e610d2-attempt-1",
+        "size_in_bytes": 51432951,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10304558704",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10304558704/zip",
+        "expired": false,
+        "digest": "sha256:c6e50f93be293aad7432cedc8ebb0c1e774d35a6300665ca8978103fbed1a34f",
+        "created_at": "2026-09-12T20:01:15Z",
+        "updated_at": "2026-09-12T20:01:15Z",
+        "expires_at": "2026-09-19T20:01:10Z",
+        "workflow_run": {
+          "id": 34715381302,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+          "head_sha": "a7855af2f7640edffd2c23ae752b6f1e37e610d2"
+        }
+      },
+      {
+        "id": 10304539163,
+        "node_id": "MDg6QXJ0aWZhY3QxMDMwNDUzOTE2Mw==",
+        "name": "masc-macos-arm64",
+        "size_in_bytes": 134472077,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10304539163",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10304539163/zip",
+        "expired": false,
+        "digest": "sha256:96427eb2356c07b782b0fd8e20485f10c8a66b8e044972658469908ceb8f7597",
+        "created_at": "2026-09-12T20:08:47Z",
+        "updated_at": "2026-09-12T20:08:47Z",
+        "expires_at": "2026-12-11T19:51:29Z",
+        "workflow_run": {
+          "id": 34715381302,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+          "head_sha": "a7855af2f7640edffd2c23ae752b6f1e37e610d2"
+        }
+      },
+      {
+        "id": 10304153978,
+        "node_id": "MDg6QXJ0aWZhY3QxMDMwNDE1Mzk3OA==",
+        "name": "runtime-probe-linux-x64-a7855af2f7640edffd2c23ae752b6f1e37e610d2-attempt-1",
+        "size_in_bytes": 67537657,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10304153978",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10304153978/zip",
+        "expired": false,
+        "digest": "sha256:f20d88f55f106f83c51b7b76a74690372d7731eaf22cf462a3ab7679794053f6",
+        "created_at": "2026-09-12T20:10:23Z",
+        "updated_at": "2026-09-12T20:10:23Z",
+        "expires_at": "2026-09-19T20:10:15Z",
+        "workflow_run": {
+          "id": 34715381302,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+          "head_sha": "a7855af2f7640edffd2c23ae752b6f1e37e610d2"
+        }
+      },
+      {
+        "id": 10303749605,
+        "node_id": "MDg6QXJ0aWZhY3QxMDMwMzc0OTYwNQ==",
+        "name": "runtime-probe-linux-arm64-a7855af2f7640edffd2c23ae752b6f1e37e610d2-attempt-1",
+        "size_in_bytes": 81041076,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10303749605",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10303749605/zip",
+        "expired": false,
+        "digest": "sha256:983fbd7b26aff829d30b976e80131e52ae5932362ff818e9fcf9df07f8975824",
+        "created_at": "2026-09-12T20:06:05Z",
+        "updated_at": "2026-09-12T20:06:05Z",
+        "expires_at": "2026-09-19T20:05:58Z",
+        "workflow_run": {
+          "id": 34715381302,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "feat/workspace-memory-keeper-discovery-20260913",
+          "head_sha": "a7855af2f7640edffd2c23ae752b6f1e37e610d2"
+        }
+      }
+    ]
+  },
+  "parent_log": {
+    "path": "/tmp/masc-curator-native-parent-34715042787.log",
+    "sha256": "6b68bcaa1e5140347dded6057f6f99e4bf5ef2bc5ddff94e901e7b9f96e55ce4",
+    "bytes": 468855
+  },
+  "parent_requested_suite_results": [
+    {
+      "suite": "test_workspace_memory_curator_lane",
+      "status": "success",
+      "case_count": 4,
+      "ok_case_lines": [
+        "2026-09-12T20:00:34.1189728Z   [OK]          background proposal publication          0   commits coalesce...",
+        "2026-09-12T20:00:34.6179045Z   [OK]          background proposal publication          1   failure stays vi...",
+        "2026-09-12T20:00:35.6198179Z   [OK]          background proposal publication          2   canonical direct...",
+        "2026-09-12T20:00:36.1215837Z   [OK]          background proposal publication          3   changed prompt i..."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:36.1216764Z Test Successful in 3.111s. 4 tests run."
+      ],
+      "log_line_start": 3116,
+      "log_line_end": 3141,
+      "targeted_success_line": "2026-09-12T20:00:36.1269347Z [targeted] test/test_workspace_memory_curator_lane: OK in 4s"
+    },
+    {
+      "suite": "test_server_dashboard_http_keeper_memory_health",
+      "status": "success",
+      "case_count": 18,
+      "ok_case_lines": [
+        "2026-09-12T20:00:36.2572910Z   [OK]          current snapshot          0   curator canonical owners and ma...",
+        "2026-09-12T20:00:36.2617250Z   [OK]          current snapshot          1   curator inventory binds committ...",
+        "2026-09-12T20:00:36.2634129Z   [OK]          current snapshot          2   workspace context malformed pat...",
+        "2026-09-12T20:00:36.2635844Z   [OK]          current snapshot          3   workspace context discovery not...",
+        "2026-09-12T20:00:36.2693054Z   [OK]          current snapshot          4   workspace context preserves sou...",
+        "2026-09-12T20:00:36.2719776Z   [OK]          current snapshot          5   explicit base path.",
+        "2026-09-12T20:00:36.2751080Z   [OK]          current snapshot          6   revision bytes and delta.",
+        "2026-09-12T20:00:36.2776767Z   [OK]          current snapshot          7   derived facts and support inval...",
+        "2026-09-12T20:00:36.2788992Z   [OK]          current snapshot          8   librarian lane busy alert.",
+        "2026-09-12T20:00:36.2802929Z   [OK]          current snapshot          9   corrupt snapshot visible.",
+        "2026-09-12T20:00:36.2826270Z   [OK]          current snapshot         10   sort and empty store.",
+        "2026-09-12T20:00:36.2830654Z   [OK]          current snapshot         11   configured keeper without snaps...",
+        "2026-09-12T20:00:36.2835893Z   [OK]          current snapshot         12   librarian starvation error alert.",
+        "2026-09-12T20:00:36.2848286Z   [OK]          current snapshot         13   librarian failures warn alert.",
+        "2026-09-12T20:00:36.2851424Z   [OK]          current snapshot         14   toml name override canonical id...",
+        "2026-09-12T20:00:36.2856559Z   [OK]          current snapshot         15   snapshot read site failures cou...",
+        "2026-09-12T20:00:36.2866076Z   [OK]          current snapshot         16   source-only snapshot counted.",
+        "2026-09-12T20:00:36.2869240Z   [OK]          current snapshot         17   corrupt source snapshot visible."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:36.2870040Z Test Successful in 0.031s. 18 tests run."
+      ],
+      "log_line_start": 3143,
+      "log_line_end": 3251,
+      "targeted_success_line": "2026-09-12T20:00:36.2924228Z [targeted] test/test_server_dashboard_http_keeper_memory_health: OK in 0s"
+    },
+    {
+      "suite": "test_keeper_memory_os_current",
+      "status": "success",
+      "case_count": 50,
+      "ok_case_lines": [
+        "2026-09-12T20:00:36.4239852Z   [OK]          commit notification                       0   all writers not...",
+        "2026-09-12T20:00:36.4254469Z   [OK]          commit notification                       1   snapshot author...",
+        "2026-09-12T20:00:36.4266613Z   [OK]          commit notification                       2   directory alias...",
+        "2026-09-12T20:00:36.4279990Z   [OK]          commit notification                       3   cancellation pr...",
+        "2026-09-12T20:00:36.4293468Z   [OK]          current snapshot                          0   fresh replace a...",
+        "2026-09-12T20:00:36.4294792Z   [OK]          current snapshot                          1   derivation cont...",
+        "2026-09-12T20:00:36.4336787Z   [OK]          current snapshot                          2   support retract...",
+        "2026-09-12T20:00:36.4493069Z   [OK]          current snapshot                          3   reverse-ordered...",
+        "2026-09-12T20:00:36.4536871Z   [OK]          current snapshot                          4   alternate suppo...",
+        "2026-09-12T20:00:36.4587854Z   [OK]          current snapshot                          5   same rule repla...",
+        "2026-09-12T20:00:36.4602826Z   [OK]          current snapshot                          6   unsupported der...",
+        "2026-09-12T20:00:36.4605638Z   [OK]          current snapshot                          7   memory id is ex...",
+        "2026-09-12T20:00:36.4625196Z   [OK]          current snapshot                          8   exact added rem...",
+        "2026-09-12T20:00:36.4637650Z   [OK]          current snapshot                          9   duplicate ident...",
+        "2026-09-12T20:00:36.4651685Z   [OK]          current snapshot                         10   non-current sna...",
+        "2026-09-12T20:00:36.4654502Z   [OK]          current snapshot                         11   unsupported cur...",
+        "2026-09-12T20:00:36.4657488Z   [OK]          current snapshot                         12   forged invalida...",
+        "2026-09-12T20:00:36.4670182Z   [OK]          current snapshot                         13   fact basis is r...",
+        "2026-09-12T20:00:36.4684386Z   [OK]          current snapshot                         14   object order ir...",
+        "2026-09-12T20:00:36.4698074Z   [OK]          current snapshot                         15   duplicate snaps...",
+        "2026-09-12T20:00:36.4701128Z   [OK]          current snapshot                         16   snapshot read I...",
+        "2026-09-12T20:00:36.4744030Z   [OK]          current snapshot                         17   recall preserve...",
+        "2026-09-12T20:00:36.4784094Z   [OK]          current snapshot                         18   recall read fai...",
+        "2026-09-12T20:00:36.4796021Z   [OK]          current snapshot                         19   recall has no s...",
+        "2026-09-12T20:00:36.4817848Z   [OK]          current snapshot                         20   explicit upsert...",
+        "2026-09-12T20:00:36.4845880Z   [OK]          current snapshot                         21   explicit upsert...",
+        "2026-09-12T20:00:36.4849900Z   [OK]          current snapshot                         22   board provenanc...",
+        "2026-09-12T20:00:36.4850737Z   [OK]          current snapshot                         23   board provenanc...",
+        "2026-09-12T20:00:36.4854504Z   [OK]          current snapshot                         24   a board referen...",
+        "2026-09-12T20:00:36.4869975Z   [OK]          current snapshot                         25   explicit keeper...",
+        "2026-09-12T20:00:36.4925836Z   [OK]          current snapshot                         26   stale replace p...",
+        "2026-09-12T20:00:36.4969320Z   [OK]          current snapshot                         27   every commit ap...",
+        "2026-09-12T20:00:36.4979487Z   [OK]          current snapshot                         28   rejected commit...",
+        "2026-09-12T20:00:36.4981385Z   [OK]          current snapshot                         29   invalid drop id...",
+        "2026-09-12T20:00:36.4983342Z   [OK]          current snapshot                         30   purge plan remo...",
+        "2026-09-12T20:00:36.5003896Z   [OK]          current snapshot                         31   journal recreat...",
+        "2026-09-12T20:00:36.5024485Z   [OK]          current snapshot                         32   re-observation ...",
+        "2026-09-12T20:00:36.5050345Z   [OK]          undecodable state is not a wedge          0   quarantine and ...",
+        "2026-09-12T20:00:36.5063630Z   [OK]          undecodable state is not a wedge          1   reading moves n...",
+        "2026-09-12T20:00:36.5086412Z   [OK]          undecodable state is not a wedge          2   expected revisi...",
+        "2026-09-12T20:00:36.5108206Z   [OK]          undecodable state is not a wedge          3   torn json too.",
+        "2026-09-12T20:00:36.5149821Z   [OK]          undecodable state is not a wedge          4   two quarantines...",
+        "2026-09-12T20:00:36.5165837Z   [OK]          rejection names its cause                 0   missing change ...",
+        "2026-09-12T20:00:36.5179583Z   [OK]          rejection names its cause                 1   unknown token n...",
+        "2026-09-12T20:00:36.5195235Z   [OK]          rejection names its cause                 2   retained arithm...",
+        "2026-09-12T20:00:36.5211871Z   [OK]          rejection names its cause                 3   added row is no...",
+        "2026-09-12T20:00:36.5224114Z   [OK]          rejection names its cause                 4   duplicate row i...",
+        "2026-09-12T20:00:36.5234685Z   [OK]          rejection names its cause                 5   blank source tr...",
+        "2026-09-12T20:00:36.5249076Z   [OK]          rejection names its cause                 6   unexpected top-...",
+        "2026-09-12T20:00:36.5285321Z   [OK]          rejection names its cause                 7   a keeper writin..."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:36.5286004Z Test Successful in 0.110s. 50 tests run."
+      ],
+      "log_line_start": 3253,
+      "log_line_end": 3480,
+      "targeted_success_line": "2026-09-12T20:00:36.5336667Z [targeted] test/test_keeper_memory_os_current: OK in 0s"
+    },
+    {
+      "suite": "test_keeper_memory_write",
+      "status": "success",
+      "case_count": 25,
+      "ok_case_lines": [
+        "2026-09-12T20:00:36.6478048Z   [OK]          commit notification          0   source writes and invalidati...",
+        "2026-09-12T20:00:36.6483281Z   [OK]          validation                   0   typed validation failures.",
+        "2026-09-12T20:00:36.6487883Z   [OK]          validation                   1   board reference validation.",
+        "2026-09-12T20:00:36.6490366Z   [OK]          validation                   2   typed retract validation fai...",
+        "2026-09-12T20:00:36.6499278Z   [OK]          validation                   3   runtime validation is proven...",
+        "2026-09-12T20:00:36.6500977Z   [OK]          validation                   4   valid input composes the sto...",
+        "2026-09-12T20:00:36.6506403Z   [OK]          validation                   5   unsupported derived write is...",
+        "2026-09-12T20:00:36.6517759Z   [OK]          persistence                  0   write comes back through rec...",
+        "2026-09-12T20:00:36.6545194Z   [OK]          persistence                  1   derived write uses exact pre...",
+        "2026-09-12T20:00:36.6619438Z   [OK]          persistence                  2   retract cascades and journal...",
+        "2026-09-12T20:00:36.6823317Z   [OK]          persistence                  3   source change discards stale...",
+        "2026-09-12T20:00:36.6849806Z   [OK]          persistence                  4   source write has no recall s...",
+        "2026-09-12T20:00:36.6885236Z   [OK]          persistence                  5   source rewrite renews the cl...",
+        "2026-09-12T20:00:36.6888301Z   [OK]          persistence                  6   invalidation rendering only ...",
+        "2026-09-12T20:00:36.7063386Z   [OK]          persistence                  7   tools isolate config BasePat...",
+        "2026-09-12T20:00:36.7112923Z   [OK]          persistence                  8   search filters exact substri...",
+        "2026-09-12T20:00:36.7139188Z   [OK]          persistence                  9   search records a retrieval p...",
+        "2026-09-12T20:00:36.7178463Z   [OK]          persistence                 10   retract records a citation.",
+        "2026-09-12T20:00:36.7179193Z   [OK]          persistence                 11   source parser accepts every ...",
+        "2026-09-12T20:00:36.7180307Z   [OK]          persistence                 12   source parser rejects unknow...",
+        "2026-09-12T20:00:36.7181472Z   [OK]          persistence                 13   source parser rejects a non-...",
+        "2026-09-12T20:00:36.7187957Z   [OK]          failure class                0   corrupt snapshot is a depend...",
+        "2026-09-12T20:00:36.7204114Z   [OK]          failure class                1   unwritable store is a depend...",
+        "2026-09-12T20:00:36.7209955Z   [OK]          failure class                2   input and state failures kee...",
+        "2026-09-12T20:00:36.7216672Z   [OK]          failure class                3   unreadable source path is th..."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:36.7217097Z Test Successful in 0.082s. 25 tests run."
+      ],
+      "log_line_start": 3482,
+      "log_line_end": 3730,
+      "targeted_success_line": "2026-09-12T20:00:36.7272596Z [targeted] test/test_keeper_memory_write: OK in 0s"
+    },
+    {
+      "suite": "test_workspace_memory_proposals",
+      "status": "success",
+      "case_count": 6,
+      "ok_case_lines": [
+        "2026-09-12T20:00:36.8313961Z   [OK]          behavior          0   submit, restart read, attribution and i...",
+        "2026-09-12T20:00:36.8320688Z   [OK]          behavior          1   malformed references refused before per...",
+        "2026-09-12T20:00:36.8332321Z   [OK]          behavior          2   missing and corruption remain distinct.",
+        "2026-09-12T20:00:36.8349473Z   [OK]          behavior          3   unique evidence bindings and zero-fact ...",
+        "2026-09-12T20:00:36.8363794Z   [OK]          behavior          4   real saved local curator proposal.",
+        "2026-09-12T20:00:36.8381746Z   [OK]          behavior          5   unavailable gap requires preserved detail."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:36.8382520Z Test Successful in 0.008s. 6 tests run."
+      ],
+      "log_line_start": 3732,
+      "log_line_end": 3786,
+      "targeted_success_line": "2026-09-12T20:00:36.8409721Z [targeted] test/test_workspace_memory_proposals: OK in 0s"
+    },
+    {
+      "suite": "test_exact_lane_run_registry",
+      "status": "success",
+      "case_count": 27,
+      "ok_case_lines": [
+        "2026-09-12T20:00:36.9594881Z   [OK]          registry          0   durable exact evidence.",
+        "2026-09-12T20:00:36.9623711Z   [OK]          registry          1   memory and disk preserve available JSON...",
+        "2026-09-12T20:00:36.9638485Z   [OK]          registry          2   missing source preserves terminal ident...",
+        "2026-09-12T20:00:36.9653452Z   [OK]          registry          3   partial source preserves per-field avai...",
+        "2026-09-12T20:00:36.9670809Z   [OK]          registry          4   latest malformed completion does not re...",
+        "2026-09-12T20:00:36.9743054Z   [OK]          registry          5   latest payloads survive blank rows and ...",
+        "2026-09-12T20:00:36.9755823Z   [OK]          registry          6   missing receipt is explicit null.",
+        "2026-09-12T20:00:36.9777863Z   [OK]          registry          7   pre-v4 completion is not replayed as su...",
+        "2026-09-12T20:00:36.9779913Z   [OK]          registry          8   blank selected slot is rejected before ...",
+        "2026-09-12T20:00:36.9817726Z   [OK]          registry          9   hard-cut artifact does not poison compa...",
+        "2026-09-12T20:00:36.9856260Z   [OK]          registry         10   cut refuses a store with an unterminate...",
+        "2026-09-12T20:00:36.9858097Z   [OK]          registry         11   running shape.",
+        "2026-09-12T20:00:36.9903765Z   [OK]          registry         12   restart settles running lane.",
+        "2026-09-12T20:00:36.9905073Z   [OK]          registry         13   current storage generation.",
+        "2026-09-12T20:00:36.9911072Z   [OK]          registry         14   store version pins the registration shape.",
+        "2026-09-12T20:00:37.0850780Z   [OK]          registry         15   exact history is not cross-lane pruned.",
+        "2026-09-12T20:00:38.5382989Z   [OK]          registry         16   a busy lane cannot evict a quiet lane's...",
+        "2026-09-12T20:00:38.5384548Z   [OK]          registry         17   all lanes matches independent construct...",
+        "2026-09-12T20:00:38.5386683Z   [OK]          registry         18   retention is derived from the monitor p...",
+        "2026-09-12T20:00:39.9280318Z   [OK]          registry         19   completed runs are bounded.",
+        "2026-09-12T20:00:39.9281604Z   [OK]          registry         20   failed durable registration is not publ...",
+        "2026-09-12T20:00:39.9300862Z   [OK]          registry         21   failed durable completion is explicitly...",
+        "2026-09-12T20:00:40.4323686Z   [OK]          registry         22   observation reads do not wait for durab...",
+        "2026-09-12T20:00:40.4328302Z   [OK]          registry         23   pages are a total order over equal time...",
+        "2026-09-12T20:00:40.4331623Z   [OK]          registry         24   summary carries no payload.",
+        "2026-09-12T20:00:40.4347832Z   [OK]          registry         25   projected runs omit payload in memory.",
+        "2026-09-12T20:00:41.7562352Z   [OK]          registry         26   the store does not hold the payloads it..."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:41.7563469Z Test Successful in 4.800s. 27 tests run."
+      ],
+      "log_line_start": 3788,
+      "log_line_end": 3950,
+      "targeted_success_line": "2026-09-12T20:00:41.7641410Z [targeted] test/test_exact_lane_run_registry: OK in 5s"
+    },
+    {
+      "suite": "test_server_standalone_lane_projection",
+      "status": "success",
+      "case_count": 11,
+      "ok_case_lines": [
+        "2026-09-12T20:00:41.8930190Z   [OK]          snapshot          0   Goal judgement metric is independent of...",
+        "2026-09-12T20:00:41.8933299Z   [OK]          snapshot          1   all four lanes and observation states.",
+        "2026-09-12T20:00:41.8935518Z   [OK]          snapshot          2   latest terminal is ordered by completio...",
+        "2026-09-12T20:00:41.8940552Z   [OK]          snapshot          3   no verdict is failed; synthetic elapsed...",
+        "2026-09-12T20:00:41.8944201Z   [OK]          snapshot          4   an operator-routed claim is not a lane ...",
+        "2026-09-12T20:00:41.8948327Z   [OK]          snapshot          5   verifier runs are filtered before pagin...",
+        "2026-09-12T20:00:41.8955956Z   [OK]          snapshot          6   native kind filtering preserves quiet c...",
+        "2026-09-12T20:00:41.8957298Z   [OK]          snapshot          7   verifier detail keeps verdict reason an...",
+        "2026-09-12T20:00:41.8959481Z   [OK]          snapshot          8   every retained run kind projects Skill ...",
+        "2026-09-12T20:00:41.8963754Z   [OK]          snapshot          9   detail preserves outcome when original ...",
+        "2026-09-12T20:00:41.8964446Z   [OK]          snapshot         10   unknown lane and duplicate identity fai..."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:41.8964819Z Test Successful in 0.002s. 11 tests run."
+      ],
+      "log_line_start": 3952,
+      "log_line_end": 4053,
+      "targeted_success_line": "2026-09-12T20:00:41.9001416Z [targeted] test/test_server_standalone_lane_projection: OK in 0s"
+    },
+    {
+      "suite": "test_runtime_per_keeper_routing",
+      "status": "success",
+      "case_count": 56,
+      "ok_case_lines": [
+        "2026-09-12T20:00:42.0721819Z   [OK]          runtime-assignment routing                 0   [runtime.assig...",
+        "2026-09-12T20:00:42.0738425Z   [OK]          runtime-assignment routing                 1   unassigned kee...",
+        "2026-09-12T20:00:42.0760408Z   [OK]          runtime-assignment routing                 2   dashboard runt...",
+        "2026-09-12T20:00:42.0779130Z   [OK]          runtime-assignment routing                 3   dashboard runt...",
+        "2026-09-12T20:00:42.0782366Z   [OK]          runtime-assignment routing                 4   dashboard Code...",
+        "2026-09-12T20:00:42.0786338Z   [OK]          runtime-assignment routing                 5   dashboard runt...",
+        "2026-09-12T20:00:42.0802028Z   [OK]          runtime-assignment routing                 6   unknown assign...",
+        "2026-09-12T20:00:42.0826293Z   [OK]          runtime-assignment routing                 7   dashboard runt...",
+        "2026-09-12T20:00:42.0859963Z   [OK]          runtime-assignment routing                 8   runtime and eg...",
+        "2026-09-12T20:00:42.0893451Z   [OK]          runtime-assignment routing                 9   deleted Keeper...",
+        "2026-09-12T20:00:42.0966481Z   [OK]          runtime-assignment routing                10   concurrent ass...",
+        "2026-09-12T20:00:42.0968664Z   [OK]          runtime-assignment routing                11   missing runtim...",
+        "2026-09-12T20:00:42.0998513Z   [OK]          runtime-assignment routing                12   runtime assign...",
+        "2026-09-12T20:00:42.1020704Z   [OK]          runtime-assignment routing                13   dashboard runt...",
+        "2026-09-12T20:00:42.1096059Z   [OK]          runtime-assignment routing                14   first-run HTTP...",
+        "2026-09-12T20:00:42.1297111Z   [OK]          runtime-assignment routing                15   first-run fall...",
+        "2026-09-12T20:00:42.1449971Z   [OK]          runtime-assignment routing                16   first-run imp ...",
+        "2026-09-12T20:00:42.1494722Z   [OK]          runtime-assignment routing                17   first-run CLI ...",
+        "2026-09-12T20:00:42.1509219Z   [OK]          runtime-assignment routing                18   unknown defaul...",
+        "2026-09-12T20:00:42.1555732Z   [OK]          runtime-assignment routing                19   dashboard runt...",
+        "2026-09-12T20:00:42.1566055Z   [OK]          runtime-assignment routing                20   dashboard raw ...",
+        "2026-09-12T20:00:42.1590933Z   [OK]          runtime-assignment routing                21   dashboard raw ...",
+        "2026-09-12T20:00:42.1601593Z   [OK]          runtime-assignment routing                22   dashboard raw ...",
+        "2026-09-12T20:00:42.1608908Z   [OK]          runtime-assignment routing                23   messages-http ...",
+        "2026-09-12T20:00:42.1617480Z   [OK]          driver lookup                              0   get_runtime_by...",
+        "2026-09-12T20:00:42.1625544Z   [OK]          driver lookup                              1   rerank resolve...",
+        "2026-09-12T20:00:42.1633189Z   [OK]          driver lookup                              2   rerank resolve...",
+        "2026-09-12T20:00:42.1655172Z   [OK]          driver lookup                              3   rerank resolve...",
+        "2026-09-12T20:00:42.1665518Z   [OK]          driver lookup                              4   context budget...",
+        "2026-09-12T20:00:42.1674510Z   [OK]          driver lookup                              5   context budget...",
+        "2026-09-12T20:00:42.1683227Z   [OK]          driver lookup                              6   runtime budget...",
+        "2026-09-12T20:00:42.1691788Z   [OK]          driver lookup                              7   strict context...",
+        "2026-09-12T20:00:42.1701739Z   [OK]          driver lookup                              8   of_meta projec...",
+        "2026-09-12T20:00:42.1704756Z   [OK]          driver lookup                              9   Codex official...",
+        "2026-09-12T20:00:42.1707743Z   [OK]          driver lookup                             10   Codex official...",
+        "2026-09-12T20:00:42.1719552Z   [OK]          per-model thinking gate                    0   thinking-suppo...",
+        "2026-09-12T20:00:42.1730129Z   [OK]          per-model thinking gate                    1   request-side p...",
+        "2026-09-12T20:00:42.1739900Z   [OK]          per-model thinking gate                    2   explicit prese...",
+        "2026-09-12T20:00:42.1750801Z   [OK]          per-model thinking gate                    3   thinking-suppo...",
+        "2026-09-12T20:00:42.1765353Z   [OK]          per-model thinking gate                    4   runtime invent...",
+        "2026-09-12T20:00:42.1783359Z   [OK]          per-model thinking gate                    5   runtime invent...",
+        "2026-09-12T20:00:42.1796350Z   [OK]          per-model thinking gate                    6   runtime invent...",
+        "2026-09-12T20:00:42.1813784Z   [OK]          per-model thinking gate                    7   runtime invent...",
+        "2026-09-12T20:00:42.1828047Z   [OK]          per-model thinking gate                    8   runtime invent...",
+        "2026-09-12T20:00:42.1829780Z   [OK]          per-model thinking gate                    9   unknown runtim...",
+        "2026-09-12T20:00:42.1833344Z   [OK]          per-model thinking gate                   10   seed_of_thinki...",
+        "2026-09-12T20:00:42.1849565Z   [OK]          runtime token capacity projection          0   max_output_tok...",
+        "2026-09-12T20:00:42.1852268Z   [OK]          runtime token capacity projection          1   max_context_of...",
+        "2026-09-12T20:00:42.1859586Z   [OK]          runtime token capacity projection          2   historical qwe...",
+        "2026-09-12T20:00:42.1890850Z   [OK]          lane candidate writer                      0   a picked lane ...",
+        "2026-09-12T20:00:42.1935329Z   [OK]          lane candidate writer                      1   a second write...",
+        "2026-09-12T20:00:42.1973536Z   [OK]          lane candidate writer                      2   an exact-outpu...",
+        "2026-09-12T20:00:42.1982458Z   [OK]          lane candidate writer                      3   an empty ladde...",
+        "2026-09-12T20:00:42.2010991Z   [OK]          lane candidate writer                      4   an unresolvabl...",
+        "2026-09-12T20:00:42.2021113Z   [OK]          materialize-failure diagnostics            0   assignment to ...",
+        "2026-09-12T20:00:42.2024738Z   [OK]          materialize-failure diagnostics            1   assignment typ..."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:42.2025442Z Test Successful in 0.131s. 56 tests run."
+      ],
+      "log_line_start": 4055,
+      "log_line_end": 4364,
+      "targeted_success_line": "2026-09-12T20:00:42.2094300Z [targeted] test/test_runtime_per_keeper_routing: OK in 1s"
+    },
+    {
+      "suite": "test_prompt_registry_defaults",
+      "status": "success",
+      "case_count": 35,
+      "ok_case_lines": [
+        "2026-09-12T20:00:42.3173896Z   [OK]          fragment_group_slots          0   slots keep their own paragr...",
+        "2026-09-12T20:00:42.3183350Z   [OK]          fragment_group_slots          1   prose before the first mark...",
+        "2026-09-12T20:00:42.3192968Z   [OK]          fragment_group_slots          2   a heading-only body is pros...",
+        "2026-09-12T20:00:42.3203775Z   [OK]          fragment_group_slots          3   a slot declares its own ope...",
+        "2026-09-12T20:00:42.3217445Z   [OK]          fragment_group_slots          4   a repeated marker keeps its...",
+        "2026-09-12T20:00:42.3218611Z   [OK]          registration                  0   fixture keys are unique.",
+        "2026-09-12T20:00:42.3225889Z   [OK]          registration                  1   all markdown-backed prompts...",
+        "2026-09-12T20:00:42.3233309Z   [OK]          registration                  2   get_prompt resolves markdow...",
+        "2026-09-12T20:00:42.3240420Z   [OK]          registration                  3   prompt_source reports file.",
+        "2026-09-12T20:00:42.3247682Z   [OK]          rendering                     0   render_prompt_template uses...",
+        "2026-09-12T20:00:42.3255398Z   [OK]          rendering                     1   resolve and render returns ...",
+        "2026-09-12T20:00:42.3262781Z   [OK]          rendering                     2   render_prompt_template leav...",
+        "2026-09-12T20:00:42.3271966Z   [OK]          rendering                     3   render_prompt_template repl...",
+        "2026-09-12T20:00:42.3283133Z   [OK]          rendering                     4   render_prompt_template dete...",
+        "2026-09-12T20:00:42.3294938Z   [OK]          rendering                     5   render_prompt_template vali...",
+        "2026-09-12T20:00:42.3307983Z   [OK]          override                      0   set_override replaces file ...",
+        "2026-09-12T20:00:42.3317015Z   [OK]          override                      1   clear_override reverts to f...",
+        "2026-09-12T20:00:42.3324903Z   [OK]          override                      2   set_override rejects unknow...",
+        "2026-09-12T20:00:42.3333398Z   [OK]          override                      3   set_override rejects unknow...",
+        "2026-09-12T20:00:42.3345040Z   [OK]          override                      4   invalid persisted override ...",
+        "2026-09-12T20:00:42.3373640Z   [OK]          override                      5   a saved override round-trip...",
+        "2026-09-12T20:00:42.3384811Z   [OK]          override                      6   an override is bound to the...",
+        "2026-09-12T20:00:42.3423630Z   [OK]          override                      7   a default body that moved u...",
+        "2026-09-12T20:00:42.3453811Z   [OK]          override                      8   a variable the prompt newly...",
+        "2026-09-12T20:00:42.3485373Z   [OK]          override                      9   an override naming a variab...",
+        "2026-09-12T20:00:42.3514828Z   [OK]          override                     10   a refused override survives...",
+        "2026-09-12T20:00:42.3546087Z   [OK]          override                     11   clearing a refused override...",
+        "2026-09-12T20:00:42.3595926Z   [OK]          override                     12   malformed versioned envelop...",
+        "2026-09-12T20:00:42.3624481Z   [OK]          override                     13   persisted set and clear lea...",
+        "2026-09-12T20:00:42.3630707Z   [OK]          override                     14   set_override rejects placeh...",
+        "2026-09-12T20:00:42.3634615Z   [OK]          override                     15   set_override rejects placeh...",
+        "2026-09-12T20:00:42.3654155Z   [OK]          override                     16   restore_overrides rejects a...",
+        "2026-09-12T20:00:42.3658619Z   [OK]          integration                   0   system_prompt_body reads ma...",
+        "2026-09-12T20:00:42.3665636Z   [OK]          integration                   1   system_prompt_body falls ba...",
+        "2026-09-12T20:00:42.3677441Z   [OK]          prompts_json                  0   prompts_json exposes effect..."
+      ],
+      "summary_lines": [
+        "2026-09-12T20:00:42.3677827Z Test Successful in 0.052s. 35 tests run."
+      ],
+      "log_line_start": 4366,
+      "log_line_end": 4573,
+      "targeted_success_line": "2026-09-12T20:00:42.3720332Z [targeted] test/test_prompt_registry_defaults: OK in 0s"
+    }
+  ],
+  "parent_requested_total_cases": 232,
+  "audit_observed_at_utc": "2026-09-12T20:11:06.167305+00:00",
+  "limits": [
+    "Discovery Test runs were queued at one-shot inspection; no logs inferred and no polling loop used.",
+    "Release workflow was in_progress; ARM job success is not full Release success.",
+    "Artifact metadata and workflow source association verified through GitHub API only; no artifact downloaded or contents/binary identity verified.",
+    "Parent test success does not prove later discovery commits or installed behavior."
+  ],
+  "all_reported_cases_have_individual_ok_lines": true
+}

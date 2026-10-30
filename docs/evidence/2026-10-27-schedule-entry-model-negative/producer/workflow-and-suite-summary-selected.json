@@ -1,0 +1,47 @@
+{
+  "schema": "masc.schedule-entry-negative.native-summary-selection.v1",
+  "workflow": {
+    "id": 40428400174,
+    "name": "Minimal manual checks",
+    "head_sha": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+    "head_branch": "ci/schedule-entry-candidate-20261027",
+    "status": "completed",
+    "conclusion": "success",
+    "event": "workflow_dispatch",
+    "path": ".github/workflows/pr-check.yml",
+    "run_attempt": 1
+  },
+  "jobs": [
+    {
+      "id": 121939820621,
+      "name": "Source and config syntax",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 121939820842,
+      "name": "native-tui / macos-tui",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "suite_summaries": [
+    {
+      "suite": "test_tui_lane_addons",
+      "cases": 27,
+      "original_summary": {
+        "line": 34,
+        "text": "Test Successful in 0.027s. 27 tests run."
+      }
+    },
+    {
+      "suite": "test_lane_addon_application",
+      "cases": 5,
+      "original_summary": {
+        "line": 12,
+        "text": "Test Successful in 0.001s. 5 tests run."
+      }
+    }
+  ],
+  "scope": "Existing addon-lifecycle suites and artifact production only; no wire suite, model success, installation or visible UI proof."
+}

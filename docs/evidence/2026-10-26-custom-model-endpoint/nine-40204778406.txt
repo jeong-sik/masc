@@ -1,0 +1,51 @@
+run: 40204778406
+head: 3a16b0a868c4daf412546846da901bcc0fef878b
+raw_sha256: af144024ac1b6978522aa0613246b028161b9f37f05a6cc2c6d38c4c75a3e718
+raw_bytes: 112571
+
+test suite	Checkout	2026-10-25T14:59:32.2902834Z HEAD is now at 3a16b0a8 fix(runtime): validate custom endpoint URI octets before projection
+test suite	Test	2026-10-25T15:01:05.2899637Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T15:01:05.2900305Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T15:01:05.2901349Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T15:01:05.2901958Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T15:01:05.2902554Z   [OK]          provider authority          0   identity.
+test suite	Test	2026-10-25T15:01:05.2903653Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T15:01:05.2904505Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T15:01:05.2905143Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T15:01:05.2905761Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T15:01:05.2906331Z   [OK]          provider authority          1   context.
+test suite	Test	2026-10-25T15:01:05.2907997Z ASSERT A rejects forcing despite the bare row allowing it
+test suite	Test	2026-10-25T15:01:05.2908592Z ASSERT B retains its separate forcing declaration
+test suite	Test	2026-10-25T15:01:05.2909361Z ASSERT endpoint override preserves selected provider
+test suite	Test	2026-10-25T15:01:05.2910031Z ASSERT endpoint override cannot borrow B's policy
+test suite	Test	2026-10-25T15:01:05.2910640Z ASSERT A rejects required choice before dispatch
+test suite	Test	2026-10-25T15:01:05.2911176Z ASSERT B admits required choice
+test suite	Test	2026-10-25T15:01:05.2911639Z ASSERT B forcing reaches final Chat body
+test suite	Test	2026-10-25T15:01:05.2912208Z   [OK]          provider authority          2   policy and wire.
+test suite	Test	2026-10-25T15:01:05.2912858Z ASSERT custom label cannot borrow discovery endpoint
+test suite	Test	2026-10-25T15:01:05.2913452Z   [OK]          custom endpoint             0   missing.
+test suite	Test	2026-10-25T15:01:05.2914246Z ASSERT custom label cannot borrow environment endpoint
+test suite	Test	2026-10-25T15:01:05.2914854Z   [OK]          custom endpoint             1   ambient.
+test suite	Test	2026-10-25T15:01:05.2915549Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:01:05.2916663Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:01:05.2917489Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:01:05.2918303Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T15:01:05.2918991Z   [OK]          custom endpoint             2   invalid.
+test suite	Test	2026-10-25T15:01:05.2919591Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:01:05.2920029Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:01:05.2920452Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T15:01:05.2920820Z   [OK]          custom endpoint             3   malformed.
+test suite	Test	2026-10-25T15:01:05.2921196Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:01:05.2921587Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:01:05.2921976Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T15:01:05.2922380Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:01:05.2922791Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:01:05.2923191Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:01:05.2923587Z ASSERT valid authority and path/query bytes remain explicit
+test suite	Test	2026-10-25T15:01:05.2923953Z   [OK]          custom endpoint             4   ports.
+test suite	Test	2026-10-25T15:01:05.2924466Z ASSERT custom classification retains explicit model
+test suite	Test	2026-10-25T15:01:05.2924831Z ASSERT custom classification retains explicit endpoint
+test suite	Test	2026-10-25T15:01:05.2925287Z ASSERT custom config retains explicit endpoint
+test suite	Test	2026-10-25T15:01:05.2925901Z ASSERT custom wire retains explicitly selected model
+test suite	Test	2026-10-25T15:01:05.2926496Z   [OK]          custom endpoint             5   explicit.
+test suite	Test	2026-10-25T15:01:05.2927042Z Test Successful in 0.028s. 9 tests run.

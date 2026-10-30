@@ -1,0 +1,1201 @@
+module Types = Masc_domain
+
+module Lib = Masc
+
+open Alcotest
+
+let () =
+  Dashboard_projection_cache.register_operator_snapshot_json
+    { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
+  Dashboard_projection_cache.register_operator_digest_json
+    { Dashboard_projection_cache.digest = Operator_control.digest_json }
+
+let () = ignore Operator_tool.force_link
+
+(** Dashboard Mission read-model regression tests. *)
+
+let test_dir () =
+  let tmp = Filename.temp_file "masc_dashboard_briefing" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o755;
+  tmp
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun f -> rm (Filename.concat path f));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  rm dir
+
+let request target =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
+
+let contains str substr =
+  try
+    ignore (Str.search_forward (Str.regexp_string substr) str 0);
+    true
+  with Not_found -> false
+
+let object_has_key label key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | json ->
+    failf "%s must be an object, got %s" label (Yojson.Safe.to_string json)
+
+let with_test_env f =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Time_compat.set_clock clock;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+    (fun () -> f ~clock ~sw)
+
+let write_pending_confirm config _session_id =
+  let operator_dir = Filename.concat (Workspace_utils.masc_dir config) "operator" in
+  Workspace_utils.mkdir_p operator_dir;
+  Workspace_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
+    (`List
+      [
+        `Assoc
+          [
+            ("confirm_token", `String "confirm-mission-test");
+            ("trace_id", `String "ops_fixture_mission");
+            ("actor", `String "dashboard-fixture");
+            ("action_type", `String "keeper_message");
+            ("target_type", `String "keeper");
+            ("target_id", `String "fixture-keeper");
+            ("payload", `Assoc [ ("reason", `String "fixture pending confirmation") ]);
+            ("delegated_tool", `String "masc_keeper_delegate");
+            ("created_at", `String (Masc_domain.now_iso ()));
+            ("expires_at", `Null);
+          ];
+      ])
+
+let seed_workspace config session_id =
+  ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+  ignore (Lib.Workspace.bind_session config ~agent_name:"mission-local64-smoke"
+            ~capabilities:[ "operator"; "fixture"; "local64" ] ());
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-alpha"
+            ~capabilities:[ "worker"; "local64"; "manager" ] ());
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-beta"
+            ~capabilities:[ "worker"; "local64"; "metacog" ] ());
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-gamma"
+            ~capabilities:[ "worker"; "local64"; "executor" ] ());
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-delta"
+            ~capabilities:[ "worker"; "local64"; "observer" ] ());
+  ignore
+    (Lib.Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"mission-local64-smoke"
+       ~content:"@llama-local-alpha recover failed worker coverage");
+  ignore
+    (Lib.Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"llama-local-alpha"
+       ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
+
+  (* Team sessions are retired; mission fixtures now exercise workspace-level
+     attention and worker/keeper signals without persisting session records. *)
+  ignore session_id;
+  write_pending_confirm config session_id
+
+let test_dashboard_briefing_projection () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let session_id = "ts-mission-fixture-001" in
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      seed_workspace config session_id;
+      (* Simulate delta departing: remove agent file so Dashboard_briefing
+         sees delta as departed. *)
+      let delta_path =
+        Filename.concat (Workspace_utils.agents_dir config) "llama-local-delta.json"
+      in
+      if Sys.file_exists delta_path then Sys.remove delta_path;
+      let json =
+        Dashboard_briefing.json
+          ~actor:"test-dashboard-projection"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      let open Yojson.Safe.Util in
+      let attention_queue = json |> member "attention_queue" |> to_list in
+      let summary = json |> member "summary" in
+      let agent_briefs = json |> member "agent_briefs" |> to_list in
+      let internal_signals = json |> member "internal_signals" |> to_list in
+      let alpha_brief =
+        agent_briefs
+        |> List.find (fun row ->
+               row |> member "agent_name" |> to_string = "llama-local-alpha")
+      in
+      (* After #8395 (#8563), root-level incidents are reclassified as
+         internal_signals. The clean fixture has no non-root attention
+         source — pending_confirm_waiting is root-scoped — so
+         attention_queue is expected to be empty. The pending-confirm
+         assertion has moved to internal_signals (see below). *)
+      check bool "attention_queue is public-only (empty in clean fixture)" true
+        (attention_queue = []);
+      check bool "mission summary retains workspace health" true
+        (summary |> member "workspace_health" <> `Null);
+      List.iter
+        (fun key ->
+           check bool ("mission summary omits " ^ key) false
+             (object_has_key "mission summary" key summary))
+        [ "paused"; "active_agents"; "namespace_id"; "namespace"; "namespace_mode" ];
+      check bool "mission payload omits sessions" false
+        (object_has_key "mission payload" "sessions" json);
+      let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
+      check bool "recent input preserves exact alpha mention" true
+        (contains alpha_input "@llama-local-alpha");
+      check bool "recent input excludes unrelated beta mention" false
+        (contains alpha_input "@llama-local-beta");
+      check bool "agent brief omits social context" false
+        (object_has_key "agent brief" "where" alpha_brief);
+      check string "agent brief signal truth" "message"
+        (alpha_brief |> member "evidence_source" |> to_string);
+      check bool "internal signal includes pending confirm" true
+        (internal_signals
+         |> List.exists (fun row ->
+              contains (row |> member "summary" |> to_string) "pending confirmation"));
+      (* The clean fixture has no workspace recommendation. Verify that
+         internal_signals still carries the reachable pending-confirm incident. *)
+      check bool "internal signals are workspace-scoped" true
+        (internal_signals
+         |> List.for_all (fun row ->
+              row |> member "target_type" |> to_string = "workspace")))
+
+let test_dashboard_briefing_http_full_contract () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let session_id = "ts-mission-http-fixture-001" in
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      seed_workspace config session_id;
+      (* Clear stale cache entries from prior tests to avoid cross-test pollution.
+         Both dashboard-level and operator snapshot caches must be invalidated. *)
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      let json =
+        Server_dashboard_http.dashboard_briefing_http_json
+          ~state
+          ~sw
+          ~clock
+          (request "/api/v1/dashboard/briefing?agent_name=test-dashboard-http")
+      in
+      let open Yojson.Safe.Util in
+      check bool "operator targets present in mission http payload" true
+        (json |> member "operator_targets" <> `Null);
+      check bool "internal signals retained in mission http payload" true
+        ((json |> member "internal_signals" |> to_list) <> []);
+      check bool "command focus retained in mission http payload" true
+        (json |> member "command_focus" <> `Null))
+
+let test_dashboard_briefing_http_default_bootstraps_first_success () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      let session_id = "ts-mission-http-default-001" in
+      seed_workspace config session_id;
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      let json =
+        Server_dashboard_http.dashboard_briefing_http_json
+          ~state
+          ~sw
+          ~clock
+          (request "/api/v1/dashboard/briefing")
+      in
+      let open Yojson.Safe.Util in
+      check string "default mission cache becomes fresh" "fresh"
+        (json |> member "projection_diagnostics" |> member "cache_state"
+        |> to_string);
+      check bool "default mission records first success" true
+        (json |> member "projection_diagnostics" |> member "last_success_at"
+         <> `Null);
+      check bool "default mission leaves initializing placeholder" true
+        (json |> member "summary" |> member "workspace_health" |> to_string
+         <> "initializing"))
+
+let test_dashboard_briefing_keeper_tool_audit_fallback () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let session_id = "ts-mission-http-default-001" in
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      seed_workspace config session_id;
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      let json =
+        Server_dashboard_http.dashboard_briefing_http_json
+          ~state
+          ~sw
+          ~clock
+          (request "/api/v1/dashboard/briefing")
+      in
+      let open Yojson.Safe.Util in
+      check string "default mission cache becomes fresh" "fresh"
+        (json |> member "projection_diagnostics" |> member "cache_state"
+        |> to_string);
+      check bool "default mission records first success" true
+        (json |> member "projection_diagnostics" |> member "last_success_at"
+         <> `Null);
+      check bool "default mission leaves initializing placeholder" true
+        (json |> member "summary" |> member "workspace_health" |> to_string
+         <> "initializing"))
+
+let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence () =
+  let keeper_name = "audit-keeper-assembly-fixture" in
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let briefs =
+        Dashboard_briefing_assembly.build_keeper_briefs config
+          [
+            `Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String keeper_name);
+                ("status", `String "offline");
+                ("diagnostic", `Assoc [ ("health_state", `String "offline") ]);
+                ("updated_at", `String (Masc_domain.now_iso ()));
+                ("latest_tool_names", `List []);
+                ("latest_tool_call_count", `Null);
+                ("latest_action_source", `String "structured_model");
+                ("tool_audit_source", `Null);
+                ("tool_audit_at", `Null);
+              ];
+          ]
+      in
+      let open Yojson.Safe.Util in
+      let brief =
+        briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+      in
+      check bool "no synthetic audit source without evidence" true
+        (brief |> member "tool_audit_source" = `Null);
+      check string "in-band action source is preserved" "structured_model"
+        (brief |> member "latest_action_source" |> to_string);
+      check bool "no observed tools without evidence" true
+        ((brief |> member "latest_tool_names" |> to_list) = []))
+
+(* A serialized severity is ranked by decoding it back to [operator_severity].
+   The string ranker this replaced mapped "critical" and "bad" to the same
+   value, so a critical attention item sorted no higher than a bad one — while
+   the typed [Operator_digest_types.severity_rank] has always separated them
+   (4 vs 3, since [Sev_info] joined the scale below them). *)
+(* Workspace health is read off which severities are present, not off whether
+   the list is non-empty. The old shape called every non-empty list without a
+   [Sev_bad] row "warn", which put a critical row in the amber bucket and let a
+   purely informational one -- a Keeper holding messages it has not answered
+   yet -- turn the whole workspace amber. On the live runtime that held health
+   at "warning" for eleven days over three Discord asides nobody was going to
+   answer. *)
+let attention_row severity =
+  { Operator_digest.kind = "fixture"
+  ; severity
+  ; summary = "fixture row"
+  ; target_type = Lib.Operator_action_constants.workspace_target_type
+  ; target_id = None
+  ; actor = None
+  ; evidence = `Assoc []
+  }
+
+let test_workspace_health_reads_the_severities_present () =
+  let health items = Operator_digest.health_from_attention_items items in
+  Alcotest.(check string) "no rows is ok" "ok" (health []);
+  Alcotest.(check string) "an informational row alone stays ok" "ok"
+    (health [ attention_row Operator_digest.Sev_info ]);
+  Alcotest.(check string) "a warning row is warn" "warn"
+    (health
+       [ attention_row Operator_digest.Sev_info
+       ; attention_row Operator_digest.Sev_warn
+       ]);
+  Alcotest.(check string) "a critical row is bad, not warn" "bad"
+    (health [ attention_row Operator_digest.Sev_critical ]);
+  Alcotest.(check string) "a bad row outranks a warning" "bad"
+    (health
+       [ attention_row Operator_digest.Sev_warn
+       ; attention_row Operator_digest.Sev_bad
+       ])
+
+let test_informational_severity_ranks_below_warn_and_above_nothing () =
+  let rank = Operator_digest.severity_rank in
+  Alcotest.(check bool) "info ranks under warn" true
+    (rank Operator_digest.Sev_info < rank Operator_digest.Sev_warn);
+  (* 0 is reserved for a string that is not a severity at all, so an
+     informational row must not share it. *)
+  Alcotest.(check bool) "info ranks above an unreadable severity" true
+    (rank Operator_digest.Sev_info
+     > Operator_digest_types.severity_rank_of_string "not-a-severity")
+
+let test_internal_signals_rank_critical_above_bad () =
+  let workspace = Lib.Operator_action_constants.workspace_target_type in
+  let incident kind severity =
+    `Assoc
+      [ ("kind", `String kind)
+      ; ("severity", `String severity)
+      ; ("summary", `String (kind ^ " summary"))
+      ; ("target_type", `String workspace)
+      ; ("target_id", `Null)
+      ]
+  in
+  let signals =
+    Dashboard_briefing_assembly.build_internal_signals
+      [ incident "warn_one" "warn"; incident "bad_one" "bad"; incident "critical_one" "critical" ]
+      []
+  in
+  let open Yojson.Safe.Util in
+  let order = signals |> List.map (fun row -> to_string (member "summary" row)) in
+  Alcotest.(check (list string))
+    "critical sorts above bad, bad above warn"
+    [ "critical_one summary"; "bad_one summary"; "warn_one summary" ]
+    order
+
+(* An internal signal reports one stream. The operator digest records no link
+   between an attention item and a recommended action, so a row must not fill
+   in the other side, and no action may be dropped for having been "matched"
+   to an incident. The removed matcher did both: normalized-prose equality of
+   summary vs reason, else a kind -> action_type table, which attached the one
+   workspace recommendation to every incident whose kind that table listed. *)
+let test_internal_signals_do_not_pair_streams () =
+  let workspace = Lib.Operator_action_constants.workspace_target_type in
+  let incident kind summary =
+    `Assoc
+      [
+        ("kind", `String kind);
+        ("severity", `String "warn");
+        ("summary", `String summary);
+        ("target_type", `String workspace);
+        ("target_id", `Null);
+      ]
+  in
+  let action action_type reason =
+    `Assoc
+      [
+        ("action_type", `String action_type);
+        ("severity", `String "warn");
+        ("reason", `String reason);
+        ("target_type", `String workspace);
+        ("target_id", `Null);
+      ]
+  in
+  let incidents =
+    [
+      (* kind the deleted table mapped to "broadcast" *)
+      incident "intent_blocked" "Namespace intent is blocked";
+      (* reason identical to the action's, which the deleted prose
+         comparison treated as proof of a response *)
+      incident "stalled_session" "Pause the namespace";
+    ]
+  in
+  let actions = [ action "broadcast" "Pause the namespace" ] in
+  let signals =
+    Dashboard_briefing_assembly.build_internal_signals incidents actions
+  in
+  let open Yojson.Safe.Util in
+  let of_type wanted =
+    signals
+    |> List.filter (fun row -> to_string (member "signal_type" row) = wanted)
+  in
+  Alcotest.(check int) "both incidents kept" 2 (List.length (of_type "attention"));
+  Alcotest.(check int) "the action is still its own row" 1
+    (List.length (of_type "action"));
+  List.iter
+    (fun row ->
+      Alcotest.(check bool)
+        "an attention row claims no action" true
+        (member "action" row = `Null))
+    (of_type "attention");
+  List.iter
+    (fun row ->
+      Alcotest.(check bool)
+        "an action row claims no attention" true
+        (member "attention" row = `Null))
+    (of_type "action")
+
+let test_dashboard_keeper_unknown_context_is_informational () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let now_ts = Unix.gettimeofday () in
+      let keeper ~updated_at name context_ratio =
+        `Assoc
+          [
+            ("name", `String name);
+            ("agent_name", `String name);
+            ("status", `String "active");
+            ("diagnostic", `Assoc [ ("health_state", `String "healthy") ]);
+            ("updated_at", `String updated_at);
+            ("context_ratio", context_ratio);
+            ( "context_metrics_unavailable",
+              match context_ratio with
+              | `Null ->
+                `Assoc
+                  [
+                    ("kind", `String "not_observed");
+                    ("reason", `String "context_measurement_missing");
+                  ]
+              | _ -> `Null );
+            ("turn_count", `Int 1);
+          ]
+      in
+      let unknown =
+        keeper
+          ~updated_at:(Masc_domain.iso8601_of_unix_seconds (now_ts -. 1.0))
+          "unknown-context" `Null
+      in
+      let observed =
+        keeper
+          ~updated_at:(Masc_domain.iso8601_of_unix_seconds now_ts)
+          "observed-context" (`Float 0.1)
+      in
+      let open Yojson.Safe.Util in
+      let briefs =
+        Dashboard_briefing_assembly.build_keeper_briefs config [ observed; unknown ]
+      in
+      check string "missing context does not add pressure" "observed-context"
+        (briefs |> List.hd |> member "name" |> to_string);
+      let unknown_brief =
+        briefs
+        |> List.find (fun row ->
+               row |> member "name" |> to_string = "unknown-context")
+      in
+      check string "brief preserves unavailable context kind" "not_observed"
+        (unknown_brief
+         |> member "context_metrics_unavailable"
+         |> member "kind"
+         |> to_string);
+      let continuity =
+        Dashboard_execution_builders.build_continuity_briefs
+          ~now_ts [ unknown ]
+        |> List.hd
+      in
+      check string "missing context does not downgrade healthy activity" "healthy"
+        (continuity.json |> member "state" |> to_string);
+      check string "health note follows remaining predicates" "정상 동작 중"
+        (continuity.json |> member "note" |> to_string);
+      check string "continuity preserves unavailable context reason"
+        "context_measurement_missing"
+        (continuity.json
+         |> member "context_metrics_unavailable"
+         |> member "reason"
+         |> to_string))
+
+let make_message ?mention ~seq ~from_agent ~content () : Types.message =
+  { request_id = Printf.sprintf "wmsg-test-%d" seq;
+    seq;
+    from_agent;
+    msg_type = "broadcast";
+    content;
+    mention;
+    mention_delivery =
+      (match mention with None -> Types.Mention_passive | Some _ -> Types.Mention_accepted);
+    timestamp = "";
+    trace_context = None;
+    expires_at = None;
+    }
+
+(* Regression: a degenerate agent record with an empty/whitespace name must not
+   crash latest_message_to (String.get on an empty [lowered]). *)
+let test_latest_message_to_empty_name_safe () =
+  let msgs = [ make_message ~seq:1 ~from_agent:"alice" ~content:"hey @bob ping" () ] in
+  (match Dashboard_briefing_agents.latest_message_to "" msgs with
+   | None -> ()
+   | Some _ -> Alcotest.fail "empty name must not match a mention");
+  (match Dashboard_briefing_agents.latest_message_to "   " msgs with
+   | None -> ()
+   | Some _ -> Alcotest.fail "whitespace name must not match a mention");
+  match Dashboard_briefing_agents.latest_message_to "bob" msgs with
+  | Some (m : Types.message) -> Alcotest.(check int) "matched seq" 1 m.seq
+  | None -> Alcotest.fail "expected @bob mention to match"
+
+(* #27324 regression: the old detector was single-character membership —
+   content contains '@' AND (first or last char of the name anywhere) — so for
+   agent "claude" any message with '@' plus a 'c' or 'e' counted as addressed
+   to claude. These pin real mention semantics. *)
+let test_latest_message_to_requires_real_mention () =
+  (* '@' present, and both 'c' and 'e' appear, but nothing mentions claude. *)
+  let msgs =
+    [ make_message ~seq:1 ~from_agent:"alice" ~content:"meeting @ 3pm — everyone come" () ]
+  in
+  match Dashboard_briefing_agents.latest_message_to "claude" msgs with
+  | None -> ()
+  | Some _ -> Alcotest.fail "'@' plus stray name letters is not a mention"
+
+let test_latest_message_to_longer_handle_is_not_a_mention () =
+  let msgs =
+    [ make_message ~seq:1 ~from_agent:"alice" ~content:"@claude-dev take this" () ]
+  in
+  match Dashboard_briefing_agents.latest_message_to "claude" msgs with
+  | None -> ()
+  | Some _ -> Alcotest.fail "@claude-dev must not read as a mention of claude"
+
+let test_latest_message_to_reads_typed_mention_field () =
+  (* No '@' anywhere in the body: the typed [mention] field alone must carry. *)
+  let msgs =
+    [ make_message ~seq:4 ~from_agent:"alice" ~content:"please review the plan"
+        ~mention:"claude" () ]
+  in
+  match Dashboard_briefing_agents.latest_message_to "claude" msgs with
+  | Some (m : Types.message) -> Alcotest.(check int) "typed mention seq" 4 m.seq
+  | None -> Alcotest.fail "typed mention field must reach the agent"
+
+let test_latest_message_to_prefers_latest_mention () =
+  let msgs =
+    [ make_message ~seq:2 ~from_agent:"alice" ~content:"@claude first ping" ();
+      make_message ~seq:7 ~from_agent:"bob" ~content:"@claude second ping" ();
+      make_message ~seq:9 ~from_agent:"claude" ~content:"@claude talking about myself" () ]
+  in
+  match Dashboard_briefing_agents.latest_message_to "claude" msgs with
+  | Some (m : Types.message) ->
+      (* seq 9 is from claude itself and must be skipped. *)
+      Alcotest.(check int) "latest non-self mention" 7 m.seq
+  | None -> Alcotest.fail "expected a mention to match"
+
+(* The pressure ranker used to compare the status string twice — a membership
+   list for offline/inactive and an equality for idle. keeper_status_runtime
+   names this ranker in the comment on [surface_status], which is the closed
+   vocabulary the producer builds. Ranks are pinned here through the ordering
+   so parsing into that type cannot quietly change which keeper surfaces first
+   (#29350). *)
+let test_pressure_rank_orders_by_surface_status () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let updated_at = Masc_domain.now_iso () in
+      let row name health =
+        `Assoc
+          [ ("name", `String name)
+          ; ("agent_name", `String name)
+          ; ("diagnostic", `Assoc [ ("health_state", `String health) ])
+          ; ("updated_at", `String updated_at)
+          ; ("latest_tool_names", `List [])
+          ]
+      in
+      let open Yojson.Safe.Util in
+      let names rows =
+        Dashboard_briefing_assembly.build_keeper_briefs config rows
+        |> List.map (fun row -> row |> member "name" |> to_string)
+      in
+      (* Ranked by health: a keeper whose keepalive is gone outranks one
+         that has not turned yet, which outranks one that is working. *)
+      Alcotest.(check (list string))
+        "offline outranks idle, which outranks healthy"
+        [ "k-offline"; "k-idle"; "k-healthy" ]
+        (names
+           [ row "k-healthy" "healthy"
+           ; row "k-idle" "idle"
+           ; row "k-offline" "offline"
+           ]);
+      (* A failing keeper is not doing its work either, so it shares the top
+         rank with offline. Tied rows sort by when they were last seen, which
+         is the same moment here, so the pair is pinned and its order is
+         not. *)
+      let ranked =
+        names
+          [ row "k-healthy" "healthy"
+          ; row "k-failing" "failing"
+          ; row "k-idle" "idle"
+          ; row "k-offline" "offline"
+          ]
+      in
+      Alcotest.(check (list string))
+        "failing and offline share the top rank"
+        [ "k-failing"; "k-offline" ]
+        (List.sort String.compare (List.filteri (fun index _ -> index < 2) ranked));
+      Alcotest.(check (list string))
+        "both outrank idle, which outranks healthy"
+        [ "k-idle"; "k-healthy" ]
+        (List.filteri (fun index _ -> index >= 2) ranked))
+;;
+
+let test_keeper_brief_publishes_health_and_phase () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let open Yojson.Safe.Util in
+      let brief =
+        Dashboard_briefing_assembly.build_keeper_briefs config
+          [ `Assoc
+              [ ("name", `String "k-idle")
+              ; ("agent_name", `String "k-idle")
+              ; ("status", `String "idle")
+              ; ("phase", `String "Running")
+              ; ("paused", `Bool false)
+              ; ("diagnostic", `Assoc [ ("health_state", `String "idle") ])
+              ; ("updated_at", `String (Masc_domain.now_iso ()))
+              ; ("latest_tool_names", `List [])
+              ]
+          ]
+        |> List.hd
+      in
+      (* The rank this row is sorted by comes from health, so the row has to
+         carry health -- otherwise a reader sees only the status word. *)
+      let field name = Yojson.Safe.to_string (brief |> member name) in
+      Alcotest.(check string) "health travels with the row" {|"idle"|} (field "health");
+      (* An operator asks two questions the fold answered with one word:
+         is it running (health), and did someone stop it (phase). *)
+      Alcotest.(check string) "phase travels with the row" {|"Running"|} (field "phase"))
+;;
+
+(* A Keeper declared in [.masc/config/keepers] that has never booted: the
+   operator snapshot lists it as a declaration row (#35084). *)
+let declare_unbooted_keeper (config : Workspace_utils.config) name =
+  Workspace_utils.mkdir_p (Lib.Workspace.keepers_runtime_dir config);
+  let declarations =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  Workspace_utils.mkdir_p declarations;
+  Out_channel.with_open_bin
+    (Filename.concat declarations (name ^ ".toml"))
+    (fun out ->
+      output_string out
+        "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n\
+         instructions = \"Help the operator.\"\n")
+
+let row_named name rows =
+  List.find_opt
+    (fun row -> Yojson.Safe.Util.(row |> member "name") = `String name)
+    rows
+
+(* #38090: a Keeper whose snapshot row raised was dropped from [items] with
+   one log line, and the briefing, the execution screen and the TUI Overview
+   counted a fleet that had lost it as a smaller fleet. PR #38072's first CI
+   run lost all three fixture Keepers this way: building a row asks for the
+   default runtime, and this suite initializes none. That same failure is the
+   fixture here. *)
+let test_a_keeper_whose_row_raises_is_reported_unread () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      (* The row resolves an unassigned keeper through the default route. *)
+      (match Runtime.get_default_route () with
+       | exception Failure _ -> ()
+       | route ->
+         failf
+           "precondition: this case needs building a row to raise, but a \
+            default route %S is initialized"
+           route);
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc [ "name", `String "k-unread"; "trace_id", `String "unread-trace" ])
+        with
+        | Ok meta -> meta
+        | Error error -> fail ("meta fixture: " ^ error)
+      in
+      (match Lib.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error error -> fail ("write meta: " ^ error));
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let open Yojson.Safe.Util in
+      let unread_named label json =
+        match Lib.Keeper_snapshot_unread.list_of_json (json |> member "keepers_unread") with
+        | Error error -> failf "%s keepers_unread does not decode: %s" label error
+        | Ok unread ->
+          (match
+             List.find_opt
+               (fun (u : Lib.Keeper_snapshot_unread.t) ->
+                String.equal u.Lib.Keeper_snapshot_unread.name "k-unread")
+               unread
+           with
+           | Some { Lib.Keeper_snapshot_unread.reason = Row_raised _; _ } -> ()
+           | Some { Lib.Keeper_snapshot_unread.reason = Meta_read_failed detail; _ } ->
+             failf "%s reports the keeper as a meta read failure: %s" label detail
+           | None -> failf "%s does not report k-unread as unread" label)
+      in
+      let briefing =
+        Dashboard_briefing.json
+          ~actor:"test-briefing-unread-keeper"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      check bool "the keeper has no brief -- its row was never built" true
+        (Option.is_none (row_named "k-unread" (briefing |> member "keeper_briefs" |> to_list)));
+      unread_named "the briefing" briefing;
+      (* The list itself read, so empty lists beside it are a reading. *)
+      (match
+         Lib.Keeper_snapshot_unread.listing_of_json (briefing |> member "keepers_listing")
+       with
+       | Ok Lib.Keeper_snapshot_unread.Listed -> ()
+       | Ok (Lib.Keeper_snapshot_unread.Unreadable detail) ->
+         failf "the briefing reports a listed directory as unreadable: %s" detail
+       | Ok Lib.Keeper_snapshot_unread.Not_listed ->
+         fail "the briefing says it did not ask for Keepers"
+       | Error error -> failf "the briefing keepers_listing does not decode: %s" error);
+      let execution =
+        Dashboard_execution.json
+          ~actor:"test-execution-unread-keeper"
+          ~light:true
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      unread_named "the execution render" execution)
+
+(* #38120: a Keeper directory that does not list leaves no row and no unread
+   name, so the snapshot's [keepers] section is empty either way. The
+   section's [listing] is what tells an unlisted fleet from an empty one, and
+   a section without it is a producer defect, not "listed". *)
+let test_an_unlisted_keeper_directory_is_not_an_empty_fleet () =
+  let module U = Lib.Keeper_snapshot_unread in
+  let snapshot listing =
+    `Assoc
+      [ ( "keepers"
+        , `Assoc
+            ([ "count", `Int 0; "items", `List []; U.section_field, `List [] ]
+             @ Option.to_list (Option.map (fun l -> U.listing_field, U.listing_to_json l) listing))
+        )
+      ]
+  in
+  (match U.listing_of_snapshot (snapshot (Some (U.Unreadable "EACCES"))) with
+   | Ok (U.Unreadable "EACCES") -> ()
+   | Ok (U.Unreadable other) -> failf "unreadable detail changed: %s" other
+   | Ok (U.Listed | U.Not_listed) -> fail "an unlisted directory read as a listing"
+   | Error error -> failf "unreadable listing does not decode: %s" error);
+  (match U.listing_of_snapshot (snapshot None) with
+   | Error _ -> ()
+   | Ok _ -> fail "a keepers section without listing decoded");
+  (match U.listing_of_snapshot `Null with
+   | Ok U.Not_listed -> ()
+   | Ok (U.Listed | U.Unreadable _) | Error _ ->
+     fail "a snapshot with no keepers section is not Not_listed");
+  match U.listing_of_json (`Assoc [ "state", `String "unknown" ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "an unknown listing state decoded"
+
+(* The execution render that answered 500 on 2026-09-19: the snapshot's
+   declaration row for [imp] had no health, and the continuity briefs raised
+   on it. *)
+let test_execution_render_with_a_declared_keeper () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      declare_unbooted_keeper config "imp";
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let json =
+        Dashboard_execution.json
+          ~actor:"test-execution-declared-keeper"
+          ~light:true
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      let open Yojson.Safe.Util in
+      check bool "the render is not the timeout page" true
+        (json |> member "error" = `Null);
+      (match row_named "imp" (json |> member "keepers" |> to_list) with
+       | Some row ->
+         check bool "the declared keeper stays listed as a declaration" true
+           (row |> member "declaration_only" |> to_bool)
+       | None -> fail "the declared keeper is missing from the keeper list");
+      check bool "the declared keeper has no continuity brief" true
+        (Option.is_none
+           (row_named "imp" (json |> member "continuity_briefs" |> to_list))))
+
+(* The snapshot is cached for ten seconds, so a render can hold a declaration
+   row for a Keeper whose metadata exists by now. Enriching that row from the
+   metadata would build a row that is declaration-only and has runtime health
+   at once. *)
+let test_enrich_leaves_a_declaration_row_without_runtime_fields () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc [ "name", `String "imp"; "trace_id", `String "declared-trace" ])
+        with
+        | Ok meta -> meta
+        | Error error -> fail ("meta fixture: " ^ error)
+      in
+      (match Lib.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error error -> fail ("write meta: " ^ error));
+      let declared =
+        Lib.Keeper_declared_roster.to_json
+          { Lib.Keeper_declared_roster.name = "imp"
+          ; requirements = [ Lib.Keeper_declared_roster.Runtime_check_required ]
+          }
+      in
+      let enriched =
+        Dashboard_execution.For_test.enrich_keeper_with_diagnostic ~config declared
+      in
+      List.iter
+        (fun key ->
+           check bool (key ^ " is not added to a declaration row") false
+             (object_has_key "enriched declaration row" key enriched))
+        [ "diagnostic"; "trust"; "runtime_trust" ];
+      check bool "the row stays a declaration" true
+        Yojson.Safe.Util.(enriched |> member "declaration_only" |> to_bool))
+
+(* 2026-09-23 live: every keeper brief on /api/v1/dashboard/briefing had
+   [health = null], so a keeper in the Failing phase sat mid-list. The rows
+   above build their fixture with a [diagnostic] the operator snapshot never
+   wrote. This case goes through the real producer: stored metadata, a
+   registry phase, and the briefing render. *)
+(* The snapshot row reads each keeper's runtime identity, which asks for the
+   default runtime. Without one every fixture keeper's row fails and the
+   snapshot drops it, so the briefing never sees the keepers at all. *)
+let briefing_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let test_briefing_ranks_a_failing_keeper_first () =
+  let dir = test_dir () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Lib.Keeper_registry.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let runtime_path = Filename.concat dir "runtime.toml" in
+      Out_channel.with_open_bin runtime_path (fun out ->
+        output_string out briefing_runtime_toml);
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error error -> failf "Runtime.init_default failed: %s" error);
+      Lib.Keeper_registry.For_testing.clear ();
+      let store fields =
+        let meta =
+          match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
+          | Ok meta -> meta
+          | Error error -> fail ("meta fixture: " ^ error)
+        in
+        (match Lib.Keeper_meta_store.replace_snapshot config meta with
+         | Ok () -> ()
+         | Error error -> fail ("write meta: " ^ error));
+        meta
+      in
+      let register ?current_task_id name =
+        let task_field =
+          match current_task_id with
+          | Some id -> [ "current_task_id", `String id ]
+          | None -> []
+        in
+        ignore
+          (Lib.Keeper_registry.For_testing.register
+             ~base_path:config.base_path
+             name
+             (store
+                ([ "name", `String name; "trace_id", `String (name ^ "-trace") ]
+                 @ task_field)))
+      in
+      register ~current_task_id:"task-1844" "k-running";
+      register "k-failing";
+      ignore
+        (store
+           [ "name", `String "k-paused"
+           ; "trace_id", `String "paused-trace"
+           ; "paused", `Bool true
+           ; "current_task_id", `String "task-1845"
+           ]);
+      (match
+         Lib.Keeper_registry.dispatch_event
+           ~base_path:config.base_path
+           "k-failing"
+           (Keeper_state_machine.Turn_failed { consecutive = 1 })
+       with
+       | Ok _ -> ()
+       | Error _ -> fail "the turn failure was not accepted");
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let json =
+        Dashboard_briefing.json
+          ~actor:"test-briefing-failing-keeper"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      let open Yojson.Safe.Util in
+      let briefs = json |> member "keeper_briefs" |> to_list in
+      let health name =
+        match row_named name briefs with
+        | Some row -> Yojson.Safe.to_string (row |> member "health")
+        | None -> failf "%s is missing from keeper_briefs" name
+      in
+      check string "the failing keeper's brief says failing" {|"failing"|}
+        (health "k-failing");
+      check string "the running keeper's brief carries its health" {|"idle"|}
+        (health "k-running");
+      (* A paused keeper's keepalive is gone, so it reads offline. *)
+      check string "the paused keeper's brief carries its health" {|"offline"|}
+        (health "k-paused");
+      (* [current_work] is read from the snapshot row's [current_task_id]. The
+         key used to be missing from every row, so each keeper read as holding
+         nothing (#31726). A paused keeper takes the lightweight row, the
+         others the full one. *)
+      let current_work name =
+        match row_named name briefs with
+        | Some row -> Yojson.Safe.to_string (row |> member "current_work")
+        | None -> failf "%s is missing from keeper_briefs" name
+      in
+      check string "a running keeper's brief names the task it holds" {|"task-1844"|}
+        (current_work "k-running");
+      check string "a paused keeper's brief names the task it still holds"
+        {|"task-1845"|}
+        (current_work "k-paused");
+      check string "a keeper holding no task reads null" "null"
+        (current_work "k-failing");
+      (* Offline shares the top pressure rank with failing, but a pause is
+         the operator's own decision, so the paused keeper ranks as no
+         pressure at all and sorts below the idle one. *)
+      (* Only the three fixture keepers are ordered here; another row the
+         workspace seeds must not decide this case. *)
+      let fixture_names = [ "k-failing"; "k-running"; "k-paused" ] in
+      check (list string) "failing first, then idle, then paused"
+        fixture_names
+        (briefs
+         |> List.map (fun row -> row |> member "name" |> to_string)
+         |> List.filter (fun name -> List.mem name fixture_names)))
+
+(* A paused keeper is not pressure on any axis. Its context ratio is left
+   over from before the pause and no turn will add to it, so a high ratio
+   must not lift it into the context-pressure rank above a working keeper. *)
+let test_paused_keeper_with_high_context_is_not_pressure () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let updated_at = Masc_domain.now_iso () in
+      let row name ~paused ~health ~context_ratio =
+        `Assoc
+          [ ("name", `String name)
+          ; ("agent_name", `String name)
+          ; ("paused", `Bool paused)
+          ; ("context_ratio", `Float context_ratio)
+          ; ("diagnostic", `Assoc [ ("health_state", `String health) ])
+          ; ("updated_at", `String updated_at)
+          ; ("latest_tool_names", `List [])
+          ]
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check (list string))
+        "an idle keeper outranks a paused one at context 0.9"
+        [ "k-idle"; "k-paused" ]
+        (Dashboard_briefing_assembly.build_keeper_briefs config
+           [ row "k-paused" ~paused:true ~health:"offline" ~context_ratio:0.9
+           ; row "k-idle" ~paused:false ~health:"idle" ~context_ratio:0.1
+           ]
+         |> List.map (fun row -> row |> member "name" |> to_string)))
+
+let test_worker_support_tracks_each_exact_assignee_across_renders () =
+  let now_ts = 1_000_000_000.0 in
+  let stamp = Types.iso8601_of_unix_seconds now_ts in
+  let agent ?(status = Types.Inactive) ?current_task ~age name : Types.agent =
+    { id = None; name; agent_type = "fixture"; status; capabilities = []
+    ; current_task; session_bound_at = stamp
+    ; last_seen = Types.iso8601_of_unix_seconds (now_ts -. age); meta = None
+    }
+  in
+  let task id task_status : Types.task =
+    { id; title = id; description = ""; task_status; priority = 3; files = []
+    ; created_at = stamp; created_by = None; predecessor_task_id = None
+    ; contract = None; execution_links = Types.no_execution_links
+    ; handoff_context = None; cycle_count = 0; reclaim_policy = None
+    ; do_not_reclaim_reason = None; skills = []
+    }
+  in
+  let claimed assignee = Types.Claimed { assignee; claimed_at = stamp } in
+  let started assignee = Types.InProgress { assignee; started_at = stamp } in
+  let tasks =
+    [ task "a-claim" (claimed "alpha"); task "a-start" (started "alpha")
+    ; task "upper-claim" (claimed "Alpha")
+    ; task "unlisted" (claimed "alpha ")
+    ; task "beta-start" (started "beta"); task "healthy-start" (started "healthy")
+    ; task "todo" Types.Todo
+    ; task "submitted"
+        (Types.AwaitingVerification
+           { assignee = "terminal"; started_at = stamp; submitted_at = stamp
+           ; verification_id = "v-submitted" })
+    ; task "done"
+        (Types.Done { assignee = "terminal"; completed_at = stamp; notes = None })
+    ; task "cancelled"
+        (Types.Cancelled
+           { cancelled_by = "terminal"; cancelled_at = stamp; reason = None })
+    ]
+  in
+  let agents =
+    [ agent ~age:4. "Alpha"; agent ~age:5. "terminal"; agent ~age:3. "alpha"
+    ; agent ~age:2. " alpha "
+    ; agent ~status:Types.Active ~age:0. "healthy"
+    ; agent ~current_task:"explicit-work" ~age:1. "beta"
+    ]
+  in
+  let message =
+    { (make_message ~seq:1 ~from_agent:" ALPHA " ~content:"ready to continue" ())
+      with timestamp = stamp }
+  in
+  let render ~tasks ~agents =
+    Dashboard_execution_builders.build_worker_support_briefs
+      ~now_ts ~tasks ~agents ~messages:[ message ]
+    |> List.map (fun (row : Dashboard_execution_helpers.worker_context) -> row.json)
+  in
+  let rows = render ~tasks ~agents in
+  let open Yojson.Safe.Util in
+  check (list string) "attention ordering is stable and healthy work is omitted"
+    [ "Alpha"; "alpha"; " alpha "; "beta"; "terminal" ]
+    (List.map (fun row -> row |> member "name" |> to_string) rows);
+  List.iter2
+    (fun row (count, focus) ->
+      check int "only this exact owner's claimed/started tasks count" count
+        (row |> member "active_task_count" |> to_int);
+      check string "ownership count and explicit focus stay aligned" focus
+        (row |> member "focus" |> to_string);
+      check string "offline workers remain offline" "offline"
+        (row |> member "state" |> to_string))
+    rows
+    [ 1, "1 claimed tasks waiting for explicit current_task"
+    ; 2, "2 claimed tasks waiting for explicit current_task"
+    ; 0, "ready to continue"
+    ; 1, "explicit-work"
+    ; 0, "Idle / waiting for assignment"
+    ];
+  let empty_tasks = render ~tasks:[] ~agents in
+  check (list int) "the next render has no retained ownership counts"
+    [ 0; 0; 0; 0; 0 ]
+    (List.map (fun row -> row |> member "active_task_count" |> to_int) empty_tasks);
+  let beta_only = render ~tasks ~agents:[ List.nth agents 5 ] in
+  check (list string) "a render only returns its supplied agents" [ "beta" ]
+    (List.map (fun row -> row |> member "name" |> to_string) beta_only);
+  check bool "an intervening render cannot change an earlier result" true
+    (Yojson.Safe.equal (`List rows) (`List (render ~tasks ~agents)));
+  check bool "an empty fleet has no worker briefs" true
+    (render ~tasks ~agents:[] = [])
+
+let () =
+  Alcotest.run "Dashboard Mission"
+    [
+      ( "read_model",
+        [
+          Alcotest.test_case "latest_message_to tolerates empty agent name"
+            `Quick test_latest_message_to_empty_name_safe;
+          Alcotest.test_case "latest_message_to requires a real mention"
+            `Quick test_latest_message_to_requires_real_mention;
+          Alcotest.test_case "latest_message_to rejects longer handles"
+            `Quick test_latest_message_to_longer_handle_is_not_a_mention;
+          Alcotest.test_case "latest_message_to reads the typed mention field"
+            `Quick test_latest_message_to_reads_typed_mention_field;
+          Alcotest.test_case "latest_message_to prefers the latest non-self mention"
+            `Quick test_latest_message_to_prefers_latest_mention;
+          Alcotest.test_case "projection groups root-cause lanes" `Quick
+            test_dashboard_briefing_projection;
+          Alcotest.test_case "http mission keeps full contract" `Quick
+            test_dashboard_briefing_http_full_contract;
+          Alcotest.test_case "http mission default bootstraps first success"
+            `Quick test_dashboard_briefing_http_default_bootstraps_first_success;
+          Alcotest.test_case "keeper tool audit fallback" `Quick
+            test_dashboard_briefing_keeper_tool_audit_fallback;
+          Alcotest.test_case "keeper brief keeps in-band tools without evidence" `Quick
+            test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
+          Alcotest.test_case "unknown keeper context is informational" `Quick
+            test_dashboard_keeper_unknown_context_is_informational;
+          Alcotest.test_case "internal signals rank critical above bad" `Quick
+            test_internal_signals_rank_critical_above_bad;
+          Alcotest.test_case "workspace health reads the severities present"
+            `Quick test_workspace_health_reads_the_severities_present;
+          Alcotest.test_case "informational severity ranks below warn" `Quick
+            test_informational_severity_ranks_below_warn_and_above_nothing;
+          Alcotest.test_case "a keeper whose row raises is reported unread" `Quick
+            test_a_keeper_whose_row_raises_is_reported_unread;
+          Alcotest.test_case "an unlisted keeper directory is not an empty fleet" `Quick
+            test_an_unlisted_keeper_directory_is_not_an_empty_fleet;
+          Alcotest.test_case "pressure rank orders by health" `Quick
+            test_pressure_rank_orders_by_surface_status;
+          Alcotest.test_case "keeper brief publishes health and phase" `Quick
+            test_keeper_brief_publishes_health_and_phase;
+          Alcotest.test_case "briefing ranks a failing keeper first" `Quick
+            test_briefing_ranks_a_failing_keeper_first;
+          Alcotest.test_case "paused keeper with high context is not pressure"
+            `Quick test_paused_keeper_with_high_context_is_not_pressure;
+          Alcotest.test_case "internal signals do not pair the two streams"
+            `Quick test_internal_signals_do_not_pair_streams;
+        ] );
+      ( "execution render",
+        [
+          Alcotest.test_case "worker support keeps exact ownership across renders"
+            `Quick test_worker_support_tracks_each_exact_assignee_across_renders;
+          Alcotest.test_case "declared keeper does not take down the render"
+            `Quick test_execution_render_with_a_declared_keeper;
+          Alcotest.test_case "enrich leaves a declaration row without runtime fields"
+            `Quick test_enrich_leaves_a_declaration_row_without_runtime_fields;
+        ] );
+    ]

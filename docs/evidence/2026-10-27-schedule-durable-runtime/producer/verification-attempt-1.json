@@ -1,0 +1,15 @@
+{
+  "is_derivative": true,
+  "recorded_at_unix": 1793047873.2450209,
+  "basis": "Root unified exec session39151 terminal exit1; metadata reconstructed after that terminal result, not a separately captured verifier source/stdout file",
+  "error_type": "KeyError",
+  "key": "tui_sha256",
+  "cause": "Verifier assumed a TUI-specific key; actual receipt uses sha256 for the TUI",
+  "prior_observations": [
+    "Archive ZIP SHA/bytes and receipt source/workflow/behavior verified",
+    "Server hash1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c and readonly build-commit a3950a189b9cc5a7ce82cb725699455d79923f42 observed"
+  ],
+  "server_or_model_started": false,
+  "original_archive_or_receipt_modified": false,
+  "next_action": "Continue local exact-member/CLI verification with actual receipt field; no redownload/build/replay"
+}

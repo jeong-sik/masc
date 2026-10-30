@@ -1,0 +1,247 @@
+(** Task_cache_invariant — reads canonical task state and the subject's own
+    record without collapsing absence, unreadability, and disagreement into
+    one another.
+
+    Two lookups, each keeping its failure modes apart:
+      - {!read_fresh_task_status} answers what the backlog says about a task.
+      - {!agent_current_task_match} answers what one agent record caches, and
+        says so when the record could not be read at all.
+
+    {!clear_stale_agent_task_if_matching} clears [current_task] on a matching
+    record and logs a [cache_desync.cleared] event.  Whether the caller then
+    suppresses, rejects, or reports a dependency failure is the caller's
+    decision, made on the returned variant.
+
+    @since #13397 — broadcast / mention desync. *)
+
+open Masc_domain
+open Workspace_utils
+
+type fresh_task_lookup =
+  | Found of Masc_domain.task_status
+  | Absent
+  | Unavailable of string
+
+(** Read the current task status directly from the backlog (snapshot read,
+    no write lock), preserving absence and read failure as distinct facts. *)
+let read_fresh_task_status config ~(task_id : string) : fresh_task_lookup =
+  match Workspace_backlog.read_backlog_r config with
+  | Error detail -> Unavailable detail
+  | Ok backlog ->
+    (match
+       List.find_opt
+         (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+         backlog.tasks
+     with
+     | Some task -> Found task.task_status
+     | None -> Absent)
+;;
+
+(** What one agent record says about a task, with the ways the answer can be
+    unavailable kept apart from the answer itself. *)
+type agent_task_match =
+  | Matches
+  | Mismatch
+  | Missing
+  | Unreadable of string
+
+(** [is_terminal status] returns [true] iff the status is [Done _] or
+    [Cancelled _].  SSOT: [Masc_domain.task_status_is_terminal]. *)
+let is_terminal = Masc_domain.task_status_is_terminal
+
+(** Why an agent record had its [current_task] cleared.
+
+    [After_commit] is the routine sweep a writer runs once its backlog commit
+    lands: the previous assignee stops owning a task that just moved. Nothing
+    was out of step. [Desync] is the reactive path, which clears only after
+    reading the canonical backlog and finding the task terminal or gone.
+
+    Both used to emit [cache_desync.cleared]. Two thirds of 3,000 recorded
+    events came from [transition_task_r], an after-commit site, so the count
+    could not answer whether agent caches actually drift -- the question
+    #27411 has to settle before deciding what the seven repair sites are
+    for. *)
+type clear_cause =
+  | After_commit
+  | Desync
+
+let clear_cause_event_type = function
+  | After_commit -> "task_cache.cleared_after_commit"
+  | Desync -> "cache_desync.cleared"
+
+let emit_cache_clear_event config ~cause ~agent_name ~task_id ~status_label ~module_name =
+  try
+    log_event config
+      (`Assoc
+        [ "type", `String (clear_cause_event_type cause)
+        ; "module", `String module_name
+        ; "agent", `String agent_name
+        ; "task_id", `String task_id
+        ; "ts", `String (now_iso ())
+        ])
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "task_cache_invariant: log_event failed (%s %s): %s"
+      module_name
+      task_id
+      (Printexc.to_string exn)
+;;
+
+let agent_file config agent_name =
+  Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+;;
+
+let agent_current_task_match config ~agent_name ~task_id =
+  let path = agent_file config agent_name in
+  if not (path_exists config path)
+  then Missing
+  else
+    with_file_lock config path (fun () ->
+      match read_json_doc config path with
+      | Error error -> Unreadable (json_doc_error_to_string error)
+      | Ok None -> Missing
+      | Ok (Some json) ->
+        (match agent_of_yojson json with
+         | Ok agent -> if agent.current_task = Some task_id then Matches else Mismatch
+         | Error detail -> Unreadable detail))
+;;
+
+let read_agent_record config path =
+  let decode json = agent_of_yojson json |> Result.map Option.some in
+  match config.backend, key_of_path config path with
+  | Memory _, Some key ->
+    (match backend_get config ~key with
+     | Error error -> Error (Backend_types.show_error error)
+     | Ok None -> Ok None
+     | Ok (Some content) ->
+       (try decode (Yojson.Safe.from_string content)
+        with Yojson.Json_error message -> Error message))
+  | Memory _, None -> Error "agent path is outside the configured backend"
+  | FileSystem _, _ ->
+    try
+      let channel = Unix.in_channel_of_descr (Unix.openfile path [Unix.O_RDONLY] 0) in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel)
+        (fun () -> decode (Yojson.Safe.from_channel channel))
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | Unix.Unix_error (error, fn, arg) -> Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+    | Sys_error message | Yojson.Json_error message -> Error message
+;;
+
+(* Memory writes commit to the backend before their local mirror. A retry may
+   therefore observe an already-cleared primary. Repair only its projection;
+   never rewrite an unrelated primary Task assignment to settle that mirror. *)
+let settle_agent_mirror config path agent =
+  match config.backend with
+  | FileSystem _ -> Ok ()
+  | Memory _ ->
+    let expected = agent_to_yojson agent in
+    let verify () = match read_json_local_result path with
+      | Ok stored when stored = expected -> Ok ()
+      | Ok _ -> Error "agent mirror readback mismatch"
+      | Error message -> Error message in
+    match verify () with
+    | Ok () -> Ok ()
+    | Error _ ->
+      match write_json_local path expected with
+      | Error _ as error -> error
+      | Ok () -> verify ()
+;;
+
+let before_cache_write = Atomic.make (fun (_path : string) -> ())
+
+module For_testing = struct
+  let with_before_cache_write hook f =
+    let previous = Atomic.get before_cache_write in
+    Fun.protect ~finally:(fun () -> Atomic.set before_cache_write previous)
+      (fun () -> Atomic.set before_cache_write hook; f ())
+end
+
+let clear_stale_agent_task_if_matching
+      config
+      ~(cause : clear_cause)
+      ~(agent_name : string)
+      ~(task_id : string)
+      ~(status_label : string)
+      ~(module_name : string)
+  =
+  let path =
+    agent_file config agent_name
+  in
+  let outcome =
+    match with_file_lock_r config path (fun () ->
+      match read_agent_record config path with
+      | Error detail -> Unreadable detail
+      | Ok None -> Missing
+      | Ok (Some agent) when agent.current_task = Some task_id ->
+        let updated = { agent with status = Masc_domain.Active; current_task = None } in
+        (Atomic.get before_cache_write) path;
+        (match write_json_commit_result config path (agent_to_yojson updated) with
+         | Error detail -> Unreadable detail
+         | Ok {mirror_error=Some detail} -> Unreadable detail
+         | Ok {mirror_error=None} ->
+           (match read_agent_record config path with
+            | Ok (Some stored) when stored = updated -> Matches
+            | Ok _ -> Unreadable "agent cache write readback mismatch"
+            | Error detail -> Unreadable detail))
+      | Ok (Some agent) ->
+        (match settle_agent_mirror config path agent with
+         | Ok () -> Mismatch | Error detail -> Unreadable detail)) with
+    | Ok result -> result
+    | Error error -> Unreadable (Masc_domain.masc_error_to_string error)
+  in
+  (match outcome with
+   | Matches ->
+     emit_cache_clear_event config ~cause ~agent_name ~task_id ~status_label ~module_name
+   | Mismatch | Missing | Unreadable _ -> ());
+  outcome
+;;
+
+(** Clear the agent's [current_task] field on disk when it equals [task_id]
+    and log one diagnostic event named by [cause]. *)
+let clear_stale_agent_task config ~cause ~agent_name ~task_id ~status ~module_name =
+  ignore
+    (clear_stale_agent_task_if_matching
+       config
+       ~cause
+       ~agent_name
+       ~task_id
+       ~status_label:(Masc_domain.task_status_to_string status)
+       ~module_name)
+;;
+let clear_stale_agent_task_for_task_result config ~cause ~task_id ~status ~module_name =
+  let path = agents_dir config in
+  let files = match config.backend, key_of_path config path with
+    | Memory _, Some prefix ->
+      let prefix = prefix ^ ":" in
+      backend_list_keys config ~prefix
+      |> Result.map_error Backend_types.show_error
+      |> Result.map (List.map (fun key ->
+        String.sub key (String.length prefix) (String.length key - String.length prefix)))
+    | Memory _, None -> Error "agent directory is outside the configured backend"
+    | FileSystem _, _ ->
+      (try
+         let directory = Unix.opendir path in
+         Fun.protect ~finally:(fun () -> Unix.closedir directory) (fun () ->
+           let rec read acc = match Unix.readdir directory with
+             | name -> read (name :: acc)
+             | exception End_of_file -> Ok (List.rev acc) in
+           read [])
+       with
+       | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+       | Unix.Unix_error (error, fn, arg) -> Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))) in
+  match files with
+  | Error message -> Error [message]
+  | Ok files ->
+    let errors = List.filter_map (fun filename ->
+      if not (Filename.check_suffix filename ".json") then None
+      else
+        let agent_name = Filename.remove_extension filename in
+        match clear_stale_agent_task_if_matching config ~cause ~agent_name ~task_id
+          ~status_label:(Masc_domain.task_status_to_string status) ~module_name with
+        | Matches | Mismatch | Missing -> None
+        | Unreadable detail -> Some (filename ^ ": " ^ detail)) files in
+    match errors with [] -> Ok () | _ -> Error errors
+;;

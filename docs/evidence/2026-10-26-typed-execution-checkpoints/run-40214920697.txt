@@ -1,0 +1,7 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40214920697
+Complete raw log SHA256: 404f86d17febdea5c67c9b0a8c7ff03cb5dcd16c0e32d68dbfd20615a2e4ef96
+Complete raw log bytes: 113761
+Selected checkout, relevant assertions, failures and suite summaries.
+
+test suite	Checkout	2026-10-25T17:07:36.1314922Z HEAD is now at 235acf08 test(execution): expose post-commit checkpoint sink outcome changes
+test suite	Test	2026-10-25T17:09:30.4806759Z Error: Unbound value test_case

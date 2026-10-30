@@ -1,0 +1,3 @@
+[2026-09-10 08:47:38] [INFO] [Keeper/direct-gate-http-proof] hitl resolution committed approval=appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8 signal=signaled phase=running
+[2026-09-10 08:47:39] [INFO] [Keeper] gate replay approval=appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8 applied operation=tool_execute journal=recorded output_bytes=655 output_sha256=a343f905ded2e0c991335e70c5106cb6a505827a5c55ad48bd13d157d47e8f62
+[2026-09-10 08:47:39] [INFO] [Keeper] turn entry: acknowledged spent Gate grant replay without a turn keeper=direct-gate-http-proof

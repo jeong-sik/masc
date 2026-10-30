@@ -1,0 +1,55 @@
+{
+  "schema": "masc.retained-capture-locations.v1",
+  "selected_files": [
+    {
+      "retained": "plan.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-helper-v1/plan.json",
+      "capture_sha256": "ac80d26bffae24f1088cad5e6d30fb2f86f3741ba37c1ac4ac58a3595a010659",
+      "retained_sha256": "ac80d26bffae24f1088cad5e6d30fb2f86f3741ba37c1ac4ac58a3595a010659",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "retained": "summary.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-helper-v1/summary.json",
+      "capture_sha256": "c31e5f678378d34a3ec4c91f3c3722b06d26953eb35d25c5b5a616dab581baf5",
+      "retained_sha256": "c31e5f678378d34a3ec4c91f3c3722b06d26953eb35d25c5b5a616dab581baf5",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "retained": "measurements.jsonl",
+      "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-helper-v1/stdout.jsonl",
+      "capture_sha256": "6da5e20ac0735c63deb848f7454c9eda530d20fe84377bd8a05ac9bbd1d42792",
+      "retained_sha256": "6da5e20ac0735c63deb848f7454c9eda530d20fe84377bd8a05ac9bbd1d42792",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "retained": "interpreter.stderr.txt",
+      "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-helper-v1/stderr.txt",
+      "capture_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "retained": "probe.ocaml.txt",
+      "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-helper-v1/probe.ml",
+      "capture_sha256": "9bee5fd28e92c46b9faa6d2ad03bf22eb0ee4bc56f9fd621c9f6cbc25c45529d",
+      "retained_sha256": "9bee5fd28e92c46b9faa6d2ad03bf22eb0ee4bc56f9fd621c9f6cbc25c45529d",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "retained": "reproduce.py",
+      "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-preparation-v1/run_probe.py",
+      "capture_sha256": "34e6baf69c0fd2d42f85c9ca10aca21bb3e66180477890711bd11f7337a578f3",
+      "retained_sha256": "34e6baf69c0fd2d42f85c9ca10aca21bb3e66180477890711bd11f7337a578f3",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "retained": "syntax-receipt.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-preparation-v1/syntax-receipt.json",
+      "capture_sha256": "169a77fc9e68ee72ec1efab3e28fdad03561bcacbe43d4c555acd07204b578fa",
+      "retained_sha256": "169a77fc9e68ee72ec1efab3e28fdad03561bcacbe43d4c555acd07204b578fa",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    }
+  ],
+  "note": "Frozen capture-time commands/paths keep their original meaning. Reproduce into a new artifacts directory; no new output belongs in this bundle."
+}

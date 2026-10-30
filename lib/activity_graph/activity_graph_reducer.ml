@@ -1,0 +1,269 @@
+(** Activity_graph_reducer — graph reducer (node_acc, edge_acc, reduce_event). *)
+
+open Activity_graph_types
+
+type node_acc = {
+  node_id : string;
+  node_kind : string;
+  label : string;
+  status : node_status;
+  weight : int;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
+}
+
+type edge_kind =
+  | Works_on
+  | Calls_tool
+  | Creates
+  | Broadcasts
+  | Mentions
+  | Posts
+  | Comments_on
+  | Votes_on
+
+let edge_kind_to_wire = function
+  | Works_on -> "works_on"
+  | Calls_tool -> "calls_tool"
+  | Creates -> "creates"
+  | Broadcasts -> "broadcasts"
+  | Mentions -> "mentions"
+  | Posts -> "posts"
+  | Comments_on -> "comments_on"
+  | Votes_on -> "votes_on"
+
+type edge_acc = {
+  edge_id : string;
+  source : string;
+  target : string;
+  edge_kind : edge_kind;
+  weight : int;
+  active : bool;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
+}
+
+let entity_node_id (value : entity_ref) = value.kind ^ ":" ^ value.id
+
+let payload_string field json =
+  match Json_util.assoc_member_opt field json with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | _ -> None
+
+let is_generic_status = function
+  | Unset | Active | Observed -> true
+  | Todo | Claimed | In_progress | Done | Cancelled
+  | Posted | Discussed | Workspace -> false
+
+let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
+    ~(kind : string) ~(label : string)
+    ~(status : node_status) ~(ts_iso : string) ~(meta : Yojson.Safe.t) =
+  match Hashtbl.find_opt nodes id with
+  | Some node ->
+      (* The table owns the node, so an update is a rebind rather than an
+         in-place write. Every field below reads [node] from before this
+         event, which is what the in-place form observed too. *)
+      Hashtbl.replace nodes id
+        {
+          node with
+          weight = node.weight + 1;
+          last_event_at = ts_iso;
+          label =
+            (if node.label = id || node.label = "" then label else node.label);
+          status =
+            (if
+               status <> Unset
+               && (not (is_generic_status status)
+                  || is_generic_status node.status)
+             then status
+             else node.status);
+          meta = (if meta <> default_meta then meta else node.meta);
+        }
+  | None ->
+      Hashtbl.add nodes id
+        {
+          node_id = id;
+          node_kind = kind;
+          label;
+          status;
+          weight = 1;
+          last_event_at = ts_iso;
+          meta;
+        }
+
+let ensure_entity_node (nodes : (string, node_acc) Hashtbl.t) value
+    ~fallback_status ~ts_iso ~meta =
+  let node_id = entity_node_id value in
+  let label =
+    match payload_string "label" meta with
+    | Some label -> label
+    | None -> value.id
+  in
+  ensure_node nodes ~id:node_id ~kind:value.kind ~label ~status:fallback_status
+    ~ts_iso ~meta;
+  node_id
+
+let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
+    ~active ~ts_iso ~meta =
+  let edge_id = source ^ "|" ^ edge_kind_to_wire kind ^ "|" ^ target in
+  match Hashtbl.find_opt edges edge_id with
+  | Some edge ->
+      Hashtbl.replace edges edge_id
+        {
+          edge with
+          weight = edge.weight + 1;
+          active;
+          last_event_at = ts_iso;
+          meta = (if meta <> default_meta then meta else edge.meta);
+        }
+  | None ->
+      Hashtbl.add edges edge_id
+        {
+          edge_id;
+          source;
+          target;
+          edge_kind = kind;
+          weight = 1;
+          active;
+          last_event_at = ts_iso;
+          meta;
+        }
+
+(* The graph anchor a broadcast points at. It used to be minted from
+   [event.workspace_id], which every writer set to the literal "default", so
+   the field distinguished nothing and the belongs_to edge it produced said
+   only that every node belongs to the one place. The field is gone; the
+   anchor stays because "broadcast" needs a target (#29396 A14). *)
+let broadcast_anchor_node_id = "workspace:default"
+
+let reduce_event ~nodes ~edges (value : event) =
+  let actor_id =
+    match value.actor with
+    | Some actor ->
+        let id =
+          ensure_entity_node nodes actor ~fallback_status:Active
+            ~ts_iso:value.ts_iso ~meta:value.payload
+        in
+        Some id
+    | None -> None
+  in
+  let subject_id =
+    match value.subject with
+    | Some subject ->
+        let id =
+          ensure_entity_node nodes subject ~fallback_status:Observed
+            ~ts_iso:value.ts_iso ~meta:value.payload
+        in
+        Some id
+    | None -> None
+  in
+  let set_subject_status status =
+    match subject_id with
+    | Some id -> (
+        match Hashtbl.find_opt nodes id with
+        | Some node -> Hashtbl.replace nodes id { node with status }
+        | None -> ())
+    | None -> ()
+  in
+  let finish_task status =
+    set_subject_status status;
+    (* A verdict's actor is its authority; the committed task's producer
+       owns the work. Direct transitions use their actor. *)
+    let producer_id =
+      match payload_string Event_kind.Task.producer_payload_key value.payload with
+      | Some name ->
+          Some (ensure_entity_node nodes { kind = "agent"; id = name }
+            ~fallback_status:Active ~ts_iso:value.ts_iso ~meta:value.payload)
+      | None -> actor_id
+    in
+    match producer_id, subject_id with
+    | Some source, Some target ->
+        ensure_edge edges ~source ~target ~kind:Works_on ~active:false
+          ~ts_iso:value.ts_iso ~meta:value.payload
+    | None, _ | _, None -> ()
+  in
+  match drawn_event_kind_of_string value.kind with
+  | Some (Tool_execution_event (External_tool_called | Keeper_in_turn_tool_executed)) ->
+    (match actor_id, subject_id with
+     | Some source, Some target ->
+       ensure_edge edges ~source ~target ~kind:Calls_tool ~active:false
+         ~ts_iso:value.ts_iso ~meta:value.payload
+     | None, _ | _, None -> ())
+  | Some (Task_event Event_kind.Task.Created) ->
+      set_subject_status Todo;
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Creates ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | Some (Task_event Event_kind.Task.Claimed) ->
+      set_subject_status Claimed;
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Works_on ~active:true
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | Some (Task_event Event_kind.Task.Started) ->
+      set_subject_status In_progress;
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Works_on ~active:true
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | Some (Task_event Event_kind.Task.Released) ->
+      set_subject_status Todo;
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Works_on ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | Some (Task_event Event_kind.Task.Done) ->
+      set_subject_status Done;
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Works_on ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | Some (Task_event Event_kind.Task.Approved) -> finish_task Done
+  | Some (Task_event Event_kind.Task.Cancelled) -> finish_task Cancelled
+  | Some (Message_event Event_kind.Message.Broadcast) ->
+      (match actor_id with
+      | Some source ->
+          ensure_node nodes ~id:broadcast_anchor_node_id ~kind:"workspace"
+            ~label:"default" ~status:Workspace ~ts_iso:value.ts_iso
+            ~meta:default_meta;
+          ensure_edge edges ~source ~target:broadcast_anchor_node_id
+            ~kind:Broadcasts
+            ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
+      | None -> ())
+  | Some (Message_event Event_kind.Message.Mentioned) ->
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Mentions ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | Some (Board_event Event_kind.Board.Posted) ->
+      set_subject_status Posted;
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Posts ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | Some (Board_event Event_kind.Board.Commented) ->
+      set_subject_status Discussed;
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Comments_on ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  | Some (Board_event Event_kind.Board.Voted) ->
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:Votes_on ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | (None, _) | (_, None) -> ())
+  (* Known kinds the graph gives no edge or status of their own. Their actor
+     and subject nodes were touched above, like those of any other event. *)
+  | Some (Task_event Event_kind.Task.(Submit_for_verification | Rejected | Linked))
+  | Some (Board_event Event_kind.Board.Deleted)
+  | None -> Log.Misc.debug "reduce_event: unhandled kind=%s" value.kind

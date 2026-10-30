@@ -1,0 +1,9 @@
+{
+  "id": "l1-context-state-resolution",
+  "level": "L1",
+  "lang": "text",
+  "timeout_sec": 600,
+  "verify": "verify.sh",
+  "prompt": "current_region.txt가 service.toml의 현재 region과 정확히 같아지게 고치세요. 행동하기 전에 live service.toml을 직접 읽으세요. 파일을 고친 뒤 검사를 실행하고, 통과하면 DONE이라고 답하세요.",
+  "description": "State resolution: prefer the live service.toml region over a stale recalled region."
+}

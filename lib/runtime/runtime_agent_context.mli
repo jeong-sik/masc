@@ -1,0 +1,216 @@
+(** Runtime_agent_context — shared {!config} surface and agent
+    assembly helpers.
+
+    Owns the shared per-worker {!config} record + pure / defaulted
+    preparation logic shared by both
+    {!Runtime_agent.build} and
+    {!Runtime_agent.resume_from_checkpoint}.
+    {!Runtime_agent} remains the public facade and still
+    performs the approval wiring and final
+    [build_safe] / [Agent.resume] calls. *)
+
+(** {1 Stop reason} *)
+
+(** Why a worker run terminated. Completed/yielded outcomes carry their
+    producer's exact provider ordinal; runtime turn counts are not a substitute.
+    InputRequired does not claim a completed provider response. *)
+type stop_reason =
+  | Completed of { provider_turn_ordinal : int }
+  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
+  | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
+  | Yielded_after_repeated_tool_call of {
+      turns_used : int;
+      provider_turn_ordinal : int;
+      tool_name : string;
+      repeated_count : int;
+    }
+  | Yielded_after_repeated_assistant_text of {
+      turns_used : int;
+      provider_turn_ordinal : int;
+      repeated_count : int;
+    }
+  | InputRequired of {
+      turns_used : int;
+      request : Agent_core.Error.input_required;
+    }
+
+(** {1 Per-worker config} *)
+
+type config = {
+  name : string;
+  provider_cfg : Llm_provider.Provider_config.t;
+  model_id : string;
+  system_prompt : string;
+  tools : Agent_core.Tool.t list;
+  stream_idle_timeout_s : float option;
+  first_event_timeout_s : float option;
+      (** Bound on the silent wait for the FIRST streaming provider event
+          (TTFT/prefill), forwarded to AGENT_CORE
+          [Builder.with_first_event_timeout]. [stream_idle_timeout_s] arms
+          only after that event; when [None], AGENT_CORE's resolver falls
+          back to [body_timeout_s], then to [stream_idle_timeout_s]
+          (RFC-AC-037). *)
+  body_timeout_s : float option;
+      (** Total HTTP body-consumption ceiling forwarded to AGENT_CORE
+          [Builder.with_body_timeout] for non-streaming completion paths.
+          Streaming paths deliberately ignore this knob so active long
+          streams are not killed by total duration; streaming liveness is
+          owned by [stream_idle_timeout_s] and the attempt liveness
+          observer. Non-HTTP transports ignore it. *)
+  call_timeout_s : float option;
+      (** Bound on a non-streaming completion as a whole, the wait for the
+          provider's admission permit included: a call still queued behind
+          another caller's permit when it runs out ends as
+          [TimeoutError { phase = Queue }] without being sent. On the
+          exact-fit path the count-tokens request, its permit wait and its
+          round trip, spends from the same window first. A caller that has
+          one deadline for its whole call (a fusion panelist or judge) sets
+          this together with [body_timeout_s]; the streaming path does not
+          read it. *)
+  admission_timeout_s : float option;
+      (** Bound on the wait for the provider's admission permit before a
+          streaming completion. A keeper turn queued behind other keepers'
+          streams on the same binding ends the wait as
+          [TimeoutError { phase = Queue }] when it runs out, and rotates,
+          instead of the attempt watchdog ending it as no progress; a granted
+          stream runs under its own budgets. On a binding measured before
+          dispatch it is one window over both permit waits, the count-tokens
+          request's and the stream's. The keeper passes its no-progress
+          threshold. *)
+  permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option;
+      (** The cell a bounded wait for the provider's admission permit writes
+          as it begins and ends, handed to AGENT_CORE
+          [Builder.with_permit_wait]. The keeper stands its attempt watchdog
+          down while the wait is on, the wait having a deadline of its own,
+          and counts again from the instant the wait settled. Nothing in the
+          types makes that deadline shorter than the watchdog's threshold;
+          the keeper passes the same value as both. *)
+  max_tokens : int option;
+      (** Caller-level output-token override. [None] adds no override, so an
+          explicit [provider_cfg.max_tokens] remains authoritative; when both
+          are absent no request field is synthesized from a capability
+          ceiling. [Some n] is an operator/profile override or a non-keeper
+          caller's deliberate request budget. *)
+  temperature : float option;
+      (** Exact caller/model sampling declaration. [None] omits temperature and
+          leaves the selected provider's default intact. *)
+  hooks : Agent_core.Hooks.hooks option;
+  (* Settles a [pre_tool_use] hook that answers [ElicitToolApproval]. Absent
+     means such a decision is rejected rather than admitted, so a turn with
+     nobody watching does not run the call on its own. *)
+  tool_approval : Agent_core.Hooks.tool_approval_callback option;
+  event_bus : Agent_core.Event_bus.t option;
+  session_id : string option;
+  description : string option;
+  runtime_id : string option;
+  execution_actor : string option;
+      (** Host-owned actor whose tool invocations this execution dispatches.
+          Independent of the synthetic agent name. Absent means unobserved. *)
+  initial_messages : Agent_core.Types.message list;
+  media_store : Agent_core.History.media_store;
+      (** Holds the media of the agent's history; passed to every agent this
+          config creates or resumes. Built by {!Tool_blob_media_store}. *)
+  model_input_projection : Agent_core.Agent.model_input_projection option;
+  serialization_executor : Agent_core.Agent.serialization_executor option;
+  pre_dispatch_serialization_observer :
+    Agent_core.Agent.pre_dispatch_serialization_observer option;
+      (** Observer for the exact serialized request body, invoked by AGENT_CORE after
+          stream-field injection, just before dispatch. This is the only reading
+          of the byte quantity that reaches the provider: the canonical
+          checkpoint's bytes cover [{system_prompt, messages}] and exclude tool
+          schemas. Diagnostic and non-authoritative — a raised callback becomes
+          typed failure evidence and does not rewrite the provider result. *)
+  raw_trace : Agent_core.Raw_trace.t option;
+  trace_link : (string * string) option;
+  enable_thinking : bool option;
+  preserve_thinking : bool option;
+  transport : Masc_grpc_transport.t;
+  checkpoint_sidecar : Yojson.Safe.t option;
+  cache_system_prompt : bool;
+  yield_on_tool : bool;
+  context_injector : Agent_core.Hooks.context_injector option;
+  context : Agent_core.Context.t option;
+  top_p : float option;
+      (** Nucleus sampling probability forwarded to AGENT_CORE [Builder.with_top_p].
+          [None] leaves the provider/model default intact. *)
+  top_k : int option;
+      (** Top-k sampling limit forwarded to AGENT_CORE [Builder.with_top_k].
+          [None] leaves the provider/model default intact. *)
+  min_p : float option;
+      (** Minimum probability threshold for nucleus sampling, forwarded
+          to AGENT_CORE [Builder.with_min_p]. [None] leaves the provider default
+          intact; [Some 0.0] is a no-op and some providers (Groq, GLM)
+          reject the field, so leave [None] unless explicitly needed. *)
+  on_run_complete : (bool -> unit) option;
+  checkpoint_sink : Agent_core.Agent.checkpoint_sink option;
+  execution_store : Agent_core.Agent.execution_store option;
+      (** Optional durable scope forwarded to the selected native Agent API
+          call. [None] leaves scope selection to Core, including ambient
+          child execution. Core rejects an explicit store together with an
+          ambient child scope. Use one store/directory per API call; a
+          cooperative yield terminates that call's scope. The host owns
+          locator persistence, terminal disposition handling and checkpoint
+          recovery; this bridge neither reuses a completed scope nor selects
+          a recovery locator. *)
+}
+(** Per-worker configuration. Concrete record because
+    callers ({!Runtime_agent}, keeper workers) construct + tweak
+    fields field-by-field at the dispatch site. *)
+
+(** {1 Default config builder} *)
+
+val default_config :
+  media_store:Agent_core.History.media_store ->
+  name:string ->
+  provider_cfg:Llm_provider.Provider_config.t ->
+  system_prompt:string ->
+  tools:Agent_core.Tool.t list ->
+  config
+(** [default_config ~name ~provider_cfg ~system_prompt ~tools]
+    returns a {!config} populated with sensible defaults for every
+    field except the four required ones.  Caller mutates fields
+    in place via record copy ([{ cfg with ... }]) before passing
+    to {!builder} or {!prepare_resume}. *)
+
+(** {1 Builder} *)
+
+val builder :
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  config:config ->
+  ?transport:Llm_provider.Llm_transport.t ->
+  unit ->
+  Agent_core.Builder.t
+(** [builder ~net ~config ?transport ()] builds an {!Agent_core.Builder.t}
+    from [config]. *)
+
+val context_fit_admission
+  :  Llm_provider.Provider_config.t
+  -> Agent_core.Agent.context_fit_admission
+(** Exact provider-fit policy shared by fresh and resumed agents. The AGENT_CORE
+    provider capability SSOT decides whether native request measurement exists;
+    unsupported providers retain compatibility dispatch. *)
+
+(** {1 Resume preparation} *)
+
+type prepared_resume = {
+  patched_checkpoint : Agent_core.Checkpoint.t;
+  agent_config : Agent_core.Types.agent_config;
+  options : Agent_core.Agent.options;
+  context_fit_admission : Agent_core.Agent.context_fit_admission;
+}
+(** Output of {!prepare_resume}. [patched_checkpoint] and [agent_config] use
+    the same provider-base-plus-explicit-override resolution as a fresh
+    builder. *)
+
+val set_agent_core_tracer : Agent_core.Tracing.t -> unit
+(** Set the AGENT_CORE tracer used by {!builder}.  Called once
+    at server bootstrap so AGENT_CORE spans flow to the same OTLP collector as
+    MASC-native telemetry.  Defaults to [Tracing.null] until set. *)
+
+val prepare_resume :
+  config:config -> checkpoint:Agent_core.Checkpoint.t -> prepared_resume
+(** [prepare_resume ~config ~checkpoint] computes the patched checkpoint,
+    agent config, and options for an [Agent.resume] call. Runtime resumes
+    provisionally admit source changes; dispatch excludes only foreign reasoning
+    outside the target's replay selection. The checkpoint message spine and
+    provenance are retained; malformed provenance is still rejected by Agent Core. Pure — no side effects. *)

@@ -1,0 +1,260 @@
+(** CanAdmin Skill editor authority for existing published SKILL.md files.
+
+    The editor never accepts a host path. An exact published reference is
+    resolved back through the frozen source configuration, and writes are
+    limited to sources declared [read-write]. The expected content revision is
+    a compare-and-swap guard against overwriting an unpublished external edit. *)
+
+type access = Read_only | Read_write
+
+type path_rejection =
+  | Outside_source
+  | Non_directory_component
+  | Non_regular_file
+  | Identity_changed
+  | Recovery_directory_not_private
+
+type recovery_disposition =
+  | Original_restored
+  | Quarantine_retained
+  | Original_restored_with_quarantine_retained
+
+type cancellation_stage =
+  | Quarantine_settlement
+  | After_quarantine
+  | After_verification
+
+type recovery_cause =
+  | Recovery_operation_failed of string
+  | Recovery_cancelled of cancellation_stage
+
+type delete_unpublished_reason =
+  | Publication_failed of string
+  | Publication_cancelled
+
+type loaded = private
+  { reference : Skill_reference.t
+  ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+  ; source_text : string
+  ; access : access
+  }
+
+type preview = private
+  { profile : Keeper_skill_observability.profile
+  ; diagnostics : string list
+  }
+
+type save_outcome =
+  | Unchanged of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Saved_and_published of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Saved_but_unpublished of
+      { preview : preview
+      ; reason : string
+      }
+
+type writable_source = private { source_id : Skill_source_config.source_id }
+
+type create_outcome =
+  | Created_and_published of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Created_but_shadowed of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      ; winner : Skill_catalog_snapshot.identity
+      }
+      (** Written and published, but [winner] declares the same name earlier
+          in catalog order. The catalog keeps the new package as its shadow:
+          turns that list Skills by name see [winner], and only a Task that
+          pins the new package's exact reference gets it. *)
+  | Created_but_unpublished of
+      { preview : preview
+      ; reason : string
+      }
+
+(** What happened to the package folder after its [SKILL.md] was quarantined.
+    A folder left behind makes [create] answer [Package_already_exists] for
+    the same package id, so the delete says whether it is gone. *)
+type package_directory =
+  | Package_directory_removed
+  | Package_directory_kept_non_empty
+      (** Other files (for example [references/]) are still in the folder,
+          so it stays. *)
+  | Package_directory_removed_unsynced of string
+      (** The folder is gone, but syncing its parent failed, so a crash may
+          bring it back. *)
+  | Package_directory_remove_failed of string
+
+type delete_outcome =
+  | Deleted_and_published of
+      { reference : Skill_reference.t
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      ; recovery_id : string
+      ; disposition : recovery_disposition
+      ; package_directory : package_directory
+      }
+  | Deleted_but_unpublished of
+      { reference : Skill_reference.t
+      ; reason : delete_unpublished_reason
+      ; recovery_id : string
+      ; disposition : recovery_disposition
+      ; package_directory : package_directory
+      }
+
+(** Why a source could not take the request. Each case carries what was
+    looked at (source id, catalog position, or resolved folder), so the caller
+    can tell a missing folder from a declaration that never reached the
+    catalog. *)
+type source_not_ready =
+  | Source_not_in_catalog of { source_id : string }
+      (** The published catalog snapshot has no source with this id, for
+          example because runtime.toml does not declare it. *)
+  | Source_index_out_of_range of { index : int }
+      (** A catalog entry points at a source position the same snapshot does
+          not have. *)
+  | Source_root_missing of { resolved_path : string }
+  | Source_root_not_directory of
+      { resolved_path : string
+      ; kind : Unix.file_kind
+      }
+  | Source_root_unavailable of
+      { resolved_path : string
+      ; operation : Skill_catalog_snapshot.source_operation
+      ; detail : string
+      }
+  | Source_root_unresolved of Skill_source_config.resolution
+  | Source_root_create_failed of
+      { resolved_path : string
+      ; detail : string
+      }
+      (** The declared folder was missing and making it raised. *)
+  | Source_root_refresh_failed of
+      { resolved_path : string
+      ; detail : string
+      }
+      (** The folder was made, but the catalog refresh that would let a
+          package land in it failed. *)
+  | Source_root_moved of
+      { before : string
+      ; after : string
+      }
+      (** The source resolved to a different folder under the write lock. *)
+  | Recovery_directory_missing of { path : string }
+
+type error =
+  | Invalid_workspace
+  | Snapshot_not_registered
+  | Snapshot_uninitialized
+  | Reference_not_current
+  | Source_not_ready of source_not_ready
+  | Source_file_missing
+  | Source_read_failed
+  | Source_path_rejected of path_rejection
+  | Source_read_only
+  | Confirmation_required
+  | Package_already_exists
+  | Invalid_package_id of string
+  | Revision_conflict of { actual : Skill_reference.content_revision }
+  | Delete_revision_conflict of
+      { actual : Skill_reference.content_revision
+      ; recovery_id : string
+      ; disposition : recovery_disposition
+      }
+  | Source_too_large of { bytes : int; max_bytes : int }
+  | Validation_failed of string
+  | Write_failed of string
+  | Quarantine_failed of
+      { candidate_moved : bool
+      ; recovery_id : string option
+      ; disposition : recovery_disposition option
+      ; cause : recovery_cause
+      }
+  | Recovery_required of
+      { observed : Skill_reference.content_revision option
+      ; recovery_id : string
+      ; disposition : recovery_disposition
+      ; cause : recovery_cause
+      }
+
+(** Capture the caller-visible attached tools once for authoring. Failure is
+    passed through to the editor; it never falls back to the static catalog. *)
+val authoring_descriptors :
+  config:Workspace.config -> access:Lane_addon_sources.access ->
+  (Keeper_tool_descriptor.t list, string) result
+
+val load : base_path:string -> Skill_reference.t -> (loaded, error) result
+val preview : descriptors:(Keeper_tool_descriptor.t list, string) result -> base_path:string -> Skill_reference.t -> source_text:string -> (preview, error) result
+
+val save :
+  descriptors:(Keeper_tool_descriptor.t list, string) result ->
+  base_path:string ->
+  reference:Skill_reference.t ->
+  source_text:string ->
+  refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
+  (save_outcome, error) result
+
+(** Writable, ready source identities only. Resolved host paths never leave
+    this authority boundary. *)
+val writable_sources : base_path:string -> (writable_source list, error) result
+
+(** Create one new package directory and SKILL.md without overwriting. *)
+val create :
+  descriptors:(Keeper_tool_descriptor.t list, string) result ->
+  base_path:string ->
+  source_id:Skill_source_config.source_id ->
+  package_id:string ->
+  source_text:string ->
+  refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
+  (create_outcome, error) result
+
+(** Logically delete the exact [SKILL.md] selected by [reference]. [confirmed]
+    must be [true]. The candidate is atomically moved into a fresh private,
+    non-scanned recovery directory and verified there. A matching candidate is
+    retained under [recovery_id], never unlinked by this operation. Existing
+    turns keep their immutable snapshot; [refresh] only publishes the change
+    for later turns. *)
+val delete :
+  base_path:string ->
+  reference:Skill_reference.t ->
+  confirmed:bool ->
+  refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
+  (delete_outcome, error) result
+
+val access_to_string : access -> string
+val recovery_disposition_to_string : recovery_disposition -> string
+val delete_unpublished_reason_to_string : delete_unpublished_reason -> string
+val error_recovery : error -> (string * recovery_disposition) option
+val error_code : error -> string
+val error_to_string : error -> string
+val loaded_to_yojson : loaded -> Yojson.Safe.t
+val preview_to_yojson : preview -> Yojson.Safe.t
+val save_outcome_to_yojson : save_outcome -> Yojson.Safe.t
+val writable_source_to_yojson : writable_source -> Yojson.Safe.t
+val create_outcome_to_yojson : create_outcome -> Yojson.Safe.t
+val package_directory_to_yojson : package_directory -> Yojson.Safe.t
+val delete_outcome_to_yojson : delete_outcome -> Yojson.Safe.t
+val error_to_yojson : error -> Yojson.Safe.t
+
+module For_testing : sig
+  val recovery_file_path : source_root:string -> recovery_id:string -> string
+
+  (** Inject an external path replacement after the exact revision precheck
+      and immediately before the atomic quarantine rename. *)
+  val delete :
+    before_quarantine:(unit -> unit) ->
+    after_move:(unit -> unit) ->
+    after_quarantine:(unit -> unit) ->
+    after_verification:(unit -> unit) ->
+    base_path:string ->
+    reference:Skill_reference.t ->
+    confirmed:bool ->
+    refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
+    (delete_outcome, error) result
+end

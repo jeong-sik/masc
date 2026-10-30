@@ -1,0 +1,83 @@
+{
+  "schema": "masc.dashboard-stack-integration.v1",
+  "base": "c2dfa238ebd318a9152e70d874ac2cbf68ae2ad8",
+  "native_stack": 45588,
+  "source_layers": [
+    {
+      "pr": 45586,
+      "old_head": "03c2206fdfa7ef142b937aff8ab905b1b7b1a753",
+      "new_head": "e39d08557bea97b2ff547e5dbb22a1ac11f4c4f9"
+    },
+    {
+      "pr": 45587,
+      "old_head": "0d414b2a2536133c4ab91b11769ce832e635c3c2",
+      "new_head": "d7060b6c2659ab083eaa6c8bd36a32c9092fa4c5"
+    },
+    {
+      "pr": 45601,
+      "old_head": "ab64e15c82e57d4428db1ddd18a14bd485af3331",
+      "new_head": "ca86f4298f6257bbcf2de0a2da8704cff3fe670e"
+    }
+  ],
+  "validated_top_before_documentation_update": "4a94c8cc5f9d6ed71e81c2e7cfd6257cf9f1917f",
+  "source_changes_after_validation": "none; this integration evidence is the only later delta",
+  "conflict_resolution": {
+    "files": [
+      "dashboard/src/config/navigation.ts",
+      "dashboard/src/router.test.ts"
+    ],
+    "cause": "PR45534 already merged the command:gate alias and two matching redirect test deletions",
+    "decision": "Keep removal of the obsolete redirect infrastructure; retain main Command descriptions",
+    "prior_top_to_restaked_top_router_test": "identical bytes",
+    "prior_top_to_restaked_top_navigation_delta": "Only inherited main descriptions for Command and Actions"
+  },
+  "checks": [
+    {
+      "name": "frontend-tests",
+      "command": "pnpm --dir dashboard exec vitest run <the 16 suites listed in README> --no-file-parallelism --maxWorkers=1",
+      "exit_code": 0,
+      "full_log_bytes": 442,
+      "full_log_sha256": "05ea1fc9b9a7470407421516340a0c7e2988f9c23854f8a5af724a6cb54c2922",
+      "committed_log": "frontend-tests.log",
+      "log_is_excerpt": false
+    },
+    {
+      "name": "frontend-types",
+      "command": "pnpm --dir dashboard typecheck",
+      "exit_code": 0,
+      "full_log_bytes": 109,
+      "full_log_sha256": "29013f2d63d2c08240c2b635a043e398c43fe1603c7b5b02ad28c731452bebb8",
+      "committed_log": "frontend-types.log",
+      "log_is_excerpt": false
+    },
+    {
+      "name": "frontend-eslint",
+      "command": "pnpm --dir dashboard exec eslint <changed existing dashboard/src .ts/.tsx files>",
+      "exit_code": 0,
+      "full_log_bytes": 0,
+      "full_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "committed_log": "frontend-eslint.log",
+      "log_is_excerpt": false
+    },
+    {
+      "name": "frontend-build",
+      "command": "pnpm --dir dashboard build",
+      "exit_code": 0,
+      "full_log_bytes": 63490,
+      "full_log_sha256": "437c4ffa68f0bd8ce7c07c357a22375a6292e35264c7fdbbe8976d9cc2fc2b42",
+      "committed_log": "frontend-build.log",
+      "log_is_excerpt": true
+    }
+  ],
+  "build_identity": {
+    "schema": "masc.dashboard-build.v1",
+    "source_commit": "4a94c8cc5f9d6ed71e81c2e7cfd6257cf9f1917f"
+  },
+  "build_stamp": "2026-10-24T03:53:57.063Z",
+  "server_ocaml_validation": "Not executed locally; focused exact-source CI request tracked in PR body.",
+  "evidence_limits": [
+    "No installed asset replacement, deployment, restart, full server typecheck or transport-repair claim.",
+    "Prior 2026-10-23 counts and private captures below remain historical.",
+    "Existing old-head approvals do not approve the rebased heads."
+  ]
+}

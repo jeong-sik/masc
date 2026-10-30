@@ -1,0 +1,6 @@
+; The wizard question order and completeness rule, plus one run that writes a
+; real runtime.toml and reads it back with the loader.
+
+(test
+ (name test_voice_wizard)
+ (libraries alcotest masc.voice_wizard masc.voice_setup masc.voice_config masc.runtime unix))

@@ -1,0 +1,301 @@
+(** Which machine a Keeper's GitHub device-flow login is written to, and so
+    which machine its status and its token are read from.
+
+    A Docker or Micro_vm Keeper's identity lives in the host directory
+    [<base>/.masc/keepers/<name>/github-cli] -- Docker bind-mounts it, a guest
+    carries a snapshot of it -- so its login belongs on this host. Both carry
+    that directory in at creation, so a container or guest started before its
+    Keeper had any identity picks the login up when it is next recreated, not
+    while it runs.
+
+    A Remote_ssh Keeper's tree and its [gh] live on another machine, and a login
+    written here would never be seen there: every turn would keep failing the
+    endpoint's identity preflight ([remote_github_identity_missing]) while the
+    operator looks at a successful login on this screen. *)
+
+open Result.Syntax
+
+(* Each shaping step is one short remote command. The login itself is the long
+   one and carries its own budget. *)
+let step_timeout_sec = 30.0
+
+(* Deliberately not [Keeper_sandbox_remote_lane.attached_guest_endpoint]. That
+   door ends in [check_preflight], whose last step is the [gh auth status] this
+   login exists to make pass, so routing through it makes the fix unreachable
+   from the state it fixes. *)
+let resolve ~(config : Workspace.config) ~keeper_name =
+  let base_path = config.Workspace.base_path in
+  let* endpoint = Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name in
+  Keeper_sandbox_ssh.create ~base_path ~keeper_name ~endpoint ()
+;;
+
+let run_remote ?(stdin_content = None) endpoint ~timeout_sec ~on_stdout_chunk ~on_stderr_chunk ~argv =
+  let run = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
+  run
+    ~on_stdout_chunk
+    ~on_stderr_chunk
+    ~stdin_content
+    ~argv
+    ~env:[||]
+    ~cwd:None
+;;
+
+(* The argv is a fixed shape built here -- mkdir, chmod, find, gh -- and carries
+   paths rather than credentials, so naming it in the failure is what lets an
+   operator act on an exit code. The remote stderr is another matter: it is text
+   from another machine that reaches the operator through the SSE [error] event,
+   so it goes through the same redaction every other identity failure does, and
+   redaction runs before truncation so a cut cannot leave half a secret. *)
+let step_result ~redaction endpoint ~argv result =
+  match Masc_exec.Sandbox_target.status_tuple result with
+  | Unix.WEXITED 0, stdout, _ -> Ok stdout
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, stderr ->
+    Error
+      (Printf.sprintf
+         "remote_ssh_github_login_step_failed: endpoint %s ran [%s]: %s"
+         (Keeper_sandbox_remote.name endpoint)
+         (String.concat " " argv)
+         (Exec_policy.truncate_for_log
+            (Keeper_secret_redaction.redact_text redaction (String.trim stderr))))
+;;
+
+let step ~redaction endpoint ~argv =
+  run_remote
+    endpoint
+    ~timeout_sec:step_timeout_sec
+    ~on_stdout_chunk:None
+    ~on_stderr_chunk:None
+    ~argv
+  |> step_result ~redaction endpoint ~argv
+;;
+
+let bootstrap_control_root ~redaction endpoint =
+  let argv =
+    [ "mkdir"; "-p"; Keeper_sandbox_remote.keeper_control_root endpoint ]
+  in
+  Keeper_sandbox_remote.bootstrap_keeper_control_root
+    ~timeout_sec:step_timeout_sec endpoint
+  |> step_result ~redaction endpoint ~argv
+  |> Result.map (fun _ -> ())
+;;
+
+(* The host lane secures exactly these two names, skips one that is absent and
+   refuses one that is not a regular file. The endpoint has to agree on all
+   three counts: [gh] writes [config.yml] as well as [hosts.yml], and a chmod
+   aimed at one fixed path would fail a login that had in fact succeeded. *)
+let config_name_predicate =
+  [ "("; "-name"; "hosts.yml"; "-o"; "-name"; "config.yml"; ")" ]
+;;
+
+let find_config_files gh_dir tail =
+  ([ "find"; gh_dir; "-maxdepth"; "1" ] @ config_name_predicate) @ tail
+;;
+
+let secure_config_files ~redaction endpoint ~gh_dir =
+  let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
+  let* irregular =
+    step ~redaction endpoint ~argv:(find_config_files gh_dir [ "!"; "-type"; "f" ])
+  in
+  if String.trim irregular <> ""
+  then
+    Error
+      (Printf.sprintf
+         "remote_ssh_github_login_credential_not_a_regular_file: endpoint %s: %s"
+         (Keeper_sandbox_remote.name endpoint)
+         (String.trim irregular))
+  else
+    let* (_ : string) =
+      step
+        ~redaction
+        endpoint
+        ~argv:
+          (find_config_files
+             gh_dir
+             [ "-type"; "f"; "-exec"; "chmod"; "0600"; "{}"; "+" ])
+    in
+    Ok ()
+;;
+
+(* One [gh] probe on the endpoint, read as an observation. It writes nothing
+   there: a status read must not stand up the directories a login creates.
+
+   masc projects no GitHub token onto an endpoint: the runner drops every
+   caller env name outside the endpoint allowlist, and this lane supplies none.
+   So the probe with the config directory alone is the whole story, and
+   [stored] and [effective] are one reading rather than two.
+
+   A probe that never ran on the endpoint says nothing about its login, so a
+   transport failure is an error naming the endpoint, not an unauthenticated
+   reading. Its reason can carry remote text, so it is redacted before it is
+   cut, as every other failure from the endpoint is. *)
+let remote_observation ~base_path ~keeper_name ~hostname endpoint
+  : (Keeper_github_identity.observation, string) result
+  =
+  match
+    run_remote
+      endpoint
+      ~timeout_sec:step_timeout_sec
+      ~on_stdout_chunk:None
+      ~on_stderr_chunk:None
+      ~argv:(Keeper_github_identity.auth_probe_argv ~hostname)
+  with
+  | Masc_exec.Sandbox_target.Transport_failed { reason; _ } ->
+    let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+    Error
+      (Printf.sprintf
+         "remote_ssh_github_endpoint_unreachable: endpoint %s: %s"
+         (Keeper_sandbox_remote.name endpoint)
+         (Exec_policy.truncate_for_log
+            (Keeper_secret_redaction.redact_text redaction (String.trim reason))))
+  | Masc_exec.Sandbox_target.Ran { status; stdout; stderr; output_files = _ } ->
+    let result =
+      Keeper_github_identity.auth_result_of_probe
+        ~base_path
+        ~keeper_name
+        (status, stdout, stderr)
+    in
+    Ok
+      { keeper = keeper_name
+      ; hostname
+      ; config_dir = Keeper_sandbox_remote.gh_config_dir endpoint
+      ; projected_token_env_names = []
+      ; stored = result
+      ; effective = result
+      ; effective_probe_scope = `Endpoint_process_only
+      ; checked_at_unix = Time_compat.now ()
+      }
+;;
+
+let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
+  let base_path = config.Workspace.base_path in
+  let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+  let* endpoint = resolve ~config ~keeper_name in
+  let gh_dir = Keeper_sandbox_remote.gh_config_dir endpoint in
+  let* () = Keeper_sandbox_remote.check_endpoint_preflight endpoint in
+  (* The endpoint may never have held this Keeper. A root the ssh user cannot
+     write is the bootstrap's job, and this step names it rather than letting
+     gh fail later with a directory message. *)
+  let* () = bootstrap_control_root ~redaction endpoint in
+  Keeper_sandbox_remote.invalidate_preflight endpoint;
+  let* () = Keeper_sandbox_remote.check_workspace_preflight endpoint in
+  let* (_ : string) = step ~redaction endpoint ~argv:[ "mkdir"; "-p"; gh_dir ] in
+  let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
+  let lane : Keeper_github_identity.login_lane =
+    { run_login =
+        (fun ~scopes ~on_stdout_chunk ~on_stderr_chunk ->
+          let result =
+            Masc_exec.Sandbox_target.status_tuple
+              (run_remote
+                 endpoint
+                 ~timeout_sec:Keeper_github_identity.login_timeout_sec
+                 ~on_stdout_chunk:(Some on_stdout_chunk)
+                 ~on_stderr_chunk:(Some on_stderr_chunk)
+                 ~argv:(Keeper_github_identity.login_argv ~hostname ~scopes))
+          in
+          Keeper_sandbox_remote.invalidate_preflight endpoint;
+          result)
+    ; run_login_with_token =
+        (fun ~token ->
+          let result =
+            Masc_exec.Sandbox_target.status_tuple
+              (run_remote
+                 endpoint
+                 ~timeout_sec:step_timeout_sec
+                 ~on_stdout_chunk:None
+                 ~on_stderr_chunk:None
+                 ~stdin_content:(Some token)
+                 ~argv:(Keeper_github_identity.login_with_token_argv ~hostname))
+          in
+          Keeper_sandbox_remote.invalidate_preflight endpoint;
+          result)
+    ; secure_after_login = (fun () -> secure_config_files ~redaction endpoint ~gh_dir)
+    ; observe_after_login =
+        (fun () ->
+          let observation =
+            remote_observation ~base_path ~keeper_name ~hostname endpoint
+          in
+          (* Login changes identity state, so the next payload pays for the
+             complete tool/disk/identity preflight. Its unrelated readiness
+             must not discard this successful identity observation. *)
+          Keeper_sandbox_remote.invalidate_preflight endpoint;
+          observation)
+    }
+  in
+  Ok lane
+;;
+
+let for_keeper ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname =
+  let keeper_name = meta.Keeper_meta_contract.name in
+  match
+    (meta.Keeper_meta_contract.sandbox_profile
+      : Keeper_types_profile_sandbox.sandbox_profile)
+  with
+  (* Both reach the host directory -- Docker binds it, a guest carries a
+     snapshot of it -- so a host login is what reaches them. *)
+  | Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm ->
+    Keeper_github_identity.local_lane ~config ~keeper_name ~hostname
+  | Keeper_types_profile_sandbox.Remote_ssh -> remote_lane ~config ~keeper_name ~hostname
+;;
+
+let observe ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname =
+  let keeper_name = meta.Keeper_meta_contract.name in
+  match
+    (meta.Keeper_meta_contract.sandbox_profile
+      : Keeper_types_profile_sandbox.sandbox_profile)
+  with
+  | Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm ->
+    Keeper_github_identity.observe ~config ~keeper_name ~hostname
+  | Keeper_types_profile_sandbox.Remote_ssh ->
+    let hostname = String.trim hostname in
+    if String.equal hostname ""
+    then Error "GitHub hostname must not be empty"
+    else
+      let* endpoint = resolve ~config ~keeper_name in
+      remote_observation
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+        ~hostname
+        endpoint
+;;
+
+type stored_token_error =
+  | Keeper_meta_unreadable of string
+  | Remote_ssh_identity_on_endpoint of { keeper_name : string }
+  | Host_identity_unavailable of string
+
+let stored_token_error_to_string = function
+  | Keeper_meta_unreadable message ->
+    Printf.sprintf "keeper meta could not be read to find its GitHub identity: %s" message
+  | Remote_ssh_identity_on_endpoint { keeper_name } ->
+    Printf.sprintf
+      "remote_ssh_github_token_not_on_host: keeper %S is a Remote_ssh Keeper; its \
+       GitHub CLI login lives on its endpoint and masc does not copy that token \
+       back to this host, so a GitHub identity that calls from this host cannot \
+       use it"
+      keeper_name
+  | Host_identity_unavailable message -> message
+;;
+
+let host_stored_token ~config ~keeper_name ~hostname =
+  Keeper_github_identity.stored_token ~config ~keeper_name ~hostname
+  |> Result.map_error (fun message -> Host_identity_unavailable message)
+;;
+
+(* No meta means no declared profile and so no endpoint: nothing but this
+   host's directory can hold the login, which is where the read goes. Only a
+   meta that says Remote_ssh sends it elsewhere. A meta that exists and cannot
+   be read is not absence, so it is its own refusal. *)
+let stored_token ~config ~keeper_name ~hostname =
+  match Keeper_meta_store.read_effective_meta config keeper_name with
+  | Error message -> Error (Keeper_meta_unreadable message)
+  | Ok None -> host_stored_token ~config ~keeper_name ~hostname
+  | Ok (Some meta) ->
+    (match
+       (meta.Keeper_meta_contract.sandbox_profile
+         : Keeper_types_profile_sandbox.sandbox_profile)
+     with
+     | Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm ->
+       host_stored_token ~config ~keeper_name ~hostname
+     | Keeper_types_profile_sandbox.Remote_ssh ->
+       Error (Remote_ssh_identity_on_endpoint { keeper_name }))
+;;

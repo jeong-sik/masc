@@ -1,0 +1,70 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.64.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"status\":\"ok\",\"goal_id\":\"goal-outcome-driven-work-20261024\",\"action\":\"request_complete\",\"goal\":{\"id\":\"goal-outcome-driven-work-20261024\",\"criterion_revision\":\"306708facbfb9379a9e51b8f7c815678\",\"title\":\"Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\",\"metric\":\"MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.\",\"target_value\":\"G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.\",\"due_date\":null,\"priority\":1,\"phase\":\"verifying\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-10-24T07:09:57Z\",\"updated_at\":\"2026-10-25T00:45:12Z\"},\"verification\":{\"goal_id\":\"goal-outcome-driven-work-20261024\",\"completion\":{\"state\":\"proof_pending\",\"requested_at\":\"2026-10-25T00:45:12Z\",\"request_id\":\"b0792fb9b86e66445ccd673bc6463ce2\",\"criterion\":{\"revision\":\"306708facbfb9379a9e51b8f7c815678\",\"title\":\"Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\",\"metric\":\"MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.\",\"target_value\":\"G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.\"}},\"submitted_evidence\":[],\"updated_at\":\"2026-10-25T00:45:12Z\"}}",
+          "status": "ok",
+          "tool": "masc_goal_transition"
+        },
+        "trace_id": "2",
+        "agent_id": "codex-goal-outcomes-20261024",
+        "tool": "masc_goal_transition",
+        "duration_ms": 868,
+        "attempts": 1,
+        "timestamp": "2026-10-25T00:45:13Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"status\":\"ok\",\"goal_id\":\"goal-outcome-driven-work-20261024\",\"action\":\"request_complete\",\"goal\":{\"id\":\"goal-outcome-driven-work-20261024\",\"criterion_revision\":\"306708facbfb9379a9e51b8f7c815678\",\"title\":\"Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\",\"metric\":\"MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.\",\"target_value\":\"G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.\",\"due_date\":null,\"priority\":1,\"phase\":\"verifying\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-10-24T07:09:57Z\",\"updated_at\":\"2026-10-25T00:45:12Z\"},\"verification\":{\"goal_id\":\"goal-outcome-driven-work-20261024\",\"completion\":{\"state\":\"proof_pending\",\"requested_at\":\"2026-10-25T00:45:12Z\",\"request_id\":\"b0792fb9b86e66445ccd673bc6463ce2\",\"criterion\":{\"revision\":\"306708facbfb9379a9e51b8f7c815678\",\"title\":\"Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\",\"metric\":\"MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.\",\"target_value\":\"G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.\"}},\"submitted_evidence\":[],\"updated_at\":\"2026-10-25T00:45:12Z\"}}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "status": "ok",
+      "goal_id": "goal-outcome-driven-work-20261024",
+      "action": "request_complete",
+      "goal": {
+        "id": "goal-outcome-driven-work-20261024",
+        "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+        "title": "Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다",
+        "metric": "MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.",
+        "target_value": "G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.",
+        "due_date": null,
+        "priority": 1,
+        "phase": "verifying",
+        "last_review_note": null,
+        "last_review_at": null,
+        "created_at": "2026-10-24T07:09:57Z",
+        "updated_at": "2026-10-25T00:45:12Z"
+      },
+      "verification": {
+        "goal_id": "goal-outcome-driven-work-20261024",
+        "completion": {
+          "state": "proof_pending",
+          "requested_at": "2026-10-25T00:45:12Z",
+          "request_id": "b0792fb9b86e66445ccd673bc6463ce2",
+          "criterion": {
+            "revision": "306708facbfb9379a9e51b8f7c815678",
+            "title": "Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다",
+            "metric": "MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.",
+            "target_value": "G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다."
+          }
+        },
+        "submitted_evidence": [],
+        "updated_at": "2026-10-25T00:45:12Z"
+      }
+    }
+  }
+}

@@ -1,0 +1,542 @@
+(** Keeper_tool_dispatch_runtime — exact keeper tool execution dispatch. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_tool_shared_runtime
+include Keeper_tool_policy
+
+type executed_tool_result = Keeper_tool_execution.t
+
+(* Descriptor and registered-only routes are distinct dispatch sources.
+   The selected producer supplies the authoritative typed outcome. *)
+
+type descriptor_dispatch =
+  | Descriptor_route of Keeper_tool_descriptor.t * Keeper_tool_execution.t option
+  | Validation_rejected of Keeper_tool_execution.t
+  | Undescribed_route
+
+type descriptor_dispatch_resolution =
+  | Return_output of Keeper_tool_execution.t
+  | Return_descriptor_invariant of Keeper_tool_descriptor.t
+  | Try_registered_only_route
+
+(* Why the call is outside the surface. A tool the profile denies or the
+   sandbox refuses keeps an inventory row that names the reason, and the
+   rejection repeats it, so [keeper_tools_list] and this answer agree. A name
+   registered only in dispatch, or a descriptor value the surface does not
+   hold, has no row. *)
+type frozen_surface_absence =
+  | No_inventory_row
+  | Inventory_row of Keeper_capability_surface.capability_availability
+
+type frozen_surface_admission_error =
+  | Descriptor_outside_frozen_surface of
+      { requested_tool : string
+      ; descriptor_id : string
+      ; absence : frozen_surface_absence
+      }
+  | Tool_name_absent_from_frozen_surface of
+      { requested_tool : string
+      ; absence : frozen_surface_absence
+      }
+
+let absence_of_row = function
+  | Some availability -> Inventory_row availability
+  | None -> No_inventory_row
+;;
+
+let frozen_surface_admission_error_to_execution error =
+  let requested_tool, absence, detail_fields =
+    match error with
+    | Descriptor_outside_frozen_surface { requested_tool; descriptor_id; absence } ->
+      requested_tool, absence, [ "descriptor_id", `String descriptor_id ]
+    | Tool_name_absent_from_frozen_surface { requested_tool; absence } ->
+      requested_tool, absence, []
+  in
+  let availability_fields =
+    match absence with
+    | No_inventory_row -> [ "availability", `String "outside_tool_surface" ]
+    | Inventory_row availability ->
+      ( "availability"
+      , `String
+          (Keeper_capability_surface.capability_availability_to_string availability) )
+      :: Keeper_capability_surface.availability_detail_fields availability
+  in
+  let data =
+    `Assoc
+      ([ "ok", `Bool false
+       ; "error", `String "tool_outside_frozen_capability_surface"
+       ; "tool", `String requested_tool
+       ]
+       @ availability_fields
+       @ detail_fields)
+  in
+  Keeper_tool_execution.failure_data
+    ~class_:Tool_result.Policy_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    ~message:(Yojson.Safe.to_string data)
+    data
+;;
+
+let admit_descriptor capability_authority ~requested_tool descriptor =
+  match capability_authority with
+  | Keeper_tool_runtime.Compatibility_meta -> Ok ()
+  | Keeper_tool_runtime.Frozen_surface capability_surface ->
+    if Keeper_capability_surface.admits capability_surface descriptor
+    then Ok ()
+    else
+      Error
+        (Descriptor_outside_frozen_surface
+           { requested_tool
+           ; descriptor_id = descriptor.Keeper_tool_descriptor.id
+           ; absence =
+               absence_of_row
+                 (Keeper_capability_surface.tool_row_availability
+                    capability_surface
+                    descriptor)
+           })
+;;
+
+let admit_tool_name capability_authority requested_tool =
+  match capability_authority with
+  | Keeper_tool_runtime.Compatibility_meta -> Ok ()
+  | Keeper_tool_runtime.Frozen_surface capability_surface ->
+    let is_exposed_name descriptor =
+      Keeper_tool_descriptor.keeper_model_names descriptor
+      |> List.exists (String.equal requested_tool)
+    in
+    if
+      Keeper_capability_surface.descriptors capability_surface
+      |> List.exists is_exposed_name
+    then Ok ()
+    else
+      Error
+        (Tool_name_absent_from_frozen_surface
+           { requested_tool
+           ; absence =
+               absence_of_row
+                 (Keeper_capability_surface.tool_row_availability_for_name
+                    capability_surface
+                    requested_tool)
+           })
+;;
+
+let resolve_descriptor_dispatch = function
+  | Descriptor_route (_, Some raw_output) | Validation_rejected raw_output ->
+    Return_output raw_output
+  | Descriptor_route (descriptor, None) -> Return_descriptor_invariant descriptor
+  | Undescribed_route -> Try_registered_only_route
+;;
+
+(* The class the invariant break is reported as. #28895 already derived the
+   log level from this value rather than repeating it; the payload below kept
+   its own copy as a string until 2026-09-06. *)
+let descriptor_route_invariant_class = Tool_result.Runtime_failure
+
+let descriptor_route_invariant_payload ~tool_name descriptor =
+  let descriptor_id = descriptor.Keeper_tool_descriptor.id in
+  let executor =
+    Keeper_tool_descriptor.executor_to_string descriptor.executor
+  in
+  let runtime_handler =
+    Keeper_tool_descriptor.runtime_handler_to_string descriptor.runtime_handler
+  in
+  `Assoc
+    [ "ok", `Bool false
+    ; "error", `String "keeper_tool_descriptor_route_invariant"
+    ; ( "failure_class"
+      , `String
+          (Tool_result.tool_failure_class_to_string
+             descriptor_route_invariant_class) )
+    ; "tool", `String tool_name
+    ; "descriptor_id", `String descriptor_id
+    ; "executor", `String executor
+    ; "runtime_handler", `String runtime_handler
+    ]
+;;
+
+let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
+  let payload = descriptor_route_invariant_payload ~tool_name descriptor in
+  let descriptor_id = descriptor.Keeper_tool_descriptor.id in
+  let executor =
+    Keeper_tool_descriptor.executor_to_string descriptor.executor
+  in
+  let runtime_handler =
+    Keeper_tool_descriptor.runtime_handler_to_string descriptor.runtime_handler
+  in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string AgentToolDispatchRuntimeFailures)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "tool", tool_name
+      ; "reason", "descriptor_route_unhandled"
+      ; "descriptor_id", descriptor_id
+      ; "executor", executor
+      ; "runtime_handler", runtime_handler
+      ]
+    ();
+  (* The invariant break is a Runtime_failure by construction; deriving the
+     level from that same class keeps the log honest if the classification
+     ever changes (#28895 review). *)
+  let failure_class = descriptor_route_invariant_class in
+  Log.Keeper.emit
+    (Tool_result.log_level_of_failure_class failure_class)
+    ~keeper_name
+    ~category:Log.Tool
+    ~details:
+      (`Assoc
+         [ "error_kind", `String "keeper_tool_descriptor_route_invariant"
+         ; "tool", `String tool_name
+         ; "descriptor_id", `String descriptor_id
+         ; "executor", `String executor
+         ; "runtime_handler", `String runtime_handler
+         ])
+    "keeper descriptor route resolved but its typed runtime handler returned no result";
+  Keeper_tool_execution.failure_data
+    ~class_:failure_class
+    ~message:(Yojson.Safe.to_string payload)
+    payload
+;;
+
+(* ── Tool execution dispatch ──────────────────────────────────── *)
+
+let runtime_context
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ?source_context
+      ?owned_job_replay
+      ?turn_sandbox_factory
+      ?artifact_draft_scope
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ?continuation_channel
+      ?gate_context
+      ?turn_ref
+      ?gate_grant
+      ?tool_use_id
+      ?trace_id
+      ?result_projection
+      ~capability_authority
+      ()
+  =
+  Keeper_tool_runtime.
+    { config
+    ; meta
+    ; publication_recovery
+    ; ctx_work
+    ; source_context
+    ; owned_job_replay
+    ; turn_sandbox_factory
+    ; artifact_draft_scope
+    ; sw
+    ; clock
+    ; proc_mgr
+    ; net
+    ; mcp_session_id
+    ; continuation_channel
+    ; gate_context
+    ; turn_ref
+    ; gate_grant
+    ; tool_use_id
+    ; trace_id
+    ; result_projection
+    ; capability_authority
+    }
+;;
+
+let execute_keeper_tool_descriptor_with_authority
+      ~capability_authority
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
+      ~(ctx_work : working_context)
+      ?source_context
+      ?owned_job_replay
+      ?prepared_read
+      ?prepared_edit
+      ?prepared_write
+      ?turn_sandbox_factory
+      ?artifact_draft_scope
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ?continuation_channel
+      ?gate_context
+      ?turn_ref
+      ?gate_grant
+      ?tool_use_id
+      ?trace_id
+      ?result_projection
+      ~(descriptor : Keeper_tool_descriptor.t)
+      ~(input : Yojson.Safe.t)
+      ()
+  =
+  match
+    admit_descriptor
+      capability_authority
+      ~requested_tool:descriptor.internal_name
+      descriptor
+  with
+  | Error error -> frozen_surface_admission_error_to_execution error
+  | Ok () ->
+  let canonical = match capability_authority with
+    | Keeper_tool_runtime.Frozen_surface surface ->
+        Keeper_capability_surface.find_descriptor_by_id surface descriptor.id
+    | Keeper_tool_runtime.Compatibility_meta -> Keeper_tool_descriptor.find_id descriptor.id in
+  match canonical with
+  | Some canonical when canonical == descriptor ->
+    let context =
+      runtime_context
+        ~config
+        ~meta
+        ~publication_recovery
+        ~ctx_work
+        ?source_context
+        ?owned_job_replay
+        ?turn_sandbox_factory
+        ?artifact_draft_scope
+        ?sw
+        ?clock
+        ?proc_mgr
+        ?net
+        ?mcp_session_id
+        ?continuation_channel
+        ?gate_context
+        ?turn_ref
+        ?gate_grant
+        ?tool_use_id
+        ?trace_id
+        ?result_projection
+        ~capability_authority
+        ()
+    in
+    (match Keeper_tool_runtime.handle ?prepared_read ?prepared_edit ?prepared_write context ~descriptor ~args:input with
+     | Some execution -> execution
+     | None ->
+       descriptor_route_invariant_error
+         ~keeper_name:meta.name
+         ~tool_name:descriptor.internal_name
+         descriptor)
+  | Some _ | None ->
+    let data =
+      `Assoc
+        [ "ok", `Bool false
+        ; "error", `String "noncanonical_keeper_tool_descriptor"
+        ; "descriptor_id", `String descriptor.id
+        ]
+    in
+    Keeper_tool_execution.failure_data
+      ~class_:Tool_result.Runtime_failure
+      ~message:(Yojson.Safe.to_string data)
+      data
+;;
+
+let execute_keeper_tool_descriptor_for_capability_surface_with_outcome
+      ~capability_surface
+  =
+  execute_keeper_tool_descriptor_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+;;
+
+let execute_keeper_tool_call_with_authority
+      ~capability_authority
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
+      ~(ctx_work : working_context)
+      ?source_context
+      ?owned_job_replay
+      ?prepared_read
+      ?prepared_edit
+      ?prepared_write
+      ?turn_sandbox_factory
+      ?artifact_draft_scope
+      (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
+         Keeper_tool_runtime.context for Eio-bound descriptor handlers. *)
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ?continuation_channel
+      ?gate_context
+      ?turn_ref
+      ?gate_grant
+      ?tool_use_id
+      ?trace_id
+      ?result_projection
+      ~(name : string)
+      ~(input : Yojson.Safe.t)
+      ()
+  : executed_tool_result
+  =
+  let args = input in
+  let surface_admission = admit_tool_name capability_authority name in
+  match surface_admission with
+  | Error error -> frozen_surface_admission_error_to_execution error
+  | Ok () ->
+       let keeper_tool_runtime_context =
+         runtime_context
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ?source_context
+           ?owned_job_replay
+           ?turn_sandbox_factory
+           ?artifact_draft_scope
+           ?sw
+           ?clock
+           ?proc_mgr
+           ?net
+           ?mcp_session_id
+           ?continuation_channel
+           ?gate_context
+           ?turn_ref
+           ?gate_grant
+           ?tool_use_id
+           ?trace_id
+           ?result_projection
+           ~capability_authority
+           ()
+       in
+       let descriptor_dispatch =
+         match
+           (match capability_authority with
+            | Keeper_tool_runtime.Compatibility_meta ->
+                Keeper_tool_descriptor_resolution.validated_descriptor_and_input_for_tool_call
+                  ~tool_name:name ~input:args
+            | Keeper_tool_runtime.Frozen_surface surface ->
+                Option.map (fun descriptor ->
+                  Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+                    ~tool_name:name descriptor ~input:args
+                  |> Result.map (fun input -> descriptor, input))
+                  (Keeper_capability_surface.find_descriptor_by_name surface name))
+         with
+         | Some (Ok (descriptor, translated_args)) ->
+           Descriptor_route
+             ( descriptor
+             , Keeper_tool_runtime.handle
+                 ?prepared_read
+                 ?prepared_edit
+                 ?prepared_write
+                 keeper_tool_runtime_context
+                 ~descriptor
+                 ~args:translated_args )
+         | Some (Error validation_result) ->
+           Validation_rejected (Keeper_tool_execution.of_tool_result validation_result)
+         | None -> Undescribed_route
+       in
+       match resolve_descriptor_dispatch descriptor_dispatch with
+       | Return_output execution -> execution
+       | Return_descriptor_invariant descriptor ->
+         descriptor_route_invariant_error
+           ~keeper_name:meta.name
+           ~tool_name:name
+           descriptor
+       | Try_registered_only_route ->
+         (* Registered-only tools are a separate dispatch source. A descriptor
+            route that resolves but returns [None] is handled above as a typed
+            invariant failure and can never fall through to this backend. *)
+         let unknown_name = name in
+         (match
+            Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
+              ~config
+              ~keeper_name:meta.name
+              ~name:unknown_name
+              ~args
+          with
+          | Some execution -> execution
+          | None ->
+            let fields =
+              [ "ok", `Bool false
+              ; "error", `String "unknown_tool"
+              ; "tool", `String unknown_name
+              ]
+            in
+            let data = `Assoc fields in
+            Keeper_tool_execution.failure_data
+              ~class_:Tool_result.Runtime_failure
+              ~message:(Yojson.Safe.to_string data)
+              data)
+;;
+
+let execute_keeper_tool_call_for_capability_surface_with_outcome
+      ~capability_surface
+  =
+  execute_keeper_tool_call_with_authority
+    ~capability_authority:
+      (Keeper_tool_runtime.Frozen_surface capability_surface)
+;;
+
+module Compatibility = struct
+  let execute_keeper_tool_descriptor_with_outcome =
+    execute_keeper_tool_descriptor_with_authority
+      ~capability_authority:Keeper_tool_runtime.Compatibility_meta
+  ;;
+
+  let execute_keeper_tool_call_with_outcome =
+    execute_keeper_tool_call_with_authority
+      ~capability_authority:Keeper_tool_runtime.Compatibility_meta
+  ;;
+
+  let execute_keeper_tool_call
+        ~(config : Workspace.config)
+        ~(meta : keeper_meta)
+        ~(publication_recovery :
+            Keeper_publication_recovery_availability.turn_context)
+        ~(ctx_work : working_context)
+        ?source_context
+        ?owned_job_replay
+        ?turn_sandbox_factory
+        ?artifact_draft_scope
+        ~(name : string)
+        ~(input : Yojson.Safe.t)
+        ()
+    : string
+    =
+    let result =
+      execute_keeper_tool_call_with_outcome
+        ~config
+        ~meta
+        ~publication_recovery
+        ~ctx_work
+        ?source_context
+        ?owned_job_replay
+        ?turn_sandbox_factory
+        ?artifact_draft_scope
+        ~name
+        ~input
+        ()
+    in
+    result.Keeper_tool_execution.raw_output
+  ;;
+end
+
+module For_testing = struct
+  type descriptor_route_kind =
+    | Output
+    | Invariant
+    | Registered_only
+
+  let descriptor_route_invariant_payload = descriptor_route_invariant_payload
+
+  let descriptor_route_kind ~descriptor ~output =
+    let output = Option.map Keeper_tool_execution.success output in
+    match resolve_descriptor_dispatch (Descriptor_route (descriptor, output)) with
+    | Return_output _ -> Output
+    | Return_descriptor_invariant _ -> Invariant
+    | Try_registered_only_route -> Registered_only
+  ;;
+end

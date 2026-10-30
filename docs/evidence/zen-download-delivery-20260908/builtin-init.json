@@ -1,0 +1,13 @@
+{
+  "source": "fe31fbcbd6ece858b957143bad64977c4678d9f7",
+  "binary_sha256": "b6f62f33fdd6e8df89a3540c13677411d7aea13ae051886cb1397c01d141c24c",
+  "fresh_init_package_files": {
+    "SKILL.md": "ed82ef295c0cc4eb92ebfff7d2c4a2972660e4e7fb4e340a6ee3f09893e20b74",
+    "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+    "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77",
+    "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972"
+  },
+  "force_init_preserved_existing_package": true,
+  "force_init_preserved_deleted_resource": true,
+  "installer_upgrade_measured": false
+}

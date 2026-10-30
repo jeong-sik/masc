@@ -1,0 +1,10 @@
+{
+  "binary_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "prompt_commit": "0ee4d40910ab0433cc8020c194a104873f7b6f82",
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "credential_reference_only": "ZAI_API_KEY_SB",
+  "eio_backend": "posix",
+  "planned_calls": 240,
+  "started_at": "2026-09-29T15:53:30.120103+00:00",
+  "scope": "Separate Grade prompt candidate; same frozen corpus, runtime configuration and binary as completed baseline"
+}

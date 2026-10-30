@@ -1,0 +1,49 @@
+{
+  "probe_source": "c7bdc04f78e3b6c09abae94e28852b37f8274da7",
+  "focused_run": 36252628612,
+  "conclusion": "success",
+  "full_local_log_sha256": "ef721b993e49c1168d54085bf2dc31270b2cebaafe7b9c56e605a190d9a1c3bd",
+  "selected_lines": [
+    {
+      "line": 4353,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0271570Z ASSERT no opener reuses the original bytes"
+    },
+    {
+      "line": 4354,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0271869Z ASSERT adjacent styles and empty payload"
+    },
+    {
+      "line": 4355,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0272142Z ASSERT trailing opener"
+    },
+    {
+      "line": 4356,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0272389Z ASSERT stray escape survives between spans"
+    },
+    {
+      "line": 4357,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0272671Z ASSERT non-opener tail survives"
+    },
+    {
+      "line": 4358,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0272991Z ASSERT multiline and arbitrary bytes stay exact"
+    },
+    {
+      "line": 4359,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0273301Z ASSERT unterminated styled suffix"
+    },
+    {
+      "line": 4360,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0273610Z ASSERT nested opener keeps first terminator semantics"
+    },
+    {
+      "line": 4361,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0273986Z   [OK]          semantic               7   strip_sgr removes only styles."
+    },
+    {
+      "line": 4381,
+      "text": "test suite\tTest\t2026-09-26T15:43:44.0283452Z Test Successful in 0.002s. 17 tests run."
+    }
+  ],
+  "scope": "Probe test source matches PR theme suite; probe base lacks unrelated current-main compile defect. Not current PR gate success."
+}

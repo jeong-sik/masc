@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-21T17:12:18.408974+00:00",
+  "identity": "local-admin",
+  "method": "POST",
+  "path": "/api/v1/verification/verdict",
+  "request": {
+    "task_id": "task-001",
+    "verification_id": "vrf-5ee2e4f6674a8ccda7adaa075d60da5b",
+    "verdict": "approve",
+    "notes": "Isolated qualification operator API exercise, performed by Codex through the private local-admin credential; not an actual human review claim. Inspected the immutable 400-byte untruncated artifact and independently recomputed the exact eb484 Git blob/checkout SHA256 b4e3984bdbf0fb70cf065c9313e8fa31b0f943cc403d3731a95c997447981078. verified_count=1 and source_commit/path/task_id match the narrow source-byte contract. Separate independent read-only agent confirmed those values. Guest only retained the host measurement. Original unreadable submission remains retained; no behavioral/full54 completion claim."
+  },
+  "http_status": 400,
+  "response": {
+    "ok": false,
+    "error": "[TaskError] Invalid task state: Task task-001 is done; a completion verdict applies only to an obligation awaiting one"
+  }
+}

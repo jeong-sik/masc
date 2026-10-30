@@ -1,0 +1,393 @@
+"""Exercise the installer's real shell wizard through a terminal and pipes."""
+import errno
+import http.server
+import json
+import os
+from pathlib import Path
+import pty
+import shlex
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = (ROOT / "scripts/install.sh").read_text()
+DEFINITIONS = SCRIPT.split('\nwhile [ $# -gt 0 ]; do', 1)[0]
+CATALOG = '''
+PROVIDER_IDS=(one two)
+PROVIDER_NAMES=(One Two)
+PROVIDER_KEYS=("" "")
+PROVIDER_ENDPOINTS=(https://one.invalid https://two.invalid)
+PROVIDER_PING_PATHS=(/health /health)
+PROVIDER_DEFAULT_RUNTIME_IDS=(one.model two.model)
+PROVIDER_KINDS=(provider provider)
+PROVIDER_COMMANDS=("" "")
+PROVIDER_AVAIL=(cloud cloud)
+DEFAULT_PROVIDER_INDEX=0
+load_provider_catalog() { :; }
+compute_provider_availability() { :; }
+report_sandbox_backends() { :; }
+update_runtime_default() { printf 'selected=%s\\n' "$2"; }
+DRY_RUN=1
+BASE_PATH=/fixture
+'''
+
+
+def run_shell(body, terminal_input=None):
+    master = slave = reader = None
+    terminal = bytearray()
+    try:
+        if terminal_input is not None:
+            master, slave = pty.openpty()
+
+            def drain():
+                while True:
+                    try:
+                        chunk = os.read(master, 65536)
+                        if not chunk:
+                            return
+                        terminal.extend(chunk)
+                    except OSError as error:
+                        if error.errno != errno.EIO:
+                            raise
+                        return
+
+            reader = threading.Thread(target=drain)
+            reader.start()
+            os.write(master, terminal_input)
+        result = subprocess.run(
+            ["bash", "-c", DEFINITIONS + CATALOG + body],
+            stdin=slave if slave is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=slave if slave is not None else subprocess.PIPE,
+            text=True, timeout=5,
+        )
+        if slave is not None:
+            os.close(slave)
+            slave = None
+            reader.join(timeout=5)
+            if reader.is_alive():
+                raise RuntimeError("terminal output reader did not finish")
+        return result, terminal.decode()
+    finally:
+        if slave is not None:
+            os.close(slave)
+        if reader is not None:
+            reader.join(timeout=5)
+        if master is not None:
+            os.close(master)
+
+
+class Wizard(unittest.TestCase):
+    def test_next_and_resume_commands_preserve_the_selected_workspace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # Shell syntax in user-selected paths must survive copying the
+            # command, rather than becoming expansion or command substitution.
+            unusual = root / "space ' \" $HOME `touch injected` $(touch injected)"
+            unusual.mkdir()
+            binary = unusual / 'masc'
+            receipt = root / 'receipt.json'
+            binary.write_text('#!' + sys.executable + '\n' + '''
+import json, os, sys
+from pathlib import Path
+if os.environ.get('SETUP_CANCEL') == '1':
+    sys.exit(9)
+Path(os.environ['COMMAND_RECEIPT']).write_text(json.dumps({
+    'argv': sys.argv[1:],
+    'env': {key: os.environ.get(key) for key in (
+        'MASC_ASSETS_DIR', 'MASC_BASE_PATH', 'AGENT_CORE_MODEL_CATALOG',
+        'MASC_RUNTIME_EVENTS')},
+}))
+''')
+            binary.chmod(0o755)
+            assets = str(unusual / 'assets')
+            base = str(unusual / 'workspace')
+            catalog = str(unusual / 'catalog.json')
+            variables = {'DEST': str(binary), 'DASHBOARD_ASSETS_DIR': assets,
+                         'BASE_PATH': base, 'AGENT_CORE_MODEL_CATALOG': catalog,
+                         'VERSION': 'v9.9.9', 'MASC_PORT': '9876'}
+            body = '\n' + ''.join(key + '=' + shlex.quote(value) + '\n'
+                                  for key, value in variables.items())
+            for mode, expected_argv in (
+                ('next', ['setup', '--base-path', base, '--port', '9876']),
+                ('reopen', ['--base-path', base, '--port', '9876']),
+                ('resume', ['setup', '--base-path', base, '--port', '9876']),
+            ):
+                for runtime_events in (None, '0'):
+                    with self.subTest(mode=mode, runtime_events=runtime_events):
+                        script = body + ('unset MASC_RUNTIME_EVENTS\n' if runtime_events is None
+                                         else 'MASC_RUNTIME_EVENTS=0\n')
+                        if mode == 'resume':
+                            script += ('DRY_RUN=0\nRUN_SETUP_JOURNEY=1\n'
+                                       'export SETUP_CANCEL=1\nfinish_setup_journey\n')
+                        else:
+                            script += ('RUN_SETUP_JOURNEY=' + ('1' if mode == 'reopen' else '0') +
+                                       '\nprint_install_summary\n')
+                        result, _ = run_shell(script)
+                        self.assertEqual(result.returncode, 1 if mode == 'resume' else 0,
+                                         result.stderr)
+                        commands = [line.strip() for line in
+                                    (result.stdout + result.stderr).splitlines()
+                                    if line.startswith('  env ')]
+                        self.assertEqual(len(commands), 1)
+                        env = dict(os.environ, COMMAND_RECEIPT=str(receipt))
+                        env.pop('SETUP_CANCEL', None)
+                        env.pop('MASC_RUNTIME_EVENTS', None)
+                        copied = subprocess.run(['bash', '-c', commands[0]], cwd=root,
+                                                env=env, capture_output=True, text=True,
+                                                timeout=5)
+                        self.assertEqual(copied.returncode, 0, copied.stderr)
+                        observed = json.loads(receipt.read_text())
+                        self.assertEqual(observed['argv'], expected_argv)
+                        self.assertEqual(observed['env'], {
+                            'MASC_ASSETS_DIR': assets, 'MASC_BASE_PATH': base,
+                            'AGENT_CORE_MODEL_CATALOG': catalog,
+                            'MASC_RUNTIME_EVENTS': runtime_events,
+                        })
+                        self.assertFalse((root / 'injected').exists())
+
+    def test_authenticated_provider_probe_keeps_credentials_out_of_curl_argv(self):
+        key = 'synthetic-provider-probe-credential'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = root / 'curl.json'
+            curl = root / 'curl'
+            curl.write_text('#!' + sys.executable + '\n' + '''
+import json, os, stat, sys
+from pathlib import Path
+arguments = sys.argv[1:]
+headers = []
+for index, argument in enumerate(arguments):
+    if argument in ('-H', '--header'):
+        value = arguments[index + 1]
+        if value.startswith('@'):
+            path = Path(value[1:])
+            headers.append({'value': path.read_text(),
+                            'pipe': stat.S_ISFIFO(path.stat().st_mode)})
+        else:
+            headers.append({'value': value, 'pipe': False})
+Path(os.environ['CURL_RECEIPT']).write_text(json.dumps({
+    'argv': arguments, 'headers': headers,
+}))
+print(os.environ['CURL_STATUS'], end='')
+''')
+            curl.chmod(0o755)
+            for status, exit_code in (('200', 0), ('401', 1)):
+                with self.subTest(status=status):
+                    body = (
+                        '\nPATH=' + shlex.quote(str(root)) + ':"$PATH"\n'
+                        'export CURL_RECEIPT=' + shlex.quote(str(receipt)) + '\n'
+                        'export CURL_STATUS=' + status + '\n'
+                        'PROVIDER_KEYS=(PROBE_API_KEY "")\n'
+                        'PROBE_API_KEY=' + shlex.quote(key) + '\n'
+                        'ping_provider 0 "$PROBE_API_KEY"\n'
+                    )
+                    result, _ = run_shell(body)
+                    self.assertEqual(result.returncode, exit_code, result.stderr)
+                    observed = json.loads(receipt.read_text())
+                    self.assertNotIn(key, '\0'.join(observed['argv']))
+                    self.assertEqual(observed['headers'], [{
+                        'value': 'Authorization: Bearer ' + key + '\n',
+                        'pipe': True,
+                    }])
+                    self.assertIn('https://one.invalid/health', observed['argv'])
+                    self.assertNotIn(key, result.stdout + result.stderr)
+
+    def test_incompatible_workspace_selection_happens_before_installer_seed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / 'old workspace'
+            state = base / '.masc/config/keepers/imp.toml'
+            state.parent.mkdir(parents=True)
+            state.write_bytes(b'[keeper]\nautoboot_enabled = true\n')
+            before = (state.read_bytes(), state.stat().st_ino, state.stat().st_mtime_ns)
+            calls = root / 'calls.jsonl'
+            binary = root / 'masc'
+            binary.write_text('#!' + sys.executable + '\n' + '''import json,sys
+from pathlib import Path
+base=Path(sys.argv[sys.argv.index('--base-path')+1])
+with Path(''' + repr(str(calls)) + ''').open('a') as stream:
+ stream.write(json.dumps([sys.argv[1],str(base)])+'\\n')
+if sys.argv[1]=='setup-preflight':
+ old=base/'.masc/config/keepers/imp.toml'
+ print(json.dumps(dict(status='needs_attention' if old.exists() else 'ready',read_only=True,
+  scope='keeper_goal_state_schema',issues=[dict(path=str(old),detail='old state')] if old.exists() else [])))
+ sys.exit(1 if old.exists() else 0)
+if sys.argv[1]=='workspace-upgrade':
+ print(json.dumps(dict(schema='masc.workspace_upgrades.v1',read_only=True,keepers=[],backups=[])))
+ sys.exit(0)
+assert sys.argv[1]=='init'
+config=base/'.masc/config';config.mkdir(parents=True,exist_ok=True)
+(config/'runtime.toml').write_text('[runtime]\\n')
+print('init complete')
+''')
+            binary.chmod(0o755)
+            helper = ROOT / 'scripts/install-runtime-setup.py'
+            before_wizard = SCRIPT.split('# Check persisted state before init',1)[1].split('# --- 4b. first-run wizard',1)[0]
+            body = ('\nDRY_RUN=0\nSEED_CONFIG=1\nexport TERM=dumb\nBASE_PATH=' + shlex.quote(str(base)) +
+                    '\nDEST=' + shlex.quote(str(binary)) + '\nGUEST_SHIM=1\ninstall_guest_shim() { printf "shim=%s\\n" "$BASE_PATH"; }' +
+                    '\nfetch_bundle_asset() { cp ' +
+                    shlex.quote(str(helper)) + ' "$2"; }\n# Check persisted state before init' + before_wizard +
+                    '\nprintf "chosen=%s\\n" "$BASE_PATH"\n')
+            result, terminal = run_shell(body,b'\n')
+            self.assertEqual(result.returncode,0,terminal)
+            chosen = Path(str(base) + '-new').resolve()
+            self.assertIn('chosen='+str(chosen),result.stdout)
+            # The guest shim goes to the workspace the check settled on, not the old one.
+            self.assertIn('shim='+str(chosen),result.stdout)
+            import json
+            observed = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertEqual(observed,[['setup-preflight',str(base.resolve())],
+                                       ['workspace-upgrade',str(base.resolve())],
+                                       ['setup-preflight',str(chosen)],['init',str(chosen)]])
+            self.assertEqual((state.read_bytes(),state.stat().st_ino,state.stat().st_mtime_ns),before)
+            self.assertFalse((base/'.masc/config/runtime.toml').exists())
+            self.assertTrue((chosen/'.masc/config/runtime.toml').exists())
+
+    def test_terminal_setup_uses_installed_journey_after_artifact_installation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / 'masc'
+            binary.write_text('#!/bin/sh\n[ -t 0 ] && [ -t 1 ] && [ -t 2 ] || exit 7\nprintf "journey=%s\\n" "$*"\n')
+            binary.chmod(0o755)
+            body = ('\nDRY_RUN=0\nDEST=' + shlex.quote(str(binary)) + '\nMASC_PORT=9876\n'
+                    'run_wizard "$BASE_PATH"\n'
+                    '[ "$RUN_SETUP_JOURNEY" -eq 1 ] || exit 8\n'
+                    'finish_setup_journey\n')
+            result, terminal = run_shell(body, b'')
+        self.assertEqual(result.returncode, 0, terminal)
+        self.assertIn('journey=setup --base-path /fixture --port 9876', terminal)
+
+    def test_local_authentication_challenge_is_not_reported_as_stopped(self):
+        class AuthRequired(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+            def log_message(self, *args):
+                pass
+        with http.server.HTTPServer(('127.0.0.1', 0), AuthRequired) as server:
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                body = ('\nPROVIDER_KINDS=(provider)\n'
+                        f'PROVIDER_ENDPOINTS=(http://127.0.0.1:{server.server_port})\n'
+                        'PROVIDER_PING_PATHS=(/models)\nprovider_availability_label 0\n')
+                result, _ = run_shell(body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), 'authentication required')
+            finally:
+                server.shutdown()
+                thread.join()
+
+
+    def test_new_workspace_prompts_and_defaults_to_masc_under_home(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result, terminal = run_shell(
+                '\ncd ' + shlex.quote(directory) + '\nBASE_PATH=""\n'
+                'choose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
+        self.assertEqual(result.returncode, 0, terminal)
+        self.assertIn('Workspace directory', terminal)
+        self.assertIn('workspace=' + os.environ['HOME'] + '/MASC\n', result.stdout)
+
+    def test_existing_workspace_remains_the_suggested_location(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / '.masc/config').mkdir(parents=True)
+            result, terminal = run_shell(
+                '\ncd ' + shlex.quote(directory) + '\nBASE_PATH=""\n'
+                'choose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
+            self.assertIn('workspace=' + directory, result.stdout)
+        self.assertEqual(result.returncode, 0, terminal)
+
+    def test_custom_workspace_with_spaces_is_preserved(self):
+        result, terminal = run_shell(
+            '\nBASE_PATH=""\nchoose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n',
+            b'/tmp/masc workspace\n')
+        self.assertEqual(result.returncode, 0, terminal)
+        self.assertIn('workspace=/tmp/masc workspace', result.stdout)
+
+    def test_explicit_workspace_does_not_prompt(self):
+        result, terminal = run_shell(
+            '\nchoose_install_base_path\nprintf "workspace=%s\\n" "$BASE_PATH"\n', b'\n')
+        self.assertEqual(result.returncode, 0, terminal)
+        self.assertNotIn('Workspace directory', terminal)
+        self.assertIn('workspace=/fixture', result.stdout)
+
+
+
+
+    def test_explicit_provider_applies_to_existing_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / ".masc/config"
+            config.mkdir(parents=True)
+            (config / "runtime.toml").touch()
+            result, _ = run_shell('''
+CONFIG_PREEXISTING=1
+WIZARD_PROVIDER=two
+run_wizard() { printf 'wizard=%s\\n' "$WIZARD_PROVIDER"; }
+maybe_run_wizard "''' + directory + '"\n')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('wizard=two', result.stdout)
+
+    def test_explicit_provider_requires_runtime_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result, _ = run_shell('WIZARD_PROVIDER=two\nmaybe_run_wizard "' + directory + '"\n')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('runtime.toml not found; cannot run wizard', result.stderr)
+
+    def test_noninteractive_ambiguous_sources_do_not_change_default(self):
+        result, _ = run_shell('run_wizard "$BASE_PATH"\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('skipping first-time setup wizard', result.stdout)
+        self.assertNotIn('selected=', result.stdout)
+
+    def test_subscription_cli_without_login_is_not_connectivity_success(self):
+        result, _ = run_shell('''
+PROVIDER_KINDS=(subscription subscription)
+PROVIDER_COMMANDS=(bash bash)
+DEST=false
+if ping_provider 0 ""; then echo false-success; else echo login-not-ready; fi
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('login-not-ready', result.stdout)
+        self.assertNotIn('false-success', result.stdout)
+
+    def test_unsupported_login_probe_is_neither_success_nor_failure(self):
+        result, _ = run_shell('''
+PROVIDER_KINDS=(subscription subscription)
+PROVIDER_COMMANDS=(bash bash)
+probe_unavailable() { return 3; }
+DEST=probe_unavailable
+WIZARD_PROVIDER=one
+DRY_RUN=0
+run_wizard "$BASE_PATH"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('login probe unavailable', result.stdout)
+        self.assertNotIn('provider connectivity: ok', result.stdout)
+        self.assertNotIn('check did not pass', result.stderr)
+
+    def test_missing_healthcheck_is_skipped(self):
+        result, _ = run_shell('''
+PROVIDER_PING_PATHS=("" "")
+if provider_ping_possible 0 ""; then echo false-success; else echo check-unavailable; fi
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('check-unavailable', result.stdout)
+
+    def test_conflicting_flags_fail_before_download(self):
+        for args, message in [
+            (["--provider", "one", "--no-wizard"], "--provider requires"),
+            (["--sandbox", "docker"], "--sandbox requires --team"),
+        ]:
+            with self.subTest(args=args):
+                result = subprocess.run(["bash", str(ROOT / 'scripts/install.sh'), *args], capture_output=True, text=True, timeout=5)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertNotIn('downloading', result.stdout)
+
+
+if __name__ == '__main__':
+    unittest.main()

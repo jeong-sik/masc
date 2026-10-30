@@ -1,0 +1,19 @@
+id = "msx-observer"
+revision = "0.2.0"
+title = "MSX captured frames"
+ui_category = "execution_environment"
+contributions = ["observe"]
+image = "masc-lane-msx-observer:0.2.0"
+command = ["python3", "server.py"]
+
+[world.skills]
+directory = "skills"
+
+[world.outputs.frames]
+lanes = ["msx/frame"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304

@@ -1,0 +1,4 @@
+model-set=accepted:first.next,first.sol
+model_set=rejected:providers.first.model_set
+model-sets=rejected:providers.first.model-sets
+shipped_provider_tables=accepted:9

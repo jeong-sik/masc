@@ -1,0 +1,46 @@
+{
+  "observed_at": "2026-10-21T05:39:37.995701+00:00",
+  "frontend_source": "566b98b5d1645d6312d518bf2810f3e5e0626586",
+  "host_binary_source": "12d295ed1e1bbf78ddbcabe41c5799f879d453af",
+  "host_binary_sha256": "f5b58a72fb3176c857b8f345ae1a38929c02ddff3edcce739c330a9d7c9de773",
+  "worker_image": "sha256:6dc223be960dd1a2adb9da10c34dcd9610231478a8e2e74a324a459c0bc02745",
+  "workspace": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-reconnect-20261021-tzunv2o7",
+  "input": "synthetic VST phrase snapshot, actual Docker/MCP worker",
+  "old_instance": "01a15cf3-691a-7000-887b-ddb8974e8b8f",
+  "new_instance": "01a15cf6-1580-7000-9c35-86ba0bd1b928",
+  "cleanup_engine": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7",
+  "old_container_absent": true,
+  "retained_history_rows": 2,
+  "dashboard_suites": 8,
+  "dashboard_checks_passed": 145,
+  "typescript": "tsc --noEmit passed",
+  "ocaml": "parser checks only; no local Dune build",
+  "tui_binary": "new source not executed",
+  "builder_request": {
+    "operation_id": "kmsg-2ada1cdc54884c58aa6736a80b598868",
+    "state_when_received": "queued"
+  },
+  "limits": [
+    "No real audio or VST device execution; input is synthetic",
+    "No Candle extraction or provider execution",
+    "No TUI candidate execution or whole build claim",
+    "Cleaning and starting transient states were not captured; inactive and applied observed",
+    "Host binary is pre-existing 12d295, not frontend source head",
+    "Initial unauthenticated setup returned401; restarting that disposable workspace was refused by stale lease ownership; final cycle ran on a new isolated workspace, without bypassing lease"
+  ],
+  "artifacts": {
+    "off-dashboard.png": "74fd52c19d8be7c3b0d6015867920f72b673eeabed2e5fa0e229c89fff3c8a18",
+    "off.json": "f64e0365c0386d7b9daef740a793d156c438d4757e2f63170878ca1e67dfba0a",
+    "off-dashboard.txt": "f9293280a9657fe5de062d7480de8c7375ee2a1db3c472374dd8bb923ae69d4b",
+    "history.json": "301e9056c0332401f9f132562ca32d91f5606473a6425608c4445e109523f330",
+    "README.md": "7b756f8e5e92f95a5c73e90bb1c93aa8c284b3e72617b824bcb71fbc106f618d",
+    "on-before.json": "09012af5dd83236d463add24c421e4b4c56b677086ae72f90667def20f909187",
+    "reconnected-dashboard.txt": "ecb48244b073fd7a5a63fe7189ea310834c50205b04a7aeb2730044d0be2351b",
+    "reconnected.json": "beb1d3fa7a717df67424a84f5a474bf9e46d3f9fbf4d7d2482fee8e57e05265f",
+    "container-absence.json": "fae0f25ea71ca61de8d438d86c53f4b2f038b12e7a68f6a50d29114b96c086da",
+    "reconnected-dashboard.png": "dbcaee497256ee328d2f1d1c42d211e26ea034f1b0179d9f0419effa054066a3",
+    "dashboard-tests.txt": "0e9392b910c4fcd55458fe41f0146c9b3ebd69dcedea137cd5c84c69a9eb4d1e",
+    "final-cleanup.json": "8f67200a05e66e206faf56217d45ec3c6f3c11b4453d339fa91bb1ce833bf0be",
+    "on-dashboard.png": "149ad2aff345a729e02b030b1c40d4959181c53eafcc16f43ec31e2f7da5fd16"
+  }
+}

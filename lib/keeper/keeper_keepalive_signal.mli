@@ -1,0 +1,191 @@
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+type grpc_heartbeat_starter_fn = {
+  f : 'a. ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option;
+}
+
+val grpc_heartbeat_starter : ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option
+
+val register_grpc_heartbeat_starter : grpc_heartbeat_starter_fn -> unit
+
+val record_wake_payload :
+  keeper_name:string ->
+  trace_id:string ->
+  turn_index:int ->
+  context_window:int ->
+  system_prompt_bytes:int ->
+  tool_schema_json_bytes:int ->
+  message_content_bytes:int ->
+  message_count:int ->
+  role_counts:(string * int) list ->
+  tool_count:int ->
+  unit
+
+val register_record_wake_payload :
+  (keeper_name:string ->
+   trace_id:string ->
+   turn_index:int ->
+   context_window:int ->
+   system_prompt_bytes:int ->
+   tool_schema_json_bytes:int ->
+   message_content_bytes:int ->
+   message_count:int ->
+   role_counts:(string * int) list ->
+   tool_count:int ->
+   unit) ->
+  unit
+
+val record_tool_skipped : tool_name:string -> reason_code:string -> unit
+
+val register_record_tool_skipped :
+  (tool_name:string -> reason_code:string -> unit) ->
+  unit
+
+val record_execute_output :
+  keeper_name:string ->
+  task_id:string option ->
+  stdout:string ->
+  stderr:string ->
+  status:Yojson.Safe.t ->
+  streamed:bool ->
+  unit
+
+val register_record_execute_output :
+  (keeper_name:string ->
+   task_id:string option ->
+   stdout:string ->
+   stderr:string ->
+   status:Yojson.Safe.t ->
+   streamed:bool ->
+   unit) ->
+  unit
+
+val record_execute_stream_chunk :
+  keeper_name:string -> stream_id:int -> stream:[ `Stdout | `Stderr ] -> string -> unit
+
+val register_record_execute_stream_chunk :
+  (keeper_name:string -> stream_id:int -> stream:[ `Stdout | `Stderr ] -> string -> unit) ->
+  unit
+
+val record_execute_stream_start :
+  keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit
+
+val register_record_execute_stream_start :
+  (keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit) ->
+  unit
+
+val record_execute_stream_end :
+  keeper_name:string -> stream_id:int -> task_id:string option -> status:Yojson.Safe.t -> unit
+
+val register_record_execute_stream_end :
+  (keeper_name:string -> stream_id:int -> task_id:string option -> status:Yojson.Safe.t -> unit) ->
+  unit
+
+(** FSM guard identity helpers (Cycle 43).
+    Wrapped by [Keeper_fsm_guard_runtime.wrap_unit] at call sites. *)
+val pre_turn_complete_heartbeat : turn_running:bool ref -> unit
+val post_turn_complete_heartbeat : turn_running:bool ref -> unit
+val post_wakeup_signal : wakeup:bool Atomic.t -> unit
+val post_submit_task : meta:keeper_meta -> task_id:Keeper_id.Task_id.t -> unit
+
+(** Outcome of an [interruptible_sleep] call. Mirrors the three terminal
+    branches of the polling loop, so callers can distinguish an exact Keeper
+    wake from the configured heartbeat cadence. *)
+type sleep_outcome =
+  | Stopped   (** [stop] atomic was observed [true] before the duration
+                  elapsed. *)
+  | Woken     (** [wakeup] transitioned [true -> false], or an active
+                  [cadence_sleeping] handshake was consumed by a cadence
+                  update; the caller should dispatch the next cycle. *)
+  | Timeout   (** Full [duration] elapsed without [stop] or [wakeup]. *)
+
+(** Whether a wakeup may end the sleep before its duration elapses.
+    [Interrupt_on_wakeup] is the heartbeat default. Under
+    [Serve_wakeup_after_duration] a wakeup raised during the sleep is consumed
+    when the duration ends, so the tick happens once per signal, only later;
+    [stop] ends either policy at once. Used for the provider backoff after a
+    rate-limited or exhausted turn, where waking sooner only re-runs the same
+    failing call (#34653). *)
+type wake_policy =
+  | Interrupt_on_wakeup
+  | Serve_wakeup_after_duration
+
+(** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
+    effect within ~chunk_sec instead of waiting for the full interval. *)
+val interruptible_sleep :
+  ?cadence_sleeping:bool Atomic.t ->
+  ?wake_policy:wake_policy ->
+  ?interrupt_when:(unit -> bool) ->
+  clock:'a Eio.Time.clock ->
+  stop:bool Atomic.t ->
+  wakeup:bool Atomic.t ->
+  (unit -> float) ->
+  sleep_outcome
+(** When [cadence_sleeping] is supplied, it is [true] only inside this sleep.
+    A runtime cadence decrease consumes it with CAS, avoiding a queued wake
+    during active cycle setup and closing both the duration-resolution and
+    timeout-edge races. [duration] is resolved only after the handshake is
+    visible. [interrupt_when], when supplied, revalidates the dependency of
+    the wait at each existing sleep boundary. A true result returns [Woken]
+    even under [Serve_wakeup_after_duration]; ordinary stimulus/cadence hints
+    still cannot interrupt that policy. [stop] has precedence. *)
+
+(** Wake up a specific keeper immediately.
+
+    When [?stimulus] is given, the stimulus is durably appended to the keeper's
+    Event Layer queue ([Keeper_registry_event_queue.enqueue]) independently of
+    lifecycle phase. The wake hint is sent only to a lifecycle-admitted Running
+    Keeper; inactive and paused lanes retain the durable event without a
+    false delivery claim. If no live registry entry exists, callers
+    must supply [base_path] so the payload can be persisted for replay. Callers
+    that only need to break the keeper out of [interruptible_sleep] may omit the
+    stimulus. See RFC-0020 §3 (data channel vs hint signal). *)
+val wakeup_keeper :
+  ?base_path:string ->
+  ?stimulus:Keeper_event_queue.stimulus ->
+  string -> unit
+
+val wakeup_relevant_keeper_for_board_signal :
+  ?dispatch_attention:(Keeper_board_attention_candidate.candidate list -> unit) ->
+  ?dispatch_discoverable_post:(Board_dispatch.board_signal -> unit) ->
+  config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
+(** Route typed immediate audiences to durable Keeper stimulus queues.
+    [dispatch_discoverable_post] reserves and asynchronously admits normal
+    discoverable posts to one event batch. Owners retain durable cursor catchup.
+    Without that callback, established owners use their cursor and only initial
+    cursor fallbacks persist on the producer fiber. *)
+
+(** Per-stage timing accumulator for Phase 0 profiling. *)
+type stage_timing = {
+  presence_ms : float;
+  snapshot_ms : float;
+  board_ms : float;
+  turn_ms : float;
+}
+
+val stage_timing_ring_size : unit -> int
+
+val percentile : float array -> float -> float
+
+val stage_timing_to_json :
+  ring:stage_timing array -> count:int ->
+  [> `Null
+  | `Assoc of
+      (string *
+       [> `Assoc of (string * [> `Float of float | `Int of int ]) list ])
+      list
+  ]
+
+val format_since_last_scheduled_autonomous : int option -> string
+
+val dispatch_keepalive_event :
+  ctx:'a context -> keeper_name:string ->
+  Keeper_state_machine.event -> unit
+
+
+type periodic_cadence = Initial_due of float | After_periodic of float
+val periodic_remaining : now:float -> interval:float -> periodic_cadence -> float
+val periodic_is_due : now:float -> interval:float -> periodic_cadence -> bool
+val consume_periodic : now:float -> periodic_cadence

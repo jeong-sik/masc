@@ -1,0 +1,11 @@
+[2026-10-29 00:17:41] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `native task authenticated read'.
+This run has ID `TIEE5W6J'.
+
+  [OK]          registered routes          0   H1/H2 auth, strict scope and f...
+  [OK]          registered routes          1   H1/H2 Child auth, ticket3, unk...
+  [OK]          registered routes          2   unchecked hints cannot become ...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/native task authenticated read'.
+Test Successful in 0.195s. 3 tests run.
+exit=0

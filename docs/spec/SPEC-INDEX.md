@@ -1,0 +1,133 @@
+---
+status: reference
+---
+
+# MASC Specification Index
+
+> Status: Living draft
+> Last Updated: 2026-10-29
+> Snapshot baseline: `dune-project` version `0.66.0`
+
+MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 Goal, Task, Board, Schedule을 통해 작업하고 현재 실행 상태를 관찰·조정할 수 있게 한다. Keeper turn과 dashboard/operator visibility를 제공하며 MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다.
+
+## Snapshot Metadata
+
+The version line above is current as of the last doc touch. The size/count rows
+below are an inventory snapshot and should be recalculated before being
+used as evidence.
+
+| 항목 | 값 |
+|------|-----|
+| Release baseline | 0.66.0 |
+| Language | OCaml 5.x (Eio-native, effect-based concurrency) |
+| LOC (lib, `.ml` + `.mli`) | 994,693 |
+| LOC (test, `.ml` + `.mli`) | 1,036,706 |
+| OCaml modules under `lib/` (`.ml`) | 2,085 |
+| `.mli` interfaces under `lib/` | 2,006 |
+| MCP tool modules (`lib/**/tool_*.ml`) | 117 |
+| Test files (`test/*.ml`, top level) | 1,744 |
+| Executables | 20 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`, `masc-browser-host`, `masc-reliable-change-g1-check`, `masc-http-probe`, `masc-librarian-replay`, `masc-librarian-continuity`, `masc-librarian-preflight-eval`, `masc-msx-addon-worker`, `masc-dos-addon-worker`) + 5 internal (`public_tool_manifest`, `keeper_store_layout_manifest`, `gen_board_tool_registry`, `stagehand_model_probe`, `masc_tui_keys_doc_cli`) |
+
+숫자는 2026-10-17 (v0.58.0) 기준. `git ls-files` 로 추적 파일만 세고, 실행 파일은 `bin/dune` 의 `(executable ...)` stanza 에서 `public_name` 유무로 나눴다. 표의 baseline 행은 `scripts/bump-version.sh` 가 릴리스마다 고쳐 쓰므로, 나머지 행이 그 baseline 보다 오래되면 표가 재보지 않은 숫자를 그 버전의 것이라고 말하게 된다.
+
+## Layer Diagram
+
+```mermaid
+graph TB
+    L6["Layer 6: Integration<br/>agent core bridge, research loop"]
+    L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
+    L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
+    L3["Layer 3: Engine<br/>keeper, scheduling, execution"]
+    L2["Layer 2: Domain<br/>workspace, goal, task, board"]
+    L1["Layer 1: Storage<br/>backend, dated_jsonl, memory"]
+    L0["Layer 0: Primitives<br/>types, core, log, time_compat, fs_compat"]
+
+    L6 --> L5
+    L5 --> L4
+    L4 --> L3
+    L3 --> L2
+    L2 --> L1
+    L1 --> L0
+```
+
+## Specification Files
+
+| File | Title | Description | Status |
+|------|-------|-------------|--------|
+| `00-glossary.md` | Glossary | 용어 정의, 약어 목록 | Draft |
+| `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
+| `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
+| `03-workspace-state.md` | Workspace State | Workspace 경계, 상태 소유권, 원자적 변경 계약, Goal/Task 생명주기, 관측·은퇴 계약 | Draft |
+| `04-turn-lifecycle.md` | Turn Lifecycle | Keeper turn 시작/종료, heartbeat/polling/waiting, direct msg, FSM, receipt | Draft |
+| `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
+| `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
+| `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
+| `11-board.md` | Board System | Posts, comments, votes, filesystem/JSONL backend | Draft |
+| `12-memory-systems.md` | Memory Systems | Memory OS fact store, Shared Wiki, Workspace Memory ledger/briefing, context budget | Draft |
+| `13-agent-core.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Active |
+| `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |
+| `15-testing.md` | Testing | 검증 계층, contract suites, fixture/manual 분리 | Draft |
+| `16-root-cause-rubric.md` | Root-Cause Rubric | Markers behind the `root/*` values declared in a `masc-triage` block | Reference |
+| `18-log-severity-taxonomy.md` | Log Severity Taxonomy | 4-level contract for `Log.{debug,info,warn,error}` callsites | Reference |
+| `lane-application-observation.md` | Lane Application Observation | Lane Add-on 선언 저장과 worker 실행 적용 관찰의 분리 | Reference |
+| [candle-requirements.md](candle-requirements.md) | Candle requirements | 보상·원장·감쇠·구매·선물·초상화의 전체 요구사항, 현재 구현/미구현/미검증 및 수용 조건 | Reference |
+
+## Active Design Documents
+
+이 spec suite 외에 `docs/design/`와 `docs/rfc/`에 위치한 활성 설계 문서들:
+
+| Document | Description | Related Spec |
+|----------|-------------|--------------|
+| `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-agent-core.md` |
+| `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-agent-core.md` |
+
+## Conventions
+
+### Document Structure
+
+기본 서브시스템 spec 파일은 아래 섹션을 따른다 (`03-workspace-state.md`, `16-root-cause-rubric.md`, `18-log-severity-taxonomy.md`, `lane-application-observation.md` 등 경계·레퍼런스 문서는 도메인 계약에 맞춘 절 구성을 사용한다):
+1. Problem Statement
+2. Non-Goals
+3. Module Inventory (table)
+4. Key Types (OCaml signatures)
+5. State Machines (Mermaid)
+6. Invariants (INV-{SUBSYSTEM}-NNN)
+7. Failure Modes
+8. Dependencies (upstream/downstream)
+9. Open Questions
+
+### Invariant Naming
+
+이 `docs/spec/` 목록은 `INV-{SUBSYSTEM}-{NNN}` 형식을 사용한다. 접두어는 각 spec 파일이 실제로 쓰는
+것을 따르며, 아래 표가 그 목록이다.
+
+| Prefix | Subsystem | Declared in |
+|--------|-----------|-------------|
+| `INV-SYS` | System overview | `01-system-overview.md` |
+| `INV-TYPE` | Types and invariants | `02-types-and-invariants.md` |
+| `INV-WORKSPACE` | Workspace lifecycle | `03-workspace-state.md` |
+| `INV-TURN` | Turn lifecycle | `04-turn-lifecycle.md` |
+| `INV-KEEPER` | Keeper engine | `05-keeper-agent.md` |
+| `INV-SERVER` | Server and transport | `09-server-transport.md` |
+| `INV-DASH` | Dashboard | `10-dashboard.md` |
+| `INV-CONFIG` | Configuration | `14-configuration.md` |
+
+`15-testing.md`는 테스트 스위트 불변식에 짧은 형식(`INV-T1`–`INV-T5`)을 쓴다.
+`11-board.md`, `12-memory-systems.md`, `13-agent-core.md`는 아직 `INV-` 불변식을
+선언하지 않는다. 새 접두어는 해당 spec 파일이 실제로 불변식을 선언할 때 이 표에
+더한다.
+
+`docs/design/`의 RFC는 자신의 식별자를 자체 소유한다. 예를 들어
+`checkpoint-truth-and-replay-rfc.md`는 `INV-AC-CHK-001`–`005`를 선언한다. 이 표는
+`docs/spec/`의 접두어만 다루며, 설계 문서의 식별자는 해당 문서에서 찾는다.
+
+### Cross-Reference Format
+
+- Spec 간: `./NN-filename.md#section-anchor`
+- 코드: `lib/<module_name>.ml:L123`
+- Invariant: `INV-WORKSPACE-001`
+- 외부 문서: `docs/<document-name>.md`
+
+### SSOT
+
+제품·개발 정책의 권위 있는 계약은 `docs/constitution.xml`이며, 구현 계약의 진실 원본은 소스 트리(`lib/`, `packages/agent_core/`, `bin/`)다. 이 spec suite는 그 아키텍처와 계약을 정리한 참조 문서다.

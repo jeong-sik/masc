@@ -1,0 +1,479 @@
+(** Production rejected-dispatch stream finalization.
+
+    PR #28237 follow-up: the previous regression suite called
+    [For_testing.close_rejected_execute_stream] directly, so it did not
+    prove that [handle_tool_execute_typed] invokes the stream finalizer in
+    the [Gate_reject], [Cannot_parse], [Too_complex], and [Path_reject]
+    branches. This suite drives the real production dispatch wiring through
+    a controlled [Execute_shell_ir] result (via the
+    [For_testing.dispatch_override] seam) and asserts that
+    [record_execute_stream_end] fires for every rejected branch.
+
+    The same seam also drives a completed dispatch, so the lane-ceiling group
+    checks the inline bound through the production handler rather than by
+    calling the output helper directly. *)
+
+open Alcotest
+open Masc
+
+module Keeper_tool_execute_runtime = Masc.Keeper_tool_execute_runtime
+module Keeper_keepalive_signal = Masc.Keeper_keepalive_signal
+module Keeper_identity = Masc.Keeper_identity
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_registry = Masc.Keeper_registry
+module Keeper_types_profile_sandbox = Keeper_types_profile_sandbox
+module Json = Yojson.Safe.Util
+
+(* ── Helpers (mirror test_keeper_sandbox_docker_route.ml) ────────── *)
+
+let temp_dir () =
+  let dir = Filename.temp_file "keeper_tool_execute_stream_close_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let rec cleanup_dir path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter
+      (fun name -> cleanup_dir (Filename.concat path name))
+      (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+  | exception Unix.Unix_error _ -> ()
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+  output_string oc content
+
+(* Dispatch rejection is injected below, but guest preparation happens first.
+   Keep that prerequisite test-owned instead of starting a real host container. *)
+let with_fixture_docker f =
+  let dir = temp_dir () in
+  let docker = Filename.concat dir "docker" in
+  write_file docker {|#!/bin/sh
+set -eu
+case "$1" in
+  info) printf '[]\n' ;;
+  image) [ "$2" = inspect ]; printf '[]\n' ;;
+  inspect)
+    case "$3" in
+      *State.Running*) printf 'true\n' ;;
+      *) printf 'fixture-container-id\n' ;;
+    esac ;;
+  ps|rm|exec) exit 0 ;;
+  run) printf 'fixture-container-id\n' ;;
+  *) printf 'unexpected fixture docker invocation: %s\n' "$1" >&2; exit 2 ;;
+esac
+|};
+  Unix.chmod docker 0o700;
+  let previous = Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" (Option.value previous ~default:"");
+      cleanup_dir dir)
+    (fun () ->
+      Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" docker;
+      f ())
+
+let with_eio_fs f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:Process_eio.reset_for_testing f
+
+let make_meta ~name () =
+  let json =
+    `Assoc
+      [ ("name", `String name)
+      ; ("trace_id", `String ("trace-" ^ name))
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta ->
+    { meta with
+      sandbox_profile = Keeper_types_profile_sandbox.Docker
+    ; sandbox_image = Some "base"
+    ; always_allow = Some true
+    }
+  | Error e -> Alcotest.fail e
+
+let setup f =
+  with_fixture_docker @@ fun () ->
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  ensure_dir (Filename.concat base Common.masc_dirname);
+  let config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir config_dir;
+  let config = Workspace.default_config base in
+  ensure_dir (Workspace.keepers_runtime_dir config);
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
+
+  let meta = make_meta ~name:"stream-close-keeper" () in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_factory.cleanup factory;
+      cleanup_dir base)
+  @@ fun () ->
+  Keeper_registry.For_testing.clear ();
+  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  ensure_dir playground;
+  let repos_toml = Filename.concat config_dir "repositories.toml" in
+  write_file repos_toml
+    (Printf.sprintf
+       "[repository.masc]\n\
+        name = \"masc\"\n\
+        url = \"%s\"\n\
+        local_path = \"repos/masc\"\n\
+        aliases = []\n\
+        default_branch = \"main\"\n\
+        status = \"Active\"\n\
+        keepers = [\"stream-close-keeper\"]\n\
+        auto_sync = false\n\
+        sync_interval = 300\n\
+        created_at = 0\n\
+        updated_at = 0\n"
+       playground);
+  f ~config ~meta ~factory ~playground
+
+let typed_exec_args ~cwd =
+  `Assoc
+    [ ("argv", `List [ `String "echo"; `String "hello" ])
+    ; ("cwd", `String cwd)
+    ; ("timeout_sec", `Float 5.0)
+    ]
+
+let parse_bool_field raw field =
+  Yojson.Safe.from_string raw |> Json.member field |> Json.to_bool_option
+
+(* ── The four rejected-dispatch branches ─────────────────────────── *)
+
+(* The second field is the failure class the model is told. Gate, parse and
+   complexity refusals judge only the command tree masc lowers the script to,
+   which cannot produce them, so they are masc's fault; a path refusal judges
+   the cwd and targets the caller wrote. *)
+let rejected_cases =
+  [ ( "gate_reject"
+    , "runtime_failure"
+    , (fun () ->
+        Error
+          (Keeper_tooling.Execute_shell_ir.Gate_reject
+             "gate denied by policy")) )
+  ; ( "cannot_parse"
+    , "runtime_failure"
+    , (fun () ->
+        Error
+          (Keeper_tooling.Execute_shell_ir.Cannot_parse
+             Masc_exec_command_gate.Shell_command_gate.Parse_error)) )
+  ; ( "too_complex"
+    , "runtime_failure"
+    , (fun () ->
+        Error
+          (Keeper_tooling.Execute_shell_ir.Too_complex
+             Masc_exec_command_gate.Shell_command_gate.Unsupported_nested_pipeline)) )
+  ; ( "path_reject"
+    , "policy_rejection"
+    , (fun () ->
+        Error
+          (Keeper_tooling.Execute_shell_ir.Path_reject
+             "path outside allowed scope")) )
+  ]
+
+let test_rejected_branch_finalizes_stream (name, expected_class, dispatch) () =
+  setup @@ fun ~config ~meta ~factory ~playground ->
+  let stream_end_status = ref None in
+  let dispatch_count = ref 0 in
+  Keeper_keepalive_signal.register_record_execute_stream_end
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status -> stream_end_status := Some status);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := None;
+      Keeper_keepalive_signal.register_record_execute_stream_end
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> ()))
+    (fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := Some (fun () ->
+        incr dispatch_count;
+        dispatch ());
+      let outcome =
+        Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+          ~turn_sandbox_factory:(Some factory)
+          ~config
+          ~meta
+          ~args:(typed_exec_args ~cwd:playground)
+          ()
+      in
+      let raw = outcome.raw_output in
+      check int (name ^ ": reached the rejected dispatch") 1 !dispatch_count;
+      check (option string) (name ^ ": failure class")
+        (Some expected_class)
+        (match outcome.disposition with
+         | Tool_result.Failed failure_class ->
+           Some (Tool_result.tool_failure_class_to_string failure_class)
+         | Tool_result.Completed () | Tool_result.Deferred () -> None);
+      (match parse_bool_field raw "ok" with
+       | Some true -> Alcotest.failf "%s: rejected response unexpectedly ok: %s" name raw
+       | Some false | None -> ());
+      match !stream_end_status with
+      | None ->
+        Alcotest.failf "%s: record_execute_stream_end was NOT invoked" name
+      | Some status ->
+        let rejected =
+          match Yojson.Safe.Util.member "rejected" status with
+          | `String s -> s
+          | _ -> Alcotest.failf "%s: stream end status missing rejected" name
+        in
+        check string (name ^ ": stream end status rejected tag") name rejected)
+
+let test_interrupted_stream_and_command_redaction () =
+  setup @@ fun ~config ~meta ~factory ~playground ->
+  let secret = "fixture-private-value-43019" in
+  let secret_file = Filename.concat config.base_path
+      ".masc/secrets/stream-close-keeper/env/TOKEN" in
+  ensure_dir (Filename.dirname secret_file);
+  write_file secret_file (secret ^ "\n");
+  let previous_secret_dir = Sys.getenv_opt "MASC_SECRET_DIR" in
+  Unix.putenv "MASC_SECRET_DIR" "";
+  let observed_command = ref None and ends = ref [] in
+  Keeper_keepalive_signal.register_record_execute_stream_start
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command -> observed_command := Some command);
+  Keeper_keepalive_signal.register_record_execute_stream_end
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status -> ends := status :: !ends);
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_SECRET_DIR" (Option.value previous_secret_dir ~default:"");
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := None;
+      Keeper_keepalive_signal.register_record_execute_stream_start
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ -> ());
+      Keeper_keepalive_signal.register_record_execute_stream_end
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> ()))
+    (fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := Some (fun () -> raise Exit);
+      let args = `Assoc [ "argv", `List [ `String "echo"; `String secret ];
+                          "cwd", `String playground; "timeout_sec", `Float 5.0 ] in
+      let raised =
+        try
+          ignore (Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+            ~result_projection:Tool_output.default_model_projection
+            ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+            ~turn_sandbox_factory:(Some factory) ~config ~meta ~args ());
+          false
+        with Exit -> true
+      in
+      check bool "original exception propagated" true raised;
+      let command = match !observed_command with Some command -> command | None -> fail "stream was not opened" in
+      check bool "known secret omitted from command" false (String_util.contains_substring command secret);
+      check bool "redaction visible" true (String_util.contains_substring command "[REDACTED]");
+      check (list string) "exactly one unknown close" [ "unknown" ]
+        (List.map (fun status -> status |> Json.member "outcome" |> Json.to_string) !ends))
+
+(* ── Lane ceiling on a completed dispatch ─────────────────────────── *)
+
+(* The same seam drives a completed dispatch through the production handler,
+   so the ceiling the Execute result keeps inline is the one the caller's
+   projection names, from [handle_tool_execute_with_outcome] down to the
+   output fields. *)
+
+let claude_lane =
+  Runtime_execution.Claude_code
+    { cli_path = "claude"; account_home = None; model = None; timeout_s = 1.0 }
+
+let codex_lane =
+  Runtime_execution.Codex_app_server
+    { cli_path = "codex"; account_home = None; model = None; timeout_s = 1.0 }
+
+let antigravity_lane =
+  Runtime_execution.Antigravity_cli
+    { cli_path = "agy"
+    ; model = "fixture"
+    ; agent = None
+    ; effort = None
+    ; oauth_source = "fixture"
+    ; timeout_s = 1.0
+    ; add_dirs = []
+    }
+
+(* The projection the Keeper tool bundle builds for an Official-client lane:
+   [Store_above] at that lane's inline ceiling. *)
+let lane_projection lane =
+  Tool_output.Store_above
+    { threshold_bytes = Runtime_execution.tool_result_inline_ceiling_bytes lane }
+
+let payload bytes =
+  let line = "execute lane ceiling fixture 0123456789abcdefghijklmnopqrstuvwxyz\n" in
+  String.init bytes (fun index -> line.[index mod String.length line])
+
+let with_completed_execute ?(observe = fun ~base_path:_ _ -> ()) ~lane ~stdout check_result =
+  setup @@ fun ~config ~meta ~factory ~playground ->
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := None)
+    (fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override :=
+        Some (fun () ->
+          Ok
+            { Masc_exec.Exec_dispatch.status = Unix.WEXITED 0
+            ; stdout
+            ; stderr = ""
+            ; output_files = None
+            });
+      let outcome =
+        Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+          ~result_projection:(lane_projection lane)
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+          ~turn_sandbox_factory:(Some factory)
+          ~config
+          ~meta
+          ~args:(typed_exec_args ~cwd:playground)
+          ()
+      in
+      observe ~base_path:config.Workspace.base_path outcome;
+      check_result ~base_path:config.Workspace.base_path
+        (Yojson.Safe.from_string outcome.raw_output))
+
+let stored_bytes ~base_path field result =
+  match Json.member field result with
+  | `Null -> Alcotest.failf "%s is missing" field
+  | reference ->
+    let sha256 = Json.(reference |> member "_blob" |> member "sha256" |> to_string) in
+    (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+     | Ok (Some bytes) -> bytes
+     | Ok None -> Alcotest.failf "%s names a blob the store does not hold" field
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+
+let test_non_utf8_capture_uses_artifacts () =
+  let stdout = "한글\n\x89PNG\ncut: \xed\x95" in
+  with_completed_execute ~lane:claude_lane ~stdout (fun ~base_path result ->
+    check bool "tool result can cross a UTF-8 JSON transport" true
+      (String_util.is_valid_utf8 (Yojson.Safe.to_string result));
+    check bool "non-UTF-8 output is externalized below the size ceiling" true
+      (Json.member "output" result = `Null);
+    check string "the output artifact retains every captured byte" stdout
+      (stored_bytes ~base_path "output_artifact" result))
+
+let test_claude_lane_returns_20000_bytes_inline () =
+  let stdout = payload 20_000 in
+  with_completed_execute ~lane:claude_lane ~stdout (fun ~base_path:_ result ->
+    check (option string) "20,000 bytes come back inline on the Claude Code lane"
+      (Some stdout)
+      (Json.member "output" result |> Json.to_string_option);
+    check bool "nothing was stored as a blob" true
+      (Json.member "output_artifact" result = `Null))
+
+let test_claude_lane_stores_40000_bytes_byte_identical () =
+  let stdout = payload 40_000 in
+  with_completed_execute ~lane:claude_lane ~stdout (fun ~base_path result ->
+    check bool "40,000 bytes are not inlined" true
+      (Json.member "output" result = `Null);
+    check string "the stored output blob is the command's bytes" stdout
+      (stored_bytes ~base_path "output_artifact" result);
+    check string "the stored stdout blob is the command's bytes" stdout
+      (stored_bytes ~base_path "stdout_artifact" result))
+
+let test_narrow_lanes_still_store_20000_bytes () =
+  let stdout = payload 20_000 in
+  List.iter
+    (fun (name, lane) ->
+      with_completed_execute ~lane ~stdout (fun ~base_path result ->
+        check bool (name ^ " does not inline 20,000 bytes") true
+          (Json.member "output" result = `Null);
+        check string (name ^ " stores the command's bytes") stdout
+          (stored_bytes ~base_path "output_artifact" result)))
+    [ "Codex", codex_lane; "Antigravity", antigravity_lane ]
+
+let test_manifest_preserves_execute_answer_identity () =
+  let observe ~base_path (outcome : Keeper_tool_execution.t) =
+    let require = function Ok value -> value | Error error -> fail error.Tool_bridge.message in
+    let original = match outcome.data with Some value -> value | None -> fail "Execute typed data missing" in
+    let result = Tool_result.make_ok ~tool_name:"tool_execute" ~start_time:(Tool_timing.start ())
+        ~data:original ?metadata:outcome.metadata () in
+    let project result =
+      let content = match Tool_bridge.to_agent_core_typed_result ~base_path
+          ~answer_reader:(fun output_text -> Keeper_tool_answer.answer ~tool_name:"Execute" ~output_text) result with
+        | Ok result -> result.Agent_core.Types.content
+        | Error error -> fail error.Agent_core.Types.message in
+      match Tool_output.decode_from_agent_core content with
+      | Tool_output.Decoded reference ->
+        check string "actual Execute uses manifest projection" Tool_output.artifact_manifest_mime reference.mime;
+        content, reference
+      | _ -> fail "Execute artifacts must project their durable manifest" in
+    let digest ?base_path content =
+      match Keeper_tool_progress_identity.digest_tool_io ?base_path ~tool_name:"Execute"
+          ~input:(`Assoc ["command",`String "fixture"]) ~output_text:content () with
+      | Some io -> io.Keeper_tool_progress_identity.output_fingerprint
+      | None -> fail "Execute fingerprint missing" in
+    let first, reference = project result in
+    let changed_time = match original with
+      | `Assoc fields -> `Assoc (("execution_time_ms",`Int 987654)::List.remove_assoc "execution_time_ms" fields)
+      | _ -> fail "Execute payload must be an object" in
+    let second_result = Tool_result.make_ok ~tool_name:"tool_execute" ~start_time:(Tool_timing.start ())
+        ~data:changed_time () |> Tool_bridge.attach_artifact_manifest ~base_path |> require in
+    let second, second_reference = project second_result in
+    check bool "different measurements retain different manifests" false (reference.sha256=second_reference.sha256);
+    check string "verified manifest equals inline producer answer" (digest outcome.raw_output) (digest ~base_path first);
+    check string "measurement does not invent progress through manifest" (digest ~base_path first) (digest ~base_path second);
+    check bool "unverified manifests remain distinct" false (digest first=digest second);
+    let store = Tool_blob_store.create ~base_path in
+    let forged manifest mime =
+      let reference = Tool_blob_store.put_durable store ~bytes:(Yojson.Safe.to_string manifest) ~mime in
+      match Tool_output.with_answer_fingerprint reference second_reference.answer_fingerprint with
+      | Ok reference -> Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+      | Error error -> fail (Tool_output.make_error_to_string error) in
+    let mismatch = Tool_output.artifact_manifest_to_json
+        ~content:(Yojson.Safe.to_string changed_time) ~structured_content:original in
+    let malformed = `Assoc ["schema",`String "masc.tool-result-artifact-manifest.v1"] in
+    List.iter (fun content -> check string "invalid envelope cannot claim semantic identity"
+        (digest content) (digest ~base_path content))
+      [forged mismatch Tool_output.artifact_manifest_mime;
+       forged malformed Tool_output.artifact_manifest_mime;
+       forged (Tool_output.artifact_manifest_to_json ~content:(Yojson.Safe.to_string changed_time)
+         ~structured_content:changed_time) "application/json"];
+    let payload_after = stored_bytes ~base_path "output_artifact" original in
+    check string "semantic verification leaves command output intact" (payload 40000) payload_after
+  in
+  with_completed_execute ~observe ~lane:claude_lane ~stdout:(payload 40000)
+    (fun ~base_path:_ _ -> ())
+
+let () =
+  Alcotest.run
+    "keeper-tool-execute-stream-close"
+    [ ( "rejected-dispatch-finalization"
+      , List.map
+          (fun ((name, _, _) as case) ->
+            test_case
+              (name ^ " finalizes the execute stream")
+              `Quick
+              (test_rejected_branch_finalizes_stream case))
+          rejected_cases )
+    ; ( "interrupted-observation"
+      , [ test_case "exception closes observation without exposing command secret" `Quick
+            test_interrupted_stream_and_command_redaction ] )
+    ; ( "lane-ceiling"
+      , [ test_case "manifest preserves Execute answer identity" `Quick test_manifest_preserves_execute_answer_identity
+        ; test_case "Claude Code lane returns 20,000 bytes inline" `Quick
+            test_claude_lane_returns_20000_bytes_inline
+        ; test_case "non-UTF-8 capture remains byte-identical across JSON" `Quick
+            test_non_utf8_capture_uses_artifacts
+        ; test_case "Claude Code lane stores 40,000 bytes byte-identical" `Quick
+            test_claude_lane_stores_40000_bytes_byte_identical
+        ; test_case "Codex and Antigravity lanes still store 20,000 bytes" `Quick
+            test_narrow_lanes_still_store_20000_bytes
+        ] )
+    ]
+;;

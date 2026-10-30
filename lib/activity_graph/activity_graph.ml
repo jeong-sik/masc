@@ -1,0 +1,1354 @@
+(** Activity_graph — event storage, graph building, and agent spans. *)
+
+(* Re-export sub-modules *)
+include Activity_graph_types
+include Activity_graph_registry
+include Activity_graph_reducer
+
+module StringMap = Set_util.StringMap
+module StringSet = Set_util.StringSet
+
+(* ================================================================ *)
+(* File storage paths                                               *)
+(* ================================================================ *)
+
+(* The directory this store occupies under [.masc]. Exposed so readers of the
+   same store name it from here instead of spelling the literal. *)
+let store_dirname = Dated_jsonl.Store.Root.(relative_path Activity_events)
+
+let location (config : Workspace_utils.config) =
+  Dated_jsonl.Store.at
+    (Workspace_utils.dated_store_root config)
+    Dated_jsonl.Store.Root.Activity_events
+
+let root_dir (config : Workspace_utils.config) = Dated_jsonl.Store.dir (location config)
+
+(* [Jsonl_writer] owns the YYYY-MM/DD.jsonl layout. This module used to spell
+   it out again, and it read the clock once for the month and once more for
+   the day, so a write that crossed midnight on the last of a month could put
+   the new day's file under the old month's directory (#27143). *)
+let current_dated_path (config : Workspace_utils.config) =
+  Dated_jsonl.Store.dated_path_now (location config)
+
+let day_path (config : Workspace_utils.config) =
+  (current_dated_path config).Dated_jsonl.Store.path
+
+let sequence_filename = "_seq"
+let stream_lock_key = "_stream"
+
+let root_entry_is_metadata name =
+  name = sequence_filename || name = File_lock_eio.lock_file_path stream_lock_key
+
+let seq_path (config : Workspace_utils.config) =
+  Filename.concat (root_dir config) sequence_filename
+
+let lock_path (config : Workspace_utils.config) =
+  Filename.concat (root_dir config) stream_lock_key
+
+(* Takes the path the caller is about to append to, so the directory made and
+   the file opened come from one reading of the clock. *)
+let ensure_dirs config (dated : Dated_jsonl.Store.dated_path) =
+  Workspace_utils.mkdir_p (root_dir config);
+  (* [month_dir] is the directory name, not a path; the full one is here. *)
+  Workspace_utils.mkdir_p (Filename.dirname dated.Dated_jsonl.Store.path)
+
+let read_current_seq config =
+  match Safe_ops.read_file_safe (seq_path config) with
+  | Ok raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some value -> value
+      | None -> 0)
+  | Error _ -> 0
+
+let write_current_seq config seq =
+  Fs_compat.save_file (seq_path config) (string_of_int seq)
+
+let append_line path line =
+  Fs_compat.append_file path line
+
+let sanitize_entity_ref (value : entity_ref) =
+  {
+    kind = Safe_ops.sanitize_text_utf8 value.kind;
+    id = Safe_ops.sanitize_text_utf8 value.id;
+  }
+
+let sanitize_event (value : event) =
+  {
+    value with
+    ts_iso = Safe_ops.sanitize_text_utf8 value.ts_iso;
+    kind = Safe_ops.sanitize_text_utf8 value.kind;
+    actor = Option.map sanitize_entity_ref value.actor;
+    subject = Option.map sanitize_entity_ref value.subject;
+    payload = Safe_ops.sanitize_json_utf8 value.payload;
+    tags = List.map Safe_ops.sanitize_text_utf8 value.tags;
+  }
+
+(* Trace the upstream emitter when sanitize_event repairs invalid UTF-8
+   or replaces disallowed control characters. Compare physical equality (==)
+   to detect whether sanitization changed any bytes.  sanitize_text_utf8
+   and sanitize_json_utf8 both return the original object unchanged when
+   no repair is needed, so == is a reliable O(1) change detector for
+   string and json values.
+   Note: entity_ref is a record and Option.map / List.map always allocate
+   new wrappers, so actor/subject/tags are compared field-by-field.
+   This surfaces "which kind of event / actor needed text repair at the emit
+   site" without requiring post-hoc forensics on the read-path repair log.
+   Log fires once per (kind × actor) via a new call since the Warn channel
+   has no built-in dedup; operators should correlate with the Otel_metric_store
+   repair counter for frequency. *)
+let sanitize_event_traced (value : event) : event =
+  let sanitized = sanitize_event value in
+  (* entity_ref fields: both sanitize_text_utf8 calls return the original
+     string when no repair is needed. *)
+  let entity_ref_changed (sa : entity_ref option) (oa : entity_ref option) =
+    match sa, oa with
+    | None, None -> false
+    | Some sa', Some oa' ->
+        not (sa'.kind == oa'.kind) || not (sa'.id == oa'.id)
+    | _ -> true
+  in
+  (* Fast change detection via physical equality — sanitize_text_utf8 and
+     sanitize_json_utf8 return the original object when no repair is done.
+     List.map always allocates a new list, so tags are compared element-wise. *)
+  let changed =
+    not (sanitized.ts_iso == value.ts_iso)
+    || not (sanitized.kind == value.kind)
+    || entity_ref_changed sanitized.actor value.actor
+    || entity_ref_changed sanitized.subject value.subject
+    || not (sanitized.payload == value.payload)
+    (* tags: List.map preserves length, so exists2 is safe here.  We still
+       handle the length-mismatch case explicitly (returns "changed") in
+       case sanitize_event is ever modified to filter items. *)
+    || (let n = List.length value.tags in
+        if List.length sanitized.tags <> n then true
+        else
+          List.exists2 (fun st ot -> not (st == ot)) sanitized.tags value.tags)
+  in
+  if changed then begin
+    let actor_str = match value.actor with
+      | Some a -> a.id
+      | None -> "<none>"
+    in
+    Log.Misc.warn
+      "[activity_graph] text repaired at emit kind=%s actor=%s \
+       — upstream text contained invalid UTF-8 or disallowed control characters; trace the caller that \
+       constructs payloads for this (kind, actor) pair"
+      value.kind actor_str
+  end;
+  sanitized
+
+
+let format_sse_event_data ~seq data =
+  Printf.sprintf "id: %d\nevent: activity\ndata: %s\n\n" seq data
+
+
+(* ================================================================ *)
+(* Event reading                                                    *)
+(* ================================================================ *)
+
+let parse_event_line line =
+  match Safe_ops.parse_json_safe ~context:"activity_graph:event_line" line with
+  | Ok json -> event_of_yojson json
+  | Error _ -> None
+
+let collect_event_files config =
+  let root = root_dir config in
+  if not (Sys.file_exists root) then
+    []
+  else
+    Sys.readdir root
+    |> Array.to_list
+    |> List.sort compare
+    |> List.filter_map (fun month ->
+           let month_path = Filename.concat root month in
+           if Sys.file_exists month_path && Sys.is_directory month_path then
+             Some
+               (Sys.readdir month_path
+               |> Array.to_list
+               |> List.sort compare
+               |> List.filter_map (fun name ->
+                      if Filename.check_suffix name ".jsonl" then
+                        Some (Filename.concat month_path name)
+                      else
+                        None))
+           else
+             None)
+    |> List.flatten
+
+let repair_event_file_utf8_once config path =
+  let content = Fs_compat.load_file path in
+  if String.is_valid_utf_8 content then
+    content
+  else
+    Workspace_utils.with_file_lock config (lock_path config) (fun () ->
+        let latest = Fs_compat.load_file path in
+        if String.is_valid_utf_8 latest then
+          latest
+        else
+          let repair =
+            Safe_ops.repair_utf8_text_with_stats ~surface:"activity_graph"
+              ~path:("event_file:" ^ path)
+              latest
+          in
+          if not repair.changed then
+            latest
+          else begin
+            (if String.equal path (day_path config) then
+               Log.Misc.warn
+                 "[activity_graph] UTF-8 repaired current event file in memory path=%s \
+                  invalid_bytes=%d action=read_only_current_day"
+                 path repair.invalid_bytes
+             else
+               match Fs_compat.save_file_atomic path repair.text with
+               | Ok () ->
+                   Log.Misc.warn
+                     "[activity_graph] UTF-8 repaired persisted event file path=%s \
+                      invalid_bytes=%d action=rewrite_once"
+                     path repair.invalid_bytes
+               | Error msg ->
+                   Log.Misc.warn
+                     "[activity_graph] UTF-8 repaired event file in memory path=%s \
+                      invalid_bytes=%d action=rewrite_failed error=%s"
+                     path repair.invalid_bytes msg);
+            repair.text
+          end)
+
+let parse_events_from_file config path =
+  let content = repair_event_file_utf8_once config path in
+  let lines = String.split_on_char '\n' content in
+  List.filter_map
+    (fun line ->
+      if String.trim line = "" then None else parse_event_line line)
+    lines
+
+(* RFC-0201 Step 4 — past-day file cache.
+
+   [read_all_events] historically full-scans every activity-events
+   JSONL file on every call.  With 15+ MB of historic data that
+   compute dominated the background refresh fiber and undermined
+   the Step 1 wait-free read (snapshot only refreshes after the
+   fiber finishes one full scan).
+
+   Past-day files are immutable: once the calendar day rolls over,
+   no process appends to that JSONL again.  Cache the parsed event
+   list per full file fingerprint. On re-read, if device/inode/size/mtime/ctime
+   match the cached
+   entry, reuse the parsed list and skip [Fs_compat.load_file] +
+   line split + parse.  Only the current-day file (whose fingerprint
+   changes on append) is reparsed each refresh. *)
+module Past_day_path_map = Stdlib.Map.Make (String)
+
+type file_fingerprint =
+  { device : int
+  ; inode : int
+  ; size : int
+  ; mtime : float
+  ; ctime : float
+  }
+
+let file_fingerprint path =
+  match Unix.stat path with
+  | st ->
+    Some
+      { device = st.Unix.st_dev
+      ; inode = st.Unix.st_ino
+      ; size = st.Unix.st_size
+      ; mtime = st.Unix.st_mtime
+      ; ctime = st.Unix.st_ctime
+      }
+  | exception (Unix.Unix_error _ | Sys_error _) -> None
+;;
+
+let same_file_identity left right =
+  left.device = right.device && left.inode = right.inode
+;;
+
+let same_file_fingerprint left right =
+  same_file_identity left right
+  && left.size = right.size
+  && Float.equal left.mtime right.mtime
+  && Float.equal left.ctime right.ctime
+;;
+
+let same_file_signature left right =
+  List.equal
+    (fun (left_path, left_fingerprint) (right_path, right_fingerprint) ->
+       String.equal left_path right_path
+       && Option.equal same_file_fingerprint left_fingerprint right_fingerprint)
+    left
+    right
+;;
+
+(* What the caches are holding, so an operator reads it instead of estimating
+   it. Sizing this from outside meant taking process RSS, reading [live_words]
+   off /health, and multiplying the on-disk JSONL by a guessed parse factor --
+   an estimate that lands within a factor of two and settles nothing. The
+   parsed record count is the number that matters: it is what a retention
+   change moves, and RFC-0201 Step 4 sized this design against "15+ MB of
+   historic data" that is now an order of magnitude larger.
+
+   A read, not a gauge: this module has no metric dependency, and the caller
+   that already exports gauges decides how often to look. *)
+type cache_stats = {
+  past_day_files : int;  (** parsed day files held *)
+  past_day_records : int;  (** events across them *)
+}
+
+(* P0-4 (masc perf root-cause report, 2026-07-15, item (1)): the 2s
+   [Dashboard_snapshot.refresh_loop] calls [read_all_events] up to 3x per
+   tick — [json_response], [graph_json], and [agent_spans_json] each call
+   [list_events_with_meta] / [list_events_with_total] independently — and
+   every call full-reparsed the current-day JSONL via
+   [parse_events_from_file] (measured 1.2 MB typical, 23 MB peak; Yojson
+   lexing dominated idle CPU). Past-day files already get incremental
+   treatment via [past_day_cache] above; this extends the same
+   boundary-keyed design used by
+   [Telemetry_unified.trajectory_summary_cache] (telemetry_unified.ml
+   ~L791-847) and [Dated_jsonl.file_count_cache] (dated_jsonl.ml
+   ~L537-598) to the current-day file. Unlike those two (which cache an
+   aggregate), this caches the *parsed event list* itself, since all
+   three payload builders need the raw events, not just a count — so
+   caching here transparently de-duplicates all 3 per-tick calls (and any
+   non-default HTTP query) without threading a shared value through
+   [Dashboard_snapshot.compute]. *)
+type current_day_entry = {
+  cd_fingerprint : file_fingerprint;
+  cd_events : event list;  (* unsorted — callers always re-sort by [seq] *)
+  cd_parsed_to : int;
+      (** Byte offset the events above were parsed up to: the end of the last
+          newline-terminated line. *)
+  cd_prefix_digest : string;
+      (** Digest of the bytes below {!cd_parsed_to}. An append leaves them
+          alone and a rewrite does not, and no cheaper property tells the two
+          apart: a file rewritten in place keeps its inode, and one rewritten
+          to the same length keeps its size. Reading and digesting the prefix
+          costs 7.5 ms against 67.3 ms to parse it (5.3 MB current-day file,
+          measured 2026-09-05), so proving the prefix is nine times cheaper
+          than re-reading it. *)
+}
+
+type all_events_cache_entry =
+  { signature : (string * file_fingerprint option) list
+  ; events : event list
+  }
+
+type all_events_workspace_cache =
+  { root : string
+  ; mutex : Cross_context_mutex.t
+    (* Held for a whole read, and a read stats and reads the event files
+       through Eio, so the reading fiber suspends while it holds this. A
+       [Stdlib.Mutex] made the next fiber of the domain raise
+       [Sys_error "Mutex.lock: Resource deadlock avoided"] instead of
+       waiting (the cache gauge did, 2026-10-25). The cross-context lock
+       makes a fiber wait cooperatively. The serialization stays on purpose: a
+       cold read parses the whole store, and two readers must not both do it. *)
+  ; mutable entry : all_events_cache_entry option
+  ; (* The merged, seq-sorted events of every file EXCEPT the current day,
+       keyed on those files' own signature. [entry] above is keyed on every
+       file including today's, and today's grows on nearly every tick, so
+       [entry] misses almost always -- 2026-08-29 measured 6,072 of 440,068
+       retained events (1.4%) landing in the current-day file. Without this
+       the miss re-concatenated and re-sorted all 440,068 on every miss, for
+       a page of 500. Past files never change once the day rolls over, so
+       their merge is computed once and reused until a file is added,
+       rotated, or evicted. *)
+    mutable past_merged : all_events_cache_entry option
+  ; mutable past_day_cache :
+      (file_fingerprint * event list) Past_day_path_map.t
+  ; current_day_cache : (string, current_day_entry) Hashtbl.t
+  ; mutable last_used : int
+  ; mutable active_users : int
+  }
+
+(* The three default dashboard activity projections are built back-to-back.
+   Per-file caches avoid JSON parsing, but [read_all_events] still rebuilt and
+   sorted the complete retained event list independently for each projection.
+   Cache that immutable aggregate per workspace by a full file fingerprint so
+   unchanged readers share one sorted list without serializing other roots. *)
+let all_events_workspace_caches :
+    (string, all_events_workspace_cache) Hashtbl.t =
+  Hashtbl.create 4
+
+let all_events_workspace_caches_mu = Stdlib.Mutex.create ()
+let all_events_workspace_cache_limit = 16
+let all_events_workspace_use_counter = ref 0
+let all_events_rebuild_counter = Atomic.make 0
+
+(* Rebuilds of the past-day merge specifically. [all_events_rebuild_counter]
+   above counts aggregate misses, which happen on nearly every append; this
+   one has to stay flat across those, because the past files did not move. *)
+let past_merged_rebuild_counter = Atomic.make 0
+
+let evict_lru_idle_workspace_cache () =
+  let candidate =
+    Hashtbl.fold
+      (fun candidate_root candidate current ->
+         if candidate.active_users <> 0
+         then current
+         else
+           match current with
+           | None -> Some (candidate_root, candidate.last_used)
+           | Some (_, oldest) when candidate.last_used < oldest ->
+             Some (candidate_root, candidate.last_used)
+           | Some _ -> current)
+      all_events_workspace_caches
+      None
+  in
+  match candidate with
+  | None -> false
+  | Some (root, _) ->
+    Hashtbl.remove all_events_workspace_caches root;
+    true
+;;
+
+let acquire_all_events_workspace_cache root =
+  Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+    incr all_events_workspace_use_counter;
+    let last_used = !all_events_workspace_use_counter in
+    match Hashtbl.find_opt all_events_workspace_caches root with
+    | Some cache ->
+      cache.last_used <- last_used;
+      cache.active_users <- cache.active_users + 1;
+      cache
+    | None ->
+      if Hashtbl.length all_events_workspace_caches >= all_events_workspace_cache_limit
+      (* See [evict_lru_idle_workspace_cache]: its boolean is diagnostic only. *)
+      then ignore (evict_lru_idle_workspace_cache ());
+      let cache =
+        { root
+        ; mutex = Cross_context_mutex.create ()
+        ; entry = None
+        ; past_merged = None
+        ; past_day_cache = Past_day_path_map.empty
+        ; current_day_cache = Hashtbl.create 1
+        ; last_used
+        ; active_users = 1
+        }
+      in
+      Hashtbl.add all_events_workspace_caches root cache;
+      cache)
+;;
+
+let release_all_events_workspace_cache cache =
+  Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+    match Hashtbl.find_opt all_events_workspace_caches cache.root with
+    | Some current when current == cache ->
+      cache.active_users <- max 0 (cache.active_users - 1);
+      if Hashtbl.length all_events_workspace_caches > all_events_workspace_cache_limit
+      (* See [evict_lru_idle_workspace_cache]: release only needs its effect. *)
+      then ignore (evict_lru_idle_workspace_cache ())
+    | None | Some _ -> ())
+;;
+
+let reset_all_events_cache_for_testing () =
+  Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+    Hashtbl.reset all_events_workspace_caches;
+    all_events_workspace_use_counter := 0);
+  Atomic.set all_events_rebuild_counter 0;
+  Atomic.set past_merged_rebuild_counter 0
+;;
+
+let current_day_rebuild_counter = Atomic.make 0
+
+let reset_past_day_cache_for_testing () =
+  let caches =
+    Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+      Hashtbl.fold (fun _ cache acc -> cache :: acc) all_events_workspace_caches [])
+  in
+  List.iter
+    (fun cache ->
+       Cross_context_mutex.with_lock cache.mutex (fun () ->
+         cache.past_day_cache <- Past_day_path_map.empty;
+         cache.entry <- None))
+    caches
+;;
+
+let cache_stats () =
+  let caches =
+    Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+      Hashtbl.fold (fun _ cache acc -> cache :: acc) all_events_workspace_caches [])
+  in
+  List.fold_left
+    (fun stats cache ->
+       let files, records =
+         Cross_context_mutex.with_lock cache.mutex (fun () ->
+           ( Past_day_path_map.cardinal cache.past_day_cache
+           , Past_day_path_map.fold
+               (fun _ (_, events) acc -> acc + List.length events)
+               cache.past_day_cache
+               0 ))
+       in
+       { past_day_files = stats.past_day_files + files
+       ; past_day_records = stats.past_day_records + records
+       })
+    { past_day_files = 0; past_day_records = 0 }
+    caches
+;;
+
+(* How often an append was read as an append rather than as a whole file.
+   Beside [current_day_rebuild_counter] so a test can say which path ran. *)
+let current_day_append_counter = Atomic.make 0
+
+let reset_current_day_cache_for_testing () =
+  reset_all_events_cache_for_testing ();
+  Atomic.set current_day_rebuild_counter 0;
+  Atomic.set current_day_append_counter 0
+
+(* The current-day file is mutable, and it changes constantly: it is the file
+   every event is appended to. Keying the cache on the whole fingerprint meant
+   size and mtime moved on each append, so each read re-parsed the file from
+   zero. Measured 2026-09-05 on a 5.4 MB current-day file growing ~4 KB per
+   ten seconds: this call site allocated 1.9 GB in twenty-five seconds, the
+   largest single source in an otherwise idle server, and the resulting minor
+   collections stalled the scheduler past a second.
+
+   Soundness is proved rather than assumed. Same inode and a size that only
+   grew is not enough -- a file rewritten in place keeps its inode, and one
+   rewritten to the same length keeps its size, and the tests below hold both
+   cases against this. What settles it is the prefix itself: its digest is
+   recorded, and a read that finds it unchanged knows the bytes it already
+   parsed are the bytes still there. Anything else takes the full reparse.
+   [fold_appended_lines] stops at the last newline, so a line still being
+   flushed is left for the next read rather than parsed in half.
+
+   UTF-8 is not lost by reading a slice: [parse_event_line] repairs per line
+   through [Safe_ops.parse_json_safe], and the whole-file pass this replaces
+   never rewrote the current day either -- it repaired in memory and said so. *)
+let parse_current_day_events_cached cache config path : event list =
+  let prefix_digest upto =
+    if upto <= 0 then Digest.string ""
+    else Digest.string (Fs_compat.read_slice ~path ~from:0 ~len:upto)
+  in
+  let record fingerprint events parsed_to =
+    (* Re-stat: a write between the read and here would make the recorded
+       offset describe bytes we did not see. Storing the fingerprint we read
+       under keeps the next call's comparison honest. *)
+    match file_fingerprint path with
+    | Some after when same_file_fingerprint fingerprint after ->
+      Hashtbl.replace cache.current_day_cache path
+        { cd_fingerprint = after
+        ; cd_events = events
+        ; cd_parsed_to = parsed_to
+        ; cd_prefix_digest = prefix_digest parsed_to
+        }
+    | None | Some _ -> ()
+  in
+  let full_reparse fingerprint =
+    let events = parse_events_from_file config path in
+    Atomic.incr current_day_rebuild_counter;
+    (* Everything up to the last newline is accounted for. Taking the file
+       size instead would claim a half-written trailing line was parsed. *)
+    let (), boundary =
+      Fs_compat.fold_appended_lines ~path ~from:0 ~init:() ~f:(fun () _ -> ())
+    in
+    record fingerprint events boundary;
+    events
+  in
+  match file_fingerprint path with
+  | None -> parse_events_from_file config path
+  | Some fingerprint ->
+    (match Hashtbl.find_opt cache.current_day_cache path with
+     | Some entry when same_file_fingerprint entry.cd_fingerprint fingerprint ->
+       entry.cd_events
+     | Some entry
+       when same_file_identity entry.cd_fingerprint fingerprint
+            && fingerprint.size >= entry.cd_parsed_to
+            && String.equal
+                 (prefix_digest entry.cd_parsed_to)
+                 entry.cd_prefix_digest ->
+       (* The bytes already parsed are still those bytes, so only what follows
+          them is read. *)
+       let appended, boundary =
+         Fs_compat.fold_appended_lines ~path ~from:entry.cd_parsed_to ~init:[]
+           ~f:(fun acc line ->
+             match parse_event_line line with
+             | Some event -> event :: acc
+             | None -> acc)
+       in
+       if boundary = entry.cd_parsed_to && appended = []
+       then (
+         (* Grown, but not yet by a whole line. The parsed set is unchanged;
+            the fingerprint is refreshed so the next call compares against
+            what is on disk now. *)
+         record fingerprint entry.cd_events entry.cd_parsed_to;
+         entry.cd_events)
+       else (
+         let events = entry.cd_events @ List.rev appended in
+         Atomic.incr current_day_append_counter;
+         record fingerprint events boundary;
+         events)
+     | None | Some _ -> full_reparse fingerprint)
+
+(* P0-4 item (2): [past_day_cache] never removed an entry once inserted, so
+   a file pruned from disk by the existing 24h [MASC_JSONL_RETENTION_DAYS]
+   maintenance sweep (server_bootstrap_maintenance.ml, same
+   activity-events directory, default 30 days) stayed cached forever —
+   unbounded growth over the process lifetime (report item (6)).
+   Reconcile both caches against the live file set on every
+   [read_all_events] call: entries whose path is no longer present are
+   dropped. This never evicts a file [collect_event_files] would still
+   touch, so it cannot regress the hit rate for anything still on disk —
+   it only reclaims memory for files that are gone and would never be
+   looked up again. Deliberately NOT a second, independent "keep last N
+   days" cap: that would require either (a) bounding [read_all_events]'s
+   scan itself, which would change [total_matching_events] /
+   [events_store_total] output for stores with low daily event volume (a
+   real behavior change, out of scope here), or (b) a second retention
+   constant parallel to [MASC_JSONL_RETENTION_DAYS] that could drift from
+   it — the "Scattered Hardcoded Defaults" anti-pattern
+   software-development.md warns against. Mirroring the existing knob
+   instead of introducing a new one keeps a single retention SSOT. *)
+let evict_stale_cache_entries cache ~live_paths =
+  let live_set = StringSet.of_list live_paths in
+  cache.past_day_cache <-
+    Past_day_path_map.filter
+      (fun path _ -> StringSet.mem path live_set)
+      cache.past_day_cache;
+  Hashtbl.filter_map_inplace
+    (fun path entry -> if StringSet.mem path live_set then Some entry else None)
+    cache.current_day_cache
+
+(* One file, through whichever cache owns it. The caller holds [cache.mutex].
+   Extracted so the recent-only read below shares the exact parse and cache
+   behaviour of the full read -- two copies of this would drift, and the
+   drift would show up as a page that disagrees with itself. *)
+let parse_file_through_cache cache config ~current_day path =
+  if String.equal path current_day
+  then parse_current_day_events_cached cache config path
+  else (
+    match file_fingerprint path with
+    | None -> parse_events_from_file config path
+    | Some fingerprint ->
+      (match Past_day_path_map.find_opt path cache.past_day_cache with
+       | Some (cached_fingerprint, parsed)
+         when same_file_fingerprint cached_fingerprint fingerprint -> parsed
+       | None | Some _ ->
+         let parsed = parse_events_from_file config path in
+         cache.past_day_cache
+         <- Past_day_path_map.add path (fingerprint, parsed) cache.past_day_cache;
+         parsed))
+;;
+
+let read_all_events config =
+  let root = root_dir config in
+  let cache = acquire_all_events_workspace_cache root in
+  Fun.protect
+    ~finally:(fun () -> release_all_events_workspace_cache cache)
+    (fun () ->
+       Cross_context_mutex.with_lock cache.mutex (fun () ->
+         let current_day = day_path config in
+         let files = collect_event_files config in
+         evict_stale_cache_entries cache ~live_paths:files;
+         let signature_for paths =
+           List.map (fun path -> path, file_fingerprint path) paths
+         in
+         let signature = signature_for files in
+         match cache.entry with
+         | Some cached when same_file_signature cached.signature signature ->
+           cached.events
+         | None | Some _ ->
+           let by_seq (a : event) (b : event) = Int.compare a.seq b.seq in
+           let past_files =
+             List.filter (fun path -> not (String.equal path current_day)) files
+           in
+           let past_signature = signature_for past_files in
+           let past_events =
+             match cache.past_merged with
+             | Some cached
+               when same_file_signature cached.signature past_signature ->
+               cached.events
+             | None | Some _ ->
+               let merged =
+                 past_files
+                 |> List.fold_left
+                      (fun acc path ->
+                         let rows =
+                           parse_file_through_cache cache config ~current_day path
+                         in
+                         List.rev_append rows acc)
+                      []
+                 |> List.sort by_seq
+               in
+               Atomic.incr past_merged_rebuild_counter;
+               cache.past_merged <-
+                 Some { signature = past_signature; events = merged };
+               merged
+           in
+           let current_events =
+             if List.exists (fun path -> String.equal path current_day) files
+             then
+               parse_current_day_events_cached cache config current_day
+               |> List.sort by_seq
+             else []
+           in
+           (* Both sides are seq-sorted, so the join is a linear merge rather
+              than a sort of the concatenation. Sorting the whole retained
+              history was the cost this split removes. *)
+           let events = List.merge by_seq past_events current_events in
+           Atomic.incr all_events_rebuild_counter;
+           let files_after = collect_event_files config in
+           let signature_after = signature_for files_after in
+           if same_file_signature signature_after signature
+           then cache.entry <- Some { signature; events };
+           events))
+
+let max_event_seq events =
+  List.fold_left (fun acc (value : event) -> max acc value.seq) 0 events
+
+let matches_filters ?(kinds = []) (value : event) =
+  kinds = [] || List.mem value.kind kinds
+
+(** Returns [(page, total_matching, latest_store_seq, latest_matching_seq)].
+    [total_matching] and [latest_matching_seq] are computed before [limit].
+    [latest_store_seq] is the max of the persisted sequence counter and the
+    JSONL rows so a stale [_seq] file cannot make dashboard cursors move
+    backward. *)
+(* [keep] runs with the other filters, BEFORE [limit] pages the result, so
+   [limit] counts events the caller wanted. Applying it afterwards discards
+   part of the page and leaves the caller unable to say how wide a page it
+   needs — the read already loads the whole log, so a caller that filtered
+   later had to inflate [limit] and still lost its oldest events to a busier
+   agent. *)
+(* [keep] is optional so the unfiltered callers can say so. The three default
+   dashboard projections ask for the whole store with no kind, no cursor and
+   no time bound; running [List.filter] for them rebuilt the retained list,
+   cons by cons, to hand back the same events. With nothing to filter the
+   page is a suffix of the cached list and [List.drop] shares that list's
+   tail, so the rebuild is gone: [List.length] still walks but allocates
+   nothing, and [max_event_seq] reuses the value computed above because the
+   list is the same one.
+
+   Sizing this honestly: at 440,068 retained events the copy is roughly 10MB
+   of list cells, which is not where activity_events_default's 2,909MB comes
+   from. That figure is a cold parse -- the per-file parse caches are process
+   memory, so the first read after a restart re-parses the whole store, and
+   the warning lands exactly once per boot (measured across 8 consecutive
+   boots on 2026-08-29/30, 2,905MB to 2,920MB, one per boot). masc#31722
+   carries that. This removes a copy that had no reason to exist; it does not
+   remove the parse. *)
+(* Line counts per file, keyed on size, so [total] does not need the store
+   parsed. Counting bytes is not parsing: the whole 238MB store scans in a
+   fraction of what parsing 440,068 events costs, and after the first pass
+   only appended bytes are read.
+
+   [total] means "events matching the filters", and with no filters that is
+   every event in the store. Line count answers it only while every
+   non-empty line parses to an event -- measured 2026-08-30 on the live
+   store, 444,600 non-empty lines and 444,600 parsed events with an integer
+   seq, difference zero. A corrupt line would make this over-count, which
+   moves [has_more] toward true; the pinned test below is what catches the
+   assumption breaking. *)
+let line_count_cache : (string, int * int) Hashtbl.t = Hashtbl.create 64
+let line_count_cache_mu = Stdlib.Mutex.create ()
+
+let reset_line_count_cache_for_testing () =
+  Stdlib.Mutex.protect line_count_cache_mu (fun () -> Hashtbl.reset line_count_cache)
+;;
+
+let count_lines_cached path =
+  match Unix.stat path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> 0
+  | st ->
+    let size = st.Unix.st_size in
+    let cached =
+      Stdlib.Mutex.protect line_count_cache_mu (fun () ->
+        Hashtbl.find_opt line_count_cache path)
+    in
+    let from, base =
+      match cached with
+      | Some (boundary, count) when boundary = size -> size, count
+      | Some (boundary, count) when boundary < size -> boundary, count
+      (* boundary past the size: the file shrank or rotated, so recount. *)
+      | Some _ | None -> 0, 0
+    in
+    if from = size && cached <> None
+    then base
+    else (
+      let count, boundary =
+        Fs_compat.fold_appended_lines ~path ~from ~init:base ~f:(fun acc line ->
+          if String.trim line = "" then acc else acc + 1)
+      in
+      Stdlib.Mutex.protect line_count_cache_mu (fun () ->
+        Hashtbl.replace line_count_cache path (boundary, count));
+      count)
+;;
+
+let total_event_count config =
+  collect_event_files config
+  |> List.fold_left (fun acc path -> acc + count_lines_cached path) 0
+;;
+
+(* The newest [limit] events without parsing the ones before them.
+
+   Files are collected in month/day order and seq is bumped under the same
+   lock that appends the line, so a later file never holds a smaller seq than
+   an earlier one -- verified on the live store 2026-08-30: 31 files, zero
+   non-ascending seq inside a file and zero ordering violations across them.
+   Walking newest-first and stopping once [limit] is covered therefore yields
+   the same suffix the full read would.
+
+   One file past the stopping point is read anyway. That is the margin for
+   the one way the ordering could bend -- a clock that moves back would append
+   to an older file with a still-increasing seq -- and it costs one file's
+   parse rather than the store's. *)
+let read_recent_events config ~limit =
+  let root = root_dir config in
+  let cache = acquire_all_events_workspace_cache root in
+  Fun.protect
+    ~finally:(fun () -> release_all_events_workspace_cache cache)
+    (fun () ->
+       Cross_context_mutex.with_lock cache.mutex (fun () ->
+         let current_day = day_path config in
+         let files = collect_event_files config in
+         evict_stale_cache_entries cache ~live_paths:files;
+         let rec gather acc covered = function
+           | [] -> acc
+           | path :: rest ->
+             let rows = parse_file_through_cache cache config ~current_day path in
+             let acc = rows :: acc in
+             let covered = covered + List.length rows in
+             if covered >= limit
+             then (
+               match rest with
+               | [] -> acc
+               | margin :: _ ->
+                 parse_file_through_cache cache config ~current_day margin :: acc)
+             else gather acc covered rest
+         in
+         gather [] 0 (List.rev files)
+         |> List.concat
+         |> List.sort (fun (a : event) (b : event) -> Int.compare a.seq b.seq)))
+;;
+
+let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ?keep
+    ?since_ms () =
+  let filtered =
+    after_seq > 0
+    || kinds <> []
+    || Option.is_some keep
+    || Option.is_some since_ms
+  in
+  if not filtered
+  then (
+    (* The three default dashboard projections land here: the whole store, no
+       kind, no cursor, no time bound, and a page of the newest 500 or 1000.
+       Reading only the files that cover those, and counting the rest rather
+       than parsing them, is what keeps the first read after a restart off
+       the whole store. A filtered read still needs everything, because a
+       kind or a time bound can match an event of any age. *)
+    let recent = read_recent_events config ~limit in
+    let recent_count = List.length recent in
+    let page =
+      if recent_count > limit
+      then List.drop (recent_count - limit) recent
+      else recent
+    in
+    let max_seq = max_event_seq recent in
+    let total = total_event_count config in
+    (page, total, max (read_current_seq config) max_seq, max_seq))
+  else (
+    let stored = read_all_events config in
+    let stored_max_seq = max_event_seq stored in
+    let latest_store_seq = max (read_current_seq config) stored_max_seq in
+    let all =
+      stored
+      |> List.filter (fun value ->
+             value.seq > after_seq
+             && matches_filters ~kinds value
+             && (match keep with None -> true | Some keep -> keep value)
+             && (match since_ms with
+                 | None -> true
+                 | Some ms -> value.ts_ms >= ms))
+    in
+    let total = List.length all in
+    let page =
+      if after_seq > 0 then
+        List.take limit all
+      else
+        all |> List.drop (max 0 (total - limit))
+    in
+    (page, total, latest_store_seq, max_event_seq all))
+
+(** Returns [(page, total_matching)] where [total_matching] is the count
+    of all events matching filters before [limit] is applied. *)
+let list_events_with_total config ?(kinds = []) ~after_seq ~limit
+    ?since_ms () =
+  let page, total, _latest_store_seq, _latest_matching_seq =
+    list_events_with_meta config ~kinds ~after_seq ~limit ?since_ms ()
+  in
+  (page, total)
+
+let list_events config ?(kinds = []) ~after_seq ~limit ~keep () =
+  let page, _total, _latest_store_seq, _latest_matching_seq =
+    list_events_with_meta config ~kinds ~after_seq ~limit ~keep ()
+  in
+  page
+
+let window_meta ~limit ~events_shown ~events_store_total
+    ?(extra = []) () : Yojson.Safe.t =
+  `Assoc ([
+    ("limit", `Int limit);
+    ("events_shown", `Int events_shown);
+    ("events_store_total", `Int events_store_total);
+    ("has_more", `Bool (events_store_total > events_shown));
+  ] @ extra)
+
+
+let activity_events_store_path config = root_dir config
+
+(* ================================================================ *)
+(* Event emission                                                   *)
+(* ================================================================ *)
+
+let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
+  let value, json_line =
+    Workspace_utils.with_file_lock config (lock_path config) (fun () ->
+        let dated = current_dated_path config in
+        ensure_dirs config dated;
+        let seq = read_current_seq config + 1 in
+        write_current_seq config seq;
+        let value =
+          {
+            seq;
+            ts_ms = now_ts_ms ();
+            ts_iso = Masc_domain.now_iso ();
+            kind;
+            actor;
+            subject;
+            payload;
+            tags;
+          }
+          |> sanitize_event_traced
+        in
+        let json_line = Yojson.Safe.to_string (event_to_yojson value) in
+        append_line dated.Dated_jsonl.Store.path (json_line ^ "\n");
+        (value, json_line))
+  in
+  let encoded = format_sse_event_data ~seq:value.seq json_line in
+  let snapshot =
+    with_registry_ro (fun () -> Hashtbl.fold (fun key client acc -> (key, client) :: acc) clients [])
+  in
+  let failed = ref [] in
+  List.iter
+    (fun (session_id, client) ->
+      if value.seq > client.last_seq && client_matches client value then
+        (try
+          client.push encoded;
+          client.last_seq <- value.seq
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Misc.warn "SSE push failed for %s: %s" session_id (Printexc.to_string exn);
+            failed := session_id :: !failed))
+    snapshot;
+  List.iter unregister !failed;
+  value
+
+(* ================================================================ *)
+(* JSON response                                                    *)
+(* ================================================================ *)
+
+let build_json_response config ~events ~total_matching ~latest_store_seq
+    ~latest_matching_seq ~after_seq ~limit ~kinds =
+  let next_after_seq =
+    match List.rev events with
+    | last :: _ -> last.seq
+    | [] -> after_seq
+  in
+  `Assoc
+    [
+      ("generated_at_iso", `String (Masc_domain.now_iso ()));
+      ("dashboard_surface", `String "/api/v1/activity/events");
+      ("source", `String "activity_graph_jsonl");
+      ( "retention",
+        `Assoc
+          [
+            ("scope", `String "activity_events");
+            ("workspace_root", `String (Workspace_utils.masc_dir config));
+            ("durable_store", `String (activity_events_store_path config));
+            ("file_pattern", `String "activity-events/YYYY-MM/DD.jsonl");
+            ("seq_counter", `String (seq_path config));
+            ( "cache_policy",
+              `String
+                "uncached; reads persisted JSONL rows; delta cursor via after_seq" );
+          ] );
+      ( "query",
+        `Assoc
+          [
+            ("after_seq", `Int after_seq);
+            ("limit", `Int limit);
+            ("kinds", `List (List.map (fun value -> `String value) kinds));
+          ] );
+      ("events", `List (List.map event_to_yojson events));
+      ("count", `Int (List.length events));
+      ("total_matching_events", `Int total_matching);
+      ("after_seq", `Int after_seq);
+      ("next_after_seq", `Int next_after_seq);
+      ("limit", `Int limit);
+      ("kinds", `List (List.map (fun value -> `String value) kinds));
+      ("latest_seq", `Int latest_store_seq);
+      ("latest_matching_seq", `Int latest_matching_seq);
+    ]
+;;
+
+let json_response config ?(kinds = []) ~after_seq ~limit () =
+  let events, total_matching, latest_store_seq, latest_matching_seq =
+    list_events_with_meta config ~kinds ~after_seq ~limit ()
+  in
+  build_json_response config ~events ~total_matching ~latest_store_seq
+    ~latest_matching_seq ~after_seq ~limit ~kinds
+;;
+
+(* ================================================================ *)
+(* Graph building                                                   *)
+(* ================================================================ *)
+
+let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
+    ?(kinds = []) () =
+  let kind_counts_json =
+    let counts =
+      List.fold_left
+        (fun acc (e : event) ->
+          let prev = StringMap.find_opt e.kind acc |> Option.value ~default:0 in
+          StringMap.add e.kind (prev + 1) acc)
+        StringMap.empty
+        events
+    in
+    `Assoc
+      (StringMap.fold
+         (fun kind count acc -> (kind, `Int count) :: acc)
+         counts []
+      |> List.sort (fun (a, _) (b, _) -> String.compare a b))
+  in
+  let heatmap_json =
+    let matrix = Array.init 7 (fun _ -> Array.make 24 0) in
+    let max_count = ref 0 in
+    List.iter
+      (fun (e : event) ->
+        let tm = Unix.localtime (float_of_int e.ts_ms /. 1000.0) in
+        let day = if tm.tm_wday = 0 then 6 else tm.tm_wday - 1 in
+        let hour = tm.tm_hour in
+        let next_count = matrix.(day).(hour) + 1 in
+        matrix.(day).(hour) <- next_count;
+        if next_count > !max_count then max_count := next_count)
+      events;
+    let matrix_json =
+      `List
+        (Array.to_list
+           (Array.map
+              (fun row ->
+                `List
+                  (Array.to_list
+                     (Array.map (fun count -> `Int count) row)))
+              matrix))
+    in
+    `Assoc
+      [
+        ("matrix", matrix_json);
+        ("max", `Int !max_count);
+        ("total", `Int (List.length events));
+      ]
+  in
+  let nodes = Hashtbl.create 64 in
+  let edges = Hashtbl.create 96 in
+  List.iter (reduce_event ~nodes ~edges) events;
+  let node_list =
+    Hashtbl.fold (fun _ node acc -> node :: acc) nodes []
+    |> List.sort (fun a b -> String.compare a.node_id b.node_id)
+  in
+  let edge_list =
+    Hashtbl.fold (fun _ edge acc -> edge :: acc) edges []
+    |> List.sort (fun a b -> String.compare a.edge_id b.edge_id)
+  in
+  let nodes_json =
+    List.map
+      (fun node ->
+        graph_node_to_yojson
+          {
+            id = node.node_id;
+            kind = node.node_kind;
+            label = node.label;
+            status = node.status;
+            weight = node.weight;
+            last_event_at = node.last_event_at;
+            meta = node.meta;
+          })
+      node_list
+  in
+  let edges_json =
+    List.map
+      (fun edge ->
+        graph_edge_to_yojson
+          {
+            id = edge.edge_id;
+            source = edge.source;
+            target = edge.target;
+            kind = edge_kind_to_wire edge.edge_kind;
+            weight = edge.weight;
+            active = edge.active;
+            last_event_at = edge.last_event_at;
+            meta = edge.meta;
+          })
+      edge_list
+  in
+  let timeline =
+    let total = List.length events in
+    events |> List.drop (max 0 (total - timeline_limit))
+  in
+  let count_kind kind =
+    List.length
+      (List.filter (fun node -> String.equal node.node_kind kind) node_list)
+  in
+  (* No node status marks an agent inactive, so every agent node is active. *)
+  let agent_count = count_kind "agent" in
+  `Assoc
+    [
+      ("generated_at", `String (Masc_domain.now_iso ()));
+      ( "window",
+        window_meta ~limit
+          ~events_shown:(List.length events)
+          ~events_store_total
+          ~extra:[
+            ("kinds", `List (List.map (fun value -> `String value) kinds));
+          ] () );
+      ( "stats",
+        `Assoc
+          [
+            ("event_count", `Int (List.length events));
+            ("edge_count", `Int (List.length edges_json));
+            ("agent_count", `Int agent_count);
+            ("task_count", `Int (count_kind "task"));
+            ("active_agents", `Int agent_count);
+          ] );
+      ("kind_counts", kind_counts_json);
+      ("heatmap", heatmap_json);
+      ("nodes", `List nodes_json);
+      ("edges", `List edges_json);
+      ("timeline", `List (List.map event_to_yojson timeline));
+    ]
+;;
+
+let graph_json config ?(kinds = []) ?(limit = 500)
+    ?(timeline_limit = 80) ?since_ms () =
+  let events, events_store_total =
+    list_events_with_total config ~kinds ~after_seq:0 ~limit ?since_ms ()
+  in
+  build_graph_json ~events ~events_store_total ~limit ~timeline_limit ~kinds ()
+;;
+
+(* ================================================================ *)
+(* Agent spans                                                      *)
+(* ================================================================ *)
+
+(* Span start events paired with their matching end events *)
+let span_start_kind = function
+  | Some (Task_event Event_kind.Task.(Claimed | Started)) -> Some Task_span
+  | Some
+      (Task_event
+         Event_kind.Task.(
+           ( Created | Released | Done | Cancelled | Submit_for_verification
+           | Approved | Rejected | Linked )))
+  | Some (Tool_execution_event (External_tool_called | Keeper_in_turn_tool_executed))
+  | Some (Message_event Event_kind.Message.(Broadcast | Mentioned))
+  | Some (Board_event Event_kind.Board.(Posted | Commented | Voted | Deleted))
+  | None -> None
+
+(* Whose span an ending event closes. A verdict keeps its authority as actor,
+   and the span belongs to the producer whose work the verdict commits. *)
+type span_closer =
+  | Acting_agent
+  | Task_producer
+
+(** Issue #8711: single SSOT for span-ending event kinds. The previous
+    [span_end_kind] / [span_end_status] pair reproduced the same
+    alphabet in two places; if either gained a constructor without the
+    other being updated the catch-all in [span_end_status] would
+    silently map the new kind to [Span_ended], losing semantic
+    information. Combining them forces both pieces to stay in sync at
+    compile time (Parse, don't validate). Whose span the event closes is
+    answered here too, for the same reason. *)
+let span_end_classification = function
+  | Some (Task_event Event_kind.Task.Done) ->
+    Some (Task_span, Span_completed, Acting_agent)
+  (* RFC-0323 G-3: approve-produced Done completes the task span too. *)
+  | Some (Task_event Event_kind.Task.Approved) ->
+    Some (Task_span, Span_completed, Task_producer)
+  | Some (Task_event Event_kind.Task.Released) ->
+    Some (Task_span, Span_released, Acting_agent)
+  | Some (Task_event Event_kind.Task.Cancelled) ->
+    Some (Task_span, Span_cancelled, Task_producer)
+  | Some
+      (Task_event
+         Event_kind.Task.(
+           ( Created | Claimed | Started | Submit_for_verification | Rejected
+           | Linked )))
+  | Some (Tool_execution_event (External_tool_called | Keeper_in_turn_tool_executed))
+  | Some (Message_event Event_kind.Message.(Broadcast | Mentioned))
+  | Some (Board_event Event_kind.Board.(Posted | Commented | Voted | Deleted))
+  | None -> None
+
+
+
+let build_agent_spans_json ~events ~events_store_total ~limit =
+  let now_ms = now_ts_ms () in
+  let open_spans
+    : (string * string option, int * agent_span_kind * string) Hashtbl.t
+    =
+    Hashtbl.create 32
+  in
+  let closed_spans : agent_span list ref = ref [] in
+  let agents_set : (string, bool) Hashtbl.t = Hashtbl.create 16 in
+  List.iter (fun (e : event) ->
+    let agent_id = match e.actor with
+      | Some a -> Some a.id
+      | None -> None
+    in
+    let subject_id = match e.subject with
+      | Some s -> Some s.id
+      | None -> None
+    in
+    match agent_id with
+    | None -> ()
+    | Some aid ->
+        Hashtbl.replace agents_set aid true;
+        let kind = drawn_event_kind_of_string e.kind in
+        (match span_start_kind kind with
+         | Some sk ->
+             let label = match subject_id with
+               | Some sid -> sid
+               | None -> e.kind
+             in
+             Hashtbl.replace open_spans (aid, subject_id) (e.ts_ms, sk, label)
+         | None -> ());
+        (match span_end_classification kind with
+         | Some (ek, status, closer) ->
+             (* Verdicts retain their authority as actor. Their producer
+                owns the span; direct cancellations use the acting owner. *)
+             let closing_aid =
+               match closer with
+               | Task_producer ->
+                   (match
+                      Json_util.assoc_member_opt
+                        Event_kind.Task.producer_payload_key
+                        e.payload
+                    with
+                    | Some (`String name) when String.trim name <> "" -> name
+                    | Some _ | None -> aid)
+               | Acting_agent -> aid
+             in
+             let key = (closing_aid, subject_id) in
+             (match Hashtbl.find_opt open_spans key with
+              | Some (start_ms, sk, label) when sk = ek ->
+                  Hashtbl.remove open_spans key;
+                  closed_spans := {
+                    agent = closing_aid;
+                    start_ms;
+                    end_ms = e.ts_ms;
+                    span_kind = sk;
+                    label;
+                    span_status = status;
+                  } :: !closed_spans
+              | None | Some _ -> ())
+         | None -> ())
+  ) events;
+  Hashtbl.iter (fun (aid, _subj) (start_ms, sk, label) ->
+    closed_spans := {
+      agent = aid;
+      start_ms;
+      end_ms = now_ms;
+      span_kind = sk;
+      label;
+      span_status = Span_open;
+    } :: !closed_spans
+  ) open_spans;
+  let all_spans = List.rev !closed_spans in
+  let agents = Hashtbl.fold (fun k _ acc -> k :: acc) agents_set []
+    |> List.sort String.compare
+  in
+  let min_ms = List.fold_left (fun m (s : agent_span) -> min m s.start_ms) max_int all_spans in
+  let max_ms = List.fold_left (fun m (s : agent_span) -> max m s.end_ms) 0 all_spans in
+  let time_range_min = if all_spans = [] then now_ms else min_ms in
+  let time_range_max = if all_spans = [] then now_ms else max_ms in
+  `Assoc [
+    ("agents", `List (List.map (fun a -> `String a) agents));
+    ("spans", `List (List.map agent_span_to_yojson all_spans));
+    ("time_range", `Assoc [
+      ("min_ms", `Int time_range_min);
+      ("max_ms", `Int time_range_max);
+    ]);
+    ("window",
+     window_meta ~limit
+       ~events_shown:(List.length events)
+       ~events_store_total
+        ~extra:[("spans_count", `Int (List.length all_spans))]
+       ());
+  ]
+;;
+
+let agent_spans_json config ?(limit = 500) ?since_ms () =
+  let events, events_store_total =
+    list_events_with_total config ~kinds:[] ~after_seq:0 ~limit ?since_ms ()
+  in
+  build_agent_spans_json ~events ~events_store_total ~limit
+;;
+
+type default_projections = {
+  events_default : Yojson.Safe.t;
+  graph_default : Yojson.Safe.t;
+  swimlane_default : Yojson.Safe.t;
+}
+
+let default_projections config : default_projections =
+  let events_1000, total, latest_store_seq, latest_matching_seq =
+    list_events_with_meta config ~kinds:[] ~after_seq:0 ~limit:1000 ()
+  in
+  let events_default =
+    build_json_response config ~events:events_1000 ~total_matching:total
+      ~latest_store_seq ~latest_matching_seq ~after_seq:0 ~limit:1000 ~kinds:[]
+  in
+  let count_1000 = List.length events_1000 in
+  let events_500 =
+    if count_1000 > 500 then List.drop (count_1000 - 500) events_1000 else events_1000
+  in
+  let graph_default =
+    build_graph_json ~events:events_500 ~events_store_total:total ~limit:500
+      ~timeline_limit:80 ~kinds:[] ()
+  in
+  let swimlane_default =
+    build_agent_spans_json ~events:events_500 ~events_store_total:total ~limit:500
+  in
+  { events_default; graph_default; swimlane_default }
+;;
+
+module For_testing = struct
+  let reset_current_day_cache_for_testing = reset_current_day_cache_for_testing
+  let reset_past_day_cache_for_testing = reset_past_day_cache_for_testing
+  let reset_line_count_cache_for_testing = reset_line_count_cache_for_testing
+  let current_day_rebuild_count () = Atomic.get current_day_rebuild_counter
+  let current_day_append_count () = Atomic.get current_day_append_counter
+  let all_events_rebuild_count () = Atomic.get all_events_rebuild_counter
+  let past_merged_rebuild_count () = Atomic.get past_merged_rebuild_counter
+  let touch_workspace_cache root =
+    let cache = acquire_all_events_workspace_cache root in
+    release_all_events_workspace_cache cache
+  ;;
+
+  let workspace_cache_count () =
+    Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+      Hashtbl.length all_events_workspace_caches)
+  ;;
+
+  let workspace_cache_mem root =
+    Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+      Hashtbl.mem all_events_workspace_caches root)
+  ;;
+
+  let past_day_cache_entry_count () =
+    (cache_stats ()).past_day_files
+  let current_day_path = day_path
+end
+
+(* For [Heap_roots]: walk the table under its own lock, so the diagnostic
+   never counts a bucket array another domain is resizing. Never called from
+   inside this module's critical sections; the lock is not reentrant. *)
+let heap_root walk = Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () -> walk (Obj.repr all_events_workspace_caches))

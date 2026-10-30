@@ -1,0 +1,183 @@
+(lang dune 3.22)
+
+(using menhir 3.0)
+
+(name masc)
+(version 0.66.0)
+
+; Local-sandbox-only: vendor/ocaml-msx carries a copy of the pinned
+; ocaml-msx package so sandboxes whose opam switch lacks the pin can still
+; build. Declaring the package here lets lib/msx_lane link
+; ocaml-msx.msx from the vendored sources. Environments with the real pin
+; installed find both the vendored and the pinned package at the same
+; findlib names, so nothing changes for CI; the vendored directory stays
+; uncommitted.
+(package
+ (name ocaml-msx)
+ ; vendor/ is gitignored, so in every committed tree this package owns no
+ ; stanzas. Without (allow_empty) the <pkg>.install validation that the
+ ; default alias demands fails and plain `dune build` stops repo-wide,
+ ; taking every public library and executable (browser_host included)
+ ; out of the default build.
+ (allow_empty))
+
+; Format OCaml, and only OCaml. Nothing enforces formatting today:
+; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the
+; ocamlformat workflow this comment used to cite no longer exists. But
+; `dune fmt` formats every language it knows, so it rewrote 18 dune files
+; nobody checks, and the one blank line it added to lib/dune pushed the
+; structure ratchet's then line-count metric past its baseline. The repo's
+; own formatter broke the repo's own gate (#29253). That metric now counts
+; library modules rather than file lines, but scoping formatting to OCaml
+; alone is still what makes `dune fmt` safe to run.
+(formatting
+ (enabled_for ocaml))
+
+(generate_opam_files true)
+(implicit_transitive_deps false)
+(executables_implicit_empty_intf false)
+
+(source
+ (github jeong-sik/masc))
+
+(authors "Jeongsik Yun")
+
+(maintainers "Jeongsik Yun")
+
+(license MIT)
+
+(documentation https://github.com/jeong-sik/masc)
+
+(package
+ (name masc)
+ (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
+ (description "Multi-Agent Shared Context: a harness for running several coding agents against one repository, with the shared workspace state served over MCP and a terminal UI")
+ (depends
+  (ocaml (= 5.5.1))
+  ; [dune] dependency is implicit from [(lang dune 3.22)] above —
+  ; declaring it again here makes the generated .opam emit
+  ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).
+  ; External dependencies (opam pin)
+  (mcp_protocol (>= 1.3.0))
+  (grpc-direct-core (>= 0.1.0))
+  (grpc-direct (>= 0.1.0))
+  (ws-direct-core (>= 0.2.0))
+  (ws-direct-gluten (>= 0.2.0))
+  (ws-direct-eio (>= 0.2.0))
+  ; lib/msx_lane links ocaml-msx.msx. The generated masc.opam carried this
+  ; dependency by hand while dune-project did not declare it, so every local
+  ; `dune build` regenerated masc.opam without the line and left the worktree
+  ; dirty -- and a run that nobody reverted took the dependency out (#34747).
+  ; Path-pinned: `opam pin add ocaml-msx --kind=path <core repo>`, per bin/dune.
+  ocaml-msx
+  ; lib/dos_lane links ocaml-dos.dosmachine, the same way lib/msx_lane links
+  ; the MSX core: a second machine keepers play on (RFC-0439).
+  ocaml-dos
+  ; Native stdout colour capability detection links the system terminfo API.
+  (conf-ncurses :build)
+  ; Standard dependencies
+  (re (>= 1.10))
+  (ptime (>= 1.2))
+  zarith
+  (qrc (= 0.2.0))
+  ; Upper bound, not just a floor. yojson 3.0 landed through a floor-only
+  ; constraint on a cache miss and broke every build on main (#28327); the
+  ; repair raised the floor and left 3 -> 4 open (#28543). --locked pins the
+  ; exact version now, so this is the answer for anything that resolves
+  ; without the lock.
+  (yojson
+   (and
+    (>= 3.0)
+    (< 4.0)))
+  (otoml (>= 1.0))
+  (yaml (= 3.2.0))
+  (graphql (>= 0.14.0))
+  (graphql_parser (>= 0.14.0))
+  (cmdliner (>= 1.1))
+  (cohttp (>= 5.0))
+  (cohttp-eio (>= 6.0))
+  ; RFC-0107 Phase D — pooled keep-alive HTTP transport. piaf provides
+  ; per-endpoint persistent client (Client.t) + h1/h2 + Eio integration;
+  ; multi-host pool layer (Host_key map, idle eviction, TLS cache) is
+  ; built on top in lib/masc_http_client/pool.ml.  macOS install needs
+  ; brew openssl@3 + CPATH=/opt/homebrew/opt/openssl@3/include
+  ; LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib environment overrides
+  ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
+  (piaf (= 0.2.0))
+  (eio-ssl (>= 0.3.0))
+  ;; Agent execution is built from packages/agent_core in this repository.
+  ;; It is a private MASC library, not an independently versioned package.
+  angstrom
+  (uri (>= 4.4))
+  (tls (>= 2.1.2))
+  (tls-eio (>= 2.1.2))
+  (domain-name (>= 0.4))
+  (ipaddr (>= 5.6))
+  (ca-certs (>= 0.2))
+  (ppx_deriving_yojson (>= 3.6))
+  (ppx_enumerate (>= v0.17.0))
+  (ppx_let (>= v0.17.0))
+  (ppx_deriving (>= 5.2))
+  (ppxlib (>= 0.30))
+  (sqlite3 (>= 5.4.2))
+  (mirage-crypto (>= 1.0))
+  (mirage-crypto-rng (>= 1.0))
+  (mirage-crypto-pk (>= 1.0))
+  ; Upper bound, not just a floor. x509 1.2.0 types the CN constructor as
+  ; Common_name.t; 1.0.6 (locked) through 1.1.1 take a string, which is what
+  ; packages/agent_core/test/test_tls_cancellability.ml passes.
+  (x509 (and (>= 1.0) (< 1.2)))
+  ; Upper bound, not just a floor. jose is below 1.0, so a minor release may
+  ; change what lib/auth/oidc_id_token_signature.ml matches on. It verifies
+  ; the RS256 signature of an OIDC ID token against the provider's JWKS.
+  (jose (and (>= 0.11.0) (< 0.12.0)))
+  (integers (>= 0.7))
+  (zstd (>= 0.4))
+  (decompress (>= 1.5.3))
+  (checkseum (>= 0.5.2))
+  (httpun (>= 0.2))
+  (httpun-eio (>= 0.2))
+  (httpun-ws (= 0.2.0))
+  (bigstringaf (>= 0.10))
+  (eio (>= 1.0))
+  (eio_main (>= 1.0))
+  (eio_posix (>= 0.16))
+  (cstruct (>= 6.0))
+  (digestif (>= 1.1))
+  (eqaf (>= 0.10))
+  optint
+  (ocaml-protoc-plugin (>= 4.0))
+  (pbrt (and (>= 3.0) (< 4.0)))
+  (h2 (>= 0.13))
+  (h2-eio (>= 0.13))
+  (alcotest (and :with-test (>= 1.6)))
+  (qcheck-core (and :with-test (>= 0.21)))
+  (qcheck-alcotest (and :with-test (>= 0.21)))
+  (bisect_ppx (and :with-test (>= 2.8)))
+  (mtime (>= 2.0))
+  (markup (>= 1.0.3))
+  (uutf (>= 1.0.0))
+  (uucp (>= 17.0.0))
+  (uunf (>= 17.0.0))
+  (uuseg (>= 17.0.0))
+  (uuidm (>= 0.9.10))
+  ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
+  ; atdgen runs at build-time (codegen for sse_event.atd →
+  ; sse_event_{t,j}.{ml,mli}); atdgen-runtime is linked into the
+  ; generated _j module.  The typed SSE library is production-required.
+  (atdgen (and :build (>= 4.2.0)))
+  (atdgen-runtime (>= 4.2.0))
+  ; RFC-0004 Phase A0.2 PR-2: atdts generates TypeScript decoders
+  ; from sse_event.atd for the dashboard (committed at
+  ; dashboard/src/schemas/sse_event_generated.ts).  Build-time only;
+  ; no runtime linkage.  CI invokes it via dashboard/scripts/gen-sse-types.sh.
+  (atdts (and :build (>= 4.2.0)))
+  ; OpenTelemetry observability + OTLP exporter.  MASC consumes the
+  ; [opentelemetry.client] findlib library exposed by 0.13; newer package
+  ; families use a different public library layout.
+  (opentelemetry (= 0.13))
+  (ambient-context-eio (>= 0.2))
+  ; Build-time embedder for default config seeds (init subcommand)
+  (crunch (and :build (>= 4.0)))))
+ 
+; Formatting

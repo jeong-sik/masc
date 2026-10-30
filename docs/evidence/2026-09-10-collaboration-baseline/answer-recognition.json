@@ -1,0 +1,13 @@
+[
+  {
+    "ts": 1789043190.380447,
+    "keeper": "exhibit-editor",
+    "tool": "keeper_memory_retract",
+    "input": {
+      "memory_id": "sha256:79f260d70df52dcf4ebaab21b589b25ea9329899a9dd295bba0961e2bca350af",
+      "reason": "운영자가 확정 정보를 제공해 '온라인 가상 전시만, 추후 공지' 가정이 더 이상 유효하지 않음. task-001 작업 산출물도 이 가정으로 생성되어 재작업 필요."
+    },
+    "output": "{\"ok\":false,\"error_kind\":\"fact_not_found\",\"memory_id\":\"sha256:79f260d70df52dcf4ebaab21b589b25ea9329899a9dd295bba0961e2bca350af\"}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+    "disposition": "failed"
+  }
+]

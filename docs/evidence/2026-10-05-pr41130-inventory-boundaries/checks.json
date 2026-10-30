@@ -1,0 +1,88 @@
+{
+  "checkpoint": "2b815e33c390e8a4a35a9ddccf656bcce3fde0ae",
+  "parent": "e7eb8f219b487a6755f0317e0d6e9be59bab5691",
+  "native_stack_at_start": {
+    "number": 41123,
+    "position": 6,
+    "size": 8,
+    "direct_parent_pr": 41124,
+    "unrelated_41126_stack": 40961
+  },
+  "red": {
+    "build_handle": 93613,
+    "build_exit": 0,
+    "run_handle": 15506,
+    "exit": 1,
+    "inventory_new_failed_cases": 3,
+    "tui_new_failed_case": 11,
+    "tui_existing_failure": "Issue41174 later fixed by inherited parent"
+  },
+  "final": {
+    "build_handle": 53630,
+    "build_exit": 0,
+    "native_handle": 54867,
+    "native_exit": 0,
+    "inventory_tests": 8,
+    "tui_tests": 17,
+    "web_check_handle": 59751,
+    "exit": 0,
+    "web_suites": 3,
+    "web_tests": 78,
+    "tsc": "PASS",
+    "eslint": "PASS"
+  },
+  "commands": [
+    "opam exec --switch=5.5.1 -- scripts/dune-local.sh build test/test_server_lane_inventory.exe test/test_tui_lane_addons.exe",
+    "_build/default/test/test_server_lane_inventory.exe",
+    "_build/default/test/test_tui_lane_addons.exe",
+    "pnpm test src/components/lane-addons-panel.test.ts src/components/lane-declaration-editor.test.ts src/api/lane-declarations.test.ts",
+    "pnpm exec tsc --noEmit --pretty false",
+    "pnpm exec eslint src/components/lane-addons-panel.ts src/components/lane-addons-panel.test.ts src/components/lane-declaration-editor.test.ts"
+  ],
+  "logs": {
+    "inventory-red.log": {
+      "source": "/tmp/pr41130-boundaries-native-red.log",
+      "sha256": "2b82242557538d674270b254dd636c66734118e2b569f9ad037c101549d4d977"
+    },
+    "tui-red.log": {
+      "source": "/tmp/pr41130-boundaries-tui-red.log",
+      "sha256": "2fb31a7f33842e78508f77024ec66cac7d5b12293b811d7036dd0184acbd1c60"
+    },
+    "build.log": {
+      "source": "/tmp/pr41130-boundaries-final-build.log",
+      "sha256": "efd52ea2ea056e27ea18609b726b5e80bac552af66135c21046295c2e88cfa25"
+    },
+    "inventory-green.log": {
+      "source": "/tmp/pr41130-boundaries-final-inventory.log",
+      "sha256": "7ebec0c49abffe80ae67bad539bac2a3329f12b6206380ab796febdf4cc2159b"
+    },
+    "tui-green.log": {
+      "source": "/tmp/pr41130-boundaries-final-tui.log",
+      "sha256": "4024581c05ac1065893283e6e861b3affe9d292e943675d2531bde1c8a42a3a1"
+    },
+    "web-green.log": {
+      "source": "/tmp/pr41130-boundaries-final-web.log",
+      "sha256": "974a7a239cbd52019ccac0483155a6e577a17ab7b46b40c3f048f0ace4148adf"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41130-boundaries-final-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41130-boundaries-final-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "integration-old-filename-tui.log": {
+      "source": "/tmp/pr41130-boundaries-integrated-tui.log",
+      "sha256": "8e8a0832e1ea109b80d6520189afde42be2e31ba2e30635f33f81429aa3c6581"
+    },
+    "integration-old-filename-web.log": {
+      "source": "/tmp/pr41130-boundaries-integrated-web.log",
+      "sha256": "d4382047ccaa4c2eb68b640855c69ea680bc478803c8d9abc3bcc525bfaa3853"
+    }
+  },
+  "binaries": {
+    "_build/default/test/test_server_lane_inventory.exe": "21bd14de4b374f93affc4216f8a32f0566ba5693d593263d81c7aa4e80bb165c",
+    "_build/default/test/test_tui_lane_addons.exe": "aef751eb705598a0c38f22a7b17407138fbaecd9aa776acdffe7e63d474b5826"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schema": "masc.remote_ssh_keeper_files.v1",
+  "result": "FAIL",
+  "keeper": "native-bootstrap-keeper",
+  "expected_binary_commit": "f9bf6b408afcff200131dfdd9040cba2551abab4",
+  "binary_sha256": "993cdd69c7e3aaec31c175478f91b658d6d138593ddbd9030364666928a75e09",
+  "model": "scripted loopback fixture",
+  "claims": [],
+  "identity_sha256": "f296e524ceaa7a66c6da1853fdde526f9f34e2e8af54ceb3e145c3ac0ef805a5",
+  "known_hosts_sha256": "4a85ee952e826c7e715caeca878de6e3efacff9a3545658c47411363f252068f",
+  "not_measured": [
+    "model quality",
+    "sustained continuity",
+    "GitHub authentication",
+    "bootstrap CLI",
+    "redirects and long jobs",
+    "candidate source unless commit matches",
+    "shim sandbox application receipt when peer omits it"
+  ],
+  "binary_commit": "f9bf6b408afcff200131dfdd9040cba2551abab4",
+  "error": "/private/tmp/mssh-candidate-runtime-f9bf6b4/masc keeper-create exited 1: [2026-10-25 20:38:47] [INFO] [MCP] Tag registry initialized: 181 tools registered\nremote_ssh_root_missing: endpoint proof ran [test -d /srv/masc/bootstrap-ready] exit=1 stderr=remote_ssh_shim_config_error: unknown key \"env_file\"\nThe declaration may have been written before this failed.\nRe-running the same command applies the declaration to the keeper of that name; it does not make a second one.\n\n"
+}

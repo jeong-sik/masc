@@ -1,0 +1,803 @@
+(** Keeper source-bound current memory. *)
+
+open Result.Syntax
+
+let suffix = ".memory-source-current.json"
+let max_source_bytes = 1_048_576
+
+type file_source =
+  { path : string
+  ; sha256 : string
+  }
+
+type revalidation_scope =
+  | All_sources
+  | Selected_sources of file_source list
+
+module Source_identity_set = Set.Make (struct
+  type t = file_source
+  let compare left right =
+    let path = String.compare left.path right.path in
+    if path <> 0 then path else String.compare left.sha256 right.sha256
+end)
+
+type fact =
+  { claim : string
+  ; first_seen : float
+  ; source : file_source
+  }
+
+type invalidation_reason =
+  | Source_changed
+  | Source_unavailable
+[@@deriving enumerate]
+
+type invalidation =
+  { source_path : string
+  ; invalidated_at : float
+  ; reason : invalidation_reason
+  }
+
+type t =
+  { revision : int
+  ; updated_at : float
+  ; trace_id : string
+  ; facts : fact list
+  ; invalidations : invalidation list
+  }
+
+type projection =
+  { snapshot : t option
+  ; facts : fact list
+  ; invalidations : invalidation list
+  ; unverified_paths : string list
+  }
+
+type source_read_failure =
+  | Source_path_rejected of string
+  | Source_missing
+  | Source_not_a_regular_file
+  | Source_too_large of
+      { actual_bytes : int
+      ; max_bytes : int
+      }
+  | Source_over_limit of { max_bytes : int }
+  | Source_io_failed of string
+  | Source_endpoint_unanswered of string
+
+let source_read_failure_to_string = function
+  | Source_path_rejected reason -> reason
+  | Source_missing -> "source_path does not exist"
+  | Source_not_a_regular_file -> "source_path is not a regular file"
+  | Source_too_large { actual_bytes; max_bytes } ->
+    Printf.sprintf
+      "source_path exceeds byte limit actual_bytes=%d max_bytes=%d"
+      actual_bytes
+      max_bytes
+  | Source_over_limit { max_bytes } ->
+    Printf.sprintf "source_path exceeds byte limit max_bytes=%d" max_bytes
+  | Source_io_failed detail -> "source_path read failed: " ^ detail
+  | Source_endpoint_unanswered detail ->
+    "source_path endpoint did not answer the read: " ^ detail
+;;
+
+type write_error =
+  | Source_read_failed of source_read_failure
+  | Store_write_failed of string
+
+let path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ suffix)
+;;
+
+let keeper_id_of_filename filename = Filename.chop_suffix_opt ~suffix filename
+;;
+
+let list_keeper_ids_for_keepers_dir ~keepers_dir =
+  if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
+  then []
+  else
+    Sys.readdir keepers_dir
+    |> Array.to_list
+    |> List.filter_map keeper_id_of_filename
+    |> List.sort String.compare
+;;
+
+let invalidation_reason_to_string = function
+  | Source_changed -> "source_changed"
+  | Source_unavailable -> "source_unavailable"
+;;
+
+let invalidation_reason_of_string s = List.find_opt (fun v -> String.equal (invalidation_reason_to_string v) s) all_of_invalidation_reason
+;;
+
+let exact_object_fields required fields =
+  List.length required = List.length fields
+  && List.for_all
+       (fun required_name ->
+          match
+            List.filter
+              (fun (observed_name, _) -> String.equal required_name observed_name)
+              fields
+          with
+          | [ _ ] -> true
+          | [] | _ :: _ :: _ -> false)
+       required
+;;
+
+let non_empty value = not (String.equal (String.trim value) "")
+
+let valid_source_path value =
+  non_empty value
+  && not (String.contains value '\n')
+  && not (String.contains value '\r')
+;;
+
+let valid_sha256 value =
+  String.length value = 71
+  && String.starts_with ~prefix:"sha256:" value
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       (String.sub value 7 64)
+;;
+
+let finite_nonnegative value = Float.is_finite value && value >= 0.0
+
+let sha256 content =
+  "sha256:" ^ Agent_core_sha256.(digest_string content |> to_hex)
+;;
+
+let render_fact ?(verified = true) fact =
+  Printf.sprintf
+    "- [category=fact recorded=%s source=file:%S source_sha256=%s%s] %s"
+    (Masc_domain.iso8601_of_unix_seconds fact.first_seen)
+    fact.source.path
+    fact.source.sha256
+    (if verified then "" else " unverified=source_unreadable_this_turn")
+    fact.claim
+;;
+
+let render_invalidation invalidation =
+  Printf.sprintf
+    "- [invalidated source=file:%S reason=%s] Old claim removed; re-read source."
+    invalidation.source_path
+    (invalidation_reason_to_string invalidation.reason)
+;;
+
+let budget_lines_of ~facts ~invalidations =
+  List.map (render_fact ~verified:false) facts
+  @ List.map render_invalidation invalidations
+;;
+
+let budget_lines = function
+  | None -> []
+  | Some (snapshot : t) ->
+    budget_lines_of ~facts:snapshot.facts ~invalidations:snapshot.invalidations
+;;
+
+let source_to_json source =
+  `Assoc
+    [ "kind", `String "file"
+    ; "path", `String source.path
+    ; "sha256", `String source.sha256
+    ]
+;;
+
+let source_of_json = function
+  | `Assoc fields when exact_object_fields [ "kind"; "path"; "sha256" ] fields ->
+    (match
+       List.assoc_opt "kind" fields
+       , List.assoc_opt "path" fields
+       , List.assoc_opt "sha256" fields
+     with
+     | Some (`String "file"), Some (`String path), Some (`String digest)
+       when valid_source_path path && valid_sha256 digest ->
+       Some { path; sha256 = digest }
+     | _ -> None)
+  | _ -> None
+;;
+
+let fact_to_json fact =
+  `Assoc
+    [ "claim", `String fact.claim
+    ; "first_seen", `Float fact.first_seen
+    ; "source", source_to_json fact.source
+    ]
+;;
+
+let fact_of_json = function
+  | `Assoc fields when exact_object_fields [ "claim"; "first_seen"; "source" ] fields ->
+    (match
+       List.assoc_opt "claim" fields
+       , List.assoc_opt "first_seen" fields
+       , List.assoc_opt "source" fields
+     with
+     | Some (`String claim), Some (`Float first_seen), Some source
+       when non_empty claim && finite_nonnegative first_seen ->
+       Option.map
+         (fun source -> { claim; first_seen; source })
+         (source_of_json source)
+     | Some (`String claim), Some (`Int first_seen), Some source
+       when non_empty claim && first_seen >= 0 ->
+       Option.map
+         (fun source -> { claim; first_seen = float_of_int first_seen; source })
+         (source_of_json source)
+     | _ -> None)
+  | _ -> None
+;;
+
+let invalidation_to_json invalidation =
+  `Assoc
+    [ "source_path", `String invalidation.source_path
+    ; "invalidated_at", `Float invalidation.invalidated_at
+    ; "reason", `String (invalidation_reason_to_string invalidation.reason)
+    ]
+;;
+
+let invalidation_of_json = function
+  | `Assoc fields
+    when exact_object_fields [ "source_path"; "invalidated_at"; "reason" ] fields ->
+    (match
+       List.assoc_opt "source_path" fields
+       , List.assoc_opt "invalidated_at" fields
+       , List.assoc_opt "reason" fields
+     with
+     | Some (`String source_path), Some (`Float invalidated_at), Some (`String reason)
+       when valid_source_path source_path && finite_nonnegative invalidated_at ->
+       Option.map
+         (fun reason -> { source_path; invalidated_at; reason })
+         (invalidation_reason_of_string reason)
+     | Some (`String source_path), Some (`Int invalidated_at), Some (`String reason)
+       when valid_source_path source_path && invalidated_at >= 0 ->
+       Option.map
+         (fun reason ->
+            { source_path; invalidated_at = float_of_int invalidated_at; reason })
+         (invalidation_reason_of_string reason)
+     | _ -> None)
+  | _ -> None
+;;
+
+let list_of_json decode = function
+  | `List values ->
+    List.fold_left
+      (fun decoded value ->
+         match decoded, decode value with
+         | Some decoded, Some value -> Some (value :: decoded)
+         | _ -> None)
+      (Some [])
+      values
+    |> Option.map List.rev
+  | _ -> None
+;;
+
+module Path_set = Set.Make (String)
+
+let paths_are_unique_and_disjoint facts invalidations =
+  let add_unique seen path =
+    if Path_set.mem path seen then None else Some (Path_set.add path seen)
+  in
+  let seen =
+    List.fold_left
+      (fun seen fact -> Option.bind seen (fun seen -> add_unique seen fact.source.path))
+      (Some Path_set.empty)
+      facts
+  in
+  List.fold_left
+    (fun seen invalidation ->
+       Option.bind seen (fun seen -> add_unique seen invalidation.source_path))
+    seen
+    invalidations
+  |> Option.is_some
+;;
+
+let to_json snapshot =
+  `Assoc
+    [ "revision", `Int snapshot.revision
+    ; "updated_at", `Float snapshot.updated_at
+    ; "trace_id", `String snapshot.trace_id
+    ; "facts", `List (List.map fact_to_json snapshot.facts)
+    ; "invalidations", `List (List.map invalidation_to_json snapshot.invalidations)
+    ]
+;;
+
+let of_json = function
+  | `Assoc fields
+    when exact_object_fields
+           [ "revision"; "updated_at"; "trace_id"; "facts"; "invalidations" ]
+           fields ->
+    (match
+       List.assoc_opt "revision" fields
+       , List.assoc_opt "updated_at" fields
+       , List.assoc_opt "trace_id" fields
+       , List.assoc_opt "facts" fields
+       , List.assoc_opt "invalidations" fields
+     with
+     | ( Some (`Int revision)
+       , Some updated_at_json
+       , Some (`String trace_id)
+       , Some facts_json
+       , Some invalidations_json ) ->
+       let updated_at =
+         match updated_at_json with
+         | `Float value -> Some value
+         | `Int value -> Some (float_of_int value)
+         | _ -> None
+       in
+       (match
+          updated_at
+          , list_of_json fact_of_json facts_json
+          , list_of_json invalidation_of_json invalidations_json
+        with
+        | Some updated_at, Some facts, Some invalidations
+          when revision >= 1
+               && finite_nonnegative updated_at
+               && non_empty trace_id
+               && paths_are_unique_and_disjoint facts invalidations ->
+          Some { revision; updated_at; trace_id; facts; invalidations }
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+let parse path content =
+  try
+    match of_json (Yojson.Safe.from_string content) with
+    | Some snapshot -> Ok snapshot
+    | None -> Error (Printf.sprintf "%s: invalid source-bound memory snapshot" path)
+  with
+  | Yojson.Json_error message ->
+    Error (Printf.sprintf "%s: invalid JSON: %s" path message)
+;;
+
+let read_for_keepers_dir ~keepers_dir ~keeper_id =
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  try
+    match Fs_compat.load_file_opt path with
+    | None -> Ok None
+    | Some content ->
+      let+ snapshot = parse path content in
+      Some snapshot
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | Sys_error message ->
+    Error (Printf.sprintf "source-bound memory read failed path=%s: %s" path message)
+;;
+
+(* A microVM or remote Keeper writes its files on the endpoint, not on the
+   host, so a host stat of the resolved path always answered ENOENT: on
+   2026-09-17..23 every one of 86 microVM source_path writes failed and no
+   source-bound fact existed on any Keeper. The endpoint tree is read through
+   the same backend Read uses; a tree shared with the host (a Docker mount)
+   is read on the host as before.
+
+   The endpoint reports a missing path, a non-file and a file it could not
+   read by exit status. Only head's own failure status (1) becomes the
+   unreadable exit; any other status (126/127: no head on the endpoint,
+   128+n: head was signalled) passes through undeclared, because it is about
+   the endpoint, not the file. Every answer about the file is a declared exit, so
+   the caller's mistake (wrong path) and one unreadable file stay apart from
+   an endpoint that did not answer at all, without parsing its stderr. *)
+let endpoint_source_missing_exit = 3
+let endpoint_source_not_regular_exit = 4
+let endpoint_source_unreadable_exit = 5
+
+let endpoint_source_argv ~path ~max_bytes =
+  [ "sh"
+  ; "-c"
+  ; Printf.sprintf
+      {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; head -c "$2" "$1"; s=$?; if [ "$s" -eq 1 ]; then exit %d; fi; exit "$s"|}
+      endpoint_source_missing_exit
+      endpoint_source_not_regular_exit
+      endpoint_source_unreadable_exit
+  ; "sh"
+  ; path
+  ; string_of_int max_bytes
+  ]
+;;
+
+let endpoint_source_read_of_outcome = function
+  (* The command did not finish with one of its declared exits: the
+     transport failed, the guest is absent, the read timed out, or the
+     process was signalled. None of that is an answer about this file. *)
+  | Error detail -> Error (Source_endpoint_unanswered detail)
+  | Ok (Unix.WEXITED code, _) when code = endpoint_source_missing_exit ->
+    Error Source_missing
+  | Ok (Unix.WEXITED code, _) when code = endpoint_source_not_regular_exit ->
+    Error Source_not_a_regular_file
+  | Ok (Unix.WEXITED code, _) when code = endpoint_source_unreadable_exit ->
+    Error (Source_io_failed "the endpoint could not read source_path")
+  | Ok (Unix.WEXITED 0, content) when String.length content > max_source_bytes ->
+    Error (Source_over_limit { max_bytes = max_source_bytes })
+  | Ok (Unix.WEXITED 0, content) -> Ok content
+  (* Not produced by the backend, which returns [Ok] only for a status in
+     [ok_exit_codes] and turns every other status into [Error]; kept because
+     the status type is wider than that contract. *)
+  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+    Error
+      (Source_endpoint_unanswered "endpoint source read ended outside its declared exits")
+;;
+
+let read_endpoint_source ~config ~meta ~resolved =
+  let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
+  (* One byte past the limit tells an over-limit source from one exactly at it. *)
+  let fetch_bytes = max_source_bytes + 1 in
+  match Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path:resolved with
+  | Error detail -> Error (Source_io_failed detail)
+  | Ok path ->
+    (* Raw bytes: the text capture rewrites the endpoint root to the host
+       path, which would hash text the file does not hold and could grow a
+       file past the limit. The command bounds its own output with head -c. *)
+    Keeper_sandbox_read_backend.run_command_with_capture
+      ~ok_exit_codes:
+        [ 0
+        ; endpoint_source_missing_exit
+        ; endpoint_source_not_regular_exit
+        ; endpoint_source_unreadable_exit
+        ]
+      ~config
+      ~meta
+      ~command_argv:(endpoint_source_argv ~path ~max_bytes:fetch_bytes)
+      ~max_bytes:None
+      ~timeout_sec
+      ()
+    |> endpoint_source_read_of_outcome
+;;
+
+let read_source ~config ~meta ~source_path =
+  match
+    Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config
+      ~meta
+      ~raw_path:source_path
+  with
+  | Error (refusal : Keeper_alerting_path.path_refusal) ->
+    Error (Source_path_rejected refusal.message)
+  | Ok resolved ->
+  match
+    Keeper_types_profile_sandbox.tree_location_of_profile
+      meta.Keeper_meta_contract.sandbox_profile
+  with
+  | Keeper_types_profile_sandbox.Endpoint_owned -> read_endpoint_source ~config ~meta ~resolved
+  | Keeper_types_profile_sandbox.Shared_mount ->
+  try
+    let stats = Unix.stat resolved in
+    if stats.st_kind <> Unix.S_REG
+    then Error Source_not_a_regular_file
+    else if stats.st_size > max_source_bytes
+    then
+      Error
+        (Source_too_large { actual_bytes = stats.st_size; max_bytes = max_source_bytes })
+    else (
+      let content = Fs_compat.load_file resolved in
+      if String.length content > max_source_bytes
+      then
+        Error
+          (Source_too_large
+             { actual_bytes = String.length content; max_bytes = max_source_bytes })
+      else Ok content)
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Source_missing
+  | Sys_error message -> Error (Source_io_failed message)
+  | Unix.Unix_error (error, operation, _) ->
+    Error
+      (Source_io_failed
+         (Printf.sprintf "operation=%s: %s" operation (Unix.error_message error)))
+;;
+
+let save_snapshot path snapshot =
+  let content = Yojson.Safe.pretty_to_string (to_json snapshot) ^ "\n" in
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> Ok snapshot
+  | Error message ->
+    Error
+      (Printf.sprintf
+         "source-bound memory atomic write failed path=%s: %s"
+         path
+         message)
+;;
+
+let trace_id meta = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id
+
+let update_locked ?clock ~keepers_dir ~keeper_id ~on_commit build =
+  Fs_compat.mkdir_p keepers_dir;
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  File_lock_eio.with_lock ?clock path (fun () ->
+    let* previous =
+      match Fs_compat.load_file_opt path with
+      | None -> Ok None
+      | Some content ->
+        let+ snapshot = parse path content in
+        Some snapshot
+    in
+    let* next, changed, outcome = build previous in
+    if changed then (
+      let+ snapshot = save_snapshot path next in
+      on_commit snapshot;
+      snapshot, outcome)
+    else Ok (next, outcome))
+;;
+
+let with_commit_notification ~keepers_dir ~keeper_id write =
+  Fs_compat.mkdir_p keepers_dir;
+  let notification_keepers_dir = Unix.realpath keepers_dir in
+  let committed = ref None in
+  let notify () =
+    Option.iter (fun revision ->
+      Keeper_memory_commit_notifications.notify_committed
+        { keepers_dir = notification_keepers_dir; keeper_id; store = Source_bound; revision }) !committed
+  in
+  (* Mark the authoritative write inside the transaction; dispatch only after
+     its locks unwind, including an exception raised by lock cleanup. *)
+  match write (fun snapshot -> committed := Some snapshot.revision) with
+  | result -> notify (); result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    notify ();
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+let upsert_file_fact
+      ?clock
+      ~ordinary_facts
+      ~config
+      ~meta
+      ~keepers_dir
+      ~now
+      ~claim
+      ~source_path
+      ()
+  =
+  let source_path = String.trim source_path in
+  let claim = String.trim claim in
+  if not (valid_source_path source_path)
+  then Error (Source_read_failed (Source_path_rejected "source_path must be non-empty"))
+  else if not (non_empty claim)
+  then Error (Store_write_failed "source-bound memory claim must be non-empty")
+  else if not (finite_nonnegative now)
+  then
+    Error
+      (Store_write_failed
+         "source-bound memory timestamp must be finite and non-negative")
+  else
+    match read_source ~config ~meta ~source_path with
+    | Error failure -> Error (Source_read_failed failure)
+    | Ok content ->
+      let incoming_source = { path = source_path; sha256 = sha256 content } in
+      with_commit_notification
+        ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
+      Keeper_memory_os_aggregate_lock.with_lock
+        ?clock
+        ~keepers_dir
+        ~keeper_id:meta.Keeper_meta_contract.name
+        (fun () ->
+           update_locked
+             ?clock
+             ~keepers_dir
+             ~keeper_id:meta.Keeper_meta_contract.name
+             ~on_commit
+             (fun previous ->
+      let previous_facts, previous_invalidations, revision, first_seen =
+        match previous with
+        | None -> [], [], 1, now
+        | Some snapshot ->
+          let first_seen =
+            List.find_map
+              (fun fact ->
+                 if
+                   String.equal fact.source.path source_path
+                   && String.equal fact.claim claim
+                   && String.equal fact.source.sha256 incoming_source.sha256
+                 then Some fact.first_seen
+                 else None)
+              snapshot.facts
+            |> Option.value ~default:now
+          in
+          snapshot.facts, snapshot.invalidations, snapshot.revision + 1, first_seen
+      in
+      let facts =
+        previous_facts
+        |> List.filter (fun fact -> not (String.equal fact.source.path source_path))
+        |> fun facts ->
+        facts @ [ { claim; first_seen; source = incoming_source } ]
+      in
+      let invalidations =
+        List.filter
+          (fun invalidation -> not (String.equal invalidation.source_path source_path))
+          previous_invalidations
+      in
+      let* ordinary = ordinary_facts () in
+      let source_lines = budget_lines_of ~facts ~invalidations in
+      let previous_bytes =
+        Keeper_memory_os_render.facts_payload_bytes
+          ~ordinary_facts:ordinary
+          ~source_lines:
+            (budget_lines_of ~facts:previous_facts ~invalidations:previous_invalidations)
+      in
+      let* () =
+        Keeper_memory_os_render.check_facts_budget
+          ~previous_bytes
+          ~ordinary_facts:ordinary
+          ~source_lines
+      in
+      Ok
+        ( { revision
+          ; updated_at = now
+          ; trace_id = trace_id meta
+          ; facts
+          ; invalidations
+          }
+        , true
+        , () ))))
+      |> Result.map fst
+      |> Result.map_error (fun detail -> Store_write_failed detail)
+;;
+
+(* Whether a revalidation pass still asks its sources. The first read the
+   endpoint does not answer ([Source_endpoint_unanswered]) ends the asking
+   for the rest of the pass: every further read goes to the same endpoint
+   and would wait out the same read timeout while this store's lock is held,
+   at the start of the turn. A fact that is not asked ends exactly where a
+   fact whose read got no answer ends -- kept, not invalidated, and reported
+   unverified. One file that cannot be read ([Source_io_failed]) says nothing
+   about the others, so the pass goes on to the next fact. *)
+type revalidation_asking =
+  | Asking
+  | Stopped_after_unanswered_read
+
+type revalidation_step =
+  { asking : revalidation_asking
+  ; kept_rev : fact list
+  ; unverified_rev : string list
+  ; invalidated_rev : invalidation list
+  ; deferred_paths : Path_set.t
+  }
+
+let keep_unverified step fact =
+  { step with
+    kept_rev = fact :: step.kept_rev
+  ; unverified_rev = fact.source.path :: step.unverified_rev
+  }
+;;
+
+let revalidate ?(scope = All_sources) ?clock ~config ~meta ~keepers_dir ~now () =
+  let identities = match scope with
+    | All_sources -> None
+    | Selected_sources sources -> Some (Source_identity_set.of_list sources) in
+  let selected fact = match identities with
+    | None -> true
+    | Some identities -> Source_identity_set.mem fact.source identities in
+  if not (finite_nonnegative now)
+  then Error "source-bound memory timestamp must be finite and non-negative"
+  else
+    let+ snapshot, unverified_paths =
+      with_commit_notification
+        ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
+      update_locked
+        ?clock
+        ~keepers_dir
+        ~keeper_id:meta.Keeper_meta_contract.name
+        ~on_commit
+        (function
+        | None ->
+          Ok
+            ( { revision = 1
+              ; updated_at = now
+              ; trace_id = trace_id meta
+              ; facts = []
+              ; invalidations = []
+              }
+            , false
+            , [] )
+        | Some previous ->
+          let step =
+            List.fold_left
+              (fun step fact ->
+                 if not (selected fact) then
+                   { (keep_unverified step fact) with
+                     deferred_paths = Path_set.add fact.source.path step.deferred_paths }
+                 else match step.asking with
+                 | Stopped_after_unanswered_read -> keep_unverified step fact
+                 | Asking ->
+                   (match read_source ~config ~meta ~source_path:fact.source.path with
+                    | Ok content when String.equal (sha256 content) fact.source.sha256 ->
+                      { step with kept_rev = fact :: step.kept_rev }
+                    | Ok _ ->
+                      Log.Keeper.warn
+                        "source-bound memory invalidated keeper=%s source=%S reason=source_changed"
+                        meta.Keeper_meta_contract.name
+                        fact.source.path;
+                      { step with
+                        invalidated_rev =
+                          { source_path = fact.source.path
+                          ; invalidated_at = now
+                          ; reason = Source_changed
+                          }
+                          :: step.invalidated_rev
+                      }
+                    (* Not being able to read is not an answer. A file that
+                       could not be read this time, or an endpoint that did
+                       not answer, keeps the fact as it was last verified;
+                       only a source that answered as changed, missing or
+                       unusable invalidates it. The recall marks it, so the
+                       model can tell it from a re-read fact. *)
+                    | Error (Source_io_failed _) -> keep_unverified step fact
+                    | Error (Source_endpoint_unanswered _) ->
+                      { (keep_unverified step fact) with
+                        asking = Stopped_after_unanswered_read
+                      }
+                    | Error
+                        (( Source_path_rejected _
+                         | Source_missing
+                         | Source_not_a_regular_file
+                         | Source_too_large _
+                         | Source_over_limit _ ) as failure) ->
+                      Log.Keeper.warn
+                        "source-bound memory invalidated keeper=%s source=%S reason=source_unavailable detail=%s"
+                        meta.Keeper_meta_contract.name
+                        fact.source.path
+                        (source_read_failure_to_string failure);
+                      { step with
+                        invalidated_rev =
+                          { source_path = fact.source.path
+                          ; invalidated_at = now
+                          ; reason = Source_unavailable
+                          }
+                          :: step.invalidated_rev
+                      }))
+              { asking = Asking; kept_rev = []; unverified_rev = []; invalidated_rev = [];
+                deferred_paths = Path_set.empty }
+              previous.facts
+          in
+          let unverified = List.rev step.unverified_rev in
+          let read_unverified = List.filter
+              (fun path -> not (Path_set.mem path step.deferred_paths)) unverified in
+          (match step.asking, read_unverified with
+           | Asking, [] -> ()
+           | Asking, _ :: _ ->
+             Log.Keeper.warn
+               "source-bound memory kept %d fact(s) unverified keeper=%s: source unreadable"
+               (List.length read_unverified)
+               meta.Keeper_meta_contract.name
+           | Stopped_after_unanswered_read, _ ->
+             Log.Keeper.warn
+               "source-bound memory kept %d fact(s) unverified keeper=%s: the endpoint did not answer, the rest of the pass was not asked"
+               (List.length read_unverified)
+               meta.Keeper_meta_contract.name);
+          let facts = List.rev step.kept_rev in
+          let newly_invalidated = List.rev step.invalidated_rev in
+          if newly_invalidated = []
+          then Ok (previous, false, unverified)
+          else
+            let invalidated_paths =
+              List.fold_left
+                (fun paths invalidation -> Path_set.add invalidation.source_path paths)
+                Path_set.empty
+                newly_invalidated
+            in
+            let retained_invalidations =
+              List.filter
+                (fun invalidation ->
+                   not (Path_set.mem invalidation.source_path invalidated_paths))
+                previous.invalidations
+            in
+            Ok
+              ( { revision = previous.revision + 1
+                ; updated_at = now
+                ; trace_id = trace_id meta
+                ; facts
+                ; invalidations = retained_invalidations @ newly_invalidated
+                }
+              , true
+              , unverified )))
+    in
+    if snapshot.facts = [] && snapshot.invalidations = []
+    then { snapshot = None; facts = []; invalidations = []; unverified_paths = [] }
+    else
+      { snapshot = Some snapshot
+      ; facts = snapshot.facts
+      ; invalidations = snapshot.invalidations
+      ; unverified_paths
+      }
+;;

@@ -1,0 +1,138 @@
+module Composer = Masc_tui_board_composer
+
+let test_strip_markdown_title_prefix () =
+  Alcotest.(check string) "single hash header"
+    "Hello World"
+    (Composer.strip_markdown_title_prefix "# Hello World");
+  Alcotest.(check string) "triple hash header"
+    "Sub heading"
+    (Composer.strip_markdown_title_prefix "### Sub heading");
+  Alcotest.(check string) "tab after hash header"
+    "Tab heading"
+    (Composer.strip_markdown_title_prefix "#\tTab heading");
+  Alcotest.(check string) "bare single hash"
+    ""
+    (Composer.strip_markdown_title_prefix "#");
+  Alcotest.(check string) "bare multiple hashes"
+    ""
+    (Composer.strip_markdown_title_prefix "###");
+  Alcotest.(check string) "bare hash with trailing space"
+    ""
+    (Composer.strip_markdown_title_prefix "#   ");
+  Alcotest.(check string) "plain text without hashes"
+    "Just plain title"
+    (Composer.strip_markdown_title_prefix "Just plain title");
+  Alcotest.(check string) "hashtag is preserved"
+    "#release-v1 note"
+    (Composer.strip_markdown_title_prefix "#release-v1 note");
+  Alcotest.(check string) "leading and trailing whitespace trimmed"
+    "Trimmed"
+    (Composer.strip_markdown_title_prefix "   ## Trimmed   ")
+;;
+
+let test_split_draft () =
+  let (t1, b1) = Composer.split_draft "Simple Title\nBody line 1\nBody line 2" in
+  Alcotest.(check string) "title extracted" "Simple Title" t1;
+  Alcotest.(check string) "body extracted" "Body line 1\nBody line 2" b1;
+
+  let (t2, b2) = Composer.split_draft "# Markdown Header\n\nBody paragraph" in
+  Alcotest.(check string) "markdown title extracted" "Markdown Header" t2;
+  Alcotest.(check string) "markdown body preserved" "\nBody paragraph" b2;
+
+  let (t3, b3) = Composer.split_draft "\n\n  ### Delayed Title  \nActual body" in
+  Alcotest.(check string) "leading blank lines skipped for title" "Delayed Title" t3;
+  Alcotest.(check string) "body follows title" "Actual body" b3;
+
+  let (t4, b4) = Composer.split_draft "Only Title" in
+  Alcotest.(check string) "single line title" "Only Title" t4;
+  Alcotest.(check string) "empty body" "" b4;
+
+  let (t5, b5) = Composer.split_draft "" in
+  Alcotest.(check string) "empty title" "" t5;
+  Alcotest.(check string) "empty body" "" b5;
+
+  let (t6, b6) = Composer.split_draft "   \n\n   " in
+  Alcotest.(check string) "whitespace title" "" t6;
+  Alcotest.(check string) "whitespace body" "" b6
+;;
+
+let test_template_detection () =
+  let template = Composer.template_for_new_post () in
+  Alcotest.(check bool) "template is detected as untouched"
+    true
+    (Composer.is_untouched_template ~draft:template);
+  Alcotest.(check bool) "empty string is detected as untouched"
+    true
+    (Composer.is_untouched_template ~draft:"");
+  Alcotest.(check bool) "whitespace is detected as untouched"
+    true
+    (Composer.is_untouched_template ~draft:"   \n   \t  ");
+  Alcotest.(check bool) "modified draft is not untouched"
+    false
+    (Composer.is_untouched_template ~draft:"# My Custom Post\n\nContent")
+;;
+
+let test_addressing_analysis () =
+  let addr1 = Composer.analyze_addressing "Draft mentioning @@all to wake fleet" in
+  Alcotest.(check bool) "broadcast all detected"
+    true
+    (match addr1 with Composer.Broadcast_all -> true | _ -> false);
+
+  let addr2 = Composer.analyze_addressing "Hello @tester and @lane-smith please review" in
+  (match addr2 with
+   | Composer.Mentions targets ->
+       Alcotest.(check bool) "contains tester" true (List.mem "tester" targets);
+       Alcotest.(check bool) "contains lane-smith" true (List.mem "lane-smith" targets)
+   | _ -> Alcotest.fail "expected Mentions");
+
+  let addr3 = Composer.analyze_addressing "A post without any mentions" in
+  Alcotest.(check bool) "unaddressed detected as discoverable"
+    true
+    (match addr3 with Composer.Discoverable_unaddressed -> true | _ -> false);
+
+  let addr4 = Composer.analyze_addressing "Using @@invalid_broadcast_tag" in
+  Alcotest.(check bool) "unsupported broadcast detected"
+    true
+    (match addr4 with Composer.Unsupported_broadcast _ -> true | _ -> false)
+;;
+
+(* The caret is where the next character goes: one cell past the text, with
+   the text starting at the frame's content column. Read from the frame's
+   constants, so narrowing the margin moves the caret with the text instead
+   of leaving it where a hand-added count put it. *)
+let test_caret_follows_the_frame_margin () =
+  let cols = 80 and chrome_top_rows = 7 in
+  let caret visible_lines =
+    snd (Composer.compute_caret_position ~chrome_top_rows ~cols ~visible_lines)
+  in
+  Alcotest.(check int) "the draft starts at the frame's content column"
+    (1 + Masc_tui_frame.content_column) Composer.draft_first_column;
+  Alcotest.(check int) "an empty draft puts the caret on the first draft cell"
+    Composer.draft_first_column (caret []);
+  Alcotest.(check int) "the caret sits one cell past the typed text"
+    (Composer.draft_first_column + String.length "hello") (caret [ "hello" ]);
+  let full = String.make (Composer.draft_cells ~cols) 'x' in
+  Alcotest.(check int) "a full row and its caret fill the frame's inner width"
+    (Masc_tui_frame.inner_width ~cols)
+    (caret [ full ] - Composer.draft_first_column + 1);
+  Alcotest.(check int) "after a full row the caret takes the last content cell"
+    (cols - Masc_tui_frame.margin_cells) (caret [ full ])
+;;
+
+let () =
+  Alcotest.run "tui board composer"
+    [ ( "strip_prefix"
+      , [ Alcotest.test_case "markdown title prefix" `Quick test_strip_markdown_title_prefix ] )
+    ; ( "split_draft"
+      , [ Alcotest.test_case "draft splitting" `Quick test_split_draft ] )
+    ; ( "template"
+      , [ Alcotest.test_case "template detection" `Quick test_template_detection ] )
+    ; ( "addressing"
+      , [ Alcotest.test_case "addressing analysis" `Quick test_addressing_analysis
+        ;] )
+    ; ( "caret"
+      , [ Alcotest.test_case "caret follows the frame margin" `Quick
+            test_caret_follows_the_frame_margin
+        ] )
+    ]
+;;

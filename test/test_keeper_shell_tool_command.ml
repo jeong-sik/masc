@@ -1,0 +1,249 @@
+(* RFC tools-as-shell-commands — the split between a declared shell path
+   and the positional words that follow it, against the real crunched tool
+   tree (the three read-only tools PR-1 declares).
+
+   The rewrite itself is covered from the other side: PR-1a's dispatch
+   tests already lock the delegated round trip, and the conversion needs a
+   full turn context to build, which a unit test does not have. *)
+
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  assert (
+    K.split_words [ "board"; "post"; "get"; "p-1" ]
+    = Some ("masc_board_post_get", [ "p-1" ]));
+  assert (K.split_words [ "board"; "list" ] = Some ("masc_board_list", []));
+  assert (K.split_words [ "lane"; "status" ] = Some ("keeper_lane_status", []));
+  (* The path alone splits fine; the argument count is the schema's word,
+     not the split's. *)
+  assert (
+    K.split_words [ "board"; "post"; "get" ]
+    = Some ("masc_board_post_get", []));
+  (* Undeclared paths answer None — the closed surface, not a guess. *)
+  assert (K.split_words [ "board" ] = None);
+  assert (K.split_words [ "execute"; "script" ] = None);
+  assert (K.split_words [ "unknown"; "thing" ] = None);
+  (* A longer declared path must not be shadowed by a shorter one. *)
+  assert (
+    K.split_words [ "board"; "post"; "get"; "p-9"; "extra" ]
+    = Some ("masc_board_post_get", [ "p-9"; "extra" ]))
+
+let () =
+  (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_board_post_get" with
+   | None -> assert false
+   | Some descriptor ->
+     (* Positional words land on the schema's required parameters, in the
+        order the schema states them. *)
+     (match
+        Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor [ "p-123" ]
+      with
+      | Ok (`Assoc [ ("post_id", `String "p-123") ]) -> ()
+      | Ok _ | Error _ -> assert false);
+     (match Masc.Keeper_shell_tool_command.args_json_of_words ~descriptor [] with
+      | Error message ->
+        (* "shell command takes 1 argument, got 0" *)
+        assert (String.length message > 0)
+      | Ok _ -> assert false);
+     (* A schema with no required key states zero required parameters, so
+        an optional-only tool answers the path alone, which is what lets
+        [masc board list] and [masc lane status] run with no words. *)
+     (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_board_list" with
+      | None -> assert false
+      | Some list_descriptor -> (
+        match
+          Masc.Keeper_shell_tool_command.args_json_of_words
+            ~descriptor:list_descriptor
+            []
+        with
+        | Ok (`Assoc []) -> ()
+        | Ok _ | Error _ -> assert false)))
+
+(* The surface a lane with no turn has (#32730). The host replays an approved
+   effect with no descriptor lookup and no dispatch, so it cannot route a
+   [masc] line. Before this it passed no surface at all and the runtime's
+   absent case ran the line: routing lives in the IR's sandbox field, so an
+   unrouted line is not refused, it execs a host program named [masc]. *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  let simple name args =
+    match Masc_exec.Exec_program.of_string name with
+    | Error (`Unknown detail) -> failwith ("test fixture: " ^ detail)
+    | Ok program ->
+      Masc_exec.Shell_ir.Simple
+        { bin = program
+        ; args =
+            List.map
+              (fun a -> Masc_exec.Shell_ir.Lit (a, Masc_exec.Shell_ir.default_meta))
+              args
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = Masc_exec.Sandbox_target.host ()
+        }
+  in
+  (match K.refuse_reserved_command (simple "masc" [ "board"; "list" ]) with
+   | Error _ -> ()
+   | Ok _ -> assert false);
+  (* A pipeline hides one just as well. *)
+  (match
+     K.refuse_reserved_command
+       (Masc_exec.Shell_ir.Pipeline
+          [ simple "ls" []; simple "masc" [ "board"; "list" ] ])
+   with
+   | Error _ -> ()
+   | Ok _ -> assert false);
+  (* Everything else is the lane's ordinary work and passes through. *)
+  (match K.refuse_reserved_command (simple "ls" [ "-la" ]) with
+   | Ok _ -> ()
+   | Error _ -> assert false)
+
+(* A substitution's child stages are command positions too: [$(masc …)]
+   names the reserved word, and the refusal names the shape (RFC
+   shell-ir-typed-command-substitution, plan risk 3). *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  let module SI = Masc_exec.Shell_ir in
+  let simple name args =
+    match Masc_exec.Exec_program.of_string name with
+    | Error (`Unknown detail) -> failwith ("test fixture: " ^ detail)
+    | Ok program ->
+      SI.Simple
+        { bin = program
+        ; args =
+            List.map
+              (fun a -> SI.Lit (a, SI.default_meta))
+              args
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = Masc_exec.Sandbox_target.host ()
+        }
+  in
+  let with_subst_child child =
+    match simple "echo" [] with
+    | SI.Simple s -> SI.Simple { s with SI.args = [ SI.Subst child ] }
+    | ir -> ir
+  in
+  let masc_in_subst =
+    with_subst_child (simple "masc" [ "board"; "list" ])
+  in
+  (* refuse_reserved_command sees through the word. *)
+  (match K.refuse_reserved_command masc_in_subst with
+   | Error _ -> ()
+   | Ok _ -> assert false);
+  (* rewrite answers with the substitution refusal. *)
+  (match
+     K.rewrite
+       ~lookup:(fun _ -> None)
+       ~dispatch:(fun ~descriptor:_ ~args:_ -> None)
+       masc_in_subst
+   with
+   | Error message ->
+     let mentions sub =
+       let n = String.length message and m = String.length sub in
+       let rec go i =
+         i + m <= n && (String.sub message i m = sub || go (i + 1))
+       in
+       go 0
+     in
+     assert (mentions "command substitution")
+   | Ok _ -> assert false)
+
+(* Duplicate [shell_command] declarations are refused when the table
+   builds, not discovered at lookup time: the refusal is a typed error
+   naming the path and both tools, and distinct paths — including a prefix
+   relationship, which the split orders by longest match — all stand.  The
+   refusal is a value rather than an exception so a bad tool file cannot
+   poison the table's [lazy] and take the whole shell surface down. *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  (match
+     K.reject_duplicate_paths
+       [ ([ "board"; "list" ], "masc_board_list")
+       ; ([ "board"; "list" ], "masc_board_list_renamed")
+       ]
+   with
+   | Error message -> assert (String.length message > 0)
+   | Ok () -> assert false);
+  (* The same refusal whichever declaration comes first. *)
+  (match
+     K.reject_duplicate_paths
+       [ ([ "lane"; "status" ], "keeper_lane_status")
+       ; ([ "lane"; "status" ], "masc_lane_status")
+       ]
+   with
+   | Error _ -> ()
+   | Ok () -> assert false);
+  (* Distinct paths stand, even when one is a prefix of another. *)
+  (match
+     K.reject_duplicate_paths
+       [ ([ "board"; "list" ], "masc_board_list")
+       ; ([ "board"; "post"; "get" ], "masc_board_post_get")
+       ; ([ "lane" ], "a_lane_tool")
+       ]
+   with
+   | Ok () -> ()
+   | Error _ -> assert false);
+  (* The real crunched tree declares no duplicate, so the shell surface
+     answers normally: the typed refusal is absent. *)
+  assert (Lazy.force K.declaration_error = None)
+
+(* The duplicate is caught on the real load path, not only on a hand-built
+   list: two actual [tools/*.toml] definitions that declare the same
+   [shell_command] path are parsed by the same loader the embedded tree
+   uses, and the refusal names the path and both tools.  [declarations_of]
+   takes [read]/[files] so the test drives the load path with its own TOML
+   bytes — the embedded tree is not injectable. *)
+let () =
+  let module K = Masc.Keeper_shell_tool_command in
+  let toml ~name ~shell =
+    Printf.sprintf
+      "name = %S\ndescription = \"A tool with a shell form.\"\n\
+       additional_properties = false\nshell_command = %S\n"
+      name shell
+  in
+  let contains haystack needle =
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length haystack
+      && (String.sub haystack i n = needle || scan (i + 1))
+    in
+    n = 0 || scan 0
+  in
+  let files =
+    [ "tools/masc_board_list.toml"; "tools/masc_board_list_renamed.toml" ]
+  in
+  let read = function
+    | "tools/masc_board_list.toml" ->
+      Some (toml ~name:"masc_board_list" ~shell:"board list")
+    | "tools/masc_board_list_renamed.toml" ->
+      Some (toml ~name:"masc_board_list_renamed" ~shell:"board list")
+    | _ -> None
+  in
+  let declared = K.declarations_of ~read ~files in
+  assert (
+    declared
+    = [ ([ "board"; "list" ], "masc_board_list")
+      ; ([ "board"; "list" ], "masc_board_list_renamed")
+      ]);
+  (match K.reject_duplicate_paths declared with
+   | Error message ->
+     assert (contains message "board list");
+     assert (contains message "masc_board_list");
+     assert (contains message "masc_board_list_renamed")
+   | Ok () -> assert false);
+  (* Two real TOML files with distinct paths pass the same load path. *)
+  let distinct_read = function
+    | "tools/masc_board_list.toml" ->
+      Some (toml ~name:"masc_board_list" ~shell:"board list")
+    | "tools/masc_board_list_renamed.toml" ->
+      Some (toml ~name:"masc_board_list_renamed" ~shell:"board post get")
+    | _ -> None
+  in
+  (match
+     K.reject_duplicate_paths (K.declarations_of ~read:distinct_read ~files)
+   with
+   | Ok () -> ()
+   | Error _ -> assert false)
+
+let () =
+  print_endline "[test_keeper_shell_tool_command] all tests passed"

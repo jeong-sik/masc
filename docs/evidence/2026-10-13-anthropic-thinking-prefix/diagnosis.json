@@ -1,0 +1,40 @@
+{
+  "observed_at": "2026-10-13T06:15:09.365633+00:00",
+  "runtime_binary_commit": "6eb08ef187f64edcc1e3ae36637fb11879d2d843",
+  "keeper": "glossary-maniac",
+  "before": "trace-1789798320664-00001#2326",
+  "after": "trace-1789798320664-00001#2327",
+  "before_wire": {
+    "phase": [
+      "Pre_dispatch_serialization"
+    ],
+    "capture_id": "wr-1a133da3599-d6c4-0000",
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "http_codec": "anthropic-messages",
+    "stream": true,
+    "body_bytes": 156297,
+    "body_sha256": "0c1a2c1b80e66b5c8ee279fa92ed132c9e0b7f0d2c2a48772463996d9d01960f"
+  },
+  "after_wire": {
+    "phase": [
+      "Pre_dispatch_serialization"
+    ],
+    "capture_id": "wr-1a133db2671-d6c4-0000",
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "http_codec": "anthropic-messages",
+    "stream": true,
+    "body_bytes": 186631,
+    "body_sha256": "0bfe149f3a0bd71f7e13f5f596ffc3b8b36a7358cf906b762704ff0dccee06d6"
+  },
+  "system_same": true,
+  "tools_same": true,
+  "first_changed_message_index": 17,
+  "disappeared_context_sha256": "d8e98a15b33768fbd2a58da85473f9b12e27bc84c4c5436ffd3563843d676512",
+  "old_context_present_in_next_request": false,
+  "context_metadata": {
+    "agent_core.extra_system_context.v1": true
+  },
+  "limits": "Snapshots record provider-input messages; wire identity is captured separately. No private content or signatures included."
+}

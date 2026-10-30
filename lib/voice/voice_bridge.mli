@@ -1,0 +1,502 @@
+(** Voice_bridge — TTS synthesis, speech-to-text, local playback.
+
+    Re-exports [Voice_bridge_core] (config, helpers, local playback)
+    and adds the higher-level [agent_speak] and transcription APIs.
+
+    External callers use [agent_speak], [get_agent_voice],
+    and [public_config_json]. *)
+
+include module type of Voice_bridge_core
+
+(** {1 Types} *)
+
+(** How one Voice MCP call failed. *)
+(** One voice as an endpoint names it. [voice_id] is what a configuration
+    stores. For [say] that id is the whole printed label, parentheses included:
+    say adds them to names that exist in several languages, and the bare name
+    then selects a different language without saying so. For espeak-ng the id
+    is the printed name with its spaces back: [--voices] shows underscores,
+    and [-v] wants spaces. [voice_aliases] holds the other selections that
+    reach the voice -- espeak-ng's parenthesised aliases -- and is empty for
+    the kinds that publish none. *)
+type catalogue_voice =
+  { voice_id : string
+  ; voice_name : string option
+  ; voice_language : string option
+  ; voice_aliases : string list
+  }
+
+val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
+
+(** Parse what [say -v ?] prints. Separate from the asking so a recorded answer
+    can be replayed on a machine that has no say. *)
+val say_catalogue_of_output : string -> catalogue_voice list
+
+(** Ask one endpoint which voices it has. ElevenLabs answers over HTTP and
+    [say] answers a command; the resolved endpoint adapter selects its transport.
+    [Error] explains why an endpoint has no catalogue or could not answer. *)
+val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
+
+(** Whether a say catalogue has a voice. say does not fail on a name it does
+    not have -- it speaks in another voice and exits 0 -- so this is the only
+    place the difference shows. Names compare without regard to ASCII case, as
+    say matches them; a bare name say prints only with a language is not in the
+    catalogue. *)
+type say_voice =
+  | Say_has_it
+  | Say_lacks_it of { installed : int }  (** how many voices the catalogue has *)
+
+val say_voice_in_catalogue : catalogue_voice list -> voice:string -> say_voice
+
+(** Ask a say endpoint for its catalogue and look [voice] up in it. A blank
+    voice is [Ok]: say then uses its own. [Error] says why the voice will not
+    be the one asked for, or why the catalogue could not be read. *)
+val check_say_voice : Voice_config.endpoint -> voice:string -> (unit, string) result
+
+(** Parse what [espeak-ng --voices] prints. Separate from the asking so a
+    recorded answer can be replayed on a machine that has no espeak-ng. *)
+val espeak_catalogue_of_output : string -> catalogue_voice list
+
+(** Whether an espeak-ng catalogue answers to [voice]. espeak-ng's [-v]
+    accepts the voice name with its spaces, the Language column, the
+    parenthesised aliases, and any of these followed by a [+<variant>] suffix
+    (or [+<variant>] alone for the default voice), so a match on any of them,
+    ignoring ASCII case, is installed. Unlike say, espeak-ng refuses an unknown
+    voice itself; this check still runs first so the refusal names the voice
+    asked for and points at the list it can be picked from. *)
+val espeak_voice_in_catalogue : catalogue_voice list -> voice:string -> bool
+
+(** Ask an espeak-ng endpoint for its catalogue and look [voice] up in it. A
+    blank voice is [Ok]: espeak-ng then uses its default. [Error] says why the
+    voice will not be the one asked for, or why the catalogue could not be
+    read. *)
+val check_espeak_voice : Voice_config.endpoint -> voice:string -> (unit, string) result
+
+val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_format
+(** The container a kind's clips are written in. [say] encodes WAVE and has no
+    MP3 encoder at all, and espeak-ng writes WAVE through [-w]; everything
+    reached over a wire answers MP3. The clip filename carries this, and every
+    reader resolves a token by it, so the two sides cannot disagree about what
+    the bytes are. *)
+
+type mcp_call_error =
+  | Timed_out of float
+  | Connection_failed of string
+  | Http_status of
+      { code : int
+      ; body : string
+      }
+  | Malformed_body of string
+
+val mcp_call_error_to_string : mcp_call_error -> string
+
+type agent_speak_completion =
+  | Spoken
+      (** This host played the clip, or handed it to macOS [open]. *)
+  | Synthesized
+      (** The clip was made and this host did not play it:
+          [local_playback_status] in the payload says whether playback was
+          skipped or failed, and why. A connected dashboard can still play it. *)
+  | Dedup_skipped
+      (** The same sentence was played for this agent moments ago. *)
+
+val agent_speak_completion_to_string : agent_speak_completion -> string
+val agent_speak_completion_of_string : string -> agent_speak_completion option
+
+type agent_speak_result =
+  { completion : agent_speak_completion
+  ; payload : Yojson.Safe.t
+  }
+
+(** {1 Public API} *)
+
+(** {1 Endpoint probes}
+
+    The fallback chains stop at the first endpoint that answers, which is right
+    for serving a request and wrong for answering "is this configuration
+    working". A chain that succeeds says nothing about the endpoints behind the
+    one that answered, so a dead fallback looks exactly like a healthy one until
+    the endpoint in front of it goes away. A probe asks every endpoint and
+    reports each separately. *)
+
+type probe_outcome =
+  | Answered of string  (** What came back, in one phrase. *)
+  | Refused of string  (** The endpoint's own reason, not a summary of it. *)
+  | Skipped of string
+      (** Why it was not asked: disabled, or a kind that does not do this. *)
+
+type probe_attempt =
+  { endpoint_id : string
+  ; kind : Voice_config.endpoint_kind
+  ; outcome : probe_outcome
+  }
+
+val probe_outcome_to_string : probe_outcome -> string
+
+val spoke_detail : bytes:int -> voice:string -> string
+(** What an answered TTS probe reports: the byte count and the voice it asked
+    for. A blank voice reads as the system voice rather than as [""]. *)
+val probe_attempt_json : probe_attempt -> Yojson.Safe.t
+
+(** Parse what an ElevenLabs endpoint answers. Separate from the asking so a
+    recorded answer can be replayed without a network. *)
+val catalogue_voices_of_json : Yojson.Safe.t -> (catalogue_voice list, string) result
+
+val probe_tts
+  :  ?agent_id:string
+  -> message:string
+  -> unit
+  -> (probe_attempt list, string) result
+(** Ask every configured TTS endpoint to synthesize [message], and report what
+    each one did. The audio is discarded; what is being measured is whether the
+    endpoint answers at all, and with how many bytes.
+
+    A voice_mcp endpoint is asked through its [agent_speak] tool, the call a
+    turn makes. That tool plays the sentence where its server plays audio and
+    returns no file, so its answer names the voice without a byte count. The
+    call needs the process's Eio clock and network in {!Eio_context}; without
+    them the endpoint is reported as refused, in those words.
+
+    The voice is resolved per endpoint rather than once for the list: a voice id
+    is provider vocabulary, so asking one endpoint for another's id probes a
+    voice that does not exist there (#24068).
+
+    [Error] when the voice configuration itself does not load, or has no [tts]
+    section -- the same two states {!Voice_config.load_detailed} separates, kept
+    apart here for the same reason. *)
+
+(** How an endpoint transcribes, if it does. A kind added to
+    {!Voice_config.endpoint_kind} stops {!transcriber_of_kind} compiling until
+    it has an answer here -- the step that was missing when the two command
+    kinds reached main while the probe still matched on three. *)
+type transcriber =
+  | Over_http
+  | By_command
+  | Does_not_transcribe
+
+val transcriber_of_kind : Voice_config.endpoint_kind -> transcriber
+
+val transcript_of_stt_json : Yojson.Safe.t -> (string, string) result
+(** The transcript inside what an HTTP endpoint answered. [Error] when the body
+    carries no [text] string: that is an answer this code cannot read, not a
+    microphone that heard nothing, and the probe reports those two differently
+    on purpose. *)
+
+val probe_stt
+  :  audio_file:string
+  -> unit
+  -> (probe_attempt list, string) result
+(** Ask every configured STT endpoint to transcribe [audio_file], and report
+    what each one did.
+
+    An empty transcript is [Answered], not [Refused]: the endpoint was reached
+    and heard nothing in the audio. Saying which it was keeps a quiet recording
+    apart from an endpoint that is not there -- the distinction an empty draft
+    in the composer cannot make on its own. *)
+
+val public_config_json : unit -> (Yojson.Safe.t, Yojson.Safe.t) result
+
+val agent_speak :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  net:_ Eio.Net.t ->
+  agent_id:string ->
+  message:string ->
+  ?provider:string ->
+  ?priority:int ->
+  ?audio_device:string ->
+  unit ->
+  (agent_speak_result, string) result
+(** Synthesize [message] via the configured TTS endpoint chain and, where
+    [\[voice.local_playback\]] allows it for [agent_id], play it on this host,
+    blocking the calling fiber until playback finishes. Concurrent callers are
+    serialized by the global playback mutex. Returns a typed [completion] —
+    [Spoken] when this host played it, [Synthesized] when it did not — and
+    preserves the provider payload. TTS/endpoint failures or
+    an invalid provider completion payload return [Error] so the caller — and
+    the LLM driving it — sees the failure instead of a fake success.
+
+    Config-state semantics (no silent fallback): an explicit but broken
+    voice config surfaces its load error; when no voice config exists at
+    all, TTS is reported as explicitly disabled ([Error
+    "no configured TTS endpoint"]) instead of substituting a hardcoded
+    model name. A config that loads but has no [tts] section is refused
+    here too, before any endpoint is asked: there is no model to send, and
+    an empty string standing in for one would reach providers as
+    [model_id ""].
+
+    This is the only speak path: the former fire-and-forget
+    [enqueue_agent_speak] queue was removed after the 2026-06-10 voice
+    repeat incident (schema promised blocking semantics while the
+    implementation returned [status="queued"] immediately, so keepers
+    re-spoke the same content every sub-turn). *)
+
+val get_agent_voice :
+  agent_id:string -> (Yojson.Safe.t, string) result
+
+(** {1 Speech-to-Text} *)
+
+(** The [status] field of every capture result this module returns, as a
+    closed set. {!record_and_transcribe} and {!transcribe_audio} write it;
+    {!capture_outcome_of_json} reads it back. A reader that matches on the
+    string instead falls through whatever it does not know into "nothing was
+    heard", which is how a discarded sentence was reported as a dead
+    microphone. *)
+type capture_status =
+  | Transcribed
+  | No_audio
+  | Discarded
+
+val capture_status_to_string : capture_status -> string
+val capture_status_of_string : string -> capture_status option
+
+val transcribe_audio :
+  audio_file:string ->
+  ?language_code:string ->
+  ?deadline:Monotonic_deadline.t ->
+  unit ->
+  (Yojson.Safe.t, string) result
+(** Transcribe [audio_file] through the enabled STT endpoint chain.
+    A broken explicit voice config surfaces its load error; when no
+    voice config exists, STT is reported as explicitly disabled
+    ([Error "no enabled STT endpoints configured"]), and a config with
+    no [stt] section is refused by name before any endpoint is asked.
+    If every enabled endpoint fails, the returned error names each
+    attempted endpoint and its failure.
+
+    [deadline] is one wall-clock budget for the whole chain. It starts no new
+    clock per endpoint: each call is capped by the time left, an endpoint is
+    not started once the deadline has passed, and a chain stopped that way
+    answers an error beginning [budget_spent]. Without [deadline] behaviour is
+    unchanged. *)
+
+(** {1 Microphone capture thresholds}
+
+    The margins a capture decides by are {!Voice_config.capture_config},
+    read from [\[voice.capture\]] at each capture, with the measured defaults
+    in {!Voice_config.default_capture}. They are not duplicated here: a copy
+    of {!Voice_config.trigger_margin_db} exported from this module went on
+    describing it as a peak margin after the capture had moved to RMS. *)
+
+val db_of_amplitude : float -> float
+(** dBFS for a linear RMS amplitude; [neg_infinity] at zero. *)
+
+val amplitude_of_db : float -> float
+(** The inverse, with [neg_infinity] mapping back to zero. *)
+
+(** {1 Microphone record + transcribe} *)
+
+val recorder_refusal_message : ?device:string -> Process_eio.spawn_refusal -> string
+(** What {!record_and_transcribe} answers when its recorder never started.
+    A missing executable is named with the command that installs it -- a fresh
+    mac has no sox, which carries [rec] -- and every other refusal keeps the
+    runner's own sentence rather than a guessed cause. *)
+
+val measure_noise_floor : agent_id:string -> unit -> float option
+(** One short capture, as long as the configured
+    {!Voice_config.calibration_seconds}, returning the room's RMS amplitude.
+    [None] when the recorder could not run, or when the voice config exists
+    and does not parse -- the capture that follows refuses with that reason.
+
+    Exposed for a caller that captures repeatedly: the room does not change
+    between two utterances the way it changes across a session, and re-probing
+    costs about 1.15 s of the gap between them. *)
+
+(** How far a capture has got. Exposed so the decision that ends a recording
+    can be checked against a table of levels rather than a microphone. *)
+type level_phase =
+  | Calibrating of { until : float; floor : float option }
+  | Listening of { floor : float }
+  | Speaking of { floor : float; quiet_since : float option }
+
+(** What the operator asked for when they ended a recording early. One variant
+    rather than two flags: a stop and a discard cannot both be requested, and a
+    pair of booleans would let them be. *)
+type stop_request =
+  | Keep_what_was_heard
+  | Discard
+
+(** Why a recording ended. What happens to it turns on whether speech was
+    heard and on whether the operator said they do not want it. A capture
+    stopped mid-sentence by the stop key, and one that ran out of time
+    mid-sentence, both carry a sentence and are transcribed. *)
+type capture_end =
+  | Ended_after_speech
+  | Ended_without_speech of float option
+      (** The capture ran to its deadline and no reading ever cleared the
+          room. Carries the room level the capture settled on, as a linear
+          RMS amplitude, or [None] when the recorder never produced a sample
+          to measure.
+
+          It is carried because an empty draft is the same sight whether the
+          microphone heard nothing, the room sat above the threshold, or the
+          transcriber failed. The two levels separate those: "room -38.2 dB,
+          speech had to clear -32.2 dB" is a thing to act on. *)
+  | Stopped_before_speech of float option
+      (** Either key, pressed before anything was said. Nothing waited for
+          speech, so this is not a silence verdict on the microphone; it
+          carries the room the same way for the same reason. *)
+  | Discarded_after_speech of float
+      (** The discard key, pressed after speech was heard. The sentence is
+          thrown away on purpose and the operator is told that, not that
+          nothing was heard: the microphone worked. The floor is always known
+          here because speech was heard, so calibration had finished. *)
+
+type level_step =
+  | Continue of level_phase
+  | Finish of capture_end
+
+val advance_phase :
+  capture:Voice_config.capture_config ->
+  now:float ->
+  level:float option ->
+  level_phase ->
+  level_step
+(** What one level reading does to a capture in progress.
+
+    [level] is a linear RMS amplitude, or [None] when the recorder has not
+    written anything to measure yet — the state every capture starts in, since
+    the file is created before the first sample reaches it.
+
+    Every threshold the capture applies is here. The loop around it supplies
+    the clock and the file and nothing else. *)
+
+val end_at_deadline : level_phase -> capture_end
+(** What running out of time means, which depends on what was heard. A capture
+    cut off mid-sentence still carries speech; one that never rose above the
+    room is a recording of a room, and must not be transcribed. *)
+val with_noise_reduced_audio :
+  audio_file:string -> f:(string -> 'a) -> 'a
+(** Run [f] on a noise-reduced copy of [audio_file], removing the copy and
+    the profile when [f] returns — whatever it returns, and when it raises.
+    When sox cannot produce the copy, [f] runs on [audio_file] itself: the
+    caller transcribes what it already had rather than nothing.
+
+    Exposed because its scope-ownership is the regression contract: the
+    [noise_reduced_copy] it replaced handed the reduced file to its caller,
+    and nobody removed it — every noise-reduced capture left a
+    masc_nr_*.wav behind forever. *)
+
+val end_at_operator_stop : stop_request -> level_phase -> capture_end
+(** The same question asked of a stop.
+
+    [Keep_what_was_heard] mid-sentence is "send what I said", which is usually
+    why the key is pressed -- the alternative is waiting out
+    {!Voice_config.trailing_silence_seconds}. Before any speech it is
+    [Stopped_before_speech].
+
+    [Discard] is an abort whatever was heard. It is the only place in the
+    capture path where the operator says what they want rather than the levels
+    inferring it. Mid-sentence it is [Discarded_after_speech], so the report
+    says a sentence was thrown away; before any speech it is the same
+    [Stopped_before_speech] as the other key. *)
+
+val default_capture_timeout_seconds : float
+(** How long {!record_and_transcribe} runs before it ends on its own when
+    the caller passes no [timeout_sec]. The one number for that knob: the
+    TUI and the keeper listen tool both pass nothing, and the listen tool's
+    schema advertises this value. *)
+
+type capture_level =
+  | Level_observed of float
+  | Level_unavailable
+  | Meter_closed
+(** Meter observations are distinct from recorder admission or physical cleanup.
+    A measured zero amplitude is [Level_observed neg_infinity]; an unreadable
+    recording is [Level_unavailable], never a fabricated silent measurement. *)
+
+val resolved_audio_device :
+  ?env:string array -> pick:string option -> unit -> string option
+(** The device a capture opens, resolved once: an [AUDIODEV] in [env] wins
+    when it names a device, a blank one is no name and falls through, and
+    the stored pick is next. [env] defaults to this process's environment.
+    The panel and every capture resolve through this one place, so what the
+    panel names is what sox opens. [None] leaves the fallback to the caller
+    (the panel probes the platform; a capture opens the default). *)
+
+val record_and_transcribe :
+  agent_id:string ->
+  ?timeout_sec:float ->
+  ?language_code:string ->
+  ?noise_floor:float ->
+  ?audio_device:string ->
+  ?on_level:(capture_level -> unit) ->
+  ?should_stop:(unit -> stop_request option) ->
+  unit ->
+  (Yojson.Safe.t, string) result
+(** Record from the microphone (with beep tones) and transcribe via STT.
+
+    [audio_device] is passed to the recorder as AUDIODEV, the way sox reads a
+    device when its [rec] alias is used. [None] records whatever the
+    operating system calls the default input, exactly as before this option
+    existed. A device the system no longer has fails the capture, and that
+    failure carries sox's own sentence plus the device it was asked for.
+
+    Where the recording ends is decided here rather than by sox: the level is
+    re-read ten times a second while the file is being written, speech starts
+    when it clears the room by {!Voice_config.trigger_margin_db}, and the
+    recording stops once the room has been quiet again for
+    {!Voice_config.trailing_silence_seconds}.
+
+    [on_level] receives [Level_observed] in dBFS for a successful file reading,
+    [Level_unavailable] when no reading is available, and [Meter_closed] when
+    the capture race has returned. The last observation is not a transcription
+    result or proof of physical recorder cleanup.
+
+    [should_stop] is polled at the same rate. [Keep_what_was_heard] ends the
+    recording and still transcribes what was said -- the usual reason to stop
+    a capture is that the speaker has finished and does not want to wait out
+    {!Voice_config.trailing_silence_seconds}. [Discard] throws the recording
+    away and, when speech had been heard, says so with the [discarded]
+    status. Either one before any speech yields [no_audio], which is what
+    keeps a room away from a transcriber that answers silence with a sentence.
+
+    [noise_floor] reuses an RMS level already measured, skipping calibration.
+    Omitted, the room is read from the capture's own opening.
+
+    The thresholds come from [\[voice.capture\]], read at each call. No
+    config at all is the measured defaults. A config that exists and does not
+    parse is refused with its reason before a tone is played or a microphone
+    opened; it does not capture on defaults the operator did not set.
+
+    Returns transcription JSON on success, or a [no_audio] status when nothing
+    rose above the room — a recording of a room must not reach the endpoint,
+    which answers it with a fluent sentence — or [discarded]. The [status]
+    field is one of {!capture_status}; read it with
+    {!capture_outcome_of_json}. *)
+
+(** The result of {!record_and_transcribe} read back as what it is. The JSON
+    stays the wire shape for the keeper tool; this is for a caller that has
+    to act on it. *)
+type capture_outcome =
+  | Transcript of
+      { text : string
+      ; endpoint_id : string option
+      }
+  | Transcriber_returned_nothing of { endpoint_id : string option }
+      (** The endpoint answered and its answer was empty. Not a silence: the
+          capture heard speech and sent it, and the transcriber is the thing
+          to look at. *)
+  | Nothing_heard of { message : string }
+      (** A [no_audio] result; the message carries the room level and the
+          level speech had to clear, when they were measured. *)
+  | Discarded_recording of { message : string }
+  | Unrecognized_status of string
+      (** A status neither side of this module knows. Reported rather than
+          folded into any of the above. *)
+  | Status_absent
+      (** The JSON carries no [status] field at all, so it is not a result
+          this module wrote. Its own answer rather than an unrecognized
+          status with an invented name. *)
+
+val capture_outcome_of_json : Yojson.Safe.t -> capture_outcome
+
+module For_testing : sig
+  (** The window one Voice MCP call runs under: an answer that arrived as
+      the window closed is the answer; [Timed_out] only when none had. *)
+  val with_timeout
+    :  clock:_ Eio.Time.clock
+    -> ?timeout:float
+    -> (unit -> ('a, mcp_call_error) result)
+    -> ('a, mcp_call_error) result
+end

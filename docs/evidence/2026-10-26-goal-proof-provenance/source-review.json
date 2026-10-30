@@ -1,0 +1,183 @@
+{
+  "schema": "masc.goal.proof-source-provenance.independent-review.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T16:46:20.783681+00:00",
+  "verdict": "PASS_SCOPED_PROMPT_DESIGN_AND_SOURCE_NO_NEW_P0_P1_P2",
+  "subject": {
+    "branch": "codex/goal-proof-source-provenance-20261026",
+    "base_sha": "ce5ae0548c0b3349b57b46755034c444e260db25",
+    "checkout_head_sha": "ce5ae0548c0b3349b57b46755034c444e260db25",
+    "patch_state": "One uncommitted tracked prompt file; this verdict binds its exact bytes and diff, not a future commit.",
+    "path": "config/prompts/goal_verification.md",
+    "bytes": 7530,
+    "sha256": "35b6535650e99ec19a39a13a669e19f3a89067173d9a9dd30deab4dfb459b340",
+    "canonical_diff_command": "git diff --no-ext-diff --binary --full-index ce5ae0548c0b3349b57b46755034c444e260db25 -- config/prompts/goal_verification.md",
+    "diff_bytes": 5636,
+    "diff_sha256": "cd4e45007979350d3968977df69f39f95c939c68effc7a1334f91775e8166eb8",
+    "only_tracked_modified_path": "config/prompts/goal_verification.md"
+  },
+  "authority": {
+    "constitution_sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682",
+    "contributor_workflow_sha256": "03ae9fad1c4e361062b2b405bf1bca8ed77dd01d5613397459aa6ba4541d4ddc",
+    "review_basis": "Previously fully read authority bytes were reidentified unchanged in this checkout. Source, focused controls, build, installed runtime and actual Goal completion remain separate claims."
+  },
+  "source_findings": [
+    {
+      "scope": "Contract versus injection",
+      "source": "config/prompts/goal_verification.md:19",
+      "assessment": "The change treats declared metric subject/procedure/evidence requirements and target comparison as the contract while rejecting role changes and approval instructions inside submitted data or tool output. This removes the former ambiguity that all instructions inside metric XML should be ignored. It does not elevate arbitrary artifact instructions into Goal authority."
+    },
+    {
+      "scope": "No unconditional raw-evidence gate",
+      "source": "config/prompts/goal_verification.md:39",
+      "assessment": "Direct execution/original-evidence inspection is conditional on the declared metric requiring it. The explicit reported-number exception forbids undeclared re-execution or additional proof. The lookup section repeats that limits apply only to the metric that declares them. A valid reported-count metric is not silently replaced with an execution-quality metric."
+    },
+    {
+      "scope": "Unknown versus failed outcome",
+      "source": "config/prompts/goal_verification.md:47",
+      "assessment": "The reason must distinguish missing evidence, failed lookup and unmet measurement. Not obtaining required originals justifies inability to prove the target; it does not establish that the work itself failed. Exact original evidence may be inspected; no rerun requirement is introduced."
+    },
+    {
+      "scope": "CI and run attribution",
+      "source": "config/prompts/goal_verification.md:107",
+      "assessment": "The change correctly permits individual successes alongside an overall failed CI run and requires each execution to keep its own identifier/scope. It directly addresses the prior negative-control reason errors without declaring any specific current CI run successful."
+    },
+    {
+      "scope": "Verdict independence",
+      "source": "config/prompts/goal_verification.md:46",
+      "assessment": "Both APPROVE and REJECT remain available under the declared metric/target. No named acceptance result, fixed number of lookups, source-specific path, new authority grant, Goal requirement for independent Tasks or programmatic success gate is added."
+    }
+  ],
+  "direct_consumer_trace": [
+    {
+      "path": "lib/keeper/goal_verifier_original.ml",
+      "sha256": "3a7628a68dc50c87e9efc192b4f0c1c6756d95caff8feb71462e15b79bdc7147",
+      "lines": [
+        24,
+        31,
+        34,
+        38,
+        41,
+        45,
+        49,
+        56,
+        57,
+        85,
+        96
+      ],
+      "finding": "Preparation renders the existing proof and lookup templates with the bound subject, typed measurement observation, lookup schema/root layout and submitted snapshot, then persists exact prompt and system bytes. Variable names remain unchanged. No criterion or lookup grant is derived from the new prose."
+    },
+    {
+      "path": "lib/verification_authority_tools.ml",
+      "sha256": "ed48872fca7eb34471bb667e52c7c315e45cb91a6277196a2014388f82b5b154",
+      "lines": [
+        847,
+        849,
+        852,
+        859,
+        869,
+        875
+      ],
+      "finding": "The host captures the bound Goal/request/criterion and current-criterion measurement as context. The measurement is excluded from the authority grant projection and enters retained prompt bytes; a report update cannot silently replace an old Original."
+    },
+    {
+      "path": "lib/goal_verification_agent.ml",
+      "sha256": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388",
+      "lines": [
+        410,
+        413,
+        414,
+        416,
+        420,
+        421,
+        426,
+        428,
+        435
+      ],
+      "finding": "A fresh frontier prepares and retains the Original. Existing retained work/receipts are reused. Changing the template does not retrofit an old request or reevaluate an existing judgment."
+    },
+    {
+      "path": "config/prompts/verification.md",
+      "sha256": "e63ec4341cd59f3a4ca2e692969bf19e2a7764ed6c63f3471438ebb83fbc7fa8",
+      "lines": [
+        191,
+        193,
+        194,
+        195,
+        199,
+        202
+      ],
+      "finding": "The unchanged shared system prompt already treats user input as the declared contract/submission and rejects role-changing or approval instructions from evidence. The new Goal prose is consistent with that system policy."
+    },
+    {
+      "path": "lib/prompt_registry/prompt_registry.ml",
+      "lines": [
+        664,
+        667,
+        827,
+        828,
+        832
+      ],
+      "finding": "Template rendering resolves the effective prompt, including configured override precedence. A copied source file alone cannot prove the runtime used the overlay; retained/rendered provider input must identify the effective prompt."
+    }
+  ],
+  "structural_checks": {
+    "new_placeholders": [],
+    "removed_placeholders": [],
+    "unchanged_placeholder_names": [
+      "goal_title",
+      "lookup_root_layout",
+      "lookup_section",
+      "lookup_tools",
+      "metric",
+      "reported_measurement",
+      "submitted_sources",
+      "target_value"
+    ],
+    "proof_and_lookup_sections_retained": true,
+    "check_scope": "Read-only text/diff and consumer-source inspection; not execution of the OCaml template parser or native tests."
+  },
+  "planned_actual_controls": {
+    "assessment": "Legitimate bounded controls for conditional evidence requirements; no source blocker in the described design.",
+    "fixed_observation": "Record one actual command stdout10 as a fixed raw artifact. Source code or an operator expectation alone is not a substitute for that command observation.",
+    "controls": [
+      {
+        "metric": "actual raw observation10",
+        "reported_value": 20,
+        "target": 20,
+        "predeclared_expected_verdict": "REJECT"
+      },
+      {
+        "metric": "actual raw observation10",
+        "reported_value": 20,
+        "target": 10,
+        "predeclared_expected_verdict": "APPROVE"
+      },
+      {
+        "metric": "reported observation value20 itself",
+        "reported_value": 20,
+        "target": 20,
+        "predeclared_expected_verdict": "APPROVE"
+      }
+    ],
+    "observations_needed_to_interpret_results": [
+      "Each fresh Goal states the measurement source, unit and comparison direction unambiguously before review. The third metric explicitly measures the reported value, so the unrelated raw10 cannot silently become its criterion.",
+      "Keep expected verdicts in the operator plan, outside tool responses and verdict control. Preserve unexpected decisions and lookup failures rather than forcing the expected result.",
+      "Capture effective overlay identity and the retained Original/actual provider input; correlate actual tool reads, structured verdict and committed typed state per request/run.",
+      "Describe the candidate as the existing3e binary with this exact prompt-file overlay. Its source/native build identity is not ce5 plus a newly built product binary."
+    ],
+    "limits": "No control was executed by this reviewer. Three controls on one configured/reported Flash model do not establish broad verifier reliability, independent model judgment, full11 acceptance, original Goal success or a causal before/after effect without a matched baseline."
+  },
+  "findings_P0_P1_P2": [],
+  "remaining_risks": [
+    "Contract versus injected instructions remains a model judgment at this boundary; wording alone is not a deterministic prompt-injection defense.",
+    "The existing reported_measurement paragraph asks to open evidence locators. For a genuinely reported-value metric, failure of an unrelated optional locator must not become a new raw-evidence requirement; the explicit new exception and third control are important to the claimed scope.",
+    "The prior main approval is not corrected by changing this file. Fresh controls and any later normal main request must be judged separately, without human-confirmation or proof-completion assumptions."
+  ],
+  "effects": {
+    "source_Git_runtime_API_model_provider_Board_Goal_Task_mutations": false,
+    "agents_spawned": false,
+    "local_Dune_CI_native_or_model_execution": false,
+    "only_new_output": "review.json"
+  }
+}

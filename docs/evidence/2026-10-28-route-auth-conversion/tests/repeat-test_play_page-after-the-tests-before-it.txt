@@ -1,0 +1,19 @@
+main: 197f56852c59eb5e7c3c2305974b58c73c9c23f9
+a4b: 3d5c78c881d1e9fe1c11c7cb0ee55e5188e1b22b
+test: test_play_page, rounds: 8, run first in the same HOME: test_server_keeper_oauth_disconnect test_dashboard_execute_output test_lane_addon_ask_routes test_lane_addon_live_route test_lane_addon_surface test_msx_routes test_dos_input_routes test_browser_lane_routes test_browser_surface_session_routes
+round 1 main: failing [3,5]
+round 1 a4b: failing [3]
+round 2 main: failing [3]
+round 2 a4b: failing [3,5]
+round 3 main: failing [3,5]
+round 3 a4b: failing [3,5]
+round 4 main: failing [3]
+round 4 a4b: failing [3,5]
+round 5 main: failing [3,5]
+round 5 a4b: failing [3]
+round 6 main: failing [3]
+round 6 a4b: failing [3,5]
+round 7 main: failing [3]
+round 7 a4b: failing [3]
+round 8 main: failing [3,5]
+round 8 a4b: failing [3]

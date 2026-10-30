@@ -1,0 +1,41 @@
+{
+  "base": "dd5e691f2ce78a3dbd10c22965107344c3b39248",
+  "state": "uncommitted dashboard-only response implementation",
+  "recorded_at": "2026-10-04T05:18:13.532073+00:00",
+  "source_sha256": {
+    "dashboard/src/api/dashboard-runtime.ts": "241c9c7e4076162efb1ffa920a26502320fefa1673e2839275ab2d64271a5f60",
+    "dashboard/src/api/dashboard.ts": "1f64fbaeccab930204f195070d55a733af015363321cb9853f207d47de9c6e60",
+    "dashboard/src/api/dashboard.test.ts": "79a0132577d984bddf45d563da877b5219667bf1b12fb722ac90073c0d808033",
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": "049f5c67b0c6dc706ce59af5cb78a79041e67777f8f88ed383f296754519ab4f",
+    "dashboard/src/components/runtime-toml-editor.ts": "42e23909c5e9a9426a85150793c7d83109cfd2f693d78162b4b2408cb0f4d699",
+    "dashboard/src/components/runtime-toml-editor.test.ts": "ced6b976869a52312016cf8daa9ee87b3ecda9f97f6bd43c5d012e49fb81b6f3"
+  },
+  "commands": [
+    {
+      "command": "pnpm --dir dashboard test src/api/dashboard-runtime-raw-save.test.ts src/components/runtime-toml-editor.test.ts src/api/dashboard.test.ts --reporter verbose",
+      "exit_code": 0,
+      "result": "320 passed in 3 files; 4.31 seconds"
+    },
+    {
+      "command": "cd dashboard && pnpm exec tsc --noEmit",
+      "exit_code": 0,
+      "result": "No diagnostics"
+    },
+    {
+      "command": "cd dashboard && pnpm exec eslint src/api/dashboard-runtime.ts src/api/dashboard.ts src/api/dashboard.test.ts src/api/dashboard-runtime-raw-save.test.ts src/components/runtime-toml-editor.ts src/components/runtime-toml-editor.test.ts",
+      "exit_code": 1,
+      "result": "Only pre-existing no-nested-ternary at dashboard-runtime.ts:987:56 and :989:7. Same two reproduced on base file via eslint --stdin --stdin-filename src/api/dashboard-runtime.ts."
+    },
+    {
+      "command": "node dashboard/evidence/2026-10-04-runtime-config-cas/browser-fixture.mjs",
+      "exit_code": 0,
+      "result": "Chromium 149.0.7827.55, 7 scenario assertions, expected HTTP 409/409/500; zero pageErrors, zero unhandled routes."
+    }
+  ],
+  "limits": [
+    "No native backend, Dune, CI, deployment or real filesystem CAS execution by this agent.",
+    "Browser uses actual component, styles and HTTP API code with intercepted synthetic responses. Only conflict/read/adopt/replace/unknown-result scenario is browser-observed; successful write behavior is covered by existing focused tests, not a real backend.",
+    "Initial browser harness request matcher intercepted /dashboard/src/api modules, preventing mount. Failure log and diagnostics are retained; corrected final harness only intercepts /api endpoints.",
+    "Source verdict/independent review belongs to a different agent; this is implementation evidence."
+  ]
+}

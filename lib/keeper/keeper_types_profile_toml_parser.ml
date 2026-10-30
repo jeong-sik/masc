@@ -1,0 +1,449 @@
+include Keeper_config
+include Keeper_types_profile_sandbox
+include Keeper_types_profile_defaults
+include Keeper_types_profile_toml_normalizers
+include Keeper_types_profile_agent_core_env
+
+type keeper_toml_field_kind =
+  | Field_string
+  | Field_bool
+  | Field_int
+  | Field_string_array
+
+(* One list carries both what a keeper TOML key may be called and what it may
+   hold. [detect_unknown_keeper_toml_keys] reads the names and
+   [validate_known_keeper_field_types] reads the kinds, so a key cannot be
+   accepted as known while having no declared type.
+
+   That combination is what makes the loader's conflation reachable: for a key
+   nothing type-checks, [Keeper_toml_loader.toml_string_list] returns [[]] and
+   [toml_bool_opt] returns [None] for a wrong-typed value exactly as they do
+   for an absent one, and the profile keeps a default the file did not ask for
+   (#26622). Declaring the kind here is what keeps that unreachable. *)
+let keeper_toml_fields =
+  [ "name", Field_string
+  ; "instructions", Field_string
+  ; "activation_mode", Field_string
+  ; "input_policy", Field_string
+  ; "mention_targets", Field_string_array
+  ; "board_interests", Field_string_array
+  ; "sandbox_profile", Field_string
+  ; "sandbox_image", Field_string
+  ; "network_mode", Field_string
+  ; "remote_endpoint", Field_string
+  ; "microvm_backend", Field_string
+  ; "microvm_memory", Field_string
+  ; "microvm_cpus", Field_int
+  ; "observation_run", Field_string
+  ; "max_context_override", Field_int
+  ; "telemetry_feedback_enabled", Field_bool
+  ; "telemetry_feedback_window_hours", Field_int
+  ; "always_allow", Field_bool
+  ; "voice_always_allow", Field_bool
+    (* RFC-0390. The [keeper.tools] key is declared, so any
+       other key in that table is unknown and fails the load rather than
+       being a silently ignored sibling. A prefix rule would accept
+       [tools.nativ] and leave the runtime on its default posture without a
+       word, which is what naming them here prevents. *)
+  ; "tools.native", Field_string
+    (* RFC-0403. Sits in the same [keeper.tools] table as [tools.native] and
+       is declared for the same reason: an unlisted sibling fails the load
+       rather than being read as no selection at all. *)
+  ; "tools.attached_allow", Field_string_array
+    (* Per-keeper deny over the ordinary built-ins, by model-visible name.
+       Sits in the same [keeper.tools] table; [defer_loading] is global and
+       per tool, so a keeper that must not see spawn/delegate at all had no
+       axis until this one. *)
+  ; "tools.deny", Field_string_array
+  ; "skills.names", Field_string_array
+  ]
+
+let keeper_toml_field_names = List.map fst keeper_toml_fields
+
+let canonical_keeper_toml_key_names = keeper_toml_field_names
+
+(** One current-key detector shared by profile loading and config audit. *)
+let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
+  let known =
+    List.map (fun key -> "keeper." ^ key) canonical_keeper_toml_key_names
+  in
+  let agent_core_env_prefix_len = String.length agent_core_env_key_prefix in
+  let starts_with_agent_core_env key =
+    String.length key > agent_core_env_prefix_len
+    && String.starts_with key ~prefix:agent_core_env_key_prefix
+  in
+  doc
+  |> List.map fst
+  |> List.filter (fun key ->
+       not (List.mem key known) && not (starts_with_agent_core_env key))
+  |> dedupe_keep_order
+
+let toml_value_kind = function
+  | Keeper_toml_loader.Toml_string _ -> "string"
+  | Keeper_toml_loader.Toml_int _ -> "integer"
+  | Keeper_toml_loader.Toml_float _ -> "float"
+  | Keeper_toml_loader.Toml_bool _ -> "boolean"
+  | Keeper_toml_loader.Toml_string_array _ -> "string array"
+  | Keeper_toml_loader.Toml_array _ -> "array"
+  | Keeper_toml_loader.Toml_table _ -> "table"
+  | Keeper_toml_loader.Toml_inline_table _ -> "inline table"
+  | Keeper_toml_loader.Toml_table_array _ -> "table array"
+  | Keeper_toml_loader.Toml_offset_datetime _ -> "offset datetime"
+  | Keeper_toml_loader.Toml_local_datetime _ -> "local datetime"
+  | Keeper_toml_loader.Toml_local_date _ -> "local date"
+  | Keeper_toml_loader.Toml_local_time _ -> "local time"
+;;
+
+let keeper_toml_field_kind_expectation = function
+  | Field_string ->
+    ( "string"
+    , Keeper_toml_loader.(
+        function
+        | Toml_string _ -> true
+        | Toml_int _ | Toml_float _ | Toml_bool _ | Toml_string_array _ | Toml_array _
+        | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+        | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ -> false) )
+  | Field_bool ->
+    ( "boolean"
+    , Keeper_toml_loader.(
+        function
+        | Toml_bool _ -> true
+        | Toml_string _ | Toml_int _ | Toml_float _ | Toml_string_array _ | Toml_array _
+        | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+        | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ -> false) )
+  | Field_int ->
+    ( "integer"
+    , Keeper_toml_loader.(
+        function
+        | Toml_int _ -> true
+        | Toml_string _ | Toml_float _ | Toml_bool _ | Toml_string_array _ | Toml_array _
+        | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+        | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ -> false) )
+  | Field_string_array ->
+    ( "string array"
+    , Keeper_toml_loader.(
+        function
+        | Toml_string_array _ -> true
+        | Toml_string _ | Toml_int _ | Toml_float _ | Toml_bool _ | Toml_array _
+        | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+        | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ -> false) )
+;;
+
+let validate_known_keeper_field_types doc =
+  let expected key =
+    let bare_key = String.sub key 7 (String.length key - 7) in
+    Option.map
+      keeper_toml_field_kind_expectation
+      (List.assoc_opt bare_key keeper_toml_fields)
+  in
+  doc
+  |> List.find_map (fun (key, value) ->
+       if String.starts_with key ~prefix:"keeper."
+          && not (String.starts_with key ~prefix:agent_core_env_key_prefix)
+       then
+         match expected key with
+         | Some (expected_kind, accepts) when not (accepts value) ->
+           Some
+             (Printf.sprintf
+                "%s must be a TOML %s, got %s"
+                key
+                expected_kind
+                (toml_value_kind value))
+         | Some _ | None -> None
+       else if String.starts_with key ~prefix:agent_core_env_key_prefix
+               && Option.is_none (string_of_toml_value_for_env value)
+       then
+         Some
+           (Printf.sprintf
+              "%s must be a scalar TOML value, got %s"
+              key
+              (toml_value_kind value))
+       else None)
+  |> function None -> Ok () | Some error -> Error error
+;;
+
+let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
+    : (keeper_profile_defaults, string) result =
+  let k key = "keeper." ^ key in
+  let str key = Keeper_toml_loader.toml_string_opt doc (k key) in
+  let bool_ key = Keeper_toml_loader.toml_bool_opt doc (k key) in
+  let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
+  let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
+  let has key = List.mem_assoc (k key) doc in
+  let agent_core_env = extract_agent_core_env_from_doc doc in
+  let open Result.Syntax in
+  (* A key whose value comes from a closed vocabulary is read once. The parsed
+     value is what the cross-field checks below compare and what the record
+     holds, so a spelling is not accepted in one place and read again in
+     another. *)
+  let closed key of_string ~invalid =
+    match str key with
+    | None -> Ok None
+    | Some raw ->
+      (match of_string raw with
+       | Some value -> Ok (Some value)
+       | None -> Error (invalid raw))
+  in
+  let* () =
+    match detect_unknown_keeper_toml_keys doc with
+    | [] -> Ok ()
+    | fields ->
+        Error
+          (Printf.sprintf
+             "unknown keeper TOML keys: %s; accepted keys: %s, %s<name>"
+             (String.concat ", " fields)
+             (String.concat ", " (List.map (fun key -> "keeper." ^ key)
+                                    canonical_keeper_toml_key_names))
+             agent_core_env_key_prefix)
+  in
+  (* Do not use [strs] alone here: it maps an absent array and an explicit []
+     to the same value. The profile contract gives those opposite meanings. *)
+  let skill_names =
+    if has "skills.names"
+    then Some (strs "skills.names" |> dedupe_keep_order)
+    else None
+  in
+  (* Same absent-versus-empty rule as [skills.names]: an absent array is
+     every attached tool, an explicit [] is none of them. *)
+  let attached_tool_allow =
+    if has "tools.attached_allow"
+    then Some (strs "tools.attached_allow" |> dedupe_keep_order)
+    else None
+  in
+  (* Unlike [tools.attached_allow], absent and explicit [] mean the same thing
+     here -- deny nothing -- so a plain list carries no lost distinction. *)
+  let tool_deny = strs "tools.deny" |> dedupe_keep_order in
+  let* () = validate_known_keeper_field_types doc in
+  let* sandbox_profile =
+    closed "sandbox_profile" sandbox_profile_of_string ~invalid:(fun raw ->
+      Printf.sprintf
+        "invalid sandbox_profile '%s' (allowed: %s)"
+        raw
+        (String.concat ", " valid_sandbox_profile_strings))
+  in
+  let* network_mode =
+    closed "network_mode" network_mode_of_string ~invalid:(fun raw ->
+      Printf.sprintf
+        "invalid network_mode '%s' (allowed: %s)"
+        raw
+        (String.concat ", " valid_network_mode_strings))
+  in
+  (* The profile/mode compatibility rule, read from the type that owns both
+     ({!Keeper_types_profile_sandbox.network_mode_rejection}) rather than
+     restated here. It was restated here, and this was the only layer that
+     ran it: the keeper_up write path never compared the two, so a create
+     could produce a keeper TOML that this very function refused on the next
+     load. *)
+  let* () =
+    match sandbox_profile, network_mode with
+    | Some profile, Some mode -> (
+        match network_mode_rejection profile mode with
+        | Some message -> Error message
+        | None -> Ok ())
+    | Some _, None | None, _ -> Ok ()
+  in
+  (* Phase 1 SSH lane (Task 1 review follow-up): [remote_endpoint] is only
+     meaningful for the remote_ssh profile — it names an
+     [exec.ssh.endpoints.<name>] registry entry that only the SSH dispatch
+     branch consults. Setting it under any other profile (or none) is a
+     typo, not an override, so the load rejects it with a named error
+     instead of silently carrying a value nothing will read. No legacy TOML
+     exists to break: the key itself was introduced by the SSH lane. *)
+  let remote_endpoint = str "remote_endpoint" in
+  let* () =
+    match sandbox_profile, remote_endpoint with
+    | Some Remote_ssh, _ -> Ok ()
+    | (None | Some (Docker | Micro_vm)), Some _ ->
+        Error
+          "remote_endpoint_requires_remote_ssh: keeper.remote_endpoint is \
+           only valid with sandbox_profile = \"remote_ssh\""
+    | (None | Some (Docker | Micro_vm)), None -> Ok ()
+  in
+  (* [microvm_backend] names which runtime supplies the guest, so it is only
+     meaningful under sandbox_profile = "microvm". Set anywhere else it is a
+     typo rather than an override, and carrying it silently would leave the
+     operator believing a choice was made that nothing reads. An unknown
+     spelling is refused by name rather than falling back to a runtime the
+     keeper did not ask for -- the point of the key is that the isolation is
+     the declared one. *)
+  let* microvm_backend =
+    match sandbox_profile, str "microvm_backend" with
+    | (None | Some (Docker | Micro_vm | Remote_ssh)), None -> Ok None
+    | Some Micro_vm, Some raw ->
+        (match Keeper_microvm_backend.of_string raw with
+        | Some backend -> Ok (Some backend)
+        | None ->
+            Error
+              (Printf.sprintf
+                 "microvm_backend_unknown: keeper.microvm_backend = %S is not \
+                  one of: %s"
+                 raw
+                 (String.concat ", " Keeper_microvm_backend.valid_strings)))
+    | (None | Some (Docker | Remote_ssh)), Some _ ->
+        Error
+          "microvm_backend_requires_microvm: keeper.microvm_backend is only \
+           valid with sandbox_profile = \"microvm\""
+  in
+  (* RFC-0422 §3.4: [observation_run] chooses the box a tool_execute runs in
+     before the judge is asked. The spelling is checked whether or not a
+     profile is declared; the profile pairing
+     ({!Keeper_types_profile_sandbox.observation_run_rejection}) only when
+     one is, since an absent profile is resolved later from the workspace
+     default and this loader cannot see it. *)
+  let* observation_run =
+    closed "observation_run" observation_run_of_string ~invalid:(fun raw ->
+      Printf.sprintf
+        "observation_run_unknown: keeper.observation_run = %S is not \
+         one of: %s"
+        raw
+        (String.concat ", " valid_observation_run_strings))
+  in
+  let* () =
+    match sandbox_profile, observation_run with
+    | Some profile, Some run -> (
+        match observation_run_rejection profile run with
+        | Some message -> Error message
+        | None -> Ok ())
+    | Some _, None | None, _ -> Ok ()
+  in
+  let* native_tool_posture =
+    closed "tools.native" Runtime_native_tools.of_string ~invalid:(fun raw ->
+      Printf.sprintf
+        "invalid keeper.tools.native '%s' (allowed: %s)"
+        raw
+        (String.concat ", " Runtime_native_tools.valid_posture_strings))
+  in
+  let* activation_mode =
+    closed "activation_mode" Keeper_activation_mode.of_string ~invalid:(fun _ ->
+      "keeper.activation_mode must be manual, on_demand, or autonomous")
+  in
+  let* input_policy =
+    closed "input_policy" Keeper_input_policy.of_string ~invalid:(fun _ ->
+      "keeper.input_policy must be small or wide")
+  in
+  let* sandbox_image =
+    match str "sandbox_image" with
+    | None -> Ok None
+    | Some name ->
+      (match Keeper_sandbox_image_catalog.name_error ~field:"keeper.sandbox_image" name with
+       | None -> Ok (Some name)
+       | Some detail -> Error ("sandbox_image_invalid: " ^ detail))
+  in
+  let* max_context_override =
+    match int_ "max_context_override" with
+    | None -> Ok None
+    | Some value ->
+      Keeper_config.validate_max_context_override_value value
+      |> Result.map Option.some
+  in
+  (* The guest's size, each dimension on its own: an unset one takes the
+     workspace default (runtime.toml [sandbox]). A value that does not parse
+     fails the load, as an unknown [microvm_backend] does, instead of booting
+     the keeper on a size it did not ask for. *)
+  let guest_dimension key parse raw =
+    match raw with
+    | None -> Ok None
+    | Some raw ->
+      parse raw
+      |> Result.map Option.some
+      |> Result.map_error (fun detail ->
+        Printf.sprintf "%s_invalid: keeper.%s: %s" key key detail)
+  in
+  let* microvm_memory =
+    guest_dimension
+      "microvm_memory"
+      Keeper_microvm_guest_size.memory_of_string
+      (str "microvm_memory")
+  in
+  let* microvm_cpus =
+    guest_dimension "microvm_cpus" Keeper_microvm_guest_size.cpus_of_int (int_ "microvm_cpus")
+  in
+  Ok
+    {
+      id = None;
+      manifest_path = None;
+      instructions = str "instructions";
+      activation_mode;
+      input_policy;
+      mention_targets = strs "mention_targets";
+      board_interests = normalize_board_interests (strs "board_interests");
+      sandbox_profile;
+      sandbox_image;
+      network_mode;
+      remote_endpoint;
+      microvm_backend;
+      microvm_memory;
+      microvm_cpus;
+      observation_run;
+      max_context_override;
+      telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
+      telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
+      always_allow = bool_ "always_allow";
+      voice_always_allow = bool_ "voice_always_allow";
+      native_tool_posture;
+      skill_names;
+      attached_tool_allow;
+      tool_deny;
+      agent_core_env;
+    }
+
+(** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
+    TOML table.  Keep this a subset of [canonical_keeper_toml_key_names] —
+    the assertion below fails if a field is parsed into the record without
+    being declared known first. *)
+let parsed_field_key_names = keeper_toml_field_names
+
+let () =
+  assert (
+    List.for_all
+      (fun key -> List.mem key canonical_keeper_toml_key_names)
+      parsed_field_key_names)
+
+let merge_string_list ~base overlay =
+  match overlay with [] -> base | xs -> xs
+
+let merge_keeper_profile_defaults
+    ~(base : keeper_profile_defaults)
+    ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
+  let prefer overlay_value base_value =
+    match overlay_value with Some _ -> overlay_value | None -> base_value
+  in
+  {
+    id = prefer overlay.id base.id;
+    manifest_path = prefer overlay.manifest_path base.manifest_path;
+    instructions = prefer overlay.instructions base.instructions;
+    activation_mode = prefer overlay.activation_mode base.activation_mode;
+    input_policy = prefer overlay.input_policy base.input_policy;
+    mention_targets =
+      merge_string_list ~base:base.mention_targets overlay.mention_targets;
+    board_interests = overlay.board_interests;
+    sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
+    sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
+    network_mode = prefer overlay.network_mode base.network_mode;
+    remote_endpoint = prefer overlay.remote_endpoint base.remote_endpoint;
+    microvm_backend = prefer overlay.microvm_backend base.microvm_backend;
+    microvm_memory = prefer overlay.microvm_memory base.microvm_memory;
+    microvm_cpus = prefer overlay.microvm_cpus base.microvm_cpus;
+    observation_run = prefer overlay.observation_run base.observation_run;
+    max_context_override =
+      prefer overlay.max_context_override base.max_context_override;
+    telemetry_feedback_enabled =
+      prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
+    telemetry_feedback_window_hours =
+      prefer overlay.telemetry_feedback_window_hours
+        base.telemetry_feedback_window_hours;
+    always_allow = prefer overlay.always_allow base.always_allow;
+    voice_always_allow = prefer overlay.voice_always_allow base.voice_always_allow;
+    native_tool_posture =
+      prefer overlay.native_tool_posture base.native_tool_posture;
+    skill_names = prefer overlay.skill_names base.skill_names;
+    attached_tool_allow =
+      prefer overlay.attached_tool_allow base.attached_tool_allow;
+    tool_deny = merge_string_list ~base:base.tool_deny overlay.tool_deny;
+    agent_core_env =
+      (let overlay_keys = List.map fst overlay.agent_core_env in
+       let surviving_base =
+         List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.agent_core_env
+       in
+       surviving_base @ overlay.agent_core_env);
+  }

@@ -1,0 +1,14 @@
+# Install alongside msx-frames.toml in the same run. Adjust manifest_path when
+# copying this declaration outside this repository's example directory.
+id = "msx-frame-progress"
+run_id = "existing-msx-observations"
+manifest_path = "../../../addons/frame-progress/lane.toml"
+
+[binding]
+machine_id = "workspace-msx"
+
+[[binding.sources]]
+source_id = "msx-captures"
+kind = "lane_output"
+installation_id = "msx-frames"
+selection = "latest_completed"

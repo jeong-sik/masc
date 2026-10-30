@@ -1,0 +1,504 @@
+open Masc
+
+module EO = Agent_core.Exact_output
+
+(* Every wait a case makes on the fixture is bounded by this budget. A
+   loopback POST from a forked worker (connect, accept, read) takes well
+   under a second on an idle machine. The nightly runner has 4 CPUs and runs
+   several suites at once, where 50ms sleeps are known to miss, so the budget
+   is generous. It is still 20x shorter than the 600s per-suite deadline, so
+   a wait that never ends fails the case by name instead of holding the suite
+   until the runner kills it (#33200). *)
+let fixture_wait_seconds = 30.0
+
+(* Default [connect_timeout_s] for every fixture target. The exact-output
+   HTTP client puts no deadline on the request-to-response-headers phase
+   unless the target sets one, so a worker whose POST never gets its headers
+   answered would wait forever. This bounds the worker's side of the socket;
+   [fixture_wait_seconds] bounds the test's side. *)
+let fixture_post_connect_timeout_seconds = 30.0
+
+(* Default [body_timeout_s] for every fixture target. Plan admission refuses
+   an exact target without one (Missing_deadline): the connect deadline ends
+   at the response headers, so only this bounds a body that stalls. *)
+let fixture_post_body_timeout_seconds = 30.0
+
+type response_receipt =
+  | Complete_response of Cohttp.Code.status_code * string
+  | Refusal_without_body of Cohttp.Code.status_code
+      (** Flush refusal headers promising a nonempty body, then send no body.
+          The real client's body deadline must classify the unread cause. *)
+
+type server_behavior =
+  | Reply of string
+  | Stream_reply of string
+  | Replies of string list
+  | Reply_with of (int -> string -> Cohttp.Code.status_code * string)
+      (** Answer each request from its zero-based index and its body. A target
+          that refuses bodies over a size stands in for a real input limit, so
+          a caller that answers a refusal by sending less can be watched
+          converging rather than counted. *)
+  | Reply_with_receipt of (int -> string -> response_receipt)
+  | Abort_after_request
+  | Delay_then_reply of float * string
+  | Stream_then_stall of string
+    (** Answer [200 text/event-stream], write the given bytes once, then keep
+        the connection open and silent until the server's switch is released.
+        Stands in for a provider whose stream stops mid-answer. *)
+  | Incomplete_reply of string
+    (** Send JSON response headers and a body prefix, then keep the body open. *)
+
+type test_server =
+  { base_url : string
+  ; posts : int Atomic.t
+  ; requests : string list Atomic.t
+  ; request_paths : string list Atomic.t
+  ; first_request_arrived : unit Eio.Promise.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t
+  }
+
+type target_fixture =
+  { id : string
+  ; base_url : string
+  }
+
+type serving_constraint = {
+  checked_at_unix_s : int;
+  expires_at_unix_s : int;
+  accepted_through_tokens : int;
+  rejected_from_tokens : int;
+}
+
+(* A body source for [Stream_then_stall]: the first read hands over the
+   bytes, every later read blocks until the fiber is cancelled. Blocking here
+   (instead of returning 0 or [End_of_file]) is what keeps the response open
+   with no further bytes, which is the shape of a stalled stream. *)
+module Stalling_source = struct
+  type t = { mutable pending : string option }
+
+  let read_methods = []
+
+  let single_read t dst =
+    match t.pending with
+    | Some bytes ->
+      t.pending <- None;
+      let len = min (String.length bytes) (Cstruct.length dst) in
+      Cstruct.blit_from_string bytes 0 dst 0 len;
+      if len < String.length bytes
+      then t.pending <- Some (String.sub bytes len (String.length bytes - len));
+      len
+    | None -> Eio.Fiber.await_cancel ()
+  ;;
+end
+
+let stalling_source bytes =
+  Eio.Resource.T
+    ({ Stalling_source.pending = Some bytes }, Eio.Flow.Pi.source (module Stalling_source))
+;;
+
+let add_request requests body =
+  let rec loop () =
+    let current = Atomic.get requests in
+    if not (Atomic.compare_and_set requests current (body :: current)) then loop ()
+  in
+  loop ()
+;;
+
+(* Feed the TUI the same detail projection as the HTTP route. A raw registry
+   row is storage evidence, not the run-detail wire contract. *)
+let lane_run_detail (run : Masc.Exact_lane_run_registry.run) =
+  let module Projection = Server_standalone_lane_projection in
+  match Projection.For_testing.run_detail_json_with ~run_id:run.run_id
+      ~exact_runs:[run] ~verification_runs:[] ~goal_verification_runs:[] with
+  | Projection.Detail_found json -> json
+  | Projection.Detail_not_found | Projection.Detail_ambiguous ->
+    Alcotest.fail "expected one actual retained run detail"
+;;
+
+let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
+  let posts = Atomic.make 0 in
+  let requests = Atomic.make [] in
+  let request_paths = Atomic.make [] in
+  let first_request_arrived, resolve_first_request_arrived = Eio.Promise.create () in
+  let handler _conn request body =
+    let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    add_request requests request_body;
+    add_request request_paths (Cohttp.Request.uri request |> Uri.path);
+    let request_index = Atomic.fetch_and_add posts 1 in
+    ignore (Eio.Promise.try_resolve resolve_first_request_arrived ());
+    Option.iter (fun hook -> hook ()) on_request_before_reply;
+    let complete response = `Response response in
+    match behavior with
+    | Reply response -> complete (Cohttp_eio.Server.respond_string ~status:`OK ~body:response ())
+    | Stream_reply response ->
+      complete (Cohttp_eio.Server.respond_string
+        ~headers:(Cohttp.Header.init_with "content-type" "text/event-stream")
+        ~status:`OK ~body:response ())
+    | Replies responses ->
+      let response =
+        match List.nth_opt responses request_index with
+        | Some response -> response
+        | None -> Alcotest.failf "no fixture reply for request %d" request_index
+      in
+      complete (Cohttp_eio.Server.respond_string ~status:`OK ~body:response ())
+    | Reply_with answer ->
+      let status, body = answer request_index request_body in
+      complete (Cohttp_eio.Server.respond_string ~status ~body ())
+    | Reply_with_receipt answer ->
+      (match answer request_index request_body with
+       | Complete_response (status, body) ->
+         complete (Cohttp_eio.Server.respond_string ~status ~body ())
+       | Refusal_without_body status ->
+         let headers = Cohttp.Header.of_list
+           ["content-type", "application/json"; "content-length", "1";
+            "connection", "close"] in
+         `Expert (Cohttp.Response.make ~headers ~status (), fun input output ->
+           (* Ordinary respond buffers headers until the body's first read.
+              Flush explicitly before waiting: a pre-header timeout would not
+              exercise Not_received_in_window at all. *)
+           Eio.Buf_write.flush output;
+           ignore (Eio.Buf_read.take_all input)))
+    | Abort_after_request -> raise Exit
+    | Delay_then_reply (delay_s, response) ->
+      Eio.Time.sleep clock delay_s;
+      complete (Cohttp_eio.Server.respond_string ~status:`OK ~body:response ())
+    | Stream_then_stall first_bytes ->
+      complete (Cohttp_eio.Server.respond
+        ~headers:(Cohttp.Header.init_with "content-type" "text/event-stream")
+        ~status:`OK
+        ~body:(stalling_source first_bytes)
+        ())
+    | Incomplete_reply first_bytes ->
+      complete (Cohttp_eio.Server.respond
+        ~headers:(Cohttp.Header.init_with "content-type" "application/json")
+        ~status:`OK
+        ~body:(stalling_source first_bytes)
+        ())
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:8
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "loopback listener did not expose a TCP port"
+  in
+  let server = Cohttp_eio.Server.make_response_action ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  { base_url = Printf.sprintf "http://127.0.0.1:%d" port
+  ; posts
+  ; requests
+  ; request_paths
+  ; first_request_arrived
+  ; clock
+  }
+;;
+
+let target_fixture_toml
+      ~connect_timeout_s
+      ~body_timeout_s
+      ?enable_thinking
+      ?(serving_constraint={checked_at_unix_s=0;expires_at_unix_s=2000000000;
+          accepted_through_tokens=524298;rejected_from_tokens=524299})
+      ~requires_token_measurement
+      ~supports_response_format_json
+      ~supports_structured_output
+      ~requires_api_key
+      index
+      fixture
+  =
+  let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
+  let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
+  let timeout = Printf.sprintf "connect_timeout_s = %.6g\n" connect_timeout_s in
+  let body_timeout = Printf.sprintf "body_timeout_s = %.6g\n" body_timeout_s in
+  let enable_thinking_line =
+    Option.fold
+      ~none:""
+      ~some:(fun value -> Printf.sprintf "enable_thinking = %b\n" value)
+      enable_thinking
+  in
+  let provider_kind, request_path, serving_constraint_lines =
+    if requires_token_measurement
+    then
+      ( "anthropic"
+      , "/v1/messages"
+      , Printf.sprintf "serving_constraint_source_kind = \"probe\"\n\
+         serving_constraint_source = \"probe://exact-output-fixture\"\n\
+         serving_constraint_checked_at_unix_s = %d\n\
+         serving_constraint_confidence = \"high\"\n\
+         serving_constraint_expires_at_unix_s = %d\n\
+         serving_constraint_accepted_through_tokens = %d\n\
+         serving_constraint_rejected_from_tokens = %d\n"
+          serving_constraint.checked_at_unix_s serving_constraint.expires_at_unix_s
+          serving_constraint.accepted_through_tokens serving_constraint.rejected_from_tokens )
+    else "openai_compat", "/v1/chat/completions", ""
+  in
+  Printf.sprintf
+    "[[providers]]\n\
+     id = %S\n\
+     kind = %S\n\
+     base_url = %S\n\
+     request_path = %S\n\
+     auth = %S\n\n\
+     [[models]]\n\
+     model_id = %S\n\
+     provider_name = %S\n\
+     max_context_tokens = 8192\n\
+     max_output_tokens = 1024\n\
+     %s\
+     supports_response_format_json = %b\n\
+     supports_structured_output = %b\n\n\
+     [[targets]]\n\
+     id = %S\n\
+     provider_ref = %S\n\
+     model_id = %S\n\
+     %s\
+     %s"
+    provider_id
+    provider_kind
+    fixture.base_url
+    request_path
+    (if requires_api_key then "api-key" else "none")
+    model_id
+    provider_id
+    serving_constraint_lines
+    supports_response_format_json
+    supports_structured_output
+    fixture.id
+    provider_id
+    model_id
+    (timeout ^ body_timeout)
+    enable_thinking_line
+;;
+
+(* The replacement catalog text the fixture targets are declared in. A case
+   that needs the server's own build to see these targets -- a config commit
+   rebuilds the registry from [AGENT_CORE_MODEL_CATALOG] -- writes this text
+   to that file ([replacement_catalog_file]) instead of publishing a snapshot
+   no commit could rebuild. *)
+let catalog_document
+      ?(connect_timeouts = [])
+      ?(body_timeouts = [])
+      ?(enable_thinkings = [])
+      ?(requires_api_key = false)
+      ?(requires_api_keys = [])
+      ?(requires_token_measurement = false)
+      ?serving_constraint
+      ?(supports_response_format_json = true)
+      ?(supports_structured_output = true)
+      ~source
+      fixtures
+  : EO.catalog_document
+  =
+  let timeout_for id =
+    List.assoc_opt id connect_timeouts
+    |> Option.value ~default:fixture_post_connect_timeout_seconds
+  in
+  let body_timeout_for id =
+    List.assoc_opt id body_timeouts
+    |> Option.value ~default:fixture_post_body_timeout_seconds
+  in
+  let enable_thinking_for id = List.assoc_opt id enable_thinkings in
+  let requires_api_key_for id =
+    List.assoc_opt id requires_api_keys |> Option.value ~default:requires_api_key
+  in
+  { source
+  ; contents =
+      fixtures
+      |> List.mapi (fun index fixture ->
+          target_fixture_toml
+            ~connect_timeout_s:(timeout_for fixture.id)
+            ~body_timeout_s:(body_timeout_for fixture.id)
+            ?enable_thinking:(enable_thinking_for fixture.id)
+            ~requires_token_measurement
+            ?serving_constraint
+            ~supports_response_format_json
+            ~supports_structured_output
+            ~requires_api_key:(requires_api_key_for fixture.id)
+          index
+          fixture)
+      |> String.concat "\n"
+  }
+;;
+
+let replacement_catalog_file ~path fixtures =
+  Out_channel.with_open_bin path (fun channel ->
+    output_string channel (catalog_document ~source:path fixtures).contents)
+;;
+
+let resolver_snapshot
+      ?connect_timeouts
+      ?body_timeouts
+      ?enable_thinkings
+      ?requires_api_key
+      ?requires_api_keys
+      ?requires_token_measurement
+      ?serving_constraint
+      ?supports_response_format_json
+      ?supports_structured_output
+      ~source
+      fixtures
+  =
+  let overlay =
+    catalog_document
+      ?connect_timeouts
+      ?body_timeouts
+      ?enable_thinkings
+      ?requires_api_key
+      ?requires_api_keys
+      ?requires_token_measurement
+      ?serving_constraint
+      ?supports_response_format_json
+      ?supports_structured_output
+      ~source
+      fixtures
+  in
+
+  match
+    EO.load_resolver_snapshot
+      ~catalog:(EO.Full_replacement overlay)
+      ()
+  with
+  | Ok snapshot -> snapshot
+  | Error _ -> Alcotest.fail "exact-output resolver fixture did not load"
+;;
+
+let catalog_generation_fingerprint snapshot =
+  snapshot
+  |> EO.resolver_catalog_generation
+  |> EO.catalog_generation_fingerprint
+;;
+
+(* Official-client runtime table for cli lane-slot tests: enough for
+   [Fusion_official_client.is_official_client] to admit the two claude ids
+   without executing a client (command is /usr/bin/true). Same shape as the
+   fusion panel fixture. *)
+let official_client_runtime_fixture =
+  {|
+[runtime]
+default = "stub-http.stub-model"
+
+[providers.stub-http]
+display-name = "Stub HTTP"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+
+[models.stub-model]
+api-name = "gpt-5.4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[stub-http.stub-model]
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude_code."claude-sonnet-5"]
+
+[models."claude-opus-5-5"]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude_code."claude-opus-5-5"]
+|}
+;;
+
+let cli_primary_runtime = "claude_code.claude-sonnet-5"
+let cli_secondary_runtime = "claude_code.claude-opus-5-5"
+
+let with_official_client_runtimes f =
+  let path = Filename.temp_file "cli-lane-runtime" ".toml" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       let channel = open_out path in
+       Fun.protect
+         ~finally:(fun () -> close_out channel)
+         (fun () -> output_string channel official_client_runtime_fixture);
+       match Runtime.init_default ~config_path:path with
+       | Error detail ->
+         Alcotest.failf "official-client runtime fixture must initialize: %s" detail
+       | Ok () -> f ())
+;;
+
+(* A fixture lane's declared output budget. The value is arbitrary here — the
+   tests that care about the budget set it explicitly; the rest only need a
+   lane that resolves, and an HTTP lane with no declared budget is refused. *)
+let fixture_max_output_tokens = 4_096
+
+let publish_registry
+      ?(cli_slot_ids = [])
+      ?(max_output_tokens = Some fixture_max_output_tokens)
+      ~lane_id
+      ~slot_ids
+      resolver_snapshot
+  =
+  let owner =
+    match Runtime_schema.exact_lane_owner_of_key lane_id with
+    | Some owner -> owner
+    | None -> Alcotest.failf "exact-output registry fixture: %S is not an exact-output lane" lane_id
+  in
+  let lane : Runtime_schema.exact_output_lane_decl =
+    { owner; enabled = true; slot_ids; cli_slot_ids; max_output_tokens; thinking = None }
+  in
+  match Runtime_exact_output_registry.publish ~lanes:[ lane ] resolver_snapshot with
+  | Ok registry -> registry
+  | Error error ->
+    Alcotest.failf
+      "exact-output registry fixture did not publish: %s"
+      (Runtime_exact_output_registry.publication_error_to_string error)
+;;
+
+let openai_response output =
+  let encoded_content =
+    output
+    |> Yojson.Safe.to_string
+    |> fun json -> Yojson.Safe.to_string (`String json)
+  in
+  Printf.sprintf
+    {|{"id":"masc-conformance","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+    encoded_content
+;;
+
+let post_count server = Atomic.get server.posts
+let request_bodies server = Atomic.get server.requests |> List.rev
+let request_paths server = Atomic.get server.request_paths |> List.rev
+
+(* Waits for [promise] at most [fixture_wait_seconds]. Past that the case
+   fails with [failure] instead of holding the suite until the runner
+   deadline (#33200). *)
+let await_within_fixture_budget ~clock ~failure promise =
+  match
+    Eio.Time.with_timeout clock fixture_wait_seconds (fun () ->
+      Ok (Eio.Promise.await promise))
+  with
+  | Ok value -> value
+  | Error `Timeout -> Alcotest.failf "%s within %gs" failure fixture_wait_seconds
+;;
+
+let await_first_request server =
+  await_within_fixture_budget
+    ~clock:server.clock
+    ~failure:(Printf.sprintf "fixture server %s received no request" server.base_url)
+    server.first_request_arrived
+;;

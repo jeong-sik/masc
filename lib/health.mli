@@ -1,0 +1,34 @@
+(** Agent Health — Keeper outcome observation.
+
+    Wraps {!Failure_observation} with agent-name semantics for Keeper
+    Heartbeat. Failure history is diagnostic data and never controls
+    Keeper participation.
+
+    Integration points:
+    - Post-action: {!record_success} / {!record_failure} after
+      [execute_agent_action]
+    - Statistics: {!get_summary} for dashboard/monitoring
+
+    @since 2.75.0 *)
+
+type agent_health_summary = {
+  agent_name : string;
+  failure_count : int;
+  last_failure : Failure_observation.failure_record option;
+  last_success_at : float option;
+}
+
+(** Record a successful action as an observation. *)
+val record_success : agent_name:string -> unit
+
+(** Append a failed action observation. *)
+val record_failure : agent_name:string -> reason:string -> unit
+
+(** {1 Statistics} *)
+
+val get_summary : agent_name:string -> agent_health_summary
+
+(** {1 JSON Serialization} *)
+
+(** Shape: [{agent_name, failure_count, last_failure, last_success_at}]. *)
+val summary_to_json : agent_health_summary -> Yojson.Safe.t

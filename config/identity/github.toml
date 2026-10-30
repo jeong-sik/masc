@@ -1,0 +1,44 @@
+# GitHub's remote MCP server.
+#
+# GitHub publishes no registration endpoint, so this needs an OAuth app or
+# GitHub App made by hand: create one with its callback set to this install's
+# <base URL>/api/v1/keepers/oauth/callback, then POST its client id and secret
+# to /api/v1/keepers/oauth/client.
+#
+# Measured 2026-08-27: the MCP endpoint refuses an initialize with 401 and
+# names its metadata, and the authorization server offers S256.
+#
+# Measured 2026-08-29: a GitHub token already on the host reaches this MCP
+# endpoint directly -- initialize answered 200 with the tool list -- so the
+# app below buys per-Keeper attachment and renewal, not reachability.
+#
+# Not measured: a completed exchange, so what GitHub returns for each app
+# setting is unverified here. Either answer attaches. One carrying no expiry
+# and no refresh token is stored as a credential lasting until the provider
+# revokes it, not as a failed login (keeper_oauth_session.ml, `Never`); one
+# carrying a refresh token is renewed. Prefer token expiration turned on --
+# that is the shape masc can renew.
+
+id = "github"
+label = "GitHub"
+mcp_url = "https://api.githubcopilot.com/mcp/"
+
+# The Keeper's gh CLI already holds a github.com token -- device login puts it
+# there and rewrites it on every login and logout -- and measurement on
+# 2026-08-29 showed that token authorizes the MCP endpoint above: initialize
+# answered 200 with the tool list. So this provider reads the credential where
+# gh keeps it rather than asking an operator to make an OAuth app for a second
+# copy of the same grant.
+credential_source = "github_cli"
+credential_source_host = "github.com"
+
+# Still declared, and unused while credential_source is github_cli: switching
+# this file back to the OAuth exchange should not also have to reinvent the
+# names its tokens were stored under.
+access_token_env = "GITHUB_ACCESS_TOKEN"
+expires_at_env = "GITHUB_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.github/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

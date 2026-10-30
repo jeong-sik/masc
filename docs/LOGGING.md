@@ -1,0 +1,209 @@
+# Logging
+
+One logging surface: the per-module loggers in `lib/masc_log/log.ml`.
+
+## Canonical surface
+
+Use the per-module loggers defined in `lib/masc_log/log.ml`:
+
+```ocaml
+Log.<Module>.info  fmt …      (* normal informational log    *)
+Log.<Module>.warn  fmt …      (* recoverable problem          *)
+Log.<Module>.error fmt …      (* failure operators must see   *)
+Log.<Module>.debug fmt …      (* verbose / development detail  *)
+Log.<Module>.routine fmt …    (* repeatable housekeeping; level via MASC_LOG_ROUTINE_LEVEL *)
+
+Log.<Module>.emit <level> ~details:<json> "msg"   (* structured payload with a fixed level *)
+Log.<Module>.emit_lazy <level> (fun () -> "msg", <json>) (* lazy message and details *)
+```
+
+Each `<Module>` is built by `module X = Make(struct let name = "X" end)`. The
+`name` string is the component operators see in the emitted line and in the
+dashboard ring entry:
+
+```
+[2026-06-03 11:22:33] [WARN] [Keeper] message text
+                              ^^^^^^^ = the module's name
+```
+
+`Log.<Module>.info` and the top-level `Log.info ~ctx:"<Module>"` produce the
+**same** output shape (same component, level, message). The per-module form is
+canonical because the component is fixed at the module definition (no per-call
+string to drift) and the env-var override `MASC_LOG_<NAME>_LEVEL` works.
+
+To add a component, add a `module X = Make(struct let name = "x" end)` line to
+**both** `lib/masc_log/log.ml` and the `module X : LOGGER` list in
+`lib/masc_log/log.mli`. The module identifier must be `Capitalized`; the `name`
+string carries the exact component.
+
+## Lazy structured observations
+
+`Log.<Module>.emit_lazy level (fun () -> message, details)` checks the existing
+module override or global threshold once before building either value. Admitted
+events use the same console mirror, redaction, ring and optional daily JSONL sink
+as `emit`. Capture identities and stage clocks at their actual observation
+boundary, before the builder; put only formatting of those immutable values in
+it. A disabled event still incurs its capture and closure costs. This API does
+not change the separate Routine level policy or make enabled sink I/O lazy.
+
+Original TUI Ask follow-up records use Info in Transport, category `lifecycle`,
+with keeper metadata and `details.event = "tui_ask_followup"`. Original capsule
+identity, source/receipt/admission clocks, typed terminal cause and producer/job/UI
+facts live in `details`. The message is a readable summary. Consumers select the
+structured event field and preserve missing/unfinished outcomes; they do not
+parse the console summary. Ring JSONL, dashboard export and TUI log decoding
+already preserve this field. This does not add an Ask cohort report or prove a
+runtime speedup. See [the source boundary audit](audits/tui-ask-followup-structured-20261021.md).
+
+## Runtime execution and host acceptance
+
+Runtime observations have a producer-owned `observation_id`. Execution and
+host acceptance are separate stages in `details`, joined by this ID and the
+resolved `runtime_id`:
+
+| Event | Stage | Outcome |
+|---|---|---|
+| `runtime_execution_terminal` | `runtime_execution` | `success` or `failure`, with `attempt_index`, latency and execution error |
+| `runtime_host_acceptance` | `host_acceptance` | `accepted` or `rejected`, with the host's rejection detail |
+| `runtime_observation_gap` | `observation_gap` | `execution_evidence.status=uncaptured_failure`, with the runtime boundary error |
+
+A runtime can yield successfully and then fail the host's response contract.
+That produces one execution terminal and one host decision, not two runtime
+terminals. The observation snapshot keeps the original attempt facts and adds
+its typed `host_acceptance`; receipts still mark host rejection as failed.
+Execution success is not a Task completion or delivered-result claim. The model
+label retains the existing public redaction policy.
+
+An error returned without its execution capture has typed `Uncaptured_failure`
+evidence, an empty attempt list, and `attempt_details_available=false`. Its gap
+event has its own observation identity because the original capture cannot be
+joined. This can happen after a client produces a host-stop result but its
+completion hook or session save fails. The receipt retains the failure while
+the original execution terminal remains unchanged.
+
+Native agent events pass their payload's agent identity into `keeper_name` and
+use the producer's Keeper scope for `turn_id`. An absent Keeper scope stays null;
+a session-local turn ordinal cannot supply it. Their complete canonical envelope
+also remains in `details`.
+
+## TUI process storage
+
+The TUI owns a different Log.Ring from its server. Its structured details are
+written below the opening local `<base-path>/.masc/logs/tui/session-<pid>-*/`,
+using the existing `system_log_YYYY-MM-DD.jsonl` sink. Each invocation creates a
+fresh private directory, so startup does not import server or earlier session
+history. The selected path is announced in the existing
+`<base-path>/.masc/logs/masc-tui-<pid>.log` stderr mirror. No log from a later
+remote/workspace identity change moves this local process store.
+
+Initialization runs after stderr redirection and level setup, before TUI state
+and read producers. Expected filesystem failure leaves the TUI running and
+records a warning through the ring/console path. `details.event =
+"tui_observation_store"` records initialized/unavailable outcome and monotonic
+clocks spanning the setup. This adds synchronous startup filesystem work;
+existing input-reader startup intervals begin later and do not include it.
+
+The client directory is local evidence. In the TUI Logs surface, `o` selects
+Server or This TUI. Each source retains its own filters, list/detail position,
+snapshot and error. This TUI reads the current process's memory ring on selection
+and the existing refresh cadence, including while server identity is unavailable;
+it does not scan previous sessions' files. The server dashboard does not read the
+client directory automatically. Source integration is not visible UI or server
+export proof. Logging levels can omit rows, a crash can interrupt a write, and normal
+sink flush is not fsync. These are process-owned retained log directories; this
+change adds no automatic deletion policy. See [the storage source audit](audits/tui-observation-store-20261021.md).
+
+## Absent fields
+
+`Log.Kv.render` builds a `key=value` message and leaves out every field whose
+value is `None`. A field the producer did not measure is not written as `-` or
+`n/a`; its absence is the fact. `false` and `0` are values and are rendered.
+Use it for any line that carries optional fields:
+
+```ocaml
+Log.Keeper.info ~keeper_name "%s"
+  (Log.Kv.render
+     [ Log.Kv.int "turn" turn
+     ; Log.Kv.opt_map "cache_n" string_of_int cache_n  (* omitted when None *)
+     ])
+```
+
+Only the message text is shaped; the ring entry's typed fields are untouched.
+
+## Forbidden in `lib/` and `bin/`
+
+| Pattern | Why it is non-canonical | Migrate to |
+|---|---|---|
+| `Printf.eprintf` / `prerr_*` | raw stderr, never reaches the dashboard ring | `Log.<Module>.{info,warn,error,debug}` |
+| `Log.info ~ctx:"X"` (top-level) | per-call component string, drifts; no per-module level override | `Log.X.info` |
+| `Logs.{info,warn,err,debug,app}` | a **different** library (`logs`), routes through its own reporter, not the masc ring | `Log.<Module>.{…}` |
+| `Log.legacy_stderr` / `Log.legacy_traceln` | RFC-0079 raw bridge | `Log.<Module>.{…}` unless the message embeds its own `[LEVEL]` prefix (see the legacy bridge row below) |
+| bare `Log.emit` | top-level, `~module_name` defaults to empty | `Log.<Module>.emit` |
+
+Routine entries go through `Log.<Module>.routine` / `Log.<Module>.routine_lazy`.
+
+`Logs.*` is forbidden in `lib/`: it is the `logs` opam library, not
+`lib/masc_log`. It bypasses the structured ring buffer entirely.
+
+## Where non-canonical output is intended
+
+These sites print outside the canonical surface on purpose. A site that can
+route through the canonical surface does: fix its call site instead of
+printing around the logging surface. A new site that cannot route through it
+is added here with its reason.
+
+| Site | Why it cannot route through `Log` |
+|---|---|
+| `lib/masc_log/` | The Log system cannot log through itself. Its `eprintf` are the terminal sink, the warnings for an invalid level env var, and the file-sink rotate and write failures. |
+| `lib/runtime_log_sink.ml` | Forwards each `Agent_core.Log` record to the top-level `Log.emit`. The module name is built per record (`"agent_core:" ^ record.module_name`), so no static `Log.<Module>` preserves it. |
+| `lib/fs_compat/` | Runs below the logging stack: `masc_log` depends on `fs_compat`, so `fs_compat` cannot call `Log`. Its `eprintf` report a malformed JSONL line, a cut incomplete JSONL tail, and failed fsync or close calls. |
+| `lib/fd_accountant/` | The default resource-error observer, used until the server installs its own (which logs through `Log.Server`), and the line printed when an installed observer raises. The error being reported can be descriptor exhaustion itself, which would also stop a file sink from opening. |
+| `lib/server/server_base_path_guard.ml` | Refuses to start without a workspace, or with a base path that cannot be canonicalized, before `Log` is initialised. |
+| `bin/main_eio.ml` | A base path that cannot be canonicalized, the `Out_of_memory` and `Stack_overflow` FATAL handlers (which must not allocate through the logging stack), build-provenance argument errors, and the `login`, `token` and `mcp-config` subcommands, whose output is the command's answer. Its "already running" lines use `Log.legacy_stderr` (see the legacy bridge row). |
+| `bin/main_stdio_eio.ml` | Reports a base path that cannot be canonicalized before the server starts. On the stdio transport stdout is the protocol, so diagnostics go to stderr. |
+| `bin/masc_tui.ml` | Start-up messages before the screen is drawn: a failed stderr redirect (it cannot say so through the sink it is still redirecting), and refusals to start (no interactive terminal, no embedded build commit, an unusable workspace). |
+| `lib/exec_shim/exec_shim.ml` | `masc-exec-shim` is a static binary that runs on the remote endpoint, built from `unix` and a few small libraries without the masc logging stack. Its one stderr line is the usage message. |
+| `lib/keeper/keeper_github_identity.ml` | `print_observation` and the `run_cli_*` functions print what `masc keeper github ...` was asked for. The rest of the module runs inside the server, so the exemption is wider than the functions that need it. Splitting the subcommands into their own module removes it. |
+| `bin/masc_trace.ml`, `bin/masc_cost.ml`, `bin/masc_librarian_replay.ml`, `bin/masc_http_probe.ml`, `bin/masc_lane_cli_probe.ml`, `bin/keeper_capability_probe_cli.ml`, `bin/stagehand_model_probe.ml`, `bin/fusion_run.ml`, `bin/masc_checkpoint_purge.ml`, `bin/deployment_preflight_helper.ml` | Operator commands run at a terminal. Their stdout and stderr are the answer to the command (measurements, JSON receipts, usage and argument errors), not a server record. Routing them to the log would move them away from the person who asked. |
+| `bin/masc_cli_setup.ml`, `bin/masc_cli_docker_session.ml`, `bin/masc_cli_onboarding.ml`, `bin/masc_cli_antigravity.ml`, `bin/masc_cli_account_login.ml`, `bin/masc_cli_codex_models.ml`, `bin/masc_cli_muse_models.ml`, `bin/masc_cli_model_resume.ml`, `bin/masc_cli_owner_upgrade.ml`, `bin/masc_cli_prerequisites.ml` | One-shot setup and onboarding commands. They report account, login and setup failures to the operator's terminal and print machine-readable receipts on stdout before any server or log sink exists. |
+| `bin/gen_board_tool_registry.ml` | A Dune-time generator. Its `eprintf` reports a malformed Board TOML declaration to the build operator. |
+| `bin/main_eio.ml`, `lib/backend/backend.ml`, `lib/workspace/workspace_query.ml`, `lib/mcp_server_eio_resource.ml` | The RFC-0079 legacy bridge. `Log.legacy_stderr` and `Log.legacy_traceln` emit a raw, unprefixed stderr line and mirror it into the ring with a `Legacy_*` source tag (read back by `dashboard/src/api/schemas/logs.ts`). Every call site embeds its own `[FATAL]`, `[WARN]` or `[DEBUG]` marker in the message, so migrating would double-prefix it and drop the `Legacy_*` source. |
+
+A static component such as `"agent_core:event"` does route through `Log`: a
+module's `name` string may contain a colon even though the OCaml identifier
+cannot, and that site is the `Agent_core_event` module.
+
+### TUI admission evidence
+
+Each private TUI session also keeps `admissions/ask-followup.jsonl`. It records
+original admitted follow-up identities before dispatch independently of log level.
+Copy it separately from daily logs for the [comparison packet](guides/TUI-ASK-FOLLOWUP-COMPARISON.md).
+Missing event logs remain unobserved attempts. Journal writes add synchronous
+preparation/flush work; capture failures are best-effort warnings and can leave
+unknown attempts. Retained bytes do not prove exhaustive capture or execution.
+
+Admission-write errors carry a structured Startup Warn/Boundary diagnostic with
+the original TUI instance, request, admission clock and failed capture span.
+Inspect the This TUI Logs source for its structured details. A storage diagnostic
+is separate from the original read's producer/UI outcome; missing warnings do
+not establish capture success. The comparison reader retains these observed
+failures without discarding independently declared attempts.
+
+Routine Ask follow-up Info details carry `admission_capture` from the same
+original read: returned/failed with attempt clocks, or unavailable without them.
+The local Logs detail exposes this structured field through the existing decoder.
+No extra successful-write event is emitted. The receipt ends before warning
+formatting/output; it is not fsync, complete capture or worker/UI/Task progress.
+Historical missing receipts remain unobserved in the comparison reader.
+
+### TUI terminal preparation
+
+The original `tui_startup_observation` capture is now reserved before the probe
+child is scheduled. Dispatched-only and scheduling-failed/interrupted captures
+remain visible when no worker starts. The shared collector's caller observation
+belongs to its adapter child; the owning UI loop later installs the exact
+returned decoder and applies capabilities. Those boundaries can have a gap.
+Collection no longer precedes loop entry, but settings application still does.
+No new event schema, sink, polling cadence or capture deadline is introduced.
+A caller wait ending is not producer cancellation, physical cleanup or first
+paint/input proof; existing missing-stage and failed comparisons still apply.

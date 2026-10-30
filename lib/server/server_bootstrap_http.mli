@@ -1,0 +1,136 @@
+(** Server_bootstrap_http — HTTP listening socket setup + accept
+    loop for the MASC MCP server.
+
+    Three serve variants:
+    - {!serve}: HTTP/1.1 only.
+    - {!serve_h2}: HTTP/2 only (cleartext h2c).
+    - {!serve_auto}: h2 preface peek ({!Http_protocol_detect}) picks
+      between the two on the same cleartext port. No TLS, no ALPN.
+
+    Internal: \[Http\] alias to {!Http_server_eio} stays private —
+    callers reach config / socket types via {!Http_server_eio}
+    directly. *)
+
+type bind_address_error = Invalid_host of string
+
+val parse_bind_address : string -> (Ipaddr.t, bind_address_error) result
+(** [parse_bind_address host] reads the host the server is told to bind as one
+    IPv4 or IPv6 address. A name is not resolved: [localhost] is
+    [Invalid_host], and so is an address no family can hold, such as
+    [999.0.0.1]. *)
+
+val bind_address_error_to_string : bind_address_error -> string
+
+val make_http_config :
+  address:Ipaddr.t -> port:int -> Http_server_eio.config
+(** [make_http_config ~address ~port] builds the listener config. Its [host]
+    is [address] written out by {!Ipaddr.to_string}. Other config fields
+    default via {!Http_server_eio.default_config}. *)
+
+val listen_socket :
+  sw:Eio.Switch.t ->
+  net:[> `Network | `Platform of [> `Generic ] as 'a ] Eio.Resource.t ->
+  address:Ipaddr.t ->
+  Http_server_eio.config ->
+  'a Eio.Net.listening_socket_ty Eio.Resource.t
+(** [listen_socket ~sw ~net ~address config] binds + listens on
+    [address:config.port] via {!Eio.Net.listen}.  Returns
+    the listening-socket resource owned by the supplied switch.
+    [address] is the one {!make_http_config} wrote into [config]. *)
+
+val print_startup_banner :
+  config:Http_server_eio.config ->
+  resolved_base:string ->
+  base_path:string ->
+  masc_dir:string ->
+  path_diagnostics:Server_base_path_diagnostics.t ->
+  unit
+(** [print_startup_banner ~config ~resolved_base ~base_path
+      ~masc_dir ~path_diagnostics] prints the MASC server startup
+    banner to stdout (host:port, base paths, optional diagnostics).
+    Pinned at the contract seam — operator log scrapers parse the
+    "MASC MCP Server listening on http://" line. *)
+
+(** {1 Internal helpers} *)
+
+val with_cleanups_on_release :
+  sw:Eio.Switch.t -> (unit -> unit) list -> unit
+(** [with_cleanups_on_release ~sw cleanups] runs each cleanup on
+    [sw] release.  Each cleanup is wrapped in its own [try/with] so
+    a single non-[Cancelled] exception cannot prevent the remaining
+    cleanups (RFC-0194 §3 PR-B spirit: an [Eio.Switch.on_release]
+    callback must be all-or-nothing across its steps).
+    [Eio.Cancel.Cancelled] propagates as usual so structured
+    cancellation honors the enclosing fiber.  Cleanups run in the
+    order supplied. *)
+
+(** {1 Accept loops} *)
+
+val serve :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  addr_label:string ->
+  request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
+  unit
+(** [serve ~sw ~clock ~socket ~addr_label ~request_handler] runs the
+    HTTP/1.1 accept loop until the switch is cancelled.  Errors are
+    logged via {!Log.Misc.warn} and the connection closed; the loop
+    continues.  [addr_label] (e.g. ["0.0.0.0:8080"]) is embedded in
+    every error log line as [[h1 <addr_label>]] so operators can
+    identify which listener emitted the line when a process runs
+    multiple HTTP servers. *)
+
+val serve_h2_connection :
+  ?streams:Server_h2_stream_registry.t ->
+  ?resources:Server_h2_response_resources.t ->
+  sw:Eio.Switch.t ->
+  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_error_handler:
+    (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
+  Eio.Net.Sockaddr.stream ->
+  _ Eio.Net.stream_socket ->
+  unit
+(** Run H2 connection I/O and a separate request scope. I/O completion or
+    failure cancels pending requests and their children, including response
+    producers, without waiting for an occupied CPU pool.
+
+    Each request stream runs under its own switch in [streams] (a fresh
+    registry when omitted), and [h2_request_handler] receives that stream
+    switch as [request_sw]. A peer RST_STREAM releases the stream's entry and
+    cancels its work and children at once; a finished response releases the
+    entry when its work returns. Siblings and the connection keep running.
+
+    The finite peer-stream limit comes from {!H2_response_limits}.
+    [resources] shares payload capacity with other connections; when omitted,
+    this connection gets its own capacity. The listener accept loops below
+    create one shared capacity for all their H2 connections. *)
+
+val serve_h2 :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  addr_label:string ->
+  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_error_handler:
+    (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
+  unit
+(** [serve_h2] is the HTTP/2 variant — cleartext h2c, no ALPN.
+    Used when the operator explicitly enables H2 via env.
+    [addr_label] is embedded as [[h2 <addr_label>]] in error logs. *)
+
+val serve_auto :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  addr_label:string ->
+  request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
+  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_error_handler:
+    (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
+  unit
+(** [serve_auto] inspects the first request bytes and dispatches
+    to either the HTTP/1.1 or HTTP/2 handler.  Used as the
+    default serve loop so existing HTTP/1.1 clients keep working
+    while H2-capable clients can upgrade.  [addr_label] is
+    embedded as [[auto <addr_label>]] in error logs. *)

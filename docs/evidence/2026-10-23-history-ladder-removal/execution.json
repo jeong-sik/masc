@@ -1,0 +1,34 @@
+{
+  "scope": "Actual source-fragment encoder/decoder bytecode probe only; no full MASC/native/transport/UI validation.",
+  "ports": [],
+  "source_state": "working tree; source hashes are authoritative",
+  "source_head_role": "Parent commit only; executed source includes uncommitted Layer 2 changes.",
+  "source_head": "979661caddeb7acf3524858be0852fd6c12480be",
+  "source_git_status": " M bin/masc_tui_context_inspector.ml\n M bin/masc_tui_context_inspector.mli\n M bin/masc_tui_next_request_band.ml\n M config/runtime.toml\n M lib/keeper/keeper_carried_front.ml\n M lib/keeper/keeper_carried_front.mli\n D lib/keeper/keeper_carried_range.ml\n D lib/keeper/keeper_carried_range.mli\n M lib/keeper/keeper_model_input_ledger.ml\n M lib/keeper/keeper_model_input_ledger.mli\n M lib/keeper/keeper_turn_driver_try_provider.ml\n M lib/keeper/keeper_turn_driver_try_provider.mli\n M test/dune\n M test/test_keeper_carried_front.ml\n D test/test_keeper_carried_range.ml\n M test/test_keeper_carried_range_eviction.ml\n M test/test_keeper_context_overflow_shrink.ml\n M test/test_keeper_model_input_ledger.ml\n M test/test_keeper_next_request_forecast.ml\n M test/test_tui_next_request_band.ml\n?? docs/evidence/2026-10-23-history-ladder-removal/\n",
+  "captured_at_utc": "2026-10-23T11:13:58.881273+00:00",
+  "script_sha256": "c02ee8649ecee334a181045cd8a06f6c93980f53f6f87c5a55aa16b9e575a292",
+  "ocamlc_version": "5.5.1",
+  "compile_argv": [
+    "ocamlfind",
+    "ocamlc",
+    "-package",
+    "yojson",
+    "-linkpkg",
+    "-w",
+    "+a-70",
+    "-warn-error",
+    "+a-70",
+    "-o",
+    "origin_probe.exe",
+    "origin_probe.ml"
+  ],
+  "compile_exit": 0,
+  "compile_stdout": "",
+  "compile_stderr": "",
+  "run_argv": [
+    "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-38062-review-evidence-20261023-c8vaok33/layer2-source-review/public-evidence/receipt/origin_probe.exe"
+  ],
+  "run_exit": 0,
+  "run_stdout": "23 assertions PASS\n",
+  "run_stderr": ""
+}

@@ -1,0 +1,81 @@
+{
+  "tested_head": "720c74791ca0f562db56be11df1901611e6f1c9b",
+  "tested_tree": "9d8ed6815341e6154c171c6f41f1bbcad3833e14",
+  "stack": [
+    {
+      "number": 40906,
+      "old": "e51a135b10122a84dbc8f9815f58dbd581df427e",
+      "head": "df9f6f2170d86d18501cb501f0e96dbed7c36b54",
+      "parent": "87123f7df94a27ded447b5b05d01c2f5178de029",
+      "ref": "feat/tui-usage-charts"
+    },
+    {
+      "number": 40924,
+      "old": "157fd3b296aac435363c47773f968c98388b3b7e",
+      "head": "e271dcffc772dd187e8e1f2d9f54269f1afd0b41",
+      "parent": "df9f6f2170d86d18501cb501f0e96dbed7c36b54",
+      "ref": "feat/tui-login-result-scroll"
+    },
+    {
+      "number": 40936,
+      "old": "535a06dd5ced7351d6133c01f5af45207929d2b4",
+      "head": "589fcf5ceb1afb18f4eb180f24ffcd5011e547aa",
+      "parent": "e271dcffc772dd187e8e1f2d9f54269f1afd0b41",
+      "ref": "feat/tui-keeper-usage-charts"
+    },
+    {
+      "number": 40950,
+      "old": "46958e368fc1bce07befcb3a015854825c3906a3",
+      "head": "0eb5a318c259d8dc3d72fdf0bb02f7566b6de4cb",
+      "parent": "589fcf5ceb1afb18f4eb180f24ffcd5011e547aa",
+      "ref": "fix/tui-keeper-coverage"
+    },
+    {
+      "number": 40965,
+      "old": "2a85270e8c730f852092fedb42f06640fa4ffc45",
+      "head": "aa83fc05a74e70b7bacd80f95e9184395174fdca",
+      "parent": "0eb5a318c259d8dc3d72fdf0bb02f7566b6de4cb",
+      "ref": "fix/tui-work-summary-wrap"
+    },
+    {
+      "number": 40972,
+      "old": "2b07de9e79e91dafc101b3e07fda5b8ef1f977a4",
+      "head": "fefc336941781af9ea8221cc778a7391ad306e68",
+      "parent": "aa83fc05a74e70b7bacd80f95e9184395174fdca",
+      "ref": "fix/tui-work-baseline-time"
+    },
+    {
+      "number": 40996,
+      "old": "ffb149eb33ee542ab554aa3650297ccb5e2988fc",
+      "head": "720c74791ca0f562db56be11df1901611e6f1c9b",
+      "parent": "fefc336941781af9ea8221cc778a7391ad306e68",
+      "ref": "fix/tui-dashboard-reading-status"
+    }
+  ],
+  "results": {
+    "planning": 7,
+    "decode": 353,
+    "providers": 19,
+    "pty_flows": 5,
+    "ruff_exit": 0,
+    "pyright_exit": 0
+  },
+  "source_sha256": {
+    "bin/masc_tui_render.ml": "f05475fcf7a6ff4f147510dd7f1f6931b0baed0580b6af38b203c7b38e05f57a",
+    "test/test_tui_surface_studio_pty.py": "215961d3a2501655c396be2bb838cad3c0214f86116d9b4b1b872785fe244d6a",
+    "test/test_tui_planning_summary_rows.ml": "7715dd4a8ed67734111ee7d4de820d5ef4622c978c68d1ad5d513a1630892a8c",
+    "test/test_tui_decode.ml": "cb2419b16d07634158d6f0648faeb44988fe1ac091822b66996062970ff669c9",
+    "test/test_tui_overview_providers.ml": "e13d91f718d385c89e9827492bc84be2b42d69ec7394bf20f900b6b77bc12db8"
+  },
+  "binary_sha256": "06f23fe50ff37a582d2952bb4b417e5be7fb3b1b02dfd1d9b6619e1ca4c83bd7",
+  "logs_sha256": {
+    "build.log": "582bf25a08b124677f5b881ccbb27dbe36e618100177c7936d6ac548b87dfaaa",
+    "planning.log": "624436c66b6913239b6c5ff3295df45b29aa859792ba1f71be315f246646a8f3",
+    "decode.log": "caed16b1ca842ae9e88d1abd54122c4b78c5a6e1d6c118c1e9fb27e4cb0ad4aa",
+    "providers-no-color-failure.log": "28df6317940b7a0953b5ea88ea04d1dc43e8407b7aa905d72d99c7f635e9577c",
+    "providers-color.log": "4729f5f35d27e2ae7232a118bdc62e801302919592aee085df0f8434fcd2d3f2",
+    "studio-pty.log": "adb37f62da91daeaf4c2410bcddc2e26c124845c60bad322b8c913cd5606791e",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pyright.log": "f09d74f473c89cf5d3a9f67a107f634bdacdd0e59490ac79f834af33da6ac0f8"
+  }
+}

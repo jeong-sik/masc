@@ -1,0 +1,51 @@
+(** The chat-pane text for the [/preset] commands. Pure. *)
+
+val listing_lines : Masc.Tui_decode.presets_snapshot -> string list
+(** One header, one line per preset with its counts and description, then
+    one [!] line per unreadable directory; a single hint line when empty. *)
+
+val unreadable_rows : max_cells:int -> (string * string) list -> string list
+(** One [! name — reason] entry per unreadable preset, folded at spaces so
+    no row is wider than [max_cells] terminal cells. Continuation rows are
+    indented two cells. Nothing is cut, so a recovery step at the end of a
+    reason stays on screen. *)
+
+val saved_line : Masc.Tui_decode.preset_manifest -> string
+
+val pane_empty_line : ko:bool -> Masc.Tui_decode.presets_snapshot -> string option
+(** The Config pane's row in place of an empty list, naming the pane's save
+    key; the unreadable-rows line when only unreadable directories came back;
+    [None] when there are presets to list. *)
+
+val pane_row : ko:bool -> max_cells:int -> Masc.Tui_decode.preset_manifest -> string
+(** A width-aware name and, when they fit, the snapshot counts. *)
+
+val contents_lines : ko:bool -> Masc.Tui_decode.preset_detail -> string list
+(** What a preset holds, grouped by kind: its directory, whether the saved
+    workspace settings still match, then one line per prompt, per override,
+    per keeper instruction file, the keeper-to-runtime assignments and the
+    lanes. The manifest says how many; this says which and how big. *)
+
+val detail_lines :
+  ko:bool ->
+  selected:Masc.Tui_decode.preset_manifest option ->
+  detail:Masc.Tui_decode.preset_detail Masc_tui_fetched.view ->
+  report:Masc.Tui_decode.preset_restore_report option ->
+  string list
+(** The pane's detail: what the selected preset holds, then the last restore
+    report, which is the only place the skipped keys and the runtime.toml
+    outcome are said.
+
+    [detail] is what is known about the selected preset's contents. All four
+    states are rendered: waiting says so, and a failure says why. Matching
+    the answer to the selection is {!Masc_tui_fetched}'s job, so a late
+    answer for a preset the cursor has left never reaches here. *)
+
+val restore_lines : ko:bool -> Masc.Tui_decode.preset_restore_report -> string list
+(** The restored name and its autosave, then each surface with its effect
+    and applied/skipped counts, every skipped key with its reason, and the
+    runtime.toml outcome. *)
+
+val restore_is_clean : Masc.Tui_decode.preset_restore_report -> bool
+(** No surface skipped anything, and runtime.toml has no failure, durability,
+    lock-release or exact-output application warning. *)

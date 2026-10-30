@@ -1,0 +1,668 @@
+(** Self-standing Runtime configuration types (RFC-0206, runtime→Runtime rebirth).
+
+    Provider × Model × Binding declarative schema (RFC-0058 layers 1-3),
+    re-homed from the deleted [Runtime_declarative_types] as types owned by
+    [lib/runtime/]. The routing layers (RFC-0058 layer 4 aliases, layer 5
+    routes/profiles, and the strategy ADT) are intentionally NOT ported: a
+    Runtime is a single pre-selected (provider × model) binding, so there is
+    no routing indirection to model. *)
+
+(** {1 API format & transport} *)
+
+type api_format =
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
+  | Codex_app_server_runtime
+  | Antigravity_cli_runtime
+  | Claude_code_runtime
+  | Muse_serve_runtime
+[@@deriving show, eq]
+
+(* Whether a runtime of this format can be handed a JSON Schema to hold its
+   answer to. Every exact-output call hands one over: an HTTP slot sends it in
+   the request, and a cli_slots id gets it through
+   [Keeper_lane_cli_oneshot.run]. Muse Code's [turn/start] has no field for
+   one, so [Fusion_official_client] refuses each such call, and a Muse Code
+   runtime can stand in no exact-output list. Every arm is listed so a new
+   format has to be decided here. *)
+type output_schema_channel =
+  | Holds_output_schema
+  | No_output_schema_channel
+
+let api_format_output_schema_channel = function
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
+  | Codex_app_server_runtime
+  | Antigravity_cli_runtime
+  | Claude_code_runtime -> Holds_output_schema
+  | Muse_serve_runtime -> No_output_schema_channel
+;;
+
+(** Which vendor dialect an endpoint speaks. [protocol] names the request
+    shape; this names the dialect inside it, and the two do not determine each
+    other — [openai-compatible-http] is spoken both by plain OpenAI-compatible
+    servers and by GLM, [messages-http] both by Anthropic and by Kimi.
+
+    A provider the AGENT_CORE catalog knows states its dialect there, and
+    restating it here is refused at load. The key exists for an endpoint the
+    catalog has never seen: the install wizard's provider id carries a hash
+    of the operator's answers, so no catalog row can ever match it.
+
+    Re-exports the AGENT_CORE type so a variant added there breaks this
+    compile instead of leaving a stale local mirror. *)
+type provider_wire_kind =
+  Llm_provider.Provider_config.provider_kind =
+  | Anthropic
+  | Kimi
+  | OpenAI_compat
+  | Ollama
+  | Gemini
+  | Glm
+[@@deriving show, eq]
+
+type transport =
+  | Http of string
+  | Cli of string
+[@@deriving show, eq]
+
+type credential =
+  | Env of string
+  | File of string
+  | Inline of string
+[@@deriving show, eq]
+
+(** {1 Layer 1: Provider — how to connect} *)
+
+(** Per-provider behavioral capabilities (RFC-0058 §2.4). Describes how the
+    transport/tool lane must be driven for a provider, independent of model. *)
+type capabilities =
+  { supports_inline_tools : bool
+  ; argv_prompt_preflight : bool
+  ; uses_anthropic_caching : bool
+  }
+[@@deriving show, eq]
+
+(** [providers.<id>] — connection + behavior. Only declared provider fields
+    are accepted. [healthcheck.path] is retained as provider-owned metadata for install/setup probes; runtime
+    startup does not use it for admission. [headers] is retained for
+    per-provider HTTP header injection. *)
+let connect_timeout_s_key = "connect-timeout-s"
+let exact_body_timeout_s_key = "exact-body-timeout-s"
+let admission_priority_run_limit_key = "admission-priority-run-limit"
+
+type antigravity_effort =
+  | Antigravity_low
+  | Antigravity_medium
+  | Antigravity_high
+[@@deriving show, eq]
+
+type antigravity_cli_options =
+  { agent : string option
+  ; effort : antigravity_effort option
+  ; timeout_s : float
+  ; add_dirs : string list
+        (** [add-dirs] — extra absolute directories the CLI may read beside
+            the keeper base path, each passed as its own [--add-dir]. Empty
+            means the base path stays the only workspace root. *)
+  }
+[@@deriving show, eq]
+
+type usage_read_shape =
+  | Openrouter_key
+  | Zai_quota_limit
+  | Kimi_coding_usages
+  | Ollama_balance
+[@@deriving show, eq]
+
+let all_usage_read_shapes =
+  [ Openrouter_key; Zai_quota_limit; Kimi_coding_usages; Ollama_balance ]
+;;
+
+let usage_read_shape_to_string = function
+  | Openrouter_key -> "openrouter-key"
+  | Zai_quota_limit -> "zai-quota-limit"
+  | Kimi_coding_usages -> "kimi-coding-usages"
+  | Ollama_balance -> "ollama-balance"
+;;
+
+type usage_read =
+  { shape : usage_read_shape
+  ; url : string
+  ; refresh_s : float option
+  }
+[@@deriving show, eq]
+
+type provider =
+  { id : string
+  ; enabled : bool
+    (** Whether bindings owned by this provider may be materialized. Omitted
+        [enabled] in TOML defaults to [true]. *)
+  ; display_name : string
+  ; protocol : string
+  ; api_format : api_format
+  ; wire_kind : provider_wire_kind option
+    (** The dialect this endpoint speaks, for an endpoint the AGENT_CORE
+        catalog does not know. [None] means the catalog answers, and a
+        provider that has a catalog row is refused if it states this. *)
+  ; request_path : string option
+    (** Explicit HTTP request surface; None uses the catalog/protocol. *)
+  ; transport : transport
+  ; is_non_interactive : bool
+  ; credentials : credential option
+  ; max_context : int option
+    (** Provider context default; a binding override takes precedence, then the model default. *)
+  ; account_home : string option
+  ; capabilities : capabilities option
+  ; healthcheck_path : string option
+  ; headers : (string * string) list option
+  ; connect_timeout_s : float option
+    (** Per-provider bound on the phase before the response headers -- the
+      connection (DNS, TCP, TLS), the request and the wait for the status
+      line -- in seconds. [None] leaves that phase to the keeper's
+      first-event budget, which AGENT_CORE applies in front of the headers as
+      well as on the stream; a declared value narrows it. Declared on the
+      provider, not the model, because it is a transport property.
+      agent-core boundary, Agent Core contract I2: MASC declares the budget;
+      AGENT_CORE owns enforcement and phase=Http_operation attribution.
+      On an exact-output lane this key alone does not admit a target: it
+      ends at the response headers, so an exact slot on this provider also
+      needs [exact_body_timeout_s] (Missing_deadline, #36979). Without it
+      boot leaves such a slot out and reports it, and a save that adds one
+      is refused (#38779). *)
+  ; exact_body_timeout_s : float option
+    (** Explicit total HTTP request deadline for Exact-output calls through
+        this provider, including connection, response headers and the full
+        response body. [None] declares no body deadline; boot then leaves an
+        exact-output lane slot on this provider out of its lane and reports
+        it ([Runtime.exact_slot_degradation]), a save that adds such a slot
+        is refused ([Runtime_config_error.Exact_slot_body_deadlines_absent], #38779), and
+        a target that reaches plan admission without one is refused there
+        (Missing_deadline). This does not replace [connect_timeout_s] or
+        ordinary Keeper per-call body deadlines. *)
+  ; admission_priority_run_limit : int option
+    (** [admission-priority-run-limit]: how many admission permits in a row
+        this provider account may hand to [Priority] requests (the judgment
+        lanes) while a [Standard] request waits for one. The same limit bounds
+        combined [Priority]/[Standard] grants while [Background] memory work
+        waits, so neither Keeper calls nor maintenance can starve. [None]
+        keeps one arrival-order queue. Declared on the provider because the
+        permits are counted per account. It reaches only the bindings that declare
+        [max-concurrent]; a provider where no binding can use it, or an
+        official-client provider, is refused at load. *)
+  ; antigravity_cli : antigravity_cli_options option
+    (** Typed [antigravity-cli] process options. Present exactly for providers
+        using that protocol; absent for every other transport. *)
+  ; usage_read : usage_read option
+  }
+[@@deriving show, eq]
+
+(** {1 Layer 2: Model — what it can do} *)
+
+(** How an OpenAI-compat backend's request body encodes "enable thinking".
+    Pinned on the model because the same physical model can be served by
+    backends with different thinking-control wire shapes.
+
+    This re-exports the AGENT_CORE capability enum so AGENT_CORE variant changes break MASC
+    compile instead of leaving a stale local mirror. *)
+type thinking_control_format =
+  Llm_provider.Capabilities.thinking_control_format =
+  | No_thinking_control
+  | Thinking_object
+  | Thinking_object_adaptive
+  | Thinking_object_only
+  | Chat_template_kwargs
+  | Chat_template_token of string
+  | Ollama_think
+  | Reasoning_effort
+  | Reasoning_effort_default_on
+[@@deriving show, eq]
+
+type reasoning_streaming_format =
+  Llm_provider.Capabilities.reasoning_streaming_format =
+  | Default_reasoning_streaming
+  | No_reasoning_streaming
+  | Delta_reasoning_field of string
+  | Delta_reasoning_field_and_details of string
+  | Template_reasoning_streaming
+[@@deriving show, eq]
+
+type anthropic_thinking_control =
+  Llm_provider.Capabilities.anthropic_thinking_control =
+  | Anthropic_adaptive_default
+  | Anthropic_adaptive_disabled_through_high
+  | Anthropic_adaptive_between_tools
+  | Anthropic_always_adaptive
+[@@deriving show, eq]
+
+(** Per-model capabilities, mirroring AGENT_CORE [Llm_provider.Capabilities] for the
+    fields callers branch on. Fields already present on {!model_spec}
+    ([tools_support]/[thinking_support]/[max_context]/[streaming]) are not
+    duplicated here, to avoid two-SSOT drift. *)
+type model_capabilities =
+  { max_output_tokens : int option
+  ; supports_tool_choice : bool option
+  ; supports_required_tool_choice : bool option
+  ; supports_named_tool_choice : bool option
+  ; supports_parallel_tool_calls : bool option
+  ; thinking_control_format : thinking_control_format
+  ; declared_thinking_control_format : thinking_control_format option
+  ; anthropic_thinking_control : anthropic_thinking_control option
+  ; reasoning_streaming_format : reasoning_streaming_format option
+  ; supports_image_input : bool option
+  ; supports_audio_input : bool option
+  ; supports_video_input : bool option
+  ; supports_multimodal_inputs : bool option
+  ; supports_response_format_json : bool option
+  ; supports_structured_output : bool option
+  ; supports_system_prompt : bool option
+  ; supports_assistant_prefill : bool option
+  ; supports_prompt_caching : bool option
+  ; supports_top_k : bool option
+  ; supports_min_p : bool option
+  ; supports_seed : bool option
+  ; emits_usage_tokens : bool option
+  }
+[@@deriving show, eq]
+
+let model_capabilities_default =
+  { max_output_tokens = None
+  ; supports_tool_choice = None
+  ; supports_required_tool_choice = None
+  ; supports_named_tool_choice = None
+  ; supports_parallel_tool_calls = None
+  ; thinking_control_format = No_thinking_control
+  ; declared_thinking_control_format = None
+  ; anthropic_thinking_control = None
+  ; reasoning_streaming_format = None
+  ; supports_image_input = None
+  ; supports_audio_input = None
+  ; supports_video_input = None
+  ; supports_multimodal_inputs = None
+  ; supports_response_format_json = None
+  ; supports_structured_output = None
+  ; supports_system_prompt = None
+  ; supports_assistant_prefill = None
+  ; supports_prompt_caching = None
+  ; supports_top_k = None
+  ; supports_min_p = None
+  ; supports_seed = None
+  ; emits_usage_tokens = None
+  }
+;;
+
+(** [models.<id>] — capability declaration. A requested model id resolves by
+    exact [api_name] equality. RFC-0206 R4 forbids porting the longest-prefix
+    matcher until a binding actually requires fuzzy resolution. *)
+type model_spec =
+  { id : string
+  ; api_name : string
+  ; tools_support : bool
+  ; max_context : int option
+      (** Shared model default, below binding and provider declarations.
+          [None] leaves undeclared bindings to the capability catalog. Resolve via
+          {!Runtime_instance.resolve_max_context_of_runtime}, never read directly. *)
+  ; thinking_support : bool option
+  ; preserve_thinking : bool option
+  ; streaming : bool
+  ; temperature : float option
+    (** [temperature] — per-model sampling temperature for keeper turns. [None]
+        keeps the caller fallback ([turn] temperature, then the AGENT_CORE
+        [agent_default] profile). [Some t] overrides it for every turn on this
+        model. A model whose endpoint fixes the value declares that on its
+        AGENT_CORE catalog row ([ignored_sampling_parameters]) instead. Resolved via
+        {!Runtime.temperature_of_runtime_id} → {!Runtime_inference.resolve_temperature},
+        symmetric to the [max-output-tokens]/[max_tokens] path. *)
+  ; top_p : float option
+    (** [top_p] — per-model nucleus sampling probability forwarded through the
+        materialized AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE profile
+        unchanged. *)
+  ; top_k : int option
+    (** [top_k] — per-model top-k sampling cap forwarded through the materialized
+        AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE profile unchanged. *)
+  ; min_p : float option
+    (** [min_p] — per-model minimum probability sampling value forwarded through
+        the materialized AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE
+        profile unchanged. *)
+  ; reasoning_uncontrolled : bool
+    (** [reasoning-uncontrolled] — this lane sends no thinking control at all
+        and takes whatever the provider does on its own. Only a wire that
+        enables reasoning without a control needs it said: there, a row that
+        declares neither an effort nor this is refused, because silence and a
+        deliberate provider default make the same request and nothing else
+        tells them apart. Default [false]. *)
+  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
+       [@equal fun a b -> a = b]
+    (* Reasoning_effort.t is a plain variant with no derived [equal];
+       structural equality is exactly right for it, and declaring it here
+       keeps the comparison inside masc rather than widening the AGENT_CORE
+       module's interface for one consumer. *)
+    (** [reasoning-effort] — per-model reasoning depth. Official-client
+        runtimes take no [enable_thinking]
+        ({!Keeper_official_client_host.resolve_reasoning_effort} rejects it
+        outright), so this is the only declared control over how much a
+        Claude Code / Codex / Antigravity turn reasons. [None] leaves the
+        turn at the caller default. Resolved via
+        {!Runtime.reasoning_effort_of_runtime_id} →
+        {!Runtime_inference.resolve_reasoning_effort}, symmetric to the
+        [temperature] path. *)
+  ; turn_timeout_s : float option
+    (** [turn-timeout-s] — per-model liveness window for one official-client
+        turn, in seconds. Codex, Claude, and Antigravity reset it on every
+        protocol message, so progressing turns have no wall-clock limit.
+        Antigravity also leaves it unarmed while the CLI's last reported step
+        is a running tool step, and Codex while the model is waiting on an item
+        it started (a command, a file change, an MCP call, a sleep), because
+        the CLI may write nothing until that step or item ends.
+        Owner cancellation remains available during these waits.
+        [None] keeps the provider value where one exists and the adapter default
+        otherwise.
+        Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
+        {!Runtime_inference.resolve_turn_timeout_s}. *)
+  ; capabilities : model_capabilities option
+  }
+[@@deriving show, eq]
+
+(** {1 Layer 3: Binding — provider × model} *)
+
+type binding =
+  { provider_id : string
+  ; model_id : string
+  ; enabled : bool
+    (** Whether this provider x model binding may be materialized. Omitted
+        [enabled] in TOML defaults to [true]. *)
+  ; is_default : bool
+  ; wizard_default : bool
+  ; max_context : int option
+    (** Context override for this provider/model binding, before provider and model defaults. *)
+  ; max_concurrent : int option
+  ; disable_parallel_tool_use : bool
+  ; max_tokens : int option
+    (** Request-side output budget for this binding ([max_tokens] on Chat
+        Completions, [max_output_tokens] on Responses, [num_predict] on Ollama).
+        Absent keeps the field off the wire so the provider's own default
+        decides. masc#24067 removed a resolver that {i invented} this value from
+        a capability ceiling or a flat fallback; a value declared here is
+        explicit deployment intent, which is what that boundary asks callers to
+        carry.
+
+        Measured 2026-08-25 over 1516 turns on
+        [ollama_cloud.deepseek-v4-flash:0731]: [output_tokens] was <= 2048 on
+        1392 turns and 2048..8192 on 38, then exactly 65536 on 86 -- the
+        provider's own cap, reached only by turns that had collapsed into
+        single-token repetition. The 8192..65535 band held nothing at all, so a
+        budget inside it bounds the collapse without touching healthy work. *)
+  ; price_input : float option
+  ; price_output : float option
+  ; keep_alive : string option
+  ; num_ctx : int option
+  ; repeat_penalty : float option
+    (** Ollama [options.repeat_penalty]. Raises the cost of tokens already in
+        the window, which is the documented remedy for R1-style reasoning
+        models that restate the same thought until the turn dies. Declared per
+        binding because it is an Ollama-only option, like [num_ctx]. *)
+  ; repeat_last_n : int option
+    (** Ollama [options.repeat_last_n]: how many recent tokens
+        [repeat_penalty] looks back over. *)
+  ; return_progress : bool option
+  }
+[@@deriving show, eq]
+
+(** {1 Lanes}
+
+    Lanes are ordered failover candidate lists declared in [runtime.lanes.<id>].
+    The declaration carries opaque runtime ids; resolution to materialized
+    runtimes happens in [Runtime] so this module stays dependency-free. *)
+
+type lane_decl =
+  { id : string
+  ; candidate_ids : string list
+  }
+[@@deriving show, eq]
+
+
+(* A declaration id may be any non-blank string, so it can hold a slash; an
+   output name cannot (it is a-z, 0-9 and _ only), so the key splits at its last slash.
+   No built-in id has a slash, so the two kinds never share a key. *)
+let addon_key_separator = '/'
+
+let exact_output_name_valid name =
+  name <> ""
+  && (match name.[0] with 'a' .. 'z' -> true | _ -> false)
+  && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) name
+
+type addon_lane = { declaration_id : string; output : string } [@@deriving show, eq]
+
+let addon_lane ~declaration_id ~output =
+  if String.trim declaration_id = "" then Error "a declaration id must not be blank"
+  else if not (exact_output_name_valid output)
+  then Error "an exact output name is a-z, 0-9 and _, starting with a letter"
+  else Ok { declaration_id; output }
+
+type exact_lane_owner =
+  | Builtin of
+      (Standalone_lane.t
+      [@printer fun fmt lane -> Format.pp_print_string fmt (Standalone_lane.to_id lane)]
+      [@equal Standalone_lane.equal])
+  | Addon of addon_lane
+[@@deriving show, eq]
+
+let exact_lane_key = function
+  | Builtin lane -> Standalone_lane.to_id lane
+  | Addon { declaration_id; output } ->
+    declaration_id ^ String.make 1 addon_key_separator ^ output
+
+let exact_lane_owner_of_key key =
+  match String.rindex_opt key addon_key_separator with
+  | None -> Option.map (fun lane -> Builtin lane) (Standalone_lane.of_id key)
+  | Some position ->
+    let declaration_id = String.sub key 0 position in
+    let output = String.sub key (position + 1) (String.length key - position - 1) in
+    Result.to_option (addon_lane ~declaration_id ~output) |> Option.map (fun lane -> Addon lane)
+
+let exact_lane_table_path = function
+  | Builtin lane ->
+    [ Runtime_toml_namespace.(key Runtime); "exact_output_lanes"; Standalone_lane.to_id lane ]
+  | Addon { declaration_id; output } ->
+    [ Runtime_toml_namespace.(key Runtime); "addon_exact_lanes"; declaration_id; output ]
+
+let exact_lane_table_name owner =
+  String.concat "." (List.map Toml_line_editor.render_key (exact_lane_table_path owner))
+
+type exact_output_lane_decl =
+  { owner : exact_lane_owner
+  ; enabled : bool
+  ; slot_ids : string list
+  ; cli_slot_ids : string list
+  ; max_output_tokens : int option
+  ; thinking : bool option
+    (* [Some flag] sends [enable_thinking = flag] on every HTTP slot of this
+       lane; [None] keeps each slot's own catalog default. *)
+  }
+[@@deriving show, eq]
+
+(** {1 Top-level config}
+
+    Routes/aliases/profiles/system_targets/strategy from the deleted
+    [runtime_config] are dropped (RFC-0206 §5): the single-binding Runtime model
+    has no routing layer. *)
+(** One System One server [\[typesafeai\] destinations] names. *)
+type typesafeai_destination =
+  { endpoint : string  (** the URL the request is posted to *)
+  ; model : string  (** the model id as that server names it *)
+  ; api_key_env : string  (** the environment variable holding that server's bearer key *)
+  }
+[@@deriving show, eq]
+
+(** Which keepers memory recall judges. *)
+type memory_recall_scope =
+  | All_keepers  (** every keeper that [excluded_keepers] does not name *)
+  | Listed_keepers of string * string list  (** only these keepers, at least one *)
+[@@deriving show, eq]
+
+(** [\[typesafeai\] memory_recall], with the scope it needs. Switching recall
+    on names the keepers it reaches: there is no on without a scope. *)
+type memory_recall =
+  | Memory_recall_off
+  | Memory_recall_on of memory_recall_scope
+[@@deriving show, eq]
+
+(** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. Keys stay in
+    the environment; each destination names the variable holding its own
+    ([api_key_env]). Everything else about the lane is here. [lane_enabled]
+    turns the lane off; it cannot turn it on without a key in one of the named
+    variables. [destinations] are the System One servers asked in order until
+    one answers ({!Typesafeai_client.evaluate}); TypeSafe's own server and
+    OpenRouter's [/api/v1/systemone] both speak the protocol. Two gates ask
+    the vendor: [board_attention] (the Board attention judgment,
+    {!Keeper_board_attention_exact_flow}, which sends the post and the
+    keeper's context) and [absorb_gate] (the librarian absorb gate,
+    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context
+    preservation, Skill applicability, host shared-memory selection and
+    memory recall each require independent opt-in. Memory recall also needs
+    its scope. All reach the
+    same destinations, so one [excluded_keepers] applies to every review: a
+    keeper named there is never asked about, whichever gate asks. *)
+type typesafeai =
+  { lane_enabled : bool
+  ; destinations : typesafeai_destination * typesafeai_destination list
+  ; board_attention : bool
+  ; board_attention_confidence_floor : float
+      (** [board_attention_confidence_floor]: Jev's relevant or not-relevant
+          answer settles a Board attention candidate when its confidence is at
+          least this value (0 to 1); below it the [board_attention_exact] lane
+          judges the candidate. *)
+  ; absorb_gate : bool
+  ; context_review : bool
+  ; skill_applicability : bool
+  ; librarian_preflight : bool
+  ; workspace_memory_selection_enabled : bool
+      (** Independent opt-in to send current input/task context and shared-memory
+          interpretations/source details for host retrieval. Defaults to false. *)
+  ; memory_recall : memory_recall
+      (** Opt-in to send a keeper's stored facts and the turn's input for the
+          recall judgment. Defaults to off. *)
+  ; excluded_keepers : string list
+  }
+[@@deriving show, eq]
+
+(* The vendor's own server, its latest model, and the variable the lane read
+   before the table could name destinations. *)
+let typesafe_destination =
+  { endpoint = "https://api.typesafe.ai/v1/systemone"
+  ; model = "jev-latest"
+  ; api_key_env = "TYPESAFEAI_API_KEY"
+  }
+;;
+
+(* What an absent [typesafeai] table means: the lane on when a key is set,
+   the vendor's own server alone, Board attention on, the absorb gate off (it
+   sends memories out, so the operator turns it on by name), memory recall off,
+   nobody excluded.
+
+   The Board attention confidence floor follows TypeSafe's confidence-gated
+   routing (https://docs.typesafe.ai/confidence.md: act when confidence is
+   high, fall back to a different system when it is low). With the three
+   relevance choices, confidence = (3 x top probability - 1) / 2, so 0.3 means
+   Jev's top choice holds about 53% of the probability. Measured on the
+   2026-09-23..30 logs: of 36,807 not-relevant Jev answers the LLM lane judged
+   again, it overturned 1,304. Below 0.3 were 7.3% of those answers and 41% of
+   the overturns; at or above it the LLM overturned 2.3%. *)
+let default_typesafeai =
+  { lane_enabled = true
+  ; destinations = typesafe_destination, []
+  ; board_attention = true
+  ; board_attention_confidence_floor = 0.3
+  ; absorb_gate = false
+  ; context_review = false
+  ; skill_applicability = false
+  ; librarian_preflight = false
+  ; workspace_memory_selection_enabled = false
+  ; memory_recall = Memory_recall_off
+  ; excluded_keepers = []
+  }
+;;
+
+type config =
+  { providers : provider list
+  ; models : model_spec list
+  ; bindings : binding list
+  ; default_runtime_id : string option
+  ; keeper_assignments : (string * string) list
+    (** [\[runtime.assignments\]] — keeper name → a declared [\[runtime.lanes\]]
+        name or a runtime id ["provider.model"]. A lane name is resolved first,
+        so a lane whose name is also a runtime id still wins.
+        runtime.toml is the sole SSOT for keeper-to-runtime assignment; keeper
+        TOML does not carry a runtime selector. A keeper absent from this table routes to the default
+        runtime; an assignment naming neither a lane nor a runtime is rejected at
+        load ({!Runtime.load_list}), mirroring [\[runtime\].default] validation. The
+        id is an opaque binding key here — only the AGENT_CORE adapter parses it into
+        provider/model/spec. *)
+  ; media_failover : string list
+    (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids
+        the vision tool calls, including the image readings made for a runtime
+        that cannot take the image. A keeper turn never dispatches to them; its
+        image reroute stays inside its lane. [[]] = no vision runtimes. Each id must
+        resolve to a configured runtime (rejected at load like
+        [\[runtime\].default]). *)
+  ; lane_decls : lane_decl list
+    (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
+        Declarations are resolved against materialized runtimes at load time;
+        an unknown candidate id is rejected like [\[runtime\].default]. *)
+  ; exact_output_lane_decls : exact_output_lane_decl list
+    (** Raw ordered AGENT_CORE target references from
+        [\[runtime.exact_output_lanes.<id>\]]. MASC does not interpret them as
+        provider/model runtime bindings. *)
+  ; exec_ssh_endpoints : Exec_ssh_endpoint.t list
+    (** [\[exec.ssh.endpoints.<name>\]] — SSH remote execution endpoint
+        registry (Phase 1 SSH lane, spec §4.2). Keeper TOML [remote_endpoint]
+        names resolve against this list at keeper load/dispatch; an unknown
+        name is a config-load error. *)
+  ; lsp_servers : (string * (string * string list)) list
+    (** [\[lsp.servers\]] — the command that starts a language's server, by
+        the language's wire id: [python = \["pyright-langserver", "--stdio"\]].
+        Replaces {!Lsp_process_manager.command_of_language} for that language
+        and no other. A key naming no language, or a value that is not a
+        non-empty array of strings, is refused at load. *)
+  ; browser : Browser_configuration.t
+    (** Browser backend paths and per-lane activity from the same TOML snapshot. *)
+  ; machines : Machine_configuration.t
+    (** MSX and DOS activity from the same TOML snapshot. *)
+  ; typesafeai : typesafeai
+    (** [\[typesafeai\]] -- see {!typesafeai}. Absent is {!default_typesafeai}. *)
+  ; egress_allowlists : Egress_allowlist.t list
+    (** [\[egress.keepers.<name>\]] — what a keeper in the policy lane may
+        reach (RFC-0415). Beside the endpoint registry rather than in the
+        keeper TOML for the same reason: a keeper names a mode, and what
+        that mode permits is the operator's to say. A keeper with no entry
+        has an empty allowlist, which admits nothing. *)
+  }
+[@@deriving show, eq]
+
+(** {1 Lookups} *)
+
+let provider_of_id (cfg : config) (id : string) : provider option =
+  List.find_opt (fun (p : provider) -> String.equal p.id id) cfg.providers
+;;
+
+let model_of_id (cfg : config) (id : string) : model_spec option =
+  List.find_opt (fun (m : model_spec) -> String.equal m.id id) cfg.models
+;;
+
+let exec_ssh_endpoint (cfg : config) (name : string) : Exec_ssh_endpoint.t option =
+  List.find_opt
+    (fun (endpoint : Exec_ssh_endpoint.t) -> String.equal endpoint.name name)
+    cfg.exec_ssh_endpoints
+;;
+
+(** Runtime id derived from a binding: ["provider.model"]. Single source of id
+    derivation, shared by {!Runtime_instance.id_of_binding} and any caller indexing
+    runtimes by id. *)
+let binding_key (b : binding) : string =
+  Printf.sprintf "%s.%s" b.provider_id b.model_id
+;;

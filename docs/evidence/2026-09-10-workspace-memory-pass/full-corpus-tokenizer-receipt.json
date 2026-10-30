@@ -1,0 +1,18 @@
+{
+  "render_http": 200,
+  "exact_full_user_content_retained": true,
+  "rendered_bytes": 1441462,
+  "rendered_sha256": "aeebb1248420794bdf5513afdcdc16bd0dfb10f5327644e9d69f794a1488daa5",
+  "runner_pid": 63874,
+  "tokenizer_options": {
+    "add_special": false,
+    "parse_special": true
+  },
+  "tokenize_http": 200,
+  "tokens": 518293,
+  "loaded_context_tokens": 262144,
+  "inference_performed": false,
+  "model_weight_sha256": "3f227079003add2511437e5b1e94812e363385225bf6a9b47b0054a72bc8b01e",
+  "runner_model_in_show_sources": true,
+  "ollama_version": "0.33.3"
+}

@@ -1,0 +1,14 @@
+{
+  "before": "19eded8bc18c890e058dfc34123803431fcdb683",
+  "scope": "Interpret the actual retained-reader helpers against private regular files.\n\nMeasures warm, durable, double-read capture including fsync, but excludes JSON\nparsing, caller scheduling, complete modules and active Keeper behavior.\n",
+  "source_sha256": {
+    "Before": {
+      "file": "62d64e658cd7a1a27df3f86b17947e58f78b92bc60da9e6b1f7de27b19183c74",
+      "selected_helpers": "933fa40999d5329c6e839c0554665eccaaba266ef1ca458596f09d23f3918950"
+    },
+    "After": {
+      "file": "c917897dae17b5d58499af668c8eb4c83b63b489ffabe25bbfca38bd0207d92e",
+      "selected_helpers": "36422e33912236880ad3c200be86f4891c1b9375873eaa3801f91069d6ab10aa"
+    }
+  }
+}

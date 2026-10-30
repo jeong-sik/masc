@@ -1,0 +1,44 @@
+[
+  {
+    "request": "verifier-wire-000.json.gz",
+    "request_uncompressed_sha256": "bb28df44b8f06e80e60702dc194e95268cf98a22364d444b4b6b81e3ce1138c0",
+    "response": "verifier-response-000.json",
+    "status": 200
+  },
+  {
+    "request": "verifier-wire-001.json.gz",
+    "request_uncompressed_sha256": "cdd0b9da9d9ce02d43d3e008a71ed3885e62b97709c4ed8685a0b85d4bc160a0",
+    "response": "verifier-response-001.json",
+    "status": 200
+  },
+  {
+    "request": "verifier-wire-002.json.gz",
+    "request_uncompressed_sha256": "6398ef29b17076f1cd6274c072e51e3ec8f203c6428efd135dd9c27999384053",
+    "response": "verifier-response-002.json",
+    "status": 200
+  },
+  {
+    "request": "verifier-wire-003.json.gz",
+    "request_uncompressed_sha256": "7a550a0df7304222b6914ca016ba4de027a0af196c03ac33caaa3238ab347a34",
+    "response": "verifier-response-003.json",
+    "status": 200
+  },
+  {
+    "request": "verifier-wire-004.json.gz",
+    "request_uncompressed_sha256": "8ac7837d975c8bd269b25c1a0b6d0301662ecb8d7c4042fee539d5559ad185bb",
+    "response": "verifier-response-004.json",
+    "status": 200
+  },
+  {
+    "request": "verifier-wire-005.json.gz",
+    "request_uncompressed_sha256": "525a25234c33e1a9260485669c51aa744b3018482783845cb6a74f9c1c73473c",
+    "response": "verifier-response-005.json",
+    "status": 200
+  },
+  {
+    "request": "verifier-wire-006.json.gz",
+    "request_uncompressed_sha256": "4d2a025f956d8fd3766b48952475f4e523e8cbef18eea74a74279f3462decda9",
+    "response": "verifier-response-006.json",
+    "status": 200
+  }
+]

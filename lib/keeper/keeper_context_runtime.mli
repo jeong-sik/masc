@@ -1,0 +1,160 @@
+(** Keeper context capacity resolution, checkpoint access, system prompts
+    and lifecycle dispatch. Working context types live in {!Keeper_types}. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+(** {1 Working Context Types (re-exported from Keeper_types)} *)
+
+type working_context = Keeper_types.working_context
+type session_context = Keeper_types.session_context
+
+(** {1 Working Context Operations} *)
+
+val message_count : working_context -> int
+val checkpoint_of_context : working_context -> Agent_core.Checkpoint.t
+val messages_of_context : working_context -> Agent_core.Types.message list
+val create : eio:bool -> system_prompt:string -> working_context
+val set_system_prompt : working_context -> system_prompt:string -> working_context
+val append : working_context -> Agent_core.Types.message -> working_context
+
+val create_session : session_id:string -> base_dir:string -> session_context
+val persist_message :
+  keeper_name:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  ?source:string ->
+  session_context ->
+  Agent_core.Types.message ->
+  unit
+
+val persist_tool_observation :
+  keeper_name:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  session_context ->
+  tool_name:string ->
+  outcome:Tool_result.tool_call_outcome ->
+  unit
+
+(** {1 Keeper Context Lifecycle} *)
+
+val log_keeper_exn : label:string -> exn -> unit
+
+val context_of_agent_core_checkpoint
+  :  Agent_core.Checkpoint.t
+  -> working_context
+
+val save_agent_core_checkpoint
+  :  base_path:string
+  -> runtime_id:string
+  -> keeper_name:string
+  -> session:session_context
+  -> agent_name:string
+  -> ctx:working_context
+  -> (Agent_core.Checkpoint.t, string Keeper_context_core.checkpoint_write_error) result
+
+type post_turn_lifecycle =
+  { updated_meta : keeper_meta
+  ; checkpoint : Agent_core.Checkpoint.t option
+  ; checkpoint_bytes : int option
+  ; message_count : int
+  }
+
+type max_context_resolution =
+  { requested_override : int option
+  ; primary_budget : int
+  ; runtime_budget : int
+  ; runtime_budget_source : Runtime_instance.max_context_source
+    (** Where [runtime_budget] came from (capability catalog, runtime.toml
+        override, or override clamped by capability). *)
+  ; requested_context_window : int
+  ; effective_budget : int
+  }
+
+type max_context_resolution_error =
+  | Invalid_requested_context_override of int
+  | Runtime_context_window_unavailable of { runtime_id : string }
+
+type context_budget_source =
+  | Runtime_provider_cap
+  | Requested_override
+  | Requested_override_clamped_to_provider
+
+(** {1 Checkpoint Loading} *)
+
+val load_context_from_checkpoint
+  :  trace_id:string
+  -> base_dir:string
+  -> session_context * working_context option
+
+(** What a checkpoint load found ({!Keeper_context_core.checkpoint_load}).
+    [Checkpoint_unread] is any failure other than a missing file: the saved
+    history was not seen and may still hold what it held. *)
+type checkpoint_load = Keeper_context_core.checkpoint_load =
+  | Checkpoint_loaded of working_context
+  | Checkpoint_absent
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
+
+val load_context_from_checkpoint_classified
+  :  keeper_name:string
+  -> trace_id:string
+  -> base_dir:string
+  -> session_context * checkpoint_load
+
+val apply_post_turn_lifecycle
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> checkpoint:Agent_core.Checkpoint.t option
+  -> post_turn_lifecycle
+
+val dispatch_keeper_phase_event
+  :  config:Workspace.config
+  -> keeper_name:string
+  -> Keeper_state_machine.event
+  -> unit
+
+type lifecycle_dispatch_error =
+  | Transition_rejected of Keeper_state_machine.transition_error
+
+
+val dispatch_keeper_phase_event_result
+  :  config:Workspace.config
+  -> keeper_name:string
+  -> Keeper_state_machine.event
+  -> (unit, lifecycle_dispatch_error) result
+
+(** {1 Trace and Board Utilities} *)
+
+val generate_trace_id : ?now:float -> unit -> string
+(** {1 Model and Workspace Utilities} *)
+
+val resolve_max_context_resolution_for_runtime_id
+  :  requested_override:int option
+  -> runtime_id:string
+  -> (max_context_resolution, max_context_resolution_error) result
+
+val max_context_resolution_error_to_string
+  :  max_context_resolution_error
+  -> string
+
+val context_budget_source_of_resolution
+  :  max_context_resolution
+  -> context_budget_source
+
+val context_budget_source_to_string : context_budget_source -> string
+
+val context_budget_json_of_resolution
+  :  runtime_id:string
+  -> max_context_resolution
+  -> Yojson.Safe.t
+
+
+(** {1 Prompt Delegation} *)
+
+val build_keeper_system_prompt
+  :  instructions:string
+  -> ?keeper_name:string
+  -> ?workspace_root:string
+  -> ?constitution:string
+  -> unit
+  -> string

@@ -1,0 +1,96 @@
+{
+  "schema": "workspace.memory.context.v1",
+  "generated_at": 1,
+  "source_validation": "stored_bindings_not_revalidated",
+  "consistency": "individual_store_snapshots",
+  "discovery": {
+    "status": "available"
+  },
+  "keepers": [
+    {
+      "keeper_id": "writer",
+      "ordinary": {
+        "status": "available",
+        "snapshot": {
+          "revision": 1,
+          "updated_at": 1,
+          "facts": [
+            {
+              "claim": "Report R was generated as PDF.",
+              "category": "fact",
+              "first_seen": 1,
+              "last_seen": 1,
+              "origin": {
+                "kind": "authored",
+                "trace_id": "synthetic-scenario"
+              }
+            }
+          ]
+        }
+      },
+      "source_bound": {
+        "status": "missing"
+      }
+    },
+    {
+      "keeper_id": "reviewer",
+      "ordinary": {
+        "status": "available",
+        "snapshot": {
+          "revision": 1,
+          "updated_at": 1,
+          "facts": [
+            {
+              "claim": "Report R contains plain Markdown bytes; PDF generation failed.",
+              "category": "fact",
+              "first_seen": 1,
+              "last_seen": 1,
+              "origin": {
+                "kind": "authored",
+                "trace_id": "synthetic-scenario"
+              }
+            }
+          ]
+        }
+      },
+      "source_bound": {
+        "status": "missing"
+      }
+    },
+    {
+      "keeper_id": "analyst",
+      "ordinary": {
+        "status": "available",
+        "snapshot": {
+          "revision": 1,
+          "updated_at": 1,
+          "facts": [
+            {
+              "claim": "Measurement M was 12 seconds.",
+              "category": "fact",
+              "first_seen": 1,
+              "last_seen": 1,
+              "origin": {
+                "kind": "authored",
+                "trace_id": "synthetic-scenario"
+              }
+            },
+            {
+              "claim": "Correction from the original log: measurement M was 21 seconds, not 12.",
+              "category": "fact",
+              "first_seen": 1,
+              "last_seen": 1,
+              "origin": {
+                "kind": "authored",
+                "trace_id": "synthetic-scenario"
+              }
+            }
+          ]
+        }
+      },
+      "source_bound": {
+        "status": "missing"
+      }
+    }
+  ]
+}

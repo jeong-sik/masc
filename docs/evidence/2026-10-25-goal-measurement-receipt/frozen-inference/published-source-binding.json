@@ -1,0 +1,9 @@
+{
+  "candidate_source_sha": "3014cfce79636f1e41cc39f6019a3428c6912145",
+  "candidate_base_sha": "895df663fb303ee2fa95c38bbd28b571db9abb62",
+  "author_source_sha": "bf7927734d0822f2ed47e41a86121eed78ba3907",
+  "source_receipt_sha256": "d8d17bce7874e9b1449e51a4851b4e667c62397d43643f9045877702532483b8",
+  "all_receipt_product_files_byte_equal_to_author": true,
+  "returned_tools_executed": false,
+  "scope": "Frozen inference only. New server/actual Keeper test remains separate. Includes both negative arms and candidate limitations."
+}

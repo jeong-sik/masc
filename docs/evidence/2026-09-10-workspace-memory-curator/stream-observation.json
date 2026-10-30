@@ -1,0 +1,10 @@
+{
+  "observation": {
+    "phase": "receiving",
+    "chunks": 537,
+    "content_characters": 0,
+    "thinking_characters": 2513,
+    "observed_at": "2026-09-09T18:03:55.105217+00:00"
+  },
+  "scope": "Live local model stream; intermediate progress only, not completion"
+}

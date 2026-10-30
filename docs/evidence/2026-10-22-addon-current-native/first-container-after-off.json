@@ -1,0 +1,5 @@
+{
+  "exit_code": 1,
+  "stdout": "[]\n",
+  "stderr": "error: no such object: 573cce3a7c38741557ffa501276ab4f7e0480c256cc8fe9252b6e1c9a8094176\n"
+}

@@ -1,0 +1,56 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+                                                                                                        │[Recent] Changes · 1 keeper
+  MASC Lanes  Candidate orders  All runtimes  ▸Lanes (12 lanes)  13:08:52  HTTP [connected]             │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────── │● curat…ource-1196 open                      -
+   All lanes · observed 13:08:52                                                                        │───────────────────────────────────────────────────────
+ LANE                                               STATE                                               │curator-source-1196 · open · last event 9.0s
+ Exact-output · Librarian                           1 running · 1 admitted slots
+ Exact-output · HITL Auto Judge                     no retained runs · 1 admitted slots
+ Exact-output · Board Attention                     no retained runs · 1 admitted slots
+ Exact-output · Verifier                            no retained runs · 1 admitted slots
+ Exact-output · Browser Stagehand                   off · 0 finishing · off; candidates retained
+ Exact-output · Candle Appraiser                    off · 0 finishing · off; candidates retained
+ Browser · Browser Lane (live)                      on; 0 connected clients
+ Browser · Browser Lane (automation)                on; executor not registered
+ Browser · Browser Lane (stagehand)                 on; executor not registered
+ Machines · MSX                                     on; no screen published
+ Machines · DOS                                     on; no screen published
+ Packages · curator-qualification.toml              configured off; worker cleanup confirmed · no work…
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────
+   Space: activity · s: models · a: candidate
+   Librarian · Selects the next Memory OS snapshot from immutable Keeper history.
+   Optional lane · configuration ready · last run succeeded 37s ago
+   Config: [runtime.exact_output_lanes.librarian_exact]
+   Activity: 1 running · latest started 37s ago
+   Runs: 4 retained (2 ok / 1 fail / 0 cancel) · 50.0% success · p50 latency 51.2s
+   Slot selection history: glm-coding.glm-5.3-flash: 2 · 1 run named no slot
+   Catalog attempts (admitted order): 1 glm-coding.glm-5.3-flash
+   Then CLI (after catalog exhaustion): (none)
+   Dropped before execution: (none)
+   Output meaning: selected memory facts plus committed snapshot metadata.
+   Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output,
+   outcome, and selected slot, so no tool-call ledger exists.
+
+
+
+
+
+
+
+
+
+
+
+  j/k:move  o / A:Lane Add-ons  d:reading  i:read issues  Right / Enter:open  Esc:dashboard  q:quit  …?
+ › to curator-source-1196   (i to write)

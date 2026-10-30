@@ -1,0 +1,15 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-web-lane-inventory-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/lane-inventory.test.ts src/components/lane-inventory-panel.test.ts src/config/navigation.test.ts src/components/status.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-lane-inventory-20261004/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  66 passed (66)
+   Start at  17:42:29
+   Duration  2.77s (import 35%, environment 23%, transform 21%, setup 17%, tests 4%, worker 1%)
+
+    Isolate  4 workers spawned · ~230ms startup each (spawn + environment, per file)
+             at least ~689ms faster with isolate: false — reuses workers across files instead of one per file

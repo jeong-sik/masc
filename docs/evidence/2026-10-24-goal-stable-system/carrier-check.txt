@@ -1,0 +1,33 @@
+PASS system keeps the previous override before the Goal
+PASS extra context contains the other world only
+PASS extra receipt never claims a Goal span
+PASS logical Goal block is counted once
+PASS physical system receipt has exact bytes
+PASS physical system receipt has exact digest
+PASS physical spans are contiguous
+PASS physical span digest matches its exact bytes
+PASS physical spans are contiguous
+PASS physical span digest matches its exact bytes
+PASS physical spans are contiguous
+PASS physical span digest matches its exact bytes
+PASS physical spans cover the complete system carrier
+PASS system receipt names its own carrier
+PASS second system keeps exactly the issued Goal
+PASS post-tool round has no extra User carrier
+PASS stable system omits GATE
+PASS stable system omits TASK
+PASS stable system omits LANE
+PASS stable system omits OWNER
+PASS stable system omits CLOCK
+PASS stable system omits FOREIGN-REV
+PASS third request does not accumulate the suffix
+PASS another turn borrows no Goal
+PASS mismatched source never promotes a Goal
+PASS no-Goal effective base is byte-identical
+PASS no-Goal override preserves None or exact Some
+PASS no-Goal effective base is byte-identical
+PASS no-Goal override preserves None or exact Some
+PASS no-Goal effective base is byte-identical
+PASS no-Goal override preserves None or exact Some
+PASS an empty prior override is not replaced by default instructions
+32 exact-source carrier checks passed

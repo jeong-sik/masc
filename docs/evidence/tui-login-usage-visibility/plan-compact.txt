@@ -1,0 +1,30 @@
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+
+   MASC Usage  12:14:32  HTTP [connected]                                       
+ ────────────────────────────────────────────────────────────────────────────── 
+   Plan    Trend    Keepers    v:next view                                      
+                                                                                
+   Plan usage                                                                   
+  ┌ Claude Code Max Subscription · cefb02a1                                  ┐  
+  │ 5h                   ▕                        ▏ Reported 0%              │  
+  │ Last report 12:14 · reported 31s ago · Model call limit                  │  
+  │ Reset reset time passed · no newer report                                │  
+  │ Catalogue · exhausted (observed) · catalogue reopens 10-08 12:14 in      │  
+  │ 4d23h                                                                    │  
+  │ 7d                   ▕█████████████████████▎  ▏ Reported 89%             │  
+  │ Last report 12:14 · Model call limit                                     │  
+  │ Reset ↻ 10-08 12:14 in 4d23h                                             │  
+  │ TOOL_LIMIT tool calls                                                    │  
+  │ ▕████████████████████████▏ Reported 100%                                 │  
+  │ Last report 12:14 · Other use · does not block model calls               │  
+  │ Reset —                                                                  │  
+  │ UNKNOWN_LIMIT unknown                                                    │  
+  │ ▕███████████████████▏    ▏ Reported 80%                                  │  
+  │ Last report 12:14 · Unclassified limit                                   │  
+  │ Reset —                                                                  │  
+  │ claude@example.com                                                       │  
+  └──────────────────────────────────────────────────────────────────────────┘  
+   [rows 1-20/67 · j/k to scroll]                                               
+
+  j/k:scroll  p:Usage / Telemetry  Esc:Dashboard  q:quit  …?
+ › to alpha   (i to write)                                                      

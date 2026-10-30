@@ -1,0 +1,19 @@
+{
+  "scope": "synthetic HTTP fault injection; no semantic LLM acceptance",
+  "expected_commit": "c202a0f2cf9204e147636bc67a79931741313265",
+  "base_path": "/private/tmp/masc-direct-resume-http-c202-12/base",
+  "port": 18941,
+  "binary_sha256": "9f6d9fb3f7dc2e7b8f76c1566d8dbbe7879bdcd5847c632c5691627412c414b0",
+  "status": "verified",
+  "operation_id": "kmsg-8bd843aa06f30b87d263cd001679832d",
+  "checkpoint": {
+    "sha256": "e7c964f07520cc93904c22042d159f38d81ee5ba78cae0c8a3732826705af550",
+    "trace_id": "trace-1788990042430-00000",
+    "turn_count": 1
+  },
+  "input_sha256": "93e28181948b998c204b0d9b9983c3f68c2a62af83cf94aed858d23f40a86f3a",
+  "execution_id": "exec-1788990042540-0001",
+  "provider_requests": 3,
+  "effect_exists": true,
+  "effect_bytes": "one real filesystem effect\n"
+}

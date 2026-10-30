@@ -1,0 +1,32 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-package-installation-20261005/dashboard
+
+ ❯ src/components/lane-package-installer.test.ts (7 tests | 1 failed | 6 skipped) 50ms
+   ❯ Web package discovery to explicit declaration save (7)
+     × retains unsubmitted folder and manifest paths across remount and workspace return 49ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-package-installer.test.ts > Web package discovery to explicit declaration save > retains unsubmitted folder and manifest paths across remount and workspace return
+AssertionError: expected '' to be '/workspace/unfinished folder' // Object.is equality
+
+- Expected
++ Received
+
+- /workspace/unfinished folder
+
+ ❯ src/components/lane-package-installer.test.ts:76:90
+     74|     input(screen, 'Package manifest path', '/workspace/unfinished/lane…
+     75|     screen.unmount(); screen = render(html`<${LaneAddonsPanel} />`)
+     76|     expect((await screen.findByLabelText('Workspace folder') as HTMLIn…
+       |                                                                                          ^
+     77|     expect((screen.getByLabelText('Package manifest path') as HTMLInpu…
+     78|     await act(() => workspace('/workspace-b'))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  05:37:58
+   Duration  1.41s (import 37%, transform 33%, environment 14%, setup 12%, tests 4%)

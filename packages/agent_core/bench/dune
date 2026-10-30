@@ -1,0 +1,4 @@
+(executable
+ (name schema_wire_bytes_bench)
+ (modules schema_wire_bytes_bench)
+ (libraries agent_core yojson mtime mtime.clock))

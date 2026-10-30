@@ -1,0 +1,22 @@
+[
+  {
+    "target": "test_server_lane_inventory",
+    "exit": 0,
+    "log": "/tmp/browser-review-chain-test_server_lane_inventory.log"
+  },
+  {
+    "target": "test_browser_activity",
+    "exit": 0,
+    "log": "/tmp/browser-review-chain-test_browser_activity.log"
+  },
+  {
+    "target": "test_browser_lane",
+    "exit": 0,
+    "log": "/tmp/browser-review-chain-test_browser_lane.log"
+  },
+  {
+    "target": "test_tui_browser_activity",
+    "exit": 0,
+    "log": "/tmp/browser-review-chain-test_tui_browser_activity.log"
+  }
+]

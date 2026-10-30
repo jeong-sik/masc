@@ -1,0 +1,41 @@
+Raw workflow log SHA256: f23495ae44e5a09e0c19ab832ad74a37fff285f4d13d0373f8cde2b5c7d1008e
+Source: https://github.com/jeong-sik/masc/actions/runs/40198894805
+
+test suite	Checkout	2026-10-25T13:43:26.9594272Z HEAD is now at 5dd21094 test(minimax): use public source capability and consistent SSE evidence
+test suite	Test	2026-10-25T13:44:46.8555046Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8556043Z   [FAIL]        native models          0   MiniMax-M2.
+test suite	Test	2026-10-25T13:44:46.8556769Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8559315Z   [FAIL]        native models          1   MiniMax-M2.1.
+test suite	Test	2026-10-25T13:44:46.8560007Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8560699Z   [FAIL]        native models          2   MiniMax-M2.1-highspeed.
+test suite	Test	2026-10-25T13:44:46.8561368Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8561972Z   [FAIL]        native models          3   MiniMax-M2.5.
+test suite	Test	2026-10-25T13:44:46.8562575Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8563178Z   [FAIL]        native models          4   MiniMax-M2.5-highspeed.
+test suite	Test	2026-10-25T13:44:46.8563859Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8564422Z   [FAIL]        native models          5   MiniMax-M2.7.
+test suite	Test	2026-10-25T13:44:46.8564973Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8565550Z   [FAIL]        native models          6   MiniMax-M2.7-highspeed.
+test suite	Test	2026-10-25T13:44:46.8566417Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8566958Z   [FAIL]        native models          7   MiniMax-M3.
+test suite	Test	2026-10-25T13:44:46.8567485Z ASSERT shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8568085Z   [FAIL]        native models          8   MiniMax-M3.1-Flash.
+test suite	Test	2026-10-25T13:44:46.8569889Z │ [FAIL]        native models          0   MiniMax-M2.                         │
+test suite	Test	2026-10-25T13:44:46.8571412Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8580739Z │ [FAIL]        native models          1   MiniMax-M2.1.                       │
+test suite	Test	2026-10-25T13:44:46.8581644Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8588422Z │ [FAIL]        native models          2   MiniMax-M2.1-highspeed.             │
+test suite	Test	2026-10-25T13:44:46.8589335Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8596726Z │ [FAIL]        native models          3   MiniMax-M2.5.                       │
+test suite	Test	2026-10-25T13:44:46.8598587Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8605602Z │ [FAIL]        native models          4   MiniMax-M2.5-highspeed.             │
+test suite	Test	2026-10-25T13:44:46.8606816Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8615084Z │ [FAIL]        native models          5   MiniMax-M2.7.                       │
+test suite	Test	2026-10-25T13:44:46.8616883Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8623386Z │ [FAIL]        native models          6   MiniMax-M2.7-highspeed.             │
+test suite	Test	2026-10-25T13:44:46.8624552Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8630982Z │ [FAIL]        native models          7   MiniMax-M3.                         │
+test suite	Test	2026-10-25T13:44:46.8631867Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8638010Z │ [FAIL]        native models          8   MiniMax-M3.1-Flash.                 │
+test suite	Test	2026-10-25T13:44:46.8638888Z FAIL shipped MiniMax Responses provider is absent
+test suite	Test	2026-10-25T13:44:46.8644226Z 9 failures! in 0.025s. 9 tests run.

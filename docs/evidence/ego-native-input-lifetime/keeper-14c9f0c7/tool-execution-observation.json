@@ -1,0 +1,480 @@
+{
+  "source": "14c9f0c701768ed3242e3fcde219b3dfaf9a80ce",
+  "scope": "private candidate raw tool execution only; no provider reasoning copied",
+  "records": [
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 14,
+      "tool_use_id": "call_904c8d1b85d647bb80154a78",
+      "tool_name": "keeper_skill",
+      "finished_at": 1792856053.796225,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 11,
+      "started_at": 1792856053.788346,
+      "elapsed_seconds": 0.007879018783569336,
+      "result_bytes": 16023,
+      "result_sha256": "234f1f449ee125197b936d62e6c7b3facc9725777d501f79fdb3759ba9c4bdf1"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 16,
+      "tool_use_id": "call_17dbfdc87a844200989c28c8",
+      "tool_name": "BrowserTabs",
+      "finished_at": 1792856053.813429,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 12,
+      "started_at": 1792856053.790674,
+      "elapsed_seconds": 0.022755146026611328,
+      "result_bytes": 25543,
+      "result_sha256": "53c92d81a117ce7f7d32175fe5681ea31fd195ec5d05a4e6b8aa869fc3756dd9",
+      "input": {},
+      "result": "{\"browserCapabilities\":{\"scope\":\"implemented public tools for this browser; not readiness, effect success or dispatch authority\",\"operations\":[{\"operation\":\"list_tabs\",\"status\":\"available\",\"tool\":\"masc_browser_tabs\"},{\"operation\":\"open_tab\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"open_tab\",\"constraints\":[\"Requires the exact observed clientId. Opens a page in the connection's ego task space; it shares the cookies of the operator's ego profile.\",\"Creation can succeed even if navigation fails. Inspect the returned tabId before another create.\"]},{\"operation\":\"close_tab\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"close_tab\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"activate_tab\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"list_windows\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"create_window\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"close_window\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"navigate\",\"status\":\"conditional\",\"tool\":\"masc_browser_goto\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires the exact observed clientId and the tabId of a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\",\"Waits for the page to load. A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.\"]},{\"operation\":\"follow_link\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"follow_link\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use one freshly observed selector or documentId/nodeId; the target must be visible and unobstructed.\",\"Requires expectedUrl and an observed same-tab HTTP(S) anchor; rejects downloads, new-window targets and unsupported referrer semantics.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"back\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"back\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Moves one entry in the tab's own history and is refused before any effect when there is none.\",\"A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"forward\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"forward\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Moves one entry in the tab's own history and is refused before any effect when there is none.\",\"A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"reload\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"reload\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"session_lifecycle\",\"status\":\"unsupported\",\"reason\":\"Connected operator browsers do not expose an owned session lifecycle.\"},{\"operation\":\"read_text\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"text\",\"constraints\":[\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"read_html\",\"status\":\"unsupported\",\"reason\":\"Document-source adapters exist, but BrowserRead exposes no HTML/source mode.\"},{\"operation\":\"read_elements\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"elements\",\"constraints\":[\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"read_scene\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"scene\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId; viewport scene may be truncated. Geometry is not an occlusion guarantee.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"read_regions\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"regions\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId; copy observed region references for scoped reads.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"read_snapshot\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"snapshot\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId; ego's own accessibility tree, each actionable node with a ref (ref=12). snapshotScope is viewport (default), full_page, or subtree with root, a ref an earlier snapshot of the same page printed.\",\"A ref names the page as it was read; read again after an effect or a page change.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"screenshot\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"screenshot\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires an owning Keeper and explicit tabId; captures the viewport, not the whole document.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"native_workflow\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"workflow\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\",\"Known native Page calls run serially with SDK waits and one final snapshot. expectedUrl checks the starting page; navigation can change it afterward. No cumulative command window; SDK defaults or explicit per-step timeoutMs own waits. Failures retain completed steps; never replay the sequence.\"]},{\"operation\":\"click_snapshot_target\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.\",\"The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.\",\"The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"fill_snapshot_target\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"fill\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.\",\"The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.\",\"The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"hover_snapshot_target\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"hover\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.\",\"The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.\",\"The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"double_click_snapshot_target\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"double_click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.\",\"The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.\",\"The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"click\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Selector uses Ego SDK locators and native click, including iframe/shadow traversal and auto-scrolling. Scene references retain MASC identity and coordinate guards.\",\"The URL read before SDK entry is reported; it is not an atomic navigation guard.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"double_click\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"double_click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Selector uses native Ego double click and SDK actionability. Scene references retain MASC identity and coordinate guards; observe the application result.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"right_click\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click_at\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use the current documentId and viewport geometry; stale URL/document/viewport is refused.\",\"Pass button \\\"secondary\\\" (right) or \\\"middle\\\". Only click_at takes a button; selector and node targets do not.\",\"ego's native mouse input at the observed point; a context menu or application behavior must be observed afterward.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"middle_click\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click_at\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use the current documentId and viewport geometry; stale URL/document/viewport is refused.\",\"Pass button \\\"secondary\\\" (right) or \\\"middle\\\". Only click_at takes a button; selector and node targets do not.\",\"ego's native mouse input at the observed point; a context menu or application behavior must be observed afterward.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"pointer_down\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"pointer_up\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"hover\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"hover\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Selector uses native Ego hover and auto-scrolling. Scene references retain MASC identity and coordinate guards.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"pointer_drag\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"drag_to\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use one freshly observed selector or documentId/nodeId; the target must be visible and unobstructed.\",\"Use the current documentId and viewport geometry; stale URL/document/viewport is refused.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\",\"Uses ego's native mouse API with observed waypoints; durationMs must be zero. Input receipt does not establish application drop acceptance.\"]},{\"operation\":\"html5_drop\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"scroll_page\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"scroll\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Scrolls the page; use scroll_at for a nested pane.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"scroll_at\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"scroll_at\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use the current documentId and viewport geometry; stale URL/document/viewport is refused.\",\"Scrolls the pane at the observed viewport point.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"fill\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"fill\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Selector uses native Ego fill, locator resolution and auto-scrolling. Scene references retain the MASC DOM adapter. Fill does not press Enter or submit.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"type_text\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"type_text\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires current documentId and expectedUrl; stale document/URL is refused.\",\"Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused, use press_key for Tab/Enter.\",\"ego types with its native keyboard input.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"press_key\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"press_key\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires current documentId and expectedUrl; stale document/URL is refused.\",\"Targets current enabled focus (or body); accepts named keys or one printable ASCII character with Control/Meta/Alt/Shift modifiers. Type other text with type_text.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"key_chord\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"press_key\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires current documentId and expectedUrl; stale document/URL is refused.\",\"Targets current enabled focus (or body); accepts named keys or one printable ASCII character with Control/Meta/Alt/Shift modifiers. Type other text with type_text.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"select_option\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"select_option\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Pass value or distinct values ([] clears). Ego receives exact {value} objects and returns its native selected values. Disabled options are programmatically selectable. Native method failures are uncertain and are never replayed.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"read_frames\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"snapshot\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId and no framePath: the viewport snapshot holds each iframe's content, a cross-origin one included, with refs; snapshotScope subtree with root set to the iframe's ref reads that frame alone.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"frame_interaction\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"click and fill with target and no framePath: a ref from the frame's snapshot acts inside that frame, and a role or text target is found inside frames, a cross-origin one included, when the top document has none. expectedUrl is the top page's URL.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"read_dialog\",\"status\":\"conditional\",\"tool\":\"masc_browser_tabs\",\"constraints\":[\"Each list_tabs row of a page blocked on a dialog carries dialog: type (alert, confirm, prompt or beforeunload), message and, for a prompt, defaultValue, as ego reads the page now.\",\"An input that opens a dialog answers with it in the receipt; while it is open, reads, moves and input on that page are refused before any effect.\",\"The message is whatever the page wrote, and a page can write anything.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"accept_dialog\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"accept_dialog\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Optional text applies only to a prompt. The receipt names the dialog that was answered; with none open it is refused before any effect.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"dismiss_dialog\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"dismiss_dialog\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"The receipt names the dialog that was dismissed; with none open it is refused before any effect.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"hand_off\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"hand_off\",\"constraints\":[\"Requires the exact observed clientId. Hands the whole ego task space, tabs the operator opened there included, to the operator for a step only a person can take, such as a sign-in or a captcha; tell them what to do.\",\"While the operator holds the space, every step on it is refused before any effect, until take_over.\"]},{\"operation\":\"take_over\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"take_over\",\"constraints\":[\"Requires the exact observed clientId. Only after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them.\",\"Refused before any effect when the agent already holds the space. The receipt carries the tab that was active, unless it is a tab the operator opened; list the tabs before the next step.\"]},{\"operation\":\"upload_file\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"upload\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires an owning Keeper, an explicit ego browser, a native Ego file-input locator or snapshot ref and sandbox-authorized file paths; 16 MiB per file.\",\"The receipt's chosen lists staged files handed to the SDK, not observed input.files; the page reads them later, so this connection keeps the copies until its space ends.\",\"For a page that makes its file input only on a click, give opener instead of selector: one native Ego control locator. The SDK owns the chooser wait; the click is the effect, ego hands its file chooser the copies, and the receipt's chosen lists them.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"list_downloads\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"downloads\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId and an explicit ego browser. Lists the downloads the page started from the first step this connection took on it, opening it included, as pending, completed or interrupted. watchingSince says from when: a stopped command restarts ego's process, and with it the list.\",\"A completed file is saved in the worker's own folder and returned as an artifact. ego's browser touches the operator's download folder while a download runs and leaves nothing there.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"page_zoom\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"resize_viewport\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"touch\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"read_clipboard\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"write_clipboard\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"read_network\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"intercept_network\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"read_console\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"read_storage\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"write_storage\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"emulate_environment\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"sentence_action\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"}]},\"requiredActions\":[],\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"existing_login\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabs\":[{\"id\":1,\"index\":0,\"url\":\"http://127.0.0.1:58749/\",\"title\":\"SDK chooser lifecycle\",\"active\":true}]}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 27,
+      "tool_use_id": "call_3ef2b9aa111c44b0a9d5ba50",
+      "tool_name": "keeper_tool_search",
+      "finished_at": 1792856092.361229,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 25,
+      "started_at": 1792856092.352861,
+      "elapsed_seconds": 0.00836801528930664,
+      "result_bytes": 302,
+      "result_sha256": "c59027907ef6ced1d613406b4d51f04f06267f8419e0f0fac453a613d5f8a99f"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 31,
+      "tool_use_id": "call_cd63d0f193bf42a19dfac954",
+      "tool_name": "keeper_skill",
+      "finished_at": 1792856092.376136,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 29,
+      "started_at": 1792856092.366384,
+      "elapsed_seconds": 0.009752035140991211,
+      "result_bytes": 15602,
+      "result_sha256": "7579632879411131afd30c0469fc152dc111992c5b1a16cc59505e3978a89673"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 43,
+      "tool_use_id": "call_c96520e48b78431a9409768e",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792856113.271754,
+      "tool_error": true,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 39,
+      "started_at": 1792856113.268121,
+      "elapsed_seconds": 0.0036330223083496094,
+      "result_bytes": 635,
+      "result_sha256": "7f45509b6563db8859de5751ac5f862cc949d0eae0e6ec835e76089debc40978",
+      "input": {
+        "lane": "live",
+        "mode": "snapshot",
+        "tabId": 1
+      },
+      "result": "{\"message\":\"Invalid browser arguments: This tab or document belongs to a browser. Repeat its observed lane and clientId.. Correct the arguments using the tool schema and exact observed identities; no browser command was dispatched.\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"policy_rejection\",\"next_move\":\"Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.\",\"data\":{\"kind\":\"invalid_input\",\"detail\":\"This tab or document belongs to a browser. Repeat its observed lane and clientId.\"}}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 53,
+      "tool_use_id": "call_0180d206c8fd45448fbbe706",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792856119.843146,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 51,
+      "started_at": 1792856119.818053,
+      "elapsed_seconds": 0.02509307861328125,
+      "result_bytes": 679,
+      "result_sha256": "16a9e50290e12d190bb39124981b6a5d81725390bf58fffa75a9faf716b95ef0",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "mode": "snapshot",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:58749/\",\"title\":\"SDK chooser lifecycle\",\"scope\":\"viewport\",\"snapshot\":\"[p1 \\\"SDK chooser lifecycle\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(25): 1 managed, 0 untracked — p1* \\\"SDK chooser lifecycle\\\"]\\nroot\\n  container\\n    text \\\"Attach fixture\\\"\\n    textbox [ref=5]\\n      button [ref=7]\\n        text \\\"파일 선택\\\"\\n      text \\\"note.txt\\\"\\n  paragraph\\n    text \\\"note.txt\\\"\\n\",\"truncated\":false,\"chars\":285}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 63,
+      "tool_use_id": "call_2b457948001e48dca50c5959",
+      "tool_name": "BrowserGoto",
+      "finished_at": 1792856131.481041,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 61,
+      "started_at": 1792856131.387604,
+      "elapsed_seconds": 0.09343695640563965,
+      "result_bytes": 325,
+      "result_sha256": "d7585c38449ed83b6bb3d3141db1618af8444215dbfed1cfe8a602b407fb8f5e",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "tabId": 1,
+        "url": "http://127.0.0.1:9449/"
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"goto\",\"url\":\"http://127.0.0.1:9449/\",\"title\":\"Ego native 장시간 처리 검증\"}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 72,
+      "tool_use_id": "call_1e62fd9f72cf424faada5514",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792856136.870095,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 70,
+      "started_at": 1792856136.848321,
+      "elapsed_seconds": 0.0217740535736084,
+      "result_bytes": 1304,
+      "result_sha256": "689e308c70cbe6d0768cc0abf63726d6675004d992e208ee42e02b400fb43802",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "mode": "snapshot",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:9449/\",\"title\":\"Ego native 장시간 처리 검증\",\"scope\":\"viewport\",\"snapshot\":\"[p1 \\\"Ego native 장시간 처리 검증\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(25): 1 managed, 0 untracked — p1* \\\"Ego native 장시간 처리 검증\\\"]\\nroot\\n  heading\\n    text \\\"배송 신청\\\"\\n  paragraph\\n    text \\\"이 검증 앱은 접수 뒤 서버에서 130초간 처리합니다. 완료 결과가 화면에 나타날 때까지 기다려 주세요.\\\"\\n  form\\n    container\\n      text \\\"신청인 이름\\\"\\n      textbox [ref=8, loc=css:input[name=\\\"name\\\"]]\\n    container\\n      text \\\"수령 방법\\\"\\n      combobox [ref=9, loc=css:select[name=\\\"delivery\\\"]]\\n        text \\\"선택하세요\\\"\\n    container\\n      text \\\"알림 수단 (복수 선택 가능)\\\"\\n      listbox [ref=10, loc=css:select[name=\\\"notifications\\\"]]\\n        text \\\"이메일\\\"\\n        text \\\"문자 메시지\\\"\\n        text \\\"전화\\\"\\n    button [ref=11]\\n      text \\\"배송 신청하기\\\"\\n  status\\n    text \\\"접수 대기\\\"\\n\",\"truncated\":false,\"chars\":670}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 82,
+      "tool_use_id": "call_74c0afbe42394b6ebb9dbed9",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792856147.246506,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 80,
+      "started_at": 1792856147.228889,
+      "elapsed_seconds": 0.017616987228393555,
+      "result_bytes": 1559,
+      "result_sha256": "cdeaeccdeeb6aa260248baa6019c6e760c174e0ea5be221542d4441e0a598cd5",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "mode": "elements",
+        "selector": "select",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:9449/\",\"title\":\"Ego native 장시간 처리 검증\",\"selector\":\"select\",\"selectorMatches\":2,\"total\":2,\"truncated\":false,\"elements\":[{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > select:nth-of-type(1)\",\"tag\":\"select\",\"role\":null,\"type\":null,\"name\":\"수령 방법 \\n선택하세요\\n직접 수령\\n택배 배송\",\"text\":\"선택하세요\\n직접 수령\\n택배 배송\",\"href\":null,\"disabled\":false,\"value\":\"\",\"multiple\":false,\"options\":[{\"value\":\"\",\"label\":\"선택하세요\",\"selected\":true,\"disabled\":false},{\"value\":\"pickup\",\"label\":\"직접 수령\",\"selected\":false,\"disabled\":false},{\"value\":\"shipping\",\"label\":\"택배 배송\",\"selected\":false,\"disabled\":false}]},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > select:nth-of-type(1)\",\"tag\":\"select\",\"role\":null,\"type\":null,\"name\":\"알림 수단 (복수 선택 가능)\\n\\n이메일\\n문자 메시지\\n전화\",\"text\":\"이메일\\n문자 메시지\\n전화\",\"href\":null,\"disabled\":false,\"value\":\"\",\"multiple\":true,\"options\":[{\"value\":\"email\",\"label\":\"이메일\",\"selected\":false,\"disabled\":false},{\"value\":\"sms\",\"label\":\"문자 메시지\",\"selected\":false,\"disabled\":false},{\"value\":\"phone\",\"label\":\"전화\",\"selected\":false,\"disabled\":false}]}]}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 92,
+      "tool_use_id": "call_39a37cced39f46fd8941dc0d",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792856183.698269,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 90,
+      "started_at": 1792856183.671737,
+      "elapsed_seconds": 0.02653193473815918,
+      "result_bytes": 4747,
+      "result_sha256": "b6e9b73fee8e893a95a62a0c39e933bb48c8bad0520de86d0cac75d936c068d8",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "mode": "elements",
+        "selector": "body *",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:9449/\",\"title\":\"Ego native 장시간 처리 검증\",\"selector\":\"body *\",\"selectorMatches\":20,\"total\":16,\"truncated\":false,\"elements\":[{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > h1:nth-of-type(1)\",\"tag\":\"h1\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"배송 신청\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > p:nth-of-type(1)\",\"tag\":\"p\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"이 검증 앱은 접수 뒤 서버에서 130초간 처리합니다. 완료 결과가 화면에 나타날 때까지 기다려 주세요.\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1)\",\"tag\":\"form\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"신청인 이름 \\n수령 방법 \\n선택하세요\\n직접 수령\\n택배 배송\\n알림 수단 (복수 선택 가능)\\n\\n이메일\\n문자 메시지\\n전화\\n배송 신청하기\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1)\",\"tag\":\"label\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"신청인 이름 \",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)\",\"tag\":\"input\",\"role\":null,\"type\":\"text\",\"name\":\"신청인 이름 \",\"text\":\"\",\"href\":null,\"disabled\":false,\"readOnly\":false,\"value\":\"\"},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2)\",\"tag\":\"label\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"수령 방법 \\n선택하세요\\n직접 수령\\n택배 배송\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > select:nth-of-type(1)\",\"tag\":\"select\",\"role\":null,\"type\":null,\"name\":\"수령 방법 \\n선택하세요\\n직접 수령\\n택배 배송\",\"text\":\"선택하세요\\n직접 수령\\n택배 배송\",\"href\":null,\"disabled\":false,\"value\":\"\",\"multiple\":false,\"options\":[{\"value\":\"\",\"label\":\"선택하세요\",\"selected\":true,\"disabled\":false},{\"value\":\"pickup\",\"label\":\"직접 수령\",\"selected\":false,\"disabled\":false},{\"value\":\"shipping\",\"label\":\"택배 배송\",\"selected\":false,\"disabled\":false}]},{\"selector\":\"#address\",\"tag\":\"div\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3)\",\"tag\":\"label\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"알림 수단 (복수 선택 가능)\\n\\n이메일\\n문자 메시지\\n전화\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > br:nth-of-type(1)\",\"tag\":\"br\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > select:nth-of-type(1)\",\"tag\":\"select\",\"role\":null,\"type\":null,\"name\":\"알림 수단 (복수 선택 가능)\\n\\n이메일\\n문자 메시지\\n전화\",\"text\":\"이메일\\n문자 메시지\\n전화\",\"href\":null,\"disabled\":false,\"value\":\"\",\"multiple\":true,\"options\":[{\"value\":\"email\",\"label\":\"이메일\",\"selected\":false,\"disabled\":false},{\"value\":\"sms\",\"label\":\"문자 메시지\",\"selected\":false,\"disabled\":false},{\"value\":\"phone\",\"label\":\"전화\",\"selected\":false,\"disabled\":false}]},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > select:nth-of-type(1) > option:nth-of-type(1)\",\"tag\":\"option\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"이메일\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > select:nth-of-type(1) > option:nth-of-type(2)\",\"tag\":\"option\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"문자 메시지\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > select:nth-of-type(1) > option:nth-of-type(3)\",\"tag\":\"option\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"전화\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)\",\"tag\":\"button\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"배송 신청하기\",\"href\":null,\"disabled\":false},{\"selector\":\"#status\",\"tag\":\"div\",\"role\":\"status\",\"type\":null,\"name\":\"\",\"text\":\"접수 대기\",\"href\":null,\"disabled\":false}]}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 102,
+      "tool_use_id": "call_b81488f897d84afdbe576664",
+      "tool_name": "BrowserInteract",
+      "finished_at": 1792856206.385728,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 100,
+      "started_at": 1792856206.223426,
+      "elapsed_seconds": 0.16230177879333496,
+      "result_bytes": 1720,
+      "result_sha256": "f83a35883aa473033ba8c291f3a723f5a2bd55d52d979b743010e66f51fa281f",
+      "input": {
+        "action": "workflow",
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "expectedUrl": "http://127.0.0.1:9449/",
+        "lane": "live",
+        "steps": [
+          {
+            "method": "fill",
+            "selector": "input[name=\"name\"]",
+            "text": "Ego Native 수명 검증"
+          },
+          {
+            "method": "selectOption",
+            "selector": "select[name=\"delivery\"]",
+            "value": "shipping"
+          },
+          {
+            "method": "selectOption",
+            "selector": "select[name=\"notifications\"]",
+            "values": [
+              "email",
+              "sms"
+            ]
+          }
+        ],
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"fill\",\"receipt\":{}},{\"index\":1,\"method\":\"selectOption\",\"receipt\":[\"shipping\"]},{\"index\":2,\"method\":\"selectOption\",\"receipt\":[\"email\",\"sms\"]}],\"effectStarted\":true,\"completedEffect\":true,\"failure\":null,\"urlBefore\":\"http://127.0.0.1:9449/\",\"url\":\"http://127.0.0.1:9449/\",\"title\":\"Ego native 장시간 처리 검증\",\"snapshot\":\"[p1 \\\"Ego native 장시간 처리 검증\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(25): 1 managed, 0 untracked — p1* \\\"Ego native 장시간 처리 검증\\\"]\\nroot\\n  heading\\n    text \\\"배송 신청\\\"\\n  paragraph\\n    text \\\"이 검증 앱은 접수 뒤 서버에서 130초간 처리합니다. 완료 결과가 화면에 나타날 때까지 기다려 주세요.\\\"\\n  form\\n    container\\n      text \\\"신청인 이름\\\"\\n      textbox [ref=8, loc=css:input[name=\\\"name\\\"]]\\n        text \\\"Ego Native 수명 검증\\\"\\n    container\\n      text \\\"수령 방법\\\"\\n      combobox [ref=9, loc=css:select[name=\\\"delivery\\\"]]\\n        text \\\"택배 배송\\\"\\n    container\\n      text \\\"배송 주소\\\"\\n      textbox [ref=12, loc=css:input[name=\\\"address\\\"]]\\n    container\\n      text \\\"알림 수단 (복수 선택 가능)\\\"\\n      listbox [ref=10, loc=css:select[name=\\\"notifications\\\"]]\\n        text \\\"이메일\\\"\\n        text \\\"문자 메시지\\\"\\n        text \\\"전화\\\"\\n    button [ref=11]\\n      text \\\"배송 신청하기\\\"\\n  status\\n    text \\\"접수 대기\\\"\\n\",\"truncated\":false,\"chars\":789}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 112,
+      "tool_use_id": "call_bd7291c64efd429485d9bbf1",
+      "tool_name": "BrowserInteract",
+      "finished_at": 1792856245.496826,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 110,
+      "started_at": 1792856244.259939,
+      "elapsed_seconds": 1.236886978149414,
+      "result_bytes": 1123,
+      "result_sha256": "5b44d4ce34ee64185dfe4603a11cad7f658663d2a8d26934bafa7dd2302c9e7c",
+      "input": {
+        "action": "workflow",
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "expectedUrl": "http://127.0.0.1:9449/",
+        "lane": "live",
+        "snapshotScope": "full_page",
+        "steps": [
+          {
+            "method": "fill",
+            "selector": "input[name=\"address\"]",
+            "text": "서울시 테스트로 130"
+          },
+          {
+            "method": "click",
+            "selector": "form\r button"
+          },
+          {
+            "method": "waitForSelector",
+            "selector": "#address",
+            "state": "hidden",
+            "timeoutMs": 200000
+          }
+        ],
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"fill\",\"receipt\":{}},{\"index\":1,\"method\":\"click\",\"receipt\":{}},{\"index\":2,\"method\":\"waitForSelector\",\"receipt\":null}],\"effectStarted\":true,\"completedEffect\":true,\"failure\":null,\"urlBefore\":\"http://127.0.0.1:9449/\",\"url\":\"http://127.0.0.1:9449/\",\"title\":\"Ego native 장시간 처리 검증\",\"snapshot\":\"[p1 \\\"Ego native 장시간 처리 검증\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(25): 1 managed, 0 untracked — p1* \\\"Ego native 장시간 처리 검증\\\"]\\nroot\\n  heading\\n    text \\\"배송 신청\\\"\\n  paragraph\\n    text \\\"이 검증 앱은 접수 뒤 서버에서 130초간 처리합니다. 완료 결과가 화면에 나타날 때까지 기다려 주세요.\\\"\\n  status\\n    text \\\"접수되었습니다. 서버 처리 중입니다. 완료 결과가 나타날 때까지 기다려 주세요.\\\"\\n\",\"truncated\":false,\"chars\":303}"
+    },
+    {
+      "worker_run_id": "wr-1a16e8c2f39-2c09-0000",
+      "file": "turn-1792856043309-2c09-000000.jsonl",
+      "line": 122,
+      "tool_use_id": "call_8179b027da414d30a5bbf8d2",
+      "tool_name": "BrowserInteract",
+      "finished_at": 1792856376.002354,
+      "tool_error": false,
+      "start_file": "turn-1792856043309-2c09-000000.jsonl",
+      "start_line": 120,
+      "started_at": 1792856294.076854,
+      "elapsed_seconds": 81.92549991607666,
+      "result_bytes": 1041,
+      "result_sha256": "12954a71869c388b48767e733ad252bdd149afc975d45a797e33619e71a90028",
+      "input": {
+        "action": "workflow",
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "expectedUrl": "http://127.0.0.1:9449/",
+        "lane": "live",
+        "snapshotScope": "full_page",
+        "steps": [
+          {
+            "method": "waitForLoadState",
+            "state": "networkidle",
+            "timeoutMs": 200000
+          }
+        ],
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"waitForLoadState\",\"receipt\":null}],\"effectStarted\":false,\"completedEffect\":false,\"failure\":null,\"urlBefore\":\"http://127.0.0.1:9449/\",\"url\":\"http://127.0.0.1:9449/\",\"title\":\"배송 신청 완료\",\"snapshot\":\"[p1 \\\"배송 신청 완료\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(25): 1 managed, 0 untracked — p1* \\\"배송 신청 완료\\\"]\\nroot\\n  heading\\n    text \\\"배송 신청\\\"\\n  paragraph\\n    text \\\"이 검증 앱은 접수 뒤 서버에서 130초간 처리합니다. 완료 결과가 화면에 나타날 때까지 기다려 주세요.\\\"\\n  status\\n    text \\\"처리가 완료되었습니다.\\\"\\n  container\\n    heading\\n      text \\\"배송 신청 완료\\\"\\n    paragraph\\n      text \\\"신청 번호 EGO-001\\\"\\n\",\"truncated\":false,\"chars\":334}"
+    },
+    {
+      "worker_run_id": "wr-1a16e93be7f-2c09-0000",
+      "file": "turn-1792856538746-2c09-000001.jsonl",
+      "line": 11,
+      "tool_use_id": "call_b213a36de6fb49faab96aeac",
+      "tool_name": "BrowserGoto",
+      "finished_at": 1792856548.155576,
+      "tool_error": false,
+      "start_file": "turn-1792856538746-2c09-000001.jsonl",
+      "start_line": 9,
+      "started_at": 1792856548.028567,
+      "elapsed_seconds": 0.12700891494750977,
+      "result_bytes": 309,
+      "result_sha256": "814c5e09b1314b6f61ff07f6c1d87d80937ec5905c803872c7e658d74b3b16d0",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "tabId": 1,
+        "url": "http://127.0.0.1:9451/"
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"goto\",\"url\":\"http://127.0.0.1:9451/\",\"title\":\"Native wait marker\"}"
+    },
+    {
+      "worker_run_id": "wr-1a16e93be7f-2c09-0000",
+      "file": "turn-1792856538746-2c09-000001.jsonl",
+      "line": 21,
+      "tool_use_id": "call_ddb7591f3351476fa0e69b1c",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792856553.985162,
+      "tool_error": false,
+      "start_file": "turn-1792856538746-2c09-000001.jsonl",
+      "start_line": 19,
+      "started_at": 1792856553.942542,
+      "elapsed_seconds": 0.042619943618774414,
+      "result_bytes": 794,
+      "result_sha256": "31ded4c8302f0ae250477bd884d5324e67f334062548d812a80967048b88b5d8",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "mode": "snapshot",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:9451/\",\"title\":\"Native wait marker\",\"scope\":\"viewport\",\"snapshot\":\"[p1 \\\"Native wait marker\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(25): 1 managed, 0 untracked — p1* \\\"Native wait marker\\\"]\\nroot\\n  heading\\n    text \\\"SDK 대기 수명 검증\\\"\\n  paragraph\\n    text \\\"시작 버튼을 누르면 대기 표식은 130초 뒤 사라지고 완료 안내가 나타납니다. 시작은 한 번만 하세요.\\\"\\n  button [ref=13]\\n    text \\\"대기 검증 시작\\\"\\n  status\\n    text \\\"대기 표식\\\"\\n\",\"truncated\":false,\"chars\":304}"
+    },
+    {
+      "worker_run_id": "wr-1a16e93be7f-2c09-0000",
+      "file": "turn-1792856538746-2c09-000001.jsonl",
+      "line": 31,
+      "tool_use_id": "call_0070635b26ee4fb6be24ab20",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792856562.022678,
+      "tool_error": false,
+      "start_file": "turn-1792856538746-2c09-000001.jsonl",
+      "start_line": 29,
+      "started_at": 1792856562.002919,
+      "elapsed_seconds": 0.019758939743041992,
+      "result_bytes": 512,
+      "result_sha256": "0f02cd5a4ac4058d2289f6b34025d2f377ec625f8990b5fc37e3c30a33a89d11",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "mode": "elements",
+        "selector": "status, button",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:9451/\",\"title\":\"Native wait marker\",\"selector\":\"status, button\",\"selectorMatches\":1,\"total\":1,\"truncated\":false,\"elements\":[{\"selector\":\"#start\",\"tag\":\"button\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"대기 검증 시작\",\"href\":null,\"disabled\":false}]}"
+    },
+    {
+      "worker_run_id": "wr-1a16e93be7f-2c09-0000",
+      "file": "turn-1792856538746-2c09-000001.jsonl",
+      "line": 41,
+      "tool_use_id": "call_0372c23668234c49be30fdb6",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792856568.980293,
+      "tool_error": false,
+      "start_file": "turn-1792856538746-2c09-000001.jsonl",
+      "start_line": 39,
+      "started_at": 1792856568.963584,
+      "elapsed_seconds": 0.016709089279174805,
+      "result_bytes": 1107,
+      "result_sha256": "8a76e86093a2ce637c7d16a285b7e8a6f120b2d9d27b76e4829e1e47284d24af",
+      "input": {
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "mode": "elements",
+        "selector": "body *",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:9451/\",\"title\":\"Native wait marker\",\"selector\":\"body *\",\"selectorMatches\":6,\"total\":4,\"truncated\":false,\"elements\":[{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > h1:nth-of-type(1)\",\"tag\":\"h1\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"SDK 대기 수명 검증\",\"href\":null,\"disabled\":false},{\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > p:nth-of-type(1)\",\"tag\":\"p\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"시작 버튼을 누르면 대기 표식은 130초 뒤 사라지고 완료 안내가 나타납니다. 시작은 한 번만 하세요.\",\"href\":null,\"disabled\":false},{\"selector\":\"#start\",\"tag\":\"button\",\"role\":null,\"type\":null,\"name\":\"\",\"text\":\"대기 검증 시작\",\"href\":null,\"disabled\":false},{\"selector\":\"#pending\",\"tag\":\"div\",\"role\":\"status\",\"type\":null,\"name\":\"\",\"text\":\"대기 표식\",\"href\":null,\"disabled\":false}]}"
+    },
+    {
+      "worker_run_id": "wr-1a16e93be7f-2c09-0000",
+      "file": "turn-1792856538746-2c09-000001.jsonl",
+      "line": 53,
+      "tool_use_id": "call_ca8c1db0a3d047b6a7dc8238",
+      "tool_name": "BrowserInteract",
+      "finished_at": 1792856584.473296,
+      "tool_error": true,
+      "start_file": "turn-1792856538746-2c09-000001.jsonl",
+      "start_line": 49,
+      "started_at": 1792856584.468187,
+      "elapsed_seconds": 0.005108833312988281,
+      "result_bytes": 531,
+      "result_sha256": "6d0551298a81496d43db9f8d930e7bda95f043b260ff3bd304cb46d4a92ea70b",
+      "input": {
+        "action": "workflow",
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "lane": "live",
+        "maxChars": 3000,
+        "snapshotScope": "full_page",
+        "steps": [
+          {
+            "method": "click",
+            "selector": "#start"
+          },
+          {
+            "method": "waitForSelector",
+            "selector": "#pending",
+            "state": "hidden",
+            "timeoutMs": 200000
+          }
+        ],
+        "tabId": 1
+      },
+      "result": "{\"message\":\"Invalid browser arguments: workflow requires expectedUrl. Correct the arguments using the tool schema and exact observed identities; no browser command was dispatched.\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"policy_rejection\",\"next_move\":\"Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.\",\"data\":{\"kind\":\"invalid_input\",\"detail\":\"workflow requires expectedUrl\"}}"
+    },
+    {
+      "worker_run_id": "wr-1a16e93be7f-2c09-0000",
+      "file": "turn-1792856538746-2c09-000001.jsonl",
+      "line": 63,
+      "tool_use_id": "call_4ba51f370af44841bc5a6274",
+      "tool_name": "BrowserInteract",
+      "finished_at": 1792856721.958957,
+      "tool_error": false,
+      "start_file": "turn-1792856538746-2c09-000001.jsonl",
+      "start_line": 61,
+      "started_at": 1792856591.814054,
+      "elapsed_seconds": 130.14490294456482,
+      "result_bytes": 1031,
+      "result_sha256": "28d797c1c396b2c8e6c8204f1be7930bb2579c1ef0ff9bac83eb240f61ad5738",
+      "input": {
+        "action": "workflow",
+        "clientId": "cf719b5e-c425-4f99-94fd-5ab45ef52bf6",
+        "expectedUrl": "http://127.0.0.1:9451/",
+        "lane": "live",
+        "maxChars": 3000,
+        "snapshotScope": "full_page",
+        "steps": [
+          {
+            "method": "click",
+            "selector": "#start"
+          },
+          {
+            "method": "waitForSelector",
+            "selector": "#pending",
+            "state": "hidden",
+            "timeoutMs": 200000
+          }
+        ],
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"reason\":\"explicit_browser\"},\"clientId\":\"cf719b5e-c425-4f99-94fd-5ab45ef52bf6\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"click\",\"receipt\":{}},{\"index\":1,\"method\":\"waitForSelector\",\"receipt\":null}],\"effectStarted\":true,\"completedEffect\":true,\"failure\":null,\"urlBefore\":\"http://127.0.0.1:9451/\",\"url\":\"http://127.0.0.1:9451/\",\"title\":\"SDK 대기 검증 완료\",\"snapshot\":\"[p1 \\\"SDK 대기 검증 완료\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(25): 1 managed, 0 untracked — p1* \\\"SDK 대기 검증 완료\\\"]\\nroot\\n  heading\\n    text \\\"SDK 대기 수명 검증\\\"\\n  paragraph\\n    text \\\"시작 버튼을 누르면 대기 표식은 130초 뒤 사라지고 완료 안내가 나타납니다. 시작은 한 번만 하세요.\\\"\\n  button [ref=13]\\n    text \\\"대기 검증 시작\\\"\\n  heading\\n    text \\\"SDK 대기 검증 완료\\\"\\n\",\"truncated\":false,\"chars\":300}"
+    }
+  ],
+  "unfinished": []
+}

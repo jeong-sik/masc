@@ -1,0 +1,95 @@
++ ocamlc -version
+5.5.1
++ ocamlc -where
+/Users/dancer/.opam/5.5.1/lib/ocaml
++ ocamlfind query -format %p %v %d ocaml-msx.msx ocaml-dos.dosmachine ocaml-dos.core-identity
+ocaml-msx.msx 052f50b /Users/dancer/.opam/5.5.1/lib/ocaml-msx/msx
+ocaml-dos.dosmachine e570d41 /Users/dancer/.opam/5.5.1/lib/ocaml-dos/dosmachine
+ocaml-dos.core-identity e570d41 /Users/dancer/.opam/5.5.1/lib/ocaml-dos/core-identity
++ ocamlfind ocamldep -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -sort crypto_rng.ml crypto_rng.mli dos_lane.ml dos_lane.mli lane_activity.ml lane_activity.mli machine_checkpoint.mli machine_configuration.ml machine_configuration.mli machine_live_publication.ml machine_live_publication.mli msx_lane.ml msx_lane.mli random_id.ml random_id.mli runtime_toml_namespace.ml runtime_toml_namespace.mli screen_change.ml screen_change.mli test_dos_lane_activity.ml test_msx_lane_activity.ml time_compat.ml time_compat.mli
+crypto_rng.mli lane_activity.mli machine_checkpoint.mli machine_configuration.mli machine_live_publication.mli random_id.mli runtime_toml_namespace.mli screen_change.mli time_compat.mli time_compat.ml screen_change.ml runtime_toml_namespace.ml msx_lane.mli machine_live_publication.ml machine_configuration.ml lane_activity.ml dos_lane.mli crypto_rng.ml random_id.ml msx_lane.ml dos_lane.ml test_dos_lane_activity.ml test_msx_lane_activity.ml 
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c crypto_rng.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c lane_activity.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c machine_checkpoint.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c machine_configuration.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c machine_live_publication.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c random_id.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c runtime_toml_namespace.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c screen_change.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c time_compat.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c time_compat.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c screen_change.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c runtime_toml_namespace.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c msx_lane.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c machine_live_publication.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c machine_configuration.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c lane_activity.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c dos_lane.mli
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c crypto_rng.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c random_id.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c msx_lane.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c dos_lane.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c test_dos_lane_activity.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -w +32+69 -warn-error +a -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -c test_msx_lane_activity.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ocamlfind ocamlc -package alcotest,unix,threads,yojson,base64,digestif.c,otoml,uuidm,mirage-crypto-rng.unix,mcp_protocol.eio,ppx_enumerate,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson,ocaml-msx.msx,ocaml-dos.dosmachine,ocaml-dos.cpu86core,ocaml-dos.core-identity -linkpkg time_compat.cmo screen_change.cmo runtime_toml_namespace.cmo machine_live_publication.cmo machine_configuration.cmo lane_activity.cmo crypto_rng.cmo random_id.cmo msx_lane.cmo test_msx_lane_activity.cmo -o msx-test.exe
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
++ ./msx-test.exe
+Testing `MSX activity with retained state'.
+This run has ID `TQPK4UYD'.
+
+  [OK]          activity          0   configuration and reserved namespace.
+  [OK]          activity          1   off refuses mutation and preserves mach...
+  [OK]          activity          2   unobserved refuses execution but allows...
+> [FAIL]        activity          3   accepted input finishes after off.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        activity          3   accepted input finishes after off.       │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT single admission
+ASSERT both held and released frames ran
+FAIL both held and released frames ran
+
+   Expected: `47'
+   Received: `46'
+
+Called from unknown location
+Called from unknown location
+Called from unknown location
+Called from unknown location
+
+Logs saved to `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-machine-activity-pbndd6s1/_build/_tests/MSX activity with retained state/activity.003.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-machine-activity-pbndd6s1/_build/_tests/MSX activity with retained state'.
+1 failure! in 1.000s. 4 tests run.
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc-machine-lane-activity-20261005/docs/evidence/2026-10-05-machine-lane-activity/check-owners.py", line 28, in <module>
+    run(["./msx-test.exe"]);passed=True
+    ~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc-machine-lane-activity-20261005/docs/evidence/2026-10-05-machine-lane-activity/check-owners.py", line 15, in run
+    if p.returncode:raise subprocess.CalledProcessError(p.returncode,args)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+subprocess.CalledProcessError: Command '['./msx-test.exe']' returned non-zero exit status 1.

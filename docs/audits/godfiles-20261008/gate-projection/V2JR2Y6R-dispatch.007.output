@@ -1,0 +1,3 @@
+ASSERT deferred decision
+ASSERT on_approve states host replay delivery
+ASSERT on_approve tells the model not to resubmit

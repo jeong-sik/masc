@@ -1,0 +1,8 @@
+{
+  "failed_readonly_attempts": [],
+  "nonqualifying_same_target_reads": [],
+  "successful_complete_exact_read_execution_ids": [
+    "execution-node-cd98b9728c3f6bba6f4c070d7484c316"
+  ],
+  "scope": "All rows also retained in the complete ledger. Failed/partial inspections are not required file effects. No row is dropped or counted as a successful complete Read."
+}

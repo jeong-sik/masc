@@ -1,0 +1,20 @@
+name = "pc-tools"
+light = false
+
+[palette]
+base00 = "0e2424"
+base01 = "163838"
+base02 = "225050"
+base03 = "4a7070"
+base04 = "a0bcbc"
+base05 = "e6e6e6"
+base06 = "f0f4f4"
+base07 = "ffffff"
+base08 = "e05d59"
+base09 = "f0ad4e"
+base0a = "e5b53b"
+base0b = "5cb85c"
+base0c = "5bc0de"
+base0d = "4892d4"
+base0e = "ba68c8"
+base0f = "c49a45"

@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /private/tmp/masc-addon-inventory-application-20261021/dashboard
+
+
+ Test Files  6 passed (6)
+      Tests  62 passed (62)
+   Start at  20:25:06
+   Duration  8.07s (import 36%, transform 24%, environment 16%, setup 14%, tests 9%)
+
+     Import  199 modules were evaluated 379 times · 2.54s total, 36% of tracked time
+             ~1.20s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation

@@ -1,0 +1,167 @@
+{
+  "captured_at": "2026-09-07T08:23:57.468166+00:00",
+  "source": "system_log_2026-09-07.jsonl",
+  "exact_repetition_rows": [
+    {
+      "timestamp": "2026-09-07T07:53:46Z",
+      "seq": 27504759,
+      "tool": "Execute",
+      "count": 953
+    },
+    {
+      "timestamp": "2026-09-07T07:54:33Z",
+      "seq": 27505020,
+      "tool": "Execute",
+      "count": 7
+    },
+    {
+      "timestamp": "2026-09-07T07:55:15Z",
+      "seq": 27505324,
+      "tool": "Execute",
+      "count": 954
+    },
+    {
+      "timestamp": "2026-09-07T07:55:48Z",
+      "seq": 27505606,
+      "tool": "Execute",
+      "count": 955
+    },
+    {
+      "timestamp": "2026-09-07T07:57:56Z",
+      "seq": 27556290,
+      "tool": "Execute",
+      "count": 956
+    },
+    {
+      "timestamp": "2026-09-07T07:59:54Z",
+      "seq": 27556831,
+      "tool": "Execute",
+      "count": 957
+    },
+    {
+      "timestamp": "2026-09-07T08:00:54Z",
+      "seq": 27557234,
+      "tool": "Execute",
+      "count": 958
+    },
+    {
+      "timestamp": "2026-09-07T08:03:36Z",
+      "seq": 27557786,
+      "tool": "Execute",
+      "count": 959
+    },
+    {
+      "timestamp": "2026-09-07T08:13:57Z",
+      "seq": 27610554,
+      "tool": "Execute",
+      "count": 3
+    },
+    {
+      "timestamp": "2026-09-07T08:15:02Z",
+      "seq": 27611161,
+      "tool": "Execute",
+      "count": 4
+    },
+    {
+      "timestamp": "2026-09-07T08:19:01Z",
+      "seq": 27613170,
+      "tool": "masc_task_history",
+      "count": 3
+    },
+    {
+      "timestamp": "2026-09-07T08:22:42Z",
+      "seq": 27615175,
+      "tool": "masc_board_post_get",
+      "count": 4
+    },
+    {
+      "timestamp": "2026-09-07T08:22:49Z",
+      "seq": 27615225,
+      "tool": "keeper_tool_search",
+      "count": 3
+    }
+  ],
+  "limit": "counts are detector observations, not independent failed operations",
+  "health_top_level_keys": [
+    "status",
+    "server",
+    "version",
+    "release_version",
+    "build",
+    "health_detail",
+    "protocol",
+    "transport",
+    "http_listener",
+    "paths",
+    "internal_mcp_auth",
+    "otel",
+    "uptime",
+    "sse_clients",
+    "startup",
+    "schedule_runner",
+    "runtime_startup_degradation",
+    "dashboard_surface",
+    "subsystems",
+    "logs",
+    "gc",
+    "scheduler",
+    "feature_flags",
+    "overall_status",
+    "operator_action_required",
+    "operator_action_reasons",
+    "keeper_fibers",
+    "fd_observation",
+    "fd_accountant",
+    "disk_observation",
+    "keeper_fleet_safety",
+    "keeper_identity_drift",
+    "publication_recovery_activation",
+    "keeper_reaction_ledger",
+    "keeper_owner",
+    "keeper_board_event_collection",
+    "keeper_event_queue",
+    "keeper_terminal_effect_policy",
+    "keeper_observability_artifacts",
+    "paused_keepers",
+    "keeper_config_error_count",
+    "keeper_config_errors",
+    "keeper_config_probe_error",
+    "keeper_config_unknown_key_count",
+    "keeper_config_unknown_keys",
+    "keeper_config_schema_status",
+    "keeper_config_schema_blocking",
+    "keeper_config_schema_terminal_reason",
+    "keeper_config_operator_action_required",
+    "lazy_task_boot_guard_fires_total",
+    "full_health_snapshot"
+  ],
+  "overall_status": "warning",
+  "dashboard_surface": {
+    "status": "stale",
+    "reason": null
+  },
+  "build": {
+    "release_version": "0.33.0",
+    "binary_version": "0.33.0",
+    "repo_version": "0.33.0",
+    "commit": "6db68b4bea0c26b62ec8b88772327e5da42ae1d7",
+    "commit_source": "embedded",
+    "binary_commit": "6db68b4bea0c26b62ec8b88772327e5da42ae1d7",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "99b7fc3c8621baa21faa030436344328f1923ff156fa1b7979b635139d5e5446",
+    "binary_commit_unix_ts": 1788768163.0,
+    "binary_commit_age_seconds": 1274,
+    "repo_head_commit": "6db68b4bea",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1788768163.0,
+    "repo_head_commit_age_seconds": 1274,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "runtime_instance_id": "01a07aea-1869-7000-8a29-f54ae100185e",
+    "started_at": "2026-09-07T08:09:17Z",
+    "uptime_seconds": 880
+  },
+  "version": "0.33.0"
+}

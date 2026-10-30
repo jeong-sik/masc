@@ -1,0 +1,322 @@
+(** Prompt_registry — versioned prompt template store
+    with file overrides and runtime resolution.
+
+    Three resolution sources, in priority order:
+    - {b Override}: in-memory key→string set via
+      {!set_override} (validated against [meta_tbl]).
+    - {b File}: markdown file at
+      [<markdown_dir>/<key>.md] (frontmatter stripped via
+      [parse_frontmatter]).
+    - {b Default}: the template registered when the pin
+      ({!set_markdown_dir}, or the dune fallback behind
+      {!get_markdown_dir}) parsed the prompt's markdown
+      frontmatter. There is no in-code default
+      registration API — prompts are added as files.
+
+    Persistence: {!persist_overrides} writes a versioned,
+    contract-bound envelope to [.masc/prompt_overrides.json];
+    {!restore_overrides} reapplies it through the same
+    validation as {!set_override} — including the
+    [{{ident}}] placeholder check, which applies even to
+    prompts with no declared [template_variables] (see
+    [unexpected_template_variables]) — so manually-edited
+    or stale entries are dropped with an error log and a
+    fallback to the file value instead of silently
+    accepted.
+
+    Concurrency: override and prompt-contract mutations first take the
+    dedicated mutation mutex, then use [with_mutex] around
+    {!Prompt_registry_store.t.mutex} for the in-memory commit.  Persistence I/O
+    holds only the mutation mutex, so readers keep observing the previous
+    complete table until commit.  A directory scan ({!set_markdown_dir},
+    {!load_prompts_from_directory}) reads disk before taking either lock
+    and commits under both; the dune fallback commits under the registry
+    mutex only, because override validation reaches it while the mutation
+    mutex is held.  Other file reads
+    ({!resolve_prompt}, {!list_prompts},
+    {!validate_prompt_templates}) snapshot under the lock,
+    release it, then read disk so concurrent readers do
+    not serialize on I/O.
+
+    Internal helpers stay private at this boundary
+    ([parse_frontmatter],
+    [extract_variables], [store],
+    [version_index], [meta_tbl], [prompts_dir],
+    [markdown_dir], [is_valid_prompt_key],
+    [prompt_markdown_path], [read_file_if_exists],
+    [replace_substring_all], [render_template],
+    [build_resolved_from_snapshot], [resolved_of_snapshot],
+    [unexpected_template_variables],
+    [prompt_item_json_of_resolved], [compare_prompt_items],
+    [registrations_of_file], [scan_prompt_directory],
+    [commit_registrations], [pin_dune_sourceroot_markdown_dir],
+    [validated_override], [prompt_snapshot] and [registration] types).
+
+    Prompts are added by dropping a markdown file into the
+    pinned directory. *)
+
+(** {1 Type re-exports} *)
+
+type prompt_meta = Prompt_registry_types.prompt_meta = {
+  description : string;
+  category : string;
+  operator_surface : Prompt_registry_types.operator_surface;
+  authoring_issues : Prompt_registry_types.authoring_issue list;
+  required_file : bool;
+  template_variables : string list;
+}
+
+type prompt_source = Prompt_registry_types.prompt_source =
+  | Override
+  | File
+  | Missing
+(** Where a prompt's effective text came from. Override, then file, then
+    neither: these three are the whole answer, and the word the HTTP
+    surfaces send is {!prompt_source_to_string} of one of them. *)
+
+val prompt_source_to_string : prompt_source -> string
+(** ["override"] / ["file"] / ["missing"], unchanged from what these
+    surfaces have always sent. *)
+
+type prompt_resolution = Prompt_registry_types.prompt_resolution = {
+  effective : string;
+  source : prompt_source;
+  file_value : string option;
+  override_value : string option;
+  file_path : string option;
+  file_exists : bool;
+  has_override : bool;
+}
+
+type persisted_mutation_error =
+  | Validation_error of string
+  | Persistence_error of string
+
+(** {1 Markdown parsing} *)
+
+(** {1 Markdown directory} *)
+
+val set_markdown_dir : string -> unit
+(** Pins the directory the file-based resolution path looks under for
+    [<key>.md] and loads it: every [*.md] with a [description] in its
+    frontmatter registers under its file key, and each [### marker]
+    paragraph under [<key>.<marker>], so a slot key such as
+    [judge.effect] resolves against [judge.md]. The scan reads disk
+    before taking any lock; the pin and its registrations commit in one
+    mutex section. A pin does not unload what an earlier directory
+    registered; {!clear} does. *)
+
+val get_markdown_dir : unit -> string option
+(** Returns the effective markdown dir: the {!set_markdown_dir} pin when
+    one exists, else — only when DUNE_SOURCEROOT is set (dune build/test
+    context, never production) and [<root>/config/prompts] exists — that
+    directory, which the first such call pins and loads exactly as
+    {!set_markdown_dir} would. [None] otherwise. {!clear} unpins, and
+    the next call pins and loads again. Tests that need true prompt
+    absence pin an explicit empty directory instead of relying on the
+    unset state. *)
+
+val load_prompts_from_directory : string -> unit
+(** Re-scans [dir] into the registry without touching the pin: the same
+    registrations {!set_markdown_dir} makes. Files without frontmatter
+    (or without a [description]) are skipped. *)
+
+(** {1 Resolution} *)
+
+val resolve_prompt : string -> prompt_resolution
+(** Reads the markdown file (outside the mutex) then
+    looks up override / default under the lock and
+    returns the full {!prompt_resolution} record.  Used
+    by the dashboard HTTP route to surface every source's
+    contribution side-by-side. *)
+
+val get_prompt : string -> string
+(** Convenience accessor for [(resolve_prompt key).effective].
+    Returns the empty string when [key] is missing from
+    every source. *)
+
+val prompt_source : string -> prompt_source
+(** [(resolve_prompt key).source]. Typed rather than the wire word, so a
+    caller that wants the word asks {!prompt_source_to_string} for it at the
+    boundary where the JSON is built, like the two other sites that send it. *)
+
+(** {1 Rendering} *)
+
+val render_prompt_template :
+  string -> (string * string) list -> (string, string) result
+(** Renders the prompt at [key] with the variable
+    substitutions from the assoc list.  Errors when the
+    prompt is missing (empty after trim) or when the
+    template references an unresolved variable not in the
+    assoc list. *)
+
+val resolve_and_render_prompt_template :
+  string
+  -> (string * string) list
+  -> (prompt_resolution * string, string) result
+(** Resolve the effective template once, then render that exact snapshot.
+    Observation planes use the returned resolution to record which file or
+    override supplied the bytes sent to the model. This avoids reporting a
+    newer override beside a render produced from an older one. *)
+
+val render_resolved_prompt_template
+  :  string -> prompt_resolution -> (string * string) list -> (string, string) result
+(** Render a previously resolved snapshot, for callers that must measure
+    several candidate prompts against the very same template bytes. This is
+    pure: it reads no registry or file and may run in a system thread while
+    runtime mutex guards are enabled. Metadata drift is observed when resolving
+    the prompt, never while replaying a captured template. *)
+
+(** {1 Override lifecycle} *)
+
+val set_override : string -> string -> (unit, string) result
+(** Validates and installs an override.  Rejects invalid
+    keys, empty values, and
+    unexpected template variables (a variable in the
+    template that the registered [meta_tbl] entry does
+    not declare). *)
+
+val clear_prompt_override : string -> unit
+(** Removes the override for [key] (no-op when absent).
+    Falls back to file → default on next resolution. *)
+
+val persist_overrides : string -> (unit, string) result
+(** Writes the current override table to
+    [<base_path>/.masc/prompt_overrides.json] through an atomic replacement.
+    Returns an explicit error when the persistence boundary fails. *)
+
+val set_override_persisted :
+  base_path:string ->
+  string ->
+  string ->
+  (unit, persisted_mutation_error) result
+(** Validate an override the operator is writing now, bind it to the default
+    it replaces at this moment, atomically persist the complete candidate
+    table, then commit it to memory.  A persistence failure leaves the live
+    table unchanged. *)
+
+val restore_persisted_entry :
+  base_path:string ->
+  Prompt_override_persistence.entry ->
+  (unit, persisted_mutation_error) result
+(** The same commit for an entry the operator saved earlier (a preset).  The
+    entry keeps the binding it was written with; it is admitted under the
+    same rule as the boot-time restore, and refused as a validation error
+    only when it does not render under the prompt's current contract. *)
+
+val clear_prompt_override_persisted :
+  base_path:string -> string -> (unit, string) result
+(** Atomically persist the candidate table without [key], then commit it to
+    memory.  A persistence failure leaves the live table unchanged. *)
+
+val override_entries : unit -> Prompt_override_persistence.entry list
+(** The overrides in force. *)
+
+val persisted_entries : unit -> Prompt_override_persistence.entry list
+(** Everything the operator saved, applied or not.
+
+    An override the restore holds back is still theirs, so this is what the
+    file is written from and what a snapshot has to capture: writing only the
+    entries in force turned "not applied" into "deleted" on the next write of
+    any key, and a preset autosave taken in that state captured nothing to
+    restore. *)
+
+val quarantined_entries : unit -> Prompt_override_persistence.entry list
+(** The saved overrides this process is not applying. *)
+
+val held_back_overrides :
+  unit -> (Prompt_override_persistence.entry * string) list
+(** The same overrides, each with the reason it is not applied, so a caller
+    can say so rather than leaving one boot-time ERROR line as the only
+    evidence. *)
+
+val restore_overrides : string -> unit
+(** Reads [<base_path>/.masc/prompt_overrides.json] and reapplies every
+    entry that still renders under its prompt's current contract, keeping
+    the binding each was written with.  A default body that changed since the
+    override was written does not refuse it: the override applies and the
+    catalog reports the default as moved.  The admitted candidate set
+    replaces the live table in one mutex transaction, so refused entries
+    cannot leave stale live overrides behind.  Other envelope versions,
+    malformed entries, and entries naming template variables the prompt no
+    longer declares are refused with an observable error and fall back to
+    file content. *)
+
+type file_edit_promotion =
+  | Promoted of { key : string }
+      (** The edited body is saved as [key]'s override. *)
+  | Override_exists of { key : string }
+      (** [key] already has a saved override; nothing was written. *)
+  | Not_promotable of { reason : string }
+      (** The edit maps to no single override, or the override file could not
+          be read or written; nothing was written. *)
+
+val promote_file_edit :
+  base_path:string ->
+  file:string ->
+  embedded:string ->
+  edited:string ->
+  file_edit_promotion
+(** Save an operator's edit of the runtime prompt file [file] (relative to
+    the prompt directory) as a prompt override in
+    [<base_path>/.masc/prompt_overrides.json], so the file can be reset to
+    the distribution copy [embedded] without losing the edit. The file maps
+    to one key only when [embedded] and [edited] each yield exactly that
+    key's registration and no slot — the registrations the directory scan
+    makes — and the edit left the frontmatter unchanged; the override is
+    bound to [embedded]'s body and must use only the variables it declares.
+    A key whose saved override already holds this text is [Promoted]; a key
+    with a different saved override is left alone. Reads
+    and writes the file, not the live table: it runs at boot before
+    {!restore_overrides}. *)
+
+val set_restore_failure_observer : (unit -> unit) -> unit
+(** Installs the process-local observer called whenever override
+    restore rejects an entry or cannot parse the persisted override
+    file. The default observer is a no-op so this sub-library stays
+    independent of the runtime metrics implementation. Called after the
+    candidate and quarantine commit, outside both registry locks; it may
+    invoke a public mutation. An observer exception propagates without
+    reverting the committed restore or poisoning the mutation mutex. *)
+
+(** {1 Listing + JSON export} *)
+
+val list_prompts : unit -> Yojson.Safe.t list
+(** Returns one JSON entry per registered prompt.
+    Every entry includes [authoring_issues] as a JSON array. An empty array
+    reports no authoring issues; the field is never omitted.
+    {!prompts_json} carries these entries unchanged in its prompt list.
+    Snapshots key / meta / override / default under the
+    mutex, releases the lock, then reads the markdown
+    files and builds the [resolved] record outside the
+    lock so concurrent callers no longer serialize on
+    disk I/O.  Sorted by [(category, key)]. *)
+
+val default_revisions : unit -> (string * string) list
+(** SHA-256 revisions of registered default prompt bodies, excluding overrides.
+    Prompts without a readable default body contribute no entry. *)
+
+val prompts_json : unit -> Yojson.Safe.t
+(** [`Assoc [("prompts", `List (list_prompts ()))]] —
+    canonical envelope for the dashboard prompt route. *)
+
+(** {1 Validation} *)
+
+val validate_prompt_templates : unit -> (string * string) list
+(** Returns [(key, variable)] pairs for every template
+    that references a variable not declared in the
+    registered [meta_tbl] entry's [template_variables]
+    list.  Empty / missing prompts are skipped (only
+    rendered prompts can have unexpected variables). *)
+
+(** {1 Test isolation} *)
+
+val clear : unit -> unit
+(** Drops every entry from the registry / version index /
+    override table / meta table / slot table, unsets the
+    persisted directory and unpins the markdown dir — under
+    dune the next resolution pins and loads the fallback
+    again.  Pinned at this boundary because
+    [test/test_prompt_registry_defaults.ml] calls it
+    between cases for isolation; production code paths
+    do not need it. *)

@@ -1,0 +1,363 @@
+(** See {!Keeper_vision_ingest} (.mli) for the contract and design trail
+    (RFC-keeper-vision-delegation-tool §2.3). *)
+
+module Store = Multimodal.Vision_artifact_store
+
+type mode =
+  | Eager
+  | Store_only
+
+(* SSOT placeholder formats. The handle always lets the keeper re-read the
+   pixels via the analyze_image tool; the eager [read] text carries the meaning
+   so most follow-up turns answer without any further vision call. *)
+let image_read_placeholder ~handle ~media_type ~read_text =
+  Printf.sprintf
+    "[image read: %s | artifact:%s media_type:%s]"
+    read_text
+    (Store.to_string handle)
+    media_type
+;;
+
+let image_unread_placeholder ~handle ~media_type ~reason =
+  Printf.sprintf
+    "[image artifact:%s media_type:%s - %s; call %s to read it]"
+    (Store.to_string handle)
+    media_type
+    reason
+    Keeper_runtime_schemas_toml.keeper_analyze_image.name
+;;
+
+(* Store failure keeps the invariant (no inline pixels in history) by emitting a
+   visible marker rather than re-admitting the [Image] block — surfaced, never
+   silent. The pixels for this one block are not retained. *)
+let image_store_failed_placeholder ~reason =
+  Printf.sprintf "[image — could not store for delegation: %s]" reason
+;;
+
+let max_eager_reads_per_turn = 1
+let max_read_text_bytes = 4000
+
+let string_of_mode = function
+  | Eager -> "eager"
+  | Store_only -> "store_only"
+;;
+
+let record_eviction ~keeper_name ~mode ~result ~reason =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string VisionIngestEvictions)
+    ~labels:[ "mode", string_of_mode mode; "result", result; "reason", reason ]
+    ();
+  (* The operator-facing error counter: per keeper, by the closed reason set.
+     The pipeline counter above keeps its mode/result/reason shape; this one
+     answers "whose images failed and why" in a single lookup per reason. *)
+  if String.equal result "error"
+  then
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string VisionIngestErrors)
+      ~labels:[ "keeper", keeper_name; "reason", reason ]
+      ()
+;;
+
+(* Every reason an eviction can fail with, in one list. Closed by
+     construction: the store-path literals below and the eager-path mapping
+     above are the only producers. Health surfaces aggregate a keeper's
+     errors by walking this list, so a reason added here appears there
+     without a second edit. *)
+let error_reasons =
+  [ "media_unavailable"
+  ; "image_too_large"
+  ; "invalid_media_type"
+  ; "store_failed"
+  ; "eager_empty"
+  ; "eager_truncated"
+  ; "eager_timeout"
+  ; "eager_no_runtime"
+  ; "eager_invalid_request"
+  ; "eager_invalid_structured_response"
+  ; "eager_provider_error"
+  ; "eager_read_failed"
+  ]
+;;
+
+let eager_read_eviction_reason_of_outcome = function
+  | Keeper_vision_tool.Vo_ok _ -> None
+  | Keeper_vision_tool.Vo_empty -> Some "eager_empty"
+  | Keeper_vision_tool.Vo_truncated -> Some "eager_truncated"
+  | Keeper_vision_tool.Vo_timeout -> Some "eager_timeout"
+  | Keeper_vision_tool.Vo_no_runtime _ -> Some "eager_no_runtime"
+  | Keeper_vision_tool.Vo_invalid_request _ -> Some "eager_invalid_request"
+  | Keeper_vision_tool.Vo_invalid_structured_response _ ->
+    Some "eager_invalid_structured_response"
+  | Keeper_vision_tool.Vo_official_failure _
+  | Keeper_vision_tool.Vo_provider _ -> Some "eager_provider_error"
+;;
+
+let truncate_read_text text =
+  let length = String.length text in
+  if length <= max_read_text_bytes
+  then text
+  else String_util.utf8_prefix ~max_bytes:max_read_text_bytes text ^ "\n[truncated]"
+;;
+
+(* Operator decision (2026-06-25, RFC §2.3-eager): exhaustive description, so a
+   later text-only turn rarely needs to re-read the pixels. *)
+let extraction_query =
+  "Describe everything in this image: transcribe all text verbatim, and list \
+   every UI element, the layout, colors, state, errors, and numbers. Be \
+   exhaustive — the reader cannot see the image, only your description."
+;;
+
+
+(* Eager extraction through the shared vision core, only when an Eio context is
+   present (prod turn). Absent (tests / pre-bootstrap) -> [None]; the caller then
+   emits an unread placeholder. Provider cancellation, when configured, is
+   owned by the shared Provider boundary. *)
+(* [exclude_runtime_ids] is required rather than optional: an optional argument
+   in front of labelled ones only cannot be erased (warning 16), and a new
+   caller of the read boundary should have to decide what its walk already
+   spent rather than inherit an empty set by default. *)
+let eager_read ~base_path ~exclude_runtime_ids ~media_type ~bytes
+  : (string, string) result option
+  =
+  match
+    Eio_context.get_net_opt (), Eio_context.get_switch_opt (), Eio_context.get_clock_opt ()
+  with
+  | Some net, Some sw, Some clock ->
+    (match
+       Keeper_vision_tool.run_vision
+         ?base_path
+         ~exclude_runtime_ids
+         ~sw
+         ~clock
+         ~net
+         ~query:extraction_query
+         ~media_type
+         ~bytes
+         ()
+     with
+     | Keeper_vision_tool.Vo_ok reading -> Some (Ok (truncate_read_text reading.text))
+     | (Keeper_vision_tool.Vo_timeout | Keeper_vision_tool.Vo_empty | Keeper_vision_tool.Vo_truncated | Keeper_vision_tool.Vo_invalid_request _ | Keeper_vision_tool.Vo_no_runtime _ | Keeper_vision_tool.Vo_invalid_structured_response _ | Keeper_vision_tool.Vo_provider _ | Keeper_vision_tool.Vo_official_failure _) as outcome -> (match eager_read_eviction_reason_of_outcome outcome with
+        | Some reason -> Some (Error reason)
+        | None -> Some (Error "eager_read_failed")))
+  | _ -> None
+;;
+
+(* Transform one block. An [Image] is evicted to a text placeholder; everything
+   else — including an already-evicted [Text] placeholder — passes through
+   unchanged, so re-running on a rehydrated message is a no-op (idempotent: no
+   double-store, no double-extract). *)
+let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.content_block) =
+  match block with
+  | Agent_core.Types.Image { media_type; source } ->
+    (match source with
+     | Agent_core.Types.Url _ | Agent_core.Types.File_id _ ->
+       (* RFC-0430 / #33682: a reference carrier is not an eviction target.
+          Evict exists to trade the heavy inline payload for a local artifact
+          handle; a URL or Files-API id costs a few dozen bytes of context,
+          and the serializers put both on the wire in their native forms
+          (#33669). Passing the block through unchanged keeps the reference
+          requestable instead of replacing it with a store-failure
+          placeholder the reader cannot act on. *)
+       record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"reference_passthrough";
+       block
+     | Agent_core.Types.Stored stored ->
+       match media_store.Agent_core.History.get stored with
+      | Error
+          ( Agent_core.History.Store_failed _ | Missing_bytes _ | Digest_mismatch _
+          | Invalid_base64 _ ) ->
+        record_eviction ~keeper_name ~mode ~result:"error" ~reason:"media_unavailable";
+        (match mode with
+         | Store_only ->
+           (* A persisted message keeps the reference: bytes the store cannot
+              read now are still the bytes it names, and a placeholder written
+              here would replace the image in the checkpoint for good. *)
+           block
+         | Eager ->
+           Agent_core.Types.Text
+             (image_store_failed_placeholder ~reason:"image bytes unavailable"))
+      | Ok bytes ->
+        (match Keeper_vision_tool.validate_image_size bytes with
+         | Error _ ->
+           record_eviction ~keeper_name ~mode ~result:"error" ~reason:"image_too_large";
+           Agent_core.Types.Text
+             (image_store_failed_placeholder ~reason:"image too large")
+         | Ok () ->
+           (match Keeper_vision_tool.validate_media_type media_type with
+            | Error _ ->
+              record_eviction ~keeper_name ~mode ~result:"error" ~reason:"invalid_media_type";
+              Agent_core.Types.Text
+                (image_store_failed_placeholder ~reason:"unsupported image media type")
+            | Ok media_type ->
+              (match
+                 Keeper_vision_tool.store_kept ?base_path ~keeper_name bytes
+               with
+               | Error _ ->
+                 record_eviction ~keeper_name ~mode ~result:"error" ~reason:"store_failed";
+                 Agent_core.Types.Text
+                   (image_store_failed_placeholder ~reason:"artifact store failed")
+               | Ok handle ->
+                 (match mode with
+                  | Store_only ->
+                    record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"stored";
+                    Agent_core.Types.Text
+                      (image_unread_placeholder ~handle ~media_type ~reason:"not read")
+                  | Eager when !eager_budget > 0 ->
+                    (* An interrupted provider read has no result to cache or
+                       charge. Leave the allowance available for its retry. *)
+                    let outcome = read ~media_type ~bytes in
+                    decr eager_budget;
+                    (match outcome with
+                     | Some (Ok read_text) ->
+                       record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"eager_read";
+                       Agent_core.Types.Text
+                         (image_read_placeholder ~handle ~media_type ~read_text)
+                     | Some (Error reason) ->
+                       record_eviction ~keeper_name ~mode ~result:"error" ~reason;
+                       Agent_core.Types.Text
+                         (image_unread_placeholder
+                            ~handle
+                            ~media_type
+                            ~reason:"vision read failed")
+                     | None ->
+                       record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"stored_unread";
+                       Agent_core.Types.Text
+                         (image_unread_placeholder
+                            ~handle
+                            ~media_type
+                            ~reason:"not yet read"))
+                  | Eager ->
+                    record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"eager_budget_exhausted";
+                    Agent_core.Types.Text
+                      (image_unread_placeholder
+                         ~handle
+                         ~media_type
+                         ~reason:"not read"))))))
+  | (Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as other -> other
+;;
+
+(* Routing and delegation share the transport-plus-model capability view. *)
+let runtime_takes_images_itself id =
+  match Runtime.get_runtime_by_id id with
+  | None -> false
+  | Some (rt : Runtime_instance.t) ->
+    Runtime_agent.caps_admit_required_modalities
+         (Runtime_agent.input_capabilities_of_runtime rt)
+         [ "image" ]
+;;
+
+(* The whole lane is asked, not just the head. When any candidate takes the
+   image, RFC-0265 reroutes the turn there and the answering model sees the
+   pixels — better than any reading, and the reason RFC-keeper-vision-delegation
+   §2.4 did not want delegation to swallow the reroute case. Delegation is for
+   the case where no candidate takes it, which is where RFC-0265 reaches
+   [No_capable_runtime] and drops the image instead. An id that resolves to no
+   lane delegates for the same reason: reading the image keeps it, dropping it
+   does not. *)
+let delegates_media ~runtime_id =
+  match Runtime.resolve_assignment runtime_id with
+  | `Unavailable _ -> false
+  | `Missing -> true
+  | `Lane lane ->
+    not
+      (List.exists
+         runtime_takes_images_itself
+         (Runtime_lane.ordered_candidates lane))
+;;
+
+let evict_blocks ?base_path ~media_store ~mode ~delegate ~keeper_name blocks =
+  if delegate
+  then (
+    let eager_budget =
+      ref
+        (match mode with
+         | Eager -> max_eager_reads_per_turn
+         | Store_only -> 0)
+    in
+    (* This path has no lane walk behind it, so nothing is spent yet. *)
+    List.map
+      (evict_block ?base_path ~media_store
+         ~read:(eager_read ~base_path ~exclude_runtime_ids:[])
+         ~mode ~keeper_name ~eager_budget)
+      blocks)
+  else blocks
+;;
+
+let evict_message ?base_path ~media_store ~mode ~delegate ~keeper_name (message : Agent_core.Types.message) =
+  if delegate
+  then
+    { message with
+      Agent_core.Types.content =
+        evict_blocks ?base_path ~media_store ~mode ~delegate ~keeper_name message.Agent_core.Types.content
+    }
+  else message
+;;
+
+type image_projection =
+  { blocks : Agent_core.Types.content_block list
+  ; delegated_images : int
+  }
+
+let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~media_store ~read ~keeper_name () =
+  let cached = Hashtbl.create 8 in
+  let eager_budget = ref max_eager_reads_per_turn in
+  let project_image ~mode block =
+    match Hashtbl.find_opt cached (mode, block) with
+    | Some projected -> projected
+    | None ->
+      let projected =
+        match block with
+        | Agent_core.Types.Image { source = Agent_core.Types.Url data; _ } ->
+          Agent_core.Types.Text
+            (Printf.sprintf
+               "[unread image URL: %s; this runtime cannot view the image]" data)
+        | Agent_core.Types.Image { source = Agent_core.Types.File_id data; _ } ->
+          Agent_core.Types.Text
+            (Printf.sprintf
+               "[unread image file ID: %s; this runtime cannot view the image]" data)
+        | Agent_core.Types.Image { source = Agent_core.Types.Stored _;_}
+        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> evict_block ?base_path ~media_store
+            ~read:(read ~exclude_runtime_ids)
+            ~mode ~keeper_name ~eager_budget block
+      in
+      Hashtbl.add cached (mode, block) projected;
+      projected
+  in
+  let rec project ~mode blocks =
+    let reversed, delegated_images =
+      List.fold_left
+        (fun (reversed, count) block ->
+          match block with
+          | Agent_core.Types.Image _ ->
+            project_image ~mode block :: reversed, count + 1
+          | Agent_core.Types.ToolResult
+              { tool_use_id; content; outcome; json; content_blocks = Some nested } ->
+            let projected = project ~mode nested in
+            ( Agent_core.Types.ToolResult
+                { tool_use_id; content; outcome; json
+                ; content_blocks = Some projected.blocks }
+              :: reversed
+            , count + projected.delegated_images )
+          | ( Agent_core.Types.Text _
+            | Agent_core.Types.Thinking _
+            | Agent_core.Types.ReasoningDetails _
+            | Agent_core.Types.RedactedThinking _
+            | Agent_core.Types.ToolUse _
+            | Agent_core.Types.ToolResult { content_blocks = None; _ }
+            | Agent_core.Types.Document _
+            | Agent_core.Types.Audio _ ) as other -> other :: reversed, count)
+        ([], 0) blocks
+    in
+    { blocks = List.rev reversed; delegated_images }
+  in
+  project
+;;
+
+let fallback_projector ?base_path ?exclude_runtime_ids ~media_store ~keeper_name () =
+  fallback_projector_with_read ?base_path ?exclude_runtime_ids ~media_store ~read:(eager_read ~base_path) ~keeper_name ()
+
+module For_testing = struct
+  let fallback_projector = fallback_projector_with_read
+end

@@ -1,0 +1,735 @@
+(** Keeper metadata snapshot I/O.
+
+    Included by [Keeper_types] so existing [Keeper_types.*] callers keep
+    their public read API while durable metadata storage remains separate. *)
+
+
+open Keeper_types_profile
+open Keeper_meta_contract
+open Keeper_meta_json
+
+let settle_durable_replace path = function
+  | Ok () -> Ok ()
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "failed to durably write metadata %s: %s"
+         path
+         (Keeper_fs.durable_write_error_to_string error))
+;;
+
+let settle_durable_remove path = function
+  | Ok () -> Ok ()
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "failed to durably remove metadata %s: %s"
+         path
+         (Keeper_fs.durable_remove_error_to_string error))
+;;
+
+(** The one durable snapshot write: normal serializer plus atomic durable
+    commit.  The Owner write path ([replace_snapshot]) is its only caller;
+    every reader in this module decodes and never writes. *)
+let persist_snapshot ?ownership_root path meta =
+  let payload = meta |> meta_to_json |> Yojson.Safe.pretty_to_string in
+  Keeper_fs.save_bytes_durable_atomic ?ownership_root path payload
+  |> settle_durable_replace path
+;;
+
+(** Issue #28844: one corrupt meta file used to produce an identical WARN on
+    every periodic scan iteration (422 in three minutes).  WARNs are now
+    emitted on state transitions only — a (site, path)'s first failure, a
+    change in failure reason, or recovery — tracked as the last reported
+    failure detail per (site, path).  The state is process-local on purpose:
+    a restarted process reporting a still-bad file once is correct, and no
+    wall-clock interval is involved.
+
+    Growth bound: one entry per (site, path) that currently fails, plus stale
+    entries for keepers removed from config while failing — those linger for
+    the process lifetime.  Both populations are bounded by the configured
+    keeper count, so the table stays O(failing keepers). *)
+module Problem_report_state = struct
+  type site =
+    | Meta_read
+    | Keepalive_scan
+    | Persistent_scan
+
+  module Key = struct
+    type t = site * string
+
+    let equal (site_a, path_a) (site_b, path_b) =
+      site_a = site_b && String.equal path_a path_b
+    ;;
+
+    let hash = Hashtbl.hash
+  end
+
+  module Table = Hashtbl.Make (Key)
+
+  type entry = {
+    site : site;
+    path : string;
+    detail : string;
+    first_observed : float;
+  }
+
+  let reported : (string * float) Table.t = Table.create 16
+  let mutex = Stdlib.Mutex.create ()
+
+  (** [true] when (site, path, detail) is a new problem state and the caller
+      should log; [false] while the same failure keeps repeating. The row
+      written here is the one and only record of the failure — the dashboard
+      reads it through [snapshot_to_yojson] below, so there is no second
+      table to keep in step. *)
+  let should_report ~site ~path ~detail =
+    Stdlib.Mutex.protect mutex (fun () ->
+      let key = site, path in
+      (* NDT-OK: wall clock stamps first_observed for dashboard telemetry;
+         no branch reads it. *)
+      let now = Unix.gettimeofday () in
+      match Table.find_opt reported key with
+      | Some (previous, first_observed) when String.equal previous detail ->
+          false
+      | Some (_, first_observed) ->
+          Table.replace reported key (detail, first_observed);
+          true
+      | None ->
+          Table.replace reported key (detail, now);
+          true)
+  ;;
+
+  (** [true] when a previously reported problem cleared — the caller may log
+      the recovery transition once. *)
+  let note_recovered ~site ~path =
+    Stdlib.Mutex.protect mutex (fun () ->
+      let key = site, path in
+      match Table.find_opt reported key with
+      | None -> false
+      | Some _ ->
+        Table.remove reported key;
+        true)
+  ;;
+
+  (** Drop any reported problem state for (site, path) without observing
+      whether one existed.  For outcomes whose recovery transition is not
+      logged — the file disappeared, or the scan site whose recovery the
+      [Meta_read] site already reports — the clear itself is the whole
+      operation. *)
+  let clear ~site ~path =
+    Stdlib.Mutex.protect mutex (fun () -> Table.remove reported (site, path))
+  ;;
+
+  let site_to_string = function
+    | Meta_read -> "meta_read"
+    | Keepalive_scan -> "keepalive_scan"
+    | Persistent_scan -> "persistent_scan"
+  ;;
+
+  (** The dashboard projection reads the same rows [should_report] wrote:
+      one table, one truth, no sync step where a clear on one side could
+      leave the other side stale. *)
+  let snapshot () =
+    Stdlib.Mutex.protect mutex (fun () ->
+      Table.fold
+        (fun (site, path) (detail, first_observed) acc ->
+           { site; path; detail; first_observed } :: acc)
+        reported [])
+  ;;
+
+  let snapshot_to_yojson () =
+    `List
+      (List.map
+         (fun (e : entry) ->
+            `Assoc
+              [ ("site", `String (site_to_string e.site))
+              ; ("path", `String e.path)
+              ; ("detail", `String e.detail)
+              ; ("first_observed", `Float e.first_observed)
+              ])
+         (snapshot ()))
+  ;;
+
+  let reset () =
+    Stdlib.Mutex.protect mutex (fun () -> Table.reset reported)
+  ;;
+end
+
+type meta_presence =
+  | Meta_absent
+  | Meta_present of Keeper_meta_contract.keeper_meta
+  | Meta_not_current of string
+
+type parsed_meta_cache_entry =
+  { content : string
+  ; meta : Keeper_meta_contract.keeper_meta
+  }
+
+let parsed_meta_cache_max_entries = 1024
+let parsed_meta_cache : (string, parsed_meta_cache_entry) Hashtbl.t =
+  Hashtbl.create 64
+let parsed_meta_mu = Stdlib.Mutex.create ()
+
+let find_cached_parsed_meta ~path ~content =
+  Stdlib.Mutex.protect parsed_meta_mu (fun () ->
+    match Hashtbl.find_opt parsed_meta_cache path with
+    | Some entry when String.equal entry.content content -> Some entry.meta
+    | Some _ | None -> None)
+;;
+
+let store_cached_parsed_meta ~path ~content meta =
+  Stdlib.Mutex.protect parsed_meta_mu (fun () ->
+    if Hashtbl.length parsed_meta_cache >= parsed_meta_cache_max_entries
+    then Hashtbl.reset parsed_meta_cache;
+    Hashtbl.replace parsed_meta_cache path { content; meta })
+;;
+
+let evict_cached_parsed_meta ~path =
+  Stdlib.Mutex.protect parsed_meta_mu (fun () ->
+    Hashtbl.remove parsed_meta_cache path)
+;;
+
+let read_meta_file_path_presence path : (meta_presence, string) result =
+  (* A reader decodes and never writes: the per-Keeper Owner is the only
+     writer of this file, and it writes through [meta_to_json], whose every
+     label is one the decoder reads back.
+
+     Fail open. A meta this binary cannot read is an absent meta, not a dead
+     keeper: the TOML declaration carries the whole setup, so the boot path
+     re-materialises one. Refusing instead took the fleet down three times on
+     2026-08-23 (#29490, #29601, and the generation/last_blocker removal),
+     every time on a field this binary had itself stopped writing. What is
+     lost is the accumulated counters in the unreadable file, and the WARN
+     below is the record of that loss. *)
+  let fail_open detail =
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MetaReadFailures)
+      ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
+      ();
+    if Problem_report_state.should_report ~site:Meta_read ~path ~detail
+    then
+      Log.Keeper.warn
+        "keeper meta unreadable at %s, treating as absent (accumulated \
+         counters in it are lost; the declaration re-materialises the \
+         keeper): %s"
+        path
+        detail;
+    (* main took the recovery decision (#29610: unreadable is absent, not fatal);
+       this branch keeps its own contribution, which is that the loss shows
+       up in the unreadable-store registry instead of only in a log line. *)
+    Ok (Meta_not_current detail)
+  in
+  match Safe_ops.read_file_opt_result path with
+  | Error error ->
+    evict_cached_parsed_meta ~path;
+    Error (Safe_ops.read_file_error_to_string error)
+  | Ok None ->
+    evict_cached_parsed_meta ~path;
+    Problem_report_state.clear ~site:Meta_read ~path;
+    Ok Meta_absent
+  | Ok (Some content) ->
+    (match find_cached_parsed_meta ~path ~content with
+     | Some meta ->
+       if Problem_report_state.note_recovered ~site:Meta_read ~path
+       then Log.Keeper.info "keeper meta parse recovered for %s" path;
+       Ok (Meta_present meta)
+     | None ->
+       (match Safe_ops.parse_json_off_fiber ~context:path content with
+        | Error e ->
+          evict_cached_parsed_meta ~path;
+          Error e
+        | Ok json ->
+          (match meta_of_json json with
+           | Ok meta ->
+             store_cached_parsed_meta ~path ~content meta;
+             if Problem_report_state.note_recovered ~site:Meta_read ~path
+             then Log.Keeper.info "keeper meta parse recovered for %s" path;
+             Ok (Meta_present meta)
+           | Error detail ->
+             evict_cached_parsed_meta ~path;
+             fail_open detail)))
+;;
+
+let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
+  read_meta_file_path_presence path
+  |> Result.map (function
+    | Meta_present meta -> Some meta
+    | Meta_absent | Meta_not_current _ -> None)
+;;
+
+type current_meta_rejection =
+  | Unreadable of string
+  | Invalid_json of string
+  | Not_current of string
+
+let read_meta_file_path_read_only ~ownership_root path =
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Error error ->
+    Error (Unreadable (Fs_compat.owned_regular_file_read_error_to_string error))
+  | Ok None -> Ok None
+  | Ok (Some contents) ->
+    (match Yojson.Safe.from_string contents with
+     | exception Yojson.Json_error detail -> Error (Invalid_json detail)
+     | json ->
+       (match meta_of_json json with
+        | Ok meta -> Ok (Some meta)
+        | Error detail -> Error (Not_current detail)))
+;;
+
+let validate_current_meta_file_result path : (unit, current_meta_rejection) result =
+  (* Deploy-gate twin of [read_meta_file_path]: the same decode
+     ([meta_of_json]) minus the fail-open. [Not_current] fires exactly when
+     the runtime would read the file as absent and re-materialise the Keeper
+     from its declaration (#29610), losing the accumulated counters and the
+     persisted task binding. [Unreadable] preserves a file I/O failure and
+     [Invalid_json] a parse failure, both of which the ordinary runtime read
+     returns as [Error]. The deployment preflight runs this
+     between the previous runtime's stop and the next one's start — the
+     writer lease has to be free — so a rejection holds the plane down until
+     the operator repairs the file and redeploys. That downtime is the price
+     of keeping the counters the boot-time fail-open would lose. *)
+  match Fs_compat.load_file_opt path with
+  | exception Sys_error detail -> Error (Unreadable detail)
+  | None -> Ok ()
+  | Some contents ->
+    match Safe_ops.parse_json_off_fiber ~context:path contents with
+    | Error detail -> Error (Invalid_json detail)
+    | Ok json ->
+      (match meta_of_json json with
+       | Ok _ -> Ok ()
+       | Error detail -> Error (Not_current detail))
+;;
+
+let persisted_keeper_names_result config =
+  let dir = keeper_dir config in
+  match Safe_ops.list_dir_safe dir with
+  | Error e ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MetaReadFailures)
+      ~labels:[("keeper", "aggregate"); ("site", "persisted_listdir")]
+      ();
+    Error (Printf.sprintf "failed to list keeper directory %s: %s" dir e)
+  | Ok files ->
+    Ok
+      (files
+       |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
+       |> List.filter validate_name
+       |> List.sort String.compare)
+;;
+
+let retained_root_entries_read_only_result config =
+  let dir = Workspace.keepers_runtime_dir config in
+  match Unix.lstat dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok (dir, [])
+  | exception Unix.Unix_error (cause, _, _) ->
+    Error
+      (Printf.sprintf
+         "failed to inspect keeper directory %s: %s"
+         dir
+         (Unix.error_message cause))
+  | ({ Unix.st_kind = Unix.S_DIR; _ } as initial_stat) ->
+    (match Unix.opendir dir with
+     | exception Unix.Unix_error (cause, _, _) ->
+       Error
+         (Printf.sprintf
+            "failed to open keeper directory %s: %s"
+            dir
+            (Unix.error_message cause))
+     | handle ->
+       let rec read reversed =
+         match Unix.readdir handle with
+         | entry -> read (entry :: reversed)
+         | exception End_of_file -> Ok (List.rev reversed)
+         | exception Unix.Unix_error (cause, _, _) ->
+           Error (Unix.error_message cause)
+       in
+       let entries = read [] in
+       let closed =
+         match Unix.closedir handle with
+         | () -> Ok ()
+         | exception Unix.Unix_error (cause, _, _) ->
+           Error (Unix.error_message cause)
+       in
+       (match entries, closed, Unix.lstat dir with
+        | Ok files, Ok (), final_stat
+          when final_stat.Unix.st_kind = Unix.S_DIR
+               && final_stat.st_dev = initial_stat.st_dev
+               && final_stat.st_ino = initial_stat.st_ino ->
+          Ok (dir, files)
+        | Error detail, _, _ | _, Error detail, _ ->
+          Error
+            (Printf.sprintf "failed to list keeper directory %s: %s" dir detail)
+        | Ok _, Ok (), _ -> Error ("keeper store changed while listing: " ^ dir)
+        | exception Unix.Unix_error (cause, _, _) ->
+          Error
+            (Printf.sprintf
+               "keeper store changed while listing %s: %s"
+               dir
+               (Unix.error_message cause))))
+  | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+    Error (Printf.sprintf "keeper store is not a directory: %s" dir)
+;;
+
+let persisted_keeper_names_read_only_result config =
+  let open Result.Syntax in
+  let* _, entries = retained_root_entries_read_only_result config in
+  Ok
+    (entries
+     |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
+     |> List.filter validate_name
+     |> List.sort String.compare)
+;;
+
+let retained_keeper_names_read_only_result config =
+  let open Result.Syntax in
+  let* dir, entries = retained_root_entries_read_only_result config in
+  let* names =
+    List.fold_left
+      (fun result entry ->
+         let* names = result in
+         if String.equal entry "." || String.equal entry ".."
+         then Ok names
+         else
+         match Keeper_runtime_root_entry.metadata_keeper_name entry with
+         | Some name when validate_name name -> Ok (name :: names)
+         | Some _ -> Ok names
+         (* A store kept beside the keepers ([keepers/tool_usage]) is not a
+            keeper directory; an unknown directory with an invalid name still
+            fails the listing. *)
+         | None when Common.is_keepers_root_store_dirname entry -> Ok names
+         | None ->
+           let path = Filename.concat dir entry in
+           (match Unix.lstat path with
+            | { Unix.st_kind = Unix.S_DIR; _ } ->
+              Keeper_id.Keeper_name.of_string entry
+              |> Result.map_error (fun detail ->
+                   Printf.sprintf
+                     "invalid retained Keeper directory %S: %s"
+                     entry
+                     detail)
+              |> Result.map (fun name ->
+                   Keeper_id.Keeper_name.to_string name :: names)
+            | { Unix.st_kind = Unix.S_LNK; _ } ->
+              (match Keeper_id.Keeper_name.of_string entry with
+               | Ok _ -> Error ("retained Keeper entry is a symlink: " ^ entry)
+               | Error _ -> Ok names)
+            | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+              Ok names
+            | exception Unix.Unix_error (cause, _, _) ->
+              Error
+                (Printf.sprintf
+                   "failed to inspect retained Keeper entry %s: %s"
+                   entry
+                   (Unix.error_message cause))))
+      (Ok [])
+      entries
+  in
+  Ok (List.sort_uniq String.compare names)
+;;
+
+let persisted_keeper_names config =
+  match persisted_keeper_names_result config with
+  | Ok names -> names
+  | Error msg ->
+    Log.Keeper.warn "persisted_keeper_names: %s" msg;
+    []
+;;
+
+
+type undecodable_meta =
+  | Skip_undecodable_meta
+  | Fail_on_undecodable_meta
+
+let persisted_effective_metas ~on_undecodable config =
+  let read_effective keeper_name : (meta_presence, string) result =
+    match read_meta_file_path_presence (keeper_meta_path config keeper_name) with
+    | Ok (Meta_present meta) ->
+      Keeper_meta_contract.effective_meta_result
+        ~base_path:config.Workspace.base_path
+        meta
+      |> Result.map (fun effective -> Meta_present effective)
+    | (Ok (Meta_absent | Meta_not_current _) | Error _) as other -> other
+  in
+  let rec collect metas = function
+    | [] -> Ok (List.rev metas)
+    | keeper_name :: rest ->
+      (match read_effective keeper_name with
+       | Error detail -> Error detail
+       | Ok Meta_absent -> collect metas rest
+       | Ok (Meta_not_current detail) ->
+         (match on_undecodable with
+          | Skip_undecodable_meta -> collect metas rest
+          | Fail_on_undecodable_meta ->
+            Error
+              (Printf.sprintf
+                 "Keeper %s has settings this build cannot read: %s"
+                 keeper_name
+                 detail))
+       | Ok (Meta_present meta) -> collect ((keeper_name, meta) :: metas) rest)
+  in
+  match persisted_keeper_names_result config with
+  | Error _ as error -> error
+  | Ok keeper_names -> collect [] keeper_names
+;;
+
+let keeper_for_mention_target_in metas ~mention_target =
+  match Keeper_identity.Keeper_id.of_string mention_target with
+  | None -> Ok None
+  | Some target_id ->
+    let claims (_keeper_name, (meta : Keeper_meta_contract.keeper_meta)) =
+      List.exists
+        (fun alias ->
+           match Keeper_identity.Keeper_id.of_string alias with
+           | Some alias_id -> Keeper_identity.Keeper_id.equal alias_id target_id
+           | None -> false)
+        meta.mention_targets
+    in
+    (match List.filter claims metas with
+     | [] -> Ok None
+     | [ match_ ] -> Ok (Some match_)
+     | matches ->
+       Error
+         (Printf.sprintf
+            "multiple persisted Keepers claim mention_target=%s: %s"
+            (String.trim mention_target)
+            (matches |> List.map fst |> String.concat ",")))
+;;
+
+let persisted_keeper_for_mention_target config ~mention_target =
+  if Option.is_none (Keeper_identity.Keeper_id.of_string mention_target)
+  then Ok None
+  else
+    Result.bind
+      (persisted_effective_metas ~on_undecodable:Skip_undecodable_meta config)
+      (fun metas -> keeper_for_mention_target_in metas ~mention_target)
+;;
+
+let configured_keeper_names config =
+  Keeper_types_profile.discover_keepers_toml
+    (Config_dir_resolver.keepers_dir_for_base_path
+       ~base_path:config.Workspace.base_path)
+  |> List.map Keeper_types_profile.keeper_toml_discovery_name
+  |> dedupe_keep_order
+;;
+
+(* Discovery uses persisted JSON (.masc/keepers/*.json) as primary source.
+   JSON files are scoped to the server's base_path, so test isolation works.
+   Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
+   JSON at boot by load_or_materialize_boot_meta, so they appear here too.
+   Every canonical root [.json] is metadata authority. *)
+let keeper_names_result config =
+  persisted_keeper_names_result config
+;;
+
+let declarative_autoboot_enabled_by_default config name =
+  match
+    load_keeper_profile_defaults_result_for_base_path
+      ~base_path:config.Workspace.base_path
+      name
+  with
+  | Error _ -> false
+  | Ok defaults ->
+    (match defaults.activation_mode with
+     | Some Keeper_activation_mode.Manual -> false
+     | Some (On_demand | Autonomous) | None -> true)
+;;
+
+let effective_autoboot_enabled config name meta =
+  match
+    load_keeper_profile_defaults_result_for_base_path
+      ~base_path:config.Workspace.base_path
+      name
+  with
+  | Error _ -> false
+  | Ok defaults ->
+    (match defaults.activation_mode with
+     | Some mode -> Keeper_activation_mode.restore_owner mode
+     | None -> Keeper_activation_mode.restore_owner meta.activation_mode)
+;;
+
+let keepalive_keeper_names config =
+  configured_keeper_names config
+  |> List.filter_map (fun name ->
+    let path = keeper_meta_path config name in
+    match
+      read_meta_file_path path
+    with
+    | Ok (Some meta)
+      when (not meta.paused) && effective_autoboot_enabled config name meta ->
+        Problem_report_state.clear ~site:Keepalive_scan ~path;
+        Some meta.name
+    | Ok (Some _) ->
+      Problem_report_state.clear ~site:Keepalive_scan ~path;
+      None
+    | Ok None ->
+      Problem_report_state.clear ~site:Keepalive_scan ~path;
+      if declarative_autoboot_enabled_by_default config name then Some name
+      else None
+    | Error msg ->
+      (* Issue #8377: was [_ -> None] which collapsed read/parse
+         failures silently into "name disappeared". Discovery would
+         treat a corrupt meta file as if the keeper was deleted,
+         hiding the operational issue. Now logs and excludes so the
+         degraded state is operator-visible.  Issue #28844: the WARN
+         fires on failure-state transitions only, not per scan. *)
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MetaReadFailures)
+        ~labels:[("keeper", name); ("site", "keepalive_read")]
+        ();
+      if Problem_report_state.should_report ~site:Keepalive_scan ~path ~detail:msg
+      then
+        Log.Keeper.warn
+          "keepalive_keeper_names: meta read failed for %s, dropping from keepalive set: %s"
+          name
+          msg;
+      None)
+;;
+
+(** Names of keepers that should be running across sessions.
+    A keeper is "persistent" when its on-disk meta has autoboot enabled
+    and is not currently paused - i.e. the operator expects the runtime
+    to keep it alive after restart.
+
+    Mirrors [keepalive_keeper_names] for readers that care about
+    durability rather than the keepalive fiber. *)
+let persistent_agent_names config =
+  configured_keeper_names config
+  |> List.filter_map (fun name ->
+    let path = keeper_meta_path config name in
+    match
+      read_meta_file_path path
+    with
+    | Ok (Some meta)
+      when (not meta.paused) && effective_autoboot_enabled config name meta ->
+        Problem_report_state.clear ~site:Persistent_scan ~path;
+        Some meta.name
+    | Ok (Some _) ->
+      Problem_report_state.clear ~site:Persistent_scan ~path;
+      None
+    | Ok None ->
+      Problem_report_state.clear ~site:Persistent_scan ~path;
+      None
+    | Error msg ->
+      (* Issue #8377: same anti-pattern as keepalive_keeper_names:
+         Error was silently collapsed into None. Operator can't
+         distinguish "keeper intentionally not persistent" from
+         "meta file is corrupt and we couldn't read it".  Issue #28844:
+         the WARN fires on failure-state transitions only. *)
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MetaReadFailures)
+        ~labels:[("keeper", name); ("site", "persistent_read")]
+        ();
+      if Problem_report_state.should_report ~site:Persistent_scan ~path ~detail:msg
+      then
+        Log.Keeper.warn
+          "persistent_agent_names: meta read failed for %s, treating as non-persistent: %s"
+          name
+          msg;
+      None)
+;;
+
+let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta) option, string) result =
+  let requested_name = String.trim name in
+  if requested_name = ""
+  then Ok None
+  else
+    read_meta_file_path
+      (keeper_meta_path config requested_name)
+    |> Result.map (Option.map (fun meta -> requested_name, meta))
+;;
+
+let read_meta_presence config name : (meta_presence, string) result =
+  let requested_name = String.trim name in
+  if requested_name = ""
+  then Ok Meta_absent
+  else
+    read_meta_file_path_presence
+      (keeper_meta_path config requested_name)
+;;
+
+let read_meta config name : (Keeper_meta_contract.keeper_meta option, string) result =
+  let requested_name = String.trim name in
+  let path = keeper_meta_path config requested_name in
+  if Env_config.KeeperRuntime.debug ()
+  then
+    Log.Keeper.debug
+      "read_meta name=%s path=%s exists=%b"
+      requested_name
+      path
+      (Fs_compat.file_exists path);
+  match read_meta_resolved config requested_name with
+  | Ok (Some (_resolved_name, meta)) -> Ok (Some meta)
+  | Ok None -> Ok None
+  | Error _ as err -> err
+;;
+
+let read_effective_meta_resolved config name
+    : ((string * Keeper_meta_contract.keeper_meta) option, string) result =
+  match read_meta_resolved config name with
+  | Error _ as err -> err
+  | Ok None -> Ok None
+  | Ok (Some (resolved_name, meta)) -> (
+      match
+        Keeper_meta_contract.effective_meta_result
+          ~base_path:config.Workspace.base_path
+          meta
+      with
+      | Ok meta -> Ok (Some (resolved_name, meta))
+      | Error msg -> Error msg)
+;;
+
+let read_effective_meta config name
+    : (Keeper_meta_contract.keeper_meta option, string) result =
+  match read_effective_meta_resolved config name with
+  | Ok (Some (_resolved_name, meta)) -> Ok (Some meta)
+  | Ok None -> Ok None
+  | Error _ as err -> err
+;;
+
+(* The one place a requested name is refused as blank, so the identity minted
+   here is the only one a reader of this presence needs. *)
+let read_effective_meta_presence_named config name
+  : (Keeper_identity.Keeper_id.t * meta_presence, string) result =
+  match Keeper_identity.Keeper_id.of_string name with
+  | None -> Error "keeper name is empty"
+  | Some keeper_id ->
+    let requested_name = String.trim name in
+    let presence =
+      match
+        read_meta_file_path_presence
+          (keeper_meta_path config requested_name)
+      with
+      | Error _ as err -> err
+      | Ok (Meta_absent | Meta_not_current _) as presence -> presence
+      | Ok (Meta_present meta) ->
+        Keeper_meta_contract.effective_meta_result
+          ~base_path:config.Workspace.base_path
+          meta
+        |> Result.map (fun meta -> Meta_present meta)
+    in
+    Result.map (fun presence -> keeper_id, presence) presence
+;;
+
+let read_effective_meta_presence config name : (meta_presence, string) result =
+  Result.map
+    (fun (_keeper_id, presence) -> presence)
+    (read_effective_meta_presence_named config name)
+;;
+
+let replace_snapshot config (persisted : Keeper_meta_contract.keeper_meta) =
+  let path = keeper_meta_path config persisted.name in
+  persist_snapshot ~ownership_root:config.Workspace.base_path path persisted
+;;
+
+let remove_snapshot config ~name =
+  let path = keeper_meta_path config name in
+  Keeper_fs.remove_file_durable
+    ~ownership_root:config.Workspace.base_path
+    path
+  |> settle_durable_remove path
+;;
+
+module For_testing = struct
+  let settle_durable_replace = settle_durable_replace
+  let settle_durable_remove = settle_durable_remove
+end

@@ -1,0 +1,588 @@
+[
+  {
+    "source_id": "s1",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 0,
+    "fact": {
+      "claim": "포스터 컨셉 팔레트(아이보리 #F7F3E8 배경, 딥 그린 #2F5233·세이지 #8FAE8B·안개 블루 #A8BCC4·골드 #C9A227)는 유지되나, 샌드박스에 Pretendard·Noto Sans KR이 없어 실제 산출물은 제목 NanumSquareRound Bold·본문 NanumBarunGothic 등 나눔 계열 무상 라이선스 폰트를 사용한다.",
+      "category": "fact",
+      "first_seen": 1789043019.613823,
+      "last_seen": 1789043019.613823,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s2",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 1,
+    "fact": {
+      "claim": "Python3 + PIL 9.4.0 환경에서 나눔 계열 한글 폰트로 포스터 이미지(poster.png) 생성이 실제로 성공했으므로, 이 환경에서 한글 포함 이미지 산출물 제작 시 이 조합을 재사용할 수 있다.",
+      "category": "validated_approach",
+      "first_seen": 1789043019.613823,
+      "last_seen": 1789043019.613823,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s3",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 2,
+    "fact": {
+      "claim": "keeper_analyze_image 호출은 파일 경로가 아니라 sha256 콘텐츠 주소로 해야 하며, 비전 스토어·브라우저 레인이 모두 실패하면 PIL 픽셀 분석 스크립트(verify_render.py 방식: 텍스트 영역 어두운 픽셀 비율·행 간격·배경 purity)로 렌더링 검증을 대체할 수 있다.",
+      "category": "lesson",
+      "first_seen": 1789043207.892298,
+      "last_seen": 1789043207.892298,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s4",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 3,
+    "fact": {
+      "claim": "Gate가 실행할 표준입력 코드 없이 빈 python3 -c exec(open(/dev/stdin).read()) 요청을 거절했으므로, 실행 코드는 먼저 스크립트 파일로 저장하고 해당 파일을 명시해 실행해야 하며 빈 stdin 요청은 반복하지 않는다.",
+      "category": "lesson",
+      "first_seen": 1789043547.409825,
+      "last_seen": 1789043547.409825,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s5",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 4,
+    "fact": {
+      "claim": "exhibit-editor가 선호하는 편집 방향 중 지속되는 부분: 《기억의 정원》을 처음 접하는 관람객에게 차분하고 친근한 한국어 안내 톤을 유지한다.",
+      "category": "preference",
+      "first_seen": 1789046851.560767,
+      "last_seen": 1789046851.560767,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s6",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 5,
+    "fact": {
+      "claim": "poster.png 검수는 스크립트 내용을 읽는 것으로 대체할 수 없고, 실제 이미지를 keeper_analyze_image로 읽어 제목·배지·일시·장소·입장료 문구 전사와 한글 누락·겹침·잘림 여부를 보고해야 한다.",
+      "category": "constraint",
+      "first_seen": 1789047344.666198,
+      "last_seen": 1789047344.666198,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s7",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 6,
+    "fact": {
+      "claim": "Gate 승인 replay는 preview가 비어 있을 수 있으므로 승인된 작업을 다시 요청하지 말고, 지정된 sha256을 keeper_artifact_read로 읽어 결과를 확인한 뒤 보고해야 한다.",
+      "category": "lesson",
+      "first_seen": 1789047344.666198,
+      "last_seen": 1789047344.666198,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s8",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 7,
+    "fact": {
+      "claim": "운영자가 부여한 task-002 범위는 《기억의 정원》 전시를 움직이는 GIF와 오리지널 사운드(WAV·MP3)로 확장하는 것이며, 산출물은 multimedia/ 디렉터리에 두고 계약에 실제 디코딩 검증 조건이 포함된다.",
+      "category": "constraint",
+      "first_seen": 1789049332.811057,
+      "last_seen": 1789049332.811057,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s9",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 8,
+    "fact": {
+      "claim": "ffprobe 5.1.9와 libmp3lame 지원을 실행으로 확인했으므로 이 환경에서 MP3 인코딩과 메타데이터 검증이 가능하다.",
+      "category": "fact",
+      "first_seen": 1789049332.811057,
+      "last_seen": 1789049332.811057,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s10",
+    "keeper_id": "exhibit-designer",
+    "store": "ordinary",
+    "revision": 11,
+    "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+    "snapshot_id": "snapshot1",
+    "fact_index": 9,
+    "fact": {
+      "claim": "운영자가 확정한 task-001 행사 설정은 허구의 오프라인 전시 《기억의 정원》, 초등 고학년·보호자 대상, 2026-10-17 토요일 14:00–17:00, 은빛정류장 전시실, 입장료는 물료가 아니라 물(0원 표기도 승인)이며, 제공되지 않은 작가·주최·주소·링크는 산출물에 만들지 않는다.",
+      "category": "constraint",
+      "first_seen": 1789050180.773175,
+      "last_seen": 1789050180.773175,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s11",
+    "snapshot_id": "snapshot1",
+    "evidence_path": [
+      "change"
+    ],
+    "resolved_keeper_id": "exhibit-designer",
+    "resolved_revision": 11,
+    "resolved_store": "ordinary",
+    "resolved_evidence": {
+      "added": [
+        {
+          "claim": "운영자가 확정한 task-001 행사 설정은 허구의 오프라인 전시 《기억의 정원》, 초등 고학년·보호자 대상, 2026-10-17 토요일 14:00–17:00, 은빛정류장 전시실, 입장료는 물료가 아니라 물(0원 표기도 승인)이며, 제공되지 않은 작가·주최·주소·링크는 산출물에 만들지 않는다.",
+          "category": "constraint",
+          "first_seen": 1789050180.773175,
+          "last_seen": 1789050180.773175,
+          "origin": {
+            "kind": "injected",
+            "trace_id": ""
+          },
+          "basis": {
+            "kind": "observed"
+          }
+        }
+      ],
+      "removed": [
+        {
+          "claim": "exhibit-editor가 task-001을 claim하여 책자 3페이지 텍스트·편집 구성을 담당하고, Keeper는 시각 디자인(포스터 색감·타이포·그래픽 모티프)을 전담하는 협업 관계이다.",
+          "category": "fact",
+          "first_seen": 1789042910.860721,
+          "last_seen": 1789042910.860721,
+          "origin": {
+            "kind": "injected",
+            "trace_id": ""
+          },
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "claim": "운영자가 확정한 task-001 행사 설정은 허구의 오프라인 전시 《기억의 정원》, 초등 고학년·보호자 대상, 2026-10-17 토요일 14:00–17:00, 은빛정류장 전시실, 입장료 물료가 아니라 물(0원 표기도 승인)이며, 제공되지 않은 작가·주최·주소·링크는 산출물에 만들지 않는다.",
+          "category": "constraint",
+          "first_seen": 1789047344.666198,
+          "last_seen": 1789047344.666198,
+          "origin": {
+            "kind": "injected",
+            "trace_id": ""
+          },
+          "basis": {
+            "kind": "observed"
+          }
+        }
+      ],
+      "retained": 9,
+      "invalidated": []
+    },
+    "change_origin": {
+      "kind": "librarian",
+      "trace_id": "trace-1789042574909-00000"
+    }
+  },
+  {
+    "source_id": "s12",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 0,
+    "fact": {
+      "claim": "keeper_analyze_image는 파일 경로 대신 artifact handle(64자 hex)을 요구하므로 렌더 PNG 검수 시 artifact handle을 넘겨야 한다.",
+      "category": "constraint",
+      "first_seen": 1789043272.137896,
+      "last_seen": 1789043272.137896,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s13",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 1,
+    "fact": {
+      "claim": "exhibit-designer가 확정한 시각 컨셉은 팔레트 #F7F3E8/#2F5233/#8FAE8B/#A8BCC4/#C9A227에 제목은 NanumSquareRound Bold, 본문은 NanumBarunGothic을 쓰는 것이며, 책자·포스터 재생성에 이 컨셉을 반영한다.",
+      "category": "fact",
+      "first_seen": 1789044656.873398,
+      "last_seen": 1789044656.873398,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s14",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 2,
+    "fact": {
+      "claim": "Host Gate replay 결과의 preview는 항상 비어 있으므로(빈 preview가 빈 결과를 뜻하지 않음), 승인된 호출의 출력 내용을 판단하려면 keeper_artifact_read로 참조된 sha256의 실제 바이트를 읽어 확인해야 한다.",
+      "category": "constraint",
+      "first_seen": 1789044656.873398,
+      "last_seen": 1789044656.873398,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s15",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 3,
+    "fact": {
+      "claim": "Edit 호출에서 old_string과 new_string이 완전히 같으면 is_error=false로 반환되지만 바이트가 바뀌지 않는 실패가 운영자 지적 이후에도 반복됐으므로, 편집 전에 Read로 실제 바이트를 확인하고 old_string≠new_string임을 보장한 뒤 Grep/Read로 변경이 실제로 적용됐는지 검증한다.",
+      "category": "lesson",
+      "first_seen": 1789045231.219858,
+      "last_seen": 1789045231.219858,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s16",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 4,
+    "fact": {
+      "claim": "task-001 제작 환경: Python 3.11.2, reportlab 3.6.12, Pillow 9.4.0, cairosvg 2.5.2와 한글 나눔 폰트(스퀘어·스퀘어라운드·바른고딕·고딕·명조·고딕코딩 각 Regular/Bold)가 설치돼 있고, PyMuPDF·fitz·pdf2image는 미설치이므로 PDF→PNG 렌더링은 외부 CLI 렌더러(pdftoppm/pdftocairo/gs/mutool/pypdfium2)를 자동 탐색해 수행해야 한다.",
+      "category": "fact",
+      "first_seen": 1789047786.577775,
+      "last_seen": 1789047786.577775,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s17",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 5,
+    "fact": {
+      "claim": "검증 스크립트의 금지 음절 목록이 과도하게 넓으면 정상 음절(예: 0xBD05 '봅'은 '바라봅니다'의 정상 구성)까지 걸려 검증이 실패하므로, 금지 목록은 실제로 관측된 깨진 조합의 맥락 문자열로 유지하고, 출력 채널에서 깨지기 쉬운 음절은 코드포인트 조립으로 소스에 삽입한다.",
+      "category": "lesson",
+      "first_seen": 1789047786.577775,
+      "last_seen": 1789047786.577775,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s18",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 6,
+    "fact": {
+      "claim": "Goal exhibition-publication-baseline은 verifier_exact 판정에서 refuted됐고(정량 기준 3개인 파일 존재·3페이지·evidence 기록은 증명됐으나, 검증자의 읽기 도구가 PNG/PDF 바이너리를 텍스트 프리뷰로만 반환해 ① 한글 누락 글리프·겹침·잘림 부재 ② 포스터-책자 정보 일치 ③ 가상 전시 명시·미확정 정보 과장 금지 등 정성 기준을 확인하지 못함), 재완료 검증 요청 전에 정성 기준을 기계 검증 가능한 텍스트 증거로 변환해 첨부해야 하며 사람 최종 확인은 아직 수령하지 않은 상태를 유지한다.",
+      "category": "goal",
+      "first_seen": 1789049304.350902,
+      "last_seen": 1789049304.350902,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s19",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 7,
+    "fact": {
+      "claim": "전송 왜곡 우회 검증된 방법: 생성·수정 스크립트를 전부 ASCII(유니코드 이스케이프)로 작성하고 깨지기 쉬운 한글 음절은 chr() 코드포인트 조립으로 삽입하면 출력 채널의 '묻가'류 음절 왜곡을 피할 수 있다.",
+      "category": "validated_approach",
+      "first_seen": 1789049304.350902,
+      "last_seen": 1789049304.350902,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s20",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 8,
+    "fact": {
+      "claim": "검증자는 PNG/PDF 바이너리를 텍스트 프리뷰로만 읽을 수 있어 시각 정성 기준을 직접 확인하지 못하므로, 다음 완료 검증 요청 시에는 pdftotext 등으로 추출한 PDF 텍스트와 이미지 분석 결과를 텍스트 증거로 Goal에 함께 첨부해야 refuted가 재발하지 않는다.",
+      "category": "lesson",
+      "first_seen": 1789049304.350902,
+      "last_seen": 1789049304.350902,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s21",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 9,
+    "fact": {
+      "claim": "운영자 지시: Goal exhibition-publication-baseline은 검증기가 PNG/PDF를 시각 입력으로 받지 못하는 도구 한계로 refuted됐으므로 기준과 최신 산출물을 유지·보존하고 같은 도구 상태에서 동일 완료 요청을 반복하지 말며, 서버 이미지 입력 수정이 준비되면 그때 같은 Goal 검증을 이어간다.",
+      "category": "constraint",
+      "first_seen": 1789049556.563618,
+      "last_seen": 1789049556.563618,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s22",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 10,
+    "fact": {
+      "claim": "task-002(전시 GIF·오리지널 사운드, 담당 exhibit-designer)에 편집자 피드백을 board p-45ef957b30173b6c7ee40073069754db에 게시했으며 내용은 허구 고지 문자열 통일('※ 본 행사는 허구로 구성되었습니다.'), 행사 정보(일시·장소·대상·묣료가 아닌 묣료) 일치, 팔레트·폰트 통일, 주제 '같은 것, 다른 기억' 표현, evidence에 프레임수·재생시간·디코딩 결과 요구이며 확인하지 않은 재생·음질은 확인한 것으로 주장하지 않는다.",
+      "category": "fact",
+      "first_seen": 1789049556.563618,
+      "last_seen": 1789049556.563618,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed",
+        "board": {
+          "post_id": "p-45ef957b30173b6c7ee40073069754db"
+        }
+      }
+    }
+  },
+  {
+    "source_id": "s23",
+    "keeper_id": "exhibit-editor",
+    "store": "ordinary",
+    "revision": 20,
+    "snapshot_sha256": "0239a3bfa77b8d50d404ff2bdafab36129f16c3c8388c4a1987c503c04334483",
+    "snapshot_id": "snapshot2",
+    "fact_index": 11,
+    "fact": {
+      "claim": "refuted 사유(정성 기준 2개가 검증 불가)에 대비해 pdftotext 추출 텍스트·이미지 분석 결과·정보 일치 비교를 담은 기계 검증 가능한 텍스트 증거(evidence_quality.md)를 별도 파일로 준비해 두었고, 서버 이미지 입력 수정 후 같은 Goal 검증을 재개할 때 이를 첨부해 refuted가 재발하지 않게 한다.",
+      "category": "fact",
+      "first_seen": 1789049556.563618,
+      "last_seen": 1789049556.563618,
+      "origin": {
+        "kind": "injected",
+        "trace_id": ""
+      },
+      "basis": {
+        "kind": "observed"
+      }
+    }
+  },
+  {
+    "source_id": "s24",
+    "snapshot_id": "snapshot2",
+    "evidence_path": [
+      "change"
+    ],
+    "resolved_keeper_id": "exhibit-editor",
+    "resolved_revision": 20,
+    "resolved_store": "ordinary",
+    "resolved_evidence": {
+      "added": [],
+      "removed": [
+        {
+          "claim": "task-001 입장료 확정 문구는 '묣료'가 아닌 '묣료'로 깨진 전송 왜곡이 아니라 실제로 '묣료' 표기는 모두 무효이며 확인된 문구는 '묣료'가 아닌 '묣료'(실제: '묣료' 왜곡 무효, 확정 '묣료')이다 — 정정하면: 입장료 확정 문구는 '묣료'가 아니라 '묣료'로 전달된 왜곡은 무효이고 실제 확정 문구는 '묣료'가 아닌 '묣료'(='묣료' 오표기 무효, 확정 '묣료') — 최종: 입장료는 '묣료'로 깨진 표기가 모두 무효이며 확정 문구는 '묣료'가 아닌 '묣료'(실제 확정 문구 '묣료'의 왜곡 전송 무효, 책자·포스터 모두 '묣료'가 아닌 '묣료' — 확정 문구는 '묣료'가 아니라 '묣료') — 명확히: 이전 '묣료' 표기는 전송 왜곡으로 전부 무효이고 실제 확정 문구는 '묣료'가 아닌 '묣료'(='묣료' 깨짐 무효, 확정 '묣료')가 아니라 '묣료' — 한 문장으로: 입장료 확정 문구는 '묣료'가 아닌 '묣료'(모든 '묣료' 표기는 전송 왜곡으로 무효)이며 인쇄 최종 포스터는 exhibit-designer 확정본(484,694B, SHA-256 1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16)이고 booklet.pdf(3페이지)·renders/page1~3.png(1241x1754)·evidence.json(정정 기록 포함)은 보존 상태다.",
+          "category": "fact",
+          "first_seen": 1789049556.563618,
+          "last_seen": 1789049556.563618,
+          "origin": {
+            "kind": "injected",
+            "trace_id": ""
+          },
+          "basis": {
+            "kind": "observed",
+            "board": {
+              "post_id": "p-c36a80b0af5448a967fcfdae547f263f",
+              "comment_id": "c-eb93a3f49fc2b3e262eeb6b523fad257"
+            }
+          }
+        }
+      ],
+      "retained": 12,
+      "invalidated": []
+    },
+    "change_origin": {
+      "kind": "explicit_retract",
+      "trace_id": "trace-1789042595401-00001"
+    }
+  }
+]

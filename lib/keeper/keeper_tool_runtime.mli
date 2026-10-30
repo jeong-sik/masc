@@ -1,0 +1,72 @@
+(** Runtime dispatch for descriptor-backed agent tools.
+
+    [Keeper_tool_dispatch_runtime] owns cross-cutting execution bookkeeping. This module
+    owns the descriptor-selected lowerer/handler route for first-class agent
+    tools such as [Execute], [Read], [Grep], and [WebSearch]. *)
+
+(* RFC-0182 Phase 5 PR-A: [sw] / [clock] / [proc_mgr] / [net] /
+   [mcp_session_id] are optional Eio resource fields.  Eio-bound
+   descriptor handlers (masc_keeper_msg, masc_keeper_up, etc.) check
+   for [Some] and return a typed "Eio context not provided" failure
+   when unset. *)
+type capability_authority =
+  | Frozen_surface of Keeper_capability_surface.t
+  | Compatibility_meta
+
+type context =
+  { config : Workspace.config
+  ; meta : Keeper_meta_contract.keeper_meta
+  ; publication_recovery :
+      Keeper_publication_recovery_availability.turn_context
+  ; ctx_work : Keeper_types.working_context
+  ; turn_sandbox_factory : Keeper_sandbox_factory.t option
+  ; artifact_draft_scope : Keeper_artifact_draft_scope.t option
+  ; sw : Eio.Switch.t option
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t option
+  ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
+  ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
+  ; mcp_session_id : string option
+  ; continuation_channel : Keeper_continuation_channel.t option
+    (** RFC-0320: originating connector conversation of the current turn;
+        lets async tools (masc_fusion) route completion wakes back. *)
+  ; gate_context : (unit -> Keeper_gate.causal_context) option
+    (** Exact outer-turn evidence forwarded opaquely to the Keeper Gate. *)
+  ; turn_ref : Ids.Turn_ref.t option
+    (** The outer Keeper turn this call belongs to, for tools that record
+        per-turn evidence. [None] on callers without turn context (tests,
+        direct dispatch). *)
+  ; gate_grant : Keeper_gate.cycle_grant option
+    (** Exact human decision delivered to this Keeper lane. Permission-capable
+        handlers must match it against the normalized request before use. *)
+  ; tool_use_id : string option
+    (** #35456: the parent agent-core invocation's tool_use_id, carried so
+        in-process sub-calls (vision candidate attempts) can join their
+        start/termination rows to this call. [None] on callers without
+        invocation context (tests, direct dispatch). *)
+  ; trace_id : string option
+  ; source_context : Keeper_tool_call_log_context.turn_context option
+    (** Immutable context captured for this invocation. None means unavailable;
+        job ownership never substitutes the Keeper current task. *)
+  ; owned_job_replay : Keeper_owned_job_invocation.replay option
+    (** Sealed original source for Existing-only interrupted launch recovery. *)
+  ; result_projection : Tool_output.model_projection option
+    (** The projection this call's result crosses on its way to the model,
+        resolved for the lane running the call. [None] when the caller did
+        not resolve a lane (composition sub-calls, tests); a handler that
+        sizes its output then uses its descriptor's own projection, the
+        narrower one. *)
+  ; capability_authority : capability_authority
+    (** Production Keeper turns carry [Frozen_surface]. [Compatibility_meta]
+        is explicit and reserved for direct callers without a turn. *)
+  }
+
+val descriptor_for_internal : string -> Keeper_tool_descriptor.t option
+
+val handle :
+  ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read ->
+  ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit ->
+  ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write ->
+  context ->
+  descriptor:Keeper_tool_descriptor.t ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t option

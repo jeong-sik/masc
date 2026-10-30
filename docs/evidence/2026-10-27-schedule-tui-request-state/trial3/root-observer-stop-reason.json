@@ -1,0 +1,10 @@
+{
+  "at": 1793055974.0205052,
+  "observer_pid": 67224,
+  "owned_tui_pid": 67598,
+  "exact_controller_command_verified": true,
+  "normal_signal": "SIGINT",
+  "reason": "Controlled observation ended for frontend-readiness investigation: canonical public identity configured, actual TUI health200 confirmed; first palette input was sent before first completed successful roster refresh. No target request observed. Missing UI-ready prerequisite remains unqualified, not a product input-loss verdict.",
+  "source_prerequisite_investigation": "schedule_multimodel_review ongoing; no automatic keyboard replay",
+  "forcedkill": false
+}

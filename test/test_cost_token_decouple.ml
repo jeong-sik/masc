@@ -1,0 +1,625 @@
+(** Usage validity is observational: provider counters and cost are retained.
+
+    Before this decoupling, an invalid *token count* (e.g. a negative provider
+    counter) forced the accounted [cost_usd] to 0.0 and the
+    source label to an invalid-usage bucket, even when the provider reported a positive
+    authoritative cost. That coupling could silently drop a provider observation
+    from the primary ledger fields.
+
+    These tests pin the decoupled contract on the assembled cost-ledger payload:
+
+    - untrusted token usage + positive cost_usd => the positive cost is accounted
+      ([cost_usd] field), [cost_status="reported"], [cost_usd_source="computed"],
+      WHILE [usage_trust="untrusted"] is still surfaced (token-trust visibility
+      preserved — only the COST coupling was removed).
+    - invalid negative counters remain in the primary fields and carry anomaly
+      provenance; they are not replaced with zero/null.
+    - zero and arbitrarily large counters remain ordinary reported values. *)
+
+open Alcotest
+
+module H = Masc.Keeper_hooks_agent_core
+module Trust = Keeper_usage_trust
+
+let string_field payload key =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`String s) -> s
+      | Some other -> Alcotest.failf "%s not a string: %s" key (Yojson.Safe.to_string other)
+      | None -> Alcotest.failf "%s absent from payload" key)
+  | _ -> Alcotest.fail "payload not an object"
+
+let float_field payload key =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`Float f) -> f
+      | Some (`Int i) -> float_of_int i
+      | Some other -> Alcotest.failf "%s not a number: %s" key (Yojson.Safe.to_string other)
+      | None -> Alcotest.failf "%s absent from payload" key)
+  | _ -> Alcotest.fail "payload not an object"
+
+let int_field payload key =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`Int n) -> n
+      | Some other -> Alcotest.failf "%s not an int: %s" key (Yojson.Safe.to_string other)
+      | None -> Alcotest.failf "%s absent from payload" key)
+  | _ -> Alcotest.fail "payload not an object"
+
+let check_null_field payload key =
+  match payload with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some `Null -> ()
+     | Some other ->
+       Alcotest.failf "%s not null: %s" key (Yojson.Safe.to_string other)
+     | None -> Alcotest.failf "%s absent from payload" key)
+  | _ -> Alcotest.fail "payload not an object"
+
+let check_absent_field payload key =
+  match payload with
+  | `Assoc fields ->
+    check bool (key ^ " absent") true (Option.is_none (List.assoc_opt key fields))
+  | _ -> Alcotest.fail "payload not an object"
+;;
+
+(* Objective invalid-token signal used to prove cost remains independent. *)
+let invalid_tokens : Trust.t =
+  Trust.Usage_untrusted [ "negative_input_tokens" ]
+
+let payload
+    ?(input_tokens = 0)
+    ?(output_tokens = 0)
+    ?(cache_creation_input_tokens = 0)
+    ?(cache_read_input_tokens = 0)
+    ?(usage_missing = false)
+    ~cost_usd
+    ~usage_trust
+    () =
+  H.cost_event_payload
+    ~agent_name:"test_agent"
+    ~task_id:None
+    ~trace_id:"test-trace"
+    ~keeper_turn_id:1
+    ~agent_core_turn_ordinal:0
+    ~model:"test-model"
+    ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+    ~input_tokens
+    ~output_tokens
+    ~cost_usd
+    ~cache_creation_input_tokens
+    ~cache_read_input_tokens
+    ~usage_missing
+    ~usage_trust
+    ()
+
+(* --- the decoupling: untrusted tokens must not drop a real reported cost --- *)
+
+let test_untrusted_tokens_positive_cost_is_accounted () =
+  let p =
+    payload ~input_tokens:(-1) ~cost_usd:0.0123 ~usage_trust:invalid_tokens ()
+  in
+  check (float 1e-9) "positive cost_usd is accounted, not masked to 0.0" 0.0123
+    (float_field p "cost_usd");
+  check string "cost_status reflects the reported cost" "reported"
+    (string_field p "cost_status");
+  check string "cost_usd_source labels the accounted cost as computed" "computed"
+    (string_field p "cost_usd_source")
+
+let test_untrusted_tokens_still_surface_trust () =
+  (* Token-trust visibility is preserved: decoupling cost does NOT silence the
+     usage_trust signal that operators alert on. *)
+  let p =
+    payload ~input_tokens:(-1) ~cost_usd:0.0123 ~usage_trust:invalid_tokens ()
+  in
+  check string "usage_trust still surfaces untrusted" "untrusted"
+    (string_field p "usage_trust")
+
+(* --- invalid counters do not influence cost-source attribution --- *)
+
+let test_untrusted_tokens_zero_cost_stays_zero () =
+  let p =
+    payload ~input_tokens:(-1) ~cost_usd:0.0 ~usage_trust:invalid_tokens ()
+  in
+  check (float 1e-9) "zero cost stays 0.0" 0.0 (float_field p "cost_usd");
+  check string "cost source is independent of token validity"
+    "agent_core_cost_unreported" (string_field p "cost_usd_source");
+  check string "usage_trust still untrusted" "untrusted"
+    (string_field p "usage_trust");
+  check int "negative input remains visible" (-1) (int_field p "input_tokens")
+
+let test_trusted_tokens_positive_cost_unchanged () =
+  (* Regression guard: the always-trusted path is unaffected. *)
+  let p =
+    H.cost_event_payload ~agent_name:"test_agent" ~task_id:None
+      ~trace_id:"test-trace" ~keeper_turn_id:1 ~agent_core_turn_ordinal:0
+      ~model:"test-model" ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~input_tokens:100 ~output_tokens:50 ~cost_usd:0.0042
+      ~usage_trust:Trust.Usage_trusted ()
+  in
+  check (float 1e-9) "trusted positive cost accounted" 0.0042
+    (float_field p "cost_usd");
+  check string "trusted positive cost => computed" "computed"
+    (string_field p "cost_usd_source");
+  check string "trusted positive cost => reported" "reported"
+    (string_field p "cost_status");
+  check int "zero-based AGENT_CORE ordinal is retained" 0
+    (int_field p "agent_core_turn_ordinal")
+
+let test_trusted_tokens_include_cache_delta () =
+  let p =
+    payload
+      ~input_tokens:100
+      ~output_tokens:50
+      ~cache_creation_input_tokens:10
+      ~cache_read_input_tokens:20
+      ~cost_usd:0.0042
+      ~usage_trust:Trust.Usage_trusted
+      ()
+  in
+  check int "cache creation tokens are recorded" 10
+    (int_field p "cache_creation_tokens");
+  check int "cache read tokens are recorded" 20
+    (int_field p "cache_read_tokens");
+  check int "cache miss is derived from input minus read/write cache tokens" 70
+    (int_field p "cache_miss_input_tokens")
+
+let test_invalid_tokens_retain_cache_delta () =
+  let p =
+    payload
+      ~input_tokens:(-1)
+      ~output_tokens:50
+      ~cache_creation_input_tokens:10
+      ~cache_read_input_tokens:20
+      ~cost_usd:0.0
+      ~usage_trust:invalid_tokens
+      ()
+  in
+  check int "cache creation remains visible" 10
+    (int_field p "cache_creation_tokens");
+  check int "cache read remains visible" 20
+    (int_field p "cache_read_tokens");
+  check int "negative cache delta is not clamped" (-31)
+    (int_field p "cache_miss_input_tokens")
+
+let test_zero_and_large_counts_are_retained () =
+  let zero =
+    payload ~input_tokens:0 ~output_tokens:0 ~cost_usd:0.0
+      ~usage_trust:Trust.Usage_trusted ()
+  in
+  check int "zero input retained" 0 (int_field zero "input_tokens");
+  check int "zero output retained" 0 (int_field zero "output_tokens");
+  let large =
+    payload ~input_tokens:2_000_000 ~output_tokens:3_000_000 ~cost_usd:0.0
+      ~usage_trust:Trust.Usage_trusted ()
+  in
+  check int "large input retained" 2_000_000 (int_field large "input_tokens");
+  check int "large output retained" 3_000_000 (int_field large "output_tokens")
+
+let test_missing_usage_is_explicit_null () =
+  let missing =
+    payload ~input_tokens:123 ~output_tokens:456 ~cost_usd:7.89
+      ~usage_missing:true ~usage_trust:Trust.Usage_missing ()
+  in
+  check_null_field missing "input_tokens";
+  check_null_field missing "output_tokens";
+  check_null_field missing "cost_usd";
+  check_null_field missing "cache_creation_tokens";
+  check_null_field missing "cache_read_tokens"
+
+(* The turn-complete event carries both cache counts beside the input they
+   are part of, so a reader can tell the part read from cache from the part
+   processed fresh. Figures are e-masc-the-leader's turn 1853 (2026-09-25). *)
+let test_turn_complete_carries_both_cache_counts () =
+  let module R = Masc.Keeper_usage_resolution in
+  let sample : R.sample =
+    { input_tokens = 3_716_155
+    ; output_tokens = 6_622
+    ; cache_creation_input_tokens = 159_783
+    ; cache_read_input_tokens = 3_556_362
+    ; cost_usd = None
+    }
+  in
+  let usage_resolution : R.t =
+    { observation = Some sample
+    ; basis = R.Per_request
+    ; delta = Some sample
+    ; status = R.Exact
+    ; observed_at = 1_790_000_000.
+    }
+  in
+  let keeper_name = "cache-count-probe" in
+  let subscriber = "test-turn-complete-cache-counts" in
+  let seen = ref None in
+  Eio_main.run @@ fun _env ->
+  Masc.Sse.subscribe_external ~id:subscriber
+    ~callback:(fun (ev : Masc.Sse.external_event) ->
+      match ev.Masc.Sse.ext_payload with
+      | `Assoc fields
+        when List.assoc_opt "type" fields = Some (`String "keeper_turn_complete")
+             && List.assoc_opt "name" fields = Some (`String keeper_name) ->
+        seen := Some ev.Masc.Sse.ext_payload
+      | _ -> ())
+    ();
+  Fun.protect
+    ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber)
+    (fun () ->
+      H.broadcast_resolved_turn_complete ~keeper_name ~turn:1853
+        ~tool_calls_made:30 ~total_turns:1852 ~usage_resolution
+        ~wire_prompt_tokens:(Some (3_508, 66)));
+  match !seen with
+  | None -> fail "no keeper_turn_complete event was broadcast"
+  | Some p ->
+    check int "input" 3_716_155 (int_field p "input_tokens");
+    check int "cache reads" 3_556_362 (int_field p "cache_read_tokens");
+    check int "cache writes" 159_783 (int_field p "cache_creation_tokens");
+    (* The turn's summed wire timings ride the same event. *)
+    check int "kv reused" 3_508 (int_field p "cache_n");
+    check int "prefilled" 66 (int_field p "prompt_n")
+
+let test_native_decode_rate_uses_current_field_only () =
+  let timings : Agent_core.Types.inference_timings =
+    { prompt_n = None
+    ; prompt_ms = None
+    ; prompt_per_second = None
+    ; predicted_n = Some 5
+    ; predicted_ms = Some 100.0
+    ; predicted_per_second = Some 50.0
+    ; cache_n = None
+    }
+  in
+  let telemetry : Agent_core.Types.inference_telemetry =
+    { system_fingerprint = None
+    ; timings = Some timings
+    ; reasoning_tokens = None
+    ; request_latency_ms = None
+    ; peak_memory_gb = None
+    ; provider_kind = None
+    ; reasoning_effort = None
+    ; canonical_model_id = None
+    ; reported_model = None
+    ; reasoning_source = None
+    ; reasoning_prefix = None
+    ; inline_content_replay = None
+  ; response_replay = None
+    ; effective_context_window = None
+    ; provider_internal_action_count = None
+    ; ttfrc_ms = None
+    ; prefill_ms = None
+    }
+  in
+  let payload =
+    H.cost_event_payload
+      ~agent_name:"test_agent"
+      ~task_id:None
+      ~trace_id:"test-trace"
+      ~keeper_turn_id:1
+      ~agent_core_turn_ordinal:0
+      ~model:"test-model"
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~input_tokens:10
+      ~output_tokens:5
+      ~cost_usd:0.0
+      ~telemetry
+      ()
+  in
+  check
+    (float 1e-9)
+    "current hardware decode field"
+    50.0
+    (float_field payload "hw_decode_tokens_per_second");
+  check_absent_field payload "provider_tokens_per_second"
+;;
+
+(* RFC-0382: llama-server/Ollama wire timings carry [cache_n] (KV-cache
+   reused prompt tokens) and [prompt_n] (freshly prefilled prompt tokens).
+   Both must land on the cost-ledger payload so the per-turn KV reuse ratio
+   is reconstructible from the ledger alone. *)
+let test_timings_cache_fields_land_on_payload () =
+  let timings : Agent_core.Types.inference_timings =
+    { prompt_n = Some 26
+    ; prompt_ms = Some 709.5
+    ; prompt_per_second = Some 36.6
+    ; predicted_n = Some 512
+    ; predicted_ms = Some 54893.4
+    ; predicted_per_second = Some 9.3
+    ; cache_n = Some 1741
+    }
+  in
+  let telemetry : Agent_core.Types.inference_telemetry =
+    { system_fingerprint = None
+    ; timings = Some timings
+    ; reasoning_tokens = None
+    ; request_latency_ms = None
+    ; peak_memory_gb = None
+    ; provider_kind = None
+    ; reasoning_effort = None
+    ; canonical_model_id = None
+    ; reported_model = None
+    ; reasoning_source = None
+    ; reasoning_prefix = None
+    ; inline_content_replay = None
+  ; response_replay = None
+    ; effective_context_window = None
+    ; provider_internal_action_count = None
+    ; ttfrc_ms = None
+    ; prefill_ms = None
+    }
+  in
+  let payload =
+    H.cost_event_payload
+      ~agent_name:"test_agent"
+      ~task_id:None
+      ~trace_id:"test-trace"
+      ~keeper_turn_id:1
+      ~agent_core_turn_ordinal:0
+      ~model:"qwen3.8-27b"
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~input_tokens:26
+      ~output_tokens:512
+      ~cost_usd:0.0
+      ~telemetry
+      ()
+  in
+  check int "cache_n" 1741 (int_field payload "cache_n");
+  check int "prompt_n" 26 (int_field payload "prompt_n")
+;;
+
+let test_response_and_settlement_accounting () =
+  let response id ~creation ~read ~input ~missing projection =
+    H.cost_event_payload ~agent_name:"keeper" ~task_id:None ~trace_id:"trace"
+      ~keeper_turn_id:7 ~agent_core_turn_ordinal:2 ~model:"model"
+      ~response_id:id ~usage_projection:projection
+      ~runtime_attempt:("routing-run", "runtime-a", 1)
+      ~input_tokens:input ~output_tokens:12 ~cost_usd:0.0
+      ~cache_creation_input_tokens:creation ~cache_read_input_tokens:read
+      ~usage_missing:missing ()
+  in
+  let raw = response "reply-1" ~creation:20 ~read:70 ~input:100 ~missing:false
+      (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request) in
+  check string "raw observation links to the exact response" "reply-1"
+    (string_field raw "response_id");
+  check int "cache writes are newly processed input too" 30
+    (int_field raw "non_cached_input_tokens");
+  check int "cache misses remain a separate measurement" 10
+    (int_field raw "cache_miss_input_tokens");
+  let settled = response "reply-1" ~creation:20 ~read:70 ~input:100 ~missing:false
+      Cost_ledger.Resolved_delta in
+  check_null_field settled "response_id";
+  List.iter (check_null_field settled)
+    [ "routing_run_id"; "runtime_id"; "lane_attempt_index" ];
+  check string "response joins its lane walk" "routing-run"
+    (string_field raw "routing_run_id");
+  check string "actual runtime rather than assignment alias" "runtime-a"
+    (string_field raw "runtime_id");
+  check int "response retains failed or successful attempt index" 1
+    (int_field raw "lane_attempt_index");
+  check string "settlement is never disguised as another response" "resolved_delta"
+    (string_field settled "usage_projection");
+  check string "a raw row says what its counts cover" "per_request"
+    (string_field raw "usage_scope");
+  check_null_field settled "usage_scope";
+  let missing = response "reply-2" ~creation:0 ~read:0 ~input:0 ~missing:true
+      (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request) in
+  check string "missing usage still has response identity" "reply-2"
+    (string_field missing "response_id");
+  check_null_field missing "non_cached_input_tokens";
+  let invalid = response "reply-3" ~creation:40 ~read:70 ~input:100 ~missing:false
+      (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request) in
+  check_null_field invalid "non_cached_input_tokens";
+  let cached = response "reply-4" ~creation:0 ~read:100 ~input:100 ~missing:false
+      (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request) in
+  check int "fully cached input is a reported zero" 0
+    (int_field cached "non_cached_input_tokens")
+
+(* A raw row keeps the scope of its counts through the wire. *)
+let raw_row scope =
+  { Cost_ledger.agent = "keeper"
+  ; task_id = None
+  ; model = "model"
+  ; usage = Cost_ledger.Usage_reported { input_tokens = 900; output_tokens = 7; cost_usd = 0.0 }
+  ; usage_projection = Cost_ledger.Raw_observation scope
+  ; timestamp = "2026-09-25T00:00:00Z"
+  ; ts_unix = 1790294400.0
+  ; source =
+      Cost_ledger.Auto_trajectory
+        { trace_id = "trace"; keeper_turn_id = 3; agent_core_turn_ordinal = 1 }
+  }
+;;
+
+let decoded_projection json =
+  match Cost_ledger.of_json json with
+  | Ok row -> row.Cost_ledger.usage_projection
+  | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error)
+;;
+
+let without_field key = function
+  | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+  | json -> json
+;;
+
+let test_raw_rows_carry_their_scope () =
+  List.iter
+    (fun scope ->
+       match decoded_projection (Cost_ledger.to_json (raw_row scope)) with
+       | Cost_ledger.Raw_observation decoded ->
+         check string "scope survives the wire"
+           (Runtime_usage_scope.to_string scope)
+           (Runtime_usage_scope.to_string decoded)
+       | Cost_ledger.Resolved_delta -> fail "a raw row decoded as a resolved delta"
+       | Cost_ledger.Resolved_attempt_delta _ ->
+         fail "a raw row decoded as an attempt's resolved delta")
+    Runtime_usage_scope.all
+;;
+
+(* A raw row that does not say what its counts cover cannot be read; it is
+   rejected, not given a guessed scope. *)
+let test_a_raw_row_without_a_scope_is_rejected () =
+  let unscoped =
+    without_field "usage_scope"
+      (Cost_ledger.to_json (raw_row Runtime_usage_scope.Per_request))
+  in
+  match Cost_ledger.of_json unscoped with
+  | Error _ -> ()
+  | Ok _ -> fail "a raw row without a scope was accepted"
+;;
+
+(* A resolved delta is one Keeper turn's spend; a scope on it is a row this
+   build did not write. *)
+let test_a_resolved_row_with_a_scope_is_rejected () =
+  let resolved =
+    match Cost_ledger.to_json { (raw_row Runtime_usage_scope.Per_request) with
+                                usage_projection = Cost_ledger.Resolved_delta } with
+    | `Assoc fields ->
+      `Assoc (("usage_scope", `String "turn_total") :: List.remove_assoc "usage_scope" fields)
+    | json -> json
+  in
+  match Cost_ledger.of_json resolved with
+  | Error _ -> ()
+  | Ok _ -> fail "a resolved row carrying a scope was accepted"
+;;
+
+let attempt_row =
+  { (raw_row Runtime_usage_scope.Per_request) with
+    usage_projection =
+      Cost_ledger.Resolved_attempt_delta
+        { routing_run_id = "run-before-restart"; lane_attempt_index = 2; reading_index = 1 }
+  }
+;;
+
+(* An attempt's resolved reading names its attempt and position, and a
+   caller's field of the same name cannot rename it. *)
+let test_an_attempt_row_round_trips_its_reading () =
+  let json =
+    Cost_ledger.to_json
+      ~extra_fields:[ "lane_attempt_index", `Int 9; "routing_run_id", `String "other-run" ]
+      attempt_row
+  in
+  check int "the row's own attempt" 2 (int_field json "lane_attempt_index");
+  check string "the row's own run" "run-before-restart"
+    (Yojson.Safe.Util.(json |> member "routing_run_id" |> to_string));
+  check int "its reading" 1 (int_field json "reading_index");
+  check_null_field json "usage_scope";
+  match decoded_projection json with
+  | Cost_ledger.Resolved_attempt_delta { routing_run_id; lane_attempt_index; reading_index } ->
+    check (triple string int int) "the reading survives the wire"
+      ("run-before-restart", 2, 1)
+      (routing_run_id, lane_attempt_index, reading_index)
+  | Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_delta ->
+    fail "an attempt row decoded as another projection"
+;;
+
+(* A server that restarts during a turn runs its attempts again from lane
+   index 0, and an official client numbers its turns from 1 again, so two
+   attempts can share the lane index, the ordinal and the reading position.
+   The run that made each attempt keeps their rows apart: a reader drops both
+   rows of a shared key. *)
+let test_attempts_of_two_runs_have_distinct_keys () =
+  let after_restart =
+    { attempt_row with
+      usage_projection =
+        Cost_ledger.Resolved_attempt_delta
+          { routing_run_id = "run-after-restart"; lane_attempt_index = 2; reading_index = 1 }
+    }
+  in
+  match Cost_ledger.inference_key attempt_row, Cost_ledger.inference_key after_restart with
+  | Some before, Some after ->
+    check bool "distinct keys" true (Cost_ledger.compare_inference_key before after <> 0)
+  | None, _ | _, None -> fail "an attempt row has no inference key"
+;;
+
+let test_an_attempt_row_without_its_run_is_refused () =
+  match Cost_ledger.of_json (without_field "routing_run_id" (Cost_ledger.to_json attempt_row)) with
+  | Error _ -> ()
+  | Ok _ -> fail "an attempt row without its run was accepted"
+;;
+
+let test_an_attempt_row_without_its_reading_is_rejected () =
+  match Cost_ledger.of_json (without_field "reading_index" (Cost_ledger.to_json attempt_row)) with
+  | Error _ -> ()
+  | Ok _ -> fail "an attempt row without its reading was accepted"
+;;
+
+let test_a_manual_attempt_row_is_rejected () =
+  match
+    Cost_ledger.of_json
+      (Cost_ledger.to_json { attempt_row with source = Cost_ledger.Manual_cli })
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "a manual row claimed an attempt reading"
+;;
+
+(* The turn's settlement pairs with its decision by turn and ordinal. An
+   attempt reading of the same turn and ordinal is a different spend and
+   must not land in that pair. *)
+let test_an_attempt_reading_keys_apart_from_the_turn () =
+  let turn_row = { attempt_row with usage_projection = Cost_ledger.Resolved_delta } in
+  match Cost_ledger.inference_key turn_row, Cost_ledger.inference_key attempt_row with
+  | Some turn_key, Some attempt_key ->
+    check bool "two keys" true (Cost_ledger.compare_inference_key turn_key attempt_key <> 0)
+  | None, _ | _, None -> fail "an auto row has no key"
+;;
+
+let () =
+  run "cost_token_decouple"
+    [
+      ( "decouple",
+        [
+          test_case "untrusted tokens + positive cost is accounted" `Quick
+            test_untrusted_tokens_positive_cost_is_accounted;
+          test_case "untrusted tokens still surface usage_trust" `Quick
+            test_untrusted_tokens_still_surface_trust;
+        ] );
+      ( "no-op-leg",
+        [
+          test_case "untrusted tokens + zero cost stays 0.0/untrusted" `Quick
+            test_untrusted_tokens_zero_cost_stays_zero;
+          test_case "trusted tokens + positive cost unchanged" `Quick
+            test_trusted_tokens_positive_cost_unchanged;
+        ] );
+      ( "cache-delta",
+        [
+          test_case "response and settlement token attribution" `Quick
+            test_response_and_settlement_accounting;
+          test_case "trusted tokens include cache delta" `Quick
+            test_trusted_tokens_include_cache_delta;
+          test_case "invalid tokens retain cache delta" `Quick
+            test_invalid_tokens_retain_cache_delta;
+          test_case "zero and large counts are retained" `Quick
+            test_zero_and_large_counts_are_retained;
+          test_case "missing usage is explicit null" `Quick
+            test_missing_usage_is_explicit_null;
+          test_case "native decode rate uses current field only" `Quick
+            test_native_decode_rate_uses_current_field_only;
+          test_case "timings cache_n/prompt_n land on payload" `Quick
+            test_timings_cache_fields_land_on_payload;
+          test_case "turn complete carries both cache counts" `Quick
+            test_turn_complete_carries_both_cache_counts;
+        ] );
+      ( "usage-scope",
+        [
+          test_case "raw rows carry their scope" `Quick test_raw_rows_carry_their_scope;
+          test_case "a raw row without a scope is rejected" `Quick
+            test_a_raw_row_without_a_scope_is_rejected;
+          test_case "a resolved row with a scope is rejected" `Quick
+            test_a_resolved_row_with_a_scope_is_rejected;
+        ] );
+      ( "attempt-reading",
+        [
+          test_case "an attempt row round-trips its reading" `Quick
+            test_an_attempt_row_round_trips_its_reading;
+          test_case "an attempt row without its reading is rejected" `Quick
+            test_an_attempt_row_without_its_reading_is_rejected;
+          test_case "attempts of two runs have distinct keys" `Quick
+            test_attempts_of_two_runs_have_distinct_keys;
+          test_case "an attempt row without its run is refused" `Quick
+            test_an_attempt_row_without_its_run_is_refused;
+          test_case "a manual attempt row is rejected" `Quick
+            test_a_manual_attempt_row_is_rejected;
+          test_case "an attempt reading keys apart from the turn" `Quick
+            test_an_attempt_reading_keys_apart_from_the_turn;
+        ] );
+    ]

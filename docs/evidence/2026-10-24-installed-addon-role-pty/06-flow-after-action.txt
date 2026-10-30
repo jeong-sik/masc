@@ -1,0 +1,46 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Plugins                                                                                                                             │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│Action target: Browser original target · worker-browser                                                                                   │
+│Declared Add-on layers · last received snapshot                                                                                           │
+│Same layer: independent dependencies. Downward: declared upstream -> consumer.                                                            │
+│Layer placement describes wiring; execution and delivery need their own receipts.                                                         │
+│                                                                                                                                          │
+│Bound external inputs · declared sources                                                                                                  │
+│  No external source bindings in this view                                                                                                │
+│                                                                                                                                          │
+│Add-on layers · worker state and latest completed result summary                                                                          │
+│                                                                                                                                          │
+│Layer 0                                                                                                                                   │
+│  [worker-execution]  |  [browser-installation]  |  [mismatch-installation]                                                               │
+│    worker-execution: attached · last completed: 0 records                                                                                │
+│    browser-installation: attached · last completed: 0 records                                                                            │
+│    mismatch-installation: attached · last completed: 0 records                                                                           │
+│                                                                                                                                          │
+│Declared inputs and outputs                                                                                                               │
+│  worker-execution · Execution worker raw-first · attached                                                                                │
+│  No upstream Add-on dependency (D shows external/owned source binding)                                                                   │
+│> browser-installation · Browser original target · attached                                                                               │
+│  No upstream Add-on dependency (D shows external/owned source binding)                                                                   │
+│  mismatch-installation · Mismatch must stay unverified · attached                                                                        │
+│  No upstream Add-on dependency (D shows external/owned source binding)                                                                   │
+│                                                                                                                                          │
+│Result -> retained evidence -> explicit Keeper / Broadcast sharing -> agent use                                                           │
+│Delivery acceptance and agent reading are separate recorded stages.                                                                       │
+│No evidence sharing receipt in this session.                                                                                              │
+│f:back to observations  D:technical details  J/K:scroll                                                                                   │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  r:refresh
+ Choose a Keeper before writing · i:choose

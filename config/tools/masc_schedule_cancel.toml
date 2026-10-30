@@ -1,0 +1,25 @@
+name = "masc_schedule_cancel"
+description = """
+Cancel a scheduled or due request before execution.
+A running or finished one is refused with current_status and last_wake.
+You are recorded as the canceller. You may cancel a schedule you made or one
+that wakes you; any other is refused with error_kind not_schedule_owner."""
+additional_properties = false
+
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 21 times in 9 turns, 614 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 9 extra requests over the same week.
+defer_loading = true
+
+[[params]]
+name = "schedule_id"
+type = "string"
+required = true
+description = "Schedule id to cancel."
+
+[[params]]
+name = "reason"
+type = "string"
+required = true
+description = "Reason for operator-visible cancellation."

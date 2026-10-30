@@ -1,0 +1,22 @@
+{
+  "requested_at": "2026-10-21T15:26:33.456251+00:00",
+  "workflow": "pr-check.yml",
+  "workflow_ref": "main",
+  "source_sha": "003f52e210d31abe087f0edeba335e5bb095f4af",
+  "scenario": "addon-lifecycle",
+  "run_id": 39625447860,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39625447860",
+  "dispatch": "accepted",
+  "result": "not read at dispatch boundary",
+  "selected_suites": [
+    "test_tui_lane_addons",
+    "test_lane_addon_application"
+  ],
+  "not_proven": [
+    "successful compilation",
+    "qualified matching executables",
+    "actual corrected global Slice",
+    "installed operator runtime",
+    "full54"
+  ]
+}

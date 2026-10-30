@@ -1,0 +1,84 @@
+{
+  "observed_at_utc": "2026-09-12T11:33:15.470676+00:00",
+  "operations": {
+    "exhibit-editor": [
+      {
+        "operation_id": "kmsg-39825b6f9ece6b32ec403230b2531748",
+        "state": "failed",
+        "created_at": 1789208950.259119,
+        "started_at": 1789212474.088111,
+        "completed_at": 1789212474.138894,
+        "outcome_ref": null,
+        "failure_kind": "Turn_exception",
+        "failure_detail": "turn_failed: original direct runtime checkpoint is unavailable or invalid (operation=kmsg-39825b6f9ece6b32ec403230b2531748 trace=trace-1789042595401-00001 turn=644 sha256=a068b517b8c0aabb1401bd8e8bda0b3c14a33c996b51eefe8002fe98b41e94f5); continuation cannot be replayed"
+      },
+      {
+        "operation_id": "kmsg-290f18125241cc7094ae744f136c574a",
+        "state": "succeeded",
+        "created_at": 1789209232.586452,
+        "started_at": 1789212474.141286,
+        "completed_at": 1789212526.988583,
+        "outcome_ref": "trace-1789042595401-00001#384",
+        "failure_kind": null,
+        "failure_detail": null
+      }
+    ],
+    "exhibit-designer": [
+      {
+        "operation_id": "kmsg-07110a5ab15f29dd31f83f2eb29f6543",
+        "state": "queued",
+        "created_at": 1789212515.243637,
+        "started_at": null,
+        "completed_at": null,
+        "outcome_ref": null,
+        "failure_kind": null,
+        "failure_detail": null
+      }
+    ]
+  },
+  "semantic": {
+    "exhibit-editor": [
+      {
+        "id": {
+          "id": "kmsg-39825b6f9ece6b32ec403230b2531748",
+          "kind": "direct_operation"
+        },
+        "revision": 4,
+        "phase": {
+          "kind": "settled",
+          "terminal": {
+            "detail": "turn_failed: original direct runtime checkpoint is unavailable or invalid (operation=kmsg-39825b6f9ece6b32ec403230b2531748 trace=trace-1789042595401-00001 turn=644 sha256=a068b517b8c0aabb1401bd8e8bda0b3c14a33c996b51eefe8002fe98b41e94f5); continuation cannot be replayed",
+            "kind": "failed"
+          }
+        },
+        "updated_at": 1789212474.138894,
+        "gate_obligations": null
+      }
+    ],
+    "exhibit-designer": [
+      {
+        "id": {
+          "id": "kmsg-07110a5ab15f29dd31f83f2eb29f6543",
+          "kind": "direct_operation"
+        },
+        "revision": 3,
+        "phase": {
+          "detail": "Gate yield checkpoint belongs to another operation",
+          "kind": "recovering",
+          "origin": {
+            "binding": {
+              "approval_ids": [
+                "appr_01a09560-970c-7000-8b3d-0a5a1516a1c1"
+              ],
+              "obligations": [],
+              "runtime_suffix": null
+            },
+            "kind": "gate_binding"
+          }
+        },
+        "updated_at": 1789212571.408919,
+        "gate_obligations": null
+      }
+    ]
+  }
+}

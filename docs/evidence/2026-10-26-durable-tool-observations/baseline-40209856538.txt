@@ -1,0 +1,14 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40209856538
+Complete raw log SHA256: daf778baf7f2cd4d03ff2379f5622c3fe773abbf2a6dd21fc05483bcec7a8f0f
+Complete raw log bytes: 167989
+Selected checkout, changed assertions, failures and summaries only; omitted assertions are not claimed by this excerpt.
+
+test suite	Checkout	2026-10-25T16:03:50.9307879Z HEAD is now at fbc4dadd test(agent): expose independent durable tool event identity
+test suite	Test	2026-10-25T16:05:30.9560565Z ASSERT same occurrence identities and sequence after observer failure
+test suite	Test	2026-10-25T16:05:31.0551775Z ASSERT called observation arrives before effect
+test suite	Test	2026-10-25T16:05:31.0567641Z ASSERT bus occurrence uses canonical sequence
+test suite	Test	2026-10-25T16:05:31.0586317Z   [FAIL]        provider_mock_extra         24   durable tool bus uses canoni...
+test suite	Test	2026-10-25T16:05:31.1170141Z │ [FAIL]        provider_mock_extra         24   durable tool bus uses can...  │
+test suite	Test	2026-10-25T16:05:31.1171121Z File "packages/agent_core/test/test_pipeline.ml", line 1915, character 4:
+test suite	Test	2026-10-25T16:05:31.1171525Z FAIL bus occurrence uses canonical sequence
+test suite	Test	2026-10-25T16:05:31.1181345Z File "packages/agent_core/test/dune", line 151, characters 2-15:

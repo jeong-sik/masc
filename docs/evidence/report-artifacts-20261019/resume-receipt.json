@@ -1,0 +1,27 @@
+{
+  "scope": "real isolated HTTP service and browser; no semantic model or production deployment claim",
+  "binaryCommit": "5e2483c8857a18c0e7e8391a8fa5f7b77b1bf748",
+  "checkedAt": "2026-10-19T03:31:54.399Z",
+  "mode": "resume",
+  "checks": [
+    "service PID changed since successful create proof",
+    "actual binary commit, matched dashboard source and isolated workspace agree",
+    "exact content digests, immutable old revision, newest metadata and list agree",
+    "actual dashboard selection, GFM table rendering, source bytes, old version download and URL reload",
+    "desktop/mobile HTML counter interaction and denied parent document/storage/fetch; screenshots retained"
+  ],
+  "dashboardStatus": "ok",
+  "servicePid": 70999,
+  "documents": {
+    "markdown": {
+      "id": "artifact-3488095f6d622e1db369a9dbe48b8f7f",
+      "firstSha256": "b713e6708ebb762cf4f216c2b09a0b003746d68bec42782a5cf22bfb8523db80",
+      "latestSha256": "125a478fb5fc134923379620c08b234dd27e44d819aa9cdb73ab8f383b00fc88"
+    },
+    "html": {
+      "id": "artifact-193a7c23c60bd8eef24956f5ffd40284",
+      "sha256": "fc4534a7f56b3ef9858ee3dc56aba23bf5e95d0d0748a9c94d832a529246ec1c"
+    }
+  },
+  "status": "passed"
+}

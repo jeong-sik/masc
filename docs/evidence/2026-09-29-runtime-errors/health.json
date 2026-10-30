@@ -1,0 +1,56 @@
+{
+  "status": "ok",
+  "overall_status": "degraded",
+  "overall_status_reasons": [
+    "keeper_reaction_ledger:reaction_ledger_pending_stimulus",
+    "keeper_event_queue:runnable_backlog=36",
+    "keeper_event_queue:recoverable_backlog=4"
+  ],
+  "operator_action_reasons": [
+    "keeper_reaction_ledger:reaction_ledger_pending_stimulus",
+    "keeper_event_queue:recoverable_backlog=4"
+  ],
+  "build": {
+    "release_version": "0.46.0",
+    "binary_version": "0.46.0",
+    "repo_version": "0.46.0",
+    "commit": "c183bd896cdc4b7ad4b3a2addd4865ef643220cd",
+    "commit_source": "embedded",
+    "binary_commit": "c183bd896cdc4b7ad4b3a2addd4865ef643220cd",
+    "binary_commit_source": "embedded",
+    "ocaml_dos_core": {
+      "source_digest": "2a711d6932bbb72699645a40e835f8a1",
+      "pinned_source_digest": "2a711d6932bbb72699645a40e835f8a1",
+      "matches_pin": true
+    },
+    "provenance_source": "self_observed",
+    "executable_sha256": "2172e2e8e8f74254cc12c7e2f3fe10bedf9878cd724c1c5e36e230650f8cd9af",
+    "binary_commit_unix_ts": 1790601454.0,
+    "binary_commit_age_seconds": 42648,
+    "repo_head_commit": "0f70e5fe8b",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1790643238.0,
+    "repo_head_commit_age_seconds": 864,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "runtime_instance_id": "01a0eab3-2a4b-7000-b046-93594b9d12c4",
+    "started_at": "2026-09-29T01:06:45Z",
+    "uptime_seconds": 96
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "current_task_path": "/Users/dancer/me/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": true,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/Users/dancer/me",
+    "env_masc_base_path": "/Users/dancer/me",
+    "resolution_source": "explicit_env"
+  }
+}

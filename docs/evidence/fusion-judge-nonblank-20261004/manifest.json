@@ -1,0 +1,25 @@
+{
+  "base": "a3461f1fb69fc85041ab62ae0d27a60902c1c90d",
+  "compiler": "OCaml 5.5.1",
+  "scope": "actual isolated native Judge decoder; 11 Judge parser test functions from test_fusion.ml; no provider, server or sink execution",
+  "source_sha256": {
+    "lib/fusion_core/fusion_judge_parse.ml": "074a60118fdb03f331f7981d6f15b9fc0926692918ea0816c00b1d55bb2476c5",
+    "lib/fusion_core/fusion_judge_parse.mli": "a2089aec1547586c50c827a1a79c38ab376b3c849dd1d049e52bfaaa0044fa9e",
+    "config/prompts/fusion.judge.md": "9edc35990cc649621115bebb955d85532d4dcdef0ba18b44182065df50d76a2c",
+    "test/fusion_core/test_fusion.ml": "5eea2424c60ff4f85ed17c3bf15259ee2a348c69e3e1d1a1f70f76fec5e85154",
+    "test/test_fusion_official_client_panel.ml": "deeb947987b850c1cb4e3a42bc5472f7f9cef8a3238252dc80a7a0d01ef59eb6"
+  },
+  "binary_sha256": {
+    "baseline": "e8dc3feb2b80dfdabe61db976974e3b1493a3141954b54c632ce6462f9c53ca4",
+    "candidate": "8089c562b67c24d0f8c123eaccd46a32365063c5ca4db91e2569c6e809b6d848"
+  },
+  "parser_test_binary_sha256": "0a15a8cbe0323026b248e129ee875542f0d1abcd65626b21f9bf300106ce6a1d",
+  "cached_type_source_matches_base": true,
+  "checks": {
+    "native_decoder": "baseline accepts empty and whitespace Answer; candidate rejects both; Insufficient and supported Answer remain accepted",
+    "parser_test_slice": "11/11 passed, including empty/whitespace values at all five conclusion positions",
+    "provider_fallback_fixture": "authored, not run",
+    "full_fusion_core_suite": "not run",
+    "full_product_build": "not run"
+  }
+}

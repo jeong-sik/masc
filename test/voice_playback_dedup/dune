@@ -1,0 +1,6 @@
+; Whether a playback is a repeat of the last one is decided on the text itself,
+; not on its hash. Issue #26238.
+
+(test
+ (name test_voice_playback_dedup)
+ (libraries alcotest masc.voice_bridge_core))

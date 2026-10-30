@@ -1,0 +1,17 @@
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -intf lib/auth/auth.mli
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl lib/auth/auth_credential_base.ml
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -intf lib/auth/auth_token_prune.mli
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl lib/auth/auth_token_prune.ml
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl bin/main_eio.ml
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl test/test_auth_token_prune_transaction.ml
+exit_code=0

@@ -1,0 +1,244 @@
+(** Tests for [Masc_tui_csi].
+
+    The sequences here are what a terminal puts on the wire, written as the
+    parameters and final byte the reader hands over. Ghostty, kitty, WezTerm,
+    foot, Alacritty and iTerm2 all speak the Kitty keyboard protocol, so the
+    modifier forms are not hypothetical -- they are what this surface receives
+    the moment it asks for them. *)
+
+open Alcotest
+
+module Csi = Masc_tui_csi
+
+let named ~parameters ~final = Csi.name ~parameters ~final
+
+let check_name description expected parameters final =
+  check (option string) description (Some expected) (named ~parameters ~final)
+;;
+
+(* Every binding that existed before modifiers were readable has to keep its
+   spelling. A bare arrow gains no prefix, so nothing that reads "up" today
+   starts reading "shift-up" tomorrow. *)
+let test_legacy_arrows_keep_bare_names () =
+  check_name "up" "up" "" 'A';
+  check_name "down" "down" "" 'B';
+  check_name "right" "right" "" 'C';
+  check_name "left" "left" "" 'D';
+  check_name "home" "home" "" 'H';
+  check_name "end" "end" "" 'F'
+;;
+
+let test_legacy_tilde_keys () =
+  check_name "pageup" "pageup" "5" '~';
+  check_name "pagedown" "pagedown" "6" '~';
+  check_name "home via 1" "home" "1" '~';
+  check_name "end via 4" "end" "4" '~'
+;;
+
+let test_chat_schedule_key () =
+  List.iter (fun (parameters, final) -> check_name "chat schedule toggle" "f9" parameters final)
+    ["20", '~'; "20;1", '~'; "57372;1", 'u'];
+  check_name "modified F9 stays distinct" "ctrl-f9" "20;5" '~'
+;;
+
+let test_mouse_toggle_is_separate_from_chat_queue () =
+  List.iter (fun (parameters, final) ->
+      check_name "mouse ownership key" "f2" parameters final)
+    [ "", 'Q'; "12", '~'; "57365;1", 'u' ];
+  check_name "Ctrl-T remains the queue key" "\020" "116;5" 'u'
+;;
+
+let test_msx_checkpoint_keys () =
+  List.iter (fun (parameters, final, expected) ->
+    check_name "checkpoint key reaches binding" expected parameters final)
+    [ "14", '~', "f4"; "1", 'S', "f4"; "57367;1", 'u', "f4"
+    ; "15", '~', "f5"; "15;1", '~', "f5"; "57368;1", 'u', "f5"
+    ; "17", '~', "f6"; "18", '~', "f7"; "19", '~', "f8"
+    ; "57371;1", 'u', "f8"
+    ; "17;1", '~', "f6"; "18;1", '~', "f7"
+    ; "57369;1", 'u', "f6"; "57370;1", 'u', "f7"
+    ; "17;2", '~', "shift-f6"; "57370;5", 'u', "ctrl-f7"
+    ; "17;1:1", '~', "f6"; "18;1:2", '~', "f7"
+    ; "57369;2:1", 'u', "shift-f6"; "57370;5:2", 'u', "ctrl-f7"
+    ];
+  List.iter (fun (parameters, final) ->
+    check (option string) "checkpoint release cannot invoke binding" None
+      (named ~parameters ~final))
+    [ "15;1:3", '~'; "57368;1:3", 'u'
+    ; "17;1:3", '~'; "18;1:3", '~'; "19;1:3", '~'; "57371;1:3", 'u'
+    ; "57369;1:3", 'u'; "57370;5:3", 'u' ]
+;;
+
+(* [ESC \[ 1;2 A] is Shift+Up. This is the shape that used to fall through to
+   "unknown-esc": the parameters were no longer empty, and nothing read them. *)
+let test_modified_arrows () =
+  check_name "shift-up" "shift-up" "1;2" 'A';
+  check_name "alt-down" "alt-down" "1;3" 'B';
+  check_name "ctrl-right" "ctrl-right" "1;5" 'C';
+  check_name "ctrl-shift-left" "ctrl-shift-left" "1;6" 'D'
+;;
+
+(* The Kitty protocol's own final. The first parameter is a code point. A
+   plain or newly distinguishable chord keeps a name, while Ctrl+letter must
+   remain the C0 byte that the existing bindings receive in legacy mode. *)
+let test_csi_u_letters () =
+  check_name "ctrl-p" "\016" "112;5" 'u';
+  check_name "ctrl-shift-f" "ctrl-shift-f" "102;6" 'u';
+  check_name "alt-a" "alt-a" "97;3" 'u'
+;;
+
+let test_csi_u_control_letters_match_legacy_bytes () =
+  for offset = 0 to 25 do
+    let letter = Char.chr (Char.code 'a' + offset) in
+    let parameters = Printf.sprintf "%d;5" (Char.code letter) in
+    check_name
+      (Printf.sprintf "ctrl-%c" letter)
+      (String.make 1 (Char.chr (offset + 1)))
+      parameters 'u'
+  done
+;;
+
+(* A terminal may report an upper-case letter with Shift held. Both halves say
+   the same thing, and the name is built from the modifier so the letter is
+   lowered -- otherwise "shift-F" and "shift-f" would be two bindings. *)
+let test_csi_u_lowers_the_letter () =
+  check_name "upper-case is lowered" "shift-f" "70;2" 'u'
+;;
+
+let test_csi_u_named_keys () =
+  check_name "tab" "\t" "9;1" 'u';
+  check_name "enter" "\r" "13;1" 'u';
+  check_name "shift-enter" "shift-enter" "13;2" 'u';
+  check_name "backspace" "\127" "127;1" 'u';
+  check_name "ctrl-enter" "ctrl-enter" "13;5" 'u'
+;;
+
+(* These chords reach global reference/browser navigation, as well as every
+   composer and form, through the same decoder as the C0 terminal encoding. *)
+let test_csi_u_control_punctuation_matches_legacy () =
+  List.iter (fun (parameters, expected) ->
+      check_name "legacy control binding" expected parameters 'u')
+    [ "91;5", "esc"; "92;5", "\028"; "93;5", "\029"
+    ; "94;5", "\030"; "54;6", "\030"; "95;5", "\031"
+    ; "64;5", "\000"; "32;5", "\000" ];
+  check_name "shift Tab retains reverse navigation" "shift-tab" "9;2" 'u';
+  check_name "shift Enter retains newline" "shift-enter" "13;2" 'u';
+  check_name "Alt Backspace retains word deletion" "alt-backspace" "127;3" 'u'
+;;
+
+(* One order for every chord. Two spellings would be two bindings, and the one
+   nobody typed would look dead. *)
+let test_modifier_order_is_fixed () =
+  check_name "ctrl before alt before shift" "ctrl-alt-shift-up" "1;8" 'A'
+;;
+
+(* Backtab carried its own final long before modifiers were reportable, and it
+   already means Shift+Tab. Routing it through the modifier path would spell
+   it twice. *)
+let test_backtab_is_not_double_named () =
+  check_name "bare" "shift-tab" "" 'Z';
+  check_name "with a mask" "shift-tab" "1;2" 'Z'
+;;
+
+let test_unclaimed_modifiers_cannot_invoke_bindings () =
+  check_name "omitted modifiers" "up" "1;" 'A';
+  check_name "lock state keeps Ctrl-D" "\004" "100;197" 'u';
+  List.iter (fun parameters ->
+      check (option string) "unsupported/malformed chord stays unclaimed" None
+        (named ~parameters ~final:'u'))
+    [ "113;9"; "100;13"; "113;17"; "113;33"; "113;257"; "97;x"; "97;0" ];
+  check (option string) "malformed arrow cannot navigate" None
+    (named ~parameters:"1;x" ~final:'A')
+;;
+
+(* The mask is read through the name rather than directly: the name is what a
+   binding holds, so a mask that disagreed with it would be a bug nobody could
+   observe. 2 is Shift, 3 is Alt, 5 is Ctrl, and the bits add. *)
+let test_modifier_bits () =
+  check_name "2 is shift" "shift-up" "1;2" 'A';
+  check_name "3 is alt" "alt-up" "1;3" 'A';
+  check_name "5 is ctrl" "ctrl-up" "1;5" 'A';
+  check_name "6 is ctrl+shift" "ctrl-shift-up" "1;6" 'A';
+  check_name "7 is ctrl+alt" "ctrl-alt-up" "1;7" 'A';
+  check_name "1 holds nothing" "up" "1;1" 'A'
+;;
+
+(* A sequence this vocabulary does not name keeps that shape. The reader turns
+   [None] into its own unclaimed key rather than inventing a binding, which is
+   what keeps an unread mouse report from arriving as a keystroke. *)
+let test_unknown_sequences_are_none () =
+  check (option string) "unknown final" None (named ~parameters:"" ~final:'q');
+  check (option string) "unknown tilde number" None (named ~parameters:"99" ~final:'~');
+  check (option string) "code point with no name" None (named ~parameters:"1;1" ~final:'u');
+  check (option string) "u with no code point" None (named ~parameters:"x;1" ~final:'u')
+;;
+
+(* The enable asks only for disambiguation. The wider flags add key-release
+   and text events, and bytes nothing reads are bytes the reader has to skip. *)
+let test_enable_asks_for_disambiguation_only () =
+  check string "enable" "\027[>1u" Csi.enable_kitty_keyboard;
+  check string "disable pops it" "\027[<u" Csi.disable_kitty_keyboard
+;;
+
+(* SS3: a terminal in application cursor mode sends [ESC O A] for Up rather
+   than [ESC \[ A]. read_input hands those finals here with no parameters, so
+   the same table has to name them -- otherwise the arrows reach the surfaces
+   as "unknown-esc" and move nothing while j/k keep working. *)
+let test_ss3_finals_are_named_without_parameters () =
+  List.iter
+    (fun (final, expected) ->
+      Alcotest.(check (option string))
+        (Printf.sprintf "ESC O %c" final)
+        (Some expected)
+        (Masc_tui_csi.name ~parameters:"" ~final))
+    [ ('A', "up"); ('B', "down"); ('C', "right"); ('D', "left")
+    ; ('H', "home"); ('F', "end") ]
+
+let test_an_unnamed_ss3_final_stays_unnamed () =
+  (* [Z] is taken -- it is Shift+Tab -- so the check uses a final the table
+     really does not name. Reaching the surfaces as "unknown-esc" is the
+     right answer for those. *)
+  List.iter
+    (fun final ->
+      Alcotest.(check (option string))
+        (Printf.sprintf "ESC O %c is not named" final)
+        None
+        (Masc_tui_csi.name ~parameters:"" ~final))
+    [ 'P'; 'R' ]
+
+let () =
+  run "tui_csi"
+    [ ( "legacy"
+      , [ test_case "arrows keep bare names" `Quick test_legacy_arrows_keep_bare_names
+        ; test_case "tilde keys" `Quick test_legacy_tilde_keys
+        ; test_case "chat schedule key" `Quick test_chat_schedule_key
+        ; test_case "mouse and queue keys are distinct" `Quick
+            test_mouse_toggle_is_separate_from_chat_queue
+        ; test_case "Ghostty MSX checkpoint keys" `Quick test_msx_checkpoint_keys
+        ; test_case "backtab is not double named" `Quick test_backtab_is_not_double_named
+        ] )
+    ; ( "modifiers"
+      , [ test_case "modified arrows" `Quick test_modified_arrows
+        ; test_case "order is fixed" `Quick test_modifier_order_is_fixed
+        ; test_case "bits" `Quick test_modifier_bits
+        ; test_case "unclaimed modifiers" `Quick test_unclaimed_modifiers_cannot_invoke_bindings
+        ] )
+    ; ( "csi-u"
+      , [ test_case "letters" `Quick test_csi_u_letters
+        ; test_case "Ctrl letters match legacy bytes" `Quick
+            test_csi_u_control_letters_match_legacy_bytes
+        ; test_case "upper case is lowered" `Quick test_csi_u_lowers_the_letter
+        ; test_case "named keys" `Quick test_csi_u_named_keys
+        ; test_case "control punctuation matches legacy" `Quick
+            test_csi_u_control_punctuation_matches_legacy
+        ] )
+    ; ( "boundaries"
+      , [ test_case "SS3 finals are named without parameters" `Quick
+            test_ss3_finals_are_named_without_parameters
+        ; test_case "an unnamed SS3 final stays unnamed" `Quick
+            test_an_unnamed_ss3_final_stays_unnamed
+        ; test_case "unknown sequences" `Quick test_unknown_sequences_are_none
+        ; test_case "enable is minimal" `Quick test_enable_asks_for_disambiguation_only
+        ] )
+    ]
+;;

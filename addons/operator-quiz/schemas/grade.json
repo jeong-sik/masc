@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "description": "One judgment of the operator's answer against what was recorded before it.",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["correct", "incorrect", "void"],
+      "description": "void when the question or its expected answer is wrong, so the answer cannot be judged."
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What the answer got right or the point it missed; with void, what is wrong with the question or its expected answer."
+    }
+  },
+  "required": ["verdict", "rationale"],
+  "additionalProperties": false
+}

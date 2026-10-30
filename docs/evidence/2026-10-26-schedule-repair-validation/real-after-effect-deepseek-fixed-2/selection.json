@@ -1,0 +1,13 @@
+{
+  "raw_capture_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-2",
+  "original_sha256": {
+    "provenance.json": "0b5496a0058bc4777d08ab4872e43e862013821c044fdf17f18ed63bcf9527e8",
+    "process-ended.json": "e9c6312f79344a5db65002c44f2347c609338e9cdce0c617a4d11343c39f1f86",
+    "created.json": "a51187cc82d3c491f921df13b2d65fa59a25314f9f47e03617a17cf10c0feb9f",
+    "checks.json": "22b187702d3e42f6b8bc5198664a0753d045c8947ad14dc583ececfb2cedd27a",
+    "last-observation.json": "8711b12a026ea2d139aca08d26cafee0bcd8a5ce487318bdb8894931b94e3da8",
+    "reaction-ledger.jsonl": "400799a5841cc965f0b1ba2e48236660321b226654320ba326e699f3e85ebc20"
+  },
+  "selection": "Original identity/process/created bytes; checks retain names and decisions; final snapshot retains exact schedule history and notes, selects turn absence only; reaction rows retain event identity/time/kind/disposition. No checkpoint or first-source readmission occurred; second delay was the legal minimum one second. Two notes and exact completions are observed, with producer exit 0.",
+  "independent_review": false
+}

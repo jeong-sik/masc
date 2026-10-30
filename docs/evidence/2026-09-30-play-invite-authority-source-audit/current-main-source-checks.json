@@ -1,0 +1,249 @@
+{
+  "scope": "syntax/source only; no typecheck, Dune, native, network or CI",
+  "checked_at": "2026-09-30T04:59:14.690676+00:00",
+  "compiler_version": "5.5.1",
+  "base_commit": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+  "checked_source_commit": "c6b12939e01ef97d04f9ecd5159b27423d3d633a",
+  "commands": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_token.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth_credential_token.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/keeper/keeper_dos_controller.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/keeper/keeper_dos_controller.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/play/play_invite.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/play/play_invite.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/server/server_routes_http_routes_play.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_play_credential_transaction.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_play_invite.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_dos_input_routes.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_dos_tools.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "c112b2030652a5a25360f5d5322f8dc6da99c598",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--strict",
+        "--target",
+        "lib/auth/auth.mli",
+        "lib/auth/auth_credential_base.ml",
+        "lib/auth/auth_credential_token.ml",
+        "lib/auth/auth_credential_token.mli",
+        "lib/keeper/keeper_dos_controller.ml",
+        "lib/keeper/keeper_dos_controller.mli",
+        "lib/play/play_invite.ml",
+        "lib/play/play_invite.mli",
+        "lib/server/server_routes_http_routes_play.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--include-tests",
+        "--strict",
+        "--target",
+        "lib/auth/auth.mli",
+        "lib/auth/auth_credential_base.ml",
+        "lib/auth/auth_credential_token.ml",
+        "lib/auth/auth_credential_token.mli",
+        "lib/keeper/keeper_dos_controller.ml",
+        "lib/keeper/keeper_dos_controller.mli",
+        "lib/play/play_invite.ml",
+        "lib/play/play_invite.mli",
+        "lib/server/server_routes_http_routes_play.ml",
+        "test/test_play_credential_transaction.ml",
+        "test/test_play_invite.ml",
+        "test/test_dos_input_routes.ml",
+        "test/test_dos_tools.ml"
+      ],
+      "exit_code": 1,
+      "stdout": "test/test_play_credential_transaction.ml:30:         ignore (Dos_lane.eject ~who ~announce:ignore ())\ntest/test_play_credential_transaction.ml:32:         ignore (Dos_lane.eject ~who:\"cleanup\" ~announce:ignore ())\ntest/test_play_credential_transaction.ml:43:      ignore (dos_ok (Dos_lane.load ~who:\"player\"\ntest/test_play_credential_transaction.ml:47:        ~program_name:\"spin.com\" ~program_bytes:\"\\xeb\\xfe\" ~files:[] ~announce:ignore));\ntest/test_play_credential_transaction.ml:117:  ignore (dos_ok (Dos_lane.step ~who:\"operator\" ~steps:1 ~until_ready:false));\ntest/test_play_credential_transaction.ml:126:  ignore (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:new_token));\ntest/test_play_credential_transaction.ml:127:  ignore (dos_ok (Dos_lane.step ~who:\"player\" ~steps:1 ~until_ready:false));\ntest/test_play_credential_transaction.ml:151:  ignore (renew config);\ntest/test_play_credential_transaction.ml:179:  ignore (Auth.find_static_credential_by_token config.base_path ~token:old_token);\ntest/test_play_credential_transaction.ml:232:    ignore (Unix.lstat path)) unreadable_name_fixtures\ntest/test_play_credential_transaction.ml:246:    ignore (Unix.lstat path)) unreadable_name_fixtures\ntest/test_play_credential_transaction.ml:292:          ignore (dos_ok (Dos_lane.step ~who:\"player\" ~steps:1 ~until_ready:false));\ntest/test_play_credential_transaction.ml:300:    ignore (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:new_token));\ntest/test_play_credential_transaction.ml:322:            ignore (dos_ok (Dos_lane.release_left ~holder:\"player\" ~announce:ignore))) in\ntest/test_play_credential_transaction.ml:327:      ignore (dos_ok (Dos_lane.step ~who:\"player\" ~steps:1 ~until_ready:false));\ntest/test_play_credential_transaction.ml:331:    ignore (Eio.Promise.await writer_done));\ntest/test_play_credential_transaction.ml:366:  ignore (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:old_token));\ntest/test_play_invite.ml:136:    ignore (Auth.create_token base_path ~agent_name:\"minsu\" ~role:Masc_domain.Player);\ntest/test_dos_input_routes.ml:51:    ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));\ntest/test_dos_input_routes.ml:144:          (match Dos_lane.eject ~who:(Option.value (controller_opt ()) ~default:\"operator\") ~announce:ignore () with\ntest/test_dos_input_routes.ml:152:               ~program_bytes:hello_com ~files:[] ~announce:ignore);\ntest/test_dos_input_routes.ml:213:          (match Dos_lane.eject ~who:(Option.value (controller_opt ()) ~default:\"operator\") ~announce:ignore () with\ntest/test_dos_input_routes.ml:221:               ~program_bytes:hello_com ~files:[] ~announce:ignore);\ntest/test_dos_tools.ml:31:  ignore (Dos_lane.eject ~who ~announce:ignore () : (unit, Dos_lane.error) result)\ntest/test_dos_tools.ml:135:  ignore\ntest/test_dos_tools.ml:644:     ignore (Keeper_registry.For_testing.register ~base_path name meta : Keeper_registry.registry_entry)\ntest/test_dos_tools.ml:647:     ignore (Keeper_registry.register_offline ~base_path name meta : Keeper_registry.registry_entry)\ntest/test_dos_tools.ml:1024:      ignore (press_as ~base_path \"dos-test\" \"b\");\ntest/test_dos_tools.ml:1028:    ignore (press_as ~base_path \"dos-test\" \"a\");\ntest/test_dos_tools.ml:1033:    ignore (press_as ~base_path \"dos-test\" \"a\");\ntest/test_dos_tools.ml:1069:    ignore (dispatch ~base_path ~agent:\"liu-bei\" \"masc_dos_pass\" []);\ntest/test_dos_tools.ml:1082:    ignore (save_as ~base_path \"same\");\ntest/test_dos_tools.ml:1084:    ignore (restore_as ~base_path \"same\");\ntest/test_dos_tools.ml:1086:    ignore (restore_as ~base_path \"same\");\ntest/test_dos_tools.ml:1104:    ignore (press_as ~base_path \"dos-test\" \"a\");\ntest/test_dos_tools.ml:1105:    ignore (save_as ~base_path \"after-a\");\ntest/test_dos_tools.ml:1106:    ignore (press_as ~base_path \"dos-test\" \"x\");\ntest/test_dos_tools.ml:1107:    ignore (press_as ~base_path \"dos-test\" \"y\");\ntest/test_dos_tools.ml:1108:    ignore (restore_as ~base_path \"after-a\");\ntest/test_dos_tools.ml:1110:    ignore (press_as ~base_path \"dos-test\" \"b\");\ntest/test_dos_tools.ml:1132:    ignore (load ~base_path \"quest\");\ntest/test_dos_tools.ml:1135:    ignore (save_as ~base_path \"early\");\ntest/test_dos_tools.ml:1141:    ignore (dispatch ~base_path \"masc_dos_step\" [ (\"steps\", `Int 10_000) ]);\ntest/test_dos_tools.ml:1153:    ignore (save_as ~base_path \"kept\");\ntest/test_dos_tools.ml:1284:    ignore (dispatch ~base_path \"masc_dos_step\" [ (\"steps\", `Int 1_000) ] : Tool_result.result);\n",
+      "stderr": "STRICT FAIL: 45 ignore sites lack a justification comment\n"
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-ignore-without-comment-diff.sh",
+        "--base",
+        "c112b2030652a5a25360f5d5322f8dc6da99c598",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "New ignore sites are justified.\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-determinism-contract.sh",
+        "--base",
+        "c112b2030652a5a25360f5d5322f8dc6da99c598",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "=== Scan: new deterministic-boundary ratchet ===\nPASS: no new deterministic-boundary debt added in c112b2030652a5a25360f5d5322f8dc6da99c598...HEAD, staged diff, or worktree diff\n=== Scan: deterministic branch on non-deterministic source ===\n=== Scan: permissive default on unknown input ===\nWARN: Option.value with default on potentially unknown input (sound partial?):\nlib/mcp_server_eio_protocol.ml-486-       let arguments =\nlib/mcp_server_eio_protocol.ml:487:         match Option.value ~default:`Null (Json_util.assoc_member_opt \"arguments\" payload) with\n--\nlib/mcp_server_eio_protocol.ml-1284-        else None)\nlib/mcp_server_eio_protocol.ml:1285:      |> Option.value ~default:0\n--\nlib/mcp_server_eio_call_tool.ml-314-    ~(execution_id : Ids.Execution_id.t) : unit =\nlib/mcp_server_eio_call_tool.ml:315:  let trace_id = Option.value ~default:\"runtime-mcp\" ctx.trace_id in\n--\nlib/mcp_server_eio_call_tool.ml-320-  in\nlib/mcp_server_eio_call_tool.ml:321:  let turn = Option.value ~default:0 ctx.turn in\n--\nlib/keeper/keeper_identity_gate.ml-92-    ?cycle_grant:gate_grant\nlib/keeper/keeper_identity_gate.ml:93:    ~keeper_always_allow:(Option.value ~default:false meta.always_allow)\n--\nlib/keeper/keeper_runtime_contract.ml-179-    first_string_field [ \"action\"; \"action_key\"; \"op\"; \"cmd\"; \"command\" ] input\nlib/keeper/keeper_runtime_contract.ml:180:    |> Option.value ~default:tool_name\n--\nlib/keeper/keeper_tool_in_process_runtime.ml-135-      ?cycle_grant:gate_grant\nlib/keeper/keeper_tool_in_process_runtime.ml:136:      ~keeper_always_allow:(Option.value ~default:false meta.always_allow)\n=== Scan: catch-all permissive default ===\nWARN: catch-all branch returning Some (possible unsound default):\nlib/fs_compat/fs_compat.ml:3167:     | _ -> Some failure)\nlib/fs_compat/fs_compat.ml-3168-;;\n--\nlib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate\nlib/telemetry_unified/telemetry_unified.ml-114-\n--\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:161:        , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:162:        , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:163:        , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml-164-        , List.length values ) )\n--\nlib/dashboard/dashboard_execution_helpers.ml:43:            | _ -> Some (candidate, candidate_ts)))\nlib/dashboard/dashboard_execution_helpers.ml-44-  in\n--\nlib/fusion_core/fusion_harness_core.ml:55:          | _ -> Some (rep, n))\nlib/fusion_core/fusion_harness_core.ml-56-        None ordered_keys\n--\nlib/server/server_routes_http_routes_workspace.ml:590:     | _ -> Some (String.concat \" \" parts))\nlib/server/server_routes_http_routes_workspace.ml-591-  | _ when String.equal added \"-\" && String.equal deleted \"-\" -> Some \"bin\"\n--\n=== Scan: unordered iteration in deterministic context ===\n=== DET/NDT gate: PASS ===\n",
+      "stderr": ""
+    }
+  ],
+  "included_test_ignore_lint": "45 inherited fixture discard sites are retained; the production baseline and changed-line gate pass. This result is not an all-files lint pass."
+}

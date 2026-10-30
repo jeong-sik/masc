@@ -1,0 +1,20 @@
+{
+  "0.bin": "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0",
+  "1.bin": "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0",
+  "2.bin": "ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0",
+  "agent-core-models-overlay.toml": "00c5ac6988cc62a354b127146c599c5a61738513e05b14bb00d1b2edfa6bb299",
+  "committed-verdict.json": "de15a6a1cce388fe4c3fe40f2cf6aba8f8dff33dd62fe994cbed6d8e80c02b31",
+  "health.json": "e7b37805eac2fca7c8961c1d54d001af71126033cc30900801abca000011dcbe",
+  "operation-latest.json": "8f2604035b6ef61304dd807329e4909b699992efaf468805030a3c586aad9b5c",
+  "receipt.json": "0b06c1b5bebce2f85ac5c1ed25b6d9add83ffd60ae7921d29bc6e1b972ad65af",
+  "runtime.toml": "994984417012b819d6840c25f7fc3e2c7098bf89062303b3da8e3f9648e18f7b",
+  "server.log": "7a3e801489233c3162a533e47e1ce4732c96746aa844cda389608f9c22f55141",
+  "task-primary-readback.json": "0365a3c5f0e486ec95caa2c5798df03ca803eb33938a99ca2a99422ef738890a",
+  "tasks-readback.json": "81540a9c91041d796347d01f39c0581d1b41cf30c307f79aa8cb562edc94493c",
+  "verification-request.json": "f6b0e45ed22be9367e94d095fe4d09be79ce63dc53d26d0dc4d1b8ffc19c8d55",
+  "verifier-image-receipt.json": "5d3d16df4a43f6960b882a66480d807324e067c5c0814a36043011fe9cbd6350",
+  "verifier-request-000.json": "48d3911c9ed211d86dc21f13592ac43142a9d8cefef7ae59e3a36e3efa47e604",
+  "verifier-request-001.json": "d85e14e518f5c79d7be932471cf1a36e7180cf5c6a38334dc813052be27dec18",
+  "verifier-response-000.json": "51a5f9766a6c93d53fe2ffce3a1a557aeb02aea4e4eaf26c35f25e8b39b188d9",
+  "verifier-response-001.json": "dc303230b48bb77e5db2c5e7d0ab53a0d2a696ad8b2e1c85fa41edc688178a44"
+}

@@ -1,0 +1,7 @@
+File "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-restack-api-q8z9lrng/public_epoch_literal.ml", line 2, characters 31-40:
+2 | let epoch : P.Worker_epoch.t = Uuidm.nil
+                                   ^^^^^^^^^
+Error: The value Uuidm.nil has type Uuidm.t
+       but an expression was expected of type
+         P.Worker_epoch.t =
+           Masc.Keeper_board_attention_partition.Worker_epoch.t

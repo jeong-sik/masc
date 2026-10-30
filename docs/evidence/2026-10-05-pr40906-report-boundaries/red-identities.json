@@ -1,0 +1,9 @@
+{
+  "head": "df9f6f2170d86d18501cb501f0e96dbed7c36b54",
+  "source_sha256": {
+    "bin/masc_tui_overview_providers.ml": "af1eb0f3ca612a07939f449a4987b30e441f0e72e2db2b26b5fd4d0115fc3620",
+    "bin/masc_tui_usage_trend.ml": "195afaaa6bade32f563ed3ca3c26c7ed8aba88946be19367deaabdf969089b24",
+    "test/test_tui_overview_providers.ml": "3d13fc1adc9ff7162690e15bada4dd80abf2d169125490207bbd6db70fb311db"
+  },
+  "binary_sha256": "c8b2af5dfde37fe9519bfe0e58f55670c042e6dcb3afd30a74e911e0354f88bf"
+}

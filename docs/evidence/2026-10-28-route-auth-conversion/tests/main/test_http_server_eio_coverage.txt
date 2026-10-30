@@ -1,0 +1,13 @@
+Testing `Http Server Eio Coverage'.
+This run has ID `609BG8GA'.
+
+  [OK]          config                  0   type.
+  [OK]          config                  1   localhost.
+  [OK]          default_config          0   port.
+  [OK]          default_config          1   host.
+  [OK]          default_config          2   max_connections.
+  [OK]          default_config          3   valid.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/Http Server Eio Coverage'.
+Test Successful in 0.002s. 6 tests run.
+exit=0

@@ -1,0 +1,203 @@
+(* HTTP routes for the browser lane (docs/design/browser-lane.md, task-1382).
+
+   POST /browser-lane/poll    — x-lane: one command {id, verb, args}, or an
+                                empty window the host loops on
+   POST /browser-lane/result  — {id, ok, data | error}: resolves the waiting
+                                tool call
+   POST /browser-lane/ping    — {ok:true} when this server holds the lane
+                                token; registers no client, so a host can
+                                ask an address before it moves there
+
+   Auth is a lane token, not a dashboard session: the host process is not a
+   person. The token lives at <base>/.masc/browser-lane/token (0600, written
+   by masc browser-lane-setup). No token file means the lane is
+   not installed, and every request fails closed — port 8935 is what the
+   public tunnel points at, so an unauthenticated lane would publish the
+   user's browser to the internet. *)
+
+open Server_auth
+module Http = Http_server_eio
+
+let lane_token_path ~config =
+  List.fold_left Filename.concat (Workspace.masc_dir config)
+    [ Common.browser_lane_dirname; Common.browser_lane_token_name ]
+;;
+
+let lane_token ~config =
+  match
+    In_channel.with_open_bin (lane_token_path ~config) (fun ic ->
+        Browser_lane.Lane_token.of_text (In_channel.input_all ic))
+  with
+  | Ok token -> Some (Browser_lane.Lane_token.to_string token)
+  | Error (Browser_lane.Lane_token.Too_short | Browser_lane.Lane_token.Not_printable) -> None
+  | exception Sys_error _ -> None
+;;
+
+(* Fail closed: no installed token, or a wrong one, is the same refusal. *)
+let lane_authorized ~config request =
+  match lane_token ~config with
+  | None -> false
+  | Some token ->
+    Server_mcp_transport_http_session.get_header_any_case
+      request.Httpun.Request.headers
+      "x-lane-token"
+    = Some token
+;;
+
+let object_of_body body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> Ok fields
+  | other -> Error (Printf.sprintf "body must be a JSON object, got: %s" (Yojson.Safe.to_string other))
+  | exception Yojson.Json_error message -> Error ("invalid JSON: " ^ message)
+;;
+
+let error_json message : Yojson.Safe.t = `Assoc [ "ok", `Bool false; "error", `String message ]
+
+let ( let* ) = Result.bind
+let client_of_request request =
+  let header name = Server_mcp_transport_http_session.get_header_any_case
+      request.Httpun.Request.headers name in
+  let required name = match header name with
+    | Some value when value <> "" -> Ok value
+    | _ -> Error (name ^ " header is required") in
+  let* lane = required "x-lane" in
+  (* Only the live lane long-polls here: native-process identity owns each live
+     command queue, and automation keeps its session inside the server. *)
+  let* () = match Browser_lane.Lane_name.of_wire lane with
+    | Some Browser_lane.Lane_name.Live -> Ok ()
+    | Some (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand) | None -> Error "unknown_lane" in
+  let* raw_id = required "x-browser-client-id" in
+  let* client_id = Browser_lane.client_id_of_string raw_id in
+  let* name = required "x-browser-name" in
+  let* browser = Browser_lane.browser_of_string name in
+  (* The transport-less native identity is the WebExtension poll contract.
+     BiDi hosts declare their transport explicitly; malformed declarations
+     are rejected rather than inferred from the browser name. *)
+  let* transport = match header "x-browser-transport" with
+    | None -> Ok Browser_lane.Web_extension
+    | Some transport -> Browser_lane.live_transport_of_string transport in
+  (* The ego connection polls from inside the browser Add-on worker; no native host speaks for it. *)
+  let* () = match transport with
+    | Browser_lane.Ego_task_space -> Error "unsupported_browser_transport"
+    | Browser_lane.Web_extension | Browser_lane.Webdriver_bidi -> Ok () in
+  let version name =
+    let* value = required name in
+    if String.length value <= 64 && String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) value
+    then Ok value else Error "invalid_browser_version" in
+  let* version = version "x-browser-version" in
+  let* engine_version = required "x-browser-engine-version" in
+  if String.length engine_version > 64
+     || not (String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) engine_version)
+  then Error "invalid_browser_version"
+  else Ok ({client_id; browser; version; engine_version; transport;space=None} : Browser_lane.client_info)
+;;
+
+(* A poll holds one command for the window. The answer is flat
+   {id, verb, args, actor?} — the exact shape the host consumes. Optional
+   ownership metadata and JSON field order must not hide verb or args. *)
+let poll_answer_json (issued : Browser_lane.issued) : Yojson.Safe.t =
+  let malformed () =
+    `Assoc
+      [ ("id", `String issued.Browser_lane.id)
+      ; ("error", `String ("malformed verb envelope: " ^ Yojson.Safe.to_string issued.Browser_lane.verb_json))
+      ] in
+  match issued.Browser_lane.verb_json with
+  | `Assoc fields ->
+    (match List.assoc_opt "verb" fields, List.assoc_opt "args" fields with
+     | Some (`String verb), Some args ->
+       let actor = match List.assoc_opt "actor" fields with
+         | Some actor -> ["actor", actor] | None -> [] in
+       `Assoc (["id", `String issued.Browser_lane.id; "verb", `String verb; "args", args] @ actor)
+     | _ -> malformed ())
+  | _ -> malformed ()
+;;
+
+(* Preserve only known effect receipts at the HTTP boundary. *)
+let result_payload fields =
+  let phase = match List.assoc_opt "ok" fields, List.assoc_opt "effectPhase" fields with
+    | Some (`Bool false), Some (`String ("not_started" | "partial" as phase)) ->
+      ["effectPhase", `String phase]
+    | _ -> [] in
+  `Assoc
+    ([ "ok", (match List.assoc_opt "ok" fields with Some (`Bool v) -> `Bool v | _ -> `Bool false)
+     ; "data", Option.value (List.assoc_opt "data" fields) ~default:`Null
+     ; "error", Option.value (List.assoc_opt "error" fields) ~default:`Null
+     ] @ phase)
+
+let add_routes ?config router =
+  let refuse request reqd =
+    respond_json_value_with_cors ~status:`Forbidden request reqd
+      (error_json "lane token required")
+  in
+  let with_lane request reqd run =
+    let config=match config with Some config -> Some config | None ->
+      Option.map Mcp_server.workspace_config (current_server_state ()) in
+    match config with
+    | None -> respond_json_value_with_cors ~status:`Service_unavailable request reqd
+        (error_json "browser workspace is unavailable")
+    | Some config ->
+        if Eio_unix.run_in_systhread (fun () -> lane_authorized ~config request)
+        then run config else refuse request reqd in
+  let ingress_error request reqd = function
+    | Browser_addon_ingress.Registration_refused refusal ->
+        respond_json_value_with_cors ~status:`Bad_request request reqd
+          (error_json (Browser_lane.registration_refusal_to_wire refusal))
+    | Unavailable reason ->
+        (* A native host logs the code; it drops prose as "not a code". *)
+        respond_json_value_with_cors ~status:`Service_unavailable request reqd
+          (`Assoc [ "ok", `Bool false
+                  ; "error", `String (Browser_addon_ingress.unavailable_to_wire reason)
+                  ; "detail", `String (Browser_addon_ingress.unavailable_message reason) ])
+    | Outcome_unknown detail -> respond_json_value_with_cors ~status:`Bad_gateway request reqd (error_json detail) in
+  router
+  |> Server_routes_http_browser_surface.add_routes
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Browser_lane) "/browser-lane/poll" (fun request reqd ->
+       with_lane request reqd (fun config ->
+         match client_of_request request with
+         | Error message ->
+           respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+         | Ok client_info -> (
+           match Browser_addon_ingress.poll ~config ~client:client_info ~window_sec:25. with
+           | Error refusal ->
+             (* The host reads this code to tell a connection the lane ended,
+                which it replaces, from a refusal it would only meet again. *)
+             ingress_error request reqd refusal
+           | Ok None ->
+             respond_json_value_with_cors request reqd (`Assoc [ ("ok", `Bool true); ("empty", `Bool true) ])
+           | Ok (Some issued) ->
+             respond_json_value_with_cors request reqd (poll_answer_json issued))))
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Browser_lane) "/browser-lane/result" (fun request reqd ->
+       with_lane request reqd (fun config ->
+         Http.Request.read_body_async reqd (fun body ->
+             let respond ~status fields =
+               respond_json_value_with_cors ~status request reqd (`Assoc (("ok", `Bool true) :: fields))
+             in
+             match object_of_body body with
+             | Error message ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+             | Ok fields ->
+               (match client_of_request request with
+               | Error message ->
+                 respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+               | Ok client_info -> (
+                 match List.assoc_opt "id" fields with
+                 | Some (`String id) ->
+                   let payload = result_payload fields in
+                   (match Browser_addon_ingress.deliver ~config ~client:client_info ~id ~payload with
+                    | Ok () -> respond ~status:`OK []
+                    | Error failure -> ingress_error request reqd failure)
+                 | _ ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (error_json "id is required"))))))
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Browser_lane) "/browser-lane/ping" (fun request reqd ->
+       with_lane request reqd (fun _config ->
+         respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true])))
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Browser_lane) "/browser-lane/disconnect" (fun request reqd ->
+       with_lane request reqd (fun config -> match client_of_request request with
+       | Error message -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+       | Ok info ->
+         match Browser_addon_ingress.disconnect ~config ~client:info with
+         | Error failure -> ingress_error request reqd failure
+         | Ok () -> respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true])))
+
+;;

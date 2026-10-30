@@ -1,0 +1,4 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-2639796952.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] split opam environment: switch 5.5.1 uses /Users/dancer/.opam/5.5.1 but OPAM_SWITCH_PREFIX=/Users/dancer/.opam/5.5.0
+[dune-local] repair: eval "$(opam env --switch=5.5.1 --set-switch)"

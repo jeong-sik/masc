@@ -1,0 +1,16 @@
+Focused TUI build: PASS
+Ruff: PASS
+Pyright: 0 errors
+Surface studio color + no-color: PASS (2 journeys,34 captures)
+60x24 and80x24 all six backlog counters visible
+80x24 all three baseline-change counters visible
+80x16 selected Goal j/k and detail remain reachable
+Workspace repository failed status, long path, selected row, PageDown and refresh error cases: PASS
+System current/default, long selected doc and short doc paging: PASS
+BROWSER_PTY_FRAME_MATCH=PASS work-narrow
+BROWSER_PTY_FRAME_MATCH=PASS work-narrow-60
+BROWSER_PTY_FRAME_MATCH=PASS work-short
+BROWSER_PTY_FRAME_MATCH=PASS workspace-failed-short
+BROWSER_PTY_FRAME_MATCH=PASS system-short
+Live Work snapshot replay: PASS at60/80columns
+Baseline snapshot age semantic issue tracked separately#40959

@@ -1,0 +1,6 @@
+{
+  "requested_at": "2026-10-21T16:20:53.252480+00:00",
+  "pid": 27273,
+  "command": "/tmp/masc-addon-native-39631388009/tui-macos-arm64-d06fc9229f2d46597933526d06863e0473c87874-39631388009/masc start --base-path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9 --host 127.0.0.1 --port 49446",
+  "signal": "SIGTERM"
+}

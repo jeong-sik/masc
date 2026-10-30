@@ -1,0 +1,1375 @@
+(** RFC-0233 §5 harness for PR-3: Prompt_block_id round-trip, TurnRecord
+    codec round-trip, and block-diff exactness (the "what entered/left
+    context" question as a test). *)
+
+open Alcotest
+
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
+let block_id = testable (Fmt.of_to_string Prompt_block_id.to_string) Prompt_block_id.equal
+let turn_ref_t =
+  testable (Fmt.of_to_string Ids.Turn_ref.to_string) Ids.Turn_ref.equal
+
+(* ── Prompt_block_id ──────────────────────────────────── *)
+
+let test_block_id_roundtrip () =
+  List.iter
+    (fun block ->
+      match Prompt_block_id.of_string (Prompt_block_id.to_string block) with
+      | Ok decoded ->
+        check block_id
+          (Printf.sprintf "roundtrip %s" (Prompt_block_id.to_string block))
+          block
+          decoded
+      | Error error -> failf "current block failed to decode: %s" error)
+    Prompt_block_id.all_known
+
+let test_block_id_unknown_rejected () =
+  match Prompt_block_id.of_string "future_block" with
+  | Ok _ -> fail "decoded an unknown block id"
+  | Error message ->
+    check bool "unknown block id is explicit" true
+      (Astring.String.is_infix ~affix:"unknown prompt block id" message)
+
+(* Recurring world-state blocks stay on the first provider round of a turn;
+   the separately issued Goal snapshot and a genuine mid-turn operator note
+   ride a post-tool round. Pinned per constructor so a new block declares its class rather
+   than inheriting one (task-514). [Temporal_summary] is pinned [false] on
+   purpose: a round after tool results carries no clock, and letting it ride
+   would end every tool round's request with a User message again. *)
+let test_block_id_post_tool_round_classes () =
+  let pinned =
+    [ (Prompt_block_id.Keeper_instructions, true)
+    ; (Prompt_block_id.Dynamic_context, false)
+    ; (Prompt_block_id.Active_goals, true)
+    ; (Prompt_block_id.Completion_authority, true)
+    ; (Prompt_block_id.Admitted_scheduled_input, true)
+    ; (Prompt_block_id.Temporal_summary, false)
+    ; (Prompt_block_id.Memory_os_recall, false)
+    ; (Prompt_block_id.Librarian_working_context, false)
+    ; (Prompt_block_id.Recalled_memory, false)
+    ; (Prompt_block_id.Recalled_memory_status, false)
+    ; (Prompt_block_id.Operator_note, true)
+    ; (Prompt_block_id.Skill_compositions, false)
+    ]
+  in
+  List.iter
+    (fun (block, expected) ->
+      check bool
+        (Printf.sprintf "post-tool class of %s" (Prompt_block_id.to_string block))
+        expected
+        (Prompt_block_id.injected_on_post_tool_round block))
+    pinned;
+  (* The table is written by hand, so a constructor added to [all_known]
+     without a row here would pass unpinned. *)
+  List.iter
+    (fun block ->
+      check bool
+        (Printf.sprintf "post-tool class of %s is pinned" (Prompt_block_id.to_string block))
+        true
+        (List.exists (fun (row, _) -> Prompt_block_id.equal row block) pinned))
+    Prompt_block_id.all_known
+
+(* A resumed official-client session keeps the recall body it holds, so an
+   unchanged body is not sent again. The status line names its turn, so each
+   turn's line is new even when the words repeat. *)
+let test_block_id_resend_classes_of_the_recall_blocks () =
+  check bool "the recall body is not sent again when the session holds it" false
+    (Prompt_block_id.resent_when_held Prompt_block_id.Recalled_memory);
+  check bool "the recall status line is sent every resume" true
+    (Prompt_block_id.resent_when_held Prompt_block_id.Recalled_memory_status)
+
+(* ── TurnRecord codec ─────────────────────────────────── *)
+
+let digest_of_label label =
+  Agent_core_sha256.digest_string label |> Agent_core_sha256.to_hex
+
+let sample_block block label =
+  { Turn_record.block
+  ; bytes = String.length label
+  ; digest = digest_of_label label
+  }
+
+let input_components_or_fail = function
+  | Some components -> components
+  | None -> fail "expected available input components"
+
+let sample_record () : Turn_record.t =
+  { request_observations = [];  execution_ids =
+      [ Ids.Execution_id.of_string "exec-1781200000000-0001"
+      ; Ids.Execution_id.of_string "exec-1781200000001-0002"
+      ]
+  ; keeper = "alpha"
+  ; agent_name = "alpha-agent"
+  ; turn_kind = Turn_record.Direct
+  ; trace_id = "trace-1780648779957-00000"
+  ; absolute_turn = 4071
+  ; turn_ref =
+      Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn:4071
+  ; blocks =
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
+      ; sample_block Prompt_block_id.Dynamic_context "bbbb"
+      ; sample_block Prompt_block_id.Memory_os_recall "cccc"
+      ]
+  ; input_components =
+      Some
+        [ { component = Turn_record.Prompt_block Prompt_block_id.Keeper_instructions
+          ; bytes = 4
+          }
+        ; { component = Turn_record.Tool_schemas; bytes = 8192 }
+        ; { component = Turn_record.Message_user; bytes = 256 }
+        ]
+  ; tool_surface_ref = None
+  ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
+  ; selected_model = Some "deepseek-v4-flash"
+  ; finish_reason = Some "completed"
+  ; context_window = Some 131072
+  ; provider_context_window = None
+  ; price_input_per_million = Some 0.15
+  ; price_output_per_million = Some 0.6
+  ; request_latency_ms = Some 1234
+  ; ttfrc_ms = Some 567.8
+  ; request_wire_observation =
+      Some
+        { runtime_profile = "ollama_cloud.deepseek-v4-flash"
+        ; body_bytes = 560_513
+        }
+  ; model_input_window =
+      Some
+        { transmitted_atoms = 15
+        ; total_atoms = 7_706
+        ; measurement = Wire_shape
+        ; model_input_front = Model_input_front.At_atom (String.make 64 'a')
+        }
+  ; response_observed_model_input =
+      Some
+        { runtime_profile = "ollama_cloud.deepseek-v4-flash"
+        ; window =
+            { transmitted_atoms = 25
+            ; total_atoms = 7_700
+            ; measurement = Wire_shape
+            ; model_input_front = Model_input_front.At_atom (String.make 64 'b')
+            }
+        }
+  ; raw_trace_run_ref =
+      Some
+        { worker_run_id = "worker-run-41"
+        ; path = "/tmp/turn-record-test.jsonl"
+        ; start_seq = 8
+        ; end_seq = 15
+        ; agent_name = "agent_core-test-runtime"
+        ; session_id = "trace-1780648779957-00000"
+        }
+  ; sampling =
+      { temperature = Some 0.3
+      ; top_p = Some 0.9
+      ; max_tokens = Some 8192
+      ; enable_thinking = Some true
+      }
+  ; usage =
+      { input_tokens = Some 18000
+      ; output_tokens = Some 412
+      ; cache_creation_input_tokens = Some 2048
+      ; cache_read_input_tokens = Some 15000
+      ; scope = Runtime_usage_scope.Per_request
+      }
+  ; turn_output_tokens = None
+  ; ts = 1781200000.5
+  }
+
+(* Cache counts distinguish a cache-heavy turn from a genuinely large prompt.
+   A current provider may omit those usage values; absence stays [None] rather
+   than becoming a fabricated zero. *)
+(* [input_components] says the tool schemas cost N bytes; this says which
+   tools they were, which N alone can never recover. The value is the
+   canonical marker for a content-addressed blob, so what has to survive the
+   round trip is the marker text exactly -- a re-encoded or trimmed marker
+   would not resolve, and the blob maintenance scan would stop counting the
+   record as a reference and collect the bytes it points at. *)
+(* A Claude Code turn records the newest request under [usage] and the whole
+   turn's output apart; the TUI reads that output from this field. *)
+let test_turn_output_tokens_round_trip_and_stay_optional () =
+  let record = { (sample_record ()) with turn_output_tokens = Some 270 } in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error e -> failf "decode failed: %s" e
+   | Ok decoded ->
+     check (option int) "the turn's output survives" (Some 270)
+       decoded.turn_output_tokens);
+  match Turn_record.to_json (sample_record ()) with
+  | `Assoc fields ->
+    check bool "no turn output leaves the key out" false
+      (List.mem_assoc "turn_output_tokens" fields)
+  | _ -> fail "turn record is not an object"
+;;
+
+let test_provider_context_stays_separate_from_turn_budget () =
+  let record =
+    { (sample_record ()) with
+      context_window = Some 128_000
+    ; provider_context_window = Some 272_000
+    }
+  in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error detail -> fail detail
+   | Ok decoded ->
+     check (option int) "MASC shaping ceiling" (Some 128_000)
+       decoded.context_window;
+     check (option int) "provider model window" (Some 272_000)
+       decoded.provider_context_window);
+  match Turn_record.to_json (sample_record ()) with
+  | `Assoc fields ->
+    check bool "old records need no provider window key" false
+      (List.mem_assoc "provider_context_window" fields)
+  | _ -> fail "turn record is not an object"
+;;
+
+let test_tool_surface_ref_round_trips_and_stays_optional () =
+  (* Built through the codec that owns the grammar, not spelled here: a
+     hand-typed marker would round-trip through JSON just as happily while
+     resolving to nothing, and this test would still pass. *)
+  let marker =
+    match
+      Tool_output.make_artifact_ref ~sha256:(String.make 64 'a') ~bytes:12
+        ~preview:"[{\"name\"" ~mime:"application/json"
+    with
+    | Ok reference ->
+        Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+    | Error error -> failf "%s" (Tool_output.make_error_to_string error)
+  in
+  let record = { (sample_record ()) with tool_surface_ref = Some marker } in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error e -> failf "decode failed: %s" e
+   | Ok decoded ->
+     check (option string) "the marker survives byte for byte" (Some marker)
+       decoded.tool_surface_ref);
+  match Turn_record.of_json (Turn_record.to_json (sample_record ())) with
+  | Error e -> failf "decode failed: %s" e
+  | Ok decoded ->
+    check (option string) "a turn that recorded no surface stays absent" None
+      decoded.tool_surface_ref
+;;
+
+(* The keeper writes this payload into the blob and the context inspector
+   reads it back in a different binary. They agree only because both go
+   through the codec declared here; this pins that the codec is in fact a
+   round trip, and that a listing with one bad entry fails whole rather than
+   arriving short. A short listing would understate the surface, which is the
+   one number the reader exists to report. *)
+let test_the_tool_surface_payload_round_trips () =
+  let entries =
+    [ { Turn_record.name = "masc_schedule_create"; schema_bytes = 4093 }
+    ; { Turn_record.name = "masc_gc"; schema_bytes = 0 }
+    ]
+  in
+  (match
+     Turn_record.tool_surface_of_json (Turn_record.tool_surface_to_json entries)
+   with
+   | Error detail -> failf "decode failed: %s" detail
+   | Ok decoded ->
+       check int "every entry survives" 2 (List.length decoded);
+       check string "the first name survives" "masc_schedule_create"
+         (List.hd decoded).Turn_record.name;
+       check int "a zero-byte schema is a size, not an absence" 0
+         (List.nth decoded 1).Turn_record.schema_bytes);
+  check bool "an empty surface decodes as an empty surface" true
+    (Turn_record.tool_surface_of_json (Turn_record.tool_surface_to_json [])
+     = Ok []);
+  List.iter
+    (fun (label, json) ->
+       check bool label true
+         (Result.is_error (Turn_record.tool_surface_of_json json)))
+    [ ( "a nameless entry fails the listing"
+      , `List [ `Assoc [ "schema_bytes", `Int 4 ] ] )
+    ; ( "an empty name fails the listing"
+      , `List [ `Assoc [ "name", `String ""; "schema_bytes", `Int 4 ] ] )
+    ; ( "a negative size fails the listing"
+      , `List [ `Assoc [ "name", `String "t"; "schema_bytes", `Int (-1) ] ] )
+    ; ("a non-array payload fails", `Assoc [ "name", `String "t" ])
+    ]
+;;
+
+let test_cache_counts_round_trip_and_stay_optional () =
+  let record = sample_record () in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error e -> failf "decode failed: %s" e
+   | Ok decoded ->
+     check (option int) "cache creation survives" (Some 2048)
+       decoded.usage.cache_creation_input_tokens;
+     check (option int) "cache read survives" (Some 15000)
+       decoded.usage.cache_read_input_tokens);
+  let without_cache_usage =
+    match Turn_record.to_json record with
+    | `Assoc fields ->
+      `Assoc
+        (List.filter
+           (fun (k, _) ->
+             k <> "cache_creation_input_tokens" && k <> "cache_read_input_tokens")
+           fields)
+    | other -> other
+  in
+  match Turn_record.of_json without_cache_usage with
+  | Error e -> failf "row without provider cache usage failed to decode: %s" e
+  | Ok decoded ->
+    check (option int) "absent cache creation decodes as None" None
+      decoded.usage.cache_creation_input_tokens;
+    check (option int) "absent cache read decodes as None" None
+      decoded.usage.cache_read_input_tokens;
+    check (option int) "the rest of the row is unaffected" (Some 18000)
+      decoded.usage.input_tokens
+;;
+
+let test_historical_row_without_usage_scope_is_unavailable () =
+  let historical =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields -> `Assoc (List.remove_assoc "usage_scope" fields)
+    | other -> other
+  in
+  match Turn_record.of_json historical with
+  | Error detail -> failf "historical row failed to decode: %s" detail
+  | Ok decoded ->
+    check bool
+      "missing scope is not guessed"
+      true
+      (decoded.usage.scope = Runtime_usage_scope.Usage_scope_unavailable)
+;;
+
+(* The Dashboard refuses a whole turn record that names a prompt block id it
+   does not know (#38923), and then every row of that Keeper disappears. So the
+   list it decodes against has to name exactly the ids the server writes. The
+   list is read out of its TypeScript source, one quoted name per entry. *)
+let test_dashboard_decoder_lists_every_block_id () =
+  let source =
+    In_channel.with_open_text "../dashboard/src/api/dashboard-turn-records.ts" In_channel.input_all
+  in
+  let opening = "export const TURN_PROMPT_BLOCK_IDS = [" in
+  let start =
+    match Astring.String.find_sub ~sub:opening source with
+    | Some index -> index + String.length opening
+    | None -> fail "the Dashboard source no longer declares TURN_PROMPT_BLOCK_IDS"
+  in
+  let listed =
+    match Astring.String.find_sub ~start ~sub:"] as const" source with
+    | None -> fail "the Dashboard block id list has no end"
+    | Some finish ->
+      String.sub source start (finish - start)
+      |> String.split_on_char '\''
+      |> List.mapi (fun index piece -> index, piece)
+      |> List.filter_map (fun (index, piece) -> if index mod 2 = 1 then Some piece else None)
+  in
+  check (list string) "the Dashboard decodes exactly the ids the server writes"
+    (List.sort String.compare (List.map Prompt_block_id.to_string Prompt_block_id.all_known))
+    (List.sort String.compare listed)
+
+(* The Dashboard decoder reads the same unmodified writer output. Keep it
+   checked against the current strict codec instead of a frontend-only snapshot. *)
+let test_dashboard_writer_fixture_roundtrip () =
+  let lines =
+    In_channel.with_open_text
+      "../dashboard/src/api/fixtures/turn-record-writer.jsonl"
+      In_channel.input_lines
+  in
+  let scopes =
+    List.mapi
+      (fun index line ->
+        let json = Yojson.Safe.from_string line in
+        match Turn_record.of_json json with
+        | Error error -> failf "writer fixture row %d: %s" index error
+        | Ok record ->
+          check bool "writer fixture keeps its exact JSON shape" true
+            (Yojson.Safe.equal json (Turn_record.to_json record));
+          Runtime_usage_scope.to_string record.usage.scope)
+      lines
+  in
+  check (list string) "fixture holds one row per usage scope, in variant order"
+    (List.map Runtime_usage_scope.to_string
+       Runtime_usage_scope.all)
+    scopes
+let test_client_turn_usage_roundtrip () =
+  let record = sample_record () in
+  let usage = { record.usage with scope = Runtime_usage_scope.Turn_total } in
+  let json = Turn_record.to_json { record with usage } in
+  check string "client-turn scope has its own wire token" "turn_total"
+    (Yojson.Safe.Util.(json |> member "usage_scope" |> to_string));
+  match Turn_record.of_json json with
+  | Error error -> failf "client-turn usage rejected: %s" error
+  | Ok decoded ->
+    check bool "all known counts and their scope survive" true (decoded.usage = usage)
+;;
+
+let test_codec_roundtrip () =
+  let record = sample_record () in
+  match Turn_record.of_json (Turn_record.to_json record) with
+  | Error e -> failf "decode failed: %s" e
+  | Ok decoded ->
+    check int "execution_ids count" 2 (List.length decoded.execution_ids);
+    check bool "execution_ids preserved" true
+      (List.for_all2 Ids.Execution_id.equal record.execution_ids
+         decoded.execution_ids);
+    check string "keeper" record.keeper decoded.keeper;
+    check string "agent_name" record.agent_name decoded.agent_name;
+    check string "turn_kind" (Turn_record.turn_kind_to_string record.turn_kind)
+      (Turn_record.turn_kind_to_string decoded.turn_kind);
+    check string "trace_id" record.trace_id decoded.trace_id;
+    check int "absolute_turn" record.absolute_turn decoded.absolute_turn;
+    check turn_ref_t "turn_ref preserved" record.turn_ref decoded.turn_ref;
+    check int "blocks count" 3 (List.length decoded.blocks);
+    check bool "blocks preserved in order" true
+      (List.for_all2
+         (fun (a : Turn_record.prompt_block) (b : Turn_record.prompt_block) ->
+           Prompt_block_id.equal a.block b.block
+           && a.bytes = b.bytes
+           && String.equal a.digest b.digest)
+         record.blocks decoded.blocks);
+    check (list string) "input component ids preserved"
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+            Turn_record.input_component_id_to_string component.component)
+         (input_components_or_fail record.input_components))
+      (List.map
+         (fun (component : Turn_record.input_component) ->
+            Turn_record.input_component_id_to_string component.component)
+         (input_components_or_fail decoded.input_components));
+    check (list int) "input component bytes preserved"
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         (input_components_or_fail record.input_components))
+      (List.map
+         (fun (component : Turn_record.input_component) -> component.bytes)
+         (input_components_or_fail decoded.input_components));
+    check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
+    check (option string) "selected_model" record.selected_model decoded.selected_model;
+    check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
+    check (option int) "context_window" record.context_window decoded.context_window;
+    check (option (float 0.0001)) "price_input_per_million"
+      record.price_input_per_million decoded.price_input_per_million;
+    check (option (float 0.0001)) "price_output_per_million"
+      record.price_output_per_million decoded.price_output_per_million;
+    check (option int) "request_latency_ms round-trip" record.request_latency_ms
+      decoded.request_latency_ms;
+    check (option (float 0.0001)) "ttfrc_ms round-trip" record.ttfrc_ms
+      decoded.ttfrc_ms;
+    check (option string) "request runtime profile round-trip"
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.runtime_profile)
+         record.request_wire_observation)
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.runtime_profile)
+         decoded.request_wire_observation);
+    check (option int) "request body bytes round-trip"
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.body_bytes)
+         record.request_wire_observation)
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.body_bytes)
+         decoded.request_wire_observation);
+    (match decoded.response_observed_model_input with
+     | None -> fail "response-observed model input was dropped"
+     | Some observed ->
+       check string "response runtime survives"
+         "ollama_cloud.deepseek-v4-flash"
+         observed.runtime_profile;
+       check int "response window remains distinct from latest attempt" 25
+         observed.window.transmitted_atoms;
+       check int "response window total survives" 7_700
+         observed.window.total_atoms;
+       check string "response window digest survives" (String.make 64 'b')
+         (carried_digest observed.window.model_input_front));
+    check (option string) "exact raw trace run survives"
+      (Option.map
+         (fun (run_ref : Turn_record.raw_trace_run_ref) -> run_ref.worker_run_id)
+         record.raw_trace_run_ref)
+      (Option.map
+         (fun (run_ref : Turn_record.raw_trace_run_ref) -> run_ref.worker_run_id)
+         decoded.raw_trace_run_ref);
+    check (option (float 0.0001)) "temperature" record.sampling.temperature
+      decoded.sampling.temperature;
+    check (option (float 0.0001)) "top_p" record.sampling.top_p
+      decoded.sampling.top_p;
+    check (option int) "max_tokens" record.sampling.max_tokens
+      decoded.sampling.max_tokens;
+    check (option bool) "enable_thinking" record.sampling.enable_thinking
+      decoded.sampling.enable_thinking;
+    check (option int) "input_tokens" record.usage.input_tokens
+      decoded.usage.input_tokens;
+    check (option int) "output_tokens" record.usage.output_tokens
+      decoded.usage.output_tokens;
+    check (float 0.0001) "ts" record.ts decoded.ts
+
+let test_codec_optional_fields_absent () =
+  let record =
+    { (sample_record ()) with
+      selected_model = None
+    ; finish_reason = None
+    ; context_window = None
+    ; price_input_per_million = None
+    ; price_output_per_million = None
+    ; request_latency_ms = None
+    ; ttfrc_ms = None
+    ; request_wire_observation = None
+    ; model_input_window = None
+    ; response_observed_model_input = None
+    ; sampling =
+        { temperature = None
+        ; top_p = None
+        ; max_tokens = None
+        ; enable_thinking = None
+        }
+    ; usage =
+        { input_tokens = None
+        ; output_tokens = None
+        ; cache_creation_input_tokens = None
+        ; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Usage_scope_unavailable
+        }
+    }
+  in
+  let json = Turn_record.to_json record in
+  (* RFC-0233 §2.3/§8: absent meta fields are omitted from the wire, never
+     emitted as a fabricated value (no "stop", no placeholder selected model, no
+     fabricated 200K window or Claude $3/$15 price). *)
+  (match json with
+   | `Assoc fields ->
+     check bool "finish_reason key omitted when None" false
+       (List.mem_assoc "finish_reason" fields);
+     check bool "selected_model key omitted when None" false
+       (List.mem_assoc "selected_model" fields);
+     check bool "top_p key omitted when None" false
+       (List.mem_assoc "top_p" fields);
+     check bool "max_tokens key omitted when None" false
+       (List.mem_assoc "max_tokens" fields);
+     check bool "context_window key omitted when None" false
+       (List.mem_assoc "context_window" fields);
+     check bool "price_input_per_million key omitted when None" false
+       (List.mem_assoc "price_input_per_million" fields);
+     check bool "request_latency_ms key omitted when None" false
+       (List.mem_assoc "request_latency_ms" fields);
+     check bool "ttfrc_ms key omitted when None" false
+       (List.mem_assoc "ttfrc_ms" fields);
+     check bool "request runtime key required" true
+       (List.mem_assoc "request_runtime_profile" fields);
+     check bool "request runtime None is explicit null" true
+       (List.assoc_opt "request_runtime_profile" fields = Some `Null);
+     check bool "request bytes key required" true
+       (List.mem_assoc "request_body_bytes" fields);
+     check bool "request bytes None is explicit null" true
+       (List.assoc_opt "request_body_bytes" fields = Some `Null);
+     check bool "response-observed key required" true
+       (List.mem_assoc "response_observed_model_input" fields);
+     check bool "no response observation is explicit null" true
+       (List.assoc_opt "response_observed_model_input" fields = Some `Null)
+   | _ -> fail "to_json did not produce an object");
+  match Turn_record.of_json json with
+  | Error e -> failf "decode failed: %s" e
+  | Ok decoded ->
+    check (option string) "selected_model absent stays None" None
+      decoded.selected_model;
+    check (option string) "finish_reason absent stays None (not \"stop\")" None
+      decoded.finish_reason;
+    check (option int) "context_window absent stays None" None decoded.context_window;
+    check (option (float 0.0001)) "price_input_per_million absent" None
+      decoded.price_input_per_million;
+    check (option (float 0.0001)) "price_output_per_million absent" None
+      decoded.price_output_per_million;
+    check (option int) "request_latency_ms absent" None
+      decoded.request_latency_ms;
+    check (option (float 0.0001)) "ttfrc_ms absent" None
+      decoded.ttfrc_ms;
+    check (option string) "request runtime absent" None
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.runtime_profile)
+         decoded.request_wire_observation);
+    check (option int) "request bytes absent" None
+      (Option.map
+         (fun (observation : Turn_record.request_wire_observation) ->
+           observation.body_bytes)
+         decoded.request_wire_observation);
+    check bool "response observation absent stays None" true
+      (Option.is_none decoded.response_observed_model_input);
+    check (option (float 0.0001)) "temperature absent" None
+      decoded.sampling.temperature;
+    check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;
+    check (option int) "max_tokens absent" None decoded.sampling.max_tokens;
+    check (option int) "input_tokens absent" None decoded.usage.input_tokens;
+    check turn_ref_t "required turn_ref remains exact" record.turn_ref
+      decoded.turn_ref
+
+let test_codec_rejects_malformed () =
+  (match Turn_record.of_json (`String "not a record") with
+   | Ok _ -> fail "decoded a non-object"
+   | Error _ -> ());
+  (match Turn_record.to_json (sample_record ()) with
+   | `Assoc fields ->
+     let blank_selected_model =
+       `Assoc
+         (("selected_model", `String " ")
+          :: List.remove_assoc "selected_model" fields)
+     in
+     (match Turn_record.of_json blank_selected_model with
+      | Ok _ -> fail "decoded a blank selected_model"
+      | Error message ->
+        check bool "blank selected_model is explicit" true
+          (Astring.String.is_infix ~affix:"selected_model" message))
+   | _ -> fail "sample turn record is not an object");
+  match Turn_record.of_json (`Assoc [ ("keeper", `String "x") ]) with
+  | Ok _ -> fail "decoded a row with missing fields"
+  | Error msg ->
+    check bool "error names the missing field" true
+      (Astring.String.is_infix ~affix:"execution_ids" msg)
+
+let test_codec_requires_current_observation_fields () =
+  let remove field =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+    | other -> other
+  in
+  List.iter
+    (fun field ->
+      match Turn_record.of_json (remove field) with
+      | Ok _ -> failf "decoded a row without %s" field
+      | Error message ->
+        check bool "missing current field is explicit" true
+          (Astring.String.is_infix ~affix:field message))
+    [ "turn_ref"
+    ; "agent_name"
+    ; "turn_kind"
+    ; "raw_trace_run_ref"
+    ; "input_components"
+    ; "request_runtime_profile"
+    ; "request_body_bytes"
+    ; "transmitted_atoms"
+    ; "total_atoms"
+    ; "model_input_front"
+    ; "response_observed_model_input"
+    ]
+
+let test_codec_rejects_invalid_response_observed_model_input () =
+  let replace_observed update =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      let observed =
+        match List.assoc "response_observed_model_input" fields with
+        | `Assoc observed_fields -> `Assoc (update observed_fields)
+        | _ -> fail "sample response observation is not an object"
+      in
+      `Assoc
+        (("response_observed_model_input", observed)
+         :: List.remove_assoc "response_observed_model_input" fields)
+    | other -> other
+  in
+  let cases =
+    [ ( "blank runtime"
+      , replace_observed (fun fields ->
+          ("runtime_profile", `String " ")
+          :: List.remove_assoc "runtime_profile" fields) )
+    ; "partial window", replace_observed (List.remove_assoc "model_input_front")
+    ; ( "transmitted above total"
+      , replace_observed (fun fields ->
+          ("transmitted_atoms", `Int 8)
+          :: ("total_atoms", `Int 7)
+          :: List.remove_assoc "transmitted_atoms"
+               (List.remove_assoc "total_atoms" fields)) )
+    ]
+  in
+  List.iter
+    (fun (label, json) ->
+       match Turn_record.of_json json with
+       | Ok _ -> failf "%s decoded" label
+       | Error message ->
+         check bool label true
+           (Astring.String.is_infix
+              ~affix:"response_observed_model_input"
+              message))
+    cases
+
+(* The record has to carry how much of its own history the turn transmitted,
+   because nothing downstream can recover it: the request itself keeps no trace
+   of what was cut. *)
+let test_empty_model_input_boundaries_roundtrip_and_reject_invalid_shapes () =
+  let sample = sample_record () in
+  let row ?(transmitted_atoms = 0) ~total_atoms model_input_front =
+    let window : Turn_record.model_input_window =
+      { transmitted_atoms; total_atoms; measurement = Durable_shape; model_input_front } in
+    { sample with model_input_window = Some window
+    ; response_observed_model_input = Some { runtime_profile = "codex"; window }
+    } in
+  List.iter (fun (total_atoms, front) ->
+    let record = row ~total_atoms front in
+    match Turn_record.of_json (Turn_record.to_json record) with
+    | Ok decoded ->
+      check bool "empty attempted window survives the strict codec" true
+        (decoded.model_input_window = record.model_input_window);
+      check bool "empty observation survives the strict codec" true
+        (decoded.response_observed_model_input = record.response_observed_model_input)
+    | Error detail -> fail detail)
+    [ 8, Model_input_front.After_history (String.make 64 'a')
+    ; 0, Model_input_front.Empty_history
+    (* A successful floor response can carry no atoms from a nonempty history.
+       The codec preserves it; Keeper_carried_front.for_history separately
+       rejects this unwitnessed seed instead of reviving an older front. *)
+    ; 8, Model_input_front.Empty_history ];
+  List.iter (fun record ->
+    check bool "inconsistent position cannot decode" true
+      (Result.is_error (Turn_record.of_json (Turn_record.to_json record))))
+    [ row ~total_atoms:0 (Model_input_front.After_history (String.make 64 'a'))
+    ; row ~transmitted_atoms:1 ~total_atoms:8 Model_input_front.Empty_history
+    ; row ~total_atoms:8 (Model_input_front.At_atom (String.make 64 'a')) ];
+  List.iter (fun json ->
+    check bool "unknown or ambiguous front cannot decode" true
+      (Result.is_error (Model_input_front.of_json json)))
+    [ `Assoc [ "kind", `String "unknown" ]
+    ; `Assoc [ "kind", `String "empty_history"; "digest", `String (String.make 64 'a') ]
+    ; `Assoc [ "kind", `String "after_history" ]
+    ; `Assoc [ "kind", `String "after_history"; "digest", `String "" ] ]
+;;
+
+let test_record_carries_transmitted_history_share () =
+  let record =
+    { (sample_record ()) with
+      Turn_record.model_input_window =
+        Some
+          { Turn_record.transmitted_atoms = 7
+          ; total_atoms = 7_700
+          ; measurement = Wire_shape
+          ; model_input_front = Model_input_front.At_atom (String.make 64 'b')
+          }
+    }
+  in
+  match Turn_record.of_json (Turn_record.to_json record) with
+  | Error message -> failf "roundtrip rejected the share: %s" message
+  | Ok decoded ->
+    (match decoded.Turn_record.model_input_window with
+     | None -> failf "roundtrip dropped the share"
+     | Some window ->
+       check int "transmitted survives" 7 window.Turn_record.transmitted_atoms;
+       check int "total survives" 7_700 window.Turn_record.total_atoms;
+       check string "the front's digest survives" (String.make 64 'b')
+         (carried_digest window.Turn_record.model_input_front))
+
+(* A row written before the window's front was named carries no
+   [model_input_front] key even when it has no window at all. The key is
+   required like the other three, so that row is refused too: the store is
+   emptied at deploy, and a row the reset missed is refused rather than read
+   as a row without a window. *)
+let test_codec_rejects_a_row_without_a_window_or_the_digest_key () =
+  let json =
+    match
+      Turn_record.to_json
+        { (sample_record ()) with Turn_record.model_input_window = None }
+    with
+    | `Assoc fields ->
+      check bool "the window keys are null" true
+        (List.assoc_opt "transmitted_atoms" fields = Some `Null);
+      `Assoc (List.remove_assoc "model_input_front" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded a row without the model_input_front key"
+  | Error message ->
+    check bool "the missing key is named" true
+      (Astring.String.is_infix ~affix:"model_input_front" message)
+
+(* A window written before the front was named by its opening message has
+   the three counts and no digest. It names no position a later turn can
+   check, so it is not read as a window without one: the record does not
+   decode. *)
+let test_codec_rejects_a_window_without_its_front_digest () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields -> `Assoc (List.remove_assoc "model_input_front" fields)
+    | other -> other
+  in
+  (match json with
+   | `Assoc fields ->
+     check bool "the three counts are still there" true
+       (List.for_all
+          (fun key ->
+             match List.assoc_opt key fields with
+             | Some `Null | None -> false
+             | Some _ -> true)
+          [ "transmitted_atoms"; "total_atoms"; "model_input_measurement" ])
+   | _ -> fail "the sample record is an object");
+  (match Turn_record.of_json json with
+   | Ok _ -> fail "decoded a window without its front digest"
+   | Error message ->
+     check bool "the missing key is named" true
+       (Astring.String.is_infix ~affix:"model_input_front" message));
+  let null_digest =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc (("model_input_front", `Null) :: List.remove_assoc "model_input_front" fields)
+    | other -> other
+  in
+  match Turn_record.of_json null_digest with
+  | Ok _ -> fail "decoded three counts beside a null digest"
+  | Error message ->
+    check bool "all four or none" true
+      (Astring.String.is_infix ~affix:"model_input_front" message)
+
+(* #39013: a floor window — the request transmitted none of its history — is
+   still a measurement, witnessed by the last omitted atom rather than by a
+   carried front. The counts say how much went, the witness says where the
+   offered history ended. *)
+let test_codec_preserves_a_floor_window_with_its_end_witnessed () =
+  let witness = Model_input_front.After_history (String.make 64 'e') in
+  let record =
+    { (sample_record ()) with
+      Turn_record.response_observed_model_input =
+        Some
+          { runtime_profile = "claude_code"
+          ; window =
+              { transmitted_atoms = 0
+              ; total_atoms = 900
+              ; measurement = Wire_shape
+              ; model_input_front = witness
+              }
+          }
+    }
+  in
+  let json = Turn_record.to_json record in
+  (match json with
+   | `Assoc fields ->
+     (match List.assoc_opt "response_observed_model_input" fields with
+      | Some (`Assoc observed) ->
+        check bool "the floor witness serializes as an after_history front" true
+          (List.assoc_opt "model_input_front" observed
+           = Some (Model_input_front.to_json witness))
+      | _ -> fail "the observation is an object")
+   | _ -> fail "the record is an object");
+  match Turn_record.of_json json with
+  | Error message -> failf "the floor observation refused to decode: %s" message
+  | Ok decoded ->
+    (match decoded.Turn_record.response_observed_model_input with
+     | None -> fail "the roundtrip dropped the floor observation"
+     | Some observed ->
+       check int "zero transmitted" 0 observed.window.Turn_record.transmitted_atoms;
+       check int "the whole history as denominator" 900
+         observed.window.Turn_record.total_atoms;
+       check bool "the end witness survives" true
+         (observed.window.Turn_record.model_input_front = witness))
+
+(* A share above 1 is not a large number, it is a contradiction: the reader
+   would render a keeper transmitting more history than it holds. *)
+let test_codec_rejects_transmitting_more_than_held () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("transmitted_atoms", `Int 9)
+         :: ("total_atoms", `Int 8)
+         :: List.remove_assoc "transmitted_atoms"
+              (List.remove_assoc "total_atoms" fields))
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> failf "decoded a row transmitting more atoms than it held"
+  | Error message ->
+    check bool "error names the contradiction" true
+      (Astring.String.is_infix ~affix:"transmitted_atoms" message)
+
+(* Half an observation is not an observation. Accepting one side would let the
+   reader compute a share against a fabricated denominator. *)
+let test_codec_rejects_half_an_observation () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("transmitted_atoms", `Int 7)
+         :: ("total_atoms", `Null)
+         :: List.remove_assoc "transmitted_atoms"
+              (List.remove_assoc "total_atoms" fields))
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> failf "decoded a row with only one of the two counts"
+  | Error message ->
+    check bool "error says both or neither" true
+      (Astring.String.is_infix ~affix:"total_atoms" message)
+
+let test_codec_rejects_mismatched_turn_ref () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("turn_ref", `String "different-trace#4071")
+         :: List.remove_assoc "turn_ref" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded a turn_ref that disagrees with row identity"
+  | Error message ->
+    check bool "turn_ref mismatch is explicit" true
+      (Astring.String.is_infix ~affix:"does not match" message)
+
+let test_codec_rejects_mismatched_raw_trace_session () =
+  let replace_run_ref_field field value =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      let run_ref =
+        match List.assoc "raw_trace_run_ref" fields with
+        | `Assoc run_ref_fields ->
+          `Assoc ((field, value) :: List.remove_assoc field run_ref_fields)
+        | _ -> fail "sample raw trace run ref is not an object"
+      in
+      `Assoc
+        (("raw_trace_run_ref", run_ref)
+         :: List.remove_assoc "raw_trace_run_ref" fields)
+    | other -> other
+  in
+  match
+    Turn_record.of_json
+      (replace_run_ref_field "session_id" (`String "different-trace"))
+  with
+  | Ok _ -> fail "decoded mismatched raw trace session_id"
+  | Error message ->
+    check bool "raw trace session mismatch is explicit" true
+      (Astring.String.is_infix ~affix:"session_id does not match" message)
+
+let test_codec_rejects_partial_or_invalid_request_wire_observation () =
+  let replace fields =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc current ->
+      `Assoc
+        (List.fold_left
+           (fun acc (name, value) ->
+             (name, value) :: List.remove_assoc name acc)
+           current
+           fields)
+    | other -> other
+  in
+  List.iter
+    (fun fields ->
+      match Turn_record.of_json (replace fields) with
+      | Ok _ -> fail "decoded an invalid request wire observation"
+      | Error _ -> ())
+    [ [ "request_runtime_profile", `Null ]
+    ; [ "request_body_bytes", `Null ]
+    ; [ "request_runtime_profile", `String "" ]
+    ; [ "request_body_bytes", `Int (-1) ]
+    ]
+
+let test_codec_rejects_unknown_input_component () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (( "input_components"
+         , `List
+             [ `Assoc
+                 [ "component", `String "history_guess"
+                 ; "bytes", `Int 1
+                 ]
+             ] )
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded an unknown input component"
+  | Error message ->
+    check bool "unknown component is explicit" true
+      (Astring.String.is_infix ~affix:"unknown input component" message)
+
+let test_codec_rejects_input_component_extra_field () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (( "input_components"
+         , `List
+             [ `Assoc
+                 [ "component", `String "tool_schemas"
+                 ; "bytes", `Int 1
+                 ; "estimated", `Bool true
+                 ]
+             ] )
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded an input component with an extra field"
+  | Error message ->
+    check bool "extra field is explicit" true
+      (Astring.String.is_infix ~affix:"fields are not exact" message)
+
+let test_codec_preserves_explicit_unavailable_input_components () =
+  let record = { (sample_record ()) with input_components = None } in
+  let json = Turn_record.to_json record in
+  (match json with
+   | `Assoc fields ->
+     check bool "unavailable is serialized as null" true
+       (List.assoc_opt "input_components" fields = Some `Null)
+   | _ -> fail "record did not encode as an object");
+  match Turn_record.of_json json with
+  | Error message -> failf "explicit unavailable failed to decode: %s" message
+  | Ok decoded ->
+    check bool "unavailable survives round-trip" true
+      (decoded.input_components = None)
+
+let replace_blocks blocks =
+  match Turn_record.to_json (sample_record ()) with
+  | `Assoc fields ->
+    `Assoc (("blocks", `List blocks) :: List.remove_assoc "blocks" fields)
+  | other -> other
+
+let valid_block_json ?(bytes = 4) ?(digest = digest_of_label "block") block =
+  `Assoc
+    [ "block", `String (Prompt_block_id.to_string block)
+    ; "bytes", `Int bytes
+    ; "digest", `String digest
+    ]
+
+let test_codec_rejects_malformed_blocks () =
+  let cases =
+    [ ( "negative bytes"
+      , valid_block_json ~bytes:(-1) Prompt_block_id.Keeper_instructions )
+    ; ( "non-sha256 digest"
+      , valid_block_json ~digest:"abcd" Prompt_block_id.Keeper_instructions )
+    ; ( "uppercase digest"
+      , valid_block_json
+          ~digest:(String.make 64 'A')
+          Prompt_block_id.Keeper_instructions )
+    ]
+  in
+  List.iter
+    (fun (label, block) ->
+      match Turn_record.of_json (replace_blocks [ block ]) with
+      | Ok _ -> failf "decoded block with %s" label
+      | Error _ -> ())
+    cases
+
+let test_codec_rejects_duplicate_blocks_and_components () =
+  let keeper_instructions = valid_block_json Prompt_block_id.Keeper_instructions in
+  (match Turn_record.of_json (replace_blocks [ keeper_instructions; keeper_instructions ]) with
+   | Ok _ -> fail "decoded duplicate prompt blocks"
+   | Error message ->
+     check bool "duplicate block is explicit" true
+       (Astring.String.is_infix ~affix:"duplicate block" message));
+  let duplicate_components =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      let tool_schema =
+        `Assoc
+          [ "component", `String "tool_schemas"
+          ; "bytes", `Int 1
+          ]
+      in
+      `Assoc
+        (( "input_components"
+         , `List [ tool_schema; tool_schema ] )
+         :: List.remove_assoc "input_components" fields)
+    | other -> other
+  in
+  match Turn_record.of_json duplicate_components with
+  | Ok _ -> fail "decoded duplicate input components"
+  | Error message ->
+    check bool "duplicate component is explicit" true
+      (Astring.String.is_infix ~affix:"duplicate input component" message)
+
+let test_codec_rejects_unknown_block () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (( "blocks"
+         , `List
+             [ `Assoc
+                 [ "block", `String "future_block"
+                 ; "bytes", `Int 4
+                 ; "digest", `String (digest_of_label "dddd")
+                 ]
+             ] )
+         :: List.remove_assoc "blocks" fields)
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> fail "decoded a prompt block without a current producer"
+  | Error message ->
+    check bool "unknown block is explicit" true
+      (Astring.String.is_infix ~affix:"future_block" message)
+
+let test_codec_rejects_unknown_fields () =
+  let record_json = Turn_record.to_json (sample_record ()) in
+  let with_unknown_record_field =
+    match record_json with
+    | `Assoc fields -> `Assoc (("model", `String "runtime") :: fields)
+    | other -> other
+  in
+  (match Turn_record.of_json with_unknown_record_field with
+   | Ok _ -> fail "decoded a turn record with an unknown field"
+   | Error message ->
+     check bool "record field rejection is explicit" true
+       (Astring.String.is_infix ~affix:"fields are not exact" message));
+  let with_unknown_block_field =
+    match record_json with
+    | `Assoc fields ->
+      let blocks =
+        match List.assoc "blocks" fields with
+        | `List (`Assoc block_fields :: rest) ->
+          `List (`Assoc (("retired_rank", `Int 1) :: block_fields) :: rest)
+        | other -> other
+      in
+      `Assoc (("blocks", blocks) :: List.remove_assoc "blocks" fields)
+    | other -> other
+  in
+  match Turn_record.of_json with_unknown_block_field with
+  | Ok _ -> fail "decoded a prompt block with an unknown field"
+  | Error message ->
+    check bool "block field rejection is explicit" true
+      (Astring.String.is_infix ~affix:"prompt block fields are not exact" message)
+;;
+
+(* ── Block diff (RFC §5: exact added/removed set) ─────── *)
+
+let record_with_blocks blocks = { (sample_record ()) with blocks }
+
+let test_diff_added_removed_changed () =
+  let prev =
+    record_with_blocks
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
+      ; sample_block Prompt_block_id.Dynamic_context "bbbb"
+      ; sample_block Prompt_block_id.Temporal_summary "rrrr"
+      ]
+  in
+  let next =
+    record_with_blocks
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa" (* unchanged *)
+      ; sample_block Prompt_block_id.Dynamic_context "BBBB" (* changed *)
+      ; sample_block Prompt_block_id.Memory_os_recall "mmmm" (* added *)
+      ]
+  in
+  let diff = Turn_record.diff_blocks ~prev ~next in
+  check (list block_id) "added = exactly memory_os_recall"
+    [ Prompt_block_id.Memory_os_recall ]
+    (List.map (fun (b : Turn_record.prompt_block) -> b.block) diff.added);
+  check (list block_id) "removed = exactly temporal_summary"
+    [ Prompt_block_id.Temporal_summary ]
+    (List.map (fun (b : Turn_record.prompt_block) -> b.block) diff.removed);
+  check (list block_id) "changed = exactly dynamic_context"
+    [ Prompt_block_id.Dynamic_context ]
+    (List.map
+       (fun ((_, b) : Turn_record.prompt_block * Turn_record.prompt_block) -> b.block)
+       diff.changed)
+
+let test_diff_identical_records_is_empty () =
+  let record = sample_record () in
+  let diff = Turn_record.diff_blocks ~prev:record ~next:record in
+  check int "no added" 0 (List.length diff.added);
+  check int "no removed" 0 (List.length diff.removed);
+  check int "no changed" 0 (List.length diff.changed)
+
+let test_entries_with_diffs_same_trace_only () =
+  let r1 =
+    { (record_with_blocks [ sample_block Prompt_block_id.Keeper_instructions "aaaa" ]) with
+      trace_id = "trace-A"
+    ; absolute_turn = 1
+    ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-A" ~absolute_turn:1
+    }
+  in
+  let r2 =
+    { (record_with_blocks
+         [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
+         ; sample_block Prompt_block_id.Temporal_summary "rrrr"
+         ])
+      with
+      trace_id = "trace-A"
+    ; absolute_turn = 2
+    ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-A" ~absolute_turn:2
+    }
+  in
+  let r3 =
+    { (record_with_blocks [ sample_block Prompt_block_id.Keeper_instructions "zzzz" ]) with
+      trace_id = "trace-B" (* new generation: diff must be None *)
+    ; absolute_turn = 3
+    ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-B" ~absolute_turn:3
+    }
+  in
+  match Turn_record.entries_with_diffs [ r1; r2; r3 ] with
+  | [ (_, first); (_, second); (_, third) ] ->
+    check bool "first record has no predecessor" true (first = None);
+    (match second with
+     | Some diff ->
+       check (list block_id) "same-trace diff sees the added summary"
+         [ Prompt_block_id.Temporal_summary ]
+         (List.map (fun (b : Turn_record.prompt_block) -> b.block) diff.added)
+     | None -> fail "expected a diff for the same-trace successor");
+    check bool "trace boundary yields no diff" true (third = None)
+  | _ -> fail "expected three paired entries"
+
+(* ── Turn_ref (RFC-0233 §7) ───────────────────────────── *)
+
+let test_turn_ref_roundtrip () =
+  let r =
+    Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn:4071
+  in
+  check string "to_string" "trace-1780648779957-00000#4071"
+    (Ids.Turn_ref.to_string r);
+  (match Ids.Turn_ref.of_string (Ids.Turn_ref.to_string r) with
+   | Some back -> check turn_ref_t "of_string roundtrip" r back
+   | None -> fail "of_string returned None on its own output");
+  check string "trace_id accessor" "trace-1780648779957-00000"
+    (Ids.Turn_ref.trace_id r);
+  check int "absolute_turn accessor" 4071 (Ids.Turn_ref.absolute_turn r)
+
+let test_turn_ref_trace_with_hash () =
+  (* trace_id containing '#' still parses: split on the LAST '#'. *)
+  match Ids.Turn_ref.of_string "weird#trace#12" with
+  | Some r ->
+    check string "trace keeps inner '#'" "weird#trace" (Ids.Turn_ref.trace_id r);
+    check int "turn is the last segment" 12 (Ids.Turn_ref.absolute_turn r)
+  | None -> fail "expected Some for a trace_id containing '#'"
+
+let test_turn_ref_rejects_malformed () =
+  check bool "no separator -> None" true (Ids.Turn_ref.of_string "noseparator" = None);
+  check bool "non-int suffix -> None" true (Ids.Turn_ref.of_string "trace#abc" = None);
+  check bool "empty trace -> None" true (Ids.Turn_ref.of_string "#4" = None)
+
+(* The 61 rows in #30190 that named a deepseek profile next to GLM's 200,000
+   were all error-path rows, and the number they carried was the turn budget,
+   not that profile's window. Both halves of the contract are pinned here: the
+   number recorded is the budget the prompt was shaped to, and the error path
+   records no number at all. *)
+let test_context_window_records_the_turn_budget () =
+  Alcotest.(check (option int))
+    "a completed turn records the budget it was shaped to"
+    (Some 200_000)
+    (Masc.Keeper_turn_record_writer.context_window_of_turn
+       ~turn_budget:200_000
+       `Produced_result)
+
+let test_context_window_absent_on_the_error_path () =
+  Alcotest.(check (option int))
+    "an errored turn records no ceiling"
+    None
+    (Masc.Keeper_turn_record_writer.context_window_of_turn
+       ~turn_budget:200_000
+       `Errored)
+
+
+let test_request_observations_roundtrip () =
+  let observations =
+    [{Request_observation.runtime_profile="native.fixture";attempt=0;
+      evidence=Request_observation.Recorded {call_id="fixture-call";requests=
+        [{node_id="provider-0";turn=0;ordinal=0;provenance=None}]}};
+     {runtime_profile="native.fixture";attempt=1;evidence=Request_observation.Read_failed "unavailable"};
+     {runtime_profile="official.fixture";attempt=2;evidence=Request_observation.No_durable_scope}] in
+  let record = {(sample_record ()) with request_observations=observations} in
+  let json = Turn_record.to_json record in
+  (match Turn_record.of_json json with
+   | Error detail -> fail detail
+   | Ok decoded -> check bool "all per-attempt request facts survive codec" true
+       (List.map Request_observation.to_json observations =
+        List.map Request_observation.to_json decoded.request_observations));
+  match json with
+  | `Assoc fields ->
+    (match Turn_record.of_json (`Assoc (List.remove_assoc "request_observations" fields)) with
+     | Error _ -> () | Ok _ -> fail "missing observations became a fabricated empty list");
+    (match Request_observation.of_json (`Assoc ["runtime_profile",`String "native.fixture";
+       "attempt",`Int 0;"evidence",`Assoc ["status",`String "unknown"]]) with
+     | Error _ -> () | Ok _ -> fail "unknown observation silently normalized")
+  | _ -> fail "writer did not produce object"
+;;
+
+let () =
+  run "turn_record"
+    [ ( "prompt_block_id"
+      , [ test_case "all known constructors roundtrip" `Quick test_block_id_roundtrip
+        ; test_case "unknown block rejected" `Quick test_block_id_unknown_rejected
+        ; test_case "post-tool round classes" `Quick
+            test_block_id_post_tool_round_classes
+        ; test_case "resend classes of the recall blocks" `Quick
+            test_block_id_resend_classes_of_the_recall_blocks
+        ] )
+    ; ( "codec"
+      , [ test_case "roundtrip" `Quick test_codec_roundtrip
+        ; test_case "client-turn usage keeps counts and scope" `Quick
+            test_client_turn_usage_roundtrip
+        ; test_case "Dashboard writer fixture uses the current strict codec" `Quick
+            test_dashboard_writer_fixture_roundtrip
+        ; test_case "dashboard decoder lists every block id" `Quick
+            test_dashboard_decoder_lists_every_block_id
+        ; test_case "cache counts round-trip and stay optional" `Quick
+            test_cache_counts_round_trip_and_stay_optional
+        ; test_case "historical row without usage scope is unavailable" `Quick
+            test_historical_row_without_usage_scope_is_unavailable
+        ; test_case "optional fields absent" `Quick test_codec_optional_fields_absent
+        ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
+        ; test_case "current observation fields required" `Quick
+            test_codec_requires_current_observation_fields
+        ; test_case "invalid response-observed input rejected" `Quick
+            test_codec_rejects_invalid_response_observed_model_input
+        ; test_case "empty-history boundaries are explicit and strict" `Quick
+            test_empty_model_input_boundaries_roundtrip_and_reject_invalid_shapes
+        ; test_case "record carries transmitted history share" `Quick
+            test_record_carries_transmitted_history_share
+        ; test_case "transmitting more than held rejected" `Quick
+            test_codec_rejects_transmitting_more_than_held
+        ; test_case "window without its front digest rejected" `Quick
+            test_codec_rejects_a_window_without_its_front_digest
+        ; test_case "floor window with its end witnessed survives the codec" `Quick
+            test_codec_preserves_a_floor_window_with_its_end_witnessed
+        ; test_case "row without a window or the digest key rejected" `Quick
+            test_codec_rejects_a_row_without_a_window_or_the_digest_key
+        ; test_case "half an observation rejected" `Quick
+            test_codec_rejects_half_an_observation
+        ; test_case "mismatched turn_ref rejected" `Quick
+            test_codec_rejects_mismatched_turn_ref
+        ; test_case "mismatched raw trace session rejected" `Quick
+            test_codec_rejects_mismatched_raw_trace_session
+        ; test_case "partial or invalid request wire observation rejected"
+            `Quick
+            test_codec_rejects_partial_or_invalid_request_wire_observation
+        ; test_case "unknown input component rejected" `Quick
+            test_codec_rejects_unknown_input_component
+        ; test_case "input component extra field rejected" `Quick
+            test_codec_rejects_input_component_extra_field
+        ; test_case "explicit unavailable input components round-trip" `Quick
+            test_codec_preserves_explicit_unavailable_input_components
+        ; test_case "malformed blocks rejected" `Quick
+            test_codec_rejects_malformed_blocks
+        ; test_case "duplicate blocks and components rejected" `Quick
+            test_codec_rejects_duplicate_blocks_and_components
+        ; test_case "unknown block is rejected" `Quick
+            test_codec_rejects_unknown_block
+        ; test_case "unknown fields are rejected" `Quick
+            test_codec_rejects_unknown_fields
+        ] )
+    ; ( "block_diff"
+      , [ test_case "exact added/removed/changed sets" `Quick
+            test_diff_added_removed_changed
+        ; test_case "identical records diff empty" `Quick
+            test_diff_identical_records_is_empty
+        ; test_case "entries_with_diffs pairs same-trace only" `Quick
+            test_entries_with_diffs_same_trace_only
+        ] )
+    ; ( "context_window"
+      , [ test_case "records the turn budget" `Quick
+            test_context_window_records_the_turn_budget
+        ; test_case "absent on the error path" `Quick
+            test_context_window_absent_on_the_error_path
+        ; test_case "turn output tokens round-trip and stay optional" `Quick
+            test_turn_output_tokens_round_trip_and_stay_optional
+        ; test_case "provider context stays separate from turn budget" `Quick
+            test_provider_context_stays_separate_from_turn_budget
+        ; test_case "tool surface ref round trips and stays optional" `Quick
+            test_tool_surface_ref_round_trips_and_stays_optional
+        ; test_case "the tool surface payload round trips" `Quick
+            test_the_tool_surface_payload_round_trips
+        ] )
+    ; ( "request observations", [test_case "per-attempt facts and unavailability roundtrip" `Quick test_request_observations_roundtrip] )
+    ; ( "turn_ref"
+      , [ test_case "make/to_string/of_string roundtrip" `Quick
+            test_turn_ref_roundtrip
+        ; test_case "trace_id with '#' splits on last separator" `Quick
+            test_turn_ref_trace_with_hash
+        ; test_case "of_string rejects malformed" `Quick
+            test_turn_ref_rejects_malformed
+        ] )
+    ]

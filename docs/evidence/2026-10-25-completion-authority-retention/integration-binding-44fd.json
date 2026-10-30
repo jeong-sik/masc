@@ -1,0 +1,123 @@
+{
+  "author": "e9f72f1c985761e032e0fef878ce1dc6d0111ad2",
+  "author_base": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "integrated_source": "44fd882f84058d1774c9fd6aad3b0d8286ecf5cf",
+  "direct_parent": "177219da10c1b27b606c10af70b4bf6ea39211da",
+  "files": [
+    {
+      "path": "bin/masc_tui_context_inspector.ml",
+      "candidate_sha256": "ed69b8c71d8939619d47d6edafad8aebc80114a7262b875a1c4ecbffc843a9d6",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "dashboard/src/api/dashboard-turn-records.ts",
+      "candidate_sha256": "1557e34cd56e07615a4ec2919b0b26d1fe4bdb270f310344aed339fe8b82a106",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "dashboard/src/components/memory-inspector.ts",
+      "candidate_sha256": "89e31768dbcbe1bd05d4ca1383006deb30bd21c48e7ac9f7b8e312ebada75588",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_context_assembly.ml",
+      "candidate_sha256": "484a02f701471656b68403748d48bb6f470bf494261e791cfea9475dcf0d8f48",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_context_assembly.mli",
+      "candidate_sha256": "1479a882a788783bfc430cd44803ed679f6815d2c0a597c94f262810bc0f10ee",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_context_submission_link.ml",
+      "candidate_sha256": "f0f057793f66a0620ad696781f6231da6116037025cddde94d72db2ca3169819",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_context_submission_link.mli",
+      "candidate_sha256": "1a9a3fa6133b8d55e33ce1eaec5d73d06b373fd0afa0f05dcafc0ab018745120",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_next_request_forecast.ml",
+      "candidate_sha256": "1d3f1c8f59fbc4670120544607355d5f4e83285a304cc30be1d5f3d4711ca75d",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_context_projection.ml",
+      "candidate_sha256": "3c94d67e0ee786f055e44cea31378445fdd1914cf3b1ec42c1d6a9aa30827fc0",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_host.mli",
+      "candidate_sha256": "fda00181876a9ea24cf0ee44b72c40ced35e093a3f666c37b21eea634510bbd2",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_run_prompt.ml",
+      "candidate_sha256": "54229d2bce98cbe1406952f4f6655524e5366e0b9ad1a6c8426071894a8334a0",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_run_prompt.mli",
+      "candidate_sha256": "01a9b391018fa6c4244bfb22e143bfe50f230ddf59bc6da7918ef7ba28a2d2b7",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/types/prompt_block_id.ml",
+      "candidate_sha256": "29d4f8d8ce8bbf3bf53fd304a4ed95e48ee609d83de2ea2f8946c78d3255268e",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "lib/types/prompt_block_id.mli",
+      "candidate_sha256": "2f4094a70f64f63b852a32b6ce0fdf402f34bf3f3345de343bf17c14bee67eda",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "test/test_keeper_direct_goal_provider_wire.ml",
+      "candidate_sha256": "14971fa22a74ddc79bf9ee3cd73a65e4f44125b7b651b63da806bc495af03889",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "test/test_keeper_next_request_forecast.ml",
+      "candidate_sha256": "ff8034532cae89097c5e25e33201aee728c52534fff9098bf207163d3be86bb7",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "test/test_keeper_official_client_host.ml",
+      "candidate_sha256": "b423d2262896f7899f59ca09a05af53f2cd0b132993c8c591827e743a85ce29f",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "test/test_keeper_prompt_capture.ml",
+      "candidate_sha256": "12fa4eb8ec68a733f9585d5396549cf6c9f0ca6d4513a707567c7044f2237f9a",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    },
+    {
+      "path": "test/test_turn_record.ml",
+      "candidate_sha256": "94e88e50df77db2a4413dd0dbb107117dd8b8c51bf4f7bc177d7bd14bc0271e5",
+      "author_equals_integration": true,
+      "author_base_equals_parent": true
+    }
+  ],
+  "scope": "All changed product/config/direct tests match author; parent changed only docs. Runtime/native execution still separate."
+}

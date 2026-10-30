@@ -1,0 +1,111 @@
+{
+  "scope": "Actual leading System only; public authority payload. No inference from Tool history or prompt preview.",
+  "rejected_task_id": "task-001",
+  "rejected_verification_id": "vrf-5dd15968c9ec601c495335d00cc7b471",
+  "reason": "Controlled operator-proxy rejection: the initial owner explicitly required only alpha=true with beta=false and gamma=false before the first Task approval. The immutable submitted artifact has all three true. Restore beta/gamma=false, reread actual bytes, and resubmit the alpha-only artifact. The narrowed model-authored contract does not erase the original owner requirement. This is a Task verification verdict, not human Goal confirmation.",
+  "requests": [
+    {
+      "request_id": "request-000010",
+      "request_sha256": "03cfaaae6221a2a1346c32f1b234abcb0286c59759603c5d3e075b06f1e60a92",
+      "response_sha256": "a16211b70f9604fa3e9c3753bc6b7d0c81425d3df209cf251a5a530ede2934e4",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000011",
+      "request_sha256": "9bc9e6d38da24b6fe922b841755b8ec276b35b29a77d31d5ffb89ec6c5e0e707",
+      "response_sha256": "3644a5dda064b4aaff3014dbe849986e709266c312a9e6d2a61f98ac863ef9f7",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000012",
+      "request_sha256": "adafcfc7fc2c6d43defd0c5b30366d7ad5b3c491f1c4bedec04feeb554ffb156",
+      "response_sha256": "d69790c79ede8b6ad21c11d21fa91f70f2ffdb2b3e4ab562f935953beaba9573",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000013",
+      "request_sha256": "ae575df94d40e86a2767ed80dd965c53c68953ca713258b47dee0bbb9c0ebf1b",
+      "response_sha256": "933ec808c44c95aa51f2aef973a0ea04b9c76d623f9a0eb1f396c06e9f7c9a1e",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000014",
+      "request_sha256": "4f4c0074ce32ebdcac62f2b46ad8d54f0c065198ff06be420e118770e3e77c9f",
+      "response_sha256": "244cafdc8d7a9cd9fb9e7a8c4922108af30f0f7554b97b3cad20324484ba3cb0",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000015",
+      "request_sha256": "f8b35ae7a5c64521815a506b364ea28d5171b09abf441ce8d6bfbd36a983e737",
+      "response_sha256": "19163bc2c01fb18386281f3149e1992748dcd27b49bbb36f0d605c5555915b99",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000016",
+      "request_sha256": "5efa35d2f1d2383db6012e8a8a5e4f2cf6972c03a289dfe28cef672486c9795d",
+      "response_sha256": "2a8e8f75f0d87b92c33d6c3c73ac4f3d03bf5bb4dd7ba97715ee3cb96e440926",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000017",
+      "request_sha256": "acfae7a58dbe4a1db05ee04efb16090d95ce6ddfc07d5314ce82abea2ac032fc",
+      "response_sha256": "75647f68ddf086c2a71bedf9f8d13e788df8a7be46f0fdb60a8708e7af748421",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000018",
+      "request_sha256": "9d67acdb39eebec237681c61a88d9dc23530d6c900eebbcd266b629b4dac75c7",
+      "response_sha256": "3add459072cefab21777036047a422eb449b599cb23f322b2601c99b2cece88b",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    },
+    {
+      "request_id": "request-000019",
+      "request_sha256": "3954aa705db2cfd8a89d7e04f1912d62ea80b5795cd12ece6c03e3c88abdc1f4",
+      "response_sha256": "f2da544a3d38b474d224092a34601f12a8aac33f50016c0be9166a5c15cda700",
+      "response_complete": true,
+      "task_id_present": true,
+      "rejected_verification_id_present": true,
+      "exact_reason_present": true,
+      "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+    }
+  ],
+  "all_task_vrf_exact_reason_present": true,
+  "all_system_strings_equal": true,
+  "goal_and_revision_preserved": true
+}

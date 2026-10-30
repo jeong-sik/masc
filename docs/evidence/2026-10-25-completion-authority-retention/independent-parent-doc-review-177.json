@@ -1,0 +1,141 @@
+{
+  "schema": "masc.independent.docs-evidence-review.v1",
+  "reviewer": "repair_evidence_integrity",
+  "recorded_at": "2026-10-24T16:59:33.858653+00:00",
+  "verdict": "PASS",
+  "base": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "head": "177219da10c1b27b606c10af70b4bf6ea39211da",
+  "raw_diff_sha256": "01840c52b8fbbb2d6ce6640b64651aeaa358a874b83a898d5849123dca1906b3",
+  "scope": "Read-only frozen docs/evidence delta of46files. No new product source review, source/native tests, API calls, model calls, server startup, CI query, GitHub approval or repository edits. Private review JSON artifacts only.",
+  "changed_files": 46,
+  "product_trees": {
+    "lib": {
+      "base": "cb4a2cad87e55d84ce16a50a7458d5801e65282d",
+      "head": "cb4a2cad87e55d84ce16a50a7458d5801e65282d",
+      "equal": true
+    },
+    "config": {
+      "base": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "head": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "equal": true
+    },
+    "packages": {
+      "base": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "head": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "equal": true
+    },
+    "bin": {
+      "base": "290bb3af19d632193fefbdd17f59706e9f2df5a8",
+      "head": "290bb3af19d632193fefbdd17f59706e9f2df5a8",
+      "equal": true
+    },
+    "dashboard": {
+      "base": "b17104035461506f7b6388e625bb2d48836598b1",
+      "head": "b17104035461506f7b6388e625bb2d48836598b1",
+      "equal": true
+    },
+    "test": {
+      "base": "b946994be111ce7be8a814ad73a518fcfb8adf3e",
+      "head": "b946994be111ce7be8a814ad73a518fcfb8adf3e",
+      "equal": true
+    },
+    "scripts": {
+      "base": "6af9dcbedb9e3471684696f0199bfb46ca6692b5",
+      "head": "6af9dcbedb9e3471684696f0199bfb46ca6692b5",
+      "equal": true
+    }
+  },
+  "p0_p1_p2_findings": [],
+  "new_nonblocking_findings": [],
+  "prior_nonblocking_findings": [
+    {
+      "id": "snapshot-asof-and-limit-staleness",
+      "state": "CLOSED",
+      "evidence": "Top measured_at16:45:17 follows G3 terminal16:40:35; limits now latest3014G2/G3FAIL and historical54/Gemma scopes."
+    },
+    {
+      "id": "frozen-identity-two-arm-scope",
+      "state": "CLOSED",
+      "evidence": "applies_to baseline,phase_receipt plus explicit Full Systemparagraph and tool-description changes; changed manifest hashes agree."
+    }
+  ],
+  "evidence_summary": {
+    "all_changes_documentation_only": true,
+    "strict_json_files": 41,
+    "json_errors": [],
+    "manifests": 2,
+    "matching_manifest_entries": 47,
+    "known_sensitive_or_raw_thinking_candidates": 0,
+    "private_original_copies_byte_equal": 36,
+    "prior_cc_review_original_copy_equal": true,
+    "parsed_nonempty_provider_requests": 29,
+    "raw_thinking_not_copied": "Only public content/tool calls/hash/presence were extracted; raw streamed thinking excluded."
+  },
+  "claims": [
+    {
+      "claim": "LatestG2FAIL",
+      "judgment": "Supported",
+      "evidence": "Actual Task-create8 omittedgoal_id; preapproval frozen primary/mirror link records absent through ownerterminal. Controlled public-MCP link16:33:01 after ownerterminal16:31:03 is explicitly disclosed G3 setup, not G2 success."
+    },
+    {
+      "claim": "LatestG3FAIL",
+      "judgment": "Supported",
+      "evidence": "Actualapproval21, all-falseWrite22, alpha-only restoration/rework, resubmit28, successfulDonequery29, resubmit30 refused, terminal31 stops with no newTask/no beta-gamma work/no modelGoalmeasure. FinalDone Task,Executing Goal and initialoperator0/3 remain persisted."
+    },
+    {
+      "claim": "Real exact-ID Done lookupPASS",
+      "judgment": "Supported separately from model compliance",
+      "evidence": "Actualquery29 args task_ids=[task-001],projection=full omitstatus/include_done; raw nextrequest30Toolfeedback exact published and returnsDone withcompleted_at16:33:21. Same DoneTask resubmitted afterward."
+    },
+    {
+      "claim": "Receipt live interpretation",
+      "judgment": "Correctly unmeasured",
+      "evidence": "Zero modelmasc_goal_measure calls across29nonempty capturedproviderrequests. Canonicaldescription and reportinginstruction delivered. Operatorbaseline/separateHTTP-MCP are not modelreceipt interpretation; no cause/effect success or failure inferred."
+    },
+    {
+      "claim": "Approval input retention",
+      "judgment": "Presence defect accurately scoped",
+      "evidence": "Independently verified actualrequest21has notice,22–31lacknotice, olderawaitingToolfeedbackandGoalrevisionremain. Captured report bounded21–29 is preserved; current review also checked30–31. LaterDonefeedback prevents sole-cause attribution."
+    },
+    {
+      "claim": "9/11 latest ledger versus historical10/11",
+      "judgment": "Supported within explicit mixed execution scopes",
+      "evidence": "Fixed11requirements unchanged. G2/G3fail; nineothercaseobjects preservedexactly, notreexecuted. PreviousG2/G3measurements preservedexactobjects. Publishedsnapshot equals canonicalhost bytes SHAd13ab0cbea8ef70983469b2349d8be2078b641ce014955b8a84711384b17e9d4. ActualmainGoalreceipt matches text/structured/meta views andcurrentdurablerecord; mainGoalExecuting. Mainreceipt comesexistingprimaryAPI schema, notnew3014receipt proof."
+    },
+    {
+      "claim": "Artifact and terminal truth",
+      "judgment": "Supported",
+      "evidence": "Approved42B394f8fa… equalsretainedverification, regressed42B119404c… equalsmodelWrite22, final41Bd239f681… equalsmodelWrite27/currentfile. Publicterminal isexactstreamcontent, zeroToolcalls; queueackmatchesdurabletransition,pending0. No immutableartifact overwritten."
+    },
+    {
+      "claim": "Cleanup",
+      "judgment": "Current absence corroborated; historical signalling parent-recorded",
+      "evidence": "Read-only ps confirms none of recordedserver/proxyPIDs41335,23228,19782,18494,37806. Parent cleanup receipt records exactownershipverification andSIGTERM; reviewer sentnosignal."
+    }
+  ],
+  "artifact_bindings": [
+    {
+      "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-177-doc-review-ijrkqym6/structural-check.json",
+      "sha256": "0a2995328f57bec7578666d11c452af1d27b119951a6a497b2ea0dae60adf15c"
+    },
+    {
+      "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-177-doc-review-ijrkqym6/original-copy-checks.json",
+      "sha256": "f72aac99fc40013d4d94aa736211c1c533e0504e927ea94ad9b9d361da67f63c"
+    },
+    {
+      "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-177-doc-review-ijrkqym6/wire-checks.json",
+      "sha256": "a8c3d63c6e3a8fa25ea1a31a3fdc5d05c88dc5455cee62126d47dc1fe2f46334"
+    },
+    {
+      "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-177-doc-review-ijrkqym6/evidence-checks.json",
+      "sha256": "74108ce316c861cb91fc3962d3e317d8693a72c8aa253a8c729f0621597f2ff0"
+    }
+  ],
+  "limitations": [
+    "PASS judges documentation/evidence consistency at exacthead; it is not GitHub approval, source approval for the next retention implementation, full regression or Goal completion.",
+    "No freshCI/build/model/server execution was performed. Prior3014source/API andec test-only reviews are carried through unchanged source and exact previous review artifact.",
+    "Historical signal ownership cannot be independently reconstructed from a boolean cleanup receipt; present process absence was checked directly.",
+    "Known-pattern credential scanning and public-only stream extraction are bounded checks, not a universal sensitive-data classifier.",
+    "Latest9/11 remains incomplete, with G2/G3fail; oldercasecoverage and source/native/API results do not establish population reliability or currenthead execution of everycase."
+  ]
+}

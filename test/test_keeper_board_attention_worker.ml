@@ -1,0 +1,4970 @@
+module A = Masc.Keeper_board_attention_candidate
+module E = Masc.Keeper_board_attention_exact_flow
+module Event_queue = Keeper_event_queue
+module Event_queue_persistence_source = Keeper_event_queue_persistence
+module Event_queue_persistence = struct
+  include Event_queue_persistence_source
+
+  let load ~base_path ~keeper_name =
+    match load_result ~base_path ~keeper_name with
+    | Ok queue -> queue
+    | Error detail -> Alcotest.fail detail
+  ;;
+end
+module J = Masc.Keeper_board_attention_judgment
+module P = Masc.Keeper_board_attention_partition
+module Q = Masc.Keeper_board_attention_quarantine_command
+module W = Masc.Keeper_board_attention_worker
+module Wake = Masc.Keeper_board_attention_worker_wake
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+(* Completing a partition projects it onto the keeper's registry entry
+   (keeper_board_attention_worker.ml:637); without one the projection fails
+   with "exact completion lost its registered owner" before any assertion in
+   the test body is reached. The registry is process-local, so a fresh temp
+   base_path starts with no owner. test_keeper_board_attention_exact_flow.ml:75
+   carries the same helper for the same reason. *)
+let register_owner ~base_path keeper_name =
+  match Masc.Keeper_registry.get ~base_path keeper_name with
+  | Some _ -> ()
+  | None ->
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String ("trace-" ^ keeper_name)
+          ])
+      |> Result.get_ok
+    in
+    ignore
+      (Masc.Keeper_registry.register_offline ~base_path keeper_name meta
+       : Masc.Keeper_registry.registry_entry)
+;;
+
+let with_temp_base name f =
+  let base_path = Filename.temp_dir name "" in
+  register_owner ~base_path "alpha";
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
+;;
+
+let ok label = function
+  | Ok value -> value
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
+let ready_confirmation_events ~base_path =
+  P.ledger_path ~base_path ~keeper_name:"alpha"
+  |> Fs_compat.load_file
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+    if String.equal line ""
+    then None
+    else
+      match Yojson.Safe.from_string line with
+      | `Assoc fields as json ->
+        (match List.assoc_opt "kind" fields with
+         | Some (`String "ready_confirmation") -> Some json
+         | None -> List.assoc_opt "ready_confirmation" fields
+         | Some _ -> None)
+      | _ -> None)
+;;
+
+(* Every direct A.apply_judgment_and_deliver call in this file targets a
+   candidate the test just persisted, so Candidate_absent here is a fixture
+   bug, not the case under test — test_settle_completed_snapshot_terminalizes_a_
+   partition_whose_candidate_was_retired below drives the actually-missing
+   path through the finalizer it exists to cover. *)
+let delivered label = function
+  | Ok (A.Delivered candidate) -> candidate
+  | Ok A.Candidate_absent ->
+    Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
+let signal post_id : Masc.Board_dispatch.board_signal =
+  { kind = Masc.Board_dispatch.Board_post_created
+  ; post_id
+  ; author = "external-author"
+  ; title = "Board update"
+  ; content = "Persisted Board evidence"
+  ; hearth = Some "hearth-1"
+  ; updated_at = Some 42.0
+  }
+;;
+
+let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
+  let keeper_name = "alpha" in
+  let signal = signal id in
+  let candidate_id = A.candidate_id_of_signal ~keeper_name signal in
+  { candidate_id
+  ; keeper_name
+  ; signal
+  ; recorded_at
+  ; keeper_context =
+      `Assoc
+        [ "lane_keeper_name", `String keeper_name
+        ; "board_interests", `List [ `String "runtime" ]
+        ]
+  ; status = A.Pending { last_delivery_failure = None }
+  }
+;;
+
+let provenance suffix : E.attempt_provenance =
+  { slot_id = "slot-" ^ suffix
+  ; call_id = "call-" ^ suffix
+  ; plan_fingerprint = "plan-" ^ suffix
+  ; request_body_sha256 = "request-" ^ suffix
+  }
+;;
+
+let judgment (provenance : E.attempt_provenance) decision : A.judgment =
+  { verdict = { J.decision; rationale = "typed structured verdict" }
+  ; slot_id = provenance.slot_id
+  ; source =
+      A.Exact_attempt
+        { call_id = provenance.call_id
+        ; plan_fingerprint = provenance.plan_fingerprint
+        ; request_body_sha256 = provenance.request_body_sha256
+        }
+  ; judged_at = 2.0
+  }
+;;
+
+let same_provenance
+      (durable : P.exact_provenance)
+      (projected : E.attempt_provenance)
+  =
+  String.equal durable.slot_id projected.slot_id
+  && String.equal durable.call_id projected.call_id
+  && String.equal durable.plan_fingerprint projected.plan_fingerprint
+  && String.equal durable.request_body_sha256 projected.request_body_sha256
+;;
+
+let same_candidate_visit
+      (durable : P.candidate_visit)
+      (projected : E.candidate_visit)
+  =
+  String.equal durable.flow_id projected.flow_id
+  && Int.equal durable.ordinal projected.ordinal
+  && String.equal durable.slot_id projected.slot_id
+  && String.equal
+       durable.catalog_generation_fingerprint
+       projected.catalog_generation_fingerprint
+  && String.equal durable.catalog_evidence_sha256 projected.catalog_evidence_sha256
+  && String.equal
+       durable.target_identity_fingerprint
+       projected.target_identity_fingerprint
+;;
+
+let same_candidate_provenance
+      (durable : A.attempt_provenance)
+      (projected : E.attempt_provenance)
+  =
+  String.equal durable.slot_id projected.slot_id
+  && String.equal durable.call_id projected.call_id
+  && String.equal durable.plan_fingerprint projected.plan_fingerprint
+  && String.equal durable.request_body_sha256 projected.request_body_sha256
+;;
+
+let record ~base_path candidate =
+  match A.record ~base_path candidate with
+  | A.Recorded candidate -> candidate
+  | A.Duplicate _ -> Alcotest.fail "first record was a duplicate"
+  | A.Record_error detail -> Alcotest.failf "candidate record failed: %s" detail
+;;
+
+let load_one_candidate ~base_path =
+  match ok "load candidate" (A.load_candidates ~base_path ~keeper_name:"alpha") with
+  | [ candidate ] -> candidate
+  | candidates -> Alcotest.failf "expected one candidate, got %d" (List.length candidates)
+;;
+
+let load_one_partition ~base_path =
+  match ok "load partition" (P.load ~base_path ~keeper_name:"alpha") with
+  | [ partition ] -> partition
+  | partitions -> Alcotest.failf "expected one partition, got %d" (List.length partitions)
+;;
+
+(* The phase strings the inventory serves, which is what the operator snapshot,
+   the dashboard route and the TUI read. *)
+let inventory_phases ~base_path =
+  Q.inventory_to_json (Q.inventory ~base_path ~keeper_names:[ "alpha" ])
+  |> Yojson.Safe.Util.member "items"
+  |> Yojson.Safe.Util.to_list
+  |> List.map (fun item ->
+    item |> Yojson.Safe.Util.member "phase" |> Yojson.Safe.Util.to_string)
+;;
+
+let relevant_delivery_count ~base_path ~candidate_id =
+  Event_queue_persistence.load ~base_path ~keeper_name:"alpha"
+  |> Event_queue.to_list
+  |> List.fold_left
+       (fun count (stimulus : Event_queue.stimulus) ->
+          match stimulus.payload with
+          | Event_queue.Board_attention attention
+            when String.equal attention.candidate_id candidate_id -> count + 1
+          | Event_queue.Board_attention _
+          | Event_queue.Board_signal _
+          | Event_queue.Bootstrap
+          | Event_queue.Fusion_completed _
+          | Event_queue.Schedule_due _
+          | Event_queue.Connector_attention _
+          | Event_queue.Hitl_resolved _
+          | Event_queue.Ask_answered _
+          | Event_queue.Completion_authority_rejected _
+          | Event_queue.Task_outcome _
+          | Event_queue.Task_cancelled _
+          | Event_queue.Workspace_message _
+          | Event_queue.Delegate_completed _
+          | Event_queue.Tool_result_ready _ | Event_queue.Owned_job_completed _ | Event_queue.Addon_operation_changed _
+          | Event_queue.Composition_completed _ -> count)
+       0
+;;
+
+let process_at ~now ~base_path ~prepare ~execute =
+  W.For_testing.process_next
+    ~now
+    ~worker_epoch:(P.Worker_epoch.generate ())
+    ~base_path
+    ~keeper_name:"alpha"
+    ~prepare
+    ~execute
+;;
+
+let process ~base_path ~prepare ~execute =
+  process_at ~now:(fun () -> 3.0) ~base_path ~prepare ~execute
+;;
+
+let reconcile ~now ~base_path =
+  W.For_testing.reconcile_quarantines
+    ~now
+    ~worker_epoch:(P.Worker_epoch.generate ())
+    ~base_path
+    ~keeper_name:"alpha"
+;;
+
+let test_worker_exact_callback_integration_and_owner_settlement () =
+  with_temp_base "board-attention-worker-callback-chain" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let first = provenance "first" in
+  let visit suffix ordinal : E.candidate_visit =
+    { flow_id = "flow-callback-chain"
+    ; ordinal
+    ; slot_id = "slot-" ^ suffix
+    ; catalog_generation_fingerprint = "catalog-generation-" ^ suffix
+    ; catalog_evidence_sha256 = "catalog-evidence-" ^ suffix
+    ; target_identity_fingerprint = "target-identity-" ^ suffix
+    }
+  in
+  let rejected = visit "second" 1 in
+  let third_visit = visit "third" 2 in
+  let third = provenance "third" in
+  let callbacks = ref [] in
+  let observed_time = ref 3.0 in
+  let execute ~before_dispatch ~before_advance _candidate =
+    ok "bind first" (before_dispatch first);
+    (match (load_one_partition ~base_path).state with
+     | P.Running { progress = P.Bound durable; _ }
+       when same_provenance durable first -> ()
+     | _ -> Alcotest.fail "first callback did not durably bind projected provenance");
+    callbacks := !callbacks @ [ "bind-first" ];
+    ok
+      "record executed failure"
+      (before_advance ~failed:(E.Executed_failure first) ~next:rejected);
+    (match (load_one_partition ~base_path).state with
+     | P.Running
+         { progress =
+             P.Advancing
+               { execution_anchor = Some durable
+               ; last_from = None
+               ; next
+               }
+         ; _
+         }
+       when same_provenance durable first
+            && same_candidate_visit next rejected -> ()
+     | _ -> Alcotest.fail "executed failure did not retain its durable anchor");
+    callbacks := !callbacks @ [ "advance-first" ];
+    ok
+      "record predispatch rejection"
+      (before_advance
+         ~failed:(E.Predispatch_rejection rejected)
+         ~next:third_visit);
+    (match (load_one_partition ~base_path).state with
+     | P.Running
+         { progress =
+             P.Advancing
+               { execution_anchor = Some durable
+               ; last_from = Some durable_rejected
+               ; next
+               }
+         ; _
+         }
+       when same_provenance durable first
+            && same_candidate_visit durable_rejected rejected
+            && same_candidate_visit next third_visit -> ()
+     | _ -> Alcotest.fail "predispatch rejection overwrote the execution anchor");
+    callbacks := !callbacks @ [ "advance-rejected" ];
+    ok "bind third" (before_dispatch third);
+    (match (load_one_partition ~base_path).state with
+     | P.Running { progress = P.Bound durable; _ }
+       when same_provenance durable third -> ()
+     | _ -> Alcotest.fail "third callback did not durably bind projected provenance");
+    callbacks := !callbacks @ [ "bind-third" ];
+    observed_time := 9.0;
+    (* Relevant, not Not_relevant: task-1666 makes the worker settle a
+       Not_relevant completion immediately (no owner turn), which would
+       collapse the mid-test Pending assertion below before it can observe
+       the callback-chain's intermediate Completed state. The callback
+       sequence under test here is orthogonal to the verdict; a dedicated
+       test (test_a_not_relevant_judgment_settles_without_an_owner_turn)
+       covers the Not_relevant direct-settle path. *)
+    Ok (judgment third J.Relevant)
+  in
+  (match
+     ok
+       "worker callback integration"
+       (process_at
+          ~base_path
+          ~now:(fun () -> !observed_time)
+          ~prepare:(fun candidate -> Ok candidate)
+          ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Judgment_completed _
+   | W.Idle
+   | W.Contended _
+   | W.Rescan_later _
+   | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "worker exact callback chain did not complete");
+  Alcotest.(check (list string))
+    "durable callback order"
+    [ "bind-first"; "advance-first"; "advance-rejected"; "bind-third" ]
+    !callbacks;
+  (match (load_one_candidate ~base_path).status with
+   | A.Pending { last_delivery_failure = None } -> ()
+   | A.Pending { last_delivery_failure = Some _ }
+   | A.Judged _
+   | A.Consumed _
+   | A.Quarantine _ ->
+     Alcotest.fail "background worker crossed the owner settlement boundary");
+  (match load_one_partition ~base_path with
+   | { state = P.Completed { item = { judgment = observed; _ }; completed_at }; _ } ->
+     Alcotest.(check string) "selected opaque slot" third.slot_id observed.slot_id;
+     Alcotest.(check (float 0.0)) "completion observes post-execution time" 9.0 completed_at
+   | _ -> Alcotest.fail "callback chain did not persist Completed");
+  (match ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
+   | W.Partition_settled { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
+   | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
+  | _ -> Alcotest.fail "owner settlement did not consume and settle the judgment"
+;;
+
+(* Every HTTP slot was rejected before dispatch, so the partition is left
+   Advancing with no execution anchor, and the CLI tail answered. On main the
+   completion was refused ("cannot bypass pending advancement") and the
+   candidate was quarantined as [Exact_completion_failed]: 126 live rows on
+   2026-09-24, each a judgment the lane had already paid for. *)
+let test_a_cli_answer_after_every_http_slot_was_rejected_completes () =
+  with_temp_base "board-attention-worker-cli-after-rejections" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let visit slot_id ordinal : E.candidate_visit =
+    { flow_id = "flow-cli-after-rejections"
+    ; ordinal
+    ; slot_id
+    ; catalog_generation_fingerprint = "catalog-generation-" ^ slot_id
+    ; catalog_evidence_sha256 = "catalog-evidence-" ^ slot_id
+    ; target_identity_fingerprint = "target-identity-" ^ slot_id
+    }
+  in
+  let first = visit "glm-coding.glm-5.3-flash" 1 in
+  let second = visit "ollama_cloud.deepseek" 2 in
+  let cli_slot = "codex_subscription.gpt-5.6-luna" in
+  let execute ~before_dispatch:_ ~before_advance _candidate =
+    ok
+      "first slot rejected before dispatch"
+      (before_advance ~failed:(E.Predispatch_rejection first) ~next:second);
+    (* The second slot is rejected too. No slot follows it, so AGENT_CORE
+       records no further advance and the walk ends here. *)
+    (match (load_one_partition ~base_path).state with
+     | P.Running
+         { progress = P.Advancing { execution_anchor = None; next; _ }; _ }
+       when same_candidate_visit next second -> ()
+     | _ -> Alcotest.fail "fixture did not leave the walk Advancing");
+    Ok
+      { A.verdict = { J.decision = J.Relevant; rationale = "react to this Board event" }
+      ; slot_id = cli_slot
+      ; source = A.Cli_lane_slot
+      ; judged_at = 2.0
+      }
+  in
+  (match
+     ok
+       "CLI tail after every HTTP slot was rejected"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Partition_blocked _ ->
+     Alcotest.failf
+       "the CLI answer blocked the partition: %s"
+       (Yojson.Safe.to_string (P.to_yojson (load_one_partition ~base_path)))
+   | W.Judgment_completed { candidate_id; _ } ->
+     Alcotest.failf "the CLI answer completed another candidate: %s" candidate_id
+   | W.Idle -> Alcotest.fail "the CLI answer step returned Idle"
+   | W.Contended _ -> Alcotest.fail "the CLI answer step returned Contended"
+   | W.Rescan_later _ -> Alcotest.fail "the CLI answer step returned Rescan_later"
+   | W.Candidate_already_consumed _ ->
+     Alcotest.fail "the CLI answer step returned Candidate_already_consumed"
+   | W.Judgment_deferred _ ->
+     Alcotest.fail "the CLI answer step returned Judgment_deferred");
+  match (load_one_partition ~base_path).state with
+  | P.Completed { item; _ } ->
+    Alcotest.(check string) "the answering client is recorded" cli_slot item.judgment.slot_id
+  | _ ->
+    Alcotest.failf
+      "the partition is not Completed: %s"
+      (Yojson.Safe.to_string (P.to_yojson (load_one_partition ~base_path)))
+;;
+
+(* task-1666: a [Not_relevant] verdict carries nothing across the owner lane
+   (nothing is enqueued for the owner to consume --
+   keeper_board_attention_candidate.mli: "Relevant judgments cross the owner
+   lane only when the owner durably applies and consumes the exact candidate
+   judgment"), so the worker settles it the moment it is judged instead of
+   waiting for the owner's own heartbeat to run [settle_completed_snapshot]
+   -- which never runs at all while that owner is not currently ticking.
+   No call to [settle_completed_snapshot] appears anywhere in this test: the
+   owner never turns, and the candidate still reaches Consumed. *)
+let test_a_not_relevant_judgment_settles_without_an_owner_turn () =
+  with_temp_base "board-attention-worker-not-relevant-direct-settle" @@ fun base_path ->
+  let discarded = record ~base_path (candidate ~id:"candidate-not-relevant" ()) in
+  let execute ~before_dispatch ~before_advance:_ prepared =
+    let attempt = provenance ("attempt-" ^ A.(prepared.candidate_id)) in
+    ok "bind" (before_dispatch attempt);
+    Ok (judgment attempt J.Not_relevant)
+  in
+  (match
+     ok
+       "judge the discard"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id discarded.candidate_id -> ()
+   | W.Judgment_completed _
+   | W.Idle
+   | W.Contended _
+   | W.Rescan_later _
+   | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "fixture did not complete the discard's judgment");
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
+   | A.Consumed { delivery = A.Not_relevant; _ }, (P.Ready | P.Running _ | P.Completed _ | P.Blocked _) ->
+     Alcotest.fail "candidate consumed but its partition never settled"
+   | (A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _), _ ->
+     Alcotest.fail "a Not_relevant verdict waited for an owner turn it never got");
+  Alcotest.(check int)
+    "nothing was enqueued for the owner"
+    0
+    (relevant_delivery_count ~base_path ~candidate_id:discarded.candidate_id)
+;;
+
+(* Non-relevant judgments settle without queue delivery. *)
+let test_discards_do_not_hold_the_owner_delivery_slot () =
+  with_temp_base "board-attention-worker-discard-drain" @@ fun base_path ->
+  let discarded =
+    record ~base_path (candidate ~id:"candidate-discarded" ~recorded_at:1.0 ())
+  in
+  let admitted =
+    record ~base_path (candidate ~id:"candidate-admitted" ~recorded_at:2.0 ())
+  in
+  let judge_next decision =
+    let execute ~before_dispatch ~before_advance prepared =
+      let attempt = provenance ("attempt-" ^ A.(prepared.candidate_id)) in
+      ok "bind" (before_dispatch attempt);
+      ignore before_advance;
+      Ok (judgment attempt decision)
+    in
+    match
+      ok
+        "judge next pending"
+        (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+    with
+    | W.Judgment_completed { candidate_id; _ } -> candidate_id
+    | W.Idle
+    | W.Contended _
+    | W.Rescan_later _
+    | W.Candidate_already_consumed _
+    | W.Judgment_deferred _
+    | W.Partition_blocked _ -> Alcotest.fail "fixture did not complete a judgment"
+  in
+  let first = judge_next J.Not_relevant in
+  let second = judge_next J.Relevant in
+  Alcotest.(check string)
+    "the discard is judged first"
+    discarded.candidate_id
+    first;
+  Alcotest.(check string)
+    "the admission is judged second"
+    admitted.candidate_id
+    second;
+  (match
+     ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Partition_settled { candidate_id; _ } ->
+     Alcotest.(check string)
+       "one call reaches the relevant verdict behind the discard"
+       admitted.candidate_id
+       candidate_id
+   | W.No_completed_partition -> Alcotest.fail "no completion was settled");
+  Alcotest.(check int)
+    "the relevant verdict reached the Keeper queue"
+    1
+    (relevant_delivery_count ~base_path ~candidate_id:admitted.candidate_id);
+  List.iter
+    (fun (candidate : A.candidate) ->
+       match
+         List.find_opt
+           (fun (c : A.candidate) ->
+              String.equal c.candidate_id candidate.candidate_id)
+           (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha"))
+       with
+       | Some { status = A.Consumed _; _ } -> ()
+       | Some _ | None ->
+         Alcotest.failf "candidate %s was left unsettled" candidate.candidate_id)
+    [ discarded; admitted ]
+;;
+
+let complete_next ~base_path decision =
+  let selected = ref None in
+  let execute ~before_dispatch ~before_advance:_ prepared =
+    let attempt = provenance ("snapshot-" ^ A.(prepared.candidate_id)) in
+    let result = judgment attempt decision in
+    ok "bind snapshot judgment" (before_dispatch attempt);
+    selected := Some (prepared, result);
+    Ok result
+  in
+  ignore
+    (ok "complete snapshot member"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute));
+  match !selected with
+  | Some selected -> selected
+  | None -> Alcotest.fail "fixture did not execute a judgment"
+;;
+
+let delivered_ids ~base_path =
+  Event_queue_persistence.load ~base_path ~keeper_name:"alpha"
+  |> Event_queue.to_list
+  |> List.filter_map (fun (source : Event_queue.stimulus) ->
+    match source.payload with
+    | Event_queue.Board_attention attention -> Some attention.candidate_id
+    | _ -> None)
+;;
+
+let test_completed_snapshot_delivers_all_relevant_in_order () =
+  with_temp_base "board-completed-snapshot" @@ fun base_path ->
+  let decisions =
+    J.Relevant :: List.init 12 (fun _ -> J.Not_relevant) @ [ J.Relevant; J.Relevant ]
+  in
+  let candidates =
+    List.mapi
+      (fun index _ ->
+        record ~base_path
+          (candidate ~id:(Printf.sprintf "snapshot-%02d" index)
+             ~recorded_at:(float_of_int (index + 1)) ()))
+      decisions
+  in
+  List.iter (fun decision -> ignore (complete_next ~base_path decision)) decisions;
+  ignore (ok "settle all ready judgments"
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
+  let expected =
+    List.filter_map
+      (fun ((candidate : A.candidate), decision) ->
+        if decision = J.Relevant then Some candidate.candidate_id else None)
+      (List.combine candidates decisions)
+  in
+  Alcotest.(check (list string)) "every relevant judgment delivered FIFO"
+    expected (delivered_ids ~base_path);
+  List.iter
+    (fun (partition : P.t) ->
+      match partition.state with
+      | P.Settled _ -> ()
+      | _ -> Alcotest.fail "snapshot member not settled")
+    (ok "reload partitions" (P.load ~base_path ~keeper_name:"alpha"));
+  (match ok "repeat settlement"
+     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
+   | W.No_completed_partition -> ()
+   | _ -> Alcotest.fail "settled snapshot was offered again");
+  Alcotest.(check (list string)) "repeat does not duplicate delivery"
+    expected (delivered_ids ~base_path)
+;;
+
+let test_completed_snapshot_failure_preserves_remainder_and_replays () =
+  with_temp_base "board-completed-failure" @@ fun base_path ->
+  let make index =
+    record ~base_path
+      (candidate ~id:(Printf.sprintf "failure-%d" index)
+         ~recorded_at:(float_of_int index) ())
+  in
+  let first = make 1 and failing = make 2 and last = make 3 in
+  let _, first_judgment = complete_next ~base_path J.Relevant in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  (* Recreate a crash after durable delivery but before partition settlement. *)
+  ignore (delivered "first delivered before crash"
+    (A.apply_judgment_and_deliver ~base_path ~keeper_name:"alpha"
+       ~candidate_id:first.candidate_id ~judgment:first_judgment));
+  let conflicting_signal =
+    Masc.Keeper_world_observation_board_signal.board_stimulus_of_board_signal
+      { failing.signal with title = "conflicting durable payload" }
+  in
+  let conflict : Event_queue.stimulus =
+    { post_id = failing.signal.post_id; urgency = Event_queue.Normal
+    ; arrived_at = failing.recorded_at
+    ; payload = Event_queue.Board_attention
+        { candidate_id = failing.candidate_id; signal = conflicting_signal }
+    }
+  in
+  ok "persist conflicting identity"
+    (Event_queue_persistence.update_result ~base_path ~keeper_name:"alpha"
+       (fun queue -> Event_queue.enqueue queue conflict));
+  (match W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" () with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "delivery conflict falsely settled the snapshot");
+  let candidates = ok "reload failed candidates"
+    (A.load_candidates ~base_path ~keeper_name:"alpha") in
+  let status id =
+    (List.find (fun (c : A.candidate) -> String.equal c.candidate_id id) candidates).status
+  in
+  (match status first.candidate_id, status failing.candidate_id, status last.candidate_id with
+   | A.Consumed _, A.Judged { last_delivery_failure = Some _; _ }, A.Pending _ -> ()
+   | _ -> Alcotest.fail "failure did not preserve its evidence and untouched remainder");
+  List.iter
+    (fun (partition : P.t) ->
+      match String.equal partition.candidate_id first.candidate_id, partition.state with
+      | true, P.Settled _ | false, P.Completed _ -> ()
+      | _ -> Alcotest.fail "partial snapshot committed the wrong partitions")
+    (ok "reload partial settlement" (P.load ~base_path ~keeper_name:"alpha"));
+  ok "remove conflicting test fixture"
+    (Event_queue_persistence.update_result ~base_path ~keeper_name:"alpha"
+       (fun queue ->
+         Event_queue.to_list queue
+         |> List.filter (fun source -> source <> conflict)
+         |> List.fold_left Event_queue.enqueue Event_queue.empty));
+  ignore (ok "resume preserved remainder"
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
+  Alcotest.(check (list string)) "crash replay and retry deliver once in order"
+    [ first.candidate_id; failing.candidate_id; last.candidate_id ]
+    (delivered_ids ~base_path)
+;;
+
+let test_completed_snapshot_captures_settle_and_continues_waking () =
+  Eio_main.run @@ fun _ ->
+  with_temp_base "board-completed-growing" @@ fun base_path ->
+  let first = record ~base_path (candidate ~id:"captured-first" ~recorded_at:1.0 ()) in
+  let second = record ~base_path (candidate ~id:"captured-second" ~recorded_at:2.0 ()) in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  let added, resolve_added = Eio.Promise.create () in
+  (* The captured snapshot settles only what it captured: the on_captured hook
+     lands a new completion in the capture boundary, so the walk below cannot
+     see it in [completed] and must come back with a continuation wake. This
+     pins the comment above [settle_completed_snapshot] — completions that
+     arrive after the capture belong to the next admission snapshot. The
+     settle walk's inter-member yield is pinned separately by
+     test_settle_walk_yields_between_captured_members (task-2234); this test
+     passes with it removed. *)
+  let on_captured
+        ~base_path
+        ~keeper_name:_
+        ~completed:_
+    =
+    let new_candidate =
+      record ~base_path (candidate ~id:"completed-during-drain" ~recorded_at:3.0 ())
+    in
+    ignore (complete_next ~base_path J.Relevant);
+    Eio.Promise.resolve resolve_added new_candidate
+  in
+  (match ok "drain captured snapshot"
+     (W.settle_completed_snapshot
+        ~base_path
+        ~keeper_name:"alpha"
+        ~on_captured
+        ()) with
+   | W.Partition_settled { continuation_wake = Some _; _ } -> ()
+   | _ -> Alcotest.fail "new completion did not retain a continuation wake");
+  let new_candidate = Eio.Promise.await added in
+  Alcotest.(check (list string)) "new completion is outside captured snapshot"
+    [ first.candidate_id; second.candidate_id ] (delivered_ids ~base_path);
+  ignore (ok "drain next snapshot"
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
+  Alcotest.(check (list string)) "next owner boundary delivers new completion"
+    [ first.candidate_id; second.candidate_id; new_candidate.candidate_id ]
+    (delivered_ids ~base_path)
+;;
+
+let test_settle_walk_yields_between_captured_members () =
+  Eio_main.run @@ fun _ ->
+  with_temp_base "board-completed-yield" @@ fun base_path ->
+  let first = record ~base_path (candidate ~id:"yield-first" ~recorded_at:1.0 ()) in
+  let _second = record ~base_path (candidate ~id:"yield-second" ~recorded_at:2.0 ()) in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  (* Why not an external fiber: measured, Eio file I/O is itself a resumption
+     point, so an outside fiber runs inside member settlements even when the
+     between-members yield is removed — its ledger view cannot separate the
+     two orders. The yield seam is injected instead (same pattern as
+     drain_available's ~yield): the walk must call it exactly once for a
+     two-member snapshot, exactly between the members, and never before the
+     first settlement starts. *)
+  let yield_calls = ref 0 in
+  let mid_delivery = ref None in
+  let counting_yield () =
+    incr yield_calls;
+    mid_delivery := Some (delivered_ids ~base_path)
+  in
+  (match
+     ok "settle captured snapshot"
+       (W.settle_completed_snapshot
+          ~base_path
+          ~keeper_name:"alpha"
+          ~yield:counting_yield
+          ())
+   with
+   | W.Partition_settled { continuation_wake = None; _ } -> ()
+   | _ -> Alcotest.fail "unexpected settlement shape");
+  Alcotest.(check int) "one between-members yield for two members" 1
+    !yield_calls;
+  Alcotest.(check (option (list string)))
+    "the yield sits between the members, after the first settlement"
+    (Some [ first.candidate_id ]) !mid_delivery
+;;
+
+let test_setup_error_stops_before_claim_without_hot_retry () =
+  with_temp_base "board-attention-worker-setup-error" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let calls = ref 0 in
+  let yields = ref 0 in
+  let prepare _candidate =
+    incr calls;
+    Error E.Network_unavailable
+  in
+  (match
+     W.For_testing.drain_available
+       ~yield:(fun () -> incr yields)
+       ~now:(fun () -> 3.0)
+       ~worker_epoch:(P.Worker_epoch.generate ())
+       ~base_path
+       ~keeper_name:"alpha"
+       ~prepare
+       ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
+         Alcotest.fail "setup error reached execution")
+   with
+   | Error detail ->
+     Alcotest.(check string)
+       "typed setup failure stops the lifecycle"
+       "Board attention exact setup unavailable before claim: network context unavailable"
+       detail
+   | Ok (W.Drained _ | W.Retry_later _ | W.Lane_deferred _) ->
+     Alcotest.fail "setup-unavailable drain returned normally");
+  Alcotest.(check int) "one setup attempt" 1 !calls;
+  Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
+  (match (load_one_candidate ~base_path).status with
+   | A.Pending { last_delivery_failure = None } -> ()
+   | A.Pending { last_delivery_failure = Some _ }
+   | A.Judged _
+   | A.Consumed _
+   | A.Quarantine _ ->
+     Alcotest.fail "setup failure changed the Pending candidate");
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "setup failure claimed or terminalized the partition"
+;;
+
+let test_claim_generation_change_discards_without_sibling_selection () =
+  with_temp_base "board-attention-worker-claim-retry-bound" @@ fun base_path ->
+  let candidates =
+    List.init 4 (fun index ->
+      record
+        ~base_path
+        (candidate
+           ~id:(Printf.sprintf "candidate-claim-conflict-%d" index)
+           ~recorded_at:(float_of_int index)
+           ()))
+  in
+  let competitor = P.Worker_epoch.generate () in
+  let prepare_calls = ref 0 in
+  let prepare candidate =
+    incr prepare_calls;
+    let partition =
+      ok "load prepared claim target" (P.load ~base_path ~keeper_name:"alpha")
+      |> List.find_opt (fun (partition : P.t) ->
+        String.equal partition.candidate_id candidate.A.candidate_id)
+    in
+    let partition =
+      match partition with
+      | Some partition -> partition
+      | None -> Alcotest.fail "prepared claim target disappeared"
+    in
+    (match
+       ok
+         "competitor wins prepared target"
+         (P.claim_ready_exact
+            ~now:10.0
+            ~worker_epoch:competitor
+            ~base_path
+            ~keeper_name:"alpha"
+            ~partition_id:partition.partition_id
+            ~generation:partition.generation)
+     with
+     | Some _ -> ()
+     | None -> Alcotest.fail "competitor did not win prepared target");
+    Ok candidate
+  in
+  let execute_calls = ref 0 in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr execute_calls;
+    Alcotest.fail "claim retry exhaustion dispatched a prepared attempt"
+  in
+  (match
+     ok
+       "bounded prepare and claim conflicts"
+       (W.For_testing.process_next
+          ~now:(fun () -> 10.0)
+          ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path
+          ~keeper_name:"alpha"
+          ~prepare
+          ~execute)
+   with
+   | W.Rescan_later _ -> ()
+   | W.Idle
+   | W.Contended _ ->
+     Alcotest.fail "changed generation reported quiescent or same-generation contention"
+   | W.Judgment_completed _
+   | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "claim retry exhaustion produced a terminal step");
+  Alcotest.(check int) "selected target is prepared once" 1 !prepare_calls;
+  Alcotest.(check int) "no prepared attempt was dispatched" 0 !execute_calls;
+  let running, ready =
+    ok "classify roots after retry exhaustion" (P.load ~base_path ~keeper_name:"alpha")
+    |> List.fold_left
+         (fun (running, ready) (partition : P.t) ->
+            match partition.state with
+            | P.Running { progress = P.Unbound; _ } -> running + 1, ready
+            | P.Ready -> running, ready + 1
+            | P.Running _
+            | P.Completed _
+            | P.Settled _
+            | P.Abandoned _
+            | P.Blocked _ -> running, ready)
+         (0, 0)
+  in
+  Alcotest.(check int) "only the competing worker claimed a target" 1 running;
+  Alcotest.(check int) "all siblings remain Ready" 3 ready;
+  Alcotest.(check int) "all candidates remain present" 4 (List.length candidates)
+;;
+
+let test_exact_claim_retry_exhaustion_has_no_self_wake () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  with_temp_base "board-attention-worker-exact-claim-exhaustion" @@ fun base_path ->
+  List.iter
+    (fun index ->
+       ignore
+         (record
+            ~base_path
+            (candidate
+               ~id:(Printf.sprintf "candidate-exact-claim-%d" index)
+               ~recorded_at:(float_of_int index)
+               ())
+          : A.candidate))
+    [ 0; 1 ];
+  let registration =
+    ok "register exact claim wake" (Wake.register ~sw ~base_path ~keeper_name:"alpha")
+  in
+  let prepare_calls = ref 0 in
+  let claim_calls = ref 0 in
+  let execute_calls = ref 0 in
+  let selected : (string * P.Generation.t) option ref = ref None in
+  let claim_ready_exact
+        ~now:_
+        ~worker_epoch:_
+        ~base_path:_
+        ~keeper_name:_
+        ~partition_id
+        ~generation
+    =
+    incr claim_calls;
+    (match !selected with
+     | None -> selected := Some (partition_id, generation)
+     | Some (expected_id, expected_generation) ->
+       Alcotest.(check string) "retry keeps partition id" expected_id partition_id;
+       Alcotest.(check bool)
+         "retry keeps partition generation"
+         true
+         (P.Generation.equal expected_generation generation));
+    Ok None
+  in
+  let prepare candidate =
+    incr prepare_calls;
+    Ok candidate
+  in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr execute_calls;
+    Alcotest.fail "exhausted exact claim dispatched a prepared attempt"
+  in
+  (match
+     ok
+       "exhaust exact claim conflicts"
+       (W.For_testing.process_next_with_claim_ready_exact
+          ~claim_ready_exact
+          ~now:(fun () -> 10.0)
+          ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path
+          ~keeper_name:"alpha"
+          ~prepare
+          ~execute)
+   with
+   | W.Contended contention ->
+     (match !selected with
+      | Some (partition_id, generation) ->
+        Alcotest.(check string)
+          "contention retains Keeper"
+          "alpha"
+          contention.keeper_name;
+        Alcotest.(check string)
+          "contention retains partition"
+          partition_id
+          contention.partition_id;
+        Alcotest.(check bool)
+          "contention retains generation"
+          true
+          (P.Generation.equal generation contention.generation)
+      | None -> Alcotest.fail "exact claim contention lost its selected target")
+   | W.Idle
+   | W.Rescan_later _
+   | W.Judgment_completed _
+   | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "exact claim exhaustion reported quiescent or terminal");
+  Alcotest.(check int) "one prepared target" 1 !prepare_calls;
+  Alcotest.(check int) "initial claim plus two retries" 3 !claim_calls;
+  Alcotest.(check int) "no exact dispatch" 0 !execute_calls;
+  let ready =
+    ok "load roots after exact claim exhaustion" (P.load ~base_path ~keeper_name:"alpha")
+    |> List.fold_left
+         (fun count (partition : P.t) ->
+            match partition.state with
+            | P.Ready -> count + 1
+            | P.Running _
+            | P.Completed _
+            | P.Settled _
+            | P.Abandoned _
+            | P.Blocked _ -> count)
+         0
+  in
+  Alcotest.(check int) "no sibling was claimed" 2 ready;
+  (match ok "probe pending self wake" (Wake.request ~base_path ~keeper_name:"alpha") with
+   | Wake.Signaled -> ()
+   | Wake.Coalesced ->
+     Alcotest.fail "claim exhaustion enqueued an immediate self wake"
+   | Wake.Not_registered -> Alcotest.fail "claim exhaustion lost wake registration");
+  Wake.unregister registration
+;;
+
+let test_contention_rearm_is_delayed_and_deduplicated () =
+  with_temp_base "board-attention-worker-contention-rearm" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  ignore
+    (ok
+       "create contention root"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ persisted ])
+     : int);
+  let partition = load_one_partition ~base_path in
+  let contention : W.contention =
+    { keeper_name = "alpha"
+    ; partition_id = partition.partition_id
+    ; generation = partition.generation
+    }
+  in
+  let tasks : (unit -> unit) list ref = ref [] in
+  let sleeps = ref [] in
+  let requests = ref 0 in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [ task ])
+      ~sleep:(fun delay -> sleeps := !sleeps @ [ delay ])
+      ~request:(fun () ->
+        incr requests;
+        Ok Wake.Signaled)
+      ()
+  in
+  let schedule () =
+    W.For_testing.schedule_contention_rearm scheduler contention
+  in
+  let take_task () =
+    match !tasks with
+    | [ task ] ->
+      tasks := [];
+      task
+    | [] | _ :: _ :: _ -> Alcotest.fail "contention rearm task cardinality drifted"
+  in
+  let first_delay =
+    match schedule () with
+    | W.Rearm_scheduled { delay_s } -> delay_s
+    | W.Rearm_deduplicated _ -> Alcotest.fail "first contention was deduplicated"
+  in
+  (match schedule () with
+   | W.Rearm_deduplicated { delay_s } ->
+     Alcotest.(check (float 0.0))
+       "duplicate retains pending delay"
+       first_delay
+       delay_s
+   | W.Rearm_scheduled _ -> Alcotest.fail "duplicate contention forked another rearm");
+  Alcotest.(check int) "one structured delayed task" 1 (List.length !tasks);
+  Alcotest.(check int) "no immediate wake" 0 !requests;
+  Alcotest.(check int) "delay has not run" 0 (List.length !sleeps);
+  take_task () ();
+  Alcotest.(check (float 0.0))
+    "base bounded delay"
+    first_delay
+    (List.hd !sleeps);
+  Alcotest.(check int) "one delayed wake" 1 !requests;
+  let second_delay =
+    match schedule () with
+    | W.Rearm_scheduled { delay_s } -> delay_s
+    | W.Rearm_deduplicated _ ->
+      Alcotest.fail "fired rearm did not preserve retry history"
+  in
+  Alcotest.(check bool)
+    "persistent contention backs off below 20Hz"
+    true
+    (second_delay > first_delay);
+  take_task () ();
+  let capped_delay = ref second_delay in
+  for _attempt = 1 to 10 do
+    (match schedule () with
+     | W.Rearm_scheduled { delay_s } -> capped_delay := delay_s
+     | W.Rearm_deduplicated _ ->
+       Alcotest.fail "sequential persistent retry was deduplicated");
+    take_task () ()
+  done;
+  Alcotest.(check (float 0.0001)) "backoff caps conservatively" 5.0 !capped_delay;
+  Alcotest.(check bool)
+    "every contention delay is capped"
+    true
+    (List.for_all (fun delay -> delay <= 5.0) !sleeps);
+  let requests_before_reset = !requests in
+  (match schedule () with
+   | W.Rearm_scheduled _ -> ()
+   | W.Rearm_deduplicated _ ->
+     Alcotest.fail "reset fixture did not schedule a ticket");
+  W.For_testing.reset_contention_rearms scheduler ~keep:None;
+  take_task () ();
+  Alcotest.(check int)
+    "reset suppresses stale ticket wake"
+    requests_before_reset
+    !requests;
+  match schedule () with
+  | W.Rearm_scheduled { delay_s } ->
+    Alcotest.(check (float 0.0001))
+      "reset removes generation retry history"
+      0.05
+      delay_s
+  | W.Rearm_deduplicated _ ->
+    Alcotest.fail "reset retained a stale pending ticket"
+;;
+
+let test_rescan_later_reaches_delayed_run_rearm () =
+  let contention : W.contention =
+    { keeper_name = "alpha"
+    ; partition_id = "partition-old-selection"
+    ; generation = P.Generation.initial
+    }
+  in
+  let process_calls = ref 0 in
+  let yields = ref 0 in
+  let outcome =
+    ok
+      "drain changed selection"
+      (W.For_testing.drain_available_with_process
+         ~yield:(fun () -> incr yields)
+         ~process:(fun () ->
+           incr process_calls;
+           Ok (W.Rescan_later contention)))
+  in
+  (match outcome with
+   | W.Retry_later
+       { contention = observed
+       ; reason = W.Selected_generation_changed
+       ; progress = _
+       } ->
+     Alcotest.(check string)
+       "rescan retains old partition"
+       contention.partition_id
+       observed.partition_id;
+     Alcotest.(check bool)
+       "rescan retains old generation"
+       true
+       (P.Generation.equal contention.generation observed.generation)
+   | W.Drained _
+   | W.Lane_deferred _
+   | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
+     Alcotest.fail "changed selection did not reach typed delayed rescan");
+  Alcotest.(check int) "no same-turn rescan" 1 !process_calls;
+  Alcotest.(check int) "rescan did not yield into sibling claim" 0 !yields;
+  let tasks = ref [] in
+  let requests = ref 0 in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := task :: !tasks)
+      ~sleep:(fun _delay -> ())
+      ~request:(fun () ->
+        incr requests;
+        Ok Wake.Signaled)
+      ()
+  in
+  (match W.For_testing.apply_drain_rearm scheduler outcome with
+   | Some (W.Rearm_scheduled _) -> ()
+   | Some (W.Rearm_deduplicated _) | None ->
+     Alcotest.fail "run owner did not schedule the typed rescan");
+  Alcotest.(check int) "one delayed rescan fiber" 1 (List.length !tasks);
+  Alcotest.(check int) "rescan is not an immediate wake" 0 !requests
+;;
+
+let test_contention_wake_error_schedules_next_backoff () =
+  let contention : W.contention =
+    { keeper_name = "alpha"
+    ; partition_id = "partition-wake-error"
+    ; generation = P.Generation.initial
+    }
+  in
+  let tasks = ref [] in
+  let request_calls = ref 0 in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [ task ])
+      ~sleep:(fun _delay -> ())
+      ~request:(fun () ->
+        incr request_calls;
+        Error "injected wake delivery failure")
+      ()
+  in
+  ignore
+    (W.For_testing.schedule_contention_rearm scheduler contention
+     : W.rearm_schedule);
+  let first_task =
+    match !tasks with
+    | [ task ] ->
+      tasks := [];
+      task
+    | [] | _ :: _ :: _ -> Alcotest.fail "wake-error fixture task drifted"
+  in
+  first_task ();
+  Alcotest.(check int) "one failed typed wake delivery" 1 !request_calls;
+  Alcotest.(check int) "delivery error scheduled one retry" 1 (List.length !tasks);
+  match W.For_testing.schedule_contention_rearm scheduler contention with
+  | W.Rearm_deduplicated { delay_s } ->
+    Alcotest.(check (float 0.0001))
+      "delivery retry uses next backoff"
+      0.1
+      delay_s
+  | W.Rearm_scheduled _ ->
+    Alcotest.fail "delivery error left no pending retry ticket"
+;;
+
+let test_contention_wake_callback_is_outside_scheduler_lock () =
+  let contention : W.contention =
+    { keeper_name = "alpha"
+    ; partition_id = "partition-reentrant-wake"
+    ; generation = P.Generation.initial
+    }
+  in
+  let tasks = ref [] in
+  let scheduler_ref : W.For_testing.rearm_scheduler option ref = ref None in
+  let reentrant_schedule = ref None in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [ task ])
+      ~sleep:(fun _delay -> ())
+      ~request:(fun () ->
+        let scheduler =
+          match !scheduler_ref with
+          | Some scheduler -> scheduler
+          | None -> Alcotest.fail "reentrant scheduler was not installed"
+        in
+        reentrant_schedule :=
+          Some
+            (W.For_testing.schedule_contention_rearm
+               scheduler
+               contention);
+        Ok Wake.Signaled)
+      ()
+  in
+  scheduler_ref := Some scheduler;
+  ignore
+    (W.For_testing.schedule_contention_rearm scheduler contention
+     : W.rearm_schedule);
+  let first_task =
+    match !tasks with
+    | [ task ] ->
+      tasks := [];
+      task
+    | [] | _ :: _ :: _ -> Alcotest.fail "reentrant fixture task drifted"
+  in
+  first_task ();
+  (match !reentrant_schedule with
+   | Some (W.Rearm_deduplicated { delay_s }) ->
+     Alcotest.(check (float 0.0001))
+       "inflight ticket deduplicates reentrant schedule"
+       0.05
+       delay_s
+   | Some (W.Rearm_scheduled _) | None ->
+     Alcotest.fail "wake callback did not observe the inflight ticket");
+  Alcotest.(check int) "reentrant callback queued no duplicate task" 0 (List.length !tasks)
+;;
+
+let test_reset_during_wake_error_suppresses_old_generation_rearm () =
+  let contention : W.contention =
+    { keeper_name = "alpha"
+    ; partition_id = "partition-reset-during-wake"
+    ; generation = P.Generation.initial
+    }
+  in
+  let tasks = ref [] in
+  let request_calls = ref 0 in
+  let scheduler_ref : W.For_testing.rearm_scheduler option ref = ref None in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [ task ])
+      ~sleep:(fun _delay -> ())
+      ~request:(fun () ->
+        incr request_calls;
+        let scheduler =
+          match !scheduler_ref with
+          | Some scheduler -> scheduler
+          | None -> Alcotest.fail "reset-race scheduler was not installed"
+        in
+        W.For_testing.reset_contention_rearms scheduler ~keep:None;
+        Error "injected wake error after reset")
+      ()
+  in
+  scheduler_ref := Some scheduler;
+  ignore
+    (W.For_testing.schedule_contention_rearm scheduler contention
+     : W.rearm_schedule);
+  let first_task =
+    match !tasks with
+    | [ task ] ->
+      tasks := [];
+      task
+    | [] | _ :: _ :: _ -> Alcotest.fail "reset-race fixture task drifted"
+  in
+  first_task ();
+  Alcotest.(check int) "one reset-raced wake delivery" 1 !request_calls;
+  Alcotest.(check int)
+    "reset prevents old generation ticket resurrection"
+    0
+    (List.length !tasks)
+;;
+
+let rearm_contention partition_id : W.contention =
+  { keeper_name = "alpha"; partition_id; generation = P.Generation.initial }
+;;
+
+let take_rearm_task tasks =
+  match !tasks with
+  | task :: rest -> tasks := rest; task
+  | [] -> Alcotest.fail "expected a queued contention rearm"
+;;
+
+let check_rearm_scheduled label expected = function
+  | W.Rearm_scheduled { delay_s } ->
+    Alcotest.(check (float 0.0001)) label expected delay_s
+  | W.Rearm_deduplicated _ -> Alcotest.fail (label ^ ": unexpectedly deduplicated")
+;;
+
+let check_rearm_deduplicated label expected = function
+  | W.Rearm_deduplicated { delay_s } ->
+    Alcotest.(check (float 0.0001)) label expected delay_s
+  | W.Rearm_scheduled _ -> Alcotest.fail (label ^ ": forked a duplicate")
+;;
+
+let test_reset_and_recreate_during_wake_preserves_new_ticket () =
+  List.iter
+    (fun old_result ->
+      let contention = rearm_contention "partition-recreated-during-wake" in
+      let tasks = ref [] in
+      let requests = ref 0 in
+      let during_request = ref (fun () -> ()) in
+      let scheduler =
+        W.For_testing.make_contention_rearm_scheduler
+          ~fork:(fun task -> tasks := !tasks @ [task])
+          ~sleep:(fun _ -> ())
+          ~request:(fun () ->
+            incr requests;
+            if !requests = 1 then (!during_request (); old_result)
+            else Ok Wake.Signaled)
+          ()
+      in
+      let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+      during_request := (fun () ->
+        W.For_testing.reset_contention_rearms scheduler ~keep:None;
+        schedule () |> check_rearm_scheduled "same key starts fresh after reset" 0.05);
+      schedule () |> check_rearm_scheduled "initial wake" 0.05;
+      take_rearm_task tasks ();
+      Alcotest.(check int) "old completion adds no retry" 1 (List.length !tasks);
+      schedule () |> check_rearm_deduplicated "replacement remains pending" 0.05;
+      take_rearm_task tasks ();
+      Alcotest.(check int) "only the replacement makes the next request" 2 !requests;
+      Alcotest.(check int) "replacement completes without extra task" 0 (List.length !tasks);
+      schedule () |> check_rearm_scheduled "replacement retains its own history" 0.1)
+    [Error "old request failed after reset"; Ok Wake.Signaled]
+;;
+
+let test_contention_fork_failure_retains_history_and_rejects_old_callback () =
+  let contention = rearm_contention "partition-fork-failure" in
+  let tasks = ref [] in
+  let fail_fork = ref true in
+  let requests = ref 0 in
+  let failure = Failure "injected fork failure" in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task ->
+        (* Retain the callback to exercise a late invocation after fork failed. *)
+        tasks := !tasks @ [task];
+        if !fail_fork then (fail_fork := false; raise failure))
+      ~sleep:(fun _ -> ())
+      ~request:(fun () -> incr requests; Ok Wake.Signaled)
+      ()
+  in
+  let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+  Alcotest.check_raises "fork exception propagates" failure
+    (fun () -> ignore (schedule () : W.rearm_schedule));
+  Alcotest.(check int) "failed fork sent no wake" 0 !requests;
+  schedule () |> check_rearm_scheduled "fork failure retains delay history" 0.1;
+  take_rearm_task tasks ();
+  Alcotest.(check int) "failed fork's old callback cannot deliver" 0 !requests;
+  schedule () |> check_rearm_deduplicated "old callback leaves replacement alone" 0.1;
+  take_rearm_task tasks ();
+  Alcotest.(check int) "new reservation delivers once" 1 !requests;
+  Alcotest.(check int) "no unowned retry" 0 (List.length !tasks)
+;;
+
+let test_contention_sleep_failure_preserves_history_and_new_reservation () =
+  let contention = rearm_contention "partition-sleep-failure" in
+  let tasks = ref [] in
+  let requests = ref 0 in
+  (* This is an injected exception, not evidence of native switch cancellation. *)
+  let cancellation = Eio.Cancel.Cancelled (Failure "injected rearm sleep cancellation") in
+  let sleep_failure = ref (Some cancellation) in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [task])
+      ~sleep:(fun _ ->
+        match !sleep_failure with
+        | Some exn -> sleep_failure := None; raise exn
+        | None -> ())
+      ~request:(fun () -> incr requests; Ok Wake.Signaled)
+      ()
+  in
+  let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+  schedule () |> check_rearm_scheduled "initial sleep" 0.05;
+  let cancelled_task = take_rearm_task tasks in
+  Alcotest.check_raises "sleep cancellation propagates" cancellation cancelled_task;
+  Alcotest.(check int) "cancelled sleep sent no wake" 0 !requests;
+  schedule () |> check_rearm_scheduled "sleep cancellation retains history" 0.1;
+  W.For_testing.reset_contention_rearms scheduler ~keep:None;
+  schedule () |> check_rearm_scheduled "reset starts the replacement history" 0.05;
+  let stale_failure = Failure "injected stale sleep failure" in
+  sleep_failure := Some stale_failure;
+  (* Revisit the first callback: a counter rewound by reset would let its
+     cancellation clear the new key's first reservation. *)
+  Alcotest.check_raises "old sleep failure propagates" stale_failure cancelled_task;
+  schedule () |> check_rearm_deduplicated "old cancellation cannot clear a new ticket" 0.05;
+  Alcotest.(check int) "stale cancellation sent no wake" 0 !requests;
+  take_rearm_task tasks ();
+  Alcotest.(check int) "reset also invalidates the later queued callback" 0 !requests;
+  take_rearm_task tasks ();
+  Alcotest.(check int) "new ticket survives stale cancellation" 1 !requests;
+  Alcotest.(check int) "no extra task after recovery" 0 (List.length !tasks)
+;;
+
+let test_contention_successful_wake_outcomes_release_ticket () =
+  List.iter
+    (fun wake ->
+      let contention = rearm_contention "partition-successful-wake" in
+      let tasks = ref [] in
+      let requests = ref 0 in
+      let scheduler =
+        W.For_testing.make_contention_rearm_scheduler
+          ~fork:(fun task -> tasks := !tasks @ [task])
+          ~sleep:(fun _ -> ())
+          ~request:(fun () -> incr requests; Ok wake)
+          ()
+      in
+      let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+      schedule () |> check_rearm_scheduled "initial successful wake" 0.05;
+      take_rearm_task tasks ();
+      Alcotest.(check int) "successful wake has no automatic retry" 0 (List.length !tasks);
+      schedule () |> check_rearm_scheduled "success releases ticket and retains history" 0.1;
+      take_rearm_task tasks ();
+      Alcotest.(check int) "explicit schedules each request once" 2 !requests;
+      Alcotest.(check int) "second success also has no retry" 0 (List.length !tasks))
+    [Wake.Coalesced; Wake.Not_registered]
+;;
+
+let test_contention_raised_request_keeps_inflight_until_reset () =
+  let contention = rearm_contention "partition-raised-request" in
+  let requests = ref 0 in
+  let failure = Failure "injected raised request" in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> task ())
+      ~sleep:(fun _ -> ())
+      ~request:(fun () -> incr requests; raise failure)
+      ()
+  in
+  let schedule () = W.For_testing.schedule_contention_rearm scheduler contention in
+  Alcotest.check_raises "eager fork propagates request exception" failure
+    (fun () -> ignore (schedule () : W.rearm_schedule));
+  schedule () |> check_rearm_deduplicated "fork cleanup does not clear Inflight" 0.05;
+  Alcotest.(check int) "raised request is not retried" 1 !requests;
+  W.For_testing.reset_contention_rearms scheduler ~keep:None;
+  Alcotest.check_raises "reset admits a fresh request" failure
+    (fun () -> ignore (schedule () : W.rearm_schedule));
+  Alcotest.(check int) "reset is the explicit release of the failed request" 2 !requests
+;;
+
+(* #41422: the drain entry prunes consumed candidate rows the replay gate
+   cannot re-mint, before roots are ensured. A prune failure must never stop
+   judgment work, so an injected failure would only be logged and the wake
+   would proceed; this fixture exercises the successful prune. *)
+let test_drain_prunes_consumed_rows_behind_the_board_cursor () =
+  with_temp_base "board-attention-worker-prune-on-drain" @@ fun base_path ->
+  let consumed_status =
+    A.Consumed
+      { judgment = judgment (provenance "prune") J.Not_relevant
+      ; delivery = A.Not_relevant
+      ; consumed_at = 11.0
+      }
+  in
+  let consumed_row =
+    let row = candidate ~id:"candidate-prune" ~recorded_at:1.0 () in
+    { row with
+      signal = { row.signal with updated_at = Some 10.0 }
+    ; status = consumed_status
+    }
+  in
+  let prepare candidate = Ok candidate in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    Alcotest.fail "a ledger with only consumed rows dispatched a judgment"
+  in
+  (* Without a cursor the replay gate could re-mint the signal at any time,
+     so the drain keeps the row and runs out of work without dispatching. *)
+  ignore (record ~base_path consumed_row : A.candidate);
+  (match
+     ok
+       "drain without a cursor keeps the consumed row"
+       (process ~base_path ~prepare ~execute)
+   with
+   | W.Idle -> ()
+   | W.Contended _ | W.Rescan_later _
+   | W.Judgment_completed _ | W.Candidate_already_consumed _
+   | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "a consumed-only ledger produced partition work");
+  let kept =
+    ok "load without cursor" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  Alcotest.(check bool) "no cursor keeps every row" true (kept = [ consumed_row ]);
+  (* The keeper's board cursor has passed the signal coordinate, so the
+     replay gate can never re-mint it: the same drain now removes the row. *)
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  (match
+     ok
+       "drain behind the cursor prunes"
+       (process ~base_path ~prepare ~execute)
+   with
+   | W.Idle -> ()
+   | W.Contended _ | W.Rescan_later _
+   | W.Judgment_completed _ | W.Candidate_already_consumed _
+   | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "a pruned ledger produced partition work");
+  let remaining =
+    ok "load after pruned drain" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  Alcotest.(check int) "the consumed row behind the cursor was pruned" 0 (List.length remaining)
+;;
+
+(* A Keeper that stays up must not keep one settled receipt per judgment until
+   its next restart. The wake after a Not_relevant judgment settled drops the
+   receipt of the now-Consumed candidate. *)
+let test_drain_drops_the_settled_receipt_of_a_consumed_candidate () =
+  with_temp_base "board-attention-worker-settled-prune-on-drain" @@ fun base_path ->
+  let discarded = record ~base_path (candidate ~id:"candidate-settled-prune" ()) in
+  let judged = ref 0 in
+  let execute ~before_dispatch ~before_advance:_ prepared =
+    incr judged;
+    let attempt = provenance ("attempt-" ^ A.(prepared.candidate_id)) in
+    ok "bind" (before_dispatch attempt);
+    Ok (judgment attempt J.Not_relevant)
+  in
+  let prepare candidate = Ok candidate in
+  (match ok "judge the discard" (process ~base_path ~prepare ~execute) with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id discarded.candidate_id -> ()
+   | W.Judgment_completed _ | W.Idle | W.Contended _ | W.Rescan_later _
+   | W.Candidate_already_consumed _ | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "fixture did not complete the discard's judgment");
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Consumed _, P.Settled _ -> ()
+   | (A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _), _ ->
+     Alcotest.fail "fixture did not settle the consumed candidate");
+  (match ok "next wake" (process ~base_path ~prepare ~execute) with
+   | W.Idle -> ()
+   | W.Contended _ | W.Rescan_later _ | W.Judgment_completed _
+   | W.Candidate_already_consumed _ | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "a settled-only ledger produced partition work");
+  Alcotest.(check int) "the candidate was judged once" 1 !judged;
+  Alcotest.(check int)
+    "the consumed candidate's settled receipt is gone"
+    0
+    (List.length (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")))
+;;
+
+(* Helpers for the two overlap tests below. The first reads the ledger
+   pair the way the wake does after its two prunes; the second re-runs the
+   wake's two prunes plus the candidate read as one seam. *)
+
+let read_candidate_and_roots ~base_path =
+  (* Read both ledgers back-to-back, exactly the way
+     [process_next_with_claim_ready_exact_current] does after its two
+     prunes, so the assertions below read the same pair that root
+     minting saw. *)
+  let candidates =
+    ok "load candidates for roots" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  let partitions = ok "load partitions for roots" (P.load ~base_path ~keeper_name:"alpha") in
+  (candidates, partitions)
+;;
+
+(* Both prunes plus the post-prune ledger read, with no work to do: the
+   exact seam of a wake that drains the ledgers the way the worker does.
+   Runs the two prunes even when the ledger is empty, so the helper
+   exercises the same path the overlap tests need. *)
+let drain ~base_path =
+  ignore
+    (ok "drain with nothing to do"
+       (W.For_testing.process_next_with_claim_ready_exact
+          ~claim_ready_exact:(fun ~now:_ ~worker_epoch:_ ~base_path:_ ~keeper_name:_
+                                ~partition_id:_ ~generation:_ ->
+            Ok None)
+          ~now:(fun () -> 3.0)
+          ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path
+          ~keeper_name:"alpha"
+          ~prepare:(fun candidate -> Ok candidate)
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _candidate ->
+            Alcotest.fail "an empty ledger dispatched a judgment")))
+;;
+
+(* The wake's ordering property after a full consume/drain/settle overlap:
+   the post-prune read sees an empty candidate ledger over a settled
+   receipt, and root minting over that pair appends nothing. This pins the
+   shipped order's outcome directly (the #41506 tripwire lives in the next
+   test, which drives the settlement through the seam's hook). *)
+let test_drain_then_settle_does_not_mint_a_ready_root () =
+  with_temp_base "board-attention-worker-drain-then-settle" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-judged" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  ignore
+    (delivered
+       "deliver the judged candidate's Relevant verdict"
+       (A.apply_judgment_and_deliver
+          ~base_path
+          ~keeper_name:"alpha"
+          ~candidate_id:kept.candidate_id
+          ~judgment:completed_judgment)
+      : A.candidate);
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  drain ~base_path;
+  ignore
+    (ok "settle the completed snapshot"
+       (W.For_testing.deliver_and_settle_completed
+          ~base_path
+          ~keeper_name:"alpha"
+          (load_one_partition ~base_path)));
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  ignore
+    (ok "mint roots after settlement"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  Alcotest.(check int) "the consumed row was pruned" 0 (List.length candidates);
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ -> Alcotest.fail "the settlement minted a fresh Ready partition")
+    partitions
+;;
+
+(* The owner settlement, which runs without the worker lock, is landed in
+   the gap the seam's hook defines: immediately before the wake's first
+   prune. Under the shipped order — read after both prunes — the seam's
+   returned list is post-prune, it no longer names X, and minting over it
+   appends nothing. Moving the candidate read in front of the prunes (the
+   pre-#41506 order) does not change when the prunes run, so X's row and its
+   settled receipt are dropped just the same; what changes is the list
+   minted over. That stale list still names X as Judged, and [ensure_roots]
+   over a candidate whose partition just settled re-creates the Ready root
+   the settled receipt no longer authorizes — the wedge #41506 closed. This
+   test is the tripwire for that revert. *)
+let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
+  with_temp_base "board-attention-worker-settle-between-read-and-roots" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-race" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  (* X's signal token is (42.0, "candidate-overlap-race") and the cursor
+     (50.0, "cursor-post") sorts after it, so X's consumed row is removable
+     behind the cursor as soon as the settlement consumes it. *)
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  (* The seam's hook fires immediately before the first prune. The owner
+     settlement in the hook consumes X (the wake recorded the judgment on
+     the partition's Completed item, not the candidate ledger, so the row
+     is still Pending until the settlement consumes it) and settles X's
+     partition. *)
+  let hook_fired = ref 0 in
+  (* The wake body: the seam's returned list feeds [ensure_roots] exactly as
+     [process_next_with_claim_ready_exact_current] does. The stale list (read
+     before the prunes) is the whole difference between the two orders: the
+     hook fires immediately before the first prune, so under the shipped
+     order the read that follows the prunes cannot name X, while under the
+     pre-#41506 order the read sits before them and the list still does. *)
+  let candidates =
+    ok "drain with the settlement before the candidate prune"
+      (W.For_testing.prunes_and_read
+         ~base_path
+         ~keeper_name:"alpha"
+         ~hook:(fun () ->
+           incr hook_fired;
+           (* The delivery replays the exact judgment the wake recorded. The
+              worker records the judgment on the partition's Completed item,
+              not the candidate ledger, so the candidate row is still Pending
+              here: consume it first (what the owner's delivery does), then
+              settle the partition over it. *)
+           ignore
+             (delivered
+                "owner settlement consumes X"
+                (A.apply_judgment_and_deliver
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   ~candidate_id:kept.candidate_id
+                   ~judgment:completed_judgment)
+              : A.candidate);
+           ignore
+             (ok "settle X's partition without the worker lock"
+                (W.For_testing.deliver_and_settle_completed
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   (load_one_partition ~base_path))))
+         ())
+  in
+  Alcotest.(check int) "the hook fired once" 1 !hook_fired;
+  (* The seam's returned list is the wake's ensure_roots input, so assert it
+     directly: with the settlement in the hook, the list must not name X in
+     any status. Every variant that puts the candidate read in front of the
+     candidate prune hands this list a stale row (Pending or Consumed,
+     depending on whether the hook's delivery ran before the read) and fails
+     here. A read that sits after the candidate prune is a post-prune list
+     by construction and cannot fail here — that is the point: the shipped
+     order's list is exactly the post-prune one. A read between the two
+     prunes is OUT of this tripwire's scope; covering it is tracked in
+     task-2233. *)
+  Alcotest.(check bool) "the list the wake read is post-prune" false
+    (List.exists
+       (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+       candidates);
+  ignore
+    (ok "mint roots over the list the wake read"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  (* The ledger read, after the seam: X's row and settled receipt are gone
+     from the store, because the settlement in the hook consumed X behind a
+     cursor the wake had already passed and both prunes then ran. A revert
+     that moved the read before the candidate prune keeps the ledger
+     unchanged at this point — the hook consumed X behind the passed cursor,
+     so the candidate prune (now after the read) still finds and removes the
+     row, which is what the residue check below catches. *)
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  (* The prunes (which ran after the hook's settlement) dropped X's consumed
+     row and its settled receipt: the ledger keeps no row naming X, and root
+     minting over the settled partition appends nothing. *)
+  let residue =
+    List.filter
+      (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+      candidates
+  in
+  (match residue with
+   | [] -> ()
+   | [ candidate ] ->
+     let label =
+       match candidate.status with
+       | A.Pending _ -> "Pending"
+       | A.Judged _ -> "Judged"
+       | A.Consumed _ -> "Consumed"
+       | A.Quarantine _ -> "Quarantine"
+     in
+     Alcotest.failf "the pruned candidate's row survived the wake: status=%s" label
+   | _ -> Alcotest.fail "unexpected duplicate rows");
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ ->
+         Alcotest.failf
+           "the wake minted a fresh Ready root over the settled partition: %s"
+           partition.partition_id)
+    partitions
+;;
+
+(* A candidate read that sits between the two prunes is post-prune by
+   construction, so the #41506 tripwire above cannot catch a settlement
+   that lands in the OTHER gap: between that read and the settled-receipt
+   prune. This test pins exactly that seam. The [before_receipt_prune] hook
+   lands the owner settlement there: the between-prunes read has already
+   returned the stale list (naming X as Judged), the settlement consumes X
+   and settles X's partition, and minting roots over that stale list raises
+   a fresh Ready root over the settled partition — the same wedge #41506
+   closed, one gap later. *)
+let test_owner_settlement_between_the_prunes_does_not_mint_a_ready_root () =
+  with_temp_base "board-attention-worker-settle-between-prunes" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-race-2" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  let hook_fired = ref 0 in
+  let candidates =
+    ok "drain with the settlement before the receipt prune"
+      (W.For_testing.prunes_and_read
+         ~base_path
+         ~keeper_name:"alpha"
+         ~before_receipt_prune:(fun () ->
+           incr hook_fired;
+           (* Same owner settlement as the first overlap test: consume X,
+              then settle X's partition. The between-prunes read has already
+              returned its list, so the settlement lands after the read and
+              before the receipt prune. *)
+           ignore
+             (delivered
+                "owner settlement consumes X"
+                (A.apply_judgment_and_deliver
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   ~candidate_id:kept.candidate_id
+                   ~judgment:completed_judgment)
+              : A.candidate);
+           ignore
+             (ok "settle X's partition without the worker lock"
+                (W.For_testing.deliver_and_settle_completed
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   (load_one_partition ~base_path))))
+         ())
+  in
+  Alcotest.(check int) "the hook fired once" 1 !hook_fired;
+  ignore
+    (ok "mint roots over the list the wake read"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  let residue =
+    List.filter
+      (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+      candidates
+  in
+  (match residue with
+   | [] -> ()
+   (* A settle later in the same wake may drop the consumed row too; the
+      invariant is the one the partition check below asserts, not the row.
+      Only a stale non-consumed row matters: with the between-prunes read
+      in front of the prunes, the minted-over list still names X as Judged,
+      and the settlement's own delivery re-creates that Judged row after
+      the prunes — a survive-the-wake failure the partition check alone
+      would not witness. *)
+   | [ candidate ] ->
+     (match candidate.status with
+      | A.Judged _ | A.Pending _ ->
+        let label =
+          match candidate.status with
+          | A.Pending _ -> "Pending"
+          | A.Judged _ -> "Judged"
+          | A.Consumed _ -> "Consumed"
+          | A.Quarantine _ -> "Quarantine"
+        in
+        Alcotest.failf
+          "the settled candidate's stale row survived the wake: status=%s"
+          label
+      | A.Consumed _ | A.Quarantine _ -> ())
+   | _ -> Alcotest.fail "unexpected duplicate rows");
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ ->
+         Alcotest.failf
+           "the wake minted a fresh Ready root over the settled partition: %s"
+           partition.partition_id)
+    partitions
+;;
+
+let test_execution_error_preserves_bound_progress_without_hot_retry () =
+  with_temp_base "board-attention-worker-execution-error" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "terminal" in
+  let calls = ref 0 in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind terminal attempt" (before_dispatch exact);
+    Error
+      (E.Providers_exhausted
+         { attempts = [ exact ]
+         ; detail = "provider exhausted"
+         ; binding_standing = Agent_core.Exact_output.Not_every_binding_resting
+         })
+  in
+  (match
+     ok
+       "execution error"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason =
+           P.Exact_lane_exhausted
+             { detail; progress = Some (P.Bound durable) }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && same_provenance durable exact
+          && String.equal detail "provider exhausted" -> ()
+   | _ -> Alcotest.fail "execution error lost its durable bound progress");
+  (match
+     ok
+       "execution error is not retried"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "terminal exact execution became claimable");
+  Alcotest.(check int) "one exact execution" 1 !calls
+;;
+
+let test_bookkeeping_failure_keeps_its_cause_and_the_flow_sentence () =
+  with_temp_base "board-attention-worker-bookkeeping-failure" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "bookkeeping" in
+  let flow_sentence = "attempt receipt could not reach its durable boundary" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind bookkeeping attempt" (before_dispatch exact);
+    Error (E.Flow_bookkeeping_failed { attempts = [ exact ]; detail = flow_sentence })
+  in
+  (match
+     ok
+       "bookkeeping failure"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason =
+           P.Exact_flow_bookkeeping_failed
+             { detail; progress = Some (P.Bound durable) }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && same_provenance durable exact
+          && String.equal detail flow_sentence -> ()
+   | _ ->
+     Alcotest.fail
+       "bookkeeping failure lost its own cause, the flow sentence, or its progress");
+  match (load_one_candidate ~base_path).status with
+  | A.Quarantine
+      { quarantine = { failure_category = A.Exact_flow_bookkeeping_failed; _ }
+      ; _
+      } -> ()
+  | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "bookkeeping failure did not read as its own category"
+;;
+
+let test_completion_failure_preserves_bound_provenance () =
+  with_temp_base "board-attention-worker-completion-failure" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let bound = provenance "completion-bound" in
+  let mismatched = provenance "completion-mismatch" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind successful exact execution" (before_dispatch bound);
+    Ok (judgment mismatched J.Not_relevant)
+  in
+  (match
+     ok
+       "completion failure"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason =
+           P.Exact_completion_failed
+             { detail; progress = Some (P.Bound durable) }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && same_provenance durable bound
+          && String.length detail > 0 -> ()
+   | _ -> Alcotest.fail "completion failure lost its durable Bound provenance");
+  (match (load_one_partition ~base_path).state with
+   | P.Blocked
+       { reason =
+           P.Exact_completion_failed
+             { progress = Some (P.Bound durable); _ }
+       ; _
+       }
+     when same_provenance durable bound -> ()
+   | _ -> Alcotest.fail "completion failure did not persist the Bound quarantine");
+  match (load_one_candidate ~base_path).status with
+  | A.Quarantine
+      { quarantine =
+          { failure_category = A.Exact_completion_failed
+          ; attempt_provenance = Some _
+          ; _
+          }
+      ; phase = A.Quarantined
+      } ->
+    ()
+  | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "failed completion did not quarantine the candidate"
+;;
+
+let test_flow_already_started_blocks_unbound_without_hot_retry () =
+  with_temp_base "board-attention-worker-flow-replayed" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let calls = ref 0 in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr calls;
+    Error (E.Flow_already_started [ provenance "already-started" ])
+  in
+  (match
+     ok
+       "flow already started"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason = P.Exact_flow_replayed None
+       }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "Unbound affine-flow replay was not durably blocked");
+  (match
+     ok
+       "flow replay is not retried"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "blocked affine-flow replay became claimable");
+  Alcotest.(check int) "one affine-flow replay observation" 1 !calls
+;;
+
+let test_malformed_answer_quarantines_then_requeues_and_settles () =
+  with_temp_base "board-attention-worker-domain-invalid" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "domain-invalid" in
+  let malformed =
+    `Assoc
+      [ "verdicts",
+        `List
+          [ `Assoc
+              [ "candidate_id", `String persisted.candidate_id
+              ; "decision", `String "relevant"
+              ; "reason", `String "wrong field"
+              ]
+          ]
+      ]
+  in
+  let detail =
+    match J.batch_of_yojson malformed with
+    | Ok _ -> Alcotest.fail "the malformed answer was accepted"
+    | Error detail -> detail
+  in
+  let calls = ref 0 in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind domain-invalid attempt" (before_dispatch exact);
+    Error (E.Domain_output_invalid detail)
+  in
+  (match
+     ok
+       "bound domain error"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason =
+           P.Domain_output_invalid
+             { detail = observed; progress = Some (P.Bound durable) }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && String.equal observed detail
+          && same_provenance durable exact -> ()
+   | _ -> Alcotest.fail "domain error lost its durable exact binding");
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status, blocked.state with
+    | A.Quarantine { quarantine; phase = A.Quarantined },
+      P.Blocked { reason = P.Domain_output_invalid { detail = observed; _ }; _ }
+      when String.equal observed detail
+           && String.equal blocked.candidate_id persisted.candidate_id ->
+      quarantine
+    | _ -> Alcotest.fail "malformed answer did not persist Blocked and Quarantine"
+  in
+  (match
+     ok
+       "bound domain error is not retried"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "quarantined domain error became claimable");
+  Alcotest.(check int) "one domain-invalid exact execution" 1 !calls;
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "requeue command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:30.0 ~base_path command with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf "requeue failed: %s" (Q.execution_error_label error));
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
+   | _ -> Alcotest.fail "authorized requeue did not restore Ready");
+  let recovered = provenance "domain-invalid-recovered" in
+  let valid =
+    `Assoc
+      [ "verdicts",
+        `List
+          [ `Assoc
+              [ "candidate_id", `String persisted.candidate_id
+              ; "decision", `String "relevant"
+              ; "rationale", `String "recovered after requeue"
+              ]
+          ]
+      ]
+  in
+  let recovered_verdict =
+    match ok "parse recovered answer" (J.batch_of_yojson valid) with
+    | [ ({ candidate_id; verdict } : J.batch_item) ]
+      when String.equal candidate_id persisted.candidate_id -> verdict
+    | _ -> Alcotest.fail "recovered answer did not cover the same candidate"
+  in
+  let execute_valid ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind recovered attempt" (before_dispatch recovered);
+    Ok { (judgment recovered J.Relevant) with verdict = recovered_verdict }
+  in
+  (match
+     ok
+       "judge authorized requeue"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:execute_valid)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "authorized requeue did not complete the same candidate");
+  (match
+     ok
+       "settle recovered candidate"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Partition_settled { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "recovered candidate did not settle");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
+  | _ -> Alcotest.fail "recovered candidate was not consumed and settled"
+;;
+
+(* A Pending candidate the lane could not judge because every slot refused for
+   its own binding. On main this quarantined the candidate as
+   [Exact_lane_exhausted]; on 2026-09-25 that happened 1,459 times while every
+   slot of the lane was in quota rest. *)
+let claude_quota_blocked =
+  Masc.Keeper_lane_cli_oneshot.Execution_failed
+    { runtime_id = "claude_code.claude-sonnet-5"
+    ; cause =
+        Masc.Fusion_official_client.Claude_failure
+          (Runtime_claude_code.Quota_blocked
+             { api_error_status = Some 429
+             ; rate_limit = None
+             ; tool_effect_attempted = false
+             ; response_emitted = false
+             })
+    }
+;;
+
+let codex_usage_limit =
+  Masc.Keeper_lane_cli_oneshot.Execution_failed
+    { runtime_id = "codex_subscription.gpt-5.6-luna"
+    ; cause =
+        Masc.Fusion_official_client.Codex_failure
+          (Runtime_codex_app_server.Turn_failed
+             { detail = "You've hit your usage limit."
+             ; codex_error_info =
+                 Some Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+             })
+    }
+;;
+
+let spent_http_walk_then_cli_tail failures : string E.execution_error =
+  E.Cli_slots_exhausted
+    { prior_error =
+        Some
+          (E.Providers_exhausted
+             { attempts = []
+             ; detail =
+                 "agent_core_execution_failed: slot=ollama_cloud.deepseek cause=provider \
+                  refused (http_status=429 refusal=rate_limited)"
+             ; binding_standing = Agent_core.Exact_output.Every_binding_resting
+             })
+    ; failures
+    }
+;;
+
+(* The live shape of 2026-09-25: every HTTP slot answered 429, then Codex
+   reported its usage limit and Claude its quota blocked. On main this
+   quarantined the candidate as [Exact_lane_exhausted]; that day 1,459
+   candidates went that way. *)
+let spent_http_walk_then_spent_cli_tail () =
+  spent_http_walk_then_cli_tail [ codex_usage_limit; claude_quota_blocked ]
+;;
+
+let test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate () =
+  with_temp_base "board-attention-worker-spent-lane-defers" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "spent-lane" in
+  let running_generation = ref None in
+  let calls = ref 0 in
+  let drain execute =
+    ok
+      "drain"
+      (W.For_testing.drain_available
+         ~yield:(fun () -> ())
+         ~now:(fun () -> 3.0)
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~base_path
+         ~keeper_name:"alpha"
+         ~prepare:(fun candidate -> Ok candidate)
+         ~execute)
+  in
+  let spent ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind spent attempt" (before_dispatch exact);
+    running_generation := Some (load_one_partition ~base_path).generation;
+    Error (spent_http_walk_then_spent_cli_tail ())
+  in
+  (match drain spent with
+   | W.Lane_deferred { candidate_id; progress = { judgments = 0; steps = 1 } }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _ ->
+     Alcotest.fail "a spent lane did not end the drain as deferred");
+  Alcotest.(check int)
+    "the drain stopped instead of claiming the deferred root again"
+    1
+    !calls;
+  (match (load_one_candidate ~base_path).status with
+   | A.Pending { last_delivery_failure = None } -> ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "a spent lane moved the candidate out of Pending");
+  (match load_one_partition ~base_path, !running_generation with
+   | { state = P.Ready; generation; _ }, Some previous ->
+     Alcotest.(check bool)
+       "the root is Ready at the generation after its run"
+       true
+       (P.Generation.is_direct_successor ~previous generation)
+   | _, None -> Alcotest.fail "the spent run never bound"
+   | _, Some _ -> Alcotest.fail "the deferred root is not Ready");
+  let answered ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind answered attempt" (before_dispatch exact);
+    Ok (judgment exact J.Not_relevant)
+  in
+  (match drain answered with
+   | W.Drained { judgments = 1; steps = 1 } -> ()
+   | W.Drained _ | W.Lane_deferred _ | W.Retry_later _ ->
+     Alcotest.fail "the next drain did not judge the deferred candidate");
+  (match (load_one_candidate ~base_path).status with
+   | A.Consumed { delivery = A.Not_relevant; _ } -> ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "the deferred candidate was not judged and consumed");
+  (* The drain's next wake drops the settled receipt of the consumed
+     candidate, so no partition is left behind. *)
+  Alcotest.(check int)
+    "the consumed candidate's settled receipt is gone"
+    0
+    (List.length (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")))
+;;
+
+(* A 402 on the last HTTP slot of a lane that declares no CLI slot. AGENT_CORE
+   reads a payment refusal as the binding's, so the lane defers. *)
+let test_a_payment_refusal_on_the_last_slot_defers () =
+  with_temp_base "board-attention-worker-payment-refusal" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "payment-refused" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind payment-refused attempt" (before_dispatch exact);
+    Error
+      (E.Providers_exhausted
+         { attempts = [ exact ]
+         ; detail =
+             "payment refused: You requested up to 384000 tokens, but can only afford 15455"
+         ; binding_standing = Agent_core.Exact_output.Every_binding_resting
+         })
+  in
+  (match
+     ok
+       "payment refusal exhaustion"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_deferred { candidate_id; detail }
+     when String.equal candidate_id persisted.candidate_id
+          && String.length detail > 0 -> ()
+   | _ -> Alcotest.fail "a payment refusal on the last slot did not defer");
+  match (load_one_candidate ~base_path).status with
+  | A.Pending _ -> ()
+  | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "a payment refusal quarantined the candidate"
+;;
+
+(* A CLI slot that answered with the wrong candidate's verdict is not
+   resting; it answered. The lane is not deferred, so a candidate every slot
+   mishandles cannot hold the Keeper's queue behind it. *)
+let test_a_cli_answer_rejected_after_a_spent_walk_quarantines () =
+  with_temp_base "board-attention-worker-spent-walk-bad-answer" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "spent-walk-bad-answer" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind spent attempt" (before_dispatch exact);
+    Error
+      (spent_http_walk_then_cli_tail
+         [ codex_usage_limit
+         ; Masc.Keeper_lane_cli_oneshot.Invalid_domain_output
+             { runtime_id = "claude_code.claude-sonnet-5"
+             ; detail = "singleton verdict identity mismatch"
+             }
+         ])
+  in
+  (match
+     ok
+       "spent walk then a rejected CLI answer"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked { candidate_id; reason = P.Exact_lane_exhausted _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "a rejected CLI answer did not block the lane");
+  match (load_one_candidate ~base_path).status with
+  | A.Quarantine { quarantine = { failure_category = A.Exact_lane_exhausted; _ }; _ } -> ()
+  | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "a rejected CLI answer did not quarantine the candidate"
+;;
+
+(* The older candidate's lane is spent; the newer one was already consumed,
+   so settling it needs no lane call. It must not wait behind the older root,
+   which a restart that returns cut runs to Ready produces. *)
+let test_a_root_that_needs_no_lane_is_not_held_behind_a_spent_one () =
+  with_temp_base "board-attention-worker-lane-free-first" @@ fun base_path ->
+  let waiting = record ~base_path (candidate ~id:"candidate-waiting" ~recorded_at:1.0 ()) in
+  let consumed = record ~base_path (candidate ~id:"candidate-consumed" ~recorded_at:2.0 ()) in
+  ignore
+    (ok "create Ready roots" (P.ensure_roots ~base_path ~keeper_name:"alpha" [ waiting; consumed ])
+     : int);
+  let exact = provenance "lane-free-first" in
+  ignore
+    (delivered
+       "consume the newer candidate outside the worker"
+       (A.apply_judgment_and_deliver
+          ~base_path
+          ~keeper_name:"alpha"
+          ~candidate_id:consumed.candidate_id
+          ~judgment:(judgment exact J.Not_relevant))
+     : A.candidate);
+  let lane_calls = ref [] in
+  let outcome =
+    ok
+      "drain"
+      (W.For_testing.drain_available
+         ~yield:(fun () -> ())
+         ~now:(fun () -> 3.0)
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~base_path
+         ~keeper_name:"alpha"
+         ~prepare:(fun candidate -> Ok candidate)
+         ~execute:(fun ~before_dispatch ~before_advance:_ observed ->
+           lane_calls := !lane_calls @ [ observed.A.candidate_id ];
+           ok "bind spent attempt" (before_dispatch exact);
+           Error (spent_http_walk_then_spent_cli_tail ())))
+  in
+  (match outcome with
+   | W.Lane_deferred { candidate_id; progress = { judgments = 0; steps = 2 } }
+     when String.equal candidate_id waiting.candidate_id -> ()
+   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _ ->
+     Alcotest.fail "the drain did not settle the lane-free root before deferring");
+  Alcotest.(check (list string))
+    "only the waiting candidate needed the lane"
+    [ waiting.candidate_id ]
+    !lane_calls;
+  let state_of candidate_id =
+    ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")
+    |> List.find_opt (fun (partition : P.t) -> String.equal partition.candidate_id candidate_id)
+    |> Option.map (fun (partition : P.t) -> partition.state)
+  in
+  (* Settled on the first step; the second step's wake then drops the
+     receipt because its candidate is Consumed. Either way it did not wait. *)
+  (match state_of consumed.candidate_id with
+   | Some (P.Settled _) | None -> ()
+   | Some (P.Ready | P.Running _ | P.Completed _ | P.Abandoned _ | P.Blocked _) ->
+     Alcotest.fail "the lane-free root waited behind the spent one");
+  match state_of waiting.candidate_id with
+  | Some P.Ready -> ()
+  | Some _ | None -> Alcotest.fail "the spent root is not Ready"
+;;
+
+let test_restart_returns_a_cut_bound_run_to_ready () =
+  (* A restart that cuts a bound run is not a judgment about its candidate.
+     Each claim starts a fresh AGENT_CORE flow, so the next claim judges the
+     candidate without an operator requeue. *)
+  with_temp_base "board-attention-worker-interrupted-ready" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "interrupted-bound" in
+  let entered, publish_entered = Eio.Promise.create () in
+  let never, _resolve_never = Eio.Promise.create () in
+  Eio_main.run @@ fun _env ->
+  Eio.Fiber.first
+    (fun () ->
+       ignore
+         (process
+            ~base_path
+            ~prepare:(fun candidate -> Ok candidate)
+            ~execute:(fun ~before_dispatch ~before_advance:_ _candidate ->
+               ok "bind interrupted attempt" (before_dispatch exact);
+               Eio.Promise.resolve publish_entered ();
+               Eio.Promise.await never)
+          : (W.step, string) result))
+    (fun () -> Eio.Promise.await entered);
+  Alcotest.(check int)
+    "recovery releases one cut run"
+    1
+    (ok
+       "recover interrupted Bound"
+       (P.recover_for_process_start
+          ~now:4.0
+          ~base_path
+          ~keeper_name:"alpha"));
+  (match (load_one_partition ~base_path).state with
+   | P.Ready -> ()
+   | _ -> Alcotest.fail "a cut bound run did not return to Ready");
+  match
+    ok
+      "judge after restart"
+      (process
+         ~base_path
+         ~prepare:(fun candidate -> Ok candidate)
+         ~execute:(fun ~before_dispatch ~before_advance:_ _candidate ->
+           ok "bind after restart" (before_dispatch exact);
+           Ok (judgment exact J.Not_relevant)))
+  with
+  | W.Judgment_completed { candidate_id; _ }
+    when String.equal candidate_id persisted.candidate_id -> ()
+  | _ -> Alcotest.fail "the candidate was not judged after the restart"
+;;
+
+let test_cli_exhaustion_preserves_prior_domain_rejection () =
+  with_temp_base "board-attention-worker-cli-prior-domain-invalid" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "cli-prior-domain-invalid" in
+  let detail = "singleton candidate identity mismatch" in
+  let calls = ref 0 in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind rejected HTTP response" (before_dispatch exact);
+    Error
+      (E.Cli_slots_exhausted
+         { prior_error = Some (E.Domain_output_invalid detail)
+         ; failures =
+             [ Masc.Keeper_lane_cli_oneshot.Execution_failed
+                 { runtime_id = "claude_code.claude-sonnet-5"
+                 ; cause = Masc.Fusion_official_client.Setup_failure "client unavailable"
+                 }
+             ]
+         })
+  in
+  (match
+     ok
+       "CLI exhaustion after domain rejection"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason =
+           P.Domain_output_invalid
+             { detail = observed; progress = Some (P.Bound durable) }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && String.equal observed detail
+          && same_provenance durable exact ->
+     ()
+   | _ -> Alcotest.fail "CLI exhaustion replaced its prior domain rejection");
+  (match (load_one_partition ~base_path).state with
+   | P.Blocked
+       { reason =
+           P.Domain_output_invalid
+             { detail = observed; progress = Some (P.Bound durable) }
+       ; _
+       }
+     when String.equal observed detail && same_provenance durable exact ->
+     ()
+   | _ -> Alcotest.fail "partition lost the prior domain rejection");
+  (match (load_one_candidate ~base_path).status with
+   | A.Quarantine
+       { quarantine =
+           { failure_category = A.Domain_output_invalid
+           ; attempt_provenance = Some durable
+           ; _
+           }
+       ; phase = A.Quarantined
+       }
+     when same_candidate_provenance durable exact ->
+     ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "candidate lost the prior domain rejection classification");
+  (match
+     ok
+       "domain rejection with exhausted CLI is not retried"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "quarantined CLI/domain failure became claimable");
+  Alcotest.(check int) "one exact execution" 1 !calls
+;;
+
+let test_cli_exhaustion_preserves_prior_provenance_mismatch () =
+  with_temp_base "board-attention-worker-cli-prior-provenance-mismatch"
+  @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "cli-prior-provenance-mismatch" in
+  let detail = "final response provenance does not match the bound attempt" in
+  let calls = ref 0 in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind mismatched HTTP response" (before_dispatch exact);
+    Error
+      (E.Cli_slots_exhausted
+         { prior_error = Some (E.Provenance_mismatch detail)
+         ; failures =
+             [ Masc.Keeper_lane_cli_oneshot.Execution_failed
+                 { runtime_id = "claude_code.claude-sonnet-5"
+                 ; cause = Masc.Fusion_official_client.Setup_failure "client unavailable"
+                 }
+             ]
+         })
+  in
+  (match
+     ok
+       "CLI exhaustion after provenance mismatch"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason =
+           P.Execution_provenance_mismatch
+             { detail = observed; progress = Some (P.Bound durable) }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && String.equal observed detail
+          && same_provenance durable exact ->
+     ()
+   | _ -> Alcotest.fail "CLI exhaustion replaced its prior provenance mismatch");
+  (match (load_one_partition ~base_path).state with
+   | P.Blocked
+       { reason =
+           P.Execution_provenance_mismatch
+             { detail = observed; progress = Some (P.Bound durable) }
+       ; _
+       }
+     when String.equal observed detail && same_provenance durable exact ->
+     ()
+   | _ -> Alcotest.fail "partition lost the provenance mismatch evidence");
+  (match (load_one_candidate ~base_path).status with
+   | A.Quarantine
+       { quarantine =
+           { failure_category = A.Execution_provenance_mismatch
+           ; attempt_provenance = Some durable
+           ; _
+           }
+       ; phase = A.Quarantined
+       }
+     when same_candidate_provenance durable exact ->
+     ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "candidate lost the provenance mismatch classification");
+  (match
+     ok
+       "provenance mismatch with exhausted CLI is not retried"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "quarantined CLI/provenance failure became claimable");
+  Alcotest.(check int) "one exact execution" 1 !calls
+;;
+
+let test_bound_cancellation_is_prompt_and_process_recoverable () =
+  Eio_main.run @@ fun _env ->
+  with_temp_base "board-attention-worker-bound-cancel" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let exact = provenance "cancelled-bound" in
+  let entered, publish_entered = Eio.Promise.create () in
+  let never, _resolve_never = Eio.Promise.create () in
+  let returned = Atomic.make false in
+  Eio.Fiber.first
+    (fun () ->
+       ignore
+         (process
+            ~base_path
+            ~prepare:(fun candidate -> Ok candidate)
+            ~execute:(fun ~before_dispatch ~before_advance:_ _candidate ->
+              ok "bind cancelled attempt" (before_dispatch exact);
+              Eio.Promise.resolve publish_entered ();
+              Eio.Promise.await never)
+          : (W.step, string) result);
+       Atomic.set returned true)
+    (fun () -> Eio.Promise.await entered);
+  Alcotest.(check bool) "cancellation did not return normally" false (Atomic.get returned);
+  (match load_one_partition ~base_path with
+   | { state = P.Running { progress = P.Bound durable; _ }; _ }
+     when same_provenance durable exact -> ()
+   | _ -> Alcotest.fail "cancellation performed partition I/O before returning");
+  Alcotest.(check int)
+    "process-start recovery releases one Bound execution"
+    1
+    (ok
+       "recover cancelled Bound"
+       (P.recover_for_process_start
+          ~now:4.0
+          ~base_path
+          ~keeper_name:"alpha"));
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "process-start recovery did not return the cut Bound run to Ready"
+;;
+
+let test_released_cancellation_is_prompt_and_process_recoverable () =
+  Eio_main.run @@ fun _env ->
+  with_temp_base "board-attention-worker-advancing-cancel" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let failed = provenance "cancelled-failed" in
+  let next : E.candidate_visit =
+    { flow_id = "flow-cancelled-advance"
+    ; ordinal = 1
+    ; slot_id = "slot-cancelled-next"
+    ; catalog_generation_fingerprint = "catalog-generation-cancelled-next"
+    ; catalog_evidence_sha256 = "catalog-evidence-cancelled-next"
+    ; target_identity_fingerprint = "target-identity-cancelled-next"
+    }
+  in
+  let entered, publish_entered = Eio.Promise.create () in
+  let never, _resolve_never = Eio.Promise.create () in
+  let returned = Atomic.make false in
+  Eio.Fiber.first
+    (fun () ->
+       ignore
+         (process
+            ~base_path
+            ~prepare:(fun candidate -> Ok candidate)
+            ~execute:(fun ~before_dispatch ~before_advance _candidate ->
+              ok "bind failed attempt" (before_dispatch failed);
+              ok
+                "record failed attempt"
+                (before_advance
+                   ~failed:(E.Executed_failure failed)
+                   ~next);
+              Eio.Promise.resolve publish_entered ();
+              Eio.Promise.await never)
+          : (W.step, string) result);
+       Atomic.set returned true)
+    (fun () -> Eio.Promise.await entered);
+  Alcotest.(check bool) "released cancellation did not return" false (Atomic.get returned);
+  (match load_one_partition ~base_path with
+   | { state =
+         P.Running
+           { progress =
+               P.Advancing
+                 { execution_anchor = Some durable
+                 ; last_from = None
+                 ; next = durable_next
+                 }
+           ; _
+           }
+     ; _
+     }
+     when same_provenance durable failed
+          && same_candidate_visit durable_next next ->
+    ()
+   | _ -> Alcotest.fail "cancellation lost durable advancement evidence");
+  Alcotest.(check int)
+    "process-start recovery releases one advancing execution"
+    1
+    (ok
+       "recover cancelled released execution"
+       (P.recover_for_process_start
+          ~now:4.0
+          ~base_path
+          ~keeper_name:"alpha"));
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "process-start recovery did not return the cut advancing run to Ready"
+;;
+
+let test_unbound_cancellation_waits_for_process_start_recovery () =
+  Eio_main.run @@ fun _env ->
+  with_temp_base "board-attention-worker-unbound-cancel" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let entered, publish_entered = Eio.Promise.create () in
+  let never, _resolve_never = Eio.Promise.create () in
+  let returned = Atomic.make false in
+  Eio.Fiber.first
+    (fun () ->
+       ignore
+         (process
+            ~base_path
+            ~prepare:(fun candidate -> Ok candidate)
+            ~execute:(fun ~before_dispatch:_ ~before_advance:_ _candidate ->
+              Eio.Promise.resolve publish_entered ();
+              Eio.Promise.await never)
+          : (W.step, string) result);
+       Atomic.set returned true)
+    (fun () -> Eio.Promise.await entered);
+  Alcotest.(check bool) "unbound cancellation did not return" false (Atomic.get returned);
+  (match (load_one_partition ~base_path).state with
+   | P.Running { progress = P.Unbound; _ } -> ()
+   | _ -> Alcotest.fail "Unbound cancellation was released before process-start recovery");
+  Alcotest.(check int)
+    "process-start recovery resolves one Unbound claim"
+    1
+    (ok
+       "recover Unbound claim"
+       (P.recover_for_process_start
+          ~now:4.0
+          ~base_path
+          ~keeper_name:"alpha"));
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "process-start recovery did not return Unbound to Ready"
+;;
+
+let test_terminal_root_does_not_strand_ready_sibling () =
+  with_temp_base "board-attention-worker-terminal-sibling" @@ fun base_path ->
+  let first = record ~base_path (candidate ~id:"terminal-first" ~recorded_at:1.0 ()) in
+  let sibling = record ~base_path (candidate ~id:"ready-sibling" ~recorded_at:2.0 ()) in
+  let sibling_exact = provenance "sibling" in
+  let calls = ref [] in
+  ignore
+    (ok
+       "drain terminal then sibling"
+       (W.For_testing.drain_available
+       ~yield:(fun () -> ())
+       ~now:(fun () -> 3.0)
+       ~worker_epoch:(P.Worker_epoch.generate ())
+       ~base_path
+       ~keeper_name:"alpha"
+       ~prepare:(fun candidate -> Ok candidate)
+       ~execute:(fun ~before_dispatch ~before_advance:_ observed ->
+         calls := !calls @ [ observed.A.candidate_id ];
+         if String.equal observed.candidate_id first.candidate_id
+         then
+           Error
+             (E.Providers_exhausted
+                { attempts = []
+                ; detail = "provider exhausted"
+                ; binding_standing = Agent_core.Exact_output.Not_every_binding_resting
+                })
+         else (
+           ok "bind sibling" (before_dispatch sibling_exact);
+           (* Relevant, not Not_relevant: this test's subject is the drain
+              continuing past a terminal root, and its final assertion reads
+              the sibling as Completed — the pre-task-1666 resting state.
+              A Not_relevant verdict now settles inside the worker fiber, so
+              the sibling would be past Completed before this test looks. *)
+           Ok (judgment sibling_exact J.Relevant))))
+     : W.drain_outcome);
+  Alcotest.(check (list string))
+    "terminal root and sibling were each visited once"
+    [ first.candidate_id; sibling.candidate_id ]
+    !calls;
+  let partitions = ok "load sibling partitions" (P.load ~base_path ~keeper_name:"alpha") in
+  let state_for candidate_id =
+    List.find_opt
+      (fun (partition : P.t) -> String.equal partition.candidate_id candidate_id)
+      partitions
+    |> Option.map (fun (partition : P.t) -> partition.state)
+  in
+  (match state_for first.candidate_id with
+   | Some
+       (P.Blocked
+          { reason =
+              P.Exact_lane_exhausted { detail = "provider exhausted"; _ }
+          ; _
+          }) -> ()
+   | Some _ | None -> Alcotest.fail "first terminal root did not remain Blocked");
+  match state_for sibling.candidate_id with
+  | Some (P.Completed _) -> ()
+  | Some _ | None -> Alcotest.fail "Ready sibling did not complete after terminal root"
+;;
+
+let test_completed_startup_replays_owner_wake () =
+  with_temp_base "board-attention-worker-completed-replay" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let exact = provenance "replay" in
+  ignore
+    (ok
+       "complete before replay"
+       (process
+          ~base_path
+          ~prepare:(fun candidate -> Ok candidate)
+          ~execute:(fun ~before_dispatch ~before_advance:_ _candidate ->
+            ok "bind replay attempt" (before_dispatch exact);
+            Ok (judgment exact J.Relevant)))
+      : W.step);
+  let wake_count = ref 0 in
+  let wake_owner ~base_path:_ ~keeper_name:_ =
+    incr wake_count;
+    Masc.Keeper_registry.Signaled
+  in
+  (match
+     ok
+       "replay completed wake"
+       (W.For_testing.replay_completed_owner_wake
+          ~base_path
+          ~keeper_name:"alpha"
+          ~wake_owner)
+   with
+   | Some Masc.Keeper_registry.Signaled -> ()
+   | Some _ | None -> Alcotest.fail "Completed startup replay did not wake its owner");
+  Alcotest.(check int) "one replay wake" 1 !wake_count
+;;
+
+let test_existing_judgment_skips_exact_flow () =
+  with_temp_base "board-attention-worker-existing-judgment" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "existing-judged" in
+  ignore
+    (ok
+       "record prior judgment"
+       (A.record_judgment ~base_path persisted (judgment exact J.Relevant))
+      : A.candidate);
+  (match
+     ok
+       "complete existing judgment"
+       (process
+          ~base_path
+          ~prepare:(fun _ -> Alcotest.fail "prior judgment invoked exact preparation")
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
+            Alcotest.fail "prior judgment invoked exact execution"))
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "prior judgment was not completed without exact execution");
+  match (load_one_partition ~base_path).state with
+  | P.Completed { item = { judgment = observed; _ }; _ }
+    when (match observed.source with
+          | A.Cli_lane_slot | A.Vendor_system_one _ -> false
+          | A.Exact_attempt attempt -> String.equal attempt.call_id exact.call_id)
+    -> ()
+  | _ -> Alcotest.fail "existing judgment was not durably projected to Completed"
+;;
+
+let test_existing_consumed_skips_exact_flow_and_settles () =
+  with_temp_base "board-attention-worker-existing-consumed" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  ignore
+    (ok
+       "create Ready root"
+       (P.ensure_roots
+          ~base_path
+          ~keeper_name:"alpha"
+          [ persisted ])
+      : int);
+  let exact = provenance "existing-consumed" in
+  ignore
+    (ok
+       "record consumed judgment"
+       (A.record_judgment ~base_path persisted (judgment exact J.Not_relevant))
+      : A.candidate);
+  ignore
+    (delivered
+       "consume before worker"
+       (A.apply_judgment_and_deliver
+          ~base_path
+          ~keeper_name:"alpha"
+          ~candidate_id:persisted.candidate_id
+          ~judgment:(judgment exact J.Not_relevant))
+      : A.candidate);
+  (match
+     ok
+       "settle existing consumed"
+       (process
+          ~base_path
+          ~prepare:(fun _ -> Alcotest.fail "consumed candidate invoked exact preparation")
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
+            Alcotest.fail "consumed candidate invoked exact execution"))
+   with
+   | W.Candidate_already_consumed { candidate_id }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "existing Consumed candidate did not settle without exact execution");
+  match (load_one_partition ~base_path).state with
+  | P.Settled _ -> ()
+  | _ -> Alcotest.fail "existing Consumed partition was not Settled"
+;;
+
+let test_consumed_completed_crash_settles_without_duplicate_delivery () =
+  with_temp_base "board-attention-worker-consumed-completed-crash" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  ignore
+    (ok
+       "create root before consumption"
+       (P.ensure_roots
+          ~base_path
+          ~keeper_name:"alpha"
+          [ persisted ])
+      : int);
+  let exact = provenance "consumed-completed-crash" in
+  let completed_judgment = judgment exact J.Relevant in
+  let consumed =
+    delivered
+      "consume Relevant candidate before crash"
+      (A.apply_judgment_and_deliver
+         ~base_path
+         ~keeper_name:"alpha"
+         ~candidate_id:persisted.candidate_id
+         ~judgment:completed_judgment)
+  in
+  (match consumed.status with
+   | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ } -> ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "Relevant candidate was not durably Consumed");
+  Alcotest.(check int)
+    "one Relevant delivery before crash"
+    1
+    (relevant_delivery_count ~base_path ~candidate_id:persisted.candidate_id);
+  let worker_epoch = P.Worker_epoch.generate () in
+  let claim_target = load_one_partition ~base_path in
+  let claimed =
+    match
+      ok
+        "claim existing Consumed root"
+        (P.claim_ready_exact
+           ~now:3.0
+           ~worker_epoch
+           ~base_path
+           ~keeper_name:"alpha"
+           ~partition_id:claim_target.partition_id
+           ~generation:claim_target.generation)
+    with
+    | Some partition -> partition
+    | None -> Alcotest.fail "existing Consumed root was not claimable"
+  in
+  let item : P.completed_item =
+    { candidate_id = persisted.candidate_id; judgment = completed_judgment }
+  in
+  let completed_transition : P.exact_transition =
+    ok
+      "persist Completed immediately before crash"
+      (P.complete_existing_judgment
+         ~now:4.0
+         ~worker_epoch
+         ~base_path
+         ~partition:claimed
+         ~item)
+  in
+  (match completed_transition.write_outcome with
+   | P.Fsync_completed -> ()
+   | P.Visible_sync_unconfirmed detail ->
+     Alcotest.failf "crash fixture completion was not fsync-confirmed: %s" detail);
+  (match (load_one_partition ~base_path).state with
+   | P.Completed _ -> ()
+   | _ -> Alcotest.fail "crash fixture did not retain Completed partition");
+  (match ok "settle crash-replayed completion" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
+   | W.Partition_settled { candidate_id; continuation_wake = None }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Partition_settled _ ->
+     Alcotest.fail "crash-replayed completion settled with unexpected continuation"
+   | W.No_completed_partition ->
+     Alcotest.fail "crash-replayed Completed partition was not found");
+  Alcotest.(check int)
+    "Consumed replay did not duplicate Relevant delivery"
+    1
+    (relevant_delivery_count ~base_path ~candidate_id:persisted.candidate_id);
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
+  | _ -> Alcotest.fail "Consumed crash replay did not end in Settled"
+;;
+
+let test_process_recovery_claim_is_released_after_cancellation () =
+  with_temp_base "board-attention-worker-recovery-lifecycle" @@ fun base_path ->
+  let cancelled =
+    try
+      W.For_testing.with_process_recovery_claim
+        ~base_path
+        ~keeper_name:"alpha"
+      (fun claimed ->
+         Alcotest.(check bool) "first lifecycle acquired recovery" true claimed;
+         raise (Eio.Cancel.Cancelled (Failure "injected lifecycle cancellation")))
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool) "lifecycle cancellation was reraised" true cancelled;
+  let restarted_claim =
+    W.For_testing.with_process_recovery_claim
+      ~base_path
+      ~keeper_name:"alpha"
+      (fun claimed -> claimed)
+  in
+  Alcotest.(check bool)
+    "same-process restart reacquired recovery"
+    true
+    restarted_claim
+;;
+
+let test_unexpected_exception_is_terminal_without_hot_retry () =
+  with_temp_base "board-attention-worker-unexpected" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let calls = ref 0 in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr calls;
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "unexpected worker failure"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason = P.Unexpected_worker_failure { detail; progress = None }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && String.equal
+               detail
+               (Printexc.to_string (Failure "injected exact worker exception")) -> ()
+   | _ -> Alcotest.fail "unexpected exception was not durably terminalized");
+  (match
+     ok
+       "unexpected failure is not retried"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "unexpected terminal failure became claimable");
+  Alcotest.(check int) "one exceptional execution" 1 !calls
+;;
+
+let test_requested_blocked_recovery_and_sequential_cas_converge () =
+  with_temp_base "board-attention-worker-manual-requeue" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "blocked root did not project a candidate quarantine"
+  in
+  let requested =
+    ok
+      "persist requeue-requested crash point"
+      (A.request_quarantine_requeue
+         ~base_path
+         ~candidate:quarantined
+         ~partition_id:partition.partition_id
+         ~expected_quarantine_id:quarantine.quarantine_id
+         ~requested_at:20.0
+         ~requested_by:"operator-test")
+  in
+  (match requested.status with
+   | A.Quarantine { phase = A.Requeue_requested _; _ } -> ()
+   | _ -> Alcotest.fail "candidate did not retain requeue-requested");
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  let run label =
+    match Q.execute ~now:21.0 ~base_path command with
+    | Ok report -> report
+    | Error error ->
+      Alcotest.failf "%s: %s" label (Q.execution_error_label error)
+  in
+  let report = run "resume requeue-requested" in
+  let recovered_quarantine_id =
+    match report.candidate.status, report.partition.state with
+    | A.Quarantine { quarantine; phase = A.Requeued _ }, P.Ready ->
+      quarantine.quarantine_id
+    | _ -> Alcotest.fail "manual recovery did not reach Requeued/Ready"
+  in
+  let replay = run "idempotent replay" in
+  match replay.candidate.status, replay.partition.state with
+  | A.Quarantine
+      { quarantine = replayed; phase = A.Requeued _ },
+    P.Ready ->
+    Alcotest.(check string)
+      "two sequential CAS commands converge on one quarantine generation"
+      recovered_quarantine_id
+      replayed.quarantine_id
+  | _ -> Alcotest.fail "manual recovery replay lost its generation marker"
+;;
+
+let test_candidate_quarantine_restores_a_missing_partition () =
+  with_temp_base "board-attention-missing-partition" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let failed = provenance "missing-partition" in
+  let fail ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind call before failure" (before_dispatch failed);
+    raise (Failure "lost partition fixture")
+  in
+  (match
+     ok
+       "quarantine a candidate"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:fail)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not quarantine its candidate");
+  let quarantined = load_one_candidate ~base_path in
+  let original = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture did not retain candidate quarantine"
+  in
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:original.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "operator command rejected: %s" (Q.input_error_to_string error)
+  in
+  let partition_path = P.ledger_path ~base_path ~keeper_name:"alpha" in
+  Sys.remove partition_path;
+  ignore
+    (ok
+       "restart after partition loss"
+       (P.recover_for_process_start ~now:19.0 ~base_path ~keeper_name:"alpha")
+      : int);
+  let recovered =
+    match Q.execute ~now:20.0 ~base_path command with
+    | Ok report -> report
+    | Error error ->
+      Alcotest.failf
+        "candidate-only operator recovery failed: %s"
+        (Q.execution_error_label error)
+  in
+  (match recovered.candidate.status, recovered.partition.state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
+   | _ -> Alcotest.fail "candidate-only recovery did not reach Requeued/Ready");
+  Alcotest.(check bool)
+    "restored Blocked generation was requeued once"
+    true
+    (P.Generation.is_direct_successor
+       ~previous:quarantine.partition_generation
+       recovered.partition.generation);
+  (* A second loss after authorization must converge from the candidate's
+     retained quarantine rather than re-dispatching an unbound judgment. *)
+  Sys.remove partition_path;
+  ignore
+    (ok
+       "restart after authorized partition loss"
+       (P.recover_for_process_start ~now:20.5 ~base_path ~keeper_name:"alpha")
+      : int);
+  ok
+    "process-start reconciliation"
+    (reconcile ~now:21.0 ~base_path);
+  (match (load_one_partition ~base_path).state with
+   | P.Ready -> ()
+   | _ -> Alcotest.fail "process-start replay did not restore Ready");
+  let successful = provenance "restored-success" in
+  let answer ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind restored call" (before_dispatch successful);
+    Ok (judgment successful J.Not_relevant)
+  in
+  (match
+     ok
+       "judge restored candidate"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:answer)
+   with
+   | W.Judgment_completed _ -> ()
+   | _ -> Alcotest.fail "restored candidate was not judged");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Consumed _, P.Settled _ -> ()
+  | _ -> Alcotest.fail "restored candidate did not finish its lifecycle"
+;;
+
+let test_deferred_lane_retries_without_another_board_signal () =
+  let tasks = Queue.create () in
+  let slept = ref [] in
+  let wakes = ref 0 in
+  let scheduler =
+    W.For_testing.make_deferred_rearm_scheduler
+      ~fork:(fun task -> Queue.add task tasks)
+      ~sleep:(fun delay -> slept := delay :: !slept)
+      ~request:(fun () ->
+        incr wakes;
+        Ok Wake.Signaled)
+      ~delay_s:60.0
+  in
+  W.For_testing.schedule_deferred_rearm scheduler;
+  W.For_testing.schedule_deferred_rearm scheduler;
+  Alcotest.(check int) "one wake armed for a quiet Board" 1 (Queue.length tasks);
+  Queue.take tasks ();
+  Alcotest.(check int) "maintenance wake delivered" 1 !wakes;
+  Alcotest.(check bool)
+    "configured pulse used"
+    true
+    (List.equal Float.equal [ 60.0 ] !slept);
+  W.For_testing.rearm_deferred_after_skipped_wake
+    scheduler
+    (W.Keeper_meta_read_failed "transient metadata read");
+  Alcotest.(check int) "failed admission retains liveness" 1 (Queue.length tasks);
+  Queue.take tasks ();
+  Alcotest.(check int) "read recovery gets another wake" 2 !wakes;
+  W.For_testing.rearm_deferred_after_skipped_wake scheduler W.Keeper_paused;
+  Alcotest.(check int) "pause waits for resume" 0 (Queue.length tasks);
+  W.For_testing.schedule_deferred_rearm scheduler;
+  W.For_testing.reset_deferred_rearm scheduler;
+  Queue.take tasks ();
+  Alcotest.(check int) "settled work cancels stale wake" 2 !wakes;
+  W.For_testing.schedule_deferred_rearm scheduler;
+  Queue.take tasks ();
+  Alcotest.(check int) "later deferral can rearm" 3 !wakes
+;;
+
+let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles () =
+  with_temp_base "board-attention-worker-manual-requeue-interleaving" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ~id:"candidate-interleaving" ()) in
+  let failed_exact = provenance "manual-requeue-failure" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind failed manual requeue attempt" (before_dispatch failed_exact);
+    raise (Failure "injected exact worker exception")
+  in
+  ignore
+    (ok
+       "create interleaving quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+     : W.step);
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "interleaving fixture did not project quarantine"
+  in
+  let requested =
+    ok
+      "persist requeue request"
+      (A.request_quarantine_requeue
+         ~base_path
+         ~candidate:quarantined
+         ~partition_id:blocked.partition_id
+         ~expected_quarantine_id:quarantine.quarantine_id
+         ~requested_at:30.0
+         ~requested_by:"operator-test")
+  in
+  let execute_calls = ref 0 in
+  let execute_before_authorization ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr execute_calls;
+    Alcotest.fail "requeue-requested candidate became claimable"
+  in
+  (match
+     ok
+       "process while requeue authorization is incomplete"
+       (process
+          ~base_path
+          ~prepare:(fun candidate -> Ok candidate)
+          ~execute:execute_before_authorization)
+   with
+   | W.Idle -> ()
+   | W.Contended _
+   | W.Rescan_later _
+   | W.Judgment_completed _
+   | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "blocked partition was exposed before authorization");
+  Alcotest.(check int) "no exact dispatch before authorization" 0 !execute_calls;
+  (match (load_one_partition ~base_path).state with
+   | P.Blocked _ -> ()
+   | _ -> Alcotest.fail "partition became Ready before candidate authorization");
+  let requeued =
+    ok
+      "persist candidate requeue authorization"
+      (A.finish_quarantine_requeue
+         ~base_path
+         ~candidate:requested
+         ~partition_id:blocked.partition_id
+         ~expected_quarantine_id:quarantine.quarantine_id
+         ~requeued_at:31.0)
+  in
+  (match requeued.status, (load_one_partition ~base_path).state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Blocked _ -> ()
+   | _ -> Alcotest.fail "authorization was not durable before the Ready commit");
+  let inventory = Q.inventory ~base_path ~keeper_names:[ "alpha" ] in
+  let inventory_item =
+    match inventory.items with
+    | [ item ] -> item
+    | _ -> Alcotest.fail "typed quarantine inventory did not expose one CAS target"
+  in
+  Alcotest.(check string)
+    "inventory keeper CAS"
+    "alpha"
+    inventory_item.keeper_name;
+  Alcotest.(check string)
+    "inventory partition CAS"
+    blocked.partition_id
+    inventory_item.partition_id;
+  Alcotest.(check string)
+    "inventory candidate CAS"
+    persisted.candidate_id
+    inventory_item.candidate_id;
+  Alcotest.(check string)
+    "inventory quarantine CAS"
+    quarantine.quarantine_id
+    inventory_item.quarantine_id;
+  (* The candidate says Requeued and the partition is still Blocked: the Ready
+     commit has not happened, so this is not a finished requeue (#38276). *)
+  (match inventory_item.phase, inventory_item.requeued_at with
+   | Q.Inventory_requeue_unfinished, Some 31.0 -> ()
+   | _ -> Alcotest.fail "inventory did not expose the unfinished requeue");
+  (match inventory_item.attempt_provenance with
+   | Some durable when same_candidate_provenance durable failed_exact -> ()
+   | _ -> Alcotest.fail "inventory lost opaque attempt provenance references");
+  let inventory_json_item =
+    match
+      Q.inventory_to_json inventory
+      |> Yojson.Safe.Util.member "items"
+      |> Yojson.Safe.Util.to_list
+    with
+    | [ item ] -> item
+    | _ -> Alcotest.fail "snapshot inventory JSON did not expose one CAS target"
+  in
+  let check_json_string field expected =
+    Alcotest.(check string)
+      ("snapshot inventory " ^ field)
+      expected
+      (inventory_json_item
+       |> Yojson.Safe.Util.member field
+       |> Yojson.Safe.Util.to_string)
+  in
+  check_json_string "keeper_name" "alpha";
+  check_json_string "partition_id" blocked.partition_id;
+  check_json_string "candidate_id" persisted.candidate_id;
+  check_json_string "quarantine_id" quarantine.quarantine_id;
+  check_json_string "phase" "requeue_unfinished";
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "requeued command rejected: %s" (Q.input_error_to_string error)
+  in
+  let recovered =
+    match Q.execute ~now:32.0 ~base_path command with
+    | Ok report -> report
+    | Error error ->
+      Alcotest.failf
+        "Requeued+Blocked recovery failed: %s"
+        (Q.execution_error_label error)
+  in
+  (match recovered.candidate.status, recovered.partition.state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
+   | _ -> Alcotest.fail "Requeued+Blocked recovery did not commit Ready");
+  (match (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items with
+   | [ { Q.phase = Q.Inventory_requeued; _ } ] -> ()
+   | _ ->
+     Alcotest.fail
+       "inventory still shows the requeue as unfinished after the partition was released");
+  let exact = provenance "manual-requeue-success" in
+  let spent ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind requeued spent lane" (before_dispatch (provenance "requeued-spent"));
+    Error (spent_http_walk_then_spent_cli_tail ())
+  in
+  (match
+     ok "defer authorized requeue"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:spent)
+   with
+   | W.Judgment_deferred _ -> ()
+   | _ -> Alcotest.fail "authorized requeue did not defer on the spent lane");
+  let deferred = load_one_partition ~base_path in
+  Alcotest.(check bool) "deferral advances beyond the initial Ready" false
+    (P.Generation.is_direct_successor
+       ~previous:quarantine.partition_generation deferred.generation);
+  ignore
+    (ok "restart after authorized requeue deferral"
+       (P.recover_for_process_start ~now:33.0 ~base_path ~keeper_name:"alpha")
+     : int);
+  ok "reconcile authorized requeue after deferral"
+    (reconcile ~now:34.0 ~base_path);
+  ok "repeat process-start reconciliation"
+    (reconcile ~now:35.0 ~base_path);
+  let confirmations = ready_confirmation_events ~base_path in
+  Alcotest.(check int)
+    "each authorized Ready reconciliation is durable"
+    2
+    (List.length confirmations);
+  List.iter
+    (fun event ->
+       Alcotest.(check bool)
+         "reconciled confirmations retain the deferred generation"
+         true
+         (Yojson.Safe.Util.member "generation" event
+          = P.Generation.to_yojson deferred.generation))
+    confirmations;
+  Alcotest.(check bool) "reconciliation retains the deferred generation" true
+    (P.Generation.equal deferred.generation (load_one_partition ~base_path).generation);
+  (match (load_one_candidate ~base_path).status with
+   | A.Quarantine { phase = A.Requeued _; _ } -> ()
+   | _ -> Alcotest.fail "reconciliation lost the operator authorization");
+  let ready = load_one_partition ~base_path in
+  (match
+     ok "claim authorized requeue before process exit"
+       (P.claim_ready_exact ~now:36.0 ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path ~keeper_name:"alpha" ~partition_id:ready.partition_id
+          ~generation:ready.generation)
+   with
+   | Some { state = P.Running _; _ } -> ()
+   | _ -> Alcotest.fail "authorized requeue was not claimed");
+  Alcotest.(check int) "restart releases the interrupted run" 1
+    (ok "recover interrupted authorized requeue"
+       (P.recover_for_process_start ~now:37.0 ~base_path ~keeper_name:"alpha"));
+  ok "reconcile authorized requeue after interrupted run"
+    (reconcile ~now:38.0 ~base_path);
+  let confirmations = ready_confirmation_events ~base_path in
+  Alcotest.(check int)
+    "recovery of the cut run confirms a later Ready generation"
+    3
+    (List.length confirmations);
+  (match List.rev confirmations with
+   | latest :: _ ->
+     Alcotest.(check bool)
+       "cut run recovery advanced Ready generation"
+       false
+       (Yojson.Safe.Util.member "generation" latest
+        = P.Generation.to_yojson deferred.generation)
+   | [] -> Alcotest.fail "cut run recovery lost Ready confirmation");
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind manual requeue attempt" (before_dispatch exact);
+    (* Relevant, not Not_relevant: task-1666 makes the worker settle a
+       Not_relevant completion right in the worker fiber, so the boundary
+       assertion below (Requeued + Completed, not yet settled) would see
+       Settled instead. This test's subject is the owner-turn settlement
+       path after an authorized manual requeue; the direct path is
+       test_a_not_relevant_judgment_settles_without_an_owner_turn. *)
+    Ok (judgment exact J.Relevant)
+  in
+  (match
+     ok
+       "execute authorized manual requeue"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Judgment_completed _
+   | W.Idle
+   | W.Contended _
+   | W.Rescan_later _
+   | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "authorized manual requeue did not complete its exact judgment");
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Completed _ -> ()
+   | _ -> Alcotest.fail "exact completion crossed the owner settlement boundary");
+  (match
+     ok
+       "owner settlement"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Partition_settled { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
+   | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled");
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
+   | _ -> Alcotest.fail "manual requeue did not normalize, consume, and settle");
+  Alcotest.(check int)
+    "owner settlement preserves Ready confirmations"
+    3
+    (List.length (ready_confirmation_events ~base_path));
+  (match (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items with
+   | [] -> ()
+   | _ -> Alcotest.fail "settled candidate remained in quarantine inventory")
+;;
+
+(* A recorded requeue is unfinished while the partition is Blocked, and also
+   when the partition row is absent: [execute] restores the quarantined
+   generation's Blocked root from the candidate and finishes the requeue, as
+   the worker does on its next pass. Running that command here is what shows
+   the absent row is not a verdict the server refuses (#38276). *)
+let test_inventory_keeps_a_recorded_requeue_unfinished_until_the_partition_is_released () =
+  with_temp_base "board-attention-inventory-requeue-without-partition" @@ fun base_path ->
+  ignore (record ~base_path (candidate ~id:"candidate-inventory-pair" ()) : A.candidate);
+  let failed_exact = provenance "inventory-pair-failure" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind failed attempt" (before_dispatch failed_exact);
+    raise (Failure "injected exact worker exception")
+  in
+  ignore
+    (ok
+       "create quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+     : W.step);
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture did not project quarantine"
+  in
+  let requested =
+    ok
+      "persist requeue request"
+      (A.request_quarantine_requeue
+         ~base_path
+         ~candidate:quarantined
+         ~partition_id:blocked.partition_id
+         ~expected_quarantine_id:quarantine.quarantine_id
+         ~requested_at:30.0
+         ~requested_by:"operator-test")
+  in
+  ignore
+    (ok
+       "persist candidate requeue authorization"
+       (A.finish_quarantine_requeue
+          ~base_path
+          ~candidate:requested
+          ~partition_id:blocked.partition_id
+          ~expected_quarantine_id:quarantine.quarantine_id
+          ~requeued_at:31.0)
+     : A.candidate);
+  Alcotest.(check (list string))
+    "a recorded requeue beside a Blocked partition is unfinished"
+    [ "requeue_unfinished" ]
+    (inventory_phases ~base_path);
+  ok "empty the partition ledger" (P.purge ~base_path ~keeper_name:"alpha");
+  Alcotest.(check (list string))
+    "a recorded requeue whose partition row is absent is unfinished too"
+    [ "requeue_unfinished" ]
+    (inventory_phases ~base_path);
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        { Q.candidate_id = quarantined.candidate_id
+        ; expected_quarantine_id = quarantine.quarantine_id
+        ; decision = Q.Acknowledge_and_requeue
+        }
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:32.0 ~base_path command with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "the command did not finish a requeue whose partition row was absent: %s"
+       (Q.execution_error_label error));
+  Alcotest.(check (list string))
+    "once the partition is released the requeue is finished"
+    [ "requeued" ]
+    (inventory_phases ~base_path)
+;;
+
+let test_ready_requested_recovery_fails_closed () =
+  with_temp_base "board-attention-worker-ready-requested" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ~id:"candidate-ready-requested" ()) in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  ignore
+    (ok
+       "create Ready+Requested quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+     : W.step);
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "Ready+Requested fixture did not project quarantine"
+  in
+  ignore
+    (ok
+       "persist Ready+Requested candidate phase"
+       (A.request_quarantine_requeue
+          ~base_path
+          ~candidate:quarantined
+          ~partition_id:blocked.partition_id
+          ~expected_quarantine_id:quarantine.quarantine_id
+          ~requested_at:40.0
+          ~requested_by:"operator-test")
+     : A.candidate);
+  let ready =
+    match
+      ok
+        "inject premature Ready partition"
+        (P.requeue_blocked ~base_path ~partition:blocked)
+    with
+    | P.Requeued transition -> transition
+    | P.Cursor_conflict detail ->
+      Alcotest.failf "premature Ready cursor conflicted: %s" detail
+    | P.Generation_conflict detail ->
+      Alcotest.failf "premature Ready fixture conflicted: %s" detail
+  in
+  (match ready.write_outcome with
+   | P.Fsync_completed -> ()
+   | P.Visible_sync_unconfirmed detail ->
+     Alcotest.failf "premature Ready fixture was not fsynced: %s" detail);
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "Ready+Requested command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:41.0 ~base_path command with
+   | Error (Q.Partition_state_conflict _) -> ()
+   | Error error ->
+     Alcotest.failf
+       "Ready+Requested returned wrong error: %s"
+       (Q.execution_error_label error)
+   | Ok _ -> Alcotest.fail "Ready+Requested recovery did not fail closed");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Quarantine { phase = A.Requeue_requested _; _ }, P.Ready -> ()
+  | _ -> Alcotest.fail "Ready+Requested rejection mutated durable state"
+;;
+
+let candidate_by_id ~base_path candidate_id =
+  match
+    List.find_opt
+      (fun (candidate : A.candidate) -> String.equal candidate.candidate_id candidate_id)
+      (ok "load candidates" (A.load_candidates ~base_path ~keeper_name:"alpha"))
+  with
+  | Some candidate -> candidate
+  | None -> Alcotest.failf "candidate %s is missing" candidate_id
+;;
+
+let partition_of ~base_path candidate_id =
+  match
+    List.find_opt
+      (fun (partition : P.t) -> String.equal partition.candidate_id candidate_id)
+      (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha"))
+  with
+  | Some partition -> partition
+  | None -> Alcotest.failf "partition of %s is missing" candidate_id
+;;
+
+let quarantine_of ~base_path candidate_id =
+  match (candidate_by_id ~base_path candidate_id).status with
+  | A.Quarantine state -> state
+  | A.Pending _ | A.Judged _ | A.Consumed _ ->
+    Alcotest.failf "candidate %s is not quarantined" candidate_id
+;;
+
+(* The worker's own failed run blocks the partition and quarantines the
+   candidate at that Blocked generation. *)
+let quarantine_through_failed_run ~base_path =
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  match
+    ok
+      "quarantine through a failed run"
+      (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+  with
+  | W.Partition_blocked _ -> ()
+  | _ -> Alcotest.fail "failed run did not block the partition"
+;;
+
+(* The partition row leaves Blocked although the candidate never recorded a
+   finished requeue: the order a lost candidate write leaves behind. *)
+let ready_without_candidate_requeue ~base_path candidate_id =
+  match
+    ok
+      "move the Blocked row to Ready"
+      (P.requeue_blocked ~base_path ~partition:(partition_of ~base_path candidate_id))
+  with
+  | P.Requeued _ -> ()
+  | P.Cursor_conflict detail | P.Generation_conflict detail ->
+    Alcotest.failf "fixture requeue conflicted: %s" detail
+;;
+
+let request_requeue ~base_path candidate_id =
+  let state = quarantine_of ~base_path candidate_id in
+  ignore
+    (ok
+       "persist the operator requeue request"
+       (A.request_quarantine_requeue
+          ~base_path
+          ~candidate:(candidate_by_id ~base_path candidate_id)
+          ~partition_id:state.quarantine.partition_id
+          ~expected_quarantine_id:state.quarantine.quarantine_id
+          ~requested_at:40.0
+          ~requested_by:"operator-test")
+     : A.candidate)
+;;
+
+let finish_requeue ~base_path candidate_id =
+  let state = quarantine_of ~base_path candidate_id in
+  ignore
+    (ok
+       "persist the finished requeue"
+       (A.finish_quarantine_requeue
+          ~base_path
+          ~candidate:(candidate_by_id ~base_path candidate_id)
+          ~partition_id:state.quarantine.partition_id
+          ~expected_quarantine_id:state.quarantine.quarantine_id
+          ~requeued_at:41.0)
+     : A.candidate)
+;;
+
+let ready_with_unacknowledged_quarantine ~base_path candidate_id =
+  quarantine_through_failed_run ~base_path;
+  ready_without_candidate_requeue ~base_path candidate_id
+;;
+
+let ready_before_requeue_recorded ~base_path candidate_id =
+  quarantine_through_failed_run ~base_path;
+  request_requeue ~base_path candidate_id;
+  ready_without_candidate_requeue ~base_path candidate_id
+;;
+
+(* A finished requeue that names the Ready row's own generation: the row
+   never reached the Blocked generation the quarantine claims. *)
+let ready_at_requeued_generation ~base_path candidate_id =
+  let candidate = candidate_by_id ~base_path candidate_id in
+  ignore
+    (ok "create the Ready root" (P.ensure_roots ~base_path ~keeper_name:"alpha" [ candidate ])
+     : int);
+  let ready = partition_of ~base_path candidate_id in
+  ignore
+    (ok
+       "quarantine at the Ready generation"
+       (A.quarantine
+          ~base_path
+          ~candidate
+          ~partition_id:ready.partition_id
+          ~partition_generation:ready.generation
+          ~failure_category:A.Unexpected_worker_failure
+          ~attempt_provenance:None
+          ~quarantined_at:2.0)
+     : A.candidate);
+  request_requeue ~base_path candidate_id;
+  finish_requeue ~base_path candidate_id
+;;
+
+let judge_not_relevant
+      ~(before_dispatch : E.attempt_provenance -> (unit, string) result)
+      ~before_advance:_
+      (judged : A.candidate)
+  =
+  let exact = provenance judged.candidate_id in
+  ok "bind the judgment call" (before_dispatch exact);
+  Ok (judgment exact J.Not_relevant)
+;;
+
+let expect_judged ~base_path label candidate_id =
+  match
+    ok label (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:judge_not_relevant)
+  with
+  | W.Judgment_completed { candidate_id = judged; _ } when String.equal judged candidate_id -> ()
+  | _ -> Alcotest.failf "%s: the expected candidate was not judged" label
+;;
+
+(* Each pair used to fail process-start recovery, which stopped this Keeper's
+   whole Board attention worker until the next restart hit it again. *)
+let test_contradicting_quarantine_blocks_only_its_partition make_pair () =
+  with_temp_base "board-attention-worker-contradicting-quarantine" @@ fun base_path ->
+  let contradicted = record ~base_path (candidate ~id:"candidate-contradicted" ()) in
+  make_pair ~base_path contradicted.candidate_id;
+  (match (partition_of ~base_path contradicted.candidate_id).state with
+   | P.Ready -> ()
+   | _ -> Alcotest.fail "fixture partition is not Ready");
+  let contradicting = quarantine_of ~base_path contradicted.candidate_id in
+  let sibling =
+    record ~base_path (candidate ~id:"candidate-sibling" ~recorded_at:2.0 ())
+  in
+  ok "process-start reconciliation" (reconcile ~now:50.0 ~base_path);
+  let blocked = partition_of ~base_path contradicted.candidate_id in
+  (match blocked.state with
+   | P.Blocked { reason = P.Durable_partition_invariant _; _ } -> ()
+   | _ -> Alcotest.fail "contradicted partition was not blocked on its own");
+  let confined = quarantine_of ~base_path contradicted.candidate_id in
+  (match confined.phase, confined.quarantine.failure_category, confined.quarantine.prior_status with
+   | A.Quarantined, A.Durable_partition_invariant, A.Resumable_pending _ -> ()
+   | _ -> Alcotest.fail "new quarantine lost its category or the prior domain status");
+  Alcotest.(check bool)
+    "candidate names the new Blocked generation"
+    true
+    (P.Generation.equal confined.quarantine.partition_generation blocked.generation);
+  Alcotest.(check bool)
+    "the contradicting quarantine is replaced"
+    false
+    (String.equal confined.quarantine.quarantine_id contradicting.quarantine.quarantine_id);
+  ok "repeat process-start reconciliation" (reconcile ~now:50.5 ~base_path);
+  Alcotest.(check bool)
+    "a second pass leaves the Blocked row alone"
+    true
+    (P.Generation.equal blocked.generation (partition_of ~base_path contradicted.candidate_id).generation);
+  expect_judged ~base_path "the sibling drains" sibling.candidate_id;
+  let request : Q.request =
+    { candidate_id = contradicted.candidate_id
+    ; expected_quarantine_id = confined.quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "operator command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:51.0 ~base_path command with
+   | Ok { partition = { state = P.Ready; _ }; _ } -> ()
+   | Ok _ -> Alcotest.fail "operator requeue did not return the partition to Ready"
+   | Error error ->
+     Alcotest.failf "operator requeue failed: %s" (Q.execution_error_label error));
+  expect_judged ~base_path "the requeued candidate is judged" contradicted.candidate_id;
+  match
+    (candidate_by_id ~base_path contradicted.candidate_id).status,
+    (partition_of ~base_path contradicted.candidate_id).state
+  with
+  | A.Consumed _, P.Settled _ -> ()
+  | _ -> Alcotest.fail "requeued candidate did not finish its lifecycle"
+;;
+
+(* Without a restart, the drain claims the same pair first because it needs
+   no lane, and used to stop the whole worker there. *)
+let test_drain_blocks_a_claimed_partition_whose_candidate_is_quarantined () =
+  with_temp_base "board-attention-worker-claimed-quarantine" @@ fun base_path ->
+  let contradicted = record ~base_path (candidate ~id:"candidate-contradicted" ()) in
+  ready_with_unacknowledged_quarantine ~base_path contradicted.candidate_id;
+  let sibling =
+    record ~base_path (candidate ~id:"candidate-sibling" ~recorded_at:2.0 ())
+  in
+  (match
+     ok
+       "drain claims the contradicted partition"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:judge_not_relevant)
+   with
+   | W.Partition_blocked { candidate_id; reason = P.Durable_partition_invariant _ }
+     when String.equal candidate_id contradicted.candidate_id -> ()
+   | _ -> Alcotest.fail "claimed quarantined candidate was not blocked on its own");
+  let blocked = partition_of ~base_path contradicted.candidate_id in
+  (match quarantine_of ~base_path contradicted.candidate_id with
+   | { A.phase = A.Quarantined; quarantine }
+     when P.Generation.equal quarantine.partition_generation blocked.generation -> ()
+   | _ -> Alcotest.fail "candidate does not name the new Blocked generation");
+  expect_judged ~base_path "the sibling drains" sibling.candidate_id
+;;
+
+let test_late_quarantine_preserves_newer_generation () =
+  with_temp_base "board-attention-worker-late-quarantine" @@ fun base_path ->
+  let original = record ~base_path (candidate ~id:"candidate-late" ()) in
+  quarantine_through_failed_run ~base_path;
+  let held = quarantine_of ~base_path original.candidate_id in
+  let stale = candidate_by_id ~base_path original.candidate_id in
+  let generation =
+    ok "advance quarantine generation"
+      (P.Generation.next held.quarantine.partition_generation)
+  in
+  let write ~partition_generation ~quarantined_at =
+    A.quarantine ~base_path ~candidate:stale
+      ~partition_id:held.quarantine.partition_id ~partition_generation
+      ~failure_category:held.quarantine.failure_category
+      ~attempt_provenance:held.quarantine.attempt_provenance ~quarantined_at
+  in
+  ignore (ok "record newer quarantine"
+    (write ~partition_generation:generation ~quarantined_at:60.0) : A.candidate);
+  List.iter
+    (fun requested ->
+      if requested then request_requeue ~base_path original.candidate_id;
+      let before = candidate_by_id ~base_path original.candidate_id in
+      List.iter
+        (fun partition_generation ->
+          (match write ~partition_generation ~quarantined_at:61.0 with
+           | Error _ -> ()
+           | Ok _ -> Alcotest.fail "late or same-generation write replaced quarantine");
+          Alcotest.(check bool) "durable quarantine and operator phase preserved"
+            true (before = candidate_by_id ~base_path original.candidate_id))
+        [ held.quarantine.partition_generation; generation ];
+      ignore (ok "identical quarantine retry remains idempotent"
+        (write ~partition_generation:generation ~quarantined_at:60.0) : A.candidate);
+      Alcotest.(check bool) "identical retry preserves operator phase"
+        true (before = candidate_by_id ~base_path original.candidate_id))
+    [ false; true ]
+;;
+
+let test_stale_quarantine_generation_is_rejected () =
+  with_temp_base "board-attention-worker-stale-quarantine" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ~id:"candidate-stale-generation" ()) in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  ignore
+    (ok
+       "create stale-generation quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+     : W.step);
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "stale-generation fixture did not project quarantine"
+  in
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id ^ "-stale"
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "stale-generation command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:50.0 ~base_path command with
+   | Error (Q.Candidate_state_conflict _) -> ()
+   | Error error ->
+     Alcotest.failf
+       "stale generation returned wrong error: %s"
+       (Q.execution_error_label error)
+   | Ok _ -> Alcotest.fail "stale quarantine generation was accepted");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Quarantine
+      { quarantine = current; phase = A.Quarantined },
+    P.Blocked _
+    when String.equal current.quarantine_id quarantine.quarantine_id ->
+    ()
+  | _ -> Alcotest.fail "stale generation rejection mutated durable state"
+;;
+
+(* #38060: the requeue row names who asked for it. The command carries the
+   authenticated principal onto [Requeue_requested], finishing the requeue
+   keeps it on [Requeued], the row survives its own codec, and the operator
+   inventory shows it. *)
+let test_requeue_records_requesting_principal () =
+  with_temp_base "board-attention-worker-requeue-principal" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-requeuer"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:60.0 ~base_path command with
+   | Ok _ -> ()
+   | Error error -> Alcotest.failf "requeue failed: %s" (Q.execution_error_label error));
+  let requeued = load_one_candidate ~base_path in
+  (match requeued.status with
+   | A.Quarantine { phase = A.Requeued { requested_by; _ }; _ } ->
+     Alcotest.(check string) "Requeued names the requester"
+       "operator-requeuer" requested_by
+   | _ -> Alcotest.fail "candidate did not reach Requeued");
+  Alcotest.(check bool) "requested_by survives the candidate codec" true
+    (ok "decode requeued candidate" (A.candidate_of_json (A.candidate_to_json requeued))
+     = requeued);
+  let inventory = Q.inventory ~base_path ~keeper_names:[ "alpha" ] in
+  match inventory.items with
+  | [ item ] ->
+    Alcotest.(check (option string)) "inventory shows the requester"
+      (Some "operator-requeuer") item.requested_by
+  | items -> Alcotest.failf "expected one inventory item, got %d" (List.length items)
+;;
+
+let test_same_quarantine_command_cas_loser_converges () =
+  with_temp_base "board-attention-worker-same-command-cas" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  let report =
+    ok
+      "same command CAS loser converges"
+      (Result.map_error
+         Q.execution_error_label
+         (Q.For_testing.execute_with_before_partition_commit
+            ~before_partition_commit:(fun observed ->
+           let competing =
+             match
+               ok
+                 "competing command commits Ready"
+                 (P.requeue_blocked ~base_path ~partition:observed)
+             with
+             | P.Requeued transition -> transition
+             | P.Cursor_conflict detail ->
+               Alcotest.failf "competing command cursor conflicted: %s" detail
+             | P.Generation_conflict detail ->
+               Alcotest.failf "competing command conflicted: %s" detail
+           in
+           match competing.write_outcome with
+           | P.Fsync_completed -> ()
+           | P.Visible_sync_unconfirmed detail ->
+             Alcotest.failf "competing Ready was not durable: %s" detail)
+         ~now:20.0
+         ~base_path
+         command))
+  in
+  match report.partition.state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "same command CAS loser did not converge to Ready"
+;;
+
+let test_quarantine_command_rejects_candidate_purged_after_snapshot () =
+  with_temp_base "board-attention-worker-purge-race" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "requeue command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match
+     Q.For_testing.execute_with_before_root_restore
+       ~before_root_restore:(fun () ->
+         match A.purge ~base_path ~keeper_name:"alpha" with
+         | Ok () -> ()
+         | Error detail -> Alcotest.failf "candidate purge failed: %s" detail)
+       ~now:20.0
+       ~base_path
+       command
+   with
+   | Error (Q.Partition_state_conflict detail) ->
+     Alcotest.(check string)
+       "purged candidate blocks stale root restoration"
+       "Board attention candidates changed before root restoration"
+       detail
+   | Error error ->
+     Alcotest.failf
+       "candidate purge race returned the wrong error: %s"
+       (Q.execution_error_label error)
+   | Ok _ -> Alcotest.fail "stale command restored a purged candidate root");
+  Alcotest.(check bool)
+    "candidate remains purged"
+    false
+    (Sys.file_exists (A.ledger_path ~base_path ~keeper_name:"alpha"));
+  match ok "load partition after rejected restore" (P.load ~base_path ~keeper_name:"alpha") with
+  | [ current ] when current.partition_id = partition.partition_id -> ()
+  | _ -> Alcotest.fail "candidate purge race changed the existing partition"
+;;
+
+let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
+  with_temp_base "board-attention-worker-stale-blocked-generation" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected first exact worker exception")
+  in
+  (match
+     ok
+       "create first durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  let partition_blocked_at =
+    match partition.state with
+    | P.Blocked { blocked_at; _ } -> blocked_at
+    | _ -> Alcotest.fail "original requeue target was not Blocked"
+  in
+  let ready_snapshot = ref None in
+  (match
+     Q.For_testing.execute_with_before_partition_commit
+       ~before_partition_commit:(fun observed ->
+         let first_ready =
+           match
+             ok
+               "competing command requeues first generation"
+               (P.requeue_blocked ~base_path ~partition:observed)
+           with
+           | P.Requeued transition -> transition
+           | P.Cursor_conflict detail ->
+             Alcotest.failf "first Ready cursor conflicted: %s" detail
+           | P.Generation_conflict detail ->
+             Alcotest.failf "first Ready generation conflicted: %s" detail
+         in
+         (match first_ready.write_outcome with
+          | P.Fsync_completed -> ()
+          | P.Visible_sync_unconfirmed detail ->
+            Alcotest.failf "first Ready transition was not durable: %s" detail);
+         ready_snapshot := Some first_ready.partition;
+         let owner = P.Worker_epoch.generate () in
+         let running =
+           match
+             ok
+               "worker claims requeued partition"
+               (P.claim_ready_exact
+                  ~now:20.0
+                  ~worker_epoch:owner
+                  ~base_path
+                  ~keeper_name:"alpha"
+                  ~partition_id:first_ready.partition.partition_id
+                  ~generation:first_ready.partition.generation)
+           with
+           | Some partition -> partition
+           | None -> Alcotest.fail "requeued partition was not claimable"
+         in
+         let newer =
+           ok
+             "worker commits same-timestamp newer Blocked generation"
+             (P.block
+                ~now:partition_blocked_at
+                ~worker_epoch:owner
+                ~base_path
+                ~partition:running
+                (P.Unexpected_worker_failure
+                   { detail = "newer exact worker failure"; progress = None }))
+         in
+         match newer.write_outcome with
+         | P.Fsync_completed -> ()
+         | P.Visible_sync_unconfirmed detail ->
+           Alcotest.failf "newer Blocked generation was not durable: %s" detail)
+       ~now:19.0
+       ~base_path
+       command
+   with
+   | Error error ->
+     Alcotest.(check string)
+       "stale command returns partition conflict"
+       "partition_state_conflict"
+       (Q.execution_error_label error)
+   | Ok _ ->
+     Alcotest.fail "stale command requeued a newer failure generation");
+  (match !ready_snapshot with
+   | None -> Alcotest.fail "competing command did not retain its Ready snapshot"
+   | Some ready ->
+     (match P.confirm_ready ~base_path ~partition:ready with
+      | Error _ -> ()
+      | Ok _ ->
+        Alcotest.fail "Ready confirmation reopened a newer Blocked generation"));
+  (* The candidate records the requeue, but the partition now holds a newer
+     failure than the quarantine names. The command refused it, so the
+     inventory must not call it requeued, and it is not a request to resend. *)
+  Alcotest.(check (list string))
+    "a recorded requeue beside a newer Blocked generation is unreconciled"
+    [ "requeue_unreconciled" ]
+    (inventory_phases ~base_path);
+  let durable = load_one_partition ~base_path in
+  Alcotest.(check bool)
+    "newer generation remains structurally distinct"
+    false
+    (P.Generation.equal partition.generation durable.generation);
+  match durable.state with
+  | P.Blocked
+      { blocked_at
+      ; reason =
+          P.Unexpected_worker_failure
+            { detail = "newer exact worker failure"; progress = None }
+      } ->
+    Alcotest.(check (float 0.0))
+      "same timestamp cannot collapse distinct generations"
+      partition_blocked_at
+      blocked_at
+  | _ -> Alcotest.fail "stale command changed the newer Blocked generation"
+;;
+
+let test_cross_domain_wake_is_coalesced_and_rearmed () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  with_temp_base "board-attention-worker-wake" @@ fun base_path ->
+  (match ok "unregistered request" (Wake.request ~base_path ~keeper_name:"alpha") with
+   | Wake.Not_registered -> ()
+   | Wake.Signaled | Wake.Coalesced -> Alcotest.fail "unregistered wake was accepted");
+  let registration =
+    ok "register worker wake" (Wake.register ~sw ~base_path ~keeper_name:"alpha")
+  in
+  (match
+     W.run
+       ~sw
+       ~clock:(Eio.Stdenv.clock env)
+       ~net:None
+       ~base_path
+       ~keeper_name:"alpha"
+   with
+   | Error { stage = W.Registration; _ } -> ()
+   | Error fatal ->
+     Alcotest.failf
+       "duplicate registration returned the wrong fatal stage: %s"
+       (W.fatal_error_to_string fatal)
+   | Ok () -> Alcotest.fail "duplicate registration returned normally");
+  let first =
+    Domain.spawn (fun () -> Wake.request ~base_path ~keeper_name:"alpha")
+    |> Domain.join
+    |> ok "cross-domain wake"
+  in
+  (match first with
+   | Wake.Signaled -> ()
+   | Wake.Coalesced | Wake.Not_registered -> Alcotest.fail "first wake was not signaled");
+  (match ok "coalesced wake" (Wake.request ~base_path ~keeper_name:"alpha") with
+   | Wake.Coalesced -> ()
+   | Wake.Signaled | Wake.Not_registered -> Alcotest.fail "pending wake did not coalesce");
+  (match Wake.await registration with
+   | Wake.Wake -> ()
+   | Wake.Registration_closed -> Alcotest.fail "live registration closed");
+  (match ok "rearmed wake" (Wake.request ~base_path ~keeper_name:"alpha") with
+   | Wake.Signaled -> ()
+   | Wake.Coalesced | Wake.Not_registered ->
+     Alcotest.fail "consumed wake did not rearm");
+  Wake.unregister registration;
+  match ok "explicit unregister" (Wake.request ~base_path ~keeper_name:"alpha") with
+  | Wake.Not_registered -> ()
+  | Wake.Signaled | Wake.Coalesced ->
+    Alcotest.fail "worker lifetime left a stale wake registration"
+;;
+
+(* The drain verdict must stay three distinguishable tokens. This is what the
+   worker logs, and it is the only thing that separates "drained, nothing to
+   do" from "could not claim" from "the partition moved under me". Collapsing
+   two of them back into one string would restore the state the measurement on
+   2026-08-05 found: pending 425 -> 1031 with zero contention lines and zero
+   worker failures, and no way to tell which of the three was happening. *)
+let no_progress : W.drain_progress = { judgments = 0; steps = 0 }
+
+(* A wake that finds an empty partition and a drain that judged twenty
+   candidates both end as [Drained], so the verdict token alone cannot tell an
+   operator whether the worker did any work. Live evidence: the two hours to
+   2026-08-22T02:03Z held 120 pairs of textually identical
+   [board_attention_worker_drain ... outcome=drained] lines — each pair one
+   real drain followed by a re-wake that found nothing left — against 64
+   single lines. The counts are what separate them. *)
+let test_drain_outcome_carries_the_work_it_did () =
+  let drive steps =
+    let remaining = ref steps in
+    W.For_testing.drain_available_with_process
+      ~yield:(fun () -> ())
+      ~process:(fun () ->
+        match !remaining with
+        | [] -> Ok W.Idle
+        | step :: rest ->
+          remaining := rest;
+          Ok step)
+  in
+  let judged id =
+    W.Judgment_completed
+      { candidate_id = id; owner_wake = Masc.Keeper_registry.Exact_wake_signaled }
+  in
+  let progress_of = function
+    | Ok outcome -> W.For_testing.drain_outcome_progress outcome
+    | Error detail -> Alcotest.failf "drain failed: %s" detail
+  in
+  let empty = progress_of (drive []) in
+  Alcotest.(check (pair int int))
+    "a wake that finds nothing reports no work"
+    (0, 0)
+    (empty.judgments, empty.steps);
+  let worked = progress_of (drive [ judged "c1"; judged "c2" ]) in
+  Alcotest.(check (pair int int))
+    "two judgments are two judgments and two steps"
+    (2, 2)
+    (worked.judgments, worked.steps);
+  (* A visit that finds the candidate already consumed advanced the loop but
+     produced no judgment; collapsing it into [judgments] would put a no-op
+     drain back on the same line as a productive one. *)
+  let visited =
+    progress_of (drive [ W.Candidate_already_consumed { candidate_id = "c3" } ])
+  in
+  Alcotest.(check (pair int int))
+    "an already-consumed visit is a step without a judgment"
+    (0, 1)
+    (visited.judgments, visited.steps);
+  let contended =
+    { W.keeper_name = "k"
+    ; partition_id = "p"
+    ; generation = P.Generation.initial
+    }
+  in
+  let after_contention =
+    progress_of (drive [ judged "c4"; W.Contended contended ])
+  in
+  Alcotest.(check (pair int int))
+    "contention after a judgment keeps the judgment"
+    (1, 1)
+    (after_contention.judgments, after_contention.steps)
+;;
+
+let meta_fixture ~paused =
+  let meta =
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "alpha"; "trace_id", `String "trace-alpha" ])
+    |> Result.get_ok
+  in
+  { meta with Masc.Keeper_meta_contract.paused }
+;;
+
+(* Issue #25452: the heartbeat Board path refuses to act for a paused Keeper,
+   so the worker must skip the whole wake for the same meta. A meta the worker
+   cannot see is skipped too, never read as "not paused". *)
+let test_wake_admission_follows_keeper_pause () =
+  let admission = W.For_testing.wake_admission_of_meta_read in
+  let is_admitted = function
+    | W.Wake_admitted -> true
+    | W.Wake_skipped
+        (W.Keeper_paused | W.Keeper_meta_absent | W.Keeper_meta_read_failed _) ->
+      false
+  in
+  Alcotest.(check bool)
+    "active keeper drains"
+    true
+    (is_admitted (admission (Ok (Some (meta_fixture ~paused:false)))));
+  (match admission (Ok (Some (meta_fixture ~paused:true))) with
+   | W.Wake_skipped W.Keeper_paused -> ()
+   | W.Wake_admitted
+   | W.Wake_skipped (W.Keeper_meta_absent | W.Keeper_meta_read_failed _) ->
+     Alcotest.fail "paused keeper must skip the wake as Keeper_paused");
+  (match admission (Ok None) with
+   | W.Wake_skipped W.Keeper_meta_absent -> ()
+   | W.Wake_admitted
+   | W.Wake_skipped (W.Keeper_paused | W.Keeper_meta_read_failed _) ->
+     Alcotest.fail "absent meta must skip the wake as Keeper_meta_absent");
+  match admission (Error "unreadable") with
+  | W.Wake_skipped (W.Keeper_meta_read_failed detail) ->
+    Alcotest.(check string) "read failure keeps its detail" "unreadable" detail
+  | W.Wake_admitted | W.Wake_skipped (W.Keeper_paused | W.Keeper_meta_absent) ->
+    Alcotest.fail "meta read failure must skip the wake with its detail"
+;;
+
+let test_drain_outcome_labels_stay_distinct () =
+  let contention =
+    { W.keeper_name = "k"
+    ; partition_id = "p"
+    ; generation = P.Generation.initial
+    }
+  in
+  let labels =
+    List.map
+      W.For_testing.drain_outcome_label
+      [ W.Drained no_progress
+      ; W.Retry_later
+          { contention
+          ; reason = W.Exact_claim_contended
+          ; progress = no_progress
+          }
+      ; W.Retry_later
+          { contention
+          ; reason = W.Selected_generation_changed
+          ; progress = no_progress
+          }
+      ; W.Lane_deferred { candidate_id = "c"; progress = no_progress }
+      ]
+  in
+  Alcotest.(check (list string))
+    "one token per verdict"
+    [ "drained"
+    ; "retry_claim_contended"
+    ; "retry_generation_changed"
+    ; "deferred_lane_exhausted"
+    ]
+    labels;
+  Alcotest.(check int)
+    "no two verdicts share a token"
+    4
+    (List.length (List.sort_uniq compare labels))
+;;
+
+(* A drain that returns Retry_later left the durable partition undrained and
+   re-armed the same contention, so the next wake re-inspects the same root.
+   Emitting that at the same level as a completed drain makes a worker that
+   never finishes read as routine while its candidate ledger grows (#26863). *)
+let test_undrained_outcomes_are_not_routine () =
+  let contention =
+    { W.keeper_name = "k"
+    ; partition_id = "p"
+    ; generation = P.Generation.initial
+    }
+  in
+  let level_name outcome =
+    match W.For_testing.drain_outcome_log_level outcome with
+    | Log.Debug -> "debug"
+    | Log.Info -> "info"
+    | Log.Warn -> "warn"
+    | Log.Error -> "error"
+  in
+  Alcotest.(check string)
+    "a completed drain is routine"
+    "info"
+    (level_name (W.Drained no_progress));
+  Alcotest.(check string)
+    "a contended claim is not routine"
+    "warn"
+    (level_name
+       (W.Retry_later
+          { contention
+          ; reason = W.Exact_claim_contended
+          ; progress = no_progress
+          }));
+  Alcotest.(check string)
+    "a moved generation is not routine"
+    "warn"
+    (level_name
+       (W.Retry_later
+          { contention
+          ; reason = W.Selected_generation_changed
+          ; progress = no_progress
+          }));
+  Alcotest.(check string)
+    "a deferred lane is not routine"
+    "warn"
+    (level_name (W.Lane_deferred { candidate_id = "c"; progress = no_progress }))
+;;
+
+(* task-336 sibling defect (masc, 2026-08-16): before this fix,
+   settle_completed_snapshot's Error propagated all the way up whenever the
+   candidate a Completed item named had been retired — the whole per-keeper
+   candidate store moved aside as one directory, per
+   scripts/check-runtime-deployment-preflight.sh, with no tombstone left for
+   a later re-check. The partition never advanced past Completed, so the
+   identical error repeated on every heartbeat forever (alpha 170x one day,
+   beta 13x/25min the next, before both were data-cut by hand). This pins
+   that the finalizer now abandons such a partition once and never
+   revisits it. *)
+let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
+  ()
+  =
+  with_temp_base "board-attention-worker-quarantine-retired" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let attempt = provenance "quarantine-retired" in
+  let execute ~before_dispatch ~before_advance:_ _prepared =
+    ok "bind quarantine attempt" (before_dispatch attempt);
+    Error
+      (E.Providers_exhausted
+         { attempts = [ attempt ]
+         ; detail = "provider exhausted"
+         ; binding_standing = Agent_core.Exact_output.Not_every_binding_resting
+         })
+  in
+  (match
+     ok
+       "fail to Blocked"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "fixture did not reach Blocked");
+  (* Same retire simulation as
+     test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired:
+     move the whole per-keeper candidate ledger aside; the partition journal
+     still names the candidate. *)
+  let ledger_path =
+    Filename.concat
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         "board_attention_candidates")
+      "alpha.jsonl"
+  in
+  Sys.remove ledger_path;
+  (* Before the fix this returned Error "partition candidate is absent during
+     quarantine reconciliation: ..." and fataled the worker at process start.
+     Since task-1676 the give-up is [Abandoned]: no judgment is on record, so
+     a still-[Resumable_pending] candidate can still reopen the root later. *)
+  ok
+    "reconcile abandons the orphaned quarantine instead of failing"
+    (reconcile ~now:10.0 ~base_path);
+  (match (load_one_partition ~base_path).state with
+   | P.Abandoned { abandoned_at } ->
+     Alcotest.(check (float 0.0)) "give-up time recorded" 10.0 abandoned_at
+   | P.Settled _ -> Alcotest.fail "give-up recorded as a judgment (Settled)"
+   | _ -> Alcotest.fail "blocked partition with a retired candidate did not get abandoned");
+  ok
+    "second reconciliation pass stays a no-op"
+    (reconcile ~now:11.0 ~base_path)
+;;
+
+let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
+  ()
+  =
+  with_temp_base "board-attention-worker-candidate-retired" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  ignore
+    (ok
+       "create Ready root"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ persisted ])
+      : int);
+  let attempt = provenance "candidate-retired" in
+  let execute ~before_dispatch ~before_advance _prepared =
+    ok "bind" (before_dispatch attempt);
+    ignore before_advance;
+    (* A missing relevant candidate still has no deliverable obligation. *)
+    Ok (judgment attempt J.Relevant)
+  in
+  (match
+     ok
+       "judge to Completed"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "fixture did not reach Completed");
+  (match (load_one_partition ~base_path).state with
+   | P.Completed _ -> ()
+   | _ -> Alcotest.fail "fixture partition is not Completed before the retire simulation");
+  (* Simulate the retire exactly as the preflight script instructs an
+     operator to run it: move the whole per-keeper candidate ledger aside.
+     The partition ledger is a separate append-only journal that a retire
+     never touches, so it still names this candidate_id afterward. *)
+  let ledger_path =
+    Filename.concat
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         "board_attention_candidates")
+      "alpha.jsonl"
+  in
+  Sys.remove ledger_path;
+  Alcotest.(check int)
+    "candidate ledger is empty after the simulated retire"
+    0
+    (ok
+       "load after retire"
+       (A.load_candidates ~base_path ~keeper_name:"alpha")
+     |> List.length);
+  (match
+     ok
+       "first settlement attempt"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Partition_settled { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
+   | W.No_completed_partition ->
+     Alcotest.fail
+       "the Completed partition with the retired candidate was not settled");
+  (match (load_one_partition ~base_path).state with
+   | P.Settled _ -> ()
+   | _ -> Alcotest.fail "partition with a retired candidate did not reach Settled");
+  match
+    ok
+      "second settlement attempt"
+      (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+  with
+  | W.No_completed_partition -> ()
+  | W.Partition_settled _ ->
+    Alcotest.fail
+      "the terminalized partition was offered for settlement again (infinite retry)"
+;;
+
+let () =
+  Alcotest.run
+    "keeper_board_attention_worker"
+    [ ( "worker exact callback integration"
+      , [ Alcotest.test_case
+            "callback conversion, advancement, completion, settlement"
+            `Quick
+            test_worker_exact_callback_integration_and_owner_settlement
+        ; Alcotest.test_case
+            "setup error stops before claim"
+            `Quick
+            test_setup_error_stops_before_claim_without_hot_retry
+        ; Alcotest.test_case
+            "claim generation change discards without sibling selection"
+            `Quick
+            test_claim_generation_change_discards_without_sibling_selection
+        ; Alcotest.test_case
+            "exact claim retry exhaustion has no self wake"
+            `Quick
+            test_exact_claim_retry_exhaustion_has_no_self_wake
+        ; Alcotest.test_case
+            "contention rearm is delayed and deduplicated"
+            `Quick
+            test_contention_rearm_is_delayed_and_deduplicated
+        ; Alcotest.test_case
+            "changed selection reaches delayed run rearm"
+            `Quick
+            test_rescan_later_reaches_delayed_run_rearm
+        ; Alcotest.test_case
+            "wake error schedules next contention backoff"
+            `Quick
+            test_contention_wake_error_schedules_next_backoff
+        ; Alcotest.test_case
+            "wake callback runs outside scheduler lock"
+            `Quick
+            test_contention_wake_callback_is_outside_scheduler_lock
+        ; Alcotest.test_case
+            "reset during wake error suppresses old generation rearm"
+            `Quick
+            test_reset_during_wake_error_suppresses_old_generation_rearm
+        ; Alcotest.test_case
+            "same-key replacement survives an old wake completion"
+            `Quick
+            test_reset_and_recreate_during_wake_preserves_new_ticket
+        ; Alcotest.test_case
+            "fork failure retains history and rejects an old callback"
+            `Quick
+            test_contention_fork_failure_retains_history_and_rejects_old_callback
+        ; Alcotest.test_case
+            "sleep failure preserves history and a new reservation"
+            `Quick
+            test_contention_sleep_failure_preserves_history_and_new_reservation
+        ; Alcotest.test_case
+            "successful wake outcomes release the contention ticket"
+            `Quick
+            test_contention_successful_wake_outcomes_release_ticket
+        ; Alcotest.test_case
+            "raised request stays inflight until reset"
+            `Quick
+            test_contention_raised_request_keeps_inflight_until_reset
+        ; Alcotest.test_case
+            "execution error preserves bound progress"
+            `Quick
+            test_execution_error_preserves_bound_progress_without_hot_retry
+        ; Alcotest.test_case
+            "drain prunes consumed rows behind the board cursor"
+            `Quick
+            test_drain_prunes_consumed_rows_behind_the_board_cursor
+        ; Alcotest.test_case
+            "drain drops the settled receipt of a consumed candidate"
+            `Quick
+            test_drain_drops_the_settled_receipt_of_a_consumed_candidate
+        ; Alcotest.test_case
+            "drain then settle leaves a settled receipt without a live row"
+            `Quick
+            test_drain_then_settle_does_not_mint_a_ready_root
+        ; Alcotest.test_case
+            "owner settlement before the prunes does not mint a ready root"
+            `Quick
+            test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root
+        ; Alcotest.test_case
+            "owner settlement between the prunes does not mint a ready root"
+            `Quick
+            test_owner_settlement_between_the_prunes_does_not_mint_a_ready_root
+        ; Alcotest.test_case
+            "bookkeeping failure keeps its cause and the flow sentence"
+            `Quick
+            test_bookkeeping_failure_keeps_its_cause_and_the_flow_sentence
+        ; Alcotest.test_case
+            "a CLI answer after every HTTP slot was rejected completes"
+            `Quick
+            test_a_cli_answer_after_every_http_slot_was_rejected_completes
+        ; Alcotest.test_case
+            "a spent lane defers and the next drain judges the candidate"
+            `Quick
+            test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate
+        ; Alcotest.test_case
+            "a payment refusal on the last slot defers"
+            `Quick
+            test_a_payment_refusal_on_the_last_slot_defers
+        ; Alcotest.test_case
+            "a CLI answer rejected after a spent walk quarantines"
+            `Quick
+            test_a_cli_answer_rejected_after_a_spent_walk_quarantines
+        ; Alcotest.test_case
+            "a root that needs no lane is not held behind a spent one"
+            `Quick
+            test_a_root_that_needs_no_lane_is_not_held_behind_a_spent_one
+        ; Alcotest.test_case
+            "restart returns a cut bound run to Ready"
+            `Quick
+            test_restart_returns_a_cut_bound_run_to_ready
+        ; Alcotest.test_case
+            "completion failure preserves bound provenance"
+            `Quick
+            test_completion_failure_preserves_bound_provenance
+        ; Alcotest.test_case
+            "flow replay blocks Unbound without retry"
+            `Quick
+            test_flow_already_started_blocks_unbound_without_hot_retry
+        ; Alcotest.test_case
+            "malformed answer quarantines, requeues, and settles"
+            `Quick
+            test_malformed_answer_quarantines_then_requeues_and_settles
+        ; Alcotest.test_case
+            "CLI exhaustion preserves prior domain rejection"
+            `Quick
+            test_cli_exhaustion_preserves_prior_domain_rejection
+        ; Alcotest.test_case
+            "CLI exhaustion preserves prior provenance mismatch"
+            `Quick
+            test_cli_exhaustion_preserves_prior_provenance_mismatch
+        ; Alcotest.test_case
+            "Bound cancellation is prompt and process-recoverable"
+            `Quick
+            test_bound_cancellation_is_prompt_and_process_recoverable
+        ; Alcotest.test_case
+            "Released cancellation returns Ready on process recovery"
+            `Quick
+            test_released_cancellation_is_prompt_and_process_recoverable
+        ; Alcotest.test_case
+            "Unbound cancellation waits for process-start recovery"
+            `Quick
+            test_unbound_cancellation_waits_for_process_start_recovery
+        ; Alcotest.test_case
+            "terminal root does not strand Ready sibling"
+            `Quick
+            test_terminal_root_does_not_strand_ready_sibling
+        ; Alcotest.test_case
+            "Completed startup replays owner wake"
+            `Quick
+            test_completed_startup_replays_owner_wake
+        ; Alcotest.test_case
+            "existing Judged skips exact flow"
+            `Quick
+            test_existing_judgment_skips_exact_flow
+        ; Alcotest.test_case
+            "existing Consumed skips exact flow and settles"
+            `Quick
+            test_existing_consumed_skips_exact_flow_and_settles
+        ; Alcotest.test_case
+            "Consumed Completed crash settles without duplicate delivery"
+            `Quick
+            test_consumed_completed_crash_settles_without_duplicate_delivery
+        ; Alcotest.test_case
+            "process recovery claim releases after cancellation"
+            `Quick
+            test_process_recovery_claim_is_released_after_cancellation
+        ; Alcotest.test_case
+            "unexpected exception is terminal"
+            `Quick
+            test_unexpected_exception_is_terminal_without_hot_retry
+        ; Alcotest.test_case
+            "Requested+Blocked recovery and two sequential CAS converge"
+            `Quick
+            test_requested_blocked_recovery_and_sequential_cas_converge
+        ; Alcotest.test_case
+            "candidate-only quarantine restores through operator and restart"
+            `Quick
+            test_candidate_quarantine_restores_a_missing_partition
+        ; Alcotest.test_case
+            "deferred lane wakes without a new Board signal"
+            `Quick
+            test_deferred_lane_retries_without_another_board_signal
+        ; Alcotest.test_case
+            "Requeued+Blocked recovery settles normally"
+            `Quick
+            test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles
+        ; Alcotest.test_case
+            "inventory keeps a recorded requeue unfinished until the partition is released"
+            `Quick
+            test_inventory_keeps_a_recorded_requeue_unfinished_until_the_partition_is_released
+        ; Alcotest.test_case
+            "Ready+Requested recovery fails closed"
+            `Quick
+            test_ready_requested_recovery_fails_closed
+        ; Alcotest.test_case
+            "startup blocks only a Ready row with an unacknowledged quarantine"
+            `Quick
+            (test_contradicting_quarantine_blocks_only_its_partition
+               ready_with_unacknowledged_quarantine)
+        ; Alcotest.test_case
+            "startup blocks only a Ready row that preceded requeue authorization"
+            `Quick
+            (test_contradicting_quarantine_blocks_only_its_partition
+               ready_before_requeue_recorded)
+        ; Alcotest.test_case
+            "startup blocks only a Ready row at the requeued generation"
+            `Quick
+            (test_contradicting_quarantine_blocks_only_its_partition
+               ready_at_requeued_generation)
+        ; Alcotest.test_case
+            "drain blocks only a claimed row whose candidate is quarantined"
+            `Quick
+            test_drain_blocks_a_claimed_partition_whose_candidate_is_quarantined
+        ; Alcotest.test_case
+            "late quarantine preserves newer generation and operator request"
+            `Quick
+            test_late_quarantine_preserves_newer_generation
+        ; Alcotest.test_case
+            "stale quarantine generation is rejected"
+            `Quick
+            test_stale_quarantine_generation_is_rejected
+        ; Alcotest.test_case
+            "same quarantine command CAS loser converges"
+            `Quick
+            test_same_quarantine_command_cas_loser_converges
+        ; Alcotest.test_case
+            "quarantine rejects a candidate purged after its snapshot"
+            `Quick
+            test_quarantine_command_rejects_candidate_purged_after_snapshot
+        ; Alcotest.test_case
+            "requeue records the requesting principal"
+            `Quick
+            test_requeue_records_requesting_principal
+        ; Alcotest.test_case
+            "same-timestamp newer Blocked generation is rejected"
+            `Quick
+            test_stale_blocked_snapshot_cannot_requeue_new_generation
+        ; Alcotest.test_case
+            "cross-domain wake coalesces and rearms"
+            `Quick
+            test_cross_domain_wake_is_coalesced_and_rearmed
+        ; Alcotest.test_case
+            "undrained outcomes are not routine"
+            `Quick
+            test_undrained_outcomes_are_not_routine
+        ; Alcotest.test_case
+            "completed snapshot delivers every relevant judgment FIFO"
+            `Quick test_completed_snapshot_delivers_all_relevant_in_order
+        ; Alcotest.test_case
+            "completed snapshot preserves failure and replays without duplication"
+            `Quick test_completed_snapshot_failure_preserves_remainder_and_replays
+        ; Alcotest.test_case
+            "completed snapshot capture defers new completions to the next wake"
+            `Quick test_completed_snapshot_captures_settle_and_continues_waking
+        ; Alcotest.test_case
+            "settle walk lets another fiber run between captured members \
+             (task-2234)"
+            `Quick test_settle_walk_yields_between_captured_members
+        ; Alcotest.test_case
+            "discards do not hold the owner delivery slot"
+            `Quick
+            test_discards_do_not_hold_the_owner_delivery_slot
+        ; Alcotest.test_case
+            "a not-relevant judgment settles without an owner turn (task-1666)"
+            `Quick
+            test_a_not_relevant_judgment_settles_without_an_owner_turn
+        ; Alcotest.test_case
+            "wake admission follows keeper pause"
+            `Quick
+            test_wake_admission_follows_keeper_pause
+        ; Alcotest.test_case
+            "drain outcome labels stay distinct"
+            `Quick
+            test_drain_outcome_labels_stay_distinct
+        ; Alcotest.test_case
+            "drain outcome carries the work it did"
+            `Quick
+            test_drain_outcome_carries_the_work_it_did
+        ; Alcotest.test_case
+            "settle_completed_snapshot terminalizes a partition whose candidate was retired"
+            `Quick
+            test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
+        ; Alcotest.test_case
+            "reconcile_quarantines abandons a blocked partition whose candidate was retired"
+            `Quick
+            test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
+        ] )
+    ]
+;;

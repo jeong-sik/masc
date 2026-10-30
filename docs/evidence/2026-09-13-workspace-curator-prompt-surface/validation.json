@@ -1,0 +1,15 @@
+{
+  "scope": "source-only",
+  "vitest": {
+    "suites": 1,
+    "passed": 14,
+    "failed": 0,
+    "seconds": 2.26
+  },
+  "typescript": "tsc --noEmit passed",
+  "eslint": "3 changed TS files passed",
+  "browser": "final fresh Chromium pass, desktop/mobile, synthetic API",
+  "installed_runtime": "not_exercised",
+  "independent_review": "corrected conditional execution/reuse and slot wording; exact prompt-key binding reviewed",
+  "probe_sha256": "a0d123af28af55a88199cb2238c8c992a08eb66c9d37f506753017173b49cc6b"
+}

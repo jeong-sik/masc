@@ -1,0 +1,200 @@
+[
+  {
+    "path": "lib/types/ids.ml",
+    "first_line": 105,
+    "last_line": 149,
+    "sha256": "b7192cac534f52cdc663b297b20d6c25bf8daa42e0344230426854a627838dd0"
+  },
+  {
+    "path": "lib/keeper/keeper_identity.ml",
+    "first_line": 39,
+    "last_line": 51,
+    "sha256": "28d5b89dcf4db907fc999c00cc28470f69d566794b96235ac15abdf8027687d3"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "first_line": 13,
+    "last_line": 20,
+    "sha256": "a901bba38b99409b78b5480374ebc5c8d9c43447c0895709fd1f9fa0a48de537"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "first_line": 44,
+    "last_line": 69,
+    "sha256": "0ff0f2687c0247baee19625849a8ba40f9a28323222109eb2af32481e766bc73"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "first_line": 116,
+    "last_line": 122,
+    "sha256": "e6df55d68cca9ed6189192bfeaccd700b051bd9baa1ddb39d57589443b4149d3"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "first_line": 136,
+    "last_line": 205,
+    "sha256": "65e2a485ede98dcd36945f847c9423caab87e6ed9f9fc4bf77ead1e64000e1f1"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "first_line": 244,
+    "last_line": 244,
+    "sha256": "0c305299149ded0d4af7596a1e46d413f8cf1e782af66460ace98d2618982bc8"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "first_line": 314,
+    "last_line": 353,
+    "sha256": "e353bb4d02883bc19f31bb4bde65e2989f3b6e267084dc7221673a45c533ae48"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "first_line": 579,
+    "last_line": 588,
+    "sha256": "10254e548b2c7aadff2f956f58ada3514437f0827afdcab79a9883e35921e65b"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_context.ml",
+    "first_line": 1,
+    "last_line": 21,
+    "sha256": "a4904b3da4b467b58fcf6fa85e5db9daf443590e572b49f96a54cbc857b27ca1"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_task_context.ml",
+    "first_line": 3,
+    "last_line": 16,
+    "sha256": "02d8198279bc89eb23b76d10684fe4ce0ef0547db18b75440b2c89fe38feead0"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_task_context.ml",
+    "first_line": 54,
+    "last_line": 71,
+    "sha256": "b699696806d0b62a38dee0be29168d4be375e4c14ffbd917f938d4a852590d2a"
+  },
+  {
+    "path": "lib/keeper/keeper_counterpart_observation.ml",
+    "first_line": 1,
+    "last_line": 31,
+    "sha256": "d008c2a7d573a66440c1afcc05c8e2bdba2c2ee717815f9f9b45c8ef5d5a5bc5"
+  },
+  {
+    "path": "lib/keeper/keeper_counterpart_observation.ml",
+    "first_line": 94,
+    "last_line": 111,
+    "sha256": "10de57f38cc8626f6d20cc7065fe7543879c155fcb81a84718200e164e21f6d5"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian.ml",
+    "first_line": 13,
+    "last_line": 46,
+    "sha256": "e9436653010acdd358236eb2c5a1854ffda5a977f76c5720b7b646c30f160240"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian.ml",
+    "first_line": 326,
+    "last_line": 339,
+    "sha256": "7d15406f5097cc899d4029360d584550aa6bf2fea1c3a3bce97f356df64a02e4"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_input_capture.ml",
+    "first_line": 1,
+    "last_line": 241,
+    "sha256": "fd0579446a2babf73cc84cc76b32e776125f441a90d8af6a71012b5023406154"
+  },
+  {
+    "path": "lib/runtime/runtime_model_input_tail_window.ml",
+    "first_line": 35,
+    "last_line": 47,
+    "sha256": "60ae79e8569eff0282d566597b009bfdb7b00ba0237ad121c4c4b4ec296a16c7"
+  },
+  {
+    "path": "lib/runtime/runtime_model_input_tail_window.ml",
+    "first_line": 131,
+    "last_line": 208,
+    "sha256": "8eb3872ef0ac6f34d61e30f5d622bf8bc6bf7a875049e6aadc2227fc9999043b"
+  },
+  {
+    "path": "lib/string_util/string_util.ml",
+    "first_line": 450,
+    "last_line": 457,
+    "sha256": "3df2bafeab60dfb4571261b6c907b540a15871943fee284a2be516d450182c70"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_input_refusal.ml",
+    "first_line": 1,
+    "last_line": 16,
+    "sha256": "7ca57a6ba153b4e169d6f0542b17c12658811a7a9ed750f2b5e35f7aabb8227e"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_unread.ml",
+    "first_line": 1,
+    "last_line": 228,
+    "sha256": "91ae002f3461a7ef24b68215ac0d6d32b82447da4a83da395da3c61b76d4d1e4"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_runtime.ml",
+    "first_line": 47,
+    "last_line": 54,
+    "sha256": "858df511c6e6e94ea6edb3eb5de8a7f862a17a0e9cc3eae8f1d0679717af6639"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_runtime.ml",
+    "first_line": 64,
+    "last_line": 72,
+    "sha256": "bf3fdca481a6075f4d8b0727f5a6b4091ef28e3e648e041ff334a42c68adcdea"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_runtime.ml",
+    "first_line": 219,
+    "last_line": 237,
+    "sha256": "566d967099dfa1584ab141590568f383e9b0b42a081a0a29210011918fa45f19"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_runtime.ml",
+    "first_line": 666,
+    "last_line": 675,
+    "sha256": "549dc81bf400eb13de89aa9da31557b42e329a3b723bd74e35633bf1508dad93"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_runtime.ml",
+    "first_line": 1549,
+    "last_line": 1558,
+    "sha256": "fc2f1d2118e05918e674b1bf380bf0106c55bd6616eb2dd3d1b2eefbab7bff8c"
+  },
+  {
+    "path": "lib/keeper/keeper_librarian_runtime.ml",
+    "first_line": 2323,
+    "last_line": 2354,
+    "sha256": "8bfea7bb917e3c2d3f8a365063f9be432c52c1c4cfe1bc8c5f97f3266b3a58a7"
+  },
+  {
+    "path": "lib/librarian_continuity_report.ml",
+    "first_line": 4,
+    "last_line": 73,
+    "sha256": "63eb9f6e4a6f28e16298ed2632f2055e92c3ca31b7e367a8f9756e4f55641669"
+  },
+  {
+    "path": "lib/librarian_continuity_report.ml",
+    "first_line": 120,
+    "last_line": 134,
+    "sha256": "a27a813cbdb9a2e2cab3b6a506846ce6a2e301e2230a67fee85e047a83e172b2"
+  },
+  {
+    "path": "lib/librarian_production_evaluation.mli",
+    "first_line": 1,
+    "last_line": 54,
+    "sha256": "06cb052457bb0416127e5e160fe602785f9489caabac6b09e83ccebd3d9598b8"
+  },
+  {
+    "path": "lib/librarian_production_evaluation.ml",
+    "first_line": 1,
+    "last_line": 226,
+    "sha256": "8a7f6f7d49bc0ba66e8c109770f0c5fc7d06cbd3e12509a06ee9fde2d8ab4636"
+  },
+  {
+    "path": "benchmarks/data/librarian_production_synthetic.json",
+    "first_line": 1,
+    "last_line": 180,
+    "sha256": "27deae8d25833f70698424b31dd28b35f103317101f38a9aa6c75466e00bee33"
+  }
+]

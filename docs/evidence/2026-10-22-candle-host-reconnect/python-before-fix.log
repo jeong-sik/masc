@@ -1,0 +1,17 @@
+.........F...
+======================================================================
+FAIL: test_pending_and_original_result_survive_new_worker_incarnations (test_candle_appraiser.CandleWorker.test_pending_and_original_result_survive_new_worker_incarnations)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-candle-derive-observation-20261022/addons/tests/test_candle_appraiser.py", line 85, in test_pending_and_original_result_survive_new_worker_incarnations
+    self.assertEqual(self.output(first[0])["rows"][0]["fields"]["pending"], 0)
+                     ~~~~~~~~~~~^^^^^^^^^^
+  File "/private/tmp/masc-candle-derive-observation-20261022/addons/tests/test_candle_appraiser.py", line 77, in output
+    self.assertFalse(result.get("isError", False), result)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not false : {'content': [{'type': 'text', 'text': "observation fields must be exactly ['binding', 'context', 'sources']"}], 'isError': True}
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.631s
+
+FAILED (failures=1)

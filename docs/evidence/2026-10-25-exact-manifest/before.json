@@ -1,0 +1,54 @@
+{
+  "scope": "actual standalone production modules and interfaces with inline-test declarations excluded",
+  "source_ref": "c75ee3febdb834225ff905020add4cecd2e5264b",
+  "before": true,
+  "sources": {
+    "model_identifiers.mli": {
+      "source_sha256": "16b93bcb13adfe5262930ae761d1f771b2469dd4f00a2d05c59401ac2c3e1ba3",
+      "compiled_sha256": "16b93bcb13adfe5262930ae761d1f771b2469dd4f00a2d05c59401ac2c3e1ba3",
+      "inline_tests_excluded": 0
+    },
+    "model_identifiers.ml": {
+      "source_sha256": "8ce8c2ae936b7d6f141f7dc864acaaf0742b4f15a32e31f7272b61d77f02f779",
+      "compiled_sha256": "8ce8c2ae936b7d6f141f7dc864acaaf0742b4f15a32e31f7272b61d77f02f779",
+      "inline_tests_excluded": 0
+    },
+    "capability_vocab.mli": {
+      "source_sha256": "1c3f5477fb529b00ea0f5e53bb36908b1fcd48383d1624f88561bfc52633c416",
+      "compiled_sha256": "1c3f5477fb529b00ea0f5e53bb36908b1fcd48383d1624f88561bfc52633c416",
+      "inline_tests_excluded": 0
+    },
+    "capability_vocab.ml": {
+      "source_sha256": "a04bf5380835d81710bb84026cabd3ec1d28b8647bec14018aec4051ab14462f",
+      "compiled_sha256": "e6ced47cda79669c851983ff6633b5a93c4503bad20961d54572d40d0870fb2a",
+      "inline_tests_excluded": 19
+    },
+    "reasoning_effort.mli": {
+      "source_sha256": "302d79716c15353863683fb278b09b3948d96729074027269efc489e2d93e666",
+      "compiled_sha256": "302d79716c15353863683fb278b09b3948d96729074027269efc489e2d93e666",
+      "inline_tests_excluded": 0
+    },
+    "reasoning_effort.ml": {
+      "source_sha256": "143a311cbd071ba7834b5d9e83f910afe12ad2d6b77033477b06454a2d4fc601",
+      "compiled_sha256": "143a311cbd071ba7834b5d9e83f910afe12ad2d6b77033477b06454a2d4fc601",
+      "inline_tests_excluded": 0
+    },
+    "capability_manifest.mli": {
+      "source_sha256": "9c4c31a4028ba5d91daedaf54650f2b327f825cfb25164c0ae513902f5c295a5",
+      "compiled_sha256": "9c4c31a4028ba5d91daedaf54650f2b327f825cfb25164c0ae513902f5c295a5",
+      "inline_tests_excluded": 0
+    },
+    "capability_manifest.ml": {
+      "source_sha256": "aa587859c9636d49dde8f4e91e1b83223f393a3753e8dae87b07780285c29430",
+      "compiled_sha256": "27535972879048dcdf12a8442fd24b09484f3cd2bf883d02c81d2376f5a0393e",
+      "inline_tests_excluded": 18
+    }
+  },
+  "checks": {
+    "unknown_suffix_inherits_permission": true,
+    "declaration_order_changes_exact_target": true
+  },
+  "project_linked": false,
+  "request_resolver_executed": false,
+  "provider_called": false
+}

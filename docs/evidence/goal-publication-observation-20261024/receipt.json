@@ -1,0 +1,79 @@
+{
+  "schema": "masc.goal-publication-observation-repair.v1",
+  "parent": "c5326dda4a5300043f08f8d6b341928cdd5d919d",
+  "prior_actual_runs": [
+    {
+      "run": 40064678042,
+      "head": "94dbc91aeda43f72a3eeba2595bc716748357f49",
+      "result": "failure",
+      "counted_cases": 63,
+      "passed": 61,
+      "failed": 2,
+      "skipped": 0,
+      "owner_suite": "custom assertions passed; no Alcotest count emitted",
+      "artifact_log_bytes": 110780,
+      "artifact_log_sha256": "578eea70586c00e769a7133ef1f33d6a639abe09602d87b857a4fbc5f648abda",
+      "scope": "Goal worker 13/13; Goal agent 37/39; Task worker 11/11; owner custom assertions. All four suites compiled and executed."
+    },
+    {
+      "run": 40065105252,
+      "head": "c5326dda4a5300043f08f8d6b341928cdd5d919d",
+      "result": "failure",
+      "counted_cases": 54,
+      "passed": 49,
+      "failed": 5,
+      "skipped": 0,
+      "job_log_bytes": 207241,
+      "job_log_sha256": "438b36a4368e75335323207371700d7128bf3a29be1051044231fc2c681b32b3",
+      "scope": "Goal worker 12/15 and Goal agent 37/39. Both suites compiled and executed.",
+      "public_receipt": "https://github.com/jeong-sik/masc/pull/45708#issuecomment-6380449571"
+    }
+  ],
+  "repair": {
+    "single_goal_authority": "Host completion uses the existing pure Goal_verifier_worker.goal_admission_result, now exposed by its MLI. Raw receipt strings and observations remain unchanged. No second automatic retry policy or Task semantics change.",
+    "retention_fixture": "Newer synthetic observations are valid Deferred completions. The existing strict decoder remains unchanged. Immediate display pruning, replayed original ACK, unchanged history and exactly one reviewer remain asserted.",
+    "caught_error": "Reviewer Exit is caught by the existing Anti_rationalization boundary and becomes typed Internal / Outcome_unknown. The new fixture checks retained raw result/tools, Execution_pending, Deferred publication and no redispatch.",
+    "escaped_error": "The existing scoped outcome observer runs outside that catch and raises a distinct local exception after a successful real lookup. Fun.protect restores it. The fixture checks exact exception propagation, durable Raised tools/detail and no redispatch. No production hook or catch alteration.",
+    "agent_observation_only": "Known pre-dispatch re-admission counts actual reviewer entries while confirming one immutable original/run. Provider-reset coverage advances the existing armed mock timer once and awaits real successor-registration/reviewer-entry Promises within the existing deadline. Production clocks, deadlines, retry policy and unknown-execution authority are unchanged. The earlier reset failure log did not establish a production timer defect."
+  },
+  "prepublication_validation": {
+    "parser_only_checks": [
+      {
+        "path": "lib/keeper/goal_verifier_worker.mli",
+        "file_sha256": "10495d3d6181bb289556b9f5f020452eb52f2188e202c1e0c9098642349211bc",
+        "exit": 0,
+        "stderr": ""
+      },
+      {
+        "path": "lib/keeper/goal_verifier_host.ml",
+        "file_sha256": "6dedc8ed5f1f299fde7124a9658824362ce4955e29f60d02d12c79152ac793f5",
+        "exit": 0,
+        "stderr": ""
+      },
+      {
+        "path": "test/test_goal_verifier_worker.ml",
+        "file_sha256": "dd4e6114cf9820613c8bfeb5f01dca047af22373c43e48a0453ecfbbdf664c7b",
+        "exit": 0,
+        "stderr": ""
+      },
+      {
+        "path": "test/test_goal_verification_agent.ml",
+        "file_sha256": "7c53c308ca3c7debc2c47f28cb90b0fcb9d714d9d2664d184dd8b4976abba624",
+        "exit": 0,
+        "stderr": ""
+      }
+    ],
+    "whitespace_check": "passed",
+    "full_typecheck_or_suite_execution": false,
+    "new_source_execution_pass_claim": false
+  },
+  "next_validation": {
+    "suites": [
+      "test_goal_verifier_worker",
+      "test_goal_verification_agent"
+    ],
+    "task_suites": "not repeated; Task source unchanged in this layer",
+    "status_at_receipt": "No actual result for this repair yet; final exact-head dispatch and review receipts belong on the PR."
+  },
+  "pull_request": 45710
+}

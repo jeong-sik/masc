@@ -1,0 +1,837 @@
+import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
+import { useCallback, useEffect, useMemo, useRef } from 'preact/hooks'
+import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../../store'
+import type {
+  DashboardConfigResolution,
+  DashboardConfigResolutionItem,
+  DashboardRuntimeDiagnostic,
+  DashboardRuntimeProbeResponse,
+  DashboardRuntimeProviderProbe,
+  DashboardRuntimeProviderSnapshot,
+  DashboardRuntimeResolution,
+  KeeperRuntimeResolved,
+  KeeperRuntimeField,
+  KeeperRuntimeSource,
+} from '../../api/dashboard'
+import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
+import type { AsyncState } from '../../lib/async-state'
+import { MISSING_DATA_DASH, errorToString } from '../../lib/format-string'
+import { Btn } from '../btn'
+import { SectionCard } from '../common/card'
+import { StatusChip } from '../common/status-chip'
+import { CopyIdButton } from '../common/copy-id-button'
+import { TextInput } from '../common/input'
+import { formatNumber } from '../../lib/format-number'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../../lib/runtime-catalog-resource'
+import {
+  runtimeCatalogDeclaredSpec,
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogParameterPolicy,
+  runtimeCatalogRequestConfig,
+  runtimeCatalogSnapshotFacts,
+} from '../../lib/runtime-provider-summary'
+
+function ConfigCard({
+  class: cx,
+  title,
+  children,
+}: {
+  class?: string
+  title?: string
+  children: unknown
+}) {
+  return html`
+    <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''}" title=${title}>
+      ${children}
+    </div>
+  `
+}
+
+/** Pure: what string goes into the clipboard when the operator taps the
+    copy icon next to a path row? Always the absolute path — not the
+    ~-collapsed display string — because the dominant use case (copy →
+    paste into terminal `cd`, copy → paste into a Slack message for a
+    teammate on a different machine) requires the unambiguous form.
+    Reference UIs: GitHub file-breadcrumb copy, Vercel deployment path,
+    Datadog host path — all copy the canonical absolute form even when
+    the display is shortened. Exposed for tests. */
+export function copyablePath(item: Pick<DashboardConfigResolutionItem, 'path'>): string | null {
+  return item.path
+}
+
+/**
+ * Pure filter for runtime diagnostics entries.
+ *
+ * Case-insensitive substring match on `kind`, `signal`, and `message` in
+ * that order (first match wins). Operators can isolate a single class of
+ * runtime warning (e.g. `external_signal`), a specific POSIX signal
+ * (`SIGTERM`), or search free text in the message body.
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * useMemo keeps referential identity for the non-filtering path.
+ * Input is never mutated; `readonly` is preserved.
+ */
+export function filterDiagnostics(
+  diagnostics: readonly DashboardRuntimeDiagnostic[],
+  query: string,
+): readonly DashboardRuntimeDiagnostic[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return diagnostics
+  return diagnostics.filter(item => {
+    if (item.kind.toLowerCase().includes(needle)) return true
+    if (item.signal && item.signal.toLowerCase().includes(needle)) return true
+    if (item.message.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
+function toneClass(status: string): string {
+  switch (status) {
+    case 'ready':
+      return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]'
+    case 'warn':
+      return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
+    case 'invalid_env':
+      return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[var(--rose-fg)]'
+    default:
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
+  }
+}
+
+function sourceLabel(source: string): string {
+  switch (source) {
+    case 'env':
+      return 'env override'
+    case 'local_masc':
+      return 'local .masc'
+    case 'invalid_env':
+      return 'invalid env'
+    case 'exe_relative':
+      return 'exe fallback'
+    case 'cwd':
+      return 'cwd fallback'
+    case 'input':
+      return 'input'
+    case 'workspace':
+      return 'workspace'
+    case 'resolved_base':
+      return 'resolved base'
+    case 'runtime_data':
+      return 'runtime data'
+    case 'prompt_registry':
+      return 'prompt registry'
+    case 'derived':
+      return 'default'
+    default:
+      return 'missing'
+  }
+}
+
+function normalizePath(path: string): string {
+  if (path === '/') return path
+  return path.replace(/\/+$/, '')
+}
+
+function describePath(path: string | null, rootPath: string, isRoot: boolean): {
+  primary: string
+  context: string | null
+  kind: string | null
+} {
+  if (path === null) {
+    return { primary: '경로 없음', context: null, kind: null }
+  }
+  const normalizedPath = normalizePath(path)
+  const normalizedRoot = normalizePath(rootPath)
+
+  if (isRoot || normalizedRoot === '') {
+    return {
+      primary: normalizedPath,
+      context: null,
+      kind: null,
+    }
+  }
+
+  if (normalizedPath === normalizedRoot) {
+    return {
+      primary: '.',
+      context: 'same as config root',
+      kind: 'root-relative',
+    }
+  }
+
+  const rootPrefix = normalizedRoot === '/' ? '/' : `${normalizedRoot}/`
+  if (normalizedPath.startsWith(rootPrefix)) {
+    return {
+      primary: normalizedPath.slice(rootPrefix.length),
+      context: 'under config root',
+      kind: 'root-relative',
+    }
+  }
+
+  return {
+    primary: normalizedPath,
+    context: 'outside config root',
+    kind: 'external',
+  }
+}
+
+function ConfigRow({
+  label,
+  item,
+  rootPath = '',
+  rootSource = '',
+  isRoot = false,
+}: {
+  label: string
+  item: DashboardConfigResolutionItem
+  rootPath?: string
+  rootSource?: string
+  isRoot?: boolean
+}) {
+  const pathInfo = describePath(item.path, rootPath, isRoot)
+  const showSourceBadge = !isRoot && (rootSource === '' || item.source !== rootSource)
+
+  return html`
+    <${ConfigCard} class="px-3 py-3" title=${item.path}>
+      <div class="mb-2 flex flex-wrap items-center gap-2">
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</div>
+        <${StatusChip} tone=${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}>${item.exists ? 'present' : 'missing'}<//>
+        ${showSourceBadge
+          ? html`
+              <${StatusChip} tone="neutral" uppercase=${false}>${sourceLabel(item.source)}<//>
+            `
+          : null}
+        ${pathInfo.kind
+          ? html`
+              <${StatusChip} tone="neutral" uppercase=${false}>${pathInfo.kind}<//>
+            `
+          : null}
+      </div>
+      <div class="flex items-start gap-1.5">
+        <div class="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-[var(--color-fg-primary)]">${pathInfo.primary}</div>
+        ${item.path
+          ? html`<${CopyIdButton} value=${copyablePath(item)} label=${label} ariaLabel=${`${label} 경로 복사`} />`
+          : null}
+      </div>
+      ${pathInfo.context
+        ? html`
+            <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">${pathInfo.context}</div>
+          `
+        : null}
+    <//>
+  `
+}
+
+function isRepoFallbackSource(source: string): boolean {
+  return source === 'cwd' || source === 'exe_relative'
+}
+
+function ConfigTopologySummary({
+  resolution,
+}: {
+  resolution: DashboardConfigResolution
+}) {
+  const repoFallbackActive = isRepoFallbackSource(resolution.config_root.source)
+
+  return html`
+    <div class="v2-lab-panel mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <${StatusChip} tone="neutral" uppercase=${false}>TOML-only<//>
+        <${StatusChip} tone=${repoFallbackActive ? 'warn' : 'neutral'} uppercase=${false}>
+          ${repoFallbackActive ? 'repo config active' : 'repo seed not active'}
+        <//>
+        <span class="text-xs text-[var(--color-fg-muted)]">runtime config follows the resolved config root</span>
+      </div>
+    </div>
+  `
+}
+
+function WarningBlock({
+  title,
+  warnings,
+}: {
+  title: string
+  warnings: string[]
+}) {
+  if (warnings.length === 0) return null
+
+  return html`
+    <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
+      <div class="mb-2 text-2xs uppercase tracking-[var(--track-caps)] text-[var(--yellow-100)]">${title}</div>
+      <div class="flex flex-col gap-2">
+        ${warnings.map(warning => html`
+          <div class="text-xs leading-relaxed text-[var(--color-fg-primary)]">${warning}</div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function RuntimeMetaRow({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return html`
+    <${ConfigCard} class="flex items-center justify-between gap-3 px-3 py-2">
+      <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</div>
+      <div class="break-all text-right font-mono text-xs text-[var(--color-fg-primary)]">${value}</div>
+    <//>
+  `
+}
+
+function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
+  return html`
+    <${ConfigCard} class="px-3 py-3">
+      <div class="mb-1 flex flex-wrap items-center gap-2">
+        <${StatusChip} tone="neutral">${item.kind}<//>
+        ${item.signal
+          ? html`
+              <${StatusChip} tone="warn">${item.signal}<//>
+            `
+          : null}
+        <span class="text-2xs text-[var(--color-fg-muted)]">${item.ts}</span>
+      </div>
+      <div class="text-xs leading-relaxed text-[var(--color-fg-primary)]">${item.message}</div>
+    <//>
+  `
+}
+
+function providerProbeTone(status: DashboardRuntimeProviderProbe['status']): string {
+  switch (status) {
+    case 'reachable':
+      return 'ok'
+    case 'skipped_cli':
+    case 'skipped_native_auth':
+      return 'neutral'
+    case 'missing_auth':
+    case 'auth_failed':
+    case 'network_error':
+    case 'server_error':
+    case 'endpoint_not_found':
+    case 'invalid_endpoint':
+    case 'invalid_execution_transport':
+    case 'http_error':
+      return 'bad'
+  }
+}
+
+function runtimeProbeRefreshLabel(response: DashboardRuntimeProbeResponse): string {
+  switch (response.refresh_state) {
+    case 'fresh':
+      return 'cache hit'
+    case 'recent':
+      return 'recent cache'
+    case 'served_stale':
+      return 'refreshing stale cache'
+    case 'warming_up':
+      return 'warming up'
+  }
+}
+
+function providerProbeLabel(status: DashboardRuntimeProviderProbe['status']): string {
+  switch (status) {
+    case 'reachable':
+      return 'reachable'
+    case 'missing_auth':
+      return 'missing auth'
+    case 'auth_failed':
+      return 'auth failed'
+    case 'network_error':
+      return 'network error'
+    case 'server_error':
+      return 'server error'
+    case 'endpoint_not_found':
+      return 'not found'
+    case 'skipped_cli':
+      return 'cli skipped'
+    case 'skipped_native_auth':
+      return 'native auth skipped'
+    case 'invalid_endpoint':
+      return 'bad endpoint'
+    case 'invalid_execution_transport':
+      return 'bad transport'
+    case 'http_error':
+      return 'http error'
+  }
+}
+
+function runtimeProbeCatalogEntry(
+  catalog: readonly DashboardRuntimeProviderSnapshot[],
+  probe: DashboardRuntimeProviderProbe,
+): DashboardRuntimeProviderSnapshot | null {
+  const entry = findRuntimeCatalogEntry(catalog, probe.runtime_id)
+  if (entry) return entry
+  const providerId = probe.provider_id.trim()
+  if (providerId === '') return null
+  return catalog.find(entry => {
+    const ids = [entry.provider_id, entry.provider]
+    return ids.some(id => id?.trim() === providerId)
+  }) ?? null
+}
+
+function runtimeProbeCatalogStatus(
+  state: AsyncState<DashboardRuntimeProviderSnapshot[]>,
+  probe: DashboardRuntimeProviderProbe,
+): string {
+  if (state.status === 'idle' || state.status === 'loading') return `catalog ${state.status}`
+  if (state.status === 'error') return `catalog error: ${state.message}`
+  return `catalog missing for ${probe.runtime_id}`
+}
+
+function runtimeProbeCatalogRows(entry: DashboardRuntimeProviderSnapshot): readonly (readonly [string, string])[] {
+  const rows: Array<readonly [string, string | null]> = [
+    ['snapshot', runtimeCatalogSnapshotFacts(entry)],
+    ['effective', runtimeCatalogEffectiveCapabilities(entry)],
+    ['request', runtimeCatalogRequestConfig(entry)],
+    ['declared', runtimeCatalogDeclaredSpec(entry)],
+    ['policy', runtimeCatalogParameterPolicy(entry)],
+  ]
+  return rows.filter((row): row is readonly [string, string] => typeof row[1] === 'string' && row[1].trim() !== '')
+}
+
+const KEEPER_RUNTIME_ROWS: Array<{
+  key: keyof KeeperRuntimeResolved
+  label: string
+  fmt: 'int' | 'float' | 'duration'
+}> = [
+  { key: 'stream_idle_timeout_sec', label: 'stream idle timeout', fmt: 'duration' },
+  { key: 'first_event_timeout_sec', label: 'first event timeout', fmt: 'duration' },
+  { key: 'provider_call_deadline_sec', label: 'provider call deadline', fmt: 'duration' },
+  { key: 'body_timeout_override_sec', label: 'response body timeout override', fmt: 'duration' },
+]
+
+function sourceTone(source: KeeperRuntimeSource): string {
+  switch (source) {
+    case 'env': return 'border-[var(--color-accent-fg)]/30 bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]'
+    case 'toml': return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]'
+    case 'default': return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
+    case 'failsafe_floor': return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
+  }
+}
+
+function keeperSourceLabel(source: KeeperRuntimeSource): string {
+  switch (source) {
+    case 'env': return 'env override'
+    case 'toml': return 'runtime.toml'
+    case 'default': return 'default'
+    case 'failsafe_floor': return 'fail-safe floor (unset)'
+  }
+}
+
+function fmtKeeperValue(value: number | null, fmt: 'int' | 'float' | 'duration'): string {
+  if (value === null || value === undefined) return 'disabled'
+  switch (fmt) {
+    case 'int': return String(Math.round(value))
+    case 'float': return value.toFixed(1)
+    case 'duration': return value >= 60 ? `${formatNumber(value / 60, 1)}m` : `${formatNumber(value, 0)}s`
+  }
+}
+
+function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null }) {
+  if (!runtime) return null
+  const tomlCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key].source === 'toml').length
+  const envCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key].source === 'env').length
+
+  return html`
+    <${ConfigCard} class="mt-4 px-4 py-4">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">keeper runtime configuration</div>
+        ${tomlCount > 0 ? html`
+          <${StatusChip} tone=${sourceTone('toml')}>${tomlCount} TOML<//>
+        ` : null}
+        ${envCount > 0 ? html`
+          <${StatusChip} tone=${sourceTone('env')}>${envCount} env<//>
+        ` : null}
+      </div>
+      <div class="mb-3 text-xs text-[var(--color-fg-muted)]">
+        Resolved keeper runtime thresholds. A threshold nobody configured runs on the server's fail-safe floor; the body timeout override stays disabled until set.
+      </div>
+      <div class="grid gap-2 md:grid-cols-2">
+        ${KEEPER_RUNTIME_ROWS.map(row => {
+          const field: KeeperRuntimeField<number | null> = runtime[row.key]
+          const sourceText = field.value === null && field.source === 'default'
+            ? 'unset'
+            : keeperSourceLabel(field.source)
+          return html`
+            <div class="v2-lab-row flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+              <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.label}</div>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-xs text-[var(--color-fg-primary)]">${fmtKeeperValue(field.value, row.fmt)}</span>
+                <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${sourceTone(field.source)}">${sourceText}</span>
+              </div>
+            </div>
+          `
+        })}
+      </div>
+    <//>
+  `
+}
+
+function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: DashboardRuntimeResolution }) {
+  const fd = runtimeResolution.fd_accountant
+  const disk = runtimeResolution.disk_observation
+  const fleet = runtimeResolution.fleet_safety
+  const fdValue = fd
+    ? `${fd.fd_open ?? MISSING_DATA_DASH} / ${fd.fd_limit ?? MISSING_DATA_DASH}`
+    : MISSING_DATA_DASH
+  const activeOperations = fd?.per_kind.reduce((sum, row) => sum + row.active_operations, 0)
+  const resourceErrors = fd?.resource_errors.reduce((sum, row) => sum + row.count, 0)
+  const diskAvailable = disk?.filesystem?.available_bytes
+  const diskTotal = disk?.filesystem?.total_bytes
+  const diskValue = diskAvailable != null && diskTotal != null
+    ? `${formatNumber(diskAvailable / 1_073_741_824, 1)} / ${formatNumber(diskTotal / 1_073_741_824, 1)} GiB`
+    : disk?.filesystem?.error ? `probe error: ${disk.filesystem.error}` : MISSING_DATA_DASH
+
+  return html`
+    <${ConfigCard} class="mb-4 px-4 py-4">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">live runtime truth</div>
+        <${StatusChip} tone=${toneClass(runtimeResolution.status)}>${runtimeResolution.status}<//>
+        <${StatusChip} tone="neutral" uppercase=${false}>fd ${fdValue}<//>
+        <${StatusChip} tone="neutral" uppercase=${false}>disk ${diskValue}<//>
+      </div>
+      <div class="grid gap-3 md:grid-cols-2">
+        <${RuntimeMetaRow} label="effective base" value=${runtimeResolution.resolved_base_path.path ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="effective .masc" value=${runtimeResolution.data_root.path ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.binary_commit ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? MISSING_DATA_DASH)} />
+        <${RuntimeMetaRow} label="fd active operations" value=${activeOperations == null ? MISSING_DATA_DASH : String(activeOperations)} />
+        <${RuntimeMetaRow} label="fd resource errors (total)" value=${resourceErrors == null ? MISSING_DATA_DASH : String(resourceErrors)} />
+        <${RuntimeMetaRow} label="typed ENOSPC observations (total)" value=${disk?.storage_space_exhaustion_observations_total == null ? MISSING_DATA_DASH : String(disk.storage_space_exhaustion_observations_total)} />
+      </div>
+    <//>
+  `
+}
+
+function RuntimeProbePanel() {
+  const authority = executionWorkspaceAuthority.value
+  const received = useSignal<{
+    authority: ExecutionWorkspaceAuthority
+    data: DashboardRuntimeProbeResponse | null
+    loading: boolean
+    error: string | null
+  } | null>(null)
+  const request = useRef<AbortController | null>(null)
+  const state = authority !== null && received.value?.authority === authority
+    ? received.value
+    : { data: null, loading: authority !== null,
+      error: authority === null ? '작업공간을 확인한 뒤 연결 상태를 검사할 수 있습니다.' : null }
+
+  const load = useCallback(async (force = false) => {
+    if (authority === null || executionWorkspaceAuthority.peek() !== authority) return
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
+    const current = () => request.current === controller && !controller.signal.aborted
+      && executionWorkspaceAuthority.peek() === authority
+    const previous = received.peek()
+    const data = previous?.authority === authority ? previous.data : null
+    received.value = { authority, data, loading: true, error: null }
+    try {
+      const data = await fetchDashboardRuntimeProbe(force, { signal: controller.signal })
+      if (current()) received.value = { authority, data, loading: false, error: null }
+    } catch (error) {
+      if (current()) received.value = { authority, data, loading: false, error: errorToString(error) }
+    } finally {
+      if (request.current === controller) request.current = null
+    }
+  }, [authority, received])
+
+  useEffect(() => {
+    void load(false)
+    return () => { request.current?.abort(); request.current = null }
+  }, [load])
+  useEffect(() => {
+    loadRuntimeCatalog()
+  }, [])
+
+  const probe = state.data?.probe ?? null
+  const providerProbes = probe?.providers ?? []
+  const catalog = runtimeCatalogState.value
+  const catalogEntries = catalog.status === 'loaded' ? catalog.data : []
+  const catalogSummary = catalog.status === 'loaded'
+    ? `${catalogEntries.length} runtime specs`
+    : catalog.status
+
+  return html`
+    <${ConfigCard} class="mt-4 px-4 py-4">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          provider reachability
+        </div>
+        <${StatusChip} tone=${probe?.status === 'warming_up' ? 'neutral' : probe?.probe_ok === false ? 'bad' : 'ok'}>
+          ${probe?.status ?? 'probe pending'}
+        <//>
+        ${state.data
+          ? html`
+              <${StatusChip} tone="neutral" uppercase=${false}>
+                ${runtimeProbeRefreshLabel(state.data)} · age ${state.data.cache_age_sec == null ? MISSING_DATA_DASH : `${formatNumber(state.data.cache_age_sec, 1)}s`}
+              <//>
+            `
+          : null}
+        <${Btn}
+          size="sm"
+          class="v2-lab-action ml-auto"
+          disabled=${authority === null || state.loading}
+          onClick=${() => void load(true)}
+        >
+          ${state.loading ? 'probing...' : 'refresh probe'}
+        <//>
+      </div>
+
+      ${state.error
+        ? html`
+            <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[var(--rose-fg)]">
+              ${state.error}
+            </div>
+          `
+        : null}
+
+      ${!state.error && !probe
+        ? html`
+            <div class="text-xs text-[var(--color-fg-muted)]">
+              ${state.loading ? '불러오는 중…' : 'probe result가 아직 없음'}
+            </div>
+          `
+        : null}
+
+      ${probe
+        ? html`
+            <div class="grid gap-3 md:grid-cols-2">
+              <${RuntimeMetaRow} label="status" value=${probe.status} />
+              <${RuntimeMetaRow} label="checked at" value=${probe.checked_at} />
+              <${RuntimeMetaRow} label="reachable" value=${String(probe.summary.reachable)} />
+              <${RuntimeMetaRow} label="failed" value=${String(probe.summary.failed)} />
+              <${RuntimeMetaRow} label="skipped" value=${String(probe.summary.skipped)} />
+              <${RuntimeMetaRow} label="default runtime" value=${probe.summary.default_runtime_id ?? MISSING_DATA_DASH} />
+              <${RuntimeMetaRow} label="provider catalog" value=${catalogSummary} />
+            </div>
+            <div class="mt-3 flex flex-col gap-2">
+              ${providerProbes.map(item => {
+                const catalogEntry = runtimeProbeCatalogEntry(catalogEntries, item)
+                const catalogRows = catalogEntry ? runtimeProbeCatalogRows(catalogEntry) : []
+                return html`
+                <div class="v2-lab-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${item.runtime_id}</div>
+                      <div class="truncate text-2xs text-[var(--color-fg-muted)]">${item.probe_url ?? item.endpoint_url ?? MISSING_DATA_DASH}</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <${StatusChip} tone=${providerProbeTone(item.status)} uppercase=${false}>${providerProbeLabel(item.status)}<//>
+                      <span class="font-mono text-2xs text-[var(--color-fg-muted)]">${item.http_status ?? MISSING_DATA_DASH} · ${item.latency_ms == null ? MISSING_DATA_DASH : `${formatNumber(item.latency_ms, 1)}ms`}</span>
+                    </div>
+                  </div>
+                  ${item.error
+                    ? html`<div class="mt-2 text-2xs text-[var(--rose-fg)]">${item.error}</div>`
+                    : null}
+                  ${catalogRows.length > 0
+                    ? html`
+                      <div
+                        class="mt-2 grid gap-1 border-t border-[var(--color-border-default)]/60 pt-2 text-2xs"
+                        data-testid="runtime-probe-catalog-spec"
+                      >
+                        ${catalogRows.map(([label, value]) => html`
+                          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+                            <span class="text-[var(--color-fg-muted)]">${label}</span>
+                            <span class="min-w-0 break-words font-mono text-[var(--color-fg-secondary)]" title=${value}>${value}</span>
+                          </div>
+                        `)}
+                      </div>
+                    `
+                    : html`
+                      <div class="mt-2 text-2xs text-[var(--color-fg-muted)]" data-testid="runtime-probe-catalog-status">
+                        ${runtimeProbeCatalogStatus(catalog, item)}
+                      </div>
+                    `}
+                </div>
+              `})}
+            </div>
+
+            ${probe.observations.length > 0
+              ? html`
+                  <div class="mt-3 flex flex-col gap-2">
+                    ${probe.observations.map(item => html`
+                      <div class="v2-lab-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2 text-xs text-[var(--color-fg-primary)]">
+                        ${item}
+                      </div>
+                    `)}
+                  </div>
+                `
+              : null}
+
+            ${probe.errors.length > 0
+              ? html`
+                  <div class="mt-3 flex flex-col gap-2">
+                    ${probe.errors.map(item => html`
+                      <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[var(--rose-fg)]">
+                        ${item}
+                      </div>
+                    `)}
+                  </div>
+                `
+              : null}
+          `
+        : null}
+    <//>
+  `
+}
+
+export function ConfigResolutionPanel({
+  resolution,
+  runtimeResolution,
+}: {
+  resolution: DashboardConfigResolution | undefined
+  runtimeResolution?: DashboardRuntimeResolution
+}) {
+  const diagnosticsQuery = useSignal('')
+  const allDiagnostics = runtimeResolution?.diagnostics ?? []
+  const visibleDiagnostics = useMemo(
+    () => filterDiagnostics(allDiagnostics, diagnosticsQuery.value),
+    [allDiagnostics, diagnosticsQuery.value],
+  )
+  const isFilteringDiagnostics = diagnosticsQuery.value.trim() !== ''
+
+  if (!resolution && !runtimeResolution) return null
+
+  const rootPath = resolution?.config_root.path ?? ''
+  const rootSource = resolution?.config_root.source ?? ''
+
+  return html`
+    <${SectionCard} label="설정 경로" class="section mb-4">
+      ${resolution
+        ? html`
+            <div class="mb-6">
+              <div class="mb-3 flex flex-wrap items-center gap-2">
+                <${StatusChip} tone=${toneClass(resolution.status)}>${resolution.status}<//>
+                <${StatusChip} tone="neutral" uppercase=${false}>${sourceLabel(resolution.config_root.source)}<//>
+                <span class="text-xs text-[var(--color-fg-muted)]">resolved config root</span>
+              </div>
+
+              <${ConfigTopologySummary} resolution=${resolution} />
+
+              <div class="mb-4">
+                <${WarningBlock} title="config warnings" warnings=${resolution.warnings} />
+              </div>
+
+              <div class="grid gap-3 md:grid-cols-2">
+                <${ConfigRow}
+                  label="config root"
+                  item=${resolution.config_root}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                  isRoot=${true}
+                />
+                <${ConfigRow}
+                  label="prompts"
+                  item=${resolution.prompts}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                />
+                <${ConfigRow}
+                  label="keepers"
+                  item=${resolution.keepers}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                />
+              </div>
+            </div>
+          `
+        : null}
+
+      ${runtimeResolution
+        ? html`
+            <div>
+              <div class="mb-3 flex flex-wrap items-center gap-2">
+                <${StatusChip} tone=${toneClass(runtimeResolution.status)}>${runtimeResolution.status}<//>
+                <span class="text-xs text-[var(--color-fg-muted)]">runtime path resolution</span>
+                ${runtimeResolution.source_mismatch
+                  ? html`
+                      <${StatusChip} tone="bad">source mismatch<//>
+                    `
+                  : null}
+                ${runtimeResolution.server_workspace_mismatch
+                  ? html`
+                      <${StatusChip} tone="warn">server/workspace mismatch<//>
+                    `
+                  : null}
+              </div>
+
+              <div class="mb-4">
+                <${WarningBlock} title="runtime warnings" warnings=${runtimeResolution.warnings} />
+              </div>
+
+              <${RuntimeTruthPanel} runtimeResolution=${runtimeResolution} />
+
+              <div class="grid gap-3 md:grid-cols-2">
+                <${ConfigRow} label="base path" item=${runtimeResolution.base_path} />
+                <${ConfigRow} label="workspace path" item=${runtimeResolution.workspace_path} />
+                <${ConfigRow} label="resolved base path" item=${runtimeResolution.resolved_base_path} />
+                <${ConfigRow} label="data root" item=${runtimeResolution.data_root} />
+                <${ConfigRow} label="prompt markdown dir" item=${runtimeResolution.prompt_markdown_dir} />
+                ${runtimeResolution.server_repo_path
+                  ? html`<${ConfigRow} label="server repo" item=${runtimeResolution.server_repo_path} />`
+                  : null}
+              </div>
+
+              <div class="mt-4 grid gap-3 md:grid-cols-2">
+                <${RuntimeMetaRow} label="server repo head" value=${runtimeResolution.server_repo_git_commit ?? MISSING_DATA_DASH} />
+                <${RuntimeMetaRow} label="workspace head" value=${runtimeResolution.workspace_git_commit ?? MISSING_DATA_DASH} />
+                <${RuntimeMetaRow} label="resolved base head" value=${runtimeResolution.resolved_base_git_commit ?? MISSING_DATA_DASH} />
+                <${RuntimeMetaRow} label="runtime build" value=${runtimeResolution.build.binary_commit ?? MISSING_DATA_DASH} />
+                <${RuntimeMetaRow} label="started at" value=${runtimeResolution.build.started_at} />
+              </div>
+
+              <div class="mt-4">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+                    recent diagnostics
+                  </div>
+                  ${runtimeResolution.diagnostics.length > 0
+                    ? html`
+                        <${TextInput}
+                          type="search"
+                          value=${diagnosticsQuery.value}
+                          placeholder="kind / signal / message 필터"
+                          ariaLabel="Diagnostics 필터"
+                          onInput=${(e: Event) => { diagnosticsQuery.value = (e.target as HTMLInputElement).value }}
+                          class="min-w-40 max-w-60 flex-1 !px-2 !py-1 !text-2xs"
+                        />
+                      `
+                    : null}
+                </div>
+                <div class="flex flex-col gap-3">
+                  ${runtimeResolution.diagnostics.length === 0
+                    ? html`
+                        <${ConfigCard} class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">
+                          최근 runtime warning이 없습니다.
+                        <//>
+                      `
+                    : isFilteringDiagnostics && visibleDiagnostics.length === 0
+                      ? html`
+                          <${ConfigCard} class="px-3 py-3 text-center text-xs text-[var(--color-fg-muted)]">
+                            필터 결과 없음 (${runtimeResolution.diagnostics.length} diagnostics)
+                          <//>
+                        `
+                      : visibleDiagnostics.map(item => html`<${DiagnosticRow} item=${item} />`)}
+                </div>
+              </div>
+
+              <${KeeperRuntimePanel} runtime=${runtimeResolution.keeper_runtime} />
+
+              <${RuntimeProbePanel} />
+            </div>
+          `
+        : null}
+    <//>
+  `
+}

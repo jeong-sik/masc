@@ -1,0 +1,1223 @@
+(* Prompt presets — one named snapshot of the three operator-owned surfaces
+   that a prompt campaign changes together (#32777):
+
+   - prompt overrides, [.masc/prompt_overrides.json]. This is the durable
+     operator layer: the managed prompt files under [.masc/config/prompts]
+     are re-synced from the binary at every boot, so a preset that copied
+     them would be undone by the next start.
+   - each keeper's [keeper.instructions] in [.masc/config/keepers/<name>.toml].
+   - [\[runtime.assignments\]] and [\[runtime.exact_output_lanes.*\]] of
+     runtime.toml — keeper routing, and the librarian / judge lanes.
+
+   A preset lives under [<base>/.masc/presets/<name>/]: [manifest.json],
+   [prompt_overrides.json] (the same envelope as the live file),
+   [runtime.json], and [instructions/<keeper>.txt].
+
+   A restore writes the three surfaces through their existing paths, so they
+   take effect at three different moments; the report names each:
+   overrides at once, instructions at the keeper's next up, runtime through
+   the runtime.toml commit path (whose receipt separately reports exact-output
+   registry application). The current state is saved first as [_autosave], over the one
+   the previous restore left. *)
+
+open Result.Syntax
+
+module Override = Prompt_override_persistence
+
+type 'a saved_setting = Unrecorded | Recorded of 'a option
+
+type lane_owner =
+  | Current_lane of Runtime_schema.exact_lane_owner
+  | Unavailable_lane of string
+
+let lane_key = function
+  | Current_lane owner -> Runtime_schema.exact_lane_key owner
+  | Unavailable_lane key -> key
+;;
+
+(* A saved null removes a declaration. A setting the snapshot never recorded
+   leaves the current declaration alone; it is not an instruction to clear it. *)
+type lane =
+  { owner : lane_owner
+  ; enabled : bool
+  ; slots : string list
+  ; cli_slots : string list
+  ; max_output_tokens : int saved_setting
+  ; thinking : bool saved_setting
+  }
+
+type snapshot =
+  { name : string
+  ; description : string
+  ; created_at : string
+  ; prompt_overrides : Override.entry list
+  ; instructions : (string * string) list
+  ; assignments : (string * string) list
+  ; lanes : lane list
+  ; default_revisions : (string * string) list option
+  }
+
+type manifest =
+  { preset_name : string
+  ; preset_description : string
+  ; preset_created_at : string
+  ; override_count : int
+  ; override_keys : string list  (** Which prompts the preset overrides. *)
+  ; keepers : string list
+  ; assignment_count : int
+  ; lane_count : int
+  }
+
+type listing =
+  { presets : manifest list
+  ; unreadable : (string * string) list
+  }
+
+type part_result =
+  { applied : string list
+  ; skipped : (string * string) list
+  }
+
+type runtime_result =
+  | Runtime_unchanged
+  | Runtime_committed of Runtime.config_commit_receipt
+  | Runtime_failed of string
+
+type default_comparison =
+  | Defaults_unknown
+  | Defaults_match
+  | Defaults_differ of (string * string option * string option) list
+
+type restore_report =
+  { restored : string
+  ; autosave : string
+  ; prompt_overrides_result : part_result
+  ; instructions_result : part_result
+  ; runtime_result : runtime_result
+  ; default_comparison : default_comparison
+  ; preserved_lane_settings : (string * string) list
+  ; skipped_lanes : (string * string) list
+  ; skipped_assignments : (string * string) list
+  }
+
+let schema_version = 1
+let manifest_file = "manifest.json"
+let overrides_file = "prompt_overrides.json"
+let runtime_file = "runtime.json"
+let instructions_dir = "instructions"
+let instructions_extension = ".txt"
+let autosave_name = "_autosave"
+
+let is_valid_name name =
+  (not (String.equal name ""))
+  && (not (String.equal name "."))
+  && (not (String.equal name ".."))
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' -> true
+         | _ -> false)
+       name
+;;
+
+let presets_dir ~base_path =
+  Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets"
+;;
+
+let preset_dir ~base_path name = Filename.concat (presets_dir ~base_path) name
+
+let runtime_toml_path ~base_path =
+  Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+;;
+
+let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
+
+(* The filesystem boundary raises; a preset call answers with [Error]. *)
+let guard f =
+  match f () with
+  | value -> value
+  | exception Sys_error message -> Error message
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+;;
+
+(* ── JSON ──────────────────────────────────────────────────────────── *)
+
+let strings values = `List (List.map (fun v -> `String v) values)
+
+let string_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> Error (name ^ " must be a string")
+  | None -> Error (name ^ " missing")
+;;
+
+let int_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Ok value
+  | Some _ -> Error (name ^ " must be an integer")
+  | None -> Error (name ^ " missing")
+;;
+
+let string_list_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`List items) ->
+    List.fold_left
+      (fun acc item ->
+        let* acc = acc in
+        match item with
+        | `String value -> Ok (value :: acc)
+        | _ -> Error (name ^ " must hold strings"))
+      (Ok [])
+      items
+    |> Result.map List.rev
+  | Some _ -> Error (name ^ " must be a list")
+  | None -> Error (name ^ " missing")
+;;
+
+let json_of_string text =
+  match Yojson.Safe.from_string text with
+  | json -> Ok json
+  | exception Yojson.Json_error message -> Error ("invalid JSON: " ^ message)
+;;
+
+let manifest_of_snapshot (s : snapshot) =
+  { preset_name = s.name
+  ; preset_description = s.description
+  ; preset_created_at = s.created_at
+  ; override_count = List.length s.prompt_overrides
+  ; override_keys =
+      s.prompt_overrides
+      |> List.map (fun (e : Prompt_override_persistence.entry) -> e.key)
+      |> List.sort String.compare
+  ; keepers = List.map fst s.instructions
+  ; assignment_count = List.length s.assignments
+  ; lane_count = List.length s.lanes
+  }
+;;
+
+let compare_defaults (s : snapshot) =
+  match s.default_revisions with
+  | None -> Defaults_unknown
+  | Some saved ->
+      let current = Prompt_registry.default_revisions () in
+      let keys = List.sort_uniq String.compare (List.map fst saved @ List.map fst current) in
+      let changes = List.filter_map (fun key ->
+        let before = List.assoc_opt key saved in
+        let after = List.assoc_opt key current in
+        if before = after then None else Some (key, before, after)) keys in
+      match changes with [] -> Defaults_match | _ -> Defaults_differ changes
+;;
+
+let default_comparison_to_json comparison : Yojson.Safe.t =
+  let status, changes = match comparison with
+    | Defaults_unknown -> "unknown", []
+    | Defaults_match -> "matches", []
+    | Defaults_differ changes -> "differs", changes in
+  let revision = function None -> `Null | Some value -> `String value in
+  `Assoc ["status", `String status;
+    "changes", `List (List.map (fun (key, saved, current) ->
+      `Assoc ["key", `String key; "saved_sha256", revision saved;
+              "current_sha256", revision current]) changes)]
+;;
+
+let default_revisions_json = function
+  | None -> `Null
+  | Some rows -> `Assoc (List.map (fun (key, hash) -> key, `String hash) rows)
+;;
+
+let manifest_to_json (m : manifest) : Yojson.Safe.t =
+  `Assoc
+    [ "schema_version", `Int schema_version
+    ; "name", `String m.preset_name
+    ; "description", `String m.preset_description
+    ; "created_at", `String m.preset_created_at
+    ; "override_count", `Int m.override_count
+    ; "override_keys", strings m.override_keys
+    ; "keepers", strings m.keepers
+    ; "assignment_count", `Int m.assignment_count
+    ; "lane_count", `Int m.lane_count
+    ]
+;;
+
+(* Everything a preset would change, so an operator can read one before
+   applying it. The manifest counts things; this names them. Restoring
+   without being able to look is how a preset with ten keepers gets applied
+   over a workspace that has fourteen. *)
+let setting_field key encode = function
+  | Unrecorded -> []
+  | Recorded value -> [key, Json_util.option_to_yojson encode value]
+;;
+
+let preserved_lane_settings lanes =
+  List.concat_map (fun lane ->
+    let id = lane_key lane.owner in
+    (match lane.max_output_tokens with Unrecorded -> [id, "max_output_tokens"] | Recorded _ -> [])
+    @ (match lane.thinking with Unrecorded -> [id, "thinking"] | Recorded _ -> [])) lanes
+;;
+
+let preserved_settings_json settings =
+  `List (List.map (fun (lane, setting) ->
+    `Assoc ["lane", `String lane; "setting", `String setting]) settings)
+;;
+
+let skipped_lanes lanes =
+  List.filter_map (fun lane -> match lane.owner with
+    | Current_lane _ -> None
+    | Unavailable_lane id -> Some (id, "lane is unavailable in this runtime; no declaration is changed")) lanes
+;;
+
+let skipped_lanes_json rows =
+  `List (List.map (fun (lane, reason) ->
+    `Assoc ["lane", `String lane; "reason", `String reason]) rows)
+;;
+
+let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
+  `Assoc
+    [ "schema_version", `Int schema_version
+    ; "name", `String s.name
+    ; "description", `String s.description
+    ; "created_at", `String s.created_at
+    ; "default_revisions", default_revisions_json s.default_revisions
+    ; "preserved_lane_settings", preserved_settings_json (preserved_lane_settings s.lanes)
+    ; "skipped_lanes", skipped_lanes_json (skipped_lanes s.lanes)
+    ; ( "prompt_overrides"
+      , `List
+          (List.map
+             (fun (e : Prompt_override_persistence.entry) ->
+               `Assoc
+                 [ "key", `String e.key
+                 ; "value", `String e.value
+                 ; "bytes", `Int (String.length e.value)
+                 ; "authored_against", `String e.authored_against
+                 ; "template_variables", strings e.template_variables
+                 ])
+             s.prompt_overrides) )
+    ; ( "instructions"
+      , `List
+          (List.map
+             (fun (file, text) ->
+               `Assoc
+                 [ "keeper_file", `String file
+                 ; "bytes", `Int (String.length text)
+                 ; "text", `String text
+                 ])
+             s.instructions) )
+    ; ( "assignments"
+      , `List
+          (List.map
+             (fun (keeper, runtime) ->
+               `Assoc [ "keeper", `String keeper; "runtime", `String runtime ])
+             s.assignments) )
+    ; ( "lanes"
+      , `List
+          (List.map
+             (fun (l : lane) ->
+               `Assoc
+                 ([ "id", `String (lane_key l.owner)
+                 ; "available", `Bool (match l.owner with Current_lane _ -> true | Unavailable_lane _ -> false)
+                 ; "enabled", `Bool l.enabled
+                 ; "slots", strings l.slots
+                 ; "cli_slots", strings l.cli_slots
+                 ]
+                 @ setting_field "max_output_tokens" (fun n -> `Int n) l.max_output_tokens
+                 @ setting_field "thinking" (fun flag -> `Bool flag) l.thinking))
+             s.lanes) )
+    ]
+;;
+
+(* What [load] reads back from manifest.json: the name it was saved under,
+   its words and the keepers whose instruction files it holds. The counts and
+   override keys the file also carries are derived from the preset's files,
+   so they are drawn from what loaded ([manifest_of_snapshot]) rather than
+   read back. *)
+type stored_manifest =
+  { stored_name : string
+  ; stored_description : string
+  ; stored_created_at : string
+  ; stored_keepers : string list
+  ; stored_default_revisions : (string * string) list option
+  }
+
+let read_default_revisions fields =
+  match List.assoc_opt "default_revisions" fields with
+  | None | Some `Null -> Ok None
+  | Some (`Assoc rows) ->
+      let* reversed = List.fold_left (fun acc (key, value) ->
+        let* acc = acc in
+        match value with
+        | `String hash when String.length hash = 64
+            && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) hash ->
+            if List.mem_assoc key acc then Error ("duplicate default prompt key: " ^ key)
+            else Ok ((key, hash) :: acc)
+        | _ -> Error ("invalid default prompt SHA-256: " ^ key)) (Ok []) rows in
+      Ok (Some (List.rev reversed))
+  | Some _ -> Error "default_revisions must be an object or null"
+;;
+
+let stored_manifest_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let* version = int_field fields "schema_version" in
+    if version <> schema_version
+    then
+      Error
+        (Printf.sprintf
+           "manifest schema_version %d, this build reads %d"
+           version
+           schema_version)
+    else
+      let* stored_name = string_field fields "name" in
+      let* stored_description = string_field fields "description" in
+      let* stored_created_at = string_field fields "created_at" in
+      let* stored_keepers = string_list_field fields "keepers" in
+      let* stored_default_revisions = read_default_revisions fields in
+      let* () =
+        match
+          List.find_opt (fun keeper -> not (is_valid_name keeper)) stored_keepers
+        with
+        | Some keeper -> Error ("manifest keeper name is not a file name: " ^ keeper)
+        | None -> Ok ()
+      in
+      Ok { stored_name; stored_description; stored_created_at; stored_keepers; stored_default_revisions }
+  | _ -> Error "manifest must be an object"
+;;
+
+let runtime_to_json ~assignments ~lanes : Yojson.Safe.t =
+  `Assoc
+    [ ( "assignments"
+      , `Assoc (List.map (fun (keeper, runtime_id) -> keeper, `String runtime_id) assignments) )
+    ; ( "exact_output_lanes"
+      , `Assoc
+          (List.map
+             (fun lane ->
+               ( lane_key lane.owner
+               , `Assoc
+                   ([ "enabled", `Bool lane.enabled
+                   ; "slots", strings lane.slots
+                   ; "cli_slots", strings lane.cli_slots
+                   ]
+                   @ setting_field "max_output_tokens" (fun n -> `Int n) lane.max_output_tokens
+                   @ setting_field "thinking" (fun flag -> `Bool flag) lane.thinking) ))
+             lanes) )
+    ]
+;;
+
+let runtime_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let* assignments =
+      match List.assoc_opt "assignments" fields with
+      | Some (`Assoc pairs) ->
+        List.fold_left
+          (fun acc (keeper, value) ->
+            let* acc = acc in
+            match value with
+            | `String runtime_id -> Ok ((keeper, runtime_id) :: acc)
+            | _ -> Error ("assignment " ^ keeper ^ " must be a string"))
+          (Ok [])
+          pairs
+        |> Result.map List.rev
+      | Some _ -> Error "assignments must be an object"
+      | None -> Error "assignments missing"
+    in
+    let* lanes =
+      match List.assoc_opt "exact_output_lanes" fields with
+      | Some (`Assoc pairs) ->
+        List.fold_left
+          (fun acc (id, value) ->
+            let* acc = acc in
+            match value with
+            | `Assoc lane_fields ->
+              (* Presets saved before lanes carried activity (v0.49.0 and
+                 earlier, same schema_version) have no [enabled]: every lane
+                 in them was live, and the runtime TOML reads an omitted
+                 [enabled] as true too. Absent means true; a present value
+                 that is not a boolean is still refused. *)
+              let* enabled =
+                match List.assoc_opt "enabled" lane_fields with
+                | Some (`Bool enabled) -> Ok enabled
+                | None -> Ok true
+                | Some _ -> Error ("lane " ^ id ^ " enabled must be a boolean")
+              in
+              let* slots = string_list_field lane_fields "slots" in
+              let* cli_slots = string_list_field lane_fields "cli_slots" in
+              let owner =
+                match Runtime_schema.exact_lane_owner_of_key id with
+                | Some owner -> Current_lane owner
+                | None -> Unavailable_lane id
+              in
+              (* Missing, null and a value have distinct restore intentions.
+                 Malformed present values are still refused. *)
+              let* max_output_tokens =
+                match List.assoc_opt "max_output_tokens" lane_fields with
+                | None -> Ok Unrecorded
+                | Some `Null -> Ok (Recorded None)
+                | Some (`Int n) when n > 0 -> Ok (Recorded (Some n))
+                | Some _ ->
+                  Error ("lane " ^ id ^ " max_output_tokens must be a positive integer or null")
+              in
+              let* thinking =
+                match List.assoc_opt "thinking" lane_fields with
+                | None -> Ok Unrecorded
+                | Some `Null -> Ok (Recorded None)
+                | Some (`Bool flag) -> Ok (Recorded (Some flag))
+                | Some _ -> Error ("lane " ^ id ^ " thinking must be a boolean or null")
+              in
+              Ok ({ owner; enabled; slots; cli_slots; max_output_tokens; thinking } :: acc)
+            | _ -> Error ("lane " ^ id ^ " must be an object"))
+          (Ok [])
+          pairs
+        |> Result.map List.rev
+      | Some _ -> Error "exact_output_lanes must be an object"
+      | None -> Error "exact_output_lanes missing"
+    in
+    Ok (assignments, lanes)
+  | _ -> Error "runtime.json must be an object"
+;;
+
+let part_to_json ~timing (r : part_result) : Yojson.Safe.t =
+  `Assoc
+    [ "effect", `String timing
+    ; "applied", strings r.applied
+    ; ( "skipped"
+      , `List
+          (List.map
+             (fun (key, reason) -> `Assoc [ "key", `String key; "reason", `String reason ])
+             r.skipped) )
+    ]
+;;
+
+let report_to_json (r : restore_report) : Yojson.Safe.t =
+  let runtime =
+    match r.runtime_result with
+    | Runtime_unchanged ->
+      `Assoc [ "effect", `String "runtime_commit"; "status", `String "unchanged" ]
+    | Runtime_committed receipt ->
+      `Assoc
+        [ "effect", `String "runtime_commit"
+        ; "status", `String "committed"
+        ; "commit", Runtime.config_commit_receipt_to_yojson receipt
+        ; "exact_output_registry",
+          Runtime.exact_output_registry_application_to_yojson receipt.exact_output_registry
+        ]
+    | Runtime_failed message ->
+      `Assoc
+        [ "effect", `String "runtime_commit"
+        ; "status", `String "failed"
+        ; "error", `String message
+        ]
+  in
+  `Assoc
+    [ "restored", `String r.restored
+    ; "autosave", `String r.autosave
+    ; "prompt_overrides", part_to_json ~timing:"immediate" r.prompt_overrides_result
+    ; "instructions", part_to_json ~timing:"keeper_restart" r.instructions_result
+    ; "runtime", runtime
+    ; "default_prompts", default_comparison_to_json r.default_comparison
+    ; "preserved_lane_settings", preserved_settings_json r.preserved_lane_settings
+    ; "skipped_lanes", skipped_lanes_json r.skipped_lanes
+    ; "skipped_assignments", `List (List.map (fun (keeper, reason) ->
+        `Assoc ["keeper", `String keeper; "reason", `String reason]) r.skipped_assignments)
+    ]
+;;
+
+(* ── Capture ───────────────────────────────────────────────────────── *)
+
+let capture_instructions ~base_path =
+  let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  if not (Sys.file_exists dir && Sys.is_directory dir)
+  then []
+  else
+    Keeper_types_profile.discover_keepers_toml dir
+    |> List.filter_map (function
+      | Keeper_types_profile.Loaded { keeper_name = _; defaults } ->
+        (* Keyed by the TOML file name, which is what restore resolves;
+           [keeper.name] may differ from it. *)
+        (match
+           ( defaults.Keeper_types_profile_defaults.manifest_path
+           , defaults.Keeper_types_profile_defaults.instructions )
+         with
+         | Some path, Some text ->
+           Some (Filename.remove_extension (Filename.basename path), text)
+         | _ -> None)
+      | Keeper_types_profile.Invalid _ -> None)
+;;
+
+let parse_error_line (e : Runtime_toml.parse_error) =
+  e.Runtime_toml.path ^ ": " ^ e.Runtime_toml.message
+;;
+
+let runtime_of_text text =
+  match Runtime_toml.parse_string text with
+  | Error errors -> Error (String.concat "; " (List.map parse_error_line errors))
+  | Ok (config : Runtime_schema.config) ->
+    let lanes =
+      List.map
+        (* Every field of the declaration is named, so a field added to it is a
+           compile error here until the preset decides how to keep it. *)
+        (fun
+          { Runtime_schema.owner
+          ; enabled
+          ; slot_ids
+          ; cli_slot_ids
+          ; max_output_tokens
+          ; thinking
+          }
+        -> { owner = Current_lane owner; enabled; slots = slot_ids; cli_slots = cli_slot_ids
+           ; max_output_tokens = Recorded max_output_tokens; thinking = Recorded thinking })
+        config.Runtime_schema.exact_output_lane_decls
+    in
+    Ok (config.Runtime_schema.keeper_assignments, lanes)
+;;
+
+let capture_runtime ~base_path =
+  let path = runtime_toml_path ~base_path in
+  match Fs_compat.load_file_opt path with
+  | None -> Ok ([], [])
+  | Some text ->
+    Result.map_error
+      (fun message -> "runtime.toml at " ^ path ^ " does not parse: " ^ message)
+      (runtime_of_text text)
+;;
+
+let capture ~base_path ~name ~description =
+  if not (is_valid_name name)
+  then Error ("invalid preset name: " ^ name)
+  else
+    guard (fun () ->
+      let* assignments, lanes = capture_runtime ~base_path in
+      Ok
+        { name
+        ; description
+        ; created_at = now_iso ()
+        ; default_revisions = Some (Prompt_registry.default_revisions ())
+          (* Everything the operator saved, not only what is in force. A
+             snapshot taken while an override is refused has to carry it, or
+             the autosave a restore takes for safety is empty in exactly the
+             case it was meant for. *)
+        ; prompt_overrides = Prompt_registry.persisted_entries ()
+        ; instructions = capture_instructions ~base_path
+        ; assignments
+        ; lanes
+        })
+;;
+
+(* ── Files ─────────────────────────────────────────────────────────── *)
+
+let mkdir_p path =
+  match Fs_compat.mkdir_p path with
+  | () -> Ok ()
+  | exception Sys_error message -> Error message
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))
+;;
+
+let instruction_file dir keeper =
+  Filename.concat (Filename.concat dir instructions_dir) (keeper ^ instructions_extension)
+;;
+
+let remove_quietly dir =
+  match guard (fun () -> Ok (Fs_compat.remove_tree dir)) with
+  | Ok () | Error _ -> ()
+;;
+
+(* Holders for presets being written, beside [presets/] so the list never
+   reads one and on the same file system so a holder's directory can be
+   renamed into [presets/]. *)
+let staging_dir ~base_path =
+  Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging"
+;;
+
+(* Every file of [s] into [dir], which does not exist yet. *)
+let write_preset_files dir (s : snapshot) =
+  let* () = mkdir_p (Filename.concat dir instructions_dir) in
+  let* () =
+    Override.save ~path:(Filename.concat dir overrides_file) s.prompt_overrides
+    |> Result.map_error Override.error_to_string
+  in
+  let* () =
+    Fs_compat.save_file_atomic
+      (Filename.concat dir runtime_file)
+      (Yojson.Safe.pretty_to_string
+         (runtime_to_json ~assignments:s.assignments ~lanes:s.lanes)
+       ^ "\n")
+  in
+  let* () =
+    List.fold_left
+      (fun acc (keeper, text) ->
+        let* () = acc in
+        Fs_compat.save_file_atomic (instruction_file dir keeper) text)
+      (Ok ())
+      s.instructions
+  in
+  Fs_compat.save_file_atomic
+    (Filename.concat dir manifest_file)
+    (let json = match manifest_to_json (manifest_of_snapshot s) with
+       | `Assoc fields -> `Assoc (("default_revisions", default_revisions_json s.default_revisions) :: fields)
+       | json -> json in
+     Yojson.Safe.pretty_to_string json ^ "\n")
+;;
+
+type create_error =
+  | Invalid_name of string
+  | Already_exists of string
+  | Failed of { name : string; reason : string }
+
+let create_error_to_string = function
+  | Invalid_name name -> "invalid preset name: " ^ name
+  | Already_exists name -> "a preset named " ^ name ^ " already exists"
+  | Failed { name; reason } -> "preset " ^ name ^ " could not be saved: " ^ reason
+;;
+
+(* Both publication paths prepare the complete tree outside the listing.
+   Only the final atomic operation decides whether a name may be replaced. *)
+let with_staged_preset ~base_path (s : snapshot) publish =
+  let failed reason = Failed { name = s.name; reason } in
+  if not (is_valid_name s.name)
+  then Error (Invalid_name s.name)
+  else
+    let write () =
+      let target = preset_dir ~base_path s.name in
+      let* () = mkdir_p (presets_dir ~base_path) |> Result.map_error failed in
+      let* () = mkdir_p (staging_dir ~base_path) |> Result.map_error failed in
+      let holder = Filename.temp_dir ~temp_dir:(staging_dir ~base_path) (s.name ^ "-") "" in
+      let staged = Filename.concat holder s.name in
+      Fun.protect ~finally:(fun () -> remove_quietly holder) (fun () ->
+        let* () = write_preset_files staged s |> Result.map_error failed in
+        publish ~staged ~target)
+    in
+    match write () with
+    | result -> result
+    | exception Sys_error reason -> Error (failed reason)
+    | exception Unix.Unix_error (error, operation, argument) ->
+      Error (failed (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)))
+;;
+
+(* Replacing saves are used by explicit overwrite and the rotating autosave. *)
+let save ~base_path (s : snapshot) =
+  with_staged_preset ~base_path s (fun ~staged ~target ->
+    if Sys.file_exists target
+    then Fs_compat.exchange_paths staged target
+    else Fs_compat.rename_noreplace staged target;
+    Ok ())
+  |> Result.map_error create_error_to_string
+;;
+
+let create ~base_path (s : snapshot) =
+  with_staged_preset ~base_path s (fun ~staged ~target ->
+    match Fs_compat.rename_noreplace staged target with
+    | () -> Ok ()
+    | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Error (Already_exists s.name))
+;;
+
+let read_manifest dir =
+  match Fs_compat.load_file_opt (Filename.concat dir manifest_file) with
+  | None -> Error "manifest.json missing"
+  | Some text ->
+    let* json = json_of_string text in
+    stored_manifest_of_json json
+;;
+
+(* A preset's overrides file is read only in the format this build writes.
+   One in any other format cannot be restored, so the reason says what the
+   operator can do: set the prompts again and save them as a new preset. *)
+let preset_overrides_error_to_string = function
+  | Override.Unsupported_schema_version { expected; actual } ->
+    Printf.sprintf
+      "%s has schema_version %d and this build reads only schema_version %d, so \
+       this preset cannot be restored; set its prompts again and save them as a \
+       new preset"
+      overrides_file actual expected
+  | (Override.Invalid_json _ | Override.Read_failed _ | Override.Write_failed _ | Override.Expected_object _ | Override.Expected_list _ | Override.Expected_integer _ | Override.Expected_string _ | Override.Duplicate_field _ | Override.Missing_field _ | Override.Unexpected_field _ | Override.Duplicate_override_key _) as error -> Override.error_to_string error
+;;
+
+let load ~base_path name =
+  if not (is_valid_name name)
+  then Error ("invalid preset name: " ^ name)
+  else
+    guard (fun () ->
+    let dir = preset_dir ~base_path name in
+    if not (Sys.file_exists (Filename.concat dir manifest_file))
+    then Error ("preset not found: " ^ name)
+    else
+      let* m = read_manifest dir in
+      (* Opened, listed and restored by the directory's name, so a manifest
+         naming another preset -- a directory copied under a new name --
+         would open the original under the copy's row. *)
+      let* () =
+        if String.equal m.stored_name name
+        then Ok ()
+        else
+          Error
+            (Printf.sprintf "manifest names preset %S, but its directory is %S"
+               m.stored_name name)
+      in
+      let* prompt_overrides =
+        Override.load ~path:(Filename.concat dir overrides_file)
+        |> Result.map_error preset_overrides_error_to_string
+      in
+      let* assignments, lanes =
+        match Fs_compat.load_file_opt (Filename.concat dir runtime_file) with
+        | None -> Error "runtime.json missing"
+        | Some text ->
+          let* json = json_of_string text in
+          runtime_of_json json
+      in
+      let* instructions =
+        List.fold_left
+          (fun acc keeper ->
+            let* acc = acc in
+            match Fs_compat.load_file_opt (instruction_file dir keeper) with
+            | Some text -> Ok ((keeper, text) :: acc)
+            | None -> Error ("instructions file missing for keeper " ^ keeper))
+          (Ok [])
+          m.stored_keepers
+        |> Result.map List.rev
+      in
+      Ok
+        { name = m.stored_name
+        ; description = m.stored_description
+        ; created_at = m.stored_created_at
+        ; default_revisions = m.stored_default_revisions
+        ; prompt_overrides
+        ; instructions
+        ; assignments
+        ; lanes
+        })
+;;
+
+let list ~base_path =
+  let dir = presets_dir ~base_path in
+  if not (Sys.file_exists dir && Sys.is_directory dir)
+  then { presets = []; unreadable = [] }
+  else (
+    match guard (fun () -> Ok (Fs_compat.read_dir dir)) with
+    | Error message -> { presets = []; unreadable = [ dir, message ] }
+    | Ok names ->
+      names
+      |> List.fold_left
+           (fun acc name ->
+             (* Listed only when it loads: the list and [load] read a
+                preset the same way, so a listed preset always opens and
+                one that does not is listed as unreadable with the reason
+                [load] would give. Reading the manifest alone listed a
+                preset whose overrides file no longer reads. *)
+             match
+               guard (fun () ->
+                 if Sys.is_directory (Filename.concat dir name)
+                 then Result.map (fun s -> Some (manifest_of_snapshot s)) (load ~base_path name)
+                 else Ok None)
+             with
+             | Ok (Some m) -> { acc with presets = m :: acc.presets }
+             | Ok None -> acc
+             | Error message -> { acc with unreadable = (name, message) :: acc.unreadable })
+           { presets = []; unreadable = [] }
+      |> fun acc -> { presets = List.rev acc.presets; unreadable = List.rev acc.unreadable })
+;;
+
+(* ── Restore ───────────────────────────────────────────────────────── *)
+
+let finish (r : part_result) = { applied = List.rev r.applied; skipped = List.rev r.skipped }
+
+let restore_prompt_overrides ~base_path (entries : Override.entry list) =
+  let before = List.map (fun key -> key, Prompt_registry.resolve_prompt key)
+    [Prompt_names.candle_appraiser_grade;Prompt_names.candle_appraiser_relation;
+     Prompt_names.candle_appraiser_weights] in
+  let notify_changed () =
+    (* Managed default files are outside the preset surface. Use their captured
+       values and committed in-memory overrides; release cleanup does no I/O. *)
+    let overrides = Prompt_registry.override_entries () in
+    if List.exists (fun (key, (resolution : Prompt_registry.prompt_resolution)) ->
+      let override_value = List.find_opt (fun (entry : Override.entry) -> entry.key = key) overrides
+        |> Option.map (fun entry -> entry.Override.value) in
+      let _, effective = Prompt_registry_types.resolve_source
+        ~override_value ~file_value:resolution.file_value in
+      effective <> resolution.effective) before
+    then Candle_payout_worker.wake () in
+  Eio_guard.protect ~finally:notify_changed (fun () ->
+  let wanted key =
+    List.exists (fun (e : Override.entry) -> String.equal e.Override.key key) entries
+  in
+  let cleared =
+    List.fold_left
+      (fun acc (e : Override.entry) ->
+        if wanted e.Override.key
+        then acc
+        else (
+          match Prompt_registry.clear_prompt_override_persisted ~base_path e.Override.key with
+          | Ok () -> { acc with applied = (e.Override.key ^ " (cleared)") :: acc.applied }
+          | Error message -> { acc with skipped = (e.Override.key, message) :: acc.skipped }))
+      { applied = []; skipped = [] }
+      (* What is in force, not what is saved: a preset that does not mention
+         a key must not decide the fate of a refused override the operator is
+         still holding. An explicit clear is the only thing that removes
+         one. *)
+      (Prompt_registry.override_entries ())
+  in
+  (* Each entry keeps the binding it was captured with, so a restored
+     override reads as "written against an older default" when that is what
+     it is, instead of looking freshly authored against today's text. *)
+  let result = List.fold_left
+    (fun acc (e : Override.entry) ->
+      match Prompt_registry.restore_persisted_entry ~base_path e with
+      | Ok () -> { acc with applied = e.Override.key :: acc.applied }
+      | Error (Prompt_registry.Validation_error message)
+      | Error (Prompt_registry.Persistence_error message) ->
+        { acc with skipped = (e.Override.key, message) :: acc.skipped })
+    cleared
+    entries
+  |> finish in
+  result)
+;;
+
+let restore_instructions ~base_path instructions =
+  List.fold_left
+    (fun acc (keeper, text) ->
+      match Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path keeper with
+      | Some path when Sys.file_exists path ->
+        (match
+           Runtime.with_manifest_config_lock ~manifest_path:path
+             ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+             (fun () ->
+               Keeper_toml_loader.edit_keeper_toml_fields_strict_staged
+                 ~path
+                 [ "instructions", Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string text) ]
+               |> Result.map_error Fs_compat.atomic_replace_failure_to_string)
+         with
+         | Ok () -> { acc with applied = keeper :: acc.applied }
+         | Error detail ->
+           { acc with
+             skipped =
+               (keeper, detail) :: acc.skipped
+           })
+      | Some _ | None -> { acc with skipped = (keeper, "no keeper TOML") :: acc.skipped })
+    { applied = []; skipped = [] }
+    instructions
+  |> finish
+;;
+
+
+let setting_holds ~current = function
+  | Unrecorded -> true
+  | Recorded _ as wanted -> current = wanted
+;;
+
+let lane_holds ~current_lanes lane =
+  match List.find_opt (fun current -> current.owner = lane.owner) current_lanes with
+  | Some current ->
+      current.enabled = lane.enabled && current.slots = lane.slots
+      && current.cli_slots = lane.cli_slots
+      && setting_holds ~current:current.max_output_tokens lane.max_output_tokens
+      && setting_holds ~current:current.thinking lane.thinking
+  | None -> false
+;;
+
+(* Line-level edits of the two tables, so every other line of runtime.toml,
+   comments included, survives. Assignment rows go through the runtime's own
+   row writer (quoted keys, so a dotted keeper name stays one key). Keepers
+   assigned now but absent from the preset lose their row; lanes present in
+   the file but absent from the preset are left alone. A lane whose slots
+   already match is not rewritten either: the array writer drops comment
+   lines inside the block, and the live file keeps its lane notes there. *)
+let runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes content =
+  let content =
+    List.fold_left
+      (fun content (keeper_name, _) ->
+        if List.mem_assoc keeper_name assignments
+        then content
+        else Runtime_config_text.remove_runtime_assignment_text content ~keeper_name)
+      content
+      current_assignments
+  in
+  let content =
+    List.fold_left
+      (fun content (keeper_name, runtime_id) ->
+        Runtime_config_text.update_runtime_assignment_text content ~keeper_name ~runtime_id)
+      content
+      assignments
+  in
+  List.fold_left
+    (fun content lane ->
+      match lane.owner with
+      | Unavailable_lane _ -> content
+      | Current_lane owner ->
+      if lane_holds ~current_lanes lane
+      then content
+      else (
+        let path = Runtime_schema.exact_lane_table_name owner in
+        let current = List.find_opt (fun current -> current.owner = lane.owner) current_lanes in
+        let content = Toml_line_editor.edit_table_bool content ~path ~key:"enabled" ~value:lane.enabled in
+        (* A request setting is written only where it differs, like the slots
+           below: the integer writer replaces the whole line, so rewriting an
+           unchanged budget would drop its trailing comment. *)
+        let content =
+          if setting_holds ~current:(Option.fold ~none:Unrecorded
+               ~some:(fun l -> l.max_output_tokens) current) lane.max_output_tokens
+          then content
+          else (
+            match lane.max_output_tokens with
+            | Unrecorded -> content
+            | Recorded (Some value) -> Toml_line_editor.edit_table_int content ~path ~key:"max_output_tokens" ~value
+            | Recorded None -> Toml_line_editor.edit_table_scalar content ~path ~key:"max_output_tokens" ~value:None)
+        in
+        let content =
+          if setting_holds ~current:(Option.fold ~none:Unrecorded
+               ~some:(fun l -> l.thinking) current) lane.thinking
+          then content
+          else (
+            match lane.thinking with
+            | Unrecorded -> content
+            | Recorded (Some value) -> Toml_line_editor.edit_table_bool content ~path ~key:"thinking" ~value
+            | Recorded None -> Toml_line_editor.edit_table_scalar content ~path ~key:"thinking" ~value:None)
+        in
+        match current with
+        | Some current when current.slots = lane.slots && current.cli_slots = lane.cli_slots -> content
+        | Some _ | None ->
+          let content =
+            Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane.slots
+          in
+          Toml_line_editor.edit_table_multiline_array
+            content
+            ~path
+            ~key:"cli_slots"
+            ~values:lane.cli_slots))
+    content
+    lanes
+;;
+
+(* The preset's routing already holds in the file: the same assignment
+   rows, and every preset lane present with the same slots. Compared on the
+   parsed values, not the text — the writers reformat rows they touch. *)
+let routing_holds ~current_assignments ~current_lanes ~assignments ~lanes =
+  let sorted = List.sort compare in
+  sorted current_assignments = sorted assignments
+  && List.for_all (fun lane -> match lane.owner with
+       | Unavailable_lane _ -> true
+       | Current_lane _ -> lane_holds ~current_lanes lane) lanes
+;;
+
+(* The writer permits keeping a declared-but-catalog-missing assignment in a
+   degraded configuration. A preset must not introduce such an unavailable
+   route merely because that save is legal. Read the same materialized binding
+   and capability lookup used by Runtime's degraded-startup report. *)
+let unavailable_assignments content assignments =
+  match Runtime_toml.parse_string content with
+  | Error errors -> Error (String.concat "; " (List.map parse_error_line errors))
+  | Ok config ->
+    let runtimes, _dropped = Runtime_instance.partition_bindings config config.bindings in
+    Ok (List.filter_map (fun (keeper, id) ->
+      if List.exists (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id id) config.lane_decls
+      then None (* A declared lane takes precedence over a same-named binding. *)
+      else
+      match List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id) runtimes with
+      | None -> None (* Undeclared or dropped bindings are judged by the writer. *)
+      | Some runtime ->
+        match runtime.execution, Runtime_instance.capabilities_for_runtime runtime with
+        | (Runtime_execution.Codex_app_server _ | Claude_code _
+          | Antigravity_cli _ | Muse_serve _), _ -> None
+        | Runtime_execution.Agent_core _, Some _ -> None
+        | Runtime_execution.Agent_core provider_config, None ->
+          let missing : Runtime.missing_catalog_model =
+            { runtime_id = runtime.id; provider_id = runtime.provider.id
+            ; provider_label = Llm_provider.Provider_config.capability_provider_label provider_config
+            ; model_id = provider_config.model_id } in
+          Some (keeper, Runtime.missing_catalog_model_to_string missing)) assignments)
+;;
+
+let restore_runtime ~commit ~base_path ~assignments ~lanes =
+  let path = runtime_toml_path ~base_path in
+  let failed message = Runtime_failed message, [], skipped_lanes lanes in
+  match guard (fun () -> Ok (Fs_compat.load_file_opt path)) with
+  | Error message -> failed message
+  | Ok None -> failed ("runtime.toml missing at " ^ path)
+  | Ok (Some content) ->
+    (match runtime_of_text content with
+     | Error message -> failed ("current runtime.toml does not parse: " ^ message)
+     | Ok (current_assignments, current_lanes) ->
+       match unavailable_assignments content assignments with
+       | Error reason -> failed reason
+       | Ok unavailable ->
+       let assignments = List.filter_map (fun (keeper, runtime_id) ->
+         if List.mem_assoc keeper unavailable then
+           Option.map (fun current -> keeper, current) (List.assoc_opt keeper current_assignments)
+         else Some (keeper, runtime_id)) assignments in
+       if routing_holds ~current_assignments ~current_lanes ~assignments ~lanes
+       then Runtime_unchanged, unavailable, skipped_lanes lanes
+       else (
+       let validate = Runtime.validate_config_text ~runtime_config_path:path in
+       let text = runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes content in
+       let accepted_text, skipped_assignments, skipped_runtime_lanes =
+         match validate text with
+         | Ok () -> text, unavailable, skipped_lanes lanes
+         | Error _ ->
+           (* Use the writer's complete precondition, including catalog-only
+              slots and CLI capabilities. A rejected saved declaration keeps
+              its current value; it does not choose a substitute or discard a
+              subset of a lane's ordered candidates. *)
+           let base = List.fold_left (fun text (keeper_name, _) ->
+             if List.mem_assoc keeper_name assignments then text
+             else Runtime_config_text.remove_runtime_assignment_text text ~keeper_name)
+             content current_assignments in
+           let text, skipped_assignments = List.fold_left
+             (fun (text, skipped) (keeper_name, runtime_id) ->
+               if List.assoc_opt keeper_name current_assignments = Some runtime_id
+               then text, skipped
+               else (
+               let candidate = Runtime_config_text.update_runtime_assignment_text
+                 text ~keeper_name ~runtime_id in
+               match validate candidate with
+               | Ok () -> candidate, skipped
+               | Error reason -> text, (keeper_name, reason) :: skipped))
+             (base, []) assignments in
+           let text, skipped_runtime_lanes = List.fold_left
+             (fun (text, skipped) lane -> match lane.owner with
+               | Unavailable_lane _ -> text, skipped
+               | Current_lane _ ->
+                 if lane_holds ~current_lanes lane then text, skipped
+                 else (
+                 let candidate = runtime_text_with ~current_assignments:[]
+                   ~current_lanes ~assignments:[] ~lanes:[lane] text in
+                 match validate candidate with
+                 | Ok () -> candidate, skipped
+                 | Error reason -> text, (lane_key lane.owner, reason) :: skipped))
+             (text, []) lanes in
+           text, unavailable @ List.rev skipped_assignments,
+             skipped_lanes lanes @ List.rev skipped_runtime_lanes
+       in
+       let result =
+         if String.equal accepted_text content then Runtime_unchanged
+         else match commit ~runtime_config_path:path accepted_text with
+           | Ok receipt -> Runtime_committed receipt
+           | Error message -> Runtime_failed message
+       in
+       result, skipped_assignments, skipped_runtime_lanes))
+;;
+
+let restore_with_config_commit ~commit ~base_path name =
+  (* The target is read before the autosave is written, so restoring the
+     autosave itself applies what it held, not the state just captured. *)
+  let* target = load ~base_path name in
+  let default_comparison = compare_defaults target in
+  let autosave = autosave_name in
+  let* current =
+    capture ~base_path ~name:autosave ~description:("state before restoring " ^ name)
+  in
+  let* () = save ~base_path current in
+  let prompt_overrides_result = restore_prompt_overrides ~base_path target.prompt_overrides in
+  let instructions_result = restore_instructions ~base_path target.instructions in
+  let runtime_result, skipped_assignments, skipped_lanes =
+    restore_runtime ~commit ~base_path ~assignments:target.assignments ~lanes:target.lanes
+  in
+  Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result; default_comparison
+     ; preserved_lane_settings = preserved_lane_settings target.lanes
+     ; skipped_lanes; skipped_assignments }
+;;
+
+let restore ~base_path name =
+  restore_with_config_commit
+    ~commit:(fun ~runtime_config_path text ->
+      Runtime.save_config_text ~runtime_config_path text)
+    ~base_path name
+;;
+
+module For_testing = struct
+  let restore_with_config_commit = restore_with_config_commit
+end
+
+(* ── Delete ────────────────────────────────────────────────────────── *)
+
+type delete_error =
+  | Delete_invalid_name of string
+  | Delete_not_found of string
+  | Delete_failed of { name : string; reason : string }
+
+let unix_error_text error operation argument =
+  Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)
+;;
+
+(* The preset leaves [presets/] in one rename, into a fresh holder beside it,
+   and is removed from there. A save of the same name running alongside
+   either replaces it whole or finds it gone; it never loses files to a
+   delete still walking the old directory. A second delete of the same name
+   finds nothing to rename. No [load] first: an unreadable preset cannot be
+   restored, so removing it is the one thing the operator can still do with
+   it, and a rename moves a dangling symlink as readily as a directory. *)
+let delete ~base_path name =
+  if not (is_valid_name name)
+  then Error (Delete_invalid_name name)
+  else (
+    let holder =
+      guard (fun () ->
+        let* () = mkdir_p (staging_dir ~base_path) in
+        Ok (Filename.temp_dir ~temp_dir:(staging_dir ~base_path) (name ^ "-") ""))
+    in
+    match holder with
+    | Error reason -> Error (Delete_failed { name; reason })
+    | Ok holder ->
+      let moved =
+        match
+          Fs_compat.rename_noreplace (preset_dir ~base_path name) (Filename.concat holder name)
+        with
+        | () -> Ok ()
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Delete_not_found name)
+        | exception Unix.Unix_error (error, operation, argument) ->
+          Error (Delete_failed { name; reason = unix_error_text error operation argument })
+        | exception Sys_error reason -> Error (Delete_failed { name; reason })
+      in
+      remove_quietly holder;
+      moved)
+;;
+
+let delete_error_to_string = function
+  | Delete_invalid_name name -> "invalid preset name: " ^ name
+  | Delete_not_found name -> "no preset named " ^ name
+  | Delete_failed { name; reason } ->
+    Printf.sprintf "preset %s could not be removed: %s" name reason
+;;
+
+let same_settings (left : snapshot) (right : snapshot) =
+  let ordered rows = List.sort Stdlib.compare rows in
+  let ordered_lanes lanes =
+    List.filter (fun lane -> match lane.owner with Current_lane _ -> true | Unavailable_lane _ -> false) lanes
+    |> List.sort (fun left right -> Stdlib.compare left.owner right.owner)
+  in
+  ordered left.prompt_overrides = ordered right.prompt_overrides
+  && ordered left.instructions = ordered right.instructions
+  && ordered left.assignments = ordered right.assignments
+  && List.equal (fun saved current -> lane_holds ~current_lanes:[current] saved)
+       (ordered_lanes left.lanes) (ordered_lanes right.lanes)
+
+let source_directory ~base_path snapshot = preset_dir ~base_path snapshot.name
+
+let matches_saved_settings ~base_path snapshot =
+  guard (fun () ->
+    let overrides_path =
+      Filename.concat (Config_dir_resolver.masc_root ~base_path) overrides_file
+    in
+    let* prompt_overrides =
+      if not (Sys.file_exists overrides_path) then Ok []
+      else Override.load ~path:overrides_path
+        |> Result.map_error (fun error -> overrides_path ^ ": " ^ Override.error_to_string error)
+    in
+    let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let* instructions =
+      if Sys.file_exists dir && not (Sys.is_directory dir) then
+        Error (dir ^ ": expected a Keeper configuration directory")
+      else
+        Keeper_types_profile_toml.discover_keepers_toml_with_paths dir
+        |> List.fold_left (fun result (path, discovery) ->
+          let* instructions = result in
+          match discovery with
+          | Keeper_types_profile.Invalid { error; _ } ->
+              Error (path ^ ": " ^ Keeper_types_profile.keeper_toml_load_error_to_string error)
+          | Keeper_types_profile.Loaded { defaults; _ } ->
+              let entry = Option.map (fun text ->
+                Filename.remove_extension (Filename.basename path), text)
+                defaults.Keeper_types_profile_defaults.instructions
+              in
+              Ok (match entry with None -> instructions | Some entry -> entry :: instructions))
+          (Ok [])
+    in
+    let* assignments, lanes = capture_runtime ~base_path in
+    Ok (same_settings snapshot
+      { snapshot with prompt_overrides; instructions; assignments; lanes }))

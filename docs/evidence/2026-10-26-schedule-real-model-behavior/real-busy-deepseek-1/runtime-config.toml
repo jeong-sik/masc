@@ -1,0 +1,30 @@
+[runtime]
+default = "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.com/v1"
+connect-timeout-s = 600.0
+exact-body-timeout-s = 1200.0
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[models.ollama-cloud-deepseek-v4-1-flash]
+api-name = "deepseek-v4.1-flash"
+temperature = 1.0
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "low"
+[models.ollama-cloud-deepseek-v4-1-flash.capabilities]
+thinking-control-format = "reasoning-effort"
+reasoning-streaming-format = "delta:reasoning"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-deepseek-v4-1-flash]

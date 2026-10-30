@@ -1,0 +1,13 @@
+name = "masc_lane_detach"
+description = """
+Detach an optional Add-on instance and stop only its worker.
+
+Preserve recorded evidence and existing Keeper/game/browser ownership. Already submitted Keeper work follows its existing lifecycle. Inspect to confirm worker cleanup."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "instance_id"
+type = "string"
+required = true
+description = "Exact attached instance ID."

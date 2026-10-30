@@ -1,0 +1,179 @@
+{
+  "provenance": [
+    "Synthetic"
+  ],
+  "cases": [
+    {
+      "id": "pending-approval",
+      "source": {
+        "keeper_id": "synthetic-evaluation",
+        "keeper_instructions": "Preserve pending work, corrections and approval boundaries.",
+        "turn_ref": "synthetic-approval#1",
+        "goal_context": {
+          "status": "no_task"
+        },
+        "historical_task_contexts": [],
+        "working_context": {
+          "sources": [],
+          "previous": null,
+          "unavailable": [],
+          "execution_basis": null
+        },
+        "current": {
+          "facts": [
+            {
+              "claim": "The synthetic deployment requires a completed build and explicit approval.",
+              "category": "fact",
+              "first_seen": 0.0,
+              "last_seen": 0.0,
+              "origin": {
+                "kind": "authored",
+                "trace_id": "synthetic-approval"
+              },
+              "basis": {
+                "kind": "observed"
+              }
+            }
+          ]
+        },
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "kind": "text",
+                "text": "The cabinet code is ORCHID-731. Prepare deployment but do not publish without my approval."
+              }
+            ],
+            "name": null,
+            "tool_call_id": null,
+            "metadata": []
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "kind": "text",
+                "text": "The synthetic build passed. Approval has not been given."
+              }
+            ],
+            "name": null,
+            "tool_call_id": null,
+            "metadata": []
+          }
+        ],
+        "tool_observations": [],
+        "counterpart_observations": []
+      },
+      "previous_state": null,
+      "unread_messages": [],
+      "suffix": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "kind": "text",
+              "text": "Report our next action."
+            }
+          ],
+          "name": null,
+          "tool_call_id": null,
+          "metadata": []
+        }
+      ],
+      "question": "What code is recorded, and may we publish now?"
+    },
+    {
+      "id": "corrected-destination",
+      "source": {
+        "keeper_id": "synthetic-evaluation",
+        "keeper_instructions": "Preserve pending work, corrections and approval boundaries.",
+        "turn_ref": "synthetic-destination#1",
+        "goal_context": {
+          "status": "no_task"
+        },
+        "historical_task_contexts": [],
+        "working_context": {
+          "sources": [],
+          "previous": null,
+          "unavailable": [],
+          "execution_basis": null
+        },
+        "current": {
+          "facts": [
+            {
+              "claim": "A smoke check is required before announcing the synthetic rollout.",
+              "category": "fact",
+              "first_seen": 0.0,
+              "last_seen": 0.0,
+              "origin": {
+                "kind": "authored",
+                "trace_id": "synthetic-destination"
+              },
+              "basis": {
+                "kind": "observed"
+              }
+            }
+          ]
+        },
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "kind": "text",
+                "text": "Use staging-east initially."
+              }
+            ],
+            "name": null,
+            "tool_call_id": null,
+            "metadata": []
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "kind": "text",
+                "text": "Correction: use staging-west. The previous destination is obsolete."
+              }
+            ],
+            "name": null,
+            "tool_call_id": null,
+            "metadata": []
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "kind": "text",
+                "text": "I will use staging-west; the smoke check remains pending."
+              }
+            ],
+            "name": null,
+            "tool_call_id": null,
+            "metadata": []
+          }
+        ],
+        "tool_observations": [],
+        "counterpart_observations": []
+      },
+      "previous_state": null,
+      "unread_messages": [],
+      "suffix": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "kind": "text",
+              "text": "Continue with the agreed destination."
+            }
+          ],
+          "name": null,
+          "tool_call_id": null,
+          "metadata": []
+        }
+      ],
+      "question": "Which destination should be used, and what check remains?"
+    }
+  ]
+}

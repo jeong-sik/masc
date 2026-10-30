@@ -1,0 +1,79 @@
+{
+  "schema": "masc.owned-tui-compact-health-baseline-bug.v1",
+  "finding": "P2 controller baseline gate mismatch; no product verdict",
+  "frozen_product_source": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "affected_controller_sha256": "8c7712038a331fbcc3dedb8e9e8e7b89442e6dda1d218a49ae16e8dbbe4ffe29",
+  "affected_controller": "owned_tui_request_state_v2.py",
+  "trigger": "Fresh owned TUI starts in Overview and performs canonical compact identity reads before keyboard. Relay omits these from selected evidence; observer waits for selected health before sending first key.",
+  "source_evidence": [
+    {
+      "path": "bin/masc_tui_types.ml",
+      "lines": "15834",
+      "fact": "Fresh create_state view = Overview."
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "lines": "4276-4279,4291-4296",
+      "fact": "Overview needs roster/asks/approvals but not fleet_safety. Keeper/fleet/chat views enable fleet_safety."
+    },
+    {
+      "path": "bin/masc_tui.ml",
+      "lines": "13399-13402,13470-13473",
+      "fact": "load_http_surfaces performs compact server identity reads before and after each refresh."
+    },
+    {
+      "path": "bin/masc_tui_loader.ml",
+      "lines": "1565-1571",
+      "fact": "load_server_identity delegates to fetch_server_identity and decodes canonical identity."
+    },
+    {
+      "path": "bin/masc_tui_http.ml",
+      "lines": "3278-3279,3293-3294",
+      "fact": "fetch_server_identity GETs /health; fetch_fleet_safety GETs /health?full=1."
+    },
+    {
+      "path": "bin/masc_tui_credential.ml",
+      "lines": "11",
+      "fact": "Actual agent_name is masc-tui; HTTP auth_headers uses X-MASC-Agent and passive framer lowercases header names."
+    },
+    {
+      "path": "owned_tui_request_state_v2.py",
+      "lines": "251,605",
+      "fact": "Whitelist selected only query full=1 while initial gate waits for selected masc-tui GET /health response before keyboard."
+    }
+  ],
+  "consequence": "Valid default startup traffic may be forwarded without selected events/file, and observer cannot progress to the Keeper view which would request full health. Absence of selected records alone does not establish missing TUI requests or product/network failure.",
+  "review_correction": "The reviewer previously issued SOURCE PASS for v2 and missed this baseline mismatch. That approval was explicitly withdrawn when the direct compact/full source chain was read. This report preserves the correction rather than treating a new run as a repair of the original result.",
+  "prior_run_boundary": "Parent reports first v2 actual trial stopped as INCOMPLETE via verified observer normal SIGINT; this report is source-only and does not independently recheck live/PTY/process/API or cleanup. Original run and receipts are not modified.",
+  "minimal_repair": "Select GET /health only when parsed query is {} or exactly full:[1]. Existing safe build/paths/startup projection, identity/headers/forwarded bytes, actor filter and all scenario oracles unchanged.",
+  "not_proven": [
+    "Actual TUI readiness or health response of the first run from this source-only diagnostic",
+    "PTY paint, F9 state or causal resize acknowledgement",
+    "Actual success of a later run",
+    "Exhaustive passive framer runtime qualification"
+  ],
+  "source_bindings": {
+    "bin/masc_tui_types.ml": {
+      "bytes": 1024106,
+      "sha256": "481643071b300594df770385095b02946cfc09f40becdcb69c5cc821c05c1ade"
+    },
+    "bin/masc_tui.ml": {
+      "bytes": 1857848,
+      "sha256": "0b23150f665b9f0831332019abcb6b6ff67650e8186a68265b3d6cfa06f0c90b"
+    },
+    "bin/masc_tui_loader.ml": {
+      "bytes": 85699,
+      "sha256": "cce541a19ce37d5c74a1186fccc5359c1994ad723b20c8f5179b6128b2adc88d"
+    },
+    "bin/masc_tui_http.ml": {
+      "bytes": 196749,
+      "sha256": "2475d8e972063f72e68074f3db0ba23b2997f9ac17b84018eb40f798e0ea68c5"
+    },
+    "bin/masc_tui_credential.ml": {
+      "bytes": 13317,
+      "sha256": "c658ec2b05a2b1c89d6d105a040b5ae158c6a853f1da9c6b4fc823013bf4eb42"
+    }
+  },
+  "closed_run_causal_limit": "Closed first-run lifecycle shows canonical relay-port startup-attempt file changed absent to existing empty; readable matching live fallback list empty. Structured synthetic TUI log reports first refresh 6 failed/0 received, repeated later. These facts prevent calling the compact-health selector bug the sole actual cause. Exact transport-error detail was not retained in these summary logs. No PTY/ANSI read.",
+  "relay_identity_contract": "Frozen source peer host=127.0.0.1; explicit CLI port is resolved into TUI connection. Workspace identity compares canonical base/masc-root paths, not advertised listen port (masc_tui_types.ml:663-695). No concrete proxy-port identity refusal established; no live re-probe."
+}

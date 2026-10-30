@@ -1,0 +1,1110 @@
+import { describe, expect, it } from 'vitest'
+import { deriveLifecycleState, normalizeKeepers, normalizeKeeperTrustTerminalReason, toKeeperPhase } from './keeper-store-normalize'
+
+describe('toKeeperPhase — backend lowercase to PascalCase normalization', () => {
+  it('maps lowercase backend phase strings to PascalCase KeeperPhase', () => {
+    expect(toKeeperPhase('offline')).toBe('Offline')
+    expect(toKeeperPhase('running')).toBe('Running')
+    expect(toKeeperPhase('failing')).toBe('Failing')
+    expect(toKeeperPhase('compacting')).toBeNull()
+    expect(toKeeperPhase('draining')).toBe('Draining')
+    expect(toKeeperPhase('paused')).toBe('Paused')
+    expect(toKeeperPhase('stopped')).toBe('Stopped')
+    expect(toKeeperPhase('crashed')).toBe('Crashed')
+    expect(toKeeperPhase('restarting')).toBe('Restarting')
+  })
+
+  it('accepts PascalCase input for forward compatibility', () => {
+    expect(toKeeperPhase('Offline')).toBe('Offline')
+    expect(toKeeperPhase('Running')).toBe('Running')
+  })
+
+  it('trims surrounding whitespace before matching', () => {
+    expect(toKeeperPhase(' running ')).toBe('Running')
+  })
+
+  it('returns null for unknown or empty values', () => {
+    expect(toKeeperPhase(null)).toBeNull()
+    expect(toKeeperPhase(undefined)).toBeNull()
+    expect(toKeeperPhase('')).toBeNull()
+    expect(toKeeperPhase('unknown_phase')).toBeNull()
+    expect(toKeeperPhase('handing_off')).toBeNull()
+    expect(toKeeperPhase('HandingOff')).toBeNull()
+    expect(toKeeperPhase('RUNNING')).toBeNull()
+  })
+})
+
+describe('normalizeKeepers sandbox_profile', () => {
+  // The switch listed 'local' and 'docker' only. dashboard_http_keeper.ml emits
+  // sandbox_profile_to_string, so a microvm or remote_ssh keeper normalized to
+  // null and the fleet chip read it as an unknown sandbox
+  // (fleet-telemetry-panel.ts). That chip is the consumer this path feeds. The
+  // goal tree's 샌드박스 cell is not: it decodes
+  // dashboard_goals_types_timeline.ml through decodeGoalDetailKeeper, which
+  // never calls this normalizer. Neither is the detail alert strip, whose
+  // sandbox_profile arm sits behind sandbox_target — emitted with
+  // ~default:"unknown", so the `||` never falls through to it.
+  it('keeps every profile the runtime can emit', () => {
+    const keepers = normalizeKeepers([
+      { name: 'a', status: 'active', sandbox_profile: 'docker' },
+      { name: 'b', status: 'active', sandbox_profile: 'microvm' },
+      { name: 'c', status: 'active', sandbox_profile: 'remote_ssh' },
+    ])
+    expect(keepers.map(keeper => keeper.sandbox_profile)).toEqual([
+      'docker',
+      'microvm',
+      'remote_ssh',
+    ])
+  })
+
+  // 'local' is not a string sandbox_profile_of_string parses, so a row carrying
+  // it is a row this dashboard cannot read -- not a fourth profile.
+  it('reads anything outside the runtime set as null', () => {
+    const keepers = normalizeKeepers([
+      { name: 'a', status: 'active', sandbox_profile: 'local' },
+      { name: 'b', status: 'active', sandbox_profile: 'some_future_profile' },
+      { name: 'c', status: 'active', sandbox_profile: '' },
+      { name: 'd', status: 'active' },
+    ])
+    expect(keepers.map(keeper => keeper.sandbox_profile)).toEqual([null, null, null, null])
+  })
+})
+
+describe('normalizeKeepers addressed-message activity', () => {
+  it('carries the server count to the Keeper activity surface', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'mention-observer', status: 'active', addressed_message_count: 1 },
+    ])
+    expect(keeper?.addressed_message_count).toBe(1)
+  })
+})
+
+describe('normalizeKeepers phase field', () => {
+  it('normalizes lowercase backend phase to PascalCase KeeperPhase', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'phase-test', status: 'active', phase: 'running' },
+    ])
+    expect(keeper?.phase).toBe('Running')
+    expect(keeper?.lifecycle_phase).toBe('Running')
+  })
+
+  it('preserves explicit lifecycle phase and pipeline stage detail', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'offline-detail-test',
+        status: 'offline',
+        phase: 'running',
+        lifecycle_phase: 'Offline',
+        pipeline_stage: 'offline',
+        pipeline_stage_detail: 'launch_pending_no_fiber',
+      },
+    ])
+    expect(keeper?.phase).toBe('Running')
+    expect(keeper?.lifecycle_phase).toBe('Offline')
+    expect(keeper?.pipeline_stage).toBe('offline')
+    expect(keeper?.pipeline_stage_detail).toBe('launch_pending_no_fiber')
+  })
+
+  it('returns null for unknown phase', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'unknown-test', status: 'active', phase: 'bogus' },
+    ])
+    expect(keeper?.phase).toBeNull()
+  })
+
+  it('returns null when phase is absent', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'no-phase', status: 'active' },
+    ])
+    expect(keeper?.phase).toBeNull()
+  })
+
+  it('trims keeper status before normalization', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'trimmed-status', status: ' active ', phase: ' running ' },
+    ])
+    expect(keeper?.status).toBe('active')
+    expect(keeper?.phase).toBe('Running')
+  })
+})
+
+describe('normalizeKeepers keepalive cadence', () => {
+  it('keeps the server-resolved keepalive interval', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'cadence-test',
+        status: 'active',
+        keeper_keepalive_interval_s: 30,
+      },
+    ])
+
+    expect(keeper?.keeper_keepalive_interval_s).toBe(30)
+  })
+})
+
+describe('normalizeKeepers context measurement', () => {
+  it('decodes context numbers declared by the turn_record projection', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'rondo',
+        status: 'active',
+        context_ratio: 0.504435,
+        context_tokens: 100887,
+        context_max: 200000,
+        context_source: 'turn_record',
+        context_metrics_unavailable: null,
+        context: {
+          source: 'turn_record',
+          context_ratio: 0.504435,
+          context_tokens: 100887,
+          context_max: 200000,
+          observed_at: '2026-07-31T12:37:20Z',
+          turn_ref: 'trace-1785189111911-00004#3337',
+          absolute_turn: 3337,
+          request_body_bytes: 402408,
+        },
+      },
+    ])
+
+    expect(keeper?.context_tokens).toBe(100887)
+    expect(keeper?.context_max).toBe(200000)
+    expect(keeper?.context_ratio).toBeCloseTo(0.504435)
+    expect(keeper?.context_source).toBe('turn_record')
+    expect(keeper?.context?.turn_ref).toBe('trace-1785189111911-00004#3337')
+    expect(keeper?.context?.absolute_turn).toBe(3337)
+    expect(keeper?.context?.request_body_bytes).toBe(402408)
+    expect(keeper?.context?.observed_at).toBe('2026-07-31T12:37:20Z')
+  })
+
+  it('keeps numbers null under a retired or unknown context source', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'sojin',
+        status: 'active',
+        context_ratio: 0.13,
+        context_tokens: 16312,
+        context_max: 128000,
+        context_source: 'keeper_context_status',
+        context: {
+          source: 'keeper_context_status',
+          context_tokens: 16312,
+          context_max: 128000,
+        },
+      },
+    ])
+
+    expect(keeper?.context_tokens).toBeNull()
+    expect(keeper?.context_max).toBeNull()
+    expect(keeper?.context_ratio).toBeNull()
+    expect(keeper?.context_source).toBeNull()
+    expect(keeper?.context?.context_tokens).toBeNull()
+    expect(keeper?.context?.source).toBeNull()
+  })
+
+  it('passes through the new typed absence reasons', () => {
+    for (const reason of [
+      'turn_record_undecodable',
+      'turn_record_read_failed',
+      'turn_record_without_usage',
+      'turn_record_trace_mismatch',
+    ]) {
+      const [keeper] = normalizeKeepers([
+        {
+          name: 'rondo',
+          status: 'active',
+          context_metrics_unavailable: { kind: 'not_observed', reason },
+        },
+      ])
+      expect(keeper?.context_metrics_unavailable).toEqual({ kind: 'not_observed', reason })
+    }
+  })
+})
+
+describe('normalizeKeepers lifecycle metrics', () => {
+  it('drops retired compaction policy fields', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'sangsu',
+        status: 'active',
+        compaction_profile: 'balanced',
+        compaction_ratio_gate: 0.72,
+        compaction_message_gate: 120,
+        compaction_token_gate: 240000,
+        compaction_count: 3,
+        last_compaction_saved_tokens: 1200,
+        last_compaction_decision: 'whatever',
+      },
+    ])
+
+    expect('compaction_profile' in (keeper ?? {})).toBe(false)
+    expect('compaction_ratio_gate' in (keeper ?? {})).toBe(false)
+    expect('compaction_message_gate' in (keeper ?? {})).toBe(false)
+    expect('compaction_token_gate' in (keeper ?? {})).toBe(false)
+    expect('compaction_count' in (keeper ?? {})).toBe(false)
+    expect('last_compaction_saved_tokens' in (keeper ?? {})).toBe(false)
+    expect('last_compaction_decision' in (keeper ?? {})).toBe(false)
+  })
+
+  it('normalizes live activity projection and current approval gate', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'sangsu',
+        status: 'active',
+        last_activity_at: '2026-06-06T02:49:01Z',
+        last_activity_source: 'approval_pending',
+        live_activity: {
+          source: 'approval_pending',
+          at: '2026-06-06T02:49:01Z',
+          age_s: 5,
+          tool: 'Write',
+        },
+        current_gate: {
+          kind: 'approval_required',
+          source: 'audit_approvals',
+          tool: 'Write',
+          turn_id: 178,
+          at: '2026-06-06T02:49:01Z',
+        },
+      },
+    ])
+
+    expect(keeper?.last_activity_source).toBe('approval_pending')
+    expect(keeper?.last_activity_at).toBe('2026-06-06T02:49:01Z')
+    expect(keeper?.live_activity).toMatchObject({
+      source: 'approval_pending',
+      tool: 'Write',
+      age_s: 5,
+    })
+    expect(keeper?.current_gate).toMatchObject({
+      kind: 'approval_required',
+      source: 'audit_approvals',
+      tool: 'Write',
+      turn_id: 178,
+    })
+  })
+
+  it('normalizes a producer-shaped metrics series row', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'beta',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 2,
+            context_ratio: 0.88,
+            context_tokens: 880,
+            context_max: 1000,
+            latency_ms: 140,
+            channel: 'turn',
+            cost_usd: 0.2,
+          },
+        ],
+      },
+    ])
+
+    expect(keeper?.metrics_series).toHaveLength(1)
+    const metric = keeper!.metrics_series![0]
+    expect(metric).toMatchObject({
+      ts: 2,
+      channel: 'turn',
+      latency_ms: 140,
+    })
+    expect(deriveLifecycleState(keeper!)).toBe('active')
+  })
+
+  it('keeps runtime tool audit fields while ignoring retired context source', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'delta',
+        status: 'active',
+        latest_tool_names: ['observed_tool'],
+        latest_tool_call_count: 2,
+        tool_audit_source: 'heartbeat_result',
+        tool_audit_at: '2026-04-02T08:30:00Z',
+        context_source: 'metrics_log',
+        recent_input_preview: 'operator asked for a refresh',
+        recent_output_preview: 'keeper acknowledged the request',
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      latest_tool_names: ['observed_tool'],
+      latest_tool_call_count: 2,
+      tool_audit_source: 'heartbeat_result',
+      tool_audit_at: '2026-04-02T08:30:00Z',
+      context_source: null,
+      recent_input_preview: 'operator asked for a refresh',
+      recent_output_preview: 'keeper acknowledged the request',
+    })
+  })
+
+  it('normalizes prompt telemetry dynamically from keeper metric points', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'prompt-keeper',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 4,
+            context_ratio: 0.42,
+            context_tokens: 420,
+            context_max: 1000,
+            latency_ms: 110,
+            channel: 'turn',
+            model_used: 'glm-5',
+            cost_usd: 0.03,
+            prompt_fingerprint: 'prompt-fp-001',
+            prompt: {
+              fingerprint: 'prompt-fp-001',
+              total_bytes: 830,
+              cacheable_bytes: 512,
+              system_prompt: { bytes: 512, fingerprint: 'seg-system' },
+              dynamic_context: { bytes: 220, fingerprint: 'seg-dynamic' },
+              user_message: { bytes: 98, fingerprint: 'seg-user' },
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(keeper?.metrics_series).toHaveLength(1)
+    const metric = keeper?.metrics_series?.[0]
+    expect(metric).toBeDefined()
+    if (!metric) throw new Error('metric missing')
+    expect(metric.prompt_fingerprint).toBe('prompt-fp-001')
+    expect(metric.prompt_metrics).toEqual({
+      fingerprint: 'prompt-fp-001',
+      total_bytes: 830,
+      cacheable_bytes: 512,
+      segments: {
+        system_prompt: { bytes: 512, fingerprint: 'seg-system' },
+        dynamic_context: { bytes: 220, fingerprint: 'seg-dynamic' },
+        user_message: { bytes: 98, fingerprint: 'seg-user' },
+      },
+    })
+  })
+
+  it('preserves backend attention, sandbox, and goal progress fields', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'attention-keeper',
+        status: 'active',
+        needs_attention: true,
+        attention_reason: 'approval_pending',
+        next_human_action: 'resolve_approval',
+        sandbox_target: 'docker',
+        blocked_task_count: 2,
+        goal_progress: {
+          linked_task_count: 4,
+          done_task_count: 1,
+          open_task_count: 3,
+          blocked_task_count: 2,
+          convergence: 0.25,
+        },
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      needs_attention: true,
+      attention_reason: 'approval_pending',
+      next_human_action: 'resolve_approval',
+      sandbox_target: 'docker',
+      blocked_task_count: 2,
+      goal_progress: {
+        linked_task_count: 4,
+        blocked_task_count: 2,
+        convergence: 0.25,
+      },
+    })
+  })
+
+  it('preserves trust summary and latest causal event fields', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'trust-keeper',
+        status: 'active',
+        trust: {
+          disposition: 'Blocked',
+          disposition_reason: 'approval_waiting',
+          needs_attention: true,
+          attention_reason: 'approval_pending',
+          next_human_action: 'resolve_approval',
+          approval_state: {
+            state: 'pending',
+            summary: '1 approval request waiting',
+            pending_count: 1,
+            latest_event_at: '2026-04-23T00:09:30Z',
+          },
+          execution_summary: {
+            sandbox_summary: 'docker / none',
+            completion_observation_summary: 'not_observed',
+            latest_receipt_at: '2026-04-23T00:10:00Z',
+          },
+          latest_causal_event: {
+            kind: 'approval_pending',
+            ts: '2026-04-23T00:11:00Z',
+            ts_unix: 1776903060,
+            keeper_turn_id: 42,
+            task_id: 'task-1',
+            goal_ids: ['goal-1'],
+            title: 'Approval pending',
+            summary: 'Waiting for operator approval before resuming.',
+            severity: 'warn',
+            next_human_action: 'resolve_approval',
+            trace_id: 'trace-approval-42',
+          },
+        },
+      },
+    ])
+
+    expect(keeper?.trust).toMatchObject({
+      disposition: 'Blocked',
+      disposition_reason: 'approval_waiting',
+      needs_attention: true,
+      attention_reason: 'approval_pending',
+      next_human_action: 'resolve_approval',
+      approval_state: {
+        state: 'pending',
+        summary: '1 approval request waiting',
+        pending_count: 1,
+        latest_event_at: '2026-04-23T00:09:30Z',
+      },
+      execution_summary: {
+        sandbox_summary: 'docker / none',
+        completion_observation_summary: 'not_observed',
+      },
+      latest_causal_event: {
+        kind: 'approval_pending',
+        keeper_turn_id: 42,
+        title: 'Approval pending',
+        summary: 'Waiting for operator approval before resuming.',
+        trace_id: 'trace-approval-42',
+      },
+    })
+  })
+
+  it('preserves owner-specific stopped-reaction fields in trust summary', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'blocked-keeper',
+        status: 'active',
+        trust: {
+          disposition: 'Alert',
+          operator_disposition: 'pause_runtime',
+          operator_disposition_reason: 'fiber_unresolved',
+          needs_attention: true,
+          attention_reason: 'fiber_unresolved',
+          latest_terminal_reason: {
+            code: 'fiber_unresolved',
+            source: 'execution_receipt',
+            severity: 'bad',
+            summary: 'Turn execution exceeded the keeper turn deadline',
+            next_action: 'inspect_runtime_blocker',
+          },
+          latest_next_action: 'inspect_runtime_blocker',
+        },
+      },
+    ])
+
+    expect(keeper?.trust).toMatchObject({
+      disposition: 'Alert',
+      operator_disposition: 'pause_runtime',
+      operator_disposition_reason: 'fiber_unresolved',
+      needs_attention: true,
+      attention_reason: 'fiber_unresolved',
+      latest_terminal_reason: {
+        code: 'fiber_unresolved',
+        source: 'execution_receipt',
+        severity: 'bad',
+        summary: 'Turn execution exceeded the keeper turn deadline',
+        next_action: 'inspect_runtime_blocker',
+      },
+      latest_next_action: 'inspect_runtime_blocker',
+    })
+    expect(keeper?.stop_cause).toMatchObject({
+      code: 'fiber_unresolved',
+      source: 'terminal_reason_code',
+      summary: 'Turn execution exceeded the keeper turn deadline',
+      next_action: 'inspect_runtime_blocker',
+    })
+  })
+
+  it('prefers runtime blocker as the normalized stop cause for keeper detail', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'blocked-keeper',
+        status: 'active',
+        runtime_blocker_class: 'fiber_unresolved',
+        runtime_blocker_summary: 'turn has not made progress',
+        trust: {
+          latest_terminal_reason: {
+            code: 'api_error_timeout',
+            source: 'execution_receipt',
+            severity: 'bad',
+            summary: 'provider timed out',
+          },
+        },
+      },
+    ])
+
+    expect(keeper?.stop_cause).toMatchObject({
+      code: 'fiber_unresolved',
+      source: 'runtime_blocker_class',
+      summary: 'turn has not made progress',
+    })
+  })
+
+  it('returns null latest_terminal_reason when code is missing', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'no-code-keeper',
+        status: 'active',
+        trust: {
+          latest_terminal_reason: { source: 'execution_receipt' },
+        },
+      },
+    ])
+    expect(keeper?.trust?.latest_terminal_reason).toBeNull()
+  })
+
+  it('accepts live runtime_trust payloads and preserves terminal reason fields', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'runtime-trust-keeper',
+        status: 'active',
+        runtime_trust: {
+          disposition: 'Blocked',
+          operator_disposition: 'operator_action_required',
+          operator_disposition_reason: 'required_tool_use_unsatisfied',
+          needs_attention: true,
+          approval: {
+            state: 'ready',
+            summary: 'no pending approvals',
+            pending_count: 0,
+          },
+          execution: {
+            provider_attempt_count: 2,
+            provider_fallback_applied: true,
+            provider_selected_model: 'provider:runtime-lane',
+          },
+          latest_terminal_reason: {
+            code: 'required_tool_use_unsatisfied',
+            source: 'execution_receipt',
+            severity: 'bad',
+            summary: 'required keeper tool use was not satisfied',
+            next_action: 'inspect_provider_tool_contract',
+          },
+          latest_next_action: 'inspect_provider_tool_contract',
+        },
+      },
+    ])
+
+    expect(keeper?.trust).toMatchObject({
+      disposition: 'Blocked',
+      operator_disposition: 'operator_action_required',
+      operator_disposition_reason: 'required_tool_use_unsatisfied',
+      needs_attention: true,
+      approval_state: {
+        state: 'ready',
+        summary: 'no pending approvals',
+        pending_count: 0,
+      },
+      execution_summary: {
+        provider_attempt_count: 2,
+        provider_fallback_applied: true,
+        provider_selected_model: 'provider:runtime-lane',
+      },
+      latest_terminal_reason: {
+        code: 'required_tool_use_unsatisfied',
+        severity: 'bad',
+        next_action: 'inspect_provider_tool_contract',
+      },
+      latest_next_action: 'inspect_provider_tool_contract',
+    })
+  })
+
+  it('preserves runtime lane evidence while redacting model/provider identity', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'runtime-keeper',
+        status: 'active',
+        runtime_id: 'agent-core-keeper_unified',
+        selected_runtime_canonical: 'primary',
+        primary_model: 'openai:gpt-5.4',
+        active_model: 'gpt-5.4',
+        active_model_label: 'openai:gpt-5.4',
+        last_model_used: 'gpt-5.4',
+        metrics_series: [
+          {
+            ts_unix: 10,
+            context_ratio: 0.42,
+            context_tokens: 420,
+            context_max: 1000,
+            latency_ms: 100,
+            channel: 'turn',
+            model_used: 'anthropic:claude-sonnet',
+            runtime: {
+              runtime_id: 'primary',
+              selected_model: 'anthropic:claude-sonnet',
+              attempt_count: 2,
+              outcome: 'passed_to_next_model',
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      runtime_id: 'agent-core-keeper_unified',
+      runtime_canonical: 'primary',
+      selected_runtime_canonical: 'primary',
+      active_model_label: null,
+    })
+    expect(keeper?.primary_model).toBeUndefined()
+    expect(keeper?.active_model).toBeUndefined()
+    expect(keeper?.last_model_used).toBeUndefined()
+    expect(keeper?.metrics_series?.[0]).toMatchObject({
+      runtime_id: 'primary',
+      runtime_attempt_count: 2,
+      runtime_outcome: 'passed_to_next_model',
+    })
+  })
+
+  it('normalizes ctx composition telemetry from keeper metric points', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'ctx-keeper',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 5,
+            context_ratio: 0.51,
+            context_tokens: 510,
+            context_max: 1000,
+            latency_ms: 95,
+            channel: 'turn',
+            model_used: 'glm-5',
+            cost_usd: 0.04,
+            ctx_composition: {
+              actual_input_tokens: 1000,
+              attribution: {
+                status: 'attributed',
+                runtime_profile: 'glm-coding.glm-5',
+                attributed_bytes: 1160,
+                segments: {
+                  'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
+                  message_user: { bytes: 210, fingerprint: null },
+                  message_tool_use: { bytes: 90, fingerprint: null },
+                  message_tool_result: { bytes: 540, fingerprint: null },
+                },
+              },
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(keeper?.metrics_series).toHaveLength(1)
+    const metric = keeper?.metrics_series?.[0]
+    expect(metric?.ctx_composition).toEqual({
+      actual_input_tokens: 1000,
+      attribution: {
+        status: 'attributed',
+        runtime_profile: 'glm-coding.glm-5',
+        attributed_bytes: 1160,
+        segments: {
+          'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
+          message_user: { bytes: 210, fingerprint: null },
+          message_tool_use: { bytes: 90, fingerprint: null },
+          message_tool_result: { bytes: 540, fingerprint: null },
+        },
+      },
+    })
+  })
+
+  // A turn that was never attributed and a turn attributed at zero bytes used
+  // to normalize to the same point, which is the reading masc#32995 removed.
+  it('keeps a not-measured turn distinct from zero bytes', () => {
+    const keeper = normalizeKeepers([
+      {
+        name: 'gap-keeper',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 5,
+            channel: 'turn',
+            cost_usd: 0.01,
+            ctx_composition: {
+              actual_input_tokens: 4200,
+              attribution: {
+                status: 'not_measured',
+                reason: 'dispatch_not_reached',
+                detail: null,
+              },
+            },
+          },
+        ],
+      },
+    ])[0]
+
+    expect(keeper?.metrics_series?.[0]?.ctx_composition).toEqual({
+      actual_input_tokens: 4200,
+      attribution: {
+        status: 'not_measured',
+        reason: 'dispatch_not_reached',
+        detail: null,
+      },
+    })
+  })
+
+  // Rows written before the attribution shape existed cannot say whether the
+  // turn was measured. Reading them as zero is the defect; answering for them
+  // either way records a judgement nobody made.
+  it('drops a composition row written before the attribution shape', () => {
+    const keeper = normalizeKeepers([
+      {
+        name: 'legacy-keeper',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 5,
+            channel: 'turn',
+            cost_usd: 0.01,
+            ctx_composition: { actual_input_tokens: 1000, attributed_bytes: 0, segments: {} },
+          },
+        ],
+      },
+    ])[0]
+
+    expect(keeper?.metrics_series?.[0]?.ctx_composition).toBeNull()
+  })
+
+  it('derives wall tok/s from usage output tokens and latency', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'wall-rate',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 6,
+            context_ratio: 0.24,
+            context_tokens: 240,
+            context_max: 1000,
+            latency_ms: 2000,
+            channel: 'turn',
+            model_used: 'glm-5',
+            cost_usd: 0.05,
+            usage: {
+              input_tokens: 120,
+              output_tokens: 80,
+              total_tokens: 200,
+            },
+            inference_telemetry: {
+              request_latency_ms: 2000,
+              timings: {
+                predicted_per_second: 140,
+                prompt_per_second: 55,
+                cache_n: 10,
+              },
+            },
+          },
+        ],
+      },
+    ])
+
+    const metric = keeper?.metrics_series?.[0]
+    expect(metric?.input_tokens).toBe(120)
+    expect(metric?.output_tokens).toBe(80)
+    expect(metric?.total_tokens).toBe(200)
+    expect(metric?.wall_tokens_per_second).toBe(40)
+    expect(metric?.inference_telemetry?.timings?.predicted_per_second).toBe(140)
+  })
+
+  it('preserves non-context telemetry when context is unobserved', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'missing-latency',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 7,
+            channel: 'turn',
+            model_used: 'glm-5',
+            cost_usd: 0.05,
+            usage: {
+              input_tokens: 120,
+              output_tokens: 80,
+              total_tokens: 200,
+            },
+            inference_telemetry: {
+              timings: {
+                predicted_per_second: 140,
+              },
+            },
+          },
+        ],
+      },
+    ])
+
+    const metric = keeper?.metrics_series?.[0]
+    expect(keeper?.metrics_series).toHaveLength(1)
+    expect(metric?.context_ratio).toBeNull()
+    expect(metric?.context_tokens).toBeNull()
+    expect(metric?.context_max).toBeNull()
+    expect(metric?.latency_ms).toBeNull()
+    expect(metric?.wall_tokens_per_second).toBeNull()
+    expect(metric?.inference_telemetry?.request_latency_ms).toBeNull()
+  })
+
+  it('preserves paused runtime signals and blocker metadata for keeper UI', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'uranium666',
+        status: 'idle',
+        paused: true,
+        keepalive_running: true,
+        pause_state: 'paused',
+        runtime_blocker_state: 'blocked',
+        runtime_blocker_class: 'fiber_unresolved',
+        runtime_blocker_summary: 'Provider turn timed out.',
+        created_at: '2026-04-03T14:59:29Z',
+        updated_at: '2026-04-04T14:08:35Z',
+        last_activity_ago_s: 42,
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      paused: true,
+      keepalive_running: true,
+      pause_state: 'paused',
+      runtime_blocker_state: 'blocked',
+      runtime_blocker_class: 'fiber_unresolved',
+      runtime_blocker_summary: 'Provider turn timed out.',
+      created_at: '2026-04-03T14:59:29Z',
+      updated_at: '2026-04-04T14:08:35Z',
+      last_activity_ago_s: 42,
+    })
+  })
+})
+
+describe('normalizeKeeperTrustTerminalReason — exported helper', () => {
+  it('returns null for non-record input', () => {
+    expect(normalizeKeeperTrustTerminalReason(null)).toBeNull()
+    expect(normalizeKeeperTrustTerminalReason('string')).toBeNull()
+    expect(normalizeKeeperTrustTerminalReason(42)).toBeNull()
+  })
+
+  it('returns null when code field is absent or empty', () => {
+    expect(normalizeKeeperTrustTerminalReason({})).toBeNull()
+    expect(normalizeKeeperTrustTerminalReason({ code: null })).toBeNull()
+    expect(normalizeKeeperTrustTerminalReason({ code: '' })).toBeNull()
+  })
+
+  it('returns a full terminal reason when code is present', () => {
+    const result = normalizeKeeperTrustTerminalReason({
+      code: 'fiber_unresolved',
+      source: 'execution_receipt',
+      severity: 'bad',
+      summary: 'keeper exceeded the turn deadline',
+      next_action: 'inspect_runtime_blocker',
+    })
+    expect(result).toEqual({
+      code: 'fiber_unresolved',
+      source: 'execution_receipt',
+      severity: 'bad',
+      summary: 'keeper exceeded the turn deadline',
+      next_action: 'inspect_runtime_blocker',
+    })
+  })
+
+  it('fills optional fields with null when absent', () => {
+    const result = normalizeKeeperTrustTerminalReason({ code: 'runtime_blocked' })
+    expect(result).toEqual({
+      code: 'runtime_blocked',
+      source: null,
+      severity: null,
+      summary: null,
+      next_action: null,
+    })
+  })
+})
+
+describe('approval_state.pending_first — worktree approval blocker surfacing', () => {
+  it('normalizes pending_first with all fields from approval_state', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'pr-keeper',
+        status: 'active',
+        trust: {
+          needs_attention: true,
+          attention_reason: 'approval_pending',
+          next_human_action: 'resolve_approval',
+          approval: {
+            state: 'pending',
+            pending_count: 1,
+            pending_first: {
+              id: 'appr_2cae9bec14f6',
+              tool_name: 'Execute',
+              task_id: 'task-187',
+              blocker_class: 'blocked_before_worktree',
+            },
+          },
+        },
+      },
+    ])
+    expect(keeper?.trust?.approval_state?.pending_first).toEqual({
+      id: 'appr_2cae9bec14f6',
+      tool_name: 'Execute',
+      task_id: 'task-187',
+      blocker_class: 'blocked_before_worktree',
+    })
+  })
+
+  it('sets pending_first to null when approval_state has no pending_first', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'pr-keeper',
+        status: 'active',
+        trust: {
+          approval: {
+            state: 'idle',
+            pending_count: 0,
+          },
+        },
+      },
+    ])
+    expect(keeper?.trust?.approval_state?.pending_first).toBeNull()
+  })
+
+  it('sets pending_first to null when individual fields are absent', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'pr-keeper',
+        status: 'active',
+        trust: {
+          approval: {
+            state: 'pending',
+            pending_count: 1,
+            pending_first: {},
+          },
+        },
+      },
+    ])
+    expect(keeper?.trust?.approval_state?.pending_first).toEqual({
+      id: null,
+      tool_name: null,
+      task_id: null,
+      blocker_class: null,
+    })
+  })
+})
+
+describe('keeper profile config error boundary', () => {
+  it('normalizes the closed config error schema without losing path or action', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'broken',
+        status: 'blocked',
+        needs_attention: true,
+        config_error: {
+          keeper: 'broken',
+          keeper_path: '/workspace/.masc/config/keepers/broken.toml',
+          failing_path: '/workspace/.masc/config/keepers/base.toml',
+          kind: 'parse_error',
+          detail: 'expected table header',
+          terminal_reason: 'config_invalid',
+          blocking: true,
+          operator_action_required: true,
+          next_action: 'fix_keeper_toml_config',
+        },
+      },
+    ])
+
+    expect(keeper?.config_error).toEqual({
+      keeper: 'broken',
+      keeper_path: '/workspace/.masc/config/keepers/broken.toml',
+      failing_path: '/workspace/.masc/config/keepers/base.toml',
+      kind: 'parse_error',
+      reported_kind: null,
+      detail: 'expected table header',
+      terminal_reason: 'config_invalid',
+      blocking: true,
+      operator_action_required: true,
+      next_action: 'fix_keeper_toml_config',
+    })
+  })
+
+  it('retains unknown config error kinds as a fail-closed schema-drift value', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'broken',
+        status: 'blocked',
+        config_error: {
+          keeper: 'broken',
+          keeper_path: '/broken.toml',
+          failing_path: '/broken.toml',
+          kind: 'guessed_error',
+          detail: 'unknown',
+          terminal_reason: 'config_invalid',
+          blocking: true,
+          operator_action_required: true,
+          next_action: 'fix_keeper_toml_config',
+        },
+      },
+    ])
+
+    expect(keeper?.config_error).toMatchObject({
+      kind: 'unknown',
+      reported_kind: 'guessed_error',
+      blocking: true,
+      operator_action_required: true,
+    })
+  })
+})
+
+describe('declaration-only roster', () => {
+  it('preserves unstarted lifecycle and both independent preparation observations', () => {
+    const [keeper] = normalizeKeepers([{ name: 'imp', status: 'unbooted', phase: 'Offline',
+      declaration_only: true, preparation_requirements: ['runtime_check_required', 'sandbox_check_required'] }])
+    expect(keeper).toBeDefined()
+    if (!keeper) throw new Error('declared Keeper was dropped')
+    expect(keeper.declaration_only).toBe(true)
+    expect(keeper.preparation_requirements).toEqual(['runtime_check_required', 'sandbox_check_required'])
+    expect(keeper.lifecycle_phase).toBe('Offline')
+  })
+})
+
+
+describe('official-client local claim refusal', () => {
+  it('retains the typed blocker and recovery identity, then accepts a clear update', () => {
+    const summary = 'Local claim refused for runtime synthetic; recovery synthetic-recovery (effect_fenced).'
+    const [failed] = normalizeKeepers([{ name: 'synthetic', status: 'active',
+      runtime_blocker_class: 'official_client_recovery_required', runtime_blocker_summary: summary }])
+    expect(failed?.runtime_blocker_class).toBe('official_client_recovery_required')
+    expect(failed?.runtime_blocker_summary).toBe(summary)
+    const [cleared] = normalizeKeepers([{ name: 'synthetic', status: 'active',
+      runtime_blocker_class: null, runtime_blocker_summary: null }])
+    expect(cleared?.runtime_blocker_class).toBeNull()
+    expect(cleared?.runtime_blocker_summary).toBeNull()
+  })
+})
+describe('Keeper portrait projection', () => {
+  it('preserves equipped snapshots and reports corrupt or absent equipment without dropping the Keeper', () => {
+    const equipment = { face: 'glasses', neck: 'medal', head: 'crown', hand: 'book', base: 'dish_oak' }
+    const ready = normalizeKeepers([{ name: 'equipped', status: 'active', portrait: { state: 'ready', equipment } }])[0]
+    expect(ready?.portrait).toEqual({ state: 'ready', equipment })
+    for (const portrait of [undefined, { state: 'ready', equipment: { ...equipment, head: 'book' } }, { state: 'unavailable', reason: 'ledger corrupt' }]) {
+      const keeper = normalizeKeepers([{ name: 'equipped', status: 'active', portrait }])[0]
+      expect(keeper?.name).toBe('equipped')
+      expect(keeper?.portrait?.state).toBe('unavailable')
+    }
+  })
+
+  it('carries only a canonical Item account revision into the Keeper row', () => {
+    const revision = 'a'.repeat(64)
+    const [ready] = normalizeKeepers([{ name: 'imp', status: 'active', candle_balance_milli: '0', candle_account_revision: revision }])
+    expect(ready?.candle_account_revision).toBe(revision)
+    const [malformed] = normalizeKeepers([{ name: 'imp', status: 'active', candle_balance_milli: '0', candle_account_revision: 'changed' }])
+    expect(malformed?.candle_account_revision).toBeUndefined()
+  })
+})

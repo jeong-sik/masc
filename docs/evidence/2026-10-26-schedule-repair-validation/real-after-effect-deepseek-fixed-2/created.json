@@ -1,0 +1,94 @@
+{
+  "first": {
+    "schedule_instance_id": "01a178b9-369a-7000-a677-e95d1d4595f2",
+    "schedule_id": "audit-real-model-a5e1730bf8494d6b9f37dc0215346824",
+    "requested_by": {
+      "id": "schedule-audit-observer",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-observer",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "requested_at": 1793026766.489874,
+    "due_at": 1793026768.489874,
+    "expires_at": null,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-live-deepseek",
+        "message": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-a5e1730bf8494d6b9f37dc0215346824\" with body \"SCHEDULE_EFFECT_57eb1999d321440598a38e3c4b15a507\" using masc_schedule_note_add. Read back that same schedule note, read its schedule declaration to confirm the exact identity, then read the notes again to verify the same author/body before finishing. Do not post elsewhere or create work. If another authorized scheduled request arrives, retain both requests and perform each exact note once."
+      }
+    },
+    "status": "scheduled",
+    "source": "operator_request",
+    "recurrence": {
+      "kind": "one_shot"
+    },
+    "cancellation": null,
+    "due_at_iso": "2026-10-26T14:59:28Z",
+    "next_due_at": 1793026768.489874,
+    "next_due_at_iso": "2026-10-26T14:59:28Z",
+    "requested_at_iso": "2026-10-26T14:59:26Z",
+    "recurrence_kind": "one_shot",
+    "recurrence_summary": "one_shot",
+    "payload_digest": "5afdfe891bbc96b73a98f73a4f8e8b3bbb078caf23e61aad3ddbced9213f6e6a",
+    "payload_kind": "masc.keeper_wake",
+    "payload_support": "supported",
+    "payload_dispatch_tool": "masc.keeper_wake",
+    "payload_target": "keeper:audit-live-deepseek",
+    "payload_summary": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-a5e1730bf8494d6b9f37dc0215346824\" with body \"SCHEDULE_EFFECT_57eb199...",
+    "last_wake": null
+  },
+  "second": {
+    "schedule_instance_id": "01a178b9-6f7f-7000-842a-a511bf733d64",
+    "schedule_id": "audit-real-model-a5e1730bf8494d6b9f37dc0215346824-second",
+    "requested_by": {
+      "id": "schedule-audit-observer",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-observer",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "requested_at": 1793026781.055001,
+    "due_at": 1793026782.055001,
+    "expires_at": null,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-live-deepseek",
+        "message": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-a5e1730bf8494d6b9f37dc0215346824-second\" with body \"SCHEDULE_EFFECT_57eb1999d321440598a38e3c4b15a507_SECOND\" using masc_schedule_note_add. Read back that same schedule note, read its schedule declaration to confirm the exact identity, then read the notes again to verify the same author/body before finishing. Do not post elsewhere or create work. If another authorized scheduled request arrives, retain both requests and perform each exact note once."
+      }
+    },
+    "status": "scheduled",
+    "source": "operator_request",
+    "recurrence": {
+      "kind": "one_shot"
+    },
+    "cancellation": null,
+    "due_at_iso": "2026-10-26T14:59:42Z",
+    "next_due_at": 1793026782.055001,
+    "next_due_at_iso": "2026-10-26T14:59:42Z",
+    "requested_at_iso": "2026-10-26T14:59:41Z",
+    "recurrence_kind": "one_shot",
+    "recurrence_summary": "one_shot",
+    "payload_digest": "5a8cc686ddd6b7da49a47fa7f04450e96bd28699e93f6ff0c48c870894ceb820",
+    "payload_kind": "masc.keeper_wake",
+    "payload_support": "supported",
+    "payload_dispatch_tool": "masc.keeper_wake",
+    "payload_target": "keeper:audit-live-deepseek",
+    "payload_summary": "Scheduled verification: append exactly one durable note to schedule_id \"audit-real-model-a5e1730bf8494d6b9f37dc0215346824-second\" with body \"SCHEDULE_EFFECT_...",
+    "last_wake": null
+  }
+}

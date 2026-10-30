@@ -1,0 +1,19 @@
+# Replicate's remote MCP server.
+#
+# Only the server is named. Its endpoints, the scopes it publishes and whether
+# a client has to be registered by hand come from the two well-known documents
+# it serves, so none of that can go stale here.
+#
+# Measured 2026-09-05: the protected-resource document answers at the path
+# RFC 9728 computes, authorization server (https://mcp.replicate.com) offers
+# S256 PKCE and dynamic client registration (HTTP 201).
+
+id = "replicate"
+label = "Replicate"
+mcp_url = "https://mcp.replicate.com/mcp"
+
+access_token_env = "REPLICATE_ACCESS_TOKEN"
+expires_at_env = "REPLICATE_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.replicate/refresh_token"
+
+renew_before_sec = 600

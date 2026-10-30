@@ -1,0 +1,8 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-schedule-drain-projection-20261025/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  18:21:47
+   Duration  1.11s (transform 40%, setup 25%, environment 21%, tests 9%, import 4%)

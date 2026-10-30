@@ -1,0 +1,1394 @@
+(** Operator-facing keeper sandbox control.
+
+    This module keeps Docker lifecycle operations scoped to MASC keeper labels
+    and the active base path.  Start operations deliberately manage only
+    [container_kind=managed]; stop operations default to that same safe scope,
+    but can target [turn] or [all] when an operator needs to clear abandoned
+    turn containers before TTL cleanup. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+module Contract = Keeper_sandbox_control_contract
+
+type stop_scope = Contract.stop_scope =
+  | Stop_managed
+  | Stop_turn
+  | Stop_all
+
+let stop_scope_to_string = Contract.stop_scope_to_string
+let parse_stop_scope = Contract.parse_stop_scope
+let managed_kind = stop_scope_to_string Stop_managed
+let turn_kind = stop_scope_to_string Stop_turn
+
+let now_ms () =
+  int_of_float (Unix.gettimeofday () *. 1000.0)
+
+let normalize_path path =
+  Keeper_alerting_path.normalize_path_for_check path
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+(* The source of the Docker bind mount. [Sys.file_exists] is also true for a
+   regular file or a device, so an existing entry must resolve to a directory.
+   [host_root] has already been through [normalize_path], which resolves a
+   symbolic link, so a link reaches this check only when it points nowhere,
+   and that is not a directory either. A failed creation is an [Error] for the
+   start request instead of an exception out of it. *)
+let ensure_host_root path =
+  let open Result.Syntax in
+  let kind () =
+    match Unix.stat path with
+    | stats -> Ok (Some stats.Unix.st_kind)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      (* [stat] follows links, so a missing target is also what a link that
+         points nowhere reports. Name that case instead of creating over it. *)
+      (match Unix.lstat path with
+       | { Unix.st_kind = Unix.S_LNK; _ } ->
+         Error
+           (Printf.sprintf
+              "sandbox host root %s is a symbolic link that points nowhere"
+              path)
+       | { Unix.st_kind =
+             ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+             | Unix.S_SOCK )
+         ; _
+         } -> Ok None
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+       | exception Unix.Unix_error (error, _, _) ->
+         Error
+           (Printf.sprintf
+              "sandbox host root %s cannot be inspected: %s"
+              path
+              (Unix.error_message error)))
+    | exception Unix.Unix_error (error, _, _) ->
+      Error
+        (Printf.sprintf
+           "sandbox host root %s cannot be inspected: %s"
+           path
+           (Unix.error_message error))
+  in
+  let require_directory = function
+    | Some Unix.S_DIR -> Ok ()
+    | Some
+        ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK)
+         as other) ->
+      Error
+        (Printf.sprintf
+           "sandbox host root %s is %s, not a directory"
+           path
+           (Fs_compat.file_kind_to_string other))
+    | None -> Error (Printf.sprintf "sandbox host root %s was not created" path)
+  in
+  let* existing = kind () in
+  match existing with
+  | Some _ -> require_directory existing
+  | None ->
+    (* [mkdir_p] treats EEXIST as success, so two start requests creating the
+       same root at once both reach the second [kind] check below. *)
+    let* () =
+      match Fs_compat.mkdir_p path with
+      | () -> Ok ()
+      | exception ((Unix.Unix_error _ | Sys_error _ | Eio.Io _) as exn) ->
+        Error
+          (Printf.sprintf
+             "sandbox host root %s cannot be created: %s"
+             path
+             (Printexc.to_string exn))
+    in
+    let* created = kind () in
+    require_directory created
+
+(* Monotonically increasing counter to disambiguate managed containers
+   created within the same millisecond by the same process, as the one-shot
+   counter in {!Keeper_sandbox_docker_container_name} does for turns. *)
+let managed_container_counter : int Atomic.t = Atomic.make 0
+
+let managed_container_name ~(meta : keeper_meta) ~(network_mode : network_mode) =
+  let seq = Atomic.fetch_and_add managed_container_counter 1 in
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Docker_managed
+       { keeper_name = meta.name
+       ; network_mode
+         (* DET-OK: pid and wall-clock ms make a managed name unique per run. *)
+       ; pid = Unix.getpid ()
+       ; started_ms = now_ms ()
+       ; seq
+       })
+
+let configured_effective_network network_mode = network_mode
+
+let live_containers ~config ~meta ~timeout_sec =
+  Keeper_sandbox_runtime.list_containers
+    ~keeper_name:meta.name
+    ~base_path:config.Workspace.base_path
+    ~timeout_sec
+    ()
+
+(* Which runtime holds this Keeper's guests is the Keeper's own declaration.
+   A microvm Keeper with none has no inventory to read, and saying so beats
+   an empty list that reads as "no guests". *)
+let live_microvm_containers ~config ~(meta : keeper_meta) ~timeout_sec =
+  match meta.microvm_backend with
+  | None ->
+    Error
+      (Printf.sprintf
+         "microvm_backend_unresolved: keeper %s declares \
+          sandbox_profile=microvm and no microvm_backend, so there is no runtime \
+          to list guests on"
+         meta.name)
+  | Some backend ->
+    Keeper_sandbox_microvm.list_live_containers_for
+      backend
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name
+      ~timeout_sec
+
+let live_containers_for_keeper ~(meta : keeper_meta) containers =
+  let keeper_label = Keeper_sandbox_runtime.sanitize_label_value meta.name in
+  List.filter
+    (fun (c : Keeper_sandbox_runtime.live_container) ->
+      match c.keeper_name with
+      | Some name -> String.equal name meta.name || String.equal name keeper_label
+      | None -> false)
+    containers
+
+let running_managed_container ~network_label containers =
+  List.find_opt
+    (fun (c : Keeper_sandbox_runtime.live_container) ->
+      c.container_kind = Some managed_kind
+      && c.running = Some true
+      && c.network_label = Some network_label)
+    containers
+
+let start_managed_container
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+    ~(network_mode : network_mode)
+    ~(ttl_sec : float)
+    ~(timeout_sec : float)
+    () =
+  if meta.sandbox_profile <> Docker then
+    Error "keeper sandbox start requires sandbox_profile=docker"
+  else
+    let network_mode = configured_effective_network network_mode in
+    match Keeper_sandbox_runtime.docker_network_args network_mode with
+    | Error detail -> Error detail
+    | Ok (network_args, network_label) ->
+    let probe_timeout = timeout_sec in
+    match live_containers ~config ~meta ~timeout_sec:probe_timeout with
+    | Ok containers -> (
+        match running_managed_container ~network_label containers with
+        | Some container ->
+            Ok
+              (`Assoc
+                 [
+                   ("started", `Bool false);
+                   ("already_running", `Bool true);
+                   ("container",
+                    Keeper_sandbox_runtime.live_container_to_yojson container);
+                 ])
+        | None ->
+            match
+              Keeper_sandbox_image_resolver.for_keeper
+                ~base_path:config.Workspace.base_path meta
+            with
+            | Error error -> Error (Keeper_sandbox_image_resolver.error_to_string error)
+            | Ok pinned ->
+              let image = pinned.Keeper_sandbox_image_catalog.reference in
+              match
+                Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
+                  ~image
+                  ~timeout_sec
+              with
+              | Error failure ->
+                Error (Keeper_sandbox_runtime.image_preflight_start_error failure)
+              | Ok () ->
+              match
+                Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime
+                  ~timeout_sec
+              with
+              | Error _ as err -> err
+              | Ok seccomp_args ->
+                  let host_root =
+                    Keeper_sandbox.host_root_abs_of_meta ~config meta
+                    |> normalize_path
+                  in
+                  let open Result.Syntax in
+                  let* () = ensure_host_root host_root in
+                  let container_root =
+                    Keeper_sandbox.container_root meta.name
+                    |> Keeper_alerting_path.strip_trailing_slashes
+                  in
+                  let uid = Unix.getuid () in
+                  let gid = Unix.getgid () in
+                  let container_name =
+                    Keeper_sandbox_container_name.to_string
+                      (managed_container_name ~meta ~network_mode)
+                  in
+                  let argv =
+                    Keeper_sandbox_runtime.docker_command_argv ()
+                    @ [
+                        "run";
+                        "-d";
+                        "--rm";
+                        "--name";
+                        container_name;
+                      ]
+                    @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
+                    @ Keeper_sandbox_runtime.docker_label_args
+                        ~ttl_sec
+                        ~base_path:config.base_path
+                        ~keeper_name:meta.name
+                        ~container_kind:managed_kind
+                        ~network_label ()
+                    @ [
+                      "--user";
+                      Printf.sprintf "%d:%d" uid gid;
+                      "--env";
+                      "HOME=/tmp";
+                    ]
+                    @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
+                    @ [
+                      "--tmpfs";
+                      Env_config_sandbox.Hardening.tmpfs_mount ();
+                      "--cap-drop=ALL";
+                      "--security-opt";
+                      "no-new-privileges";
+                    ]
+                    @ seccomp_args
+                    @ [
+                      "--pids-limit";
+                      string_of_int
+                        (Env_config_sandbox.Hardening.pids_limit ());
+                      "--memory";
+                      Env_config_sandbox.Hardening.memory ();
+                      "-v";
+                      host_root ^ ":" ^ container_root ^ ":rw";
+                      "--workdir";
+                      container_root;
+                    ]
+                    @ network_args
+                    @ [ image; "tail"; "-f"; "/dev/null" ]
+                  in
+                  (* Record the exact Docker spawn dynamic extent without
+                     delaying or rejecting the keeper lane. *)
+                  let st, out =
+                    Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+                      Process_eio.run_argv_with_status
+                        ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                        ~cwd:(Config_dir_resolver.current_working_dir ())
+                        ~timeout_sec
+                        argv)
+                  in
+                  if st = Unix.WEXITED 0 then (
+                    Keeper_registry.clear_error
+                      ~base_path:config.base_path meta.name;
+                    Ok
+                      (`Assoc
+                         [
+                           ("started", `Bool true);
+                           ("already_running", `Bool false);
+                           ("container_id", `String (String.trim out));
+                           ("container_name", `String container_name);
+                           ("container_kind", `String managed_kind);
+                           ("network_label", `String network_label);
+                           ("ttl_sec", `Float ttl_sec);
+                           ("image", `String image);
+                         ]))
+                  else (
+                    let message =
+                      Keeper_sandbox_exec_failure.docker_run_failure_message
+                        ~prefix:"docker_managed_container_start_failed"
+                        ~base_path_hash:
+                          (Keeper_sandbox_runtime.base_path_hash config.base_path)
+                        ~keeper_name:meta.name
+                        ~container_kind:managed_kind
+                        ~network_label
+                        ~image
+                        ~status:st
+                        ~output:out
+                        ()
+                    in
+                    Keeper_registry_error_recording.record
+                      ~base_path:config.base_path meta.name message;
+                    Error message))
+    | Error err -> Error err
+
+let stop_containers ?keeper_name ~scope ~(config : Workspace.config)
+    ~(timeout_sec : float) () =
+  let container_kind =
+    match scope with
+    | Stop_managed -> Some managed_kind
+    | Stop_turn -> Some turn_kind
+    | Stop_all -> None
+  in
+  Keeper_sandbox_runtime.stop_containers
+    ?keeper_name
+    ?container_kind
+    ~base_path:config.base_path
+    ~timeout_sec
+    ()
+
+(* [observed_is_dir], [valid_checkout_name] and [filesystem_checkout_names]
+   lived here to list [<sandbox>/repos/*]. Discovery now measures the tree
+   ([Keeper_playground_checkouts]), which also validates entry kinds and
+   reports read failures as a typed result instead of a warn-and-empty-list. *)
+
+type catalog_resolution =
+  | Registered of Repo_manager_types.repository
+  | Unregistered
+  | Ambiguous of string list
+  | Catalog_unavailable of string
+  | Origin_unavailable of string
+
+type checkout_freshness =
+  | Current of { target_ref : string; upstream_head : string; last_observed_at_unix : int; age_s : int }
+  | Stale_ref of
+      { target_ref : string
+      ; upstream_head : string
+      ; last_observed_at_unix : int option
+      ; age_s : int option
+      }
+  | Ahead of { target_ref : string; upstream_head : string; ahead : int }
+  | Behind of { target_ref : string; upstream_head : string; behind : int }
+  | Diverged of
+      { target_ref : string
+      ; upstream_head : string
+      ; ahead : int
+      ; behind : int
+      }
+  | Freshness_unavailable of string
+
+let canonical_url raw = Agent_observation.canonical_url_of_remote raw
+
+let resolve_catalog ~catalog ~origin =
+  match catalog with
+  | Error error -> Catalog_unavailable error
+  | Ok repositories ->
+    (match canonical_url origin with
+     | None -> Origin_unavailable "origin URL is not canonicalizable"
+     | Some origin_id ->
+       let matches =
+         List.filter
+           (fun (repo : Repo_manager_types.repository) ->
+             match canonical_url repo.url with
+             | Some catalog_id -> String.equal catalog_id origin_id
+             | None -> false)
+           repositories
+       in
+       match matches with
+       | [ repo ] -> Registered repo
+       | [] -> Unregistered
+       | repos -> Ambiguous (List.map (fun repo -> repo.Repo_manager_types.id) repos))
+
+let with_inspection_budget budget inspect =
+  match Repo_git.Inspection_budget.remaining_timeout budget with
+  | Error _ as error -> error
+  | Ok timeout_sec -> inspect timeout_sec
+;;
+
+let first_git_line ~budget ~cwd args =
+  match
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.run_git ~cwd ~timeout_sec args)
+  with
+  | Ok (line :: _) -> Ok line
+  | Ok [] -> Error (Printf.sprintf "git %s returned no output" (String.concat " " args))
+  | Error _ as error -> error
+
+let dirty_state ~budget ~repository =
+  match
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.status_summary ~timeout_sec ~repository ())
+  with
+  | Ok summary -> Ok (summary.Repo_git.changed_files > 0, summary.changed_files)
+  | Error _ as error -> error
+
+(* Three nominal five-minute repository sync intervals allow normal scheduler
+   jitter while refusing an older local observation. Both probe paths use
+   the same threshold even if a repository's sync interval is reconfigured. *)
+let target_ref_stale_after_s = Keeper_sandbox_remote_checkouts.target_ref_stale_after_s
+
+(* A tracking ref's reflog records when its local value last moved. A managed
+   no-op fetch leaves it untouched, so read the fetch owner's per-ref receipt.
+   Neither probe fetches. [log.showSignature] is turned off because the
+   repository's own config would otherwise name the program that verifies a
+   signed tip commit, and a checkout's config is not the host's to run. *)
+let reflog_moved_at_unix ~budget ~cwd target_ref =
+  match first_git_line ~budget ~cwd
+          [ "-c"; "log.showSignature=false"
+          ; "reflog"; "show"; "-1"; "--date=unix"; "--format=%gd"; target_ref ] with
+  | Error _ -> None
+  | Ok line ->
+    (match String.rindex_opt line '{', String.rindex_opt line '}' with
+     | Some left, Some right when right > left + 1 ->
+       int_of_string_opt (String.sub line (left + 1) (right - left - 1))
+     | _ -> None)
+;;
+
+let newer_time left right =
+  match left, right with
+  | None, other | other, None -> other
+  | Some left, Some right -> Some (max left right)
+;;
+
+let matching_fetch_receipt_time ~budget ~cwd ~target_ref ~upstream_head ~origin_url =
+  match first_git_line ~budget ~cwd
+          [ "rev-parse"; "--path-format=absolute"; "--git-common-dir" ] with
+  | Error _ -> None
+  | Ok common_dir ->
+    (match Repo_fetch_observation.read ~common_dir with
+     | Some observation
+       when String.equal observation.target_ref target_ref
+            && String.equal observation.oid upstream_head ->
+       (match canonical_url observation.origin_url, canonical_url origin_url with
+        | Some fetched, Some origin when String.equal fetched origin ->
+          Some observation.observed_at_unix
+        | _ -> None)
+     | _ -> None)
+;;
+
+let target_ref_last_observed_at_unix ~budget ~cwd ~target_ref ~upstream_head
+      ~origin_url =
+  let moved = reflog_moved_at_unix ~budget ~cwd target_ref in
+  match moved with
+  | Some timestamp
+    when int_of_float (Time_compat.now ()) - timestamp <= target_ref_stale_after_s ->
+    moved
+  | _ ->
+    newer_time moved
+      (matching_fetch_receipt_time ~budget ~cwd ~target_ref ~upstream_head ~origin_url)
+;;
+
+let freshness_from_counts ~now_unix ~target_ref ~upstream_head
+      ~last_observed_at_unix ~behind ~ahead =
+  match behind, ahead with
+  | 0, 0 ->
+    let age_s = Option.map
+      (fun moved -> int_of_float now_unix - moved) last_observed_at_unix in
+    (match last_observed_at_unix, age_s with
+     | Some last_observed_at_unix, Some age_s
+       when age_s >= 0 && age_s <= target_ref_stale_after_s ->
+       Current { target_ref; upstream_head; last_observed_at_unix; age_s }
+     | _ -> Stale_ref { target_ref; upstream_head; last_observed_at_unix; age_s })
+  | 0, ahead -> Ahead { target_ref; upstream_head; ahead }
+  | behind, 0 -> Behind { target_ref; upstream_head; behind }
+  | behind, ahead -> Diverged { target_ref; upstream_head; ahead; behind }
+;;
+
+let freshness_of_catalog ~budget ~repository = function
+  | Registered catalog_repo ->
+    let target_ref = "origin/" ^ catalog_repo.default_branch in
+    (match
+       first_git_line
+         ~budget
+         ~cwd:repository.Repo_manager_types.local_path
+         [ "rev-parse"; target_ref ]
+     with
+     | Error error -> Freshness_unavailable error
+     | Ok upstream_head ->
+       (match
+          with_inspection_budget budget (fun timeout_sec ->
+            Repo_git.ahead_behind ~timeout_sec ~repository ~target_ref ())
+        with
+        | Error error -> Freshness_unavailable error
+        | Ok (behind, ahead) ->
+          let last_observed_at_unix =
+            if behind = 0 && ahead = 0 then
+              target_ref_last_observed_at_unix ~budget
+                ~cwd:repository.local_path ~target_ref ~upstream_head
+                ~origin_url:catalog_repo.url
+            else None in
+          freshness_from_counts ~now_unix:(Time_compat.now ()) ~target_ref
+            ~upstream_head ~last_observed_at_unix ~behind ~ahead))
+  | Unregistered -> Freshness_unavailable "checkout is not registered in the repository catalog"
+  | Ambiguous ids ->
+    Freshness_unavailable
+      (Printf.sprintf "checkout origin matches multiple repository ids: %s"
+         (String.concat ", " ids))
+  | Catalog_unavailable error -> Freshness_unavailable ("repository catalog unavailable: " ^ error)
+  | Origin_unavailable error -> Freshness_unavailable error
+
+let catalog_json = function
+  | Registered repo ->
+    `Assoc [ "state", `String "registered"; "repository_id", `String repo.id ]
+  | Unregistered -> `Assoc [ "state", `String "unregistered" ]
+  | Ambiguous ids ->
+    `Assoc
+      [ "state", `String "ambiguous"
+      ; "repository_ids", `List (List.map (fun id -> `String id) ids)
+      ]
+  | Catalog_unavailable error ->
+    `Assoc [ "state", `String "unavailable"; "error", `String error ]
+  | Origin_unavailable error ->
+    `Assoc [ "state", `String "origin_unavailable"; "error", `String error ]
+
+let freshness_json = function
+  | Current { target_ref; upstream_head; last_observed_at_unix; age_s } ->
+    `Assoc
+      [ "state", `String "current"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int 0; "behind", `Int 0
+      ; "target_ref_last_observed_at_unix", `Int last_observed_at_unix
+      ; "target_ref_age_s", `Int age_s ]
+  | Stale_ref { target_ref; upstream_head; last_observed_at_unix; age_s } ->
+    `Assoc
+      [ "state", `String "stale_ref"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int 0; "behind", `Int 0
+      ; "target_ref_last_observed_at_unix",
+        (match last_observed_at_unix with Some value -> `Int value | None -> `Null)
+      ; "target_ref_age_s", (match age_s with Some value -> `Int value | None -> `Null)
+      ]
+  | Ahead { target_ref; upstream_head; ahead } ->
+    `Assoc
+      [ "state", `String "ahead"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int ahead; "behind", `Int 0 ]
+  | Behind { target_ref; upstream_head; behind } ->
+    `Assoc
+      [ "state", `String "behind"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int 0; "behind", `Int behind ]
+  | Diverged { target_ref; upstream_head; ahead; behind } ->
+    `Assoc
+      [ "state", `String "diverged"; "target_ref", `String target_ref
+      ; "upstream_head", `String upstream_head; "ahead", `Int ahead; "behind", `Int behind ]
+  | Freshness_unavailable error ->
+    `Assoc [ "state", `String "unavailable"; "error", `String error ]
+
+(* One checkout's measured facts. [checkout_json] renders this to the tool
+   surface and [freshness_row_of_inspection] projects it into the turn
+   context, so the two surfaces read the same probe and can never disagree. *)
+type checkout_inspection = {
+  inspected : Keeper_playground_checkouts.checkout;
+  catalog_resolution : catalog_resolution;
+  branch : (string, string) result;
+  head : (string, string) result;
+  dirty : (bool * int, string) result;
+  freshness : checkout_freshness;
+}
+
+(* The origin lookup and catalog match every inspection of a checkout starts
+   from, and the repository value the git probes run against. *)
+let resolve_checkout ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+  (* The checkout's own path, as discovered. Previously this reassembled
+     [sandbox_abs/repos/<name>], which meant any checkout found outside that
+     one shape was inspected at a path that does not exist — every git call
+     below would fail and the entry would render as "unavailable". *)
+  let checkout_abs = checkout.absolute_path in
+  let name = checkout.name in
+  let origin =
+    match Repo_git.Inspection_budget.remaining_timeout budget with
+    | Error error -> Error (`Budget error)
+    | Ok timeout_sec ->
+      Repo_git.get_origin_url ~timeout_sec ~local_path:checkout_abs ()
+      |> Result.map_error (fun error -> `Lookup error)
+  in
+  let catalog_resolution =
+    match origin with
+    | Ok origin -> resolve_catalog ~catalog ~origin
+    (* A checkout without an origin remote is no catalog repository's
+       checkout: that is an answer, not an origin that could not be read. *)
+    | Error (`Lookup Repo_git.Origin_missing) -> Unregistered
+    | Error
+        (`Lookup
+           ((Repo_git.Origin_lookup_timed_out _ | Origin_lookup_failed _) as error)) ->
+      Origin_unavailable (Repo_git.origin_lookup_error_to_string error)
+    | Error (`Budget error) -> Origin_unavailable error
+  in
+  let repository : Repo_manager_types.repository =
+    match catalog_resolution with
+    | Registered repo -> { repo with local_path = checkout_abs }
+    | Unregistered | Ambiguous _ | Catalog_unavailable _ | Origin_unavailable _ ->
+      { id = name; name; url = ""; local_path = checkout_abs; aliases = []
+      ; default_branch = ""; keepers = []; status = Active; auto_sync = false
+      ; sync_interval = 0; created_at = 0L; updated_at = 0L }
+  in
+  catalog_resolution, repository
+;;
+
+let inspect_checkout ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+  let checkout_abs = checkout.absolute_path in
+  let catalog_resolution, repository = resolve_checkout ~budget ~catalog checkout in
+  let branch =
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.current_branch ~timeout_sec ~repository ())
+  in
+  let head = first_git_line ~budget ~cwd:checkout_abs [ "rev-parse"; "HEAD" ] in
+  let dirty = dirty_state ~budget ~repository in
+  (* Freshness stays the last probe so the budget drains in the same order as
+     the pre-split [checkout_json] did. *)
+  let freshness = freshness_of_catalog ~budget ~repository catalog_resolution in
+  { inspected = checkout; catalog_resolution; branch; head; dirty; freshness }
+
+let checkout_json (inspection : checkout_inspection) =
+  let checkout = inspection.inspected in
+  let name = checkout.Keeper_playground_checkouts.name in
+  let catalog_resolution = inspection.catalog_resolution in
+  let branch = inspection.branch in
+  let head = inspection.head in
+  let dirty = inspection.dirty in
+  let inspection_errors =
+    [ (match branch with Error error -> Some ("branch: " ^ error) | Ok _ -> None)
+    ; (match head with Error error -> Some ("head: " ^ error) | Ok _ -> None)
+    ; (match dirty with Error error -> Some ("status: " ^ error) | Ok _ -> None)
+    ]
+    |> List.filter_map Fun.id
+  in
+  `Assoc
+    [ "checkout_name", `String name
+    ; "path", `String checkout.relative_path
+      (* [path] is relative to the keeper's workspace root and is whatever the
+         keeper actually used; it is no longer prefixed with a segment the
+         system prescribes. [path_base] states that basis on the wire so a
+         reader does not have to know the old convention. *)
+    ; "path_base", `String "playground_root"
+    ; ( "git_link"
+      , `String
+          (match checkout.git_link with
+           | Keeper_playground_checkouts.Git_directory -> "directory"
+           | Keeper_playground_checkouts.Git_pointer_file -> "pointer_file") )
+    ; "catalog", catalog_json catalog_resolution
+    ; "branch", (match branch with Ok value -> `String value | Error _ -> `Null)
+    ; "head", (match head with Ok value -> `String value | Error _ -> `Null)
+    ; "dirty", (match dirty with Ok (value, _) -> `Bool value | Error _ -> `Null)
+    ; "changed_files", (match dirty with Ok (_, value) -> `Int value | Error _ -> `Null)
+    ; "inspection_state", `String (if inspection_errors = [] then "available" else "unavailable")
+    ; "inspection_errors", `List (List.map (fun error -> `String error) inspection_errors)
+    ; "freshness", freshness_json inspection.freshness
+    ]
+
+type freshness_row = {
+  row_checkout_path : string;
+  row_branch : string option;
+  row_changed_files : int option;
+  row_freshness : checkout_freshness;
+}
+
+(* The row is what an operator reads, and every field on it is already an
+   option. So the policy is: any git probe that did not answer shows as no
+   branch. It is one policy for every error the probe can return -- a detached
+   HEAD, a command that failed, a checkout that vanished mid-read -- because
+   the row has nowhere to put the difference and [row_freshness] is what says
+   the probe is not to be trusted. *)
+let row_branch_of_probe = function
+  | Ok branch -> Some branch
+  | Error (_ : string) -> None
+;;
+
+let freshness_row_of_inspection (inspection : checkout_inspection) =
+  (* [relative_path], not [name]: it is the cwd the keeper passes to its
+     tools, and basenames collide (a live playground held two [poc-repo]
+     checkouts at different paths, 2026-09-01 field probe). *)
+  { row_checkout_path =
+      inspection.inspected.Keeper_playground_checkouts.relative_path
+  ; row_branch = row_branch_of_probe inspection.branch
+  ; row_changed_files =
+      (match inspection.dirty with
+       | Ok (_, changed_files) -> Some changed_files
+       | Error _ -> None)
+  ; row_freshness = inspection.freshness
+  }
+
+let checkout_inspection_of_remote ~catalog (ic : Keeper_sandbox_remote_checkouts.inspected_checkout) : checkout_inspection =
+  let catalog_resolution =
+    match ic.origin with
+    | Keeper_sandbox_remote_checkouts.Origin_url origin -> resolve_catalog ~catalog ~origin
+    (* No origin remote: no catalog repository's checkout. *)
+    | Origin_not_configured -> Unregistered
+    | Origin_unread -> Origin_unavailable "remote origin URL unavailable"
+  in
+  let freshness =
+    match catalog_resolution with
+    | Registered _ ->
+      (match ic.target_ref with
+       | None -> Freshness_unavailable "target_ref unavailable"
+       | Some target_ref ->
+         (match ic.upstream_head with
+          | None ->
+            Freshness_unavailable
+              (Printf.sprintf "remote target_ref %s not found" target_ref)
+          | Some upstream_head ->
+            (match ic.ahead, ic.behind with
+             | Some ahead, Some behind ->
+               freshness_from_counts ~now_unix:(Time_compat.now ()) ~target_ref
+                 ~upstream_head
+                 ~last_observed_at_unix:ic.target_ref_last_observed_at_unix
+                 ~behind ~ahead
+             | _ -> Freshness_unavailable "ahead/behind counts unavailable")))
+    | Unregistered ->
+      Freshness_unavailable "checkout is not registered in the repository catalog"
+    | Ambiguous ids ->
+      Freshness_unavailable
+        (Printf.sprintf "checkout origin matches multiple repository ids: %s"
+           (String.concat ", " ids))
+    | Catalog_unavailable error ->
+      Freshness_unavailable ("repository catalog unavailable: " ^ error)
+    | Origin_unavailable error -> Freshness_unavailable error
+  in
+  { inspected = ic.checkout
+  ; catalog_resolution
+  ; branch = ic.branch
+  ; head = ic.head
+  ; dirty = ic.dirty
+  ; freshness
+  }
+;;
+
+let repository_checkouts_json_with_budget_impl
+    ~before_git_inspection
+    ~inspection_budget_sec
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+  =
+  let observed_at_unix = Time_compat.now () in
+  let catalog = Repo_store.load_all ~base_path:config.base_path in
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Shared_mount ->
+    let sandbox_abs =
+      Keeper_sandbox.host_root_abs_of_meta ~config meta
+      |> normalize_path
+    in
+    let scan = Keeper_playground_checkouts.discover ~root:sandbox_abs in
+    before_git_inspection ();
+    (* The budget bounds the per-checkout Git inspections below, so it starts
+       after [load_all] and [discover]. Opening it first let a large catalog or a
+       slow filesystem walk exhaust it before any Git subprocess ran, and every
+       checkout then reported branch/head/status as unavailable. *)
+    let inspection_budget =
+      Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+    in
+    let entries =
+      match scan with
+      | Ok discovery ->
+        Keeper_playground_checkouts.found discovery
+        |> List.map (fun checkout ->
+          checkout_json (inspect_checkout ~budget:inspection_budget ~catalog checkout))
+      | Error _ -> []
+    in
+    `Assoc
+      [ ( "state"
+        , `String
+            (match catalog, scan with
+             | Ok _, Ok _ when Repo_git.Inspection_budget.is_exhausted inspection_budget ->
+               "inspection_budget_exhausted"
+             | Ok _, Ok _ -> "available"
+             | Error _, _ -> "catalog_unavailable"
+             (* A failed scan and an empty playground used to be the same empty
+                list. They are different answers and now say so. *)
+             | Ok _, Error _ -> "filesystem_unavailable") )
+      ; "scan", Keeper_playground_checkouts.scan_json scan
+      ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
+      ; "observed_at_unix", `Float observed_at_unix
+      ; "entries", `List entries
+      ; "error", (match catalog with Ok _ -> `Null | Error error -> `String error)
+      ]
+  | Endpoint_owned ->
+    let remote_result =
+      Keeper_sandbox_remote_checkouts.discover_and_inspect
+        ~timeout_sec:inspection_budget_sec
+        ~config
+        ~meta
+        ~catalog
+        ()
+    in
+    before_git_inspection ();
+    let scan, entries =
+      match remote_result with
+      | Ok (scan_res, remote_inspections) ->
+        let inspections =
+          List.map (checkout_inspection_of_remote ~catalog) remote_inspections
+        in
+        let entries = List.map checkout_json inspections in
+        (scan_res, entries)
+      | Error scan_err ->
+        (Error scan_err, [])
+    in
+    `Assoc
+      [ ( "state"
+        , `String
+            (match catalog, scan with
+             | Ok _, Ok (Keeper_playground_checkouts.Partial { limit = Checkout_budget_exhausted _; _ }) ->
+               "inspection_budget_exhausted"
+             | (Ok _, Ok (Keeper_playground_checkouts.Complete _))
+             | ( Ok _
+               , Ok
+                   (Keeper_playground_checkouts.Partial
+                     { limit = Entry_budget_exhausted _ | Directory_unreadable _; _ }) )
+               -> "available"
+             | Error _, _ -> "catalog_unavailable"
+             | Ok _, Error _ -> "filesystem_unavailable") )
+      ; "scan", Keeper_playground_checkouts.scan_json scan
+      ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
+      ; "observed_at_unix", `Float observed_at_unix
+      ; "entries", `List entries
+      ; "error", (match catalog with Ok _ -> `Null | Error error -> `String error)
+      ]
+;;
+
+let repository_checkouts_json_with_budget ~inspection_budget_sec ~config ~meta =
+  repository_checkouts_json_with_budget_impl
+    ~before_git_inspection:(fun () -> ())
+    ~inspection_budget_sec
+    ~config
+    ~meta
+;;
+
+let repository_checkouts_json ~include_repository_checkouts ~config ~meta =
+  if include_repository_checkouts then
+    repository_checkouts_json_with_budget
+      ~inspection_budget_sec:Repo_git.inspection_timeout_sec
+      ~config
+      ~meta
+  else
+    `Assoc [ "state", `String "not_inspected"; "entries", `List [] ]
+;;
+
+(* What a reader of a checkout's files needs to know about the commit it is
+   reading. It stops short of the working tree: [git status] runs the
+   repository's own configured fsmonitor and can reach a promisor remote, and
+   the checkouts a verifier reads belong to the producer under review. The
+   probes that remain read refs and objects only (the reflog probe turns
+   [log.showSignature] off). A probe that did not answer is no value, and
+   [identity_freshness] says whether the rest of the row can be trusted. *)
+type identity_row = {
+  identity_checkout_path : string;
+  identity_branch : string option;
+  identity_head : string option;
+  identity_freshness : checkout_freshness;
+}
+
+(* [git -C <path>] walks up to the enclosing repository when [<path>] holds a
+   [.git] entry that is not a valid repository, and would then report that
+   repository's commit as this checkout's. *)
+let own_toplevel ~budget checkout_abs =
+  match
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.checkout_identity ~timeout_sec ~local_path:checkout_abs ())
+  with
+  | Error _ as error -> error
+  | Ok { Repo_git.toplevel; _ } ->
+    (match Unix.realpath checkout_abs with
+     | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
+     | resolved ->
+       if String.equal resolved toplevel
+       then Ok ()
+       else Error "this path is not the top of its own git repository")
+;;
+
+let inspect_checkout_identity ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+  let checkout_abs = checkout.absolute_path in
+  match own_toplevel ~budget checkout_abs with
+  | Error reason ->
+    { identity_checkout_path = checkout.relative_path
+    ; identity_branch = None
+    ; identity_head = None
+    ; identity_freshness = Freshness_unavailable reason
+    }
+  | Ok () ->
+    let catalog_resolution, repository = resolve_checkout ~budget ~catalog checkout in
+    let branch =
+      with_inspection_budget budget (fun timeout_sec ->
+        Repo_git.current_branch ~timeout_sec ~repository ())
+    in
+    let head = first_git_line ~budget ~cwd:checkout_abs [ "rev-parse"; "HEAD" ] in
+    let freshness = freshness_of_catalog ~budget ~repository catalog_resolution in
+    { identity_checkout_path = checkout.relative_path
+    ; identity_branch = Result.to_option branch
+    ; identity_head = Result.to_option head
+    ; identity_freshness = freshness
+    }
+;;
+
+let checkout_identity_rows
+    ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
+    ~(config : Workspace.config)
+    checkouts
+  =
+  let catalog = Repo_store.load_all ~base_path:config.base_path in
+  let budget =
+    Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+  in
+  List.map (inspect_checkout_identity ~budget ~catalog) checkouts
+;;
+
+let checkout_freshness_rows
+    ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+    ()
+  =
+  let catalog = Repo_store.load_all ~base_path:config.base_path in
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Shared_mount ->
+    let sandbox_abs =
+      Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+    in
+    (match Keeper_playground_checkouts.discover ~root:sandbox_abs with
+     | Error scan_error -> Error scan_error
+     | Ok discovery ->
+       let budget =
+         Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+       in
+       Ok
+         (Keeper_playground_checkouts.found discovery
+          |> List.map (fun checkout ->
+            freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout))))
+  | Endpoint_owned ->
+    match
+      Keeper_sandbox_remote_checkouts.discover_and_inspect
+        ~timeout_sec:inspection_budget_sec
+        ~config
+        ~meta
+        ~catalog
+        ()
+    with
+    | Error scan_err -> Error scan_err
+    | Ok (scan_res, remote_inspections) ->
+      (match scan_res with
+       | Error scan_err -> Error scan_err
+       | Ok _ ->
+         let inspections =
+           List.map (checkout_inspection_of_remote ~catalog) remote_inspections
+         in
+         Ok (List.map freshness_row_of_inspection inspections))
+;;
+
+module For_testing = struct
+  let repository_checkouts_json_with_budget = repository_checkouts_json_with_budget
+
+  let repository_checkouts_json_with_budget_after_discovery
+      ~before_git_inspection
+      ~inspection_budget_sec
+      ~config
+      ~meta
+    =
+    repository_checkouts_json_with_budget_impl
+      ~before_git_inspection
+      ~inspection_budget_sec
+      ~config
+      ~meta
+  ;;
+end
+
+let preflight_status ~image ~timeout_sec () =
+  Keeper_sandbox_runtime.docker_preflight ~image ~timeout_sec ()
+
+(* [docker_preflight] already answers [ok] as a bool. Serialising the record
+   and reading the field back out of an [`Assoc] meant a typo in the key, or a
+   rename upstream, produced [None] — indistinguishable from "the probe did
+   not run" — instead of a compile error. Keep the record typed to the point
+   where the payload is built. *)
+let preflight_ok (preflight : Keeper_sandbox_runtime.docker_preflight option) =
+  Option.map (fun (p : Keeper_sandbox_runtime.docker_preflight) -> p.ok) preflight
+
+let container_mode (meta : keeper_meta) containers =
+  match meta.sandbox_profile with
+  | Micro_vm ->
+    if List.exists (fun (c : Keeper_sandbox_runtime.live_container) -> c.running = Some true) containers
+    then "microvm_vm_running"
+    else "microvm_vm_not_running"
+  | Docker ->
+    if
+      List.exists
+        (fun (c : Keeper_sandbox_runtime.live_container) ->
+          c.container_kind = Some managed_kind && c.running = Some true)
+        containers
+    then
+      "managed_running"
+    else (
+      match meta.network_mode with
+      | Network_none -> "turn_scoped_or_managed_none"
+      | Network_inherit -> "oneshot_or_managed_inherit"
+      (* Unreachable for Docker: [docker_network_args] refuses this mode, so
+         a Docker keeper never starts with it. Named rather than folded into
+         a neighbour so the label does not lie if that refusal is lifted. *)
+      | Network_policy -> "policy_unavailable_on_docker")
+  | Remote_ssh -> "remote_ssh"
+
+let why_no_container (meta : keeper_meta) ~preflight containers =
+  if containers <> [] then
+    None
+  else
+    match meta.sandbox_profile with
+    | Micro_vm ->
+      (* Named from the Keeper's own meta. The Apple-only wording sent an msb
+         operator to look for a guest under a runtime the Keeper never uses. *)
+      Some
+        (Printf.sprintf
+           "no visible %s microVM guest; a guest is created on this Keeper's first sandboxed tool execution"
+           (match meta.microvm_backend with
+            | Some backend -> Keeper_microvm_backend.to_string backend
+            | None -> "declared"))
+    | Remote_ssh ->
+      Some "remote_ssh executes on its configured endpoint and does not own a local container"
+    | Docker -> (
+      match preflight_ok preflight with
+      | Some false -> Some Keeper_sandbox_runtime.docker_preflight_failed_label
+      | _ -> (
+          match meta.network_mode with
+          | Network_inherit ->
+              Some
+                "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground"
+          | Network_none ->
+              Some
+                "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted"
+          | Network_policy ->
+              Some
+                "no container: network_mode=policy is not available on sandbox_profile=docker, because the Docker egress boundary is unmeasured (RFC-0415). Set network_mode to none or inherit here, or move this keeper to microvm"))
+
+let work_volume_discard_default_json ~(timeout_sec : float) (meta : keeper_meta) =
+  match meta.sandbox_profile, meta.microvm_backend with
+  | Micro_vm, Some Keeper_microvm_backend.Apple_container ->
+    let module Microvm = Keeper_sandbox_microvm in
+    let state, error =
+      match Microvm.read_work_volume_discard_default
+          ~backend:Keeper_microvm_backend.Apple_container ~keeper_name:meta.name ~timeout_sec with
+      | Microvm.Discard_default_set -> "set", `Null
+      | Microvm.Discard_default_absent -> "absent", `Null
+      | Microvm.Superblock_unreadable failure ->
+        "unreadable", `String (Microvm.discard_read_failure_message failure)
+    in
+    `Assoc ["state", `String state; "error", error]
+  | Micro_vm, (Some (Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata) | None)
+  | (Docker | Remote_ssh), (Some _ | None) -> `Null
+;;
+
+let sandbox_resource_config_json ~timeout_sec (meta : keeper_meta) =
+  match meta.sandbox_profile with
+  | Micro_vm ->
+    (* The same resolution the boot argv takes, so the size shown is the size
+       a guest starting now gets. A size that cannot be resolved refuses the
+       boot, and says why here rather than showing nothing. *)
+    let memory, cpus, guest_size_error =
+      match
+        Env_config_sandbox.Runtime.microvm_guest_size
+          ~memory:meta.microvm_memory
+          ~cpus:meta.microvm_cpus
+      with
+      | Ok (size : Keeper_microvm_guest_size.t) ->
+        ( `String (Keeper_microvm_guest_size.memory_argv size.memory)
+        , `String (string_of_int (Keeper_microvm_guest_size.cpus_count size.cpus))
+        , `Null )
+      | Error detail -> `Null, `Null, `String detail
+    in
+    `Assoc
+      [ "memory", memory
+      ; "cpus", cpus
+      ; "guest_size_error", guest_size_error
+      ; "work_volume_size", `String (Env_config_sandbox.Runtime.microvm_work_volume_size ())
+      ; "work_volume_discard_default", work_volume_discard_default_json ~timeout_sec meta
+      ; "pids_limit", `Null
+      ; "tmpfs_size", `Null
+      ]
+  | Docker ->
+    `Assoc
+      [ "memory", `String (Env_config_sandbox.Hardening.memory ())
+      ; "cpus", `Null
+      ; "guest_size_error", `Null
+      ; "work_volume_size", `Null
+      ; "work_volume_discard_default", `Null
+      ; "pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ())
+      ; "tmpfs_size", `String (Env_config_sandbox.Hardening.tmpfs_size ())
+      ]
+  | Remote_ssh -> `Null
+;;
+
+let sandbox_paths_json ~(config : Workspace.config) (meta : keeper_meta) =
+  let host_workspace =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+  in
+  match meta.sandbox_profile with
+  | Remote_ssh ->
+    `Assoc
+      [ "host_workspace", `String host_workspace
+      ; "guest_home", `Null
+      ; "guest_workspace", `Null
+      ; "guest_config", `Null
+      ; "guest_work_volume", `Null
+      ]
+  | Docker | Micro_vm ->
+    let container_root = Keeper_sandbox.container_root meta.name in
+    let guest_workspace =
+      match meta.sandbox_profile with
+      | Micro_vm -> Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name
+      | Docker | Remote_ssh -> container_root
+    in
+    `Assoc
+      [ "host_workspace", `String host_workspace
+      ; "guest_home", `Null
+      ; "guest_workspace", `String guest_workspace
+      ; ( "guest_config"
+        , `String
+            (Keeper_sandbox_runtime.container_masc_config_dir
+               ~container_root) )
+      ; ( "guest_work_volume"
+        , match meta.sandbox_profile with
+          | Micro_vm -> `String Keeper_sandbox_microvm.work_volume_guest_root
+          | Docker | Remote_ssh -> `Null )
+      ]
+;;
+
+let live_status_json ?(include_preflight = true)
+    ?preflight_override
+    ?containers_override
+    ?(include_repository_checkouts = true)
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+    ~(timeout_sec : float)
+    ~(verbose : bool)
+    () =
+  (* Read once for the whole status, so the image row and the preflight's
+     image check describe the same build. *)
+  let configured_image =
+    match meta.sandbox_profile with
+    | Docker | Micro_vm ->
+      Some (Keeper_sandbox_image_resolver.for_keeper ~base_path:config.Workspace.base_path meta)
+    | Remote_ssh -> None
+  in
+  let preflight =
+    match preflight_override, configured_image with
+    | Some cached, _ -> cached
+    | None, Some image when include_preflight && meta.sandbox_profile = Docker ->
+      preflight_status
+        ~image:
+          (image
+           |> Result.map (fun pinned -> pinned.Keeper_sandbox_image_catalog.reference)
+           |> Result.map_error Keeper_sandbox_image_resolver.error_to_string)
+        ~timeout_sec ()
+    | None, (Some _ | None) -> None
+  in
+  let container_observation =
+    match meta.sandbox_profile with
+    | Docker ->
+      (match containers_override with
+       | Some observation ->
+         Result.map (live_containers_for_keeper ~meta) observation
+       | None -> live_containers ~config ~meta ~timeout_sec)
+    | Micro_vm -> live_microvm_containers ~config ~meta ~timeout_sec
+    | Remote_ssh -> Ok []
+  in
+  let containers, container_error, effective_mode =
+    match container_observation with
+    | Ok containers -> containers, None, Some (container_mode meta containers)
+    | Error error -> [], Some error, None
+  in
+  let why_no_container =
+    match container_error with
+    | Some _ ->
+      Some
+        (match meta.sandbox_profile with
+         | Docker -> "docker_container_listing_failed"
+         | Micro_vm -> "microvm_container_listing_failed"
+         | Remote_ssh -> "remote_ssh_container_listing_failed")
+    | None -> why_no_container meta ~preflight containers
+  in
+  `Assoc
+    [
+      ("keeper", `String meta.name);
+      ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
+      ("configured_network_mode", `String (network_mode_to_string meta.network_mode));
+      (* The image the Keeper names, the build the host catalog has for it
+         now, or why the catalog has none -- the reason its next container
+         will not start. Remote_ssh runs on a host rather than from an image,
+         so it has none of the three. *)
+      ("configured_image_name",
+        (match configured_image with
+         | Some _ -> Json_util.string_opt_to_json meta.sandbox_image
+         | None -> `Null));
+      ("configured_image",
+        (match configured_image with
+         | Some (Ok pinned) -> `String pinned.Keeper_sandbox_image_catalog.reference
+         | Some (Error _) | None -> `Null));
+      ("configured_image_unresolved",
+        (match configured_image with
+         | Some (Error error) -> `String (Keeper_sandbox_image_resolver.error_to_string error)
+         | Some (Ok _) | None -> `Null));
+      ("effective_mode", Json_util.string_opt_to_json effective_mode);
+      ( "managed_container_kind"
+      , match meta.sandbox_profile with
+        | Docker -> `String managed_kind
+        | Micro_vm -> `String Keeper_sandbox_microvm.keeper_vm_container_kind
+        | Remote_ssh -> `Null );
+      ("containers",
+       `List (List.map Keeper_sandbox_runtime.live_container_to_yojson containers));
+      ( "preflight",
+        if verbose
+        then
+          Json_util.option_to_yojson
+            Keeper_sandbox_runtime.docker_preflight_to_yojson
+            preflight
+        else `Null );
+      ("resource_config", sandbox_resource_config_json ~timeout_sec meta);
+      (* The server's last superblock read of each image-backed volume
+         (RFC keeper-volume-filesystem-repair §3.2); this cached projection
+         spawns nothing. The discard default above is a separate fresh read. *)
+      ( "volume_filesystem"
+      , `List
+          (List.map
+             (fun (volume : Keeper_volume_filesystem_watch.volume) ->
+                match Keeper_volume_filesystem_watch.latest ~volume:volume.name with
+                | Some observation ->
+                  (* §3.3: a work volume's backup is the operator's to check
+                     and remove. A build volume is recreated, never backed up. *)
+                  let repair_backup =
+                    match volume.kind with
+                    | Keeper_volume_filesystem_watch.Build -> None
+                    | Keeper_volume_filesystem_watch.Work ->
+                      Option.bind (Keeper_volume_filesystem_watch.source observation) (fun image ->
+                        let backup = Keeper_volume_repair.backup_path ~image in
+                        if Sys.file_exists backup then Some backup else None)
+                  in
+                  `Assoc
+                    (Keeper_volume_filesystem_watch.observation_fields observation
+                     @ [ "repair_backup", Json_util.string_opt_to_json repair_backup ])
+                | None ->
+                  `Assoc
+                    [ "volume", `String volume.name
+                    ; "observed_at", `Null
+                    ; "image", `Null
+                    ; "filesystem", `Null
+                    ; "observation_failed", `Null
+                    ; "repair_backup", `Null
+                    ])
+             (Keeper_volume_filesystem_watch.volumes_of_meta meta)) );
+      ("paths", sandbox_paths_json ~config meta);
+      ("container_error", Json_util.string_opt_to_json container_error);
+      ("why_no_container", Json_util.string_opt_to_json why_no_container);
+      ( "repository_checkouts",
+        repository_checkouts_json ~include_repository_checkouts ~config ~meta );
+    ]
+
+type sandbox_log_backend =
+  | Docker_logs
+  | Micro_vm_logs of Keeper_microvm_backend.t
+
+type sandbox_log_source =
+  | Local_backend of sandbox_log_backend
+  | No_local_stream of string
+
+type sandbox_logs_error =
+  | Sandbox_logs_meta_read_failed of string
+  | Sandbox_logs_keeper_not_found
+  | Sandbox_logs_backend_failed of string
+
+(* The microVM label is the runtime's own spelling, so a Keeper on msb no
+   longer reports "apple_container" on this wire. [apple_container] is
+   unchanged for the runtime that actually is Apple's. *)
+let sandbox_log_backend_label = function
+  | Docker_logs -> "docker"
+  | Micro_vm_logs backend -> Keeper_microvm_backend.to_string backend
+;;
+
+(* The sentence an operator reads when the profile keeps nothing local. It
+   agrees with [why_no_container]'s Remote_ssh answer above: the endpoint is
+   where execution happens, so the endpoint is where the logs are. The
+   endpoint's name is deliberately absent -- [keeper_meta] does not carry it,
+   and resolving it against runtime.toml would put a new failure mode on a
+   path that is not failing. *)
+let remote_ssh_no_local_stream_reason =
+  "This Keeper runs on its configured SSH endpoint, so no container log \
+   stream exists on this host; read the logs on the endpoint."
+;;
+
+let resolve_sandbox_log_target ~(config : Workspace.config) ~keeper_name =
+  match Keeper_meta_store.read_effective_meta config keeper_name with
+  | Error detail -> Error (Sandbox_logs_meta_read_failed detail)
+  | Ok None -> Error Sandbox_logs_keeper_not_found
+  | Ok (Some meta) ->
+    (match meta.sandbox_profile with
+     | Docker -> Ok (Local_backend Docker_logs, meta.name)
+     | Micro_vm ->
+       (match meta.microvm_backend with
+        | Some backend -> Ok (Local_backend (Micro_vm_logs backend), meta.name)
+        | None ->
+          Error
+            (Sandbox_logs_backend_failed
+               (Printf.sprintf
+                  "microvm_backend_unresolved: keeper %s declares \
+                   sandbox_profile=microvm and no microvm_backend, so there is no \
+                   runtime to read a log stream from"
+                  meta.name)))
+     | Remote_ssh ->
+       Ok (No_local_stream remote_ssh_no_local_stream_reason, meta.name))
+;;
+
+let sandbox_log_argv backend ~tail ~container_id =
+  match backend with
+  | Docker_logs ->
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "logs"; "--tail"; string_of_int tail; container_id ]
+  | Micro_vm_logs microvm_backend ->
+    Keeper_sandbox_microvm.logs_tail_argv_for microvm_backend ~tail ~container_id
+;;
+
+let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
+  let tail = max 1 (min 500 tail) in
+  match resolve_sandbox_log_target ~config ~keeper_name with
+  (* Rebuilt, not re-used: the payload type on the Ok side differs here, so
+     [Error _ as e] would not typecheck. *)
+  | Error resolve_error -> Error resolve_error
+  | Ok (No_local_stream reason, effective_keeper_name) ->
+    (* A profile that keeps no container here is answered, not failed: the
+       key set matches the local shapes so no caller tests for presence. *)
+    Ok
+      (`Assoc
+        [ "keeper", `String effective_keeper_name
+        ; "backend", `Null
+        ; "state", `String "no_local_stream"
+        ; "reason", `String reason
+        ; "tail", `Int tail
+        ; "instances", `List []
+        ])
+  | Ok (Local_backend backend, effective_keeper_name) ->
+    let containers =
+      match backend with
+      | Docker_logs ->
+        Keeper_sandbox_runtime.list_containers
+          ~keeper_name:effective_keeper_name
+          ~base_path:config.Workspace.base_path
+          ~timeout_sec
+          ()
+      | Micro_vm_logs microvm_backend ->
+        Keeper_sandbox_microvm.list_live_containers_for
+          microvm_backend
+          ~base_path:config.Workspace.base_path
+          ~keeper_name:effective_keeper_name
+          ~timeout_sec
+    in
+    Result.map_error
+      (fun detail -> Sandbox_logs_backend_failed detail)
+      containers
+    |> Result.map (fun containers ->
+         let rows =
+           List.map
+             (fun (container : Keeper_sandbox_runtime.live_container) ->
+               let status, stdout, stderr =
+                 Process_eio.run_argv_with_status_split ~timeout_sec
+                   (sandbox_log_argv backend ~tail ~container_id:container.id)
+               in
+               let error =
+                 match status with
+                 | Unix.WEXITED 0 -> `Null
+                 | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
+                   `String
+                     (Printf.sprintf "log command failed (%s)"
+                        (Keeper_sandbox_exec_failure.status_label status))
+               in
+               `Assoc
+                 [ "instance_id", `String container.id
+                 ; "instance_name", `String container.name
+                 ; "running", Json_util.bool_opt_to_json container.running
+                 ; "stdout", `String stdout
+                 ; "stderr", `String stderr
+                 ; "error", error
+                 ])
+             containers
+         in
+         `Assoc
+           [ "keeper", `String effective_keeper_name
+           ; "backend", `String (sandbox_log_backend_label backend)
+           ; "state", `String (if rows = [] then "no_instance" else "available")
+           ; "reason", `Null
+           ; "tail", `Int tail
+           ; "instances", `List rows
+           ])
+;;

@@ -1,0 +1,31 @@
+{
+  "status": "failed",
+  "started_at": "2026-09-12T19:59:04.178883+00:00",
+  "scope": "installed publication and HTTP Keeper preview only",
+  "runtime_mutation": false,
+  "semantic_verification": "not_performed",
+  "actual_keeper_dispatch": "not_measured",
+  "keeper_adoption": "not_measured",
+  "checks": [
+    "expected_runtime_identity"
+  ],
+  "build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+    "commit_source": "embedded",
+    "binary_commit": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "41a75acff6d190e767cebee3b53c371ed643293a41e1f1b5d93a6c5ab88c180d",
+    "binary_commit_unix_ts": 1789237013.0,
+    "binary_commit_age_seconds": 6131,
+    "executable_path": "/private/tmp/masc-851f412-installed-candidate-20260913/.masc-releases/9cf2e6e2497f396c5a23dfd2f2c36b7a2dbe99ca7fa8fbd43e2c11cf95916c1d/masc",
+    "executable_dir": "/private/tmp/masc-851f412-installed-candidate-20260913/.masc-releases/9cf2e6e2497f396c5a23dfd2f2c36b7a2dbe99ca7fa8fbd43e2c11cf95916c1d",
+    "runtime_instance_id": "01a096ee-b1f5-7000-aec2-4f7ea7d434e7",
+    "started_at": "2026-09-12T18:43:40Z",
+    "uptime_seconds": 4523
+  },
+  "error": "[Errno 2] No such file or directory: '/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/workspace-memory/publication.json'",
+  "finished_at": "2026-09-12T19:59:04.221516+00:00"
+}

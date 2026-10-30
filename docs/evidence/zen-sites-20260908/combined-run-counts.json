@@ -1,0 +1,79 @@
+{
+  "scope": "Actual Keeper execution-started/finished records only, across two named test Keepers. Excludes operator HTTP observations and approval requests that never executed.",
+  "keeper_model_turns": 23,
+  "actual_tool_calls": 228,
+  "successful_tool_calls": 212,
+  "failed_tool_calls": 16,
+  "by_tool": {
+    "BrowserAct": {
+      "attempts": 50,
+      "success": 47,
+      "failure": 3
+    },
+    "BrowserGoto": {
+      "attempts": 10,
+      "success": 10,
+      "failure": 0
+    },
+    "BrowserInteract": {
+      "attempts": 12,
+      "success": 12,
+      "failure": 0
+    },
+    "BrowserRead": {
+      "attempts": 87,
+      "success": 87,
+      "failure": 0
+    },
+    "BrowserSession": {
+      "attempts": 22,
+      "success": 20,
+      "failure": 2
+    },
+    "BrowserTabs": {
+      "attempts": 27,
+      "success": 17,
+      "failure": 10
+    },
+    "Write": {
+      "attempts": 5,
+      "success": 4,
+      "failure": 1
+    },
+    "keeper_analyze_image": {
+      "attempts": 9,
+      "success": 9,
+      "failure": 0
+    },
+    "keeper_artifact_read": {
+      "attempts": 6,
+      "success": 6,
+      "failure": 0
+    }
+  },
+  "raw_trace_sha256": {
+    "zen-sites-13eafa51/turn-1788796689308-429e-000000.jsonl": "8f84042298453b41b5f4bd69809347a72820b9e120ce1142d9860e57240bff19",
+    "zen-sites-13eafa51/turn-1788796798119-429e-000001.jsonl": "73942df538614ea14fd9c85fecf5fa39f848fcfc6e1000b3c5035991230783ef",
+    "zen-sites-13eafa51/turn-1788796804154-429e-000002.jsonl": "1c2f320a161c7b145df4c9ec6d1520ad173d3f5ff4b34629627194593c937e15",
+    "zen-sites-13eafa51/turn-1788796870487-429e-000003.jsonl": "eae0f5d3ce991eb9c40368f86a262df2d8e7fb864e02fd9bf8303eb7d249ec43",
+    "zen-sites-13eafa51/turn-1788796878538-429e-000004.jsonl": "756f2b074905bdf536ee7c17d42efcaee16fd6795e4ba7bad6201756bb9ca5bb",
+    "zen-sites-13eafa51/turn-1788796964237-429e-000005.jsonl": "4713ac543f9a9b65c23fab5af8293cb587b38cd74a326cfb8b9b17d77991aa0f",
+    "zen-sites-13eafa51/turn-1788797034660-429e-000006.jsonl": "7ba50c6a9f36730493113a67d7ea268355d31ddf2fdeadf3fc15eb26e25f386e",
+    "zen-sites-13eafa51/turn-1788797082937-429e-000007.jsonl": "62d4e96ce1054e4afb0d7bddb4755ab101b97f9743bb88993bfe131c7b2e2022",
+    "zen-sites-13eafa51/turn-1788797086967-429e-000008.jsonl": "f21e65b86cadc339a226c4242fb6398b16920fc68738adf57c8b25d7d80b977b",
+    "zen-sites-13eafa51/turn-1788797123196-429e-000009.jsonl": "be5bd1967856306fbf1f24d077eb4896e8455cad837cbf4c43e6dbeff43ff25d",
+    "zen-sites-13eafa51/turn-1788797129273-429e-000010.jsonl": "e6876f79b25760d98dac9e9f8c18261dcfb9ae5c141bcd85e13c46aab134dd28",
+    "zen-sites-13eafa51/turn-1788797195642-429e-000011.jsonl": "d9b2fc97f43b5c7d77c24f59036b8f0853e389f2ba5869411f05e1883c4c031d",
+    "zen-sites-13eafa51/turn-1788797389304-429e-000012.jsonl": "1d388f5f75f118ceb4cc31c6a6d24ab5ad3357628e07c128d709a1ca82d3c255",
+    "zen-sites-13eafa51/turn-1788797483477-429e-000013.jsonl": "daddf0bb8d5a63774d1608ab1a5125fb1834e93381dd4f7d0ce966a0550784a3",
+    "zen-sites-13eafa51/turn-1788797491517-429e-000014.jsonl": "066316d78238c6422535d2855770ead737a4f44e8cabdbd331c0d7f28172b417",
+    "zen-sites-13eafa51/turn-1788797568046-429e-000015.jsonl": "64a01919e92ccd5706dad1bed8c8098269cdab4c9d3d76b06e3bc4b95da9529b",
+    "zen-advanced-2b65f103/turn-1788797686283-429e-000016.jsonl": "561333d4eec4f460fcd3123962d5b858bb9cf9ec3fa3adc9a7204dfa767a7f2b",
+    "zen-advanced-2b65f103/turn-1788797898512-429e-000017.jsonl": "0fdc9571454fa71c70e06e6ca7fca9f78b433a5fe5e6ffac0670faed9822b054",
+    "zen-advanced-2b65f103/turn-1788798510982-429e-000018.jsonl": "a92e52ba0caa105fe6af37262ee65861048bd9ab1f264de85f626daf4e843c0d",
+    "zen-advanced-2b65f103/turn-1788798691861-429e-000019.jsonl": "1c95c3b66e0f0de354745cd0e86ff32e764b4ac5f75bf7532858de32804fd899",
+    "zen-advanced-2b65f103/turn-1788798772670-429e-000020.jsonl": "d032a8689c7a4a24cf4e9ac239b4d3653e6cf1c4f13e6883d90bf654498dcdfd",
+    "zen-advanced-2b65f103/turn-1788798797278-429e-000021.jsonl": "25d63f1d5bcdd59d0a9106b762e495943165a5d00c88a70bfde89921e879c40b",
+    "zen-advanced-2b65f103/turn-1788799015031-429e-000022.jsonl": "def9a15bfcb7e9b85de3002f9177a1b460a38a1a48355eec9f4ee8795440f866"
+  }
+}

@@ -1,0 +1,180 @@
+{
+  "case": "test/test_verifier_review_worker execution17",
+  "case_pass_line": 1248,
+  "source_path": "test/test_verifier_review_worker.ml",
+  "source_head": "fde6f30f922bb5613f3cfea75be05fe2c833ce61",
+  "source_lines": [
+    777,
+    862
+  ],
+  "source_sha256": "6ce0b54dc1f259c9052d3b525327d19e419766538339e91225ed01885e61fa90",
+  "phase_order_from_exact_source": [
+    "Judged",
+    "Committing",
+    "Commit_unknown"
+  ],
+  "groups": [
+    {
+      "phase": "Judged",
+      "observed_registration": false,
+      "log_lines": [
+        1159,
+        1174
+      ],
+      "asserted_scoped_commit_effect_counts": {
+        "observe": 0,
+        "apply": 0
+      },
+      "numeric_values_provenance": "Alcotest expected integer checks in exact checkout source passed in case17; integers are not printed as a separate metrics stream",
+      "production_entry": "Positive verifies actual Done + exact durable Approved + ACK; negative verifies actual Error + unchanged Task bytes/Owner events + no registry row. Entry callback counts are not independently instrumented."
+    },
+    {
+      "phase": "Judged",
+      "observed_registration": true,
+      "log_lines": [
+        1175,
+        1189
+      ],
+      "asserted_scoped_commit_effect_counts": {
+        "observe": 2,
+        "apply": 1
+      },
+      "numeric_values_provenance": "Alcotest expected integer checks in exact checkout source passed in case17; integers are not printed as a separate metrics stream",
+      "production_entry": "Positive verifies actual Done + exact durable Approved + ACK; negative verifies actual Error + unchanged Task bytes/Owner events + no registry row. Entry callback counts are not independently instrumented."
+    },
+    {
+      "phase": "Committing",
+      "observed_registration": false,
+      "log_lines": [
+        1190,
+        1205
+      ],
+      "asserted_scoped_commit_effect_counts": {
+        "observe": 0,
+        "apply": 0
+      },
+      "numeric_values_provenance": "Alcotest expected integer checks in exact checkout source passed in case17; integers are not printed as a separate metrics stream",
+      "production_entry": "Positive verifies actual Done + exact durable Approved + ACK; negative verifies actual Error + unchanged Task bytes/Owner events + no registry row. Entry callback counts are not independently instrumented."
+    },
+    {
+      "phase": "Committing",
+      "observed_registration": true,
+      "log_lines": [
+        1206,
+        1220
+      ],
+      "asserted_scoped_commit_effect_counts": {
+        "observe": 2,
+        "apply": 1
+      },
+      "numeric_values_provenance": "Alcotest expected integer checks in exact checkout source passed in case17; integers are not printed as a separate metrics stream",
+      "production_entry": "Positive verifies actual Done + exact durable Approved + ACK; negative verifies actual Error + unchanged Task bytes/Owner events + no registry row. Entry callback counts are not independently instrumented."
+    },
+    {
+      "phase": "Commit_unknown",
+      "observed_registration": false,
+      "log_lines": [
+        1221,
+        1236
+      ],
+      "asserted_scoped_commit_effect_counts": {
+        "observe": 0,
+        "apply": 0
+      },
+      "numeric_values_provenance": "Alcotest expected integer checks in exact checkout source passed in case17; integers are not printed as a separate metrics stream",
+      "production_entry": "Positive verifies actual Done + exact durable Approved + ACK; negative verifies actual Error + unchanged Task bytes/Owner events + no registry row. Entry callback counts are not independently instrumented."
+    },
+    {
+      "phase": "Commit_unknown",
+      "observed_registration": true,
+      "log_lines": [
+        1237,
+        1248
+      ],
+      "asserted_scoped_commit_effect_counts": {
+        "observe": 2,
+        "apply": 1
+      },
+      "numeric_values_provenance": "Alcotest expected integer checks in exact checkout source passed in case17; integers are not printed as a separate metrics stream",
+      "production_entry": "Positive verifies actual Done + exact durable Approved + ACK; negative verifies actual Error + unchanged Task bytes/Owner events + no registry row. Entry callback counts are not independently instrumented."
+    }
+  ],
+  "assertions": {
+    "negative_no_host_observation": {
+      "assertion": "missing observations refuse before actual host observation",
+      "log_lines": [
+        1164,
+        1195,
+        1226
+      ]
+    },
+    "negative_no_domain_apply": {
+      "assertion": "missing observations refuse before actual domain apply call",
+      "log_lines": [
+        1165,
+        1196,
+        1227
+      ]
+    },
+    "negative_task_bytes_preserved": {
+      "assertion": "unprovable recovery preserves the raw actual Task",
+      "log_lines": [
+        1167,
+        1198,
+        1229
+      ]
+    },
+    "negative_owner_events_preserved": {
+      "assertion": "unprovable recovery preserves the exact owner phase and events",
+      "log_lines": [
+        1168,
+        1199,
+        1230
+      ]
+    },
+    "negative_no_registry_row": {
+      "assertion": "unprovable recovery publishes no competing registry row",
+      "log_lines": [
+        1169,
+        1200,
+        1231
+      ]
+    },
+    "positive_one_apply": {
+      "assertion": "observed sibling executes exactly one real domain apply",
+      "log_lines": [
+        1181,
+        1212,
+        1243
+      ]
+    },
+    "positive_two_reads": {
+      "assertion": "observed sibling reads before and confirms after",
+      "log_lines": [
+        1182,
+        1213,
+        1244
+      ]
+    },
+    "positive_ack": {
+      "assertion": "acknowledged original leaves pending discovery",
+      "log_lines": [
+        1184,
+        1215,
+        1246
+      ]
+    },
+    "original_reviewer_once": {
+      "assertion": "recovery never adds another reviewer call",
+      "log_lines": [
+        1170,
+        1185,
+        1201,
+        1216,
+        1232,
+        1247
+      ]
+    }
+  },
+  "counting_scope": "Six subscenarios inside ONE counted Alcotest case, not six additional PASS. The fixture also performs one explicit preflight Task read outside the scoped counters."
+}

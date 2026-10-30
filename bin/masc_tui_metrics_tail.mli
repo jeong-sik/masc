@@ -1,0 +1,79 @@
+module Decode = Masc.Tui_decode
+
+type row_error =
+  | Malformed_json of {
+      path : string;
+      line_number : int option;
+      detail : string;
+    }
+  | Invalid_metrics_row of {
+      (** One-based chronological position inside the selected physical-row
+          window; this is not a source-file line number. *)
+      physical_index : int;
+      detail : string;
+    }
+  | Misfiled_row of {
+      physical_index : int;
+      names_keeper : string;
+    }
+      (** A row in this Keeper's own store that names a different Keeper. The
+          store is per Keeper -- [Keeper_types_support.keeper_metrics_store]
+          opens [<base-path>/.masc/keepers/<name>/metrics] -- so a writer put
+          this row in the wrong directory. Damage, like an unreadable row, and
+          counted apart from one because it names who misfiled it and because it
+          still consumes the physical window. *)
+
+type load_error =
+  | Remote_workspace
+      (** Local metrics were deliberately not read because the connected
+          server serves a different workspace. No storage failure occurred. *)
+  | Workspace_unconfirmed
+      (** The server workspace has not been established. Cached local metrics
+          are withdrawn until a matching workspace is observed again. *)
+  | Storage_error of Dated_jsonl.read_error
+  | Row_errors of {
+      physical_rows : int;
+      errors : row_error list;
+    }
+
+type snapshot = {
+  entries : Decode.log_entry list;
+  error : load_error option;
+}
+
+val empty : snapshot
+val error_to_string : load_error -> string
+(** Operator-facing diagnostic that keeps remote unavailability separate from
+    storage failures, which delegate to [Dated_jsonl.read_error_to_string]. *)
+val resolve_with :
+  expected_keeper:string ->
+  read_recent:(int -> (Dated_jsonl.recent_entry list, Dated_jsonl.read_error) result) ->
+  limit:int ->
+  snapshot
+val load : store:Dated_jsonl.t -> expected_keeper:string -> limit:int -> snapshot
+(** Read exactly the newest [limit] physical non-empty rows. Rejected rows
+    and rows attributed to a different Keeper consume that bound and are
+    reported; they are never backfilled. *)
+val load_keeper : base_path:string -> keeper_name:string -> limit:int -> (snapshot, string) result
+(** Read the canonical metrics location without initializing writer directories
+    or workspace configuration. Storage failures reject revalidation; valid
+    partial rows retain their typed diagnostics in the snapshot. *)
+
+val content_height : terminal_rows:int -> error:load_error option -> int
+val maximum_scroll : entry_count:int -> content_height:int -> int
+val normalize_scroll : entry_count:int -> content_height:int -> int -> int
+val scroll_up : entry_count:int -> content_height:int -> int -> int
+val scroll_down : entry_count:int -> content_height:int -> int -> int
+val page_up : entry_count:int -> content_height:int -> int -> int
+val page_down : entry_count:int -> content_height:int -> int -> int
+
+val visible
+  :  entries:Decode.log_entry list
+  -> content_height:int
+  -> scroll:int
+  -> Decode.log_entry list
+(** The rows to draw, newest first. [scroll] counts rows back from the newest,
+    so [scroll = 0] is the tail of the file. Stored order stays chronological;
+    this is the only place that reverses it, and it walks the list once rather
+    than indexing it per row. *)
+val empty_message : load_error option -> string

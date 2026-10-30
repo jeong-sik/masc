@@ -1,0 +1,35 @@
+{
+  "at": "2026-10-21T14:39:12.352386+00:00",
+  "reads": [
+    {
+      "label": "inventory-final",
+      "path": "/api/v1/lane-addons",
+      "http_status": 200,
+      "sha256": "1e1c8860ef062dd5e0c5ae8102da4e98abc5a488c60312a3d639ac1934903d03"
+    },
+    {
+      "label": "global-no-query",
+      "path": "/api/v1/lane-addons/slice",
+      "http_status": 200,
+      "sha256": "b0724798bf85b5ffc6655d12aa271a66762fc3d0bddcd56f94a9fe58532d7e35"
+    },
+    {
+      "label": "global-empty-query",
+      "path": "/api/v1/lane-addons/slice?",
+      "http_status": 400,
+      "sha256": "8a7b70611412f3d7409d24fd6e3127cc2dfdd8a226af91a0636a506ce1763675"
+    },
+    {
+      "label": "original-run",
+      "path": "/api/v1/lane-addons/slice?run_id=native-ui-proof",
+      "http_status": 200,
+      "sha256": "b0724798bf85b5ffc6655d12aa271a66762fc3d0bddcd56f94a9fe58532d7e35"
+    },
+    {
+      "label": "other-run",
+      "path": "/api/v1/lane-addons/slice?run_id=other-run",
+      "http_status": 200,
+      "sha256": "a366179db4b7899dd95a889f10293b951c1357310ce2d3d0b68ab332094d0ad1"
+    }
+  ]
+}

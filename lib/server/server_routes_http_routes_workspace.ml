@@ -1,0 +1,1742 @@
+open Server_utils
+
+module Http = Http_server_eio
+
+let base_path_of_state state = (Mcp_server.workspace_config state).base_path
+
+let sanitize_log_value ?(max_bytes = 240) s =
+  let without_controls =
+    String.map
+      (fun c ->
+        let code = Char.code c in
+        if code < 0x20 || code = 0x7f then '_' else c)
+      s
+  in
+  String_util.utf8_safe ~max_bytes ~suffix:"..."
+    without_controls
+  |> String_util.to_string
+
+let observe_workspace_route_failure ?(warn_on_failure = true) ~site ~path exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      let site = sanitize_log_value ~max_bytes:64 site in
+      let path = sanitize_log_value ~max_bytes:180 path in
+      let error = sanitize_log_value (Printexc.to_string exn) in
+      Otel_metric_store.inc_counter Otel_metric_store.metric_workspace_route_failures
+        ~labels:[("site", site)]
+        ();
+      if warn_on_failure then
+        Log.Server.warn "workspace route %s failed path=%s err=%s"
+          site path error
+      else
+        Log.Server.debug "workspace route %s failed path=%s err=%s"
+          site path error
+
+let workspace_or_default ?(warn_on_failure = true) ~site ~path ~default f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      observe_workspace_route_failure ~warn_on_failure ~site ~path exn;
+      default
+
+(* Pure classification of the [?keeper=<name>] query param into a
+   workspace base directory plus a source tag.
+
+   Without a keeper name (or with an empty / whitespace-only one) the
+   project root is used. With a name, [lookup_playground] returns the
+   keeper's private workspace root if the keeper meta is known, and
+   [exists_dir] validates that the playground directory is actually
+   on disk. Failures fall back to the project root so the IDE always
+   renders something and never depends on disk state to draw a tree.
+
+   This split keeps the side-effecting wiring (state -> config,
+   Keeper_meta_store.read_meta, Sys.file_exists / Sys.is_directory) at the
+   route boundary while the dispatch logic stays unit-testable. *)
+let classify_keeper_query
+    ~project_base
+    ~lookup_playground
+    ~exists_dir
+    keeper_param =
+  match keeper_param with
+  | None | Some "" -> (project_base, `Project)
+  | Some keeper_name ->
+    let trimmed = String.trim keeper_name in
+    if trimmed = "" then (project_base, `Project)
+    else
+      match lookup_playground trimmed with
+      | Some playground when exists_dir playground ->
+        (playground, `Playground trimmed)
+      | Some _ -> (project_base, `PlaygroundMissing trimmed)
+      | None -> (project_base, `KeeperUnknown trimmed)
+
+let classify_workspace_query
+    ~project_base
+    ~lookup_repository
+    ~lookup_playground
+    ~exists_dir
+    ~repo_param
+    ~keeper_param =
+  match repo_param with
+  | Some raw_repo when String.trim raw_repo <> "" ->
+    let repo_id = String.trim raw_repo in
+    (match lookup_repository repo_id with
+     | Some repo_path when exists_dir repo_path ->
+       (repo_path, `Repository repo_id)
+     | Some _ ->
+       (project_base, `RepositoryMissing repo_id)
+     | None ->
+       (project_base, `RepositoryUnknown repo_id))
+  | _ ->
+    classify_keeper_query
+      ~project_base
+      ~lookup_playground
+      ~exists_dir
+      keeper_param
+
+let resolve_workspace_base ~state ~uri =
+  let project_base = base_path_of_state state in
+  let config = (Mcp_server.workspace_config state) in
+  let lookup_repository repo_id =
+    match Repo_store.find ~base_path:project_base repo_id with
+    | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
+    | Error _ -> None
+  in
+  let lookup_playground name =
+    match Keeper_meta_store.read_effective_meta config name with
+    | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
+    | Ok (None) | Error _ -> None
+  in
+  let exists_dir p = Sys.file_exists p && Sys.is_directory p in
+  classify_workspace_query
+    ~project_base
+    ~lookup_repository
+    ~lookup_playground
+    ~exists_dir
+    ~repo_param:(Uri.get_query_param uri "repo_id")
+    ~keeper_param:(Uri.get_query_param uri "keeper")
+
+let json_error message =
+  `Assoc [("ok", `Bool false); ("error", `String message)]
+
+let json_response ~status req reqd json =
+  Http.Response.json_value ~status ~request:req json reqd
+
+(* Strip CR/LF and other control characters from a value before placing
+   it into an HTTP response header. RFC 7230 §3.2.4 prohibits CR/LF in
+   field-value, and an unsanitized name with "\r\nSet-Cookie: ..." would
+   let an attacker inject arbitrary headers via the keeper query param. *)
+let sanitize_header_value s =
+  String.map (fun c ->
+    let code = Char.code c in
+    if code < 0x20 || code = 0x7f then '_' else c) s
+
+(* Single SSOT encoding of the workspace source variant. Used by
+   [source_header] (HTTP header — sanitized there) and by the
+   tree/blame/diff cache keys (internal string, no sanitization). *)
+let source_to_string = function
+  | `Project -> "project"
+  | `Repository repo_id -> "repository:" ^ repo_id
+  | `RepositoryMissing repo_id -> "repository_missing:" ^ repo_id
+  | `RepositoryUnknown repo_id -> "repository_unknown:" ^ repo_id
+  | `Playground name -> "playground:" ^ name
+  | `PlaygroundMissing name -> "playground_missing:" ^ name
+  | `KeeperUnknown name -> "keeper_unknown:" ^ name
+
+(* Encode the workspace source tag as a single header value so the
+   frontend can render hints ("Playground 없음 — 프로젝트로 fallback")
+   without parsing the JSON body. *)
+let source_header source =
+  [("X-Workspace-Source", sanitize_header_value (source_to_string source))]
+
+let json_response_with_source ~status ~source req reqd json =
+  Http.Response.json_value ~status ~extra_headers:(source_header source)
+    ~request:req json reqd
+
+(* A cached workspace read goes out as the bytes the cache kept with the
+   entry, under the same source headers as an uncached answer. *)
+let cached_response_with_source ~source req reqd payload =
+  Server_cached_read_http.respond ~extra_headers:(source_header source)
+    ~request:req reqd payload
+
+let cached_response_with_source_and_base ~source ~base_path req reqd payload =
+  let headers = ("X-Workspace-Base-Path", sanitize_header_value base_path)
+                :: source_header source in
+  Server_cached_read_http.respond ~extra_headers:headers ~request:req reqd payload
+
+(* --- Safe path --- *)
+
+(* Confidentiality SSOT (task-1734). A single path component is
+   confidential when serving or listing it leaks secrets (.env,
+   credentials, .ssh) or the agent's internal state (.git config URLs,
+   .masc*/ stores). Both guards read this one list so they cannot drift:
+   the file read routes reject any request whose path contains a
+   confidential component (see [resolve_workspace_file]) and the tree
+   listing hides the same components (see [scan_dir]). Anything blocked
+   from reads is therefore also hidden from the tree.
+
+   RFC-0128 §4.6 — [.masc-ide/] is keeper metadata about the workspace,
+   not workspace content; listing it exposed the agent's annotation
+   store to the IDE (leak observed 2026-05-17 against [?repo_id=masc]).
+   The [.masc] prefix rule below subsumes both [.masc] and [.masc-ide]. *)
+type confidential_rule =
+  | Name_equals of string
+  | Name_prefix of string
+  | Name_contains of string
+
+let confidential_rules =
+  [ Name_equals ".git"
+  ; Name_prefix Common.masc_dirname (* ".masc" — SSOT #9571; subsumes .masc-ide *)
+  ; Name_prefix ".env"
+  ; Name_equals ".ssh"
+    (* [Name_contains] over-blocks names such as [credentials_guide.md];
+       for a secret denylist over-blocking is the safe direction, since a
+       false negative would serve a real credentials file. *)
+  ; Name_contains "credentials"
+  ]
+
+(* Case-insensitive matching: a case-insensitive filesystem (APFS,
+   default macOS) resolves [.ENV] to [.env], so a case-sensitive denylist
+   would be bypassable by varying case. On a case-sensitive filesystem
+   this over-blocks a distinctly-cased non-secret, which is the safe
+   direction for a secret denylist. Rule literals are already lowercase. *)
+let component_is_confidential component =
+  List.exists
+    (fun rule ->
+      match rule with
+      | Name_equals s -> String.equal (String.lowercase_ascii component) s
+      | Name_prefix s -> String_util.starts_with_ci ~prefix:s component
+      | Name_contains s -> String_util.contains_substring_ci component s)
+    confidential_rules
+
+(* Directories excluded from the tree only to reduce noise. These are
+   NOT confidential — reads under them are allowed. Confidential entries
+   are hidden separately via [component_is_confidential] so the read
+   guard and the tree stay in sync from the single SSOT above. *)
+let tree_noise_dirs =
+  [ "node_modules"; "_build"; ".obsidian"; "__pycache__";
+    ".worktrees"; ".cache"; ".tmp"; "dist"; "build" ]
+
+let default_tree_node_limit = 750
+let max_tree_node_limit = 2000
+
+(* Strict numeric validator.  OCaml's [int_of_string] accepts forms
+   that we want to reject ("1_" -> 1, "1__2" -> 12) because they let
+   malformed inputs request meaningful tree sizes.  This validator
+   mirrors what an operator would reasonably expect of a [limit=]
+   query parameter: optional sign, at least one decimal digit,
+   underscores only between digits.  When this returns [false] we
+   fall back to the default regardless of what [int_of_string_opt]
+   would have produced. *)
+let is_strict_decimal_int_string s =
+  let len = String.length s in
+  if len = 0 then false
+  else
+    let start = if s.[0] = '-' || s.[0] = '+' then 1 else 0 in
+    if start >= len then false
+    else if Char.equal s.[start] '_' || Char.equal s.[len - 1] '_' then false
+    else
+      let ok = ref true in
+      let has_digit = ref false in
+      let prev_was_underscore = ref false in
+      for i = start to len - 1 do
+        let c = s.[i] in
+        if c >= '0' && c <= '9' then begin
+          has_digit := true;
+          prev_was_underscore := false
+        end else if c = '_' then begin
+          if !prev_was_underscore then ok := false;
+          prev_was_underscore := true
+        end else begin
+          ok := false;
+          prev_was_underscore := false
+        end
+      done;
+      !ok && !has_digit
+
+let tree_node_limit_of_query = function
+  | Some raw ->
+      (* Reject malformed numerics up front so that "1_" / "1__2" /
+         "_1" are treated as junk and fall back to default, even
+         though [int_of_string_opt] would otherwise accept them. *)
+      if not (is_strict_decimal_int_string raw) then default_tree_node_limit
+      else (
+        match int_of_string_opt raw with
+        | Some n -> max 1 (min max_tree_node_limit n)
+        | None ->
+            (* Issue #13191 follow-up: parse failure on a strict
+               numeric input means the value overflowed [int].  A
+               request like [?limit=99999999999999999999] used to fall
+               back to [default_tree_node_limit] (750) instead of
+               clamping to [max_tree_node_limit] (2000), so clients
+               asking for "very large" got fewer nodes than a
+               smaller-but-valid request would.  Positive overflow
+               clamps to the maximum; negative overflow mirrors the
+               existing in-range "clamps low" behaviour and pins to 1. *)
+            let is_negative =
+              String.length raw > 0 && Char.equal raw.[0] '-'
+            in
+            if is_negative then 1 else max_tree_node_limit)
+  | None -> default_tree_node_limit
+
+(* Resolve symlinks in [path], tolerating a non-existent final component
+   so a deleted file (still shown by [git diff]) and a missing file
+   (which must reach the route's 404) resolve to a lexical path instead
+   of raising. Mirrors the existing-prefix realpath idiom in
+   [Eval_calibration]; kept local to avoid a server -> eval_calibration
+   dependency. *)
+let rec resolve_existing_prefix path =
+  try Fs_compat.realpath path with
+  | Unix.Unix_error _ | Invalid_argument _ | Sys_error _ ->
+    let parent = Filename.dirname path in
+    if String.equal parent path then path
+    else
+      Filename.concat (resolve_existing_prefix parent) (Filename.basename path)
+
+let path_within ~base candidate =
+  String.equal candidate base
+  ||
+  let base_slash =
+    let n = String.length base in
+    if n > 0 && base.[n - 1] = '/' then base else base ^ "/"
+  in
+  String.starts_with ~prefix:base_slash candidate
+
+let components_under ~base candidate =
+  if String.equal candidate base then []
+  else
+    let base_slash =
+      let n = String.length base in
+      if n > 0 && base.[n - 1] = '/' then base else base ^ "/"
+    in
+    if String.starts_with ~prefix:base_slash candidate
+    then
+      String.sub candidate (String.length base_slash) (String.length candidate - String.length base_slash)
+      |> String.split_on_char '/'
+      |> List.filter (fun part -> not (String.equal part ""))
+    else []
+
+type path_rejection =
+  | Path_traversal
+  | Confidential_component of string
+  | Symlink_escape
+
+type workspace_file = {
+  lexical_path : string;
+  resolved_path : string;
+}
+
+type workspace_file_read_error =
+  | File_not_found
+  | File_not_regular
+  | File_changed_during_open
+  | File_too_large of int
+  | File_read_failed of string
+
+let workspace_file_read_max_bytes = Env_config_runtime.Workspace_file.max_read_bytes
+
+(* Resolve [requested] (a slash-separated path relative to [base]) into
+   an absolute path guaranteed to stay within [base], or a typed
+   rejection. Guards, in order:
+   1. parent traversal ([..]/[.]) or a lexical prefix escape,
+   2. a confidential component (secret denylist SSOT), and
+   3. a symlink whose real target resolves outside [base] (B2).
+   [resolve_workspace_file] carries both paths: the lexical path under
+   [base] for Git pathspecs, and the realpath-resolved target for file
+   I/O. *)
+let resolve_workspace_file base requested =
+  let requested = String.map (fun c -> if c = '\\' then '/' else c) requested in
+  let parts = String.split_on_char '/' requested in
+  let is_traversal p = String.equal p ".." || String.equal p "." in
+  if List.exists is_traversal parts then Error Path_traversal
+  else
+    match List.find_opt component_is_confidential parts with
+    | Some c -> Error (Confidential_component c)
+    | None ->
+      let full = List.fold_left (fun acc p -> Filename.concat acc p) base parts in
+      if not (path_within ~base full) then
+        Error Path_traversal
+      else
+        let resolved_base = resolve_existing_prefix base in
+        let resolved_full = resolve_existing_prefix full in
+        if not (path_within ~base:resolved_base resolved_full) then
+          Error Symlink_escape
+        else
+          match
+            components_under ~base:resolved_base resolved_full
+            |> List.find_opt component_is_confidential
+          with
+          | Some c -> Error (Confidential_component c)
+          | None ->
+            Ok
+              {
+                lexical_path = full;
+                resolved_path = resolved_full;
+              }
+
+let run_blocking_file_io f =
+  try Eio_unix.run_in_systhread ~label:"workspace-file-read" f with
+  | Stdlib.Effect.Unhandled _ -> f ()
+
+let same_file_identity a b =
+  a.Unix.st_dev = b.Unix.st_dev
+  && a.Unix.st_ino = b.Unix.st_ino
+
+let read_fd_to_string fd len =
+  let buf = Bytes.create len in
+  let rec loop offset =
+    if offset >= len then Bytes.unsafe_to_string buf
+    else
+      let n = Unix.read fd buf offset (len - offset) in
+      if n = 0 then Bytes.sub_string buf 0 offset
+      else loop (offset + n)
+  in
+  loop 0
+
+let load_workspace_file_content ?(max_bytes = workspace_file_read_max_bytes) file =
+  run_blocking_file_io (fun () ->
+    try
+      let before_open = Unix.lstat file.resolved_path in
+      match before_open.Unix.st_kind with
+      | Unix.S_REG ->
+        let fd =
+          Unix.openfile file.resolved_path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0
+        in
+        Fun.protect
+          ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+          (fun () ->
+            let after_open = Unix.fstat fd in
+            if
+              (not (same_file_identity before_open after_open))
+              || after_open.Unix.st_kind <> Unix.S_REG
+            then Error File_changed_during_open
+            else if after_open.Unix.st_size > max_bytes then
+              Error (File_too_large after_open.Unix.st_size)
+            else Ok (read_fd_to_string fd after_open.Unix.st_size))
+      | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK | Unix.S_LNK ->
+        Error File_not_regular
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error File_not_found
+    | Unix.Unix_error _ as exn -> Error (File_read_failed (Printexc.to_string exn))
+    | Sys_error msg -> Error (File_read_failed msg))
+
+type workspace_file_save_error =
+  | Save_invalid_path
+  | Save_invalid_revision
+  | Save_conflict
+  | Save_too_large
+  | Save_read_failed of workspace_file_read_error
+  | Save_write_failed of Fs_compat.capability_write_error
+  | Save_recovery_unavailable of Keeper_publication_recovery_availability.unavailable
+  | Save_recovery_release_failed of {
+      save_result : (string, workspace_file_save_error) result;
+      release_failure : Fs_compat.Publication_recovery.lane_release_failure;
+    }
+  | Save_io_failed of { publication_may_have_started : bool; detail : string }
+
+let workspace_file_revision_at_root ~root file content =
+  Yojson.Safe.to_string (`List [ `String root;
+    `String file.resolved_path; `String content ])
+  |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex
+
+let workspace_file_revision ~base file content =
+  workspace_file_revision_at_root ~root:(resolve_existing_prefix base) file content
+
+let same_capability_identity (a : Eio.File.Stat.t) (b : Eio.File.Stat.t) =
+  Int64.equal a.dev b.dev && Int64.equal a.ino b.ino
+
+let open_workspace_save_directory ~sw path =
+  let before = Eio.Path.stat ~follow:false path in
+  if before.kind <> `Directory then Error Save_conflict
+  else
+    let directory = (Eio.Path.open_dir ~sw path :> Eio.Fs.dir_ty Eio.Path.t) in
+    let opened = Eio.Path.with_open_in Eio.Path.(directory / ".") Eio.File.stat in
+    if opened.kind = `Directory && same_capability_identity before opened
+    then Ok (directory, opened)
+    else Error Save_conflict
+
+let read_workspace_save_file ~sw ~parent ~leaf =
+  let target = Eio.Path.(parent / leaf) in
+  let before = Eio.Path.stat ~follow:false target in
+  if before.kind <> `Regular_file then Error (Save_read_failed File_not_regular)
+  else
+    let descriptor = Eio.Path.open_in ~sw target in
+    let opened = Eio.File.stat descriptor in
+    if opened.kind <> `Regular_file || not (same_capability_identity before opened)
+    then Error Save_conflict
+    else if Optint.Int63.compare opened.size
+        (Optint.Int63.of_int workspace_file_read_max_bytes) > 0
+    then Error Save_too_large
+    else
+      let bytes = Cstruct.create (Optint.Int63.to_int opened.size) in
+      (try
+         Eio.Flow.read_exact descriptor bytes;
+         let after = Eio.File.stat descriptor in
+         let current = Eio.Path.stat ~follow:false target in
+         if not (same_capability_identity opened current)
+            || current.kind <> `Regular_file
+            || not (Optint.Int63.equal opened.size after.size)
+            || opened.mtime <> after.mtime || opened.ctime <> after.ctime
+         then Error Save_conflict
+         else Ok (Cstruct.to_string bytes, opened.perm land 0o777)
+       with End_of_file -> Error Save_conflict)
+
+let workspace_save_registry publication_recovery =
+  let open Keeper_publication_recovery_availability in
+  match publication_recovery () with
+  | Available registry -> Ok registry
+  | Initializing -> Error (Save_recovery_unavailable Runtime_initializing)
+  | Registry_unavailable error ->
+    Error (Save_recovery_unavailable (Runtime_registry_unavailable error))
+  | Initialization_crashed error ->
+    Error (Save_recovery_unavailable (Runtime_initialization_crashed error))
+  | Non_runtime -> Error (Save_recovery_unavailable Runtime_non_runtime)
+
+let save_workspace_file_before_publication ~before_publication
+    ~publication_recovery ~base ~path ~expected_revision ~content =
+  let ( let* ) = Result.bind in
+  let* _ = Tool_output.validate_sha256 expected_revision
+    |> Result.map_error (fun _ -> Save_invalid_revision) in
+  let* () = if String.length content > workspace_file_read_max_bytes
+    then Error Save_too_large else Ok () in
+  let* () = if String.contains path '\000' then Error Save_invalid_path else Ok () in
+  let resolve () = resolve_workspace_file base path
+    |> Result.map_error (fun _ -> Save_invalid_path) in
+  let publication_may_have_started = ref false in
+  try
+    let* root, root_identity, initial = run_blocking_file_io (fun () ->
+      let root = resolve_existing_prefix base in
+      let identity = Unix.lstat root in
+      let* file = resolve () in
+      if identity.Unix.st_kind <> Unix.S_DIR
+         || not (path_within ~base:root file.resolved_path)
+      then Error Save_conflict
+      else Ok (root, identity, file)) in
+    let lock = Keeper_fs.acquire_path_lock initial.resolved_path in
+    Fun.protect
+      ~finally:(fun () -> Keeper_fs.release_path_lock initial.resolved_path lock)
+      (fun () -> Eio.Mutex.use_rw ~protect:true (Keeper_fs.path_lock_mutex lock) (fun () ->
+        let* file = resolve () in
+        let* () = if String.equal file.resolved_path initial.resolved_path
+          then Ok () else Error Save_conflict in
+        let* fs = match Fs_compat.get_fs_opt () with
+          | Some fs -> Ok fs
+          | None -> Error (Save_read_failed (File_read_failed "Filesystem capability unavailable")) in
+        Eio.Switch.run @@ fun sw ->
+        let* root_dir, opened_root = open_workspace_save_directory ~sw Eio.Path.(fs / root) in
+        let* () = if Int64.equal opened_root.dev (Int64.of_int root_identity.Unix.st_dev)
+            && Int64.equal opened_root.ino (Int64.of_int root_identity.Unix.st_ino)
+          then Ok () else Error Save_conflict in
+        let components = components_under ~base:root file.resolved_path in
+        let rec with_parent parent = function
+          | [] -> Error Save_invalid_path
+          | [leaf] -> Ok (parent, leaf)
+          | component :: rest ->
+            let* child, _ = open_workspace_save_directory ~sw Eio.Path.(parent / component) in
+            with_parent child rest in
+        let* parent, leaf = with_parent root_dir components in
+        let* current, permissions = read_workspace_save_file ~sw ~parent ~leaf in
+        let revision content = workspace_file_revision_at_root ~root file content in
+        let* () = if String.equal expected_revision (revision current)
+          then Ok () else Error Save_conflict in
+        if String.equal current content then Ok expected_revision
+        else
+          let* target = Fs_compat.capability_publication_target
+            ~allowed_root_path:root ~allowed_root_device:opened_root.dev
+            ~allowed_root_inode:opened_root.ino
+            ~parent_components:(components_under ~base:root (Filename.dirname file.resolved_path))
+            ~target_leaf:leaf ~permissions
+            |> Result.map_error (fun _ -> Save_invalid_path) in
+          let* registry = workspace_save_registry publication_recovery in
+          before_publication ();
+          match Fs_compat.Publication_recovery.with_lane ~registry
+            ~owner:"workspace-file-editor" (fun recovery ->
+              publication_may_have_started := true;
+              let* () = Fs_compat.replace_capability_file ~recovery ~parent ~target content
+                |> Result.map_error (fun error -> Save_write_failed error) in
+              Ok (revision content)) with
+          | Error error -> Error (Save_recovery_unavailable
+              (Keeper_publication_recovery_availability.Lane_unavailable error))
+          | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
+          | Ok (Fs_compat.Publication_recovery.Lane_release_failed { value; release_failure }) ->
+            Error (Save_recovery_release_failed { save_result = value; release_failure })))
+  with
+  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) when not !publication_may_have_started ->
+    Error (Save_read_failed File_not_found)
+  | Eio.Io _ as exn -> Error (Save_io_failed
+      { publication_may_have_started = !publication_may_have_started;
+        detail = Printexc.to_string exn })
+  | Unix.Unix_error _ as exn -> Error (Save_io_failed
+      { publication_may_have_started = !publication_may_have_started;
+        detail = Printexc.to_string exn })
+
+let save_workspace_file ~publication_recovery ~base ~path ~expected_revision ~content =
+  save_workspace_file_before_publication ~before_publication:(fun () -> ())
+    ~publication_recovery ~base ~path ~expected_revision ~content
+
+(* Strip [base] (and the following separator) from [safe]. Handles
+   [base = "/"], trailing slash on [base], and [safe = base] (returns "").
+   Assumes the workspace-file resolver has already enforced the prefix
+   invariant. *)
+let rel_under base safe =
+  if safe = base then ""
+  else
+    let base_norm =
+      let n = String.length base in
+      if n > 0 && base.[n - 1] = '/' then base else base ^ "/"
+    in
+    let bn = String.length base_norm in
+    if String.length safe >= bn && String.starts_with ~prefix:base_norm safe
+    then String.sub safe bn (String.length safe - bn)
+    else safe
+
+(* Reject anything that could be parsed by git as an option (leading
+   "-") or that contains separators outside the conservative ref/SHA +
+   revision-syntax charset. Defense against `?base_ref=-L1,9999` style
+   injection even on git versions that lack [--end-of-options].
+
+   Charset rationale:
+   - alphanumerics + [._/-]: ordinary ref/branch/tag names
+   - [~^@]: revision-syntax suffix operators (HEAD~1, HEAD^, @{u})
+   - [+]: valid in branch names per [git check-ref-format]
+   - [{}]: needed for [@{upstream}] / [HEAD@{1}] expressions
+   Excluded: [: ! ? * \ space NUL] — separators with shell or git
+   pathspec semantics that callers should not need in [base_ref]. *)
+let valid_git_ref s =
+  let n = String.length s in
+  n > 0 && n <= 256 && s.[0] <> '-'
+  && String.for_all (fun c ->
+       (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+       || (c >= '0' && c <= '9')
+       || c = '/' || c = '.' || c = '_' || c = '-'
+       || c = '~' || c = '^' || c = '@' || c = '+'
+       || c = '{' || c = '}')
+       s
+
+(* --- Recursive file tree --- *)
+
+let file_tree_node ~diff_by_path ~path ~label ~depth ~parent ~has_children =
+  let diff =
+    match diff_by_path with
+    | Some diff_by_path when not has_children ->
+      (match Hashtbl.find_opt diff_by_path path with
+       | Some badge -> `String badge
+       | None -> `Null)
+    | _ -> `Null
+  in
+  `Assoc [ ("path", `String path); ("label", `String label)
+         ; ("depth", `Int depth); ("parent", `String parent)
+         ; ("hasChildren", `Bool has_children)
+         ; ("diff", diff); ("keeperId", `Null); ("hueIndex", `Null) ]
+
+(* One directory's entries, alphabetical with directories first, minus the
+   components the tree never shows. Directories lead so that a level's budget
+   reaches subdirectories before a wide directory's leaf files consume it. *)
+let tree_entries dir =
+  let raw_entries =
+    workspace_or_default
+      ~site:"tree_readdir"
+      ~path:dir
+      ~default:[]
+      (fun () -> Sys.readdir dir |> Array.to_list)
+  in
+  let keep name =
+    not (name = "." || name = ".." || component_is_confidential name
+         || List.mem name tree_noise_dirs)
+  in
+  let sorted = List.sort String.compare (List.filter keep raw_entries) in
+  let dirs, files =
+    List.partition
+      (fun name ->
+         let full = Filename.concat dir name in
+         workspace_or_default
+           ~warn_on_failure:false
+           ~site:"tree_is_directory_partition"
+           ~path:full
+           ~default:false
+           (fun () -> Sys.is_directory full))
+      sorted
+  in
+  dirs @ files
+;;
+
+(* Breadth-first, deliberately.
+
+   A depth-first walk spends the node budget on whatever sorts first: on a
+   repository with 11k source files the default 750 nodes were exhausted
+   partway through [dashboard/], so [lib/] — where most of the activity is —
+   never appeared in the response at all, and no amount of clicking could
+   reach it. The budget is a response-size bound, not a statement about which
+   directories matter, and a walk order that makes it act like one leaves a
+   large repository unnavigable.
+
+   Breadth-first spends the same budget on the shallowest nodes, so every
+   top-level entry is present before any subtree is expanded. That is what the
+   seed is for: the client fetches a directory's real contents from
+   [/api/v1/workspace/children] when it is expanded, so anything the budget
+   cuts is one click away instead of unreachable. *)
+let scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
+  let pending = Queue.create () in
+  if depth <= max_depth then Queue.add (dir, depth) pending;
+  let acc = ref acc in
+  let remaining = ref remaining in
+  while (not (Queue.is_empty pending)) && !remaining > 0 do
+    let dir, depth = Queue.pop pending in
+    List.iter
+      (fun name ->
+         if !remaining > 0
+         then begin
+           let full = Filename.concat dir name in
+           let is_dir =
+             workspace_or_default
+               ~warn_on_failure:false
+               ~site:"tree_is_directory"
+               ~path:full
+               ~default:false
+               (fun () ->
+                  match Unix.lstat full with
+                  | { Unix.st_kind = Unix.S_LNK; _ } -> false
+                  | { Unix.st_kind =
+                        ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK
+                        | Unix.S_FIFO | Unix.S_SOCK )
+                    ; _
+                    } -> Sys.is_directory full)
+           in
+           let rel = rel_under base full in
+           (* A directory is expandable regardless of the scan depth it was
+              reached at: [/api/v1/workspace/children] loads its entries on
+              first expand, so the chevron stays on boundary directories. *)
+           let has_children = is_dir in
+           let parent = if depth = 0 then "" else Filename.dirname rel in
+           acc
+           := file_tree_node ~diff_by_path ~path:rel ~label:name ~depth ~parent
+                ~has_children
+              :: !acc;
+           remaining := !remaining - 1;
+           if is_dir && depth < max_depth then Queue.add (full, depth + 1) pending
+         end)
+      (tree_entries dir)
+  done;
+  (!acc, !remaining)
+;;
+
+let scan_dir ?diff_by_path ~base ~depth ~max_depth ~max_nodes acc dir =
+  fst (scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining:max_nodes acc dir)
+
+(* --- Git helpers --- *)
+
+let git_run_lines ~cwd args =
+  match Repo_git.run_git ~cwd ("--no-optional-locks" :: args) with
+  | Ok lines -> lines
+  | Error msg ->
+      observe_workspace_route_failure
+        ~site:"git_run"
+        ~path:cwd
+        (Failure msg);
+      []
+
+let diff_badge_of_numstat ~added ~deleted =
+  match int_of_string_opt added, int_of_string_opt deleted with
+  | Some added, Some deleted ->
+    let parts =
+      (if added > 0 then [Printf.sprintf "+%d" added] else [])
+      @ (if deleted > 0 then [Printf.sprintf "-%d" deleted] else [])
+    in
+    (match parts with
+     | [] -> None
+     | _ -> Some (String.concat " " parts))
+  | _ when String.equal added "-" && String.equal deleted "-" -> Some "bin"
+  | _ -> None
+
+let parse_git_numstat_line line =
+  match String.split_on_char '\t' line with
+  | added :: deleted :: path_parts ->
+    let path = String.concat "\t" path_parts in
+    if path = "" then None
+    else
+      (match diff_badge_of_numstat ~added ~deleted with
+       | Some badge -> Some (path, badge)
+       | None -> None)
+  | _ -> None
+
+let git_diff_badges ~base =
+  let badges = Hashtbl.create 32 in
+  git_run_lines ~cwd:base ["diff"; "--numstat"; "HEAD"; "--"]
+  |> List.iter (fun line ->
+       match parse_git_numstat_line line with
+       | Some (path, badge) -> Hashtbl.replace badges path badge
+       | None -> ());
+  badges
+
+(* Surface git failure to the caller instead of collapsing to []. Lets
+   route handlers distinguish "command errored / invalid ref" from
+   "command succeeded with no output". *)
+let git_run_lines_or_error ~cwd args =
+  Repo_git.run_git ~cwd ("--no-optional-locks" :: args)
+
+(* The repository that owns [path], searched upward from the file and stopped
+   at [base].
+
+   git does not stop. Asked about a file under a playground that holds its
+   clones in [repos/<id>/], git finds no repository at the playground root,
+   walks past it, and answers from whichever repository encloses MASC's own
+   checkout. There the path does not exist, so git prints nothing and the
+   route reports a modified file as unchanged -- a wrong answer with a 200 on
+   it, which is worse than a failure the caller can see (#30322).
+
+   [base] is the far edge because it is where the caller's authority ends: a
+   query names a keeper or a repository, and an answer from outside that is
+   not an answer to the question asked. *)
+let repository_containing ~base ~directory =
+  let normalise dir =
+    let n = String.length dir in
+    if n > 1 && dir.[n - 1] = '/' then String.sub dir 0 (n - 1) else dir
+  in
+  let base = normalise base in
+  let rec walk dir =
+    let dir = normalise dir in
+    if not (path_within ~base dir)
+    then None
+    else if Sys.file_exists (Filename.concat dir ".git") then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else walk parent
+  in
+  walk directory
+
+let repository_owning ~base ~path =
+  repository_containing ~base ~directory:(Filename.dirname path)
+
+type workspace_file_catalog = {
+  catalog_root : string;
+  catalog_paths : string list;
+}
+
+type workspace_file_catalog_error =
+  | Catalog_invalid_path
+  | Catalog_directory_unavailable
+  | Catalog_repository_unavailable
+  | Catalog_scan_failed of string
+
+let workspace_file_catalog ~base ~path =
+  let ( let* ) = Result.bind in
+  let* directory =
+    resolve_workspace_file base path
+    |> Result.map_error (fun _ -> Catalog_invalid_path)
+  in
+  try
+    if (Unix.stat directory.resolved_path).Unix.st_kind <> Unix.S_DIR then
+      Error Catalog_directory_unavailable
+    else
+      match repository_containing ~base ~directory:directory.lexical_path with
+      | None -> Error Catalog_repository_unavailable
+      | Some root ->
+          let* paths =
+            Repo_git.file_paths_at ~local_path:root ()
+            |> Result.map_error (fun detail -> Catalog_scan_failed detail)
+          in
+          let catalog_paths =
+            List.filter_map
+              (fun path ->
+                let lexical_path = Filename.concat root path in
+                let relative = rel_under base lexical_path in
+                match resolve_workspace_file base relative with
+                | Error _ -> None
+                | Ok file ->
+                    (* The file reader accepts backslashes as separators. A
+                       literal POSIX backslash name must not become a different
+                       file when the operator opens the catalog selection. *)
+                    if not (String.equal file.lexical_path lexical_path) then None
+                    else
+                      match (Unix.stat file.resolved_path).Unix.st_kind = Unix.S_REG with
+                      | true -> Some relative
+                      | false -> None
+                      | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+                          None)
+              paths
+          in
+          Ok { catalog_root = rel_under base root; catalog_paths }
+  with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+      Error Catalog_directory_unavailable
+  | (Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as ex ->
+      Error (Catalog_scan_failed (Printexc.to_string ex))
+
+let git_status_file_json (change : Repo_git.status_file) =
+  `Assoc
+    [ ("path", `String change.path)
+    ; ("staged", `Bool change.staged)
+    ; ("unstaged", `Bool change.unstaged)
+    ; ("untracked", `Bool change.untracked)
+    ; ("conflicted", `Bool change.conflicted)
+    ]
+
+module For_testing = struct
+  let sanitize_log_value = sanitize_log_value
+  let observe_workspace_route_failure = observe_workspace_route_failure
+  let parse_git_numstat_line = parse_git_numstat_line
+  type safe_workspace_file = workspace_file
+  let resolve_workspace_file = resolve_workspace_file
+  let repository_owning = repository_owning
+  let workspace_file_catalog = workspace_file_catalog
+  let load_workspace_file_content = load_workspace_file_content
+  let workspace_file_revision = workspace_file_revision
+  let save_workspace_file = save_workspace_file
+  let save_workspace_file_before_publication = save_workspace_file_before_publication
+end
+
+(* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
+
+type blame_entry = { bl_line: int; bl_author: string; bl_time: int64 }
+
+(* [git blame --porcelain] emits one header line per source line:
+   "<40-hex sha> <orig-line> <final-line>[ <group-size>]". The commit
+   metadata block (author, author-time, ...) follows only the FIRST header
+   of each sha; later occurrences repeat the bare header. So line->commit
+   pairs and sha->metadata must be collected separately and joined at the
+   end — attributing metadata to whichever header happened to precede it
+   assigns lines to the wrong commit. *)
+let is_hex_digit = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false
+
+let parse_blame_header line =
+  match String.split_on_char ' ' line with
+  | sha :: _orig_line :: final_line :: rest
+    when String.length sha = 40 && String.for_all is_hex_digit sha -> (
+      match int_of_string_opt final_line with
+      | Some n when n > 0 ->
+        let group_size = match rest with
+          | gs :: _ -> (match int_of_string_opt gs with Some g when g > 0 -> g | _ -> 1)
+          | [] -> 1
+        in
+        Some (sha, n, group_size)
+      | Some _ | None -> None)
+  | _ -> None
+
+let parse_blame_porcelain lines =
+  let metadata : (string, string option * int64 option) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  let update_metadata sha f =
+    let current =
+      match Hashtbl.find_opt metadata sha with
+      | Some value -> value
+      | None -> (None, None)
+    in
+    Hashtbl.replace metadata sha (f current)
+  in
+  let rec collect cur_sha acc remaining =
+    match remaining with
+    | [] -> List.rev acc
+    | hd :: tl -> (
+      match parse_blame_header hd with
+      | Some (sha, final_line, _group_size) ->
+        (* Porcelain still emits a header for every final line. The counted
+           first header only scopes the following metadata block; expanding it
+           would duplicate the later bare headers and corrupt attribution. *)
+        collect (Some sha) ((final_line, sha) :: acc) tl
+      | None ->
+        (match cur_sha with
+         | Some sha when String.starts_with ~prefix:"author " hd ->
+           let author = String.sub hd 7 (String.length hd - 7) in
+           update_metadata sha (fun (_, time) -> (Some author, time))
+         | Some sha when String.starts_with ~prefix:"author-time " hd ->
+           let ts = String.sub hd 12 (String.length hd - 12) in
+           (match Int64.of_string_opt ts with
+            | Some n -> update_metadata sha (fun (author, _) -> (author, Some n))
+            | None -> ())
+         | Some _ | None -> ());
+        collect cur_sha acc tl)
+  in
+  collect None [] lines
+  |> List.filter_map (fun (line, sha) ->
+       match Hashtbl.find_opt metadata sha with
+       | Some (Some author, Some time) ->
+         Some { bl_line = line; bl_author = author; bl_time = time }
+       | Some (None, _) | Some (_, None) | None -> None)
+
+let blame_entry_to_json file_path ~line_start ~line_end ~author ~time =
+  `Assoc [ ("file_path", `String file_path)
+         ; ("line_start", `Int line_start); ("line_end", `Int line_end)
+         ; ("keeper_id", `String author)
+         ; ("timestamp_ms", `Int (Int64.to_int time * 1000))
+         ; ("kind", `String "edit") ]
+
+let group_blame_entries file_path entries =
+  let sorted = List.sort (fun a b -> compare a.bl_line b.bl_line) entries in
+  let rec go current_start current_end current_author current_time acc remaining =
+    match remaining with
+    | [] ->
+      (match current_start with
+       | Some s ->
+         let json = blame_entry_to_json file_path
+           ~line_start:s ~line_end:current_end
+           ~author:current_author ~time:current_time in
+         List.rev (json :: acc)
+       | None -> List.rev acc)
+    | hd :: tl ->
+      match current_start with
+      | Some s when hd.bl_author = current_author && hd.bl_line = current_end + 1 ->
+        go (Some s) hd.bl_line current_author hd.bl_time acc tl
+      | Some s ->
+        let json = blame_entry_to_json file_path
+          ~line_start:s ~line_end:current_end
+          ~author:current_author ~time:current_time in
+        go (Some hd.bl_line) hd.bl_line hd.bl_author hd.bl_time (json :: acc) tl
+      | None ->
+        go (Some hd.bl_line) hd.bl_line hd.bl_author hd.bl_time acc tl
+  in
+  go None 0 "" 0L [] sorted
+
+module For_testing_blame = struct
+  type entry = blame_entry = {
+    bl_line : int;
+    bl_author : string;
+    bl_time : int64;
+  }
+
+  let parse_blame_header = parse_blame_header
+  let parse_blame_porcelain = parse_blame_porcelain
+  let group_blame_entries = group_blame_entries
+end
+
+(* --- Log parsing --- *)
+
+(* One [git log --pretty=format:%h%x09%at%x09%an%x09%s] row. Only the first
+   three tabs split -- a subject may carry tabs of its own. A row that does
+   not hold four fields, or whose second field is not an epoch-seconds
+   integer, is dropped rather than filled in. The epoch rides out as
+   [timestamp_ms] so the TUI can weave commits and recorded keeper edits
+   into one timeline without parsing a date string. *)
+let git_log_row_of_line line =
+  match String.split_on_char '\t' line with
+  | hash :: at :: author :: subject_first :: subject_rest -> (
+      match int_of_string_opt at with
+      | None -> None
+      | Some seconds ->
+          let subject = String.concat "\t" (subject_first :: subject_rest) in
+          Some
+            (`Assoc
+               [ ("hash", `String hash)
+               ; ("timestamp_ms", `Int (seconds * 1000))
+               ; ("author", `String author)
+               ; ("subject", `String subject)
+               ]))
+  | _ -> None
+
+module For_testing_log = struct
+  let git_log_row_of_line = git_log_row_of_line
+end
+
+(* --- Diff parsing --- *)
+
+let parse_hunk_header line =
+  if not (String.starts_with ~prefix:"@@ -" line) then None
+  else
+    let rest = String.sub line 4 (String.length line - 4) in
+    let sp_idx =
+      let rec find i =
+        if i >= String.length rest then String.length rest
+        else if String.get rest i = ' ' then i
+        else find (i + 1)
+      in
+      find 0
+    in
+    if sp_idx >= String.length rest then None
+    else
+      let old_part = String.sub rest 0 sp_idx in
+      let new_rest = String.sub rest (sp_idx + 1) (String.length rest - sp_idx - 1) in
+      let plus_idx =
+        let rec find i =
+          if i >= String.length new_rest then String.length new_rest
+          else if String.get new_rest i = ' ' then i
+          else find (i + 1)
+        in
+        find 0
+      in
+      let new_part = String.sub new_rest 0 plus_idx in
+      let parse_start s =
+        match String.split_on_char ',' s with
+        | x :: _ -> Option.value (int_of_string_opt x) ~default:1
+        | [] -> 1
+      in
+      Some (parse_start old_part, parse_start new_part)
+
+let parse_unified_diff lines =
+  let rec go old_line new_line acc remaining =
+    match remaining with
+    | [] -> List.rev acc
+    | hd :: tl ->
+      if String.starts_with ~prefix:"@@" hd then
+        (match parse_hunk_header hd with
+         | Some (ol, nl) -> go ol nl acc tl
+         | None -> go old_line new_line acc tl)
+      else if String.starts_with ~prefix:"+++" hd
+           || String.starts_with ~prefix:"---" hd then
+        go old_line new_line acc tl
+      else if String.starts_with ~prefix:"+" hd then
+        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
+        let row = `Assoc [ ("kind", `String "add")
+                         ; ("oldLine", `Null); ("newLine", `Int new_line)
+                         ; ("text", `String text) ] in
+        go old_line (new_line + 1) (row :: acc) tl
+      else if String.starts_with ~prefix:"-" hd then
+        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
+        let row = `Assoc [ ("kind", `String "delete")
+                         ; ("oldLine", `Int old_line); ("newLine", `Null)
+                         ; ("text", `String text) ] in
+        go (old_line + 1) new_line (row :: acc) tl
+      else if String.starts_with ~prefix:" " hd then
+        let text = String.sub hd 1 (max 0 (String.length hd - 1)) in
+        let row = `Assoc [ ("kind", `String "context")
+                         ; ("oldLine", `Int old_line); ("newLine", `Int new_line)
+                         ; ("text", `String text) ] in
+        go (old_line + 1) (new_line + 1) (row :: acc) tl
+      else
+        go old_line new_line acc tl
+  in
+  go 1 1 [] lines
+
+(* --- Routes --- *)
+
+let add_routes router =
+  router
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/tree" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let depth =
+             match Uri.get_query_param uri "depth" with
+             | Some d ->
+               (match int_of_string_opt d with
+                | Some n -> max 1 (min 5 n)
+                | None -> 3)
+             | None -> 3
+           in
+           let max_nodes =
+             tree_node_limit_of_query (Uri.get_query_param uri "limit")
+           in
+           let include_diff = bool_query_param request "diff" ~default:false in
+           let effective_depth, effective_max_nodes =
+             match source with
+             | `Project
+             | `RepositoryMissing _
+             | `RepositoryUnknown _
+             | `PlaygroundMissing _
+             | `KeeperUnknown _ -> (0, min max_nodes 200)
+             | `Repository _ | `Playground _ -> (depth, max_nodes)
+           in
+           let cache_key =
+             Printf.sprintf "workspace:tree:%s:%s:%d:%d:%b"
+               base
+               (source_to_string source)
+               effective_depth effective_max_nodes include_diff
+           in
+           let payload =
+             Dashboard_cache.get_or_compute_payload cache_key
+               ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+               (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                  let nodes =
+                    if not (Sys.file_exists base) then []
+                    else
+                      let diff_by_path =
+                        if include_diff then Some (git_diff_badges ~base)
+                        else None
+                      in
+                      scan_dir ?diff_by_path ~base ~depth:0
+                        ~max_depth:effective_depth
+                        ~max_nodes:effective_max_nodes [] base
+                  in
+                  `List (List.rev nodes)))
+           in
+           cached_response_with_source_and_base ~source ~base_path:base request
+             reqd payload)
+
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/files" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           match source with
+           | `RepositoryMissing _ | `RepositoryUnknown _
+           | `PlaygroundMissing _ | `KeeperUnknown _ ->
+               json_response ~status:`Not_found request reqd
+                 (json_error "The selected workspace is unavailable")
+           | `Project | `Repository _ | `Playground _ ->
+               match Uri.get_query_param uri "path" with
+               | None ->
+                   json_response ~status:`Bad_request request reqd
+                     (json_error "Missing path parameter")
+               | Some path ->
+                   let result =
+                     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                       workspace_file_catalog ~base ~path)
+                   in
+                   match result with
+                   | Ok catalog ->
+                       json_response_with_source ~status:`OK ~source request reqd
+                         (`Assoc
+                            [ ("root", `String catalog.catalog_root)
+                            ; ("files", `List (List.map (fun path -> `String path)
+                                               catalog.catalog_paths))
+                            ])
+                   | Error error ->
+                       let status, message =
+                         match error with
+                         | Catalog_invalid_path -> `Bad_request, "Invalid path"
+                         | Catalog_directory_unavailable ->
+                             `Not_found, "The selected directory is unavailable"
+                         | Catalog_repository_unavailable ->
+                             `Not_found, "Open a Git repository directory to find files"
+                         | Catalog_scan_failed detail -> `Internal_server_error, detail
+                       in
+                       json_response ~status request reqd (json_error message))
+
+  |> Server_route.get Server_route.Public_read "/api/v1/git/status" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let scope =
+             match source with
+             | `Project -> Some (`Assoc [ ("kind", `String "project") ])
+             | `Repository id ->
+                 Some
+                   (`Assoc
+                      [ ("kind", `String "repository")
+                      ; ("repository_id", `String id)
+                      ])
+             | `RepositoryMissing _ | `RepositoryUnknown _
+             | `Playground _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
+                 None
+           in
+           match scope with
+           | None ->
+               json_response ~status:`Not_found request reqd
+                 (json_error "Git status needs a project or repository workspace")
+           | Some scope ->
+               (* Git itself walks above [base]. A status request has no file
+                  path from which to find an owning nested checkout, so only
+                  the repository rooted exactly at the requested workspace is
+                  a truthful answer. *)
+               if not (Sys.file_exists (Filename.concat base ".git")) then
+                 json_response ~status:`Not_found request reqd
+                   (json_error "No Git repository at this workspace root")
+               else
+                 (match Repo_git.status_files_at ~local_path:base () with
+                  | Error detail ->
+                      json_response ~status:`Internal_server_error request reqd
+                        (json_error detail)
+                  | Ok changes ->
+                      json_response_with_source ~status:`OK ~source request reqd
+                        (`Assoc
+                           [ ("scope", scope)
+                           ; ( "changes"
+                             , `List (List.map git_status_file_json changes) )
+                           ; ("total", `Int (List.length changes))
+                           ])))
+
+  (* Lazy tree: return exactly one level of a directory's entries so the
+     IDE can expand deep trees on demand instead of relying on the single
+     bounded /tree snapshot (which, for the [project] workspace source, is
+     root-only). [base] stays the whole workspace base and only [dir] is
+     the subpath, so each node's path/parent/depth stay anchored to the
+     whole tree and merge into the client's flat node array. *)
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/children" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           match Uri.get_query_param uri "path" with
+           | None ->
+             json_response ~status:`Bad_request request reqd
+               (json_error "Missing path parameter")
+           | Some requested ->
+             (* Same admission control as /file, /blame, /diff: uniform
+                [Invalid path] on traversal / confidential / symlink escape so a
+                caller cannot probe which subpaths exist or are secret. *)
+             (match resolve_workspace_file base requested with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd
+                  (json_error "Invalid path")
+              | Ok file ->
+                let max_nodes =
+                  tree_node_limit_of_query (Uri.get_query_param uri "limit")
+                in
+                (* A rel path with N non-empty segments sits at depth N-1, so
+                   its children are at depth N. Passing ~depth = ~max_depth =
+                   child_depth reads exactly one level (the recursion guard
+                   [depth < max_depth] is false), while [rel_under base] keeps
+                   path/parent anchored to the whole tree. *)
+                let child_depth =
+                  rel_under base file.lexical_path
+                  |> String.split_on_char '/'
+                  |> List.filter (fun s -> not (String.equal s ""))
+                  |> List.length
+                in
+                let cache_key =
+                  Printf.sprintf "workspace:children:%s:%s:%d:%d"
+                    base file.lexical_path child_depth max_nodes
+                in
+                let payload =
+                  Dashboard_cache.get_or_compute_payload cache_key
+                    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                       let is_dir =
+                         workspace_or_default
+                           ~warn_on_failure:false
+                           ~site:"children_is_directory"
+                           ~path:file.lexical_path
+                           ~default:false
+                           (fun () -> Sys.is_directory file.lexical_path)
+                       in
+                       if not is_dir then `List []
+                       else
+                         let nodes =
+                           scan_dir ~base ~depth:child_depth
+                             ~max_depth:child_depth ~max_nodes []
+                             file.lexical_path
+                         in
+                         `List (List.rev nodes)))
+                in
+                cached_response_with_source_and_base ~source ~base_path:base
+                  request reqd payload))
+
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/file" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           match source with
+           | `RepositoryMissing _ | `RepositoryUnknown _
+           | `PlaygroundMissing _ | `KeeperUnknown _ ->
+             json_response ~status:`Not_found request reqd
+               (json_error "The selected workspace is unavailable")
+           | `Project | `Repository _ | `Playground _ ->
+           match Uri.get_query_param uri "path" with
+           | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+           | Some p ->
+             (match resolve_workspace_file base p with
+              | Error _ ->
+                (* Uniform [Invalid path] for traversal, confidential, and
+                   symlink-escape rejections: a distinct message would let
+                   a caller probe which paths are secret or exist. *)
+                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+              | Ok file ->
+                (match load_workspace_file_content file with
+                 | Ok content ->
+                   let revision = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                     workspace_file_revision ~base file content) in
+                   let json = `Assoc [("ok", `Bool true); ("content", `String content);
+                     ("revision", `String revision)] in
+                   json_response_with_source ~status:`OK ~source request reqd json
+                 | Error File_not_found | Error File_not_regular ->
+                   json_response ~status:`Not_found request reqd (json_error "File not found")
+                 | Error File_changed_during_open ->
+                   json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+                 | Error (File_too_large _) ->
+                   json_response ~status:`Payload_too_large request reqd (json_error "File too large")
+                 | Error (File_read_failed msg) ->
+                   observe_workspace_route_failure
+                     ~site:"file_read"
+                     ~path:file.lexical_path
+                     (Failure msg);
+                   json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file"))))
+
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/workspace/file" (fun state request reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let refuse status code detail =
+               json_response ~status request reqd
+                 (`Assoc ["ok", `Bool false; "code", `String code; "error", `String detail]) in
+             let invalid () = refuse `Bad_request "invalid_workspace_file_save"
+                 "Provide path, expected_revision, content and expected_workspace" in
+             match Yojson.Safe.from_string body with
+             | exception Yojson.Json_error _ -> invalid ()
+             | `Assoc fields when List.length fields = 4
+                 && List.sort_uniq String.compare (List.map fst fields)
+                    = ["content"; "expected_revision"; "expected_workspace"; "path"] ->
+               (match List.assoc_opt "path" fields, List.assoc_opt "expected_revision" fields,
+                      List.assoc_opt "content" fields, List.assoc_opt "expected_workspace" fields with
+                | Some (`String path), Some (`String expected_revision), Some (`String content), Some (`Assoc _) ->
+                  let config = Mcp_server.workspace_config state in
+                  (match Workspace.validate_expected_workspace ~config (`Assoc fields) with
+                   | Error Workspace.Invalid_workspace_precondition -> invalid ()
+                   | Error Workspace.Workspace_precondition_failed ->
+                     refuse `Conflict "workspace_precondition_failed" "Workspace changed; retain the draft and refresh its identity"
+                   | Ok _ ->
+                     let uri = Uri.of_string request.target in
+                     let scope_valid = match Uri.query uri with
+                       | [] -> true
+                       | [ ("keeper" | "repo_id"), [name] ] -> String.trim name <> ""
+                       | _ -> false in
+                     if not scope_valid then invalid ()
+                     else
+                       let base, source = resolve_workspace_base ~state ~uri in
+                       match source with
+                       | `RepositoryMissing _ | `RepositoryUnknown _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
+                         refuse `Not_found "workspace_unavailable" "The selected workspace is unavailable"
+                       | `Project | `Repository _ | `Playground _ ->
+                         (match save_workspace_file
+                           ~publication_recovery:(Mcp_server.publication_recovery_availability_provider state)
+                           ~base ~path ~expected_revision ~content with
+                          | Ok revision -> json_response_with_source ~status:`OK ~source request reqd
+                            (`Assoc ["ok", `Bool true; "revision", `String revision])
+                          | Error Save_invalid_path -> refuse `Bad_request "invalid_path" "Invalid path"
+                          | Error Save_invalid_revision -> invalid ()
+                          | Error Save_conflict -> refuse `Conflict "workspace_file_changed" "File changed; retain the draft and compare the current source"
+                          | Error Save_too_large | Error (Save_read_failed (File_too_large _)) ->
+                            refuse `Payload_too_large "workspace_file_too_large" "File exceeds the configured readable size"
+                          | Error (Save_read_failed (File_not_found | File_not_regular)) ->
+                            refuse `Not_found "workspace_file_unavailable" "The existing file is unavailable"
+                          | Error (Save_read_failed File_changed_during_open) ->
+                            refuse `Conflict "workspace_file_changed" "File changed; retain the draft"
+                          | Error (Save_read_failed (File_read_failed _)) ->
+                            refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
+                          | Error (Save_recovery_unavailable error) ->
+                            Log.Server.warn "workspace file recovery unavailable: %s"
+                              (Keeper_publication_recovery_availability.unavailable_to_string error);
+                            refuse `Service_unavailable "workspace_file_save_unavailable" "Save is unavailable; retain the draft"
+                          | Error (Save_recovery_release_failed { save_result; release_failure }) ->
+                            Log.Server.warn "workspace file recovery release failed saved=%b evidence=%s"
+                              (Result.is_ok save_result)
+                              (Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure);
+                            refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save"
+                          | Error (Save_io_failed { publication_may_have_started; detail }) ->
+                            Log.Server.warn "workspace file save IO failed publication_started=%b evidence=%s"
+                              publication_may_have_started detail;
+                            if publication_may_have_started then
+                              refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save"
+                            else
+                              refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
+                          | Error (Save_write_failed error) ->
+                            Log.Server.warn "workspace file publication failed: %s"
+                              (Fs_compat.capability_write_error_to_string error);
+                            (match error.target_effect with
+                             | Fs_compat.Target_unchanged -> refuse `Internal_server_error "workspace_file_save_failed" "Save failed before publication; retain the draft"
+                             | Fs_compat.Target_created
+                             | Fs_compat.Target_replaced | Fs_compat.Target_state_unknown ->
+                               refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save")))
+                | _ -> invalid ())
+             | _ -> invalid ()))
+
+  (* Ask the language server about a name: definition or hover, at the
+     occurrence-th start of [symbol] on a 1-based line. The same
+     question surface the keeper_code_query tool offers, over the same
+     [Lsp_position] arithmetic, reached through the workspace axes
+     (?keeper= / ?repo_id=) this file already resolves.
+
+     Token-gated where the file reads above are public: answering
+     spawns a language server. The pool is request-scoped
+     ([Lsp_turn_pool.with_turn_pool]) for the reason its mli measures —
+     a resident server holds 12-155 MB; a spawn costs tens of
+     milliseconds plus the first question's indexing. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanBroadcast) "/api/v1/lsp/question" (fun state _identity request reqd ->
+            let uri = Uri.of_string request.target in
+            let base, _source = resolve_workspace_base ~state ~uri in
+            let param name = Uri.get_query_param uri name in
+            let bad message =
+              json_response ~status:`Bad_request request reqd
+                (json_error message)
+            in
+            let open struct
+              let ( let* ) r f =
+                match r with
+                | Ok v -> f v
+                | Error message -> `Failed message
+            end in
+            let outcome =
+              (* Parsed by the module that owns the vocabulary, not spelled
+                 again here. This arm read [definition] and [hover] only,
+                 while the Keeper tool over the same client had answered
+                 [references] since #30504 -- the route was a word behind,
+                 and nothing said so. *)
+              let* question =
+                match param "question" with
+                | Some raw ->
+                  (match Lsp_questions.question_of_string raw with
+                   | Some question -> Ok question
+                   | None ->
+                     Error
+                       (Printf.sprintf
+                          "question must be definition, hover or references, \
+                           got %S"
+                          raw))
+                | None -> Error "question parameter is required"
+              in
+              let* raw_path =
+                match param "path" with
+                | Some p when String.trim p <> "" -> Ok p
+                | _ -> Error "path parameter is required"
+              in
+              let* line_number =
+                match Option.bind (param "line") int_of_string_opt with
+                | Some n when n >= 1 -> Ok n
+                | Some _ -> Error "line is 1-based and must be >= 1"
+                | None -> Error "line parameter is required (1-based)"
+              in
+              let* symbol =
+                match param "symbol" with
+                | Some sym when String.trim sym <> "" -> Ok (String.trim sym)
+                | _ -> Error "symbol parameter is required"
+              in
+              let* occurrence =
+                match param "occurrence" with
+                | None -> Ok 1
+                | Some raw ->
+                  (match int_of_string_opt raw with
+                   | Some n when n >= 1 -> Ok n
+                   | Some _ | None ->
+                     Error "occurrence is 1-based and must be >= 1")
+              in
+              let* file =
+                match resolve_workspace_file base raw_path with
+                | Ok file -> Ok file
+                | Error _ -> Error "Invalid path"
+              in
+              let path = file.lexical_path in
+              let line_index = line_number - 1 in
+              let* language = Lsp_position.language_of ~path in
+              let* line = Lsp_position.line_of_file ~path ~line_index in
+              let* character =
+                Lsp_position.column_of ~line ~symbol ~occurrence ~line_number
+              in
+              let* workspace_root =
+                Lsp_position.project_root_of ~language ~path ~boundary:base
+              in
+              (* Refused before it is asked, not judged after it is answered:
+                 a server with no index answers references with the
+                 occurrences in the file it was given, and a short list reads
+                 like an answer. The same guard the Keeper tool applies. *)
+              let* () =
+                Lsp_questions.reference_index_ready
+                  ~question
+                  ~language
+                  ~project_root:workspace_root
+              in
+              `Ask (question, language, workspace_root, path, line_index,
+                    character)
+            in
+            match outcome with
+            | `Failed message -> bad message
+            | `Ask (question, language, workspace_root, path, line_index,
+                    character) ->
+              Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ()) (fun () ->
+                match Lsp_turn_pool.get_opt () with
+                | None ->
+                  json_response ~status:`Service_unavailable request reqd
+                    (json_error
+                       "no Eio environment for a language-server pool here")
+                | Some pool ->
+                  (match
+                     Lsp_questions.ask pool ~language ~workspace_root ~path
+                       ~line:line_index ~character ~question
+                   with
+                   | Error error ->
+                     json_response ~status:`Bad_gateway request reqd
+                       (json_error
+                          (Format.asprintf "%a" Lsp_questions.pp_error error))
+                   | Ok answer ->
+                     let location_json (l : Lsp_questions.location) =
+                       (* 1-based out, the way the caller asked. A location
+                          outside the workspace (stdlib, a vendored package)
+                          keeps its absolute path and says which side it fell
+                          on, instead of a relative path that resolves to the
+                          wrong file. *)
+                       let boundary = Fs_compat.realpath_lenient base in
+                       let answered =
+                         Fs_compat.realpath_lenient l.Lsp_questions.path
+                       in
+                       let prefix = boundary ^ Filename.dir_sep in
+                       let inside =
+                         String.starts_with ~prefix answered
+                       in
+                       let shown =
+                         if inside then
+                           String.sub answered (String.length prefix)
+                             (String.length answered - String.length prefix)
+                         else answered
+                       in
+                       `Assoc
+                         [ ("path", `String shown)
+                         ; ("inside_workspace", `Bool inside)
+                         ; ("line", `Int (l.Lsp_questions.line + 1))
+                         ; ("character", `Int (l.Lsp_questions.character + 1))
+                         ]
+                     in
+                     let data =
+                       match answer with
+                       | Lsp_questions.Locations locations ->
+                         `Assoc
+                           [ ("kind", `String "locations")
+                           ; ( "locations"
+                             , `List (List.map location_json locations) )
+                           ]
+                       | Lsp_questions.Hover_text text ->
+                         `Assoc
+                           [ ("kind", `String "hover")
+                           ; ( "text"
+                             , match text with
+                               | Some t -> `String t
+                               | None -> `Null )
+                           ]
+                     in
+                     json_response ~status:`OK request reqd
+                       (`Assoc [ ("ok", `Bool true); ("data", data) ]))))
+
+  |> Server_route.get Server_route.Public_read "/api/v1/git/blame" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let file_path =
+             match Uri.get_query_param uri "path" with
+             | Some p -> p
+             | None -> ""
+           in
+           if file_path = "" then
+             json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+           else
+             (match resolve_workspace_file base file_path with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+              | Ok safe ->
+                if not (Sys.file_exists safe.resolved_path) then
+                  json_response ~status:`Not_found request reqd (json_error "File not found")
+                else
+                (match repository_owning ~base ~path:safe.lexical_path with
+                 | None ->
+                   json_response ~status:`Not_found request reqd
+                     (json_error "No git repository under this scope owns that path")
+                 | Some repo_root ->
+                  let rel = rel_under repo_root safe.lexical_path in
+                  let cache_key =
+                    Printf.sprintf "git:blame:%s:%s:%s"
+                      repo_root
+                      (source_to_string source)
+                      rel
+                  in
+                  let payload =
+                    Dashboard_cache.get_or_compute_payload cache_key
+                      ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                      (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                         match git_run_lines ~cwd:repo_root
+                                 ["blame"; "--porcelain"; "--"; rel]
+                         with
+                         | [] -> `List []
+                         | lines ->
+                           let entries = parse_blame_porcelain lines in
+                           let grouped = group_blame_entries rel entries in
+                           `List grouped))
+                  in
+                  cached_response_with_source ~source request reqd payload)))
+
+  |> Server_route.get Server_route.Public_read "/api/v1/git/log" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let limit =
+             match
+               Option.bind (Uri.get_query_param uri "limit") int_of_string_opt
+             with
+             | Some n when n >= 1 -> min n 200
+             | Some _ | None -> 50
+           in
+           match Uri.get_query_param uri "path" with
+           | None | Some "" ->
+             json_response ~status:`Bad_request request reqd
+               (json_error "Missing path parameter")
+           | Some p ->
+             (match resolve_workspace_file base p with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd
+                  (json_error "Invalid path")
+              | Ok safe ->
+                if not (Sys.file_exists safe.resolved_path) then
+                  json_response ~status:`Not_found request reqd
+                    (json_error "File not found")
+                else
+                  (match repository_owning ~base ~path:safe.lexical_path with
+                   | None ->
+                     json_response ~status:`Not_found request reqd
+                       (json_error
+                          "No git repository under this scope owns that path")
+                   | Some repo_root ->
+                     let rel = rel_under repo_root safe.lexical_path in
+                     let cache_key =
+                       Printf.sprintf "git:log:%s:%s:%s:%d" repo_root
+                         (source_to_string source)
+                         rel limit
+                     in
+                     let payload =
+                       Dashboard_cache.get_or_compute_payload cache_key
+                         ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                         (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                            let lines =
+                              git_run_lines ~cwd:repo_root
+                                [ "log"
+                                ; Printf.sprintf "-n%d" limit
+                                ; "--pretty=format:%h%x09%at%x09%an%x09%s"
+                                ; "--"
+                                ; rel
+                                ]
+                            in
+                            `Assoc
+                              [ ("ok", `Bool true)
+                              ; ( "commits"
+                                , `List
+                                    (List.filter_map git_log_row_of_line
+                                       lines) )
+                              ]))
+                     in
+                     cached_response_with_source ~source request reqd payload)))
+
+  |> Server_route.get Server_route.Public_read "/api/v1/git/diff" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let file_path =
+             match Uri.get_query_param uri "path" with
+             | Some p -> p
+             | None -> ""
+           in
+           if file_path = "" then
+             json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+           else
+             let base_ref =
+               match Uri.get_query_param uri "base_ref" with
+               | Some r -> r
+               | None -> "HEAD"
+             in
+             if not (valid_git_ref base_ref) then
+               json_response ~status:`Bad_request request reqd
+                 (json_error "Invalid base_ref")
+             else
+             (match resolve_workspace_file base file_path with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+              | Ok safe ->
+                (match repository_owning ~base ~path:safe.lexical_path with
+                 | None ->
+                   (* Saying so beats the empty diff git would print from
+                      whatever repository encloses this one: an answer from
+                      outside the queried scope is not an answer. *)
+                   json_response ~status:`Not_found request reqd
+                     (json_error "No git repository under this scope owns that path")
+                 | Some repo_root ->
+                let rel = rel_under repo_root safe.lexical_path in
+                let cache_key =
+                  Printf.sprintf "git:diff:%s:%s:%s:%s"
+                    repo_root
+                    (source_to_string source)
+                    base_ref
+                    rel
+                in
+                let payload =
+                  Dashboard_cache.get_or_compute_payload cache_key
+                    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                    (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                       match git_run_lines_or_error ~cwd:repo_root
+                               ["diff"; base_ref; "--"; rel]
+                       with
+                       | Error _ ->
+                         observe_workspace_route_failure
+                           ~site:"git_run" ~path:rel
+                           (Failure "git diff failed");
+                         `Null
+                       | Ok [] ->
+                         `Assoc [("unified", `List []); ("has_changes", `Bool false)]
+                       | Ok diff_lines ->
+                         let unified = parse_unified_diff diff_lines in
+                         `Assoc [("unified", `List unified); ("has_changes", `Bool true)]))
+                in
+                (match payload.json with
+                 | `Null ->
+                   json_response ~status:`Bad_request request reqd
+                     (json_error "git diff failed")
+                 | _ -> cached_response_with_source ~source request reqd payload))))

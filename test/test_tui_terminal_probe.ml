@@ -1,0 +1,838 @@
+open Alcotest
+
+let osc_bell body = "\x1b]" ^ body ^ "\x07"
+let osc_st body = "\x1b]" ^ body ^ "\x1b\\"
+
+let graphics_reply status =
+  Printf.sprintf "\x1b_Gi=%d;%s\x1b\\" (Masc_tui_graphics.image_id Masc_tui_graphics.Graphics_query) status
+;;
+
+let foreground = osc_bell "10;rgb:12/ab/00"
+let background = osc_st "11;rgb:ffff/8080/0000"
+let graphics_ok = graphics_reply "OK"
+
+let palette result =
+  match result.Masc_tui_terminal_probe.palette with
+  | Some palette -> palette
+  | None -> fail "expected a complete terminal palette"
+;;
+
+let check_rgb label expected color =
+  let actual =
+    ( Masc_tui_terminal_palette.red color
+    , Masc_tui_terminal_palette.green color
+    , Masc_tui_terminal_palette.blue color )
+  in
+  check (triple int int int) label expected actual
+;;
+
+let cell_size_query = "\x1b[16t"
+
+let test_query_can_skip_only_palette () =
+  check string "graphics remains under NO_COLOR"
+    (cell_size_query ^ Masc_tui_graphics.query)
+    (Masc_tui_terminal_probe.query ~palette:false);
+  check string "one combined query"
+    (cell_size_query ^ Masc_tui_terminal_palette.query ^ Masc_tui_graphics.query)
+    (Masc_tui_terminal_probe.query ~palette:true)
+;;
+
+(* CSI 16 t is answered with CSI 6 ; height ; width t (xterm ctlseqs). The
+   width comes second, and reading the pair the other way round would size
+   every placement against a cell the wrong shape. *)
+let test_a_cell_size_reply_is_read_width_last () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:false
+      ("\x1b[6;34;15t" ^ graphics_ok)
+  in
+  check (option (pair int int)) "width 15, height 34" (Some (15, 34))
+    result.cell_pixels;
+  check string "and none of it was typed" "" result.replay
+;;
+
+(* PageDown is ESC [ 6 ~ and shares the first two bytes with the reply. It is
+   held only until the final byte says which one arrived. *)
+let test_page_down_is_not_eaten_by_the_cell_size_wait () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:false
+      ("\x1b[6~" ^ graphics_ok)
+  in
+  check (option (pair int int)) "no size was claimed" None result.cell_pixels;
+  check string "the key reached the reader whole" "\x1b[6~" result.replay
+;;
+
+(* A reply whose numbers are missing, unparseable or zero is not a cell size,
+   and a zero would divide by nothing downstream. *)
+let test_a_malformed_cell_size_is_not_a_size () =
+  List.iter
+    (fun body ->
+      let result =
+        Masc_tui_terminal_probe.decode ~palette_requested:false (body ^ graphics_ok)
+      in
+      check (option (pair int int))
+        (Printf.sprintf "%S is not a size" body)
+        None result.cell_pixels)
+    [ "\x1b[6;34t"; "\x1b[6;0;15t"; "\x1b[6;34;0t"; "\x1b[6;x;15t"; "\x1b[8;34;15t" ]
+;;
+
+let test_palette_requires_both_slots () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (foreground ^ graphics_ok)
+  in
+  check bool "one slot is unknown" true (Option.is_none result.palette);
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (foreground ^ background ^ graphics_ok)
+  in
+  let palette = palette result in
+  check_rgb "two-digit foreground" (0x12, 0xab, 0x00)
+    (Masc_tui_terminal_palette.foreground palette);
+  check_rgb "four-digit background" (255, 128, 0)
+    (Masc_tui_terminal_palette.background palette)
+;;
+
+let test_malformed_palette_stays_unknown_and_is_not_input () =
+  let malformed = osc_bell "10;rgb:f_/00/00" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      ("before" ^ malformed ^ background ^ graphics_ok ^ "after")
+  in
+  check bool "malformed slot keeps the palette unknown" true
+    (Option.is_none result.palette);
+  check string "a recognized malformed reply is consumed" "beforeafter"
+    result.replay
+;;
+
+(* The query asks for the sixteen palette slots as well, and a terminal answers
+   each with [ESC ] 4 ; n ; rgb:...]. The prefix reader held only [10;] and
+   [11;], so a slot answer went on as typed input -- on a terminal that answers
+   all sixteen, startup logged "Manual refresh" ten times with no key pressed --
+   and no slot was ever recorded. *)
+let test_a_palette_slot_answer_is_read_and_not_typed () =
+  let slot = osc_st "4;3;rgb:f7f7/caca/8888" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      ("before" ^ foreground ^ background ^ slot ^ graphics_ok ^ "after")
+  in
+  check string "a slot answer is not input" "beforeafter" result.replay;
+  (match Masc_tui_terminal_palette.ansi (palette result) 3 with
+   | Some color -> check_rgb "slot 3 is recorded" (0xf7, 0xca, 0x88) color
+   | None -> fail "slot 3 was not recorded");
+  let other = osc_bell "41;not-ours" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (other ^ foreground ^ background ^ graphics_ok)
+  in
+  check string "an OSC that only starts with 4 still replays" other result.replay
+;;
+
+let test_rgba_requires_and_ignores_a_valid_alpha () =
+  let foreground = osc_bell "10;rgba:0101/0202/0303/ffff" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (foreground ^ background ^ graphics_ok)
+  in
+  check_rgb "rgba components" (1, 2, 3)
+    (Masc_tui_terminal_palette.foreground (palette result));
+  let missing_alpha = osc_bell "10;rgba:0101/0202/0303" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (missing_alpha ^ background ^ graphics_ok)
+  in
+  check bool "rgba without alpha is malformed" true
+    (Option.is_none result.palette)
+;;
+
+let test_ascii_utf8_and_escape_bytes_replay_exactly () =
+  let input_before = "a한\x1b" in
+  let input_between = "\x1b[Aβ" in
+  let input_after = "z" in
+  let raw =
+    input_before ^ foreground ^ input_between ^ graphics_ok ^ background
+    ^ input_after
+  in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true raw
+  in
+  check string "byte-for-byte replay"
+    (input_before ^ input_between ^ input_after)
+    result.replay
+;;
+
+let test_bracketed_paste_is_opaque () =
+  let paste =
+    "\x1b[200~pasted " ^ foreground ^ " and " ^ graphics_ok
+    ^ " bytes\x1b[201~"
+  in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (foreground ^ "before" ^ paste ^ background ^ graphics_ok ^ "after")
+  in
+  check string "terminal-looking paste bytes survive"
+    ("before" ^ paste ^ "after")
+    result.replay;
+  ignore (palette result)
+;;
+
+(* DECSET 996 asks and 2031 reports again on a theme switch, both replying as
+   [CSI ? 997 ; n n]. A multiplexer passes these through where it answers no
+   OSC colour query, so this is the only thing that ever arrives there. *)
+let theme_mode_reply parameter = Printf.sprintf "\x1b[?997;%dn" parameter
+
+let mode_to_string = function
+  | Masc_tui_terminal_palette.Dark -> "dark"
+  | Masc_tui_terminal_palette.Light -> "light"
+;;
+
+let theme_mode result =
+  match result.Masc_tui_terminal_probe.theme_mode with
+  | None -> "none"
+  | Some mode -> mode_to_string mode
+;;
+
+let test_a_theme_mode_reply_is_read_and_not_typed () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      ("a" ^ theme_mode_reply 1 ^ "b")
+  in
+  check string "the page is read" "dark" (theme_mode result);
+  check string "the reply never reaches the composer" "ab" result.replay;
+  let light =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (theme_mode_reply 2)
+  in
+  check string "light too" "light" (theme_mode light);
+  (* A parameter this does not know is not a dark page. *)
+  let unknown =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (theme_mode_reply 9)
+  in
+  check string "an unknown parameter says nothing" "none" (theme_mode unknown)
+;;
+
+(* Every other private-parameter sequence is the reader's, and holding one
+   while it might have been the reply must not eat it. *)
+let test_other_private_sequences_replay_whole () =
+  List.iter
+    (fun sequence ->
+      let result =
+        Masc_tui_terminal_probe.decode ~palette_requested:true
+          ("x" ^ sequence ^ "y")
+      in
+      check string
+        (Printf.sprintf "%S survives" sequence)
+        ("x" ^ sequence ^ "y")
+        result.replay;
+      check string "and says nothing about the page" "none" (theme_mode result))
+    [ "\x1b[?1h"          (* an application-cursor-keys set *)
+    ; "\x1b[?2004l"       (* bracketed paste off *)
+    ; "\x1b[?997;1m"      (* right parameters, wrong final byte *)
+    ; "\x1b[?6n"          (* a cursor position request *)
+    ]
+;;
+
+(* A sequence that never ends is the reader's input too. *)
+let test_an_unfinished_private_sequence_is_not_swallowed () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true "before\x1b[?997;1"
+  in
+  check string "the unfinished bytes come back" "before\x1b[?997;1"
+    result.replay;
+  check string "and no page was read" "none" (theme_mode result)
+;;
+
+(* Paste keeps the first claim on every byte it wants, even when what is
+   pasted looks exactly like the reply. *)
+let test_a_pasted_theme_reply_stays_pasted_text () =
+  let paste = "\x1b[200~" ^ theme_mode_reply 2 ^ "\x1b[201~" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      ("before" ^ paste ^ "after")
+  in
+  check string "pasted bytes survive" ("before" ^ paste ^ "after")
+    result.replay;
+  check string "and are not read as the page" "none" (theme_mode result)
+;;
+
+let test_unknown_and_incomplete_sequences_replay () =
+  let unknown_osc = osc_bell "99;not-ours" in
+  let unknown_apc = "\x1b_Gi=7;OK\x1b\\" in
+  let incomplete = "\x1b]10;rgb:ff/ff/ff" in
+  let input = unknown_osc ^ unknown_apc ^ incomplete in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true input
+  in
+  check string "nothing unrecognized is consumed" input result.replay
+;;
+
+let test_no_color_does_not_claim_osc_replies () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:false
+      (foreground ^ graphics_ok)
+  in
+  check bool "no palette" true (Option.is_none result.palette);
+  check string "unrequested OSC bytes replay" foreground result.replay;
+  match result.graphics with
+  | Some Masc_tui_graphics.Supported -> ()
+  | Some (Masc_tui_graphics.Refused reason) ->
+    failf "graphics unexpectedly refused: %s" reason
+  | None -> fail "graphics answer was not decoded"
+;;
+
+let test_stream_finishes_only_after_every_answer () =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:true in
+  String.iter (Masc_tui_terminal_probe.feed decoder) foreground;
+  String.iter (Masc_tui_terminal_probe.feed decoder) graphics_ok;
+  check bool "background still missing" false
+    (Masc_tui_terminal_probe.complete decoder);
+  String.iter (Masc_tui_terminal_probe.feed decoder) background;
+  check bool "all requested answers arrived" true
+    (Masc_tui_terminal_probe.complete decoder);
+  let result = Masc_tui_terminal_probe.finish decoder in
+  check string "responses are not replayed" "" result.replay;
+  ignore (palette result)
+;;
+
+let test_partial_osc_continues_in_the_normal_reader () =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:true in
+  let foreground_prefix = "\x1b]10;rgb:12/ab" in
+  String.iter (Masc_tui_terminal_probe.feed decoder)
+    ("before" ^ graphics_ok ^ foreground_prefix);
+  let at_deadline = Masc_tui_terminal_probe.snapshot decoder in
+  check bool "startup keeps an incomplete palette unknown" true
+    (Option.is_none at_deadline.palette);
+  check string "only decided input is replayable at the deadline" "before"
+    at_deadline.replay;
+  let replay = Buffer.create 64 in
+  String.iter
+    (fun expected ->
+      check bool "startup input remains queued until consumed" true
+        (Masc_tui_terminal_probe.has_replay decoder);
+      match Masc_tui_terminal_probe.next decoder
+              ~next_raw:(fun () -> fail "queued replay must not read the terminal") with
+      | Some byte ->
+        check char "startup bytes replay in order" expected byte;
+        Buffer.add_char replay byte
+      | None -> fail "queued startup input was lost")
+    "before";
+  check bool "an unfinished response is waiting, not queued input" false
+    (Masc_tui_terminal_probe.has_replay decoder);
+
+  let unknown_osc = osc_bell "99;normal-input" in
+  let pasted =
+    "\x1b[200~paste " ^ background ^ " is input\x1b[201~"
+  in
+  let terminal_suffix =
+    "/00\x1b\\" ^ unknown_osc ^ pasted ^ background ^ "after"
+  in
+  let terminal_position = ref 0 in
+  let next_raw () =
+    if !terminal_position >= String.length terminal_suffix then None
+    else begin
+      let byte = terminal_suffix.[!terminal_position] in
+      incr terminal_position;
+      Some byte
+    end
+  in
+  let rec read_normally () =
+    match Masc_tui_terminal_probe.next decoder ~next_raw with
+    | None -> ()
+    | Some byte ->
+      Buffer.add_char replay byte;
+      read_normally ()
+  in
+  read_normally ();
+  check string "handoff removes only completed queried replies"
+    ("before" ^ unknown_osc ^ pasted ^ "after")
+    (Buffer.contents replay);
+  check bool "the late suffix completes the decoder" true
+    (Masc_tui_terminal_probe.complete decoder)
+;;
+
+let test_graphics_refusal_is_a_complete_answer () =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:false in
+  String.iter (Masc_tui_terminal_probe.feed decoder)
+    (graphics_reply "ENOTSUPPORTED");
+  check bool "refusal ends the wait" true
+    (Masc_tui_terminal_probe.complete decoder);
+  match (Masc_tui_terminal_probe.finish decoder).graphics with
+  | Some (Masc_tui_graphics.Refused "ENOTSUPPORTED") -> ()
+  | Some Masc_tui_graphics.Supported -> fail "refusal became support"
+  | Some (Masc_tui_graphics.Refused reason) ->
+    failf "wrong refusal reason: %S" reason
+  | None -> fail "refusal was dropped"
+;;
+
+(* Read through [next] the way the input reader does after startup, with no
+   graphics answer, so the decoder never completes and stays in front. *)
+let read_through decoder text =
+  let position = ref 0 in
+  let next_raw () =
+    if !position >= String.length text then None
+    else begin
+      let byte = text.[!position] in
+      incr position;
+      Some byte
+    end
+  in
+  let out = Buffer.create 16 in
+  let rec loop () =
+    match Masc_tui_terminal_probe.next decoder ~next_raw with
+    | None -> ()
+    | Some byte ->
+      Buffer.add_char out byte;
+      loop ()
+  in
+  loop ();
+  Buffer.contents out
+;;
+
+let test_a_held_paste_head_is_reported_and_discarded () =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:false in
+  check string "the truncated paste head is held, not served" ""
+    (read_through decoder "\x1b[200");
+  check bool "the hold is visible to the reader" true
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder);
+  Masc_tui_terminal_probe.discard_incomplete_sequence decoder;
+  check bool "a discarded hold is gone" false
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder);
+  check string "later keys arrive without the discarded head" "recovered"
+    (read_through decoder "recovered")
+;;
+
+let test_a_kept_paste_head_replays_into_later_keys () =
+  (* The control for the test above: without the discard, the held head is
+     replayed in front of the next keys and the reader parses its first
+     letter as the final byte of a CSI. *)
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:false in
+  ignore (read_through decoder "\x1b[200");
+  check string "the head is replayed in front of later keys"
+    "\x1b[200recovered" (read_through decoder "recovered")
+;;
+
+let test_a_started_paste_is_not_a_hold () =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:false in
+  check string "a full start marker passes through" "\x1b[200~first"
+    (read_through decoder "\x1b[200~first");
+  check bool "paste bytes are served, not held" false
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder);
+  Masc_tui_terminal_probe.discard_incomplete_sequence decoder;
+  check string "discard leaves a running paste alone" "second\x1b[201~"
+    (read_through decoder "second\x1b[201~")
+;;
+
+let fed ~palette_requested text =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested in
+  String.iter (Masc_tui_terminal_probe.feed decoder) text;
+  decoder
+;;
+
+(* Every state that keeps bytes back across an idle read is a hold, and
+   the one-byte [Escape] state is not: [next] hands a lone ESC on as a key
+   the moment input runs dry. *)
+let test_hold_states_are_reported () =
+  let holds name palette_requested text expected =
+    check bool name expected
+      (Masc_tui_terminal_probe.holds_incomplete_sequence
+         (fed ~palette_requested text))
+  in
+  holds "OSC reply candidate" true "\x1b]10;rgb:" true;
+  holds "private CSI (theme reply)" true "\x1b[?99" true;
+  holds "cell-size reply or PageDown" false "\x1b[6" true;
+  holds "APC prefix" false "\x1b_" true;
+  holds "graphics APC body" false "\x1b_Gi=31" true;
+  holds "a lone ESC" false "\x1b" false
+;;
+
+(* A discard ends the held sequence where it stands, as the reader's own
+   CSI cancel does: the bytes after it are read from [Normal] as keys. *)
+let test_a_discarded_window_hold_reads_later_bytes_as_keys () =
+  let decoder = fed ~palette_requested:false "\x1b[6" in
+  Masc_tui_terminal_probe.discard_incomplete_sequence decoder;
+  check string "the rest is keys, not the end of PageDown" "~x"
+    (read_through decoder "~x");
+  let kept = fed ~palette_requested:false "\x1b[6" in
+  check string "control: kept, the same bytes finish PageDown" "\x1b[6~x"
+    (read_through kept "~x")
+;;
+
+(* Why Ctrl-C reads waiting bytes before it cancels: a tail already in the
+   stream finishes the held head into a paste start, and the hold is gone. *)
+let test_a_waiting_tail_resolves_the_hold () =
+  let decoder = fed ~palette_requested:false "\x1b[2" in
+  check bool "the split head is held" true
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder);
+  check string "the tail makes it a paste start" "\x1b[200~first\rsecond"
+    (read_through decoder "00~first\rsecond");
+  check bool "no hold remains to cancel" false
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder)
+;;
+
+let test_process_palette_preserves_none () =
+  Masc_tui_terminal_palette.set_current None;
+  let unknown_snapshot = Masc_tui_terminal_palette.snapshot () in
+  check bool "unknown remains None" true
+    (Option.is_none (Masc_tui_terminal_palette.current ()));
+  check bool "snapshot preserves unknown" true
+    (Option.is_none
+       (Masc_tui_terminal_palette.snapshot_palette unknown_snapshot));
+  let known =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (foreground ^ background ^ graphics_ok)
+    |> palette
+  in
+  Masc_tui_terminal_palette.set_current (Some known);
+  let known_snapshot = Masc_tui_terminal_palette.snapshot () in
+  check bool "the same authority is readable" true
+    (Option.is_some (Masc_tui_terminal_palette.current ()));
+  check int "generation advances with the atomic write"
+    (Masc_tui_terminal_palette.snapshot_generation unknown_snapshot + 1)
+    (Masc_tui_terminal_palette.snapshot_generation known_snapshot);
+  check bool "a captured snapshot cannot tear after a later write" true
+    (Option.is_none
+       (Masc_tui_terminal_palette.snapshot_palette unknown_snapshot));
+  check bool "the new snapshot carries the new palette" true
+    (Option.is_some
+       (Masc_tui_terminal_palette.snapshot_palette known_snapshot));
+  Masc_tui_terminal_palette.set_current None
+;;
+
+let test_early_key_handoff_keeps_split_replies_and_paste () =
+  let module Probe = Masc_tui_terminal_probe in
+  let decoder = Probe.create ~palette_requested:true in
+  let key = "한" in
+  Probe.feed decoder key.[0];
+  check bool "decided UTF-8 prefix hands off before any answer" true
+    (Probe.startup_status decoder = Probe.Input_ready);
+  check bool "handoff grants no completed query" false (Probe.complete decoder);
+  let first = read_through decoder
+      (String.sub key 1 (String.length key-1) ^ "\x1b]10;rgb:") in
+  let paste = "\x1b[200~" ^ graphics_ok ^ foreground ^ "\x1b[201~" in
+  let rest = read_through decoder
+      ("12/ab/00\x07" ^ background ^ theme_mode_reply 1
+       ^ "\x1b[6;34;15t" ^ paste ^ graphics_ok ^ "\x1b[6~") in
+  check string "same decoder preserves UTF-8, paste and later key bytes"
+    (key ^ paste ^ "\x1b[6~") (first ^ rest);
+  let observed = Probe.observation decoder in
+  check bool "late requested replies complete" true (Probe.complete decoder);
+  check (option (pair int int)) "actual cell answer survives handoff"
+    (Some (15,34)) observed.cell_pixels;
+  check bool "pasted graphics did not substitute for the real answer" true
+    (observed.graphics = Some Masc_tui_graphics.Supported);
+  check bool "theme arrives independently of the partial palette" true
+    (observed.theme_mode = Some Masc_tui_terminal_palette.Dark);
+  ignore (palette (Probe.snapshot decoder))
+;;
+
+let deliver_decoded_replies reader text =
+  let decoder = Masc_tui_input_decoder.create () in
+  let keys = ref [] in
+  String.iter (fun byte ->
+    List.iter (function
+      | Masc_tui_input_decoder.Reply reply -> Masc_tui_input_reader.observe_terminal_reply reader reply
+      | Key key -> keys := key :: !keys
+      | Paste _ | Mouse_wheel _ | Mouse_left_press _ | Mouse_left_drag _
+      | Mouse_left_release _ ->
+        fail "unexpected fixture input") (Masc_tui_input_decoder.feed decoder byte)) text;
+  List.rev !keys
+;;
+
+let test_late_decoded_replies_keep_the_original_observation_owner () =
+  let module Probe = Masc_tui_terminal_probe in
+  let module Reader = Masc_tui_input_reader in
+  let decoder = fed ~palette_requested:true (foreground ^ background ^ graphics_ok) in
+  check bool "startup byte filter already completed" true (Probe.complete decoder);
+  let reader = Reader.create_input_reader () in
+  let observations = ref [] in
+  Reader.install_terminal_probe reader decoder;
+  Reader.install_terminal_probe_publisher reader ~publish:(fun value -> observations := value :: !observations);
+  let original = Probe.observation decoder in
+  let other_decoder = Probe.create ~palette_requested:true in
+  let other_reader = Reader.create_input_reader () and other_observations = ref [] in
+  Reader.install_terminal_probe other_reader other_decoder;
+  Reader.install_terminal_probe_publisher other_reader
+    ~publish:(fun value -> other_observations := value :: !other_observations);
+  let other_original = !other_observations in
+  check (list string) "only actual user input becomes keys" ["x"]
+    (deliver_decoded_replies reader ("\x1b[6;34;15t" ^ osc_st "4;3;rgb:f7/ca/88"
+      ^ theme_mode_reply 1 ^ theme_mode_reply 2 ^ "x"));
+  let current = Probe.observation decoder in
+  check (option (pair int int)) "late normal-decoder cell reply reaches original owner"
+    (Some (15,34)) current.cell_pixels;
+  check bool "later theme notice replaces the prior mode" true
+    (current.theme_mode = Some Masc_tui_terminal_palette.Light);
+  check (option (pair int int)) "retained initial observation is immutable" None original.cell_pixels;
+  let initial_palette = Option.get original.palette and current_palette = Option.get current.palette in
+  check bool "retained palette did not borrow mutable slots" true
+    (Option.is_none (Masc_tui_terminal_palette.ansi initial_palette 3));
+  check bool "actual late slot is published" true
+    (Option.is_some (Masc_tui_terminal_palette.ansi current_palette 3));
+  check bool "other reader keeps its original publication" true (!other_observations == other_original);
+  check bool "other decoder has no borrowed cell reply" true
+    (Option.is_none (Probe.observation other_decoder).cell_pixels);
+  let published = !observations in
+  ignore (deliver_decoded_replies reader (theme_mode_reply 2 ^ "\x1b[6;40;20t" ^ graphics_ok));
+  check bool "duplicate notices and later first-answer slots do not republish" true
+    (!observations == published)
+;;
+
+let test_no_color_handoff_retains_refusal_and_late_geometry () =
+  let module Probe = Masc_tui_terminal_probe in
+  let module Reader = Masc_tui_input_reader in
+  let decoder = fed ~palette_requested:false "q" in
+  check bool "NO_COLOR still hands back actual input" true
+    (Probe.startup_status decoder = Probe.Input_ready);
+  check string "original key survives refusal" "q"
+    (read_through decoder (graphics_reply "ENOTSUPPORTED"));
+  let reader = Reader.create_input_reader () and observations = ref [] in
+  Reader.install_terminal_probe reader decoder;
+  Reader.install_terminal_probe_publisher reader ~publish:(fun value -> observations := value :: !observations);
+  ignore (deliver_decoded_replies reader (foreground ^ background ^ "\x1b[6;34;15t" ^ theme_mode_reply 1));
+  let observed = Probe.observation decoder in
+  check bool "unrequested colours grant no palette" true (Option.is_none observed.palette);
+  check bool "real refusal remains refusal" true
+    (observed.graphics = Some (Masc_tui_graphics.Refused "ENOTSUPPORTED"));
+  check (option (pair int int)) "geometry is independent of graphics support"
+    (Some (15,34)) observed.cell_pixels;
+  check bool "current owner receives the actual last observation" true
+    (match !observations with latest::_ -> latest == observed | [] -> false)
+;;
+
+let test_startup_caller_interrupt_does_not_replace_late_worker_facts () =
+  let module O = Masc_tui_startup_observation in
+  let note at_ns event facts = fst (O.record facts ~at_ns event) in
+  let probe = fed ~palette_requested:true "x" in
+  let initial = O.create ~pid:7 ~dispatched_ns:10L in
+  let interrupted = initial |> note 12L O.Worker_started
+      |> note 14L (O.Caller_observed (O.Call_failed O.Interrupted)) in
+  let late = interrupted |> note 20L (O.Capture_finished (O.Captured
+      {reason=O.User_input_ready;bytes_read=1;replies=Masc_tui_terminal_probe.observation probe})) in
+  check bool "late real worker result does not convert caller interruption" true
+    (late.caller_observed = Some (14L,O.Call_failed O.Interrupted));
+  check bool "worker's actual captured input remains distinct" true
+    (match late.capture_finished with Some (_,O.Captured {reason=O.User_input_ready;bytes_read=1;_}) -> true | _ -> false);
+  check bool "earlier missing worker result stays missing in immutable history" true
+    (Option.is_none interrupted.capture_finished);
+  check bool "worker result alone creates no main handoff" true (Option.is_none late.decoder_installed_ns);
+  check bool "capture bytes alone create no decoded or received input" true
+    (Option.is_none late.first_input_decoded && Option.is_none late.first_input_received)
+;;
+
+let test_startup_failure_and_unobserved_input_are_retained () =
+  let module O = Masc_tui_startup_observation in
+  let note at_ns event facts = fst (O.record facts ~at_ns event) in
+  let failed = O.create ~pid:8 ~dispatched_ns:10L |> note 12L O.Worker_started
+      |> note 15L (O.Capture_finished (O.Capture_failed {failure=O.Raised;bytes_read=5}))
+      |> note 18L (O.Caller_observed (O.Call_failed O.Raised)) in
+  let after,emitted = O.record failed ~at_ns:20L (O.First_input_received O.Key) in
+  check bool "missing decoder result is not fabricated by a receive observation" false emitted;
+  check bool "original failed sample remains intact" true (after == failed);
+  check bool "actual failure retains consumed count" true
+    (match after.capture_finished with Some (_,O.Capture_failed {failure=O.Raised;bytes_read=5}) -> true | _ -> false);
+  let absent = O.create ~pid:9 ~dispatched_ns:30L in
+  check bool "never-observed worker does not become a failed or successful worker" true
+    (Option.is_none absent.worker_started_ns && Option.is_none absent.capture_finished);
+  check bool "failed capture has no handoff or input result" true
+    (Option.is_none after.decoder_installed_ns && Option.is_none after.first_input_received)
+;;
+
+let test_startup_input_delivery_and_late_capabilities_are_independent () =
+  let module O = Masc_tui_startup_observation in
+  let module P = Masc_tui_terminal_probe in
+  let note at_ns event facts = fst (O.record facts ~at_ns event) in
+  let probe = fed ~palette_requested:true "q" in
+  let captured = P.observation probe in
+  let before = O.create ~pid:10 ~dispatched_ns:10L |> note 12L O.Worker_started
+      |> note 14L (O.Capture_finished (O.Captured {reason=O.User_input_ready;bytes_read=1;replies=captured}))
+      |> note 16L (O.Caller_observed O.Returned_to_caller) |> note 18L O.Decoder_installed
+      |> note 20L (O.Capabilities_applied captured)
+      |> note 22L (O.First_input_decoded O.Key) in
+  check bool "decoded input alone does not imply main reception" true
+    (Option.is_none before.first_input_received);
+  let received = before |> note 24L (O.First_input_received O.Key) in
+  String.iter (P.feed probe) (foreground ^ background ^ graphics_ok);
+  P.observe_cell_pixels probe (15,34);
+  let current = P.observation probe in
+  let after = received |> note 30L (O.Capabilities_applied current)
+      |> note 32L (O.First_input_decoded O.Pointer) |> note 34L (O.First_input_received O.Pointer) in
+  check bool "later gestures do not overwrite the original input pair" true
+    (after.first_input_decoded=Some (22L,O.Key) && after.first_input_received=Some (24L,O.Key));
+  check bool "late capabilities retain their actual application time and value" true
+    (match after.capabilities_applied with Some (30L,replies) -> replies == current | _ -> false);
+  check bool "capture never borrows late graphics or geometry" true
+    (Option.is_none captured.graphics && Option.is_none captured.cell_pixels);
+  check bool "actual late graphics and geometry remain available" true
+    (current.graphics=Some Masc_tui_graphics.Supported && current.cell_pixels=Some (15,34));
+  check bool "earlier input history remains independent of late replies" true
+    (before.first_input_decoded=Some (22L,O.Key) && Option.is_none before.first_input_received)
+;;
+
+let test_byte_cap_is_fixed () =
+  check int "64 KiB" (64 * 1024) Masc_tui_terminal_probe.max_bytes
+;;
+
+(* Actual pipe bytes exercise the production system-thread collector, ownership
+   handoff and normal decoder. No terminal/PTY, frame or timing threshold. *)
+let test_owned_probe_preserves_input_after_consumer_withdrawal () =
+  let module Reader = Masc_tui_input_reader in
+  let context=Eio_context.snapshot_state () and was_ready=Eio_guard.is_ready () in
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    if not was_ready then Eio_guard.disable ()) (fun () ->
+    Eio_main.run (fun env ->
+      let original_stdin=Unix.dup Unix.stdin in
+      let source,writer=Unix.pipe ~cloexec:true () in
+      Fun.protect ~finally:(fun () ->
+        Unix.dup2 original_stdin Unix.stdin;
+        Unix.close original_stdin;Unix.close source;Unix.close writer) (fun () ->
+        Unix.dup2 source Unix.stdin;
+        Eio.Switch.run (fun sw -> Eio_context.with_turn_switch sw (fun () ->
+          let clock=Eio.Stdenv.clock env in
+          Eio_context.set_clock clock;
+          Eio_guard.enable ();
+          let reader=Reader.create_input_reader () and observations=ref [] in
+          Reader.prepare_terminal_probe ~sw:(Some sw) ~clock:(Some clock) reader ~palette_requested:true;
+          Reader.install_terminal_probe_publisher reader
+            ~publish:(fun value -> observations := value :: !observations);
+          (* Withdraw only a consumer wait. The original root-owned producer
+             must still collect this original pipe, not prepare a replacement. *)
+          let exception Wait_withdrawn in
+          let entered,enter=Eio.Promise.create () in
+          (try
+             Eio.Fiber.first
+               (fun () -> Eio.Promise.resolve enter ();ignore (Reader.read_input reader ()))
+               (fun () -> Eio.Promise.await entered;raise Wait_withdrawn);
+             fail "consumer wait unexpectedly won"
+           with Wait_withdrawn -> ());
+          let text=foreground ^ "한" ^ background ^ graphics_ok ^ "\x1b[6;34;15t"
+            ^ "\x1b[200~원래 초안\r\n다음 줄\x1b[201~" in
+          let rec write offset =
+            if offset<String.length text then
+              let sent=Unix.write_substring writer text offset (String.length text-offset) in
+              if sent=0 then fail "fixture pipe accepted no bytes" else write (offset+sent) in
+          write 0;
+          (* Completion wakes the consumer, but buffer/replay ownership stays
+             with the original preparation until the loop explicitly installs. *)
+          check bool "pending consumer never decodes producer-owned pipe bytes" true
+            (Reader.read_input reader ()=None);
+          check bool "pending readiness cannot steal replay or buffer tail" true
+            (not (Reader.input_reader_has_ready_input reader) && not (Reader.input_byte_ready reader));
+          let rec install ()=match Reader.poll_terminal_probe reader with
+            | Reader.Probe_pending -> ignore (Reader.read_input reader ());install ()
+            | Probe_installed -> ()
+            | Probe_unchanged -> fail "original probe was not installed" in
+          install ();
+          let initial=match !observations with
+            | value::_ -> value | [] -> fail "original capability observation missing" in
+          let rec next_user ()=match Reader.read_input reader () with
+            | None | Some (Reader.Graphics_reply _) -> next_user ()
+            | Some ((Reader.Key _ | Reader.Pasted _) as event) -> event
+            | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
+              fail "fixture produced a mouse event" in
+          (match next_user () with
+           | Reader.Key text -> check string "original UTF-8 input survives handoff" "한" text
+           | Pasted _ | Graphics_reply _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _ ->
+             fail "original UTF-8 key missing");
+          (match next_user () with
+           | Reader.Pasted paste -> check string "original bracketed paste survives late replies"
+               "원래 초안\n다음 줄" paste.Masc_tui_paste.text
+           | Key _ | Graphics_reply _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _ ->
+             fail "original bracketed paste missing");
+          let latest=match !observations with value::_ -> value | [] -> fail "late replies missing" in
+          check bool "late replies update original capability owner" true
+            (Option.is_some latest.palette && latest.graphics=Some Masc_tui_graphics.Supported
+             && latest.cell_pixels=Some (15,34));
+          check bool "retained initial observation stays immutable" true
+            (Option.is_none initial.palette && Option.is_none initial.cell_pixels)
+        )))))
+;;
+
+let () =
+  run "tui_terminal_probe"
+    [ ( "actual owned input"
+      , [test_case "consumer withdrawal preserves actual probe, UTF-8, paste and late replies"
+          `Quick test_owned_probe_preserves_input_after_consumer_withdrawal] )
+    ; ( "query"
+      , [ test_case "NO_COLOR skips only palette" `Quick
+            test_query_can_skip_only_palette
+        ; test_case "the byte cap is fixed" `Quick test_byte_cap_is_fixed
+        ] )
+    ; ( "cell size"
+      , [ test_case "a reply is read width last" `Quick
+            test_a_cell_size_reply_is_read_width_last
+        ; test_case "PageDown is not eaten" `Quick
+            test_page_down_is_not_eaten_by_the_cell_size_wait
+        ; test_case "a malformed reply is not a size" `Quick
+            test_a_malformed_cell_size_is_not_a_size
+        ] )
+    ; ( "palette"
+      , [ test_case "both slots are required" `Quick
+            test_palette_requires_both_slots
+        ; test_case "malformed stays unknown" `Quick
+            test_malformed_palette_stays_unknown_and_is_not_input
+        ; test_case "a palette slot answer is read, not typed" `Quick
+            test_a_palette_slot_answer_is_read_and_not_typed
+        ; test_case "rgba validates alpha" `Quick
+            test_rgba_requires_and_ignores_a_valid_alpha
+        ; test_case "process authority preserves None" `Quick
+            test_process_palette_preserves_none
+        ] )
+    ; ( "theme mode"
+      , [ test_case "a reply is read and not typed" `Quick
+            test_a_theme_mode_reply_is_read_and_not_typed
+        ; test_case "other private sequences replay whole" `Quick
+            test_other_private_sequences_replay_whole
+        ; test_case "an unfinished one is not swallowed" `Quick
+            test_an_unfinished_private_sequence_is_not_swallowed
+        ; test_case "a pasted reply stays pasted text" `Quick
+            test_a_pasted_theme_reply_stays_pasted_text
+        ] )
+    ; ( "replay"
+      , [ test_case "ASCII UTF-8 and ESC replay exactly" `Quick
+            test_ascii_utf8_and_escape_bytes_replay_exactly
+        ; test_case "bracketed paste is opaque" `Quick
+            test_bracketed_paste_is_opaque
+        ; test_case "unknown and incomplete sequences replay" `Quick
+            test_unknown_and_incomplete_sequences_replay
+        ; test_case "NO_COLOR does not claim OSC" `Quick
+            test_no_color_does_not_claim_osc_replies
+        ] )
+    ; ( "startup observation"
+      , [ test_case "caller interruption remains distinct from late worker completion" `Quick
+            test_startup_caller_interrupt_does_not_replace_late_worker_facts
+        ; test_case "failed and unobserved samples retain missing input" `Quick
+            test_startup_failure_and_unobserved_input_are_retained
+        ; test_case "input delivery remains independent of late capabilities" `Quick
+            test_startup_input_delivery_and_late_capabilities_are_independent
+        ] )
+    ; ( "stream"
+      , [ test_case "early key keeps split replies, UTF-8 and opaque paste" `Quick
+            test_early_key_handoff_keeps_split_replies_and_paste
+        ; test_case "late normal replies keep their original observation owner" `Quick
+            test_late_decoded_replies_keep_the_original_observation_owner
+        ; test_case "NO_COLOR handoff retains refusal and late geometry" `Quick
+            test_no_color_handoff_retains_refusal_and_late_geometry
+        ; test_case "every requested answer completes" `Quick
+            test_stream_finishes_only_after_every_answer
+        ; test_case "partial OSC continues after startup" `Quick
+            test_partial_osc_continues_in_the_normal_reader
+        ; test_case "graphics refusal completes" `Quick
+            test_graphics_refusal_is_a_complete_answer
+        ] )
+    ; ( "held sequence"
+      , [ test_case "a held paste head is reported and discarded" `Quick
+            test_a_held_paste_head_is_reported_and_discarded
+        ; test_case "a kept paste head replays into later keys" `Quick
+            test_a_kept_paste_head_replays_into_later_keys
+        ; test_case "a started paste is not a hold" `Quick
+            test_a_started_paste_is_not_a_hold
+        ; test_case "hold states are reported" `Quick
+            test_hold_states_are_reported
+        ; test_case "a discarded window hold reads later bytes as keys" `Quick
+            test_a_discarded_window_hold_reads_later_bytes_as_keys
+        ; test_case "a waiting tail resolves the hold" `Quick
+            test_a_waiting_tail_resolves_the_hold
+        ] )
+    ]
+;;

@@ -1,0 +1,3029 @@
+open Masc
+
+module Candidate = Keeper_board_attention_candidate
+module Exact_output = Agent_core.Exact_output
+module Exact_flow = Keeper_board_attention_exact_flow
+module Fixture = Exact_output_fixture
+module Judgment = Keeper_board_attention_judgment
+module Partition = Keeper_board_attention_partition
+module Worker = Keeper_board_attention_worker
+
+type callback_event =
+  | Dispatch of Exact_flow.attempt_provenance
+  | Advance of Exact_flow.advance_source * Exact_flow.candidate_visit
+
+let with_prompt_registry f =
+  Fun.protect
+    ~finally:Prompt_registry.clear
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_defaults.init ();
+      f ())
+;;
+
+let run_eio f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  f
+    ~sw
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let with_temp_base prefix f =
+  let base_path = Filename.temp_dir prefix "" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
+;;
+
+let prepare_exact ~net candidate =
+  let keeper_name =
+    "board-attention-exact-test-" ^ candidate.Candidate.candidate_id
+  in
+  let base_path = "/tmp/masc-board-attention-exact-flow" in
+  (match Keeper_registry.get ~base_path keeper_name with
+   | Some _ -> ()
+   | None ->
+     let meta =
+       Masc_test_deps.meta_of_json_fixture
+       (`Assoc
+          [ "name", `String keeper_name ])
+       |> Result.get_ok
+     in
+     ignore (Keeper_registry.register_offline ~base_path keeper_name meta));
+  Exact_flow.prepare
+    ~base_path
+    ~keeper_name
+    ~net
+    candidate
+;;
+
+let signal post_id : Board_dispatch.board_signal =
+  { kind = Board_dispatch.Board_post_created
+  ; post_id
+  ; author = "external-author"
+  ; title = "Board update"
+  ; content = "Persisted Board evidence"
+  ; hearth = Some "hearth-1"
+  ; updated_at = Some 42.0
+  }
+;;
+
+let candidate post_id : Candidate.candidate =
+  let signal = signal post_id in
+  let keeper_name = "alpha" in
+  let candidate_id = Candidate.candidate_id_of_signal ~keeper_name signal in
+  { candidate_id
+  ; keeper_name
+  ; signal
+  ; recorded_at = 1.0
+  ; keeper_context =
+      `Assoc
+        [ "lane_keeper_name", `String keeper_name
+        ; "board_interests", `List [ `String "runtime" ]
+        ]
+  ; status = Candidate.Pending { last_delivery_failure = None }
+  }
+;;
+
+let judgment_output ~candidate_id =
+  `Assoc
+    [ ( "verdicts"
+      , `List
+          [ `Assoc
+              [ "candidate_id", `String candidate_id
+              ; "decision", `String "relevant"
+              ; "rationale", `String "The persisted Board evidence requires attention."
+              ]
+          ] )
+    ]
+;;
+
+let target id base_url : Fixture.target_fixture = { id; base_url }
+
+let reserved_non_listening_loopback_base_url ~sw =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Eio.Switch.on_release sw (fun () -> Unix.close socket);
+  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  match Unix.getsockname socket with
+  | Unix.ADDR_INET (_, port) -> Printf.sprintf "http://127.0.0.1:%d" port
+  | Unix.ADDR_UNIX _ -> assert false
+;;
+
+let publish_lane ?(requires_api_keys = []) ?(cli_slot_ids = []) fixtures =
+  let snapshot =
+    Fixture.resolver_snapshot
+      ~requires_api_keys
+      ~supports_response_format_json:true
+      ~supports_structured_output:false
+      ~source:"Board attention exact-flow conformance"
+      fixtures
+  in
+  ignore
+    (Fixture.publish_registry
+       ~cli_slot_ids
+       ~lane_id:Exact_flow.lane_id
+       ~slot_ids:(List.map (fun (fixture : Fixture.target_fixture) -> fixture.id) fixtures)
+       snapshot
+      : Runtime_exact_output_registry.t)
+;;
+
+let check_same_provenance label
+      (expected : Exact_flow.attempt_provenance)
+      (actual : Exact_flow.attempt_provenance)
+  =
+  Alcotest.(check string) (label ^ " slot") expected.slot_id actual.slot_id;
+  Alcotest.(check string) (label ^ " call") expected.call_id actual.call_id;
+  Alcotest.(check string)
+    (label ^ " plan fingerprint")
+    expected.plan_fingerprint
+    actual.plan_fingerprint;
+  Alcotest.(check string)
+    (label ^ " request hash")
+    expected.request_body_sha256
+    actual.request_body_sha256
+;;
+
+let partition_history ~base_path ~keeper_name =
+  Partition.ledger_path ~base_path ~keeper_name
+  |> Fs_compat.load_file
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> not (String.equal line ""))
+  |> List.map (fun line ->
+    match Partition.of_yojson (Yojson.Safe.from_string line) with
+    | Ok partition -> partition
+    | Error detail ->
+      Alcotest.failf "partition history decode failed: %s" detail)
+;;
+
+let test_explicit_lane_failover_and_success_provenance () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      with_temp_base "board-attention-production-chain" @@ fun base_path ->
+      let candidate = candidate "board-attention-production-chain" in
+      (match Candidate.record ~base_path candidate with
+       | Candidate.Recorded _ -> ()
+       | Candidate.Duplicate _ -> Alcotest.fail "fresh candidate duplicated"
+       | Candidate.Record_error detail -> Alcotest.fail detail);
+      let meta =
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+            [ "name", `String candidate.keeper_name
+            ; "trace_id", `String "trace-board-production-chain"
+            ])
+        |> Result.get_ok
+      in
+      ignore
+        (Keeper_registry.register_offline
+           ~base_path
+           candidate.keeper_name
+           meta);
+      let response =
+        Fixture.openai_response
+          (judgment_output ~candidate_id:candidate.candidate_id)
+      in
+      let rejected_server =
+        Fixture.start_server ~sw ~net ~clock (Fixture.Reply response)
+      in
+      let success_server =
+        Fixture.start_server ~sw ~net ~clock (Fixture.Reply response)
+      in
+      let first =
+        target
+          "board-attention-unreachable"
+          (reserved_non_listening_loopback_base_url ~sw)
+      in
+      let second =
+        target "board-attention-missing-credential" rejected_server.base_url
+      in
+      let third = target "board-attention-success" success_server.base_url in
+      publish_lane
+        ~requires_api_keys:[ second.id, true ]
+        [ first; second; third ];
+      (match
+         Worker.For_testing.process_next_exact
+           ~clock
+           ~net:(Some net)
+           ~now:(fun () -> 3.0)
+           ~worker_epoch:(Partition.Worker_epoch.generate ())
+           ~base_path
+           ~keeper_name:candidate.keeper_name
+       with
+       | Ok (Worker.Judgment_completed { candidate_id; _ })
+         when String.equal candidate_id candidate.candidate_id -> ()
+       | Ok _ -> Alcotest.fail "production exact flow did not complete"
+       | Error detail -> Alcotest.fail detail);
+      Alcotest.(check int)
+        "B rejected before HTTP"
+        0
+        (Fixture.post_count rejected_server);
+      Alcotest.(check int)
+        "C dispatched once"
+        1
+        (Fixture.post_count success_server);
+      let relevant =
+        partition_history ~base_path ~keeper_name:candidate.keeper_name
+        |> List.filter_map (fun partition ->
+          match partition.Partition.state with
+          | Partition.Running { progress = Partition.Bound proof; _ } ->
+            Some (`Bound proof)
+          | Partition.Running
+              { progress =
+                  Partition.Advancing
+                    { execution_anchor; last_from; next }
+              ; _
+              } ->
+            Some (`Advance (execution_anchor, last_from, next))
+          | Partition.Completed { item = { judgment; _ }; _ } ->
+            Some (`Completed judgment)
+          | _ -> None)
+      in
+      match relevant with
+      | [ `Bound first_bound
+        ; `Advance (Some first_anchor, None, rejected_visit)
+        ; `Advance (Some retained_anchor, Some rejected, success_visit)
+        ; `Bound third_bound
+        ; `Completed judgment
+        ] ->
+        Alcotest.(check bool)
+          "A exact execution anchor persisted"
+          true
+          (first_bound = first_anchor
+           && first_anchor = retained_anchor
+           && String.equal first_bound.slot_id first.id);
+        Alcotest.(check bool)
+          "B rejection identity persisted before C"
+          true
+          (rejected = rejected_visit
+           && String.equal rejected.slot_id second.id
+           && String.equal success_visit.slot_id third.id);
+        Alcotest.(check bool)
+          "C bound and completed with exact provenance"
+          true
+          (String.equal third_bound.slot_id third.id
+           && String.equal judgment.slot_id third_bound.slot_id
+           &&
+           match judgment.source with
+           | Candidate.Cli_lane_slot | Candidate.Vendor_system_one _ -> false
+           | Candidate.Exact_attempt attempt ->
+             String.equal attempt.call_id third_bound.call_id
+             && String.equal attempt.plan_fingerprint third_bound.plan_fingerprint
+             && String.equal
+                  attempt.request_body_sha256
+                  third_bound.request_body_sha256)
+      | _ ->
+        Alcotest.fail
+          "expected Bound(A), Advancing(A->B), Advancing(B->C), Bound(C), Completed(C)"))
+;;
+
+let test_domain_candidate_id_mismatch_advances_to_declared_successor () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-domain-mismatch" in
+      let invalid =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:"different-candidate")))
+      in
+      let successor =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      let first = target "board-attention-domain-invalid" invalid.base_url in
+      let second = target "board-attention-domain-successor" successor.base_url in
+      publish_lane [ first; second ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "valid domain-mismatch fixture was not admitted"
+      in
+      let dispatches = ref [] in
+      let before_dispatch provenance : (unit, string) result =
+        dispatches := provenance :: !dispatches;
+        Ok ()
+      in
+      let advances = ref [] in
+      let before_advance
+            ~(failed : Exact_flow.advance_source)
+            ~(next : Exact_flow.candidate_visit)
+        : (unit, string) result
+        =
+        let failed_slot_id =
+          match failed with
+          | Exact_flow.Executed_failure provenance -> provenance.slot_id
+          | Exact_flow.Predispatch_rejection visit -> visit.slot_id
+        in
+        advances := (failed_slot_id, next.slot_id) :: !advances;
+        Ok ()
+      in
+      (match
+         Exact_flow.execute
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch
+           ~before_advance
+           prepared
+       with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "success came from declared successor"
+           second.id
+           judgment.slot_id
+       | Error _ -> Alcotest.fail "declared semantic successor did not complete");
+      Alcotest.(check int) "domain-invalid slot dispatched once" 1 (Fixture.post_count invalid);
+      Alcotest.(check int) "declared successor dispatched once" 1 (Fixture.post_count successor);
+      Alcotest.(check (list (pair string string)))
+        "successor bind records one local A-to-B journal transition"
+        [ first.id, second.id ]
+        (List.rev !advances);
+      match List.rev !dispatches with
+      | [ first_provenance; second_provenance ] ->
+        Alcotest.(check string)
+          "first declared slot reached dispatch first"
+          first.id
+          first_provenance.slot_id;
+        Alcotest.(check string)
+          "declared successor reached dispatch second"
+          second.id
+          second_provenance.slot_id
+      | _ -> Alcotest.fail "semantic failover did not preserve declared dispatch order"))
+;;
+
+let test_keeper_preference_reorders_the_board_lane () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      with_temp_base "board-attention-per-keeper-preference" @@ fun base_path ->
+      let candidate = candidate "board-attention-per-keeper-preference" in
+      let response =
+        Fixture.openai_response
+          (judgment_output ~candidate_id:candidate.candidate_id)
+      in
+      let first = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
+      let preferred =
+        Fixture.start_server ~sw ~net ~clock (Fixture.Reply response)
+      in
+      publish_lane
+        [ target "board-default" first.base_url
+        ; target "board-preferred" preferred.base_url
+        ];
+      (match
+         Keeper_exact_lane_preference.set
+           (Workspace.default_config base_path)
+           ~actor:"test"
+           ~keeper_name:candidate.keeper_name
+           ~lane_id:Exact_flow.lane_id
+           (Some "board-preferred")
+       with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      let prepared =
+        match
+          Exact_flow.prepare
+            ~base_path
+            ~keeper_name:candidate.keeper_name
+            ~net:(Some net)
+            candidate
+        with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "preferred Board lane did not prepare"
+      in
+      let result =
+        Exact_flow.execute
+          ~clock
+          ~callback_error_to_string:Fun.id
+          ~before_dispatch:(fun _ -> Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          prepared
+      in
+      (match result with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "preferred Board slot selected"
+           "board-preferred"
+           judgment.slot_id
+       | Error _ -> Alcotest.fail "preferred Board exact flow failed");
+      Alcotest.(check int) "default Board slot not called" 0 (Fixture.post_count first);
+      Alcotest.(check int)
+        "preferred Board slot called once"
+        1
+        (Fixture.post_count preferred)))
+;;
+
+let test_missing_lane_is_setup_error_without_dispatch () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-missing-lane" in
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      let fixture = target "board-attention-unassigned" server.base_url in
+      let snapshot =
+        Fixture.resolver_snapshot
+          ~supports_response_format_json:true
+          ~supports_structured_output:false
+          ~source:"Board attention missing-lane conformance"
+          [ fixture ]
+      in
+      (match Runtime_exact_output_registry.publish ~lanes:[] snapshot with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.failf
+           "missing-lane registry fixture did not publish: %s"
+           (Runtime_exact_output_registry.publication_error_to_string error));
+      (match prepare_exact ~net:(Some net) candidate with
+       | Error Exact_flow.Lane_unavailable -> ()
+       | Ok _ -> Alcotest.fail "missing Board-attention lane was synthesized"
+       | Error _ -> Alcotest.fail "missing lane produced the wrong setup error");
+      Alcotest.(check int) "missing lane performs no provider POST" 0 (Fixture.post_count server)))
+;;
+
+let test_prepare_resumable_status_gate () =
+  let pending = candidate "board-attention-gate" in
+  let quarantine : Candidate.quarantine =
+    { quarantine_id = "ba-quarantine-gate"
+    ; partition_id = "ba-root-gate"
+    ; partition_generation =
+        Masc.Keeper_board_attention_partition_generation.initial
+    ; failure_category = Candidate.Unexpected_worker_failure
+    ; attempt_provenance = None
+    ; quarantined_at = 2.0
+    ; prior_status =
+        Candidate.Resumable_pending { last_delivery_failure = None }
+    }
+  in
+  let quarantined phase =
+    { pending with status = Candidate.Quarantine { quarantine; phase } }
+  in
+  let expect_candidate_not_pending label candidate =
+    match prepare_exact ~net:None candidate with
+    | Error Exact_flow.Candidate_not_pending -> ()
+    | Error _ -> Alcotest.failf "%s returned a different setup error" label
+    | Ok _ -> Alcotest.failf "%s was admitted before requeue authorization" label
+  in
+  let expect_network_unavailable label candidate =
+    match prepare_exact ~net:None candidate with
+    | Error Exact_flow.Network_unavailable -> ()
+    | Error _ -> Alcotest.failf "%s did not reach the network gate" label
+    | Ok _ -> Alcotest.failf "%s unexpectedly prepared without a network" label
+  in
+  expect_candidate_not_pending
+    "quarantined candidate"
+    (quarantined Candidate.Quarantined);
+  expect_candidate_not_pending
+    "requeue-requested candidate"
+    (quarantined
+       (Candidate.Requeue_requested
+          { requested_at = 3.0; requested_by = "operator-test" }));
+  expect_network_unavailable "normal pending candidate" pending;
+  expect_network_unavailable
+    "authorized requeued candidate"
+    (quarantined
+       (Candidate.Requeued { requeued_at = 4.0; requested_by = "operator-test" }))
+;;
+
+
+
+(* --- cli tail (RFC cli-runtimes-as-lane-slots) --------------------------- *)
+
+let contains_substring ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  n = 0 || at 0
+;;
+
+(* Records what the walk handed the client so the test can assert the schema
+   actually travelled, not just that an answer came back. *)
+let recording_runner reply =
+  let seen = ref None in
+  let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt =
+    seen := Some (runtime_id, output_schema, prompt);
+    reply runtime_id
+  in
+  runner, seen
+;;
+
+let prepared_with_cli_tail ~net ~cli_slot_ids candidate =
+  let server_url = "http://127.0.0.1:1" in
+  publish_lane ~cli_slot_ids [ target "board-attention-primary" server_url ];
+  ignore net;
+  match prepare_exact ~net candidate with
+  | Ok prepared -> prepared
+  | Error _ -> Alcotest.fail "board attention flow did not prepare"
+;;
+
+let openai_text_response text =
+  let encoded_content = Yojson.Safe.to_string (`String text) in
+  Printf.sprintf
+    {|{"id":"masc-conformance","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+    encoded_content
+;;
+
+type callback_durability_fault = Dispatch_unconfirmed | Advance_unconfirmed | No_fault
+
+let test_worker_callback_durability_blocks_http fault () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      with_temp_base "board-attention-callback-durability" @@ fun base_path ->
+      let candidate = candidate "board-attention-callback-durability" in
+      (match Candidate.record ~base_path candidate with
+       | Candidate.Recorded _ -> ()
+       | Candidate.Duplicate _ -> Alcotest.fail "fresh candidate duplicated"
+       | Candidate.Record_error detail -> Alcotest.fail detail);
+      let meta = Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String candidate.keeper_name;
+                   "trace_id", `String "trace-callback-durability"])
+        |> Result.get_ok in
+      ignore (Keeper_registry.register_offline ~base_path candidate.keeper_name meta);
+      let first = Fixture.start_server ~sw ~net ~clock
+          (Fixture.Reply (openai_text_response "not json")) in
+      let successor = Fixture.start_server ~sw ~net ~clock
+          (Fixture.Reply (Fixture.openai_response
+             (judgment_output ~candidate_id:candidate.candidate_id))) in
+      let first_target = target "durability-first" first.base_url in
+      let next_target = target "durability-successor" successor.base_url in
+      publish_lane [first_target; next_target];
+      let injected = ref 0 in
+      let map_write_outcome callback outcome =
+        (match outcome with
+         | Partition.Fsync_completed -> ()
+         | Partition.Visible_sync_unconfirmed detail -> Alcotest.fail detail);
+        let inject = match fault, callback with
+          | Dispatch_unconfirmed, Worker.For_testing.Before_dispatch
+          | Advance_unconfirmed, Worker.For_testing.Before_advance -> true
+          | Dispatch_unconfirmed, Worker.For_testing.Before_advance
+          | Advance_unconfirmed, Worker.For_testing.Before_dispatch
+          | No_fault, Worker.For_testing.Before_dispatch
+          | No_fault, Worker.For_testing.Before_advance -> false in
+        if inject then (
+          incr injected;
+          (* The write and selected provenance are real. Only the outcome
+             observed by the callback consumer is a semantic fault. *)
+          let history = partition_history ~base_path ~keeper_name:candidate.keeper_name in
+          (match List.rev history, callback with
+           | {Partition.state=Partition.Running {progress=Partition.Bound bound; _}; _}::_,
+             Worker.For_testing.Before_dispatch ->
+             Alcotest.(check string) "binding persisted before outcome fault"
+               first_target.id bound.slot_id
+           | {Partition.state=Partition.Running
+                {progress=Partition.Advancing {next; execution_anchor=Some anchor; _}; _}; _}::_,
+             Worker.For_testing.Before_advance ->
+             Alcotest.(check string) "failed binding retained" first_target.id anchor.slot_id;
+             Alcotest.(check string) "selected successor persisted" next_target.id next.slot_id
+           | _ -> Alcotest.fail "outcome injection preceded its actual partition write");
+          Partition.Visible_sync_unconfirmed "injected callback durability uncertainty")
+        else outcome
+      in
+      let result = Worker.For_testing.process_next_exact_with_write_outcome
+          ~map_write_outcome ~clock ~net:(Some net) ~now:(fun () -> 3.)
+          ~worker_epoch:(Partition.Worker_epoch.generate ())
+          ~base_path ~keeper_name:candidate.keeper_name in
+      let history = partition_history ~base_path ~keeper_name:candidate.keeper_name in
+      (match fault, result, List.rev history with
+       | No_fault, Ok (Worker.Judgment_completed _),
+         {Partition.state=Partition.Completed _; _}::_ ->
+         Alcotest.(check int) "control injects no fault" 0 !injected
+       | (Dispatch_unconfirmed | Advance_unconfirmed),
+         Ok (Worker.Partition_blocked {reason=Partition.Exact_execution_quarantined progress; _}),
+         {Partition.state=Partition.Blocked
+            {reason=Partition.Exact_execution_quarantined persisted; _}; _}::_ ->
+         Alcotest.(check bool) "blocked progress survives storage" true (progress=persisted);
+         (match fault, progress with
+          | Dispatch_unconfirmed, Partition.Bound bound ->
+            Alcotest.(check string) "blocked binding is exact" first_target.id bound.slot_id
+          | Advance_unconfirmed, Partition.Advancing {next; _} ->
+            Alcotest.(check string) "blocked advance is exact" next_target.id next.slot_id
+          | _ -> Alcotest.fail "wrong durable callback progress quarantined");
+         Alcotest.(check int) "only selected callback fault injected" 1 !injected;
+         let candidates = Candidate.load_candidates ~base_path ~keeper_name:candidate.keeper_name
+           |> Result.get_ok in
+         (match candidates with
+          | [{Candidate.status=Candidate.Quarantine {phase=Candidate.Quarantined; _}; _}] -> ()
+          | _ -> Alcotest.fail "uncertain callback did not retain candidate quarantine");
+         let queue = Keeper_event_queue_persistence.load_result
+             ~base_path ~keeper_name:candidate.keeper_name |> Result.get_ok in
+         Alcotest.(check int) "no owner delivery after uncertainty" 0 (Keeper_event_queue.length queue);
+         (match Worker.For_testing.process_next_exact ~clock ~net:(Some net)
+                  ~now:(fun () -> 4.) ~worker_epoch:(Partition.Worker_epoch.generate ())
+                  ~base_path ~keeper_name:candidate.keeper_name with
+          | Ok Worker.Idle -> ()
+          | _ -> Alcotest.fail "blocked callback was dispatched again")
+       | _, Error detail, _ -> Alcotest.fail detail
+       | _ -> Alcotest.fail "worker did not retain the expected callback disposition");
+      let first_count, next_count = match fault with
+        | Dispatch_unconfirmed -> 0,0
+        | Advance_unconfirmed -> 1,0
+        | No_fault -> 1,1 in
+      Alcotest.(check int) "actual first peer request count" first_count (Fixture.post_count first);
+      Alcotest.(check int) "actual successor peer request count" next_count (Fixture.post_count successor)))
+;;
+
+let board_attention_run_ids () =
+  Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+  |> List.filter_map (fun (run : Exact_lane_run_registry.run) ->
+    if run.lane = Exact_lane_run_registry.Board_attention
+    then Some run.run_id
+    else None)
+;;
+
+let new_board_attention_run ~before =
+  Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+  |> List.find_opt (fun (run : Exact_lane_run_registry.run) ->
+    run.lane = Exact_lane_run_registry.Board_attention
+    && not (List.mem run.run_id before))
+  |> function
+  | Some run -> run
+  | None -> Alcotest.fail "board attention exact run was not recorded"
+;;
+
+let new_board_attention_run_full ~before =
+  let summary = new_board_attention_run ~before in
+  match
+    Exact_lane_run_registry.get
+      (Exact_lane_run_registry.global ())
+      ~run_id:summary.run_id
+  with
+  | Some run -> run
+  | None -> Alcotest.fail "board attention exact run payload was not retained"
+;;
+
+let check_cli_run_selected ~before ~slot_id =
+  match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+  | Exact_lane_run_registry.Completed
+      { outcome = Exact_lane_run_registry.Succeeded; selected_slot; _ }
+  | Exact_lane_run_registry.Completion_persistence_failed
+      { intended_outcome = Exact_lane_run_registry.Succeeded; selected_slot; _ } ->
+    Alcotest.(check (option string))
+      "the exact run names the CLI slot that answered"
+      (Some slot_id)
+      selected_slot
+  | Exact_lane_run_registry.Running
+  | Exact_lane_run_registry.Completed _
+  | Exact_lane_run_registry.Completion_persistence_failed _ ->
+    Alcotest.fail "the mixed exact run did not close as a CLI success"
+;;
+
+let cli_success_runner candidate calls =
+  fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+    incr calls;
+    Ok
+      (Yojson.Safe.to_string
+         (judgment_output ~candidate_id:candidate.Candidate.candidate_id))
+;;
+
+let test_mixed_semantic_exhaustion_walks_cli_tail () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-semantic" in
+      let rejected =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:"another-candidate")))
+      in
+      let http = target "board-attention-semantic-http" rejected.base_url in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [ http ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed semantic lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let dispatches = ref [] in
+      let cli_calls = ref 0 in
+      let result =
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~callback_error_to_string:Fun.id
+          ~before_dispatch:(fun provenance ->
+            dispatches := provenance :: !dispatches;
+            Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ ->
+            Alcotest.fail "semantic rejection must not fabricate an HTTP advance callback")
+          prepared
+      in
+      (match result with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "CLI answered after semantic exhaustion"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id
+       | Error _ -> Alcotest.fail "semantic exhaustion did not reach the CLI tail");
+      Alcotest.(check int) "HTTP candidate dispatched once" 1 (Fixture.post_count rejected);
+      Alcotest.(check int) "CLI candidate dispatched once" 1 !cli_calls;
+      (match !dispatches with
+       | [ provenance ] ->
+         Alcotest.(check string)
+           "the prior HTTP receipt remains observable"
+           http.id
+           provenance.slot_id
+       | _ -> Alcotest.fail "mixed semantic flow lost its HTTP dispatch evidence");
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
+;;
+
+let test_mixed_semantic_rejection_and_cli_failure_keep_both_causes () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-semantic-cli-failure" in
+      let rejected =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:"another-candidate")))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-semantic-cli-failure-http" rejected.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed semantic failure lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
+      in
+      (match
+         Exact_flow.execute
+           ~cli_runner:runner
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+           prepared
+       with
+       | Error
+           (Exact_flow.Cli_slots_exhausted
+              { prior_error = Some (Exact_flow.Domain_output_invalid detail)
+              ; failures = [ _ ]
+              }) ->
+         Alcotest.(check bool)
+           "typed prior error keeps the semantic rejection"
+           true
+           (contains_substring ~needle:"identity mismatch" detail)
+       | Error _ -> Alcotest.fail "mixed failure lost its typed prior rejection"
+       | Ok _ -> Alcotest.fail "failed semantic and CLI walks cannot judge");
+      match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+      | Exact_lane_run_registry.Completed
+          { outcome = Exact_lane_run_registry.Failed { detail; _ }; _ } ->
+        Alcotest.(check bool)
+          "durable detail keeps the semantic rejection class"
+          true
+          (contains_substring ~needle:"invalid_domain_output" detail);
+        Alcotest.(check bool)
+          "durable detail keeps the semantic rejection payload"
+          true
+          (contains_substring ~needle:"identity mismatch" detail);
+        Alcotest.(check bool)
+          "durable detail keeps the CLI failure"
+          true
+          (contains_substring ~needle:"client unavailable" detail)
+      | Exact_lane_run_registry.Running
+      | Exact_lane_run_registry.Completed _
+      | Exact_lane_run_registry.Completion_persistence_failed _ ->
+        Alcotest.fail "mixed failure did not close with durable detail")))
+;;
+
+let test_mixed_advanceable_final_failure_walks_cli_tail () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-invalid-json" in
+      let invalid =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (openai_text_response "not json"))
+      in
+      let http = target "board-attention-invalid-json-http" invalid.base_url in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [ http ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed invalid-JSON lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let dispatches = ref [] in
+      let cli_calls = ref 0 in
+      let result =
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~callback_error_to_string:Fun.id
+          ~before_dispatch:(fun provenance ->
+            dispatches := provenance :: !dispatches;
+            Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ ->
+            Alcotest.fail "the exhausted final HTTP candidate has no HTTP successor")
+          prepared
+      in
+      (match result with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "CLI answered after advanceable execution failure"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id
+       | Error _ -> Alcotest.fail "advanceable final failure did not reach the CLI tail");
+      Alcotest.(check int) "invalid HTTP candidate dispatched once" 1 (Fixture.post_count invalid);
+      Alcotest.(check int) "CLI candidate dispatched once" 1 !cli_calls;
+      (match !dispatches with
+       | [ provenance ] ->
+         Alcotest.(check string) "HTTP evidence keeps its slot" http.id provenance.slot_id
+       | _ -> Alcotest.fail "advanceable failure lost its HTTP dispatch evidence");
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
+;;
+
+(* A request that went out and got no answer hands the partition to the CLI
+   tail like any other provider failure (RFC-exact-lane-walks-one-slot-list
+   Q1): the exact request carries no tools, so the CLI slot cannot double an
+   effect. *)
+let test_mixed_unknown_result_walks_cli_tail () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-unknown-result" in
+      let aborted = Fixture.start_server ~sw ~net ~clock Fixture.Abort_after_request in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-unknown-result-http" aborted.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed unknown-result lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let cli_calls = ref 0 in
+      (match
+         Exact_flow.execute
+           ~cli_runner:(cli_success_runner candidate cli_calls)
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ ->
+             Alcotest.fail "the aborted final HTTP candidate has no HTTP successor")
+           prepared
+       with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "CLI answered after the unanswered HTTP request"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id
+       | Error _ -> Alcotest.fail "an unanswered HTTP request did not reach the CLI tail");
+      Alcotest.(check int) "aborted HTTP candidate dispatched once" 1
+        (Fixture.post_count aborted);
+      Alcotest.(check int) "CLI candidate dispatched once" 1 !cli_calls;
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
+;;
+
+let test_mixed_before_advance_failure_stops_before_cli () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-persistence" in
+      let invalid =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (openai_text_response "not json"))
+      in
+      let successor =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-persistence-first" invalid.base_url
+        ; target "board-attention-persistence-second" successor.base_url
+        ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed persistence lane did not prepare"
+      in
+      let cli_calls = ref 0 in
+      match
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~callback_error_to_string:Fun.id
+          ~before_dispatch:(fun _ -> Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ -> Error "disk")
+          prepared
+      with
+      | Error (Exact_flow.Before_advance_persistence_failed { cause; _ }) ->
+        Alcotest.(check string) "persistence cause retained" "disk" cause;
+        Alcotest.(check int) "persistence failure does not dispatch CLI" 0 !cli_calls;
+        Alcotest.(check int) "successor is not dispatched" 0 (Fixture.post_count successor)
+      | Error _ -> Alcotest.fail "before-advance failure changed category"
+      | Ok _ -> Alcotest.fail "before-advance failure must remain terminal")))
+;;
+
+let test_mixed_before_dispatch_failure_stops_before_cli () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-bind-persistence" in
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-bind-persistence-http" server.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed bind-persistence lane did not prepare"
+      in
+      let cli_calls = ref 0 in
+      match
+        Exact_flow.execute
+          ~cli_runner:(cli_success_runner candidate cli_calls)
+          ~clock
+          ~callback_error_to_string:Fun.id
+          ~before_dispatch:(fun _ -> Error "disk")
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          prepared
+      with
+      | Error (Exact_flow.Before_dispatch_persistence_failed { cause; _ }) ->
+        Alcotest.(check string) "bind persistence cause retained" "disk" cause;
+        Alcotest.(check int) "bind persistence failure does not dispatch HTTP" 0
+          (Fixture.post_count server);
+        Alcotest.(check int) "bind persistence failure does not dispatch CLI" 0 !cli_calls
+      | Error _ -> Alcotest.fail "before-dispatch failure changed category"
+      | Ok _ -> Alcotest.fail "before-dispatch failure must remain terminal")))
+;;
+
+let test_mixed_cli_failure_keeps_http_evidence () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-cli-failure" in
+      let invalid =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (openai_text_response "not json"))
+      in
+      let http = target "board-attention-cli-failure-http" invalid.base_url in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [ http ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed CLI-failure lane did not prepare"
+      in
+      let cli_calls = ref 0 in
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        incr cli_calls;
+        Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
+      in
+      match
+        Exact_flow.execute
+          ~cli_runner:runner
+          ~clock
+          ~callback_error_to_string:Fun.id
+          ~before_dispatch:(fun _ -> Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          prepared
+      with
+      | Error
+          (Exact_flow.Cli_slots_exhausted
+             { prior_error =
+                 Some
+                   (Exact_flow.Providers_exhausted
+                     { attempts = [ provenance ]
+                     ; binding_standing = Exact_output.Not_every_binding_resting
+                     ; detail = _
+                     })
+             ; failures = [ _ ]
+             }) ->
+        (* The HTTP slot answered text that is not JSON. It answered, so the walk
+           is not a resting one and the worker quarantines instead of
+           waiting. *)
+        Alcotest.(check string)
+          "CLI failure retains the exhausted HTTP receipt"
+          http.id
+          provenance.slot_id;
+        Alcotest.(check int) "the declared CLI slot was tried once" 1 !cli_calls
+      | Error _ -> Alcotest.fail "CLI failure did not retain the HTTP execution failure"
+      | Ok _ -> Alcotest.fail "a failed CLI tail must not produce a judgment")))
+;;
+
+let test_mixed_cli_cancellation_propagates_once () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-mixed-cli-cancel" in
+      let rejected =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:"another-candidate")))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime ]
+        [ target "board-attention-cancel-http" rejected.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "mixed cancellation lane did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let cli_calls = ref 0 in
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        incr cli_calls;
+        raise (Eio.Cancel.Cancelled (Failure "synthetic cli cancellation"))
+      in
+      let propagated =
+        match
+          Exact_flow.execute
+            ~cli_runner:runner
+            ~clock
+            ~callback_error_to_string:Fun.id
+            ~before_dispatch:(fun _ -> Ok ())
+            ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+            prepared
+        with
+        | exception Eio.Cancel.Cancelled _ -> true
+        | Ok _ | Error _ -> false
+      in
+      Alcotest.(check bool) "CLI cancellation propagates" true propagated;
+      Alcotest.(check int) "cancellation stops the CLI walk" 1 !cli_calls;
+      match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+      | Exact_lane_run_registry.Completed
+          { outcome = Exact_lane_run_registry.Cancelled; _ }
+      | Exact_lane_run_registry.Completion_persistence_failed
+          { intended_outcome = Exact_lane_run_registry.Cancelled; _ } ->
+        ()
+      | Exact_lane_run_registry.Running
+      | Exact_lane_run_registry.Completed _
+      | Exact_lane_run_registry.Completion_persistence_failed _ ->
+        Alcotest.fail "cancelled CLI tail did not close the exact run as cancelled")))
+;;
+
+let test_cli_only_executes_without_http_provenance () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock ->
+      let candidate = candidate "board-attention-cli-only" in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [];
+      let prepared = match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "CLI-only Board lane must prepare" in
+      let calls = ref 0 in
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        incr calls;
+        Ok (Yojson.Safe.to_string (judgment_output ~candidate_id:candidate.Candidate.candidate_id)) in
+      match Exact_flow.execute ~cli_runner:runner
+        ~clock
+        ~callback_error_to_string:Fun.id
+        ~before_dispatch:(fun _ -> Alcotest.fail "CLI-only must not bind an HTTP receipt")
+        ~before_advance:(fun ~failed:_ ~next:_ -> Alcotest.fail "CLI-only must not advance HTTP")
+        prepared with
+      | Error _ -> Alcotest.fail "CLI-only Board judgment failed"
+      | Ok judgment ->
+        Alcotest.(check int) "one actual CLI dispatch" 1 !calls;
+        (match judgment.Candidate.source with
+         | Candidate.Cli_lane_slot -> ()
+         | Candidate.Exact_attempt _ -> Alcotest.fail "fabricated HTTP provenance"
+         | Candidate.Vendor_system_one _ ->
+           Alcotest.fail "a CLI answer recorded as a vendor answer"))))
+;;
+
+(* A CLI-only lane has no HTTP failure behind it, so the failure it reports
+   carries the walked slots alone. [prior_error = None] is that fact, not a
+   missing field. *)
+let test_cli_only_failure_keeps_the_walked_slots () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock ->
+      let candidate = candidate "board-attention-cli-only-failed" in
+      publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "CLI-only Board lane must prepare"
+      in
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        Ok "not json"
+      in
+      match
+        Exact_flow.execute
+          ~cli_runner:runner
+          ~clock
+          ~callback_error_to_string:Fun.id
+          ~before_dispatch:(fun _ -> Alcotest.fail "CLI-only must not bind an HTTP receipt")
+          ~before_advance:(fun ~failed:_ ~next:_ -> Alcotest.fail "CLI-only must not advance HTTP")
+          prepared
+      with
+      | Error (Exact_flow.Cli_slots_exhausted { prior_error; failures }) ->
+        Alcotest.(check bool) "no HTTP failure is invented" true (Option.is_none prior_error);
+        Alcotest.(check int) "the one walked slot is kept" 1 (List.length failures)
+      | Error (Exact_flow.Providers_exhausted _) ->
+        Alcotest.fail "a CLI-only lane has no provider walk to exhaust"
+      | Error _ -> Alcotest.fail "a failed CLI-only walk must report its slots"
+      | Ok _ -> Alcotest.fail "a slot answering non-JSON must not produce a judgment")))
+;;
+
+(* The HTTP slot of [prepared_with_cli_tail] is a closed port, so [execute]
+   exhausts it and walks the CLI tail, the path production takes when a quota
+   pool is spent. Callbacks accept every binding. *)
+let execute_with_tail ~clock ~runner prepared =
+  Exact_flow.execute
+    ~cli_runner:runner
+    ~clock
+    ~callback_error_to_string:Fun.id
+    ~before_dispatch:(fun _ -> Ok ())
+    ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+    prepared
+;;
+
+let latest_board_attention_run ~actor =
+  Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+  |> List.filter (fun (run : Exact_lane_run_registry.run) ->
+    run.lane = Exact_lane_run_registry.Board_attention && String.equal run.actor actor)
+  |> List.sort (fun (a : Exact_lane_run_registry.run) (b : Exact_lane_run_registry.run) ->
+    Float.compare b.started_at a.started_at)
+  |> function
+  | run :: _ -> run
+  | [] -> Alcotest.fail "no board attention run was recorded"
+;;
+
+(* RFC cli-runtimes-as-lane-slots §3: a run a CLI slot answered is recorded
+   with [selected_slot] = that runtime id. The record used to close as failed
+   on the last HTTP slot before the tail ran (2026-09-19: 12 of 12 runs a CLI
+   slot answered read "failed"). *)
+let test_cli_tail_judges_with_its_own_provenance () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock ->
+      let candidate = candidate "board-attention-cli-tail" in
+      let prepared =
+        prepared_with_cli_tail
+          ~net:(Some net)
+          ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+          candidate
+      in
+      let runner, seen =
+        recording_runner (fun _ ->
+          Ok
+            (Yojson.Safe.to_string
+               (judgment_output ~candidate_id:candidate.Candidate.candidate_id)))
+      in
+      match execute_with_tail ~clock ~runner prepared with
+      | Error _ -> Alcotest.fail "the cli tail did not judge after the HTTP slot failed"
+      | Ok judgment ->
+        Alcotest.(check string)
+          "the slot id is that client, not a catalog slot"
+          Fixture.cli_primary_runtime
+          judgment.Candidate.slot_id;
+        (match judgment.Candidate.source with
+         | Candidate.Cli_lane_slot -> ()
+         | Candidate.Exact_attempt _ ->
+           Alcotest.fail "a cli judgment must not claim an exact attempt"
+         | Candidate.Vendor_system_one _ ->
+           Alcotest.fail "a cli judgment must not claim a vendor answer");
+        (match !seen with
+         | None -> Alcotest.fail "the runner was never called"
+         | Some (_, output_schema, prompt) ->
+           Alcotest.(check bool)
+             "the lane schema travelled on the client's own channel"
+             true
+             (output_schema <> `Null);
+           Alcotest.(check bool)
+             "the judge prompt travelled too"
+             true
+             (String.length prompt > 0));
+        let run = latest_board_attention_run ~actor:candidate.Candidate.keeper_name in
+        (match run.status with
+         | Exact_lane_run_registry.Completed
+             { outcome = Exact_lane_run_registry.Succeeded; selected_slot; _ }
+         | Exact_lane_run_registry.Completion_persistence_failed
+             { intended_outcome = Exact_lane_run_registry.Succeeded; selected_slot; _ } ->
+           Alcotest.(check (option string))
+             "the run record names the client that answered"
+             (Some Fixture.cli_primary_runtime)
+             selected_slot
+         | Exact_lane_run_registry.Running
+         | Exact_lane_run_registry.Completed _
+         | Exact_lane_run_registry.Completion_persistence_failed _ ->
+           Alcotest.fail "the run record did not close as succeeded"))))
+;;
+
+let test_cli_tail_advances_after_wrong_candidate () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock ->
+      let candidate = candidate "board-attention-cli-domain-failover" in
+      let prepared = prepared_with_cli_tail ~net:(Some net)
+          ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime]
+          candidate in
+      let attempted = ref [] in
+      let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        attempted := !attempted @ [runtime_id];
+        let candidate_id =
+          if String.equal runtime_id Fixture.cli_primary_runtime then "another-candidate"
+          else candidate.Candidate.candidate_id in
+        Ok (Yojson.Safe.to_string (judgment_output ~candidate_id))
+      in
+      match execute_with_tail ~clock ~runner prepared with
+      | Error _ -> Alcotest.fail "the second cli slot did not judge"
+      | Ok judgment ->
+        Alcotest.(check (list string)) "wrong identity advances to next slot"
+          [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempted;
+        Alcotest.(check string) "accepted slot owns the judgment"
+          Fixture.cli_secondary_runtime judgment.Candidate.slot_id;
+        (match judgment.Candidate.source with
+         | Candidate.Cli_lane_slot -> ()
+         | Candidate.Exact_attempt _ -> Alcotest.fail "CLI answer forged HTTP provenance"
+         | Candidate.Vendor_system_one _ ->
+           Alcotest.fail "CLI answer recorded as a vendor answer"))))
+;;
+
+let test_cli_tail_without_declared_slots_is_typed () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock ->
+      let candidate = candidate "board-attention-cli-tail-empty" in
+      let prepared =
+        prepared_with_cli_tail ~net:(Some net) ~cli_slot_ids:[] candidate
+      in
+      let runner, seen = recording_runner (fun _ -> Ok "{}") in
+      match execute_with_tail ~clock ~runner prepared with
+      | Error (Exact_flow.Providers_exhausted { detail; _ }) ->
+        Alcotest.(check bool) "no client was asked" true (Option.is_none !seen);
+        Alcotest.(check bool)
+          "the failure is the HTTP one, with no tail walked"
+          false
+          (contains_substring ~needle:"cli tail" detail)
+      | Error (Exact_flow.Cli_slots_exhausted _) ->
+        Alcotest.fail "a lane that declares no slot walked none, so none is exhausted"
+      | Error _ -> Alcotest.fail "provider exhaustion must stay provider exhaustion"
+      | Ok _ -> Alcotest.fail "a lane with no declared tail must not produce a judgment")))
+;;
+
+let test_cli_tail_rejects_a_verdict_for_another_candidate () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock ->
+      let candidate = candidate "board-attention-cli-tail-mismatch" in
+      let prepared =
+        prepared_with_cli_tail
+          ~net:(Some net)
+          ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+          candidate
+      in
+      let runner, _ =
+        recording_runner (fun _ ->
+          Ok
+            (Yojson.Safe.to_string
+               (judgment_output ~candidate_id:"some-other-candidate")))
+      in
+      match execute_with_tail ~clock ~runner prepared with
+      (* The failures arrive as the walker's own values, so the test asks the
+         type which slot refused and why -- not a sentence for the substring. *)
+      | Error (Exact_flow.Cli_slots_exhausted { prior_error; failures }) ->
+        Alcotest.(check bool)
+          "the HTTP failure the tail followed is kept"
+          true
+          (match prior_error with
+           | Some (Exact_flow.Providers_exhausted _) -> true
+           | Some _ | None -> false);
+        (match failures with
+         | [ failure ] ->
+           let rendered = Keeper_lane_cli_oneshot.failure_to_string failure in
+           Alcotest.(check bool)
+             "the rejecting slot is named"
+             true
+             (contains_substring ~needle:Fixture.cli_primary_runtime rendered);
+           Alcotest.(check bool)
+             "the identity mismatch is reported"
+             true
+             (contains_substring ~needle:"identity mismatch" rendered)
+         | failures ->
+           Alcotest.failf "walked one slot, kept %d failures" (List.length failures))
+      | Error _ -> Alcotest.fail "a rejected cli verdict must read as an exhausted tail"
+      | Ok _ ->
+        Alcotest.fail "a verdict naming another candidate must not become this judgment")))
+;;
+
+(* A failed durable write before dispatch says the record is in doubt; a second
+   transport does not settle that, so the tail is not walked. *)
+let test_persistence_failure_does_not_walk_the_cli_tail () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw:_ ~net ~clock ->
+      let candidate = candidate "board-attention-cli-tail-persistence" in
+      let prepared =
+        prepared_with_cli_tail
+          ~net:(Some net)
+          ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+          candidate
+      in
+      let runner, seen =
+        recording_runner (fun _ ->
+          Ok
+            (Yojson.Safe.to_string
+               (judgment_output ~candidate_id:candidate.Candidate.candidate_id)))
+      in
+      match
+        Exact_flow.execute
+          ~cli_runner:runner
+          ~clock
+          ~callback_error_to_string:Fun.id
+          ~before_dispatch:(fun _ -> Error "disk")
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          prepared
+      with
+      | Error (Exact_flow.Before_dispatch_persistence_failed { cause; _ }) ->
+        Alcotest.(check string) "the persistence cause is kept" "disk" cause;
+        Alcotest.(check bool) "no client was asked" true (Option.is_none !seen)
+      | Error _ -> Alcotest.fail "a persistence failure must keep its own terminal"
+      | Ok _ -> Alcotest.fail "a persistence failure must not become a judgment")))
+;;
+
+(* The four AGENT_CORE bookkeeping constructors all stay on the typed terminal
+   side of the transport decision. A successful measurement followed by a
+   failed dispatch callback supplies the opaque visit, receipt, and evidence
+   values needed to construct them without a test-only production hook. *)
+let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
+  run_eio (fun ~sw ~net ~clock ->
+    let id = "board-attention-bookkeeping-classification" in
+    let server =
+      Fixture.start_server
+        ~sw
+        ~net
+        ~clock
+        (Fixture.Reply {|{"input_tokens":1}|})
+    in
+    let snapshot =
+      Fixture.resolver_snapshot
+        ~requires_token_measurement:true
+        ~source:"Board attention bookkeeping classification"
+        [ target id server.base_url ]
+    in
+    let admitted_target =
+      Exact_output.admit_target_ref snapshot id |> Result.get_ok
+    in
+    let flow_candidate =
+      Exact_output.make_flow_candidate ~id ~admitted_target |> Result.get_ok
+    in
+    let requirement =
+      Exact_output.make_output_requirement
+        ~schema:Keeper_structured_output_schema.board_attention_judgment_batch_output_schema
+        ~minimum_guarantee:Exact_output.Json_syntax
+    in
+    let start_flow () =
+      Exact_output.snapshot_flow
+        ~first:flow_candidate
+        ~rest:[]
+        ~messages:[ Llm_provider.Types.user_msg "classify bookkeeping failure" ]
+        requirement
+      |> Result.get_ok
+      |> Exact_output.start_flow ~admission_class:Llm_provider.Admission_class.Standard
+      |> Result.get_ok
+    in
+    let measurement = ref None in
+    let captured_failure =
+      Exact_output.execute_flow_once
+        ~net
+        ~clock
+        ~before_measurement_dispatch:(fun receipt ->
+          measurement := Some receipt;
+          Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Error "capture admitted candidate")
+        ~before_advance:(fun ~failed:_ ~next:_ ->
+          Alcotest.fail "dispatch callback failure advanced")
+        ~validate:(fun _ -> Alcotest.fail "dispatch callback failure reached validation")
+        (start_flow ())
+    in
+    match captured_failure, !measurement with
+    | Error
+        (Exact_output.Flow_execution_terminal
+           { cause =
+               Exact_output.Flow_before_dispatch_callback_failed
+                 { candidate; evidence; _ }
+           ; _
+           }), Some measurement ->
+      let visit = candidate.visit in
+      let failures =
+        [ ( Exact_output.Flow_attempt_start_failed
+              { candidate = visit
+              ; cause = Exact_output.Call_id_generation_failed "call id"
+              ; evidence
+              }
+          , Some "call_id_generation_failed detail=\"call id\"" )
+        ; ( Exact_output.Flow_measurement_start_failed
+              { candidate = visit
+              ; cause =
+                  Exact_output.Measurement_operation_id_generation_failed "operation id"
+              ; evidence
+              }
+          , Some "operation_id_generation_failed detail=\"operation id\"" )
+        ; ( Exact_output.Flow_before_measurement_dispatch_callback_failed
+              { measurement; cause = "measurement intent"; evidence }
+          , Some "cause=measurement intent" )
+        ; ( Exact_output.Flow_measurement_terminal_callback_failed
+              { measurement; cause = "measurement terminal"; evidence }
+          , Some "cause=measurement terminal" )
+        ]
+      in
+      List.iter
+        (fun (failure, expected_cause) ->
+           match
+             Exact_flow.terminal_of_flow_error ~callback_error_to_string:Fun.id failure
+           with
+           | Exact_flow.Flow_bookkeeping_failed { detail; _ } ->
+             Option.iter
+               (fun expected ->
+                  Alcotest.(check bool)
+                    "bookkeeping cause reaches the durable detail"
+                    true
+                    (contains_substring ~needle:expected detail))
+               expected_cause
+           | Exact_flow.Providers_exhausted _ ->
+             Alcotest.fail "bookkeeping failure was classified as provider exhaustion"
+           | _ -> Alcotest.fail "bookkeeping failure lost its typed terminal")
+        failures
+    | Ok _, _ | Error _, _ ->
+      Alcotest.fail "fixture did not retain measurement and admitted candidate")
+;;
+
+(* Jev goes out through the pooled client, which needs a pool on this domain;
+   the exact-output lane dials its own connections and does not. *)
+let run_eio_with_http_pool f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
+    f ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env))
+;;
+
+(* Jev is on for [f] and asks the server at [endpoint]. *)
+let with_jev
+      ?(excluded_keepers = [])
+      ~endpoint
+      f
+  =
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
+    Masc_test_deps.with_typesafeai_policy
+      { Runtime_schema.default_typesafeai with
+        excluded_keepers;
+        destinations =
+          ( { Runtime_schema.endpoint; model = "requested-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+          , [] )
+      }
+      f)
+;;
+
+(* A System One answer to the adapter's relevance question. *)
+let jev_response
+      ?(confidence = 0.6)
+      ?probabilities
+      ~choice
+      ()
+  =
+  let probabilities = Option.value probabilities ~default:
+    (if String.equal choice "relevant" then
+       ["relevant", 0.8; "not_relevant", 0.2; "uncertain", 0.]
+     else ["relevant", 0.2; "not_relevant", 0.8; "uncertain", 0.]) in
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "model", `String "jev-latest"
+        ; ( "answers"
+          , `Assoc
+              [ ( "relevance"
+                , `Assoc
+                    [ "type", `String "choice"
+                    ; "choice", `String choice
+                    ; ( "probabilities"
+                      , `Assoc
+                          (List.map
+                             (fun (label, probability) -> label, `Float probability)
+                             probabilities) )
+                    ; "confidence", `Float confidence
+                    ] )
+              ] )
+        ])
+;;
+
+let json_string_field name = function
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some (`String value) -> Some value
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let json_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
+let last_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+;;
+
+(* The [jev] details of every terminal entry the flow logged for this
+   candidate after [since_seq]. *)
+let terminal_jev_entries ~since_seq ~candidate_id =
+  Log.Ring.recent ~limit:1000 ~module_filter:"Keeper" ~since_seq ~order:`Oldest_first ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    match entry.details with
+    | `Assoc fields ->
+      (match List.assoc_opt "candidate_id" fields, List.assoc_opt "jev" fields with
+       | Some (`String id), Some jev when String.equal id candidate_id -> Some jev
+       | _ -> None)
+    | _ -> None)
+;;
+
+type jev_run =
+  { result : (Candidate.judgment, string Exact_flow.execution_error) result
+  ; jev_posts : int
+  ; jev_destination : string
+  ; jev_request_bodies : string list
+  ; llm_posts : int
+  ; terminal_jev : Yojson.Safe.t list
+  ; exact_selected_slot : string option
+  ; exact_output : Yojson.Safe.t
+  }
+
+(* Runs the exact flow with Jev switched on and answering [jev_choice], in
+   front of one LLM slot that answers relevant. *)
+(* [candidate] after an operator requeued it from a quarantine: the durable
+   requeue the worker executes like a pending candidate. *)
+let requeued_after_quarantine (pending : Candidate.candidate) : Candidate.candidate =
+  let quarantine : Candidate.quarantine =
+    { quarantine_id = "ba-quarantine-" ^ pending.candidate_id
+    ; partition_id = "ba-root-" ^ pending.candidate_id
+    ; partition_generation = Masc.Keeper_board_attention_partition_generation.initial
+    ; failure_category = Candidate.Exact_lane_exhausted
+    ; attempt_provenance = None
+    ; quarantined_at = 2.0
+    ; prior_status = Candidate.Resumable_pending { last_delivery_failure = None }
+    }
+  in
+  { pending with
+    status =
+      Candidate.Quarantine
+        { quarantine
+        ; phase = Candidate.Requeued { requeued_at = 4.0; requested_by = "operator-test" }
+        }
+  }
+;;
+
+let execute_behind_jev
+      ?(jev_confidence = 0.6)
+      ?jev_probabilities
+      ?(requeued = false)
+      ~name
+      ~jev_choice
+      ()
+  =
+  with_prompt_registry (fun () ->
+    run_eio_with_http_pool (fun ~sw ~net ~clock ->
+      let candidate =
+        if requeued then requeued_after_quarantine (candidate name) else candidate name
+      in
+      let jev =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (jev_response
+                ~confidence:jev_confidence
+                ?probabilities:jev_probabilities
+                ~choice:jev_choice
+                ()))
+      in
+      let llm =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:candidate.candidate_id)))
+      in
+      publish_lane [ target (name ^ "-llm") llm.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the Jev fixture candidate was not admitted"
+      in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        let since_seq = last_log_seq () in
+        let before = board_attention_run_ids () in
+        let result =
+          Exact_flow.execute
+            ~clock
+            ~callback_error_to_string:Fun.id
+            ~before_dispatch:(fun _ -> Ok ())
+            ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+            prepared
+        in
+        let exact_selected_slot, exact_output =
+          match (new_board_attention_run_full ~before).Exact_lane_run_registry.status with
+          | Exact_lane_run_registry.Completed
+              { outcome = Exact_lane_run_registry.Succeeded
+              ; selected_slot
+              ; output
+              ; _
+              } ->
+            selected_slot, output
+          | Exact_lane_run_registry.Running
+          | Exact_lane_run_registry.Completed _
+          | Exact_lane_run_registry.Completion_persistence_failed _ ->
+            Alcotest.fail "Jev fixture did not close the exact run as succeeded"
+        in
+        { result
+        ; jev_posts = Fixture.post_count jev
+        ; jev_destination = jev.base_url
+        ; jev_request_bodies = Fixture.request_bodies jev
+        ; llm_posts = Fixture.post_count llm
+        ; terminal_jev =
+            terminal_jev_entries ~since_seq ~candidate_id:candidate.candidate_id
+        ; exact_selected_slot
+        ; exact_output
+        })))
+;;
+
+let check_terminal_jev label ~answer ~rejudged run =
+  match run.terminal_jev with
+  | [ jev ] ->
+    Alcotest.(check (option string))
+      (label ^ ": Jev's answer on the terminal entry")
+      (Some answer)
+      (json_string_field "answer" jev);
+    Alcotest.(check (option string))
+      (label ^ ": what the LLM lane decided after Jev")
+      rejudged
+      (json_string_field "rejudged" jev)
+  | entries ->
+    Alcotest.failf
+      "%s: expected one terminal entry for the candidate, found %d"
+      label
+      (List.length entries)
+;;
+
+let expected_jev_provenance run : Candidate.system_one_provenance =
+  match run.jev_request_bodies with
+  | [ body ] ->
+    { destination_uri = run.jev_destination
+    ; answering_model_id = "jev-latest"
+    ; request_body_sha256 = Agent_core_sha256.(digest_string body |> to_hex)
+    }
+  | bodies ->
+    Alcotest.failf
+      "expected one exact Jev request body, saw %d"
+      (List.length bodies)
+;;
+
+let check_terminal_provenance label run provenance =
+  match run.terminal_jev with
+  | [ jev ] ->
+    Alcotest.(check bool)
+      (label ^ ": terminal evidence repeats the request provenance")
+      true
+      (json_field "provenance" jev
+       = Some (Candidate.system_one_provenance_to_yojson provenance))
+  | _ -> Alcotest.failf "%s: terminal evidence is missing" label
+;;
+
+let check_terminal_confidence label run expected =
+  match run.terminal_jev with
+  | [ jev ] ->
+    (match json_field "confidence" jev with
+     | Some (`Float confidence) ->
+       Alcotest.(check (float 0.000001))
+         (label ^ ": the terminal entry keeps Jev's confidence")
+         expected
+         confidence
+     | Some _ | None -> Alcotest.failf "%s: terminal entry has no numeric confidence" label)
+  | _ -> Alcotest.failf "%s: terminal evidence is missing" label
+;;
+
+let test_jev_relevant_is_kept () =
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-relevant"
+      ~jev_choice:"relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.95; "not_relevant", 0.05; "uncertain", 0. ]
+      ()
+  in
+  check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
+  check_terminal_confidence "relevant" run 0.9;
+  match run.result with
+  | Ok judgment ->
+    Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
+    Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
+    Alcotest.(check (option string))
+      "Vendor System One does not fabricate a selected slot"
+      None
+      run.exact_selected_slot;
+    Alcotest.(check bool)
+      "the exact-run output keeps the accepted judgment"
+      true
+      (run.exact_output = Candidate.judgment_to_yojson judgment);
+    (match judgment.Candidate.source with
+     | Candidate.Vendor_system_one provenance ->
+       let expected = expected_jev_provenance run in
+       Alcotest.(check string)
+         "the configured destination is durable"
+         run.jev_destination
+         provenance.destination_uri;
+       Alcotest.(check string)
+         "the model Jev's response named"
+         "jev-latest"
+         provenance.answering_model_id;
+       Alcotest.(check string)
+         "the exact request bytes are durable"
+         expected.request_body_sha256
+         provenance.request_body_sha256;
+       check_terminal_provenance "relevant" run provenance
+     | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
+       Alcotest.fail "a relevant Jev answer must be recorded as Jev's")
+  | Error _ -> Alcotest.fail "a relevant Jev answer did not complete the flow"
+;;
+
+let check_judged_by_the_llm_lane label run =
+  match run.result with
+  | Ok judgment ->
+    Alcotest.(check int) (label ^ ": Jev asked once") 1 run.jev_posts;
+    Alcotest.(check int) (label ^ ": the LLM lane judges it") 1 run.llm_posts;
+    (match judgment.Candidate.source with
+     | Candidate.Exact_attempt _ -> ()
+     | Candidate.Vendor_system_one _ | Candidate.Cli_lane_slot ->
+       Alcotest.failf "%s: the judgment must come from the LLM lane" label);
+    (match judgment.Candidate.verdict.Judgment.decision with
+     | Judgment.Relevant -> ()
+     | Judgment.Not_relevant ->
+       Alcotest.failf "%s: the LLM lane's relevant verdict was not the one kept" label)
+  | Error _ -> Alcotest.failf "%s: the LLM lane did not complete the flow" label
+;;
+
+let test_jev_confident_not_relevant_is_kept () =
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-not-relevant"
+      ~jev_choice:"not_relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95; "uncertain", 0. ]
+      ()
+  in
+  check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:None run;
+  check_terminal_confidence "not_relevant" run 0.9;
+  match run.result with
+  | Ok judgment ->
+    Alcotest.(check int) "Jev asked once" 1 run.jev_posts;
+    Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
+    (match judgment.Candidate.verdict.Judgment.decision with
+     | Judgment.Not_relevant -> ()
+     | Judgment.Relevant -> Alcotest.fail "Jev's not-relevant decision was not the one kept");
+    (match judgment.Candidate.source with
+     | Candidate.Vendor_system_one provenance ->
+       Alcotest.(check string)
+         "the exact request bytes are durable"
+         (expected_jev_provenance run).request_body_sha256
+         provenance.request_body_sha256;
+       check_terminal_provenance "not_relevant" run provenance
+     | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
+       Alcotest.fail "a confident not-relevant Jev answer must be recorded as Jev's")
+  | Error _ -> Alcotest.fail "a confident not-relevant Jev answer did not complete the flow"
+;;
+
+let settle_floor =
+  Runtime_schema.default_typesafeai.Runtime_schema.board_attention_confidence_floor
+;;
+
+let below_the_settle_floor = settle_floor /. 2.0
+
+(* A requeued quarantine is executed like a pending candidate, so Jev is asked
+   first for it too; before, it skipped Jev and went to the LLM lane. *)
+let test_jev_settles_a_requeued_candidate () =
+  let run =
+    execute_behind_jev
+      ~requeued:true
+      ~name:"board-attention-jev-requeued"
+      ~jev_choice:"not_relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.05; "not_relevant", 0.95; "uncertain", 0. ]
+      ()
+  in
+  check_terminal_jev "requeued" ~answer:"not_relevant" ~rejudged:None run;
+  Alcotest.(check int) "Jev is asked for the requeued candidate" 1 run.jev_posts;
+  Alcotest.(check int) "the LLM lane is not asked" 0 run.llm_posts;
+  match run.result with
+  | Ok judgment ->
+    (match judgment.Candidate.source with
+     | Candidate.Vendor_system_one _ -> ()
+     | Candidate.Exact_attempt _ | Candidate.Cli_lane_slot ->
+       Alcotest.fail "the requeued candidate's judgment must be Jev's")
+  | Error _ -> Alcotest.fail "the requeued candidate did not complete the flow"
+;;
+
+(* Either decision below the floor goes to the LLM lane, and the terminal entry
+   keeps what Jev decided next to what the lane decided. *)
+let test_jev_low_confidence_is_judged_again () =
+  List.iter
+    (fun choice ->
+       let run =
+         execute_behind_jev
+           ~name:("board-attention-jev-low-confidence-" ^ choice)
+           ~jev_choice:choice
+           ~jev_confidence:below_the_settle_floor
+           ()
+       in
+       let label = "low-confidence " ^ choice in
+       check_judged_by_the_llm_lane label run;
+       check_terminal_jev label ~answer:"low_confidence" ~rejudged:(Some "relevant") run;
+       check_terminal_provenance label run (expected_jev_provenance run);
+       check_terminal_confidence label run below_the_settle_floor;
+       match run.terminal_jev with
+       | [ jev ] ->
+         Alcotest.(check (option string))
+           (label ^ ": the terminal entry keeps Jev's decision")
+           (Some choice)
+           (json_string_field "decision" jev)
+       | _ -> Alcotest.failf "%s: terminal evidence is missing" label)
+    [ "relevant"; "not_relevant" ]
+;;
+
+(* An explicit uncertain answer delegates to the full judgment lane. *)
+let test_jev_uncertain_is_judged_again () =
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-uncertain"
+      ~jev_choice:"uncertain"
+      ~jev_confidence:0.26
+      ~jev_probabilities:[ "relevant", 0.2; "not_relevant", 0.2; "uncertain", 0.6 ]
+      ()
+  in
+  check_judged_by_the_llm_lane "uncertain" run;
+  check_terminal_jev "uncertain" ~answer:"uncertain" ~rejudged:(Some "relevant") run;
+  check_terminal_provenance "uncertain" run (expected_jev_provenance run);
+  check_terminal_confidence "uncertain" run 0.26
+;;
+
+let test_jev_confidence_at_the_floor_settles () =
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-at-the-floor"
+      ~jev_choice:"not_relevant"
+      ~jev_confidence:settle_floor
+      ()
+  in
+  Alcotest.(check int) "the LLM lane is not asked at the floor" 0 run.llm_posts;
+  check_terminal_jev "at the floor" ~answer:"not_relevant" ~rejudged:None run
+;;
+
+let test_jev_invalid_confidence_is_judged_again () =
+  List.iter (fun confidence ->
+    let run = execute_behind_jev ~name:"board-attention-jev-invalid-confidence"
+        ~jev_choice:"relevant" ~jev_confidence:confidence () in
+    check_judged_by_the_llm_lane "invalid confidence" run;
+    check_terminal_jev "invalid confidence" ~answer:"failed" ~rejudged:None run)
+    [-0.1; 1.5]
+;;
+
+let test_jev_low_confidence_cli_fallback_is_in_the_terminal_entry () =
+  Fixture.with_official_client_runtimes (fun () ->
+  with_prompt_registry (fun () ->
+    run_eio_with_http_pool (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-jev-cli-fallback" in
+      let jev =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (jev_response ~confidence:below_the_settle_floor ~choice:"not_relevant" ()))
+      in
+      publish_lane
+        ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
+        [ target "board-attention-jev-closed-http" "http://127.0.0.1:1" ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the Jev CLI fallback fixture did not prepare"
+      in
+      let before = board_attention_run_ids () in
+      let cli_calls = ref 0 in
+      let result, terminal_jev =
+        with_jev ~endpoint:jev.base_url (fun () ->
+          let since_seq = last_log_seq () in
+          let result =
+            Exact_flow.execute
+              ~cli_runner:(cli_success_runner candidate cli_calls)
+              ~clock
+              ~callback_error_to_string:Fun.id
+              ~before_dispatch:(fun _ -> Ok ())
+              ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+              prepared
+          in
+          ( result
+          , terminal_jev_entries
+              ~since_seq
+              ~candidate_id:candidate.Candidate.candidate_id ))
+      in
+      (match result with
+       | Ok judgment ->
+         Alcotest.(check string)
+           "the declared CLI slot supplies the final judgment"
+           Fixture.cli_primary_runtime
+           judgment.Candidate.slot_id;
+         (match judgment.Candidate.source with
+          | Candidate.Cli_lane_slot -> ()
+          | Candidate.Exact_attempt _ | Candidate.Vendor_system_one _ ->
+            Alcotest.fail "the CLI fallback judgment lost its source")
+       | Error _ -> Alcotest.fail "the declared CLI fallback did not answer");
+      Alcotest.(check int) "Jev is asked once" 1 (Fixture.post_count jev);
+      Alcotest.(check int) "the CLI fallback is asked once" 1 !cli_calls;
+      (match terminal_jev with
+       | [ jev ] ->
+         Alcotest.(check (option string))
+           "the terminal entry keeps Jev's answer"
+           (Some "low_confidence")
+           (json_string_field "answer" jev);
+         Alcotest.(check (option string))
+           "the terminal entry includes the CLI fallback decision"
+           (Some "relevant")
+           (json_string_field "rejudged" jev)
+       | entries ->
+         Alcotest.failf
+           "expected one terminal Jev entry after the CLI fallback, found %d"
+           (List.length entries));
+      check_cli_run_selected ~before ~slot_id:Fixture.cli_primary_runtime)))
+;;
+
+let test_jev_choice_outside_the_question_is_judged_again () =
+  let run = execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe" () in
+  check_judged_by_the_llm_lane "unknown choice" run;
+  check_terminal_jev "unknown choice" ~answer:"failed" ~rejudged:None run
+;;
+
+(* The adapter alone, against the same stand-in: the request offers the two
+   decisions under their labels, and a not-relevant answer decodes to
+   [Not_relevant] rather than an error. *)
+let with_board_admission_workspace f =
+  with_temp_base "board-normal-admission" (fun base_path ->
+    let config = Workspace.default_config base_path in
+    Fun.protect ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ()) (fun () ->
+      ignore (Workspace.init config ~agent_name:None : string);
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      f config))
+;;
+
+let admission_meta ?(paused = false) config name =
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String name; "trace_id", `String ("trace-" ^ name)])
+    |> Result.get_ok in
+  let meta = { meta with Keeper_meta_contract.paused } in
+  let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  Fs_compat.mkdir_p dir;
+  Out_channel.with_open_text (Filename.concat dir (name ^ ".toml")) (fun oc ->
+    output_string oc "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nboard_interests = [\"research\"]\n");
+  Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
+  let resolved = Keeper_meta_store.read_effective_meta config name |> Result.get_ok |> Option.get in
+  ignore (Keeper_registry.For_testing.register ~base_path:config.base_path name resolved);
+  resolved
+;;
+
+let admission_post ~author ~title =
+  match Board_dispatch.create_post ~author ~title ~content:"new research evidence"
+      ~post_kind:Board.Human_post ~visibility:Board.Internal () with
+  | Ok post -> post
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
+let admission_candidate config meta signal =
+  let id = Candidate.candidate_id_of_signal ~keeper_name:meta.Keeper_meta_contract.name signal in
+  match Candidate.load_candidates ~base_path:config.Workspace.base_path ~keeper_name:meta.name with
+  | Error detail -> Alcotest.fail detail
+  | Ok candidates ->
+      match List.find_opt (fun c -> String.equal c.Candidate.candidate_id id) candidates with
+      | Some candidate -> candidate
+      | None -> Alcotest.fail "normal producer candidate missing"
+;;
+
+let test_normal_discoverable_producer_batches_owner_cursor_catchup () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_board_admission_workspace (fun config ->
+      let first = admission_meta config "normal-first" in
+      let second = admission_meta config "normal-second" in
+      let paused_initial = admission_meta ~paused:true config "paused-initial" in
+      let paused_established = admission_meta ~paused:true config "paused-established" in
+      let judged_meta = admission_meta config "prior-judgment" in
+      ignore (admission_post ~author:"baseline-author" ~title:"baseline");
+      List.iter (fun meta -> ignore (Keeper_world_observation.collect_board_events
+        ~base_path:config.base_path ~meta)) [first; second; paused_established; judged_meta];
+      let previous_cursor = (Option.get (Keeper_registry.get ~base_path:config.base_path paused_established.name)).board_cursor_ts in
+      let request_signal = ref None in
+      let release, resolver = Eio.Promise.create () in
+      let answer _ body =
+        let questions = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "questions" |> to_assoc) in
+        let answers = List.map (fun (id, _) -> id, `Assoc
+          ["type", `String "choice"; "choice", `String "not_relevant";
+           "confidence", `Float 1.; "probabilities", `Assoc
+             ["relevant", `Float 0.; "not_relevant", `Float 1.; "uncertain", `Float 0.]]) questions in
+        `OK, Yojson.Safe.to_string (`Assoc ["model", `String "jev-latest"; "answers", `Assoc answers]) in
+      let jev = Fixture.start_server ~sw ~net ~clock
+          ~on_request_before_reply:(fun () -> Eio.Promise.await release)
+          (Fixture.Reply_with answer) in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        Eio.Switch.run (fun batch_sw ->
+          Board_dispatch.set_board_signal_hook (fun addressed ->
+            let signal = addressed.Board_dispatch.signal in
+            request_signal := Some signal;
+            (* A recovered prior judgment with a Ready root must stay with
+               ordinary delivery; stable-id duplicates are not fresh work. *)
+            let candidate = Candidate.of_board_signal ~meta:judged_meta ~recorded_at:1. signal in
+            ignore (Candidate.record ~base_path:config.base_path candidate);
+            let judgment : Candidate.judgment =
+              { verdict = { Judgment.decision = Judgment.Not_relevant; rationale = "already judged" }
+              ; slot_id = "prior-cli"; source = Candidate.Cli_lane_slot; judged_at = 2. } in
+            ignore (Candidate.record_judgment ~base_path:config.base_path candidate judgment |> Result.get_ok);
+            ignore (Partition.ensure_roots ~base_path:config.base_path ~keeper_name:judged_meta.name [candidate] |> Result.get_ok);
+            let deliver () = Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
+              ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config)
+              addressed in
+            deliver ();
+            deliver ());
+          Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve resolver ())) (fun () ->
+            ignore (admission_post ~author:"external-author" ~title:"normal research");
+            let signal = Option.get !request_signal in
+            (* Established fleet I/O must not run on the receipt fiber. *)
+            let id = Candidate.candidate_id_of_signal ~keeper_name:first.name signal in
+            Alcotest.(check bool) "reserved before asynchronous admission" true
+              (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:id);
+            Eio.Promise.await jev.first_request_arrived;
+            List.iter (fun meta ->
+              (match (admission_candidate config meta signal).status with
+               | Candidate.Pending _ -> ()
+               | _ -> Alcotest.fail "vendor was called before durable pending evidence");
+              let _, post_count, _ = Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta in
+              Alcotest.(check int) "owner independently acknowledges one new post" 1 post_count;
+              let _, repeated, _ = Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta in
+              Alcotest.(check int) "owner catchup is idempotent" 0 repeated) [first; second];
+            (match (admission_candidate config paused_initial signal).status with
+             | Candidate.Pending _ -> () | _ -> Alcotest.fail "paused first cursor lost fallback");
+            (match (admission_candidate config judged_meta signal).status with
+             | Candidate.Judged _ -> () | _ -> Alcotest.fail "prior judgment was replaced");
+            Alcotest.(check (float 0.)) "paused established cursor stays unadvanced" previous_cursor
+              (Option.get (Keeper_registry.get ~base_path:config.base_path paused_established.name)).board_cursor_ts));
+        let signal = Option.get !request_signal in
+        List.iter (fun meta ->
+          (match (admission_candidate config meta signal).status with
+           | Candidate.Consumed { delivery = Candidate.Not_relevant; _ } -> ()
+           | _ -> Alcotest.fail "normal batch did not settle");
+          Alcotest.(check bool) "lease released after batch" false
+            (Keeper_board_attention_admission.blocked ~base_path:config.base_path
+               ~candidate_id:(Candidate.candidate_id_of_signal ~keeper_name:meta.name signal))) [first; second];
+        let resumed = { paused_established with Keeper_meta_contract.paused = false } in
+        Keeper_meta_store.replace_snapshot config resumed |> Result.get_ok;
+        ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta:resumed);
+        ignore (admission_candidate config resumed signal);
+        match Fixture.request_bodies jev with
+        | [body] ->
+            let questions = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "questions" |> to_assoc) in
+            Alcotest.(check int) "one normal request serves two owners" 2 (List.length questions);
+            List.iter (fun meta -> Alcotest.(check bool) "owner question present" true
+              (List.mem_assoc (Candidate.candidate_id_of_signal ~keeper_name:meta.Keeper_meta_contract.name signal) questions)) [first; second]
+        | _ -> Alcotest.fail "normal producer split or retried vendor requests")))
+;;
+
+let test_off_switch_releases_discoverable_admission () =
+  run_eio (fun ~sw:_ ~net:_ ~clock ->
+    with_board_admission_workspace (fun config ->
+      let meta = admission_meta config "off-switch-owner" in
+      let finished = Eio.Switch.run (fun sw -> sw) in
+      let signal = signal "off-switch-event" in
+      (try Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:finished ~clock ~config signal
+       with Invalid_argument _ -> ());
+      let id = Candidate.candidate_id_of_signal ~keeper_name:meta.name signal in
+      Alcotest.(check bool) "finished switch cannot strand ownership" false
+        (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:id);
+      (* A cancelled-but-not-released switch must refuse immediately, without
+         waiting for unrelated switch fibers to join. *)
+      (try Eio.Switch.run (fun sw ->
+        Eio.Switch.fail sw Exit;
+        Eio.Cancel.protect (fun () ->
+          (try Keeper_board_attention_fanout.enqueue_discoverable_post ~sw ~clock ~config signal
+           with Eio.Cancel.Cancelled _ -> ());
+          Alcotest.(check bool) "off switch refuses before teardown" false
+            (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:id)))
+       with Exit -> ());
+      Alcotest.(check bool) "cancelled switch releases the skipped child" false
+        (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:id)))
+;;
+
+let test_admission_uses_canonical_workspace_scope () =
+  with_temp_base "board-admission-alias" (fun base_path ->
+    with_temp_base "board-admission-other" (fun other ->
+      let token = Keeper_board_attention_admission.reserve_batch ~base_path ~candidate_ids:["same-event"] in
+      Fun.protect ~finally:(fun () -> Keeper_board_attention_admission.release token) (fun () ->
+        Alcotest.(check bool) "workspace alias shares admission" true
+          (Keeper_board_attention_admission.blocked ~base_path:(Filename.concat base_path ".") ~candidate_id:"same-event");
+        Alcotest.(check bool) "other workspace is independent" false
+          (Keeper_board_attention_admission.blocked ~base_path:other ~candidate_id:"same-event"))))
+;;
+
+let test_worker_rechecks_admission_after_prepare () =
+  run_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_base "board-worker-admission-race" (fun base_path ->
+      let candidate = candidate "prepare-admission-race" in
+      ignore (Candidate.record ~base_path candidate);
+      ignore (Partition.ensure_roots ~base_path ~keeper_name:candidate.keeper_name [candidate] |> Result.get_ok);
+      let token = ref None in
+      Fun.protect ~finally:(fun () -> Option.iter Keeper_board_attention_admission.release !token) (fun () ->
+        let result = Worker.For_testing.process_next_with_claim_ready_exact
+          ~now:(fun () -> 3.) ~worker_epoch:(Partition.Worker_epoch.generate ()) ~base_path
+          ~keeper_name:candidate.keeper_name
+          ~prepare:(fun _ ->
+            token := Some (Keeper_board_attention_admission.reserve_batch ~base_path ~candidate_ids:[candidate.candidate_id]); Ok ())
+          ~claim_ready_exact:(fun ~now:_ ~worker_epoch:_ ~base_path:_ ~keeper_name:_ ~partition_id:_ ~generation:_ ->
+            Alcotest.fail "singleton claim bypassed newly acquired batch lease")
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ () -> Alcotest.fail "singleton execution bypassed batch lease") in
+        match result with
+        | Ok (Worker.Rescan_later _) -> ()
+        | _ -> Alcotest.fail "prepare-to-claim race did not preserve batch ownership")))
+;;
+
+let test_cancelled_normal_batch_retains_owner_recovery () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_board_admission_workspace (fun config ->
+      let meta = admission_meta config "cancelled-normal" in
+      ignore (admission_post ~author:"baseline" ~title:"baseline");
+      ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+      let held, resolve = Eio.Promise.create () in
+      let jev = Fixture.start_server ~sw ~net ~clock
+          ~on_request_before_reply:(fun () -> Eio.Promise.await held) (Fixture.Reply "{}") in
+      let signal = ref None in
+      let replacement_worker = ref None in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve resolve ())) (fun () ->
+          (try Eio.Switch.run (fun batch_sw ->
+            Board_dispatch.set_board_signal_hook (fun addressed ->
+              signal := Some addressed.Board_dispatch.signal;
+              Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
+                ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config) addressed);
+            ignore (admission_post ~author:"external" ~title:"cancelled research");
+            Eio.Promise.await jev.first_request_arrived;
+            let entry = Option.get (Keeper_registry.get ~base_path:config.base_path meta.name) in
+            Keeper_registry.For_testing.unsafe_put_entry ~base_path:config.base_path meta.name
+              { entry with Keeper_registry.lane = Keeper_lane.create () };
+            replacement_worker := Some (Keeper_board_attention_worker_wake.register ~sw
+              ~base_path:config.base_path ~keeper_name:meta.name |> Result.get_ok);
+            (match Worker.For_testing.process_next ~now:(fun () -> 4.)
+              ~worker_epoch:(Partition.Worker_epoch.generate ()) ~base_path:config.base_path ~keeper_name:meta.name
+              ~prepare:(fun _ -> Alcotest.fail "replacement singleton bypassed batch ownership")
+              ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ -> Alcotest.fail "replacement singleton reached vendor") with
+             | Ok Worker.Idle -> () | _ -> Alcotest.fail "replacement startup did not defer held batch");
+            Eio.Switch.fail batch_sw Exit)
+           with Exit -> ());
+          (match Keeper_board_attention_worker_wake.request ~base_path:config.base_path ~keeper_name:meta.name with
+           | Ok Keeper_board_attention_worker_wake.Coalesced -> ()
+           | _ -> Alcotest.fail "replacement worker did not receive post-release fallback wake");
+          (match Keeper_board_attention_worker_wake.await (Option.get !replacement_worker) with
+           | Keeper_board_attention_worker_wake.Wake -> ()
+           | Keeper_board_attention_worker_wake.Registration_closed -> Alcotest.fail "replacement registration was closed");
+          let signal = Option.get !signal in
+          let candidate = admission_candidate config meta signal in
+          (match candidate.status with Candidate.Pending _ -> () | _ -> Alcotest.fail "cancel lost pending candidate");
+          (match Partition.load ~base_path:config.base_path ~keeper_name:meta.name with
+           | Ok [{ state = Partition.Ready; _ }] -> ()
+           | _ -> Alcotest.fail "cancel did not return partition to ordinary recovery");
+          Alcotest.(check bool) "cancel releases candidate admission" false
+            (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:candidate.candidate_id);
+          let _, caught_up, _ = Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta in
+          Alcotest.(check int) "owner cursor still catches up after cancellation" 1 caught_up;
+          let recovered = admission_candidate config meta signal in
+          Alcotest.(check string) "catchup preserves durable identity" candidate.candidate_id recovered.candidate_id))))
+;;
+
+let test_worker_skips_reserved_root_for_other_ready_work () =
+  run_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_base "board-worker-reserved-oldest" (fun base_path ->
+      let old = candidate "reserved-oldest" in
+      let next = { (candidate "unreserved-next") with Candidate.recorded_at = 2. } in
+      List.iter (fun candidate -> ignore (Candidate.record ~base_path candidate)) [old; next];
+      let judgment : Candidate.judgment =
+        { verdict = { Judgment.decision = Judgment.Not_relevant; rationale = "existing ordinary work" }
+        ; slot_id = "prior-cli"; source = Candidate.Cli_lane_slot; judged_at = 3. } in
+      ignore (Candidate.record_judgment ~base_path next judgment |> Result.get_ok);
+      ignore (Partition.ensure_roots ~base_path ~keeper_name:old.keeper_name [old; next] |> Result.get_ok);
+      let token = Keeper_board_attention_admission.reserve_batch ~base_path ~candidate_ids:[old.candidate_id] in
+      Fun.protect ~finally:(fun () -> Keeper_board_attention_admission.release token) (fun () ->
+        (match Worker.For_testing.process_next ~now:(fun () -> 4.)
+          ~worker_epoch:(Partition.Worker_epoch.generate ()) ~base_path ~keeper_name:old.keeper_name
+          ~prepare:(fun _ -> Alcotest.fail "reserved pending root entered preparation")
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ -> Alcotest.fail "reserved pending root entered model") with
+         | Ok _ -> () | Error detail -> Alcotest.fail detail);
+        match Partition.load ~base_path ~keeper_name:old.keeper_name with
+        | Error detail -> Alcotest.fail detail
+        | Ok partitions ->
+            let selected = List.find (fun (p : Partition.t) -> String.equal p.candidate_id next.candidate_id) partitions in
+            (match selected.state with Partition.Completed _ | Partition.Settled _ -> ()
+             | _ -> Alcotest.fail "reserved oldest blocked other Ready work"))))
+;;
+
+let test_normal_duplicate_payloads_use_persisted_signal_groups () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_board_admission_workspace (fun config ->
+      let first = admission_meta config "persisted-first" in
+      let second = admission_meta config "persisted-second" in
+      ignore (admission_post ~author:"baseline" ~title:"baseline");
+      List.iter (fun meta -> ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta)) [first; second];
+      let answer _ body =
+        let questions = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "questions" |> to_assoc) in
+        let answers = List.map (fun (id, _) -> id, `Assoc
+          ["type", `String "choice"; "choice", `String "not_relevant";
+           "confidence", `Float 1.; "probabilities", `Assoc
+             ["relevant", `Float 0.; "not_relevant", `Float 1.; "uncertain", `Float 0.]]) questions in
+        `OK, Yojson.Safe.to_string (`Assoc ["model", `String "jev-latest"; "answers", `Assoc answers]) in
+      let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply_with answer) in
+      let current = ref None in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        Eio.Switch.run (fun batch_sw ->
+          Board_dispatch.set_board_signal_hook (fun addressed ->
+            let signal = addressed.Board_dispatch.signal in
+            current := Some signal;
+            let persisted_signal = { signal with Board_dispatch.content = "older durable source evidence" } in
+            ignore (Candidate.record ~base_path:config.base_path
+              (Candidate.of_board_signal ~meta:first ~recorded_at:1. persisted_signal));
+            Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
+              ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config) addressed);
+          ignore (admission_post ~author:"external" ~title:"payload research"));
+        let signal = Option.get !current in
+        let first_candidate = admission_candidate config first signal in
+        let second_candidate = admission_candidate config second signal in
+        Alcotest.(check string) "duplicate keeps complete old signal" "older durable source evidence" first_candidate.signal.content;
+        List.iter (fun candidate -> match candidate.Candidate.status with
+          | Candidate.Consumed _ -> () | _ -> Alcotest.fail "persisted-signal batch failed") [first_candidate; second_candidate];
+        let requests = Fixture.request_bodies jev in
+        Alcotest.(check int) "different persisted signals get separate requests" 2 (List.length requests);
+        List.iter (fun body ->
+          let json = Yojson.Safe.from_string body in
+          let questions = Yojson.Safe.Util.(json |> member "questions" |> to_assoc) in
+          Alcotest.(check int) "each exact source group has one question" 1 (List.length questions);
+          let candidate = if List.mem_assoc first_candidate.candidate_id questions then first_candidate else second_candidate in
+          Alcotest.(check bool) "request uses returned persisted signal" true
+            (Yojson.Safe.Util.member "state" json = `Assoc ["signal", Candidate.signal_to_yojson candidate.signal])) requests)))
+;;
+
+let test_detached_normal_admission_revalidates_owner () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_board_admission_workspace (fun config ->
+      let active = admission_meta config "still-active" in
+      let removed = admission_meta config "withdrawn-removed" in
+      let stopped = admission_meta config "withdrawn-stopped" in
+      let paused = admission_meta config "withdrawn-paused" in
+      let replaced = admission_meta config "withdrawn-replaced" in
+      let metas = [active; removed; stopped; paused; replaced] in
+      ignore (admission_post ~author:"baseline" ~title:"baseline");
+      List.iter (fun meta -> ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta)) metas;
+      let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply "{}") in
+      let signal = ref None in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        Eio.Switch.run (fun batch_sw ->
+          Board_dispatch.set_board_signal_hook (fun addressed ->
+            signal := Some addressed.Board_dispatch.signal;
+            Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
+              ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config) addressed;
+            (* These registry mutations are synchronous, while the real child
+               is at its first yield. Metadata remains present and unpaused. *)
+            Keeper_registry.For_testing.unregister ~base_path:config.base_path removed.name;
+            let change name f =
+              let entry = Option.get (Keeper_registry.get ~base_path:config.base_path name) in
+              Keeper_registry.For_testing.unsafe_put_entry ~base_path:config.base_path name (f entry) in
+            change stopped.name (fun entry -> { entry with Keeper_registry.phase = Keeper_state_machine.Stopped });
+            change paused.name (fun entry -> { entry with Keeper_registry.phase = Keeper_state_machine.Paused });
+            change replaced.name (fun entry -> { entry with Keeper_registry.lane = Keeper_lane.create () }));
+          ignore (admission_post ~author:"external" ~title:"withdrawn owner research"));
+        let signal = Option.get !signal in
+        List.iter (fun meta ->
+          let candidates = Candidate.load_candidates ~base_path:config.base_path ~keeper_name:meta.Keeper_meta_contract.name |> Result.get_ok in
+          Alcotest.(check int) "withdrawn owner has no newly admitted candidate" 0 (List.length candidates);
+          Alcotest.(check bool) "withdrawn reservation released" false
+            (Keeper_board_attention_admission.blocked ~base_path:config.base_path
+               ~candidate_id:(Candidate.candidate_id_of_signal ~keeper_name:meta.name signal))) [removed; stopped; paused; replaced];
+        match Fixture.request_bodies jev with
+        | [body] ->
+            let questions = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "questions" |> to_assoc) in
+            Alcotest.(check int) "only current active owner is judged" 1 (List.length questions);
+            Alcotest.(check bool) "current owner question present" true
+              (List.mem_assoc (Candidate.candidate_id_of_signal ~keeper_name:active.name signal) questions)
+        | _ -> Alcotest.fail "withdrawn owners changed vendor request count")))
+;;
+
+let test_jev_event_fanout_settles_and_defers () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_temp_base "board-event-fanout" @@ fun base_path ->
+    let first = candidate "shared-event" in
+    let make_keeper keeper_name =
+      { first with Candidate.keeper_name
+      ; candidate_id = Candidate.candidate_id_of_signal ~keeper_name first.signal
+      ; keeper_context = `Assoc
+          [ "lane_keeper_name", `String keeper_name
+          ; "board_interests", `List [`String "runtime"] ] }
+    in
+    let second = make_keeper "beta" in
+    let third = make_keeper "gamma" in
+    let relevant = make_keeper "delta" in
+    let excluded = make_keeper "excluded" in
+    let missing = make_keeper "missing" in
+    let answer choice confidence =
+      `Assoc [ "type", `String "choice"; "choice", `String choice
+             ; "probabilities", `Assoc
+                 (List.map (fun label -> label, `Float (if String.equal label choice then 0.8 else 0.1))
+                    ["relevant"; "not_relevant"; "uncertain"])
+             ; "confidence", `Float confidence ]
+    in
+    let response = Yojson.Safe.to_string (`Assoc
+      [ "model", `String "jev-latest"
+      ; "answers", `Assoc
+          [first.candidate_id, answer "not_relevant" 1.0
+          ;second.candidate_id, answer "uncertain" 1.0
+          ;third.candidate_id, answer "not_relevant" 0.0
+          ;relevant.candidate_id, answer "relevant" 1.0] ]) in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
+    with_jev ~excluded_keepers:["excluded"] ~endpoint:jev.base_url (fun () ->
+      List.iter (fun c -> match Candidate.record ~base_path c with
+        | Candidate.Recorded _ -> ()
+        | Candidate.Duplicate _ | Candidate.Record_error _ -> Alcotest.fail "record failed")
+        [first; second; third; relevant; excluded; missing];
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [first; second; third; relevant; excluded; missing]);
+      let load c = match Candidate.load_candidates ~base_path ~keeper_name:c.Candidate.keeper_name with
+        | Ok [c] -> c
+        | _ -> Alcotest.fail "candidate ledger missing" in
+      (match (load first).status with
+       | Candidate.Consumed { delivery = Candidate.Not_relevant; judgment; _ } ->
+         (match judgment.source with
+          | Candidate.Vendor_system_one _ -> ()
+          | _ -> Alcotest.fail "wrong judgment source")
+       | _ -> Alcotest.fail "confident answer did not settle");
+      List.iter (fun c ->
+        (match (load c).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "review candidate consumed");
+        match Keeper_board_attention_partition.load ~base_path ~keeper_name:c.keeper_name with
+        | Ok [{ state = Keeper_board_attention_partition.Ready; _ }] -> ()
+        | _ -> Alcotest.fail "review partition not returned to worker") [second; third; missing];
+      (match (load excluded).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "excluded candidate judged");
+      (match (load relevant).status with Candidate.Pending _ -> () | _ -> Alcotest.fail "relevant delivery bypassed owner");
+      (match Partition.load ~base_path ~keeper_name:relevant.keeper_name with
+       | Ok [{ state = Partition.Completed _; _ }] -> ()
+       | _ -> Alcotest.fail "relevant completion not durable");
+      match Fixture.request_bodies jev with
+      | [body] ->
+        let json = Yojson.Safe.from_string body in
+        let questions = Yojson.Safe.Util.(json |> member "questions" |> to_assoc) in
+        Alcotest.(check int) "one request carries eligible questions" 5 (List.length questions);
+        Alcotest.(check bool) "excluded keeper is not sent" false (List.mem_assoc excluded.candidate_id questions);
+        Alcotest.(check bool) "signal-only state" true
+          (Yojson.Safe.Util.member "state" json = `Assoc ["signal", Candidate.signal_to_yojson first.signal])
+      | _ -> Alcotest.fail "event did not make exactly one request"))
+;;
+
+let test_jev_event_fanout_failure_releases_claim () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_temp_base "board-event-fanout-failure" @@ fun base_path ->
+    let c = candidate "failed-event" in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply "{}") in
+    with_jev ~endpoint:jev.base_url (fun () ->
+      (match Candidate.record ~base_path c with
+       | Candidate.Recorded _ -> ()
+       | _ -> Alcotest.fail "record failed");
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [c]);
+      (match Candidate.load_candidates ~base_path ~keeper_name:c.keeper_name with
+       | Ok [{ status = Candidate.Pending _; _ }] -> ()
+       | _ -> Alcotest.fail "failed batch changed the pending candidate");
+      match Partition.load ~base_path ~keeper_name:c.keeper_name with
+      | Ok [{ state = Partition.Ready; _ }] -> ()
+      | _ -> Alcotest.fail "failed batch stranded a claimed partition"))
+;;
+
+let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    let candidate = candidate "board-attention-jev-adapter" in
+    let jev =
+      Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant" ()))
+    in
+    with_jev ~endpoint:jev.base_url (fun () ->
+      let judged =
+        match
+          Typesafeai_board_attention.judge_candidate
+            ~clock
+            ~destinations:
+              ( { Typesafeai_client.endpoint = jev.base_url
+                 ; model = "requested-model"
+                 ; api_key = "test-typesafeai-key"
+                 }
+              , [] )
+            ~candidate
+            ()
+        with
+        | Ok judged -> judged
+        | Error detail ->
+          Alcotest.failf "the not_relevant answer did not decode: %s" detail
+      in
+      Alcotest.(check string)
+        "the destination used by the adapter"
+        jev.base_url
+        judged.provenance.destination_uri;
+      Alcotest.(check string)
+        "the model Jev's response named"
+        "jev-latest"
+        judged.provenance.answering_model_id;
+      (match judged.assessment with
+       | Typesafeai_board_attention.Decided { Judgment.decision = Judgment.Not_relevant; _ } -> ()
+       | Typesafeai_board_attention.Decided { Judgment.decision = Judgment.Relevant; _ }
+       | Typesafeai_board_attention.Needs_review _ ->
+         Alcotest.fail "a not_relevant answer decoded as another assessment");
+      Alcotest.(check (float 0.0))
+        "the adapter returns Jev's confidence"
+        0.6
+        judged.confidence;
+      match Fixture.request_bodies jev with
+      | [ body ] ->
+        Alcotest.(check string)
+          "the adapter hashes the exact serialized body"
+          Agent_core_sha256.(digest_string body |> to_hex)
+          judged.provenance.request_body_sha256;
+        let request_json = Yojson.Safe.from_string body in
+        let state, relevance =
+          match request_json with
+          | `Assoc fields ->
+            ( List.assoc_opt "state" fields
+            , match List.assoc_opt "questions" fields with
+              | Some (`Assoc questions) -> List.assoc_opt "relevance" questions
+              | Some _ | None -> None )
+          | _ -> None, None
+        in
+        Alcotest.(check bool)
+          "Jev's state carries only the current signal"
+          true
+          (state = Some (`Assoc [ "signal", Candidate.signal_to_yojson candidate.signal ]));
+        let interests =
+          match Candidate.board_interests candidate with
+          | Ok interests -> interests
+          | Error detail -> Alcotest.failf "candidate interests failed: %s" detail
+        in
+        (match relevance with
+         | Some (`Assoc question) ->
+           Alcotest.(check (option string))
+             "the relevance question is a choice"
+             (Some "choice")
+             (json_string_field "type" (`Assoc question));
+           (match json_string_field "instructions" (`Assoc question) with
+            | Some instructions ->
+              Alcotest.(check bool)
+                "the question names the keeper"
+                true
+                (contains_substring ~needle:(Printf.sprintf "%S" candidate.keeper_name) instructions);
+              Alcotest.(check bool)
+                "the question carries the keeper's interests"
+                true
+                (contains_substring
+                   ~needle:
+                     (Yojson.Safe.to_string
+                        (`List (List.map (fun interest -> `String interest) interests)))
+                   instructions)
+            | None -> Alcotest.fail "the relevance question has no instructions");
+           (match List.assoc_opt "criteria" question with
+            | Some (`Assoc criteria) ->
+              Alcotest.(check (list string))
+                "the request offers every decision under its label"
+                (Judgment.decision_tokens @ ["uncertain"])
+                (List.map fst criteria);
+              Alcotest.(check (option string))
+                "relevant requires the current signal, not capability overlap"
+                (Some
+                   "The current signal itself requires this keeper's concrete attention, review, or action for one of its board interests; general topic or capability overlap alone is insufficient.")
+                (match List.assoc_opt "relevant" criteria with
+                 | Some (`String description) -> Some description
+                 | Some _ | None -> None);
+              Alcotest.(check (option string))
+                "not relevant includes broad interest overlap"
+                (Some
+                   "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with a board interest, or does not require this keeper to act.")
+                (match List.assoc_opt "not_relevant" criteria with
+                 | Some (`String description) -> Some description
+                 | Some _ | None -> None)
+            | Some _ | None -> Alcotest.fail "the relevance question has no criteria map")
+         | Some _ | None -> Alcotest.fail "the request carries no relevance question")
+      | bodies ->
+        Alcotest.failf "expected one request to Jev, saw %d" (List.length bodies)))
+;;
+
+(* A rejected batch answer must say which keys it carried. The 53 quarantines
+   of 2026-09-29 all read "fields must be exactly ..." and nothing durable
+   separates a missing field from an extra one from a repeated one. The parser
+   stays as strict as before; only the message names the shape, and a value
+   never appears in it. *)
+let test_batch_rejection_names_the_answer_shape () =
+  let one_item fields = `Assoc [ "verdicts", `List [ `Assoc fields ] ] in
+  let valid =
+    [ "candidate_id", `String "c-1"
+    ; "decision", `String "relevant"
+    ; "rationale", `String "SECRET-RATIONALE-VALUE"
+    ]
+  in
+  let rejected label answer =
+    match Judgment.batch_of_yojson answer with
+    | Ok _ -> Alcotest.failf "%s: the answer must stay rejected" label
+    | Error detail -> detail
+  in
+  let check_names label detail needles =
+    List.iter
+      (fun needle ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s names %s" label needle)
+          true
+          (contains_substring ~needle detail))
+      needles
+  in
+  (match Judgment.batch_of_yojson (one_item valid) with
+   | Ok [ _ ] -> ()
+   | Ok _ | Error _ -> Alcotest.fail "the exact three fields must still be accepted");
+  let extra =
+    rejected "extra" (one_item (valid @ [ "confidence", `String "SECRET-EXTRA-VALUE" ]))
+  in
+  check_names "extra" extra [ "item=0"; "missing=[]"; "extra=[\"confidence\"]"; "repeated=[]" ];
+  Alcotest.(check bool) "an extra field's value stays out" false
+    (contains_substring ~needle:"SECRET-EXTRA-VALUE" extra);
+  Alcotest.(check bool) "a field's value stays out" false
+    (contains_substring ~needle:"SECRET-RATIONALE-VALUE" extra);
+  let missing =
+    rejected "missing" (one_item [ "candidate_id", `String "c-1"; "decision", `String "relevant" ])
+  in
+  check_names "missing" missing [ "missing=[\"rationale\"]"; "extra=[]" ];
+  let alias =
+    rejected
+      "alias"
+      (one_item
+         [ "candidate_id", `String "c-1"
+         ; "decision", `String "relevant"
+         ; "reason", `String "x"
+         ])
+  in
+  check_names "alias" alias [ "missing=[\"rationale\"]"; "extra=[\"reason\"]" ];
+  let repeated =
+    rejected
+      "repeated"
+      (one_item
+         [ "candidate_id", `String "c-1"
+         ; "candidate_id", `String "c-2"
+         ; "decision", `String "relevant"
+         ; "rationale", `String "x"
+         ])
+  in
+  check_names "repeated" repeated [ "missing=[]"; "extra=[]"; "repeated=[\"candidate_id\"]" ];
+  let long_key = String.make 40 'k' in
+  let clipped = rejected "long key" (one_item (valid @ [ long_key, `Null ])) in
+  Alcotest.(check bool) "a long key is clipped" false
+    (contains_substring ~needle:long_key clipped);
+  let second_item =
+    rejected
+      "second item"
+      (`Assoc
+          [ ( "verdicts"
+            , `List
+                [ `Assoc valid
+                ; `Assoc [ "candidate_id", `String "c-2"; "decision", `String "relevant" ]
+                ] )
+          ])
+  in
+  check_names "second item" second_item [ "item=1"; "missing=[\"rationale\"]" ];
+  let envelope =
+    rejected "envelope" (`Assoc [ "verdicts", `List []; "note", `String "SECRET-NOTE" ])
+  in
+  check_names "envelope" envelope [ "keys=[\"verdicts\"; \"note\"]" ];
+  Alcotest.(check bool) "an envelope value stays out" false
+    (contains_substring ~needle:"SECRET-NOTE" envelope);
+  (* The expected envelope key with the wrong value type must name that
+     type requirement, not claim its already-correct key is missing. None
+     of these answers may become accepted or reveal the rejected value. *)
+  List.iter
+    (fun value ->
+      let detail =
+        rejected "non-list verdicts" (`Assoc [ "verdicts", value ])
+      in
+      Alcotest.(check string) "wrong envelope value explains the list requirement"
+        "board-attention batch verdict field verdicts must be a list" detail)
+    [ `Null; `Bool false; `Int 1; `String "SECRET-VERDICTS-VALUE";
+      `Assoc [ "secret", `String "SECRET-OBJECT-VALUE" ] ];
+  (match Judgment.batch_of_yojson (`Assoc [ "verdicts", `List [] ]) with
+   | Ok [] -> ()
+   | Ok _ | Error _ -> Alcotest.fail "an empty verdict list must remain accepted")
+;;
+
+(* Board-attention quarantines on 2026-09-29 ended on a rejected key set whose
+   sentence did not say which keys. Scenario: each declared slot answers with a
+   wrong shape (an extra key on the first, an alias for [rationale] on the
+   second). The flow must walk to the successor, end as
+   [Domain_output_invalid], and the detail the durable partition keeps (the
+   last slot's) must name the shape and quote no value. *)
+let test_wrong_shape_on_every_slot_ends_domain_invalid_naming_the_shape () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-wrong-shape" in
+      let answer fields = `Assoc [ "verdicts", `List [ `Assoc fields ] ] in
+      let extra_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "rationale", `String "SECRET-FIRST-RATIONALE"
+          ; "confidence", `String "SECRET-CONFIDENCE"
+          ]
+      in
+      let aliased_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "reason", `String "SECRET-REASON"
+          ]
+      in
+      let first_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response extra_key))
+      in
+      let second_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response aliased_key))
+      in
+      let first = target "board-attention-wrong-shape-extra" first_server.base_url in
+      let second = target "board-attention-wrong-shape-alias" second_server.base_url in
+      publish_lane [ first; second ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the wrong-shape fixture was not admitted"
+      in
+      (match
+         Exact_flow.execute
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+           prepared
+       with
+       | Ok _ -> Alcotest.fail "a wrong shape on every slot must not be accepted"
+       | Error (Exact_flow.Domain_output_invalid detail) ->
+         List.iter
+           (fun needle ->
+             Alcotest.(check bool)
+               (Printf.sprintf "the terminal detail names %s" needle)
+               true
+               (contains_substring ~needle detail))
+           [ "fields must be exactly"
+           ; "item=0"
+           ; "missing=[\"rationale\"]"
+           ; "extra=[\"reason\"]"
+           ; "repeated=[]"
+           ];
+         List.iter
+           (fun secret ->
+             Alcotest.(check bool)
+               (Printf.sprintf "the terminal detail never quotes %s" secret)
+               false
+               (contains_substring ~needle:secret detail))
+           [ "SECRET-REASON"; "SECRET-FIRST-RATIONALE"; "SECRET-CONFIDENCE" ]
+       | Error _ -> Alcotest.fail "expected Domain_output_invalid as the terminal error");
+      Alcotest.(check int) "first slot dispatched once" 1 (Fixture.post_count first_server);
+      Alcotest.(check int)
+        "second slot dispatched once"
+        1
+        (Fixture.post_count second_server)))
+;;
+
+(* The same wrong-shape walk, read from the run record. The Blocked partition
+   keeps the terminal detail verbatim; the run record must quote the same
+   words, not only the terminal class, or the operator who opens the lane run
+   cannot tell which keys the lane rejected. HTTP slots only: the CLI tail
+   branch of [Exact_flow.error_detail] already keeps its sentence. *)
+let test_wrong_shape_run_record_keeps_the_shape () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-wrong-shape-record" in
+      let answer fields = `Assoc [ "verdicts", `List [ `Assoc fields ] ] in
+      let extra_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "rationale", `String "SECRET-FIRST-RATIONALE"
+          ; "confidence", `String "SECRET-CONFIDENCE"
+          ]
+      in
+      let aliased_key =
+        answer
+          [ "candidate_id", `String candidate.candidate_id
+          ; "decision", `String "relevant"
+          ; "reason", `String "SECRET-REASON"
+          ]
+      in
+      let first_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response extra_key))
+      in
+      let second_server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response aliased_key))
+      in
+      let first = target "board-attention-wrong-shape-record-extra" first_server.base_url in
+      let second = target "board-attention-wrong-shape-record-alias" second_server.base_url in
+      publish_lane [ first; second ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "the wrong-shape fixture was not admitted"
+      in
+      let before = board_attention_run_ids () in
+      (match
+         Exact_flow.execute
+           ~clock
+           ~callback_error_to_string:Fun.id
+           ~before_dispatch:(fun _ -> Ok ())
+           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+           prepared
+       with
+       | Ok _ -> Alcotest.fail "a wrong shape on every slot must not be accepted"
+       | Error (Exact_flow.Domain_output_invalid _) -> ()
+       | Error _ -> Alcotest.fail "expected Domain_output_invalid as the terminal error");
+      match (new_board_attention_run ~before).Exact_lane_run_registry.status with
+      | Exact_lane_run_registry.Completed
+          { outcome = Exact_lane_run_registry.Failed { code; detail }; _ } ->
+        Alcotest.(check string)
+          "the run record keeps the terminal class"
+          "invalid_domain_output"
+          code;
+        List.iter
+          (fun needle ->
+            Alcotest.(check bool)
+              (Printf.sprintf "the run record detail names %s" needle)
+              true
+              (contains_substring ~needle detail))
+          [ "fields must be exactly"
+          ; "item=0"
+          ; "missing=[\"rationale\"]"
+          ; "extra=[\"reason\"]"
+          ; "repeated=[]"
+          ];
+        List.iter
+          (fun secret ->
+            Alcotest.(check bool)
+              (Printf.sprintf "the run record detail never quotes %s" secret)
+              false
+              (contains_substring ~needle:secret detail))
+          [ "SECRET-REASON"; "SECRET-FIRST-RATIONALE"; "SECRET-CONFIDENCE" ]
+      | Exact_lane_run_registry.Running
+      | Exact_lane_run_registry.Completed _
+      | Exact_lane_run_registry.Completion_persistence_failed _ ->
+        Alcotest.fail "the wrong-shape run did not close with durable detail"))
+;;
+
+let () =
+  Alcotest.run
+    "Keeper Board-attention exact flow"
+    [ ( "parse boundary"
+      , [ Alcotest.test_case
+            "a rejected batch answer names its shape, never its values"
+            `Quick
+            test_batch_rejection_names_the_answer_shape
+        ] )
+    ; ( "callback durability"
+      , [ Alcotest.test_case "unconfirmed bind sends no HTTP and retains quarantine" `Quick
+            (test_worker_callback_durability_blocks_http Dispatch_unconfirmed)
+        ; Alcotest.test_case "unconfirmed advance never dispatches successor" `Quick
+            (test_worker_callback_durability_blocks_http Advance_unconfirmed)
+        ; Alcotest.test_case "confirmed callbacks reach the actual successor" `Quick
+            (test_worker_callback_durability_blocks_http No_fault)
+        ] )
+    ; ( "production adapter"
+      , [ Alcotest.test_case "CLI-only Board judgments need no HTTP attempt" `Quick
+            test_cli_only_executes_without_http_provenance
+        ; Alcotest.test_case
+            "a failed CLI-only walk keeps the slots it walked"
+            `Quick
+            test_cli_only_failure_keeps_the_walked_slots
+        ; Alcotest.test_case
+            "CLI domain mismatch advances with correct provenance"
+            `Quick test_cli_tail_advances_after_wrong_candidate
+        ; Alcotest.test_case
+            "resumable status gate requires durable requeue authorization"
+            `Quick
+            test_prepare_resumable_status_gate
+        ; Alcotest.test_case
+            "explicit lane failover preserves projection order and success provenance"
+            `Quick
+            test_explicit_lane_failover_and_success_provenance
+        ; Alcotest.test_case
+            "strict singleton mismatch advances to declared successor"
+            `Quick
+            test_domain_candidate_id_mismatch_advances_to_declared_successor
+        ; Alcotest.test_case
+            "a wrong shape on every slot ends domain-invalid and names the shape"
+            `Quick
+            test_wrong_shape_on_every_slot_ends_domain_invalid_naming_the_shape
+        ; Alcotest.test_case
+            "a wrong shape on every slot keeps the shape in the run record"
+            `Quick
+            test_wrong_shape_run_record_keeps_the_shape
+        ; Alcotest.test_case
+            "Keeper preference reorders the Board lane"
+            `Quick
+            test_keeper_preference_reorders_the_board_lane
+        ; Alcotest.test_case
+            "missing lane is setup error without dispatch"
+            `Quick
+            test_missing_lane_is_setup_error_without_dispatch
+        ] )
+    ; ( "cli tail"
+      , [ Alcotest.test_case
+            "mixed semantic exhaustion walks the CLI tail"
+            `Quick
+            test_mixed_semantic_exhaustion_walks_cli_tail
+        ; Alcotest.test_case
+            "mixed semantic and CLI failures keep both causes"
+            `Quick
+            test_mixed_semantic_rejection_and_cli_failure_keep_both_causes
+        ; Alcotest.test_case
+            "mixed advanceable final failure walks the CLI tail"
+            `Quick
+            test_mixed_advanceable_final_failure_walks_cli_tail
+        ; Alcotest.test_case
+            "mixed unanswered HTTP request walks the CLI tail"
+            `Quick
+            test_mixed_unknown_result_walks_cli_tail
+        ; Alcotest.test_case
+            "mixed persistence failure stops before CLI"
+            `Quick
+            test_mixed_before_advance_failure_stops_before_cli
+        ; Alcotest.test_case
+            "mixed bind persistence failure stops before CLI"
+            `Quick
+            test_mixed_before_dispatch_failure_stops_before_cli
+        ; Alcotest.test_case
+            "mixed CLI failure keeps HTTP evidence"
+            `Quick
+            test_mixed_cli_failure_keeps_http_evidence
+        ; Alcotest.test_case
+            "mixed CLI cancellation propagates once"
+            `Quick
+            test_mixed_cli_cancellation_propagates_once
+        ; Alcotest.test_case
+            "a cli slot judges under its own provenance"
+            `Quick
+            test_cli_tail_judges_with_its_own_provenance
+        ; Alcotest.test_case
+            "an undeclared tail is a typed refusal"
+            `Quick
+            test_cli_tail_without_declared_slots_is_typed
+        ; Alcotest.test_case
+            "a verdict naming another candidate is rejected"
+            `Quick
+            test_cli_tail_rejects_a_verdict_for_another_candidate
+        ; Alcotest.test_case
+            "a persistence failure does not walk the cli tail"
+            `Quick
+            test_persistence_failure_does_not_walk_the_cli_tail
+        ; Alcotest.test_case
+            "flow bookkeeping failures are not provider exhaustion"
+            `Quick
+            test_flow_bookkeeping_failures_are_not_provider_exhaustion
+        ] )
+    ; ( "jev first"
+      , [ Alcotest.test_case "normal producer batches owner cursor catchup" `Quick
+            test_normal_discoverable_producer_batches_owner_cursor_catchup
+        ; Alcotest.test_case "detached normal admission revalidates current owner" `Quick
+            test_detached_normal_admission_revalidates_owner
+        ; Alcotest.test_case "normal duplicate payloads use exact persisted signal groups" `Quick
+            test_normal_duplicate_payloads_use_persisted_signal_groups
+        ; Alcotest.test_case "cancelled normal batch retains owner recovery" `Quick
+            test_cancelled_normal_batch_retains_owner_recovery
+        ; Alcotest.test_case "worker skips reserved oldest for other Ready work" `Quick
+            test_worker_skips_reserved_root_for_other_ready_work
+        ; Alcotest.test_case "off switch releases skipped discoverable admission" `Quick
+            test_off_switch_releases_discoverable_admission
+        ; Alcotest.test_case "admission uses canonical workspace scope" `Quick
+            test_admission_uses_canonical_workspace_scope
+        ; Alcotest.test_case "worker rechecks admission after preparation" `Quick
+            test_worker_rechecks_admission_after_prepare
+        ; Alcotest.test_case "event fanout settles confident answers and defers review" `Quick
+            test_jev_event_fanout_settles_and_defers
+        ; Alcotest.test_case "failed event fanout releases the claim" `Quick
+            test_jev_event_fanout_failure_releases_claim
+        ; Alcotest.test_case
+            "a relevant Jev answer is kept"
+            `Quick
+            test_jev_relevant_is_kept
+        ; Alcotest.test_case
+            "a confident not-relevant Jev answer is kept"
+            `Quick
+            test_jev_confident_not_relevant_is_kept
+        ; Alcotest.test_case
+            "a Jev decision below the settle floor is judged again by the LLM lane"
+            `Quick
+            test_jev_low_confidence_is_judged_again
+        ; Alcotest.test_case
+            "an explicit uncertain Jev answer is judged again by the LLM lane"
+            `Quick
+            test_jev_uncertain_is_judged_again
+        ; Alcotest.test_case
+            "a Jev decision at the settle floor is kept"
+            `Quick
+            test_jev_confidence_at_the_floor_settles
+        ; Alcotest.test_case
+            "a requeued candidate asks Jev first"
+            `Quick
+            test_jev_settles_a_requeued_candidate
+        ; Alcotest.test_case "invalid confidence delegates to the LLM lane" `Quick
+            test_jev_invalid_confidence_is_judged_again
+        ; Alcotest.test_case
+            "a low-confidence Jev terminal entry includes the CLI fallback"
+            `Quick
+            test_jev_low_confidence_cli_fallback_is_in_the_terminal_entry
+        ; Alcotest.test_case
+            "a Jev choice the question did not offer goes to the LLM lane"
+            `Quick
+            test_jev_choice_outside_the_question_is_judged_again
+        ; Alcotest.test_case
+            "the adapter offers every decision and reads not_relevant"
+            `Quick
+            test_jev_adapter_sends_the_decisions_and_reads_not_relevant
+        ] )
+    ]
+;;

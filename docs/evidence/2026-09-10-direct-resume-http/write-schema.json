@@ -1,0 +1,24 @@
+{
+  "type": "function",
+  "function": {
+    "name": "Write",
+    "description": "Write full file content into the keeper sandbox or an allowed path. Missing parent directories are created safely; call Write directly instead of using Execute mkdir.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "Absolute or sandbox-relative file path. Parent directories are created as needed."
+        },
+        "content": {
+          "type": "string",
+          "description": "Exact full file content; overwrites the existing file. Preserve requested whitespace, including a final newline when requested. Do not strip or add whitespace. Compare bytes_written with the expected UTF-8 byte count; verify file content or hash before claiming exact content."
+        }
+      },
+      "required": [
+        "file_path",
+        "content"
+      ]
+    }
+  }
+}

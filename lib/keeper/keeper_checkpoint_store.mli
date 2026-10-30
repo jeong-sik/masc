@@ -1,0 +1,907 @@
+(** Keeper checkpoint store — AGENT_CORE checkpoint persistence, AGENT_CORE
+    history archive, and agent-core error classification. *)
+
+(** Path of the canonical AGENT_CORE checkpoint file
+    [session_dir/<session_id>.json]. *)
+val agent_core_checkpoint_path :
+  session_dir:string -> session_id:string -> string
+
+(** [agent-core-snapshot-] prefix on AGENT_CORE history archive entries. *)
+(** [.json] suffix on AGENT_CORE history archive entries. *)
+(** [true] iff [filename] is an AGENT_CORE history archive file. *)
+(** Sorted-descending list of AGENT_CORE history archive filenames in
+    [session_dir]. *)
+
+val list_agent_core_history_files : session_dir:string -> string list
+
+(** Number of AGENT_CORE history archive entries retained after a save. *)
+(** Path of an AGENT_CORE history archive entry within [session_dir]. *)
+val agent_core_history_path :
+  session_dir:string -> snapshot_id:string -> string
+
+(** Compose an AGENT_CORE history archive snapshot id from a checkpoint
+    (created_at_ms + keeper_generation suffix). *)
+val agent_core_history_snapshot_id_of_checkpoint :
+  Agent_core.Checkpoint.t -> string
+
+(** The same id from the checkpoint's [created_at] alone, as a head's header
+    gives it. *)
+val agent_core_history_snapshot_id_of_created_at : float -> string
+
+(** One input-ordered result from an explicit history deletion request. *)
+type history_delete_result =
+  | History_deleted of string
+  | History_missing of string
+  | History_refused of string
+  | History_removal_failed of string
+
+(** Delete AGENT_CORE history archive entries by [snapshot_ids]. The result
+    keeps an absent file, a filename outside the exact producer contract, and
+    a failed removal distinct. *)
+val delete_agent_core_history_files :
+  session_dir:string ->
+  snapshot_ids:string list ->
+  history_delete_result list
+
+(** What {!delete_all_agent_core_history_files} did: how many archive entries
+    it removed, and each one still there with why. *)
+type history_cleared =
+  { removed : int
+  ; left : string list
+  }
+
+(** Delete every AGENT_CORE history archive entry of [session_dir]. A purge
+    calls it once the purged checkpoint is installed: the entries are heads
+    of the checkpoint before it, so while one is there the object sweep keeps
+    the content the purge removed (RFC-0476 §3.3). The next save archives
+    again. [Error] when [session_dir] cannot be listed. *)
+val delete_all_agent_core_history_files :
+  session_dir:string -> (history_cleared, string) result
+
+(** Relation between an incoming checkpoint and the current known high
+    watermark for the same canonical AGENT_CORE checkpoint path. *)
+type save_agent_core_relation = [ `Cold | `Forward | `Equal ]
+
+(** Classified checkpoint save result.
+
+    [Stale_noop] is a successful no-op: the canonical checkpoint was left
+    untouched because accepting [incoming_turn_count] would move memory
+    behind the known high watermark. It must not be treated as keeper
+    turn failure, pause, or stop. *)
+type save_agent_core_outcome =
+  | Saved of
+      { relation : save_agent_core_relation
+      ; turn_count : int
+      ; canonical_bytes : int
+      ; checkpoint : Agent_core.Checkpoint.t
+        (** What the canonical file now holds: the checkpoint passed in, or
+            the recovery copy with the unencodable json dropped when its
+            payload could not be encoded. A caller that reasons about the
+            stored history reads this, not the value it passed. *)
+      }
+  | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
+
+(** Save [ckpt] in one locked disk-SSOT transaction. A missing [session_dir]
+    is created by the durable writer, retaining the public create-first contract.
+    [Saved] means payload, rename, and parent-directory fsync succeeded; history
+    is observed best effort. [canonical_bytes] is the size of the file the save
+    wrote, from that file's descriptor.
+
+    [history_retained] is how many past checkpoints to leave beside the
+    canonical one; zero writes no history at all. The caller reads it from
+    [Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained]
+    and passes it in. The store never reads the setting itself: a failing
+    read there would stop the best-effort history prune without saying so.
+
+    RFC-0225 §3.2 checkpoint watermark: returns [Ok Stale_noop] when
+    [ckpt.turn_count] is older than the canonical checkpoint currently on disk.
+    A stale writer must not clobber a conversation the newer writer already
+    persisted, but this is not a keeper lifecycle failure. Equal turn_count
+    re-saves pass. A corrupt or unreadable existing checkpoint fails closed and
+    is never treated as a cold store.
+
+    The canonical file is a head (RFC-0476 §3.2): the save writes the message
+    objects and turn bundles the head names that the previous head did not,
+    then the head. [boundary] says whether this save ends a Keeper turn
+    ([Turn_closes] writes the turn's messages as one bundle). A failed object
+    write leaves the previous head in place. When this process has not seen
+    the previous head's objects (it only parsed that head), the save checks
+    that each is in the session first and writes the missing ones again from
+    [ckpt]'s messages, so a head never names an object that is not there.
+
+    This save keeps nothing for the next one: it encodes every message.
+    A Keeper's own saves use {!save_agent_core_for_keeper}. *)
+val save_agent_core_classified :
+  session_dir:string ->
+  history_retained:int ->
+  boundary:Agent_core.Checkpoint_objects.boundary ->
+  Agent_core.Checkpoint.t ->
+  (save_agent_core_outcome, string) result
+
+(** {!save_agent_core_classified} for a save of [keeper_name]'s own
+    checkpoint. Saves of one canonical file share the store's encoding memo for
+    it, so a save encodes only the messages that no earlier save in this
+    process wrote and no {!load_agent_core_for_save} read
+    ({!Agent_core.Checkpoint_objects.plan_save}). After the save, a load
+    answers from the value the save wrote while the head keeps the identity
+    sampled after the write. The Keeper is named here because a
+    checkpoint's [agent_name] names the runtime its turn ran on. *)
+val save_agent_core_for_keeper :
+  keeper_name:string ->
+  session_dir:string ->
+  history_retained:int ->
+  boundary:Agent_core.Checkpoint_objects.boundary ->
+  Agent_core.Checkpoint.t ->
+  (save_agent_core_outcome, string) result
+
+(** Run [f] under the stable checkpoint lock for [session_dir]. The lock inode
+    is a sibling of the session subtree, so deleting/recreating that subtree
+    cannot replace it. [f] receives the canonical session location used to
+    derive the lock, keeping the lock and mutation on one path identity. *)
+val with_session_lock :
+  session_dir:string -> (string -> 'a) -> ('a, string) result
+
+(** Why reading the bytes failed, when the failure says nothing about what
+    the file holds. *)
+type checkpoint_read_failure =
+  | Os_error of Unix.error  (** An open, stat or read syscall failed. *)
+  | Changed_while_read  (** The file or its directory changed during the read. *)
+  | Read_raised  (** The read or decode raised an exception. *)
+
+(** Load failure classification used by callers to distinguish
+    cold-start absence from real I/O / parse / agent-core errors. *)
+type checkpoint_load_error =
+  | Not_found
+  | Store_error of string
+  | Parse_error of string
+  (** A canonical this binary recognises as an earlier [checkpoint_version].
+      Apart from [Parse_error] because the two need opposite answers: a
+      superseded canonical is replaceable, a corrupt one is not. *)
+  | Superseded_version of { expected : int; got : int }
+  (** A canonical a later [checkpoint_version] wrote: an older binary is
+      reading a newer workspace. Nothing here replaces or deletes it, because
+      the newer binary can still read it. The codec checks the version before
+      it decodes anything else, so a later build's file lands here whenever
+      that build bumped [checkpoint_version]. A codec change shipped without
+      a bump reads as [Parse_error] instead, and the clear deletes it
+      (#38680). *)
+  | Newer_version of { expected : int; got : int }
+  | Io_error of string
+      (** From {!load_agent_core}: the path is not a regular file, or lies
+          outside the owned directory chain, so nothing was read. Elsewhere it
+          also carries OS read failures: the canonical read under a save or a
+          retained-reference lookup, an exception in
+          {!load_agent_core_history_file}, and {!classify_core_error} of an
+          agent-core [FileOpFailed]. Only from {!load_agent_core} does it mean
+          the path, not the read, is at fault. *)
+  | Read_failed of { cause : checkpoint_read_failure; detail : string }
+      (** The owned-file read behind {!load_agent_core} and
+          {!load_agent_core_history_file} failed itself; the same bytes may
+          read fine next time. The other readers report this as [Io_error]. *)
+  | Agent_core_error of string
+  | Objects_invalid of Agent_core.Checkpoint_objects.load_error
+      (** The head names a message object or bundle that is missing,
+          unreadable, or not what the head says it is. *)
+
+val checkpoint_load_error_to_string : checkpoint_load_error -> string
+
+(** Project an [Agent_core.Error.t] to [checkpoint_load_error].
+
+    RFC-0089 G4: this no longer classifies [Not_found] from string-matched
+    [FileOpFailed.detail]. Cold-start "checkpoint absent" is detected at
+    the OS boundary via a typed [Fs_compat.file_exists] check *before* any
+    load, so any [core_error] reaching this function is a real
+    I/O / parse / agent-core fault and routes accordingly. *)
+val classify_core_error :
+  Agent_core.Error.t -> checkpoint_load_error
+
+(** Load a single AGENT_CORE history archive entry. Returns [Not_found]
+    when the file does not exist or [snapshot_id] is not one real path
+    segment (such an id can never name a history entry); classifies Agent Core
+    errors via [classify_core_error]. *)
+val load_agent_core_history_file :
+  session_dir:string ->
+  snapshot_id:string ->
+  (Agent_core.Checkpoint.t, checkpoint_load_error) result
+
+(** What a turn starts from, read from the store. A trace with no checkpoint
+    and one whose checkpoint an earlier [checkpoint_version] wrote both start
+    without saved history; they are told apart because the first save of the
+    second replaces the old file. Every other failed read is not a start: the
+    saved history was not seen and may still be there. *)
+type turn_history =
+  | Saved_history of Agent_core.Checkpoint.t
+  | No_saved_history
+  | Saved_history_superseded of { expected : int; got : int }
+
+(** Which load failures are a start without saved history ([Not_found],
+    [Superseded_version]) and which are not. The turn's load
+    ({!Keeper_context_core.load_context_from_checkpoint_classified}) and the
+    next-request forecast decide through it. *)
+val turn_history_of_load :
+  (Agent_core.Checkpoint.t, checkpoint_load_error) result ->
+  (turn_history, checkpoint_load_error) result
+
+(** Load the canonical AGENT_CORE checkpoint for [session_id]. While the file
+    has the (device, inode, size, mtime) it had when {!save_agent_core_for_keeper}
+    in this process wrote it, or when {!load_agent_core_for_save} read it, the
+    answer is the value kept then and the file is not read; the [context] is a
+    fresh copy. Such an answer
+    also skips the owner and mode checks of the read: a chmod, chown or hard
+    link leaves the identity as it was, and the value is what this process
+    wrote or read, not what the file holds now. Otherwise one read path for Eio
+    and non-Eio contexts: the owned-file read distinguishes an absent file from
+    a read failure, and the read and JSON decode run off the calling fiber when
+    the Eio capability is installed. A [session_id] that is not one real path
+    segment is refused as [Store_error] (the same rejection agent core store
+    applied). *)
+val load_agent_core :
+  session_dir:string ->
+  session_id:string ->
+  (Agent_core.Checkpoint.t, checkpoint_load_error) result
+
+(** {!load_agent_core} for [keeper_name]'s turn, which saves this lineage next
+    with {!save_agent_core_for_keeper}. When it reads the file it also keeps
+    what it read, with the encoding memo the load filled
+    ({!Agent_core.Checkpoint_objects.load}), so that save writes only the new
+    messages and the next load answers without a read. A read
+    during which the file changed keeps nothing. *)
+val load_agent_core_for_save :
+  keeper_name:string ->
+  session_dir:string ->
+  session_id:string ->
+  (Agent_core.Checkpoint.t, checkpoint_load_error) result
+
+(** Drops what the store keeps for [keeper_name]'s checkpoints under
+    [session_root], or for every Keeper of that name when [session_root]
+    was never resolved by this process and no longer resolves. The store
+    resolves a session root once per spelling and keys what it keeps under
+    that resolution. A save still running keeps its value again afterwards:
+    the decode of the bytes it wrote, handed out only while the file keeps
+    that identity (#43575). *)
+val forget_written_lineages : session_root:string -> keeper_name:string -> unit
+
+(** Message count of the canonical checkpoint for [session_id]. Answered
+    without reading the file while the file on disk is the one the store's
+    canonical summary was taken from (a parse or a write by this process);
+    otherwise the checkpoint is loaded and parsed once. [Ok None] when there
+    is no checkpoint. *)
+val canonical_message_count :
+  session_dir:string ->
+  session_id:string ->
+  (int option, checkpoint_load_error) result
+
+(** What a checkpoint list shows, read from the head and as few objects as
+    it takes: the header's creation time, the message count, the system
+    prompt from its header object, and [latest] of the last message it gives
+    [Some] for ({!Agent_core.Checkpoint_objects.find_last}). It is for
+    showing a checkpoint: the chains are not checked, as a load checks them
+    (RFC-0476 §3.5). *)
+type 'a checkpoint_summary =
+  { created_at : float
+  ; message_count : int
+  ; system_prompt : string option
+  ; latest : 'a option
+  }
+
+(** The canonical checkpoint's {!checkpoint_summary}; [Error Not_found] when
+    there is none. A canonical whose header names another session is
+    refused. *)
+val summarize_canonical :
+  session_dir:string ->
+  session_id:string ->
+  latest:(Agent_core.Types.message -> 'a option) ->
+  ('a checkpoint_summary, checkpoint_load_error) result
+
+(** A history archive entry's {!checkpoint_summary}, as
+    {!load_agent_core_history_file} names and refuses entries. *)
+val summarize_agent_core_history_file :
+  session_dir:string ->
+  snapshot_id:string ->
+  latest:(Agent_core.Types.message -> 'a option) ->
+  ('a checkpoint_summary, checkpoint_load_error) result
+
+(** Byte length of the canonical head for [session_id]: the summary's
+    identity while the file on disk is the one this process last parsed or
+    wrote, otherwise one [stat]. [Ok None] when there is no checkpoint. The
+    messages are in objects (RFC-0476 §3.2), so this is the head's size, not
+    the history's, and not a token estimate or a provider request size. *)
+val canonical_byte_count :
+  session_dir:string ->
+  session_id:string ->
+  (int option, checkpoint_load_error) result
+
+(** How far the read and decode {!load_agent_core} takes got on the
+    canonical, one step at a time. *)
+type canonical_judgement =
+  | Judged_absent
+  | Judged_decoded of Agent_core.Checkpoint.t
+  | Judged_superseded of { expected : int; got : int }
+      (** An earlier version wrote it; a turn replaces it. *)
+  | Judged_newer of { expected : int; got : int }
+      (** A build that bumped [checkpoint_version] wrote it; that build can
+          still read it. A later build that changed the codec without a bump
+          is [Judged_undecodable] instead (#38680). *)
+  | Judged_undecodable of checkpoint_load_error
+      (** The bytes were read and the decoder rejected their content
+          ([Parse_error] or [Store_error]). *)
+  | Judged_inconclusive of checkpoint_load_error
+      (** No bytes were judged: the session id is not a path segment, the read
+          returned no bytes or raised, or the decoder failed for a reason that
+          is not the content. *)
+
+(** Judge the canonical without a lock. {!remove_undecodable_canonical}
+    judges again under the session lock before it deletes anything. *)
+val judge_canonical : session_dir:string -> session_id:string -> canonical_judgement
+
+(** What {!remove_undecodable_canonical} found under the session lock. *)
+type undecodable_removal_outcome =
+  | Removed of { undecodable : checkpoint_load_error }
+      (** The canonical was [Judged_undecodable] and was deleted.
+          [undecodable] is the decoder's error. *)
+  | Canonical_absent
+  | Canonical_loadable
+      (** The canonical decodes, or was written by an earlier version: a
+          turn can start from it, so nothing was removed. *)
+
+type undecodable_removal_error =
+  | Removal_refused of checkpoint_load_error
+      (** The canonical was [Judged_newer] (carried as [Newer_version]) or
+          [Judged_inconclusive]; it stays. *)
+  | Removal_failed of string
+      (** The lock or the unlink failed; the canonical stays. *)
+  | Removal_durability_unknown of string
+      (** The unlink happened, but the directory sync that makes it durable
+          failed. *)
+
+val undecodable_removal_error_to_string : undecodable_removal_error -> string
+
+(** Delete a canonical checkpoint that {!judge_canonical} finds
+    [Judged_undecodable], for the operator's [masc_keeper_clear]. The
+    judgement and the unlink run under the session lock the writers take;
+    nothing else is deleted.
+
+    A copy of the bytes survives only as far as the history window keeps
+    one: a save hardlinks the canonical it installs into the window, so with
+    [keeper.checkpoint_history_retained] above 0 the entries still in the
+    window share the canonical's inode (and so any change made to it in
+    place); with 0 nothing is kept, and bytes no save installed were never
+    linked. *)
+val remove_undecodable_canonical :
+  session_dir:string ->
+  session_id:string ->
+  (undecodable_removal_outcome, undecodable_removal_error) result
+
+type checkpoint_identity_error =
+  | Session_id_invalid of string
+  | Ref_create_failed of Keeper_checkpoint_ref.create_error
+
+type checkpoint_ref_load_error =
+  | Ref_not_found
+  | Ref_read_failed of checkpoint_load_error
+  | Ref_identity_invalid of checkpoint_identity_error
+  | Ref_session_mismatch of
+      { expected : Keeper_id.Trace_id.t
+      ; actual : Keeper_id.Trace_id.t
+      }
+  | Ref_lock_failed of string
+
+val checkpoint_ref_create_error_to_string : Keeper_checkpoint_ref.create_error -> string
+val checkpoint_identity_error_to_string : checkpoint_identity_error -> string
+val checkpoint_ref_load_error_to_string : checkpoint_ref_load_error -> string
+
+(** A load as a reader of the saved history takes it. A canonical an earlier
+    [checkpoint_version] wrote ([Superseded_version]) is the deliberate hard
+    cut: the turn path starts fresh on it and the next save replaces it. A
+    reader answers the same fresh state, so it settles on the file instead of
+    reporting it as unreadable at every pass. A keeper whose turns save no
+    checkpoint (an official client) never replaces it. *)
+module Saved_history : sig
+  type 'a t =
+    | Read of 'a
+    | Superseded of { expected : int; got : int }
+
+  (** {!checkpoint_load_error} without [Superseded_version]: that case is
+      {!Superseded}, never a failure. *)
+  type error =
+    | Not_found
+    | Store_error of string
+    | Parse_error of string
+    | Newer_version of { expected : int; got : int }
+    | Io_error of string
+    | Read_failed of { cause : checkpoint_read_failure; detail : string }
+    | Agent_core_error of string
+    | Objects_invalid of Agent_core.Checkpoint_objects.load_error
+
+  (** {!checkpoint_ref_load_error} whose read failure is an {!error}. *)
+  type ref_error =
+    | Ref_not_found
+    | Ref_read_failed of error
+    | Ref_identity_invalid of checkpoint_identity_error
+    | Ref_session_mismatch of
+        { expected : Keeper_id.Trace_id.t
+        ; actual : Keeper_id.Trace_id.t
+        }
+    | Ref_lock_failed of string
+end
+
+(** The cut decision for a {!checkpoint_load_error} load. Every other error
+    keeps its constructor. *)
+val saved_history :
+  ('a, checkpoint_load_error) result -> ('a Saved_history.t, Saved_history.error) result
+
+(** {!saved_history} for a load that reports {!checkpoint_ref_load_error}: the
+    cut arrives as [Ref_read_failed (Superseded_version _)]. *)
+val saved_history_of_ref :
+  ('a, checkpoint_ref_load_error) result
+  -> ('a Saved_history.t, Saved_history.ref_error) result
+
+(** The text {!checkpoint_load_error_to_string} gives the same failure. *)
+val saved_history_error_to_string : Saved_history.error -> string
+
+(** The text {!checkpoint_ref_load_error_to_string} gives the same failure. *)
+val saved_history_ref_error_to_string : Saved_history.ref_error -> string
+
+(** A checkpoint value and its reference. The reference's digest is the
+    content digest ({!Agent_core.Checkpoint_objects.head_content_digest}): the
+    same for the value and for every head written for it, whatever turns its
+    messages are split into. The value, and the trace and turn of the
+    reference, are the load of one head, with one exception: when a canonical
+    loader ({!with_agent_core_exact_snapshot}, {!load_agent_core_exact_snapshot},
+    {!load_agent_core_with_ref}, {!with_agent_core_exact_snapshot_since},
+    {!decode_changed_bytes}) reads a head whose (device, inode, size, mtime)
+    identity is the one a Keeper's lineage wrote or read, they are that
+    lineage's value, which is what loading that head gave or gives, as
+    {!load_agent_core} answers. A file rewritten in place that keeps its size
+    and mtime defeats that rule (#43575). A snapshot carries no bytes: a store
+    that keeps one writes it through {!persist_exact_snapshot} or
+    {!retain_exact_snapshot}. *)
+type exact_checkpoint_snapshot
+
+val exact_snapshot_checkpoint : exact_checkpoint_snapshot -> Agent_core.Checkpoint.t
+
+val exact_snapshot_reference :
+  exact_checkpoint_snapshot -> Keeper_checkpoint_ref.t
+
+(** The messages of {!exact_snapshot_checkpoint}. *)
+val exact_snapshot_messages : exact_checkpoint_snapshot -> Agent_core.Types.message list
+
+(** Capture a producer-returned checkpoint once: its reference is the content
+    digest of the value, which the checkpoint codec's encoding gives. *)
+val exact_snapshot_of_value :
+  expected_session_id:Keeper_id.Trace_id.t -> Agent_core.Checkpoint.t ->
+  (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+
+(** Load head bytes {!persist_exact_snapshot} returned, with the objects they
+    name read from [session_dir]. The reference is the head's content
+    digest. *)
+val exact_snapshot_of_head_bytes :
+  session_dir:string ->
+  expected_session_id:Keeper_id.Trace_id.t ->
+  string ->
+  (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+
+(** Read an exact canonical snapshot (see {!exact_checkpoint_snapshot} for
+    where its value comes from) and run [f] while retaining the same
+    stable session lock used by checkpoint writers and session removal.
+    A source-read or lock-acquisition failure does not run [f]. Callback results
+    are preserved; exceptions, including Eio cancellation, propagate after
+    lock cleanup.
+
+    [f] must not re-enter checkpoint operations that acquire this session's
+    lock. Perform model inference before this call. A callback that acquires
+    Memory locks must acquire them inside this source lock and must retain
+    the existing source-before-Memory lock order. The outer error can report
+    lock-release failure after [f] completed, so an effectful callback must
+    track its own committed outcome rather than infer it from [Error]. *)
+val with_agent_core_exact_snapshot :
+  session_dir:string ->
+  session_id:string ->
+  (exact_checkpoint_snapshot -> 'a) ->
+  ('a, checkpoint_ref_load_error) result
+
+(** Load an exact canonical checkpoint snapshot under the session lock, as
+    {!with_agent_core_exact_snapshot} reads it. *)
+val load_agent_core_exact_snapshot :
+  session_dir:string ->
+  session_id:string ->
+  (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+
+(** The content one exact snapshot read, named by its digest. It is made only
+    from an exact snapshot, never from a stored record. *)
+type exact_source
+
+val exact_snapshot_source : exact_checkpoint_snapshot -> exact_source
+
+type exact_snapshot_since =
+  | Unchanged_source
+      (** The head names the known content, by digest, so the value the
+          caller already holds for it is still current. No object was read. *)
+  | Changed_source of exact_checkpoint_snapshot
+      (** The head names other content, loaded once or, under the rule on
+          {!exact_checkpoint_snapshot}, a Keeper lineage's value for it. *)
+
+(** {!with_agent_core_exact_snapshot} for a caller that already holds one
+    exact snapshot of this session: under the same session lock the head is
+    read, and its objects are loaded only when its content digest differs from
+    [known]. A missing file is [Ref_not_found]. *)
+val with_agent_core_exact_snapshot_since :
+  session_dir:string ->
+  known:exact_source ->
+  (exact_snapshot_since -> 'a) ->
+  ('a, checkpoint_ref_load_error) result
+
+(** A head read under the session lock whose content differs from a known
+    source. *)
+type changed_bytes
+
+type exact_bytes_since =
+  | Unchanged_bytes
+      (** The head names the known content. No object was read. *)
+  | Changed_bytes of changed_bytes
+      (** Another head, read but whose objects are not loaded yet. *)
+
+(** Read the head under the session lock and release the lock without
+    loading its objects. A caller that holds the known snapshot's decoded value
+    can drop it before {!decode_changed_bytes} builds the new one, so the two
+    are not alive together. A missing file is [Ref_not_found]. *)
+val read_agent_core_exact_bytes_since :
+  session_dir:string ->
+  known:exact_source ->
+  (exact_bytes_since, checkpoint_ref_load_error) result
+
+(** Load the head {!read_agent_core_exact_bytes_since} found changed, with the
+    digest it already took. The objects a head names do not change, so they
+    are read after the lock was released. When they were read from a file whose identity a
+    Keeper's lineage holds, that lineage's value is handed out instead, as
+    {!exact_checkpoint_snapshot} describes. The lock is released between the
+    read and the decode, so a later file that reuses the read file's inode
+    with the same size and mtime is one more false match for that identity
+    rule (#43575). *)
+val decode_changed_bytes :
+  changed_bytes -> (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+
+(** Load one canonical checkpoint and its exact source identity from the same
+    locked read, as {!load_agent_core_exact_snapshot}: the digest is the head's
+    content digest, and {!exact_checkpoint_snapshot} says where the checkpoint
+    and the reference's session and turn come from. *)
+val load_agent_core_with_ref :
+  session_dir:string ->
+  session_id:string ->
+  ( Agent_core.Checkpoint.t * Keeper_checkpoint_ref.t
+  , checkpoint_ref_load_error )
+  result
+
+type checkpoint_cas_error =
+  | Source_unavailable of checkpoint_ref_load_error
+  | Source_changed of Keeper_checkpoint_ref.t
+  | Candidate_identity_invalid of checkpoint_identity_error
+  | Candidate_session_mismatch of
+      { expected : Keeper_id.Trace_id.t
+      ; candidate : Keeper_id.Trace_id.t
+      }
+   | Candidate_turn_regressed of
+       { source_turn : int
+       ; candidate_turn : int
+       }
+   | Candidate_unencodable of Agent_core.Error.t
+       (** The checkpoint codec refused the candidate. *)
+   | Candidate_content_mismatch of
+       { reference : Keeper_checkpoint_ref.t
+       ; content : string
+       }
+       (** The snapshot's value does not encode to the content its reference
+           names. *)
+   | Objects_not_installed of Keeper_checkpoint_object_store.write_error
+       (** A message object or bundle the head would name was not written, so
+           the head was not either. *)
+   | Commit_not_installed of Keeper_fs.durable_write_error
+
+type checkpoint_installation_auxiliary =
+  | Commit_durability_unknown of Keeper_fs.durable_write_error
+  | Commit_observer_failed of Eio.Exn.with_bt
+  | Release_process_lock_failed of File_lock_eio.durable_lock_error
+  | Post_commit_unwind_interrupted of Eio.Exn.with_bt
+
+type not_installed_checkpoint =
+  { cause : checkpoint_cas_error
+  ; auxiliary : checkpoint_installation_auxiliary list
+  }
+
+type installed_checkpoint =
+  { installed_ref : Keeper_checkpoint_ref.t
+  ; auxiliary : checkpoint_installation_auxiliary list
+  }
+
+type checkpoint_installation =
+  | Not_installed of not_installed_checkpoint
+  | Installed of installed_checkpoint
+
+val require_confirmed_installation : checkpoint_installation ->
+  (Keeper_checkpoint_ref.t, checkpoint_installation) result
+(** Interpret the staged write result without performing another write or read.
+    Return its exact installed reference only when auxiliary evidence is empty.
+    Other results remain the original result value. An actual Eio cancellation
+    in observer/unwind auxiliary evidence is reraised with its original exception
+    and backtrace, including when bytes were already installed. Callers retain
+    that installed evidence but cannot convert cancellation into a retryable
+    storage error. This function does not reconfirm uncertain durability. *)
+
+(** Conditionally publish [candidate] only when the canonical head still
+    names exactly [expected_source_ref]. The stable session lock is reacquired,
+    the current head is read, and an equal-turn checkpoint with different
+    content is rejected as [Source_changed]. The candidate's objects are
+    written before its head, laid out against the canonical head read before
+    the lock; [boundary] says whether the install ends a Keeper turn. A source reference
+    taken from an exact snapshot can carry a session and turn from a Keeper
+    lineage ({!exact_checkpoint_snapshot}), so for those two fields admission
+    is as strong as that (device, inode, size, mtime) identity rule (#43575);
+    the digest is always compared with the head read now. On success the
+    returned ref is the content digest of the head passed to the durable
+    atomic writer. A writer error after atomic rename is an [Installed] result
+    carrying [Commit_durability_unknown], never a retryable not-installed
+    failure. Releasing the stable lock cannot replace the already-computed body
+    result: [Not_installed] retains its exact cause and [Installed] retains its
+    exact reference, with [Release_process_lock_failed] appended as auxiliary
+    evidence in either case.
+    The payload-store commit is not an operation terminal fact; the Keeper
+    operation journal owns that authority.
+
+    The closed result distinguishes [Not_installed] from [Installed].
+    Observer, release-lock, and unwind failures after durable commit remain
+    typed [auxiliary] facts beside the exact installed reference; they
+    never become install failures or retry signals. An exception before commit
+    is re-raised with its original raw backtrace. *)
+val save_agent_core_if_source :
+  session_dir:string ->
+  expected_source_ref:Keeper_checkpoint_ref.t ->
+  boundary:Agent_core.Checkpoint_objects.boundary ->
+  Agent_core.Checkpoint.t ->
+  checkpoint_installation
+
+(** Install only if no canonical checkpoint exists, under the same stable
+    session lock as source CAS. A concurrently created checkpoint produces
+    [Source_changed]; corrupt/unreadable existing bytes are never overwritten.
+    Installation and durability semantics match [save_agent_core_if_source]. *)
+val save_agent_core_if_absent :
+  session_dir:string ->
+  boundary:Agent_core.Checkpoint_objects.boundary ->
+  Agent_core.Checkpoint.t ->
+  checkpoint_installation
+
+(** Retain an accepted immutable checkpoint outside rolling history, as a head
+    whose objects sit with the canonical's. The path is derived internally
+    from its reference, under [session_dir]. An existing head must validate
+    against that exact reference before any write; corrupt evidence is never
+    repaired. A retry durably rewrites a head for the same content to
+    reconfirm fsync after an earlier uncertain publication.
+
+    [Installed] describes the retained artifact, not the latest canonical file.
+    Only an installation without durability uncertainty permits a journal to
+    reference it. Persist these bytes before the journal Suspend CAS; a failed
+    CAS may leave an unreferenced artifact; this API never removes it, and
+    [Keeper_retained_checkpoint_sweep] does at the next server startup. These bytes are accepted evidence, not authority to roll the shared
+    canonical conversation back: cooperative A continuation must preserve B's
+    newer shared history and use an explicit settled boundary and original
+    admitted input. Exact runtime recovery remains a separate contract.
+
+    Whole-session cleanup (including shutdown [remove_session_dir]) can remove
+    this directory. Runtime journal lifecycle integration must settle or protect
+    owned continuations before that cleanup. Owner/native callers, those cleanup
+    guards are not wired by this primitive. *)
+val retain_exact_snapshot :
+  session_dir:string -> exact_checkpoint_snapshot -> checkpoint_installation
+
+type persist_error =
+  | Persist_session_unavailable of string
+  | Persist_unencodable of Agent_core.Error.t
+  | Persist_content_mismatch of
+      { reference : Keeper_checkpoint_ref.t
+      ; content : string
+      }
+  | Persist_objects_failed of Keeper_checkpoint_object_store.write_error
+
+val persist_error_to_string : persist_error -> string
+
+(** Head bytes for [snapshot] that another store can keep, with the objects
+    they name durable in [session_dir] first, under the session lock.
+    {!exact_snapshot_of_head_bytes} loads them back. The objects are kept as
+    long as a sweep root names them (RFC-0476 §3.6). *)
+val persist_exact_snapshot :
+  session_dir:string ->
+  exact_checkpoint_snapshot ->
+  (string, persist_error) result
+
+(** What {!back_up_canonical} wrote: the copied head's path and the bytes of
+    the head and every object. *)
+type canonical_backup =
+  { backup_head : string
+  ; backup_bytes : int
+  }
+
+type backup_error =
+  | Backup_canonical_unreadable of checkpoint_load_error
+  | Backup_canonical_absent
+  | Backup_content_changed of
+      { expected : string
+      ; actual : string
+      }
+      (** The canonical's content digest is [actual], not the source the
+          caller read. *)
+  | Backup_object_unreadable of
+      { digest : string
+      ; detail : string
+      }
+  | Backup_file_conflict of string
+      (** A file in the backup holds other bytes than the one it copies. *)
+  | Backup_write_failed of
+      { path : string
+      ; error : Keeper_fs.durable_write_error
+      }
+  | Backup_read_back_mismatch of string
+
+val backup_error_to_string : backup_error -> string
+
+(** Copies the canonical head for [session_id] and every object it names into
+    [backup_dir], at the paths they have under [session_dir]
+    ([<session_id>.json], [objects/<aa>/<sha256>]): the objects first, each
+    checked against its digest, then the head. With the server stopped,
+    copying the contents of [backup_dir] over [session_dir] puts the
+    checkpoint back. [content] is the content digest of the checkpoint the
+    caller read; a canonical with another one is not copied. A file already
+    in [backup_dir] is kept when it holds the same bytes, so a retried backup
+    of one checkpoint succeeds. Files are written durably below
+    [ownership_root]. *)
+val back_up_canonical :
+  session_dir:string ->
+  session_id:string ->
+  ownership_root:string ->
+  backup_dir:string ->
+  content:string ->
+  (canonical_backup, backup_error) result
+
+(** The session subdirectory holding retained artifacts, each named
+    [<sha256>.json] after its reference. *)
+val retained_dirname : string
+
+type release_failure =
+  | Lock_held_elsewhere
+      (** The session's checkpoint lock was held at the attempt. Nothing
+          waited and the file stays; it is unnamed, so the startup sweep
+          removes it. *)
+  | Release_failed of string
+
+val release_retained :
+  session_root:string -> Keeper_chat_operation_store.released_checkpoint ->
+  (unit, release_failure) result
+(** Remove the retained artifact a confirmed journal commit released, under
+    [session_root], holding the same session lock that retention and exact
+    reads take. The lock is tried once and never waited for. An absent
+    artifact or retained directory is already released. A path outside the
+    owned, symlink-free directory chain, or one that is not a regular file, is
+    refused and left in place. The removal is not fsynced: an artifact a crash
+    restores is unnamed, and [Keeper_retained_checkpoint_sweep] removes it at
+    the next startup. *)
+
+(** Read only the artifact addressed by the complete accepted reference, under
+    the stable session lock. Validates immutable bytes, trace and turn count;
+    returns their snapshot or a typed error. Never falls back to the latest
+    canonical checkpoint, rolling history, or an empty context. A caller must
+    load and validate the bytes before a Resume CAS: possession of a reference
+    alone proves no checkpoint availability. Reload after an uncertain write
+    establishes byte identity, not fsync; successful retention must reconfirm
+    durability before a new journal reference is committed. *)
+val load_retained_exact_snapshot :
+  session_dir:string -> reference:Keeper_checkpoint_ref.t ->
+  (exact_checkpoint_snapshot, checkpoint_cas_error) result
+
+type retained_snapshot =
+  | Retained_current of exact_checkpoint_snapshot
+  | Retained_superseded of
+      { reference : Keeper_checkpoint_ref.t
+      ; expected_version : int
+      ; got_version : int
+      ; pending_input : Agent_core.Agent_input_request.pending option
+      }
+
+val load_retained_snapshot :
+  session_dir:string -> reference:Keeper_checkpoint_ref.t ->
+  (retained_snapshot, checkpoint_cas_error) result
+
+val find_exact_snapshot_for_retention : session_dir:string -> reference:Keeper_checkpoint_ref.t ->
+  (exact_checkpoint_snapshot, checkpoint_cas_error) result
+(** Find the already identified content in retained storage, the canonical
+    head, or rolling history under the original session lock: only a head that
+    names this reference's content digest is loaded. No newest-file selection
+    or changed-checkpoint substitution is permitted. I/O failure
+    remains an error; the caller must confirm retention before resuming. *)
+
+
+module For_testing : sig
+  val save_agent_core_for_keeper_measured :
+    keeper_name:string -> session_dir:string -> history_retained:int ->
+    boundary:Agent_core.Checkpoint_objects.boundary ->
+    Agent_core.Checkpoint.t -> (save_agent_core_outcome * int option, string) result
+  (** Count payload bytes from the message objects, the head and fallback
+      archive writes in this save. A stale no-op and a hardlink write no payload bytes. [None]
+      means an archive write may have partially failed, or the count overflowed;
+      callers must not present it as a measured zero. This is a logical payload
+      count, not physical device traffic, metadata, or fsync traffic. New store
+      write paths must report their payload through the same observation. *)
+
+  val retained_payload_bytes : directory:string -> int
+  (** Recursively count logical regular-file bytes once per device/inode,
+      without following symlinks. Intended for a private benchmark directory. *)
+
+  val with_before_history_link : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Pause the accepted history-link syscall job. The hook must not perform
+      Eio effects; the caller retains its checkpoint transaction until the
+      syscall job completes. *)
+
+  val retain_exact_snapshot_with_writer :
+    write_checkpoint_bytes:
+      (on_durable_commit:(unit -> unit) -> ownership_root:string ->
+       path:string -> bytes:string ->
+       (Keeper_fs.durable_commit_outcome, Keeper_fs.durable_write_error) result) ->
+    session_dir:string -> exact_checkpoint_snapshot -> checkpoint_installation
+
+  val save_agent_core_if_source_with_observer :
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    boundary:Agent_core.Checkpoint_objects.boundary ->
+    Agent_core.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_agent_core_if_source_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error ->
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    boundary:Agent_core.Checkpoint_objects.boundary ->
+    Agent_core.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_agent_core_if_source_with_acquire_failure :
+    acquire_failure:File_lock_eio.durable_lock_error ->
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    boundary:Agent_core.Checkpoint_objects.boundary ->
+    Agent_core.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_agent_core_if_source_with_writer :
+    write_checkpoint_bytes:
+      (on_durable_commit:(unit -> unit) ->
+       ownership_root:string ->
+       path:string ->
+       bytes:string ->
+       (Keeper_fs.durable_commit_outcome, Keeper_fs.durable_write_error) result) ->
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    boundary:Agent_core.Checkpoint_objects.boundary ->
+    Agent_core.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_agent_core_if_source_with_post_commit_unwind :
+    post_commit_unwind:(unit -> unit) ->
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    boundary:Agent_core.Checkpoint_objects.boundary ->
+    Agent_core.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_agent_core_for_keeper_with_before_stage :
+    before_stage:(Keeper_fs.durable_write_stage -> unit) ->
+    keeper_name:string ->
+    session_dir:string ->
+    history_retained:int ->
+    boundary:Agent_core.Checkpoint_objects.boundary ->
+    Agent_core.Checkpoint.t ->
+    (save_agent_core_outcome, string) result
+  (** {!save_agent_core_for_keeper} with [before_stage] run just before each
+      filesystem step of the canonical write. *)
+end

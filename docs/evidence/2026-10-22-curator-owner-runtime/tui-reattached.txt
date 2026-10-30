@@ -1,0 +1,56 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+                                                                                                        │[Recent] Changes · 0 keepers (1 offline)
+  MASC Lanes  Candidate orders  All runtimes  ▸Lanes (12 lanes)  13:19:15  HTTP [connected]             │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────── │───────────────────────────────────────────────────────
+   All lanes · observed 13:19:15                                                                        │curator-source-1196 · turn 3 · last event 8m27s
+ LANE                                               STATE                                               │  calls · newest first
+ Exact-output · Librarian                           idle · 1 admitted slots                             │■    keeper_memory_search                           1ms
+ Exact-output · HITL Auto Judge                     no retained runs · 1 admitted slots
+ Exact-output · Board Attention                     no retained runs · 1 admitted slots
+ Exact-output · Verifier                            no retained runs · 1 admitted slots
+ Exact-output · Browser Stagehand                   off · 0 finishing · off; candidates retained
+ Exact-output · Candle Appraiser                    off · 0 finishing · off; candidates retained
+ Browser · Browser Lane (live)                      on; 0 connected clients
+ Browser · Browser Lane (automation)                on; executor not registered
+ Browser · Browser Lane (stagehand)                 on; executor not registered
+ Machines · MSX                                     on; no screen published
+ Machines · DOS                                     on; no screen published
+ Packages · curator-qualification.toml              configured on; worker running: 01a161d4-4188-7000-…
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────
+   curator-qualification.toml
+   Package declaration and its owned observation workers.
+   Identity:
+   declaration//private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022
+   -3ksh84lf/.masc/config/lane-addons/curator-qualification.toml
+   Reading: configured on; worker running: 01a161d4-4188-7000-b79c-17a3edec7769 · live attached
+   TOML:
+   /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.m
+   asc/config/lane-addons/curator-qualification.toml
+   Installation: curator-qual-1196
+   Run: curator-qualification-scope
+   Package: workspace-curator · Workspace Curator worker
+   Desired revision: 5d89cd3fcf651a9bdf6725377f3d2ff83d2e4fd748590f0b41f24d085176d12d
+   Source revision: 792cbe4de0e2b5a5188d2cd61f53907dc9c539d0421dc27af774374349d0477c
+   Instance: 01a161d4-4188-7000-b79c-17a3edec7769
+   Incarnation: 01a161d4-4188-7000-b79c-17a3edec7769
+   Run: curator-qualification-scope
+   Package: workspace-curator · 0.1.0
+   Worker: live attached
+   Applied declaration revision: 5d89cd3fcf651a9bdf6725377f3d2ff83d2e4fd748590f0b41f24d085176d12d
+   Exact outputs ([ / ] choose, e opens its runtime.toml table):
+   › briefing · bound: glm-coding.glm-5.3-flash
+   classification · bound: glm-coding.glm-5.3-flash
+
+  j/k:move  o / A:Lane Add-ons  d:reading  i:read issues  Right / Enter:open  Esc:dashboard  q:quit  …?
+ › to curator-source-1196   (i to write)

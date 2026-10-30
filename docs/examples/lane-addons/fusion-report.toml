@@ -1,0 +1,10 @@
+id = "fusion-report"
+run_id = "fusion-report"
+manifest_path = "../../../addons/fusion-report/lane.toml"
+
+[binding]
+[[binding.sources]]
+source_id = "fusion-output"
+kind = "lane_output"
+installation_id = "fusion-results"
+selection = "latest_completed"

@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Trusted semantic click fixture</title>
+<style>
+  body { min-height:400px }
+  #row { position:absolute;left:30px;top:25px;width:350px;height:100px;background:#ddd }
+  #more { opacity:0;margin:25px }
+  #row:hover #more { opacity:1 }
+  #menu { position:absolute;left:30px;top:150px }
+  #label { display:contents }
+  #hidden-control { display:none }
+  #guards { position:absolute;left:450px;top:30px }
+  #covered { position:absolute;left:0;top:130px;width:100px;height:50px }
+  #cover { position:absolute;left:0;top:130px;width:100px;height:50px;background:black;z-index:2 }
+</style>
+<p id="result" style="position:absolute;top:260px">waiting</p>
+<div id="row">Hover this message <button id="more">More actions</button></div>
+<div id="menu" hidden><button id="select" role="menuitem">Choose item</button></div>
+<div id="guards">
+  <button id="disabled" disabled>Disabled</button>
+  <div aria-disabled="true"><button id="aria-disabled">ARIA disabled</button></div>
+  <button id="covered">Covered</button><div id="cover"></div>
+  <button class="ambiguous">First</button><button class="ambiguous">Second</button>
+  <button id="stale">Remove me</button>
+  <input id="hidden-control" type="checkbox"><label id="label" for="hidden-control">Visible label</label>
+</div>
+<script>
+window.fixtureEvents = [];
+const record = event => {
+  window.fixtureEvents.push({type:event.type,trusted:event.isTrusted,target:event.target.id});
+};
+for (const type of ['pointerdown','mousedown','click']) document.addEventListener(type,record,true);
+let pointer = false;
+document.querySelector('#more').onpointerdown = event => { pointer = event.isTrusted; };
+document.querySelector('#more').onmousedown = event => {
+  if (pointer && event.isTrusted) document.querySelector('#menu').hidden = false;
+};
+document.querySelector('#select').onclick = event => {
+  if (event.isTrusted) document.querySelector('#result').textContent = 'trusted selection';
+};
+document.querySelector('#stale').onclick = () => document.querySelector('#stale').remove();
+</script>

@@ -1,0 +1,18 @@
+nvidia/nemotron-3-ultra-550b-a55b:free basic 200 content=OK finish=stop
+nvidia/nemotron-3-ultra-550b-a55b:free toolcall 200 NO_TOOL_CALL finish=stop
+nvidia/nemotron-3-ultra-550b-a55b:free nothink 200 reasoning_tokens=0 content=391
+thinkingmachines/inkling:free basic 403 thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/ap
+thinkingmachines/inkling:free toolcall 403 thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai
+thinkingmachines/inkling:free nothink 403 thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/
+nvidia/nemotron-3.5-super-vl:free basic 200 content=OK finish=stop
+nvidia/nemotron-3.5-super-vl:free toolcall 200 tool=get_weather
+nvidia/nemotron-3.5-super-vl:free nothink 200 reasoning_tokens=0 content=391
+recursive/flint-v1.0:free basic 200 content=OK finish=stop
+recursive/flint-v1.0:free toolcall 429 Provider returned error  [provider_429 on first try; this is the retry]
+recursive/flint-v1.0:free nothink 400 Reasoning is mandatory for this endpoint and cannot be disabled. 
+xingchen-agi/xing4.0-29b-a4b:free basic 200 content=1.  **Analyze the Request:** The user wa finish=length
+xingchen-agi/xing4.0-29b-a4b:free toolcall 200 tool=get_weather
+xingchen-agi/xing4.0-29b-a4b:free nothink 200 reasoning_tokens=0 content=391
+deepseek/deepseek-v4.1-flash-1017 basic 200 content=OK finish=stop
+deepseek/deepseek-v4.1-flash-1017 toolcall 200 tool=get_weather
+deepseek/deepseek-v4.1-flash-1017 nothink 200 reasoning_tokens=0 content=391

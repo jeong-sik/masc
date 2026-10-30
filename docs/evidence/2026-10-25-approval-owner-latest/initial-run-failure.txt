@@ -1,0 +1,8 @@
+test suite	Checkout	2026-10-25T04:56:50.9742007Z HEAD is now at 5d50121d docs: bind audit history repair to PR 45895 and clarify validation scope
+test suite	Test	2026-10-25T04:59:35.5516972Z File "lib/keeper_approval/audit.ml", line 572, characters 22-33:
+test suite	Test	2026-10-25T04:59:35.5517621Z 572 |             { stage = Read_recent
+test suite	Test	2026-10-25T04:59:35.5518050Z                             ^^^^^^^^^^^
+test suite	Test	2026-10-25T04:59:35.5518632Z Error: This variant expression is expected to have type write_stage
+test suite	Test	2026-10-25T04:59:35.5519350Z        There is no constructor Read_recent within type write_stage
+test suite	Test	2026-10-25T05:01:40.4421980Z ##[error]Process completed with exit code 1.
+test suite	Test	2026-10-25T05:01:40.4421980Z ##[error]Process completed with exit code 1.

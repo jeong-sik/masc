@@ -1,0 +1,11 @@
+{
+  "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/keeper-scale-evidence-v3-faults-projection-fixed.json",
+  "sha256": "ae0b562f2d7bf2f3156b717338b085b9a929e8b309ac99641cf4b523d091165a",
+  "cases": 25,
+  "passed": true,
+  "masc_processes_started": 0,
+  "harness_hash_matches_reviewed_source": true,
+  "fault_probe_hash_matches_reviewed_source": true,
+  "reviewer_reran_full_fault_probe": false,
+  "scope": "Read original root-produced Python fault-probe receipt and verified exact reviewed source binding; source-extracted five-case projection check separately rerun by reviewer."
+}

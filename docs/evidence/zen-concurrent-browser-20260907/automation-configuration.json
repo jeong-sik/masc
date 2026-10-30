@@ -1,0 +1,81 @@
+{
+  "result": "passed",
+  "server_source": "3f80b0bef240373abdcbef8e0a668e8130b5fbbe",
+  "server_sha256": "3fe98ff8b1a742ebfc6dc19ed4c66e58d0b6c7d9f977d69e6dd71bf3958e5a5b",
+  "server_port": 61027,
+  "runtime": "isolated temporary MASC runtime",
+  "config_sha256": "7ac5392ff7ffe2b2ac403ac2a3d5c08d7bc5a4e8595c2778853ed8121badb9cf",
+  "browser_configuration": {
+    "webdriver_url": "http://127.0.0.1:61026",
+    "binary": "<user-applications>/Zen.app/Contents/MacOS/zen"
+  },
+  "geckodriver_binary_override": false,
+  "measurements": [
+    {
+      "operation": "session",
+      "status": 200,
+      "elapsed_ms": 3157.1
+    },
+    {
+      "operation": "goto",
+      "status": 200,
+      "elapsed_ms": 93.4
+    },
+    {
+      "operation": "read",
+      "status": 200,
+      "elapsed_ms": 45.8
+    },
+    {
+      "operation": "screenshot",
+      "status": 200,
+      "elapsed_ms": 85.7
+    },
+    {
+      "operation": "session",
+      "status": 200,
+      "elapsed_ms": 341.8
+    }
+  ],
+  "proof_script_sha256": "402a492d6a2eadb939f5c47a59e47e9b9da443d61b93152155b6c8d132c17922",
+  "observed_session": {
+    "http_status": 200,
+    "moz_firefox_options": {
+      "args": [
+        "-headless"
+      ],
+      "binary": "<user-applications>/Zen.app/Contents/MacOS/zen"
+    },
+    "browser_name": "firefox",
+    "process_id": 37679,
+    "process_executable": "<user-applications>/Zen.app/Contents/MacOS/zen",
+    "application_name": "Zen",
+    "application_ini_sha256": "b6e38078933843dc6039cc7cbeadb4e349251cc767a16d7693ba2d6fc9921cb9",
+    "webdriver_browser_version": "1.22b"
+  },
+  "screenshot": {
+    "path": "configured-zen-automation.png",
+    "bytes": 35918,
+    "sha256": "bd3c07bb6c5a4509390323e77656be9e7f88ed6ba00bb051dc18c9dc1edab4f8"
+  },
+  "tab_id": 1,
+  "automation_session_closed": true,
+  "restored_driver": {
+    "pid": 55960,
+    "port": 61026,
+    "ready": true,
+    "detached": true
+  },
+  "config_unchanged": true,
+  "receipt_corrections": [
+    "The observed capabilities browserVersion is a WebDriver browser version (1.22b), not a Gecko engine version.",
+    "Initial restored child stopped with harness exit; a detached replacement was started and independently rechecked."
+  ],
+  "server_identity": {
+    "pid": 38354,
+    "process_executable": "/tmp/masc-zen-research-20260907/masc-3f80-macos/masc-macos-arm64",
+    "file_sha256_verified": true
+  },
+  "receipt_redaction": "The user Applications prefix and temporary runtime base are redacted; raw receipt SHA-256 retained.",
+  "raw_receipt_sha256": "0d6eccfa3aae2735be2af9c259323b55443e257f91a3eed264ddb44c55879753"
+}

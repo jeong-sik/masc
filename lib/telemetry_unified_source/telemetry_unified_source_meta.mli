@@ -1,0 +1,56 @@
+(** Metadata and store discovery helpers for unified telemetry sources. *)
+
+open Telemetry_unified_source
+
+val observe_source_read_failure : source -> site:string -> error:string -> unit
+val observe_source_read_failure_exn : source -> site:string -> exn -> unit
+val protect_source_read : source -> site:string -> default:'a -> (unit -> 'a) -> 'a
+
+type read_result = {
+  entries : Yojson.Safe.t list;
+  total_matching_entries : int;
+  truncated : bool;
+}
+
+val fixed_store_location :
+  masc_root:string -> source -> Dated_jsonl.Store.location option
+(** The store a fixed-path source reads. [masc_root] is [<base>/.masc]. *)
+
+val keeper_metric_location : masc_root:string -> string -> Dated_jsonl.Store.location
+val execution_receipt_location : masc_root:string -> string -> Dated_jsonl.Store.location
+(** A keeper's metric and execution receipt stores, by keeper name. *)
+
+val fixed_store_dir : masc_root:string -> source -> string option
+val source_freshness_slo_s : ?keeper_keepalive_interval_s:float -> source -> float
+val source_producer : source -> string
+
+val source_dashboard_surface : source -> string
+(** The route this source is read back through. Producers used to spell the
+    path out where they reported a coverage gap, so the declared surface and
+    the reported one could disagree with nothing comparing them. *)
+val source_metadata_fields :
+  ?keeper_keepalive_interval_s:float ->
+  masc_root:string ->
+  source ->
+  (string * Yojson.Safe.t) list
+
+val replay_retention_json :
+  ?keeper_keepalive_interval_s:float ->
+  base_path:string ->
+  masc_root:string ->
+  sources:source list ->
+  unit ->
+  Yojson.Safe.t
+
+type store_dir_state =
+  | Store_missing
+  | Store_directory
+  | Store_invalid
+
+val classify_store_dir : source -> site:string -> string -> store_dir_state
+val discover_keeper_metric_dirs : string -> (string * string) list
+val is_directory : source -> site:string -> string -> bool
+val is_jsonl_file : source -> site:string -> string -> bool
+val discover_trajectory_keeper_dirs_in_root : string -> (string * string) list
+val discover_trajectory_keeper_dirs : string -> (string * string) list
+val discover_execution_receipt_dirs : string -> (string * string) list

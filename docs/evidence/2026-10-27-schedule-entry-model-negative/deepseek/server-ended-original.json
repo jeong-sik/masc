@@ -1,0 +1,24 @@
+{
+  "url": "http://127.0.0.1:61815",
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace",
+  "forced_kill": false,
+  "pid": 87160,
+  "started_at_unix": 1793065474.5966551,
+  "argv": [
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/masc",
+    "start",
+    "--base-path",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "61815"
+  ],
+  "executable_sha256": "8fb19608eac66c5b0cbaf10cc5a549ae9e3093222d4a504abcd8b6e85473adfe",
+  "direct_owned_child": true,
+  "observation_ended_at_unix": 1793065503.4103,
+  "returncode_at_observation_end": null,
+  "stop_reason": "normal termination of exact directly spawned owned child after bounded observation",
+  "returncode": 0,
+  "stopped_at_unix": 1793065503.910343
+}

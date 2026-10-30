@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-08-19T09:48:00Z",
+  "purpose": "Cross-Verification 행 duration 축 — 검증 실행의 지속과 재시작 관통",
+  "source": "<base-path>/.masc/verification-runs.jsonl",
+  "population": { "registrations": 65, "completions": 65, "orphans": 0 },
+  "window": {
+    "first": "2026-08-18T02:57Z",
+    "last": "2026-08-19T09:40Z",
+    "span_hours": 30.7,
+    "last_24h": 4,
+    "latest_relative": "캡처 8분 전"
+  },
+  "elapsed_seconds": { "min": 3, "median": 7, "max": 125 },
+  "distribution_by_6h": {
+    "08-18 02시대": 2, "08-18 03시대": 19, "08-18 04시대": 6, "08-18 05시대": 18,
+    "08-18 06시대": 12, "08-18 07시대": 3, "08-18 09시대": 1,
+    "08-18 20시대": 1, "08-18 23시대": 1, "08-19 02시대": 1, "08-19 09시대": 1
+  },
+  "producers_top": {
+    "keeper-polisher-agent": 8,
+    "keeper-rw-e0-r4-20260818-build-b-agent": 7,
+    "keeper-rw-e0-r4-20260818-research-agent": 5,
+    "keeper-rw-e0-r6-20260818-research-agent": 5,
+    "keeper-rw-e0-r7-20260818-build-b-agent": 5
+  },
+  "verdict": "duration 축 충족 — 30.7시간 창에 65건이 기록되고 최신이 캡처 8분 전이라 24h 사다리를 관통한다. 등록 65와 완료 65가 일치해 고아 실행이 없고, 소요는 중앙값 7초로 짧다.",
+  "restart_crossing": "08-19 오전 재배포(observables endpoint가 404에서 200으로 바뀐 시점)를 사이에 두고 08-18 23:59·08-19 02:48·08-19 09:40 실행이 이어진다 — 재시작을 가로질러 같은 스토어에 누적된다.",
+  "caveats": {
+    "burst_shaped": "분포가 고르지 않다. 08-18 03~06시대에 55건이 몰려 있고 이후는 하루에 몇 건이다. E0 캠페인이 돌던 구간의 부산물이라 '지속'은 스토어의 연속성이지 균일한 트래픽이 아니다.",
+    "single_producer_recently": "08-18 20시 이후 실행은 전부 keeper-rondo-agent 한 곳에서 나왔다."
+  }
+}

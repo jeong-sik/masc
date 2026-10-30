@@ -1,0 +1,204 @@
+(** Screen dispatch and shared rendering projections.
+    Board, Code, MCP resource, Approval, Fusion, Verification, Repository,
+    Work, Lanes/Clients, Activity/Logs, System Config, Keepers,
+    System/Runtime/Tools/Metrics, Overlay/Modal, and Connectors/Browser Lane
+    screens are owned by {!Masc_tui_render_board}, {!Masc_tui_render_code},
+    {!Masc_tui_render_resources}, {!Masc_tui_render_approvals},
+    {!Masc_tui_render_fusion}, {!Masc_tui_render_verification},
+    {!Masc_tui_render_repositories}, {!Masc_tui_render_work},
+    {!Masc_tui_render_lanes}, {!Masc_tui_render_activity},
+    {!Masc_tui_render_config}, {!Masc_tui_render_keepers},
+    {!Masc_tui_render_runtime}, {!Masc_tui_render_overlays} and
+    {!Masc_tui_render_connectors}. *)
+
+module Frame_presenter = Masc_tui_frame_presenter
+module Ask_projection = Masc_tui_ask_projection
+module Ask_layout = Masc_tui_ask_layout
+module Board_detail = Masc_tui_board_detail
+module Magnitude = Masc_tui_magnitude
+module Message_layout = Masc_tui_message_layout
+module Tool_detail = Masc_tui_tool_detail
+module Retained_view = Masc_tui_retained_view
+module Metrics_tail = Masc_tui_metrics_tail
+module Observation_layout = Masc_tui_observation_layout
+module Context_state = Masc_tui_context_state
+module Keeper_activity = Masc_tui_keeper_activity
+module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_diff = Masc_tui_keeper_chat_diff
+module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
+module Render_schedule = Masc_tui_render_schedule
+module Agenda = Masc_tui_agenda
+module Markdown = Masc_tui_markdown
+module Markdown_cache = Masc_tui_markdown_render_cache
+module Composer = Masc_tui_composer
+module Composer_projection = Masc_tui_composer_projection
+module Keeper_control = Masc_tui_keeper_control
+module Task_selection = Masc_tui_task_selection
+module Tool_tree = Masc_tui_tool_tree
+module Theme_choice = Masc_tui_theme_choice
+module Planning_detail = Masc_tui_planning_detail
+module Link = Masc_tui_link
+module Status = Masc.Keeper_status_runtime
+module Render_tools = Masc_tui_render_tools
+val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
+
+val set_table_frame : bool -> unit
+
+val panel_input_owner :
+  Masc_tui_types.state -> terminal_rows:int -> Masc_tui_presented.panel_owner option
+(** The command panel or its search editor selected by the actual frame. *)
+
+val acting_pane_columns : Masc_tui_types.state -> terminal_cols:int -> int
+(** The current Activity pane reservation at this terminal width, usable
+    before a frame is built when reconciling interaction bounds. *)
+
+val acting_pane_suppressed : Masc_tui_types.state -> bool
+(** Whether this frame draws no Activity pane whatever the reader chose: a
+    modal covers the whole terminal, and the Activity screen and the Browser
+    Lane already fill their own. The pane's key reads this too, so a press
+    cannot move a choice the reader has no way to see. *)
+
+(** What a press on this terminal row opens in the chat history the last frame
+    drew, and {!Masc_tui_message_layout.Action_none} for any row outside it.
+
+    Absolute terminal rows: the two-pane split places the chat beside the
+    roster rather than below it, so a line keeps the vertical position its
+    buffer gave it. Answers {!Action_none} until a frame has drawn a history,
+    so a press cannot be served by a row that is no longer on screen. *)
+val keeper_roster_marquee_target :
+  Masc_tui_types.state -> cols:int -> string option
+
+type lane_run_tool_counts = {
+  completed : int;
+  deferred : int;
+  failed : int;
+  other : int;
+}
+
+type memory_state =
+    Memory_ordinary
+  | Memory_warning
+  | Memory_degraded
+  | Memory_no_current
+  | Memory_source_only
+  | Memory_starving
+  | Memory_read_error
+module Span = Masc_tui_span
+module Diff = Masc_tui_diff
+val config_models_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
+(** The models pane's scroll bound: the document it actually draws (table or
+    stacked items at the current width), not a row count. *)
+
+val config_models_stacked : Masc_tui_types.state -> bool
+(** Whether the models pane draws stacked items at the current width. *)
+
+val tools_scrolled : Masc_tui_types.state -> Masc_tui_types.scrolled
+val render_tools :
+  Masc_tui_types.state ->
+  Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+val config_content_height : Masc_tui_types.state -> int
+val prompts_detail_viewport : Masc_tui_types.state -> int * int
+(** Wrapped selected prompt/asset row count and the detail's visible rows.
+    Page and edge keys use the same document and geometry as drawing. *)
+val context_inspector_viewport : Masc_tui_types.state -> int * int
+val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
+val keeper_deletions_viewport : Masc_tui_types.state -> int * int
+val help_viewport : Masc_tui_types.state -> int * int
+val patch_modal_horizontal_limit : Masc_tui_types.state -> int
+(** Largest body-cell offset needed to read a patch line while keeping its
+    old/new line numbers and change marker fixed. *)
+
+val patch_modal_viewport : Masc_tui_types.state -> int * int
+(** The patch review overlay's diff-row count and the rows it shows, so the
+    page keys move a window and the end key reaches the end. *)
+
+val link_modal_viewport : Masc_tui_types.state -> int * int
+(** The link preview overlay's line count and the rows it shows, so the page
+    keys move a window rather than a fixed number of lines. *)
+
+val agenda_lines : Masc_tui_types.state -> Masc_tui_agenda.line list
+(** The agenda panel's rows, as the frame draws them. The keypress that walks
+    the rows Enter can act on reads the same list, so the cursor cannot name a
+    row the frame is not drawing. *)
+
+val agenda_viewport : Masc_tui_types.state -> int * int
+val task_detail_viewport : Masc_tui_types.state -> int * int
+(** Wrapped physical row count and visible body height for the current Task
+    reading, including its metadata and the actual split-pane width. *)
+val planning_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical row count and reader height of the current Goal detail,
+    including its pinned action rows and actual split-pane width. *)
+val agenda_scroll_position : Masc_tui_types.state -> int
+(** The scroll currently drawn, following a selected target only during
+    target navigation. Page reading retains its own window. *)
+val presets_viewport : Masc_tui_types.state -> int * int
+(** Wrapped detail row count and height below the Presets selection list. *)
+val answering_viewport : Masc_tui_types.state -> int * int
+val answering_selected_target :
+  Masc_tui_types.state -> lines:Masc_tui_answering.line list -> string option
+(** The selected keeper only when its actionable row lies in the rendered
+    Answering window. Paging away leaves no visible target until movement
+    brings the cursor back into view. *)
+(** Pure projection for the visible Recent pane, or [None] when it will not
+    consume chunks. Dimensions are the raw terminal measurement. The loop
+    stores this result inside frame Build timing; rendering never stores it. *)
+val acting_pane_chunk_projection :
+  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int ->
+  Masc_tui_acting.chunk_projection option
+
+val frame_choice :
+  Masc_tui_types.state -> terminal_rows:int ->
+  [ `Too_small of int
+  | `Play_card of Masc_tui_play_card.t
+  | `Collab of Masc_tui_collab.t
+  | `Account_login of Masc_tui_account_login.t
+  | `Lane_addons of Masc_tui_lane_addons.t
+  | `Detail_reading of Masc_tui_detail_reading.t
+  | `About | `Palette | `Context | `Keeper_deletions | `Help
+  | `Agenda | `Answering | `Patch | `Link
+  | `Queue of Masc_tui_types.queue_panel
+  | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
+(** The visible surface or overlay, also used before preparing Home focus. *)
+
+val queue_below_play : Masc_tui_types.state -> terminal_rows:int -> Masc_tui_types.queue_panel option
+(** The Queue that would own input with Play omitted, respecting the same
+    compact and overlay priority as [frame_choice]. *)
+
+val render :
+  home:Masc_tui_home.prepared Lazy.t ->
+  compact_recovery_notice:string option ->
+  Masc_tui_types.state ->
+  Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
+  Masc_tui_approvals_model.approval_row option *
+  Masc_tui_press.press_target Masc_tui_hit.zones *
+  Masc_tui_pane_selection.layout *
+  Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame *
+  (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t
+(** The frame without press marks, where each marked text landed in it, and
+    where each of its panes sits. Commit the zones, panes, and Activity
+    input authority and chat row actions only once the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy
+    reading for this synchronous Build only. Frame preparation and drawing
+    may force it; neither awaits, shares it with another domain, nor mutates
+    its source inputs between those forces. Other surfaces leave it unforced. *)
+
+val browser_lane_scroll_limit :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int ->
+  Masc_tui_types.Browser_lane_view.t -> int
+
+val browser_lane_selection_scroll :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int ->
+  Masc_tui_types.Browser_lane_view.t -> int
+(** Reveal the selected node's first wrapped row after explicit selection. *)
+
+
+val runtime_config_status_scroll_limit :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> int
+
+val browser_history_scroll_limit : Masc_tui_types.state -> terminal_rows:int -> cols:int -> Masc_tui_types.Browser_history.t -> int
+
+val repository_studio_content_height : Masc_tui_types.state -> cols:int -> budget:int -> cursor:int -> int
+(** The repository list's actual viewport, including the selected context panel.
+    Keyboard page and cursor movement use the same geometry as rendering. *)
+
+val schedule_detail_viewport : Masc_tui_types.state -> int * int
+(** Physical-row count and height of the current Schedule evidence reader. *)

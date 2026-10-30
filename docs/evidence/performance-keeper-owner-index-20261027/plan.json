@@ -1,0 +1,70 @@
+{
+  "schema": "masc.owner-projection-index-helper-plan.v1",
+  "baseline_ref": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+  "scope": "Exact complete inventory modules in OCaml interpreter, injected Owner/projection and identity canonicalizer; not actual Owner actors, production path normalization, native server or Keeper population",
+  "fixture_dependencies": {
+    "Keeper_owner": "distinct handles holding an Atomic int option projection",
+    "Keeper_owner_reducer.projection": "int option",
+    "Keeper_registry_types.canonical_base_path_exn": "identity on already canonical fixture keys; actual validation/environment/filesystem costs excluded",
+    "Set_util.StringMap": "exact current Map.Make(String) declaration"
+  },
+  "populations": [
+    2,
+    30,
+    300
+  ],
+  "order_per_population": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline"
+  ],
+  "phases": [
+    "install",
+    "lookup_sweep",
+    "lookup_miss",
+    "replace",
+    "stale_remove",
+    "current_remove"
+  ],
+  "sweeps_per_cell": 1000,
+  "semantic_seed": [
+    2026,
+    10,
+    27
+  ],
+  "semantic_random_steps": 20000,
+  "warmup_or_discard": "none; semantic work precedes measurement; full_major before each phase outside counters/clocks",
+  "sources": {
+    "baseline": {
+      "full_file_sha256": "75081348d96afa2d7c9e9d5c05a74cb95063e4110d713775a729f77892b380c8"
+    },
+    "candidate": {
+      "full_file_sha256": "f625a542b4aaced6974093660b85976f8d9fdd7f32effa30ce9291777572b445"
+    }
+  },
+  "set_util_full_file_sha256": "2c25c4d3e12c2589d91ca80b123ad238e6125fe066d7a24722c402dad81e513d",
+  "script_sha256": "dc1c3fb3eacef86e8436378653d49aea00964a91b500123e1c9752926733659e",
+  "generated_probe_sha256": "26f0c68cc3a6b0681221c4e7b332f680936a16e08ab1feb8475cb7efb4e0c0bb",
+  "selected_execution_inputs": {
+    "/Users/dancer/.opam/5.5.1/bin/ocaml": "3addf929a311601f68553d0aa6d48294af02934316d39a98f46bc09a3b2b1b60",
+    "/Users/dancer/.opam/5.5.1/lib/mtime/mtime.cma": "3612e34dbf4cfa678a26b168f4d9f7104ae8f98f9476bc104181533c918da3a4",
+    "/Users/dancer/.opam/5.5.1/lib/mtime/clock/mtime_clock.cma": "cd33f778e4ca1046870f613ddb19d952cfb0a3363bcdcd1398806676476bd39d"
+  },
+  "actual_interpreter_version": "The OCaml toplevel, version 5.5.1",
+  "command": [
+    "/Users/dancer/.opam/5.5.1/bin/ocaml",
+    "-noinit",
+    "-noprompt",
+    "-I",
+    "+unix",
+    "-I",
+    "/Users/dancer/.opam/5.5.1/lib/mtime",
+    "-I",
+    "/Users/dancer/.opam/5.5.1/lib/mtime/clock",
+    "unix.cma",
+    "mtime.cma",
+    "mtime_clock.cma",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/probe.ml"
+  ]
+}

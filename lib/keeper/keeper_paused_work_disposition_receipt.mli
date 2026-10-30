@@ -1,0 +1,88 @@
+(** Durable typed intent receipts for explicit paused-work disposition. *)
+
+type continuation_binding =
+  | Routed of Keeper_continuation_channel.t
+  | No_channel
+
+type transfer_owner =
+  { from_keeper : string
+  ; to_keeper : string
+  ; target_trace_id : Keeper_id.Trace_id.t
+  ; source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; continuation_binding : continuation_binding
+  }
+
+type source_terminal_operation =
+  { source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
+  }
+
+type operation =
+  | Resume_owner
+  | Transfer_owner of transfer_owner
+  | Ack_source_terminal of source_terminal_operation
+
+type t =
+  { keeper_name : string
+  ; expected_trace_id : Keeper_id.Trace_id.t
+  ; operator_operation_id : string
+  ; requested_at : float
+  ; operation : operation
+  }
+
+type save_result =
+  | Created
+  | Existing of t
+
+type keeper_lock
+
+val equal : t -> t -> bool
+
+val continuation_binding_of_source :
+  Keeper_event_queue.stimulus -> continuation_binding
+(** Extract the exact routed channel carried by channel-bearing source kinds;
+    all other typed stimuli use [No_channel]. *)
+
+val continuation_binding_to_yojson : continuation_binding -> Yojson.Safe.t
+val continuation_binding_of_yojson : Yojson.Safe.t -> (continuation_binding, string) result
+
+val source_terminal_receipt_kind :
+  Keeper_event_queue_state.source_terminal_receipt -> string
+
+val store_version : string
+(** The one place the receipt store's generation is written. The schema string
+    and the directory name are both derived from it, so a shape change moves
+    both or neither. *)
+
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, string) result
+(** Strict current codec used by both public surfaces and durable loads. *)
+
+val load :
+  Workspace.config ->
+  keeper_name:string ->
+  operator_operation_id:string ->
+  (t option, string) result
+(** Load a receipt in the current schema. Retired schemas are rejected. *)
+
+val with_keeper_lock :
+  Workspace.config ->
+  keeper_name:string ->
+  (keeper_lock -> 'a) ->
+  ('a, string) result
+(** Serialize every disposition operation for one Keeper across processes. *)
+
+val save_if_absent :
+  keeper_lock -> Workspace.config -> t -> (save_result, string) result
+(** Persist [t] with a strict durable atomic write. An existing operation ID is
+    returned for exact replay or conflict handling and is never overwritten. *)
+
+val durable_receipt_exists :
+  masc_root:string -> keeper_name:string -> operator_operation_id:string -> bool
+(** Whether a receipt for this operation is on disk (#38527: the event-queue
+    projection retention predicate -- a receipt nobody can re-ask is dropped
+    from the queue's projected dispositions, one that a standing paused-work
+    receipt can still re-ask stays). Existence only: no decode, no lock.
+    [masc_root] is [<base>/.masc]. *)

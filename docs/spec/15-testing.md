@@ -1,0 +1,357 @@
+---
+status: reference
+---
+
+# Testing
+
+| 항목 | 값 |
+|------|-----|
+| Status | Draft |
+| Team | Foundation |
+| Maps to | `test/`, `lib/keeper/keeper_gate.ml`, `lib/keeper/keeper_approval_queue.ml`, `lib/eval_harness.ml`, `lib/trajectory/trajectory.ml` |
+| Dependencies | (all subsystem specs) |
+| Test Files | `test/dune`와 포함 stanza가 SSOT |
+
+---
+
+## 1. 목적
+
+MASC MCP의 검증 전략을 정의한다. 테스트는 3개 계층(Hermetic Required, Optional Env-Gated, Manual Experiment)으로 분리되며, Keeper 에이전트에 대해서는 별도의 Eval Harness(시나리오 기반 행동 평가)를 운영한다.
+
+---
+
+## 2. 검증 철학
+
+### 2.1 원칙
+
+1. **Hermetic first**: 외부 DB, 네트워크, LLM 런타임 없이 재현 가능한 테스트가 CI 필수 게이트.
+2. **Env-gated 분리**: PostgreSQL, live network, local LLM 등 환경 의존 테스트는 별도 계층으로 분리. CI 기본 green과 동일시하지 않는다.
+3. **실험은 실험**: benchmark, swarm proof, TRPG workload는 pass/fail이 아니라 proof artifact와 함께 해석한다.
+4. **기능 검증**: 제품의 입력·출력·상태 변화를 검사한다. 테스트 등록·CI 구성·검사기·증거 판정기의 자체 동작을 검사하는 테스트는 두지 않는다.
+5. **Agent harness**: Keeper 에이전트의 행동 품질은 시나리오 기반 eval harness로 측정한다.
+
+### 2.2 테스트 환경 격리
+
+`test/dune`의 `(env)` 섹션이 테스트 환경을 강제 격리한다:
+
+```
+ZAI_API_KEY=""                   (ZAI API 비활성화)
+```
+
+이 격리는 비결정적 외부 네트워크 호출을 단위 테스트에서 제거한다.
+
+---
+
+## 3. Verification Matrix (3 계층)
+
+### 3.1 Layer 1: Hermetic Required
+
+외부 의존성 없이 재현 가능한 기능 검증. 실행 시점과 범위는 헌법의 `execution_protocol`을 따른다.
+
+| 항목 | 실행 방법 | 범위 |
+|------|----------|------|
+| 단위/통합 테스트 묶음 | `dune test --root .` / `make test` | `test/dune`에 등록된 기능 테스트 |
+| SSE Storm E2E | `MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e` | SSE reconnect 시나리오 |
+| Contract Harness | `make test-contract` | Streamable HTTP and Golden Path contracts |
+
+Contract harness는 서버가 이미 떠 있다고 가정하지 않고 hermetic bootstrap 경로로 실행된다.
+
+**판정 기준**: 실행한 기능 시나리오의 결과를 해당 커밋과 범위로 기록한다.
+
+### 3.2 Layer 2: Optional Env-Gated
+
+특정 환경이 있을 때만 의미가 있는 테스트. CI 기본 green에 포함되지 않는다.
+
+| 게이트 | 테스트 파일 | 필요 환경 |
+|--------|-----------|----------|
+| Local viewer | `scripts/viewer-local-e2e-check.sh` | 빌드 도구 |
+
+규칙: env 미설정 시 skip 또는 not run. CI 로그에 "왜 안 돌았는지"가 명시되어야 한다.
+
+### 3.3 Layer 3: Manual Experiment
+
+Correctness gate가 아닌 orchestration/benchmark/behavior 실험. Runbook과 함께 해석한다.
+
+| 실험 | 스크립트 | 참조 문서 |
+|------|---------|----------|
+| Keeper fleet proof | `scripts/harness/workload/agent_swarm_live.sh` | `docs/BENCHMARK-RUNBOOK.md` |
+| Supervised delivery | - | `docs/SUPERVISOR-MODE.md` |
+| Local runtime capacity | `scripts/llama-runtime-pool.sh` | `docs/PERFORMANCE-SLO.md` |
+
+규칙: proof artifact, report, runtime 전제, 모델 선택 근거를 함께 남긴다.
+
+---
+
+## 4. 테스트 파일 인벤토리
+
+테스트 목록은 자주 변하므로 이 문서에 손관리 파일 수를 고정하지 않는다.
+현재 목록은 repo에서 직접 생성한다.
+
+```bash
+rg --files test | sort
+rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test/*/dune
+```
+
+### 4.1 dune 테스트 그룹
+
+`test/dune`은 다음 구조로 테스트를 구성한다:
+
+1. **Pure synchronous tests**: 순수 동기 기능 검증을 `(tests ...)` 블록과 개별 `(test ...)`로 선언한다.
+2. **Eio-dependent tests** (개별 `(test ...)` 블록): Eio.Mutex, Session.with_lock 등을 사용하는 테스트는 `eio eio_main` 의존으로 개별 빌드
+3. **agent core bridge tests**: `agent_core` 의존
+4. **Product script tests**: 설치·업그레이드·실행 스크립트의 사용자 동작을 검증한다. CI 러너·리뷰 가드·증거 수집기·빌드 검사기의 자체 테스트는 두지 않는다.
+
+테스트는 입력에 대한 제품의 출력·상태 변화·저장·복구를 검증한다. 소스의 함수 호출
+횟수, 문구·파일명·구현 형태를 고정하는 검사, 과거 호환만 유지하는 검사와 폐기한 기능의 부재 검사는 두지 않는다.
+TUI 화면 문구·배치·폭별 레이아웃·행 순서를 확인하는 테스트(PTY 시나리오 포함)도 두지 않는다
+(`v0.51.0`에서 181개 Python PTY 시나리오와 48개 OCaml TUI 레이아웃 테스트 제거).
+TUI 는 자주 바뀐다. TUI 검사는 보낸 요청·저장한 상태·결정만 본다.
+기능 검증에 필요한 프로토콜·권한·자원 경계는 실제 입력과 결과로 확인한다.
+
+---
+
+## 5. Test Harness Architecture
+
+### 5.1 Keeper execution-boundary tests
+
+Keeper 실행 테스트는 두 경계를 분리해서 검증한다.
+
+- typed argv/input, 명시적 cwd/redirect target, allowed-path containment,
+  sandbox confinement 같은 객관적 구조 불변식
+- exact Always Allowed, configured LLM Auto Judge, non-blocking HITL로 구성된
+  request-local Gate 흐름
+
+명령 문자열, 도구 이름, 호출 횟수, cost, entropy를 로컬 권한 분류나
+Keeper stop/pause 조건으로 사용하지 않는다. Cost, turn, tool-call 통계는
+관측 및 평가 데이터일 뿐 실행 전 차단 근거가 아니다.
+
+### 5.2 Eval Harness (lib/eval_harness.ml)
+
+시나리오 기반 Keeper 행동 평가. METR Task Standard와 OpenAI Harness 패턴에서 영감.
+
+**구성 요소**:
+
+```
+Scenario -> goal + setup_messages + tool_expectations + graders
+Runner   -> 시나리오 실행, grader 적용, EvalResult 생산
+Grader   -> Deterministic (Exact/Contains/Regex/NotContains)
+         -> ModelBased (LLM 프롬프트 + rubric)
+Metrics  -> pass@k, mean score, consistency
+```
+
+**Scenario 구조**:
+
+```ocaml
+type scenario = {
+  id : string;                    (* 고유 식별자 *)
+  category : string;              (* "safety" | "capability" | "efficiency" *)
+  goal : string;                  (* Keeper에 주어지는 목표 *)
+  tool_expectations : tool_expectation list;
+  graders : grader list;
+  tags : string list;             (* "regression" | "smoke" 등 *)
+}
+```
+
+**Grader 타입**:
+- `Deterministic`: 필드(result/tool_name/error)에 대한 Exact/Contains/Regex/NotContains 매칭. 0 지연.
+- `ModelBased`: LLM에 rubric과 결과를 제출하여 0.0-1.0 점수 산출. 비용 발생.
+
+### 5.3 Trajectory (`lib/trajectory/trajectory.ml`)
+
+Keeper tool call과 사고(thinking) 요약을 `.masc/trajectories/{keeper_name}/{trace_id}.jsonl`에
+JSONL로 기록한다. 결정적 재생, 비용 누적, 엔트로피 탐지, eval_harness 연동을 지원하며,
+메모리 내 trajectory 행은 디스크 JSONL append 성공이 확인된 뒤에만 정리(retire)한다(`#43376`).
+
+**기록 위치**: `.masc/trajectories/{keeper_name}/{trace_id}.jsonl`
+
+**tool_call_entry 필드**:
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `ts` | float | Unix 타임스탬프 |
+| `turn` | int | 세션 내 턴 번호 |
+| `round` | int | 턴 내 도구 라운드 (1-3) |
+| `execution_id` | string option | 정확한 도구 호출 실행 식별자 (`Tool.Invocation.t` 조인용) |
+| `tool_name` | string | 호출된 도구 |
+| `gate_decision` | Pass/Reject | 사전 게이트 결과 |
+| `result` | string option | 실행 결과 (게이트 차단 시 None) |
+| `duration_ms` | int | 실행 시간 |
+| `cost_usd` | float | 추정 비용 |
+
+모델이 원문 사고 블록을 비공개(withheld/redacted)로 반환한 경우 `withheld_thinking_entry`
+레코드로 턴/라운드/타임스탬프와 비공개 사유를 별도 기록한다.
+
+**trajectory_outcome**: `Completed | Failed | Timeout | Gated`.
+
+### 5.4 Judgment boundary tests
+
+LLM judgment tests are owned by the product contract they exercise. Shared
+tests do not manufacture a generic action-verifier lifecycle or infer
+semantics from tool names and prose.
+
+```
+typed effect request -> objective structure/path/sandbox invariants
+                     -> Gate: exact Always Allowed | configured LLM Auto Judge | non-blocking HITL
+                     -> execution + observation
+
+Task completion claim -> configured LLM verification
+                      -> complete | remain active
+
+cost / token / turn -> observation and aggregation only
+```
+
+---
+
+## 6. CI Pipeline
+
+### 6.1 스크립트: scripts/ci-run-tests.sh
+
+CI 테스트 실행기. 다음 기능을 제공한다:
+
+| 기능 | 설명 |
+|------|------|
+| Heartbeat logging | `CI_TEST_HEARTBEAT_SEC` (기본 30초) 간격으로 진행 상태 출력. "silent hang" 방지. |
+| Diagnostics dump | 실패 시 프로세스 스냅샷, 로그 파일 경로, 빌드 디렉토리 정보 출력. |
+| Disk observation | 사용 가능 공간이 임계값 아래로 내려가면 상태와 진단을 기록하되 실행을 중단하지 않는다. |
+| Single attempt | 명령을 정확히 한 번 실행한다. 명령의 실패 코드, timeout 124, 취소 130/143을 보존하며 성공 뒤 정리 확인이 불가능하면 125를 반환한다. |
+| Owned session | 루트 자식을 회수하기 전에 세션 정리를 마친다. Dune의 별도 action 그룹은 Linux pidfd 또는 Darwin audit token으로 식별해 종료한다. 숫자 PID 스냅샷으로 신호를 보내지 않는다. |
+
+기본 명령과 선택적 contract harness는 각각 독립 세션에서 실행한다. 먼저 루트 그룹에
+TERM을 보내 Dune의 정상 취소 전파를 허용하며, `CI_TEST_TIMEOUT_GRACE_SEC` 이후 KILL과
+기존 2초 관찰 구간을 사용한다. 식별자 획득·검사·신호 실패나 미정리 상태는
+`cleanup_unconfirmed`로 기록한다. 경계는 `owned_session`이며, 의도적인 `setsid` 또는
+daemon 이탈 전체를 격리하는 계약은 아니다. 이미 관찰한 자식의 세션 이탈도 불확실성으로
+보고한다. 관찰 구간 뒤에도 루트가 살아 있으면 모든 신호 전송을 끝내고 `root_unsettled`로
+보고하며, 무한 `waitpid`나 자식 회수 완료를 주장하지 않는다. macOS에서는 공개
+`proc_signal_with_audittoken` API, Linux에서는 Python의
+`os.pidfd_open`과 `signal.pidfd_send_signal`을 사용할 수 있어야 한다.
+
+### 6.2 실행 흐름
+
+```bash
+# 표준 CI 경로
+make test                    # dune test --root .
+make test-contract           # scripts/harness/contract/run_all.sh
+
+# 수동 검증 — Dune action이 exact worktree server executable을 주입한다.
+MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
+```
+
+일반 스택 병합 대상 head는 소스 리뷰와 `merge-compile` 권고 기록을 확인하고,
+`.github/workflows/test.yml`은 일일(daily) 스케줄 및 수동 실행으로 전체 행동/단위 회귀
+(`@runtest`)를 검증한다. Release/Tag 후보 검증은 `.github/workflows/release-candidate.yml`이
+`config/release-behavior.json`에 선언된 통합 행동 스위트(bootstrap, TUI, viewer,
+dashboard, lane add-on smoke)를 실행한다.
+
+### 6.3 Contract Harness
+
+| Contract | 파일 | 검증 대상 |
+|----------|------|----------|
+| Streamable HTTP | `streamable_http_contract.sh` | MCP Streamable HTTP transport 프로토콜 |
+| Golden Path | `golden_path_1_contract.sh` | Workspace join -> task add -> claim -> transition 기본 경로 |
+
+Contract harness는 hermetic bootstrap으로 실행된다. 사전 서버 실행을 요구하지 않는다.
+
+---
+
+## 7. Coverage
+
+100% coverage closeout uses the checklist in
+`docs/qa/BISECT-COVERAGE-CLOSEOUT-RUNBOOK.md`. Do not close a coverage goal from
+stale `_coverage` files or from the existence of `*_coverage.ml` supplement
+tests alone.
+
+### 7.1 bisect_ppx
+
+OCaml 코드 커버리지 도구. `BISECT_FILE` 환경변수로 출력 경로를 지정한다.
+
+```bash
+scripts/coverage_percent.sh --fail-under 100
+bisect-ppx-report html --coverage-path _coverage
+```
+
+### 7.2 Coverage 파일 분포
+
+45개의 `*_coverage.ml` 파일이 커버리지 보강 목적으로 존재한다 (`test/dune`이 SSOT). 이 파일들은 기존 기능 테스트에서 누락된 분기 경로를 보완한다.
+
+---
+
+## 8. 테스트 라이브러리 의존성
+
+| 라이브러리 | 용도 |
+|-----------|------|
+| `alcotest` | 테스트 프레임워크 (assertion, test case 구조화) |
+| `masc` | 서버 라이브러리 |
+| `agent_core` | agent core 에이전트 SDK |
+| `eio`, `eio_main` | Eio 동시성 (Mutex, 스케줄러) |
+| `yojson` | JSON 직렬화/역직렬화 |
+| `mirage-crypto`, `mirage-crypto-rng` | 암호화 테스트 |
+| `cohttp` | HTTP 클라이언트 테스트 |
+| `str` | 정규식 |
+
+---
+
+## 9. 불변식
+
+- **INV-T1**: Hermetic Required 계층의 모든 테스트는 외부 ZAI credentials 없이 통과해야 한다.
+- **INV-T2**: Env-gated 테스트는 필수 환경변수 부재 시 skip 또는 not run으로 처리한다. 실패가 아니다.
+- **INV-T3**: 구조 경계 테스트는 명령 문자열이나 도구 이름에서 권한 의미를 추론하지 않는다.
+- **INV-T4**: 한 Gate 요청의 pending/HITL 상태는 다른 Keeper 또는 같은 Keeper의 독립 작업 lane을 중단시키지 않는다.
+- **INV-T5**: Contract harness는 외부 서버에 의존하지 않는다. Hermetic bootstrap 경로만 사용한다.
+
+---
+
+## 10. 테스트 작성 가이드
+
+### 10.1 새 테스트 추가 시
+
+1. `test/dune`에 테스트 등록 (pure sync면 최상단 `(tests ...)` 블록, Eio 의존이면 개별 `(test ...)` 블록)
+2. Hermetic required로 분류 가능한지 확인. 외부 의존이 있으면 env-gated 계층에 배치.
+3. `assert true` 사용 금지. `Alcotest.check` 또는 의미 있는 assertion 사용.
+4. 외부 서비스 mock은 테스트 내부에서 처리. `test/dune`의 env 격리에 의존.
+
+### 10.2 Keeper 행동 테스트 추가 시
+
+1. `eval_harness.scenario` 정의 (goal, tool_expectations, graders)
+2. 타입/경로/격리 같은 객관적 불변식은 deterministic assertion으로, 의미·품질 판단은 configured LLM grader로 검증.
+3. `trajectory` 로깅으로 재현성 확보.
+4. 외부 효과는 exact Always Allowed, configured LLM Auto Judge, nonblocking HITL의 Gate 계약을 검증.
+
+### 10.3 Keeper transcript read/cache truth
+
+`GET /api/v1/keepers/:name/chat/history` distinguishes an unknown name (404),
+known empty retained history (200 with `[]`), and unavailable history (503).
+Live registration is sufficient history authority, but current typed metadata,
+conversation files, or current TurnRecords also preserve offline/archive reads.
+History authority does not grant mutation rights.
+
+`test_server_dashboard_http_keeper_chat_page` exercises the actual GET handler
+for unknown-name cache/registry stability, offline empty history followed by
+file creation, unreadable/incomplete files, same-size/mtime atomic replacement,
+and malformed autonomous storage. A real append-once writer committing after
+the strict source read preserves HTTP 200 for that observed body, retires its
+cache ownership, and becomes visible on the next request. The suite also covers
+equivalence with the existing 100-primary/300-secondary transcript window,
+counter-only metadata writes retaining the cache, and broken metadata being
+insufficient to authorize empty history without revoking retained chat rows.
+Public 503 bodies use static refusal text; parser/provider fragments and host
+paths remain internal diagnostics.
+`test_keeper_autonomous_turn_source` covers a failed exact-run read, rejection
+of cache publication, and recovery after repair; the best-effort activity
+reader keeps its separate skip behavior.
+
+The strict transcript reader reuses the existing descriptor-bound 4 MiB physical
+reader; TurnRecord selection retains the existing retention window. Freshness
+observations include file absence and device/inode/size/mtime/ctime. Detected
+source drift retires cache ownership without rejecting an already-read body;
+initial authority/read failures still refuse success. Observations across stores do not establish
+an atomic snapshot. Intentionally absent/retired raw traces remain optional
+evidence, and trace-only enrichment retains the existing TTL policy.
+
+---
+
+## 11. References
+
+| 문서 | 경로 |
+|------|------|
+| Verification matrix | `docs/VERIFICATION-MATRIX.md` |

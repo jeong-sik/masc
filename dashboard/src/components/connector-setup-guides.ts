@@ -1,0 +1,125 @@
+// Setup guides surfaced in the dashboard. Originally just connector
+// onboarding (sidecars), now also covers in-process operator setup like
+// the hardened Docker sandbox for keeper playgrounds. The renderer in
+// setup-guide-card.ts is data-driven and does not care what the id means.
+// Keep this file data-only. Source of truth for connector steps:
+// docs/CONNECTOR-CONFIG-SCHEMA.md.
+
+interface SetupStep {
+  text: string
+  // Optional inline external link rendered after the step text.
+  link?: { href: string; label: string }
+}
+
+interface ConnectorSetupGuide {
+  title: string
+  intro: string
+  steps: SetupStep[]
+  // Bottom-row reference links (docs, libraries, dashboards on the platform side).
+  references: Array<{ href: string; label: string }>
+}
+
+export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
+  discord: {
+    title: 'Discord 봇 등록 (서버 내장 게이트웨이)',
+    intro: 'Bot Token + Message Content Intent + OAuth bot scope 필요. 서버가 Discord Gateway에 직접 연결합니다.',
+    steps: [
+      {
+        text: 'Discord Developer Portal에서 새 Application 생성.',
+        link: { href: 'https://discord.com/developers/applications', label: 'Developer Portal' },
+      },
+      { text: 'Bot 탭 → Reset Token → 토큰 복사.' },
+      { text: '쉘 환경변수 DISCORD_BOT_TOKEN 으로 export (예: ~/.zshenv 에 추가).' },
+      { text: 'Bot 탭 → Privileged Gateway Intents → Message Content Intent 활성화.' },
+      { text: 'OAuth2 → URL Generator → scope: bot, permissions: Send Messages / Embed Links / Read Message History.' },
+      { text: '생성된 URL을 열어 봇을 길드에 초대.' },
+      { text: 'masc 서버를 재기동 — 부팅 시 자동으로 Discord Gateway 에 연결됩니다.' },
+    ],
+    references: [
+      { href: 'https://discord.com/developers/docs/topics/gateway#gateway-intents', label: 'Gateway Intents' },
+      { href: 'https://discord.com/developers/docs/reference', label: 'Discord API Reference' },
+    ],
+  },
+  imessage: {
+    title: 'iMessage 권한 (macOS only)',
+    intro: '인증 토큰이 없습니다 — 대신 macOS 권한으로 서버가 직접 chat.db를 읽습니다.',
+    steps: [
+      { text: '시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한 → masc 서버를 띄우는 터미널 추가. 권한이 없으면 게이트웨이가 이유를 남기고 시작하지 않습니다.' },
+      { text: 'Messages.app 로그인 후 열어두기 (chat.db에 최근 메시지가 쌓이도록).' },
+      { text: '대화를 keeper에 연결(bind)하기. 연결되지 않은 대화는 keeper에게 전달되지 않습니다 — Messages.app에는 개인 대화가 전부 들어 있어서, 연결이 곧 전달 범위입니다.' },
+      { text: '답장은 기본적으로 자기 자신과의 대화로 갑니다. 그 대화는 자동으로 찾지만, 직접 지정하려면 MASC_IMESSAGE_SELF_CHAT_GUID에 chat GUID를 넣으세요. 받은 대화에 그대로 답하려면 MASC_IMESSAGE_REPLY_MODE=source-chat.' },
+    ],
+    references: [
+      { href: 'https://support.apple.com/en-us/guide/mac-help/mh11479/mac', label: 'macOS Privacy guide' },
+    ],
+  },
+  slack: {
+    title: 'Slack App + Socket Mode',
+    intro: 'Bot Token (xoxb-)와 App-Level Token (xapp-) 둘 다 필요합니다.',
+    steps: [
+      {
+        text: 'api.slack.com/apps에서 Create New App → From scratch.',
+        link: { href: 'https://api.slack.com/apps', label: 'Slack apps' },
+      },
+      { text: 'Basic Information → App-Level Tokens → Generate, scope connections:write → xapp- 토큰을 SLACK_APP_TOKEN에.' },
+      { text: 'Socket Mode → Enable Socket Mode 토글.' },
+      { text: 'OAuth & Permissions → Bot Token Scopes에 chat:write, app_mentions:read, im:history, im:read 추가 → Install to Workspace → xoxb- 토큰을 SLACK_BOT_TOKEN에.' },
+      { text: 'Event Subscriptions → bot events: app_mention, message.im 구독.' },
+    ],
+    references: [
+      { href: 'https://api.slack.com/apis/connections/socket', label: 'Socket Mode docs' },
+      { href: 'https://api.slack.com/scopes', label: 'OAuth scope reference' },
+    ],
+  },
+  telegram: {
+    title: 'Telegram BotFather',
+    intro: '@BotFather 한 명만 거치면 됩니다. 토큰을 MASC 서버에 설정합니다.',
+    steps: [
+      {
+        text: 'Telegram에서 @BotFather에게 /newbot 전송 → 이름과 username 입력 → 출력된 토큰을 TELEGRAM_BOT_TOKEN에.',
+        link: { href: 'https://t.me/BotFather', label: '@BotFather' },
+      },
+      { text: '(옵션) /setprivacy → Disable로 두면 봇이 그룹의 모든 메시지를 받음. 기본은 mention-only.' },
+      { text: 'TELEGRAM_BOT_TOKEN을 서버 환경변수 또는 runtime.toml에 설정한 뒤 MASC 서버를 재기동하세요.' },
+      { text: '대시보드에서 숫자 chat ID를 Keeper에 바인딩하세요. 그룹 ID는 음수일 수 있습니다.' },
+    ],
+    references: [
+      { href: 'https://core.telegram.org/bots', label: 'Telegram Bot API' },
+    ],
+  },
+  // Not a connector — operator preflight when flipping a keeper's
+  // sandbox_profile to docker in the config panel. Steps are
+  // manual verification commands because (a) we don't want the dashboard
+  // server spawning docker itself for this, and (b) "run this locally and
+  // confirm" matches the other setup-guide entries and reuses the same
+  // renderer without a new component.
+  sandbox_hardened: {
+    title: 'Keeper Docker Sandbox 프리플라이트',
+    intro:
+      "keeper의 sandbox_profile을 'docker'로 바꾸면 다음 Execute 호출부터 container에서 실행됩니다. 먼저 호스트 Docker가 준비됐는지 확인하세요.",
+    steps: [
+      {
+        text: '터미널에서 `docker info` → daemon이 응답하는지 확인. 실패하면 Docker Desktop/engine을 먼저 실행.',
+      },
+      {
+        text: '이미지 준비: `masc sandbox-image` 로 `base` 를 빌드하고 출력된 태그를 `masc sandbox-image promote base <태그>` 로 이미지 목록에 올립니다. `masc setup` 이 이 둘을 대신 합니다. keeper 는 `sandbox_image = "base"` 처럼 목록의 이름을 적습니다.',
+      },
+      {
+        text: '(강화 모드) rootless 여부 확인: `docker info --format {{json .SecurityOptions}}` 결과에 `rootless`가 포함되어야 `MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=true` 환경에서 Execute가 통과합니다. 기본값은 `false`라 생략 가능.',
+      },
+      {
+        text: '(옵션) userns 확인: 같은 명령 출력에서 `userns` 키 유무를 확인. `MASC_KEEPER_SANDBOX_REQUIRE_USERNS=true`일 때만 필수.',
+      },
+      {
+        text: "메모리/프로세스 한도 기본값 확인: `MASC_KEEPER_SANDBOX_MEMORY=2g`, `MASC_KEEPER_SANDBOX_PIDS_LIMIT=128`, `MASC_KEEPER_SANDBOX_TMPFS_SIZE=256m`. 사용 keeper가 더 필요하면 서버 기동 env에서 조정.",
+      },
+      {
+        text: "sandbox_profile을 'docker'로 저장한 뒤 해당 keeper의 다음 Execute 호출 로그를 확인. 실패하면 keeper_last_error 필드가 이 화면 위쪽에 노출됩니다.",
+      },
+    ],
+    references: [
+      { href: 'https://docs.docker.com/engine/security/rootless/', label: 'Docker rootless mode' },
+      { href: 'https://docs.docker.com/engine/security/userns-remap/', label: 'Docker userns remap' },
+    ],
+  },
+}

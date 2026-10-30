@@ -1,0 +1,13 @@
+{
+  "server_pid": 22869,
+  "worker_pid": 23002,
+  "sdk_pid": 23104,
+  "server_and_worker_exited": true,
+  "sdk_parent": 1,
+  "sdk_status_before_cleanup": "23104     1 S    54:41",
+  "source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+  "sdk_cleanup_requested": "SIGTERM",
+  "manual_sdk_cleanup_confirmed": "SDK PID absent in subsequent ps",
+  "source_attribution": "same persistent-session teardown structure predates this stack in commit 965d3120780; no demonstrated cause of orphan, space loss or provider timeout",
+  "source_hypothesis": "worker 2s abort grace can race SDK close wait 2s plus group stop grace 2s"
+}

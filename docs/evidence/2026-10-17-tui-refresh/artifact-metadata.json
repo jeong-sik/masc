@@ -1,0 +1,38 @@
+[
+  {
+    "run": 38911700463,
+    "artifacts": [
+      {
+        "id": 12051260858,
+        "name": "macos-arm64-probe-683c7950682b45a2591002e09f654515ccf02155-attempt-1",
+        "size_in_bytes": 165008207,
+        "digest": "sha256:051c3663cec773a19ca32df70ef786b5a737d5df7a4540134534f9e35c083abb",
+        "expired": false
+      }
+    ]
+  },
+  {
+    "run": 38913805271,
+    "artifacts": [
+      {
+        "id": 12052540893,
+        "name": "macos-arm64-probe-5b852597e818d2619c2f64ff6cd0baa307c17c07-attempt-1",
+        "size_in_bytes": 165014082,
+        "digest": "sha256:78b3e8f4f5e8ee6a6551c4dffc985a40982ddfcd68161e4b158e42bb4027bf1d",
+        "expired": false
+      }
+    ]
+  },
+  {
+    "run": 38918375925,
+    "artifacts": [
+      {
+        "id": 12054406530,
+        "name": "macos-arm64-probe-f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c-attempt-1",
+        "size_in_bytes": 165015884,
+        "expired": false,
+        "digest": "sha256:7eb8b7049915697322b72c3e7a73275b04a7c96611c72b9b8e7c1e4a3562017c"
+      }
+    ]
+  }
+]

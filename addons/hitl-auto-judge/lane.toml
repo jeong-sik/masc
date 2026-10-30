@@ -1,0 +1,32 @@
+id = "hitl-auto-judge"
+revision = "0.1.1"
+title = "HITL Auto Judge worker"
+ui_category = "memory_judgment"
+contributions = ["derive"]
+image = "masc-lane-hitl-auto-judge:0.1.1"
+command = ["python3", "server.py", "--state", "/state"]
+
+[world.state]
+mode = "persistent"
+
+[world.tools]
+export = ["judge"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+
+[world.exact_outputs.judgment]
+schema = "schemas/judgment.json"
+request_schema = true
+
+[world.outputs.requests]
+lanes = ["hitl/auto-judge"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","maxItems":0,"items":{"type":"object","properties":{},"additionalProperties":false}}},"required":["sources"],"additionalProperties":false}'''
+presentation = '''{"description":"Original HITL judgment requests; the decision, terminalisation and consumption remain host-owned","readings":[{"lane_id":"hitl/auto-judge","path":["pending"],"label":"Pending requests","unit":"requests","format":"number"},{"lane_id":"hitl/auto-judge","path":["finished"],"label":"Retained results","unit":"requests","format":"number"}]}'''

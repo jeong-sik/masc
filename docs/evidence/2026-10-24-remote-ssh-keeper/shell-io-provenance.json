@@ -1,0 +1,62 @@
+{
+  "observed_at_utc": "2026-10-25T00:20:30.380240+00:00",
+  "scope": "actual a317 Keeper using public command form over the owned pinned loopback SSH fixture; scripted model",
+  "runtime_source": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+  "harness_base": "058021550f99abdd274ee658f2d7c28351c5ced5",
+  "harness_sha256": "ff2c86e974ae2ac36f01d3a9cceb76bef27f09fda3a26d61b392ef7db6e3256d",
+  "binary_sha256": "d27fb1565ca8eb220cd751edb83ab193cb43932d8b9ec50fa9ae25067b38a669",
+  "runtime_builds": [
+    {
+      "release_version": "0.64.0",
+      "binary_version": "0.64.0",
+      "commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+      "commit_source": "embedded",
+      "binary_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "d27fb1565ca8eb220cd751edb83ab193cb43932d8b9ec50fa9ae25067b38a669",
+      "binary_commit_unix_ts": 1792852403.0,
+      "binary_commit_age_seconds": 35196,
+      "executable_path": "/private/tmp/mssh-candidate-runtime-a317/masc",
+      "executable_dir": "/private/tmp/mssh-candidate-runtime-a317",
+      "runtime_instance_id": "01a1706d-af03-7000-83a0-7881326bfbf6",
+      "started_at": "2026-10-25T00:19:58Z",
+      "uptime_seconds": 0
+    },
+    {
+      "release_version": "0.64.0",
+      "binary_version": "0.64.0",
+      "commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+      "commit_source": "embedded",
+      "binary_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "d27fb1565ca8eb220cd751edb83ab193cb43932d8b9ec50fa9ae25067b38a669",
+      "binary_commit_unix_ts": 1792852403.0,
+      "binary_commit_age_seconds": 35203,
+      "executable_path": "/private/tmp/mssh-candidate-runtime-a317/masc",
+      "executable_dir": "/private/tmp/mssh-candidate-runtime-a317",
+      "runtime_instance_id": "01a1706d-c888-7000-ba30-06c9b61c8109",
+      "started_at": "2026-10-25T00:20:05Z",
+      "uptime_seconds": 0
+    }
+  ],
+  "endpoint": {
+    "container": "masc-ssh-keeper-ready-20261024",
+    "host": "127.0.0.1",
+    "port": 56243,
+    "user": "masc",
+    "remote_root": "/srv/masc/playground"
+  },
+  "shim_sha256": "ad79352d398d00eb48eebdf0bc29faacd3b4de633349e377ed81d560dc379183",
+  "not_measured": [
+    "internal typed IR redirects",
+    "long remote jobs",
+    "real-model autonomy",
+    "current merged binary",
+    "unknown-release repair execution",
+    "production installation"
+  ],
+  "byte_validation": "strict read_bytes().decode UTF-8 on both payload and independent SSH readback; newline translation disabled",
+  "historical_attempt": "earlier read_text harness and /tmp/mssh-keeper-shell-io-a317 PASS are excluded; fresh bytes-preserving run retained here"
+}

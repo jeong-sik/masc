@@ -1,0 +1,33 @@
+{
+  "main": "87123f7df94a27ded447b5b05d01c2f5178de029",
+  "compiled_leaf": "1b43702d01ba465e9d1413eb900819191081e648",
+  "old_remote_heads": {
+    "40769": "0f691abfad39ac5da4b19ca6884b7daf84192788",
+    "40794": "0820996e5e0639718b6c40c3ac48986c9652c199",
+    "40795": "a1ddc270b97600b57c2705874ebb2f1f7ade1aa9"
+  },
+  "code_heads": {
+    "40769": "e523092316176bcd3d82755bccdb9b4615b865bd",
+    "40794": "7f673b0ddd7aa9667098a94ca2658d8883ebc861",
+    "40795": "1b43702d01ba465e9d1413eb900819191081e648"
+  },
+  "source_hashes": {
+    "bin/dune": "aff53f14e465d9d936b04943d2f3bcf6eaeb42e34388ba1e442dc31a17328179",
+    "bin/masc_librarian_preflight_eval.ml": "dd22a0446023c91b5f7e7cc94ab7ecb7ddaff87ebcc4f06069148a7a10266b21",
+    "lib/time_compat/dune": "185629478e995f7cbd11e85780a316e7370af5e63f4c588093e1a14d70143422",
+    "lib/types/dune": "04fa2d12ac302d9192025cc5b499920bb9908c085e91b841cbfa6c09046974a0"
+  },
+  "logs": {
+    "time-compat-red.log": "ab85b852c4448bb6115052b1442ed38ea078baac06fac70acc5759a37f1bdccc",
+    "ids-red.log": "1939fb060da43bd6bacb2f0b325a299235f2b67f839f1e08757e59d402f0f66e",
+    "build-green.log": "baf4929a34be24eab47fa27f42a5ab660cd8c885e48be4c19c747ec696c2657b"
+  },
+  "binary_sha256": "2f6f5ea50a9c2b34ea5dfeae13841ecb8c550e96cd58c5cab1f3f8e3d3b52c21",
+  "command": "opam exec --switch=5.5.1 -- env DUNE_JOBS=2 bash scripts/dune-local.sh build bin/masc_librarian_preflight_eval.exe",
+  "results": [
+    "Unbound module Time_compat",
+    "Unbound module Ids",
+    "exit 0"
+  ],
+  "scope": "Focused executable compile only; no provider execution, full build, full suite, CI or deployment"
+}

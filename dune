@@ -1,0 +1,78 @@
+(dirs
+ (:standard
+  \
+  .worktrees
+  worktrees
+  _build_codex_trpg
+  ; Ad hoc refutation probes are operator scratch, never project source.
+  refute_tmp
+  ; The running server writes here and deletes as it rotates, so a scan that
+  ; includes it races the process it is building: dune reads a proof file
+  ; into the source tree, the server drops it, and the build stops with
+  ; "File unavailable: logs/masc-runtime-health-proof.<pid>.v2". Nothing in
+  ; the tree builds from logs/ and git does not track it.
+  logs))
+
+; Generated evidence may contain incomplete source snapshots and dune files.
+; Keep those files available as data without evaluating their build stanzas.
+(data_only_dirs artifacts)
+
+; Warning 32 (unused value declaration) is set here, once, for the whole
+; tree. It used to be decided per library: of 121 stanzas under lib/, 84
+; opted in and 37 did not, so an unreachable value in any of those 37
+; produced no signal at all, and a wrapper ladder could grow four rungs deep
+; before anyone could see it. Setting it centrally means the build stops the
+; moment a value loses its last caller, in the same edit that removed it.
+;
+; Warning 69 (unused record field) joins it for the same reason, one level
+; down: 32 stops a value that lost its last caller, 69 stops a field that lost
+; its last reader. A field that only ever meets polymorphic [=] or
+; [Hashtbl.hash] counts as unread, because neither names the field; the
+; compiler cannot see that participation, so such records compare field by
+; field.
+;
+; Warning 4 (fragile match) joins them: a `| _ ->` over a variant we define
+; keeps compiling when a constructor is added, so the new case silently takes
+; the old default. With 4 on, the compiler names every match that has to
+; decide about the new constructor. A foreign type with far too many cases
+; (Unix.error) is listed once, in System_error_class.errno_of_unix_error, and
+; call sites match on the errno variant that function returns. Test
+; directories switch it off in their own env stanza.
+;
+; task-2499: The full @runtest regression on a GitHub ubuntu-24.04 runner
+; exhausts the free disk space with test executables. The CI lane selects
+; this profile via DUNE_PROFILE=ci in scripts/ci-run-test-suite.sh so only
+; the CI build strips debug symbols; local dev and release builds keep them
+; for backtraces. -no-g alone barely shrinks the executable (-0.01%);
+; linking with -ccopt -s strips C linker symbols and DWARF, which is where
+; most of the size lives, while OCaml backtrace frames stay intact (leader
+; measurement on OCaml 5.5.1: 3.1MB toy exe, -58%).
+(env
+ (dev
+  (flags
+   (:standard -w +4+32+69 -warn-error +a)))
+ (release
+  (flags
+   (:standard -w +4+32+69 -warn-error +a)))
+ (ci
+  (flags
+   (:standard -w +4+32+69 -warn-error +a))
+  (link_flags
+   (:standard -ccopt -s))))
+
+; Vendored packages are local copies of external sources. Keep the repository's
+; strict warning policy for MASC code, but do not turn vendor warnings 4 and 69 into a
+; project build error. The subdir stanza applies this override without editing
+; the vendored dune files or weakening warning 32 in the rest of the tree.
+(subdir vendor
+ (env
+  (dev (flags (:standard -w -4-69)))
+  (release (flags (:standard -w -4-69)))
+  (ci (flags (:standard -w -4-69)))))
+
+(install
+ (package masc)
+ (section bin)
+ (files
+  (scripts/check-runtime-deployment-preflight.sh as
+   masc-check-runtime-deployment-preflight)))

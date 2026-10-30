@@ -1,0 +1,61 @@
+Testing `Keeper metrics rotation'.
+This run has ID `3NUHRTH6'.
+
+  [OK]          stdlib filesystem          0   no rotation under threshold.
+  [OK]          stdlib filesystem          1   rotation at threshold.
+  [OK]          stdlib filesystem          2   rotation shifts existing backups.
+  [OK]          stdlib filesystem          3   nonexistent file safe.
+  [OK]          stdlib filesystem          4   append triggers rotation.
+> [FAIL]        stdlib filesystem          5   zero retention removes backups.
+  [FAIL]        stdlib filesystem          6   reduced retention prunes and s...
+  [FAIL]        stdlib filesystem          7   unrelated names survive cleanup.
+  [FAIL]        stdlib filesystem          8   symlink targets survive cleanup.
+  [OK]          stdlib filesystem          9   directories refuse cleanup.
+  [FAIL]        stdlib filesystem         10   directories refuse shifting.
+  [OK]          stdlib filesystem         11   zero size disables cleanup.
+  [OK]          Eio filesystem             0   no rotation under threshold.
+  [OK]          Eio filesystem             1   rotation at threshold.
+  [OK]          Eio filesystem             2   rotation shifts existing backups.
+  [OK]          Eio filesystem             3   nonexistent file safe.
+  [OK]          Eio filesystem             4   append triggers rotation.
+  [FAIL]        Eio filesystem             5   zero retention removes backups.
+  [FAIL]        Eio filesystem             6   reduced retention prunes and s...
+  [FAIL]        Eio filesystem             7   unrelated names survive cleanup.
+  [FAIL]        Eio filesystem             8   symlink targets survive cleanup.
+  [OK]          Eio filesystem             9   directories refuse cleanup.
+  [FAIL]        Eio filesystem            10   directories refuse shifting.
+  [OK]          Eio filesystem            11   zero size disables cleanup.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        stdlib filesystem          5   zero retention removes back...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT only the new current file remains
+File "test_metrics.ml", line 96, character 2:
+FAIL only the new current file remains
+
+   Expected: `["metrics.jsonl"]'
+   Received: `["metrics.jsonl"; "metrics.jsonl.1"; "metrics.jsonl.2";
+               "metrics.jsonl.9"]'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Test_metrics.test_zero_retention_discards_backups.(fun) in file "test_metrics.ml", lines 96-97, characters 2-28
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-metrics-retention-native-_x8wkrkb/baseline/_build/_tests/Keeper metrics rotation/stdlib filesystem.005.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-metrics-retention-native-_x8wkrkb/baseline/_build/_tests/Keeper metrics rotation'.
+10 failures! in 0.056s. 24 tests run.

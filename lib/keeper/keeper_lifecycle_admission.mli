@@ -1,0 +1,34 @@
+(** Pure lifecycle admission for keeper execution boundaries.
+
+    The persisted [paused] bit is the pause authority. Missing latch detail
+    while [paused = true] is fail-closed as an unclassified pause. *)
+
+type paused_latch = private
+  | Classified of Keeper_latched_reason.t
+  | Unclassified
+
+type state = private
+  | Active
+  | Paused of paused_latch
+
+val state :
+  paused:bool ->
+  latched_reason:Keeper_latched_reason.t option ->
+  state
+
+type manual_one_shot_admission =
+  | Manual_admitted_active
+  | Manual_admitted_paused_recovery of paused_latch
+
+val admit_manual_one_shot : state -> manual_one_shot_admission
+
+type autonomous_denial = Autonomous_paused of paused_latch
+
+type autonomous_admission =
+  | Autonomous_admitted
+  | Autonomous_denied of autonomous_denial
+
+val admit_autonomous : state -> autonomous_admission
+
+val state_to_wire : state -> string
+val autonomous_denial_to_wire : autonomous_denial -> string

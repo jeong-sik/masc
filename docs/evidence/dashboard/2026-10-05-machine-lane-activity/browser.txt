@@ -1,0 +1,6 @@
+(node:45136) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+2:13:41 AM [vite] (client) Re-optimizing dependencies because vite config has changed
+2:13:44 AM [vite] (client) ✨ new dependencies optimized: htm
+2:13:44 AM [vite] (client) ✨ optimized dependencies changed. reloading
+{"passed":true,"checked_at":"2026-10-04T17:13:45.906Z","browser":"149.0.7827.55","scope":"Actual Status, inventory decoder and styled rendering with synthetic HTTP. No machine owner, Runtime publication, on/off editor, native TUI or deployment execution.","checks":["MSX off retains a stable screen observation","readout provides policy guidance without an activity toggle","DOS unobserved activity is separate from its running publication","missing activity rejects the complete new inventory and labels the retained reading","explicit refresh recovers current activity without changing the publication","mobile readout has no page-wide horizontal overflow","zero writes, page errors and unexpected API routes"],"reads":3,"errors":[],"writes":[],"unexpected":[]}

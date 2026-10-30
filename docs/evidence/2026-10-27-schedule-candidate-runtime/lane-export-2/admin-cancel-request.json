@@ -1,0 +1,15 @@
+{
+  "is_derivative": true,
+  "selection": {
+    "method": "POST",
+    "path": "/api/v1/tools/masc_schedule_cancel",
+    "request_body": {
+      "schedule_id": "audit-export-0cdae5209bc849f89b60733b5cbae929-control",
+      "reason": "owned control cleanup"
+    },
+    "observed_at": 1793039511.2109702,
+    "status": 200,
+    "body_bytes": 2900,
+    "body_sha256": "dacd723289750637d6c157120af955f7ab3a9247fbb1726b72d29368a28894ad"
+  }
+}

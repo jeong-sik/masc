@@ -1,0 +1,844 @@
+(** No-LLM contracts for the coding-eval corpus and report pipeline
+    (RFC-0396 W1/W2).
+
+    Three contracts keep the corpus honest without touching a model:
+    every case declaration decodes; a pristine workspace fails its verify
+    (the task starts red); the solution overlay turns verify green (the task
+    is solvable and verify measures the right thing). The report pipeline is
+    pinned on a fixed two-row evidence file, including the row-consistency
+    guard that refuses a row disagreeing with its own verdict. *)
+
+open Alcotest
+
+(* Dune runs a test from its build directory, so a bare relative path finds
+   nothing. Same shape as test_keeper_sandbox_image_contract.ml: trust
+   DUNE_SOURCEROOT only when the anchor is visible inside it, walk upwards
+   otherwise, and fail loudly rather than skipping. *)
+let corpus_anchor = Filename.concat "benchmarks" (Filename.concat "coding" "cases")
+
+let rec find_source_root_from dir depth =
+  if depth > 8
+  then None
+  else if Sys.file_exists (Filename.concat dir corpus_anchor)
+  then Some dir
+  else (
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_source_root_from parent (depth + 1))
+;;
+
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root
+    when String.trim root <> "" && Sys.file_exists (Filename.concat root corpus_anchor)
+    -> root
+  | _ ->
+    (match find_source_root_from (Sys.getcwd ()) 0 with
+     | Some root -> root
+     | None ->
+       Alcotest.fail
+         (Printf.sprintf
+            "could not locate %s from %s -- the corpus contract cannot run"
+            corpus_anchor
+            (Sys.getcwd ())))
+;;
+
+let cases_dir () = Filename.concat (source_root ()) corpus_anchor
+
+let string_contains haystack needle =
+  let h = String.length haystack and n = String.length needle in
+  let rec loop i = i + n <= h && (String.sub haystack i n = needle || loop (i + 1)) in
+  n = 0 || loop 0
+;;
+
+let temp_dir prefix =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Sys.mkdir path 0o755;
+  path
+;;
+
+let run_quiet command =
+  (* /bin/sh via Sys.command; stdout/stderr are silenced so a red verify does
+     not spam the suite log — the exit code is the entire verdict. *)
+  Sys.command (command ^ " >/dev/null 2>&1")
+;;
+
+let copy_tree ~src ~dst =
+  let code =
+    run_quiet
+      (Printf.sprintf "cp -R %s %s" (Filename.quote (src ^ "/.")) (Filename.quote dst))
+  in
+  if code <> 0 then Alcotest.failf "cp -R %s -> %s exited %d" src dst code
+;;
+
+let verify_exit ~case_dir ~(case : Coding_eval_case.t) ~workspace =
+  run_quiet
+    (Printf.sprintf
+       "bash %s %s"
+       (Filename.quote (Filename.concat case_dir case.verify))
+       (Filename.quote workspace))
+;;
+
+let loaded_cases () =
+  match Coding_eval_case.load_cases ~cases_dir:(cases_dir ()) with
+  | Ok cases -> cases
+  | Error message -> Alcotest.failf "corpus failed to load: %s" message
+;;
+
+let test_corpus_decodes () =
+  let cases = loaded_cases () in
+  check bool "at least one case" true (List.length cases >= 1);
+  check
+    bool
+    "l1-calc-add present"
+    true
+    (List.exists (fun (c : Coding_eval_case.t) -> String.equal c.id "l1-calc-add") cases)
+;;
+
+let test_every_case_starts_red_and_solution_turns_green () =
+  let cases = loaded_cases () in
+  List.iter
+    (fun (case : Coding_eval_case.t) ->
+       let case_dir = Filename.concat (cases_dir ()) case.id in
+       let workspace = temp_dir ("coding_eval_" ^ case.id ^ "_") in
+       copy_tree ~src:(Filename.concat case_dir "workspace") ~dst:workspace;
+       let pristine = verify_exit ~case_dir ~case ~workspace in
+       check bool (case.id ^ " pristine verify fails") true (pristine <> 0);
+       copy_tree ~src:(Filename.concat case_dir "solution") ~dst:workspace;
+       let solved = verify_exit ~case_dir ~case ~workspace in
+       check int (case.id ^ " solution verify passes") 0 solved)
+    cases
+;;
+
+let test_case_json_rejects_undeclared_keys () =
+  let json =
+    `Assoc
+      [ "id", `String "x"
+      ; "level", `String "L1"
+      ; "lang", `String "python"
+      ; "timeout_sec", `Int 60
+      ; "verify", `String "verify.sh"
+      ; "prompt", `String "p"
+      ; "description", `String "d"
+      ; "extra", `String "nope"
+      ]
+  in
+  match Coding_eval_case.of_json json with
+  | Ok _ -> Alcotest.fail "expected the undeclared key to be rejected"
+  | Error message ->
+    check bool "error names the key" true (string_contains message "extra")
+;;
+
+let row_json
+      ?(provider = "ollama")
+      ?(model = "test-model")
+      ?(experiment_digest = String.make 64 'a')
+      ?(memory_mode = "off")
+      ?(cost_usd = None)
+      ?run_id
+      ?(regression_exit = None)
+      ?(edited_source_files = None)
+      ?(edited_target_files = None)
+      ?(build_exit = None)
+      ~run_index
+      ~status
+      ~verify_exit
+      ~passed
+      ()
+  =
+  let int_or_null = function
+    | Some code -> `Int code
+    | None -> `Null
+  in
+  `Assoc
+    [ "case_id", `String "l1-calc-add"
+    ; "run_index", `Int run_index
+    ; "run_id", `String (match run_id with
+          | Some run_id -> run_id
+          | None -> Printf.sprintf "%s-%s-run-%d" provider model run_index)
+    ; "provider", `String provider
+    ; "model", `String model
+    ; "experiment_digest", `String experiment_digest
+    ; "memory_mode", `String memory_mode
+    ; "status", `String status
+    ; "verify_exit", int_or_null verify_exit
+    ; "regression_exit", int_or_null regression_exit
+    ; "edited_source_files", int_or_null edited_source_files
+    ; "edited_target_files", int_or_null edited_target_files
+    ; "build_exit", int_or_null build_exit
+    ; "passed", `Bool passed
+    ; "duration_ms", `Int 1200
+    ; "recorded_at", `Float 1700000000.0
+    ; "tool_calls", `List [ `String "Read"; `String "Edit"; `String "Execute" ]
+    ; "input_tokens", `Null
+    ; "output_tokens", `Null
+    ; "cost_usd", (match cost_usd with Some cost -> `Float cost | None -> `Null)
+    ; "error", `Null
+    ]
+;;
+
+let write_jsonl path rows =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () ->
+       List.iter
+         (fun row -> output_string channel (Yojson.Safe.to_string row ^ "\n"))
+         rows)
+;;
+
+let single_cohort (report : Coding_eval_report.suite_report) =
+  match report.cohorts with
+  | [ cohort ] -> cohort
+  | cohorts -> Alcotest.failf "expected one cohort, got %d" (List.length cohorts)
+;;
+
+let test_report_pipeline_on_fixed_rows () =
+  let cases = loaded_cases () in
+  let dir = temp_dir "coding_eval_report_" in
+  let runs_path = Filename.concat dir "runs.jsonl" in
+  write_jsonl
+    runs_path
+    [ row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true ()
+    ; row_json ~run_index:2 ~status:"ok" ~verify_exit:(Some 1) ~passed:false ()
+    ];
+  let rows =
+    match Coding_eval_report.rows_of_jsonl_file runs_path with
+    | Ok rows -> rows
+    | Error message -> Alcotest.failf "rows failed to decode: %s" message
+  in
+  match Coding_eval_report.build_suite ~cases ~rows ~k:1 with
+  | Error message -> Alcotest.failf "suite failed to build: %s" message
+  | Ok report ->
+    let cohort = single_cohort report in
+    check int "total runs" 2 cohort.suite.total_runs;
+    check (float 0.0001) "overall pass rate" 0.5 cohort.suite.overall_pass_rate;
+    (match cohort.suite.results with
+     | [ result ] ->
+       check (float 0.0001) "pass@1 over n=2 c=1" 0.5 result.pass_at_k;
+       check bool "n=2 is below the min-runs gate" false result.min_runs_met
+     | results -> Alcotest.failf "expected one scenario result, got %d" (List.length results));
+    let bucket_count bucket =
+      List.assoc bucket cohort.bucket_counts
+    in
+    check int "verify_green bucket" 1 (bucket_count Coding_eval_report.Verify_green);
+    check int "verify_red bucket" 1 (bucket_count Coding_eval_report.Verify_red);
+    let rendered = Coding_eval_report.render_report report in
+    check bool "report names the buckets" true (string_contains rendered "verify_red: 1")
+;;
+
+let test_report_decodes_real_harness_rows () =
+  let helper = Filename.concat (source_root ()) "scripts/harness/lib/coding_eval_evidence.sh" in
+  let dir = temp_dir "coding_eval_emitted_" in
+  let runs_path = Filename.concat dir "runs.jsonl" in
+  List.iteri
+    (fun index (status, verify_exit, regression_exit, acceptance) ->
+       let args =
+         [ helper; acceptance; "l1-calc-add"; string_of_int (index + 1)
+         ; Printf.sprintf "observed-run-%d" (index + 1)
+         ; "provider"; "model"; status; verify_exit; "100"; "1234"
+         ; "[]"; "null"; "null"; "null"; "null"; regression_exit
+         ; "1"; "1"; "null"
+         ]
+       in
+       let command =
+         "bash -c "
+         ^ Filename.quote
+             "set -euo pipefail; source \"$1\"; acceptance=\"$2\"; shift 2; \
+              operation_id=null; if [[ \"$acceptance\" != null ]]; then \
+              operation_id=\"$(printf '%s' \"$acceptance\" | coding_eval_operation_id)\"; fi; \
+              evidence_row \"$@\" \"$operation_id\" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa off"
+         ^ " coding-eval-emitter "
+         ^ String.concat " " (List.map Filename.quote args)
+         ^ " >> " ^ Filename.quote runs_path
+       in
+       check int "real row producer succeeds" 0 (Sys.command command))
+    [ "ok", "0", "0", {|{"operation_id":"kmsg-observed-1","state":"Queued"}|}
+    ; "ok", "1", "0", {|{"operation_id":"kmsg-observed-2","state":"Queued"}|}
+    ; "ok", "0", "1", {|{"operation_id":"kmsg-observed-3","state":"Queued"}|}
+    ; "timeout", "null", "null", {|{"operation_id":"kmsg-observed-4","state":"Queued"}|}
+    ; "provider_error", "1", "null", {|{"operation_id":"kmsg-observed-5","state":"Queued"}|}
+    ; "transport_error", "null", "null", "null"
+    ];
+  let rows =
+    match Coding_eval_report.rows_of_jsonl_file runs_path with
+    | Error message -> failf "real harness rows refused by report reader: %s" message
+    | Ok rows -> rows
+  in
+  check (list bool) "only settled green verification passes"
+    [ true; false; false; false; false; false ]
+    (List.map (fun (row : Coding_eval_report.row) -> row.passed) rows);
+  check (list (option string)) "accepted identities survive later verification failure"
+    [ Some "kmsg-observed-1"; Some "kmsg-observed-2"; Some "kmsg-observed-3"
+    ; Some "kmsg-observed-4"; Some "kmsg-observed-5"; None ]
+    (List.map
+       (fun (row : Coding_eval_report.row) ->
+          Option.map Keeper_operation_id.to_string row.operation_id)
+       rows);
+  List.iter
+    (fun (row : Coding_eval_report.row) ->
+       check string "model stays model identity" "model" row.model;
+       check (option int) "unreported tokens remain unknown" None row.input_tokens;
+       check (option (float 0.0001)) "unreported cost remains unknown" None row.cost_usd)
+    rows;
+  match Coding_eval_report.build_suite ~cases:(loaded_cases ()) ~rows ~k:1 with
+  | Error message -> fail message
+  | Ok report ->
+    let cohort = single_cohort report in
+    check int "all actual emitted rows enter the report" 6 cohort.suite.total_runs;
+    check (float 0.0001) "one passing coding evaluation" (1.0 /. 6.0) cohort.suite.overall_pass_rate
+;;
+
+let test_failed_admission_is_recorded_without_grading () =
+  let root = source_root () in
+  let fixture = Filename.concat root "test/fixtures/coding_eval_admission_failure.sh" in
+  List.iter
+    (fun prior_workspace ->
+       let proof_dir = temp_dir "coding_eval_admission_" in
+       let command =
+         "bash " ^ String.concat " "
+           (List.map Filename.quote [ fixture; root; proof_dir; prior_workspace ])
+       in
+       check int "actual episode driver records failure" 0 (Sys.command command);
+       let rows =
+         match Coding_eval_report.rows_of_jsonl_file (Filename.concat proof_dir "out/runs.jsonl") with
+         | Error message -> fail message
+         | Ok rows -> rows
+       in
+       (match rows with
+        | [ row ] ->
+          check bool "transport failure is retained" true
+            (row.status = Coding_eval_report.Run_transport_error);
+          check bool "failed admission cannot pass" false row.passed;
+          check (option int) "verification was not run" None row.verify_exit;
+          check (option string) "unobserved operation stays unknown" None
+            (Option.map Keeper_operation_id.to_string row.operation_id);
+          check (option string) "original failure is retained"
+            (Some "keeper_up: controlled admission failure") row.error
+        | _ -> fail "expected exactly one failed-episode row");
+       let marker =
+         let run_id = match rows with [row] -> row.Coding_eval_report.run_id | _ -> fail "one row required" in
+         Filename.concat proof_dir
+           ("target/.masc/playground/docker/coding-eval-" ^ run_id ^ "/workspace/unexpected-grading")
+       in
+       check bool "stale workspace was not graded" false (Sys.file_exists marker))
+    [ "fresh"; "stale" ]
+;;
+
+let test_status_response_must_identify_admitted_operation () =
+  let root = source_root () in
+  let fixture = Filename.concat root "test/fixtures/coding_eval_operation_response.sh" in
+  List.iter
+    (fun (response, wire_mode, expected_status, expected_passed, invalid_response) ->
+       let proof_dir = temp_dir "coding_eval_operation_" in
+       let command =
+         "bash " ^ String.concat " "
+           (List.map Filename.quote [ fixture; root; proof_dir; response; wire_mode ])
+       in
+       check int "actual episode driver finishes" 0 (Sys.command command);
+       let rows =
+         match Coding_eval_report.rows_of_jsonl_file (Filename.concat proof_dir "out/runs.jsonl") with
+         | Error message -> fail message
+         | Ok rows -> rows
+       in
+       (match rows with
+        | [ row ] ->
+          check bool "status reflects the response identity" true (row.status = expected_status);
+          check bool "only its own successful response passes" expected_passed row.passed;
+          check (option int) "prepared artifact is still graded" (Some 0) row.verify_exit;
+          check (option string) "admitted identity is preserved" (Some "kmsg-accepted")
+            (Option.map Keeper_operation_id.to_string row.operation_id);
+          if invalid_response then
+            check (option string) "identity failure is not overwritten as a timeout"
+              (Some "keeper_delegate_status returned no matching operation_id") row.error
+        | _ -> fail "expected exactly one operation episode row");
+       let lookup =
+         Yojson.Safe.from_file (Filename.concat proof_dir "status-request.json")
+         |> Yojson.Safe.Util.member "operation_id" |> Yojson.Safe.Util.to_string
+       in
+       check string "lookup uses the admitted identity" "kmsg-accepted" lookup;
+       let run_id = match rows with [row] -> row.Coding_eval_report.run_id | _ -> fail "one row required" in
+       let run_dir = Filename.concat proof_dir ("out/runs/" ^ run_id) in
+       if invalid_response then (
+         let read_file path =
+           let channel = open_in_bin path in
+           Fun.protect ~finally:(fun () -> close_in_noerr channel)
+             (fun () -> really_input_string channel (in_channel_length channel))
+         in
+         check string "MCP response bytes survive real extraction and classification"
+           (read_file (Filename.concat proof_dir "status-response.json"))
+           (read_file (Filename.concat run_dir "operation-invalid.json"));
+         check bool "contradictory response is not a final outcome" false
+           (Sys.file_exists (Filename.concat run_dir "operation-final.json")))
+       else
+         check bool "matching terminal response is retained" true
+           (Sys.file_exists (Filename.concat run_dir "operation-final.json")))
+    [ {|{"operation_id":"kmsg-accepted","state":"Succeeded"}|}, "text", Coding_eval_report.Run_ok, true, false
+    ; {|{"operation_id":"kmsg-accepted","state":"Failed"}|}, "text", Coding_eval_report.Run_provider_error, false, false
+    ; {|{"operation_id":"kmsg-other","state":"Succeeded"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":"kmsg-other","state":"Running"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"state":"Succeeded"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":null,"state":"Succeeded"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":42,"state":"Succeeded"}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; "", "text", Coding_eval_report.Run_transport_error, false, true
+    ; "not json", "text", Coding_eval_report.Run_transport_error, false, true
+    ; {|{"operation_id":"kmsg-accepted","state":"Succeeded"} {}|}, "text", Coding_eval_report.Run_transport_error, false, true
+    ; "not json", "raw", Coding_eval_report.Run_transport_error, false, true
+    ]
+;;
+
+let test_admission_without_operation_identity_is_refused () =
+  let helper = Filename.concat (source_root ()) "scripts/harness/lib/coding_eval_evidence.sh" in
+  List.iter
+    (fun response ->
+       let command =
+         "bash -c "
+         ^ Filename.quote "set -euo pipefail; source \"$1\"; printf '%s' \"$2\" | coding_eval_operation_id"
+         ^ " coding-eval-admission " ^ Filename.quote helper ^ " " ^ Filename.quote response
+       in
+       check bool "malformed admission never manufactures an identity" true
+         (run_quiet command <> 0))
+    [ {|{}|}; {|{"operation_id":null}|}; {|{"operation_id":42}|}
+    ; {|{"operation_id":""}|}
+    ]
+;;
+
+let test_report_rejects_invalid_operation_identity () =
+  let row = row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true () in
+  let fields = match row with `Assoc fields -> fields | _ -> fail "expected row object" in
+  List.iter
+    (fun value ->
+       match Coding_eval_report.row_of_json (`Assoc (("operation_id", value) :: fields)) with
+       | Error _ -> ()
+       | Ok _ -> fail "invalid operation identity was accepted")
+    [ `String ""; `String "../other"; `Int 42 ];
+  match Coding_eval_report.row_of_json row with
+  | Error message -> fail message
+  | Ok decoded ->
+    check (option string) "missing observation does not infer from run id" None
+      (Option.map Keeper_operation_id.to_string decoded.operation_id)
+;;
+
+let test_row_disagreeing_with_its_verdict_is_refused () =
+  match
+    Coding_eval_report.row_of_json
+      (row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 1) ~passed:true ())
+  with
+  | Ok _ -> Alcotest.fail "expected the inconsistent row to be refused"
+  | Error message ->
+    check bool "error says the row disagrees" true (string_contains message "disagrees")
+;;
+
+let decode_report_row json =
+  match Coding_eval_report.row_of_json json with
+  | Ok row -> row
+  | Error message -> Alcotest.failf "report row refused: %s" message
+;;
+
+let report_of_rows rows =
+  match Coding_eval_report.build_suite ~cases:(loaded_cases ()) ~rows ~k:1 with
+  | Ok report -> report
+  | Error message -> Alcotest.failf "report refused: %s" message
+;;
+
+let test_report_separates_model_memory_and_experiment () =
+  let row ?provider ?model ?memory_mode ?experiment_digest passed =
+    row_json ?provider ?model ?memory_mode ?experiment_digest
+      ~run_index:1 ~status:"ok" ~verify_exit:(Some (if passed then 0 else 1))
+      ~passed () |> decode_report_row
+  in
+  let rows =
+    [ row true
+    ; row ~model:"other-model" false
+    ; row ~provider:"other-provider" false
+    ; row ~memory_mode:"seeded" false
+    ; row ~experiment_digest:(String.make 64 'b') false
+    ]
+  in
+  let report = report_of_rows rows in
+  check int "every comparison dimension separates cohorts" 5 (List.length report.cohorts);
+  List.iter
+    (fun (cohort : Coding_eval_report.cohort_report) ->
+       check int "a cohort has its own single recorded episode" 1 cohort.suite.total_runs;
+       match cohort.suite.results with
+       | [ result ] ->
+         check bool "different cohorts cannot fill the minimum sample" false result.min_runs_met;
+         let expected = if List.exists
+             (fun (row : Coding_eval_report.row) ->
+                Coding_eval_report.cohort_of_row row = cohort.cohort && row.passed)
+             rows then 1.0 else 0.0 in
+         check (float 0.0001) "pass@1 is specific to that cohort" expected result.pass_at_k
+       | _ -> Alcotest.fail "one recorded case per cohort was expected")
+    report.cohorts;
+  let json = Coding_eval_report.report_json report in
+  let open Yojson.Safe.Util in
+  check string "model labels are not selected-weight attestation" "configured_model"
+    (json |> member "model_identity_scope" |> to_string);
+  check bool "no pooled model-quality pass rate" true
+    (json |> member "overall_pass_rate" = `Null);
+  check bool "no pooled cost per solved acceptance" true
+    (json |> member "cost" |> member "cost_per_solved_task_usd" = `Null);
+  check int "all cohort identities reach the artifact" 5
+    (json |> member "cohorts" |> to_list |> List.length)
+;;
+
+let test_report_cost_counts_failed_episodes_and_keeps_unknown () =
+  let row run_index passed cost_usd =
+    row_json ~run_index ~status:"ok" ~verify_exit:(Some (if passed then 0 else 1))
+      ~cost_usd ~passed () |> decode_report_row
+  in
+  let succeeded = row 1 true (Some 1.0) in
+  let failed = row 2 false (Some 2.0) in
+  let report = report_of_rows [ succeeded; failed ] |> single_cohort in
+  let costs = Coding_eval_report.summarize_costs (Coding_eval_report.runs_of_cohort report) in
+  check (option (float 0.0001)) "failed spend is in the full numerator" (Some 3.0) costs.total_cost_usd;
+  check (option (float 0.0001)) "one solved acceptance bears both episode costs"
+    (Some 3.0) costs.cost_per_solved_task_usd;
+  let report = report_of_rows [ succeeded; row 2 false None ] |> single_cohort in
+  let costs = Coding_eval_report.summarize_costs (Coding_eval_report.runs_of_cohort report) in
+  check int "priced episode coverage" 1 costs.observed_runs;
+  check int "unreported episode coverage" 1 costs.unreported_runs;
+  check (float 0.0001) "known subtotal is explicitly partial" 1.0 costs.known_cost_usd;
+  check (option (float 0.0001)) "missing failed spend prevents a full total" None costs.total_cost_usd;
+  check (option (float 0.0001)) "missing cost prevents a solved-task price" None costs.cost_per_solved_task_usd;
+  (match report.suite.results with
+   | [ result ] ->
+     check (option (float 0.0001)) "generic case total agrees with suite unknown"
+       None result.total_cost_usd
+   | _ -> Alcotest.fail "one case result was expected");
+  let report = report_of_rows [ failed ] |> single_cohort in
+  let costs = Coding_eval_report.summarize_costs (Coding_eval_report.runs_of_cohort report) in
+  check (option (float 0.0001)) "no solved acceptance has no finite price" None costs.cost_per_solved_task_usd
+;;
+
+let test_report_refuses_duplicate_samples () =
+  let first = row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true ()
+      |> decode_report_row in
+  List.iter
+    (fun repeated ->
+       match Coding_eval_report.build_suite ~cases:(loaded_cases ()) ~rows:[first;repeated] ~k:1 with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "a duplicate sample inflated the cohort")
+    [ first; { first with run_id = "another-id-for-the-same-repeat" } ]
+;;
+
+let test_report_requires_experiment_identity () =
+  let base = row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true () in
+  let fields = match base with `Assoc fields -> fields | _ -> Alcotest.fail "row object expected" in
+  List.iter
+    (fun json ->
+       match Coding_eval_report.row_of_json json with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "an unknown or malformed experiment was admitted")
+    [ `Assoc (List.remove_assoc "experiment_digest" fields)
+    ; `Assoc (("experiment_digest", `String "old-evidence") :: List.remove_assoc "experiment_digest" fields)
+    ; `Assoc (List.remove_assoc "memory_mode" fields)
+    ; `Assoc (("memory_mode", `String "imagined-mode") :: List.remove_assoc "memory_mode" fields)
+    ];
+  (* Both orderings are otherwise valid rows, but first-key and last-key JSON
+     consumers assign different cohorts. Refuse the ambiguous wire object. *)
+  List.iter
+    (fun (name, alternative) ->
+       List.iter
+         (fun duplicate_fields ->
+            let json = Yojson.Safe.from_string
+                (Yojson.Safe.to_string (`Assoc duplicate_fields)) in
+            match Coding_eval_report.row_of_json json with
+            | Error message ->
+              check bool (name ^ " is refused as a duplicate object key") true
+                (string_contains message "duplicate object keys")
+            | Ok _ -> Alcotest.failf "duplicate %s chose a cohort by key order" name)
+         [ (name, alternative) :: fields; fields @ [ name, alternative ] ])
+    [ "provider", `String "another-provider"
+    ; "model", `String "another-model"
+    ; "memory_mode", `String "seeded"
+    ; "experiment_digest", `String (String.make 64 'b')
+    ]
+;;
+
+let base_case_fields =
+  [ "id", `String "x"
+  ; "level", `String "L1"
+  ; "lang", `String "python"
+  ; "timeout_sec", `Int 60
+  ; "verify", `String "verify.sh"
+  ; "prompt", `String "p"
+  ; "description", `String "d"
+  ]
+;;
+
+let test_test_files_defaults_to_check_sh () =
+  match Coding_eval_case.of_json (`Assoc base_case_fields) with
+  | Ok case ->
+    check (list string) "default protected oracle" [ "check.sh" ] case.test_files
+  | Error message -> Alcotest.failf "expected the default test_files, got: %s" message
+;;
+
+let test_test_files_rejects_traversal () =
+  let json =
+    `Assoc (base_case_fields @ [ "test_files", `List [ `String "../evil.sh" ] ])
+  in
+  match Coding_eval_case.of_json json with
+  | Ok _ -> Alcotest.fail "expected the .. path to be rejected"
+  | Error message ->
+    check bool "error names the traversal" true (string_contains message "..")
+;;
+
+let write_text_file path contents =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel contents)
+;;
+
+(* The anti-gaming contract: a solution overlay may not ship its own copy of a
+   protected test oracle, because the graded run restores that file from the
+   case's canonical workspace. If the solution could carry [check.sh], a
+   candidate could be graded against a test it authored. *)
+let test_solution_may_not_ship_the_oracle () =
+  let root = temp_dir "coding_eval_oracle_" in
+  let case_id = "oracle-fixture" in
+  let dir = Filename.concat root case_id in
+  Sys.mkdir dir 0o755;
+  Sys.mkdir (Filename.concat dir "workspace") 0o755;
+  Sys.mkdir (Filename.concat dir "solution") 0o755;
+  write_text_file
+    (Filename.concat dir "case.json")
+    (Yojson.Safe.to_string
+       (`Assoc
+           [ "id", `String case_id
+           ; "level", `String "L1"
+           ; "lang", `String "bash"
+           ; "timeout_sec", `Int 60
+           ; "verify", `String "verify.sh"
+           ; "prompt", `String "p"
+           ; "description", `String "d"
+           ]));
+  write_text_file
+    (Filename.concat dir "verify.sh")
+    "#!/usr/bin/env bash\nbash \"$1/check.sh\"\n";
+  write_text_file
+    (Filename.concat (Filename.concat dir "workspace") "check.sh")
+    "exit 1\n";
+  write_text_file
+    (Filename.concat (Filename.concat dir "solution") "check.sh")
+    "exit 0\n";
+  match Coding_eval_case.load_case ~dir with
+  | Ok _ -> Alcotest.fail "expected the solution-shipped oracle to be rejected"
+  | Error message ->
+    check bool "error names the oracle" true (string_contains message "check.sh")
+;;
+
+let test_case_json_accepts_regression () =
+  let json = `Assoc (base_case_fields @ [ "regression", `String "regress.sh" ]) in
+  match Coding_eval_case.of_json json with
+  | Ok case ->
+    check (option string) "regression parsed" (Some "regress.sh") case.regression
+  | Error message -> Alcotest.failf "expected regression to parse, got: %s" message
+;;
+
+(* A regression guard that went red makes the run not-passed even when verify is
+   green; a row claiming otherwise is refused, and one telling the consistent
+   story decodes. *)
+let test_regression_failure_gates_passed () =
+  (match
+     Coding_eval_report.row_of_json
+       (row_json
+          ~run_index:1
+          ~status:"ok"
+          ~verify_exit:(Some 0)
+          ~regression_exit:(Some 1)
+          ~passed:true
+          ())
+   with
+   | Ok _ -> Alcotest.fail "expected a green-verify red-regression pass to be refused"
+   | Error message ->
+     check bool "error names regression" true (string_contains message "regression_exit"));
+  match
+    Coding_eval_report.row_of_json
+      (row_json
+         ~run_index:1
+         ~status:"ok"
+         ~verify_exit:(Some 0)
+         ~regression_exit:(Some 1)
+         ~passed:false
+         ())
+  with
+  | Ok row -> check bool "regression failure is not a pass" false row.passed
+  | Error message -> Alcotest.failf "consistent regression row should decode: %s" message
+;;
+
+let test_regressed_bucket () =
+  match
+    Coding_eval_report.row_of_json
+      (row_json
+         ~run_index:1
+         ~status:"ok"
+         ~verify_exit:(Some 0)
+         ~regression_exit:(Some 1)
+         ~passed:false
+         ())
+  with
+  | Error message -> Alcotest.failf "row should decode: %s" message
+  | Ok row ->
+    check
+      bool
+      "green verify + red regression buckets as Regressed"
+      true
+      (Coding_eval_report.bucket_of_row row = Coding_eval_report.Regressed)
+;;
+
+let test_case_json_accepts_build () =
+  let json = `Assoc (base_case_fields @ [ "build", `String "build.sh" ]) in
+  match Coding_eval_case.of_json json with
+  | Ok case -> check (option string) "build parsed" (Some "build.sh") case.build
+  | Error message -> Alcotest.failf "expected build to parse, got: %s" message
+;;
+
+(* The verify-red trajectory buckets are decided by the deterministic file-delta
+   signals, never by parsing output: no source edited is Gave_up, source but not
+   the target is Off_target_edit, the target edited with a red build probe is
+   Build_failed, and the target edited with no failing build is Wrong_solution. *)
+let bucket_of_failed_row ?edited_source_files ?edited_target_files ?build_exit () =
+  match
+    Coding_eval_report.row_of_json
+      (row_json
+         ~run_index:1
+         ~status:"ok"
+         ~verify_exit:(Some 1)
+         ?edited_source_files
+         ?edited_target_files
+         ?build_exit
+         ~passed:false
+         ())
+  with
+  | Ok row -> Coding_eval_report.bucket_of_row row
+  | Error message -> Alcotest.failf "row should decode: %s" message
+;;
+
+let test_gave_up_bucket () =
+  check
+    bool
+    "no source edited buckets as Gave_up"
+    true
+    (bucket_of_failed_row
+       ~edited_source_files:(Some 0)
+       ~edited_target_files:(Some 0)
+       ()
+     = Coding_eval_report.Gave_up)
+;;
+
+let test_off_target_edit_bucket () =
+  check
+    bool
+    "source edited but not the target buckets as Off_target_edit"
+    true
+    (bucket_of_failed_row
+       ~edited_source_files:(Some 2)
+       ~edited_target_files:(Some 0)
+       ()
+     = Coding_eval_report.Off_target_edit)
+;;
+
+let test_build_failed_bucket () =
+  check
+    bool
+    "target edited with a red build buckets as Build_failed"
+    true
+    (bucket_of_failed_row
+       ~edited_source_files:(Some 1)
+       ~edited_target_files:(Some 1)
+       ~build_exit:(Some 1)
+       ()
+     = Coding_eval_report.Build_failed)
+;;
+
+let test_wrong_solution_bucket () =
+  check
+    bool
+    "target edited, build green, still red buckets as Wrong_solution"
+    true
+    (bucket_of_failed_row
+       ~edited_source_files:(Some 1)
+       ~edited_target_files:(Some 1)
+       ~build_exit:(Some 0)
+       ()
+     = Coding_eval_report.Wrong_solution)
+;;
+
+let test_uninstrumented_failure_stays_coarse () =
+  check
+    bool
+    "a verify-red row with no trajectory signals stays Verify_red"
+    true
+    (bucket_of_failed_row () = Coding_eval_report.Verify_red)
+;;
+
+let () =
+  run
+    "coding_eval_cases"
+    [ ( "corpus"
+      , [ test_case "corpus decodes" `Quick test_corpus_decodes
+        ; test_case
+            "pristine red, solution green"
+            `Quick
+            test_every_case_starts_red_and_solution_turns_green
+        ; test_case
+            "case.json rejects undeclared keys"
+            `Quick
+            test_case_json_rejects_undeclared_keys
+        ; test_case
+            "test_files defaults to check.sh"
+            `Quick
+            test_test_files_defaults_to_check_sh
+        ; test_case
+            "test_files rejects path traversal"
+            `Quick
+            test_test_files_rejects_traversal
+        ; test_case
+            "solution may not ship the oracle"
+            `Quick
+            test_solution_may_not_ship_the_oracle
+        ; test_case
+            "case.json accepts a regression guard"
+            `Quick
+            test_case_json_accepts_regression
+        ; test_case "case.json accepts a build probe" `Quick test_case_json_accepts_build
+        ] )
+    ; ( "report"
+      , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows
+        ; test_case "model memory and experiment cohorts stay separate" `Quick
+            test_report_separates_model_memory_and_experiment
+        ; test_case "solved-task cost includes failures and unknown coverage" `Quick
+            test_report_cost_counts_failed_episodes_and_keeps_unknown
+        ; test_case "duplicate samples are refused" `Quick test_report_refuses_duplicate_samples
+        ; test_case "experiment identity is required" `Quick test_report_requires_experiment_identity
+        ; test_case "real harness rows decode" `Quick test_report_decodes_real_harness_rows
+        ; test_case "failed admission records its episode without grading" `Quick
+            test_failed_admission_is_recorded_without_grading
+        ; test_case "status response identifies the admitted operation" `Quick
+            test_status_response_must_identify_admitted_operation
+        ; test_case "operation identity is observed, never inferred" `Quick
+            test_report_rejects_invalid_operation_identity
+        ; test_case "admission must return an operation identity" `Quick
+            test_admission_without_operation_identity_is_refused
+        ; test_case
+            "inconsistent row refused"
+            `Quick
+            test_row_disagreeing_with_its_verdict_is_refused
+        ; test_case
+            "regression failure gates passed"
+            `Quick
+            test_regression_failure_gates_passed
+        ; test_case "regressed bucket" `Quick test_regressed_bucket
+        ; test_case "gave-up bucket" `Quick test_gave_up_bucket
+        ; test_case "off-target-edit bucket" `Quick test_off_target_edit_bucket
+        ; test_case "build-failed bucket" `Quick test_build_failed_bucket
+        ; test_case "wrong-solution bucket" `Quick test_wrong_solution_bucket
+        ; test_case
+            "uninstrumented failure stays coarse"
+            `Quick
+            test_uninstrumented_failure_stays_coarse
+        ] )
+    ]
+;;

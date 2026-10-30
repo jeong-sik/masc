@@ -1,0 +1,93 @@
+{
+  "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
+  "source_sha256": "6ad016b1c6cf4988a50d602b8c8f2356ae9910396cb8619c5a2f19237b3810f0",
+  "browser_version": "149.0.7827.55",
+  "seat_reads": 8,
+  "frame_reads": 3,
+  "checks": [
+    "seat recovers without machine activity",
+    "failed frame is fetched again",
+    "pad click sends input",
+    "reopening focused selector discovers idle invite",
+    "pass updates controller",
+    "eject clears pixels"
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dos/pass",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    }
+  ],
+  "errors": []
+}

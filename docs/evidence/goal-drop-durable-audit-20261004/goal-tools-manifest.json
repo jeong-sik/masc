@@ -1,0 +1,13 @@
+{
+  "source_ref": null,
+  "results": {
+    "test_goal_tools": 0
+  },
+  "scope": "complete Workspace_goals implementation against unchanged cached public interface; registered cancellation suite with a direct module alias; real temporary filesystem and fresh child process; cached lower dependencies; not full product/server",
+  "cache": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004",
+  "source_sha256": {
+    "masc__Workspace_goals.ml": "849ab0940feb342505d16bcb82f996a5d66b8ebaa221272a5725209da3475a86",
+    "masc__Workspace_goals.mli": "a7996a9eafa5c63291daf8de58f0599d8e644e45cf0d77873252bf4ece3af53d",
+    "test_goal_tools.ml": "9692b47ec11e97f661478b815ef819eb602a85928d13fc744fe7ea2f83bc027d"
+  }
+}

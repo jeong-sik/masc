@@ -1,0 +1,89 @@
+(** Strict operator inventory decoder. No reads or mutations occur here.
+    [None] declaration belongs only to a manual attachment; [None] applied
+    revision means that instance has no declaration owner. Unobserved and
+    incomplete readings never mean disabled or deleted. *)
+type selection =
+  | Exact of Standalone_lane.t
+  | Browser of Browser_lane.Lane_name.t
+  | Machine of Machine_lane.t
+  | Declaration of string
+  | Manual_instance of { instance_id : string; incarnation : string }
+
+type configuration =
+  | Configured of {
+      admitted_slots : string list; cli_slots : string list;
+      declared_slots : string list; declared_cli_slots : string list;
+      dropped_slots : string list; admission_error : string option;
+    }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
+  | Unconfigured of string
+  | Registry_unavailable of string
+
+(** A Lane Add-on exact output and its lane: one the package declares, or a
+    runtime.toml table for an output it does not declare. *)
+type exact_output_source = Declared | Table_only
+type exact_output = { output : string; source : exact_output_source; configuration : configuration }
+
+type declaration =
+  | Valid of {
+      installation_id : string; enabled : bool; run_id : string; package_id : string;
+      title : string; desired_revision : string; source_revision : string;
+      ui_category : Lane_addon_category.t option;
+      (** Current valid declaration metadata, independent of applied workers. *)
+      application : Lane_addon_application.t;
+      exact_outputs : exact_output list;  (** Declared ones in manifest order, then table-only ones. *)
+    }
+  | Invalid of string list
+  | Absent
+  | Unobserved
+
+type phase = Lane_addon_types.phase = Attached | Observing | Failed of string | Detaching | Detached
+type presence = Live | Retained
+type instance = {
+  instance_id : string; incarnation : string; run_id : string;
+  package_id : string; title : string; package_revision : string;
+  ui_category : Lane_addon_category.t option;
+  (** Original worker metadata. Invalid/unobserved declarations cannot borrow it. *)
+  presence : presence; phase : phase; applied_revision : string option;
+}
+type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
+type machine_publication = No_screen | Stable | Running | Publication_unavailable
+(** What the browser Add-on's last published observation says for a
+    built-in browser row: the observed value; with no observation, whether
+    no browser Add-on is declared, one is switched off or one is declared on
+    and not running; or why its observation cannot be read. *)
+type 'a browser_reading =
+  | Browser_observed of 'a
+  | Browser_addon_absent
+  | Browser_addon_off
+  | Browser_addon_not_running
+  | Browser_addon_unavailable of string
+type state =
+  | Exact_state of configuration
+  | Browser_clients of int browser_reading
+  | Browser_executor of bool browser_reading
+  | Machine_state of machine_activity * machine_publication
+  | Package_state of { declaration : declaration option; instances : instance list }
+type row = {
+  id : string; label : string; purpose : string;
+  ui_category : Lane_addon_category.t option;
+  (** Server-authored display role for built-in routes. [None] means no role
+      was supplied; clients never infer one from an ID or label. Package rows
+      independently use their current declaration or original manual worker. *)
+  selection : selection; state : state;
+}
+type package_read = {
+  directory : string; complete : bool; owner_present : bool;
+  issues : (string * string) list;
+}
+type snapshot = {
+  observed_at : float; rows : row list;
+  exact_snapshot : Tui_decode.standalone_lanes_snapshot; package_read : package_read;
+}
+
+val decode : Yojson.Safe.t -> (snapshot, string) result
+(** Requires every built-in exactly once, coherent row targets and state,
+    unique row/instance identities, and agreement with the existing complete
+    exact snapshot.
+    Unknown inventory fields/variants, duplicate JSON keys and missing fields
+    are errors. The embedded exact payload uses its existing decoder. *)

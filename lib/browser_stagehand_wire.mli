@@ -1,0 +1,129 @@
+(** The JSON-RPC the Stagehand v4 extension speaks with its host, and the CDP
+    expressions that carry it (RFC-browser-lane-stagehand §2, §3.3).
+
+    The protocol's schema is [packages/protocol/stagehand.v4.json] in
+    browserbase/stagehand. This module names only the part masc uses; wire
+    keys are the schema's snake_case names. *)
+
+(** The protocol major this client implements. The runtime reports its
+    version in its readiness marker; another major is refused. *)
+val supported_protocol_major : int
+
+(** The protocol version this client implements, sent in [stagehand.init]. *)
+val protocol_version : string
+
+(** The CDP binding the extension calls with each message for the host. *)
+val send_to_host_binding : string
+
+(** A [Runtime.evaluate] expression that hands one encoded message to the
+    extension. *)
+val deliver_expression : string -> string
+
+(** A [Runtime.evaluate] expression that says at once whether the
+    extension's receiver is installed and what its runtime marker is. The
+    host polls it: the service worker's evaluation context has no
+    [setTimeout] to wait with. *)
+val readiness_expression : string
+
+type marker = { protocol_version : string; runtime_version : string }
+
+val marker_of_json : Yojson.Safe.t -> (marker, string) result
+
+type readiness = Not_ready | Ready of marker
+
+(** The value {!readiness_expression} evaluates to. *)
+val readiness_of_json : Yojson.Safe.t -> (readiness, string) result
+
+(** The leading number of the marker's [protocol_version], digits only.
+    [Error] when there is none, or when it does not fit an [int]. *)
+val protocol_major : marker -> (int, string) result
+
+(** Chrome's id for an unpacked extension whose directory has this real path:
+    the first 32 hex digits of its SHA-256, with [0]–[f] written [a]–[p]. *)
+val extension_id_of_real_path : string -> string
+
+type id = Int_id of int | String_id of string
+type rpc_error = { code : int; message : string }
+
+(** JSON-RPC codes masc answers with. *)
+val method_not_found : int
+val invalid_params : int
+
+val host_refused : int
+
+type extension_request =
+  | Llm_generate of { id : id; params : Yojson.Safe.t }
+  | Invalid_params of { id : id; detail : string }
+  | Unsupported_request of { id : id; method_ : string }
+
+(** A notification's [params], when it has any. *)
+type extension_notification =
+  | Log of Yojson.Safe.t option
+  | Page_event of Yojson.Safe.t option
+  | Unsupported_notification of { method_ : string }
+
+type incoming =
+  | Response of { id : id; result : (Yojson.Safe.t, rpc_error) result }
+  | Malformed_response of { id : id; detail : string }
+      (** A response whose id is readable but whose body is not one result
+          or one well-formed error: the call it answers has ended with no
+          answer to read. *)
+  | Request of extension_request
+  | Notification of extension_notification
+
+(** One message the extension sent through {!send_to_host_binding}. *)
+val decode : string -> (incoming, string) result
+
+(** [stagehand.init], sent once per session before any {!call}. *)
+type init = { client_version : string; browser_cdp_url : string }
+
+val init_method : string
+val encode_init : id:int -> init -> string
+
+(** A positive timeout for one Stagehand sentence, in protocol milliseconds.
+    The one product policy is [sentence_timeout]; the Browser Lane transport
+    wait is derived from it. *)
+type sentence_timeout_ms = private Sentence_timeout_ms of int
+
+val sentence_timeout : sentence_timeout_ms
+val timeout_ms : sentence_timeout_ms -> int
+
+(** Viewport coordinates in CSS pixels, as required by Stagehand's native
+    pointer protocol. These are not Browser Lane viewport fractions. *)
+type css_point = { x : float; y : float }
+
+(** The calls an attached session sends. *)
+type call =
+  | Close
+  | Act of { page_id : string; instruction : string; timeout : sentence_timeout_ms }
+  | Observe of { page_id : string; instruction : string option; timeout : sentence_timeout_ms }
+  | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option; timeout : sentence_timeout_ms }
+  | Context_pages
+  | Context_active_page
+  | Context_new_page
+  | Page_close of { page_id : string }
+  | Page_reload of { page_id : string }
+  | Page_go_back of { page_id : string }
+  | Page_go_forward of { page_id : string }
+  | Page_goto of { page_id : string; url : string }
+  | Page_screenshot of { page_id : string }
+  | Page_evaluate of { page_id : string; expression : string }
+  | Page_hover of { page_id : string; x : float; y : float }
+  | Page_set_viewport_size of { page_id : string; width : int; height : int }
+  | Page_click of { page_id : string; x : float; y : float; button : Browser_lane.Pointer.button }
+  | Page_double_click of { page_id : string; x : float; y : float }
+  | Page_type of { page_id : string; text : string }
+  | Page_key_press of { page_id : string; key : Browser_lane.Keyboard.t }
+  | Page_scroll of { page_id : string; x : float; y : float; delta_x : float; delta_y : float }
+  | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float; route : css_point list }
+
+val method_name : call -> string
+val call_params : call -> Yojson.Safe.t
+val sentence_timeout_of_call : call -> sentence_timeout_ms option
+
+(** [true] for the calls during which the extension asks the host for a
+    model answer ([llm.generate]). *)
+val uses_model : call -> bool
+
+val encode_call : id:int -> call -> string
+val encode_reply : id:id -> (Yojson.Safe.t, rpc_error) result -> string

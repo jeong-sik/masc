@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-10-25T01:08:55.016362+00:00",
+  "source_sha": "17583b006eaf0823587ba07a27ad50889ef8d498",
+  "validation_ref": "codex/goal-integrity-validation-17583b00",
+  "scope": "Three changed native suites only. Not a full regression or installation. Parent five-suite failure remains unchanged.",
+  "previous_run": 40147287888,
+  "suites": [
+    "test_verification",
+    "test_completion_repair_delivery",
+    "test_keeper_claude_code_runtime"
+  ],
+  "selection_sha256": "612a7a0cac7685a673f13484aba19e0953765fa690bcc49fe00aed9de6cddda1",
+  "inputs": {
+    ".github/workflows/test.yml": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+  },
+  "dispatch_exit": 0,
+  "dispatch_output": "https://github.com/jeong-sik/masc/actions/runs/40149490208",
+  "dispatch_stderr": ""
+}

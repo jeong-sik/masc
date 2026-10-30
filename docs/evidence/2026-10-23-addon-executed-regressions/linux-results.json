@@ -1,0 +1,51 @@
+{
+  "run_id": 39924350904,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39924350904",
+  "source_sha": "25faf14776f1115e962a4c4873e668af386211ad",
+  "status": "completed",
+  "conclusion": "failure",
+  "compile_completed": true,
+  "suites": [
+    {
+      "suite": "test_lane_addon_submit_once",
+      "passed": 9,
+      "failed": 0,
+      "alcotest_elapsed_s": 0.226
+    },
+    {
+      "suite": "test_workspace_curator_addon_commit",
+      "passed": 76,
+      "failed": 0,
+      "alcotest_elapsed_s": 2.588
+    },
+    {
+      "suite": "test_keeper_addon_deferred_runtime",
+      "passed": 0,
+      "failed": 1,
+      "alcotest_elapsed_s": 0.358
+    },
+    {
+      "suite": "test_keeper_librarian_addon_owner",
+      "passed": 23,
+      "failed": 0,
+      "alcotest_elapsed_s": 16.356
+    },
+    {
+      "suite": "test_keeper_librarian_durable_execution",
+      "passed": 17,
+      "failed": 0,
+      "alcotest_elapsed_s": 14.611
+    }
+  ],
+  "passed": 125,
+  "failed": 1,
+  "failure": {
+    "suite": "test_keeper_addon_deferred_runtime",
+    "file": "test/test_keeper_addon_deferred_runtime.ml",
+    "line": 241,
+    "assertion": "an entirely denied surface offers no unusable loader",
+    "expected": false,
+    "actual": true
+  },
+  "scope": "Controlled worker/runtime fixtures, not actual provider, installed runtime or visible UI."
+}

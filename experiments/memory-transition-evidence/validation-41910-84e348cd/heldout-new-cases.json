@@ -1,0 +1,111 @@
+[
+  {
+    "id": "catalog_discrepancy_closed",
+    "source_memory": "Catalog inquiry C64: on Monday the archivist reported two manuscripts assigned shelf code H8. Which manuscript had the wrong code was unknown; neither record was to be deleted during the inquiry.",
+    "proposed_memory": "Catalog inquiry C64: on Monday two manuscripts reportedly shared H8 and the incorrect record was unknown. On Tuesday the archivist reported checking both accession ledgers, correcting the second manuscript to H9, and closing that inquiry with both records retained.",
+    "new_observations": [
+      {
+        "kind": "conversation",
+        "batch_turn_ref": "synthetic-heldout-catalog_discrepancy_closed#40",
+        "local_position": 0,
+        "text": "[local_position=0 role=user speaker=unknown] Tuesday, inquiry C64: I checked the accession ledger for each of the two manuscripts. The second manuscript belongs at H9, so I corrected its shelf code. Both manuscript records remain in the catalog; the duplicate-code inquiry is now closed."
+      }
+    ],
+    "expected_mergeable": true,
+    "expected_retention": "merge",
+    "rationale": "The explicit C64 follow-up supports a later reported resolution of this inquiry. The candidate preserves the earlier uncertainty, time ordering, attribution, and requirement to retain both records. It does not claim independent verification of the archivist report."
+  },
+  {
+    "id": "focus_inquiry_continues",
+    "source_memory": "Focus inquiry F28: at 08:00 the telescope operator reported blurred calibration frames; the cause was unknown. Science exposures were paused until a sharp calibration frame could be demonstrated.",
+    "proposed_memory": "Focus inquiry F28: at 08:00 blurred calibration frames had an unknown cause. At 09:00 the operator reported finding a loose focus encoder coupling in the same inquiry. Tightening is still pending and no sharp calibration frame has been demonstrated, so science exposures remain paused.",
+    "new_observations": [
+      {
+        "kind": "conversation",
+        "batch_turn_ref": "synthetic-heldout-focus_inquiry_continues#40",
+        "local_position": 0,
+        "text": "[local_position=0 role=user speaker=unknown] 09:00 update to F28: I found the focus encoder coupling loose while examining the blurred calibration frames. I have not tightened it yet and have not obtained a sharp calibration frame. Science exposures remain paused."
+      }
+    ],
+    "expected_mergeable": true,
+    "expected_retention": "merge",
+    "rationale": "This is a continuing inquiry with a supported reported diagnosis, not a claim of recovery. The candidate keeps the prior unknown cause as historical and preserves the outstanding repair, verification condition, and pause."
+  },
+  {
+    "id": "shared_cause_separate_press",
+    "source_memory": "Press inquiry P46 concerns washed-out ink on press East during Wednesday batch 61. The operator attributed it to a contaminated ink reservoir; batch 61 remained quarantined pending a clean sample.",
+    "proposed_memory": "Press inquiry P46: East batch 61 had washed-out ink from a contaminated reservoir, but cleaning produced a clean sample and batch 61 was released.",
+    "new_observations": [
+      {
+        "kind": "conversation",
+        "batch_turn_ref": "synthetic-heldout-shared_cause_separate_press#40",
+        "local_position": 0,
+        "text": "[local_position=0 role=user speaker=unknown] Press inquiry P47 is a separate job on press West, batch 88. Its reservoir was also contaminated; cleaning West produced a clean sample and only batch 88 was released."
+      },
+      {
+        "kind": "conversation",
+        "batch_turn_ref": "synthetic-heldout-shared_cause_separate_press#40",
+        "local_position": 1,
+        "text": "[local_position=1 role=user speaker=unknown] No cleaning or new sample has occurred for East inquiry P46. East batch 61 is still quarantined."
+      }
+    ],
+    "expected_mergeable": false,
+    "expected_retention": "keep",
+    "rationale": "A shared cause does not transfer the independent West outcome to East. The candidate contradicts explicit unresolved P46 evidence and removes its quarantine condition."
+  },
+  {
+    "id": "planned_crate_transfer",
+    "source_memory": "Crate inquiry K52: the curator reported crate 305 still in the receiving bay with its humidity logger awaiting replacement. It must not enter the gallery before a replacement logger is installed and its first reading is checked.",
+    "proposed_memory": "Crate inquiry K52: crate 305 initially waited in receiving for a replacement humidity logger; the logger was installed, its first reading checked, and the crate then entered the gallery.",
+    "new_observations": [
+      {
+        "kind": "conversation",
+        "batch_turn_ref": "synthetic-heldout-planned_crate_transfer#40",
+        "local_position": 0,
+        "text": "[local_position=0 role=user speaker=unknown] For K52 I have scheduled the logger replacement for Friday. No replacement, first-reading check, or gallery transfer has occurred; crate 305 remains in receiving."
+      }
+    ],
+    "expected_mergeable": false,
+    "expected_retention": "keep",
+    "rationale": "The candidate changes an explicit future plan into three completed actions. It cannot retire the current location and unmet prerequisites."
+  },
+  {
+    "id": "unobserved_export_outcome",
+    "source_memory": "Export inquiry E83: the analyst reported that the nightly species export might be missing its final partition. Completeness was unknown and publication was paused until all partition counts could be compared.",
+    "proposed_memory": "Export inquiry E83: the nightly species export was initially of unknown completeness; the final partition was subsequently confirmed present, all counts matched, and publication resumed.",
+    "new_observations": [
+      {
+        "kind": "conversation",
+        "batch_turn_ref": "synthetic-heldout-unobserved_export_outcome#40",
+        "local_position": 0,
+        "text": "[local_position=0 role=user speaker=unknown] For E83 I invoked the count-comparison command. Its response was lost before I could read any counts. I do not know whether the final partition is present or whether the counts match. Publication remains paused."
+      },
+      {
+        "kind": "tool_execution",
+        "batch_turn_ref": "synthetic-heldout-unobserved_export_outcome#40",
+        "local_position": 0,
+        "tool_name": "compare_species_partition_counts",
+        "outcome": "unknown"
+      }
+    ],
+    "expected_mergeable": false,
+    "expected_retention": "keep",
+    "rationale": "An unknown execution outcome and absent count evidence cannot establish completeness or release publication. The candidate erases explicit present uncertainty and the outstanding comparison condition."
+  },
+  {
+    "id": "recurring_belt_distinction",
+    "source_memory": "Sorter event S16: on June 4 a slipped belt stopped parcel lane North. The operator reported reseating the belt and verifying the lane at 11:00, closing that occurrence. A new stoppage must be tracked separately.",
+    "proposed_memory": "Sorter event S16 was one uninterrupted belt stoppage from June 4 through June 9; the earlier 11:00 verification did not close it, and its first successful repair was on June 9.",
+    "new_observations": [
+      {
+        "kind": "conversation",
+        "batch_turn_ref": "synthetic-heldout-recurring_belt_distinction#40",
+        "local_position": 0,
+        "text": "[local_position=0 role=user speaker=unknown] June 9: a new belt slip stopped North again after it had operated normally since the June 4 verification. We opened event S21 for this recurrence. S16 stays closed; S21 was repaired and verified today."
+      }
+    ],
+    "expected_mergeable": false,
+    "expected_retention": "keep",
+    "rationale": "The candidate collapses two explicitly distinct occurrences, denies the recorded closure of S16, and reassigns the S21 repair. Shared equipment and failure mode do not justify erasing the intervening normal operation."
+  }
+]

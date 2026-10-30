@@ -1,0 +1,82 @@
+[
+  {
+    "call_id": "ssh-file-0-0",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-0",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"6609600e382b411596c04b47f913d406\\\", \\\"cwd\\\": \\\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\\\", \\\"hostname\\\": \\\"6758e8d27ec8\\\", \\\"uid\\\": 1000}\\n\",\"typed\":true,\"execution_time_ms\":326}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-1",
+    "tool": "Write",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-1",
+      "content": "{\"ok\":true,\"path\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c/notes.txt\",\"mode\":\"overwrite\",\"bytes_written\":7,\"via\":\"remote_ssh\"}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-2",
+    "tool": "Read",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-2",
+      "content": "{\"ok\":true,\"path\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c/notes.txt\",\"bytes\":7,\"truncated\":false,\"offset\":1,\"returned_lines\":1,\"content\":\"before\\n\",\"via\":\"remote_ssh\"}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-3",
+    "tool": "Edit",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-3",
+      "content": "{\"ok\":true,\"path\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c/notes.txt\",\"mode\":\"patch\",\"bytes_written\":6,\"changed\":true,\"occurrences\":1,\"replace_all\":false,\"via\":\"remote_ssh\"}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-4",
+    "tool": "Grep",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-4",
+      "content": "{\"ok\":true,\"op\":\"rg\",\"path\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c/notes.txt\",\"pattern\":\"^after$\",\"via\":\"remote_ssh\",\"status\":{\"kind\":\"exit\",\"code\":0},\"matches\":[\"1:after\"]}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-5",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-5",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"escaped_shell\":[{\"shell\":\"sh\",\"finding\":\"glob_brace\",\"should_have_been\":\"a shell runs this line, so it does what you wrote. The typed argv form cannot say it, and argv is the form that gets path scope -- use it when the line does not need a shell\"}],\"output\":\"{\\\"marker\\\": \\\"6609600e382b411596c04b47f913d406\\\", \\\"cwd\\\": \\\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\\\", \\\"hostname\\\": \\\"6758e8d27ec8\\\", \\\"uid\\\": 1000, \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"redirect input.txt\\\", \\\"redirect output.txt\\\", \\\"redirect stderr.txt\\\", \\\"redirect stdout.txt\\\", \\\"ssh-proof.json\\\"], \\\"shell_io\\\": {\\\"redirect input.txt\\\": \\\"alpha\\\\n\\\", \\\"redirect output.txt\\\": \\\"alpha\\\\nbeta\\\\n\\\", \\\"redirect stdout.txt\\\": \\\"separate-out\\\\n\\\", \\\"redirect stderr.txt\\\": \\\"separate-err\\\\n\\\"}}\\n\",\"typed\":true,\"execution_time_ms\":323}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-restart-0",
+    "tool": "Read",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-restart-0",
+      "content": "{\"ok\":true,\"path\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c/notes.txt\",\"bytes\":6,\"truncated\":false,\"offset\":1,\"returned_lines\":1,\"content\":\"after\\n\",\"via\":\"remote_ssh\"}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-restart-1",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-restart-1",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"escaped_shell\":[{\"shell\":\"sh\",\"finding\":\"glob_brace\",\"should_have_been\":\"a shell runs this line, so it does what you wrote. The typed argv form cannot say it, and argv is the form that gets path scope -- use it when the line does not need a shell\"}],\"output\":\"{\\\"marker\\\": \\\"6609600e382b411596c04b47f913d406\\\", \\\"cwd\\\": \\\"/private/tmp/mssh-keeper-shell-io-bytes-a317/.workspace/.masc/playground/ssh-proof-20261025-c\\\", \\\"hostname\\\": \\\"6758e8d27ec8\\\", \\\"uid\\\": 1000, \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"redirect input.txt\\\", \\\"redirect output.txt\\\", \\\"redirect stderr.txt\\\", \\\"redirect stdout.txt\\\", \\\"ssh-proof.json\\\"], \\\"shell_io\\\": {\\\"redirect input.txt\\\": \\\"alpha\\\\n\\\", \\\"redirect output.txt\\\": \\\"alpha\\\\nbeta\\\\n\\\", \\\"redirect stdout.txt\\\": \\\"separate-out\\\\n\\\", \\\"redirect stderr.txt\\\": \\\"separate-err\\\\n\\\"}}\\n\",\"typed\":true,\"execution_time_ms\":317}"
+    },
+    "expected_failure": false
+  }
+]

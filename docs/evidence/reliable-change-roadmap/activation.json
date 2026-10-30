@@ -1,0 +1,38 @@
+{
+  "schema": "masc.reliable_change.roadmap_activation.v1",
+  "recorded_at": "2026-09-08T16:29:52Z",
+  "goal_id": "goal-reliable-change-g1-20260909",
+  "goal_phase_at_readback": "executing",
+  "first_task_id": "task-1478",
+  "first_task_status_at_readback": "todo",
+  "first_task_contract": {
+    "strict": true,
+    "completion_contract": [
+      "기존 harness의 요청/Task, run/turn/provider attempt, target revision, verifier 실행, raw artifact 관측을 G1 contract에 맞게 연결한다. required/applicable 및 phase 경계는 실행 전 manifest로 고정한다.",
+      "보고된 usage를 scope에 따라 결합하고 실패 attempt와 verifier 비용을 포함한다. retry-success fixture의 정확한 합계 input40/output8/cache-read8/USD0.07을 재구성하며 누적 snapshot을 이중 합산하지 않는다. 실제 미보고 값은 null과 이유를 보존한다.",
+      "독립 checker가 여섯 사례×3 고유 반복의 coverage와 원시 관측을 검증한다. 다른 request/attempt/revision, 부분/누락 evidence, 중복 usage, 모두 null 처리, 임의 N/A 면제는 통과하지 않는다.",
+      "현재 head의 CI 행동 테스트 실행 로그와 의미 있는 negative case를 제출한다. 로컬 Dune 빌드는 하지 않는다. 구현 테스트를 실제 모델 실측이나 G1 Goal 완료로 주장하지 않는다."
+    ],
+    "required_evidence": [
+      "변경 PR와 최종 source revision",
+      "CI 실제 suite 실행 결과와 checker positive/negative 출력",
+      "run/turn/request/attempt→usage→verdict 연결 예시와 synthetic/live 구분",
+      "후속 18+3 실측 실행 명령과 artifact manifest 형식"
+    ]
+  },
+  "measurement_state": "not_run",
+  "contract_sha256": "7e701e3bf6087037f3ede2c457cb70b790db2ac752348fa9fe17a7c4120af18d",
+  "evidence_location": "<base-path>/.masc/playground/reliable-change-evidence/g1/",
+  "goal_metadata_readback": "masc_goal_list: metric matches submitted metric",
+  "task_readback": "masc_tasks(todo) and authoritative tasks/backlog.json",
+  "goal_link_readback": {
+    "source": "tasks/goal_task_links.json",
+    "link": {
+      "goal_id": "goal-reliable-change-g1-20260909",
+      "task_ids": [
+        "task-1478"
+      ]
+    }
+  },
+  "scope": "Only G1 and its first implementation Task were created. G2-G5 remain planned; existing Goal contracts were not modified."
+}

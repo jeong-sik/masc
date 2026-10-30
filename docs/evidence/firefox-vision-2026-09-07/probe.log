@@ -1,0 +1,13 @@
+PASS element observation names its tab
+PASS password values are absent
+PASS opaque option values are observable
+PASS native fill select and click changed page
+PASS live DOM value reflects native fill
+PASS second tab remains independently readable
+PASS ambiguous selector rejected before effect
+PASS native back returns to previous URL
+PASS native forward restores URL
+PASS native screenshot carries the selected tab
+PASS closed tab cannot be clicked
+PASS reopened sessions never reuse tab IDs
+PASS old session target rejected

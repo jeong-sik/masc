@@ -1,0 +1,2671 @@
+let contains ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop i =
+    i + needle_len <= haystack_len
+    && (String.sub haystack i needle_len = needle || loop (i + 1))
+  in
+  needle_len = 0 || loop 0
+
+let response ?(content = []) ?(stop_reason = Agent_core.Types.EndTurn) () =
+  {
+    Agent_core.Types.id = "resp-test";
+    model = "model-test";
+    stop_reason;
+    content;
+    usage = None;
+    telemetry = None;
+  }
+
+let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
+
+let checkpoint_with_messages messages : Agent_core.Checkpoint.t =
+  { provider_binding = None;
+    Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version;
+    session_id = "session-test";
+    agent_name = "agent-test";
+    model = "model-test";
+    system_prompt = None;
+    messages;
+    usage = Agent_core.Types.empty_usage;
+    turn_count = 1;
+    created_at = 0.0;
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    reasoning_effort = None;
+    enable_thinking = None;
+    preserve_thinking = None;
+    response_format = Agent_core.Types.Off;
+    cache_system_prompt = false;
+
+    context = Agent_core.Context.create_sync ();
+    pending_input = None; mcp_sessions = [];
+    working_context = None;
+  }
+
+let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
+  {
+    response = response ?content ?stop_reason ();
+    checkpoint;
+    session_id = "session-test";
+    session_resumed = None;
+    turns = 1;
+    trace_ref = None;
+    run_validation = None;
+    runtime_observation = None;
+    cooperative_boundary = None;
+    stop_reason = (Runtime_agent.Completed { provider_turn_ordinal = 0 });
+  }
+
+let input_required_request () : Agent_core.Error.input_required =
+  { request_id = "input-request-1"
+  ; participant_name = Some "operator"
+  ; question = "Which repository should I inspect?"
+  ; schema = Some (`Assoc [ "type", `String "string" ])
+  ; timeout_s = None
+  ; created_at = 1_000.0
+  }
+
+let accept_no_progress_retry_kind_string err =
+  let kind =
+    match Masc.Keeper_turn_driver.classify_masc_internal_error err with
+    | Some internal_error ->
+      Masc.Keeper_turn_driver.accept_no_progress_retry_kind internal_error
+    | None -> None
+  in
+  Option.map
+    (function
+      | `Empty_no_progress -> "empty_no_progress"
+      | `Thinking_only_no_progress -> "thinking_only_no_progress"
+      | `Truncated_no_progress -> "truncated_no_progress")
+    kind
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let test_admitted_continuation_requires_checkpoint () =
+  match
+    Masc.Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "admitted-continuation" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      ~runtime_id:"unused" ~base_path:"." ~media_store:(Tool_blob_media_store.of_base_path ~base_path:".") ~goal:"continue"
+      ~system_prompt:"" ~agent_core_tools:[] ~continue_from_checkpoint:true ()
+  with
+  | Error (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field = "continuation_checkpoint"; _ })) -> ()
+  | Error error -> Alcotest.failf "wrong admission error: %s" (Agent_core.Error.to_string error)
+  | Ok _ -> Alcotest.fail "missing admitted checkpoint must not dispatch a new input"
+
+let test_dispatch_accepts_runtime_without_serialized_request_cap () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "uncapped_keeper_runtime_" ".toml" in
+  let uncapped =
+    String.concat
+      "\n"
+      [ "[runtime]"
+      ; "default = \"test_provider.test_model\""
+      ; ""
+      ; "[providers.test_provider]"
+      ; "protocol = \"openai-compatible-http\""
+      ; "endpoint = \"http://127.0.0.1:1/v1\""
+      ; ""
+      ; "[models.test_model]"
+      ; "api-name = \"test-model\""
+      ; "max-context = 8192"
+      ; "tools-support = true"
+      ; "streaming = true"
+      ; ""
+      ; "[test_provider.test_model]"
+      ]
+  in
+  write_file path uncapped;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       match Runtime.init_default ~config_path:path with
+       | Error error -> Alcotest.failf "fixture load failed: %s" error
+       | Ok () ->
+         (match
+            Masc.Keeper_turn_driver.For_testing.resolve_runtime_candidate_for_attempt
+              "test_provider.test_model"
+          with
+          | Ok _ -> ()
+          | Error error -> Alcotest.failf "uncapped runtime should resolve for dispatch: %s"
+              (Agent_core.Error.to_string error)))
+
+let test_keeper_hook_relaxes_strict_tool_choice () =
+  let open Agent_core.Types in
+  let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in
+  Alcotest.(check bool) "Any -> Auto" true (relax (Some Any) = Some Auto);
+  Alcotest.(check bool)
+    "Tool -> Auto"
+    true
+    (relax (Some (Tool "keeper_context_status")) = Some Auto);
+  Alcotest.(check bool)
+    "Auto unchanged"
+    true
+    (relax (Some Auto) = Some Auto);
+  Alcotest.(check bool)
+    "None_ unchanged"
+    true
+    (relax (Some None_) = Some None_);
+  Alcotest.(check bool) "unset unchanged" true (relax None = None)
+
+let test_accept_keeps_result () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"ollama.test"
+      ~accept:(fun _ -> true)
+      (run_result ())
+  in
+  match result with
+  | Ok kept ->
+    Alcotest.(check string) "session preserved" "session-test" kept.session_id
+  | Error err ->
+    Alcotest.failf "accepted response should pass through: %s"
+      (Agent_core.Error.to_string err)
+
+let empty_terminal_error stop_reason =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.EmptyCompletion
+       { provider = "test"; stop_reason; detail = "empty assistant turn" })
+
+let test_empty_terminal_completion_requires_this_attempt_saved_checkpoint () =
+  let module Attempt = Masc.Keeper_turn_driver_try_provider in
+  let progress = Atomic.make Attempt.No_checkpoint_stage in
+  let saved_count () = Attempt.For_testing.tool_result_save_count progress in
+  let checkpoint = checkpoint_with_messages [] in
+  let decide ~before ?(checkpoint = Some checkpoint)
+      ?(observed_provider_turn_ordinal = Some 17)
+      ?(stop_reason = Agent_core.Types.EndTurn) () =
+    Attempt.complete_saved_tool_terminal
+      ~tool_results_saved_in_attempt:(saved_count () > before)
+      ~observed_provider_turn_ordinal ~checkpoint (Error (empty_terminal_error stop_reason))
+  in
+  let check_decision label expected decision =
+    Alcotest.(check bool) label expected (Result.is_ok decision)
+  in
+  let before = saved_count () in
+  check_decision "tool-free terminal retains its failure" false (decide ~before ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_context_injection;
+  check_decision "context-only save does not complete" false (decide ~before ());
+  Attempt.observe_checkpoint_stage progress Agent_core.Agent.After_tool_results_appended;
+  check_decision "reaching the tool-save stage does not complete" false (decide ~before ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_tool_results_appended;
+  check_decision "this attempt's saved tool result completes" true (decide ~before ());
+  let no_ordinal = empty_terminal_error Agent_core.Types.EndTurn in
+  (match Attempt.complete_saved_tool_terminal
+       ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:None
+       ~checkpoint:(Some checkpoint) (Error no_ordinal) with
+   | Error retained -> Alcotest.(check bool) "no observed provider ordinal retains exact original failure"
+       true (retained == no_ordinal)
+   | Ok _ -> Alcotest.fail "checkpoint counts fabricated a provider ordinal");
+  (match decide ~before () with
+   | Ok completed -> Alcotest.(check (option int)) "same-attempt ordinal survives synthesis"
+       (Some 17) (Runtime_agent.final_provider_turn_ordinal completed.stop_reason)
+   | Error error -> Alcotest.fail (Agent_core.Error.to_string error));
+  check_decision "checkpoint must be available" false
+    (decide ~before ~checkpoint:None ());
+  List.iter (fun stop_reason ->
+    check_decision "non-EndTurn failure remains a failure" false
+      (decide ~before ~stop_reason ()))
+    [ Agent_core.Types.StopToolUse
+    ; Agent_core.Types.MaxTokens
+    ; Agent_core.Types.StopSequence
+    ; Agent_core.Types.Refusal
+    ; Agent_core.Types.ContentFilter
+    ; Agent_core.Types.RepetitionTruncation
+    ; Agent_core.Types.PauseTurn
+    ; Agent_core.Types.Compaction
+    ; Agent_core.Types.ContextWindowExceeded
+    ; Agent_core.Types.UnmatchedToolCalls
+    ; Agent_core.Types.Unknown "provider-specific"
+    ];
+  let next_attempt = saved_count () in
+  check_decision "an earlier attempt cannot authorize completion" false
+    (decide ~before:next_attempt ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_context_injection;
+  check_decision "context injection cannot reuse earlier tool proof" false
+    (decide ~before:next_attempt ());
+  let unrelated = Agent_core.Error.Internal "unrelated" in
+  let unchanged = Attempt.complete_saved_tool_terminal
+      ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:(Some 17) ~checkpoint:(Some checkpoint)
+      (Error unrelated) in
+  (match unchanged with
+   | Error actual -> Alcotest.(check bool) "unrelated failure retained" true (actual == unrelated)
+   | Ok _ -> Alcotest.fail "unrelated failure was completed");
+  let input_error = Agent_core.Error.Agent (Agent_core.Error.InputRequired (input_required_request ())) in
+  (match Attempt.complete_saved_tool_terminal
+       ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:None
+       ~checkpoint:(Some checkpoint) (Error input_error) with
+   | Error retained -> Alcotest.(check bool) "input request without an inference ordinal stays input-required"
+       true (retained == input_error)
+   | Ok _ -> Alcotest.fail "input required became inference completion");
+  let original = run_result () in
+  let unchanged = Attempt.complete_saved_tool_terminal
+      ~tool_results_saved_in_attempt:true ~observed_provider_turn_ordinal:(Some 17) ~checkpoint:(Some checkpoint) (Ok original) in
+  (match unchanged with
+   | Ok actual -> Alcotest.(check bool) "successful result unchanged" true (actual == original)
+   | Error _ -> Alcotest.fail "successful result was rejected")
+;;
+
+type tool_checkpoint_store_case = Fresh_checkpoint | Ahead_checkpoint | Failed_tool_checkpoint
+
+let run_tool_then_empty_with_checkpoint_store store_case () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let module Core = Agent_core in
+  let module Attempt = Masc.Keeper_turn_driver_try_provider in
+  let module Store = Masc.Keeper_checkpoint_store in
+  let root = Filename.temp_file "tool-empty-checkpoint-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let rec remove_owned_tree path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> remove_owned_tree (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else Sys.remove path
+  in
+  Fun.protect ~finally:(fun () -> remove_owned_tree root) (fun () ->
+  let session_dir = Filename.concat root "sessions" in
+  let session_id = "quiet-terminal-session" in
+  let progress = Atomic.make Attempt.No_checkpoint_stage in
+  let before = Attempt.For_testing.tool_result_save_count progress in
+  let tool_executions = ref 0 in
+  let executed_names = ref [] in
+  let provider_calls = ref 0 in
+  let replies = ref
+      [ response ~stop_reason:Core.Types.StopToolUse
+          ~content:[Llm_provider.Types.ToolUse {id="observed-1"; name="observe"; input=`Assoc []}] ()
+      ; response ~content:[] () ] in
+  let next () =
+    incr provider_calls;
+    match !replies with
+    | reply :: rest -> replies := rest; reply
+    | [] -> Alcotest.fail "completed tool was retried after terminal response"
+  in
+  let transport : Llm_provider.Llm_transport.t =
+    Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> {response=Ok (next ()); latency_ms=None})
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) }) in
+  let provider_config = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"test"
+      ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"
+      ~model_id:"mock-model" () in
+  let tool = Core.Tool.create ~name:"observe" ~description:"Observe once" ~parameters:[]
+      (fun _ -> incr tool_executions; executed_names := "observe" :: !executed_names;
+        Ok {Core.Types.content="observed"; content_blocks=None; _meta=None}) in
+  let observed_provider_turn_ordinal = ref None in
+  let hooks = { Core.Hooks.empty with after_turn = Some (function
+    | Core.Hooks.AfterTurn { turn; _ } ->
+      observed_provider_turn_ordinal := Some turn; Core.Hooks.Continue
+    | Core.Hooks.BeforeTurn _ | Core.Hooks.BeforeTurnParams _
+    | Core.Hooks.PreToolUse _ | Core.Hooks.PostToolUse _
+    | Core.Hooks.PostToolUseFailure _ | Core.Hooks.OnStop _
+    | Core.Hooks.OnError _ | Core.Hooks.OnToolError _ -> Core.Hooks.Continue) } in
+  let options = {Core.Agent.default_options with
+      provider_config=Some provider_config; transport=Some transport; hooks} in
+  let newer = { (checkpoint_with_messages [message ~role:Core.Types.User [Core.Types.Text "newer canonical"]])
+      with session_id; model="mock-model"; turn_count=100 } in
+  (match store_case with
+   | Ahead_checkpoint ->
+     (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 newer with
+      | Ok (Store.Saved _) -> ()
+      | Ok (Store.Stale_noop _) -> Alcotest.fail "fresh canonical fixture was stale"
+      | Error detail -> Alcotest.fail detail)
+   | Fresh_checkpoint | Failed_tool_checkpoint -> ());
+  let saves = ref 0 in
+  let stale_noops = ref 0 in
+  let failed_saves = ref 0 in
+  let checkpoint_owner (snapshot : Core.Agent.checkpoint_snapshot) =
+    (* Match the real Keeper sink's ownership contract: only its classified
+       Saved branch can witness tool progress, never a successful stale no-op. *)
+    let checkpoint = { snapshot.checkpoint with session_id } in
+    (match store_case, snapshot.stage with
+     | Failed_tool_checkpoint, Core.Agent.After_tool_results_appended ->
+       write_file (Store.agent_core_checkpoint_path ~session_dir ~session_id) "{unreadable canonical"
+     | (Fresh_checkpoint | Ahead_checkpoint | Failed_tool_checkpoint), _ -> ());
+    match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
+    | Ok (Store.Saved _) ->
+      incr saves;
+      Attempt.observe_checkpoint_saved progress snapshot.stage;
+      Ok ()
+    | Ok (Store.Stale_noop _) -> incr stale_noops; Ok ()
+    | Error detail -> incr failed_saves; Error detail
+  in
+  let checkpoint_sink = Attempt.observing_checkpoint_sink progress (Some checkpoint_owner) in
+  let agent = Core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env)
+      ~config:(Core.Types.default_config ~model:"mock-model") ~options ~tools:[tool]
+      ~checkpoint_sink () in
+  let error = match Core.Agent.run ~sw agent "observe once" with
+    | Error error -> error
+    | Ok _ -> Alcotest.fail "shared SDK silently accepted the empty terminal or failed store" in
+  let checkpoint = Core.Agent.checkpoint ~session_id agent in
+  let result = Attempt.complete_saved_tool_terminal
+      ~tool_results_saved_in_attempt:
+        (Attempt.For_testing.tool_result_save_count progress > before)
+      ~observed_provider_turn_ordinal:!observed_provider_turn_ordinal
+      ~checkpoint:(Some checkpoint) (Error error) in
+  Alcotest.(check int) "one real tool execution" 1 !tool_executions;
+  Alcotest.(check bool) "observed checkpoint boundary prevents same-run replay" false
+    (Attempt.same_run_retry_allowed progress);
+  (match store_case, error with
+   | (Fresh_checkpoint | Ahead_checkpoint),
+       Core.Error.Provider (Llm_provider.Error.EmptyCompletion {stop_reason=Core.Types.EndTurn; _}) -> ()
+   | (Fresh_checkpoint | Ahead_checkpoint), _ -> Alcotest.fail (Core.Error.to_string error)
+   | Failed_tool_checkpoint, _ -> ());
+  match store_case, result with
+  | Fresh_checkpoint, Ok completed ->
+    Alcotest.(check int) "tool request then empty terminal" 2 !provider_calls;
+    Alcotest.(check bool) "this SDK invocation observed a provider ordinal" true
+      (Option.is_some !observed_provider_turn_ordinal);
+    Alcotest.(check (option int)) "synthetic completion retains the actual hook ordinal"
+      !observed_provider_turn_ordinal
+      (Runtime_agent.final_provider_turn_ordinal completed.stop_reason);
+    Alcotest.(check bool) "actual checkpoint owner saved" true (!saves > 0);
+    let durable = match Store.load_agent_core ~session_dir ~session_id with
+      | Ok checkpoint -> checkpoint
+      | Error error -> Alcotest.fail (Store.checkpoint_load_error_to_string error) in
+    let results = List.concat_map (fun (m : Core.Types.message) ->
+      List.filter_map (function Core.Types.ToolResult {tool_use_id; content; _} -> Some (tool_use_id, content)
+        | _ -> None) m.content) durable.messages in
+    Alcotest.(check (list (pair string string))) "reopened canonical owns exact tool result"
+      ["observed-1", "observed"] results;
+    Alcotest.(check string) "checkpoint session retained" session_id completed.session_id;
+    Alcotest.(check int) "checkpoint turn count retained" checkpoint.turn_count completed.turns;
+    Alcotest.(check bool) "actual checkpoint retained" true
+      (Option.fold ~none:false ~some:(fun saved -> saved == checkpoint) completed.checkpoint);
+    Alcotest.(check string) "provider response id is unavailable" "" completed.response.id;
+    Alcotest.(check bool) "usage is unavailable, not invented" true (completed.response.usage = None);
+    Alcotest.(check (result string string)) "actual executed tool names support finalization" (Ok "")
+      (Keeper_tooling.Response.normalize_response_text
+         ~text:(Core.Types.visible_text_of_response completed.response) ~tool_names:!executed_names ())
+  | Ahead_checkpoint, Error retained ->
+    Alcotest.(check bool) "stale owner made no new tool-save proof" true (!stale_noops > 0);
+    Alcotest.(check int) "no save advanced behind canonical" 0 !saves;
+    Alcotest.(check int) "empty terminal observed after tool" 2 !provider_calls;
+    Alcotest.(check bool) "empty failure retained without owned save" true (retained == error);
+    let durable = match Store.load_agent_core ~session_dir ~session_id with
+      | Ok checkpoint -> checkpoint
+      | Error error -> Alcotest.fail (Store.checkpoint_load_error_to_string error) in
+    Alcotest.(check int) "newer canonical did not regress" 100 durable.turn_count;
+    Alcotest.(check bool) "newer canonical messages unchanged" true (durable.messages = newer.messages)
+  | Failed_tool_checkpoint, Error retained ->
+    Alcotest.(check bool) "tool-stage store refusal was real" true (!failed_saves > 0);
+    Alcotest.(check int) "failed tool save ends before another provider call" 1 !provider_calls;
+    Alcotest.(check bool) "persistence failure remains a failure" true (retained == error);
+    (match Store.load_agent_core ~session_dir ~session_id with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "failed canonical read became an empty successful checkpoint")
+  | Fresh_checkpoint, Error error -> Alcotest.fail (Core.Error.to_string error)
+  | (Ahead_checkpoint | Failed_tool_checkpoint), Ok _ ->
+    Alcotest.fail "a tool result without its owned durable save completed")
+;;
+
+let test_tool_then_empty_failure_completes_without_reexecution =
+  run_tool_then_empty_with_checkpoint_store Fresh_checkpoint
+
+let test_tool_then_empty_stale_checkpoint_does_not_complete =
+  run_tool_then_empty_with_checkpoint_store Ahead_checkpoint
+
+let test_tool_checkpoint_failure_does_not_complete_or_repeat =
+  run_tool_then_empty_with_checkpoint_store Failed_tool_checkpoint
+;;
+
+let test_input_required_bypasses_response_accept () =
+  let accept_calls = ref 0 in
+  let reject (_ : Agent_core.Types.api_response) =
+    incr accept_calls;
+    false
+  in
+  let request = input_required_request () in
+  let result =
+    { (run_result ()) with
+      stop_reason = Runtime_agent.InputRequired { turns_used = 2; request }
+    }
+  in
+  (match
+     Masc.Keeper_turn_driver.For_testing.apply_accept
+       ~runtime_id:"runtime.reasoning-model"
+       ~accept:reject
+       result
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "InputRequired rotated through response acceptance: %s"
+       (Agent_core.Error.to_string error));
+  Alcotest.(check int)
+    "InputRequired never invokes the deliverable accept predicate"
+    0
+    !accept_calls
+
+let test_terminal_tool_completion_bypasses_empty_response_rejection () =
+  let accept_calls = ref 0 in
+  let reject (_ : Agent_core.Types.api_response) =
+    incr accept_calls;
+    false
+  in
+  let completed_state () =
+    Masc.Keeper_tools_agent_core.Terminal_effect_completed
+      (Masc.Keeper_tool_execution.Surface_post_completed
+         Masc.Keeper_surface_post.To_dashboard)
+  in
+  (match
+     Masc.Keeper_turn_driver.For_testing.apply_official_client_accept
+       ~runtime_id:"runtime.official-client"
+       ~accept:reject
+       ~terminal_effect_state:completed_state
+       (run_result ~content:[] ())
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "settled terminal tool completion was rejected: %s"
+       (Agent_core.Error.to_string error));
+  Alcotest.(check int)
+    "terminal completion does not invoke response-content acceptance"
+    0
+    !accept_calls
+
+let test_open_terminal_state_keeps_empty_response_rejection () =
+  match
+    Masc.Keeper_turn_driver.For_testing.apply_official_client_accept
+      ~runtime_id:"runtime.official-client"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~terminal_effect_state:(fun () ->
+        Masc.Keeper_tools_agent_core.Terminal_effect_open)
+      (run_result ~content:[] ())
+  with
+  | Error error ->
+    (match Keeper_internal_error.classify_masc_internal_error error with
+     | Some (Keeper_internal_error.Accept_rejected { reason; _ }) ->
+       Alcotest.(check bool)
+         "ordinary empty response remains typed no-progress"
+         true
+         (contains ~needle:"response rejected by accept" reason)
+     | Some other ->
+       Alcotest.failf
+         "ordinary empty response produced %s"
+         (Keeper_internal_error.kind_of_masc_internal_error other)
+     | None ->
+       Alcotest.failf
+         "ordinary empty response produced the wrong rejection: %s"
+         (Agent_core.Error.to_string error))
+  | Ok _ -> Alcotest.fail "ordinary empty response was incorrectly accepted"
+
+let test_replay_projection_failure_rejects_completed_attempt () =
+  let open Agent_core.Types in
+  let canonical_prefix =
+    [ message
+        ~role:User
+        [ Text "canonical history"
+        ; image_block ~media_type:"image/png"
+            ~source:(Stored (Agent_core.History.stored_of_raw "canonical-image"))
+        ]
+    ]
+  in
+  let dispatch_prefix = [ message ~role:User [ Text "canonical history" ] ] in
+  let drifted_checkpoint =
+    checkpoint_with_messages [ message ~role:User [ Text "unrelated history" ] ]
+  in
+  let outcomes =
+    Masc.Keeper_attempt_checkpoint.project
+      ~projection:
+        (Masc.Keeper_replay_prefix.media_degraded
+           ~canonical_prefix
+           ~dispatch_prefix)
+      (Ok (run_result ~checkpoint:drifted_checkpoint ()))
+  in
+  match outcomes.Masc.Keeper_attempt_checkpoint.turn_result with
+  | Error (Agent_core.Error.Internal detail) ->
+    Alcotest.(check bool)
+      "local replay-prefix drift fails the turn explicitly"
+      true
+      (String.trim detail <> "")
+  | Error error ->
+    Alcotest.failf
+      "expected typed Internal replay-prefix failure, got %s"
+      (Agent_core.Error.to_string error)
+  | Ok _ -> Alcotest.fail "replay-prefix drift did not fail closed"
+
+let test_rejects_as_typed_accept_error () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"ollama.gemma4-26b-a4b-qat"
+      ~accept:(fun _ -> false)
+      (run_result ())
+  in
+  match result with
+  | Ok _ -> Alcotest.fail "rejected response should fail"
+  | Error err ->
+    (match Keeper_internal_error.classify_masc_internal_error err with
+     | Some (Keeper_internal_error.Accept_rejected { scope; reason; _ }) ->
+       Alcotest.(check string)
+         "scope"
+         "ollama.gemma4-26b-a4b-qat"
+         scope;
+       Alcotest.(check bool)
+         "reason mentions accept rejection"
+         true
+         (contains ~needle:"response rejected by accept" reason)
+     | Some other ->
+       Alcotest.failf "expected Accept_rejected, got %s"
+         (Keeper_internal_error.kind_of_masc_internal_error other)
+     | None ->
+       Alcotest.failf "expected typed keeper error, got %s"
+         (Agent_core.Error.to_string err))
+
+let expect_accept_rejected result =
+  match result with
+  | Ok _ -> Alcotest.fail "rejected response should fail"
+  | Error err ->
+    (match Keeper_internal_error.classify_masc_internal_error err with
+     | Some (Keeper_internal_error.Accept_rejected { reason_kind; reason; _ }) ->
+       err, reason_kind, reason
+     | Some other ->
+       Alcotest.failf "expected Accept_rejected, got %s"
+         (Keeper_internal_error.kind_of_masc_internal_error other)
+     | None ->
+       Alcotest.failf "expected typed keeper error, got %s"
+         (Agent_core.Error.to_string err))
+
+let accept_rejected_core_error
+    ?(stop_reason = None)
+    ~response_shape
+    ~reason
+    () =
+  Keeper_internal_error.core_error_of_masc_internal_error
+    (Keeper_internal_error.Accept_rejected
+       { scope = "runtime.changed-diagnostic"
+       ; model = None
+       ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+       ; response_shape
+       ; stop_reason
+       ; reason
+       })
+
+(* A max-tokens rejection owed the checkpoint two different things, and one
+   condition decided both: the cut only happened when thinking had been on.
+   With thinking already off there was no second attempt to make -- and the
+   response accept had just called unusable stayed in the checkpoint, becoming
+   input on every later turn.
+
+   Measured on a live keeper, 2026-09-03, thinking off throughout: collapse into one
+   repeated word, rejected at max_tokens, message_assistant_text 136 KB ->
+   308 KB over twelve turns in 30-40 KB steps -- the size of the rejected
+   text each time. *)
+(* The wire below can be told to stop thinking; the case where it cannot is
+   [test_a_wire_that_cannot_stop_thinking_drops_instead_of_retrying]. *)
+let truncation_recovery ~enable_thinking ~result ~checkpoint =
+  Masc.Keeper_turn_driver_try_provider.For_testing.truncation_recovery
+    ~enable_thinking ~thinking_can_be_disabled:true ~result ~checkpoint
+
+let max_tokens_rejection () =
+  Error
+    (accept_rejected_core_error
+       ~stop_reason:(Some Agent_core.Types.MaxTokens)
+       ~response_shape:None
+       ~reason:"response rejected by accept: stop_reason=max_tokens"
+       ())
+
+let assistant_ended_checkpoint () =
+  checkpoint_with_messages
+    [ message ~role:Agent_core.Types.Tool [ Agent_core.Types.Text "tool output" ]
+    ; message [ Agent_core.Types.Text "collapsed" ]
+    ]
+
+let test_a_rejected_response_leaves_the_checkpoint_either_way () =
+  let checkpoint = assistant_ended_checkpoint () in
+  let cut_messages = function
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking c
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Drop_rejected_response c ->
+      List.length c.Agent_core.Checkpoint.messages
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+      Alcotest.fail "a max-tokens rejection must reach the checkpoint"
+  in
+  (match
+     truncation_recovery ~enable_thinking:(Some true)
+       ~result:(max_tokens_rejection ()) ~checkpoint:(Some checkpoint)
+   with
+   | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking _ as
+     plan ->
+     Alcotest.(check int) "thinking on: retry on the cut checkpoint" 1
+       (cut_messages plan)
+   | _ -> Alcotest.fail "thinking on must still retry without thinking");
+  (* The case that was silently keeping the rejected text. *)
+  match
+    truncation_recovery ~enable_thinking:(Some false)
+      ~result:(max_tokens_rejection ()) ~checkpoint:(Some checkpoint)
+  with
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Drop_rejected_response _ as
+    plan ->
+    Alcotest.(check int) "thinking off: the rejected response is still dropped" 1
+      (cut_messages plan)
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking _ ->
+    Alcotest.fail "thinking is already off; there is no remedy to retry"
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+    Alcotest.fail "the rejected response must leave the checkpoint"
+
+(* Thinking was on, so the remedy looks available -- but some wires have no way
+   to say "stop thinking": Grok's reasoning has no off switch, and a
+   Reasoning_effort row whose ladder omits "none" cannot spell the disable.
+   Sending it anyway spends the turn on a request refused before dispatch, and a
+   lane holding one candidate has nothing to rotate to (#36972, the fourth turn
+   lost this way after #26787, #30701 and #28447). The rejected response is owed
+   the same drop it gets when thinking was already off. *)
+let test_a_wire_that_cannot_stop_thinking_drops_instead_of_retrying () =
+  let checkpoint = assistant_ended_checkpoint () in
+  match
+    Masc.Keeper_turn_driver_try_provider.For_testing.truncation_recovery
+      ~enable_thinking:(Some true) ~thinking_can_be_disabled:false
+      ~result:(max_tokens_rejection ()) ~checkpoint:(Some checkpoint)
+  with
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Drop_rejected_response cut ->
+    Alcotest.(check int)
+      "the rejected response is dropped without a retry that cannot be sent" 1
+      (List.length cut.Agent_core.Checkpoint.messages)
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking _ ->
+    Alcotest.fail "this wire has no field that can carry the disable"
+  | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+    Alcotest.fail "the rejected response must still leave the checkpoint"
+
+(* 2026-09-11: the no-thinking truncation retry re-dispatches the same
+   candidate; with the runtime declaring reasoning-effort the retry died in
+   request validation ("cannot set reasoning_effort when enable_thinking=false")
+   instead of continuing the turn — observed on the Terminal-Bench anthropic
+   smoke against v0.35.7. Effort is a thinking modifier, so the retry strips
+   it from the candidate it re-dispatches. *)
+(* The recovery decision is fed a boolean, and this is where that boolean comes
+   from. Testing the decision alone leaves the question unasked: does the gate
+   read this candidate's own contract, or does it answer the same either way?
+   The two rows below differ in exactly one declared value -- whether the off
+   effort is in the ladder -- so a gate that ignored the row would fail one of
+   them. *)
+let test_the_retry_gate_reads_this_candidate_s_ladder () =
+  let router_caps =
+    match Llm_provider.Capabilities.capabilities_for_provider_label "openrouter" with
+    | Some caps -> caps
+    | None -> Alcotest.fail "the router base is no longer reachable by label"
+  in
+  let candidate caps =
+    Runtime_candidate.of_provider_config
+      (Llm_provider.Provider_config.make
+         ~kind:Llm_provider.Provider_config.OpenAI_compat
+         ~model_id:"gate-row"
+         ~base_url:"https://openrouter.ai/api/v1"
+         ~model_capabilities_override:caps
+         ())
+  in
+  Alcotest.(check bool)
+    "a ladder with no off value cannot take the retry"
+    false
+    (Masc.Keeper_turn_driver_try_provider.For_testing.retry_without_thinking_admitted
+       (candidate router_caps));
+  let with_off_declared =
+    { router_caps with
+      Llm_provider.Capabilities.accepted_reasoning_efforts =
+        Some [ Llm_provider.Reasoning_effort.None_; Llm_provider.Reasoning_effort.Low ]
+    }
+  in
+  Alcotest.(check bool)
+    "the same row declaring the off value can"
+    true
+    (Masc.Keeper_turn_driver_try_provider.For_testing.retry_without_thinking_admitted
+       (candidate with_off_declared))
+
+let test_truncation_retry_candidate_drops_reasoning_effort () =
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~model_id:"claude-fable-5"
+      ~base_url:"https://api.anthropic.com"
+      ~reasoning_effort:Llm_provider.Reasoning_effort.High
+      ()
+  in
+  let stripped =
+    Masc.Keeper_turn_driver_try_provider.For_testing.candidate_without_reasoning_effort
+      (Runtime_candidate.of_provider_config cfg)
+    |> Runtime_candidate.provider_cfg
+  in
+  Alcotest.(check bool)
+    "effort dropped"
+    true
+    (stripped.Llm_provider.Provider_config.reasoning_effort = None);
+  Alcotest.(check string)
+    "model preserved"
+    "claude-fable-5"
+    stripped.Llm_provider.Provider_config.model_id
+
+(* The cut has to reach the durable checkpoint, or the rejected text is back
+   as input next turn: fixture_worker carried the same 31 KB collapse four times,
+   2026-09-05 (#33267). The drop is persisted through the keeper's own sink
+   under its own stage, at the turn count of the checkpoint it replaces. *)
+let test_a_dropped_response_is_written_through_the_sink () =
+  let checkpoint = assistant_ended_checkpoint () in
+  let cut =
+    match
+      truncation_recovery ~enable_thinking:(Some false)
+        ~result:(max_tokens_rejection ()) ~checkpoint:(Some checkpoint)
+    with
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Drop_rejected_response cut -> cut
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Retry_without_thinking _
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+      Alcotest.fail "thinking off and max_tokens: the response must be dropped"
+  in
+  let written = ref None in
+  let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+    written := Some snapshot;
+    Ok ()
+  in
+  (match
+     Masc.Keeper_turn_driver_try_provider.For_testing.persist_dropped_response
+       ~checkpoint_sink:(Some sink) ~now:42.0 cut
+   with
+   | Ok () -> ()
+   | Error reason -> Alcotest.failf "an accepting sink must not refuse: %s" reason);
+  (match !written with
+   | None -> Alcotest.fail "the cut never reached the sink"
+   | Some snapshot ->
+     Alcotest.(check bool) "written under its own stage" true
+       (snapshot.stage = Agent_core.Agent.After_rejected_response_dropped);
+     Alcotest.(check int) "at the turn count it replaces" checkpoint.turn_count
+       snapshot.turn;
+     Alcotest.(check int) "without the rejected response" 1
+       (List.length snapshot.checkpoint.Agent_core.Checkpoint.messages);
+     Alcotest.(check (float 0.0)) "stamped with the caller's clock" 42.0
+       snapshot.timestamp);
+  (match
+     Masc.Keeper_turn_driver_try_provider.For_testing.persist_dropped_response
+       ~checkpoint_sink:(Some (fun _ -> Error "disk full")) ~now:42.0 cut
+   with
+   | Error "disk full" -> ()
+   | Error other -> Alcotest.failf "the sink's own reason must come back, got %s" other
+   | Ok () -> Alcotest.fail "a refusing sink must not read as installed");
+  match
+    Masc.Keeper_turn_driver_try_provider.For_testing.persist_dropped_response
+      ~checkpoint_sink:None ~now:42.0 cut
+  with
+  | Ok () -> ()
+  | Error reason -> Alcotest.failf "no sink means nothing to refuse: %s" reason
+
+let test_recovery_is_scoped_to_max_tokens_rejections () =
+  let checkpoint = assistant_ended_checkpoint () in
+  let not_applicable name plan =
+    match plan with
+    | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
+      ()
+    | _ -> Alcotest.failf "%s must not cut the checkpoint" name
+  in
+  not_applicable "a successful turn"
+    (truncation_recovery ~enable_thinking:(Some false)
+       ~result:(Ok (run_result ())) ~checkpoint:(Some checkpoint));
+  not_applicable "a rejection that did not stop at max_tokens"
+    (truncation_recovery ~enable_thinking:(Some false)
+       ~result:
+         (Error
+            (accept_rejected_core_error ~stop_reason:(Some Agent_core.Types.EndTurn)
+               ~response_shape:None ~reason:"clean no-progress" ()))
+       ~checkpoint:(Some checkpoint));
+  not_applicable "a rejection with no checkpoint to cut"
+    (truncation_recovery ~enable_thinking:(Some false)
+       ~result:(max_tokens_rejection ()) ~checkpoint:None)
+
+let test_accept_rejected_threads_stop_reason () =
+  (* RFC-0271 §4.5 slice 1: apply_accept preserves the provider's typed
+     stop_reason on the rejected turn's Accept_rejected, so a MaxTokens
+     truncation is later distinguishable from a clean EndTurn no-progress
+     terminal. Behaviour-neutral groundwork — no classification change yet. *)
+  let threaded sr =
+    match
+      Masc.Keeper_turn_driver.For_testing.apply_accept
+        ~runtime_id:"runtime.truncation"
+        ~accept:(fun _ -> false)
+        (run_result ~stop_reason:sr ())
+    with
+    | Ok _ -> Alcotest.fail "rejected response should fail"
+    | Error err ->
+      (match Keeper_internal_error.classify_masc_internal_error err with
+       | Some (Keeper_internal_error.Accept_rejected { stop_reason; _ }) ->
+         stop_reason
+       | _ -> Alcotest.fail "expected Accept_rejected")
+  in
+  Alcotest.(check bool) "MaxTokens threaded" true
+    (threaded Agent_core.Types.MaxTokens = Some Agent_core.Types.MaxTokens);
+  Alcotest.(check bool) "EndTurn threaded" true
+    (threaded Agent_core.Types.EndTurn = Some Agent_core.Types.EndTurn)
+
+let test_accept_rejected_stop_reason_survives_codec () =
+  (* to_json -> of_json preserves the typed stop_reason (Slice 1 codec). *)
+  let err =
+    accept_rejected_core_error
+      ~stop_reason:(Some Agent_core.Types.MaxTokens)
+      ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+      ~reason:"response rejected by accept (runtime=x): shape=empty"
+      ()
+  in
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some (Keeper_internal_error.Accept_rejected { stop_reason; _ }) ->
+    Alcotest.(check bool) "stop_reason survives codec round-trip" true
+      (stop_reason = Some Agent_core.Types.MaxTokens)
+  | _ -> Alcotest.fail "expected Accept_rejected after codec round-trip"
+
+(* A max_tokens stop on a response with nothing deliverable keeps the shape's
+   rotation kind, so the lane moves on when the continuation cannot run; the
+   continuation attempt itself is still offered to every max_tokens
+   no-progress rejection. Pinned after analyst repeated a thinking-only
+   max_tokens turn nine times on 2026-09-02 with a second lane candidate
+   idle. *)
+let test_max_tokens_without_content_keeps_rotation_kind () =
+  let thinking_only =
+    accept_rejected_core_error
+      ~stop_reason:(Some Agent_core.Types.MaxTokens)
+      ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
+      ~reason:"shape=thinking_only stop_reason=max_tokens"
+      ()
+  in
+  let empty =
+    accept_rejected_core_error
+      ~stop_reason:(Some Agent_core.Types.MaxTokens)
+      ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+      ~reason:"shape=empty stop_reason=max_tokens"
+      ()
+  in
+  let partial =
+    accept_rejected_core_error
+      ~stop_reason:(Some Agent_core.Types.MaxTokens)
+      ~response_shape:
+        (Some Keeper_internal_error.Accept_response_has_deliverable_content)
+      ~reason:"shape=has_deliverable_content stop_reason=max_tokens"
+      ()
+  in
+  let kind err =
+    match Keeper_internal_error.classify_masc_internal_error err with
+    | Some internal_error ->
+      Option.map
+        (function
+          | `Empty_no_progress -> "empty_no_progress"
+          | `Thinking_only_no_progress -> "thinking_only_no_progress"
+          | `Truncated_no_progress -> "truncated_no_progress")
+        (Keeper_internal_error.accept_no_progress_retry_kind internal_error)
+    | None -> None
+  in
+  Alcotest.(check (option string))
+    "thinking-only max_tokens keeps the thinking-only kind"
+    (Some "thinking_only_no_progress")
+    (kind thinking_only);
+  Alcotest.(check (option string))
+    "empty max_tokens keeps the empty kind"
+    (Some "empty_no_progress")
+    (kind empty);
+  Alcotest.(check (option string))
+    "partial-content max_tokens is the truncation kind"
+    (Some "truncated_no_progress")
+    (kind partial);
+  Alcotest.(check bool)
+    "thinking-only max_tokens can try the next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next
+       thinking_only);
+  Alcotest.(check bool)
+    "partial-content max_tokens can try the next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next
+       partial);
+  Alcotest.(check (option string))
+    "partial-content max_tokens defers with the truncation reason"
+    (Some "truncated_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason partial));
+  let partial_route =
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Masc_execution
+      partial
+  in
+  Alcotest.(check string)
+    "partial-content max_tokens routes to rotation"
+    "rotate_now"
+    (Keeper_runtime_failure_route.route_kind_label partial_route);
+  Alcotest.(check string)
+    "partial-content max_tokens carries the truncation rotation class"
+    "no_progress_truncated"
+    (Keeper_runtime_failure_route.route_class_label partial_route);
+  List.iter
+    (fun (label, err) ->
+       Alcotest.(check bool)
+         (label ^ " is offered the max_tokens continuation")
+         true
+         (Masc.Keeper_turn_driver_try_provider.For_testing
+          .max_tokens_truncation_error
+            err))
+    [ "thinking-only", thinking_only; "empty", empty; "partial", partial ];
+  let end_turn_thinking_only =
+    accept_rejected_core_error
+      ~stop_reason:(Some Agent_core.Types.EndTurn)
+      ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
+      ~reason:"shape=thinking_only stop_reason=end_turn"
+      ()
+  in
+  Alcotest.(check bool)
+    "an end_turn thinking-only rejection is not a truncation"
+    false
+    (Masc.Keeper_turn_driver_try_provider.For_testing.max_tokens_truncation_error
+       end_turn_thinking_only)
+;;
+
+let test_reject_reason_describes_thinking_only_response () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-model"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:
+           [
+             Llm_provider.Types.Thinking
+               { signature = None; content = "abcde" };
+           ]
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies thinking-only shape"
+    true
+    (contains ~needle:"shape=thinking_only" reason);
+  Alcotest.(check bool)
+    "reason reports thinking block count"
+    true
+    (contains ~needle:"thinking_blocks=1" reason);
+  Alcotest.(check bool)
+    "reason reports thinking char count without content"
+    true
+    (contains ~needle:"thinking_chars=5" reason);
+  Alcotest.(check bool)
+    "no-progress accept rejection is typed"
+    true
+    (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err);
+  Alcotest.(check bool)
+    "no-progress accept rejection is not auto-recoverable"
+    false
+    (Masc.Keeper_error_classify.is_auto_recoverable_turn_error err);
+  Alcotest.(check bool)
+    "no-progress accept rejection is not warn-handled"
+    false
+    (Masc.Keeper_error_classify.should_warn_keeper_cycle_failed err);
+  Alcotest.(check bool)
+    "no-progress accept rejection is not runtime exhaustion"
+    false
+    (Masc.Keeper_error_classify.is_runtime_exhausted_error err);
+  Alcotest.(check bool)
+    "thinking-only without tool can try next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check (option string))
+    "thinking-only without tool is runtime-recoverable"
+    (Some "thinking_only_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
+let test_finalization_blank_response_is_typed_accept_rejection () =
+  let result =
+    Masc.Keeper_turn_response_contract.normalize_response_text_for_finalization
+      ~runtime_id:"ollama.gemma4-26b-a4b-qat"
+      ~run_result:(run_result ())
+      ~text:""
+      ~tool_names:[]
+      ()
+  in
+  match result with
+  | Ok text -> Alcotest.failf "blank response should fail, got %S" text
+  | Error err ->
+    (match Keeper_internal_error.classify_masc_internal_error err with
+     | Some
+         (Keeper_internal_error.Accept_rejected
+            { scope; reason_kind; reason; _ }) ->
+       Alcotest.(check string)
+         "scope"
+         "ollama.gemma4-26b-a4b-qat"
+         scope;
+       Alcotest.(check bool)
+         "reason kind is no usable progress"
+         true
+         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+       Alcotest.(check bool)
+         "reason identifies empty shape"
+         true
+         (contains ~needle:"shape=empty" reason);
+       Alcotest.(check bool)
+         "typed no-progress classification"
+         true
+         (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err)
+     | Some other ->
+       Alcotest.failf "expected Accept_rejected, got %s"
+         (Keeper_internal_error.kind_of_masc_internal_error other)
+     | None ->
+       Alcotest.failf "expected typed keeper error, got %s"
+         (Agent_core.Error.to_string err))
+
+let test_finalization_does_not_surface_hidden_reasoning () =
+  let hidden = "private chain of thought must not become a user reply" in
+  let response =
+    run_result
+      ~content:
+        [ Llm_provider.Types.Thinking { signature = None; content = hidden }
+        ; Llm_provider.Types.ReasoningDetails
+            { reasoning_content = Some "provider-private reasoning"
+            ; details = []
+            }
+        ]
+      ()
+  in
+  let finalize tool_names =
+    Masc.Keeper_turn_response_contract.normalize_response_text_for_finalization
+      ~runtime_id:"runtime.reasoning-model"
+      ~run_result:response
+      ~text:""
+      ~tool_names
+      ()
+  in
+  (match finalize [ "masc_schedule_get" ] with
+   | Error err ->
+     Alcotest.failf "tool fallback should succeed: %s" (Agent_core.Error.to_string err)
+   | Ok text ->
+     Alcotest.(check string)
+       "tool-only completion does not fabricate assistant prose"
+       ""
+       text;
+     Alcotest.(check bool)
+       "Thinking content is not user-facing"
+       false
+       (contains ~needle:hidden text);
+     Alcotest.(check bool)
+       "ReasoningDetails content is not user-facing"
+       false
+       (contains ~needle:"provider-private reasoning" text));
+  let _err, reason_kind, reason = expect_accept_rejected (finalize []) in
+  Alcotest.(check bool)
+    "reasoning-only finalization keeps the typed no-progress rejection"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "typed rejection diagnostic does not expose Thinking content"
+    false
+    (contains ~needle:hidden reason);
+  Alcotest.(check bool)
+    "typed rejection diagnostic does not expose ReasoningDetails content"
+    false
+    (contains ~needle:"provider-private reasoning" reason)
+
+let test_thinking_with_text_is_accepted () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-text"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:
+           [
+             Llm_provider.Types.Thinking
+               { signature = None; content = "internal chain" };
+             Llm_provider.Types.Text "final answer";
+           ]
+         ())
+  in
+  match result with
+  | Ok kept ->
+    Alcotest.(check string) "session preserved" "session-test" kept.session_id
+  | Error err ->
+    Alcotest.failf "thinking plus text should pass accept: %s"
+      (Agent_core.Error.to_string err)
+
+let test_thinking_with_tool_use_is_accepted () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-tool"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:
+           [
+             Llm_provider.Types.Thinking
+               { signature = None; content = "internal chain" };
+             Llm_provider.Types.ToolUse
+               { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
+           ]
+         ())
+  in
+  match result with
+  | Ok kept ->
+    Alcotest.(check string) "session preserved" "session-test" kept.session_id
+  | Error err ->
+    Alcotest.failf "thinking plus tool use should pass accept: %s"
+      (Agent_core.Error.to_string err)
+
+let check_accept_matches_agent_core_shape label content =
+  let response = response ~content () in
+  let expected =
+    response
+    |> Agent_core.Response_shape.summarize
+    |> Agent_core.Response_shape.has_deliverable_content
+  in
+  Alcotest.(check bool)
+    label
+    expected
+    (Keeper_tooling.Response.response_has_text_or_tool_progress response)
+
+let test_accept_contract_delegates_to_agent_core_response_shape () =
+  check_accept_matches_agent_core_shape "empty" [];
+  check_accept_matches_agent_core_shape
+    "thinking only"
+    [
+      Llm_provider.Types.Thinking
+        { signature = None; content = "internal chain" };
+    ];
+  check_accept_matches_agent_core_shape "blank text" [ Llm_provider.Types.Text " \n\t " ];
+  check_accept_matches_agent_core_shape "text" [ Llm_provider.Types.Text "visible answer" ];
+  check_accept_matches_agent_core_shape
+    "tool use"
+    [
+      Llm_provider.Types.ToolUse
+        { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
+    ];
+  check_accept_matches_agent_core_shape
+    "tool result"
+    [
+      Llm_provider.Types.ToolResult
+        {
+          tool_use_id = "tool-1";
+          content = "ok";
+          outcome = Agent_core.Types.Tool_succeeded;
+          json = None;
+          content_blocks = None;
+        };
+    ];
+  check_accept_matches_agent_core_shape
+    "media"
+    [
+      Llm_provider.Types.Image
+        { media_type = "image/png"
+        ; source = Llm_provider.Types.Base64 "redacted"
+        };
+    ]
+
+let test_thinking_only_non_end_turn_response_is_rejected () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-stop-sequence"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:
+           [
+             Llm_provider.Types.Thinking
+               { signature = None; content = "internal chain" };
+           ]
+         ~stop_reason:Agent_core.Types.StopSequence
+         ())
+  in
+  let _err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies thinking-only shape"
+    true
+    (contains ~needle:"shape=thinking_only" reason);
+  Alcotest.(check bool)
+    "reason keeps non-end stop reason"
+    true
+    (contains ~needle:"stop_reason=stop_sequence" reason)
+
+let test_thinking_only_no_tool_can_try_next_candidate () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-only-no-tool"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:
+           [
+             Llm_provider.Types.Thinking
+               { signature = None; content = "internal chain" };
+           ]
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies thinking-only shape"
+    true
+    (contains ~needle:"shape=thinking_only" reason);
+  Alcotest.(check bool)
+    "thinking-only no-tool can try next provider candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check (option string))
+    "thinking-only no-tool classified by internal-error SSOT"
+    (Some "thinking_only_no_progress")
+    (accept_no_progress_retry_kind_string err);
+  Alcotest.(check (option string))
+    "thinking-only no-tool is runtime-recoverable"
+    (Some "thinking_only_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
+let test_empty_non_end_turn_response_is_rejected () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.empty-stop-sequence"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result ~stop_reason:Agent_core.Types.StopSequence ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies empty shape"
+    true
+    (contains ~needle:"shape=empty" reason);
+  Alcotest.(check bool)
+    "reason keeps non-end stop reason"
+    true
+    (contains ~needle:"stop_reason=stop_sequence" reason);
+  Alcotest.(check bool)
+    "no-progress accept rejection is typed"
+    true
+    (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err);
+  Alcotest.(check bool)
+    "empty no-progress can try next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check (option string))
+    "empty no-progress classified by internal-error SSOT"
+    (Some "empty_no_progress")
+    (accept_no_progress_retry_kind_string err);
+  Alcotest.(check (option string))
+    "empty no-progress is runtime-recoverable"
+    (Some "empty_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err));
+  (match Masc.Keeper_turn_driver.classify_masc_internal_error err with
+   | Some internal_error ->
+     Alcotest.(check string)
+       "accept rejection runtime id uses scope"
+       "runtime.empty-stop-sequence"
+       (Masc.Keeper_turn_driver.runtime_id_of_masc_internal_error internal_error);
+     Alcotest.(check bool)
+       "summary describes provider empty turn"
+       true
+       (Option.value
+          ~default:false
+          (Option.map
+             (contains ~needle:"empty assistant turn")
+             (Masc.Keeper_turn_driver.summary_of_masc_internal_error internal_error)))
+   | None -> Alcotest.fail "expected typed accept rejection")
+
+let test_blank_text_non_end_turn_response_is_rejected () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.blank-max-tokens"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:[ Llm_provider.Types.Text " \n\t " ]
+         ~stop_reason:Agent_core.Types.MaxTokens
+         ())
+  in
+  let _err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies blank text"
+    true
+    (contains ~needle:"shape=blank_text_only" reason);
+  Alcotest.(check bool)
+    "reason reports zero trimmed text chars"
+    true
+    (contains ~needle:"text_chars=0" reason);
+  Alcotest.(check bool)
+    "reason keeps max-token stop reason"
+    true
+    (contains ~needle:"stop_reason=max_tokens" reason)
+
+let test_quiet_final_passes_when_policy_allows () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.quiet-final"
+      ~accept:
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Allow_quiet_final)
+      (run_result ~content:[ Llm_provider.Types.Text "" ] ())
+  in
+  match result with
+  | Ok kept ->
+    Alcotest.(check string)
+      "session preserved"
+      "session-test"
+      kept.session_id
+  | Error err ->
+    Alcotest.failf
+      "explicit quiet final should pass when the policy allows it: %s"
+      (Agent_core.Error.to_string err)
+
+let test_quiet_final_rejected_when_policy_requires_progress () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.require-progress"
+      ~accept:
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Require_progress)
+      (run_result ~content:[ Llm_provider.Types.Text "" ] ())
+  in
+  let _err, reason_kind, _reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "blank final without a quiet policy stays no-progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
+
+let test_quiet_final_does_not_extend_past_end_turn () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.quiet-max-tokens"
+      ~accept:
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Allow_quiet_final)
+      (run_result
+         ~content:[ Llm_provider.Types.Text "" ]
+         ~stop_reason:Agent_core.Types.MaxTokens
+         ())
+  in
+  let _err, reason_kind, _reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "interrupted blank output is not a chosen quiet final"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
+
+(* A Muse turn whose model wrote no message settles with [content = []].
+   When the wake allows silence, that is the same choice as a blank text
+   block. *)
+let test_no_content_final_passes_when_policy_allows () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.quiet-no-content"
+      ~accept:
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Allow_quiet_final)
+      (run_result ~content:[] ())
+  in
+  match result with
+  | Ok kept ->
+    Alcotest.(check string) "session preserved" "session-test" kept.session_id
+  | Error err ->
+    Alcotest.failf
+      "a completed turn with no content should pass when the policy allows it: %s"
+      (Agent_core.Error.to_string err)
+
+let test_no_content_final_rejected_when_policy_requires_progress () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.require-progress-no-content"
+      ~accept:
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Require_progress)
+      (run_result ~content:[] ())
+  in
+  let _err, reason_kind, _reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "no content without a quiet policy stays no-progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
+
+(* A lane with thinking on says nothing as reasoning blocks and no text, with
+   or without an empty text block beside them (#41925). The replay half of
+   why this is safe is in test_keeper_replay_checkpoint. *)
+let test_thinking_only_final_follows_the_quiet_policy () =
+  let thinking = Llm_provider.Types.Thinking { signature = Some "sig"; content = "hidden" } in
+  let accept ~policy content =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.quiet-thinking-only"
+      ~accept:(Keeper_tooling.Response.accepts_response ~policy)
+      (run_result ~content ())
+  in
+  List.iter
+    (fun (label, content) ->
+       (match accept ~policy:Keeper_tooling.Response.Allow_quiet_final content with
+        | Ok _ -> ()
+        | Error err ->
+          Alcotest.failf
+            "%s should pass when the policy allows silence: %s"
+            label
+            (Agent_core.Error.to_string err));
+       let _err, reason_kind, _reason =
+         expect_accept_rejected
+           (accept ~policy:Keeper_tooling.Response.Require_progress content)
+       in
+       Alcotest.(check bool)
+         (label ^ " without a quiet policy stays no-progress")
+         true
+         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress))
+    [ "thinking alone", [ thinking ]
+    ; "thinking with an empty text block", [ thinking; Llm_provider.Types.Text "" ]
+    ; "redacted thinking", [ Llm_provider.Types.RedactedThinking "opaque" ]
+    ]
+
+let test_finalization_settles_no_content_quiet_final () =
+  let finalize ~policy content =
+    Masc.Keeper_agent_run.For_testing.normalize_final_response_text
+      ~response_policy:policy
+      ~keeper_name:"keeper-test"
+      ~runtime_id:"runtime.quiet-no-content"
+      ~run_result:(run_result ~content ())
+      ~text:""
+      ~tool_names:[]
+      ()
+  in
+  List.iter
+    (fun (label, content) ->
+       (match finalize ~policy:Keeper_tooling.Response.Allow_quiet_final content with
+        | Ok text -> Alcotest.(check string) (label ^ " settles as an empty reply") "" text
+        | Error err ->
+          Alcotest.failf
+            "an accepted %s final must also settle: %s"
+            label
+            (Agent_core.Error.to_string err));
+       match finalize ~policy:Keeper_tooling.Response.Require_progress content with
+       | Ok _ -> Alcotest.failf "%s under Require_progress must not settle" label
+       | Error _ -> ())
+    [ "no content", []
+    ; "reasoning-only", [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
+    ]
+
+let test_quiet_final_shape_names_the_settled_form () =
+  let shape ?stop_reason content =
+    Keeper_tooling.Response.quiet_final_shape
+      ~policy:Keeper_tooling.Response.Allow_quiet_final
+      (response ~content ?stop_reason ())
+  in
+  Alcotest.(check bool)
+    "blank text"
+    true
+    (shape [ Llm_provider.Types.Text " " ] = Some Keeper_tooling.Response.Quiet_blank_text);
+  Alcotest.(check bool)
+    "no content"
+    true
+    (shape [] = Some Keeper_tooling.Response.Quiet_no_content);
+  Alcotest.(check bool)
+    "reasoning alone"
+    true
+    (shape [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
+     = Some Keeper_tooling.Response.Quiet_thinking_only);
+  List.iter
+    (fun stop_reason ->
+       Alcotest.(check bool)
+         "reasoning alone that did not end its turn"
+         true
+         (shape ~stop_reason
+            [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
+          = None))
+    [ Agent_core.Types.MaxTokens; Agent_core.Types.StopToolUse ];
+  Alcotest.(check bool)
+    "no content cut by max tokens"
+    true
+    (shape ~stop_reason:Agent_core.Types.MaxTokens [] = None)
+
+(* The label is the [shape] value of masc_keeper_quiet_finals_total; the
+   dashboards and alerts that read the counter match these exact values. *)
+let test_quiet_final_shape_labels_are_the_metric_values () =
+  List.iter
+    (fun (shape, expected) ->
+       Alcotest.(check string)
+         expected
+         expected
+         (Keeper_tooling.Response.quiet_final_shape_label shape))
+    [ Keeper_tooling.Response.Quiet_blank_text, "blank_text"
+    ; Keeper_tooling.Response.Quiet_no_content, "no_content"
+    ; Keeper_tooling.Response.Quiet_thinking_only, "thinking_only"
+    ]
+
+let wake_observation
+    ~pending_messages
+    ~pending_board_events
+  : Masc.Keeper_world_observation.world_observation
+  =
+  { pending_messages
+  ; pending_board_events
+  ; idle_seconds = 0
+  ; active_goals = Ok []
+  ; unclaimed_task_count = 0
+  ; claimable_tasks = []
+  ; held_task_skills = []
+  ; failed_task_count = 0
+  ; scheduled_automation =
+      Masc.Keeper_world_observation.empty_scheduled_automation_observation
+  ; approval_authority =
+      { revision = 1
+      ; state = Masc.Keeper_world_observation.Approval_authority_complete
+      ; pending = []
+      }
+  ; backlog_revision = None
+  ; running_keeper_fiber_count = 0
+  ; connected_surfaces = []
+  ; connected_surface_failures = []
+  ; own_recent_board_posts = []
+  ; fleet_messages = []
+  ; own_recent_actions = Ok []
+  }
+
+let board_event event_kind : Masc.Keeper_world_observation.pending_board_event =
+  { event_kind
+  ; post_id = "post-test"
+  ; author = "peer"
+  ; title = "event"
+  ; preview = "preview"
+  ; hearth = None
+  ; post_kind = Masc.Board.Human_post
+  ; updated_at = 0.0
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; replies_after_own_comment = None
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  }
+
+let scheduled_wake ~result_delivery : Keeper_event_queue.scheduled_wake =
+  { occurrence_id = "occurrence-test"
+  ; schedule_instance_id = "instance-test"
+  ; schedule_id = "schedule-test"
+  ; due_at = 0.0
+  ; payload_digest = "digest-test"
+  ; title = None
+  ; message = "reminder"
+  ; result_delivery
+  }
+
+let autonomous_wake_speaker =
+  Masc.Keeper_input_speaker.Host_prompt
+    (Masc.Keeper_input_speaker.Autonomous_wake { answered_asks = [] })
+
+(* The autonomous unified turn runs with this history source
+   (Keeper_unified_turn_execution). *)
+let policy_for_turn ~turn_kind ~speaker ~observation ~hitl_resolution =
+  Masc.Keeper_agent_run.For_testing.response_policy_for_turn
+    ~turn_kind
+    ~input_speaker:speaker
+    ~world_observation:observation
+    ~hitl_resolution
+    ~history_assistant_source:"internal_assistant"
+
+let check_policy label expected actual =
+  Alcotest.(check bool)
+    label
+    true
+    (actual = expected)
+
+let test_response_policy_autonomous_wake_without_input_allows_quiet_final () =
+  let observation = wake_observation ~pending_messages:[] ~pending_board_events:[] in
+  check_policy
+    "empty autonomous wake allows a quiet final"
+    Keeper_tooling.Response.Allow_quiet_final
+    (policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~speaker:autonomous_wake_speaker
+       ~observation:(Some observation)
+       ~hitl_resolution:None)
+
+(* #41925: a thinking lane's silence is reasoning with no text, and only an
+   internal turn's finalization keeps that reasoning out of replay. An
+   autonomous wake on a turn that replays its reply may not end quietly, so a
+   caller that forgets the internal source cannot replay that reasoning. *)
+let test_response_policy_requires_progress_when_the_reply_is_replayed () =
+  let observation = wake_observation ~pending_messages:[] ~pending_board_events:[] in
+  check_policy
+    "a wake whose reply is replayed requires progress"
+    Keeper_tooling.Response.Require_progress
+    (Masc.Keeper_agent_run.For_testing.response_policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~input_speaker:autonomous_wake_speaker
+       ~world_observation:(Some observation)
+       ~hitl_resolution:None
+       ~history_assistant_source:"direct_assistant")
+
+let test_response_policy_pending_message_requires_progress () =
+  let message =
+    { Masc.Keeper_world_observation_message_scope.message_id = "message-test"
+    ; speaker = "owner"
+    ; content = "what changed?"
+    ; kind = Masc.Keeper_world_observation_message_scope.Mention
+    }
+  in
+  let observation =
+    wake_observation ~pending_messages:[ message ] ~pending_board_events:[]
+  in
+  check_policy
+    "an unacknowledged message keeps the response contract"
+    Keeper_tooling.Response.Require_progress
+    (policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~speaker:autonomous_wake_speaker
+       ~observation:(Some observation)
+       ~hitl_resolution:None)
+
+let test_response_policy_board_event_requires_progress () =
+  let observation =
+    wake_observation
+      ~pending_messages:[]
+      ~pending_board_events:
+        [ board_event Masc.Keeper_world_observation.Board_post_created ]
+  in
+  check_policy
+    "a delivered board event keeps the response contract"
+    Keeper_tooling.Response.Require_progress
+    (policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~speaker:autonomous_wake_speaker
+       ~observation:(Some observation)
+       ~hitl_resolution:None)
+
+let test_response_policy_reminder_only_schedule_allows_quiet_final () =
+  let reminder_event result_delivery =
+    board_event
+      (Masc.Keeper_world_observation.Schedule_due
+         (scheduled_wake ~result_delivery))
+  in
+  let no_delivery =
+    wake_observation
+      ~pending_messages:[]
+      ~pending_board_events:[ reminder_event None ]
+  in
+  check_policy
+    "a schedule without authorized result delivery may end quietly"
+    Keeper_tooling.Response.Allow_quiet_final
+    (policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~speaker:autonomous_wake_speaker
+       ~observation:(Some no_delivery)
+       ~hitl_resolution:None);
+  let dashboard_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"thread-test" with
+    | Ok channel -> channel
+    | Error detail -> Alcotest.failf "dashboard channel should construct: %s" detail
+  in
+  let with_delivery =
+    wake_observation
+      ~pending_messages:[]
+      ~pending_board_events:[ reminder_event (Some dashboard_channel) ]
+  in
+  check_policy
+    "an authorized result delivery keeps the response contract"
+    Keeper_tooling.Response.Require_progress
+    (policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~speaker:autonomous_wake_speaker
+       ~observation:(Some with_delivery)
+       ~hitl_resolution:None)
+
+let test_response_policy_non_autonomous_input_requires_progress () =
+  let observation = wake_observation ~pending_messages:[] ~pending_board_events:[] in
+  check_policy
+    "a direct turn never allows a quiet final"
+    Keeper_tooling.Response.Require_progress
+    (policy_for_turn
+       ~turn_kind:Turn_record.Direct
+       ~speaker:autonomous_wake_speaker
+       ~observation:(Some observation)
+       ~hitl_resolution:None);
+  check_policy
+    "an autonomous turn without a world observation keeps the response contract"
+    Keeper_tooling.Response.Require_progress
+    (policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~speaker:autonomous_wake_speaker
+       ~observation:None
+       ~hitl_resolution:None);
+  let dashboard_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"thread-test" with
+    | Ok channel -> channel
+    | Error detail -> Alcotest.failf "dashboard channel should construct: %s" detail
+  in
+  let hitl_resolution =
+    { Keeper_event_queue.approval_id = "approval-test"
+    ; decision = Keeper_event_queue.Hitl_approved
+    ; channel = dashboard_channel
+    }
+  in
+  check_policy
+    "a Gate answer keeps the response contract"
+    Keeper_tooling.Response.Require_progress
+    (policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~speaker:autonomous_wake_speaker
+       ~observation:(Some observation)
+       ~hitl_resolution:(Some hitl_resolution));
+  let answered_speaker =
+    Masc.Keeper_input_speaker.Host_prompt
+      (Masc.Keeper_input_speaker.Autonomous_wake
+         { answered_asks = [ Masc.Keeper_input_speaker.Owner ] })
+  in
+  check_policy
+    "answered asks keep the response contract"
+    Keeper_tooling.Response.Require_progress
+    (policy_for_turn
+       ~turn_kind:Turn_record.Autonomous
+       ~speaker:answered_speaker
+       ~observation:(Some observation)
+       ~hitl_resolution:None)
+
+(* The wake input closes with the line the accept policy selects, so the model
+   reads the same decision the accept check applies. Compared against the
+   rendered slot, not its wording. *)
+let rendered_clause key =
+  match Prompt_registry.render_prompt_template key [] with
+  | Ok text -> text
+  | Error detail -> Alcotest.failf "clause %s should render: %s" key detail
+
+let test_wake_input_closes_with_the_policy_clause () =
+  let wake = "wake" in
+  let allowed =
+    rendered_clause Prompt_names.keeper_wake_completion_quiet_final_allowed
+  in
+  let required =
+    rendered_clause Prompt_names.keeper_wake_completion_progress_required
+  in
+  let clause_for observation =
+    let response_policy =
+      policy_for_turn
+        ~turn_kind:Turn_record.Autonomous
+        ~speaker:autonomous_wake_speaker
+        ~observation:(Some observation)
+        ~hitl_resolution:None
+    in
+    Masc.Keeper_agent_run.For_testing.with_completion_clause
+      ~input_speaker:autonomous_wake_speaker
+      ~response_policy
+      wake
+  in
+  Alcotest.(check string)
+    "a wake that may end quietly says so"
+    (wake ^ "\n\n" ^ allowed)
+    (clause_for (wake_observation ~pending_messages:[] ~pending_board_events:[]));
+  Alcotest.(check string)
+    "a wake with a delivered board event says it must answer"
+    (wake ^ "\n\n" ^ required)
+    (clause_for
+       (wake_observation
+          ~pending_messages:[]
+          ~pending_board_events:
+            [ board_event Masc.Keeper_world_observation.Board_post_created ]));
+  Alcotest.(check bool) "the two clauses differ" false (String.equal allowed required);
+  let empty = wake_observation ~pending_messages:[] ~pending_board_events:[] in
+  let clause_with ~speaker ~hitl_resolution =
+    Masc.Keeper_agent_run.For_testing.with_completion_clause
+      ~input_speaker:speaker
+      ~response_policy:
+        (policy_for_turn
+           ~turn_kind:Turn_record.Autonomous
+           ~speaker
+           ~observation:(Some empty)
+           ~hitl_resolution)
+      wake
+  in
+  Alcotest.(check string)
+    "a wake quoting an answered Ask says it must answer"
+    (wake ^ "\n\n" ^ required)
+    (clause_with
+       ~speaker:
+         (Masc.Keeper_input_speaker.Host_prompt
+            (Masc.Keeper_input_speaker.Autonomous_wake
+               { answered_asks = [ Masc.Keeper_input_speaker.Owner ] }))
+       ~hitl_resolution:None);
+  let dashboard_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"thread-test" with
+    | Ok channel -> channel
+    | Error detail -> Alcotest.failf "dashboard channel should construct: %s" detail
+  in
+  Alcotest.(check string)
+    "a wake carrying a Gate answer says it must answer"
+    (wake ^ "\n\n" ^ required)
+    (clause_with
+       ~speaker:autonomous_wake_speaker
+       ~hitl_resolution:
+         (Some
+            { Keeper_event_queue.approval_id = "approval-test"
+            ; decision = Keeper_event_queue.Hitl_approved
+            ; channel = dashboard_channel
+            }))
+
+let test_non_wake_input_carries_no_clause () =
+  let message = "operator request" in
+  Alcotest.(check string)
+    "a person's message is left as written"
+    message
+    (Masc.Keeper_agent_run.For_testing.with_completion_clause
+       ~input_speaker:(Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner)
+       ~response_policy:Keeper_tooling.Response.Require_progress
+       message);
+  Alcotest.(check string)
+    "an official-client resume cue is left as written"
+    message
+    (Masc.Keeper_agent_run.For_testing.with_completion_clause
+       ~input_speaker:
+         (Masc.Keeper_input_speaker.Host_prompt
+            Masc.Keeper_input_speaker.Official_client_resume)
+       ~response_policy:Keeper_tooling.Response.Require_progress
+       message)
+
+let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.max-tokens"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:[ Llm_provider.Types.Text "partial partial partial" ]
+         ~stop_reason:Agent_core.Types.MaxTokens
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "typed MaxTokens response is no usable completion"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "diagnostic retains typed stop reason"
+    true
+    (contains ~needle:"stop_reason=max_tokens" reason);
+  Alcotest.(check (option string))
+    "MaxTokens with visible text classifies as truncation"
+    (Some "truncated_no_progress")
+    (accept_no_progress_retry_kind_string err);
+  Alcotest.(check bool)
+    "truncation keeps the rotation hint for when the continuation fails"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check bool)
+    "provider helper recognizes the continuation trigger"
+    true
+    (Masc.Keeper_turn_driver_try_provider.For_testing.max_tokens_truncation_error
+       err)
+;;
+
+let test_truncation_checkpoint_drops_only_incomplete_assistant () =
+  let tool_result =
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Tool
+    ; content =
+        [ Agent_core.Types.ToolResult
+            { tool_use_id = "call-1"
+            ; content = "effect already recorded"
+            ; outcome = Agent_core.Types.Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = Some "call-1"
+    ; metadata = []
+    }
+  in
+  let incomplete = message [ Agent_core.Types.Text "partial" ] in
+  let checkpoint = checkpoint_with_messages [ tool_result; incomplete ] in
+  match
+    Masc.Keeper_turn_driver_try_provider.For_testing
+    .checkpoint_before_incomplete_response
+      checkpoint
+  with
+  | None -> Alcotest.fail "assistant-ended checkpoint should be continuable"
+  | Some prepared ->
+    Alcotest.(check bool)
+      "post-tool result is preserved and incomplete assistant is removed"
+      true
+      (prepared.messages = [ tool_result ]);
+    Alcotest.(check int)
+      "turn count remains provider-observation history"
+      checkpoint.turn_count
+      prepared.turn_count
+;;
+
+let test_custom_accept_reject_preserves_predicate_reason () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.custom"
+      ~accept:(fun _ -> false)
+      (run_result ~content:[ Llm_provider.Types.Text "visible answer" ] ())
+  in
+  let err, reason_kind, _reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "custom predicate rejection kind is distinct"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_predicate_rejected);
+  Alcotest.(check bool)
+    "custom predicate rejection is not no-progress"
+    false
+    (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err);
+  Alcotest.(check bool)
+    "custom predicate rejection is not auto-recoverable"
+    false
+    (Masc.Keeper_error_classify.is_auto_recoverable_turn_error err)
+
+let test_media_with_tool_result_is_deliverable () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.mixed"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result
+         ~content:
+           [
+             Llm_provider.Types.ToolResult
+               {
+                 tool_use_id = "tool-1";
+                 content = "ok";
+                 outcome = Agent_core.Types.Tool_succeeded;
+                 json = None;
+                 content_blocks = None;
+               };
+             Llm_provider.Types.Image
+               {
+                 media_type = "image/png";
+                 source = Llm_provider.Types.Base64 "redacted";
+               };
+           ]
+         ())
+  in
+  match result with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.failf
+      "multimodal response with an image must remain deliverable: %s"
+      (Agent_core.Error.to_string err)
+
+let test_sse_event_progress_kind_classifies_known_deltas () =
+  let open Agent_core.Types in
+  let kind event = Masc.Keeper_agent_run_turn_helpers.sse_event_progress_kind event in
+  let watchdog_kind event =
+    Masc.Keeper_agent_run_turn_helpers.sse_event_watchdog_progress_kind event
+  in
+  Alcotest.(check (option string))
+    "tool block start follows agent-core stream classifier"
+    (Some "sse_tool_block_start")
+    (kind
+       (ContentBlockStart
+          { index = 0; content_type = "tool_use"; tool_id = None; tool_name = None }));
+  Alcotest.(check (option string))
+    "text delta"
+    (Some "sse_text_delta")
+    (kind (ContentBlockDelta { index = 0; delta = TextDelta "visible" }));
+  Alcotest.(check (option string))
+    "NDJSON provider error"
+    (Some "ndjson_error")
+    (kind
+       (NDJSONError
+          { message = "request rejected"
+          ; error_type = Some "rate_limit_exceeded"
+          ; raw = "{}"
+          }));
+  Alcotest.(check (option string))
+    "thinking delta"
+    (Some "sse_thinking_delta")
+    (kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }));
+  Alcotest.(check (option string))
+    "reasoning details delta"
+    (Some "sse_thinking_delta")
+    (kind
+       (ContentBlockDelta
+          { index = 0
+          ; delta =
+              ReasoningDetailsDelta
+                { reasoning_content = None
+                ; details =
+                    [ { raw = `Assoc [ "text", `String "hidden" ]
+                      ; text = Some "hidden"
+                      }
+                    ]
+                }
+          }));
+  Alcotest.(check (option string))
+    "tool arg delta"
+    (Some "sse_tool_arg_delta")
+    (kind (ContentBlockDelta { index = 0; delta = InputJsonDelta "{}" }));
+  Alcotest.(check (option string))
+    "tool arg snapshot"
+    (Some "sse_tool_arg_delta")
+    (kind (ContentBlockDelta { index = 0; delta = InputJsonSnapshot "{}" }));
+  Alcotest.(check (option string))
+    "media delta"
+    (Some "sse_media_delta")
+    (kind
+       (ContentBlockDelta
+          {
+            index = 0;
+            delta =
+              MediaDelta
+                { media_type = "image/png"; source = Base64 "abcd" };
+          }));
+  Alcotest.(check (option string))
+    "empty text delta falls back to carrier progress"
+    (Some "sse_content_delta")
+    (kind (ContentBlockDelta { index = 0; delta = TextDelta "" }));
+  Alcotest.(check (option string))
+    "empty text delta is not watchdog progress"
+    None
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = TextDelta "" }));
+  Alcotest.(check (option string))
+    "a reasoning delta is the provider producing, so it is watchdog progress"
+    (Some "sse_thinking_delta")
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }));
+  Alcotest.(check (option string))
+    "a reasoning details delta is watchdog progress"
+    (Some "sse_thinking_delta")
+    (watchdog_kind
+       (ContentBlockDelta
+          { index = 0
+          ; delta =
+              ReasoningDetailsDelta
+                { reasoning_content = Some "hidden"; details = [] }
+          }));
+  Alcotest.(check (option string))
+    "an empty reasoning delta is a carrier frame, not progress"
+    None
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "" }));
+  Alcotest.(check (option string))
+    "a redacted thinking delta is named for what it is and is watchdog progress"
+    (Some "sse_redacted_thinking")
+    (watchdog_kind
+       (ContentBlockDelta { index = 0; delta = RedactedThinkingSnapshot "opaque" }));
+  Alcotest.(check (option string))
+    "a redacted thinking block delivered whole in its start is watchdog progress"
+    (Some "sse_redacted_thinking")
+    (watchdog_kind
+       (ContentBlockStart
+          { index = 0
+          ; content_type = "redacted_thinking"
+          ; tool_id = Some "opaque"
+          ; tool_name = None
+          }));
+  Alcotest.(check (option string))
+    "an empty redacted thinking delta is a carrier frame, not progress"
+    None
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = RedactedThinkingSnapshot "" }));
+  Alcotest.(check (option string))
+    "a text block start is a control frame, not progress"
+    None
+    (watchdog_kind
+       (ContentBlockStart
+          { index = 0; content_type = "text"; tool_id = None; tool_name = None }));
+  Alcotest.(check (option string))
+    "a reasoning signature is a carrier frame, not progress"
+    None
+    (watchdog_kind
+       (ContentBlockDelta { index = 0; delta = ThinkingSignatureDelta "sig" }));
+  Alcotest.(check (option string))
+    "visible text delta is watchdog progress"
+    (Some "sse_text_delta")
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = TextDelta "visible" }));
+  Alcotest.(check (option string))
+    "stream incomplete"
+    (Some "sse_stream_incomplete")
+    (kind (StreamIncomplete { reason = "max_output_tokens" }))
+
+let registry_recorded_progress events =
+  let recorded = ref [] in
+  let downstream_count = ref 0 in
+  let on_event =
+    Masc.Keeper_agent_run_turn_helpers.registry_progress_on_event
+      ~record_turn_progress:(fun kind -> recorded := kind :: !recorded)
+      (Some (fun _ -> incr downstream_count))
+  in
+  List.iter on_event events;
+  (List.rev !recorded, !downstream_count)
+
+let test_registry_progress_on_event_records_only_watchdog_progress () =
+  let open Agent_core.Types in
+  let recorded, downstream_count =
+    registry_recorded_progress
+      [ ContentBlockDelta { index = 0; delta = TextDelta "" }
+      ; ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }
+      ; ContentBlockStop { index = 0 }
+      ; MessageDelta { stop_reason = None; usage = None }
+      ; ContentBlockDelta { index = 0; delta = TextDelta "visible" }
+      ; ContentBlockStart
+          { index = 1; content_type = "tool_use"; tool_id = None; tool_name = None }
+      ]
+  in
+  Alcotest.(check (list string))
+    "production refreshes watchdog progress; carrier and control frames do not"
+    [ "sse_thinking_delta"; "sse_text_delta"; "sse_tool_block_start" ]
+    recorded;
+  Alcotest.(check int) "downstream still sees every event" 6 downstream_count
+
+(* A model reasoning for longer than the no-progress threshold is working:
+   every reasoning delta stamps progress, so a stream of them alone keeps
+   the attempt alive for as long as the lines keep coming, and the accept
+   gate, not the watchdog, judges the thinking-only result when it ends. *)
+let test_a_reasoning_only_stream_keeps_refreshing_watchdog_progress () =
+  let open Agent_core.Types in
+  let recorded, _ =
+    registry_recorded_progress
+      (List.init 5 (fun i ->
+         ContentBlockDelta { index = 0; delta = ThinkingDelta (Printf.sprintf "step %d" i) }))
+  in
+  Alcotest.(check (list string))
+    "each reasoning delta refreshed progress"
+    (List.init 5 (fun _ -> "sse_thinking_delta"))
+    recorded
+
+let test_carrier_only_stream_remains_observable_without_lifecycle_gate () =
+  let open Agent_core.Types in
+  let recorded, downstream_count =
+    registry_recorded_progress
+      [ ContentBlockDelta { index = 0; delta = TextDelta "" }
+      ; ContentBlockDelta { index = 0; delta = ThinkingDelta "" }
+      ; ContentBlockDelta { index = 0; delta = ThinkingSignatureDelta "sig" }
+      ; ContentBlockStop { index = 0 }
+      ; MessageDelta { stop_reason = None; usage = None }
+      ; MessageStop
+      ]
+  in
+  Alcotest.(check (list string))
+    "carrier-only stream does not invent progress"
+    []
+    recorded;
+  Alcotest.(check int) "diagnostic downstream receives carrier stream" 6 downstream_count
+
+(* Candidate exhaustion must retain its typed runtime-exhausted identity so a
+   DNS/network failure remains observable without relying on free-text error
+   matching. *)
+let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
+  let mapped =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.dns-test"
+         ; reason = Keeper_internal_error.Dns_failure
+         })
+  in
+  Alcotest.(check bool)
+    "DNS exhaustion is a runtime-exhausted error"
+    true
+    (Masc.Keeper_error_classify.is_runtime_exhausted_error mapped);
+  Alcotest.(check bool)
+    "DNS exhaustion is not auto-recoverable (counts toward crash threshold, \
+     per record_failure_observation's counts_toward_crash)"
+    false
+    (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped);
+  match Keeper_internal_error.classify_masc_internal_error mapped with
+  | Some (Keeper_internal_error.Runtime_exhausted { runtime_id; reason }) ->
+    Alcotest.(check string) "runtime_id preserved" "runtime.dns-test" runtime_id;
+    Alcotest.(check bool)
+      "reason is Dns_failure"
+      true
+      (reason = Keeper_internal_error.Dns_failure);
+    Alcotest.(check bool)
+      "Dns_failure is policy-retryable (Auto_resume_with_backoff eligible)"
+      true
+      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason)
+  | Some other ->
+    Alcotest.failf "expected Runtime_exhausted, got %s"
+      (Keeper_internal_error.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_core.Error.to_string mapped)
+
+let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
+  let mapped =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.no-candidates"
+         ; reason = Keeper_internal_error.No_providers_available
+         })
+  in
+  match Keeper_internal_error.classify_masc_internal_error mapped with
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
+    Alcotest.(check bool)
+      "no last_err maps to No_providers_available"
+      true
+      (reason = Keeper_internal_error.No_providers_available)
+  | Some other ->
+    Alcotest.failf "expected Runtime_exhausted, got %s"
+      (Keeper_internal_error.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_core.Error.to_string mapped)
+
+let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
+  let mapped =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.session-conflict"
+         ; reason = Keeper_internal_error.Session_conflict
+         })
+  in
+  match Keeper_internal_error.classify_masc_internal_error mapped with
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
+    Alcotest.(check bool)
+      "reason is Session_conflict"
+      true
+      (reason = Keeper_internal_error.Session_conflict);
+    Alcotest.(check bool)
+      "session conflict is not automatically retryable"
+      false
+      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
+    Alcotest.(check string)
+      "session conflict has a stable observation label"
+      "session_conflict"
+      (Keeper_internal_error.runtime_exhaustion_reason_to_label reason);
+    let encoded = Keeper_internal_error.runtime_exhaustion_reason_to_json reason in
+    Alcotest.(check bool)
+      "session conflict survives persistence round-trip"
+      true
+      (Keeper_internal_error.runtime_exhaustion_reason_of_json encoded
+       = Some Keeper_internal_error.Session_conflict);
+    Alcotest.(check bool)
+      "session conflict is not auto-recoverable"
+      false
+      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped)
+  | Some other ->
+    Alcotest.failf "expected Runtime_exhausted, got %s"
+      (Keeper_internal_error.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_core.Error.to_string mapped)
+
+let test_runtime_exhaustion_label_caps_free_text_detail () =
+  let detail = String.make 260 'x' ^ "\nwith newline\tand spacing" in
+  let label =
+    Keeper_internal_error.runtime_exhaustion_reason_to_label
+      (Keeper_internal_error.Other_detail detail)
+  in
+  Alcotest.(check bool)
+    "label detail is byte-capped"
+    true
+    (String.length label <= 212);
+  Alcotest.(check bool) "label has no newline" false (contains ~needle:"\n" label);
+  Alcotest.(check bool) "label is marked truncated" true (contains ~needle:"..." label)
+
+let test_keeper_tool_slot_callbacks_are_always_wired () =
+  let config = Masc.Workspace.default_config (Filename.get_temp_dir_name ()) in
+  (* The lease callbacks are plain functions: the type admits no turn
+     without them, so the remaining check is that calling them is safe on a
+     keeper the registry does not hold. *)
+  let _, on_yield, on_resume, _ =
+    Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
+      ~preview:None
+      ~observation_token:None
+      ~config
+      ~keeper_name:"slot-lease-test"
+      ~downstream:None
+      ~turn_id:1
+  in
+  on_yield ();
+  on_resume ()
+
+let test_official_failure_observation_reaches_receipt () =
+  let open Masc in
+  let error = Agent_core.Error.Provider
+    (Llm_provider.Error.ProviderReportedError
+       { provider = "antigravity_cli"; error_type = Some "turn_failed";
+         detail = "successful result response has no deliverable content" }) in
+  let observe prompt_sent_at =
+    Masc.Keeper_turn_driver.For_testing.official_client_observation
+      ~keeper_name:"test-keeper" ~runtime_id:"antigravity.test"
+      ~prompt_sent_at ~execution_result:(Error error) (Error error) in
+  Alcotest.(check bool) "pre-admission error invents no invocation" true
+    (Option.is_none (observe None));
+  let observation = observe (Some 10.0) in
+  Alcotest.(check bool) "failed invocation is visible in receipt" true
+    (Masc.Keeper_agent_error.runtime_outcome_of_observation
+       ~lane_failover_applied:false observation = Masc.Keeper_execution_receipt.Runtime_failed);
+  match observation with
+  | None -> Alcotest.fail "transmitted invocation was not observed"
+  | Some observed ->
+    Alcotest.(check string) "runtime identity" "antigravity.test" observed.runtime_id;
+    Alcotest.(check bool) "no model response invented" true
+      (Option.is_none observed.selected_model);
+    Alcotest.(check int) "missing capture invents no provider attempt" 0
+      (List.length observed.attempts);
+    Alcotest.(check bool) "attempt detail availability remains honest" false
+      observed.attempt_details_available;
+    match observed.execution_evidence with
+    | Runtime_observation.Uncaptured_failure detail ->
+        Alcotest.(check string) "runtime boundary failure retained"
+          (Agent_core.Error.to_string error) detail
+    | Captured_execution -> Alcotest.fail "raw Error cannot supply an execution capture"
+
+let test_official_success_observation_is_preserved () =
+  let open Masc in
+  let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates ~runtime_id:"official.test" () in
+  let observed = Runtime_observation.runtime_observation_with_metrics ~selected_model:None ~capture () in
+  let result = { (run_result ()) with Runtime_agent.runtime_observation = Some observed } in
+  let actual = Masc.Keeper_turn_driver.For_testing.official_client_observation
+    ~keeper_name:"test-keeper" ~runtime_id:"official.test"
+    ~prompt_sent_at:(Some 10.0) ~execution_result:(Ok result) (Ok result) in
+  Alcotest.(check bool) "successful provider observation stays authoritative" true
+    (actual = Some { observed with host_acceptance = Some Runtime_observation.Accepted })
+
+let test_host_rejection_keeps_execution_identity_and_outcome () =
+  let open Masc in
+  Log.set_level Log.Info;
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
+  let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates
+    ~runtime_id:"official.test" ~keeper_name:"test-keeper" ~turn_id:73 () in
+  Runtime_observation.record_attempt_terminal capture ~model_id:"test-model"
+    ~latency_ms:(Some 12) ~error:None;
+  let execution = Runtime_observation.runtime_observation_with_metrics
+    ~selected_model:(Some "test-model") ~capture () in
+  let result = { (run_result ()) with Runtime_agent.runtime_observation = Some execution } in
+  let rejected = Keeper_turn_driver.For_testing.apply_accept
+    ~runtime_id:"official.test" ~accept:(fun _ -> false) result in
+  Alcotest.(check bool) "host refused the deliverable" true (Result.is_error rejected);
+  let observed = Keeper_turn_driver.For_testing.official_client_observation
+    ~keeper_name:"test-keeper" ~turn_id:73 ~runtime_id:"official.test"
+    ~prompt_sent_at:(Some 10.0) ~execution_result:(Ok result) rejected
+    |> Option.get in
+  Alcotest.(check string) "host stage keeps execution identity"
+    execution.observation_id observed.observation_id;
+  Alcotest.(check bool) "provider success is not rewritten as a provider failure"
+    true (execution.attempts = observed.attempts);
+  let next_capture, _ = Runtime_observation.runtime_metrics_for_candidates
+    ~runtime_id:"official.test" ~keeper_name:"test-keeper" ~turn_id:73 () in
+  let next = Runtime_observation.runtime_observation_with_metrics
+    ~selected_model:(Some "test-model") ~capture:next_capture () in
+  Alcotest.(check bool) "a repeated display turn cannot reuse execution identity"
+    false (String.equal observed.observation_id next.observation_id);
+  Alcotest.(check bool) "receipt observes host rejection separately" true
+    (Keeper_agent_error.runtime_outcome_of_observation ~lane_failover_applied:false
+       (Some observed) = Keeper_execution_receipt.Runtime_failed);
+  let rows = Log.Ring.recent ~since_seq ~module_filter:"Telemetry" ~order:`Oldest_first () in
+  let field key (row : Log.Ring.entry) = Yojson.Safe.Util.member key row.details in
+  Alcotest.(check int) "one execution terminal and one host decision" 2 (List.length rows);
+  Alcotest.(check bool) "stages cannot masquerade as two runtime terminals" true
+    (List.map (field "stage") rows = [`String "runtime_execution"; `String "host_acceptance"]);
+  Alcotest.(check bool) "stage outcomes retain the actual two decisions" true
+    (List.map (field "outcome") rows = [`String "success"; `String "rejected"]);
+  List.iter (fun (row : Log.Ring.entry) ->
+    Alcotest.(check bool) "event joins original execution" true
+      (field "observation_id" row = `String execution.observation_id);
+    Alcotest.(check (option string)) "event keeper" (Some "test-keeper") row.keeper_name;
+    Alcotest.(check (option int)) "event Keeper turn" (Some 73) row.turn_id) rows
+
+let test_lost_capture_failure_does_not_log_another_execution () =
+  let open Masc in
+  Log.set_level Log.Info;
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
+  let projected = Keeper_official_client_host.host_stop_result
+    ~runtime_id:"official.test" ~model:"test-model" ~session_id:"session-observation"
+    ~turn_id:"vendor-turn-observation" ~provider_turn_ordinal:7 ~turns_used:1 ~latency_ms:(Some 12)
+    ~request_context:None
+    (Keeper_official_client_host.Terminal_tool_boundary
+       {outcome=Terminal_completed; tool_name="test"}) in
+  let captured = (Result.get_ok projected).Runtime_agent.runtime_observation |> Option.get in
+  (* The official adapter may fail its completion hook or session commit
+     after constructing the host-stop result and return only that error. *)
+  let error = Agent_core.Error.Internal "session commit rejected" in
+  let observed = Keeper_turn_driver.For_testing.official_client_observation
+    ~keeper_name:"test-keeper" ~turn_id:73 ~runtime_id:"official.test"
+    ~prompt_sent_at:(Some 10.) ~execution_result:(Error error) (Error error)
+    |> Option.get in
+  Alcotest.(check int) "no replacement provider attempt" 0 (List.length observed.attempts);
+  Alcotest.(check bool) "the failed boundary remains visible to the receipt" true
+    (Keeper_agent_error.runtime_outcome_of_observation ~lane_failover_applied:false
+       (Some observed) = Keeper_execution_receipt.Runtime_failed);
+  let rows = Log.Ring.recent ~since_seq ~module_filter:"Telemetry" ~order:`Oldest_first () in
+  let field key (row : Log.Ring.entry) = Yojson.Safe.Util.member key row.details in
+  Alcotest.(check bool) "lost capture is a gap, not a second execution terminal" true
+    (List.map (field "stage") rows = [`String "runtime_execution"; `String "observation_gap"]);
+  match rows with
+  | [terminal; gap] ->
+      Alcotest.(check bool) "the original terminal remains identifiable" true
+        (field "observation_id" terminal = `String captured.observation_id);
+      Alcotest.(check bool) "the gap does not claim the lost capture identity" true
+        (field "observation_id" gap <> field "observation_id" terminal);
+      Alcotest.(check bool) "the gap exposes typed failure evidence" true
+        (field "execution_evidence" gap =
+           Runtime_observation.execution_evidence_to_json observed.execution_evidence)
+  | _ -> Alcotest.fail "expected the original terminal and one missing-capture diagnostic"
+
+let () =
+  Alcotest.run "keeper_turn_driver_accept"
+    [
+      ( "accept"
+      , [
+          Alcotest.test_case "lost execution capture never fabricates a second attempt" `Quick
+            test_lost_capture_failure_does_not_log_another_execution;
+          Alcotest.test_case "host rejection preserves execution evidence and stage identity" `Quick
+            test_host_rejection_keeps_execution_identity_and_outcome;
+          Alcotest.test_case "official failure reaches receipt after prompt transmission" `Quick
+            test_official_failure_observation_reaches_receipt;
+          Alcotest.test_case "official success preserves its observation" `Quick
+            test_official_success_observation_is_preserved;
+          Alcotest.test_case "accepted response passes through" `Quick
+            test_accept_keeps_result;
+          Alcotest.test_case
+            "InputRequired bypasses response acceptance"
+            `Quick
+            test_input_required_bypasses_response_accept;
+          Alcotest.test_case "typed empty terminal requires this attempt's saved checkpoint"
+            `Quick test_empty_terminal_completion_requires_this_attempt_saved_checkpoint;
+          Alcotest.test_case "real tool then typed empty failure completes without reexecution"
+            `Quick test_tool_then_empty_failure_completes_without_reexecution;
+          Alcotest.test_case "real stale checkpoint cannot authorize empty completion"
+            `Quick test_tool_then_empty_stale_checkpoint_does_not_complete;
+          Alcotest.test_case "real tool checkpoint refusal cannot complete or repeat"
+            `Quick test_tool_checkpoint_failure_does_not_complete_or_repeat;
+          Alcotest.test_case
+            "terminal tool completion bypasses empty response rejection"
+            `Quick
+            test_terminal_tool_completion_bypasses_empty_response_rejection;
+          Alcotest.test_case
+            "open terminal state keeps empty response rejection"
+            `Quick
+            test_open_terminal_state_keeps_empty_response_rejection;
+          Alcotest.test_case
+            "replay projection failure rejects completed attempt"
+            `Quick
+            test_replay_projection_failure_rejects_completed_attempt;
+          Alcotest.test_case
+            "strict tool_choice is relaxed to auto"
+            `Quick
+            test_keeper_hook_relaxes_strict_tool_choice;
+          Alcotest.test_case "rejected response is typed" `Quick
+            test_rejects_as_typed_accept_error;
+          Alcotest.test_case "thinking-only rejection is diagnosed" `Quick
+            test_reject_reason_describes_thinking_only_response;
+          Alcotest.test_case
+            "max_tokens without content keeps its rotation kind"
+            `Quick
+            test_max_tokens_without_content_keeps_rotation_kind;
+          Alcotest.test_case
+            "blank finalization response is typed no-progress"
+            `Quick
+            test_finalization_blank_response_is_typed_accept_rejection;
+          Alcotest.test_case
+            "finalization does not surface hidden reasoning"
+            `Quick
+            test_finalization_does_not_surface_hidden_reasoning;
+	          Alcotest.test_case "thinking plus text is accepted" `Quick
+	            test_thinking_with_text_is_accepted;
+          Alcotest.test_case "thinking plus tool use is accepted" `Quick
+            test_thinking_with_tool_use_is_accepted;
+          Alcotest.test_case "accept delegates to AGENT_CORE response shape" `Quick
+            test_accept_contract_delegates_to_agent_core_response_shape;
+          Alcotest.test_case "thinking-only non-end-turn response is rejected" `Quick
+            test_thinking_only_non_end_turn_response_is_rejected;
+          Alcotest.test_case
+            "thinking-only no-tool response rotates typed no-progress"
+            `Quick
+            test_thinking_only_no_tool_can_try_next_candidate;
+          Alcotest.test_case
+            "Accept_rejected threads typed stop_reason (RFC-0271 §4.5)"
+            `Quick
+            test_accept_rejected_threads_stop_reason;
+          Alcotest.test_case
+            "Accept_rejected stop_reason survives codec (RFC-0271 §4.5)"
+            `Quick
+            test_accept_rejected_stop_reason_survives_codec;
+          Alcotest.test_case "empty non-end-turn response is rejected" `Quick
+            test_empty_non_end_turn_response_is_rejected;
+          Alcotest.test_case "blank text non-end-turn response is rejected" `Quick
+            test_blank_text_non_end_turn_response_is_rejected;
+          Alcotest.test_case
+            "quiet final passes when the turn policy allows it"
+            `Quick
+            test_quiet_final_passes_when_policy_allows;
+          Alcotest.test_case
+            "quiet final rejected when the turn policy requires progress"
+            `Quick
+            test_quiet_final_rejected_when_policy_requires_progress;
+          Alcotest.test_case
+            "quiet final does not extend past an EndTurn stop"
+            `Quick
+            test_quiet_final_does_not_extend_past_end_turn;
+          Alcotest.test_case
+            "no-content final passes when the turn policy allows it"
+            `Quick
+            test_no_content_final_passes_when_policy_allows;
+          Alcotest.test_case
+            "no-content final rejected when the turn policy requires progress"
+            `Quick
+            test_no_content_final_rejected_when_policy_requires_progress;
+          Alcotest.test_case
+            "thinking-only final follows the quiet policy"
+            `Quick
+            test_thinking_only_final_follows_the_quiet_policy;
+          Alcotest.test_case
+            "finalization settles an accepted no-content or reasoning-only final"
+            `Quick
+            test_finalization_settles_no_content_quiet_final;
+          Alcotest.test_case
+            "quiet final shape names the settled form"
+            `Quick
+            test_quiet_final_shape_names_the_settled_form;
+          Alcotest.test_case
+            "quiet final shape labels are the metric values"
+            `Quick
+            test_quiet_final_shape_labels_are_the_metric_values;
+          Alcotest.test_case
+            "autonomous wake without input allows a quiet final"
+            `Quick
+            test_response_policy_autonomous_wake_without_input_allows_quiet_final;
+          Alcotest.test_case
+            "a wake whose reply is replayed requires progress"
+            `Quick
+            test_response_policy_requires_progress_when_the_reply_is_replayed;
+          Alcotest.test_case
+            "pending message requires progress"
+            `Quick
+            test_response_policy_pending_message_requires_progress;
+          Alcotest.test_case
+            "board event requires progress"
+            `Quick
+            test_response_policy_board_event_requires_progress;
+          Alcotest.test_case
+            "reminder-only schedule allows a quiet final"
+            `Quick
+            test_response_policy_reminder_only_schedule_allows_quiet_final;
+          Alcotest.test_case
+            "non-autonomous input requires progress"
+            `Quick
+            test_response_policy_non_autonomous_input_requires_progress;
+          Alcotest.test_case
+            "wake input closes with the policy clause"
+            `Quick
+            test_wake_input_closes_with_the_policy_clause;
+          Alcotest.test_case
+            "non-wake input carries no clause"
+            `Quick
+            test_non_wake_input_carries_no_clause;
+          Alcotest.test_case
+            "MaxTokens text uses checkpoint continuation"
+            `Quick
+            test_max_tokens_text_is_rejected_for_checkpoint_continuation;
+          Alcotest.test_case
+            "truncation checkpoint preserves tools and drops partial assistant"
+            `Quick
+            test_truncation_checkpoint_drops_only_incomplete_assistant;
+          Alcotest.test_case "custom predicate rejection stays distinct" `Quick
+            test_custom_accept_reject_preserves_predicate_reason;
+          Alcotest.test_case "media with tool result is deliverable" `Quick
+            test_media_with_tool_result_is_deliverable;
+          Alcotest.test_case "sse progress classifies known deltas" `Quick
+            test_sse_event_progress_kind_classifies_known_deltas;
+          Alcotest.test_case
+            "sse watchdog progress records production and not carrier frames"
+            `Quick
+            test_registry_progress_on_event_records_only_watchdog_progress;
+          Alcotest.test_case
+            "a reasoning-only stream keeps refreshing watchdog progress"
+            `Quick
+            test_a_reasoning_only_stream_keeps_refreshing_watchdog_progress;
+          Alcotest.test_case
+            "carrier-only stream remains observable without lifecycle gate"
+            `Quick
+            test_carrier_only_stream_remains_observable_without_lifecycle_gate;
+          Alcotest.test_case
+            "DNS failure exhaustion classifies as Runtime_exhausted (KLV-DNS)"
+            `Quick
+            test_dns_failure_exhaustion_classifies_as_runtime_exhausted;
+          Alcotest.test_case
+            "no-candidates exhaustion classifies as No_providers_available"
+            `Quick
+            test_no_candidates_exhaustion_classifies_as_no_providers_available;
+          Alcotest.test_case
+            "session conflict preserves typed terminal exhaustion"
+            `Quick
+            test_session_conflict_exhaustion_preserves_typed_terminal_reason;
+          Alcotest.test_case
+            "admitted continuation requires its checkpoint before dispatch"
+            `Quick
+            test_admitted_continuation_requires_checkpoint;
+          Alcotest.test_case
+            "dispatch accepts runtime without serialized-request cap"
+            `Quick
+            test_dispatch_accepts_runtime_without_serialized_request_cap;
+          Alcotest.test_case
+            "runtime exhaustion labels cap free-text detail"
+            `Quick
+            test_runtime_exhaustion_label_caps_free_text_detail;
+          Alcotest.test_case
+            "keeper tool slot callbacks are always wired"
+            `Quick
+            test_keeper_tool_slot_callbacks_are_always_wired;
+          Alcotest.test_case
+            "a rejected response leaves the checkpoint either way"
+            `Quick
+            test_a_rejected_response_leaves_the_checkpoint_either_way;
+          Alcotest.test_case
+            "a wire that cannot stop thinking drops instead of retrying"
+            `Quick
+            test_a_wire_that_cannot_stop_thinking_drops_instead_of_retrying;
+          Alcotest.test_case
+            "truncation retry candidate drops reasoning effort"
+            `Quick
+            test_truncation_retry_candidate_drops_reasoning_effort;
+          Alcotest.test_case
+            "the retry gate reads this candidate's ladder"
+            `Quick
+            test_the_retry_gate_reads_this_candidate_s_ladder;
+          Alcotest.test_case
+            "truncation recovery is scoped to max-tokens rejections"
+            `Quick
+            test_recovery_is_scoped_to_max_tokens_rejections;
+          Alcotest.test_case
+            "a dropped response is written through the sink"
+            `Quick
+            test_a_dropped_response_is_written_through_the_sink;
+        ] );
+    ]

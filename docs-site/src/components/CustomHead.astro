@@ -1,0 +1,43 @@
+---
+import Default from '@astrojs/starlight/components/Head.astro';
+---
+
+<Default {...Astro.props}><slot /></Default>
+
+<script>
+  import mermaid from 'mermaid';
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#100f0c',
+      primaryColor: '#211e1a',
+      primaryTextColor: '#f0e9dc',
+      primaryBorderColor: '#d4a14a',
+      lineColor: '#d4a14a',
+      secondaryColor: '#141210',
+      tertiaryColor: '#0c0b08',
+      edgeLabelBackground: '#1a1815'
+    }
+  });
+
+  async function renderMermaid() {
+    try {
+      await mermaid.run({
+        querySelector: '.mermaid, pre.mermaid, code.language-mermaid',
+      });
+    } catch (err) {
+      console.error('Mermaid render error:', err);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderMermaid);
+  } else {
+    renderMermaid();
+  }
+
+  document.addEventListener('astro:page-load', renderMermaid);
+</script>

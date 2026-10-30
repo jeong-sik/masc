@@ -1,0 +1,4 @@
+src/keeper-stream.test.ts(1862,7): error TS2322: Type '{ id: string; role: string; content: string; ts: number; delivery_provenance: KeeperChatDeliveryProvenance; delivery_provenance_status: string; }' is not assignable to type 'RestChatHistoryMessage'.
+  Types of property 'delivery_provenance_status' are incompatible.
+    Type 'string' is not assignable to type '"absent" | "invalid" | "valid" | undefined'.
+src/keeper-stream.test.ts(1873,9): error TS2322: Type 'string' is not assignable to type '"absent" | "invalid" | "valid" | undefined'.

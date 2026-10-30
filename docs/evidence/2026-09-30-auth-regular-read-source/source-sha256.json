@@ -1,0 +1,67 @@
+{
+  "algorithm": "sha256",
+  "scope": "Source files at 308ab9eb1d8a25c01906a7e48c055e39d4d7fd43 plus refreshed evidence metadata; manifest excludes itself. Historical check records identify their own older source commit.",
+  "files": [
+    {
+      "path": "changelog.d/40256.md",
+      "sha256": "4d08198ee8bd30ec2d7e5ae75b7a603533ac6990fb37ca0b031dabcefd9fcd03"
+    },
+    {
+      "path": "lib/auth/auth.ml",
+      "sha256": "9d6b485fbc7081dbbb6ad876c82877bd72e356679f5d88512718f4a8f47b01be"
+    },
+    {
+      "path": "lib/auth/auth.mli",
+      "sha256": "23c0c295ea16c6d839591bfa5ece3ad4a9b94d82825fa14c141ba527cecb2439"
+    },
+    {
+      "path": "lib/auth/auth_credential_base.ml",
+      "sha256": "e3d36ab5275756dc853f5c4b86a6edb2091265dda78d718566e3af72f270b0fe"
+    },
+    {
+      "path": "lib/auth/auth_login.ml",
+      "sha256": "5456acdd9b175bcb0f94259fce16ff688d1e6950527f41d1a6baccb52e6380d5"
+    },
+    {
+      "path": "lib/auth/auth_login.mli",
+      "sha256": "e6142ad25b3558b9f4e5356143938a4a783622b9a9563605ae69018d3f4a883f"
+    },
+    {
+      "path": "lib/auth/auth_oauth.ml",
+      "sha256": "06b8a3adbeee81d79ec7f50f2ae66257815ca0e8daefc5b97376f43c3bf02634"
+    },
+    {
+      "path": "lib/auth/auth_oauth.mli",
+      "sha256": "0fd7917ee870d82ae2018303388d1c35bcc94ba5088fdfdd0298ba040f949695"
+    },
+    {
+      "path": "test/dune",
+      "sha256": "629fbc097107caead5d68a2520d01666d07cfef3573e8558a454d048c6823f67"
+    },
+    {
+      "path": "test/stanzas/test_auth_regular_read_boundary.inc",
+      "sha256": "f4ed1b499db52db5565daa30ca773c95c92eaf7fba51b9df8f2075a674d0dca5"
+    },
+    {
+      "path": "test/test_auth_regular_read_boundary.ml",
+      "sha256": "34f65385b49d3d21e01cf5516974c3b197aa62fee8fb092f8ee587af64733778"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-auth-regular-read-source/README.md",
+      "sha256": "ae45f976d8518cfb3b280b16ae979399a76fdbe35ba233e03d728e69e5ff1336"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-auth-regular-read-source/composition.json",
+      "sha256": "2481963b412557d6e0a09a2288de247eacd45a0d9d605bcb8ec2e30808ab975d"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-auth-regular-read-source/parse-checks.json",
+      "sha256": "8dd1446a15a73db159c572d9b8df1267d4e74e5b6563cbaa0fff43e05560b67e"
+    },
+    {
+      "path": "docs/evidence/2026-09-30-auth-regular-read-source/source-checks.json",
+      "sha256": "d7a24aeeea11185e9d17ab5065f23da5dc9f2122c6c38711318d8ffbd2bf8db3"
+    }
+  ],
+  "source_commit": "308ab9eb1d8a25c01906a7e48c055e39d4d7fd43"
+}

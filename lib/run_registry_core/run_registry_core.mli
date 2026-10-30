@@ -1,0 +1,297 @@
+(** Shared current-state engine for bounded, append-only observation registries. *)
+
+module Json : sig
+  val object_fields
+    :  Yojson.Safe.t
+    -> ((string * Yojson.Safe.t) list, string) result
+
+  val exact_fields
+    :  required:string list
+    -> ?optional:string list
+    -> (string * Yojson.Safe.t) list
+    -> (unit, string) result
+
+  val string_field
+    :  string
+    -> (string * Yojson.Safe.t) list
+    -> (string, string) result
+
+  val float_field
+    :  string
+    -> (string * Yojson.Safe.t) list
+    -> (float, string) result
+
+  val optional_string_field
+    :  string
+    -> (string * Yojson.Safe.t) list
+    -> (string option, string) result
+
+  val optional_string_list_field
+    :  string
+    -> (string * Yojson.Safe.t) list
+    -> (string list option, string) result
+  (** An absent key is [None]. A present key must hold a list whose every
+      element is a string; anything else is an [Error], never [None]. *)
+end
+
+module type Payload = sig
+  type registration
+  type completion
+
+  val name : string
+  val registration_to_yojson : registration -> Yojson.Safe.t
+  val registration_of_yojson : Yojson.Safe.t -> (registration, string) result
+  val completion_to_yojson : completion -> Yojson.Safe.t
+  val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
+
+  val shed_registration : registration -> registration
+  val shed_completion : completion -> completion
+  (** The value with any heavy payload dropped, for the copy the store keeps
+      in memory.
+
+      A registry whose rows are small returns the value unchanged and nothing
+      about it changes. One whose rows carry model input or output drops those
+      fields: the store retains thousands of rows to serve a list that does
+      not read them, and a detail view that reads one at a time. Measured
+      2026-09-05, the exact-lane registry held 498 MB of live heap and 98% of
+      the file behind it was the prompt text.
+
+      What was shed is not lost -- it is on the row this entry was replayed
+      from, and {!Make.get} reads it back. So a shed value must still carry
+      everything a list projection reads, and a payload the store cannot
+      re-read from a row must not be shed. *)
+  val running_noun : string
+  val restart_reason : string
+  val replayed_running_completion
+    : (started_at:float -> registration -> completion) option
+  (** [Some] converts a replayed [Running] entry into explicit terminal
+      evidence. [None] drops it when the subsystem's authoritative state lives
+      elsewhere. *)
+  val completed_retention : [ `All | `Latest of int ]
+
+  val retention_group : (registration -> string) option
+  (** [Some group_of] makes [`Latest n] a PER-GROUP bound: the newest [n]
+      completed entries survive within each group instead of globally, so a
+      busy group cannot evict a quiet one's entire history (the exact-lane
+      registry's librarian runs every few turns per keeper — under a global
+      bound the quiet
+      lane's zero retained runs was indistinguishable from "never ran").
+      [None] keeps the single global bound. *)
+end
+
+type persistence_state =
+  | Not_persisted
+  | Durability_unknown
+
+type persistence_failure =
+  { detail : string
+  ; state : persistence_state
+  }
+
+type replay_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; dropped_running : int
+  ; reached_end : bool
+  }
+
+type replay_status =
+  | Not_replayed
+  | Log_absent
+  | Replayed of replay_report
+
+type cut_report =
+  { lines_read : int
+  ; malformed_lines : int
+  ; retained_entries : int
+  ; reached_end : bool
+  ; rewritten : bool
+  }
+(** What a deployment-time store cut read and what it kept. *)
+
+module Make (Payload : Payload) : sig
+  type status =
+    | Running
+    | Completed of Payload.completion
+
+  type entry =
+    { id : string
+    ; started_at : float
+    ; registration : Payload.registration
+    ; status : status
+    }
+
+  type t
+
+  val max_completed_retained : int
+  val create : ?path:string -> unit -> t
+  val replay_status : t -> replay_status
+  (** Immutable diagnostics from this registry instance's startup read. *)
+
+  val validate_event_json : Yojson.Safe.t -> (unit, string) result
+  (** Pure event codec validation; does not replay or mutate a registry. *)
+
+  val replay : string -> t
+  (** Retains a lightweight in-memory projection while compaction streams the
+      selected original register/complete rows. Dropped payload fields are
+      never serialized from the projection over their durable source.
+      A replayed running entry gets the subsystem's explicit restart verdict.
+      As with {!cut_replay_log}, replay requires exclusive ownership of the log. *)
+
+  val replay_with_retained_history : string -> t
+  (** Retains JSONL history without automatic compaction while keeping completed
+      in-memory entries bounded. Only durable exact-terminal consumers need it.
+      Other registry callers retain {!replay}'s existing compaction behavior. *)
+
+  val register
+    :  t
+    -> id:string
+    -> started_at:float
+    -> registration:Payload.registration
+    -> unit
+(** Registry mutations and their JSONL events are serialized per [t], so a
+    concurrent completion cannot overtake its registration on disk. *)
+
+  val complete
+    :  t
+    -> id:string
+    -> completion:Payload.completion
+    -> [ `Completed | `Persistence_failed of persistence_failure | `Unknown ]
+  (** Completion persistence is an observation-plane mutation. A durable
+      append failure is returned explicitly with whether rollback established
+      that it was not persisted or durability remains unknown. The in-memory
+      entry keeps its previous state, so the caller chooses how to expose that failed
+      observation without claiming a replayable completion. *)
+
+  val complete_with
+    :  t
+    -> id:string
+    -> make_completion:(Payload.completion option -> Payload.completion)
+    -> [ `Completed | `Persistence_failed of persistence_failure | `Unknown ]
+  (** Derive the completion from the previous in-memory completion under the
+      same mutation lock as its durable append and publication. [None] means
+      the entry is [Running]; an unknown id does not call [make_completion].
+      The previous value is the payload's [shed_completion] projection.
+      The callback must not re-enter this registry. This lets a subsystem
+      retain first-completion evidence without a racy [get] then [complete]. *)
+
+  val list_entries : t -> entry list
+  val get_metadata : t -> id:string -> entry option
+  (** The immutable in-memory entry for this id, without sorting or disk
+      access. Payload fields may be shed; callers that need their values must
+      hydrate them and report whether that read succeeded. [None] means the
+      id is not retained. Unrelated mutations preserve this entry's identity. *)
+  val get : t -> id:string -> entry option
+  type current_read_error =
+    | Volatile_store
+    | Not_initialized
+    | Incomplete_startup of replay_report
+    | Non_regular_history of Unix.file_kind
+    | Invalid_history of string
+    | Incomplete_history
+    | Snapshot_changed
+    | Read_failed of string
+    | Read_cleanup_failed of { primary : current_read_error option; detail : string }
+
+  val read_current_from_log
+    : t -> id:string -> (entry option, current_read_error) result
+  (** Fresh strict read of the complete current log under the mutation lock.
+      [Ok None] means this id has no registration in the observed history,
+      including a genuinely absent log. [Some] retains the full latest
+      registration and its [Running] or [Completed] status, without shedding
+      payloads or synthesizing a restart completion. A later registration
+      resets the previous lifecycle. Malformed unrelated rows, orphan
+      completions, incomplete tails and source changes refuse the whole read.
+
+      A pathless store, a [create] instance without startup replay, and an
+      incomplete startup replay are explicit errors. A clean startup permits
+      this fresh read; it does not prove its success or durability. Cancellation
+      propagates. [Read_cleanup_failed] retains a simultaneous source failure
+      in [primary]; [None] means the source read succeeded but descriptor
+      settlement did not. This read does not compact, repair, append, alter the live
+      projection or confirm fsync. Its result is not an ACK or a capability
+      for a later conditional write: that write must reacquire the serializer,
+      revalidate its source and confirm publication durability. The caller must
+      retain exclusive ownership of the log, as for [replay]. *)
+  val completed_from_log : t -> id:string -> (entry option, string) result
+  (** Strict streamed lookup of the latest registration lifecycle for one id.
+      A later register resets an earlier completion. Running/missing ids return
+      [Ok None]; malformed rows, partial tails and I/O failures return [Error].
+      Reads only the durable log, retaining one requested entry in memory. *)
+
+  type reconciliation_change =
+    | Confirm_current
+    | Register_original of {
+        started_at : float;
+        registration : Payload.registration;
+        completion : Payload.completion option;
+      }
+    | Complete_original of Payload.completion
+
+  type 'error reconciliation_error =
+    | Current_source_unavailable of current_read_error
+    | Decision_refused of 'error
+    | Invalid_change of string
+    | Publication_failed of persistence_failure
+
+  val reconcile_current :
+    t -> id:string ->
+    decide:(entry option -> (reconciliation_change * 'a, 'error) result) ->
+    ('a, 'error reconciliation_error) result
+  (** Strictly parse the complete current history, decide, and confirm/append
+      under the mutation mutex and the same exclusive data-file/path lock used
+      by all writers. Refuse every malformed/orphan row or incomplete tail before
+      calling [decide]. No repair, compaction or restart synthesis occurs.
+      [Register_original] requires actual absence; [Complete_original] requires
+      an actual registration. The caller owns payload equality/provenance policy.
+      [Confirm_current] requires an actual entry and fsyncs it without appending.
+      The callback runs in a blocking worker: local blocking payload validation
+      is allowed, Eio effects or registry re-entry are not. Cancellation propagates.
+
+      Confirmed full disk state is adopted into the ordinary shed projection,
+      including retention, only after the durable transaction succeeds. Success
+      confirms historical publication even if that retention immediately evicts
+      the entry. It grants neither domain effects nor perpetual retention.
+      This transaction uses the existing complete-byte updater and temporarily
+      retains the complete log string; it is not a streamed-read optimization.
+      Startup authority restrictions match [read_current_from_log]. *)
+  val cut_replay_log : execute:bool -> string -> cut_report
+  (** Rewrites [path] from the state a replay of it produces. A hard-cut field
+      leaves rows that can never decode again; [replay] declines to compact
+      while any of them is on disk, so without this the store keeps them and
+      its retention bound stops applying.
+
+      The rewrite is [replay]'s own compaction, so it keeps exactly what
+      [replay] keeps and nothing else. Beyond the rows no decoder reads, that
+      settles every entry still [Running] according to
+      [Payload.replayed_running_completion] (a fiber does not survive a
+      restart), drops every completed entry past [completed_retention], and
+      collapses the append history to one register — and one complete — per
+      surviving entry. On a store that has been compacting normally this is
+      what the next boot would write anyway; on a poisoned store it is not,
+      because that store has not compacted since the field was cut.
+
+      [execute:false] measures and reports without writing. A file whose last
+      line is unterminated is never rewritten, because a partial read must not
+      become a truncating rewrite — [reached_end] is [false], [rewritten] is
+      [false], and the counts still stand.
+
+      Run this only while no server holds the store. The rewrite replaces the
+      inode, and a running server keeps appending through the writer it opened
+      before — those appends land in the unlinked file. *)
+end
+
+(** Single-owner lifecycle for a process-wide registry. The first installation
+    replaces the inert pre-boot registry; every later installation is rejected
+    without changing the active registry. *)
+module Global (Registry : sig
+    type t
+
+    val initial : t
+  end) : sig
+  type t = Registry.t
+  type install_error = Already_installed
+
+  val current : unit -> t
+  val install : t -> (unit, install_error) result
+end

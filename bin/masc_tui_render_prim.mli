@@ -1,0 +1,782 @@
+(** Drawing and layout primitives shared by screen renderers.
+    This module depends on shared state and presentation components,
+    without referring back to a surface renderer. *)
+
+(* The same scope the implementation has, so the signatures read the way
+   they are written there. *)
+open Masc_tui_types
+open Tui_decode
+
+module Ask_projection = Masc_tui_ask_projection
+module Keeper_control = Masc_tui_keeper_control
+module Browser_lane_layout = Masc_tui_browser_lane_layout
+module Chart = Masc_tui_chart
+module Context_bars = Masc_tui_context_bars
+module Diff = Masc_tui_diff
+module Frame_presenter = Masc_tui_frame_presenter
+module Keeper_chat = Masc_tui_keeper_chat_projection
+module Magnitude = Masc_tui_magnitude
+module Markdown = Masc_tui_markdown
+module Render_schedule = Masc_tui_render_schedule
+module Retained_view = Masc_tui_retained_view
+module Span = Masc_tui_span
+module Status = Masc.Keeper_status_runtime
+
+val local_source_pending_note : state -> local_read_source -> string option
+(** The original local read's pending phase for the Work and Keeper surfaces.
+    [None] means that this source has no pending read. *)
+
+val runtime_assignment_label : runtime_assignment -> string
+(** The assignment shown in the runtime picker and Runtime Stats value. *)
+
+val voice_meter_text : state -> string
+(** Current microphone phase shared by composer and chat: preparation, starting,
+    observed recording, unavailable input, processing or original-slot stopping.
+    A missing level is not evidence of active recording. Presentation only. *)
+
+val runtime_assignment_targets : runtime_assignment -> string -> bool
+(** Whether an assignment resolves to the named lane or runtime. *)
+
+type planning_tab =
+  Render_schedule.planning_tab =
+    Planning_goals
+  | Planning_task_review
+  | Planning_verdicts
+
+type change_context = {
+  ctx_keeper : string option;
+  ctx_task_id : string option;
+  ctx_task_title : string option;
+  ctx_task_description : string option;
+  ctx_goal_id : string option;
+  ctx_goal_title : string option;
+  ctx_turn : int option;
+  ctx_comment : string option;
+  ctx_pr : Masc_tui_pr_ref.t option;
+  ctx_pr_slug : string option;
+}
+
+type context_pane_body =
+    Plain of string list * int option
+  | Split of { common : string list; left : string list; right : string list;
+    }
+
+type diff_surface =
+  { ds_title : string  (** the screen title *)
+  ; ds_address : string  (** what the header names beside "vs HEAD" *)
+  ; ds_context_lines : string list
+        (** drawn under the header, each followed by a divider *)
+  ; ds_diff : Masc.Tui_decode.git_diff option  (** [None] until the tree is read *)
+  ; ds_error : string option
+  ; ds_scroll : int  (** the stored scroll, clamped here and reported back *)
+  ; ds_hscroll : int  (** body offset in display cells; gutters remain fixed *)
+  ; ds_unchanged : string  (** the empty line when the tree reports no change *)
+  ; ds_esc_hint : string  (** what esc does on this surface *)
+  ; ds_footer_hints : string
+  ; ds_surface_key : string
+  ; ds_clamped : int -> clamped_scroll
+  }
+
+val acting_pane_reserved_cols : int ref
+
+val frame_acting_pane :
+  Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame ref
+(** The candidate for the synchronous draw. Input must use the copy accepted
+    by the terminal, not this temporary construction cell. *)
+
+val frame_panes : Masc_tui_pane_selection.layout ref
+(** Where each pane of the frame being drawn sits, set by the surface ends
+    ([finish_surface], [finish_frame_beside_acting_pane]). Commit it only
+    once the terminal accepts the frame. *)
+
+val clamped_scroll_now :
+  Masc_tui_types.state ->
+  Masc_tui_types.clamped_scroll ->
+  Masc_tui_types.clamped_scroll
+(** The value {!Masc_tui_types.apply_clamped_scroll} writes, read back from the
+    state: the reader a frame named, at the row it is on now. *)
+
+val reader_after_wheel :
+  Masc_tui_types.clamped_scroll ->
+  Masc.Tui_mouse_protocol.wheel_direction ->
+  Masc_tui_types.clamped_scroll option
+(** Where one wheel notch leaves a reader, given its position now: one row, as
+    [j] / [k] move it. [None] for the scrolls the wheel reaches as a key. *)
+
+val navigation_rows : int
+
+val get_terminal_size : unit -> int * int
+
+val lines_ended_since : Buffer.t -> start:int -> int
+(** How many lines the buffer ended after byte [start]: the row, counted from
+    there, that the next line written lands on. *)
+
+val frame_lines : Buffer.t -> string list
+(** Split the current buffer bytes into ordered rows, removing one final LF
+    terminator. Empty input has no rows; leading and interior empty rows remain.
+    Row strings stay unchanged after later buffer mutation. *)
+
+val write_two_panes :
+  Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit
+
+(** The frame for a terminal too small for any surface: the notice alone,
+    with no strip and no Activity pane. Surfaces end through [finish_surface]
+    or [finish_frame_beside_acting_pane]. *)
+val finish_terminal_too_small_frame :
+  cursor:Frame_presenter.cursor ->
+  rows:int ->
+  cols:int ->
+  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+val table_frame_enabled : bool ref
+
+val chat_markdown_palette : closing:string -> Markdown.palette
+
+val markdown_with_closing :
+  closing:string -> width:int -> string -> string list
+
+val document_markdown : width:int -> string -> string list
+
+val search_marker : Masc_tui_types.state -> string option
+(** The "/" query on screen and how many rows it reaches, or [None] when no
+    query is on screen. One spelling for the three places that draw it: the
+    footer, the Keepers heading, and the context inspector's title.
+
+    The count is taken here, over the rows the surface offers right now, so
+    it cannot describe a list the surface has since left. The "n/N" suffix
+    appears only where those keys have rows to step, and only while footers
+    spell their hints. Plain text -- the footer dims its whole line, so it
+    styles its own. *)
+
+val search_marker_styled : Masc_tui_types.state -> string
+(** {!search_marker} in the colour the two headings share -- accented while
+    the query is being typed, dim once settled -- or [""] when there is no
+    query. *)
+
+type recovery_row = {
+  recovery_text : string;
+  recovery_quit : Masc_tui_action_notice.quit_confirmation option;
+}
+
+val footer_line :
+  ?help_door:bool ->
+  ?status:Masc_tui_footer.status_item list ->
+  ?position:string ->
+  ?recovery_in_slot:recovery_row option ->
+  Masc_tui_types.state -> max_cells:int -> hints:string -> string
+(** [position] is where a scrolling surface stands in what it is scrolling.
+    It is separate from [hints] because the fitter gives up key items from
+    the back, and a position is the one item on the row that [?] cannot
+    recover; kept with the keys that cannot be dropped. Use the footer when
+    the detail has no spare content row; list panes with a window-reading row
+    keep their position in the body. *)
+
+val keeper_split_threshold_cols : int
+
+val keeper_roster_pane_cols : int
+
+val strip_rows : int
+(** The lines the surface strip takes above every surface: a row a surface
+    counts in its own frame sits this many lines lower in the terminal's. A
+    picture placed over a surface's rows starts from there. *)
+
+val change_row_address : Masc.Tui_decode.file_change -> string
+
+val file_change_evidence_label :
+  Masc.Keeper_file_change_evidence.t option -> string option
+
+val recent_chunk_projection :
+  Masc_tui_types.state -> Masc_tui_acting.chunk_projection
+
+val finish_surface :
+  Masc_tui_types.state ->
+  ?clamped:Masc_tui_types.clamped_scroll ->
+  surface_key:string ->
+  rows:int ->
+  cols:int ->
+  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+(** The footer a frame beside the Activity pane ends with. [No_footer] is for
+    a frame whose last row is a notice instead -- the chat in a terminal too
+    small to hold it. *)
+type acting_pane_footer =
+  | Footer_hints of { hints : string; position : string option }
+      (** Drawn by {!footer_line}; [position] as there. *)
+  | No_footer
+
+(** The end of a surface that draws its own composer and footer instead of
+    taking the shared composer row. [cols] is the width it laid out against,
+    the terminal less the Activity pane; the pane is drawn in those columns
+    beside the rows the press test counts as the pane's, and the strip spans
+    the whole terminal.
+
+    These frames draw no agenda row, so the footer is drawn here. What waits
+    on the operator is on the surface strip, which they draw like every
+    other frame. *)
+val recovery_slot : Masc_tui_types.state -> max_cells:int -> recovery_row option
+(** A complete CSI, quit, or rejection notice that fits a dedicated row, already
+    marked for presentation evidence where applicable. *)
+
+val recovery_box_bottom : Masc_tui_types.state -> Buffer.t -> cols:int -> recovery_row option
+(** Draw the existing borderless bottom row, replacing it with a complete
+    recovery notice when one fits. The result is the same selection passed to
+    {!footer_line} to avoid duplicating it. *)
+
+val finish_frame_beside_acting_pane :
+  Masc_tui_types.state ->
+  ?clamped:Masc_tui_types.clamped_scroll ->
+  ?roster:Masc_tui_pane_selection.roster_split ->
+  ?recovery_in_slot:recovery_row option ->
+  surface_key:string ->
+  cursor:Frame_presenter.cursor ->
+  rows:int ->
+  cols:int ->
+  footer:acting_pane_footer ->
+  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+type chrome_body = {
+  push : string -> unit;
+  push_styled : style:string -> string -> unit;
+  push_selected : string -> unit;
+  push_divider : unit -> unit;
+  push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
+}
+
+val surface_chrome_rows : int
+(** The rows {!surface_chrome} draws around its body: the top border, the
+    title and its rule, the bottom border and the footer. A key handler that
+    bounds a body's scroll subtracts this, the same number the frame does. *)
+
+val surface_chrome_budget : Masc_tui_types.state -> terminal_rows:int -> int
+(** Available body rows for the shared surface chrome. *)
+
+type chrome_frame = Chrome_screen | Chrome_overlay
+(** [Chrome_screen] draws rules without a box, for a surface that is the whole
+    screen. [Chrome_overlay] keeps the box, for an overlay opened over one. *)
+
+(** What a body does with rows past its budget. Required, so every surface
+    says it at the call: a body that fits, one the keypress windows and one
+    that was silently losing its tail used to read the same (#35716). *)
+type overflow =
+  | Fits
+      (** The body fits its budget. Rows past it are not drawn; the last row
+          of the budget says how many the screen could not hold. *)
+  | Paged_by_cursor
+      (** The body windows its rows against [~budget] and the keypress bounds
+          the cursor or scroll that picks the window through
+          {!Masc_tui_scroll}. A body that miscounts is cut as [Fits] is. *)
+  | Scrolled of { scroll : int; report : int -> Masc_tui_types.clamped_scroll }
+      (** The body pushes every row it has. The contract shows the window
+          from [scroll], held inside the rows there are, draws the
+          ["[lines a-b/n]"] row under it when they overflow, and reports the
+          scroll it drew from through [report]. *)
+  | Self_scrolled of (unit -> Masc_tui_types.clamped_scroll)
+      (** The body windows part of itself under rows it pins, which the
+          contract cannot tell apart from the window. The thunk is read after
+          the body has drawn, the only moment it can say what it clamped to. *)
+
+val surface_window_height :
+  Masc_tui_types.state -> terminal_rows:int -> count:int -> int
+(** The window a {!Scrolled} body gets out of [count] rows: the budget, less
+    the position row when they overflow. A key handler that bounds the scroll
+    asks this, the number the frame draws with. *)
+
+val surface_chrome :
+  overflow:overflow ->
+  ?help_door:bool ->
+  ?frame:chrome_frame ->
+  ?status:Masc_tui_footer.status_item list ->
+  ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
+  Masc_tui_types.state ->
+  terminal_rows:int ->
+  cols:int ->
+  surface_key:string ->
+  title:string ->
+  hints:string ->
+  body:(budget:int -> chrome_body -> unit) ->
+  Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+(** [sidebar] reserves its width from [cols] and draws beside the body,
+    above the full-width footer. The body must wrap for the remaining width.
+    A complete recovery notice may use the existing bottom row. *)
+
+val connection_badge : Masc_tui_types.state -> string
+
+val badge_row : cols:int -> lead:string -> label:string -> badge:string -> string
+(** A header row of [lead], a bracketed [label] and [badge] for a surface drawn
+    in [cols] columns. The label is cut with an ellipsis to the cells left after
+    [lead] and [badge], and its brackets go when none are left, so the badge is
+    drawn whole whenever [lead] and [badge] fit in the row; a row too narrow for
+    those two is cut at its end like any other. *)
+
+val lane_run_detail_title : string
+val measurement_detail_title : string
+val fusion_title : string
+val runtime_detail_title : string
+val keeper_calls_lead : string
+(** What the headings laid out by {!Masc_tui_ansi.detail_heading} draw before
+    the id: a lane run, a measurement artifact, a Fusion run (its list and
+    launch form carry the same title), one runtime's detail, and one keeper's
+    calls. *)
+
+val coordinator_status_row :
+  Masc_tui_types.state -> style:string -> string -> string
+(** The coordinator's {!connection_badge} and then [status] in [style]. The
+    style covers [status] alone; the badge keeps its own colour. *)
+
+val count_frame_lines : Buffer.t -> int
+(** The rows a buffer holds, for a surface that lays the rest of its height
+    out around a block it has already drawn. A last line with no newline after
+    it counts as a row: the terminal draws it, and a footer is written that
+    way. *)
+
+val slash_hint_text : restore:string -> string -> string option
+(** What the slash word at the start of a draft is -- the command it names,
+    the commands it could still become, or that it is none -- painted, with
+    [restore] handed back after each coloured span. [None] for a draft that is
+    not a slash command. Drawn after the draft on the composer row and in place
+    of the keys in the chat pane's footer. *)
+
+val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
+
+val keeper_action_color : Status.keeper_next_action_path option -> string
+
+val keeper_state_glyph :
+  paused:bool ->
+  health:Masc_tui_types.Tui_decode.keeper_health option -> string
+
+val fit_runtime_id : int -> string -> string
+
+val keeper_roster_pane :
+  ?focused:bool ->
+  Masc_tui_types.state -> rows:int -> cols:int -> Buffer.t -> unit
+
+val listing_rows_below_the_body : int
+
+val write_list_sidebar :
+  Buffer.t ->
+  rows:int ->
+  cols:int ->
+  title:string ->
+  focused:bool ->
+  holding:int option ->
+  labels:string list ->
+  selected:int ->
+  unit
+(** An index beside a detail pane. [holding] is what the surface holds when
+    that is more than [labels] was given -- the Board's page of fifty out of a
+    board of a hundred and ninety-eight -- and the row spells the pair the way
+    the surface's own header does. A list that is filtered rather than paged
+    passes [None]; it is asked of every caller so that a list with nothing
+    more to hold says so. The index has one quiet right separator and keeps
+    the same label columns whether focused or not. A focused selection fills
+    its row; an unfocused selection keeps a caret without claiming focus. *)
+
+val write_list_sidebar_selection :
+  Buffer.t ->
+  rows:int ->
+  cols:int ->
+  title:string ->
+  focused:bool ->
+  holding:int option ->
+  labels:string list ->
+  selection:int option ->
+  unit
+(** {!write_list_sidebar} for a list the open item may not be in: [None]
+    highlights no row and leaves the list at its top. *)
+
+val data_unreliable_row : cols:int -> string -> string
+
+val overview_pulse_text : Masc_tui_types.state -> now:float -> string
+(** The Overview's Pulse: a sparkline of Keeper turns finished in the last eight
+    fifteen-second windows, or {!Masc_tui_types.title_missing_reading} before
+    any keeper-turn reading has come back. *)
+
+val fenced_document_text : language:string -> string -> string
+
+val lexed_span : string * String.t -> string
+
+val keeper_lane_idle_text : int -> string
+
+val box_wrapped_field :
+  Buffer.t -> int -> head:string -> style:string -> string -> unit
+(** Wrap [body] inside a framed box row of width [cols], prefixing the first
+    row with [head] and hanging continuation rows to [head]'s display width. *)
+
+val selected_ask_question :
+  Masc_tui_types.state -> Masc.Tui_decode_asks.ask_question option
+
+val draw_ask_question :
+  Buffer.t ->
+  int ->
+  text_entry:Masc_tui_types.ask_text_entry option ->
+  row:Masc.Tui_decode_asks.ask_row ->
+  draft:Ask_projection.draft ->
+  question:Masc.Tui_decode_asks.ask_question ->
+  answering:bool -> selected_question:bool -> unit
+(** Render the original question with an explicit immutable editor snapshot.
+    The editor must still match both the original Ask and question slots.
+    A compact frame can defer this construction without retaining mutable UI
+    state or changing the full answer reader's data and action authority. *)
+
+val draw_ask_context : Buffer.t -> int -> row:Masc.Tui_decode_asks.ask_row -> unit
+
+val draw_ask_origin : Buffer.t -> int -> Masc_tui_types.state -> unit
+(** Explicit recorded-question diagnostics, shared by browsing and the
+    scrollable answer reader. It performs no read or effect. *)
+
+val ask_block : (Buffer.t -> 'a) -> string * int
+
+val question_hints : Masc_tui_types.state -> string
+
+val question_asks : Masc_tui_types.state -> Masc.Tui_decode_asks.ask_row list
+
+val ask_question_viewport : Masc_tui_types.state -> string list * int
+
+val board_score_style : int -> string
+
+val board_score_text : int -> string
+(** A net Board score as the reader draws it, on the post header and on each
+    comment: an up arrow and the signed score above zero, a down arrow below,
+    a bare zero otherwise. Style it with {!board_score_style}. *)
+
+val bracketed : max_cells:int -> string -> string
+(** [\[text\]], with [text] folded in the middle only when it runs past
+    [max_cells]. Never padded inside the brackets. *)
+
+val list_count_text : loaded:int -> holding:int option -> string
+(** [(loaded of holding)] when the surface holds more than the page an index
+    carries, and [(loaded)] otherwise. [holding] is the Board census, the
+    Schedules request count, the Task Review page total -- whatever the
+    surface's own header counts. *)
+
+val board_read_title :
+  screen:string -> id:string -> hearth:string option -> votes:int -> replies:int ->
+  string
+(** The Board reader's title row: [screen], the post id in brackets (folded
+    only when it overruns the list's ID column), the hearth, the score and the
+    reply count.
+
+    [id] and [hearth] arrive terminal-safe. The Board pane sanitizes them where
+    it reads the post. *)
+
+val magnitude_tone : Magnitude.band -> string
+
+val browser_lane_rows :
+  cols:int -> Masc_tui_types.Browser_lane_view.t -> Browser_lane_layout.rows
+
+val semantic_status_color : string -> string
+
+val planning_phase_label : Goal_phase.t -> string
+
+val planning_action_key : Goal_phase.Public_action.t -> string
+(** The key a goal detail takes for a lifecycle request. *)
+
+val planning_action_of_key : string -> Goal_phase.Public_action.t option
+(** Parse the same keys drawn in the Goal detail action strip. *)
+
+val planning_action_label : Goal_phase.Public_action.t -> string
+(** What the goal detail's Actions and ARMED rows call that request. *)
+
+val planning_phase_column : int
+
+val planning_phase_color : Goal_phase.t -> string
+
+val transport_attention_item :
+  Masc.Tui_decode.transport_health option ->
+  Masc_tui_types.attention_item option
+(** The one Overview Attention item about the transport: a warning while the
+    outbound queue's pressure is [Watch], bad while it is [High], and nothing
+    when it is [Steady] or unread. The readings themselves are on Metrics. *)
+
+val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
+(** The goal count; with any goals, also the completed share and a counter per
+    phase. *)
+
+val planning_rollup_rows :
+  cols:int -> Masc_tui_types.planning_rollup -> string list
+(** {!planning_rollup_row} packed into frame-bounded rows so narrow terminals
+    keep each phase counter intact and retain the 2-cell left margin on
+    wrapped continuation lines. *)
+
+val planning_backlog_counts :
+  Masc_tui_types.planning_backlog -> (string * int * string) list
+(** The Backlog counts as [(key, count, label)], each label led by the progress
+    mark its Task rows wear. *)
+
+val planning_backlog_clauses :
+  Masc_tui_types.planning_backlog -> string list
+(** The Backlog summary clauses ([Backlog: ○ todo=N], [◉ claimed=N], ...),
+    each styled by magnitude band and kept atomic across clause packing. *)
+
+val planning_change_clauses :
+  ?ko:bool ->
+  baseline:Masc_tui_types.planning_snapshot option ->
+  Masc_tui_types.planning_snapshot ->
+  string list
+(** The baseline-delta clauses for the Planning summary block. *)
+
+val pack_planning_summary_rows : cols:int -> string list -> string list
+(** Packs summary clauses within [framed_inner_width cols - 2] and prefixes
+    each physical row with the 2-cell left margin. *)
+
+val work_tasks_room : budget:int -> header_rows:int -> count:int -> int
+(** Visible task rows for [Work / Tasks] given [budget] body rows and
+    [header_rows] summary/divider rows, reserving one row for [[tasks a-b/n]]
+    when overflowing and at least 2 rows remain below the header. *)
+
+val planning_goal_history_summary : unlisted:int -> ended:int -> string
+(** The retained-history count row: how many goals are no longer listed, and
+    how many of those left the list with no outcome recorded. *)
+
+val planning_workspace_title :
+  Masc_tui_types.state ->
+  cols:int ->
+  tab:planning_tab ->
+  window:string ->
+  after:string ->
+  string
+(** [after] is what the caller draws past this title on the same row. The strip
+    inside leaves room for it; without it the strip took the row and the frame
+    cut the clock and the badge off the end. *)
+
+val harness_detail_heading :
+  Masc_tui_types.state -> cols:int -> task_id:string -> tail:string -> string
+(** One verdict's heading in a frame [cols] wide: the Planning strip with
+    Verdicts current, the task id, and [tail] (the connection badge). The
+    strip never goes under the width that holds its current entry; the id
+    folds first ({!Masc_tui_ansi.detail_heading}). *)
+
+val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
+
+val keeper_control_hints :
+  ?offers_chat:bool ->
+  ?offers_back:bool ->
+  ?taken:string list ->
+  Masc_tui_types.state -> Keeper_control.reading option -> string
+(** The Keeper keys alone, less any whose single keys are in [taken] -- the
+    keys a detail tab answers itself ({!Masc_tui_keys.keeper_detail_tab_taken_keys}).
+    The footer carries the armed or running action as a status item
+    ({!keeper_action_status}), so the fitter keeps that sentence whole instead
+    of treating it as a droppable key. *)
+
+val keeper_action_status :
+  Masc_tui_types.state -> Masc_tui_footer.status_item list
+(** The armed or running Keeper action, if there is one. *)
+
+val system_log_level_style : Masc.Tui_decode.system_log_level -> string
+
+val system_log_category_text : Masc.Tui_decode.system_log_entry -> string
+
+val fusion_run_status_color :
+  Masc.Tui_decode_fusion.fusion_run_status -> string
+
+val fusion_run_stage_compact :
+  Masc.Tui_decode_fusion.fusion_run_stage -> string
+(** A running run's stage, short enough for the table's STATE cell. *)
+
+val fusion_run_state_text :
+  status:Masc.Tui_decode_fusion.fusion_run_status ->
+  stage:Masc.Tui_decode_fusion.fusion_run_stage ->
+  string
+(** What the Fusion table's STATE cell says: the stage while the run is
+    running, [completed] once it has, and the server's failure code for a run
+    that failed. *)
+
+val fusion_run_progress_text :
+  Masc.Tui_decode_fusion.fusion_run_stage -> string
+
+val sidebar_row_lead_cells : int
+(** What a list index spends before a row's label: the caret the cursor wears
+    and a space each side. The room a label folds to is the frame's inner
+    width less this, which is what a width check has to compare against. *)
+
+val fusion_run_clock : Masc.Tui_decode_fusion.fusion_run -> string
+
+val fusion_run_duration :
+  now:float -> Masc.Tui_decode_fusion.fusion_run -> string
+
+val fusion_run_age :
+  now:float -> Masc.Tui_decode_fusion.fusion_run -> string
+
+val repository_change_status : Masc.Tui_decode.repository_change -> string
+
+val box_line_span : Buffer.t -> int -> Span.t -> unit
+
+val file_change_matches_path :
+  scope:Masc.Tui_decode.repository_change_scope option ->
+  string -> Masc.Tui_decode.file_change -> bool
+(** A file attribution requires the same repository identity and relative
+    path. Project, bundle and absolute paths do not establish that match. *)
+
+val resolve_change_context :
+  Masc_tui_types.state -> path_opt:string option -> change_context
+
+val build_change_context_lines : cols:int -> change_context -> string list
+
+val repository_changes_diff_context_visible :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> path:string -> bool
+
+val repository_changes_diff_page_rows :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> path:string -> int
+
+val tree_diff_gutter : Masc.Tui_decode.git_diff_row -> string
+(** Literal old/new coordinates and change marker; its measured width is shared
+    by diff rendering and horizontal bounds. *)
+
+val tree_diff_row_span :
+  ?hscroll:int -> width:int -> Masc.Tui_decode.git_diff_row -> Span.t
+
+val render_diff_surface :
+  Masc_tui_types.state ->
+  diff_surface ->
+  Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+val render_repository_changes_diff :
+  Masc_tui_types.state ->
+  path:String.t ->
+  Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+val runtime_quota_badge : Masc.Tui_decode.runtime_option -> string option
+
+val runtime_rate_limit_badge : Masc.Tui_decode.runtime_option -> string option
+
+(** The lanes that list a runtime among their candidates, in resolved order.
+    Both doors into the runtime detail read it, so neither can answer with a
+    shorter list than the other. *)
+val runtime_lanes_using :
+  Masc.Tui_decode.runtime_surface_snapshot -> runtime_id:string -> string list
+
+val runtime_all_rows :
+  Masc.Tui_decode.runtime_surface_snapshot ->
+  (Masc.Tui_decode.runtime_option * string list) list
+
+val tools_scrolled_for_lines :
+  Masc_tui_types.state -> 'a list -> Masc_tui_types.scrolled
+
+val path_from_root : root:string -> string -> string
+(** [path_from_root ~root path] is [path] said from [root] when it is under it,
+    and [path] whole when it is not. A sibling whose name starts with the
+    root's -- [/a/bc] under [/a/b] -- is not under it. *)
+
+val config_pane_strip :
+  cols:int -> before:string -> after:string -> Masc_tui_types.state -> string
+
+val system_subnav_row : Masc_tui_types.state -> string
+(** Clickable System sub-navigation bar (9:Runtime, s:Resources, t:Tools&Skills,
+    A:Activity, L:Logs) and UI language toggle badge (KO/EN). *)
+
+val config_pane_title_head :
+  room:int -> name:string -> reading:string -> string
+(** The head of a Config pane's title row in [room] cells: the pane's name and
+    the reading beside it, each followed by the gap that holds the next part
+    off it. The reading is cut with a mark; the name is drawn whole or not at
+    all, and when it does not fit the head is [""]. *)
+
+val config_pane_title :
+  cols:int ->
+  name:string ->
+  ?reading:string ->
+  ?note:string ->
+  ?clock:string ->
+  Masc_tui_types.state ->
+  string
+(** The whole title row a Config pane draws: its name, the strip, and the badge,
+    with the file it is reading and the clock between them where the pane has
+    those. [reading] is whatever the pane adds beside its name -- a count, a
+    warning -- and is the part that gives way. Ten panes spelled this row and
+    nine of them spelled it identically, which is also why none could tell the
+    strip to leave room for the badge. *)
+
+val config_metadata_summary :
+  Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list
+
+val runtime_config_status_lines :
+  Masc_tui_types.state ->
+  cols:int -> (Masc_tui_runtime_config_view.tone * string) list
+
+val help_masthead : Masc_tui_types.state -> string list
+
+val help_lines : width:int -> Masc_tui_types.state -> string list
+(** The cheat sheet's sections, each entry's text wrapped to [width] cells and
+    continued under the column every entry's text starts at. *)
+
+val context_split_width : int -> int
+
+(** The stack band of the context inspector for the row [turn_back] steps
+    behind the newest: composition rows with their bytes and, when the turn
+    holds both a serialized body and a per-request input count, an
+    estimated token figure; the serialized request led by the provider's
+    token count; history reach; recent turns. *)
+val context_composition_lines :
+  ?runtime_details:(string -> string list) ->
+  cols:int ->
+  turn_back:int ->
+  ?forecast:(Masc_tui_context_inspector.forecast, string) result ->
+  Masc_tui_context_inspector.selection ->
+  string list
+
+val context_inspector_content_lines :
+  cols:int -> Masc_tui_types.state -> context_pane_body
+
+val context_split_pane_height : content_height:int -> common_len:int -> int
+
+val keeper_deletions_lines : Masc_tui_types.state -> cols:int -> string list
+
+val keeper_deletions_hints : Masc_tui_types.state -> scrollable:bool -> string
+(** The deletion overlay's key row: [j/k] only with two or more records, the
+    record scroll only when [scrollable], and [t] only when the selected
+    record can be retried. *)
+
+val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list
+
+val answering_preview_rows : int
+
+(** Common title and content geometry for surfaces with two panes. *)
+val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
+  name:string -> split:bool -> unit
+val pane_surface_content_height : rows:int -> int
+
+val models_account_reading : provider:string -> overview_account_emails_reading -> string option * string list
+(** Account identity and visible evidence notes for the Models pane. Failed and
+    partially decoded reads remain distinct from a read with no email. *)
+
+val models_source_account_reading : provider:string -> runtime_config_reading option -> string option * string list
+(** Models labels come only from the account reading published with its source. *)
+
+val studio_panel : width:int -> title:string -> lines:string list -> string list
+(** Framed sub-panel box with a middle-truncated title header and cell-fitted rows. *)
+
+val lane_run_clock : float -> string
+(** Local [MM-DD HH:MM:SS] timestamp for lane run and harness verdict sidebars. *)
+
+val detail_section_heading : ?first:bool -> string -> (string * string) list
+(** Numbered/grouped section header [  [ Title ]] in [(style, text)] pairs for
+    scrollable detail readers. *)
+
+val detail_section_lines : ?first:bool -> string -> string list
+(** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)
+
+val split_summary_columns :
+  cols:int ->
+  left_title:string ->
+  left_rows:(string * string) list ->
+  right_title:string ->
+  right_rows:(string * string) list ->
+  (string * string) list
+(** Side-by-side 2-column summary block (with [ │ ] divider on wide viewports and
+    stacked fallback on narrow viewports). *)
+
+val runtime_substrate_tab_strip :
+  Masc_tui_types.state ->
+  cols:int ->
+  before:string ->
+  after:string ->
+  current:[ `Runtime_lanes | `Runtime_all | `Features | `Clients ] ->
+  string
+(** Shared clickable tab strip across [System / Runtime] ([Candidate orders] and
+    [All runtimes]), [Features], and [Clients]. *)

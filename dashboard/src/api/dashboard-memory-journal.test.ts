@@ -1,0 +1,233 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fetchKeeperMemoryJournal } from './dashboard-memory-journal'
+import { clearStoredToken, setStoredToken } from './core'
+
+// A Response body reads once and ensureDevToken consumes the first, so each
+// call needs a fresh instance rather than one shared mock value.
+function stubFetch(payload: unknown) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    ),
+  )
+  setStoredToken('journal-test-token', { source: 'manual' })
+}
+
+afterEach(() => {
+  clearStoredToken()
+  vi.unstubAllGlobals()
+})
+
+const committed = {
+  structural_id: 'memory:journal:10:exampleorg:0',
+  ok: true,
+  outcome: 'committed',
+  recorded_at: 1786000000,
+  revision: 223,
+  source: { kind: 'librarian', trace_id: 'trace-a' },
+  change: {
+    added: [{
+      claim: 'x',
+      category: 'fact',
+      first_seen: 1785990000,
+      last_seen: 1785990001,
+      origin: { kind: 'injected', trace_id: '' },
+      basis: { kind: 'observed' },
+    }],
+    removed: [],
+    retained: 3,
+    invalidated: [{
+      fact: {
+        claim: 'derived x',
+        category: 'fact',
+        first_seen: 1785980000,
+        last_seen: 1785980001,
+        origin: { kind: 'authored', trace_id: 'trace-before' },
+        basis: {
+          kind: 'derived',
+          derivations: [{
+            rule_id: 'rule-x',
+            premise_ids: [`sha256:${'a'.repeat(64)}`],
+          }],
+        },
+      },
+      missing_premise_ids: [`sha256:${'a'.repeat(64)}`],
+    }],
+  },
+  dropped: [{
+    memory_id: `sha256:${'b'.repeat(64)}`,
+    reason: 'superseded by the openssl decision',
+  }],
+}
+
+const failed = {
+  structural_id: 'memory:journal:10:exampleorg:1',
+  ok: true,
+  outcome: 'failed',
+  recorded_at: 1786000100,
+  trace_id: 'trace-b',
+  kind: 'runtime_context_unavailable',
+  detail: 'Eio net/clock context unavailable',
+  snapshot_present: false,
+}
+
+function payload(entries: unknown[], undecodable = 0) {
+  return {
+    keeper: 'exampleorg',
+    dashboard_surface: '/api/v1/keepers/:name/memory-journal',
+    returned: entries.length,
+    undecodable_lines: undecodable,
+    entries,
+  }
+}
+
+describe('memory journal', () => {
+  it('retains a dynamically named category in the pass journal', async () => {
+    stubFetch(payload([{
+      ...committed,
+      change: {
+        ...committed.change,
+        added: [{ ...committed.change.added[0], category: 'architecture_decision' }],
+      },
+    }]))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
+    expect(entry.added[0]?.category).toBe('architecture_decision')
+  })
+  it('keeps a commit and a failure as different members', async () => {
+    stubFetch(payload([committed, failed]))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    const [first, second] = journal.entries
+    expect(first?.ok).toBe(true)
+    expect(first && first.ok && first.outcome).toBe('committed')
+    expect(second && second.ok && second.outcome).toBe('failed')
+    // A failure has no revision to read, which is the point of the split.
+    if (first?.ok && first.outcome === 'committed') expect(first.revision).toBe(223)
+    if (second?.ok && second.outcome === 'failed') {
+      expect(second.detail).toBe('Eio net/clock context unavailable')
+      expect(second.kind).toBe('runtime_context_unavailable')
+    }
+  })
+
+  // Drop reasons ride this line and nothing else stores them.
+  it('carries the librarian drop reasons', async () => {
+    stubFetch(payload([committed]))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
+    expect(entry.sourceKind).toBe('librarian')
+    expect(entry.added[0]).toMatchObject({
+      claim: 'x',
+      category: 'fact',
+      basis: { kind: 'observed' },
+      origin: { kind: 'injected', traceId: '' },
+    })
+    expect(entry.invalidated[0]).toMatchObject({
+      fact: { claim: 'derived x', basis: { kind: 'derived' } },
+      missingPremiseIds: [`sha256:${'a'.repeat(64)}`],
+    })
+    expect(entry.drops).toHaveLength(1)
+    expect(entry.drops[0]?.reason).toBe('superseded by the openssl decision')
+  })
+
+  // An observed fact may name the Board post it was read from; the decoder
+  // keeps the reference and answers null for a transcript observation.
+  it('keeps the board post an observed fact was read from', async () => {
+    const withBoard = {
+      ...committed,
+      change: {
+        ...committed.change,
+        added: [
+          { ...committed.change.added[0], basis: { kind: 'observed', board: { post_id: 'p-abc' } } },
+          {
+            ...committed.change.added[0],
+            claim: 'y',
+            basis: { kind: 'observed', board: { post_id: 'p-abc', comment_id: 'c-def' } },
+          },
+        ],
+      },
+    }
+    stubFetch(payload([withBoard]))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
+    expect(entry.added[0]?.basis).toEqual({ kind: 'observed', board: { post_id: 'p-abc', comment_id: null } })
+    expect(entry.added[1]?.basis).toEqual({
+      kind: 'observed',
+      board: { post_id: 'p-abc', comment_id: 'c-def' },
+    })
+    expect(entry.invalidated[0]?.fact.basis).toEqual({ kind: 'derived', derivations: expect.any(Array) })
+  })
+
+  it('keeps explicit retraction as a typed committed source', async () => {
+    stubFetch(payload([{ ...committed, source: { kind: 'explicit_retract', trace_id: 'trace-r' } }]))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'committed') throw new Error('expected a commit')
+    expect(entry.sourceKind).toBe('explicit_retract')
+    expect(entry.traceId).toBe('trace-r')
+  })
+
+  it('keeps a torn line in place with its reason', async () => {
+    stubFetch(payload([committed, { structural_id: 'memory:journal:10:exampleorg:2', ok: false, error: 'not valid JSON' }], 1))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    expect(journal.undecodableLines).toBe(1)
+    expect(journal.entries[1]).toEqual({ ok: false, error: 'not valid JSON' })
+  })
+
+  // An outcome from a wider build must not be rendered as something else —
+  // that would describe a pass that never happened.
+  it('rejects the payload when an outcome is unknown', async () => {
+    stubFetch(payload([{ ...committed, outcome: 'deferred' }]))
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
+  })
+
+  it('rejects a commit whose change block is missing', async () => {
+    const { change: _change, ...withoutChange } = committed
+    stubFetch(payload([withoutChange]))
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
+  })
+
+  it('rejects a commit whose memory producer is unknown', async () => {
+    stubFetch(payload([{ ...committed, source: { ...committed.source, kind: 'legacy_writer' } }]))
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
+  })
+
+  it('rejects an unknown field instead of projecting past a wider journal contract', async () => {
+    stubFetch(payload([{ ...committed, future_field: true }]))
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
+  })
+
+  // The server projection prepends structural_id to every entry since #32380;
+  // a line without it did not come through read_journal_tail_projection.
+  it('rejects an entry missing the server-projected structural_id', async () => {
+    const { structural_id: _structuralId, ...withoutStructuralId } = committed
+    stubFetch(payload([withoutStructuralId]))
+    await expect(fetchKeeperMemoryJournal('exampleorg')).rejects.toThrow('memory journal')
+  })
+
+  // A quarantine is neither a committed nor a failed pass — it decodes as its
+  // own outcome instead of throwing the whole journal away.
+  it('keeps a quarantined line as its own outcome', async () => {
+    const quarantined = {
+      structural_id: 'memory:journal:10:exampleorg:3',
+      ok: true,
+      outcome: 'quarantined',
+      recorded_at: 1786000200,
+      rejection: 'snapshot decode failed: bad revision',
+      rejected_path: '/keepers/exampleorg/memory_os.rejected.json',
+    }
+    stubFetch(payload([quarantined]))
+    const journal = await fetchKeeperMemoryJournal('exampleorg')
+    const entry = journal.entries[0]
+    if (!entry?.ok || entry.outcome !== 'quarantined') throw new Error('expected a quarantine')
+    expect(entry.rejection).toBe('snapshot decode failed: bad revision')
+    expect(entry.rejectedPath).toContain('rejected')
+  })
+})

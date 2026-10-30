@@ -1,0 +1,11 @@
+{
+  "commit": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+  "arch": "macos-arm64",
+  "run_attempt": 1,
+  "release_validated": false,
+  "sha256": {
+    "main_eio.exe": "2d9f684599ef08ce0474c4516430d1bf4bde8212efd4b2572659950ff5e56c75",
+    "masc_tui.exe": "88b23dce786b5721e8ac1c5730b9735088141e6324af1e677d9d4ce92dee2bc8",
+    "masc_browser_host.exe": "3619a5c59c069966d09ac5ee506c5198ee670e8151cc03fb10df41d20c1a3b72"
+  }
+}

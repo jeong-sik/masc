@@ -1,0 +1,25 @@
+{
+  "scope": "actual run_started metadata; prompt and reasoning excluded",
+  "runs": [
+    {
+      "record_type": "run_started",
+      "worker_run_id": "wr-1a16e987856-1462-0000",
+      "agent_name": "agent_core-glm-coding.glm-5.3-flash",
+      "session_id": "trace-1792856839286-00000",
+      "ts": 1792856848.470847,
+      "model": "glm-5.3-flash",
+      "file": "turn-1792856848467-1462-000000.jsonl",
+      "line": 1
+    },
+    {
+      "record_type": "run_started",
+      "worker_run_id": "wr-1a16e996748-1462-0000",
+      "agent_name": "agent_core-glm-coding.glm-5.3-flash",
+      "session_id": "trace-1792856839286-00000",
+      "ts": 1792856909.640757,
+      "model": "glm-5.3-flash",
+      "file": "turn-1792856909637-1462-000001.jsonl",
+      "line": 1
+    }
+  ]
+}

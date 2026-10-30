@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: known native sequence navigates, waits and returns one final snapshot
+ok 1 - known native sequence navigates, waits and returns one final snapshot
+  ---
+  duration_ms: 1.217958
+  type: 'test'
+  ...
+# Subtest: full-page workflow snapshot uses the native full_page scope
+ok 2 - full-page workflow snapshot uses the native full_page scope
+  ---
+  duration_ms: 0.133791
+  type: 'test'
+  ...
+# Subtest: a failed SDK wait retains prior effects and never runs later steps
+ok 3 - a failed SDK wait retains prior effects and never runs later steps
+  ---
+  duration_ms: 1.039541
+  type: 'test'
+  ...
+# Subtest: an SDK input error stays uncertain and is never retried
+ok 4 - an SDK input error stays uncertain and is never retried
+  ---
+  duration_ms: 0.166041
+  type: 'test'
+  ...
+# Subtest: a failed read-only wait has no input effect
+ok 5 - a failed read-only wait has no input effect
+  ---
+  duration_ms: 0.604708
+  type: 'test'
+  ...
+# Subtest: dialog or SDK control loss stops the sequence without follow-up reads
+ok 6 - dialog or SDK control loss stops the sequence without follow-up reads
+  ---
+  duration_ms: 0.284583
+  type: 'test'
+  ...
+# Subtest: wrong starting URL refuses before input and final snapshot cuts preserve Unicode
+ok 7 - wrong starting URL refuses before input and final snapshot cuts preserve Unicode
+  ---
+  duration_ms: 0.166125
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 107.409375

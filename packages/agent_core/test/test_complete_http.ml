@@ -1,0 +1,5140 @@
+(** HTTP-level tests for Complete module using mock cohttp-eio server.
+    Tests one-shot complete and complete_stream.
+    No real LLM calls — all responses are canned JSON. *)
+
+open Alcotest
+open Llm_provider
+
+let check_observed_request_metadata ~body events =
+  let entered = List.filter_map (fun (event : Http_request_observer.event) -> match event.phase with
+    | Client_entered {tool_inventory;request_components;_} -> Some (tool_inventory,request_components)
+    | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) !events in
+  let actual, components = match entered with
+    | [(Some tools,Some components)] -> tools,components
+    | _ -> fail "one observed native request metadata record required" in
+  (match Yojson.Safe.from_string body, components with
+   | `Assoc fields, Json_object_members {members;framing_bytes} ->
+       check (list string) "peer field occurrence order" (List.map fst fields)
+         (List.map (fun (member : Http_request_observer.request_member) -> member.name) members);
+       check int "component bytes account for the exact peer body" (String.length body)
+         (framing_bytes + List.fold_left (fun bytes (member : Http_request_observer.request_member) ->
+            bytes + member.wire_bytes) 0 members);
+       List.iter2 (fun (_,value) (member : Http_request_observer.request_member) ->
+         let json = Yojson.Safe.to_string value in
+         check int "actual peer value bytes" (String.length json) member.value_json_bytes;
+         check string "actual peer value digest" Agent_core_sha256.(digest_string json |> to_hex)
+           member.value_json_sha256) fields members
+   | _ -> fail "component observation was unavailable for an actual compact JSON request");
+  match Yojson.Safe.Util.member "tools" (Yojson.Safe.from_string body),actual with
+  | `Null, No_tools_member -> ()
+  | (`List entries as tools), Tools_member {wire_entries;json_bytes;json_sha256} ->
+    let json = Yojson.Safe.to_string tools in
+    check int "actual wire entries, including provider wrappers" (List.length entries) wire_entries;
+    check int "actual peer tool encoding bytes" (String.length json) json_bytes;
+    check string "actual peer tool encoding digest" Agent_core_sha256.(digest_string json |> to_hex) json_sha256
+  | _ -> fail "observed inventory did not describe the actual received tools"
+;;
+
+(* ── Mock server ─────────────────────────────────────── *)
+
+let anthropic_response ?(id = "msg-1") ?(model = "mock") ?(stop_reason = "end_turn") text =
+  Printf.sprintf
+    {|{"id":"%s","type":"message","role":"assistant","model":"%s","content":[{"type":"text","text":"%s"}],"stop_reason":"%s","usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}|}
+    id
+    model
+    text
+    stop_reason
+;;
+
+let anthropic_empty_response stop_reason =
+  Printf.sprintf
+    {|{"id":"msg-empty","type":"message","role":"assistant","model":"mock","content":[],"stop_reason":"%s","usage":{"input_tokens":10,"output_tokens":0}}|}
+    stop_reason
+;;
+
+let anthropic_empty_sse stop_reason =
+  Printf.sprintf
+    "event: message_start\n\
+     data: \
+     {\"type\":\"message_start\",\"message\":{\"id\":\"msg-empty\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"mock\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n\
+     event: message_delta\n\
+     data: \
+     {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"%s\"},\"usage\":{\"output_tokens\":0}}\n\n\
+     event: message_stop\n\
+     data: {\"type\":\"message_stop\"}\n\n"
+    stop_reason
+;;
+
+let openai_response text =
+  Printf.sprintf
+    {|{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-4","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}|}
+    text
+;;
+
+let openai_mlx_vlm_response text =
+  Printf.sprintf
+    {|{"id":"chatcmpl-mlx-1","object":"chat.completion","model":"gpt-4","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"input_tokens":11,"output_tokens":5,"prompt_tps":21.55,"generation_tps":81.56},"peak_memory":52.66}|}
+    text
+;;
+
+let openai_responses_tool_call_response () =
+  {|{"id":"resp-1","model":"gpt-5.5","status":"completed","output":[
+      {"id":"rs-1","type":"reasoning","summary":[{"type":"summary_text","text":"Need a lookup."}]},
+      {"id":"fc-1","type":"function_call","call_id":"call_lookup","name":"lookup","arguments":"{\"q\":\"weather\"}"}
+    ],
+    "usage":{"input_tokens":12,"output_tokens":8,"output_tokens_details":{"reasoning_tokens":3}}}|}
+;;
+
+let ollama_tool_call_response () =
+  {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls",
+     "message":{"role":"assistant","content":"",
+       "tool_calls":[
+         {"function":{"index":0,"name":"get_temperature","arguments":{"city":"New York"}}},
+         {"function":{"index":1,"name":"get_conditions","arguments":{"city":"London"}}}
+       ]}}|}
+;;
+
+let fresh_port () =
+  let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt s Unix.SO_REUSEADDR true;
+  Unix.bind s (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port =
+    match Unix.getsockname s with
+    | Unix.ADDR_INET (_, p) -> p
+    | _ -> failwith "not inet"
+  in
+  Unix.close s;
+  port
+;;
+
+let start_mock_server
+      ~sw
+      ~net
+      ?(status = `OK)
+      ?(delay_sec = 0.0)
+      ?clock
+      ?capture_body
+      ?capture_path
+      ?capture_headers
+      ?on_request
+      response_body
+  =
+  let port = fresh_port () in
+  let handler _conn req body =
+    let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    (match capture_body with
+     | Some seen -> seen := Some request_body
+     | None -> ());
+    (match capture_path with
+     | Some seen -> seen := Some (Cohttp.Request.uri req |> Uri.path)
+     | None -> ());
+    (match capture_headers with Some seen -> seen := Some (Cohttp.Request.headers req) | None -> ());
+    (match on_request with
+     | Some f -> f ()
+     | None -> ());
+    (match clock with
+     | Some clk when delay_sec > 0.0 -> Eio.Time.sleep clk delay_sec
+     | _ -> ());
+    Cohttp_eio.Server.respond_string ~status ~body:response_body ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:8
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+;;
+
+let start_header_capture_server ~sw ~net ~seen response_body =
+  let port = fresh_port () in
+  let handler _conn req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let headers = Cohttp.Request.headers req in
+    seen
+    := Some
+         ( Cohttp.Header.get headers "traceparent"
+         , Cohttp.Header.get headers "tracestate"
+         , Cohttp.Header.get headers "x-custom" );
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:response_body ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:8
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+;;
+
+(* ── Helper: make Provider_config ────────────────────── *)
+
+let make_config
+      ?(kind = Provider_config.Anthropic)
+      ?(request_path = "/v1/messages")
+      base_url
+  =
+  Provider_config.make
+    ~kind
+    ~model_id:"test-model"
+    ~base_url
+    ~request_path
+    ~temperature:0.0
+    ~max_tokens:100
+    ()
+;;
+
+let make_openai_config base_url =
+  Provider_config.make
+    ~kind:Provider_config.OpenAI_compat
+    ~model_id:"gpt-4"
+    ~base_url
+    ~request_path:"/v1/chat/completions"
+    ~temperature:0.0
+    ~max_tokens:100
+    ()
+;;
+
+let make_kimi_config ?request_path base_url =
+  Provider_config.make
+    ~kind:Provider_config.Kimi
+    ~model_id:"kimi-for-coding"
+    ~base_url
+    ?request_path
+    ~system_prompt:"Kimi system"
+    ~temperature:0.0
+    ~max_tokens:100
+    ()
+;;
+
+let messages = [ Types.user_msg "hello" ]
+
+
+let mock_transport_response text =
+  { Types.id = "transport-response"
+  ; model = "transport-model"
+  ; stop_reason = Types.EndTurn
+  ; content = [ Types.Text text ]
+  ; usage = None
+  ; telemetry = None
+  }
+;;
+
+let make_transport response : Llm_transport.t =
+  Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> { Llm_transport.response; latency_ms = Some 7 })
+  ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> response)
+  })
+;;
+
+let check_typed_empty_completion expected = function
+  | Error
+      (Http_client.ProviderFailure
+         { kind = Http_client.Empty_completion { stop_reason }; _ }) ->
+    check bool "typed stop reason" true (stop_reason = expected)
+  | Ok _ -> fail "expected empty completion error, got Ok"
+  | Error _ -> fail "expected typed empty completion provider failure"
+;;
+
+let check_content_free_terminal expected = function
+  | Ok (response : Types.api_response) ->
+    check bool "typed terminal reason" true (response.stop_reason = expected);
+    check int "no answer content invented" 0 (List.length response.content)
+  | Error _ -> fail "completion boundary erased authoritative terminal state"
+;;
+
+(* ── complete: success ───────────────────────────────── *)
+
+let test_complete_anthropic_ok () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net (anthropic_response "mock response") in
+    let config = make_config url in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+    | Ok resp ->
+      check string "model" "mock" resp.model;
+      let text =
+        List.filter_map
+          (function
+            | Llm_provider.Types.Text s -> Some s
+            | _ -> None)
+          resp.content
+        |> String.concat ""
+      in
+      check string "text" "mock response" text;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_http_rejects_typed_empty_completion () =
+  let run expected wire_stop_reason =
+    Eio_main.run
+    @@ fun env ->
+    try
+      Eio.Switch.run
+      @@ fun sw ->
+      let url =
+        start_mock_server ~sw ~net:env#net (anthropic_empty_response wire_stop_reason)
+      in
+      (Complete.complete ~sw ~net:env#net ~config:(make_config url) ~messages ()).Llm_provider.Completion_outcome.result
+      |> check_typed_empty_completion expected;
+      Eio.Switch.fail sw Exit
+    with
+    | Exit -> ()
+  in
+  List.iter
+    (fun (expected, wire) -> run expected wire)
+    [ Types.EndTurn, "end_turn"
+    ; Types.ContextWindowExceeded, "model_context_window_exceeded"
+    ; Types.Unknown "new_provider_finish", "new_provider_finish"
+    ; Types.UnmatchedToolCalls, "unmatched_tool_calls" ]
+;;
+
+let test_complete_stream_http_rejects_typed_empty_completion () =
+  let run expected wire_stop_reason =
+    Eio_main.run
+    @@ fun env ->
+    try
+      Eio.Switch.run
+      @@ fun sw ->
+      let url =
+        start_mock_server ~sw ~net:env#net (anthropic_empty_sse wire_stop_reason)
+      in
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config:(make_config url)
+        ~messages
+        ~on_event:(fun _ -> ())
+        ()).Llm_provider.Completion_outcome.result
+      |> check_typed_empty_completion expected;
+      Eio.Switch.fail sw Exit
+    with
+    | Exit -> ()
+  in
+  List.iter
+    (fun (expected, wire) -> run expected wire)
+    [ Types.EndTurn, "end_turn"
+    ; Types.ContextWindowExceeded, "model_context_window_exceeded"
+    ; Types.Unknown "new_provider_finish", "new_provider_finish"
+    ; Types.UnmatchedToolCalls, "unmatched_tool_calls" ]
+;;
+
+let test_complete_http_preserves_content_free_terminal () =
+  List.iter (fun (expected, wire_stop_reason) ->
+    Eio_main.run @@ fun env ->
+    try Eio.Switch.run @@ fun sw ->
+      let url = start_mock_server ~sw ~net:env#net
+          (anthropic_empty_response wire_stop_reason) in
+      (Complete.complete ~sw ~net:env#net ~config:(make_config url) ~messages ()).Llm_provider.Completion_outcome.result
+      |> check_content_free_terminal expected;
+      Eio.Switch.fail sw Exit
+    with Exit -> ())
+    [ Types.Refusal, "refusal"; Types.MaxTokens, "max_tokens"
+    ; Types.ContentFilter, "content_filter"
+    ; Types.RepetitionTruncation, "repetition_truncation" ]
+;;
+
+let test_complete_stream_http_preserves_content_free_terminal () =
+  List.iter (fun (expected, wire_stop_reason) ->
+    Eio_main.run @@ fun env ->
+    try Eio.Switch.run @@ fun sw ->
+      let url = start_mock_server ~sw ~net:env#net
+          (anthropic_empty_sse wire_stop_reason) in
+      (Complete.complete_stream ~sw ~net:env#net ~config:(make_config url)
+        ~messages ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+      |> check_content_free_terminal expected;
+      Eio.Switch.fail sw Exit
+    with Exit -> ())
+    [ Types.Refusal, "refusal"; Types.MaxTokens, "max_tokens"
+    ; Types.ContentFilter, "content_filter"
+    ; Types.RepetitionTruncation, "repetition_truncation" ]
+;;
+
+(* llama-server (OpenAI-compat SSE) attaches a [timings] object — including
+   [cache_n], the KV-cache-reused prompt tokens — to the final chunk without
+   opt-in. The stream path must land it in response telemetry and emit
+   [Prefill_complete], exactly like the Ollama NDJSON done line does. *)
+let openai_sse_with_llama_timings =
+  "data: \
+   {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pong\"},\"finish_reason\":null}],\"id\":\"c-t\",\"model\":\"qwen3.8-27b\",\"object\":\"chat.completion.chunk\"}\n\n\
+   data: \
+   {\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"delta\":{}}],\"id\":\"c-t\",\"model\":\"qwen3.8-27b\",\"object\":\"chat.completion.chunk\",\"timings\":{\"cache_n\":1741,\"prompt_n\":26,\"prompt_ms\":709.5,\"predicted_n\":2,\"predicted_ms\":122.7,\"predicted_per_second\":16.3}}\n\n\
+   data: [DONE]\n\n"
+;;
+
+let test_complete_stream_openai_captures_llama_server_timings () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net openai_sse_with_llama_timings in
+    let prefill = ref None in
+    let events = ref [] in
+    let result =
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config:(make_openai_config url)
+        ~messages
+        ~on_telemetry:(fun evt ->
+          match evt with
+          | Telemetry_event.Prefill_complete { prompt_eval_tokens; cache_hit; _ } ->
+            prefill := Some (prompt_eval_tokens, cache_hit)
+          | _ -> ())
+        ~on_event:(fun event -> events := event :: !events)
+        ()).Llm_provider.Completion_outcome.result
+    in
+    (match result with
+     | Ok resp ->
+       check string "streamed reported id" "c-t" resp.id;
+       check string "streamed reported model" "qwen3.8-27b" resp.model;
+       (match List.rev !events with
+        | Types.Connected :: Types.MessageStart {id="c-t";model="qwen3.8-27b";usage=None}
+            :: Types.ContentBlockStart {content_type="text";_} :: _ -> ()
+        | _ -> Alcotest.fail "HTTP stream must publish its reported prelude before content");
+       check int "one HTTP response prelude" 1
+         (List.length (List.filter (function Types.MessageStart _ -> true | _ -> false) !events));
+       (match resp.telemetry with
+        | Some { timings = Some t; _ } ->
+          check (option int) "cache_n" (Some 1741) t.cache_n;
+          check (option int) "prompt_n" (Some 26) t.prompt_n;
+          check (option int) "predicted_n" (Some 2) t.predicted_n
+        | Some { timings = None; _ } | None ->
+          Alcotest.fail "expected stream timings in response telemetry");
+       (match !prefill with
+        | Some (prompt_eval_tokens, cache_hit) ->
+          check int "prefill tokens" 26 prompt_eval_tokens;
+          check bool "cache_hit" true cache_hit
+        | None -> Alcotest.fail "expected Prefill_complete telemetry")
+     | Error err ->
+       Alcotest.fail
+         (Printf.sprintf
+            "expected Ok, got %s"
+            (match err with
+             | Http_client.NetworkError { message; _ }
+             | Http_client.TimeoutError { message; _ } -> message
+             | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
+             | Http_client.AcceptRejected { reason } -> reason
+             | Http_client.ProviderTerminal { message; _ } -> message
+             | Http_client.ProviderFailure { message; _ } -> message)));
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* ── complete: HTTP error ────────────────────────────── *)
+
+let test_complete_http_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_mock_server ~sw ~net:env#net ~status:`Bad_request "bad request body"
+    in
+    let config = make_config url in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+    | Ok _ -> fail "expected Error"
+    | Error (Http_client.HttpError { code; _ }) ->
+      check int "status 400" 400 code;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected HttpError"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_request_wire_observer_sees_exact_sync_body () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let captured_body = ref None in
+    let observed = ref [] in
+    let http_events = ref [] in
+    let http_observer = Http_request_observer.create (fun event -> http_events := event :: !http_events; Ok ()) in
+    let base_url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~capture_body:captured_body
+        (openai_response "observed")
+    in
+    let request_wire_observer observation =
+      observed := observation :: !observed;
+      Ok ()
+    in
+    (match
+       Http_request_observer.with_observer http_observer (fun () -> (Complete.complete
+         ~sw
+         ~net:env#net
+         ~capture_id:"sync-request-1"
+         ~request_wire_observer
+         ~config:(make_openai_config base_url)
+         ~messages
+         ()).Llm_provider.Completion_outcome.result)
+     with
+     | Error _ -> fail "request observation changed the provider result"
+     | Ok _ -> ());
+    (match !captured_body, !observed with
+     | Some body, [ observation ] ->
+       check_observed_request_metadata ~body http_events;
+       check
+         (option string)
+         "capture id"
+         (Some "sync-request-1")
+         observation.Request_wire_observer.capture_id;
+       check string "provider" "openai_compat" observation.provider;
+       check string "model" "gpt-4" observation.model;
+       check string "codec" "openai-chat" observation.http_codec;
+       check bool "sync" false observation.stream;
+       check int "exact bytes" (String.length body) observation.body_bytes;
+       check
+         string
+         "exact digest"
+         Agent_core_sha256.(to_hex (digest_string body))
+         observation.body_sha256
+     | None, _ -> fail "mock server did not capture the request body"
+     | Some _, _ -> fail "request observer was not invoked exactly once");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_invalid_uri_rejects_before_wire_observation () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let observed_request_count = ref 0 in
+  let request_wire_observer _observation =
+    incr observed_request_count;
+    Ok ()
+  in
+  match
+    (Complete.complete
+      ~sw
+      ~net:env#net
+      ~request_wire_observer
+      ~config:(make_config "http://")
+      ~messages
+      ()).Llm_provider.Completion_outcome.result
+  with
+  | Error (Http_client.NetworkError { kind = Http_client.Unknown; _ }) ->
+    check int "invalid URI produces no wire observation" 0 !observed_request_count
+  | Ok _ -> fail "invalid URI reached provider dispatch"
+  | Error _ -> fail "invalid URI returned the wrong typed error"
+;;
+
+let test_complete_stream_final_wire_injection_grows_the_body () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let request_count = ref 0 in
+    let base_url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~on_request:(fun () -> incr request_count)
+        "must not arrive"
+    in
+    let unlimited = make_openai_config base_url in
+    let pre_injection_bytes =
+      match
+        Complete_common.serialize_http_request
+          ~stream:true
+          ~config:unlimited
+          ~messages
+          ~tools:[]
+      with
+      | Error _ -> fail "fixture serialization failed"
+      | Ok serialized -> String.length serialized.Complete_common.body
+    in
+    let final_bytes =
+      match
+        Complete.inspect_serialized_request ~stream:true ~config:unlimited ~messages ()
+      with
+      | Error _ -> fail "final request inspection failed"
+      | Ok observation -> observation.Request_wire_observer.body_bytes
+    in
+    check
+      bool
+      "stream injection grows the final body"
+      true
+      (final_bytes > pre_injection_bytes);
+    check int "no HTTP dispatch" 0 !request_count;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_http_empty_error_body_has_context () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net ~status:`Not_found "" in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.Anthropic
+        ~model_id:"test-model"
+        ~base_url:url
+        ~request_path:"/v1/messages?api_key=secret"
+        ~temperature:0.0
+        ~max_tokens:100
+        ()
+    in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+    | Ok _ -> fail "expected Error"
+    | Error (Http_client.HttpError { code; body = Http_client.Received body; _ }) ->
+      check int "status 404" 404 code;
+      check
+        string
+        "diagnostic body"
+        (Printf.sprintf
+           "empty HTTP 404 response from provider=anthropic model=test-model base_url=%s \
+            request_path=/v1/messages url=%s/v1/messages"
+           url
+           url)
+        body;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected HttpError"
+  with
+  | Exit -> ()
+;;
+
+(* ── complete: Openai compat ─────────────────────────── *)
+
+let test_complete_openai_ok () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net (openai_response "openai reply") in
+    let config = make_openai_config url in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+    | Ok resp ->
+      let text =
+        List.filter_map
+          (function
+            | Llm_provider.Types.Text s -> Some s
+            | _ -> None)
+          resp.content
+        |> String.concat ""
+      in
+      check string "text" "openai reply" text;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok for openai"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_openai_responses_sync_ok () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_mock_server ~sw ~net:env#net (openai_responses_tool_call_response ())
+    in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.OpenAI_compat
+        ~model_id:"gpt-5.5"
+        ~base_url:url
+        ~request_path:"/v1/responses"
+        ~temperature:0.0
+        ~max_tokens:100
+        ()
+    in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+    | Ok resp ->
+      check bool "stop tool use" true (resp.stop_reason = Types.StopToolUse);
+      (match resp.content with
+       | [ Types.Thinking { content; _ }; Types.ToolUse { id; name; input } ] ->
+         check string "reasoning" "Need a lookup." content;
+         check string "tool id" "call_lookup" id;
+         check string "tool name" "lookup" name;
+         check
+           string
+           "tool arg"
+           "weather"
+           (Yojson.Safe.Util.member "q" input |> Yojson.Safe.Util.to_string)
+       | _ -> fail "expected reasoning + tool use");
+      (match resp.telemetry with
+       | Some telemetry ->
+         check (option int) "reasoning tokens" (Some 3) telemetry.reasoning_tokens
+       | None -> fail "expected telemetry");
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok for OpenAI Responses sync"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_openai_responses_json_mode_body () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let captured = ref None in
+    let url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~capture_body:captured
+        (openai_responses_tool_call_response ())
+    in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.OpenAI_compat
+        ~model_id:"gpt-5.5"
+        ~base_url:url
+        ~request_path:"/v1/responses"
+        ~response_format:Types.JsonMode
+        ~temperature:0.0
+        ~max_tokens:100
+        ()
+    in
+    (match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+     | Ok _ -> ()
+     | Error _ -> fail "expected Ok for OpenAI Responses JSON mode");
+    match !captured with
+    | Some body ->
+      let json = Yojson.Safe.from_string body in
+      check
+        string
+        "responses text.format"
+        "json_object"
+        Yojson.Safe.Util.(
+          json |> member "text" |> member "format" |> member "type" |> to_string);
+      Eio.Switch.fail sw Exit
+    | None -> fail "server did not capture request body"
+  with
+  | Exit -> ()
+;;
+
+let start_responses_sse_server ~sw ~net ?capture_body response_body =
+  let port = fresh_port () in
+  let handler _conn _req body =
+    let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    Option.iter (fun seen -> seen := Some request_body) capture_body;
+    let headers = Cohttp.Header.of_list [ "content-type", "text/event-stream" ] in
+    Cohttp_eio.Server.respond_string ~status:`OK ~headers ~body:response_body ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:8
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+;;
+
+let openai_responses_sse_tool_call_response () =
+  "event: response.created\n\
+   data: \
+   {\"type\":\"response.created\",\"response\":{\"id\":\"resp-stream-1\",\"model\":\"gpt-5.5\",\"status\":\"in_progress\",\"usage\":null}}\n\n\
+   event: response.reasoning_summary_text.delta\n\
+   data: \
+   {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs_1\",\"output_index\":0,\"summary_index\":0,\"delta\":\"Need \
+   a lookup.\"}\n\n\
+   event: response.output_item.added\n\
+   data: \
+   {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_lookup\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n\
+   event: response.function_call_arguments.delta\n\
+   data: \
+   {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"item_id\":\"fc_1\",\"delta\":\"{\\\"q\\\":\\\"weather\\\"}\"}\n\n\
+   event: response.completed\n\
+   data: \
+   {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-stream-1\",\"model\":\"gpt-5.5\",\"status\":\"completed\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Need \
+   a \
+   lookup.\"}],\"encrypted_content\":\"enc_reasoning_1\"},{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_lookup\",\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"weather\\\"}\"}],\"usage\":{\"input_tokens\":12,\"output_tokens\":8,\"input_tokens_details\":{\"cached_tokens\":2}}}}\n\n"
+;;
+
+let test_complete_stream_openai_responses_ok () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_responses_sse_server
+        ~sw
+        ~net:env#net
+        (openai_responses_sse_tool_call_response ())
+    in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.OpenAI_compat
+        ~model_id:"gpt-5.5"
+        ~base_url:url
+        ~request_path:"/v1/responses"
+        ~temperature:0.0
+        ~max_tokens:100
+        ()
+    in
+    let events = ref [] in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config
+        ~messages
+        ~on_event:(fun evt -> events := evt :: !events)
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Ok resp ->
+      check string "stream id" "resp-stream-1" resp.id;
+      check bool "stop tool use" true (resp.stop_reason = Types.StopToolUse);
+      check bool "events emitted" true (List.length !events >= 5);
+      check bool "explicit final reasoning snapshot delivered" true
+        (List.exists
+           (function
+             | Types.ContentBlockDelta
+                 { index = 0; delta = Types.RedactedThinkingSnapshot _ } -> true
+             | _ -> false)
+           !events);
+      (match resp.content with
+       | [ Types.RedactedThinking raw_reasoning; Types.ToolUse { id; name; input } ] ->
+         let reasoning = Yojson.Safe.from_string raw_reasoning in
+         check
+           string
+           "reasoning type"
+           "reasoning"
+           (Yojson.Safe.Util.member "type" reasoning |> Yojson.Safe.Util.to_string);
+         check
+           string
+           "encrypted reasoning"
+           "enc_reasoning_1"
+           (Yojson.Safe.Util.member "encrypted_content" reasoning
+            |> Yojson.Safe.Util.to_string);
+         check string "tool id" "call_lookup" id;
+         check string "tool name" "lookup" name;
+         check
+           string
+           "tool arg"
+           "weather"
+           (Yojson.Safe.Util.member "q" input |> Yojson.Safe.Util.to_string)
+       | _ -> fail "expected redacted reasoning + tool use");
+      (match resp.usage with
+       | Some usage ->
+         check int "input tokens" 12 usage.input_tokens;
+         check int "output tokens" 8 usage.output_tokens;
+         check int "cached tokens" 2 usage.cache_read_input_tokens
+       | None -> fail "expected usage");
+      Eio.Switch.fail sw Exit
+    | Error error ->
+      failf "expected Ok for Responses streaming, got %s"
+        (match error with
+         | Http_client.NetworkError { message; _ }
+         | Http_client.TimeoutError { message; _ }
+         | Http_client.ProviderTerminal { message; _ }
+         | Http_client.ProviderFailure { message; _ } -> message
+         | Http_client.HttpError { code; body; _ } ->
+           Printf.sprintf "HTTP %d: %s" code (Http_client.refusal_body_text body)
+         | Http_client.AcceptRejected { reason } -> reason)
+  with
+  | Exit -> ()
+;;
+
+let test_complete_trace_context_headers () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let seen = ref None in
+    let url =
+      start_header_capture_server ~sw ~net:env#net ~seen (anthropic_response "ok")
+    in
+    let config =
+      { (make_config url) with
+        Provider_config.headers = [ "traceparent", "stale"; "x-custom", "yes" ]
+      }
+    in
+    let trace_context =
+      [ "traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"
+      ; "tracestate", "vendor=value"
+      ]
+    in
+    (match (Complete.complete ~sw ~net:env#net ~config ~messages ~trace_context ()).Llm_provider.Completion_outcome.result with
+     | Ok _ -> ()
+     | Error _ -> fail "expected Ok");
+    match !seen with
+    | Some (traceparent, tracestate, custom) ->
+      check
+        (option string)
+        "traceparent"
+        (Some "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01")
+        traceparent;
+      check (option string) "tracestate" (Some "vendor=value") tracestate;
+      check (option string) "custom header preserved" (Some "yes") custom;
+      Eio.Switch.fail sw Exit
+    | None -> fail "server did not capture headers"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_openai_mlx_vlm_telemetry () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~delay_sec:0.02
+        ~clock
+        (openai_mlx_vlm_response "mlx reply")
+    in
+    let config = make_openai_config url in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+    | Ok resp ->
+      let text =
+        List.filter_map
+          (function
+            | Llm_provider.Types.Text s -> Some s
+            | _ -> None)
+          resp.content
+        |> String.concat ""
+      in
+      check string "text" "mlx reply" text;
+      (match resp.usage with
+       | Some usage ->
+         check int "input_tokens" 11 usage.input_tokens;
+         check int "output_tokens" 5 usage.output_tokens
+       | None -> fail "expected usage");
+      (match resp.telemetry with
+       | Some t ->
+         check
+           bool
+           "latency patched"
+           true
+           (Option.value ~default:0 t.request_latency_ms > 0);
+         check (option string) "canonical model id" (Some "gpt-4") t.canonical_model_id;
+         check (option (float 0.001)) "peak memory" (Some 52.66) t.peak_memory_gb;
+         (match t.timings with
+          | Some timings ->
+            check
+              (option (float 0.001))
+              "prompt tps"
+              (Some 21.55)
+              timings.prompt_per_second;
+            check
+              (option (float 0.001))
+              "generation tps"
+              (Some 81.56)
+              timings.predicted_per_second
+          | None -> fail "expected timings")
+       | None -> fail "expected telemetry");
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok for mlx-vlm openai compat"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_sync_latency_uses_injected_clock () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 10.0;
+    let url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~on_request:(fun () -> Eio_mock.Clock.set_time clock 11.25)
+        (anthropic_response "clocked")
+    in
+    let config = make_config url in
+    match (Complete.complete ~sw ~net:env#net ~clock ~config ~messages ()).Llm_provider.Completion_outcome.result with
+    | Ok resp ->
+      (match resp.telemetry with
+       | Some telemetry ->
+         check
+           (option int)
+           "latency from injected clock"
+           (Some 1250)
+           telemetry.request_latency_ms
+       | None -> fail "expected telemetry");
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+let test_latency_counter_clamps_negative_injected_clock () =
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 10.0;
+  let counter = Complete_common.start_latency_counter ~clock () in
+  Eio_mock.Clock.set_time clock 9.0;
+  check (option int) "latency clamped" (Some 0) (Complete_common.latency_ms_int counter)
+;;
+
+(* ── complete with cache ─────────────────────────────── *)
+
+let test_complete_cache_store_and_hit () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let received = ref None and requests = ref 0 in
+    let url = start_mock_server ~sw ~net:env#net ~capture_body:received
+        ~on_request:(fun () -> incr requests) (anthropic_response "cached") in
+    let config = make_config url in
+    let store : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 4 in
+    let cache : Cache.t =
+      { get = (fun ~key -> Hashtbl.find_opt store key)
+      ; set = (fun ~key ~ttl_sec:_ value -> Hashtbl.replace store key value)
+      }
+    in
+    let first = Complete.complete ~sw ~net:env#net ~config ~messages ~cache () in
+    (match first.result with
+     | Ok _ -> check bool "stored in cache" true (Hashtbl.length store > 0)
+     | Error _ -> fail "expected Ok first call");
+    let second = Complete.complete ~sw ~net:env#net ~config ~messages ~cache () in
+    (match first.request_provenance, second.request_provenance with
+     | Completion_outcome.Serialized sent, Completion_outcome.Cache_reused lookup ->
+       check string "cache lookup uses same body digest" sent.body_sha256 lookup.body_sha256;
+       check bool "cache lookup preserves exact output decision" true
+         (sent.output_token_receipt = lookup.output_token_receipt);
+       let body = match !received with Some body -> body
+         | None -> fail "cache miss never reached peer" in
+       check string "public miss describes actual peer body"
+         Agent_core_sha256.(digest_string body |> to_hex) sent.body_sha256
+     | (Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+       | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved), _
+     | Completion_outcome.Serialized _, (Completion_outcome.Not_serialized
+       | Completion_outcome.Serialized _ | Completion_outcome.External_unobserved
+       | Completion_outcome.Interrupted_unobserved) ->
+       fail "cache reuse must be distinct from a dispatched request");
+    check int "cache hit made no second HTTP request" 1 !requests;
+    match second.result with
+    | Ok resp ->
+      let text =
+        List.filter_map
+          (function
+            | Llm_provider.Types.Text s -> Some s
+            | _ -> None)
+          resp.content
+        |> String.concat ""
+      in
+      check string "from cache" "cached" text;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok second call"
+  with
+  | Exit -> ()
+;;
+
+let with_response_cache_server ?(response_body = anthropic_response "cached") f =
+  Eio_main.run @@ fun env ->
+  try
+    Eio.Switch.run @@ fun sw ->
+    let captured = ref None in
+    let bodies = ref [] in
+    let url = start_mock_server ~sw ~net:env#net ~capture_body:captured
+        ~on_request:(fun () -> bodies := Option.get !captured :: !bodies) response_body in
+    let store = Hashtbl.create 4 in
+    let cache : Cache.t =
+      { get = (fun ~key -> Hashtbl.find_opt store key)
+      ; set = (fun ~key ~ttl_sec value ->
+          check int "response cache TTL is unchanged" Constants.Cache.default_ttl_sec ttl_sec;
+          Hashtbl.replace store key value)
+      } in
+    f ~sw ~net:env#net ~url ~cache ~bodies;
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let with_response_cache_catalog f =
+  let previous = Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    match previous with
+    | Some catalog -> Model_catalog.set_global catalog
+    | None -> Model_catalog.clear_global ()) f
+;;
+
+let response_cache_catalog ~ceiling ~replay =
+  match Model_catalog.of_toml_string ~source:"response cache projection fixture"
+      (Printf.sprintf {|[[models]]
+model_id = "response-cache-model"
+base = "anthropic"
+max_context_tokens = 4096
+max_output_tokens = %d
+reasoning_replay = "%s"
+|} ceiling replay) with
+  | Ok catalog -> catalog
+  | Error detail -> fail detail
+;;
+
+let require_cached_response = function
+  | Ok response -> response
+  | Error _ -> fail "response-cache completion failed"
+;;
+
+let test_response_cache_tracks_catalog_defaults () =
+  with_response_cache_catalog @@ fun () ->
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
+  let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
+      ~base_url:url ~request_path:"/v1/messages" () in
+  let run () = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
+  ignore (run ());
+  Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"preserve_always");
+  ignore (run ());
+  ignore (run ());
+  check int "changed resolved body misses; identical body hits" 2 (List.length !bodies);
+  let ceilings = List.rev !bodies |> List.map (fun body ->
+    Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "max_tokens" |> to_int)) in
+  check (list int) "each dispatched body has its own resolved ceiling" [64;16] ceilings
+;;
+
+let test_response_cache_tracks_reasoning_source_projection () =
+  with_response_cache_catalog @@ fun () ->
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
+  let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
+      ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
+  let source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
+  let foreign = Reasoning_dialect.reasoning_source_for_provider_config
+      { config with model_id = "foreign-model" } |> Result.get_ok in
+  let prior_content =
+    [ Types.Thinking { signature = Some "opaque-signed-history"; content = "prior reasoning" }
+    ; Types.Text "prior answer" ] in
+  (* The producing request had no earlier history, so the digest the record
+     side stamps is the one over an empty message list. The foreign case keeps
+     it, so only the reasoning source differs between the two histories. *)
+  let prefix_metadata =
+    match
+      Backend_anthropic.transmitted_reasoning_prefix
+        ~config ~messages:[] ~tools:[] ~response_content:prior_content ()
+    with
+    | Some prefix -> Types.Reasoning_prefix.metadata prefix
+    | None -> fail "the producing request records no reasoning prefix"
+  in
+  let history metadata : Types.message list =
+    [ { (Types.assistant_msg "prior answer") with metadata; content = prior_content }
+    ; Types.user_msg "continue" ] in
+  let matching = history (Types.Reasoning_source.metadata source @ prefix_metadata) in
+  let mismatching = history (Types.Reasoning_source.metadata foreign @ prefix_metadata) in
+  check bool "canonical content alone cannot distinguish source" true
+    (List.map Api_common.message_to_json matching = List.map Api_common.message_to_json mismatching);
+  let run messages = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
+  ignore (run matching);
+  ignore (run mismatching);
+  ignore (run (history []));
+  ignore (run matching);
+  check int "source changes miss; identical projected bodies hit" 2 (List.length !bodies);
+  let has_thinking body =
+    let open Yojson.Safe.Util in
+    Yojson.Safe.from_string body |> member "messages" |> to_list
+    |> List.exists (fun message -> message |> member "content" |> to_list
+       |> List.exists (fun block -> member "type" block = `String "thinking")) in
+  check (list bool) "matching source keeps signed history; foreign or absent source strips it"
+    [true;false] (List.rev_map has_thinking !bodies)
+;;
+
+let test_response_cache_does_not_restamp_cached_reasoning () =
+  with_response_cache_catalog @@ fun () ->
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  let response_body = {|{"id":"cached-reasoning","type":"message","role":"assistant","model":"response-cache-model","content":[{"type":"thinking","thinking":"original reasoning","signature":"original-signature"},{"type":"text","text":"answer"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}|} in
+  with_response_cache_server ~response_body @@ fun ~sw ~net ~url ~cache ~bodies ->
+  let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
+      ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
+  let run () = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
+  let original = run () in
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"no_replay");
+  let current_source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
+  let cached = run () in
+  check int "unchanged effective body reuses the stored response" 1 (List.length !bodies);
+  check bool "cached signed content is unchanged" true (cached.content = original.content);
+  (* A hit replays the original call's telemetry, including its reasoning
+     source, but not the three latency figures: they describe a network round
+     trip this call never made (#42728). *)
+  let without_latency (t : Types.inference_telemetry) =
+    { t with request_latency_ms = None; ttfrc_ms = None; prefill_ms = None } in
+  check bool "the stored call measured a network latency" true
+    (match original.telemetry with
+     | Some t -> Option.is_some t.request_latency_ms
+     | None -> false);
+  check bool "a hit carries no latency of its own" true
+    (match cached.telemetry with
+     | Some t -> t = without_latency t
+     | None -> false);
+  check bool "cache retains original telemetry apart from latency" true
+    (cached.telemetry = Option.map without_latency original.telemetry);
+  let original_source = Option.bind original.telemetry (fun telemetry -> telemetry.reasoning_source)
+      |> Option.get in
+  check bool "fixture changed the current source" false
+    (Types.Reasoning_source.equal original_source current_source);
+  let assistant = match Types.assistant_message_of_response cached with
+    | Ok message -> message
+    | Error error -> fail (Types.show_assistant_message_error error) in
+  match Types.Reasoning_source.classify assistant.metadata with
+  | Present actual -> check bool "cached reasoning keeps its original source" true
+      (Types.Reasoning_source.equal original_source actual)
+  | Absent | Invalid | Duplicate -> fail "cached reasoning lost its original source"
+;;
+
+let test_response_cache_reuses_admitted_body_without_dispatch_on_hit () =
+  with_response_cache_catalog @@ fun () ->
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
+  let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
+      ~base_url:url ~request_path:"/v1/messages" () in
+  let serialized = Complete.prepare_request ~config ~messages ()
+      |> Complete.admit_request_body ~stream:false |> Result.get_ok in
+  Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"no_replay");
+  let observations = ref [] in
+  let observer observation = observations := observation :: !observations; Ok () in
+  let run () = (Complete.complete_serialized ~sw ~net serialized ~cache
+      ~request_wire_observer:observer ()).Llm_provider.Completion_outcome.result |> require_cached_response in
+  ignore (run ());
+  ignore (run ());
+  check int "admitted body cache hit does not dispatch" 1 (List.length !bodies);
+  check int "admitted body cache hit does not emit a dispatch observation" 1 (List.length !observations);
+  let body = List.hd !bodies in
+  check int "dispatch reuses the previously admitted 64-token body" 64
+    Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "max_tokens" |> to_int);
+  let observation = List.hd !observations in
+  let observed = Request_wire_observer.observation ~capture_id:None ~provider:observation.provider
+      ~model:observation.model ~http_codec:observation.http_codec ~stream:false ~body in
+  check string "dispatch evidence matches the cached body" observed.body_sha256 observation.body_sha256
+;;
+
+(* ── complete with metrics ───────────────────────────── *)
+
+let test_complete_metrics () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net (anthropic_response "metrics test") in
+    let config = make_config url in
+    let hit_count = ref 0 in
+    let miss_count = ref 0 in
+    let start_count = ref 0 in
+    let end_count = ref 0 in
+    let status_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_cache_hit = (fun ~model_id:_ -> incr hit_count)
+      ; on_cache_miss = (fun ~model_id:_ -> incr miss_count)
+      ; on_request_start = (fun ~model_id:_ -> incr start_count)
+      ; on_request_end = (fun ~model_id:_ ~latency_ms:_ -> incr end_count)
+      ; on_error = (fun ~model_id:_ ~message:_ ~reason:_ -> ())
+      ; on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    (* No cache provided → on_cache_miss not called *)
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
+    | Ok _ ->
+      check int "no cache = no miss" 0 !miss_count;
+      check int "start" 1 !start_count;
+      check int "end" 1 !end_count;
+      check int "no hit" 0 !hit_count;
+      (* on_http_status fired once with the actual 200 code *)
+      check int "status callback count" 1 (List.length !status_calls);
+      (match !status_calls with
+       | [ (_, _, code) ] -> check int "status code" 200 code
+       | _ -> fail "expected exactly one status call");
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_tool_call_metrics () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net (ollama_tool_call_response ()) in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.Ollama
+        ~model_id:"qwen3:8b"
+        ~base_url:url
+        ~request_path:"/api/chat"
+        ~temperature:0.0
+        ~max_tokens:100
+        ()
+    in
+    let tool_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_tool_calls =
+          (fun ~provider ~model_id ~count ->
+            tool_calls := (provider, model_id, count) :: !tool_calls)
+      }
+    in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
+    | Ok resp ->
+      check bool "stop tool use" true (resp.stop_reason = Types.StopToolUse);
+      (match !tool_calls with
+       | [ (provider, model_id, count) ] ->
+         check string "provider" "ollama" provider;
+         check string "model" "qwen3:8b" model_id;
+         check int "tool call count" 2 count
+       | _ -> fail "expected one tool-call metric");
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+(* ── complete: 401 non-retryable ─────────────────────── *)
+
+let test_complete_non_retryable () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net ~status:`Unauthorized "unauthorized" in
+    let config = make_config url in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+    | Ok _ -> fail "expected Error"
+    | Error (Http_client.HttpError { code; _ }) ->
+      check int "401" 401 code;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected HttpError"
+  with
+  | Exit -> ()
+;;
+
+(* ── complete: error metrics ─────────────────────────── *)
+
+let test_complete_error_metrics () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net ~status:`Bad_request "bad" in
+    let config = make_config url in
+    let error_count = ref 0 in
+    let status_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_cache_hit = (fun ~model_id:_ -> ())
+      ; on_cache_miss = (fun ~model_id:_ -> ())
+      ; on_request_start = (fun ~model_id:_ -> ())
+      ; on_request_end = (fun ~model_id:_ ~latency_ms:_ -> ())
+      ; on_error = (fun ~model_id:_ ~message:_ ~reason:_ -> incr error_count)
+      ; on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
+    | Ok _ -> fail "expected Error"
+    | Error _ ->
+      check int "error callback" 1 !error_count;
+      (* 400 HTTP response must also emit on_http_status before error fires *)
+      check int "status callback count" 1 (List.length !status_calls);
+      (match !status_calls with
+       | [ (_, _, 400) ] -> ()
+       | [ (_, _, code) ] -> fail (Printf.sprintf "expected 400, got %d" code)
+       | _ -> fail "expected exactly one status call");
+      Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_http_error_metrics_uses_fallback () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net ~status:`Bad_request "bad stream" in
+    let config = make_config url in
+    let status_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    (match
+       Complete_stream.complete_stream_http
+         ~sw
+         ~net:env#net
+         ~metrics
+         ~config
+         ~messages
+         ~tools:[]
+         ~on_event:(fun _ -> ())
+         ()
+       |> fun outcome -> outcome.Completion_outcome.result
+     with
+     | Error (Http_client.HttpError { code = 400; _ }) -> ()
+     | Error _ -> fail "expected streaming HTTP 400"
+     | Ok _ -> fail "expected streaming HTTP error");
+    (match !status_calls with
+     | [ ("anthropic", "test-model", 400) ] -> ()
+     | [ (_, _, status) ] -> fail (Printf.sprintf "expected 400, got %d" status)
+     | _ -> fail "expected exactly one direct streaming status call");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_transport_http_metrics_ok () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let config = make_openai_config "http://unused.test" in
+    let status_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    let transport = make_transport (Ok (mock_transport_response "transport ok")) in
+    match (Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
+    | Ok _ ->
+      (match !status_calls with
+       | [ ("openai_compat", "gpt-4", 200) ] -> Eio.Switch.fail sw Exit
+       | [ (_, _, code) ] -> fail (Printf.sprintf "expected 200, got %d" code)
+       | _ -> fail "expected exactly one transport status call")
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_transport_http_metrics_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let config = make_openai_config "http://unused.test" in
+    let status_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    let transport =
+      make_transport
+        (Error
+           (Http_client.HttpError
+              { code = 429; body = Http_client.Received "rate limited"; retry_after_header = None }))
+    in
+    match (Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
+    | Ok _ -> fail "expected Error"
+    | Error (Http_client.HttpError { code; _ }) ->
+      check int "status 429" 429 code;
+      (match !status_calls with
+       | [ ("openai_compat", "gpt-4", 429) ] -> Eio.Switch.fail sw Exit
+       | [ (_, _, seen) ] -> fail (Printf.sprintf "expected 429, got %d" seen)
+       | _ -> fail "expected exactly one transport status call")
+    | Error _ -> fail "expected HttpError"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_transport_mock_emits_status () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.Anthropic
+        ~model_id:"codex-mini"
+        ~base_url:""
+        ()
+    in
+    let hits = ref 0 in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> incr hits)
+      }
+    in
+    let transport = make_transport (Ok (mock_transport_response "cli ok")) in
+    match (Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
+    | Ok _ ->
+      check int "mock transport emits status" 1 !hits;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+(* ── Global metrics registry ──────────────────────────── *)
+
+let test_metrics_global_default_is_noop () =
+  let g = Metrics.get_global () in
+  (* Default state: the noop callbacks should not raise and should be
+     distinguishable by reference from a custom instance below. *)
+  g.on_cache_hit ~model_id:"m";
+  g.on_request_end ~model_id:"m" ~latency_ms:(Some 1);
+  g.on_http_status ~provider:"ollama" ~model_id:"m" ~status:200;
+  (* No side effects observable. *)
+  check bool "default global accepts noop calls" true true
+;;
+
+let test_metrics_global_set_and_get () =
+  let hits = ref 0 in
+  let previous = Metrics.get_global () in
+  (* Fun.protect guarantees the global is restored even if a check
+     assertion raises inside the body, preventing cross-test pollution
+     through the shared process-wide sink. *)
+  Fun.protect
+    ~finally:(fun () -> Metrics.set_global previous)
+    (fun () ->
+       let custom : Metrics.t =
+         { Metrics.noop with
+           on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> incr hits)
+         }
+       in
+       Metrics.set_global custom;
+       let g = Metrics.get_global () in
+       g.on_http_status ~provider:"ollama" ~model_id:"m" ~status:429;
+       g.on_http_status ~provider:"glm" ~model_id:"m" ~status:429;
+       check int "global metric fired twice" 2 !hits)
+;;
+
+let test_metrics_global_used_when_no_per_call_metrics () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_mock_server ~sw ~net:env#net (anthropic_response "global metrics test")
+    in
+    let config = make_config url in
+    let status_calls = ref [] in
+    let previous = Metrics.get_global () in
+    let bridge : Metrics.t =
+      { Metrics.noop with
+        on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    Metrics.set_global bridge;
+    Fun.protect
+      ~finally:(fun () -> Metrics.set_global previous)
+      (fun () ->
+         (* Deliberately do NOT pass ~metrics — global should take effect. *)
+         match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+         | Ok _ ->
+           check int "global on_http_status fired once" 1 (List.length !status_calls);
+           Eio.Switch.fail sw Exit
+         | Error _ -> fail "expected Ok")
+  with
+  | Exit -> ()
+;;
+
+(* ── complete_stream: SSE ─────────────────────────────── *)
+
+let anthropic_sse_response text =
+  Printf.sprintf
+    "event: message_start\n\
+     data: \
+     {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"mock\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
+     event: content_block_start\n\
+     data: \
+     {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+     event: content_block_delta\n\
+     data: \
+     {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"%s\"}}\n\n\
+     event: content_block_stop\n\
+     data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+     event: message_delta\n\
+     data: \
+     {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n\
+     event: message_stop\n\
+     data: {\"type\":\"message_stop\"}\n\n"
+    text
+;;
+
+let anthropic_sse_thinking_signature_tool_response =
+  "event: message_start\n\
+   data: \
+   {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"mock\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
+   event: content_block_start\n\
+   data: \
+   {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}\n\n\
+   event: content_block_delta\n\
+   data: \
+   {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Need \
+   a lookup.\"}}\n\n\
+   event: content_block_delta\n\
+   data: \
+   {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_opaque\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+   event: content_block_start\n\
+   data: \
+   {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tu_1\",\"name\":\"lookup\",\"input\":{}}}\n\n\
+   event: content_block_delta\n\
+   data: \
+   {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"weather\\\"}\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":1}\n\n\
+   event: message_delta\n\
+   data: \
+   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":5}}\n\n\
+   event: message_stop\n\
+   data: {\"type\":\"message_stop\"}\n\n"
+;;
+
+let anthropic_sse_frame_message_start =
+  "event: message_start\n\
+   data: \
+   {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"mock\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n"
+;;
+
+let anthropic_sse_frame_content_block_start =
+  "event: content_block_start\n\
+   data: \
+   {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+;;
+
+let anthropic_sse_frame_delta text =
+  Printf.sprintf
+    "event: content_block_delta\n\
+     data: \
+     {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"%s\"}}\n\n"
+    text
+;;
+
+let anthropic_sse_frame_block_stop =
+  "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+;;
+
+let anthropic_sse_frame_usage_only =
+  "event: message_delta\n\
+   data: \
+   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
+;;
+
+let anthropic_sse_frame_message_stop = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+(* The tail every Anthropic turn ends with, in the order the wire sends it. *)
+let anthropic_sse_frame_stop =
+  anthropic_sse_frame_block_stop ^ anthropic_sse_frame_usage_only ^ anthropic_sse_frame_message_stop
+;;
+
+let anthropic_sse_frame_thinking_block_start =
+  "event: content_block_start\n\
+   data: \
+   {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
+;;
+
+let anthropic_sse_frame_thinking_delta text =
+  Printf.sprintf
+    "event: content_block_delta\n\
+     data: \
+     {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"%s\"}}\n\n"
+    text
+;;
+
+(* Thinking-only prelude (block 0) followed by a deliverable text answer
+   (block 1). Used by the mock-clock cutoff tests: the cutoff must fire
+   while still inside the block-0 thinking deltas, and the trailing text
+   answer lets the no-advance control finalize [Ok]. *)
+let anthropic_thinking_then_answer_frames ~frame_gap_s =
+  [ 0.0, anthropic_sse_frame_message_start
+  ; frame_gap_s, anthropic_sse_frame_thinking_block_start
+  ; frame_gap_s, anthropic_sse_frame_thinking_delta "t1"
+  ; frame_gap_s, anthropic_sse_frame_thinking_delta "t2"
+  ; frame_gap_s, anthropic_sse_frame_thinking_delta "t3"
+  ; ( frame_gap_s
+    , "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+    )
+  ; ( frame_gap_s
+    , "event: content_block_start\n\
+       data: \
+       {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+    )
+  ; ( frame_gap_s
+    , "event: content_block_delta\n\
+       data: \
+       {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"answer\"}}\n\n"
+    )
+  ; ( frame_gap_s
+    , "event: content_block_stop\n\
+       data: {\"type\":\"content_block_stop\",\"index\":1}\n\n\
+       event: message_delta\n\
+       data: \
+       {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n\
+       event: message_stop\n\
+       data: {\"type\":\"message_stop\"}\n\n" )
+  ]
+;;
+
+let read_http_request flow =
+  let reader = Eio.Buf_read.of_flow flow ~max_size:8192 in
+  let _request_line = Eio.Buf_read.line reader in
+  let rec read_headers content_length =
+    match Eio.Buf_read.line reader with
+    | "" -> content_length
+    | line ->
+      let lower = String.lowercase_ascii line in
+      let content_length =
+        if String.starts_with ~prefix:"content-length:" lower
+        then (
+          let value = String.sub line 15 (String.length line - 15) |> String.trim in
+          match int_of_string_opt value with
+          | Some n -> n
+          | None -> content_length)
+        else content_length
+      in
+      read_headers content_length
+    | exception End_of_file -> content_length
+  in
+  let content_length = read_headers 0 in
+  if content_length > 0 then ignore (Eio.Buf_read.take content_length reader : string)
+;;
+
+let start_raw_sync_server ~sw ~net ~clock ~body_delay_sec response_body =
+  let port = fresh_port () in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:8
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Net.accept_fork
+      ~sw
+      socket
+      ~on_error:(fun _ -> ())
+      (fun flow _addr ->
+         try
+           read_http_request flow;
+           Eio.Flow.copy_string
+             (Printf.sprintf
+                "HTTP/1.1 200 OK\r\n\
+                 Content-Type: application/json\r\n\
+                 Content-Length: %d\r\n\
+                 Connection: close\r\n\
+                 \r\n"
+                (String.length response_body))
+             flow;
+           Eio.Time.sleep clock body_delay_sec;
+           Eio.Flow.copy_string response_body flow
+         with
+         | _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+;;
+
+let start_raw_sse_server ~sw ~net ~clock delayed_frames =
+  let port = fresh_port () in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:8
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Net.accept_fork
+      ~sw
+      socket
+      ~on_error:(fun _ -> ())
+      (fun flow _addr ->
+         try
+           read_http_request flow;
+           Eio.Flow.copy_string
+             "HTTP/1.1 200 OK\r\n\
+              Content-Type: text/event-stream\r\n\
+              Connection: close\r\n\
+              \r\n"
+             flow;
+           List.iter
+             (fun (delay_sec, frame) ->
+                if delay_sec > 0.0 then Eio.Time.sleep clock delay_sec;
+                Eio.Flow.copy_string frame flow)
+             delayed_frames
+         with
+         | _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+;;
+
+(* Advance beyond both removed provider-kind defaults (60s cloud, 600s
+   Ollama) while the client is awaiting its first protocol line. [Connected]
+   proves the HTTP body callback has started before the controller jumps the
+   mock clock and releases the server body. *)
+let removed_provider_idle_defaults_upper_bound_s = 601.0
+
+let start_clock_jump_stream_server ~sw ~net ~release_body ~content_type body =
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:8
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> invalid_arg "expected a TCP listening socket"
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Net.accept_fork
+      ~sw
+      socket
+      ~on_error:(fun _ -> ())
+      (fun flow _addr ->
+         try
+           read_http_request flow;
+           Eio.Flow.copy_string
+             (Printf.sprintf
+                "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nConnection: close\r\n\r\n"
+                content_type)
+             flow;
+           Eio.Promise.await release_body;
+           Eio.Flow.copy_string body flow
+         with
+         | _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+;;
+
+let start_sse_server
+      ~sw
+      ~net
+      ?capture_body
+      ?capture_path
+      ?(content_type = "text/event-stream")
+      response_body
+  =
+  let port = fresh_port () in
+  let handler _conn req body =
+    let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    (match capture_body with
+     | Some seen -> seen := Some request_body
+     | None -> ());
+    (match capture_path with
+     | Some seen -> seen := Some (Cohttp.Request.uri req |> Uri.path)
+     | None -> ());
+    let headers = Cohttp.Header.of_list [ "content-type", content_type ] in
+    Cohttp_eio.Server.respond_string ~status:`OK ~headers ~body:response_body ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:8
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+;;
+
+let test_complete_stream_refused_frame_diagnostics () =
+  Eio_main.run @@ fun env ->
+  List.iter (fun format ->
+    let dir = Filename.temp_dir "stream-diagnostic" "" in
+    let path = Filename.concat dir "frames" in
+    let previous_setting = Sys.getenv_opt "MASC_WIRE_PARSE_DUMP" in
+    let set_destination = function
+      | None -> Unix.unsetenv "MASC_WIRE_PARSE_DUMP"
+      | Some destination -> Unix.putenv "MASC_WIRE_PARSE_DUMP" destination in
+    let read_dump () =
+      if Sys.file_exists path then In_channel.with_open_bin path In_channel.input_all
+      else "" in
+    Fun.protect
+      ~finally:(fun () ->
+        set_destination previous_setting;
+        if Sys.file_exists path then Sys.remove path;
+        Unix.rmdir dir)
+      (fun () ->
+        let run ~destination ~writes ~raw ~redacted ~verbatim =
+          set_destination destination;
+          let before = read_dump () in
+          try
+            Eio.Switch.run @@ fun sw ->
+            let content_type, body, config = match format with
+              | Http_client.Sse ->
+                  "text/event-stream", "data: " ^ raw ^ "\n\n", (fun url -> make_config url)
+              | Http_client.Ndjson ->
+                  "application/x-ndjson", raw ^ "\n",
+                  make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" in
+            let url = start_sse_server ~sw ~net:env#net ~content_type body in
+            let failures = ref [] in
+            let summaries = ref [] in
+            let on_event = function
+              | Types.SSEParseFailed { reason; raw } ->
+                  failures := (Http_client.Sse, reason, raw, read_dump ()) :: !failures
+              | Types.NDJSONParseFailed { reason; raw } ->
+                  failures := (Http_client.Ndjson, reason, raw, read_dump ()) :: !failures
+              | _ -> () in
+            let on_telemetry = function
+              | Telemetry_event.Streaming_summary { terminal; _ } ->
+                  summaries := (terminal, read_dump ()) :: !summaries
+              | _ -> () in
+            let message = match
+              (Complete.complete_stream ~sw ~net:env#net ~config:(config url)
+                ~messages ~on_event ~on_telemetry ()).Llm_provider.Completion_outcome.result
+            with
+              | Error (Http_client.ProviderFailure
+                  { kind = Http_client.Provider_wire_error
+                      { format = actual; kind = Http_client.Malformed_payload }; message }) ->
+                  check bool "diagnostic preserves the returned wire format" true (actual = format);
+                  message
+              | Error _ -> fail "diagnostic changed the typed malformed-frame error"
+              | Ok _ -> fail "malformed frame unexpectedly completed" in
+            let reason = match !failures with
+              | [(actual_format, reason, actual_raw, at_failure)] ->
+                  check bool "failure event preserves wire format" true (actual_format = format);
+                  check string "failure event retains the full raw frame" raw actual_raw;
+                  check string "failure event precedes diagnostic append" before at_failure;
+                  reason
+              | _ -> fail "expected exactly one malformed-frame event" in
+            let label = Http_client.provider_wire_format_to_string format in
+            let excerpt =
+              if String.length redacted <= 256 then redacted
+              else String.sub redacted 0 256 ^ "...(truncated)" in
+            check string "returned message keeps its redacted bounded excerpt"
+              (Printf.sprintf "%s parse failed: %s raw=%S"
+                (String.uppercase_ascii label) reason excerpt) message;
+            let expected =
+              if writes then
+                before ^ Printf.sprintf "%s\t%s\t%d\tverbatim=%b\t%s\n"
+                  (String.uppercase_ascii label) reason (String.length raw)
+                  verbatim (String.escaped redacted)
+              else before in
+            check string "one full diagnostic append, or no write when disabled/unavailable"
+              expected (read_dump ());
+            (match !summaries with
+             | [(terminal, at_summary)] ->
+                 check bool "terminal summary preserves the wire failure" true
+                   (terminal = Telemetry_event.Terminal_error (label ^ "_wire_error"));
+                 check string "terminal summary follows diagnostic append" expected at_summary
+             | _ -> fail "expected exactly one terminal summary");
+            Eio.Switch.fail sw Exit
+          with Exit -> ()
+        in
+        let raw = "{\"pad\":\"" ^ String.make 900 'x' in
+        run ~destination:None ~writes:false ~raw ~redacted:raw ~verbatim:true;
+        run ~destination:(Some "") ~writes:false ~raw ~redacted:raw ~verbatim:true;
+        check bool "disabled sink creates no diagnostic file" false (Sys.file_exists path);
+        run ~destination:(Some path) ~writes:true ~raw ~redacted:raw ~verbatim:true;
+        check int "new diagnostic file grants no group or other permissions" 0
+          ((Unix.stat path).st_perm land 0o077);
+        let raw =
+          "{\"authorization\":\"Bearer sk-live-abcdefghijklmnopqrstuvwxyz\",\"pad\":\""
+          ^ String.make 900 'x' in
+        let redacted =
+          "{\"authorization\":\"Bearer [REDACTED]\",\"pad\":\"" ^ String.make 900 'x' in
+        run ~destination:(Some path) ~writes:true ~raw ~redacted ~verbatim:false;
+        (* A directory fails even when tests run with elevated filesystem privileges. *)
+        run ~destination:(Some dir) ~writes:false ~raw ~redacted ~verbatim:false))
+    [Http_client.Sse; Http_client.Ndjson]
+;;
+
+let test_complete_injected_http_transport_preserves_stream_status_metrics () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_sse_server ~sw ~net:env#net (anthropic_sse_response "streamed") in
+    let transport = Complete.make_http_transport ~sw ~net:env#net () in
+    let status_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~transport
+         ~config:(make_config url)
+         ~messages
+         ~metrics
+         ~on_event:(fun _ -> ())
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Ok _ -> ()
+     | Error _ -> fail "expected injected HTTP transport stream to succeed");
+    check
+      (list (triple string string int))
+      "injected HTTP transport preserves response status"
+      [ "anthropic", "test-model", 200 ]
+      (List.rev !status_calls);
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let text_of_response (resp : Types.api_response) =
+  List.filter_map
+    (function
+      | Llm_provider.Types.Text s -> Some s
+      | _ -> None)
+    resp.content
+  |> String.concat ""
+;;
+
+let check_kimi_anthropic_request ~expected_path ~stream ~captured_body ~captured_path =
+  (match captured_path with
+   | Some path -> check string "Kimi request path" expected_path path
+   | None -> fail "server did not capture Kimi request path");
+  match captured_body with
+  | Some body ->
+    let json = Yojson.Safe.from_string body in
+    let open Yojson.Safe.Util in
+    check string "Kimi model" "kimi-for-coding" (json |> member "model" |> to_string);
+    check
+      string
+      "Anthropic top-level system"
+      "Kimi system"
+      (json |> member "system" |> to_string);
+    check bool "stream flag" stream (json |> member "stream" |> to_bool);
+    (match json |> member "stream_options" with
+     | `Null -> ()
+     | _ -> fail "Anthropic Messages request must not carry OpenAI stream_options")
+  | None -> fail "server did not capture Kimi request body"
+;;
+
+let test_complete_kimi_path_override_stays_anthropic_codec () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let captured_body = ref None in
+    let captured_path = ref None in
+    let url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~capture_body:captured_body
+        ~capture_path:captured_path
+        (anthropic_response "kimi sync")
+    in
+    let request_path = "/v1/chat/completions" in
+    (match
+       (Complete.complete
+         ~sw
+         ~net:env#net
+         ~config:(make_kimi_config ~request_path url)
+         ~messages
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Ok resp -> check string "Kimi sync text" "kimi sync" (text_of_response resp)
+     | Error _ -> fail "expected Kimi sync Anthropic Messages response to parse");
+    check_kimi_anthropic_request
+      ~expected_path:request_path
+      ~stream:false
+      ~captured_body:!captured_body
+      ~captured_path:!captured_path;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_kimi_anthropic_stream_codec () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let captured_body = ref None in
+    let captured_path = ref None in
+    let url =
+      start_sse_server
+        ~sw
+        ~net:env#net
+        ~capture_body:captured_body
+        ~capture_path:captured_path
+        (anthropic_sse_response "kimi stream")
+    in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_kimi_config url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Ok resp -> check string "Kimi stream text" "kimi stream" (text_of_response resp)
+     | Error _ -> fail "expected Kimi Anthropic Messages SSE response to parse");
+    check_kimi_anthropic_request
+      ~expected_path:"/v1/messages"
+      ~stream:true
+      ~captured_body:!captured_body
+      ~captured_path:!captured_path;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_request_wire_observer_sees_exact_stream_body () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let captured_body = ref None in
+    let observed = ref [] in
+    let http_events = ref [] in
+    let http_observer = Http_request_observer.create (fun event -> http_events := event :: !http_events; Ok ()) in
+    let url =
+      start_sse_server
+        ~sw
+        ~net:env#net
+        ~capture_body:captured_body
+        (anthropic_sse_response "observed stream")
+    in
+    let request_wire_observer observation =
+      observed := observation :: !observed;
+      Ok ()
+    in
+    (match
+       Http_request_observer.with_observer http_observer (fun () -> (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~capture_id:"stream-request-1"
+         ~request_wire_observer
+         ~config:(make_kimi_config url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ()).Llm_provider.Completion_outcome.result)
+     with
+     | Ok resp -> check string "stream response" "observed stream" (text_of_response resp)
+     | Error _ -> fail "request observation changed the streaming provider result");
+    (match !captured_body, !observed with
+     | Some body, [ observation ] ->
+       check_observed_request_metadata ~body http_events;
+       check
+         (option string)
+         "capture id"
+         (Some "stream-request-1")
+         observation.Request_wire_observer.capture_id;
+       check string "provider" "kimi" observation.provider;
+       check string "model" "kimi-for-coding" observation.model;
+       check string "codec" "anthropic-messages" observation.http_codec;
+       check bool "stream" true observation.stream;
+       check int "exact bytes" (String.length body) observation.body_bytes;
+       check
+         string
+         "exact digest"
+         Agent_core_sha256.(to_hex (digest_string body))
+         observation.body_sha256
+     | None, _ -> fail "SSE server did not capture the request body"
+     | Some _, _ -> fail "stream request observer was not invoked exactly once");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_openai_compatible_kimi_uses_openai_codec () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let captured_body = ref None in
+    let captured_path = ref None in
+    let url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~capture_body:captured_body
+        ~capture_path:captured_path
+        (openai_response "kimi openai")
+    in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.OpenAI_compat
+        ~model_id:"kimi-for-coding"
+        ~base_url:url
+        ~request_path:"/v1/chat/completions"
+        ~system_prompt:"Kimi OpenAI system"
+        ~max_tokens:100
+        ()
+    in
+    (match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+     | Ok resp -> check string "Kimi OpenAI text" "kimi openai" (text_of_response resp)
+     | Error _ -> fail "expected OpenAI-compatible Kimi response to parse");
+    (match !captured_path with
+     | Some path -> check string "Kimi OpenAI path" "/v1/chat/completions" path
+     | None -> fail "server did not capture OpenAI-compatible Kimi path");
+    (match !captured_body with
+     | Some body ->
+       let json = Yojson.Safe.from_string body in
+       let open Yojson.Safe.Util in
+       check bool "no Anthropic top-level system" true (json |> member "system" = `Null);
+       (match json |> member "messages" |> to_list with
+        | first_message :: _ ->
+          check
+            string
+            "OpenAI system message"
+            "system"
+            (first_message |> member "role" |> to_string)
+        | [] -> fail "OpenAI-compatible request omitted messages")
+     | None -> fail "server did not capture OpenAI-compatible Kimi body");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_ok () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server ~sw ~net:env#net (anthropic_sse_response "streamed text")
+    in
+    let config = make_config url in
+    let events = ref [] in
+    let on_event evt = events := evt :: !events in
+    match (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event ()).Llm_provider.Completion_outcome.result with
+    | Ok resp ->
+      let text =
+        List.filter_map
+          (function
+            | Llm_provider.Types.Text s -> Some s
+            | _ -> None)
+          resp.content
+        |> String.concat ""
+      in
+      check string "text" "streamed text" text;
+      check bool "events received" true (List.length !events > 0);
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_preserves_thinking_signature () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server ~sw ~net:env#net anthropic_sse_thinking_signature_tool_response
+    in
+    let config = make_config url in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Ok resp ->
+      check bool "stop tool use" true (resp.stop_reason = Types.StopToolUse);
+      (match resp.content with
+       | [ Types.Thinking { signature; content }; Types.ToolUse { id; name; input } ] ->
+         check bool "thinking signature" true (signature = Some "sig_opaque");
+         check string "thinking content" "Need a lookup." content;
+         check string "tool id" "tu_1" id;
+         check string "tool name" "lookup" name;
+         check
+           string
+           "tool arg"
+           "weather"
+           (Yojson.Safe.Util.member "q" input |> Yojson.Safe.Util.to_string)
+       | _ -> fail "expected thinking + tool use");
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_malformed_payload_is_wire_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_sse_server ~sw ~net:env#net "data: {not-json\n\n" in
+    let status_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_config url)
+         ~messages
+         ~metrics
+         ~on_event:(fun _ -> ())
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Error
+         (Http_client.ProviderFailure
+            { kind =
+                Http_client.Provider_wire_error
+                  { format = Http_client.Sse; kind = Http_client.Malformed_payload }
+            ; _
+            }) -> ()
+     | Error _ -> fail "expected typed malformed SSE payload"
+     | Ok _ -> fail "malformed SSE payload must not complete successfully");
+    (match !status_calls with
+     | [ ("anthropic", "test-model", 200) ] -> ()
+     | [ (_, _, status) ] -> fail (Printf.sprintf "expected 200, got %d" status)
+     | _ -> fail "expected exactly one status call for malformed SSE");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* A structurally valid provider error envelope is NOT a wire failure. The
+   summary used to say [sse_wire_error] while the returned error said
+   [Provider_reported_error] — the two halves of the same stream disagreed. *)
+let test_complete_provider_error_envelope_is_not_a_wire_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server
+        ~sw
+        ~net:env#net
+        "data: {\"error\":{\"type\":\"rate_limit_exceeded\",\"message\":\"slow down\"}}\n\n"
+    in
+    let telemetry = ref [] in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_openai_config url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Error
+         (Http_client.ProviderFailure
+            { kind = Http_client.Provider_reported_error { error_type = Some _ }; _ }) ->
+       ()
+     | Error _ -> fail "expected a typed provider-reported error"
+     | Ok _ -> fail "a provider error envelope must not complete successfully");
+    let terminal =
+      List.find_map
+        (function
+          | Telemetry_event.Streaming_summary { terminal; _ } -> Some terminal
+          | _ -> None)
+        !telemetry
+    in
+    check
+      (option (testable Telemetry_event.pp_streaming_terminal ( = )))
+      "provider-reported envelope is not summarised as a wire failure"
+      (Some (Telemetry_event.Terminal_error "provider_stream_error"))
+      terminal;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* A provider condition declared inside the stream -- a mid-stream error whose
+   numeric code is 502 -- is returned as that [HttpError], with only the error
+   object as its body. The summary is labelled from the error returned, the
+   label any [HttpError] the stream returns gets, not [provider_stream_error],
+   which names a returned [Provider_reported_error]. *)
+let test_complete_declared_provider_condition_is_that_http_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server
+        ~sw
+        ~net:env#net
+        "data: {\"id\":\"c\",\"model\":\"m\",\"error\":{\"code\":502,\"message\":\"Provider disconnected\"},\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"error\"}]}\n\n"
+    in
+    let telemetry = ref [] in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_openai_config url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Error
+         (Http_client.HttpError
+            { code = 502; body = Http_client.Received body; retry_after_header = None }) ->
+       check
+         string
+         "the refusal body is the error object alone"
+         {|{"error":{"code":502,"message":"Provider disconnected"}}|}
+         body
+     | Error _ -> fail "expected the declared 502 as an HttpError"
+     | Ok _ -> fail "a mid-stream provider error must not complete successfully");
+    let terminal =
+      List.find_map
+        (function
+          | Telemetry_event.Streaming_summary { terminal; _ } -> Some terminal
+          | _ -> None)
+        !telemetry
+    in
+    check
+      (option (testable Telemetry_event.pp_streaming_terminal ( = )))
+      "the summary names the returned HttpError"
+      (Some (Telemetry_event.Terminal_error "sse_stream_error: HTTP 502"))
+      terminal;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_ollama_malformed_ndjson_is_wire_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server ~sw ~net:env#net ~content_type:"application/x-ndjson" "{not-json\n"
+    in
+    let telemetry = ref [] in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Error
+         (Http_client.ProviderFailure
+            { kind =
+                Http_client.Provider_wire_error
+                  { format = Http_client.Ndjson; kind = Http_client.Malformed_payload }
+            ; _
+            }) -> ()
+     | Error _ -> fail "expected typed malformed NDJSON payload"
+     | Ok _ -> fail "malformed NDJSON payload must not complete successfully");
+    let terminal =
+      List.find_map
+        (function
+          | Telemetry_event.Streaming_summary { terminal; _ } -> Some terminal
+          | _ -> None)
+        !telemetry
+    in
+    check
+      (option (testable Telemetry_event.pp_streaming_terminal ( = )))
+      "NDJSON telemetry keeps its wire format"
+      (Some (Telemetry_event.Terminal_error "ndjson_wire_error"))
+      terminal;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_ollama_provider_error_is_not_wire_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server
+        ~sw
+        ~net:env#net
+        ~content_type:"application/x-ndjson"
+        {|{"error":"model failed"}
+|}
+    in
+    let telemetry = ref [] in
+    let events = ref [] in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" url)
+         ~messages
+         ~on_event:(fun event -> events := event :: !events)
+         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Error
+         (Http_client.ProviderFailure
+            { kind = Http_client.Provider_reported_error { error_type = None }; _ }) -> ()
+     | Error _ -> fail "expected a typed provider-reported error"
+     | Ok _ -> fail "a provider error envelope must not complete successfully");
+    let ndjson_errors =
+      List.filter_map
+        (function
+          | Types.NDJSONError { message; error_type = None; raw } -> Some (message, raw)
+          | Types.NDJSONError { error_type = Some _; _ } -> None
+          | _ -> None)
+        !events
+    in
+    check
+      bool
+      "Ollama provider error is not relabelled as SSE"
+      true
+      (not
+         (List.exists
+            (function
+              | Types.SSEError _ -> true
+              | _ -> false)
+            !events));
+    (match ndjson_errors with
+     | [ (message, raw) ] ->
+       check string "NDJSON provider error message" "model failed" message;
+       check string "NDJSON provider error raw" {|{"error":"model failed"}|} raw
+     | _ -> fail "Ollama provider error must remain exactly one NDJSON event");
+    let terminal =
+      List.find_map
+        (function
+          | Telemetry_event.Streaming_summary { terminal; _ } -> Some terminal
+          | _ -> None)
+        !telemetry
+    in
+    check
+      (option (testable Telemetry_event.pp_streaming_terminal ( = )))
+      "provider error telemetry is not a wire failure"
+      (Some (Telemetry_event.Terminal_error "provider_stream_error"))
+      terminal;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_ollama_missing_required_ndjson_field_is_wire_error () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server
+        ~sw
+        ~net:env#net
+        ~content_type:"application/x-ndjson"
+        {|{"model":"test-model","message":{"role":"assistant","content":"before"},"done":false}
+{}
+{"model":"test-model","message":{"role":"assistant","content":"after"},"done":true,"done_reason":"stop"}
+|}
+    in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ~on_telemetry:(fun _ -> ())
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Error
+         (Http_client.ProviderFailure
+            { kind =
+                Http_client.Provider_wire_error
+                  { format = Http_client.Ndjson; kind = Http_client.Malformed_payload }
+            ; _
+            }) -> ()
+     | Error _ -> fail "expected typed malformed NDJSON payload"
+     | Ok _ -> fail "missing required NDJSON field must not complete successfully");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_ollama_incomplete_ndjson_preserves_wire_format () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server
+        ~sw
+        ~net:env#net
+        ~content_type:"application/x-ndjson"
+        {|{"model":"test-model","message":{"role":"assistant","content":"partial"},"done":false}
+|}
+    in
+    let telemetry = ref [] in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Error
+         (Http_client.ProviderFailure
+            { kind =
+                Http_client.Provider_wire_error
+                  { format = Http_client.Ndjson; kind = Http_client.Incomplete_stream }
+            ; _
+            }) -> ()
+     | Error _ -> fail "expected typed incomplete NDJSON stream"
+     | Ok _ -> fail "unterminated NDJSON stream must not complete successfully");
+    let terminal =
+      List.find_map
+        (function
+          | Telemetry_event.Streaming_summary { terminal; _ } -> Some terminal
+          | _ -> None)
+        !telemetry
+    in
+    check
+      (option (testable Telemetry_event.pp_streaming_terminal ( = )))
+      "incomplete NDJSON telemetry is not successful"
+      (Some (Telemetry_event.Terminal_error "ndjson_wire_error"))
+      terminal;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_on_event_exception_is_nonfatal () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server ~sw ~net:env#net (anthropic_sse_response "streamed text")
+    in
+    let config = make_config url in
+    let calls = ref 0 in
+    let on_event _evt =
+      incr calls;
+      failwith "stream observer failed"
+    in
+    match (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event ()).Llm_provider.Completion_outcome.result with
+    | Ok resp ->
+      check string "text" "streamed text" (text_of_response resp);
+      check bool "callback invoked" true (!calls > 0);
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_wire_observer_rejection_is_typed_nonfatal () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let token = "Authorization: Bearer opaque-token" in
+    let url = start_sse_server ~sw ~net:env#net (anthropic_sse_response token) in
+    let config = make_config url in
+    let observations = ref [] in
+    let telemetry = ref [] in
+    let wire_observer observation =
+      observations := observation :: !observations;
+      Error Wire_observer.{ reason = "caller queue unavailable" }
+    in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~capture_id:"request-wire-1"
+        ~wire_observer
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Error _ -> fail "wire observer rejection changed the provider result"
+    | Ok response ->
+      check string "provider response preserved" token (text_of_response response);
+      check bool "raw chunks were offered" true (List.length !observations > 0);
+      List.iter
+        (fun (observation : Wire_observer.observation) ->
+           check
+             (option string)
+             "exact capture id"
+             (Some "request-wire-1")
+             observation.capture_id;
+           check string "exact provider" "anthropic" observation.provider;
+           check string "exact model" "test-model" observation.model;
+           check
+             bool
+             "raw token absent"
+             false
+             (Agent_core_strings.contains_substring ~needle:token ~haystack:observation.redacted_chunk))
+        !observations;
+      check
+        bool
+        "redacted token observed"
+        true
+        (List.exists
+           (fun (observation : Wire_observer.observation) ->
+              Agent_core_strings.contains_substring ~needle:"[REDACTED]" ~haystack:observation.redacted_chunk)
+           !observations);
+      let failures =
+        List.filter_map
+          (function
+            | Telemetry_event.Wire_observer_failure failure -> Some failure
+            | _ -> None)
+          !telemetry
+      in
+      check
+        int
+        "one failure per rejected offer"
+        (List.length !observations)
+        (List.length failures);
+      List.iter
+        (fun (failure : Wire_observer.failure) ->
+           match failure.cause with
+           | Observer_rejected { reason } ->
+             check string "exact rejection" "caller queue unavailable" reason
+           | Observer_raised _ -> fail "rejection was relabelled as an exception")
+        failures;
+      Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_wire_failure_telemetry_exception_is_nonfatal () =
+  let diagnostics = ref [] in
+  Diag.with_sink
+    (fun _level ~ctx message -> diagnostics := (ctx, message) :: !diagnostics)
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       try
+         Eio.Switch.run
+         @@ fun sw ->
+         let url =
+           start_sse_server ~sw ~net:env#net (anthropic_sse_response "streamed text")
+         in
+         let config = make_config url in
+         let observer_calls = ref 0 in
+         let wire_observer _observation =
+           incr observer_calls;
+           failwith "wire observer unavailable"
+         in
+         let on_telemetry = function
+           | Telemetry_event.Wire_observer_failure _ ->
+             failwith "telemetry observer unavailable"
+           | _ -> ()
+         in
+         (match
+            (Complete.complete_stream
+              ~sw
+              ~net:env#net
+              ~wire_observer
+              ~config
+              ~messages
+              ~on_event:(fun _ -> ())
+              ~on_telemetry
+              ()).Llm_provider.Completion_outcome.result
+          with
+          | Error _ ->
+            fail "wire failure telemetry callback exception changed the provider result"
+          | Ok response ->
+            check
+              string
+              "provider response preserved"
+              "streamed text"
+              (text_of_response response));
+         check bool "wire observer invoked" true (!observer_calls > 0);
+         check
+           bool
+           "telemetry callback failure reached diagnostic fallback"
+           true
+           (List.exists
+              (fun (ctx, message) ->
+                 String.equal ctx "wire_observer"
+                 && Agent_core_strings.contains_substring ~needle:"telemetry observer unavailable" ~haystack:message
+                 && Agent_core_strings.contains_substring ~needle:"wire observer unavailable" ~haystack:message)
+              !diagnostics);
+         Eio.Switch.fail sw Exit
+       with
+       | Exit -> ())
+;;
+
+let test_complete_stream_transport_on_event_exception_is_nonfatal () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let calls = ref 0 in
+  let transport =
+    { (make_transport (Ok (mock_transport_response "transport streamed"))) with
+      invoke_stream =
+        (fun ?on_telemetry:_ ~on_event _req ->
+          on_event
+            (Types.ContentBlockDelta { index = 0; delta = Types.TextDelta "ignored" });
+          Completion_outcome.external_unobserved
+            (Ok (mock_transport_response "transport streamed")))
+    }
+  in
+  let on_event _evt =
+    incr calls;
+    failwith "transport observer failed"
+  in
+  let config = make_config "http://unused.test" in
+  match
+    (Complete.complete_stream ~sw ~net:env#net ~transport ~config ~messages ~on_event ()).Llm_provider.Completion_outcome.result
+  with
+  | Ok resp ->
+    check string "text" "transport streamed" (text_of_response resp);
+    check int "callback invoked" 1 !calls
+  | Error _ -> fail "expected Ok"
+;;
+
+let test_complete_stream_preserves_repeated_incremental_text () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.0, anthropic_sse_frame_content_block_start
+        ; 0.0, anthropic_sse_frame_delta "ha"
+        ; 0.0, anthropic_sse_frame_delta "ha"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let events = ref [] in
+    let on_event event = events := event :: !events in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config:(make_config url)
+        ~messages
+        ~on_event
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Ok response ->
+      check string "canonical response" "haha" (text_of_response response);
+      let text_deltas =
+        !events
+        |> List.rev
+        |> List.filter_map (function
+          | Types.ContentBlockDelta { delta = Types.TextDelta text; _ } -> Some text
+          | _ -> None)
+      in
+      check (list string) "canonical callbacks" [ "ha"; "ha" ] text_deltas;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "canonical text stream did not complete"
+  with
+  | Exit -> ()
+;;
+
+let complete_stream_preserves_repeated_content ~reasoning () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    let unit = "Each independent case uses the same starting premise.\n" in
+    let repeated = String.concat "" (List.init 96 (fun _ -> unit)) in
+    let later = "The cases now yield the answer." in
+    let frame event fields =
+      Printf.sprintf "event: %s\ndata: %s\n\n" event
+        (Yojson.Safe.to_string (`Assoc (("type", `String event) :: fields))) in
+    let initial_kind, delta_kind, content_key =
+      if reasoning then "thinking", "thinking_delta", "thinking"
+      else "text", "text_delta", "text" in
+    let start index kind = frame "content_block_start"
+      ["index",`Int index;"content_block",`Assoc ["type",`String kind;kind,`String ""]] in
+    let delta index kind key text = frame "content_block_delta"
+      ["index",`Int index;"delta",`Assoc ["type",`String kind;key,`String text]] in
+    let stop index = frame "content_block_stop" ["index",`Int index] in
+    let frames =
+      [0.0,anthropic_sse_frame_message_start; 0.0,start 0 initial_kind]
+      @ List.init 96 (fun _ -> 0.0,delta 0 delta_kind content_key unit)
+      @ [0.0,stop 0; 0.0,start 1 "text"; 0.0,delta 1 "text_delta" "text" later;
+         0.0,stop 1;0.0,anthropic_sse_frame_usage_only;0.0,anthropic_sse_frame_message_stop] in
+    let url = start_raw_sse_server ~sw ~net:env#net ~clock:env#clock frames in
+    let delivered = ref [] in
+    let on_event = function
+      | Types.ContentBlockDelta {delta=Types.TextDelta text | Types.ThinkingDelta text;_} ->
+        delivered := text :: !delivered
+      | _ -> () in
+    (match (Complete.complete_stream ~sw ~net:env#net ~config:(make_config url)
+              ~messages ~on_event ()).Llm_provider.Completion_outcome.result with
+     | Error _ -> fail "valid repeating content must reach the provider terminal"
+     | Ok response ->
+       check bool "explicit provider terminal survives" true (response.stop_reason=Types.EndTurn);
+       let canonical = List.filter_map (function
+         | Types.Text text | Types.Thinking {content=text;_} -> Some text
+         | _ -> None) response.content |> String.concat "" in
+       check string "canonical repeated content and later answer" (repeated ^ later) canonical;
+       check string "callbacks deliver every repeated fragment and later answer"
+         (repeated ^ later) (String.concat "" (List.rev !delivered)));
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let test_complete_stream_preserves_repeated_text () =
+  complete_stream_preserves_repeated_content ~reasoning:false ()
+;;
+
+let test_complete_stream_preserves_repeated_reasoning () =
+  complete_stream_preserves_repeated_content ~reasoning:true ()
+;;
+
+let test_complete_stream_replaces_invalid_content_with_typed_failure () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let image_start =
+      "event: content_block_start\n\
+       data: \
+       {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"image\"}}\n\n"
+    in
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.0, image_start
+        ; 0.0, anthropic_sse_frame_delta "must-not-render"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let events = ref [] in
+    let on_event event = events := event :: !events in
+    (match
+       (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_config url)
+         ~messages
+         ~on_event
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "cross-kind content stream completed successfully");
+    let events = List.rev !events in
+    check bool "invalid raw text was suppressed" false
+      (List.exists
+         (function
+           | Types.ContentBlockDelta { delta = Types.TextDelta "must-not-render"; _ } ->
+             true
+           | _ -> false)
+         events);
+    check int "one typed replacement failure" 1
+      (List.fold_left
+         (fun count -> function
+            | Types.SSEParseFailed
+                { reason =
+                    "content_block_delta_kind_mismatch:index:0:block:image:delta:text"
+                ; _
+                } -> count + 1
+            | _ -> count)
+         0
+         events);
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.03, anthropic_sse_frame_content_block_start
+        ; 0.03, anthropic_sse_frame_delta "active "
+        ; 0.03, anthropic_sse_frame_delta "long "
+        ; 0.03, anthropic_sse_frame_delta "stream"
+        ; 0.03, anthropic_sse_frame_stop
+        ]
+    in
+    let config = make_config url in
+    let events = ref [] in
+    let on_event evt = events := evt :: !events in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~stream_idle_timeout_s:0.08
+        ~config
+        ~messages
+        ~on_event
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Ok resp ->
+      check string "text" "active long stream" (text_of_response resp);
+      check bool "events received" true (List.length !events > 0);
+      Eio.Switch.fail sw Exit
+    | Error err ->
+      fail
+        (Printf.sprintf
+           "expected active stream to complete, got %s"
+           (match err with
+            | Http_client.NetworkError { message; _ }
+            | Http_client.TimeoutError { message; _ } -> message
+            | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
+            | Http_client.AcceptRejected { reason } -> reason
+            | Http_client.ProviderTerminal { message; _ } -> message
+            | Http_client.ProviderFailure { message; _ } -> message))
+  with
+  | Exit -> ()
+;;
+
+(* The frames after the last delta project nothing the classifier names as
+   a production: the text block's stop closes a block that is not a tool
+   call, and the usage-bearing message_delta is the shape of an
+   OpenAI-compatible usage-only final chunk. Neither may put the stream back
+   to "awaiting the first delta" or forward to "streaming a tool call": a
+   stall after them is an idle gap in the state the last production left,
+   and the phase, the message and the telemetry all say so. This is the
+   wire order of every Anthropic turn whose proxy holds the socket after the
+   final block. *)
+let timeout_telemetry telemetry =
+  List.filter_map
+    (function
+      | Telemetry_event.Timeout { timeout_type; _ } -> Some timeout_type
+      | _ -> None)
+    !telemetry
+;;
+
+let test_complete_stream_idle_after_output_keeps_the_production_state () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.0, anthropic_sse_frame_content_block_start
+        ; 0.0, anthropic_sse_frame_delta "hello"
+        ; 0.0, anthropic_sse_frame_block_stop ^ anthropic_sse_frame_usage_only
+        ; 0.5, anthropic_sse_frame_message_stop
+        ]
+    in
+    let config = make_config url in
+    let telemetry = ref [] in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~stream_idle_timeout_s:0.08
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Error
+        (Http_client.TimeoutError
+           { phase = Http_client.Stream_idle Http_client.Streaming_answer; message }) ->
+      let expected = "stream_idle_timeout_s deadline exceeded while streaming_answer" in
+      check string "the message names the idle knob and the production state" expected message;
+      check
+        (list (testable Telemetry_event.pp_timeout_type ( = )))
+        "the telemetry timeout carries the same state"
+        [ Telemetry_event.Stream_idle Http_client.Streaming_answer ]
+        (timeout_telemetry telemetry);
+      Eio.Switch.fail sw Exit
+    | Error (Http_client.TimeoutError { phase; message }) ->
+      failf
+        "a stall after output must be an idle gap in streaming_answer, got %s (%s)"
+        (Http_client.timeout_phase_to_label phase)
+        message
+    | Ok _ -> fail "expected the stall after the usage frame to end the stream"
+    | Error _ -> fail "expected TimeoutError{phase=Stream_idle Streaming_answer}"
+  with
+  | Exit -> ()
+;;
+
+(* Before any output the budget that ran out was the one to the first
+   token, and the telemetry says that too, whatever frame last moved the
+   reader's state. *)
+let test_complete_stream_first_event_timeout_telemetry_is_ttft () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.5, anthropic_sse_frame_content_block_start
+        ; 0.0, anthropic_sse_frame_delta "late"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let config = make_config url in
+    let telemetry = ref [] in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~first_event_timeout_s:0.08
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) ->
+      check
+        (list (testable Telemetry_event.pp_timeout_type ( = )))
+        "the telemetry timeout is the first-token budget"
+        [ Telemetry_event.Ttft_exceeded ]
+        (timeout_telemetry telemetry);
+      Eio.Switch.fail sw Exit
+    | Error (Http_client.TimeoutError { phase; message }) ->
+      failf
+        "a stall before output is First_token, got %s (%s)"
+        (Http_client.timeout_phase_to_label phase)
+        message
+    | Ok _ -> fail "expected the first-event budget to end the stream"
+    | Error _ -> fail "expected TimeoutError{phase=First_token}"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_idle_timeout_still_fires () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.12, anthropic_sse_frame_message_start
+        ; 0.0, anthropic_sse_frame_content_block_start
+        ; 0.0, anthropic_sse_frame_delta "late"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let config = make_config url in
+    let on_event _evt = () in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~stream_idle_timeout_s:0.03
+        ~config
+        ~messages
+        ~on_event
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Error (Http_client.TimeoutError { phase = Http_client.First_token; message }) ->
+      let prefix = "stream_idle_timeout_s deadline exceeded" in
+      check
+        bool
+        "stream idle message"
+        true
+        (String.length message >= String.length prefix
+         && String.equal (String.sub message 0 (String.length prefix)) prefix);
+      Eio.Switch.fail sw Exit
+    | Error (Http_client.TimeoutError { phase; _ }) ->
+      fail
+        (Printf.sprintf
+           "unexpected timeout phase %s"
+           (Http_client.timeout_phase_to_label phase))
+    | Ok _ -> fail "expected stream idle timeout"
+    | Error _ -> fail "expected TimeoutError{phase=First_token}"
+  with
+  | Exit -> ()
+;;
+
+let responses_sse_frame_created =
+  "event: response.created\n\
+   data: \
+   {\"type\":\"response.created\",\"response\":{\"id\":\"resp-prelude-1\",\"model\":\"gpt-5.5\",\"status\":\"in_progress\",\"usage\":null}}\n\n"
+;;
+
+let responses_sse_frame_text_delta text =
+  Printf.sprintf
+    "event: response.output_text.delta\n\
+     data: \
+     {\"type\":\"response.output_text.delta\",\"output_index\":0,\"item_id\":\"msg_1\",\"delta\":%S}\n\n"
+    text
+;;
+
+let responses_sse_frame_completed text =
+  Printf.sprintf
+    "event: response.completed\n\
+     data: \
+     {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-prelude-1\",\"model\":\"gpt-5.5\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":%S}]}],\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n"
+    text
+;;
+
+(* The Responses surface opens with [response.created] before prefill. On
+   2026-09-10 a gpt-5.6-luna turn was cut 164 s in with "stream_idle_timeout_s
+   deadline exceeded while awaiting_first_delta": the opening frame had ended
+   the first-event wait, so the silent prefill sat under the 120 s inter-token
+   idle. Here the opening frame arrives at once and the first token 0.4 s
+   later (> idle 0.1, < first-event 1.0), in the same write as the completion
+   so that no idle window spans a server write boundary, and the turn must
+   complete. *)
+let test_complete_stream_responses_prelude_keeps_first_event_budget () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, responses_sse_frame_created
+        ; 0.4, responses_sse_frame_text_delta "late" ^ responses_sse_frame_completed "late"
+        ]
+    in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.OpenAI_compat
+        ~model_id:"gpt-5.5"
+        ~base_url:url
+        ~request_path:"/v1/responses"
+        ~temperature:0.0
+        ~max_tokens:100
+        ()
+    in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~stream_idle_timeout_s:0.1
+        ~first_event_timeout_s:1.0
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Ok resp ->
+      check string "text" "late" (text_of_response resp);
+      Eio.Switch.fail sw Exit
+    | Error (Http_client.TimeoutError { message; phase; _ }) ->
+      fail
+        (Printf.sprintf
+           "the opening frame ended the first-event wait (phase %s): %s"
+           (Http_client.timeout_phase_to_label phase)
+           message)
+    | Error _ -> fail "expected the Responses stream to complete"
+  with
+  | Exit -> ()
+;;
+
+(* Bug #10 regression (38-bug campaign): actively streaming reasoning
+   deltas are stream LIVENESS, not idleness. Each hidden-reasoning delta
+   advances the injected mock clock by 6s, so the cumulative
+   thinking-only span crosses the 10s idle budget on the third delta —
+   the exact condition the deleted thinking-only wall-clock cutoff used
+   to abort on (TimeoutError{Stream_idle Streaming_thinking}, then MASC
+   retried and re-killed the round, losing the turn). Inter-event gaps
+   (6s) stay under the 10s idle deadline, so the line-idle timer must
+   not fire either: the stream must finalize [Ok] with the answer. *)
+let test_complete_stream_long_thinking_is_not_cut_off () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let mock_clock = Eio_mock.Clock.make () in
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        (anthropic_thinking_then_answer_frames ~frame_gap_s:0.01)
+    in
+    let config = make_config url in
+    let mock_now = ref 0.0 in
+    let on_event = function
+      | Types.ContentBlockDelta { delta = (Types.ThinkingDelta _ | Types.ThinkingSnapshot _); _ } ->
+        mock_now := !mock_now +. 6.0;
+        Eio_mock.Clock.set_time mock_clock !mock_now
+      | _ -> ()
+    in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:mock_clock
+        ~stream_idle_timeout_s:10.0
+        ~config
+        ~messages
+        ~on_event
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Ok resp ->
+      check string "text" "answer" (text_of_response resp);
+      Eio.Switch.fail sw Exit
+    | Error err ->
+      fail
+        (Printf.sprintf
+           "long thinking must stream to completion, got %s"
+           (match err with
+            | Http_client.NetworkError { message; _ }
+            | Http_client.TimeoutError { message; _ } -> message
+            | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
+            | Http_client.AcceptRejected { reason } -> reason
+            | Http_client.ProviderTerminal { message; _ } -> message
+            | Http_client.ProviderFailure { message; _ } -> message))
+  with
+  | Exit -> ()
+;;
+
+let omitted_idle_test_case ~transport_arm ~kind ~request_path ~content_type ~body () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let mock_clock = Eio_mock.Clock.make () in
+    let connected, resolve_connected = Eio.Promise.create () in
+    let release_body, resolve_release_body = Eio.Promise.create () in
+    let url =
+      start_clock_jump_stream_server ~sw ~net:env#net ~release_body ~content_type body
+    in
+    let config =
+      Provider_config.make
+        ~kind
+        ~model_id:"test-model"
+        ~base_url:url
+        ~request_path
+        ~temperature:0.0
+        ~max_tokens:100
+        ()
+    in
+    let transport =
+      if transport_arm
+      then Some (Complete.make_http_transport ~clock:mock_clock ~sw ~net:env#net ())
+      else None
+    in
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.await connected;
+      Eio.Fiber.yield ();
+      Eio_mock.Clock.set_time mock_clock removed_provider_idle_defaults_upper_bound_s;
+      Eio.Fiber.yield ();
+      Eio.Promise.resolve resolve_release_body ());
+    match
+      Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+        (Complete.complete_stream
+          ~sw
+          ~net:env#net
+          ~clock:mock_clock
+          ?transport
+          ~config
+          ~messages
+          ~on_event:(function
+            | Types.Connected -> Eio.Promise.resolve resolve_connected ()
+            | _ -> ())
+          ()).Llm_provider.Completion_outcome.result)
+    with
+    | Ok resp ->
+      check string "text" "default-disabled" (text_of_response resp);
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "omitted stream idle timeout must remain disabled"
+    | exception Eio.Time.Timeout -> fail "clock-jump fixture did not terminate"
+  with
+  | Exit -> ()
+;;
+
+let test_anthropic_omitted_idle_has_no_provider_default =
+  omitted_idle_test_case
+    ~transport_arm:false
+    ~kind:Provider_config.Anthropic
+    ~request_path:"/v1/messages"
+    ~content_type:"text/event-stream"
+    ~body:(anthropic_sse_response "default-disabled")
+;;
+
+let test_ollama_omitted_idle_has_no_provider_default =
+  omitted_idle_test_case
+    ~transport_arm:false
+    ~kind:Provider_config.Ollama
+    ~request_path:"/api/chat"
+    ~content_type:"application/x-ndjson"
+    ~body:
+      "{\"model\":\"test-model\",\"message\":{\"role\":\"assistant\",\"content\":\"default-disabled\"},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":10,\"eval_count\":5}\n"
+;;
+
+let test_transport_anthropic_omitted_idle_has_no_provider_default =
+  omitted_idle_test_case
+    ~transport_arm:true
+    ~kind:Provider_config.Anthropic
+    ~request_path:"/v1/messages"
+    ~content_type:"text/event-stream"
+    ~body:(anthropic_sse_response "default-disabled")
+;;
+
+let test_clock_jump_fixture_fires_explicit_idle_timeout () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let mock_clock = Eio_mock.Clock.make () in
+    let connected, resolve_connected = Eio.Promise.create () in
+    let release_body, resolve_release_body = Eio.Promise.create () in
+    let url =
+      start_clock_jump_stream_server
+        ~sw
+        ~net:env#net
+        ~release_body
+        ~content_type:"text/event-stream"
+        (anthropic_sse_response "too-late")
+    in
+    let config = make_config url in
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.await connected;
+      Eio.Fiber.yield ();
+      Eio_mock.Clock.set_time mock_clock removed_provider_idle_defaults_upper_bound_s;
+      Eio.Fiber.yield ();
+      Eio.Promise.resolve resolve_release_body ());
+    match
+      Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+        (Complete.complete_stream
+          ~sw
+          ~net:env#net
+          ~clock:mock_clock
+          ~stream_idle_timeout_s:600.0
+          ~config
+          ~messages
+          ~on_event:(function
+            | Types.Connected -> Eio.Promise.resolve resolve_connected ()
+            | _ -> ())
+          ()).Llm_provider.Completion_outcome.result)
+    with
+    | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) ->
+      Eio.Switch.fail sw Exit
+    | Ok _ -> fail "explicit idle timeout must fire across the clock jump"
+    | Error _ -> fail "expected typed first-token timeout"
+    | exception Eio.Time.Timeout -> fail "clock-jump fixture did not terminate"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_metrics () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server ~sw ~net:env#net (anthropic_sse_response "streamed text")
+    in
+    let config = make_config url in
+    let first_chunks = ref [] in
+    let inter_chunks = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_streaming_first_chunk =
+          (fun ~provider ~model_id ~ttfrc_ms ->
+            first_chunks := (provider, model_id, ttfrc_ms) :: !first_chunks)
+      ; on_streaming_chunk =
+          (fun ~provider ~model_id ~chunk_index ~inter_chunk_ms ->
+            inter_chunks
+            := (provider, model_id, chunk_index, inter_chunk_ms) :: !inter_chunks)
+      }
+    in
+    let on_event _evt = () in
+    match
+      (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event ~metrics ()).Llm_provider.Completion_outcome.result
+    with
+    | Ok _ ->
+      check int "first chunk count" 1 (List.length !first_chunks);
+      (match !first_chunks with
+       | [ (provider, model_id, ttfrc_ms) ] ->
+         check string "provider" "anthropic" provider;
+         check string "model_id" "test-model" model_id;
+         check bool "ttfrc non-negative" true (ttfrc_ms >= 0.0)
+       | _ -> fail "expected one first chunk");
+      check bool "inter chunk metrics" true (List.length !inter_chunks > 0);
+      List.iter
+        (fun (provider, model_id, chunk_index, inter_chunk_ms) ->
+           check string "inter provider" "anthropic" provider;
+           check string "inter model_id" "test-model" model_id;
+           check bool "chunk_index non-negative" true (chunk_index >= 0);
+           check bool "inter chunk non-negative" true (inter_chunk_ms >= 0.0))
+        !inter_chunks;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "expected Ok"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_unknown_latency_stays_unknown () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_sse_server ~sw ~net:env#net (anthropic_sse_response "streamed text")
+    in
+    let config = make_config url in
+    let telemetry_events = ref [] in
+    let first_chunk_metrics = ref 0 in
+    let inter_chunk_metrics = ref 0 in
+    let status_calls = ref [] in
+    let metrics : Metrics.t =
+      { Metrics.noop with
+        on_streaming_first_chunk =
+          (fun ~provider:_ ~model_id:_ ~ttfrc_ms:_ -> incr first_chunk_metrics)
+      ; on_streaming_chunk =
+          (fun ~provider:_ ~model_id:_ ~chunk_index:_ ~inter_chunk_ms:_ ->
+            incr inter_chunk_metrics)
+      ; on_http_status =
+          (fun ~provider ~model_id ~status ->
+            status_calls := (provider, model_id, status) :: !status_calls)
+      }
+    in
+    let result =
+      Complete_stream.complete_stream_http
+        ~sw
+        ~net:env#net
+        ~latency_counter:Complete_common.Unknown_latency
+        ~on_telemetry:(fun evt -> telemetry_events := evt :: !telemetry_events)
+        ~metrics
+        ~config
+        ~messages
+        ~tools:[]
+        ~on_event:(fun _evt -> ())
+        ()
+      |> fun outcome -> outcome.Completion_outcome.result
+    in
+    (match result with
+     | Ok resp ->
+       (match resp.telemetry with
+        | Some t ->
+          check (option int) "response latency unknown" None t.request_latency_ms;
+          check (option (float 0.001)) "response ttfrc unknown" None t.ttfrc_ms
+        | None -> fail "expected response telemetry")
+     | Error _ -> fail "expected Ok");
+    let first_chunk =
+      List.find_map
+        (function
+          | Telemetry_event.Streaming_first_chunk r -> Some r.ttfrc_ms
+          | _ -> None)
+        !telemetry_events
+    in
+    let summary =
+      List.find_map
+        (function
+          | Telemetry_event.Streaming_summary
+              { total_ms; inter_chunk_ms_p50; inter_chunk_ms_p95; inter_chunk_ms_max; _ }
+            -> Some (total_ms, inter_chunk_ms_p50, inter_chunk_ms_p95, inter_chunk_ms_max)
+          | _ -> None)
+        !telemetry_events
+    in
+    check
+      (option (option (float 0.001)))
+      "first chunk latency event"
+      (Some None)
+      first_chunk;
+    (match summary with
+     | Some (total_ms, inter_chunk_ms_p50, inter_chunk_ms_p95, inter_chunk_ms_max) ->
+       check (option (float 0.001)) "summary total unknown" None total_ms;
+       check (option (float 0.001)) "summary p50 unknown" None inter_chunk_ms_p50;
+       check (option (float 0.001)) "summary p95 unknown" None inter_chunk_ms_p95;
+       check (option (float 0.001)) "summary max unknown" None inter_chunk_ms_max
+     | None -> fail "expected streaming summary");
+    check int "first chunk metrics skipped" 0 !first_chunk_metrics;
+    check int "inter chunk metrics skipped" 0 !inter_chunk_metrics;
+    (match !status_calls with
+     | [ ("anthropic", "test-model", 200) ] -> ()
+     | [ (_, _, status) ] -> fail (Printf.sprintf "expected 200, got %d" status)
+     | _ -> fail "expected exactly one streaming status call");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* Agent Core contract: drive the [Some t] transport dispatch arm. The high-level
+   [stream_idle_timeout_s] must reach [read_sse] via the request-borne carrier field on
+   [Llm_transport.completion_request]; pre-F1 the dispatch dropped it and a
+   first-token stall hung until an external watchdog. The sibling idle-timeout
+   tests above call [complete_stream] WITHOUT [~transport] (the [None] arm,
+   which always armed idle), so they pass even with the dispatch drop — this one
+   guards the transport arm specifically. *)
+let test_complete_stream_transport_arm_idle_timeout () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.15, anthropic_sse_frame_message_start
+        ; 0.0, anthropic_sse_frame_content_block_start
+        ; 0.0, anthropic_sse_frame_delta "late"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let config = make_config url in
+    (* The request-borne deadline is the sole idle-timeout source. *)
+    let transport = Complete.make_http_transport ~clock:env#clock ~sw ~net:env#net () in
+    match
+      (Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~stream_idle_timeout_s:0.03
+        ~transport
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ()).Llm_provider.Completion_outcome.result
+    with
+    | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) ->
+      Eio.Switch.fail sw Exit
+    | Ok _ -> fail "expected idle timeout via the Some-t dispatch — carrier dropped?"
+    | Error _ -> fail "expected TimeoutError{phase=First_token} via the transport arm"
+  with
+  | Exit -> ()
+;;
+
+(* ── complete: body_timeout_s ─────────────────────────── *)
+
+let test_complete_body_timeout_fires () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    (* Server delays response by 2.0s; caller deadline 0.3s must fire first
+       and produce TimeoutError{phase=Non_streaming_body} with a body-deadline message. *)
+    let url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~delay_sec:2.0
+        (anthropic_response "should not arrive")
+    in
+    let config = make_config url in
+    let t0 = Unix.gettimeofday () in
+    (match
+       (Complete.complete
+         ~sw
+         ~net:env#net
+         ~clock:env#clock
+         ~config
+         ~messages
+         ~body_timeout_s:0.3
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Ok _ -> fail "expected Error (body_timeout_s should have fired)"
+     | Error
+         (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; message }) ->
+       let elapsed = Unix.gettimeofday () -. t0 in
+       check bool "fires under server delay" true (elapsed < 1.5);
+       check
+         bool
+         "message identifies body deadline"
+         true
+         (let prefix = "body_timeout_s deadline exceeded" in
+          String.length message >= String.length prefix
+          && String.equal (String.sub message 0 (String.length prefix)) prefix)
+     | Error _ ->
+       fail "unexpected error variant (expected TimeoutError{phase=Non_streaming_body})");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_body_timeout_does_not_fire_on_fast_response () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    (* No server delay; generous body_timeout_s must not interfere. *)
+    let url = start_mock_server ~sw ~net:env#net (anthropic_response "fast response") in
+    let config = make_config url in
+    (match
+       (Complete.complete
+         ~sw
+         ~net:env#net
+         ~clock:env#clock
+         ~config
+         ~messages
+         ~body_timeout_s:60.0
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Ok resp ->
+       let text =
+         List.filter_map
+           (function
+             | Llm_provider.Types.Text s -> Some s
+             | _ -> None)
+           resp.content
+         |> String.concat ""
+       in
+       check string "text" "fast response" text
+     | Error _ -> fail "unexpected error on fast path with body_timeout_s set");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_sync_uses_only_outer_body_timeout () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sync_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~body_delay_sec:0.08
+        (anthropic_response "slow body")
+    in
+    let config = { (make_config url) with connect_timeout_s = Some 0.02 } in
+    (match
+       (Complete.complete
+         ~sw
+         ~net:env#net
+         ~clock:env#clock
+         ~config
+         ~messages
+         ~body_timeout_s:0.5
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Ok response -> check string "body" "slow body" (text_of_response response)
+     | Error _ -> fail "nested connect timeout incorrectly capped sync body");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_body_timeout_without_clock_rejected_before_request () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let request_count = ref 0 in
+    let url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~on_request:(fun () -> incr request_count)
+        (anthropic_response "must not arrive")
+    in
+    let config = make_config url in
+    (match
+       (Complete.complete ~sw ~net:env#net ~config ~messages ~body_timeout_s:60.0 ()).Llm_provider.Completion_outcome.result
+     with
+     | Error (Http_client.AcceptRejected _) ->
+       check int "request rejected before HTTP I/O" 0 !request_count
+     | Ok _ -> fail "expected AcceptRejected for body_timeout_s without clock"
+     | Error _ -> fail "expected typed AcceptRejected for body_timeout_s without clock");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_body_timeout_requires_finite_positive_value_before_request () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let request_count = ref 0 in
+    let url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~on_request:(fun () -> incr request_count)
+        (anthropic_response "positive timeout")
+    in
+    let config = make_config url in
+    let invalid_cases =
+      [ "zero", 0.0
+      ; "negative", -1.0
+      ; "nan", Float.nan
+      ; "positive infinity", Float.infinity
+      ; "negative infinity", Float.neg_infinity
+      ]
+    in
+    List.iter
+      (fun (label, body_timeout_s) ->
+         match
+           (Complete.complete
+             ~sw
+             ~net:env#net
+             ~clock:env#clock
+             ~config
+             ~messages
+             ~body_timeout_s
+             ()).Llm_provider.Completion_outcome.result
+         with
+         | Error (Http_client.AcceptRejected _) ->
+           check int (label ^ " rejected before HTTP I/O") 0 !request_count
+         | Ok _ -> failf "%s timeout was accepted" label
+         | Error _ -> failf "%s timeout returned the wrong typed error" label)
+      invalid_cases;
+    (match
+       (Complete.complete
+         ~sw
+         ~net:env#net
+         ~clock:env#clock
+         ~config
+         ~messages
+         ~body_timeout_s:60.0
+         ()).Llm_provider.Completion_outcome.result
+     with
+     | Ok resp ->
+       let text =
+         List.filter_map
+           (function
+             | Llm_provider.Types.Text value -> Some value
+             | _ -> None)
+           resp.content
+         |> String.concat ""
+       in
+       check string "positive timeout response" "positive timeout" text;
+       check int "positive timeout performs one request" 1 !request_count
+     | Error _ -> fail "positive timeout was rejected");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_without_body_timeout_or_clock_succeeds () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net (anthropic_response "unbounded") in
+    let config = make_config url in
+    (match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
+     | Ok resp ->
+       let text =
+         List.filter_map
+           (function
+             | Llm_provider.Types.Text value -> Some value
+             | _ -> None)
+           resp.content
+         |> String.concat ""
+       in
+       check string "no-timeout response" "unbounded" text
+     | Error _ -> fail "no timeout and no clock must preserve unbounded HTTP behavior");
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_injected_transport_without_timeout_is_unbounded () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let calls = ref 0 in
+  let response = mock_transport_response "injected unbounded" in
+  let transport =
+    { (make_transport (Ok response)) with
+      invoke_sync =
+        (fun _ ->
+          incr calls;
+          Completion_outcome.external_unobserved
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
+    }
+  in
+  match
+    (Complete.complete ~sw ~net:env#net ~transport ~config:(make_config "") ~messages ()).Llm_provider.Completion_outcome.result
+  with
+  | Ok resp ->
+    check
+      string
+      "unbounded injected response"
+      "injected unbounded"
+      (text_of_response resp);
+    check int "unbounded injected call count" 1 !calls
+  | Error _ -> fail "injected transport without body_timeout_s was rejected"
+;;
+
+let test_complete_injected_transport_rejects_invalid_deadlines_before_call () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let calls = ref 0 in
+  let response = mock_transport_response "must not run" in
+  let transport =
+    { (make_transport (Ok response)) with
+      invoke_sync =
+        (fun _ ->
+          incr calls;
+          Completion_outcome.external_unobserved
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
+    }
+  in
+  let config = make_config "" in
+  (match
+     (Complete.complete
+       ~sw
+       ~net:env#net
+       ~transport
+       ~config
+       ~messages
+       ~body_timeout_s:1.0
+       ()).Llm_provider.Completion_outcome.result
+   with
+   | Error (Http_client.AcceptRejected _) -> ()
+   | Ok _ -> fail "injected timeout without clock was accepted"
+   | Error _ -> fail "injected timeout without clock returned the wrong typed error");
+  let invalid_cases =
+    [ "zero", 0.0
+    ; "negative", -1.0
+    ; "nan", Float.nan
+    ; "positive infinity", Float.infinity
+    ; "negative infinity", Float.neg_infinity
+    ]
+  in
+  List.iter
+    (fun (label, body_timeout_s) ->
+       match
+         (Complete.complete
+           ~sw
+           ~net:env#net
+           ~clock:env#clock
+           ~transport
+           ~config
+           ~messages
+           ~body_timeout_s
+           ()).Llm_provider.Completion_outcome.result
+       with
+       | Error (Http_client.AcceptRejected _) -> ()
+       | Ok _ -> failf "%s injected timeout was accepted" label
+       | Error _ -> failf "%s injected timeout returned the wrong typed error" label)
+    invalid_cases;
+  check int "invalid deadlines call injected transport zero times" 0 !calls
+;;
+
+let test_complete_injected_transport_positive_timeout_succeeds () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let calls = ref 0 in
+  let response = mock_transport_response "injected bounded" in
+  let transport =
+    { (make_transport (Ok response)) with
+      invoke_sync =
+        (fun _ ->
+          incr calls;
+          Completion_outcome.external_unobserved
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
+    }
+  in
+  match
+    (Complete.complete
+      ~sw
+      ~net:env#net
+      ~clock:env#clock
+      ~transport
+      ~config:(make_config "")
+      ~messages
+      ~body_timeout_s:1.0
+      ()).Llm_provider.Completion_outcome.result
+  with
+  | Ok resp ->
+    check string "bounded injected response" "injected bounded" (text_of_response resp);
+    check int "bounded injected call count" 1 !calls
+  | Error _ -> fail "positive injected body_timeout_s was rejected"
+;;
+
+let test_complete_injected_transport_timeout_is_typed () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let calls = ref 0 in
+  let response = mock_transport_response "must time out" in
+  let transport =
+    { (make_transport (Ok response)) with
+      invoke_sync =
+        (fun _ ->
+          incr calls;
+          Eio.Time.sleep env#clock 1.0;
+          Completion_outcome.external_unobserved
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
+    }
+  in
+  match
+    (Complete.complete
+      ~sw
+      ~net:env#net
+      ~clock:env#clock
+      ~transport
+      ~config:(make_config "")
+      ~messages
+      ~body_timeout_s:0.01
+      ()).Llm_provider.Completion_outcome.result
+  with
+  | Error (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; message })
+    ->
+    check
+      string
+      "injected timeout message preserves exact caller deadline"
+      "body_timeout_s deadline exceeded after 0.01s (Complete.complete injected sync \
+       transport)"
+      message;
+    check int "expired injected transport call count" 1 !calls
+  | Ok _ -> fail "slow injected transport escaped body_timeout_s"
+  | Error _ -> fail "injected expiry returned the wrong typed error"
+;;
+
+let test_complete_injected_transport_inner_timeout_is_not_relabelled () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let calls = ref 0 in
+  let response = mock_transport_response "must raise" in
+  let transport =
+    { (make_transport (Ok response)) with
+      invoke_sync =
+        (fun _ ->
+          incr calls;
+          raise Eio.Time.Timeout)
+    }
+  in
+  let propagated =
+    try
+      ignore
+        ((Complete.complete
+           ~sw
+           ~net:env#net
+           ~clock:env#clock
+           ~transport
+           ~config:(make_config "")
+           ~messages
+           ~body_timeout_s:1.0
+           ())).Llm_provider.Completion_outcome.result;
+      false
+    with
+    | Eio.Time.Timeout -> true
+  in
+  check bool "transport-owned timeout exception propagates" true propagated;
+  check int "inner timeout transport call count" 1 !calls
+;;
+
+let test_complete_deadline_preflight_precedes_cache_hit () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let cache_reads = ref 0 in
+  let observations = ref 0 in
+  let response = mock_transport_response "cached" in
+  let cache : Cache.t =
+    { get =
+        (fun ~key:_ ->
+          incr cache_reads;
+          Some (Cache.response_to_json response))
+    ; set = (fun ~key:_ ~ttl_sec:_ _ -> ())
+    }
+  in
+  match
+    (Complete.complete
+      ~sw
+      ~net:env#net
+      ~config:(make_config "")
+      ~messages
+      ~cache
+      ~body_timeout_s:1.0
+      ~request_wire_observer:(fun _ -> incr observations; Ok ())
+      ()).Llm_provider.Completion_outcome.result
+  with
+  | Error (Http_client.AcceptRejected _) ->
+    check int "deadline preflight precedes cache lookup" 0 !cache_reads;
+    check int "deadline preflight precedes dispatch observation" 0 !observations
+  | Ok _ -> fail "cache hit silently bypassed invalid deadline contract"
+  | Error _ -> fail "cache preflight returned the wrong typed error"
+;;
+
+let check_accept_rejected ~label ~needle = function
+  | Error (Http_client.AcceptRejected { reason }) ->
+    check bool (label ^ " reason") true (Agent_core_strings.contains_substring ~needle:needle ~haystack:reason)
+  | Ok _ -> failf "%s unexpectedly succeeded" label
+  | Error _ -> failf "%s returned a non-AcceptRejected error" label
+;;
+
+let test_complete_rejects_unsupported_reasoning_before_io () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let request_count = ref 0 in
+    let base_url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~on_request:(fun () -> incr request_count)
+        (anthropic_response "must not arrive")
+    in
+    let capabilities =
+      { Capabilities.gemini_capabilities with
+        accepted_reasoning_efforts = Some [ Reasoning_effort.Low ]
+      }
+    in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.Gemini
+        ~model_id:"explicit-gemini-contract"
+        ~base_url
+        ~reasoning_effort:Reasoning_effort.High
+        ~model_capabilities_override:capabilities
+        ()
+    in
+    check_accept_rejected
+      ~label:"sync unsupported reasoning effort"
+      ~needle:"does not accept reasoning effort"
+      ((Complete.complete ~sw ~net:env#net ~config ~messages ())).Llm_provider.Completion_outcome.result;
+    check_accept_rejected
+      ~label:"stream unsupported reasoning effort"
+      ~needle:"does not accept reasoning effort"
+      ((Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config
+         ~messages
+         ~on_event:(fun _ -> ())
+         ())).Llm_provider.Completion_outcome.result;
+    check int "unsupported effort performs no HTTP request" 0 !request_count;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_complete_rejects_missing_anthropic_output_ceiling_before_io () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let request_count = ref 0 in
+    let base_url =
+      start_mock_server
+        ~sw
+        ~net:env#net
+        ~on_request:(fun () -> incr request_count)
+        (anthropic_response "must not arrive")
+    in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.Anthropic
+        ~model_id:"undeclared-anthropic-model"
+        ~base_url
+        ()
+    in
+    check_accept_rejected
+      ~label:"sync missing Anthropic output ceiling"
+      ~needle:"requires max_tokens"
+      ((Complete.complete ~sw ~net:env#net ~config ~messages ())).Llm_provider.Completion_outcome.result;
+    check_accept_rejected
+      ~label:"stream missing Anthropic output ceiling"
+      ~needle:"requires max_tokens"
+      ((Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config
+         ~messages
+         ~on_event:(fun _ -> ())
+         ())).Llm_provider.Completion_outcome.result;
+    check int "missing output ceiling performs no HTTP request" 0 !request_count;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* ── Runner ──────────────────────────────────────────── *)
+
+let test_responses_tool_images_on_http ~stream () =
+  let open Types in
+  let inline_image =
+    Image { media_type = "image/png"; source = Base64 "aW1hZ2U=" }
+  in
+  let url_image =
+    Image { media_type = "image/png"; source = Url "https://images.invalid/reference.png" }
+  in
+  let file_image =
+    Image { media_type = "image/png"; source = File_id "file_fixture_image" }
+  in
+  let failed =
+    Tool_failed { failure_kind = Reported_tool_error; error_class = Some Transient }
+  in
+  let nested_error =
+    ToolResult
+      { tool_use_id = "nested-error"; content = "capture incomplete"; outcome = failed
+      ; json = None
+      ; content_blocks = Some [ Text "nested before"; inline_image; Text "nested after" ] }
+  in
+  let nested_parent =
+    ToolResult
+      { tool_use_id = "nested-parent"; content = ""; outcome = Tool_succeeded
+      ; json = None
+      ; content_blocks = Some [ Text "parent before"; nested_error; url_image; file_image
+                              ; Text "parent after" ] }
+  in
+  let nested_text =
+    ToolResult
+      { tool_use_id = "nested-text"; content = "nested failure"; outcome = failed
+      ; json = None; content_blocks = Some [ Text "nested failure" ] }
+  in
+  let cases =
+    [ "mixed", Tool_succeeded, "captured images",
+        Some [ Text "first"; inline_image; Text "middle"; url_image; file_image; Text "last" ]
+    ; "image_only", Tool_succeeded, "", Some [ inline_image ]
+    ; "failed_image", failed, "capture incomplete",
+        Some [ Text "capture incomplete"; inline_image ]
+    ; "plain_failure", failed, "camera unavailable", None
+    ; "text_blocks", Tool_succeeded, "still text", Some [ Text "still text" ]
+    ; "empty_blocks", Tool_succeeded, "", Some []
+    ; "audio_and_image", Tool_succeeded, "mixed media",
+        Some [ Audio { media_type = "audio/wav"; source = Base64 "YXVkaW8=" }
+             ; inline_image ]
+    ; "nested_only", Tool_succeeded, "", Some [ nested_parent ]
+    ; "direct_and_nested", Tool_succeeded, "",
+        Some [ Text "outer before"; file_image; nested_error; Text "outer after"; url_image ]
+    ; "nested_without_image", failed, "nested failure", Some [ nested_text ]
+    ]
+  in
+  let history =
+    make_message ~role:User [ Text "earlier image"; url_image ]
+    :: List.concat_map
+         (fun (id, outcome, content, content_blocks) ->
+            [ make_message ~role:Assistant
+                [ ToolUse { id; name = "capture"; input = `Assoc [] } ]
+            ; make_message ~role:Tool
+                [ ToolResult { tool_use_id = id; content; outcome; json = None
+                             ; content_blocks } ] ])
+         cases
+    @ [ user_msg "Compare with the earlier image." ]
+  in
+  let text value = `Assoc [ "type", `String "input_text"; "text", `String value ] in
+  let inline =
+    `Assoc [ "type", `String "input_image"
+           ; "image_url", `String "data:image/png;base64,aW1hZ2U=" ]
+  in
+  let url =
+    `Assoc [ "type", `String "input_image"
+           ; "image_url", `String "https://images.invalid/reference.png" ]
+  in
+  let file =
+    `Assoc [ "type", `String "input_image"; "file_id", `String "file_fixture_image" ]
+  in
+  let nested_error_parts =
+    [ text {|Begin nested tool result {"tool_use_id":"nested-error","is_error":true}|}
+    ; text "nested before"; inline; text "nested after"
+    ; text {|End nested tool result {"tool_use_id":"nested-error","is_error":true}|} ]
+  in
+  let expected_outputs =
+    [ "mixed", `List [ text "first"; inline; text "middle"; url; file; text "last" ]
+    ; "image_only", `List [ inline ]
+    ; "failed_image", `List [ text "capture incomplete"; inline ]
+    ; "plain_failure", `String "camera unavailable"
+    ; "text_blocks", `String {|[{"type":"text","text":"still text"}]|}
+    ; "empty_blocks", `String "[]"
+    ; "audio_and_image",
+        `List [ text {|{"type":"audio","source":{"type":"base64","media_type":"audio/wav","data":"YXVkaW8="}}|}
+              ; inline ]
+    ; "nested_only",
+        `List
+          ([ text {|Begin nested tool result {"tool_use_id":"nested-parent","is_error":false}|}
+           ; text "parent before" ]
+           @ nested_error_parts
+           @ [ url; file; text "parent after"
+             ; text {|End nested tool result {"tool_use_id":"nested-parent","is_error":false}|} ])
+    ; "direct_and_nested",
+        `List ([ text "outer before"; file ] @ nested_error_parts
+               @ [ text "outer after"; url ])
+    ; "nested_without_image",
+        `String {|[{"type":"tool_result","tool_use_id":"nested-text","content":[{"type":"text","text":"nested failure"}],"is_error":true}]|}
+    ]
+  in
+  Eio_main.run @@ fun env ->
+  try
+    Eio.Switch.run @@ fun sw ->
+    let captured = ref None in
+    let base_url =
+      if stream then
+        start_responses_sse_server ~sw ~net:env#net ~capture_body:captured
+          (openai_responses_sse_tool_call_response ())
+      else
+        start_mock_server ~sw ~net:env#net ~capture_body:captured
+          (openai_responses_tool_call_response ())
+    in
+    let config =
+      Provider_config.make ~kind:Provider_config.OpenAI_compat ~model_id:"gpt-5.5"
+        ~base_url ~request_path:"/v1/responses" ~temperature:0.0 ~max_tokens:100 ()
+    in
+    let result =
+      if stream then
+        (Complete.complete_stream ~sw ~net:env#net ~config ~messages:history
+          ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+      else (Complete.complete ~sw ~net:env#net ~config ~messages:history ()).Llm_provider.Completion_outcome.result
+    in
+    (match result with Ok _ -> () | Error _ -> fail "Responses fixture completion failed");
+    let body = match !captured with
+      | Some body -> Yojson.Safe.from_string body
+      | None -> fail "Responses HTTP fixture received no request"
+    in
+    let open Yojson.Safe.Util in
+    let input = body |> member "input" |> to_list in
+    let check_json label expected actual =
+      check bool label true (Yojson.Safe.equal expected actual)
+    in
+    check_json "historical user image remains native"
+      (`List [ text "earlier image"; url ]) (List.hd input |> member "content");
+    let tool_items = List.tl input |> List.rev |> List.tl |> List.rev in
+    check int "every tool call and output remains in order"
+      (2 * List.length expected_outputs) (List.length tool_items);
+    List.iteri (fun index (id, output) ->
+      check_json (id ^ " call identity")
+        (`Assoc [ "type", `String "function_call"; "call_id", `String id
+                ; "name", `String "capture"; "arguments", `String "{}" ])
+        (List.nth tool_items (2 * index));
+      check_json (id ^ " output preserves content and pairing")
+        (`Assoc [ "type", `String "function_call_output"; "call_id", `String id
+                ; "output", output ])
+        (List.nth tool_items ((2 * index) + 1))) expected_outputs;
+    check_json "followup stays after all tool outputs"
+      (`List [ text "Compare with the earlier image." ])
+      (List.hd (List.rev input) |> member "content");
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let test_anthropic_image_sources_on_http ~stream () =
+  let open Types in
+  let images =
+    [ Image { media_type = "image/png"; source = Base64 "aW1hZ2U=" }
+    ; Image { media_type = "application/octet-stream"
+            ; source = Url "https://images.invalid/reference.png" }
+    ; Image { media_type = "application/octet-stream"
+            ; source = File_id "file_fixture_image" }
+    ]
+  in
+  let image source = `Assoc [ "type", `String "image"; "source", source ] in
+  let expected_images =
+    [ image (`Assoc [ "type", `String "base64"; "media_type", `String "image/png"
+                   ; "data", `String "aW1hZ2U=" ])
+    ; image (`Assoc [ "type", `String "url"
+                   ; "url", `String "https://images.invalid/reference.png" ])
+    ; image (`Assoc [ "type", `String "file"; "file_id", `String "file_fixture_image" ])
+    ]
+  in
+  let history =
+    [ make_message ~role:User images
+    ; assistant_msg "Remembered the earlier images."
+    ; user_msg "Inspect another image before comparing."
+    ; make_message ~role:Assistant
+        [ ToolUse { id = "inspect-1"; name = "inspect_image"; input = `Assoc [] } ]
+    ; make_message ~role:Tool
+        [ ToolResult
+            { tool_use_id = "inspect-1"; content = "image result"
+            ; outcome = Tool_succeeded; json = None
+            ; content_blocks = Some (Text "image result" :: images) } ]
+    ; user_msg "Compare these with the earlier images."
+    ]
+  in
+  Eio_main.run @@ fun env ->
+  try
+    Eio.Switch.run @@ fun sw ->
+    let captured = ref None in
+    let url =
+      if stream then
+        start_sse_server ~sw ~net:env#net ~capture_body:captured
+          (anthropic_sse_response "accepted images")
+      else
+        start_mock_server ~sw ~net:env#net ~capture_body:captured
+          (anthropic_response "accepted images")
+    in
+    let config = make_config url in
+    let result =
+      if stream then
+        (Complete.complete_stream ~sw ~net:env#net ~config ~messages:history
+          ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+      else (Complete.complete ~sw ~net:env#net ~config ~messages:history ()).Llm_provider.Completion_outcome.result
+    in
+    (match result with Ok _ -> () | Error _ -> fail "fixture completion failed");
+    let body = match !captured with
+      | Some body -> Yojson.Safe.from_string body
+      | None -> fail "HTTP fixture received no request"
+    in
+    let open Yojson.Safe.Util in
+    let messages = body |> member "messages" |> to_list in
+    check int "history and merged tool followup retained" 5 (List.length messages);
+    let check_json label expected actual =
+      check bool label true (Yojson.Safe.equal expected actual)
+    in
+    check_json "earlier user image sources are native on the outgoing wire"
+      (`List expected_images) (List.hd messages |> member "content");
+    let tool_followup = List.nth messages 4 in
+    check string "tool result becomes an Anthropic user message" "user"
+      (tool_followup |> member "role" |> to_string);
+    check_json "tool images stay native and the followup remains after them"
+      (`List
+        [ `Assoc
+            [ "type", `String "tool_result"; "tool_use_id", `String "inspect-1"
+            ; "content", `List
+                (`Assoc [ "type", `String "text"; "text", `String "image result" ]
+                 :: expected_images)
+            ; "is_error", `Bool false ]
+        ; `Assoc [ "type", `String "text"
+                 ; "text", `String "Compare these with the earlier images." ] ])
+      (tool_followup |> member "content");
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let test_refresh_failure_prevents_http () =
+  Eio_main.run (fun env ->
+    try Eio.Switch.run (fun sw ->
+      let calls = ref 0 in
+      let endpoint = start_mock_server ~sw ~net:env#net ~on_request:(fun () -> incr calls)
+        (anthropic_response "must not arrive") in
+      let config = Provider_config.make ~kind:Gemini ~model_id:"fixture-gemini" ~base_url:endpoint
+        ~auth_scheme:Bearer_token ~api_key:"stale-token"
+        ~credential_source:(Refreshable_credential (fun () -> Error Credential_unavailable))
+        ~model_capabilities_override:Capabilities.gemini_capabilities () in
+      List.iter (fun stream ->
+        let result = if stream then (Complete.complete_stream ~sw ~net:env#net ~config ~messages
+          ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result else (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result in
+        match result with
+        | Error (Http_client.AcceptRejected { reason }) ->
+          check string "safe refusal" "Provider credential refresh is unavailable" reason
+        | _ -> fail "refresh failure must reject before dispatch") [false; true];
+      check int "no stale or anonymous request" 0 !calls;
+      Eio.Switch.fail sw Exit)
+    with Exit -> ())
+;;
+
+let test_vertex_native_transport () =
+  List.iter (fun stream ->
+    Eio_main.run (fun env ->
+      try Eio.Switch.run (fun sw ->
+        let response = {|{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"inspect_workspace","args":{}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}|} in
+        let response = if stream then "data: " ^ response ^ "\n\n" else response in
+        let seen_body = ref None and seen_path = ref None and seen_headers = ref None in
+        let endpoint = start_mock_server ~sw ~net:env#net ~capture_body:seen_body
+            ~capture_path:seen_path ~capture_headers:seen_headers response in
+        let refreshes = ref 0 in
+        let credential_source = Provider_config.Refreshable_credential (fun () ->
+          incr refreshes;
+          Ok (Secret.of_string "fixture-access-token")) in
+        let config = Provider_config.make ~kind:Gemini ~model_id:"fixture-gemini"
+            ~base_url:(endpoint ^ "/v1/projects/fixture/locations/global/publishers/google")
+            ~auth_scheme:Bearer_token ~api_key:"stale-token-must-not-be-used" ~credential_source
+            ~model_capabilities_override:Capabilities.gemini_capabilities () in
+        let tools = [`Assoc ["name", `String "inspect_workspace";
+          "description", `String "Inspect workspace";
+          "input_schema", `Assoc ["type", `String "object"; "properties", `Assoc []]]] in
+        let cache : Cache.t = {
+          get=(fun ~key:_ -> fail "refreshable account must not read a static response cache");
+          set=(fun ~key:_ ~ttl_sec:_ _ -> fail "refreshable account must not populate a static response cache") } in
+        let http_events = ref [] in
+        let http_observer = Http_request_observer.create (fun event -> http_events := event :: !http_events; Ok ()) in
+        let result = Http_request_observer.with_observer http_observer (fun () ->
+          if stream then (Complete.complete_stream ~sw ~net:env#net ~config
+            ~messages ~tools ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+          else (Complete.complete ~sw ~net:env#net ~config ~messages ~tools ~cache ()).Llm_provider.Completion_outcome.result) in
+        (match result with
+         | Error _ -> fail "native Vertex-shaped transport failed"
+         | Ok response -> check bool "native function call survives transport" true
+             (response.Types.stop_reason = Types.StopToolUse));
+        check int "refresh executed at actual HTTP dispatch" 1 !refreshes;
+        let headers = Option.get !seen_headers in
+        check (option string) "OAuth Authorization" (Some "Bearer fixture-access-token")
+          (Cohttp.Header.get headers "authorization");
+        check (option string) "no Gemini API key header" None
+          (Cohttp.Header.get headers "x-goog-api-key");
+        check (option string) "native publisher method path"
+          (Some ("/v1/projects/fixture/locations/global/publishers/google/models/fixture-gemini:"
+            ^ if stream then "streamGenerateContent" else "generateContent")) !seen_path;
+        check_observed_request_metadata ~body:(Option.get !seen_body) http_events;
+        let body = Option.get !seen_body |> Yojson.Safe.from_string in
+        check bool "native contents, not chat-completions messages" true
+          (Yojson.Safe.Util.member "contents" body <> `Null
+           && Yojson.Safe.Util.member "messages" body = `Null);
+        check bool "native function declarations" true
+          (Yojson.Safe.Util.member "tools" body <> `Null);
+        Eio.Switch.fail sw Exit)
+      with Exit -> ())) [false; true]
+;;
+
+let transport_request config observer : Llm_transport.completion_request =
+  { config; messages; tools=[]; capture_id=None; observe_http_status=None
+  ; observe_wire_chunk=None; request_wire_observer=observer
+  ; stream_idle_timeout_s=None; first_event_timeout_s=None; body_timeout_s=None }
+;;
+
+let test_native_completion_outcome ?(public = false) ~via_transport () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    List.iter (fun stream ->
+      List.iter (fun succeeds ->
+        List.iter (fun observer ->
+          let captured = ref None in
+          let url =
+            if stream && succeeds then
+              start_sse_server ~sw ~net:env#net ~capture_body:captured
+                (anthropic_sse_response "ok")
+            else start_mock_server ~sw ~net:env#net ~capture_body:captured
+                ~status:(if succeeds then `OK else `Bad_request)
+                (anthropic_response "ok")
+          in
+          let capabilities =
+            { Capabilities.default_capabilities with max_output_tokens = Some 100 } in
+          let config = Provider_config.make ~kind:Anthropic ~model_id:"outcome-fixture"
+              ~request_path:"/v1/messages" ~base_url:url ~max_tokens:200
+              ~model_capabilities_override:capabilities () in
+          let response, provenance =
+            if public then
+              let transport = if via_transport then
+                Some (Complete.make_http_transport ~sw ~net:env#net ()) else None in
+              let outcome = if stream then
+                Complete.complete_stream ~sw ~net:env#net ?transport
+                  ?request_wire_observer:observer ~config ~messages
+                  ~on_event:(fun _ -> ()) ()
+              else
+                Complete.complete ~sw ~net:env#net ?transport
+                  ?request_wire_observer:observer ~config ~messages () in
+              outcome.result, outcome.request_provenance
+            else if via_transport then
+              let transport = Complete.make_http_transport ~sw ~net:env#net () in
+              let request = transport_request config observer in
+              if stream then
+                let outcome = transport.invoke_stream ~on_event:(fun _ -> ()) request in
+                outcome.result, outcome.request_provenance
+              else
+                let outcome = transport.invoke_sync request in
+                outcome.result.response, outcome.request_provenance
+            else if stream then
+              let outcome = Complete_stream.complete_stream_http ~sw ~net:env#net
+                  ?request_wire_observer:observer ~config ~messages ~tools:[]
+                  ~on_event:(fun _ -> ()) () in
+              outcome.result, outcome.request_provenance
+            else
+              let outcome = Complete_sync.complete_http ~sw ~net:env#net
+                  ?request_wire_observer:observer ~config ~messages ~tools:[] () in
+              let response, _latency = outcome.result in
+              response, outcome.request_provenance
+          in
+          (match succeeds, response with
+           | true, Ok _ | false, Error (Http_client.HttpError {code=400;_}) -> ()
+           | _ -> fail "native outcome changed the provider result");
+          let body = match !captured with Some body -> body
+            | None -> fail "peer did not receive the generation body" in
+          match provenance with
+          | Completion_outcome.Cache_reused _
+          | Completion_outcome.Not_serialized
+          | Completion_outcome.External_unobserved
+          | Completion_outcome.Interrupted_unobserved -> fail "serialized evidence was lost"
+          | Completion_outcome.Serialized actual ->
+            check int "actual peer body length" (String.length body) actual.body_bytes;
+            check string "actual peer body digest"
+              Agent_core_sha256.(digest_string body |> to_hex) actual.body_sha256;
+            check (option int) "caller intent retained" (Some 200)
+              (Types.output_token_receipt_requested actual.output_token_receipt);
+            check (option int) "actual wire decision retained"
+              (Some Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "max_tokens" |> to_int))
+              (Types.output_token_receipt_effective actual.output_token_receipt))
+          [ None
+          ; Some (fun _ -> Error {Request_wire_observer.reason="observer rejected"})
+          ; Some (fun _ -> raise (Invalid_argument "observer failed")) ])
+        [true; false])
+      [false; true];
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let test_custom_transport_outcome () =
+  let response = Ok (mock_transport_response "custom") in
+  let transport = make_transport response in
+  let request = transport_request (make_config "http://not-observed.invalid") None in
+  let sync = transport.invoke_sync request in
+  let stream = transport.invoke_stream ~on_event:(fun _ -> ()) request in
+  let check_unobserved = function
+    | Completion_outcome.External_unobserved -> ()
+    | Completion_outcome.Cache_reused _
+    | Completion_outcome.Not_serialized | Completion_outcome.Serialized _
+    | Completion_outcome.Interrupted_unobserved ->
+      fail "custom callback invented a native serialization fact"
+  in
+  check_unobserved sync.request_provenance;
+  check_unobserved stream.request_provenance;
+  check bool "custom sync result unchanged" true (sync.result.response = response);
+  check bool "custom stream result unchanged" true (stream.result = response)
+;;
+
+let test_native_completion_before_serialization () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = Provider_config.make ~kind:Anthropic
+      ~model_id:"receipt-required-missing" ~base_url:"http://127.0.0.1:1" () in
+  let check_provenance = function
+    | Completion_outcome.Not_serialized -> ()
+    | Completion_outcome.Cache_reused _
+    | Completion_outcome.Serialized _
+    | Completion_outcome.External_unobserved
+    | Completion_outcome.Interrupted_unobserved -> fail "failed serializer invented a receipt"
+  in
+  let sync = Complete_sync.complete_http ~sw ~net:env#net
+      ~config ~messages ~tools:[] () in
+  check_provenance sync.request_provenance;
+  (match fst sync.result with
+   | Error (Http_client.AcceptRejected _) -> ()
+   | Error _ | Ok _ -> fail "missing required limit must fail before dispatch");
+  let stream = Complete_stream.complete_stream_http ~sw ~net:env#net
+      ~config ~messages ~tools:[] ~on_event:(fun _ -> ()) () in
+  check_provenance stream.request_provenance;
+  match stream.result with
+  | Error (Http_client.AcceptRejected _) -> ()
+  | Error _ | Ok _ -> fail "missing required stream limit must fail before dispatch"
+;;
+
+let test_public_unobserved_and_preflight () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = make_config "http://not-observed.invalid" in
+  let transport = make_transport (Ok (mock_transport_response "custom")) in
+  List.iter (fun stream ->
+    let outcome = if stream then
+      Complete.complete_stream ~sw ~net:env#net ~config ~messages ~transport
+        ~on_event:(fun _ -> ()) ()
+    else Complete.complete ~sw ~net:env#net ~config ~messages ~transport () in
+    (match outcome.request_provenance with
+     | Completion_outcome.External_unobserved -> ()
+     | Completion_outcome.Not_serialized | Completion_outcome.Serialized _
+     | Completion_outcome.Cache_reused _ | Completion_outcome.Interrupted_unobserved ->
+       fail "public custom path invented a native receipt");
+    match outcome.result with Ok _ -> () | Error _ -> fail "custom success lost")
+    [false; true];
+  let missing = Provider_config.make ~kind:Anthropic
+    ~model_id:"receipt-required-missing" ~base_url:"http://127.0.0.1:1" () in
+  List.iter (fun stream ->
+    let outcome = if stream then
+      Complete.complete_stream ~sw ~net:env#net ~config:missing ~messages
+        ~on_event:(fun _ -> ()) ()
+    else Complete.complete ~sw ~net:env#net ~config:missing ~messages () in
+    (match outcome.request_provenance with
+     | Completion_outcome.Not_serialized -> ()
+     | Completion_outcome.Serialized _ | Completion_outcome.Cache_reused _
+     | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+       fail "public rejection invented a receipt");
+    match outcome.result with
+    | Error (Http_client.AcceptRejected _) -> ()
+    | Error _ | Ok _ -> fail "missing required output must reject") [false; true]
+;;
+
+let test_prepared_rejection_retains_serialization () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = make_config "http://127.0.0.1:1" in
+  let prepared = Complete.prepare_request ~config ~messages () in
+  List.iter (fun stream ->
+    let serialized = match Complete.admit_request_body ~stream prepared with
+      | Ok request -> request
+      | Error _ -> fail "fixture must admit a serialized body" in
+    let outcome = if stream then
+      Complete.complete_stream_serialized ~sw ~net:env#net serialized
+        ~admission_timeout_s:(-1.) ~on_event:(fun _ -> ()) ()
+    else
+      Complete.complete_serialized ~sw ~net:env#net serialized
+        ~call_timeout_s:(-1.) () in
+    (match outcome.result with
+     | Error (Http_client.AcceptRejected _) -> ()
+     | Error _ | Ok _ -> fail "invalid declared deadline must reject before dispatch");
+    match outcome.request_provenance with
+    | Completion_outcome.Serialized request ->
+      check bool "prepared serialization survives a pre-dispatch rejection" true
+        (request.body_bytes > 0)
+    | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+    | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+      fail "pre-dispatch rejection discarded an existing serialized artifact")
+    [false; true]
+;;
+
+let test_prepared_wrong_mode_retains_serialization () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = make_config "http://127.0.0.1:1" in
+  let prepared = Complete.prepare_request ~config ~messages () in
+  List.iter (fun stream ->
+    let serialized = match Complete.admit_request_body ~stream prepared with
+      | Ok request -> request | Error _ -> fail "fixture serialization failed" in
+    let outcome = if stream then
+      Complete.complete_serialized ~sw ~net:env#net serialized ()
+    else Complete.complete_stream_serialized ~sw ~net:env#net serialized
+      ~on_event:(fun _ -> ()) () in
+    (match outcome.result with
+     | Error (Http_client.AcceptRejected _) -> ()
+     | Error _ | Ok _ -> fail "wrong streaming shape must reject before dispatch");
+    match outcome.request_provenance with
+    | Completion_outcome.Serialized _ -> ()
+    | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+    | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+      fail "wrong mode rejection discarded the supplied serialization") [false; true]
+;;
+
+let test_prepared_work_timeout_retains_serialization () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    let clock = Eio_mock.Clock.make () in
+    let captured = ref None in
+    let url = start_mock_server ~sw ~net:env#net ~capture_body:captured
+      ~on_request:(fun () ->
+        Eio_mock.Clock.set_time clock 1.;
+        Eio.Fiber.await_cancel ()) (anthropic_response "must time out") in
+    let config = make_config url in
+    let prepared = Complete.prepare_request ~config ~messages () in
+    let serialized = match Complete.admit_request_body ~stream:false prepared with
+      | Ok request -> request | Error _ -> fail "fixture serialization failed" in
+    let outcome = Complete.complete_serialized ~sw ~net:env#net ~clock
+      ~call_timeout_s:1. serialized () in
+    (match outcome.result with
+     | Error (Http_client.TimeoutError {phase=Http_client.Non_streaming_body;_}) -> ()
+     | Error _ | Ok _ -> fail "peer-triggered clock must expire the provider round trip");
+    (match outcome.request_provenance with
+     | Completion_outcome.Serialized request ->
+       let body = match !captured with Some body -> body
+         | None -> fail "deadline moved before peer received the request" in
+       check string "interruption preserves known peer body"
+         Agent_core_sha256.(digest_string body |> to_hex) request.body_sha256
+     | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+     | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+       fail "work timeout discarded known prepared serialization");
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let () =
+  run
+    "complete_http"
+    [ ( "native_request_provenance"
+      , [ test_case "success/error retain receipt without observer delivery"
+            `Quick (test_native_completion_outcome ~via_transport:false)
+        ; test_case "native transport factory preserves the received wire evidence"
+            `Quick (test_native_completion_outcome ~via_transport:true)
+        ; test_case "public sync/stream outcomes preserve native success/error evidence"
+            `Quick (test_native_completion_outcome ~public:true ~via_transport:false)
+        ; test_case "public outcomes preserve factory success/error evidence"
+            `Quick (test_native_completion_outcome ~public:true ~via_transport:true)
+        ; test_case "custom callbacks explicitly leave native wire unobserved"
+            `Quick test_custom_transport_outcome
+        ; test_case "public custom and preflight states remain explicit"
+            `Quick test_public_unobserved_and_preflight
+        ; test_case "prepared evidence survives pre-dispatch rejection"
+            `Quick test_prepared_rejection_retains_serialization
+        ; test_case "wrong mode rejection preserves prepared evidence"
+            `Quick test_prepared_wrong_mode_retains_serialization
+        ; test_case "work timeout preserves prepared evidence"
+            `Quick test_prepared_work_timeout_retains_serialization
+        ; test_case "failed serialization invents no receipt"
+            `Quick test_native_completion_before_serialization ] )
+    ; ( "Vertex native", [test_case "OAuth native sync and streaming tool response" `Quick test_vertex_native_transport; test_case "refresh failure blocks HTTP" `Quick test_refresh_failure_prevents_http] )
+    ; ( "Responses tool image wire"
+      , [ test_case "sync native tool images and history" `Quick
+            (test_responses_tool_images_on_http ~stream:false)
+        ; test_case "stream native tool images and history" `Quick
+            (test_responses_tool_images_on_http ~stream:true) ] )
+    ; ( "anthropic image wire"
+      , [ test_case "sync history and tool image source carriers" `Quick
+            (test_anthropic_image_sources_on_http ~stream:false)
+        ; test_case "stream history and tool image source carriers" `Quick
+            (test_anthropic_image_sources_on_http ~stream:true) ] )
+    ; ( "complete"
+      , [ test_case "anthropic ok" `Quick test_complete_anthropic_ok
+        ; test_case
+            "Kimi path override stays Anthropic"
+            `Quick
+            test_complete_kimi_path_override_stays_anthropic_codec
+        ; test_case
+            "OpenAI-compatible Kimi uses OpenAI codec"
+            `Quick
+            test_complete_openai_compatible_kimi_uses_openai_codec
+        ; test_case
+            "HTTP rejects typed empty completion"
+            `Quick
+            test_complete_http_rejects_typed_empty_completion
+        ; test_case "HTTP preserves content-free terminal" `Quick
+            test_complete_http_preserves_content_free_terminal
+        ; test_case "http error" `Quick test_complete_http_error
+        ; test_case
+            "wire observer sees exact sync body"
+            `Quick
+            test_complete_request_wire_observer_sees_exact_sync_body
+        ; test_case
+            "invalid URI rejects before wire observation"
+            `Quick
+            test_complete_invalid_uri_rejects_before_wire_observation
+        ; test_case
+            "stream body limit includes final wire injection"
+            `Quick
+            test_complete_stream_final_wire_injection_grows_the_body
+        ; test_case
+            "empty http error body has context"
+            `Quick
+            test_complete_http_empty_error_body_has_context
+        ; test_case "openai ok" `Quick test_complete_openai_ok
+        ; test_case
+            "openai responses sync ok"
+            `Quick
+            test_complete_openai_responses_sync_ok
+        ; test_case
+            "openai responses json mode body"
+            `Quick
+            test_complete_openai_responses_json_mode_body
+        ; test_case
+            "openai responses stream ok"
+            `Quick
+            test_complete_stream_openai_responses_ok
+        ; test_case
+            "openai mlx-vlm telemetry"
+            `Quick
+            test_complete_openai_mlx_vlm_telemetry
+        ; test_case
+            "sync latency uses injected clock"
+            `Quick
+            test_complete_sync_latency_uses_injected_clock
+        ; test_case
+            "latency clamps negative injected clock"
+            `Quick
+            test_latency_counter_clamps_negative_injected_clock
+        ; test_case "trace context headers" `Quick test_complete_trace_context_headers
+        ; test_case "non-retryable" `Quick test_complete_non_retryable
+        ; test_case
+            "body_timeout_s fires under server delay"
+            `Quick
+            test_complete_body_timeout_fires
+        ; test_case
+            "body_timeout_s no-op on fast response"
+            `Quick
+            test_complete_body_timeout_does_not_fire_on_fast_response
+        ; test_case
+            "sync uses only outer body timeout"
+            `Quick
+            test_complete_sync_uses_only_outer_body_timeout
+        ; test_case
+            "body_timeout_s without clock rejects before request"
+            `Quick
+            test_complete_body_timeout_without_clock_rejected_before_request
+        ; test_case
+            "body_timeout_s requires a finite positive value before request"
+            `Quick
+            test_complete_body_timeout_requires_finite_positive_value_before_request
+        ; test_case
+            "no body timeout and no clock stays unbounded"
+            `Quick
+            test_complete_without_body_timeout_or_clock_succeeds
+        ; test_case
+            "injected transport without body timeout stays unbounded"
+            `Quick
+            test_complete_injected_transport_without_timeout_is_unbounded
+        ; test_case
+            "injected transport rejects invalid deadlines before call"
+            `Quick
+            test_complete_injected_transport_rejects_invalid_deadlines_before_call
+        ; test_case
+            "injected transport accepts a positive body timeout"
+            `Quick
+            test_complete_injected_transport_positive_timeout_succeeds
+        ; test_case
+            "injected transport expiry is a typed body timeout"
+            `Quick
+            test_complete_injected_transport_timeout_is_typed
+        ; test_case
+            "injected transport inner timeout is not relabelled"
+            `Quick
+            test_complete_injected_transport_inner_timeout_is_not_relabelled
+        ; test_case
+            "deadline preflight precedes cache hit"
+            `Quick
+            test_complete_deadline_preflight_precedes_cache_hit
+        ; test_case
+            "unsupported reasoning rejects before sync or stream I/O"
+            `Quick
+            test_complete_rejects_unsupported_reasoning_before_io
+        ; test_case
+            "missing Anthropic output ceiling rejects before sync or stream I/O"
+            `Quick
+            test_complete_rejects_missing_anthropic_output_ceiling_before_io
+        ] )
+    ; "cache",
+      [ test_case "store and hit" `Quick test_complete_cache_store_and_hit
+      ; test_case "catalog defaults are part of the HTTP identity" `Quick
+          test_response_cache_tracks_catalog_defaults
+      ; test_case "reasoning source projects into HTTP cache identity" `Quick
+          test_response_cache_tracks_reasoning_source_projection
+      ; test_case "cached reasoning is not restamped" `Quick
+          test_response_cache_does_not_restamp_cached_reasoning
+      ; test_case "admitted body is reused and cache hits skip dispatch" `Quick
+          test_response_cache_reuses_admitted_body_without_dispatch_on_hit
+      ]
+    ; ( "metrics"
+      , [ test_case "callbacks" `Quick test_complete_metrics
+        ; test_case "tool call callback" `Quick test_complete_tool_call_metrics
+        ; test_case "error callback" `Quick test_complete_error_metrics
+        ; test_case
+            "direct streaming HTTP error uses metrics fallback"
+            `Quick
+            test_complete_stream_http_error_metrics_uses_fallback
+        ; test_case
+            "injected HTTP transport preserves streaming status"
+            `Quick
+            test_complete_injected_http_transport_preserves_stream_status_metrics
+        ; test_case "transport http ok" `Quick test_complete_transport_http_metrics_ok
+        ; test_case
+            "transport http error"
+            `Quick
+            test_complete_transport_http_metrics_error
+        ; test_case
+            "transport mock emits status"
+            `Quick
+            test_complete_transport_mock_emits_status
+        ; test_case "global default is noop" `Quick test_metrics_global_default_is_noop
+        ; test_case "global set and get" `Quick test_metrics_global_set_and_get
+        ; test_case
+            "global used when no per-call metrics"
+            `Quick
+            test_metrics_global_used_when_no_per_call_metrics
+        ] )
+    ; ( "stream"
+      , [ test_case "sse ok" `Quick test_complete_stream_ok
+        ; test_case
+            "malformed SSE payload is a typed wire error"
+            `Quick
+            test_complete_stream_malformed_payload_is_wire_error
+        ; test_case
+            "provider error envelope is not a wire failure"
+            `Quick
+            test_complete_provider_error_envelope_is_not_a_wire_error
+        ; test_case
+            "a declared provider condition is that HttpError"
+            `Quick
+            test_complete_declared_provider_condition_is_that_http_error
+        ; test_case
+            "refused frames preserve optional diagnostics and terminal ordering"
+            `Quick
+            test_complete_stream_refused_frame_diagnostics
+        ; test_case
+            "malformed Ollama NDJSON preserves its wire format"
+            `Quick
+            test_complete_ollama_malformed_ndjson_is_wire_error
+        ; test_case
+            "Ollama provider errors are not wire failures"
+            `Quick
+            test_complete_ollama_provider_error_is_not_wire_error
+        ; test_case
+            "missing Ollama NDJSON fields are wire errors"
+            `Quick
+            test_complete_ollama_missing_required_ndjson_field_is_wire_error
+        ; test_case
+            "incomplete Ollama NDJSON preserves its wire format"
+            `Quick
+            test_complete_ollama_incomplete_ndjson_preserves_wire_format
+        ; test_case
+            "Kimi Anthropic Messages SSE codec"
+            `Quick
+            test_complete_kimi_anthropic_stream_codec
+        ; test_case
+            "wire observer sees exact stream body"
+            `Quick
+            test_complete_request_wire_observer_sees_exact_stream_body
+        ; test_case
+            "HTTP stream rejects typed empty completion"
+            `Quick
+            test_complete_stream_http_rejects_typed_empty_completion
+        ; test_case "HTTP stream preserves content-free terminal" `Quick
+            test_complete_stream_http_preserves_content_free_terminal
+        ; test_case
+            "preserves thinking signature"
+            `Quick
+            test_complete_stream_preserves_thinking_signature
+        ; test_case
+            "on_event exceptions are nonfatal"
+            `Quick
+            test_complete_stream_on_event_exception_is_nonfatal
+        ; test_case
+            "wire observer rejection is typed and nonfatal"
+            `Quick
+            test_complete_stream_wire_observer_rejection_is_typed_nonfatal
+        ; test_case
+            "wire failure telemetry exception is nonfatal"
+            `Quick
+            test_complete_stream_wire_failure_telemetry_exception_is_nonfatal
+        ; test_case
+            "transport on_event exceptions are nonfatal"
+            `Quick
+            test_complete_stream_transport_on_event_exception_is_nonfatal
+        ; test_case
+            "built-in stream preserves repeated incremental text"
+            `Quick
+            test_complete_stream_preserves_repeated_incremental_text
+        ; test_case
+            "built-in stream preserves repeated text and later output"
+            `Quick
+            test_complete_stream_preserves_repeated_text
+        ; test_case
+            "built-in stream preserves repeated reasoning and later output"
+            `Quick
+            test_complete_stream_preserves_repeated_reasoning
+        ; test_case
+            "built-in stream replaces invalid content with typed failure"
+            `Quick
+            test_complete_stream_replaces_invalid_content_with_typed_failure
+        ; test_case
+            "active chunks exceed idle total"
+            `Quick
+            test_complete_stream_active_chunks_can_exceed_idle_timeout_total
+        ; test_case
+            "stream idle timeout still fires"
+            `Quick
+            test_complete_stream_idle_timeout_still_fires
+        ; test_case
+            "an idle gap after output keeps the production state"
+            `Quick
+            test_complete_stream_idle_after_output_keeps_the_production_state
+        ; test_case
+            "a first-event timeout's telemetry is the first-token budget"
+            `Quick
+            test_complete_stream_first_event_timeout_telemetry_is_ttft
+        ; test_case
+            "Responses opening frame keeps the first-event budget"
+            `Quick
+            test_complete_stream_responses_prelude_keeps_first_event_budget
+        ; test_case "streaming metrics" `Quick test_complete_stream_metrics
+        ; test_case
+            "OpenAI-compat stream captures llama-server timings"
+            `Quick
+            test_complete_stream_openai_captures_llama_server_timings
+        ; test_case
+            "unknown stream latency stays unknown"
+            `Quick
+            test_complete_stream_unknown_latency_stays_unknown
+        ; test_case
+            "transport arm idle timeout (Agent Core contract)"
+            `Quick
+            test_complete_stream_transport_arm_idle_timeout
+        ; test_case
+            "long thinking is not cut off (bug #10 regression)"
+            `Quick
+            test_complete_stream_long_thinking_is_not_cut_off
+        ; test_case
+            "Anthropic omitted idle has no provider default"
+            `Quick
+            test_anthropic_omitted_idle_has_no_provider_default
+        ; test_case
+            "Ollama omitted idle has no provider default"
+            `Quick
+            test_ollama_omitted_idle_has_no_provider_default
+        ; test_case
+            "transport Anthropic omitted idle has no provider default"
+            `Quick
+            test_transport_anthropic_omitted_idle_has_no_provider_default
+        ; test_case
+            "clock-jump fixture fires explicit idle timeout"
+            `Quick
+            test_clock_jump_fixture_fires_explicit_idle_timeout
+        ] )
+    ]
+;;

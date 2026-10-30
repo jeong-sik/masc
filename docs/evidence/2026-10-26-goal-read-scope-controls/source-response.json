@@ -1,0 +1,114 @@
+{
+  "schema": "masc.goal.read-scope.proposal.review-response.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T19:42:54.146617+00:00",
+  "verdict": "AGREE_PASS_SCOPED_PRIVATE_SOURCE_PROPOSAL_EFFECT_UNMEASURED",
+  "scope": "Response to the full9152B independent proposal review and the four frozen private proposal files. No application, runtime interrogation or new model/control execution. Existing semantic FAIL is preserved as its own input scope.",
+  "review_input": {
+    "label": "../masc-goal-read-scope-proposal-review-20261026-v1/review.json",
+    "bytes": 9152,
+    "sha256": "eb4a5b8d94863b66d280718adb228674ea83185b1b0cea13816ccfbbe4a5ef84",
+    "read_in_full": true
+  },
+  "proposal_identity": {
+    "baseline_head": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+    "baseline_prompt_bytes": 8143,
+    "baseline_prompt_sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d",
+    "candidate_prompt_bytes": 9182,
+    "candidate_prompt_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "plan_state": "PROPOSED_NOT_APPLIED_UNEXECUTED",
+    "all_four_inputs_read": true,
+    "exact_unified_patch_matches": true,
+    "added_lines": 12,
+    "removed_lines": 0,
+    "byte_increase": 1039,
+    "placeholders_and_section_interfaces_unchanged": true
+  },
+  "adjudication": [
+    {
+      "axis": "Declared subscopes within one condition",
+      "decision": "AGREE_PASS",
+      "basis": "The new paragraph is explicitly conditional on already required subject/state/delivery-path observations. It prevents an observed subcondition from attesting an unobserved one and distinguishes preparatory/readiness conclusions from the observations behind them. It adds neither a new actor/path list nor a universal extra condition."
+    },
+    {
+      "axis": "Actual Tool content and returned range",
+      "decision": "AGREE_PASS",
+      "basis": "The candidate uses returned content/ranges rather than file name, total file_bytes or origin-log coordinates as proof of what was read. Empty successful EOF is not equated with absence or a failed behavior. Necessary observations may already lie inside a partial page; otherwise further targeted lookup or explicit unverified scope remains possible. No whole-file, all-page or fixed-read-count gate is introduced."
+    },
+    {
+      "axis": "Scalar and reported-value metrics",
+      "decision": "PRESERVED",
+      "basis": "Existing text still forbids undeclared reruns/additional proof for a metric measuring a reported number. The new paragraphs do not require execution originals for every metric or invalidate metadata when that metadata is itself the declared measured object. Their point is not to mistake metadata for unread substantive contents."
+    },
+    {
+      "axis": "Declared aggregation and shared originals",
+      "decision": "PRESERVED",
+      "basis": "The baseline aggregation ending remains unchanged and permits the declared multi-run calculation with identities/scopes retained. One common returned body may support several conditions or subscopes if it actually contains their observations. The new distinction is not a separate-file/tool-call/producer requirement."
+    },
+    {
+      "axis": "Tool/API and authority",
+      "decision": "UNCHANGED_WITHIN_FOUR_FILE_SOURCE_SCOPE",
+      "basis": "The complete delta consists of12 added prompt lines. Proof/lookup section names, placeholders, existing verdict/reason contract, read-only authority and human-confirmation separation remain unchanged. Referencing offset/next_offset uses the existing file-read surface; it does not add schema fields or permissions. This response does not independently exercise every adapter."
+    }
+  ],
+  "relation_to_actual159_FAIL": {
+    "frozen_review_label": "../masc-goal-originals-428e-sufficiency-review-20261026-v1/review.json",
+    "bytes": 49418,
+    "sha256": "e8a971f45f663b3f512ba9806bb968f86359724ed62b2b564377b825f8a63c28",
+    "existing_verdict": "FAIL_PROOF_SUFFICIENCY_P2_A3_AND_A7_UNOBSERVED_REQUIRED_SUBCONDITIONS",
+    "assessment": "The two generic additions match the observed classes of omission: A3 operator observations were expanded to judge delivery, A7 Goal state/readiness summaries were expanded to lifecycle/external-acceptance observations, and origin-log coordinates led to empty or unrelated excerpt pages. This is source rationale, not evidence that0dc corrects a model verdict.",
+    "retained_effect": "The428e isolated replay’s actual APPROVE/proof_proven/awaiting_confirmation and its independent proof-sufficiency FAIL remain unchanged. No retrospective backfill, new valid original11 proof or primary3067 proof follows from the proposal.",
+    "new_audit_limit": "The semantic49,418B review is this reviewer’s prior frozen report; its hash/identity is reused without repeating the159 protocol audit or counting it as another independent execution."
+  },
+  "prospective_design": {
+    "N_P_R_status": "Prospective and unexecuted in the supplied plan, not observed results.",
+    "what_it_could_measure": "Finite partial-content N/P controls can test whether necessary recorded command observations after a page boundary affect lookup/verdict behavior. A reported-value control can check that the existing exception remains usable.",
+    "what_it_cannot_establish_alone": "Even if later results are correct, these controls alone do not establish arbitrary actor/state/recipient separation, resolve the specific retainedA3/A7 proof omissions, prove complete original11 behavior or provide general reliability/causal A/B evidence.",
+    "no_new_requirement": "No additional mandatory control or success gate is imposed by this response. Any later claim must stay within the actual measured design."
+  },
+  "application_boundary": {
+    "state_basis": "Plan declares PROPOSED_NOT_APPLIED_UNEXECUTED; parent reports candidate source is not applied and Task2686 claim was normally refused while2684 was held. These are handoff facts, not new API or checkout observations by this reviewer.",
+    "Task_boundary": "Task creation/claim sequencing does not prove effective-prompt application or measured repair. No Task or Goal state is changed here.",
+    "source_review_boundary": "PASS applies to the private0dc proposal. It is not a formal GitHub approval of a new head, not a change to approved/unmerged577 and not whole-stack admission or operational application."
+  },
+  "inputs": [
+    {
+      "label": "proposal/baseline.md",
+      "bytes": 8143,
+      "sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d"
+    },
+    {
+      "label": "proposal/candidate.md",
+      "bytes": 9182,
+      "sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400"
+    },
+    {
+      "label": "proposal/plan.json",
+      "bytes": 1864,
+      "sha256": "76de74b72fd92df51aff36112091d714c70819b4cc054a47eed7ac866110565f"
+    },
+    {
+      "label": "proposal/proposal.patch",
+      "bytes": 2237,
+      "sha256": "3d997fc82fac3b44f2bbe8930be40b1e60287a7b7fe56bc46b344d47b79ba2b5"
+    }
+  ],
+  "findings": {
+    "new_P0": [],
+    "new_P1": [],
+    "new_P2": [],
+    "retained_limits": [
+      "Existing428e A3/A7 proof-sufficiency P2 remains",
+      "Candidate application and effectiveness unmeasured",
+      "Actor/state/delivery-path general sufficiency not established by prospective partial-content controls",
+      "Primary Goal proof/human confirmation, merge/install and whole-stack admission remain separate"
+    ]
+  },
+  "effects": {
+    "API_Git_model_test_process_CI_build_Docker_Board_calls": 0,
+    "Task_Goal_source_PR_runtime_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "formal_review_or_merge_posts": 0,
+    "only_new_output": "response.json in the new external response directory"
+  }
+}

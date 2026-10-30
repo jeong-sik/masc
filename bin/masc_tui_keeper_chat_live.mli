@@ -1,0 +1,248 @@
+(** Incremental reader for the keeper chat stream, for the live view.
+
+    {!Masc_tui_keeper_chat_projection} decodes the same stream once it has
+    ended: it validates every field and identity, and returns the turn's
+    outcome. It reads none of the payloads on the way — text deltas, tool call
+    names, and thinking fragments are checked for shape and dropped. A turn
+    that read six files and edited two therefore reaches the screen looking
+    exactly like one answered from memory, and nothing at all reaches it until
+    the whole turn is over.
+
+    This reads the payloads, from chunks, as they arrive.
+
+    {2 Live and terminal observations}
+
+    Live deltas feed the transcript and can release queued input or update a
+    control token before the stream ends. A request-scoped reader therefore
+    checks acceptance against that request before publishing it. The final
+    turn outcome still comes from the strict whole-body decode over the same
+    bytes. The live acceptance does not independently prove the workspace or
+    validate every later event's identity.
+
+    {2 Chunk boundaries}
+
+    [feed] takes bytes, not lines. A chunk may end mid-line, and the next one
+    may carry the rest. Deltas are built only from complete blank-line-terminated
+    events; data fields are joined before decoding. *)
+
+type args_fragment =
+  | Args_delta of string
+      (** Argument text to append to what this call has accumulated. *)
+  | Args_snapshot of string
+      (** Argument text that replaces it — some providers send a snapshot
+          instead of, not in addition to, their deltas. *)
+
+(** Where a request stood when the server accepted it. *)
+type admission =
+  | Queued  (** Accepted and waiting its turn in the keeper's queue. *)
+  | Running  (** Accepted and started. *)
+  | Settled
+      (** Already finished when it was accepted: an idempotent replay of an
+          operation the server had already run. *)
+
+type tool_occurrence =
+  { stream_scope : int
+  ; block_index : int
+  ; provider_message_id : string option
+  ; tool_call_id : string option
+  }
+(** Server-owned live row identity plus optional provider correlations. *)
+
+type stream_usage =
+  { input_tokens : int option
+  ; output_tokens : int option
+  ; cache_read_input_tokens : int option
+  ; cache_creation_input_tokens : int option
+  }
+(** Token counters a provider request reported mid-stream. They are cumulative
+    inside that one request, not across the turn. A field the provider
+    did not report stays [None]: the screen has to be able to say "not
+    reported" rather than draw a zero it was never told. *)
+
+val stream_usage_of_usage_json : Yojson.Safe.t -> stream_usage option
+(** Read one [usage] object, in the shape
+    [Keeper_chat_events.delta_usage_to_json] writes on both the live wire and
+    the journal. [None] when it is not an object or reports no counter at all,
+    so an empty delta becomes no row rather than a row of blanks. *)
+
+(** One thing that happened in the turn, as far as the live view is concerned. *)
+type delta =
+  | Run_started
+  | Batch_bound of Masc_tui_keeper_chat_projection.batch_binding
+  | Runtime_attempt_started of
+      { runtime_id : string option
+      ; attempt_index : int option
+      }
+      (** New resolved-runtime attempt: discard unfinished text/thinking from
+          the prior attempt while retaining tool evidence. *)
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; retry : Runtime_claude_api_retry.t
+      }
+  | Stream_model_started of
+      { generation : int option
+      ; message_id : string option
+      ; stream_scope : int option
+      ; model : string
+      ; usage : stream_usage option
+      }
+      (** Provider response metadata. The bridge scope is retained across repeated
+          starts, including a surviving start following scoped text. The optional
+          provider id is correlation data, not response identity. *)
+  | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
+      (** Exact run generation/scope/index metadata, separate from body bytes.
+          Ended closes only the named Text/Thinking occurrence. *)
+  | Stream_model_stopped of Masc.Keeper_chat_events.response_identity option
+      (** The provider response ended; the Keeper turn may still be running. *)
+  (** Supplied response generation; None means no generation was observed.
+      Owned details require a scope and cannot overwrite newer response facts. *)
+  | Stream_details of
+      { generation : int option
+      ; stream_scope : int option
+      ; usage : stream_usage option
+      ; stop_reason : Agent_core.Types.stop_reason option
+      }
+      (** What the provider said about the message in flight: the counters so
+          far, and why it stopped writing ([end_turn], [max_tokens],
+          [refusal], …). One wire event carries both and the dashboard keeps
+          them as one record ([dashboard/src/keeper-stream.ts]
+          KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
+          least one of the two is present. *)
+  | Text of {text : string; response : Masc.Keeper_chat_events.text_response}  (** Assistant text to append. *)
+  | Thinking of
+      { text : string
+      ; index : int
+      ; response : Masc.Keeper_chat_events.response_identity option
+      }
+      (** Supplied reasoning bytes, the stream content block they belong to
+          ([index], within one response) and their observed response identity.
+          None preserves unbound bytes without granting response ownership.
+          Deltas of one block continue one reasoning stretch; a different
+          [index] or response starts another. *)
+  | Thinking_snapshot of
+      { text : string
+      ; index : int
+      ; response : Masc.Keeper_chat_events.response_identity
+      }
+      (** Replace this exact response/block. A replacement requires the
+          producer's response identity; unbound bytes cannot replace history. *)
+  | Media of Masc.Keeper_chat_events.generated_media
+  | Native_tool_started of
+      { occurrence : tool_occurrence; tool_name : string option }
+  | Native_tool_progress of
+      { occurrence : tool_occurrence; progress : Runtime_native_tools.progress }
+  | Native_tool_ended of
+      { occurrence : tool_occurrence; completion : Runtime_native_tools.completion }
+  | Tool_started of
+      { occurrence : tool_occurrence
+      ; tool_name : string
+      }
+  | Tool_admitted of
+      { occurrence : tool_occurrence
+      ; provider_tool_name : string
+      ; tool_name : string
+      }
+  | Tool_args of
+      { occurrence : tool_occurrence
+      ; fragment : args_fragment
+      }
+  | Tool_ended of { occurrence : tool_occurrence }
+  | Tool_result of
+      { occurrence : tool_occurrence
+      ; execution_id : string
+      }
+      (** Exact server occurrence plus the canonical execution identity after
+          the tool-call log commit. Provider ids remain optional correlation
+          data. Missing occurrence coordinates or canonical identity is an
+          {!Undecodable} event. *)
+  | Stream_protocol_error of
+      { quarantined_occurrence : tool_occurrence option
+      ; detail : string
+      }
+      (** Typed server diagnostic. Only [quarantined_occurrence] authorizes a
+          live tool row to enter the failed state; an absent occurrence remains
+          a turn-level diagnostic. *)
+  | Approval_requested of
+      { call_id : string
+      ; tool_name : string
+      ; args : string
+      ; question : string
+      ; because : string
+      }
+      (** The turn is held at this call until it is answered. [because] is
+          why it was held; the pane draws it under the question. *)
+  | Approval_settled of
+      { call_id : string
+      ; outcome : string
+      }
+      (** How the wait ended -- the answer, or that none came. Drawn so a
+          prompt stops being shown, including on the paths where nobody
+          answered. *)
+  | Accepted of
+      { admission : admission
+      ; queue_length : int
+      ; interactive : Masc_tui_keeper_chat_projection.interactive_receipt option
+            (** How many operations the keeper's chat queue held when the
+                server accepted this one. The server counts the whole queue,
+                so this is not "how many are ahead of this one" and must not
+                be drawn as though it were. *)
+      }
+      (** The server took the request. Until this arrives, a pane can say the
+          request went out and nothing more -- which is what left a wait of
+          minutes reading as "waiting for the run to start" with no way to
+          tell a busy keeper from a stuck one. *)
+  | Checkpoint  (** The turn is continuing past a context checkpoint. *)
+  | External_effect_completed
+  | Reply_details of
+      { reply : string
+      ; turn_outcome : Masc.Keeper_turn_outcome.t
+      ; turn_ref : string
+      ; terminal_stream_scope : int option
+      }
+      (** The terminal reply as the server recorded it (KEEPER_REPLY_DETAILS):
+          the text the transcript keeps, the typed outcome, and the store join
+          key. The strict decoder validates the same event; this is what lets
+          the per-operation log project the reply row without a second
+          decode. *)
+  | Run_failed of { message : string }
+  | Run_finished
+  | Undecodable of string
+      (** A line that could not be read, and why. Reported rather than
+          skipped: a live pane that silently drops what it does not
+          understand looks like a keeper that did nothing.
+
+          Event types this reader does not display — but which the strict
+          decode accepts — are not reported here; they produce no delta at
+          all. An event type neither knows is [Undecodable] here and an error
+          there, so the two stay consistent about what the stream may
+          contain. *)
+
+type t
+
+val create : ?request:Masc_tui_keeper_chat_projection.request -> unit -> t
+(** When [request] is supplied, an acceptance must match that request and
+    never advances the journal cursor. A pre-acceptance error remains visible;
+    any other earlier event, or a mismatched or repeated acceptance, stops
+    this decoder. Other live event identities are not checked here. *)
+
+val requires_reconnect : t -> bool
+(** An invalid scoped stream must be closed and reconciled with the same
+    request. A pre-acceptance RUN_ERROR is left for whole-body decoding. *)
+
+type observed_delta = { seq : int option; at : float option; delta : delta }
+(** Server event timestamp in epoch seconds, or [None] when not provided. *)
+
+val feed : t -> string -> observed_delta list
+(** [feed t chunk] adds [chunk] to what has been read and returns the deltas
+    completed by it, in stream order, each with the journal seq of the frame
+    that carried it: the value of the frame's [id:] line, or [None] for a
+    frame without one (the acceptance event and the settle-time run_error
+    never went through the bus). For a request-scoped reader, acceptance is
+    always unsequenced even if the frame includes an id. The id is held across a chunk boundary and
+    dropped at the frame's end, so an id-less frame cannot inherit the seq of
+    the frame before it. The server writes [id:] before [data:] in every
+    frame ([Sse_wire.add_optional_headers]); an id after its data would tag
+    nothing. Bytes of a line that is still incomplete are held until the rest
+    arrives -- so a decoder must not be carried across a reconnect: a stream
+    cut after an [id:] line would leave the seq and the partial bytes armed
+    for the next stream's first frame. *)

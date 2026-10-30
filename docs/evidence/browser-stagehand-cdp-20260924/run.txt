@@ -1,0 +1,24 @@
++  324ms devtools port 51148
++  378ms browser Chrome/156.0.8071.0
++  415ms Extensions.loadUnpacked -> hjhcoogdpgkmdicaipfcopkjagnfailn (matches id computed from path) origins: extension
++  585ms runtime marker {"protocolVersion":"2.0.0","serverInfo":{"name":"stagehand","version":"1.0.2"}}
++  592ms extension -> host request: stagehand.log (105 bytes)
++  628ms stagehand.init -> {"initialized":true,"pages":[{"page_id":"8122312C077222CBD854EA67233517C6","url":"about:blank"}]}
++  676ms page.goto ok (48ms) {"page":{"page_id":"8122312C077222CBD854EA67233517C6","url":"http://127.0.0.1:51146/"},"response":{"response_id":"9d7eb861-6fcd-420b-90dd-d1980568bdd9","url":"http://127.0.0.1:51146/","status":200,"status_text":"OK","headers":{"connection":
++  730ms page.screenshot ok (54ms) {"data":"iVBORw0KGgoAAAANSUhEUgAABQAAAALJCAIAAABkxhlSAAAQAElEQVR4nOzde/xVA774/5XkkhqEitQklNthlIjcOTrMjGu5zRyXjDAX95FLRC4TZtzvxhHjGo7LyWBQSO41OKMopFKJkEqkpn7v32c97Mf+fqpPxUTO+/n84/NYe+219l6fT7s/Xvu99trLzp07twAAAID/65YpAAAAIAEBDAAAQAoCGAAAgBQ
++  731ms screenshot saved ./out/fixture.png
++  747ms extension -> host request: stagehand.log (225 bytes)
++  748ms extension -> host request: llm.generate (1464 bytes)
++  748ms   llm.generate: messages=1 response_format=json_schema schema_props=[heading,price] tools=0
++  750ms extension -> host request: llm.generate (1469 bytes)
++  750ms   llm.generate: messages=1 response_format=json_schema schema_props=[progress,completed] tools=0
++  750ms extension -> host request: stagehand.log (205 bytes)
++  750ms stagehand.extract ok (19ms) {"data":{"heading":"Order form","price":"42 USD"},"metadata":{"cache":{"status":"DISABLED"},"usage":{"input_tokens":0,"output_tokens":0,"reasoning_tokens":0,"cached_input_tokens":0,"inference_time_ms":3}}}
++ 1281ms extension -> host request: llm.generate (4834 bytes)
++ 1281ms   llm.generate: messages=1 response_format=json_schema schema_props=[action,twoStep] tools=0
++ 1285ms extension -> host request: stagehand.log (233 bytes)
++ 1319ms stagehand.act ok (569ms) {"data":{"success":true,"message":"Action [click] performed successfully on selector: xpath=/html[1]/body[1]/button[1]","action_description":"Submit order button","actions":[{"selector":"xpath=/html[1]/body[1]/button[1]","description":"Subm
++ 1325ms page.evaluate clicked? ok (6ms) {"value":"yes"}
++ 1327ms stagehand.metrics ok (2ms) {"act_prompt_tokens":0,"act_completion_tokens":0,"act_reasoning_tokens":0,"act_cached_input_tokens":0,"act_inference_time_ms":9,"extract_prompt_tokens":0,"extract_completion_tokens":0,"extract_reasoning_tokens":0,"extract_cached_input_token
++ 1328ms recorded extension->host requests: stagehand.log, stagehand.log, llm.generate, llm.generate, stagehand.log, llm.generate, stagehand.log
++ 1329ms done

@@ -1,0 +1,1254 @@
+function browserScene(args) {
+  const linkHref = element => {
+    if (element.localName !== 'a') return null;
+    const value = element.href;
+    const raw = typeof value === 'string' ? value : value?.baseVal;
+    // XLink is the SVG spelling of href and only an SVG anchor is followed
+    // through it. An HTML anchor carrying only an xlink:href has an empty
+    // .href, and resolving "" against baseURI advertised the current page as
+    // the destination -- selecting that control reloaded the page instead of
+    // following the XLink value.
+    const xlink = typeof SVGAElement !== 'undefined' && element instanceof SVGAElement
+      && element.hasAttributeNS?.('http://www.w3.org/1999/xlink','href');
+    if (typeof raw !== 'string' || !(element.hasAttribute('href') || xlink)) return null;
+    try { return new URL(raw,element.baseURI || document.baseURI).href; }
+    catch { return null; }
+  };
+  // WAI-ARIA 1.2 roles are ordered fallbacks, not simultaneous declarations.
+  // https://www.w3.org/TR/wai-aria-1.2/#roles
+  const ariaRoles = new Set('alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic grid gridcell group heading img insertion link list listbox listitem log main marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(' '));
+  const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
+    .find(role => ariaRoles.has(role)) || null;
+  const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
+  const associatedControl = element => element.localName === 'label' ? (element.control ?? null) : null;
+  const labelledControl = element => {
+    const target=associatedControl(element);
+    return target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type) ? target : null;
+  };
+  const key = Symbol.for('masc.browser.scene.refs.v4');
+  let state = window[key];
+  const sameDocument = state && state.document === document && state.root === document.documentElement;
+  if (args.mode === 'resolve' || args.mode === 'resolve_link') {
+    if (!sameDocument || args.documentId !== state.id) throw new Error('scene_document_changed');
+    const ref = state.nodes.get(args.nodeId);
+    const element = ref && ref.deref();
+    if (!element || !element.isConnected || element.ownerDocument !== document)
+      throw new Error('scene_node_detached');
+    if (state.labels.has(args.nodeId)) {
+      const pinned = state.labels.get(args.nodeId), current = associatedControl(element);
+      if (current !== (pinned.target ? pinned.target.deref() : null)
+          || (current?.type ?? null) !== pinned.type)
+        throw new Error('scene_label_control_changed');
+    }
+    if (args.mode === 'resolve_link') {
+      if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
+      if (linkHref(element) !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
+    }
+    return element;
+  }
+  if (args.mode !== 'read' && args.mode !== 'viewport') throw new Error('unknown_scene_mode');
+  if (!sameDocument) {
+    // getRandomValues also works on ordinary HTTP pages, where randomUUID
+    // is unavailable. The document identity carries 128 cryptographic bits.
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+      byte => byte.toString(16).padStart(2,'0')).join('');
+    state = {document, root:document.documentElement, id, next:0,
+      ids:new WeakMap(), nodes:new Map(), links:new Map(), labels:new Map()};
+    window[key] = state;
+  }
+  if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
+  // Weak references preserve identity through reordering without retaining
+  // detached page nodes for the lifetime of a single-page application.
+  for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) {
+    state.nodes.delete(id); state.links.delete(id); state.labels.delete(id);
+  }
+  const nodeId = element => {
+    let id = state.ids.get(element);
+    const href = linkHref(element), target = associatedControl(element);
+    const pinned = id && state.labels.get(id);
+    const labelChanged = element.localName === 'label' && (!pinned
+      || target !== (pinned.target ? pinned.target.deref() : null)
+      || (target?.type ?? null) !== pinned.type);
+    // A recycled anchor gets a new observation reference. Retire its old
+    // reference so connected virtualized anchors cannot accumulate revisions.
+    if (!id || (href !== null && state.links.get(id) !== href) || labelChanged) {
+      if (id) { state.nodes.delete(id); state.links.delete(id); state.labels.delete(id); }
+      id = 'n' + (++state.next); state.ids.set(element,id);
+      if (href !== null) state.links.set(id,href);
+      if (element.localName === 'label')
+        state.labels.set(id,{target:target === null ? null : new WeakRef(target),type:target?.type ?? null});
+    }
+    state.nodes.set(id,new WeakRef(element));
+    return id;
+  };
+  const regionContexts = new WeakMap();
+  // Region context is an observed semantic ancestor, not a site selector.
+  // Prefer the nearest article for feeds and threads, then the nearest main;
+  // otherwise retain the closest standard landmark that was actually exposed.
+  const attribute = (element, name) =>
+    typeof element.getAttribute === 'function' ? element.getAttribute(name) : null;
+  const regionRole = element => String(effectiveRole(element) || element.localName || '')
+    .trim().toLowerCase();
+  const regionTokens = new Set(['main','navigation','complementary','region','log',
+    'banner','contentinfo','search','form','article','header','footer','section']);
+  const semanticRegion = element => {
+    if (!element || element.nodeType !== 1) return false;
+    const tag = element.localName || '', role = attribute(element,'role') || '';
+    if (['main','nav','aside','section','article','header','footer','search'].includes(tag)) return true;
+    if (regionTokens.has(effectiveRole(element))) return true;
+    return tag === 'form' && (attribute(element,'aria-label') !== null
+      || attribute(element,'aria-labelledby') !== null);
+  };
+  // Only declared DOM semantics make a custom control actionable. A native
+  // label is itself an activation target, including a hidden radio's label.
+  const nativeControlSelector = 'button,input:not([type=hidden]),textarea,select,summary,[contenteditable=true]';
+  const controlSelector = nativeControlSelector + ',label,[onclick],[role]';
+  const isControl = element => linkHref(element) !== null
+    || element.hasAttribute('onclick') || actionRoles.has(effectiveRole(element))
+    || (element.localName === 'label' ? (() => {
+        const target=labelledControl(element);
+        return target !== null && !(visible(target) && boxes(target.getClientRects(),target).length);
+      })()
+      : element.matches(nativeControlSelector));
+  // WAI-ARIA mixed is supported by checkbox/menuitemcheckbox only.
+  const checkedState = element => {
+    const role=effectiveRole(element), value=attribute(element,'aria-checked');
+    if (!['checkbox','menuitemcheckbox','radio','menuitemradio','switch'].includes(role)
+        || !['true','false','mixed'].includes(value)) return undefined;
+    return value === 'mixed' && !['checkbox','menuitemcheckbox'].includes(role) ? 'false' : value;
+  };
+  const disabledControl = element => {
+    const target = associatedControl(element) || element;
+    if (target.matches(':disabled')) return true;
+    for (const start of new Set([element,target]))
+      for (let parent=start; parent; parent=parent.parentElement)
+      if (attribute(parent,'aria-disabled') === 'true') return true;
+    return false;
+  };
+  const maxChars = args.maxChars;
+  if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 100000)
+    throw new Error('invalid_scene_max_chars');
+  // Admit nodes by the complete scene's 1 MiB JSON/UTF-8 resource ceiling,
+  // below the native host's 8 MiB incoming reply bound. Count metadata and
+  // geometry as well as text, without imposing a separate node quota.
+  const responseByteLimit = 1024 * 1024;
+  const nodes = [], styles = new WeakMap();
+  let chars = 0, truncated = false, nodeBytes = 0;
+  const view = args.view === undefined ? 'content' : args.view;
+  if (view !== 'content' && view !== 'regions') throw new Error('unknown_scene_view');
+  const scene = {schema:'masc.browser.scene.v1',documentId:state.id,url:location.href,title:document.title,
+    viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},nodes,chars:0,truncated:false,
+    scope:args.scope || null,view,
+    coverage:'top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness'};
+  const encoder = new TextEncoder();
+  const jsonBytes = value => encoder.encode(JSON.stringify(value)).byteLength;
+  // The empty envelope includes both array brackets, chars:0 and false.
+  // Only the nodes, decimal chars digits and boolean spelling change below.
+  const envelopeBytes = jsonBytes(scene);
+  if (envelopeBytes > responseByteLimit) throw new Error('scene_response_exceeds_1_mib');
+  const css = element => {
+    if (!styles.has(element)) styles.set(element,getComputedStyle(element));
+    return styles.get(element);
+  };
+  const rendered = element => {
+    for (let parent=element; parent; parent=parent.parentElement) {
+      const style=css(parent);
+      if (style.display === 'none' || Number(style.opacity) === 0) return false;
+    }
+    return true;
+  };
+  const visible = element => rendered(element) && css(element).visibility === 'visible';
+  const boxes = (rects, element) => {
+    let left=0,top=0,right=innerWidth,bottom=innerHeight;
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      const style=css(ancestor);
+      const clipsX=['auto','scroll','hidden','clip'].includes(style.overflowX);
+      const clipsY=['auto','scroll','hidden','clip'].includes(style.overflowY);
+      if (clipsX || clipsY) {
+        const r=ancestor.getBoundingClientRect();
+        if (clipsX) {left=Math.max(left,r.left);right=Math.min(right,r.right);}
+        if (clipsY) {top=Math.max(top,r.top);bottom=Math.min(bottom,r.bottom);}
+      }
+      // Positioned descendants can escape overflow ancestors before their
+      // containing block. We do not reconstruct CSS containing blocks here:
+      // retain uncertain geometry instead of hiding a visible popup. This
+      // can include positioned content clipped by a transformed ancestor.
+      if (style.position === 'fixed' || style.position === 'absolute') break;
+    }
+    return Array.from(rects).filter(r => Number.isFinite(r.x) && Number.isFinite(r.y))
+      .map(r => ({x:Math.max(left,r.x),y:Math.max(top,r.y),
+        width:Math.min(right,r.right)-Math.max(left,r.x),
+        height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
+      .filter(r => r.width>0 && r.height>0);
+  };
+  const labelTextRects = (element, admit = rects => Array.from(rects)) => {
+    if (element.localName !== 'label') return [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
+    while (walker.nextNode()) {
+      const text = walker.currentNode, parent = text.parentElement;
+      if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+      let hidden = false;
+      for (let node = parent; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+      }
+      if (hidden) continue;
+      const range = document.createRange(); range.selectNodeContents(text);
+      rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
+    }
+    return rects;
+  };
+  const visibleText = element => {
+    // innerText is the browser's whitespace/text-transform authority. Use it
+    // only when every painted text fragment is admitted by the scene geometry.
+    // innerText alone includes opacity-zero and clipped descendants; those
+    // retain the filtered traversal below rather than exposing hidden content.
+    const admitted=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
+    let complete=true;
+    while (admitted.nextNode()) {
+      const child=admitted.currentNode, parent=child.parentElement;
+      if (!parent || !child.textContent.trim()) continue;
+      let displayed=true, opaque=true;
+      for (let ancestor=parent;ancestor;ancestor=ancestor.parentElement) {
+        if (css(ancestor).display === 'none') displayed=false;
+        if (Number(css(ancestor).opacity) === 0) opaque=false;
+      }
+      if (!displayed || css(parent).visibility !== 'visible') continue;
+      const range=document.createRange(); range.selectNodeContents(child);
+      if (!opaque || !boxes(range.getClientRects(),parent).length) {complete=false;break;}
+    }
+    if (complete && typeof element.innerText === 'string') return element.innerText.trim();
+    const pending=Array.from(element.childNodes || []).reverse(), parts=[];
+    let separator=null;
+    const append = text => {
+      if (!text) return;
+      if (separator !== null && parts.length && !/[\n\t]$/.test(parts[parts.length-1])) parts.push(separator);
+      separator=null; parts.push(text);
+    };
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.separator) {
+        if (separator !== '\n') separator=child.separator;
+        continue;
+      }
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) append(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        if (child.localName === 'br' && visible(child)) { separator=null; parts.push('\n'); continue; }
+        const boundary = visible(child) && ['block','list-item','table-row','flex','grid'].includes(css(child).display);
+        const boundarySeparator = css(child).display === 'table-cell' ? '\t' : '\n';
+        if (boundary || css(child).display === 'table-cell') {
+          pending.push({separator:boundarySeparator});
+          // Opening and closing boundaries coalesce until actual text arrives.
+          if (separator !== '\n') separator=boundarySeparator;
+        }
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
+  const regionLabel = element => {
+    const labelledBy = (attribute(element,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+      .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
+    const heading = typeof element.querySelector === 'function'
+      ? element.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]') : null;
+    const headingText = heading && visible(heading) ? visibleText(heading) : '';
+    const candidates = [attribute(element,'aria-label'), labelledBy, headingText];
+    if (semanticRegion(element)) candidates.push(regionRole(element));
+    for (const candidate of candidates) {
+      const label = typeof candidate === 'string' ? candidate.trim() : '';
+      if (label) return label;
+    }
+    return semanticRegion(element) ? regionRole(element) : '';
+  };
+  const ancestorRegion = element => {
+    let first = null, article = null, main = null;
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      if (!semanticRegion(ancestor) || !visible(ancestor)) continue;
+      let candidate = regionContexts.get(ancestor);
+      if (!candidate) {
+        candidate = {nodeId:nodeId(ancestor),role:regionRole(ancestor),label:regionLabel(ancestor)};
+        regionContexts.set(ancestor,candidate);
+      }
+      if (!first) first = candidate;
+      if (!article && candidate.role === 'article') article = candidate;
+      if (!main && candidate.role === 'main') main = candidate;
+    }
+    return article || main || first;
+  };
+  const svgVisibleText = element => {
+    if (element.namespaceURI !== 'http://www.w3.org/2000/svg') return '';
+    const pending=Array.from(element.childNodes).reverse(), parts=[];
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
+  // A text node inside a heading often belongs to a span, while a link heading
+  // is observed as a control. Preserve
+  // that observed semantic ancestry without treating font size, CSS classes,
+  // or text resemblance as a heading signal. ARIA headings require an
+  // explicit valid level; an incomplete role stays unclassified.
+  const headingLevel = element => {
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      const tag=ancestor.localName || '';
+      if (/^h[1-6]$/.test(tag)) return Number(tag.slice(1));
+      if (effectiveRole(ancestor) === 'heading') {
+        const raw=ancestor.getAttribute('aria-level');
+        return /^[1-6]$/.test(raw || '') ? Number(raw) : null;
+      }
+    }
+    return null;
+  };
+  const sourceContext = element => {
+    const raw = element.getAttribute('data-masc-source');
+    if (raw === null) return null;
+    try { return JSON.parse(raw); }
+    catch { return {schema:'invalid'}; }
+  };
+  const describe = (kind, element, rawText, rects, extra={}) => {
+    if (!rects.length) return;
+    if (chars >= maxChars) { truncated=true; return; }
+    const style=css(element), points=Array.from(rawText);
+    const text=points.slice(0,maxChars-chars).join('');
+    const nextTruncated = text.length !== rawText.length;
+    const nextChars = chars + Array.from(text).length;
+    const observation = {kind,nodeId:nodeId(element),tag:element.localName,text,rects,sourceContext:sourceContext(element),
+      ancestorRegion:kind === 'region' ? null : ancestorRegion(element),
+      color:style.color,fontSize:Number.parseFloat(style.fontSize),
+      fontWeight:style.fontWeight,whiteSpace:style.whiteSpace,...extra};
+    const addedBytes = jsonBytes(observation) + (nodes.length ? 1 : 0);
+    const nextBytes = envelopeBytes + nodeBytes + addedBytes
+      + String(nextChars).length - 1 + (nextTruncated ? -1 : 0);
+    if (nextBytes > responseByteLimit) { truncated=true; return; }
+    nodes.push(observation); nodeBytes+=addedBytes; chars=nextChars; truncated=nextTruncated;
+  };
+  const root = args.scope ? browserScene({...args.scope,mode:'resolve'}) : document.body;
+  if (view === 'regions' && root) {
+    const selector = 'main,nav,aside,section,article,header,footer,search,form[aria-label],form[aria-labelledby],[role~=main],[role~=navigation],[role~=complementary],[role~=region],[role~=log],[role~=banner],[role~=contentinfo],[role~=search],[role~=form]';
+    const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
+    for (const region of regions) {
+      if (truncated) break;
+      if (!visible(region) || !semanticRegion(region)) continue;
+      const role = effectiveRole(region) || region.localName;
+      const name = regionLabel(region);
+      describe('region',region,name,boxes(region.getClientRects(),region),{role});
+    }
+  }
+  // Landmarks and scrollable panes are independent observed properties.
+  // A site instruction chooses the relevant scope; a header must not hide
+  // an unrelated message pane from the observation.
+  if (view === 'regions' && root && !truncated) {
+    for (const element of [root,...root.querySelectorAll('*')]) {
+      if (truncated) break;
+      if (!visible(element)) continue;
+      const style = css(element);
+      const scrollsY = ['auto','scroll'].includes(style.overflowY)
+        && element.scrollHeight > element.clientHeight;
+      const scrollsX = ['auto','scroll'].includes(style.overflowX)
+        && element.scrollWidth > element.clientWidth;
+      if (!scrollsY && !scrollsX) continue;
+      const rects = boxes(element.getClientRects(),element);
+      if (!rects.length) continue;
+      const name = regionLabel(element) || (scrollsY ? 'Vertical scroll area' : 'Horizontal scroll area');
+      // The same element may already be a landmark: keep one reference.
+      const existing = nodes.find(node => node.nodeId === state.ids.get(element));
+      if (!existing) describe('region',element,name,rects,{role:'scroll-area'});
+    }
+  }
+  const stack = root && view === 'content' ? Array.from(root.childNodes).reverse() : [];
+  while (stack.length && !truncated) {
+    const node=stack.pop();
+    if (node.nodeType === 3) {
+      const element=node.parentElement;
+      if (!element || !node.textContent.trim() || !visible(element)) continue;
+      const range=document.createRange(); range.selectNodeContents(node);
+      describe('text',element,node.textContent,boxes(range.getClientRects(),element),
+        {headingLevel:headingLevel(element)});
+      continue;
+    }
+    if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
+        || !rendered(node)) continue;
+    const tag=node.localName;
+    const control=isControl(node);
+    const controlRects = control && visible(node)
+      ? boxes(node.getClientRects(),node) : [];
+    if (control && visible(node) && !controlRects.length)
+      controlRects.push(...labelTextRects(node, (rects, parent) => boxes(rects,parent)));
+    if (control && visible(node) && controlRects.length) {
+      const labelledBy = (attribute(node,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
+      const nativeLabel = Array.from(node.labels || []).map(visibleText).filter(Boolean).join(' ');
+      const label=node.getAttribute('aria-label') || labelledBy || nativeLabel
+        || node.getAttribute('placeholder') || visibleText(node) || svgVisibleText(node) || tag;
+      const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
+      const target=labelledControl(node) || node, disabled=disabledControl(node);
+      const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
+        && !node.readOnly && !disabled;
+      describe('control',node,label,controlRects,{
+        ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
+        controlType:input ? node.type : tag,disabled,editable,
+        role:effectiveRole(node),
+        ...(target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type)
+          ? {checked:!!target.checked,...(target.type === 'checkbox' ? {indeterminate:!!target.indeterminate} : {})} : {}),
+        ...(checkedState(node) !== undefined ? {ariaChecked:checkedState(node)} : {}),
+        ...(['tab','option','row','treeitem','gridcell'].includes(effectiveRole(node))
+          && ['true','false'].includes(attribute(node,'aria-selected'))
+          ? {ariaSelected:attribute(node,'aria-selected')} : {}),
+        clickable:typeof node.click === 'function' && !disabled,
+        headingLevel:headingLevel(node)});
+      // A delegated handler does not consume its heading, prose or raster
+      // descendants. Intrinsic/ARIA controls retain their own label semantics.
+      if (node.hasAttribute('onclick') && !node.matches(nativeControlSelector)
+          && !actionRoles.has(effectiveRole(node)) && tag !== 'label') {
+        for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
+        continue;
+      }
+      // Visit the outermost nested controls; each visits its own descendants.
+      const nested=Array.from(node.querySelectorAll?.(controlSelector+',a') || [])
+        .filter(isControl);
+      const nestedSet=new Set(nested);
+      for (let i=nested.length-1;i>=0;i--) {
+        let ancestor=nested[i].parentElement;
+        while (ancestor && ancestor !== node && !nestedSet.has(ancestor)) ancestor=ancestor.parentElement;
+        if (ancestor === node) stack.push(nested[i]);
+      }
+      continue;
+    }
+    if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {
+      describe('raster',node,node.getAttribute('alt') || node.getAttribute('aria-label') || tag,
+        boxes(node.getClientRects(),node));
+      if (tag === 'svg') for (const anchor of Array.from(node.querySelectorAll('a')).reverse())
+        if (linkHref(anchor) !== null) stack.push(anchor);
+      continue;
+    }
+    for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
+  }
+  scene.chars=chars; scene.truncated=truncated;
+  return scene;
+}
+
+
+function browserDocument() {
+  if (window !== window.top) throw new Error('document_observation_requires_top_document');
+  const identity = browserScene({mode:'viewport'});
+  const page = {documentId:identity.documentId,url:location.href,title:document.title,
+    observedAt:Date.now()/1000,html:document.documentElement?.outerHTML ?? null,
+    htmlComplete:document.documentElement !== null,htmlUnavailableReason:null};
+  // The observation is optional. Keep identity and report incomplete coverage
+  // rather than returning a truncated document as if it were complete HTML.
+  if (page.html === null) {
+    page.htmlComplete = false;
+    page.htmlUnavailableReason = 'document_has_no_root';
+  } else if (new TextEncoder().encode(JSON.stringify(page)).byteLength > 1024 * 1024) {
+    page.html = null;
+    page.htmlComplete = false;
+    page.htmlUnavailableReason = 'document_html_exceeds_1_mib';
+  }
+  return page;
+}
+
+// masc browser lane — background bridge (B backend).
+//
+// One native-messaging port to the host process. The host asks, this side
+// answers; nothing is pushed proactively. Verbs are a closed set: an unknown
+// verb is refused by name, never guessed (the same rule the lane protocol
+// holds everywhere).
+
+const HOST_NAME = "masc_browser_host";
+const READ_CAP = 50000;
+
+// A follow receipt records the effect immediately. Only its next scene read
+// waits for the browser to commit a document; executeScript(document_end)
+// already owns the DOM-ready boundary. No error text or full-load heuristic
+// is evidence that the destination is ready.
+function createNavigationReadiness() {
+  const records = new Map();
+  function forget(tabId, record) {
+    if (records.get(tabId) === record) records.delete(tabId);
+  }
+  async function begin(args, deadlineMs, signal) {
+    signal?.throwIfAborted();
+    const source = await browser.webNavigation.getFrame({tabId:args.tabId,frameId:0});
+    if (!source || typeof source.documentId !== 'string' || !source.documentId)
+      throw new Error('navigation_document_identity_unavailable');
+    if (source.url !== args.expectedUrl) throw new Error('page_url_changed');
+    signal?.throwIfAborted();
+    records.get(args.tabId)?.cancel('navigation_observation_superseded');
+    let resolve, receipt = null, candidate = null, settled = false;
+    const ready = new Promise(done => { resolve = done; });
+    const owned = event => event.tabId === args.tabId && event.frameId === 0;
+    const cleanup = () => {
+      clearTimeout(timer);
+      browser.webNavigation.onCommitted.removeListener(committed);
+      browser.webNavigation.onReferenceFragmentUpdated.removeListener(fragment);
+      browser.tabs.onRemoved.removeListener(removed);
+    };
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      forget(args.tabId, record);
+      resolve(value);
+    };
+    const accept = () => {
+      if (!receipt || !candidate) return;
+      if (candidate.kind === 'committed' ||
+          (candidate.kind === 'fragment' && candidate.event.url === receipt.destinationUrl))
+        finish({kind:'observed',documentId:candidate.event.documentId});
+    };
+    const committed = event => {
+      if (!owned(event) || typeof event.documentId !== 'string' || !event.documentId ||
+          event.documentId === source.documentId) return;
+      candidate = {kind:'committed',event};
+      accept();
+    };
+    const fragment = event => {
+      if (!owned(event) || event.documentId !== source.documentId || candidate?.kind === 'committed') return;
+      candidate = {kind:'fragment',event};
+      accept();
+    };
+    const removed = tabId => {
+      if (tabId === args.tabId) record.cancel('navigation_tab_closed');
+    };
+    const record = {
+      ready,
+      followed(value) { receipt = value; accept(); },
+      cancel(error) {
+        finish({kind:'unavailable',error});
+        forget(args.tabId, record);
+      },
+    };
+    // The native host supplies its already-running transport deadline. This
+    // observation also expires if no read follows; it owns no browser action.
+    const timer = setTimeout(() => record.cancel('navigation_observation_expired'),
+      Math.max(0, deadlineMs - Date.now()));
+    browser.webNavigation.onCommitted.addListener(committed);
+    browser.webNavigation.onReferenceFragmentUpdated.addListener(fragment);
+    browser.tabs.onRemoved.addListener(removed);
+    records.set(args.tabId, record);
+    return record;
+  }
+  async function beforeRead(tabId, signal) {
+    const record = records.get(tabId);
+    if (!record) return;
+    let abort;
+    const cancelled = new Promise(resolve => {
+      abort = () => resolve({kind:'unavailable',error:'browser_command_cancelled'});
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, {once:true});
+    });
+    try {
+      const result = await Promise.race([record.ready, cancelled]);
+      if (result.kind === 'unavailable') throw new Error(result.error);
+    } finally {
+      signal.removeEventListener('abort', abort);
+      record.cancel('navigation_observation_consumed');
+    }
+  }
+  return {begin, beforeRead, clear() {
+    for (const record of records.values()) record.cancel('browser_client_disconnected');
+  }};
+}
+const navigationReadiness = createNavigationReadiness();
+const commandControllers = new Set();
+
+
+let port = null;
+let reconnectTimer = null;
+
+function connect() {
+  if (port) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  const connection = browser.runtime.connectNative(HOST_NAME);
+  port = connection;
+  connection.onMessage.addListener(msg => onHostMessage(msg, connection));
+  connection.onDisconnect.addListener(() => {
+    if (port !== connection) return;
+    port = null;
+    navigationReadiness.clear();
+    for (const controller of commandControllers.values()) controller.abort();
+    commandControllers.clear();
+    // The host is launched by the browser per connection; a quiet retry keeps
+    // the lane alive across host restarts without spamming launches.
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, 5000);
+  });
+}
+
+async function tabsList() {
+  const tabs = await browser.tabs.query({});
+  return tabs.map((t) => ({
+    id: t.id,
+    index: t.index,
+    windowId: t.windowId,
+    active: t.active,
+    title: t.title,
+    url: t.url,
+  }));
+}
+
+async function pageRead(args) {
+  if (args?.includeHtml === true) {
+    if (!Number.isSafeInteger(args.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+    const [page] = await browser.tabs.executeScript(args.tabId, {
+      runAt: "document_end",
+      code: browserScene.toString() + "\n" + browserDocument.toString() + "\nbrowserDocument();",
+    });
+    if (!page) throw new Error("page_unavailable");
+    return {tabId:args.tabId,...page};
+  }
+  const tabId =
+    typeof args?.tabId === "number"
+      ? args.tabId
+      : (await browser.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  if (typeof tabId !== "number") throw new Error("no_active_tab");
+  const cap = args?.maxChars ?? READ_CAP;
+  if (!Number.isInteger(cap) || cap < 1 || cap > 100000) throw new Error("bad_max_chars");
+  const [page] = await browser.tabs.executeScript(tabId, {
+    runAt: "document_end",
+    code: `(() => {
+      const chars = Array.from(document.body?.innerText ?? '');
+      return {url:location.href,title:document.title,
+        text:chars.slice(0,${cap}).join(''),chars:chars.length,truncated:chars.length>${cap}};
+    })()`,
+  });
+  if (!page) throw new Error("page_unavailable");
+  return {tabId, ...page};
+}
+
+async function pageElements(args) {
+  const tabId = typeof args?.tabId === "number" ? args.tabId
+    : (await browser.tabs.query({active:true,currentWindow:true}))[0]?.id;
+  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("invalid_tab_id");
+  const within = args?.within;
+  if (within !== undefined && (typeof within !== "string" || within === ""))
+    throw new Error("invalid_within");
+  const selector = args?.selector;
+  if (selector !== undefined && (typeof selector !== "string" || selector === ""))
+    throw new Error("invalid_selector");
+  const [page] = await browser.tabs.executeScript(tabId, {
+    runAt: "document_end",
+    code: '(' + (function () {
+// WAI-ARIA 1.2 roles are ordered fallbacks, not simultaneous declarations.
+// https://www.w3.org/TR/wai-aria-1.2/#roles
+const ariaRoles = new Set('alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic grid gridcell group heading img insertion link list listbox listitem log main marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(' '));
+const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
+  .find(role => ariaRoles.has(role)) || null;
+const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
+// [within] is a CSS selector read by the page's own engine: only controls that
+// match it, or sit inside an element that matches it, are observed. An invalid
+// selector is refused rather than read as the whole page.
+const {within, selector: requestedSelector} = arguments[0] || {};
+let scope = null;
+if (within !== undefined) {
+  try { scope = new Set(document.querySelectorAll(within)); }
+  catch { throw new Error('invalid_css_selector'); }
+}
+// Membership in the matched set, not closest(): closest() reads :scope as
+// the control itself, while the count above reads it as the root element.
+const inScope = el => {
+  for (let node = el; node; node = node.parentElement) if (scope.has(node)) return true;
+  return false;
+};
+// Explicit CSS reads may observe custom rows and other non-control nodes.
+// Observation does not claim that a matched node supports an interaction.
+let matches;
+try {
+  matches = Array.from(document.querySelectorAll(requestedSelector === undefined
+    ? 'a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'
+    : requestedSelector));
+} catch { throw new Error('invalid_css_selector'); }
+const nodes = matches.filter(el => scope === null || inScope(el));
+// A selector path stops at the nearest element, the control itself included,
+// whose id no other element in the document carries. Without one it runs from
+// the root element. Either way it names exactly one element.
+const idAnchors = new Map();
+const idAnchor = node => {
+  const id = node.id;
+  if (typeof id !== 'string' || id === '') return null;
+  if (!idAnchors.has(id)) {
+    const anchor = '#' + CSS.escape(id);
+    idAnchors.set(id, document.querySelectorAll(anchor).length === 1 ? anchor : null);
+  }
+  return idAnchors.get(id);
+};
+function selector(el) {
+  const parts=[];
+  for (let node=el; node && node.nodeType===1; node=node.parentElement) {
+    const anchor=idAnchor(node);
+    if (anchor !== null) { parts.unshift(anchor); break; }
+    const tag=node.localName;
+    const siblings=node.parentElement ? Array.from(node.parentElement.children).filter(s=>s.localName===tag) : [node];
+    parts.unshift(tag+':nth-of-type('+(siblings.indexOf(node)+1)+')');
+  }
+  return parts.join(' > ');
+}
+const labelTextRects = (element, admit = rects => Array.from(rects)) => {
+  if (element.localName !== 'label') return [];
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
+  while (walker.nextNode()) {
+    const text = walker.currentNode, parent = text.parentElement;
+    if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+    let hidden = false;
+    for (let node = parent; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+    }
+    if (hidden) continue;
+    const range = document.createRange(); range.selectNodeContents(text);
+    rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
+  }
+  return rects;
+};
+const observable = el => (el.getClientRects().length || labelTextRects(el).length) && getComputedStyle(el).visibility !== 'hidden'
+  && getComputedStyle(el).visibility !== 'collapse'
+  && (() => { for (let parent=el;parent;parent=parent.parentElement) {
+    const style=getComputedStyle(parent);
+    if (style.display === 'none' || Number(style.opacity) === 0) return false;
+  } return true; })();
+const visible = nodes.filter(el=>observable(el)
+  && (requestedSelector !== undefined || !el.getAttribute('role') || actionRoles.has(effectiveRole(el))
+    || ['a','button','input','textarea','select','summary','label'].includes(el.localName)
+    || el.getAttribute('onclick') !== null || el.getAttribute('contenteditable') === 'true')
+  && (requestedSelector !== undefined || el.localName!=='label' || el.hasAttribute('onclick') || actionRoles.has(effectiveRole(el))
+    || (el.control?.localName==='input' && ['checkbox','radio'].includes(el.control.type) && !observable(el.control))));
+function disabled(el) {
+  const target=(el.localName==='label' && el.control) || el;
+  if (target.matches(':disabled')) return true;
+  for (const start of new Set([el,target]))
+    for (let parent=start;parent;parent=parent.parentElement)
+    if (parent.getAttribute('aria-disabled')==='true') return true;
+  return false;
+}
+function name(el) {
+  const labelledBy=(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+    .map(id=>document.getElementById(id)?.textContent || '').join(' ').trim();
+  const labels=Array.from(el.labels || []).map(label=>label.innerText || '').filter(Boolean).join(' ');
+  return el.getAttribute('aria-label') || labelledBy || labels || el.getAttribute('placeholder') || '';
+}
+// The first [points] characters of [text]. A character is at most two UTF-16
+// units, so only that much of a long text is split into characters, and the
+// cut never leaves half of one.
+const head = (text, points) => Array.from(text.slice(0, points * 2)).slice(0, points).join('');
+function observe(el) {
+  const result = {selector:selector(el),tag:el.localName,
+    role:effectiveRole(el),type:el.getAttribute('type'),name:name(el),
+    text:head(el.innerText || '', 500),href:el.href || null,disabled:disabled(el)};
+  const target=(el.localName==='label' && el.control) || el;
+  if (target.localName==='input' && ['checkbox','radio'].includes(target.type))
+    result.checked=!!target.checked;
+  if (target.localName==='input' && target.type==='checkbox') result.indeterminate=!!target.indeterminate;
+  const checkedRole=effectiveRole(el), checked=el.getAttribute('aria-checked');
+  if (['checkbox','menuitemcheckbox','radio','menuitemradio','switch'].includes(checkedRole)
+      && ['true','false','mixed'].includes(checked))
+    result.ariaChecked=checked==='mixed' && !['checkbox','menuitemcheckbox'].includes(checkedRole) ? 'false' : checked;
+  if (['tab','option','row','treeitem','gridcell'].includes(effectiveRole(el))
+      && ['true','false'].includes(el.getAttribute('aria-selected')))
+    result.ariaSelected=el.getAttribute('aria-selected');
+  if (el.localName==='input') {
+    // Read the normalized DOM type: missing/unknown types behave as text inputs.
+    result.type=el.type;
+    result.readOnly=!!el.readOnly;
+    if (el.type!=='password' && el.type!=='file') result.value=el.value;
+    if (el.type==='checkbox' || el.type==='radio') result.checked=!!el.checked;
+    if (el.type==='checkbox') result.indeterminate=!!el.indeterminate;
+  } else if (el.localName==='textarea') {
+    result.value=el.value;
+    result.readOnly=!!el.readOnly;
+  } else if (el.localName==='select') {
+    result.value=el.value;
+    result.multiple=!!el.multiple;
+    result.options=Array.from(el.options).map(option=>({
+      value:option.value,label:option.label,selected:!!option.selected,
+      disabled:!!option.disabled || (option.parentElement?.localName==='optgroup' && !!option.parentElement.disabled)
+    }));
+  }
+  return result;
+}
+return {url:location.href,title:document.title,
+  ...(scope === null ? {} : {within,withinMatches:scope.size}),
+  ...(requestedSelector === undefined ? {} : {selector:requestedSelector,selectorMatches:matches.length}),
+  total:visible.length,truncated:visible.length>200,
+  elements:visible.slice(0,200).map(observe)};
+}).toString() + ')(' + JSON.stringify({within,selector}) + ')'
+  });
+  if (!page) throw new Error("page_unavailable");
+  return {tabId,...page};
+}
+
+async function pageScene(args, signal) {
+  if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error('tab_id_required');
+  await navigationReadiness.beforeRead(args.tabId, signal);
+  if (signal?.aborted) throw new Error('browser_command_cancelled');
+  const [scene] = await browser.tabs.executeScript(args.tabId, {
+    runAt: "document_end",
+    code: '(' + browserScene.toString() + ')(' + JSON.stringify({mode:'read',maxChars:args.maxChars,view:args.view,scope:args.scope}) + ')',
+  });
+  if (!scene) throw new Error('scene_unavailable');
+  return {tabId:args.tabId,...scene};
+}
+
+async function pageCapture(args) {
+  const tabId = args?.tabId;
+  if (!Number.isInteger(tabId) || tabId < 0) throw new Error("tab_id_required");
+  const before = await browser.tabs.get(tabId);
+  const observeViewport = async () => {
+    const [value] = await browser.tabs.executeScript(tabId, {
+    runAt: "document_end",
+      code:'(' + browserScene.toString() + ')({mode:"viewport"})'
+    });
+    if (!value) throw new Error('viewport_unavailable');
+    return value;
+  };
+  const viewport = await observeViewport();
+  const dataUrl = await browser.tabs.captureTab(tabId, {format: "png"});
+  const after = await browser.tabs.get(tabId);
+  const afterViewport = await observeViewport();
+  if (before.url !== after.url || Object.keys(viewport).some(key => viewport[key] !== afterViewport[key]))
+    throw new Error("viewport_changed_during_capture");
+  const prefix = "data:image/png;base64,";
+  if (!dataUrl.startsWith(prefix)) throw new Error("capture_is_not_png");
+  return {tabId, title: after.title, url: after.url,
+    mimeType: "image/png", data: dataUrl.slice(prefix.length), viewport};
+}
+
+function interactInPage(args) {
+  let effectStarted = false;
+  let selectedValues;
+  try {
+  if (args.expectedUrl !== undefined && args.expectedUrl !== location.href)
+    throw new Error("page_url_changed");
+  const before = location.href;
+  // The same predicate the scene admits a control by (browser_scene_script.ml
+  // `rendered`/`visible`). display and opacity take effect through ancestors,
+  // so a page that withdrew the target by setting opacity 0 on a wrapper
+  // leaves an element that still reports client rects and its own computed
+  // display. Checking only the element acted on a link the read surface had
+  // already stopped showing.
+  const labelTextRects = (element, admit = rects => Array.from(rects)) => {
+    if (element.localName !== 'label') return [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
+    while (walker.nextNode()) {
+      const text = walker.currentNode, parent = text.parentElement;
+      if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+      let hidden = false;
+      for (let node = parent; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+      }
+      if (hidden) continue;
+      const range = document.createRange(); range.selectNodeContents(text);
+      rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
+    }
+    return rects;
+  };
+  const observable = element => {
+    if (!element.getClientRects().length && !labelTextRects(element).length) return false;
+    if (getComputedStyle(element).visibility !== 'visible') return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || Number(style.opacity) === 0) return false;
+    }
+    return true;
+  };
+  if (args.action === "follow_link") {
+    const element = browserScene({...args,mode:'resolve_link'});
+    if (!(element instanceof HTMLAnchorElement) && !(typeof SVGAElement !== 'undefined' && element instanceof SVGAElement))
+      throw new Error('follow_link_requires_anchor');
+    if (!observable(element)) throw new Error('element_not_visible');
+    const target = element.getAttribute('target') ?? document.querySelector('base[target]')?.getAttribute('target') ?? '';
+    const normalizedTarget = target.toLowerCase();
+    const sameTab = normalizedTarget === '' || normalizedTarget === '_self'
+      || (window === window.top && (normalizedTarget === '_top' || normalizedTarget === '_parent'));
+    if (!sameTab) throw new Error('follow_link_requires_same_tab');
+    const rel = (element.getAttribute('rel') || '').toLowerCase().split(/\s+/);
+    if (rel.includes('noreferrer') || element.hasAttribute('referrerpolicy'))
+      throw new Error('follow_link_referrer_policy_unsupported');
+    if (element.hasAttribute('download')) throw new Error('follow_link_rejects_download');
+    const rawHref = typeof element.href === 'string' ? element.href : element.href.baseVal;
+    const destination = new URL(rawHref, element.baseURI || document.baseURI || location.href);
+    if (!['http:','https:'].includes(destination.protocol)) throw new Error('follow_link_requires_http_url');
+    const result = {action:args.action,urlBefore:before,url:before,destinationUrl:destination.href,
+      navigationSource:{url:before,documentId:args.documentId},
+      title:document.title,scrollX:scrollX,scrollY:scrollY};
+    // Follow the observed href directly: page click handlers cannot redirect
+    // this primitive into window.open or an unrelated application action.
+    effectStarted = true;
+    location.assign(destination.href);
+    return result;
+  }
+  if (args.action === "click_at" || args.action === "scroll_at") {
+    const current = browserScene({mode:'viewport'}), expected = args.viewport;
+    if (!expected || Object.keys(current).some(key => current[key] !== expected[key]))
+      throw new Error('observed_viewport_changed');
+    const point = args.point;
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
+        || point.x < 0 || point.x >= 1 || point.y < 0 || point.y >= 1)
+      throw new Error('invalid_viewport_point');
+    let element = document.elementFromPoint(point.x * innerWidth, point.y * innerHeight);
+    if (!element) throw new Error('point_has_no_element');
+    if (args.action === 'click_at') {
+      if (typeof element.click !== 'function') throw new Error('point_has_no_clickable_element');
+      if (element.matches(':disabled')) throw new Error('element_disabled');
+    effectStarted = true;
+      element.click();
+    } else {
+      if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
+        throw new Error('scroll_coordinates_must_be_integers');
+      // Hit testing stops at shadow hosts and frame elements. Resolve both
+      // before scrolling; never redirect an inaccessible frame hit to its page.
+      let hitWindow = window, hitX = point.x * innerWidth, hitY = point.y * innerHeight;
+      for (;;) {
+        if (element.shadowRoot && typeof element.shadowRoot.elementFromPoint === 'function') {
+          const inner = element.shadowRoot.elementFromPoint(hitX, hitY);
+          if (inner && inner !== element) { element = inner; continue; }
+        }
+        if (element.localName !== 'iframe' && element.localName !== 'frame') break;
+        let childDocument;
+        try { childDocument = element.contentDocument; }
+        catch { throw new Error('scroll_frame_inaccessible'); }
+        if (!childDocument || !childDocument.defaultView) throw new Error('scroll_frame_inaccessible');
+        // A bounding rectangle cannot invert rotation, skew or perspective.
+        // Reject transformed frames/ancestors before either scroll axis acts.
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = hitWindow.getComputedStyle(node);
+          if (style.transform !== 'none' || style.perspective !== 'none'
+              || (style.rotate && style.rotate !== 'none')
+              || (style.scale && style.scale !== 'none')
+              || (style.translate && style.translate !== 'none')
+              || (style.zoom && style.zoom !== 'normal' && Number(style.zoom) !== 1))
+            throw new Error('scroll_frame_geometry_unsupported');
+        }
+        const rect = element.getBoundingClientRect(), style = hitWindow.getComputedStyle(element);
+        hitX -= rect.left + element.clientLeft + Number.parseFloat(style.paddingLeft);
+        hitY -= rect.top + element.clientTop + Number.parseFloat(style.paddingTop);
+        hitWindow = childDocument.defaultView;
+        if (hitX < 0 || hitY < 0 || hitX >= hitWindow.innerWidth || hitY >= hitWindow.innerHeight)
+          throw new Error('scroll_point_outside_frame_content');
+        element = childDocument.elementFromPoint(hitX, hitY);
+        if (!element) throw new Error('point_has_no_element');
+      }
+      // Follow actual scroll containers under the pointer. Slack's message
+      // pane scrolls independently of document.body and its channel sidebar.
+      const scrollAxis = (delta, axis) => {
+        if (delta === 0) return;
+        const vertical = axis === 'y';
+        for (let node = element; node; node = node.parentElement || node.getRootNode().host) {
+          const style = hitWindow.getComputedStyle(node);
+          const overflow = vertical ? style.overflowY : style.overflowX;
+          const position = vertical ? node.scrollTop : node.scrollLeft;
+          const maximum = vertical ? node.scrollHeight-node.clientHeight : node.scrollWidth-node.clientWidth;
+          if ((overflow === 'auto' || overflow === 'scroll') && maximum > 0) {
+            node.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+            const after = vertical ? node.scrollTop : node.scrollLeft;
+            // Reverse-flow chat and RTL scrollers may have negative positions.
+            // The browser's actual movement establishes consumption, not a range guess.
+            if (after !== position) return;
+            const chain = vertical ? style.overscrollBehaviorY : style.overscrollBehaviorX;
+            if (chain === 'contain' || chain === 'none') return;
+          }
+        }
+        hitWindow.scrollBy({left:vertical ? 0 : delta,top:vertical ? delta : 0,behavior:'instant'});
+      };
+    effectStarted = true;
+      scrollAxis(args.x,'x'); scrollAxis(args.y,'y');
+    }
+  } else if (args.action === "scroll") {
+    if (!Number.isSafeInteger(args.x) || !Number.isSafeInteger(args.y))
+      throw new Error("scroll_coordinates_must_be_integers");
+    effectStarted = true;
+    window.scrollBy({left: args.x, top: args.y, behavior: "instant"});
+  } else if (args.action === "click" || args.action === "fill" || args.action === "select_option") {
+    let element;
+    if (args.nodeId !== undefined || args.documentId !== undefined) {
+      if (args.selector !== undefined || typeof args.nodeId !== "string" || typeof args.documentId !== "string")
+        throw new Error("invalid_scene_reference");
+      element = browserScene({...args,mode:'resolve'});
+    } else {
+      if (typeof args.selector !== "string" || !args.selector.trim()) throw new Error("selector_required");
+      let elements;
+      try { elements = document.querySelectorAll(args.selector); }
+      catch { throw new Error("invalid_css_selector"); }
+      if (elements.length !== 1)
+        throw new Error(elements.length === 0 ? "element_not_found" : "selector_is_ambiguous");
+      element = elements[0];
+    }
+    if (!observable(element)) throw new Error("element_not_visible");
+    const activationTarget=(element.localName === 'label' && element.control) || element;
+    if (activationTarget.matches(":disabled")) throw new Error("element_disabled");
+    for (const start of new Set([element,activationTarget]))
+      for (let parent=start; parent; parent=parent.parentElement)
+      if (parent.getAttribute?.('aria-disabled') === 'true') throw new Error("element_disabled");
+    if (args.action === "click") {
+      if (typeof element.click !== "function") throw new Error("element_not_clickable");
+    effectStarted = true;
+      element.click();
+    } else if (args.action === "select_option") {
+      if (!(element instanceof HTMLSelectElement)) throw new Error("element_is_not_a_select");
+      const multiple = args.values !== undefined;
+      if (multiple && args.value !== undefined) throw new Error("option_selection_conflict");
+      if (multiple && !element.multiple) throw new Error("element_is_not_a_multiple_select");
+      if (!multiple && element.multiple) throw new Error("multiple_select_requires_values");
+      const requested = multiple ? args.values : [args.value];
+      if (!Array.isArray(requested) || requested.some(value => typeof value !== "string"))
+        throw new Error("option_value_required");
+      if (new Set(requested).size !== requested.length) throw new Error("option_values_are_not_distinct");
+      const options = Array.from(element.options);
+      const chosen = requested.map(value => {
+        const matches = options.filter(option => option.value === value);
+        if (matches.length !== 1) throw new Error(matches.length === 0 ? "option_not_found" : "option_is_ambiguous");
+        if (matches[0].matches(":disabled")) throw new Error("option_disabled");
+        return matches[0];
+      });
+      const desired = new Set(chosen), previous = options.map(option => option.selected);
+      const expectedValues = new Map(chosen.map((option, index) => [option, requested[index]]));
+      const selected = () => Array.from(element.options).filter(option => option.selected);
+      const applied = () => {
+        const observed = selected();
+        return observed.length === desired.size
+          && observed.every(option => desired.has(option) && option.value === expectedValues.get(option));
+      };
+    effectStarted = true;
+      if (multiple) options.forEach(option => { option.selected = desired.has(option); });
+      else element.selectedIndex = chosen[0].index;
+      if (!applied()) {
+        options.forEach((option, index) => { option.selected = previous[index]; });
+        throw new Error("select_rejected_value");
+      }
+      element.dispatchEvent(new Event("input", {bubbles: true}));
+      element.dispatchEvent(new Event("change", {bubbles: true}));
+      if (!element.isConnected || !applied()) throw new Error("select_changed_during_events");
+      selectedValues = selected().map(option => option.value);
+    } else {
+      if (typeof args.text !== "string") throw new Error("fill_text_required");
+      const input = element instanceof HTMLInputElement;
+      const textarea = element instanceof HTMLTextAreaElement;
+      if (!input && !textarea && element.isContentEditable === true) {
+        if (args.text === "" && element.textContent === "") return {action: args.action, urlBefore: before, url: location.href,
+          title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
+        element.focus();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    effectStarted = true;
+        const applied = args.text === "" ? document.execCommand("delete") : document.execCommand("insertText", false, args.text);
+        if (!applied) throw new Error("editable_rejected_text");
+        if (!args.text.includes("\n") && element.textContent.replace(/\u00a0/g, " ") !== args.text.replace(/\u00a0/g, " ")) throw new Error("editable_changed_text");
+      } else {
+      if ((!input && !textarea) || (input && !["text", "search", "email", "url", "tel", "password", "number"].includes(element.type)))
+        throw new Error("element_is_not_a_text_input");
+      if (element.readOnly) throw new Error("element_read_only");
+      const prototype = input ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(prototype, "value").set;
+      const previousValue = element.value;
+    effectStarted = true;
+      setter.call(element, args.text);
+      if (element.value !== args.text) {
+        setter.call(element, previousValue);
+        throw new Error("input_rejected_value");
+      }
+      element.dispatchEvent(new Event("input", {bubbles: true}));
+      element.dispatchEvent(new Event("change", {bubbles: true}));
+      if (element.value !== args.text) throw new Error("input_changed_during_events");
+      }
+    }
+  } else throw new Error("unknown_interaction_action");
+  return {action: args.action, urlBefore: before, url: location.href,
+    title: document.title, scrollX: window.scrollX, scrollY: window.scrollY,
+    ...(selectedValues === undefined ? {} : {selectedValues})};
+  } catch (error) {
+    return {interactionFailure:{message:String(error?.message ?? error),effectStarted}};
+  }
+}
+
+async function pageInteract(args, deadlineMs, signal) {
+  if (args?.action === 'set_zoom') return pageZoom(args, signal);
+  if (args?.action === 'activate_tab') {
+    let effectStarted = false;
+    try {
+      if (!Number.isSafeInteger(args.tabId) || args.tabId < 0) throw new Error('tab_id_required');
+      if (typeof args.expectedUrl !== 'string' || !args.expectedUrl.trim()) throw new Error('activate_tab_requires_expected_url');
+      const before = await browser.tabs.get(args.tabId);
+      if (before.url !== args.expectedUrl) throw new Error('page_url_changed');
+      signal?.throwIfAborted();
+      effectStarted = true;
+      await browser.tabs.update(args.tabId, {active:true});
+      const after = await browser.tabs.get(args.tabId);
+      if (after.id !== args.tabId || after.url !== args.expectedUrl || !after.active)
+        throw new Error('activated_tab_observation_changed');
+      return {tabId:args.tabId,action:'activate_tab',urlBefore:before.url,url:after.url,active:after.active,title:after.title};
+    } catch (cause) {
+      const error = new Error(String(cause?.message ?? cause));
+      error.effectStarted = effectStarted;
+      throw error;
+    }
+  }
+  let navigation = null;
+  // Only this read-only preflight can establish that injection never began.
+  // A later executeScript rejection can lose a result after a page effect.
+  try {
+    if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+    if (args.framePath !== undefined) throw new Error("frame_path_is_not_supported_by_the_extension_yet");
+    if (!['click', 'follow_link', 'fill', 'select_option', 'scroll', 'click_at', 'scroll_at'].includes(args.action)) throw new Error("unknown_interaction_action");
+    const tab = await browser.tabs.get(args.tabId);
+    signal?.throwIfAborted();
+    if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');
+    if (args.action === 'follow_link') navigation = await navigationReadiness.begin(args, deadlineMs, signal);
+    signal?.throwIfAborted();
+  } catch (cause) {
+    navigation?.cancel('follow_observation_unavailable');
+    const error = new Error(String(cause?.message ?? cause));
+    error.effectStarted = false;
+    throw error;
+  }
+  try {
+    // JSON encoding keeps selectors and text out of executable source syntax.
+    if (signal?.aborted) {
+      const error = new Error('browser_command_aborted');
+      error.effectStarted = false;
+      throw error;
+    }
+    const [result] = await browser.tabs.executeScript(args.tabId, {
+      runAt: "document_end",
+      code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,
+    });
+    if (!result) throw new Error("page_unavailable");
+    if (result.interactionFailure) {
+      const error = new Error(result.interactionFailure.message);
+      error.effectStarted = result.interactionFailure.effectStarted;
+      throw error;
+    }
+    navigation?.followed(result);
+    return {tabId: args.tabId, ...result};
+  } catch (error) {
+    navigation?.cancel('follow_observation_unavailable');
+    throw error;
+  }
+}
+
+async function pageZoom(args, signal) {
+  let effectStarted = false;
+  try {
+    if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error('tab_id_required');
+    if (typeof args.expectedUrl !== 'string' || !args.expectedUrl.trim()) throw new Error('set_zoom_requires_expected_url');
+    // MDN tabs.setZoom/getZoom: explicit factors range from 0.3 to 5.
+    // Zero's browser-default reset is deliberately not an implicit factor.
+    if (!Number.isFinite(args.factor) || args.factor < 0.3 || args.factor > 5)
+      throw new Error('zoom_factor_out_of_range');
+    const before = await browser.tabs.get(args.tabId);
+    if (before.id !== args.tabId || before.url !== args.expectedUrl) throw new Error('page_url_changed');
+    signal?.throwIfAborted();
+    const zoomBefore = await browser.tabs.getZoom(args.tabId);
+    const settings = await browser.tabs.getZoomSettings(args.tabId);
+    if (!Number.isFinite(zoomBefore) || zoomBefore < 0.3 || zoomBefore > 5)
+      throw new Error('zoom_observation_invalid');
+    if (settings?.mode !== 'automatic') throw new Error('automatic_browser_zoom_required');
+    if (!['per-origin','per-tab'].includes(settings.scope)) throw new Error('zoom_scope_unknown');
+    // Reads above can yield while a navigation occurs. Check the exact tab
+    // again immediately before dispatch; no active-tab fallback is allowed.
+    const guarded = await browser.tabs.get(args.tabId);
+    if (guarded.id !== args.tabId || guarded.url !== args.expectedUrl) throw new Error('page_url_changed');
+    signal?.throwIfAborted();
+    effectStarted = true;
+    await browser.tabs.setZoom(args.tabId, args.factor);
+    signal?.throwIfAborted();
+    const zoomFactor = await browser.tabs.getZoom(args.tabId);
+    const after = await browser.tabs.get(args.tabId);
+    if (after.id !== args.tabId || after.url !== args.expectedUrl) throw new Error('zoomed_tab_observation_changed');
+    if (!Number.isFinite(zoomFactor) || zoomFactor < 0.3 || zoomFactor > 5)
+      throw new Error('zoom_observation_invalid');
+    signal?.throwIfAborted();
+    return {tabId:args.tabId,action:'set_zoom',urlBefore:before.url,url:after.url,
+      title:after.title,requestedFactor:args.factor,zoomBefore,zoomFactor,
+      zoomScope:settings.scope,zoomMode:settings.mode};
+  } catch (cause) {
+    const error = new Error(String(cause?.message ?? cause));
+    error.effectStarted = effectStarted;
+    throw error;
+  }
+}
+
+async function onHostMessage(msg, connection = port) {
+  const reply = { id: msg?.id, ok: false };
+  const controller = new AbortController();
+  let timer;
+  let dispatched = false;
+  try {
+    if (!Number.isSafeInteger(msg?.deadlineMs)) throw new Error('command_deadline_required');
+    const remaining = msg.deadlineMs - Date.now();
+    if (remaining <= 0) throw new Error('browser_command_expired');
+    if (remaining > 2147483647) throw new Error('command_deadline_out_of_timer_range');
+    commandControllers.add(controller);
+    timer = setTimeout(() => controller.abort(), remaining);
+    controller.signal.addEventListener('abort', () => clearTimeout(timer), {once:true});
+    dispatched = true;
+    switch (msg?.verb) {
+      case "browser.info":
+        reply.data = await browser.runtime.getBrowserInfo();
+        reply.ok = true;
+        break;
+      case "tabs.list":
+        reply.data = await tabsList();
+        reply.ok = true;
+        break;
+      case "page.scene":
+        reply.data = await pageScene(msg.args, controller.signal);
+        reply.ok = true;
+        break;
+      case "page.elements":
+        reply.data = await pageElements(msg.args);
+        reply.ok = true;
+        break;
+      case "page.read":
+        reply.data = await pageRead(msg.args);
+        reply.ok = true;
+        break;
+      case "page.interact":
+        reply.data = await pageInteract(msg.args, msg.deadlineMs, controller.signal);
+        reply.ok = true;
+        break;
+      case "page.capture":
+        reply.data = await pageCapture(msg.args);
+        reply.ok = true;
+        break;
+      default:
+        reply.error = `unknown_verb:${msg?.verb}`;
+    }
+  } catch (e) {
+    reply.error = String(e?.message ?? e);
+    if (msg?.verb === 'page.interact' && (!dispatched || e?.effectStarted === false))
+      reply.effectPhase = 'not_started';
+  } finally {
+    clearTimeout(timer);
+    commandControllers.delete(controller);
+  }
+  try {
+    // Match the native host's bounded incoming frames, including JSON/UTF-8.
+    // Reject locally before an oversized frame can disconnect the host.
+    if (new TextEncoder().encode(JSON.stringify(reply)).byteLength > 8 * 1024 * 1024) {
+      delete reply.data;
+      reply.ok = false;
+      reply.error = "browser_reply_exceeds_8_mib";
+    }
+    connection?.postMessage(reply);
+  } catch {
+    // Port died mid-answer; the reconnect path owns the next attempt.
+  }
+}
+
+connect();

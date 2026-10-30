@@ -1,0 +1,32 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+
+  9:Runtime  p:next  ▸runtime.toml  models  5›  15:31:42  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────
+    base /var/fold…t-fixture-oe0t54fu   masc <base>/.masc   binary age unknown
+ ──────────────────────────────────────────────────────────────────────────────
+    fetch: HTTP 503: runtime config load failed: fixture configuration unavai…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:select / scroll  PgUp/PgDn:page  v:read status  Esc:back  q:quit  …?
+ › to alpha   (i to write)

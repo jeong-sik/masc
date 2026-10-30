@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-24T18:20:05.255503+00:00",
+  "before_sha256": "d13ab0cbea8ef70983469b2349d8be2078b641ce014955b8a84711384b17e9d4",
+  "after_sha256": "b0a49ff49eee6dd27e3239fdd5db08c59d86649d3d0601272f84c2a84a6a22c3",
+  "current_goal_id": "goal-outcome-driven-work-20261024",
+  "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+  "goal_phase_before": "executing",
+  "measured_pass": 10,
+  "required": 11,
+  "remaining": [
+    "G3"
+  ],
+  "main_api_note": "MCP Goal list60s and /health?full=1 5s read timed out before this artifact update; no measurement write attempted yet. Persisted Goal was independently read.",
+  "public_evidence_commit": "2bc6ae8fa1904d8232c8ea0738e0b14bab824945"
+}

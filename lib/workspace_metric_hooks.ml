@@ -1,0 +1,568 @@
+open Masc_domain
+
+let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
+  let exn_str = Printexc.to_string exn in
+  let event_family = Workspace_telemetry_drop_event.family_to_wire event in
+  let event_kind = Workspace_telemetry_drop_event.kind_to_wire event in
+  let details =
+    `Assoc
+      [ "event_family", `String event_family
+      ; "event_kind", `String event_kind
+      ; "exception", `String exn_str
+      ]
+  in
+  Telemetry_observe.observe_silent ~kind:"workspace_telemetry_drop_log" (fun () ->
+    Log.Workspace.emit
+      Log.Warn
+      ~details
+      (Printf.sprintf
+         "telemetry/audit dropped (non-Eio context): %s/%s"
+         event_family
+         event_kind));
+  Telemetry_observe.observe_silent ~kind:"workspace_telemetry_drop_metric" (fun () ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_workspace_telemetry_drop
+      ~labels:(Workspace_telemetry_drop_event.to_metric_labels event)
+      ())
+;;
+
+(* Intermediate for the independent delivery paths of one terminal-task commit.
+   [Workspace_hooks.Task_terminal_delivery_degraded] carries an inline record,
+   which cannot be constructed as a standalone value, so each path reports
+   through this and the variant is built once after both have run. *)
+type terminal_delivery_degradation =
+  { degraded_kind : string
+  ; degraded_detail : string
+  }
+
+let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = function
+  | Masc_domain.Claim -> Audit_log.ClaimTask
+  | Masc_domain.Start -> Audit_log.StartTask
+  | Masc_domain.Done_action -> Audit_log.DoneTask
+  | Masc_domain.Cancel -> Audit_log.CancelTask
+  | Masc_domain.Release -> Audit_log.ReleaseTask
+  | Masc_domain.Submit_for_verification as action ->
+    Audit_log.Custom ("task_" ^ Masc_domain.task_action_to_string action)
+;;
+
+let merge_detail_fields fields details =
+  match details with
+  | `Assoc extra -> `Assoc (fields @ extra)
+  | `Null -> `Assoc fields
+  | other -> `Assoc (fields @ [ "payload", other ])
+;;
+
+let observe_agent_lifecycle
+      config
+      ~agent_id
+      ~(event : Workspace_hooks.agent_lifecycle_event)
+      ~details
+  =
+  let event_kind = Workspace_hooks.agent_lifecycle_event_to_string event in
+  let details =
+    merge_detail_fields
+      [ "event_family", `String "agent_lifecycle"
+      ; "event_kind", `String event_kind
+      ; "agent_id", `String agent_id
+      ]
+      details
+  in
+  let level =
+    match event with
+    | Session_bound | Session_rebound | Session_ended -> Log.Info
+  in
+  let message =
+    match event with
+    | Session_bound -> Printf.sprintf "agent session bound: %s" agent_id
+    | Session_rebound -> Printf.sprintf "agent session rebound: %s" agent_id
+    | Session_ended -> Printf.sprintf "agent session ended: %s" agent_id
+  in
+  Log.Workspace.emit level ~details message;
+  (match event with
+   | Session_ended -> (Atomic.get Workspace_hooks.active_agents_change_fn) `Dec
+   | Session_bound | Session_rebound ->
+     (Atomic.get Workspace_hooks.active_agents_change_fn) `Inc);
+  let audit_details =
+    match event with
+    | Session_rebound -> merge_detail_fields [ "session_rebound", `Bool true ] details
+    | Session_bound | Session_ended -> details
+  in
+  let action =
+    match event with
+    | Session_ended -> Audit_log.Custom "agent_session_ended"
+    | Session_bound | Session_rebound -> Audit_log.Custom "agent_session_bound"
+  in
+  try
+    Audit_log.log_action
+      config
+      ~agent_id
+      ~action
+      ~details:audit_details
+      ~outcome:Audit_log.Success
+      ();
+    if Env_config_core.telemetry_enabled ()
+    then (
+      match event with
+      | Session_ended -> Telemetry_eio.track_agent_unbound config ~agent_id ~reason:"session_ended"
+      | Session_bound | Session_rebound ->
+        Telemetry_eio.track_agent_session_bound config ~agent_id ())
+  with
+  | Stdlib.Effect.Unhandled _ as exn ->
+    let lifecycle_kind : Workspace_telemetry_drop_event.lifecycle_kind =
+      match event with
+      | Workspace_hooks.Session_bound -> Session_bound
+      | Workspace_hooks.Session_rebound -> Session_rebound
+      | Workspace_hooks.Session_ended -> Session_ended
+    in
+    warn_telemetry_drop ~event:(Agent_lifecycle lifecycle_kind) exn
+;;
+
+let observe_task_transition_event
+      config
+      ~agent_name
+      ~task_id
+      ~(transition : Masc_domain.task_action)
+      ~details
+  =
+  let transition_s = Masc_domain.task_action_to_string transition in
+  let details =
+    merge_detail_fields
+      [ "event_family", `String "task_transition"
+      ; "transition", `String transition_s
+      ; "task_id", `String task_id
+      ; "agent_id", `String agent_name
+      ]
+      details
+  in
+  let level =
+    match transition with
+    | Masc_domain.Cancel -> Log.Warn
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Done_action
+    | Masc_domain.Release
+    | Masc_domain.Submit_for_verification -> Log.Info
+  in
+  let message = Printf.sprintf "task %s %s by %s" task_id transition_s agent_name in
+  Log.Task.emit level ~details message;
+  (try
+     Audit_log.log_action
+       config
+       ~agent_id:agent_name
+       ~action:(task_action_of_transition transition)
+       ~details
+       ~outcome:Audit_log.Success
+       ();
+     if Env_config_core.telemetry_enabled ()
+     then (
+       match transition with
+       | Masc_domain.Claim | Masc_domain.Start ->
+         Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
+       | Masc_domain.Done_action ->
+         let duration_ms = Safe_ops.json_int ~default:0 "duration_ms" details in
+         Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~terminal:Task_outcome_measurement.Approved;
+         Otel_metric_store.record_task_completed ()
+       | Masc_domain.Cancel ->
+         let duration_ms = Safe_ops.json_int ~default:0 "duration_ms" details in
+         Telemetry_eio.track_task_completed config ~task_id ~duration_ms ~terminal:Task_outcome_measurement.Cancelled;
+         Otel_metric_store.record_task_failed ()
+       | Masc_domain.Release | Masc_domain.Submit_for_verification -> ())
+   with
+   | Stdlib.Effect.Unhandled _ as exn ->
+     warn_telemetry_drop ~event:(Task_transition transition) exn)
+;;
+
+let record_workspace_broadcast ~msg_type ~elapsed_s =
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_workspace_broadcast_duration
+    ~labels:[ "msg_type", msg_type ]
+    elapsed_s
+;;
+
+let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
+  if retries > 0
+  then
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_file_lock_retries
+      ~labels:[ "caller", caller ]
+      ~delta:(float_of_int retries)
+      ();
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_file_lock_acquire_seconds
+    ~labels:[ "caller", caller; "outcome", outcome ]
+    elapsed_s
+;;
+
+let record_file_lock_table_cas_retry () =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_file_lock_table_cas_retries
+    ()
+;;
+
+let process_timeout_metric = Otel_metric_store.metric_process_timeout
+
+let record_process_timeout ~program ~timeout_sec ~origin =
+  let stage_label = Timeout_origin.to_label origin in
+  Otel_metric_store.inc_counter process_timeout_metric
+    ~labels:
+      [ "program", program
+      ; ("timeout_bucket", Timeout_bucket.(to_label (of_seconds timeout_sec)))
+      ; "stage", stage_label
+      ]
+    ()
+;;
+
+let distributed_lock_acquire_failed_metric =
+  Otel_metric_store.metric_distributed_lock_acquire_failed
+;;
+
+let record_distributed_lock_acquire_failed ~key ~attempts =
+  Otel_metric_store.inc_counter
+    distributed_lock_acquire_failed_metric
+    ~labels:[ "key", key; "attempts", string_of_int attempts ]
+    ()
+;;
+
+let record_active_agents_change = function
+  | `Inc -> Otel_metric_store.inc_gauge Otel_metric_store.metric_active_agents ()
+  | `Dec -> Otel_metric_store.dec_gauge Otel_metric_store.metric_active_agents ()
+;;
+
+let record_workspace_telemetry_drop event =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_workspace_telemetry_drop
+    ~labels:(Workspace_telemetry_drop_event.to_metric_labels event)
+    ()
+;;
+
+let record_telemetry_observe_failure kind =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_telemetry_observe_failures
+    ~labels:[("kind", kind)] ()
+;;
+
+let record_anti_rationalization_outcome ~outcome ~runtime =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_anti_rationalization_outcome
+    ~labels:[ "outcome", outcome; "runtime", runtime ]
+    ()
+;;
+
+let install () =
+  Atomic.set Workspace_hooks.keeper_registered_fn (fun ~base_path ~agent_name ->
+    Option.is_some
+      (Keeper_registry_lookup.find_by_name_in_base_path ~base_path agent_name));
+  Atomic.set Workspace_hooks.schedule_wake_target_registered_fn (fun config keeper_name ->
+    match Keeper_meta_store.read_effective_meta config keeper_name with
+    | Ok (Some _) -> Ok true
+    | Ok None -> Ok false
+    | Error detail -> Error detail);
+  Atomic.set Workspace_hooks.observe_agent_lifecycle_fn (fun config ~agent_id ~event ~details ->
+    observe_agent_lifecycle config ~agent_id ~event ~details);
+  Atomic.set Workspace_hooks.observe_task_transition_fn (fun config ~agent_name ~task_id ~transition ~details ->
+    observe_task_transition_event config ~agent_name ~task_id ~transition ~details);
+
+  Atomic.set Workspace_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
+    try
+      ignore
+        (Activity_graph.emit
+           config
+           ~actor:(Activity_graph.entity ~kind:actor.Workspace_hooks.kind actor.id)
+           ?subject:
+             (Option.map
+                (fun (s : Workspace_hooks.activity_entity) ->
+                   Activity_graph.entity ~kind:s.kind s.id)
+                subject)
+           ~kind
+           ~payload
+           ~tags
+           ())
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Log.Workspace.warn "activity_graph emit failed: %s" (Printexc.to_string exn));
+
+  Atomic.set Workspace_hooks.tool_assigned_fn Tool_assignment_telemetry.emit_assigned;
+
+  Atomic.set Workspace_hooks.workspace_broadcast_observed_fn record_workspace_broadcast;
+  Atomic.set File_lock_eio.on_lock_attempt_fn record_file_lock_attempt;
+  Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry;
+  Atomic.set Process_eio.process_timeout_observer_fn record_process_timeout;
+  Atomic.set Workspace_hooks.distributed_lock_acquire_failed_fn record_distributed_lock_acquire_failed;
+  Atomic.set Workspace_hooks.active_agents_change_fn record_active_agents_change;
+  Atomic.set Workspace_hooks.workspace_telemetry_drop_fn record_workspace_telemetry_drop;
+  Atomic.set Workspace_hooks.telemetry_observe_failure_fn record_telemetry_observe_failure;
+
+  Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
+
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ?execution_owner ~evaluator_runtime ~candidate_kind ~prompt ?system_prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~attempt_continuation ~on_runtime_attempt_error () ->
+    let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
+    let evaluator_execution = ref None in
+    let { Task.Anti_rationalization.schemas = lookup_schemas
+        ; dispatch = dispatch_lookup
+        }
+      =
+      lookup
+    in
+    (* The verdict tool and the lookup tools share one dispatch entry point, so
+       the name decides which surface answers. A name belonging to neither
+       reaches the lookup dispatch, which returns an error the evaluator can
+       read and correct, not a silently dropped call. *)
+    let dispatch_verdict ~name ~args =
+      let start_time = Tool_timing.start () in
+      let call, answer = Task.Anti_rationalization.step_verdict_call !verdict_call args in
+      verdict_call := call;
+      match answer with
+      | Task.Anti_rationalization.Verdict_recorded verdict ->
+        evaluator_execution := Runtime_response_identity_scope.current ();
+        Tool_result.ok
+          ~tool_name:name
+          ~start_time
+          (match verdict with
+           | Approve reason -> "Completion verdict recorded: APPROVE: " ^ reason
+           | Reject reason -> "Completion verdict recorded: REJECT: " ^ reason)
+      | Task.Anti_rationalization.Verdict_already_recorded { detail } ->
+        Tool_result.error
+          ~failure_class:Tool_result.Workflow_rejection
+          ~tool_name:name
+          ~start_time
+          detail
+      | Task.Anti_rationalization.Verdict_refused { detail } ->
+        Log.Task.warn "[anti-rationalization] structured verdict parse failed: %s" detail;
+        Tool_result.error
+          ~failure_class:Tool_result.Workflow_rejection
+          ~tool_name:name
+          ~start_time
+          (Printf.sprintf "Invalid verdict format: %s" detail)
+    in
+    let dispatch ~name ~args =
+      let result =
+        if String.equal name report_tool_schema.Masc_domain.name
+        then dispatch_verdict ~name ~args
+        else dispatch_lookup ~name ~args
+      in
+      on_tool_result ~input:args result;
+      result
+    in
+    let system_prompt = match system_prompt with
+      | Some prompt -> Ok prompt
+      | None -> Prompt_registry.render_prompt_template Prompt_names.verification_system []
+    in
+    match system_prompt with
+    | Error detail ->
+      Error (Agent_core.Error.Config
+        (Agent_core.Error.InvalidConfig { field = "verification.system"; detail }))
+    | Ok system_prompt ->
+    (* The authority-tool closures retain the submitted evidence root. A review
+       owns only this disposable session tree, never a producer's configuration. *)
+    let keeper_name = match execution_owner with
+      | Some owner -> owner.Task.Anti_rationalization.keeper_name
+      | None -> "completion-review-" ^ Random_id.uuid_v7 () in
+    let selected_runtime_id = ref None in
+    match
+      Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
+        match Runtime.verifier_exact_slot_admission ~candidate_kind ~runtime_id:evaluator_runtime with
+        | Error detail ->
+          Error (Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig {field="verifier_exact.cli_slots"; detail}))
+        | Ok () ->
+        Option.iter Eio.Switch.check sw;
+        Eio.Switch.run (fun review_sw ->
+          let review_root = match execution_owner with
+            | Some owner ->
+              (match Fs_compat.get_fs_opt () with
+               | None -> Error (Agent_core.Error.Config
+                   (Agent_core.Error.InvalidConfig {field="review.execution_owner";
+                    detail="review journal filesystem is unavailable"}))
+               | Some fs ->
+                 Eio.Path.mkdirs ~exists_ok:true ~perm:0o700 Eio.Path.(fs / owner.session_root);
+                 Ok owner.session_root)
+            | None ->
+              let root = Filename.temp_file "masc-completion-review-" "" in
+              Unix.unlink root;
+              Unix.mkdir root 0o700;
+              Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree root);
+              Ok root in
+          match review_root with
+          | Error _ as error -> error
+          | Ok review_root -> Keeper_turn_driver_wrappers.run_named_with_masc_tools
+            ~input_source:Keeper_request_source.Completion_review
+            ~raw_trace:None
+            ~runtime_id:evaluator_runtime
+            ~on_selected_runtime:(fun runtime_id -> selected_runtime_id := Some runtime_id)
+            ?on_request_execution_ready:(Option.map
+              (fun owner -> owner.Task.Anti_rationalization.on_execution_ready) execution_owner)
+            ~base_path:review_root
+            (* The goal media were put in the workspace store; the review root
+               is only the reviewer's scratch directory. *)
+            ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+            ~goal:prompt
+            ?goal_blocks
+            ~keeper_name
+            (* The review runs once under a disposable name; no cycle retries a
+               failure it would record (RFC-0458 §3.4 rule 5). *)
+            ~walk_owner:Keeper_turn_driver.One_shot_walk
+            ~system_prompt
+            ~masc_tools:(report_tool_schema :: lookup_schemas)
+            ~dispatch
+            ~context:(Agent_core.Context.create ())
+            ~output_contract:Keeper_turn_driver.Tool_verdict
+            ~tool_requirement:Keeper_required_tools.Required
+            (* The reviewer is program-owned, not operator-declared: its
+               instructions are [system_prompt] above and its native posture
+               is this value. No keepers/<name>.toml is written under
+               [review_root]; the official-client host takes a stated posture
+               as [Runtime_native_tools.Program_defined] and reads no
+               declaration for it (#36066 refuses undeclared keepers). *)
+            ~required_native_posture:Runtime_native_tools.Native_none
+            (* These bounded authority results have no reader for a disposable
+               session blob. Keep their text on the wire, or fail explicitly
+               at the existing evidence ceiling instead of emitting a marker. *)
+            ~tool_result_projection:(Tool_output.Inline_up_to
+              {maximum_bytes=Tool_shard_limits.verification_evidence_max_bytes})
+            ~attempt_continuation
+            ~on_runtime_attempt_error
+            ~sw:review_sw
+            ()))
+    with
+    | Ok _ ->
+      (match !verdict_call.Task.Anti_rationalization.violation with
+       | Some detail ->
+         Error
+           (Agent_core.Error.Internal
+              ("task completion verdict protocol violation: " ^ detail))
+       | None ->
+         (match !selected_runtime_id with
+          | Some selected_runtime_id -> Ok {Task.Anti_rationalization.selected_runtime_id;
+              verdict= !verdict_call.recorded; evaluator_execution= !evaluator_execution}
+          | None -> Error (Agent_core.Error.Internal "verifier dispatch omitted its selected runtime")))
+    | Error err ->
+      Error err);
+
+  Atomic.set Workspace_hooks.record_task_metric_fn (fun config ~agent_id ~task_id ~started_at ~completed_at ~terminal ~error_message ~collaborators ~handoff_from ~handoff_to ->
+    let metric : Metrics_store_eio.task_metric = {
+      id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
+      agent_id;
+      task_id;
+      started_at;
+      completed_at;
+      success = Task_outcome_measurement.lifecycle_success terminal;
+      error_message;
+      collaborators;
+      handoff_from;
+      handoff_to;
+    } in
+    try
+      match Metrics_store_eio.record config metric with
+      | Ok (Metrics_store_eio.Enqueued | Written) -> ()
+      | Error error -> Log.Task.error ~keeper_name:task_id "task metric record rejected: %s"
+          (Metrics_store_eio.record_error_to_string error)
+    with Eio.Cancel.Cancelled _ as e -> raise e
+       | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record dynamic hook failed: %s" (Stdlib.Printexc.to_string exn));
+
+  Atomic.set Workspace_hooks.push_task_event_fn (fun ~event_type ~details ->
+    let payload = `Assoc (
+      ("type", `String event_type) ::
+      ("timestamp", `Float (Time_compat.now ())) ::
+      details
+    ) in
+    Subscriptions.push_event_to_sessions payload);
+
+  (* Tell the Task's author that the work they filed was cancelled.
+     The Task's Goal links do not determine this recipient. *)
+  let deliver_task_cancellation config ~actor ~task_id =
+    match
+      Keeper_task_cancellation_wake.notify_author
+        ~config
+        ~actor
+        ~task_id
+    with
+    | Keeper_task_cancellation_wake.Delivered _
+    | Keeper_task_cancellation_wake.Already_present _
+    | Keeper_task_cancellation_wake.Not_cancelled
+    | Keeper_task_cancellation_wake.Self_cancelled
+    | Keeper_task_cancellation_wake.No_author
+    | Keeper_task_cancellation_wake.Author_not_a_keeper _ -> None
+    | Keeper_task_cancellation_wake.Backlog_read_failed { detail } ->
+      Some
+        { degraded_kind = "cancellation_author_backlog_read_failed"
+        ; degraded_detail = detail
+        }
+    | Keeper_task_cancellation_wake.Author_lookup_failed { author; detail } ->
+      Some
+        { degraded_kind = "cancellation_author_lookup_failed"
+        ; degraded_detail = Printf.sprintf "author=%s: %s" author detail
+        }
+    | Keeper_task_cancellation_wake.Canceller_lookup_failed { agent_name; detail } ->
+      (* Degraded rather than silent: nothing was enqueued because the
+         self-cancellation check could not be decided, and the ambiguous
+         identity behind it needs repair. *)
+      Some
+        { degraded_kind = "cancellation_canceller_lookup_failed"
+        ; degraded_detail = Printf.sprintf "canceller=%s: %s" agent_name detail
+        }
+    | Keeper_task_cancellation_wake.Enqueue_failed { keeper_name; detail } ->
+      Some
+        { degraded_kind = "cancellation_author_storage_error"
+        ; degraded_detail = Printf.sprintf "keeper=%s: %s" keeper_name detail
+        }
+  in
+  Atomic.set Workspace_hooks.task_terminal_committed_fn
+    (fun config ~actor ~task_id ->
+       let cancellation_degraded =
+         deliver_task_cancellation config ~actor ~task_id
+       in
+       match cancellation_degraded with
+       | None -> Workspace_hooks.Task_terminal_delivered
+       | Some degraded ->
+         Workspace_hooks.Task_terminal_delivery_degraded
+           { kind = degraded.degraded_kind; detail = degraded.degraded_detail });
+
+  Atomic.set Workspace_hooks.verification_submit_request_fn
+    (fun config ~task ~assignee ~verification_id ~claim ->
+       Verification_protocol.create_submit_request
+         ~config
+         ~task
+         ~assignee
+         ~verification_id
+         ~claim);
+
+  Atomic.set Workspace_hooks.verification_delete_request_fn
+    (fun config ~verification_id ->
+       Verification_protocol.delete_verification_request ~config ~verification_id);
+
+  Atomic.set Workspace_hooks.verification_notify_submit_fn
+    (fun config ~task ~assignee ~verification_id ~claim ->
+       Verification_protocol.notify_submit_for_verification
+         ~config
+         ~task
+         ~assignee
+         ~verification_id
+         ~claim);
+
+  Atomic.set Workspace_hooks.verification_notify_verdict_fn
+    (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
+       match decision with
+       | `Approve notes ->
+         Verification_protocol.notify_approve_verification
+           ~task_id
+           ~authority
+           ~verification_id
+           ~notes
+       | `Reject reason ->
+         Verification_protocol.notify_reject_verification
+           ~task_id
+           ~authority
+           ~verification_id
+           ~reason);
+
+  (* Wrapper for cache desync cleared *)
+  let original_cache_desync = Atomic.get Workspace_hooks.cache_desync_cleared_fn in
+  Atomic.set Workspace_hooks.cache_desync_cleared_fn (fun config ~module_name ~task_id ~status ->
+    original_cache_desync config ~module_name ~task_id ~status;
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_cache_desync_cleared
+      ~labels:[ "module", module_name; "status", status ]
+      ());
+
+  ()
+;;

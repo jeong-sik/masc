@@ -1,0 +1,19 @@
+defer_loading = true
+name = "keeper_image_read"
+description = """
+Read an image's original pixels into the current model, without calling another \
+model. Provide exactly one sandbox path or your own image artifact from a \
+screenshot/upload. Use this for visual inspection when the current runtime \
+accepts image input. A runtime that cannot accept images must use \
+keeper_analyze_image for a delegated text reading instead."""
+additional_properties = false
+
+[[params]]
+name = "path"
+type = "string"
+description = "Image file in your own sandbox, resolved like Read."
+
+[[params]]
+name = "artifact"
+type = "string"
+description = "Exact Keeper-local image handle returned by a screenshot or image tool; not a tool-blob reference."

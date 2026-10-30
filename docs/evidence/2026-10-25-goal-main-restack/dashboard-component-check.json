@@ -1,0 +1,36 @@
+{
+  "head": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+  "path": "dashboard/src/components/memory-inspector.ts",
+  "source_sha256": "89e31768dbcbe1bd05d4ca1383006deb30bd21c48e7ac9f7b8e312ebada75588",
+  "scope": "Actual constants and exported pure composition functions, transpiled with installed TypeScript and executed in Node VM; no Preact/render/browser/server/native proof",
+  "cases": [
+    {
+      "label": "before",
+      "fragment_sha256": "3c4c93713f5c33002496c8de5dbbb2b11c87bb786823747127fe6959265712eb",
+      "result": {
+        "status": "error",
+        "type": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'lbl')"
+      }
+    },
+    {
+      "label": "after",
+      "fragment_sha256": "358ee89a872a8dda7b75e138caed96975a969dd4c29d898d0960647bfe3c7d6a",
+      "result": {
+        "status": "ok",
+        "value": {
+          "totalBytes": 74,
+          "parts": [
+            {
+              "key": "prompt.completion_authority",
+              "lbl": "Task 검증 판정",
+              "bytes": 74,
+              "color": "var(--volt)",
+              "mem": false
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

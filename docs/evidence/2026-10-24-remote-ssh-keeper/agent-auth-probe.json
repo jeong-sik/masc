@@ -1,0 +1,17 @@
+{
+  "provenance": "operator_proxy",
+  "candidate_binary_exercised": false,
+  "scenario": "invalid replaced private key, retained valid .pub, dedicated isolated agent",
+  "results": [
+    {
+      "agent_disabled": false,
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "agent_disabled": true,
+      "exit": 255,
+      "stderr": "Load key \"/tmp/mc24/stale-key\": invalid format\nmasc@127.0.0.1: Permission denied (publickey).\n"
+    }
+  ]
+}

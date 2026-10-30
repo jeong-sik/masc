@@ -1,0 +1,10 @@
+{
+  "observed_at_utc": "2026-10-26T12:21:01.469827+00:00",
+  "path": "/api/v1/keepers/masc-pro-builder/chat/operations/schedule-backend-resume-0c7be315f4334255b271e1195ca530d0",
+  "http_status": 200,
+  "operation": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "schedule-backend-resume-0c7be315f4334255b271e1195ca530d0",
+    "state": "Queued"
+  }
+}

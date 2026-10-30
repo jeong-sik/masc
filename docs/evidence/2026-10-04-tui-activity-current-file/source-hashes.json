@@ -1,0 +1,9 @@
+{
+  "bin/masc_tui_exact_activity.ml": "45cd5f1364fd12dbb29cb78d58dd7dc0431d807afd389f8b562b3c8392887ade",
+  "bin/masc_tui_exact_activity.mli": "ff87fd265b08c4c742c323932b86917b59e535fc734c7fb320d409507bfb455e",
+  "bin/masc_tui_keys.ml": "1c7085b668bdb0083c281140f88801e4c524ab839080fa154b49f0926d7c48b1",
+  "test/test_tui_exact_activity.ml": "602bef255cb7935df80599d6957ac3bc9319eee3db3f83510eba27f503e336bb",
+  "test/test_tui_exact_activity_pty.py": "14bde58b37e57b5ce4677c239961f6e9275727361ee034e379f8e94995cb142c",
+  "docs/guides/exact-lane-activity.md": "12916300ef202c19163bfb55f86ae5cbb55c96f1a7cbfdc67e8763461ae50905",
+  "docs/evidence/2026-10-04-tui-activity-current-file/check-draft.py": "b95581b4ec0724206de13c09a652ab451f211a799c133bb9326dfd91114de1ff"
+}

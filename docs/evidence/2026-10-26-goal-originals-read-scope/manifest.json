@@ -1,0 +1,73 @@
+{
+  "schema": "masc.goal.read-scope.publication-manifest.v1",
+  "created_at_utc": "2026-10-25T20:13:41.906553+00:00",
+  "cohort": "2026-10-26-goal-originals-read-scope",
+  "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "prompt_sha_prefix": "428e2d7f",
+  "private_original_leaf_count": 159,
+  "file_count_excluding_manifest": 12,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2314,
+      "sha256": "ba99f3a8a6aac74b5d5c6782bb58d5ae72b148b26ed01ccb5c01c3d0f3ee4d03"
+    },
+    {
+      "path": "actual-tool-sequence.json",
+      "bytes": 49190,
+      "sha256": "35acd3ff1860bc0532fdb8b1e0c61ccbb94f1080d4024b89e4b51dc33894e74b"
+    },
+    {
+      "path": "owned-stop.json",
+      "bytes": 1254,
+      "sha256": "124b6721be4a97d59a12871a2e51903fb09722863a9266bd4e4c1fcfb1fe1f5f"
+    },
+    {
+      "path": "persisted-outcome.json",
+      "bytes": 7297,
+      "sha256": "3e720125c04bfe60d017bae9ba492ed0abb92596dde90e3d4f723fffd76470a3"
+    },
+    {
+      "path": "preparation-review.json",
+      "bytes": 12855,
+      "sha256": "6a3651f55749fe8b65bd242050e8b7e18a00c4a1a510fee603ba5406420a1dcf"
+    },
+    {
+      "path": "private-originals-manifest.json",
+      "bytes": 33019,
+      "sha256": "aabafc30054b561115afb01984a76e7b75b26aa24c4c91ee2d82a09e8dd92b70"
+    },
+    {
+      "path": "protocol-response.json",
+      "bytes": 19148,
+      "sha256": "2fe9d4aee2f820754f9719c7707413c5ee3210879dfad2a58451e69ec56a3ee8"
+    },
+    {
+      "path": "protocol-review.json",
+      "bytes": 51180,
+      "sha256": "c1fa4dd3239ce6022579e1eea683e60cc3b4102e421dac10adecabcb07093603"
+    },
+    {
+      "path": "read-coverage-clarification.json",
+      "bytes": 3130,
+      "sha256": "b599c123d21ebe2662c9aee982cb35c995c834aa1dade7adddf99feb6edb8bdd"
+    },
+    {
+      "path": "result.json",
+      "bytes": 12167,
+      "sha256": "e2c86a51ba9bded8d2850083c7ca25327d0179890dcccce10a7a2117a25c75ac"
+    },
+    {
+      "path": "sufficiency-response.json",
+      "bytes": 15187,
+      "sha256": "a243b8437b3c8af206dc3ceb7ab43d89eb791f084bc616fd1a04e4e62ca66978"
+    },
+    {
+      "path": "sufficiency-review.json",
+      "bytes": 49418,
+      "sha256": "e8a971f45f663b3f512ba9806bb968f86359724ed62b2b564377b825f8a63c28"
+    }
+  ],
+  "raw_provider_bodies_or_reasoning_exported": false,
+  "scope": "Allowlisted immutable result/protocol/state projections, attributed reviews and metadata-only private-original manifest. No originalGoal completion, native current-head build, installation, causal effect or reliability claim."
+}

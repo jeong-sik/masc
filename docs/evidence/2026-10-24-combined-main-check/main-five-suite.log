@@ -1,0 +1,1705 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_goal_verifier_worker.exe test/test_goal_verification_agent.exe test/test_verifier_review_worker.exe test/test_completion_trust_harness.exe test/test_verification_run_registry.exe test/fixtures/verifier-image-lookup.png config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md
+(cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+Warning: option "-j-std" is deprecated.
+[targeted] test/test_goal_verifier_worker: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_goal_verifier_worker: start 2026-10-24T13:45:03Z
+::group::{retained Goal worker}
+Testing `retained Goal worker'.
+This run has ID `V9V65I2L'.
+
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-af1730 (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-af1730 (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-witty-koala mention=none request_id=wmsg-305079ab1fc498a57da2416d7795b795 seq=1 bytes=47
+ASSERT actual original workspace
+ASSERT original Goal prompt
+ASSERT original system message
+[2026-10-24 13:45:03] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-af1730/.masc/playground argument={"file_path":"measurement-owner/proof.png"} outcome=resolved
+ASSERT canonical full image reaches reviewer
+ASSERT shared successful-read projection
+[2026-10-24 13:45:03] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849503547-1b2ff995 LLM approved runtime=goal-reviewer reason=The actual evidence reaches the metric.
+ASSERT exactly one actual reviewer entry
+ASSERT actual read retained with result
+ASSERT the original observation run survives
+ASSERT all original tool observations survive
+ASSERT restoring judgment never calls a model again
+ASSERT worker cannot apply Goal proof or confirmation
+  [OK]          execution          0   actual retained visual lookup and rest...
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-34696e (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-34696e (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-gentle-llama mention=none request_id=wmsg-b76d2fbf5b2f00d0c494d5e8469e1c13 seq=1 bytes=48
+ASSERT actual inner continuation must resolve its original
+[2026-10-24 13:45:03] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849503595-0ca3bb74 evaluator unavailable runtime=goal-reviewer retryable=false; no verdict committed: Network error (connection_reset): Goal reply lost
+ASSERT unknown frontier retains the original attempt
+ASSERT no slot fallback or restart replay after unknown
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-2c19dd (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-2c19dd (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-happy-wolf mention=none request_id=wmsg-ec5c0f49ed384f58c167e474fd427a81 seq=1 bytes=46
+ASSERT cancelled reviewer called once
+  [OK]          execution          1   unknown and cancellation never redispa...
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-16c552 (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-16c552 (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-tame-shark mention=none request_id=wmsg-6befeb787ef3b17b4ac70836ca8813da seq=1 bytes=46
+[2026-10-24 13:45:03] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849503646-23fa3082 fixture admission unavailable; no verdict committed
+ASSERT actual admission did not judge
+ASSERT no reviewer before admission repair
+[2026-10-24 13:45:03] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849503646-23fa3082 LLM approved runtime=goal-reviewer reason=admitted
+ASSERT one actual provider entry after repair
+ASSERT same original run after repair
+ASSERT same attempt after repair
+  [OK]          execution          2   same-original pre-admission repair.
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-ba9aa5 (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-ba9aa5 (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-brave-shark mention=none request_id=wmsg-7e6d5064facb5f6dc1432225784ec841 seq=1 bytes=47
+ASSERT strict discovery finds the original subject
+ASSERT no refused path calls model
+  [OK]          execution          3   authority destination and strict inven...
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-4f17ee (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-4f17ee (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-fair-eagle mention=none request_id=wmsg-f79e5c68a3ff07ba74899c0af0f06bb6 seq=1 bytes=46
+ASSERT retry keeps complete original prompt
+[2026-10-24 13:45:03] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849503716-c94102ff evaluator unavailable runtime=goal-reviewer retryable=true; no verdict committed: Rate limited: definite temporary refusal (retry_after: 1.000s)
+ASSERT typed definite refusal retains retry candidate
+ASSERT one linked successor
+ASSERT fixed staged run survives
+ASSERT no run allocation during restart
+ASSERT retry keeps complete original prompt
+[2026-10-24 13:45:03] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849503716-c94102ff LLM approved runtime=goal-reviewer reason=checked original
+ASSERT only definite terminal failure gets a new provider attempt
+ASSERT judged frontier does not create another successor
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-7083f8 (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-7083f8 (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-jade-hawk mention=none request_id=wmsg-84e58f0702199b5da67df60205aa843c seq=1 bytes=45
+ASSERT retry keeps complete original prompt
+[2026-10-24 13:45:03] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849503759-b4604a19 evaluator unavailable runtime=goal-reviewer retryable=true; no verdict committed: Rate limited: definite temporary refusal (retry_after: 1.000s)
+ASSERT typed definite refusal retains retry candidate
+ASSERT one linked successor
+ASSERT fixed staged run survives
+ASSERT no run allocation during restart
+ASSERT retry keeps complete original prompt
+[2026-10-24 13:45:03] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849503759-b4604a19 LLM approved runtime=goal-reviewer reason=checked original
+ASSERT only definite terminal failure gets a new provider attempt
+ASSERT judged frontier does not create another successor
+  [OK]          execution          4   linked frontier restores the original ...
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-271845 (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-271845 (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-lean-shark mention=none request_id=wmsg-58979f6c1204d776097eb3aefde1a3b4 seq=1 bytes=46
+[2026-10-24 13:45:03] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849503813-12eeed84 LLM approved runtime=goal-reviewer reason=actual proof
+[2026-10-24 13:45:03] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+ASSERT exact committed state prevents duplicate proof/Candle effects
+ASSERT commit recovery never calls another model
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-86a366 (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-86a366 (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-brave-wolf mention=none request_id=wmsg-7d39393d79e709afd31f3fd357677a8c seq=1 bytes=46
+[2026-10-24 13:45:03] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849503856-45e60600 LLM approved runtime=goal-reviewer reason=actual proof
+ASSERT another request cannot authorize old proof
+  [OK]          execution          5   actual Goal proof commit reply loss an...
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-f49a37 (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-f49a37 (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-gentle-koala mention=none request_id=wmsg-6b79d4fe0005e519dfd7dadf8a5fe59e seq=1 bytes=48
++mock time is now 42
+[1970-01-01 00:00:42] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-f49a37/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[1970-01-01 00:00:42] [INFO] [Misc] [goal-proof-review] goal_id=goal-42000-0d1d5475 LLM approved runtime=goal-reviewer reason=actual target measured
+ASSERT the actual owner canonicalized integral receipt metadata
+[1970-01-01 00:00:42] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[1970-01-01 00:00:42] [INFO] [Misc] goal verifier committed retained goal_id=goal-42000-0d1d5475 run_id=host/0d2cd18872c16996e82476867e50868d
+ASSERT restart and repeated recovery do not ask another model
+ASSERT integral original metadata commits the actual proof
+ASSERT proof keeps the original run
+  [OK]          execution          6   actual integral receipt commits after ...
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-26ab3b (no git root found)
+[2026-10-24 13:45:03] [INFO] [Workspace] MASC base: /tmp/goal-worker-26ab3b (MASC_BASE_PATH)
+[2026-10-24 13:45:03] [INFO] [Misc] workspace broadcast committed from=planner-fair-fox mention=none request_id=wmsg-3c6ce20829d6e28f072497f92c66a875 seq=1 bytes=44
+[2026-10-24 13:45:03] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-26ab3b/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:03] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849503958-e7b09606 LLM approved runtime=goal-reviewer reason=actual target measured
+ASSERT actual tool result exists before restart
+ASSERT registry is actually missing
+[2026-10-24 13:45:03] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849503958-e7b09606 run_id=host/841baba54b86c13836e0a5d8867042dd
+ASSERT production recovery never asks another model
+ASSERT human confirmation still pending
+ASSERT same original tools and start time survive
+  [OK]          execution          7   actual agent restores before lookup an...
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-fa6bfa (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-fa6bfa (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-noble-eagle mention=none request_id=wmsg-deef2c8d9efec0888d3e1fb81e4851f0 seq=1 bytes=47
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-fa6bfa/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504029-7f0d6320 LLM approved runtime=goal-reviewer reason=actual target measured
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+ASSERT actual retention immediately removes the oldest display row
+ASSERT durable original ACK survives registry replay and pruning
+ASSERT rechecking does not append another observation
+ASSERT history remains unchanged
+ASSERT no reviewer redispatch
+  [OK]          execution          8   finished publication survives registry...
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-954415 (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-954415 (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-deft-panda mention=none request_id=wmsg-f54b26f667fafb9ab3b75a3b18fb9950 seq=1 bytes=46
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-954415/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849504152-c84ad61b evaluator unavailable runtime=goal-reviewer retryable=false; no verdict committed: Internal error: review evaluator raised unexpectedly: Stdlib.Exit
+ASSERT caught Exit retains the typed unavailable non-verdict
+ASSERT raw caught Internal error survives reopening
+ASSERT caught reviewer error retains its actual lookup
+ASSERT caught error publishes its actual tools as deferred
+ASSERT caught reviewer is never replayed
+  [OK]          execution          9   caught reviewer Exit retains its actua...
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-e0c188 (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-e0c188 (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-bold-lemur mention=none request_id=wmsg-d90a628fd5b6c0a50add170bab657494 seq=1 bytes=46
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-e0c188/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+ASSERT escaping observer follows the actual reviewer lookup
+ASSERT the original observer exception escaped exactly once
+ASSERT actual successful lookup survives exception and reload
+ASSERT Raised names the actual escaping observer exception
+ASSERT raised host observation preserves the actual tools
+ASSERT raised reviewer is never replayed
+  [OK]          execution         10   raised review retains actual tool obse...
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-62e991 (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-62e991 (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-pale-tiger mention=none request_id=wmsg-314ea9536b663dc0137081985ac610fd seq=1 bytes=46
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-62e991/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504211-2306aaae LLM approved runtime=goal-reviewer reason=actual target measured
+ASSERT real ledger-before-phase crash
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+ASSERT phase-moved boot recovery makes no model call
+ASSERT post-commit operator suspension remains intact
+ASSERT original proof timestamp was not rewritten
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-c92fdb (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-c92fdb (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-merry-beaver mention=none request_id=wmsg-831609051e2471e3b36a90a2ac140967 seq=1 bytes=48
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-c92fdb/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504271-68b70b00 LLM rejected runtime=goal-reviewer reason=actual target measured
+ASSERT real ledger-before-phase crash
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+ASSERT phase-moved boot recovery makes no model call
+ASSERT post-commit operator suspension remains intact
+ASSERT original proof timestamp was not rewritten
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-f781ad (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-f781ad (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-gentle-gecko mention=none request_id=wmsg-df18a649514ee0e414beda7b0c83b304 seq=1 bytes=48
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-f781ad/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504329-6c3adb03 LLM approved runtime=goal-reviewer reason=actual target measured
+ASSERT real ledger-before-phase crash
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849504329-6c3adb03 run_id=host/301dafbc656b99cced373ccbd6a396d0
+ASSERT phase-moved boot recovery makes no model call
+ASSERT post-commit operator suspension remains intact
+ASSERT original proof timestamp was not rewritten
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-6a4c19 (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-6a4c19 (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-happy-falcon mention=none request_id=wmsg-c0e3410f0e96ebad1f9ab1de2ea87373 seq=1 bytes=48
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-6a4c19/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504397-e45cba80 LLM rejected runtime=goal-reviewer reason=actual target measured
+ASSERT real ledger-before-phase crash
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849504397-e45cba80 run_id=host/c9b09f6bad68621e885ad3eb9e0b9b72
+ASSERT phase-moved boot recovery makes no model call
+ASSERT post-commit operator suspension remains intact
+ASSERT original proof timestamp was not rewritten
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-2ca220 (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-2ca220 (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-merry-falcon mention=none request_id=wmsg-fd715189296eb6817946baef79aee7f1 seq=1 bytes=48
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-2ca220/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504464-f8f4b26e LLM approved runtime=goal-reviewer reason=actual target measured
+ASSERT real ledger-before-phase crash
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849504464-f8f4b26e run_id=host/e135b781942dbde55403bc845ea268ee
+ASSERT phase-moved boot recovery makes no model call
+ASSERT post-commit operator suspension remains intact
+ASSERT original proof timestamp was not rewritten
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-cd83dc (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-cd83dc (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-jolly-panda mention=none request_id=wmsg-80cf53924265ffb0692a2ea8cf9dec5c seq=1 bytes=47
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-cd83dc/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504531-fc13c301 LLM rejected runtime=goal-reviewer reason=actual target measured
+ASSERT real ledger-before-phase crash
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849504531-fc13c301 run_id=host/12f8bab3edfb9772e1738a7cbc4dc2c8
+ASSERT phase-moved boot recovery makes no model call
+ASSERT post-commit operator suspension remains intact
+ASSERT original proof timestamp was not rewritten
+  [OK]          execution         11   actual proof partial write and phase-m...
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-1168de (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-1168de (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-lucky-eagle mention=none request_id=wmsg-32ac7f846a152ceac54c48493f64dec6 seq=1 bytes=47
+[2026-10-24 13:45:04] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849504597-652b8841 evaluator unavailable runtime=goal-reviewer retryable=false; no verdict committed: Not found: candidate removed
+[2026-10-24 13:45:04] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849504597-652b8841
+ASSERT explicit request links only a definitely settled failure
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-1168de/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504597-652b8841 LLM approved runtime=goal-reviewer reason=actual target measured
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849504597-652b8841 run_id=01a16e28-6969-7000-afeb-145fc6980479
+ASSERT unknown execution never re-enters after explicit request
+ASSERT actual phase follows definite retry authority
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-786a4d (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-786a4d (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-noble-shark mention=none request_id=wmsg-af5888eb67301d081286b9efdcb0fea1 seq=1 bytes=47
+[2026-10-24 13:45:04] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849504694-f337693c evaluator unavailable runtime=goal-reviewer retryable=false; no verdict committed: Network error (connection_reset): reply lost
+[2026-10-24 13:45:04] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849504694-f337693c
+ASSERT explicit request links only a definitely settled failure
+[2026-10-24 13:45:04] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849504694-f337693c gate=Original_pending reason=Goal reviewer may have dispatched; no automatic replay
+[2026-10-24 13:45:04] [WARN] [Board] backend() called before server init, auto-initializing JSONL
+ASSERT unknown execution never re-enters after explicit request
+ASSERT actual phase follows definite retry authority
+  [OK]          execution         12   actual explicit retry and unknown fence.
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-0bde0d (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-0bde0d (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-witty-orca mention=none request_id=wmsg-d32b187e4e2cfaa747b2292a8006e089 seq=1 bytes=46
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-0bde0d/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504745-9944f8ef LLM approved runtime=goal-reviewer reason=
+[2026-10-24 13:45:04] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849504745-9944f8ef gate=Verdict_without_reason reason=verdict without a stated reason is not a judgment; the pending row stays durable
+ASSERT raw model verdict and actual lookup survive reopening
+ASSERT published non-verdict preserves the actual raw tool observations
+[2026-10-24 13:45:04] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849504745-9944f8ef gate=Verdict_without_reason reason=verdict without a stated reason is not a judgment; the pending row stays durable
+ASSERT ordinary wake does not redispatch
+ASSERT ordinary wake leaves proof pending
+[2026-10-24 13:45:04] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849504745-9944f8ef
+[2026-10-24 13:45:04] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849504745-9944f8ef
+ASSERT repeated explicit request retains one linked successor
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-0bde0d/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504745-9944f8ef LLM approved runtime=goal-reviewer reason=actual target measured
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849504745-9944f8ef run_id=01a16e28-6a1a-7000-8c48-6df8a442e3d0
+ASSERT explicit request makes one new model call
+ASSERT stated evidence advances to human confirmation
+ASSERT proof binds the original pending request
+ASSERT proof uses the new stated evidence
+ASSERT successor has its own fixed run
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-0670ff (no git root found)
+[2026-10-24 13:45:04] [INFO] [Workspace] MASC base: /tmp/goal-worker-0670ff (MASC_BASE_PATH)
+[2026-10-24 13:45:04] [INFO] [Misc] workspace broadcast committed from=planner-keen-bear mention=none request_id=wmsg-41aeae363f9fd3aee5bdcaf2f2aadda8 seq=1 bytes=45
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-0670ff/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504876-2cfbe26c LLM approved runtime=goal-reviewer reason= \x09\x0A
+[2026-10-24 13:45:04] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849504876-2cfbe26c gate=Verdict_without_reason reason=verdict without a stated reason is not a judgment; the pending row stays durable
+ASSERT raw model verdict and actual lookup survive reopening
+ASSERT published non-verdict preserves the actual raw tool observations
+[2026-10-24 13:45:04] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849504876-2cfbe26c gate=Verdict_without_reason reason=verdict without a stated reason is not a judgment; the pending row stays durable
+ASSERT ordinary wake does not redispatch
+ASSERT ordinary wake leaves proof pending
+[2026-10-24 13:45:04] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849504876-2cfbe26c
+[2026-10-24 13:45:04] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849504876-2cfbe26c
+ASSERT repeated explicit request retains one linked successor
+[2026-10-24 13:45:04] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-0670ff/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:04] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849504876-2cfbe26c LLM approved runtime=goal-reviewer reason=actual target measured
+[2026-10-24 13:45:04] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+[2026-10-24 13:45:04] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849504876-2cfbe26c run_id=01a16e28-6a9f-7000-b2ef-71fdf197de64
+ASSERT explicit request makes one new model call
+ASSERT stated evidence advances to human confirmation
+ASSERT proof binds the original pending request
+ASSERT proof uses the new stated evidence
+ASSERT successor has its own fixed run
+  [OK]          execution         13   reasonless Goal reply needs an explici...
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal-worker-cff64a (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal-worker-cff64a (MASC_BASE_PATH)
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-brave-zebra mention=none request_id=wmsg-4f4d890c95ed300894d681bd338b2fad seq=1 bytes=47
+[2026-10-24 13:45:05] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-cff64a/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:05] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849505009-04fa092a LLM approved runtime=goal-reviewer reason=actual target measured
+[2026-10-24 13:45:05] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849505009-04fa092a run_id=host/ee0211cbad91effc5b190d27af9cfa96
+ASSERT suspended or dropped original never calls another model
+ASSERT actual operator lifecycle is preserved
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505009-04fa092a
+ASSERT resume restores the original verifying phase before its wake is consumed
+[2026-10-24 13:45:05] [WARN] [Misc] Goal effects retained for retry: Goal notification host boundary is unavailable
+ASSERT resume reconciles proof without human completion
+ASSERT the actual resume consumer reuses the committed proof
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal-worker-93464f (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal-worker-93464f (MASC_BASE_PATH)
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-lucky-zebra mention=none request_id=wmsg-65e10427bdbe5552530e2a4e857b7036 seq=1 bytes=47
+[2026-10-24 13:45:05] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-93464f/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:05] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849505085-64bc8eda LLM approved runtime=goal-reviewer reason=actual target measured
+[2026-10-24 13:45:05] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849505085-64bc8eda gate=Commit_refused reason=Goal commit conflicts with the authoritative original subject
+[2026-10-24 13:45:05] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849505085-64bc8eda gate=Commit_refused reason=Goal commit conflicts with the authoritative original subject
+ASSERT suspended or dropped original never calls another model
+ASSERT actual operator lifecycle is preserved
+  [OK]          execution         14   actual bound suspend and drop.
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal-worker-f49be0 (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal-worker-f49be0 (MASC_BASE_PATH)
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-jolly-panda mention=none request_id=wmsg-42f232b8db3e50c11134499aa9b77455 seq=1 bytes=47
+[2026-10-24 13:45:05] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal-worker-f49be0/.masc/playground argument={"file_path":"measurement-owner/measurement.json"} outcome=resolved
+[2026-10-24 13:45:05] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849505135-0703f534 LLM approved runtime=goal-reviewer reason=actual target measured
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal-worker-f49be0/cloned-workspace (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal-worker-f49be0 for requested path /tmp/goal-worker-f49be0/cloned-workspace
+[2026-10-24 13:45:05] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal-worker-f49be0/cloned-workspace for test executable test_goal_verifier_worker.exe
+ASSERT actual cloned request ID is identical
+ASSERT neither original nor clone changed phase
+  [OK]          execution         15   cloned workspace refuses the original ...
+
+Test Successful in 1.619s. 16 tests run.
+::endgroup::
+[targeted] test/test_goal_verifier_worker: OK in 2s
+[targeted] test/test_goal_verification_agent: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_goal_verification_agent: start 2026-10-24T13:45:05Z
+[2026-10-24 13:45:05] [INFO] [MCP] Tag registry initialized: 181 tools registered
+::group::{goal_verification_agent}
+Testing `goal_verification_agent'.
+This run has ID `HWW6AJIE'.
+
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_98796a (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_98796a for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-fair-cobra mention=none request_id=wmsg-3194228d902ee573caa2d02401c7e441 seq=1 bytes=46
+ASSERT ordinary retry preserves original request
+ASSERT ordinary retry preserves original source
+ASSERT disk reload preserves request
+ASSERT disk reload preserves exact source
+ASSERT routine Goal projection omits source body
+ASSERT changed submitted source creates a new request
+ASSERT new request names new source
+ASSERT same criterion and exact source are idempotent
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505308-93979ad9
+ASSERT committed verdict retains submitted bytes
+ASSERT committed proof does not silently accept replacement refs
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-475ea2e1fe9540532ce027a92e722017 seq=2 bytes=336
+ASSERT refuted retry receives new identity
+ASSERT omitted refuted retry retains submitted bytes
+ASSERT explicit empty submission clears previous evidence
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505308-93979ad9
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-dfbffaa0118c1730c2441dbbb7aff754 seq=3 bytes=329
+ASSERT confirmation phase does not silently accept evidence refs
+  [OK]          submitted evidence                  0   pending proof binds e...
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_261662 (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_98796a for requested path /tmp/goal_verification_agent_261662
+[2026-10-24 13:45:05] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_261662 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-neat-panda mention=none request_id=wmsg-fab97424909062da7b16e313a9f08089 seq=1 bytes=46
+ASSERT invalid evidence request fails
+ASSERT failed capture does not move Goal into verification
+ASSERT invalid evidence request fails
+ASSERT failed capture does not move Goal into verification
+ASSERT invalid evidence request fails
+ASSERT failed capture does not move Goal into verification
+ASSERT invalid evidence request fails
+ASSERT failed capture does not move Goal into verification
+[2026-10-24 13:45:05] [WARN] [Board] backend() called before server init, auto-initializing JSONL
+ASSERT invalid evidence request fails
+ASSERT failed capture does not move Goal into verification
+  [OK]          submitted evidence                  1   invalid evidence leav...
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_231841 (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_261662 for requested path /tmp/goal_verification_agent_231841
+[2026-10-24 13:45:05] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_231841 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-proud-koala mention=none request_id=wmsg-a5b06487294992177c76c7723c2caa14 seq=1 bytes=47
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505374-30843434
+ASSERT review saw the original target
+[2026-10-24 13:45:05] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849505374-30843434 LLM approved runtime=verifier-a reason=three verified services meet target three
+[2026-10-24 13:45:05] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849505374-30843434 gate=Commit_refused reason=Goal commit conflicts with the authoritative original subject
+ASSERT run belongs to the original request
+ASSERT run holds the exact reviewed criterion
+ASSERT unapplied approval remains readable
+ASSERT old proof cannot complete either case
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_223b1f (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_231841 for requested path /tmp/goal_verification_agent_223b1f
+[2026-10-24 13:45:05] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_223b1f for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-calm-llama mention=none request_id=wmsg-ba07d7086274fb0adb5b7fffc1448050 seq=1 bytes=46
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505423-04c1f298
+ASSERT review saw the original target
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505423-04c1f298
+[2026-10-24 13:45:05] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849505423-04c1f298 LLM approved runtime=verifier-a reason=three verified services meet target three
+ASSERT run belongs to the original request
+ASSERT run holds the exact reviewed criterion
+ASSERT unapplied approval remains readable
+ASSERT historical approval does not replace the new request
+ASSERT old proof cannot complete either case
+  [OK]          historical review evidence          0   superseded review kee...
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_e86166 (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_223b1f for requested path /tmp/goal_verification_agent_e86166
+[2026-10-24 13:45:05] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_e86166 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-pale-whale mention=none request_id=wmsg-fa1401366af3807a1b70aa024ac06725 seq=1 bytes=46
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505477-3970a4a3
++mock time is now 1.79285e+09
+[2026-10-24 13:45:05] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849505477-3970a4a3 evaluator unavailable runtime=verifier-a retryable=true; no verdict committed: Server error 503: test evaluator unavailable
+[2026-10-24 13:45:05] [INFO] [Misc] goal verifier scheduled goal_id=goal-1792849505477-3970a4a3
+ASSERT request identity follows the explicit edit
+ASSERT scan ran against real active runtime
+ASSERT active claim prevented second review during scan
+[2026-10-24 13:45:05] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849505477-3970a4a3 gate=evaluator_unavailable reason=Server error 503: test evaluator unavailable
+[2026-10-24 13:45:05] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849505477-3970a4a3 LLM approved runtime=verifier-a reason=new target measured
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-9fe01a606fcd903a9024119a4ed02f6c seq=2 bytes=342
+[2026-10-24 13:45:05] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849505477-3970a4a3 run_id=01a16e28-6d13-7000-8e8b-d2cc66b771ec
+ASSERT wake was consumed while old claim active
+ASSERT release delivered exactly one new review
+ASSERT new proof completed without another external wake
+  [OK]          drain                               0   wake after deferred p...
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_1fbb48 (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_e86166 for requested path /tmp/goal_verification_agent_1fbb48
+[2026-10-24 13:45:05] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_1fbb48 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-warm-moose mention=none request_id=wmsg-093a9832d305b758a6d19f56fbc836ac seq=1 bytes=46
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505610-503d90ba
++mock time is now 1.79285e+09
+[2026-10-24 13:45:05] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849505610-503d90ba evaluator unavailable runtime=verifier-a retryable=true; no verdict committed: Server error 503: test evaluator unavailable
+[2026-10-24 13:45:05] [INFO] [Misc] goal verifier scheduled goal_id=goal-1792849505610-503d90ba
+ASSERT request identity follows the explicit edit
+ASSERT scan ran against real active runtime
+ASSERT active claim prevented second review during scan
+[2026-10-24 13:45:05] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849505610-503d90ba gate=evaluator_unavailable reason=Server error 503: test evaluator unavailable
+[2026-10-24 13:45:05] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849505610-503d90ba LLM approved runtime=verifier-a reason=new target measured
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-997a5d77621b99fa9856d65a3160bd5b seq=2 bytes=342
+[2026-10-24 13:45:05] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849505610-503d90ba run_id=01a16e28-6d6a-7000-8153-ba6c644c8214
+ASSERT wake was consumed while old claim active
+ASSERT release delivered exactly one new review
+ASSERT new proof completed without another external wake
+  [OK]          drain                               1   same-request explicit...
+[2026-10-24 13:45:05] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_d2cf10 (no git root found)
+[2026-10-24 13:45:05] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_1fbb48 for requested path /tmp/goal_verification_agent_d2cf10
+[2026-10-24 13:45:05] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_d2cf10 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:05] [INFO] [Misc] workspace broadcast committed from=planner-pale-koala mention=none request_id=wmsg-05f91aa2ac8a867ef7f9b14cdeaf45db seq=1 bytes=46
+[2026-10-24 13:45:05] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849505730-4e9db283
+[2026-10-24 13:45:05] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849505730-4e9db283 evaluator unavailable runtime=verifier-a retryable=false; no verdict committed: Invalid config 'verifier': test evaluator unavailable
+[2026-10-24 13:45:05] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849505730-4e9db283 gate=evaluator_unavailable reason=Invalid config 'verifier': test evaluator unavailable
+ASSERT the notice names a Goal review
+ASSERT the verifier authors the notice
+ASSERT the notice carries the deferral reason
+ASSERT the notice names the forward path
+ASSERT idle ticks start no reviewer call
+ASSERT one original run remains visible
+ASSERT idle ticks post no notice
+ASSERT the Goal waits in verifying
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier scheduled goal_id=goal-1792849505730-4e9db283
+ASSERT asking again without evidence keeps the request
+[2026-10-24 13:45:08] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849505730-4e9db283 evaluator unavailable runtime=verifier-a retryable=false; no verdict committed: Invalid config 'verifier': test evaluator unavailable
+[2026-10-24 13:45:08] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849505730-4e9db283 gate=evaluator_unavailable reason=Invalid config 'verifier': test evaluator unavailable
+ASSERT the explicit second request entered the reviewer
+ASSERT pre-dispatch re-admission keeps the complete original
+ASSERT pre-dispatch re-admission keeps the fixed run
+ASSERT pre-dispatch repair allocates no successor
+ASSERT the same stall is not posted twice
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier scheduled goal_id=goal-1792849505730-4e9db283
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849505730-4e9db283 LLM approved runtime=verifier-a reason=lane back, target met
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-8d6475bbfc420337f79d4cac541c7f89 seq=2 bytes=330
+ASSERT pre-dispatch re-admission keeps the complete original
+ASSERT pre-dispatch re-admission keeps the fixed run
+ASSERT pre-dispatch repair allocates no successor
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849505730-4e9db283 run_id=01a16e28-6dd3-7000-9f35-4902b09a1e96
+ASSERT each explicit request entered the reviewer exactly once
+ASSERT all admissions used the one original run
+ASSERT the completed worker posted the same stall only once
+ASSERT the requested review committed
+  [OK]          drain                               2   deferred review is an...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_e5bf11 (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_d2cf10 for requested path /tmp/goal_verification_agent_e5bf11
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_e5bf11 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-happy-beaver mention=none request_id=wmsg-1a1eb124de599518e5e79fee3c95ce7b seq=1 bytes=48
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508131-f77b80f7
+ASSERT the run row carries the exception
+ASSERT the notice names a Goal review
+ASSERT the notice is keyed by the Raised gate
+ASSERT the notice carries the exception
+ASSERT the notice names the forward path
+ASSERT the Goal waits in verifying
+  [OK]          drain                               3   raised review is anno...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_8293ea (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_e5bf11 for requested path /tmp/goal_verification_agent_8293ea
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_8293ea for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-lean-heron mention=none request_id=wmsg-5518112f5c3c4c4229c7891a294aec3a seq=1 bytes=46
+ASSERT Executing pending never enters evaluator
+ASSERT phase did not change during scan
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508163-f1015eb8
+ASSERT retry converges the persisted request
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508163-f1015eb8 LLM approved runtime=verifier-a reason=measured
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-e8436754ec3d626ec87b8351f1ddabfb seq=2 bytes=326
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508163-f1015eb8 run_id=01a16e28-7756-7000-9089-6dd1de1005b9
+ASSERT converged request reviewed once
+ASSERT matching proof applied
+  [OK]          drain                               4   pending before phase ...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_f6ffc7 (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_8293ea for requested path /tmp/goal_verification_agent_f6ffc7
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_f6ffc7 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-cool-moose mention=none request_id=wmsg-d7aa65f11355b135f9076dc240427211 seq=1 bytes=46
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508233-e1cf1adf
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier abandoning in-flight review goal_id=goal-1792849508233-e1cf1adf: the Goal left verifying
+ASSERT reopen leaves verifying
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier scheduled goal_id=goal-1792849508233-e1cf1adf
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508233-e1cf1adf LLM approved runtime=verifier-a reason=measured after reopen
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-7f9dddbd252c1ec378c1c190e14900b6 seq=2 bytes=331
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508233-e1cf1adf run_id=01a16e28-77be-7000-ad46-1e4ec36593de
+ASSERT the hung review was cancelled
+ASSERT the new request was reviewed once
+ASSERT the new request committed
+  [OK]          drain                               5   reopen from verifying...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_5c8b82 (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_f6ffc7 for requested path /tmp/goal_verification_agent_5c8b82
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_5c8b82 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-bold-lion mention=none request_id=wmsg-600d75bbbc745e3617da2ebfb2510599 seq=1 bytes=45
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508338-a7e3fb03
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-5fad6fdb1110ba08ffb8e80bd48da7e4 seq=2 bytes=307
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508338-a7e3fb03
+ASSERT same criterion is still current
+ASSERT a new proof request has distinct identity
+ASSERT old answer is rejected
+ASSERT new pending was not consumed
+ASSERT phase still awaits new proof
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-06a5d3093c86265f647e48cc5052710e seq=3 bytes=306
+ASSERT exact replay retains original bytes
+ASSERT proof still names its accepted evidence
+  [OK]          drain                               6   new request rejects a...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_f2094b (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_5c8b82 for requested path /tmp/goal_verification_agent_f2094b
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_f2094b for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-tame-shark mention=none request_id=wmsg-37f73cf8e06bb4f80cb4d77c391fccc6 seq=1 bytes=46
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508388-7b8f35b1
+ASSERT the durable request stands
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508388-7b8f35b1 LLM approved runtime=verifier-a reason=all 3 services verified
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-d080aaf1b961f293245e6386061c9067 seq=2 bytes=324
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508388-7b8f35b1 run_id=01a16e28-7836-7000-900b-c097496c3f05
+ASSERT proven goal still awaits human confirmation
+ASSERT the model's stated reason is the evidence
+ASSERT the fixed lane identity is the authority
+ASSERT authority kind is the system-llm slot
+ASSERT announcement carries the authoritative postcommit phase
+ASSERT proof announcement preserves the pending human boundary
+  [OK]          drain                               7   proof pending drains ...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_52315a (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_f2094b for requested path /tmp/goal_verification_agent_52315a
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_52315a for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-fair-lion mention=none request_id=wmsg-6827af76bc428f692b0101dc6c406893 seq=1 bytes=45
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508460-1f41129e
+ASSERT the read tool is advertised
+ASSERT the web tool is advertised
+ASSERT the prompt names the tools the judge holds
+ASSERT the prompt lists the root the tools resolve against
+[2026-10-24 13:45:08] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal_verification_agent_52315a/.masc/playground argument={"file_path":"some-keeper/measurement.txt"} outcome=resolved
+ASSERT the judge read the measurement itself
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508460-1f41129e LLM approved runtime=verifier-a reason=measured pass rate 100% reaches the target
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-09774289d4481c77b176ccbb69b33bba seq=2 bytes=343
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508460-1f41129e run_id=01a16e28-787f-7000-b531-b1d5c7063391
+ASSERT the judge performed one read
+ASSERT the measured goal completed
+  [OK]          drain                               8   goal proof reads the ...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_6f389d (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_52315a for requested path /tmp/goal_verification_agent_6f389d
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_6f389d for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-sage-moose mention=none request_id=wmsg-4b36b78265e3a97af25c2ebd74439997 seq=1 bytes=46
+ASSERT nothing is measured yet
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508534-7f0a0a08
+[2026-10-24 13:45:08] [WARN] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal_verification_agent_6f389d/.masc/playground argument={"file_path":"some-keeper/measurement.txt"} outcome=rejected
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508534-7f0a0a08 LLM rejected runtime=verifier-a reason=no measurement of the declared metric is on disk
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-ae274efaf0a607fafe1f57c998e83191 seq=2 bytes=413
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508534-7f0a0a08 run_id=01a16e28-78ca-7000-a2bb-b64fda62bf7e
+ASSERT the unmeasured goal is refused back to executing
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508534-7f0a0a08
+[2026-10-24 13:45:08] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/goal_verification_agent_6f389d/.masc/playground argument={"file_path":"some-keeper/measurement.txt"} outcome=resolved
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508534-7f0a0a08 LLM approved runtime=verifier-a reason=read pass rate: 100%, which reaches the target
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-072742bae7a808a827438e2b4f75ca98 seq=3 bytes=373
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508534-7f0a0a08 run_id=01a16e28-790c-7000-9f43-3f4b211a7e66
+ASSERT the same judge answered twice, differently
+ASSERT the measured goal completed on the retry
+ASSERT the approval states what it measured
+  [OK]          drain                               9   a refuted goal can re...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_118f02 (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_6f389d for requested path /tmp/goal_verification_agent_118f02
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_118f02 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-noble-beaver mention=none request_id=wmsg-7587445d1e390c5fdf3c156c89dd6d10 seq=1 bytes=48
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508681-26f91f9c
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508681-26f91f9c LLM rejected runtime=verifier-a reason=no measurement of the declared metric was found
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-76e2644568b3122d66492f8f6b8686fc seq=2 bytes=398
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508681-26f91f9c run_id=01a16e28-7964-7000-ab13-5a8870474922
+ASSERT the evaluator was reached rather than deferred
+ASSERT every producer is listed, none dropped by a cap
+ASSERT the review produced a verdict
+  [OK]          drain                              10   goal proof surface su...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_987aeb (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_118f02 for requested path /tmp/goal_verification_agent_987aeb
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_987aeb for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-keen-tiger mention=none request_id=wmsg-56a6036fa89d2d3a218dee18a6f862f9 seq=1 bytes=46
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508765-183b31ca
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508765-183b31ca LLM rejected runtime=verifier-a reason=no measurement of the declared metric was found
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-2486b317d773a353af8792be5582b7b1 seq=2 bytes=386
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508765-183b31ca run_id=01a16e28-79b0-7000-b7ef-29827409acc9
+ASSERT back to executing
+ASSERT the refutation reason is preserved
+ASSERT the refutation reason reaches goal_events.jsonl
+  [OK]          drain                              11   refuted proof returns...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_57182c (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_987aeb for requested path /tmp/goal_verification_agent_57182c
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_57182c for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-gentle-badger mention=none request_id=wmsg-6db872dc582f3b60f27554be1ce496d2 seq=1 bytes=49
+ASSERT scan names the file it could not read
+ASSERT scan does not repair primary
+ASSERT scan preserves mirror
+  [OK]          non-verdicts keep evidence          0   scan preserves source...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_7e6285 (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_57182c for requested path /tmp/goal_verification_agent_7e6285
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_7e6285 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-sage-eagle mention=none request_id=wmsg-3ee7f1eb7c2b9b6c4fe41da6d71df436 seq=1 bytes=46
+[2026-10-24 13:45:08] [WARN] [Misc] goal verifier scan skipped: goal_store: unavailable reason=schema_rejected field=criterion_revision (goal "goal-1792849508847-f3fc1870": criterion_revision must be a non-blank string) file=/tmp/goal_verification_agent_7e6285/.masc/goals.json mirror=decodes goal_count=1 updated_at=2026-10-24T13:45:08Z reset=repair field criterion_revision
+ASSERT the scan names the refused member
+ASSERT the scan names the repair
+[2026-10-24 13:45:08] [WARN] [Misc] goal verifier scan skipped: goal_store: unavailable reason=schema_rejected field=criterion_revision (goal "goal-1792849508847-f3fc1870": criterion_revision must be a non-blank string) file=/tmp/goal_verification_agent_7e6285/.masc/goals.json mirror=decodes goal_count=1 updated_at=2026-10-24T13:45:08Z reset=repair field criterion_revision
+ASSERT the scan names the refused member
+ASSERT the scan names the repair
+ASSERT one durable row per skipped scan
+ASSERT the row keeps the refused member
+ASSERT the row keeps the mirror evidence
+ASSERT the row keeps the refused member
+ASSERT the row keeps the mirror evidence
+ASSERT one WARN line per skipped scan
+ASSERT the scan does not repair the primary
+ASSERT the scan does not touch the mirror
+  [OK]          non-verdicts keep evidence          1   skipped scan records ...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_38b452 (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_7e6285 for requested path /tmp/goal_verification_agent_38b452
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_38b452 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-tame-raven mention=none request_id=wmsg-e1b3062bd8659bd4914724fc99ad9866 seq=1 bytes=46
+ASSERT a readable store leaves no skipped-scan row
+ASSERT a readable store writes no skipped-scan line
+  [OK]          non-verdicts keep evidence          2   healthy store scan re...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_627071 (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_38b452 for requested path /tmp/goal_verification_agent_627071
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_627071 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-deft-hawk mention=none request_id=wmsg-7621c0dd1faa13f2e82ab2b83a812b61 seq=1 bytes=45
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508869-e924240a
+[2026-10-24 13:45:08] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849508869-e924240a evaluator unavailable runtime=verifier-a retryable=true; no verdict committed: Server error 503: test evaluator unavailable
+[2026-10-24 13:45:08] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849508869-e924240a gate=evaluator_unavailable reason=Server error 503: test evaluator unavailable
+ASSERT the deferral states a reason
+ASSERT the phase never left verifying
+  [OK]          non-verdicts keep evidence          3   lane unavailable keep...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_a6206a (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_627071 for requested path /tmp/goal_verification_agent_a6206a
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_a6206a for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-pale-bear mention=none request_id=wmsg-9ab74a4eb77f007e7852b06c068ae7e3 seq=1 bytes=45
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508908-4c176e25
+[2026-10-24 13:45:08] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849508908-4c176e25 evaluator did not call report_review_verdict exactly once runtime=verifier-a; failing over to next verifier_exact slot verifier-b
+[2026-10-24 13:45:08] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849508908-4c176e25 LLM approved runtime=verifier-b reason=second slot proved it
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-2cd0e0098ddc58722f4212acf264dfde seq=2 bytes=322
+[2026-10-24 13:45:08] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849508908-4c176e25 run_id=01a16e28-7a3f-7000-945b-35c441fde280
+ASSERT failover follows the declared slot order
+ASSERT the second slot's verdict completed the goal
+  [OK]          non-verdicts keep evidence          4   malformed reply fails...
+[2026-10-24 13:45:08] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_9925d9 (no git root found)
+[2026-10-24 13:45:08] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_a6206a for requested path /tmp/goal_verification_agent_9925d9
+[2026-10-24 13:45:08] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_9925d9 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:08] [INFO] [Misc] workspace broadcast committed from=planner-witty-shark mention=none request_id=wmsg-5c56874abba64f57b67b995c538ac817 seq=1 bytes=47
+[2026-10-24 13:45:08] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849508984-6b7d8cb8
+[2026-10-24 13:45:09] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849508984-6b7d8cb8 evaluator did not call report_review_verdict exactly once runtime=verifier-a; failing over to next verifier_exact slot verifier-b
+[2026-10-24 13:45:09] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849508984-6b7d8cb8 evaluator did not call report_review_verdict exactly once
+[2026-10-24 13:45:09] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849508984-6b7d8cb8 gate=invalid_verdict reason=evaluator did not call report_review_verdict exactly once
+ASSERT every slot was tried for the blocking criterion
+ASSERT the phase never left verifying
+  [OK]          non-verdicts keep evidence          5   all slots failed keep...
+[2026-10-24 13:45:09] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_1a9696 (no git root found)
+[2026-10-24 13:45:09] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_9925d9 for requested path /tmp/goal_verification_agent_1a9696
+[2026-10-24 13:45:09] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_1a9696 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:09] [INFO] [Misc] workspace broadcast committed from=planner-brave-panda mention=none request_id=wmsg-c2c450d8d2bee8dc7537d962a6c7cb57 seq=1 bytes=47
+[2026-10-24 13:45:09] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849509025-6bfc54cc
+[2026-10-24 13:45:09] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849509025-6bfc54cc LLM approved runtime=verifier-a reason=
+[2026-10-24 13:45:09] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849509025-6bfc54cc gate=Verdict_without_reason reason=verdict without a stated reason is not a judgment; the pending row stays durable
+ASSERT no commit without evidence
+  [OK]          non-verdicts keep evidence          6   approve without a sta...
+[2026-10-24 13:45:09] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_db7a18 (no git root found)
+[2026-10-24 13:45:09] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_1a9696 for requested path /tmp/goal_verification_agent_db7a18
+[2026-10-24 13:45:09] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_db7a18 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:09] [INFO] [Misc] workspace broadcast committed from=planner-swift-zebra mention=none request_id=wmsg-174e2e2d99372ccf8b94abd09f743229 seq=1 bytes=47
+[2026-10-24 13:45:09] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849509066-05eee7f5
+ASSERT the reviewer received the original target
+[2026-10-24 13:45:09] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849509066-05eee7f5 LLM approved runtime=verifier-a reason=three verified services reach target three
+[2026-10-24 13:45:09] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849509066-05eee7f5 gate=Commit_refused reason=Goal commit conflicts with the authoritative original subject
+ASSERT one rendered prompt reached the reviewer
+ASSERT one review was issued
+ASSERT the new target is retained
+ASSERT obsolete approval cannot complete the goal
+  [OK]          in-flight criterion edits           0   target edit invalidat...
+[2026-10-24 13:45:09] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_4dfd4e (no git root found)
+[2026-10-24 13:45:09] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_db7a18 for requested path /tmp/goal_verification_agent_4dfd4e
+[2026-10-24 13:45:09] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_4dfd4e for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:09] [INFO] [Misc] workspace broadcast committed from=planner-tame-cobra mention=none request_id=wmsg-62ee58f631bc9af8bd7455c5031a317a seq=1 bytes=46
+[2026-10-24 13:45:09] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849509123-bc3f1ac4
+ASSERT the reviewer received the original target
+[2026-10-24 13:45:09] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849509123-bc3f1ac4 LLM approved runtime=verifier-a reason=three verified services reach target three
+[2026-10-24 13:45:09] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849509123-bc3f1ac4 gate=Commit_refused reason=Goal commit conflicts with the authoritative original subject
+ASSERT one rendered prompt reached the reviewer
+ASSERT one review was issued
+ASSERT the target returned to its original text
+ASSERT obsolete approval cannot complete the goal
+  [OK]          in-flight criterion edits           1   target ABA invalidate...
+[2026-10-24 13:45:09] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_a38916 (no git root found)
+[2026-10-24 13:45:09] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_4dfd4e for requested path /tmp/goal_verification_agent_a38916
+[2026-10-24 13:45:09] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_a38916 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:09] [INFO] [Misc] workspace broadcast committed from=planner-swift-crane mention=none request_id=wmsg-d01ed32874708f3005e885449a029594 seq=1 bytes=47
+[2026-10-24 13:45:09] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849509186-122be218
+ASSERT the reviewer received the original target
+[2026-10-24 13:45:09] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849509186-122be218 LLM approved runtime=verifier-a reason=three verified services reach target three
+[2026-10-24 13:45:09] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-1b74f28b5a6d8123b4fca7bc20e33a02 seq=2 bytes=359
+[2026-10-24 13:45:09] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849509186-122be218 run_id=01a16e28-7b55-7000-81a3-6c13e2d07ef4
+ASSERT one rendered prompt reached the reviewer
+ASSERT one review was issued
+ASSERT priority edit is retained
+ASSERT priority does not change the reviewed success criterion
+  [OK]          in-flight criterion edits           2   priority edit preserv...
+[2026-10-24 13:45:09] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_2e6a46 (no git root found)
+[2026-10-24 13:45:09] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_a38916 for requested path /tmp/goal_verification_agent_2e6a46
+[2026-10-24 13:45:09] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_2e6a46 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:09] [INFO] [Misc] workspace broadcast committed from=planner-pale-lemur mention=none request_id=wmsg-e7e21e836dd5bb0b8db6baf124c9cee4 seq=1 bytes=46
+[2026-10-24 13:45:09] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849509270-b5494572
++mock time is now 1.79285e+09
+[2026-10-24 13:45:24] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849509270-b5494572 evaluator unavailable runtime=verifier-a retryable=true; no verdict committed: Server error 503: test evaluator unavailable
+[2026-10-24 13:45:30] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849509270-b5494572 gate=evaluator_unavailable reason=Server error 503: test evaluator unavailable
++mock time is now 1.79285e+09
+[2026-10-24 13:45:32] [ERROR] [Misc] goal verifier original inventory unavailable: Add-on request ownership unavailable: an inventoried original changed
+[2026-10-24 13:45:32] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849509270-b5494572 LLM approved runtime=verifier-a reason=provider recovered, target measured
+[2026-10-24 13:45:32] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-8fd81889ab5cef7242f4b60eb711360c seq=2 bytes=350
+ASSERT one failure then one review
+ASSERT proof awaits human confirmation
+ASSERT retry preserves request identity
+ASSERT retry preserves request identity
+[2026-10-24 13:45:32] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849509270-b5494572 run_id=01a16e28-d32f-7000-9107-d9e492856141
+  [OK]          transient retry                     0   provider recovery nee...
+[2026-10-24 13:45:32] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_e92d4c (no git root found)
+[2026-10-24 13:45:32] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_2e6a46 for requested path /tmp/goal_verification_agent_e92d4c
+[2026-10-24 13:45:32] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_e92d4c for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:32] [INFO] [Misc] workspace broadcast committed from=planner-quick-tiger mention=none request_id=wmsg-543ec3e4cb2196a61587a092e91fd03b seq=1 bytes=47
+[2026-10-24 13:45:32] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849532770-296f9d39
++mock time is now 1.79285e+09
+[2026-10-24 13:45:48] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849532770-296f9d39 evaluator unavailable runtime=verifier-a retryable=true; no verdict committed: Server error 503: test evaluator unavailable
+[2026-10-24 13:45:53] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849532770-296f9d39 gate=evaluator_unavailable reason=Server error 503: test evaluator unavailable
++mock time is now 1.79285e+09
+ASSERT dropped Goal stays dropped
+ASSERT old retry never calls evaluator
+  [OK]          transient retry                     1   drop invalidates an o...
+[2026-10-24 13:45:55] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_fcaa44 (no git root found)
+[2026-10-24 13:45:55] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_e92d4c for requested path /tmp/goal_verification_agent_fcaa44
+[2026-10-24 13:45:55] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_fcaa44 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:45:55] [INFO] [Misc] workspace broadcast committed from=planner-bold-whale mention=none request_id=wmsg-a36ec8170cc5800093925064e36be62c seq=1 bytes=46
+[2026-10-24 13:45:55] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849555640-9740b194
++mock time is now 1.79285e+09
+[2026-10-24 13:46:08] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849555640-9740b194 evaluator unavailable runtime=quota_slot.test_model retryable=true; no verdict committed: Provider 'claude_code' hard quota exhausted: Claude Code quota blocked (rate_limit=rejected api_status=429) (retry_after: 2024.751s)
+[2026-10-24 13:46:13] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849555640-9740b194 gate=evaluator_unavailable reason=Provider 'claude_code' hard quota exhausted: Claude Code quota blocked (rate_limit=rejected api_status=429) (retry_after: 2024.751s)
+ASSERT the retry is dated at the stated reset
+ASSERT one refused review so far
+ASSERT the replacement reviewer has not entered before the reset
+ASSERT the dated retry is still armed
++mock time is now 1.79285e+09
+ASSERT the armed timer accepts one clock advance
+[2026-10-24 13:46:15] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849555640-9740b194 LLM approved runtime=quota_slot.test_model reason=quota reset, target measured
+ASSERT the automatic successor keeps the pending request
+ASSERT the automatic successor has its own run
+ASSERT actual reviewer entry is not before the stated reset
+ASSERT the reset enters the replacement reviewer once
+ASSERT no refused review ran in between
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-ab692d5bd58dbb7ee8647962041f2385 seq=2 bytes=356
+ASSERT proof awaits human confirmation
+[2026-10-24 13:46:15] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849555640-9740b194 run_id=01a16e29-7ded-7000-8e58-c3e59ad45f58
+  [OK]          transient retry                     2   a stated provider res...
+[2026-10-24 13:46:15] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_d13e19 (no git root found)
+[2026-10-24 13:46:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_fcaa44 for requested path /tmp/goal_verification_agent_d13e19
+[2026-10-24 13:46:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_d13e19 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=planner-fierce-beaver mention=none request_id=wmsg-b6a567aa659420b5055986089efb787a seq=1 bytes=49
+[2026-10-24 13:46:15] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849575486-efeff98b
+[2026-10-24 13:46:15] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849575486-efeff98b evaluator unavailable runtime=verifier-a retryable=false; no verdict committed: Not found: glm-5.1 was retired at 2026-09-25
+[2026-10-24 13:46:15] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849575486-efeff98b gate=evaluator_unavailable reason=Not found: glm-5.1 was retired at 2026-09-25 | model_absent=verifier-a
+ASSERT the daemon armed no retry for a permanent refusal
+ASSERT one review ran
+ASSERT one candidate was called
+ASSERT the run row names the model-absent candidate
+ASSERT idle ticks start no review
+ASSERT idle ticks call no candidate
+ASSERT the Goal waits in verifying
+[2026-10-24 13:46:15] [INFO] [Misc] goal verifier scheduled goal_id=goal-1792849575486-efeff98b
+ASSERT asking again keeps the same request
+[2026-10-24 13:46:15] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849575486-efeff98b LLM approved runtime=verifier-a reason=replacement serves the review
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-3f6e2c7c6e427acad030bd6858e87a0b seq=2 bytes=343
+[2026-10-24 13:46:15] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849575486-efeff98b run_id=01a16e29-7f2e-7000-8cf8-8e7df675fd2d
+ASSERT the requested review committed
+  [OK]          permanent refusal                   0   retired model candida...
+[2026-10-24 13:46:15] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_e40ec2 (no git root found)
+[2026-10-24 13:46:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_d13e19 for requested path /tmp/goal_verification_agent_e40ec2
+[2026-10-24 13:46:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_e40ec2 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=planner-pale-gecko mention=none request_id=wmsg-a334bf74af1bb7fd875a22be3cea17fe seq=1 bytes=46
+[2026-10-24 13:46:15] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849575807-4af945a4
+[2026-10-24 13:46:15] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849575807-4af945a4 evaluator unavailable runtime=verifier-a retryable=false; failing over to next verifier_exact slot verifier-b: Not found: glm-5.1 was retired at 2026-09-25
+[2026-10-24 13:46:15] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849575807-4af945a4 evaluator unavailable runtime=verifier-b retryable=true; no verdict committed: Server error 503: test evaluator unavailable
+[2026-10-24 13:46:15] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849575807-4af945a4 gate=evaluator_unavailable reason=Server error 503: test evaluator unavailable | model_absent=verifier-a
+ASSERT the transient slot alone is retryable
+ASSERT the retired slot names the permanent set
+ASSERT the rendered detail names the retired candidate
+ASSERT the walk tried every slot once
+  [OK]          permanent refusal                   1   retired model is filt...
+[2026-10-24 13:46:15] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_ba78c5 (no git root found)
+[2026-10-24 13:46:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_e40ec2 for requested path /tmp/goal_verification_agent_ba78c5
+[2026-10-24 13:46:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_ba78c5 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=planner-kind-llama mention=none request_id=wmsg-c7d4682405e8f82bf5e407f12818aa66 seq=1 bytes=46
+[2026-10-24 13:46:15] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849575844-2bfbcc00
+ASSERT test setup leaves the phase write missing
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-749165a4b22321dac28cb64ef6a7e55f seq=2 bytes=337
+ASSERT reconciliation does not call the model again
+ASSERT proven verdict converges to completed
+ASSERT the exact run survives reconciliation
+  [OK]          re-arm                              0   committed proven proo...
+[2026-10-24 13:46:15] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_439500 (no git root found)
+[2026-10-24 13:46:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_ba78c5 for requested path /tmp/goal_verification_agent_439500
+[2026-10-24 13:46:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_439500 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=planner-rare-otter mention=none request_id=wmsg-c473de54ce8adee34c12760c936f32a6 seq=1 bytes=46
+[2026-10-24 13:46:15] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849575873-d1be2ff3
+ASSERT test setup leaves the phase write missing
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-29567506893a221d2c977f646b470330 seq=2 bytes=340
+ASSERT refutation is not overwritten by a re-armed request
+ASSERT refuted verdict converges to executing
+ASSERT the exact refutation run survives
+  [OK]          re-arm                              1   committed refuted pro...
+[2026-10-24 13:46:15] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_24ed25 (no git root found)
+[2026-10-24 13:46:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_439500 for requested path /tmp/goal_verification_agent_24ed25
+[2026-10-24 13:46:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_24ed25 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=planner-gentle-tiger mention=none request_id=wmsg-2d2827e9281a0694e8869c62e1326456 seq=1 bytes=48
+[2026-10-24 13:46:15] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849575899-961d93f1
+ASSERT test setup leaves the phase write missing
+[2026-10-24 13:46:15] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849575914-e2995499
+ASSERT the healthy goal is still collected
+ASSERT the unreconcilable goal is not collected
+ASSERT the scan names the one goal it could not reconcile
+ASSERT it names the re-arm step as the one that failed
+[2026-10-24 13:46:15] [ERROR] [Misc] goal verifier ledger rearm_proof failed goal_id=goal-1792849575899-961d93f1; its pending row stays undrained: goal_verification: current criterion is already proven for goal-1792849575899-961d93f1
+[2026-10-24 13:46:15] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849575914-e2995499 LLM approved runtime=verifier-a reason=healthy goal verified
+[2026-10-24 13:46:15] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-a539ca22f04077a851abc96b508fb33f seq=2 bytes=345
+[2026-10-24 13:46:15] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849575914-e2995499 run_id=01a16e29-8009-7000-9324-3f7b0c3f90f3
+ASSERT the healthy goal is drained past the bad one
+ASSERT the bad goal stays verifying
+ASSERT the Goal row names the failed step
+ASSERT the Goal row carries the store's reason
+ASSERT the drained goal carries no unreconciled reason
+ASSERT a goal the operator dropped no longer reads as stuck
+  [OK]          re-arm                              2   one unreconcilable go...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_679789 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_24ed25 for requested path /tmp/goal_verification_agent_679789
+[2026-10-24 13:46:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_679789 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=planner-warm-beaver mention=none request_id=wmsg-105866b2f35abdec4884dea407a91290 seq=1 bytes=47
+[2026-10-24 13:46:16] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849576013-c3474312
+ASSERT test setup leaves the phase write missing
+[2026-10-24 13:46:16] [ERROR] [Misc] goal verifier ledger rearm_proof failed goal_id=goal-1792849576013-c3474312; its pending row stays undrained: goal_verification: current criterion is already proven for goal-1792849576013-c3474312
+ASSERT the server row names the re-arm step
+[2026-10-24 13:46:16] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849576013-c3474312
+[2026-10-24 13:46:16] [WARN] [Misc] [goal-proof-review] goal_id=goal-1792849576013-c3474312 evaluator unavailable runtime=verifier-a retryable=true; no verdict committed: Server error 503: test evaluator unavailable
+[2026-10-24 13:46:16] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849576013-c3474312 gate=evaluator_unavailable reason=Server error 503: test evaluator unavailable
+ASSERT the goal is still verifying
+ASSERT the clean scan took it off the planning row
+  [OK]          re-arm                              3   a clean scan replaces...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_8ef3c8 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_679789 for requested path /tmp/goal_verification_agent_8ef3c8
+[2026-10-24 13:46:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_8ef3c8 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=planner-kind-falcon mention=none request_id=wmsg-927d3b844df4ad58fa8bc28def7cc1b6 seq=1 bytes=47
+[2026-10-24 13:46:16] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849576070-249f16b9 LLM approved runtime=verifier-a reason=verified after re-arm
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-d6f85466d4d650d60b53d00c80474e6e seq=2 bytes=320
+[2026-10-24 13:46:16] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849576070-249f16b9 run_id=01a16e29-8094-7000-b2b4-d019e80cf721
+ASSERT the re-armed gate completes
+ASSERT the verdict rode the re-armed request
+  [OK]          re-arm                              4   verifying goal with a...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_cea49f (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_8ef3c8 for requested path /tmp/goal_verification_agent_cea49f
+[2026-10-24 13:46:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_cea49f for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=planner-noble-whale mention=none request_id=wmsg-6efbfca4755d48895bd80a1b40272479 seq=1 bytes=47
+[2026-10-24 13:46:16] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849576145-d4601a47
+[2026-10-24 13:46:16] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849576145-d4601a47 LLM approved runtime=verifier-a reason=all 3 services verified
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-0c29266aa30d1f654b254307b8217e55 seq=2 bytes=324
+[2026-10-24 13:46:16] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849576145-d4601a47 run_id=01a16e29-80e2-7000-a856-1219d6ad5406
+ASSERT the Goal moved on
+ASSERT the Goal
+ASSERT the request that passed
+ASSERT when it passed is when the verdict was made
+  [OK]          candle snapshot                     0   a passing verdict lea...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_25a46b (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_cea49f for requested path /tmp/goal_verification_agent_25a46b
+[2026-10-24 13:46:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_25a46b for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=planner-lucky-shark mention=none request_id=wmsg-1cf7edb971b0097997c777c2cbbfc8bb seq=1 bytes=47
+[2026-10-24 13:46:16] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849576224-94a05b54
+[2026-10-24 13:46:16] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849576224-94a05b54 LLM approved runtime=verifier-a reason=all 3 services verified
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-c2dc100a5b5e8874d0b8daee6304d270 seq=2 bytes=324
+[2026-10-24 13:46:16] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849576224-94a05b54 run_id=01a16e29-8133-7000-a96a-80ab27ecf5da
+ASSERT the Goal moved on
+ASSERT no ledger
+  [OK]          candle snapshot                     1   without a candle.toml...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_059e26 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_25a46b for requested path /tmp/goal_verification_agent_059e26
+[2026-10-24 13:46:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_059e26 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=planner-proud-wolf mention=none request_id=wmsg-8e5d7e852e673e9f60cded0fbd32a1c0 seq=1 bytes=46
+[2026-10-24 13:46:16] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849576305-332445cc
+[2026-10-24 13:46:16] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849576305-332445cc LLM rejected runtime=verifier-a reason=the metric did not move
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-090d087f055d1ccaef1c97b2793a8d14 seq=2 bytes=338
+[2026-10-24 13:46:16] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849576305-332445cc run_id=01a16e29-8180-7000-828f-9fb3a0eafc0c
+ASSERT back to executing
+ASSERT no ledger
+  [OK]          candle snapshot                     2   a refutation leaves n...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/goal_verification_agent_6ce423 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/goal_verification_agent_059e26 for requested path /tmp/goal_verification_agent_6ce423
+[2026-10-24 13:46:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/goal_verification_agent_6ce423 for test executable test_goal_verification_agent.exe
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=planner-keen-bear mention=none request_id=wmsg-b81b550a655a88ff03746d31c57457c8 seq=1 bytes=45
+[2026-10-24 13:46:16] [WARN] [Misc] goal verification request committed without an installed goal verifier lane goal_id=goal-1792849576385-0a6c83ed
+[2026-10-24 13:46:16] [INFO] [Misc] [goal-proof-review] goal_id=goal-1792849576385-0a6c83ed LLM approved runtime=verifier-a reason=all 3 services verified
+[2026-10-24 13:46:16] [WARN] [Misc] goal verifier deferred goal_id=goal-1792849576385-0a6c83ed gate=Commit_refused reason={"status":"error","error_code":"conflict","message":"candle snapshot: candle ledger /tmp/goal_verification_agent_6ce423/.masc/candle-ledger.jsonl could not be read: private JSONL transaction target has unexpected file kind: directory"}
+ASSERT the Goal stays in Verifying
+ASSERT the same request is still pending
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=verifier_exact mention=none request_id=wmsg-366ab7d80c6a9fdfb5112d9226138bfa seq=2 bytes=324
+[2026-10-24 13:46:16] [INFO] [Misc] goal verifier committed retained goal_id=goal-1792849576385-0a6c83ed run_id=01a16e29-81d3-7000-a747-186ab34da458
+ASSERT the next pass goes through
+ASSERT and leaves exactly one Snapshot
+  [OK]          candle snapshot                     3   a snapshot that canno...
+
+Test Successful in 71.191s. 39 tests run.
+::endgroup::
+[targeted] test/test_goal_verification_agent: OK in 71s
+[targeted] test/test_verifier_review_worker: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_verifier_review_worker: start 2026-10-24T13:46:16Z
+::group::{retained verifier execution}
+Testing `retained verifier execution'.
+This run has ID `G6ZNRW4I'.
+
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-e051cf (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-e051cf (MASC_BASE_PATH)
+ASSERT original workspace reaches reviewer
+ASSERT exact stored prompt reaches reviewer
+ASSERT exact original system instructions reach reviewer
+ASSERT original media reaches reviewer
+[2026-10-24 13:46:16] [INFO] [Task] [verification-lookup] tool=tool_read_file root=/tmp/verifier-worker-e051cf/.masc/playground/review-fixture argument={"file_path":"receipt.txt"} outcome=resolved
+ASSERT successful owned lookup retains shared evidence projection
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT one actual reviewer dispatch
+  [OK]          execution          0   frozen prompt, media, lookup and verdict.
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-b19d00 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-b19d00 (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-390249 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-390249 (MASC_BASE_PATH)
+ASSERT no refused path dispatches a reviewer
+  [OK]          execution          1   missing and changed authority refuse b...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-fc5b5f (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-fc5b5f (MASC_BASE_PATH)
+ASSERT wake without terminal retry keeps original
+ASSERT retry preserves exact prompt
+[2026-10-24 13:46:16] [WARN] [Task] task_id=task-001 [task-completion-review] evaluator unavailable runtime=fixture-reviewer retryable=true; no verdict committed: Rate limited: definite complete HTTP refusal (retry_after: none)
+ASSERT explicit terminal transition produces one linked successor
+ASSERT another wake reuses the same successor
+ASSERT whole successor differs only in identity
+ASSERT retry preserves exact prompt
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=retry checked
+ASSERT restored judgment never invokes a second model
+ASSERT judgment is not another retry authorization
+  [OK]          execution          2   retry keeps both immutable originals.
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1b92cc (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1b92cc (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [WARN] [Task] task_id=task-001 [task-completion-review] evaluator unavailable runtime=fixture-reviewer retryable=false; no verdict committed: Network error (connection_reset): reply lost
+ASSERT unknown keeps original identity
+ASSERT neither fallback nor restart dispatches
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-034548 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-034548 (MASC_BASE_PATH)
+ASSERT cancelled provider called once
+  [OK]          execution          3   unknown and cancellation never redispa...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-985937 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-985937 (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-136518564192ca7099d5bd4b23e5bfaa seq=1 bytes=12
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:16] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 13:46:16] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+[2026-10-24 13:46:16] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+ASSERT success and full restart use one model
+ASSERT domain retained exact original notes
+  [OK]          execution          4   actual host commit and restart.
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-da786f (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-da786f (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-c7b871b27ae35e14554d35a5be415410 seq=1 bytes=12
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT boot finds pending commit after Task left awaiting
+[2026-10-24 13:46:16] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT boot confirms domain receipt and terminal observer ACK
+[2026-10-24 13:46:16] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT stale Awaiting call preserves acknowledged Committed history
+ASSERT domain cancellation does not call another model
+  [OK]          execution          5   actual host recovers cancellation afte...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-c92e7b (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-c92e7b (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-6e4a334c3ac313f8efa0e6a3c6fc4830 seq=1 bytes=12
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:16] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 13:46:16] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT actual production restart never reaches another provider
+ASSERT commit uses exact retained judgment notes
+  [OK]          execution          6   Judged recovery precedes actual prepar...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-0af6ba (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-0af6ba (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM rejected runtime=fixture-reviewer reason=repair
+ASSERT lost commit reply causes no duplicate domain effect
+ASSERT lost commit reply causes no new provider
+  [OK]          execution          7   commit unknown recovers original.
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-001ecb (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-001ecb (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [WARN] [Task] task_id=task-001 [task-completion-review] evaluator unavailable runtime=fixture-reviewer retryable=false; no verdict committed: Network error (connection_reset): lost after dispatch
+ASSERT actual inner admission blocks the second provider
+ASSERT restart does not enter any provider
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-63bc8a (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-63bc8a (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=second-provider reason=checked
+ASSERT ordinary consumer keeps existing inner walk admission
+  [OK]          execution          8   actual inner walk respects retained di...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-8ec9d5 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-8ec9d5 (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [WARN] [Task] task_id=task-001 [task-completion-review] fixture typed slot admission is unavailable; no verdict committed
+ASSERT slot refusal invokes no reviewer RPC
+ASSERT actual admission fact retained
+ASSERT configuration repair cannot allocate a successor
+ASSERT re-admission preserves original prompt
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=admitted
+ASSERT one provider after real pre-admission repair
+ASSERT same original owns the answer
+  [OK]          execution          9   pre-admission configuration repair reu...
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-450ff6 (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-450ff6 (MASC_BASE_PATH)
+  [OK]          execution         10   invalid inventory refuses allocation.
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-0dfa5f (no git root found)
+[2026-10-24 13:46:16] [INFO] [Workspace] MASC base: /tmp/verifier-worker-0dfa5f (MASC_BASE_PATH)
+[2026-10-24 13:46:16] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-5b7b9691884ae6df42f28fd55ff2b451 seq=1 bytes=12
+[2026-10-24 13:46:16] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:16] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=human_operator authority_actor=race-operator decision=approve
+[2026-10-24 13:46:16] [INFO] [Misc] completion authority superseded task_id=task-001 verification_id=vrf-retained-review terminal=Done (producer=review-fixture) verdict=APPROVE
+ASSERT durable terminal authority is nonblank
+ASSERT private helper preserves superseded refusal
+ASSERT late verifier preserves actual operator state
+ASSERT acknowledged original leaves pending discovery
+[2026-10-24 13:46:17] [INFO] [Misc] completion authority superseded task_id=task-001 verification_id=vrf-retained-review terminal=Done (producer=review-fixture) verdict=APPROVE
+ASSERT private helper preserves superseded refusal
+ASSERT acknowledged original leaves pending discovery
+ASSERT stale queued Awaiting call cannot reset acknowledged Superseded row
+ASSERT terminal boot never invokes another reviewer
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-8d66b2 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-8d66b2 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-1316147940e2d3c54af4d6b3143c9b08 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=race-operator mention=none request_id=wmsg-3f3c85f50b12bf021ccd012c7911f08b seq=2 bytes=69
+[2026-10-24 13:46:17] [INFO] [Misc] completion authority superseded task_id=task-001 verification_id=vrf-retained-review terminal=Cancelled by race-operator verdict=APPROVE
+ASSERT durable terminal authority is nonblank
+ASSERT private helper preserves superseded refusal
+ASSERT late verifier preserves actual operator state
+ASSERT acknowledged original leaves pending discovery
+[2026-10-24 13:46:17] [INFO] [Misc] completion authority superseded task_id=task-001 verification_id=vrf-retained-review terminal=Cancelled by race-operator verdict=APPROVE
+ASSERT private helper preserves superseded refusal
+ASSERT acknowledged original leaves pending discovery
+ASSERT stale queued Awaiting call cannot reset acknowledged Superseded row
+ASSERT terminal boot never invokes another reviewer
+  [OK]          execution         11   Judged boot preserves terminal operato...
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-46ded9 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-46ded9 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-eff4afd89ebae7b9f5e4a21722e4cfe2 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:17] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=human_operator authority_actor=race-operator decision=approve
+ASSERT one real apply; refusal never reapplies
+ASSERT one before-read and one refusal read
+ASSERT operator race and restart retain one review
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-408c52 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-408c52 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-036a70fc80f347161eb91fc755c9f177 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=race-operator mention=none request_id=wmsg-3fcbaf1ce44e9d46175c964b2f4a6c17 seq=2 bytes=69
+ASSERT one real apply; refusal never reapplies
+ASSERT one before-read and one refusal read
+ASSERT operator race and restart retain one review
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-95a11b (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-95a11b (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-17d118e734644f0c2577bcf31eaeee92 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:17] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=human_operator authority_actor=race-operator decision=reject
+ASSERT one real apply; refusal never reapplies
+ASSERT one before-read and one refusal read
+ASSERT operator race and restart retain one review
+  [OK]          execution         12   actual typed refusal race never reappl...
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d6a6c0 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d6a6c0 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-dc8169dc1ce9c90e89b4c7b73fa218b9 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT atomic judgment+registration uses one real final write
+ASSERT actual Caa returned-error guard preserves retained publication
+ASSERT typed worker failure did not write a competing completion
+[2026-10-24 13:46:17] [WARN] [Misc] verification_run_registry: dropped 1 replayed running review(s); review fibers do not survive server restart
+[2026-10-24 13:46:17] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT acknowledged original leaves pending discovery
+ASSERT unconfirmed reply never invokes another reviewer
+  [OK]          execution         13   atomic judgment observation survives u...
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d3ca50 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d3ca50 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-0726b55b65f5c8bf86fbc500f1e0e213 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=race-operator mention=none request_id=wmsg-80a4ed985ce7512353b49a2fbfd3b000 seq=2 bytes=69
+[2026-10-24 13:46:17] [INFO] [Misc] completion authority superseded task_id=task-001 verification_id=vrf-retained-review terminal=Cancelled by race-operator verdict=APPROVE
+ASSERT actual production boot discovers terminal original without Task
+ASSERT boot publication failures
+ASSERT acknowledged original leaves pending discovery
+ASSERT recovery preserves the entire original pending row
+ASSERT recovery preserves original clock, tools, runtime and elapsed
+ASSERT fresh exact durable confirmation appends no different completion
+[2026-10-24 13:46:17] [INFO] [Misc] completion authority superseded task_id=task-001 verification_id=vrf-retained-review terminal=Cancelled by race-operator verdict=APPROVE
+ASSERT private helper preserves superseded refusal
+ASSERT acknowledged original leaves pending discovery
+ASSERT stale Awaiting call cannot resurrect an ACKed pruned original
+ASSERT ACK prevents reactivation after registry compaction/pruning
+ASSERT post-ACK boot failures
+ASSERT post-ACK discovery does not resurrect a pruned registry row
+ASSERT publication boot never calls another model
+  [OK]          execution         14   terminal publication cancellation reco...
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-99335d (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-99335d (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-38a750e202f41ef7f641fc48780f895b seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT actual Caa cancellation guard preserves atomic original
+ASSERT post-save cancellation does not publish competing completion
+[2026-10-24 13:46:17] [WARN] [Misc] verification_run_registry: dropped 1 replayed running review(s); review fibers do not survive server restart
+[2026-10-24 13:46:17] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT acknowledged original leaves pending discovery
+ASSERT post-save cancellation and fresh host retain one model call
+  [OK]          execution         15   post-atomic observation cancellation r...
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d4d421 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d4d421 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-80ee883205c4f1f1262071613921e5a3 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+[2026-10-24 13:46:17] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+ASSERT bad first key does not suppress actual healthy publication
+ASSERT unprovable original remains an explicit failure
+ASSERT boot failures never cause a second review
+  [OK]          execution         16   unpublishable original cannot starve a...
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d03d64 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d03d64 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-ecef8e560b995ed2dade46c349354dd8 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+ASSERT exact missing observations cause the refusal
+ASSERT missing observations refuse before actual host observation
+ASSERT missing observations refuse before actual domain apply call
+ASSERT exact missing observations cause the refusal
+ASSERT unprovable recovery preserves the raw actual Task
+ASSERT unprovable recovery preserves the exact owner phase and events
+ASSERT unprovable recovery publishes no competing registry row
+ASSERT recovery never adds another reviewer call
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-b3dab0 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-b3dab0 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-c8bc7b6d532fb9aff93ef828e96a08d2 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+[2026-10-24 13:46:17] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+ASSERT observed sibling executes exactly one real domain apply
+ASSERT observed sibling reads before and confirms after
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT acknowledged original leaves pending discovery
+ASSERT recovery never adds another reviewer call
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-99fbc4 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-99fbc4 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-f7e113852ebf22c19b28cbc13d024b00 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+ASSERT exact missing observations cause the refusal
+ASSERT missing observations refuse before actual host observation
+ASSERT missing observations refuse before actual domain apply call
+ASSERT exact missing observations cause the refusal
+ASSERT unprovable recovery preserves the raw actual Task
+ASSERT unprovable recovery preserves the exact owner phase and events
+ASSERT unprovable recovery publishes no competing registry row
+ASSERT recovery never adds another reviewer call
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1f4447 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1f4447 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-edd76171535a155b9db82975059e1f66 seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+[2026-10-24 13:46:17] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+ASSERT observed sibling executes exactly one real domain apply
+ASSERT observed sibling reads before and confirms after
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT acknowledged original leaves pending discovery
+ASSERT recovery never adds another reviewer call
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-3ed99b (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-3ed99b (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-70c1d851baccecac892a706bc24b99fe seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+ASSERT exact missing observations cause the refusal
+ASSERT missing observations refuse before actual host observation
+ASSERT missing observations refuse before actual domain apply call
+ASSERT exact missing observations cause the refusal
+ASSERT unprovable recovery preserves the raw actual Task
+ASSERT unprovable recovery preserves the exact owner phase and events
+ASSERT unprovable recovery publishes no competing registry row
+ASSERT recovery never adds another reviewer call
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1ac555 (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1ac555 (MASC_BASE_PATH)
+[2026-10-24 13:46:17] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-aa957de8b6f40712c0c302dda19ebbde seq=1 bytes=12
+[2026-10-24 13:46:17] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+[2026-10-24 13:46:17] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+ASSERT observed sibling executes exactly one real domain apply
+ASSERT observed sibling reads before and confirms after
+[2026-10-24 13:46:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT acknowledged original leaves pending discovery
+ASSERT recovery never adds another reviewer call
+  [OK]          execution         17   missing actual observer facts refuse b...
+
+Test Successful in 1.158s. 18 tests run.
+::endgroup::
+[targeted] test/test_verifier_review_worker: OK in 1s
+[targeted] test/test_completion_trust_harness: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_completion_trust_harness: start 2026-10-24T13:46:17Z
+::group::{Completion_trust_harness}
+Testing `Completion_trust_harness'.
+This run has ID `5KSTEHW0'.
+
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:17] [INFO] [Workspace] MASC base: /tmp/completion_trust_non_owner42603a (no git root found)
+[2026-10-24 13:46:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_trust_non_owner42603a for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:17] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_trust_non_owner42603a phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-7a5d656f71d11ee31809704e25d93cba seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-664854d1413bb0b3896fd1104618708e seq=2 bytes=29
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=other-keeper mention=none request_id=wmsg-031821ba519444df07fdeecc3adf738b seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by other-keeper
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT pre-state: task owned by a non-caller agent
+[2026-10-24 13:46:18] [WARN] [Task] agent_name=keeper-completion-trust task transition failed: [TaskError] Task task-001 is claimed and owned by other-keeper; keeper-completion-trust cannot submit it.
+ASSERT non-owner completion outcome
+ASSERT rejection is ok=false
+ASSERT ownership reject is a deterministic workflow rejection
+ASSERT ownership reject rule_id
+ASSERT ownership reject names the holder
+ASSERT task still owned by foreign agent after rejected completion
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_trust_non_owner42603a
+  [OK]          completion_trust_dispatch_oracle          0   non-owner compl...
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_trust_unclaimed14491d (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_trust_non_owner42603a for requested path /tmp/completion_trust_unclaimed14491d
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_trust_unclaimed14491d for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_trust_unclaimed14491d phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-9bb6e809ef4c98a6faf4dec1d4d5d976 seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-a3eb9475292d71ea097deb50612e37b4 seq=2 bytes=24
+[2026-10-24 13:46:18] [WARN] [Task] agent_name=keeper-completion-trust task transition failed: [TaskError] Invalid task state: Invalid transition: todo -> submit_for_verification (task-001, agent=keeper-completion-trust, valid_next_actions=[claim;cancel]).
+ASSERT unclaimed completion outcome
+ASSERT unclaimed reject is a workflow rejection
+ASSERT unclaimed reject rule_id
+ASSERT claim can recover the unclaimed submission
+ASSERT the lifecycle supplies the caller's next actions
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_trust_unclaimed14491d
+  [OK]          completion_trust_dispatch_oracle          1   completion of a...
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_llm_short_notes5985aa (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_trust_unclaimed14491d for requested path /tmp/completion_llm_short_notes5985aa
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_llm_short_notes5985aa for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_llm_short_notes5985aa phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-e6b16f21d12e71a39d6c8947f40d5196 seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-904e4a138f32f4d7c3b2194c7afb7fa7 seq=2 bytes=28
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-99689af381e3236b63e868118a93ccb4 seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-3ffa7834e95ca5714501796378850b7d seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Subscriptions] push_event_to_sessions: registry not wired (further calls silenced until set_session_push_fn runs)
+ASSERT self-claim succeeds
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=1 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-2f0436081f5239de5554348efe57bca2 producer=keeper-completion-trust
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [WARN] [Board] backend() called before server init, auto-initializing JSONL
+ASSERT evidence submission succeeds
+[2026-10-24 13:46:18] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=test-evaluator-runtime reason=
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_llm_short_notes5985aa
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 done by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-2f0436081f5239de5554348efe57bca2 authority=verifier_exact verdict=APPROVE
+[2026-10-24 13:46:18] [INFO] [Misc] completion approval delivered task_id=task-001 verification_id=vrf-2f0436081f5239de5554348efe57bca2 producer=keeper-completion-trust
+  [OK]          completion_trust_dispatch_oracle          2   short notes rea...
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_rendered_imagedf5c90 (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_llm_short_notes5985aa for requested path /tmp/completion_rendered_imagedf5c90
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_rendered_imagedf5c90 for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_rendered_imagedf5c90 phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-2550a1836a581c0f0b471520580faf1d seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-bac3cf47be17f499967b0bbe95b9881f seq=2 bytes=34
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-695b4218e4558d6fda2e2cdcb65e5a1e seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-3def1baf2f1902a787f998b4c22ecd23 seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=2 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-aff28a0619f448347ea52480bece8b4a producer=keeper-completion-trust
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT real submission accepted
+[2026-10-24 13:46:18] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=test-evaluator-runtime reason=synthetic image delivery receipt only
+ASSERT one actual attached image
+ASSERT exact PNG bytes and MIME reached HTTP provider
+ASSERT immutable snapshot body
+ASSERT producer file changed independently
+ASSERT oversized known binary is adopted whole
+ASSERT unreadable artifact is explicitly typed
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_rendered_imagedf5c90
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 done by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-aff28a0619f448347ea52480bece8b4a authority=verifier_exact verdict=APPROVE
+[2026-10-24 13:46:18] [INFO] [Misc] completion approval delivered task_id=task-001 verification_id=vrf-aff28a0619f448347ea52480bece8b4a producer=keeper-completion-trust
+  [OK]          completion_trust_dispatch_oracle          3   rendered image ...
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_trust_evidence_refseea1d9 (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_rendered_imagedf5c90 for requested path /tmp/completion_trust_evidence_refseea1d9
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_trust_evidence_refseea1d9 for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_trust_evidence_refseea1d9 phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-9b5bd030a5e4d43c917defe066da6a47 seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-6206fb240580e926f923b5cf99e7b882 seq=2 bytes=38
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-36f50cac1495887ed38cad13fa6ad6ac seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-d928463b8f739ea8c6960a8aaa8474d4 seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT self-claim precondition succeeds
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=2 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-7812a5d931a7d58c6a98013acff5225a producer=keeper-completion-trust
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT completion outcome
+ASSERT submitted evidence refs
+[2026-10-24 13:46:18] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=test-evaluator-runtime reason=
+ASSERT done assignee
+ASSERT controlled reviewer actually ran
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_trust_evidence_refseea1d9
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 done by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-7812a5d931a7d58c6a98013acff5225a authority=verifier_exact verdict=APPROVE
+[2026-10-24 13:46:18] [INFO] [Misc] completion approval delivered task_id=task-001 verification_id=vrf-7812a5d931a7d58c6a98013acff5225a producer=keeper-completion-trust
+  [OK]          completion_trust_dispatch_oracle          4   submitted evide...
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_llm_reject_then_approve258eea (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_trust_evidence_refseea1d9 for requested path /tmp/completion_llm_reject_then_approve258eea
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_llm_reject_then_approve258eea for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_llm_reject_then_approve258eea phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-8f27d6cc546b86952a92603cca8427cb seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-621548e874cc76114666412b1da44b70 seq=2 bytes=30
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-bb449f3c5a82f1df1ac9adc51559013a seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-af29362ab4d7b5538df9124b9ec5e908 seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT self-claim succeeds
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=2 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-ebd7fc6d2a7d0cd851ab47034e8e8ac4 producer=keeper-completion-trust
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT first submission succeeds
+[2026-10-24 13:46:18] [INFO] [Task] task_id=task-001 [task-completion-review] LLM rejected runtime=test-evaluator-runtime reason=deliverable requires corrected evidence
+ASSERT rejected task returns to same producer
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-ebd7fc6d2a7d0cd851ab47034e8e8ac4 authority=verifier_exact verdict=REJECT
+ASSERT world event task
+ASSERT world event verification
+ASSERT world event reason
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=4 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-a4aa876323f46f91a2269acad47c92fe producer=keeper-completion-trust
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT changed evidence submission succeeds
+ASSERT original submission preserved
+ASSERT resubmission has a fresh verification identity
+[2026-10-24 13:46:18] [INFO] [Misc] completion repair delivered task_id=task-001 verification_id=vrf-ebd7fc6d2a7d0cd851ab47034e8e8ac4 producer=keeper-completion-trust
+[2026-10-24 13:46:18] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=test-evaluator-runtime reason=solid evidence
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 done by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT submitted evidence refs
+ASSERT approved task owner
+ASSERT both controlled verdicts actually ran
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_llm_reject_then_approve258eea
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-a4aa876323f46f91a2269acad47c92fe authority=verifier_exact verdict=APPROVE
+[2026-10-24 13:46:18] [INFO] [Misc] completion approval delivered task_id=task-001 verification_id=vrf-a4aa876323f46f91a2269acad47c92fe producer=keeper-completion-trust
+  [OK]          completion_trust_dispatch_oracle          5   delivered rejec...
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_llm_unavailable0df24f (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_llm_reject_then_approve258eea for requested path /tmp/completion_llm_unavailable0df24f
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_llm_unavailable0df24f for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_llm_unavailable0df24f phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-e08b041414289263960fb6f1996afbe4 seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-1265094128b5af49df80e537354e967a seq=2 bytes=32
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-b70aef39d9ade43f6ad21bbbbfcdaab0 seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-3020bdbd355b2053fb01702ff8828187 seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT self-claim succeeds
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=1 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-c5667a42b59a853bb2c4434b641c70b5 producer=keeper-completion-trust
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT evidence submission succeeds without an inline verdict
+[2026-10-24 13:46:18] [WARN] [Task] task_id=task-001 [task-completion-review] evaluator unavailable runtime=test-evaluator-runtime retryable=false; no verdict committed: Internal error: test evaluator unavailable
+ASSERT controlled evaluator was unavailable
+ASSERT submitter identity is preserved for the retry
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_llm_unavailable0df24f
+[2026-10-24 13:46:18] [WARN] [Misc] system LLM completion authority stopped: Raised; producer or operator must act task_id=task-001 verification_id=vrf-c5667a42b59a853bb2c4434b641c70b5 authority=verifier_exact reason=verifier review attempt failed: execution_pending: reviewer outcome unknown; exact original retained
+  [OK]          completion_trust_dispatch_oracle          6   unavailable eva...
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_trust_positive_claim80d02a (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_llm_unavailable0df24f for requested path /tmp/completion_trust_positive_claim80d02a
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_trust_positive_claim80d02a for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_trust_positive_claim80d02a phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-0bd15fd44d72e9d8b10b09f13eb152e8 seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-2eda129127d02194903659086b0f99b0 seq=2 bytes=25
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-23a01706268129ebaa4cac51754e23bf seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-50d7130907fc3384aa2ba52ce2bd3a3a seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT legitimate claim outcome
+ASSERT claimed task is owned by the caller
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_trust_positive_claim80d02a
+  [OK]          completion_trust_dispatch_oracle          7   legitimate self...
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_terminal_racef7c714 (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_trust_positive_claim80d02a for requested path /tmp/completion_terminal_racef7c714
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_terminal_racef7c714 for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_terminal_racef7c714 phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-b4519ad6783a965466eb7fdd05b34e77 seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-92ef456d39225618c42586614998f00d seq=2 bytes=31
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-68b867e2a6bc4b5bd1aad7c3e21e1d75 seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-32cba920702f9e3e99e736581fc52d95 seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=2 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT submission is accepted
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 done by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=test-evaluator-runtime reason=late model approval
+[2026-10-24 13:46:18] [INFO] [Misc] completion approval delivered task_id=task-001 verification_id=vrf-d07660c5f6b58959c502852f04e3e486 producer=keeper-completion-trust
+[2026-10-24 13:46:18] [INFO] [Misc] completion authority superseded task_id=task-001 verification_id=vrf-d07660c5f6b58959c502852f04e3e486 terminal=Done (producer=keeper-completion-trust) verdict=APPROVE
+ASSERT actual review and outcome consumer returned
+ASSERT no shared retry batch was armed
+ASSERT only an actual nonterminal refusal publishes a stall
+ASSERT late verdict preserves the operator decision
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_terminal_racef7c714
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_terminal_race1f0931 (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_terminal_racef7c714 for requested path /tmp/completion_terminal_race1f0931
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_terminal_race1f0931 for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_terminal_race1f0931 phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-33510bb7339094155edfc9c4efc67d0b seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-b27851b327e8ca0af59c3b65a33ab774 seq=2 bytes=31
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-7ede72f5b881dcff0a9016be084960d3 seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-0e16905758a2b866cdb303547a129fd3 seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=2 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT submission is accepted
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=race-operator mention=none request_id=wmsg-68968caf7181d6b8a6d85d089fbd5274 seq=5 bytes=56
+[2026-10-24 13:46:18] [WARN] [Task] task task-001 cancel by race-operator
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=test-evaluator-runtime reason=late model approval
+[2026-10-24 13:46:18] [INFO] [Misc] completion authority superseded task_id=task-001 verification_id=vrf-a5e191f75d71c22a98ee582b1d9402e1 terminal=Cancelled by race-operator verdict=APPROVE
+ASSERT actual review and outcome consumer returned
+ASSERT no shared retry batch was armed
+ASSERT only an actual nonterminal refusal publishes a stall
+ASSERT late verdict preserves the operator decision
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_terminal_race1f0931
+ASSERT new workspace has no verdicts from earlier cases
+[2026-10-24 13:46:18] [INFO] [Workspace] MASC base: /tmp/completion_terminal_race39d573 (no git root found)
+[2026-10-24 13:46:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/completion_terminal_race1f0931 for requested path /tmp/completion_terminal_race39d573
+[2026-10-24 13:46:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/completion_terminal_race39d573 for test executable test_completion_trust_harness.exe
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: registering keeper name=keeper-completion-trust base_path=/tmp/completion_terminal_race39d573 phase=running
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-ca0caaf00bf447b60ae3341d84d2103a seq=1 bytes=51
+[2026-10-24 13:46:18] [INFO] [Workspace] agent session bound: keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-6e6c345d103fc6cf993e098397ddcf36 seq=2 bytes=31
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-2022d39aa10375025e9c6fd7662b5bb7 seq=3 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 claim by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [INFO] [Misc] workspace broadcast committed from=keeper-completion-trust mention=none request_id=wmsg-a7d4ed442d1f2d8f45f9ae6bbcf89e2a seq=4 bytes=16
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 start by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-10-24 13:46:18] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=2 (persistence pending)
+[2026-10-24 13:46:18] [INFO] [Task] task task-001 submit_for_verification by keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT submission is accepted
+[2026-10-24 13:46:18] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=test-evaluator-runtime reason=late model approval
+[2026-10-24 13:46:18] [INFO] [Misc] completion repair delivered task_id=task-001 verification_id=vrf-d256fdb5857e52c684287667179efe2e producer=keeper-completion-trust
+[2026-10-24 13:46:18] [WARN] [Misc] system LLM completion authority stopped: Commit_failed; producer or operator must act task_id=task-001 verification_id=vrf-d256fdb5857e52c684287667179efe2e authority=verifier_exact reason=retained commit conflicts with a nonterminal Task
+ASSERT actual review and outcome consumer returned
+ASSERT no shared retry batch was armed
+ASSERT only an actual nonterminal refusal publishes a stall
+ASSERT late verdict preserves the operator decision
+[2026-10-24 13:46:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-completion-trust base_path=/tmp/completion_terminal_race39d573
+  [OK]          completion_trust_dispatch_oracle          8   late verdict re...
+
+Test Successful in 1.008s. 9 tests run.
+::endgroup::
+[targeted] test/test_completion_trust_harness: OK in 2s
+[targeted] test/test_verification_run_registry: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_verification_run_registry: start 2026-10-24T13:46:19Z
+::group::{verification_run_registry}
+Testing `verification_run_registry'.
+This run has ID `SK0DNJJ9'.
+
+ASSERT status
+ASSERT task
+ASSERT producer
+ASSERT no elapsed while running
+  [OK]          rfc-0361-d4          0   running review is visible before it ...
+ASSERT labels match the wire vocabulary
+ASSERT labels are distinct
+  [OK]          rfc-0361-d4          1   every outcome has a distinct wire la...
+ASSERT status approved
+ASSERT evaluator_runtime approved
+ASSERT cause present for approved
+ASSERT status rejected
+ASSERT evaluator_runtime rejected
+ASSERT cause present for rejected
+ASSERT status infrastructure_unavailable
+ASSERT evaluator_runtime infrastructure_unavailable
+ASSERT cause present for infrastructure_unavailable
+ASSERT status not_reviewed
+ASSERT evaluator_runtime not_reviewed
+ASSERT cause present for not_reviewed
+ASSERT status commit_failed
+ASSERT evaluator_runtime commit_failed
+ASSERT cause present for commit_failed
+ASSERT status raised
+ASSERT evaluator_runtime raised
+ASSERT cause present for raised
+ASSERT status review_cancelled
+ASSERT evaluator_runtime review_cancelled
+ASSERT cause present for review_cancelled
+ASSERT status superseded_by
+ASSERT evaluator_runtime superseded_by
+ASSERT cause present for superseded_by
+  [OK]          rfc-0361-d4          2   failure outcomes carry an operator-r...
+ASSERT replayed status approved
+ASSERT replayed detail approved
+ASSERT replayed status rejected
+ASSERT replayed detail rejected
+ASSERT replayed status infrastructure_unavailable
+ASSERT replayed detail infrastructure_unavailable
+ASSERT replayed status not_reviewed
+ASSERT replayed detail not_reviewed
+ASSERT replayed status commit_failed
+ASSERT replayed detail commit_failed
+ASSERT replayed status raised
+ASSERT replayed detail raised
+ASSERT replayed status review_cancelled
+ASSERT replayed detail review_cancelled
+ASSERT replayed status superseded_by
+ASSERT replayed detail superseded_by
+  [OK]          rfc-0361-d4          3   every outcome survives replay.
+ASSERT approval reason on the wire
+  [OK]          rfc-0361-d4          4   an approval carries the reviewer's s...
+ASSERT replayed status
+ASSERT absent reason reads back empty
+  [OK]          rfc-0361-d4          5   an approval written without a reason...
+ASSERT gate on the wire
+ASSERT no retry flag on the wire
+ASSERT no retry flag after replay
+  [OK]          rfc-0361-d4          6   not_reviewed wire shape is gate and ...
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: dropped 1 replayed running review(s); review fibers do not survive server restart
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: skipped 1 malformed replay line(s); first=/tmp/verification-runs-5614ad.legacy-retryable.jsonl:2: object fields mismatch (missing=[], unknown=[retryable], duplicates=0)
+ASSERT legacy completion carrying retryable is not replayed
+  [OK]          rfc-0361-d4          7   legacy row carrying retryable is rej...
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: dropped 1 replayed running review(s); review fibers do not survive server restart
+ASSERT stale running review dropped
+ASSERT completed review kept
+  [OK]          rfc-0361-d4          8   replay drops running reviews.
+ASSERT one row per verification
+ASSERT newest attempt is live
+ASSERT newest actor
+  [OK]          rfc-0361-d4          9   a retry replaces its prior attempt.
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: completion for unknown id vrf-unknown
+ASSERT unknown completion creates no row
+ASSERT unknown completion writes no event
+  [OK]          rfc-0361-d4         10   unknown completion is logged without...
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: dropped 1 replayed running review(s); review fibers do not survive server restart
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: skipped 1 malformed replay line(s); first=/tmp/verification-runs-7eccee.unknown-outcome.jsonl:2: unknown verification outcome "probably_fine"
+ASSERT unknown outcome is not replayed
+ASSERT unknown outcome evidence is preserved
+  [OK]          rfc-0361-d4         11   unknown outcome label is an error.
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: dropped 1 replayed running review(s); review fibers do not survive server restart
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: skipped 1 malformed replay line(s); first=/tmp/verification-runs-a390d6.missing-outcome-detail.jsonl:2: object fields mismatch (missing=[tools,reason], unknown=[], duplicates=0)
+ASSERT reasonless rejection is not replayed
+ASSERT malformed completion is not compacted away
+  [OK]          rfc-0361-d4         12   rejected without a reason is an error.
+ASSERT completed runs bounded
+ASSERT newest retained
+ASSERT oldest evicted
+  [OK]          rfc-0361-d4         13   completed runs are pruned.
+ASSERT retained bounded to max_completed_retained
+ASSERT newest run retained
+ASSERT old run evicted
+  [OK]          rfc-0361-d4         14   stream replay large history.
+[2026-10-24 13:46:19] [WARN] [Misc] verification_run_registry: dropped 10 replayed running review(s); review fibers do not survive server restart
+ASSERT backfills to exactly max_completed_retained
+ASSERT newest non-running completed retained (vrf-bk-090)
+ASSERT oldest backfilled completed retained (vrf-bk-027)
+ASSERT evicted beyond retention window (vrf-bk-026)
+  [OK]          rfc-0361-d4         15   stream replay retries and running ba...
+ASSERT tool name
+ASSERT typed disposition
+ASSERT finished at
+  [OK]          rfc-0361-d4         16   tool evidence keeps input and typed ...
+ASSERT pre-boot registry
+ASSERT installed registry
+ASSERT first owner remains active
+  [OK]          rfc-0361-d4         17   global registry has one installation...
+ASSERT all original identity, outcome and tool fields survive replay
+ASSERT confirming a recovered terminal row appends nothing
+  [OK]          rfc-0361-d4         18   terminal publication reopens without...
+ASSERT refusal leaves the complete history unchanged
+ASSERT refusal leaves the complete history unchanged
+ASSERT refusal leaves the complete history unchanged
+ASSERT all original identity, outcome and tool fields survive replay
+  [OK]          rfc-0361-d4         19   terminal publication preserves confl...
+ASSERT an uninitialized publication creates no history
+ASSERT occupied history directory is preserved
+  [OK]          rfc-0361-d4         20   terminal publication refuses unconfi...
+ASSERT canonical terminal payload retains every original field
+  [OK]          rfc-0361-d4         21   terminal publication decoder refuses...
+ASSERT display retention evicts the old row
+ASSERT durable historical confirmation does not append
+ASSERT confirmation does not promise display retention
+  [OK]          rfc-0361-d4         22   terminal confirmation survives displ...
+
+Test Successful in 0.093s. 23 tests run.
+::endgroup::
+[targeted] test/test_verification_run_registry: OK in 0s

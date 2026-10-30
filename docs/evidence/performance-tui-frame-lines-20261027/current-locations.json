@@ -1,0 +1,102 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Newly authored18selectedstaging-byte manifest, not original raw-run manifest;16exact original captures and2explicit source_text wrappers.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "recorded-capture-hashes.json",
+    "sha256": "86646a9dcfb73ca26f035b6d74d6da8cf35e45da0004e53a5ed562b57924f085"
+  },
+  "files": {
+    "docs/evidence/performance-tui-frame-lines-20261027/reverse-carrier.ml.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/reverse-carrier.ml.txt",
+      "recorded_sha256": "0eb79dd7b506ba6e6f508a7dfc28f4e240379cfeed0c1bbab18307337a71d536",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/reverse-plan.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/reverse-plan.json",
+      "recorded_sha256": "45ef9d025bea7f3140730459bd36469a0759acc3e528dfb280f848d3aeaa767a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/reverse-execution.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/reverse-execution.json",
+      "recorded_sha256": "f66f45b8648b4aa537185602e0dd89250b48368cc9e7de7837754e1dcef24f82",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/reverse-raw.jsonl": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/reverse-raw.jsonl",
+      "recorded_sha256": "d58139fb1112a9d8488c2aae44c2b5dce633189c2b9888649de47cd5e00e1616",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/reverse-summary.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/reverse-summary.json",
+      "recorded_sha256": "9aad807b1cd72be03d09c4bbaa6bb4ccef15b731d98b7c09b12218a03eebade1",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-native-carrier.ml.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-native-carrier.ml.txt",
+      "recorded_sha256": "916362435227be25707a7c9feaf9dc96d222889ace231f09a96eda50af4e8554",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-native-plan.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-native-plan.json",
+      "recorded_sha256": "cea2ac651f391ed01c0e4bb8ad60f209ad5b7a5526ebe7e2cff12c6f8b7cad3f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-native-execution.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-native-execution.json",
+      "recorded_sha256": "314b8eb82c12859ec0328ebeec24f8cd9d8ec753b89e4237d34baa8b2c6acc17",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-native-raw.jsonl": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-native-raw.jsonl",
+      "recorded_sha256": "3364338d8f7137cb0289b49adb3d5d39ba811788eed15daf1d565da17e03c5d7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-native-summary.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-native-summary.json",
+      "recorded_sha256": "65a53bae614ae827ed87866cd29f2285f07136d44e4e4ea4eb6705884970f278",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-interpreter-carrier.ml.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-interpreter-carrier.ml.txt",
+      "recorded_sha256": "6ef5b204484b059f1671225e14e9694bec408524f7d97abe968202ae4174fe71",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-interpreter-plan.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-interpreter-plan.json",
+      "recorded_sha256": "b72df21e4bb6e32a6927c97147aade6fe0c219b05d7a18791ab43396f5307691",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-interpreter-execution.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-interpreter-execution.json",
+      "recorded_sha256": "e93c57ff37a57cce6fb8c11c874aa162e6131b18c9887b0acd012078e1b16414",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-interpreter-raw.jsonl": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-interpreter-raw.jsonl",
+      "recorded_sha256": "c0fecc2fbd812d8777eb87346fae8c5f77345623d67ecb0d3cf45fd84c6a08ac",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-interpreter-summary.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-interpreter-summary.json",
+      "recorded_sha256": "9b359cafff726b5991f9512681882aa4d64e9e320a89f09e50896b642e20ce1d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/actual-tool-returns.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/actual-tool-returns.json",
+      "recorded_sha256": "7ccf71544b67f65dabaa4d3a0d74da5365b90d7e9c0162310e294bd617b9b5d5",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/rejected-interpreter-stderr.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/rejected-interpreter-stderr.json",
+      "recorded_sha256": "c08c6398406173166054ca5c73f524af63322566d408dd9084b74ab6dcfdca15",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tui-frame-lines-20261027/native-compiler-config.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/tui-frame-lines-evidence-curation-v1/bundle-v2/native-compiler-config.json",
+      "recorded_sha256": "e1efa1258fbd5870bc26bbbea6c82203dfe997ed76ac9eda3a8aeea2646c8cb8",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

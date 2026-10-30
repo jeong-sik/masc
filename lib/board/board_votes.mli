@@ -1,0 +1,337 @@
+(** Board_votes — voting + karma + flair on top of the
+    Board_core store.
+
+    Runtime-include extends {!Board_core} (which itself
+    includes {!Board_core_classify} and {!Board_core_payload})
+    via [include module type of struct include Board_core end].
+    Type identity propagates end-to-end across the chain
+    (cycle 187 rationale).
+
+    The {!Board} top-level facade ([lib/board.ml]) is the
+    final hop in the runtime — it does
+    [include Board_votes] and re-exports every entry below
+    plus the entire Board_core surface to the wider codebase.
+
+    External callers reach 5 dotted [Board_votes.X] symbols
+    plus 17 [Board.X] entries that resolve into Board_votes
+    defs.  All are pinned below.
+
+    Internal helpers stay private at this boundary:
+    - {b Vote-direction normaliser}: [all_vote_directions],
+      [vote_direction_of_string_opt].
+    - {b Vote log persistence}: [append_vote_log],
+      [save_vote_log_jsonl], [record_vote_side_effect].
+    - {b Persistence loaders}: [load_persisted_posts],
+      [load_persisted_comments], [load_persisted_votes], reactions,
+      sub-boards, and [recalculate_reply_counts].
+    - {b Global store}: [global_lazy] ref.
+    - {b Flair extractor internals}: [flair_tag_re],
+      [extract_flair]. *)
+
+include module type of struct
+  include Board_core
+end
+
+(** {1 Vote direction wire format} *)
+
+val vote_direction_to_string : vote_direction -> string
+(** Lower-cased canonical encoding ([Up] → ["up"], [Down] →
+    ["down"]).  Consumed by the JSONL persister and the
+    operator dashboard. *)
+
+val valid_vote_direction_strings : string list
+(** SSOT mirror of the encoded forms that
+    [vote_direction_of_string_opt] accepts.  Used by the JSON Schema
+    generator for the [direction] enum field in the vote MCP tool. *)
+
+val vote_direction_of_string_opt : string -> vote_direction option
+(** Sound partial parser: case-insensitive, trims whitespace, and
+    accepts only ["up"] / ["down"].  Empty or unknown input returns
+    [None] (no silent permissive fallback).  No suite pins this
+    parser today. *)
+
+(** {1 Vote log path} *)
+
+val vote_log_path : unit -> string
+(** Path to the append-only vote log JSONL under the board directory
+    resolved by {!Board_paths.board_masc_dir} — the same resolver used by
+    [persist_path] / [comments_path] / [reactions_path] / [sub_boards_path],
+    so this is [<base>/.masc/board_votes.jsonl].  Each accepted row
+    has exactly [target], [voter], [direction], and positive finite [ts]
+    fields; [target] carries canonical typed target/voter identities and the
+    derived [voter] field must match it. *)
+
+(** {1 Voting} *)
+
+val current_vote_for_post :
+  store ->
+  voter:string ->
+  post_id:string ->
+  (vote_direction option, board_error) Result.t
+(** Returns the persisted vote direction for [voter] on [post_id],
+    if any. *)
+
+val vote :
+  store ->
+  voter:string ->
+  post_id:string ->
+  direction:vote_direction ->
+  (int, board_error) Result.t
+(** Casts a vote on the post identified by [post_id].
+    Returns [Ok total_score] — the post's [(votes_up - votes_down)]
+    score {b after} this vote, not the amount this vote changed it.
+    Validates [voter] + [post_id] before taking the lock; rejects
+    duplicate votes in the same direction with [Already_voted].
+
+    Vote flips swap up↔down without re-counting (and
+    {b without} earning credits, to prevent down/up
+    alternation abuse).
+
+    Write-ahead: the vote is durably appended to the vote log {b before}
+    [store.posts] / [store.vote_log] are mutated, not after. Mutating first
+    and rolling back a failed append second would leave a window where a
+    racing [flush_dirty] snapshot-writes the not-yet-durable mutation before
+    the append either confirms or fails it, durably resurrecting a vote that
+    should not exist. If the append fails, [Error (Io_error _)] is returned
+    and nothing was ever mutated, so there is nothing to undo. If a second
+    call for the same [(voter, post_id)] commits first while this one's
+    append is in flight, this call's commit re-checks the vote log
+    immediately before mutating and returns [Error (Already_voted _)]
+    instead of clobbering the winner. *)
+
+val current_vote_for_comment :
+  store ->
+  voter:string ->
+  comment_id:string ->
+  (vote_direction option, board_error) Result.t
+(** Returns the persisted vote direction for [voter] on [comment_id],
+    if any. *)
+
+val vote_comment :
+  store ->
+  voter:string ->
+  comment_id:string ->
+  direction:vote_direction ->
+  (int, board_error) Result.t
+(** Same write-ahead shape as {!vote} but targets a comment via its
+    [comment_id]. *)
+
+(** {1 Stats} *)
+
+val stats : store -> Yojson.Safe.t
+(** Returns an [`Assoc] with [post_count],
+    [comment_count], [expired_pending], [last_sweep], and
+    [backend = "jsonl"].  Consumed by the operator
+    dashboard's at-a-glance health card. *)
+
+(** {1 JSONL row decoders} *)
+
+val visibility_of_string : string -> visibility option
+(** Re-export of {!Board_core_classify.visibility_of_string}.
+    Pinned at this layer so callers reach it via the
+    {!Board} facade unchanged. *)
+
+val post_of_yojson : Yojson.Safe.t -> post option
+(** Decodes one row emitted by the current {!post_to_yojson} writer.  Returns
+    [None] unless the field set, JSON types, identifiers, derived values, and
+    optional typed objects match that current wire shape exactly. *)
+
+val comment_of_yojson : Yojson.Safe.t -> comment option
+(** Decodes one row emitted by the current {!comment_to_yojson} writer, with
+    the same exact current-wire contract as {!post_of_yojson}. *)
+
+(** {1 Hearth aggregation} *)
+
+val list_hearths
+  :  store
+  -> ?exclude_system:bool
+  -> ?exclude_automation:bool
+  -> unit
+  -> (string * int) list
+(** Returns [(hearth, post_count)] pairs sorted by count
+    descending. Posts with no [hearth] are skipped. Optional post-kind filters
+    use the same classification contract as Board post listing. *)
+
+(** {1 Mutation helpers} *)
+
+val set_thread_id :
+  store ->
+  post_id:string ->
+  thread_id:string ->
+  (unit, board_error) Result.t
+(** Pins [thread_id] onto the post.  Used by the
+    Conversation linker to bridge a Board post to a
+    persisted Conversation thread. *)
+
+val set_pinned :
+  store ->
+  post_id:string ->
+  pinned:bool ->
+  (unit, board_error) Result.t
+(** Sets the post's [pinned] flag (operator-curated pin).
+    Marks the post dirty so the change persists to
+    posts.jsonl and survives restart. *)
+
+type close_successor =
+  | No_successor
+  | Successor of string
+(** A close must state its successor decision explicitly: [Successor id]
+    continues the thread, [No_successor] says there is none. There is no
+    default -- a caller that names neither is refused, so a missing
+    successor is never silently read as "none". *)
+
+val set_closed :
+  store ->
+  post_id:string ->
+  closed_by:string ->
+  successor:close_successor ->
+  summary:string ->
+  unit ->
+  (unit, board_error) Result.t
+(** Records a typed close (task-1758/#39356): who closed it, the successor
+    decision, and why. Permission (author/operator/configured moderator) is
+    checked by the caller before this runs, the same boundary as
+    [set_pinned]. Persists immediately via [append_post], durable before the
+    call returns. [summary] must be non-empty after trimming and [successor]
+    must name a decision; a whitespace-only summary or a missing decision is
+    refused as [Validation_error] with no write. A [Successor] id must
+    resolve to an existing post and cannot equal [post_id]; either violation
+    is refused as [Validation_error] with no write. *)
+
+val reopen :
+  store -> post_id:string -> (unit, board_error) Result.t
+(** Clears a post's [closed] state back to open. Idempotent: reopening an
+    already-open post is [Ok ()]. Same permission boundary as [set_closed]. *)
+
+type deletion_outcome =
+  | Durable_deletion
+  | Deletion_persistence_pending of string
+      (** The deletion is applied in memory and failed snapshot rewrites are
+          scheduled for [flush_dirty]. The detail names the write failures. *)
+
+val delete_post :
+  store -> post_id:string -> (deletion_outcome, board_error) Result.t
+(** Removes the post and every comment under it from the
+    in-memory store, then rewrites the posts, comments, vote
+    and reaction snapshots without them.  Refused with
+    [Io_error], before anything changes, while any of those
+    four stores did not load fully: the rewrite would delete
+    the rows memory never held (#38595). [Error] always means no deletion
+    was applied. Once applied, [Ok Durable_deletion] means all four rewrites
+    succeeded; [Ok (Deletion_persistence_pending detail)] keeps the applied
+    transition distinct from a refused write. Retrying deletion is not a
+    persistence retry: the post is already absent; [flush_dirty] retries the
+    failed snapshots. *)
+
+(** {1 Global store + lifecycle} *)
+
+val global : unit -> store
+(** Lazy singleton.  First call constructs the store via
+    {!create_store}, then runs the five loaders
+    ([load_persisted_posts] / [_comments] / [_votes] / reactions / sub-boards +
+    [recalculate_reply_counts]) under
+    [Eio.Lazy.from_fun ~cancel:`Protect] so a cancelled
+    fiber cannot leave the singleton half-initialised. *)
+
+val reset_global_for_test : unit -> unit
+(** Reinstalls a fresh lazy singleton.  Safe to call only
+    from test setup before concurrent fibers exist. *)
+
+val flush_dirty : store -> unit
+(** Atomically replaces each dirty post/comment snapshot independently.
+    Captures data under the state lock and serializes snapshot writers with
+    the persistence lock. If either table is dirty, also compacts readable
+    vote/reaction ledgers. Failed writes remain scheduled for a later flush.
+    Stamps [last_flush] with the wall clock. *)
+
+(** {1 Karma} *)
+
+(** A single attributed karma event.  One event is generated per upvote
+    received by an agent.  Downvotes do not generate karma events
+    (scoring rule: [Up] = +1, [Down] = 0). *)
+type karma_event = {
+  recipient : string;
+  (** Agent who earned the karma — author of the upvoted post or comment. *)
+  voter : string;
+  (** Agent who cast the upvote. *)
+  target_kind : Board_vote_key.target_kind;
+  (** The upvoted content's kind, read off the vote key. *)
+  target_id : string;
+  (** Identifier of the upvoted post or comment. *)
+  delta : int;
+  (** Karma delta.  Always [+1] per upvote under the current scoring
+      contract.  Stored explicitly so future rule changes are backward
+      compatible — older events keep their original delta value. *)
+  ts : float;
+  (** Unix timestamp at which the upvote was cast (seconds since epoch). *)
+}
+
+val karma_score_for_direction : vote_direction -> int
+(** Scoring contract: [Up] → [+1], [Down] → [0].
+    This is the single source of truth for karma scoring.
+    Replay and rebuild operations must use this function so that
+    a scoring-rule change takes effect everywhere simultaneously. *)
+
+val build_karma_ledger : store -> karma_event list
+(** Rebuild the full karma ledger from the in-memory vote log and
+    author tables.  One {!karma_event} is emitted per [Up] vote
+    whose target post/comment still exists in the store and whose
+    voter differs from the content author.
+
+    The function:
+    - Holds the store lock for the duration of the snapshot.
+    - Returns events sorted ascending by [ts] (oldest first) so
+      callers can replay them in chronological order.
+    - Silently drops votes whose target has since been deleted
+      (content gone, vote orphan — not an error).
+    - Excludes self-upvotes from karma. The board score can still
+      record a self-vote, but reputation is peer recognition only.
+
+    Replay contract: [totals_of_karma_ledger (build_karma_ledger s)]
+    must equal the output of [get_all_karma s]. *)
+
+val totals_of_karma_ledger : karma_event list -> (string * int) list
+(** Aggregate [(recipient, total_karma)] pairs from a ledger.
+    Sorted descending by total (highest karma first).
+    Complement to {!build_karma_ledger} for the rebuild path. *)
+
+val karma_event_to_yojson : karma_event -> Yojson.Safe.t
+(** JSON serialiser for a single karma event.  Wire format:
+    [{recipient, voter, target_kind, target_id, delta, ts, ts_iso}].
+    [ts_iso] is RFC-3339 UTC (["YYYY-MM-DDTHH:MM:SSZ"]). *)
+
+val get_agent_karma : store -> agent_name:string -> int
+(** Returns the karma projection for [agent_name] from the same
+    ledger-backed totals used by {!get_all_karma}.  Self-upvotes are
+    excluded. *)
+
+val get_all_karma : store -> (string * int) list
+(** Returns [(agent_name, total_peer_upvotes)] for every author in
+    the store by replaying the karma ledger.  Memoised in
+    [store.karma_cache] —
+    {!invalidate_post_caches} and
+    {!invalidate_comment_caches} clear the entry on every
+    relevant mutation. *)
+
+(** {1 Flair} *)
+
+val available_flairs : (string * string * string) list
+(** Curated flair catalogue.  Each entry is
+    [(name, emoji, label)] (e.g. [("insight", "💡",
+    "Insight")]).  Consumed by the dashboard badge renderer
+    and by {!flair_to_yojson} when serialising a
+    karma-enriched post. *)
+
+val flair_to_yojson :
+  string * string * string -> Yojson.Safe.t
+(** Wire encoder for a single flair entry.  Emits
+    [`Assoc [("name", _); ("emoji", _); ("label", _)]]. *)
+
+val post_to_yojson_with_karma :
+  post -> author_karma:int -> Yojson.Safe.t
+(** Karma-enriched serialiser used by the dashboard:
+    extends {!post_to_yojson} with [author_karma],
+    caller-supplied [classification_reason] when present in metadata,
+    extracted [flair], and a
+    pre-computed [score = votes_up - votes_down] so the
+    client does not have to derive it. *)

@@ -1,0 +1,181 @@
+Raw workflow log SHA256: 532bfaeedf39a8d6304939ce1d56837d2769bcc34554267a78f58ec419dc38f9
+Source: https://github.com/jeong-sik/masc/actions/runs/40218005191
+
+test suite	Checkout	2026-10-25T17:45:51.5596800Z HEAD is now at f040ae31 test(minimax): inspect omitted reasoning without dereferencing null
+test suite	Test	2026-10-25T17:47:03.1083167Z ASSERT native provider requires explicit credentials
+test suite	Test	2026-10-25T17:47:03.1083788Z ASSERT declared native endpoint
+test suite	Test	2026-10-25T17:47:03.1084215Z ASSERT declared Responses route
+test suite	Test	2026-10-25T17:47:03.1084688Z ASSERT dedicated Responses plaintext declaration
+test suite	Test	2026-10-25T17:47:03.1085285Z ASSERT native producer and consumer contract agree
+test suite	Test	2026-10-25T17:47:03.1091272Z ASSERT sync reasoning/call/result/user order
+test suite	Test	2026-10-25T17:47:03.1091904Z ASSERT sync full reasoning reaches documented summary input
+test suite	Test	2026-10-25T17:47:03.1092337Z ASSERT sync original call identity
+test suite	Test	2026-10-25T17:47:03.1092619Z ASSERT sync tool result identity
+test suite	Test	2026-10-25T17:47:03.1093090Z ASSERT sync later human input retained
+test suite	Test	2026-10-25T17:47:03.1095589Z ASSERT SSE reasoning/call/result/user order
+test suite	Test	2026-10-25T17:47:03.1096195Z ASSERT SSE full reasoning reaches documented summary input
+test suite	Test	2026-10-25T17:47:03.1096739Z ASSERT SSE original call identity
+test suite	Test	2026-10-25T17:47:03.1097010Z ASSERT SSE tool result identity
+test suite	Test	2026-10-25T17:47:03.1097273Z ASSERT SSE later human input retained
+test suite	Test	2026-10-25T17:47:03.1103778Z ASSERT documented automatic tool choice
+test suite	Test	2026-10-25T17:47:03.1104481Z ASSERT undocumented forcing rejected before HTTP
+test suite	Test	2026-10-25T17:47:03.1105123Z ASSERT undocumented forcing rejected before HTTP
+test suite	Test	2026-10-25T17:47:03.1105797Z ASSERT tool-free request emits no undocumented none value
+test suite	Test	2026-10-25T17:47:03.1106456Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1107263Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1107990Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1108729Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1109812Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1110547Z ASSERT model-specific effort boundary
+test suite	Test	2026-10-25T17:47:03.1111110Z ASSERT model-specific effort boundary
+test suite	Test	2026-10-25T17:47:03.1111792Z ASSERT explicit disable follows the declared control semantics
+test suite	Test	2026-10-25T17:47:03.1112924Z   [OK]          native models            0   MiniMax-M3.
+test suite	Test	2026-10-25T17:47:03.1113623Z ASSERT native provider requires explicit credentials
+test suite	Test	2026-10-25T17:47:03.1114277Z ASSERT declared native endpoint
+test suite	Test	2026-10-25T17:47:03.1114791Z ASSERT declared Responses route
+test suite	Test	2026-10-25T17:47:03.1115351Z ASSERT dedicated Responses plaintext declaration
+test suite	Test	2026-10-25T17:47:03.1116022Z ASSERT native producer and consumer contract agree
+test suite	Test	2026-10-25T17:47:03.1120098Z ASSERT sync reasoning/call/result/user order
+test suite	Test	2026-10-25T17:47:03.1120757Z ASSERT sync full reasoning reaches documented summary input
+test suite	Test	2026-10-25T17:47:03.1121377Z ASSERT sync original call identity
+test suite	Test	2026-10-25T17:47:03.1121855Z ASSERT sync tool result identity
+test suite	Test	2026-10-25T17:47:03.1122336Z ASSERT sync later human input retained
+test suite	Test	2026-10-25T17:47:03.1125315Z ASSERT SSE reasoning/call/result/user order
+test suite	Test	2026-10-25T17:47:03.1125863Z ASSERT SSE full reasoning reaches documented summary input
+test suite	Test	2026-10-25T17:47:03.1126394Z ASSERT SSE original call identity
+test suite	Test	2026-10-25T17:47:03.1127037Z ASSERT SSE tool result identity
+test suite	Test	2026-10-25T17:47:03.1127442Z ASSERT SSE later human input retained
+test suite	Test	2026-10-25T17:47:03.1127896Z ASSERT documented automatic tool choice
+test suite	Test	2026-10-25T17:47:03.1128393Z ASSERT undocumented forcing rejected before HTTP
+test suite	Test	2026-10-25T17:47:03.1128923Z ASSERT undocumented forcing rejected before HTTP
+test suite	Test	2026-10-25T17:47:03.1129772Z ASSERT tool-free request emits no undocumented none value
+test suite	Test	2026-10-25T17:47:03.1130458Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1131166Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1131870Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1132563Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1133258Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T17:47:03.1133865Z ASSERT model-specific effort boundary
+test suite	Test	2026-10-25T17:47:03.1134342Z ASSERT model-specific effort boundary
+test suite	Test	2026-10-25T17:47:03.1134942Z ASSERT explicit disable follows the declared control semantics
+test suite	Test	2026-10-25T17:47:03.1135595Z   [OK]          native models            1   MiniMax-M3.1-Flash.
+test suite	Test	2026-10-25T17:47:03.1136026Z ASSERT native provider requires explicit credentials
+test suite	Test	2026-10-25T17:47:03.1136581Z ASSERT declared native endpoint
+test suite	Test	2026-10-25T17:47:03.1137029Z ASSERT declared Responses route
+test suite	Test	2026-10-25T17:47:03.1137484Z ASSERT full public admission
+test suite	Test	2026-10-25T17:47:03.1137926Z ASSERT omitted depth stays omitted
+test suite	Test	2026-10-25T17:47:03.1138319Z ASSERT M3 enable requires a non-none effort
+test suite	Test	2026-10-25T17:47:03.1138608Z ASSERT full public admission
+test suite	Test	2026-10-25T17:47:03.1138869Z ASSERT M3 explicit enable carries its effort
+test suite	Test	2026-10-25T17:47:03.1139453Z ASSERT full public admission
+test suite	Test	2026-10-25T17:47:03.1139729Z ASSERT omitted depth stays omitted
+test suite	Test	2026-10-25T17:47:03.1140029Z ASSERT M3 enable requires a non-none effort
+test suite	Test	2026-10-25T17:47:03.1140376Z ASSERT full public admission
+test suite	Test	2026-10-25T17:47:03.1140704Z ASSERT M3 explicit enable carries its effort
+test suite	Test	2026-10-25T17:47:03.1141036Z   [OK]          default control          0   MiniMax-M3.
+test suite	Test	2026-10-25T17:47:03.1141382Z ASSERT native provider requires explicit credentials
+test suite	Test	2026-10-25T17:47:03.1141700Z ASSERT declared native endpoint
+test suite	Test	2026-10-25T17:47:03.1141961Z ASSERT declared Responses route
+test suite	Test	2026-10-25T17:47:03.1142204Z ASSERT full public admission
+test suite	Test	2026-10-25T17:47:03.1142447Z ASSERT omitted depth stays omitted
+test suite	Test	2026-10-25T17:47:03.1142700Z ASSERT full public admission
+test suite	Test	2026-10-25T17:47:03.1143552Z ASSERT default-on enable does not invent a depth
+test suite	Test	2026-10-25T17:47:03.1144050Z ASSERT no competing thinking object
+test suite	Test	2026-10-25T17:47:03.1144543Z ASSERT unsupported M3.1 effort fails full admission
+test suite	Test	2026-10-25T17:47:03.1145113Z ASSERT unsupported M3.1 effort fails full admission
+test suite	Test	2026-10-25T17:47:03.1145618Z ASSERT M3.1 cannot disable thinking
+test suite	Test	2026-10-25T17:47:03.1146065Z ASSERT full public admission
+test suite	Test	2026-10-25T17:47:03.1146476Z ASSERT omitted depth stays omitted
+test suite	Test	2026-10-25T17:47:03.1146922Z ASSERT full public admission
+test suite	Test	2026-10-25T17:47:03.1147380Z ASSERT default-on enable does not invent a depth
+test suite	Test	2026-10-25T17:47:03.1147888Z ASSERT no competing thinking object
+test suite	Test	2026-10-25T17:47:03.1148358Z ASSERT unsupported M3.1 effort fails full admission
+test suite	Test	2026-10-25T17:47:03.1148857Z ASSERT unsupported M3.1 effort fails full admission
+test suite	Test	2026-10-25T17:47:03.1149457Z ASSERT M3.1 cannot disable thinking
+test suite	Test	2026-10-25T17:47:03.1149776Z   [OK]          default control          1   MiniMax-M3.1-Flash.
+test suite	Test	2026-10-25T17:47:03.1150125Z Test Successful in 0.029s. 4 tests run.
+test suite	Test	2026-10-25T17:47:03.1699795Z ASSERT full output content retained
+test suite	Test	2026-10-25T17:47:03.1705777Z ASSERT reasoning, call, result, later user order
+test suite	Test	2026-10-25T17:47:03.1706439Z ASSERT full text mapped to documented input summary
+test suite	Test	2026-10-25T17:47:03.1707046Z ASSERT tool call ID
+test suite	Test	2026-10-25T17:47:03.1707654Z ASSERT result call ID
+test suite	Test	2026-10-25T17:47:03.1708229Z ASSERT later user content
+test suite	Test	2026-10-25T17:47:03.1709369Z   [OK]          public history          0   full content through tool and lat...
+test suite	Test	2026-10-25T17:47:03.1710557Z ASSERT full reasoning takes precedence over condensation
+test suite	Test	2026-10-25T17:47:03.1713384Z ASSERT full reasoning replayed once
+test suite	Test	2026-10-25T17:47:03.1713708Z ASSERT one reasoning, one visible answer
+test suite	Test	2026-10-25T17:47:03.1714117Z   [OK]          public history          1   full text precedes summary.
+test suite	Test	2026-10-25T17:47:03.1714723Z ASSERT existing summary retained
+test suite	Test	2026-10-25T17:47:03.1717298Z ASSERT summary replay unchanged
+test suite	Test	2026-10-25T17:47:03.1717869Z   [OK]          public history          2   existing summary control.
+test suite	Test	2026-10-25T17:47:03.1718438Z ASSERT blank full text permits summary
+test suite	Test	2026-10-25T17:47:03.1718819Z   [OK]          public history          3   blank full content fallback.
+test suite	Test	2026-10-25T17:47:03.1719790Z ASSERT entire opaque item unchanged
+test suite	Test	2026-10-25T17:47:03.1722728Z ASSERT opaque replay unchanged
+test suite	Test	2026-10-25T17:47:03.1723182Z   [OK]          public history          4   opaque carrier control.
+test suite	Test	2026-10-25T17:47:03.1723552Z ASSERT distinct native items retain order
+test suite	Test	2026-10-25T17:47:03.1726093Z ASSERT native item order after persistence
+test suite	Test	2026-10-25T17:47:03.1726477Z   [OK]          public history          5   multiple native reasoning items.
+test suite	Test	2026-10-25T17:47:03.1726861Z ASSERT blank encrypted content is not opaque
+test suite	Test	2026-10-25T17:47:03.1727211Z   [OK]          public history          6   blank encrypted content.
+test suite	Test	2026-10-25T17:47:03.1727620Z ASSERT extensible parts do not discard recognized text
+test suite	Test	2026-10-25T17:47:03.1728028Z   [OK]          public history          7   unknown content extensions.
+test suite	Test	2026-10-25T17:47:03.1730152Z ASSERT malformed recognized text fails closed
+test suite	Test	2026-10-25T17:47:03.1730641Z   [OK]          public history          8   malformed recognized text.
+test suite	Test	2026-10-25T17:47:03.1731020Z ASSERT malformed content carrier fails closed
+test suite	Test	2026-10-25T17:47:03.1731378Z   [OK]          public history          9   malformed content carrier.
+test suite	Test	2026-10-25T17:47:03.1989536Z ASSERT existing OpenAI policy still excludes plaintext
+test suite	Test	2026-10-25T17:47:03.1990636Z   [OK]          public history         10   OpenAI opaque policy control.
+test suite	Test	2026-10-25T17:47:03.1991668Z ASSERT stamped source and request contract agree
+test suite	Test	2026-10-25T17:47:03.1992374Z ASSERT stamped source and request contract agree
+test suite	Test	2026-10-25T17:47:03.1993165Z   [OK]          public history         11   producer consumer contract identity.
+test suite	Test	2026-10-25T17:47:03.1994068Z ASSERT Responses-only option leaves other protocol defaults
+test suite	Test	2026-10-25T17:47:03.1994620Z ASSERT Responses-only option leaves other protocol defaults
+test suite	Test	2026-10-25T17:47:03.1995170Z ASSERT Responses-only option leaves other protocol defaults
+test suite	Test	2026-10-25T17:47:03.1995703Z ASSERT Responses-only option leaves other protocol defaults
+test suite	Test	2026-10-25T17:47:03.1996246Z   [OK]          public history         12   other protocol default controls.
+test suite	Test	2026-10-25T17:47:03.1996818Z ASSERT Chat preserve-always cannot opt Responses into plaintext
+test suite	Test	2026-10-25T17:47:03.1997399Z   [OK]          public history         13   Chat override cannot activate Res...
+test suite	Test	2026-10-25T17:47:03.1997943Z ASSERT public manifest parses dedicated typed policy
+test suite	Test	2026-10-25T17:47:03.1998453Z   [OK]          public history         14   public manifest declaration.
+test suite	Test	2026-10-25T17:47:03.2006815Z ASSERT plaintext admission does not rotate opaque tokens
+test suite	Test	2026-10-25T17:47:03.2007234Z   [OK]          public history         15   opaque endpoint binding.
+test suite	Test	2026-10-25T17:47:03.2007602Z Test Successful in 0.029s. 16 tests run.
+test suite	Test	2026-10-25T17:47:03.2561220Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2561661Z ASSERT sync/SSE canonical parity
+test suite	Test	2026-10-25T17:47:03.2568302Z ASSERT reasoning/call/result/later-user after persistence
+test suite	Test	2026-10-25T17:47:03.2569547Z ASSERT full input reasoning
+test suite	Test	2026-10-25T17:47:03.2570274Z   [OK]          public SSE          0   full history.
+test suite	Test	2026-10-25T17:47:03.2571102Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2576446Z   [OK]          public SSE          1   summary then full.
+test suite	Test	2026-10-25T17:47:03.2577032Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2577570Z   [OK]          public SSE          2   full then summary.
+test suite	Test	2026-10-25T17:47:03.2578176Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2578720Z   [OK]          public SSE          3   summary-only control.
+test suite	Test	2026-10-25T17:47:03.2579595Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2580109Z   [OK]          public SSE          4   part ordering.
+test suite	Test	2026-10-25T17:47:03.2580687Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2581237Z   [OK]          public SSE          5   repeated boundaries.
+test suite	Test	2026-10-25T17:47:03.2581808Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2582319Z   [OK]          public SSE          6   item done without output.
+test suite	Test	2026-10-25T17:47:03.2591070Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2591757Z   [OK]          public SSE          7   delta without output.
+test suite	Test	2026-10-25T17:47:03.2592461Z   [OK]          public SSE          8   conflict.
+test suite	Test	2026-10-25T17:47:03.2593025Z   [OK]          public SSE          9   truncation.
+test suite	Test	2026-10-25T17:47:03.2593580Z   [OK]          public SSE         10   explicit empty.
+test suite	Test	2026-10-25T17:47:03.2594030Z   [OK]          public SSE         11   missing item.
+test suite	Test	2026-10-25T17:47:03.2594431Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2594740Z   [OK]          public SSE         12   omitted channel.
+test suite	Test	2026-10-25T17:47:03.2595051Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2595344Z   [OK]          public SSE         13   whitespace then full.
+test suite	Test	2026-10-25T17:47:03.2595891Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2596159Z   [OK]          public SSE         14   Unicode chunks.
+test suite	Test	2026-10-25T17:47:03.2596467Z ASSERT canonical reasoning
+test suite	Test	2026-10-25T17:47:03.2596753Z   [OK]          public SSE         15   multiple native items.
+test suite	Test	2026-10-25T17:47:03.2597080Z ASSERT opaque exact
+test suite	Test	2026-10-25T17:47:03.2597346Z   [OK]          public SSE         16   opaque transition.
+test suite	Test	2026-10-25T17:47:03.2597687Z   [OK]          public SSE         17   opaque conflict.
+test suite	Test	2026-10-25T17:47:03.2598022Z   [OK]          public SSE         18   late plaintext.
+test suite	Test	2026-10-25T17:47:03.2598353Z   [OK]          public SSE         19   item identity.
+test suite	Test	2026-10-25T17:47:03.2598692Z   [OK]          public SSE         20   signed thinking guard.
+test suite	Test	2026-10-25T17:47:03.2599301Z   [OK]          public SSE         21   wrong block guard.
+test suite	Test	2026-10-25T17:47:03.2599769Z Test Successful in 0.002s. 22 tests run.

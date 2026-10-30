@@ -1,0 +1,33 @@
+{
+  "captured_at": "2026-08-19T07:20:00Z",
+  "purpose": "Tool 행 — 도구 표면이 매 턴 차지하는 컨텍스트 비용과 실사용률",
+  "context": "소스에 박힌 모델용 텍스트를 외부로 뺄지 검토하다 측정. tool-schema description이 가장 큰 덩어리(163문장 16.3KB)여서, 실제로 얼마가 서빙되고 얼마가 쓰이는지 먼저 쟀다.",
+  "served_surface": {
+    "source": "MCP tools/list (codex-mcp-client 자격)",
+    "tools": 44,
+    "description_bytes_total": 2969,
+    "input_schema_bytes_total": 27136,
+    "reading": "설명문(2.9KB)보다 inputSchema(26.5KB)가 9배 크다. 프롬프트 엔지니어링 대상으로 보이는 산문은 표면 비용의 10%에 불과하고, 나머지는 타입 구조다."
+  },
+  "keeper_usage": {
+    "source": "<base-path>/.masc/tool_calls/2026-08/*.jsonl",
+    "distinct_tools_called": 102,
+    "total_calls": 122252,
+    "keepers": 67,
+    "top": {
+      "keeper_tasks_list": 22058,
+      "keeper_artifact_read": 17960,
+      "Execute": 17938,
+      "keeper_board_list": 8626,
+      "masc_board_list": 8335,
+      "Read": 7383
+    }
+  },
+  "store_scope_caveat": {
+    "finding": "tool_calls 스토어는 keeper 턴의 호출만 기록한다. 외부 MCP 클라이언트 호출은 들어가지 않는다.",
+    "evidence": "masc_broadcast·masc_keeper_msg·masc_tasks의 스토어 기록이 각각 0건인데, 이 세션에서 외부 MCP 클라이언트로 masc_broadcast를 실제 호출해 응답(seq 1824)을 받았다.",
+    "consequence": "'서빙되지만 미사용' 판정을 이 스토어만으로 내리면 외부 클라이언트 전용 도구가 전부 미사용으로 오분류된다. 7종(masc_board_curation_read/submit, masc_broadcast, masc_keeper_msg, masc_messages, masc_start, masc_tasks)이 그 형태이며, 이들은 keeper 턴이 아니라 운영자·외부 에이전트 표면이다."
+  },
+  "verdict": "도구 표면 비용은 44종 29.5KB이고 keeper는 그중 대부분을 실제로 쓴다(102종 호출은 keeper 전용 도구를 포함한 수). 프롬프트 외부화 관점에서 중요한 것은 산문 2.9KB가 아니라 타입 구조 26.5KB이며, 후자는 코드와 분리할 수 없다.",
+  "implication_for_externalization": "소스 프롬프트를 0으로 만드는 목표에서 tool-schema description은 제외하는 편이 낫다. 설명은 스키마와 한 몸이고(인자 추가 시 함께 바뀐다), 분리하면 타입과 설명이 어긋날 위험만 생기며, 절감되는 표면은 전체의 10%다."
+}

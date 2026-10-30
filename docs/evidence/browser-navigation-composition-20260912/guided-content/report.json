@@ -1,0 +1,257 @@
+{
+  "scope": "isolated three-channel website; experimental MASC callable composition joins navigation with unscoped visible content; persistent native TUI",
+  "steps": [
+    {
+      "label": "01-open",
+      "status": 200,
+      "elapsed_ms": 1425.92,
+      "request": {
+        "action": "open",
+        "headless": true
+      }
+    },
+    {
+      "label": "02-goto",
+      "status": 200,
+      "elapsed_ms": 112.44,
+      "request": {
+        "url": "http://127.0.0.1:53872/index.html"
+      }
+    },
+    {
+      "label": "03-page",
+      "status": 200,
+      "elapsed_ms": 9.81,
+      "request": {
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "04-regions",
+      "status": 200,
+      "elapsed_ms": 6.81,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "regions"
+      }
+    },
+    {
+      "label": "05-selected-region",
+      "status": 200,
+      "elapsed_ms": 6.6,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "content",
+        "scope": {
+          "documentId": "5147363cbfea94838af1cad7e4eb8e25",
+          "nodeId": "n1"
+        }
+      }
+    },
+    {
+      "label": "06-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 19.72,
+      "request": {
+        "lane": "automation",
+        "tabId": 1
+      }
+    },
+    {
+      "label": "14-final-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 18.24,
+      "request": {
+        "lane": "automation",
+        "tabId": 1
+      }
+    },
+    {
+      "label": "06-close",
+      "status": 200,
+      "elapsed_ms": 313.82,
+      "request": {
+        "action": "close"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "keeper_shutdown_admission": {
+        "accepted": true,
+        "schema_version": 8,
+        "revision": 0,
+        "operation_id": "shutdown-fef037b9-c180-43de-94a1-c5d3a2679de6",
+        "keeper_name": "browser-handoff-proof-43795000",
+        "lane_ownership": {
+          "kind": "registered_lane",
+          "lane_id": "lane-f3c23aff-adbd-4607-8640-ee5ee3162a5c"
+        },
+        "trace_id": "trace-1789223858523-00000",
+        "actor": "browser-handoff-proof",
+        "cleanup_intent": {
+          "reason": {
+            "kind": "operator_stop_retain_meta"
+          },
+          "remove_session": false
+        },
+        "turn_disposition": {
+          "kind": "no_inflight_turn"
+        },
+        "expected_backlog_version": 1,
+        "owned_task_ids": [],
+        "join_evidence": null,
+        "phase": {
+          "kind": "prepared"
+        },
+        "created_at": "2026-09-12T14:38:14Z",
+        "updated_at": "2026-09-12T14:38:14Z"
+      }
+    },
+    {
+      "keeper_shutdown_finalized": true
+    },
+    "owned browser session closed",
+    {
+      "name": "server",
+      "pid": 61830,
+      "exit": 0
+    },
+    {
+      "name": "driver",
+      "pid": 61698,
+      "exit": 0
+    }
+  ],
+  "composition_file_sha256": "a1c3189c8cf1178ad2daaa9b81aefd45d70048cf3f11e5f564964a960d462514",
+  "instruction_sha256": "dff25891c9c85f49cc37caf3f0e9ac7732f4056cf43e1fde172172827f3467ef",
+  "runtime_id": "codex_subscription.gpt-5.6-luna",
+  "build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "cd7f637eca4ce164552fafc47051fb70579c91dd",
+    "commit_source": "embedded",
+    "binary_commit": "cd7f637eca4ce164552fafc47051fb70579c91dd",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "08f3ce42a9ebbf2c5dc2f14e50dd390e45c8c0cdf0c59f4218168ef591525e7d",
+    "binary_commit_unix_ts": 1789221166.0,
+    "binary_commit_age_seconds": 2690,
+    "executable_path": "/private/tmp/browser-composition-native-cd7/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-composition-native-cd7/runtime",
+    "runtime_instance_id": "01a0960d-65e8-7000-8a2f-29a3379633c8",
+    "started_at": "2026-09-12T14:37:35Z",
+    "uptime_seconds": 0
+  },
+  "binary_sha256": "08f3ce42a9ebbf2c5dc2f14e50dd390e45c8c0cdf0c59f4218168ef591525e7d",
+  "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+  "api_port": 53853,
+  "driver_port": 53852,
+  "assertions": {
+    "selected_region_retained": true,
+    "channel_navigation_present": true,
+    "sidebar_excluded": true
+  },
+  "observed_content": "Channels Alpha Beta Gamma",
+  "clipboard": {
+    "tui_sha256": "821a88fe8299a0e367496adff2e65ddaafd3af6f6de9be4c0c5712e9a5a6d781",
+    "clipboard_bytes": 526,
+    "clipboard_sha256": "c394698acd2ff946dc2a791dadef1960704946c2ef97bae86eb8bd4e2d8681c9",
+    "columns": 130,
+    "rows": 35,
+    "selected_region_index": 0,
+    "lifetime": {
+      "columns": 130,
+      "rows": 35,
+      "input_events": [
+        {
+          "monotonic": 967309.431307833,
+          "keys_hex": "3a676f2042726f77736572204c616e650d"
+        },
+        {
+          "monotonic": 967309.449008208,
+          "keys_hex": "61"
+        },
+        {
+          "monotonic": 967309.468092333,
+          "keys_hex": "76"
+        },
+        {
+          "monotonic": 967309.485728375,
+          "keys_hex": "79"
+        },
+        {
+          "monotonic": 967309.486582125,
+          "keys_hex": "73"
+        },
+        {
+          "monotonic": 967309.502287541,
+          "keys_hex": "73"
+        }
+      ],
+      "refresh_interval": "unmodified product default",
+      "pid": 63388,
+      "started_monotonic": 967309.105420666,
+      "binary_sha256": "821a88fe8299a0e367496adff2e65ddaafd3af6f6de9be4c0c5712e9a5a6d781",
+      "copied_monotonic": 967309.486561916,
+      "copy_offset": 19156,
+      "alive_at_copy": true,
+      "display_selected_monotonic": 967309.51890125,
+      "display_intent": "unscoped content selected before Keeper starts",
+      "keeper_observation_finished_monotonic": 967345.348926791,
+      "alive_after_keeper_observation": true,
+      "exit": 0,
+      "stopped_monotonic": 967345.400446791,
+      "capture_errors": []
+    }
+  },
+  "keeper": "browser-handoff-proof-43795000",
+  "turn_started_monotonic": 967309.739220916,
+  "operation_id": "kmsg-1e78dbb99e758c985dba4739763edb30",
+  "operation_state": "Succeeded",
+  "turn_observed_elapsed_seconds": 35.537,
+  "model_tool_calls": [
+    {
+      "id": "exec-03b9f943-e861-4221-9196-c37a6e0f9c4a",
+      "name": "keeper_skill",
+      "execution_id": "exec-1789223872687-0001",
+      "success": true
+    },
+    {
+      "id": "exec-b124bda6-180d-48f4-ba56-16e41fbef4b7",
+      "name": "keeper_skill",
+      "execution_id": "exec-1789223872704-0002",
+      "success": true
+    },
+    {
+      "id": "exec-fddf9770-f286-4941-a1ee-24fa2f81d191",
+      "name": "BrowserRead",
+      "execution_id": "exec-1789223876297-0003",
+      "success": true
+    },
+    {
+      "id": "exec-6515777e-15e3-40f1-9750-65240d7ff5cc",
+      "name": "keeper_compose_browser-navigate-content",
+      "execution_id": "exec-1789223879381-0006",
+      "success": true
+    },
+    {
+      "id": "exec-d24a42ee-aa24-486f-a04a-03a46f45e824",
+      "name": "keeper_compose_browser-navigate-content",
+      "execution_id": "exec-1789223882080-0009",
+      "success": true
+    },
+    {
+      "id": "exec-fbee28c6-2d50-4982-b2a8-48f9969f3765",
+      "name": "keeper_compose_browser-navigate-content",
+      "execution_id": "exec-1789223884702-000c",
+      "success": true
+    }
+  ],
+  "composition_invocations": 3,
+  "chat_envelope_tool_calls": [],
+  "model_tool_calls_measurement": "typed turn execution_ids joined to durable tool_call records",
+  "result": "operation_completed_pending_evidence_audit"
+}

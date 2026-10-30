@@ -1,0 +1,13 @@
+{
+  "source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+  "keeper_shutdown_finalized": true,
+  "queued_operations": 0,
+  "explicit_browser_detach": "native_released",
+  "sdk_space": 14,
+  "sdk_space_after_detach": "not found",
+  "worker_pid": 93968,
+  "sdk_pid": 93978,
+  "worker_and_sdk_pids_after_detach": "absent",
+  "manual_sdk_signal_needed_on_final_detach": false,
+  "scope": "normal explicit retirement succeeded; does not establish root cause or repair of earlier host-SIGINT orphan"
+}

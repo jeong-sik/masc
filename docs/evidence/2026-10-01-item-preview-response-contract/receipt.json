@@ -1,0 +1,131 @@
+{
+  "source_commit": "d826db43d3af688d2b31795113f0d06f29ae1ca5",
+  "base_commit": "31b6bdfa9ec22e839e56522cd21c0e8788845d1b",
+  "result": "PASS",
+  "command": "node e2e/keeper-items.mjs",
+  "source_sha256": {
+    "dashboard/e2e/keeper-items.mjs": "064628140a0838a9f04e5527c3683976cba2ff6c041c291531fd8fcc1104281a",
+    "dashboard/src/components/keeper-portrait.ts": "443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8",
+    "dashboard/src/components/keeper-items-panel.ts": "bc6fce45474fc2deb5992caecc424611cfbe3949fe666b6087abd7ab2553a6d1"
+  },
+  "browser_manifest": {
+    "scope": "production Item component in a controlled browser fixture; synthetic account and roster revisions",
+    "source_sha": "d826db43d3af688d2b31795113f0d06f29ae1ca5",
+    "browser_version": "149.0.7827.55",
+    "requests": [
+      {
+        "failed": false,
+        "owned_items": [
+          "crown"
+        ]
+      },
+      {
+        "failed": false,
+        "owned_items": [
+          "crown",
+          "glasses"
+        ]
+      },
+      {
+        "failed": false,
+        "owned_items": [
+          "crown",
+          "glasses"
+        ]
+      },
+      {
+        "failed": true,
+        "owned_items": [
+          "crown",
+          "glasses"
+        ]
+      },
+      {
+        "failed": false,
+        "owned_items": [
+          "crown",
+          "glasses"
+        ]
+      }
+    ],
+    "portrait_requests": [
+      {
+        "keeper": "rondo",
+        "size": "224",
+        "preview": null
+      },
+      {
+        "keeper": "rondo",
+        "size": "224",
+        "preview": "beanie"
+      },
+      {
+        "keeper": "rondo",
+        "size": "224",
+        "preview": null
+      },
+      {
+        "keeper": "rondo",
+        "size": "224",
+        "preview": null
+      },
+      {
+        "keeper": "rondo",
+        "size": "224",
+        "preview": null
+      },
+      {
+        "keeper": "rondo",
+        "size": "224",
+        "preview": null
+      }
+    ],
+    "restoration": "held observed request released and settled to intended badge fallback",
+    "captures": [
+      {
+        "name": "keeper-items-desktop",
+        "sha256": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c"
+      },
+      {
+        "name": "keeper-items-preview-unavailable",
+        "sha256": "75fce85f7451b2173bc13c8da824522967bc599d70733f8ba2ba120d86cf2d39"
+      },
+      {
+        "name": "keeper-items-preview-restored",
+        "sha256": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c"
+      },
+      {
+        "name": "keeper-items-mobile",
+        "sha256": "76ade8fb9c4b644bf2b8d3b068ccb601fe1ebdf4203d4c74164524a1d000b55d"
+      },
+      {
+        "name": "keeper-items-loading",
+        "sha256": "d445aa6e575ee7bee498b6147168fe7ff8bcb496e58d1c306c2d35fdc61ca104"
+      },
+      {
+        "name": "keeper-items-free-purchase",
+        "sha256": "841edccc23ee33b059d0b46600bb250ac910f48751cd64ef472f27667d5f13c9"
+      },
+      {
+        "name": "keeper-items-price-change",
+        "sha256": "b7e635786f0ab05b95330db86aeb2a975aa5ff17060a722af0e1933b662acc41"
+      },
+      {
+        "name": "keeper-items-unavailable",
+        "sha256": "d6ec71175cbbf2af2b84b8840d10c9adf63f7998397ac7e635d5febb4ac87872"
+      },
+      {
+        "name": "keeper-items-recovered",
+        "sha256": "9484e31829ca4f02cf4bafc0eb6a8acf8a1916beabde947338e0246bf94107c9"
+      }
+    ],
+    "errors": []
+  },
+  "scope": "Actual Chromium through local Vite with production components and synthetic account/portrait HTTP. Portrait503 deliberately settles to badge fallback; no native PNG or installed proof. Screens retained only in local artifact directory, not committed here.",
+  "artifact_directory": "/private/tmp/40461-browser-contract-proof-current",
+  "discarded_attempts": [
+    "Initial cold Vite dependency reload produced six account reads and failed the existing exact-five assertion. After optimization the scenario passed; no assertion weakened.",
+    "One later run supplied an abbreviated source SHA; excluded in favor of the retained rerun with full git rev-parse HEAD."
+  ],
+  "build_or_ci_started": false
+}

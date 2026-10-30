@@ -1,0 +1,68 @@
+(include_subdirs no)
+
+(library
+ (name fs_compat_internal)
+ (package masc)
+ (wrapped true)
+ (modules
+  mkdir_memo
+  fd_cache
+  owned_directory_chain
+  owned_tree_cleanup
+  retention_directory
+  capability_leaf
+  capability_mutation_lease
+  eio_resource_scope
+  capability_recovery_obligation
+  capability_recovery_reconciler
+  publication_recovery_access
+  atomic_temp_name
+  atomic_orphan_cleanup
+  atomic_replace
+  atomic_write
+  blocking_write
+  execution_context
+  fd_write_all
+  atomic_orphan_size_class)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries eio eio.unix unix yojson uuidm  masc.agent_core.digest optint cstruct
+  masc_string_util)
+ (foreign_stubs
+  (language c)
+  (names clone_file_stubs directory_exchange_stubs owned_directory_read_stubs owned_tree_cleanup_stubs retention_directory_stubs)))
+
+(library
+ (name fs_compat)
+ (public_name masc.fs_compat)
+ (modules fs_compat)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
+ (flags
+  (:standard -w +4))
+ (libraries
+  fs_compat_internal
+  eio
+  eio.unix
+  unix
+  yojson
+  uuidm
+   masc.agent_core.digest
+  optint))
+
+(library
+ (name fs_compat_test_support)
+ (modules
+  publication_recovery_for_testing
+  capability_write_for_testing)
+ (flags
+  (:standard -w +4))
+ (libraries
+  fs_compat
+  fs_compat_internal
+  eio
+  eio.unix
+  unix
+  yojson
+  uuidm
+   masc.agent_core.digest))

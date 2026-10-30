@@ -1,0 +1,9 @@
+{
+  "id": "l3-py-config-plumb",
+  "level": "L3",
+  "lang": "python",
+  "timeout_sec": 900,
+  "verify": "verify.sh",
+  "prompt": "check.sh fails: greeting.py must honour a new config field. config.load returns a dict from KEY=VALUE lines; add support so that a NAME entry reaches greeting.greet, which should return 'Hello, <NAME>!' and fall back to 'Hello, world!' when NAME is missing. Adjust config.py and greeting.py as needed. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Multi-file feature: plumb the NAME config entry from config.py through greeting.py."
+}

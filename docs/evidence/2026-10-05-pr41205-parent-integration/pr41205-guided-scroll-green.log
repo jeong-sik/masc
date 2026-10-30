@@ -1,0 +1,15 @@
+Package preview / schema fields / review / explicit declaration save: PASS
+Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41205-parent-integration-20261005/test/test_tui_lane_operator_pty.py", line 241, in package_scroll_boundary
+    terminal.run_terminal_scenario(executable, description='Package metadata scroll boundary',
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        interact=interact, http_fixtures=fixtures, http_requests=requests)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41205-parent-integration-20261005/test/tui_keyboard_harness.py", line 2394, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41205-parent-integration-20261005/test/test_tui_lane_operator_pty.py", line 236, in interact
+    assert not requests, 'browsing metadata dispatched a mutation'
+           ^^^^^^^^^^^^
+AssertionError: browsing metadata dispatched a mutation

@@ -1,0 +1,1093 @@
+import { html } from 'htm/preact'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import {
+  fetchExactLaneRun,
+  fetchExactLaneRuns,
+  fetchFusionRuns,
+  fetchGoalVerificationRuns,
+  fetchStandaloneLanes,
+  fetchVerificationRuns,
+  type ExactLane,
+  type ExactLaneRunRecord,
+  type ExactLaneRunSummary,
+  type FusionRunRecord,
+  type GoalVerificationRunRecord,
+  type StandaloneLanesSnapshot,
+  type VerificationRunRecord,
+} from '../api/dashboard'
+import type { VerificationToolObservation } from '../api/dashboard-verification-runs'
+import {
+  fetchKeeperMemoryJournal,
+  type MemoryJournal,
+  type MemoryJournalEntry,
+} from '../api/dashboard-memory-journal'
+import { KeeperTurnInspectorPanel } from './keeper-turn-inspector-panel'
+import { ApiRequestError } from '../api/core'
+import { registerInternalAgentRefresh } from '../sse-store'
+import { Btn } from './btn'
+import { ErrorState } from './common/feedback-state'
+import type { StatusBadgeTone } from './common/status-badge'
+import { JsonViewerCard } from './common/json-viewer'
+import type { ExactLanePayloadAvailability } from '../api/dashboard-exact-lane-runs'
+import { formatDateTimeKo, relativeTime } from '../lib/format-time'
+import { hashForRoute } from '../router'
+import { keepers as keeperRosterSignal, shellRuntimeResolution } from '../store'
+import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
+import type { LaneNavigationTarget } from '../lib/lane-navigation'
+import { goalVerificationRunTone } from './goal-verification-runs-panel'
+
+type Filter =
+  | 'all'
+  | 'librarian'
+  | 'workspace-curator'
+  | 'candle-appraiser'
+  | 'auto-judge'
+  | 'board-attention'
+  | 'verification'
+  | 'fusion'
+type Row =
+  | { source: 'exact'; id: string; run: ExactLaneRunSummary }
+  | { source: 'verification'; id: string; run: VerificationRunRecord }
+  | { source: 'goal_verification'; id: string; run: GoalVerificationRunRecord }
+  | { source: 'fusion'; id: string; run: FusionRunRecord }
+type CommittedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'committed' }>
+type FailedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'failed' }>
+
+type LibrarianInputEvidence = {
+  promptKey: string
+  promptSource: string
+  promptFilePath: string | null
+  effectiveTemplate: string
+  renderedBytes: number
+  renderedSha256: string
+  variables: Record<string, string>
+  messageCount: number | null
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+export function librarianInputEvidence(value: unknown): LibrarianInputEvidence | null {
+  const root = record(value)
+  const actual = record(root?.actual_input)
+  const prompt = record(actual?.prompt)
+  const rawVariables = record(actual?.rendered_prompt_variables)
+  if (!root || !actual || !prompt || !rawVariables) return null
+  const promptKey = typeof prompt.key === 'string' ? prompt.key : null
+  const promptSource = typeof prompt.source === 'string' ? prompt.source : null
+  const effectiveTemplate = typeof prompt.effective_template === 'string' ? prompt.effective_template : null
+  const renderedBytes = typeof prompt.rendered_bytes === 'number' ? prompt.rendered_bytes : null
+  const renderedSha256 = typeof prompt.rendered_sha256 === 'string' ? prompt.rendered_sha256 : null
+  if (
+    promptKey === null
+    || promptSource === null
+    || effectiveTemplate === null
+    || renderedBytes === null
+    || renderedSha256 === null
+  ) return null
+  const variables: Record<string, string> = {}
+  for (const [key, item] of Object.entries(rawVariables)) {
+    if (typeof item !== 'string') return null
+    variables[key] = item
+  }
+  return {
+    promptKey,
+    promptSource,
+    promptFilePath: typeof prompt.file_path === 'string' ? prompt.file_path : null,
+    effectiveTemplate,
+    renderedBytes,
+    renderedSha256,
+    variables,
+    messageCount: typeof root.message_count === 'number' ? root.message_count : null,
+  }
+}
+
+export function renderCapturedLibrarianPrompt(evidence: LibrarianInputEvidence): string {
+  return evidence.effectiveTemplate.replace(/\{\{([^}]+)\}\}/g, (whole, rawName: string) => {
+    const name = rawName.trim()
+    const value = evidence.variables[name]
+    return value === undefined ? whole : value
+  })
+}
+
+function isForbidden(reason: unknown): boolean {
+  return reason instanceof ApiRequestError
+    ? reason.status === 403
+    : typeof reason === 'object'
+      && reason !== null
+      && 'status' in reason
+      && reason.status === 403
+}
+
+const FILTERS: Array<{ id: Filter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'librarian', label: 'Librarian' },
+  { id: 'workspace-curator', label: 'Workspace Curator' },
+  { id: 'candle-appraiser', label: 'Candle Appraiser' },
+  { id: 'auto-judge', label: 'Auto Judge' },
+  { id: 'board-attention', label: 'Board Attention' },
+  { id: 'verification', label: 'Verification' },
+  { id: 'fusion', label: 'Fusion' },
+]
+
+type RunReading = 'loading' | 'ready' | 'stale' | 'unavailable'
+type RunSource = Row['source']
+type SelectedLane = Extract<LaneNavigationTarget, { kind: 'run_history' }>['lane']
+type SelectedLaneRuns = { lane: SelectedLane; rows: Row[]; reading: RunReading }
+
+// Where a selected Lane's runs are kept. Exact-lane runs never name
+// verifier_exact or browser_stagehand_exact (ExactLane excludes both). The
+// Verifier's runs are its task and Goal reviews, and Stagehand keeps no run
+// history at all. The target's rows and its availability reading both come
+// from this one read, so an unrelated source's failure cannot mark the
+// target's observations unavailable.
+type LaneRunHistory =
+  | { kind: 'exact'; lane: ExactLane }
+  | { kind: 'verifier' }
+  | { kind: 'not_retained' }
+
+function laneRunHistory(lane: SelectedLane): LaneRunHistory {
+  switch (lane) {
+    case 'board_attention_exact': case 'hitl_auto_judge': case 'librarian_exact':
+    case 'workspace_curator_exact': case 'candle_appraiser': return { kind: 'exact', lane }
+    case 'verifier_exact': return { kind: 'verifier' }
+    case 'browser_stagehand_exact': return { kind: 'not_retained' }
+  }
+}
+
+function exactRow(run: ExactLaneRunSummary): Row {
+  return { source: 'exact', id: `exact:${run.runId}`, run }
+}
+
+function verificationRow(run: VerificationRunRecord): Row {
+  return { source: 'verification', id: `verification:${run.verificationId}`, run }
+}
+
+function goalVerificationRow(run: GoalVerificationRunRecord): Row {
+  return { source: 'goal_verification', id: `goal_verification:${run.runId}`, run }
+}
+
+// The exact-run request names the lane, so the server filters before it
+// pages and a busy Lane cannot fill the page and hide the selected one.
+async function fetchLaneRuns(history: LaneRunHistory): Promise<Row[]> {
+  switch (history.kind) {
+    case 'exact':
+      return (await fetchExactLaneRuns({ lane: history.lane })).runs.map(exactRow)
+    case 'verifier': {
+      const [task, goal] = await Promise.all([fetchVerificationRuns(), fetchGoalVerificationRuns()])
+      return [...task.runs.map(verificationRow), ...goal.runs.map(goalVerificationRow)]
+        .sort((a, b) => startedAt(b) - startedAt(a))
+    }
+    case 'not_retained': return []
+  }
+}
+
+// Verification counts task and Goal reviews, the two run kinds the server's
+// Lane matrix attributes to verifier_exact.
+function sourcesForKind(kind: Exclude<Filter, 'all'>): RunSource[] {
+  switch (kind) {
+    case 'verification': return ['verification', 'goal_verification']
+    case 'fusion': return ['fusion']
+    case 'librarian': case 'workspace-curator': case 'candle-appraiser': case 'auto-judge': case 'board-attention': return ['exact']
+  }
+}
+
+function nextRunReading(previous: RunReading, result: PromiseSettledResult<unknown>): RunReading {
+  if (result.status === 'fulfilled') return 'ready'
+  return previous === 'ready' || previous === 'stale' ? 'stale' : 'unavailable'
+}
+
+// Rows drawn from several sources are only as complete as the weakest read:
+// a count missing one source would show fewer runs than happened.
+function combinedReading(readings: RunReading[]): RunReading {
+  if (readings.includes('unavailable')) return 'unavailable'
+  if (readings.includes('loading')) return 'loading'
+  return readings.includes('stale') ? 'stale' : 'ready'
+}
+
+function readingHasRows(reading: RunReading): boolean {
+  return reading === 'ready' || reading === 'stale'
+}
+
+function inventoryReadingCaption(reading: RunReading, latest: number | null): string {
+  const observed = latest === null ? '관측 기록 없음' : `최근 ${formatDateTimeKo(latest)}`
+  switch (reading) {
+    case 'loading': return '읽는 중'
+    case 'unavailable': return '관측 불가'
+    case 'ready': return observed
+    case 'stale': return `STALE · ${observed}`
+  }
+}
+
+function ownerLastObserved(latest: number | null, completeReading: boolean, allFresh: boolean): string {
+  if (latest === null && !completeReading) return '관측 불가'
+  const observed = latest === null ? '없음' : formatDateTimeKo(latest)
+  return allFresh ? observed : `STALE · ${observed}`
+}
+
+function laneLabel(row: Row): string {
+  if (row.source === 'verification') return 'Verification'
+  if (row.source === 'goal_verification') return 'Goal verification'
+  if (row.source === 'fusion') return 'Fusion'
+  switch (row.run.lane) {
+    case 'librarian_exact': return 'Librarian'
+    case 'workspace_curator_exact': return 'Workspace Curator'
+    case 'candle_appraiser': return 'Candle Appraiser'
+    case 'hitl_auto_judge': return 'Auto Judge'
+    case 'board_attention_exact': return 'Board Attention'
+  }
+}
+
+function status(row: Row): string {
+  if (row.source === 'exact' && row.run.lane === 'hitl_auto_judge'
+    && row.run.code === 'exact_source_resolved') return 'failed · source resolved'
+  return row.run.status
+}
+
+function tone(row: Row): StatusBadgeTone {
+  if (row.source === 'goal_verification') return goalVerificationRunTone(row.run.status)
+  const value = status(row)
+  if (value === 'succeeded' || value === 'completed' || value === 'approved') return 'ok'
+  if (value === 'running') return 'warn'
+  if (value === 'cancelled') return 'info'
+  if (value === 'rejected') return 'info'
+  if (value === 'review_cancelled') return 'neutral'
+  return 'bad'
+}
+
+function actor(row: Row): string {
+  if (row.source === 'verification' || row.source === 'goal_verification') return row.run.evaluatorRuntime ?? row.run.authorityActor
+  if (row.source === 'fusion') return row.run.keeper
+  return row.run.actor
+}
+
+function subject(row: Row): string {
+  if (row.source === 'verification') return row.run.taskId
+  if (row.source === 'goal_verification') return row.run.goalId
+  if (row.source === 'fusion') return row.run.runId
+  return row.run.subjectId ?? '—'
+}
+
+function startedAt(row: Row): number {
+  return row.run.startedAt
+}
+
+function elapsed(row: Row): number | undefined {
+  return row.source === 'fusion' ? undefined : row.run.elapsedSeconds
+}
+
+function formatElapsed(value: number | undefined): string {
+  if (value == null) return '—'
+  return value < 1 ? `${Math.round(value * 1000)}ms` : `${value.toFixed(1)}s`
+}
+
+function finishedAt(row: Row): number | undefined {
+  const duration = elapsed(row)
+  return duration == null ? undefined : startedAt(row) + duration
+}
+
+function rowKind(row: Row): Exclude<Filter, 'all'> {
+  if (row.source === 'verification' || row.source === 'goal_verification') return 'verification'
+  if (row.source === 'fusion') return 'fusion'
+  switch (row.run.lane) {
+    case 'librarian_exact': return 'librarian'
+    case 'workspace_curator_exact': return 'workspace-curator'
+    case 'candle_appraiser': return 'candle-appraiser'
+    case 'hitl_auto_judge': return 'auto-judge'
+    case 'board_attention_exact': return 'board-attention'
+    default: {
+      const unreachable: never = row.run.lane
+      return unreachable
+    }
+  }
+}
+
+function EvidenceBadge({ kind }: { kind: 'raw' | 'typed' | 'excerpt' }) {
+  const style = kind === 'raw'
+    ? 'border-[var(--status-warn)] text-[var(--status-warn)]'
+    : kind === 'excerpt'
+      ? 'border-[var(--color-danger)] text-[var(--color-danger)]'
+      : 'border-[var(--color-accent)] text-[var(--color-accent)]'
+  return html`<span class=${`inline-flex rounded border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide ${style}`}>${kind}</span>`
+}
+
+function keeperHref(name: string): string {
+  return hashForRoute('monitoring', { section: 'agents', view: 'keepers', keeper: name })
+}
+
+function fusionHref(): string {
+  return hashForRoute('fusion')
+}
+
+function librarianRevision(value: unknown): number | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const after = (value as Record<string, unknown>).after
+  if (after === null || typeof after !== 'object' || Array.isArray(after)) return undefined
+  const revision = (after as Record<string, unknown>).revision
+  return typeof revision === 'number' && Number.isFinite(revision) ? revision : undefined
+}
+
+function librarianMemoryEvidence(value: unknown): { before: unknown; after: unknown } | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  const fields = value as Record<string, unknown>
+  if (!('before' in fields) || !('after' in fields)) return null
+  return { before: fields.before, after: fields.after }
+}
+
+function LibrarianJournal({
+  keeper,
+  traceId,
+  revision,
+}: {
+  keeper: string
+  traceId: string
+  revision?: number
+}) {
+  const [journal, setJournal] = useState<MemoryJournal | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchKeeperMemoryJournal(keeper, 500, { signal: controller.signal })
+      .then(setJournal)
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return
+        setError(isForbidden(reason)
+          ? 'Admin 권한이 있어야 Memory before/after journal을 읽을 수 있습니다.'
+          : reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => controller.abort()
+  }, [keeper])
+
+  if (error !== null) {
+    return html`<p class="text-xs text-[var(--color-danger)]">기억 저널을 읽지 못했습니다: ${error}</p>`
+  }
+  if (journal === null) {
+    return html`<p class="text-xs text-[var(--color-fg-muted)]">기억 저널 읽는 중…</p>`
+  }
+  if (journal.entries.length === 0) {
+    return html`
+      <div class="rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--color-bg-elevated)] p-3 text-xs">
+        <div class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /><strong>Memory journal evidence 없음</strong></div>
+        <p class="mt-1 text-[var(--color-fg-muted)]">이 실행의 revision 요약은 run registry에 있지만, 메모리 변경 원문을 담는 journal 행은 반환되지 않았습니다.</p>
+      </div>
+    `
+  }
+
+  const related = journal.entries.filter((entry): entry is CommittedMemoryJournalEntry =>
+    entry.ok
+    && entry.outcome === 'committed'
+    && entry.traceId === traceId
+    && entry.sourceKind === 'librarian'
+    && revision != null
+    && entry.revision === revision,
+  )
+  const traceOnlyCommits = journal.entries.filter((entry): entry is CommittedMemoryJournalEntry =>
+    entry.ok
+    && entry.outcome === 'committed'
+    && entry.traceId === traceId
+    && !related.includes(entry),
+  )
+  const traceOnlyFailures = journal.entries.filter((entry): entry is FailedMemoryJournalEntry =>
+    entry.ok
+    && entry.outcome === 'failed'
+    && entry.traceId === traceId,
+  )
+
+  return html`
+    <div class="grid gap-2">
+      <div class="flex flex-wrap items-center gap-2 text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">
+        <${EvidenceBadge} kind="typed" />
+        <span>Memory journal · trace ${traceId}${revision == null ? '' : ` · revision ${revision}`}</span>
+        ${journal.undecodableLines > 0
+          ? html`<span class="text-[var(--color-danger)]"> · 읽지 못한 줄 ${journal.undecodableLines}</span>`
+          : null}
+      </div>
+      <p class="text-xs text-[var(--color-fg-muted)]">정규화된 commit journal — RAW 원문은 Turn inspector에서</p>
+      ${related.length === 0
+        ? html`<p class="rounded border border-[var(--color-border-default)] p-3 text-xs text-[var(--color-fg-muted)]">정확히 조인되는 journal 행이 없습니다. trace만 같거나 시간상 가까운 행을 추정해서 붙이지 않았습니다.</p>`
+        : null}
+      <ol class="grid gap-1">
+        ${related.map((entry, index) => {
+          return html`<li key=${index} class="grid gap-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-3xs">
+            <div class="flex flex-wrap items-center gap-2">
+              <code>${entry.sourceKind}</code>
+              <strong>revision ${entry.revision}</strong>
+              <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
+              <span class="text-[var(--color-fg-muted)]">
+                추가 ${entry.added.length} · 제거 ${entry.removed.length} · 지지 무효화 ${entry.invalidated.length} · 유지 ${entry.retained}
+              </span>
+            </div>
+            <div class="grid gap-3 lg:grid-cols-2">
+              <${JsonViewerCard} title=${`추가된 기억 ${entry.added.length}건`} data=${entry.added} />
+              <${JsonViewerCard} title=${`제거된 기억 ${entry.removed.length}건`} data=${entry.removed} />
+            </div>
+            <${JsonViewerCard} title=${`지지 무효화 ${entry.invalidated.length}건`} data=${entry.invalidated} />
+            <${JsonViewerCard} title=${`제거 판단 ${entry.drops.length}건`} data=${entry.drops} />
+          </li>`
+        })}
+      </ol>
+      ${traceOnlyCommits.length === 0 && traceOnlyFailures.length === 0
+        ? null
+        : html`<div class="grid gap-2 rounded border border-[var(--status-warn)] bg-[var(--color-bg-elevated)] p-3">
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <${EvidenceBadge} kind="typed" />
+              <strong>같은 trace · exact join 아님</strong>
+            </div>
+            <p class="text-xs text-[var(--color-fg-muted)]">trace만 일치 — 이 pass의 산출물로 보장되지 않음</p>
+            <ol class="grid gap-2">
+              ${traceOnlyCommits.map((entry, index) => html`
+                <li key=${index} class="grid gap-2 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-3xs">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <code>${entry.sourceKind}</code>
+                    <strong>revision ${entry.revision}</strong>
+                    <time class="text-[var(--color-fg-muted)]" dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
+                    <span class="text-[var(--color-fg-muted)]">추가 ${entry.added.length} · 제거 ${entry.removed.length} · 지지 무효화 ${entry.invalidated.length} · 유지 ${entry.retained}</span>
+                  </div>
+                  <div class="grid gap-2 lg:grid-cols-2">
+                    <${JsonViewerCard} title=${`별도 producer 추가 ${entry.added.length}건`} data=${entry.added} />
+                    <${JsonViewerCard} title=${`별도 producer 제거 ${entry.removed.length}건`} data=${entry.removed} />
+                  </div>
+                  <${JsonViewerCard} title=${`별도 producer 지지 무효화 ${entry.invalidated.length}건`} data=${entry.invalidated} />
+                </li>
+              `)}
+              ${traceOnlyFailures.map((entry, index) => html`
+                <li key=${`failure-${index}`} class="rounded border border-[var(--color-danger)] p-2 text-3xs">
+                  <div class="flex flex-wrap gap-2">
+                    <code>librarian_failure</code>
+                    <strong class="text-[var(--color-danger)]">${entry.kind}</strong>
+                    <time dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
+                    <span class="text-[var(--color-fg-muted)]">스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}</span>
+                  </div>
+                  <span class="mt-1 block text-[var(--color-fg-muted)]">${entry.detail}</span>
+                </li>
+              `)}
+            </ol>
+          </div>`}
+    </div>
+  `
+}
+
+function ExactPayload({ side, availability, value }: {
+  side: 'input' | 'output'
+  availability: ExactLanePayloadAvailability | null
+  value: unknown
+}) {
+  const title = side === 'input' ? '실제 입력 · typed' : '실제 출력 · typed'
+  return html`
+    <div data-exact-payload=${side} data-payload-state=${availability?.state ?? 'pending'}>
+      ${availability?.state === 'available'
+        ? html`<${JsonViewerCard} title=${title} data=${value} />`
+        : html`<div class="ia-evi">
+            <div class="ia-k">${title}</div>
+            ${availability === null
+              ? html`<p class="ia-note">실행 중 · 아직 출력이 기록되지 않았습니다</p>`
+              : availability.state === 'not_loaded'
+                ? html`<p class="ia-note">원문을 불러오지 않았습니다</p>`
+                : html`<p class="ia-err">원문 사용 불가: ${availability.error.message} <code>${availability.error.code}</code></p>`}
+          </div>`}
+    </div>
+  `
+}
+
+function exactAnswerSource(run: ExactLaneRunRecord) {
+  const source = run.answerSource
+  if (source?.kind === 'vendor_system_one') {
+    return html` · 답변 출처 <code>Vendor System One · ${source.model}</code> · exact-flow receipt 없음`
+  }
+  if (source?.kind === 'cli_lane_slot') {
+    return html` · 답변 출처 <code>CLI · ${source.slotId}</code>`
+  }
+  if (source?.kind === 'exact_attempt') {
+    return html` · 답변 출처 <code>Exact · ${source.slotId}</code>`
+  }
+  if (
+    run.lane === 'board_attention_exact'
+    && (run.status === 'succeeded' || run.intendedStatus === 'succeeded')
+  ) {
+    return html` · 답변 출처 <code>원문 사용 불가</code>`
+  }
+  return run.selectedSlot === undefined
+    ? null
+    : html` · 선택 slot <code>${run.selectedSlot ?? '없음'}</code>`
+}
+
+function exactRunContractNote(lane: ExactLaneRunRecord['lane']) {
+  switch (lane) {
+    case 'workspace_curator_exact':
+      return '이 실행은 기록된 workspace inventory와 curator prompt를 사용합니다. 의미 검증이나 Keeper 기억 승격을 수행하지 않습니다.'
+    case 'candle_appraiser':
+      return '이 실행은 확정된 Goal의 지급 등급, 후보 Task별 관련성, Keeper의 기여 가중치를 판단합니다. 지급 금액은 설정과 Candle 원장이 정합니다.'
+    case 'librarian_exact':
+      return '이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.'
+    case 'hitl_auto_judge':
+      return '이 exact 실행은 기록된 HITL 요청만 판단하며 도구를 호출하지 않습니다.'
+    case 'board_attention_exact':
+      return '이 exact 실행은 기록된 Board 후보만 판단하며 도구를 호출하지 않습니다.'
+  }
+}
+
+// The listing carries no payloads, so opening a row is what fetches them. The
+// alternative — shipping every run's input and output with the list — is what
+// made this panel download 246 MB before it could draw a single line.
+function ExactRunDetail({ runId }: { runId: string }) {
+  const [run, setRun] = useState<ExactLaneRunRecord | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [showRenderedPrompt, setShowRenderedPrompt] = useState(false)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setRun(null)
+    setError(null)
+    setShowRenderedPrompt(false)
+    fetchExactLaneRun(runId, { signal: controller.signal })
+      .then(setRun)
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return
+        setError(String(cause))
+      })
+    return () => controller.abort()
+  }, [runId])
+
+  if (error !== null) {
+    return html`
+      <div class="ia-detail">
+        <p class="ia-err">이 실행의 typed 값을 읽지 못했습니다: ${error}</p>
+      </div>
+    `
+  }
+  if (run === null) {
+    return html`
+      <div class="ia-detail">
+        <p class="ia-note">typed 입출력을 불러오는 중…</p>
+      </div>
+    `
+  }
+    const inputAvailable = run.payloadAvailability.input.state === 'available'
+    const outputAvailable = run.payloadAvailability.output?.state === 'available'
+    const memoryEvidence = run.lane === 'librarian_exact' && outputAvailable
+      ? librarianMemoryEvidence(run.output)
+      : null
+    const inputEvidence = run.lane === 'librarian_exact' && inputAvailable
+      ? librarianInputEvidence(run.input.payload)
+      : null
+    return html`
+      <div class="ia-detail">
+        <div class="ia-evi">
+          <div class="ia-k"><${EvidenceBadge} kind="typed" /> Exact-output registry metadata</div>
+          <p class="ia-note">
+            Admin-only 실제 typed 값
+            ${run.lane === 'librarian_exact' ? ' · Librarian exact에는 research RAW 입력 없음' : null}
+            ${exactAnswerSource(run)}
+             ${run.lane === 'workspace_curator_exact'
+               ? html` · Workspace <code>${run.actor}</code> · model-proposed; semantic verification not performed`
+               : run.lane === 'candle_appraiser'
+                 ? html` · Workspace <code>${run.actor}</code>`
+                 : html` · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>`}
+          </p>
+          ${run.lane === 'hitl_auto_judge' && run.code === 'exact_source_resolved'
+            ? html`<p class="ia-note">승인 항목이 판정 기록 전에 해결됐습니다. 이전 실행 단계에 오류가 있었는지는 이 과거 기록만으로 확정할 수 없습니다.</p>`
+            : null}
+          ${run.lane === 'hitl_auto_judge' && record(run.output)?.reason === 'source_resolved_without_recorded_judgment'
+            ? html`<p class="ia-note">승인 항목이 판정 기록 전에 해결되어 판정이 저장되지 않았습니다.</p>`
+            : null}
+          ${run.code === undefined
+            ? null
+            : html`<p class="ia-err"><code>${run.code}</code>: ${run.detail}</p>`}
+        </div>
+        <div class="ia-tool-io">
+          <${ExactPayload} side="input" availability=${run.payloadAvailability.input} value=${run.input.payload} />
+          <${ExactPayload} side="output" availability=${run.payloadAvailability.output} value=${run.output} />
+        </div>
+        ${inputEvidence === null ? null : html`
+          <div class="ia-evi" data-librarian-input-evidence>
+            <div class="ia-k"><${EvidenceBadge} kind="typed" /> Librarian prompt + input provenance</div>
+            <p class="ia-note">
+              <code>${inputEvidence.promptKey}</code> · source <code>${inputEvidence.promptSource}</code>
+              ${inputEvidence.promptFilePath ? html` · <code>${inputEvidence.promptFilePath}</code>` : null}
+              · ${inputEvidence.renderedBytes.toLocaleString()} bytes · sha256 <code>${inputEvidence.renderedSha256.slice(0, 12)}</code>
+              ${inputEvidence.messageCount === null ? null : ` · ${inputEvidence.messageCount} messages`}
+            </p>
+            <div class="ia-tool-io">
+              <${JsonViewerCard} title="실행 당시 effective template" data=${inputEvidence.effectiveTemplate} />
+              <${JsonViewerCard} title="실제 치환 input sections" data=${inputEvidence.variables} />
+            </div>
+            <${Btn} variant="ghost" onClick=${() => setShowRenderedPrompt(value => !value)}>
+              ${showRenderedPrompt ? '최종 rendered prompt 닫기' : '최종 rendered prompt 보기'}
+            <//>
+            ${showRenderedPrompt
+              ? html`<pre class="mono mt-2 max-h-120 overflow-auto whitespace-pre-wrap rounded border border-[var(--color-border-default)] p-3">${renderCapturedLibrarianPrompt(inputEvidence)}</pre>`
+              : null}
+          </div>
+        `}
+        ${run.persistenceError === undefined
+          ? null
+          : html`<p class="ia-err">완료 의도 <code>${run.intendedStatus}</code> · persistence <code>${run.persistenceState}</code>: ${run.persistenceError}${run.intendedCode ? ` · ${run.intendedCode}: ${run.intendedDetail}` : ''}</p>`}
+        <p class="ia-note"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>${exactRunContractNote(run.lane)}</p>
+        ${memoryEvidence === null
+          ? null
+          : html`<div class="ia-evi">
+              <div class="ia-k"><${EvidenceBadge} kind="typed" /> Memory before → after</div>
+              <p class="ia-note">registry에는 count/revision만, 실제 추가·제거는 아래 journal</p>
+              <div class="ia-tool-io">
+                <${JsonViewerCard} title="Before memory · typed" data=${memoryEvidence.before} expandAll=${true} />
+                <${JsonViewerCard} title="After memory + change · typed" data=${memoryEvidence.after} expandAll=${true} />
+              </div>
+            </div>`}
+        ${run.lane === 'librarian_exact' && run.subjectId !== null
+          ? html`<div class="ia-evi">
+              <${LibrarianJournal}
+                keeper=${run.actor}
+                traceId=${run.subjectId}
+                revision=${librarianRevision(run.output)}
+              />
+            </div>`
+          : run.lane === 'librarian_exact' && run.subjectId === null
+            ? html`<p class="ia-note">이 exact-run registry 세대는 subject_id를 기록하지 않아 Memory journal을 trace로 결합하지 않습니다.</p>`
+            : null}
+      </div>
+    `
+}
+
+function VerificationTools({ id, tools }: { id: string; tools: VerificationToolObservation[] }) {
+  return html`
+    <div class="ia-evi">
+      <div class="ia-k">Internal tool agents (${tools.length})</div>
+      ${tools.length === 0
+        ? html`<p class="ia-note">No tools invoked in this verification run.</p>`
+        : html`<ol class="ia-tools">
+            ${tools.map((tool, index) => html`
+              <li key=${`${id}-${index}`} class="ia-tool">
+                <div class="ia-tool-h">
+                  <b>${index + 1}. ${tool.toolName}</b>
+                  <code class="mono">${tool.disposition}</code>
+                  <time class="ia-ms mono" dateTime=${new Date(tool.finishedAt * 1000).toISOString()}>종료 ${formatDateTimeKo(tool.finishedAt)}</time>
+                  <span class="ia-ms mono">${tool.durationMs.toFixed(0)}ms</span>
+                </div>
+                <div class="ia-tool-io">
+                  <div>
+                    <div class="ia-k"><${EvidenceBadge} kind="typed" /> 입력 preview</div>
+                    <${JsonViewerCard} data=${tool.input} />
+                  </div>
+                  <div>
+                    <div class="ia-k"><${EvidenceBadge} kind="excerpt" /> 출력 ${tool.outputTruncated ? '· truncated' : '· complete excerpt'}</div>
+                    <pre class="mono max-h-80">${tool.outputExcerpt}${tool.outputTruncated ? '\n… 1,024 byte 이후는 registry에 보존되지 않음' : ''}</pre>
+                  </div>
+                </div>
+              </li>
+            `)}
+          </ol>`}
+    </div>
+  `
+}
+
+function Details({ row }: { row: Row }) {
+  if (row.source === 'verification' || row.source === 'goal_verification') {
+    return html`
+      <div class="ia-detail">
+        <div class="ia-evi">
+          <div class="ia-k"><${EvidenceBadge} kind="typed" /> Execution path</div>
+          ${row.source === 'verification'
+            ? html`<code class="mono">${row.run.producer} → ${row.run.authorityKind} → ${row.run.authorityActor} → ${row.run.status}</code>`
+            : html`<code class="mono">goal ${row.run.goalId} · request ${row.run.requestId} → ${row.run.authorityActor} → ${row.run.status}</code>`}
+          <p class="ia-note">
+            시작 <time dateTime=${new Date(row.run.startedAt * 1000).toISOString()}>${formatDateTimeKo(row.run.startedAt)}</time>
+            ${finishedAt(row) == null ? null : html` · 종료 <time dateTime=${new Date(finishedAt(row)! * 1000).toISOString()}>${formatDateTimeKo(finishedAt(row)!)}</time>`}
+            ${row.run.evaluatorRuntime ? html` · runtime <code>${row.run.evaluatorRuntime}</code>` : null}
+          </p>
+          ${row.source === 'verification'
+            ? row.run.cause ? html`<p class=${row.run.status === 'review_cancelled' ? 'ia-note' : 'ia-err'}>${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null
+            : html`
+              <p class="ia-note">Criterion r${row.run.criterion.revision} · ${row.run.criterion.title}</p>
+              ${row.run.evaluatedVerdict ? html`<p class="ia-note">Verdict ${row.run.evaluatedVerdict.decision} · ${row.run.evaluatedVerdict.reason}</p>` : null}
+              ${row.run.detail ? html`<p class=${row.run.status === 'review_cancelled' ? 'ia-note' : 'ia-err'}>${row.run.detail}</p>` : null}`}
+          <p class="ia-note">Review 원문은 저장되지 않음 · 출력은 1,024B excerpt</p>
+        </div>
+        <${VerificationTools} id=${row.id} tools=${row.run.tools ?? []} />
+      </div>
+    `
+  }
+  if (row.source === 'exact') {
+    return html`<${ExactRunDetail} runId=${row.run.runId} />`
+  }
+  return html`
+    <div class="ia-detail">
+      <div class="ia-evi">
+        <div class="ia-k"><${EvidenceBadge} kind="typed" /> Fusion registry summary</div>
+        <code class="mono">preset ${row.run.preset} · status ${row.run.status}</code>
+        ${row.run.error ? html`<div class="ia-err">${row.run.failureCode}: ${row.run.error}</div>` : null}
+        <p class="ia-note">input/output 미보존 — 상세는 Fusion 화면에서 · <a class="text-[var(--color-accent)] hover:underline" href=${fusionHref()}>Fusion evidence 열기 →</a></p>
+      </div>
+    </div>
+  `
+}
+
+function matches(row: Row, filter: Filter): boolean {
+  if (filter === 'all') return true
+  return rowKind(row) === filter
+}
+
+type KeeperIdentity = { name: string; agent_name?: string | null }
+
+// The Keeper the run's work belongs to, or null when the run records none:
+// workspace-scoped exact lanes and Goal reviews name no producing Keeper.
+function recordedOwner(row: Row): string | null {
+  switch (row.source) {
+    case 'verification': return row.run.producer
+    case 'goal_verification': return null
+    case 'fusion': return row.run.keeper
+    case 'exact':
+      return row.run.lane === 'workspace_curator_exact' || row.run.lane === 'candle_appraiser' ? null : row.run.actor
+  }
+}
+
+function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string | null {
+  const recorded = recordedOwner(row)
+  if (recorded === null) return null
+  return roster.find(keeper => keeper.name === recorded || keeper.agent_name === recorded)?.name ?? recorded
+}
+
+export function InternalAgentsMonitor() {
+  const navigation = useLaneNavigation(['run_history'])
+  if (navigation.error || navigation.pending) return html`<${LaneNavigationNotice}
+    message=${navigation.error ?? 'Verify the workspace before reading this Lane target.'} pending=${navigation.pending} />`
+  const target = navigation.target?.kind === 'run_history' ? navigation.target : undefined
+  return html`<${InternalAgentsMonitorContent} target=${target}
+    key=${navigation.authority ? JSON.stringify([navigation.authority.workspaceRoot, navigation.authority.epoch]) : undefined} />`
+}
+
+function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigationTarget, { kind: 'run_history' }> }) {
+  const [rows, setRows] = useState<Row[]>([])
+  const targetLane = target?.lane
+  const [laneRuns, setLaneRuns] = useState<SelectedLaneRuns | null>(null)
+  // Rows read for an earlier target never stand in for the current one.
+  const selectedLaneRuns = laneRuns !== null && laneRuns.lane === targetLane ? laneRuns : null
+  const [laneMatrix, setLaneMatrix] = useState<StandaloneLanesSnapshot | null>(null)
+  const [laneMatrixError, setLaneMatrixError] = useState<string | null>(null)
+  const [filter, setFilterState] = useState<Filter>('all')
+  function setFilter(value: Filter) { setFilterState(value); if (target) clearLaneNavigation() }
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [errors, setErrors] = useState<string[]>([])
+  const [runReadings, setRunReadings] = useState<Record<RunSource, RunReading>>({
+    exact: 'loading', verification: 'loading', goal_verification: 'loading', fusion: 'loading',
+  })
+  const refreshVersion = useRef(0)
+  const targetRow = useRef<HTMLTableRowElement>(null), focusedTarget = useRef<typeof target>(undefined)
+  useEffect(() => {
+    if (target && target !== focusedTarget.current && targetRow.current) {
+      targetRow.current.focus(); focusedTarget.current = target
+    }
+  }, [target, laneMatrix])
+
+  const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current
+    setLoading(true)
+    const history = targetLane === undefined ? null : laneRunHistory(targetLane)
+    const [exact, verification, goalVerification, fusion, standalone, selected] = await Promise.allSettled([
+      fetchExactLaneRuns(),
+      fetchVerificationRuns(),
+      fetchGoalVerificationRuns(),
+      fetchFusionRuns(),
+      fetchStandaloneLanes(),
+      history === null ? Promise.resolve([]) : fetchLaneRuns(history),
+    ])
+    const next: Row[] = []
+    const failures: string[] = []
+    if (exact.status === 'fulfilled') {
+      next.push(...exact.value.runs.map(exactRow))
+    } else failures.push(isForbidden(exact.reason)
+      ? 'Exact lanes + RAW: Admin 권한 필요 (Settings에서 Admin bearer token을 사용하세요).'
+      : `Exact lanes: ${String(exact.reason)}`)
+    if (verification.status === 'fulfilled') {
+      next.push(...verification.value.runs.map(verificationRow))
+    } else failures.push(`Verification: ${String(verification.reason)}`)
+    if (goalVerification.status === 'fulfilled') {
+      next.push(...goalVerification.value.runs.map(goalVerificationRow))
+    } else failures.push(`Goal verification: ${String(goalVerification.reason)}`)
+    if (fusion.status === 'fulfilled') {
+      next.push(...fusion.value.runs.map(run => ({ source: 'fusion' as const, id: `fusion:${run.runId}`, run })))
+    } else failures.push(`Fusion: ${String(fusion.reason)}`)
+    if (targetLane !== undefined && selected.status === 'rejected') failures.push(`Selected Lane ${targetLane}: ${String(selected.reason)}`)
+    if (version !== refreshVersion.current) return
+    if (standalone.status === 'fulfilled') {
+      setLaneMatrix(standalone.value)
+      setLaneMatrixError(null)
+    } else {
+      setLaneMatrixError(isForbidden(standalone.reason)
+        ? 'Lanes: Admin 권한 필요.'
+        : `Lanes: ${String(standalone.reason)}`)
+    }
+    const results: Record<RunSource, PromiseSettledResult<unknown>> = {
+      exact, verification, goal_verification: goalVerification, fusion,
+    }
+    setRows(previous => [
+      ...next,
+      ...previous.filter(row => results[row.source].status === 'rejected'),
+    ].sort((a, b) => startedAt(b) - startedAt(a)))
+    setRunReadings(previous => ({
+      exact: nextRunReading(previous.exact, exact),
+      verification: nextRunReading(previous.verification, verification),
+      goal_verification: nextRunReading(previous.goal_verification, goalVerification),
+      fusion: nextRunReading(previous.fusion, fusion),
+    }))
+    if (targetLane !== undefined) setLaneRuns(previous => {
+      const retained: SelectedLaneRuns = previous?.lane === targetLane ? previous : { lane: targetLane, rows: [], reading: 'loading' }
+      return selected.status === 'fulfilled'
+        ? { lane: targetLane, rows: selected.value, reading: 'ready' }
+        : { ...retained, reading: nextRunReading(retained.reading, selected) }
+    })
+    setErrors(failures)
+    setLoading(false)
+  }, [targetLane])
+
+  useEffect(() => {
+    void refresh()
+    const unregister = registerInternalAgentRefresh(() => { void refresh() })
+    return () => {
+      unregister()
+      refreshVersion.current += 1
+    }
+  }, [refresh])
+
+  const visible = useMemo<Array<{ row: Row; stale: boolean }>>(() => target
+    ? (selectedLaneRuns?.rows ?? []).map(row => ({ row, stale: selectedLaneRuns?.reading === 'stale' }))
+    : rows.filter(row => matches(row, filter)).map(row => ({ row, stale: runReadings[row.source] === 'stale' })),
+  [rows, filter, target, selectedLaneRuns, runReadings])
+  const targetHistory = target ? laneRunHistory(target.lane) : null
+  const roster = keeperRosterSignal.value
+  const pausedKeeperNames = shellRuntimeResolution.value?.fleet_safety?.paused_keepers_health?.names ?? []
+  const keepers = useMemo(() => {
+    const names = new Set(roster.map(keeper => keeper.name))
+    for (const name of pausedKeeperNames) names.add(name)
+    for (const row of rows) {
+      const owner = resolvedOwner(row, roster)
+      if (owner !== null) names.add(owner)
+    }
+    return Array.from(names).sort()
+  }, [pausedKeeperNames, rows, roster])
+  const allReadings = Object.values(runReadings)
+  const completeReading = allReadings.every(readingHasRows)
+  const allFresh = allReadings.every(reading => reading === 'ready')
+  const selectedReading = combinedReading(target
+    ? [selectedLaneRuns?.reading ?? 'loading']
+    : filter === 'all' ? allReadings : sourcesForKind(filter).map(source => runReadings[source]))
+  const inventory = FILTERS.filter(item => item.id !== 'all').map(item => {
+    const kind = item.id as Exclude<Filter, 'all'>
+    const matching = rows.filter(row => rowKind(row) === kind)
+    const reading = combinedReading(sourcesForKind(kind).map(source => runReadings[source]))
+    return {
+      ...item,
+      count: readingHasRows(reading) ? matching.length : null,
+      reading,
+      latest: matching.reduce<number | null>((value, row) => value == null ? startedAt(row) : Math.max(value, startedAt(row)), null),
+    }
+  })
+  const owners = keepers.map(name => {
+    const owned = rows.filter(row => resolvedOwner(row, roster) === name)
+    return {
+      name,
+      total: owned.length,
+      counts: Object.fromEntries(inventory.map(item => [item.id, owned.filter(row => rowKind(row) === item.id).length])) as Record<Exclude<Filter, 'all'>, number>,
+      latest: owned.reduce<number | null>((value, row) => value == null ? startedAt(row) : Math.max(value, startedAt(row)), null),
+    }
+  })
+
+  return html`
+    <section class="v2-monitoring-surface ia-wrap" data-testid="internal-agents-monitor">
+      ${target && html`<p role="status">Selected Lane: ${target.lane}. The run list is limited to this Lane; other Lane observations remain visible in the matrix.
+        <button type="button" onClick=${() => setFilter('all')}>Show all Lane runs</button></p>`}
+      <div class="ia-head">
+        <h3>Internal execution evidence</h3>
+        <span class="ia-count mono">${completeReading ? rows.length : "—"} runs · ${keepers.length} Keeper owners${allFresh ? "" : " · incomplete or stale"}</span>
+        <span class="ia-route mono">monitoring?section=internal-agents</span>
+        <${Btn} class="v2-monitoring-action" onClick=${() => void refresh()} disabled=${loading}>
+          ${loading ? 'Loading…' : 'Refresh'}
+        <//>
+      </div>
+      <p class="ia-lede">Run registry, Memory OS journal, Keeper retained trace를 출처별로 분리하고 producer가 보존한 typed identity만으로 읽습니다.</p>
+
+      <div class="v2-monitoring-card flex flex-wrap gap-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs">
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /> Admin 전용 retained JSONL 실제 행 · 민감값 포함 가능</span>
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /> schema-typed registry 값 · 권한/retention 계약에 따라 실제값 포함</span>
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="excerpt" /> 원문 전체가 아닌 제한된 출력</span>
+      </div>
+
+      <section class="grid gap-2" aria-labelledby="standalone-lane-matrix-title">
+        <div class="flex flex-wrap items-end gap-2">
+          <h3 id="standalone-lane-matrix-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Lanes</h3>
+          <span class="rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-accent)]">READ-ONLY OBSERVATION</span>
+          <span class="text-3xs text-[var(--color-fg-muted)]">설정됐지만 현재 관측창에 실행이 없는 lane도 표시합니다.</span>
+        </div>
+        ${laneMatrixError === null ? null : html`<div role="alert" class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">${laneMatrix === null ? '관측 불가' : 'STALE · 마지막 성공 관측을 표시합니다.'} · ${laneMatrixError}</div>`}
+        ${laneMatrix === null
+          ? html`<div class="ia-empty">Lane 관측 정보를 읽는 중이거나 사용할 수 없습니다.</div>`
+          : html`
+            <div class="text-xs text-[var(--color-fg-muted)]">Observed · ${formatDateTimeKo(laneMatrix.observedAtUnix)}</div>
+            ${laneMatrix.exactRunProjectionTruncated
+              ? html`<div class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">Exact run window ${laneMatrix.exactRunProjectionCount} / ${laneMatrix.exactRunSourceTotal} · 표의 exact counts/p50는 최신 bounded window 기준입니다.</div>`
+              : null}
+            <div class="ai-tablewrap">
+              <table class="ai-table" data-testid="standalone-lane-matrix">
+                <thead>
+                  <tr><th>Lane</th><th>State</th><th>Admitted slots</th><th class="r">Running</th><th class="r">Retained</th><th class="r">Last terminal</th><th class="r">p50</th><th>Observed selected slots</th></tr>
+                </thead>
+                <tbody>
+                  ${laneMatrix.lanes.map(lane => {
+                    const stagehandHasNoHistory = lane.laneId === 'browser_stagehand_exact'
+                    const exactWindowExcludesHistory = lane.laneId !== 'verifier_exact'
+                      && laneMatrix.exactRunProjectionTruncated
+                    const statusLabel = lane.status === 'no_retained_observation'
+                      ? stagehandHasNoHistory
+                        ? 'Run history not retained'
+                        : exactWindowExcludesHistory
+                          ? 'No run in recent window'
+                          : 'No retained observation'
+                      : lane.status.charAt(0).toUpperCase() + lane.status.slice(1)
+                    const noTerminalLabel = stagehandHasNoHistory
+                      ? '실행 기록 미보존'
+                      : exactWindowExcludesHistory
+                        ? '최근 완료 관측 없음'
+                        : '관측 기록 없음'
+                    const statusClass = lane.status === 'degraded' || lane.status === 'unavailable'
+                      ? 'text-[var(--color-danger)]'
+                      : lane.status === 'running'
+                        ? 'text-[var(--status-warn)]'
+                        : 'text-[var(--color-fg-primary)]'
+                    const jevLabel = lane.laneId !== 'board_attention_exact' || lane.jev === null
+                      ? null
+                      : lane.jev.state === 'off'
+                        ? 'JEV OFF'
+                        : lane.jev.state === 'cli_only'
+                          ? 'JEV unavailable: Board lane is CLI-only'
+                          : lane.jev.state === 'lane_unavailable'
+                            ? 'JEV unavailable: Board lane is not ready'
+                            : `JEV CONFIGURED · ${lane.jev.destinations.map(d => `${d.destinationUri} (${d.model})`).join(', ')}`
+                    return html`
+                      <tr key=${lane.laneId} ref=${target?.lane === lane.laneId ? targetRow : undefined}
+                        tabIndex=${target?.lane === lane.laneId ? -1 : undefined} aria-current=${target?.lane === lane.laneId ? 'true' : undefined}
+                        aria-label=${`Lane observation ${lane.laneId}`}>
+                        <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code><p class="text-xs text-[var(--color-fg-muted)]">${lane.purpose}</p>${jevLabel === null ? null : html`<br /><span class="mono text-3xs">${jevLabel}</span>`}</td>
+                        <td class=${statusClass}><strong>${statusLabel}</strong><br /><span class="text-3xs">Config: ${lane.configurationState}</span>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
+                        <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
+                        <td class="r mono">${lane.runningCount}</td>
+                        <td class="r mono">${lane.retainedRunCount}</td>
+                        <td class="r mono">${lane.lastTerminalAt === null ? noTerminalLabel : `${lane.lastOutcome ?? 'terminal'} · ${formatDateTimeKo(lane.lastTerminalAt)}`}</td>
+                        <td class="r mono">${formatElapsed(lane.p50ElapsedSeconds ?? undefined)}</td>
+                        <td class="mono">${lane.selectedSlots.length === 0 ? '—' : lane.selectedSlots.map(slot => `${slot.slotId} ×${slot.count}`).join(', ')}</td>
+                      </tr>
+                    `
+                  })}
+                </tbody>
+              </table>
+            </div>
+          `}
+      </section>
+
+      ${errors.length > 0 ? html`<${ErrorState} message=${'Run observations incomplete or stale; retained rows may be older. ' + errors.join(' · ')} />` : null}
+      <section class="grid gap-2" aria-labelledby="internal-agent-inventory-title">
+        <div class="flex items-end gap-2">
+          <h3 id="internal-agent-inventory-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Observed run inventory</h3>
+          <span class="text-3xs text-[var(--color-fg-muted)]">0건인 lane도 숨기지 않습니다.</span>
+        </div>
+        <div class="ai-strip">
+          ${inventory.map(item => html`
+            <button
+              key=${item.id}
+              type="button"
+              class=${`ai-stat cursor-pointer text-left ${!target && filter === item.id ? 'border-[var(--volt-strong)]' : ''}`}
+              aria-pressed=${!target && filter === item.id}
+              onClick=${() => setFilter(item.id)}
+            >
+              <span class="k">${item.label}</span>
+              <span class="v mono">${item.count ?? "—"}</span>
+              <span class="cl-sub mono">${inventoryReadingCaption(item.reading, item.latest)}</span>
+            </button>
+          `)}
+        </div>
+      </section>
+
+      <section class="grid gap-2" aria-labelledby="internal-agent-owner-title">
+        <div class="flex items-end gap-2">
+          <h3 id="internal-agent-owner-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Owner × execution kind</h3>
+          <span class="text-3xs text-[var(--color-fg-muted)]">Keeper Fleet와 exact identity로 조인합니다.</span>
+        </div>
+        <div class="ai-tablewrap">
+          <table class="ai-table">
+            <thead>
+              <tr><th>Owner</th>${inventory.map(item => html`<th key=${item.id} class="r">${item.label}</th>`)}<th class="r">Last observed</th></tr>
+            </thead>
+            <tbody>
+              ${owners.map(owner => html`
+                <tr key=${owner.name}>
+                  <td><a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(owner.name)}>${owner.name}</a> <span class="dim mono">${completeReading ? owner.total : "—"}</span></td>
+                  ${inventory.map(item => {
+                    const count = owner.counts[item.id as Exclude<Filter, 'all'>]
+                    return html`<td key=${item.id} class=${`r mono ${count === 0 ? 'dim' : ''}`}>${item.count === null ? "—" : count}${item.reading === "stale" ? " · STALE" : ""}</td>`
+                  })}
+                  <td class="r dim mono">${ownerLastObserved(owner.latest, completeReading, allFresh)}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="ia-filters" role="group" aria-label="Internal agent filters">
+        ${FILTERS.map(item => html`
+          <button
+            key=${item.id}
+            type="button"
+            class=${`ia-filter ${!target && filter === item.id ? 'on' : ''}`}
+            aria-pressed=${!target && filter === item.id}
+            onClick=${() => setFilter(item.id)}
+          >${item.label} ${item.id === 'all' ? completeReading ? rows.length : '—' : inventory.find(entry => entry.id === item.id)?.count ?? '—'}</button>
+        `)}
+      </div>
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+        <${KeeperTurnInspectorPanel} keepers=${keepers} />
+      </div>
+      <div class="flex items-end gap-2">
+        <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Run timeline</h3>
+        <span class="text-3xs text-[var(--color-fg-muted)]">절대 시각 + 상대 시각 + elapsed</span>
+      </div>
+      ${!loading && visible.length === 0
+        ? html`<div class="ia-empty">${targetHistory?.kind === 'not_retained' ? 'Run history is not retained for this Lane.' : selectedReading === 'ready' ? 'No internal agent runs for this filter.' : selectedReading === 'stale' ? 'STALE · No runs in the last successful observation.' : 'Run observations unavailable for this filter.'}</div>`
+        : html`<div class="ia-list">
+            ${visible.map(({ row, stale }) => {
+              const open = expanded === row.id
+              const startIso = new Date(startedAt(row) * 1000).toISOString()
+              return html`
+                <article key=${row.id} class=${`ia-card ${open ? 'on' : ''}`}>
+                  <button
+                    type="button"
+                    class="ia-row"
+                    aria-expanded=${open}
+                    onClick=${() => setExpanded(open ? null : row.id)}
+                  >
+                    <span class="ia-badge" data-tone=${tone(row)}><i></i>${status(row)}</span>
+                    <span class="ia-sub">
+                      <b>${laneLabel(row)}</b>
+                      <code class="mono" title=${subject(row)}>${subject(row)}</code>
+                      ${row.source === 'exact' && row.run.lane === 'librarian_exact'
+                        ? html`<code translate="no" class="mono" title=${row.run.runId}>run_id · ${row.run.runId}</code>`
+                        : null}
+                    </span>
+                    <span class="ia-meta mono">
+                      ${stale ? html`<span>STALE</span>` : null}
+                      <span>${actor(row)}</span>
+                      <span><time dateTime=${startIso}>${formatDateTimeKo(startedAt(row))}</time> · ${relativeTime(startIso)}</span>
+                      <span>elapsed ${formatElapsed(elapsed(row))}</span>
+                    </span>
+                  </button>
+                  ${open ? html`<${Details} row=${row} />` : null}
+                </article>
+              `
+            })}
+          </div>`}
+    </section>
+  `
+}

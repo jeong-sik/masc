@@ -1,0 +1,38 @@
+{
+  "profile_source": "f69b7b40a379f3b3ff7fd8060b041d0315b15851",
+  "profile_sha256": "00a12ce1594acab5623d33fe10eabe953ec2b0b6790d4017128cf622e97758f4",
+  "source_file": "bin/masc_tui_theme.ml",
+  "source_file_sha256": "0ce74cb97631b0d1bf59f4ac96459721385d5daefa0ebf04302750ce118101f7",
+  "same_source_at_PR_base": "b09463d18da5fe9208cd7984f6100c59244c878d",
+  "profile_occurrences": [
+    {
+      "line": 1122,
+      "text": "    + !   : |       !   : 1 camlMasc_tui_theme$go_885  (in masc_tui.exe) + 40  [0x102a99608]"
+    },
+    {
+      "line": 1334,
+      "text": "    + ! : | +   21 camlMasc_tui_theme$go_885  (in masc_tui.exe) + 204,344,...  [0x102a996ac,0x102a99738,...]"
+    },
+    {
+      "line": 1575,
+      "text": "    + 36 camlMasc_tui_theme$go_885  (in masc_tui.exe) + 416  [0x102a99780]"
+    },
+    {
+      "line": 1576,
+      "text": "    + ! 23 camlMasc_tui_theme$go_885  (in masc_tui.exe) + 104,52,...  [0x102a99648,0x102a99614,...]"
+    },
+    {
+      "line": 2029,
+      "text": "    + 3 camlMasc_tui_theme$go_885  (in masc_tui.exe) + 320  [0x102a99720]"
+    },
+    {
+      "line": 2030,
+      "text": "    + ! 2 camlMasc_tui_theme$go_885  (in masc_tui.exe) + 28,380  [0x102a995fc,0x102a9975c]"
+    },
+    {
+      "line": 2981,
+      "text": "        camlMasc_tui_theme$go_885  (in masc_tui.exe)        47"
+    }
+  ],
+  "profile_location": "https://github.com/jeong-sik/masc/blob/bff54dd755d4e34f15db001952e645c0a36841c0/docs/evidence/tui-footer-pinned-key-rules-2026-09-26/native-sample.txt"
+}

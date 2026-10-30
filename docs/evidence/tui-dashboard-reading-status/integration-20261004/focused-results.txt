@@ -1,0 +1,4 @@
+FOCUSED_RESULT failed_source PASS
+FOCUSED_RESULT each_failed_source PASS
+FOCUSED_RESULT receipt PASS
+FOCUSED_RESULT receipt_held PASS

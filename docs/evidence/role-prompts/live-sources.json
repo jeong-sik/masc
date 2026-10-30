@@ -1,0 +1,44 @@
+[
+  {
+    "key": "fusion.judge",
+    "source": "file",
+    "bytes": 276,
+    "sha256": "7761c91e3768637e6fca935c997985faca9cc0dfbb43a1ce6b0d0ea646011e10"
+  },
+  {
+    "key": "fusion.judge.output",
+    "source": "file",
+    "bytes": 831,
+    "sha256": "46a159e7fde50b86997f57bcc76656d6eece1dbe135209db06399dd438ff8619"
+  },
+  {
+    "key": "goal_verification.proof",
+    "source": "file",
+    "bytes": 1586,
+    "sha256": "0fd591dd6efd77594d97604c14caaaa1778cfadd0b903e4a283e3d456c196555"
+  },
+  {
+    "key": "judge.board",
+    "source": "file",
+    "bytes": 1071,
+    "sha256": "d149e19679c443f32b8f6bccb558207ea45035ae03c7faa1b61b6c1fd5e12575"
+  },
+  {
+    "key": "judge.effect",
+    "source": "file",
+    "bytes": 6820,
+    "sha256": "394a0755b8ac8a8f575393bbf806a43925620eff025b9a609fc93f8ab3fb8191"
+  },
+  {
+    "key": "librarian",
+    "source": "file",
+    "bytes": 16529,
+    "sha256": "1ea12402eb881a64f4360a51fd6208a4416e8e6b0d896dea5860f71be57846d1"
+  },
+  {
+    "key": "verification",
+    "source": "file",
+    "bytes": 3319,
+    "sha256": "f228fc395b98c904996d59dc2d07ba77385f53a9dd2dc9b1e087b7e5c3cb9afe"
+  }
+]

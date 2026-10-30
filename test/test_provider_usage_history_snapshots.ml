@@ -1,0 +1,251 @@
+open Alcotest
+open Masc
+module Usage = Runtime_provider_usage_window
+module History = Server_provider_usage_history
+
+let decode decoder json = match decoder (Yojson.Safe.from_string json) with
+  | Ok report -> report | Error error -> fail (Usage.decode_error_to_string error)
+
+let usage_journal config =
+  Dated_jsonl.open_store
+    (Dated_jsonl.Store.at
+       (Workspace_utils.dated_store_root config)
+       Provider_usage_history)
+
+let fixture test = Eio_main.run (fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base = Filename.temp_dir "provider-usage-history-" "" in
+  let config = Workspace.default_config base in
+  let scope = Runtime_quota_window.scope_of_credential ~provider_id:base None in
+  let day = floor (Unix.gettimeofday () /. 86400.) *. 86400. in
+  Fun.protect ~finally:(fun () ->
+    Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ -> ());
+    Fs_compat.remove_tree base) (fun () -> History.install config; test config scope day))
+
+let history config now =
+  match History.read config ~now ~window:History.Seven_days with
+  | Error detail -> fail detail
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      check int "all persisted records remain readable" 0 (json |> member "unreadable_reports" |> to_int);
+      (match Tui_decode_usage.decode_provider_usage_history json with
+       | Ok _ -> () | Error detail -> fail detail);
+      json
+
+let points config now = Yojson.Safe.Util.(history config now |> member "points" |> to_list)
+let empty_reports config now = Yojson.Safe.Util.(history config now |> member "reported_no_windows" |> to_list)
+
+let kind point = Yojson.Safe.Util.(point |> member "kind" |> to_string)
+let observed point = Yojson.Safe.Util.(point |> member "observed_at" |> to_float)
+
+let removed_cap_and_empty_snapshot () = fixture (fun config scope day ->
+  let cap = decode Usage.decode_openrouter_key {|{"data":{"limit":20,"limit_remaining":0}}|} in
+  let uncapped = decode Usage.decode_openrouter_key {|{"data":{"limit":null,"usage":21.5}}|} in
+  Usage.record ~scope ~observed_at:(day -. 1.) cap;
+  Usage.record ~scope ~observed_at:(day +. 10.) cap;
+  Usage.record ~scope ~observed_at:(day +. 20.) uncapped;
+  let rows = points config (day +. 21.) in
+  check int "prior day plus current uncapped report" 2 (List.length rows);
+  check bool "spent cap is absent from current day" false
+    (List.exists (fun row -> observed row >= day && kind row = "provider:API key credit limit") rows);
+  let current = List.find (fun row -> observed row >= day) rows in
+  check string "uncapped USD survives the history boundary" "usd"
+    Yojson.Safe.Util.(current |> member "unit" |> to_string);
+  check (float 0.) "uncapped amount retained" 21.5
+    Yojson.Safe.Util.(current |> member "value" |> to_float);
+  Usage.record ~scope ~observed_at:(day +. 30.)
+    (decode Usage.decode_openrouter_key {|{"data":{"limit":null}}|});
+  let rows = points config (day +. 31.) in
+  check int "empty report clears today, not prior days" 1 (List.length rows);
+  let empty = empty_reports config (day +. 31.) in
+  check int "successful empty day remains reported" 1 (List.length empty);
+  check (float 0.) "empty snapshot has its actual observation time" (day +. 30.) (observed (List.hd empty));
+  check (float 0.) "yesterday retains its observed cap" (day -. 1.) (observed (List.hd rows));
+  (* A delayed old-format journal append must not revive a window removed by
+     the later snapshot. This also covers reading the pre-marker store format. *)
+  let journal = usage_journal config in
+  Dated_jsonl.append journal (`List [`Assoc [
+    "scope_id", `String (History.scope_id scope); "source", `String (Usage.source_to_string Openrouter_key_read);
+    "kind", `String "provider:credit limit"; "limit_id", `Null;
+    "observed_at", `Float (day +. 25.); "resets_at", `Null;
+    "unit", `String "fraction"; "value", `Float 1.]]);
+  check int "late stored old cap stays removed" 1 (List.length (points config (day +. 31.))))
+
+let complete_and_sparse_sources () = fixture (fun config scope day ->
+  let antigravity disabled = decode Usage.decode_antigravity_usage (Printf.sprintf
+    {|{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"week","window":"weekly","remaining_fraction":0},{"id":"short","window":"5h","remaining_fraction":0,"disabled":%b}]}]}}}|} disabled) in
+  Usage.record ~scope ~observed_at:(day +. 10.) (antigravity false);
+  Usage.record ~scope ~observed_at:(day +. 20.) (antigravity true);
+  let rows = points config (day +. 21.) in
+  check (list string) "disabled bucket omitted from daily latest report" ["seven_day"] (List.map kind rows);
+  let codex = decode Usage.decode_codex_rate_limits_updated in
+  Usage.record ~scope ~observed_at:(day +. 10.)
+    (codex {|{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300},"secondary":{"usedPercent":20,"windowDurationMins":10080}}}|});
+  Usage.record ~scope ~observed_at:(day +. 20.)
+    (codex {|{"rateLimits":{"primary":null,"secondary":{"usedPercent":21,"windowDurationMins":10080}}}|});
+  Usage.record ~scope ~observed_at:(day +. 30.) (antigravity true);
+  let rows = points config (day +. 31.) |> List.filter (fun row ->
+    Yojson.Safe.Util.(row |> member "source" |> to_string)
+      = Usage.source_to_string Codex_account_rate_limits_updated) in
+  check (list string) "sparse updates retain unstated windows" ["five_hour"; "seven_day"] (List.map kind rows);
+  let primary = List.find (fun row -> kind row = "five_hour") rows in
+  check (float 0.) "sparse primary retains its original observation" (day +. 10.) (observed primary))
+
+let empty_day_and_recovery () = fixture (fun config scope day ->
+  let empty = decode Usage.decode_openrouter_key {|{"data":{"limit":null}}|} in
+  Usage.record ~scope ~observed_at:(day +. 10.) empty;
+  check int "empty-only account has no invented utilization" 0 (List.length (points config (day +. 11.)));
+  check int "empty-only account retains the successful report" 1 (List.length (empty_reports config (day +. 11.)));
+  Usage.record ~scope ~observed_at:(day +. 20.)
+    (decode Usage.decode_openrouter_key {|{"data":{"limit":20,"limit_remaining":15}}|});
+  check int "numeric recovery replaces empty state" 0 (List.length (empty_reports config (day +. 21.)));
+  check int "numeric recovery remains measured" 1 (List.length (points config (day +. 21.)));
+  Usage.record ~scope ~observed_at:(day +. 30.) empty;
+  Usage.record ~scope ~observed_at:(day +. 40.)
+    (decode Usage.decode_codex_rate_limits_updated {|{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300}}}|});
+  check int "another source's surviving window prevents an empty-day claim" 0
+    (List.length (empty_reports config (day +. 41.)));
+  check int "another source's window remains" 1 (List.length (points config (day +. 41.))))
+
+let overlapping_sources () = fixture (fun config scope day ->
+  let codex = decode Usage.decode_codex_rate_limits_updated
+    {|{"rateLimits":{"limitId":"shared","primary":{"usedPercent":10,"windowDurationMins":300}}}|} in
+  let antigravity disabled = decode Usage.decode_antigravity_usage (Printf.sprintf
+    {|{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"shared","window":"5h","remaining_fraction":0.2,"disabled":%b}]}]}}}|} disabled) in
+  Usage.record ~scope ~observed_at:(day +. 10.) codex;
+  Usage.record ~scope ~observed_at:(day +. 20.) (antigravity false);
+  let rows = points config (day +. 21.) in
+  check int "same logical window has one daily point" 1 (List.length rows);
+  check (float 0.) "newest surviving source selected" (day +. 20.) (observed (List.hd rows));
+  Usage.record ~scope ~observed_at:(day +. 30.) (antigravity true);
+  let rows = points config (day +. 31.) in
+  check int "other source survives complete omission of same-kind window" 1 (List.length rows);
+  check (float 0.) "surviving source keeps its original timestamp" (day +. 10.) (observed (List.hd rows));
+  check int "another surviving source prevents a false empty day" 0
+    (List.length (empty_reports config (day +. 31.))))
+
+let legacy_openrouter_label ~old_kind ~current_kind ~report ~unit ~value ~extra () = fixture (fun config scope day ->
+  let journal = usage_journal config in
+  let legacy ~source ~observed_at = `Assoc ([
+    "scope_id", `String (History.scope_id scope); "source", `String source;
+    "kind", `String old_kind; "limit_id", `Null;
+    "observed_at", `Float observed_at; "resets_at", `Null;
+    "unit", `String unit; "value", `Float value] @ extra) in
+  Dated_jsonl.append journal (`List [
+    legacy ~source:(Usage.source_to_string Openrouter_key_read) ~observed_at:(day -. 1.);
+    legacy ~source:(Usage.source_to_string Openrouter_key_read) ~observed_at:(day +. 1.);
+    legacy ~source:(Usage.source_to_string Codex_account_rate_limits_updated)
+      ~observed_at:(day -. 86401.)]);
+  Usage.record ~scope ~observed_at:(day +. 10.)
+    (decode Usage.decode_openrouter_key report);
+  let rows = points config (day +. 11.) in
+  let openrouter = List.filter (fun row ->
+    Yojson.Safe.Util.(row |> member "source" |> to_string)
+      = Usage.source_to_string Openrouter_key_read) rows in
+  check int "one old day and one current day" 2 (List.length openrouter);
+  check (list string) "old and new days share the current series identity"
+    [current_kind; current_kind]
+    (List.map kind openrouter);
+  let old = List.find (fun row -> observed row < day) openrouter in
+  check string "historical measurement unit is preserved" unit
+    Yojson.Safe.Util.(old |> member "unit" |> to_string);
+  check (float 0.) "historical measured value retained" value
+    Yojson.Safe.Util.(old |> member "value" |> to_float);
+  let other = List.find (fun row ->
+    Yojson.Safe.Util.(row |> member "source" |> to_string)
+      = Usage.source_to_string Codex_account_rate_limits_updated) rows in
+  check string "other source's same label is not renamed" old_kind (kind other))
+
+let damaged_journal_keeps_readable_history () = fixture (fun config scope day ->
+  let cap = decode Usage.decode_openrouter_key
+    {|{"data":{"limit":20,"limit_remaining":5}}|} in
+  Usage.record ~scope ~observed_at:(day -. 1.) cap;
+  Usage.record ~scope ~observed_at:(day +. 5.) cap;
+  let scope_id = History.scope_id scope in
+  let point ~limit_id ~observed_at value =
+    [ "scope_id", `String scope_id
+    ; "source", `String (Usage.source_to_string Codex_account_rate_limits_updated)
+    ; "kind", `String "five_hour"
+    ; "limit_id", `String limit_id
+    ; "observed_at", `Float observed_at
+    ; "resets_at", `Null
+    ; "unit", `String "percent"
+    ; "value", `Int value
+    ]
+  in
+  let journal = usage_journal config in
+  let outside = day -. 7. *. 86400. in
+  (* A bad item does not discard its valid neighbors. Its timestamp is outside
+     the query, but full decoding still reports the missing nullable field. *)
+  Dated_jsonl.append journal (`List [
+    `Assoc (point ~limit_id:"before" ~observed_at:(day +. 10.) 10);
+    `Assoc (List.remove_assoc "limit_id"
+      (point ~limit_id:"invalid" ~observed_at:outside 99));
+    `Assoc (point ~limit_id:"after" ~observed_at:(day +. 20.) 20);
+    `Assoc (point ~limit_id:"too-old" ~observed_at:outside 30);
+    `Assoc (point ~limit_id:"future" ~observed_at:(day +. 100.) 40)]);
+  let location = Dated_jsonl.Store.at
+    (Workspace_utils.dated_store_root config) Provider_usage_history in
+  let dated = Dated_jsonl.Store.dated_path location ~ts:day in
+  Fs_compat.append_file dated.path "{broken-json\n";
+  Dated_jsonl.append journal (`Int 42);
+  (* A later real complete report still replaces only its own current day;
+     the other source's neighbors and the prior UTC day's cap survive. *)
+  Usage.record ~scope ~observed_at:(day +. 40.)
+    (decode Usage.decode_openrouter_key {|{"data":{"limit":null,"usage":21.5}}|});
+  let json = match History.read config ~now:(day +. 50.) ~window:History.Seven_days with
+    | Ok json -> json | Error detail -> fail detail in
+  let reading = match Tui_decode_usage.decode_provider_usage_history json with
+    | Ok reading -> reading | Error detail -> fail detail in
+  check int "item, syntax and non-list failures reach the consumer" 3
+    reading.puh_unreadable_reports;
+  check int "valid neighbors, prior day and later report survive" 4
+    (List.length reading.puh_points);
+  check int "corruption is not a successful empty report" 0
+    (List.length reading.puh_reported_no_windows);
+  check bool "every point retains the opaque scope" true
+    (List.for_all (fun (point : Tui_decode_usage.provider_usage_history_point) ->
+      point.puhp_scope_id = scope_id) reading.puh_points);
+  let by_limit limit_id = List.find
+    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
+      point.puhp_limit_id = Some limit_id) reading.puh_points in
+  List.iter (fun (limit_id, at, expected) ->
+    let point = by_limit limit_id in
+    check (float 0.) "neighbor observation time survives" at point.puhp_observed_at;
+    match point.puhp_unit with
+    | Tui_decode_usage.Utilization_percent value ->
+        check int "neighbor utilization survives" expected value
+    | Utilization_fraction _ | Utilization_usd _ -> fail "neighbor unit changed")
+    ["before", day +. 10., 10; "after", day +. 20., 20];
+  let prior = List.find
+    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
+      point.puhp_observed_at < day) reading.puh_points in
+  check (float 0.) "append day does not replace observation day" (day -. 1.)
+    prior.puhp_observed_at;
+  check string "prior day's cap remains" "provider:API key credit limit" prior.puhp_kind;
+  let current = List.find
+    (fun (point : Tui_decode_usage.provider_usage_history_point) ->
+      point.puhp_observed_at = day +. 40.) reading.puh_points in
+  match current.puhp_unit with
+  | Tui_decode_usage.Utilization_usd { used; limit = None } ->
+      check (float 0.) "later uncapped report survives malformed rows" 21.5 used
+  | Utilization_usd { limit = Some _; _ } | Utilization_fraction _
+  | Utilization_percent _ -> fail "later report lost its uncapped USD amount")
+
+let () = run "provider usage durable snapshots" ["history", [
+  test_case "damaged journal retains readable history through the typed decoder" `Quick
+    damaged_journal_keeps_readable_history;
+  test_case "legacy OpenRouter credit label retains history identity" `Quick
+    (legacy_openrouter_label ~old_kind:"provider:credit limit"
+      ~current_kind:"provider:API key credit limit"
+      ~report:{|{"data":{"limit":20,"limit_remaining":5}}|}
+      ~unit:"fraction" ~value:0.5 ~extra:[]);
+  test_case "uncapped OpenRouter usage retains history identity" `Quick
+    (legacy_openrouter_label ~old_kind:"provider:credit usage (all time)"
+      ~current_kind:"provider:API key usage (all time)"
+      ~report:{|{"data":{"limit":null,"usage":21.5}}|}
+      ~unit:"usd" ~value:12.5 ~extra:["limit", `Null]);
+  test_case "overlapping source windows survive another source's empty report" `Quick overlapping_sources;
+  test_case "empty-only day, recovery and another reporting source" `Quick empty_day_and_recovery;
+  test_case "removed cap, empty report, prior day and delayed journal" `Quick removed_cap_and_empty_snapshot;
+  test_case "complete bucket omission and sparse event semantics" `Quick complete_and_sparse_sources]]

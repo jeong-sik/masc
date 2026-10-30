@@ -1,0 +1,53 @@
+{
+  "checked_at": "2026-10-04T17:23:23.666837+00:00",
+  "parent": "468befeab53c0851ec4c2e8717acdbc67c361177",
+  "compiled_fixed_source_tree": "0aac60cf8e0637f59ff19e135bce2e49784cb516",
+  "head": "8c2cc2e76675ed8c50a4a7e01d85905988756aa8",
+  "scope": "focused actual native and TUI PTY with synthetic HTTP, not full suite/realBrowser/CI/deployment",
+  "results": {
+    "red_build_exit": 0,
+    "red_pty_exit": 1,
+    "green_build_exit": 0,
+    "green_pty_exit": 0,
+    "native_tests": 15,
+    "native_exit": 0,
+    "ruff_exit": 0,
+    "pyright_errors": 1,
+    "baseline_pyright_errors": 1,
+    "new_pyright_errors": 0
+  },
+  "source_sha256": {
+    "bin/dune": "e1cc37c764f9b3de1be18a80ed6194d3bbf63cec4e5f09298efdfbe80cfb60b6",
+    "bin/masc_tui.ml": "954d258a32027d9f7816a990a2dc19441a4304844cba777352b6c4acb8895ae4",
+    "bin/masc_tui_async_protocol.ml": "8404ab453ed957d6a27355036371a54d68f9ac4f109e7e6c45f091a16117644d",
+    "bin/masc_tui_async_protocol.mli": "8404ab453ed957d6a27355036371a54d68f9ac4f109e7e6c45f091a16117644d",
+    "bin/masc_tui_browser_activity.ml": "a80d08f44c38a94024cd6387a4500441fdad7273328cb58513e6b23c7ac80520",
+    "bin/masc_tui_browser_activity.mli": "bc140783d36cfd715cba8ba0e1445df0864b4dba79ba6fb8ab2f418ff6aaf685",
+    "bin/masc_tui_keys.ml": "4ef816fbb4e82a7b353bf0d1f562fb218611bc71d7efdf30b0cac5d527bda35b",
+    "bin/masc_tui_render.ml": "51df0ff010b658ace442cc2a4617a43001940407831917aa1469f3177d0f60b7",
+    "bin/masc_tui_types.ml": "f1ea7c5d8252f60b6982331647263be3d0c48981eb8944ebbe2f3ac4ffb39f16",
+    "changelog.d/41187.md": "b5286e496b872e361d0de3ec806a5f3206493d668e54cda48c7061ee9ba3b44c",
+    "docs/design/browser-lane-examples.md": "ec33e55cd8df78106cde63bfa10efa7d96165b96b4fb26d4c7b873403c28035e",
+    "docs/guides/tui-browser-lanes.md": "67fe204ca6a3b7126b4365df07f56abdce5822e6bd625acbfaf0f0b32f73dd0f",
+    "test/dune": "8e9c60514895c97480f6cc9e155fbc07304a596413847a011b4c17040098374b",
+    "test/test_tui_browser_activity.ml": "63ee1b2aa815fb7cd72cb3d90e6f43d1b9c2140030d6d39466953e4b549f621b",
+    "test/test_tui_browser_activity_pty.py": "a3ff3ed298fc431d9dc804e99ea69e6f00a3eb6971ed9102348d3193a89ed3e0"
+  },
+  "binary_sha256": {
+    "_build/default/bin/masc_tui.exe": "d9b7325e59d86e1b965ae9216ed48b1d3c021d19700e8634d22424191fd19a27",
+    "_build/default/test/test_tui_browser_activity.exe": "710b17f557dbb7e1eada00380fd665b99051074691e410d31f27f0a72af8b22e"
+  },
+  "artifact_sha256": {
+    "docs/evidence/2026-10-05-pr41187-help-response/README.md": "990caa59959af829d49723d6c10f03f84d7803b3d82f8463eb1514070bf49349",
+    "docs/evidence/2026-10-05-pr41187-help-response/red-build.log": "95fcfbee66575cdb60b2b27cf3f38f4a80a693a828288ff6eb15cf4a0b8fadde",
+    "docs/evidence/2026-10-05-pr41187-help-response/native-tests.log": "e0200a95d0205e89b31b9918888b66c991e34025afed5ba5b2ff9dc2554cf514",
+    "docs/evidence/2026-10-05-pr41187-help-response/red-pty.log": "91f02e261c7f881172918a70d1d19adb1cd7a605f766f5a75c5c0f2059bcd68d",
+    "docs/evidence/2026-10-05-pr41187-help-response/red-screen.txt": "1bdb654e2e697fbb1c0a78cb17ae2854b08dc3d42be50ab131aa755d00e1b615",
+    "docs/evidence/2026-10-05-pr41187-help-response/red-identities.json": "a1dcdc3725a63f0f1a4c660673bb933395c86f1e475c5ea607654ad4cfac2e3a",
+    "docs/evidence/2026-10-05-pr41187-help-response/green-build.log": "2a3d00de5f6e604a37c718e0f9b961478ab02d928f3f0b3dd973ef662f42c689",
+    "docs/evidence/2026-10-05-pr41187-help-response/green-pty.log": "b3121cf3c1495693f5ea77da24c80c0a9d932d9b92386fa6cc2c1f0776493cd1",
+    "docs/evidence/2026-10-05-pr41187-help-response/ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/evidence/2026-10-05-pr41187-help-response/pyright.json": "7e05004b230eed379bb266cb924a91cc340f85d22c22fa05e173d6118d267c1b",
+    "docs/evidence/2026-10-05-pr41187-help-response/baseline-pyright.json": "00c20d133e1d93e52b1602d8a0d982a0942791db013ac8c297854f8c275c5d2d"
+  }
+}

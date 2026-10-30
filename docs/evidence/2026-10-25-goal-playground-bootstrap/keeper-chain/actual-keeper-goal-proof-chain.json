@@ -1,0 +1,270 @@
+{
+  "schema": "masc.keeper-goal-proof-chain-public.v1",
+  "verdict": "PASS_CONTROLLED_GOAL_ATTAINMENT_WITH_OPERATOR_WAIT_APPROVAL",
+  "scope": "One fresh Docker cohort using GLM-5.3. Three-flag Goal attainment reached an actual verifier proof; human confirmation remains pending.",
+  "runtime": {
+    "source_commit": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+    "binary_sha256": "c1ec353779d5fff6a9da9ec4290667ab9b5e158c28c34a7094a691d5d08277a4",
+    "sandbox_profile": "docker",
+    "image_sha256": "de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d",
+    "network_mode": "none",
+    "configured_model_slot": "glm-coding.glm-5-3",
+    "reported_models": [
+      "glm-5.3"
+    ],
+    "role_contexts_separate": true,
+    "independent_models": false
+  },
+  "evidence_integrity": {
+    "frozen_manifest_sha256": "35e24bd1ab9001ef25d143cc19aa61ea5c0a93e7d99cd75eac0cd4047e34050f",
+    "primary_copies_verified": 16,
+    "retained_originals_verified": 218,
+    "completed_requests": 60,
+    "completed_model_post_receipts": 59,
+    "request_response_hashes_verified": true,
+    "unique_tool_calls": 66,
+    "unique_tool_results": 66,
+    "all_transport_statuses": 200,
+    "context_blob_projections_verified": 28,
+    "projected_blob_hashes_match_original_tool_payloads": true
+  },
+  "operation": {
+    "id": "kmsg-fd19ec27475843c7012146e862cfdb97",
+    "state": "Succeeded",
+    "authoritative_api_and_readonly_sqlite_agree": true,
+    "final_turn": null,
+    "event_queue_pending_count": 0,
+    "final_user_response_sha256": "4efdc7d145be666d6c27ca63b15f94b2748dbf135bac9e44185fac1ba9c698d1",
+    "final_response_explicitly_waits_for_human_confirmation": true
+  },
+  "chain": {
+    "initial_message_contains_goal_id": false,
+    "initial_keeper_system_contains_matching_and_unrelated_goals": true,
+    "initial_keeper_system_contains_baseline": true,
+    "later_keeper_system_contains_real_partial_measurement": true,
+    "initial_flags": {
+      "alpha": false,
+      "beta": false,
+      "gamma": false
+    },
+    "first_task_strict_alpha_only": true,
+    "partial_measurement": {
+      "id": "6f798845a6afd9bd0df46a69f8f66299",
+      "criterion_revision": "44e5c1e15a081e05a68582a6d2869df9",
+      "actor": "goal-proof-chain",
+      "value": "1/3",
+      "call_id": "call_1f9286c308104063b11098a7"
+    },
+    "beta_gamma_edit_seconds_after_first_task_approval": 59.716103,
+    "final_flags": {
+      "alpha": true,
+      "beta": true,
+      "gamma": true
+    },
+    "final_measurement": {
+      "id": "78af0ee46423e49695608243077d6129",
+      "criterion_revision": "44e5c1e15a081e05a68582a6d2869df9",
+      "actor": "goal-proof-chain",
+      "value": "3/3",
+      "call_id": "call_98dd08720cb44ce995276924"
+    },
+    "measurement_receipt_alone_is_attainment_proof": false,
+    "final_task_states": {
+      "task-001": "done",
+      "task-002": "done",
+      "task-003": "done"
+    }
+  },
+  "task_reviews": [
+    {
+      "task_id": "task-003",
+      "verification_id": "vrf-1950a9c9357f276b9474d6fd8a7efb46",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact",
+      "evaluator_runtime": "glm-coding.glm-5-3",
+      "outcome": "approved",
+      "artifact": {
+        "reference": "artifact:workspace/factorial-result.txt",
+        "bytes": 6,
+        "truncated": false,
+        "sha256": "e966587eb3ff4f28de316758d1d21a34c5eb1829f6fa9c8ec54f0db13251dd0f",
+        "value": 40320
+      }
+    },
+    {
+      "task_id": "task-001",
+      "verification_id": "vrf-3d54aaaa5c7d626e2fe4ba89c8592104",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact",
+      "evaluator_runtime": "glm-coding.glm-5-3",
+      "outcome": "approved",
+      "artifact": {
+        "reference": "artifact:workspace/acceptance.json",
+        "bytes": 55,
+        "truncated": false,
+        "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+        "value": {
+          "alpha": true,
+          "beta": false,
+          "gamma": false
+        }
+      }
+    },
+    {
+      "task_id": "task-002",
+      "verification_id": "vrf-bb5291f7894b81a33d5cedffc3a565ad",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact",
+      "evaluator_runtime": "glm-coding.glm-5-3",
+      "outcome": "approved",
+      "artifact": {
+        "reference": "artifact:workspace/acceptance.json",
+        "bytes": 53,
+        "truncated": false,
+        "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+        "value": {
+          "alpha": true,
+          "beta": true,
+          "gamma": true
+        }
+      }
+    }
+  ],
+  "goal_proofs": [
+    {
+      "goal_id": "goal-keeper-proof-chain-b19d0b89ddea4e68815f1b1f6e9a2730",
+      "criterion_revision": "44e5c1e15a081e05a68582a6d2869df9",
+      "request_id": "c02c9cf67f6c7ad331e0df67cea6392f",
+      "run_id": "01a172a1-33fd-7000-bac5-2314ab3aa62e",
+      "state": "proof_proven",
+      "outcome": "proven",
+      "authority": {
+        "kind": "system_llm_agent",
+        "actor": "verifier_exact"
+      },
+      "recorded_at": "2026-10-25T10:35:59Z",
+      "actual_reads": [
+        {
+          "requested_locator": "docker/goal-proof-chain/workspace/acceptance.json",
+          "disposition": "completed",
+          "ok": true,
+          "bytes": 53,
+          "truncated": false,
+          "content_sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+        }
+      ],
+      "one_review_and_one_commit": true
+    },
+    {
+      "goal_id": "goal-unrelated-factorial-b19d0b89ddea4e68815f1b1f6e9a2730",
+      "criterion_revision": "0c0868ca1b5eeba46399deb115cb309a",
+      "request_id": "3d0c13bb335f2b3d143675cf5e371e11",
+      "run_id": "01a172a1-33de-7000-b4d3-0871712e0f52",
+      "state": "proof_proven",
+      "outcome": "proven",
+      "authority": {
+        "kind": "system_llm_agent",
+        "actor": "verifier_exact"
+      },
+      "recorded_at": "2026-10-25T10:36:09Z",
+      "actual_reads": [
+        {
+          "requested_locator": "workspace/factorial-result.txt",
+          "disposition": "completed",
+          "ok": true,
+          "bytes": 6,
+          "truncated": false,
+          "content_sha256": "e966587eb3ff4f28de316758d1d21a34c5eb1829f6fa9c8ec54f0db13251dd0f"
+        },
+        {
+          "requested_locator": "factorial-result.txt",
+          "disposition": "failed",
+          "ok": false,
+          "bytes": null,
+          "truncated": null,
+          "content_sha256": null
+        }
+      ],
+      "one_review_and_one_commit": true
+    }
+  ],
+  "retained_original_binding": [
+    {
+      "goal_id": "goal-keeper-proof-chain-b19d0b89ddea4e68815f1b1f6e9a2730",
+      "request_id": "c02c9cf67f6c7ad331e0df67cea6392f",
+      "run_id": "01a172a1-33fd-7000-bac5-2314ab3aa62e",
+      "original_digest": "8454c987b5ca4b4b3f53521f84f04b0a5f4f3bb54a9d1e2c35d754078653250c",
+      "owner_request_digest": "7a11abeef9c620e435e005f9e3860b282a28bf5b1ea0348e469d9e92e4974ce0",
+      "canonical_digests_match": true,
+      "latest_measurement_in_original": true,
+      "wire_carriers": [
+        "request-000048",
+        "request-000049",
+        "request-000051"
+      ],
+      "wire_user_and_system_exact": true
+    },
+    {
+      "goal_id": "goal-unrelated-factorial-b19d0b89ddea4e68815f1b1f6e9a2730",
+      "request_id": "3d0c13bb335f2b3d143675cf5e371e11",
+      "run_id": "01a172a1-33de-7000-b4d3-0871712e0f52",
+      "original_digest": "86203a1631e737927527d15dd809cb1c126ffe6353b214cffc569565f64209b7",
+      "owner_request_digest": "6908f3c95fb9502c3f6c54710b32e685eb34b89876859301d9fe9ab25baae45a",
+      "canonical_digests_match": true,
+      "latest_measurement_in_original": true,
+      "wire_carriers": [
+        "request-000046",
+        "request-000050",
+        "request-000052"
+      ],
+      "wire_user_and_system_exact": true
+    }
+  ],
+  "operator_interventions": {
+    "sleep_20_wait_approval": 1,
+    "prior_wait_auto_judge_result": "quarantined:domain_invalid_output",
+    "persistent_allow_rule_created": false,
+    "manual_task_approval": 0,
+    "semantic_nudge_after_initial_message": 0,
+    "human_goal_confirmation": 0,
+    "zero_count_scope": "Root intervention declaration corroborated by the observed operation and tool history"
+  },
+  "counterevidence": [
+    {
+      "severity": "P2_followup",
+      "issue": "Auxiliary rg did not execute: Node MODULE_NOT_FOUND at exit1 was returned as successful search matches. Required direct source reads still succeeded.",
+      "source": "lib/keeper/keeper_workspace_read_ops.ml:205",
+      "improvement": "Validate sandbox executable and entrypoint identity and retain typed execution failures."
+    },
+    {
+      "severity": "P2_followup",
+      "issue": "Task002 temporal condition was approved from Task context rather than an authoritative prior approval receipt.",
+      "current_run": "Independent trace proves the edits followed Task001 approval by 59.716103 seconds.",
+      "improvement": "Give temporal-contract reviewers immutable prior approval and execution receipts."
+    },
+    {
+      "severity": "observation",
+      "issue": "The same nonexistent artifact was requested three times despite explicit policy rejection; the Keeper later recovered."
+    },
+    {
+      "severity": "observation",
+      "issue": "The final 3/3 measurement narrative retained a stale Task002 awaiting-verification phrase; authoritative final backlog is Done."
+    },
+    {
+      "severity": "observation",
+      "issue": "The unrelated factorial proof had one failed auxiliary file read after its successful 6-byte source read."
+    },
+    {
+      "severity": "observation",
+      "issue": "One read-only status client session was renewed after 404; this was not a server restart."
+    }
+  ],
+  "limits": [
+    "Operator wait approval occurred; full autonomy is not established.",
+    "Both Goals are proof_proven and awaiting_confirmation; neither is human-confirmed complete.",
+    "A single GLM model served separate role contexts; model independence is not established.",
+    "This Docker cohort does not prove microVM or SSH source-read behavior, production installation, or population reliability.",
+    "Persisted final user response was checked; this audit does not add rendered browser or TUI evidence."
+  ],
+  "publication": "Allowlisted identifiers, hashes, facts and bounded findings only; local filesystem locations and complete model/tool outputs are omitted."
+}

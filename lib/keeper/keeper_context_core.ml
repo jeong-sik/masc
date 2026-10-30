@@ -1,0 +1,339 @@
+(** Keeper_context_core — shared keeper context utilities.
+
+    Accessors, JSON codecs, save/load extracted to
+    [Keeper_context_core_accessors] (godfile decomp). *)
+
+open Printf
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+include Keeper_context_core_accessors
+
+type 'persistence_error checkpoint_write_error =
+  | Tool_history_invalid of Keeper_transcript_unit.structural_error
+  | Persistence_error of 'persistence_error
+
+let checkpoint_write_error_to_string ~persistence_error_to_string = function
+  | Tool_history_invalid error ->
+    "tool history invalid: " ^ Keeper_transcript_unit.show_structural_error error
+  | Persistence_error error -> persistence_error_to_string error
+;;
+
+let resume_checkpoint_of_context (ctx : working_context) : Agent_core.Checkpoint.t =
+  let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
+  {
+    ctx.checkpoint with
+    version = Agent_core.Checkpoint.checkpoint_version;
+    system_prompt = Some (system_prompt_of_context ctx);
+    messages = messages_of_context ctx;
+    context = checkpoint_context;
+  }
+
+let context_of_agent_core_checkpoint (cp : Agent_core.Checkpoint.t) : working_context =
+  let system_prompt = Option.value ~default:"" cp.system_prompt in
+  let messages = cp.messages in
+  let context = Agent_core.Context.copy ~eio:true cp.context in
+  let checkpoint =
+    { cp with system_prompt = Some system_prompt; messages; context }
+  in
+  sync_agent_core_context { checkpoint }
+
+let checkpoint_for_persistence
+    ~base_path
+    ~(runtime_id : string)
+    ~(keeper_name : string)
+    ~(session : session_context)
+    ~(agent_name : string)
+    ~(ctx : working_context)
+  : (Agent_core.Checkpoint.t, Keeper_transcript_unit.structural_error) result =
+  let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
+  let checkpoint_messages = messages_of_context ctx in
+  (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
+     keeper whose runtime cannot take an image, evict any inline image to a
+     handle-only placeholder BEFORE it is persisted, so a reloaded checkpoint
+     can never re-materialise inline base64. A Url/File_id reference block is
+     not inline base64 (#33682): it persists as-is, and the RFC-0265 degrade
+     floor strips it from the dispatch view of a text-only runtime while the
+     persisted original stays requestable. Store-only here — checkpoint
+     writes must not block the turn fiber on a vision provider call (eager
+     extraction is site 1's job). Also the migration path for images persisted
+     by pre-existing checkpoints. A runtime that takes the image itself keeps
+     it. [runtime_id]/[keeper_name] are required so every checkpoint write path
+     is compiler-forced to name the runtime it persists for (N-of-M closure). *)
+  let checkpoint_messages =
+    List.map
+      (Keeper_vision_ingest.evict_message
+         ~base_path
+         ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+         ~mode:Keeper_vision_ingest.Store_only
+         ~delegate:(Keeper_vision_ingest.delegates_media ~runtime_id)
+         ~keeper_name)
+      checkpoint_messages
+  in
+  match Keeper_transcript_unit.validate checkpoint_messages with
+  | Error _ as error -> error
+  | Ok () ->
+    Ok
+      {
+        ctx.checkpoint with
+        version = Agent_core.Checkpoint.checkpoint_version;
+        session_id = session.session_id;
+        agent_name;
+        model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
+        system_prompt = Some (system_prompt_of_context ctx);
+        messages = checkpoint_messages;
+        created_at = Time_compat.now ();
+        context = checkpoint_context;
+      }
+
+let save_agent_core_checkpoint_classified
+    ~base_path
+    ~runtime_id
+    ~keeper_name
+    ~session
+    ~agent_name
+    ~ctx
+  =
+  match
+    checkpoint_for_persistence
+      ~base_path
+      ~runtime_id
+      ~keeper_name
+      ~session
+      ~agent_name
+      ~ctx
+  with
+  | Error error -> Error (Tool_history_invalid error)
+  | Ok checkpoint ->
+    (match
+       Keeper_checkpoint_store.save_agent_core_for_keeper
+         ~keeper_name
+         ~session_dir:session.session_dir
+         ~history_retained:
+           (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+         ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+         checkpoint
+     with
+     | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ } as outcome) ->
+       Ok (stored, outcome)
+     | Ok (Keeper_checkpoint_store.Stale_noop _ as outcome) -> Ok (checkpoint, outcome)
+     | Error error -> Error (Persistence_error error))
+
+let save_agent_core_checkpoint
+    ~base_path
+    ~runtime_id
+    ~keeper_name
+    ~session
+    ~agent_name
+    ~ctx
+  =
+  match
+    save_agent_core_checkpoint_classified
+      ~base_path
+      ~runtime_id
+      ~keeper_name
+      ~session
+      ~agent_name
+      ~ctx
+  with
+  | Ok (checkpoint, Keeper_checkpoint_store.Saved _)
+  | Ok (checkpoint, Keeper_checkpoint_store.Stale_noop _) -> Ok checkpoint
+  | Error e -> Error e
+
+(* ================================================================ *)
+(* Checkpoint Loading                                                *)
+(* ================================================================ *)
+
+(* What a load found. [Checkpoint_unread] is every failure other than a missing
+   file: the saved history was not seen, and may still be there. Its typed
+   cause lets a turn distinguish an intentional version cut from a failed
+   read, which must not produce an empty replacement history. *)
+type checkpoint_load =
+  | Checkpoint_loaded of working_context
+  | Checkpoint_absent
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
+
+let classified_load
+    ~(load :
+       session_dir:string ->
+       session_id:string ->
+       (Agent_core.Checkpoint.t, Keeper_checkpoint_store.checkpoint_load_error) result)
+    ~trace_id
+    ~base_dir
+  =
+  let session = create_session ~session_id:trace_id ~base_dir in
+  let agent_core_result = load ~session_dir:session.session_dir ~session_id:trace_id in
+  (match agent_core_result with
+   | Error (Superseded_version { expected; got }) ->
+       (* An intentional version cut affects this AGENT_CORE history only.
+          An official-client runtime owns its session separately and does
+          not save this checkpoint. The loader cannot promise a next save. *)
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_superseded))]
+         ();
+       Log.Keeper.warn
+         "keeper:%s AGENT_CORE checkpoint is version %d, superseded by %d; \
+          saved AGENT_CORE history was not loaded; official-client session state is separate"
+         trace_id got expected
+   | Error (Newer_version { expected; got }) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_parse))]
+         ();
+       Log.Keeper.error
+         "keeper:%s AGENT_CORE checkpoint is version %d, written by a later binary; \
+          this one reads %d and leaves it in place"
+         trace_id got expected
+   | Error (Parse_error detail) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_parse))]
+         ();
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint parse error: %s" trace_id detail
+   | Error (Store_error detail) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_store))]
+         ();
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint store error: %s" trace_id detail
+   | Error (Objects_invalid _ as error) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_store))]
+         ();
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint store error: %s" trace_id
+         (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+   | Error (Io_error detail | Read_failed { detail; _ }) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_io))]
+         ();
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint I/O error: %s" trace_id detail
+   | Error (Agent_core_error detail) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_failure))]
+         ();
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint agent-core error: %s" trace_id detail
+   | Error Not_found ->
+       Log.Keeper.debug "keeper:%s AGENT_CORE checkpoint not found" trace_id
+   | Ok _ -> ());
+  let unread error = session, Checkpoint_unread error in
+  match Keeper_checkpoint_store.turn_history_of_load agent_core_result with
+  | Ok (Saved_history checkpoint) ->
+    session, Checkpoint_loaded (context_of_agent_core_checkpoint checkpoint)
+  | Ok No_saved_history -> session, Checkpoint_absent
+  | Ok (Saved_history_superseded { expected; got }) ->
+    unread (Superseded_version { expected; got })
+  | Error error -> unread error
+
+(* A turn saves this lineage next, so its load keeps what it reads. *)
+let load_context_from_checkpoint_classified ~keeper_name ~trace_id ~base_dir =
+  classified_load
+    ~load:(Keeper_checkpoint_store.load_agent_core_for_save ~keeper_name)
+    ~trace_id
+    ~base_dir
+
+let load_context_from_checkpoint ~trace_id ~base_dir =
+  let session, load =
+    classified_load ~load:Keeper_checkpoint_store.load_agent_core ~trace_id ~base_dir
+  in
+  match load with
+  | Checkpoint_loaded ctx -> session, Some ctx
+  | Checkpoint_absent | Checkpoint_unread _ -> session, None
+
+(** Patch an AGENT_CORE checkpoint: unify session_id and normalize the last assistant
+    message's visible text. AGENT_CORE-owned internal replay blocks (reasoning/tool blocks) stay
+    typed content blocks; MASC only edits the visible text projection. New
+    writes keep the checkpoint [working_context] empty. *)
+let patch_checkpoint_last_assistant
+    (cp : Agent_core.Checkpoint.t) ~session_id ~response_text
+  : Agent_core.Checkpoint.t =
+  let visible_response_text = response_text in
+  let patch_assistant_message (msg : Agent_core.Types.message) =
+    let visible_is_blank = String.trim visible_response_text = "" in
+    let rec patch_content replaced acc = function
+      | [] ->
+          if replaced || visible_is_blank then List.rev acc
+          else List.rev (Agent_core.Types.Text visible_response_text :: acc)
+      | Agent_core.Types.Text _ :: rest when not replaced ->
+          let acc =
+            if visible_is_blank then acc
+            else Agent_core.Types.Text visible_response_text :: acc
+          in
+          patch_content true acc rest
+      | Agent_core.Types.Text _ :: rest -> patch_content replaced acc rest
+      | (Agent_core.Types.Thinking _
+         | Agent_core.Types.ReasoningDetails _
+         | Agent_core.Types.RedactedThinking _
+         | Agent_core.Types.ToolUse _
+         | Agent_core.Types.ToolResult _
+         | Agent_core.Types.Image _
+         | Agent_core.Types.Document _
+         | Agent_core.Types.Audio _ as block) :: rest ->
+          patch_content replaced (block :: acc) rest
+    in
+    let content =
+      if List.mem_assoc Agent_core.Types.Response_replay.metadata_key msg.metadata
+      then msg.Agent_core.Types.content
+      else patch_content false [] msg.Agent_core.Types.content
+    in
+    let rec content_unchanged left right =
+      match left, right with
+      | [], [] -> true
+      | Agent_core.Types.Text left :: left_rest,
+        Agent_core.Types.Text right :: right_rest
+        when String.equal left right ->
+        content_unchanged left_rest right_rest
+      | left_block :: left_rest, right_block :: right_rest
+        when left_block == right_block ->
+        content_unchanged left_rest right_rest
+      | [], _ :: _ | _ :: _, [] -> false
+      | ( Agent_core.Types.Text _
+        | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Image _
+        | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ ) :: _
+      , ( Agent_core.Types.Text _
+        | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Image _
+        | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ ) :: _ -> false
+    in
+    if content_unchanged content msg.Agent_core.Types.content
+       && Option.is_none msg.name
+       && Option.is_none msg.tool_call_id
+    then msg
+    else
+      (* The reconstruction keeps metadata only: name/tool_call_id stay
+         dropped because assistant messages never carry them in practice. *)
+      Agent_core.Types.make_message
+        ~origin:msg.origin ~metadata:msg.metadata
+        ~role:Agent_core.Types.Assistant
+        content
+  in
+  let rec patch_last_assistant suffix_rev = function
+    | [] -> cp.messages
+    | msg :: older_rev when msg.Agent_core.Types.role = Agent_core.Types.Assistant ->
+        let patched = patch_assistant_message msg in
+        if patched == msg
+        then cp.messages
+        else List.rev_append older_rev (patched :: suffix_rev)
+    | msg :: older_rev -> patch_last_assistant (msg :: suffix_rev) older_rev
+  in
+  let messages =
+    patch_last_assistant [] (List.rev cp.messages)
+  in
+  { cp with Agent_core.Checkpoint.session_id;
+            messages;
+            working_context = None }

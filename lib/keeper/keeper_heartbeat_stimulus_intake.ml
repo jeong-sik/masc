@@ -1,0 +1,1321 @@
+(** Event-Layer stimulus intake for the keeper heartbeat loop.
+
+    Extracted from [keeper_heartbeat_loop.ml] (lines 375-553) as part of
+    the godfile decomp campaign. Owns:
+
+    - the [heartbeat_event_intake] record returned to the heartbeat loop;
+    - per-class string labels used in Otel_metric_store and log lines;
+    - per-stimulus consumption ([consume_single_heartbeat_stimulus]);
+    - the bounded-batch intake function ([heartbeat_event_intake]) that reads
+      one durable snapshot. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+let stimulus_urgency_to_string = function
+  | Keeper_event_queue.Immediate -> "immediate"
+  | Keeper_event_queue.Normal -> "normal"
+  | Keeper_event_queue.Low -> "low"
+;;
+
+let pending_board_event_of_stimulus ~base_path ~meta_after_triage stim =
+  Keeper_world_observation.pending_board_event_of_stimulus ~base_path ~meta:meta_after_triage stim
+;;
+
+type stimulus_intake_result =
+  | Stimulus_consumed of Keeper_world_observation.pending_board_event list
+  | Stimulus_connector_retry_later of Keeper_external_attention.read_error
+  | Stimulus_connector_missing of string
+  | Stimulus_ask_retry_later of Keeper_ask_store.read_error
+  | Stimulus_ask_missing of string
+  | Stimulus_ask_not_answered of string
+  | Stimulus_job_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Stimulus_addon_unavailable of string * Lane_addon_companion_publication.error
+  | Stimulus_completion_rejection_obsolete
+  | Stimulus_completion_rejection_retry_later of string
+
+type event_queue_intake_error =
+  | Pending_selection_failed of string
+  | Connector_read_failed of Keeper_external_attention.read_error
+  | Connector_item_missing of string
+  | Ask_read_failed of Keeper_ask_store.read_error
+  | Job_result_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Addon_result_unavailable of string * Lane_addon_companion_publication.error
+  | Completion_rejection_read_failed of string
+
+let event_queue_intake_error_to_string = function
+  | Pending_selection_failed detail ->
+    "event queue pending selection failed: " ^ detail
+  | Connector_read_failed error ->
+    "connector attention intake retry: " ^ Keeper_external_attention.read_error_to_string error
+  | Connector_item_missing event_id ->
+    "connector attention item missing: " ^ event_id
+  | Ask_read_failed error ->
+    "ask answer intake retry: " ^ Keeper_ask_store.read_error_to_string error
+  | Completion_rejection_read_failed detail ->
+    "completion rejection authority intake retry: " ^ detail
+  | Addon_result_unavailable (id,error) ->
+    "addon publication unavailable " ^ id ^ ": " ^ Lane_addon_companion_publication.error_to_string error
+  | Job_result_unavailable (job_id,error) ->
+    "job result unavailable " ^ Keeper_owned_job_identity.Job_id.to_string job_id ^ ": "
+    ^ Keeper_owned_job_store.error_to_string error
+;;
+
+let event_queue_intake_error_reason_label = function
+  | Pending_selection_failed _ -> "event_queue_selection_failed"
+  | Connector_read_failed _ -> "event_queue_connector_read_failed"
+  | Connector_item_missing _ -> "event_queue_connector_item_missing"
+  | Ask_read_failed _ -> "event_queue_ask_read_failed"
+  | Completion_rejection_read_failed _ -> "event_queue_completion_rejection_read_failed"
+  | Job_result_unavailable _ -> "event_queue_job_result_unavailable"
+  | Addon_result_unavailable _ -> "event_queue_addon_result_unavailable"
+;;
+
+let event_queue_intake_error_counts_as_cycle_failure = function
+  | Pending_selection_failed _ -> true
+  | Connector_read_failed _ | Connector_item_missing _
+  | Ask_read_failed _
+  | Completion_rejection_read_failed _
+  | Job_result_unavailable _ | Addon_result_unavailable _ -> false
+;;
+
+let classify_pending_board_event_result = function
+  | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
+  | Error (_ : Keeper_world_observation_board_signal.board_unavailable) ->
+    Stimulus_consumed []
+;;
+
+let completion_rejection_intake ~config ~(meta_after_triage : keeper_meta) stim
+      (rejection : Keeper_event_queue.completion_authority_rejection) =
+  match Workspace_task_rejection_outbox.standing config
+    ~task_id:rejection.car_task_id ~verification_id:rejection.car_verification_id
+    ~producer:meta_after_triage.name ~reason:rejection.car_reason
+    ~authority:rejection.car_authority with
+  | Error detail -> Stimulus_completion_rejection_retry_later detail
+  | Ok Workspace_task_rejection_outbox.Obsolete -> Stimulus_completion_rejection_obsolete
+  | Ok Workspace_task_rejection_outbox.Current ->
+    (match pending_board_event_of_stimulus ~base_path:config.base_path ~meta_after_triage stim with
+     | Ok events -> Stimulus_consumed (Option.to_list events)
+     | Error unavailable ->
+       Stimulus_completion_rejection_retry_later
+         (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
+;;
+
+(* A Board read that answers no row names a swept post or an id that does not
+   parse, and reading again gives the same answer. The stimulus is consumed so
+   it cannot be reselected on every snapshot. *)
+let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
+  match stim.Keeper_event_queue.payload with
+  | Keeper_event_queue.Completion_authority_rejected rejection ->
+    completion_rejection_intake ~config:(Workspace.default_config base_path)
+      ~meta_after_triage stim rejection
+  | Keeper_event_queue.Addon_operation_changed change ->
+    (match Keeper_world_observation.pending_board_event_of_addon_operation_change
+       ~base_path ~keeper_name:meta_after_triage.name ~arrived_at:stim.arrived_at change with
+     | Ok event -> Stimulus_consumed [event]
+     | Error error -> Stimulus_addon_unavailable (change.ao_publication_id,error))
+  | Keeper_event_queue.Owned_job_completed completion ->
+    (match Keeper_world_observation.pending_board_event_of_owned_job_completion
+       ~base_path ~keeper_name:meta_after_triage.name ~arrived_at:stim.arrived_at completion with
+     | Ok event -> Stimulus_consumed [event]
+     | Error error -> Stimulus_job_unavailable (completion.oj_job_id,error))
+  | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Tool_result_ready _
+  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Task_outcome _
+  | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ ->
+  let read_result = pending_board_event_of_stimulus ~base_path ~meta_after_triage stim in
+  match read_result with
+  | Ok _ -> classify_pending_board_event_result read_result
+  | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ObservationQueryFailures)
+      ~labels:
+        [ ( "operation"
+          , Runtime_observation_query_operation.(to_label Board_stimulus_intake) )
+        ]
+      ();
+    Log.Keeper.warn
+      "stimulus intake: board read unavailable, consuming stimulus \
+       stimulus_id=%s keeper=%s: %s"
+      stim.Keeper_event_queue.post_id
+      meta_after_triage.name
+      (Keeper_world_observation_board_signal.unavailable_to_string unavailable);
+    classify_pending_board_event_result read_result
+;;
+
+let record_event_queue_stimulus_turn_finished
+      ~(ctx : _ context)
+      ~keeper_name
+      ~disposition
+      (stimulus : Keeper_event_queue.stimulus)
+  =
+  try
+    Keeper_reaction_ledger.record_event_queue_turn_finished
+      ~base_path:ctx.config.base_path
+      ~keeper_name
+      ~disposition
+      stimulus
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.error
+      "turn exit: failed to persist event queue turn-finished reaction \
+       post_id=%s keeper=%s: %s"
+      stimulus.Keeper_event_queue.post_id
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
+let record_event_queue_stimulus_turn_started
+      ~(ctx : _ context)
+      ~keeper_name
+      (stimulus : Keeper_event_queue.stimulus)
+  =
+  try
+    Keeper_reaction_ledger.record_event_queue_turn_started
+      ~base_path:ctx.config.base_path
+      ~keeper_name
+      stimulus
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.error
+      "turn entry: failed to persist event queue stimulus reaction post_id=%s \
+       (keeper=%s): %s"
+      stimulus.post_id
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
+type heartbeat_event_intake = {
+  pending_board_events : Keeper_world_observation.pending_board_event list;
+  source_batch : Keeper_heartbeat_source_batch.t;
+  diagnostic_selection : Keeper_event_queue_state.pending_selection option;
+  event_queue_intake_error : event_queue_intake_error option;
+  event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
+}
+
+let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
+  Keeper_external_attention.recorded_items_by_event_ids
+    ~base_path ~keeper_name ~event_ids:[ event_id ]
+  |> Result.map (List.assoc_opt event_id)
+;;
+
+let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
+  match stim.payload with
+  | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
+  | Keeper_event_queue.Tool_result_ready _ ->
+    Some Keeper_world_observation.Tool_result_ready_stimulus
+  | Keeper_event_queue.Schedule_due _ ->
+    Some Keeper_world_observation.Scheduled_automation_stimulus
+  | Keeper_event_queue.Connector_attention _ ->
+    Some Keeper_world_observation.Connector_attention_stimulus
+  | Keeper_event_queue.Ask_answered _ ->
+    (* A dedicated turn_reason for the same reason the HITL one below has it:
+       the prompt has to steer the keeper back to the question it asked, not
+       let it proceed on its own state as if nothing came back. *)
+    Some Keeper_world_observation.Ask_answered_stimulus
+  | Keeper_event_queue.Hitl_resolved _ ->
+    (* RFC-0320 W3b: give the HITL-resolution wake a dedicated turn_reason so
+       the prompt can steer the keeper back to the originating conversation
+       instead of silently proceeding on its own state. This changes only how
+       the turn is described, not whether it runs. *)
+    Some Keeper_world_observation.Hitl_resolved_stimulus
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ ->
+    (* No dedicated turn_reason: like the other async-completion wakes, the
+       stimulus itself forces the keeper to re-run its cycle and proceed on its
+       own state. The answer travels in the Board Activity row, so the turn
+       does not have to be named for the Keeper to read it. *)
+    None
+  | Keeper_event_queue.Completion_authority_rejected _ ->
+    Some Keeper_world_observation.Completion_authority_rejection_stimulus
+  (* Dedicated turn_reason, same principle as the rejection twin: the producer
+     must be able to tell a verdict wake from an autonomous tick — and an
+     approved turn must never be described as a rejection. *)
+  | Keeper_event_queue.Task_outcome _ ->
+    Some Keeper_world_observation.Task_outcome_stimulus
+  (* Dedicated turn_reason: the author has to be able to tell a cancellation
+     wake from an autonomous tick, otherwise the turn is indistinguishable from
+     the 96%-of-turns scheduled channel and the cancellation reads as noise. *)
+  | Keeper_event_queue.Task_cancelled _ ->
+    Some Keeper_world_observation.Task_cancellation_stimulus
+  (* Dedicated turn_reason: the transcript scan reports the same message as
+     [Mention_pending] only while the row is still ahead of the ack watermark.
+     The queue entry is the durable delivery, so the turn names it as such. *)
+  | Keeper_event_queue.Workspace_message _ ->
+    Some Keeper_world_observation.Workspace_message_stimulus
+;;
+
+let consume_single_heartbeat_stimulus
+      ~(ctx : _ context)
+      ~meta_after_triage
+      ?connector_attention_items
+      ?ask_rows
+      (stim : Keeper_event_queue.stimulus)
+  =
+  let class_str = Keeper_event_queue.payload_kind_label stim.payload in
+  let intake_result =
+    match stim.payload with
+    | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
+      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+    | Keeper_event_queue.Fusion_completed c ->
+      (* RFC-0266: an async fusion deliberation finished and woke this keeper.
+         Surface the resolved answer as a pending_board_event so this turn acts
+         on it (a non-empty list, unlike Bootstrap which injects nothing). *)
+      let terminal =
+        match c.terminal with
+        | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
+        | Keeper_event_queue.Fusion_failed _ -> "failed"
+        | Keeper_event_queue.Fusion_cancelled -> "cancelled"
+      in
+      Log.Keeper.info
+        "turn entry: fusion result delivered run_id=%s terminal=%s (keeper=%s)"
+        c.run_id terminal meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+    | Keeper_event_queue.Schedule_due sw ->
+      Log.Keeper.info
+        "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
+        sw.schedule_id
+        sw.due_at
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+    | Keeper_event_queue.Completion_authority_rejected rejection ->
+      completion_rejection_intake ~config:ctx.config ~meta_after_triage stim rejection
+    | Keeper_event_queue.Task_cancelled cancellation ->
+      Log.Keeper.info
+        "turn entry: task cancellation delivered task_id=%s cancelled_by=%s \
+         (keeper=%s)"
+        cancellation.tc_task_id
+        cancellation.tc_cancelled_by
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+    | Keeper_event_queue.Ask_answered answered ->
+      (* The ask_id is a pointer only; the answer stays in Keeper_ask_store.
+         Load it here and promote it to a pending observation, the same split
+         Connector_attention makes — a wake carrying no answer is one the
+         Keeper cannot act on, which is how this feature went unused. *)
+      let rows = match ask_rows with
+        | Some snapshot -> snapshot
+        | None -> Keeper_ask_store.rows_result
+            ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name in
+      (match rows with
+       | Error error -> Stimulus_ask_retry_later error
+       | Ok Keeper_ask_store.Missing_log -> Stimulus_ask_missing answered.ask_id
+       | Ok (Keeper_ask_store.Stored_rows rows) ->
+         match List.assoc_opt answered.ask_id rows with
+         | Some (ask, Keeper_ask.Answered_by { answers; responder; answered_at }) ->
+           Log.Keeper.info
+             "turn entry: ask answer delivered ask_id=%s (keeper=%s)"
+             answered.ask_id meta_after_triage.name;
+           Stimulus_consumed
+             [ Keeper_world_observation.pending_board_event_of_ask_answer
+                 ~meta:meta_after_triage ~ask ~answers ~responder ~answered_at ]
+         | Some (_, Keeper_ask.Open)
+         | Some (_, Keeper_ask.Withdrawn_because _) ->
+           Stimulus_ask_not_answered answered.ask_id
+         | None -> Stimulus_ask_missing answered.ask_id)
+    | Keeper_event_queue.Bootstrap ->
+      Log.Keeper.info
+        "turn entry: bootstrap stimulus consumed (keeper=%s)"
+        meta_after_triage.name;
+      Stimulus_consumed []
+    | Keeper_event_queue.Connector_attention ca ->
+      (* RFC-connector-ambient-attention-wake: the stimulus woke this keeper.
+         The event_id is a pointer only; the message/surface content stays in
+         Keeper_external_attention. Load it here and promote it to a pending
+         observation so the turn has real connector context instead of a
+         contentless wake reason. *)
+      let recorded_item =
+        match connector_attention_items with
+        | Some preloaded ->
+          (* RFC-0377 P1-1: the caller already loaded every batch member's
+             attention item in one scan (see
+             [connector_attention_items_of_batch] below) — reuse it instead
+             of re-scanning the whole event log for this one id. *)
+          Result.map (List.assoc_opt ca.event_id) preloaded
+        | None ->
+          recorded_attention_item_by_event_id
+            ~base_path:ctx.config.base_path
+            ~keeper_name:meta_after_triage.name
+            ~event_id:ca.event_id
+      in
+      (match recorded_item with
+       | Error error -> Stimulus_connector_retry_later error
+       | Ok None -> Stimulus_connector_missing ca.event_id
+       | Ok (Some item) ->
+         Log.Keeper.info
+           "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
+           ca.event_id
+           meta_after_triage.name;
+         Stimulus_consumed
+           [ Keeper_world_observation.pending_board_event_of_external_attention
+               ~meta:meta_after_triage item ])
+    | Keeper_event_queue.Hitl_resolved r ->
+      (* The approval has left the queue, so this cycle no longer skips. There
+         is no observation to fabricate: the typed resolution itself is
+         threaded as cycle context. *)
+      Log.Keeper.info
+        "turn entry: hitl resolution delivered approval=%s decision=%s (keeper=%s)"
+        r.approval_id
+        (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
+        meta_after_triage.name;
+      Stimulus_consumed []
+    | Keeper_event_queue.Delegate_completed dc ->
+      (* Same shape as [Fusion_completed]: a turn this Keeper asked another to
+         run has ended, and the answer is surfaced as a pending_board_event so
+         this turn acts on it. *)
+      (* The level comes from the outcome: a delegation the asker is still
+         waiting on that could not finish is not routine. *)
+      (match dc.dc_terminal with
+       | Keeper_event_queue.Delegate_failed _ -> Log.Keeper.warn
+       | Keeper_event_queue.Delegate_replied _ | Keeper_event_queue.Delegate_no_reply -> Log.Keeper.info)
+        "turn entry: delegation answer delivered operation_id=%s from=%s \
+         outcome=%s (keeper=%s)"
+        dc.dc_operation_id
+        dc.dc_keeper
+        (match dc.dc_terminal with
+         | Keeper_event_queue.Delegate_replied _ -> "replied"
+         | Keeper_event_queue.Delegate_no_reply -> "no_reply"
+         | Keeper_event_queue.Delegate_failed _ -> "failed")
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ ->
+      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+    | Keeper_event_queue.Composition_completed cc ->
+      (* Same shape as [Delegate_completed]: work this Keeper started and did
+         not wait for has settled, surfaced as a pending_board_event so this
+         turn acts on it instead of the Keeper having to remember the id. *)
+      (match cc.cc_terminal with
+       | Keeper_event_queue.Composition_failed _
+       | Keeper_event_queue.Composition_cancelled _ -> Log.Keeper.warn
+       | Keeper_event_queue.Composition_succeeded -> Log.Keeper.info)
+        "turn entry: composition result delivered request_id=%s tool=%s \
+         outcome=%s (keeper=%s)"
+        cc.cc_request_id
+        cc.cc_tool
+        (match cc.cc_terminal with
+         | Keeper_event_queue.Composition_succeeded -> "succeeded"
+         | Keeper_event_queue.Composition_failed _ -> "failed"
+         | Keeper_event_queue.Composition_cancelled _ -> "cancelled")
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+    | Keeper_event_queue.Task_outcome outcome ->
+      (* The approval twin of the rejection log line beside it: a verdict the
+         Keeper submitted evidence for has landed, surfaced as a
+         pending_board_event so this turn acts on it instead of the producer
+         discovering its closed task by projection drift. *)
+      Log.Keeper.info
+        "turn entry: task outcome delivered task_id=%s verification_id=%s \
+         authority_kind=%s (keeper=%s)"
+        outcome.to_task_id
+        outcome.to_verification_id
+        (Masc_domain.completion_authority_kind outcome.to_authority)
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+    | Keeper_event_queue.Workspace_message message ->
+      (* The transcript row committed at the delivery boundary carries the
+         content and the message lane reads it, so there is no observation to
+         fabricate here — injecting one would put the same message in front of
+         the keeper twice. *)
+      Log.Keeper.info
+        "turn entry: keeper message delivered request_id=%s from=%s (keeper=%s)"
+        message.wmsg_request_id
+        message.wmsg_from
+        meta_after_triage.name;
+      Stimulus_consumed []
+  in
+  match intake_result with
+  | Stimulus_connector_retry_later _ | Stimulus_connector_missing _
+  | Stimulus_ask_retry_later _ | Stimulus_ask_missing _
+  | Stimulus_completion_rejection_obsolete | Stimulus_completion_rejection_retry_later _
+  | Stimulus_ask_not_answered _ | Stimulus_job_unavailable _ | Stimulus_addon_unavailable _ -> intake_result
+  | Stimulus_consumed _ ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string StimulusConsumed)
+      ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
+      ();
+    Log.Keeper.info
+      "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s (keeper=%s)"
+      stim.post_id
+      (stimulus_urgency_to_string stim.urgency)
+      class_str
+      meta_after_triage.name;
+    intake_result
+;;
+
+let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus) =
+  match stimulus.payload with
+  (* Nothing else has to settle first: the answer is already durable when the
+     wake is enqueued. *)
+  | Keeper_event_queue.Ask_answered _ -> true
+  | Keeper_event_queue.Hitl_resolved resolution ->
+    (match
+       Keeper_approval_queue.get_pending_entry_for_workspace
+         ~base_path
+         ~id:resolution.approval_id
+     with
+     | Ok None -> true
+     | Ok (Some _) -> false
+     | Error detail ->
+       (* Not ready, as with an entry still pending, but said aloud: a
+          broken approval store would otherwise hold every HITL resolution
+          out of intake with the same silence as one not yet resolved. *)
+       Log.Keeper.warn
+         "turn entry: HITL resolution held back because the approval store \
+          could not be read approval=%s: %s"
+         resolution.approval_id
+         (Keeper_approval_queue_result.storage_error_to_string detail);
+       false)
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+  | Keeper_event_queue.Task_outcome _ ->
+    true
+;;
+
+(* A queued approved resolution whose durable record is gone is retired by
+   [reconcile_spent_selection] when the queue reaches it. Projecting it into
+   an earlier turn would hand the replay an id with nothing behind it. A read
+   failure keeps the entry projectable, as before: the store may answer
+   inside the turn. *)
+let resolution_has_durable_record
+      ~base_path
+      (resolution : Keeper_event_queue.hitl_resolution)
+  =
+  match resolution.decision with
+  | Keeper_event_queue.Hitl_rejected _ -> true
+  | Keeper_event_queue.Hitl_approved ->
+    (match
+       Keeper_approval_queue.approved_resolution_delivery
+         ~base_path
+         ~id:resolution.approval_id
+     with
+     | Ok _ -> true
+     | Error error ->
+       (match Keeper_approval_queue_result.resolution_absence_of_grant_error error with
+        | Some _ -> false
+        | None -> true))
+;;
+
+(* A resolution whose continuation slot is settled has nothing left for a
+   turn to do: the turn that received its replay completed, checkpointed, or
+   failed after the provider answered. Projecting it again hands the model
+   evidence it already consumed, which is the loop #32956 measured (one
+   approval on 24 turns). [reconcile_spent_selection] retires the queue entry
+   when the queue reaches it. *)
+let continuation_settled
+      ~base_path
+      ~keeper_name
+      (resolution : Keeper_event_queue.hitl_resolution)
+  =
+  Keeper_approval_queue.continuation_settled_chat_projection_present
+    ~base_path
+    ~keeper_name
+    ~approval_id:resolution.approval_id
+;;
+
+(* #28809: a ready [Hitl_resolved] may sit behind the stimulus that woke this
+   turn — typically a redelivered workspace message whose own earlier turn
+   deferred on that very approval. The resolution is durable truth in the
+   approval journal, not queue-ordered content, so a turn may project it as
+   cycle context without admitting it (the queue entry is untouched here).
+   After the projected replay spends the grant and the receiving turn settles
+   the continuation, [reconcile_spent_selection] retires the still-queued
+   entry without costing a turn; until then the resolution is projected
+   again, because the model has not seen its outcome yet. *)
+let ready_hitl_resolution_peek ~base_path ~keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error _ -> None
+  | Ok pending ->
+    List.find_map
+      (fun (stimulus : Keeper_event_queue.stimulus) ->
+         match stimulus.payload with
+         | Keeper_event_queue.Hitl_resolved resolution ->
+           if
+             stimulus_ready_for_intake ~base_path stimulus
+             && resolution_has_durable_record ~base_path resolution
+             && not (continuation_settled ~base_path ~keeper_name resolution)
+           then Some resolution
+           else None
+         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _
+         | Keeper_event_queue.Bootstrap
+         | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Schedule_due _
+         | Keeper_event_queue.Connector_attention _
+         | Keeper_event_queue.Ask_answered _
+         | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_cancelled _
+         | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _
+         | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+         | Keeper_event_queue.Task_outcome _ -> None)
+      (Keeper_event_queue.to_list pending)
+;;
+
+(* A selection can be ready to intake and still have nothing left for a turn to
+   do, because the work it refers to settled elsewhere. Delivering one costs a
+   full turn and leaves the entry at the queue head, so a turn that checkpoints
+   instead of completing re-reads the same entry on the next cycle and the
+   Keeper makes no progress for as long as that entry stays spent. Retire them
+   here, before a turn is spent on them. *)
+type spent_selection_reconciliation =
+  | Selection_actionable
+  | Spent_grant_replay_acknowledged
+  | Tool_result_hint_retired
+  | Absent_grant_retired of
+      { approval_id : string
+      ; absence : Keeper_approval_queue_result.resolution_absence
+      }
+
+let reconcile_spent_selection
+      ~config
+      ~keeper_name
+      (selection : Keeper_event_queue_state.pending_selection)
+  =
+  match selection.source.Keeper_event_queue.payload with
+  | Tool_result_ready receipt_id ->
+    let open Result.Syntax in
+    let base_path = config.Workspace_utils.base_path in
+    let retire_hint () =
+      let* () = Keeper_registry_event_queue.ack_pending_result ~base_path keeper_name ~selection in
+      Ok Tool_result_hint_retired
+    in
+    let* meta = Keeper_meta_store.read_effective_meta config keeper_name in
+    (match meta with
+     | Some meta when Keeper_client_tool_outbox_wake.route_can_consume meta ->
+       let* snapshot = Keeper_client_tool_outbox.load ~base_path ~keeper_name in
+       if Keeper_client_tool_outbox.contains_receipt snapshot ~receipt_id then
+         Ok Selection_actionable
+       else retire_hint ()
+     | Some _ | None ->
+       (* Route retirement must not depend on a store that this client cannot
+          consume. Even unreadable evidence stays untouched while unrelated
+          work proceeds; Codex re-entry resumes authoritative receipt reads. *)
+       retire_hint ())
+  | Schedule_due _ -> Ok Selection_actionable
+  | Hitl_resolved {approval_id; decision=Keeper_event_queue.Hitl_approved; _}
+    when Keeper_approval_queue.continuation_settled_chat_projection_present
+      ~base_path:config.Workspace_utils.base_path ~keeper_name ~approval_id ->
+    (* The native input receipt proves delivery, independently of whether the
+       model chose to spend a non-replayable one-shot grant. Keep that grant's
+       authority untouched while retiring the delivered input wake. *)
+    (match Keeper_registry_event_queue.ack_pending_result
+       ~base_path:config.Workspace_utils.base_path keeper_name ~selection with
+     | Ok () -> Ok Spent_grant_replay_acknowledged
+     | Error message -> Error ("native continuation input ack failed: " ^ message))
+  | Hitl_resolved
+      { approval_id; decision = Keeper_event_queue.Hitl_approved; _ } ->
+    (* An approved grant is one-shot, but consumption alone is not terminal:
+       host replay consumes before running the effect, then durably records the
+       outcome. If evidence or journal persistence fails after the effect,
+       [Keeper_gate_replay] keeps the raw result in-process and needs this wake
+       to repair publication without running the effect again.
+
+       Retire only [consumed + durable outcome + continuation settlement]. The
+       settlement is written after the replay-owning model turn completed,
+       durably checkpointed, or failed after the provider answered (#32956:
+       a failed continuation used to leave no receipt, so the same approval
+       rode 24 turns); without it, a crash between effect journaling and
+       model continuation must replay the evidence into a fresh turn instead of
+       silently draining the wake. A read error, an unconsumed grant, or a
+       consumed grant without its outcome stays actionable. *)
+    (match Keeper_approval_queue.approved_resolution_delivery
+             ~base_path:config.Workspace_utils.base_path
+             ~id:approval_id
+     with
+     | Ok
+         { request
+         ; state = Keeper_approval_queue_result.Resolution_consumed
+         ; replay_outcome = Some replay_outcome
+         ; _
+         } ->
+       (match
+          Keeper_approval_queue.ensure_resolution_chat_projection
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some request.tool_name)
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+        with
+        | Error message -> Error ("approval resolution projection failed: " ^ message)
+        | Ok () ->
+          (match
+             Keeper_approval_queue.ensure_replay_chat_projection
+               ~base_path:config.Workspace_utils.base_path
+               ~keeper_name
+               ~approval_id
+               ~tool_name:(Some request.tool_name)
+               ~outcome:replay_outcome
+           with
+           | Error message -> Error ("approval replay projection failed: " ^ message)
+           | Ok () ->
+             if
+               not
+                 (Keeper_approval_queue.continuation_settled_chat_projection_present
+                    ~base_path:config.Workspace_utils.base_path
+                    ~keeper_name
+                    ~approval_id)
+             then Ok Selection_actionable
+             else
+               (match
+                  Keeper_registry_event_queue.ack_pending_result
+                    ~base_path:config.Workspace_utils.base_path
+                    keeper_name
+                    ~selection
+                with
+                | Error message ->
+                  Error ("spent grant replay ack failed: " ^ message)
+                | Ok () -> Ok Spent_grant_replay_acknowledged)))
+     | Ok
+         { request
+         ; state =
+             ( Keeper_approval_queue_result.Resolution_unconsumed
+             | Keeper_approval_queue_result.Resolution_consumed )
+         ; replay_outcome = None
+         ; _
+         }
+     | Ok
+         { request
+         ; state = Keeper_approval_queue_result.Resolution_unconsumed
+         ; replay_outcome = Some _
+         ; _
+         } ->
+       (match
+          Keeper_approval_queue.ensure_resolution_chat_projection
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some request.tool_name)
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+        with
+        | Ok () -> Ok Selection_actionable
+        | Error message -> Error ("approval resolution projection failed: " ^ message))
+     | Error error ->
+       let project_approved () =
+         Keeper_approval_queue.ensure_resolution_chat_projection
+           ~base_path:config.Workspace_utils.base_path
+           ~keeper_name
+           ~approval_id
+           ~tool_name:None
+           ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       in
+       (match Keeper_approval_queue_result.resolution_absence_of_grant_error error with
+        | None ->
+          (* A read failure: the store may answer on the next turn. *)
+          (match project_approved () with
+           | Ok () -> Ok Selection_actionable
+           | Error message ->
+             Error ("approval resolution projection failed: " ^ message))
+        | Some absence ->
+          (* The store's answer is a fact that reading again will not change:
+             nothing stands behind this entry to replay. A turn spent on it
+             failed the same way every cycle after a store version cut removed
+             the delivery rows while the queues kept their wakes (#33373), so
+             the entry is retired here. The queued decision is projected as the
+             resolution only where the store holds no decision of its own; a
+             store that recorded a rejection already speaks for itself. *)
+          let projection =
+            match absence with
+            | Keeper_approval_queue_result.Resolution_not_approved -> Ok ()
+            | Keeper_approval_queue_result.Resolution_missing
+            | Keeper_approval_queue_result.Resolution_still_pending
+            | Keeper_approval_queue_result.Resolution_workspace_mismatch _ ->
+              project_approved ()
+          in
+          (match projection with
+           | Error message ->
+             Error ("approval resolution projection failed: " ^ message)
+           | Ok () ->
+             (match
+                Keeper_registry_event_queue.ack_pending_result
+                  ~base_path:config.Workspace_utils.base_path
+                  keeper_name
+                  ~selection
+              with
+              | Error message ->
+                Error ("absent grant retirement ack failed: " ^ message)
+              | Ok () -> Ok (Absent_grant_retired { approval_id; absence })))))
+  | Hitl_resolved
+      { approval_id; decision = Keeper_event_queue.Hitl_rejected rationale; _ } ->
+    (match
+       Keeper_approval_queue.ensure_resolution_chat_projection
+         ~base_path:config.Workspace_utils.base_path
+         ~keeper_name
+         ~approval_id
+         ~tool_name:None
+         ~decision:(Keeper_approval_queue_rules_types.Decision.Reject rationale)
+     with
+     | Ok () ->
+       if
+         not
+           (Keeper_approval_queue.continuation_settled_chat_projection_present
+              ~base_path:config.Workspace_utils.base_path
+              ~keeper_name
+              ~approval_id)
+       then Ok Selection_actionable
+       else
+         (match
+            Keeper_registry_event_queue.ack_pending_result
+              ~base_path:config.Workspace_utils.base_path
+              keeper_name
+              ~selection
+          with
+          | Error message ->
+            Error ("rejected approval continuation ack failed: " ^ message)
+          | Ok () -> Ok Spent_grant_replay_acknowledged)
+     | Error message -> Error ("approval resolution projection failed: " ^ message))
+  | Ask_answered _
+  | Board_signal _
+  | Board_attention _
+  | Bootstrap
+  | Fusion_completed _
+  | Connector_attention _
+  | Completion_authority_rejected _
+  (* A committed approval cannot be un-committed, so the selection stays worth
+     a turn — the same rule as the rejection twin beside it. *)
+  | Task_outcome _
+  (* A committed cancellation cannot be undone or settled elsewhere, so the
+     selection is always still worth a turn. *)
+  | Task_cancelled _
+  (* A committed workspace message cannot be withdrawn, so the selection stays
+     worth a turn. *)
+  | Workspace_message _
+  (* An answer that has arrived cannot be un-sent, so the selection stays worth
+     a turn. *)
+  | Delegate_completed _
+  (* A settled composition cannot un-settle, so the selection stays worth a
+     turn. *)
+  | Composition_completed _ | Owned_job_completed _ | Addon_operation_changed _ ->
+    Ok Selection_actionable
+;;
+
+type intake_source_scope =
+  | General_sources
+  | Addon_invocation of Keeper_event_queue.addon_operation_change
+  | Scheduled_work of Keeper_event_queue_state.pending_selection
+
+let source_scope (selection : Keeper_event_queue_state.pending_selection) =
+  match selection.source.payload with
+  | Keeper_event_queue.Schedule_due _ -> Scheduled_work selection
+  | Keeper_event_queue.Addon_operation_changed change -> Addon_invocation change
+  | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
+  | Fusion_completed _ | Connector_attention _ | Hitl_resolved _
+  | Ask_answered _ | Completion_authority_rejected _ | Task_cancelled _
+  | Workspace_message _ | Delegate_completed _ | Composition_completed _
+  | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ -> General_sources
+
+let same_source_scope left right = match left,right with
+  | Scheduled_work left, Scheduled_work right ->
+      Keeper_event_queue_state.same_entry left right
+  | Scheduled_work _, (General_sources | Addon_invocation _)
+  | (General_sources | Addon_invocation _), Scheduled_work _ -> false
+  | General_sources,General_sources -> true
+  | General_sources,Addon_invocation _ | Addon_invocation _,General_sources -> false
+  | Addon_invocation left,Addon_invocation right ->
+      left.ao_origin_id=right.ao_origin_id && left.ao_source=right.ao_source
+      && left.ao_channel=right.ao_channel
+
+let heartbeat_event_intake_with_priority
+      ~priority_sources
+      ~ctx
+      ~meta_after_triage
+      ~pending_board_events
+  =
+  (* RFC-event-queue-admit-all-ready — one turn observes a bounded batch of
+     ready sources from this durable snapshot. The queue is a wake/attention
+     layer, not a second work tracker: admitting one row per turn made a
+     steady arrival rate an unbounded backlog even while every Keeper remained
+     alive.
+
+     Connector attention keeps RFC-0377's conversation boundary:
+     only the first readable ready connector conversation is eligible, while rows for
+     other conversations remain pending for their own routed turn. *)
+  let base_path = ctx.config.base_path in
+  let keeper_name = meta_after_triage.name in
+  let connector_attention_event_id (s : Keeper_event_queue.stimulus) =
+    match s.Keeper_event_queue.payload with
+    | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
+    | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Board_attention _
+    | Keeper_event_queue.Bootstrap
+    | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Schedule_due _
+    | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Ask_answered _
+    | Keeper_event_queue.Completion_authority_rejected _
+    | Keeper_event_queue.Task_cancelled _
+    | Keeper_event_queue.Workspace_message _
+    | Keeper_event_queue.Delegate_completed _
+    | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+    | Keeper_event_queue.Task_outcome _ ->
+      None
+  in
+  let ready_batch selections =
+    let hitl_selected = ref false in
+    let admitted =
+      List.filter
+        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+           stimulus_ready_for_intake ~base_path selection.source
+           &&
+           match selection.source.payload with
+           | Keeper_event_queue.Hitl_resolved _ ->
+             (* One tool bundle carries one exact cycle grant. Admitting two
+                HITL resolutions would replay only the first while a completed
+                turn ACKed both durable sources. Leave later resolutions queued
+                for their own exact replay turn. *)
+             if !hitl_selected
+             then false
+             else (
+               hitl_selected := true;
+               true)
+           (* Every other kind is eligible here; the Connector snapshot
+              below selects one readable conversation. A new kind is listed here on
+              purpose, so whether it may share a batch is decided, not
+              inherited. *)
+           | Keeper_event_queue.Board_signal _
+           | Keeper_event_queue.Board_attention _
+           | Keeper_event_queue.Bootstrap
+           | Keeper_event_queue.Fusion_completed _
+           | Keeper_event_queue.Schedule_due _
+           | Keeper_event_queue.Connector_attention _
+           | Keeper_event_queue.Ask_answered _
+           | Keeper_event_queue.Completion_authority_rejected _
+           | Keeper_event_queue.Task_cancelled _
+           | Keeper_event_queue.Workspace_message _
+           | Keeper_event_queue.Delegate_completed _
+           | Keeper_event_queue.Composition_completed _
+           | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+           | Keeper_event_queue.Task_outcome _ ->
+             true)
+        selections
+    in
+    admitted
+  in
+  let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
+  let is_board_source (selection : Keeper_event_queue_state.pending_selection) =
+    match selection.source.payload with
+    | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ -> true
+    | Keeper_event_queue.Ask_answered _
+    | Keeper_event_queue.Bootstrap
+    | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Schedule_due _
+    | Keeper_event_queue.Connector_attention _
+    | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Completion_authority_rejected _
+    | Keeper_event_queue.Task_cancelled _
+    | Keeper_event_queue.Workspace_message _
+    | Keeper_event_queue.Delegate_completed _
+    | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+    | Keeper_event_queue.Task_outcome _ -> false
+  in
+  let consume_batch selections =
+    (* Defer the one Connector snapshot until admission reaches a Connector.
+       Index once, then select the first readable conversation and withdraw
+       missing pointers in one linear pass without per-pointer reconciliation. *)
+    let connector_snapshot = ref None in
+    let ask_snapshot = ref None in
+    let admitted_scope = ref None in
+    let prepare_connectors selections =
+      let event_ids = List.filter_map
+        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+          connector_attention_event_id selection.source) selections in
+      let loaded = Keeper_external_attention.recorded_items_by_event_ids
+        ~base_path ~keeper_name ~event_ids
+        |> Result.map (fun pairs ->
+          let items = Hashtbl.create (List.length pairs) in
+          List.iter (fun (id, item) -> Hashtbl.replace items id item) pairs;
+          items) in
+      connector_snapshot := Some loaded;
+      match loaded with
+      | Error _ -> selections, None
+      | Ok items ->
+        let first_channel = ref None in
+        let first_missing = ref None in
+        let missing_count = ref 0 in
+        let selected = List.filter
+          (fun (selection : Keeper_event_queue_state.pending_selection) ->
+            match connector_attention_event_id selection.source with
+            | None -> true
+            | Some event_id when not (Hashtbl.mem items event_id) ->
+              incr missing_count;
+              (match !first_missing with
+               | None -> first_missing := Some (selection, Connector_item_missing event_id)
+               | Some _ -> ());
+              false
+            | Some _ ->
+              match Keeper_event_queue.connector_attention_channel selection.source.payload with
+              | None -> false
+              | Some channel ->
+                match !first_channel with
+                | None -> first_channel := Some channel; true
+                | Some first -> Keeper_continuation_channel.same_conversation channel first)
+          selections in
+        if !missing_count > 0 then
+          Log.Keeper.warn
+            "turn entry: retaining missing connector attention keeper=%s count=%d"
+            keeper_name !missing_count;
+        selected, !first_missing
+    in
+    let rec loop
+          remaining
+          observations_rev
+          selections_rev
+          first_withdrawn
+          selections
+      =
+      match remaining, selections with
+      | 0, _ | _, [] ->
+        ( List.rev observations_rev
+        , List.rev selections_rev
+        , first_withdrawn
+        , None )
+      | _, (selection : Keeper_event_queue_state.pending_selection) :: rest
+        when (match !admitted_scope with
+          | None -> false
+          | Some scope -> not (same_source_scope scope (source_scope selection))) ->
+        (* Another invocation/conversation, or a channel-less general source,
+           stays durable for its own turn. Skipping does not ACK it or spend
+           this batch's existing admission allowance. *)
+        loop remaining observations_rev selections_rev first_withdrawn rest
+      | _, (selection : Keeper_event_queue_state.pending_selection) :: _
+        when Option.is_none !connector_snapshot
+             && Option.is_some (connector_attention_event_id selection.source) ->
+        let selections, missing = prepare_connectors selections in
+        let first_withdrawn = match first_withdrawn with
+          | None -> missing | Some _ as kept -> kept in
+        loop remaining observations_rev selections_rev first_withdrawn selections
+      | _, selection :: rest ->
+        (match
+           reconcile_spent_selection
+             ~config:ctx.config
+             ~keeper_name
+             selection
+         with
+         | Error message ->
+           ( List.rev observations_rev
+           , List.rev selections_rev
+           , first_withdrawn
+           , Some (selection, Pending_selection_failed message) )
+         | Ok Spent_grant_replay_acknowledged ->
+           Log.Keeper.info
+             "turn entry: acknowledged spent Gate grant replay without a turn \
+              keeper=%s"
+             keeper_name;
+           loop remaining observations_rev selections_rev first_withdrawn rest
+         | Ok Tool_result_hint_retired ->
+           Log.Keeper.info "turn entry: retired inactive tool result hint keeper=%s" keeper_name;
+           loop remaining observations_rev selections_rev first_withdrawn rest
+         | Ok (Absent_grant_retired { approval_id; absence }) ->
+           Log.Keeper.warn
+             "turn entry: retired approved Gate resolution without a durable \
+              record keeper=%s approval=%s store=%s"
+             keeper_name
+             approval_id
+             (Keeper_approval_queue_result.resolution_absence_to_string absence);
+           loop remaining observations_rev selections_rev first_withdrawn rest
+         | Ok Selection_actionable ->
+           let connector_attention_items =
+             match connector_attention_event_id selection.source with
+             | None -> None
+             | Some event_id ->
+               Option.map (Result.map (fun items ->
+                 match Hashtbl.find_opt items event_id with
+                 | None -> [] | Some item -> [event_id, item])) !connector_snapshot
+           in
+           let retain_ask error =
+             Log.Keeper.warn
+               "turn entry: retaining unavailable ask answer keeper=%s: %s"
+               keeper_name (event_queue_intake_error_to_string error);
+             let first_withdrawn = match first_withdrawn with
+               | None -> Some (selection, error)
+               | Some _ as kept -> kept
+             in
+             loop remaining observations_rev selections_rev first_withdrawn rest
+           in
+           let ack_terminal_ask detail =
+             (* The canonical Ask log is append-only, so a missing log, an
+                absent ask id, and an Open or Withdrawn resolution can never
+                gain the answer this pointer names: unlike a read failure,
+                no later state resolves them. Retaining such a source
+                reselects the same poison on every snapshot and reports an
+                intake error every heartbeat. Withdraw it with the same
+                typed terminal ACK as a Board source with no remaining
+                observation; answer recovery re-enqueues a fresh pointer if
+                a later answer is recorded. *)
+             (match
+                Keeper_registry_event_queue.ack_pending_result
+                  ~base_path
+                  keeper_name
+                  ~selection
+              with
+              | Ok () ->
+                Log.Keeper.info
+                  "turn entry: acknowledged terminal ask answer keeper=%s: %s"
+                  keeper_name
+                  detail;
+                loop remaining observations_rev selections_rev first_withdrawn rest
+              | Error message ->
+                let failure_detail =
+                  "failed to acknowledge terminal ask answer source ("
+                  ^ detail
+                  ^ "): "
+                  ^ message
+                in
+                ( List.rev observations_rev
+                , List.rev selections_rev
+                , first_withdrawn
+                , Some (selection, Pending_selection_failed failure_detail) ))
+           in
+           let ask_rows = match selection.source.payload with
+             | Keeper_event_queue.Ask_answered _ ->
+               let snapshot = match !ask_snapshot with
+                 | Some snapshot -> snapshot
+                 | None ->
+                   let snapshot = Keeper_ask_store.rows_result ~base_path ~keeper_name in
+                   ask_snapshot := Some snapshot;
+                   snapshot in
+               Some snapshot
+             | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
+             | Keeper_event_queue.Bootstrap | Keeper_event_queue.Fusion_completed _
+             | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
+             | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Completion_authority_rejected _
+             | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+             | Keeper_event_queue.Task_outcome _ -> None
+           in
+           (match
+              consume_single_heartbeat_stimulus
+                ~ctx
+                ~meta_after_triage
+                ?connector_attention_items
+                ?ask_rows
+                selection.source
+            with
+            | Stimulus_connector_missing event_id ->
+              Log.Keeper.warn
+                "turn entry: retaining missing connector attention keeper=%s event_id=%s"
+                keeper_name event_id;
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection, Connector_item_missing event_id)
+                | Some _ as kept -> kept
+              in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_connector_retry_later error ->
+              Log.Keeper.warn
+                "turn entry: retaining unread connector attention keeper=%s: %s"
+                keeper_name (Keeper_external_attention.read_error_to_string error);
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection, Connector_read_failed error)
+                | Some _ as kept -> kept
+              in
+              (* Every Connector row uses the same failed store snapshot. Leave
+                 the rest pending without repeating reconciliation and warnings;
+                 independent source kinds can still fill the admission batch. *)
+              let rest = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                Option.is_none (connector_attention_event_id selection.source)) rest in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_ask_retry_later error -> retain_ask (Ask_read_failed error)
+            | Stimulus_ask_missing ask_id ->
+              ack_terminal_ask ("ask answer source missing: " ^ ask_id)
+            | Stimulus_ask_not_answered ask_id ->
+              ack_terminal_ask ("ask source has no recorded answer: " ^ ask_id)
+            | Stimulus_completion_rejection_retry_later detail ->
+              let error = Completion_rejection_read_failed detail in
+              Log.Keeper.warn "turn entry: retaining unread completion rejection keeper=%s: %s"
+                keeper_name detail;
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection,error) | Some _ as kept -> kept in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_completion_rejection_obsolete ->
+              (match Keeper_registry_event_queue.ack_pending_result
+                 ~base_path keeper_name ~selection with
+               | Ok () ->
+                 loop remaining observations_rev selections_rev first_withdrawn rest
+               | Error message ->
+                 ( List.rev observations_rev
+                 , List.rev selections_rev
+                 , first_withdrawn
+                 , Some (selection, Pending_selection_failed
+                     ("failed to acknowledge obsolete completion rejection: " ^ message)) ))
+            | Stimulus_addon_unavailable (id,error) ->
+              let error=Addon_result_unavailable (id,error) in
+              Log.Keeper.warn "turn entry: retaining unavailable addon result keeper=%s: %s"
+                keeper_name (event_queue_intake_error_to_string error);
+              let first_withdrawn=match first_withdrawn with
+                | None -> Some (selection,error) | Some _ as kept -> kept in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_job_unavailable (job_id,error) ->
+              let error = Job_result_unavailable (job_id,error) in
+              Log.Keeper.warn "turn entry: retaining unavailable job result keeper=%s: %s"
+                keeper_name (event_queue_intake_error_to_string error);
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection,error) | Some _ as kept -> kept in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_consumed [] when is_board_source selection ->
+              (* Permanent Board absence is terminal before dispatch. It is the
+                 one safe empty-source ACK: the post id cannot become readable
+                 later, while retaining it would reselect the same poison on
+                 every snapshot. *)
+              (match
+                 Keeper_registry_event_queue.ack_pending_result
+                   ~base_path
+                   keeper_name
+                   ~selection
+               with
+               | Ok () ->
+                 Log.Keeper.info
+                   "turn entry: acknowledged Board stimulus with no remaining \
+                    observation stimulus_id=%s keeper=%s"
+                   selection.source.post_id
+                   keeper_name;
+                 loop remaining observations_rev selections_rev first_withdrawn rest
+               | Error message ->
+                 let detail =
+                   "failed to acknowledge Board stimulus with no remaining \
+                    observation: "
+                   ^ message
+                 in
+                 ( List.rev observations_rev
+                 , List.rev selections_rev
+                 , first_withdrawn
+                 , Some (selection, Pending_selection_failed detail) ))
+            | Stimulus_consumed observations ->
+              (* Choose only after canonical consumption succeeds. An unread
+                 Add-on must not anchor the batch and starve independent work. *)
+              (match !admitted_scope with
+               | None -> admitted_scope:=Some (source_scope selection)
+               | Some _ -> ());
+              loop
+                (remaining - 1)
+                (List.rev_append observations observations_rev)
+                (selection :: selections_rev)
+                first_withdrawn
+                rest))
+    in
+    loop max_events [] [] None selections
+  in
+  let ( queued_observations
+      , consumed_selections
+      , intake_frontier
+      , first_withdrawn
+      , hard_error )
+    =
+    match
+      Keeper_registry_event_queue.pending_frontier_result
+        ~base_path
+        keeper_name
+    with
+    | Error message ->
+      Log.Keeper.error
+        "turn entry: event queue selection failed keeper=%s: %s"
+        keeper_name
+        message;
+      [], [], Keeper_event_queue_state.unobserved_frontier, None
+      , Some (None, Pending_selection_failed message)
+    | Ok (frontier, pending) ->
+      (* Revalidate against this actual intake snapshot. A withdrawn or reinserted
+         source never borrows the old handoff's admission preference. *)
+      let preferred, rest = List.partition (fun source ->
+        List.exists (Keeper_event_queue_state.same_entry source) priority_sources) pending in
+      let batch = ready_batch (preferred @ rest) in
+      let observations, selections, withdrawn, error =
+        consume_batch batch
+      in
+      ( observations
+      , selections
+      , frontier
+      , withdrawn
+      , Option.map (fun (selection, error) -> Some selection, error) error )
+  in
+  let source_batch = Keeper_heartbeat_source_batch.of_intake
+    ~frontier:intake_frontier ~admitted:consumed_selections in
+  let diagnostic_selection =
+    match hard_error, first_withdrawn with
+    | Some (Some selection, _), _ -> Some selection
+    | _, Some (selection, _) -> Some selection
+    | (None | Some (None, _)), None -> None
+  in
+  let event_queue_intake_error =
+    match hard_error, first_withdrawn with
+    | Some (_, error), _ -> Some error
+    | None, Some (_, error) -> Some error
+    | None, None -> None
+  in
+  let event_queue_triggers =
+    List.filter_map event_queue_trigger_of_stimulus
+      (Keeper_heartbeat_source_batch.stimuli source_batch)
+    |> List.sort_uniq compare
+  in
+  let pending_board_events =
+    List.fold_left
+      (fun acc (event : Keeper_world_observation.pending_board_event) ->
+         if
+           List.exists
+             (Keeper_world_observation.same_board_event_identity event)
+             acc
+         then acc
+         else (
+           (match event.Keeper_world_observation.event_kind with
+            | Keeper_world_observation.Schedule_due wake ->
+              Log.Keeper.info
+                "turn entry: promoted scheduled work schedule_id=%s \
+                 occurrence_id=%s keeper=%s"
+                wake.Keeper_event_queue.schedule_id
+                event.Keeper_world_observation.post_id
+                meta_after_triage.name
+            | Keeper_world_observation.Board_post_created
+  | Keeper_world_observation.Board_post_updated
+            | Keeper_world_observation.Board_comment_added _
+            | Keeper_world_observation.Board_reaction_changed _
+            | Keeper_world_observation.Board_vote_cast _
+            | Keeper_world_observation.Fusion_completed
+            | Keeper_world_observation.External_attention _
+            | Keeper_world_observation.Completion_authority_rejected _
+            | Keeper_world_observation.Task_outcome _
+            | Keeper_world_observation.Task_cancelled _
+            | Keeper_world_observation.Delegate_completed _
+            | Keeper_world_observation.Ask_answered_row _
+            | Keeper_world_observation.Composition_completed
+            | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ ->
+              Log.Keeper.info
+                "turn entry: promoted queued observation post_id=%s keeper=%s"
+                event.Keeper_world_observation.post_id
+                meta_after_triage.name);
+           event :: acc))
+      pending_board_events
+      (List.rev queued_observations)
+  in
+  { pending_board_events
+  ; source_batch
+  ; diagnostic_selection
+  ; event_queue_intake_error
+  ; event_queue_triggers
+  }
+;;
+
+let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
+  heartbeat_event_intake_with_priority ~priority_sources:[]
+    ~ctx ~meta_after_triage ~pending_board_events

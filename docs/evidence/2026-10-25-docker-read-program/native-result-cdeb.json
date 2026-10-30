@@ -1,0 +1,41 @@
+{
+  "schema": "masc.read-program.native-result.v1",
+  "source_sha": "cdeb9e5af15677c22fc4be8b0cc0f82d42e5b351",
+  "run_id": 40190669931,
+  "job_id": 121160783992,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40190669931",
+  "result": "PASS_SELECTED_SUITE",
+  "selected_suites": [
+    "test_keeper_sandbox_read_backend"
+  ],
+  "alcotest_cases": 79,
+  "new_handler_cases_passed": [
+    "Missing executable returns typed Runtime_failure.",
+    "Legitimate no-match returns Completed with empty matches."
+  ],
+  "docker_in_new_cases": "Fixture, not real Docker; the separate CLI probe is actual Docker.",
+  "raw_log": {
+    "bytes": 179228,
+    "sha256": "01d93661d6893dd0b41dbe620d1daf985c9c48fff88913bab0bdd8dd78461fed"
+  },
+  "selection": {
+    "source_sha": "cdeb9e5af15677c22fc4be8b0cc0f82d42e5b351",
+    "minimal": true,
+    "suites": [
+      "test_keeper_sandbox_read_backend"
+    ],
+    "runner": "scripts/ci-run-targeted-tests.sh"
+  },
+  "selection_canonical_json_sha256": "160104efdd9669564437f30bf7eec0dbb261c3c9ea3f89d2dd19f8b9ba4e5da5",
+  "actual_build_command": "dune build test/test_keeper_sandbox_read_backend.exe",
+  "first_attempt": {
+    "run": 40189920561,
+    "source_sha": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+    "result": "COMPILE_FAILURE",
+    "tests_executed": 0
+  },
+  "full_regression": "not_run",
+  "previous_full_regression_run_head_suites": "not_established",
+  "new_model_episode": false,
+  "production_installation": false
+}

@@ -1,0 +1,56 @@
+{
+  "scope": "I1 backend active operator Lane inventory; TUI/Web consumer and enabled controls excluded",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc-lane-inventory-20261004",
+  "branch": "feat/lane-inventory-20261004",
+  "base": "1a1c3217fd25cbce5d2a293d0f529da33fea0295",
+  "head": "4077c549c705ff8b51c71783b3700928b602dd7a",
+  "full_diff_sha256": "3f6169531b6e08a9b8193ba0eed3959c1103d423a6339035959d078520157e76",
+  "state": "source reviewed; native boundary tests unexecuted; no GitHub approval or integration",
+  "files": {
+    "docs/guides/lane-inventory.md": "50e07565db99f2b344e13e7096124ac06af9f9f88aa36e5c56b4d2ad876106f2",
+    "lib/browser_lane/browser_lane.ml": "3004105758dd3512f850730d7b40fa92104961d1e29e11551a43b83db8c179c3",
+    "lib/lane_addon/lane_addon_runtime.ml": "2a02ee7510755542657d4e832cf57b530e61458abd48d494d6d8adc6b579f384",
+    "lib/lane_addon/lane_addon_runtime.mli": "c6bfdfe1810b4c589972b6d737722f7c7c5c61abed47dd88972bd79b33cae8c2",
+    "lib/lane_addon/lane_addon_store.ml": "cac642b5ae49de5855d3ef629ca196e196f8c31c02fd91e64754f198c0f9d87c",
+    "lib/lane_addon/lane_addon_store.mli": "7b3d80625184f396b88f727026f01c8b0737be16835a8fc1517b6f72ad423bc9",
+    "lib/server/server_lane_inventory.ml": "8e34bcc13bb28dc993de694f5f9a47e6b26146f93b953a1a30b7fcd3ff90319f",
+    "lib/server/server_lane_inventory.mli": "c557b19532f13cbaed3910818bc0b6e6e78e523434ba792cf8751ea20d5f3a3f",
+    "lib/server/server_routes_http_routes_dashboard.ml": "3fb1f0c61dbeb25dabe8b8be4d6dd46a6e5895f5c47149beb04d7df156d2f6c9",
+    "lib/server/server_standalone_lane_projection.ml": "b64699b4a95d03b2263f5283446e0765f65b30487868d701884492a49d3066b4",
+    "lib/server/server_standalone_lane_projection.mli": "1f29585acdfe4a6768dabe474508db8369485aad014b0b364d14693f363bbab1",
+    "test/dune": "7fabe162dbf8287e9a1bc21b7ae2b782807bcdfcbebb2221f33af3e8581b2017",
+    "test/test_browser_lane.ml": "491bc6d847bd06768386aad15c0e1cd81a3fc667d94f2ac2c883e57d5ba57a35",
+    "test/test_lane_addon_reconcile.ml": "cd8263c5a4a4d656f1027c952805da5af79bd558bd89c54fcc9c02c622c2632e",
+    "test/test_server_lane_inventory.ml": "03939566e3e1e3eb1c75512384b492aa2ece2c439c03254253ac5ccb9187ecf8"
+  },
+  "wire_contract": "docs/guides/lane-inventory.md and lib/server/server_lane_inventory.ml serialize the exact schema masc.lane-inventory/v1; GET /api/v1/lanes requires CanAdmin",
+  "implemented": [
+    "Derived builtin census via Lane_id.all_of_builtin; typed exact/browser/machine/declaration/manual selection identity, including manual incarnation.",
+    "Standalone immutable observation captures admission once; legacy standalone endpoint and inventory exact_snapshot render that typed observation without JSON reparsing.",
+    "Browser connection count under read lock without pruning/settling requests; executor registration is only Atomic presence, no session/process inference.",
+    "Machine state uses only current Atomic publication.",
+    "Filesystem declaration inventory before reconcile plus typed live/retained metadata from existing runtime owner; no manager/store creation, action schema callback, worker acquisition, reconciliation or cleanup in the read path.",
+    "Per-file metadata failure preserves readable siblings and reports issues; malformed/duplicate declarations remain addressable.",
+    "Confirmed Detached history does not count as active instances; only complete declaration absence plus confirmed cleanup removes declared row. Partial reads preserve known owner path. Manual Detached excluded."
+  ],
+  "boundary_tests_authored": [
+    "test_server_lane_inventory.ml: all builtin + first-reconcile valid/malformed/duplicate declarations; workspace file bytes/no manager/store creation; partial retained metadata and manual exact pair; known cleanup vs partial declaration absence; actual HTTP 401/403/200 authority boundary.",
+    "test_browser_lane.ml: expired connected client not counted, but pending waiter and unretired client remain until explicit disconnect.",
+    "test_lane_addon_reconcile.ml: actual manual live owner read does not call worker start/stop/observation backend."
+  ],
+  "verification": {
+    "parser": "13/13 OCaml 5.5.1 parser-only PASS",
+    "native_typecheck": "not_run",
+    "boundary_tests": "authored_not_run",
+    "dune": "not_run",
+    "ci": "not_run"
+  },
+  "limits": [
+    "Scoped source review only; not native backend or TUI runtime proof.",
+    "No enabled toggles or frontend consumer in this PR.",
+    "Cross-family observation is not atomic.",
+    "No GitHub approval or merge."
+  ],
+  "reviewer": "root independent read of config_review_response authored backend",
+  "verdict": "PASS_scope_only"
+}

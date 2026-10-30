@@ -1,0 +1,942 @@
+open Masc
+module Runtime = Keeper_librarian_runtime
+module Fixture = Exact_output_fixture
+module Runs = Exact_lane_run_registry
+
+let served_slot =
+  Alcotest.testable
+    (fun fmt -> function
+       | Runtime.Api_slot id -> Format.fprintf fmt "Api_slot %s" id
+       | Runtime.Cli_slot id -> Format.fprintf fmt "Cli_slot %s" id)
+    ( = )
+
+let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = env#net and clock = env#clock in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let start_server status =
+  let posts = ref 0 in
+  let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port | _ -> Alcotest.fail "missing loopback port" in
+  let handler _ _ body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all));
+    incr posts;
+    let body = match status with
+      | `Request_entity_too_large -> {|{"error":{"message":"fixture body limit","type":"invalid_request_error"}}|}
+      | `Too_many_requests -> {|{"error":{"message":"fixture quota","type":"rate_limit_error"}}|}
+      (* A 200 whose one choice carries nothing: the provider answered empty. *)
+      | `OK ->
+        {|{"id":"fixture","object":"chat.completion","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
+      | _ -> {|{"error":{"message":"fixture authorization","type":"authentication_error"}}|} in
+    Cohttp_eio.Server.respond_string ~status ~body () in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port, posts in
+  let first = if first_overflow then Some (start_server `Request_entity_too_large) else None in
+  let base_url, posts = start_server status in
+  let terminal : Fixture.target_fixture = {id = "capacity-terminal"; base_url} in
+  let targets = match first with
+    | None -> [terminal]
+    | Some (base_url, _) -> [{Fixture.id = "capacity-first"; base_url}; terminal] in
+  let resolver = Fixture.resolver_snapshot ~source:"capacity-callback-fixture" targets in
+  (match Runtime_exact_output_registry.publish
+      ~lanes:[{Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian;
+        enabled = true; slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
+        cli_slot_ids = List.map fst cli_errors;
+        max_output_tokens = Some 4_096; thinking = None}] resolver with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
+  let input : Keeper_librarian.input =
+    {turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
+     historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
+     keeper_id = Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions = "Preserve evidence.";
+     current = None; working_context = Keeper_librarian_context.empty;
+     messages = [Agent_core.Types.user_msg "Pending conversation evidence."];
+     tool_observations = []; counterpart_observations = []} in
+  let cli_calls = ref [] in
+  let cli_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    cli_calls := !cli_calls @ [runtime_id];
+    Error (List.assoc runtime_id cli_errors) in
+  let refused = ref 0 and committed = ref false and observed_limit = ref None in
+  let verdict = ref None and same = ref None and provider_refusals = ref [] in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Runtime.run_best_effort ~cli_runner
+    ~on_cli_input_limit:(fun limit ->
+      incr refused;
+      observed_limit := Some (limit.Keeper_lane_cli_oneshot.runtime_id, limit.capacity.max_chars))
+    ~on_not_committed:(fun outcome ->
+      provider_refusals := List.sort_uniq compare
+        (!provider_refusals @ outcome.Runtime.provider_input_refusals);
+      (* Folded as the continuity pass folds it: any report's size verdict
+         stands. *)
+      let shows_size = outcome.Runtime.walk_shows_size in
+      verdict := Some (match !verdict with None -> shows_size | Some earlier -> earlier || shows_size);
+      let met = outcome.Runtime.smaller_range_meets_same_failure in
+      same := Some (match !same with None -> met | Some earlier -> earlier || met))
+    ~on_memory_committed:(fun () -> committed := true)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
+  Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
+  Option.iter (fun expected -> Alcotest.(check (option (pair string int)))
+    "limit retains the actual refusing runtime" (Some expected) !observed_limit) expected_limit;
+  (* The verdict the continuity pass reads to decide whether to read less. It
+     is taken from every failure of the walk, so the same set of causes
+     answers the same way in either order. *)
+  Option.iter
+    (fun shows_size ->
+       Alcotest.(check (option bool))
+         "the walk's size verdict" (Some shows_size) !verdict)
+    shows_size;
+  (* What a recursive splitter reads as a veto: the walk also met a failure a
+     smaller range meets the same way. *)
+  Option.iter
+    (fun met ->
+       Alcotest.(check (option bool))
+         "the walk also met a size-independent failure" (Some met) !same)
+    same_failure;
+  Alcotest.(check (list string)) "CLI candidates ran in order"
+    (List.map fst cli_errors) !cli_calls;
+  Alcotest.(check int) "terminal provider really received the request" 1 !posts;
+  Option.iter (fun (_, count) -> Alcotest.(check int)
+    "body-refused first provider really ran" 1 !count) first;
+  Alcotest.(check bool) "refused request never commits Memory" false !committed;
+  let expected_refusals =
+    if first_overflow || status = `Request_entity_too_large
+    then [Keeper_librarian_input_refusal.Request_body_refused]
+    else [] in
+  Alcotest.(check (list string)) "named HTTP body refusal survives subsequent slots and CLI fallback"
+    (List.map Keeper_librarian_input_refusal.to_string expected_refusals)
+    (List.map Keeper_librarian_input_refusal.to_string !provider_refusals);
+  let runs = Runs.list_runs registry |> List.filter
+    (fun (run : Runs.run) -> String.equal run.actor keeper_id) in
+  match runs with
+  | [run] -> Alcotest.(check string) "terminal failure remains observable" "failed"
+      (Runs.status_label run.status)
+  | _ -> Alcotest.fail "expected one recorded Librarian run"
+
+let test_absorb_evidence_capacity_recovers ~base_path () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = env#net and clock = env#clock in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let keeper_id = "absorb-evidence-capacity" in
+  let module Current = Keeper_memory_os_current in
+  let module L = Keeper_librarian in
+  let module M = Keeper_memory_os_types in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let fact = M.observed ~claim:"A17 is under investigation." ~category:M.Fact
+    ~now:100. ~origin:{kind=M.Authored; trace_id=keeper_id} in
+  let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:100. ~source:{kind=Current.Librarian; trace_id=keeper_id} ~facts:[fact] ()
+    |> function Ok state -> state | Error detail -> Alcotest.fail detail in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let before = Fs_compat.load_file path in
+  let output = `Assoc ["new_claims", `List [`Assoc [
+      "claim", `String "A17 was investigated and then resolved.";
+      "category", `String "fact"; "absorbs", `List [`String "m1"]]];
+      "dropped", `List []; "working_contexts", `List []] in
+  let librarian = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response output)) in
+  let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply
+    {|{"model":"fixture","answers":{"s0_0":{"type":"choice","choice":"mergeable","confidence":1.0,"probabilities":{"mergeable":1.0,"different_context":0.0,"loses_knowledge":0.0,"uncertain":0.0}}}}|}) in
+  let resolver = Fixture.resolver_snapshot ~source:"absorb-capacity"
+    [{Fixture.id="absorb-capacity-librarian"; base_url=librarian.base_url}] in
+  (match Runtime_exact_output_registry.publish
+    ~lanes:[{Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled=true;
+      slot_ids=["absorb-capacity-librarian"]; cli_slot_ids=[];
+      max_output_tokens=Some 4096; thinking=None}] resolver with
+   | Ok _ -> () | Error error ->
+     Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-capacity-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with absorb_gate=true;
+     destinations=({Runtime_schema.endpoint=jev.base_url; model="fixture";
+                    api_key_env="TYPESAFEAI_API_KEY"},[])} @@ fun () ->
+  let observation = Agent_core.Types.user_msg "A17 recovery was verified after the investigation." in
+  let input : L.input =
+    {turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1000;
+     historical_task_contexts=[]; goal_context=L.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve the event history.";
+     current=Some {facts=seeded.facts}; working_context=Keeper_librarian_context.empty;
+     messages=List.init 1000 (fun _ -> observation);
+     tool_observations=[]; counterpart_observations=[]} in
+  let size = ref None and commits = ref 0 in
+  let run input = Runtime.run_best_effort
+    ~on_not_committed:(fun outcome -> size := Some outcome.Runtime.walk_shows_size)
+    ~on_memory_committed:(fun () -> incr commits)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
+  run input;
+  Alcotest.(check (option bool)) "real runtime reports capacity to source narrowing" (Some true) !size;
+  Alcotest.(check int) "capacity failure cannot commit candidate" 0 !commits;
+  Alcotest.(check string) "source snapshot unchanged" before (Fs_compat.load_file path);
+  Alcotest.(check int) "oversized evidence never dispatched" 0 (Fixture.post_count jev);
+  (* The caller can retry a smaller selected range against the unchanged snapshot. *)
+  run {input with messages=[observation]};
+  Alcotest.(check int) "smaller range commits once" 1 !commits;
+  Alcotest.(check int) "smaller evidence reaches the judge" 1 (Fixture.post_count jev);
+  Alcotest.(check bool) "actual memory snapshot advances" true (before <> Fs_compat.load_file path)
+;;
+
+let test_prefit_real_continuity ~base_path () =
+  let module P = Keeper_librarian_continuity in
+  let module B = Keeper_turn_boundaries in
+  let module C = Keeper_checkpoint_store in
+  let module Current = Keeper_memory_os_current in
+  let module Context = Keeper_librarian_context in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let some = function Some value -> value | None -> Alcotest.fail "missing continuity source" in
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let keeper_id = "prefit-real-continuity" and trace_id = "prefit-source" in
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let queued_source : Context.source =
+    {reference="pending-chat"; content=`String "Unrelated pending question."} in
+  let pocket : Context.pocket =
+    {id="pending-pocket"; merge_contexts=[]; sources=[queued_source.reference];
+     context="An unresolved question still needs an answer.";
+     next_steps=["Answer the original question."]; completeness=Context.Current} in
+  let previous_context = Context.commit ~keepers_dir ~keeper_id
+      ~expected_version:None ~execution_basis:"pending-execution"
+      ~sources:[queued_source] [pocket] |> get in
+  let context_path = Context.path ~keepers_dir ~keeper_id in
+  let context_before = Fs_compat.load_file_opt context_path |> some in
+  let working_context : Context.input =
+    {sources=[queued_source]; previous=Some previous_context; unavailable=[];
+     execution_basis=Some "pending-execution"} in
+  let source = List.init 4 (fun index -> Agent_core.Types.user_msg
+    (string_of_int index ^ String.make 2000 'a')) in
+  let pending =
+    [Agent_core.Types.user_msg "Do not publish before explicit approval.";
+     Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+       [Agent_core.Types.ToolUse {id="pending-read";name="read_file";input=`Assoc []}];
+     { (Agent_core.Types.make_message ~role:Agent_core.Types.Tool
+       [Agent_core.Types.ToolResult {tool_use_id="pending-read";content="Unpublished patch";
+         outcome=Agent_core.Types.Tool_succeeded;json=None;content_blocks=None}])
+       with tool_call_id=Some "pending-read" }] in
+  let canonical = source @ pending in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { provider_binding = None;version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+     agent_name=keeper_id; model="fixture"; system_prompt=None; messages=canonical;
+     usage=Agent_core.Types.empty_usage; turn_count=4; created_at=1000.;
+     tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
+     top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
+     preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
+     context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None} in
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  (match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
+   | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
+   | Error detail -> Alcotest.fail detail);
+  B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
+    {B.recorded_at=1000.; event=B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;
+      turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+      history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
+    |> Result.map_error B.append_error_to_string |> get;
+  let resolver = Fixture.resolver_snapshot ~source:"prefit-cli-only" [] in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
+  let prepare () = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
+  let input prepared : Keeper_librarian.input =
+    let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
+    {turn_ref=P.turn_ref prepared; historical_task_contexts = []; goal_context =Keeper_librarian.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve evidence.";
+     current=Option.map (fun (s : Current.t) -> {Keeper_librarian.facts=s.facts}) current;
+     working_context; messages=P.messages prepared;
+     tool_observations=[];counterpart_observations=[]} in
+  (* Independently measure the exact prompt contract to derive the fixture's
+     server limit, including template, current facts, continuity and schema. *)
+  let rendered prepared input =
+    let variables =
+      Keeper_librarian_runtime.librarian_prompt_variables ~continuity:prepared input |> get in
+    let _, prompt = Prompt_registry.resolve_and_render_prompt_template
+      Prompt_names.librarian variables |> get in
+    let requirement = Agent_core.Exact_output.make_output_requirement
+      ~schema:Keeper_structured_output_schema.librarian_continuity_output_schema
+      ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+    Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt in
+  let chars text = Runtime_codex_app_server.prompt_char_count text |> get in
+  let full = prepare () in
+  let half = P.narrow full |> some in
+  let max_chars = chars (rendered half (input half)) in
+  let capacity : Keeper_lane_cli_oneshot.input_capacity =
+    {runtime_id=Fixture.cli_primary_runtime;
+     capacity={actual_chars=chars (rendered full (input full));max_chars}} in
+  let missing_state = `Assoc ["new_claims", `List []; "dropped", `List [];
+    "working_contexts", `List []] in
+  let null_state = match missing_state with
+    | `Assoc fields -> `Assoc (("working_state", `Null) :: fields)
+    | _ -> Alcotest.fail "expected fixture object" in
+  let check_working_state_schema ~continuity output_schema =
+    let open Yojson.Safe.Util in
+    let state = output_schema |> member "properties" |> member "working_state" in
+    let expected = if continuity then `String "string"
+      else `List [`String "string"; `String "null"] in
+    Alcotest.(check string) "CLI schema matches this pass's working-state obligation"
+      (Yojson.Safe.to_string expected) (Yojson.Safe.to_string (member "type" state));
+    if continuity then Alcotest.(check int) "continuity requires nonempty text" 1
+      (state |> member "minLength" |> to_int) in
+  let invalid_calls = ref [] in
+  let invalid_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt:_ =
+    check_working_state_schema ~continuity:true output_schema;
+    invalid_calls := !invalid_calls @ [runtime_id];
+    Ok (Yojson.Safe.to_string
+      (if runtime_id = Fixture.cli_primary_runtime then null_state else missing_state)) in
+  let invalid_committed = ref false in
+  let invalid_size_verdict = ref None in
+  Runtime.run_best_effort ~continuity:half
+    ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id half |> get)
+    ~cli_runner:invalid_runner ~on_memory_committed:(fun () -> invalid_committed := true)
+    ~on_not_committed:(fun reason -> invalid_size_verdict := Some reason.Runtime.walk_shows_size)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input half);
+  Alcotest.(check (list string)) "missing working states advance through declared slots once"
+    [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !invalid_calls;
+  Alcotest.(check (option bool)) "schema failure stops partition traversal" (Some false)
+    !invalid_size_verdict;
+  Alcotest.(check bool) "missing working state never publishes Memory" false !invalid_committed;
+  Alcotest.(check bool) "missing working state leaves no Memory snapshot" true
+    (Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get |> Option.is_none);
+  Alcotest.(check bool) "missing working state leaves no range receipt" false
+    (P.memory_committed ~config ~keeper_name:keeper_id half |> get);
+  Alcotest.(check bool) "missing working state leaves no continuity frontier" true
+    (P.read ~config ~keeper_name:keeper_id |> get |> Option.is_none);
+  (* An ordinary Memory pass never reads the working state, so a blank one
+     the current schema allows refuses nothing, as null never did. *)
+  List.iter (fun (label, working_state) ->
+    let answer = match missing_state with
+      | `Assoc fields -> `Assoc (("working_state", working_state) :: fields)
+      | _ -> Alcotest.fail "expected fixture object" in
+    let ordinary_runner ~runtime:_ ~system_prompt:_ ~output_schema ~prompt:_ =
+      check_working_state_schema ~continuity:false output_schema;
+      Ok (Yojson.Safe.to_string answer) in
+    match Runtime.For_testing.execute_exact_output_classified ~continuity:None
+      ~cli_runner:ordinary_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
+      ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Llm_provider.Types.user_msg "ordinary Memory"] () with
+    | Ok (({ Runtime.continuity_answer; _ }, _), _) ->
+      Alcotest.(check bool)
+        ("ordinary Memory accepts a " ^ label ^ " working state and carries no continuity answer")
+        true
+        (match continuity_answer with
+         | Runtime.Memory_only -> true
+         | Runtime.Continuity _ -> false)
+    | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error))
+    [ "null", `Null; "blank", `String "" ];
+  let api_answer = `Assoc ["new_claims", `List []; "dropped", `List [];
+    "working_contexts", `List []; "working_state", `String "API saved state."] in
+  let api_server output = Fixture.start_server ~sw ~net:env#net ~clock:env#clock
+    (Fixture.Reply (Fixture.openai_response output)) in
+  let invalid_api = api_server null_state and valid_api = api_server api_answer in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:["missing-state"; "valid-state"]
+    (Fixture.resolver_snapshot ~source:"continuity-api-validation"
+      [{Fixture.id="missing-state";base_url=invalid_api.base_url};
+       {Fixture.id="valid-state";base_url=valid_api.base_url}]));
+  (match Runtime.For_testing.execute_exact_output_classified ~continuity:(Some half)
+     ~clock:env#clock ~net:env#net ~base_path ~keeper_id ~selected_input:{(input half) with working_context=Context.empty}
+     ~messages:[Llm_provider.Types.user_msg "synthesize completed source"] () with
+   | Ok (({ Runtime.continuity_answer; _ }, _), slot) ->
+     Alcotest.check served_slot "API validation advances to declared successor"
+       (Runtime.Api_slot "valid-state") slot;
+     Alcotest.(check (option string)) "API successor supplies working state"
+       (Some "API saved state.")
+       (match continuity_answer with
+        | Runtime.Continuity { working_state; _ } -> Some working_state
+        | Runtime.Memory_only -> None)
+   | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
+  Alcotest.(check int) "null-state API candidate ran exactly once" 1 (Fixture.post_count invalid_api);
+  Alcotest.(check int) "valid API successor ran exactly once" 1 (Fixture.post_count valid_api);
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
+  let calls = ref [] in
+  let execute prepared state =
+    let input = input prepared in
+    let expected = rendered prepared input in
+    let answered_by = ref None in
+    let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema ~prompt =
+      check_working_state_schema ~continuity:true output_schema;
+      calls := prompt :: !calls;
+      answered_by := Some runtime_id;
+      Alcotest.(check string) "prefit and dispatch use identical full text" expected prompt;
+      Alcotest.(check bool) "no oversized CLI probe after learning the bound" true
+        (chars prompt <= max_chars);
+      if List.length !calls = 1 then (
+        Alcotest.(check string) "null response belongs to first declared candidate"
+          Fixture.cli_primary_runtime runtime_id;
+        Ok (Yojson.Safe.to_string null_state))
+      else (
+      if List.length !calls = 2 then
+        Alcotest.(check string) "valid successor handles the same source"
+          Fixture.cli_secondary_runtime runtime_id;
+      Ok (Yojson.Safe.to_string (`Assoc [
+        "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
+        "working_state", `String state]))) in
+    let committed = ref false and memory_committed = ref false in
+    let served_by = ref None in
+    let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
+    Runtime.run_best_effort ~continuity:prepared
+      ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
+      ~cli_runner:runner
+      ~on_continuity_committed:(fun ~served_by:slot _ ->
+        served_by := Some slot; committed:=true)
+      ~on_memory_committed:(fun () -> memory_committed:=true)
+      ~base_path ~keepers_dir ~keeper_id
+      ~expected_revision:(Option.map (fun (s : Current.t) -> s.revision) current) input;
+    Alcotest.(check bool) "actual Memory publication completed" true !memory_committed;
+    Alcotest.(check bool) "actual continuity publication completed" true !committed;
+    Alcotest.(check (option served_slot)) "the commit names the CLI runtime that answered"
+      (Option.map (fun id -> Runtime.Cli_slot id) !answered_by) !served_by;
+    let saved = P.read ~config ~keeper_name:keeper_id |> get |> some in
+    Alcotest.(check int) "stored frontier advances to the selected atom group"
+      (P.end_atom prepared) saved.end_atom;
+    Alcotest.(check bool) "stored Memory receipt covers the selected atom group" true
+      (P.memory_committed ~config ~keeper_name:keeper_id prepared |> get);
+    Alcotest.(check string) "continuity leaves pending context bytes unchanged"
+      context_before (Fs_compat.load_file_opt context_path |> some) in
+  let fit prepared = Runtime.fit_continuity ~capacity ~base_path ~keeper_id
+      ~input_for:(fun candidate -> Ok (input candidate)) prepared |> get |> some in
+  let first = fit full in
+  Alcotest.(check int) "measured bound selects first two whole atoms" 2 (P.end_atom first);
+  execute first ("Saved state " ^ String.make 200 's');
+  let fact = Keeper_memory_os_types.observed ~claim:("New fact " ^ String.make 200 'f')
+    ~category:Keeper_memory_os_types.Fact ~now:1001.
+    ~origin:{kind=Keeper_memory_os_types.Authored;trace_id} in
+  ignore (Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:1001.
+    ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[fact] () |> get);
+  let next = prepare () in
+  Alcotest.(check bool) "new state and Memory overhead make former atom count exceed limit"
+    true (chars (rendered next (input next)) > max_chars);
+  let second = fit next in
+  Alcotest.(check int) "second pass accounts for growing overhead" 3 (P.end_atom second);
+  execute second "State through the third atom.";
+  let last = fit (prepare ()) in
+  Alcotest.(check int) "final selected group reaches the completed boundary" 4 (P.end_atom last);
+  execute last "Completed history is saved; publication still requires explicit approval.";
+  Alcotest.(check int) "three fitted groups plus one rejected candidate were dispatched" 4 (List.length !calls);
+  Alcotest.(check bool) "no completed work remains; unfinished work is not selected" true
+    (P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> Option.is_none);
+  let snapshot = P.read ~config ~keeper_name:keeper_id |> get |> some in
+  let lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id |> get in
+  let module Driver = Keeper_turn_driver_try_provider in
+  let continuity = Driver.prepare_continuity ~trace_id ~lines ~messages:canonical snapshot
+    |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
+  let provider_config = Agent_core.Llm_provider.Provider_config.make
+    ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"continuity-cycle-fixture" ~base_url:"https://provider.example" () in
+  let completed_end =
+    Driver.completed_history_end ~trace_id ~lines ~messages:canonical
+    |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
+  let view = match Driver.For_testing.request_view
+    ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
+    ~input_policy:Keeper_input_policy.Small ~continuity ~provider_config
+    ~measure_message_bytes:(fun message -> String.length
+      (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
+    ~accepted:None ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
+    ~current_turn_results:Driver.Current_turn_verbatim ~base_path
+    ~demote_before:completed_end ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
+    ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical with
+    | Ok view -> view
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
+  let transmitted = view.transmitted
+    |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in
+  let summaries, suffix = List.partition (fun (message : Agent_core.Types.message) ->
+    message.metadata = Runtime_model_input_tail_window.working_state_metadata) transmitted in
+  Alcotest.(check int) "next request contains exactly one saved working state" 1 (List.length summaries);
+  Alcotest.(check bool) "next request preserves unfinished user and tool exchange exactly" true
+    (List.equal Agent_core.Types.Message_value.equal pending suffix);
+  let after = match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
+    | Ok value -> C.exact_snapshot_messages value
+    | Error _ -> Alcotest.fail "source checkpoint disappeared" in
+  Alcotest.(check bool) "source checkpoint is unchanged" true
+    (List.equal Agent_core.Types.Message_value.equal canonical after)
+
+(* The size verdict, cause by cause. A walk reads less when any of its
+   failures answers true, so this table is the whole rule: a row that flips
+   changes what a keeper reads after a refusal. *)
+let test_named_provider_input_refusals () =
+  let module E = Agent_core.Exact_output in
+  let module I = Keeper_librarian_input_refusal in
+  let refused refusal = E.Provider_response_refused
+    { http_status = 400; refusal; retry_after_s = None } in
+  List.iter (fun (label, cause, expected) ->
+    Alcotest.(check (list string)) label
+      (List.map I.to_string expected)
+      (List.map I.to_string (Runtime.For_testing.cause_input_refusals cause)))
+    [ "named context overflow", refused E.Context_overflow, [I.Context_overflow]
+    ; "named input capacity", refused E.Input_capacity, [I.Input_capacity]
+    ; "named request body refusal", refused E.Request_body_refused, [I.Request_body_refused]
+    ; "unknown invalid request cannot become a named size refusal", refused E.Invalid_request, []
+    ; "missing refusal body cannot become a named size refusal", refused E.Refusal_body_not_received, []
+    ; "timeout cannot become a named size refusal", refused E.Timeout, []
+    ; "quota cannot become a named size refusal", refused E.Rate_limited, []
+    ; "invalid answer cannot become a named size refusal", E.Invalid_json_output, []
+    ];
+  let module Http = Agent_core.Llm_provider.Http_client in
+  let context_error = Http.ProviderFailure
+    {kind=Http.Context_overflow {limit=None};message="fixture"} in
+  Alcotest.(check (list string)) "an unsent context failure is not a provider refusal" []
+    (List.map I.to_string (Runtime.For_testing.cause_input_refusals
+      (E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch})));
+  List.iter (fun cause ->
+    let module Shared = Keeper_exact_walk_failure in
+    let original=Shared.of_cause cause in
+    let decoded=match Shared.api_observation cause |> Shared.api_observation_to_yojson
+        |> Shared.api_observation_of_yojson with
+      | Ok observed -> Shared.of_api_observation observed
+      | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "named actual causes survive the strict shared receipt source codec" true
+      (original=decoded))
+    [refused E.Context_overflow;refused E.Input_capacity;refused E.Request_body_refused;
+     refused E.Rate_limited;E.Invalid_json_output;
+     E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch}]
+
+let test_native_context_receipt_flags () =
+  let module Shared = Keeper_exact_walk_failure in
+  let runtime_id = Fixture.cli_primary_runtime in
+  let codex tool_effect_attempted = Fusion_official_client.Codex_failure
+    (Runtime_codex_app_server.Context_window_exceeded
+      {message="original Codex context refusal";tool_effect_attempted}) in
+  let claude tool_effect_attempted response_emitted = Fusion_official_client.Claude_failure
+    (Runtime_claude_code.Context_window_exceeded
+      {message="original Claude context refusal";tool_effect_attempted;response_emitted}) in
+  List.iter (fun (cause,expected) ->
+    let failure=Keeper_lane_cli_oneshot.Execution_failed {runtime_id;cause} in
+    let json=Shared.cli_observation failure |> Shared.cli_observation_to_yojson in
+    let decoded=match Shared.cli_observation_of_yojson json with
+      | Ok decoded -> decoded | Error detail -> Alcotest.fail detail in
+    let evidence=Shared.of_cli_observation decoded in
+    Alcotest.(check bool) "restored native flags decide admission" expected
+      (Shared.refuses_input_capacity evidence);
+    Alcotest.(check bool) "unsafe native context cannot permit a smaller range" (not expected)
+      evidence.size_independent_execution_failure;
+    Alcotest.(check bool) "context refusal is not a measured character limit" false
+      (Shared.shows_range_size evidence);
+    Alcotest.(check bool) "original typed context flags and reason survive roundtrip" true
+      (Yojson.Safe.equal json (Shared.cli_observation_to_yojson decoded));
+    let without_flags = match json with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          if key="cause" then key,(match value with
+            | `List [tag;`Assoc flags] -> `List [tag;`Assoc
+                (List.filter (fun (name,_) -> name<>"tool_effect_attempted") flags)]
+            | _ -> Alcotest.fail "context flags missing from original source proof")
+          else key,value) fields)
+      | _ -> Alcotest.fail "missing original native observation" in
+    Alcotest.(check bool) "missing safety evidence refuses instead of granting admission" true
+      (Result.is_error (Shared.cli_observation_of_yojson without_flags)))
+    [codex false,true;codex true,false;
+     claude false false,true;claude false true,false;
+     claude true false,false;claude true true,false]
+
+let test_size_verdict_table () =
+  let module E = Agent_core.Exact_output in
+  (* The verdict reads the refusal and never the status it arrived with. *)
+  let any_status = 400 in
+  let refused refusal = E.Provider_response_refused { http_status = any_status; refusal; retry_after_s = None } in
+  let module Http = Agent_core.Llm_provider.Http_client in
+  let module Types = Agent_core.Llm_provider.Types in
+  let sent error = E.Completion_failed { error; dispatch = E.Generation_dispatch_started } in
+  let unsent error = E.Completion_failed { error; dispatch = E.No_generation_dispatch } in
+  let failed kind = sent (Http.ProviderFailure { kind; message = "" }) in
+  let network kind = sent (Http.NetworkError { message = ""; kind }) in
+  let timed_out phase = sent (Http.TimeoutError { message = ""; phase }) in
+  let empty stop_reason = failed (Http.Empty_completion { stop_reason }) in
+  List.iter
+    (fun (name, cause, expected) ->
+       Alcotest.(check bool) name expected (Runtime.For_testing.cause_shows_size cause))
+    [ "context overflow", refused E.Context_overflow, true
+    ; "input capacity", refused E.Input_capacity, true
+    ; "request body refused", refused E.Request_body_refused, true
+    ; "timeout", refused E.Timeout, true
+    ; "invalid request, reason unknown", refused E.Invalid_request, true
+    ; "refusal body not received", refused E.Refusal_body_not_received, true
+    ; "rate limited", refused E.Rate_limited, false
+    ; "overloaded", refused E.Overloaded, false
+    ; "server error", refused E.Server_error, false
+    ; "network error", refused E.Network_error, false
+    ; "authentication failed", refused E.Auth_failed, false
+    ; "authorization refused", refused E.Authorization_refused, false
+    ; "payment required", refused E.Payment_required, false
+    ; "model not found", refused E.Not_found, false
+    (* A provider error that is not an HTTP refusal, read by its typed kind
+       (#37899). On 2026-09-22 msx-retro-mania's walk narrowed from 130 to 16
+       atoms on quota and empty-response failures while its keeper's request
+       kept growing. *)
+    ; "completion failed, context overflow", failed (Http.Context_overflow { limit = None }), true
+    ; ( "completion failed, response too large"
+      , failed (Http.Response_body_too_large { limit_bytes = 1 })
+      , true )
+    ; "completion failed, empty at the context window", empty Types.ContextWindowExceeded, true
+    ; "completion failed, empty at the output budget", empty Types.MaxTokens, true
+    ; "completion failed, empty at end of turn", empty Types.EndTurn, false
+    ; "completion failed, empty for a reason not named", empty (Types.Unknown "x"), false
+    ; "completion failed, hard quota", failed (Http.Hard_quota { retry_after = None }), false
+    ; ( "completion failed, capacity exhausted"
+      , failed
+          (Http.Capacity_exhausted
+             { scope = Http.Failure_scope_account; retry_after = None; model = None })
+      , false )
+    ; ( "completion failed, unclassified provider failure"
+      , failed (Http.Unknown_provider_failure { reason = None })
+      , false )
+    ; "completion failed, dns failure", network Http.Dns_failure, false
+    ; "completion failed, connection refused", network Http.Connection_refused, false
+    ; "completion failed, tls failure", network Http.Tls_error, false
+    ; "completion failed, peer reset", network Http.Connection_reset, false
+    ; "completion failed, peer closed", network Http.End_of_file, false
+    ; "completion failed, unclassified network failure", network Http.Unknown, false
+    (* Deadlines on a sent request: those on the provider's handling of the
+       whole request count, those that say nothing about its size do not. *)
+    ; "completion failed, sent, whole-call deadline", timed_out Http.Wall_clock, true
+    ; "completion failed, sent, awaiting headers", timed_out Http.Http_operation, true
+    ; "completion failed, sent, awaiting first token", timed_out Http.First_token, true
+    ; ( "completion failed, sent, idle stream"
+      , timed_out (Http.Stream_idle Http.Streaming_answer)
+      , false )
+    ; "completion failed, sent, deadline not named", timed_out Http.Unknown_timeout, false
+    ; "completion failed, queued past its deadline", timed_out Http.Queue, false
+    ; "completion failed, capacity backpressure", timed_out Http.Capacity_backpressure, false
+    (* The transport reports a connect deadline as [Http_operation]. A request
+       that was never sent was judged by no provider. *)
+    ; ( "completion failed, connect deadline, not sent"
+      , unsent (Http.TimeoutError { message = ""; phase = Http.Http_operation })
+      , false )
+    ; ( "completion failed, context overflow, not sent"
+      , unsent (Http.ProviderFailure { kind = Http.Context_overflow { limit = None }; message = "" })
+      , false )
+    ; ( "completion failed, provider terminal"
+      , sent (Http.ProviderTerminal { kind = Http.Session_conflict; message = "" })
+      , false )
+    ; "completion failed, wiring rejected", sent (Http.AcceptRejected { reason = "" }), false
+    ; "output limit", E.Output_limit_reached, true
+    ; "incomplete output", E.Incomplete_output, true
+    ; "missing output", E.Missing_output, true
+    ; "ambiguous output", E.Ambiguous_output 2, true
+    ; "unexpected output content", E.Unexpected_output_content, true
+    ; "invalid json output", E.Invalid_json_output, false
+    ; "response body deadline exceeded", E.Response_body_deadline_exceeded, true
+    ]
+
+(* Unclassified execution failures still cannot narrow input. Typed Codex
+   character-capacity evidence is tested through the actual fallback walk. *)
+let test_cli_size_verdict_table () =
+  let module L = Keeper_lane_cli_oneshot in
+  let runtime_id = Fixture.cli_primary_runtime in
+  List.iter
+    (fun (name, failure, expected) ->
+       Alcotest.(check bool) name expected (Runtime.For_testing.cli_failure_shows_size failure))
+    [ "an answer that is not JSON", L.Invalid_json_output { runtime_id; detail = "truncated" }, false
+    ; "an answer the domain refused", L.Invalid_domain_output { runtime_id; detail = "schema" }, false
+    ; "an id this module cannot run", L.Not_an_official_client { runtime_id }, false
+    ; "an id this module cannot find", L.Unknown_runtime { runtime_id }, false
+    ; "a client that failed without saying why",
+      L.Execution_failed
+        { runtime_id; cause = Fusion_official_client.Setup_failure "quota" },
+      false
+    ]
+
+(* A candidate turned away before dispatch. Only a projection over the slot's
+   window is about the range; the rest answer a smaller range the same way. *)
+let test_disposition_size_verdict_table () =
+  let module E = Agent_core.Exact_output in
+  let over_the_window : E.candidate_rejection_disposition =
+    E.Input_capacity
+      (E.Token_measurement_required { accepted_through_tokens = 1; rejected_from_tokens = Some 2 })
+  in
+  List.iter
+    (fun (name, (disposition : E.candidate_rejection_disposition), expected) ->
+       Alcotest.(check bool) name expected
+         (Runtime.For_testing.disposition_shows_size disposition))
+    [ "a projection over the slot's window", over_the_window, true
+    ; "a slot that is unavailable", E.Runtime_slot_unavailable, false
+    ; "a runtime contract that refused", E.Runtime_contract_rejected, false
+    ; "an input contract that refused", E.Input_contract_rejected, false
+    ; "an output requirement that refused", E.Output_requirement_rejected, false
+    ; "a request that could not be prepared", E.Request_preparation_failed, false
+    ]
+
+(* A continuity pass owns nothing but its snapshot. Memory has committed
+   nothing for this range, so the store refuses the snapshot after the model
+   answered. The run must be recorded as failed: recorded as succeeded, 728 live
+   runs hid a refusal that stopped every Codex Keeper's continuity. *)
+let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry () =
+  let module P = Keeper_librarian_continuity in
+  let module B = Keeper_turn_boundaries in
+  let module C = Keeper_checkpoint_store in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let some = function Some value -> value | None -> Alcotest.fail "missing continuity source" in
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let keeper_id = "continuity-only-refused" and trace_id = "continuity-only-source" in
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let source = List.init 4 (fun index -> Agent_core.Types.user_msg
+    (string_of_int index ^ String.make 200 'a')) in
+  let pending = [Agent_core.Types.user_msg "Do not publish before explicit approval."] in
+  let canonical = source @ pending in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { provider_binding = None;version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+     agent_name=keeper_id; model="fixture"; system_prompt=None; messages=canonical;
+     usage=Agent_core.Types.empty_usage; turn_count=4; created_at=1000.;
+     tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
+     top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
+     preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
+     context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None} in
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  (match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
+   | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
+   | Error detail -> Alcotest.fail detail);
+  B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
+    {B.recorded_at=1000.; event=B.Turn_ended { task_context = Masc.Keeper_turn_task_context.No_task;
+      turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+      history_at_start=B.Fresh_history; position=B.position_of_messages source |> get}}
+    |> Result.map_error B.append_error_to_string |> get;
+  let resolver = Fixture.resolver_snapshot ~source:"continuity-only-cli-only" [] in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
+  let prepared = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
+  let input : Keeper_librarian.input =
+    {turn_ref=P.turn_ref prepared; historical_task_contexts = []; goal_context =Keeper_librarian.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve evidence."; current=None;
+     working_context=Keeper_librarian_context.empty; messages=P.messages prepared;
+     tool_observations=[];counterpart_observations=[]} in
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    Ok (Yojson.Safe.to_string
+          (`Assoc ["working_state", `String "State the refused snapshot must not keep."])) in
+  let committed = ref false and refusals = ref [] in
+  Runtime.run_best_effort ~write_scope:Runtime.Context_only ~continuity:prepared
+    ~cli_runner:runner
+    ~on_continuity_committed:(fun ~served_by:_ _ -> committed := true)
+    ~on_not_committed:(fun refused -> refusals := refused.Runtime.detail :: !refusals)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
+  let reason = "continuity state not committed: Memory has not committed this continuity source" in
+  Alcotest.(check bool) "no snapshot was committed" false !committed;
+  Alcotest.(check (list string)) "the caller is told once, with the store's reason" [reason] !refusals;
+  Alcotest.(check bool) "no snapshot file exists" true
+    (Option.is_none (P.read ~config ~keeper_name:keeper_id |> get));
+  let runs = Runs.list_runs registry |> List.filter
+    (fun (run : Runs.run) -> String.equal run.actor keeper_id) in
+  match runs with
+  | [{Runs.status = Runs.Completed {outcome = Runs.Failed {code; detail}; _}; _}] ->
+    Alcotest.(check string) "the run names the failure" "continuity_not_committed" code;
+    Alcotest.(check string) "and carries the reason the log line carries" reason detail
+  | [run] -> Alcotest.failf "the run was recorded as %s, not failed" (Runs.status_label run.status)
+  | _ -> Alcotest.fail "expected one recorded Librarian run"
+
+let test_durable_runtime_returns_refusal_reports ~base_path () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let start status = Fixture.start_server ~sw ~net:env#net ~clock:env#clock
+    (Fixture.Reply_with (fun _ _ -> status,
+      {|{"error":{"message":"fixture refusal","type":"invalid_request_error"}}|})) in
+  let size = start `Request_entity_too_large and quota = start `Too_many_requests in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:["durable-size";"durable-quota"]
+    (Fixture.resolver_snapshot ~source:"durable-refusal-report"
+      [{Fixture.id="durable-size";base_url=size.base_url};
+       {Fixture.id="durable-quota";base_url=quota.base_url}]));
+  let keeper_id = "durable-refusal-report" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let input : Keeper_librarian.input =
+    {turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
+     historical_task_contexts=[];goal_context=Keeper_librarian.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve evidence.";current=None;
+     working_context=Keeper_librarian_context.empty;
+     messages=[Agent_core.Types.user_msg "Unread conversation."];
+     tool_observations=[];counterpart_observations=[]} in
+  let config = Workspace.default_config base_path in
+  Masc_test_deps.declare_fixture_keeper ~sandbox_image:"base" ~base_path
+    ~sandbox_profile:(Some Keeper_types_profile.Docker) keeper_id;
+  Keeper_types_profile.invalidate_keeper_profile_snapshots ();
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_id; "trace_id", `String keeper_id])
+    |> function
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> () | Error detail -> Alcotest.fail detail);
+  let baseline = [Agent_core.Types.user_msg "Already read baseline."] in
+  let messages = baseline @ input.messages in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { provider_binding = None;version=Agent_core.Checkpoint.checkpoint_version;session_id=keeper_id;
+     agent_name=keeper_id;model="fixture";system_prompt=None;messages;
+     usage=Agent_core.Types.empty_usage;turn_count=2;created_at=1000.;tools=[];
+     tool_choice=None;disable_parallel_tool_use=false;temperature=None;top_p=None;
+     top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
+     preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
+     context=Agent_core.Context.create_sync ();pending_input=None;mcp_sessions=[];working_context=None} in
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) keeper_id in
+  (match Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
+   | Ok (Keeper_checkpoint_store.Saved _) -> ()
+   | Ok (Stale_noop _) -> Alcotest.fail "stale durable refusal fixture"
+   | Error detail -> Alcotest.fail detail);
+  let append turn history_at_start messages =
+    let position = match Keeper_turn_boundaries.position_of_messages messages with
+      | Ok position -> position | Error detail -> Alcotest.fail detail in
+    match Keeper_turn_boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
+      {recorded_at=Float.of_int turn;event=Turn_ended {
+        task_context=Keeper_turn_task_context.No_task;
+        turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:turn;
+        history_at_start;position}} with
+    | Ok () -> () | Error error -> Alcotest.fail (Keeper_turn_boundaries.append_error_to_string error) in
+  (* This fixture starts after an already-read turn. A Fresh_history boundary
+     means restart and correctly dispatches from atom zero instead of merely
+     establishing the first read position. *)
+  append 1 Keeper_turn_boundaries.Continued_history baseline;
+  append 2 Keeper_turn_boundaries.Continued_history messages;
+  let consume commit = match Keeper_librarian_durable_consumer.consume_one ~config ~keeper_name:keeper_id ~commit with
+    | Ok outcome -> outcome
+    | Error error -> Alcotest.fail (Keeper_librarian_durable_consumer.error_to_string error) in
+  (match consume (fun _ -> Alcotest.fail "baseline dispatched a provider") with
+   | Keeper_librarian_durable_consumer.Baseline_advanced _ -> ()
+   | Nothing_to_read | Pending | Memory_not_committed _ | Progress_advanced _ | Official_advanced _ ->
+     Alcotest.fail "the durable refusal fixture did not establish its baseline");
+  let result = ref None in
+  ignore (consume (fun original ->
+    let value = Keeper_librarian_durable_consumer.commit_with_runtime
+      ~base_path ~keepers_dir ~keeper_id original in
+    result := Some value; value));
+  (match (match !result with Some value -> value | None -> Alcotest.fail "actual selector skipped commit") with
+   | Keeper_librarian_durable_consumer.Memory_committed ->
+     Alcotest.fail "the failed walk claimed Memory committed"
+   | Memory_pending ->
+     Alcotest.fail "the synchronous failed walk claimed an unfinished owner commit"
+   | Memory_refused reports ->
+     Alcotest.(check bool) "the adapter retains classified reports" true (reports <> []);
+     Alcotest.(check bool) "provider size refusal and later quota both reach the durable edge" true
+       (List.exists (fun (report : Runtime.not_committed) ->
+         report.provider_input_refusals = [Keeper_librarian_input_refusal.Request_body_refused]
+         && report.smaller_range_meets_same_failure) reports));
+  Alcotest.(check int) "body-refusing provider called once" 1 (Fixture.post_count size);
+  Alcotest.(check int) "quota provider called once" 1 (Fixture.post_count quota);
+  (match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "failed walk published Memory"
+   | Error detail -> Alcotest.fail detail);
+  (* Exercise the actual message-floor inference producer too. Its unread
+     authority is deliberately separate from recursive admission partitioning. *)
+  (match Runtime.infer_memory_step ~base_path ~keepers_dir ~keeper_id
+    ~previous_state:None ~unread_messages:[] input with
+   | Runtime.Memory_inferred _ -> Alcotest.fail "a failed original walk became a Memory step"
+   | Memory_not_inferred failure ->
+     Alcotest.(check bool) "actual API-only exhaustion retains named source-refusal authority" true
+       (failure.exhausted_input_refusals=Some [Keeper_librarian_input_refusal.Request_body_refused]);
+     let classified=List.filter (fun (report : Runtime.not_committed) ->
+       report.provider_input_refusals<>[]) failure.reports in
+     Alcotest.(check bool) "actual inference retains a classified mixed walk" true (classified<>[]);
+     List.iter (fun report -> match Keeper_memory_admission_worker.For_testing.judgment_of_not_committed report with
+       | Keeper_memory_admission_worker.Deferred _ -> ()
+       | Input_size_refused _ | Committed | Awaiting_evidence ->
+         Alcotest.fail "the actual mixed quota/input walk recursively partitioned admission") classified);
+  Alcotest.(check int) "the inference producer made its own original body-refused call" 2 (Fixture.post_count size);
+  Alcotest.(check int) "the inference producer made its own original quota call" 2 (Fixture.post_count quota)
+
+let () =
+  let base_path = Filename.temp_dir "librarian-capacity-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let registry = Runs.create ~path:(Filename.concat base_path Runs.storage_filename) () in
+  (match Runs.install_global registry with
+   | Ok () -> () | Error Runs.Already_installed -> Alcotest.fail "registry already installed");
+  let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Prompt_defaults.init ();
+  let case ?same_failure name first_overflow status expected shows_size =
+    Alcotest.test_case name `Quick
+      (test_callback ~shows_size ?same_failure ~base_path ~registry ~keeper_id:name ~first_overflow ~status
+         ~expected) in
+  let codex_error data = Fusion_official_client.Codex_failure
+    (Runtime_codex_app_server.Rpc_error
+      { method_ = "turn/start"; code = Some (-32602);
+        message = "Input exceeds the maximum length of 1048576 characters.";
+        data }) in
+  let capacity = codex_error (Some (`Assoc [
+    "input_error_code", `String "input_too_large";
+    "actual_chars", `Int 23; "max_chars", `Int 17])) in
+  let larger_capacity = codex_error (Some (`Assoc [
+    "input_error_code", `String "input_too_large";
+    "actual_chars", `Int 23; "max_chars", `Int 21])) in
+  let generic = codex_error None in
+  let quota = Fusion_official_client.Setup_failure "quota" in
+  let cli_case ?(first_overflow = false) ?expected_limit name cli_errors expected shows_size =
+    Alcotest.test_case name `Quick (fun () ->
+      Fixture.with_official_client_runtimes @@ fun () ->
+      test_callback ~cli_errors ?expected_limit ~shows_size ~base_path ~registry ~keeper_id:name
+        ~first_overflow ~status:`Too_many_requests ~expected ()) in
+  Alcotest.run "Librarian capacity callbacks"
+    ["size verdict", [Alcotest.test_case "named input refusal is separate from descent evidence" `Quick
+       test_named_provider_input_refusals;
+       Alcotest.test_case "original native context flags remain admission authority" `Quick
+         test_native_context_receipt_flags;
+       Alcotest.test_case "every provider cause, one row each" `Quick
+       test_size_verdict_table;
+       Alcotest.test_case "every official-client failure, one row each" `Quick
+         test_cli_size_verdict_table;
+       Alcotest.test_case "every pre-dispatch rejection, one row each" `Quick
+         test_disposition_size_verdict_table];
+     "continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
+       (test_prefit_real_continuity ~base_path);
+       Alcotest.test_case "a continuity-only run whose snapshot is refused is failed" `Quick
+         (test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry)];
+     "actual HTTP outcomes", [
+      Alcotest.test_case "durable runtime preserves refusal reports without publishing Memory" `Quick
+        (test_durable_runtime_returns_refusal_reports ~base_path);
+      Alcotest.test_case "absorb evidence capacity preserves and recovers memory" `Quick
+        (test_absorb_evidence_capacity_recovers ~base_path);
+      (* An API slot states its limit in provider prose, which this process
+         cannot read back into a number, so it reports none. The pass does
+         not need one: a size refusal is evidence enough to read less. *)
+      (* A body a provider refused for its size says so whether it came
+         first or last; a quota or an authorization refusal never does. The
+         four together are the order matrix: a verdict taken from the walk's
+         last cause alone would answer rows two and three differently. *)
+      (* The second verdict is what the admission worker reads before it
+         splits: size with a quota or an operator refusal in the same walk is
+         deferred whole, so the refusing provider is not asked once per part. *)
+      case ~same_failure:false "capacity-final" false `Request_entity_too_large 0 true;
+      case ~same_failure:true "quota-final" false `Too_many_requests 0 false;
+      case ~same_failure:true "capacity-then-quota" true `Too_many_requests 0 true;
+      case ~same_failure:true "capacity-then-auth" true `Unauthorized 0 true;
+      case ~same_failure:false "capacity-then-capacity" true `Request_entity_too_large 0 true;
+      (* An empty answer that ended its turn says nothing about size: a
+         smaller range meets the same provider (#37899). *)
+      case "empty-completion-final" false `OK 0 false];
+    "HTTP to CLI outcomes", [
+      (* Typed capacity survives later quota failures in either walk order. *)
+      cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1 true;
+      cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0 false;
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-quota"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-generic-rpc"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, generic] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 17) "cli-quota-then-capacity"
+        [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 21) "cli-two-capacities"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, larger_capacity] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 21) "cli-two-capacities-reversed"
+        [Fixture.cli_primary_runtime, larger_capacity; Fixture.cli_secondary_runtime, capacity] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-equal-capacities-keep-first"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, capacity] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 17) "cli-equal-capacities-reversed"
+        [Fixture.cli_secondary_runtime, capacity; Fixture.cli_primary_runtime, capacity] 1 true;
+      (* The API walk that sent the pass to the official client met a size
+         refusal. The client's own failure says nothing, and the verdict
+         still comes from the walk before it. *)
+      cli_case ~first_overflow:true "capacity-then-quota-then-cli-generic-rpc"
+        [Fixture.cli_primary_runtime, generic] 0 true]]

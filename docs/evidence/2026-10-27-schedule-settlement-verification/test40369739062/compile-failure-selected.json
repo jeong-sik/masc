@@ -1,0 +1,18 @@
+[
+  {
+    "source_line": 70,
+    "text": "test suite\tTest\t2026-10-26T17:37:57.6584049Z File \"lib/schedule/schedule_runner.ml\", line 730, characters 4-24:"
+  },
+  {
+    "source_line": 71,
+    "text": "test suite\tTest\t2026-10-26T17:37:57.6584674Z 730 |   | Eio.Cancel.Cancelled _ as exn -> raise exn"
+  },
+  {
+    "source_line": 72,
+    "text": "test suite\tTest\t2026-10-26T17:37:57.6585140Z           ^^^^^^^^^^^^^^^^^^^^"
+  },
+  {
+    "source_line": 73,
+    "text": "test suite\tTest\t2026-10-26T17:37:57.6585709Z Error: Unbound module Eio"
+  }
+]

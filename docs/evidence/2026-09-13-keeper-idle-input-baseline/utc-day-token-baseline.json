@@ -1,0 +1,568 @@
+{
+  "sample_finished_at": "2026-09-12T20:44:03.871647+00:00",
+  "utc_date": "2026-09-12",
+  "source_files": [
+    {
+      "path": "costs/2026-09/12.jsonl",
+      "bytes": 852398,
+      "sha256": "336fdf51983bdff4a2a08512fa45ba25ee069a877462b06c393de7508338ef3d"
+    },
+    {
+      "path": "keepers/exhibit-designer/turn-records/2026-09/12.jsonl",
+      "bytes": 276442,
+      "sha256": "9e52a6815a1acb18554f173db6d65ae1ae3b31073a8fef840b9ff7b282263f7f"
+    },
+    {
+      "path": "keepers/exhibit-editor/turn-records/2026-09/12.jsonl",
+      "bytes": 623004,
+      "sha256": "a93d3aea2c601c02a88a5b1e710f2a59be431e5c39d9e5534970e4f48f844c0e"
+    }
+  ],
+  "malformed_lines": [],
+  "source_decode_complete": true,
+  "ledger_interval": [
+    "2026-09-12T00:00:13Z",
+    "2026-09-12T20:43:10Z"
+  ],
+  "usage_by_projection": [
+    {
+      "model": "glm-5.3",
+      "projection": "raw_observation",
+      "trust": "trusted",
+      "rows": 514,
+      "tokens": {
+        "input_tokens": {
+          "observations": 514,
+          "known": 514,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 53786651,
+          "complete_sum": 53786651,
+          "median": 104733.0,
+          "max": 130386
+        },
+        "output_tokens": {
+          "observations": 514,
+          "known": 514,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 610495,
+          "complete_sum": 610495,
+          "median": 722.5,
+          "max": 22210
+        },
+        "cache_read_tokens": {
+          "observations": 514,
+          "known": 514,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 47265984,
+          "complete_sum": 47265984,
+          "median": 96640.0,
+          "max": 122816
+        },
+        "cache_creation_tokens": {
+          "observations": 514,
+          "known": 514,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 0,
+          "complete_sum": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 514,
+          "known": 514,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 6520667,
+          "complete_sum": 6520667,
+          "median": 1693.5,
+          "max": 107735
+        }
+      }
+    },
+    {
+      "model": "glm-5.3",
+      "projection": "resolved_delta",
+      "trust": "trusted",
+      "rows": 230,
+      "tokens": {
+        "input_tokens": {
+          "observations": 230,
+          "known": 230,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 24165426,
+          "complete_sum": 24165426,
+          "median": 105076.0,
+          "max": 120802
+        },
+        "output_tokens": {
+          "observations": 230,
+          "known": 230,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 247328,
+          "complete_sum": 247328,
+          "median": 749.5,
+          "max": 7359
+        },
+        "cache_read_tokens": {
+          "observations": 230,
+          "known": 230,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 21683904,
+          "complete_sum": 21683904,
+          "median": 100064.0,
+          "max": 120128
+        },
+        "cache_creation_tokens": {
+          "observations": 230,
+          "known": 230,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 0,
+          "complete_sum": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 230,
+          "known": 230,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 2481522,
+          "complete_sum": 2481522,
+          "median": 1644.0,
+          "max": 107419
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "projection": "raw_observation",
+      "trust": "missing",
+      "rows": 3,
+      "tokens": {
+        "input_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        },
+        "output_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        },
+        "cache_read_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        },
+        "cache_creation_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        },
+        "cache_miss_input_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "projection": "raw_observation",
+      "trust": "trusted",
+      "rows": 133,
+      "tokens": {
+        "input_tokens": {
+          "observations": 133,
+          "known": 133,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 28701638,
+          "complete_sum": 28701638,
+          "median": 219444,
+          "max": 341701
+        },
+        "output_tokens": {
+          "observations": 133,
+          "known": 133,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 17086,
+          "complete_sum": 17086,
+          "median": 45,
+          "max": 714
+        },
+        "cache_read_tokens": {
+          "observations": 133,
+          "known": 133,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 27847680,
+          "complete_sum": 27847680,
+          "median": 212480,
+          "max": 335616
+        },
+        "cache_creation_tokens": {
+          "observations": 133,
+          "known": 133,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 0,
+          "complete_sum": 0,
+          "median": 0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 133,
+          "known": 133,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 853958,
+          "complete_sum": 853958,
+          "median": 6056,
+          "max": 273821
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "projection": "resolved_delta",
+      "trust": "missing",
+      "rows": 3,
+      "tokens": {
+        "input_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        },
+        "output_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        },
+        "cache_read_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        },
+        "cache_creation_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        },
+        "cache_miss_input_tokens": {
+          "observations": 3,
+          "known": 0,
+          "missing": 3,
+          "invalid": 0,
+          "known_sum": null,
+          "complete_sum": null,
+          "median": null,
+          "max": null
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "projection": "resolved_delta",
+      "trust": "trusted",
+      "rows": 132,
+      "tokens": {
+        "input_tokens": {
+          "observations": 132,
+          "known": 132,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 28524063,
+          "complete_sum": 28524063,
+          "median": 219872.0,
+          "max": 341701
+        },
+        "output_tokens": {
+          "observations": 132,
+          "known": 132,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 16808,
+          "complete_sum": 16808,
+          "median": 45.0,
+          "max": 714
+        },
+        "cache_read_tokens": {
+          "observations": 132,
+          "known": 132,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 27671296,
+          "complete_sum": 27671296,
+          "median": 213184.0,
+          "max": 335616
+        },
+        "cache_creation_tokens": {
+          "observations": 132,
+          "known": 132,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 0,
+          "complete_sum": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 132,
+          "known": 132,
+          "missing": 0,
+          "invalid": 0,
+          "known_sum": 852767,
+          "complete_sum": 852767,
+          "median": 6062.0,
+          "max": 273821
+        }
+      }
+    }
+  ],
+  "hook_requests": {
+    "count": 0,
+    "adjacent_by_keeper": {},
+    "tool_schema_bytes": {
+      "observations": 0,
+      "known": 0,
+      "missing": 0,
+      "invalid": 0,
+      "known_sum": null,
+      "complete_sum": null,
+      "median": null,
+      "max": null
+    },
+    "extra_context_bytes": {
+      "observations": 0,
+      "known": 0,
+      "missing": 0,
+      "invalid": 0,
+      "known_sum": null,
+      "complete_sum": null,
+      "median": null,
+      "max": null
+    }
+  },
+  "turn_records": {
+    "count": 406,
+    "shapes": [
+      {
+        "shape": "durable_shape",
+        "usage_scope": "per_request",
+        "rows": 133
+      },
+      {
+        "shape": "durable_shape",
+        "usage_scope": "unavailable",
+        "rows": 3
+      },
+      {
+        "shape": "wire_shape",
+        "usage_scope": "per_request",
+        "rows": 241
+      },
+      {
+        "shape": "wire_shape",
+        "usage_scope": "unavailable",
+        "rows": 29
+      }
+    ],
+    "prompt_blocks_bytes": {
+      "keeper_instructions": {
+        "observations": 406,
+        "known": 406,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 3426698,
+        "complete_sum": 3426698,
+        "median": 8368.0,
+        "max": 8613
+      },
+      "memory_os_recall": {
+        "observations": 326,
+        "known": 326,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 11777460,
+        "complete_sum": 11777460,
+        "median": 32652.0,
+        "max": 110254
+      },
+      "dynamic_context": {
+        "observations": 326,
+        "known": 326,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 3417089,
+        "complete_sum": 3417089,
+        "median": 10311.0,
+        "max": 24581
+      },
+      "temporal_summary": {
+        "observations": 326,
+        "known": 326,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 24169,
+        "complete_sum": 24169,
+        "median": 85.0,
+        "max": 94
+      }
+    },
+    "wire_shape_components_bytes": {
+      "message_assistant_text": {
+        "observations": 270,
+        "known": 270,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 9279212,
+        "complete_sum": 9279212,
+        "median": 38185.5,
+        "max": 58677
+      },
+      "message_tool_result": {
+        "observations": 270,
+        "known": 270,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 13499253,
+        "complete_sum": 13499253,
+        "median": 54004.0,
+        "max": 125382
+      },
+      "message_tool_use": {
+        "observations": 270,
+        "known": 270,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 28657265,
+        "complete_sum": 28657265,
+        "median": 102597.0,
+        "max": 212898
+      },
+      "message_user": {
+        "observations": 270,
+        "known": 270,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 2683532,
+        "complete_sum": 2683532,
+        "median": 9360.0,
+        "max": 17977
+      },
+      "prompt.dynamic_context": {
+        "observations": 190,
+        "known": 190,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 2228631,
+        "complete_sum": 2228631,
+        "median": 12541.5,
+        "max": 24028
+      },
+      "prompt.keeper_instructions": {
+        "observations": 270,
+        "known": 270,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 2259605,
+        "complete_sum": 2259605,
+        "median": 8368.0,
+        "max": 8613
+      },
+      "prompt.memory_os_recall": {
+        "observations": 190,
+        "known": 190,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 11252364,
+        "complete_sum": 11252364,
+        "median": 36480.0,
+        "max": 110254
+      },
+      "prompt.temporal_summary": {
+        "observations": 190,
+        "known": 190,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 14725,
+        "complete_sum": 14725,
+        "median": 86.0,
+        "max": 89
+      },
+      "tool_schemas": {
+        "observations": 270,
+        "known": 270,
+        "missing": 0,
+        "invalid": 0,
+        "known_sum": 17410903,
+        "complete_sum": 17410903,
+        "median": 63639.0,
+        "max": 66751
+      }
+    }
+  },
+  "limits": [
+    "known_sum excludes missing/invalid counts; complete_sum is null unless every decoded observation in that group is valid and at least one exists; consult source_decode_complete for excluded rows.",
+    "UTC-day prefix snapshots are not an atomic snapshot of the whole runtime.",
+    "Hook captures are not final provider HTTP bytes; repeated hooks are not deduplicated requests.",
+    "Byte counts are not tokenizer counts. CLI durable_shape excludes client-owned history expansion.",
+    "Raw observations and resolved deltas overlap; never add these projections.",
+    "Provider usage measures reported accounting, not hardware counters or all failed attempts."
+  ]
+}

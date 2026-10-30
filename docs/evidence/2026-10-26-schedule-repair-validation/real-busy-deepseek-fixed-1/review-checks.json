@@ -1,0 +1,26 @@
+{
+  "raw_observer_pass_count": 9,
+  "raw_observer_failures": [
+    "busy-overlap precondition was observed"
+  ],
+  "raw_overlap_observed": false,
+  "observer_exit_code": 1,
+  "binary_sha_matches": true,
+  "v2_script_sha_matches": true,
+  "exact_identities_match_ack_payloads_and_final_projection": true,
+  "ledger_order_establishes_second_arrival_before_first_checkpoint": true,
+  "checkpoint_to_second_start_ms": 3.5600662231445312,
+  "second_recorded_to_first_checkpoint_ms": 42.395830154418945,
+  "second_arrival_to_first_checkpoint_ms": 55.99188804626465,
+  "first_ack_count": 1,
+  "first_premature_ack_before_second_completion": false,
+  "both_notes_are_keeper_turn_id": 2,
+  "first_note_precedes_first_readmission": true,
+  "unique_notes_per_requested_schedule": [
+    1,
+    1
+  ],
+  "pending_and_outbox_empty": true,
+  "last_recorded_live_turn": null,
+  "producer_exit_code": null
+}

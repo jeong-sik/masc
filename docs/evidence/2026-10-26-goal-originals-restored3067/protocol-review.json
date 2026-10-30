@@ -1,0 +1,178 @@
+{
+  "schema": "masc.goal.restored3067.independent-actual-protocol-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T21:16:33.338727+00:00",
+  "verdict": "PASS_PROTOCOL_INTEGRITY_ACTUAL_ISOLATED_APPROVE_SEMANTICS_UNASSESSED",
+  "scope": "All203 frozen-original inventory/hash audit, exact harness sources, restored-state/input/override/provider/tool/verdict/store and owned-cleanup joins. This confirms the actual isolated APPROVE protocol, not semantic sufficiency of the original eleven behaviors or primary Goal completion.",
+  "identity": {
+    "task_id": "task-2688",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "restored_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "existing_measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "request_id": "ca40f5934e4b849dafd0c0f414254029",
+    "run_id": "01a174db-7962-7000-a964-2e11d67a800f",
+    "candidate_source_head": "4edcba731f79a4e0297c98cc5df3960b4d5263d1",
+    "candidate_prompt_bytes": 9182,
+    "candidate_prompt_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "execution_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "execution_binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "managed_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "boundary": "Actual binary file, saved embedded-source health and private base match. Same restored Goal/revision/measurement IDs do not identify the primary workspace. No Git/current-ref, primary-postrun-state or native4edc-build observation is made."
+  },
+  "integrity": {
+    "manifest": {
+      "path": "terminal-originals-private/manifest.json",
+      "bytes": 40587,
+      "sha256": "8f2bb92dce336dc13c29c9873fffd34b06c07596f5caf12de227ddebace7f5fb"
+    },
+    "leaf_entries": 203,
+    "inventory_with_manifest": 204,
+    "all203_lengths_and_SHA_match": true,
+    "inventory_exact_and_regular_files": true,
+    "leaf_total_bytes": 10222243,
+    "group_counts": {
+      "setup": 20,
+      "wire": 64,
+      "submission": 9,
+      "prompt-application": 6,
+      "inputs": 76,
+      "bootstrap": 4,
+      "harness": 9,
+      "postrun-harness": 2,
+      "primary-capture": 6,
+      "snapshot": 7
+    },
+    "manifest_order_path_NUL_bytes_NUL_sha256_LF_stream_sha256": "8322af21d0d245d9328ae79d6b2d5bee3ef2bc7a15aeb764a2242e61a290fa1b",
+    "safe_projections": [
+      {
+        "path": "safe-results/result.json",
+        "bytes": 14985,
+        "sha256": "27c5755aec474d5d9dabcd0419e136aa08ab45522260aa7c753c83b14d158bf9"
+      },
+      {
+        "path": "safe-results/actual-tool-sequence.json",
+        "bytes": 59792,
+        "sha256": "4373b281cc90c87927814c9b0f4be73a1524c741ff11f874e42c1b71af150439"
+      },
+      {
+        "path": "safe-results/persisted-outcome.json",
+        "bytes": 8200,
+        "sha256": "f468dffddc1305025d7f98d9a8883a295fcc4a4d5f53b3b1aee37a92fd0ea6e1"
+      }
+    ],
+    "final_reread_stable": true
+  },
+  "harness_and_bootstrap": {
+    "sources": "All nine frozen prelaunch and two postrun source copies match their source-manifest lengths/SHA and original source bytes. The ninth prelaunch source includes the preparation-only primary read-client. Read restored driver/snapshot helper and clone delta in the prior exact-hash preparation review; read postrun freezer/stop source here. No helper is executed by this reviewer.",
+    "source_limits": "The postrun source manifest retains its earlier Prepared-only description as a historical capture; terminal outputs do not relabel it as current prepared state. One snapshot/frozen tree and exclusive-output source guards are not forensic proof that no deleted earlier artifacts existed.",
+    "selected_state": "Three bootstrap documents contain one unchanged selected Goal3067, existing full ada746 measurement and Idle verification with empty submitted evidence. New version1 wrappers and empty Goal event/notification outboxes deliberately exclude unrelated Goals/workers/proof journals. Whole primary stores are not copied.",
+    "capture_validation": "Decoded saved before/after normal Goal-list replies and selected only the specified Goal. Selected projections are equal to each other, the bootstrap rows and manifest canonical-row digests. Other primary Goal bodies/identifiers remain private and are not exported by this report. This is not an atomic whole-workspace snapshot.",
+    "installation": "Installation receipt matches all three bootstrap file hashes plus goals.json.last-good. Exact cloned launch source places exclusive owned-path writes after config-only init and before proxy/server launch. Normal isolated API readback equals the preserved prestart Goal/measurement/Idle projection.",
+    "normal_request": "Saved submission requests are initialize, Goal list and one request_complete only; no upsert or measure. The request returns proof_pending with requestca40… against3067, then the same request/run commits below. No manual verdict or forced APPROVE is installed.",
+    "inputs": "All76 frozen input copies match the unchanged staged manifest584df4b0…; canonical acceptance remains4fdd1ec8… and root carrier equals delivery index. Copies are historical evidence, not new execution of eleven behaviors."
+  },
+  "override_and_receiver": {
+    "normal_persisted_overrides": [
+      {
+        "key": "goal_verification.proof",
+        "bytes": 4491,
+        "sha256": "9ae476a08f68371c35c373208b6496442d0f6c63a85d8a8adf527e077d8f33a4"
+      },
+      {
+        "key": "goal_verification.lookup",
+        "bytes": 4285,
+        "sha256": "8d290c71a1836bf72ce39bbb1398305682e6ca6326e028d8ca5d0c27ca481442"
+      }
+    ],
+    "normal_set_ACK_and_effective_catalog_match": true,
+    "before_source_file_after_override": true,
+    "health": "Pre-application, later and snapshot health bind private base,3e embedded source,00f3 executable hash and no startup degradation. Saved verifier lane is the one declared/admitted glm-coding.glm-5.3-flash slot without CLI/dropped slots. These are saved observations, not new live queries."
+  },
+  "actual_provider_and_tool_protocol": {
+    "Goal_runs": 1,
+    "provider_POSTs": 20,
+    "other_wire_requests": "One GET /models",
+    "all_HTTP_status200": true,
+    "requested_and_reported_model": "glm-5.3-flash",
+    "unknown_reported_models": 0,
+    "all_request_response_hashes_and_receipts_match": true,
+    "all20_System_User_equal_own_retained_Original": true,
+    "retained_user": {
+      "bytes": 10912,
+      "sha256": "a34c7ceb6221c9741d538500ad846a80f9ea424b97d36369ef6aca291328b491"
+    },
+    "retained_System": {
+      "bytes": 1094,
+      "sha256": "93ae8047102142a637b7c15f74277dff7b8d54a059bd4460ed1ff24fea2c4340"
+    },
+    "Original_binding": "Retained owner digest/body/run/subject join the exact Goal/request3067. Actual reported_measurement JSON equals the existing full recorded observation; both0dc added instruction blocks appear in actual input. Original base and all returned file paths bind the private playground.",
+    "unique_calls": 53,
+    "matching_results": 53,
+    "each_result_follows_actual_call": true,
+    "replayed_results_identical_per_call_id": true,
+    "assistant_history_call_names_and_arguments_match_actual_calls": true,
+    "read_calls": 52,
+    "verdict_calls": 1,
+    "unique_read_paths": 49,
+    "ok_nonempty_pages": 52,
+    "empty_pages": 0,
+    "truncated_pages": 4,
+    "all52_content_bytes_equal_frozen_source_line_slices": true,
+    "all_offsets_lines_bytes_file_sizes_and_returned_next_offsets_checked": true,
+    "verified_page_identity_rows_sha256": "57485bd399a16318a5f37935ff3194e8ed0a56fa5bb3abd7cb2f3e3d230eb521",
+    "safe_projection": "All53 arguments and full Tool-result byte/hash fields match actual wire; read metadata/content/source hashes agree. Native52 read inputs match actual arguments. Page counts, four truncated ranges and path coverage are not whole-file or semantic proof counts."
+  },
+  "verdict_native_and_store": {
+    "actual_structured_decision": "APPROVE",
+    "call_id": "call_-7137924965197669468",
+    "wire_response": "request-000020",
+    "ACK_in_following_request": "request-000021",
+    "full_reason_bytes": 4005,
+    "reason_sha256": "12228db76db135b4662f7cf5c9652755dbc3ccc82faca1ec9f6c272e1896cc27",
+    "ACK_sha256": "ba29fd69a474a812b9fffed82c007592ee284456dcd51f9d8deb2c52fd402bac",
+    "ACK_exact_decision_and_reason": true,
+    "native_stages": [
+      "register",
+      "reviewed",
+      "committed"
+    ],
+    "native_typed_decision": "approved",
+    "both_native_completion_rows_record53_tools": true,
+    "full_evaluated_reason_and_stored_evidence_equal_wire": true,
+    "native_input_summary_limit": "The final Tool input reason is a visibly truncated526B prefix ending ...(truncated), SHA2560d25003b2be8d08dd228e554b9c377eba27d5e5a6f58bc6c9d023facfb0ba11a, in both native phases. It is not the full4005B wire argument. The full reason remains in wire, ACK, evaluated_verdict and stored evidence; no full-input equality is claimed for that summary.",
+    "final_isolated_completion": "proof_proven",
+    "final_isolated_phase": "awaiting_confirmation",
+    "three_stores_equal_safe_projection": true,
+    "existing_measurement_unchanged": true,
+    "store_shape": "Proven verdict.reason is null; evidence carries the complete reason. Current criterion/request/run/measurement bindings match. Protocol acceptance is not semantic endorsement or human confirmation."
+  },
+  "owned_cleanup": {
+    "owned_pids": [
+      4378,
+      4364
+    ],
+    "saved_raw_ps_observations": 10,
+    "recorded_SIGTERM_per_PID": 1,
+    "full_pre_signal_identity_equals_spawn_and_receipt_hash": true,
+    "intermediate_same_birth_rows_match": true,
+    "final_saved_ps_rc1_stdout_stderr_empty": true,
+    "stop_receipt_bytes": 1231,
+    "stop_receipt_sha256": "6433f5557a6cd68819808d5bde402340bf067bd04a123889c3e703b998f41a04",
+    "raw_ps_sha256": "2810b6f59b99ff82a4e307386214c439d26037570dec56b2ed693592f3bde0f3",
+    "limit": "Saved code/receipt/observations support one recorded TERM each and PID absence at those times. No reviewer process query/signal, future absence, descendants or fleet cleanup is inferred."
+  },
+  "findings": {
+    "new_protocol_P0": [],
+    "new_protocol_P1": [],
+    "new_protocol_P2": [],
+    "semantic_verdict_quality": "NOT_ADJUDICATED",
+    "retained_observational_limit": "Native Tool input reason is bounded; full verdict evidence is separately verified."
+  },
+  "limits": [
+    "One new verifier replay over retained historical originals; same3067/ada IDs remove the earlier clone-revision mismatch from actual input but do not make this the primary workspace.",
+    "No new execution of eleven underlying behaviors, semantic11PASS, specific A3/A7 repair guarantee, primary Goal update/completion or human confirmation follows from protocolPASS.",
+    "Prior159/109/154 cohorts stay immutable and separate;20POST are one tool loop, not independent samples, source-only causal A/B, weight independence or reliability.",
+    "No native4edc build/fullCI, formal GitHub approval, whole-stack admission, merge, install or current operating-primary observation. A separate semantic audit must judge the reason against required returned evidence."
+  ],
+  "effects": "Filesystem reads and offline hash/JSON/value/range comparisons only. No API/Git/build/test/model/CI/process/Board call, new agent or Task/Goal/source/store/existing-artifact mutation. Only this new report is written."
+}

@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T13:15:42+09:00",
+  "case_id": "l1-context-source-bound-refresh",
+  "source_commit": "1a74490e82642805af249c496c3947b026a54428",
+  "binary_sha256": "0f163ad23d6e2e07f234e9a9092aa2d7e06e8fad7c667862f02714efef5d4897",
+  "exact_head_run": {
+    "model": "hf.co/unsloth/gemma-4-31B-it-qat-GGUF:UD-Q4_K_XL",
+    "provider": "ollama",
+    "port": 9500,
+    "status": "ok",
+    "verify_exit": 0,
+    "duration_ms": 36000,
+    "stale_claim_matches_in_last_prompt": 0,
+    "source_changed_matches_in_last_prompt": 2,
+    "source_path_matches_in_last_prompt": 2,
+    "final_revision": 3,
+    "final_fact_count": 1,
+    "final_invalidation_count": 0,
+    "declared_stale_source_sha256": "8e2e7e55dc8858471232e070c9cf7645af83775487a4e9b0eef7fce9dde508ab",
+    "live_source_sha256": "0b79c1f7c5218e6a6bfa92266b0de96e7f506a9edc8eeb8b3ef91ecd4115abce",
+    "final_fact_source_sha256": "0b79c1f7c5218e6a6bfa92266b0de96e7f506a9edc8eeb8b3ef91ecd4115abce",
+    "tool_calls": [
+      "Read",
+      "Read",
+      "Execute",
+      "Write",
+      "Execute",
+      "keeper_memory_write"
+    ],
+    "memory_recall_block": "--- Memory OS Recall ---\nCurrent memory after source revalidation at 2026-08-30T04:14:54Z (memory_revision=absent source_revision=2).\n- [invalidated source=file:\"workspace/service.toml\" reason=source_changed checked=2026-08-30T04:14:54Z] Previous claim was discarded; re-read this source before writing a replacement.",
+    "artifact_sha256": {
+      "evidence.json": "d22e19cbb6f4e8373c66582528b1f76c5427f61556213d0a07e096c85863cdd5",
+      "last-prompt.json": "e9de10eed0bcd8a3807183897270fc84f7d4911606e68b405ccba63da076261f",
+      "memory-source-seed.json": "4b73d89cbe82590ec16f647bb7871e7a5a643b037e46ef7eb484020099292ae3",
+      "memory-source-final.json": "e82602341ace8402276cf8b12050598c344042fcade535b230902ffdaa68d2ed"
+    }
+  },
+  "adversarial_runs": [
+    {
+      "label": "qwen27b-current-case-pre-final",
+      "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+      "status": "ok",
+      "verify_exit": 0,
+      "duration_ms": 179000,
+      "stale_claim_matches": 0,
+      "final_invalidation_count": 0,
+      "note": "Same case revision, before the final combined-budget guard."
+    },
+    {
+      "label": "gemma31b-current-case-pre-final",
+      "model": "hf.co/unsloth/gemma-4-31B-it-qat-GGUF:UD-Q4_K_XL",
+      "status": "ok",
+      "verify_exit": 0,
+      "duration_ms": 169000,
+      "stale_claim_matches": 0,
+      "final_invalidation_count": 0,
+      "note": "Same case revision, before the final combined-budget guard."
+    },
+    {
+      "label": "qwen8b-ambiguous-target",
+      "model": "qwen3:8b",
+      "status": "ok",
+      "verify_exit": 1,
+      "duration_ms": 51000,
+      "stale_claim_matches": 0,
+      "final_invalidation_count": 0,
+      "note": "Recreated memory but edited the authoritative source instead of the target file."
+    },
+    {
+      "label": "qwen8b-current-case",
+      "model": "qwen3:8b",
+      "status": "provider_error",
+      "verify_exit": 0,
+      "duration_ms": 27000,
+      "stale_claim_matches": 0,
+      "final_invalidation_count": 1,
+      "note": "Fixed the workspace but never called keeper_memory_write, so the typed invalidation remained pending."
+    }
+  ],
+  "aggregate_observations": {
+    "runs_with_stale_claim_removed_before_model": 9,
+    "runs_observed": 9,
+    "current_case_full_successes": 6,
+    "current_case_runs": 7,
+    "performance_claim": false
+  },
+  "shutdown_check": {
+    "isolated_ports": [9491, 9492, 9493, 9494, 9495, 9496, 9497, 9498, 9500],
+    "listeners_after_runs": [],
+    "operating_8935_status": "ok",
+    "operating_effective_base_path": "/Users/dancer/me",
+    "operating_effective_masc_root": "/Users/dancer/me/.masc",
+    "operating_roots_diverge": false
+  }
+}

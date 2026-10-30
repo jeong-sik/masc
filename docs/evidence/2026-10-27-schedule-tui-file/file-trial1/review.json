@@ -1,0 +1,161 @@
+{
+  "schema": "masc.file-effect-trial1-offline-evidence-review.v1",
+  "verdict": "OBSERVED_FILE_SCENARIO_FAIL_PRESERVED",
+  "new_product_P0_P2_findings": [],
+  "reviewer_role": "Reviewer authored controller v3; this is separate direct correlation of closed raw runtime evidence, not an independent source review of the reviewer own controller. Root and another reviewer handled controller admission.",
+  "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "controller_sha256": "bc450f6d8201956d18026d6aa2e3533534aaed198e6a16a201c54299c1f657d1",
+  "binary_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+  "workflow_run": 40396800146,
+  "artifact_id": 12687003191,
+  "identity": {
+    "keeper": "audit-file-ce44a31266bd45a2b82ba58ce53124d0",
+    "schedule_id": "audit-file-job-950cf3f5d41a4a0b874e5152eadd7d5e",
+    "instance_id": "01a17a5a-6d77-7000-8310-a034d865237a",
+    "post_id": "41c1a71e915fbcff23b0d974871ae6287226974c4c74666c534e428bfa676344",
+    "source_incarnation": 0,
+    "trace_id": "trace-1793054108984-00000",
+    "absolute_turn": 1,
+    "turn_ref": "trace-1793054108984-00000#1",
+    "pid": 24402
+  },
+  "raw_bindings": {
+    "result": {
+      "path": "result.json",
+      "bytes": 1154,
+      "sha256": "f866cb35eb579e9abced42b9449248e94ff4aaa5675e5a089ba50cc8fa500dff"
+    },
+    "provenance": {
+      "path": "provenance.json",
+      "bytes": 9882,
+      "sha256": "4ebf03089c5451973a6f84bf2dad18a3c7dffb50cd13ed56fff593897ee4e2aa"
+    },
+    "original_observer_calls": {
+      "path": "all-owned-tool-calls.json",
+      "bytes": 8265,
+      "sha256": "15918b34330db000ba2a9b01109680f0247d48f3e4559b734715fee2bcb2b0af"
+    },
+    "final_call_files": [
+      {
+        "path": "workspace/.masc/tool_calls/2026-10/26.jsonl",
+        "bytes": 11151,
+        "sha256": "18d9e826b24eb1e0d0028b264a44b46d4dd33e4be219a092cfaab0b4219edbb4"
+      }
+    ],
+    "reaction_files": [
+      {
+        "path": "workspace/.masc/keepers/audit-file-ce44a31266bd45a2b82ba58ce53124d0/reaction-ledger/v7/2026-10/26.jsonl",
+        "bytes": 5321,
+        "sha256": "7b27d0b65fa1656818ba925b4d062aea6387539a80d7dfa0bc6990b02ebdeb34"
+      }
+    ],
+    "turn_files": [
+      {
+        "path": "workspace/.masc/keepers/audit-file-ce44a31266bd45a2b82ba58ce53124d0/turn-records/2026-10/26.jsonl",
+        "bytes": 4198,
+        "sha256": "bbf631f4e3511415b026295a7f69098d33ecb3306cf4f4cc292e607f929404cf"
+      }
+    ],
+    "final_queue": {
+      "path": "workspace/.masc/keepers/audit-file-ce44a31266bd45a2b82ba58ce53124d0/event-queue-v19.json",
+      "bytes": 2770,
+      "sha256": "bee0ef25062a4730b53891252ddc50a38b0d8a9317bea4531b85eb41b844eab8"
+    },
+    "final_primary": {
+      "path": "workspace/.masc/schedules.json",
+      "bytes": 3313,
+      "sha256": "0a5800a2ed2128a4ed02febabc1a221f2f6a98e0c25d1065e84a81a090ad5103"
+    },
+    "post_observer": {
+      "path": "root-post-failure-readonly.json",
+      "bytes": 2368,
+      "sha256": "1774c61e08897ee8cc7b1e56ef147f0262b1efe3171045b89a20d1bfab379b41"
+    },
+    "stop": {
+      "path": "root-owned-server-stop.json",
+      "bytes": 686,
+      "sha256": "e237b5ccd7c2918d44f7c9c6adb78aa971bbf37a59ce0519aa68a6120d7c0327"
+    },
+    "server_log": {
+      "path": "server.log",
+      "bytes": 30118,
+      "sha256": "1def7f6719fd6ab90bfce8b2a506986499157327244193b47e6fccda02a7b7f4"
+    }
+  },
+  "checks": {
+    "controller_and_all_22_source_bindings_match": true,
+    "actual_binary_archive_receipt_prior_verification_hashes_match": true,
+    "exact_Write_public_input": true,
+    "content_utf8_bytes": 71,
+    "content_sha256": "b9941e6ed5f1209347146c7482ddacc8c56ff4f692a66c88a7dbd2870ec8f36e",
+    "one_LF_and_no_final_LF": true,
+    "final_call_count": 2,
+    "Write_attempts": 1,
+    "Read_attempts": 0,
+    "note_add_attempts": 0,
+    "notes_in_final_primary": 0,
+    "final_call_execution_ids_equal_turn_record": true,
+    "full_scheduled_request_equal_ACK_source": true,
+    "sampled_pending_source_equals_final_ACK_source": true,
+    "pending_incarnation_equals_ACK_incarnation": true,
+    "queue_capture_count": 162,
+    "pending_entries_verified": 162,
+    "queue_inventory_hash_recipe": "filename + space + decimal bytes + space + sha256 + LF, numeric queue order",
+    "queue_inventory_sha256": "29c198d1dac0d97fb981a0c6dd47214c12a9c4e13fffd4201cf655efdc4f5699"
+  },
+  "observed_failure": {
+    "tool": "Write",
+    "execution_id": "execution-node-56585a983983fc66cb11323b5bde5d36",
+    "tool_use_id": "call_9lj2og8c",
+    "wire_outcome": "error",
+    "disposition": "failed",
+    "failure_class": "dependency_unavailable",
+    "cause_reported": "microvm_start_failed: microvm_shim_missing",
+    "independent_corroboration": "server.log lines18/172/173; later same-turn keeper_lane_status returns unreachable microvm_shim_missing. No shim/environment investigation performed.",
+    "Write_ts": 1793054147.39753,
+    "observer_FAIL_ts": 1793054147.487283
+  },
+  "closed_ledger_vs_observer_snapshot": {
+    "observer_snapshot_rows": 1,
+    "observer_snapshot_bytes": 5943,
+    "observer_snapshot_sha256": "485ce044bc55f1cfca01b47d006189b1598af8dc4483cb64d8ab317cc3123135",
+    "closed_final_rows": 2,
+    "closed_final_bytes": 11151,
+    "closed_final_sha256": "18d9e826b24eb1e0d0028b264a44b46d4dd33e4be219a092cfaab0b4219edbb4",
+    "later_call": {
+      "tool": "keeper_lane_status",
+      "execution_id": "execution-node-cdf05609177b20bab4f816a72bc4d646",
+      "ts": 1793054148.785883,
+      "wire_outcome": "ok",
+      "disposition": "completed"
+    },
+    "meaning": "Read-only lane diagnosis happened after original observer FAIL and is included in final turn record. Original selected one-row snapshot remains unchanged; it is not the whole closed turn."
+  },
+  "completion_boundary": {
+    "turn_finished": 1793054151.550634,
+    "final_ACK": 1793054151.550838,
+    "source_receipt_kind": "turn_completed",
+    "fresh_root_HTTP_projection": "matched_terminal_completed",
+    "schedule_status": "succeeded",
+    "pending_count": 0,
+    "meaning": "Completed/succeeded is source/turn execution bookkeeping; it does not assert successful Write or required file effect. No output success marker was written."
+  },
+  "effect_verdict": "No successful Write or Read receipt; exact file bytes/destination effect remain unproved. The observed Write dependency failure establishes scenario FAIL. Do not convert to file success or assert independent proof that no guest bytes exist.",
+  "cleanup": {
+    "fresh_root_idle_terminal_notes0_at": 1793054228.639173,
+    "normal_SIGTERM_at": 1793054238.5939908,
+    "exact_command_verified_by_root": true,
+    "disappeared": true,
+    "exit_status": null,
+    "exit_status_reason": "cleanup observer was not parent",
+    "forced_kills": [],
+    "restarts": 0
+  },
+  "limits": [
+    "No independent guest/host file inspection or file-effect proof; no hypothetical shim repair or later trial outcome imported.",
+    "No complete provider wire bodies inspected or reconstructed; no full prompt/thinking copied.",
+    "Root post-observer HTTP receipt supplies hashes/lengths and selected fields; full original three HTTP bodies were not rehashed by this reviewer. Closed durable queue/turn/primary corroborate its selected completion/notes facts.",
+    "No fresh API/process/model/runtime/CI action; offline reads and this report only. Original result and capture bytes unchanged.",
+    "Failure is an observed runtime dependency failure, not by itself a new product P0-P2 source diagnosis or complete feature verdict."
+  ]
+}

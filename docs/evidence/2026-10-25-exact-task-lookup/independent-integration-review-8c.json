@@ -1,0 +1,17 @@
+{
+  "verdict": "PASS",
+  "head": "8c3b4ac12ac3f3b4cc399ed6b1cc50633bad4e69",
+  "incremental_base": "0596143ca7393557f072662e11d7e8359d23743b",
+  "reviewer": "repair_evidence_integrity",
+  "combined_delta_files": 40,
+  "product_config_native_test_files": 7,
+  "product_bytes_equal": [
+    "1c6205ea60bd6fc225450fdda1b9c691b92aa3a2",
+    "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+    "8c3b4ac12ac3f3b4cc399ed6b1cc50633bad4e69"
+  ],
+  "raw_code_delta_sha256": "4f9e7e86f4cb0a783d0abf819d45281c723984d834c7155755c099ad9f3f2f3e",
+  "raw_combined_delta_sha256": "1511278bb1cbd1edd4bec43bf16a2133610409d8e3be12528183acb29d2ca868",
+  "checks": "Independent actual-source27PASS; descriptor/validator/SDK preserve missing optional Boolean (no default/no with_defaults), explicit/null/invalid semantics, cursor/revision closure. Qwen18/18 + Gemma31/31 evidence manifest match and published baseline equality. No new P0-P2.",
+  "scope": "Source/evidence review, not GitHub APPROVE, all-stack approval, native execution or repaired real G3 result."
+}

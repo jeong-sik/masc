@@ -1,0 +1,38 @@
+name = "masc_browser_session"
+description = """
+Manage a browser or explicitly bind an observed Ego Space to a shared Goal. Goal Space binding is experimental: it has no measured Keeper production run yet. action=bind_goal requires goalId, lane=live and the observed Ego clientId; it stores metadata without browser input or taking control. action=goal_status with goalId reads only the stored binding. The same binding is idempotent; reassignment or sharing a Space across distinct Goals is refused. action=unbind_goal with goalId removes the Goal's binding so a wrong one can be bound again; it changes no browser or Space. Keeper initial automatic discovery/open consults its current Task Goal binding; retain the resulting lane/clientId for subsequent calls. A bound Ego Space is already open: use BrowserTabs to discover its pages, rather than opening a managed session. A missing bound connection does not select another browser. Open or manage a work browser. For initial action=open, optional requiredActions chooses a work browser implementing all requested operations; unsupported combinations fail before opening. Omit lane to reuse a single open work session, or start the configured Chrome backend before the Gecko backend when no session is open. Multiple open work sessions require a choice. Visible by default. The receipt reports browserSelection; retain its lane for later work. lane=automation: Gecko (configure [browser.automation] geckodriver, optional binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). Each backend runs while its browser-automation or browser-stagehand Lane Add-on declaration is enabled. The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto/masc_browser_goto with the same lane."""
+additional_properties = false
+
+[[params]]
+name = "action"
+type = "string"
+enum = ["open", "close", "status", "bind_goal", "goal_status", "unbind_goal"]
+required = true
+description = "bind_goal stores an observed Ego Space for goalId (lane=live and clientId required). goal_status reads the stored binding only (goalId required; no other options). unbind_goal removes that binding (goalId required; no other options). open launches; close stops; status observes the session. With none open, status adds driver.ready (true: open can start one now; false: driver.message says why, e.g. \"Session already started\") or driver.error (the driver did not answer)."
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["live", "automation", "stagehand"]
+description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Exact observed live connection UUID. Required for bind_goal; it is never a numeric Space ID."
+
+[[params]]
+name = "goalId"
+type = "string"
+description = "Existing shared workspace Goal ID; accepted only for bind_goal, goal_status and unbind_goal."
+
+[[params]]
+name = "headless"
+type = "boolean"
+default = false
+
+[[params]]
+name = "requiredActions"
+type = "array"
+items = { type = "string", enum = ["list_tabs", "open_tab", "close_tab", "activate_tab", "list_windows", "create_window", "close_window", "navigate", "follow_link", "back", "forward", "reload", "session_lifecycle", "read_text", "read_html", "read_elements", "read_scene", "read_regions", "read_snapshot", "screenshot", "native_workflow", "click_snapshot_target", "fill_snapshot_target", "hover_snapshot_target", "double_click_snapshot_target", "click", "double_click", "right_click", "middle_click", "pointer_down", "pointer_up", "hover", "pointer_drag", "html5_drop", "scroll_page", "scroll_at", "fill", "type_text", "press_key", "key_chord", "select_option", "read_frames", "frame_interaction", "read_dialog", "accept_dialog", "dismiss_dialog", "hand_off", "take_over", "space_status", "finish_space", "wait_for_control", "adopt_tab", "release_tab", "upload_file", "list_downloads", "page_zoom", "resize_viewport", "touch", "read_clipboard", "write_clipboard", "read_network", "intercept_network", "read_console", "read_storage", "write_storage", "emulate_environment", "sentence_action"] }
+description = "Optional public operations needed by the task, only for initial discovery or action=open. Automatic choice requires one browser implementing all operations; impossible combinations fail before any browser command. Explicit browser owners never change. Inspect browserCapabilities constraints and retain browserSelection for later calls."

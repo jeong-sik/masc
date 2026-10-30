@@ -1,0 +1,9 @@
+{
+  "source_ref": "working-tree",
+  "compile_exit": 0,
+  "compile_stderr": "",
+  "run_exit": 0,
+  "stdout": "PASS Goal-closes-after-capture reads=1 coherent=true authoritative=true measurement_preserved=true\nPASS Goal-opens-after-empty-capture reads=1 coherent=true authoritative=true measurement_preserved=true\nPASS Goal-replaced-after-capture reads=1 coherent=true authoritative=true measurement_preserved=true\nPASS unreadable-is-not-empty reads=1 coherent=true authoritative=true measurement_preserved=true\nPASS later-read-failure-cannot-replace-capture reads=1 coherent=true authoritative=true measurement_preserved=true\nPASS authoritative-empty reads=1 coherent=true authoritative=true measurement_preserved=true\nPASS measurement-failure-keeps-Goal reads=1 coherent=true authoritative=true measurement_preserved=true\nPASS terminal-is-filtered-once reads=1 coherent=true authoritative=true measurement_preserved=true\n8 exact-source direct Goal snapshot checks passed\n",
+  "stderr": "",
+  "scope": "Actual extracted capture bindings, direct helper/world builder, Goal summary producer/open-ID renderer; scripted store, nominal Goal types, measurement and other world I/O stand-ins. No full typecheck, persisted-store I/O, Keeper/Host, SDK, vendor or live execution."
+}

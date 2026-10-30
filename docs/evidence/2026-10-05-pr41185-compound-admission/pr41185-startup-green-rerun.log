@@ -1,0 +1,25 @@
+Testing `server_browser_stagehand'.
+This run has ID `P44TJ7SK'.
+
+  [OK]          lifetime          0   webdriver startup freezes configuration...
+  [OK]          lifetime          1   Stagehand startup freezes configuration...
+  [OK]          lifetime          2   failed open stops Chromium before same-...
+  [OK]          lifetime          3   malformed owner record blocks profile r...
+  [OK]          lifetime          4   unmatched live PID blocks profile reset.
+> [FAIL]        lifetime          5   dead leader with live group blocks prof...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        lifetime          5   dead leader with live group blocks p...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[exception] Unix.Unix_error(Unix.EINTR, "waitpid", "")
+            Raised by primitive operation at Dune__exe__Test_server_browser_stagehand.test_dead_leader_with_live_group_blocks in file "test/test_server_browser_stagehand.ml", line 191, characters 9-33
+            Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+            Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+            Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+            Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+            
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/server_browser_stagehand/lifetime.005.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/server_browser_stagehand'.
+1 failure! in 10.823s. 6 tests run.

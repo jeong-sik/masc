@@ -1,0 +1,114 @@
+{
+  "scope": "actual pure projection/codec/receipt only; no Host.prepare_turn, hooks, SDK, client, transport or remote retention proof",
+  "baseline": "3badb88117794510dac576bf3fc34f0336e17d8a",
+  "sources": [
+    {
+      "compiled": "agent_core.ml",
+      "source": "exact role/content/metadata/message fragments; schema and provider-reasoning types excluded",
+      "sha256": "5039e58ead0f480521ed9db5bf8f8cf1d96bb0991c21e1471f56e75918d7a2d9"
+    },
+    {
+      "compiled": "prompt_block_id.mli",
+      "source": "lib/types/prompt_block_id.mli",
+      "sha256": "9f0fb7337a8301265ba0f1624bf5223e874f6c302473608cf45b8ae5e363b59f"
+    },
+    {
+      "compiled": "prompt_block_id.ml",
+      "source": "lib/types/prompt_block_id.ml",
+      "sha256": "41ef23675e52f6422265ad9254df1906f5d01cae3d8a6919be14df4f8063aa68"
+    },
+    {
+      "compiled": "keeper_context_layers.mli",
+      "source": "lib/keeper/keeper_context_layers.mli",
+      "sha256": "e1c4e1e44e1ccf629c7709424880a91af6d3c7552709523e1af5ff43fee85741"
+    },
+    {
+      "compiled": "keeper_context_layers.ml",
+      "source": "lib/keeper/keeper_context_layers.ml",
+      "sha256": "2fbefab7ec5f8686eb1a0b936646e28569191f1799608b590f9eb14a62db9259"
+    },
+    {
+      "compiled": "keeper_context_assembly.mli",
+      "source": "lib/keeper/keeper_context_assembly.mli",
+      "sha256": "1d271a068f51a3272e2e8f57fb26d3be9ac0b9dda5f50412e882ed45ecddc3fc"
+    },
+    {
+      "compiled": "keeper_context_assembly.ml",
+      "source": "lib/keeper/keeper_context_assembly.ml",
+      "sha256": "a4735b6574f7997aa523e4d7aef90383b61b9b9447be26d9555fe61c3aefcd6b"
+    },
+    {
+      "compiled": "keeper_official_client_context_codec.mli",
+      "source": "lib/keeper/keeper_official_client_context_codec.mli",
+      "sha256": "d03b9cfacd9f99ae4cb4057934cca0671277ae91bd5de997ec23964c0e1ccfea"
+    },
+    {
+      "compiled": "keeper_official_client_context_codec.ml",
+      "source": "lib/keeper/keeper_official_client_context_codec.ml",
+      "sha256": "4811768c182047dd28ef41270f7f25e29bd14e9e14b55578be6dfad46596afb4"
+    },
+    {
+      "compiled": "runtime_official_client_write.ml",
+      "source": "exact pure write-receipt prefix, excludes effectful report",
+      "sha256": "31cb279cb69f5add1bf94ef8e13654d67d6b244b1a8444f4add2bc4540e88c2c"
+    },
+    {
+      "compiled": "keeper_official_client_session_store.ml",
+      "source": "exact carried/held type fragment",
+      "sha256": "d2cba73f2a512dc82a7f41dacd3093a274f818fe43afe88c623060cb930dcd9c"
+    },
+    {
+      "compiled": "runtime_model_input_tail_window.ml",
+      "source": "exact metadata classifiers fragment",
+      "sha256": "60ae79e8569eff0282d566597b009bfdb7b00ba0237ad121c4c4b4ec296a16c7"
+    },
+    {
+      "compiled": "keeper_official_task_reference.ml",
+      "source": "exact task-reference classifier fragment",
+      "sha256": "86cc1cb56ae63e2a20be9772a93b4deea29a8b886575b835772df2c53271d2fd"
+    },
+    {
+      "compiled": "prompt_names.ml",
+      "source": "unexecuted notice key placeholders",
+      "sha256": "4b6b45c1525704639006683b2e809e32047b534822adbc28d59d3ccc69016713"
+    },
+    {
+      "compiled": "prompt_registry.ml",
+      "source": "unreachable notice dependency",
+      "sha256": "fff69dc9a7b2701f5ab7abbac05d633cd1bd237d277d95062c6b77b8774df63d"
+    },
+    {
+      "compiled": "log.ml",
+      "source": "unreachable log dependency",
+      "sha256": "b98152fd5caf2112adc0df44de52367c23393543fa4deea61bee2d6b92727227"
+    },
+    {
+      "compiled": "keeper_context_submission_link.mli",
+      "source": "lib/keeper/keeper_context_submission_link.mli",
+      "sha256": "9a5fad9bfff683d5931e312203ba8eded7941d4c8f0bf04d0ca8dc9be1a7783d"
+    },
+    {
+      "compiled": "keeper_context_submission_link.ml",
+      "source": "lib/keeper/keeper_context_submission_link.ml",
+      "sha256": "8044dd16bce6405a0a86873de2448df38aa4cc1d4b26933b77c65442e1c89307"
+    }
+  ],
+  "results": [
+    {
+      "variant": "baseline",
+      "projection_sha256": "c2b65e3098454771cd41ddb3bb83ba6797e71c7958e2c9d3e359df8e1d75e52e",
+      "compile_exit": 0,
+      "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
+      "run_exit": 0,
+      "output": "PASS baseline drops the changed System Goal from Resume\nPASS baseline held set names no System Goal\n2 exact-source official Resume checks passed\n"
+    },
+    {
+      "variant": "repair",
+      "projection_sha256": "21c67a47c26282dba74ac6e063a28ba3850c91d40c301e86a1357730e4d5b6c6",
+      "compile_exit": 0,
+      "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
+      "run_exit": 0,
+      "output": "PASS changed Goal reaches a separate Resume User message\nPASS Start names the Goal it sent through System\nPASS same Goal does not accumulate in Resume history\nPASS existing non-Goal world stays held\nPASS a new Goal after session Start is delivered\nPASS Goal never becomes an extra-context source block\nPASS actual projected text matches its receipt slot\nPASS source proof names System\nPASS target proof names official Resume User\nPASS source proof hashes the actual System partition\nPASS selected raw System span is exactly the delivered Goal\nPASS local held omission retains System-derived evidence\nPASS stale System issuer cannot prove new observation\nPASS JSON turn-text slot binds the actual projection\n14 exact-source official Resume checks passed\n"
+    }
+  ]
+}

@@ -1,0 +1,769 @@
+module Projection = Masc_tui_keeper_chat_projection
+
+type args_fragment =
+  | Args_delta of string
+  | Args_snapshot of string
+
+type admission =
+  | Queued
+  | Running
+  | Settled
+
+type tool_occurrence =
+  { stream_scope : int
+  ; block_index : int
+  ; provider_message_id : string option
+  ; tool_call_id : string option
+  }
+
+type stream_usage =
+  { input_tokens : int option
+  ; output_tokens : int option
+  ; cache_read_input_tokens : int option
+  ; cache_creation_input_tokens : int option
+  }
+
+type delta =
+  | Run_started
+  | Batch_bound of Masc_tui_keeper_chat_projection.batch_binding
+  | Runtime_attempt_started of
+      { runtime_id : string option
+      ; attempt_index : int option
+      }
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; retry : Runtime_claude_api_retry.t
+      }
+  | Stream_model_started of
+      { generation : int option
+      ; message_id : string option
+      ; stream_scope : int option
+      ; model : string
+      ; usage : stream_usage option
+      }
+  | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
+  | Stream_model_stopped of Masc.Keeper_chat_events.response_identity option
+  | Stream_details of
+      { generation : int option
+      ; stream_scope : int option
+      ; usage : stream_usage option
+      ; stop_reason : Agent_core.Types.stop_reason option
+      }
+  | Text of {text : string; response : Masc.Keeper_chat_events.text_response}
+  | Thinking of
+      { text : string
+      ; index : int
+      ; response : Masc.Keeper_chat_events.response_identity option
+      }
+  | Thinking_snapshot of
+      { text : string
+      ; index : int
+      ; response : Masc.Keeper_chat_events.response_identity
+      }
+  | Media of Masc.Keeper_chat_events.generated_media
+  | Native_tool_started of
+      { occurrence : tool_occurrence; tool_name : string option }
+  | Native_tool_progress of
+      { occurrence : tool_occurrence; progress : Runtime_native_tools.progress }
+  | Native_tool_ended of
+      { occurrence : tool_occurrence; completion : Runtime_native_tools.completion }
+  | Tool_started of
+      { occurrence : tool_occurrence
+      ; tool_name : string
+      }
+  | Tool_admitted of
+      { occurrence : tool_occurrence
+      ; provider_tool_name : string
+      ; tool_name : string
+      }
+  | Tool_args of
+      { occurrence : tool_occurrence
+      ; fragment : args_fragment
+      }
+  | Tool_ended of { occurrence : tool_occurrence }
+  | Tool_result of
+      { occurrence : tool_occurrence
+      ; execution_id : string
+      }
+  | Stream_protocol_error of
+      { quarantined_occurrence : tool_occurrence option
+      ; detail : string
+      }
+  | Approval_requested of
+      { call_id : string
+      ; tool_name : string
+      ; args : string
+      ; question : string
+      ; (* Why this call was held at all. The approval list screen shows it
+           (#30518); without it here, the same reader answering from the chat
+           pane decides without the reason. Emitted since #30518, so it is
+           read with a default rather than required: an event without it is
+           still a prompt that has to be answered. *)
+        because : string
+      }
+  | Approval_settled of
+      { call_id : string
+      ; outcome : string
+      }
+  | Accepted of
+      { admission : admission
+      ; queue_length : int
+      ; interactive : Masc_tui_keeper_chat_projection.interactive_receipt option
+      }
+  | Checkpoint
+  | External_effect_completed
+  | Reply_details of
+      { reply : string
+      ; turn_outcome : Masc.Keeper_turn_outcome.t
+      ; turn_ref : string
+      ; terminal_stream_scope : int option
+      }
+  | Run_failed of { message : string }
+  | Run_finished
+  | Undecodable of string
+
+type rejection = Invalid_stream | Preacceptance_failure
+
+type owner =
+  | Unscoped
+  | Awaiting of Projection.request
+  | Bound
+  | Rejected of rejection
+
+type t = { decoder : Sse_wire.decoder; mutable owner : owner }
+
+let create ?request () =
+  { decoder = Sse_wire.create_decoder ()
+  ; owner = (match request with None -> Unscoped | Some request -> Awaiting request)
+  }
+
+let requires_reconnect t =
+  match t.owner with
+  | Rejected Invalid_stream -> true
+  | Unscoped | Awaiting _ | Bound | Rejected Preacceptance_failure -> false
+
+let string_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | Some _ | None -> None
+
+let object_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`Assoc value) -> Some value
+  | Some _ | None -> None
+
+let nonnegative_int_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`Int value) when value >= 0 -> Some value
+  | Some _ | None -> None
+
+let optional_stream_scope fields name =
+  match List.filter (fun (key, _) -> key = name) fields with
+  | [] -> Ok None
+  | [(_, json)] ->
+    (match Runtime_json_integer.of_json json with
+     | Ok scope when scope >= 0 -> Ok (Some scope)
+     | Ok _ | Error _ -> Error (name ^ " must be one nonnegative safe integer"))
+  | _ -> Error (name ^ " must be one nonnegative safe integer")
+
+(* The one place that reads a usage object, for both the live wire arm and the
+   journal replay in {!Masc_tui_keeper_chat_log}: the producer writes the same
+   shape on both paths ([Keeper_chat_events.delta_usage_to_json]) and only the
+   counters the provider actually reported are present, so a missing field
+   stays [None] rather than becoming a zero the screen would state as fact.
+   All-absent reads as no usage at all, so an empty delta draws nothing. *)
+let stream_usage_of_usage_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let usage =
+      { input_tokens = nonnegative_int_field fields "input_tokens"
+      ; output_tokens = nonnegative_int_field fields "output_tokens"
+      ; cache_read_input_tokens =
+          nonnegative_int_field fields "cache_read_input_tokens"
+      ; cache_creation_input_tokens =
+          nonnegative_int_field fields "cache_creation_input_tokens"
+      }
+    in
+    if usage.input_tokens = None
+       && usage.output_tokens = None
+       && usage.cache_read_input_tokens = None
+       && usage.cache_creation_input_tokens = None
+    then None
+    else Some usage
+  | _ -> None
+
+let optional_nonblank_string fields name =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some _ -> Error (name ^ " must be a nonblank string when present")
+
+let tool_occurrence ~event fields =
+  let index field = Option.bind (List.assoc_opt field fields) (fun json ->
+    match Runtime_json_integer.of_json json with
+    | Ok value when value >= 0 -> Some value
+    | Ok _ | Error _ -> None) in
+  match
+    index "toolStreamScope",
+    index "toolCallBlockIndex"
+  with
+  | Some stream_scope, Some block_index ->
+    (match
+       optional_nonblank_string fields "providerMessageId",
+       optional_nonblank_string fields "toolCallId"
+     with
+     | Ok provider_message_id, Ok tool_call_id ->
+       Ok { stream_scope; block_index; provider_message_id; tool_call_id }
+     | Error detail, _ | _, Error detail -> Error (event ^ " " ^ detail))
+  | None, _ -> Error (event ^ " has no nonnegative safe integer toolStreamScope")
+  | _, None -> Error (event ^ " has no nonnegative safe integer toolCallBlockIndex")
+
+(* [required] reads one string field and names the event in the failure, so an
+   Undecodable row says which event was short of what. *)
+let required ~event ~field fields build =
+  match string_field fields field with
+  | Some value -> [ build value ]
+  | None -> [ Undecodable (Printf.sprintf "%s has no %s" event field) ]
+
+let tool_args_deltas fields =
+  match tool_occurrence ~event:"TOOL_CALL_ARGS" fields with
+  | Error detail -> [ Undecodable detail ]
+  | Ok occurrence -> (
+      match string_field fields "delta", string_field fields "snapshot" with
+      | Some delta, None -> [ Tool_args { occurrence; fragment = Args_delta delta } ]
+      | None, Some snapshot ->
+          [ Tool_args { occurrence; fragment = Args_snapshot snapshot } ]
+      | Some _, Some _ ->
+          [ Undecodable "TOOL_CALL_ARGS carries both delta and snapshot" ]
+      | None, None ->
+          [ Undecodable "TOOL_CALL_ARGS carries neither delta nor snapshot" ])
+
+let tool_start_deltas fields =
+  match tool_occurrence ~event:"TOOL_CALL_START" fields with
+  | Error detail -> [ Undecodable detail ]
+  | Ok occurrence ->
+    (match string_field fields "toolCallName" with
+     | Some tool_name when String.trim tool_name <> "" ->
+       [ Tool_started { occurrence; tool_name } ]
+     | Some _ | None -> [ Undecodable "TOOL_CALL_START has no nonblank toolCallName" ])
+
+(* Custom event names the live pane draws something for. The rest are on the
+   strict decoder's allowlist and validated there; they carry nothing this
+   view shows, so they produce no delta. *)
+let custom_deltas_unvalidated fields =
+  match string_field fields "name" with
+  | None -> [ Undecodable "CUSTOM has no name" ]
+  | Some ("KEEPER_NATIVE_TOOL_START" | "KEEPER_NATIVE_TOOL_END" | "KEEPER_NATIVE_TOOL_PROGRESS" as event) ->
+      (match object_field fields "value" with
+       | None -> [Undecodable (event ^ " value is not an object")]
+       | Some value ->
+           match tool_occurrence ~event value with
+           | Error detail -> [Undecodable detail]
+           | Ok occurrence ->
+               if event = "KEEPER_NATIVE_TOOL_START" then
+                 [Native_tool_started {occurrence; tool_name = string_field value "toolCallName"}]
+               else if event = "KEEPER_NATIVE_TOOL_PROGRESS" then
+                 (match List.assoc_opt "progress" value with
+                  | None -> [Undecodable (event ^ ": progress is required")]
+                  | Some json -> (match Runtime_native_tools.progress_of_json json with
+                      | Ok progress -> [Native_tool_progress {occurrence; progress}]
+                      | Error detail -> [Undecodable (event ^ ": " ^ detail)]))
+               else
+                 (* The wire contract permits an END without a completion:
+                    an older sender closes the occurrence without terminal
+                    metadata, so whether the provider reported a status is
+                    not known and it reads as completion_unrecorded. A
+                    present completion must be exactly one and well-formed. *)
+                 (match List.filter (fun (key, _) -> String.equal key "completion") value with
+                  | [] -> [Native_tool_ended {occurrence; completion = Runtime_native_tools.completion_unrecorded}]
+                  | [_, json] ->
+                      (match Runtime_native_tools.completion_of_json json with
+                       | Ok completion -> [Native_tool_ended {occurrence; completion}]
+                       | Error detail -> [Undecodable (event ^ ": " ^ detail)])
+                  | _ -> [Undecodable (event ^ " must carry at most one completion")]))
+  | Some "KEEPER_MEDIA_DELTA" ->
+      (match List.assoc_opt "value" fields with
+       | None -> [Undecodable "KEEPER_MEDIA_DELTA value is required"]
+       | Some value ->
+           match Masc.Keeper_chat_events.generated_media_of_json value with
+           | Ok media -> [Media media]
+           | Error detail -> [Undecodable detail])
+  | Some "KEEPER_THINKING_SNAPSHOT" -> (
+      match object_field fields "value" with
+      | None -> [ Undecodable "KEEPER_THINKING_SNAPSHOT value is not an object" ]
+      | Some value ->
+          (match Masc.Keeper_chat_events.optional_response_identity_of_fields value with
+           | Error detail -> [Undecodable detail]
+           | Ok None -> [Undecodable "thinking snapshot requires response identity"]
+           | Ok (Some owner) ->
+               let response=owner in
+               (* The content block index is what tells two adjacent reasoning
+                  blocks of one response apart (#37717). It is only compared for
+                  equality, so any integer the journal accepts is accepted. *)
+               (match List.assoc_opt "index" value with
+                | Some (`Int index) ->
+                    required ~event:"KEEPER_THINKING_SNAPSHOT" ~field:"snapshot" value
+                      (fun text -> Thinking_snapshot {text;index;response})
+                | Some _ | None -> [ Undecodable "KEEPER_THINKING_SNAPSHOT has no integer index" ])))
+  | Some "KEEPER_THINKING_DELTA" -> (
+      match object_field fields "value" with
+      | None -> [ Undecodable "KEEPER_THINKING_DELTA value is not an object" ]
+      | Some value ->
+          (match Masc.Keeper_chat_events.optional_response_identity_of_fields value with
+           | Error detail -> [Undecodable detail]
+           | Ok response ->
+               (* The content block index is what tells two adjacent reasoning
+                  blocks of one response apart (#37717). It is only compared for
+                  equality, so any integer the journal accepts is accepted. *)
+               (match List.assoc_opt "index" value with
+                | Some (`Int index) ->
+                    required ~event:"KEEPER_THINKING_DELTA" ~field:"delta" value
+                      (fun text -> Thinking {text;index;response})
+                | Some _ | None -> [ Undecodable "KEEPER_THINKING_DELTA has no integer index" ])))
+  | Some "KEEPER_CHAT_OPERATION_ACCEPTED" -> (
+      let event = "KEEPER_CHAT_OPERATION_ACCEPTED" in
+      match List.assoc_opt "value" fields with
+      | None -> [ Undecodable (event ^ " value is required") ]
+      | Some value -> (
+          match Projection.decode_acceptance value with
+          | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
+          | Error
+              (( Projection.Request_id_mismatch _
+               | Projection.Duplicate_acceptance
+               | Projection.Duplicate_reply_details
+               | Projection.Duplicate_terminal
+               | Projection.Event_before_acceptance _
+               | Projection.Event_identity_mismatch _
+               | Projection.Unknown_event_type _
+               | Projection.Unknown_custom_event _
+               | Projection.Tool_event_without_start _
+               | Projection.Tool_result_without_start _
+               | Projection.Quarantined_tool_result _
+               | Projection.Conflicting_tool_result _
+               | Projection.Reused_tool_execution_id _
+               | Projection.Duplicate_run_start
+               | Projection.Missing_run_start _
+               | Projection.Missing_acceptance
+               | Projection.Stream_interrupted _
+               | Projection.Missing_reply_details
+               | Projection.Missing_text_end
+               | Projection.Run_failed _
+               | Projection.Replayed_failed
+               | Projection.Replayed_cancelled ) as error) ->
+              [ Undecodable (Projection.stream_error_to_string error) ]
+          | Ok acceptance ->
+              let admission =
+                match acceptance.Projection.state with
+                | Projection.Queued -> Queued
+                | Projection.Running -> Running
+                | Projection.Succeeded | Projection.Failed
+                | Projection.Cancelled -> Settled
+              in
+              [ Accepted
+                  { admission; queue_length = acceptance.Projection.queued_count; interactive = acceptance.interactive }
+              ]))
+  | Some "KEEPER_CHAT_BATCH_BOUND" ->
+    (match List.assoc_opt "value" fields with
+     | None -> [Undecodable "KEEPER_CHAT_BATCH_BOUND requires value"]
+     | Some value -> match Projection.decode_batch_binding value with
+       | Ok binding -> [Batch_bound binding]
+       | Error error -> [Undecodable (Projection.stream_error_to_string error)])
+  | Some "KEEPER_PROVIDER_RETRY" ->
+    (match List.assoc_opt "value" fields with
+     | None -> [Undecodable "KEEPER_PROVIDER_RETRY requires value"]
+     | Some value -> match Projection.decode_provider_retry value with
+       | Ok (attempt, retry) -> [Provider_retry_observed {attempt; retry}]
+       | Error error -> [Undecodable (Projection.stream_error_to_string error)])
+  | Some "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
+    (match List.assoc_opt "value" fields with
+     | Some `Null -> [ Runtime_attempt_started { runtime_id = None; attempt_index = None } ]
+     | Some (`Assoc v) ->
+       let runtime_id = string_field v "runtime_id" in
+       let attempt_index = nonnegative_int_field v "attempt_index" in
+       [ Runtime_attempt_started { runtime_id; attempt_index } ]
+     | Some _ | None ->
+       [ Undecodable
+           "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED.value must be null or an object"
+       ])
+  | Some "KEEPER_STREAM_MESSAGE_START" ->
+    (match object_field fields "value" with
+     | Some value ->
+       let generation = match List.filter (fun (key,_) -> key="content_generation") value with
+         | [] -> Ok None
+         | [_, json] ->
+             Result.bind (Runtime_json_integer.of_json json) (fun generation ->
+               if generation < 0 then Error "content generation must be nonnegative"
+               else Ok (Some generation))
+         | _ -> Error "duplicate content generation" in
+       (match generation, string_field value "model" with
+        | Ok generation, Some model ->
+          (* A start establishes response and usage even when the provider
+             has no model label. Presentation handles that absent label. *)
+          [ Stream_model_started
+              { generation; message_id = Option.bind (string_field value "provider_message_id")
+                  (fun id -> if String.trim id = "" then None else Some id)
+              ; stream_scope = nonnegative_int_field value "stream_scope"
+              ; model = String.trim model
+              ; usage = Option.bind (List.assoc_opt "usage" value) stream_usage_of_usage_json
+              } ]
+        | Error detail, _ -> [Undecodable detail]
+        | Ok _, None -> [])
+     | None -> [])
+  | Some "KEEPER_MODEL_CONTENT_ACTIVITY" ->
+    (match List.assoc_opt "value" fields with
+     | None -> [Undecodable "KEEPER_MODEL_CONTENT_ACTIVITY requires value"]
+     | Some json ->
+       match Masc.Keeper_chat_events.model_content_activity_of_json json with
+       | Ok activity -> [Model_content_activity activity]
+       | Error detail -> [Undecodable detail])
+  | Some "KEEPER_STREAM_MESSAGE_STOP" ->
+    (match List.assoc_opt "value" fields with
+     | Some `Null -> [ Stream_model_stopped None ]
+     | Some json ->
+       (match Masc.Keeper_chat_events.response_identity_of_json json with
+        | Ok owner -> [ Stream_model_stopped (Some owner) ]
+        | Error detail -> [ Undecodable detail ])
+     | None -> [ Undecodable "KEEPER_STREAM_MESSAGE_STOP requires value" ])
+  | Some "KEEPER_STREAM_MESSAGE_DELTA" ->
+    (* The dashboard reader already keeps both of these
+       ([dashboard/src/keeper-stream.ts] KEEPER_STREAM_MESSAGE_DELTA) and draws
+       the stop reason ([dashboard/src/components/session-trace/
+       session-trace-entry.ts]), so a turn in flight told one renderer its
+       token cost and why it stopped, and the other nothing. A delta that
+       carried neither still retains its supplied response identity. *)
+    (match object_field fields "value" with
+     | Some value ->
+       let generation = match List.filter (fun (key,_) -> key="content_generation") value with
+         | [] -> Ok None
+         | [_, json] ->
+             Result.bind (Runtime_json_integer.of_json json) (fun generation ->
+               if generation < 0 then Error "content generation must be nonnegative"
+               else Ok (Some generation))
+         | _ -> Error "duplicate content generation" in
+       (match generation, optional_stream_scope value "stream_scope" with
+        | Error detail, _ | _, Error detail -> [Undecodable detail]
+        | Ok (Some _), Ok None -> [Undecodable "owned message delta requires stream_scope"]
+        | Ok generation, Ok stream_scope ->
+       let usage =
+         match List.assoc_opt "usage" value with
+         | Some usage -> stream_usage_of_usage_json usage
+         | None -> None
+       in
+       let stop_reason =
+         match List.assoc_opt "stop_reason" value with
+         | Some (`String reason) when String.trim reason <> "" ->
+           Some (Agent_core.Types.stop_reason_of_string (String.trim reason))
+         | Some _ | None -> None
+       in
+       if generation = None && usage = None && stop_reason = None
+       then []
+       else [ Stream_details { generation; usage; stop_reason; stream_scope } ])
+     | None -> [])
+  | Some "KEEPER_TOOL_CALL_ADMITTED" ->
+      (match object_field fields "value" with
+       | None -> [Undecodable "KEEPER_TOOL_CALL_ADMITTED value is not an object"]
+       | Some value ->
+         (match tool_occurrence ~event:"KEEPER_TOOL_CALL_ADMITTED" value,
+                string_field value "providerToolName", string_field value "toolCallName" with
+          | Ok occurrence, Some provider_tool_name, Some tool_name
+            when String.trim provider_tool_name <> "" && String.trim tool_name <> "" ->
+            [Tool_admitted {occurrence; provider_tool_name; tool_name}]
+          | Error detail, _, _ -> [Undecodable detail]
+          | Ok _, _, _ -> [Undecodable "KEEPER_TOOL_CALL_ADMITTED needs nonblank tool names"]))
+  | Some "KEEPER_TOOL_RESULT_READY" -> (
+      match object_field fields "value" with
+      | None -> [ Undecodable "KEEPER_TOOL_RESULT_READY value is not an object" ]
+      | Some value -> (
+          match tool_occurrence ~event:"KEEPER_TOOL_RESULT_READY" value with
+          | Error detail -> [ Undecodable detail ]
+          | Ok occurrence ->
+            (match string_field value "executionId" with
+             | Some execution_id when String.trim execution_id <> "" ->
+               [ Tool_result { occurrence; execution_id } ]
+             | Some _ | None ->
+               [ Undecodable
+                   "KEEPER_TOOL_RESULT_READY has no nonblank executionId"
+               ])))
+  | Some "KEEPER_STREAM_PROTOCOL_ERROR" -> (
+      match object_field fields "value" with
+      | None ->
+          [ Undecodable "KEEPER_STREAM_PROTOCOL_ERROR value is not an object" ]
+      | Some value -> (
+          match string_field value "kind" with
+          | Some kind
+            when Option.is_some
+                   (Masc.Keeper_chat_events.stream_protocol_error_kind_of_string
+                      kind) ->
+            let detail =
+              match string_field value "reason" with
+              | Some reason when String.trim reason <> "" -> kind ^ ": " ^ reason
+              | Some _ | None -> kind
+            in
+            (match List.assoc_opt "quarantined_occurrence" value with
+             | None ->
+               [ Stream_protocol_error
+                   { quarantined_occurrence = None; detail }
+               ]
+             | Some (`Assoc occurrence_fields) ->
+               (* The strict decoder rejects a repeated identity field here;
+                  the live view must refuse it too before the occurrence can
+                  mark a tool failed and ended. *)
+               (match Projection.unique_object_fields
+                        ~surface:"Keeper live CUSTOM KEEPER_STREAM_PROTOCOL_ERROR.value.quarantined_occurrence"
+                        (`Assoc occurrence_fields) with
+                | Error detail -> [ Undecodable detail ]
+                | Ok unique_fields ->
+                  (match
+                     tool_occurrence ~event:"KEEPER_STREAM_PROTOCOL_ERROR"
+                       unique_fields
+                   with
+                   | Ok occurrence ->
+                     [ Stream_protocol_error
+                         { quarantined_occurrence = Some occurrence; detail }
+                     ]
+                   | Error detail -> [ Undecodable detail ]))
+             | Some _ ->
+               [ Undecodable
+                   "KEEPER_STREAM_PROTOCOL_ERROR quarantined_occurrence is not an object"
+               ])
+          | Some _ | None ->
+            [ Undecodable "KEEPER_STREAM_PROTOCOL_ERROR has no known kind" ]))
+  | Some "KEEPER_TOOL_APPROVAL_REQUESTED" -> (
+      match object_field fields "value" with
+      | None ->
+          [ Undecodable "KEEPER_TOOL_APPROVAL_REQUESTED value is not an object" ]
+      | Some value -> (
+          match
+            ( string_field value "tool_call_id"
+            , string_field value "tool_call_name"
+            , string_field value "question" )
+          with
+          | Some call_id, Some tool_name, Some question ->
+              [ Approval_requested
+                  { call_id
+                  ; tool_name
+                  ; (* Absent arguments are drawn as none rather than dropping
+                       the prompt: a reader still has to answer, and the tool
+                       name plus the question is enough to. *)
+                    args = Option.value ~default:"" (string_field value "args")
+                  ; question
+                  ; (* Same posture as args: a missing because is an older
+                       emitter, not a reason to drop the ask. *)
+                    because =
+                      Option.value ~default:"" (string_field value "because")
+                  }
+              ]
+          | _ ->
+              [ Undecodable
+                  "KEEPER_TOOL_APPROVAL_REQUESTED needs tool_call_id, \
+                   tool_call_name and question"
+              ]))
+  | Some "KEEPER_TOOL_APPROVAL_SETTLED" -> (
+      match object_field fields "value" with
+      | None ->
+          [ Undecodable "KEEPER_TOOL_APPROVAL_SETTLED value is not an object" ]
+      | Some value -> (
+          match
+            (string_field value "tool_call_id", string_field value "outcome")
+          with
+          | Some call_id, Some outcome -> [ Approval_settled { call_id; outcome } ]
+          | _ ->
+              [ Undecodable
+                  "KEEPER_TOOL_APPROVAL_SETTLED needs tool_call_id and outcome"
+              ]))
+  | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
+  | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]
+  | Some "KEEPER_REPLY_DETAILS" -> (
+      (* The recorded reply and optional terminal stream provenance use the
+         same schema as the strict completion decoder. *)
+      match object_field fields "value" with
+      | None -> [ Undecodable "KEEPER_REPLY_DETAILS value is not an object" ]
+      | Some value -> (
+          match
+            ( string_field value "reply"
+            , Option.bind (string_field value "turn_outcome")
+                Masc.Keeper_turn_outcome.of_label
+            , Option.bind (string_field value "turn_ref") Ids.Turn_ref.of_string
+            , optional_stream_scope value "terminal_stream_scope" )
+          with
+          | Some reply, Some turn_outcome, Some turn_ref, Ok terminal_stream_scope ->
+              [ Reply_details
+                  { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope }
+              ]
+          | _, _, _, Error detail -> [Undecodable detail]
+          | (Some _, Some _, None, Ok _) | (Some _, None, _, Ok _) | (None, _, _, Ok _) -> [ Undecodable
+                  "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \
+                   a well-formed turn_ref"
+              ]))
+  | Some name when List.mem name Projection.known_custom_names -> []
+  | Some name -> [ Undecodable ("unknown CUSTOM event name: " ^ name) ]
+
+let custom_deltas fields =
+  match string_field fields "name", List.assoc_opt "value" fields with
+  | Some name, Some value ->
+    let unique_value =
+      match value with
+      | `Assoc _ ->
+        Projection.unique_object_fields
+          ~surface:("Keeper live CUSTOM " ^ name ^ ".value") value
+        |> Result.map (fun _ -> ())
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        Ok ()
+    in
+    (match unique_value with
+     | Error detail -> [ Undecodable detail ]
+     | Ok () ->
+       (match Projection.validate_custom_value ~name value with
+        | Ok () -> custom_deltas_unvalidated fields
+        | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
+        | Error
+            (( Projection.Request_id_mismatch _
+             | Projection.Duplicate_acceptance
+             | Projection.Duplicate_reply_details
+             | Projection.Duplicate_terminal
+             | Projection.Event_before_acceptance _
+             | Projection.Event_identity_mismatch _
+             | Projection.Unknown_event_type _
+             | Projection.Unknown_custom_event _
+             | Projection.Tool_event_without_start _
+             | Projection.Tool_result_without_start _
+             | Projection.Quarantined_tool_result _
+             | Projection.Conflicting_tool_result _
+             | Projection.Reused_tool_execution_id _
+             | Projection.Duplicate_run_start
+             | Projection.Missing_run_start _
+             | Projection.Missing_acceptance
+             | Projection.Stream_interrupted _
+             | Projection.Missing_reply_details
+             | Projection.Missing_text_end
+             | Projection.Run_failed _
+             | Projection.Replayed_failed
+             | Projection.Replayed_cancelled
+             ) as error) ->
+          [ Undecodable (Projection.stream_error_to_string error) ]))
+  | None, _ | Some _, None -> custom_deltas_unvalidated fields
+
+(* Annotated rather than inferred. Without it the parameter widens to an open
+   variant, every tag listed below is accepted whether or not Yojson has it,
+   and the exhaustiveness this match is written for stops being checked
+   against anything. That is how the two arms removed here -- `Tuple and
+   `Variant, dropped by yojson 3 -- read as covered cases while being
+   unreachable. *)
+let event_deltas (event : Yojson.Safe.t) =
+  match event with
+  | `Assoc _ -> (
+      match Projection.unique_object_fields ~surface:"Keeper live event" event with
+      | Error detail -> [Undecodable detail]
+      | Ok fields -> (
+      match string_field fields "type" with
+      | None -> [ Undecodable "event has no type" ]
+      | Some "RUN_STARTED" -> [ Run_started ]
+      | Some "RUN_FINISHED" -> [ Run_finished ]
+      | Some "RUN_ERROR" ->
+          (* A run error with no message is still a failed run, so this reports
+             the failure rather than an Undecodable line about the field. *)
+          [ Run_failed
+              { message =
+                  Option.value ~default:"" (string_field fields "message")
+              }
+          ]
+      | Some "TEXT_MESSAGE_CONTENT" ->
+          (match Masc.Keeper_chat_events.text_response_of_fields
+              ~owner_field:"textResponse" ~scope_field:"textStreamScope" fields with
+           | Ok response -> required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
+               (fun text -> Text {text;response})
+           | Error detail -> [Undecodable detail])
+      | Some "TOOL_CALL_START" -> tool_start_deltas fields
+      | Some "TOOL_CALL_ARGS" -> tool_args_deltas fields
+      | Some "TOOL_CALL_END" ->
+          (match tool_occurrence ~event:"TOOL_CALL_END" fields with
+           | Ok occurrence -> [ Tool_ended { occurrence } ]
+           | Error detail -> [ Undecodable detail ])
+      | Some "CUSTOM" -> custom_deltas fields
+      (* Accepted by the strict decode, nothing for this view to draw. *)
+      | Some ("TEXT_MESSAGE_START" | "TEXT_MESSAGE_END") -> []
+      | Some unknown ->
+          [ Undecodable (Printf.sprintf "unknown event type %s" unknown) ]))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      (* Spelled out rather than left to a catch-all so a new Yojson variant
+         stops the build instead of landing here. *)
+      [ Undecodable "event is not a JSON object" ]
+
+type observed_delta = { seq : int option; at : float option; delta : delta }
+
+let is_acceptance = function
+  | `Assoc fields ->
+      List.exists (fun (name, value) -> name = "type" && value = `String "CUSTOM") fields
+      && List.exists (fun (name, value) ->
+           name = "name" && value = `String "KEEPER_CHAT_OPERATION_ACCEPTED") fields
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
+
+let frame_deltas t (frame : Sse_wire.frame) =
+  match t.owner with
+  | Rejected _ -> []
+  | Unscoped | Awaiting _ | Bound ->
+  let seq = match frame.id with
+    | None -> None
+    | Some id ->
+      match Projection.classify_sse_line ("id:" ^ id) with
+      | Projection.Sse_id seq -> Some seq
+      | Projection.Sse_ignored | Projection.Sse_frame_end
+      | Projection.Sse_data _ | Projection.Sse_noncanonical_data -> None in
+  let at, seq, deltas = match Yojson.Safe.from_string frame.data with
+    | json ->
+        let at = match json with
+          | `Assoc fields ->
+              (match List.assoc_opt "timestamp" fields with
+               | Some (`Int seconds) when seconds >= 0 -> Some (float_of_int seconds)
+               | Some (`Float seconds) when Float.is_finite seconds && seconds >= 0. -> Some seconds
+               | _ -> None)
+          | _ -> None in
+        (match t.owner with
+         | Rejected _ -> at, None, []
+         | Unscoped -> at, seq, event_deltas json
+         | Awaiting request when is_acceptance json ->
+             (match Projection.validate_live_acceptance ~request json with
+              | Error error ->
+                  t.owner <- Rejected Invalid_stream;
+                  at, None, [Undecodable (Projection.stream_error_to_string error)]
+              | Ok () ->
+                  t.owner <- Bound;
+                  (* Acceptance is a transport preface, not a journal row. *)
+                  at, None, event_deltas json)
+         | Awaiting _ ->
+             (match event_deltas json with
+              | [Run_failed _] as failure ->
+                  t.owner <- Rejected Preacceptance_failure;
+                  at, None, failure
+              | [Undecodable _] as failure ->
+                  t.owner <- Rejected Invalid_stream;
+                  at, None, failure
+              | []
+              | [ ( Run_started | Batch_bound _ | Runtime_attempt_started _
+                  | Provider_retry_observed _ | Stream_model_started _
+                  | Model_content_activity _ | Stream_model_stopped _
+                  | Stream_details _ | Text _ | Thinking _ | Thinking_snapshot _
+                  | Media _ | Native_tool_started _ | Native_tool_progress _
+                  | Native_tool_ended _ | Tool_started _ | Tool_admitted _
+                  | Tool_args _ | Tool_ended _ | Tool_result _
+                  | Stream_protocol_error _ | Approval_requested _
+                  | Approval_settled _ | Accepted _ | Checkpoint
+                  | External_effect_completed | Reply_details _ | Run_finished ) ]
+              | _ :: _ :: _ ->
+                  t.owner <- Rejected Invalid_stream;
+                  at, None, [Undecodable "live event before request acceptance"])
+         | Bound when is_acceptance json ->
+             t.owner <- Rejected Invalid_stream;
+             at, None, [Undecodable (Projection.stream_error_to_string Projection.Duplicate_acceptance)]
+         | Bound -> at, seq, event_deltas json)
+    | exception Yojson.Json_error detail ->
+        (match t.owner with
+         | Awaiting _ ->
+             t.owner <- Rejected Invalid_stream;
+             None, None, [Undecodable ("invalid JSON: " ^ detail)]
+         | Unscoped | Bound -> None, seq, [Undecodable ("invalid JSON: " ^ detail)]
+         | Rejected _ -> None, None, []) in
+  List.map (fun delta -> {seq; at; delta}) deltas
+
+let feed t chunk =
+  Sse_wire.feed t.decoder chunk |> List.concat_map (frame_deltas t)

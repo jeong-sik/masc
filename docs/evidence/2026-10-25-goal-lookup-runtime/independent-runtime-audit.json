@@ -1,0 +1,507 @@
+{
+  "scope": "Independent read-only actual candidate audit; no raw thinking, no model calls, mutation, Task approval or Goal confirmation. Public model response distinguished from typed persisted states.",
+  "observed_at": "2026-10-24T15:43:23.512018+00:00",
+  "identity": {
+    "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+    "binary": "/tmp/masc-goal-runtime-54e8b9b7/masc",
+    "base_path": "/private/tmp/masc-goal-canary-54e8b9b7-qwen",
+    "pid": 41335,
+    "port": 58276,
+    "provider_proxy_port": 55595,
+    "model": "qwen3:8b",
+    "production_deployment": false
+  },
+  "selected_afterapproval_wire": [
+    {
+      "request": 15,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000015.request",
+        "bytes": 93472,
+        "sha256": "dc77df5d1921506b6138f9b8e3c780f1dcea4358372ed216a8f9e21873f425fa"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000015.response",
+        "bytes": 45784,
+        "sha256": "2db7ea5ccd8ccc8d890b67f484be22d21aeadcc867c8784e549952116a23fe12"
+      },
+      "tool_calls": [
+        {
+          "id": "call_7rcthrk8",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "description": "Update beta field to true after alpha verification",
+              "contract": {
+                "completion_contract": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "inspect_gate_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ]
+              },
+              "priority": 3,
+              "goal_id": "goal-canary-three-results",
+              "title": "Set beta to true in acceptance.json"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 16,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000016.request",
+        "bytes": 85341,
+        "sha256": "734168e83e7ba545c211b35f2fd45d1a39fb3b13dadd719769de00891a1a7296"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000016.response",
+        "bytes": 45498,
+        "sha256": "e686760ecab7b83aa347c5f237014904ba80ebbb3a7e98c99440a11ad991871b"
+      },
+      "tool_calls": [
+        {
+          "id": "call_gacehhrd",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_claim",
+            "arguments": {
+              "task_id": "task-002"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 17,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000017.request",
+        "bytes": 87736,
+        "sha256": "847f42419e208d6b922fe02aa1d1372bd0aefeab98b3086ec0d5baf1474a0c3c"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000017.response",
+        "bytes": 45569,
+        "sha256": "de57e4b60f36e4633a9d0311155dc07080986184bf62c4b59ab345481d7e9b0d"
+      },
+      "tool_calls": [
+        {
+          "id": "call_nnqb7mp0",
+          "function": {
+            "index": 0,
+            "name": "Edit",
+            "arguments": {
+              "cwd": "workspace",
+              "file_path": "acceptance.json",
+              "new_string": "beta\": true",
+              "old_string": "beta\": false"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 18,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000018.request",
+        "bytes": 89678,
+        "sha256": "9ad9c4a062ac79732577106972a24596faf0db257c004ec7d3e57f32434b089d"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000018.response",
+        "bytes": 45502,
+        "sha256": "bff4accb495c72413de512aec697cc825e22ec8954b6454b9b5e1554bade3780"
+      },
+      "tool_calls": [
+        {
+          "id": "call_in4uzjqw",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "cwd": "workspace",
+              "file_path": "acceptance.json"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 19,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000019.request",
+        "bytes": 91702,
+        "sha256": "3d0b08d392f40b63822fd03bcf4b493194cc15ade4307dc3cb427368ec44e467"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000019.response",
+        "bytes": 25054,
+        "sha256": "55f796085a4731265f5169352987f8038321f67678a1d85e32db7cf4b93c90b6"
+      },
+      "tool_calls": [
+        {
+          "id": "call_brwn8gvm",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_done",
+            "arguments": {
+              "evidence_refs": [
+                "artifact:workspace/acceptance.json"
+              ],
+              "result": "beta set to true in acceptance.json",
+              "task_id": "task-002"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 20,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000020.request",
+        "bytes": 93057,
+        "sha256": "775cc769db277963bb32128d3754e64fd3ca2041e1754cb81fffd4a5cbd2dff0"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000020.response",
+        "bytes": 39248,
+        "sha256": "3717e67d2c9a3c82f7335f640216effe91c04b2f6c5545b249c9a4d9dcbcdae1"
+      },
+      "tool_calls": [
+        {
+          "id": "call_g8pngjx0",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "description": "Finalize gamma field to true",
+              "goal_id": "goal-canary-three-results",
+              "priority": 3,
+              "title": "Set gamma to true in acceptance.json",
+              "contract": {
+                "completion_contract": [
+                  "artifact:workspace/acceptance.json"
+                ],
+                "inspect_gate_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 21,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000021.request",
+        "bytes": 94915,
+        "sha256": "ccb77b70a8866aaeb946cd3f7de05d494e77b66295ccde57591c38412a711057"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000021.response",
+        "bytes": 33436,
+        "sha256": "964cc525fcaeb38ceb4d255be6806c952b8a0624e032b72f92c1ee42a869b9f3"
+      },
+      "tool_calls": [
+        {
+          "id": "call_85m1lodx",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_claim",
+            "arguments": {
+              "task_id": "task-003"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 22,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000022.request",
+        "bytes": 96860,
+        "sha256": "f709765a5e34f822133688511a7571affba7525b4a349fe891ea495b970b5732"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000022.response",
+        "bytes": 22537,
+        "sha256": "ca53bc3dba8aefdb7ac4df417b10a116b53059a559d25b3cb74bf1409f8ef29c"
+      },
+      "tool_calls": [
+        {
+          "id": "call_6lomx69w",
+          "function": {
+            "index": 0,
+            "name": "Edit",
+            "arguments": {
+              "old_string": "gamma\": false",
+              "cwd": "workspace",
+              "file_path": "acceptance.json",
+              "new_string": "gamma\": true"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 23,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000023.request",
+        "bytes": 98029,
+        "sha256": "41c44d2c3f3df3b56c2a08dbd21ca8a9c2fc1d4eb4194419d8fdddbe89adfd38"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000023.response",
+        "bytes": 25822,
+        "sha256": "0059453daaecb4c1b1abe6862ca14f90bed54799f2d3140754efa9c5d0b7e13c"
+      },
+      "tool_calls": [
+        {
+          "id": "call_yk79golg",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "cwd": "workspace",
+              "file_path": "acceptance.json"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 24,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000024.request",
+        "bytes": 99393,
+        "sha256": "c239a8c04e0d2fbff043f736d2588d5b13d8bd31a44217fd2e8ea55c43dbf329"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000024.response",
+        "bytes": 26834,
+        "sha256": "b2331b94d5ca02978a857eef4c8406fce74db7ca5d2d07929a199f4747a1acf1"
+      },
+      "tool_calls": [
+        {
+          "id": "call_ozqsy2lw",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_done",
+            "arguments": {
+              "evidence_refs": [
+                "artifact:workspace/acceptance.json"
+              ],
+              "result": "gamma set to true in acceptance.json",
+              "task_id": "task-003"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 25,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000025.request",
+        "bytes": 100769,
+        "sha256": "a21e1ccd4539b1cdfb5c8f63c9e4f29b58ffae179de084440a1eea8d83ca9347"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000025.response",
+        "bytes": 20284,
+        "sha256": "314c0f3e3493fb3a68613e3e57dc7508dee445d53f8639b5b4f95108d50a24fd"
+      },
+      "tool_calls": [
+        {
+          "id": "call_66v4qmpf",
+          "function": {
+            "index": 0,
+            "name": "keeper_tasks_list",
+            "arguments": {
+              "projection": "full",
+              "status": "awaiting_verification"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 26,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000026.request",
+        "bytes": 103581,
+        "sha256": "7ec447a5a287c17d2416f9c58d234161a2437f53af1f69cff3ee61d9f4f0af62"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000026.response",
+        "bytes": 28831,
+        "sha256": "58428fc72e12b883f46ad1078d11427d2d1cb0b1dc008fc5ede6e83d1dd12def"
+      },
+      "tool_calls": [
+        {
+          "id": "call_sanch24e",
+          "function": {
+            "index": 0,
+            "name": "masc_goal_measure",
+            "arguments": {
+              "evidence": "artifact:workspace/acceptance.json",
+              "criterion_revision": "a8b64eab0d7d525cd37119c9d0c35684",
+              "goal_id": "goal-canary-three-results",
+              "observed_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "request": 27,
+      "request_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000027.request",
+        "bytes": 105386,
+        "sha256": "835c1d9ef1ae8037e65ba09dbbc8225c1f9533112d601c0a0aa82669ccace84d"
+      },
+      "response_file": {
+        "path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000027.response",
+        "bytes": 61083,
+        "sha256": "48b6080d4a12a5623ac0fc5c129f40dbb9a981e99ad5c9a93e6403441843c85e"
+      },
+      "tool_calls": []
+    }
+  ],
+  "response27_public_text": "The goal \"goal-canary-three-results\" has been successfully achieved. All three fields (`alpha`, `beta`, and `gamma`) in `workspace/acceptance.json` are now set to `true`, and the metric was verified with the observation:\n\n```\n3/3: alpha=true, beta=true, gamma=true, each persisted and reread\n```\n\n### Summary of Actions:\n1. **Task-001 (Alpha)**: Completed and awaiting verification.\n2. **Task-002 (Beta)**: Completed and awaiting verification.\n3. **Task-003 (Gamma)**: Completed and awaiting verification.\n4. **Goal Verification**: Confirmed via `masc_goal_measure` that all criteria are met.\n\n### Next Steps:\n- The tasks are now in `awaiting_verification` status. Once approved by the system, the goal will be marked as complete.\n- No further action is required unless additional tasks or goals are introduced.\n\nLet me know if you'd like to proceed with any further steps or verify the final state of the file!",
+  "response27_terminal": {
+    "created_at": "2026-10-24T15:39:35.573535Z",
+    "done": true,
+    "done_reason": "stop",
+    "model": "qwen3:8b"
+  },
+  "task_statuses": [
+    {
+      "id": "task-001",
+      "status": "done",
+      "completed_at": "2026-10-24T15:36:18Z",
+      "submitted_at": null,
+      "verification_id": null
+    },
+    {
+      "id": "task-002",
+      "status": "awaiting_verification",
+      "completed_at": null,
+      "submitted_at": "2026-10-24T15:37:49Z",
+      "verification_id": "vrf-d7577cdb8894a9f4787216724f0be3ac"
+    },
+    {
+      "id": "task-003",
+      "status": "awaiting_verification",
+      "completed_at": null,
+      "submitted_at": "2026-10-24T15:38:46Z",
+      "verification_id": "vrf-199038edc1d0dcc7dec35ea58872a1d1"
+    }
+  ],
+  "goal_records": [
+    {
+      "id": "goal-canary-three-results",
+      "criterion_revision": "a8b64eab0d7d525cd37119c9d0c35684",
+      "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+      "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+      "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+      "due_date": null,
+      "priority": 1,
+      "phase": "executing",
+      "last_review_note": null,
+      "last_review_at": null,
+      "created_at": "2026-10-24T15:21:48Z",
+      "updated_at": "2026-10-24T15:21:48Z"
+    }
+  ],
+  "goal_measurements": {
+    "version": 1,
+    "measurements": [
+      {
+        "id": "8b430723782d866a978a430d8a06a2e9",
+        "goal_id": "goal-canary-three-results",
+        "criterion_revision": "a8b64eab0d7d525cd37119c9d0c35684",
+        "observed_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+        "evidence": "artifact:workspace/acceptance.json",
+        "actor": "goal-canary",
+        "recorded_at": "2026-10-24T15:39:12Z"
+      }
+    ]
+  },
+  "owner_or_link_calls": [
+    {
+      "at": "2026-10-24T15:21:49Z",
+      "actor": {
+        "kind": "agent",
+        "id": "goal-canary-operator"
+      },
+      "name": "masc_keeper_msg"
+    }
+  ],
+  "all_observed_model_measure_calls": [
+    {
+      "request": 26,
+      "call": {
+        "id": "call_sanch24e",
+        "function": {
+          "index": 0,
+          "name": "masc_goal_measure",
+          "arguments": {
+            "evidence": "artifact:workspace/acceptance.json",
+            "criterion_revision": "a8b64eab0d7d525cd37119c9d0c35684",
+            "goal_id": "goal-canary-three-results",
+            "observed_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread"
+          }
+        }
+      }
+    }
+  ],
+  "file_records": [
+    {
+      "path": "/tmp/masc-goal-canary-54e8b9b7-qwen/.masc/tasks/backlog.json",
+      "bytes": 3277,
+      "sha256": "e64b4e985a6c7356a49822601661eabbd7e6762943c086ffa6a4c123afac356f"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-54e8b9b7-qwen/.masc/goals.json",
+      "bytes": 798,
+      "sha256": "70027c60fdb7934884c1e26dfc0f1dfc2fd46a971a8ef610e42d2b3129779d54"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-54e8b9b7-qwen/.masc/goal_measurements.json",
+      "bytes": 436,
+      "sha256": "4bef806cbdc610022ee5ae8592277cf7ae718e109ae4d62038a714658e156209"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-54e8b9b7-qwen/.masc/tasks/goal_task_links.json",
+      "bytes": 193,
+      "sha256": "541b80c395a032a3f7d368968a6cf9886dbb3a4faefc6860befd9c3b0b7f1381"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-54e8b9b7-qwen/.masc/playground/docker/goal-canary/workspace/acceptance.json",
+      "bytes": 44,
+      "sha256": "481126b0b86f1f7bb6b1c5a3fa4ac7ec3a394facfc6cb6af1aa1eba163c2aa71"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-54e8b9b7-qwen/operator-observations/partial-inspection.json",
+      "bytes": 2586,
+      "sha256": "1a7d9512efd149f669423270489446a733f11f1871ed5a2c491f9030cdc27c83"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-54e8b9b7-qwen/operator-observations/approval-receipt.json",
+      "bytes": 118,
+      "sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112"
+    }
+  ],
+  "assessment": {
+    "remaining_work_actual": true,
+    "current_goal_revision_3_of_3_recorded": true,
+    "goal_phase_executing": true,
+    "intermediate_1_of_3_before_work_recorded": false,
+    "public_goal_verification_claim_supported": false,
+    "automatic_goal_completion_claim_supported": false,
+    "unqualified_fixed_G3_recommendation": "withhold pending explicit scope judgment; public answer violates the without-inferring-Goal-completion clause if it includes model-visible claims",
+    "causal_limit": "new actual run has no afterapproval exact-ID Task lookup; it does not isolate the lookup-default change as the cause of improved action"
+  }
+}

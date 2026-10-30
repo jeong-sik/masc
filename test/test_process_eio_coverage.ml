@@ -1,0 +1,1835 @@
+open Alcotest
+
+module M = Masc
+
+let contains haystack needle =
+  let len_h = String.length haystack and len_n = String.length needle in
+  let rec loop i =
+    if i + len_n > len_h then false
+    else if String.sub haystack i len_n = needle then true
+    else loop (i + 1)
+  in
+  loop 0
+
+let with_runtime_reset f =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  Fun.protect ~finally:Process_eio.reset_for_testing f
+
+let test_should_retry_unix_fallback_on_bind_error () =
+  let exn = Unix.Unix_error (Unix.EADDRINUSE, "bind", "") in
+  check bool "retry bind eaddrinuse" true
+    (Process_eio.should_retry_unix_fallback exn)
+
+let test_should_retry_unix_fallback_on_cancelled_bind_error () =
+  let exn =
+    Eio.Cancel.Cancelled (Unix.Unix_error (Unix.EADDRINUSE, "bind", ""))
+  in
+  check bool "retry cancelled bind eaddrinuse" true
+    (Process_eio.should_retry_unix_fallback exn)
+
+(* A child that emits past the capture ceiling must yield a bounded result
+   that names what it elided, not the whole stream. Before the ceiling the
+   drainers copied every byte into an unbounded buffer: one `rg` over
+   single-line multi-MB JSON retained 590MB inside a keeper turn. *)
+let test_capture_bounds_oversized_stdout () =
+  Process_eio.reset_for_testing ();
+  let emitted = 9 * 1024 * 1024 in
+  let ceiling =
+    Common.max_process_capture_head_bytes
+    + Common.max_process_capture_tail_bytes
+  in
+  (* [ceiling] must sit strictly inside what the child writes, otherwise the
+     assertions below hold trivially and prove nothing. *)
+  check bool "child out-writes the ceiling" true (emitted > ceiling);
+  let argv =
+    [ "/bin/sh";
+      "-c";
+      Printf.sprintf "yes %s | head -c %d" (String.make 64 'a') emitted ]
+  in
+  let run_and_check () =
+    let output = Process_eio.run_argv argv in
+    (* Pinned to the ceiling plus the truncation marker, not merely "smaller
+       than the child wrote": shaving a few bytes would not prove the cap. *)
+    let len = String.length output in
+    check bool "capture stays under what the child emitted" true (len < emitted);
+    check bool "capture lands at the ceiling plus a short marker" true
+      (len >= ceiling && len <= ceiling + 128);
+    check bool "elided bytes are reported, not dropped silently" true
+      (contains output "(truncated ")
+  in
+  run_and_check ();
+  with_runtime_reset run_and_check
+
+(* Output that fits is byte-identical: the ceiling must not perturb the
+   overwhelmingly common short-output call. *)
+let test_capture_leaves_small_stdout_untouched () =
+  Process_eio.reset_for_testing ();
+  let run_and_check () =
+    let output = Process_eio.run_argv [ "/bin/sh"; "-c"; "printf 'small-exact'" ] in
+    check bool "no truncation marker on a short capture" false
+      (contains output "(truncated ");
+    check string "short capture passes through byte-identical" "small-exact" output
+  in
+  run_and_check ();
+  with_runtime_reset run_and_check
+
+let test_eio_pipeline_preserves_streams_and_callbacks () =
+  with_runtime_reset @@ fun () ->
+  let payload = String.make 12_288 'x' ^ "\nfinal bytes\n" in
+  let stages =
+    [ Process_eio.plumbed_stage ~env:None ~cwd:None
+        ~argv:[ "/bin/sh"; "-c";
+                "printf '%s' \"$1\"; printf 'first-error\\n' >&2";
+                "capture-fixture"; payload ];
+      Process_eio.plumbed_stage ~env:None ~cwd:None
+        ~argv:[ "/bin/sh"; "-c";
+                "cat; printf 'second-error\\n' >&2; exit 7" ] ]
+  in
+  let expected_stderr = "first-error\nsecond-error\n" in
+  let check_result = function
+    | Error detail -> fail detail
+    | Ok (status, stdout, stderr) ->
+      check bool "pipeline preserves nonzero stage status" true
+        (status = Unix.WEXITED 7);
+      check string "pipeline drains all final stdout" payload stdout;
+      check string "pipeline retains stderr in stage order" expected_stderr stderr
+  in
+  check_result (Process_eio.run_argv_pipeline_with_status_split stages);
+  let stdout_chunks = Buffer.create (String.length payload) in
+  let stderr_chunks = Buffer.create 64 in
+  check_result
+    (Process_eio.run_argv_pipeline_with_status_split
+       ~on_stdout_chunk:(Buffer.add_string stdout_chunks)
+       ~on_stderr_chunk:(Buffer.add_string stderr_chunks) stages);
+  check string "stdout callbacks preserve the complete stream" payload
+    (Buffer.contents stdout_chunks);
+  (* Stage drainers run concurrently; callback arrival order need not match
+     the deterministic order used for the returned stderr. *)
+  check int "stderr callbacks preserve the complete byte count"
+    (String.length expected_stderr) (Buffer.length stderr_chunks);
+  let sorted_bytes text =
+    String.to_seq text |> List.of_seq |> List.sort Char.compare
+  in
+  check (list char) "stderr callbacks preserve every byte independent of arrival order"
+    (sorted_bytes expected_stderr) (sorted_bytes (Buffer.contents stderr_chunks))
+
+let test_run_argv_fallback_preserves_env () =
+  let output =
+    Process_eio.run_argv ~env:[| "PROCESS_EIO_TEST_VAR=ok" |] [ "/usr/bin/env" ]
+  in
+  check bool "env visible in fallback" true
+    (contains output "PROCESS_EIO_TEST_VAR=ok")
+
+let test_run_argv_with_status_fallback_includes_stderr_on_failure () =
+  Process_eio.reset_for_testing ();
+  let status, output =
+    Process_eio.run_argv_with_status
+      [ "/bin/sh"; "-c"; "printf 'stderr-fallback\\n' >&2; exit 4" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "fallback stderr exit code" 4 code;
+  check bool "fallback stderr surfaced in output" true
+    (contains output "stderr-fallback")
+
+let test_spawn_guard_wraps_foreground_run_argv () =
+  Process_eio.reset_for_testing ();
+  let calls = Atomic.make 0 in
+  Process_eio.set_spawn_guard
+    { Process_eio.run =
+        (fun f ->
+          Atomic.incr calls;
+          f ())
+    };
+  Fun.protect
+    ~finally:Process_eio.reset_spawn_guard_for_testing
+    (fun () ->
+      let status, output =
+        Process_eio.run_argv_with_status [ "/bin/echo"; "guarded" ]
+      in
+      let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+      check int "guarded command exit code" 0 code;
+      check string "guarded command output" "guarded" (String.trim output);
+      check int "spawn guard called once" 1 (Atomic.get calls))
+
+let test_run_argv_with_stdin_fallback_preserves_input () =
+  let output =
+    Process_eio.run_argv_with_stdin ~stdin_content:"ping\n" [ "/bin/cat" ]
+  in
+  check string "stdin content round-trips" "ping\n" output
+
+let test_run_argv_fallback_surfaces_spawn_error () =
+  Process_eio.reset_for_testing ();
+  let output =
+    Process_eio.run_argv [ "/definitely/missing/process-eio-command" ]
+  in
+  check bool "spawn error surfaced" true
+    (contains output "process_eio_error")
+
+let test_run_argv_with_status_fallback_surfaces_spawn_error () =
+  Process_eio.reset_for_testing ();
+  let status, output =
+    Process_eio.run_argv_with_status
+      [ "/definitely/missing/process-eio-command" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "missing command exit code" 127 code;
+  check bool "missing command output surfaced" true
+    (contains output "process_eio_error")
+
+let status_to_string = function
+  | Unix.WEXITED code -> Printf.sprintf "exited %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signaled %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+
+let missing_program = "/definitely/missing/process-eio-command"
+
+let check_refusal_names_the_missing_program () =
+  match Process_eio.run_argv_with_status_split_or_refusal [ missing_program ] with
+  | Error (Process_eio.Executable_not_found named) ->
+    check string "the refusal names argv[0] as given" missing_program named
+  | Error
+      (( Process_eio.Empty_argv | Process_eio.Spawn_failed _ | Process_eio.Child_setup_failed _
+       | Process_eio.Cwd_unavailable _ ) as refusal) ->
+    failf "expected Executable_not_found, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+(* A file that exists and is not executable: the spawn is refused, not the
+   lookup. *)
+let with_noexec_file f =
+  let path = Filename.temp_file "process-eio-noexec" ".sh" in
+  Out_channel.with_open_bin path (fun oc -> output_string oc "not a program\n");
+  Unix.chmod path 0o600;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () -> f path)
+
+(* Unix fallback: posix_spawnp reports the refusal with its errno at the
+   spawn call (OCaml 5.5 spawn.c:80, EACCES checked on this switch) and the
+   typed runner carries that errno as a value. *)
+let test_or_refusal_carries_the_spawn_errno () =
+  Process_eio.reset_for_testing ();
+  with_noexec_file @@ fun path ->
+  match Process_eio.run_argv_with_status_split_or_refusal [ path ] with
+  | Error (Process_eio.Spawn_failed { executable; error = Unix.EACCES }) ->
+    check string "the refusal names the file" path executable
+  | Error refusal ->
+    failf "expected Spawn_failed EACCES, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+(* Native foreground execution owns a posix_spawn group. A failed exec
+   therefore reports libc's errno, rather than a fork error-pipe string. *)
+let test_or_refusal_carries_the_native_spawn_errno () =
+  with_runtime_reset @@ fun () ->
+  with_noexec_file @@ fun path ->
+  match Process_eio.run_argv_with_status_split_or_refusal [ path ] with
+  | Error (Process_eio.Spawn_failed { executable; error = Unix.EACCES }) ->
+    check string "the refusal names the file" path executable
+  | Error refusal ->
+    failf "expected Spawn_failed EACCES, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+(* Eio path: the cwd is opened before the fork (spawn_unix on both
+   backends), so a directory that does not exist is a refusal with eio's
+   own Fs error, not a 127 with text. *)
+let test_or_refusal_names_the_missing_cwd_eio () =
+  with_runtime_reset @@ fun () ->
+  match
+    Process_eio.run_argv_with_status_split_or_refusal
+      ~cwd:"/definitely/missing/process-eio-cwd"
+      [ "/bin/sh"; "-c"; "exit 0" ]
+  with
+  | Error (Process_eio.Cwd_unavailable { cwd; error = Process_eio.Eio_cwd_error (Eio.Fs.E (Eio.Fs.Not_found _)) }) ->
+    check bool "the refusal names the directory" true
+      (contains cwd "definitely/missing/process-eio-cwd")
+  | Error refusal ->
+    failf "expected Cwd_unavailable Not_found, got %s"
+      (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
+
+let check_empty_argv_is_refused () =
+  match Process_eio.run_argv_with_status_split_or_refusal [] with
+  | Error Process_eio.Empty_argv -> ()
+  | Error refusal ->
+    failf "expected Empty_argv, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, _stdout, stderr) ->
+    failf "an empty argv ran: %s with stderr %S" (status_to_string status) stderr
+
+let test_or_refusal_refuses_empty_argv_on_both_paths () =
+  Process_eio.reset_for_testing ();
+  check_empty_argv_is_refused ();
+  with_runtime_reset check_empty_argv_is_refused
+
+(* The typed runner hands a program the spawn cannot find back as a value.
+   The tuple runners above keep folding it into exit 127 plus text. Unix
+   fallback path. *)
+let test_run_argv_with_status_split_or_refusal_names_missing_program () =
+  Process_eio.reset_for_testing ();
+  check_refusal_names_the_missing_program ()
+
+(* Same contract on the Eio path, where the refusal originates as
+   [Eio.Process.Executable_not_found] from the spawner's PATH resolution. *)
+let test_run_argv_with_status_split_or_refusal_names_missing_program_eio () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  check_refusal_names_the_missing_program ();
+  Process_eio.reset_for_testing ()
+
+(* A program that ran is [Ok] with its own status and streams, exactly what
+   [run_argv_with_status_split] returns; only the pre-spawn case differs. *)
+let test_run_argv_with_status_split_or_refusal_returns_status_when_it_ran () =
+  Process_eio.reset_for_testing ();
+  match
+    Process_eio.run_argv_with_status_split_or_refusal
+      [ "/bin/sh"; "-c"; "echo refused-by-fixture >&2; exit 3" ]
+  with
+  | Error refusal ->
+    failf "sh was refused: %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok (status, stdout, stderr) ->
+    check string "the child's exit status" "exited 3" (status_to_string status);
+    check string "stdout stays separate" "" stdout;
+    check bool "stderr is the child's own" true (contains stderr "refused-by-fixture")
+
+let test_run_argv_with_status_fallback_enforces_timeout () =
+  Process_eio.reset_for_testing ();
+  let status, _output =
+    Process_eio.run_argv_with_status ~timeout_sec:1.0 [ "/bin/sleep"; "5" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "fallback timeout exit code" 124 code
+
+(* A socket owned by the grandchild proves descriptor release even when
+   Linux init has not reaped its zombie yet. A PID existence probe cannot. *)
+let wait_fixture_readable fd =
+  let deadline = Monotonic_deadline.after ~seconds:5. in
+  let rec wait () =
+    try
+      let ready, _, _ = Unix.select [ fd ] [] []
+          (Monotonic_deadline.remaining_seconds deadline) in
+      ready <> []
+    with
+    | Unix.Unix_error (Unix.EINTR, _, _) ->
+      if Monotonic_deadline.passed deadline then false else wait ()
+  in
+  wait ()
+
+let with_fallback_descendant mode run =
+  Process_eio.reset_for_testing ();
+  let root = Filename.temp_file "fallback-group-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let socket_path = Filename.concat root "witness.sock" in
+  let started = Filename.concat root "started" in
+  let listener = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  let script = {|
+import os, socket, subprocess, sys, time
+child_script = """
+import os, socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sys.argv[1])
+s.sendall(b'ready')
+if sys.argv[3] == 'closed':
+    os.close(0); os.close(1); os.close(2)
+open(sys.argv[2], 'w').close()
+time.sleep(60)
+"""
+subprocess.Popen([sys.executable, '-c', child_script, *sys.argv[1:]])
+while not os.path.exists(sys.argv[2]): time.sleep(0.01)
+if sys.argv[3] == 'normal':
+    print('leader-output', flush=True)
+    sys.exit(7)
+while True: time.sleep(60)
+|} in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close listener;
+      List.iter (fun path -> if Sys.file_exists path then Sys.remove path)
+        [ socket_path; started ];
+      Unix.rmdir root)
+    (fun () ->
+      Unix.bind listener (Unix.ADDR_UNIX socket_path);
+      Unix.listen listener 1;
+      let outcome = run started [ "python3"; "-c"; script; socket_path; started; mode ] in
+      check bool "grandchild reached its witness socket" true
+        (wait_fixture_readable listener);
+      let witness, _ = Unix.accept listener in
+      Fun.protect ~finally:(fun () -> Unix.close witness) (fun () ->
+        let bytes = Bytes.create 32 in
+        let received = Buffer.create 5 in
+        let rec drain () =
+          check bool "owned grandchild releases its socket" true
+            (wait_fixture_readable witness);
+          match Unix.read witness bytes 0 (Bytes.length bytes) with
+          | 0 -> ()
+          | n -> Buffer.add_subbytes received bytes 0 n; drain ()
+        in
+        drain ();
+        check string "witness came from the started grandchild" "ready"
+          (Buffer.contents received));
+      outcome)
+
+let rec wait_fixture_child flags pid =
+  try Unix.waitpid flags pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> wait_fixture_child flags pid
+
+let test_fallback_normal_exit_cleans_descendant_and_preserves_sibling () =
+  let sibling = Unix.create_process "/bin/sleep" [| "sleep"; "60" |]
+      Unix.stdin Unix.stdout Unix.stderr in
+  let sibling_reaped = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if not !sibling_reaped then (
+        Unix.kill sibling Sys.sigkill;
+        ignore (wait_fixture_child [] sibling)))
+    (fun () ->
+      let status, stdout, _ = with_fallback_descendant "normal" (fun _ argv ->
+        (* The fixture ceiling makes the broken EOF-first runner return a
+           timeout instead of hanging the suite. A healthy exit preserves 7. *)
+        Process_eio.run_argv_with_status_split ~timeout_sec:5. argv) in
+      check bool "leader status preserved" true (status = Unix.WEXITED 7);
+      check string "buffered leader output preserved" "leader-output\n" stdout;
+      let reaped, _ = wait_fixture_child [ Unix.WNOHANG ] sibling in
+      sibling_reaped := reaped <> 0;
+      check int "unrelated sibling is still running" 0 reaped)
+
+let test_fallback_timeout_cleans_descendant_with_closed_stdio () =
+  let status, _, _ = with_fallback_descendant "closed" (fun _ argv ->
+    Process_eio.run_argv_with_status_split ~timeout_sec:1. argv) in
+  check bool "explicit timeout preserved" true
+    (Process_eio.exit_reason_of_status status = Process_eio.Timed_out)
+
+(* A leader which exited without descendants is still waitable when cleanup
+   signals its group. Darwin reports EPERM for this zombie-only group. *)
+let test_fallback_owner_preserves_completed_exit_status () =
+  let owner = Unix_foreground_process.create () in
+  let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close dev_null) (fun () ->
+    Fun.protect ~finally:(fun () -> Unix_foreground_process.close owner) (fun () ->
+      Unix_foreground_process.spawn owner "/bin/sh" [ "/bin/sh"; "-c"; "exit 7" ]
+        (Unix.environment ()) dev_null dev_null dev_null;
+      let deadline = Monotonic_deadline.after ~seconds:5. in
+      let rec await_exit () =
+        match Unix_foreground_process.poll owner with
+        | Some status -> status
+        | None ->
+          if Monotonic_deadline.passed deadline then fail "child did not exit";
+          (* SIGCHLD is the event we are waiting for, so an interrupted
+             pause should immediately return to observing the owner. *)
+          (try ignore (Unix.select [] [] [] 0.01) with
+           | Unix.Unix_error (Unix.EINTR, _, _) -> ());
+          await_exit ()
+      in
+      check bool "normal nonzero status is preserved" true
+        (await_exit () = Unix.WEXITED 7);
+      check bool "repeated poll retains status" true
+        (Unix_foreground_process.poll owner = Some (Unix.WEXITED 7));
+      Unix_foreground_process.close owner))
+
+exception Fallback_owner_fixture_failure
+
+let test_fallback_owner_exception_cleanup () =
+  with_fallback_descendant "closed" (fun started argv ->
+    let owner = Unix_foreground_process.create () in
+    let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close dev_null) (fun () ->
+      match Fun.protect
+        ~finally:(fun () -> Unix_foreground_process.close owner)
+        (fun () ->
+          Unix_foreground_process.spawn owner "python3" argv (Unix.environment ())
+            dev_null dev_null dev_null;
+          let deadline = Monotonic_deadline.after ~seconds:5. in
+          while not (Sys.file_exists started) do
+            if Monotonic_deadline.passed deadline then
+              fail "grandchild did not start";
+            (try ignore (Unix.select [] [] [] 0.01) with
+             | Unix.Unix_error (Unix.EINTR, _, _) -> ())
+          done;
+          raise Fallback_owner_fixture_failure)
+      with
+      | () -> fail "fixture must raise"
+      | exception Fallback_owner_fixture_failure -> ()))
+
+let with_timeout_observer f =
+  let previous = Atomic.get Process_eio.process_timeout_observer_fn in
+  let seen = ref [] in
+  Atomic.set Process_eio.process_timeout_observer_fn
+    (fun ~program ~timeout_sec ~origin ->
+       seen := (program, timeout_sec, Timeout_origin.to_label origin) :: !seen);
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Process_eio.process_timeout_observer_fn previous)
+    (fun () -> f seen)
+
+let test_run_argv_with_status_fallback_observes_timeout () =
+  Process_eio.reset_for_testing ();
+  with_timeout_observer (fun seen ->
+      let status, _output =
+        Process_eio.run_argv_with_status ~timeout_sec:0.02 [ "/bin/sleep"; "5" ]
+      in
+      let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+      check int "fallback timeout exit code" 124 code;
+      (* Unix fallback runs after [create_process_env] returns, so the
+         stage is always [command]. *)
+      check
+        (list (triple string (float 0.0001) string))
+        "fallback timeout observer payload"
+        [ ("sleep", 0.02, "command") ]
+        (List.rev !seen))
+
+(* Sub-second budgets must render with their decimals. The old %.0fs format
+   printed "Timeout after 0s" for the 0.4s budgets a drained git-inspection
+   deadline had left (2026-08-27 audit), which reads as a zero-timeout
+   spawn instead of an exhausted one. The timeout WARN comes from the
+   Eio-native paths, so this test initializes the Eio runtime first. *)
+
+(* A non-zero exit keeps its stdout -- [output_for_status] joins it with
+   stderr -- but a timeout used to drop it entirely: a keeper search that had
+   been matching for fifteen seconds got back the word "timeout" and nothing
+   else (masc#31742, 18 occurrences on 2026-08-29). The bytes the child
+   already wrote are the same bytes a successful call would have returned, so
+   they come back labelled rather than discarded. *)
+let test_timeout_returns_the_partial_stdout () =
+  Eio_main.run
+  @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let output =
+    Process_eio.run_argv
+      ~timeout_sec:0.5
+      [ "/bin/sh"; "-c"; "/bin/echo MATCH-BEFORE-TIMEOUT; sleep 5" ]
+  in
+  check bool "the failure line comes first" true
+    (String.length output >= 18
+     && String.equal (String.sub output 0 18) "process_eio_error:");
+  check bool "the timeout is still named" true (contains output "timeout after");
+  check bool "the partial stdout survives" true
+    (contains output "MATCH-BEFORE-TIMEOUT");
+  check bool "and it is labelled incomplete" true (contains output "incomplete")
+
+(* A timeout with nothing written keeps the old shape: the error alone, with
+   no empty section inviting a reader to think output was captured. *)
+let test_timeout_without_output_stays_bare () =
+  Eio_main.run
+  @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let output = Process_eio.run_argv ~timeout_sec:0.2 [ "/bin/sleep"; "5" ] in
+  check bool "the timeout is named" true (contains output "timeout after");
+  check bool "no partial section is added" false (contains output "incomplete")
+
+let test_timeout_log_keeps_subsecond_precision () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let before =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> 0
+  in
+  let status, _output =
+    Process_eio.run_argv_with_status ~timeout_sec:0.02 [ "/bin/sleep"; "5" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "eio timeout exit code" 124 code;
+  let timeout_rows =
+    Log.Ring.recent ~since_seq:before ()
+    |> List.filter (fun (row : Log.Ring.entry) ->
+           contains row.message "[Process_eio] Timeout after ")
+  in
+  check bool "timeout warning was logged" true (timeout_rows <> []);
+  check bool "sub-second budget renders with decimals"
+    true
+    (List.exists
+       (fun (row : Log.Ring.entry) -> contains row.message "Timeout after 0.02s")
+       timeout_rows)
+
+let test_init_exposes_complete_runtime () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  check bool "initialized" true (Process_eio.is_initialized ());
+  check bool "proc_mgr available" true
+    (match Process_eio.get_proc_mgr () with Ok _ -> true | Error _ -> false);
+  check bool "clock available" true
+    (match Process_eio.get_clock () with Ok _ -> true | Error _ -> false)
+
+(** Verify that Eio.Cancel.Cancelled is re-raised, not swallowed *)
+let test_run_argv_propagates_cancelled () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let raised = ref false in
+  (try
+     Eio.Cancel.sub (fun cc ->
+         Eio.Cancel.cancel cc (Failure "test cancel");
+         ignore (Process_eio.run_argv [ "/bin/echo"; "should-not-run" ]))
+   with Eio.Cancel.Cancelled _ -> raised := true);
+  check bool "Cancelled propagated from run_argv" true !raised
+
+let test_run_argv_with_status_propagates_cancelled () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let raised = ref false in
+  (try
+     Eio.Cancel.sub (fun cc ->
+         Eio.Cancel.cancel cc (Failure "test cancel");
+         ignore (Process_eio.run_argv_with_status [ "/bin/echo"; "nope" ]))
+   with Eio.Cancel.Cancelled _ -> raised := true);
+  check bool "Cancelled propagated from run_argv_with_status" true !raised
+
+let test_run_argv_with_stdin_propagates_cancelled () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let raised = ref false in
+  (try
+     Eio.Cancel.sub (fun cc ->
+         Eio.Cancel.cancel cc (Failure "test cancel");
+         ignore
+           (Process_eio.run_argv_with_stdin ~stdin_content:"x"
+              [ "/bin/cat" ]))
+   with Eio.Cancel.Cancelled _ -> raised := true);
+  check bool "Cancelled propagated from run_argv_with_stdin" true !raised
+
+let test_run_argv_with_stdin_and_status_propagates_cancelled () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let raised = ref false in
+  (try
+     Eio.Cancel.sub (fun cc ->
+         Eio.Cancel.cancel cc (Failure "test cancel");
+         ignore
+           (Process_eio.run_argv_with_stdin_and_status ~stdin_content:"x"
+              [ "/bin/cat" ]))
+   with Eio.Cancel.Cancelled _ -> raised := true);
+  check bool "Cancelled propagated from run_argv_with_stdin_and_status" true
+    !raised
+
+let test_run_argv_with_status_cwd_override () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  (* Use a non-root default cwd (/usr) so the test verifies that an
+     absolute ~cwd:"/tmp" truly replaces it, not just appends to root. *)
+  let cwd_default = Eio.Path.(Eio.Stdenv.fs env / "/usr") in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  (* Without ~cwd, pwd should return /usr *)
+  let status_default, stdout_default =
+    Process_eio.run_argv_with_status [ "/bin/pwd" ]
+  in
+  let code_d = match status_default with Unix.WEXITED c -> c | _ -> 1 in
+  check int "default pwd exit code" 0 code_d;
+  check string "default cwd is /usr" "/usr" (String.trim stdout_default);
+  (* With ~cwd:"/tmp", pwd should return /tmp, not /usr/tmp *)
+  let status, stdout =
+    Process_eio.run_argv_with_status ~cwd:"/tmp" [ "/bin/pwd" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "override pwd exit code" 0 code;
+  let trimmed = String.trim stdout in
+  (* /tmp may resolve to /private/tmp on macOS *)
+  check bool "cwd is /tmp or /private/tmp"
+    (trimmed = "/tmp" || trimmed = "/private/tmp") true
+
+let with_fallback_cwd_fixture f =
+  Process_eio.reset_for_testing ();
+  let root = Filename.temp_file ~temp_dir:(Sys.getcwd ()) "process-cwd-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let first = Filename.concat root "first directory" in
+  let second = Filename.concat root "second" in
+  Unix.mkdir first 0o700;
+  Unix.mkdir second 0o700;
+  let ordinary_file = Filename.concat root "ordinary-file" in
+  Out_channel.with_open_bin ordinary_file (fun out -> output_string out "file");
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chmod first 0o700;
+      Unix.rmdir first;
+      Unix.rmdir second;
+      Sys.remove ordinary_file;
+      Unix.rmdir root;
+      Process_eio.reset_for_testing ())
+    (fun () -> f ~first ~second ~ordinary_file)
+
+let test_fallback_cwd_applies_to_each_execution_path () =
+  with_fallback_cwd_fixture @@ fun ~first ~second ~ordinary_file:_ ->
+  let parent_cwd = Sys.getcwd () in
+  let expected = Unix.realpath first in
+  let check_output label (status, stdout, stderr) expected =
+    check bool (label ^ " exits successfully") true (status = Unix.WEXITED 0);
+    check string (label ^ " stderr") "" stderr;
+    check string (label ^ " cwd/output") expected (String.trim stdout)
+  in
+  (* Entering a directory requires search permission, not listing permission. *)
+  Unix.chmod first 0o111;
+  check_output "status"
+    (Process_eio.run_argv_with_status_split ~cwd:first [ "/bin/pwd" ]) expected;
+  let relative = Filename.concat (Filename.basename (Filename.dirname first))
+      (Filename.basename first) in
+  (match Process_eio.run_argv_with_status_split_or_refusal ~cwd:relative [ "/bin/pwd" ] with
+   | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+   | Ok output -> check_output "relative typed runner" output expected);
+  check_output "stdin"
+    (Process_eio.run_argv_with_stdin_and_status_split ~cwd:first
+       ~stdin_content:"body\n" [ "/bin/sh"; "-c"; "pwd; cat" ])
+    (expected ^ "\nbody");
+  let chunks = Buffer.create 64 in
+  check_output "streaming fallback"
+    (Process_eio.run_argv_with_status_split_streaming ~cwd:first
+       ~on_stdout_chunk:(Buffer.add_string chunks)
+       ~on_stderr_chunk:(fun text -> fail text) [ "/bin/pwd" ]) expected;
+  check string "completion callback receives cwd output" (expected ^ "\n")
+    (Buffer.contents chunks);
+  let stages =
+    [ Process_eio.plumbed_stage ~argv:[ "/bin/pwd" ] ~env:None ~cwd:(Some first)
+    ; Process_eio.plumbed_stage ~argv:[ "/bin/sh"; "-c"; "cat; pwd" ]
+        ~env:None ~cwd:(Some second) ]
+  in
+  (match Process_eio.run_argv_pipeline_with_status_split stages with
+   | Error detail -> fail detail
+   | Ok output -> check_output "per-stage cwd" output (expected ^ "\n" ^ Unix.realpath second));
+  check string "parent cwd is unchanged" parent_cwd (Sys.getcwd ())
+
+let test_fallback_unavailable_cwd_refuses_before_execution () =
+  with_fallback_cwd_fixture @@ fun ~first ~second:_ ~ordinary_file ->
+  let check_refusal (cwd, expected_error) =
+      match Process_eio.run_argv_with_status_split_or_refusal ~cwd
+          [ "/bin/echo"; "must not execute" ] with
+      | Error (Process_eio.Cwd_unavailable { cwd = reported; error = Native_cwd_error error }) ->
+        check string "refusal names requested directory" cwd reported;
+        check bool "refusal preserves directory errno" true (error = expected_error)
+      | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+      | Ok (_, stdout, _) -> failf "invalid cwd allowed execution: %S" stdout
+  in
+  List.iter check_refusal
+    [ Filename.concat first "missing", Unix.ENOENT;
+      ordinary_file, Unix.ENOTDIR;
+      first ^ "\000/missing", Unix.ENOENT ];
+  (* A privileged process can enter mode 000 directories. Only assert denial
+     when this fixture runs without that privilege. *)
+  if Unix.geteuid () <> 0 then (
+    Unix.chmod first 0o000;
+    check_refusal (first, Unix.EACCES);
+    Unix.chmod first 0o700);
+  match Process_eio.run_argv_with_status_split_or_refusal ~cwd:first [ missing_program ] with
+  | Error (Process_eio.Executable_not_found named) ->
+    check string "valid cwd preserves executable refusal" missing_program named
+  | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+  | Ok _ -> fail "missing executable ran"
+
+let test_bind_fallback_keeps_initialized_cwd_and_capability () =
+  with_fallback_cwd_fixture @@ fun ~first ~second ~ordinary_file:_ ->
+  Eio_main.run @@ fun env ->
+  let calls = Atomic.make 0 in
+  let original_mgr = Eio.Stdenv.process_mgr env in
+  let module Base = Eio_unix.Process.Make_mgr (struct
+    type t = unit
+    let spawn_unix () ~sw ?cwd ~env ~fds ~executable args =
+      Eio_unix.Process.spawn_unix ~sw ?cwd ~env ~fds ~executable original_mgr args
+  end) in
+  let module Failing = struct
+    include Base
+    let pipe _ ~sw:_ =
+      Atomic.incr calls;
+      raise (Unix.Unix_error (Unix.EADDRINUSE, "bind", "fixture pipe"))
+  end in
+  let proc_mgr = Eio.Resource.T ((), Eio_unix.Process.Pi.mgr_unix (module Failing)) in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Path.(Eio.Stdenv.fs env / first) in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let check_pwd ?cwd expected =
+    match Process_eio.run_argv_with_status_split_or_refusal ?cwd [ "/bin/pwd" ] with
+    | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+    | Ok (status, stdout, stderr) ->
+      check bool "fallback command completes" true (status = Unix.WEXITED 0);
+      check string "fallback stderr" "" stderr;
+      check string "fallback resolves initialized cwd" expected (String.trim stdout)
+  in
+  check_pwd (Unix.realpath first);
+  check_pwd ~cwd:"../second" (Unix.realpath second);
+  Process_eio.init ~cwd_default:(Eio.Stdenv.cwd env) ~proc_mgr ~clock;
+  (match Process_eio.run_argv_with_status_split_or_refusal ~cwd:first [ "/bin/echo"; "must not execute" ] with
+   | Error (Process_eio.Cwd_unavailable { error = Eio_cwd_error _; _ }) -> ()
+   | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+   | Ok (_, stdout, _) -> failf "fallback bypassed cwd capability: %S" stdout);
+  check int "every execution reached the failing Eio pipe boundary" 3 (Atomic.get calls)
+
+(* The exception is raised only after the child's stdout is read. The child
+   writes its marker before stdout, so the first execution is known to have
+   had an effect even though the process runner receives no exit status. *)
+let test_bind_error_after_child_effect_respects_fallback_policy () =
+  let root = Filename.temp_dir "process-bind-after-effect-" "" in
+  let stdin_default_marker = Filename.concat root "stdin-default" in
+  let stdin_eio_only_marker = Filename.concat root "stdin-eio-only" in
+  let streaming_default_marker = Filename.concat root "streaming-default" in
+  let streaming_eio_only_marker = Filename.concat root "streaming-eio-only" in
+  let markers =
+    [ stdin_default_marker; stdin_eio_only_marker
+    ; streaming_default_marker; streaming_eio_only_marker ] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (fun path -> if Sys.file_exists path then Sys.remove path) markers;
+      Unix.rmdir root)
+    (fun () ->
+      List.iter (fun path -> Out_channel.with_open_bin path (fun _ -> ())) markers;
+      Eio_main.run @@ fun env ->
+      let original_mgr = Eio.Stdenv.process_mgr env in
+      let pipe_calls = ref 0 in
+      let injected_reads = ref 0 in
+      let module Bind_source = struct
+        type t = [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Resource.t
+        let read_methods = []
+        let single_read source dst =
+          ignore (Eio.Flow.single_read source dst : int);
+          incr injected_reads;
+          raise (Unix.Unix_error (Unix.EADDRINUSE, "bind", "fixture stdout"))
+      end in
+      let handler :
+        (Bind_source.t, [ Eio.Flow.source_ty | Eio.Resource.close_ty ]) Eio.Resource.handler =
+        Eio.Resource.handler
+          [ Eio.Resource.H (Eio.Flow.Pi.Source, (module Bind_source))
+          ; Eio.Resource.H (Eio.Resource.Close, Eio.Flow.close)
+          ]
+      in
+      let module Base = Eio_unix.Process.Make_mgr (struct
+        type t = unit
+        let spawn_unix () ~sw ?cwd ~env ~fds ~executable args =
+          Eio_unix.Process.spawn_unix ~sw ?cwd ~env ~fds ~executable original_mgr args
+      end) in
+      let module Failing = struct
+        include Base
+        let pipe () ~sw =
+          let source, sink = Base.pipe () ~sw in
+          let is_stdout = !pipe_calls mod 2 = 0 in
+          incr pipe_calls;
+          if is_stdout then Eio.Resource.T (source, handler), sink else source, sink
+      end in
+      let proc_mgr = Eio.Resource.T ((), Eio_unix.Process.Pi.mgr_unix (module Failing)) in
+      Process_eio.init ~cwd_default:(Eio.Stdenv.fs env) ~proc_mgr ~clock:(Eio.Stdenv.clock env);
+      Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
+        let argv marker =
+          [ "/bin/sh"; "-c"; "printf 1 >> \"$1\"; printf x"; "fixture"; marker ]
+        in
+        let run_stdin ?fallback_policy marker =
+          Process_eio.run_argv_with_stdin_and_status_split ?fallback_policy ~stdin_content:""
+            (argv marker)
+        in
+        let run_streaming ?fallback_policy marker =
+          Process_eio.run_argv_with_status_split_streaming ?fallback_policy
+            ~on_stdout_chunk:ignore ~on_stderr_chunk:ignore (argv marker)
+        in
+        let check_pair name
+            (run : ?fallback_policy:Process_eio.fallback_policy -> string ->
+              Unix.process_status * string * string)
+            default_marker eio_only_marker =
+          let default_status, default_stdout, _ = run default_marker in
+          check bool (name ^ " default policy reports the successful Unix retry") true
+            (default_status = Unix.WEXITED 0);
+          check string (name ^ " Unix retry's stdout is returned") "x" default_stdout;
+          check string (name ^ " default policy executes the child twice") "11"
+            (In_channel.with_open_bin default_marker In_channel.input_all);
+          let eio_only_status, _, _ = run ~fallback_policy:Process_eio.Eio_only eio_only_marker in
+          check bool (name ^ " Eio_only returns an error") true
+            (eio_only_status = Unix.WEXITED 127);
+          check string (name ^ " Eio_only executes the child only once") "1"
+            (In_channel.with_open_bin eio_only_marker In_channel.input_all)
+        in
+        check_pair "stdin" run_stdin stdin_default_marker stdin_eio_only_marker;
+        check_pair "streaming" run_streaming streaming_default_marker streaming_eio_only_marker;
+        check int "all Eio executions reached the injected read" 4 !injected_reads;
+        check int "each Eio execution opened stdout and stderr pipes" 8 !pipe_calls))
+
+(* Fill a nonblocking pipe with no reader to measure its capacity on this
+   host. Finish byte by byte because a large atomic write can fail while a
+   smaller amount of space remains. Both ends are closed even on failure. *)
+let observed_pipe_capacity () =
+  let reader, writer = Unix.pipe ~cloexec:true () in
+  Fun.protect
+    ~finally:(fun () ->
+      Fun.protect ~finally:(fun () -> Unix.close reader) (fun () -> Unix.close writer))
+    (fun () ->
+      Unix.set_nonblock writer;
+      let chunk = String.make 4096 'x' in
+      let rec fill total length =
+        match Unix.write_substring writer chunk 0 length with
+        | written when written > 0 -> fill (total + written) length
+        | _ -> fail "pipe write made no progress"
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill total length
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          if length = 1 then total else fill total 1
+      in
+      fill 0 (String.length chunk))
+;;
+
+(* The child records its own execution before closing stdin without reading,
+   then records that it reached the close. Ignore TERM during these short
+   steps so cleanup racing the close cannot erase that observation. The payload
+   exceeds a separately observed host pipe with room for capacity differences.
+   Child exit and stdin-copy scheduling can produce different statuses, so
+   this does not assert EPIPE. A reported timeout fails the test. *)
+let test_eio_only_stdin_closed_early_does_not_replay () =
+  let root = Filename.temp_dir "process-eio-stdin-closed-" "" in
+  let marker = Filename.concat root "executions" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists marker then Sys.remove marker;
+      Unix.rmdir root)
+    (fun () ->
+      let capacity = observed_pipe_capacity () in
+      check bool "the host pipe has positive capacity" true (capacity > 0);
+      let input_length = max (4 * capacity) (8 * 1024 * 1024) in
+      let stdin_content = String.make input_length 'x' in
+      with_timeout_observer @@ fun timeouts ->
+      with_runtime_reset @@ fun () ->
+      let status, _, _ =
+        Process_eio.run_argv_with_stdin_and_status_split
+          ~fallback_policy:Process_eio.Eio_only
+          ~timeout_sec:10.
+          ~stdin_content
+          [ "/bin/sh"; "-c";
+            "trap '' TERM; printf 'started\\n' >> \"$1\" || exit 3; exec 0<&-; printf 'closed\\n' >> \"$1\" || exit 3; exit 2";
+            "fixture"; marker ]
+      in
+      check int "the operation did not hit its timeout" 0 (List.length !timeouts);
+      check bool "a timeout status is not accepted as a passing test" false
+        (status = Process_eio.timed_out_status);
+      (match status with
+       | Unix.WEXITED 0 -> fail "the early-closing child must not report success"
+       | Unix.WEXITED _ | Unix.WSIGNALED _ -> ()
+       | Unix.WSTOPPED signal -> failf "child remained stopped with signal %d" signal);
+      check bool "the child wrote its execution marker" true (Sys.file_exists marker);
+      check string "one child started and closed stdin" "started\nclosed\n"
+        (In_channel.with_open_bin marker In_channel.input_all))
+;;
+
+(* With no initialized Eio process runtime, Eio_only must reject before even
+   starting a child that could produce more than the capture ceiling. *)
+let with_uninitialized_eio_only_fixture run =
+  Process_eio.reset_for_testing ();
+  let root = Filename.temp_dir "process-eio-only-" "" in
+  let marker = Filename.concat root "child-started" in
+  let capture_dir = Filename.concat root "capture" in
+  Fun.protect
+    ~finally:(fun () ->
+      Process_eio.reset_for_testing ();
+      if Sys.file_exists capture_dir then (
+        Sys.readdir capture_dir
+        |> Array.iter (fun name -> Sys.remove (Filename.concat capture_dir name));
+        Unix.rmdir capture_dir);
+      if Sys.file_exists marker then Sys.remove marker;
+      Unix.rmdir root)
+    (fun () ->
+      let emitted = Common.max_process_capture_head_bytes
+        + Common.max_process_capture_tail_bytes + 1 in
+      let argv =
+        [ "/bin/sh"; "-c"
+        ; "printf started > \"$1\"; exec /usr/bin/head -c \"$2\" /dev/zero >&2"
+        ; "fixture"; marker; string_of_int emitted
+        ]
+      in
+      let stdout_callbacks = ref 0 and stderr_callbacks = ref 0 in
+      let on_stdout_chunk _ = incr stdout_callbacks in
+      let on_stderr_chunk _ = incr stderr_callbacks in
+      let ((status, stdout, _stderr), files) =
+        Process_output_capture.with_capture ~stdout_limit:1 ~stderr_limit:1 ~capture_dir
+          (fun output_capture ->
+            run ~output_capture ~on_stdout_chunk ~on_stderr_chunk argv)
+      in
+      check bool "uninitialized Eio_only returns a failure" true (status = Unix.WEXITED 127);
+      check string "no child stdout is returned" "" stdout;
+      check bool "child did not run before the refusal" false (Sys.file_exists marker);
+      check int "no child stdout callback" 0 !stdout_callbacks;
+      check int "no child stderr callback" 0 !stderr_callbacks;
+      let check_unavailable name = function
+        | Process_output_capture.Capture_failed
+            { path = Some path; limit_exceeded = false; _ } ->
+          check int (name ^ " capture remains empty") 0 (Unix.stat path).st_size
+        | Process_output_capture.Capture_failed _
+        | Process_output_capture.Complete_file _
+        | Process_output_capture.Incomplete_file _ ->
+          fail (name ^ " was not marked unavailable without output")
+      in
+      check_unavailable "stdout" files.stdout;
+      check_unavailable "stderr" files.stderr)
+
+let test_uninitialized_eio_only_stdin_never_starts_child () =
+  with_uninitialized_eio_only_fixture (fun ~output_capture ~on_stdout_chunk ~on_stderr_chunk argv ->
+    Process_eio.run_argv_with_stdin_and_status_split ~fallback_policy:Process_eio.Eio_only
+      ~output_capture ~on_stdout_chunk ~on_stderr_chunk ~stdin_content:"" argv)
+
+let test_uninitialized_eio_only_streaming_never_starts_child () =
+  with_uninitialized_eio_only_fixture (fun ~output_capture ~on_stdout_chunk ~on_stderr_chunk argv ->
+    Process_eio.run_argv_with_status_split_streaming ~fallback_policy:Process_eio.Eio_only
+      ~output_capture ~on_stdout_chunk ~on_stderr_chunk argv)
+
+let test_run_argv_with_status_includes_stderr_on_failure () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let status, output =
+    Process_eio.run_argv_with_status
+      [ "/bin/sh"; "-c"; "printf 'stderr-only\\n' >&2; exit 3" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "stderr failure exit code" 3 code;
+  check bool "stderr surfaced in output" true
+    (contains output "stderr-only")
+
+let test_run_argv_with_status_split_streaming_invokes_callbacks () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun s -> stdout_chunks := s :: !stdout_chunks)
+      ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
+      [ "/bin/sh"
+      ; "-c"
+      ; "printf 'stdout-chunk\\n'; printf 'stderr-chunk\\n' >&2"
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "streaming exit code" 0 code;
+  check string "streaming stdout captured" "stdout-chunk\n" stdout;
+  check string "streaming stderr captured" "stderr-chunk\n" stderr;
+  check bool "streaming stdout callback invoked" true (List.length !stdout_chunks > 0);
+  check bool "streaming stderr callback invoked" true (List.length !stderr_chunks > 0)
+
+let test_run_argv_pipeline_streaming_timeout_preserves_stderr () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let stderr_chunks = ref [] in
+  let status, stdout, stderr =
+    Result.get_ok
+    @@ Process_eio.run_argv_pipeline_with_status_split
+      ~timeout_sec:0.5
+      ~on_stdout_chunk:(fun _ -> ())
+      ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
+      [
+        {
+          Process_eio.stdin = Process_eio.Inherited;
+          stdout = Process_eio.Captured;
+          stderr = Process_eio.Captured;
+          argv =
+            [ "/bin/sh"; "-c"; "printf 'pipeline-timeout-stderr\\n' >&2; sleep 5" ];
+          env = None;
+          cwd = None;
+        };
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "pipeline timeout exit code" 124 code;
+  check string "pipeline timeout stdout" "" stdout;
+  check bool
+    "pipeline timeout stderr preserves streamed data"
+    true
+    (contains stderr "pipeline-timeout-stderr");
+  check bool
+    "pipeline timeout stderr avoids synthetic timeout when data streamed"
+    false
+    (contains stderr "process_eio_error");
+  check bool
+    "pipeline timeout stderr callback invoked"
+    true
+    (contains (String.concat "" (List.rev !stderr_chunks)) "pipeline-timeout-stderr")
+
+let test_run_argv_with_status_split_streaming_fallback_invokes_callbacks () =
+  Process_eio.reset_for_testing ();
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun s -> stdout_chunks := s :: !stdout_chunks)
+      ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
+      [ "/bin/sh"
+      ; "-c"
+      ; "printf 'fallback-stdout\\n'; printf 'fallback-stderr\\n' >&2"
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "streaming fallback exit code" 0 code;
+  check string "streaming fallback stdout captured" "fallback-stdout\n" stdout;
+  check string "streaming fallback stderr captured" "fallback-stderr\n" stderr;
+  check string
+    "streaming fallback stdout callback"
+    "fallback-stdout\n"
+    (String.concat "" (List.rev !stdout_chunks));
+  check string
+    "streaming fallback stderr callback"
+    "fallback-stderr\n"
+    (String.concat "" (List.rev !stderr_chunks))
+
+let test_run_argv_with_stdin_and_status_split_fallback_callback_exception_continues
+    () =
+  Process_eio.reset_for_testing ();
+  let stdout_callback_calls = Atomic.make 0 in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_stdin_and_status_split
+      ~on_stdout_chunk:(fun _ ->
+        Atomic.incr stdout_callback_calls;
+        failwith "intentional fallback callback failure")
+      ~on_stderr_chunk:(fun _ -> ())
+      ~stdin_content:"stdin-fallback-captured\n"
+      [ "/bin/cat" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "stdin fallback callback exception exit code" 0 code;
+  check string
+    "stdin fallback callback exception stdout captured"
+    "stdin-fallback-captured\n"
+    stdout;
+  check string "stdin fallback callback exception stderr captured" "" stderr;
+  check bool
+    "stdin fallback callback exception callback invoked"
+    true
+    (Atomic.get stdout_callback_calls > 0)
+
+let test_run_argv_with_status_split_streaming_callback_exception_continues () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let stdout_callback_calls = Atomic.make 0 in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun _ ->
+        Atomic.incr stdout_callback_calls;
+        failwith "intentional callback failure")
+      ~on_stderr_chunk:(fun _ -> ())
+      [ "/bin/sh"; "-c"; "printf 'still-captured\\n'" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "callback exception streaming exit code" 0 code;
+  check string "callback exception stdout captured" "still-captured\n" stdout;
+  check string "callback exception stderr captured" "" stderr;
+  check bool
+    "callback exception callback invoked"
+    true
+    (Atomic.get stdout_callback_calls > 0)
+
+let test_run_argv_with_status_split_streaming_callback_cancelled_propagates () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let cancelled =
+    try
+      ignore
+        (Process_eio.run_argv_with_status_split_streaming
+           ~on_stdout_chunk:(fun _ ->
+             raise (Eio.Cancel.Cancelled (Failure "intentional cancellation")))
+           ~on_stderr_chunk:(fun _ -> ())
+           [ "/bin/sh"; "-c"; "printf 'cancel-me\\n'" ]);
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  check bool "callback cancellation propagates" true cancelled
+
+let test_run_argv_with_status_split_streaming_cancel_reaps_child () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let marker = Filename.temp_file "process-eio-cancel-reap" ".marker" in
+  Sys.remove marker;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists marker then Sys.remove marker)
+    (fun () ->
+      let cancellation_requested = Atomic.make false in
+      let cancelled =
+        try
+          Eio.Cancel.sub (fun cc ->
+              ignore
+                (Process_eio.run_argv_with_status_split_streaming
+                   ~on_stdout_chunk:(fun _ ->
+                     if Atomic.compare_and_set cancellation_requested false true
+                     then Eio.Cancel.cancel cc (Failure "cancel running child"))
+                   ~on_stderr_chunk:(fun _ -> ())
+                   [ "/bin/sh"
+                   ; "-c"
+                   ; "printf '%d\\n' \"$$\" > \"$1\"; printf 'ready\\n'; while :; do sleep 1; done"
+                   ; "process-eio-cancel-reap"
+                   ; marker
+                   ]));
+          false
+        with Eio.Cancel.Cancelled _ -> true
+      in
+      check bool "external cancellation propagates" true cancelled;
+      let ic = open_in marker in
+      let child_pid =
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr ic)
+          (fun () -> input_line ic |> int_of_string)
+      in
+      let child_reaped =
+        try
+          Unix.kill child_pid 0;
+          false
+        with Unix.Unix_error (Unix.ESRCH, _, _) -> true
+      in
+      check bool "child reaped before cancellation propagation" true child_reaped)
+
+let test_run_argv_with_status_split_streaming_multiple_chunks () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let chunk_count = Atomic.make 0 in
+  let status, stdout, _stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun _ -> Atomic.incr chunk_count)
+      ~on_stderr_chunk:(fun _ -> ())
+      [ "/bin/sh"
+      ; "-c"
+      ; "i=0; while [ $i -lt 500 ]; do printf '%s' 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; i=$((i+1)); done; printf '\\n'"
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "multi-chunk exit code" 0 code;
+  check int "multi-chunk stdout length" 25001 (String.length stdout);
+  check bool "multi-chunk received more than one chunk" true (Atomic.get chunk_count > 1)
+
+let test_reset_for_testing_clears_runtime () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  check bool "initialized before reset" true (Process_eio.is_initialized ());
+  Process_eio.reset_for_testing ();
+  check bool "cleared after reset" false (Process_eio.is_initialized ());
+  check bool "proc_mgr unavailable after reset" true
+    (match Process_eio.get_proc_mgr () with Ok _ -> false | Error _ -> true)
+
+(** Invalid explicit timeouts are objective input errors, never rewritten to
+    an implicit process budget. Omitting the timeout remains valid and
+    unbounded. *)
+let test_run_argv_with_status_rejects_invalid_timeout () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let check_rejected label timeout_sec =
+    let rejected =
+      try
+        ignore
+          (Process_eio.run_argv_with_status
+             ~timeout_sec
+             [ "/bin/sleep"; "0.05" ]);
+        false
+      with Invalid_argument _ -> true
+    in
+    check bool (Printf.sprintf "%s timeout rejected" label) true rejected
+  in
+  check_rejected "zero" 0.0;
+  check_rejected "negative" (-1.0);
+  check_rejected "nan" Float.nan;
+  check_rejected "neg_infinity" Float.neg_infinity;
+  check_rejected "infinity" Float.infinity;
+  let status, _output =
+    Process_eio.run_argv_with_status [ "/bin/sleep"; "0.05" ]
+  in
+  check int
+    "absent timeout is accepted"
+    0
+    (match status with Unix.WEXITED code -> code | _ -> -1)
+
+(** Verify that a pipeline timeout reaps every stage and still captures
+    whatever stdout/stderr was produced before the timeout fired. *)
+let test_run_argv_pipeline_timeout_reaps_all_stages () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let status, _stdout, _stderr =
+    Result.get_ok
+    @@ Process_eio.run_argv_pipeline_with_status_split
+         ~timeout_sec:0.5
+      [
+        {
+          Process_eio.stdin = Process_eio.Inherited;
+          stdout = Process_eio.Captured;
+          stderr = Process_eio.Captured;
+          argv = [ "/bin/sh"; "-c"; "echo stage1-output; sleep 5" ];
+          env = None;
+          cwd = None;
+        };
+        Process_eio.plumbed_stage ~argv:[ "/bin/cat" ] ~env:None ~cwd:None;
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "pipeline timeout exit code" 124 code
+
+(* repo_git, voice_bridge_core and exec_dispatch all decide "did this time
+   out" from Process_eio's status. They used to each compare against 124, so
+   the agreement was a coincidence the compiler could not see (#28651). This
+   pins the classifier they now share. *)
+let test_exit_reason_classifies_the_timeout_status () =
+  Alcotest.(check bool)
+    "the synthesized timeout status classifies as Timed_out"
+    true
+    (Process_eio.exit_reason_of_status Process_eio.timed_out_status
+     = Process_eio.Timed_out);
+  Alcotest.(check bool)
+    "a plain exit does not"
+    true
+    (Process_eio.exit_reason_of_status (Unix.WEXITED 0) = Process_eio.Completed 0);
+  Alcotest.(check bool)
+    "a signal is neither"
+    true
+    (Process_eio.exit_reason_of_status (Unix.WSIGNALED 9) = Process_eio.Signaled 9)
+;;
+
+(* Cancelling a running child used to send SIGTERM and SIGKILL back to back:
+   the switch release hook fired before the child could act on the first.
+   Measured on the voice recorder, that cost the last quarter second of every
+   stopped capture. The cancellation path preserves [child_exit_grace_seconds] even if
+   the child closes its pipes before finishing cleanup. Two children prove the two halves: one that traps SIGTERM and writes
+   a marker on its way out shows the wait happened; one that ignores SIGTERM
+   shows the wait is bounded.
+
+   The shape is the voice capture's: [Fiber.first] between the spawn and a
+   watcher that returns as soon as the child says it is running. *)
+let with_process_runtime f =
+  Eio_main.run @@ fun env ->
+  (* Match server_runtime_bootstrap's manager. eio_linux v1.3 immediately
+     KILLs from its cancelled reap daemon, before this finalizer can grant
+     grace; that foreign owner's policy is not the installed runtime's. *)
+  let proc_mgr = Posix_spawn_process_mgr.mgr in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  f ~clock
+;;
+
+let fresh_marker suffix =
+  let path = Filename.temp_file "process-eio-grace" suffix in
+  Sys.remove path;
+  path
+;;
+
+let remove_if_present path = if Sys.file_exists path then Sys.remove path
+
+(* Runs [script] under /bin/sh and stops it as soon as [started] exists. The
+   spawn goes through the same entry point the voice recorder uses. *)
+let stop_once_started ~clock ~started script =
+  Eio.Fiber.first
+    (fun () ->
+       ignore
+         (Process_eio.run_argv_with_stdin_and_status
+            ~stdin_content:""
+            [ "/bin/sh"; "-c"; script ]);
+       `Child_exited_on_its_own)
+    (fun () ->
+       let rec wait () =
+         if not (Sys.file_exists started)
+         then (
+           Eio.Time.sleep clock 0.01;
+           wait ())
+       in
+       wait ();
+       `Stopped_by_the_watcher)
+;;
+
+let test_cancel_waits_for_the_child_to_act_on_sigterm () =
+  with_process_runtime @@ fun ~clock ->
+  let started = fresh_marker ".started" in
+  let finished = fresh_marker ".finished" in
+  Fun.protect
+    ~finally:(fun () ->
+      remove_if_present started;
+      remove_if_present finished)
+    (fun () ->
+       (* The trap is installed before the child announces itself, so the
+          SIGTERM cannot land in the gap. [sleep 0.05] rather than one long
+          sleep: sh runs a trap only once the foreground command it is waiting
+          on returns. *)
+       let script =
+         Printf.sprintf
+           "trap ': > %s; exit 0' TERM; : > %s; while :; do sleep 0.05; done"
+           (Filename.quote finished)
+           (Filename.quote started)
+       in
+       let outcome = stop_once_started ~clock ~started script in
+       check bool "the watcher stopped the child" true
+         (outcome = `Stopped_by_the_watcher);
+       check bool "the child ran its SIGTERM handler before the kill" true
+         (Sys.file_exists finished))
+;;
+
+(* Exercise the installed manager, including Linux's SIGCHLD bridge. A
+   TERM handler closes output before doing work; EOF must not shorten grace. *)
+let cancel_closed_output_child ~redirected () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:Posix_spawn_process_mgr.mgr ~clock;
+  let started = fresh_marker ".started" in
+  let finished = fresh_marker ".finished" in
+  let output = fresh_marker ".output" in
+  Fun.protect
+    ~finally:(fun () -> List.iter remove_if_present [ started; finished; output ])
+    (fun () ->
+      let script = Printf.sprintf
+        "trap 'sleep 0.2; : > %s; exit 0' TERM; exec 1>&- 2>&-; : > %s; while :; do sleep 0.05; done"
+        (Filename.quote finished) (Filename.quote started) in
+      let destination =
+        if redirected then Process_eio.Written_to { path = output; append = true }
+        else Process_eio.Captured in
+      let outcome = Eio.Fiber.first
+        (fun () ->
+          ignore (Process_eio.run_argv_with_redirects
+            ~stdin:Process_eio.Inherited ~stdout:destination ~stderr:destination
+            [ "/bin/sh"; "-c"; script ]);
+          `Exited)
+        (fun () ->
+          let rec wait () =
+            if Sys.file_exists started then ()
+            else (Eio.Time.sleep clock 0.01; wait ()) in
+          wait ();
+          `Cancelled) in
+      check bool "watcher cancelled the owning switch" true (outcome = `Cancelled);
+      check bool "closed outputs do not truncate TERM handler" true
+        (Sys.file_exists finished))
+;;
+
+let test_cancel_grace_is_waited_out_when_the_child_ignores_sigterm () =
+  with_process_runtime @@ fun ~clock ->
+  let started = fresh_marker ".started" in
+  Fun.protect
+    ~finally:(fun () -> remove_if_present started)
+    (fun () ->
+       let script =
+         Printf.sprintf
+           "trap '' TERM; : > %s; while :; do sleep 0.05; done"
+           (Filename.quote started)
+       in
+       let t0 = Eio.Time.now clock in
+       let outcome = stop_once_started ~clock ~started script in
+       let elapsed = Eio.Time.now clock -. t0 in
+       check bool "the watcher stopped the child" true
+         (outcome = `Stopped_by_the_watcher);
+       check bool
+         (Printf.sprintf "the stop waited out the grace (%.2fs)" elapsed)
+         true
+         (elapsed >= Process_eio.child_exit_grace_seconds))
+;;
+(* No upper bound on [elapsed]: a reap that waited on the child's pipes would
+   not come back at all here (the child ignores SIGTERM and never exits), and
+   a case that does not come back is the suite deadline's to name (#33156).
+   A hand-picked allowance above the grace would only re-time that. *)
+
+(* #33182: a timeout raced the finalizer onto the switch-off path, which
+   waits for EOF on the child's pipes, and a grandchild that inherited stdout
+   held the pipe for its whole life: a 0.2s budget came back at 2.03s. A
+   timeout leaves the switch on, so the finalizer reaps the child the
+   ordinary way and returns when the child is gone, whatever its grandchild
+   still holds. The fixture is the one that measured it: a sh script whose
+   foreground sleep inherits stdout and outlives the budget. Two of the six
+   entry points that nest their switch outside the timeout run it. *)
+let grandchild_timeout_budget_seconds = 0.2
+
+(* As long as the grace. A finalizer that waited on the pipes would come back
+   only when this sleep, the last holder of stdout, exits. *)
+let grandchild_lifetime_seconds = Process_eio.child_exit_grace_seconds
+
+(* The grandchild marks the moment it lets go of stdout. Whether that mark
+   exists when the call returns is the observation: a return that waited on
+   the pipes finds it, a return at the budget does not. No clock is read. *)
+let grandchild_holding_stdout_script ~released =
+  Printf.sprintf "sleep %g; : > %s; printf late" grandchild_lifetime_seconds
+    (Filename.quote released)
+;;
+
+let timeout_with_a_grandchild_holding_stdout run =
+  let released = fresh_marker ".released" in
+  Fun.protect
+    ~finally:(fun () -> remove_if_present released)
+    (fun () ->
+       let status, stdout, _stderr =
+         run ~timeout_sec:grandchild_timeout_budget_seconds
+           [ "/bin/sh"; "-c"; grandchild_holding_stdout_script ~released ]
+       in
+       check bool "the call reports the timeout" true
+         (Process_eio.exit_reason_of_status status = Process_eio.Timed_out);
+       check string "nothing printed after the budget comes back" "" stdout;
+       check bool
+         "timed-out group did not produce its late completion marker"
+         false
+         (Sys.file_exists released))
+;;
+
+let test_timeout_with_a_grandchild_holding_stdout_returns_at_the_budget () =
+  with_process_runtime @@ fun ~clock:_ ->
+  timeout_with_a_grandchild_holding_stdout (fun ~timeout_sec argv ->
+    Process_eio.run_argv_with_status_split ~timeout_sec argv)
+;;
+
+let test_timeout_with_stdin_and_a_grandchild_holding_stdout_returns_at_the_budget
+    ()
+  =
+  with_process_runtime @@ fun ~clock:_ ->
+  timeout_with_a_grandchild_holding_stdout (fun ~timeout_sec argv ->
+    Process_eio.run_argv_with_stdin_and_status_split
+      ~timeout_sec
+      ~stdin_content:""
+      argv)
+;;
+
+(* The ordinary reap sends SIGTERM and waits out the grace under
+   [Eio.Cancel.protect]. The daemon that resolves [Eio.Process.await] is a
+   fiber of the switch the child was spawned in; when that switch's parent is
+   cancelled during the grace, the daemon dies, and an await after the SIGKILL
+   has nothing left to resolve it, because the release hook that would reap
+   the child runs only once this fiber has returned. A stop request landing
+   while an exec is timing out is that shape. The reap reads the switch again
+   after the grace and returns without waiting when it is off.
+
+   An Eio timeout around the call cannot turn that hang into a failure: it
+   cancels its body, and a body inside [Cancel.protect] is not interrupted
+   (measured in scratch: such a wait outlived a 2.0s [with_timeout] until an
+   8s alarm). The watchdog is a wall clock on another domain, and a scenario
+   that does not come back leaves its domain blocked until the process
+   exits. *)
+exception Operator_stop_during_the_reap_grace
+
+let operator_stop_into_grace_seconds = 0.5
+
+let watchdog_poll_interval_seconds = 0.05
+
+(* The budget, the grace the reap waits out before the SIGKILL, and one more
+   grace: the reap's own second phase is an await bounded by that same grace
+   (it is skipped on this path, where the switch is off), so a return later
+   than this is later than anything the mechanism itself waits for. The
+   watchdog needs a deadline because an Eio timeout cannot break a wait
+   under [Cancel.protect]; this is the only clock in the mechanism. *)
+let reap_return_bound_seconds =
+  grandchild_timeout_budget_seconds
+  +. (2.0 *. Process_eio.child_exit_grace_seconds)
+;;
+
+(* One grace longer than the watchdog bound: a child that exited on its own
+   inside the window would satisfy the timing for the wrong reason. *)
+let sigterm_ignoring_child_lifetime_seconds =
+  reap_return_bound_seconds +. Process_eio.child_exit_grace_seconds
+;;
+
+let outcome_within_seconds bound scenario =
+  let outcome = Atomic.make None in
+  let runner =
+    Domain.spawn (fun () ->
+      let result =
+        try Ok (with_process_runtime scenario) with
+        | exn -> Error exn
+      in
+      Atomic.set outcome (Some result))
+  in
+  let deadline = Unix.gettimeofday () +. bound in
+  let rec wait () =
+    match Atomic.get outcome with
+    | Some result ->
+      Domain.join runner;
+      `Came_back result
+    | None when Unix.gettimeofday () > deadline -> `Still_blocked
+    | None ->
+      Unix.sleepf watchdog_poll_interval_seconds;
+      wait ()
+  in
+  wait ()
+;;
+
+let describe_status = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+;;
+
+let parent_cancel_during_the_reap_grace ~clock =
+  let t0 = Eio.Time.now clock in
+  let how =
+    match
+      Eio.Switch.run (fun outer ->
+        Eio.Fiber.fork ~sw:outer (fun () ->
+          Eio.Time.sleep clock
+            (grandchild_timeout_budget_seconds +. operator_stop_into_grace_seconds);
+          Eio.Switch.fail outer Operator_stop_during_the_reap_grace);
+        Process_eio.run_argv_with_status_split
+          ~timeout_sec:grandchild_timeout_budget_seconds
+          [ "/bin/sh";
+            "-c";
+            Printf.sprintf "trap '' TERM; sleep %g"
+              sigterm_ignoring_child_lifetime_seconds ])
+    with
+    | status, _stdout, _stderr ->
+      Printf.sprintf "the call returned (%s)" (describe_status status)
+    | exception Operator_stop_during_the_reap_grace ->
+      "the outer switch re-raised the stop"
+  in
+  Eio.Time.now clock -. t0, how
+;;
+
+let test_parent_cancel_during_the_reap_grace_returns () =
+  match
+    outcome_within_seconds reap_return_bound_seconds
+      parent_cancel_during_the_reap_grace
+  with
+  | `Still_blocked ->
+    fail
+      (Printf.sprintf
+         "the call did not come back within %.1fs: a cancel during the reap grace hangs it"
+         reap_return_bound_seconds)
+  | `Came_back (Error exn) ->
+    fail (Printf.sprintf "the scenario raised: %s" (Printexc.to_string exn))
+  | `Came_back (Ok (elapsed, how)) ->
+    check bool
+      (Printf.sprintf "%s once the grace had run out (%.2fs)" how elapsed)
+      true
+      (elapsed >= Process_eio.child_exit_grace_seconds);
+    check bool
+      (Printf.sprintf "%s within the bound (%.2fs)" how elapsed)
+      true
+      (elapsed < reap_return_bound_seconds)
+;;
+
+let test_run_argv_with_stdin_held_open_handles_early_closed_pipe () =
+  with_runtime_reset @@ fun () ->
+  let stdin_content = String.make 65536 'x' in
+  let status, _stdout, stderr =
+    Process_eio.run_argv_with_stdin_held_open_and_status_split
+      ~stdin_content
+      [ "/bin/sh"; "-c"; "echo reader_died >&2; exit 2" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "exit status preserved on early reader exit" 2 code;
+  check bool "stderr captured from early-exiting child" true
+    (contains stderr "reader_died")
+;;
+
+let test_run_argv_with_stdin_held_open_preserves_open_pipe () =
+  with_runtime_reset @@ fun () ->
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_stdin_held_open_and_status_split
+      ~stdin_content:"hello_stream\n"
+      [ "/bin/sh"; "-c"; "read line; echo \"got:$line\"" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "exit status 0" 0 code;
+  check string "stderr empty" "" stderr;
+  check bool "stdout captured" true (contains stdout "got:hello_stream")
+;;
+
+let () =
+  run "Process_eio coverage"
+    [
+      ( "capture owner",
+        [ test_case "pipeline preserves streams and callbacks" `Quick
+            test_eio_pipeline_preserves_streams_and_callbacks ] );
+      ( "fallback cwd",
+        [ test_case "each execution path uses its requested directory" `Quick
+            test_fallback_cwd_applies_to_each_execution_path;
+          test_case "unavailable directory refuses before execution" `Quick
+            test_fallback_unavailable_cwd_refuses_before_execution;
+          test_case "bind fallback keeps initialized cwd and capability" `Quick
+            test_bind_fallback_keeps_initialized_cwd_and_capability;
+          test_case "bind failure after effect respects fallback policy" `Quick
+            test_bind_error_after_child_effect_respects_fallback_policy;
+          test_case "Eio-only stdin closes early without a replay" `Quick
+            test_eio_only_stdin_closed_early_does_not_replay;
+          test_case "uninitialized Eio-only stdin refuses before spawning" `Quick
+            test_uninitialized_eio_only_stdin_never_starts_child;
+          test_case "uninitialized Eio-only streaming refuses before spawning" `Quick
+            test_uninitialized_eio_only_streaming_never_starts_child ] );
+      ( "fallback",
+        [
+          test_case "retry-on-bind-eaddrinuse" `Quick
+            test_should_retry_unix_fallback_on_bind_error;
+          test_case "retry-on-cancelled-bind-eaddrinuse" `Quick
+            test_should_retry_unix_fallback_on_cancelled_bind_error;
+          test_case "argv-fallback-preserves-env" `Quick
+            test_run_argv_fallback_preserves_env;
+          test_case "argv-with-status-fallback-includes-stderr-on-failure"
+            `Quick
+            test_run_argv_with_status_fallback_includes_stderr_on_failure;
+          test_case "spawn-guard-wraps-foreground-run-argv" `Quick
+            test_spawn_guard_wraps_foreground_run_argv;
+          test_case "argv-with-stdin-fallback-preserves-input" `Quick
+            test_run_argv_with_stdin_fallback_preserves_input;
+          test_case "argv-fallback-surfaces-spawn-error" `Quick
+            test_run_argv_fallback_surfaces_spawn_error;
+          test_case "argv-with-status-fallback-surfaces-spawn-error" `Quick
+            test_run_argv_with_status_fallback_surfaces_spawn_error;
+          test_case "argv-with-status-split-or-refusal-names-missing-program"
+            `Quick
+            test_run_argv_with_status_split_or_refusal_names_missing_program;
+          test_case
+            "argv-with-status-split-or-refusal-names-missing-program-eio"
+            `Quick
+            test_run_argv_with_status_split_or_refusal_names_missing_program_eio;
+          test_case "argv-with-status-split-or-refusal-returns-status-when-it-ran"
+            `Quick
+            test_run_argv_with_status_split_or_refusal_returns_status_when_it_ran;
+          test_case "argv-with-status-split-or-refusal-carries-the-spawn-errno"
+            `Quick
+            test_or_refusal_carries_the_spawn_errno;
+          test_case "argv-with-status-split-or-refusal-carries-child-setup-text-eio"
+            `Quick
+            test_or_refusal_carries_the_native_spawn_errno;
+          test_case "argv-with-status-split-or-refusal-refuses-empty-argv-both-paths"
+            `Quick
+            test_or_refusal_refuses_empty_argv_on_both_paths;
+          test_case "argv-with-status-split-or-refusal-names-the-missing-cwd-eio"
+            `Quick
+            test_or_refusal_names_the_missing_cwd_eio;
+          test_case "argv-with-status-fallback-enforces-timeout" `Quick
+            test_run_argv_with_status_fallback_enforces_timeout;
+          test_case "fallback-normal-exit-cleans-descendant-preserves-sibling" `Quick
+            test_fallback_normal_exit_cleans_descendant_and_preserves_sibling;
+          test_case "fallback-timeout-cleans-closed-stdio-descendant" `Quick
+            test_fallback_timeout_cleans_descendant_with_closed_stdio;
+          test_case "fallback-owner-preserves-completed-exit-status" `Quick
+            test_fallback_owner_preserves_completed_exit_status;
+          test_case "fallback-owner-exception-cleanup" `Quick
+            test_fallback_owner_exception_cleanup;
+          test_case "argv-with-status-fallback-observes-timeout" `Quick
+            test_run_argv_with_status_fallback_observes_timeout;
+          test_case "timeout-log-keeps-subsecond-precision" `Quick
+            test_timeout_log_keeps_subsecond_precision;
+          test_case "timeout-returns-the-partial-stdout" `Quick
+            test_timeout_returns_the_partial_stdout;
+          test_case "timeout-without-output-stays-bare" `Quick
+            test_timeout_without_output_stays_bare;
+          test_case "init-exposes-complete-runtime" `Quick
+            test_init_exposes_complete_runtime;
+        ] );
+      ( "cancellation-propagation",
+        [
+          test_case "run_argv-propagates-cancelled" `Quick
+            test_run_argv_propagates_cancelled;
+          test_case "run_argv_with_status-propagates-cancelled" `Quick
+            test_run_argv_with_status_propagates_cancelled;
+          test_case "run_argv_with_stdin-propagates-cancelled" `Quick
+            test_run_argv_with_stdin_propagates_cancelled;
+          test_case "run_argv_with_stdin_and_status-propagates-cancelled" `Quick
+           test_run_argv_with_stdin_and_status_propagates_cancelled;
+           test_case "run_argv_with_status-cwd-override" `Quick
+             test_run_argv_with_status_cwd_override;
+           test_case "run_argv_with_status-includes-stderr-on-failure" `Quick
+             test_run_argv_with_status_includes_stderr_on_failure;
+           test_case "run_argv_with_status_split_streaming-invokes-callbacks" `Quick
+             test_run_argv_with_status_split_streaming_invokes_callbacks;
+           test_case
+             "run_argv_pipeline_with_status_split-timeout-preserves-stderr"
+             `Quick
+             test_run_argv_pipeline_streaming_timeout_preserves_stderr;
+           test_case
+             "run_argv_with_status_split_streaming-fallback-invokes-callbacks"
+             `Quick
+             test_run_argv_with_status_split_streaming_fallback_invokes_callbacks;
+           test_case
+             "run_argv_with_stdin_and_status_split-fallback-callback-exception-continues"
+             `Quick
+             test_run_argv_with_stdin_and_status_split_fallback_callback_exception_continues;
+           test_case
+             "run_argv_with_status_split_streaming-callback-exception-continues"
+             `Quick
+             test_run_argv_with_status_split_streaming_callback_exception_continues;
+           test_case
+             "run_argv_with_status_split_streaming-callback-cancelled-propagates"
+             `Quick
+             test_run_argv_with_status_split_streaming_callback_cancelled_propagates;
+           test_case
+             "run_argv_with_status_split_streaming-cancel-reaps-child"
+             `Quick
+             test_run_argv_with_status_split_streaming_cancel_reaps_child;
+           test_case "run_argv_with_status_split_streaming-multiple-chunks" `Quick
+             test_run_argv_with_status_split_streaming_multiple_chunks;
+           test_case "run_argv_with_status-rejects-invalid-timeout" `Quick
+             test_run_argv_with_status_rejects_invalid_timeout;
+           test_case "run_argv_pipeline-timeout-reaps-all-stages" `Quick
+             test_run_argv_pipeline_timeout_reaps_all_stages;
+           test_case "reset_for_testing-clears-runtime" `Quick
+             test_reset_for_testing_clears_runtime;
+           test_case "capture-bounds-oversized-stdout" `Quick
+             test_capture_bounds_oversized_stdout;
+           test_case "capture-leaves-small-stdout-untouched" `Quick
+             test_capture_leaves_small_stdout_untouched;
+           test_case "exit-reason-classifies-the-timeout-status" `Quick
+             test_exit_reason_classifies_the_timeout_status;
+            test_case "run_argv_with_stdin_held_open-handles-early-closed-pipe"
+              `Quick
+              test_run_argv_with_stdin_held_open_handles_early_closed_pipe;
+            test_case "run_argv_with_stdin_held_open-preserves-open-pipe"
+              `Quick
+              test_run_argv_with_stdin_held_open_preserves_open_pipe;
+         ] );
+      ( "cancellation-grace",
+        [
+          test_case "cancel-file-redirects-preserves-term-handler" `Quick
+            (cancel_closed_output_child ~redirected:true);
+          test_case "cancel-early-pipe-eof-preserves-term-handler" `Quick
+            (cancel_closed_output_child ~redirected:false);
+
+          test_case "cancel-waits-for-the-child-to-act-on-sigterm" `Quick
+            test_cancel_waits_for_the_child_to_act_on_sigterm;
+          test_case "cancel-grace-is-bounded-when-the-child-ignores-sigterm" `Quick
+            test_cancel_grace_is_waited_out_when_the_child_ignores_sigterm;
+        ] );
+      ( "timeout-grace",
+        [
+          test_case
+            "run_argv_with_status_split-timeout-with-a-grandchild-holding-stdout-returns-at-the-budget"
+            `Quick
+            test_timeout_with_a_grandchild_holding_stdout_returns_at_the_budget;
+          test_case
+            "run_argv_with_stdin_and_status_split-timeout-with-a-grandchild-holding-stdout-returns-at-the-budget"
+            `Quick
+            test_timeout_with_stdin_and_a_grandchild_holding_stdout_returns_at_the_budget;
+          test_case "parent-cancel-during-the-reap-grace-returns" `Quick
+            test_parent_cancel_during_the_reap_grace_returns;
+        ] );
+    ]

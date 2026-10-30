@@ -1,0 +1,12 @@
+{
+  "head": "bd414e75e63dc817d9e8aa2adab4fb06c8af7852",
+  "parent": "b249888c3f2bd740a6fd02477d57619c2f6de6c5",
+  "build_handle": 64406,
+  "build_exit": 0,
+  "test_exit": 0,
+  "logs": {
+    "tests.log": "14fa2fa2f78f4e1f9f4d7f21c82b15d63e11751229d2931cd03a11dd5d52f1a0",
+    "build.log": "ae1b83500cc3fa3cc75ef5a8d06a7eb725a200f6779a07a1e18b8e6ff7d9d9ca"
+  },
+  "tui_binary_sha256": "df8b5c09ca67d1ef912ff4f3bbe0436cd0fa1194b04e676699ba00e7bd2b9f47"
+}

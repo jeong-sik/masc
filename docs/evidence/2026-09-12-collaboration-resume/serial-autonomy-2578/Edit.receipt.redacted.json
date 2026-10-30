@@ -1,0 +1,126 @@
+{
+  "execution_id": "exec-1789213537223-0038",
+  "tool_use_id": "call_80c8b4da5a914449b2abf519",
+  "trace_id": "trace-1789042595401-00001",
+  "session_id": "trace-1789042595401-00001",
+  "turn": 688,
+  "keeper_turn_id": 392,
+  "task_id": "task-003",
+  "turn_kind": "autonomous",
+  "lane": "tool_optional",
+  "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+  "input": {
+    "file_path": "serial/story.md",
+    "new_string": "폐막 삼십 분 전. 은빛정류장 전시실의 불이 하나둘 어두워지기 시작했다.",
+    "old_string": "폐막三十 분 전. 은빛정류장 전시실의 불이 하나둘 어두워지기 시작했다."
+  },
+  "output": {
+    "_blob": {
+      "sha256": "8fd7e15a5ca3239a37ddece6a66dcec75e5c7ffd9fadc1392d97a5b44cf109ff",
+      "bytes": 1335,
+      "mime": "application/vnd.masc.tool-result-manifest+json",
+      "preview": ""
+    }
+  },
+  "success": true,
+  "duration_ms": 26.957988739013672,
+  "disposition": "completed",
+  "artifact_refs": [
+    {
+      "_blob": {
+        "sha256": "3a5e59215198927424829f40d9d30486fee5ed1128e9a486d24a68c59b2df91c",
+        "bytes": 10335,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    },
+    {
+      "_blob": {
+        "sha256": "64b4e4fbd644605c3f5a07d46c814f58b6fcd40a246dfff69d9ee53aad025c60",
+        "bytes": 10336,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    }
+  ],
+  "file_change_evidence": {
+    "kind": "edit",
+    "occurrence_count": 1,
+    "occurrences": [
+      {
+        "old_range": {
+          "start_line": 77,
+          "end_line": 77
+        },
+        "new_range": {
+          "start_line": 77,
+          "end_line": 77
+        }
+      }
+    ]
+  },
+  "sandbox_profile": "docker",
+  "network_mode": "none",
+  "blob_verification": [
+    {
+      "declared": {
+        "sha256": "3a5e59215198927424829f40d9d30486fee5ed1128e9a486d24a68c59b2df91c",
+        "bytes": 10335,
+        "mime": "application/octet-stream",
+        "preview": ""
+      },
+      "verified": {
+        "bytes": 10335,
+        "sha256": "3a5e59215198927424829f40d9d30486fee5ed1128e9a486d24a68c59b2df91c"
+      },
+      "store_relative_path": "tool_blobs/3a/3a5e59215198927424829f40d9d30486fee5ed1128e9a486d24a68c59b2df91c"
+    },
+    {
+      "declared": {
+        "sha256": "64b4e4fbd644605c3f5a07d46c814f58b6fcd40a246dfff69d9ee53aad025c60",
+        "bytes": 10336,
+        "mime": "application/octet-stream",
+        "preview": ""
+      },
+      "verified": {
+        "bytes": 10336,
+        "sha256": "64b4e4fbd644605c3f5a07d46c814f58b6fcd40a246dfff69d9ee53aad025c60"
+      },
+      "store_relative_path": "tool_blobs/64/64b4e4fbd644605c3f5a07d46c814f58b6fcd40a246dfff69d9ee53aad025c60"
+    }
+  ],
+  "exact_single_replacement_verified": true,
+  "raw_trace_events": [
+    {
+      "seq": 108,
+      "record_type": "hook_invoked",
+      "ts": 1789213537.195904,
+      "tool_use_id": "call_80c8b4da5a914449b2abf519",
+      "tool_turn": 688
+    },
+    {
+      "seq": 109,
+      "record_type": "tool_execution_started",
+      "ts": 1789213537.19619,
+      "tool_use_id": "call_80c8b4da5a914449b2abf519",
+      "tool_turn": 688,
+      "tool_name": "Edit"
+    },
+    {
+      "seq": 110,
+      "record_type": "hook_invoked",
+      "ts": 1789213537.339866,
+      "tool_use_id": "call_80c8b4da5a914449b2abf519",
+      "tool_turn": 688
+    },
+    {
+      "seq": 111,
+      "record_type": "tool_execution_finished",
+      "ts": 1789213537.340044,
+      "tool_use_id": "call_80c8b4da5a914449b2abf519",
+      "tool_turn": 688,
+      "tool_name": "Edit",
+      "tool_error": false
+    }
+  ]
+}

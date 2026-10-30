@@ -1,0 +1,76 @@
+{
+  "at": "2026-10-22T04:08:19.150409+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/dashboard/exact-lane-runs",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "generated_at": "2026-10-22T04:08:19Z",
+    "count": 4,
+    "total": 4,
+    "has_more": false,
+    "runs": [
+      {
+        "run_kind": "exact_output",
+        "run_id": "librarian-exact-314f762631692c041c16c2ebbef1d130",
+        "lane": "librarian_exact",
+        "subject_id": null,
+        "actor": "curator-source-1196",
+        "started_at": 1792642095.570046,
+        "status": "running"
+      },
+      {
+        "run_kind": "exact_output",
+        "run_id": "librarian-exact-9ec2899bac53685ba37adefb84358620",
+        "lane": "librarian_exact",
+        "subject_id": null,
+        "actor": "curator-source-1196",
+        "started_at": 1792642034.533796,
+        "status": "succeeded",
+        "completion_origin": "producer",
+        "elapsed_s": 61.02834391593933,
+        "selected_slot": "glm-coding.glm-5.3-flash",
+        "usage": {
+          "input_tokens": 11897,
+          "output_tokens": 2716,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0
+        }
+      },
+      {
+        "run_kind": "exact_output",
+        "run_id": "librarian-exact-19eea9f10ce100396d798b0495ac80cd",
+        "lane": "librarian_exact",
+        "subject_id": null,
+        "actor": "curator-source-1196",
+        "started_at": 1792641983.317425,
+        "status": "succeeded",
+        "completion_origin": "producer",
+        "elapsed_s": 51.2143189907074,
+        "selected_slot": "glm-coding.glm-5.3-flash",
+        "usage": {
+          "input_tokens": 2099,
+          "output_tokens": 1980,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0
+        }
+      },
+      {
+        "run_kind": "exact_output",
+        "run_id": "librarian-exact-5e8dc6ab1579b7586bdea66f6c01fe63",
+        "lane": "librarian_exact",
+        "subject_id": null,
+        "actor": "curator-source-1196",
+        "started_at": 1792641887.986424,
+        "status": "failed",
+        "completion_origin": "producer",
+        "elapsed_s": 0.5177490711212158,
+        "selected_slot": null,
+        "usage": null,
+        "code": "librarian_failed",
+        "detail": "exact execution failed outward_effect=started cause=execution_failed: slot=ollama_cloud.ollama-cloud-kimi-k3 call_id=35a6037270d16812acb73ba070535fa8 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={\"error\":{\"message\":\"you (yousleepwhen) have reached your weekly usage limit, add usage credits: https://ollama.com/settings (ref: f5739657-11ea-4428-9a2c-8329392a995c)\",\"type\":\"api_error\",\"param\":null,\"code\":null}} ; flow=[slot=ollama_cloud.ollama-cloud-kimi-k3 call_id=35a6037270d16812acb73ba070535fa8]"
+      }
+    ]
+  }
+}

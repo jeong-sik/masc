@@ -1,0 +1,62 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-lane-addons-workspace-isolation-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-workspace.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-lane-addons-workspace-isolation-20261004/dashboard
+
+ ❯ src/components/lane-addons-workspace.test.ts (2 tests | 2 failed) 119ms
+   × hides old-workspace actions after new-workspace read fails 88ms
+   × does not mix frozen A observations into B inventory 31ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-addons-workspace.test.ts > hides old-workspace actions after new-workspace read fails
+AssertionError: expected <button …(1)></button> to be null
+
+- Expected:
+null
+
++ Received:
+<button
+  class="border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"
+>
+  Observe
+</button>
+
+ ❯ src/components/lane-addons-workspace.test.ts:33:74
+     31|   workspace('/audit/B')
+     32|   await screen.findByText('B inventory failed', { exact: true })
+     33|   expect(screen.queryByRole('button', { name: 'Observe', exact: true }…
+       |                                                                          ^
+     34|   expect(screen.queryByRole('button', { name: 'Remove worker', exact: …
+     35|   expect(api.observeLaneAddon).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/lane-addons-workspace.test.ts > does not mix frozen A observations into B inventory
+AssertionError: expected [ SVGTitleElement{ …(37) }, …(2) ] to have a length of +0 but got 3
+
+- Expected
++ Received
+
+- 0
++ 3
+
+ ❯ src/components/lane-addons-workspace.test.ts:49:75
+     47|   workspace('/audit/B')
+     48|   await screen.findAllByText('B-worker', { exact: false })
+     49|   expect(screen.queryAllByText('Frozen A observation', { exact: false …
+       |                                                                           ^
+     50| })
+     51|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  18:39:59
+   Duration  2.07s (import 42%, transform 31%, environment 13%, setup 8%, tests 6%)
+
+ ELIFECYCLE  Test failed. See above for more details.

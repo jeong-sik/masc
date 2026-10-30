@@ -1,0 +1,9 @@
+Observed local selected command (not a reconstructed full stdout log):
+./node_modules/.bin/vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/schedule/queue-drain-status.test.ts src/components/lanes/lane-queue-model.test.ts src/components/tools/scheduled-automation-panel.test.ts
+
+ Test Files  3 passed (3)
+      Tests  97 passed (97)
+   Start at  18:08:18
+   Duration  2.96s
+
+The final subsequent lane-model delta updates two explanatory strings only. No additional behavior changed after this measurement. Initial new detailed-panel fixtures failed due to the test being placed outside its container setup, then due to omitted last_wake. Both fixtures were corrected to the actual panel contract; production rendering was not relaxed. Earlier 92-case PASS preceded the five explicit contradiction cases.

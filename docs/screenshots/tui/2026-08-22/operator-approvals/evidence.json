@@ -1,0 +1,109 @@
+{
+  "schema": "masc.tui.screenshot_evidence.v1",
+  "kind": "fixture_backed_actual_binary_tui_capture",
+  "captured_at_start": "2026-08-22T04:14:02Z",
+  "captured_at_end": "2026-08-22T04:14:08Z",
+  "pull_request": 29466,
+  "related_issues": [29418],
+  "evidence_asset_commit_sha": "5fb44971fb93edc92fd77f5973012442e90a28a0",
+  "worktree_clean_before_capture": true,
+  "source": {
+    "code_source_sha": "897b58aaf07745d4515f5e87c23872d25c129553",
+    "executable": "_build/default/bin/masc_tui.exe",
+    "executable_bytes": 26191616,
+    "executable_sha256": "eff98be54d03da842466c14f6cc55ed74695bf32cee17b36f55670fb992aa6a1",
+    "build_command": "scripts/dune-local.sh build bin/masc_tui.exe @test/runtest-test_tui_decode @test/runtest-test_tui_operator_projection @test/runtest-test_tui_http_ast @test/runtest-test_operator_control_actions",
+    "fixture_contract_module": "test/test_tui_operator_projection.ml",
+    "fixture_contract_functions": ["approval_item_json", "snapshot_json"],
+    "capture_fixture": "equivalent inline local HTTP responses"
+  },
+  "terminal": {
+    "kind": "real_pty_via_ttyd",
+    "columns": 99,
+    "rows": 30,
+    "term": "xterm-256color",
+    "ttyd_version": "1.7.7-unknown",
+    "renderer": "dom",
+    "xterm_version": null,
+    "xterm_version_note": "ttyd does not report its bundled xterm.js version separately",
+    "font_family": "Menlo",
+    "font_size_px": 14,
+    "playwright_version": "1.59.0",
+    "chromium_version": "147.0.7727.15",
+    "browser_viewport_width_px": 860,
+    "browser_viewport_height_px": 496,
+    "device_scale_factor": 1,
+    "screenshot_width_px": 834,
+    "screenshot_height_px": 480
+  },
+  "runtime": {
+    "TERM": "xterm-256color",
+    "MASC_TUI_SYNC": "off",
+    "refresh_seconds": 60.0,
+    "screenshot_selector": ".xterm-screen"
+  },
+  "fixtures": {
+    "initial_tokens": ["token-a", "token-b", "token-c"],
+    "selected_token": "token-b",
+    "replacement_tokens": ["token-new", "token-a", "token-b", "token-c"],
+    "selected_action": {
+      "action_type": "keeper_probe",
+      "target_type": "keeper",
+      "target_id": "beta",
+      "delegated_tool": "masc_keeper_status"
+    },
+    "control_payload": {
+      "reason_source_prefix": "U+009B",
+      "reason_suffix": "31mOWNED-29466"
+    }
+  },
+  "screenshots": [
+    {
+      "file": "01-approval-selection-after-prepend.png",
+      "captured_at": "2026-08-22T04:14:06Z",
+      "bytes": 40171,
+      "sha256": "96170a372b2a93746b6eae266fa31be5c651ea32818bd9a466cba4da52d3c27d",
+      "width_px": 834,
+      "height_px": 480,
+      "terminal_columns": 99,
+      "terminal_rows": 30,
+      "visible_fixture_port": 64227,
+      "input_before_screenshot": ["Tab", "Tab", "j", "r", "y"],
+      "input_hex_before_screenshot": ["09", "09", "6a", "72", "79"],
+      "fixture_transition": "select token-b; [A,B,C] -> [NEW,A,B,C]",
+      "assertion": "token-b remains selected and the first y arms keeper_probe on beta",
+      "operator_confirm_post_count": 0
+    },
+    {
+      "file": "02-approval-payload-c1-sanitized.png",
+      "captured_at": "2026-08-22T04:14:08Z",
+      "bytes": 30363,
+      "sha256": "59fdb5e50238e7ed50ba1f25e4cf09a02c631a212e9e5b68f7aad14e51836c68",
+      "width_px": 834,
+      "height_px": 480,
+      "terminal_columns": 99,
+      "terminal_rows": 30,
+      "visible_fixture_port": 64246,
+      "input_before_screenshot": ["Tab", "Tab"],
+      "input_hex_before_screenshot": ["09", "09"],
+      "fixture_transition": "serve one approval with a U+009B-prefixed payload reason",
+      "assertion": "terminal DOM contains literal \\u009B31mOWNED-29466 and no raw U+009B",
+      "terminal_dom_raw_u009b_present": false,
+      "terminal_dom_escaped_c1_observed": "\\u009B31mOWNED-29466"
+    }
+  ],
+  "verification": {
+    "tui_decode": "PASS 28/28",
+    "tui_operator_projection": "PASS 8/8",
+    "tui_http_ast": "PASS 10/10",
+    "operator_control_actions": "PASS 8/8",
+    "independent_review": "KEEP; P0/P1/P2 = 0/0/0"
+  },
+  "limits": [
+    "The HTTP responses are deterministic synthetic fixtures, not a production runtime.",
+    "The screenshots are rendering evidence; focused tests are the behavior proof.",
+    "The capture proves the terminal projection for this executable and viewport only.",
+    "No DOM text was replaced and no screenshot was edited, redacted, or AI-generated after capture.",
+    "Deployment and live API health are separate evidence axes."
+  ]
+}

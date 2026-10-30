@@ -1,0 +1,71 @@
+(** Fusion — 심판 모델의 LLM-facing JSON 출력 → {!Fusion_types.judge_synthesis}.
+
+    [ppx_deriving_yojson]의 variant 인코딩(예: [["Answer", ...]])은 LLM이 안정적으로
+    내기 어렵다. LLM이 내기 쉬운 JSON(named fields, [decision]은 [{"kind": ...}]
+    태그 객체)을 typed field 정의로 받는다. 같은 정의에서 출력 schema와 parser를
+    만들며, 제시된 배열 항목이 잘못되면 종합 전체를 Error로 거절한다.
+    [answer]와 [recommend]는 공백뿐인 결정 내용과 [resolved_answer]를 거절한다.
+    [insufficient]는 답을 지어내지 않고 빈 [resolved_answer]를 반환할 수 있다.
+
+    순수 함수 — agent_core 의존 없이 fusion_core에서 단위 테스트 가능.
+
+    기대 JSON 형태 (LLM 지시는 [config/prompts/fusion.judge.md] 의 [output] 슬롯):
+    {[
+      {
+        "consensus":        [ { "text": "...", "supporting_models": ["m1"] } ],
+        "contradictions":   [ { "topic": "...", "positions": [ {"model":"m1","stance":"..."} ],
+                                "evidence": ["..."] } ],
+        "partial_coverage": [ { "topic": "...", "addressed_by": ["m1"], "missing": "..." } ],
+        "unique_insights":  [ { "text": "...", "model": "m1" } ],
+        "blind_spots":      [ "..." ],
+        "resolved_answer":  "...",
+        "decision": { "kind": "answer", "answer": "..." }
+      }
+    ]}
+    [decision.kind]는 ["answer"] | ["recommend"] | ["insufficient"] 중 하나:
+    - answer:       [{ "kind": "answer", "answer": "..." }]
+    - recommend:    [{ "kind": "recommend", "action": "...", "rationale": "..." }]
+    - insufficient: [{ "kind": "insufficient", "missing": ["..."] }]
+
+    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
+
+(** Wire field names shared by the typed decoder, its derived output schema,
+    and prompt fixtures. *)
+val wire_field_consensus : string
+val wire_field_consensus_text : string
+val wire_field_supporting_models : string
+val wire_field_contradictions : string
+val wire_field_topic : string
+val wire_field_positions : string
+val wire_field_model : string
+val wire_field_stance : string
+val wire_field_evidence : string
+val wire_field_partial_coverage : string
+val wire_field_addressed_by : string
+val wire_field_missing : string
+val wire_field_unique_insights : string
+val wire_field_blind_spots : string
+val wire_field_resolved_answer : string
+val wire_field_decision : string
+val wire_field_decision_kind : string
+val wire_field_answer : string
+val wire_decision_answer : string
+val wire_decision_recommend : string
+val wire_decision_insufficient : string
+val wire_field_recommend_action : string
+val wire_field_recommend_rationale : string
+
+(** [of_string]이 쓰는 typed field 정의에서 파생된 JSON output schema. *)
+val output_schema : Yojson.Safe.t
+
+(** JSON 문자열 파싱 편의. ```json 코드펜스를 허용하고 벗긴 뒤 [of_json]. *)
+val of_string : string -> (Fusion_types.judge_synthesis, string) result
+
+type parse_failure = Invalid_json of string | Invalid_synthesis of string
+
+val of_string_detailed :
+  string -> (Fusion_types.judge_synthesis, parse_failure) result
+(** The same strict parser with a closed failure stage. MASC's actual judge
+    owner can preserve bounded original response evidence without recovering
+    the failure class from parser text. Fence removal is only for parsing;
+    the caller retains the original response bytes. *)

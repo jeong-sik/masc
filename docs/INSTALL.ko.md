@@ -1,0 +1,780 @@
+# Install, use and upgrade MASC
+
+[English](INSTALL.md)
+
+## 빠른 시작
+
+최신 릴리스의 설치기를 내려받은 뒤, 다운로드가 성공했을 때만 실행합니다.
+
+```bash
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh && bash /tmp/masc-install.sh
+```
+
+설치기는 workspace 위치를 묻습니다. 설치 후 설정 화면이 열리지 않으면 다음
+명령으로 모델 연결과 sandbox를 설정하세요. 아래 경로는 기본 설치 위치입니다.
+`--prefix`를 바꿨다면 그 경로의 `masc`를 실행하세요.
+
+```bash
+"$HOME/.local/bin/masc" setup
+```
+
+Claude Code와 Codex는 해당 CLI가 `PATH`에 있거나 공식 설치기가 두는 자리
+(`~/.local/bin`, Codex는 `CODEX_INSTALL_DIR`)에 있으면 목록에 나옵니다. 그래서
+설치기가 바꾼 PATH를 아직 반영하지 않은 터미널에서도 찾습니다.
+`masc runtime-client-path --client claude-code`가 setup과 런타임이 쓸 경로를
+보여 줍니다. 연결 검사가
+실패하면 고른 모델을 유지한 채 로그인 화면을 열 수 있습니다. sandbox 준비가
+필요하면 설치·시작 동작을 제안합니다. macOS에서는 공식 다운로드나 안내 페이지를
+열며, MASC가 업체 설치기의 서명이나 체크섬을 검증하는 것은 아닙니다. Linux에서는
+제안된 배포판 패키지 명령을 실행합니다.
+
+설치 중 셸 PATH 변경에 동의했다면 새 터미널에서 `masc`를 쓸 수 있습니다.
+변경을 건너뛰었거나 비대화형으로 설치했다면 설치 경로를 PATH에 직접 추가하세요.
+기본 경로는 `export PATH="$HOME/.local/bin:$PATH"`이며, `--prefix`를 바꿨다면
+그 디렉터리를 사용합니다.
+
+스크립트를 먼저 읽어보려면 이렇게 하세요.
+
+```bash
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh &&
+less /tmp/masc-install.sh && # q로 나갑니다
+bash /tmp/masc-install.sh
+```
+
+먼저 다운로드하면 스크립트를 읽어볼 수 있고, 다운로드 실패 시 불완전한
+설치기를 실행하지 않습니다.
+
+나머지는 참고 자료입니다. 무엇이 설치되는지, 모델을 어떻게 고르는지, sandbox가
+어떻게 다른지, 업그레이드와 삭제는 어떻게 하는지를 다룹니다. 태그와 자산 제공
+여부는 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서
+확인하세요. 다중 선택은 0.35.2부터 지원합니다.
+
+## 플랫폼과 준비물
+
+| OS / CPU | 릴리스 자산 suffix | 검증 환경 |
+|---|---|---|
+| Linux x86-64 | `linux-x64` | Ubuntu 24.04 runner + 새 Ubuntu 24.04 container |
+| Linux ARM64 | `linux-arm64` | Ubuntu 24.04 ARM runner + 새 Ubuntu 24.04 container |
+| macOS Apple Silicon | `macos-arm64` | macOS 14 ARM runner |
+| macOS Intel | `macos-x64` | macOS 15 Intel runner |
+
+이 표는 CI 대상입니다. 성공한 해당 릴리스의 `Release` 실행과 실제 자산을
+확인해야 설치 검증이 완료된 것입니다.
+
+Linux 바이너리는 Ubuntu 22.04 컨테이너에서 빌드하므로 **glibc 2.35 이상**이
+필요합니다. Ubuntu 22.04, Debian 12, RHEL 10 그리고 그 이후 배포판이 해당합니다.
+더 높은 버전을 요구하는 바이너리가 나오면 릴리스가 실패하므로, 이 기준은
+의도가 아니라 검사 대상입니다(`scripts/check-glibc-floor.sh`). glibc 기준과
+아래 공유 라이브러리 목록은 별개이며, 라이브러리는 배포판마다 따로 갖춰야
+합니다. RHEL 9는 glibc 2.34라서 이 기준에 못 미칩니다. Alpine을 비롯한 musl
+배포판과 위보다 오래된 macOS는 검증 대상이 아닙니다. Intel Mac은 Apple
+Container 기반 microVM을 제공하지 않으므로 Docker 또는 remote SSH를 선택합니다.
+Runner 이름은 [GitHub 공식 목록](https://github.com/actions/runner-images)을 따릅니다.
+
+설치 스크립트는 Bash, curl, tar, `sha256sum` 또는 `shasum`을 사용합니다.
+macOS는 Python과 실행 라이브러리를 함께 제공하므로 Homebrew나 별도 Python 설치가
+필요하지 않습니다. Linux x64와 ARM64도 검증된 Python을 함께 제공합니다.
+아래 시스템 라이브러리는 여전히 필요합니다.
+OCaml/opam/Dune, Node.js/pnpm은 **바이너리 설치에 필요하지 않습니다**.
+
+Ubuntu 24.04:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
+  libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+```
+
+Ubuntu 22.04와 Debian 12는 OpenSSL 패키지 이름이 `libssl3t64`가 아니라 `libssl3`입니다.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
+  libssl3 libzstd1 zlib1g libncurses6 libtinfo6
+```
+
+macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이상**이 필요합니다. 설치기가 해당 CPU의 Python과 실행 라이브러리를 검증해 릴리스 파일과 함께 설치합니다. Homebrew나 Xcode 명령줄 도구를 설치하지 않습니다.
+
+설정 화면에서 sandbox 서비스를 확인하고 빠진 준비물의 설치·시작 동작을 제안합니다.
+macOS에서는 공식 다운로드나 안내 페이지를 열며 MASC가 업체 설치기의 서명이나 체크섬을
+검증하는 것은 아닙니다. Linux에서는 제안된 패키지 명령을 실행합니다. 지원되는 Apple
+Silicon Mac에서는 Apple Container를, macOS와 Linux에서는 Docker를 선택할 수 있습니다.
+모델 연결에는 해당 제공자의 구독이나 API 사용 권한이 필요합니다. Claude Code와 Codex는
+연결 검사가 실패했을 때 모델 선택을 유지한 채 로그인 화면을 열 수 있습니다.
+
+시작에 실패하면 설치기가 표시하는 실행 파일 경로와 stderr 원문을 확인하세요. `SIGABRT` 같은 종료 신호만으로 누락 라이브러리라고 단정할 수는 없습니다. `--force`는 workspace 설정을 보존하면서 릴리스 파일을 다시 설치하며, 지원하지 않는 OS를 호환되게 만들지는 않습니다.
+
+### PDF 증거 검사
+
+MASC 호스트에 Poppler의 `pdftotext`와 `pdftoppm`이 있으면 Task·Goal 검증에서
+PDF 텍스트와 렌더링된 페이지를 읽을 수 있습니다. Poppler는 호스트 의존성이며
+portable 릴리스 파일에는 포함되지 않습니다.
+
+`masc setup`의 **Prepare imp’s workspace** 화면에서 **PDF document inspection**을
+선택하세요. 두 명령의 실행 가능 여부를 표시하고, 사용자가 선택하면 설치합니다.
+macOS에서는 기존 Homebrew의
+[`brew install poppler`](https://formulae.brew.sh/formula/poppler)를 사용하고,
+Debian·Ubuntu에서는 `sudo apt-get`으로
+[`poppler-utils`](https://packages.debian.org/stable/poppler-utils)를 설치합니다.
+다른 Linux 배포판은 해당 패키지 관리자로 직접 설치하세요. 기본 MASC 설치 과정은
+Homebrew나 PDF 도구를 자동으로 설치하지 않습니다.
+
+설정 화면 없이 같은 동작을 실행할 수도 있습니다.
+
+```bash
+masc prerequisite-actions pdf-tools                        # 도구와 설치 동작 확인
+masc prerequisite-actions pdf-tools --execute poppler_install
+```
+
+설치 후에는 두 명령을 `-v`로 실제 실행합니다. 결과는 현재 프로세스 환경의 가용성을
+나타내며, PDF 검사나 검증 통과를 뜻하지 않습니다. MASC를 서비스로 실행한다면 PDF
+검증을 요청하기 전에 서비스의 PATH에서도 두 명령을 찾을 수 있게 설정하세요.
+
+### 브라우저 도구 (geckodriver, Firefox)
+
+브라우저 레인은 portable 릴리스에 들어 있지 않은 호스트 프로그램 둘을 실행합니다.
+automation 레인이 서버와 함께 띄우는 geckodriver와, geckodriver와 attached-Firefox
+레인이 움직이는 Firefox입니다.
+
+```bash
+masc prerequisite-actions geckodriver                       # 상태와 동작 확인
+masc prerequisite-actions geckodriver --execute geckodriver_brew_install
+masc prerequisite-actions firefox
+masc prerequisite-actions firefox --execute firefox_brew_install
+```
+
+macOS에서는 기존 Homebrew의 [`geckodriver`](https://formulae.brew.sh/formula/geckodriver)
+formula와 [`firefox`](https://formulae.brew.sh/cask/firefox) cask를 사용합니다.
+Linux에서는 배포판마다 패키지 이름이 달라서 프로젝트의 다운로드·설치 안내 페이지를
+엽니다. 기본 MASC 설치 과정은 Homebrew나 이 프로그램들을 자동으로 설치하지 않습니다.
+`/Applications`에 `Firefox.app`이 이미 있으면 Homebrew가 Firefox cask 설치를
+거절합니다. 그때는 `firefox` 결과가 그 Firefox를 이미 보여 주므로 설치가 필요
+없습니다.
+
+결과는 현재 프로세스 환경에서 프로그램이 `--version`에 답하는지와 그 절대 경로를
+알려 줍니다. 프로그램은 PDF 검사와 같이 일부만 남긴 환경 변수로 실행합니다.
+버전을 출력하는 데 `DISPLAY` 같은 변수가 필요한 프로그램은 답하지 않는 것으로
+나옵니다. `runtime.toml`은 고치지 않습니다. `[browser.automation]`에 실행 파일을
+적는 일과 서버 재시작은 별도 단계입니다.
+
+## 설치
+
+위의 빠른 시작이 보통의 설치입니다. 묻는 과정 없이 workspace를 정하려면 이렇게
+하세요.
+
+```bash
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh &&
+bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
+```
+
+최신 릴리스가 아니라 특정 릴리스를 설치하려면 그 태그의 설치기를 받아 고정합니다.
+먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
+
+```bash
+TAG=v0.66.0
+curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
+  -o /tmp/masc-install.sh &&
+bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+태그의 설치기를 내려받기만 해서는 설치 버전이 고정되지 않습니다. 위처럼
+`--version "$TAG"`도 지정해야 합니다. 생략하면 설치기가 최신 릴리스를 찾습니다.
+예시는 게시된 v0.60.0을 고정하며, `main` 문서에는 그 릴리스에 없는 변경이 있을 수 있습니다.
+
+셸 PATH 변경에 동의한 경우 새 터미널에서 `masc`가 잡힙니다. 그 외에는 설치
+디렉터리를 PATH에 직접 추가하세요. 기본 경로라면
+`export PATH="$HOME/.local/bin:$PATH"`를 실행합니다. 이 명령에는 설치 옵션을 붙이지 않습니다.
+
+재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
+
+`--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
+`.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 설정 화면과 같은
+`$HOME/MASC`를 제안합니다. 현재 디렉터리에 기존 `.masc/config`가 있으면 그
+workspace를 제안합니다. 명시한 `--base-path`는 질문 없이 사용하며, 비대화형 또는
+`--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다.
+터미널에서 설치하면서 workspace 설정을 새로 만들 때, 그 workspace를 이후 `masc`가 찾는
+기본값으로 기록합니다. 기존 설정을 유지하는 재설치는 기록된 기본값을 건드리지 않습니다. 터미널
+없이 스크립트로 설치하면 기록하지 않으므로, 검증이나 CI 설치가 이 컴퓨터의 기본값을 바꾸지 않습니다. 설치 위치와
+작업 데이터 위치는 독립적입니다. `--version`을 지정하면 해당 버전의 자산을 설치하며, 설치기 수정은
+릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
+체크섬이 없거나 불일치하면 설치를 중단합니다.
+
+`--no-wizard`는 모델 선택을 건너뜁니다. 자동화에서는 `--provider <id>`로
+기존 공급자를 선택합니다. 대화형 마법사는 여러 연결과 모델을 함께 고른 뒤 imp의
+기본 연결과 대체 순서를 선택합니다. API 키 값은 저장하지 않고 환경변수 이름만 사용합니다.
+
+## 첫 설치 마법사
+
+**↑/↓로 이동하고 Space로 여러 항목을 선택한 뒤 Enter로 진행**합니다.
+하나를 고르는 화면에서는 Enter로 선택합니다. 글자를 치면 목록을 거르고, Esc로 거르기를
+지우고, Ctrl-C로 취소합니다. 커서 조작을 지원하지 않는 터미널은 번호를 표시하며,
+`1,3`처럼 여러 번호를 입력하거나 `q`로 취소합니다.
+
+모델 목록은 CLI 캐시, HTTP 서버, 기존 연결, 설치된 catalog에서 읽습니다.
+목록에 있는 모델도 저장 전에 실제 응답과 무해한 도구 호출을 통과해야 합니다.
+실패하면 재시도, 해당 연결 제외, 다시 선택, 나중에 설정 중에서 고릅니다.
+모델을 추가해도 기존 연결은 그대로 남습니다.
+
+| 실행 상황 | 동작 |
+|---|---|
+| 터미널에서 첫 설치 | workspace 설치 후 설정이 열리지 않으면 `masc setup` 실행. 여러 연결·모델 선택 후 실제 응답·도구 검사 |
+| 입력 파이프/자동화, 출처가 하나 | 해당 출처 선택; 연결 probe 결과 별도 표시 |
+| 입력 파이프/자동화, 출처가 없거나 여러 개 | 선택 보류; 강제 `--wizard`는 `--provider` 필요 |
+| `--provider <id>` | 기존 workspace에서도 지정 공급자 선택 |
+| `--no-wizard` | 모델 선택 생략; `--provider`와 함께 사용 불가 |
+| 기존 설정이 있는 일반 업그레이드 | 선택 보존; 다시 고르려면 `--wizard` |
+
+```bash
+bash /tmp/masc-install.sh --version "$TAG" \
+  --base-path "$HOME/masc-workspace" --wizard
+```
+
+`masc setup`은 imp를 준비하기 전에 선택한 모델을 다시 검사합니다.
+모델·도구 검사 통과와 Docker·Keeper sandbox 준비는 별도 단계로 표시합니다.
+자동화의 `MASC_INSTALL_NO_PING=1`은 공급자 연결 probe만 생략하며 모델 응답을
+검증한 것으로 처리하지 않습니다. `--sandbox`는 `--team`과 함께 사용하며
+기존 Keeper 설정을 일괄 변경하지 않습니다.
+
+## 기본 설치 내용
+
+| 위치 | 내용 / 용도 |
+|---|---|
+| `<prefix>/masc` | HTTP/MCP 서버, 설정·로그인·Keeper 관리 CLI. 터미널에서 실행하면 TUI 진입 |
+| `<prefix>/masc-tui` | Keeper, 채팅, 작업, 보드, 승인, 로그를 보는 터미널 UI |
+| `<prefix>/masc-browser-host` | Firefox 계열 native messaging 연결 실행 파일. 설치만으로 브라우저 등록되지는 않음 |
+| `<prefix>/masc-deployment-preflight-helper` | 실행 환경 사전점검 보조 바이너리 |
+| `<prefix>/masc-check-runtime-deployment-preflight` | 사전점검 실행 스크립트 |
+| `<prefix>/.masc-releases/<receipt-hash>/` | 서버와 같은 커밋의 대시보드, 서버 실행 파일, 검증 receipt |
+| `<base-path>/.masc/config/` | runtime 설정 및 기본 설정 seed. 운영 중 모델 카탈로그·도구·프롬프트는 내장 자산을 사용하며, `AGENT_CORE_MODEL_CATALOG`로 모델 카탈로그 전체를 명시적으로 교체할 수 있음(아래 참고) |
+| `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
+
+### 모델 카탈로그를 통째로 바꿀 때
+
+`AGENT_CORE_MODEL_CATALOG` 가 가리키는 파일은 내장 카탈로그를 **통째로** 대신합니다.
+일부만 덮는 게 아니라서, 내장 카탈로그에서 남는 것도 없고 `runtime.toml` 에서 채워 주는 것도 없습니다.
+
+부팅이 막히는 건 뒤쪽 때문입니다. 내장 카탈로그를 쓸 때는 서버가 `runtime.toml` 의 바인딩마다
+exact-output target 을 하나씩 만들어 줍니다. 교체 파일을 쓰면 하나도 안 만들어서,
+`[runtime.exact_output_lanes.*]` 가 부르는 슬롯이 아무것도 안 잡힙니다.
+그러면 필수 레인이 등록에 실패하고 서버는 `exact-output resolver-and-lane registry` 로 멈춥니다.
+
+그래서 교체 파일은 레인이 부르는 슬롯마다 `[[targets]]` 행을 자기 안에 적어야 합니다.
+소스 트리의 `packages/agent_core/models.toml` 에는 그 행이 없습니다 — provider 와 model 쪽만 담은 파일이라,
+그대로 복사해서 쓰면 교체 파일로는 모자랍니다.
+
+**설치된 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 내장 스킬(`browser-lanes` 포함)을 준비합니다.
+`imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
+설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
+Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
+설치하지 않습니다. 사용 가능한 실행 환경 탐지는 설치나 인증을 대신하지 않습니다.
+
+## 모델 연결 선택
+
+Codex 캐시가 없는 첫 설치에서는 설치된 CLI의 내장 모델 목록에서 context 한도를
+읽습니다. 인증이나 모델 호출은 하지 않으며, API catalog의 최대값을 Codex 한도로
+사용하지 않습니다. 실제 모델 사용 가능 여부는 저장 전 응답·도구 검사로 확인합니다.
+
+기존 API 공급자, Claude Code, Codex, 로컬 Ollama 모델을 목록에서 선택합니다.
+**Add another server URL**에서는 llama.cpp, vLLM, OpenAI-compatible 서버나
+다른 컴퓨터의 Ollama를 연결할 수 있습니다. 기존 Antigravity 연결도 표시되지만
+실제 검증 어댑터가 없는 런타임은 대화형 준비 검사를 통과할 수 없습니다.
+AWS Bedrock과 GCP/Vertex 연결은 추후 릴리스 대상(TODO)이며 현재 설치·검증 범위에
+포함되지 않습니다.
+
+컨텍스트 크기는 모델 메타데이터나 동일한 연결의 기존 설정에서 읽습니다.
+Ollama는 선택한 모델만 필요에 따라 로드하고 실제 설정·실행 중인 컨텍스트를
+사용합니다. 모델 구조상 최대치를 그대로 할당하지 않습니다. 단일 모델 llama.cpp는
+`/props`의 서버 설정값을 읽습니다. 한도를 알 수 없을 때만 다시 선택하거나
+문서에 명시된 서버 한도를 고급 입력으로 지정합니다. 도구 지원 여부 퀴즈는 없습니다.
+
+여러 모델을 함께 등록하고 기본 모델과 대체 순서를 고릅니다. 이 순서는 대화 레인에
+적용되며 내부 보조 판단 레인은 기본 모델을 사용합니다. 다른 Keeper의 명시적
+연결 지정은 유지합니다. 같은 연결을 다시 고르면 재사용하고 모델·연결 설정이
+달라지면 별도 연결로 보존합니다.
+
+같은 바이너리가 임시 설정을 검증하고 선택한 모델 모두의 응답·도구 호출을
+확인한 후 반영합니다. 검증 실패 시 기존 파일은 보존됩니다. 인증값은 shell이나
+CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를 설치하거나 로그인하지
+않습니다. **Configure later**로 미룰 수 있고 imp는 자동으로 시작하지 않습니다.
+
+## `imp`와 첫 대화
+
+`masc`를 실행하세요. `MASC_BASE_PATH` export는 필요 없습니다. 저장된 작업 공간이
+없으면 제안되는 `~/MASC` 디렉터리를 Enter로 선택하거나 다른 위치를 고르세요.
+디렉터리는 선택한 뒤에 만들어집니다. 명시적인 `--base-path`와 기존 환경 설정은
+저장된 기본값보다 우선합니다.
+
+이어지는 setup 여정에서 모델 연결과 샌드박스를 선택합니다. 모델을 여러 개 고르고
+대체 순서를 정할 수 있습니다. Claude Code·Codex는 연결 검사가 실패하면 공식
+로그인을 열고 같은 선택으로 다시 시도할 수 있습니다. 선택한 모델은 저장 전에
+실제 응답·도구 검사를 통과해야 합니다.
+
+샌드박스 화면은 서비스 상태, 누락된 준비물, 고급 선택지를 보여줍니다. 준비되지
+않은 서비스를 고르면 이 컴퓨터에서 쓸 수 있는 설치·시작 동작을 띄웁니다. 같은
+목록은 `masc prerequisite-actions <서비스>`로도 볼 수 있습니다. 서비스가
+실행 중이어도 이미지 준비와 imp 부팅은 별개입니다. 새 백엔드를 고를 때 빠른
+경로는 게스트 명령에 인터넷 접근을 허용합니다. 현재 설정된 백엔드를 선택하면
+그 네트워크 정책을 유지하고, 고급 설정에서 명시적으로 바꿀 수 있습니다. 게스트
+네트워킹을 끄면 샌드박스 명령에 영향이 있습니다. MASC 모델 연결과 WebFetch는
+서버 쪽의 별도 네트워크 제어를 사용합니다.
+
+Apple Container는 이미지를 따로 띄운 VM 안에서 빌드합니다. 이 VM은 설정에
+`[build] rosetta = false`가 없으면 Rosetta를 씁니다. Rosetta가 없는 맥에서는
+서비스가 응답해도 이미지 빌드가 매번 실패합니다. setup은 이 상태를 먼저 확인하고
+두 가지 중 하나를 고르게 합니다.
+
+- **Build images without Rosetta**: `~/.config/container/config.toml`(또는
+  `$XDG_CONFIG_HOME/container/config.toml`)의 `[build]`에 `rosetta = false`를 쓰고
+  Apple Container 서비스를 다시 시작합니다. 다시 시작하는 동안 Apple Container에서
+  돌던 컨테이너는 멈춥니다. 이후 빌드는 arm64 이미지만 만들고, MASC 샌드박스
+  이미지는 arm64입니다.
+- **Install Rosetta**: `softwareupdate --install-rosetta`를 실행합니다. Apple
+  라이선스가 나오고 비밀번호를 물을 수 있습니다.
+
+```bash
+masc setup                     # 연결·샌드박스 선택 다시 열기
+masc doctor                    # 읽기 전용 준비 상태 보고
+masc sandbox-catalog           # 호스트 샌드박스 선택지를 JSON으로 확인
+masc runtime-client-path --client claude-code   # 공식 클라이언트를 어디서 실행할지 JSON으로 확인
+```
+
+준비 단계는 선택한 백엔드를 사용하고, 선택을 저장하기 전에 검증한 뒤 이 작업
+공간의 서버를 시작하거나 연결합니다. 로컬 운영자 자격증명을 만들고 `imp`를
+시작합니다. 이후 `masc`만 실행하면(`imp`나 다른 Keeper에 저장된 대화 기록이 있을 때)
+모델 선택을 반복하지 않고 바로 저장된 대화를 엽니다. UI는 현재 서버·실행 상태를
+별도로 관찰합니다. 기록이 남아 있다고 해서 현재 계정이나 샌드박스를 쓸 수 있다는 뜻은 아닙니다.
+
+자동화에서는 작업 공간과 선택을 명시적으로 지정합니다. 예를 들어:
+
+```bash
+masc setup --base-path "$HOME/masc-workspace" --no-tui \
+  --sandbox-profile docker --network-mode inherit
+```
+
+setup 여정을 나가도 준비된 서버는 계속 실행됩니다. 다른 작업 공간이 포트를 쓰고
+있으면 `--port 8936`처럼 빈 포트를 지정하세요. 모델 선택은 현재 마법사 세션 안에서
+로그인·재시도를 거쳐도 유지됩니다. "Finish later"를 고르면 이미 저장된 설정은
+유지되며, 검사를 통과하지 못한 선택은 저장되지 않았습니다.
+
+TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세요.
+
+- “안녕. 대화가 연결됐는지 확인할 수 있게 답해줘.”
+- “Board에 첫 대화라는 글을 작성하고 글 id를 알려줘.”
+- “내 샌드박스 살펴보기라는 Task를 설명과 함께 만들고 id를 알려줘.”
+- “네 샌드박스 안에서 `pwd`와 `ls`를 실행하고 디렉터리 목록을 보여줘.”
+- “WebFetch로 지금 https://example.com 을 가져와서 HTTP 상태와 페이지 제목을 알려줘.”
+
+답변, 저장된 Board 글과 Task, 샌드박스·웹 도구의 성공 결과를 확인하세요.
+여기서는 대화와 기본 기능을 확인하며 Task 완료는 별도 절차입니다. Web fetch는
+검색 API 키가 필요 없고 web search는 별도 검색 프로바이더 설정이 필요합니다.
+어느 프로바이더가 빠졌는지는 `masc web-search-setup`으로 확인합니다.
+도구 승인을 기다리면 채팅이나 **Approvals**에서 해당 요청을 확인하세요.
+승인 대기나 HTTP 서버 응답만으로 모델 응답·도구 실행 성공을 판단하지 마세요.
+
+### 목소리로 `imp`와 대화하기 (macOS)
+
+setup 여정은 모델 연결과 샌드박스 사이에서 **3 · Give imp a voice (optional)** 를 묻습니다.
+말하기는 모든 Mac에 있는 `say`를 쓰므로 내려받을 것이 없습니다. 듣기는 따로 묻고,
+`whisper-cli`, 1.6GB 모델 파일, 마이크 녹음용 `sox`가 필요합니다. 여정이 셋 다 설치를
+안내합니다. **Stay text only**를 고르면 음성 설정은 바뀌지 않습니다.
+
+여정 밖에서는 `say`가 보여 주는 목록에서 목소리를 고르세요. 목록에 없는 이름은
+거부되고 아무것도 쓰지 않습니다.
+
+```bash
+masc voice-local-setup --base-path "$HOME/masc-workspace" --list-voices
+masc voice-local-setup --base-path "$HOME/masc-workspace" --voice "Yuna" \
+  --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+masc voice-verify --base-path "$HOME/masc-workspace" --agent imp --audio utterance.wav
+```
+
+`voice-verify`는 문장 하나를 합성하고 오디오 파일을 받아써서, 엔드포인트마다
+`answered`나 `refused`와 그 이유를 알려 줍니다.
+
+TUI에서 imp 채팅을 여세요. 음성 단축키는 채팅 도움말 시트(`…?`)에 표시됩니다.
+
+| 키 | 하는 일 |
+|---|---|
+| `Ctrl-Y` | 한 문장을 녹음해 입력에 넣음. 다시 누르면 멈추고 들은 내용을 남김 |
+| `Enter` | 입력을 보냄 |
+| `Ctrl-A` | 계속 듣기: 한 문장을 받으면 다음 녹음을 시작 |
+| `Esc` | 녹음 중인 내용을 버림 |
+
+`[voice.stt] send_on_stop = true`로 두면 녹음이 끝날 때 바로 보내서 Enter가 필요 없습니다.
+
+imp는 글로 답합니다. 음성 도구를 부를 때만 말하고, 그 클립은 채팅 줄에 붙습니다.
+대시보드는 직접 누르는 플레이어로 보여 주고, TUI는 재생하지 않습니다.
+`[voice.local_playback]`이 없으면 이 컴퓨터에서 소리가 나지 않습니다.
+
+단계마다 잰 결과는 [VOICE-RUNBOOK.md](VOICE-RUNBOOK.md)에 있습니다.
+
+MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 사용하고 [클라이언트 설정](../README.md#mcp-client-setup)을 따르세요.
+
+### `imp`에게 브라우저와 GitHub 로그인 주기
+
+setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
+브라우저, GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄과 ego lite 줄,
+z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
+모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
+
+- **브라우저.** `imp`가 자기 Firefox에서 웹 페이지를 읽습니다. geckodriver가 그 Firefox를 움직입니다.
+  geckodriver나 Firefox가 없으면 Homebrew 설치(Linux는 공식 다운로드 페이지)를 안내하고, 다시
+  확인한 뒤 `masc browser-lane-setup --mode automation`을 실행합니다. 이 명령이 geckodriver 경로를
+  `runtime.toml`에 쓰고, 이미 적어 둔 geckodriver 가 있으면 그대로 둡니다. 서버는 시작할 때 이 값을
+  읽으므로, 이 줄은 `masc setup`이 서버를 시작하기 전에 실행합니다. 이미 실행 중인 워크스페이스
+  서버를 그대로 쓰기로 했다면 그 서버는 재시작하기 전까지 예전 설정을 쓰고, 여정이 그렇게 알려 줍니다.
+- **GitHub.** 이 컴퓨터의 `gh`에 로그인이 있으면 계정, 토큰의 scope, 토큰이 있는 곳을 보여 주고
+  `imp`가 그 로그인을 써도 되는지 묻습니다. 그러면 `imp`는 그 계정 이름으로 push하고 PR을 엽니다.
+  토큰은 복사본이 넘어가므로, 이 컴퓨터에서 토큰을 폐기하거나 갱신하면 `imp`가 끊깁니다.
+  로그인이 없으면 `masc keeper-github login`이 일회용 코드를 보여 주고, 직접 승인하면 됩니다.
+  이 줄은 `masc setup`이 끝난 뒤에 실행합니다. 로그인에는 `imp`가 먼저 있어야 하기 때문입니다.
+- **웹 검색.** `masc web-search-setup --base-path <워크스페이스>` 를 실행합니다. 아무것도 쓰지
+  않고 공급자별 상태, 지금 호출이 쓸 검색 순서, 키가 없는 공급자에 export 해야 하는 변수를 보여
+  줍니다. 키를 만들거나 저장하지는 않습니다. 서버는 자기 환경에서 키를 읽습니다. `masc setup` 이
+  시작하는 서버는 이 터미널의 환경에서 `MASC_BASE_PATH`, `MASC_CONFIG_DIR` 만 워크스페이스 값으로
+  바꾼 환경을 받고, 이미 실행 중인 서버는 가진 환경을 그대로 씁니다. 서버를 시작하는 곳에 키를
+  export 한 뒤에 다시 실행하세요. `masc web-search-setup --searxng-url <주소>` 는 다른 실행입니다.
+  `runtime.toml` 의 `[web_search]` 에 씁니다. 바로 아래 두 줄에서 이 설정을 직접 고를 수 있습니다.
+- **z.ai 웹 검색(체크 안 됨).** 설치를 실행하는 곳에 `ZAI_API_KEY` 가 있을 때만 나옵니다. GLM
+  모델도 같은 변수를 읽습니다. 확정하면 `masc web-search-setup --provider zai` 가
+  `web_search.provider = "zai"` 를 씁니다. 거기에 다른 공급자가 적혀 있었다면 바뀝니다. 그러면 z.ai 를
+  먼저 시도하고 나머지 공급자는 평소 순서로 시도합니다. `web_search.provider_order` 가 있으면 그
+  순서가 우선이라 이 선택은 아무것도 바꾸지 않습니다. 검색할 때마다 그 GLM Coding Plan 의 검색
+  한도가 줄어듭니다. 키는 저장하지 않고 서버가 자기 환경에서 읽습니다.
+- **SearXNG(체크 안 됨).** 키가 필요 없습니다. SearXNG 는 다른 검색 엔진에서 결과를 가져오고, 그
+  엔진들이 서버의 요청을 거절할 수 있어서 결과가 적거나 없을 수 있습니다. 측정한 arm64 Mac
+  (2026-10-14)에서는 엔진 하나가 답했고 둘은 거절했습니다. 줄이 하는 일은 현재 상태에 따라 다릅니다.
+  - *컨테이너가 없고 Docker 가 응답할 때:* 버전을 고정한 이미지(디스크에서 약 380 MB)를 받고,
+    `masc-searxng` 컨테이너를 `--restart unless-stopped` 로 `127.0.0.1:8888` 에 띄웁니다. 설정은
+    `<워크스페이스>/.masc/searxng/` 아래에 쓰고, JSON 검색이 응답할 때까지 기다린 뒤
+    `web_search.searxng_url` 을 씁니다.
+  - *멈춘 `masc-searxng` 컨테이너가 있을 때:* `docker start` 만 합니다. 이미지를 받지 않고 아무것도
+    쓰지 않습니다. 그 뒤에 `web_search.searxng_url` 을 씁니다.
+  - *`http://127.0.0.1:8888` 에서 SearXNG 가 이미 응답할 때:* 주소만 씁니다. Docker 가 꺼져 있어도
+    나옵니다.
+
+  이 주소는 이미 적혀 있던 `web_search.searxng_url` 을 바꿉니다. 저장하면 SearXNG 는 키가 필요한
+  공급자보다 먼저 시도하고, `web_search.provider` 로 이름 붙인 공급자 뒤에 둡니다.
+  `web_search.provider_order` 가 있으면 둘 다 그 순서가 우선입니다. 그 밖의 경우에는 줄이 나오지
+  않습니다. Docker 가 꺼져 있고 응답하는 곳도 없을 때, 또는 `masc-searxng` 컨테이너가 실행 중인데
+  JSON 에 답하지 않거나, 일시정지, 재시작 중이거나, Docker 가 시작할 수 없는 상태일 때입니다.
+  컨테이너가 이런 상태면 다음에 실행할 Docker 명령(`docker logs`, `docker unpause`,
+  `docker inspect`)을 화면에 알려 줍니다.
+- **Firefox 연결 두 줄(체크 안 됨).** Firefox 를 찾았을 때만 `imp`가 로그인해서 쓸 Firefox 를
+  연결하는 줄이 둘 더 나옵니다. `masc browser-lane-setup` 이 여는 두 길입니다.
+  - *BiDi*: MASC 가 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다. 다시 불러올 것이
+    없고, `imp`가 일하는 사이트에 한 번 로그인하면 됩니다. 그 포트에는 인증이 없어서 이
+    컴퓨터의 어떤 프로그램이든 그 브라우저를 움직이고 쿠키를 읽을 수 있습니다.
+  - *부가기능*: 평소 쓰는 Firefox 에 MASC 부가기능으로 붙습니다. Firefox 를 다시 켜면 부가기능이
+    지워져서 그때마다 `about:debugging` 에서 다시 불러야 합니다.
+
+  둘 다 브라우저 줄처럼 `masc setup` 이 서버를 시작하기 전에 씁니다. 같이 골라도 되고, 그러면
+  연결을 지정하지 않은 요청은 BiDi Firefox 로 갑니다. Firefox 를 못 찾으면 둘 다 나오지 않습니다.
+  Zen 은 감지하지 않습니다. 직접 연결하려면
+  `masc browser-lane-setup --mode extension --manifest-dir <Zen의 native messaging 폴더>` 를
+  실행하세요. 그 폴더 위치는 이 문서가 확인하지 않았습니다.
+- **ego lite(체크 안 됨).** `ego-browser` 가 `PATH` 나 `~/.local/bin`(ego lite 첫 실행이 두는 곳)에서
+  답하면 [ego lite](https://lite.ego.app/) 를 연결하는 줄이 하나 더 나옵니다. 고르면
+  `masc browser-lane-setup --mode ego` 를 실행해서 `runtime.toml` 에 `[browser.live.ego]` 표를 씁니다.
+  그러면 browser Add-on 이 ego lite 에 `masc-keepers` 라는 작업 공간을 열고 live 연결로 붙입니다.
+  ego lite 에 사용자가 만든 같은 이름의 공간이 있으면 setup 이 거절하고, ego lite 가 공간 목록을
+  주지 않으면 아무것도 쓰지 않습니다. ego lite 를 켜 두세요. 거절되면 같은 실행의 다른 browser 줄도
+  쓰지 않습니다. `imp` 는
+  그 공간의 탭만 보고, 그 안에서 자기가 연 페이지에만 클릭하고 입력합니다. 그 페이지들은 ego lite
+  프로필의 쿠키를 같이 써서, `imp` 가 로그인된 사이트에서 사용자 이름으로 읽고 움직입니다.
+  Firefox 는 필요 없습니다. BiDi 줄과 같이 고르면 연결을 지정하지 않은 요청은 모호하다고
+  거절됩니다. 서버는 시작할 때 이 표를 읽어서, 이미 떠 있는 서버는 다시 시작해야 하고 여정이
+  그렇게 알려 줍니다.
+
+빠른 설치는 모든 줄과 줄마다 명령, 체크됐을 줄인지를 보여 주기만 합니다. 프로그램의 `--version`과
+`gh auth status`를 실행하고, Docker 에 `masc-searxng` 컨테이너를 묻고, 로컬 주소가 응답하는지
+확인합니다. 설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과 같이 합니다.
+
+```bash
+# 브라우저 줄: imp 전용 Firefox 의 geckodriver
+masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+# BiDi 줄: MASC 가 띄우는 전용 Firefox
+masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
+# 부가기능 줄: 평소 쓰는 Firefox
+masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
+# ego lite 줄: ego lite 안의 작업 공간
+masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
+# 웹 검색 줄: 어느 공급자에 키가 있는지(아무것도 쓰지 않음)
+masc web-search-setup --base-path "$HOME/masc-workspace"
+# z.ai 줄: 웹 검색에서 z.ai 를 먼저 시도(서버 환경의 ZAI_API_KEY 를 읽음)
+masc web-search-setup --provider zai --base-path "$HOME/masc-workspace"
+# SearXNG 줄: 컨테이너를 시작(멈춘 컨테이너는 searxng_docker_start_existing)하고 주소를 저장
+masc prerequisite-actions searxng --execute searxng_docker_run --base-path "$HOME/masc-workspace"
+masc web-search-setup --searxng-url http://127.0.0.1:8888 --base-path "$HOME/masc-workspace"
+# GitHub 줄, 로그인이 있을 때: gh 에 이미 있는 로그인을 imp 에게 줌(토큰은 표준 입력)
+gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
+# GitHub 줄, 로그인이 없을 때: 직접 승인하는 일회용 코드
+masc keeper-github login --keeper imp --base-path "$HOME/masc-workspace"
+```
+
+## 이미지와 Linux/microVM의 경계
+
+설치 스크립트는 sandbox 이미지를 다운로드하거나 빌드하지 않습니다.
+`masc sandbox-image`는 일반 이미지의 **recipe**를 내장하고 있으며 첫 빌드에는
+Debian base image와 패키지를 받는 네트워크가 필요합니다.
+
+| 실행 환경 | 준비 | 검증 범위 |
+|---|---|---|
+| Linux + Docker | 설정 화면의 동작으로든 직접이든 Docker daemon을 설치·시작하고 `masc sandbox-image` 실행 | 서버 설치와 이미지 생성/도구 실행은 별도 검사 |
+| Apple Silicon + Apple Container | macOS 26 및 `container` 설치, 아래 runtime 지정 빌드 | macOS 14 서버 CI 통과만으로 이 backend를 증명하지 않음 |
+| Linux + nerdctl/Kata | containerd/nerdctl/Kata와 가상화 지원, backend 명시, 해당 store에 이미지 생성 | 작업 볼륨을 멱등 생성·inspect 확인; 실제 Kata 검증 필요, policy networking 미지원 |
+| remote SSH | 원격 endpoint와 인증·shim·도구 준비 | 로컬 Docker/microVM 이미지와 독립적인 원격 환경 |
+
+```bash
+# Docker Keeper의 이미지 저장소
+masc sandbox-image
+
+# Apple Container Keeper의 별도 이미지 저장소
+masc sandbox-image --runtime apple_container
+
+# nerdctl/Kata Keeper의 별도 이미지 저장소
+masc sandbox-image --runtime nerdctl_kata
+```
+
+빌드마다 태그가 따로 붙습니다. 형식은 `masc-sandbox-base:<UTC 분>-<입력 해시>`이고
+명령이 태그를 출력합니다. 이미 저장소에 있는 태그는 다시 빌드하지 않고 거절하므로,
+한 태그 아래에서 빌드가 바뀌지 않습니다. Keeper 는 태그를 적지 않습니다.
+`sandbox_image` 에는 바이너리에 든 이미지 이름(`config/sandbox-images.toml` 의
+`base`, `ocaml`)을 적고, 이 호스트가 그 이름에 올린 빌드는
+`<base-path>/.masc/config/sandbox-image-builds.toml` 에 있습니다. `masc sandbox-image promote <이름> <태그>` 를 같은 `--runtime` 으로
+실행하면 다음 턴부터 그 이름이 이 빌드로 뜹니다. promote 는 그 저장소에 있는 태그만
+받고, 목록에는 이름과 저장소마다 태그 하나만 남습니다. 되돌리려면 저장소에 남아 있는
+예전 태그를 다시 promote 하면 됩니다. `masc setup` 은 설정하는 저장소에 `base` 빌드가
+목록에 없으면 빌드해서 목록에 올립니다. `base` 가 아닌 레시피는
+checkout 의 `sandbox-images/` 아래에 있고 `masc sandbox-image --recipe ocaml --source .`
+처럼 빌드합니다.
+
+Linux에서 실행 중인 서버와 같은 base path를 지정하여 Keeper를 생성합니다.
+먼저 위 Kata runtime·이미지와 서버의 모델 설정을 준비하고 admin credential로
+로그인해야 합니다. CLI가 선택한 backend를 서버에 전달하고 Keeper TOML에 저장합니다.
+
+```bash
+masc keeper-create --base-path "$HOME/masc-workspace" \
+  --agent local-admin --name linux-worker \
+  --sandbox-profile microvm --microvm-backend nerdctl_kata \
+  --network-mode none --activation-mode manual \
+  --instructions "지정된 작업을 수행하고 실행 결과와 증거를 보고한다."
+```
+
+`--microvm-backend`는 `microvm`에만 유효합니다. 생략하면 기존 backend를
+유지하며, 새 Linux Keeper에는 host 기본값이 없으므로 명시해야 합니다.
+`--edit`와 함께 지정하면 다른 선언 flag와 동일하게 충돌로 거부합니다.
+
+`--runtime`만 바꿔도 hypervisor나 daemon을 설치하지는 않습니다.
+`--runtime nerdctl_kata`로 직접 빌드하려면
+[nerdctl의 BuildKit 설정](https://github.com/containerd/nerdctl/blob/main/docs/build.md)도
+필요합니다. containerd와 Kata만 실행 중인 상태로는 이미지 빌드 준비가 끝난 것이 아닙니다.
+Docker store에 있는 이미지는 Apple Container/nerdctl store에 자동 복사되지 않습니다.
+Linux nerdctl/Kata는 해당 runtime의 영속 named volume을 생성하고 inspect로
+이름과 mountpoint를 확인합니다. guest를 다시 만들어도 같은 볼륨을 연결합니다.
+이 저장소는 호스트의 관리 디렉터리이며 Apple의 guest ext4 디스크와 다릅니다.
+`MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE`는 nerdctl에서 강제되지 않고 실제 사용 가능한
+공간은 호스트 filesystem을 따릅니다. 이 차이는 부팅 로그에 표시합니다.
+Apple에서 측정한 host descriptor 특성이 Linux에서도 같다고 보장하지 않습니다.
+`network_mode=none` 또는 `inherit`를 사용하며 Linux의 `policy`는 지원하지 않습니다.
+호스트의 `/etc/resolv.conf`에 루프백, 링크 로컬, 미지정 주소만 있는 상태에서 `network_mode=inherit`를 쓰면 게스트가 DNS를 해석할 수 없으므로, `runtime.toml`의 `[sandbox] microvm_dns`에 도달 가능한 업스트림 DNS 서버를 지정하세요.
+`scripts/smoke-nerdctl-kata-volume.sh`는 Kata의 볼륨·격리를 검사합니다.
+설치된 Keeper까지 검증하려면 `Kata volume smoke` workflow의 `release_run`에
+Linux x64 작업이 성공한 Release 실행 번호를 지정합니다. 이 경로는 해당 바이너리와
+shim을 설치하고 이미지 생성·Keeper 도구 실행·정본 checkpoint·게스트 재생성 후
+파일 보존을 확인합니다. 단순 볼륨 검사 통과만으로 설치된 Keeper 실행을 보장하지 않습니다.
+[Apple Container](https://github.com/apple/container#requirements)는 Apple Silicon과
+macOS 26을 지원하며, [Kata](https://github.com/kata-containers/kata-containers/blob/main/docs/installation.md)는
+호스트 가상화 조건을 확인해야 합니다. Microsandbox의 현재 MASC 연결은 필수 격리
+조건에 제약이 있어 검증된 대안으로 안내하지 않습니다.
+
+`base`에는 bash, CA certificates, curl, findutils, gh, git,
+less, procps, Python 3, ripgrep이 들어갑니다. **Node, pnpm, OCaml, 컴파일러,
+SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테스트가 목적이면
+필요한 toolchain이 있는 이미지를 빌드해 목록의 이름으로 promote 하고, 그 이름을
+Keeper의 `sandbox_image`로 지정합니다.
+저장소의 `sandbox-images/ocaml/Dockerfile`은 MASC 개발용 별도 이미지이며 일반 설치물이 아닙니다.
+
+## 초기 프롬프트·skills·Keeper
+
+기본 설치는 **자동 시작하지 않는 Keeper `imp` 1명**과 내장 스킬
+`browser-lanes`, `browser-live-follow-read`, `browser-navigate-read`,
+`diagram-in-chat`, `evidence-review`, `frontend-change`, `lane-addon-author`,
+`observe-act-verify`, `prior-art`, `root-cause-first`, `run-and-read`,
+`skill-authoring`, `verify-before-claiming-done`, `work-intake`를 준비합니다.
+모델과 샌드박스를 설정한 뒤 Keeper를 시작하세요.
+
+Task와 Goal 검증 에이전트도 `keeper_skill`을 통해 작업 공간에 공개된 지침 Skill을
+읽을 수 있습니다. 기본 제공되는 `evidence-review`는 계약, 실행 로그, 리비전을
+대조하는 절차를 안내합니다. Skill은 확인 절차를 제공할 뿐 새로운 도구나 실행 권한을
+부여하지 않으며, Skill이 없어도 기존 증거 조회로 검증을 진행합니다.
+
+프롬프트는 다음 세 곳만 구분하면 됩니다.
+
+| 바꾸려는 내용 | 편집 위치 |
+|---|---|
+| 이 세계가 돌아가는 방식 (모든 Keeper 공통) | 프롬프트 편집기의 `keeper` |
+| 이 세계가 귀하게 여기는 것 | 프롬프트 편집기의 `keeper.worldview` |
+| 특정 Keeper의 역할 | `.masc/config/keepers/<name>.toml`의 `instructions` |
+| 도구별 상세 절차 | 해당 스킬 |
+
+공통 본문은 [config/prompts/keeper.md](../config/prompts/keeper.md)입니다.
+프롬프트 편집기에서 `keeper`를 열어 고친 뒤 **오버라이드 적용**을 누르세요.
+오버라이드는 공통 행동 지침만 바꿉니다. 개별 Keeper의 역할 지침과 답변 언어는
+바꾸지 않습니다.
+
+`config/prompts/keeper.md`의 `###` 아래는 런타임이 필요한 때에 렌더링하는
+슬롯입니다. 이 슬롯 전체를 매 턴 넣지 않습니다.
+공통 행동 규칙은 본문에 한 번만 쓰고 역할 지침에는 담당 업무만 적으세요.
+
+설치된 `.masc/config/prompts/`는 배포본입니다. 서버가 시작할 때 내장본으로
+맞추므로 직접 편집하지 마세요. 편집기에서 저장한 내용은
+`.masc/prompt_overrides.json`에 보관되며, 이후 구성하는 프롬프트에 적용됩니다.
+업그레이드해도 유효한 override가 있으면 배포본보다 우선하므로, 새 기본 지침을
+쓰려면 override를 해제하세요.
+`keeper.identity` 같은 슬롯 override도 별도 항목입니다.
+
+프리셋은 여러 Keeper의
+역할·프롬프트·모델 배정을 함께 저장하고 되돌릴 때 사용하세요.
+`constitution.xml`은 개발 계약이며 Keeper의 시스템 프롬프트가 아닙니다.
+
+`browser-lanes`는 브라우저 연결·탐색·조작·검증 절차를 담습니다.
+브라우저나 확장, 인증을 설치하지는 않습니다. 기존 스킬 패키지는 덮어쓰지 않으므로
+업그레이드할 때 사용자 변경과 새 안내를 비교해 반영하세요.
+첫 브라우저 작업 전에 browser-lanes 스킬을 읽고, 요청한 작업을 지원하는 연결을
+확인하세요. 도구가 반환한 browserSelection의 lane과 live 연결의 clientId, tabId를
+이후 호출에 유지하세요. browser_binding_required 등 거절이 발생하면 해당 응답과
+원래 연결 영수증을 확인하고 스킬의 해당 복구 절차를 따르세요. 원인을 확인하지 않은
+동일 호출을 반복하지 마세요.
+Gecko scene 기능은 native host와 브라우저 확장 0.5.0 이상이 함께 있어야 합니다.
+쓰던 브라우저 확장은 따로 갱신하세요.
+
+`--team classic`을 선택하면 다음 네 Keeper TOML을 추가합니다.
+
+| Keeper | 개별 지침의 역할 |
+|---|---|
+| `tech_lead` | 요구사항 분해, 역할 분배, diff/증거 검토 |
+| `backend` | 백엔드 구현과 검증 |
+| `frontend` | 프론트엔드 구현과 검증 |
+| `qa` | 요구사항에 대한 테스트·검증 |
+
+이 preset은 `activation_mode="autonomous"`, `sandbox_profile="docker"`,
+`network_mode="inherit"`를 사용하고 fleet 기본 모델을 따릅니다. 역할 지침은
+컴파일러나 인증을 설치하지 않으며 개별 `skills` 패키지도 추가하지 않습니다.
+
+Skill 검색 경로는 `runtime.toml`의 `[[skills.sources]]`가 선언합니다.
+기본 순서는 `<base-path>/.masc/skills`, `<base-path>/.agents/skills`,
+`<user-home>/.masc/skills`, `<user-home>/.agents/skills`입니다.
+설치가 비어 있어도 **이미 존재하는 사용자 skill은 검색될 수 있습니다**.
+각 skill은 `<name>/SKILL.md`와 필요한 리소스로 구성하고, Keeper 생성 시
+`--skill` 또는 `--no-skills`로 선택을 명시합니다. Codex/Claude에 설치한 모든 skill이
+MASC에 자동 복사되는 것은 아닙니다.
+
+## 업그레이드와 복구
+
+릴리스에 첨부된 `install.sh`를 새로 받은 뒤, 기존과 같은 prefix/base path로 실행합니다.
+
+```bash
+bash /tmp/masc-install.sh --version "$TAG" \
+  --base-path "$HOME/masc-workspace" --force --no-wizard
+```
+
+기존 바이너리를 다른 릴리스로 교체하려면 `--force`가 필요합니다. 이 옵션이
+없으면 관리되는 릴리스 링크의 실행 파일이 요청한 릴리스의 체크섬과 일치할 때만
+계속합니다. 버전 문자열만으로는 파일의 신원을 확인할 수 없습니다.
+설치기와 번들 helper가 모두 덮어쓰기 방지 출판을 지원해야 합니다. 이 옵션이
+없는 이전 릴리스 helper는 출판 전에 중단됩니다. 대상 파일을 확인한 뒤
+`--force`로 교체를 명시할 수 있습니다.
+
+0.34.0부터 `--force`는 바이너리를 갱신하며 기존 runtime 설정, 모델 선택,
+Keeper 파일을 보존합니다. 필수 runtime 설정이 이미 있는 작업 공간에서는
+새 내장 skill만 보충하고, 기존 설정과 사용자가 삭제한 선택 설정 파일을 보존합니다.
+새 설치 또는 필수 설정이 없는 작업 공간에서는 기본 설정을 seed합니다. 설정 초기화가 목적일
+때만 `--reset-config`를 추가합니다. 이 옵션은 seeded 설정과 선택한 팀 파일을
+덮어쓰므로 사용자 설정을 별도 보관한 다음 사용하세요.
+
+서버/대시보드와 prefix의 companion 실행 파일은 설치 실패 시 이전 상태로 복구합니다.
+workspace의 guest shim과 명시적으로 초기화한 설정은 이 prefix transaction에
+포함되지 않습니다. 프로세스가 강제 종료되어 `.masc-install-transaction`이 남으면
+[배포 transaction 안내](design/installed-dashboard-distribution.md)를 확인합니다.
+
+일부 릴리스는 이전 상태 파일을 변환하는 대신 파일 계약을 바로 변경합니다.
+`CHANGELOG.md`의 `Fresh state required` 항목에 해당 파일이 나열됩니다. 새 서버를
+시작하기 전에 해당 파일을 삭제하거나 새 형식으로 다시 작성하세요. 그렇지 않으면
+부팅 로그에서 디코딩 불가 오류를 보고하고, 그 파일을 읽는 화면(Keeper 프로필,
+Goal 등)은 정리할 때까지 비어 있거나 오류를 반환합니다.
+
+실행 중인 서버는 설치만으로 교체되지 않습니다. 진행 중인 작업을 정리한 뒤 서버를
+재시작하고 `masc --version`, `/health?full=1`, 대시보드를 다시 확인합니다.
+이전 버전으로 돌아갈 때도 그 태그의 설치 스크립트를 사용합니다. 이전 버전의
+`--force`는 설정까지 초기화할 수 있으므로 설정 백업과 `--no-seed --no-wizard`가
+필요합니다. 이전 release directory는 실행 중인 프로세스와 복구를 위해 보존됩니다.
+
+## 릴리스 검증
+
+`Release` workflow는 네 native target을 모두 필수로 빌드하고, checksum을
+사용하는 `file://` 설치 → config seed → 설치된 서버 health → 대시보드 검증을
+수행합니다. Linux는 OCaml 개발 환경이 없는 새 Ubuntu container에서도 같은
+설치를 실행합니다. TUI와 browser host의 `--help`로 동적 로더가 동작하는지도 확인합니다.
+Linux native runner에서는 설치된 실행 파일로 새 Keeper를 생성하고 로컬 모델
+fixture가 요청한 도구를 실제 Docker에서 실행하는 첫 턴 검증도 수행합니다.
+ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable checkpoint가
+일치해야 통과합니다. 모델 품질·실제 API 인증·장시간 연속성은 이 fixture가
+증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
+
+`workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
+검증된 커밋에 `vX.Y.Z` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
+`SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
+각각 확인해야 합니다.
+
+## 제거
+
+실행 중인 MASC 서버와 TUI를 종료한 뒤, 릴리스에서 받은 최신 설치기를 사용합니다.
+기본 제거는 프로그램과 대시보드만 삭제하며, 설정·Keeper·기록과 Homebrew 의존성은 보존합니다.
+
+```bash
+bash /tmp/masc-install.sh --uninstall --dry-run
+bash /tmp/masc-install.sh --uninstall
+```
+
+설치할 때 `--prefix`를 지정했다면 제거할 때도 같은 값을 지정하세요.
+제거는 네트워크, Python, Homebrew 없이 실행되며 prefix 디렉터리나 다른 파일은 지우지 않습니다.
+중단된 설치 transaction이 남아 있으면 이를 먼저 복구하라는 오류를 냅니다.
+
+데이터도 제거하려면 **실제 설치했던 workspace 경로**를 명시해야 합니다.
+아래 예시는 그 workspace 아래 `.masc`를 삭제합니다. 제안된 workspace를 그대로
+골랐다면 `--base-path "$HOME/MASC"`입니다. `.masc` 디렉터리 자체를 base path로 넣지 마세요.
+
+```bash
+bash /tmp/masc-install.sh --uninstall --purge-data \
+  --base-path "$HOME/masc-workspace" --dry-run
+# 삭제 대상 확인 후 --dry-run 없이 실행
+```
+
+다른 경로를 가리키는 `.masc` 또는 배포 디렉터리 symlink는 링크 자체만 삭제합니다.
+
+### 기존 workspace의 파일을 읽을 수 없는 경우
+
+`masc setup`은 workspace 초기화, Docker 준비, 로그인, 서버 실행 전에 기존
+Keeper 설정과 Goal 상태를 현재 스키마로 읽을 수 있는지 확인합니다. 읽을 수
+없는 파일은 실제 경로와 파서 오류를 표시하고 기존 파일을 수정하지 않은 채
+중단합니다. 구버전 파일을 보존했다는 사실이 새 버전과의 호환성을 뜻하지는
+않습니다.
+
+다음 중 하나를 선택하세요.
+
+- 별도로 시작하려면 사용하지 않는 디렉터리를 골라
+  앞에서 받은 검증된 installer로
+  `bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-new-workspace" --wizard`를
+  실행해 runtime을 선택합니다. 이어서
+  `masc setup --base-path "$HOME/masc-new-workspace"`를 실행합니다. 원래 workspace는 그대로 남습니다.
+- 원래 workspace를 검토하려면 setup을 중단하고 표시된 파일과
+  `CHANGELOG.md`의 `Fresh state required` 항목을 확인합니다. 기존 로그는
+  원래 workspace의 `.masc/logs`에 있습니다. 사용자가 의도적으로 파일을
+  수정한 뒤에만 같은 workspace에서 setup을 다시 실행하세요.
+
+Setup은 예전 Goal 파일을 삭제하거나 복구 사본을 덮어쓰지 않고, Keeper 설정을
+자동 변환하지도 않습니다. 중단한 workspace가 준비됐다고 표시하지 않습니다.

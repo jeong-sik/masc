@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-21T17:23:03Z",
+  "paid_count": 1,
+  "original_request_id": "eb1b31232bf66ae2d1e677472024cfa6",
+  "original_verification_run_id": "01a15f73-38a3-7000-8e6d-41546e05b642",
+  "ledger_byte_identical_to_settled_off": true,
+  "ledger_sha256": "f3d140b25a2c27fe62d5bc8add9c20563e34cd82eb8e41fb34be25e04651b5f9",
+  "candle_run_ids": [
+    "candle-appraisal-89be81f79845ae8e2845c7cff3fe53ce9ffc3965c0d71e55f7ac74fdfc8e2d76",
+    "candle-appraisal-badde092aec5ae622529da3e335cc7bcfcd2d7c3fc19f8b18bfa9fdba2ffc92a",
+    "candle-appraisal-ff3969efdda160ca2e146b76e21def699d46df7335a19d8472d920b8abde6d6e"
+  ],
+  "candle_run_count": 3,
+  "all_three_succeeded": true
+}

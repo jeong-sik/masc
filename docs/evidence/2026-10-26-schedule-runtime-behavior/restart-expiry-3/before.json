@@ -1,0 +1,151 @@
+{
+  "accepted": {
+    "schedule_instance_id": "01a17836-0334-7000-be3d-f847f122f3aa",
+    "schedule_id": "audit-retained-expiring",
+    "requested_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "requested_at": 1793018168.11566,
+    "due_at": 1793018169.11566,
+    "expires_at": 1793018198.112855,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-restart-a",
+        "message": "Retain this accepted input after definition expiry."
+      }
+    },
+    "status": "scheduled",
+    "source": "operator_request",
+    "recurrence": {
+      "kind": "interval",
+      "interval_sec": 3600
+    },
+    "cancellation": null,
+    "due_at_iso": "2026-10-26T12:36:09Z",
+    "next_due_at": 1793018169.11566,
+    "next_due_at_iso": "2026-10-26T12:36:09Z",
+    "requested_at_iso": "2026-10-26T12:36:08Z",
+    "recurrence_kind": "interval",
+    "recurrence_summary": "every 3600s",
+    "payload_digest": "83f74d384c883c9c151412674861b10afd90532455be730593589f2323630efc",
+    "payload_kind": "masc.keeper_wake",
+    "payload_support": "supported",
+    "payload_dispatch_tool": "masc.keeper_wake",
+    "payload_target": "keeper:audit-restart-a",
+    "payload_summary": "Retain this accepted input after definition expiry.",
+    "last_wake": null
+  },
+  "never": {
+    "schedule_instance_id": "01a17836-0b26-7000-8b0d-7307adcd51df",
+    "schedule_id": "audit-expire-before-acceptance",
+    "requested_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "requested_at": 1793018170.15033,
+    "due_at": 1793018190.15033,
+    "expires_at": 1793018195.1471171,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-restart-a",
+        "message": "Must expire while the scheduler is down."
+      }
+    },
+    "status": "scheduled",
+    "source": "operator_request",
+    "recurrence": {
+      "kind": "one_shot"
+    },
+    "cancellation": null,
+    "due_at_iso": "2026-10-26T12:36:30Z",
+    "next_due_at": 1793018190.15033,
+    "next_due_at_iso": "2026-10-26T12:36:30Z",
+    "requested_at_iso": "2026-10-26T12:36:10Z",
+    "recurrence_kind": "one_shot",
+    "recurrence_summary": "one_shot",
+    "payload_digest": "e8686ac34b41b1d3c9cf18d0fe3186a685062a0a1053a8a9088c092742012807",
+    "payload_kind": "masc.keeper_wake",
+    "payload_support": "supported",
+    "payload_dispatch_tool": "masc.keeper_wake",
+    "payload_target": "keeper:audit-restart-a",
+    "payload_summary": "Must expire while the scheduler is down.",
+    "last_wake": null
+  },
+  "missed": {
+    "schedule_instance_id": "01a17836-0b36-7000-9b34-963dd22b1164",
+    "schedule_id": "audit-missed-interval",
+    "requested_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-admin",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "requested_at": 1793018170.166463,
+    "due_at": 1793018190.166463,
+    "expires_at": null,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-restart-a",
+        "message": "Miss multiple interval due times while scheduler is down."
+      }
+    },
+    "status": "scheduled",
+    "source": "operator_request",
+    "recurrence": {
+      "kind": "interval",
+      "interval_sec": 2
+    },
+    "cancellation": null,
+    "due_at_iso": "2026-10-26T12:36:30Z",
+    "next_due_at": 1793018190.166463,
+    "next_due_at_iso": "2026-10-26T12:36:30Z",
+    "requested_at_iso": "2026-10-26T12:36:10Z",
+    "recurrence_kind": "interval",
+    "recurrence_summary": "every 2s",
+    "payload_digest": "4ee261db4f0f6ff179bd3f0eb8e15cf32b63085471d1ff86c0e2f4d059854d40",
+    "payload_kind": "masc.keeper_wake",
+    "payload_support": "supported",
+    "payload_dispatch_tool": "masc.keeper_wake",
+    "payload_target": "keeper:audit-restart-a",
+    "payload_summary": "Miss multiple interval due times while scheduler is down.",
+    "last_wake": null
+  },
+  "pending": {
+    "queue_index": 0,
+    "post_id": "a25840c772c6bbb55d706014489562c41dd996483df28147af1b3b9424df6d17",
+    "source_ref": "33863933cdec5c2afcbf76f73732215e99db53a090475b9dd271ef53f074bfc7",
+    "source_incarnation": "0",
+    "urgency": "normal",
+    "arrived_at_unix": 1793018169.986868,
+    "payload_kind": "schedule_due"
+  }
+}

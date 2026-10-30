@@ -1,0 +1,42 @@
+{
+  "keeper-model-requests.json.gz": {
+    "original_name": "keeper-model-requests.json",
+    "uncompressed_bytes": 1203614,
+    "uncompressed_sha256": "e796b10fd1ce90a85b24c23a477f4f7f435e1c9c0e995c99b251c5f5d09be3a0"
+  },
+  "keeper-checkpoint.json.gz": {
+    "original_name": "keeper-checkpoint.json",
+    "uncompressed_bytes": 142386,
+    "uncompressed_sha256": "bc8a1a44401c55f0eaada9c1146ba62ee3ff6cf3efd6d3c94b0626461dae752c"
+  },
+  "keeper-checkpoint-after-restart.json.gz": {
+    "original_name": "keeper-checkpoint-after-restart.json",
+    "uncompressed_bytes": 146867,
+    "uncompressed_sha256": "4d56bf54195b166362e7cbdfcfa8191d229d75e607075d68bee2b4083fb22e06"
+  },
+  "keeper-tool-ledger.json.gz": {
+    "original_name": "keeper-tool-ledger.json",
+    "uncompressed_bytes": 82471,
+    "uncompressed_sha256": "93483937d34e0e0aec54ca535f4e632b92f9c8061a7d475bc5174bb6f5530531"
+  },
+  "keeper-health.json.gz": {
+    "original_name": "keeper-health.json",
+    "uncompressed_bytes": 34987,
+    "uncompressed_sha256": "e50d83ac01ed14bc5ab8cbe948abf00de0124013f6c93bef4849b5363f9ef500"
+  },
+  "keeper-health-after-restart.json.gz": {
+    "original_name": "keeper-health-after-restart.json",
+    "uncompressed_bytes": 23022,
+    "uncompressed_sha256": "41838001a059226fc9b1e347409b973bd0c4616bafa03c2b6c627d3d3fcc2e4a"
+  },
+  "keeper-server-log.txt.gz": {
+    "original_name": "keeper-server-log.txt",
+    "uncompressed_bytes": 57392,
+    "uncompressed_sha256": "899859201dc6dee59b180c728a79fbfda90a9c6449aa5cd682053007d631c774"
+  },
+  "keeper-chat-stream.txt.gz": {
+    "original_name": "keeper-chat-stream.txt",
+    "uncompressed_bytes": 30282,
+    "uncompressed_sha256": "bca55d9102d886b4484118247df65acd0984bc4b01bff144650e845e684c2809"
+  }
+}

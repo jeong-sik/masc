@@ -1,0 +1,93 @@
+{
+  "scope": "OCaml parsing and Python AST only",
+  "checks": [
+    {
+      "path": "bin/masc_tui.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.mli",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.mli",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_installer.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_lane_installer.mli",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_package_browser.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_package_browser.mli",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_render.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "docs/evidence/2026-10-05-tui-package-discovery/check-discovery.py",
+      "python_ast": true
+    },
+    {
+      "path": "lib/lane_addon/lane_addon_catalog.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/lane_addon/lane_addon_catalog.mli",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_lane_addons.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_lane_addon_catalog.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_lane_addons.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_lane_operator_pty.py",
+      "python_ast": true
+    },
+    {
+      "path": "test/test_tui_package_browser.ml",
+      "exit": 0,
+      "stderr": ""
+    }
+  ]
+}

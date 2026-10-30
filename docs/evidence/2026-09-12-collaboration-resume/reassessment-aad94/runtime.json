@@ -1,0 +1,28 @@
+{
+  "observed_at": "2026-09-12T14:50:24.958887+00:00",
+  "source_response_sha256": "d3b47a4ffe7a44c1ef4ce192ecf037a886d46abc4de8d4efa015b437c1933a05",
+  "pid": 42175,
+  "status": "ok",
+  "build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "aad94bbf3fb90a4600496bf56d7590f02ff385ad",
+    "commit_source": "embedded",
+    "binary_commit": "aad94bbf3fb90a4600496bf56d7590f02ff385ad",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "8942a20752f9312b31c0d0be18d29918a6f8e810839492b960cd833cac231a74",
+    "binary_commit_unix_ts": 1789221421.0,
+    "binary_commit_age_seconds": 2989,
+    "executable_path": "/private/tmp/masc-aad94-installed-candidate-20260912/.masc-releases/ba550fc39f44fce722fc463cecee1ba9554c5af0bc10b16ff8139b1c7b060e75/masc",
+    "executable_dir": "/private/tmp/masc-aad94-installed-candidate-20260912/.masc-releases/ba550fc39f44fce722fc463cecee1ba9554c5af0bc10b16ff8139b1c7b060e75",
+    "runtime_instance_id": "01a0960c-5657-7000-86d9-4a5886faf24e",
+    "started_at": "2026-09-12T14:36:26Z",
+    "uptime_seconds": 624
+  },
+  "overall_status": "ok",
+  "overall_status_reasons": [],
+  "operator_action_required": false,
+  "operator_action_reasons": [],
+  "keeper_config_error_count": 0
+}

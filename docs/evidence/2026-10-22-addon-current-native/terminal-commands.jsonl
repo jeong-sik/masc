@@ -1,0 +1,30 @@
+{"at": 1792598162.359532, "capture": "01-initial", "show": true}
+{"at": 1792598172.312974, "keys": ":addons\r", "settle_ms": 700, "capture": "02-addon-overview", "show": true}
+{"at": 1792598181.737369, "keys": "A\u0015slice {}\r", "settle_ms": 500, "capture": "03-global-slice-empty", "show": true}
+{"at": 1792598192.361408, "keys": "\r", "settle_ms": 400, "capture": "04-installation-off", "show": true}
+{"at": 1792598224.289931, "keys": "r", "settle_ms": 500, "capture": "05-installation-on-pending", "show": false}
+{"at": 1792598233.7327812, "keys": "\u001br\r", "settle_ms": 400, "capture": "06-installation-on-ready", "show": true}
+{"at": 1792598243.685744, "keys": "j\r", "settle_ms": 450, "capture": "07-first-worker-detail", "show": true}
+{"at": 1792598256.738417, "keys": "\r", "settle_ms": 600, "capture": "08-first-worker-detail", "show": true}
+{"at": 1792598265.3113642, "keys": "4", "settle_ms": 250, "capture": "09-original-record", "show": true}
+{"at": 1792598274.299692, "keys": " ", "settle_ms": 200, "capture": "10-record-selected", "show": false}
+{"at": 1792598286.197403, "keys": "r", "settle_ms": 500, "capture": "11-retained-refreshed", "show": true}
+{"at": 1792598299.020424, "keys": "e", "settle_ms": 200, "capture": "12-preserve-retained-evidence", "show": true}
+{"at": 1792598308.98735, "keys": "\r", "settle_ms": 600, "capture": "13-retained-real-receipt", "show": true}
+{"at": 1792598322.431403, "keys": "r", "settle_ms": 550, "capture": "14-receipt-and-row-after-refresh", "show": true}
+{"at": 1792598341.87034, "keys": "r", "settle_ms": 650, "capture": "15-retained-slice-failed", "show": true}
+{"at": 1792598357.149327, "keys": "A\u0015slice {\"run_id\":\"different-run\"}\r", "settle_ms": 300, "capture": "16-cross-run-refused", "show": false}
+{"at": 1792598370.236618, "keys": "r", "settle_ms": 450, "capture": "17-original-owner-after-reconnect", "show": true}
+{"at": 1792598379.72658, "keys": "\u001b", "settle_ms": 150, "show": false}
+{"at": 1792598397.394933, "keys": "r", "settle_ms": 550, "capture": "18-reconnected-original-detail-recovered", "show": false}
+{"at": 1792598511.304976, "keys": "\u001b", "settle_ms": 200, "capture": "19-current-after-reconnect", "show": true}
+{"at": 1792598527.423018, "keys": "j", "settle_ms": 150, "show": false}
+{"at": 1792598536.841724, "keys": "\r", "settle_ms": 400, "capture": "20-new-worker-second-input", "show": true}
+{"at": 1792598641.280406, "keys": "d", "settle_ms": 500, "capture": "21-remove-toml-worker-confirm", "show": true}
+{"at": 1792598663.23718, "capture": "22-remove-toml-worker-result", "settle_ms": 300, "show": true}
+{"at": 1792598708.478316, "keys": "r", "settle_ms": 300, "capture": "23-original-detail-after-reinstall", "show": false}
+{"at": 1792598779.505464, "keys": "\u001b", "settle_ms": 100, "show": false}
+{"at": 1792598788.846092, "keys": "j", "settle_ms": 100, "show": false}
+{"at": 1792598808.773172, "keys": "\r", "settle_ms": 400, "capture": "24-reinstalled-worker-third-input", "show": false}
+{"at": 1792598834.2963, "keys": "r", "settle_ms": 500, "capture": "25-final-retained-history", "show": false}
+{"at": 1792598846.091915, "stop": true}

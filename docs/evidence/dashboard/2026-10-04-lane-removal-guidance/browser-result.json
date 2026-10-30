@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual LaneAddonsPanel with synthetic HTTP; label/effect explanation only, no real detach or native TUI",
+  "assertions": [
+    "TOML-managed removal label",
+    "manual worker removal label",
+    "disk deletion explanation",
+    "retained evidence explanation",
+    "zero mutation requests"
+  ],
+  "writes": [],
+  "unexpected": [],
+  "errors": []
+}

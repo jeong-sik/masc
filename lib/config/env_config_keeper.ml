@@ -1,0 +1,907 @@
+(** Env_config_keeper — keeper runtime parameters from environment.
+
+    {!Keeper_runtime_setting_registry} is the public inventory. Only settings
+    classified there with a TOML key ([Toml_only], [Toml_and_env]) can be
+    declared in [<resolved config root>/runtime.toml]; the remainder are
+    explicitly [Env_only]. The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs
+    at server startup and records unset values in the process-local boot
+    override store. TOML-backed accessors read that store when called, after
+    startup has loaded the document; module initialization precedes that load.
+
+    Precedence: process env > TOML > hardcoded default below. A setting
+    classified [Toml_only] has no process-env step: TOML > hardcoded default.
+
+    See [docs/ENV-CONTRACT.md] for the environment contract. *)
+
+open Env_config_core
+
+(** {1 Keeper Bootstrap Configuration} *)
+
+module KeeperBootstrap = struct
+  (** [MASC_KEEPER_AUTONOMOUS_ENABLED]: the global switch for automatic
+      Keeper startup and spontaneous (autonomous/proactive) turns. *)
+  let enabled () = get_bool ~default:true "MASC_KEEPER_AUTONOMOUS_ENABLED"
+
+  (** Polling interval (seconds) for the keeper-lifecycle listener
+      retry loop in [server_bootstrap_loops.ml]. After a listener
+      iteration raises (non-cancellation) the loop sleeps for this
+      interval before retrying — keeping the spinning under control
+      when an upstream subsystem is briefly down. Default 0.25s
+      preserves the inline literal at [server_bootstrap_loops.ml:240]. *)
+  let keeper_listener_retry_interval_sec =
+    Float.max
+      0.05
+      (get_float ~default:0.25 "MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC")
+  ;;
+end
+
+(** {1 Keeper Reactive Configuration} *)
+
+module KeeperReactive = struct
+  (** Global kill-switch for reactive keeper turns. The autonomous
+      counterpart is {!KeeperBootstrap.enabled}. *)
+  let enabled () = get_bool ~default:true "MASC_KEEPER_REACTIVE_ENABLED"
+end
+
+module KeeperWikiContents = struct
+  (** Whether each Keeper turn carries the wiki table of contents (RFC
+      keepers-see-the-wiki-table-of-contents). On by default; off, the turn
+      neither lists the wiki nor carries the paragraph. *)
+  let enabled_env_key = "MASC_KEEPER_WIKI_CONTENTS_ENABLED"
+  let enabled () = get_bool ~default:true enabled_env_key
+end
+
+(** {1 Keeper Turn Configuration} *)
+
+(* The boot layer (runtime.toml > default) under the
+   [keeper.turn.*] Runtime_params in [Keeper_config]: each param's default
+   thunk and validation bounds are these, and the operator settings
+   projection reads the same readers. *)
+module KeeperTurn = struct
+  let batch_limit_default = 200
+  let batch_limit_min = 10
+  let batch_limit_max = 2000
+
+  let batch_limit () =
+    get_int_clamped
+      ~default:batch_limit_default
+      ~min_v:batch_limit_min
+      ~max_v:batch_limit_max
+      "MASC_KEEPER_BATCH_LIMIT"
+  ;;
+
+  let temperature_default = 0.4
+  let temperature_min = 0.0
+  let temperature_max = 2.0
+
+  let temperature () =
+    get_float_clamped
+      ~default:temperature_default
+      ~min_v:temperature_min
+      ~max_v:temperature_max
+      "MASC_KEEPER_UNIFIED_TEMP"
+  ;;
+
+  (* Unset (or blank) is [None]: no thinking request is sent and the selected
+     runtime keeps its provider default. *)
+  let enable_thinking () =
+    let env_name = "MASC_KEEPER_ENABLE_THINKING" in
+    match raw_value_opt env_name with
+    | None -> None
+    | Some raw when String.trim raw = "" -> None
+    | Some _ -> Some (get_bool_strict ~default:false env_name)
+  ;;
+end
+
+(** {1 Keeper Metrics Rotation Configuration} *)
+
+module KeeperSpawn = struct
+  (** Bytes of each spawned process stream [Spawn_registry] keeps. A process
+      can outrun any reader, so the buffer is bounded and [read] reports every
+      byte the bound cost -- a cap that says what it discarded rather than one
+      that hides it.
+
+      Default 1 MiB: enough to hold a build's output between two reads of a
+      turn, small enough that a chatty watcher cannot grow a keeper's memory
+      without limit. Floor 4 KiB, because a buffer smaller than a single pipe
+      read drops most of what it is handed. *)
+  (* Reading an env var once at module init is a pure computation: no outcome,
+     no failure, no duration. What is worth observing is what the bound costs,
+     and [Spawn_registry] reports that per read as [dropped_before], where a
+     caller can act on it. The marker sits on the line above the binding
+     because the gate reads a two-line window. *)
+  (* TEL-OK *)
+  let spawn_output_buffer_bytes =
+    Int.max 4096 (get_int_nonneg ~default:1_048_576 "MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES")
+  ;;
+
+end
+
+module KeeperMetrics = struct
+  (** Auxiliary Keeper JSONL logs: maximum file size before rotation
+      (default: 10MB). Date-sharded metrics use a separate Dated_jsonl store. *)
+  let max_file_bytes () = get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
+
+  (** Zero discards old versions at rotation; max_bytes=0 disables rotation. *)
+  let max_rotated_files_min = 0
+  let max_rotated_files () =
+    Int.max max_rotated_files_min
+      (get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED")
+
+  let store_max_bytes () =
+    get_int_nonneg ~default:0 "MASC_KEEPER_METRICS_STORE_MAX_BYTES"
+end
+
+(** {1 Keeper Wire Capture Configuration} *)
+
+module KeeperWireCapture = struct
+  let clamp_int ~min_value ~max_value value =
+    max min_value (min max_value value)
+  ;;
+
+  (** Master switch for diagnostic MASC->AGENT_CORE wire capture. Default off.
+      @category Policies @ops_class operator *)
+  let enabled () = get_bool ~default:false "MASC_KEEPER_WIRE_CAPTURE"
+
+  let retention_days_default = 3
+  let retention_days_ceiling = 30
+  let max_bytes_default = 64 * 1024 * 1024
+  let max_bytes_ceiling = 1024 * 1024 * 1024
+
+  (** Maximum age for [<masc_root>/wire-capture] day files retained by the
+      diagnostic MASC->AGENT_CORE wire-capture harness. Default is 3 days. Range:
+      [1, 30] days.
+
+      @category Policies @ops_class operator *)
+  let retention_days () =
+    get_int_nonneg
+      ~default:retention_days_default
+      "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS"
+    |> clamp_int ~min_value:1 ~max_value:retention_days_ceiling
+  ;;
+
+  (** Maximum bytes for the active [<masc_root>/wire-capture/YYYY-MM/DD.jsonl]
+      file and maximum total bytes retained below [<masc_root>/wire-capture]
+      after opportunistic completed-day cleanup. Default is 64 MiB. Range:
+      [1, 1024] MiB.
+
+      @category Policies @ops_class operator *)
+  let max_bytes () =
+    get_int_nonneg ~default:max_bytes_default "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_bytes_ceiling
+  ;;
+end
+
+(** {1 Keeper Supervisor Configuration} *)
+
+module KeeperSupervisor = Env_config_keeper_supervisor
+
+(** {1 Keeper Poll Intervals}
+
+    Drain / poll cadences for keeper background fibers that have no
+    natural event signal — they have to wake up periodically and check.
+    Previously hardcoded as inline literals in the fiber loop body,
+    making them invisible to the operator and impossible to tune
+    without a rebuild. Operator-tunable cadence is a load-bearing
+    config knob in production, not an implementation detail.
+
+    Precedence: process env > hardcoded default below. *)
+
+module KeeperPollIntervals = struct
+  (** Crash persistence drain fiber wake interval in seconds.
+
+      Drain fiber batches in-memory crash events and persists them
+      to the dated jsonl store. Lower values reduce write batching
+      (more, smaller writes); higher values risk losing the
+      in-memory tail on a hard kill. A switch that closes writes
+      whatever is still queued, so no record is lost to an orderly
+      shutdown -- a larger value only means more of them are written
+      then. Must be >= 0.1.
+      Default: 2.0 — used at {!Keeper_crash_persistence}. *)
+  let crash_persistence_drain_sec =
+    Float.max 0.1 (get_float ~default:2.0 "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC")
+  ;;
+end
+
+(** {1 Autonomous turn configuration} *)
+
+module KeeperAutonomous = struct
+  (** Upper bound on the wake prompt, in bytes.
+
+      This value is not a system prompt: it is appended to the durable
+      checkpoint as the user turn of every autonomous cycle, so its cost is
+      paid again on each subsequent turn that replays the history. A long
+      operator string therefore consumes prompt budget permanently rather
+      than once, which is why the bound is enforced where the value is read
+      instead of being left to the operator's judgement. *)
+  let max_wake_prompt_bytes = 2048
+
+  (** Contract for the fleet env var. [Error] carries an operator-facing
+      reason; blank is rejected rather than folded into the default, so
+      "unset" and "set to nothing" stay distinguishable. *)
+  let validate_wake_prompt raw =
+    let trimmed = String.trim raw in
+    if String.equal trimmed ""
+    then Error "autonomous wake prompt must not be blank"
+    else if String.length trimmed > max_wake_prompt_bytes
+    then
+      Error
+        (Printf.sprintf
+           "autonomous wake prompt is %d bytes, over the %d-byte bound (it is \
+            appended to the durable checkpoint on every autonomous turn)"
+           (String.length trimmed)
+           max_wake_prompt_bytes)
+    else Ok trimmed
+  ;;
+
+  (** The wording used when neither the fleet nor a keeper configures one.
+
+      Read from the binary, not from [<config-root>/prompts]. That managed
+      copy is distribution state for inspection; [Managed_asset_sync]
+      converges it onto the embedded tree on boot. Fleet customization uses
+      the runtime setting [autonomous.wake_prompt], not
+      [prompt_overrides.json].
+
+      This binding runs before startup asset sync, so reading the managed
+      copy here would also fail on the first boot containing a new asset. *)
+  let default_wake_prompt =
+    let asset = "prompts/keeper.autonomous.wake.txt" in
+    match Embedded_config.read asset with
+    | None ->
+      (* The crunch tree is the repository's own [config/], so a missing key
+         means the binary was built without the asset. Nothing at runtime can
+         supply it. *)
+      raise
+        (Env_config_core.Config_error
+           ("autonomous wake prompt is not embedded in this binary: " ^ asset))
+    | Some contents ->
+      (match validate_wake_prompt (String.trim contents) with
+       | Ok prompt -> prompt
+       | Error detail ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf "invalid embedded autonomous wake prompt %s: %s" asset detail)))
+  ;;
+
+  (** Fleet-wide wake prompt, or [None] when unset. Read as a function: the
+      value is steerable through the boot override store, and a keeper process
+      outlives module-load time. *)
+  let wake_prompt_opt () =
+    match Env_config_core.raw_value_opt "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" with
+    | None -> None
+    | Some raw ->
+      (match validate_wake_prompt raw with
+       | Ok value -> Some value
+       | Error reason ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT: %s" reason)))
+  ;;
+
+  (** Fleet value else the literal default. This is what a keeper that states
+      no override of its own is woken with, and what the operator settings
+      projection reports. *)
+  let wake_prompt () = Option.value (wake_prompt_opt ()) ~default:default_wake_prompt
+end
+
+(** {1 Keeper Runtime Configuration} *)
+
+module KeeperRuntime = struct
+  (** Enable keeper debug logging. Default: false. *)
+  let debug () = get_bool ~default:false "MASC_KEEPER_DEBUG"
+
+  (** Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. *)
+  let snapshot_sec () = max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
+end
+
+(** {1 Keeper Memory OS Configuration}
+
+    Memory OS readers use functions, not module-load constants, because tests and
+    long-running processes may steer these kill switches with live env updates.
+    Precedence still flows through {!Env_config_core.raw_value_opt}: process env,
+    then the boot override store, then the hardcoded defaults below. *)
+
+module KeeperMemoryOs = struct
+  type librarian_config_state =
+    | Enabled
+    | Disabled
+    | Invalid
+
+  let recall_enabled_default = true
+  let librarian_enabled_default = true
+  (* The 2026-09-28 live distribution peaked at 464,514 rendered bytes
+     including source-bound facts. 512 KiB is the next fixed bound above it. *)
+  let facts_max_bytes_default = 512 * 1024
+  (* Live explicit-write intake peaked at 2,830 entries/day (2026-10-06,
+     docs/audits/2026-10-07-week-audit/C-librarian-memory-skills.md). Candidate
+     rows run from sub-KiB claims to a few KiB with provenance, so 16 MiB is
+     days of peak intake while judgement is blocked, and it bounds every
+     whole-state queue rewrite. *)
+  let pending_max_bytes_default = 16 * 1024 * 1024
+
+  (* Env-key SSOT: config-introspection and tests reference these constants
+     instead of re-spelling the literals, so a knob rename breaks compilation
+     instead of silently drifting into a phantom registry entry. *)
+  let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
+  let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+  let facts_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES"
+  let pending_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_PENDING_MAX_BYTES"
+  let category_cap_env_key = "MASC_KEEPER_MEMORY_CATEGORY_CAP"
+  let facts_per_category_cap_env_key = "MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP"
+
+  let positive_count name ~default =
+    match Env_config_memory.env_opt name with
+    | None -> default
+    | Some raw ->
+      (match int_of_string_opt raw with
+       | Some value when value > 0 -> value
+       | Some _ | None ->
+         raise (Env_config_core.Config_error (name ^ " must be a positive integer")))
+  ;;
+
+  let category_cap () = positive_count category_cap_env_key ~default:30
+  let facts_per_category_cap () =
+    positive_count facts_per_category_cap_env_key ~default:30
+  ;;
+
+  let facts_max_bytes () =
+    match Env_config_memory.env_opt facts_max_bytes_env_key with
+    | None -> facts_max_bytes_default
+    | Some raw ->
+      (match int_of_string_opt raw with
+       | Some value when value > 0 -> value
+       | Some _ | None ->
+         raise
+           (Env_config_core.Config_error
+              (facts_max_bytes_env_key ^ " must be a positive integer")))
+  ;;
+
+  let pending_max_bytes () =
+    match Env_config_memory.env_opt pending_max_bytes_env_key with
+    | None -> pending_max_bytes_default
+    | Some raw ->
+      (match int_of_string_opt raw with
+       | Some value when value > 0 -> value
+       | Some _ | None ->
+         raise
+           (Env_config_core.Config_error
+              (pending_max_bytes_env_key ^ " must be a positive integer")))
+  ;;
+
+  let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
+    Env_config_memory.get_bool_logged
+      ~invalid
+      name
+      ~default
+  ;;
+
+  let librarian_config_state () =
+    match Env_config_memory.env_opt librarian_env_key with
+    | None ->
+      if librarian_enabled_default then Enabled else Disabled
+    | Some raw ->
+      (match Env_config_memory.parse_bool_token raw with
+       | Some true -> Enabled
+       | Some false -> Disabled
+       | None -> Invalid)
+  ;;
+
+  (** Memory OS recall prompt injection kill switch. Default: true; invalid
+      values fail closed to false so malformed operator input cannot leave the
+      kill switch accidentally enabled.
+      @category Policies
+      @ops_class operator *)
+  let recall_enabled () =
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      recall_env_key
+      ~default:recall_enabled_default
+  ;;
+end
+
+(** {1 Keeper Vision Tool Configuration} *)
+
+module KeeperVision = struct
+  let clamp_int ~min_value ~max_value value =
+    max min_value (min max_value value)
+  ;;
+
+  let clamp_float ~min_value ~max_value value =
+    Float.max min_value (Float.min max_value value)
+  ;;
+
+  let max_image_bytes_default = 5 * 1024 * 1024
+  let max_image_bytes_ceiling = 10 * 1024 * 1024
+  let candidate_backoff_base_sec_ceiling = 5.0
+  let candidate_backoff_max_sec_ceiling = 30.0
+
+  (** Maximum raw image bytes accepted by the one-shot vision tool before
+      provider-message construction. Default is 5 MiB to match dashboard upload
+      policy. Range: [1, 10 MiB], so base64 expansion still stays below the
+      default HTTP body cap with headroom.
+
+      @category Policies @ops_class operator *)
+  let max_image_bytes () =
+    get_int_nonneg ~default:max_image_bytes_default "MASC_KEEPER_VISION_MAX_IMAGE_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_image_bytes_ceiling
+  ;;
+
+  let max_output_tokens_default = 64 * 1024
+  let max_output_tokens_floor = 4096
+  let max_output_tokens_ceiling = 128 * 1024
+
+  (** Maximum output tokens for the one-shot vision sub-call. On the
+      OpenAI-compatible /v1 endpoint the vision runtimes use, this single budget is
+      shared by the model's reasoning phase and the visible answer, so a cap that
+      only fits the answer lets reasoning drain it and truncate the reply
+      mid-JSON (2026-08-27 MiniMax M3 finding). Default 65536 clears OpenAI's
+      >= 25000 reasoning-plus-output reserve with headroom and matches OSS
+      reasoning tooling; it is a ceiling billed only for tokens generated, not a
+      target, so raising it costs nothing on a normal reply. Range:
+      [4096, 131072], the ceiling being M3's declared output limit.
+
+      @category Policies @ops_class operator *)
+  let max_output_tokens () =
+    get_int_nonneg ~default:max_output_tokens_default "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS"
+    |> clamp_int ~min_value:max_output_tokens_floor ~max_value:max_output_tokens_ceiling
+  ;;
+
+  (** Base delay before trying the next vision runtime after a failed provider
+      attempt. A small default avoids tight failover loops while keeping the tool
+      responsive. Range: [0, 5] seconds; 0 disables inter-candidate delay.
+
+      @category Timeouts @ops_class operator *)
+  let candidate_backoff_base_sec () =
+    get_float_nonneg ~default:0.05 "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC"
+    |> clamp_float ~min_value:0.0 ~max_value:candidate_backoff_base_sec_ceiling
+  ;;
+
+  (** Upper bound for the per-candidate vision failover delay. Range: [base, 30]
+      seconds, so a typo cannot exceed the tool's cumulative deadline policy.
+
+      @category Timeouts @ops_class operator *)
+  let candidate_backoff_max_sec () =
+    let base = candidate_backoff_base_sec () in
+    get_float_nonneg ~default:0.25 "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC"
+    |> clamp_float ~min_value:0.0 ~max_value:candidate_backoff_max_sec_ceiling
+    |> Float.max base
+  ;;
+
+  let max_dimension_default = 1568
+  let max_dimension_floor = 256
+  let max_dimension_ceiling = 8192
+
+  (** Maximum image dimension (longest edge) before downscaling. Default is 1568px
+      matching provider token-efficiency recommendations. Range: [256, 8192].
+
+      @category Policies @ops_class operator *)
+  let max_dimension () =
+    get_int_nonneg ~default:max_dimension_default "MASC_KEEPER_VISION_MAX_DIMENSION"
+    |> clamp_int ~min_value:max_dimension_floor ~max_value:max_dimension_ceiling
+  ;;
+end
+
+(** {1 Keeper Lane Gate Configuration} *)
+
+module KeeperLaneGate = struct
+  let clamp_float ~min_value ~max_value value =
+    Float.max min_value (Float.min max_value value)
+  ;;
+
+  let admission_wait_budget_sec_default = 60.0
+  let admission_wait_budget_sec_ceiling = 600.0
+
+  (** Total admission budget (seconds) shared by the submission-lane and
+      persistence-lane acquisitions of one [Keeper_msg_async] submit. While a
+      durable write is in progress the lane gate is held; before this bound a
+      hung durable write used to leak the lane permanently and every later
+      submit for that keeper hung with it (#25398). On expiry the submit fails
+      with [Submit_lane_unavailable] instead of waiting. Only submit is
+      bounded; status-settlement lane acquisitions stay unbounded so a
+      committed write can always settle. Range: (0, 600] seconds.
+
+      @category Timeouts @ops_class operator *)
+  let admission_wait_budget_sec () =
+    get_float_nonneg
+      ~default:admission_wait_budget_sec_default
+      "MASC_KEEPER_LANE_ADMISSION_WAIT_BUDGET_SEC"
+    |> clamp_float
+         ~min_value:0.001
+         ~max_value:admission_wait_budget_sec_ceiling
+  ;;
+end
+
+(** {1 Keeper Turn Admission Bounds} *)
+
+module KeeperAdmissionBounds = struct
+  let clamp_int ~min_value ~max_value value =
+    max min_value (min max_value value)
+  ;;
+
+  let max_events_default = 32
+  let max_events_ceiling = 256
+
+  (** Maximum number of durable queue selections admitted into one turn.
+      [ready_batch] used to admit every ready selection in the snapshot, so a
+      steady arrival rate became an unbounded backlog even while every Keeper
+      stayed alive (#29365). Selections past this bound stay pending for a
+      later turn instead of being dropped. Range: [1, 256]. Default 32.
+
+      @category Limits @ops_class operator *)
+  let max_events () =
+    get_int_nonneg ~default:max_events_default "MASC_KEEPER_ADMISSION_MAX_EVENTS"
+    |> clamp_int ~min_value:1 ~max_value:max_events_ceiling
+  ;;
+end
+
+(** {1 Keeper Generated Media Configuration} *)
+
+module KeeperGeneratedMedia = struct
+  let clamp_int ~min_value ~max_value value =
+    max min_value (min max_value value)
+  ;;
+
+  let clamp_float ~min_value ~max_value value =
+    Float.max min_value (Float.min max_value value)
+  ;;
+
+  let max_bytes_default = 10 * 1024 * 1024
+  let max_bytes_ceiling = 50 * 1024 * 1024
+  let dir_max_bytes_default = 500 * 1024 * 1024
+  let dir_max_bytes_ceiling = 5 * 1024 * 1024 * 1024
+  let retention_seconds_default = Masc_time_constants.day
+  let retention_seconds_ceiling = Masc_time_constants.days_to_seconds 30
+
+  (** Maximum raw generated-media bytes accepted by the durable store and serve
+      route. Default is 10 MiB. Range: [1, 50 MiB].
+
+      @category Policies @ops_class operator *)
+  let max_bytes () =
+    get_int_nonneg ~default:max_bytes_default "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_bytes_ceiling
+  ;;
+
+  (** Maximum total bytes retained in [<masc_dir>/media] after opportunistic
+      cleanup. Default is 500 MiB. Range: [1, 5 GiB].
+
+      @category Policies @ops_class operator *)
+  let dir_max_bytes () =
+    get_int_nonneg
+      ~default:dir_max_bytes_default
+      "MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:dir_max_bytes_ceiling
+  ;;
+
+  (** Maximum generated-media file age retained by opportunistic cleanup. Default
+      is 24 hours. Range: [1 second, 30 days].
+
+      @category Policies @ops_class operator *)
+  let retention_seconds () =
+    get_float_nonneg
+      ~default:retention_seconds_default
+      "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC"
+    |> clamp_float ~min_value:1.0 ~max_value:retention_seconds_ceiling
+  ;;
+end
+
+(** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
+
+module WorkAsHeartbeat = struct
+  (** Master switch. When true, successful Workspace.heartbeat after a
+      unified turn counts as presence proof, allowing the next cycle to skip
+      the full ensure_keeper_workspace_presence call. *)
+  let enabled () = get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
+end
+
+(** {1 Keeper Keepalive Loop Constants} *)
+
+module KeeperKeepalive = struct
+  (** Heartbeat cycle interval in seconds. Default: 300.
+      Every positive operator-selected cadence is preserved exactly. This is
+      the foundational timing constant — every keeper cycle (presence,
+      snapshot, board scan, turn) runs at this cadence.
+
+      It is a ceiling, not a fixed spacing: a queued stimulus wakes the lane
+      inside [sleep_chunk_sec], so a keeper with work runs more often than
+      this. Measured 2026-09-03: polisher 289 s and analyst 265 s median
+      between turns, pr-updater 88 s. *)
+  let interval_sec () =
+    let interval = get_int ~default:300 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
+    if interval > 0 then interval
+    else raise (Config_error "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC must be a positive integer")
+
+  (** Interruptible sleep chunk size in seconds: the upper bound on how long a
+      keeper's heartbeat sleep takes to notice a wakeup atomic set by an incoming
+      stimulus (board/mention/goal/schedule/approval). Smaller = faster wakeup
+      response but more CPU polling. Default: 0.5 (was 2.0) — a queued event now
+      wakes the lane within 0.5s instead of up to 2s; at ~2 CAS checks/sec/keeper
+      the extra polling is negligible, and the dominant reaction cost remains the
+      turn's own LLM call, not this floor.
+      Range: [0.1, 10.0].
+      @category Thresholds
+      @ops_class operator *)
+  let sleep_chunk_sec () =
+    get_float_clamped ~default:0.5 ~min_v:0.1 ~max_v:10.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"
+  ;;
+
+  (* How long a path rests after a throttle that stated no usable
+     [Retry-After] (absent, zero, negative, infinite, NaN): a path that keeps answering
+     429 is tried once a minute (RFC-provider-path-rest §3.3). The cap's lower
+     clamp is this same value so an env override can never set the cap below
+     it. Not env-configurable. *)
+  let rate_limit_backoff_floor_sec = 60.0
+
+  (** Fallback rest for a hard quota that stated no usable end, and the
+      upper bound of other unhinted rests (RFC-provider-path-rest §3.3).
+      Usable provider [Retry-After] hints are preserved even above this value.
+      A keeper waits only while the path it
+      would send next rests; a rate-limit or quota wait serves queued stimuli
+      when it ends (#34653), a capacity wait still wakes within
+      [sleep_chunk_sec]. Default: 900 (15 min).
+      Range: [[rate_limit_backoff_floor_sec], 3600.0].
+      @category Thresholds
+      @ops_class operator *)
+  let rate_limit_backoff_cap_sec =
+    get_float_clamped
+      ~default:900.0
+      ~min_v:rate_limit_backoff_floor_sec
+      ~max_v:3600.0
+      "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"
+  ;;
+
+  let parse_timeout_seconds raw =
+    match Float.of_string_opt (String.trim raw) with
+    | Some seconds when Float.is_finite seconds && Float.compare seconds 0.0 > 0 ->
+      Ok seconds
+    | Some _ | None ->
+      Error "expected a finite, positive number of seconds"
+  ;;
+
+  (* The value of a declared timeout setting, read now. Unset is [None]; a
+     declared value that is not a finite positive number of seconds is an
+     operator configuration error, never a fallback: an unparsable string
+     read as unset would switch a deadline off, and NaN would pass every
+     comparison against it. *)
+  let refuse_declared_timeout env_key raw detail =
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf "invalid %s=%S (%s)" env_key raw detail))
+  ;;
+
+  (* The seconds a declared timeout setting names, with the text the
+     operator wrote: every refusal quotes that text, never a rendering of
+     the parsed number, so "29.9999999" is refused as itself and not as
+     "30". *)
+  let declared_timeout_seconds_with_raw env_key =
+    match Env_config_core.raw_value_opt env_key with
+    | None -> None
+    | Some raw ->
+      (match parse_timeout_seconds raw with
+       | Ok seconds -> Some (raw, seconds)
+       | Error detail -> refuse_declared_timeout env_key raw detail)
+  ;;
+
+  (* [declared_timeout_seconds_with_raw] for a setting with a declared range: a value
+     outside it is refused the way an unparsable one is, and the way the
+     runtime.toml validator refuses it, instead of being moved to the nearest
+     bound behind the operator's back. *)
+  let declared_timeout_seconds_within ~min_sec ~max_sec env_key =
+    match declared_timeout_seconds_with_raw env_key with
+    | None -> None
+    | Some (raw, seconds) ->
+      if Float.compare seconds min_sec < 0 || Float.compare seconds max_sec > 0
+      then
+        refuse_declared_timeout
+          env_key
+          raw
+          (Printf.sprintf "expected a value within [%g, %g] seconds" min_sec max_sec)
+      else Some seconds
+  ;;
+
+  (* The declared range of the provider-call no-progress threshold, ahead of
+     the two stream budgets because their own ceiling is its upper bound: a
+     budget no threshold can cover is refused where it is read, instead of
+     at every boot by the freeze rule with advice the range then rejects. *)
+  let provider_call_deadline_min_sec = 30.0
+  let provider_call_deadline_max_sec = 3600.0
+
+  let declared_stream_budget_seconds env_key =
+    match declared_timeout_seconds_with_raw env_key with
+    | None -> None
+    | Some (raw, seconds) ->
+      if Float.compare seconds provider_call_deadline_max_sec > 0
+      then
+        refuse_declared_timeout
+          env_key
+          raw
+          (Printf.sprintf
+             "expected at most %g seconds, the longest provider_call_deadline_sec can cover"
+             provider_call_deadline_max_sec)
+      else Some seconds
+  ;;
+
+  let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
+  let stream_idle_failsafe_floor_sec = 600.0
+
+  (** Explicit idle-gap timeout for streaming AGENT_CORE provider responses.
+      This bounds time between streamed lines, not total turn duration.
+      Unset means no explicit value: the resolved layer substitutes
+      [stream_idle_failsafe_floor_sec] (RFC-0345); MASC and AGENT_CORE do not
+      synthesize a provider/model default.  A configured value must be finite
+      and strictly positive; malformed values are operator configuration
+      errors, never a fallback.
+
+      Setting: runtime.toml [turn.stream_idle_timeout_sec]. Default: unset -> [None].
+      @category Timeouts @ops_class operator *)
+  let stream_idle_timeout_sec () = declared_stream_budget_seconds stream_idle_timeout_env_key
+
+  let first_event_timeout_env_key = "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC"
+
+  (* Fail-safe bound for the silent first-event (TTFT/prefill) wait; the
+     substitution rule lives in Keeper_runtime_resolved. Same magnitude as
+     [stream_idle_failsafe_floor_sec]: an order above real silent prefill
+     observed in production (152s mimo 1M-context 2026-07-20; ~200-525s local
+     MLX 20.7K-token keeper prompts 2026-08-16), not a per-provider tuning
+     (RFC-AC-037 §3). *)
+  let first_event_failsafe_floor_sec = 600.0
+
+  (** Explicit first-event (TTFT/prefill) timeout for streaming AGENT_CORE
+      provider responses. One window from the request to the provider's
+      first token-bearing event, connection and response headers included
+      (an opening frame such as Responses
+      [response.created] neither ends it nor extends it);
+      [stream_idle_timeout_sec] bounds the gaps after it. Providers that emit
+      no keepalives while prefilling are legitimately silent in this phase,
+      so this budget is distinct from — and typically longer than — the
+      inter-line idle gap (RFC-AC-037). Unset means no explicit value; the
+      resolved layer substitutes {!first_event_failsafe_floor_sec}. A
+      configured value must be finite and strictly positive; malformed values
+      are operator configuration errors, never a fallback. Same value grammar
+      as the other timeout settings, hence the shared reader.
+
+      Setting: runtime.toml [turn.first_event_timeout_sec]. Default: unset -> [None].
+      @category Timeouts @ops_class operator *)
+  let first_event_timeout_sec () = declared_stream_budget_seconds first_event_timeout_env_key
+
+  (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
+      calls. In agent_core this wraps [Complete.complete]'s synchronous HTTP
+      body read; streaming calls deliberately ignore the knob so active
+      long streams are not killed by total duration. Streaming liveness is
+      always bounded: the operator's [stream_idle_timeout_sec] or its floor,
+      and the attempt watchdog.
+
+      Opt-in: unset leaves [None] so {!Runtime_agent_context} skips the
+      builder wiring. Set only for sync completion callers that need a
+      body-read ceiling. Read on every call; the setting is declared in the
+      environment only, runtime.toml has no key for it. A declared value that
+      is not a finite positive number of seconds raises
+      {!Env_config_core.Config_error}.
+
+      Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset -> [None].
+      Declared range: [{!body_timeout_min_sec}, {!body_timeout_max_sec}]; a
+      value outside it raises {!Env_config_core.Config_error}. *)
+  let body_timeout_min_sec = 10.0
+  let body_timeout_max_sec = 600.0
+
+  let body_timeout_env_key = "MASC_KEEPER_BODY_TIMEOUT_SEC"
+
+  let body_timeout_sec_override () =
+    declared_timeout_seconds_within
+      ~min_sec:body_timeout_min_sec
+      ~max_sec:body_timeout_max_sec
+      body_timeout_env_key
+  ;;
+
+  (* Fail-safe no-progress threshold for a provider call attempt (seconds),
+     substituted by the resolved layer when runtime.toml
+     [turn.provider_call_deadline_sec] declares none. Without it
+     a default install runs no attempt watchdog at all and a tool's provider
+     sub-call has no bound: an attempt that never produces a token holds the
+     keeper until an operator interrupts it. The value is the one the live
+     workspace has run under since 2026-08-07 (#27416), validated by the
+     2026-08-12 measurement (longest legitimate progress gap in a healthy
+     turn 120 s, the wedge it caught 65 min): 7.5 times the gap, a quarter
+     of the wedge, and above the two stream floors, so a silent prefill is
+     ended by the reader's typed first-token timeout, not by this. A
+     universal liveness ceiling, not a per-provider tuning; an explicit
+     runtime.toml value overrides it. *)
+  let provider_call_deadline_failsafe_floor_sec = 900.0
+
+  (** The keeper's no-progress threshold for a provider call attempt, in
+      seconds (#27349; measured against the turn's progress signal since
+      #28417, not against elapsed time). The attempt watchdog ends an attempt
+      that made no progress for this long while no tool is in flight and no
+      approval is pending, and a provider sub-call made from inside a tool,
+      which that watchdog does not see, runs under it
+      ({!Keeper_provider_subcall}).
+
+      On expiry the watchdog classifies the failure as the existing typed
+      [Api (Timeout { phase = Some Wall_clock })] and routes it through the
+      existing declared-lane rotation.
+
+      Unset leaves [None] here; the resolved layer substitutes
+      {!provider_call_deadline_failsafe_floor_sec}. Read on every call, so a
+      runtime.toml value applied at boot is seen; a declared value that is
+      not a finite positive number of seconds raises
+      {!Env_config_core.Config_error}.
+
+      Declared range: [{!provider_call_deadline_min_sec},
+      {!provider_call_deadline_max_sec}]; a value outside it raises
+      {!Env_config_core.Config_error}.
+
+      Setting: runtime.toml [turn.provider_call_deadline_sec]. Default: unset -> [None].
+      @category Timeouts
+      @ops_class operator *)
+  let provider_call_deadline_env_key = "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
+
+  let provider_call_deadline_sec_override () =
+    declared_timeout_seconds_within
+      ~min_sec:provider_call_deadline_min_sec
+      ~max_sec:provider_call_deadline_max_sec
+      provider_call_deadline_env_key
+  ;;
+
+end
+
+(** {1 Keeper Context Window} *)
+
+(** {1 gRPC Heartbeat Reconnect} *)
+
+module KeeperGrpc = struct
+  (** Backoff delay between gRPC reconnect attempts in seconds.
+      Default: 5.0. Range: [1.0, 60.0]. *)
+  let reconnect_backoff_sec =
+    Float.max
+      1.0
+      (Float.min 60.0 (get_float ~default:5.0 "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"))
+  ;;
+end
+
+(** {1 Proactive Generation} *)
+
+module KeeperProactive = struct
+  (** Stage timing ring buffer size for Phase 0 profiling.
+      Default: 100. Range: [10, 1000]. *)
+  let stage_timing_ring_size =
+    max 10 (min 1000 (get_int ~default:100 "MASC_KEEPER_STAGE_TIMING_RING_SIZE"))
+  ;;
+end
+
+(** {1 Dashboard Health Thresholds}
+
+    Thresholds used by the dashboard keeper health scorer and harness health
+    panels. These affect UI display only. *)
+
+module DashboardHealth = struct
+  let runtime_warning_ctx_ratio =
+    get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
+  ;;
+end
+
+module KeeperPeerArtifact = struct
+  let clamp_int ~min_value ~max_value value = max min_value (min max_value value)
+  let max_bytes_default = 64 * 1024 * 1024
+  let max_bytes_ceiling = 256 * 1024 * 1024
+
+  (** Largest artifact a Keeper may hand to a peer through
+      [keeper_artifact_transfer]. The Keeper names the path, the whole file is
+      held here while the blob store takes it, and the blob is then durable --
+      so this is the size a Keeper can commit on its own. Default is 64 MiB,
+      above generated media because these are build outputs. Range:
+      [1, 256 MiB].
+
+      @category Policies @ops_class operator *)
+  let max_bytes () =
+    get_int_nonneg ~default:max_bytes_default "MASC_KEEPER_PEER_ARTIFACT_MAX_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_bytes_ceiling
+  ;;
+end
+
+(* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
+   deleted (audit F8): its value was threaded as [?provider_filter] into
+   [Keeper_turn_driver.run_named], which silently ignored it after the RFC-0206
+   single-runtime purge. The knob was dead while its docs were live; deletion
+   documents reality. Provider selection is runtime.toml SSOT
+   ([runtime].default / [[runtime.assignments]]). *)
+
+(** Print configuration summary for debugging *)

@@ -1,0 +1,59 @@
+{
+  "captured_at": "2026-08-15T21:54:52+0900",
+  "script": "scripts/bench-web-tools.py",
+  "server_health": {
+    "status": "ok",
+    "version": "0.22.0",
+    "commit": null,
+    "commit_source": null
+  },
+  "provider_direct": {
+    "searxng": [
+      {
+        "query": "OCaml 5.5 effect handlers tutorial",
+        "http_status": 200,
+        "elapsed_ms": 2398.4,
+        "bytes": 243,
+        "result_count": 0,
+        "engines": []
+      },
+      {
+        "query": "Claude Opus latest model context window",
+        "http_status": 200,
+        "elapsed_ms": 979.4,
+        "bytes": 9176,
+        "result_count": 10,
+        "engines": [
+          "duckduckgo"
+        ]
+      },
+      {
+        "query": "장마철 제습기 원리",
+        "http_status": 200,
+        "elapsed_ms": 1381.7,
+        "bytes": 21012,
+        "result_count": 10,
+        "engines": [
+          "duckduckgo"
+        ]
+      }
+    ],
+    "duckduckgo_html": {
+      "query": "OCaml 5.5 effect handlers tutorial",
+      "http_status": 202,
+      "elapsed_ms": 303.1,
+      "bytes": 14274,
+      "result_anchor_count": 0
+    },
+    "bing_rss": {
+      "query": "OCaml 5.5 effect handlers tutorial",
+      "http_status": 200,
+      "elapsed_ms": 215.3,
+      "bytes": 5285,
+      "item_count": 10
+    }
+  },
+  "mcp_tool": {
+    "error": "RuntimeError: HTTP 401: {\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32001,\"message\":\"[AuthError] Unauthorized: Authentication required. Use 'Authorization: Bearer <token>' header.\",\"data\":{\"auth_error_code\":\"missing_token\"}}}"
+  }
+}

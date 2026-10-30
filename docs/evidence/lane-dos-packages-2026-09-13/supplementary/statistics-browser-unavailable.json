@@ -1,0 +1,56 @@
+{
+  "phase": "unavailable",
+  "source_commit": "4218e1c05e2029e7b63d8847aa857a18dd6db084",
+  "response_mocking": false,
+  "controlled_snapshot_fixture": false,
+  "actual_dos_guest": true,
+  "game_activity_claimed": false,
+  "origin": "http://127.0.0.1:64364",
+  "configuration_directory": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/lane-dos-statistics-proof/4218e1c05e-4dd9ef41e9c3454687b78a2d1aa49a83/.masc/config/lane-addons",
+  "issues": 0,
+  "declarations": 1,
+  "instances": [
+    {
+      "id": "01a0962f-beac-7000-9f49-61da64f6290a",
+      "phase": "attached"
+    },
+    {
+      "id": "01a0962f-beb9-7000-95d0-c80f39803274",
+      "phase": "detached"
+    }
+  ],
+  "rows": 8,
+  "complete": false,
+  "page_errors": [],
+  "screenshots": {
+    "configuration.png": "41f8d46ddc72c7235bdd1a86ba90983a18cb922ff89f4942a8eee0334e1a4070",
+    "lane-panel.png": "90a983fb1174495e03de524af43661054a2828396e9e3843910c156c59deb284",
+    "dashboard-viewport.png": "97848d64dab15ed45dd0e167b4f381ce8a4458f25012c19d855f68b5da9098af",
+    "timeline.png": "efd83fc504e56e794e2616d16134dd4de3f388cb7acf181ce63d1d9e2d98c261",
+    "source-coverage.png": "d71246daa6352d1df4bfd9cee1afccf032fc099e08d81cdec7b7fb5191990062",
+    "retained-row-1.png": "07de4bcf5a72f5663c3c7f7e4ca4a35109b8cd83b45cde5ee6b5d86cec207e9a",
+    "retained-fields-1.png": "72e929d681a87fca0ef7446fcb5109010072109c62d3efbe5b6a09c74043a090",
+    "retained-row-2.png": "a858b628e81b93e72f4d6fc6fc52db7d6e8742f280f772991a7204ac54566a0c",
+    "retained-fields-2.png": "08f55ab3518304245414911bbcc16b41385dc4ad62da8fecb9d87fd608ae86cf"
+  },
+  "responses": [
+    {
+      "file": "response-001.json",
+      "path": "/api/v1/lane-addons",
+      "status": 200,
+      "sha256": "2189bc5d12cef655923ff69fed2dd98159e9dd05b45f4d2222b00f5d2ce3e32c"
+    },
+    {
+      "file": "response-002.json",
+      "path": "/api/v1/lane-addons",
+      "status": 200,
+      "sha256": "2189bc5d12cef655923ff69fed2dd98159e9dd05b45f4d2222b00f5d2ce3e32c"
+    },
+    {
+      "file": "response-003.json",
+      "path": "/api/v1/lane-addons/slice?run_id=dos-statistics-proof-4218e1c05e-4dd9ef41e9c3454687b78a2d1aa49a83",
+      "status": 200,
+      "sha256": "e50c8d3f67179871072589a1bc9ac24ff09dfd78694ed2c84794c5846f9cb84a"
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "config_digest": "sha256:03eeb4b99a58db3dbf2db3a0c8bd18fcaf737f94102e8cb8bc5477999bb3a9df",
+  "manifest_digest": "sha256:0070775a948cba3d0227fcfe17cec99499ab9c5cf4b755167549b65200b77682",
+  "manifest_media_type": "application/vnd.oci.image.manifest.v1+json",
+  "manifest_bytes": 709,
+  "layer_descriptors": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar",
+      "digest": "sha256:13a56b6535801be2adde694dabaf1c2df1d862a390661907dac821c42cd565cc",
+      "size": 100229120
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar",
+      "digest": "sha256:79d56cbdd42f5d24dee3fc13438f0ae08e8cdaad940b59093fe9e02edfa66c94",
+      "size": 1161533440
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar",
+      "digest": "sha256:748c8d6307995b998a0b96a26695fa69cea6beea7fb25b43ddc43937211892c4",
+      "size": 2048
+    }
+  ],
+  "rootfs_diff_ids": [
+    "sha256:13a56b6535801be2adde694dabaf1c2df1d862a390661907dac821c42cd565cc",
+    "sha256:79d56cbdd42f5d24dee3fc13438f0ae08e8cdaad940b59093fe9e02edfa66c94",
+    "sha256:748c8d6307995b998a0b96a26695fa69cea6beea7fb25b43ddc43937211892c4"
+  ],
+  "configuration_keys": [
+    "ArgsEscaped",
+    "Cmd",
+    "Env",
+    "Labels"
+  ],
+  "configuration_sha256": "sha256:323d939080ca47f9e4029e4d13e60063595b74f16b0a18f2f9a3c194af51d604",
+  "architecture": "arm64",
+  "os": "linux",
+  "source_commit": "de1d81f9662cecad3117e22a17df9bbaff3a86b1",
+  "image_tags": [
+    "masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64"
+  ],
+  "verified_blobs": [
+    {
+      "digest": "sha256:0070775a948cba3d0227fcfe17cec99499ab9c5cf4b755167549b65200b77682",
+      "bytes": 709
+    },
+    {
+      "digest": "sha256:03eeb4b99a58db3dbf2db3a0c8bd18fcaf737f94102e8cb8bc5477999bb3a9df",
+      "bytes": 1770
+    },
+    {
+      "digest": "sha256:13a56b6535801be2adde694dabaf1c2df1d862a390661907dac821c42cd565cc",
+      "bytes": 100229120
+    },
+    {
+      "digest": "sha256:6a0163f7c5fe2a6c5dfabf81ee1f1189af55aea4b49eb47e722e6864ec9b72e8",
+      "bytes": 401
+    },
+    {
+      "digest": "sha256:73b859f4d81ce6087e9c744488a503ab6da604719b2aec038a8d98df5fb5a7f8",
+      "bytes": 971
+    },
+    {
+      "digest": "sha256:748c8d6307995b998a0b96a26695fa69cea6beea7fb25b43ddc43937211892c4",
+      "bytes": 2048
+    },
+    {
+      "digest": "sha256:79d56cbdd42f5d24dee3fc13438f0ae08e8cdaad940b59093fe9e02edfa66c94",
+      "bytes": 1161533440
+    },
+    {
+      "digest": "sha256:dc347eb7627799016f22f0071fcfa43767f8306f8c4389f92616a99b94fae41d",
+      "bytes": 477
+    }
+  ],
+  "schema": "masc.sandbox-image-artifact.v1",
+  "image_tag": "masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64",
+  "build_engine_id": "sha256:03eeb4b99a58db3dbf2db3a0c8bd18fcaf737f94102e8cb8bc5477999bb3a9df",
+  "build_engine_identity_kind": "config_digest",
+  "run_id": "34404224985",
+  "run_attempt": "1",
+  "destination": {
+    "id": "sha256:0070775a948cba3d0227fcfe17cec99499ab9c5cf4b755167549b65200b77682",
+    "identity_kind": "manifest_digest"
+  },
+  "files": {
+    "image.tar.gz": {
+      "bytes": 412994848,
+      "sha256": "02b3092bf852eab513dcaa71887f166a46faff8916f4ec1af1985e446dd4bf6d"
+    },
+    "image-inspect.json": {
+      "bytes": 2365,
+      "sha256": "562b586c8511eab18daa8f5bcbe36359929d12f8fb67af4590540b0274fb4a06"
+    },
+    "Dockerfile": {
+      "bytes": 3277,
+      "sha256": "882400bc5bed25975dc97f8b10929423c19028ea232e5c2dee88b6db64d054cb"
+    },
+    "proof/receipt.json": {
+      "bytes": 7723,
+      "sha256": "2b8e7385231b65bb93760247dfd595fc986817bac805565cbe681610ac521966"
+    }
+  }
+}

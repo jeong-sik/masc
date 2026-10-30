@@ -1,0 +1,35 @@
+[
+  {
+    "report": "09011780-87d3-4f3c-2b1e-9650f07c6645.ghosttycrash",
+    "timestamp": "2026-09-29T01:23:51.441220Z",
+    "ghostty_version": "1.3.1",
+    "exception_code": 6,
+    "pc_offset": "0x7a5a90",
+    "frames": [
+      "Io.Writer.unreachableRebase (in ghostty) + 0",
+      "compress.flate.Decompress.streamInner (in ghostty) + 8448"
+    ]
+  },
+  {
+    "report": "71ae3324-3c8e-43da-da57-93bdc513b602.ghosttycrash",
+    "timestamp": "2026-09-29T01:32:33.971682Z",
+    "ghostty_version": "1.3.1",
+    "exception_code": 6,
+    "pc_offset": "0x7a5a90",
+    "frames": [
+      "Io.Writer.unreachableRebase (in ghostty) + 0",
+      "compress.flate.Decompress.streamInner (in ghostty) + 8448"
+    ]
+  },
+  {
+    "report": "8d6ef20a-5d32-4e12-cf29-27eb16a42bf3.ghosttycrash",
+    "timestamp": "2026-09-29T01:24:07.017095Z",
+    "ghostty_version": "1.3.1",
+    "exception_code": 6,
+    "pc_offset": "0x7a5a90",
+    "frames": [
+      "Io.Writer.unreachableRebase (in ghostty) + 0",
+      "compress.flate.Decompress.streamInner (in ghostty) + 8448"
+    ]
+  }
+]

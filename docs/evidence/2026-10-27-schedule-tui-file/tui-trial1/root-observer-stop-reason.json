@@ -1,0 +1,11 @@
+{
+  "at": 1793054612.904881,
+  "observer_pid": 30753,
+  "owned_tui_pid": 30953,
+  "exact_controller_command": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v2.py --source-root /Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate --native-dir /Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146 --output /Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-1 --image-reference masc-sandbox:general --observation-deadline-unix 1793054961.293945",
+  "interpreter_sha256": "25b22eb30870683374ff135107533476508749e10db95845c75db9258932341d",
+  "normal_signal": "SIGINT",
+  "reason": "Source-confirmed controller baseline bug: whitelist only full health; default Overview uses compact /health before keyboard. End observer INCOMPLETE; no product verdict or automatic replay.",
+  "not_a_producer_deadline_or_forcekill": true,
+  "prior_no_signal_attempt": "Python launcher command alias mismatch refused signal; retried only identity read with authoritative Python framework path"
+}

@@ -1,0 +1,211 @@
+(** Success-path metric update for unified keeper cycle, extracted from
+    keeper_unified_metrics.ml.
+
+    Pure write-only side-effect: updates keeper_meta runtime fields
+    based on a successful turn result. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_context_runtime
+
+include Keeper_unified_metrics_support
+include Keeper_unified_metrics_json_support
+
+let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
+    ~(observation : Keeper_world_observation.world_observation)
+    ~(usage_resolution : Keeper_usage_resolution.t)
+    ~(usage_cursor : Keeper_usage_resolution.cursor option)
+    ?(is_autonomous_turn = true)
+    (result : Keeper_agent_run.run_result) : keeper_meta =
+  let now_ts = Time_compat.now () in
+  let tool_names = Keeper_agent_result.tool_names result in
+  let usage_trust =
+    classify_usage_trust
+      ~usage_reported:result.usage_reported
+      ~usage:result.usage
+  in
+  (* #9959: surface classification into Otel_metric_store exactly once per
+     turn. Other [classify_usage_trust] call sites serialize the
+     trust into JSONL but do not bump the counter. *)
+  record_usage_trust ~keeper_name:meta.name ~trust:usage_trust;
+  record_keeper_idle_seconds
+    ~keeper_name:meta.name
+    ~idle_seconds:observation.idle_seconds;
+  (* [usage_trust] is anomaly provenance only. The raw provider observation is
+     preserved as last usage; only the single typed resolution below is
+     additive. *)
+  (* [last_input_tokens] is read as context occupancy (keeper meta JSON,
+     the context projection's fallback). A runtime that reports the newest
+     request's input apart from the turn's spend supplies that figure; the
+     spend's input is a sum over the turn's requests, not a size any request
+     had. The output is that request's when the runtime reports its final
+     count (Codex, whose spend is a thread-cumulative count), otherwise the
+     turn's. *)
+  let observed_output_tokens =
+    match result.runtime_observation with
+    | Some { request_context = Some { Runtime_observation.output_tokens = Some output; _ }; _ } ->
+      output
+    | Some { request_context = Some { Runtime_observation.output_tokens = None; _ }; _ }
+    | Some { request_context = None; _ }
+    | None -> result.usage.output_tokens
+  in
+  let observed_input_tokens, observed_total_tokens =
+    match result.runtime_observation with
+    | Some { request_context = Some context; _ } ->
+      ( context.Runtime_observation.input_tokens
+      , context.Runtime_observation.input_tokens + observed_output_tokens )
+    | Some { request_context = None; _ } | None ->
+      result.usage.input_tokens, Inference_utils.total_tokens result.usage
+  in
+  (* Runtime usage is not necessarily a turn delta. The resolver combines the
+     producer's fresh/resumed conversation authority with the durable cursor;
+     every downstream aggregate consumes that same delta. *)
+  let aggregate_input_tokens, aggregate_output_tokens, aggregate_total_tokens =
+    match usage_resolution.delta with
+    | Some delta ->
+      let usage = Keeper_usage_resolution.api_usage_of_sample delta in
+      ( delta.input_tokens
+      , delta.output_tokens
+      , Inference_utils.total_tokens usage )
+    | None -> 0, 0, 0
+  in
+  let has_substantive_tools = has_substantive_tool_calls tool_names in
+  let has_text = String.trim result.response_text <> "" in
+  (* Visible-output preview follows the typed result surface. *)
+  let is_visible_reply =
+    Keeper_turn_outcome.equal
+      result.turn_outcome
+      Keeper_turn_outcome.Visible_reply
+  in
+  let validated_evidence = visible_run_validation result in
+  let has_validated_evidence = Option.is_some validated_evidence in
+  let visible_tool_signal_present =
+    has_substantive_tools || has_validated_evidence
+  in
+  let is_scheduled_autonomous_cycle =
+    is_autonomous_turn
+    && is_scheduled_autonomous_cycle_of_observation observation
+  in
+  let is_board_reactive =
+    Keeper_world_observation.has_pending_board_activity observation
+  in
+  let is_mention_reactive =
+    Keeper_world_observation_message_scope.has_kind
+      Keeper_world_observation_message_scope.Mention observation.pending_messages
+  in
+  let has_meaningful_work =
+    has_text || has_substantive_tools || has_validated_evidence
+  in
+  let rt = meta.runtime in
+  (* #10474: proactive outcome counter for successful cycles. *)
+  if is_scheduled_autonomous_cycle then begin
+    let outcome =
+      if has_substantive_tools then "tool_called"
+      else if is_noop_cycle ~has_text ~tools_used:tool_names
+      then "noop"
+      else "tool_called"
+    in
+    Otel_metric_store.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
+      ~labels:[ ("keeper", meta.name); ("outcome", outcome) ]
+      ()
+  end;
+  let updated_meta = {
+    meta with
+    updated_at = now_iso ();
+    runtime = { rt with
+      usage =
+        with_last_reported_usage
+          {
+            rt.usage with
+            total_turns = rt.usage.total_turns + 1;
+            total_input_tokens =
+              rt.usage.total_input_tokens + aggregate_input_tokens;
+            total_output_tokens =
+              rt.usage.total_output_tokens + aggregate_output_tokens;
+            total_tokens = rt.usage.total_tokens + aggregate_total_tokens;
+            last_turn_ts = now_ts;
+            last_latency_ms = latency_ms;
+          }
+          ~usage_reported:result.usage_reported
+          ~input_tokens:observed_input_tokens
+          ~output_tokens:observed_output_tokens
+          ~total_tokens:observed_total_tokens
+          ~observed_at:now_ts;
+      usage_cursor;
+      last_usage_resolution = Some usage_resolution;
+      (* Deterministic scheduled autonomous cycle accounting is separated from
+         nondeterministic model output visibility. *)
+      proactive_rt = {
+        count_total =
+          rt.proactive_rt.count_total
+          + (if is_scheduled_autonomous_cycle then 1 else 0);
+        last_ts =
+          (if is_scheduled_autonomous_cycle
+              || ((is_board_reactive || is_mention_reactive)
+                  && has_meaningful_work)
+           then now_ts
+           else rt.proactive_rt.last_ts);
+        visible_count_total =
+          rt.proactive_rt.visible_count_total
+          + (if is_scheduled_autonomous_cycle
+               && (has_text || visible_tool_signal_present)
+             then 1
+             else 0);
+        last_visible_ts =
+          (if is_scheduled_autonomous_cycle
+              && (has_text || visible_tool_signal_present)
+           then now_ts
+           else rt.proactive_rt.last_visible_ts);
+        last_outcome =
+          (if is_scheduled_autonomous_cycle then
+             scheduled_autonomous_outcome_of_result ~has_text
+               ~has_tool_calls:visible_tool_signal_present
+           else rt.proactive_rt.last_outcome);
+        last_reason =
+          (if is_scheduled_autonomous_cycle then
+             (if has_substantive_tools then
+                Printf.sprintf "unified:tools=[%s]"
+                  (String.concat "," tool_names)
+              else if has_validated_evidence then
+                (match validated_evidence with
+                 | Some v ->
+                   Printf.sprintf "unified:validated_evidence(ok=%b,evidence=%d)"
+                     v.ok (List.length v.evidence)
+                 | None -> "unified:validated_evidence(unreachable)")
+              else if not has_text then
+                "unified:"
+                ^ proactive_cycle_outcome_to_string Proactive_silent
+              else "unified:text_response")
+           else
+             (* A successful reactive cycle supersedes a prior typed proactive
+                error. [last_reason] remains display detail only. *)
+             match rt.proactive_rt.last_outcome with
+             | Proactive_error -> "unified:reactive_success"
+             | Proactive_never_started
+             | Proactive_unknown
+             | Proactive_silent
+             | Proactive_text_response
+             | Proactive_tool_use
+             | Proactive_mixed_response -> rt.proactive_rt.last_reason);
+        last_preview =
+          (if not is_scheduled_autonomous_cycle
+           then rt.proactive_rt.last_preview
+           else
+             select_proactive_preview
+               ~previous:rt.proactive_rt.last_preview
+               ~has_text
+               ~is_visible_reply
+               ~has_substantive_tools
+               ~tool_names
+               ~response_text:result.response_text
+               ~validated_evidence_preview:
+                 (Option.map validated_evidence_preview validated_evidence));
+      };
+      (* A successful turn means the keeper is not blocked.
+         Clear unconditionally so stale error strings from previous
+         failures do not persist in the runtime JSON and mislead the
+         dashboard into showing BLOCKED status. *)
+    };
+  } in
+  updated_meta

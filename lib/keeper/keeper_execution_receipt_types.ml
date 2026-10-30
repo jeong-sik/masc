@@ -1,0 +1,213 @@
+(* Keeper_execution_receipt_types — receipt type definitions,
+   outcome/runtime/slot classification, completion contract types, and
+   JSON helpers. Extracted from keeper_execution_receipt.ml during
+   godfile decomposition. *)
+
+(* Receipt outcome classification. Mirrors the TLA+ spec
+   [ReceiptOutcomeSet] (see [specs/keeper-turn-fsm/KeeperTurnFSM.tla] and
+   [specs/keeper-state-machine/KeeperOutcomesConservation.tla]).
+   [`Skipped] corresponds to TLA+ "receipt_skipped" produced by the
+   [PhaseGateSkip] action: the turn reached terminal [Done] without
+   dispatching, so it is a successful no-op rather than a failure or
+   cancellation. JSON projection goes through the typed helpers so that
+   Skipped/Cancelled/Error are not silently folded into one another. *)
+type outcome_kind = Keeper_execution_receipt_outcome_kind.outcome_kind
+
+let outcome_kind_to_string =
+  Keeper_execution_receipt_outcome_kind.outcome_kind_to_string
+let outcome_kind_to_tla_receipt =
+  Keeper_execution_receipt_outcome_kind.outcome_kind_to_tla_receipt
+
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+let error_kind_to_string (Error_kind value) = value
+
+(* TLA+ ReceiptIsAuthoritative invariant
+   (specs/keeper-turn-fsm/KeeperTurnFSM.tla:336):
+     receipt_outcome = "receipt_done" => turn_state = "done"
+   Per ReceiptMatchesState the [Done] state also accepts receipt_skipped
+   (PhaseGateSkip path), so this helper enforces the receipt-authoritative
+   direction for both `Ok and `Skipped: a successful-terminal receipt
+   MUST be paired with turn_state = "done". `Error and `Cancelled are
+   left to ReceiptMatchesState (a separate invariant) and accepted here
+   so this helper is single-concern. *)
+type receipt_authority_violation =
+  { outcome : string
+  ; turn_state : string
+  }
+
+let assert_receipt_authoritative ~outcome ~turn_state =
+  match outcome, turn_state with
+  | `Ok, "done" | `Skipped, "done" -> Ok ()
+  | `Ok, other -> Error { outcome = "receipt_done"; turn_state = other }
+  | `Skipped, other -> Error { outcome = "receipt_skipped"; turn_state = other }
+  | (`Error | `Cancelled), _ -> Ok ()
+;;
+
+type tool_surface =
+  { turn_lane : Keeper_agent_tool_surface.turn_lane }
+
+(* Receipt-level summary of how the in-turn runtime attempt sequence
+   ended.  Closed set across two producer paths:
+    - [Keeper_agent_error.runtime_outcome_of_observation] — 4 values
+       sourced from [Runtime_legacy_runner.runtime_observation].
+     - [keeper_turn_helpers.build_pending_receipt] — emits
+       [Runtime_not_dispatched] for pre-dispatch pending receipts.
+   JSON wire form is the lowercase string via
+   [runtime_outcome_to_string]. *)
+type runtime_outcome =
+  | Runtime_passed_to_next_model
+  | Runtime_completed
+  | Runtime_failed
+  | Runtime_not_observed
+  | Runtime_not_dispatched
+
+let runtime_outcome_to_string = function
+  | Runtime_passed_to_next_model -> "passed_to_next_model"
+  (* Runtime-attempt completion is intentionally distinct from the final turn
+     disposition: a completed provider attempt can still fail the Keeper
+     completion contract. This field therefore keeps its own typed wire. *)
+  | Runtime_completed -> "completed"
+  | Runtime_failed -> "failed"
+  | Runtime_not_observed -> "not_observed"
+  | Runtime_not_dispatched -> "not_dispatched"
+;;
+
+(* Receipt-level observation of visible completion evidence.  This axis is
+   deliberately independent of turn outcome, terminal reason, lifecycle,
+   authorization, and operator disposition.  It records only whether dispatch
+   happened and whether a response or tool execution was observed. *)
+type completion_contract_result =
+  | Completion_observation_unknown
+  | Completion_not_dispatched
+  | Completion_no_visible_output
+  | Completion_response_observed
+  | Completion_tool_execution_observed
+
+module Completion_contract_label = Keeper_completion_contract_result_label
+
+let completion_contract_result_to_label = function
+  | Completion_observation_unknown -> Completion_contract_label.Unknown
+  | Completion_not_dispatched -> Completion_contract_label.Not_dispatched
+  | Completion_no_visible_output -> Completion_contract_label.No_visible_output
+  | Completion_response_observed -> Completion_contract_label.Response_observed
+  | Completion_tool_execution_observed ->
+    Completion_contract_label.Tool_execution_observed
+;;
+
+let completion_contract_result_to_string result =
+  result
+  |> completion_contract_result_to_label
+  |> Completion_contract_label.to_string
+;;
+
+type t =
+  { keeper_name : string
+  ; trace_id : string
+  ; turn_count : int option
+      (** Absolute Keeper turn identity, shared with runtime manifest rows. *)
+  ; agent_core_turn_count : int option
+      (** Internal agent loop iterations within this Keeper turn. *)
+  ; current_task_id : string option
+  ; outcome : outcome_kind
+  ; terminal_reason_code : string
+  ; response_text_present : bool
+  ; completion_contract_result : completion_contract_result
+  ; actionable_signal : Keeper_contract_classifier.actionable_signal option
+    (* World-observation signal captured at turn time. It is independent of
+       completion evidence and does not authorize or block the turn. *)
+  ; tool_surface : tool_surface
+  ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
+  ; sandbox_root : string option
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
+  ; runtime_id : string
+  ; runtime_selected_model : string option
+  ; runtime_attempt_count : int
+  ; runtime_lane_attempt_count : int
+  ; runtime_lane_evidence : Keeper_runtime_walk_evidence.t option
+  ; runtime_fallback_applied : bool
+  ; runtime_outcome : runtime_outcome
+  ; agent_core_internal_runtime_allowed : bool
+  (* Two facts, never one. [degraded_retry_applied] is the lane an earlier
+     turn deferred to and that this turn dispatched on; [degraded_retry_deferred]
+     is the lane this turn leaves for a later one. Both can hold at once: a
+     turn can take up a deferred lane, fail there, and defer again. They used
+     to share one bool and one runtime string, which let a receipt print
+     "retry applied" beside a runtime nothing had run on yet (#37108). *)
+  ; degraded_retry_applied : Keeper_error_classify.degraded_retry option
+  ; degraded_retry_deferred : Keeper_error_classify.degraded_retry option
+  ; stop_reason : Runtime_agent.stop_reason option
+  ; error_kind : error_kind option
+  ; error_message : string option
+  ; started_at : string
+  ; ended_at : string
+  ; extra_system_context_digest : string option
+  ; extra_system_context_injected_size : int option
+  ; extra_system_context_computed_size : int option
+  }
+
+let stop_reason_to_string = function
+  | Runtime_agent.Completed _ -> "completed"
+  | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
+    Printf.sprintf "yielded_to_operation_queued:%d" turns_used
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
+    Printf.sprintf "yielded_to_durable_stimulus:%d" turns_used
+  | Runtime_agent.Yielded_after_repeated_tool_call
+      { turns_used; tool_name; repeated_count; _ } ->
+    Printf.sprintf
+      "yielded_after_repeated_tool_call:%d:%s:%d"
+      turns_used
+      tool_name
+      repeated_count
+  | Runtime_agent.Yielded_after_repeated_assistant_text
+      { turns_used; repeated_count; _ } ->
+    Printf.sprintf
+      "yielded_after_repeated_assistant_text:%d:%d"
+      turns_used
+      repeated_count
+  | Runtime_agent.InputRequired _ ->
+    Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
+;;
+
+(* One typed projection shared by receipts and success decision records.
+   Completion and failure authority remain independent of these observations. *)
+let disposition_of_stop_reason = function
+  | Runtime_agent.Completed _ -> Keeper_turn_disposition.Success
+  | Runtime_agent.InputRequired _ -> Keeper_turn_disposition.Input_required
+  | Runtime_agent.Yielded_to_operation_queued _
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+    Keeper_turn_disposition.Checkpoint
+;;
+
+let receipt_terminal_reason_code_of_stop_reason stop_reason =
+  Keeper_turn_disposition.to_wire (disposition_of_stop_reason stop_reason)
+;;
+
+let sandbox_kind_of_meta (meta : Keeper_meta_contract.keeper_meta) : Keeper_types_profile_sandbox.sandbox_profile =
+  meta.sandbox_profile
+;;
+
+let list_json values = `List (List.map (fun value -> `String value) values)
+
+let string_opt_json = function
+  | Some value -> `String value
+  | None -> `Null
+;;
+
+(* One object per lane so a reader cannot pick up a runtime without the reason
+   it was deferred for, and cannot read the reason of one lane beside the
+   runtime of another. *)
+let degraded_retry_json = function
+  | Some (retry : Keeper_error_classify.degraded_retry) ->
+    `Assoc
+      [ "runtime", `String retry.next_runtime
+      ; ( "reason"
+        , `String
+            (Keeper_error_classify.degraded_retry_reason_to_string
+               retry.fallback_reason) )
+      ]
+  | None -> `Null
+;;

@@ -1,0 +1,22 @@
+[
+  {
+    "executable": "masc",
+    "args": [
+      "build-commit"
+    ],
+    "returncode": 0,
+    "stdout": "c3cb3715e3a36b56ae17c23820b6b7c83914a602\n",
+    "stderr": "[2026-10-26 22:52:25] [INFO] [MCP] Tag registry initialized: 182 tools registered\n",
+    "sha256": "06ee93c99b31a6fca6786c2c6a676c8023b62b0fc854da6616518c21202ad3a8"
+  },
+  {
+    "executable": "masc-tui",
+    "args": [
+      "--build-commit"
+    ],
+    "returncode": 0,
+    "stdout": "c3cb3715e3a36b56ae17c23820b6b7c83914a602\n",
+    "stderr": "",
+    "sha256": "4541bb731d235e000388d8fdfac503d50777da70126869da128cca1be181c9ea"
+  }
+]

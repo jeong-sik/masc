@@ -1,0 +1,1257 @@
+import { html } from 'htm/preact'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useSignalValue, useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
+import { globalShortcutManager } from '../../lib/global-shortcut-manager'
+import {
+  activeIdeFile,
+  focusIdeContextAnchor,
+  ideContextFocus,
+  type IdeContextFocus,
+  type IdeContextFocusRouteLink,
+} from './ide-state'
+import { codebaseForRepositoryId, getIdeDataWorkspaceStore } from './ide-workspace-singleton'
+import { parsePositiveLineString } from '../common/normalize'
+import { IdeExplorer } from './ide-explorer'
+import { IdeEditor, type IdeEditorView } from './ide-editor'
+import { IdeConversationRail } from './ide-conversation-rail'
+import { IdeActivityPanel } from './ide-activity-panel'
+import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
+import { IdeInterject } from './ide-interject'
+import { ExecuteOutputDrawer } from './execute-output-drawer'
+import { IdePresenceStrip } from './ide-presence-strip'
+import { IdePinnedKeepers } from './ide-pinned-keepers'
+import {
+  IDE_LAYERS,
+  IDE_LAYER_LABELS,
+  REVIEW_FOCUS_LAYERS,
+  IdeToolbar,
+  availableLayersForView,
+} from './ide-toolbar'
+import { IdeBreadcrumb } from './ide-breadcrumb'
+import { IdeReviewFocusStrip } from './ide-review-focus-strip'
+import { pinKeeper } from './multi-keeper-pin-store'
+import { OverlayKeeperTrace } from './overlay-keeper-trace'
+import { IdePersistencePanel } from './ide-persistence-panel'
+import { routeLinksForContext } from './ide-context-lens'
+import { lspScopeKey, lspScopeSnapshot, lspStatusRejected, lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
+import { lspDocumentStatus, lspDocumentStatusLabel, lspDocumentStatusDetail, type LspDocumentStatus } from './ide-lsp-document-status'
+import { navigate, route } from '../../router'
+import { activeKeeperName } from '../../keeper-state'
+import { keepers } from '../../store'
+import { dashboardBearerToken } from '../../api/core'
+import { devTokenBootstrapStatus } from '../../api/dev-token'
+import { dashboardWsReady } from '../../dashboard-ws-state'
+import { fetchRepositoryObservation, type Repository } from '../../api/repositories'
+import type { WorkspaceSource } from '../../api/workspace-source'
+import type { WorkspaceFetchIssue } from './ide-data-workspace-store'
+import {
+  parseActive,
+  serializeActive,
+} from '../../../design-system/headless-core/layered-overlay'
+import { viewFromRoute } from './ide-view-route'
+import { useIsMobile } from '../../hooks/use-is-mobile'
+
+type ViewTab = IdeEditorView
+type IdeFocus = 'review'
+type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
+type IdeConnectionTone = 'ok' | 'warn'
+
+export interface IdeStatusbarChip {
+  readonly id: string
+  readonly label: string
+  readonly tone: IdeStatusbarChipTone
+  readonly title: string
+}
+
+export interface IdeStatusbarModel {
+  readonly workspaceLabel: string
+  readonly workspaceBasePath: string | null
+  readonly chips: ReadonlyArray<IdeStatusbarChip>
+  readonly connectionLabel: string
+  readonly connectionTone: IdeConnectionTone
+}
+
+const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
+const IDE_ACTIVITY_POLL_MS = 10_000
+const REVIEW_FOCUS_LAYER_PARAM = REVIEW_FOCUS_LAYERS.join(',')
+const EMPTY_LAYER_PARAM = 'none'
+export const IDE_TREE_WIDTH_STORAGE_KEY = 'dashboard:ide-tree-width'
+export const IDE_TREE_WIDTH_DEFAULT = 230
+export const IDE_TREE_WIDTH_MIN = 180
+export const IDE_TREE_WIDTH_MAX = 360
+const STATUSBAR_LAYER_PRIORITY: ReadonlyArray<string> = [
+  'keeper-trace',
+  'time',
+  'parallel',
+]
+const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
+  source: 'SOURCE',
+  unified: 'UNIFIED',
+  'split-diff': 'SPLIT DIFF',
+  blame: 'BLAME',
+}
+export function normalizeIdeTreeWidth(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return IDE_TREE_WIDTH_DEFAULT
+  return Math.min(IDE_TREE_WIDTH_MAX, Math.max(IDE_TREE_WIDTH_MIN, Math.round(numeric)))
+}
+
+function readStoredIdeTreeWidth(): number {
+  if (typeof window === 'undefined' || window.localStorage === undefined) {
+    return IDE_TREE_WIDTH_DEFAULT
+  }
+  try {
+    const raw = window.localStorage.getItem(IDE_TREE_WIDTH_STORAGE_KEY)
+    if (!raw) return IDE_TREE_WIDTH_DEFAULT
+    try {
+      return normalizeIdeTreeWidth(JSON.parse(raw))
+    } catch {
+      return normalizeIdeTreeWidth(raw)
+    }
+  } catch {
+    return IDE_TREE_WIDTH_DEFAULT
+  }
+}
+
+function writeStoredIdeTreeWidth(width: number): void {
+  if (typeof window === 'undefined' || window.localStorage === undefined) return
+  try {
+    window.localStorage.setItem(IDE_TREE_WIDTH_STORAGE_KEY, JSON.stringify(width))
+  } catch {
+    // localStorage can be unavailable or quota-limited; keep the in-memory width.
+  }
+}
+
+interface IdeStatusbarInput {
+  readonly activeView: ViewTab
+  readonly activeLayers: ReadonlySet<string>
+  readonly activeFilePath: string | null
+  readonly contextFocus?: IdeContextFocus | null
+  readonly findOpen: boolean
+  readonly terminalOpen: boolean
+  readonly railsCollapsed: boolean
+  readonly reviewFocusActive: boolean
+  readonly routeParams: Record<string, string>
+  readonly repositories?: ReadonlyArray<Repository>
+  readonly activeRepositoryId?: string | null
+  readonly workspaceSource?: WorkspaceSource
+  readonly workspaceBasePath?: string | null
+  readonly workspaceIssues?: ReadonlyArray<WorkspaceFetchIssue>
+  readonly dashboardConnected?: boolean
+  readonly lspStatus?: LspStatusSnapshot
+  readonly lspStatusStale?: boolean
+  readonly lspDocument?: LspDocumentStatus | null
+}
+
+function focusFromRoute(raw: string | null | undefined): IdeFocus | null {
+  return raw?.trim().toLowerCase() === 'review' ? 'review' : null
+}
+
+function layersFromRoute(raw: string | null | undefined, focus: IdeFocus | null): ReadonlySet<string> {
+  if (raw?.trim().toLowerCase() === EMPTY_LAYER_PARAM) return new Set()
+  if (focus === 'review' && !raw?.trim()) {
+    return parseActive(REVIEW_FOCUS_LAYER_PARAM, IDE_LAYER_KINDS)
+  }
+  return parseActive(raw ?? '', IDE_LAYER_KINDS)
+}
+
+function keeperFromRoute(): string {
+  const routeKeeper = route.value.params.keeper?.trim()
+  if (routeKeeper) return routeKeeper
+  const active = activeKeeperName.value.trim()
+  if (active) return active
+  return keepers.value[0]?.name?.trim() ?? ''
+}
+
+function routeFocusFile(params: Record<string, string>): string | undefined {
+  return params.file?.trim() || params.file_path?.trim() || params.path?.trim() || undefined
+}
+
+function routeFocusLine(params: Record<string, string>): number | undefined {
+  const raw = params.line?.trim() || params.lineno?.trim()
+  if (!raw) return undefined
+  return parsePositiveLineString(raw)
+}
+
+function routeFocusLabel(params: Record<string, string>, filePath: string): string {
+  const label = params.label?.trim()
+  if (label) return label
+  return filePath.split('/').pop() || filePath
+}
+
+function routeFocusSourceId(params: Record<string, string>, filePath: string, line?: number): string {
+  const sourceId = params.source_id?.trim() || params.source?.trim()
+  if (sourceId) return sourceId
+  return line !== undefined ? `route:${filePath}:${line}` : `route:${filePath}`
+}
+
+function routeParam(params: Record<string, string>, ...keys: ReadonlyArray<string>): string | undefined {
+  for (const key of keys) {
+    const value = params[key]?.trim()
+    if (value) return value
+  }
+  return undefined
+}
+
+function shortStatusbarPath(path: string): string {
+  const trimmed = path.trim()
+  if (!trimmed) return 'no file'
+  const parts = trimmed.split('/').filter(Boolean)
+  if (parts.length <= 2) return trimmed
+  return `${parts.at(-2)}/${parts.at(-1)}`
+}
+
+function compactStatusbarPath(path: string): string | undefined {
+  const normalized = path.trim().replace(/\\/g, '/')
+  if (!normalized) return undefined
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length === 0) return undefined
+  if (parts.length === 1) return parts[0]
+  return `${parts.at(-2)}/${parts.at(-1)}`
+}
+
+function statusbarRepositoryLabel(repository: Repository | undefined): string | undefined {
+  const name = repository?.name?.trim()
+  if (name) return name
+  return compactStatusbarPath(repository?.local_path ?? '') ?? repository?.id?.trim()
+}
+
+// No active repository means the tree is the project root. Naming the
+// first registered repository here put its origin and branch over a tree
+// that is not that repository.
+function activeStatusbarRepository(
+  repositories: ReadonlyArray<Repository> | undefined,
+  activeRepositoryId: string | null | undefined,
+): Repository | undefined {
+  if (!repositories || !activeRepositoryId) return undefined
+  return repositories.find(repository => repository.id === activeRepositoryId)
+}
+
+/**
+ * Derive a browsable https web URL from a git clone URL so the repo-origin
+ * block can render the prototype's `↗` external link.
+ *
+ * Total + deterministic: handles the two common clone forms
+ * (`https://host/owner/repo[.git]` and `git@host:owner/repo[.git]`) and
+ * returns `null` for anything else. A `null` result means "no usable web
+ * link" — the caller omits the `<a>` rather than fabricating a destination.
+ */
+function deriveRepoWebUrl(cloneUrl: string | null | undefined): string | null {
+  const raw = cloneUrl?.trim()
+  if (!raw) return null
+  const stripGitSuffix = (path: string): string => path.replace(/\.git$/i, '')
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+      url.pathname = stripGitSuffix(url.pathname)
+      url.username = ''
+      url.password = ''
+      return url.toString()
+    } catch {
+      return null
+    }
+  }
+  // scp-like syntax: git@host:owner/repo(.git)
+  const scpMatch = /^[^@\s]+@([^:\s]+):(.+)$/.exec(raw)
+  if (scpMatch) {
+    const host = scpMatch[1]
+    const rawPath = scpMatch[2]
+    if (!host || !rawPath) return null
+    const path = stripGitSuffix(rawPath.replace(/^\/+/, ''))
+    if (!path) return null
+    return `https://${host}/${path}`
+  }
+  return null
+}
+
+function statusbarWorkspaceLabel(
+  repositories: ReadonlyArray<Repository> | undefined,
+  activeRepositoryId: string | null | undefined,
+  workspaceSource: WorkspaceSource | undefined,
+): string {
+  const repositoryForId = (repoId: string): string =>
+    statusbarRepositoryLabel(repositories?.find(repository => repository.id === repoId))
+    ?? repoId
+
+  switch (workspaceSource?.kind) {
+    case 'repository':
+      return repositoryForId(workspaceSource.repoId)
+    case 'repository_missing':
+      return `${repositoryForId(workspaceSource.repoId)} fallback`
+    case 'repository_unknown':
+      return `${workspaceSource.repoId} unknown`
+    case 'playground':
+      return `@${workspaceSource.keeper}`
+    case 'playground_missing':
+      return `@${workspaceSource.keeper} fallback`
+    case 'keeper_unknown':
+      return `@${workspaceSource.keeper} unknown`
+    case 'project':
+    case undefined:
+      return statusbarRepositoryLabel(activeStatusbarRepository(repositories, activeRepositoryId)) ?? '(no workspace)'
+  }
+}
+
+function dashboardRuntimeConnected(): boolean {
+  return dashboardWsReady.value
+}
+
+/**
+ * Derive a human-readable label for the disconnected state so the statusbar
+ * tells the user *why* rather than just "reconnecting".
+ */
+function disconnectionReasonLabel(): string {
+  const hasToken = !!dashboardBearerToken()
+  const bootstrap = devTokenBootstrapStatus.value
+
+  if (!hasToken && (bootstrap === 'no_endpoint' || bootstrap === 'invalid_response')) {
+    return 'dashboard · auth required'
+  }
+  if (!hasToken && bootstrap === 'network') {
+    return 'dashboard · server unreachable'
+  }
+  if (!hasToken && (bootstrap === 'fetching' || bootstrap === 'warming')) {
+    return 'dashboard · bootstrapping...'
+  }
+  if (!hasToken) {
+    return 'dashboard · no token'
+  }
+  return 'dashboard · reconnecting'
+}
+
+function statusbarLayerLabel(activeLayers: ReadonlySet<string>): string | null {
+  if (activeLayers.size === 0) return null
+  const labels = STATUSBAR_LAYER_PRIORITY
+    .filter(layer => activeLayers.has(layer))
+    .map(layer => IDE_LAYER_LABELS.get(layer) ?? layer)
+  if (labels.length === 0) return `${activeLayers.size} layers`
+  return labels.length === 1 ? labels[0]! : `${labels[0]} +${labels.length - 1}`
+}
+
+function normalizePrLabel(value: string): string {
+  const normalized = value.trim().replace(/^#/, '')
+  return normalized ? `#${normalized}` : value.trim()
+}
+
+function statusbarTelemetryLabel(params: Record<string, string>): string | undefined {
+  const session = routeParam(params, 'session_id')
+  const operation = routeParam(params, 'operation_id', 'op')
+  const worker = routeParam(params, 'worker_run_id', 'worker')
+  const query = routeParam(params, 'telemetry_q', 'q') ?? routeParam(params, 'log_id', 'log')
+  const first = session ?? operation ?? worker ?? query
+  return first ? `Telemetry ${first}` : undefined
+}
+
+function focusRouteLinkByLabel(
+  focus: IdeContextFocus | null | undefined,
+  ...labels: ReadonlyArray<string>
+): IdeContextFocusRouteLink | undefined {
+  const accepted = new Set(labels.map(label => label.toLowerCase()))
+  return focus?.route_links?.find(link => accepted.has(link.label.trim().toLowerCase()))
+}
+
+function focusRouteParam(
+  focus: IdeContextFocus | null | undefined,
+  labels: ReadonlyArray<string>,
+  ...keys: ReadonlyArray<string>
+): string | undefined {
+  const link = focusRouteLinkByLabel(focus, ...labels)
+  if (!link) return undefined
+  return routeParam(link.params, ...keys)
+}
+
+function statusbarTelemetryLabelFromFocus(focus: IdeContextFocus | null | undefined): string | undefined {
+  const telemetry = focusRouteLinkByLabel(focus, 'Telemetry')
+  if (!telemetry) return undefined
+  const session = routeParam(telemetry.params, 'session_id')
+  const operation = routeParam(telemetry.params, 'operation_id', 'op')
+  const worker = routeParam(telemetry.params, 'worker_run_id', 'worker')
+  const query = routeParam(telemetry.params, 'telemetry_q', 'q') ?? routeParam(telemetry.params, 'log_id', 'log')
+  const first = session ?? operation ?? worker ?? query
+  return first ? `Telemetry ${first}` : undefined
+}
+
+function workspaceIssueLabel(issue: WorkspaceFetchIssue): string {
+  switch (issue.kind) {
+    case 'repositories':
+      return 'repos'
+    case 'tree':
+      return 'tree'
+    case 'file':
+      return issue.file_path ? `file ${shortStatusbarPath(issue.file_path)}` : 'file'
+    case 'blame':
+      return 'blame'
+    case 'diff':
+      return 'diff'
+  }
+}
+
+function workspaceIssueTitle(issues: ReadonlyArray<WorkspaceFetchIssue>): string {
+  return issues
+    .map(issue => {
+      const scope = [
+        issue.file_path ? `file=${issue.file_path}` : null,
+        issue.repo_id ? `repo=${issue.repo_id}` : null,
+        issue.keeper ? `keeper=${issue.keeper}` : null,
+      ].filter((part): part is string => part !== null)
+      const scoped = scope.length > 0 ? ` (${scope.join(', ')})` : ''
+      return `${workspaceIssueLabel(issue)}${scoped}: ${issue.message}`
+    })
+    .join('\n')
+}
+
+function lspUnavailableStatus(status: LspStatusSnapshot | undefined): ReadonlyArray<string> {
+  return (status?.langs ?? [])
+    .filter(lang => !lang.connected)
+    .map(lang => {
+      const error = lang.last_error?.trim()
+      return error ? `${lang.lang}: ${error}` : lang.lang
+    })
+}
+
+function addStatusbarChip(
+  chips: IdeStatusbarChip[],
+  id: string,
+  label: string | undefined,
+  tone: IdeStatusbarChipTone,
+  title: string,
+) {
+  const trimmed = label?.trim()
+  if (!trimmed) return
+  chips.push({ id, label: trimmed, tone, title })
+}
+
+export function deriveIdeStatusbarModel({
+  activeView,
+  activeLayers,
+  activeFilePath,
+  contextFocus = null,
+  findOpen,
+  terminalOpen,
+  railsCollapsed,
+  reviewFocusActive,
+  routeParams,
+  repositories,
+  activeRepositoryId,
+  workspaceSource,
+  workspaceBasePath = null,
+  workspaceIssues = [],
+  dashboardConnected = false,
+  lspStatus,
+  lspStatusStale = false,
+  lspDocument = null,
+}: IdeStatusbarInput): IdeStatusbarModel {
+  const chips: IdeStatusbarChip[] = []
+  const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
+  addStatusbarChip(chips, 'view', viewLabel, reviewFocusActive ? 'brass' : 'ghost', `View: ${viewLabel}`)
+  addStatusbarChip(
+    chips,
+    'file',
+    activeFilePath === null ? 'no file' : shortStatusbarPath(activeFilePath),
+    'ghost',
+    `Active file: ${activeFilePath === null ? 'no file' : activeFilePath}`,
+  )
+
+  const layerLabel = statusbarLayerLabel(activeLayers)
+  addStatusbarChip(chips, 'layers', layerLabel ?? undefined, 'info', layerLabel ? `Active layers: ${layerLabel}` : '')
+  const issueLabels = [...new Set(workspaceIssues.map(workspaceIssueLabel))]
+  addStatusbarChip(
+    chips,
+    'workspace-fetch',
+    issueLabels.length > 0 ? `IDE fetch degraded ${issueLabels.join('/')}` : undefined,
+    'warn',
+    workspaceIssueTitle(workspaceIssues),
+  )
+  const selectedLsp = lspDocument?.filePath === activeFilePath
+    && lspDocument.scope === lspScopeKey(lspScopeSnapshot()) ? lspDocument : null
+  if (activeFilePath !== null) {
+    const healthy = selectedLsp?.connection.kind === 'connected'
+      && selectedLsp.diagnostics.kind === 'complete'
+    addStatusbarChip(chips, 'lsp-document',
+      selectedLsp ? lspDocumentStatusLabel(selectedLsp) : 'LSP not attempted',
+      healthy ? 'info' : 'warn',
+      selectedLsp ? lspDocumentStatusDetail(selectedLsp)
+        : 'No language server observation for this selected file. Browser analysis and Keeper tool usage are separate.')
+  }
+  const lspUnavailable = lspUnavailableStatus(lspStatus)
+  // A rejected payload leaves the reading below untouched, so it would go on
+  // describing a fleet that has since changed. Say that first: which servers
+  // are up matters less than whether the answer is current.
+  addStatusbarChip(
+    chips,
+    'lsp-payload',
+    lspStatusStale ? 'LSP status stale' : undefined,
+    'warn',
+    'The last masc/lspStatus payload could not be read, so the reading beside this is the one before it.',
+  )
+  addStatusbarChip(
+    chips,
+    'lsp-status',
+    lspUnavailable.length > 0 ? `LSP unavailable ${lspUnavailable.length}` : undefined,
+    'warn',
+    lspUnavailable.join('\n'),
+  )
+  if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
+  if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
+  if (railsCollapsed) addStatusbarChip(chips, 'rails', 'rails hidden', 'ghost', 'IDE side rails hidden')
+
+  const routeLine = routeFocusLine(routeParams)
+  const contextLine = contextFocus?.line ?? routeLine
+  const routeSurface = contextFocus?.surface?.trim() || routeParams.surface?.trim()
+  const routeLabel = contextFocus?.label?.trim() || routeParams.label?.trim()
+  const routeFocusParts = [
+    routeSurface,
+    contextLine ? `L${contextLine}` : undefined,
+    routeLabel,
+  ].filter((part): part is string => Boolean(part?.trim()))
+  addStatusbarChip(
+    chips,
+    'focus',
+    routeFocusParts.length > 0 ? routeFocusParts.join(' ') : undefined,
+    'brass',
+    'Route-focused IDE context',
+  )
+
+  const goal = routeParam(routeParams, 'goal_id', 'goal')
+    ?? focusRouteParam(contextFocus, ['Goal'], 'goal')
+  const task = routeParam(routeParams, 'task_id', 'task')
+    ?? focusRouteParam(contextFocus, ['Task'], 'task')
+  const board = routeParam(routeParams, 'board_post_id', 'post')
+    ?? focusRouteParam(contextFocus, ['Board'], 'post')
+  const comment = routeParam(routeParams, 'comment_id', 'comment')
+    ?? focusRouteParam(contextFocus, ['Comment'], 'comment')
+  const pr = routeParam(routeParams, 'pr_id', 'pr')
+    ?? focusRouteParam(contextFocus, ['PR'], 'pr')
+  const git = routeParam(routeParams, 'git_ref', 'ref')
+    ?? focusRouteParam(contextFocus, ['Git'], 'ref')
+  const log = routeParam(routeParams, 'log_id', 'log')
+    ?? focusRouteParam(contextFocus, ['Log'], 'log_id')
+  const telemetry = statusbarTelemetryLabel(routeParams)
+    ?? statusbarTelemetryLabelFromFocus(contextFocus)
+  const keeper = routeParam(routeParams, 'keeper')
+    ?? focusRouteParam(contextFocus, ['Keeper'], 'keeper')
+    ?? contextFocus?.keeper_id
+
+  addStatusbarChip(chips, 'goal', goal ? `Goal ${goal}` : undefined, 'brass', 'Focused goal')
+  addStatusbarChip(chips, 'task', task ? `Task ${task}` : undefined, 'brass', 'Focused task')
+  addStatusbarChip(chips, 'board', board ? `Board ${board}` : undefined, 'info', 'Focused board post')
+  addStatusbarChip(chips, 'comment', comment ? `Comment ${comment}` : undefined, 'info', 'Focused comment')
+  addStatusbarChip(chips, 'pr', pr ? `PR ${normalizePrLabel(pr)}` : undefined, 'info', 'Focused pull request')
+  addStatusbarChip(chips, 'git', git ? `Git ${git}` : undefined, 'ghost', 'Focused git reference')
+  addStatusbarChip(chips, 'log', log ? `Log ${log}` : undefined, 'info', 'Focused runtime log')
+  addStatusbarChip(chips, 'telemetry', telemetry, 'info', 'Focused fleet telemetry')
+  addStatusbarChip(chips, 'keeper', keeper ? `Keeper ${keeper}` : undefined, 'ok', 'Focused keeper')
+
+  return {
+    workspaceLabel: statusbarWorkspaceLabel(repositories, activeRepositoryId, workspaceSource),
+    workspaceBasePath,
+    chips,
+    connectionLabel: dashboardConnected
+      ? 'dashboard · live'
+      : disconnectionReasonLabel(),
+    connectionTone: dashboardConnected ? 'ok' : 'warn',
+  }
+}
+
+function IdeDashboardConnectionChip({
+  label,
+  tone,
+}: {
+  readonly label: string
+  readonly tone: IdeConnectionTone
+}) {
+  const title = tone === 'ok'
+    ? 'Dashboard event transport is live. Repository tree loads and LSP report separate status.'
+    : 'Dashboard event transport is not live. Repository tree loads and LSP report separate status.'
+  return html`
+    <span
+      class=${`tag-chip sm is-${tone}`}
+      data-testid="ide-dashboard-connection"
+      title=${title}
+      aria-label=${`${label}; ${title}`}
+    >${label}</span>
+  `
+}
+
+function paramsWithLayers(
+  params: Record<string, string>,
+  view: ViewTab,
+  activeLayers: ReadonlySet<string>,
+): Record<string, string> {
+  const next: Record<string, string> = { ...params, section: 'ide-shell', view }
+  const serialized = serializeActive(activeLayers)
+  if (serialized) {
+    next.layers = serialized
+  } else if (focusFromRoute(params.focus) === 'review' && view === 'unified') {
+    next.layers = EMPTY_LAYER_PARAM
+  } else {
+    delete next.layers
+  }
+  return next
+}
+
+function paramsWithRails(
+  params: Record<string, string>,
+  view: ViewTab,
+  collapsed: boolean,
+): Record<string, string> {
+  const next: Record<string, string> = { ...params, section: 'ide-shell', view }
+  if (collapsed) {
+    next.rails = 'hidden'
+  } else {
+    delete next.rails
+  }
+  return next
+}
+
+/**
+ * Repo-origin block for the IDE top bar — prototype `.ide-repo` chrome.
+ *
+ * Renders the active repository's origin clone URL (copy-on-click), an
+ * optional GitHub-style web link, and the default branch using the vendored
+ * keeper-v2 `.ide-repo` / `.ide-remote` / `.ide-web` / `.br` skin classes.
+ *
+ */
+// The repository list carries no git state — deriving it is two subprocesses
+// per repository — so the status bar asks for the one repository it shows.
+// Nothing is spent on the four repositories nobody is looking at.
+function RepositoryGitStatus({ repositoryId }: { readonly repositoryId: string }) {
+  const [status, setStatus] = useState<Repository['git_status']>(undefined)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setStatus(undefined)
+    fetchRepositoryObservation(repositoryId, { signal: controller.signal })
+      .then(repository => {
+        if (controller.signal.aborted) return
+        setStatus(repository?.git_status ?? null)
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+        setStatus(null)
+      })
+    return () => controller.abort()
+  }, [repositoryId])
+
+  if (status === undefined) {
+    return html`<span data-state="loading" title="git status --porcelain=v1 조회 중">변경 확인 중</span>`
+  }
+  return repositoryGitStatusView(status)
+}
+
+function repositoryGitStatusView(status: Repository['git_status']) {
+  if (!status) {
+    return html`<span data-state="missing" title="repository git_status 필드 미수신">변경 상태 없음</span>`
+  }
+  if (status.state === 'unavailable') {
+    return html`
+      <span data-state="unavailable" title=${status.error || 'git status unavailable'}>
+        변경 확인 실패
+      </span>
+    `
+  }
+  if (!status.dirty) {
+    return html`<span data-state="clean" title="git status --porcelain=v1: 변경 없음">변경 없음</span>`
+  }
+  const title = [
+    `changed ${status.changed_files}`,
+    `staged ${status.staged_files}`,
+    `unstaged ${status.unstaged_files}`,
+    `untracked ${status.untracked_files}`,
+    `conflicted ${status.conflicted_files}`,
+  ].join(' · ')
+  return html`<span data-state="dirty" title=${title}>${status.changed_files}개 변경</span>`
+}
+
+function IdeRepoOrigin({
+  repositories,
+  activeRepositoryId,
+}: {
+  readonly repositories: ReadonlyArray<Repository> | undefined
+  readonly activeRepositoryId: string | null | undefined
+}) {
+  const [copied, setCopied] = useState(false)
+  const repository = activeStatusbarRepository(repositories, activeRepositoryId)
+  if (!repository) return null
+
+  const origin = repository.url.trim()
+  const branch = repository.default_branch.trim()
+  const webUrl = deriveRepoWebUrl(origin)
+
+  const copyOrigin = () => {
+    if (!origin) return
+    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+    if (!clipboard) return
+    void clipboard.writeText(origin).then(() => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1100)
+    }).catch(() => {
+      // Clipboard can be blocked by permissions; leave the label unchanged.
+    })
+  }
+
+  return html`
+    <span
+      class="ide-repo"
+      data-testid="ide-repo-origin"
+      title=${`이 keeper 워크트리의 origin (git remote) · ${repository.local_path || repository.name}`}
+    >
+      ${origin
+        ? html`
+          <button
+            type="button"
+            class="ide-remote mono"
+            title="origin 클론 URL 복사"
+            onClick=${copyOrigin}
+          >${copied ? '✓ 복사됨' : origin}</button>
+        `
+        : html`<span class="ide-remote mono" data-stub="repo-origin">origin URL 미수신</span>`}
+      ${webUrl
+        ? html`<a class="ide-web" href=${webUrl} target="_blank" rel="noreferrer" title="웹에서 보기 ↗">↗</a>`
+        : null}
+      ${branch ? html`<span class="br" title="기본 브랜치 (default_branch)">${branch}</span>` : null}
+      ${' · '}
+      <${RepositoryGitStatus} repositoryId=${repository.id} />
+    </span>
+  `
+}
+
+export function IdeShell() {
+  // App-lifetime singleton: the store survives IdeShell unmount (tab change),
+  // so tree expansion / repo selection / diff / file content persist across
+  // navigation instead of being disposed and refetched. Do NOT dispose on
+  // unmount — the store is intentionally shared across all IdeShell mounts.
+  const workspaceStore = useMemo(() => getIdeDataWorkspaceStore(), [])
+  const isMobileViewport = useIsMobile()
+
+  const diffRows = useSubscribedSnapshot(
+    workspaceStore.diffRows,
+    workspaceStore.subscribeDiffRows,
+  )
+  const repositories = useSubscribedValue(
+    workspaceStore.repositories,
+    workspaceStore.subscribeRepositories,
+  )
+  const activeRepositoryId = useSubscribedValue(
+    workspaceStore.activeRepositoryId,
+    workspaceStore.subscribeActiveRepositoryId,
+  )
+  const workspaceSource = useSubscribedValue(
+    workspaceStore.workspaceSource,
+    workspaceStore.subscribeWorkspaceSource,
+  )
+  const workspaceBasePath = useSubscribedValue(
+    workspaceStore.workspaceBasePath,
+    workspaceStore.subscribeWorkspaceBasePath,
+  )
+  const workspaceIssues = useSubscribedValue(
+    workspaceStore.workspaceIssues,
+    workspaceStore.subscribeWorkspaceIssues,
+  )
+  const activeCodebase = codebaseForRepositoryId(activeRepositoryId)
+  const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
+
+  useEffect(() => {
+    const unsubscribe = activeIdeFile.subscribe(setActiveFilePath)
+    return () => unsubscribe()
+  }, [])
+
+  const [contextFocus, setContextFocus] = useState(ideContextFocus.value)
+  useEffect(() => {
+    const unsubscribe = ideContextFocus.subscribe(setContextFocus)
+    return () => unsubscribe()
+  }, [])
+
+  const routeFileFocus = routeFocusFile(route.value.params)
+  const routeLineFocus = routeFocusLine(route.value.params)
+  const routeSurfaceFocus = route.value.params.surface?.trim() || 'Route'
+  const routeLabelFocus = routeFileFocus ? routeFocusLabel(route.value.params, routeFileFocus) : ''
+  const routeSourceFocus = routeFileFocus
+    ? routeFocusSourceId(route.value.params, routeFileFocus, routeLineFocus)
+    : ''
+  const routeKeeperFocus = route.value.params.keeper?.trim() || undefined
+  const routeGoalFocus = routeParam(route.value.params, 'goal_id', 'goal')
+  const routeTaskFocus = routeParam(route.value.params, 'task_id', 'task')
+  const routeBoardPostFocus = routeParam(route.value.params, 'board_post_id', 'post')
+  const routeCommentFocus = routeParam(route.value.params, 'comment_id', 'comment')
+  const routePrFocus = routeParam(route.value.params, 'pr_id', 'pr')
+  const routeGitFocus = routeParam(route.value.params, 'git_ref', 'ref')
+  const routeLogFocus = routeParam(route.value.params, 'log_id', 'log')
+  const routeSessionFocus = routeParam(route.value.params, 'session_id')
+  const routeOperationFocus = routeParam(route.value.params, 'operation_id', 'op')
+  const routeWorkerRunFocus = routeParam(route.value.params, 'worker_run_id', 'worker')
+  const routeTelemetryFocus = routeParam(route.value.params, 'telemetry_q', 'q') ?? routeLogFocus
+
+  useEffect(() => {
+    if (!routeFileFocus) return
+    const telemetry = Boolean(
+      routeTelemetryFocus
+      || routeSessionFocus
+      || routeOperationFocus
+      || routeWorkerRunFocus,
+    )
+    focusIdeContextAnchor({
+      file_path: routeFileFocus,
+      line: routeLineFocus,
+      surface: routeSurfaceFocus,
+      label: routeLabelFocus,
+      source_id: routeSourceFocus,
+      keeper_id: routeKeeperFocus,
+      route_links: routeLinksForContext({
+        filePath: routeFileFocus,
+        line: routeLineFocus,
+        surface: routeSurfaceFocus,
+        label: routeLabelFocus,
+        sourceId: routeSourceFocus,
+        goalId: routeGoalFocus,
+        taskId: routeTaskFocus,
+        boardPostId: routeBoardPostFocus,
+        commentId: routeCommentFocus,
+        prId: routePrFocus,
+        gitRef: routeGitFocus,
+        logId: routeLogFocus,
+        sessionId: routeSessionFocus,
+        operationId: routeOperationFocus,
+        workerRunId: routeWorkerRunFocus,
+        telemetryQuery: routeTelemetryFocus,
+        keeperId: routeKeeperFocus,
+        telemetry,
+      }),
+    }, 'route')
+  }, [
+    routeFileFocus,
+    routeLineFocus,
+    routeSurfaceFocus,
+    routeLabelFocus,
+    routeSourceFocus,
+    routeKeeperFocus,
+    routeGoalFocus,
+    routeTaskFocus,
+    routeBoardPostFocus,
+    routeCommentFocus,
+    routePrFocus,
+    routeGitFocus,
+    routeLogFocus,
+    routeSessionFocus,
+    routeOperationFocus,
+    routeWorkerRunFocus,
+    routeTelemetryFocus,
+  ])
+
+  const activeFocus = focusFromRoute(route.value.params.focus)
+  const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
+  const lspStatus = useSignalValue(lspStatusSnapshot)
+  const lspStatusStale = useSignalValue(lspStatusRejected)
+  const selectedDocumentLsp = useSignalValue(lspDocumentStatus)
+  const reviewFocusActive = activeFocus === 'review' && activeView === 'unified'
+  const activeLayers = availableLayersForView(
+    layersFromRoute(route.value.params.layers, reviewFocusActive ? activeFocus : null),
+    activeView,
+  )
+  const terminalOpen = route.value.params.terminal === 'open'
+  // The reference IDE keeps the drawer in the shell at all times. A route can
+  // still opt out explicitly, while only `terminal=open` starts live output.
+  const terminalVisible = route.value.params.terminal !== 'hidden'
+  const findOpen = route.value.params.find === 'open'
+  const terminalKeeper = keeperFromRoute()
+  const railsCollapsed = route.value.params.rails === 'hidden'
+  const effectiveRailsCollapsed = railsCollapsed || isMobileViewport
+  const treeCollapsed = isMobileViewport
+    ? route.value.params.tree !== 'open'
+    : route.value.params.tree === 'hidden'
+  const [workContextOpen, setWorkContextOpen] = useState(false)
+  const [treeWidth, setTreeWidth] = useState<number>(readStoredIdeTreeWidth)
+  const statusbar = deriveIdeStatusbarModel({
+    activeView,
+    activeLayers,
+    activeFilePath,
+    contextFocus,
+    findOpen,
+    terminalOpen,
+    railsCollapsed: effectiveRailsCollapsed,
+    reviewFocusActive,
+    routeParams: route.value.params,
+    repositories,
+    activeRepositoryId,
+    workspaceSource,
+    workspaceBasePath,
+    workspaceIssues,
+    dashboardConnected: dashboardRuntimeConnected(),
+    lspStatus,
+    lspStatusStale,
+    lspDocument: selectedDocumentLsp,
+  })
+
+  useEffect(() => {
+    const next = viewFromRoute(route.value.params.view)
+    setActiveView(current => current === next ? current : next)
+  }, [route.value.params.view])
+
+  const handleViewChange = (next: ViewTab) => {
+    setActiveView(next)
+    const leavingImplicitReview =
+      next !== 'unified'
+      && focusFromRoute(route.value.params.focus) === 'review'
+      && !route.value.params.layers?.trim()
+    const compatibleLayers = availableLayersForView(
+      leavingImplicitReview ? new Set() : activeLayers,
+      next,
+    )
+    const nextParams = paramsWithLayers(route.value.params, next, compatibleLayers)
+    delete nextParams.find
+    if (next !== 'unified' && focusFromRoute(nextParams.focus) === 'review') {
+      delete nextParams.focus
+      if (nextParams.layers?.trim().toLowerCase() === EMPTY_LAYER_PARAM) delete nextParams.layers
+    }
+    navigate('code', nextParams)
+  }
+
+  const handleLayersChange = (nextLayers: ReadonlySet<string>) => {
+    navigate('code', paramsWithLayers(route.value.params, activeView, nextLayers))
+  }
+
+  const handleRailsToggle = () => {
+    navigate('code', paramsWithRails(route.value.params, activeView, !railsCollapsed))
+  }
+
+  const handleTreeToggle = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+    }
+    if (isMobileViewport) {
+      if (treeCollapsed) nextParams.tree = 'open'
+      else delete nextParams.tree
+    } else if (treeCollapsed) {
+      delete nextParams.tree
+    } else {
+      nextParams.tree = 'hidden'
+    }
+    navigate('code', nextParams)
+  }
+
+  const handleTerminalOpen = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+      terminal: 'open',
+    }
+    if (terminalKeeper) nextParams.keeper = terminalKeeper
+    navigate('code', nextParams)
+  }
+
+  // The route keeper is the one the chat and the terminal address.
+  const handleOpenKeeper = (keeperName: string) => {
+    navigate('code', {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+      keeper: keeperName,
+    })
+  }
+
+  const handleTerminalStop = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+    }
+    delete nextParams.terminal
+    navigate('code', nextParams)
+  }
+
+  const handleFindOpen = () => {
+    navigate('code', {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+      find: 'open',
+    })
+  }
+
+  // Mod+F inside the IDE opens the current-file find, as every editor does;
+  // outside it the browser keeps its own find. The editor surface is
+  // contenteditable, so the binding has to fire from inside inputs too. A
+  // click on empty IDE space leaves focus on the body, which counts as
+  // inside while the IDE is the page on screen.
+  const shellRef = useRef<HTMLElement>(null)
+  const findOpenRef = useRef(findOpen)
+  findOpenRef.current = findOpen
+  const handleFindOpenRef = useRef(handleFindOpen)
+  handleFindOpenRef.current = handleFindOpen
+  useEffect(() => globalShortcutManager.register({
+    id: 'ide.find.open',
+    chord: { key: 'f', modifiers: ['Mod'] },
+    description: 'Find in the current file',
+    scope: 'global',
+    preserveInInputs: true,
+    when: (event) => {
+      const shell = shellRef.current
+      const target = event.target
+      const inside = shell !== null && target instanceof Node
+        && (shell.contains(target) || target === shell.ownerDocument.body)
+      return inside
+    },
+    action: (event) => {
+      event.preventDefault()
+      if (!findOpenRef.current) {
+        handleFindOpenRef.current()
+        return
+      }
+      const input = shellRef.current?.querySelector<HTMLInputElement>('[data-testid="ide-find-panel"] input[type="search"]')
+      input?.focus()
+      input?.select()
+    },
+  }), [])
+
+  const handleFindClose = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+    }
+    delete nextParams.find
+    navigate('code', nextParams)
+  }
+
+  const setPersistentTreeWidth = (nextWidth: number) => {
+    const normalized = normalizeIdeTreeWidth(nextWidth)
+    setTreeWidth(normalized)
+    writeStoredIdeTreeWidth(normalized)
+  }
+
+  const handleTreeResizePointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = treeWidth
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setPersistentTreeWidth(startWidth + moveEvent.clientX - startX)
+    }
+    const stopTracking = () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopTracking)
+      window.removeEventListener('pointercancel', stopTracking)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopTracking, { once: true })
+    window.addEventListener('pointercancel', stopTracking, { once: true })
+  }
+
+  const handleTreeResizeKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      setPersistentTreeWidth(treeWidth - 10)
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      setPersistentTreeWidth(treeWidth + 10)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      setPersistentTreeWidth(IDE_TREE_WIDTH_MIN)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      setPersistentTreeWidth(IDE_TREE_WIDTH_MAX)
+    }
+  }
+
+  return html`
+    <section
+      ref=${shellRef}
+      class="ide-plane-shell ide-v2-surface v2-ide-surface ss-surface bg-surface-page"
+      role="region"
+      aria-label="Code IDE shell"
+      data-terminal-open=${terminalVisible ? 'true' : 'false'}
+      data-mobile-viewport=${isMobileViewport ? 'true' : 'false'}
+      data-rails-collapsed=${effectiveRailsCollapsed ? 'true' : 'false'}
+      data-tree-collapsed=${treeCollapsed ? 'true' : 'false'}
+      data-tree-width=${String(treeWidth)}
+    >
+      <h1 class="sr-only">MASC IDE</h1>
+      <div class="ide-top">
+        <button
+          type="button"
+          class="ide-v2-action ide-v2-tree-toggle"
+          aria-expanded=${treeCollapsed ? 'false' : 'true'}
+          aria-controls="ide-file-tree"
+          aria-label=${treeCollapsed ? '파일 트리 펼치기' : '파일 트리 접기'}
+          title=${treeCollapsed ? '파일 트리 펼치기' : '파일 트리 접기'}
+          data-testid="ide-tree-toggle"
+          onClick=${handleTreeToggle}
+        >${treeCollapsed ? '⊞' : '⊟'}</button>
+        <${IdeRepoOrigin}
+          repositories=${repositories}
+          activeRepositoryId=${activeRepositoryId}
+        />
+        <${IdeToolbar}
+          activeView=${activeView}
+          activeLayers=${activeLayers}
+          onViewChange=${handleViewChange}
+          onLayersChange=${handleLayersChange}
+          railsCollapsed=${railsCollapsed}
+          onRailsToggle=${handleRailsToggle}
+          onTerminalOpen=${handleTerminalOpen}
+          onFindOpen=${handleFindOpen}
+          onFindClose=${handleFindClose}
+          findOpen=${findOpen}
+          compact=${true}
+        />
+        <span class="spacer" />
+        <details
+          class="ide-v2-operational-status"
+          data-testid="ide-statusbar"
+          aria-label="IDE operational status"
+        >
+          <summary
+            class="tag-chip sm is-warn"
+            data-testid="ide-readiness-notice"
+            title="IDE shell is observational; LSP, overlay, and shell flows are not a verified execution boundary."
+          >
+            <span
+              class="ide-v2-connection-dot"
+              data-state=${statusbar.connectionTone}
+              aria-label=${statusbar.connectionLabel}
+            >●</span>
+            실험 · 미검증
+          </summary>
+          <div
+            class="ide-v2-operational-status-popover"
+            aria-label="IDE operational status"
+          >
+            <span
+              class="tag-chip sm is-brass"
+              data-testid="ide-statusbar-workspace"
+              title=${statusbar.workspaceBasePath
+                ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
+                : undefined}
+            >${statusbar.workspaceLabel}</span>
+            ${statusbar.chips.map(chip => html`
+              <span
+                key=${chip.id}
+                class=${`tag-chip sm is-${chip.tone}`}
+                title=${chip.title}
+                data-testid=${`ide-statusbar-chip-${chip.id}`}
+              >${chip.label}</span>
+            `)}
+            <${IdeDashboardConnectionChip}
+              label=${statusbar.connectionLabel}
+              tone=${statusbar.connectionTone}
+            />
+          </div>
+        </details>
+        <${IdePresenceStrip} compact=${true} pollMs=${IDE_ACTIVITY_POLL_MS} />
+        <${IdePinnedKeepers} onOpenKeeper=${handleOpenKeeper} />
+        <button
+          type="button"
+          class="ide-v2-action ide-v2-rail-toggle"
+          aria-pressed=${railsCollapsed ? 'true' : 'false'}
+          aria-label=${railsCollapsed ? '활동 레일 펼치기' : '활동 레일 접기'}
+          title=${railsCollapsed ? '활동 레일 펼치기' : '활동 레일 접기'}
+          data-testid="ide-rail-toggle"
+          onClick=${handleRailsToggle}
+        >${railsCollapsed ? '⊢' : '⊣'}</button>
+      </div>
+      <div
+        class="ide-plane-grid ide-body ${treeCollapsed ? 'no-tree' : ''} ${railsCollapsed ? 'no-rail' : ''}"
+        role="presentation"
+        style=${`--ide-tree-width: ${treeWidth}px;`}
+      >
+        ${treeCollapsed ? null : html`
+          <div id="ide-file-tree" class="ide-plane-tree ide-tree v2-ide-panel" data-testid="ide-file-tree">
+            <${IdeExplorer}
+              fileTreeStore=${workspaceStore.fileTreeStore}
+              workspaceSource=${workspaceStore.workspaceSource}
+              subscribeWorkspaceSource=${workspaceStore.subscribeWorkspaceSource}
+              repositories=${workspaceStore.repositories}
+              activeRepositoryId=${workspaceStore.activeRepositoryId}
+              subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+              onRepositoryChange=${workspaceStore.setActiveRepositoryId}
+              onRepositoryScan=${workspaceStore.scanRepositories}
+              subscribeRepositories=${workspaceStore.subscribeRepositories}
+            />
+            <button
+              type="button"
+              class="ide-v2-tree-resize"
+              aria-label="Resize file tree"
+              aria-orientation="vertical"
+              aria-valuemin=${IDE_TREE_WIDTH_MIN}
+              aria-valuemax=${IDE_TREE_WIDTH_MAX}
+              aria-valuenow=${treeWidth}
+              data-testid="ide-tree-resize"
+              onPointerDown=${handleTreeResizePointerDown}
+              onKeyDown=${handleTreeResizeKeyDown}
+            />
+          </div>
+        `}
+        <div
+          class="ide-plane-editor ide-ed v2-ide-panel"
+        >
+          ${reviewFocusActive
+            ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
+            : html`<${IdeBreadcrumb} />`}
+          <${IdeEditor}
+            activeView=${activeView}
+            activeLayers=${activeLayers}
+            documentStore=${workspaceStore.documentStore}
+            ownershipStore=${workspaceStore.ownershipStore}
+            diffRows=${() => diffRows}
+            findOpen=${findOpen}
+            onFindOpen=${handleFindOpen}
+            onFindClose=${handleFindClose}
+            onKeeperLineSelect=${pinKeeper}
+          />
+          <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
+          ${terminalVisible
+            ? html`<${ExecuteOutputDrawer}
+                keeperName=${terminalKeeper}
+                streamEnabled=${terminalOpen}
+                compact=${true}
+                onStop=${handleTerminalStop}
+              />`
+            : null}
+        </div>
+        ${effectiveRailsCollapsed
+          ? null
+          : html`
+            <div
+              class="ide-plane-conversation ide-rail v2-ide-panel"
+              data-testid="ide-right-rail"
+            >
+              <div class="ide-rail-scroll">
+                <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
+                    <${IdeActivityPanel}
+                      activeFile=${activeFilePath}
+                      codebase=${activeCodebase}
+                      diffRows=${diffRows}
+                      pollMs=${IDE_ACTIVITY_POLL_MS}
+                      compact=${true}
+                    />
+                    <div class="ide-v2-work-context">
+                      <button
+                        type="button"
+                        aria-expanded=${workContextOpen ? 'true' : 'false'}
+                        onClick=${() => setWorkContextOpen(current => !current)}
+                      >Work Context</button>
+                      ${workContextOpen ? html`
+                        <div class="ide-plane-context-stack" data-testid="ide-right-context-stack">
+                          <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
+                          <${IdePersistencePanel} keeperName=${terminalKeeper} />
+                        </div>
+                        <div class="ide-plane-primary-rail" data-testid="ide-primary-conversation-rail">
+                          <${IdeConversationRail} />
+                        </div>
+                      ` : null}
+                    </div>
+                </div>
+              </div>
+            </div>
+          `}
+      </div>
+      <${IdeInterject} keeperName=${terminalKeeper} compact=${terminalVisible} />
+    </section>
+  `
+}

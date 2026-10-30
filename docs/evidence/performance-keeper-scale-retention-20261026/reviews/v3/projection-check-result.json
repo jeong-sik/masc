@@ -1,0 +1,34 @@
+{
+  "schema": "masc.source-extracted-projection-fix.v1",
+  "producer_sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+  "reader_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+  "cases": [
+    {
+      "case": "main rejects invalid raw-state-mirrored follower",
+      "outcome": "rejected",
+      "error": "ProbeError",
+      "detail": "public original payload differs from exact SQLite snapshot"
+    },
+    {
+      "case": "main accepts correct c3cb projected Running follower",
+      "outcome": "accepted"
+    },
+    {
+      "case": "reader rejects invalid raw-state-mirrored follower",
+      "outcome": "rejected",
+      "error": "AssertionError",
+      "detail": ""
+    },
+    {
+      "case": "reader accepts correct c3cb projected Running follower",
+      "outcome": "accepted"
+    },
+    {
+      "case": "main accepts terminal batch after raw members settle",
+      "outcome": "accepted"
+    }
+  ],
+  "projection_fix_verified": true,
+  "masc_processes_started": 0,
+  "scope": "Pure Python validator behavior only; c3cb native state projection read from source, not executed."
+}

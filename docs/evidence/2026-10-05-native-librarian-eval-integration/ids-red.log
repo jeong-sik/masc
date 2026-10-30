@@ -1,0 +1,8 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-4149035100.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/native40759-reconcile-20261005/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/native40759-reconcile-20261005 bin/masc_librarian_preflight_eval.exe
+File "bin/masc_librarian_preflight_eval.ml", line 115, characters 18-21:
+115 |         {turn_ref=Ids.Turn_ref.make ~trace_id:case.id ~absolute_turn:1;
+                        ^^^
+Error: Unbound module Ids

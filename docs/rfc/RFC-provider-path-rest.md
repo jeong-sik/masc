@@ -1,0 +1,317 @@
+---
+rfc: "provider-path-rest"
+title: "사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다"
+status: Draft
+created: 2026-09-15
+updated: 2026-09-26
+author: claude
+supersedes: []
+superseded_by: null
+related: ["0433", "0370"]
+---
+
+# RFC: 사용량 제한은 그 경로만 쉬게 한다 (provider-path-rest)
+
+## 0. 요약
+
+지금은 한 경로(runtime 후보)가 rate limit 이나 quota 소진으로 실패하면 Keeper 전체가
+600초를 쉰다. 그동안 예약 wake 가 와도 턴이 뜨지 않는다. 그런데 턴 드라이버는 그 순간
+이미 쉬지 않는 다른 경로를 다음 턴용으로 골라 두었다. heartbeat 가 그 선택을 읽지 않는다.
+
+이 RFC 는 **누가 쉬는가**를 바로잡는다. 백오프를 없애거나 줄이는 일이 아니다.
+
+- 쉼은 제한을 받은 경로의 것이다. 그 사실은 이미 경로별 저장소 두 곳에 기록된다.
+- Keeper 는 **다음에 보낼 경로**가 쉬는 동안만 기다린다. 다음 경로가 쉬지 않으면
+  기다리지 않고 남은 입력을 그 경로로 잇는다.
+- 다음에 보낼 경로가 쉬면, 다음 턴이 쉬지 않는 경로로 시작할 수 있는 가장 이른 시각까지
+  기다린다. 그동안 wake 는 잠을 끊지 못한다(#34653 보장 유지).
+- 쉬는 길이는 cadence 에서 뗀다.
+
+### 대기의 의존성이 바뀐 경우 (2026-09-26)
+
+대기는 실패한 dispatch의 배정·후보 순서·binding에 속한다. heartbeat는 턴 진입 전에
+이 값을 한 Runtime snapshot에서 읽는다. 기존 sleep 경계에서 현재 snapshot과
+비교해 배정 변경, 같은 이름의 lane 편집, credential binding 교체를 발견하면
+대기를 끝내고 현재 배정으로 다시 판단한다. 이전 dispatch의 deferred suffix도
+메모리와 durable 저장소에서 해제한다. 관련 없는 설정 변경은 대기를 깨지 않는다.
+
+대기를 결정할 때 관측된 경로의 rest가 다른 실행의 성공으로 풀린 경우에도 재평가한다.
+이 근거는 dispatch 결정에 함께 실어, 결정과 sleep 준비 사이에 일어난 회복도 읽는다.
+저장된 rest가 없이 실패 응답만으로 정한 대기는 그 응답의 기한을 유지한다.
+Board·schedule 알림과 cadence 변경은 동일 provider 대기를 조기에 끝내지 않는다.
+stop은 어느 대기든 종료한다. 대기를 깨우는 동작은 Queue source를 ACK하지 않는다.
+
+직접 채팅도 턴 진입 때 읽은 dispatch snapshot을 저장된 재시도의 관측 근거로 사용한다.
+Owner는 정확히 그 재시도가 여전히 Queued일 때만 후보와 `not_before`를 함께 갱신한다.
+새 배정도 쉬고 있다면 새 경로의 release 시각을 저장한다. 기존 시각만 해제해서
+쉬는 경로를 조기에 부르지 않는다. 체크포인트·입력·완료된 효과·gate 의무는 유지한다.
+이 관측 근거는 프로세스 안에만 존재한다. 재시작으로 근거가 사라져도 성공으로
+해석하지 않고, 저장된 `not_before`를 유지한다.
+
+Owner의 cooling 관측은 기존 sleep 경계를 사용한다. 상태가 그대로이면 전체 readiness
+조회나 변경 알림을 발생시키지 않는다. 재시도 변경 또는 기한 도달 때만 drain을 깨운다.
+
+## 1. 지금 동작 (2026-09-15 실측, #36583)
+
+### 1.1 wake 가 턴이 되기까지
+
+keeper 13명, 약 02:00Z~08:50Z, `schedule_due` 62건. wake 도착은 event queue
+disposition 의 `source_arrived_at`, 소비한 턴은 `raw-traces` 의 `run_started` 로 쟀다.
+
+| wake 와 소비 턴 사이에 있던 일 | 건수 | 중앙값 | 최대 |
+|---|---|---|---|
+| 아무 일 없음 | 17 | 74초 | 854초 |
+| 앞 턴이 도는 중 | 16 | 182초 | 1,886초 |
+| rate limit 실패 (서버 멈춤 없음) | 11 | 928초 | 2,936초 |
+| 서버 멈춤 | 15 | 2,094초 | 6,018초 |
+
+rate limit 이 끼면 11건 모두 392초를 넘었다. 같은 서버 세대 안에서 rate limit 으로 끝난
+턴 뒤 다음 턴까지 39건의 중앙값은 683초였다. 성공한 턴 뒤는 390건 중앙값 80초였다.
+
+### 1.2 쉬는 동안 다른 경로가 있었나
+
+서버 로그 두 개(`masc-server-restart-20260915-context.log`, `masc-server-56516.log`)에서
+`rate-limited failure route; backing off next cycle by 600s` 13건을 바로 앞의
+`keeper cycle FAILED` 줄과 짝지었다.
+
+| 실패 줄의 `deferred_next_runtime` | 건수 | 내용 |
+|---|---|---|
+| 다른 경로 (`ollama_cloud.ollama-cloud-deepseek-v4-1-flash`) | 6 | glm-coding 이 durable progress 뒤 429. 드라이버가 deepseek 를 다음 경로로 넘겼는데 Keeper 가 600초 쉼 |
+| `none` | 7 | 이 턴에서 lane 후보를 모두 시도함. deepseek 는 timeout·반복 생성, kimi 는 주간 한도(AuthError), 마지막 glm 이 429 |
+
+analyst 15:29:15 KST 로그가 한 턴에 모든 사실을 보여 준다.
+
+```
+same-run runtime retry deferred after durable run progress (checkpoint_observed=true)
+deferred frozen runtime lane suffix after checkpoint failed_runtime=glm-coding.glm-5.3-flash next_runtime=ollama_cloud.ollama-cloud-deepseek-v4-1-flash remaining=2 reason=rate_limit
+keeper cycle FAILED runtime=glm-coding.glm-5.3-flash ... deferred_next_runtime=ollama_cloud.ollama-cloud-deepseek-v4-1-flash
+rate-limited failure route; backing off next cycle by 600s (cadence 600s, cap 900s); stimuli queued meanwhile are served when it ends
+```
+
+다음 턴은 14분 뒤 deepseek 로 떴고 성공했다.
+
+## 2. 기존 장치가 왜 못 했나
+
+새 장치를 만들기 전에 이미 있는 것을 따라갔다. 좌표는 main `265dd506c1` 기준이다.
+
+1. **같은 턴 안의 교체는 된다.** `lane_should_retry`(`lib/keeper/keeper_turn_driver.ml:247`)는
+   429 를 `Runtime_attempt_fsm.should_try_next`(`lib/runtime/runtime_attempt_fsm.ml:21`)로 넘겨
+   다음 후보로 간다.
+2. **durable progress 뒤에는 다음 턴으로 넘긴다.** 같은 턴 재시도가 막히면 남은 후보를
+   `on_retry_deferred`(`keeper_turn_driver.ml:667`)가 `deferred_runtime_lane` 으로 넘긴다.
+   다음 턴은 `quota_ordered_deferred_runtime_lane`(`:170`)로 쉬는 경로를 뒤로 민다.
+3. **경로별 쉼 증거도 이미 있다.** 429 는 `Runtime_lane_preference.note_rate_limit`
+   (후보 행 단위, `keeper_turn_driver.ml:547`), 402·HardQuota 는 `Runtime_quota_window`
+   (자격 증명 단위)에 남는다. 둘 다 keeper 사이에 공유된다.
+4. **heartbeat 가 이 선택을 안 읽는다.** `failure_route_rate_limited_backoff_hint`
+   (`lib/keeper/keeper_heartbeat_loop.ml:212`)는 `failure.route` 만 보고
+   `failure.deferred_runtime_lane` 은 보지 않는다. rate limit 이면 무조건 Keeper 전체를
+   `Serve_wakeup_after_duration` 으로 재운다(`:1524`). **배선 문제다.**
+5. **쉬는 길이가 cadence 에 묶여 있다.** `retry_backoff_sec`
+   (`lib/keeper_runtime/keeper_runtime_failure_route.ml:307`)는 힌트가 없으면
+   `max cadence floor`, 힌트가 있어도 `max hint cadence` 다. provider 가 5초라고 해도
+   cadence 600초를 잔다. `.mli` 는 "힌트가 없으면 floor" 라고 적고 있어 코드와 다르다.
+6. **실패한 턴 뒤에는 cadence 를 다 잔다.** `last_wake_source`(`:1579`)는 자극을 ack 한
+   사이클만 곧바로 다음 사이클로 보낸다. 실패한 턴은 ack 하지 않고, wake 신호는 그 턴을
+   띄울 때 이미 썼다. 그래서 드라이버가 다음 경로를 넘겨 둔 non-rest 실패
+   (lane-smith 05:12Z `Generation_repeated` → 다음 경로 glm)도 605초를 기다렸다.
+
+## 3. 바꾸는 것 (Phase 1)
+
+### 3.1 규칙
+
+> Keeper 는 **다음에 보낼 경로**가 쉬는 동안만 기다린다.
+
+실패한 사이클 뒤 다음 사이클은 아래 표로 정한다.
+
+| 실패가 넘긴 것 | 다음 경로 상태 | 다음 사이클 |
+|---|---|---|
+| deferred suffix 있음 | 걷는 순서의 첫 경로가 쉬지 않음 | 기다리지 않는다. 남은 입력이 있으면 곧바로 그 suffix 로 턴을 잇는다 |
+| deferred suffix 있음 | 첫 경로가 쉼 | 다음 턴의 첫 경로가 쉬지 않게 되는 가장 이른 시각까지 기다린다 (3.3 끝) |
+| suffix 없음, 여러 후보, route 가 `Rate_limited`·`Hard_quota` | 새 walk의 머리가 쉬지 않음 | 일반 실패 cadence를 유지한다. 마지막 후보의 quota로 다른 후보까지 쉬지 않는다 |
+| suffix 없음, 여러 후보, route 가 `Rate_limited`·`Hard_quota` | 새 walk의 머리가 쉼 | 새 walk의 관측된 release 시각까지 기다린다 |
+| suffix 없음, 단일·미해결 배정, route 가 `Rate_limited`·`Hard_quota` | 실패한 경로가 쉼 | 실패 응답과 관측된 경로의 release 중 늦은 시각까지 기다린다 |
+| 그 밖 | — | 지금처럼 cadence |
+
+suffix가 없으면 이 턴의 후보 순회가 끝났다는 뜻이다. 모든 후보가 같은 이유나
+같은 기한으로 쉬는 것은 아니다. 마지막 Claude 후보가 quota reset을 알려 줬더라도
+앞선 HTTP·Codex 후보가 일시적인 연결 오류로 실패했다면 그 reset을 레인 전체의
+대기시간으로 적용하지 않는다. 새 walk의 머리가 사용 가능하면 일반 실패 cadence로
+돌아간다. 즉시 같은 입력을 반복하는 deferred continuation을 만들지는 않는다.
+단일 후보와 해소할 수 없는 배정은 실패 응답 자체의 대기 근거를 유지한다.
+
+heartbeat 와 채팅 lane 은 이 표 하나(`Keeper_turn_driver.next_dispatch_after_failure`)를
+같이 읽는다. 같은 실패에 두 lane 이 다르게 답하지 않는다.
+
+### 3.2 상태 모양
+
+새로 저장하는 상태는 없다. 경로별 사실은 기존 두 저장소가 가진다. 아래는 그 사실에서
+사이클마다 다시 계산하는 파생값이다.
+
+```ocaml
+(* 한 경로의 지금 상태 — Keeper_turn_driver *)
+type path_rest =
+  | Path_serving
+  | Path_resting of { release_at : float }
+
+(* 실패한 사이클 뒤 다음 사이클 — Keeper_heartbeat_loop *)
+type wait_basis = Failure_response | Observed_path_rest
+
+type after_failure =
+  | Continue_on_deferred_lane of { next_runtime_id : string }
+  | Wait_for_path_release of
+      { release_at : float
+      ; waiting_on : string  (* 풀리기를 기다리는 runtime 또는 assignment id *)
+      ; basis : wait_basis
+      }
+
+(* 두 lane 이 같이 읽는 결정 — Keeper_turn_driver *)
+type next_dispatch =
+  | Dispatch_now of { runtime_id : string }
+  | Wait_until of
+      { release_at : float; waiting_on : string; basis : wait_basis }
+```
+
+`keepalive_turn_outcome.provider_backoff : provider_backoff option` 을
+`after_failure : after_failure option` 으로 바꾼다. `None` 은 cadence 다.
+
+### 3.3 한 경로가 언제 풀리나
+
+| 증거 | 풀리는 시각 |
+|---|---|
+| 429, provider 가 시간을 말함 (`retry_after = Some h`) | `noted_at + max h 1초` |
+| 429, 시간을 말하지 않음 | `noted_at + rate_limit_backoff_floor_sec` (60초) |
+| 402·HardQuota, 리셋 시각을 말함 (`Until t`) | `t` |
+| 402·HardQuota, 말하지 않음 (`Observed`) | 판단한 시각 + `rate_limit_backoff_cap_sec` (900초) |
+
+제공자가 말한 유효한 Retry-After와 quota reset은 그대로 보존한다(#39190).
+`rate_limit_backoff_cap_sec`는 시각을 말하지 않은 경우의 fallback에만 적용한다.
+cadence는 어디에도 들어가지 않는다. Retry-After가 후속 요청 전 대기를 나타낸다는
+[RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3)을 따른다.
+
+429 와 402 를 다르게 두는 근거는 이미 타입에 있다. `retry_class` 문서가 `Rate_limited` 를
+"soft 429 throttle", `Hard_quota` 를 "account-level quota/balance exhaustion" 으로
+구분한다. 분 단위로 풀리는 제한과 결제해야 풀리는 소진을 같은 길이로 쉬게 할 이유가 없다.
+
+`Observed` 는 기록 시각을 갖지 않으므로 판단한 시각부터 센다. 기록 시각을 더하면
+`note_observed_exhausted` 호출처 13곳이 바뀌어 이번 범위에서 뺐다.
+
+단일·미해결 배정의 실패 응답은 저장소에 관측이 없어도 자기 경로의 휴식 근거다.
+여러 후보의 배정에서는 마지막 실패 응답 하나를 다른 후보의 휴식으로 확대하지 않는다.
+
+풀리는 시각과 걷는 순서는 같이 움직이지 않을 수 있다. 다음 턴은
+`quota_ordered_deferred_runtime_lane` 순서로 걷고, 그 순서는 쉬는 증거가 있는 경로를
+뒤로 민다. provider 가 말한 시각은 그 시각에 증거가 지워져 순서도 같이 풀린다. 말하지 않은
+증거는 성공이 올 때까지 뒤로 밀린 채다. 제공자가 말한 시각은 fallback cap으로 자르지
+않으므로 대기와 순서가 같은 시각에 풀린다.
+
+그래서 suffix 가 쉬면 대기 시각은 **걷는 순서의 첫 경로**가 정한다.
+
+- 첫 경로가 쉬지 않으면 곧바로 잇는다.
+- 첫 경로가 쉬면 그 경로가 풀리는 시각까지 기다린다. 뒤의 경로가 더 일찍 풀리고 그 시각에
+  순서도 풀린다면(제공자가 말한 시각) 그 시각까지만 기다린다. 그때 그 경로가 앞으로 온다.
+- 뒤의 경로가 일찍 풀려도 순서가 안 풀리면 대기를 줄이지 않는다. 줄이면 다음 턴이 아직
+  쉬는 첫 경로를 부른다.
+
+suffix 가 없으면 같은 규칙을 assignment 의 새 walk 순서(선언 순서 → quota·backpressure
+강등)에 적용한다. 단일·미해결 배정만 실패 응답의 쉼과 비교해 늦은 쪽을 쓴다.
+
+### 3.4 chat lane
+
+`Keeper_direct_runtime_continuation.retry_not_before` 는 3.1 의 같은 결정을 읽는다.
+suffix 의 walk 머리가 쉬지 않으면 곧바로 claim 할 수 있고, 머리가 쉬면 그 시각까지
+미룬다. 지금은 실패한 경로의 쉼을 기다린다.
+
+### 3.5 구현 범위
+
+- `lib/keeper_runtime/keeper_runtime_failure_route.{ml,mli}`: `retry_backoff_sec` 를
+  `path_rest_sec ~cap_sec ~retry_class ~retry_after_hint` 로 바꾼다. cadence 인자는 없앤다.
+- `lib/keeper/keeper_turn_driver.{ml,mli}`: 3.3 표를 계산하는 `path_rest`, walk 머리 판단
+  (`deferred_lane_rest`, `assignment_walk_rest`), 두 lane 이 같이 읽는
+  `next_dispatch_after_failure`.
+- `lib/keeper/keeper_heartbeat_loop.{ml,mli}`: `after_failure` 와 결정 함수, sleep 분기.
+  `provider_backoff` 와 `failure_route_rate_limited_backoff_hint` 는 지운다. lib 안에서
+  아무도 부르지 않고 테스트만 부르던 `next_keepalive_sleep_duration_sec` 도 지운다.
+- `lib/keeper/keeper_direct_runtime_continuation.ml`: `retry_not_before` 가 3.4 를 따른다.
+- 테스트: 8절.
+
+## 4. #34653 보장은 그대로인가
+
+#34653 이 막은 것: 소진된 경로를 wake 가 거듭 깨워 같은 호출을 되풀이하는 것
+(2026-09-09, 41분에 실패 턴 183회, 중앙값 30초 간격).
+
+지키는 성질을 **P** 로 부른다.
+
+> 실패로 쉬기 시작한 경로에, 그 경로가 풀리기 전에 wake 때문에 다시 보내지 않는다.
+
+1. **다음 경로가 쉬면 wake 가 잠을 못 끊는다.** `Wait_for_path_release` 는 rate limit·
+   quota 에서 `Serve_wakeup_after_duration` 을 그대로 쓴다.
+2. **이어가는 턴은 쉬는 경로에서 시작하지 않는다.** `Continue_on_deferred_lane` 은 걷는
+   순서의 첫 경로가 쉬지 않을 때만 나온다. suffix 에는 실패한 경로가 들어 있지 않다.
+   대기가 끝나는 시각에도 첫 경로는 쉬지 않는다(3.3 끝).
+3. **이어가기는 끝이 있다.** 이어간 턴이 또 실패하면 드라이버는 그 경로를 뺀 더 짧은
+   suffix 를 넘기거나 suffix 를 넘기지 않는다. 한 입력에 이어가기는 lane 후보 수를 넘지
+   못한다. 누적 횟수를 세는 게이트는 없다. suffix 의 길이가 줄어드는 것이 끝을 만든다.
+
+바뀌는 것도 있다. provider 가 시간을 말하지 않은 429 가 **유일한 경로**에서 나면 지금은
+cadence(라이브 600초)를 자고, 바뀐 뒤에는 60초를 잔다. 그런 Keeper 는 그 경로를 약
+10배 자주 두드린다. #34653 의 30초 중앙값보다는 두 배 이상 느리고, wake 는 여전히 잠을
+끊지 못한다. 주간 한도처럼 오래가는 소진이 402·HardQuota 로 오면 900초를 잔다.
+provider 가 주간 한도를 429 로 보내면(#34653 의 ollama cloud 108건) 60초 간격이 된다.
+이 비용을 받아들일지가 이 RFC 에서 리뷰어가 정할 한 가지다.
+
+## 5. 세 번째 문제를 범위에 넣나
+
+#36583 의 세 번째 항목(실패한 턴이 못 먹은 자극이 남았는데 cadence 를 다 기다림)은
+**deferred suffix 가 있을 때만** 넣는다.
+
+- 넣는 이유: suffix 가 있으면 다음 턴은 같은 턴의 재실행이 아니라 다른 경로로의 이어가기다.
+  "진전 없는 턴을 곧바로 다시 돌리지 않는다" 는 cadence 의 이유가 해당하지 않는다.
+  3.1 의 첫 줄이 rest 실패와 non-rest 실패를 가리지 않고 이 경우를 덮는다.
+- 빼는 부분: suffix 가 없으면 cadence 를 유지한다. 그때 곧바로 다시 돌리면 방금 실패한
+  경로에 같은 입력을 되풀이한다. 끝을 만드는 장치가 없다.
+
+## 6. Phase 2 (이번 범위 밖)
+
+Phase 1 뒤에도 P 가 안 닿는 곳이 셋 있다. 모두 지금도 있는 동작이다.
+
+- lane walk 는 쉬는 후보를 **뒤로 밀 뿐 부른다**(RFC-0433 의 ordering-only 결정).
+  이어간 턴의 첫 경로가 실패하면 walk 가 쉬는 후보까지 갈 수 있다.
+- Keeper 가 쉬지 않을 때 wake 로 시작한 턴도 첫 경로가 쉬면 그 경로를 부른다.
+- 대기가 끝난 순간과 턴이 실제로 뜨는 순간 사이에 다른 keeper 가 같은 후보에 새 쉼을 적으면
+  (후보 관측은 프로세스 전역이다), 다음 턴은 다시 판단하지 않고 그 후보를 부른다. 남은 입력
+  없이 `Continue_on_deferred_lane` 이 나와 cadence 를 잔 뒤도 같다.
+  같은 binding의 새로운 거부가 기존 대기 중 reset을 연장해도, 이 RFC의 대기 무효화는
+  이미 정한 deadline을 연장하지 않는다. 명시적 reset과 시각 없는 fallback을 구분한
+  dispatch admission에서 해결해야 하며, heartbeat와 직접 채팅 모두에 남아 있다.
+
+Phase 2 는 walk 가 쉬는 후보를 건너뛰고, 모두 쉬면 호출 없이 "모든 경로가 쉼" 을 typed
+terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지 않는다" 와 부딪히므로
+따로 설계한다.
+
+## 7. 고르지 않은 대안
+
+- **cap·floor 숫자만 줄이기**: 누가 쉬는가를 그대로 두고 증상만 누른다. 거부한다.
+- **Phase 2 를 먼저**: walk 에 admission 을 넣는 일은 RFC-0433 을 뒤집는다. 드라이버가 이미
+  고른 경로를 heartbeat 가 읽게 하는 것만으로 측정한 13건 중 6건이 풀린다.
+- **cadence 유지**: 힌트가 있어도 cadence 로 올리는 것은 provider 가 말한 사실을 버리는 일이다.
+
+## 8. 검증
+
+- 결정 함수 테스트: 첫 경로가 쉬지 않는 suffix → 이어가기, 모두 쉬는 suffix → 순서가
+  풀리는 가장 이른 시각, 순서가 안 풀리는 뒤 경로는 대기를 줄이지 않음, quota 리셋 시각,
+  suffix 없는 여러 후보의 rate limit → 새 walk 머리가 사용 가능하면 cadence, 쉬면 그 release까지; 단일 경로 힌트 5초 →
+  5초(cadence 무관), 그 밖 → cadence.
+- 채팅 lane: 쉬지 않는 머리 → 곧바로 claim, 쉬는 머리 → 풀릴 때까지.
+- #34653 회귀: 유일한 경로가 쉬는 동안 결정은 `Serve_wakeup_after_duration` 대기이고,
+  `interruptible_sleep` 은 그 대기 중 wakeup 을 끝까지 미룬다(기존 테스트 유지).
+- 배포 뒤 실측: `rate-limited failure route` 대신 새 로그 줄의 `waiting_on` 과
+  다음 턴의 runtime 을 짝지어, 다른 경로가 있었는데 기다린 건수가 0 인지 본다.
+
+## 9. 확인 못 한 것
+
+- 오늘 13건의 429 가 `Retry-After` 를 가졌는지 모른다. 로그에 힌트가 안 찍힌다.
+  새 로그 줄에 풀리는 시각을 찍는다.
+- 측정한 11건 중 suffix 가 있던 건수는 서버 로그가 없는 세대(PID 57313)에서 셀 수 없었다.
+- 한 자격 증명을 나눠 쓰는 두 행은 429 를 따로 기록한다(RFC-0433). 이어간 경로가 같은
+  계정이면 한 번 더 429 를 받고 suffix 가 줄어든다.

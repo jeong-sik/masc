@@ -1,0 +1,13 @@
+name = "masc_msx_save"
+description = """
+Checkpoint the MSX machine under a name.
+
+Save the complete workspace MSX machine to a named checkpoint without advancing it. Includes CPU, RAM, VRAM, cartridge SRAM, disk bytes and open file positions; survives server restart. Replaces the named slot."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "slot"
+type = "string"
+description = "Checkpoint name: 1..64 letters, digits, underscores or hyphens. Default quick."
+default = "quick"

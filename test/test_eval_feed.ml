@@ -1,0 +1,481 @@
+open Alcotest
+
+module Eval_feed = Dashboard_eval_feed
+
+let test_counter = ref 0
+
+let tmpdir prefix =
+  incr test_counter;
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "%s_%d_%d_%d" prefix (Unix.getpid ()) !test_counter
+         (int_of_float (Unix.gettimeofday () *. 1000.0)))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+
+let mkdir_p path =
+  let rec aux current = function
+    | [] -> ()
+    | seg :: rest ->
+        let next = Filename.concat current seg in
+        (try Unix.mkdir next 0o755
+         with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        aux next rest
+  in
+  let segments = String.split_on_char '/' path in
+  match segments with
+  | "" :: rest -> aux "/" rest
+  | _ -> aux "." segments
+
+let write_file path content =
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc
+
+(* ── Sample JSON fixtures ────────────────────────────────────────── *)
+
+let valid_verdict_json =
+  {|{
+    "schema_version": 1,
+    "all_passed": true,
+    "coverage": 0.85,
+    "layer_results": [
+      {
+        "layer_name": "ToolSelected",
+        "passed": true,
+        "score": 0.95,
+        "evidence": ["correct tool chosen"],
+        "detail": null
+      },
+      {
+        "layer_name": "CompletesWithin",
+        "passed": true,
+        "score": 1.0,
+        "evidence": ["3/5 turns"],
+        "detail": "within budget"
+      },
+      {
+        "layer_name": "ContainsText",
+        "passed": false,
+        "score": null,
+        "evidence": ["missing expected output", "partial match"],
+        "detail": null
+      }
+    ]
+  }|}
+
+let valid_snapshot_json =
+  Printf.sprintf
+    {|{
+    "agent_name": "keeper-a",
+    "session_id": "sess-001",
+    "worker_run_id": "run-abc-123",
+    "timestamp": 1700000000.0,
+    "coverage": 0.85,
+    "baseline_status": "Improved",
+    "verdict": %s
+  }|}
+    valid_verdict_json
+
+(* ── Verdict parsing tests ───────────────────────────────────────── *)
+
+let test_parse_valid_verdict () =
+  let json = Yojson.Safe.from_string valid_verdict_json in
+  match Eval_feed.read_verdict_json json with
+  | Error msg -> fail ("unexpected error: " ^ msg)
+  | Ok verdict ->
+      check int "schema_version" 1 verdict.schema_version;
+      check bool "all_passed" true verdict.all_passed;
+      check (float 0.001) "coverage" 0.85 verdict.coverage;
+      check int "layer count" 3 (List.length verdict.layer_results);
+      let first = List.nth verdict.layer_results 0 in
+      check string "first layer name" "ToolSelected" first.layer_name;
+      check bool "first passed" true first.passed;
+      (match first.score with
+      | Some s -> check (float 0.001) "first score" 0.95 s
+      | None -> fail "expected score for first layer");
+      check (list string) "first evidence" [ "correct tool chosen" ]
+        first.evidence;
+      let third = List.nth verdict.layer_results 2 in
+      check string "third layer name" "ContainsText" third.layer_name;
+      check bool "third passed" false third.passed;
+      check bool "third score is none" true (Option.is_none third.score);
+      check (list string) "third evidence"
+        [ "missing expected output"; "partial match" ]
+        third.evidence
+
+let test_parse_wrong_schema_version () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema_version": 2, "all_passed": true, "coverage": 0.5, "layer_results": []}|}
+  in
+  match Eval_feed.read_verdict_json json with
+  | Ok _ -> fail "expected error for schema_version 2"
+  | Error msg ->
+      check bool "error mentions schema_version" true
+        (String.length msg > 0);
+      check bool "error mentions version 2" true
+        (try
+           ignore (Str.search_forward (Str.regexp_string "2") msg 0);
+           true
+         with Not_found -> false)
+
+let test_parse_missing_schema_version () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"all_passed": true, "coverage": 0.5, "layer_results": []}|}
+  in
+  match Eval_feed.read_verdict_json json with
+  | Ok _ -> fail "expected error for missing schema_version"
+  | Error _ -> ()
+
+(* An explicitly empty layer list stays valid; only an absent field is an
+   error. Folding the two together is what let a damaged report read as a
+   passing verdict with nothing to check (#29355). *)
+let test_parse_missing_required_field () =
+  List.iter
+    (fun (name, body) ->
+      match Eval_feed.read_verdict_json (Yojson.Safe.from_string body) with
+      | Ok _ -> fail ("expected error for a report without " ^ name)
+      | Error msg ->
+          check bool
+            ("error names " ^ name)
+            true
+            (try
+               ignore (Str.search_forward (Str.regexp_string name) msg 0);
+               true
+             with Not_found -> false))
+    [ ("all_passed", {|{"schema_version": 1, "coverage": 0.5, "layer_results": []}|})
+    ; ("coverage", {|{"schema_version": 1, "all_passed": true, "layer_results": []}|})
+    ; ( "layer_results"
+      , {|{"schema_version": 1, "all_passed": true, "coverage": 0.5}|} )
+    ]
+
+let test_parse_wrong_typed_required_field () =
+  List.iter
+    (fun (name, body) ->
+      match Eval_feed.read_verdict_json (Yojson.Safe.from_string body) with
+      | Ok _ -> fail ("expected error for a non-conforming " ^ name)
+      | Error _ -> ())
+    [ ("all_passed", {|{"schema_version": 1, "all_passed": "yes", "coverage": 0.5, "layer_results": []}|})
+    ; ("layer_results", {|{"schema_version": 1, "all_passed": true, "coverage": 0.5, "layer_results": {}}|})
+    ]
+
+let test_parse_empty_layer_results () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema_version": 1, "all_passed": true, "coverage": 1.0, "layer_results": []}|}
+  in
+  match Eval_feed.read_verdict_json json with
+  | Error msg -> fail ("unexpected error: " ^ msg)
+  | Ok verdict ->
+      check bool "all_passed" true verdict.all_passed;
+      check int "layer count" 0 (List.length verdict.layer_results)
+
+let test_parse_layer_missing_name () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+        "schema_version": 1, "all_passed": false, "coverage": 0.0,
+        "layer_results": [{"passed": true, "evidence": []}]
+      }|}
+  in
+  match Eval_feed.read_verdict_json json with
+  | Ok _ -> fail "expected error for missing layer_name"
+  | Error msg ->
+      check bool "error mentions layer_name" true
+        (try
+           ignore
+             (Str.search_forward (Str.regexp_string "layer_name") msg 0);
+           true
+         with Not_found -> false)
+
+(* ── read_latest tests ───────────────────────────────────────────── *)
+
+let test_list_agents_nonexistent_dir () =
+  let result = Eval_feed.list_agents ~base_path:"/nonexistent/path" in
+  check int "empty result" 0 (List.length result)
+
+let test_list_agents_with_dirs () =
+  let base = tmpdir "eval_agents" in
+  let eval_root = Filename.concat (Filename.concat base ".agent_core") "eval" in
+  mkdir_p (Filename.concat eval_root "keeper-b");
+  mkdir_p (Filename.concat eval_root "keeper-a");
+  write_file (Filename.concat eval_root "readme.txt") "ignore me";
+  let result = Eval_feed.list_agents ~base_path:base in
+  check (list string) "sorted agent dirs" [ "keeper-a"; "keeper-b" ] result
+
+let test_read_latest_empty_dir () =
+  let base = tmpdir "eval_empty" in
+  let result = Eval_feed.read_latest ~base_path:base ~agent_name:"keeper-a" ~limit:10 in
+  check int "empty result" 0 (List.length result)
+
+let test_read_latest_nonexistent_dir () =
+  let result =
+    Eval_feed.read_latest ~base_path:"/nonexistent/path"
+      ~agent_name:"keeper-a" ~limit:10
+  in
+  check int "empty result" 0 (List.length result)
+
+let test_read_latest_with_files () =
+  let base = tmpdir "eval_files" in
+  let eval_dir =
+    Filename.concat
+      (Filename.concat (Filename.concat base ".agent_core") "eval")
+      "keeper-a"
+  in
+  mkdir_p eval_dir;
+  (* Write two valid snapshot files *)
+  write_file
+    (Filename.concat eval_dir "001.json")
+    (Printf.sprintf
+       {|{
+         "worker_run_id": "run-001",
+         "timestamp": 1700000001.0,
+         "coverage": 0.80,
+         "baseline_status": "Unchanged",
+         "verdict": %s
+       }|}
+       valid_verdict_json);
+  write_file
+    (Filename.concat eval_dir "002.json")
+    (Printf.sprintf
+       {|{
+         "worker_run_id": "run-002",
+         "session_id": "sess-002",
+         "timestamp": 1700000002.0,
+         "coverage": 0.90,
+         "baseline_status": "Improved",
+         "verdict": %s
+       }|}
+       valid_verdict_json);
+  (* Write one invalid file *)
+  write_file (Filename.concat eval_dir "003.json") {|{"invalid": true}|};
+  (* Write a non-json file that should be ignored *)
+  write_file (Filename.concat eval_dir "readme.txt") "ignore me";
+  let results =
+    Eval_feed.read_latest ~base_path:base ~agent_name:"keeper-a" ~limit:10
+  in
+  check int "two valid snapshots" 2 (List.length results);
+  (* Sorted by filename descending, so 002 comes first *)
+  let first = List.nth results 0 in
+  check string "first worker_run_id" "run-002" first.worker_run_id;
+  check string "first agent_name" "keeper-a" first.agent_name;
+  check (float 0.001) "first coverage" 0.85 first.verdict.coverage;
+  (match first.session_id with
+  | Some sid -> check string "first session_id" "sess-002" sid
+  | None -> fail "expected session_id for first snapshot");
+  (match first.baseline_status with
+  | Some bs -> check string "first baseline_status" "Improved" bs
+  | None -> fail "expected baseline_status for first snapshot");
+  let second = List.nth results 1 in
+  check string "second worker_run_id" "run-001" second.worker_run_id;
+  check (float 0.001) "second coverage" 0.85 second.verdict.coverage
+
+let test_read_latest_with_limit () =
+  let base = tmpdir "eval_limit" in
+  let eval_dir =
+    Filename.concat
+      (Filename.concat (Filename.concat base ".agent_core") "eval")
+      "keeper-b"
+  in
+  mkdir_p eval_dir;
+  for i = 1 to 5 do
+    write_file
+      (Filename.concat eval_dir (Printf.sprintf "%03d.json" i))
+      (Printf.sprintf
+         {|{
+           "worker_run_id": "run-%03d",
+           "timestamp": %f,
+           "coverage": 0.5,
+           "verdict": %s
+         }|}
+         i
+         (1700000000.0 +. float_of_int i)
+         valid_verdict_json)
+  done;
+  let results =
+    Eval_feed.read_latest ~base_path:base ~agent_name:"keeper-b" ~limit:2
+  in
+  check int "limited to 2" 2 (List.length results)
+
+let with_owned_boundary_fixture f =
+  let top = tmpdir "eval_owned_boundary" in
+  let base = Filename.concat top "workspace" in
+  let root = Filename.concat (Filename.concat base ".agent_core") "eval" in
+  let outside = Filename.concat top "outside" in
+  mkdir_p (Filename.concat root "local");
+  mkdir_p outside;
+  write_file (Filename.concat outside "999.json") valid_snapshot_json;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree top)
+    (fun () -> f ~base ~root ~outside)
+
+let check_no_snapshots ~base name =
+  check int "foreign snapshots are not read" 0
+    (List.length (Eval_feed.read_latest ~base_path:base ~agent_name:name ~limit:10))
+
+let test_owned_boundary_parent_component () =
+  with_owned_boundary_fixture @@ fun ~base ~root:_ ~outside:_ ->
+  let sibling = Filename.concat (Filename.concat base ".agent_core") "outside" in
+  mkdir_p sibling;
+  write_file (Filename.concat sibling "999.json") valid_snapshot_json;
+  check_no_snapshots ~base "../outside"
+
+let test_owned_boundary_linked_agent () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside ->
+  Unix.symlink outside (Filename.concat root "linked");
+  check_no_snapshots ~base "linked";
+  check (list string) "linked agent is not advertised" ["local"]
+    (Eval_feed.list_agents ~base_path:base)
+
+let test_owned_boundary_linked_json () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside ->
+  let dir = Filename.concat root "local" in
+  write_file (Filename.concat dir "001.json") valid_snapshot_json;
+  Unix.symlink (Filename.concat outside "999.json") (Filename.concat dir "999.json");
+  check int "only the retained regular snapshot is read" 1
+    (List.length (Eval_feed.read_latest ~base_path:base ~agent_name:"local" ~limit:10))
+
+let check_owned_boundary_linked_root parent =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside ->
+  let target = if parent then Filename.dirname root else root in
+  Fs_compat.remove_tree target;
+  let external_root = if parent then Filename.concat outside "eval" else outside in
+  mkdir_p (Filename.concat external_root "local");
+  write_file (Filename.concat (Filename.concat external_root "local") "999.json") valid_snapshot_json;
+  Unix.symlink outside target;
+  check_no_snapshots ~base "local";
+  check (list string) "linked storage root is not enumerated" []
+    (Eval_feed.list_agents ~base_path:base)
+
+let test_owned_boundary_literal_names () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside:_ ->
+  List.iter (fun name ->
+    let dir = Filename.concat root name in mkdir_p dir;
+    write_file (Filename.concat dir "001.json") valid_snapshot_json;
+    check int "literal single-component agent remains readable" 1
+      (List.length (Eval_feed.read_latest ~base_path:base ~agent_name:name ~limit:1)))
+    ["-"; "에이전트"]
+
+let test_owned_boundary_relative_base () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside:_ ->
+  write_file (Filename.concat (Filename.concat root "local") "001.json") valid_snapshot_json;
+  let previous = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Sys.chdir previous) (fun () ->
+    Sys.chdir (Filename.dirname base);
+    check (list string) "relative base preserves the same agents" ["local"]
+      (Eval_feed.list_agents ~base_path:"workspace");
+    check int "relative base preserves retained snapshots" 1
+      (List.length (Eval_feed.read_latest ~base_path:"workspace" ~agent_name:"local" ~limit:10)))
+
+let test_owned_boundary_missing_is_quiet () =
+  with_owned_boundary_fixture @@ fun ~base ~root ~outside:_ ->
+  Fs_compat.remove_tree root;
+  let cursor = (Log.Ring.bounds ()).total - 1 in
+  check (list string) "fresh workspace has no eval agents" [] (Eval_feed.list_agents ~base_path:base);
+  check_no_snapshots ~base "local";
+  check int "fresh-boot absence emits no warning" 0
+    (List.length (Log.Ring.recent ~since_seq:cursor ~module_filter:"Dashboard" ()))
+
+(* ── Serialization roundtrip ─────────────────────────────────────── *)
+
+let test_snapshot_json_roundtrip () =
+  let json = Yojson.Safe.from_string valid_snapshot_json in
+  match Eval_feed.read_verdict_json (Yojson.Safe.Util.member "verdict" json) with
+  | Error msg -> fail ("verdict parse failed: " ^ msg)
+  | Ok verdict ->
+      let snapshot : Eval_feed.eval_snapshot =
+        {
+          agent_name = "keeper-a";
+          session_id = Some "sess-001";
+          worker_run_id = "run-abc-123";
+          timestamp = 1700000000.0;
+          verdict;
+          baseline_status = Some "Improved";
+        }
+      in
+      let json_out = Eval_feed.snapshot_to_json snapshot in
+      let agent =
+        Safe_ops.json_string ~default:"" "agent_name" json_out
+      in
+      check string "agent_name roundtrip" "keeper-a" agent;
+      let verdict_j = Yojson.Safe.Util.member "verdict" json_out in
+      let sv =
+        Safe_ops.json_int ~default:0 "schema_version" verdict_j
+      in
+      check int "schema_version in output" 1 sv
+
+let test_verdict_to_json () =
+  let verdict : Eval_feed.swiss_verdict_json =
+    {
+      schema_version = 1;
+      all_passed = false;
+      coverage = 0.42;
+      layer_results =
+        [
+          {
+            layer_name = "L1";
+            passed = true;
+            score = Some 0.9;
+            evidence = [ "ok" ];
+            detail = None;
+          };
+        ];
+    }
+  in
+  let json = Eval_feed.verdict_to_json verdict in
+  let ap = Safe_ops.json_bool ~default:true "all_passed" json in
+  check bool "all_passed false" false ap;
+  let cov = Safe_ops.json_float ~default:0.0 "coverage" json in
+  check (float 0.001) "coverage" 0.42 cov
+
+(* ── Test suite ──────────────────────────────────────────────────── *)
+
+let () =
+  run "Dashboard_eval_feed"
+    [
+      ( "owned_boundary", [
+          test_case "parent component cannot select sibling" `Quick test_owned_boundary_parent_component;
+          test_case "linked agent is neither read nor listed" `Quick test_owned_boundary_linked_agent;
+          test_case "linked JSON cannot supply a snapshot" `Quick test_owned_boundary_linked_json;
+          test_case "linked eval root is refused" `Quick (fun () -> check_owned_boundary_linked_root false);
+          test_case "linked agent-core ancestor is refused" `Quick (fun () -> check_owned_boundary_linked_root true);
+          test_case "dash and Unicode names remain literal" `Quick test_owned_boundary_literal_names;
+          test_case "relative workspace roots preserve reads" `Quick test_owned_boundary_relative_base;
+          test_case "fresh-boot absence remains quiet" `Quick test_owned_boundary_missing_is_quiet;
+        ] );
+      ( "verdict_parsing",
+        [
+          test_case "valid verdict" `Quick test_parse_valid_verdict;
+          test_case "wrong schema_version" `Quick
+            test_parse_wrong_schema_version;
+          test_case "missing schema_version" `Quick
+            test_parse_missing_schema_version;
+          test_case "empty layer_results" `Quick
+            test_parse_empty_layer_results;
+          test_case "missing required field" `Quick
+            test_parse_missing_required_field;
+          test_case "wrong-typed required field" `Quick
+            test_parse_wrong_typed_required_field;
+          test_case "layer missing name" `Quick test_parse_layer_missing_name;
+        ] );
+      ( "read_latest",
+        [
+          test_case "list_agents nonexistent directory" `Quick
+            test_list_agents_nonexistent_dir;
+          test_case "list_agents with dirs" `Quick
+            test_list_agents_with_dirs;
+          test_case "empty directory" `Quick test_read_latest_empty_dir;
+          test_case "nonexistent directory" `Quick
+            test_read_latest_nonexistent_dir;
+          test_case "with files" `Quick test_read_latest_with_files;
+          test_case "with limit" `Quick test_read_latest_with_limit;
+        ] );
+      ( "serialization",
+        [
+          test_case "snapshot roundtrip" `Quick test_snapshot_json_roundtrip;
+          test_case "verdict_to_json" `Quick test_verdict_to_json;
+        ] );
+    ]

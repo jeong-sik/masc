@@ -1,0 +1,570 @@
+type location =
+  | In_repo of {
+      repo_id : string;
+      relative_path : string;
+    }
+  | In_bundle of { bundle_path : string }
+  | At_absolute_path of { path : string }
+
+type kind =
+  | Edited of {
+      before : string;
+      after : string;
+      replace_all : bool;
+    }
+  | Written of { content : string }
+  | Inserted of {
+      line : int;
+      text : string;
+    }
+  | Materialized of {
+      sha256 : string;
+      bytes : int;
+    }
+
+type t = {
+  at : float;
+  keeper : string;
+  turn : int option;
+  task_id : string option;
+  execution_id : string option;
+  line_evidence : Keeper_file_change_evidence.t option;
+  location : location;
+  kind : kind;
+  succeeded : bool;
+}
+
+type unreadable_reason =
+  | Input_exceeded_log_budget
+  | Malformed of string
+
+type classification =
+  | Not_a_file_change
+  | File_change of t
+  | Unreadable of unreadable_reason
+
+(* What the row says it ran. Three answers, because two of them are ordinary
+   and one is a defect, and collapsing them would bury the defect. *)
+type named_tool =
+  | Handler of Keeper_tool_descriptor.runtime_handler
+  | Not_descriptor_backed
+      (** Composition-surface tools carry no descriptor id at all — see
+          {!Keeper_tool_call_log.log_call}. They do not write files. *)
+  | Unknown_descriptor of string
+      (** A descriptor id this build does not define. *)
+
+(* Which tool the call ran, as the descriptor registry defines it rather than
+   as the row spells it. The log carries both a display name ("Edit") and the
+   descriptor id its route evidence recorded ("agent.edit_file"); only the
+   second is the registry's own key, and only the registry knows which handler
+   sits behind it. Matching the display name here would put a second, drifting
+   copy of the tool table in this module. *)
+let named_tool_of_row row =
+  match Json_field.assoc row "route_evidence" with
+  | Json_field.Field_absent | Json_field.Wrong_shape _ -> Not_descriptor_backed
+  | Json_field.Found fields -> (
+      match Json_field.string (`Assoc fields) "descriptor_id" with
+      | Json_field.Field_absent | Json_field.Wrong_shape _ -> Not_descriptor_backed
+      | Json_field.Found id -> (
+          match Keeper_tool_descriptor.find_id id with
+          | Some d -> Handler d.Keeper_tool_descriptor.runtime_handler
+          | None -> Unknown_descriptor id))
+
+let optional_string row key = Json_field.to_option (Json_field.string row key)
+let optional_int row key = Json_field.to_option (Json_field.int row key)
+
+let required_string row key =
+  match Json_field.string row key with
+  | Json_field.Found value -> Ok value
+  | Json_field.Field_absent -> Error (Malformed (Printf.sprintf "%s is absent" key))
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Malformed (Printf.sprintf "%s is %s, expected %s" key got expected))
+
+let required_int row key =
+  match Json_field.int row key with
+  | Json_field.Found value -> Ok value
+  | Json_field.Field_absent -> Error (Malformed (Printf.sprintf "%s is absent" key))
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Malformed (Printf.sprintf "%s is %s, expected %s" key got expected))
+
+(* The target recorded by the action-radius producer. It reads the same
+   redacted input object that the log persists: for peer artifacts,
+   [Keeper_runtime_contract.action_radius_json] selects [input.path], so the
+   handler and this projection name the same materialize path. Other file
+   tools use their own target field rather than one display-name vocabulary
+   shared here (#28582).
+
+   Logged targets are mostly bundle-relative and sometimes absolute -- 528
+   against 40 over 2026-08-22..24 -- so the shape is decided by looking, not
+   assumed. *)
+let target_path_of_row row =
+  match Json_field.assoc row "action_radius" with
+  | Json_field.Field_absent -> Error (Malformed "action_radius is absent")
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Malformed (Printf.sprintf "action_radius is %s, expected %s" got expected))
+  | Json_field.Found fields -> required_string (`Assoc fields) "target_path"
+
+let line_evidence_of_row row =
+  match Json_field.assoc row "file_change_evidence" with
+  | Json_field.Field_absent -> Ok None
+  | Json_field.Wrong_shape { expected; got } ->
+    Error
+      (Malformed
+         (Printf.sprintf "file_change_evidence is %s, expected %s" got expected))
+  | Json_field.Found fields ->
+    (match Keeper_file_change_evidence.of_yojson (`Assoc fields) with
+     | Ok evidence -> Ok (Some evidence)
+     | Error detail -> Error (Malformed ("file_change_evidence: " ^ detail)))
+
+let validate_line_evidence ~execution_id ~succeeded kind line_evidence =
+  match kind, line_evidence with
+  | _, None -> Ok ()
+  | _, Some _
+    when Option.fold
+           ~none:true
+           ~some:(fun value -> String.trim value = "")
+           execution_id ->
+    Error (Malformed "file_change_evidence has no canonical execution_id")
+  | _, Some _ when not succeeded ->
+    Error (Malformed "failed file change carries completed line evidence")
+  | Edited { replace_all = false; _ },
+    Some
+      (Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = _ })
+    when occurrence_count <> 1 ->
+    Error
+      (Malformed
+         "single Edit carries a file_change_evidence occurrence_count other than one")
+  | Inserted _,
+    Some
+      (Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = _ })
+    when occurrence_count <> 1 ->
+    Error
+      (Malformed
+         "an insert carries a file_change_evidence occurrence_count other than one")
+  | Edited _, Some (Keeper_file_change_evidence.Edited _)
+  | Inserted _, Some (Keeper_file_change_evidence.Edited _)
+  | Written _, Some (Keeper_file_change_evidence.Written _)
+  | Materialized _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
+  | Inserted _, Some (Keeper_file_change_evidence.Written _) ->
+    Error (Malformed "insert input carries write file_change_evidence")
+  | Edited _, Some (Keeper_file_change_evidence.Written _) ->
+    Error (Malformed "edit input carries write file_change_evidence")
+  | Written _, Some (Keeper_file_change_evidence.Edited _) ->
+    Error (Malformed "write input carries edit file_change_evidence")
+  | Materialized _, Some (Keeper_file_change_evidence.Edited _) ->
+    Error (Malformed "materialize input carries edit file_change_evidence")
+
+(* Where the target sits. A relative target is read as the bundle-relative
+   path it is, not rebuilt into an absolute one first: whether the keeper ran
+   local or in Docker changes where its bundle sits on disk and nothing about
+   the path inside it, so composing an absolute path here would mean picking a
+   sandbox flavour this projection has no reason to know.
+
+   An absolute target is reported as one. It is neither a repository address
+   nor a path under a bundle root, and calling it either would put a name on
+   the file that nothing can resolve. *)
+let location_of_target ~target_path =
+  if not (Filename.is_relative target_path) then At_absolute_path { path = target_path }
+  else
+    match Playground_paths.parse_bundle_relative_repo_path target_path with
+    | Some (repo_id, relative_path) -> In_repo { repo_id; relative_path }
+    | None -> In_bundle { bundle_path = target_path }
+
+let writing_input_of_row row =
+  match Json_field.assoc row "input" with
+  | Json_field.Found fields -> Ok (`Assoc fields)
+  | Json_field.Field_absent -> Error (Malformed "input is absent")
+  | Json_field.Wrong_shape { got = "string"; _ } ->
+    (* The log flattens a call's arguments to a preview string once they
+       serialize past its inline budget ([Keeper_tool_call_log.max_output_len]).
+       A string here is that and only that: nothing else in the writer produces
+       one. The change happened; its text is not on disk to be read back. *)
+    Error Input_exceeded_log_budget
+  | Json_field.Wrong_shape { expected; got } ->
+    Error (Malformed (Printf.sprintf "input is %s, expected %s" got expected))
+;;
+
+let writing_input_and_keeper row =
+  Result.bind (writing_input_of_row row) (fun input ->
+      Result.map (fun keeper -> input, keeper) (required_string row "keeper"))
+;;
+
+(* This is the single exhaustive handler classification. Non-writing handlers
+   return without reading [input], preserving the durable projection's legacy
+   treatment of their truncated or malformed arguments. A peer-artifact
+   export has valid writing-tool input but returns [None] because it reads the
+   file into the blob store; materialize returns its typed file change. *)
+let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
+  match handler with
+  | Keeper_tool_descriptor.Tool_edit_file ->
+    Result.bind (writing_input_and_keeper row) (fun (input, keeper) ->
+      match (required_string input "old_string", required_string input "new_string") with
+      | Ok before, Ok after ->
+          (* [replace_all] is optional in the tool's own schema, and its
+             absence means the call replaced one occurrence. *)
+          let replace_all =
+            Option.value ~default:false (Json_field.to_option (Json_field.bool input "replace_all"))
+          in
+          Ok (Some (keeper, Edited { before; after; replace_all }))
+      | Error detail, _ | _, Error detail -> Error detail)
+  | Keeper_tool_descriptor.Tool_write_file ->
+    Result.bind (writing_input_and_keeper row) (fun (input, keeper) ->
+      match required_string input "content" with
+      | Ok content -> Ok (Some (keeper, Written { content }))
+      | Error detail -> Error detail)
+  | Keeper_tool_descriptor.Tool_ide_annotate ->
+    Result.bind (writing_input_and_keeper row) (fun (input, keeper) ->
+      (* The line the file received is composed the way the tool composed
+         it, from the same three inputs and the same function, so the
+         projection shows the comment that is in the file. *)
+      match
+        ( required_string input "file_path"
+        , required_int input "line"
+        , required_string input "text" )
+      with
+      | Ok file_path, Ok line, Ok text -> (
+          let kind =
+            match Json_field.string input "kind" with
+            | Json_field.Found word -> Ide_memo.kind_of_word word
+            | Json_field.Field_absent -> Some Agent_observation.Comment
+            | Json_field.Wrong_shape _ -> None
+          in
+          match kind with
+          | None -> Error (Malformed "kind is not a memo kind")
+          | Some kind -> (
+              match Ide_memo.make ~author:keeper ~kind ~text with
+              | Error why -> Error (Malformed ("memo: " ^ why))
+              | Ok memo -> (
+                  match Lsp_process_manager.memo_line ~path:file_path memo with
+                  | Error refusal ->
+                      Error (Malformed (Lsp_process_manager.memo_line_error_to_string refusal))
+                  | Ok comment_line ->
+                    Ok (Some (keeper, Inserted { line; text = comment_line })))))
+      | Error detail, _, _ | _, Error detail, _ | _, _, Error detail -> Error detail)
+  | Keeper_tool_descriptor.Tool_peer_artifact ->
+    Result.bind (writing_input_and_keeper row) (fun (input, keeper) ->
+      (* One handler, two actions: [export] reads a file into the blob store
+         and [materialize] writes a blob's bytes into a file. Only the second
+         is a file change. The handler and projection share this typed parser,
+         so a new action makes both exhaustive matches fail until classified. *)
+      match Keeper_peer_artifact_request.of_json input with
+      | Error detail -> Error (Malformed detail)
+      | Ok (Keeper_peer_artifact_request.Export _) -> Ok None
+      | Ok (Keeper_peer_artifact_request.Materialize { artifact; _ }) ->
+        Ok
+          (Some
+             ( keeper
+             , Materialized
+                 { sha256 = artifact.blob.sha256; bytes = artifact.blob.bytes }
+             )))
+  | Keeper_tool_descriptor.Tool_execute
+  | Keeper_tool_descriptor.Tool_search_files
+  | Keeper_tool_descriptor.Tool_read_file
+  | Keeper_tool_descriptor.Tool_lane_status
+  | Keeper_tool_descriptor.Tool_tools_list
+  | Keeper_tool_descriptor.Tool_capability_search
+  | Keeper_tool_descriptor.Tool_context_status
+  | Keeper_tool_descriptor.Tool_artifact_read
+  | Keeper_tool_descriptor.Tool_skill_validate
+  | Keeper_tool_descriptor.Tool_artifact_draft | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish
+  | Keeper_tool_descriptor.Tool_workspace_memory_read
+  | Keeper_tool_descriptor.Tool_memory_search
+  | Keeper_tool_descriptor.Tool_memory_select
+  | Keeper_tool_descriptor.Tool_memory_retract
+  | Keeper_tool_descriptor.Tool_memory_write
+  | Keeper_tool_descriptor.Tool_constitution_write
+  | Keeper_tool_descriptor.Tool_constitution_read
+  | Keeper_tool_descriptor.Tool_constitution_remove
+  | Keeper_tool_descriptor.Tool_wiki_search
+  | Keeper_tool_descriptor.Tool_wiki_read
+  | Keeper_tool_descriptor.Tool_surface_read
+  | Keeper_tool_descriptor.Tool_surface_post
+  | Keeper_tool_descriptor.Tool_person_note_set
+  | Keeper_tool_descriptor.Tool_voice_dispatch
+  | Keeper_tool_descriptor.Tool_task_dispatch
+  | Keeper_tool_descriptor.Tool_board_dispatch
+  | Keeper_tool_descriptor.Tool_masc_task_dispatch
+  | Keeper_tool_descriptor.Tool_masc_plan_dispatch
+  | Keeper_tool_descriptor.Tool_masc_run_dispatch
+  | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+  | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+  | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+  | Keeper_tool_descriptor.Tool_web_search
+  | Keeper_tool_descriptor.Tool_web_fetch
+  | Keeper_tool_descriptor.Tool_masc_control_dispatch
+  | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+  | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_job_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
+  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_masc_fusion_decision
+  | Keeper_tool_descriptor.Tool_masc_file_dispatch
+  | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
+  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
+  | Keeper_tool_descriptor.Tool_browser_tabs
+  | Keeper_tool_descriptor.Tool_browser_read
+  | Keeper_tool_descriptor.Tool_browser_session
+  | Keeper_tool_descriptor.Tool_browser_goto
+  | Keeper_tool_descriptor.Tool_browser_act
+  | Keeper_tool_descriptor.Tool_browser_instruct
+  | Keeper_tool_descriptor.Tool_browser_interact
+  | Keeper_tool_descriptor.Tool_lane_addon _
+  | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image -> Ok None
+
+(* The call's own outcome, read by the rule every tool-call log reader shares.
+   A deferred write has not changed the file yet. A row that does not say how
+   the call ended is unreadable: projecting it as either outcome invents one. *)
+let succeeded_of_row row =
+  match Tool_result.recorded_call_outcome row with
+  | Tool_result.Recorded_succeeded -> Ok true
+  | Tool_result.Recorded_failed | Tool_result.Recorded_deferred -> Ok false
+  | Tool_result.Recorded_unsettled ->
+      Error (Malformed "file change row does not say how the call ended")
+  | Tool_result.Recorded_malformed ->
+      Error (Malformed "file change row carries an outcome this build cannot read")
+
+let classify row =
+  match named_tool_of_row row with
+  | Not_descriptor_backed -> Not_a_file_change
+  | Unknown_descriptor id ->
+      (* Present but undefined here. It cannot be shown to be a read, so it is
+         reported rather than counted as one. *)
+      Unreadable (Malformed (Printf.sprintf "descriptor %s is not defined in this build" id))
+  | Handler handler ->
+      let parsed =
+        Result.bind (kind_of_row ~handler row) (function
+          | None -> Ok None
+          | Some (keeper, kind) ->
+                    Result.bind (succeeded_of_row row) @@ fun succeeded ->
+                    let execution_id = optional_string row "execution_id" in
+                    Result.bind (line_evidence_of_row row) (fun line_evidence ->
+                      Result.bind
+                        (validate_line_evidence
+                           ~execution_id
+                           ~succeeded
+                           kind
+                           line_evidence)
+                        (fun () ->
+                          Result.bind (target_path_of_row row) (fun target_path ->
+                            let at =
+                              Option.value ~default:0.
+                                (Json_field.to_option (Json_field.float row "ts"))
+                            in
+                            Ok
+                              (Some
+                                 { at
+                                 ; keeper
+                                 ; turn = optional_int row "turn"
+                                 ; task_id = optional_string row "task_id"
+                                 ; execution_id
+                                 ; line_evidence
+                                 ; location = location_of_target ~target_path
+                                 ; kind
+                                 ; succeeded
+                                 })))))
+      in
+      (match parsed with
+       | Ok None -> Not_a_file_change
+       | Ok (Some change) -> File_change change
+       | Error detail -> Unreadable detail)
+
+type tally = {
+  changes : t list;
+  unreadable_rows : unreadable_row list;
+  not_file_changes : int;
+  not_file_changes_ts : float list;
+  over_budget : int;
+  malformed : int;
+}
+
+and unreadable_row = {
+  ur_location : location option;
+  ur_reason : unreadable_reason;
+  ur_at : float;
+}
+
+let empty_tally =
+  { changes = []
+  ; unreadable_rows = []
+  ; not_file_changes = 0
+  ; not_file_changes_ts = []
+  ; over_budget = 0
+  ; malformed = 0
+  }
+;;
+
+let row_ts_or_zero row =
+  match Json_field.to_option (Json_field.float row "ts") with
+  | Some ts -> ts
+  | None -> 0.0
+;;
+
+(* [classify_all] is this fold; a caller that reads rows incrementally holds
+   the tally between reads and folds each new row into it, so the step is
+   named rather than buried. Both lists accumulate newest-first and are
+   reversed by [seal_tally]. *)
+let fold_row tally row =
+  match classify row with
+  | File_change change -> { tally with changes = change :: tally.changes }
+  | Not_a_file_change ->
+    let ts = row_ts_or_zero row in
+    { tally with
+      not_file_changes = tally.not_file_changes + 1
+    ; not_file_changes_ts = ts :: tally.not_file_changes_ts
+    }
+  | Unreadable reason ->
+    let ur_location =
+      match target_path_of_row row with
+      | Ok target_path -> Some (location_of_target ~target_path)
+      | Error _ -> None
+    in
+    let ur_at = row_ts_or_zero row in
+    { tally with
+      unreadable_rows = { ur_location; ur_reason = reason; ur_at } :: tally.unreadable_rows
+    ; over_budget =
+        (match reason with
+         | Input_exceeded_log_budget -> tally.over_budget + 1
+         | Malformed _ -> tally.over_budget)
+    ; malformed =
+        (match reason with
+         | Input_exceeded_log_budget -> tally.malformed
+         | Malformed _ -> tally.malformed + 1)
+    }
+;;
+
+let prune_before ~since_ts tally =
+  let changes = List.filter (fun c -> c.at >= since_ts) tally.changes in
+  let unreadable_rows = List.filter (fun u -> u.ur_at >= since_ts) tally.unreadable_rows in
+  let not_file_changes_ts = List.filter (fun ts -> ts >= since_ts) tally.not_file_changes_ts in
+  let over_budget =
+    List.fold_left
+      (fun n u ->
+         match u.ur_reason with
+         | Input_exceeded_log_budget -> n + 1
+         | Malformed _ -> n)
+      0
+      unreadable_rows
+  in
+  let malformed = List.length unreadable_rows - over_budget in
+  { changes
+  ; unreadable_rows
+  ; not_file_changes = List.length not_file_changes_ts
+  ; not_file_changes_ts
+  ; over_budget
+  ; malformed
+  }
+;;
+
+let min_opt a b =
+  match a, b with
+  | None, None -> None
+  | Some x, None | None, Some x -> Some x
+  | Some x, Some y -> Some (Float.min x y)
+;;
+
+let oldest_row_ts tally =
+  let oldest_change =
+    List.fold_left
+      (fun acc (c : t) -> min_opt acc (Some c.at))
+      None
+      tally.changes
+  in
+  let oldest_unreadable =
+    List.fold_left
+      (fun acc u -> min_opt acc (Some u.ur_at))
+      oldest_change
+      tally.unreadable_rows
+  in
+  List.fold_left
+    (fun acc ts -> min_opt acc (Some ts))
+    oldest_unreadable
+    tally.not_file_changes_ts
+;;
+
+(* Every classified row lands in exactly one of the three: [fold_row] matches
+   on [classify], whose three constructors are these. So their sum is what was
+   read, and an incremental caller can answer "of m calls" from a tally it kept
+   instead of a row list it dropped. *)
+let rows_counted tally =
+  List.length tally.changes
+  + List.length tally.unreadable_rows
+  + tally.not_file_changes
+;;
+
+let seal_tally tally =
+  { tally with
+    changes = List.rev tally.changes
+  ; unreadable_rows = List.rev tally.unreadable_rows
+  }
+;;
+
+let classify_all rows = seal_tally (List.fold_left fold_row empty_tally rows)
+
+let for_repo_file ~repo_id ~relative_path changes =
+  List.filter
+    (fun change ->
+      match change.location with
+      | In_repo address ->
+        String.equal address.repo_id repo_id
+        && String.equal address.relative_path relative_path
+      | In_bundle _ | At_absolute_path _ -> false)
+    changes
+
+let unreadable_for_repo_file ~repo_id ~relative_path rows =
+  List.filter
+    (fun row ->
+      match row.ur_location with
+      | Some (In_repo address) ->
+        String.equal address.repo_id repo_id
+        && String.equal address.relative_path relative_path
+      | Some (In_bundle _ | At_absolute_path _) | None -> false)
+    rows
+
+let location_to_json = function
+  | In_repo { repo_id; relative_path } ->
+      `Assoc
+        [ ("kind", `String "repo")
+        ; ("repo_id", `String repo_id)
+        ; ("path", `String relative_path)
+        ]
+  | In_bundle { bundle_path } ->
+      `Assoc [ ("kind", `String "bundle"); ("path", `String bundle_path) ]
+  | At_absolute_path { path } -> `Assoc [ ("kind", `String "absolute"); ("path", `String path) ]
+
+let kind_to_json = function
+  | Edited { before; after; replace_all } ->
+      `Assoc
+        [ ("kind", `String "edit")
+        ; ("before", `String before)
+        ; ("after", `String after)
+        ; ("replace_all", `Bool replace_all)
+        ]
+  | Written { content } -> `Assoc [ ("kind", `String "write"); ("content", `String content) ]
+  | Inserted { line; text } ->
+      `Assoc [ ("kind", `String "insert"); ("line", `Int line); ("text", `String text) ]
+  | Materialized { sha256; bytes } ->
+      `Assoc
+        [ ("kind", `String "materialize"); ("sha256", `String sha256); ("bytes", `Int bytes) ]
+
+let optional_json to_json = function None -> `Null | Some value -> to_json value
+
+let to_json change =
+  `Assoc
+    [ ("at", `Float change.at)
+    ; ("keeper", `String change.keeper)
+    ; ("turn", optional_json (fun turn -> `Int turn) change.turn)
+    ; ("task_id", optional_json (fun id -> `String id) change.task_id)
+    ; ("execution_id", optional_json (fun id -> `String id) change.execution_id)
+    ; ( "line_evidence"
+      , optional_json Keeper_file_change_evidence.to_yojson change.line_evidence )
+    ; ("location", location_to_json change.location)
+    ; ("change", kind_to_json change.kind)
+    ; ("succeeded", `Bool change.succeeded)
+    ]

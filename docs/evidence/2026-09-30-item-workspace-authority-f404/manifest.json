@@ -1,0 +1,5 @@
+{
+  "scope": "synthetic HTTP A/B/A Item accounts through a real PTY; no live deployment",
+  "binary_sha256": "daedc12a303f73f9622f24c8ede77f4ea89bcad3354fc1fca7587873aeabadda",
+  "scenario_sha256": "c13bf444d0b7eb8249b602fc338d9f533d3cb0c5bbbfba011482d32340ceb64b"
+}

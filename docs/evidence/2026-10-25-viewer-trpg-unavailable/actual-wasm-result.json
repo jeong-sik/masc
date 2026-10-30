@@ -1,0 +1,59 @@
+{
+  "run": 40182013461,
+  "executed_head": "d20baab64c20bc4552e0690a4399e1df97ecc8aa",
+  "result": "SUCCESS",
+  "observations": [
+    {
+      "fixture": "query",
+      "code": "trpg_producer_absent",
+      "runtimeReady": true,
+      "bodyClass": "mode-home",
+      "disabled": true,
+      "noticeVisible": true,
+      "notice": "TRPG는 현재 지원되지 않습니다. 연결할 TRPG 서비스가 없습니다.",
+      "storage": null,
+      "modeQuery": "trpg",
+      "requested": [
+        "http://127.0.0.1:44093/viewer_bg.wasm"
+      ],
+      "recoveredMode": "mode-monitor",
+      "recoveredPanelActive": true,
+      "unavailableCleared": true,
+      "noticeHiddenAfterRecovery": true,
+      "requestedAfterRecovery": [
+        "http://127.0.0.1:44093/viewer_bg.wasm",
+        "http://127.0.0.1:44093/mcp"
+      ]
+    },
+    {
+      "fixture": "storage",
+      "code": "trpg_producer_absent",
+      "runtimeReady": true,
+      "bodyClass": "mode-home",
+      "disabled": true,
+      "noticeVisible": true,
+      "notice": "TRPG는 현재 지원되지 않습니다. 연결할 TRPG 서비스가 없습니다.",
+      "storage": "trpg",
+      "modeQuery": null,
+      "requested": [
+        "http://127.0.0.1:44093/viewer_bg.wasm"
+      ],
+      "recoveredMode": "mode-monitor",
+      "recoveredPanelActive": true,
+      "unavailableCleared": true,
+      "noticeHiddenAfterRecovery": true,
+      "requestedAfterRecovery": [
+        "http://127.0.0.1:44093/viewer_bg.wasm",
+        "http://127.0.0.1:44093/mcp"
+      ]
+    }
+  ],
+  "receipt": {
+    "cases": 2,
+    "profile": "dev debug=0",
+    "target": "wasm32-unknown-unknown",
+    "wasm_sha256": "9ad65385b8cde2ea1ee2e810fef7b90aacf136c22fe21c5ed24b657336505b25",
+    "bindgen_version": "0.2.108"
+  },
+  "raw_log_sha256": "a2015622319ecac1a265342d725552a1bd2f740027e4d65891826e50f0033aad"
+}

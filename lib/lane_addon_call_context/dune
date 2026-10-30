@@ -1,0 +1,5 @@
+(include_subdirs no)
+(library
+ (name lane_addon_call_context)
+ (public_name masc.lane_addon_call_context)
+ (libraries mcp_protocol yojson masc.machine_controller_contract))

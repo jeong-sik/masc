@@ -1,0 +1,70 @@
+{
+  "schema": "masc.task-source.goal-result-projection.v1",
+  "projection_of_private_primary_ledgers": true,
+  "private_primary_goal_verifications_sha256": "1b52c3006c0406d63e76067155e3c63b4f5c0d35f9479867c560cf814b4eb767",
+  "goal": {
+    "id": "goal-task-state-bde4636ab8314491942f146c375a2027-p",
+    "criterion_revision": "a87186151ae1e7197793970a646e3c8e",
+    "title": "Controlled submitted Task status observation P",
+    "metric": "Lifecycle state of exact submitted Task task-001. 1 exactly when the referenced submitted canonical Task row has status done; otherwise 0. The Goal tests this lifecycle observation only, not an approval certificate, external acceptance or actual Edit ordering.",
+    "target_value": "1",
+    "due_date": null,
+    "priority": 3,
+    "phase": "awaiting_confirmation",
+    "last_review_note": null,
+    "last_review_at": "2026-10-25T13:46:25Z",
+    "created_at": "2026-10-25T13:45:57Z",
+    "updated_at": "2026-10-25T13:46:25Z"
+  },
+  "measurement": {
+    "id": "3909d023f32dd5f607b8ae14372c065e",
+    "goal_id": "goal-task-state-bde4636ab8314491942f146c375a2027-p",
+    "criterion_revision": "a87186151ae1e7197793970a646e3c8e",
+    "observed_value": "1",
+    "evidence": "task:task-001",
+    "actor": "task-source-controls-operator",
+    "recorded_at": "2026-10-25T13:45:57Z"
+  },
+  "completion": {
+    "state": "proof_proven",
+    "verdict": {
+      "outcome": "proven",
+      "reason": null,
+      "request_id": "a292506b327eb99fabc643039af5bb31",
+      "criterion": {
+        "revision": "a87186151ae1e7197793970a646e3c8e",
+        "title": "Controlled submitted Task status observation P",
+        "metric": "Lifecycle state of exact submitted Task task-001. 1 exactly when the referenced submitted canonical Task row has status done; otherwise 0. The Goal tests this lifecycle observation only, not an approval certificate, external acceptance or actual Edit ordering.",
+        "target_value": "1"
+      },
+      "verification_run_id": "01a1734f-92de-7000-8534-e53baff3df62",
+      "authority": {
+        "kind": "system_llm_agent",
+        "actor": "verifier_exact"
+      },
+      "evidence": "I read the submitted canonical Task row task-001 via the Task lookup tool: its status field is exactly \"done\" (completed_at 2026-10-25T13:45:09Z, assignee task-source-controls-operator), matching the reported measurement's observed_value 1. Per the declared metric — 1 exactly when the referenced Task row has status done — the measured value is 1, which equals the target value 1.",
+      "recorded_at": "2026-10-25T13:46:25Z"
+    }
+  },
+  "submitted_source": {
+    "file": "source-P.json",
+    "reference": "task:task-001",
+    "bytes": 2561,
+    "sha256": "a6c643bf14be8b9bfb49dfc848dd00174adfa0531fe99c7c1c559773f009867e"
+  },
+  "observed_actual_structured_verdict": {
+    "tool_call_id": "call_-7138402771719421001",
+    "arguments": {
+      "verdict": "APPROVE",
+      "reason": "I read the submitted canonical Task row task-001 via the Task lookup tool: its status field is exactly \"done\" (completed_at 2026-10-25T13:45:09Z, assignee task-source-controls-operator), matching the reported measurement's observed_value 1. Per the declared metric — 1 exactly when the referenced Task row has status done — the measured value is 1, which equals the target value 1."
+    }
+  },
+  "full_source_in_model_input": {
+    "request": "request-000007",
+    "lookup_call_id": "call_-7138396449527558395",
+    "tool_message_bytes": 2984,
+    "tool_message_sha256": "35113670b0b53dff5a0645c4a55d270f3f777208b338157e06da598f398ba51f",
+    "source_bytes_exactly_equal_submission": true
+  },
+  "source_capture_and_export_limit": "Export read after judgment; not claimed as a separate pending-state snapshot."
+}

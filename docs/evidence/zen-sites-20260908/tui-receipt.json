@@ -1,0 +1,19 @@
+{
+  "result": "passed",
+  "clientId": "automation",
+  "script_sha256": "74ba90a35cd6422b570b2f93886971d3e3fb80b03dff68eb3b7ddb0191131b9e",
+  "tui_sha256": "be5a17aa56c8d3e4ea16933e51c87242681fef344b5119e73f6d8b4c750b93bd",
+  "transport": "real pinned MASC HTTP; Keeper-submitted webapp receipt",
+  "terminal": "PTY with Kitty capability response and 140x42 cells",
+  "tty_override_applied": false,
+  "text_verified": [
+    "WebDriver"
+  ],
+  "image": {
+    "path": "zen-through-tui.png",
+    "bytes": 140099,
+    "sha256": "d28f9f98df87b3deb4fece194df31645444526ad45bfcd9977e301dd83fd50bb"
+  },
+  "normal_exit_code": 0,
+  "termios_restoration_measured_here": false
+}

@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41204-browser-parser-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/lib/browser-lane-activity.test.ts src/lib/machine-lane-activity.test.ts src/components/exact-lane-activity-panel.test.ts src/components/runtime-toml-editor.test.ts src/components/browser-lane-activity-panel.test.ts src/components/machine-lane-activity-panel.test.ts src/components/settings-surface.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41204-browser-parser-integration-20261005/dashboard
+
+
+ Test Files  7 passed (7)
+      Tests  379 passed (379)
+   Start at  04:53:20
+   Duration  11.59s (tests 60%, import 17%, transform 10%, environment 8%, setup 5%)
+
+    Isolate  7 workers spawned · ~213ms startup each (spawn + environment, per file)
+             at least ~1.28s faster with isolate: false — reuses workers across files instead of one per file
+

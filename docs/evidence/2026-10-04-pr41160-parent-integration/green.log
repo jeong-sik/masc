@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts -t 'rejects a comparison response superseded|blocks a lost typed-patch receipt|refreshes mounted Settings after'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  3 passed | 134 skipped (137)
+   Start at  22:41:54
+   Duration  2.41s (transform 41%, import 32%, environment 11%, setup 8%, tests 8%)
+

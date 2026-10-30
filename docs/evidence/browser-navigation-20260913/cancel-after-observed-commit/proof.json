@@ -1,0 +1,1089 @@
+{
+  "scene_source_sha256": "92147af0d320728e33bbfb8b7b47da190b6be2a4ce34560f87cdb16a56edc712",
+  "source_commit": "b40259fc4baf9187936a0686301b937d76b7104e",
+  "probe_sha256": "259fd369c7bcb9ea9ae98f69d21199cb29ec0785fc7d3a785c692cc2bcb0c03b",
+  "browser_sha256": "000d78c41741027daa41fcf86ffacd4e46123304b292f5a4c890f5601ef209fe",
+  "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+  "events_before_resource_release": [
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "replies": [
+        {
+          "id": 1,
+          "ok": true,
+          "data": {
+            "tabId": 2,
+            "schema": "masc.browser.scene.v1",
+            "documentId": "19e73e93c1dabf259b0144d62efab51d",
+            "url": "http://127.0.0.1:51270/initial",
+            "title": "",
+            "viewport": {
+              "width": 1366,
+              "height": 683,
+              "scrollX": 0,
+              "scrollY": 0
+            },
+            "nodes": [
+              {
+                "kind": "text",
+                "nodeId": "n1",
+                "tag": "h1",
+                "text": "Observed /initial",
+                "rects": [
+                  {
+                    "x": 8,
+                    "y": 24.633331298828125,
+                    "width": 228.39999389648438,
+                    "height": 32
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 0)",
+                "fontSize": 32,
+                "fontWeight": "700",
+                "whiteSpace": "normal"
+              },
+              {
+                "kind": "control",
+                "nodeId": "n2",
+                "tag": "a",
+                "text": "pending",
+                "rects": [
+                  {
+                    "x": 8,
+                    "y": 82.86666870117188,
+                    "width": 51.55000305175781,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/pending",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n3",
+                "tag": "a",
+                "text": "destination",
+                "rects": [
+                  {
+                    "x": 59.55000305175781,
+                    "y": 82.86666870117188,
+                    "width": 70.23333740234375,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/first",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n4",
+                "tag": "a",
+                "text": "redirect",
+                "rects": [
+                  {
+                    "x": 129.78334045410156,
+                    "y": 82.86666870117188,
+                    "width": 48.86665344238281,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/redirect",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n5",
+                "tag": "a",
+                "text": "hash",
+                "rects": [
+                  {
+                    "x": 178.64999389648438,
+                    "y": 82.86666870117188,
+                    "width": 29.333343505859375,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/initial#hash",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n6",
+                "tag": "a",
+                "text": "broken",
+                "rects": [
+                  {
+                    "x": 207.98333740234375,
+                    "y": 82.86666870117188,
+                    "width": 44.43333435058594,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/broken",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              }
+            ],
+            "chars": 53,
+            "truncated": false,
+            "scope": null,
+            "view": "content",
+            "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "reply",
+      "verb": "page.interact",
+      "replies": [
+        {
+          "id": 2,
+          "ok": true,
+          "data": {
+            "tabId": 2,
+            "action": "follow_link",
+            "urlBefore": "http://127.0.0.1:51270/initial",
+            "url": "http://127.0.0.1:51270/initial",
+            "destinationUrl": "http://127.0.0.1:51270/pending",
+            "navigationSource": {
+              "url": "http://127.0.0.1:51270/initial",
+              "documentId": "19e73e93c1dabf259b0144d62efab51d"
+            },
+            "title": "",
+            "scrollX": 0,
+            "scrollY": 0
+          }
+        }
+      ]
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "replies": [
+        {
+          "id": 3,
+          "ok": false,
+          "error": "navigation_tab_closed"
+        }
+      ]
+    },
+    {
+      "kind": "case",
+      "name": "closed-tab",
+      "sourceFrameBeforeFollow": {
+        "tabId": 2,
+        "frameId": 0,
+        "parentFrameId": -1,
+        "documentId": "a844c0a0-fac6-f001-3964-abfbf9a5fd1d",
+        "url": "http://127.0.0.1:51270/initial"
+      },
+      "follow": {
+        "id": 2,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:51270/initial",
+          "url": "http://127.0.0.1:51270/initial",
+          "destinationUrl": "http://127.0.0.1:51270/pending",
+          "navigationSource": {
+            "url": "http://127.0.0.1:51270/initial",
+            "documentId": "19e73e93c1dabf259b0144d62efab51d"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      },
+      "rejected": {
+        "id": 3,
+        "ok": false,
+        "error": "navigation_tab_closed"
+      },
+      "nativeEventsAtReadSettlement": [
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793480,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        }
+      ],
+      "nativeEvents": [
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793480,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        }
+      ]
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "replies": [
+        {
+          "id": 4,
+          "ok": true,
+          "data": {
+            "tabId": 3,
+            "schema": "masc.browser.scene.v1",
+            "documentId": "06f93badceba3dce23a50cac9f15e20a",
+            "url": "http://127.0.0.1:51270/initial",
+            "title": "",
+            "viewport": {
+              "width": 1366,
+              "height": 683,
+              "scrollX": 0,
+              "scrollY": 0
+            },
+            "nodes": [
+              {
+                "kind": "text",
+                "nodeId": "n1",
+                "tag": "h1",
+                "text": "Observed /initial",
+                "rects": [
+                  {
+                    "x": 8,
+                    "y": 24.633331298828125,
+                    "width": 228.39999389648438,
+                    "height": 32
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 0)",
+                "fontSize": 32,
+                "fontWeight": "700",
+                "whiteSpace": "normal"
+              },
+              {
+                "kind": "control",
+                "nodeId": "n2",
+                "tag": "a",
+                "text": "pending",
+                "rects": [
+                  {
+                    "x": 8,
+                    "y": 82.86666870117188,
+                    "width": 51.55000305175781,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/pending",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n3",
+                "tag": "a",
+                "text": "destination",
+                "rects": [
+                  {
+                    "x": 59.55000305175781,
+                    "y": 82.86666870117188,
+                    "width": 70.23333740234375,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/first",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n4",
+                "tag": "a",
+                "text": "redirect",
+                "rects": [
+                  {
+                    "x": 129.78334045410156,
+                    "y": 82.86666870117188,
+                    "width": 48.86665344238281,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/redirect",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n5",
+                "tag": "a",
+                "text": "hash",
+                "rects": [
+                  {
+                    "x": 178.64999389648438,
+                    "y": 82.86666870117188,
+                    "width": 29.333343505859375,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/initial#hash",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n6",
+                "tag": "a",
+                "text": "broken",
+                "rects": [
+                  {
+                    "x": 207.98333740234375,
+                    "y": 82.86666870117188,
+                    "width": 44.43333435058594,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/broken",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              }
+            ],
+            "chars": 53,
+            "truncated": false,
+            "scope": null,
+            "view": "content",
+            "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "reply",
+      "verb": "page.interact",
+      "replies": [
+        {
+          "id": 5,
+          "ok": true,
+          "data": {
+            "tabId": 3,
+            "action": "follow_link",
+            "urlBefore": "http://127.0.0.1:51270/initial",
+            "url": "http://127.0.0.1:51270/initial",
+            "destinationUrl": "http://127.0.0.1:51270/pending",
+            "navigationSource": {
+              "url": "http://127.0.0.1:51270/initial",
+              "documentId": "06f93badceba3dce23a50cac9f15e20a"
+            },
+            "title": "",
+            "scrollX": 0,
+            "scrollY": 0
+          }
+        }
+      ]
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "replies": [
+        {
+          "id": 6,
+          "ok": false,
+          "error": "browser_command_cancelled"
+        }
+      ]
+    },
+    {
+      "kind": "late-commit",
+      "committed": {
+        "url": "http://127.0.0.1:51270/pending",
+        "timeStamp": 1789265793810,
+        "frameId": 0,
+        "parentFrameId": -1,
+        "documentId": "d239971b-de0f-04b5-5abc-8441c37643cf",
+        "tabId": 3,
+        "windowId": 3,
+        "transitionType": "link",
+        "transitionQualifiers": []
+      },
+      "old_read_reply_count": 1,
+      "nativeEvents": [
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793652,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 3,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793804,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "1494d794-c0be-f968-71e1-914a90d67ff7",
+            "tabId": 3,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793805,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 3,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793809,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "d239971b-de0f-04b5-5abc-8441c37643cf",
+            "tabId": 3,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        }
+      ],
+      "scope": "external wait after cancellation for verification only"
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "replies": [
+        {
+          "id": 7,
+          "ok": true,
+          "data": {
+            "tabId": 3,
+            "schema": "masc.browser.scene.v1",
+            "documentId": "25336b72d810c7ed5b784dbeab8ae9bd",
+            "url": "http://127.0.0.1:51270/pending",
+            "title": "",
+            "viewport": {
+              "width": 1366,
+              "height": 683,
+              "scrollX": 0,
+              "scrollY": 0
+            },
+            "nodes": [
+              {
+                "kind": "text",
+                "nodeId": "n1",
+                "tag": "h1",
+                "text": "Observed /pending",
+                "rects": [
+                  {
+                    "x": 8,
+                    "y": 24.633331298828125,
+                    "width": 258.70001220703125,
+                    "height": 32
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 0)",
+                "fontSize": 32,
+                "fontWeight": "700",
+                "whiteSpace": "normal"
+              },
+              {
+                "kind": "control",
+                "nodeId": "n2",
+                "tag": "a",
+                "text": "pending",
+                "rects": [
+                  {
+                    "x": 8,
+                    "y": 82.86666870117188,
+                    "width": 51.55000305175781,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/pending",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n3",
+                "tag": "a",
+                "text": "destination",
+                "rects": [
+                  {
+                    "x": 59.55000305175781,
+                    "y": 82.86666870117188,
+                    "width": 70.23333740234375,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/first",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n4",
+                "tag": "a",
+                "text": "redirect",
+                "rects": [
+                  {
+                    "x": 129.78334045410156,
+                    "y": 82.86666870117188,
+                    "width": 48.86665344238281,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/redirect",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n5",
+                "tag": "a",
+                "text": "hash",
+                "rects": [
+                  {
+                    "x": 178.64999389648438,
+                    "y": 82.86666870117188,
+                    "width": 29.333343505859375,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/pending#hash",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "control",
+                "nodeId": "n6",
+                "tag": "a",
+                "text": "broken",
+                "rects": [
+                  {
+                    "x": 207.98333740234375,
+                    "y": 82.86666870117188,
+                    "width": 44.43333435058594,
+                    "height": 16
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 238)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal",
+                "href": "http://127.0.0.1:51270/broken",
+                "controlType": "a",
+                "disabled": false,
+                "editable": false,
+                "clickable": true
+              },
+              {
+                "kind": "raster",
+                "nodeId": "n7",
+                "tag": "img",
+                "text": "img",
+                "rects": [
+                  {
+                    "x": 8,
+                    "y": 100.46665954589844,
+                    "width": 24,
+                    "height": 24
+                  }
+                ],
+                "sourceContext": null,
+                "color": "rgb(0, 0, 0)",
+                "fontSize": 16,
+                "fontWeight": "400",
+                "whiteSpace": "normal"
+              }
+            ],
+            "chars": 56,
+            "truncated": false,
+            "scope": null,
+            "view": "content",
+            "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "fresh-read",
+      "answer": {
+        "id": 7,
+        "ok": true,
+        "data": {
+          "tabId": 3,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "25336b72d810c7ed5b784dbeab8ae9bd",
+          "url": "http://127.0.0.1:51270/pending",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /pending",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 258.70001220703125,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "pending",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 51.55000305175781,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:51270/pending",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 59.55000305175781,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:51270/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 129.78334045410156,
+                  "y": 82.86666870117188,
+                  "width": 48.86665344238281,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:51270/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 178.64999389648438,
+                  "y": 82.86666870117188,
+                  "width": 29.333343505859375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:51270/pending#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n6",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 207.98333740234375,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:51270/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "raster",
+              "nodeId": "n7",
+              "tag": "img",
+              "text": "img",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 100.46665954589844,
+                  "width": 24,
+                  "height": 24
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal"
+            }
+          ],
+          "chars": 56,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      },
+      "old_read_reply_count": 1,
+      "finalFrame": {
+        "tabId": 3,
+        "frameId": 0,
+        "parentFrameId": -1,
+        "documentId": "d239971b-de0f-04b5-5abc-8441c37643cf",
+        "url": "http://127.0.0.1:51270/pending"
+      }
+    },
+    {
+      "kind": "case",
+      "name": "read-deadline",
+      "sourceFrameBeforeFollow": {
+        "tabId": 3,
+        "frameId": 0,
+        "parentFrameId": -1,
+        "documentId": "1494d794-c0be-f968-71e1-914a90d67ff7",
+        "url": "http://127.0.0.1:51270/initial"
+      },
+      "follow": {
+        "id": 5,
+        "ok": true,
+        "data": {
+          "tabId": 3,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:51270/initial",
+          "url": "http://127.0.0.1:51270/initial",
+          "destinationUrl": "http://127.0.0.1:51270/pending",
+          "navigationSource": {
+            "url": "http://127.0.0.1:51270/initial",
+            "documentId": "06f93badceba3dce23a50cac9f15e20a"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      },
+      "rejected": {
+        "id": 6,
+        "ok": false,
+        "error": "browser_command_cancelled"
+      },
+      "nativeEventsAtReadSettlement": [
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793652,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 3,
+            "windowId": 3
+          }
+        }
+      ],
+      "nativeEvents": [
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793652,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 3,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793804,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "1494d794-c0be-f968-71e1-914a90d67ff7",
+            "tabId": 3,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793805,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 3,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:51270/pending",
+            "timeStamp": 1789265793809,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "d239971b-de0f-04b5-5abc-8441c37643cf",
+            "tabId": 3,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        }
+      ]
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "http_requests": [
+    {
+      "method": "GET",
+      "path": "/initial",
+      "time": 1789265793.2984169
+    },
+    {
+      "method": "GET",
+      "path": "/favicon.ico",
+      "time": 1789265793.429402
+    },
+    {
+      "method": "GET",
+      "path": "/pending",
+      "time": 1789265793.5164192
+    },
+    {
+      "method": "GET",
+      "path": "/initial",
+      "time": 1789265793.5742972
+    },
+    {
+      "method": "GET",
+      "path": "/pending",
+      "time": 1789265793.65495
+    },
+    {
+      "method": "GET",
+      "path": "/release",
+      "time": 1789265793.7861938
+    },
+    {
+      "method": "GET",
+      "path": "/slow.png",
+      "time": 1789265793.821461
+    }
+  ],
+  "failure": null,
+  "cleanup": [
+    {
+      "stage": "webdriver session delete",
+      "ok": true
+    },
+    {
+      "stage": "driver stop",
+      "ok": true
+    },
+    {
+      "stage": "HTTP shutdown",
+      "ok": true
+    },
+    {
+      "stage": "HTTP close",
+      "ok": true
+    },
+    {
+      "stage": "driver log close",
+      "ok": true
+    }
+  ],
+  "scope": "exact candidate background with final connect disabled; manual onHostMessage replies with synthetic 10000ms per-command deadlines (native host uses 20000ms); no native MASC server/host proof",
+  "background_sha256": "e95636f2d6df68f4316b44c466748380cd38f3cdfe99c32deb68ab332d4a9c6e",
+  "interaction_source_sha256": "2d20c1c656f99a46dc6402f387e9888dc82ca9f9e9cfa4a3f97846c1a0d0f905"
+}

@@ -1,0 +1,604 @@
+{
+  "sample_finished_at": "2026-09-09T10:32:41.691335+00:00",
+  "utc_date": "2026-09-09",
+  "source_files": [
+    {
+      "path": "costs/2026-09/09.jsonl",
+      "bytes": 1951036,
+      "sha256": "595f54d57eef083d2ac97e8ec5a644a6ea41d30d7f54926e32d18969fb63f72b"
+    },
+    {
+      "path": "wire-capture/2026-09/09.001.jsonl",
+      "bytes": 33532381,
+      "sha256": "99746530e0689b1376ad67ca5e0dd0329f1e812c3d36cc536a3e0e870f595424"
+    },
+    {
+      "path": "wire-capture/2026-09/09.002.jsonl",
+      "bytes": 33544254,
+      "sha256": "1f9f63ace3eb1b16b80c443d32609065980db3e16948fdd0234ad089bb752f5b"
+    },
+    {
+      "path": "wire-capture/2026-09/09.003.jsonl",
+      "bytes": 33551353,
+      "sha256": "f32815d08064f6a81241ed5ac51cd85783ae4451fa561f0f1d0fcf3cb814d254"
+    },
+    {
+      "path": "wire-capture/2026-09/09.jsonl",
+      "bytes": 28937167,
+      "sha256": "f664831c01eb704994952527e005ae86baec1a279c8d8367cd34e9cdb0aa73c9"
+    },
+    {
+      "path": "keepers/code-reviewer/turn-records/2026-09/09.jsonl",
+      "bytes": 192423,
+      "sha256": "b8c286d501bc50aea30ad94d7b51db7e1189c59f14fcc744b690f373ba30dbde"
+    },
+    {
+      "path": "keepers/geek-scout/turn-records/2026-09/09.jsonl",
+      "bytes": 175694,
+      "sha256": "aa114598f1e1d4802b5e2370cf7e29564c2060c330ed39c2b5e1a11f3060f741"
+    },
+    {
+      "path": "keepers/goo-yang-bong/turn-records/2026-09/09.jsonl",
+      "bytes": 224816,
+      "sha256": "c125651373b545100b7741bbda60e634a10fbb8f183692f5769893a76b5752a7"
+    },
+    {
+      "path": "keepers/jazz-developer/turn-records/2026-09/09.jsonl",
+      "bytes": 138260,
+      "sha256": "c598129dbdaa758ad2d334caede2df2f5e800250314390c13f7cb746fbf60a18"
+    },
+    {
+      "path": "keepers/kidsnote-slack-context-collector/turn-records/2026-09/09.jsonl",
+      "bytes": 80526,
+      "sha256": "44bb0c554880bf492622e103c2a3094dc828c2f4c60fd49d76e9cec77dd1de4d"
+    },
+    {
+      "path": "keepers/lane-smith/turn-records/2026-09/09.jsonl",
+      "bytes": 156978,
+      "sha256": "56a3675327809855304630e522564120e35f40449961dc833f04692ed3291245"
+    },
+    {
+      "path": "keepers/msx-retro-mania/turn-records/2026-09/09.jsonl",
+      "bytes": 422403,
+      "sha256": "ba31ed7bc24e539349543024c56154c8543e395bce7571e4f4c2ca6fde8700e2"
+    },
+    {
+      "path": "keepers/polisher/turn-records/2026-09/09.jsonl",
+      "bytes": 184703,
+      "sha256": "206caad266d8941ae6e67bffe788fe88ef35597478f5a83edbc64dce836084d8"
+    },
+    {
+      "path": "keepers/pr-updater/turn-records/2026-09/09.jsonl",
+      "bytes": 250718,
+      "sha256": "17245d0824c1733a10ad0930757edb051076652220a99ef2d74b86f528498950"
+    },
+    {
+      "path": "keepers/rondo/turn-records/2026-09/09.jsonl",
+      "bytes": 267436,
+      "sha256": "dcee2bb4777fa78aa3e7484fb74b575a15535f4b1a5b1f020c82a1f0049227e6"
+    },
+    {
+      "path": "keepers/sangsu/turn-records/2026-09/09.jsonl",
+      "bytes": 234032,
+      "sha256": "2d3e0c3593db367d3870c612766c87c2aa970f468e95e70d3b6e32a5a05ea827"
+    }
+  ],
+  "malformed_lines": [],
+  "ledger_interval": [
+    "2026-09-09T00:00:04Z",
+    "2026-09-09T10:32:28Z"
+  ],
+  "usage_by_projection": [
+    {
+      "model": "claude-sonnet-5",
+      "projection": "raw_observation",
+      "trust": "trusted",
+      "rows": 324,
+      "tokens": {
+        "input_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 431264171,
+          "median": 516816.5,
+          "max": 43254388
+        },
+        "output_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 420919,
+          "median": 40.0,
+          "max": 30252
+        },
+        "cache_read_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 423146067,
+          "median": 503061.5,
+          "max": 43172261
+        },
+        "cache_creation_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 8115626,
+          "median": 1816.0,
+          "max": 348795
+        },
+        "cache_miss_input_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 2478,
+          "median": 4.0,
+          "max": 152
+        }
+      }
+    },
+    {
+      "model": "claude-sonnet-5",
+      "projection": "resolved_delta",
+      "trust": "trusted",
+      "rows": 324,
+      "tokens": {
+        "input_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 431264171,
+          "median": 516816.5,
+          "max": 43254388
+        },
+        "output_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 420919,
+          "median": 40.0,
+          "max": 30252
+        },
+        "cache_read_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 423146067,
+          "median": 503061.5,
+          "max": 43172261
+        },
+        "cache_creation_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 8115626,
+          "median": 1816.0,
+          "max": 348795
+        },
+        "cache_miss_input_tokens": {
+          "observations": 324,
+          "known": 324,
+          "sum": 2478,
+          "median": 4.0,
+          "max": 152
+        }
+      }
+    },
+    {
+      "model": "glm-5.3",
+      "projection": "raw_observation",
+      "trust": "trusted",
+      "rows": 1410,
+      "tokens": {
+        "input_tokens": {
+          "observations": 1410,
+          "known": 1410,
+          "sum": 115078192,
+          "median": 81866.0,
+          "max": 136942
+        },
+        "output_tokens": {
+          "observations": 1410,
+          "known": 1410,
+          "sum": 1053930,
+          "median": 312.5,
+          "max": 19102
+        },
+        "cache_read_tokens": {
+          "observations": 1410,
+          "known": 1410,
+          "sum": 96376192,
+          "median": 74688.0,
+          "max": 130048
+        },
+        "cache_creation_tokens": {
+          "observations": 1410,
+          "known": 1410,
+          "sum": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 1410,
+          "known": 1410,
+          "sum": 18702000,
+          "median": 1350.5,
+          "max": 112562
+        }
+      }
+    },
+    {
+      "model": "glm-5.3",
+      "projection": "resolved_delta",
+      "trust": "trusted",
+      "rows": 213,
+      "tokens": {
+        "input_tokens": {
+          "observations": 213,
+          "known": 213,
+          "sum": 19578945,
+          "median": 91284,
+          "max": 130165
+        },
+        "output_tokens": {
+          "observations": 213,
+          "known": 213,
+          "sum": 260648,
+          "median": 930,
+          "max": 10841
+        },
+        "cache_read_tokens": {
+          "observations": 213,
+          "known": 213,
+          "sum": 13986944,
+          "median": 75200,
+          "max": 127936
+        },
+        "cache_creation_tokens": {
+          "observations": 213,
+          "known": 213,
+          "sum": 0,
+          "median": 0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 213,
+          "known": 213,
+          "sum": 5592001,
+          "median": 10614,
+          "max": 112562
+        }
+      }
+    },
+    {
+      "model": "glm-5.3-flash",
+      "projection": "raw_observation",
+      "trust": "trusted",
+      "rows": 206,
+      "tokens": {
+        "input_tokens": {
+          "observations": 206,
+          "known": 206,
+          "sum": 20078076,
+          "median": 94933.0,
+          "max": 127630
+        },
+        "output_tokens": {
+          "observations": 206,
+          "known": 206,
+          "sum": 227012,
+          "median": 515.0,
+          "max": 9996
+        },
+        "cache_read_tokens": {
+          "observations": 206,
+          "known": 206,
+          "sum": 13873856,
+          "median": 80064.0,
+          "max": 122496
+        },
+        "cache_creation_tokens": {
+          "observations": 206,
+          "known": 206,
+          "sum": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 206,
+          "known": 206,
+          "sum": 6204220,
+          "median": 5376.0,
+          "max": 127630
+        }
+      }
+    },
+    {
+      "model": "glm-5.3-flash",
+      "projection": "resolved_delta",
+      "trust": "trusted",
+      "rows": 50,
+      "tokens": {
+        "input_tokens": {
+          "observations": 50,
+          "known": 50,
+          "sum": 5001014,
+          "median": 99796.5,
+          "max": 125102
+        },
+        "output_tokens": {
+          "observations": 50,
+          "known": 50,
+          "sum": 99387,
+          "median": 1336.5,
+          "max": 9996
+        },
+        "cache_read_tokens": {
+          "observations": 50,
+          "known": 50,
+          "sum": 2622848,
+          "median": 65536.0,
+          "max": 104832
+        },
+        "cache_creation_tokens": {
+          "observations": 50,
+          "known": 50,
+          "sum": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 50,
+          "known": 50,
+          "sum": 2378166,
+          "median": 30501.0,
+          "max": 125102
+        }
+      }
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "projection": "raw_observation",
+      "trust": "trusted",
+      "rows": 146,
+      "tokens": {
+        "input_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 9267294,
+          "median": 66507.0,
+          "max": 127236
+        },
+        "output_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 109607,
+          "median": 544.5,
+          "max": 2633
+        },
+        "cache_read_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 7354240,
+          "median": 64640.0,
+          "max": 127104
+        },
+        "cache_creation_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 1913054,
+          "median": 395.0,
+          "max": 122195
+        }
+      }
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "projection": "resolved_delta",
+      "trust": "trusted",
+      "rows": 146,
+      "tokens": {
+        "input_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 9267294,
+          "median": 66507.0,
+          "max": 127236
+        },
+        "output_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 109607,
+          "median": 544.5,
+          "max": 2633
+        },
+        "cache_read_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 7354240,
+          "median": 64640.0,
+          "max": 127104
+        },
+        "cache_creation_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_miss_input_tokens": {
+          "observations": 146,
+          "known": 146,
+          "sum": 1913054,
+          "median": 395.0,
+          "max": 122195
+        }
+      }
+    }
+  ],
+  "hook_requests": {
+    "count": 3120,
+    "adjacent_by_keeper": {
+      "pairs": 3108,
+      "system_prompt_comparable": 3108,
+      "system_prompt_unchanged": 3108,
+      "tools_ref_comparable": 3108,
+      "tools_ref_unchanged": 2947,
+      "extra_system_context_comparable": 1351,
+      "extra_system_context_unchanged": 1
+    },
+    "tool_schema_bytes": {
+      "observations": 3120,
+      "known": 3120,
+      "sum": 263127907,
+      "median": 71456.0,
+      "max": 160062
+    },
+    "extra_context_bytes": {
+      "observations": 3120,
+      "known": 1627,
+      "sum": 103299785,
+      "median": 65095,
+      "max": 134798
+    }
+  },
+  "turn_records": {
+    "count": 1107,
+    "shapes": [
+      {
+        "shape": "durable_shape",
+        "usage_scope": "per_request",
+        "rows": 470
+      },
+      {
+        "shape": "durable_shape",
+        "usage_scope": "unavailable",
+        "rows": 132
+      },
+      {
+        "shape": "wire_shape",
+        "usage_scope": "per_request",
+        "rows": 229
+      },
+      {
+        "shape": "wire_shape",
+        "usage_scope": "unavailable",
+        "rows": 276
+      }
+    ],
+    "prompt_blocks_bytes": {
+      "keeper_instructions": {
+        "observations": 1107,
+        "known": 1107,
+        "sum": 7952649,
+        "median": 6169,
+        "max": 11114
+      },
+      "skill_compositions": {
+        "observations": 900,
+        "known": 900,
+        "sum": 317100,
+        "median": 357.0,
+        "max": 357
+      },
+      "memory_os_recall": {
+        "observations": 900,
+        "known": 900,
+        "sum": 46422169,
+        "median": 47740.0,
+        "max": 120797
+      },
+      "dynamic_context": {
+        "observations": 900,
+        "known": 900,
+        "sum": 14449984,
+        "median": 12698.0,
+        "max": 50610
+      },
+      "temporal_summary": {
+        "observations": 900,
+        "known": 900,
+        "sum": 60721,
+        "median": 82.0,
+        "max": 90
+      }
+    },
+    "wire_shape_components_bytes": {
+      "message_user": {
+        "observations": 505,
+        "known": 505,
+        "sum": 2707477,
+        "median": 4350,
+        "max": 39835
+      },
+      "prompt.dynamic_context": {
+        "observations": 326,
+        "known": 326,
+        "sum": 3916775,
+        "median": 10942.0,
+        "max": 49695
+      },
+      "prompt.keeper_instructions": {
+        "observations": 505,
+        "known": 505,
+        "sum": 3634024,
+        "median": 6379,
+        "max": 11114
+      },
+      "prompt.memory_os_recall": {
+        "observations": 326,
+        "known": 326,
+        "sum": 16410448,
+        "median": 46979.5,
+        "max": 110469
+      },
+      "prompt.skill_compositions": {
+        "observations": 326,
+        "known": 326,
+        "sum": 115178,
+        "median": 357.0,
+        "max": 357
+      },
+      "prompt.temporal_summary": {
+        "observations": 326,
+        "known": 326,
+        "sum": 21497,
+        "median": 82.0,
+        "max": 90
+      },
+      "tool_schemas": {
+        "observations": 505,
+        "known": 505,
+        "sum": 35727034,
+        "median": 70135,
+        "max": 77735
+      },
+      "message_assistant_text": {
+        "observations": 496,
+        "known": 496,
+        "sum": 17832564,
+        "median": 27655.0,
+        "max": 148538
+      },
+      "message_tool_result": {
+        "observations": 504,
+        "known": 504,
+        "sum": 24036847,
+        "median": 42470.0,
+        "max": 169469
+      },
+      "message_tool_use": {
+        "observations": 504,
+        "known": 504,
+        "sum": 20831310,
+        "median": 33182.0,
+        "max": 129247
+      }
+    }
+  },
+  "limits": [
+    "UTC-day prefix snapshots are not an atomic snapshot of the whole runtime.",
+    "Hook captures are not final provider HTTP bytes; repeated hooks are not deduplicated requests.",
+    "Byte counts are not tokenizer counts. CLI durable_shape excludes client-owned history expansion.",
+    "Raw observations and resolved deltas overlap; never add these projections.",
+    "Provider usage measures reported accounting, not hardware counters or all failed attempts."
+  ]
+}

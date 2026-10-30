@@ -1,0 +1,407 @@
+(* GET /api/v1/runtime/resolved — single source of truth for "what runtime,
+   model, and max-context is actually applied" (bugs #14/#15/#36):
+
+   - #15: max-context previously diverged across three sources (runtime.toml
+     override, AGENT_CORE hardcoded defaults, AGENT_CORE capability catalog cap). This
+     document reports the one value [Runtime_instance.max_context_of_runtime] resolves,
+     plus the binding/provider/model declaration or capability that
+     produced it ([Runtime_instance.resolve_max_context_of_runtime]).
+   - #14: the settings panel previously rendered only explicit
+     [\[runtime.assignments\]] entries. [assignments] here joins every
+     configured keeper — including ones riding [\[runtime\].default] with no
+     explicit entry — so the frontend never has to reconstruct that join.
+   - #36: this is the one place an operator can see the resolved
+     runtime/model actually in effect. *)
+
+let string_opt_json = Json_util.string_opt_to_json
+let int_opt_json = Json_util.int_opt_to_json
+
+(* The rate limit this process holds for a runtime, and the moment the
+   provider's own Retry-After ends it when that is still ahead of [now]. *)
+let runtime_rate_limit ~now observed : bool * float option =
+  match observed with
+  | Some
+      { Runtime_candidate_backpressure.rate_limit =
+          Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
+      ; failed_attempt = _
+      } ->
+    let resets_at =
+      match Keeper_runtime_failure_route.usable_retry_after retry_after with
+      | Some wait when Float.compare (noted_at +. wait) now > 0 -> Some (noted_at +. wait)
+      | Some _ | None -> None
+    in
+    true, resets_at
+  | Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = _ } | None ->
+    false, None
+;;
+
+(* The last attempt on a runtime that failed without answering. The lane walk
+   reads it to try this runtime after the candidates that answered, except in
+   the walk of the Keeper that recorded it (RFC-0458 §3.4); only an answer
+   clears it. *)
+let runtime_failed_attempt_json observed : Yojson.Safe.t =
+  match observed with
+  | Some
+      { Runtime_candidate_backpressure.failed_attempt =
+          Some
+            (Runtime_candidate_backpressure.Failed_attempt
+               { noted_at; failure; recorded_by })
+      ; rate_limit = _
+      } ->
+    `Assoc
+      [ "noted_at", `Float noted_at
+      ; "failure", `String (Runtime_candidate_backpressure.attempt_failure_to_wire_name failure)
+      ; "recorded_by", `String (Runtime_candidate_backpressure.recorder_keeper_name recorded_by)
+      ]
+  | Some { Runtime_candidate_backpressure.failed_attempt = None; rate_limit = _ } | None -> `Null
+;;
+
+let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson.Safe.t =
+  let exact_slot_group =
+    Runtime.exact_slot_list_key_of_api_format rt.provider.api_format
+  in
+  let effective_max_context, source =
+    match Runtime_instance.resolve_max_context_of_runtime rt with
+    | Some resolution -> resolution
+    | None ->
+      failwith
+        (Printf.sprintf
+           "runtime resolved projection invariant violated: runtime %S has no max-context resolution"
+           rt.id)
+  in
+  (* Life state: the quota window says whether the
+     provider side of this runtime is currently refusing work (2026-09-12
+     operator ask: the runtime list shows what exists, not what is alive).
+     [Until] is a provider-stated reset deadline; [Observed] is a hard-quota
+     rejection that claimed no reset -- the next success on the scope clears
+     it. A numeric "remaining" is not honest: providers do not expose it,
+     and the window's own contract is these two facts. *)
+  let quota_scope = Runtime_instance.quota_scope_of_runtime rt in
+  let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
+  let quota_resets_at = Runtime_quota_window.active_until ~scope:quota_scope ~now in
+  let quota_scope_label = scope_label quota_scope in
+  (* A rate limit is a separate fact from the quota window: it is this
+     process's own observation of a 429 on this runtime. The provider's stated
+     Retry-After deadline or a successful answer clears it. A limit without a
+     stated wait stays until success and has no [rate_limit_resets_at]. *)
+  let observed =
+    Runtime_candidate_backpressure.candidate_backpressure ~now
+      ~candidate:rt.candidate_backpressure
+  in
+  let rate_limited, rate_limit_resets_at = runtime_rate_limit ~now observed in
+  `Assoc
+    [ "id", `String rt.id
+    ; "provider", `String rt.provider.display_name
+      (* The [providers.<id>] table this binding belongs to. The display name
+         above is prose; an editor that opens the provider's table needs the
+         key. *)
+    ; "provider_id", `String rt.provider.id
+    ; "model", `String rt.model.api_name
+    ; "exact_slot_group", string_opt_json exact_slot_group
+      (* An exact HTTP slot on this runtime would be refused on save: its
+         provider declares no exact-body-timeout-s (rule 3, #38779). The
+         lane pickers read this instead of discovering it from the 400. *)
+    ; ( "exact_body_deadline_missing"
+      , `Bool
+          (Runtime.exact_slot_lacks_body_deadline
+             ~target_source:(Runtime.exact_output_target_source ())
+             rt) )
+    ; "effective_max_context", `Int effective_max_context
+    ; "max_context_source", `String (Runtime_instance.max_context_source_to_string source)
+    ; "max_output_tokens", int_opt_json (Runtime_instance.max_output_tokens_of_runtime rt)
+      (* The effort this binding declares. Bindings of one model that differ
+         only in effort share provider, model and context, so without it the
+         picker draws them as identical rows. [null] is an unset effort, not
+         an unknown one.
+
+         Declared, not effective: an official-client turn puts the value
+         through the catalog clamp and then the CLI's own vocabulary
+         ([Keeper_official_client_host.effective_reasoning_effort],
+         [Runtime_claude_code.cli_admitted_reasoning_effort]), which today
+         changes [minimal] and [ultra] on Claude Code and efforts outside a model's
+         accepted set. The key says which of the two it is; surfacing the
+         other belongs to the detail view, which has room to say both. *)
+    ; ( "declared_reasoning_effort"
+      , match rt.model.reasoning_effort with
+        | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort)
+        | None -> `Null )
+    ; "is_local", `Bool (Runtime_instance.is_local_runtime rt)
+    ; "is_default", `Bool rt.binding.is_default
+    ; "quota_exhausted", `Bool quota_exhausted
+    ; "quota_resets_at", (match quota_resets_at with Some t -> `Float t | None -> `Null)
+    ; "quota_scope", `String quota_scope_label
+    ; "rate_limited", `Bool rate_limited
+    ; ( "rate_limit_resets_at"
+      , match rate_limit_resets_at with Some t -> `Float t | None -> `Null )
+    ; "failed_attempt", runtime_failed_attempt_json observed
+    ]
+;;
+
+(* Where a lane on this surface comes from. [Declared] is a
+   [runtime.lanes.<id>] table: the routing endpoint edits it, and a keeper
+   assigned to it walks every candidate. [From_assignment] is the
+   one-candidate lane [Runtime.resolve_assignment] makes on the spot for an
+   assignment that names a runtime rather than a lane -- no table declares it,
+   so it has no failover to walk and [remove] has nothing to delete. The two
+   used to reach the surface as the same row, which left the reader no way to
+   tell a lane that walks from one that cannot. *)
+type lane_origin =
+  | Declared
+  | From_assignment
+
+let lane_json ((lane : Runtime_lane.t), origin) : Yojson.Safe.t =
+  `Assoc
+    [ "id", `String (Runtime_lane.id lane)
+    ; "runtime_ids", Json_util.json_string_list (Runtime_lane.ordered_candidates lane)
+    ; ( "declared"
+      , `Bool (match origin with Declared -> true | From_assignment -> false) )
+    ]
+;;
+
+let resolved_assignment_json
+    (resolution : [ `Lane of Runtime_lane.t | `Unavailable of Runtime.missing_catalog_model | `Missing ])
+  : Yojson.Safe.t
+  =
+  match resolution with
+  | `Lane lane -> `Assoc [ "kind", `String "lane"; "id", `String (Runtime_lane.id lane) ]
+  | `Unavailable missing ->
+      `Assoc
+        [ "kind", `String "unavailable"
+        ; "id", `String missing.runtime_id
+        ; "reason", `Assoc
+            [ "kind", `String "missing_catalog_model"
+            ; "message", `String ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing)
+            ; "provider_id", `String missing.provider_id
+            ; "provider_label", `String missing.provider_label
+            ; "model_id", `String missing.model_id
+            ]
+        ]
+  | `Missing -> `Assoc [ "kind", `String "missing"; "id", `Null ]
+;;
+
+(* Mirrors [Keeper_meta_contract.runtime_id_of_meta]: a keeper with no
+   [\[runtime.assignments\]] entry (or a blank one) runs on [\[runtime\].default].
+   Duplicating that exact fallback here (rather than only reporting explicit
+   assignments) is bug #14's fix — the resolved document must match what a
+   turn actually dispatches to. *)
+let assignment_target (snapshot : Runtime.dashboard_runtime_resolved_snapshot) (keeper_name : string)
+  : string * string option
+  =
+  match List.assoc_opt keeper_name snapshot.rs_assignments with
+  | Some id when String.trim id <> "" -> "explicit", Some (String.trim id)
+  | Some _ | None ->
+    (* The route the default names, which is what [resolve_assignment] is given
+       for a keeper with no assignment; [default] is only the runtime it enters
+       on. *)
+    "default", Option.bind snapshot.rs_default_runtime (fun _ -> snapshot.rs_default_route)
+;;
+
+let assignment_json (snapshot : Runtime.dashboard_runtime_resolved_snapshot) (keeper_name : string) : Yojson.Safe.t =
+  let assignment_source, runtime_id = assignment_target snapshot keeper_name in
+  let resolved =
+    match runtime_id with
+    | Some id -> resolved_assignment_json (snapshot.rs_resolve_assignment id)
+    | None -> `Assoc [ "kind", `String "missing"; "id", `Null ]
+  in
+  `Assoc
+    [ "keeper", `String keeper_name
+    ; "assignment_source", `String assignment_source
+    ; "resolved", resolved
+    ]
+;;
+
+(* Union of explicit [\[runtime.assignments\]] keys and the keeper registry:
+   an assignment can name a keeper whose directory has not materialized yet,
+   and the registry can list keepers with no assignment at all (the default
+   riders bug #14 is about). *)
+let all_keeper_names ~snapshot ~(config : Workspace.config) : string list =
+  let assigned = List.map fst snapshot.Runtime.rs_assignments in
+  let registered =
+    (match Keeper_meta_store.keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "all_keeper_names: keeper names unread: %s" detail;
+       [])
+  in
+  assigned @ registered |> List.sort_uniq String.compare
+;;
+
+(* Declared lanes plus the lanes an assignment resolves to on its own. A keeper
+   assigned to a bare runtime id dispatches through a lane that no
+   [\[runtime.lanes\]] table declares, and reporting only declared lanes would
+   hide that lane's candidates from the document that is supposed to say what
+   dispatch will do. *)
+let dispatchable_lanes ~keeper_names (snapshot : Runtime.dashboard_runtime_resolved_snapshot)
+  : (Runtime_lane.t * lane_origin) list
+  =
+  let declared = snapshot.rs_lanes in
+  let seen = List.map Runtime_lane.id declared in
+  let implicit =
+    keeper_names
+    |> List.filter_map (fun keeper -> snd (assignment_target snapshot keeper))
+    |> List.filter_map (fun id ->
+      match snapshot.rs_resolve_assignment id with
+      | `Lane lane when not (List.mem (Runtime_lane.id lane) seen) -> Some lane
+      | `Lane _ | `Missing | `Unavailable _ -> None)
+    |> List.sort_uniq (fun a b ->
+      String.compare (Runtime_lane.id a) (Runtime_lane.id b))
+  in
+  List.map (fun lane -> lane, Declared) declared
+  @ List.map (fun lane -> lane, From_assignment) implicit
+;;
+
+(* Provider-reported usage windows, for operators only
+   ([Runtime_provider_usage_window]). Nothing here says whether a provider is
+   available: codex-cli 0.156.0's schema tells clients not to infer recovery
+   from percentages or reset times, so the numbers are shown as reported.
+
+   The table lives in this process and is not persisted, so a scope that has
+   not reported since [provider_usage_windows_since] is shown as exactly that,
+   never as an empty or healthy window. Every configured quota scope gets a
+   row, plus any scope that reported and is no longer configured. *)
+module Usage = Runtime_provider_usage_window
+
+let usage_window_kind_json : Usage.window_kind -> Yojson.Safe.t = function
+  | Five_hour -> `Assoc [ "kind", `String "five_hour" ]
+  | Seven_day -> `Assoc [ "kind", `String "seven_day" ]
+  | Duration_minutes minutes ->
+    `Assoc [ "kind", `String "duration_minutes"; "minutes", `Int minutes ]
+  | Provider_label label -> `Assoc [ "kind", `String "provider_label"; "label", `String label ]
+;;
+
+let usage_utilization_json : Usage.utilization -> Yojson.Safe.t = function
+  | Fraction value -> `Assoc [ "unit", `String "fraction"; "value", `Float value ]
+  | Percent value -> `Assoc [ "unit", `String "percent"; "value", `Int value ]
+  | Usd { used; limit } ->
+    `Assoc [ "unit", `String "usd"; "value", `Float used
+           ; "limit", Json_util.float_opt_to_json limit ]
+;;
+
+let usage_window_json ({ window; source; observed_at } : Usage.recorded) : Yojson.Safe.t =
+  `Assoc
+    [ "limit_id", string_opt_json window.limit_id
+    ; "window", usage_window_kind_json window.kind
+    ; "utilization", usage_utilization_json window.utilization
+    ; "resets_at", int_opt_json window.resets_at
+    ; "observed_at", `Float observed_at
+    ; "source", `String (Usage.source_to_string source)
+    ; "role", `String (Usage.window_role_to_string window.role)
+    ]
+;;
+
+(* Configured runtimes grouped by quota scope, in first-appearance order: rows
+   sharing a credential share one account and so one set of windows. Each
+   provider keeps its [display-name] beside its id: the id is the table key a
+   join needs, the name is what the operator wrote to read. *)
+let usage_scopes (runtimes : Runtime_instance.t list) =
+  let add groups scope (provider : Runtime_schema.provider) =
+    let named (id, _) = String.equal id provider.id in
+    let entry = provider.id, provider.display_name in
+    match List.find_opt (fun (known, _) -> Runtime_quota_window.scope_equal known scope) groups with
+    | Some _ ->
+      List.map
+        (fun (known, providers) ->
+           if Runtime_quota_window.scope_equal known scope && not (List.exists named providers)
+           then known, providers @ [ entry ]
+           else known, providers)
+        groups
+    | None -> groups @ [ scope, [ entry ] ]
+  in
+  let configured =
+    List.fold_left
+      (fun groups (rt : Runtime_instance.t) -> add groups (Runtime_instance.quota_scope_of_runtime rt) rt.provider)
+      []
+      runtimes
+  in
+  let unconfigured =
+    List.filter
+      (fun scope ->
+         not (List.exists (fun (known, _) -> Runtime_quota_window.scope_equal known scope) configured))
+      (Usage.recorded_scopes ())
+    |> List.sort (fun a b ->
+      String.compare (Runtime_quota_window.scope_to_string a) (Runtime_quota_window.scope_to_string b))
+  in
+  configured @ List.map (fun scope -> scope, []) unconfigured
+;;
+
+let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
+  let state, windows, report_fields =
+    match Usage.state ~scope with
+    | Not_reported_since_start -> "not_reported_since_start", [], []
+    | Reported_no_windows { source; observed_at } ->
+        "reported_no_windows", [],
+        [ "source", `String (Usage.source_to_string source); "observed_at", `Float observed_at ]
+    | Reported (first, rest) -> "reported", List.map usage_window_json (first :: rest), []
+  in
+  `Assoc
+    ([ "scope", `String (scope_label scope)
+    ; "scope_id", `String (Server_provider_usage_history.scope_id scope)
+    ; ( "providers"
+      , `List
+          (List.map
+             (fun (id, display_name) ->
+                `Assoc [ "id", `String id; "display_name", `String display_name ])
+             providers) )
+    ; "state", `String state
+    ; "windows", `List windows
+    ] @ report_fields)
+;;
+
+let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
+  (* One read of the loaded state: a reload between two reads could pair a
+     default runtime with a list that no longer holds it, and its scope with
+     no label. The default is grouped too; [usage_scopes] adds a provider to a
+     scope once, so it is not counted twice. *)
+  let snapshot = Runtime.dashboard_runtime_resolved_snapshot () in
+  let default_route = snapshot.rs_default_route in
+  let default = snapshot.rs_default_runtime in
+  let runtimes = snapshot.rs_runtimes in
+  let scopes = usage_scopes (Option.to_list default @ runtimes) in
+  (* The keeper directory is listed once too: the lanes an assignment
+     implies and the assignment rows then name the same fleet. *)
+  let keeper_names = all_keeper_names ~snapshot ~config in
+  (* This document can be read without authentication in non-strict mode.
+     Keep account homes and credential-file paths in typed internal scopes;
+     expose only response-local, consistent join keys. Every row below is
+     drawn from the same snapshot [scopes] was, so the missing branch is an
+     invariant violation, not a reload race. *)
+  let public_scope_labels =
+    List.mapi (fun index (scope, _) -> scope, Printf.sprintf "account:%d" (index + 1)) scopes
+  in
+  let scope_label scope =
+    match
+      List.find_opt
+        (fun (known, _) -> Runtime_quota_window.scope_equal known scope)
+        public_scope_labels
+    with
+    | Some (_, label) -> label
+    | None -> failwith "runtime quota scope missing from resolved projection"
+  in
+  `Assoc
+    [ "generated_at_iso", `String generated_at_iso
+    ; "source", `String "/api/v1/runtime/resolved"
+    ; "config_path", string_opt_json snapshot.rs_config_path
+    ; "default_route", string_opt_json default_route
+    ; ( "default_runtime"
+      , match default with
+        | Some rt -> runtime_resolution_json ~now ~scope_label rt
+        | None -> `Null )
+    ; "runtimes", `List (List.map (runtime_resolution_json ~now ~scope_label) runtimes)
+      (* [\[runtime\].media_failover] is a route, not a lane: no keeper turn
+         dispatches to it, and it has no table of its own. Keep both the active
+         fleet and the file's declaration so an operator can distinguish a
+         rejected entry without losing its position when rewriting the route. *)
+    ; "media_failover", Json_util.json_string_list snapshot.rs_media_failover
+    ; ( "media_failover_declared"
+      , Json_util.json_string_list snapshot.rs_declared_media_failover )
+    ; "lanes", `List (List.map lane_json (dispatchable_lanes ~keeper_names snapshot))
+    ; "assignments", `List (List.map (assignment_json snapshot) keeper_names)
+    ; "provider_usage_windows_since", `Float Usage.recording_since
+    ; ( "provider_usage_windows"
+      , `List (List.map (usage_scope_json ~scope_label) scopes) )
+    ]
+;;
+
+let build ~generated_at_iso ~config =
+  build_at ~now:(Time_compat.now ()) ~generated_at_iso ~config
+;;

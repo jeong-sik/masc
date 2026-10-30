@@ -1,0 +1,80 @@
+{
+  "source_commit": "5334be62fca7e70350cff7e36899ef24f27230dc",
+  "server_sha256": "fc5ea6a5451056b0542c0b337b9e3c62392a872dbc75f5d693eb22041fe4a9c3",
+  "binaries": {
+    "masc-macos-arm64": "fc5ea6a5451056b0542c0b337b9e3c62392a872dbc75f5d693eb22041fe4a9c3",
+    "masc-tui-macos-arm64": "4713063cd0f4d7c707dfea47e361cee3f6017155bdebf746e5fede70949ce8d8",
+    "masc-browser-host-macos-arm64": "ee1da83847b65178b99632e307866dc1a0582cd34648e70b187a286071106d42"
+  },
+  "binary_source_proof": {
+    "source_commit": "5334be62fca7e70350cff7e36899ef24f27230dc",
+    "runtime": "/tmp/browser-continuity-native-5334/runtime",
+    "sha256": {
+      "masc-macos-arm64": "fc5ea6a5451056b0542c0b337b9e3c62392a872dbc75f5d693eb22041fe4a9c3",
+      "masc-tui-macos-arm64": "4713063cd0f4d7c707dfea47e361cee3f6017155bdebf746e5fede70949ce8d8",
+      "masc-browser-host-macos-arm64": "ee1da83847b65178b99632e307866dc1a0582cd34648e70b187a286071106d42"
+    }
+  },
+  "runtime_provenance": {
+    "libraries": [
+      {
+        "name": "libcrypto.3.dylib",
+        "upstream_sha256": "c853c9fefb6d391ab52d8db288b21c106db98e22efd148f2812cb7c27531cd41"
+      },
+      {
+        "name": "libgmp.10.dylib",
+        "upstream_sha256": "03091509d91b059bb22432c77b5aabecf918d32eb3b66b90b0c0c78f74c177b9"
+      },
+      {
+        "name": "libssl.3.dylib",
+        "upstream_sha256": "4a466b82b563ce7bcf90062811ca36c8d57ce5f7fca22333dd68b2f7f41ee7ba"
+      },
+      {
+        "name": "libzstd.1.5.7.dylib",
+        "upstream_sha256": "34c960d7a0c76409111fa77423cf61b6177da9b30901b4d588b190cb351fd1e8"
+      }
+    ],
+    "minimum_macos": "14.0",
+    "platform": "macos-arm64",
+    "python": {
+      "browser_download_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "digest": "sha256:d3904bd6a072246e07aa0bdadee9a14e80521e42a943c0848059feb16a2816dc",
+      "name": "cpython-3.13.15+20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "release": "20260901",
+      "size": 25147663,
+      "upstream": "astral-sh/python-build-standalone"
+    },
+    "schema": "masc.macos-runtime.v1",
+    "source_commit": "5334be62fca7e70350cff7e36899ef24f27230dc"
+  },
+  "packages": {
+    "browser-lanes": {
+      "SKILL.md": "8277e8b890542117d8f748967bf2c019cccf444bd8fa8a4aa4613d421f684671",
+      "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972",
+      "references/composition.md": "661203a7464152b506f7f62e480e3f9d903f4e428ba94918e291d06132b2e37a",
+      "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+      "references/extraction.md": "a2ad35c4a5b0079e8639b9962ef6f675f8a747ef382bacb9e8d871887c7fbf3f",
+      "references/observation.md": "5685ef16c9f0eb4eed1d432d2231211c22495bc9ca8ddbce5be6b4ac5309e0ea",
+      "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77"
+    },
+    "browser-live-click-content": {
+      "SKILL.md": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107"
+    }
+  },
+  "exports": [
+    {
+      "package": "browser-lanes",
+      "exit_code": 0,
+      "stdout": "Bundled package exported to /private/tmp/browser-continuity-native-5334/bundle/browser-lanes\nbundled revision: 54d1e709686b42848d940cdd75bc6a128a8c9e409ba05a3fccc3c521a8d811ae\n",
+      "stderr": "[2026-09-13 10:15:05] [INFO] [MCP] Tag registry initialized: 174 tools registered\n"
+    },
+    {
+      "package": "browser-live-click-content",
+      "exit_code": 0,
+      "stdout": "Bundled package exported to /private/tmp/browser-continuity-native-5334/bundle/browser-live-click-content\nbundled revision: a5387473ce40a24f0d69767a27e7b9226aadf2755ac7effdd84759caabd16b43\n",
+      "stderr": "[2026-09-13 10:15:05] [INFO] [MCP] Tag registry initialized: 174 tools registered\n"
+    }
+  ],
+  "origin": "candidate binary skills-refresh --export-to",
+  "result": "exported"
+}

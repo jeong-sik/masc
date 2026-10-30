@@ -1,0 +1,133 @@
+{
+  "recorded_at": "2026-10-04T20:40:49.245892+00:00",
+  "base": "e4fad56d68d4e2401191e8e83668c4b449f8c4d5",
+  "scope": "Actual Web components with synthetic HTTP, focused TypeScript tests; no real backend, worker, native TUI/PTY, deployment or CI",
+  "browser": {
+    "passed": true,
+    "scope": "Actual panel/form/session/API in Chromium with synthetic HTTP. No real backend/worker or full SPA validation.",
+    "browser": "149.0.7827.55",
+    "checks": [
+      "folder navigation, catalog metadata/issues and fresh preview through actual API decoders",
+      "nested source selection; incomplete numeric text refuses drafting with no write",
+      "binding and unsubmitted path inputs survive actual component unmount/remount",
+      "workspace return preserves inputs but requires fresh preview before drafting",
+      "actual styled nested form at mobile width without horizontal overflow",
+      "prepared TOML preserves false/zero/named output and independent pre-existing raw draft",
+      "only explicit Save TOML dispatches one create; receipt remains pending reconciliation"
+    ],
+    "reads": [
+      {
+        "path": "/api/v1/lane-addons",
+        "query": "",
+        "workspace": "/workspace"
+      },
+      {
+        "path": "/api/v1/lane-addons/package-catalog",
+        "query": "",
+        "workspace": "/workspace"
+      },
+      {
+        "path": "/api/v1/lane-addons/package-catalog",
+        "query": "?directory=%2Fworkspace%2Fpackages",
+        "workspace": "/workspace"
+      },
+      {
+        "path": "/api/v1/lane-addons/package-preview",
+        "query": "?manifest_path=%2Fworkspace%2Fpackages%2Freport%2Flane.toml",
+        "workspace": "/workspace"
+      },
+      {
+        "path": "/api/v1/lane-addons",
+        "query": "",
+        "workspace": "/workspace"
+      },
+      {
+        "path": "/api/v1/lane-addons",
+        "query": "",
+        "workspace": "/workspace-b"
+      },
+      {
+        "path": "/api/v1/lane-addons",
+        "query": "",
+        "workspace": "/workspace"
+      },
+      {
+        "path": "/api/v1/lane-addons/package-preview",
+        "query": "?manifest_path=%2Fworkspace%2Fpackages%2Freport%2Flane.toml",
+        "workspace": "/workspace"
+      },
+      {
+        "path": "/api/v1/lane-addons",
+        "query": "",
+        "workspace": "/workspace"
+      }
+    ],
+    "mutations": [
+      {
+        "path": "/api/v1/lane-addons/declaration",
+        "body": {
+          "file_name": "new-report.toml",
+          "source_text": "enabled = true\nid = \"new-report\"\nrun_id = \"run\"\nmanifest_path = \"/workspace/packages/report/lane.toml\"\nbinding = { \"sources\" = [{ \"source_id\" = \"upstream\", \"kind\" = \"lane_output\", \"installation_id\" = \"producer\", \"selection\" = \"latest_completed\", \"output_id\" = \"results\" }], \"count\" = 0, \"enabled\" = false }\n",
+          "mode": "create"
+        },
+        "workspace": "/workspace"
+      }
+    ],
+    "errors": [],
+    "unexpected": []
+  },
+  "sha256": {
+    "addons/dos-world/lane.toml": "96abae12b48b681d8edbd94af5215d1fe13096dc356c48e8bb7d40230124a3ef",
+    "addons/frame-progress/lane.toml": "db13f69dd4ab5493a83e4641a541511e136fcb0069c3d166aa21dff170d2f62b",
+    "addons/fusion-compute/lane.toml": "a2d0ee0e7ab1ff47d02e4f1427930232760f6aedf5431b2a61c72be36620b1f5",
+    "addons/fusion-report/lane.toml": "6c18781e0689628318f8305a7cf88a880ca94039f13758fe778ca26fc18968b3",
+    "addons/fusion-results/lane.toml": "e3f7585d9df1d0b288a9b917c95d39eb23e811586a3438ea14c15b1ef144d703",
+    "addons/msx-observer/lane.toml": "3903365391cb9d9208ef19feda3659c6534483e5a1237d7c2f4d229d4053c1b3",
+    "addons/output-statistics/lane.toml": "c19c8aa6c7e9c34b90ff7a8c186694c86fcafd0a5842fac4583cbfb3c65e8b17",
+    "addons/quiz-grader/lane.toml": "eea5dd6d1374877548a54568c0238242312efffd6767ccec69f8ddd535f8a3c1",
+    "addons/quiz-questions/lane.toml": "ed5a2fa26cfd8d80d7caab1994009e327e0d2a5f9562620f40ce8f1ab80ad588",
+    "addons/value-difference/lane.toml": "f67aeaf9adf8c2721f20956257dac0d20d1d4675976ed9354bed4597b1a59315",
+    "addons/web-project/lane.toml": "c5cedd1693db96d5251f5e1b6df70acb2bc91ca6e974e7dc6586ba4abf805598",
+    "addons/wkbl-score-runs/lane.toml": "370b196feece8f5e983ee179fa3c9aa2b8463df07ccc3e6776826cc8d604a94e",
+    "changelog.d/41206.md": "7704cdec8c41290674c5ee5306aa7269494d75fd328ec0021f3e4fb9ef53cd87",
+    "dashboard/evidence/2026-10-05-web-package-installation/README.md": "8068e47076e355185825dd961de4f91ca358f19c30263eb659b32c14293bc074",
+    "dashboard/evidence/2026-10-05-web-package-installation/before-explicit-select-labels.json": "abb28555dcad94381e91b4c6039ba43d502bea397bfeca084b214a75f535d1a3",
+    "dashboard/evidence/2026-10-05-web-package-installation/before-explicit-select-labels.png": "48057a86ead316d350dcc455d5d7e8a3d87ece4c2de0ddf23ffc7c0176668ed3",
+    "dashboard/evidence/2026-10-05-web-package-installation/browser-result.json": "3b38b7b40a026605dd3ea45b17b4c7765840a72e103fb2d05e40807007387008",
+    "dashboard/evidence/2026-10-05-web-package-installation/browser.mjs": "c84ce152b5a8368a44eb4cbd2ef56b48fefaf91250a982abec786549efdc3e10",
+    "dashboard/evidence/2026-10-05-web-package-installation/browser.txt": "23d76922c7a1ad967ff9e717df758c7c5ba01928dfbdc6907903cb2ea5e4166d",
+    "dashboard/evidence/2026-10-05-web-package-installation/browser.txt.gz": "3968b7933c42fe59ac8426321ec48cb28b289ee794f1898c5e5c800e5a981015",
+    "dashboard/evidence/2026-10-05-web-package-installation/checks.json": "ab33bd725d55b01a5db869573a5f1097b6e124d0979ad44b7def67bf2516461d",
+    "dashboard/evidence/2026-10-05-web-package-installation/draft-saved-desktop.png": "5eedb9870053d37de9da6de867f25249d833b8fe7c8c1d03ce5c93944377ad45",
+    "dashboard/evidence/2026-10-05-web-package-installation/fixture.html": "9358f1d3ca56e4876546c13bc9335a54f63c1d9ad1082b8ee4a7fe627dffeab6",
+    "dashboard/evidence/2026-10-05-web-package-installation/fixture.ts": "5c8a43a1d489740d33bc80f8d83dd38c756205336029797717798bab1e63b898",
+    "dashboard/evidence/2026-10-05-web-package-installation/form-desktop.png": "8d0096a42dda0641c92a2aea7dae126081def4e8f374e11487b6e578eeba881f",
+    "dashboard/evidence/2026-10-05-web-package-installation/form-mobile.png": "18df041b3d69658446b702ee77d910c3f1595c61adf736c53e6926b8d1fbd730",
+    "dashboard/evidence/2026-10-05-web-package-installation/initial-fixture-validation.json": "89aad40ac445ada4ffd725763dffd844a88a91a8edbd43e45422b69c890f33b0",
+    "dashboard/evidence/2026-10-05-web-package-installation/lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-web-package-installation/lint.txt.gz": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+    "dashboard/evidence/2026-10-05-web-package-installation/path-input-before.json": "ac94e9d56a202d0f5d639c16ea532f3e851227810b98a8a941f618bf100f04cd",
+    "dashboard/evidence/2026-10-05-web-package-installation/path-input-before.txt": "70d56adc4494eedf925bf15401de680c70f520f1b4161a5a52fb0c99203da358",
+    "dashboard/evidence/2026-10-05-web-package-installation/path-input-before.txt.gz": "2c9f9d6b9750dc1adb9c5fefd5f66ffd36563a23a27909ddb6bee0e550e02f17",
+    "dashboard/evidence/2026-10-05-web-package-installation/tests.txt": "c37a51ffdd6b939dbaf259926df5ef231397b4fa7c42220a1c72151ad2880341",
+    "dashboard/evidence/2026-10-05-web-package-installation/tests.txt.gz": "182a2e805ae1cde463d5b1a8d956423c32a85d82968cb2fccb08e5e0ef23ee63",
+    "dashboard/evidence/2026-10-05-web-package-installation/typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboard/evidence/2026-10-05-web-package-installation/typecheck.txt.gz": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+    "dashboard/pnpm-lock.yaml": "1a85e066a8baf940cf65df3cf18e76224684fcff6b47254b9c37d6647fd607a0",
+    "dashboard/src/api/lane-addons.ts": "c53ecf01650b3f553ff70c0c4ead2b68996d40cade0f4f091dba00f81dce48c2",
+    "dashboard/src/api/lane-package-catalog.ts": "e95efbab3ae5df757ff9ff850bda4f07f427f9b5c2f5525cbd58cfbe28c5dcb8",
+    "dashboard/src/components/lane-addons-panel.ts": "e79d8556b468244070ba8bf2b176729ba7ba79f6f46d2ef08b037d26fa832f27",
+    "dashboard/src/components/lane-binding-form.ts": "cb398165c692dd8fe09cf14365a944247c7b93edb68f54887f07af0c32eeddf4",
+    "dashboard/src/components/lane-declaration-editor.ts": "0e4e9c674bf08e5251ddb0bfb486ed41de21a159637a1e264f4017eb77032616",
+    "dashboard/src/components/lane-package-installer.test.ts": "3dfb0209f145149a405ab0f4a7f2679f58dfc83112e8a6ae9220be6cdd6839ed",
+    "dashboard/src/components/lane-package-installer.ts": "26d73a0138e56b0b3ea10ffa33b58f41636eb6ffae8dc60231de7c2ffd29d6eb",
+    "dashboard/src/lib/lane-binding-form.test.ts": "0acade02a8c6b8e00d1ca2ec8c49cc4bb09cb929c1a80c0e11d041f88931cd55",
+    "dashboard/src/lib/lane-binding-form.ts": "4c0d1a071d597c38f76881d2be67aa19dd854ff7e5bf4811ee64159e15d745d3",
+    "dashboard/src/lib/lane-declaration-sessions.ts": "b53c17a8280588f068dd425a3cee3a25e0d199d3fa816325ef221bcda5e6b9b1",
+    "dashboard/src/lib/lane-package-installation-session.ts": "080589474ce8f18a55b58475aebacfb8b694d180ad882e00c041b5c6dcaaa853",
+    "docs/guides/lane-addon-toml.md": "8dc24666eb3d34563b06138a280c4205f1fd37762277ecc1d9c5222565fe47ae",
+    "docs/guides/web-lane-addons.md": "c5c3bf397af525556c96dd6f11128a2b4043525fb09eefb3670f1946c8c6d3d9",
+    "lib/lane_addon/lane_addon_action.ml": "b58739dd371110688f6babf48e7ff81614fa5c638d5b08448f3d74faf7f05a9d",
+    "lib/lane_addon/lane_addon_action.mli": "9da30991d81ad63ae1136e262241be877c28ca5961c34b2a40a190afd90835d0"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "error": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('Inventory unavailable', { exact: true }) to be visible\u001b[22m\n",
+  "checks": [
+    "pending Slice survives manual inventory refresh and both results display",
+    "Slice completion leaves pending inventory request and loading state intact",
+    "Clear slice cancels only Slice; inventory completes and cancelled late Slice stays hidden"
+  ],
+  "reads": [
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "query": ""
+    },
+    {
+      "path": "/api/v1/lane-addons",
+      "query": ""
+    }
+  ],
+  "writes": [],
+  "errors": [],
+  "unexpected": [],
+  "cancelled": [
+    {
+      "path": "/api/v1/lane-addons/slice",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "text": "Synthetic HTTP · actual Status/router/Add-ons controls · no live backend\n\nFixture Add-ons\nFixture workspace A\nFixture workspace B\nKEEPER FLEET\nINTERNAL AGENTS\nTOOL MONITOR\nRUNTIME\nOBSERVATORY\nSKILLS\nALL LANES\nLANE ADD-ONS\nLANE · QUEUE\nMONITOR\n›\nLANE ADD-ONS\nLANE ADD-ONS\n\nOptional cross-lane observations and relationships.\n\nLANE ADD-ONS\n\nOptional observations and relationships. Keeper work continues independently.\n\nNew TOML\nRefresh\n\nGET /api/v1/lane-addons: Inventory unavailable\n\nShowing retained data after a failed request; current state is unverified.\n\nLane × wall time · Select an event to inspect its evidence. Drag empty plot space to set a slice window.\n\nEach row is a declared or observed Lane. Dotted links are recorded relationships; spacing does not imply causation.\n\nNo observations in this view\n\nworker\nWorker after Clear slice · attached\nNo observations in this view\nTOML CONFIGURATION\n\nDirectory: /fixture/A/.masc/config/lane-addons\n\nConfiguration read: complete\n\nDECLARATION / FILE\tDESIRED REVISION\tAPPLIED REVISION / INSTANCE\tCONFIGURATION STATUS\npkg\n/fixture/A/.masc/config/lane-addons/pkg.toml\nEdit TOMLOn / off\tsemantic\tNone\nNo instance\n\tNot yet applied\n\nConfiguration status tracks installed revisions. Observation status is shown per instance below.\n\nInstall package\nAttach a package\nINSTANCE / PACKAGE\tRUN / REVISION\tSTATUS\tCURSOR / ROWS\tACTIONS\n Worker after Clear slice\nworker · fixture\n\nNot managed by TOML\n\nPackage input and display contracts\n\trun\nv1\n\tattached\t0 / 0\tObserveRemove worker\n\nCleans up this worker and its owned resources. Retained observations and evidence remain.\n\nRun filter \nLane filter \nSince (Unix seconds) \nUntil (Unix seconds) \nSlice\nClear slice\nKeeper (optional) \nPreserve selected evidence"
+}

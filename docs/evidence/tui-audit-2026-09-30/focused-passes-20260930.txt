@@ -1,0 +1,66 @@
+surface: Task detail
+run: 36663470167
+source_head: be39f068a18aec45e2c17e7e42ef7532b60dc164
+scope: focused fixture PTY and named suites; not full TUI or installed binary evidence
+test suite	Checkout	2026-09-30T03:16:45.1526698Z be39f068a18aec45e2c17e7e42ef7532b60dc164
+test suite	Test	2026-09-30T03:22:19.7525720Z Task metadata physical-row viewport: PASS
+test suite	Test	2026-09-30T03:22:19.8412457Z [targeted] test_tui_task_metadata_viewport_pty: OK in 55s
+
+surface: Keeper Info/Channels
+run: 36663532148
+source_head: 3308aef6b461afe0b7deb89aacc12d5ed6c0699f
+scope: focused fixture PTY and named suites; not full TUI or installed binary evidence
+test suite	Checkout	2026-09-30T03:18:11.0123943Z 3308aef6b461afe0b7deb89aacc12d5ed6c0699f
+test suite	Test	2026-09-30T03:24:25.6668333Z Keeper Info and Channels metadata wrap: PASS
+test suite	Test	2026-09-30T03:24:25.7668054Z [targeted] test_tui_keeper_metadata_wrap_pty: OK in 38s
+test suite	Test	2026-09-30T03:24:38.4344360Z tui keeper portrait: PASS (3 scenarios)
+test suite	Test	2026-09-30T03:24:38.5304967Z [targeted] test_tui_keeper_portrait_pty: OK in 13s
+
+surface: Clients/Connectors
+run: 36663560222
+source_head: 8f1bd0ee909464241f2c8eccf8efa824fdf6a19b
+scope: focused fixture PTY and named suites; not full TUI or installed binary evidence
+test suite	Checkout	2026-09-30T03:18:25.8592428Z 8f1bd0ee909464241f2c8eccf8efa824fdf6a19b
+test suite	Test	2026-09-30T03:23:56.6003281Z Client and Connector responsive layout: PASS
+test suite	Test	2026-09-30T03:23:56.6881955Z [targeted] test_tui_client_connector_layout_pty: OK in 39s
+test suite	Test	2026-09-30T03:24:20.3817943Z [targeted] test/test_tui_client_rows: OK in 0s
+test suite	Test	2026-09-30T03:24:20.6787198Z [targeted] test/test_tui_connector_state: OK in 0s
+
+surface: Goal detail
+run: 36665786174
+source_head: e38b210cd189fae660078b2571c2198d17ff95c9
+scope: focused fixture PTY and named suites; not full TUI or installed binary evidence
+test suite	Checkout	2026-09-30T03:55:54.3770251Z e38b210cd189fae660078b2571c2198d17ff95c9
+test suite	Test	2026-09-30T04:00:48.3049003Z Goal detail physical-row viewport: PASS
+test suite	Test	2026-09-30T04:00:48.3861522Z [targeted] test_tui_goal_detail_viewport_pty: OK in 41s
+test suite	Test	2026-09-30T04:00:59.9915365Z Goal confirmation key and HTTP wiring: PASS
+test suite	Test	2026-09-30T04:00:59.9921995Z [targeted] test_tui_goal_confirmation_pty: OK in 11s
+test suite	Test	2026-09-30T04:01:06.9335767Z [targeted] test/test_tui_planning_detail: OK in 0s
+
+surface: Runtime Params
+run: 36665989084
+source_head: 8c909157d18cf73a042e83fd02592ee33b528f20
+scope: focused fixture PTY and named suites; not full TUI or installed binary evidence
+test suite	Checkout	2026-09-30T03:57:23.2825542Z 8c909157d18cf73a042e83fd02592ee33b528f20
+test suite	Test	2026-09-30T04:02:58.5144314Z Runtime parameter value/contract viewport: PASS
+test suite	Test	2026-09-30T04:02:58.6105448Z [targeted] test_tui_runtime_params_viewport_pty: OK in 48s
+test suite	Test	2026-09-30T04:03:08.0442836Z [targeted] test/test_tui_runtime_param_picker: OK in 1s
+
+surface: Keeper logs
+run: 36665480126
+source_head: 8241076261ad10c8402b043889864ada0a37c47d
+scope: focused fixture PTY and named suites; not full TUI or installed binary evidence
+test suite	Checkout	2026-09-30T03:57:22.5844782Z 8241076261ad10c8402b043889864ada0a37c47d
+test suite	Test	2026-09-30T04:03:09.5224859Z Keeper logs narrow reading: PASS
+test suite	Test	2026-09-30T04:03:09.6238044Z [targeted] test_tui_keeper_logs_wrap_pty: OK in 36s
+test suite	Test	2026-09-30T04:03:18.2723828Z [targeted] test/test_tui_observation_layout: OK in 0s
+test suite	Test	2026-09-30T04:03:18.4353134Z [targeted] test/test_tui_metrics_tail: OK in 0s
+
+surface: Presets
+run: 36666351767
+source_head: 3128a81dda8696b90224d9c8bf15e2976a96cf7a
+scope: focused fixture PTY and named suites; not full TUI or installed binary evidence
+test suite	Checkout	2026-09-30T04:04:50.1936269Z 3128a81dda8696b90224d9c8bf15e2976a96cf7a
+test suite	Test	2026-09-30T04:09:40.2188988Z Preset physical-row viewport: PASS
+test suite	Test	2026-09-30T04:09:40.2966398Z [targeted] test_tui_preset_viewport_pty: OK in 48s
+test suite	Test	2026-09-30T04:09:47.9084823Z [targeted] test/test_tui_preset_text: OK in 0s

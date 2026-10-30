@@ -1,0 +1,84 @@
+{
+  "source_head": "240358b788505f4073eaea21ce5cb59e797c267e",
+  "sha256": {
+    "packages/agent_core/lib/agent/agent.mli": "b158fa1f24f026ad7d7de7605a81b0e461345da6bbef98bfbf4c717004f4bd61",
+    "packages/agent_core/lib/agent/agent_checkpoint_sink.ml": "cfad3636bf67134151f544cb824f57e45733241c3e587499092ac0c30ce4c056",
+    "packages/agent_core/lib/agent/agent_checkpoint_sink.mli": "a675bb454cccc8d2bf1f79acaa0055a08e8256bb29a74b70c271e218408014af",
+    "packages/agent_core/lib/agent/agent_execution_projection.ml": "bfb1768450226cdc247b74ed077c0f8d22316adecae20b13557553a546730c9c",
+    "packages/agent_core/lib/agent/agent_execution_projection_intf.mli": "2e03740d0f138072d875a9e9e1dd4cef257c5de8bcecab056075bece1ad2ac5c",
+    "packages/agent_core/lib/agent/agent_types.ml": "f8ab3e97fe96c39e16b928e77ff77d00cf3ea5cee9171c7e46d5ef840799f84c",
+    "packages/agent_core/lib/agent/agent_types.mli": "67fe8d21e4100a07e39500e5a876b5c3668ab309a875c0186b1234df81acdad2",
+    "packages/agent_core/lib/agent_core.ml": "5ea2ee05885feccb02418d995a53dc4735fa30c4bd8d3b797441c4d8770bb6ec",
+    "packages/agent_core/lib/agent_core.mli": "97c01fcb82b059cc35d8f852c81f9d3f0ba989f3b8597d19d335fd91feef3b42",
+    "packages/agent_core/lib/checkpoint_snapshot.ml": "1e8719fba45f3211442bd65880e5e416dd6e77cc7b224a0f085a09316ab6a9a3",
+    "packages/agent_core/lib/checkpoint_snapshot.mli": "792a5fd52ac2de3bf9c9644e2919506c2d5d4a58f046f50d422bbf47b9ca32fe",
+    "packages/agent_core/lib/execution_agent_scope.ml": "13056c1e374b868d97420ab2a31285ca3db22dc1aa2551671644c358d0b744ee",
+    "packages/agent_core/lib/execution_agent_scope.mli": "c8e16f1483c31fa78e3a4fcb7240a8f085a5af996197edd3660914644888d1db",
+    "packages/agent_core/lib/execution_event.ml": "e1c6a985bf010166f7e36a7572eb16f3edb5e9ce682a833c01ef8b0b244be6e8",
+    "packages/agent_core/lib/execution_event.mli": "d55808fca3bc7dff72933e1504e4004e800e606dcfb9285ffc8aa96c46d80424",
+    "packages/agent_core/lib/execution_journal.ml": "a4d5ddcbeddf0da7b98b4b05c8f2bbdea2ad289e071b4e5bb4ac0088f5f45fb1",
+    "packages/agent_core/lib/execution_tool_observation.ml": "202348410dad451ed59c40639d2bf5a596d38b53b1249a899c8882a530e0cb55",
+    "packages/agent_core/test/test_execution_journal.ml": "8444332669ceb842d6e2f2a1bc16643b9149ab78f86dd88e0f46017413126182",
+    "packages/agent_core/test/test_execution_projection.ml": "1a21822ee22b4dbbb694d07f45260cb08bc8af0a0b9f9dd32de3fa78c84b6604",
+    "packages/agent_core/test/test_pipeline.ml": "e0ee0675023ee3e6d8980ccf8fa41e537d9d4304db89c1183eb0ac315a34a29e",
+    "packages/agent_core/test/test_agent_advanced.ml": "287467e0b97904ee6e2736575ca62e3d2edc4edb2d8105f37d704eb02b601f58"
+  },
+  "logs": [
+    {
+      "run": 40214920697,
+      "raw_sha256": "404f86d17febdea5c67c9b0a8c7ff03cb5dcd16c0e32d68dbfd20615a2e4ef96",
+      "raw_bytes": 113761,
+      "selected_lines": 2
+    },
+    {
+      "run": 40214984887,
+      "raw_sha256": "609b0059bc933ef73d9c7c5f7d8fb13241ad9beb394e9ff58613372b30c4e994",
+      "raw_bytes": 190890,
+      "selected_lines": 11
+    },
+    {
+      "run": 40215354533,
+      "raw_sha256": "df312da1ffb5c436f07d96f5c03db861db7d5710544dde28271813c7f6b95533",
+      "raw_bytes": 129740,
+      "selected_lines": 4
+    },
+    {
+      "run": 40215507460,
+      "raw_sha256": "c389b6045cf55290f02b7c34b297b2185d1a68ecedc1a0a5cb3277c192fbd567",
+      "raw_bytes": 249592,
+      "selected_lines": 31
+    },
+    {
+      "run": 40215791578,
+      "raw_sha256": "b5dabb2eb9b8a24c58eaf001c0259740939e55cd70c739f0407a24b42c824d4f",
+      "raw_bytes": 224925,
+      "selected_lines": 26
+    },
+    {
+      "run": 40215877213,
+      "raw_sha256": "66b19a1f23f8c6e91a684b30aeb2aa3b9e0c3a21616ca7c06cab0416710ff5b0",
+      "raw_bytes": 182773,
+      "selected_lines": 10
+    },
+    {
+      "run": 40216063083,
+      "raw_sha256": "e086e5e0f5df7f3ab0a3497f8f0fe7c748388239ffb3e5e29b1504b6a6303a8b",
+      "raw_bytes": 127670,
+      "selected_lines": 11
+    }
+  ],
+  "carry_scope": {
+    "from": "15b9700c21b3a6d2b9af87bd986d04cb30109b7f",
+    "to": "240358b788505f4073eaea21ce5cb59e797c267e",
+    "changed_files": [
+      "packages/agent_core/test/test_execution_projection.ml"
+    ],
+    "actual_passes": 122,
+    "suites": [
+      "Pipeline81",
+      "Journal20",
+      "Advanced21"
+    ],
+    "excluded": "Projection suite"
+  }
+}

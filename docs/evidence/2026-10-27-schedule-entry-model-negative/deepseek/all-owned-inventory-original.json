@@ -1,0 +1,226 @@
+{
+  "schema": "masc.schedule-c3-owned-tool-inventory.v1",
+  "sources": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1/workspace/.masc/tool_calls/2026-10/27.jsonl",
+      "sha256": "c37e659b24a46675218205b497b66bcfda91e9d705af2b0b950629d1d492eb4d",
+      "bytes": 50094,
+      "rows": 10
+    }
+  ],
+  "owned_rows": [
+    {
+      "record_kind": "tool_call",
+      "tool": "keeper_tool_search",
+      "execution_id": "execution-node-720d8b2d3bdb63e04615eb7613edf196",
+      "tool_use_id": "call_b7qmavtk",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065482.229614,
+      "disposition": null,
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "bb4f05e43c412bc76400a876c1ca394c5d62486cbd18272965153b3aff69e34e",
+        "json_value_bytes": 83
+      },
+      "output_binding": {
+        "json_value_sha256": "dbe148e29626fdbd2b95a95700aafec2923f1dd1f815842b87d44aec90546bca",
+        "json_value_bytes": 317
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_get",
+      "execution_id": "execution-node-762ac500c1afb2e4cb2e5423c9639aea",
+      "tool_use_id": "call_ouic3gcf",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065483.798685,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "ff68403913239b066d838c71b3bce311e1fa965138db224a5bf55c1ffc15233a",
+        "json_value_bytes": 67
+      },
+      "output_binding": {
+        "json_value_sha256": "c10e0ca3435e9d48ead3180f7c613c006a3d35a8da36c3202b358d40d26ed53a",
+        "json_value_bytes": 3822
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-982205a34a3af5d7669742f6150b7d7d",
+      "tool_use_id": "call_hrx698w0",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065485.519092,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "ff68403913239b066d838c71b3bce311e1fa965138db224a5bf55c1ffc15233a",
+        "json_value_bytes": 67
+      },
+      "output_binding": {
+        "json_value_sha256": "8a9b178edee2ec475f4f99d4c68d31a259ed64af5993a8e5248bfbe03d304b64",
+        "json_value_bytes": 117
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_note_add",
+      "execution_id": "execution-node-67dbfb7c7c627bc3f0083cc2722c9b55",
+      "tool_use_id": "call_i7afk0xk",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065487.968226,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "e9d8192b84c3766960dede64decc6f3d579b25e092ba12a576648f5f034b065a",
+        "json_value_bytes": 125
+      },
+      "output_binding": {
+        "json_value_sha256": "71cc7f1a18f53f1d3978d4b6900e759c36c005a59eea2e1d6afe9f37787ce5e3",
+        "json_value_bytes": 337
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-e12f465338b77c5f9e32726a0cadc06a",
+      "tool_use_id": "call_2f2eyewc",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065489.067608,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "d42b7829b72584080a26f2f01aa83db3e68e6c91844adda338c65e4bd3ba0753",
+        "json_value_bytes": 74
+      },
+      "output_binding": {
+        "json_value_sha256": "76792a5415091a602f9f5af3dede5868bdf21bba81efa6d4584cc044fc8bafed",
+        "json_value_bytes": 124
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-0428c34a3cd7c15379300cb9e7fdc190",
+      "tool_use_id": "call_daxz6735",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065490.432328,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "d42b7829b72584080a26f2f01aa83db3e68e6c91844adda338c65e4bd3ba0753",
+        "json_value_bytes": 74
+      },
+      "output_binding": {
+        "json_value_sha256": "76792a5415091a602f9f5af3dede5868bdf21bba81efa6d4584cc044fc8bafed",
+        "json_value_bytes": 124
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_note_add",
+      "execution_id": "execution-node-ea5973f5841208dfb75b5f7f711b6ac3",
+      "tool_use_id": "call_1yzidskh",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065492.222543,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "9efd913976d6b7e64cd19baea23796fa397eb3e3c379c5f99bce72b80d61b7a0",
+        "json_value_bytes": 139
+      },
+      "output_binding": {
+        "json_value_sha256": "8fde35505bbcd3c037848da1230a21f159ff8e4ab9760a5dbc84d3dec4c8aeac",
+        "json_value_bytes": 352
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-5ed74dad8cfcfcee7577a25ac54316be",
+      "tool_use_id": "call_5whjrvu7",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065493.486053,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "d42b7829b72584080a26f2f01aa83db3e68e6c91844adda338c65e4bd3ba0753",
+        "json_value_bytes": 74
+      },
+      "output_binding": {
+        "json_value_sha256": "b3ec5a0ded5e27f8378ef444d9d35e4608718a455299cb6c9bc86dc096f79740",
+        "json_value_bytes": 428
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_note_add",
+      "execution_id": "execution-node-64c5591e76b0c80c85cf1ee118356a4a",
+      "tool_use_id": "call_ooege493",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065495.229244,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "6e4b63828b1b3916f5f83a1ecf36e25a501b136e3b8bb50205e561ef434bf149",
+        "json_value_bytes": 133
+      },
+      "output_binding": {
+        "json_value_sha256": "50bbe5f1b984a6910487e69c3b9ab0733eb3d17f75315fdecdba89ec8fe34030",
+        "json_value_bytes": 346
+      },
+      "raw_input_output_retained": false
+    },
+    {
+      "record_kind": "tool_call",
+      "tool": "masc_schedule_notes_list",
+      "execution_id": "execution-node-f002e81967a37200f31bba72dda7c012",
+      "tool_use_id": "call_dgtpzuu0",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793065478099-00000",
+      "ts": 1793065497.031523,
+      "disposition": "completed",
+      "wire_outcome": "ok",
+      "input_binding": {
+        "json_value_sha256": "ff68403913239b066d838c71b3bce311e1fa965138db224a5bf55c1ffc15233a",
+        "json_value_bytes": 67
+      },
+      "output_binding": {
+        "json_value_sha256": "de6c6661cbf0f99083dbd50c1034a6541373ac914a1f70a6114a9191759d77c2",
+        "json_value_bytes": 705
+      },
+      "raw_input_output_retained": false
+    }
+  ],
+  "row_count": 10,
+  "read_errors": [],
+  "scope": "All owned Keeper rows; non-synthetic input/output contents excluded, semantic hashes only."
+}

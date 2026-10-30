@@ -1,0 +1,79 @@
+{
+  "checks": [
+    {
+      "name": "tests",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "src/lib/lane-binding-form.test.ts",
+        "src/components/lane-package-installer.test.ts",
+        "src/components/lane-declaration-editor.test.ts",
+        "src/components/lane-addons-workspace.test.ts",
+        "src/components/lane-addons-panel.test.ts",
+        "--config",
+        "vitest.config.ts",
+        "--no-file-parallelism",
+        "--maxWorkers=1"
+      ],
+      "exit_code": 0,
+      "log": "tests.txt",
+      "raw_log": "tests.txt.gz",
+      "raw_sha256": "000ef57c636ee21687c5fb0415eb58c00352ce181c89e7f6480a64e761be3baa",
+      "normalization": "Trailing whitespace at EOF only; raw output retained as gzip"
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "exit_code": 0,
+      "log": "typecheck.txt",
+      "raw_log": "typecheck.txt.gz",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization": "Trailing whitespace at EOF only; raw output retained as gzip"
+    },
+    {
+      "name": "lint",
+      "command": [
+        "node",
+        "node_modules/eslint/bin/eslint.js",
+        "src/api/lane-package-catalog.ts",
+        "src/components/lane-binding-form.ts",
+        "src/components/lane-package-installer.ts",
+        "src/components/lane-package-installer.test.ts",
+        "src/lib/lane-binding-form.ts",
+        "src/lib/lane-binding-form.test.ts",
+        "src/lib/lane-package-installation-session.ts",
+        "src/lib/lane-declaration-sessions.ts",
+        "src/components/lane-declaration-editor.ts",
+        "src/components/lane-addons-panel.ts"
+      ],
+      "exit_code": 0,
+      "log": "lint.txt",
+      "raw_log": "lint.txt.gz",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization": "Trailing whitespace at EOF only; raw output retained as gzip"
+    },
+    {
+      "name": "browser",
+      "command": [
+        "node",
+        "evidence/2026-10-05-web-package-installation/browser.mjs"
+      ],
+      "exit_code": 0,
+      "log": "browser.txt",
+      "raw_log": "browser.txt.gz",
+      "raw_sha256": "23d76922c7a1ad967ff9e717df758c7c5ba01928dfbdc6907903cb2ea5e4166d",
+      "normalization": "Trailing whitespace at EOF only; raw output retained as gzip"
+    }
+  ],
+  "path_input_before": {
+    "exit_code": 1,
+    "raw_sha256": "086958c8ce7ac93a37a47525bec938db52428b9a41137ac315d5a786deef834f",
+    "raw_log": "path-input-before.txt.gz",
+    "normalization": "Trailing whitespace at EOF only"
+  }
+}

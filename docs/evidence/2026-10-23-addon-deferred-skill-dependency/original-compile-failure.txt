@@ -1,0 +1,6 @@
+test suite	Test	2026-10-23T07:51:23.6237778Z File "test/test_keeper_addon_deferred_runtime.ml", line 103, characters 27-46:
+test suite	Test	2026-10-23T07:51:23.6238330Z 103 |   let skill_config = match Skill_source_config.parse_text "" with
+test suite	Test	2026-10-23T07:51:23.6238722Z                                  ^^^^^^^^^^^^^^^^^^^
+test suite	Test	2026-10-23T07:51:23.6239005Z Error: Unbound module Skill_source_config
+test suite	Test	2026-10-23T07:51:27.6124200Z ##[error]Process completed with exit code 1.
+test suite	Upload equipped portrait HTTP evidence	﻿2026-10-23T07:51:27.6172215Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

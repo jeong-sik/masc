@@ -1,0 +1,14 @@
+{
+  "source_sha256": {
+    "dashboard/src/lib/settings-runtime-session.ts": "9ca9f415a35da0948293b98c4c8590b3c5871f98df565aa623ff6168a0100b2d",
+    "dashboard/src/components/settings-surface.ts": "dcbe54dfe68aa0ed2650698c020659a939b202a4da83acdb0f48ff6db57adbc0",
+    "dashboard/src/components/settings-surface.test.ts": "a71e9272c85e5a7b2189b16d771339bcc29d8581ada07d659524884adce2406b"
+  },
+  "scope": "Intermediate WIP after retained-write repair, before unsent-detach repair. Product session snapshot is copied; Settings surface and augmented test match final source hashes.",
+  "result": "3 failed / 70 skipped",
+  "session_copy": "unsent-release-before-session.ts",
+  "log": "unsent-release-before.txt",
+  "log_sha256": "46bc9e0ee414c6a8b207ae2bb2436152ea93584fbf9e6a0b3438a55184bcb8b6",
+  "original_log_sha256": "cca717642fc647ccb9eab87c2579660dc15e6344f1a791832ede87b0aed5a19d",
+  "copied_log_normalization": "Outer blank whitespace removed."
+}

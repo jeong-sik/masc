@@ -1,0 +1,29 @@
+{
+  "source": "97ed4b9f508727944bdec361dd4d3e271d1a510a",
+  "artifact": null,
+  "run_id": null,
+  "sha256": {
+    "main_eio.exe": "732abb40ac65f8df793481bcf92260dd48fb1e0ebad1f1edef155946110df5fb"
+  },
+  "provenance": "Local installed-file snapshot with embedded source declaration only. Harness plumbing smoke on macOS, not a Linux artifact or candidate benchmark.",
+  "port": 56412,
+  "base": "<OWNED_WORKSPACE>",
+  "model_endpoint": "http://127.0.0.1:56411/v1",
+  "environment_keys": [
+    "LANG",
+    "MASC_BASE_PATH",
+    "MASC_CONFIG_BOOTSTRAP",
+    "MASC_CONFIG_DIR",
+    "MASC_GRPC_ENABLED",
+    "MASC_KEEPER_AUTONOMOUS_ENABLED",
+    "MASC_ORCHESTRATOR_ENABLED",
+    "MASC_WS_ENABLED",
+    "PATH"
+  ],
+  "tasks": 250,
+  "cycles": 2,
+  "encoding": "gzip",
+  "text_kind": "multilingual",
+  "runner_sha256": "81cb56a1afe93b2859854273f9b868ac48e2297c9998843499677181c7d7ba37",
+  "fixture_sha256": "3cc6877c5057c6148927e24b8951958a0859e7fd5bbf1ed48d5c22a5c056f2ed"
+}

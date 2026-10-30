@@ -1,0 +1,18 @@
+# captured 2026-10-29T05:06:11Z from the server at ~/me/.masc (binary_commit 3e41385b549 until 2026-10-29T03:07Z, 216f7ab8456 after)
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --keeper code-reviewer --timeline --since 2026-10-26T12:30:00Z --until 2026-10-26T13:05:00Z
+Timeline of code-reviewer (window 2026-10-26T12:30:00Z .. 2026-10-26T13:05:00Z)
+utc          turn path              family      stop                           tools   seconds
+12:36:50    10273 autonomous_cycle  agent_core  yielded_to_operation_queued        5     567.5
+12:38:22    10274 direct_turn       agent_core  yielded_to_durable_stimulus        2      70.3
+12:39:18    10275 autonomous_cycle  agent_core  yielded_to_operation_queued        2      30.8
+12:41:19    10276 direct_turn       agent_core  yielded_to_durable_stimulus        1      75.9
+12:42:12    10277 autonomous_cycle  agent_core  yielded_to_operation_queued        2      43.9
+12:45:16    10278 direct_turn       agent_core  yielded_to_durable_stimulus        2     174.1
+12:46:10    10279 autonomous_cycle  agent_core  yielded_to_operation_queued        2      43.5
+12:49:51    10280 direct_turn       agent_core  yielded_to_durable_stimulus        8     202.9
+12:50:25    10281 autonomous_cycle  agent_core  yielded_to_operation_queued        2      21.8
+12:54:41    10282 direct_turn       agent_core  yielded_to_durable_stimulus       19     250.6
+12:56:10    10283 autonomous_cycle  agent_core  yielded_to_operation_queued        2      77.8
+12:58:33    10284 direct_turn       agent_core  completed                          5     134.5
+12:59:39    10285 autonomous_cycle  agent_core  yielded_to_durable_stimulus        1      53.0
+turns 13, execution path changed between 12 of 12 consecutive pairs

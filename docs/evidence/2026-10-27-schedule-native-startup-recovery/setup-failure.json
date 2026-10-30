@@ -1,0 +1,5 @@
+{
+  "kind": "TypeError",
+  "message": "'select.kqueue' object does not support the context manager protocol (missed __exit__ method)",
+  "at": 1793042207.487133
+}

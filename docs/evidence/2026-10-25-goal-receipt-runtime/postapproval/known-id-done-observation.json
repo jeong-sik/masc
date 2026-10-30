@@ -1,0 +1,104 @@
+{
+  "scope": "Actual known-ID lookup and returned authoritative lifecycle; not a claim that the model used it correctly.",
+  "observed_at": "2026-10-24T16:40:10.353670+00:00",
+  "query_wire": [
+    {
+      "request_id": "request-000029",
+      "request_sha256": "6a42002e32347db1c976614f3cff5276d8ff479c0876e6424fb888c85b2893ab",
+      "response_sha256": "c5952d200f87bbc8639476fef98f282701be51b2883e7af7db74ebb798a733fe",
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [
+        {
+          "id": "call_nrovnr3y",
+          "function": {
+            "index": 0,
+            "name": "keeper_tasks_list",
+            "arguments": {
+              "task_ids": [
+                "task-001"
+              ],
+              "projection": "full"
+            }
+          }
+        }
+      ],
+      "last_tool_feedback": {
+        "role": "tool",
+        "tool_name": "keeper_task_done",
+        "content": "{\"ok\":false,\"error\":\"Invalid task state: Invalid transition: done -> submit_for_verification (task-001, agent=goal-canary).\",\"failure_class\":\"workflow_rejection\",\"error_class\":\"deterministic\",\"recoverable\":false,\"diagnosis\":{\"rule_id\":\"task_transition_invalid_state\"},\"task_id\":\"task-001\",\"action\":\"submit_for_verification\",\"requested_agent\":\"goal-canary\",\"disposition\":\"failed\",\"typed_outcome\":{\"kind\":\"Error\",\"reason\":\"{\\\"ok\\\":false,\\\"error\\\":\\\"Invalid task state: Invalid transition: done -> submit_for_verification (task-001, agent=goal-canary).\\\",\\\"failure_class\\\":\\\"workflow_rejection\\\",\\\"error_class\\\":\\\"deterministic\\\",\\\"recoverable\\\":false,\\\"diagnosis\\\":{\\\"rule_id\\\":\\\"task_transition_invalid_state\\\"},\\\"task_id\\\":\\\"task-001\\\",\\\"action\\\":\\\"submit_for_verification\\\",\\\"requested_agent\\\":\\\"goal-canary\\\"}\"}}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes."
+      },
+      "public_response": "",
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T16:39:14.627203Z",
+          "done_reason": "stop",
+          "eval_count": 406,
+          "prompt_eval_count": 23923
+        }
+      ],
+      "thinking_codepoints_count_only": 1810
+    }
+  ],
+  "returned_feedback": {
+    "role": "tool",
+    "tool_name": "keeper_tasks_list",
+    "content": "{\"backlog_authority\":\"primary\",\"degraded\":false,\"projection\":\"full\",\"matching_count\":1,\"returned_count\":1,\"truncated\":false,\"new_tasks_count\":0,\"new_tasks\":[],\"kind\":\"snapshot\",\"revision\":\"tasks:50b1032fee1c614c42bb9b6afe59d73a04747fcf9a9f3d2887d45b1088dc7b2f\",\"snapshot\":[{\"id\":\"task-001\",\"title\":\"Set alpha to true in acceptance.json\",\"description\":\"Modify workspace/acceptance.json to set alpha to true while keeping beta and gamma as false.\",\"priority\":3,\"files\":[],\"created_at\":\"2026-10-24T16:25:17Z\",\"created_by\":\"goal-canary\",\"contract\":{\"completion_contract\":[\"alpha is set to true\",\"beta and gamma remain false\"],\"required_evidence\":[\"artifact:workspace/acceptance.json\"]},\"handoff_context\":{\"summary\":\"alpha set to true, beta and gamma remain false\",\"evidence_refs\":[\"artifact:workspace/acceptance.json\"],\"updated_at\":\"2026-10-24T16:30:30Z\",\"updated_by\":\"goal-canary\"},\"status\":\"done\",\"assignee\":\"goal-canary\",\"completed_at\":\"2026-10-24T16:33:21Z\",\"notes\":\"Controlled operator-proxy canary approval after exact retained artifact inspection: alpha=true, beta=false, gamma=false; first Task only. No independent LLM verdict or human Goal completion confirmation claim.\"}]}"
+  },
+  "subsequent_call": [
+    {
+      "id": "call_fq8g1ipt",
+      "function": {
+        "index": 0,
+        "name": "keeper_task_done",
+        "arguments": {
+          "task_id": "task-001",
+          "evidence_refs": [
+            "artifact:workspace/acceptance.json"
+          ],
+          "notes": "Set alpha to true while keeping beta and gamma as false",
+          "result": "alpha is now true, beta and gamma remain false"
+        }
+      }
+    }
+  ]
+}

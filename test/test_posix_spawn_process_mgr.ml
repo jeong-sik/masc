@@ -1,0 +1,627 @@
+(** The posix_spawn process manager must behave like eio_posix's fork-based
+    one for everything masc's process layer uses: stdout capture through a
+    pipe, exit status, working directory, environment, and a child killed
+    when its switch is released. Each case runs against both managers and
+    compares. *)
+
+open Alcotest
+
+let managers env =
+  [ "eio_posix", Eio.Stdenv.process_mgr env
+  ; "posix_spawn", Posix_spawn_process_mgr.mgr
+  ; "foreground", Posix_spawn_process_mgr.foreground_mgr
+      ~clock:(Eio.Stdenv.clock env) ~grace_seconds:2.
+  ]
+;;
+
+let capture_stdout ?cwd ?env mgr args =
+  Eio.Process.parse_out ?cwd ?env mgr Eio.Buf_read.take_all args
+;;
+
+let test_stdout_capture () =
+  Eio_main.run
+  @@ fun env ->
+  List.iter
+    (fun (label, mgr) ->
+      check string (label ^ " captures stdout") "hello\n"
+        (capture_stdout mgr [ "/bin/echo"; "hello" ]))
+    (managers env)
+;;
+
+let test_exit_status () =
+  Eio_main.run
+  @@ fun env ->
+  List.iter
+    (fun (label, mgr) ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let proc = Eio.Process.spawn ~sw mgr [ "/bin/sh"; "-c"; "exit 3" ] in
+      match Eio.Process.await proc with
+      | `Exited code -> check int (label ^ " exit code") 3 code
+      | `Signaled signal -> failf "%s: signaled %d" label signal)
+    (managers env)
+;;
+
+let test_original_birth_survives_reap () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Time.with_timeout_exn clock 10. @@ fun () ->
+  List.iter (fun mgr -> Eio.Switch.run @@ fun sw ->
+    let input, release = Eio_unix.pipe sw in
+    let proc = Eio.Process.spawn ~sw mgr ~stdin:input
+        ["/bin/sh"; "-c"; "read release; exit 7"] in
+    let started = Posix_spawn_process_mgr.original_start proc in
+    check bool "live original birth was captured" true (Option.is_some started);
+    check (option string) "capture belongs to the still-owned original child"
+      (Posix_spawn_detached.process_start (Eio.Process.pid proc)) started;
+    Eio.Flow.copy_string "exit\n" release;
+    (match Eio.Process.await proc with
+     | `Exited code -> check int "original child exits" 7 code
+     | `Signaled _ -> fail "original child was signalled");
+    (match Unix.waitpid [Unix.WNOHANG] (Eio.Process.pid proc) with
+     | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+     | _ -> fail "original child is not yet reaped");
+    check (option string) "original handle retains birth after PID release"
+      started (Posix_spawn_process_mgr.original_start proc);
+    (* A child may finish before [spawn] returns. Its retained observation is
+       either the original birth or an explicit absence, never a later lookup. *)
+    let fast = Eio.Process.spawn ~sw mgr ["/bin/sh"; "-c"; "exit 3"] in
+    let original = Posix_spawn_process_mgr.original_start fast in
+    ignore (Eio.Process.await fast);
+    check (option string) "fast-exit handle keeps the original observation"
+      original (Posix_spawn_process_mgr.original_start fast))
+    [Posix_spawn_process_mgr.mgr;
+     Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2.];
+  Eio.Switch.run @@ fun sw ->
+  let foreign = Eio.Process.spawn ~sw (Eio.Stdenv.process_mgr env)
+      ["/bin/sh"; "-c"; "exit 0"] in
+  ignore (Eio.Process.await foreign);
+  check (option string) "unsupported manager does not synthesize an identity"
+    None (Posix_spawn_process_mgr.original_start foreign)
+;;
+
+let test_cwd_and_env () =
+  Eio_main.run
+  @@ fun env ->
+  let dir = Filename.get_temp_dir_name () in
+  let expected_dir = Unix.realpath dir in
+  List.iter
+    (fun (label, mgr) ->
+      let cwd = Eio.Path.(Eio.Stdenv.fs env / dir) in
+      let pwd = capture_stdout ~cwd mgr [ "/bin/pwd" ] |> String.trim |> Unix.realpath in
+      check string (label ^ " honours cwd") expected_dir pwd;
+      let printed =
+        capture_stdout ~env:[| "MASC_SPAWN_PROBE=present" |] mgr [ "/usr/bin/env" ]
+      in
+      check bool (label ^ " passes the environment") true
+        (String_util.contains_substring printed "MASC_SPAWN_PROBE=present");
+      check bool (label ^ " passes only the given environment") false
+        (String_util.contains_substring printed "PATH="))
+    (managers env)
+;;
+
+let test_missing_executable () =
+  Eio_main.run
+  @@ fun env ->
+  List.iter
+    (fun (label, mgr) ->
+      Eio.Switch.run
+      @@ fun sw ->
+      match Eio.Process.spawn ~sw mgr [ "/nonexistent/masc-spawn-probe" ] with
+      | _ -> failf "%s: spawning a missing executable succeeded" label
+      | exception Eio.Io _ -> ()
+      | exception Unix.Unix_error _ -> ())
+    (managers env)
+;;
+
+let test_child_is_killed_when_the_switch_is_released () =
+  Eio_main.run
+  @@ fun env ->
+  List.iter
+    (fun (label, mgr) ->
+      let pid =
+        Eio.Switch.run
+        @@ fun sw ->
+        let proc = Eio.Process.spawn ~sw mgr [ "/bin/sleep"; "60" ] in
+        Eio.Process.pid proc
+      in
+      let alive =
+        match Unix.kill pid 0 with
+        | () -> true
+        | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
+      in
+      check bool (label ^ " child is gone after the switch is released") false alive)
+    (managers env)
+;;
+
+(* The manager awaits a child through [Eio_unix.Process.sigchld], which only a
+   backend that installs a SIGCHLD handler broadcasts. eio_posix installs one
+   at startup and eio_linux does not, so on Linux the wait used to never end.
+   Removing the handler here puts this backend into the state the other one
+   starts in, which is what lets the Linux failure run on any machine. *)
+let test_await_without_the_backends_sigchld_handler () =
+  Eio_main.run
+  @@ fun env ->
+  Sys.set_signal Sys.sigchld Sys.Signal_default;
+  Eio.Switch.run
+  @@ fun sw ->
+  let proc = Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr [ "/bin/echo"; "hi" ] in
+  match
+    Eio.Time.with_timeout (Eio.Stdenv.clock env) 10.0 (fun () ->
+      Ok (Eio.Process.await proc))
+  with
+  | Ok (`Exited code) -> check int "exit code" 0 code
+  | Ok (`Signaled signal) -> failf "signaled %d" signal
+  | Error `Timeout ->
+    (* Put it back before failing: the switch's release hook reaps through the
+       same condition, so the teardown would hang here too. *)
+    Eio_unix.Process.install_sigchld_handler ();
+    fail "await never returned: the manager waited on a handler nothing installed"
+;;
+
+(* This spawn closes a descriptor it was not given. eio_posix does not, and
+   that difference is deliberate.
+
+   exec only closes descriptors marked close-on-exec, so fork+exec hands the
+   child every other one -- eio's manager included. Measured 2026-09-07 on
+   macOS with a raw [Unix.pipe ()]: eio_posix's child inherited the write end
+   and the reader never saw EOF; this manager's child did not.
+
+   What makes the difference is the flag the stub sets:
+   POSIX_SPAWN_CLOEXEC_DEFAULT on macOS, and since 2026-09-07
+   posix_spawn_file_actions_addclosefrom_np on glibc. Before that the glibc
+   branch relied on "masc opens its descriptors close-on-exec", which is a
+   whole-process claim nothing enforces -- OCaml's [?cloexec] defaults to
+   false, and lib/exec_shim (three pipes) and bin/main_eio each open one that
+   way. Measured in C on glibc 2.39 the same day: without the closing action
+   the EOF never arrived, with it it did.
+
+   So the file's parity rule has one stated exception, and this is it. A
+   future reader who makes the two agree by dropping the guarantee is
+   removing the thing that keeps a stray descriptor out of a child; make eio
+   stricter instead, or leave them apart.
+
+   The pipe is raw [Unix.pipe ()] on purpose: eio's own pipes pass
+   [~cloexec:true] (eio_posix low_level.ml:498) and cannot leak, so a test
+   built on those could not fail and would prove nothing. This is the shape
+   the repo actually opens without the flag. The timeout keeps a regression a
+   failed case instead of a hung suite. *)
+let test_this_spawn_does_not_inherit_an_unlisted_pipe () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let bystander_r, bystander_w = Unix.pipe () in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.close bystander_r with Unix.Unix_error _ -> ());
+      try Unix.close bystander_w with Unix.Unix_error _ -> ())
+    (fun () ->
+      Eio.Switch.run
+      @@ fun sw ->
+      (* Spawned while the pipe is open and named by no file action. *)
+      let holder =
+        Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr [ "/bin/sleep"; "30" ]
+      in
+      Unix.close bystander_w;
+      Unix.set_nonblock bystander_r;
+      (* Every write end this process knows of is gone. A read that still
+         finds the pipe open means the child kept one. *)
+      let rec drain deadline =
+        match Unix.read bystander_r (Bytes.create 64) 0 64 with
+        | 0 -> true
+        | _ -> drain deadline
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          if Eio.Time.now clock > deadline
+          then false
+          else (
+            Eio.Time.sleep clock 0.01;
+            drain deadline)
+      in
+      let saw_eof = drain (Eio.Time.now clock +. 10.) in
+      Eio.Process.signal holder Sys.sigkill;
+      check bool "the child did not inherit a pipe this spawn never named" true
+        saw_eof)
+;;
+
+let group_fixture = {|import os, signal, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN if sys.argv[2] == "ignore" else lambda *_: sys.exit(0))
+r, w = os.pipe()
+child = os.fork()
+if child == 0:
+    os.close(r)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    for fd in (0, 1, 2):
+        os.close(fd)
+    with open(sys.argv[1], "w") as f:
+        f.write(str(os.getpid()))
+    os.write(w, b"r")
+    os.close(w)
+    time.sleep(60)
+    os._exit(0)
+os.close(w)
+os.read(r, 1)
+os.close(r)
+if sys.argv[2] == "exit":
+    sys.exit(0)
+while True:
+    signal.pause()
+|}
+
+let with_group_fixture f =
+  let marker = Filename.temp_file "foreground-group" ".pid" in
+  Sys.remove marker;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists marker then Sys.remove marker)
+    (fun () -> Eio_main.run (fun env -> f env marker))
+;;
+
+let wait_for_marker clock marker =
+  Eio.Time.with_timeout_exn clock 10. (fun () ->
+    let rec loop () =
+      if Sys.file_exists marker && (Unix.stat marker).Unix.st_size > 0 then ()
+      else (Eio.Time.sleep clock 0.01; loop ()) in
+    loop ());
+  let ic = open_in marker in
+  Fun.protect ~finally:(fun () -> close_in ic) (fun () -> int_of_string (input_line ic))
+;;
+
+let assert_descendant_stopped env pid =
+  (* Orphan zombies may await the platform's init reaper. They cannot run;
+     group cleanup does not claim to reap a process that is not our child. *)
+  let stopped () =
+    let state = Eio.Process.parse_out (Eio.Stdenv.process_mgr env)
+      Eio.Buf_read.take_all ~is_success:(fun _ -> true)
+      [ "/bin/ps"; "-o"; "stat="; "-p"; string_of_int pid ] |> String.trim in
+    state = "" || state.[0] = 'Z' in
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. (fun () ->
+    let rec loop () =
+      if stopped () then () else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; loop ()) in
+    loop ())
+;;
+
+let test_group_term_keeps_owner_after_leader_exit ~mode () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
+    Eio.Switch.run (fun sw ->
+      let sibling = Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr [ "/bin/sleep"; "60" ] in
+      let proc = Eio.Process.spawn ~sw mgr [ "python3"; "-c"; group_fixture; marker; mode ] in
+      let descendant = wait_for_marker clock marker in
+      let requested_at = Eio.Time.now clock in
+      Eio.Process.signal proc Sys.sigterm;
+      ignore (Eio.Process.await proc);
+      check bool "leader exit does not retire the group TERM grace" true
+        (Eio.Time.now clock -. requested_at >= 2.);
+      assert_descendant_stopped env descendant;
+      Unix.kill (Eio.Process.pid sibling) 0;
+      Eio.Process.signal sibling Sys.sigkill))
+;;
+
+let test_group_explicit_kill_reaps_leader_and_stops_descendant () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
+    Eio.Switch.run (fun sw ->
+      let proc = Eio.Process.spawn ~sw mgr
+        [ "python3"; "-c"; group_fixture; marker; "ignore" ] in
+      let descendant = wait_for_marker clock marker in
+      Eio.Process.signal proc Sys.sigkill;
+      (match Eio.Process.await proc with
+       | `Signaled signal -> check int "leader received SIGKILL" Sys.sigkill signal
+       | `Exited code -> failf "killed leader exited normally: %d" code);
+      assert_descendant_stopped env descendant;
+      match Unix.waitpid [ Unix.WNOHANG ] (Eio.Process.pid proc) with
+      | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+      | _ -> fail "explicitly killed foreground leader left unreaped"))
+;;
+
+let test_group_final_reap_needs_no_second_signal () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let interrupted = Atomic.make false in
+  let waitpid pid =
+    if not (Atomic.exchange interrupted true)
+    then raise (Unix.Unix_error (Unix.EINTR, "waitpid", ""))
+    else Unix.waitpid [] pid in
+  let mgr = Posix_spawn_process_mgr.For_testing.foreground_mgr
+      ~clock ~grace_seconds:2. ~waitpid in
+  Eio.Switch.run @@ fun sw ->
+  let proc = Eio.Process.spawn ~sw mgr ["/bin/sh"; "-c"; "exit 7"] in
+  (match Eio.Time.with_timeout_exn clock 10. (fun () -> Eio.Process.await proc) with
+   | `Exited code -> check int "actual exit survives interrupted final reap" 7 code
+   | `Signaled _ -> fail "completed child was reported killed");
+  check bool "final wait was reached" true (Atomic.get interrupted);
+  match Unix.waitpid [Unix.WNOHANG] (Eio.Process.pid proc) with
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+  | _ -> fail "leader was not reaped exactly once"
+;;
+
+let test_group_final_reap_does_not_block_scheduler () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let entered, publish_entered = Eio.Promise.create () in
+  let input, output = Unix.pipe ~cloexec:true () in
+  Fun.protect ~finally:(fun () -> Unix.close input; Unix.close output) @@ fun () ->
+  let calls = Atomic.make 0 in
+  let waitpid pid =
+    ignore (Atomic.fetch_and_add calls 1 : int);
+    Eio.Promise.resolve publish_entered ();
+    let byte = Bytes.create 1 in
+    ignore (Unix.read input byte 0 1 : int);
+    Unix.waitpid [] pid in
+  let mgr = Posix_spawn_process_mgr.For_testing.foreground_mgr
+      ~clock ~grace_seconds:2. ~waitpid in
+  Eio.Switch.run @@ fun sw ->
+  let proc = Eio.Process.spawn ~sw mgr ["/bin/sh"; "-c"; "exit 9"] in
+  Eio.Promise.await entered;
+  (* This fiber must run while the final wait blocks its system thread.
+     A concurrent termination request cannot signal/reap the owned PID. *)
+  Fun.protect
+    ~finally:(fun () -> ignore (Unix.write_substring output "x" 0 1 : int))
+    (fun () -> Eio.Process.signal proc Sys.sigterm);
+  (match Eio.Time.with_timeout_exn clock 10. (fun () -> Eio.Process.await proc) with
+   | `Exited code -> check int "original exit preserved" 9 code
+   | `Signaled _ -> fail "reaping child was signalled");
+  check int "one owner performs final wait" 1 (Atomic.get calls)
+;;
+
+exception Fixture_final_wait_failed
+
+let test_observation_cancel_preserves_physical_reap () =
+  List.iter (fun (target_stage,fail_after_wait) ->
+    Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let injected = ref false and captured = ref None in
+    let waits = Atomic.make 0 in
+    let waitpid pid =
+      ignore (Atomic.fetch_and_add waits 1 : int);
+      let observed = Unix.waitpid [] pid in
+      if fail_after_wait then raise Fixture_final_wait_failed;
+      observed in
+    let mgr = Posix_spawn_process_mgr.For_testing.foreground_mgr ~clock ~grace_seconds:2. ~waitpid in
+    Exec_tap.enable ~writer:(fun line ->
+      let stage = Yojson.Safe.Util.member "stage" (Yojson.Safe.from_string line) in
+      match target_stage with
+      | Some target when stage = `String target ->
+        injected := true;
+        raise (Eio.Cancel.Cancelled (Failure "fixture lifecycle observer cancelled"))
+      | Some _ | None -> ());
+    Fun.protect ~finally:Exec_tap.disable @@ fun () ->
+    (* Fixture guard only. The production owner does not use a deadline. *)
+    Eio.Time.with_timeout_exn clock 10. @@ fun () ->
+    let propagated = match Eio.Switch.run (fun sw ->
+      let proc = Eio.Process.spawn ~sw mgr ["/bin/sh";"-c";"exit 7"] in
+      captured := Some proc;
+      Eio.Fiber.await_cancel ()) with
+      | () -> `None
+      | exception Eio.Cancel.Cancelled _ -> `Cancellation
+      | exception Fixture_final_wait_failed -> `Wait_failure in
+    check bool "observer cancellation was injected only when requested" (Option.is_some target_stage) !injected;
+    check bool "observer cancellation propagates even if wait also fails" (Option.is_some target_stage)
+      (propagated = `Cancellation);
+    check bool "normal observer preserves the raw syscall failure" (Option.is_none target_stage)
+      (propagated = `Wait_failure);
+    check int "one owner physically waits once" 1 (Atomic.get waits);
+    let proc = match !captured with Some proc -> proc | None -> fail "child not captured" in
+    (match fail_after_wait,Eio.Process.await proc with
+     | false,`Exited code -> check int "settled original exit survives observer failure" 7 code
+     | false,`Signaled _ -> fail "observer failure changed a completed exit"
+     | true,_ -> fail "canonical wait failure disappeared"
+     | exception Fixture_final_wait_failed -> check bool "canonical failure remains explicit" true fail_after_wait);
+    match Unix.waitpid [Unix.WNOHANG] (Eio.Process.pid proc) with
+    | exception Unix.Unix_error (Unix.ECHILD,_,_) -> ()
+    | _ -> fail "observer failure left an unreaped child")
+    [Some "waitpid_started",false;Some "waitpid_returned",false;
+     Some "waitpid_started",true;None,true]
+;;
+
+let test_group_normal_exit_reaps_in_long_lived_switch () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
+    Eio.Switch.run (fun sw ->
+      for _ = 1 to 12 do
+        let proc = Eio.Process.spawn ~sw mgr [ "/bin/sh"; "-c"; "exit 0" ] in
+        ignore (Eio.Process.await proc);
+        (match Unix.waitpid [ Unix.WNOHANG ] (Eio.Process.pid proc) with
+         | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+         | _ -> fail "foreground leader left unreaped in a live switch")
+      done;
+      let proc = Eio.Process.spawn ~sw mgr [ "python3"; "-c"; group_fixture; marker; "exit" ] in
+      let descendant = wait_for_marker clock marker in
+      ignore (Eio.Process.await proc);
+      assert_descendant_stopped env descendant))
+;;
+
+(* An official-client adapter is cancelled by its turn owner, even when the
+   vendor leader and an MCP child have both stopped writing to the pipes.
+   Returning from the cancelled switch must leave neither process running. *)
+let test_client_switch_cancel_reaps_leader_and_stops_descendant () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds in
+    let leader = ref None in
+    let descendant = ref None in
+    Eio.Switch.run (fun siblings ->
+      let sibling = Eio.Process.spawn ~sw:siblings Posix_spawn_process_mgr.mgr
+        [ "/bin/sleep"; "60" ] in
+      Eio.Fiber.first
+        (fun () -> Eio.Switch.run (fun sw ->
+          let proc = Eio.Process.spawn ~sw mgr
+            [ "python3"; "-c"; group_fixture; marker; "ignore" ] in
+          leader := Some (Eio.Process.pid proc);
+          ignore (Eio.Process.await proc)))
+        (fun () -> descendant := Some (wait_for_marker clock marker));
+      (match !descendant with
+       | Some pid -> assert_descendant_stopped env pid
+       | None -> fail "client cancellation fixture never became ready");
+      (match !leader with
+       | None -> fail "client leader was not recorded"
+       | Some pid ->
+         (match Unix.waitpid [ Unix.WNOHANG ] pid with
+          | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+          | _ -> fail "cancelled client leader was not reaped"));
+      Unix.kill (Eio.Process.pid sibling) 0;
+      Eio.Process.signal sibling Sys.sigkill))
+;;
+
+(* Startup failure cleanup may already be waiting under protection before
+   Retire cancels the process switch. Its reaper must publish the original exit
+   without waiting for a switch release hook that cannot run yet. *)
+let test_cancel_settles_protected_await () =
+  List.iter (fun cleanup_already_started ->
+    with_group_fixture (fun env marker ->
+      let clock = Eio.Stdenv.clock env in
+      let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2. in
+      let original = ref None and descendant = ref None in
+      let entered, notify = Eio.Promise.create () in
+      Eio.Time.with_timeout_exn clock 10. (fun () ->
+        Eio.Fiber.first
+          (fun () -> Eio.Switch.run (fun sw ->
+            let proc = Eio.Process.spawn ~sw mgr
+                ["python3"; "-c"; group_fixture; marker; "ignore"] in
+            original := Some proc;
+            descendant := Some (wait_for_marker clock marker);
+            let settle () = Eio.Cancel.protect (fun () ->
+              Eio.Process.signal proc Sys.sigterm;
+              if cleanup_already_started then Eio.Promise.resolve notify ();
+              ignore (Eio.Process.await proc)) in
+            if cleanup_already_started then settle ()
+            else
+              match Eio.Promise.resolve notify (); Eio.Fiber.await_cancel () with
+              | () -> fail "cancellation fixture resumed normally"
+              | exception (Eio.Cancel.Cancelled _ as exn) -> settle (); raise exn))
+          (fun () -> Eio.Promise.await entered));
+      (match !original with
+       | None -> fail "original child was not started"
+       | Some proc ->
+         ignore (Eio.Process.await proc);
+         (match Unix.waitpid [Unix.WNOHANG] (Eio.Process.pid proc) with
+          | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+          | _ -> fail "cancelled protected cleanup left the original child unreaped"));
+      match !descendant with
+      | Some pid -> assert_descendant_stopped env pid
+      | None -> fail "original descendant was not observed"))
+    [false; true]
+;;
+
+let test_native_command_cancel_cleans_closed_pipe_descendant () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
+      ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock;
+    let descendant = ref None in
+    Eio.Fiber.first
+      (fun () -> ignore (Process_eio.run_argv_with_status_split
+         [ "python3"; "-c"; group_fixture; marker; "wait" ]))
+      (fun () -> descendant := Some (wait_for_marker clock marker));
+    match !descendant with
+    | Some pid -> assert_descendant_stopped env pid
+    | None -> fail "command exited before cancellation fixture was ready")
+;;
+
+(* Darwin's group kill answers EPERM when it signalled nobody; the member
+   snapshot decides whether nobody was left to signal. *)
+module Members = Process_group_members
+
+let snapshot_leader = 4242
+let snapshot_owner = 100
+
+let group_member ?(parent = snapshot_leader) pid state =
+  { Members.pid; parent; state }
+
+let no_live_member members =
+  Members.no_live_member ~leader:snapshot_leader ~owner:snapshot_owner members
+
+let owned_leader state = group_member ~parent:snapshot_owner snapshot_leader state
+
+let test_zombie_group_has_no_live_member () =
+  check bool "a zombie leader alone" true
+    (no_live_member [ owned_leader Members.Zombie ]);
+  check bool "a zombie leader and a zombie descendant" true
+    (no_live_member [ owned_leader Members.Zombie; group_member 4243 Members.Zombie ])
+;;
+
+let test_exiting_member_is_not_live () =
+  (* #39768: a Claude Code descendant still tearing down its exit when the
+     group SIGKILL went out. The kernel's group walk no longer sees it, so the
+     kill reached nobody; it is not a process left running. *)
+  check bool "a zombie leader and an exiting descendant" true
+    (no_live_member [ owned_leader Members.Zombie; group_member 4243 Members.Exiting ]);
+  check bool "an exiting leader" true (no_live_member [ owned_leader Members.Exiting ])
+;;
+
+let test_live_member_is_a_refusal () =
+  check bool "a live descendant" false
+    (no_live_member [ owned_leader Members.Zombie; group_member 4243 Members.Live ]);
+  check bool "a live leader" false (no_live_member [ owned_leader Members.Live ])
+;;
+
+let test_group_without_its_owned_leader_is_not_ours () =
+  check bool "no members" false (no_live_member []);
+  check bool "members but no leader" false
+    (no_live_member [ group_member 4243 Members.Zombie ]);
+  check bool "a leader another process owns" false
+    (no_live_member [ group_member ~parent:1 snapshot_leader Members.Zombie ]);
+  (* Ownership is read off the leader's own row: another member being our
+     child does not make the leader ours. *)
+  check bool "the leader pid and our child on different rows" false
+    (no_live_member
+       [ group_member ~parent:1 snapshot_leader Members.Zombie
+       ; group_member ~parent:snapshot_owner 4243 Members.Zombie
+       ])
+;;
+
+let () =
+  run "posix_spawn_process_mgr"
+    [ ( "a group signal that reached nobody",
+        [ test_case "a zombie-only group has no live member" `Quick
+            test_zombie_group_has_no_live_member
+        ; test_case "an exiting member is not live" `Quick
+            test_exiting_member_is_not_live
+        ; test_case "a live member makes EPERM a refusal" `Quick
+            test_live_member_is_a_refusal
+        ; test_case "a group needs the leader this process owns" `Quick
+            test_group_without_its_owned_leader_is_not_ours ])
+    ; ( "original process identity",
+        [ test_case "birth observation survives original child reap" `Quick
+            test_original_birth_survives_reap ])
+    ; ( "foreground group ownership",
+        [ test_case "observer cancellation cannot strand physical reap or its owner promise" `Quick
+            test_observation_cancel_preserves_physical_reap
+        ; test_case "final reap leaves scheduler and signal responsive" `Quick
+            test_group_final_reap_does_not_block_scheduler
+        ; test_case "final reap needs no second SIGCHLD" `Quick
+            test_group_final_reap_needs_no_second_signal
+        ; test_case "TERM leader exits before closed-pipe descendant" `Quick
+            (test_group_term_keeps_owner_after_leader_exit ~mode:"wait")
+        ; test_case "TERM-ignoring leader still reaches group escalation" `Quick
+            (test_group_term_keeps_owner_after_leader_exit ~mode:"ignore")
+        ; test_case "explicit group SIGKILL reaps leader and stops descendant" `Quick
+            test_group_explicit_kill_reaps_leader_and_stops_descendant
+        ; test_case "normal leaders reap inside a long-lived switch" `Quick
+            test_group_normal_exit_reaps_in_long_lived_switch
+        ; test_case "client switch cancellation owns leader and descendants" `Quick
+            test_client_switch_cancel_reaps_leader_and_stops_descendant
+        ; test_case "switch cancellation settles protected original-child await" `Quick
+            test_cancel_settles_protected_await
+        ; test_case "native command cancellation cleans its group" `Quick
+            test_native_command_cancel_cleans_closed_pipe_descendant ])
+    ; ( "parity with eio_posix"
+      , [ test_case "captures stdout" `Quick test_stdout_capture
+        ; test_case "reports the exit status" `Quick test_exit_status
+        ; test_case "honours cwd and env" `Quick test_cwd_and_env
+        ; test_case "rejects a missing executable" `Quick test_missing_executable
+        ; test_case "kills the child when the switch is released" `Quick
+            test_child_is_killed_when_the_switch_is_released
+        ] )
+    ; ( "own dependencies"
+      , [ test_case "awaits without the backend's SIGCHLD handler" `Quick
+            test_await_without_the_backends_sigchld_handler
+        ] )
+    ; ( "stricter than eio_posix"
+      , [ test_case "closes a descriptor it was not given" `Quick
+            test_this_spawn_does_not_inherit_an_unlisted_pipe
+        ] )
+    ]
+;;

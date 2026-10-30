@@ -1,0 +1,60 @@
+{
+  "base": "8b7b57b580c083c8f89fa5143af205c2ece669cd",
+  "python": "3.14.4",
+  "platform": "Darwin",
+  "commands": [
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "addons/tests",
+        "-p",
+        "test_candle_appraiser.py"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "addons/tests",
+        "-p",
+        "test_workspace_curator.py"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "tests": {
+    "existing_candle": 13,
+    "curator": 6,
+    "total": 19
+  },
+  "source_sha256": {
+    "addons/exact_worker.py": "6a467d21e8d6487c00efdd88314d6432463baeeb245082f5c0b7b3189a31f978",
+    "addons/candle-appraiser/server.py": "a7864a0e2be89de2c821cd01e7860e6afe7fb22eac0f2bf13a75c71ca6210c91",
+    "addons/candle-appraiser/lane.toml": "dcc49be96b50c0b4f07daf4c08a5ab39064c5cf3e2d021b457f7f4689ec900f2",
+    "addons/candle-appraiser/Dockerfile": "21d8b9f109fe8af7fe6b17b7d12d3ebcfa96990d62057402d8952bf009871292",
+    "addons/workspace-curator/server.py": "85411e4661624ccaf828d1297c2967e9083b62aecee99f434c00c787952c8d22",
+    "addons/workspace-curator/lane.toml": "5d2419b486b7cc33b28fcabc0cdc9ecf8625cb872c94390b1db39b890a462473",
+    "addons/workspace-curator/Dockerfile": "21d8b9f109fe8af7fe6b17b7d12d3ebcfa96990d62057402d8952bf009871292",
+    "addons/tests/test_candle_appraiser.py": "b532bb7a3e0b2bfb48ce1637dd0af8bc12813a2f5d0d6e35736f16a0589a4c08",
+    "addons/tests/test_workspace_curator.py": "043a964be9faf6bff837f35a68c96b54d4d270d30817cfdc621760985eb3af13",
+    "addons/protocol.py": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa",
+    "addons/tests/stdio_fixture.py": "054de35ee2cc40caf7f47ecc04ffc7ec4e5d4418b8a5697bf1d1cb3737be5377"
+  },
+  "public_log_sha256": "762904cac5195ca8d0a54e9e5e07137fcdfd5a0d12a48219c1048ea41863ad2c",
+  "scope": "actual local Python stdio/restart, shared storage failures, frame admission and staged package mount layout; providers scripted, no runtime install",
+  "not_claimed": [
+    "OCaml typing or new contract suite execution",
+    "container build/start",
+    "production Curator owner/domain commit/wake",
+    "real provider/Off/reconnect/UI",
+    "full54 completion"
+  ]
+}

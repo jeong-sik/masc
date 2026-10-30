@@ -1,0 +1,20 @@
+name = "cga-classic"
+light = false
+
+[palette]
+base00 = "000000"
+base01 = "151515"
+base02 = "2a2a2a"
+base03 = "555555"
+base04 = "aaaaaa"
+base05 = "ffffff"
+base06 = "d4d4d4"
+base07 = "ffffff"
+base08 = "ff5555"
+base09 = "aa5500"
+base0a = "ffff55"
+base0b = "55ff55"
+base0c = "55ffff"
+base0d = "6262ff"
+base0e = "ff55ff"
+base0f = "aa0000"

@@ -1,0 +1,1266 @@
+(** Runtime = Provider + Model + Spec(binding).
+
+    runtime→Runtime 전환 (RFC-0206). runtime 의 routes/runtime_id/tier/profile
+    간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
+    으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
+    선언 스키마는 {!Runtime_schema}, materialized 값은 {!Runtime_instance} 소유. *)
+
+open Runtime_config_error
+open Runtime_schema
+open Runtime_instance
+
+val exact_slot_list_key_of_api_format : api_format -> string option
+(** The declaration key used when an exact-output lane appends a binding with
+    this provider format: [Some slots] or [Some cli_slots]. [None] means the
+    protocol has no output-schema channel and cannot enter an exact lane.
+    The runtime writer and the
+    resolved picker projection use the same decision. *)
+
+type config_source_revision = private Config_source_revision of string
+type config_commit_order = private Config_commit_order of int64
+
+type config_observation = private
+  { path : string
+  ; source_text : string
+  ; source_revision : config_source_revision
+  }
+
+type config_edit_error =
+  | Config_source_conflict of config_observation
+  | Config_edit_failed of string
+
+type config_durability =
+  | Durable
+  | Durability_unconfirmed of { detail : string }
+
+type config_commit_error =
+  | Config_commit_refused of string
+  | Config_commit_write_failed of Fs_compat.atomic_replace_failure
+(** A refusal happens before replacement; a write failure here also precedes
+    rename. A visible replacement returns a receipt, including uncertain durability. *)
+
+(** Where the exact-output registry's targets come from. *)
+type exact_output_target_source =
+  | Runtime_binding_targets
+      (** The exact-output registry builds its targets from this file's HTTP
+          bindings, so a slot's deadline is its provider's
+          [exact-body-timeout-s]. *)
+  | Replacement_catalog_targets of { path : string }
+      (** [AGENT_CORE_MODEL_CATALOG] names a full replacement catalog; its
+          [[targets]] rows are the whole target set and carry their own
+          [body_timeout_s]. Binding fields in runtime.toml,
+          [exact-body-timeout-s] among them, do not reach those targets. *)
+
+(** What a config commit did to the exact-output registry. *)
+type exact_output_registry_application =
+  | Exact_output_registry_replaced of { origin : exact_output_target_source }
+      (** A registry rebuilt from the committed text was published with the
+          write. *)
+  | Exact_output_registry_unpublished
+      (** No registry was published, and a commit does not publish the first
+          one: exact lanes stay unavailable until a restart publishes one. *)
+  | Exact_output_registry_kept of
+      { reason : Runtime_exact_output_registry.publication_error }
+      (** The committed text does not rebuild the registry and neither did
+          the file it replaced, so the fault predates the commit. The
+          published registry stays as it was and no longer describes the
+          file, and the file on disk publishes no registry at the next boot.
+          {!exact_output_registry_stale} records it for health until a
+          commit replaces the registry. *)
+
+(** The registry a config commit kept because neither the committed text nor
+    the file it replaced rebuilds one. It keeps serving, but the file on disk
+    publishes no registry at the next boot. *)
+type exact_output_registry_stale =
+  { stale_reason : Runtime_exact_output_registry.publication_error
+  ; stale_since_commit : config_commit_order
+        (** The first commit that kept it; later kept commits do not move it. *)
+  }
+
+type config_commit_receipt = private
+  { observation : config_observation
+  ; durability : config_durability
+  ; order : config_commit_order
+  ; lock_warnings : config_lock_warning list
+  ; exact_output_registry : exact_output_registry_application
+  ; ignored_legacy_keys : string list
+        (** Legacy keys the committed text still carries
+            (e.g. ["models.gpt-5.max-prompt-bytes"]) that this masc reads
+            past without a value. Empty on a receipt whose write did not
+            land, where there is no committed text to name keys from. The
+            editor that caused the commit says them in a warning so the
+            reader knows the old key is now inert (#45985). *)
+  }
+
+and config_lock_warning =
+  | Config_lock_release_unconfirmed of string
+
+type keeper_assignment_state =
+  | Assignment_missing
+  | Assignment_present of string
+
+type keeper_assignment_revision =
+  | Runtime_config_missing
+  | Runtime_config_present of
+      { source_revision : config_source_revision
+      ; assignment : keeper_assignment_state
+      }
+
+type keeper_assignment_cas_error =
+  | Assignment_revision_conflict of keeper_assignment_revision
+  | Assignment_io_error of string
+
+type keeper_assignment_write =
+  | Assignment_unchanged of keeper_assignment_revision
+  | Assignment_committed of
+      { receipt : config_commit_receipt
+      ; revision : keeper_assignment_revision
+      }
+
+type keeper_assignment_transaction
+
+type 'a config_lock_receipt = private
+  { value : 'a
+  ; warnings : config_lock_warning list
+  }
+
+val config_source_revision_of_text : string -> config_source_revision
+(** Pure identity of the source text, independent of its storage path. *)
+
+val config_observation : path:string -> string -> config_observation
+(** Pure source identity used inside callers' locked config edits. *)
+
+val config_source_revision_to_string : config_source_revision -> string
+type lane_set_error =
+  | Lane_set_revision_conflict of { expected : string; observed : string }
+  | Lane_set_invalid of string
+
+val lane_set_error_to_string : lane_set_error -> string
+val config_commit_order_to_string : config_commit_order -> string
+val compare_config_commit_order : config_commit_order -> config_commit_order -> int
+val config_lock_warning_to_yojson : config_lock_warning -> Yojson.Safe.t
+val config_commit_receipt_to_yojson : config_commit_receipt -> Yojson.Safe.t
+(** Public commit identity, durability and lock warnings. Does not expose the
+    configuration text. Unconfirmed durability retains its original detail. *)
+val exact_output_registry_application_to_yojson :
+  exact_output_registry_application -> Yojson.Safe.t
+(** Registry application is independent of the file's commit/durability. *)
+val keeper_assignment_revision_to_yojson : keeper_assignment_revision -> Yojson.Safe.t
+val keeper_assignment_revision_of_yojson :
+  Yojson.Safe.t -> (keeper_assignment_revision, string) result
+
+val with_keeper_assignment_transaction :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  (keeper_assignment_transaction -> 'a) ->
+  ('a config_lock_receipt, string) result
+(** Hold the process-wide and durable [runtime.toml] locks while observing and
+    acting on one Keeper assignment. Callers that also hold a Keeper manifest
+    lock must always acquire that manifest lock first. An unresolved journal
+    rejects the callback before it observes or mutates the assignment. *)
+
+val keeper_assignment_revision :
+  keeper_assignment_transaction -> keeper_assignment_revision
+
+val keeper_assignment_transaction_path : keeper_assignment_transaction -> string option
+
+val commit_keeper_assignment :
+  ?egress_allow:string list ->
+  keeper_assignment_transaction ->
+  runtime_id:string option ->
+  (keeper_assignment_write, string) result
+(** Compose the assignment and optional egress allowlist into one source
+    commit. [runtime_id=None] clears the assignment; omitted [egress_allow]
+    preserves the allowlist. The receipt describes the final source revision.
+    [Assignment_unchanged] means neither setting changed the source bytes. *)
+
+val restore_keeper_assignment_transaction :
+  keeper_assignment_transaction -> (keeper_assignment_write, string) result
+(** Restore the exact [runtime.toml] source bytes captured when the
+    transaction began. The caller must still be inside the transaction
+    callback, so no other admitted runtime writer can interleave. *)
+
+val commit_keeper_removal :
+  keeper_assignment_transaction -> (keeper_assignment_write, string) result
+(** Remove this exact Keeper's runtime assignment and egress override in one
+    source commit, preserving other Keepers' settings. *)
+
+val observe_keeper_assignment :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  unit ->
+  (keeper_assignment_revision config_lock_receipt, string) result
+
+val set_keeper_assignment_if_revision :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  runtime_id:string option ->
+  expected:keeper_assignment_revision ->
+  unit ->
+  (keeper_assignment_write config_lock_receipt,
+   keeper_assignment_cas_error) result
+(** Compare and replace under the same runtime-config transaction. [Error]
+    carries the exact observed revision. *)
+
+module Assignment_for_testing : sig
+  val commit_with_replace_file :
+    replace_file:
+      (string ->
+       string ->
+       (unit, Fs_compat.atomic_replace_failure) result) ->
+    keeper_assignment_transaction ->
+    runtime_id:string option ->
+    (keeper_assignment_write, string) result
+
+  val restore_with_replace_file :
+    replace_file:
+      (string ->
+       string ->
+       (unit, Fs_compat.atomic_replace_failure) result) ->
+    keeper_assignment_transaction ->
+    (keeper_assignment_write, string) result
+
+  val set_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error ->
+    runtime_config_path:string ->
+    keeper_name:string ->
+    runtime_id:string option ->
+    expected:keeper_assignment_revision ->
+    unit ->
+    (keeper_assignment_write config_lock_receipt,
+     keeper_assignment_cas_error) result
+end
+
+val agent_core_model_catalog_env_var_name : string
+
+val exact_output_target_source :
+  ?env:(string -> string option) -> unit -> exact_output_target_source
+(** One answer for both readers: configuration load decides whether rule 3
+    (exact slot body deadline) applies, and {!exact_output_resolver_catalog}
+    decides which catalog the exact-output registry reads, at boot and on
+    every config commit. A blank value names no file. *)
+
+type missing_catalog_model =
+  { runtime_id : string
+  ; provider_id : string
+  ; provider_label : string
+  ; model_id : string
+  }
+(** Runtime binding whose concrete provider/model pair is absent from the AGENT_CORE
+    capability catalog. [provider_label] is the exact AGENT_CORE capability namespace
+    used for lookup. *)
+
+val missing_catalog_model_to_string : missing_catalog_model -> string
+(** Exact configured runtime/provider/model identity for unavailable-route diagnostics. *)
+
+type missing_catalog_report =
+  { config_path : string
+  ; missing_models : missing_catalog_model list
+  }
+
+type unavailable_runtime_assignment =
+  { keeper_name : string
+  ; runtime_id : string
+  }
+
+type startup_degradation =
+  { report : missing_catalog_report
+  ; configured_default_runtime_id : string
+  ; disabled_runtime_ids : string list
+  ; unavailable_assignments : unavailable_runtime_assignment list
+  }
+(** Operator-visible startup degradation. Missing-catalog runtime bindings are
+    removed from the active runtime set so requests never dispatch through AGENT_CORE
+    [provider_default]. The server may continue only when at least one
+    catalog-known default remains and no default/lane/media route references a
+    disabled runtime. Explicit Keeper assignments retain their configured IDs;
+    only affected Keepers resolve to [Unavailable] and cannot dispatch. *)
+
+type init_default_outcome =
+  | Initialized
+  | Initialized_degraded of startup_degradation
+
+type strict_init_error =
+  | Runtime_config_error of string
+  | Missing_catalog_models of missing_catalog_report
+
+val strict_init_error_to_string : strict_init_error -> string
+val startup_degradation_to_string : startup_degradation -> string
+val startup_degradation_to_yojson :
+  exact_slots:exact_slot_degradation ->
+  exact_registry_stale:exact_output_registry_stale option ->
+  startup_degradation option ->
+  Yojson.Safe.t
+(** The one startup report health, the runtime inventory and the dashboard
+    read. Catalog-missing bindings and exact slots without a body deadline
+    both make it [degraded]; the gaps and the lanes they empty are listed in
+    every shape, and [status_reasons]/[operator_action_reasons] name every
+    cause present. *)
+
+val load_list :
+  config_path:string
+  -> ( t list
+       * t
+       * (string * string) list
+       * string list
+       * Runtime_lane.t list
+     , load_failure )
+     result
+(** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
+    keeper_assignments, media_failover, lanes)].
+    Fails ([Error]) if
+    [\[runtime\].default] is missing / unresolved, if any
+    [\[runtime.assignments\]] target names neither a declared lane nor a
+    configured runtime, if any
+    [\[runtime\].media_failover] entry does not resolve, or if any
+    [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
+    validation — no silent fallback for a typo'd id). [keeper_assignments] is the
+    keeper→lane-name-or-runtime-id list; [media_failover] names the vision runtimes;
+    [lanes] is the ordered failover candidate lists. *)
+
+
+(** {1 Lazy default runtime singleton}
+
+    Initialized once at startup via {!init_default}.  All consumer
+    code that previously resolved a runtime name now calls
+    {!get_default_runtime_id} instead. *)
+
+val init_default : config_path:string -> (unit, string) result
+(** Parse + RFC-0206 routing validation + populate the singletons. Does NOT apply
+    the AGENT_CORE capability-catalog gate (use {!init_default_strict} for fail-closed
+    callers or {!init_default_degraded_report} for server boot). Safe for tests
+    with arbitrary-model runtime fixtures. *)
+
+val exact_output_targets : t list -> Agent_core.Exact_output.declared_target list
+(** The exact-output slots of [runtimes]: every HTTP binding, carried whole with
+    its resolved credential and its [exact-body-timeout-s]. Official-client
+    runtimes do no exact output and are left out. *)
+
+type exact_output_catalog =
+  { catalog_input : Agent_core.Exact_output.resolver_catalog_input
+  ; catalog_origin : exact_output_target_source
+  ; catalog_description : string  (** A phrase naming it for the publication log. *)
+  ; catalog_exact_slots : exact_slot_degradation
+        (** What rule 3 leaves out of this build: the gap slots, which are not
+            targets, and the lanes they empty, which the registry does not
+            require. The same function [set_loaded] records for the startup
+            report. *)
+  }
+
+val exact_output_resolver_catalog :
+  exact_output_lane_decls:Runtime_schema.exact_output_lane_decl list ->
+  t list ->
+  exact_output_catalog
+(** The catalog an exact-output resolver snapshot for [runtimes] is built from.
+    {!exact_output_target_source} decides: the full replacement
+    [AGENT_CORE_MODEL_CATALOG] names, or the embedded catalog with
+    {!exact_output_targets} as its targets, less every slot rule 3 leaves out
+    for [exact_output_lane_decls]. Boot, every config commit, the save preview
+    and the on-disk rebuild check read this one derivation, and pass
+    [catalog_exact_slots.emptied_lane_ids] as the lanes excused from the
+    required set. *)
+
+val report_exact_output_registry : Runtime_exact_output_registry.t -> unit
+(** Log what [registry] left out: targets whose binding has no catalog row,
+    rejected lane slots (a slot rule 3 left out is counted, not diagnosed
+    again), [verifier_exact] slots that cannot judge, and the optional lanes
+    with nothing admitted. Boot runs it after publishing and every config
+    commit that replaces the registry runs it when what it reports changed
+    (a kept registry's rejected slots are listed, not diagnosed, because it
+    was built from an earlier text). The rule-3 slots and lanes themselves
+    are named by {!warn_exact_slot_degradation}. *)
+
+val warn_exact_slot_degradation : exact_slot_degradation -> unit
+(** One WARN per exact slot rule 3 leaves out and one per lane it empties.
+    Boot logs it before publishing, so it is said even when the registry
+    cannot be published. A config commit logs it after the write: a save
+    refuses only the gaps it adds, so the text it commits can keep gaps the
+    file already had. *)
+
+val load_exact_output_resolver_snapshot :
+  Agent_core.Exact_output.resolver_catalog_input ->
+  ( Agent_core.Exact_output.resolver_snapshot
+  , Agent_core.Exact_output.resolver_snapshot_error )
+  result
+(** Build a resolver snapshot from [catalog], excluding targets whose provider
+    or model has no catalog row. *)
+
+val exact_output_runtime_observations :
+  origin:exact_output_target_source -> t list ->
+  (string * Runtime_exact_output_registry.runtime_observation) list
+(** Observation cells for targets built from these same runtimes. Binding
+    equality preserves existing cells; replacement catalog targets get none. *)
+
+val publish_exact_output_registry :
+  ?runtime_observations:(string * Runtime_exact_output_registry.runtime_observation) list ->
+  ?required_lane_ids:string list ->
+  ?excused_lane_ids:string list ->
+  lanes:Runtime_schema.exact_output_lane_decl list ->
+  Agent_core.Exact_output.resolver_snapshot ->
+  (Runtime_exact_output_registry.t, string) result
+(** Publish one immutable AGENT_CORE resolver-and-lane snapshot and return that exact
+    publication. [required_lane_ids] must each retain an admitted slot, less
+    [excused_lane_ids] (the lanes rule 3 emptied); that validation happens
+    before the global publication changes. *)
+
+val unpublish_exact_output_registry :
+  unit -> (unit, Runtime_exact_output_registry.publication_error) result
+(** Withdraw the published exact-output registry and clear
+    {!exact_output_registry_stale}, since no kept registry serves any more.
+    Refuses, changing nothing, while a replacement reservation is active. *)
+
+val init_default_strict : config_path:string -> (unit, string) result
+(** Fail-closed startup entry point: {!init_default} plus the capability check
+    on the materialized runtime list. Rejects ([Error]) a binding whose model
+    the AGENT_CORE catalog does not carry and whose runtime block declares no
+    capabilities of its own. Used by strict validation callers such as fusion
+    run. *)
+
+val init_default_strict_report :
+  config_path:string -> (unit, strict_init_error) result
+(** Typed form of {!init_default_strict}. Useful when callers need missing
+    catalog models without string-matching the fatal error message. *)
+
+val init_default_degraded_report :
+  config_path:string -> (init_default_outcome, strict_init_error) result
+(** Server bootstrap entry point. Applies the strict AGENT_CORE catalog gate, but when
+    catalog-membership rows fail it can remove uncatalogued runtimes from the
+    active set and continue in an operator-visible degraded mode. Explicit
+    Keeper assignments retain their IDs and resolve to [Unavailable]. Parse
+    errors, all-missing runtime sets, and missing default/lane/media routes
+    remain fatal; no configured route is replaced by an implicit fallback. *)
+
+val init_default_degraded_observation :
+  config_observation -> (init_default_outcome, strict_init_error) result
+(** Initialize from one immutable source observation so Runtime and sibling
+    consumers can use the same exact bytes without a second filesystem read. *)
+
+module For_testing : sig
+  type snapshot
+
+  val snapshot : unit -> snapshot
+  val restore : snapshot -> unit
+
+  val with_config_lock_observed_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error -> runtime_config_path:string ->
+    (unit -> 'a) -> ('a config_lock_receipt, string) result
+  (** Real writer lock and journal admission, with an injected release result. *)
+
+  val with_config_lock_with_journal_sync_parent :
+    sync_parent:(string -> unit) -> runtime_config_path:string ->
+    (unit -> unit) -> (unit, string) result
+  (** Production writer admission with an injected journal-parent sync. *)
+
+  val save_config_text_with_sync_parent :
+    ?runtime_config_path:string ->
+    sync_parent:(string -> unit) ->
+    string ->
+    (config_commit_receipt, string) result
+  (** Production-equivalent runtime config replacement with an injected
+      parent-directory sync operation. *)
+
+end
+
+val get_default_runtime : unit -> t option
+val get_runtimes : unit -> t list
+
+val catalogue_revision : unit -> int
+(** Monotonic revision of the published runtime catalogue. *)
+
+val await_catalogue_change : after:int -> int
+(** Wait for a publication newer than [after], without polling. A publication
+    that precedes the wait is returned immediately. *)
+
+val get_default_route_and_runtimes : unit -> string option * t option * t list
+(** The configured default route, its entry runtime and the runtime list from
+    one read of the loaded state. [None] means no default is initialized. *)
+val get_runtime_ids : unit -> string list
+val startup_degradation : unit -> startup_degradation option
+val startup_degraded : unit -> bool
+
+val exact_output_registry_stale : unit -> exact_output_registry_stale option
+(** [Some] from a config commit that kept the exact-output registry until a
+    commit replaces it, leaves none published, or boot publishes one. The
+    startup report lists it as [exact_output_registry_stale] and names
+    [exact_output_registry_stale] in its reasons. *)
+
+val exact_slot_degradation : unit -> exact_slot_degradation
+(** The gaps of the loaded file and the lanes they empty. *)
+
+val exact_slot_lacks_body_deadline : target_source:exact_output_target_source -> t -> bool
+(** Whether this runtime, named as an HTTP slot of an exact-output lane, is a
+    rule-3 gap: a configured HTTP runtime whose provider declares no
+    [exact-body-timeout-s], under binding targets. The save refusal and the
+    runtime listing both read this predicate. *)
+
+val exact_slot_body_deadline_gaps : unit -> exact_slot_body_deadline_gap list
+(** The exact slots the loaded file declares on a provider without
+    [exact-body-timeout-s], computed when the file was loaded. Boot does not
+    refuse the file for them; the exact-output registry leaves them out. *)
+val runtimes_and_media_failover : unit -> t list * string list
+(** Atomically consistent snapshot of configured runtimes plus
+    [\[runtime\].media_failover]. Use when both values drive one routing
+    decision, so a runtime config refresh cannot interleave between two
+    separate reads. *)
+
+val runtime_id_for_keeper : string -> string option
+(** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned
+    in [\[runtime.assignments\]] (runtime.toml SSOT) — a declared lane name or a
+    runtime id — or [None] when no explicit assignment exists (caller falls back
+    to {!get_default_route}). It is a routing label, not necessarily a
+    materialized binding: pass it to {!resolve_assignment} to walk the lane, or
+    to {!entry_runtime_id_of_route} for the binding the turn opens first. The id is opaque (only the AGENT_CORE adapter parses
+    it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
+
+val keeper_assignments : unit -> (string * string) list
+(** Snapshot of explicit [keeper_name -> runtime_id] assignments loaded from
+    [\[runtime.assignments\]]. The list is validated during {!init_default};
+    a catalog-unavailable assignment retains its exact configured runtime ID.
+    Dashboard/operator surfaces use this to expose assignment blast radius
+    without parsing TOML independently. *)
+
+type dashboard_runtime_resolved_snapshot =
+  { rs_default_route : string option
+  ; rs_default_runtime : t option
+  ; rs_runtimes : t list
+  ; rs_assignments : (string * string) list
+  ; rs_lanes : Runtime_lane.t list
+  ; rs_media_failover : string list
+  ; rs_declared_media_failover : string list
+  ; rs_config_path : string option
+  ; rs_resolve_assignment : string ->
+      [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
+  }
+
+val dashboard_runtime_resolved_snapshot : unit -> dashboard_runtime_resolved_snapshot
+(** All routing fields and assignment resolution from one loaded-state read. *)
+
+type keeper_dispatch_snapshot
+(** Effective route, ordered candidates and their frozen dispatch identities
+    from one loaded-state read. Unrelated config edits do not change it. *)
+
+val keeper_dispatch_snapshot : keeper_name:string -> keeper_dispatch_snapshot
+val same_keeper_dispatch :
+  keeper_dispatch_snapshot -> keeper_dispatch_snapshot -> bool
+(** Unchanged bindings retain their candidate cells across catalog reloads.
+    A reassignment, lane edit, removal or binding replacement differs. *)
+
+type dashboard_runtime_defaults_snapshot =
+  { default_runtime : t option
+  ; runtimes : t list
+  ; media_failover : string list
+  ; config_path : string option
+  }
+
+val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_snapshot
+(** Capture every value consumed by the dashboard runtime-defaults endpoint from
+    one immutable loaded-state snapshot. *)
+
+(** The exact-output lanes, one [\[runtime.exact_output_lanes.<id>\]] table
+    each. They are {!Standalone_lane.t}, whose [all], [to_id] and [of_id] list
+    and spell them; the equation keeps [Runtime.Librarian] and the other
+    constructor paths. [Verifier] is the single selector for completion
+    judgement calls (RFC-0361 D7(a)). *)
+type exact_lane = Standalone_lane.t =
+  | Librarian
+  | Hitl_auto_judge
+  | Board_attention
+  | Verifier
+  | Browser_stagehand
+      (** Answers the Stagehand extension's [llm.generate] for the browser
+          lane (RFC-browser-lane-stagehand §3.7). *)
+  | Candle_appraiser
+      (** Appraises the grade, Task relations and Keeper contribution weights of a confirmed Candle payout. *)
+
+val verifier_runtime_admission : t -> (unit, string) result
+(** The one answer to "can this runtime judge a completion review?", used by
+    lane resolution, readiness, dispatch and the runtime-file writer.
+
+    A verifier candidate must expose mediated tools without native reads, which
+    Agent Core and Claude Code meet and other official clients do not. An Agent
+    Core binding must additionally take inline tools and a system prompt,
+    because the review is dispatched with required tools and the managed
+    verification.system prompt: without either, the dispatch is refused one
+    attempt later by [Keeper_required_tools] or by AGENT_CORE's
+    [Unsupported_system_prompt] (#37382). *)
+
+val verifier_cli_slot_admission : runtime_id:string -> (unit, string) result
+(** Admit the exact official-client binding with required tool support, without
+    expanding any same-named Keeper lane. Lane-only IDs, Agent Core runtimes,
+    and clients without native-tool suppression are refused. *)
+
+val verifier_cli_slot_admission_in
+  :  runtimes:t list
+  -> lane_ids:string list
+  -> runtime_id:string
+  -> (unit, string) result
+(** {!verifier_cli_slot_admission} over an explicit runtime table, for the
+    runtime-file writer, which judges the table it just parsed rather than the
+    loaded one. Both entry points must reach the same verdict: a slot one
+    spelling admits and another refuses is what #37179 was. *)
+
+type verifier_slot_rejection =
+  { position : int
+  ; slot_id : string
+  ; detail : string
+  }
+(** One declared [verifier_exact] slot the lane cannot judge through.
+    [position] counts from 1 across the whole lane declaration, catalog slots
+    first, so it names the same line of runtime.toml as the registry's own
+    rejected-slot report. *)
+
+type verifier_exact_lane_slots =
+  { admitted_catalog_slot_ids : string list
+  ; admitted_cli_slot_ids : string list
+  ; slot_rejections : verifier_slot_rejection list
+  }
+
+val verifier_slot_rejection_to_string : verifier_slot_rejection -> string
+
+val verifier_catalog_slot_admission : runtime_id:string -> (unit, string) result
+(** {!verifier_runtime_admission} for an id written in [verifier_exact.slots].
+    Judgement dispatches that id alone, so it must name a configured runtime;
+    whether the same id is also an exact-output target is the registry's
+    question, not this one. *)
+
+val verifier_exact_lane_admission
+  :  declared:Runtime_schema.exact_output_lane_decl
+  -> registry_admitted_catalog_slots:string list
+  -> verifier_exact_lane_slots
+(** Split one declared lane into the ids that can judge and the ones that
+    cannot, numbering positions from the declaration so a rejected sibling does
+    not shift them. A catalog slot absent from
+    [registry_admitted_catalog_slots] is skipped rather than rejected again:
+    publication already reports it, with a cause this module cannot see. *)
+
+val verifier_exact_lane_resolution : unit -> (verifier_exact_lane_slots, string) result
+(** {!verifier_exact_lane_admission} applied to the published lane. The
+    registry carries the ids verbatim because only this module holds the
+    runtime table that answers admission. *)
+
+val verifier_exact_lane_slots : unit -> ((string * Types_core.verifier_slot_kind) list, string) result
+(** Acquire slot ids with their immutable admission kind, catalog first then official
+    clients, in declaration order — the single provider-selection SSOT for
+    completion-authority judgement calls. [Error] names why the lane cannot
+    judge (registry not published, lane unconfigured, or every declared slot
+    rejected); there is no fallback to another route. New acquisitions remain
+    fenced during publication. The acquired kind survives later activity or
+    declaration changes; it does not freeze the runtime execution binding. *)
+
+val verifier_exact_lane_readiness : unit -> (verifier_slot_rejection list, string) result
+(** Whether the [verifier_exact] lane has a slot that can be dispatched now,
+    for a caller that reports authority readiness rather than walking the lane.
+    [Ok] carries the declared slots the lane cannot judge through, so a short
+    lane says why it is short; [Error] names every rejection. This answers from
+    the same admission as {!verifier_exact_lane_slots}: the two used to
+    apply different predicates to catalog slots, and that disagreement let the
+    authority start on a lane that refused every review (#37382). *)
+
+val verifier_exact_slot_admission : candidate_kind:Types_core.verifier_slot_kind -> runtime_id:string -> (unit, string) result
+(** Validate one configured direct slot. A declared CLI slot retains its
+    execution-kind constraint, including when the lane is off. New implicit
+    reviews acquire the lane through [verifier_exact_lane_slots] first; this
+    candidate check does not revoke an already acquired review when activity
+    changes. Explicit single-runtime overrides remain independent of lane activity. *)
+
+val media_failover : unit -> string list
+(** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids the
+    vision tool calls, including the image readings made for a runtime that
+    cannot take the image. A keeper turn never dispatches to them; its image
+    reroute stays inside its lane. [[]] = no vision runtimes. Every entry is
+    validated at load so each resolves to a configured runtime. *)
+
+val declared_media_failover : unit -> string list
+(** [\[runtime\].media_failover] in file order before runtime admission. This
+    preserves entries excluded from the active fleet so an operator surface
+    can edit the declaration without silently erasing them. *)
+
+val lanes : unit -> Runtime_lane.t list
+(** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
+    an ordered list of runtime ids validated at load. *)
+
+val browser_configuration : unit -> Browser_configuration.t option
+(** Published Browser configuration. [None] means the runtime configuration
+    is unavailable. Activity follows this snapshot immediately; backend paths
+    are consumed when the server installs its executors. *)
+
+val machine_configuration : unit -> Machine_configuration.t option
+(** Activity from the same atomic published configuration as Runtime. [None]
+    means no valid configuration is currently published. *)
+
+val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
+(** [\[lsp.servers\]] applied over the client's own table: the command that
+    starts a language's server, the operator's where one was written for that
+    language. Pass it as [~servers] to the language-server pool and spawn. *)
+
+val get_lane_by_id : string -> Runtime_lane.t option
+(** Lane with the given id, or [None] if no such lane is configured. *)
+
+val resolve_assignment :
+  string -> [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
+(** Resolve a keeper assignment to a lane. The id names a declared lane or a
+    runtime, and a lane of that name is taken first; an id naming a bare runtime
+    resolves to a lane holding that runtime alone. A lane walks exactly the
+    candidates it declares.
+    [Unavailable] preserves the configured identity when its capability catalog
+    entry is absent. [Missing] means the id was not configured. Neither selects
+    the default in place of the requested runtime. *)
+
+val entry_runtime_id_of_route : string -> string option
+(** The concrete binding id a route opens first: the declared lane's entry
+    candidate, or the runtime itself when the route names one. [None] when the
+    route names neither. Callers needing a materialized runtime resolve the
+    route here first — {!get_runtime_by_id} knows nothing about lanes and
+    answers [None] for a lane name. *)
+
+val get_runtime_by_id : string -> t option
+(** [get_runtime_by_id id] is the materialized runtime whose binding-key id
+    ["provider.model"] equals [id], or [None] if that runtime is not active.
+    {!resolve_assignment} distinguishes a catalog-unavailable configured ID
+    from an unknown ID. Used by the keeper turn driver to dispatch to the requested runtime (a
+    keeper's runtime assignment or the default); [None] makes the driver
+    fail fast rather than silently substituting the default (RFC-0207). *)
+
+val is_local_runtime_id : string -> bool option
+(** Locality classification for a configured runtime id, or [None] when the
+    runtime id is not currently materialized. *)
+
+val resolve_max_context_of_runtime_id : string -> (int * max_context_source) option
+(** {!Runtime_instance.resolve_max_context_of_runtime} looked up by runtime id: the effective
+    input context window together with the source that produced it, or [None]
+    when the id is not configured. Budget surfaces must carry the source —
+    dropping it rendered a runtime.toml override as ["runtime_provider_cap"]
+    in keeper status JSON, which disguised the #25463 config drift as a
+    provider fact. *)
+
+val max_context_of_runtime_id : string -> int option
+(** Effective input context window for the materialized runtime [id], or [None]
+    when the id is not configured.  Budgeting callers use this to size a
+    per-keeper routed turn against the same runtime that dispatch will use.
+    When the AGENT_CORE provider capability catalog declares a context cap, the value
+    is clamped to [min runtime.toml max-context provider cap] so MASC cannot
+    admit a prompt larger than the provider-owned window. *)
+
+val thinking_support_of_runtime_id : string -> bool option
+(** Explicit [thinking-support] policy for the runtime's model. [None] means
+    the field is absent or the runtime is not configured. Consumed by
+    {!Runtime_inference.for_runtime}; absence must not become a disable request. *)
+
+val temperature_of_runtime_id : string -> float option
+(** Per-model [temperature] override ([models.<id>.temperature] in runtime.toml)
+    for the model bound to runtime [id], or [None] when the id is not configured
+    or the model leaves it unset.  Consumed by
+    {!Runtime_inference.resolve_temperature}: a keeper turn uses this value when
+    set and its caller fallback ([turn] temperature) otherwise. *)
+
+val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t option
+(** Per-model [reasoning-effort] from runtime.toml, or [None] when unset or
+    the runtime id is unknown. Consumed by
+    {!Runtime_inference.resolve_reasoning_effort}. *)
+
+val turn_timeout_s_of_runtime_id : string -> float option
+(** Per-model [turn-timeout-s] from runtime.toml, or [None] when unset or the
+    runtime id is unknown. Official-client adapters interpret it as the maximum
+    silence between protocol messages, not total turn duration. [None] means
+    "keep whatever bound the caller already has". Consumed by
+    {!Runtime_inference.resolve_turn_timeout_s}. *)
+
+
+val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
+(** Non-secret quota-scope identity of the runtime's provider
+    ({!Runtime_quota_window.scope_of_credential}): rows sharing one
+    credential account share one scope, so an exhausted window recorded on
+    one row demotes every sibling backed by the same account. [None] when
+    the runtime id is unknown. Consumed by
+    {!Runtime_quota_window.demote_order} and the matching note site. *)
+
+val top_p_of_runtime_id : string -> float option
+(** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
+    or [None] when the runtime is not configured or no explicit value is
+    declared.  This projects the Provider_config SSOT used for dispatch. *)
+
+(** Request [top_k] from the materialized AGENT_CORE provider config for runtime [id],
+    or [None] when absent. *)
+
+(** Request [min_p] from the materialized AGENT_CORE provider config for runtime [id],
+    or [None] when absent. *)
+
+val preserve_thinking_of_runtime_id : string -> bool option
+(** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
+    uninitialized cache, or no explicit TOML field.
+
+    AGENT_CORE owns provider/model capability truth and applies provider-required
+    reasoning replay internally. MASC does not promote a request-side preserve
+    capability into default keeper policy. Consumed by
+    {!Runtime_inference.for_runtime} without provider/model string matching. *)
+
+val pricing_of_runtime_id : string -> float option * float option
+(** [(price_input, price_output)] per-million-token USD rates declared on the
+    runtime [id] binding in runtime.toml, or [(None, None)] when the runtime is
+    not configured or the operator left the rates unset.  Consumed by the
+    turn-record writer (RFC-0233 §8) so the dashboard renders actual cost or
+    absence rather than a fabricated Claude default. *)
+
+val get_default_route : unit -> string
+(** [\[runtime\].default] as the file writes it: a declared lane's id or a
+    runtime's. A keeper with no assignment is routed by this, resolved through
+    {!resolve_assignment} like any assignment, so the default walks a lane's
+    candidates whenever it names one. {!get_default_runtime_id} answers with
+    the runtime that route enters on. Raises when no runtime is loaded, like
+    {!get_default_runtime_id}. *)
+
+val get_default_runtime_id : unit -> string
+(** The runtime binding where the current default route enters: the route
+    itself may be a lane name, which {!get_default_route} returns instead.
+    @raise Failure if {!init_default} has not run. No silent fallback
+    (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a
+    recoverable condition. Callers must invoke this at runtime, never as a
+    module-level [let] binding (would crash config-less test binaries). *)
+
+val config_path : unit -> string option
+(** Path to the runtime config TOML, or [None] if unresolved. Re-homed from
+    deleted [Runtime.config_path] (delegates to
+    [Config_dir_resolver]). *)
+
+val runtime_config_path_missing_message : string
+(** The one spelling of "no runtime config path resolves", shared by both
+    error producers and the dashboard route that maps it to 404. Consumers
+    that need to BRANCH on the condition use {!config_path} (or the typed
+    results) rather than matching this sentence. *)
+
+val load_config_observation :
+  ?runtime_config_path:string -> unit -> (config_observation, string) result
+(** Load one immutable runtime.toml observation, including its exact source
+    revision. *)
+
+val save_config_text :
+  ?runtime_config_path:string -> string -> (config_commit_receipt, string) result
+(** Validate raw runtime.toml and prepare its exact-output replacement without
+    changing the active registry: a resolver snapshot built from the catalog
+    {!exact_output_resolver_catalog} names for the runtimes this text loads,
+    with every lane admitted against it. When the targets are the runtime
+    bindings, a changed binding field such as [exact-body-timeout-s] is what
+    the replacement carries; under a full replacement catalog it is not, and
+    the receipt says so ([Replacement_catalog_targets]). A text the
+    registry cannot be rebuilt from is refused before the write when the file
+    it replaces rebuilds; when that file does not either, the write goes
+    through, the published registry is kept, and the receipt carries
+    [Exact_output_registry_kept]. The writer then reserves that exact base and
+    atomically replaces the file. A failure
+    before rename leaves the published registry and runtime cache unchanged.
+    Once rename is visible, the prepared immutable registry and runtime cache
+    are synchronously converged even when parent-directory fsync fails; that
+    durability-uncertain case returns an [Ok] receipt carrying
+    [Durability_unconfirmed], because the replacement is already visible. A
+    fully durable replacement returns an [Ok] receipt carrying [Durable]. Before exact-output registry bootstrap,
+    the same write-stage rules apply to the runtime cache while the registry
+    remains unpublished.
+
+    Refused when the text leaves a Fusion preset seat, enabled or not, naming
+    a route a run cannot resolve in the text, unless that seat (same preset,
+    kind and trimmed route) already did not resolve in the file on disk: every
+    run of the preset would fail there, with [unknown_route] when no lane or
+    runtime has the name and [route_unavailable] when it names a runtime the
+    model catalog cannot serve. So removing or renaming a
+    [\[runtime.lanes.<id>\]] table here is refused while a seat names it, as it
+    is through {!remove_runtime_lane}. *)
+
+val save_config_text_if_current :
+  ?runtime_config_path:string ->
+  expected_source_path:string ->
+  expected_source_revision:string ->
+  string ->
+  (config_commit_receipt, config_edit_error) result
+(** Save an editor's complete source only if its observed path and lowercase
+    SHA-256 revision still identify the file. Read, comparison and commit share the config
+    write lock. A conflict returns the current immutable observation without
+    writing the file or changing runtime/registry state. A matching revision
+    uses {!save_config_text}'s validation, durability and application contract.
+    Invalid revisions and read/validation/write failures are [Config_edit_failed]. *)
+
+val commit_config_text_locked :
+  ?replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+  runtime_config_path:string ->
+  string ->
+  (config_commit_receipt, config_commit_error) result
+(** Validate and commit runtime.toml, then republish the live runtime
+    registry, for a caller that already holds the config write lock:
+    {!with_config_lock} took the durable lock and resolved the keeper
+    journal. Everything else is {!save_config_text}'s -- the same validation,
+    the same atomic replace, the same receipt. Callers outside the lock use
+    {!save_config_text}; replacing the file without this commit leaves the
+    published registry at its previous snapshot until the next restart. *)
+
+val edit_config_text :
+  ?runtime_config_path:string ->
+  (string -> string) ->
+  (config_commit_receipt, string) result
+(** Read runtime.toml, hand its text to [edit], and commit what comes back --
+    all three inside the config write lock, so a write that lands between the
+    read and the commit cannot be silently overwritten. Everything after the
+    edit is {!save_config_text}'s: the same validation, the same atomic
+    replace, the same receipt. Use this rather than loading the file and
+    calling {!save_config_text}, which leaves that gap open. *)
+
+val validate_config_text :
+  ?runtime_config_path:string -> string -> (unit, string) result
+(** Run the raw runtime.toml save precondition — TOML parse, ordered Skill
+    source validation, config materialization, dispatch-cap validation, the
+    [\[fusion\]] section, the Fusion seats {!save_config_text} judges, and
+    the exact-output registry replacement it prepares —
+    without writing or mutating the active
+    registry. Preview endpoints call
+    this so [can_save] reflects the same rejection {!save_config_text}
+    enforces. Returns [Ok ()] when the text would be accepted for save;
+    [Error msg] with the reason otherwise. *)
+
+val set_runtime_id_for_keeper :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  runtime_id:string ->
+  unit ->
+  (keeper_assignment_write config_lock_receipt, string) result
+(** Persist [keeper_name] -> [runtime_id] in
+    [\[runtime.assignments\]] (runtime.toml SSOT), validate the resulting
+    runtime config, atomically write it, and refresh the in-process runtime
+    assignment cache. *)
+
+val clear_runtime_id_for_keeper :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  unit ->
+  (keeper_assignment_write config_lock_receipt, string) result
+(** Remove [keeper_name] from [\[runtime.assignments\]], validate the resulting
+    runtime config, atomically write it, and refresh the in-process runtime
+    assignment cache. *)
+
+val set_runtime_default :
+  ?runtime_config_path:string ->
+  runtime_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
+    validate the resulting config, atomically write it, and refresh the
+    in-process runtime cache. *)
+
+val set_first_run_runtime :
+  ?runtime_config_path:string ->
+  ?fallback_runtime_ids:string list ->
+  ?bind_imp:bool ->
+  runtime_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Atomically select the default runtime and bind the librarian, Board attention,
+    Host Gate judge, and verifier exact-output lanes to that same runtime.
+    The declared lane named after the primary runtime contains that runtime followed
+    by [fallback_runtime_ids], in order. Exact-output lanes remain primary-only:
+    HTTP runtimes use catalog slots; official clients use CLI slots. All candidates
+    must be distinct, enabled, materialized runtime IDs. Keeper assignments are
+    preserved unless [bind_imp] explicitly selects this lane for imp (default false).
+    Other Keeper assignments are always preserved. Intended
+    for an explicit first-install setup action, since existing lane choices
+    are replaced. Validation failures leave the configuration unchanged. *)
+
+val set_runtime_media_failover :
+  ?runtime_config_path:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Persist [\[runtime\]].media_failover through the runtime.toml SSOT writer,
+    validate the resulting config, atomically write it, and refresh the
+    in-process runtime cache. The list order is preserved. *)
+
+val set_runtime_lane_candidates :
+  ?runtime_config_path:string ->
+  ?expected_source_revision:string ->
+  lane_id:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, lane_set_error) result
+(** Persist [\[runtime.lanes."<lane_id>"\]].candidates through the runtime.toml
+    SSOT writer, validate the resulting config, atomically write it, and refresh
+    the in-process runtime cache. The list order is the failover order. Creates
+    the lane table when the id has none — a runtime whose lane was synthesized
+    ([self]) becomes a declared lane the first time an operator adds a
+    candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
+    nothing is not the same edit as removing the lane. When
+    [expected_source_revision] is supplied, the file's source revision is
+    compared while holding the write lock before replacing the whole order.
+    A stale revision returns a typed conflict with both revisions. *)
+
+val create_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Declare a new [\[runtime.lanes."<lane_id>"\]] with [runtime_ids] as its
+    candidates, through the same validated write as
+    {!set_runtime_lane_candidates}. One refusal, read under the write lock:
+    the file already declares that lane, and a create that landed on it would
+    replace its candidates without the operator having seen them.
+
+    A [lane_id] that is also a runtime id is allowed and shadows that runtime:
+    every keeper naming it, and every unassigned keeper when it is
+    [\[runtime\].default], walks the lane's candidates. {!set_first_run_runtime}
+    writes exactly that pair, so refusing it here left the install path's own
+    output beyond an operator's reach. The Runtime surface marks which lanes a
+    table declares. *)
+
+
+val rename_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  new_lane_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Rename [\[runtime.lanes."<lane_id>"\]] to [new_lane_id] and rewrite every
+    reference to it in the same validated write: the [\[runtime.assignments\]]
+    entries that name it, [\[runtime\].default] when it does, and every Fusion
+    preset seat that names it (rewritten through {!Fusion_config_writer}). A
+    lane's name is its routing key ({!resolve_assignment} reads a lane before a runtime of
+    the same id), so a file written with a reference missed would route those
+    keepers to a lane that is no longer declared -- which is also why this is
+    not a remove followed by a create.
+
+    Refused when the file does not declare [lane_id], when it already declares
+    [new_lane_id] (as a lane or as a header the line editor can see), and when
+    the lane is not written as its own table.
+
+    [\[runtime\].default] takes the new name like an assignment does, because
+    it holds a route ({!get_default_route}).
+
+    When a seat names the lane, the rename needs [\[fusion\]] to load, since
+    the seats are rewritten through the Fusion writer; it is refused while
+    [\[fusion\]] does not load, and when the writer cannot address a preset
+    with a seat on the lane (inline [judges] tables, dotted
+    [presets.<name>.judge] keys). When no seat names the lane, [\[fusion\]] is
+    only read for its seats.
+
+    What the rename does not reach:
+    - A Fusion run already in progress resolves each seat when it reaches it,
+      so a rename during the run can fail that run's judge.
+    - Routes passed as Fusion tool arguments are not in runtime.toml and are
+      not rewritten.
+    - A rewritten seat line loses its trailing comment, as any value
+      {!Fusion_config_writer} rewrites does. *)
+
+val remove_runtime_lane :
+  ?runtime_config_path:string ->
+  lane_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Remove the [\[runtime.lanes."<lane_id>"\]] table through the runtime.toml
+    SSOT writer. Refused while a keeper still routes through the lane id,
+    naming each way it does: an entry of [\[runtime.assignments\]],
+    [\[runtime\].default], which every unassigned keeper walks, or a Fusion
+    preset seat. The seats are read without validating the presets
+    ({!Fusion_config.seat_routes_of_toml}), so an invalid preset elsewhere does
+    not block the remove; both lane writers refuse only while a [\[fusion\]]
+    value has the wrong TOML type and the seats cannot be read. Every save also
+    refuses a Fusion seat that would stop resolving ({!save_config_text}). A
+    keeper's route is read as a lane before a runtime ({!resolve_assignment}), so
+    removing the lane would either fail the load or silently hand those
+    keepers the runtime of the same id. Refused when the file does not declare
+    the lane as its own table. *)
+
+val set_exact_output_lane_slots :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slots:string list ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Persist [\[runtime.exact_output_lanes.<id>\]].slots the same way
+    {!set_runtime_lane_candidates} persists conversation-lane candidates: the
+    SSOT writer, full validation, atomic write, cache refresh. The list order
+    is the walk order of the lane. An empty [slots] is rejected — mandatory
+    exact lanes fail the boot fail-closed without one, so a lane that resolves
+    to nothing is not the edit an operator is making. A lane the file does not
+    declare yet gets its table; [lane] is one of the lanes the server runs, so
+    that table is read. A lane the file declares other than as its own table
+    (inline, or through dotted keys) is refused rather than declared twice, and
+    so is a slot the lane already declares as a CLI slot, and a binding whose
+    provider is an official client, which can only be a CLI slot. An empty
+    [slots] is this writer's own floor: it names the whole catalog order.
+    Taking the last catalog slot off a lane that keeps a CLI slot is
+    {!drop_exact_output_lane_slot}. *)
+
+val append_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Add [slot] to the end of the list of
+    [\[runtime.exact_output_lanes.<id>\]] it belongs in, as the file declares
+    them, read under the runtime.toml write lock, and commit the result like
+    {!set_exact_output_lane_slots}. A binding whose provider is an official
+    client (Codex app-server, Antigravity CLI, Claude Code) goes to
+    [cli_slots]; every other id goes to [slots], where the registry admits or
+    reports it when it publishes the lane. A lane table this creates for a CLI
+    slot declares
+    [cli_slots] alone; the parser reads an absent [slots] as empty. Declared
+    slots
+    the exact-output registry did not admit stay in place. Refused, by name,
+    when the lane already declares [slot] as a slot or as a CLI slot. Tables
+    are created and refused as {!set_exact_output_lane_slots} says. *)
+
+type exact_slot_move =
+  | Move_slot_up
+  | Move_slot_down
+  | Move_slot_first
+      (** Which way {!move_exact_output_lane_slot} walks a slot through the
+          declared order, which is the order the lane walks. *)
+
+val drop_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Take [slot] out of whichever of [slots] and [cli_slots] of
+    [\[runtime.exact_output_lanes.<id>\]] declares it, read under the write lock
+    for the reason {!append_exact_output_lane_slot} gives: the caller names one
+    slot rather than an order rebuilt from the admitted view, so declared slots
+    the registry rejected stay. Refused when the lane declares no such slot,
+    naming what it does declare, and when [slot] is the lane's last slot across
+    both lists -- a lane that resolves to nothing is not this edit; remove the
+    lane's table. *)
+
+val move_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane ->
+  slot:string ->
+  move:exact_slot_move ->
+  unit ->
+  (config_commit_receipt, string) result
+(** Exchange [slot] with its neighbour, or promote it to the first position
+    while preserving the relative order of the other candidates, in the list that
+    holds it -- [slots] or [cli_slots] -- read under the write lock like
+    {!drop_exact_output_lane_slot}. The two lists do not mix: a slot never moves
+    into the other one. Refused when the lane declares no such slot, and when
+    a neighbour move would pass the end. Promoting an already first candidate
+    is also refused, leaving the order unchanged. *)
+
+val replace_exact_output_lane_slot :
+  ?runtime_config_path:string ->
+  lane:exact_lane -> slot:string -> replacement:string -> unit ->
+  (config_commit_receipt, string) result
+(** Replace one declared candidate at its current position under the write
+    lock. The replacement must belong to the same HTTP/CLI group and must
+    not already occur in the lane. Other candidates are preserved. *)
+
+val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
+(** Clear model dispatch state after startup configuration failure. Owner and
+    workspace readiness are managed independently by server bootstrap. *)
+
+val with_config_lock : runtime_config_path:string -> (unit -> ('a, string) result) -> ('a, string) result
+(** Serialize an owner configuration activation with the existing file writers.
+    Reject an unresolved configuration journal before invoking the action.
+    The action must not recursively invoke a config writer. *)
+
+val with_config_lock_observed : runtime_config_path:string -> (unit -> 'a) ->
+  ('a config_lock_receipt, string) result
+(** The same writer admission, retaining completed action values and lock-release
+    warnings separately. The action must not recursively invoke a config writer. *)
+val attach_lock_warnings : config_lock_warning list -> config_commit_receipt -> config_commit_receipt
+(** Attach the owning lock's observed release warnings to its completed commit. *)
+
+val with_manifest_config_lock :
+  runtime_config_path:string -> manifest_path:string ->
+  (unit -> ('a, string) result) -> ('a, string) result
+(** Manifest-only mutations use the same manifest-then-runtime lock order as
+    composite Keeper configuration writes. The action must not reacquire either
+    lock. Both locks cover the authoritative read and mutation. *)
+
+(** {1 Typed Lane Requirement x Runtime Capability Admission}
+
+    RFC-any-runtime-serves-an-exact-lane: each lane declares its requirement as
+    a closed value, each runtime derives its capability from its launch/provider
+    profile, and {!admits} decides admission by exhaustive pattern matching
+    without wildcards on any capability or requirement variant. *)
+
+type window_requirement =
+  | Unbounded_or_unknown
+  | Known_at_least of { min_tokens : int }
+
+type overflow_requirement =
+  | Truncation_acceptable
+  | Reject_before_truncation
+
+type verdict_requirement =
+  | Free_text
+  | Json_syntax of { schema : Yojson.Safe.t }
+  | Provider_enforced_json_schema of
+      { name : string
+      ; schema : Yojson.Safe.t
+      }
+
+type lane_requirement =
+  { window : window_requirement
+  ; overflow : overflow_requirement
+  ; verdict : verdict_requirement
+  ; tool_free : bool
+  ; fresh_invocation : bool
+  }
+
+type context_window_capability =
+  | Window_unknown
+  | Window_known of { max_input_tokens : int }
+
+type overflow_behavior =
+  | Truncates_silently
+  | Rejects_oversize_input
+  | Caller_bounded of { max_input_tokens : int }
+
+type structured_output_capability =
+  | Text_only
+  | Prompted_json
+  | Flag_json_schema
+  | Http_response_format_json_schema
+
+type runtime_capability =
+  { context_window : context_window_capability
+  ; overflow : overflow_behavior
+  ; structured_output : structured_output_capability
+  ; supports_tool_free : bool
+  ; supports_fresh_invocation : bool
+  }
+
+type refusal =
+  | Runtime_unknown
+  | Window_unknown_for_bounded_lane
+  | Window_too_small of
+      { required : int
+      ; actual : int
+      }
+  | Caller_bound_too_small of
+      { required : int
+      ; actual : int
+      }
+  | Silent_truncation_on_overflow
+  | Structured_output_unsupported of
+      { required : [ `Json_syntax | `Provider_enforced_json_schema ]
+      ; actual : structured_output_capability
+      }
+  | Tool_free_unsupported
+  | Fresh_invocation_unsupported
+
+val structured_output_capability_to_string : structured_output_capability -> string
+val equal_refusal : refusal -> refusal -> bool
+val refusal_to_string : refusal -> string
+val pp_refusal : Format.formatter -> refusal -> unit
+
+val admits :
+  lane:lane_requirement ->
+  runtime:runtime_capability ->
+  (unit, refusal) result
+
+val capability_of_runtime : t -> runtime_capability
+val capability_of_runtime_id : string -> runtime_capability option
+
+val requirement_of_exact_lane :
+  ?schema:Yojson.Safe.t ->
+  exact_lane ->
+  lane_requirement
+

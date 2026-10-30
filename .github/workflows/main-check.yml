@@ -1,0 +1,31 @@
+name: Main check
+
+# Type-check the selected ref only when explicitly requested.
+# The operator-authorized main-minimal-build schedule remains separate.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keep an explicitly requested check running when another is queued.
+  group: main-check-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: dune build @check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DUNE_JOBS: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+      - name: Type-check the tree
+        run: dune build @check

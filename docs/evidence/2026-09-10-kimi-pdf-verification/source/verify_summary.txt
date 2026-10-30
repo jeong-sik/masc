@@ -1,0 +1,189 @@
+=== pdfinfo ===
+Title:           기억 제안 해석 안내
+Subject:         (unspecified)
+Keywords:        
+Author:          memory-guide-proof
+Creator:         (unspecified)
+Producer:        ReportLab PDF Library - www.reportlab.com
+CreationDate:    Wed Sep  9 23:27:31 2026 UTC
+ModDate:         Wed Sep  9 23:27:31 2026 UTC
+Custom Metadata: no
+Metadata Stream: no
+Tagged:          no
+UserProperties:  no
+Suspects:        no
+Form:            none
+JavaScript:      no
+Pages:           3
+Encrypted:       no
+Page size:       595.276 x 841.89 pts (A4)
+Page rot:        0
+File size:       136937 bytes
+Optimized:       no
+PDF version:     1.4
+
+=== pdffonts ===
+name                                 type              encoding         emb sub uni object ID
+------------------------------------ ----------------- ---------------- --- --- --- ---------
+Helvetica                            Type 1            WinAnsi          no  no  no       2  0
+AAAAAA+NanumGothic                   TrueType          WinAnsi          yes yes yes     10  0
+AAAAAB+NanumGothic                   TrueType          WinAnsi          yes yes yes     14  0
+AAAAAA+NanumGothicBold               TrueType          WinAnsi          yes yes yes     18  0
+AAAAAB+NanumGothicBold               TrueType          WinAnsi          yes yes yes     22  0
+Times-Roman                          Type 1            WinAnsi          no  no  no       5  0
+
+=== pdftotext (처음 2500자) ===
+기억 제안 해석 안내 — memory-guide-proof
+
+synthetic-scenario 예시
+
+기억 제안(메모리 제안) 해석 안내
+대상 제안: d0420c0c2fbcca66a97f27d2152351dc9544e288601ea21962b7235e8ec3395f · 조회일 2026-09-09 · 문서
+작성 memory-guide-proof
+
+먼저 읽을 세 가지
+이 문서의 모든 예시는 synthetic-scenario(시나리오) 데이터입니다. 네 건의 출처(s1–s4) 모두 원문
+origin.trace_id가 “synthetic-scenario”로 확인되므로, 실제 운영 기록·측정이 아닙니다.
+기억 제안은 모델이 제안한 해석이지 검증된 사실이 아닙니다. 원문 status=model_proposed,
+semantic_verification=not_performed.
+이 문서는 저장소 조회 결과(저장된 주장)와 직접 확인한 사실(독립 검증)을 구분해 적었습니다. 검증이 “미수행”인
+항목은 사실로 받아들이지 마세요.
+
+1. 기억 제안이란 무엇인가
+기억 제안은 여러 Keeper의 기억 스냅샷을 모아 모델이 “이렇게 합쳐도 되는가”를 제안한 초안입니다. 각 출처는
+Keeper별 기억 저장소의 스냅샷에서 온 저장된 주장이고, 제안은 그 주장들을 비교해 상충(conflicts), 합의
+후보(shared_claims), 누락(gaps)으로 분류합니다. 분류 결과 자첳보다 “어떤 출처가 무엇을 주장했는지”를 먼저
+보세요.
+status=model_proposed — 모델이 만든 제안이며, 채택되기 전 상태입니다.
+semantic_verification=not_performed — 의미 검증이 시행되지 않았다는 뜻이지, 불가능하다는 뜻이
+아닙니다. 나중에 수행되면 판단이 바뀔 수 있습니다.
+제안을 읽는 것만으로는 아무 것도 확정되지 않습니다. 원문 출처(s1–s4)와 실제 파일·로그를 대조해야 비로소
+검증됩니다.
+
+2. 원문 구조 한눈에 보기
+조회한 제안 원문의 구성입니다. (아래 표는 원문에서 직접 확인한 값입니다.)
+항목
+
+원문 값
+
+읽는 법
+
+제안 ID
+
+d0420c0c…3395f
+
+목록에서 다시 읽을 때 쓰는 식별자
+
+status / 검증
+
+model_proposed / not_performed
+
+모델 제안 · 의미 검증 미실시
+
+출처 수
+
+4건 (s1–s4)
+
+모두 origin.kind=authored
+
+trace_id
+
+synthetic-scenario
+
+전체가 시나리오 데이터
+
+스냅샷
+
+snapshot1/2/3 (ordinary)
+
+Keeper별 일반 저장소
+
+gaps
+
+source_bound 3건 missing
+
+저장소 관측 부재(외부 원본과 별개)
+
+3. 예시 1 — 상충 관측(conflicts): “PDF가 만들어졌다” vs “실패했다”
+출처
+
+Keeper
+
+저장된 주장(원문 번역)
+
+검증
+
+s1
+
+writer
+
+Report R이 PDF로 생성되었다.
+
+미수행
+
+s2
+
+reviewer
+
+Report R은 일반 Markdown 바이트이며 PDF 생성은 실패했다.
+
+미수행
+
+본 문서의 모든 예시는 synthetic-scenario 데이터입니다 — 실제 운영 관측이 아닙니다.
+1
+
+기억 제안 해석 안내 — memory-guide-proof
+
+synthetic-scenario 예시
+
+이 제안을 읽는 법
+conflicts 항목은 두 주장을 병합하지 않고 상충으로 보존합니다. 어느 쪽이 옳은지는 제안이 판단하지 않습니다.
+판단하려면 Report R 파일을 직접 열어 바이트·생성 로그를 대조해야 합니다. 이 문서 작성 시점에는 그 확인을
+수행하지 못했습니다(미수행). 출처가 synthetic-scenario라 실제 파일이 있을 것 같지는 않지만, 원문 증거만으로
+“파일이 없다”고 단정하지는 않습니다.
+따라서 권장 결론은 보류입니다. 한쪽 주장을 골라 기록하면 근거 없는 사실로 굳어집니다.
+
+4. 예시 2 — 수치 정정(shared_claims): 12초 → 21초
+출처
+
+Keeper
+
+저장된 주장(원문 번역)
+
+검증
+
+s3
+
+analyst
+
+측정 M은 12초였다.
+
+미수행
+
+s4
+
+analyst
+
+정정: 원본 로그 기준 측정 M은 21초, 12초가 아니다.
+
+미수행
+
+이 제안을 읽는 법
+두 주장은 모순처럼 보이지만 정정 관계입니다. 제안은 “21초로 정정되어 12초를 대체한다”는 합의 후보로
+묶었습니다.
+“정정”은 그 자체로 검증이 아닙니다. 21초가 맞는지는 원본 로그 대조가 필요하며, 이 문서에서는 그 대조를
+수행하지 못했습니다(미수행). 로그가 없다고 단정한 것이 아닙니다.
+기억으로 남길 때는 “21초(정정됨, 근거: 원본 로그 — 미확인)”처럼 검증 상태를 함께 적으세요.
+
+5. 예시 3 — 저장소별 누락(gaps): ordinary와 source_bound
+gaps 항목은 세 Keeper 모두 source_bound 저장소에서 관측이 없음(missing)을 기록합니다. 스냅샷은
+ordinary에만 존재합니다.
+Keeper
+
+ordinary 스냅샷
+
+source_bound 관측
+
+의미
+
+writ

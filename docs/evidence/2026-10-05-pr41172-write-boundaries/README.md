@@ -1,0 +1,13 @@
+# Runtime write boundary consumer repair
+
+Starting head #41172 99e3716b9a0482620da7c1cd5929a4b25258abf6. Two current review findings are reproduced through actual source sessions: raw/structured Runtime commits did not invalidate retained Exact activity bases; typed RuntimeTomlSaveRejected was incorrectly treated as an unknown sent write.
+
+The raw writer now publishes the existing source-generation notification after a validated owned file receipt. Signals.batch defers invalidation effects until that writer marks its already-adopted generation; other activity sessions withdraw their stale bases while the writing raw editor retains its valid saved basis. No unchanged/no-commit branch publishes it. The existing committed projection signal remains after setup resume; activity writers already publish source generation and are unchanged.
+
+Known typed pre-replacement rejection changes only uncertainty and its error notice. It does not restore a captured current source: a concurrent external generation may have legitimately withdrawn it. Draft and source remain available when current; no resume or read is invented. Unknown transport writes and typed revision conflicts retain their previous treatment.
+
+Actual RED: five new consumer cases failed while32 existing passed. Raw and structured commits left dirty/clean activity readings stale; known rejection lost retryability and incorrectly became uncertain, including after external invalidation. The first attempt omitted the raw read's mandatory reload mode and did not reach those commits; excluded fixture log retained. Working-directory tool failures are also excluded. After correcting fixtures, valid RED was run before production edits.
+
+Actual GREEN181 tests across3 focused suites (Exact activity panel, raw Runtime editor, Settings), TypeScript and scoped ESLint PASS. checks.json pins source/raw hashes and code tree before evidence. Commands from dashboard: pnpm test src/components/exact-lane-activity-panel.test.ts for RED; pnpm test src/components/exact-lane-activity-panel.test.ts src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts for GREEN; pnpm exec tsc --noEmit --pretty false; pnpm exec eslint src/lib/runtime-toml-session.ts src/lib/exact-lane-activity-session.ts src/components/exact-lane-activity-panel.test.ts. Typed rejection is injected using the real exported error class; this is consumer proof, not a new HTTP wire execution.
+
+No native change/build, PTY, provider execution, full suite, CI, deployment, release or TerminalBench claim. Downstream combined-parent qualification is separate.

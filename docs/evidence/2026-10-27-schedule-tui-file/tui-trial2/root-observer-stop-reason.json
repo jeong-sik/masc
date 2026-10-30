@@ -1,0 +1,11 @@
+{
+  "at": 1793055292.613133,
+  "observer_pid": 52662,
+  "owned_tui_pid": 52750,
+  "exact_controller_command_verified": true,
+  "normal_signal": "SIGINT",
+  "reason": "Actual native TUI compact health returns400; separate named root no-bearer diagnostic has identical response bytes SHA and canonical request_authority_untrusted. Relay Host is not configured serveridentity. Controlled observer INCOMPLETE; no scheduling-product failure or automatic replay.",
+  "tui_observations": 77,
+  "body_sha256": "9899c6d6b7c6164b2154cfa135c99258254e3c157c23efc5ab8e4a30f28da73f",
+  "forcedkill": false
+}

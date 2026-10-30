@@ -1,0 +1,1988 @@
+(** A store this build cannot decode is settled once, at boot: examined
+    without being touched, refused unless the operator accepted the
+    quarantine, and moved aside only then (RFC-0420). The goal store is only
+    read: boot logs one INFO line when it cannot read it, never refuses or
+    moves it, and leaves its bytes as they were (RFC-0444 §2.4, criteria 3
+    and 7). *)
+
+open Alcotest
+open Masc
+module R = Keeper_store_boot_reconcile
+module D = Keeper_durable_store
+module B = Server_bootstrap_loops
+module Session = Keeper_official_client_session_store
+
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Sys.readdir path
+    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+    Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+    Unix.unlink path
+;;
+
+let with_workspace operation =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* Preparation checks the config base path against its realpath; on macOS
+     the temp dir is reached through the /var -> /private/var symlink. *)
+  let root = Unix.realpath (Filename.temp_dir "store-boot-reconcile-" "") in
+  let config = Workspace.default_config root in
+  ignore (Workspace.init config ~agent_name:(Some "test"));
+  Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> operation config)
+;;
+
+let meta keeper_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String keeper_name; "trace_id", `String "trace-reconcile" ])
+  with
+  | Ok meta -> meta
+  | Error detail -> fail detail
+;;
+
+let write_bytes path bytes =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc = open_out_bin path in
+  output_string oc bytes;
+  close_out oc
+;;
+
+let file_digest path = Digest.to_hex (Digest.file path)
+
+(* One goal row as this build's encoder writes it; the decoder reads every
+   member of it back. goals.json is written raw from these rows so no writer
+   of the store (and none of its create-time rules) is involved. *)
+let goal_row ts =
+  Goal_store.goal_to_yojson
+    { Goal_store.id = "goal-before-the-hard-cut"
+    ; criterion_revision = "fixture-criterion"
+    ; title = "Goal before the hard cut"
+    ; metric = None
+    ; target_value = None
+    ; due_date = None
+    ; priority = 3
+    ; phase = Goal_phase.Executing
+    ; last_review_note = None
+    ; last_review_at = None
+    ; created_at = ts
+    ; updated_at = ts
+    }
+;;
+
+let goals_bytes ts rows =
+  Yojson.Safe.to_string
+    (`Assoc [ "version", `Int 1; "updated_at", `String ts; "goals", `List rows ])
+;;
+
+let goal_bytes_that_read () =
+  let ts = Masc_domain.now_iso () in
+  goals_bytes ts [ goal_row ts ]
+;;
+
+(* goals.json as the #34459 hard cut left it: a row without
+   [criterion_revision], in the file and in its .last-good mirror. *)
+let goal_bytes_without_criterion_revision () =
+  let ts = Masc_domain.now_iso () in
+  let row =
+    match goal_row ts with
+    | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      fail "goal serializer returned a non-object"
+  in
+  goals_bytes ts [ row ]
+;;
+
+(* The line boot has to log for the seeded store, rendered from the store's
+   own reader: refused on [criterion_revision], with the mirror refused too.
+   Any other reading means the fixture is not the #34459 shape. *)
+let unavailable_goal_store_line config =
+  match Goal_store.load_source config with
+  | Goal_store.Unavailable
+      ({ Goal_store.reason = Goal_store.Schema_rejected { field; _ }
+       ; mirror = Goal_store.Mirror_rejected _
+       ; _
+       } as unavailable) ->
+    check string "the store refuses the missing field" "criterion_revision" field;
+    Goal_store.unavailable_to_string unavailable
+  | Goal_store.Unavailable unavailable ->
+    failf "the goal store was refused another way: %s"
+      (Goal_store.unavailable_to_string unavailable)
+  | Goal_store.Available _ -> fail "the seeded goal store read as Available"
+  | Goal_store.Uninitialized -> fail "the seeded goal store read as Uninitialized"
+;;
+
+(* [since_seq] is exclusive and the ring's first entry carries seq 0. *)
+let ring_cursor () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+(* The INFO lines [Log.Keeper] wrote after [cursor], oldest first.
+   [Log.Keeper] reads [MASC_LOG_KEEPER_LEVEL] once at start-up: a shell that
+   sets it above INFO keeps these lines out of the ring and the counts below
+   read 0. CI does not set it. *)
+let keeper_info_lines_since cursor =
+  Log.Ring.recent
+    ~limit:Log.Ring.capacity
+    ~since_seq:cursor
+    ~module_filter:"Keeper"
+    ~order:`Oldest_first
+    ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    match entry.Log.Ring.level with
+    | Log.Info -> Some entry.Log.Ring.message
+    | Log.Debug | Log.Warn | Log.Error -> None)
+;;
+
+let count_line line lines = List.length (List.filter (String.equal line) lines)
+
+(* One sound meta, one meta that is not a current snapshot, one memory
+   snapshot that is not JSON, and a goal store this build refuses in both
+   its files. *)
+type fixture =
+  { sound_meta : string
+  ; broken_meta : string
+  ; broken_snapshot : string
+  ; goals : string
+  ; goals_mirror : string
+  }
+
+let seed config =
+  (match Keeper_meta_store.replace_snapshot config (meta "sound") with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  let sound_meta = Keeper_types_profile.keeper_meta_path config "sound" in
+  let broken_meta = Keeper_types_profile.keeper_meta_path config "broken" in
+  write_bytes broken_meta "{\"name\":\"broken\"}";
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  let broken_snapshot =
+    Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"sound"
+  in
+  write_bytes broken_snapshot "{ this is not a snapshot";
+  let goals = Goal_store.goals_path config in
+  let goals_mirror = goals ^ ".last-good" in
+  let goal_bytes = goal_bytes_without_criterion_revision () in
+  write_bytes goals goal_bytes;
+  write_bytes goals_mirror goal_bytes;
+  { sound_meta; broken_meta; broken_snapshot; goals; goals_mirror }
+;;
+
+let goal_digests fixture = file_digest fixture.goals, file_digest fixture.goals_mirror
+
+let check_goal_digests label fixture (goals, goals_mirror) =
+  check string (label ^ ": goals.json digest") goals (file_digest fixture.goals);
+  check string (label ^ ": .last-good digest") goals_mirror (file_digest fixture.goals_mirror)
+;;
+
+let stores_of undecodable =
+  List.map (fun (u : R.undecodable) -> R.store_to_string u.R.store) undecodable
+;;
+
+let test_examine_reads_and_moves_nothing () =
+  with_workspace
+  @@ fun config ->
+  let fixture = seed config in
+  let digests = goal_digests fixture in
+  let line = unavailable_goal_store_line config in
+  let cursor = ring_cursor () in
+  let examination = R.examine config in
+  check int "readable" 1 examination.R.readable;
+  check int "one INFO line for the unreadable goal store" 1
+    (count_line line (keeper_info_lines_since cursor));
+  check (list string) "both broken stores are named, meta first"
+    [ "keeper_meta"; "memory_current" ]
+    (stores_of examination.R.undecodable);
+  List.iter
+    (fun (u : R.undecodable) ->
+       check bool (u.R.path ^ " is still where it was") true (Sys.file_exists u.R.path);
+       check bool (u.R.path ^ " says why") true (String.length u.R.rejection > 0))
+    examination.R.undecodable;
+  check (list string) "the paths are the seeded files"
+    [ fixture.broken_meta; fixture.broken_snapshot ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  let again = R.examine config in
+  check (list string) "a second look gives the same answer"
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable)
+    (List.map (fun (u : R.undecodable) -> u.R.path) again.R.undecodable);
+  check int "one INFO line per look" 2 (count_line line (keeper_info_lines_since cursor));
+  check_goal_digests "after two looks" fixture digests;
+  check int "and no rejected copy appeared" 0
+    (Sys.readdir (Filename.dirname fixture.broken_snapshot)
+     |> Array.to_list
+     |> List.filter (fun name -> String_util.contains_substring name ".rejected-")
+     |> List.length)
+;;
+
+(* A goal store that does not exist yet, or that reads, is not a line;
+   otherwise every fresh install would log a false INFO at each boot. The
+   workspace holds no keeper, and the other examiners write no Keeper INFO
+   line of their own. *)
+let test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads () =
+  with_workspace
+  @@ fun config ->
+  (match Goal_store.load_source config with
+   | Goal_store.Uninitialized -> ()
+   | Goal_store.Available _ -> fail "a fresh workspace already had a goal store"
+   | Goal_store.Unavailable unavailable ->
+     failf "a fresh workspace read as %s" (Goal_store.unavailable_to_string unavailable));
+  let cursor = ring_cursor () in
+  let (_ : R.examination) = R.examine config in
+  check (list string) "no INFO line for an absent goal store" []
+    (keeper_info_lines_since cursor);
+  write_bytes (Goal_store.goals_path config) (goal_bytes_that_read ());
+  (match Goal_store.load_source config with
+   | Goal_store.Available state ->
+     check int "the written store reads its one goal" 1 (List.length state.Goal_store.goals)
+   | Goal_store.Uninitialized -> fail "the written goal store read as Uninitialized"
+   | Goal_store.Unavailable unavailable ->
+     failf "the written goal store read as %s"
+       (Goal_store.unavailable_to_string unavailable));
+  let cursor = ring_cursor () in
+  let (_ : R.examination) = R.examine config in
+  check (list string) "no INFO line for a goal store that reads" []
+    (keeper_info_lines_since cursor)
+;;
+
+let test_admit_refuses_only_undecodable_without_the_flag () =
+  let clean = { R.readable = 3; undecodable = []; unreadable = []; discovery_failures = [] } in
+  let broken =
+    { R.readable = 1
+    ; unreadable = []
+    ; discovery_failures = []
+    ; undecodable =
+        [ { R.store = D.Refusing.Memory_current
+          ; keeper = "sound"
+          ; path = "/w/sound.memory-current.json"
+          ; rejection = "invalid JSON"
+          }
+        ]
+    }
+  in
+  (match R.admit ~accept_quarantine:false clean with
+   | Ok admitted -> check int "nothing undecodable passes without the flag" 3 admitted.R.readable
+   | Error _ -> fail "a clean examination was refused");
+  (match R.admit ~accept_quarantine:false broken with
+   | Error refused ->
+     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Unreadable _ | R.Discovery_failed _ | R.Quarantine_failed _ -> None) refused))
+   | Ok _ -> fail "an undecodable store passed without the flag");
+  match R.admit ~accept_quarantine:true broken with
+  | Ok admitted ->
+    check int "the flag lets the undecodable store through to quarantine" 1
+      (List.length admitted.R.undecodable)
+  | Error _ -> fail "the flag did not admit the quarantine"
+;;
+
+let test_refusal_names_each_store_and_both_ways_forward () =
+  let text =
+    R.refusal_to_string
+      (List.map (fun row -> R.Undecodable row) [ { R.store = D.Refusing.Keeper_meta
+        ; keeper = "broken"
+        ; path = "/w/.masc/keepers/broken.json"
+        ; rejection = "field set mismatch (missing: trace_id)"
+        }
+      ; { R.store = D.Refusing.Memory_current
+        ; keeper = "sound"
+        ; path = "/w/config/keepers/sound.memory-current.json"
+        ; rejection = "invalid JSON: Line 1"
+        }
+      ])
+  in
+  let has needle = check bool ("mentions " ^ needle) true (String_util.contains_substring text needle) in
+  has "boot refused: 2 store(s)";
+  has "keeper_meta keeper=broken path=/w/.masc/keepers/broken.json: field set mismatch (missing: trace_id)";
+  has "memory_current keeper=sound path=/w/config/keepers/sound.memory-current.json: invalid JSON: Line 1";
+  has "validate-stores";
+  has "--accept-store-quarantine";
+  check int "one line per store plus the heading and the ways forward" 4
+    (List.length (String.split_on_char '\n' text))
+;;
+
+let test_metadata_io_failure_never_accepts_quarantine () =
+  with_workspace @@ fun config ->
+  let keeper = "blocked" in
+  let path = Keeper_types_profile.keeper_meta_path config keeper in
+  (* A directory at the canonical file path is a real read failure even
+     when the test user can bypass permission bits. Retain valid bytes
+     inside it so any rename or replacement is observable. *)
+  Fs_compat.mkdir_p path;
+  let retained = Filename.concat path "original" in
+  let bytes = Keeper_meta_json.meta_to_json (meta keeper) |> Yojson.Safe.to_string in
+  write_bytes retained bytes;
+  let error =
+    match Keeper_meta_store.validate_current_meta_file_result path with
+    | Error (Keeper_meta_store.Unreadable detail) -> detail
+    | Error (Keeper_meta_store.Invalid_json _ | Keeper_meta_store.Not_current _) ->
+      fail "a file I/O failure was classified as rejected content"
+    | Ok () -> fail "a directory was accepted as metadata"
+  in
+  (match Keeper_meta_store.read_meta_file_path_read_only
+           ~ownership_root:config.Workspace.base_path path with
+   | Error (Keeper_meta_store.Unreadable _) -> ()
+   | Error (Keeper_meta_store.Invalid_json _ | Keeper_meta_store.Not_current _)
+   | Ok _ -> fail "the strict reader lost the I/O failure");
+  let examination = R.examine config in
+  let check_failure (failure : R.failure) =
+    check string "the metadata owner" keeper failure.R.keeper;
+    check string "the canonical path" path failure.R.path;
+    check bool "the metadata store" true (failure.R.store = D.Refusing.Keeper_meta);
+    check string "the reader's original failure" error failure.R.error
+  in
+  let failure =
+    match examination.R.unreadable with
+    | [ failure ] -> check_failure failure; failure
+    | [] | _ :: _ -> fail "examination did not retain the unreadable metadata"
+  in
+  check bool "I/O is never a quarantine candidate" true (examination.R.undecodable = []);
+  Fun.protect ~finally:B.For_testing.reset_keeper_persistence_lifecycle (fun () ->
+    List.iter (fun accept_quarantine ->
+      (match R.admit ~accept_quarantine examination with
+       | Error refusals ->
+         check bool "admission retains the mandatory I/O refusal" true
+           (refusals = [ R.Unreadable failure ])
+       | Ok _ -> fail "admission lost the mandatory I/O refusal");
+      B.For_testing.reset_keeper_persistence_lifecycle ();
+      match B.prepare_keeper_persistence ~accept_store_quarantine:accept_quarantine ~config () with
+      | Error error ->
+        check bool "boot retains the mandatory I/O refusal" true
+          (error = B.Store_quarantine_refused [ R.Unreadable failure ])
+      | Ok _ -> fail "boot admitted unreadable metadata") [ false; true ]);
+  let report = R.quarantine ~now:0. config examination in
+  (match report.R.failed, report.R.quarantined with
+   | [ failure ], [] -> check_failure failure
+   | ([], _ | _ :: _, _) -> fail "quarantine did not preserve the I/O refusal");
+  check bool "the canonical path remains a directory" true (Sys.is_directory path);
+  check string "the retained bytes never moved or changed" bytes (Fs_compat.load_file retained)
+;;
+
+let test_invalid_json_metadata_remains_an_explicit_quarantine () =
+  with_workspace @@ fun config ->
+  let keeper = "malformed" in
+  let path = Keeper_types_profile.keeper_meta_path config keeper in
+  let bytes = "{invalid-metadata" in
+  write_bytes path bytes;
+  (match Keeper_meta_store.validate_current_meta_file_result path with
+   | Error (Keeper_meta_store.Invalid_json _) -> ()
+   | Error (Keeper_meta_store.Unreadable _ | Keeper_meta_store.Not_current _)
+   | Ok () -> fail "the gate lost the JSON parse failure");
+  (match Keeper_meta_store.read_meta_file_path_read_only
+           ~ownership_root:config.Workspace.base_path path with
+   | Error (Keeper_meta_store.Invalid_json _) -> ()
+   | Error (Keeper_meta_store.Unreadable _ | Keeper_meta_store.Not_current _)
+   | Ok _ -> fail "the strict reader lost the JSON parse failure");
+  let examination = R.examine config in
+  check bool "readable invalid JSON is not I/O failure" true (examination.R.unreadable = []);
+  let row =
+    match examination.R.undecodable with
+    | [ row ] -> check string "the refused path" path row.R.path; row
+    | [] | _ :: _ -> fail "examination lost the rejected JSON"
+  in
+  (match R.admit ~accept_quarantine:false examination with
+   | Error refusals ->
+     check bool "invalid JSON requires explicit acceptance" true
+       (refusals = [ R.Undecodable row ])
+   | Ok _ -> fail "invalid JSON bypassed explicit acceptance");
+  check string "refusal preserves rejected bytes" bytes (Fs_compat.load_file path);
+  let admitted =
+    match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "explicit acceptance did not admit invalid JSON for quarantine"
+  in
+  let report = R.quarantine ~now:0. config admitted in
+  (match report.R.quarantined, report.R.failed with
+   | [ moved ], [] ->
+     check string "the moved path" path moved.R.path;
+     check string "quarantine retains original bytes" bytes (Fs_compat.load_file moved.R.rejected_path)
+   | ([], _ | _ :: _, _) -> fail "accepted invalid JSON was not quarantined");
+  check bool "the rejected file left its canonical path" false (Sys.file_exists path)
+;;
+
+let test_undecodable_stores_are_moved_aside_once () =
+  with_workspace
+  @@ fun config ->
+  let fixture = seed config in
+  let digests = goal_digests fixture in
+  let report = R.quarantine ~now:1_700_000_000.0 config (R.examine config) in
+  check int "examined" 3 report.R.examined;
+  check int "readable" 1 report.R.readable;
+  check int "quarantined" 2 (List.length report.R.quarantined);
+  check int "failed" 0 (List.length report.R.failed);
+  check bool "the broken meta is gone from its path" false (Sys.file_exists fixture.broken_meta);
+  check bool "the broken snapshot is gone from its path" false
+    (Sys.file_exists fixture.broken_snapshot);
+  List.iter
+    (fun (q : R.quarantined) ->
+       check bool (q.R.path ^ " kept as bytes") true (Sys.file_exists q.R.rejected_path);
+       check bool (q.R.path ^ " moved alone") true (Option.is_none q.R.moved_with);
+       check bool (q.R.path ^ " says why") true (String.length q.R.rejection > 0))
+    report.R.quarantined;
+  check (list string) "both stores are named"
+    [ "keeper_meta"; "memory_current" ]
+    (List.map (fun (q : R.quarantined) -> R.store_to_string q.R.store) report.R.quarantined);
+  check bool "the sound meta still reads" true
+    (Result.is_ok (Keeper_meta_store.validate_current_meta_file_result fixture.sound_meta));
+  check_goal_digests "after the quarantine" fixture digests;
+  let again = R.examine config in
+  check int "a second boot finds nothing to move" 0 (List.length again.R.undecodable);
+  check int "and still reads the sound meta" 1 again.R.readable;
+  let counted = R.quarantine ~now:1_700_000_001.0 config again in
+  check int "quarantine with nothing undecodable only counts" 1 counted.R.examined;
+  check int "and moves nothing" 0 (List.length counted.R.quarantined)
+;;
+
+(* Ordinary removal commits the snapshot even when its archive append fails,
+   and leaves its removal receipt and its publication receipt pending. If a
+   later boot cannot decode that snapshot, accepted quarantine does not move
+   it: the snapshot and both receipts stay where they are, and the report
+   names the store as failed. *)
+let test_memory_quarantine_refuses_pending_publication () =
+  with_workspace
+  @@ fun config ->
+  let module Current = Keeper_memory_os_current in
+  let module Types = Keeper_memory_os_types in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  let keeper_id = "sound" in
+  let original : Types.fact =
+    { claim = "original with conditions preserved during quarantine"
+    ; category = Types.Constraint
+    ; first_seen = 100.
+    ; last_seen = 100.
+    ; origin = { kind = Types.Authored; trace_id = "boot-removal" }
+    ; basis = Types.Observed Types.Transcript
+    }
+  in
+  (match Current.upsert_fact ~keepers_dir ~keeper_id ~now:200.
+      ~source:{ Current.kind = Current.Explicit_write; trace_id = "boot-removal" }
+      original with
+   | Ok _ -> ()
+   | Error error -> fail (Current.upsert_error_to_string error));
+  let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let seed_journal = Fs_compat.load_file journal_path in
+  Fs_compat.invalidate_cached_writer journal_path;
+  Sys.remove journal_path;
+  Unix.mkdir journal_path 0o700;
+  (match Current.retract_fact ~keepers_dir ~keeper_id ~now:300.
+      ~source:{ Current.kind = Current.Explicit_retract; trace_id = "boot-removal" }
+      ~memory_id:(Types.memory_id original) ~reason:"operator withdrew this exact rule" ()
+   with
+   | Ok snapshot ->
+     check bool "the committed snapshot retains the removed original" true
+       (snapshot.change.removed = [ original ])
+   | Error _ -> fail "ordinary removal must report its committed snapshot");
+  Unix.rmdir journal_path;
+  write_bytes journal_path seed_journal;
+  let removal_path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id in
+  let publication_path = Current.publication_receipt_path ~keepers_dir ~keeper_id in
+  let removal_bytes = Fs_compat.load_file removal_path in
+  let publication_bytes = Fs_compat.load_file publication_path in
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let rejected_bytes =
+    match Yojson.Safe.from_string (Fs_compat.load_file snapshot_path) with
+    | `Assoc fields ->
+      Yojson.Safe.to_string (`Assoc (("unknown_snapshot_field", `Bool true) :: fields))
+    | _ -> fail "the committed snapshot is not an object"
+  in
+  write_bytes snapshot_path rejected_bytes;
+  let examination = R.examine config in
+  check (list string) "boot names the rejected snapshot" [ snapshot_path ]
+    (List.map (fun (row : R.undecodable) -> row.path) examination.undecodable);
+  let admitted =
+    match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "accepted quarantine was refused before any move"
+  in
+  let report = R.quarantine ~now:400. config admitted in
+  check int "nothing is moved aside" 0 (List.length report.R.quarantined);
+  (match report.R.failed with
+   | [ failure ] ->
+     check string "the failed store" "memory_current" (R.store_to_string failure.R.store);
+     check string "the exact snapshot" snapshot_path failure.R.path
+   | _ -> fail "the refused quarantine names the snapshot once");
+  check string "the rejected snapshot stays in place" rejected_bytes
+    (Fs_compat.load_file snapshot_path);
+  check string "the removal receipt stays in place" removal_bytes
+    (Fs_compat.load_file removal_path);
+  check string "the publication receipt stays in place" publication_bytes
+    (Fs_compat.load_file publication_path);
+  check (list string) "no rejected copy is written" []
+    (Sys.readdir keepers_dir |> Array.to_list
+     |> List.filter (fun name -> String_util.contains_substring name ".rejected-"))
+;;
+
+(* The whole preparation, as the server runs it: refused without the flag with
+   the file untouched, moved aside with it. The goal store gives one line per
+   boot and keeps its bytes through both. *)
+let test_preparation_refuses_then_moves_aside_with_the_flag () =
+  with_workspace
+  @@ fun config ->
+  let fixture = seed config in
+  let digests = goal_digests fixture in
+  let line = unavailable_goal_store_line config in
+  let cursor = ring_cursor () in
+  Fun.protect
+    ~finally:B.For_testing.reset_keeper_persistence_lifecycle
+    (fun () ->
+       B.For_testing.reset_keeper_persistence_lifecycle ();
+       (match B.prepare_keeper_persistence ~accept_store_quarantine:false ~config () with
+        | Error (B.Store_quarantine_refused undecodable) ->
+          check (list string) "the refusal names both stores"
+            [ "keeper_meta"; "memory_current" ]
+            (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Unreadable _ | R.Discovery_failed _ | R.Quarantine_failed _ -> None) undecodable));
+          check bool "the broken snapshot is untouched" true
+            (Sys.file_exists fixture.broken_snapshot);
+          check bool "the broken meta is untouched" true (Sys.file_exists fixture.broken_meta);
+          check bool "the refusal text reaches the operator" true
+            (String_util.contains_substring
+               (B.keeper_persistence_prepare_error_to_string
+                  (B.Store_quarantine_refused undecodable))
+               fixture.broken_snapshot)
+        | Error error ->
+          failf "preparation failed for another reason: %s"
+            (B.keeper_persistence_prepare_error_to_string error)
+        | Ok _ -> fail "preparation went on past an undecodable store without the flag");
+       check_goal_digests "after the refused boot" fixture digests;
+       B.For_testing.reset_keeper_persistence_lifecycle ();
+       match B.prepare_keeper_persistence ~accept_store_quarantine:true ~config () with
+       | Ok _ ->
+         check bool "with the flag the broken snapshot is moved aside" false
+           (Sys.file_exists fixture.broken_snapshot);
+         check bool "and the broken meta too" false (Sys.file_exists fixture.broken_meta);
+         check_goal_digests "after the accepted quarantine" fixture digests;
+         check int "one INFO line per boot, two boots" 2
+           (count_line line (keeper_info_lines_since cursor))
+       | Error error ->
+         failf "preparation with the flag failed: %s"
+           (B.keeper_persistence_prepare_error_to_string error))
+;;
+
+let test_preflight_reads_admission_queue_without_consuming () =
+  with_workspace @@ fun config ->
+  let module Queue = Keeper_memory_admission_queue in
+  let base_path = config.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let scan = match D.reader D.Id.Memory_admission_queue with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "admission queue is preflight-only" in
+  let fact : Keeper_memory_os_types.fact =
+    { claim = "Keep deployment context separate."; category = Fact;
+      first_seen = 1.; last_seen = 1.;
+      origin = {kind = Authored; trace_id = "admission-preflight"};
+      basis = Observed Transcript } in
+  (match Queue.append ~keepers_dir ~keeper_id:"pending" ~request_id:"request" fact with
+   | Ok _ -> () | Error detail -> fail (Queue.append_error_to_string detail));
+  let path = Queue.path ~keepers_dir ~keeper_id:"pending" in
+  let before = Fs_compat.load_file path in
+  (match D.run scan ~base_path with
+   | Ok {D.rows = 1; refused = 0; _} -> ()
+   | Ok _ -> fail "pending queue was not decoded" | Error detail -> fail detail);
+  check string "preflight never acknowledges pending input" before (Fs_compat.load_file path);
+  write_bytes path {|{"generation":"queue","last_sequence":0,"pending":{}}|};
+  let malformed = Fs_compat.load_file path in
+  (match D.run scan ~base_path with
+   | Ok {D.rows = 1; refused = 1; first_refusal = Some detail} ->
+     check bool "refusal identifies the keeper" true (String.starts_with ~prefix:"pending: " detail)
+   | Ok _ -> fail "malformed queue silently passed" | Error detail -> fail detail);
+  check string "refused input remains intact" malformed (Fs_compat.load_file path);
+  write_bytes path {|{"generation":"queue","last_sequence":0,"pending":[]}|};
+  (match D.run scan ~base_path with
+   | Ok {D.rows = 1; refused = 0; _} -> ()
+   | Ok _ -> fail "empty existing queue was not decoded" | Error detail -> fail detail)
+;;
+
+(* The deploy preflight and boot read one list (Keeper_durable_store). For a
+   store boot refuses on, both must refuse the same file: a build that boot
+   refuses would otherwise have passed the preflight, or the reverse. The
+   goal store degrades at boot and has no preflight reader. *)
+let test_preflight_refuses_what_boot_names () =
+  with_workspace
+  @@ fun config ->
+  let fixture = seed config in
+  let base_path = config.Workspace.base_path in
+  let first_refusal id =
+    match D.reader id with
+    | D.Refuse_boot (_, scan) | D.Preflight_only scan ->
+      (match D.run scan ~base_path with
+       | Ok { D.refused = 1; first_refusal = Some detail; _ } -> detail
+       | Ok report -> failf "%s: refused %d, not 1" (D.name id) report.D.refused
+       | Error detail -> failf "%s: scan failed: %s" (D.name id) detail)
+    | D.Degrade_typed _ -> failf "%s: no preflight reader" (D.name id)
+  in
+  let examination = R.examine config in
+  check (list string) "boot names both refusing stores"
+    [ "keeper_meta"; "memory_current" ]
+    (stores_of examination.R.undecodable);
+  check bool "the preflight refuses the keeper meta file boot names" true
+    (String.starts_with ~prefix:(fixture.broken_meta ^ ": ") (first_refusal D.Id.Keeper_meta));
+  check bool "the preflight refuses the snapshot of the keeper boot names" true
+    (String.starts_with ~prefix:"sound: " (first_refusal D.Id.Memory_current));
+  check bool "the goal store boot reports has no preflight reader" true
+    (match D.reader D.Id.Goal_store with
+     | D.Degrade_typed D.Reported.Goal_store -> true
+     | D.Refuse_boot _ | D.Preflight_only _ -> false)
+;;
+
+(* 2026-09-30: a transcript row whose delivery identity kind a later build no
+   longer reads made every append-once delivery to that keeper fail with
+   transcript_persist_failed, and no deploy check read the transcripts. The
+   preflight now runs the same read and names the file and the line. *)
+let test_preflight_names_the_transcript_line_appends_refuse () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let path keeper_name = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name in
+  let plain_row = {|{"id":"row-1","role":"user","content":"hello","ts":1.0}|} in
+  let unknown_identity_row =
+    {|{"id":"row-2","role":"user","content":"held","ts":2.0,"delivery_key":{"kind":"kind-this-build-does-not-read"},"transcript_slot":{"kind":"accepted_user"}}|}
+  in
+  write_bytes (path "readable") (plain_row ^ "\n");
+  write_bytes (path "unreadable") (plain_row ^ "\n" ^ unknown_identity_row ^ "\n");
+  let scan =
+    match D.reader D.Id.Keeper_chat_transcripts with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "transcripts are read by the preflight only"
+  in
+  (match D.run scan ~base_path with
+   | Ok { D.rows = 2; refused = 1; first_refusal = Some detail } ->
+     check bool "the refusal names the file" true
+       (String.starts_with ~prefix:(path "unreadable" ^ ": ") detail);
+     check bool "the refusal names the line" true
+       (String_util.contains_substring detail "at line 2: ")
+   | Ok report -> failf "rows %d refused %d" report.D.rows report.D.refused
+   | Error detail -> failf "scan failed: %s" detail);
+  write_bytes (path "unreadable") (plain_row ^ "\n");
+  (match D.run scan ~base_path with
+   | Ok { D.refused = 0; _ } -> ()
+   | Ok report -> failf "still refused %d after the row was removed" report.D.refused
+   | Error detail -> failf "scan failed: %s" detail)
+;;
+
+let test_transcript_inventory_failure_is_not_empty () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let dir = Keeper_chat_store.chat_dir base_path in
+  let scan =
+    match D.reader D.Id.Keeper_chat_transcripts with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "transcripts require preflight"
+  in
+  (match D.run scan ~base_path with
+   | Ok { D.rows = 0; refused = 0; _ } -> ()
+   | Ok report -> failf "absent transcripts returned %d rows" report.D.rows
+   | Error detail -> failf "absent transcripts failed inventory: %s" detail);
+  write_bytes dir "this path is a file";
+  (match D.run scan ~base_path with
+   | Error detail ->
+     check bool "non-directory inventory error names the chat path" true
+       (String.starts_with ~prefix:(dir ^ ": ") detail);
+     check bool "non-directory inventory error gives its reason" true
+       (String_util.contains_substring detail "not a directory")
+   | Ok _ -> fail "a transcript path that is a file passed as an empty store");
+  Unix.unlink dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod dir 0o700)
+    (fun () ->
+       Unix.chmod dir 0o000;
+       if Unix.geteuid () <> 0
+       then
+         match D.run scan ~base_path with
+         | Error detail ->
+           check bool "unreadable directory error names the chat path" true
+             (String.starts_with ~prefix:(dir ^ ": ") detail)
+         | Ok _ -> fail "unreadable transcript directory passed as an empty store")
+;;
+
+(* 2026-10-22 (#45075): #44905 moved the chat operation journal to
+   user_version 3 while all 36 live journals were version 2. No deploy check
+   read them, and after the restart every keeper owner refused its journal. *)
+let test_preflight_refuses_an_older_chat_operation_journal () =
+  with_workspace
+  @@ fun config ->
+  let module Store = Keeper_chat_operation_store in
+  let base_path = config.Workspace.base_path in
+  let keepers_runtime_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let journal keeper_name = Store.path_for_keeper ~keepers_runtime_dir ~keeper_name in
+  let create keeper_name =
+    let path = journal keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    match Store.open_or_create ~path with
+    | Error error -> fail (Store.error_to_string error)
+    | Ok store ->
+      (match Store.close store with
+       | Ok () -> ()
+       | Error error -> fail (Store.error_to_string error))
+  in
+  create "current";
+  create "older";
+  (* The generation before this build's, as the live journals were. *)
+  let db = Sqlite3.db_open (journal "older") in
+  let rc = Sqlite3.exec db "PRAGMA user_version=2" in
+  ignore (Sqlite3.db_close db : bool);
+  check bool "the older generation is written" true (Sqlite3.Rc.is_success rc);
+  (* A store directory beside the keepers is not a keeper's journal. *)
+  write_bytes
+    (Filename.concat
+       (Filename.concat keepers_runtime_dir
+          (Common.keeper_runtime_store_dirname Common.Keeper_tool_usage))
+       Store.database_file)
+    "";
+  let scan =
+    match D.reader D.Id.Keeper_chat_operations with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "chat operation journals are read by the preflight only"
+  in
+  match D.run scan ~base_path with
+  | Ok { D.rows = 2; refused = 1; first_refusal = Some detail } ->
+    check bool "the refusal names the older journal" true
+      (String.starts_with ~prefix:(journal "older" ^ ": ") detail);
+    check bool "and says its generation is not this build's" true
+      (String_util.contains_substring detail "user_version")
+  | Ok report -> failf "rows %d refused %d" report.D.rows report.D.refused
+  | Error detail -> failf "scan failed: %s" detail
+;;
+
+(* [Id.all] is derived. Each store boot refuses on or reports must be
+   reached from exactly one id, or boot would read it twice or never. *)
+let test_every_boot_store_has_exactly_one_id () =
+  let refusing =
+    List.filter_map
+      (fun id ->
+         match D.reader id with
+         | D.Refuse_boot (store, _) -> Some store
+         | D.Degrade_typed _ | D.Preflight_only _ -> None)
+      D.Id.all
+  in
+  let reported =
+    List.filter_map
+      (fun id ->
+         match D.reader id with
+         | D.Degrade_typed store -> Some store
+         | D.Refuse_boot _ | D.Preflight_only _ -> None)
+      D.Id.all
+  in
+  check bool "each refusing store once" true
+    (List.sort compare refusing = List.sort compare D.Refusing.all);
+  check bool "each reported store once" true
+    (List.sort compare reported = List.sort compare D.Reported.all);
+  let names = List.map D.name D.Id.all in
+  check int "names are distinct" (List.length names)
+    (List.length (List.sort_uniq String.compare names));
+  List.iter
+    (fun id ->
+       let read_by_preflight = Option.is_some (D.preflight_scan id) in
+       match D.reader id with
+       | D.Refuse_boot _ | D.Preflight_only _ ->
+         check bool (D.name id ^ ": the deploy preflight reads it") true read_by_preflight
+       | D.Degrade_typed _ ->
+         check bool (D.name id ^ ": the deploy preflight leaves it to boot") false
+           read_by_preflight)
+    D.Id.all
+;;
+
+(* 2026-09-26: a binding written before the official-client session schema
+   hard cut (#38986) made every turn of its keeper fail, and boot did not
+   read that store. Boot now refuses it and names the file; the preflight
+   refuses the same file; the accepted quarantine moves it aside under the
+   store lock, so the keeper's next claim finds no binding and starts a new
+   vendor session. *)
+let test_session_io_refuses_boot_and_direct_quarantine () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "session-io" in
+  let path = Session.path ~base_path ~keeper_name |> Result.get_ok in
+  Fs_compat.mkdir_p path;
+  let original = Unix.stat path in
+  let read_error =
+    match Session.load ~base_path ~keeper_name with
+    | Error ((Session.Unreadable _) as error) -> error
+    | Error (Session.Invalid_path _ | Session.Invalid_json _ | Session.Not_current _)
+    | Ok _ -> fail "the directory did not produce a typed I/O failure"
+  in
+  let failure =
+    { R.store = D.Refusing.Official_client_session
+    ; keeper = keeper_name
+    ; path
+    ; error = Session.read_error_to_string read_error
+    }
+  in
+  let examination = R.examine config in
+  check bool "boot retains the original file failure" true
+    (examination.R.unreadable = [ failure ]);
+  check bool "I/O is not a quarantine candidate" true (examination.R.undecodable = []);
+  Fun.protect ~finally:B.For_testing.reset_keeper_persistence_lifecycle (fun () ->
+    List.iter (fun accept_quarantine ->
+      (match R.admit ~accept_quarantine examination with
+       | Error refusals -> check bool "I/O admission is mandatory" true
+           (refusals = [ R.Unreadable failure ])
+       | Ok _ -> fail "an I/O failure bypassed admission");
+      B.For_testing.reset_keeper_persistence_lifecycle ();
+      match B.prepare_keeper_persistence ~accept_store_quarantine:accept_quarantine ~config () with
+      | Error error -> check bool "boot refuses the I/O failure" true
+          (error = B.Store_quarantine_refused [ R.Unreadable failure ])
+      | Ok _ -> fail "boot admitted an unreadable session") [ false; true ]);
+  let report = R.quarantine ~now:0. config examination in
+  check bool "quarantine carries the mandatory I/O refusal" true
+    (report.R.failed = [ failure ] && report.R.quarantined = []);
+  let rejected_path = path ^ ".quarantine-test" in
+  (match Session.move_aside ~base_path ~keeper_name ~rejected_path with
+   | Error error -> check bool "the locked reread retains its I/O cause" true
+       (error = Session.Move_read_failed read_error)
+   | Ok () -> fail "an I/O failure authorized a direct rename");
+  check int "the source directory remains the same entry" original.Unix.st_ino
+    (Unix.stat path).Unix.st_ino;
+  check bool "no quarantine destination was created" false (Sys.file_exists rejected_path)
+;;
+
+let test_session_quarantine_reread_refuses_a_new_io_failure () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "changed-session" in
+  let path = Session.path ~base_path ~keeper_name |> Result.get_ok in
+  write_bytes path "{rejected-session";
+  let examination = R.examine config in
+  let admitted =
+    match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "readable rejected content was not admitted for explicit quarantine"
+  in
+  Unix.unlink path;
+  Unix.mkdir path 0o700;
+  let original = Unix.stat path in
+  let report = R.quarantine ~now:0. config admitted in
+  (match report.R.failed, report.R.quarantined with
+   | [ failure ], [] ->
+     check string "the failed move names the original owner" keeper_name failure.R.keeper;
+     check string "the failed move names the original path" path failure.R.path;
+     check bool "the failure belongs to the session store" true
+       (failure.R.store = D.Refusing.Official_client_session)
+   | [], _ | _ :: _, _ -> fail "the new I/O failure did not refuse the stale quarantine");
+  check int "the replacement entry was not moved" original.Unix.st_ino
+    (Unix.stat path).Unix.st_ino
+;;
+
+let test_an_unreadable_session_binding_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let path =
+    match Keeper_official_client_session_store.path ~base_path ~keeper_name:"sound" with
+    | Ok path -> path
+    | Error detail -> fail detail
+  in
+  write_bytes path "{\"schema\":\"masc.keeper.official-client-session.v1\"}";
+  let digest = file_digest path in
+  let examination = R.examine config in
+  check (list string) "boot names the binding" [ "official_client_session" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "at its path" [ path ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Ok _ -> fail "boot must refuse a binding this build cannot read"
+   | Error undecodable ->
+     let refusal = R.refusal_to_string undecodable in
+     check bool "the refusal names the keeper and the path" true
+       (String_util.contains_substring
+          refusal
+          ("official_client_session keeper=sound path=" ^ path)));
+  check string "the refused binding is untouched" digest (file_digest path);
+  (match D.reader D.Id.Official_client_session with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Ok { D.refused = 1; first_refusal = Some detail; _ } ->
+        check bool "the preflight refuses the same keeper's binding" true
+          (String.starts_with ~prefix:"sound: " detail)
+      | Ok report -> failf "the preflight refused %d, not 1" report.D.refused
+      | Error detail -> failf "preflight scan failed: %s" detail)
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "the session store refuses boot");
+  let report = R.quarantine ~now:1_700_000_002.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.rejected_path; moved_with = None; _ } ], [] ->
+     check bool "the binding is gone" false (Sys.file_exists path);
+     check string "the rejected copy keeps the bytes" digest (file_digest rejected_path)
+   | _ -> fail "exactly one binding is moved aside");
+  (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "a binding survived the quarantine"
+   | Error detail -> failf "the store still refuses after the quarantine: %s" detail);
+  (* The next claim plans from no binding and writes a fresh one beside the
+     rejected copy. *)
+  match
+    Keeper_official_client_session_store.claim
+      ~base_path
+      ~keeper_name:"sound"
+      ~expected:None
+      ~client_kind:Keeper_official_client_session_store.Claude_code
+      ~owner_epoch:(Keeper_official_client_session_store.process_epoch ())
+      ~runtime_id:"claude_code.fixture"
+      ~tool_surface_sha256:(String.make 64 'a')
+      ~updated_at:1_700_000_003.0
+  with
+  | Error detail -> failf "the claim after the quarantine failed: %s" detail
+  | Ok (_ : Keeper_official_client_session_store.t) ->
+    (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
+     | Ok (Some _) -> ()
+     | Ok None -> fail "the claim wrote no binding"
+     | Error detail -> failf "the fresh binding does not read back: %s" detail)
+;;
+
+(* A claim reads a binding through a linked keeper directory, so boot must
+   read it the same way, or a v1 binding behind the link stops every turn of
+   that keeper while boot names nothing. *)
+let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let path =
+    match Keeper_official_client_session_store.path ~base_path ~keeper_name:"linked" with
+    | Ok path -> path
+    | Error detail -> fail detail
+  in
+  let keeper_dir = Filename.dirname (Filename.dirname path) in
+  let target = Filename.concat base_path "linked-keeper-elsewhere" in
+  Fs_compat.mkdir_p target;
+  Fs_compat.mkdir_p (Filename.dirname keeper_dir);
+  Unix.symlink target keeper_dir;
+  write_bytes path "{\"schema\":\"masc.keeper.official-client-session.v1\"}";
+  let examination = R.examine config in
+  check (list string) "boot names the binding behind the link" [ "official_client_session" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "for the linked keeper" [ "linked" ]
+    (List.map (fun (u : R.undecodable) -> u.R.keeper) examination.R.undecodable)
+;;
+
+let queue_dir ~base_path = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "sound"
+
+(* A snapshot this build reads: the empty state as its own encoder writes it,
+   so a schema bump does not turn these cases red. *)
+let current_snapshot_bytes =
+  Keeper_event_queue_state.to_yojson Keeper_event_queue_state.empty |> Yojson.Safe.to_string
+;;
+
+let queue_files ~base_path =
+  let dir = queue_dir ~base_path in
+  ( Filename.concat dir Keeper_event_queue_persistence.snapshot_filename
+  , Filename.concat dir Keeper_event_queue_persistence.transition_wal_filename )
+;;
+
+let test_queue_operational_failures_refuse_recovery () =
+  with_workspace @@ fun config ->
+  let module Q = Keeper_event_queue_persistence in
+  let base_path = config.Workspace.base_path in
+  let empty = R.examine config in
+  let keeper = "sound" in
+  let dir = queue_dir ~base_path in
+  Fs_compat.mkdir_p (Filename.dirname dir);
+  Unix.symlink (Filename.basename dir) dir;
+  let observed =
+    match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:keeper with
+    | Error ((Q.State_failed (Q.File_rejected {cause=Q.Inspection_failure; _})) as failure) -> failure
+    | Error failure -> fail (Q.read_only_failure_to_string failure)
+    | Ok _ -> fail "the actual ELOOP was accepted as readable"
+  in
+  let check_mandatory ?(keeper=keeper) failure =
+    let examination = R.For_testing.record_event_queue_failure ~keeper failure empty in
+    check int "operational failure is mandatory" 1 (List.length examination.R.unreadable);
+    check int "operational failure is not a quarantine candidate" 0
+      (List.length examination.R.undecodable);
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Error [R.Unreadable _] -> ()
+      | Error _ -> fail "operational failure lost its mandatory refusal"
+      | Ok _ -> fail "quarantine flag bypassed an operational queue failure") [false;true];
+    let report = R.quarantine ~now:0. config examination in
+    check int "direct quarantine carries the failure" 1 (List.length report.R.failed);
+    check int "direct quarantine moves nothing" 0 (List.length report.R.quarantined)
+  in
+  check_mandatory observed;
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:keeper
+     ~rejected_path_of:(fun path -> path ^ ".rejected-operational") with
+   | Error _ -> ()
+   | Ok _ -> fail "actual inspection failure started quarantine");
+  check string "the looping entry remains" (Filename.basename dir) (Unix.readlink dir);
+  Unix.unlink dir;
+  (match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:keeper with
+   | Error ((Q.State_failed (Q.State_missing _)) as missing) -> check_mandatory missing
+   | _ -> fail "required missing state lost its original cause");
+  (match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:"invalid/keeper" with
+   | Error ((Q.Owner_unresolved _) as owner) -> check_mandatory ~keeper:"invalid/keeper" owner
+   | _ -> fail "invalid owner lost its original cause");
+  (* These are pure policy inputs, not injected or executed I/O/close faults. *)
+  (match observed with
+   | Q.State_failed (Q.File_rejected failure) ->
+     List.iter (fun cause -> check_mandatory (Q.State_failed (Q.File_rejected
+       {failure with cause}))) [Q.Io_failure; Coherence_failure];
+     let cleanup : Fs_compat.private_jsonl_operation_failure =
+       {operation=Close_transaction_data; exception_=Unix.Unix_error (Unix.EIO,"close",failure.path);
+        backtrace=Printexc.get_callstack 0} in
+     check_mandatory (Q.State_failed (Q.File_rejected
+       {failure with cause=Q.Invalid_json; cleanup_failure=Some cleanup}));
+     check_mandatory (Q.Read_raised "pure unexpected-read failure input")
+   | State_failed (State_missing _) | Owner_unresolved _ | Read_raised _ ->
+     fail "fixture lost its classified file failure")
+;;
+
+let test_queue_reread_refuses_a_new_inspection_failure () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot "{invalid-snapshot";
+  write_bytes wal "{invalid-wal\n";
+  let examination = R.examine config in
+  let admitted = match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "content rejection was not admitted explicitly" in
+  let dir = queue_dir ~base_path in
+  let retained = Filename.concat base_path "retained-queue" in
+  Unix.rename dir retained;
+  Unix.symlink (Filename.basename dir) dir;
+  let report = R.quarantine ~now:0. config admitted in
+  check int "new inspection failure refuses the stale move" 1 (List.length report.R.failed);
+  check int "no queue was quarantined" 0 (List.length report.R.quarantined);
+  check string "replacement entry retained" (Filename.basename dir) (Unix.readlink dir);
+  check string "snapshot evidence remains unchanged" "{invalid-snapshot"
+    (Fs_compat.load_file (Filename.concat retained (Filename.basename snapshot)));
+  check string "WAL evidence remains unchanged" "{invalid-wal\n"
+    (Fs_compat.load_file (Filename.concat retained (Filename.basename wal)));
+  check bool "no journal was started" false
+    (Sys.file_exists (Filename.concat retained "event-queue-quarantine-v1.json"))
+;;
+
+let test_queue_tail_requires_explicit_quarantine () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  let tail = "{incomplete-tail" in
+  write_bytes wal tail;
+  let examination = R.examine config in
+  check int "tail damage is not an operational refusal" 0 (List.length examination.R.unreadable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Error [R.Undecodable _] -> ()
+   | Error _ | Ok _ -> fail "tail damage did not require explicit quarantine");
+  let admitted = match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "tail damage lost explicit format quarantine policy" in
+  check string "validation does not truncate tail bytes" tail (Fs_compat.load_file wal);
+  let report = R.quarantine ~now:0. config admitted in
+  match report.R.failed, report.R.quarantined with
+  | [], [{R.path; rejected_path; _}] ->
+    check string "the WAL is the rejected file" wal path;
+    check string "the complete damaged bytes are retained" tail (Fs_compat.load_file rejected_path)
+  | _ -> fail "explicit tail quarantine did not preserve the queue pair"
+;;
+
+let check_queue_starts_empty ~base_path =
+  let module Q = Keeper_event_queue_persistence in
+  (match Q.durable_state_exists_result ~base_path ~keeper_name:"sound" with
+   | Ok false -> ()
+   | Ok true -> fail "durable queue state survived the quarantine"
+   | Error detail -> fail detail);
+  match Q.load_result ~base_path ~keeper_name:"sound" with
+  | Ok queue ->
+    check int "the next load starts the empty queue" 0 (Keeper_event_queue.length queue)
+  | Error detail -> failf "the queue still refuses after the quarantine: %s" detail
+;;
+
+(* A queue this build cannot decode keeps its keeper from registering
+   (#37900), and until this step only the deploy preflight read it. Boot now
+   refuses it, the preflight refuses the same keeper, and the accepted
+   quarantine moves the snapshot and its WAL together, the rejected snapshot
+   last, so the next load starts the empty queue. *)
+let test_an_unreadable_event_queue_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot "{\"schema\":\"keeper.event_queue.state.v18\"}";
+  write_bytes wal "{not-json\n";
+  let snapshot_digest = file_digest snapshot in
+  let wal_digest = file_digest wal in
+  let examination = R.examine config in
+  check (list string) "boot names the queue" [ "event_queue" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "at its snapshot" [ snapshot ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Ok _ -> fail "boot must refuse a queue this build cannot read"
+   | Error undecodable ->
+     check bool "the refusal names the keeper and the path" true
+       (String_util.contains_substring
+          (R.refusal_to_string undecodable)
+          ("event_queue keeper=sound path=" ^ snapshot)));
+  check string "the refused snapshot is untouched" snapshot_digest (file_digest snapshot);
+  check string "the refused WAL is untouched" wal_digest (file_digest wal);
+  (match D.reader D.Id.Keeper_event_queue with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Ok { D.refused = 1; first_refusal = Some detail; _ } ->
+        check bool "the preflight refuses the same keeper's queue" true
+          (String.starts_with ~prefix:"sound: " detail)
+      | Ok report -> failf "the preflight refused %d, not 1" report.D.refused
+      | Error detail -> failf "preflight scan failed: %s" detail)
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "the event queue refuses boot");
+  let report = R.quarantine ~now:1_700_000_004.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.rejected_path; moved_with = Some (moved, rejected_wal); _ } ], [] ->
+     check string "the WAL moved with it" wal moved;
+     check bool "the snapshot is gone" false (Sys.file_exists snapshot);
+     check bool "the WAL is gone" false (Sys.file_exists wal);
+     check string "the rejected snapshot keeps the bytes" snapshot_digest
+       (file_digest rejected_path);
+     check string "the rejected WAL keeps the bytes" wal_digest (file_digest rejected_wal)
+   | [ _ ], [] -> fail "the snapshot and the WAL move together"
+   | _ -> fail "exactly one queue is moved aside");
+  check_queue_starts_empty ~base_path
+;;
+
+(* With no snapshot the WAL is the queue, so the refusal names the WAL: a
+   path to a file that does not exist would send the operator to the wrong
+   place. *)
+let test_a_wal_only_queue_is_named_by_its_wal () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let _, wal = queue_files ~base_path in
+  write_bytes wal "{not-json\n";
+  let wal_digest = file_digest wal in
+  let examination = R.examine config in
+  check (list string) "boot names the queue at its WAL" [ wal ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  let report = R.quarantine ~now:1_700_000_005.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.rejected_path; moved_with = None; _ } ], [] ->
+     check bool "the WAL is gone" false (Sys.file_exists wal);
+     check string "the rejected WAL keeps the bytes" wal_digest (file_digest rejected_path)
+   | _ -> fail "exactly the WAL is moved aside");
+  check_queue_starts_empty ~base_path
+;;
+
+(* The snapshot decodes and the WAL on top of it does not. The row names the
+   WAL, the file the operator has to look at, and both move. *)
+let test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  write_bytes wal "{not-json\n";
+  let snapshot_digest = file_digest snapshot in
+  let examination = R.examine config in
+  check (list string) "boot names the queue at its WAL" [ wal ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  let report = R.quarantine ~now:1_700_000_006.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.path; rejected_path; moved_with = Some (moved, rejected_snapshot); _ } ], [] ->
+     check string "the record names the WAL" wal path;
+     check string "the snapshot moved with it" snapshot moved;
+     check bool "the rejected WAL is kept" true (Sys.file_exists rejected_path);
+     check string "the snapshot keeps the bytes" snapshot_digest
+       (file_digest rejected_snapshot)
+   | _ -> fail "the WAL and its snapshot move together");
+  check_queue_starts_empty ~base_path
+;;
+
+let quarantine_intent_path snapshot =
+  Filename.concat (Filename.dirname snapshot) "event-queue-quarantine-v1.json"
+;;
+
+let check_quarantine_refuses ~config ~snapshot =
+  let module Q = Keeper_event_queue_persistence in
+  let base_path = config.Workspace.base_path in
+  let intent = quarantine_intent_path snapshot in
+  let digest = file_digest intent in
+  (match Q.durable_state_exists_result ~base_path ~keeper_name:"sound" with
+   | Ok true -> () | Ok false -> fail "incomplete quarantine disappeared" | Error e -> fail e);
+  check bool "discovery includes incomplete quarantine" true
+    (List.mem "sound" (Q.discover_keeper_names_with_durable_state ~base_path).keeper_names);
+  (match Q.load_state_result ~base_path ~keeper_name:"sound" with
+   | Error _ -> () | Ok _ -> fail "incomplete quarantine loaded as a queue");
+  Q.For_testing.reset_snapshot_cache_for_testing ();
+  (match Q.load_state_result ~base_path ~keeper_name:"sound" with
+   | Error _ -> () | Ok _ -> fail "fresh cache bypassed incomplete quarantine");
+  (match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:"sound" with
+   | Error ((Q.State_failed (Q.File_rejected {file=Q.Quarantine_intent; path; _})) as failure) ->
+     check string "typed refusal names the recovery record" intent path;
+     check bool "the recovery policy preserves explicit journal resume" true
+       (Q.recovery_decision failure = Q.Resume_quarantine)
+   | Error _ -> fail "incomplete quarantine lost its typed authority"
+   | Ok _ -> fail "read-only validation admitted incomplete quarantine");
+  let observed = Q.observe_snapshot_with_errors ~base_path ~keeper_name:"sound" in
+  check bool "lock-free observation reports unavailable" true (observed.read_errors <> []);
+  let transformed = ref false in
+  (match Q.update_result ~base_path ~keeper_name:"sound" (fun queue -> transformed := true; queue) with
+   | Error _ -> () | Ok () -> fail "mutation bypassed incomplete quarantine");
+  check bool "refused mutation never transforms state" false !transformed;
+  check string "refused accesses preserve the recovery record" digest (file_digest intent);
+  let examination = R.examine config in
+  check (list string) "boot names the incomplete quarantine" [intent]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  check int "journal resume is not mislabeled as operational I/O" 0
+    (List.length examination.R.unreadable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Error [R.Undecodable _] -> ()
+   | Error _ | Ok _ -> fail "incomplete quarantine did not require explicit resume");
+  (match R.admit ~accept_quarantine:true examination with
+   | Ok _ -> ()
+   | Error _ -> fail "the new recovery policy blocked explicit journal resume");
+  (match D.reader D.Id.Keeper_event_queue with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Ok {D.refused=1; _} -> ()
+      | Ok _ -> fail "preflight omitted incomplete quarantine"
+      | Error detail -> fail detail)
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "queue preflight must refuse")
+;;
+
+let test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot "{\"schema\":\"keeper.event_queue.state.v18\"}";
+  write_bytes wal "";
+  let snapshot_digest = file_digest snapshot in
+  let rejected_wal = wal ^ ".rejected-test" in
+  let module Q = Keeper_event_queue_persistence in
+  (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+      ~rename:(fun source destination ->
+        if source = snapshot then raise (Sys_error "snapshot rename refused")
+        else Fs_compat.rename_noreplace source destination) with
+   | Error _ -> () | Ok () -> fail "snapshot rename failure admitted quarantine");
+  check bool "the WAL moved first" true (Sys.file_exists rejected_wal);
+  check string "the rejected snapshot stays intact" snapshot_digest (file_digest snapshot);
+  check_quarantine_refuses ~config ~snapshot
+;;
+
+(* One WAL row this build replays, encoded the way the writer does, so the
+   quarantine tests below start from a genuine durable transition. *)
+let valid_transition_row ~base_path ~keeper_name =
+  let module State = Keeper_event_queue_state in
+  let module Queue = Keeper_event_queue in
+  let source : Queue.stimulus =
+    { post_id = "durable-source"
+    ; urgency = Queue.Normal
+    ; arrived_at = 1.0
+    ; payload = Queue.Bootstrap
+    }
+  in
+  let initial = State.with_pending (Queue.enqueue Queue.empty source) State.empty in
+  let selection =
+    match State.select_when ~now:2.0 ~ready:(fun _ -> true) initial with
+    | Some selection -> selection
+    | None -> fail "no pending selection for the durable transition"
+  in
+  let staged =
+    match State.terminalize_pending_turn_attempt ~applied_at:2.0 ~selection ~detail:"" initial with
+    | Error detail -> fail detail
+    | Ok (staged, State.Transition_applied _) -> staged
+    | Ok (_, State.Transition_already_applied _) -> fail "first terminalization replayed"
+  in
+  let entry =
+    match State.transition_outbox staged with
+    | [ entry ] -> entry
+    | _ -> fail "terminalization did not stage one outbox entry"
+  in
+  `Assoc
+    [ "schema", `String Keeper_event_queue_schema.transition_wal
+    ; "base_path", `String base_path
+    ; "keeper_name", `String keeper_name
+    ; "pre_state", State.to_yojson initial
+    ; "outbox_entry", State.outbox_entry_to_yojson entry
+    ]
+  |> Yojson.Safe.to_string
+  |> fun row -> row ^ "\n"
+;;
+
+(* A valid durable transition precedes a malformed row. Failure after moving
+   this WAL must never let the next load silently use only the good snapshot.
+   The guard also survives a transient obstruction at the old WAL path. *)
+let test_a_half_finished_move_of_a_rejected_wal_retains_recovery () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  let wal_bytes = valid_transition_row ~base_path ~keeper_name:"sound" ^ "{not-json\n" in
+  write_bytes wal wal_bytes;
+  let snapshot_digest = file_digest snapshot in
+  let wal_digest = file_digest wal in
+  let module Q = Keeper_event_queue_persistence in
+  let rejected_wal = wal ^ ".rejected-test" in
+  (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+      ~rename:(fun source destination ->
+        if source = snapshot then (
+          Unix.mkdir wal 0o700;
+          raise (Sys_error "snapshot rename refused; original WAL path obstructed"))
+        else Fs_compat.rename_noreplace source destination) with
+   | Error _ -> () | Ok () -> fail "incomplete quarantine was admitted");
+  Unix.rmdir wal;
+  check string "the moved WAL retains every durable byte" wal_digest (file_digest rejected_wal);
+  check string "snapshot remains unchanged" snapshot_digest (file_digest snapshot);
+  check bool "no rollback silently reintroduced the WAL" false (Sys.file_exists wal);
+  check_quarantine_refuses ~config ~snapshot;
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun _ -> fail "retry must reuse its recorded destinations") with
+   | Error detail -> fail detail
+   | Ok moved ->
+     check string "retry still names the rejected WAL" wal moved.path;
+     check string "retry preserves its destination" rejected_wal moved.rejected_path);
+  check string "retry retained the complete WAL" wal_digest (file_digest rejected_wal);
+  check string "retry retained the snapshot" snapshot_digest (file_digest (snapshot ^ ".rejected-test"));
+  check_queue_starts_empty ~base_path
+;;
+
+let test_intent_only_quarantine_is_discovered_and_resumed () =
+  List.iter (fun only ->
+    with_workspace @@ fun config ->
+    let base_path = config.Workspace.base_path in
+    let snapshot, wal = queue_files ~base_path in
+    (match only with
+     | `Snapshot -> write_bytes snapshot "{not-json"
+     | `Wal -> write_bytes wal "{not-json\n"
+     | `Both -> write_bytes snapshot "{not-json"; write_bytes wal "{not-json\n");
+    let originals = List.filter Sys.file_exists [snapshot;wal] in
+    let digests = List.map (fun p -> p, file_digest p) originals in
+    let module Q = Keeper_event_queue_persistence in
+    (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun p -> p ^ ".rejected-test")
+        ~rename:Fs_compat.rename_noreplace
+        ~before_clear:(fun () -> raise (Sys_error "interrupted before intent removal")) with
+     | Error _ -> () | Ok () -> fail "pre-clear interruption did not stop quarantine");
+    List.iter (fun p -> check bool "both originals are absent" false (Sys.file_exists p)) [snapshot;wal];
+    check_quarantine_refuses ~config ~snapshot;
+    (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun _ -> fail "resume must use recorded destinations") with
+     | Ok _ -> () | Error detail -> fail detail);
+    List.iter (fun (p,digest) -> check string "resume preserves bytes" digest (file_digest (p ^ ".rejected-test"))) digests;
+    check_queue_starts_empty ~base_path)
+    [`Snapshot; `Wal; `Both]
+;;
+
+let test_quarantine_rejects_changed_entries () =
+  List.iter (fun changed ->
+    with_workspace @@ fun config ->
+    let base_path = config.Workspace.base_path in
+    let snapshot, wal = queue_files ~base_path in
+    write_bytes snapshot "{not-json";
+    (match changed with `Appeared_partner -> () | `Source | `Destination | `Both_paths -> write_bytes wal "original WAL");
+    let module Q = Keeper_event_queue_persistence in
+    (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+        ~rename:(fun source destination ->
+          if source = snapshot then raise (Sys_error "stop after WAL")
+          else Fs_compat.rename_noreplace source destination) with
+     | Error _ -> () | Ok () -> fail "fixture did not interrupt quarantine");
+    let evidence_path = match changed with
+      | `Source -> write_bytes snapshot "replacement snapshot"; snapshot
+      | `Destination -> write_bytes (wal ^ ".rejected-test") "edited WAL"; wal ^ ".rejected-test"
+      | `Both_paths -> write_bytes wal "replacement WAL"; wal
+      | `Appeared_partner -> write_bytes wal "new WAL after intent"; wal in
+    let digest = file_digest evidence_path in
+    (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun _ -> fail "retry recomputed a destination") with
+     | Error _ -> () | Ok _ -> fail "changed entry was treated as original authority");
+    check string "conflicting evidence retained" digest (file_digest evidence_path);
+    check_quarantine_refuses ~config ~snapshot)
+    [`Source; `Destination; `Both_paths; `Appeared_partner]
+;;
+
+let test_quarantine_never_overwrites_a_destination () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  write_bytes wal "{not-json\n";
+  let digest = file_digest wal in
+  let module Q = Keeper_event_queue_persistence in
+  let destination = wal ^ ".rejected-test" in
+  (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+      ~rename:(fun source target ->
+        write_bytes target "concurrent destination evidence";
+        Fs_compat.rename_noreplace source target) with
+   | Error _ -> () | Ok () -> fail "quarantine overwrote a new destination");
+  check string "conflicting destination retained" "concurrent destination evidence" (Fs_compat.load_file destination);
+  check string "original WAL retained" digest (file_digest wal);
+  check_quarantine_refuses ~config ~snapshot;
+  Unix.unlink destination;
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun _ -> fail "retry changed its destination") with
+   | Ok _ -> () | Error detail -> fail detail);
+  check_queue_starts_empty ~base_path
+;;
+
+let test_quarantine_requires_confirmed_intent_before_moves () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  write_bytes wal "{not-json\n";
+  let originals = List.map (fun p -> p, file_digest p) [snapshot;wal] in
+  let module Q = Keeper_event_queue_persistence in
+  List.iter (fun _ ->
+    (match Q.For_testing.move_aside_with_sync ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun p -> p ^ ".rejected-test")
+        ~sync_intent:(fun _ -> Error "intent sync refused") with
+     | Error _ -> () | Ok () -> fail "unconfirmed intent authorized quarantine");
+    List.iter (fun (p,digest) ->
+      check string "sync refusal retains every original byte" digest (file_digest p);
+      check bool "sync refusal moves no entry" false (Sys.file_exists (p ^ ".rejected-test"))) originals;
+    check_quarantine_refuses ~config ~snapshot)
+    [`First_attempt; `Explicit_retry];
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun _ -> fail "resume must use recorded destinations") with
+   | Ok _ -> () | Error detail -> fail detail);
+  check_queue_starts_empty ~base_path
+;;
+
+let test_quarantine_cancellation_retains_intent () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  write_bytes wal "{not-json\n";
+  let module Q = Keeper_event_queue_persistence in
+  (match Q.For_testing.move_aside_with_rename ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun p -> p ^ ".rejected-test") ~before_clear:ignore
+      ~rename:(fun source destination ->
+        Fs_compat.rename_noreplace source destination;
+        raise (Eio.Cancel.Cancelled (Failure "interrupted after WAL rename"))) with
+   | exception Eio.Cancel.Cancelled _ -> ()
+   | Error _ | Ok () -> fail "quarantine swallowed cancellation");
+  check_quarantine_refuses ~config ~snapshot;
+  (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+      ~rejected_path_of:(fun _ -> fail "cancelled recovery recomputed destinations") with
+   | Ok _ -> () | Error detail -> fail detail);
+  check_queue_starts_empty ~base_path
+;;
+
+let test_bad_quarantine_intent_refuses_without_touching_sources () =
+  List.iter (fun fixture ->
+    with_workspace @@ fun config ->
+    let base_path = config.Workspace.base_path in
+    let snapshot, _ = queue_files ~base_path in
+    let intent = quarantine_intent_path snapshot in
+    Fs_compat.mkdir_p (Filename.dirname snapshot);
+    (match fixture with
+     | `Malformed -> write_bytes intent "{not-json"; Unix.chmod intent 0o600
+     | `Link -> Unix.symlink "absent-intent-target" intent);
+    let module Q = Keeper_event_queue_persistence in
+    check bool "intent-only entry discovered" true
+      (List.mem "sound" (Q.discover_keeper_names_with_durable_state ~base_path).keeper_names);
+    (match Q.load_result ~base_path ~keeper_name:"sound" with
+     | Error _ -> () | Ok _ -> fail "bad intent loaded as an empty queue");
+    (match Q.move_aside_undecodable_result ~base_path ~keeper_name:"sound"
+        ~rejected_path_of:(fun _ -> fail "invalid intent must not plan moves") with
+     | Error _ -> () | Ok _ -> fail "invalid intent was silently discarded");
+    check bool "bad intent is retained as an entry" true
+      (match Fs_compat.exact_path_kind ~follow:false intent with
+       | Fs_compat.Exact_kind _ -> true | Fs_compat.Exact_missing | Fs_compat.Exact_unknown -> false))
+    [`Malformed; `Link]
+;;
+
+(* State that reads by the time the lock is held is left where it is. *)
+let test_a_queue_that_decodes_is_not_moved () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, _ = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  let digest = file_digest snapshot in
+  check int "boot names nothing" 0 (List.length (R.examine config).R.undecodable);
+  (match
+     Keeper_event_queue_persistence.move_aside_undecodable_result
+       ~base_path
+       ~keeper_name:"sound"
+       ~rejected_path_of:(fun path -> path ^ ".rejected-test")
+   with
+   | Ok _ -> fail "a queue that decodes must not move"
+   | Error detail ->
+     check bool "the move says the queue decodes now" true
+       (String_util.contains_substring detail "decodes now"));
+  check string "the snapshot is untouched" digest (file_digest snapshot)
+;;
+
+let test_indirect_queue_files_refuse_and_move_as_entries () =
+  List.iter (fun fixture ->
+    with_workspace @@ fun config ->
+    let base_path = config.Workspace.base_path in
+    let snapshot, wal = queue_files ~base_path in
+    let link, snapshot_bytes, refused_path = match fixture with
+      | `Snapshot -> snapshot, None, snapshot
+      | `Wal | `Live_wal -> wal, None, wal
+      | `Malformed_snapshot_and_wal -> wal, Some "{not-json", snapshot
+      | `Snapshot_and_wal -> wal, Some current_snapshot_bytes, wal in
+    Fs_compat.mkdir_p (Filename.dirname link);
+    Option.iter (write_bytes snapshot) snapshot_bytes;
+    let missing_target = Filename.concat base_path "missing-queue-target" in
+    let target_bytes = match fixture with
+      | `Live_wal -> Some ""
+      | `Snapshot | `Wal | `Malformed_snapshot_and_wal | `Snapshot_and_wal -> None in
+    Option.iter (write_bytes missing_target) target_bytes;
+    Unix.symlink missing_target link;
+    (match Keeper_event_queue_persistence.durable_state_exists_result
+        ~base_path ~keeper_name:"sound" with
+     | Ok true -> ()
+     | Ok false -> fail "dangling queue was classified as absent"
+     | Error detail -> fail detail);
+    let examination = R.examine config in
+    check (list string) "boot names the rejected entry" [refused_path]
+      (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+    (match R.admit ~accept_quarantine:false examination with
+     | Error _ -> ()
+     | Ok _ -> fail "dangling queue entry admitted boot");
+    (match D.reader D.Id.Keeper_event_queue with
+     | D.Refuse_boot (_, scan) ->
+       (match D.run scan ~base_path with
+        | Ok {D.rows = 1; refused = 1; _} -> ()
+        | Ok _ -> fail "preflight omitted the dangling queue"
+        | Error detail -> fail detail)
+     | D.Degrade_typed _ | D.Preflight_only _ -> fail "queue must refuse boot");
+    check string "read-only checks preserve the link" missing_target (Unix.readlink link);
+    Option.iter (fun bytes ->
+      check string "read-only checks preserve the snapshot" bytes (Fs_compat.load_file snapshot)) snapshot_bytes;
+    let report = R.quarantine ~now:1_700_000_007.0 config examination in
+    (match report.R.quarantined, report.R.failed with
+     | [q], [] ->
+       check string "quarantine names the rejected entry" refused_path q.R.path;
+       let moved = (q.R.path, q.R.rejected_path) ::
+         (match q.R.moved_with with None -> [] | Some partner -> [partner]) in
+       check int "every existing queue entry moved"
+         (match snapshot_bytes with None -> 1 | Some _ -> 2) (List.length moved);
+       let rejected_link = List.assoc link moved in
+       check string "quarantine preserves the dangling link itself" missing_target
+         (Unix.readlink rejected_link);
+       Option.iter (fun bytes ->
+         check string "quarantine preserves the snapshot bytes" bytes
+           (Fs_compat.load_file (List.assoc snapshot moved))) snapshot_bytes
+     | _ -> fail "dangling queue quarantine must move the whole pair");
+    List.iter (fun path ->
+      match Fs_compat.exact_path_kind ~follow:false path with
+      | Fs_compat.Exact_missing -> ()
+      | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+        fail "a queue entry survived successful quarantine") [snapshot; wal];
+    (match target_bytes with
+     | None -> check bool "quarantine never creates the missing target" false (Sys.file_exists missing_target)
+     | Some bytes -> check string "quarantine never changes the link target" bytes (Fs_compat.load_file missing_target));
+    check_queue_starts_empty ~base_path)
+    [`Snapshot; `Wal; `Live_wal; `Malformed_snapshot_and_wal; `Snapshot_and_wal]
+;;
+
+let test_queue_inventory_inspection_failure_preserves_partial_discovery () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, _ = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  let loop = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "loop" in
+  Unix.symlink loop loop;
+  let discovery = Keeper_event_queue_persistence.discover_keeper_names_with_durable_state ~base_path in
+  check (list string) "healthy queue remains discovered" ["sound"] discovery.keeper_names;
+  check bool "directory inspection failure is explicit" true (Option.is_some discovery.read_error);
+  let examination = R.examine config in
+  List.iter (fun accept_quarantine ->
+    match R.admit ~accept_quarantine examination with
+    | Ok _ -> fail "incomplete queue inventory admitted boot"
+    | Error failures ->
+      check bool "queue inventory refuses even accepted quarantine" true
+        (List.exists (function
+          | R.Discovery_failed {store = D.Refusing.Event_queue; _} -> true
+          | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
+    [false; true];
+  (match D.reader D.Id.Keeper_event_queue with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Error _ -> ()
+      | Ok _ -> fail "preflight accepted incomplete queue inventory")
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "queue must refuse boot");
+  check string "inspection preserves the loop" loop (Unix.readlink loop);
+  check string "inspection preserves the healthy queue" current_snapshot_bytes (Fs_compat.load_file snapshot)
+;;
+
+
+let test_unreadable_session_inventory_refuses_even_with_quarantine () =
+  with_workspace (fun config ->
+    let path = Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path in
+    if Sys.file_exists path then remove_tree path;
+    write_bytes path "not a directory";
+    let examination = R.examine config in
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Ok _ -> fail "an unread session inventory admitted boot"
+      | Error failures ->
+        check bool "official-client inventory failure remains explicit" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures);
+        check bool "the earlier metadata scan also retains its inventory failure" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Keeper_meta; _ } -> true
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
+      [ false; true ];
+    check string "the unread inventory was not renamed" "not a directory"
+      (let channel = open_in path in
+       Fun.protect ~finally:(fun () -> close_in channel)
+         (fun () -> really_input_string channel (in_channel_length channel))))
+;;
+
+let test_event_queue_discovery_failure_refuses_quarantine () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let directory = Filename.concat
+        (Common.keepers_runtime_dir_of_base ~base_path) "invalid keeper name" in
+    let path = Filename.concat directory Keeper_event_queue_persistence.snapshot_filename in
+    write_bytes path "unread queue";
+    let examination = R.examine config in
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Ok _ -> fail "partial event queue discovery admitted boot"
+      | Error failures ->
+        check bool "queue discovery failure remains explicit" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Event_queue; _ } -> true
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
+      [ false; true ];
+    check bool "discovery never moved the queue" true (Sys.file_exists path))
+;;
+
+let test_blocked_session_directory_refuses_even_with_quarantine () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let state_path =
+      match Keeper_official_client_session_store.path ~base_path ~keeper_name:"sound" with
+      | Ok path -> path
+      | Error detail -> fail detail
+    in
+    let state_dir = Filename.dirname state_path in
+    write_bytes state_dir "not a directory";
+    let examination = R.examine config in
+    check bool "blocked session directory is an inventory failure" true
+      (List.exists (fun (failure : R.discovery_failure) ->
+         failure.R.store = D.Refusing.Official_client_session
+         && String_util.contains_substring failure.R.rejection state_dir)
+        examination.R.discovery_failures);
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Ok _ -> fail "a blocked session directory admitted boot"
+      | Error failures ->
+        check bool "blocked session directory cannot be quarantined" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false)
+            failures))
+      [ false; true ];
+    check string "blocked directory was not changed" "not a directory"
+      (let channel = open_in state_dir in
+       Fun.protect ~finally:(fun () -> close_in channel)
+         (fun () -> really_input_string channel (in_channel_length channel))))
+;;
+
+let test_examination_does_not_create_an_absent_runtime_root () =
+  with_workspace (fun config ->
+    let path = Workspace.keepers_runtime_dir config in
+    if Sys.file_exists path then remove_tree path;
+    let examination = R.examine config in
+    check int "no persisted stores" 0 examination.R.readable;
+    check int "no directory failures" 0 (List.length examination.R.discovery_failures);
+    check bool "examination leaves an absent root absent" false (Sys.file_exists path))
+;;
+
+let test_preparation_refuses_a_failed_session_quarantine () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let path =
+      match Keeper_official_client_session_store.path ~base_path ~keeper_name:"sound" with
+      | Ok path -> path
+      | Error detail -> fail detail
+    in
+    write_bytes path "{invalid-session";
+    let digest = file_digest path in
+    (* Opening a directory as the store's writable lock file deterministically
+       fails even when the test user can bypass file permission bits. *)
+    let lock_path = Filename.dirname path ^ ".lock" in
+    Unix.mkdir lock_path 0o700;
+    Fun.protect
+      ~finally:B.For_testing.reset_keeper_persistence_lifecycle
+      (fun () ->
+        B.For_testing.reset_keeper_persistence_lifecycle ();
+        (match B.prepare_keeper_persistence ~accept_store_quarantine:true ~config () with
+         | Error (B.Store_quarantine_refused
+                    [ R.Quarantine_failed failure ]) ->
+           check string "the failed store" "official_client_session"
+             (R.store_to_string failure.R.store);
+           check string "the exact binding" path failure.R.path;
+           check string "the owner" "sound" failure.R.keeper;
+           check bool "the operator sees the failed move" true
+             (String_util.contains_substring
+                (R.refusal_to_string [ R.Quarantine_failed failure ])
+                "quarantine failed")
+         | Error error ->
+           failf "preparation failed for another reason: %s"
+             (B.keeper_persistence_prepare_error_to_string error)
+         | Ok _ -> fail "preparation admitted a binding whose quarantine failed");
+        check string "failed quarantine preserves the binding" digest (file_digest path);
+        check (list string) "failed quarantine writes no rejected copy" [ "session.json" ]
+          (Array.to_list (Sys.readdir (Filename.dirname path)));
+        Unix.rmdir lock_path;
+        B.For_testing.reset_keeper_persistence_lifecycle ();
+        (match B.prepare_keeper_persistence ~accept_store_quarantine:true ~config () with
+         | Ok _ -> ()
+         | Error error ->
+           failf "preparation after lock repair failed: %s"
+             (B.keeper_persistence_prepare_error_to_string error));
+        check bool "repair permits moving the rejected binding" false (Sys.file_exists path);
+        match Array.to_list (Sys.readdir (Filename.dirname path)) with
+        | [ rejected ] ->
+          check string "the successful quarantine retains the original bytes" digest
+            (file_digest (Filename.concat (Filename.dirname path) rejected))
+        | _ -> fail "successful quarantine must retain exactly one rejected binding"))
+;;
+
+let test_gate_preflight_replays_wal_without_repair () =
+  let module Codec = Keeper_approval_queue_codec in
+  let module Map = Set_util.StringMap in
+  List.iter (fun (label, log, refused) ->
+    with_workspace (fun config ->
+      let base_path = config.Workspace.base_path in
+      let snapshot_path = Keeper_gate_path.pending ~base_path in
+      let log_path = Keeper_gate_path.pending_log ~base_path in
+      let snapshot = Codec.snapshot_to_yojson ~base_path ~next_sequence:1
+        ~generation:1 ~pending_map:Map.empty ~delivery_map:Map.empty
+        |> Yojson.Safe.to_string in
+      write_bytes snapshot_path snapshot;
+      write_bytes log_path log;
+      let before = Array.to_list (Sys.readdir (Filename.dirname snapshot_path))
+        |> List.sort String.compare in
+      (match D.preflight_scan D.Id.Gate_pending with
+       | None -> fail "Gate must have a preflight scan"
+       | Some scan ->
+         match D.run scan ~base_path with
+         | Error detail -> fail detail
+         | Ok report ->
+           check int (label ^ ": one snapshot/WAL authority") 1 report.rows;
+           check int (label ^ ": refusal") refused report.refused);
+      check string (label ^ ": snapshot bytes retained") snapshot
+        (Fs_compat.load_file snapshot_path);
+      check string (label ^ ": WAL bytes retained") log (Fs_compat.load_file log_path);
+      check (list string) (label ^ ": no recovery or lock files created") before
+        (Array.to_list (Sys.readdir (Filename.dirname snapshot_path)) |> List.sort String.compare)))
+    [ "valid current WAL",
+        "{\"kind\":\"pending_remove\",\"generation\":1,\"next_sequence\":1,\"id\":\"absent\"}\n", 0
+    ; "malformed complete row", "not-json\n", 1
+    ; "future generation",
+        "{\"kind\":\"pending_remove\",\"generation\":2,\"next_sequence\":1,\"id\":\"absent\"}\n", 1
+    ; "unknown row kind",
+        "{\"kind\":\"invented\",\"generation\":1,\"next_sequence\":1,\"id\":\"absent\"}\n", 1
+    ; "incomplete tail", "{\"kind\":", 1
+    ]
+;;
+
+let test_gate_preflight_preserves_orphan_wal () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let path = Keeper_gate_path.pending_log ~base_path in
+    write_bytes path "unread orphan WAL";
+    (match D.preflight_scan D.Id.Gate_pending with
+     | None -> fail "Gate must have a preflight scan"
+     | Some scan ->
+       match D.run scan ~base_path with
+       | Error detail -> fail detail
+       | Ok report -> check int "missing snapshot is the production reset state" 0 report.rows);
+    check string "orphan WAL remains untouched" "unread orphan WAL" (Fs_compat.load_file path))
+;;
+
+let test_board_partition_preflight_uses_production_replay ~keeper_name () =
+  with_workspace (fun config ->
+    let module Partition = Keeper_board_attention_partition in
+    let module Candidate = Partition.Candidate in
+    let base_path = config.Workspace.base_path in
+    let signal : Board_dispatch.board_signal =
+      { kind = Board_dispatch.Board_post_created; post_id = "preflight-post"
+      ; author = "external"; title = "Preflight"; content = "Retained evidence"
+      ; hearth = None; updated_at = Some 1.0 } in
+    let candidate : Candidate.candidate =
+      { candidate_id = Candidate.candidate_id_of_signal ~keeper_name signal
+      ; keeper_name; signal; keeper_context = `Assoc ["keeper", `String keeper_name]
+      ; recorded_at = 1.0; status = Candidate.Pending {last_delivery_failure=None} } in
+    (match Partition.ensure_roots ~base_path ~keeper_name [candidate] with
+     | Error detail -> fail detail | Ok _ -> ());
+    let partition = match Partition.load ~base_path ~keeper_name with
+      | Ok [partition] -> partition
+      | Ok _ -> fail "fixture must create one production partition"
+      | Error detail -> fail detail in
+    let path = Partition.path ~base_path ~keeper_name in
+    let current = Partition.to_yojson partition in
+    (* Give the other Keeper a genuine root identity. A forged root would
+       fail before the ledger's Keeper binding was checked. *)
+    let other_keeper = "another" in
+    let other_candidate = {candidate with
+      keeper_name=other_keeper;
+      candidate_id=Candidate.candidate_id_of_signal ~keeper_name:other_keeper signal} in
+    (match Partition.ensure_roots ~base_path ~keeper_name:other_keeper [other_candidate] with
+     | Error detail -> fail detail | Ok _ -> ());
+    let foreign = match Partition.load ~base_path ~keeper_name:other_keeper with
+      | Ok [partition] -> Partition.to_yojson partition
+      | Ok _ -> fail "fixture must create one foreign production partition"
+      | Error detail -> fail detail in
+    Unix.unlink (Partition.path ~base_path ~keeper_name:other_keeper);
+    let replace name value = match current with
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "production partition must encode an object" in
+    let row json = Yojson.Safe.to_string json ^ "\n" in
+    List.iter (fun (label, bytes, refused) ->
+      write_bytes path bytes;
+      let before = Array.to_list (Sys.readdir (Filename.dirname path)) |> List.sort String.compare in
+      (match D.preflight_scan D.Id.Board_attention_partitions with
+       | None -> fail "partitions must have a preflight scan"
+       | Some scan -> match D.run scan ~base_path with
+         | Error detail -> fail detail
+         | Ok report ->
+           check int (label ^ ": one ledger") 1 report.rows;
+           check int (label ^ ": refusal") refused report.refused);
+      check string (label ^ ": bytes retained") bytes (Fs_compat.load_file path);
+      check (list string) (label ^ ": no recovery files") before
+        (Array.to_list (Sys.readdir (Filename.dirname path)) |> List.sort String.compare))
+      [ "current production row", row current, 0
+      ; "empty owner ledger", "", 0
+      ; "old schema", row (replace "schema_version" (`Int 0)), 1
+      ; "foreign keeper with genuine root", row foreign, 1
+      ; "mixed keeper roots", row current ^ row foreign, 1
+      ; "forged root", row (replace "partition_id" (`String "forged")), 1
+      ; "changed immutable identity", row current ^ row (replace "created_at" (`Float 2.0)), 1
+      ; "incomplete tail", Yojson.Safe.to_string current, 1
+      ])
+;;
+
+let test_board_partition_preflight_refuses_failed_inventory () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let directory = Keeper_board_attention_partition.directory ~base_path in
+    write_bytes directory "a file is not a partition inventory";
+    match D.preflight_scan D.Id.Board_attention_partitions with
+    | None -> fail "partitions must have a preflight scan"
+    | Some scan -> match D.run scan ~base_path with
+      | Error _ -> ()
+      | Ok _ -> fail "failed partition inventory was accepted as empty")
+;;
+
+let () =
+  run
+    "keeper store boot reconcile"
+    [ ( "examine"
+      , [ test_case "reads every store and moves nothing" `Quick
+            test_examine_reads_and_moves_nothing
+        ; test_case "is silent on a goal store that is absent or reads" `Quick
+            test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads
+        ; test_case "examination leaves an absent runtime root absent" `Quick
+            test_examination_does_not_create_an_absent_runtime_root
+        ] )
+    ; ( "admit"
+      , [ test_case "session I/O refuses boot and direct quarantine" `Quick
+            test_session_io_refuses_boot_and_direct_quarantine
+        ; test_case "metadata I/O failure never accepts quarantine" `Quick
+            test_metadata_io_failure_never_accepts_quarantine
+        ; test_case "invalid JSON metadata requires explicit quarantine" `Quick
+            test_invalid_json_metadata_remains_an_explicit_quarantine
+        ; test_case "partial queue discovery refuses quarantine" `Quick
+            test_event_queue_discovery_failure_refuses_quarantine
+        ; test_case "unreadable inventory refuses even with quarantine" `Quick
+            test_unreadable_session_inventory_refuses_even_with_quarantine
+        ; test_case "blocked session directory refuses even with quarantine" `Quick
+            test_blocked_session_directory_refuses_even_with_quarantine
+        ; test_case "refuses only undecodable stores without the flag" `Quick
+            test_admit_refuses_only_undecodable_without_the_flag
+        ; test_case "the refusal names each store and both ways forward" `Quick
+            test_refusal_names_each_store_and_both_ways_forward
+        ] )
+    ; ( "quarantine"
+      , [ test_case "queue operational causes refuse recovery" `Quick
+            test_queue_operational_failures_refuse_recovery
+        ; test_case "queue quarantine rereads a changed inspection failure" `Quick
+            test_queue_reread_refuses_a_new_inspection_failure
+        ; test_case "queue incomplete tail requires explicit quarantine" `Quick
+            test_queue_tail_requires_explicit_quarantine
+        ; test_case "session quarantine rereads a changed I/O failure" `Quick
+            test_session_quarantine_reread_refuses_a_new_io_failure
+        ; test_case "undecodable stores are moved aside once" `Quick
+            test_undecodable_stores_are_moved_aside_once
+        ; test_case "pending publication refuses the memory quarantine" `Quick
+            test_memory_quarantine_refuses_pending_publication
+        ] )
+    ; ( "preparation"
+      , [ test_case "refuses without the flag and moves aside with it" `Quick
+            test_preparation_refuses_then_moves_aside_with_the_flag
+        ; test_case "a failed session quarantine refuses until repaired" `Quick
+            test_preparation_refuses_a_failed_session_quarantine
+        ] )
+    ; ( "one list"
+      , [ test_case "the preflight refuses what boot names" `Quick
+            test_preflight_refuses_what_boot_names
+        ; test_case "Gate preflight replays WAL without repairing evidence" `Quick
+            test_gate_preflight_replays_wal_without_repair
+        ; test_case "Gate preflight preserves an orphan WAL" `Quick
+            test_gate_preflight_preserves_orphan_wal
+        ; test_case "partition preflight uses production decode and replay" `Quick
+            (test_board_partition_preflight_uses_production_replay
+               ~keeper_name:"preflight-keeper")
+        ; test_case "partition preflight preserves noncanonical Keeper identity" `Quick
+            (test_board_partition_preflight_uses_production_replay
+               ~keeper_name:"Foo.Bar")
+        ; test_case "partition preflight refuses failed inventory" `Quick
+            test_board_partition_preflight_refuses_failed_inventory
+        ; test_case "admission preflight decodes and preserves pending input" `Quick
+            test_preflight_reads_admission_queue_without_consuming
+        ; test_case "the preflight names the transcript line appends refuse" `Quick
+            test_preflight_names_the_transcript_line_appends_refuse
+        ; test_case "transcript inventory failures cannot pass as empty" `Quick
+            test_transcript_inventory_failure_is_not_empty
+        ; test_case "the preflight refuses an older chat operation journal" `Quick
+            test_preflight_refuses_an_older_chat_operation_journal
+        ; test_case "every boot store has exactly one id" `Quick
+            test_every_boot_store_has_exactly_one_id
+        ] )
+    ; ( "official-client session"
+      , [ test_case "an unreadable binding refuses boot and moves aside under its lock"
+            `Quick test_an_unreadable_session_binding_refuses_boot
+        ; test_case "a binding behind a linked keeper directory refuses boot" `Quick
+            test_a_binding_behind_a_linked_keeper_directory_refuses_boot
+        ] )
+    ; ( "event queue"
+      , [ test_case "indirect queue files refuse and quarantine their directory entries" `Quick
+            test_indirect_queue_files_refuse_and_move_as_entries
+        ; test_case "inspection failure preserves partial queue discovery" `Quick
+            test_queue_inventory_inspection_failure_preserves_partial_discovery
+        ; test_case "an unreadable queue refuses boot and moves aside with its WAL" `Quick
+            test_an_unreadable_event_queue_refuses_boot
+        ; test_case "a WAL-only queue is named by its WAL" `Quick
+            test_a_wal_only_queue_is_named_by_its_wal
+        ; test_case "a bad WAL over a good snapshot is named by its WAL" `Quick
+            test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal
+        ; test_case "a half-finished move leaves the rejected file" `Quick
+            test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again
+        ; test_case "a half-finished WAL quarantine retains recovery and resumes" `Quick
+            test_a_half_finished_move_of_a_rejected_wal_retains_recovery
+        ; test_case "intent-only and single-file quarantine resume" `Quick
+            test_intent_only_quarantine_is_discovered_and_resumed
+        ; test_case "changed quarantine entries remain refused" `Quick
+            test_quarantine_rejects_changed_entries
+        ; test_case "a destination created during rename is never overwritten" `Quick
+            test_quarantine_never_overwrites_a_destination
+        ; test_case "intent sync is mandatory before every attempted recovery" `Quick
+            test_quarantine_requires_confirmed_intent_before_moves
+        ; test_case "cancellation after rename keeps recovery authority" `Quick
+            test_quarantine_cancellation_retains_intent
+        ; test_case "malformed and indirect intent cannot disappear" `Quick
+            test_bad_quarantine_intent_refuses_without_touching_sources
+        ; test_case "a queue that decodes is not moved" `Quick
+            test_a_queue_that_decodes_is_not_moved
+        ] )
+
+    ]
+;;

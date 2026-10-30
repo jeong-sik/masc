@@ -1,0 +1,578 @@
+(** A single-turn client for the official Claude Code CLI.
+
+    This is not an Anthropic HTTP provider. Supported credential and routing
+    environment variables are passed only to the official CLI.
+    Claude Code owns authentication, its session and model loop. MASC owns the
+    child lifetime, exact SDK-control/MCP bridge, and terminal projection. *)
+
+type authentication = Claude_ai | Api_key | OAuth_token | Third_party
+
+type api_provider = First_party | Bedrock | Vertex | Foundry | Mantle
+
+type subscription = private
+  { authentication : authentication
+  ; subscription_type : string option
+  ; api_provider : api_provider
+  }
+
+val authentication_to_string : authentication -> string
+val api_provider_to_string : api_provider -> string
+
+type config =
+  { cli_path : string
+  ; account_home : string option
+    (** Selected CLI configuration and login directory. [None] inherits the
+        operator's ordinary Claude Code environment. *)
+  ; cwd : string
+  ; model : string option
+  ; system_prompt : string option
+    (** [None] omits [--system-prompt], which is what leaves the CLI's
+        built-in prompt in place; [Some text] passes the flag and replaces
+        that prompt entirely. "" is not a way to spell [None]: the client
+        reads any string as the prompt, so an empty one replaces the built-in
+        prompt with nothing rather than keeping it. A caller that wants the
+        built-in prompt plus its own text needs a different flag
+        ([--append-system-prompt]), which this client does not send.
+        On a [Resume] the client sends the system prompt it recorded at the
+        session's first launch until the conversation is compacted
+        ([--system-prompt-snapshot on], which [command] always passes), so
+        text placed here on a
+        resume does not reach the model before then. *)
+  ; admission_timeout_s : float
+    (** Finite bound for the post-spawn initialize exchange and callbacks
+        before the user turn is written. *)
+  ; native : Runtime_native_tools.posture
+    (** How much of the CLI's built-in tool surface this turn may use
+        (RFC-0390). Built-in calls run inside the client and never reach the
+        MASC approval gate, so the keeper layer admits [Native_full] only
+        for Yolo keepers. *)
+  ; timeout_s : float option
+    (** [None] removes the deadline after the user message is written: the
+        spawned client decides when its own turn ends. Initialization remains
+        bounded by [admission_timeout_s]. Declared as [turn-timeout-s] in
+        runtime config, where [0] selects [None]. *)
+    (** Maximum silence between CLI stream messages. Each received message
+        resets the deadline; a progressing turn has no cumulative time limit. *)
+  ; output_schema : Yojson.Safe.t option
+    (** JSON Schema the CLI enforces on the turn's final answer
+        ([--json-schema]). The mechanism is validation with a re-prompt, not
+        constrained decoding: the client checks its own answer and tries again,
+        and gives up with subtype [error_max_structured_output_retries].
+        [None] leaves the answer unfenced, which is what every caller did
+        before this field existed. *)
+  }
+
+val default_timeout_s : float
+val default_config : cwd:string -> config
+val client_environment : string option -> string array
+(** Selected-account child environment shared by execution and explicit login. *)
+val effective_account_home : string option -> string option
+(** The selected Claude Code configuration directory: explicit home,
+    CLAUDE_CONFIG_DIR, or the CLI's HOME/.claude default. An inherited relative
+    CLAUDE_CONFIG_DIR is resolved against the process cwd and passed to the
+    child; other inherited authentication variables are preserved. Explicit
+    paths keep their literal spelling for the client's credential identity. *)
+val account_file : string option -> string option
+(** The global config file that names the account signed in to a selected
+    home, or with none to the inherited one: the legacy [.config.json] in the
+    config directory while it exists, else [.claude.json] inside
+    CLAUDE_CONFIG_DIR when set, otherwise in HOME. A selected home runs as
+    CLAUDE_CONFIG_DIR. [None] when the environment names neither. *)
+val environment_credential_names : string list
+(** The variables {!runs_on_environment_credential} reads: the cloud provider
+    switches, then ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY and
+    CLAUDE_CODE_OAUTH_TOKEN. *)
+val runs_on_environment_credential : string option -> bool
+(** Whether a child on this home is given a credential Claude Code uses before
+    its /login account: a cloud provider switch that Claude Code reads as on
+    ("1", "true", "yes" or "on"), or a non-empty ANTHROPIC_AUTH_TOKEN,
+    ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. Only the inherited home
+    ([None]) passes them. *)
+
+(** One image attached to a turn's user message. [base64_data] is the raw
+    base64 payload with no data-URL prefix and no newlines, the shape the
+    stream-json image block takes. *)
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
+type session_mode =
+  | Start
+  | Resume of { session_id : string }
+
+type rate_limit_status =
+  | Allowed
+  | Allowed_warning
+  | Rejected
+
+type rate_limit =
+  { status : rate_limit_status
+  ; rate_limit_type : string option
+  ; resets_at : int option
+  ; overage_status : string option
+  ; overage_disabled_reason : string option
+  }
+
+(** Input side of one provider request, read from an assistant frame, in
+    the same exclusive wire convention as {!turn_usage}. The frame's
+    output_tokens is a streaming snapshot, not the request's final count, so
+    it is not carried. *)
+type request_input =
+  { input_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
+  }
+
+(** Usage counts read from a CLI frame. The CLI mirrors Anthropic
+    Messages semantics: [input_tokens] is the exclusive wire count (tokens
+    after the last cache breakpoint); absent cache fields read as 0. The
+    keeper mapping builds the canonical inclusive
+    {!Agent_core.Types.api_usage} from these via
+    [Backend_anthropic.usage_of_wire_counts]. *)
+type turn_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
+  }
+
+(** Two facts about one client turn that neither stands in for. *)
+type observed_usage =
+  { latest_request_input : request_input option
+        (** Newest root assistant request, deduplicated by message id: the
+            context that request occupied. Child tool envelopes carry their
+            own model and usage and cannot replace this root observation.
+            Not what the turn spent. *)
+  ; turn_total : turn_usage option
+        (** Result-frame sum over this client turn's provider calls: what
+            the turn spent. Not a context window size. *)
+  }
+
+type turn_result =
+  { session_id : string
+  ; turn_id : string
+  ; model : string
+  ; text : string
+  ; dynamic_tool_calls : int
+  ; subscription : subscription
+  ; rate_limit : rate_limit option
+  ; resumed : bool
+  ; usage : observed_usage
+  }
+
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; detail : Keeper_terminal_effect_detail.t
+      }
+
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
+
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
+  { success : bool
+  ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
+  }
+
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
+
+(** A partial block keeps the SDK message id and block index. A complete-only
+    envelope has its own UUID and content ordinal; neither is a turn-wide text
+    bucket. This identity is separate from native tool occurrence identity. *)
+type content_block =
+  | Partial_block of { message_id : string; index : int }
+  | Assistant_block of { uuid : string; ordinal : int }
+
+type content_channel = Text_content | Thinking_content
+
+type native_task_status = Runtime_native_tasks.status =
+  | Task_pending | Task_running | Task_completed | Task_failed | Task_killed | Task_paused
+
+type native_task_terminal = Runtime_native_tasks.terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
+type native_task_reason = Runtime_native_tasks.reason = Worker_restart
+type native_task_boundary = Runtime_native_tasks.boundary = Task_terminal_unobserved | Task_terminal_observed
+(** Whether this run has supplied terminal evidence, not whether it is running.
+    A resumed run needs a fresh registration and a newer provider run_id. *)
+
+type native_task_usage = Runtime_native_tasks.usage =
+  { total_tokens : int; tool_uses : int; duration_ms : int }
+(** Provider task observations, never the root model's usage. [duration_ms]
+    preserves the signed safe integer reported by the provider's wall-clock
+    subtraction; a negative value neither fails nor terminates the task. *)
+
+type native_task_event = Runtime_native_tasks.event =
+  | Task_registered of
+      { subagent_type : string option; is_backgrounded : bool option
+      ; skip_transcript : bool option; ambient : bool option }
+      (** Registration declares no task status. [None] means not reported. *)
+  | Task_patched of
+      { status : native_task_status option; is_backgrounded : bool option
+      ; end_time : int option; total_paused_ms : int option }
+      (** [total_paused_ms] retains signed safe integers; absence is
+          unreported, not zero. [end_time] admission retains the separate
+          nonnegative timestamp check. *)
+  | Task_progress_reported of
+      { usage : native_task_usage; last_tool_name : string option }
+  | Task_terminal_reported of
+      { outcome : native_task_terminal; reason : native_task_reason option
+      ; usage : native_task_usage option; skip_transcript : bool option
+      ; ambient : bool option }
+
+type native_task_owner = private
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; task_id : string; run_id : string; call_id : string
+  ; call_envelope_uuid : string; call_ordinal : int }
+(** Exact root Agent occurrence that registered this task run. The call may
+    already have returned an async launch result. [run_id] is opaque except
+    for the provider-declared lexical ordering of runs of the same task.
+    [invocation] is the actual ticket minted before this runtime invocation's
+    user write, also emitted by its Prepared input observation. Replayed SDK
+    IDs cannot replace this invocation identity. It proves the receiving
+    invocation, not the native envelope's consumed-input attribution. *)
+
+type native_task_observation = private
+  { owner : native_task_owner; uuid : string; event : native_task_event
+  ; boundary : native_task_boundary }
+(** Invocation-local observations: explicit session/run identity, Native_full,
+    unambiguous Root_response/Built_in Agent and provider root spawn depth.
+    No ownership is inferred for run-less, unknown or child task frames.
+    Raw prompt, summary, description, error and output-file bodies are excluded.
+    [boundary] is the registry's post-event fact. Later terminal notices and
+    metadata-only patches preserve it; they cannot reopen a sealed run.
+    Task termination does not terminate the native call, model response or turn.
+    This client still returns on the first root result; post-result receiving
+    requires a separate process/session lifetime implementation. *)
+
+type native_agent_parent_witness = private
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; call_id : string
+  ; call_envelope_uuid : string
+  ; call_ordinal : int
+  }
+(** Invocation-registry witness to an unambiguous Root_response/Built_in Agent
+    call admitted under Native_full. An open or returned native call retains
+    the same original envelope UUID and its observed content-array ordinal;
+    this is not an API streaming index. [invocation] refers to the actual
+    immutable Prepared ticket captured once by that runtime's native registry,
+    not a copied provider session or a newly generated identifier. No task/run,
+    consumed-input attribution or publication authority is inferred. A later
+    input join must compare the whole ticket, including receiver generation and
+    client UUID, before reading or changing its owner evidence cache.
+    Later call-ID reuse can make
+    the registry ambiguous and subsequent child observations unknown; an
+    earlier witness remains its immutable historical snapshot, not current
+    authority or cancellation evidence. It certifies only the original
+    native call, not a separately supplied body's authenticity or parent pairing.
+    [complete_child_content] retains the actual accepted body/parent together;
+    a downstream input join also compares its literal parent with [call_id]. *)
+
+type complete_child_content = private
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; observation_id : string
+  ; parent_tool_use_id : string
+  ; parent_occurrence : native_agent_parent_witness option
+  ; message_id : string option
+  ; model : string
+  ; block : content_block
+  ; channel : content_channel
+  ; text : string
+  }
+(** Validated complete-frame child model content from the actual runtime
+    invocation. Only the producer can construct this record; capturing a genuine
+    parent witness cannot attach a different body or literal parent to it.
+    [invocation] is the native registry's actual immutable Prepared ticket,
+    even when the parent is unknown. [observation_id] is minted once per actual
+    accepted complete child model envelope and shared by its body blocks. It is
+    distinct across repeated accepted provider envelopes, including an unknown
+    observation before its parent and a later known snapshot. It is an opaque
+    observation identity, not a delivery/commit receipt or ordering clock.
+    This proves observed provider provenance,
+    not child consumption of a parent input group or Task/run ownership. *)
+
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of
+      { message_id : string option
+      ; block : content_block
+      ; text : string
+      }
+      (** A partial text delta or the missing suffix of a complete [assistant]
+          block. [message_id] is the frame's
+          [message.id]. The CLI writes each content block of a response as
+          its own frame under the same id, so blocks sharing an id are one
+          assistant message and a new id is the next one. [None] when the
+          frame carries no id. Complete-envelope body isolation admits only
+          root model responses here. Partial events rely on the SDK's
+          main-session-only contract; their parser checks the session and
+          event shape without independently validating parent scope. *)
+  | Thinking_delta of
+      { message_id : string option
+      ; block : content_block
+      ; text : string
+      }
+      (** Provider-exposed thinking text from partial or complete assistant
+          blocks. Complete child envelopes use [Child_content_observed];
+          partial attribution relies on the SDK main-session-only contract
+          described on [Text_delta]. Opaque signatures and redacted payloads
+          are not text. *)
+  | Child_content_observed of complete_child_content
+      (** Provider-exposed text or thinking from a complete child assistant
+          envelope, retaining its literal parent call and [Assistant_block]
+          UUID/content ordinal. [None] means the envelope has no message id.
+          [model] is the child envelope's reported model, never a root model.
+          Each accepted envelope reports a body snapshot, including empty
+          text. The host observation ID distinguishes actual accepted frames,
+          including repeated provider UUIDs; its original ordinal/channel owns
+          each body. Redelivery of that observation can be applied idempotently;
+          a separate accepted replay is not agreement of changed replay bodies. The
+          parent call is provenance, not an inferred task owner.
+          [parent_occurrence] is the registry's fact when this body is observed,
+          even before task registration or after native return. [None] means
+          the parent is unknown, ambiguous, not a root built-in Agent, or not
+          admitted under Native_full. It preserves the supplied body and parent
+          ID and never retroactively upgrades an earlier unknown observation.
+          A later observation is not certification of the earlier binding. Child
+          content cannot supply the root reply, root response-emitted evidence,
+          model or usage. This is separate from root partial reconciliation.
+          Keeper can deliver private content through its separate bound/rejected
+          observation callback. Driver sinks, child display and persistence are
+          not yet connected. *)
+  | Content_block_stopped of { block : content_block; channel : content_channel }
+      (** Published once after a partial block's stop and complete-envelope
+          reconciliation, in either wire order. A late complete suffix precedes
+          this event under the original identity. Complete-only blocks close
+          after their content. Empty partial blocks close at their wire stop. *)
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of
+      { identity : Runtime_native_tools.action_identity
+      ; progress : Runtime_native_tools.progress
+      }
+      (** A UUID-deduplicated root heartbeat or Agent retry notice matched to the literal parent call
+          in this invocation. Invalid/unowned observations neither publish a
+          tool row nor fail a healthy turn. Agent retry requires Native_full;
+          clear matches an earlier notice's opaque progress id and agent type.
+          No progress-id prefix is parsed. *)
+  | Native_task_observed of native_task_observation
+  | Usage_windows_reported of Runtime_provider_usage_window.report
+      (** The windows a [rate_limit_event] reported, for the operator
+          projection only; nothing that routes or retries reads it. *)
+  | Provider_retry_observed of Runtime_claude_api_retry.t
+      (** A root API request retry in this exact session. Independent of native
+          tool retries, fallback attempts and thinking. Malformed or other-session
+          notices are ignored; no private error text is published. *)
+  | Conversation_compacted
+      (** The client reported a [compact_boundary]: it summarised the
+          conversation during this turn, so the copies the session held of
+          earlier prompts are no longer there as sent. *)
+  | Usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      ; usage : turn_usage
+      }
+      (** The turn's spend from the result frame of [session_id] ([turn_id]
+          is its [uuid]),
+          emitted once the frame is known to be this session's and before it
+          decides whether the turn succeeded, so a failed turn still reports
+          it. Absent when the frame carries no usage or no model response was
+          measured. *)
+  | Turn_finished of { text : string }
+
+val dynamic_tool_spec : dynamic_tool -> Yojson.Safe.t
+(** One [tools/list] entry as the MCP server answers Claude Code
+    (code.claude.com/docs/en/mcp). Its [_meta] carries
+    ["anthropic/alwaysLoad": true] for an {!Runtime_official_client_tool.Upfront}
+    tool, which exempts it from Claude Code's tool search, and
+    ["anthropic/maxResultSizeChars": n] for a
+    {!Runtime_official_client_tool.Bounded_bytes} [n] tool. A tool with
+    neither carries no [_meta]. *)
+
+val dynamic_tool_bytes : dynamic_tool list -> int
+(** Bytes the tool declarations occupy in the request this process builds: each
+    name, description and serialized input schema, plus the serialized [_meta]
+    object for a tool that carries one. Not provider tokens: it bounds the
+    request, it does not price it. *)
+
+type error =
+  | Invalid_config of string
+  | Spawn_failed of string
+  | Protocol_error of
+      { stage : string
+      ; detail : string
+      }
+  | Subscription_required of string
+  | Unsupported_control_request of string
+  | Turn_transport_interrupted of
+      { stage : string
+      ; tool_effect_attempted : bool
+      ; detail : string
+      }
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
+  | Turn_failed of string
+  | Turn_failed_with_observation of
+      { detail : string
+      ; api_error_status : int option
+        (** The result frame's structured HTTP status, when present. Keep it
+            separate from the diagnostic so callers can distinguish account
+            access from a generic provider rejection without reading prose. *)
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
+  | Stopped_by_host of
+      { stop : host_stop
+      ; latest_request_input : request_input option
+        (** Input side of the newest assistant request seen before the host
+            ended the turn. The result frame never arrives after a host
+            stop, so the turn's spend is not observed; the assistant
+            frames' output counts are streaming snapshots and do not
+            replace it. *)
+      }
+  | Quota_blocked of
+      { api_error_status : int option
+      ; rate_limit : rate_limit option
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
+  | Process_exited of
+      { detail : string
+      ; turn_admitted : bool
+      }
+      (** [turn_admitted] is false when the client died before the turn was
+          admitted, which means no turn was submitted and another candidate may
+          still be tried. *)
+  | Unhandled_exception of string
+      (** An exception nothing in the runtime expected, caught as the turn
+          leaves it: a host-side failure such as a refused process signal,
+          not something the client sent. The string is the exception. That
+          catch-all re-raises [Out_of_memory], [Stack_overflow] and
+          [Sys.Break] instead. *)
+  | Timeout of float
+
+val error_to_string : error -> string
+
+val validate_turn :
+  ?dynamic_tools:dynamic_tool list ->
+  ?session_mode:session_mode ->
+  config ->
+  prompt:string ->
+  images:image_input list ->
+  (unit, error) result
+
+val probe_subscription :
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config ->
+  (subscription, error) result
+(** Measure the official CLI login without submitting a model turn. The child
+    receives the same credential-preserving allowlisted environment as [run_turn]. *)
+
+val cli_admitted_reasoning_effort :
+  Llm_provider.Reasoning_effort.t -> Llm_provider.Reasoning_effort.t
+(** Admit the canonical effort to Claude Code's CLI vocabulary: [Minimal]
+    becomes [Low] and [Ultra] becomes [Max]. Other declared values stay exact.
+    [command] rejects either unsupported value if a caller skips admission. *)
+
+val command :
+  system_prompt_file:string option ->
+  config ->
+  dynamic_tools:dynamic_tool list ->
+  reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  session_mode:session_mode ->
+  session_id:string ->
+  (string list, error) result
+(** Build CLI argv from the prepared replacement file. A configured prompt
+    requires a file; an unset prompt requires None. Prompt bytes never occupy argv.
+    Exposed because the flag set is a
+    contract with the installed client — tests pin how [config.native]
+    selects [--tools] and what [--allowedTools] pre-approves (RFC-0390). *)
+
+type context_frame =
+  | System_prompt_file  (** The [--system-prompt-file] the child was started with. *)
+  | User_message of { client_uuid : string }
+      (** The stream-json user message on stdin: [Turn_text] slots in
+          [message.content]. *)
+
+type context_submission = private
+  { frame : context_frame
+  ; write : Runtime_official_client_write.t
+  }
+
+val context_submission_to_json : context_submission -> Yojson.Safe.t
+(** Content-free proof of a completed write: the file the child was started
+    with, or the user message line on stdin. Not the client's acceptance. *)
+
+val run_turn :
+  ?dynamic_tools:dynamic_tool list ->
+  ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
+  ?session_mode:session_mode ->
+  ?admitted_subscription:subscription ->
+  ?on_spawned:(unit -> unit) ->
+  ?on_prompt_sent:(unit -> unit) ->
+  (* Called after the complete turn-input message is written to the CLI.
+      This is transport evidence, not provider acceptance. Never called for
+      preparation, spawn, handshake, or incomplete input-write failures. *)
+  ?on_context_submission:(context_submission -> unit) ->
+  (* The system prompt file once the child started with it, and the user
+     message once its line is written, before [on_prompt_sent]. Non-reserved
+     observer exceptions are logged as unavailable measurement; the turn
+     continues. *)
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  ?on_session_ready:(session_id:string -> (unit, string) result) ->
+  ?on_turn_starting:(session_id:string -> (unit, string) result) ->
+  ?on_turn_started:(session_id:string -> turn_id:string -> (unit, string) result) ->
+  ?on_terminal_received:(unit -> unit) ->
+  (* Called after the result's session/turn identity is validated, before any
+     result observers or state callbacks. It does not certify acceptance. *)
+  ?on_stream_event:(stream_event -> unit) ->
+  ?on_input_observation:(Runtime_claude_input_attribution.observation -> unit) ->
+  (* Optional invocation-local ticket/write/response metadata, separate from
+     authored content and native tasks. It does not extend receiver lifetime. *)
+  config ->
+  prompt:string ->
+  images:image_input list ->
+  (turn_result, error) result
+(** Execute one turn through Claude Code's stream-json control protocol.
+
+    Supported API-key, token and routing environment variables are preserved.
+    Preflight uses the same settings isolation as the turn; credential validity
+    and selected-model access are established by the actual turn. *)

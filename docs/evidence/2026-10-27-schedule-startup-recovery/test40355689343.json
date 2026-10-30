@@ -1,0 +1,12 @@
+{
+  "id": 40355689343,
+  "name": "Test",
+  "head_sha": "3fdf8c35554b3d35b6bed57b6ef62495bba09fd8",
+  "head_branch": "fix/schedule-startup-recovery-20261027",
+  "event": "workflow_dispatch",
+  "status": "completed",
+  "conclusion": "failure",
+  "html_url": "https://github.com/jeong-sik/masc/actions/runs/40355689343",
+  "created_at": "2026-10-26T16:05:18Z",
+  "updated_at": "2026-10-26T16:10:23Z"
+}

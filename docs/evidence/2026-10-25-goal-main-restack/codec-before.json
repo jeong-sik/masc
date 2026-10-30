@@ -1,0 +1,83 @@
+{
+  "scope": "Compile actual frozen-original and retained-result codecs with explicit pure ports.\n\nThis does not execute the owner store, worker dispatch, prompts, native Host,\nprovider/SDK, or filesystem locks. --baseline uses main's exact result codec\nagainst the Goal review-result type to expose the missing consumer field.\n",
+  "baseline": true,
+  "source_inputs": [
+    {
+      "path": "lib/task/anti_rationalization.ml",
+      "sha256": "8c17413e6d952ec176bcd4f3c998fa6d02396a0e9ffdd0265be8f4ff8aa14dd9"
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.ml",
+      "sha256": "4d4769457e38ecb36d6593274b13a161097f243ff3779e748b2491cdd2caee65"
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.mli",
+      "sha256": "088184e356f8952912eb38ff58f82c4832fa4a515a82edfdddf9631521fd5be4"
+    },
+    {
+      "path": "lib/keeper/verifier_review_owner.ml",
+      "sha256": "eb11f090c921a42834291a2a6a5b9a187ea5cae5c578ea45df397b3ad7be8cdf"
+    },
+    {
+      "path": "main98a:lib/keeper/verifier_review_owner.ml",
+      "sha256": "c1d07a55da0fcc7a1f49173cd26a993107dffad46d9903be6f8a7d3e728a59f0"
+    },
+    {
+      "path": "lib/types/runtime_response_identity.mli",
+      "sha256": "20d6a3913e4b1e249b0c7e15a1f0102f3b07043042435214d64f37fd290fc6d4"
+    },
+    {
+      "path": "lib/types/runtime_response_identity.ml",
+      "sha256": "e008f7c6b24d543c7d6f0b5aaca8c52459d79640bd6ab915fef38f89072f4c3e"
+    }
+  ],
+  "ports": [
+    "types_core.ml",
+    "tool_result.ml",
+    "tool_timing.ml",
+    "prompt_names.ml",
+    "prompt_registry.ml",
+    "json_util.ml",
+    "string_util.ml",
+    "lane_addon_action.ml",
+    "lane_addon_store.ml",
+    "AR.build_prompt",
+    "Types_core/Tool_result types"
+  ],
+  "digest_port": "nonproduction digest port; no crypto/owner-store claim",
+  "compile": {
+    "command": [
+      "ocamlfind",
+      "ocamlc",
+      "-w",
+      "+4+8+9",
+      "-warn-error",
+      "+4+8+9",
+      "-package",
+      "yojson",
+      "-linkpkg",
+      "runtime_response_identity.mli",
+      "runtime_response_identity.ml",
+      "types_core.ml",
+      "tool_result.ml",
+      "tool_timing.ml",
+      "prompt_names.ml",
+      "prompt_registry.ml",
+      "json_util.ml",
+      "string_util.ml",
+      "lane_addon_action.ml",
+      "lane_addon_store.ml",
+      "ar.ml",
+      "task.ml",
+      "verifier_review_original.mli",
+      "verifier_review_original.ml",
+      "result_codec.ml",
+      "probe.ml",
+      "-o",
+      "probe"
+    ],
+    "exit": 2,
+    "output": "File \"result_codec.ml\", lines 45-49, characters 7-60:\n45 | .......{AR.verdict;evaluator_runtime=member \"evaluator_runtime\" json |> to_string;\n46 |       generator_runtime=optional (member \"generator_runtime\" json);gate;\n47 |       fallback_reason=optional (member \"fallback_reason\" json);\n48 |       retryable_runtimes=strings \"retryable_runtimes\";\n49 |       model_absent_runtimes=strings \"model_absent_runtimes\"}...\nError: Some record fields are undefined: evaluator_execution\n"
+  },
+  "execution": null
+}

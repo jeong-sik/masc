@@ -1,0 +1,80 @@
+[
+  {
+    "file": "lib/runtime/runtime_exact_output_registry.ml",
+    "sha256": "1e9a187c2c0d4524d52e26a91cb89b41e7be91caf57ce91ed7c6c32027a9664d",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "lib/runtime/runtime_wizard_inventory.ml",
+    "sha256": "77d2adcfae0b5dd62390438e5ac0a4acb0aca3250f2a48a6c919c0b9cfe96006",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/capabilities.ml",
+    "sha256": "5cd08e96d6a8668633aa87c52d6910fb6d68261ceb9337a4a5ef053627bdba65",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/exact_output.mli",
+    "sha256": "1a128bd51d0e5f6dc8567fb984eeb971b98a397c56b8e3d9309b70ce8a8f0caf",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/exact_output_catalog_binding.ml",
+    "sha256": "5e947c95655e4562c327fdf44e420cbdd3bcae28c9cd5eeb9a538b508bd195f8",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/exact_output_catalog_binding.mli",
+    "sha256": "3817c1bffd3d642d2334b27ac91a2dc5db8d0105ce3e8584cbdb6290a9524dbe",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/exact_output_resolver.ml",
+    "sha256": "3399f548aaa4593349542b11d6f7db02ce95dcc96e31fd171efec589a8c8068f",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/exact_output_resolver.mli",
+    "sha256": "0856c1abc0dd2225edb30f2fd025f819d712dd91b534e403eaf110f49262751e",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/model_catalog.ml",
+    "sha256": "c9b15554a37c7578f2e93d54044cf5aeeb108be93c29a43ad726e97b8d9426b2",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/model_catalog.mli",
+    "sha256": "a289c38a495acef4b4f7d9e02b244ca18fa7cd0fe509ee8e6d335f701a29cff6",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/lib/llm_provider/pricing.ml",
+    "sha256": "cde724d9d38152756d6504956304a223bd475db08ffd45291fb76728b1b349ab",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/test/test_capabilities.ml",
+    "sha256": "a6537cae163b2f4dc9741b8d3b811eecc8a83e3148f80caca9b9b5e4628cc3d7",
+    "exit": 0,
+    "diagnostic": ""
+  },
+  {
+    "file": "packages/agent_core/test/test_model_identifiers.ml",
+    "sha256": "91d191d085e5aa1d5ba063453618f26ae5bd20c405c3316ea4a251f15d9acb0d",
+    "exit": 0,
+    "diagnostic": ""
+  }
+]

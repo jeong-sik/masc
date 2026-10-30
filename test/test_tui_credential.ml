@@ -1,0 +1,369 @@
+open Alcotest
+
+module Credential = Masc_tui_credential
+
+let has needle line = String_util.string_contains_substring ~needle line
+
+let test_the_server_reason_comes_from_the_typed_code () =
+  let body code = Printf.sprintf {|{"error":"x","auth_error_code":%S}|} code in
+  let of_code code =
+    Credential.server_reason_of_body
+      (body (Masc_error.Auth_error_code.to_string code))
+  in
+  check bool "an expired code is Expired" true
+    (of_code Masc_error.Auth_error_code.Token_expired = Some Credential.Expired);
+  check bool "an insufficient role is its own reason" true
+    (of_code Masc_error.Auth_error_code.Insufficient_role
+     = Some Credential.Insufficient_role);
+  check bool "an invalid token is a plain refusal" true
+    (of_code Masc_error.Auth_error_code.Invalid_token = Some Credential.Rejected);
+  (* An /mcp refusal is a JSON-RPC error with the code under error.data. *)
+  check bool "a JSON-RPC refusal is read from error.data" true
+    (Credential.server_reason_of_body
+       (Printf.sprintf
+          {|{"jsonrpc":"2.0","id":null,"error":{"code":-32001,"message":"x","data":{"auth_error_code":%S}}}|}
+          (Masc_error.Auth_error_code.to_string
+             Masc_error.Auth_error_code.Token_expired))
+     = Some Credential.Expired);
+  List.iter
+    (fun (label, raw) ->
+      check bool (label ^ " is a plain refusal") true
+        (Credential.server_reason_of_body raw = Some Credential.Rejected))
+    [ ("a code the server never writes", body "brand_new_code")
+    ; ("a code that is not a string", {|{"auth_error_code":1}|})
+    ];
+  (* No code at all is not a credential refusal: the auth layer writes one on
+     every refusal, so these came from a handler refusing the request. *)
+  List.iter
+    (fun (label, raw) ->
+      check bool (label ^ " is not about the credential") true
+        (Credential.server_reason_of_body raw = None))
+    [ ("a handler's own refusal", {|{"error":"only your own queued message can be prioritized"}|})
+    ; ("a body that is not JSON", "forbidden")
+    ; ("a JSON value that is not an object", {|"token_expired"|})
+    ]
+
+let test_plan_prefers_the_environment () =
+  let chosen = function
+    | Credential.Use token -> token
+    | Credential.Mint _ -> "mint"
+    | Credential.Go_without -> "go-without"
+    | Credential.No_workspace -> "no-workspace"
+  in
+  let plan ?(env = None) ?(file = Credential.Not_stored) ?(requires = true)
+      ?(here = true) () =
+    chosen
+      (Credential.plan ~env_token:env ~workspace_token:file
+         ~workspace_requires_token:requires ~workspace_initialized:here)
+  in
+  check string "the environment wins over the workspace" "env"
+    (plan ~env:(Some "env") ~file:(Credential.Stored "file") ());
+  check string "the workspace file is used when the environment is empty" "file"
+    (plan ~file:(Credential.Stored "file") ());
+  check string "an environment bearer is used even where none is demanded" "env"
+    (plan ~env:(Some "env") ~requires:false ())
+
+let startup_plan stored =
+  Credential.plan ~env_token:None ~workspace_token:stored
+    ~workspace_requires_token:true ~workspace_initialized:true
+
+let workspace_refresh ~sent stored =
+  Credential.refresh_plan ~source:Credential.From_workspace ~sent ~stored
+    ~credential_record:true ~workspace_requires_token:true ~workspace_initialized:true
+
+let test_exact_opaque_file_token_is_used_without_replacement () =
+  let exact = " opaque-reader-fixture\t" in
+  let verified = ref [] in
+  let stored =
+    Credential.stored_token_of_file ~exact_token:(Some exact)
+      ~read_http_candidate:(fun () -> fail "a valid exact token must not read a different representation")
+      ~verify:(fun token ->
+        verified := token :: !verified;
+        if String.equal token exact then Ok () else Error Credential.Mismatched_token)
+  in
+  check (list string) "exact bytes are verified once" [ exact ] (List.rev !verified);
+  check bool "startup uses the existing opaque token rather than minting" true
+    (startup_plan stored = Credential.Use exact);
+  check bool "a later refusal does not authorize replacing the valid exact token" true
+    (workspace_refresh ~sent:exact stored = Credential.Keep_held)
+
+let test_http_file_candidate_is_verified_after_exact_rejection () =
+  let exact = "reader-fixture\n" and candidate = "reader-fixture" in
+  let verified = ref [] and candidate_reads = ref 0 in
+  let stored =
+    Credential.stored_token_of_file ~exact_token:(Some exact)
+      ~read_http_candidate:(fun () -> incr candidate_reads; Some candidate)
+      ~verify:(fun token ->
+        verified := token :: !verified;
+        if String.equal token candidate then Ok () else Error Credential.Mismatched_token)
+  in
+  check (list string) "the exact bytes precede HTTP candidate verification"
+    [ exact; candidate ] (List.rev !verified);
+  check int "one fallback read" 1 !candidate_reads;
+  check bool "startup adopts the verified HTTP representation without minting" true
+    (startup_plan stored = Credential.Use candidate);
+  check bool "refresh adopts that verified candidate rather than minting over it" true
+    (workspace_refresh ~sent:"previous-fixture" stored = Credential.Adopt candidate)
+
+let test_rejected_http_candidates_keep_the_existing_replacement_policy () =
+  let exact = "reader-fixture\n" and candidate = "reader-fixture" in
+  List.iter (fun (rejection, expected_plan, expected_refresh) ->
+    let verified = ref [] in
+    let stored =
+      Credential.stored_token_of_file ~exact_token:(Some exact)
+        ~read_http_candidate:(fun () -> Some candidate)
+        ~verify:(fun token ->
+          verified := token :: !verified;
+          Error (if String.equal token exact then Credential.Mismatched_token else rejection))
+    in
+    check (list string) "both representations were authoritatively rejected"
+      [ exact; candidate ] (List.rev !verified);
+    check bool "startup retains the typed policy" true (startup_plan stored = expected_plan);
+    check bool "refresh retains the typed policy" true
+      (workspace_refresh ~sent:candidate stored = expected_refresh))
+    [ (Credential.Expired_token, Credential.Mint Credential.Replaces_expired,
+       Credential.Remint Credential.Replaces_expired)
+    ; (Credential.Mismatched_token, Credential.Mint Credential.Replaces_mismatched,
+       Credential.Remint Credential.Replaces_mismatched)
+    ; (Credential.Other_rejection, Credential.Use candidate, Credential.Keep_held)
+    ]
+
+let test_an_unchanged_or_absent_http_candidate_keeps_the_exact_verdict () =
+  let exact = "opaque-reader-fixture" in
+  List.iter (fun candidate ->
+    let calls = ref 0 in
+    let stored =
+      Credential.stored_token_of_file ~exact_token:(Some exact)
+        ~read_http_candidate:(fun () -> candidate)
+        ~verify:(fun _ -> incr calls; Error Credential.Other_rejection)
+    in
+    check int "the same representation is not reverified" 1 !calls;
+    check bool "an unrelated refusal remains the server's decision" true
+      (startup_plan stored = Credential.Use exact)) [ None; Some exact ]
+
+(* Minting is for a workspace that is already here and demands a bearer. The
+   two conditions are separate: a missing auth config reads as the default and
+   the default demands one, so an empty directory claims to require a bearer it
+   has nowhere to put. *)
+let test_plan_mints_only_into_a_workspace_that_demands_one () =
+  let plan ~requires ~here =
+    Credential.plan ~env_token:None ~workspace_token:Credential.Not_stored
+      ~workspace_requires_token:requires ~workspace_initialized:here
+  in
+  check bool "a demanding workspace that is here mints" true
+    (plan ~requires:true ~here:true = Credential.Mint Credential.First_token);
+  check bool "a demanding path with no workspace does not mint" true
+    (plan ~requires:true ~here:false = Credential.No_workspace);
+  check bool "an open workspace does not mint" true
+    (plan ~requires:false ~here:true = Credential.Go_without);
+  check bool "an open path with no workspace needs nothing" true
+    (plan ~requires:false ~here:false = Credential.Go_without)
+
+(* A persisted bearer whose record has expired is not a bearer this client can
+   use. Carrying it was the bug: every read came back refused, and restarting
+   found the same file and carried it again. The environment still wins -- an
+   operator who pointed this run at a credential gets that credential. *)
+let test_an_expired_stored_token_is_replaced () =
+  let plan ?(env = None) ?(requires = true) ?(here = true) () =
+    Credential.plan ~env_token:env ~workspace_token:Credential.Stored_expired
+      ~workspace_requires_token:requires ~workspace_initialized:here
+  in
+  check bool "a demanding workspace replaces it" true
+    (plan () = Credential.Mint Credential.Replaces_expired);
+  check bool "the environment still wins" true
+    (plan ~env:(Some "env") () = Credential.Use "env");
+  check bool "an open workspace goes without rather than carry it" true
+    (plan ~requires:false () = Credential.Go_without);
+  check bool "no workspace, no mint" true
+    (plan ~here:false () = Credential.No_workspace)
+
+(* The two mints are different news. An operator whose credential ran out
+   should hear that, not that it never had one. *)
+let test_a_replacement_says_the_old_one_expired () =
+  match Credential.outcome_notice (Credential.Minted Credential.Replaces_expired) with
+  | None -> fail "a replacement must be reported"
+  | Some notice ->
+      check bool "it says the stored one expired" true (has "had expired" notice);
+      check bool "it does not claim none was present" false
+        (has "no operator token was present" notice)
+
+(* A file the record no longer holds is minted over like an expired one: it is
+   what a mint that failed between its two writes leaves, and what another
+   masc-tui's mint leaves for this one. *)
+let test_a_mismatched_stored_token_is_replaced () =
+  check bool "a demanding workspace replaces it" true
+    (Credential.plan ~env_token:None ~workspace_token:Credential.Stored_mismatched
+       ~workspace_requires_token:true ~workspace_initialized:true
+     = Credential.Mint Credential.Replaces_mismatched);
+  match Credential.outcome_notice (Credential.Minted Credential.Replaces_mismatched) with
+  | None -> fail "a replacement must be reported"
+  | Some notice ->
+      check bool "it says the file no longer matched" true (has "no longer matched" notice)
+
+(* After a refusal the workspace is read again. A different bearer there was
+   minted by another masc-tui and is adopted, not minted over; only an
+   expired or mismatched file is replaced; a bearer from the environment is
+   never this client's to replace. *)
+let test_refresh_after_a_refusal () =
+  let refresh ?(source = Credential.From_workspace) ?(credential_record = true)
+      stored =
+    Credential.refresh_plan ~source ~sent:"old" ~stored ~credential_record
+      ~workspace_requires_token:true ~workspace_initialized:true
+  in
+  check bool "a different bearer in the workspace is adopted" true
+    (refresh (Credential.Stored "new") = Credential.Adopt "new");
+  check bool "the same bearer is kept: nothing here can change" true
+    (refresh (Credential.Stored "old") = Credential.Keep_held);
+  check bool "an expired file is minted over" true
+    (refresh Credential.Stored_expired = Credential.Remint Credential.Replaces_expired);
+  check bool "a mismatched file is minted over" true
+    (refresh Credential.Stored_mismatched
+     = Credential.Remint Credential.Replaces_mismatched);
+  check bool "an environment bearer is left alone" true
+    (refresh ~source:Credential.From_environment Credential.Stored_expired
+     = Credential.Keep_held);
+  check bool "an open workspace mints nothing" true
+    (Credential.refresh_plan ~source:Credential.From_workspace ~sent:"old"
+       ~stored:Credential.Stored_expired ~credential_record:true
+       ~workspace_requires_token:false ~workspace_initialized:true
+     = Credential.Keep_held);
+  (* An operator who deleted this client's credential while it ran is not
+     overruled by the next refusal. *)
+  check bool "a mismatched file with no record left is not minted over" true
+    (refresh ~credential_record:false Credential.Stored_mismatched
+     = Credential.Keep_held);
+  check bool "no file and no record is not minted either" true
+    (refresh ~credential_record:false Credential.Not_stored
+     = Credential.Keep_held);
+  check bool "a bearer written since is still adopted without a record" true
+    (refresh ~credential_record:false (Credential.Stored "new")
+     = Credential.Adopt "new")
+
+(* The self-mint window is this client's own policy, not the workspace's. The
+   workspace default is a day, meant for an operator sitting in front of a
+   session; a client left running overnight is exactly what that window
+   refuses. The upper bound is the store's: a longer window would make every
+   mint fail instead of lasting longer. *)
+let test_self_mint_window_is_neither_a_day_nor_forever () =
+  check int "thirty days" (24 * 30) Credential.self_mint_expiry_hours;
+  check bool "outlasts an operator session" true
+    (Credential.self_mint_expiry_hours > 24);
+  check bool "within the year the credential store will issue" true
+    (Credential.self_mint_expiry_hours <= 8_760)
+
+(* Silence is right for the two ordinary outcomes; a mint and a failure both
+   change what the operator should expect from the next few reads. *)
+let test_only_the_notable_outcomes_speak () =
+  check bool "holding a bearer says nothing" true
+    (Credential.outcome_notice Credential.Held = None);
+  check bool "a workspace that demands nothing says nothing" true
+    (Credential.outcome_notice Credential.Not_required = None);
+  (match Credential.outcome_notice (Credential.Minted Credential.First_token) with
+   | None -> fail "a fresh mint must be reported"
+   | Some notice ->
+       check bool "a mint says it made one" true (has "minted one" notice);
+       (* Read off the constant rather than spelled out, so the sentence
+          cannot go on claiming thirty days after the window changes. *)
+       check bool "a mint says how long it lasts" true
+         (has
+            (Printf.sprintf "%d days" (Credential.self_mint_expiry_hours / 24))
+            notice));
+  match Credential.outcome_notice (Credential.Mint_failed "disk is read-only") with
+  | None -> fail "a failed mint must be reported"
+  | Some notice ->
+      check bool "a failed mint carries its own detail" true
+        (has "disk is read-only" notice);
+      check bool "a failed mint names the remedy" true
+        (has Credential.remedy notice)
+
+(* The one outcome a first install produces. It is the ordinary path -- the
+   server that makes the workspace is the one the TUI starts a moment later --
+   so the line must not hand over a command for a state that clears itself,
+   which is what made the operator distrust it. *)
+let test_a_pending_workspace_asks_nothing_of_the_operator () =
+  match Credential.outcome_notice Credential.Workspace_pending with
+  | None -> fail "a pending workspace must be reported"
+  | Some notice ->
+      check bool "it says what is missing" true
+        (has "no workspace to mint into" notice);
+      check bool "it says this client takes it again" true
+        (has "mints one once a server answers" notice);
+      check bool "it hands over no command" false
+        (has Credential.login_command notice);
+      check bool "it does not name the remedy" false
+        (has Credential.remedy notice)
+
+(* A boot with no workspace is the one outcome a workspace appearing later
+   would change, and the reason a first install recovers without [masc login]:
+   the server that makes the workspace is the one the TUI starts a moment
+   after the boot decision was taken. The other four are answers already --
+   including a mint that failed against a workspace that was already here,
+   which is local file work and fails the same way after the server is up. *)
+let test_only_a_pending_workspace_is_taken_again () =
+  check bool "a missing workspace is taken again" true
+    (Credential.outcome_needs_retry Credential.Workspace_pending);
+  List.iter
+    (fun (label, outcome) ->
+      check bool (label ^ " is settled") false
+        (Credential.outcome_needs_retry outcome))
+    [ ("a held bearer", Credential.Held)
+    ; ("a fresh mint", Credential.Minted Credential.First_token)
+    ; ("a replaced expired bearer", Credential.Minted Credential.Replaces_expired)
+    ; ("a workspace that demands none", Credential.Not_required)
+    ; ("a mint that failed", Credential.Mint_failed "disk is read-only")
+    ]
+
+(* The level is part of the contract, not decoration: a first install's pending
+   workspace is the ordinary path and must not read as an error, while a mint
+   that failed is the one the operator has to act on. Reporting the pending
+   workspace as an error made a working first start read as a broken one. *)
+let test_only_a_failed_mint_is_an_error () =
+  check string "a failed mint is an error" "error"
+    (Credential.outcome_level (Credential.Mint_failed "disk is read-only"));
+  List.iter
+    (fun (label, outcome) ->
+      check string (label ^ " is not an error") "system"
+        (Credential.outcome_level outcome))
+    [ ("a held bearer", Credential.Held)
+    ; ("a fresh mint", Credential.Minted Credential.First_token)
+    ; ("a replaced expired bearer", Credential.Minted Credential.Replaces_expired)
+    ; ("a workspace that demands none", Credential.Not_required)
+    ; ("a pending workspace", Credential.Workspace_pending)
+    ]
+
+let () =
+  run "tui_credential"
+    [ ( "refusal"
+      , [ test_case "the server reason comes from the typed code" `Quick
+            test_the_server_reason_comes_from_the_typed_code
+        ; test_case "the plan prefers the environment" `Quick
+            test_plan_prefers_the_environment
+        ; test_case "a valid exact opaque file token is never reminted" `Quick
+            test_exact_opaque_file_token_is_used_without_replacement
+        ; test_case "the HTTP candidate is verified only after exact rejection" `Quick
+            test_http_file_candidate_is_verified_after_exact_rejection
+        ; test_case "rejected HTTP candidates keep the replacement policy" `Quick
+            test_rejected_http_candidates_keep_the_existing_replacement_policy
+        ; test_case "an absent or identical HTTP candidate keeps the exact verdict" `Quick
+            test_an_unchanged_or_absent_http_candidate_keeps_the_exact_verdict
+        ; test_case "minting is only into a workspace that demands one" `Quick
+            test_plan_mints_only_into_a_workspace_that_demands_one
+        ; test_case "an expired stored token is replaced" `Quick
+            test_an_expired_stored_token_is_replaced
+        ; test_case "a replacement says the old one expired" `Quick
+            test_a_replacement_says_the_old_one_expired
+        ; test_case "a mismatched stored token is replaced" `Quick
+            test_a_mismatched_stored_token_is_replaced
+        ; test_case "refresh after a refusal" `Quick test_refresh_after_a_refusal
+        ; test_case "the self-mint window is the client's own" `Quick
+            test_self_mint_window_is_neither_a_day_nor_forever
+        ; test_case "only the notable outcomes speak" `Quick
+            test_only_the_notable_outcomes_speak
+        ; test_case "a pending workspace asks nothing of the operator" `Quick
+            test_a_pending_workspace_asks_nothing_of_the_operator
+        ; test_case "only a pending workspace is taken again" `Quick
+            test_only_a_pending_workspace_is_taken_again
+        ; test_case "only a failed mint is an error" `Quick
+            test_only_a_failed_mint_is_an_error
+        ] )
+    ]

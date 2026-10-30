@@ -1,0 +1,160 @@
+val default_runtime_id : unit -> string
+val bool_of_env_default : string -> default:bool -> bool
+val bool_of_env_opt : string -> bool option
+val bool_of_string : string -> bool option
+val int_of_env_default :
+  string -> default:int -> min_v:int -> max_v:int -> int
+val float_of_env_default :
+  string -> default:float -> min_v:float -> max_v:float -> float
+val validate_name : string -> bool
+val utf8_repair_string : string -> string
+val keeper_bootstrap_proactive_warmup_sec : unit -> int
+val keeper_bootstrap_stagger_step_sec : unit -> int
+val keeper_bootstrap_retry_interval_sec : unit -> int
+val keeper_batch_limit : unit -> int
+val keeper_unified_temperature : unit -> float
+val keeper_status_fast_default : unit -> bool
+val keeper_enable_thinking : unit -> bool option
+val ensure_runtime_params_init : unit -> unit
+type sandbox_profile =
+  Keeper_types_profile_sandbox.sandbox_profile =
+    Docker
+  | Micro_vm
+  | Remote_ssh
+module Sandbox_profile_tla =
+  Keeper_types_profile_sandbox.Sandbox_profile_tla
+type network_mode =
+  Keeper_types_profile_sandbox.network_mode =
+    Network_none
+  | Network_inherit
+  | Network_policy
+val to_tla_symbol : network_mode -> string
+val all_symbols : string list
+val all_states : network_mode list
+val terminal_symbols : string list
+val active_symbols : string list
+val idle_symbols : string list
+val is_terminal : network_mode -> bool
+val is_active : network_mode -> bool
+val is_idle : network_mode -> bool
+val sandbox_profile_to_string : sandbox_profile -> string
+val sandbox_profile_of_string : string -> sandbox_profile option
+val all_sandbox_profiles : sandbox_profile list
+val valid_sandbox_profile_strings : string list
+val network_mode_to_string : network_mode -> string
+val network_mode_of_string : string -> network_mode option
+val all_network_modes : network_mode list
+val valid_network_mode_strings : string list
+val default_network_mode_for_profile : sandbox_profile -> network_mode
+type keeper_profile_defaults =
+  Keeper_types_profile_defaults.keeper_profile_defaults = {
+  id : Ids.Keeper_id.t option;
+  manifest_path : string option;
+  instructions : string option;
+  activation_mode : Keeper_activation_mode.t option;
+  input_policy : Keeper_input_policy.t option;
+  mention_targets : string list;
+  board_interests : string list;
+  sandbox_profile :
+    Keeper_types_profile_sandbox.sandbox_profile option;
+  sandbox_image : string option;
+  network_mode : Keeper_types_profile_sandbox.network_mode option;
+  remote_endpoint : string option;
+  microvm_backend : Keeper_microvm_backend.t option;
+  microvm_memory : Keeper_microvm_guest_size.memory option;
+  microvm_cpus : Keeper_microvm_guest_size.cpus option;
+  observation_run : Keeper_types_profile_sandbox.observation_run option;
+  max_context_override : int option;
+  telemetry_feedback_enabled : bool option;
+  telemetry_feedback_window_hours : int option;
+  always_allow : bool option;
+  voice_always_allow : bool option;
+  native_tool_posture : Runtime_native_tools.posture option;
+  skill_names : string list option;
+  attached_tool_allow : string list option;
+  tool_deny : string list;
+  agent_core_env : (string * string) list;
+}
+val empty_keeper_profile_defaults : keeper_profile_defaults
+val dedupe_keep_order : 'a list -> 'a list
+val normalize_name_list : string list -> string list
+val normalize_board_interests : string list -> string list
+val normalize_name_list_opt : string list -> string list option
+val lower_string_list_opt : string list -> string list option
+val first_some : 'a option -> 'a option -> 'a option
+val string_of_toml_value_for_env :
+  Keeper_toml_loader.toml_value -> string option
+val agent_core_env_key_prefix : string
+val agent_core_env_key_is_allowed : string -> bool
+val extract_agent_core_env_from_doc :
+  Keeper_toml_loader.toml_doc -> (string * string) list
+val profile_defaults_of_toml :
+  Keeper_toml_loader.toml_doc ->
+  (keeper_profile_defaults, string) result
+val parsed_field_key_names : string list
+val canonical_keeper_toml_key_names : string list
+val detect_unknown_keeper_toml_keys :
+  Keeper_toml_loader.toml_doc -> string list
+val merge_string_list : base:'a list -> 'a list -> 'a list
+val merge_keeper_profile_defaults :
+  base:keeper_profile_defaults ->
+  overlay:keeper_profile_defaults -> keeper_profile_defaults
+
+type keeper_toml_error_kind =
+  Keeper_types_profile_toml_io.keeper_toml_error_kind =
+  | Read_error
+  | Parse_error
+  | Profile_error
+  | Invalid_name
+  | Declaration_not_found of string
+      (** The keeper name that has no [keepers/<name>.toml]. *)
+  | Unknown_deny_tool of string list
+      (** [keeper.tools.deny] entries no descriptor offers the model. *)
+
+type keeper_toml_load_error =
+  Keeper_types_profile_toml_io.keeper_toml_load_error =
+  { keeper_path : string
+  ; failing_path : string
+  ; kind : keeper_toml_error_kind
+  ; detail : string
+  }
+
+val keeper_toml_error_kind_to_string : keeper_toml_error_kind -> string
+
+val unknown_deny_tools : string list -> string list
+(** The subset of a [keeper.tools.deny] list that names no model-visible
+    descriptor. Loading refuses a profile for which this is non-empty; a
+    later reader may assert on it, never warn. *)
+val keeper_toml_load_error_to_string : keeper_toml_load_error -> string
+val read_keeper_toml_content : string -> (string, keeper_toml_load_error) result
+val invalidate_parsed_toml_cache : unit -> unit
+val inspect_keeper_toml :
+  string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
+val inspect_keeper_toml_content :
+  path:string ->
+  string ->
+  (string * keeper_profile_defaults, keeper_toml_load_error) result
+(** Inspect captured bytes without reopening [path]. Successful parsing may
+    reuse the existing per-file cache for the exact path and full content;
+    parse/validation errors are not cached. *)
+val load_keeper_toml :
+  string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
+
+type keeper_toml_discovery =
+  Keeper_types_profile_toml_io.keeper_toml_discovery =
+  | Loaded of
+      { keeper_name : string
+      ; defaults : keeper_profile_defaults
+      }
+  | Invalid of
+      { keeper_name : string
+      ; error : keeper_toml_load_error
+      }
+
+val keeper_toml_discovery_name : keeper_toml_discovery -> string
+val keeper_toml_paths : string -> string list
+val discover_keeper_toml_path : string -> keeper_toml_discovery
+val discover_keeper_toml_read :
+  path:string -> (string, keeper_toml_load_error) result -> keeper_toml_discovery
+val discover_keepers_toml_with_paths : string -> (string * keeper_toml_discovery) list
+val discover_keepers_toml : string -> keeper_toml_discovery list

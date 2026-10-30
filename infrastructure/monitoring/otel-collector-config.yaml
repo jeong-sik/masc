@@ -1,0 +1,61 @@
+# masc-mcp OTel Collector — Prometheus 없이 Jaeger + VictoriaMetrics
+#
+# Context: RFC-0217 S4-2 이후 metrics는 OTLP push only.
+# Prometheus exporter는 제거하고:
+#   - traces → Jaeger
+#   - metrics → VictoriaMetrics (prometheusremotewrite)
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 128
+    send_batch_max_size: 256
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  prometheusremotewrite:
+    endpoint: http://victoriametrics:8428/api/v1/write
+    tls:
+      insecure: true
+    # No external_labels; service.name etc. come from OTLP resource attrs.
+
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheusremotewrite]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]
+
+  telemetry:
+    logs:
+      level: warn

@@ -1,0 +1,170 @@
+name = "masc_browser_act"
+description = """
+Run one action in an explicitly selected browser. Automation serves the listed actions; Stagehand serves only open_tab and top-level back/forward/reload/close_tab through native browser methods. open_window opens a new browser window holding one tab (automation Firefox and live BiDi only; it returns that tab's tabId). set_cookie and delete_cookie write one cookie for the tab's own page host on an automation Firefox only (never on a live or operator browser); the value is never returned. set_emulation sets a tab's reported location (latitude and longitude), locale and IANA timezone on an automation Firefox (reload the page to see new values); clear_emulation restores these overrides only and leaves permissions unchanged. A geolocation grant for the current origin persists until the owned browser session closes. block_requests makes the tab's requests to the listed hosts fail on an automation Firefox; unblock_requests lifts them. Live BiDi serves open_tab, open_window, and top-level back/forward/reload/close_tab only for a tab this connection opened with open_tab. On an ego connection, hand_off gives its whole task space to the operator for a step only a person can take, such as a sign-in or a captcha. Its receipt returns spaceId and spaceName, identifying the same Space without proving window visibility. Use masc_ask to explain the required step and request completion, retaining this browser binding and the original Task/Goal in context. While they hold it, Page work on that space is refused before any effect. space_status reads only the already bound numeric Space name, native ownership value and observation time, including delegated control, without Page calls, claim, takeover or input reset. It does not establish window visibility or login success. wait_for_control waits within the current agent-owned Space using Ego SDK polling; it does not take over, signal completed login, or clear unconfirmed input release. take_over takes it back: call it only after the operator says they are done, because nothing checks that they did. It returns the original Space and the native user-boundary activeTabId/egoPage, including unmanaged label=null. This is not current focus or login proof. Explicitly adopt an unmanaged returned tab before reading; takeover does not adopt or clear uncertain input. A changed or missing boundary target never falls back to the current active tab. SDK owns the execution wait; do not replay takeover after a lost result. Omit identity only for initial open_tab discovery; otherwise retain the exact browserSelection lane/clientId and returned tabId. A failed navigation after creation retains a partial-effect receipt: inspect that created tab on the same browser before deciding what to do next; never open another automatically.
+On an ego connection, adopt_tab explicitly manages an observed unmanaged tab in the same agent-controlled Space, with optional pageLabel (native SDK as). Reads and explicit input/navigation/activation can then use that native managed Page without changing its origin. release_tab returns an unknown-origin managed Page without closing its tab; agent-created Pages must be closed. These actions retain origin, never take over Space control and cannot resolve uncertain input release. A lost receipt requires listing the same Space before continuing, never replay.
+finish_space explicitly completes a successful Ego task once. Optional keepPages is either "all" to retain all current Pages or a list of permanent Page labels to retain for the user (default empty); all former Page labels end. The native "all" policy retains the Space even when it has no managed Pages. Never finish on an error, user-control handoff or worker retirement. A lost completion receipt must be reconciled, never replayed. Retained Spaces and tabs keep browser-backed files.
+Read elements in the same tab/frame for selectors; preserve decoded CSS escapes exactly. After no match, re-read. Actions can change external state: observe again after success or failure before retrying."""
+additional_properties = false
+# 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
+# 1,981 B 를 매번 실었고, 09-17~23 7일간 이 도구를 부른 서로 다른
+# Keeper 턴은 5개다. 지연의 손익은 호출 수가 아니라 필요했던 턴 수로
+# 가른다(masc #32062). 지연돼도 keeper_tool_search 목록에 이름이 남고,
+# 부르면 그 턴에 스키마가 붙는다. 한 줄 요약은 그 답에 한 번 나온다.
+defer_loading = true
+
+[[params]]
+name = "action"
+type = "string"
+enum = ["open_tab", "open_window", "hand_off", "take_over", "space_status", "finish_space", "wait_for_control", "adopt_tab", "release_tab", "close_tab", "back", "forward", "reload", "upload", "accept_dialog", "dismiss_dialog", "set_cookie", "delete_cookie", "set_emulation", "clear_emulation", "block_requests", "unblock_requests"]
+required = true
+description = "Browser-level actions: tabs, history, JavaScript dialogs, file upload, cookies, emulation, request blocking, and handing an ego task space to the operator and back. Page input (click, fill, select, scroll, keys) is masc_browser_interact."
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["automation", "live", "stagehand"]
+description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+
+[[params]]
+name = "tabId"
+type = "integer"
+minimum = 0
+description = "Required except open_tab, open_window, hand_off, take_over, space_status, finish_space and wait_for_control."
+
+[[params]]
+name = "selector"
+type = "string"
+description = "upload: one observed file input. Ego uses native locator/ref syntax, including a label or wrapper with one compatible input; other backends use decoded CSS."
+
+[[params]]
+name = "opener"
+type = "string"
+description = "upload on an ego browser instead of selector: one observed native locator/ref for the control whose click opens the page's file chooser. The click is the effect; the receipt's chosen lists the files handed to the chooser."
+
+[[params]]
+name = "text"
+type = "string"
+description = "accept_dialog prompt text."
+
+[[params]]
+name = "url"
+type = "string"
+description = "open_tab and open_window HTTP(S) URL."
+
+[[params]]
+name = "framePath"
+type = "array"
+items = { type = "string" }
+description = "Observed outer-to-inner frame selectors; preserve CSS escapes. Nonempty only for upload; omit for top-level."
+
+[[params]]
+name = "paths"
+type = "array"
+items = { type = "string" }
+description = "Keeper-readable playground-relative or visible absolute files, privately staged via sandbox before replacing input selection. Max 16 MiB/file."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Required with lane=live for open_tab, open_window, hand_off, take_over, space_status, finish_space and wait_for_control: exact observed live connection ID. Not valid on automation or stagehand."
+
+[[params]]
+name = "cookieName"
+type = "string"
+description = "set_cookie and delete_cookie: the cookie name, a token of at most 256 bytes (no space, comma, semicolon, equals sign or control character)."
+
+[[params]]
+name = "cookieValue"
+type = "string"
+description = "set_cookie: the cookie value, at most 4096 bytes, no control character or semicolon. It is a credential: it is sent to the browser and never returned."
+
+[[params]]
+name = "cookiePath"
+type = "string"
+description = "set_cookie: path scope starting with /; default /."
+
+[[params]]
+name = "cookieSecure"
+type = "boolean"
+description = "set_cookie: send only over HTTPS. Required with cookieSameSite None."
+
+[[params]]
+name = "cookieHttpOnly"
+type = "boolean"
+description = "set_cookie: hide the cookie from page scripts."
+
+[[params]]
+name = "cookieSameSite"
+type = "string"
+enum = ["Strict", "Lax", "None"]
+description = "set_cookie: SameSite attribute; omit to leave it to the browser."
+
+[[params]]
+name = "cookieMaxAgeSec"
+type = "integer"
+minimum = 1
+maximum = 604800
+description = "set_cookie: lifetime in seconds, at most 7 days. Omit for a session cookie."
+
+[[params]]
+name = "latitude"
+type = "number"
+minimum = -90.0
+maximum = 90.0
+description = "set_emulation: reported latitude in degrees; needs longitude. Also grants the current origin geolocation permission for the owned browser session; clear_emulation leaves that grant unchanged."
+
+[[params]]
+name = "longitude"
+type = "number"
+minimum = -180.0
+maximum = 180.0
+description = "set_emulation: reported longitude in degrees; needs latitude."
+
+[[params]]
+name = "accuracyMeters"
+type = "number"
+minimum = 0.0
+maximum = 10000.0
+description = "set_emulation: reported location accuracy in meters, above 0; default 10."
+
+[[params]]
+name = "locale"
+type = "string"
+description = "set_emulation: a language tag such as ko-KR (navigator.language and Intl)."
+
+[[params]]
+name = "timezone"
+type = "string"
+description = "set_emulation: an IANA time zone name such as Asia/Seoul."
+
+[[params]]
+name = "hosts"
+type = "array"
+items = { type = "string" }
+description = "block_requests: exact lowercase host names or IPv4 addresses such as ads.example.com. Requests from the tab and its frames to them fail until unblock_requests; a subdomain is a host of its own."
+
+[[params]]
+name = "controlOptions"
+type = "object"
+additional_properties = false
+description = "wait_for_control only: native SDK interval and timeout in positive finite milliseconds. The timeout must fit the action's reply window: a longer one is refused before the wait starts, and an omitted one waits for that window; an omitted interval keeps the SDK default. Requires an agent-owned Ego Space and exact clientId. Never takes over user control, completes a login handoff or clears uncertain input release."
+
+[[params.params]]
+name = "interval"
+type = "number"
+exclusive_minimum = 0.0
+
+[[params.params]]
+name = "timeout"
+type = "number"
+exclusive_minimum = 0.0
+
+[[params]]
+name = "pageLabel"
+type = "string"
+description = "adopt_tab only: optional permanent Page label, forwarded as the Ego SDK as option; omit to let Ego assign it. Requires observed tabId and exact live clientId."
+
+[[params]]
+name = "keepPages"
+description = "finish_space only: native all policy or distinct observed permanent Page labels to retain for the user; default empty list. All labels end, including retained Pages."
+one_of = [{ type = "string", enum = ["all"] }, { type = "array", items = { type = "string" } }]

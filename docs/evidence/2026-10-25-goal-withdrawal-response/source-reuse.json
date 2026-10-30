@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-24T15:40:46.269270+00:00",
+  "public_premise_head": "8c3b4ac12ac3f3b4cc399ed6b1cc50633bad4e69",
+  "original_execution_source": "d3a242837194e94c435a228228ac0eaab10724aa",
+  "critical22_059_to8c_identical": true,
+  "candidate_unified_prompt_sha256": "16602609a130792ef1123bd9b65a35bd1d442cc9d9ec306080a97e7c4fa224af",
+  "previous_tested_candidate_unified_prompt_sha256": "16602609a130792ef1123bd9b65a35bd1d442cc9d9ec306080a97e7c4fa224af",
+  "whole_file_identical": true,
+  "tests_reexecuted": false,
+  "previous_component_scope": "25 checks of actual file-extracted formatter, Goal rows, world arm, template renderer and pure official projection/codec/receipt; stand-in Goal types and registry resolution; not full Keeper/Host/SDK/vendor"
+}

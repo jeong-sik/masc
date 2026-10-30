@@ -1,0 +1,45 @@
+{
+  "space_id": 31,
+  "observed_at": "2026-10-24T17:49:46.134Z",
+  "source_kind": "actual rendered DOM from real backend capture",
+  "title": "MASC · Keepers",
+  "url": "http://127.0.0.1:53887/dashboard/#keepers?keeper=goal-canary",
+  "drawerPresent": true,
+  "labels": [
+    "어시스턴트 응답",
+    "도구 결과",
+    "도구 호출",
+    "사용자 메시지",
+    "현재 Goal",
+    "Task 검증 판정",
+    "동적 컨텍스트",
+    "Keeper 지침",
+    "Librarian 작업 맥락",
+    "메모리 회상메모리",
+    "시간 요약",
+    "도구 스키마"
+  ],
+  "buttons": [
+    "이 keeper",
+    "전체",
+    "✕",
+    "마지막 캡처 닫기",
+    "keeper_instructions\n23.3 KB\n▸",
+    "active_goals\n1.3 KB\n▸",
+    "completion_authority\n795 B\n▾",
+    "memory_os_recall\n1.1 KB\n▸",
+    "librarian_working_context\n352 B\n▸",
+    "dynamic_context\n4.1 KB\n▸",
+    "temporal_summary\n84 B\n▸"
+  ],
+  "summaries": [
+    "System 프롬프트 (25.4 KB)",
+    "Extra context (5.6 KB)"
+  ],
+  "renderError": false,
+  "authority_display_sha256": "602462c67a76266db3fabce6a9e75eec293bdb24cc6713af034711258a3dd793",
+  "authority_api_sha256": "602462c67a76266db3fabce6a9e75eec293bdb24cc6713af034711258a3dd793",
+  "authority_exactly_matches_api": true,
+  "api_turn": 3,
+  "api_trace": "trace-1792862169652-00000"
+}

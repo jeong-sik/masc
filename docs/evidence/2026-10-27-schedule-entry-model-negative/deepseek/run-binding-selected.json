@@ -1,0 +1,74 @@
+{
+  "schema": "masc.schedule-entry-negative.run-binding.v1",
+  "run": "after-effect-deepseek-c3-1",
+  "source": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+  "checkout_head": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+  "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+  "runtime_instance_id": "01a17b07-df8e-7000-bc21-915dd0530f00",
+  "binary_sha256": "8fb19608eac66c5b0cbaf10cc5a549ae9e3093222d4a504abcd8b6e85473adfe",
+  "controller_sha256": "5dc790ed515f4bdeab148314ab0dc0d4e6b48c0050c58105a8109bfacf8a5aec",
+  "workflow": "Minimal manual checks",
+  "workflow_run": 40428400174,
+  "workflow_head": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+  "workflow_ref": "ci/schedule-entry-candidate-20261027",
+  "artifact_id": 12700992849,
+  "archive_sha256": "83950a5247389ee0d915668ac27fccaa209b018d4f017a95fc4aa0e941937f4c",
+  "native_binding_sha256": "00c31be20e143b5cccc851025d316adccb97c77da6901f14ebad9d636de32687",
+  "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+  "second_schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second",
+  "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+  "authority_fixture": "owned Gate always_allow plus Keeper yolo; permissive fixture, not default authorization or a grant from scheduled wake",
+  "original_C2_argument_normalization": {
+    "allowed_substitutions": [
+      "A schedule_id",
+      "B schedule_id",
+      "A1/B/A2 nonce body",
+      "Keeper identity"
+    ],
+    "due_in_sec_unchanged": 1,
+    "tool_destinations_unchanged": true,
+    "bindings": [
+      {
+        "request": "A",
+        "normalized_same_as_original_C2": true,
+        "sha256": "3da29d5b2a1a0fdfa0492113f607d1c8cbd4f3130f8fd221b53fbd4d80508868"
+      },
+      {
+        "request": "B",
+        "normalized_same_as_original_C2": true,
+        "sha256": "ca8031293929df87864c1b5e3f329c89a18008258545cdd54de62a91fbddf8f7"
+      }
+    ],
+    "old_api_records": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/api-records.json",
+      "bytes": 2204039,
+      "sha256": "7376499d5590034bcc12e680b1b13924914cc2464d87671cda46ca70a8e24c1b"
+    }
+  },
+  "checkpoint_availability": {
+    "selected_observation_entries": 24,
+    "currently_missing_original_paths": 15,
+    "currently_replaced_bytes": 8,
+    "currently_matching_paths": 1,
+    "meaning": "Historical observer selections and recorded checkpointed reaction retained; many product-rotated mutable snapshot bytes are no longer independently re-readable. Do not claim full byte-identical preemption checkpoint restoration or full lineage PASS. Direct actual wrong-turn evidence is independent of these missing snapshots."
+  },
+  "controller_original_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/probe_real_busy_after_effect_c3_v2.py",
+  "original_invocation": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/probe_real_busy_after_effect_c3_v2.py",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/runs/after-effect-deepseek-c3-1",
+    "--binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/masc",
+    "--native-binding",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/native-binding.json",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--provider",
+    "ollama_cloud",
+    "--observation-deadline-unix",
+    "1793066372.9649012"
+  ],
+  "no_retry_or_provider_switch": true,
+  "scope": "Captured original run binding and independent comparison, not a new run or a directly executable relocated controller."
+}

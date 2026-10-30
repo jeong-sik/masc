@@ -1,0 +1,55 @@
+{
+  "result": "passed",
+  "refresh_seconds": 2,
+  "observation_seconds": 7,
+  "tui_sha256": "b1fcc25f1a2c9e6c2e3134f1cbe5791fa4222d9449734789723c23a239164ce3",
+  "server_commit": "a1dcd40acca7b43d34ee761afcf165d35b943c0c",
+  "upstream_api_port": 8958,
+  "authenticated_slack_content_measured": false,
+  "measurement": "completed read responses through loopback proxy; native host binary identity supplied separately",
+  "automatic_slack_live_read_count": 4,
+  "events": [
+    {
+      "elapsed_ms": 6487.5,
+      "app": "browser",
+      "lane": "live",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "elapsed_ms": 6730.2,
+      "app": "slack",
+      "lane": "live",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "elapsed_ms": 7784.6,
+      "app": "slack",
+      "lane": "live",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "elapsed_ms": 9848.8,
+      "app": "slack",
+      "lane": "live",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "elapsed_ms": 11831.4,
+      "app": "slack",
+      "lane": "live",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "elapsed_ms": 13813.7,
+      "app": "slack",
+      "lane": "live",
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

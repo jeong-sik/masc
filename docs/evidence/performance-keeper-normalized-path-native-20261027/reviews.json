@@ -1,0 +1,37 @@
+{
+  "schema": "masc.selected-review-locators.v1",
+  "authority": "Root-authored locator selection; original reports remain local. No formal GitHub approval.",
+  "reports": [
+    {
+      "path": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-source-review-v1/README.md",
+      "sha256": "e944472f6f96bb8ff62c1b47c88363ad54d3b1e223c50e6ce29f62eaa9596cad",
+      "kind": "Original local review locator; selected summary is root-authored, not a verbatim report or new verdict."
+    },
+    {
+      "path": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-source-review-v1/grammar-history-clarification.md",
+      "sha256": "6a53ffa5943234162c94620bff1a6c7b999a752485a3f0f15dbab82387745ec0",
+      "kind": "Original local review locator; selected summary is root-authored, not a verbatim report or new verdict."
+    },
+    {
+      "path": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-helper-review-v1/README.md",
+      "sha256": "3fd30426f1a3a91ac567d618698a300fbad4ca7c456b0f764eb6635a6ddc6bfe",
+      "kind": "Original local review locator; selected summary is root-authored, not a verbatim report or new verdict."
+    },
+    {
+      "path": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-native-plan-review-v1/README.md",
+      "sha256": "c023c20824d5e767eb320d150add69a6ae0b79332894f23d959b43298e9dbe35",
+      "kind": "Original local review locator; selected summary is root-authored, not a verbatim report or new verdict."
+    },
+    {
+      "path": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-native-evidence-review-v1/README.md",
+      "sha256": "8ded42470dd1b5094e73dd5a974f2da8d2c0c34843bae598364b3658b6d9e365",
+      "kind": "Original local review locator; selected summary is root-authored, not a verbatim report or new verdict."
+    },
+    {
+      "path": "artifacts/runs/extreme-perf-20261026/normalized-path-copy-native-evidence-review-v2/README.md",
+      "sha256": "c2d63abddd32b59cc559bca42219ea24a5ad3aad44a5c483e06b43394404a948",
+      "kind": "Original local review locator; selected summary is root-authored, not a verbatim report or new verdict."
+    }
+  ],
+  "scope": "Source/helper/plan reviews remain separate from native evidence consistency audits."
+}

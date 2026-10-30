@@ -1,0 +1,179 @@
+(** Eval_harness — scenario-based behavioural evaluation for Keeper
+    agents.
+
+    Defines scenario / grader / metric types, plus the runner +
+    summary helpers used by the eval CLI and dashboard. METR Task
+    Standard / OpenAI Harness inspired.
+
+    The [score_std_dev] aggregator is hidden. Callers consume the typed
+    records, deterministic grader / tool-expectation runners, pass@k /
+    summary builders, scenario loader, and {!report_to_string}.
+
+    @since 2.73.0 *)
+
+(** {1 Grader types} *)
+
+type match_mode =
+  | Exact
+  | Contains
+  | Regex of string
+  | NotContains
+
+type deterministic_grader = {
+  field : string;
+  expected : string;
+  mode : match_mode;
+  weight : float;
+  description : string;
+}
+
+type model_grader = {
+  prompt_template : string;
+  rubric : string;
+  weight : float;
+  description : string;
+}
+
+type grader =
+  | Deterministic of deterministic_grader
+  | ModelBased of model_grader
+
+(** {1 Scenario types} *)
+
+type tool_expectation = {
+  selector : Eval_tool_selector.t;
+  required : bool;
+  max_calls : int option;
+  args_contain : string option;
+}
+
+(** Whether the keeper owns the task it is tempted to complete. Only
+    [Self_owned] scenarios reach the anti-rationalization judge in production, so
+    verdict recording (--record-verdicts) is restricted to them. *)
+type ownership =
+  | Self_owned
+  | Foreign
+
+type scenario = {
+  id : string;
+  name : string;
+  description : string;
+  category : string;
+  goal : string;
+  setup_messages : string list;
+  expected_outcome : string;
+  tool_expectations : tool_expectation list;
+  graders : grader list;
+  tags : string list;
+  ownership : ownership;
+}
+
+(** {1 Result types} *)
+
+type grader_result = {
+  grader_desc : string;
+  score : float;
+  weight : float;
+  passed : bool;
+  detail : string;
+}
+
+type eval_run = {
+  scenario_id : string;
+  run_index : int;
+  trace_id : string;
+  scores : grader_result list;
+  weighted_score : float;
+  passed : bool;
+  tool_calls_made : string list;
+  total_turns : int;
+  total_cost_usd : float option;
+  (** [None] when this run's full cost was not observed. *)
+  duration_ms : int;
+  outcome : Trajectory.trajectory_outcome;
+  error : string option;
+}
+
+type eval_result = {
+  scenario : scenario;
+  runs : eval_run list;
+  pass_at_k : float;
+  mean_score : float;
+  consistency : float;
+  total_cost_usd : float option;
+  (** Full cost of every run, including failures. [None] for no runs or when
+      any run's cost is unreported; a known subtotal is not a total. *)
+  ci95_low : float;
+  ci95_high : float;
+  min_runs_met : bool;
+}
+
+type eval_suite_result = {
+  suite_name : string;
+  started_at : float;
+  ended_at : float;
+  results : eval_result list;
+  overall_pass_rate : float;
+  total_cost_usd : float option;
+  total_runs : int;
+}
+
+(** {1 Grading runners} *)
+
+val apply_deterministic_grader :
+  deterministic_grader -> string -> grader_result
+(** Score [value] against the deterministic grader. Returns a
+    binary 0.0 / 1.0 score in [grader_result.score]. *)
+
+val check_tool_expectations :
+  tool_expectation list ->
+  string list ->
+  grader_result list
+(** Run every tool expectation against the actual tool-call name
+    list and return one [grader_result] per expectation. *)
+
+val check_tool_expectations_with_evidence :
+  tool_expectation list ->
+  Eval_tool_selector.call list ->
+  grader_result list
+(** Run every tool expectation against descriptor-aware tool-call
+    evidence. Use this for replay/shadow harnesses that carry
+    [route_evidence]. *)
+
+(** {1 Pass@k + summary} *)
+
+val compute_pass_at_k : k:int -> n:int -> c:int -> float
+(** The chance that a [k]-run sample drawn from the [n] recorded runs, [c] of
+    which passed, contains at least one pass: [1 - C(n-c, k) / C(n, k)].
+
+    The draw is without replacement, so a single failing run cannot fill more
+    than one slot of the sample. That is what separates this from
+    [1 - (1 - c/n)^k], which reads the same counts with replacement and
+    therefore never reports more than this one does. *)
+
+val summarize_runs :
+  scenario:scenario -> k:int -> eval_run list -> eval_result
+(** Aggregate the runs of a single scenario into an
+    {!eval_result} (pass@k, mean score, consistency, total cost). The caller
+    must first separate model/configuration/experiment cohorts. Missing run
+    costs remain unknown in the result rather than forming a partial total. *)
+
+(** {1 Scenario IO} *)
+
+val scenario_of_json : Yojson.Safe.t -> (scenario, string) result
+
+val load_scenarios_from_file :
+  string -> (scenario list, string) result
+(** Decode every JSON object in [path] into a {!scenario}; surfaces
+    Yojson / Sys errors as [Error msg]. *)
+
+(** {1 Reporting} *)
+
+(** Threshold the human-facing report uses for a scenario's PASS/FAIL badge:
+    a scenario reads PASS when [pass_at_k] reaches this value. Display only —
+    nothing branches on the badge. *)
+val scenario_pass_at_k_threshold : float
+
+val report_to_string : eval_suite_result -> string
+(** Pretty-print a suite result as a human-readable report
+    (overall pass rate, per-scenario score breakdown). *)

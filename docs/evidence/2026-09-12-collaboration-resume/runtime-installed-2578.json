@@ -1,0 +1,192 @@
+{
+  "observed_at": 1789212487.47033,
+  "before_build": {
+    "release_version": "0.35.13",
+    "binary_version": "0.35.13",
+    "commit": "53203f998a2df9f6149e1c033d5602836a8d7066",
+    "commit_source": "embedded",
+    "binary_commit": "53203f998a2df9f6149e1c033d5602836a8d7066",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "494eb5859625dbc592f6360e20bdac76ce8be9040224c5fbae94f7382cf88d11",
+    "binary_commit_unix_ts": 1789209509.0,
+    "binary_commit_age_seconds": 2930,
+    "executable_path": "/private/tmp/masc-runtime-53203/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-runtime-53203",
+    "runtime_instance_id": "01a0953a-a053-7000-8ae4-051cceac386f",
+    "started_at": "2026-09-12T10:47:22Z",
+    "uptime_seconds": 2396
+  },
+  "after_build": {
+    "release_version": "0.35.13",
+    "binary_version": "0.35.13",
+    "commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "commit_source": "embedded",
+    "binary_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "ec8e45b98440645b975959060e81a1cb69495f78835d7e42c400ffd4c793e2ef",
+    "binary_commit_unix_ts": 1789210878.0,
+    "binary_commit_age_seconds": 1609,
+    "executable_path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183/masc",
+    "executable_dir": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183",
+    "runtime_instance_id": "01a0955f-9536-7000-b3ef-639e00e0d2bb",
+    "started_at": "2026-09-12T11:27:44Z",
+    "uptime_seconds": 22
+  },
+  "pid": 89912,
+  "artifact_source": {
+    "run_id": 34690056205,
+    "artifact_id": 10296878284,
+    "name": "masc-macos-arm64"
+  },
+  "installed_release_sha256": "31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183",
+  "captured_files": {
+    "tasks/backlog.json": {
+      "bytes": 8309,
+      "sha256": "b70a56a358f5ff5416834db4d8bd94f81fef0307b39c483d271e32b63f6c45cd"
+    },
+    "tasks/goal_task_links.json": {
+      "bytes": 175,
+      "sha256": "ace0a271672e832a68741f3d6726f37df6b357ca4cfe59f7cc612d9c3e3f2ef3"
+    },
+    "goals.json": {
+      "bytes": 1490,
+      "sha256": "6b08ea8b822529de2013c01bf48f9a7af36ea44c64b557a2be1ec8483ca2c8ae"
+    },
+    "goal_verifications.json": {
+      "bytes": 2297,
+      "sha256": "322866e40223e1ba69d3b8e4fe937849cd98bbc935840813097c8fe29bd03149"
+    },
+    "config/runtime.toml": {
+      "bytes": 3392,
+      "sha256": "40e88329d37a70862d538246781b4e44677a3d112b7f60aa2a0b6a14d48e6f1b"
+    },
+    "config/keepers/exhibit-editor.toml": {
+      "bytes": 612,
+      "sha256": "38c22672c50e3fa982f12cd0b97163985363412a106c88ee6f98ee2512003d24"
+    },
+    "config/keepers/exhibit-designer.toml": {
+      "bytes": 631,
+      "sha256": "30501da7c16f29e7fa5f5f4f0abb91c26ffb0375a7c02237d004299a3bf987c8"
+    },
+    "playground/docker/exhibit-editor/booklet.pdf": {
+      "bytes": 102608,
+      "sha256": "ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb"
+    },
+    "playground/docker/exhibit-editor/poster.png": {
+      "bytes": 86709,
+      "sha256": "2b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386"
+    },
+    "playground/docker/exhibit-editor/evidence.json": {
+      "bytes": 1637,
+      "sha256": "ca3daad86842e741fde60a67312abb12ca8220cf16fe2c6611cbb2a4df8a9fae"
+    },
+    "playground/docker/exhibit-editor/renders/page1.png": {
+      "bytes": 64091,
+      "sha256": "3db665442ed4dbcef2eafc5a769868ce9772814f9ecc7edd7acf2ba726e1b34c"
+    },
+    "playground/docker/exhibit-editor/renders/page2.png": {
+      "bytes": 81051,
+      "sha256": "c85b181149d6bfd3fec00ad3fbd3e51eb75d2bb48d0a562c1e90cd6620eed731"
+    },
+    "playground/docker/exhibit-editor/renders/page3.png": {
+      "bytes": 80753,
+      "sha256": "9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62"
+    },
+    "playground/docker/exhibit-designer/poster.png": {
+      "bytes": 484694,
+      "sha256": "1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16"
+    },
+    "playground/docker/exhibit-designer/multimedia/garden.gif": {
+      "bytes": 588811,
+      "sha256": "da21aa4e6c7f80e88481f49c0c77e864b64e5f7f0ebe7536256b699b35396307"
+    },
+    "playground/docker/exhibit-designer/multimedia/garden.wav": {
+      "bytes": 2116844,
+      "sha256": "2471dc1e9805570267b668e05e05b7138a1e1cac489cebd6f4a2252dad8e96e0"
+    },
+    "playground/docker/exhibit-designer/multimedia/garden.mp3": {
+      "bytes": 289689,
+      "sha256": "1c2eaa4f20e51fdba0534a6fe71c1558c94d6a6dafc50194ab5bc88e397c6f7d"
+    },
+    "config/prompts/verification.md": {
+      "bytes": 10878,
+      "sha256": "a24a827be9c535af8d957dfd9a61effb86f754b45d227960bdf2d8a82861b6eb"
+    },
+    "workspace-memory/proposals/9b676bb25ad23dc951bfd7b8e5130f9b58a0384b205c8e40123df0e2865f98ff.json": {
+      "bytes": 26319,
+      "sha256": "9b676bb25ad23dc951bfd7b8e5130f9b58a0384b205c8e40123df0e2865f98ff"
+    },
+    "playground/docker/exhibit-editor/received/designer-poster.png": {
+      "bytes": 484694,
+      "sha256": "1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16"
+    },
+    "playground/docker/exhibit-editor/notes/exhibition-memory-handoff.md": {
+      "bytes": 6586,
+      "sha256": "12bd9264c83411313dbb1f4a6c7ed1a1c126da3076e67cb81e0358acf16bcec4"
+    },
+    "playground/docker/exhibit-designer/received/editor-handoff-brief.md": {
+      "bytes": 6586,
+      "sha256": "12bd9264c83411313dbb1f4a6c7ed1a1c126da3076e67cb81e0358acf16bcec4"
+    }
+  },
+  "changed_captured_files": [],
+  "initial_operations": [
+    {
+      "operation_id": "kmsg-290f18125241cc7094ae744f136c574a",
+      "state": "running",
+      "started_at": 1789212474.141286,
+      "completed_at": null,
+      "outcome_ref": null,
+      "failure_kind": null,
+      "failure_detail": null
+    },
+    {
+      "operation_id": "kmsg-39825b6f9ece6b32ec403230b2531748",
+      "state": "failed",
+      "started_at": 1789212474.088111,
+      "completed_at": 1789212474.138894,
+      "outcome_ref": null,
+      "failure_kind": "Turn_exception",
+      "failure_detail": "turn_failed: original direct runtime checkpoint is unavailable or invalid (operation=kmsg-39825b6f9ece6b32ec403230b2531748 trace=trace-1789042595401-00001 turn=644 sha256=a068b517b8c0aabb1401bd8e8bda0b3c14a33c996b51eefe8002fe98b41e94f5); continuation cannot be replayed"
+    },
+    {
+      "operation_id": "kmsg-bd06b067ff118b7c0a59ac15a2384c4d",
+      "state": "succeeded",
+      "started_at": 1789208672.941375,
+      "completed_at": 1789208841.443728,
+      "outcome_ref": "trace-1789042595401-00001#381",
+      "failure_kind": null,
+      "failure_detail": null
+    },
+    {
+      "operation_id": "kmsg-d6fbbb3f8c19ac26e34419dfc2c5617a",
+      "state": "succeeded",
+      "started_at": 1789207630.235403,
+      "completed_at": 1789207838.146435,
+      "outcome_ref": "trace-1789042595401-00001#377",
+      "failure_kind": null,
+      "failure_detail": null
+    },
+    {
+      "operation_id": "kmsg-0cc88b1200e2c82c76abe6c566f1b8f1",
+      "state": "queued",
+      "started_at": null,
+      "completed_at": null,
+      "outcome_ref": null,
+      "failure_kind": null,
+      "failure_detail": null
+    }
+  ],
+  "overall_status": "warning",
+  "overall_status_reasons": [
+    "keeper_event_queue:runnable_backlog=8"
+  ],
+  "limitations": [
+    "Candidate deployment; failing native fixture and latest-main build are not declared passing.",
+    "22 file hashes compare observations immediately before/after upgrade, not all runtime files.",
+    "Historical missing checkpoint becomes durable failure; it is not replayed or fabricated.",
+    "SQLite backup retained privately; live database was not edited directly."
+  ]
+}

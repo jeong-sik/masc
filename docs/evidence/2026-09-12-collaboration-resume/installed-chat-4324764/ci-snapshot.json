@@ -1,0 +1,38 @@
+[
+  {
+    "id": 34705063187,
+    "name": "Test",
+    "head_sha": "4324764e959a5ff8b265b292e5bab9f68e550313",
+    "status": "completed",
+    "conclusion": "success",
+    "html_url": "https://github.com/jeong-sik/masc/actions/runs/34705063187",
+    "updated_at": "2026-09-12T16:45:09Z"
+  },
+  {
+    "id": 34705064645,
+    "name": "Release",
+    "head_sha": "4324764e959a5ff8b265b292e5bab9f68e550313",
+    "status": "completed",
+    "conclusion": "success",
+    "html_url": "https://github.com/jeong-sik/masc/actions/runs/34705064645",
+    "updated_at": "2026-09-12T16:52:52Z"
+  },
+  {
+    "id": 34705688030,
+    "name": "Test",
+    "head_sha": "31bdf7597b63ace0f9a12883b5de3726b6993b09",
+    "status": "completed",
+    "conclusion": "failure",
+    "html_url": "https://github.com/jeong-sik/masc/actions/runs/34705688030",
+    "updated_at": "2026-09-12T16:54:45Z"
+  },
+  {
+    "id": 34705689786,
+    "name": "Release",
+    "head_sha": "31bdf7597b63ace0f9a12883b5de3726b6993b09",
+    "status": "in_progress",
+    "conclusion": null,
+    "html_url": "https://github.com/jeong-sik/masc/actions/runs/34705689786",
+    "updated_at": "2026-09-12T16:37:23Z"
+  }
+]

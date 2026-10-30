@@ -1,0 +1,16 @@
+[
+  {
+    "ip_family": "-4",
+    "exit_code": 0,
+    "result": "301 43.108.87.199 0.030009",
+    "diagnostic": "",
+    "elapsed_s": 0.126
+  },
+  {
+    "ip_family": "-6",
+    "exit_code": 7,
+    "result": "000  0.000000",
+    "diagnostic": "curl: (7) Failed to connect to api.z.ai port 443 after 4 ms: Couldn't connect to server",
+    "elapsed_s": 0.031
+  }
+]

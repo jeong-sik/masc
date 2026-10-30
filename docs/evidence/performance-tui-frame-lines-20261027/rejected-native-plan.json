@@ -1,0 +1,21 @@
+{
+  "schema": "masc.native-extracted-frame-lines-carrier.v1",
+  "parent_plan": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/tui-frame-lines-prototype-v1/plan.json",
+  "parent_plan_sha256": "b72df21e4bb6e32a6927c97147aade6fe0c219b05d7a18791ab43396f5307691",
+  "source": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/tui-frame-lines-native-carrier-v1/carrier.ml",
+  "source_sha256": "916362435227be25707a7c9feaf9dc96d222889ace231f09a96eda50af4e8554",
+  "parent_carrier_sha256": "6ef5b204484b059f1671225e14e9694bec408524f7d97abe968202ae4174fe71",
+  "delta": "Only backend provenance string; same baseline/candidate/correctness inputs/ABBA workload.",
+  "compiler": "/Users/dancer/.opam/5.5.1/bin/ocamlopt",
+  "compiler_sha256": "ccadb1995ae48aa74d8df099c313a1bd6a4356e37e112fe938636f9607142488",
+  "compile_argv": [
+    "/Users/dancer/.opam/5.5.1/bin/ocamlopt",
+    "-I",
+    "+unix",
+    "unix.cmxa",
+    "carrier.ml",
+    "-o",
+    "carrier"
+  ],
+  "measurement_scope": "One local native stdlib/Unix-only extracted-helper compile; no Dune/project build, MASC typing, native TUI, service, installed runtime or SLO. Default native flags; not CI builder/loaded-library equivalence."
+}

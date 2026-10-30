@@ -1,0 +1,94 @@
+---
+rfc: "0441"
+title: "A running turn must not misread or outrank the person waiting on it"
+status: Draft
+created: 2026-09-10
+updated: 2026-10-29
+author: goo-yang-bong
+related: ["0345"]
+---
+
+# RFC-0441 — Typed turn-liveness policy: a running turn must not misread or outrank the person waiting on it (#25898)
+
+- Status: Draft
+- Author: goo-yang-bong
+- Related: masc#25898 (root-fix, cluster `turn-liveness-policy`), masc#20849 (17+ min priority inversion + dashboard stall misread), masc#21971, masc#24164, RFC-0345 (stream idle fail-safe floor), #29230/task-596 (historical wall-clock ceiling, removed by #39377), #28809 (HITL mid-turn preemption pattern)
+- Boundary vs task-596/#29230: #29230/task-596 documented a cumulative wall-clock ceiling, which #39377 removed. This RFC owns the **priority and observability of what waits on a running turn** — when a running turn must yield its lane to a person, and how the waiting person reads the runner's health. These remain disjoint concerns: turn lifetime and no-progress deadlines are separate from this policy's cost to other people.
+
+## 0. Summary
+
+A long-running autonomous turn is not a bug. Two things about it were: (1) it outranked the operator's direct message for its whole duration — measured 17+ min in #20849 — and (2) while the operator waited, the dashboard read the runner's healthy tool-grinding as "스트림 지연" (a dying transport), because the only liveness signal the waiting client had was its own silent SSE feed.
+
+This RFC addresses both under one typed policy statement: **the runner should yield to the person at the next proven resumable boundary, and the waiting person should see the runner's tool activity, not infer death from their own feed's silence.** AGENT_CORE has a checkpointed post-tool boundary. An official client's tool-completed notification alone does not prove that its result will be available to the model after a cold resume; that handoff needs separate verification.
+
+## 1. What already exists (do not re-implement — task-596 lesson)
+
+The cluster was filed before three layers landed; a reviewer must know what is already policy:
+
+- **Wake-class priority** (`Keeper_event_queue.urgency`, `Keeper_external_attention`): a mention or DM is classified `Mention`/`Direct_message` at the connector and is not the fleet's lowest grade. Owner direct messages dispatch through `Keeper_owner_registry.submit_operation` (the owner-operation queue), not the ambient `Connector_attention` stimulus.
+- **Mid-turn preemption for owner operations** (`chat_yield_request`): on AGENT_CORE, the running turn's checkpointed post-tool probe sees `queued_count > 0` and yields; the owner-op child (`Keeper_owner.start_child_if_needed`) is mutually exclusive with the running turn, so the yield is what hands the lane over. #28809 added the same probe for approved Gate resolutions. Official-client tool notifications have a separate result-handoff contract and do not establish this checkpoint guarantee.
+- **Turn lifetime and configured deadlines** (#39377): the cumulative wall-clock ceiling was removed. Progressing official-client turns have no cumulative time cutoff; declared idle and admission deadlines, explicit verification deadlines, and owner cancellation remain effective.
+- **Stream-idle fail-safe floor** (RFC-0345): a hung provider stream cannot freeze the chat lane; 600 s floor when unset. This covers the *genuine* dead-transport case the dashboard heuristic guesses at.
+
+## 2. Remaining gaps
+
+### 2.1 Gap A — ambient connector conversations had no mid-turn preemption
+
+The owner-operation probe covers a person's *direct* address. The HITL probe covers approved resolutions. But an **ambient** connector conversation (Slack/Discord channel the keeper follows, no mention, no DM) lands as a `Connector_attention` stimulus — and a probe chain that ended at those two would let a multi-hour autonomous run hold an ambient conversation's turn behind it, the same inversion #20849 measured, one class over.
+
+Every wake kind (`Proactive_tick`, `Woken []` and a nonempty `Woken`) uses one probe chain. None of them yields to a row that intake already read, the payloads the turn was itself woken by included, except an approved Gate resolution whose grant is still unspent.
+
+**Fix (this RFC, implemented for AGENT_CORE):** the probe chain ends with a third, narrow probe. It yields when a row of a kind that may preempt, a `Connector_attention` among them, reached the queue after the turn's intake read it, and never to a row intake already saw, the turn's own wake payloads included. The AGENT_CORE source turn checkpoints at the post-tool boundary and resumes after the conversation turn settles — the same cooperative yield `Runtime_agent.Yielded_to_durable_stimulus` models for #28809. This does not establish a replayable tool-result handoff for official clients.
+
+**Re-entry and liveness:** `Runtime_agent` passes `cooperative_yield_probe` to `Agent_core.Agent.Advanced.continue` when resuming with a probe, so the resumed source can reach this probe again. Each yield must be justified by a currently pending stimulus. A one-shot latch would suppress a later, genuinely new conversation. The callback shape alone does not prove the absence of livelock; queue ordering and repeated-yield behavior need verification.
+
+### 2.2 Gap B — the waiting client reads feed silence as death
+
+`ChatComposer`'s stall hint (`STREAM_STALL_THRESHOLD_S = 15`) is driven by `lastEventAt`, which the live-send path marks **only on SSE events from this client's own stream**. When the operator's message is queued behind a running turn:
+
+- the server has accepted (`KEEPER_CHAT_OPERATION_ACCEPTED`) and the operation is `queued`/`running` elsewhere;
+- the runner's tool activity streams to *its own* consumers, not to this SSE feed;
+- after 15 s of that silence the composer prints "마지막 수신 N초 전 — 스트림 지연" in warning color — to a user whose keeper is, in fact, healthily working.
+
+The hydrate path (post-reload, `hydrateTrackedKeeperChatOperation`) already marks the signal on every poll tick while the operation is queued or running; the live-send path does not poll between acceptance and the first reply event. Same store, two paths, one marks liveness and one doesn't.
+
+**Fix (this RFC):** liveness marking must not depend on which path owns the request. While the live-send stream is open and the operation is not yet streaming a reply, the client polls the operation (it already has the poll machinery and cadence from the hydrate path) and marks the stream signal from the operation's `queued`/`running` state — the same evidence the hydrate path uses. The runner's tool activity (last tool call time, count) is the deeper display the issue asked for; the poll-marked signal is the minimal honest fix that stops the death misread, and the display lands on top of the same poll data.
+
+### 2.3 Gap C — a debt-cap turn could ignore every later chat boundary
+
+RFC-0373 lets the autonomous lane take one slot after repeated chat-lane deferrals. That admission must survive until the autonomous turn can do work. The Owner previously published a debt-cap marker for the entire turn, and `chat_yield_request` ignored claimable chats at every tool boundary while the marker stayed set. A long autonomous turn could therefore complete many tools while the person's queued chat waited for the whole turn.
+
+**Fix:** the debt cap decides who enters the freed Owner slot. Once the admitted autonomous turn reaches a settled AGENT_CORE tool-result boundary, the ordinary chat-yield request applies. Official clients own their conversation history: sending a tool response to them does not prove that a cold resume will retain it. A queued chat alone therefore does not stop their admitted turn at a tool boundary; the chat waits until that turn ends. This changes no turn-count or time budget.
+
+**Remaining continuity risk:** official-client repetition detection can still stop a turn at a dynamic-tool boundary after a result was returned, before model-visible cold-resume retention has been proved. This existing loop guard remains necessary to stop repeated calls, including the measured identical-input loop with moving outputs. This change does not make that stop a proven resumable boundary. A safe early official-client handoff needs a runtime-specific result-retention and replay contract, tested by stopping and cold-resuming the vendor client after the exact tool result.
+
+## 3. Policy, stated once
+
+A running turn owes the person waiting on it at each proven resumable boundary:
+
+1. **Yield order** (highest first): claimed owner operations → approved HITL resolutions → a `Connector_attention`, or another kind that may preempt, that reached the queue after the turn's intake. A turn yields to none of the rows its intake already read, its own wake payloads included, except an approved HITL resolution whose grant is still unspent.
+   If the provider has not reached a proven resumable boundary, the admitted turn keeps
+   running. #39309 removes queue-triggered cancellation before its first response
+   event. AGENT_CORE can yield at its checkpointed post-tool boundary. A
+   debt-cap admission protects entry into the autonomous slot; it does not
+   suppress later chat yield requests after that boundary. An official-client
+   tool-completed event does not by itself prove a replayable result handoff,
+   so queued chats alone do not stop those clients at a tool boundary. Existing
+   repetition and terminal-effect stops can still end a turn there, with the
+   repetition stop's resume safety still unproved. Configured
+   no-progress timeouts release a stalled lane independently of queued input.
+2. **Honest liveness**: anyone waiting on the turn sees the turn's actual activity (tool calls, queue state), never an inference of death from their own feed's silence.
+3. **Turn lifetime is separate from this policy's axis**: a progressing turn may run long; #39377 removed the cumulative wall-clock ceiling. Declared silence and admission deadlines, explicit verification deadlines, and owner cancellation remain separate from the yield order and observability policy.
+
+## 4. Non-goals
+
+- Adding a cumulative turn-duration cap or hang-escape policy. The historical #29230/task-596 ceiling was removed by #39377; declared silence/admission deadlines and the RFC-0345 stream-idle floor remain separate.
+- Changing how mentions/DMs are classified or that they route to the owner-operation queue (existing policy, kept).
+- Interruption (cancel) of the source turn — the AGENT_CORE yield is cooperative at a persisted boundary; a forced-cancel lane is a separate design.
+
+## 5. Verification
+
+- Gap A: `test_keeper_turn_outcome` / `test_mid_turn_resume` (yield-and-resume still passes; probe chain extension adds a case); `dune build @check` clean. The 17-min symptom's class (ambient conversation held behind a `Woken` turn) has an in-tree fixture through the event queue's connector payload.
+- Gap B: the dashboard composer fixture (`primitives.test.ts`, `data-chat-stall-hint`) gains the queued-poll marking case; vitest runs it without a browser.
+- Gap C: the Owner debt-cap fixture admits the autonomous lane over a claimable chat, settles a local dynamic-tool result, checks the AGENT_CORE yield decision directly, keeps an official-client host turn running, and observes the chat claim after completion. Its direct AGENT_CORE decision probe does not execute or persist an Agent-core checkpoint, and its local dynamic-tool result does not prove vendor model-visible retention. A later official-client tool-boundary yield requires proof that a cold-resumed vendor conversation retains the exact tool result once; a local host callback or item-completed event alone does not establish that proof.
+- Post-merge: #25898 closes with before/after of one measured hold (issue text has the 17-min baseline from 2026-06-11).

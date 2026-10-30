@@ -1,0 +1,343 @@
+module Projection = Masc_tui_keeper_chat_projection
+
+let request_body ~request_id ~tool ~arguments =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ("id", `String request_id)
+      ; ("method", `String "tools/call")
+      ; ( "params"
+        , `Assoc [ ("name", `String tool); ("arguments", `Assoc arguments) ] )
+      ])
+
+type outcome = {
+  text : string;
+  is_error : bool;
+}
+
+type resource = {
+  uri : string;
+  name : string;
+  title : string option;
+  description : string option;
+  mime_type : string option;
+  size : int option;
+}
+
+(* Why a walk over the [resources/list] pages ended. A caller that cannot tell
+   a finished listing from one stopped at a bound will report a truncated list
+   as the whole thing -- which is the bug the walk exists to fix, one page size
+   further out. [Page_limit_reached] carries the bound it hit so the message
+   can name it. *)
+type resources_walk_stop =
+  [ `Complete
+  | `Page_limit_reached of int
+  | `Repeated_cursor of string
+  ]
+
+let string_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | Some _ | None -> None
+
+let int_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Some value
+  | Some (`Intlit value) -> int_of_string_opt value
+  | Some _ | None -> None
+
+(* The response object, whichever framing carried it. An SSE body holds it
+   on its [data:] line; the first such line is the answer. A body with no
+   such line is read as the object itself. *)
+let response_json body =
+  let data_lines =
+    String.split_on_char '\n' body
+    |> List.filter_map (fun line ->
+           match Projection.classify_sse_line line with
+           | Projection.Sse_data payload -> Some payload
+           | Projection.Sse_ignored | Projection.Sse_id _ | Projection.Sse_frame_end
+           | Projection.Sse_noncanonical_data ->
+               None)
+  in
+  let raw = match data_lines with first :: _ -> first | [] -> String.trim body in
+  match Yojson.Safe.from_string raw with
+  | json -> Ok json
+  | exception Yojson.Json_error detail -> Error ("tools/call answer was not JSON: " ^ detail)
+
+open Result.Syntax
+
+let text_of_content (content : Yojson.Safe.t) =
+  match content with
+  | `List parts ->
+      parts
+      |> List.filter_map (fun part ->
+             match part with
+             | `Assoc fields -> (
+                 match (string_field fields "type", string_field fields "text") with
+                 | Some "text", Some text -> Some text
+                 | _, _ -> None)
+             | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _
+               ->
+                 None)
+      |> String.concat "\n"
+  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ -> ""
+
+let outcome_of_body ~request_id body =
+  let* json = response_json body in
+  match json with
+  | `Assoc fields -> (
+      let answered =
+        match List.assoc_opt "id" fields with
+        | Some (`String id) -> Some id
+        | Some (`Int id) -> Some (string_of_int id)
+        | Some _ | None -> None
+      in
+      match answered with
+      | Some id when not (String.equal id request_id) ->
+          Error (Printf.sprintf "tools/call answered request %s, not %s" id request_id)
+      | Some _ | None -> (
+          match List.assoc_opt "error" fields with
+          | Some (`Assoc error) ->
+              Error
+                (Printf.sprintf "tools/call refused: %s"
+                   (Option.value ~default:"(no message)" (string_field error "message")))
+          | Some _ -> Error "tools/call refused with an error this cannot read"
+          | None -> (
+              match List.assoc_opt "result" fields with
+              | Some (`Assoc result) -> (
+                  let is_error =
+                    match List.assoc_opt "isError" result with
+                    | Some (`Bool value) -> value
+                    | Some _ | None -> false
+                  in
+                  match List.assoc_opt "content" result with
+                  | Some content -> (
+                      match text_of_content content with
+                      | "" -> Error "tools/call answered with no text content"
+                      | text -> Ok { text; is_error })
+                  | None -> Error "tools/call answered with no content")
+              | Some _ | None -> Error "tools/call answered with no result")))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "tools/call answer was not an object"
+
+let task_id_of_add_task text =
+  match Yojson.Safe.from_string text with
+  | `Assoc fields -> (
+      match string_field fields "task_id" with
+      | Some id -> Ok id
+      | None -> Error ("masc_add_task answered without a task_id: " ^ text))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error ("masc_add_task did not answer with an object: " ^ text)
+  | exception Yojson.Json_error _ -> Error ("masc_add_task did not answer JSON: " ^ text)
+
+(* The resources side of the same wire: list and read, framed exactly like
+   tools/call and read through the same SSE-or-plain body reader. *)
+
+let plain_request_body ~request_id ~method_ ~params =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ("id", `String request_id)
+      ; ("method", `String method_)
+      ; ("params", params)
+      ])
+
+let resources_list_request_body ?cursor ~request_id () =
+  let params =
+    match cursor with
+    | None -> `Assoc []
+    | Some cursor -> `Assoc [ ("cursor", `String cursor) ]
+  in
+  plain_request_body ~request_id ~method_:"resources/list" ~params
+
+let resources_read_request_body ~request_id ~uri =
+  plain_request_body ~request_id ~method_:"resources/read"
+    ~params:(`Assoc [ ("uri", `String uri) ])
+
+let display_name (resource : resource) =
+  match resource.title with
+  | Some title when String.trim title <> "" -> title
+  | Some _ | None -> resource.name
+
+type resource_content_kind =
+  | Resource_text of string
+  | Resource_blob of { base64 : string }
+
+type resource_content = {
+  rc_uri : string option;
+  rc_mime_type : string option;
+  rc_kind : resource_content_kind;
+}
+
+(* Every data payload on the stream, in order. A Streamable-HTTP server may
+   put notifications ahead of the response, and the colon-no-space spelling
+   is legal SSE, so this reads more than [response_json]'s first line. *)
+let response_candidates body =
+  let data_payloads =
+    String.split_on_char '\n' body
+    |> List.filter_map (fun line ->
+           let line =
+             if String.length line > 0 && line.[String.length line - 1] = '\r'
+             then String.sub line 0 (String.length line - 1)
+             else line
+           in
+           if String.length line >= 5 && String.sub line 0 5 = "data:" then
+             let payload = String.sub line 5 (String.length line - 5) in
+             Some (String.trim payload)
+           else None)
+    |> List.filter_map (fun payload ->
+           match Yojson.Safe.from_string payload with
+           | json -> Some json
+           | exception Yojson.Json_error _ -> None)
+  in
+  match data_payloads with
+  | [] -> (
+      match Yojson.Safe.from_string (String.trim body) with
+      | json -> [ json ]
+      | exception Yojson.Json_error _ -> [])
+  | payloads -> payloads
+
+let result_of_body ~request_id ~label body =
+  let candidates = response_candidates body in
+  let id_of fields =
+    match List.assoc_opt "id" fields with
+    | Some (`String value) -> Some value
+    | Some (`Int value) -> Some (string_of_int value)
+    | Some `Null -> None
+    | _ -> None
+  in
+  let matching =
+    List.find_map
+      (fun json ->
+        match json with
+        | `Assoc fields when id_of fields = Some request_id -> Some fields
+        | _ -> None)
+      candidates
+  in
+  match matching with
+  | Some fields -> (
+      match List.assoc_opt "error" fields with
+      | Some error -> Error (label ^ " error: " ^ Yojson.Safe.to_string error)
+      | None -> (
+          match List.assoc_opt "result" fields with
+          | Some (`Assoc result) -> Ok result
+          | Some _ | None -> Error (label ^ " answered with no result")))
+  | None -> (
+      (* No frame names our id. A parse-refusal answers with a null id and
+         an error member -- that error is the diagnosis, not the id gate. *)
+      let null_id_error =
+        List.find_map
+          (fun json ->
+            match json with
+            | `Assoc fields when id_of fields = None ->
+                List.assoc_opt "error" fields
+            | _ -> None)
+          candidates
+      in
+      match null_id_error with
+      | Some error -> Error (label ^ " error: " ^ Yojson.Safe.to_string error)
+      | None ->
+          if candidates = [] then Error (label ^ " answer was not JSON")
+          else Error (label ^ " answered a different request id"))
+
+let resource_of_row row =
+  match row with
+  | `Assoc fields -> (
+      match string_field fields "uri" with
+      | Some uri ->
+          let name =
+            match string_field fields "name" with
+            | Some name when String.trim name <> "" -> name
+            | Some _ | None -> uri
+          in
+          Some
+            { uri
+            ; name
+            ; title = string_field fields "title"
+            ; description = string_field fields "description"
+            ; mime_type = string_field fields "mimeType"
+            ; size = int_field fields "size"
+            }
+      | None -> None)
+  | _ -> None
+
+(* One [resources/list] answer: the page it carries and the cursor that leads
+   to the next one. The server pages this listing, and the entries a reader
+   is likeliest to be missing -- the wiki pages -- sort at its end, so a
+   caller that stops after the first answer loses them whole. *)
+let resources_page_of_body ~request_id body =
+  let* result = result_of_body ~request_id ~label:"resources/list" body in
+  let next_cursor =
+    match List.assoc_opt "nextCursor" result with
+    | Some (`String cursor) when String.trim cursor <> "" -> Some cursor
+    | Some _ | None -> None
+  in
+  match List.assoc_opt "resources" result with
+  | Some (`List rows) -> Ok (List.filter_map resource_of_row rows, next_cursor)
+  | Some _ | None -> Error "resources/list answered with no resources"
+
+let resources_of_body ~request_id body =
+  let* resources, _ = resources_page_of_body ~request_id body in
+  Ok resources
+
+(* Every page of the listing, in server order. [fetch] answers the raw body of
+   one [resources/list] request for the cursor it is given ([None] for the
+   first page), so the HTTP caller keeps its framing and this stays a pure
+   loop. Two stops keep a misbehaving server from spinning: a cursor seen
+   before ends the walk, and [max_pages] bounds even fresh cursors. Both stops
+   are reported in the returned [resources_walk_stop]; [Error] is only a
+   [fetch] or parse failure, so a caller never reads a cut-off page as the
+   whole listing. *)
+let resources_list_all ~request_id ?(max_pages = 64)
+    ~(fetch : cursor:string option -> (string, string) result) () :
+    (resource list * resources_walk_stop, string) result =
+  let rec loop ~cursor ~seen ~acc ~pages =
+    match fetch ~cursor with
+    | Error detail -> Error detail
+    | Ok body -> (
+        match resources_page_of_body ~request_id body with
+        | Error detail -> Error detail
+        | Ok (resources, next_cursor) -> (
+            let acc = List.rev_append resources acc in
+            match next_cursor with
+            | None -> Ok (List.rev acc, `Complete)
+            | Some cursor when List.mem cursor seen ->
+                Ok (List.rev acc, `Repeated_cursor cursor)
+            | Some cursor ->
+                if pages >= max_pages then
+                  Ok (List.rev acc, `Page_limit_reached max_pages)
+                else
+                  loop ~cursor:(Some cursor) ~seen:(cursor :: seen) ~acc
+                    ~pages:(pages + 1)))
+  in
+  loop ~cursor:None ~seen:[] ~acc:[] ~pages:1
+
+let resource_contents_of_body ~request_id body =
+  let* result = result_of_body ~request_id ~label:"MCP" body in
+  match List.assoc_opt "contents" result with
+  | Some (`List parts) ->
+      let invalid index =
+        Error (Printf.sprintf "MCP resource content part %d must contain exactly one text or blob string" index)
+      in
+      let rec decode index acc = function
+        | [] ->
+            if acc = [] then Error "MCP answered with no readable contents"
+            else Ok (List.rev acc)
+        | `Assoc fields :: rest ->
+            let kinds = List.filter (fun (key, _) -> key = "text" || key = "blob") fields in
+            let kind = match kinds with
+              | ["text", `String text] -> Some (Resource_text text)
+              | ["blob", `String base64] -> Some (Resource_blob {base64})
+              | _ -> None in
+            (match kind with
+             | None -> invalid index
+             | Some rc_kind ->
+                 let content =
+                   { rc_uri = string_field fields "uri"
+                   ; rc_mime_type = string_field fields "mimeType"
+                   ; rc_kind } in
+                 decode (index + 1) (content :: acc) rest)
+        | _ :: _ -> invalid index
+      in
+      decode 1 [] parts
+  | Some _ | None -> Error "MCP answered with no contents"

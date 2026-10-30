@@ -1,0 +1,122 @@
+{
+  "observed_at": "2026-10-24T16:26:22.300139+00:00",
+  "scope": "Read-only actual create boundary; omitted Goal is not inferred association. Observer has not linked or messaged.",
+  "create_wire": [
+    {
+      "request_id": "request-000008",
+      "request_sha256": "72eac5a2c06028f68bb25d9de2f7261e9bcf9264283d41cd01e810c740909fe2",
+      "response_sha256": "dabdf78bdb16903d3261f05965cdd09e0b8498622c28a24477bd09fb9f6e0e38",
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [
+        {
+          "id": "call_rhqzuwrp",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "description": "Modify workspace/acceptance.json to set alpha to true while keeping beta and gamma as false.",
+              "contract": {
+                "completion_contract": [
+                  "alpha is set to true",
+                  "beta and gamma remain false"
+                ],
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ]
+              },
+              "title": "Set alpha to true in acceptance.json"
+            }
+          }
+        }
+      ],
+      "last_tool_feedback": {
+        "role": "tool",
+        "tool_name": "Write",
+        "content": "{\"ok\":true,\"path\":\"/private/tmp/masc-goal-canary-3014cfce-qwen/.masc/playground/docker/goal-canary/workspace/acceptance.json\",\"mode\":\"overwrite\",\"bytes_written\":42,\"via\":\"docker\"}"
+      },
+      "public_response": "",
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T16:25:17.165419Z",
+          "done_reason": "stop",
+          "eval_count": 446,
+          "prompt_eval_count": 19727
+        }
+      ],
+      "thinking_codepoints_count_only": 1714
+    }
+  ],
+  "task": [
+    {
+      "id": "task-001",
+      "title": "Set alpha to true in acceptance.json",
+      "description": "Modify workspace/acceptance.json to set alpha to true while keeping beta and gamma as false.",
+      "priority": 3,
+      "files": [],
+      "created_at": "2026-10-24T16:25:17Z",
+      "created_by": "goal-canary",
+      "contract": {
+        "completion_contract": [
+          "alpha is set to true",
+          "beta and gamma remain false"
+        ],
+        "required_evidence": [
+          "artifact:workspace/acceptance.json"
+        ]
+      },
+      "status": "in_progress",
+      "assignee": "goal-canary",
+      "started_at": "2026-10-24T16:25:41Z"
+    }
+  ],
+  "goal_link_files": [
+    {
+      "path": "/tmp/masc-goal-canary-3014cfce-qwen/.masc/tasks/goal_task_links.json",
+      "exists": false
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3014cfce-qwen/.masc/tasks/goal_task_links.json.last-good",
+      "exists": false
+    }
+  ]
+}

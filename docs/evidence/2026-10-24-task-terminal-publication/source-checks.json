@@ -1,0 +1,468 @@
+{
+  "at": "2026-10-24T13:06:23.311365+00:00",
+  "code_pr": 45769,
+  "evidence_pr": 45770,
+  "native_stack": 45771,
+  "current_code_head": "44b6daee827adb9ef700c29f8d221220c2024df9",
+  "direct_parent": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+  "branch_main_baseline": "d587bf1ffa123a05ae688cbc9fabe8e35221b206",
+  "main_relative_source_patch_sha256": "645968414841616749b8ff18bd9b097413bb776e6e37ed5f86bd95e857dd3e19",
+  "repair_delta_sha256": "9e0efaab502cb8052b9d8b3f29419e8b50db4f5fe53ca768cb9ad5c09b65f1a8",
+  "changed_from6c9": [
+    "lib/completion_authority_agent.ml",
+    "lib/completion_authority_agent.mli",
+    "lib/keeper/verifier_review_publication.ml",
+    "test/test_verifier_review_worker.ml"
+  ],
+  "unchanged_from6c9": [
+    "lib/keeper/verifier_review_commit_intent.ml",
+    "lib/keeper/verifier_review_commit_intent.mli",
+    "lib/keeper/verifier_review_owner.ml",
+    "lib/keeper/verifier_review_owner.mli",
+    "lib/keeper/verifier_review_publication.mli",
+    "lib/keeper/verifier_review_worker.ml",
+    "lib/keeper/verifier_review_worker.mli",
+    "lib/lane_addon/lane_addon_tool_request_owner.ml",
+    "lib/lane_addon/lane_addon_tool_request_owner.mli",
+    "lib/verification_run_registry.ml",
+    "lib/verification_run_registry.mli",
+    "test/test_completion_trust_harness.ml",
+    "test/test_verification_run_registry.ml"
+  ],
+  "parser": [
+    {
+      "path": "lib/completion_authority_agent.ml",
+      "sha256": "86560523b2c242564e2713267c301c10bebc8a5cd8e845a7cb1fa85a41e32ad7",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/completion_authority_agent.ml"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "validation": "four-file repair parser evidence; no typecheck"
+    },
+    {
+      "path": "lib/completion_authority_agent.mli",
+      "sha256": "f21405aa170a21804b845ee7936bc1f16a6fcb08a6162acf483cb1a2e1730b6a",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/completion_authority_agent.mli"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "validation": "four-file repair parser evidence; no typecheck"
+    },
+    {
+      "path": "lib/keeper/verifier_review_commit_intent.ml",
+      "sha256": "5999ed7deb37fb5b9cfbbdeb12b0a1a813993629688570f7c1025037b7c388a9",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_commit_intent.ml"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/keeper/verifier_review_commit_intent.mli",
+      "sha256": "27a01ea2805089c113ef3c2a6ecb313b88f7723427b496118c55e88a341ecf9f",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_commit_intent.mli"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/keeper/verifier_review_owner.ml",
+      "sha256": "c1d07a55da0fcc7a1f49173cd26a993107dffad46d9903be6f8a7d3e728a59f0",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_owner.ml"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/keeper/verifier_review_owner.mli",
+      "sha256": "a975357613140a0680e8a07f5472d9950b24948cb010354d6fed3378988fc2fc",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_owner.mli"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/keeper/verifier_review_publication.ml",
+      "sha256": "667e6ad3a051bb7b292a3d41aa35545c5516053287947e4153a04d3cd263016d",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_publication.ml"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "validation": "four-file repair parser evidence; no typecheck"
+    },
+    {
+      "path": "lib/keeper/verifier_review_publication.mli",
+      "sha256": "9333ef992e92b92578bc3f71e157530561228706204e74286acb1dc8f0efb5f1",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_publication.mli"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/keeper/verifier_review_worker.ml",
+      "sha256": "cc21069b583d3af96caa372d697e79da72e109be458732746188cc148ddb14a4",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_worker.ml"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/keeper/verifier_review_worker.mli",
+      "sha256": "fc0f646b48bf347283a88569462316520361852e8bae2692f90e0bdc1c474ab2",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_worker.mli"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/lane_addon/lane_addon_tool_request_owner.ml",
+      "sha256": "ee20c979a22e6c8b335c23af903a8604224650e1bfaebeb2b5fdda0a8a70d2ea",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/lane_addon/lane_addon_tool_request_owner.ml"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/lane_addon/lane_addon_tool_request_owner.mli",
+      "sha256": "4144ed70f74decd7cc587a33b41f30229d27e971b2de626bbef3c0aa032d57dd",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/lane_addon/lane_addon_tool_request_owner.mli"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/verification_run_registry.ml",
+      "sha256": "9864c29f2d5b49c3bd26abb18acad4d50bf9fc66492c2e82da2760499d8bd281",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/verification_run_registry.ml"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "lib/verification_run_registry.mli",
+      "sha256": "0b251b5a8a525e920aa6866f96cb033684a23aa732767c10e475e445efd06cfe",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/verification_run_registry.mli"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "test/test_completion_trust_harness.ml",
+      "sha256": "a451f6bc65b46aa24d608d38b45fad412cbf9dae295ef0e8549d7fbe75c72a6b",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/test/test_completion_trust_harness.ml"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "test/test_verification_run_registry.ml",
+      "sha256": "0762ac9ab2b3ae7c4f9d75c79be06f784e99e5da7b719e27720df6436f770343",
+      "exit": 0,
+      "stderr": "",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/test/test_verification_run_registry.ml"
+      ],
+      "validation": "byte-identical to6c9; prior parser evidence reused"
+    },
+    {
+      "path": "test/test_verifier_review_worker.ml",
+      "sha256": "6ce0b54dc1f259c9052d3b525327d19e419766538339e91225ed01885e61fa90",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/test/test_verifier_review_worker.ml"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "validation": "four-file repair parser evidence; no typecheck"
+    }
+  ],
+  "parser_evidence": "4 repair-file parser checks plus 13 identical prior-source checks; no local Dune/typecheck",
+  "whitespace": {
+    "exit": 0
+  },
+  "suite_declarations": [
+    {
+      "target": "test_goal_verifier_worker",
+      "cases": 16,
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
+    },
+    {
+      "target": "test_goal_verification_agent",
+      "cases": 39,
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
+    },
+    {
+      "target": "test_verifier_review_worker",
+      "cases": 18,
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
+    },
+    {
+      "target": "test_completion_trust_harness",
+      "cases": 9,
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
+    },
+    {
+      "target": "test_verification_run_registry",
+      "cases": 23,
+      "new_candidate_execution": "observed in actual run40095356149; see actual_validation"
+    }
+  ],
+  "historical_source_stages": {
+    "reviewed4cad_patch": "6a2241fb310447fe0d8a5a377f8f8ac16a1f7debd001d3498c0dcdf241f2db96",
+    "prepared_ac7_commit": "4e69d102c3efa964573ff2124171ea4ac6de4b29",
+    "ac7_source_patch_sha256": "f683a2789b69a64fa679845430c62633e1628161156e62f7a69c4b194546a97a",
+    "d587_original_code": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+    "d587_original_source_patch_sha256": "a40757e08d719838b7bf7a8beae7245068d8c43861d340b9ca7d53700c015e15"
+  },
+  "known_prior_result": {
+    "run": 40078689529,
+    "checkout": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+    "classification": "compile fatal warning4 before all five suite starts",
+    "suites_started": 0,
+    "test_cases_executed": 0,
+    "case_skips": 0,
+    "case_assertion_failures": 0
+  },
+  "review_boundary": {
+    "prior_cr": 5637557664,
+    "prior_cr_head": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+    "internal_source_clear_missed_p2": true,
+    "new_formal_approval": 5638294412,
+    "reviewer_own_cr_resolution": "footer explicitly replaces own CR5637557664; source receipt admitted current44b6"
+  },
+  "claims": {
+    "typecheck_current_candidate": true,
+    "execution_current_candidate": true,
+    "installed_runtime": false,
+    "merge": false,
+    "typecheck_scope": "selected five executable/transitive dependency build only",
+    "execution_scope": "five suites with private controlled fixtures",
+    "full_repository_regression": false,
+    "external_model": false
+  },
+  "pre_execution_document_timestamp": "2026-10-24T12:42:55.487046+00:00",
+  "actual_validation": {
+    "run_id": 40095356149,
+    "job_id": 120876318526,
+    "checkout": "44b6daee827adb9ef700c29f8d221220c2024df9",
+    "selected_executable_build": "success",
+    "suites": [
+      {
+        "suite": "test/test_goal_verifier_worker",
+        "counts": {
+          "OK": 16,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_goal_verifier_worker: OK in 1s"
+      },
+      {
+        "suite": "test/test_goal_verification_agent",
+        "counts": {
+          "OK": 39,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_goal_verification_agent: OK in 73s"
+      },
+      {
+        "suite": "test/test_verifier_review_worker",
+        "counts": {
+          "OK": 18,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_verifier_review_worker: OK in 1s"
+      },
+      {
+        "suite": "test/test_completion_trust_harness",
+        "counts": {
+          "OK": 9,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_completion_trust_harness: OK in 1s"
+      },
+      {
+        "suite": "test/test_verification_run_registry",
+        "counts": {
+          "OK": 23,
+          "FAIL": 0,
+          "SKIP": 0,
+          "TODO": 0
+        },
+        "terminal": "[targeted] test/test_verification_run_registry: OK in 0s"
+      }
+    ],
+    "totals": {
+      "PASS": 105,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    },
+    "artifact_id": 12560518815,
+    "receipt_sha256": "3e55cae9dd6ad7392bfcd42994ecaa04592895e2b48ae00fb6a842eaca051ac5",
+    "runner_sha256": "656f84ac3f1346832135c63fc7d809a40a229e8dcfcb8811b901b41a2abdc9c7",
+    "scope": "controlled five-suite production-path regression; no external model, installed runtime or full-repository claim"
+  },
+  "code_source_approval": {
+    "review_api_id_from_guard_receipt": 5638294412,
+    "raw_review_node_id": "PRR_kwDOQ7_DYc8AAAABUBGLjA",
+    "state": "APPROVED",
+    "submitted_at": "2026-10-24T12:49:57Z",
+    "firstline": "verdict: PASS head: 44b6daee827adb9ef700c29f8d221220c2024df9 by: code-reviewer-brother",
+    "footer": "approve-guard: head `44b6daee827adb9ef700c29f8d221220c2024df9` \u00b7 source review \u00b7 replaces own CHANGES_REQUESTED 5637557664 \u00b7 reviewed base `d587bf1ffa123a05ae688cbc9fabe8e35221b206` \u00b7 diff sha256 `d6c3fb1ccda47623e0cf9755cbd580f3c0618483d72be6fe6a1efa783f9783ba`",
+    "full_reviews_file": "/tmp/masc-goal-terminal-final-validation-20261024/attempt-2/code44b6-reviews.json",
+    "full_reviews_sha256": "96927a34cfbdde8eca81128a90c1ab57776d8702f3690e00d1a6dbf6e3304477",
+    "source_receipt_sha256": "15c8a856417b4487eb5b796da54c85ddda1f6514a9d9fdbdc56f594a34534aaa",
+    "scope": "code #45769 exact44b6 only; no evidence-layer approval/integration claim"
+  }
+}

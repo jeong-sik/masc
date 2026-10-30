@@ -1,0 +1,43 @@
+name = "masc_play_room"
+description = """
+Join the public MSX/DOS game room, read its conversation, say something to everyone there, or leave.
+This is the same conversation Play link guests see in their browser. Never put private Keeper context or secrets here.
+Use a stable client_id for your participation. join/read/say renew presence for 60 seconds; read again while participating.
+say requires a new message_id; retry an uncertain send with exactly the same id and text to avoid duplicates.
+read returns the latest 100 messages; before=<oldest id> reads the preceding page. The room works even without a loaded machine.
+"""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "action"
+type = "string"
+required = true
+enum = ["join", "read", "say", "leave"]
+
+[[params]]
+name = "client_id"
+type = "string"
+required = true
+description = "Stable 1..128 ASCII letters/digits/dot/underscore/hyphen, e.g. keeper-game."
+
+[[params]]
+name = "machine"
+type = "string"
+required = true
+enum = ["msx", "dos"]
+
+[[params]]
+name = "message_id"
+type = "string"
+description = "say only: unique 1..128 ASCII letters/digits/dot/underscore/hyphen."
+
+[[params]]
+name = "text"
+type = "string"
+description = "say only: nonempty public message, at most 4096 UTF-8 bytes."
+
+[[params]]
+name = "before"
+type = "integer"
+description = "read only: positive oldest message id from the page you already have."

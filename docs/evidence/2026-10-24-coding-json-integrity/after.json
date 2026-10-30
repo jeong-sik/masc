@@ -1,0 +1,10 @@
+{
+  "base_head": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+  "command": [
+    "python3",
+    "scripts/tests/test_coding_eval_boundary.py",
+    "-v"
+  ],
+  "exit_code": 0,
+  "scope": "actual production Python collection CLI, input manifest, corpus oracle restoration and symlink refusal; Docker execution not rerun (one explicit skip)"
+}

@@ -1,0 +1,59 @@
+# JSON fields of a response body that differ between two runs for a reason other than the
+# change under test. compare.py --ignore-file reads one rule per line and searches its
+# regular expression in the path of the field, with every array index written as []
+# (for example `.roots[].bytes`). A rule written as `METHOD /route/path :: REGEX` applies
+# to that route only; any other rule applies to every route. Lines that start with # and
+# empty lines are skipped.
+
+# Where the binary came from. Two builds of two source trees differ here by design.
+(^|\.)build\.
+(^|\.)runtime_resolution\.
+(^|\.)server_repo_path\.
+(^|\.)dashboard_surface\.
+
+# Counters, timings and sizes of the process, and the freshness of its caches. They move
+# while the server runs, so two runs of one build rarely agree on them; when they do, it
+# is chance.
+\.uptime$
+^\.gc\.
+^\.scheduler\.pool_wait\.
+fd_observation
+(^|\.)(build|walk)_ms$
+^\.(allocated|live|major)\[\]\.
+^\.roots\[\]\.
+^\.entry_details\[\]\.
+
+# One route each. The reason is on the line above the rule.
+
+# Milliseconds each projection took, and the names of the slowest ones in the order the
+# timings came out.
+GET /api/v1/dashboard/bootstrap :: ^\.shell\.projection_diagnostics\.
+
+# Lookups in the dashboard cache. An entry hits while its time to live (spread by up to
+# 10% per key) has not run out, so the counts follow the clock. Two runs of one build gave
+# 19 hits and 14 misses, then 11 and 10, in the default mode.
+GET /api/v1/dashboard/cache-stats :: ^\.(hit_ratio|hits_total|misses_total)$
+
+# The pool of the server's own outgoing HTTP client: reuses, creations and evictions of its
+# connections, and how many are idle or in flight. The server's background work moves them,
+# not the requests made to the server.
+GET /api/v1/dashboard/runtime-observables :: ^\.pool\.
+
+# Samples and bytes the allocation profiler took from the major heap since the process
+# started. They grow with the allocation of the server's own work. Two runs of one build
+# agreed on them once by chance.
+GET /api/v1/diagnostics/memprof :: ^\.major_(bytes|samples)$
+
+# Counters of the process in the health report: the server's log (the sequence number of its
+# newest line, the lines in its recent window, the lines it retains and has written) and the
+# scheduler lag samples. The probe and the periodic tasks add lines and samples, as for
+# /api/v1/dashboard/logs below.
+GET /health :: ^\.(logs|scheduler)\.
+
+# The tail of the server's own log. Its newest 200 lines hold what the probe caused and
+# the periodic tasks (a `gc` line every few minutes), so the sequence numbers and the
+# window shift by a line when a periodic task runs once more. logs_tail_diff.py aligns
+# the lines of two runs and shows what is left.
+GET /api/v1/dashboard/logs :: ^\.(latest_seq|oldest_seq|total)$
+GET /api/v1/dashboard/logs :: ^\.ring\.
+GET /api/v1/dashboard/logs :: ^\.entries\[\]\.

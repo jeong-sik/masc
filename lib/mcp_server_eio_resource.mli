@@ -1,0 +1,60 @@
+(** Mcp_server_eio_resource — \`resources/read\` JSON-RPC handler.
+
+    Extracted from {!Mcp_server_eio} as part of the god-file
+    decomposition.  Single external entry: {!handle_read_resource_eio}.
+
+    Internal: re-exports of
+    \[Mcp_transport_protocol.make_response\] /
+    \[Mcp_transport_protocol.make_error\] (used to construct
+    JSON-RPC envelopes inside the handler) and
+    \[public_tool_help_schemas\] (delegate to {!Config.visible_tool_schemas})
+    stay private — none have external callers. *)
+
+val handle_read_resource_eio :
+  Mcp_server.server_state ->
+  Yojson.Safe.t ->
+  Yojson.Safe.t option ->
+  Yojson.Safe.t
+(** [handle_read_resource_eio state id params] handles a
+    [resources/read] JSON-RPC call.
+
+    Parameter contract:
+    - [state]: server state (provides config + session registry).
+    - [id]: JSON-RPC request id (echoed in response).
+    - [params]: optional JSON-RPC params object.  When [None] or
+      not [`Assoc _], returns an error envelope with code [-32602]
+      (the JSON-RPC 2.0 Invalid params code).
+
+    Required fields in [params]:
+    - [uri]: non-empty string.  Empty / missing produces error
+      code [-32602] with message [Missing uri].
+
+    The URI is parsed via {!Mcp_server.parse_masc_resource_uri}
+    into a (resource_id, uri) pair, and the handler routes to the
+    appropriate read source (messages directory, tool-help
+    schemas, etc.) based on the resource id.
+
+    Synchronous workspace, event, worktree, and library filesystem reads run
+    in a system thread so they cannot block the cooperative Eio domain.
+    Session registry reads remain on the calling fiber because they may yield
+    through the registry actor.
+
+    Returns a JSON-RPC response envelope (jsonrpc / id / result or
+    error fields).  Never raises — all error paths produce error
+    envelopes via {!Mcp_transport_protocol.make_error}. *)
+
+val wiki_resources : base_path:string -> Mcp_server.mcp_resource list
+(** One [masc://wiki/<topic>] resource per page in the wiki, in page-name
+    order, and [masc://wiki/log] first when the wiki has a log. A page's title
+    and summary become the resource's title and description; a page whose
+    header does not read is listed by file name with the reason. An absent
+    wiki directory lists nothing.
+
+    The pages are also reachable through the [masc://wiki/{topic}] template,
+    which a client that only lists resources cannot expand. The filesystem
+    reads run in a system thread. *)
+
+module For_testing : sig
+  val blocking_io_execution_context : unit -> Eio_guard.execution_context
+  (** Execution context observed inside the resource filesystem boundary. *)
+end

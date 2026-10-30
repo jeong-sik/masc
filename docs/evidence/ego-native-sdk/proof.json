@@ -1,0 +1,302 @@
+{
+  "spaceId": 4,
+  "finished": false,
+  "url": "http://localhost:63253/",
+  "observations": [
+    {
+      "action": "fill",
+      "target": "loc=css:#editor",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "select_option",
+      "target": "loc=css:#single",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {
+          "selectedValues": [
+            "b"
+          ]
+        },
+        "error": null
+      }
+    },
+    {
+      "action": "select_option",
+      "target": "loc=css:#single",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {
+          "selectedValues": [
+            "disabled"
+          ]
+        },
+        "error": null
+      }
+    },
+    {
+      "action": "select_option",
+      "target": "loc=css:#multi",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {
+          "selectedValues": [
+            "a",
+            "b"
+          ]
+        },
+        "error": null
+      }
+    },
+    {
+      "action": "select_option",
+      "target": "loc=css:#multi",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {
+          "selectedValues": []
+        },
+        "error": null
+      }
+    },
+    {
+      "action": "click",
+      "target": "loc=css:#offscreen",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "click",
+      "target": "loc=css:#shadow-button",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "hover",
+      "target": "loc=css:#editor",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "double_click",
+      "target": "loc=css:#editor",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "fill",
+      "target": "loc=css:#frame-input",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "click",
+      "target": "loc=role:button[name=\"Frame action\"]",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "fill",
+      "target": "@24",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "click",
+      "target": "loc=css:#dialog",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {
+          "dialog": {
+            "url": "http://localhost:63253/",
+            "frameId": "BD56DA250E24433E8B18503DEAFDD5F2",
+            "message": "Native dialog",
+            "type": "alert",
+            "hasBrowserHandler": true,
+            "defaultPrompt": ""
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "action": "fill",
+      "target": "loc=css:#editor",
+      "result": {
+        "urlBefore": "http://localhost:63253/",
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "action": "wrong_url",
+      "result": {
+        "before": true,
+        "error": "the tab is at http://localhost:63253/, not at expectedUrl; read it again"
+      }
+    }
+  ],
+  "events": [
+    {
+      "id": "editor",
+      "type": "input",
+      "trusted": true
+    },
+    {
+      "id": "single",
+      "type": "input",
+      "trusted": false
+    },
+    {
+      "id": "single",
+      "type": "change",
+      "trusted": false
+    },
+    {
+      "id": "single",
+      "type": "input",
+      "trusted": false
+    },
+    {
+      "id": "single",
+      "type": "change",
+      "trusted": false
+    },
+    {
+      "id": "multi",
+      "type": "input",
+      "trusted": false
+    },
+    {
+      "id": "multi",
+      "type": "change",
+      "trusted": false
+    },
+    {
+      "id": "multi",
+      "type": "input",
+      "trusted": false
+    },
+    {
+      "id": "multi",
+      "type": "change",
+      "trusted": false
+    },
+    {
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "",
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "",
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "offscreen",
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "editor",
+      "type": "change",
+      "trusted": true
+    },
+    {
+      "id": "offscreen",
+      "type": "click",
+      "trusted": true
+    },
+    {
+      "id": "",
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "shadow",
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "shadow",
+      "type": "click",
+      "trusted": true
+    },
+    {
+      "id": "shadow-button",
+      "type": "click",
+      "trusted": true
+    },
+    {
+      "id": "",
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "editor",
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "editor",
+      "type": "click",
+      "trusted": true
+    },
+    {
+      "id": "editor",
+      "type": "click",
+      "trusted": true
+    },
+    {
+      "id": "editor",
+      "type": "dblclick",
+      "trusted": true
+    },
+    {
+      "id": "dialog",
+      "type": "mouseenter",
+      "trusted": true
+    },
+    {
+      "id": "dialog",
+      "type": "click",
+      "trusted": true
+    },
+    {
+      "id": "editor",
+      "type": "input",
+      "trusted": true
+    }
+  ],
+  "script_sha256": "849d3fead48c161e5aeb4de10a70521ec930f357f066c93d06827aca47012c2f",
+  "scope": "Production JS native-input boundary on installed Ego; not OCaml typing, Add-on/host dispatch, autonomous Keeper execution, or deployment proof."
+}

@@ -1,0 +1,13 @@
+{
+  "ts": "2026-09-09T23:11:54Z",
+  "goal_id": "goal-1788995514248-d795c8d8",
+  "event_type": "goal_phase",
+  "payload": {
+    "phase": "completed",
+    "authority_kind": "human_operator",
+    "actor": "admin",
+    "request_id": "fd8f5e970304ff3c5bb6432aa3db3844",
+    "verification_run_id": "01a08871-2fa1-7000-9faa-1d402c5e6538",
+    "criterion_revision": "5e84069cad450f6d84192d55985c5e55"
+  }
+}

@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""One owned real-Docker scheduled export; execute only with verified candidate inputs.
+
+No production installation, model, fake worker, image build/pull, or CI access.
+Deadlines bound observation; missing evidence is incomplete, not a timing defect.
+"""
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import tempfile
+import time
+import tomllib
+import urllib.parse
+import uuid
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    for name in ['binary', 'output']:
+        p.add_argument('--' + name, type=Path, required=True)
+    for name in ['source-commit', 'expected-sha256', 'package-commit', 'expected-image-id',
+                 'producer-workflow', 'producer-run-id', 'producer-ref', 'producer-head', 'producer-source-ref']:
+        p.add_argument('--' + name, required=True)
+    p.add_argument('--docker', default=shutil.which('docker'))
+    p.add_argument('--wait-seconds', type=float, default=90, help='Finite observer window, not product policy')
+    a = p.parse_args()
+    repo = Path(__file__).resolve().parents[2]
+    def hexid(value, length):
+        return len(value) == length and all(c in '0123456789abcdef' for c in value)
+    for value in [a.source_commit, a.package_commit, a.producer_head]:
+        if not hexid(value, 40):
+            p.error('source/package/producer heads must be full lowercase 40-hex identities')
+    if not hexid(a.expected_sha256, 64) or not a.expected_image_id.startswith('sha256:') or not hexid(a.expected_image_id[7:], 64):
+        p.error('expected executable SHA-256 and immutable Docker image ID required')
+    if not a.docker or not 0 < a.wait_seconds < float('inf'):
+        p.error('existing Docker executable and positive finite observation window required')
+    output, binary = a.output.resolve(), a.binary.resolve(strict=True)
+    if not output.is_relative_to(repo / 'artifacts') or output.exists():
+        p.error('output must be a NEW directory under this checkout artifacts/')
+    output.mkdir(mode=0o700, parents=True)
+    def sha(data):
+        return hashlib.sha256(data).hexdigest()
+    def git(*argv):
+        return subprocess.check_output(['git', '-C', str(repo), *argv])
+    helper_bytes = git('show', a.source_commit + ':scripts/lane-addons/qualify.py')
+    helper = output / 'qualify-source.py'
+    helper.write_bytes(helper_bytes)
+    spec = importlib.util.spec_from_file_location('owned_lane_qualify', helper)
+    q = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(q)  # guarded library import; its lifecycle main is not called
+    ev = q.Evidence(output / 'http')
+    checks, server, admin, instance_id, container_id = [], None, None, None, None
+    def check(name, passed):
+        checks.append({'name': name, 'passed': bool(passed)})
+        print(('PASS ' if passed else 'FAIL ') + name, flush=True)
+        if not passed:
+            raise AssertionError(name)
+    def command(argv, env=None):
+        result = subprocess.run(argv, env=env, capture_output=True, timeout=a.wait_seconds)
+        if result.returncode:
+            raise q.QualificationError(str(argv[:2]) + ' failed; exit ' + str(result.returncode) + '; output withheld')
+        return result.stdout  # never journal login output or arbitrary container config
+    def request(api, method, path, body=None, *, stage, status=200):
+        try:
+            value = api.request(method, path, body, stage=stage)
+        except q.QualificationError:
+            event = ev.events[-1]
+            if event.get('status') != status or event.get('error'):
+                raise
+            value = json.loads((ev.root / event['body_path']).read_bytes())
+        check(stage + ' HTTP ' + str(status), ev.events[-1]['status'] == status)
+        return value
+    def unwrap(value):
+        if isinstance(value.get('data'), dict):
+            return value['data']
+        return json.loads(value['message'])
+    def wait(read, accept):
+        deadline = time.monotonic() + a.wait_seconds
+        while True:
+            if server.poll() is not None:
+                raise q.QualificationError('owned producer exited before observation finished')
+            value = read()
+            if accept(value):
+                return value
+            if time.monotonic() >= deadline:
+                raise q.QualificationError('finite observation deadline; evidence incomplete, no restart/resubmit')
+            time.sleep(min(.25, max(0, deadline - time.monotonic())))
+    provenance = {'scope': 'isolated candidate; no operating installation claim', 'binary_source_commit': a.source_commit,
+        'binary_sha256': sha(binary.read_bytes()), 'expected_binary_sha256': a.expected_sha256,
+        'package_commit': a.package_commit, 'controller_sha256': sha(Path(__file__).read_bytes()),
+        'helper_source_commit': a.source_commit, 'helper_sha256': sha(helper_bytes),
+        'harness_checkout_head': git('rev-parse', 'HEAD').decode().strip(),
+        'producer': {'workflow': a.producer_workflow, 'run_id': a.producer_run_id, 'execution_head': a.producer_head,
+                     'ref': a.producer_ref, 'source_input': a.producer_source_ref, 'basis': 'supplied; no CI query'},
+        'not_proven': ['installation', 'DOS counter', 'nonempty journal mutation', 'model/quiz generation',
+                       'external effect exactly-once', 'restart durability', 'HTTP race', 'whole RBAC/schedule feature']}
+    outcome, forced = 'incomplete_or_failed_oracle', False
+    with tempfile.TemporaryDirectory(prefix='masc-lane-scheduled-') as temporary:
+        base = Path(temporary).resolve()
+        env = {k: v for k, v in os.environ.items() if k in ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR',
+            'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH', 'DOCKER_API_VERSION', 'SSH_AUTH_SOCK']}
+        env.update(MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='false')
+        run_id = 'audit-export-' + uuid.uuid4().hex
+        provenance['docker_executable'] = str(Path(a.docker).resolve())
+        try:
+            check('candidate executable digest', provenance['binary_sha256'] == a.expected_sha256)
+            check('probe and producer resolve the same Docker executable', Path(a.docker).resolve() == Path(shutil.which('docker', path=env['PATH'])).resolve())
+            command([str(binary), 'init', '--base-path', str(base)], env)
+            package = base / 'packages/operator-quiz'
+            files = git('ls-tree', '-r', '--name-only', a.package_commit, '--', 'addons/operator-quiz').decode().splitlines()
+            provenance['package_files'] = []
+            for path in files:
+                data = git('show', a.package_commit + ':' + path)
+                target = package / Path(path).relative_to('addons/operator-quiz')
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                provenance['package_files'].append({'path': path, 'sha256': sha(data), 'bytes': len(data)})
+            manifest = tomllib.loads((package / 'lane.toml').read_text())
+            check('unmodified real operator-quiz acting Docker package', manifest['id'] == 'operator-quiz'
+                  and manifest.get('runtime', 'docker') == 'docker' and 'act' in manifest['contributions'])
+            image_id = command([a.docker, 'image', 'inspect', manifest['image'], '--format', '{{.Id}}']).decode().strip()
+            check('existing package image immutable identity', image_id == a.expected_image_id)
+            provenance.update(image_reference=manifest['image'], image_id=image_id, package_revision=manifest['revision'])
+            fixture = git('show', a.source_commit + ':scripts/fixtures/release-evidence/runtime.toml')
+            (base / '.masc/config/runtime.toml').write_bytes(fixture)
+            provenance['runtime_fixture_sha256'] = sha(fixture)
+            declaration = {'id': run_id, 'run_id': run_id, 'manifest_path': str(package / 'lane.toml')}
+            text = ''.join(key + ' = ' + json.dumps(value) + '\n' for key, value in declaration.items())
+            text += 'exact_outputs = []\ntool_hooks = []\n[binding]\nsources = []\nlanguage = "ko"\ntimezone = "Asia/Seoul"\n'
+            text += '[[binding.records]]\nsource_id = "owned-public-board"\nkind = "board"\nvisibilities = ["public"]\n'
+            declared = base / '.masc/config/lane-addons' / (run_id + '.toml')
+            declared.parent.mkdir(parents=True, exist_ok=True)
+            declared.write_text(text)
+            ev.json('declaration.json', {'source_text': text, 'sha256': sha(text.encode())})
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0))
+                port = sock.getsockname()[1]
+            check('ephemeral owned listener differs from primary', port != 8935)
+            tokens = {}
+            for role in ['admin', 'worker']:
+                actor = 'audit-lane-' + role
+                command([str(binary), 'login', '--base-path', str(base), '--host', '127.0.0.1', '--port', str(port),
+                         '--agent', actor, '--role', role, '--client-env', 'OWNED_LANE_TOKEN', '--no-expiry', '--json'], env)
+                tokens[role] = (base / '.masc/auth' / (actor + '.token')).read_text().strip()
+            url = 'http://127.0.0.1:' + str(port)
+            admin, worker = [q.API(url, ev, token=tokens[r], timeout=15, max_response_bytes=8*1024*1024) for r in ['admin', 'worker']]
+            with (output / 'server.log').open('xb') as log:
+                server = subprocess.Popen([str(binary), 'start', '--base-path', str(base), '--host', '127.0.0.1',
+                                           '--port', str(port)], cwd=base, env=env, stdout=log, stderr=log)
+            ev.json('owned-process.json', {'pid': server.pid, 'port': port, 'base_path': str(base)})
+            def startup():
+                try:
+                    return admin.request('GET', '/health?full=1', stage='startup')
+                except q.QualificationError:
+                    return {}
+            health = wait(startup, lambda h: h.get('startup', {}).get('state_ready') is True)
+            check('owned base and candidate observed identity', health['paths']['effective_base_path'] == str(base)
+                  and health['build']['binary_commit'] == a.source_commit and health['build']['executable_sha256'] == a.expected_sha256)
+            provenance['observed_build'] = health['build']
+            def ready(snapshot):
+                nonlocal instance_id, container_id
+                live = [e for e in snapshot['instances'] if (e.get('configuration') or {}).get('id') == run_id and e.get('runtime_presence') == 'live']
+                if len(live) == 1:
+                    instance_id = live[0]['instance_id']
+                    container_id = q.container_resource_id(live[0], allow_pending=True)
+                rows = [d for d in (snapshot.get('configuration') or {}).get('declarations', []) if d['id'] == run_id]
+                return (snapshot.get('configuration') or {}).get('complete') is True and not snapshot['configuration']['issues'] and len(rows) == 1 and rows[0]['applied_revision'] == rows[0]['desired_revision'] and any(e['instance_id'] == rows[0]['instance_id'] and e['observation_seq'] > 0 and e['phase']['kind'] == 'attached' for e in snapshot['instances'])
+            snapshot = wait(lambda: admin.request('GET', '/api/v1/lane-addons', stage='worker-ready'), ready)
+            entry = next(e for e in snapshot['instances'] if (e.get('configuration') or {}).get('id') == run_id and e['runtime_presence'] == 'live')
+            instance_id, container_id = entry['instance_id'], q.container_resource_id(entry)
+            check('real worker schema and resolved image', entry['resolved_image'] == {'runtime': 'docker', 'digest': image_id}
+                  and 'export' in entry['action_schema']['properties']['action']['properties']['kind']['enum'] and not entry['package'].get('exact_outputs'))
+            fmt = '{"id":{{json .Id}},"image":{{json .Image}},"instance":{{json (index .Config.Labels "masc.lane.instance")}},"scope":{{json (index .Config.Labels "masc.lane.scope")}},"state_owner":{{json (index .Config.Labels "masc.lane.state.owner")}},"mounts":{{json .Mounts}}}'
+            owned = json.loads(command([a.docker, 'container', 'inspect', container_id, '--format', fmt]))
+            check('exact owned Docker resource and persistent state', owned['id'] == container_id and owned['image'] == image_id
+                  and owned['instance'] == instance_id and owned['scope'] == sha(str(base / '.masc/lane-addons').encode())
+                  and json.loads(owned['state_owner']) == [str(base / '.masc/lane-addons'), json.dumps(['configuration', run_id], separators=(',', ':')), 'operator-quiz']
+                  and any(m['Destination'] == '/state' and m['Type'] == 'volume' for m in owned['mounts']))
+            ev.json('owned-container-selected.json', owned)
+            def create(sid, delay):
+                value = request(admin, 'POST', '/api/v1/tools/masc_schedule_create', {'schedule_id': sid, 'installation_id': run_id,
+                    'action': {'kind': 'export'}, 'due_in_sec': delay, 'recurrence_kind': 'one_shot'}, stage='create-' + sid, status=201)
+                row = unwrap(value)
+                check(sid + ' HTTP Admin human operator stamp', value['ok'] and all(row[k]['kind'] == 'human_operator' and row[k]['id'] == 'audit-lane-admin' for k in ['requested_by', 'scheduled_by']))
+                return row
+            created = create(run_id, 1)
+            def lookup(sid):
+                return admin.request('GET', '/api/v1/dashboard/scheduled-automation?' + urllib.parse.urlencode({'schedule_id': sid}), stage='lookup-' + sid)
+            terminal = wait(lambda: lookup(run_id), lambda v: v.get('status') == 'found' and v['request']['status'] in ['succeeded', 'failed', 'expired', 'cancelled'])
+            check('one-shot durable schedule acceptance', terminal['request']['status'] == 'succeeded' and len(terminal['wakes']) == 1)
+            wake = terminal['wakes'][0]
+            detail = wake['detail']
+            signals = [json.loads(line) for path in (base / '.masc/schedules/signals').rglob('*.jsonl') for line in path.read_text().splitlines() if line]
+            matches = [s for s in signals if s.get('schedule_instance_id') == created['schedule_instance_id'] and s.get('schedule_id') == run_id]
+            occurrence = sha('|'.join(['schedule.due_candidate', created['schedule_instance_id'], run_id, format(float(created['due_at']), '.17g'), created['payload_digest']]).encode())
+            check('exact occurrence signal and handoff identity', wake['status'] == 'succeeded' and wake['schedule_instance_id'] == created['schedule_instance_id'] and len(matches) == 1 and detail['kind'] == 'masc.lane_act.handed_over'
+                  and detail['installation_id'] == run_id and detail['instance_id'] == instance_id and detail['schedule_id'] == run_id
+                  and detail['schedule_instance_id'] == created['schedule_instance_id'] and detail['request_id'] == matches[0]['occurrence_id'] == occurrence and matches[0]['payload'] == created['payload']
+                  and wake['due_at'] == created['due_at'] == matches[0]['due_at'] and wake['payload_digest'] == created['payload_digest'] == matches[0]['payload_digest'])
+            ev.json('selected-signal.json', matches[0])
+            path = '/api/v1/lane-addons/actions?' + urllib.parse.urlencode({'instance_id': instance_id, 'request_id': detail['request_id']})
+            receipt = wait(lambda: admin.request('GET', path, stage='export-action'), lambda r: r['state'] in ['confirmed', 'failed_before_effect', 'outcome_unknown'])
+            check('actual original worker confirmed export', receipt['state'] == 'confirmed' and receipt['action'] == {'kind': 'export'}
+                  and receipt['instance_id'] == receipt['incarnation'] == instance_id and receipt['request_id'] == detail['request_id']
+                  and receipt['requester'] == 'schedule:' + run_id + ':audit-lane-admin' and receipt['executor'] == {'kind': 'container', 'id': container_id} and isinstance(receipt['result'], dict))
+            result = receipt['result']
+            check('typed export result identity', hexid(result['sha256'], 64) and type(result['bytes']) is int and result['bytes'] >= 0)
+            sliced = admin.request('GET', '/api/v1/lane-addons/slice?' + urllib.parse.urlencode({'run_id': run_id, 'lane_id': 'quiz/measures'}), stage='export-evidence')
+            ev.json('export-receipt.json', receipt)
+            check('export evidence references result digest', any(e.get('sha256') == result['sha256'] and e.get('uri') == 'lane-evidence:' + result['sha256'] for row in sliced['rows'] for e in row.get('evidence', [])))
+            blob = (base / '.masc/lane-addons/evidence' / (result['sha256'] + '.json')).read_bytes()
+            state = output / 'owned-state-copy'
+            state.mkdir()
+            command([a.docker, 'cp', container_id + ':/state/.', str(state)])
+            command([a.docker, 'cp', container_id + ':/protocol.py', str(output / 'image-protocol.py')])
+            log_path = state / 'operator-quiz/log.jsonl'
+            check('copied log is not a symlink', not log_path.is_symlink())
+            log_bytes = log_path.read_bytes() if log_path.exists() else b''
+            q.private_write(output / 'export-blob.bin', blob)
+            check('host retained bytes and independent owned volume readback', sha(blob) == sha(log_bytes) == result['sha256'] and len(blob) == len(log_bytes) == result['bytes'])
+            provenance.update(log_absent=not log_path.exists(), exported_bytes=len(blob), image_protocol_sha256=sha((output / 'image-protocol.py').read_bytes()), package_protocol_sha256=sha(git('show', a.package_commit + ':addons/protocol.py')))
+            check('stable exact action receipt reread', admin.request('GET', path, stage='export-reread') == receipt)
+            control_id = run_id + '-control'
+            create(control_id, 86400)  # separate never-due control; exactly one scheduled action runs
+            def control_row():
+                return next(r for r in json.loads((base / '.masc/schedules.json').read_bytes())['schedules'] if r['schedule_id'] == control_id)
+            before = control_row()
+            check('control remains far-future and scheduled', before['status'] == 'scheduled' and before['due_at'] > time.time())
+            ev.json('control-before.json', before)
+            refused = request(worker, 'POST', '/api/v1/tools/masc_schedule_cancel', {'schedule_id': control_id, 'reason': 'owned authority negative probe'}, stage='worker-cancel', status=400)
+            error = refused['data']
+            check('Worker stays named and cannot cancel another operator schedule', refused['ok'] is False and error['error_kind'] == 'not_schedule_owner'
+                  and error['schedule_id'] == control_id and error['caller'] == 'audit-lane-worker' and error['scheduled_by_id'] == 'audit-lane-admin' and error['wake_target'] is None and control_row() == before)
+            ev.json('control-after-worker.json', control_row())
+            cancelled = request(admin, 'POST', '/api/v1/tools/masc_schedule_cancel', {'schedule_id': control_id, 'reason': 'owned control cleanup'}, stage='admin-cancel')
+            after = control_row()
+            ev.json('control-after-admin.json', after)
+            check('Admin cancels control as human operator', cancelled['ok'] and after['status'] == 'cancelled' and after['cancellation']['cancelled_by'] == {'id': 'audit-lane-admin', 'kind': 'human_operator', 'display_name': None})
+            outcome = 'bounded_checks_passed'
+        finally:
+            if server is not None and server.poll() is None:
+                if instance_id is None:
+                    try:
+                        snap = admin.request('GET', '/api/v1/lane-addons', stage='owned-cleanup-discovery')
+                        own = [e for e in snap['instances'] if (e.get('configuration') or {}).get('id') == run_id and e.get('runtime_presence') == 'live']
+                        if len(own) == 1:
+                            instance_id, container_id = own[0]['instance_id'], q.container_resource_id(own[0], allow_pending=True)
+                    except Exception as error:
+                        ev.json('cleanup-discovery-error.json', {'kind': type(error).__name__})
+                if instance_id is not None:
+                    try:
+                        admin.request('POST', '/api/v1/lane-addons/detach', {'instance_id': instance_id}, stage='owned-detach')
+                        wait(lambda: q.current_instance(admin, instance_id, 'owned-release')[0], lambda e: e['phase']['kind'] == 'detached')
+                        if container_id is not None:
+                            check('owned exact container released', q.docker_absence(a.docker, container_id, ev, a.wait_seconds))
+                    except Exception as error:
+                        outcome = 'incomplete_or_failed_cleanup'
+                        ev.json('cleanup-failure.json', {'kind': type(error).__name__, 'message': str(error)})
+                server.terminate()
+                try:
+                    server.wait(timeout=a.wait_seconds)
+                except subprocess.TimeoutExpired:
+                    forced = True
+                    server.kill()
+                    server.wait()
+            ev.json('summary.json', {'outcome': outcome, 'checks': checks, 'server_exit_code': None if server is None else server.poll(),
+                                    'forced_server_kill': forced, 'temporary_base_removed_on_exit': True, 'runtime_scope': provenance['not_proven']})
+            ev.json('provenance.json', provenance)
+    return 0 if outcome == 'bounded_checks_passed' and not forced else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

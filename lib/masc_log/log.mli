@@ -1,0 +1,302 @@
+(** MASC Logging System - Structured logging with levels *)
+
+(** Log levels *)
+type level =
+  | Debug
+  | Info
+  | Warn
+  | Error
+
+(** Structured event classes carried in log [details]. *)
+type event_class = Routine
+
+val event_class_to_string : event_class -> string
+(** Convert a structured event class to its stable JSON label. *)
+
+(** Log categories for dashboard filtering. *)
+type category =
+  | Fsm
+  | Lifecycle
+  | Directive
+  | Heartbeat
+  | Tool
+  | Routine
+  | Boundary
+  | Turn
+  | Broadcast
+
+val level_to_string : level -> string
+(** Convert level to string representation. *)
+
+val level_to_int : level -> int
+(** Convert level to integer for comparison. *)
+
+val level_of_string_opt : string -> level option
+(** Parse level from string without a fallback.  Returns [None] for
+    unrecognised input. *)
+
+val should_log : level -> bool
+(** Check if a message at the given level should be logged. *)
+
+val set_level : level -> unit
+(** Set the global log level. *)
+
+val set_level_from_string : string -> unit
+(** Set the global log level from a string (e.g., from env var). *)
+
+val init_from_env : unit -> unit
+(** Initialize log level from MASC_LOG_LEVEL env var. *)
+
+val timestamp : unit -> string
+(** Get current timestamp as formatted string. *)
+
+val format_utc_date_of : float -> string
+(** #10392: format the [YYYY-MM-DD] UTC date for a Unix timestamp.
+    Used internally for [system_log_<date>.jsonl] filename construction
+    so the filename matches the entry [ts] field (also UTC).  Exposed
+    for unit tests; production code calls [Ring.date_string] which
+    delegates here. *)
+
+(** {1 [key=value] message text}
+
+    Fields whose value is [None] are left out of the rendered line. A field the
+    producer did not measure is not written as [-] or [n/a]: its absence is the
+    fact. [false] and [0] are values and are rendered. *)
+module Kv : sig
+  type field = string * string option
+
+  val str : string -> string -> field
+  val int : string -> int -> field
+  val bool : string -> bool -> field
+  val opt : string -> string option -> field
+  val opt_map : string -> ('a -> string) -> 'a option -> field
+
+  val render : field list -> string
+  (** [key=value] pairs joined by one space, in the given order, with every
+      [None] value omitted. An all-absent list renders as the empty string. *)
+end
+
+val emit : level -> ?module_name:string -> ?details:Yojson.Safe.t -> ?category:category -> string -> unit
+(** Log a preformatted structured message with optional JSON details. *)
+
+val info : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+val warn : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+
+(** Mirror source kinds carried on every [Ring.entry]. *)
+type source =
+  | Structured
+  | Legacy_stderr
+  | Legacy_traceln
+  | Client_tool_host
+
+val source_to_string : source -> string
+(** Canonical lowercase wire label for a {!source}.  The dashboard schema
+    in [dashboard/src/api/schemas/logs.ts] reads this back via
+    [source_of_string]. *)
+
+val legacy_stderr : level:level -> ?module_name:string -> string -> unit
+(** Mirror a stderr line into the dashboard log ring.  [~level] is
+    required as of RFC-0079; the prior [?level] option backed a
+    string-prefix classifier ([infer_legacy_level]) that has been removed. *)
+
+val legacy_traceln : level:level -> ?module_name:string -> string -> unit
+(** Mirror an [Eio.traceln]-style line into the dashboard log ring.
+    [~level] required (see [legacy_stderr]). *)
+
+(** In-memory ring buffer exposed for dashboard log viewer routes. *)
+module Ring : sig
+  (** RFC-0079: typed entry.  Wire format keeps [level] and [source] as
+      their canonical strings (see {!level_to_string} / {!source_to_string});
+      the dashboard schema in [dashboard/src/api/schemas/logs.ts] mirrors
+      that wire format. *)
+  type entry = {
+    seq : int;
+    ts : string;
+    level : level;
+    source : source;
+    module_name : string;
+    keeper_name : string option;
+    turn_id : int option;
+    message : string;
+    details : Yojson.Safe.t;
+    category : category option;
+  }
+
+  exception Entry_decode_error of string
+  (** Raised by {!entry_of_json} on missing or ill-typed fields.  The
+      file-fold boundary ([load_from_file]) catches this on historical
+      JSONL files that were written before the typed encoder.  Every
+      other call site lets it propagate. *)
+
+  val capacity : int
+  (** Maximum number of entries retained in the in-memory dashboard ring. *)
+
+  type bounds = {
+    start_seq : int;
+    total : int;
+    dropped_before : bool;
+  }
+  (** Live-window bounds: sequences in [[start_seq, total)] are
+      answerable from the ring; anything below [start_seq] has been
+      evicted ([dropped_before]) and lives only in the daily JSONL
+      sink. Rides on the dashboard logs response so "no results"
+      cannot be mistaken for "it never happened" when the cause
+      merely predates the window. *)
+
+  val bounds : unit -> bounds
+
+  val recent :
+    ?limit:int ->
+    ?min_level:int ->
+    ?module_filter:string ->
+    ?since_seq:int ->
+    ?before_seq:int ->
+    ?order:[< `Newest_first | `Oldest_first > `Newest_first ] ->
+    ?category_filter:string ->
+    ?exclude_category:string list ->
+    unit ->
+    entry list
+  (** Read a slice of the in-memory ring, newest-first by default.
+      [since_seq] returns only entries strictly newer than the cursor (forward
+      delta polling); [before_seq] returns only entries strictly older than the
+      cursor (backward "load older" paging). Both are inclusive-exclusive on the
+      cursor and compose into a bounded window when supplied together. *)
+
+  val entry_to_json : entry -> Yojson.Safe.t
+  val entry_of_json : Yojson.Safe.t -> entry
+  val to_json : entry list -> Yojson.Safe.t
+  val summary_json : unit -> Yojson.Safe.t
+  (** Cheap operator summary for [/health].  It exposes ring counters,
+      latest metadata, and file-sink state without raw log message text or
+      [details] payloads. *)
+
+  val init_file_sink : ?identity_recheck_interval_s:float -> string -> unit
+  (** Initialize file-based log persistence. Loads previous entries from disk
+      into the ring buffer, then opens the file for appending new entries.
+      [dir] is the directory for dated JSONL log files.
+
+      [identity_recheck_interval_s] (default 5.0) throttles the per-emit
+      sink-identity stat pair that detects external unlink/rename of the
+      live log file. Records emitted inside the window after an external
+      unlink are lost with the unlinked inode; the loss window is bounded
+      by the interval. Date-roll rotation is checked on every emit and is
+      not affected by the throttle. *)
+
+  val cleanup_old_files : ?keep_days:int -> string -> unit
+  (** Remove log files older than [keep_days] (default 7). *)
+
+  val file_writer_capacity : int
+  (** Lines the file-sink queue holds before a producer waits for room. *)
+
+  val start_writer : unit -> unit
+  (** Hand file-sink appends to one OS thread (RFC
+      async-log-sink-durable-append-offload). After this, a record is
+      serialized on the producer and queued; the thread writes and flushes
+      queued lines, so a slow write() stops only that thread. A full queue
+      makes the producer wait; no record is dropped. Idempotent. The first
+      call registers {!stop_writer} with [at_exit]. A process that never calls
+      it writes synchronously. *)
+
+  val stop_writer : unit -> unit
+  (** Send producers back to the synchronous path and wait until the thread
+      has written every queued line. A process that ends without [at_exit]
+      (SIGKILL, [Unix._exit], a crash) loses the lines still queued. *)
+end
+
+val client_tool_host_error :
+  ?module_name:string -> ?details:Yojson.Safe.t -> string -> unit
+(** Mirror a client/tool-host failure into the dashboard log ring with its own source. *)
+
+(** Functor for creating module-specific loggers.
+    [M.name] controls the env-var key MASC_LOG_{NAME}_LEVEL
+    and the context prefix in log output. *)
+module type LOGGER = sig
+  val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> ?category:category -> string -> unit
+  val emit_lazy :
+    level -> ?keeper_name:string -> ?turn_id:int -> ?category:category ->
+    (unit -> string * Yojson.Safe.t) -> unit
+  (** Build both message and structured details only when the existing module
+      threshold permits this level. Admission is checked once; an admitted
+      event uses the same console, redaction, ring and optional file sinks as
+      [emit]. The builder must only format already captured observations. *)
+  val routine_lazy :
+    ?details:Yojson.Safe.t ->
+    ?keeper_name:string ->
+    ?turn_id:int ->
+    ?category:category ->
+    (unit -> string) -> unit
+  (** Build the message only when the existing routine level and module threshold
+      permit emission. Uses the same redaction, console and ring sinks as [routine]. *)
+  val routine :
+    ?details:Yojson.Safe.t ->
+    ?keeper_name:string ->
+    ?turn_id:int ->
+    ?category:category ->
+    ('a, unit, string, unit) format4 ->
+    'a
+  val debug : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val info : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val warn : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val error : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+end
+
+module Make (_ : sig val name : string end) : LOGGER
+
+(** {1 Pre-defined module loggers} *)
+
+module Workspace : LOGGER
+module Mcp : LOGGER
+module Auth : LOGGER
+module Backend : LOGGER
+module Session : LOGGER
+module Sub : LOGGER
+module Pulse : LOGGER
+module BoardLog : LOGGER
+module MsxLog : LOGGER
+module DosLog : LOGGER
+module Metrics : LOGGER
+module Dashboard : LOGGER
+module Telemetry : LOGGER
+module Gate : LOGGER
+module Transport : LOGGER
+module Keeper : LOGGER
+module Runtime : LOGGER
+(** RFC-0058 Phase 8.1.5: runtime-domain namespace for catalog,
+    routing, and partial-parse events. Separated from {!Keeper} so
+    alerting/dashboard filters can target runtime subsystem without
+    keeper-domain false positives. *)
+module Mention : LOGGER
+module Misc : LOGGER
+module Identity : LOGGER
+module Pages : LOGGER
+module Config : LOGGER
+module Task : LOGGER
+module Http : LOGGER
+module Server : LOGGER
+module TaskState : LOGGER
+module KeeperExec : LOGGER
+module LocalWorker : LOGGER
+module Harness : LOGGER
+module Candle : LOGGER
+
+(** {2 Logging-consistency migration modules}
+
+    Added by [refactor/logging-consistency-harness]. The first group replaces
+    former [Log.info ~ctx:"<name>"] call sites; each [name] preserves the exact
+    component string operators see ([ts] [LEVEL] [<name>]). The second group
+    replaces former raw-stderr / [Logs.*] sites that carried no context and are
+    named after their domain. See [docs/LOGGING.md]. *)
+module Otel : LOGGER
+module Runtime_verify : LOGGER
+module Mcp_transport : LOGGER
+module Startup : LOGGER
+module Model_inference_metrics : LOGGER
+module Runtime_agent : LOGGER
+module Agent_core_event : LOGGER
+module H2_gateway : LOGGER
+module Voice : LOGGER
+module Exec_tap : LOGGER
+module Tool_validation : LOGGER
+module Discord : LOGGER
+module Slack : LOGGER
+module Ide : LOGGER

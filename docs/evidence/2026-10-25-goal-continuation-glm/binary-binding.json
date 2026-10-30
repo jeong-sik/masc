@@ -1,0 +1,9 @@
+{
+  "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "server_sha256": "98cd486335f7a40d2d49cc05501a52e1b4aee958732453405db8ded17e4de8b7",
+  "build_run": 40116636410,
+  "artifact_id": 12570426205,
+  "checked_server_only": true,
+  "compatible_support_bundle": "previously checked dca support; provenance equality verified at extraction",
+  "production_installation": false
+}

@@ -1,0 +1,1033 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  classifySkillEditorError,
+  decodeAsyncRequestObservation,
+  decodeSkillCreateReceipt,
+  decodeSkillEditorLoaded,
+  decodeSkillEditorPreview,
+  decodeSkillEditorSaveReceipt,
+  decodeSkillEvidenceResponse,
+  fetchSkillEvidence,
+  previewSkillSource,
+  readSkillSource,
+  saveSkillSource,
+  SkillsContractError,
+} from './dashboard-skills'
+import { ApiRequestError } from './core'
+import sharedAsyncActionLedger from '../../../test/fixtures/skill-ledger-async-actions.json'
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+// Server_skill_editor.create_outcome_to_yojson sends exactly these three
+// statuses; the old client defaulted anything else to 'created', a status
+// the server never sends, and dropped the not-published reason.
+describe('skill create receipt contract', () => {
+  it('accepts the published receipt', () => {
+    expect(decodeSkillCreateReceipt({ status: 'created_and_published', preview: {} }))
+      .toEqual({ status: 'created_and_published' })
+  })
+
+  it('carries the package that shadows a created one', () => {
+    const winner = { source_id: 'project-masc', package_id: 'shared', name: 'shared' }
+    expect(decodeSkillCreateReceipt({
+      status: 'created_but_shadowed',
+      preview: {},
+      snapshot_revision: 'snapshot-revision',
+      winner,
+    })).toEqual({ status: 'created_but_shadowed', winner })
+  })
+
+  it('carries the not-published reason', () => {
+    expect(decodeSkillCreateReceipt({
+      status: 'created_but_unpublished',
+      reason: 'catalog refresh failed',
+      preview: {},
+    })).toEqual({
+      status: 'created_but_unpublished',
+      reason: 'catalog refresh failed',
+    })
+  })
+
+  it.each([
+    ['a fabricated status', { status: 'created' }],
+    ['a missing reason', { status: 'created_but_unpublished' }],
+    ['a shadowed receipt without its winner', { status: 'created_but_shadowed' }],
+    ['a winner missing its package', {
+      status: 'created_but_shadowed',
+      winner: { source_id: 'project-masc', name: 'shared' },
+    }],
+    ['no status at all', {}],
+    ['a non-object payload', null],
+  ])('rejects %s instead of inventing a label', (_label, raw) => {
+    expect(() => decodeSkillCreateReceipt(raw)).toThrow('unrecognized status')
+  })
+})
+
+const reference = {
+  identity: {
+    source_id: 'workspace',
+    package_id: 'release-checklist',
+    name: 'release-checklist',
+  },
+  content_revision: 'a'.repeat(64),
+}
+
+const editorProfile = {
+  reference,
+  kind: 'instruction',
+  activation_tool: 'keeper_skill',
+  io: { kind: 'model_orchestrated' as const },
+  execution: 'model_orchestrated',
+  capabilities: {
+    as_skill: true,
+    as_tool: false,
+    batch: false,
+    parallel: false,
+    async: false,
+    tool_scope: 'registered_tools_only',
+  },
+  context: {
+    body_bytes: 120,
+    discovery_bytes: 48,
+    tool_schema_bytes: null,
+  },
+  plan: {
+    node_count: 0,
+    batch_count: 0,
+    parallel_batch_count: 0,
+    max_parallelism: 0,
+    statically_read_only: null,
+  },
+  declaration: null,
+  flow: null,
+}
+
+const editorPreview = {
+  profile: {
+    ...editorProfile,
+    reference: {
+      ...reference,
+      content_revision: 'b'.repeat(64),
+    },
+  },
+  diagnostics: [],
+}
+
+describe('existing Skill editor contract', () => {
+  it('accepts the declared I/O shipped by the server and rejects malformed contracts', () => {
+    const compositionIo = {
+      kind: 'composition',
+      input_schema: { type: 'object', required: ['task'], properties: { task: { type: 'string' } } },
+      exports: [{ name: 'answer', node_id: 'result', pointer: '/data/answer' }],
+    }
+    for (const io of [{ kind: 'model_orchestrated' }, compositionIo]) {
+      const response = { ok: true, status: 'valid', preview: {
+        ...editorPreview, profile: { ...editorProfile, io },
+      } }
+      expect(decodeSkillEditorPreview(response).profile.io).toEqual(io)
+    }
+    for (const io of [
+      { kind: 'unknown' },
+      { ...compositionIo, input_schema: 'not an object' },
+      { ...compositionIo, exports: [{ name: 'answer', node_id: 'result' }] },
+      { kind: 'model_orchestrated', invented: true },
+    ]) {
+      expect(() => decodeSkillEditorPreview({ ok: true, status: 'valid', preview: {
+        ...editorPreview, profile: { ...editorProfile, io },
+      } })).toThrow()
+    }
+  })
+
+  it('strictly decodes loaded, preview, and save receipts', () => {
+    expect(decodeSkillEditorLoaded({
+      status: 'ready',
+      reference,
+      snapshot_revision: 'snapshot-1',
+      source_text: '---\nname: release-checklist\n---\n',
+      access: 'read_write',
+    })).toMatchObject({ access: 'read_write', reference })
+
+    expect(decodeSkillEditorPreview({
+      ok: true,
+      status: 'valid',
+      preview: editorPreview,
+    })).toEqual(editorPreview)
+
+    expect(() => decodeSkillEditorPreview({
+      ok: true,
+      status: 'valid',
+      preview: { ...editorPreview, reference },
+    })).toThrow(SkillsContractError)
+
+    expect(decodeSkillEditorSaveReceipt({
+      status: 'saved_and_published',
+      preview: editorPreview,
+      snapshot_revision: 'snapshot-2',
+    })).toMatchObject({ status: 'saved_and_published', preview: editorPreview })
+
+    expect(() => decodeSkillEditorSaveReceipt({
+      status: 'saved',
+      preview: editorPreview,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('classifies only the typed 409 revision conflict', () => {
+    expect(classifySkillEditorError(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/skills/editor/save',
+      status: 409,
+      responseData: { code: 'revision_conflict' },
+    }))).toBe('revision_conflict')
+    expect(classifySkillEditorError(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/skills/editor/save',
+      status: 409,
+      responseData: { code: 'package_already_exists' },
+    }))).toBe('other')
+    expect(classifySkillEditorError(new Error('revision_conflict'))).toBe('other')
+  })
+
+  it('posts the exact reference and source text to each editor route', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'ready',
+        reference,
+        snapshot_revision: 'snapshot-1',
+        source_text: 'old source',
+        access: 'read_write',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+        status: 'valid',
+        preview: editorPreview,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'saved_and_published',
+        preview: editorPreview,
+        snapshot_revision: 'snapshot-2',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await readSkillSource(reference)
+    await previewSkillSource(reference, 'new source')
+    await saveSkillSource(reference, 'new source')
+
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/skills/editor/read',
+      '/api/v1/skills/editor/preview',
+      '/api/v1/skills/editor/save',
+    ])
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({ reference })
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({
+      reference,
+      source_text: 'new source',
+    })
+    expect(JSON.parse(fetchMock.mock.calls[2]![1]!.body as string)).toEqual({
+      reference,
+      source_text: 'new source',
+    })
+  })
+
+  it('waits for a delayed durable save response beyond the ordinary POST timeout', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('Aborted', 'AbortError'))
+      })
+      window.setTimeout(() => {
+        resolve(new Response(JSON.stringify({
+          status: 'saved_and_published',
+          preview: editorPreview,
+          snapshot_revision: 'snapshot-2',
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }, 31_000)
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const save = saveSkillSource(reference, 'new source')
+    await vi.advanceTimersByTimeAsync(31_000)
+
+    await expect(save).resolves.toMatchObject({ status: 'saved_and_published' })
+    expect(fetchMock.mock.calls[0]![1]?.signal).toBeUndefined()
+  })
+})
+
+const coverage = {
+  composition_scope: 'exact_reference_latest_completed' as const,
+  composition_records_read: 0,
+  composition_unavailable: [],
+  coverage_complete: false as const,
+  activation_scope: 'complete_retained_trace_snapshot' as const,
+  activation_sessions_inspected: 2,
+  activation_ledgers_loaded: 2,
+  activation_gaps: [],
+  activation_owner_gap_count: 0,
+}
+
+const compositionNode = {
+  node_id: 'lane',
+  execution_id: 'exec-1',
+  execution_origin: 'fresh_dispatch',
+  tool_name: 'keeper_lane_status',
+  input: {},
+  schedule: {
+    planned_index: 0,
+    batch_index: 0,
+    batch_size: 1,
+    execution_mode: 'serial' as const,
+  },
+  result: {
+    disposition: 'completed' as const,
+    data: {},
+    tool_name: 'keeper_lane_status',
+    duration_ms: 1,
+  },
+  tool_use_id: '',
+  failure_effect_disposition: null,
+  deferred_kind: null,
+  result_bytes: 2,
+  truncated_to: null,
+}
+
+const compositionEvidence = {
+  schema: 'masc.skill-composition-evidence/v1' as const,
+  reference,
+  composition_run_id: '01a045f2-cd8b-7000-a3f7-1d718a712204',
+  parent_tool_use_id: '',
+  parent_turn: 7,
+  parent_planned_index: 0,
+  request_id: null,
+  keeper: 'rondo',
+  composition_tool: 'keeper_compose_proof',
+  composition_execution: 'inline' as const,
+  result: {
+    disposition: 'completed' as const,
+    duration_ms: 1,
+    data: { actions: [compositionNode] },
+    tool_name: 'keeper_compose_proof',
+  },
+  executor_settlements: [compositionNode],
+  recorded_at: 1,
+}
+
+const activationPayload = {
+  identity: reference.identity,
+  content_revision: reference.content_revision,
+  snapshot_revision: 'b'.repeat(64),
+  turn_ref: 'trace-proof#1',
+  runtime_id: 'codex.default',
+  activated_at: '2026-08-28T03:00:00Z',
+  skill_tool_use_id: 'skill-call-1',
+  agent_core_turn: 1,
+  invocation: {
+    kind: 'instruction' as const,
+    origin: { kind: 'session_instruction' as const },
+    served_content: {
+      kind: 'skill_body' as const,
+      bytes: 4,
+      sha256: 'c'.repeat(64),
+    },
+  },
+  delivery: null,
+  actions: [],
+}
+
+const activationEvidence = {
+  trace_id: 'trace-proof',
+  owner: {
+    status: 'known' as const,
+    claims: [{ keeper: 'rondo', source: 'current_meta' as const }],
+    gaps: [],
+  },
+  activation: activationPayload,
+  async_result_deliveries: [],
+  async_actions: [],
+}
+
+describe('current composition evidence wire fields', () => {
+  it('accepts failed settlements and later serial batches from the canonical executor', () => {
+    for (const effect_disposition of ['proven_pre_effect', 'proven_post_effect', 'effect_outcome_unknown']) {
+      const failure = { disposition: 'failed', effect_disposition, failure_class: 'runtime_failure',
+        message: 'failed original execution', data: { error: 'failed original execution' },
+        tool_name: compositionNode.tool_name, duration_ms: 5 }
+      const response = { schema: 'masc.skill-evidence/v7', status: 'observed', reference,
+        activation: null, composition_statistics: null,
+        coverage: { ...coverage, composition_records_read: 1 },
+        composition: { ...compositionEvidence,
+          result: { ...failure, tool_name: compositionEvidence.composition_tool },
+          executor_settlements: [{ ...compositionNode, result: failure,
+            schedule: { ...compositionNode.schedule, batch_index: 4, batch_size: 1, execution_mode: 'serial' } }] } }
+      expect(decodeSkillEvidenceResponse(response).composition?.result.effect_disposition).toBe(effect_disposition)
+      const { effect_disposition: _omitted, ...missingEffect } = failure
+      expect(() => decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
+        result: { ...missingEffect, tool_name: compositionEvidence.composition_tool } } })).toThrow()
+    }
+  })
+
+  it('retains physical execution identity and typed node origin from the server', () => {
+    const invocation = { kind: 'composition', origin: { kind: 'session_composition' },
+      execution_id: 'exec-root', tool_name: 'keeper_compose_proof' }
+    for (const execution_origin of ['fresh_dispatch', 'retained_completion', 'dispatch_refused']) {
+      const response = { schema: 'masc.skill-evidence/v7', status: 'observed', reference,
+        activation: { selection: 'most_recent_observed', evidence: { ...activationEvidence,
+          activation: { ...activationPayload, invocation } } },
+        composition: { ...compositionEvidence, executor_settlements: [{ ...compositionNode, execution_origin }] },
+        composition_statistics: null, coverage: { ...coverage, composition_records_read: 1 } }
+      const decoded = decodeSkillEvidenceResponse(response)
+      expect(decoded.composition?.executor_settlements[0]?.execution_origin).toBe(execution_origin)
+      const waiting = decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
+        executor_settlements: [{ ...compositionNode, execution_origin,
+          deferred_kind: 'owned_job_result_wait', result: { ...compositionNode.result, disposition: 'deferred' } }] } })
+      expect(waiting.composition?.executor_settlements[0]?.deferred_kind).toBe('owned_job_result_wait')
+      expect(decoded.activation?.selection === 'most_recent_observed'
+        && decoded.activation.evidence.activation.invocation).toEqual(invocation)
+      expect(() => decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
+        executor_settlements: [{ ...compositionNode, execution_origin: 'invented' }] } })).toThrow()
+    }
+  })
+})
+
+function sharedAsyncSkillEvidence() {
+  const activation = sharedAsyncActionLedger.activations[0]!
+  return {
+    schema: 'masc.skill-evidence/v7',
+    composition_statistics: null, status: 'observed',
+    reference: {identity: activation.identity, content_revision: activation.content_revision},
+    activation: {selection: 'most_recent_observed', evidence: {
+      trace_id: sharedAsyncActionLedger.session_id,
+      owner: {status: 'not_claimed_in_retained_catalog', claims: [], gaps: []},
+      activation,
+      async_result_deliveries: sharedAsyncActionLedger.async_result_deliveries,
+      async_actions: sharedAsyncActionLedger.async_actions,
+    }},
+    composition: null,
+    coverage: {...coverage, activation_sessions_inspected: 1, activation_ledgers_loaded: 1},
+  }
+}
+
+describe('stored composition duration statistics', () => {
+  it('rejects fabricated zero means and mismatched sample totals', () => {
+    const raw = {
+      schema: 'masc.skill-evidence/v7', status: 'observed',
+      reference, activation: null, composition: compositionEvidence,
+      coverage: { ...coverage, composition_records_read: 1 },
+      composition_statistics: {
+        scope: 'exact_reference_retained_runs', duration_scope: 'stored_executor_result',
+        records: 2, completed: { samples: 2, mean_ms: 20 },
+        failed: { samples: 0, mean_ms: null }, deferred: 0,
+      },
+    }
+    expect(decodeSkillEvidenceResponse(raw).composition_statistics?.completed.mean_ms).toBe(20)
+    expect(() => decodeSkillEvidenceResponse({ ...raw,
+      status: 'not_observed_in_retained_coverage', composition: null, coverage,
+    })).toThrow(SkillsContractError)
+    expect(() => decodeSkillEvidenceResponse({ ...raw,
+      status: 'not_observed_in_retained_coverage', composition: null,
+      coverage: { ...coverage, composition_scope: 'unavailable', composition_unavailable: ['read failed'] },
+      composition_statistics: { ...raw.composition_statistics,
+        records: 0, completed: { samples: 0, mean_ms: null } },
+    })).toThrow(SkillsContractError)
+    for (const completed of [{ samples: 0, mean_ms: 0 }, { samples: 2, mean_ms: null },
+      { samples: 2, mean_ms: -1 }, { samples: 1, mean_ms: 20 }]) {
+      expect(() => decodeSkillEvidenceResponse({ ...raw,
+        composition_statistics: { ...raw.composition_statistics, completed },
+      })).toThrow()
+    }
+  })
+})
+
+describe('skill evidence contract', () => {
+  it('fetches retained SDK results and native starts with their original Task frame', async () => {
+    const response = sharedAsyncSkillEvidence()
+    vi.stubGlobal('crypto', {})
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response), {
+      status: 200, headers: {'Content-Type': 'application/json'},
+    })))
+    const decoded = await fetchSkillEvidence(response.reference)
+    expect(decoded.activation?.selection).toBe('most_recent_observed')
+    if (decoded.activation?.selection !== 'most_recent_observed') throw new Error('missing selected activation')
+    const evidence = decoded.activation.evidence
+    expect(evidence.activation.turn_ref).toBe('trace-one#41')
+    expect(evidence.activation.invocation).toEqual(response.activation.evidence.activation.invocation)
+    expect(evidence.async_result_deliveries).toHaveLength(2)
+    expect(evidence.async_actions).toHaveLength(3)
+    expect(evidence.async_actions.map(action => action.occurrence.kind)).toEqual(['sdk_result', 'sdk_result', 'native_started'])
+    expect(evidence.async_actions.map(action => action.physical_turn_ref)).toEqual(
+      response.activation.evidence.async_actions.map(action => action.physical_turn_ref))
+    expect(evidence.async_actions.every(action => action.physical_turn_ref !== evidence.activation.turn_ref)).toBe(true)
+  })
+
+  it('rejects missing detail arrays, changed admission frames and hostile action links', () => {
+    const response = sharedAsyncSkillEvidence()
+    for (const omitted of ['async_result_deliveries', 'async_actions']) {
+      const evidence = Object.fromEntries(Object.entries(response.activation.evidence).filter(([key]) => key !== omitted))
+      expect(() => decodeSkillEvidenceResponse({...response, activation: {...response.activation, evidence}})).toThrow(SkillsContractError)
+    }
+    const changedFrame = structuredClone(response)
+    changedFrame.activation.evidence.activation.runtime_id = 'changed-original-runtime'
+    const unknownLink = structuredClone(response)
+    unknownLink.activation.evidence.async_actions[0]!.delivery_sha256 = '0'.repeat(64)
+    const duplicate = structuredClone(response)
+    duplicate.activation.evidence.async_actions.push(duplicate.activation.evidence.async_actions[0]!)
+    const wrongReceivingTurn = structuredClone(response)
+    wrongReceivingTurn.activation.evidence.async_actions[0]!.physical_turn_ref = 'trace-one#74'
+    for (const invalid of [changedFrame, unknownLink, duplicate, wrongReceivingTurn]) {
+      expect(() => decodeSkillEvidenceResponse(invalid)).toThrow(SkillsContractError)
+    }
+  })
+
+  it('retains a shared handoff sibling digest without inventing its absent activation', () => {
+    const response = structuredClone(sharedAsyncSkillEvidence())
+    const delivery = response.activation.evidence.async_result_deliveries[0]!
+    delivery.child_activations.push({skill_tool_use_id: 'z-sibling', activation_sha256: '1'.repeat(64)})
+    response.activation.evidence.async_result_deliveries = [delivery]
+    response.activation.evidence.async_actions = []
+    const decoded = decodeSkillEvidenceResponse(response)
+    if (decoded.activation?.selection !== 'most_recent_observed') throw new Error('missing selected activation')
+    expect(decoded.activation.evidence.async_result_deliveries[0]?.child_activations).toHaveLength(2)
+    expect(decoded.activation.evidence.async_actions).toEqual([])
+  })
+
+  it('preserves nested activation scope in exact Skill evidence and rejects invalid correlation', () => {
+    const scope = {
+      parent_tool_use_id: 'outer-run',
+      composition_run_id: '019ffc2b-0a41-7ba2-bf58-598e0e7f711b',
+      alias: 'child/~quoted',
+    }
+    const invocation = {
+      kind: 'nested_composition', origin: { kind: 'session_composition' },
+      tool_name: 'keeper_compose_review', scope,
+    }
+    const response = {
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null, status: 'observed', reference,
+      activation: { selection: 'most_recent_observed', evidence: {
+        ...activationEvidence, activation: { ...activationPayload, invocation },
+      } },
+      composition: null, coverage,
+    }
+    expect(decodeSkillEvidenceResponse(response).activation).toEqual(response.activation)
+    for (const badScope of [
+      { ...scope, composition_run_id: 'not-a-run' },
+      { ...scope, parent_tool_use_id: 'skill-call-1' },
+      { ...scope, alias: '' },
+      { ...scope, unknown: true },
+    ]) {
+      const bad = { ...response, activation: { ...response.activation, evidence: {
+        ...response.activation.evidence, activation: { ...response.activation.evidence.activation,
+          invocation: { ...invocation, scope: badScope },
+        },
+      } } }
+      expect(() => decodeSkillEvidenceResponse(bad)).toThrow(SkillsContractError)
+    }
+  })
+
+  it('rejects the retired bounded-evidence schema', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v2',
+      status: 'never_observed',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: { ...coverage, composition_records_read: 1 },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('keeps instruction activation and composition result in one exact envelope', () => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed',
+        evidence: activationEvidence,
+      },
+      composition: compositionEvidence,
+      coverage: { ...coverage, composition_records_read: 1 },
+    })
+
+    expect(decoded.activation?.selection).toBe('most_recent_observed')
+    expect(decoded.composition?.executor_settlements).toHaveLength(1)
+  })
+
+  it('rejects async evidence without its durable request identity', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: null,
+      composition: {
+        ...compositionEvidence,
+        composition_execution: 'async',
+        request_id: null,
+      },
+      coverage: { ...coverage, composition_records_read: 1 },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects impossible node batch size and truncation invariants', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: null,
+      composition: {
+        ...compositionEvidence,
+        executor_settlements: [{
+          ...compositionNode,
+          schedule: { ...compositionNode.schedule, batch_size: 0 },
+          truncated_to: 3,
+        }],
+      },
+      coverage: { ...coverage, composition_records_read: 1 },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects observed status without any observed evidence', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: null,
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('keeps partial ledger coverage visible when nothing was observed', () => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'not_observed_in_retained_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_scope: 'incomplete_retained_trace_snapshot',
+        activation_gaps: [{
+          code: 'ledger_unreadable',
+          trace_id: 'trace-proof',
+          cause_code: 'read_failed',
+          detail: 'permission denied',
+        }],
+      },
+    })
+
+    expect(decoded.coverage.activation_gaps).toHaveLength(1)
+  })
+
+  it.each([
+    'exact_reference_latest_completed',
+    'unavailable',
+  ] as const)('accepts the declared composition scope %s', (composition_scope) => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'not_observed_in_retained_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: composition_scope === 'unavailable'
+        ? { ...coverage, composition_scope, composition_unavailable: ['index unreadable'] }
+        : { ...coverage, composition_scope },
+    })
+
+    expect(decoded.coverage.composition_scope).toBe(composition_scope)
+  })
+
+  it('rejects a timestamp tie with duplicate traces or different times', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed_timestamp_tie',
+        evidence: [
+          activationEvidence,
+          {
+            ...activationEvidence,
+            activation: { ...activationPayload, activated_at: '2026-08-28T04:00:00Z' },
+          },
+        ],
+      },
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects unknown activation gap codes', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'not_observed_in_retained_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_scope: 'incomplete_retained_trace_snapshot',
+        activation_gaps: [{ code: 'hologram' }],
+      },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects a known activation gap without its variant fields', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'not_observed_in_retained_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_scope: 'incomplete_retained_trace_snapshot',
+        activation_gaps: [{ code: 'ledger_unreadable' }],
+      },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('accepts a timestamp tie expressed with different RFC3339 offsets', () => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed_timestamp_tie',
+        evidence: [
+          activationEvidence,
+          {
+            ...activationEvidence,
+            trace_id: 'trace-proof-2',
+            activation: {
+              ...activationPayload,
+              turn_ref: 'trace-proof-2#1',
+              activated_at: '2026-08-28T12:00:00.0000000000001+09:00',
+            },
+          },
+        ],
+      },
+      composition: null,
+      coverage,
+    })
+    expect(decoded.activation?.selection).toBe('most_recent_observed_timestamp_tie')
+  })
+
+  it('accepts a leap-second tie with the next civil minute', () => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed_timestamp_tie',
+        evidence: [
+          {
+            ...activationEvidence,
+            activation: {
+              ...activationPayload,
+              activated_at: '2026-12-31T23:59:60Z',
+            },
+          },
+          {
+            ...activationEvidence,
+            trace_id: 'trace-proof-2',
+            activation: {
+              ...activationPayload,
+              turn_ref: 'trace-proof-2#1',
+              activated_at: '2027-01-01T00:00:00Z',
+            },
+          },
+        ],
+      },
+      composition: null,
+      coverage,
+    })
+    expect(decoded.activation?.selection).toBe('most_recent_observed_timestamp_tie')
+  })
+
+  it('rejects an invalid reference without an activation', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'not_observed_in_retained_coverage',
+      reference: {
+        identity: { ...reference.identity, source_id: '.' },
+        content_revision: 'short',
+      },
+      activation: null,
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects activation semantics that the canonical ledger rejects', () => {
+    const invalidActivations = [
+      { ...activationPayload, turn_ref: 'trace-proof#1e0' },
+      {
+        ...activationPayload,
+        invocation: {
+          kind: 'instruction' as const,
+          origin: { kind: 'task_instruction' as const, task_ids: ['task-1', 'task-1'] },
+          served_content: {
+            kind: 'skill_resource' as const,
+            relative_path: '../secret',
+            bytes: 4,
+            sha256: 'short',
+          },
+        },
+      },
+      {
+        ...activationPayload,
+        delivery: {
+          boundary: { kind: 'model_response' as const, agent_core_turn: 1 },
+          runtime_id: 'codex.default',
+          delivered_at: '2026-08-28T03:00:00Z',
+          content_bytes: 4,
+          content_sha256: 'd'.repeat(64),
+        },
+      },
+    ]
+    for (const activation of invalidActivations) {
+      expect(() => decodeSkillEvidenceResponse({
+        schema: 'masc.skill-evidence/v7',
+        composition_statistics: null,
+        status: 'observed',
+        reference,
+        activation: {
+          selection: 'most_recent_observed',
+          evidence: { ...activationEvidence, activation },
+        },
+        composition: null,
+        coverage,
+      })).toThrow(SkillsContractError)
+    }
+  })
+
+  it('rejects an invalid identity even when envelope and activation agree', () => {
+    const invalidReference = {
+      ...reference,
+      identity: { source_id: '../workspace', package_id: '..', name: 'Bad--Name' },
+    }
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference: invalidReference,
+      activation: {
+        selection: 'most_recent_observed',
+        evidence: {
+          ...activationEvidence,
+          activation: { ...activationPayload, identity: invalidReference.identity },
+        },
+      },
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects an RFC3339 offset outside the canonical Ptime range', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed',
+        evidence: {
+          ...activationEvidence,
+          activation: {
+            ...activationPayload,
+            activated_at: '0000-01-01T00:00:00+01:00',
+          },
+        },
+      },
+      composition: null,
+      coverage,
+    })).toThrow(SkillsContractError)
+  })
+
+  it('accepts the fractional Ptime maximum boundary', () => {
+    const decoded = decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: {
+        selection: 'most_recent_observed',
+        evidence: {
+          ...activationEvidence,
+          activation: {
+            ...activationPayload,
+            activated_at: '9999-12-31T23:59:59.999999999999Z',
+          },
+        },
+      },
+      composition: null,
+      coverage,
+    })
+    expect(decoded.activation?.selection).toBe('most_recent_observed')
+  })
+
+  it('rejects activation candidates not backed by loaded ledgers', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'observed',
+      reference,
+      activation: { selection: 'most_recent_observed', evidence: activationEvidence },
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_sessions_inspected: 0,
+        activation_ledgers_loaded: 0,
+      },
+    })).toThrow(SkillsContractError)
+  })
+
+  it('rejects trace-store-unavailable with observed sessions', () => {
+    expect(() => decodeSkillEvidenceResponse({
+      schema: 'masc.skill-evidence/v7',
+      composition_statistics: null,
+      status: 'not_observed_in_retained_coverage',
+      reference,
+      activation: null,
+      composition: null,
+      coverage: {
+        ...coverage,
+        activation_scope: 'trace_store_unavailable',
+        activation_gaps: [{
+          code: 'trace_root_unavailable',
+          operation: 'stat_entry',
+          path: '/runtime/traces',
+          detail: 'permission denied',
+        }],
+      },
+    })).toThrow(SkillsContractError)
+  })
+})
+
+const recovery = {
+  lost: 1,
+  finalized: 0,
+  cleaned: 0,
+  staging_files_inspected: 0,
+  staging_files_deleted: 0,
+  staging_files_preserved: 0,
+  unreadable: 0,
+  failed: 0,
+  store_errors: [],
+  record_errors: [],
+}
+
+// One active row as the server writes it: Server_async_request_observability
+// .entry_to_yojson (lib/server/server_async_request_observability.ml:86) puts
+// worker_ownership in front of Keeper_msg_async.entry_to_json
+// (lib/keeper/keeper_msg_async.ml:2812), which always writes request_context
+// as the submitter's object or null.
+function activeRequestRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    worker_ownership: 'runtime_owned',
+    request_id: 'request-owned',
+    keeper_name: 'rondo',
+    submitted_by: 'operator',
+    request_context: null,
+    status: 'running',
+    submitted_at: 1,
+    elapsed_sec: 2,
+    ...overrides,
+  }
+}
+
+function readyObservation(requests: readonly Record<string, unknown>[]): Record<string, unknown> {
+  const owned = requests.filter(row => row.worker_ownership === 'runtime_owned').length
+  return {
+    schema: 'masc.async-request-observation/v1',
+    status: 'ready',
+    summary: {
+      active: requests.length,
+      runtime_owned: owned,
+      ownership_unknown: requests.length - owned,
+      record_errors: 0,
+    },
+    requests,
+    record_errors: [],
+    startup_recovery: recovery,
+  }
+}
+
+describe('async request observation contract', () => {
+  it('keeps durable row and current-process ownership distinct', () => {
+    const decoded = decodeAsyncRequestObservation(readyObservation([
+      activeRequestRow(),
+      activeRequestRow({
+        worker_ownership: 'disk_only_ownership_unknown',
+        request_id: 'request-disk-only',
+        keeper_name: 'sangsu',
+        status: 'queued',
+        submitted_at: 2,
+        elapsed_sec: 1,
+      }),
+    ]))
+
+    expect(decoded.status).toBe('ready')
+    if (decoded.status === 'ready') {
+      expect(decoded.requests.map(row => row.worker_ownership)).toEqual([
+        'runtime_owned',
+        'disk_only_ownership_unknown',
+      ])
+    }
+  })
+
+  it('keeps the request_context object the submitter gave', () => {
+    const requestContext = { source: 'board', thread: { post_id: 'p-1', depth: 2 } }
+    const decoded = decodeAsyncRequestObservation(readyObservation([
+      activeRequestRow({ request_context: requestContext }),
+    ]))
+
+    expect(decoded.status).toBe('ready')
+    if (decoded.status === 'ready') {
+      expect(decoded.requests[0]?.request_context).toEqual(requestContext)
+    }
+  })
+
+  it.each([
+    ['a row without request_context', (() => {
+      const row = activeRequestRow()
+      delete row.request_context
+      return row
+    })()],
+    ['a request_context that is not an object', activeRequestRow({ request_context: 'board' })],
+    ['a row field the server does not write', activeRequestRow({ request_ctx: null })],
+  ])('rejects %s', (_label, row) => {
+    expect(() => decodeAsyncRequestObservation(readyObservation([row]))).toThrow(
+      SkillsContractError,
+    )
+  })
+
+  it('rejects summary counts that invent or omit durable rows', () => {
+    expect(() => decodeAsyncRequestObservation({
+      schema: 'masc.async-request-observation/v1',
+      status: 'ready',
+      summary: {
+        active: 2,
+        runtime_owned: 1,
+        ownership_unknown: 1,
+        record_errors: 0,
+      },
+      requests: [],
+      record_errors: [],
+      startup_recovery: null,
+    })).toThrow(SkillsContractError)
+  })
+})

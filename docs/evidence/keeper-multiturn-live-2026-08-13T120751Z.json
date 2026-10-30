@@ -1,0 +1,65 @@
+{
+  "schema": "masc.keeper_feature_matrix.multiturn_evidence.v1",
+  "captured_at": "2026-08-13T15:34:00Z",
+  "canary": "canary-multiturn-20260813-210119",
+  "transcript": {
+    "path": "/Users/dancer/me/.masc/keeper_chat/canary-multiturn-20260813-210119.jsonl",
+    "sha256": "b60b9686b13048f1456a9ce58465a5c4c6dd7bf03ab79d90dc0b273e0dc5b573",
+    "bytes": 17532,
+    "records": 20,
+    "user_records": 10,
+    "assistant_records": 10,
+    "first_record_at_unix": 1786622508.781042,
+    "last_record_at_unix": 1786622871.149431,
+    "last_record_at_iso": "2026-08-13T12:07:51Z"
+  },
+  "configuration": {
+    "path": "/Users/dancer/me/.masc/config/keepers/canary-multiturn-20260813-210119.toml",
+    "sha256": "c1a8979d61b63b1088b3b54035011c61c90269d8b300576f7566d7f6a14c353e",
+    "sandbox_profile": "local",
+    "network_mode": "inherit",
+    "proactive_enabled": false,
+    "autoboot_enabled": true,
+    "runtime_assignment": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+  },
+  "terminal_state": {
+    "path": "/Users/dancer/me/.masc/keepers/canary-multiturn-20260813-210119.json",
+    "sha256_at_capture": "6953b6110bd61652bc01c93cc1fa349b77414bc25a22c11ee322cc32dfb2679c",
+    "paused": true,
+    "latched_reason": {
+      "kind": "operator_paused",
+      "actor": "keeper_down"
+    },
+    "owner_terminal_operation_count": 10,
+    "owner_interrupted_operation_count": 0
+  },
+  "facts_established_in_turns_1_to_9": [
+    "The project codename is Aster Ledger.",
+    "The prototype city is Nacre Bay.",
+    "Cobalt tokens must be processed before amber tokens.",
+    "If sensor Delta-7 goes silent, pause the shipment but retain the queue.",
+    "Dr. Iona Vale owns the recovery decision.",
+    "Recovery is confirmed by three consecutive violet pulses.",
+    "After confirmation, the retained queue moves to Orchid Pier.",
+    "The final recovery notice goes to channel Harbor-3.",
+    "Amber tokens tagged glasswing are quarantined rather than shipped, while cobalt remains first."
+  ],
+  "turn_10_assertions": {
+    "all_nine_distinct_facts_recalled": true,
+    "complete_operational_sequence_reconstructed": true,
+    "contradiction_assessment": "No contradictions are present.",
+    "tool_use_requested": false,
+    "tool_use_observed_in_chat": false
+  },
+  "verdict": "pass",
+  "proves": [
+    "One Keeper completed ten user-assistant exchanges on one configured runtime.",
+    "Turn 10 recalled all nine exact facts and their ordering, safety, ownership, recovery, location, notification, and exception relationships."
+  ],
+  "does_not_prove": [
+    "Memory survives process restart or compaction.",
+    "The same semantic contract works on any other runtime or provider.",
+    "The Keeper runs continuously for 1h, 2h, 4h, or 24h.",
+    "A browser surface renders the same transcript without omission or duplication."
+  ]
+}

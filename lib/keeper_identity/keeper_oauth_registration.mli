@@ -1,0 +1,68 @@
+(** Registering this installation as a client, when the authorization server
+    lets a client register itself (RFC 7591).
+
+    An operator who has already created an app has a client id and should
+    keep using it. This is for the case where nobody has: the server hands
+    one out, and the installation stops needing a step in a browser that has
+    nothing to do with what the operator was trying to do.
+
+    The registration is per installation, not per Keeper. Which person a
+    Keeper acts as is decided at consent; the client id only says which
+    software is asking. *)
+
+type error =
+  | Transport of string
+  | Refused of { status : int; body : string }
+      (** the server answered and declined. The body is kept: a server that
+          refuses a redirect URI says so there, and that is the one thing an
+          operator can act on. *)
+  | Malformed of string
+
+val error_to_string : error -> string
+
+type registered = {
+  client_id : string;
+  client_secret : string option;
+      (** What the server handed back beside the id, when it handed one back.
+
+          Registration asks for a public client and most servers answer with
+          one. Some answer with a secret anyway, and then it is not optional
+          decoration: their token endpoint refuses a redemption without it.
+          Measured 2026-08-27 -- monday.com returns one; Vercel and Hugging
+          Face echo [none] and return nothing, even though neither lists
+          [none] among the methods its metadata says it supports. Which it
+          is cannot be read off the metadata, only off this answer. *)
+  secret_expires_at : float option;
+      (** Unix seconds at which [client_secret] lapses, [Some 0.] for a
+          secret the server says never does, and [None] both for a public
+          client and for a server that issued a secret without the field RFC
+          7591 section 3.2.1 requires beside it. The store keeps the last
+          case apart from "never" -- see
+          {!Keeper_oauth_client_store.secret_expired}. *)
+  issued_at : float;  (** unix seconds, as the server dated it *)
+}
+
+(** How registration reaches the server. Injected so the request this builds
+    and the answer it reads can be exercised against a recorded response. *)
+type post =
+  url:string -> headers:(string * string) list -> body:string ->
+  (int * string, string) result
+
+val http_post :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> timeout_sec:float -> post
+(** The production transport: one request bounded by [timeout_sec] on
+    [clock]. The only way to register outside a test. *)
+
+val register :
+  post:post ->
+  registration_url:string ->
+  client_name:string ->
+  redirect_uri:string ->
+  unit ->
+  (registered, error) result
+(** Ask for a client id.
+
+    Asks for a public client: the token endpoint is told [none], and PKCE
+    proves the redemption. A server that answers with a secret anyway is
+    telling the caller its token endpoint wants one, so the secret comes back
+    in {!registered} rather than being dropped. *)

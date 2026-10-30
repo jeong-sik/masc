@@ -1,0 +1,103 @@
+import type {
+  CommittedRuntimeTomlConfig,
+  CommittedRuntimeSkillApplication,
+  RuntimeTomlConfig,
+  RuntimeTomlEditorProtocol,
+} from '../api/dashboard-runtime'
+
+type RuntimeTomlEditorProtocolFixture = Omit<
+  RuntimeTomlEditorProtocol,
+  'provider_fields' | 'required_provider_fields'
+> & {
+  readonly provider_fields: readonly string[]
+  readonly required_provider_fields: readonly string[]
+}
+
+type RuntimeTomlConfigFixtureInput = Omit<
+  RuntimeTomlConfig,
+  'path' | 'provider_protocols' | 'reserved_provider_ids' | 'source_revision'
+> & {
+  path: string
+  provider_protocols?: readonly RuntimeTomlEditorProtocolFixture[]
+  reserved_provider_ids?: readonly string[]
+}
+
+// A short stand-in for the server's reserved_provider_ids. A test that needs
+// a refused provider id takes one from here.
+export const runtimeReservedProviderIdsFixture: readonly string[] = [
+  'providers',
+  'models',
+  'runtime',
+  'voice',
+  'board',
+  'turn',
+]
+
+interface CommittedRuntimeTomlConfigFixtureOptions {
+  readonly order?: string
+  readonly durability?: CommittedRuntimeTomlConfig['commit']['durability']
+  readonly skills?: CommittedRuntimeSkillApplication
+  readonly routing?: CommittedRuntimeTomlConfig['application']['routing']
+  readonly keeperOverlay?: CommittedRuntimeTomlConfig['application']['keeper_overlay']
+  readonly exactOutputRegistry?: CommittedRuntimeTomlConfig['application']['exact_output_registry']
+}
+
+const defaultRouting: CommittedRuntimeTomlConfig['application']['routing'] = {
+  status: 'applied',
+  requires_restart: false,
+  applied_at: null,
+}
+
+const defaultKeeperOverlay: CommittedRuntimeTomlConfig['application']['keeper_overlay'] = {
+  status: 'not_configured',
+  requires_restart: false,
+  applied_at: null,
+  configured_count: 0,
+  pending_keys: [],
+  applied_keys: [],
+  preempted_keys: [],
+}
+
+export function committedRuntimeTomlConfigFixture(
+  config: RuntimeTomlConfigFixtureInput,
+  options: CommittedRuntimeTomlConfigFixtureOptions = {},
+): CommittedRuntimeTomlConfig {
+  const sourceRevision = 'runtime-source-revision'
+  const application = config.application
+  const skills = options.skills ?? {
+    state: 'published',
+    input_source_revision: sourceRevision,
+    snapshot_revision: 'skill-snapshot-revision',
+    catalog_revision: 'skill-catalog-revision',
+    config_state: 'configured',
+  }
+
+  return {
+    ...config,
+    ok: true,
+    source_revision: sourceRevision,
+    provider_protocols: (config.provider_protocols ?? []).map(protocol => ({
+      ...protocol,
+      provider_fields: [...protocol.provider_fields],
+      required_provider_fields: [...protocol.required_provider_fields],
+    })),
+    reserved_provider_ids: [...(config.reserved_provider_ids ?? runtimeReservedProviderIdsFixture)],
+    state: 'committed',
+    commit: {
+      source_revision: sourceRevision,
+      order: options.order ?? '7',
+      ...(options.durability === 'unconfirmed'
+        ? { durability: 'unconfirmed' as const, durability_detail: 'fixture directory sync uncertainty' }
+        : { durability: 'durable' as const, durability_detail: null }),
+      warnings: [],
+    },
+    application: {
+      operation: application?.operation ?? 'test_write',
+      routing: options.routing ?? defaultRouting,
+      keeper_overlay: options.keeperOverlay ?? defaultKeeperOverlay,
+      skills,
+      exact_output_registry: options.exactOutputRegistry
+        ?? { status: 'applied', requires_restart: false, targets: 'runtime_bindings' },
+    },
+  }
+}

@@ -1,0 +1,8 @@
+# Adjust manifest_path when copying this declaration outside this directory.
+id = "dos-machine"
+enabled = true
+run_id = "shared-dos"
+manifest_path = "../../../addons/dos-machine/lane.toml"
+
+[binding]
+sources = []

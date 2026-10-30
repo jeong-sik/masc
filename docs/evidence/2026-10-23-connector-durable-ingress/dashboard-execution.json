@@ -1,0 +1,54 @@
+{
+  "base": "73028e4450921a3f130b7297d013c907df2e7f49",
+  "reapplied_unchanged_to_main": "f599835707d85afca5fa59df7363efb553ba53b8",
+  "command": [
+    "pnpm",
+    "test",
+    "src/keeper-delivery-provenance.test.ts"
+  ],
+  "exit_code": 0,
+  "tests": 30,
+  "duration_seconds": 0.861,
+  "node_version": "v26.3.0",
+  "pnpm_version": "10.31.0",
+  "tool_chunk_ids": [
+    "edee3d",
+    "977782"
+  ],
+  "typecheck": {
+    "command": [
+      "pnpm",
+      "exec",
+      "tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0,
+    "tool_chunk_ids": [
+      "a4fc02",
+      "6f944f"
+    ]
+  },
+  "source_sha256": {
+    "src/keeper-delivery-provenance.ts": "a49c56e36b67bfd2419dab174e54fec52152792b81b96bb409a568c4742d85bc",
+    "src/keeper-delivery-provenance.test.ts": "66e5f08358c052985598045db965a963039bedc544275094756e63cb4d6dfd80"
+  },
+  "limits": [
+    "Actual30 Dashboard identity/codec cases; no rendered Dashboard/TUI proof.",
+    "Initial test/typecheck used73028 base;19 reviewed patch files unchanged when reapplied to f599. Current typecheck recorded separately.",
+    "No OCaml build or execution proof."
+  ],
+  "current_combination_typecheck": {
+    "base": "f599835707d85afca5fa59df7363efb553ba53b8",
+    "command": [
+      "pnpm",
+      "exec",
+      "tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0,
+    "tool_chunk_ids": [
+      "f873c6",
+      "de799d"
+    ]
+  }
+}

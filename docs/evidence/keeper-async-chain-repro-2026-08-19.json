@@ -1,0 +1,28 @@
+{
+  "captured_at": "2026-08-19T05:35:00Z",
+  "purpose": "Async Tool/Job 행 — accept→poll→terminal 체인의 재현성 보강 (매트릭스는 08-18 rtprobe 1건만 기록)",
+  "source": "<base-path>/.masc/tool_calls/2026-08/*.jsonl (8월 전수)",
+  "tool_totals": {
+    "keeper_compose_mission-snapshot": 65,
+    "keeper_compose_background-snapshot": 5,
+    "keeper_composition_status": 5,
+    "keeper_composition_cancel": 0
+  },
+  "accept_response_shape": {
+    "keys": ["composition_tool", "execution", "request_id", "submission"],
+    "submission": { "status": "queued", "durability": "durable" },
+    "execution": "async"
+  },
+  "chain_pairs": [
+    { "keeper": "rw-e0-r4-20260818-research", "poll_status": "done", "ok": true, "lag_s": 9.7 },
+    { "keeper": "rw-e0-r5-20260818-research", "poll_status": "done", "ok": true, "lag_s": 7.9 },
+    { "keeper": "rw-e0-r6-20260818-research", "poll_status": "done", "ok": true, "lag_s": 56.6 },
+    { "keeper": "rw-e0-r7-20260818-research", "poll_status": "done", "ok": true, "lag_s": 35.0 },
+    { "keeper": "rtprobe", "poll_status": "done", "ok": true, "lag_s": 2.0 }
+  ],
+  "verdict": "accept→poll→terminal 체인이 5개 서로 다른 keeper에서 독립 재현 — 매 건이 같은 request_id로 queued/durable → done/ok=true에 도달했고 lag는 2~57초로 분산. 매트릭스의 08-18 단일 실측(rtprobe)이 일회성이 아님을 확인.",
+  "still_missing": {
+    "cancel": "keeper_composition_cancel 호출 8월 전수 0건 — cancel 경로 미실측",
+    "restart_crossing": "process restart를 가로지르는 typed terminal 미실측 (5건 모두 분 단위 내 완료)"
+  }
+}

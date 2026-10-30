@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-08-19T06:53+09:00",
+  "browser_followups": {
+    "comment_detail": {
+      "method": "playwright: #board 목록(226 노드)에서 게시물 클릭 진입",
+      "markers": { "답글": 20, "comment": 6, "댓글": 2 },
+      "verdict": "게시물 상세에서 댓글 스레드 렌더 확인"
+    },
+    "toml_settings_surface": {
+      "method": "playwright: 상단 Tweaks 진입",
+      "markers": { "설정": 47 },
+      "rendered_chars": 3924,
+      "verdict": "runtime 설정 registry 표면이 브라우저로 렌더 (TOML 리터럴 노출이 아닌 설정 항목 UI)"
+    }
+  },
+  "duration_1h_window": {
+    "t0": "2026-08-19T05:50+09:00",
+    "t1": "2026-08-19T06:53+09:00",
+    "health_status": "ok at both ends",
+    "schedule_runner": { "tick_count": 2304, "success_count": 2304, "failure_count": 0, "crash_count": 0 },
+    "verdict": "63분 창에서 서버 연속 가동·스케줄 러너 무실패 — Schedule Job/Long-run duration의 1h 칸 증거"
+  },
+  "connector_disposition": {
+    "discord_slack": "runtime config에 커넥터 토큰 미구성 — live/browser 축은 운영자 프로비저닝 대기 (자격 생성은 에이전트 대행 불가 영역)"
+  }
+}

@@ -1,0 +1,2446 @@
+{
+  "kind": "INDEPENDENT_CHECKPOINT_DRAFT_NOT_CANONICAL_UPDATE",
+  "observed_at": "2026-10-23T07:01:22.266422+00:00",
+  "pinned_main": "14a4026c26d0e4dcbca3c50a515f123c950d439f",
+  "contract_identity_file": "goal54-current-main-contract-identity-20261023.json",
+  "criteria_sha256": "19dc4f8ffb9fb5c64093be6019a2fb3b59df29dd1d43777e8759ae0c9414b809",
+  "canonical_report_file_sha256": "5a4127c58792b8c5d60bb889544efb3e44e27a9d0003424502100f07ec7a5f6a",
+  "original_count": 54,
+  "excluded_extensions": [
+    "X01",
+    "X02",
+    "X03",
+    "X04",
+    "X05",
+    "X06"
+  ],
+  "full54_complete": false,
+  "newly_certified_complete_rows": [],
+  "canonical_report_stale": true,
+  "latest_canonical_checkpoint_date": "2026-10-22",
+  "recommended_narrative_updates": [
+    "A01",
+    "A02",
+    "A04",
+    "A05",
+    "A06",
+    "C01",
+    "C02",
+    "C03",
+    "D03",
+    "E01",
+    "E02",
+    "E03",
+    "E04",
+    "E05",
+    "E06",
+    "E10",
+    "E12",
+    "F01",
+    "F02",
+    "F03",
+    "F04",
+    "F05",
+    "F06",
+    "G01",
+    "G02",
+    "G04",
+    "G05",
+    "G06",
+    "H01",
+    "H02",
+    "H03",
+    "H05",
+    "H06"
+  ],
+  "rows": [
+    {
+      "id": "A01",
+      "name": "변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보",
+      "criterion": "`test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보",
+      "contract_sha256": "026ee39b73954c3c4289c07d2a170955990f23f31d07feeefd012aa2f17bd8ec",
+      "canonical_status_at_pinned_main": "고정6f68 및 수리d06fc922 native 각 TUI24+application5 PASS. matching 두 실행 파일 내장 SHA·해시·key reference와 clean 같은소스 Dashboard build 확인. 운영 설치와 구분",
+      "audit_delta": "후속 UI source 29개 중 28개가 pinned main과 동일(test/dune 제외). 기존 source PASS는 type/build PASS 아님.",
+      "next_gap": "현재 후보 최소 suite와 정확한 artifact/source identity 확보. #45426 수리 뒤 새 실행 결과 필요.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이전70f438d0 keys56+inventory17 PASS. 후속 d769 candidate Dashboard5suite64+tsc PASS 저자 영수증. exact f6f183a4 CI39912368422 compile warning4 FAIL; 겹친 실행은 합산하지 않음.",
+      "measurement": "Dashboard 실제 component+synthetic API fixture 관측은 앞 후보 범위. 새 후속 visible TUI/installed runtime 아님.",
+      "merge": "#45394/95·#45415–17 merged. 후속 #45426 warning4 source repair merged는 pinned main 이후 별도 상태.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        }
+      ],
+      "replacement_status": "후속 UI source 29개 중 28개가 pinned main과 동일(test/dune 제외). 기존 source PASS는 type/build PASS 아님. 남은 범위: 현재 후보 최소 suite와 정확한 artifact/source identity 확보. #45426 수리 뒤 새 실행 결과 필요. 기존70f438d0 73 PASS·d769 Dashboard64/tsc PASS와 별도로 f6f183a4 선택 CI39912368422는 compile FAIL. 이후 #45426 명시 분기 수리는 merged지만 새6suite/artifact/실제 TUI 성공은 미확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "A02",
+      "name": "새 TUI로 On/Off/재연결 실제 화면 관측",
+      "criterion": "같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인",
+      "contract_sha256": "f340fbc172b3587f800aa210b339b1fa4bfdba3d13805e866b4b716ee0a26f5f",
+      "canonical_status_at_pinned_main": "6f68 실제 두 UI On→Off→On 및 Remove TOML+worker→재설치·세 incarnation/정리 확인. Evidence 직후 row 소실 #44895 수리 뒤 exactd06 실제 TUI에서 row/선택/원래 receipt/읽기실패 공존 및 정상 보존 확인. 새 후보 전체 lifecycle·운영 설치 별도",
+      "audit_delta": "새 Features/Plugins·분류·원본 선택 보존 소스는 main. 새 후속 TUI 실제 화면은 미관측.",
+      "next_gap": "같은 새 binary/API/worker 후보에서 On/Off/재연결·이전 incarnation·원래 receipt 관측.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이전70f438d0 keys56+inventory17 PASS. 후속 d769 candidate Dashboard5suite64+tsc PASS 저자 영수증. exact f6f183a4 CI39912368422 compile warning4 FAIL; 겹친 실행은 합산하지 않음.",
+      "measurement": "Dashboard 실제 component+synthetic API fixture 관측은 앞 후보 범위. 새 후속 visible TUI/installed runtime 아님.",
+      "merge": "#45394/95·#45415–17 merged. 후속 #45426 warning4 source repair merged는 pinned main 이후 별도 상태.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        }
+      ],
+      "replacement_status": "새 Features/Plugins·분류·원본 선택 보존 소스는 main. 새 후속 TUI 실제 화면은 미관측. 남은 범위: 같은 새 binary/API/worker 후보에서 On/Off/재연결·이전 incarnation·원래 receipt 관측. 기존70f438d0 73 PASS·d769 Dashboard64/tsc PASS와 별도로 f6f183a4 선택 CI39912368422는 compile FAIL. 이후 #45426 명시 분기 수리는 merged지만 새6suite/artifact/실제 TUI 성공은 미확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "A03",
+      "name": "retained worker에 남는 Observe/Action 키 안내 정리",
+      "criterion": "표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존",
+      "contract_sha256": "fb2ce564a8eccaa4d462a28faf0ddad9fc812cf9a91ff14f6568d017a052fe1a",
+      "canonical_status_at_pinned_main": "#44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적",
+      "audit_delta": "기존 retained Hint/action/history 증거 보존. 이 행의 전 구현은 이번 재감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "기존 retained Hint/action/history bounded 근거 보존. 현재 source 변경 영향은 이번 재감사 범위 밖이며 새 검증 의무를 추가하지 않음.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "#44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적 / 10/23: 기존 bounded 근거 보존. Hint/action/history의 current source 변경 영향은 이번 재감사 범위 밖이며, 재실측 미실시를 이유로 미완료로 되돌리지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "A04",
+      "name": "MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인",
+      "criterion": "실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속",
+      "contract_sha256": "764405b10cecb327cabc0363f1c1c0abd356384e739e928ad158860da1b8260e",
+      "canonical_status_at_pinned_main": "공통 #44710·G01 #44803 및 G06 #44840의 6개 층 main 병합 확인. G06 병합 head와 이후 fragment-only branch head를 구분. Browser #44168 전체 현재 판정·남은 맥락 리뷰와 새 follow-up head의 재승인은 별도",
+      "audit_delta": "지정 Core/UI/Connector/E04/E06 병합 확인. 모든 PR 현재 review/approval 전수 검토는 아님.",
+      "next_gap": "움직인 Librarian 16층의 최신 head에 독립 source·최소 실행을 다시 결속.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "감사 초기 REST45095 open16층 snapshot을 보존. 이후 #45357 exact444ce2d5가07:00:59Z merged(3931736b)임을 별도 REST로 직접 확인. 현재 pending PR에서는 제거.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        },
+        {
+          "kind": "rest_native_stack",
+          "url": "https://api.github.com/repos/jeong-sik/masc/stacks/45095",
+          "scope": "16층 open snapshot. 감사 중 top ebd0ac2→444ce2d5로 이동."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "본문의 actual configured Runtime/Agent fixture와 이전184PASS/1FAIL·새 head 실행 한계"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44702",
+          "scope": "원래 Browser stack merged/main 조상"
+        },
+        {
+          "kind": "github_pr_post_pin",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "07:03:28Z 재관측: exact444ce2d5 merged at07:00:59Z, merge3931736b. 초기 open snapshot을 대체하는 현재 병합 상태."
+        }
+      ],
+      "replacement_status": "지정 Core/UI/Connector/E04/E06 병합 확인. 모든 PR 현재 review/approval 전수 검토는 아님. 남은 범위: 움직인 Librarian 16층의 최신 head에 독립 source·최소 실행을 다시 결속. 이후 #45357 exact444ce2d5는07:00:59Z merged(3931736b); 현재 pending PR에서 제거. 병합이 새 실행 성공이나 E03 전체 완료를 뜻하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "A05",
+      "name": "Browser 스택의 후속 3개 층과 기존 증거 영향 검토",
+      "criterion": "#44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증",
+      "contract_sha256": "6b69cf8324265509e77f274fd2b64ccb46552efb758e619d86d2d66b7e74aabd",
+      "canonical_status_at_pinned_main": "세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도",
+      "audit_delta": "#44702 REST merged와 pinned main 조상 관계 확인. 원래 Browser 후속3 전체 재리뷰는 아님.",
+      "next_gap": "원래14건 검사와 현재 후속 행동군의 소스·실행 범위를 따로 대조.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44702",
+          "scope": "REST merged/main 조상. 기존 후속3 소스 전체 재감사 아님"
+        }
+      ],
+      "replacement_status": "#44702 REST merged와 pinned main 조상 관계 확인. 원래 Browser 후속3 전체 재리뷰는 아님. 남은 범위: 원래14건 검사와 현재 후속 행동군의 소스·실행 범위를 따로 대조.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "A06",
+      "name": "두 스택의 전체 통합 준비",
+      "criterion": "REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행",
+      "contract_sha256": "2a2e12925cb78312a5f01f6c10fb254af47a99c54b63d961c9c8e9628717f064",
+      "canonical_status_at_pinned_main": "공통·G01·G06 main 병합. pr-updater가 Browser67층 whole rebase/push 완료 보고; REST top #44702 aa0e05f6로 변경 확인. 현재 결속 승인0/67·old-head만43/최신승인부재24. top만dirty이며 로컬 main 비교에서도 작업표 문서 충돌 재현. Firefox 환경 전달 SOURCE PASS·실제 실행 별도",
+      "audit_delta": "원래 Browser stack이 open이라는 표 상태는 낡음. #44702는 main 조상. Librarian16은 별도 open.",
+      "next_gap": "원래 두 스택 병합 상태를 갱신하고 현재 조합의 실행·설치 증거를 별도로 확보.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "감사 초기 REST45095 open16층 snapshot을 보존. 이후 #45357 exact444ce2d5가07:00:59Z merged(3931736b)임을 별도 REST로 직접 확인. 현재 pending PR에서는 제거.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        },
+        {
+          "kind": "rest_native_stack",
+          "url": "https://api.github.com/repos/jeong-sik/masc/stacks/45095",
+          "scope": "16층 open snapshot. 감사 중 top ebd0ac2→444ce2d5로 이동."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "본문의 actual configured Runtime/Agent fixture와 이전184PASS/1FAIL·새 head 실행 한계"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44702",
+          "scope": "원래 Browser stack merged/main 조상"
+        },
+        {
+          "kind": "github_pr_post_pin",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "07:03:28Z 재관측: exact444ce2d5 merged at07:00:59Z, merge3931736b. 초기 open snapshot을 대체하는 현재 병합 상태."
+        }
+      ],
+      "replacement_status": "원래 Browser stack이 open이라는 표 상태는 낡음. #44702는 main 조상. Librarian16은 이후 #45357로 병합. 남은 범위: 원래 두 스택 병합 상태를 갱신하고 현재 조합의 실행·설치 증거를 별도로 확보. 이후 #45357 exact444ce2d5는07:00:59Z merged(3931736b); 현재 pending PR에서 제거. 병합이 새 실행 성공이나 E03 전체 완료를 뜻하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "B01",
+      "name": "각 Lane의 입력·판정·효과·저장소·자원 소유 경계 작성",
+      "criterion": "옮길 실행과 host에 남을 authority를 실제 `.mli`/호출자에 연결",
+      "contract_sha256": "07f54d2f61e2992320d1b43e1e1b990c3c0eba60b4496c43a0d3fbbe2c80a8cd",
+      "canonical_status_at_pinned_main": "실제 인터페이스·호출자 경계 문서 작성, 독립 source/response 검토 PASS; 적용·통합 별도",
+      "audit_delta": "Exact registry·immutable originals·Connector·Browser MLI와 일부 직접 소비자를 읽음. 전 기능 경계 감사 아님.",
+      "next_gap": "각 E03–E11의 실제 producer/dispatch/commit 경계 조사·확정.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/hitl_judge_original.mli",
+          "scope": "불변 원본과 효과 권한 경계"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/verifier_review_original.mli",
+          "scope": "subject/question/lookup/evidence 경계"
+        }
+      ],
+      "replacement_status": "실제 인터페이스·호출자 경계 문서 작성, 독립 source/response 검토 PASS; 적용·통합 별도 / 10/23 감사: Exact registry·immutable originals·Connector·Browser MLI와 일부 직접 소비자를 읽음. 전 기능 경계 감사 아님. 남은 범위: 각 E03–E11의 실제 producer/dispatch/commit 경계 조사·확정.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "B02",
+      "name": "기존 등록·호출 경로로 연결을 통일하고 중복 glue 정리",
+      "criterion": "새로운 도메인마다 server 분기·중복 singleton·별도 registry를 추가하지 않고 필요한 typed port로 연결",
+      "contract_sha256": "3e9b5d779217cf4d88378ab73a15c0dddffc6e732db024c3c55095fad23ca716",
+      "canonical_status_at_pinned_main": "기존 기반 있음",
+      "audit_delta": "Tool export·Hook·공유 request owner MLI 및 Keeper call 소비자 확인. 전체 singleton 검사는 아님.",
+      "next_gap": "새 bridge가 기존 typed ports/owner를 사용하는지 직접 소비자까지 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/lane_addon/lane_addon_tool_request_owner.mli",
+          "scope": "기존 공유 original store/serialization 계약"
+        }
+      ],
+      "replacement_status": "기존 기반 있음 / 10/23 감사: Tool export·Hook·공유 request owner MLI 및 Keeper call 소비자 확인. 전체 singleton 검사는 아님. 남은 범위: 새 bridge가 기존 typed ports/owner를 사용하는지 직접 소비자까지 확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "B03",
+      "name": "설치 ID·instance·incarnation·request·revision·run 연결 일관화",
+      "criterion": "원래 대상·결과를 조인할 수 있고 교체 worker에 이전 권한/응답을 넘기지 않음",
+      "contract_sha256": "08b8c568c300831cec89fc2beb49e489280471ff629ec39cc21d4339446f5cfc",
+      "canonical_status_at_pinned_main": "일부 구현",
+      "audit_delta": "Export는 opaque generation owner/instance/schema를 고정하고 call 때 재검증. HITL/Verifier attempt owner 존재.",
+      "next_gap": "E04/E06 producer에 원래 attempt·bind/release/before_advance 연결.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/lane_addon/lane_addon_tool_export.mli",
+          "scope": "opaque generation owner와 invocation 재검증"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/keeper_lane_addon_runtime.ml",
+          "scope": "실제 host call에 principal/access/export 전달"
+        }
+      ],
+      "replacement_status": "일부 구현 / 10/23 감사: Export는 opaque generation owner/instance/schema를 고정하고 call 때 재검증. HITL/Verifier attempt owner 존재. 남은 범위: E04/E06 producer에 원래 attempt·bind/release/before_advance 연결.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "B04",
+      "name": "Off·Detach·Drain·Cancel·실제 정리의 의미를 통일",
+      "criterion": "새 호출 중지와 진행 중 호출의 종료/불확실 상태, 자원 정리 완료를 각각 기록",
+      "contract_sha256": "96e0acf1f1d05ff1a5b76dfd95e0b63fcb1ffff3e4a249e17f6d4bd2c8e1cd96",
+      "canonical_status_at_pinned_main": "기존 lifecycle 있음",
+      "audit_delta": "Off/Detach/Drain/Cancel/cleanup 전체 전이는 이번 재감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "각 worker의 전이와 실패·정리 결과를 구분해 실제 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "기존 lifecycle 있음 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "B05",
+      "name": "상태·자원 소유권 및 다른 workspace/설치와의 분리 검증",
+      "criterion": "profile/process/container/volume/artifact의 정확한 owner만 해제; 보존 상태의 재연결 정책 명시",
+      "contract_sha256": "b42d639cc57d5c4bfd2b0e5f5bc84fdbb850fef5bb7c2a4b12743221cadca4a3",
+      "canonical_status_at_pinned_main": "기반 있음",
+      "audit_delta": "Browser bound request는 exact browser 요구. Connector callback은 원래 workspace 유지.",
+      "next_gap": "Connector rebind 전역 original owner, 미검증 리소스·엔진 cleanup 정책 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_selection.ml",
+          "scope": "bound browser exact route와 선택 정책"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/server/server_slack_in_process_gateway.ml",
+          "scope": "원래 ingress workspace/route 소비자"
+        }
+      ],
+      "replacement_status": "기반 있음 / 10/23 감사: Browser bound request는 exact browser 요구. Connector callback은 원래 workspace 유지. 남은 범위: Connector rebind 전역 original owner, 미검증 리소스·엔진 cleanup 정책 확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "B06",
+      "name": "설정·패키지 교체와 잘못된 계약의 적용 경계 정리",
+      "criterion": "검증 전 실행 없음, 원래 revision 보존, 불완전 목록으로 제거하지 않음, 실패/미확인 표시",
+      "contract_sha256": "78cdcbd159be3e2df87dd78950d7238e58d3be49f5ea3f6f6e13e6d3ccaa0195",
+      "canonical_status_at_pinned_main": "기반 있음",
+      "audit_delta": "UI category는 display metadata이며 원래 실행 target을 대체하지 않음. config 전체 계약 감사 아님.",
+      "next_gap": "불완전 inventory·교체·unknown에서 원래 상태 보존과 실행 거절을 실제 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/lane_addon/lane_addon_category.mli",
+          "scope": "category는 display metadata, 권한과 독립"
+        }
+      ],
+      "replacement_status": "기반 있음 / 10/23 감사: UI category는 display metadata이며 원래 실행 target을 대체하지 않음. config 전체 계약 감사 아님. 남은 범위: 불완전 inventory·교체·unknown에서 원래 상태 보존과 실행 거절을 실제 검증.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "C01",
+      "name": "패키지 발견·설치·활성화·비활성화·제거 흐름 통일",
+      "criterion": "같은 manifest/declaration을 API·Dashboard·TUI가 사용하고 저장/적용/관측 결과를 구분",
+      "contract_sha256": "a3f39e4b8999b757d5a5a7c54694b7e4f751ffdf40c9e3769f45e6eae709afbe",
+      "canonical_status_at_pinned_main": "공통 경로 있음",
+      "audit_delta": "서버 builtin ui_category 정본과 두 UI consumer·package metadata가 main. API action identity 유지.",
+      "next_gap": "동일 새 후보의 install/on/off/remove 및 저장/적용/관측 구분을 두 UI와 API에서 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이전70f438d0 keys56+inventory17 PASS. 후속 d769 candidate Dashboard5suite64+tsc PASS 저자 영수증. exact f6f183a4 CI39912368422 compile warning4 FAIL; 겹친 실행은 합산하지 않음.",
+      "measurement": "Dashboard 실제 component+synthetic API fixture 관측은 앞 후보 범위. 새 후속 visible TUI/installed runtime 아님.",
+      "merge": "#45394/95·#45415–17 merged. 후속 #45426 warning4 source repair merged는 pinned main 이후 별도 상태.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        }
+      ],
+      "replacement_status": "서버 builtin ui_category 정본과 두 UI consumer·package metadata가 main. API action identity 유지. 남은 범위: 동일 새 후보의 install/on/off/remove 및 저장/적용/관측 구분을 두 UI와 API에서 검증. 기존70f438d0 73 PASS·d769 Dashboard64/tsc PASS와 별도로 f6f183a4 선택 CI39912368422는 compile FAIL. 이후 #45426 명시 분기 수리는 merged지만 새6suite/artifact/실제 TUI 성공은 미확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "C02",
+      "name": "Deferred Tools를 다른 Addon에도 실제 적용 검증",
+      "criterion": "검색→원래 schema 로드→같은 Agent에서 호출, 설치 없을 때 미노출",
+      "contract_sha256": "6d9ba83e79b085b55f54fac2eaba9b998ecfa6db09b020300d57d20167302637",
+      "canonical_status_at_pinned_main": "Browser 범위 구현·검증",
+      "audit_delta": "main Keeper snapshot/call·export 재검증 확인. real same-Agent deferred lifecycle 회귀는 open #45357의 범위.",
+      "next_gap": "최신 whole16 source/실행 후 실제 Agent discovery→schema→same Agent call→result 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "현재16층 compiled 실행 결과 미확인. 이전8bd78 head run39899986422의184PASS/1FAIL은 PR 본문 기록으로 보존; 새 head 성공 아님.",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "감사 초기 REST45095 open16층 snapshot을 보존. 이후 #45357 exact444ce2d5가07:00:59Z merged(3931736b)임을 별도 REST로 직접 확인. 현재 pending PR에서는 제거.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/keeper_lane_addon_runtime.ml",
+          "scope": "main Keeper discovery/call 소비자"
+        },
+        {
+          "kind": "rest_native_stack",
+          "url": "https://api.github.com/repos/jeong-sik/masc/stacks/45095",
+          "scope": "16층 open snapshot. 감사 중 top ebd0ac2→444ce2d5로 이동."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "본문의 actual configured Runtime/Agent fixture와 이전184PASS/1FAIL·새 head 실행 한계"
+        },
+        {
+          "kind": "github_pr_post_pin",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "07:03:28Z 재관측: exact444ce2d5 merged at07:00:59Z, merge3931736b. 초기 open snapshot을 대체하는 현재 병합 상태."
+        }
+      ],
+      "replacement_status": "main Keeper snapshot/call·export 재검증 확인. real same-Agent deferred lifecycle 회귀는 병합된 #45357의 범위. 남은 범위: 최신 whole16 source/실행 후 실제 Agent discovery→schema→same Agent call→result 확인. 이후 #45357 exact444ce2d5는07:00:59Z merged(3931736b); 현재 pending PR에서 제거. 병합이 새 실행 성공이나 E03 전체 완료를 뜻하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "C03",
+      "name": "끄기·교체 뒤 tool inventory 갱신과 기존 호출 처리",
+      "criterion": "신규 발견은 갱신되고 이미 시작된 호출은 원래 소유자/receipt로 종료; 오래된 export로 새 실행 불가",
+      "contract_sha256": "1bd6437487552d2f4d93086f775d9ff1cd8169e6662a9cc6e71c4e6e59c66db4",
+      "canonical_status_at_pinned_main": "기반 있음",
+      "audit_delta": "frozen export generation과 live schema/caller 재검증은 main 인터페이스에 존재.",
+      "next_gap": "현재 후보의 Off 철회·old handler 거절·reattach 새 authority 및 원래 receipt 실제 실행.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "현재16층 compiled 실행 결과 미확인. 이전8bd78 head run39899986422의184PASS/1FAIL은 PR 본문 기록으로 보존; 새 head 성공 아님.",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "감사 초기 REST45095 open16층 snapshot을 보존. 이후 #45357 exact444ce2d5가07:00:59Z merged(3931736b)임을 별도 REST로 직접 확인. 현재 pending PR에서는 제거.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/lane_addon/lane_addon_tool_export.mli",
+          "scope": "generation 고정·재검증 계약"
+        },
+        {
+          "kind": "rest_native_stack",
+          "url": "https://api.github.com/repos/jeong-sik/masc/stacks/45095",
+          "scope": "16층 open snapshot. 감사 중 top ebd0ac2→444ce2d5로 이동."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "본문의 actual configured Runtime/Agent fixture와 이전184PASS/1FAIL·새 head 실행 한계"
+        },
+        {
+          "kind": "github_pr_post_pin",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "07:03:28Z 재관측: exact444ce2d5 merged at07:00:59Z, merge3931736b. 초기 open snapshot을 대체하는 현재 병합 상태."
+        }
+      ],
+      "replacement_status": "frozen export generation과 live schema/caller 재검증은 main 인터페이스에 존재. 남은 범위: 현재 후보의 Off 철회·old handler 거절·reattach 새 authority 및 원래 receipt 실제 실행. 이후 #45357 exact444ce2d5는07:00:59Z merged(3931736b); 현재 pending PR에서 제거. 병합이 새 실행 성공이나 E03 전체 완료를 뜻하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "C04",
+      "name": "번들 Skill·본문·참조·스크립트의 발견과 해제 검증",
+      "criterion": "설치별 정확한 Skill reference·revision으로 읽고 해제 뒤 새 discovery에서 제외",
+      "contract_sha256": "e219bc3cd6a5cb90266a8652c57290c3af4ecfbe38919df9aa2035d02218ab9b",
+      "canonical_status_at_pinned_main": "기반 있음",
+      "audit_delta": "Skill ref/revision·unload 실제 경로는 이번 재감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "정확한 설치 Skill 읽기와 unload 뒤 discovery 철회 실제 실행.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "기반 있음 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "C05",
+      "name": "입력 Hook과 출력 Hook의 독립 선택·적용 검증 확장",
+      "criterion": "선언·override·off 조합이 실제 호출에 반영되고 원래 효과/실패 정보 보존",
+      "contract_sha256": "920a51e4f2ab48fccba638a31cb0c3b13132d74997736b05a831ee12db4daefc",
+      "canonical_status_at_pinned_main": "Browser 범위 구현·검증",
+      "audit_delta": "Hook MLI는 input/output 독립 선택, before/after_call, 무재시도와 원래 failure/effect 보존 계약.",
+      "next_gap": "독립 선택·override·Off 실제 호출 및 output 거절의 unknown effect 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/lane_addon/lane_addon_tool_hooks.mli",
+          "scope": "input/output Hook 독립 선택과 effect 보존 계약"
+        }
+      ],
+      "replacement_status": "Browser 범위 구현·검증 / 10/23 감사: Hook MLI는 input/output 독립 선택, before/after_call, 무재시도와 원래 failure/effect 보존 계약. 남은 범위: 독립 선택·override·Off 실제 호출 및 output 거절의 unknown effect 확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "C06",
+      "name": "필수 authority 검사와 선택 Hook을 분리",
+      "criterion": "Hook을 꺼도 caller·workspace·incarnation·권한·결과 기록 검사가 유지됨",
+      "contract_sha256": "1fb236d1b313bd02f590e009f06e54ae81a50a243205e70179feff858faea811",
+      "canonical_status_at_pinned_main": "Browser 경계 있음",
+      "audit_delta": "Keeper call은 principal/access·frozen export를 실제 host call에 전달. Hook Off 실측은 없음.",
+      "next_gap": "Hook Off에도 caller/workspace/incarnation/receipt 권한이 남는지 실제 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/keeper_lane_addon_runtime.ml",
+          "scope": "Hook와 별개인 host principal/access 전달"
+        }
+      ],
+      "replacement_status": "Browser 경계 있음 / 10/23 감사: Keeper call은 principal/access·frozen export를 실제 host call에 전달. Hook Off 실측은 없음. 남은 범위: Hook Off에도 caller/workspace/incarnation/receipt 권한이 남는지 실제 검증.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "D01",
+      "name": "Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장",
+      "criterion": "LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영",
+      "contract_sha256": "11e5e51f51c847da52b7c1a10e51226b25d98ca8f0a410cce47aa6822531b303",
+      "canonical_status_at_pinned_main": "Browser broker 있음",
+      "audit_delta": "Browser는 실제 model availability와 직접 non-model action을 구분. 전 Addon route 감사 아님.",
+      "next_gap": "설치/output별 모델 선택과 feature/route 독립 On/Off 실제 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_selection.ml",
+          "scope": "현재 모델 가능성과 direct verb 선택"
+        }
+      ],
+      "replacement_status": "Browser broker 있음 / 10/23 감사: Browser는 실제 model availability와 직접 non-model action을 구분. 전 Addon route 감사 아님. 남은 범위: 설치/output별 모델 선택과 feature/route 독립 On/Off 실제 확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "D02",
+      "name": "기존 요청별 schema grant를 Candle에 재사용하는 계약 확정",
+      "criterion": "`Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증",
+      "contract_sha256": "0688a2f8570b1bd36d3c12761468e75522b4f326fedbc92000e1f0a3d62604b1",
+      "canonical_status_at_pinned_main": "[#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료",
+      "audit_delta": "현재 Candle decode 전 구현 재감사 아님. public 실제3stage 영수증은 mixed component 후보.",
+      "next_gap": "단일 current 후보의 full Grade/Relation/Weights decode·failure/unknown 경계 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "과거 native24+5/compiled26/Python13은 서로 다른 경계. 이번 재실행 없음.",
+      "measurement": "실제 host eb484+worker b427 mixed qualification에서 Off owed→On3stage→Paid1회→repeat reconnect 불변3결과. 단일 current 후보나 운영 설치 아님.",
+      "merge": "#44702 REST merged 및 pinned main 조상; Candle #44911 REST merged snapshot 확인.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44702",
+          "scope": "원래 Browser 통합 merged"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44911",
+          "scope": "Candle worker original payout 수리 merged"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-22-candle-host-reconnect/README.md",
+          "scope": "host eb484+worker b427 혼합 실측; operator 설치 아님"
+        }
+      ],
+      "replacement_status": "[#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 / 10/23 감사: 현재 Candle decode 전 구현 재감사 아님. public 실제3stage 영수증은 mixed component 후보. 남은 범위: 단일 current 후보의 full Grade/Relation/Weights decode·failure/unknown 경계 검증.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "D03",
+      "name": "모델 호출 전 요청 보존 및 원래 identity 결속",
+      "criterion": "request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch",
+      "contract_sha256": "9fa456dceb838a7b423a2d7725bea632915704b48872e5d338284c57b19b218e",
+      "canonical_status_at_pinned_main": "기반 있음",
+      "audit_delta": "공유 owner는 request body/digest/summary/history 보존. E04/E06 data/owner는 생산 실행 미연결.",
+      "next_gap": "actual terminal Outcome_unknown를 typed source frontier로 유지하고 새 capture/ACK/provider fallback을 차단. definite Invalid_request 정상 재선택과 RPC Sent_unknown/publication-only 복구는 보존. 두 번째·세 번째 일반 wake actual-state 회귀 필요. prepare→retain→bind→dispatch once 실제 연결과 재개 경계 구현.",
+      "completion": "SPECIFIC_SOURCE_P2_GAP_EXISTING_OTHER_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/lane_addon/lane_addon_tool_request_owner.mli",
+          "scope": "원래 request/digest/summary/history 계약"
+        },
+        {
+          "kind": "exact_head_source",
+          "url": "https://github.com/jeong-sik/masc/blob/444ce2d57c7a2a74353fb3e8189cdde04d8f94b9/lib/keeper/keeper_librarian_durable_execution.ml#L72",
+          "scope": "P2: 모든 Rejected를 active에서 제외; 뒤 consume_one 빈 frontier 경로"
+        },
+        {
+          "kind": "exact_head_source",
+          "url": "https://github.com/jeong-sik/masc/blob/444ce2d57c7a2a74353fb3e8189cdde04d8f94b9/lib/lane_addon/lane_addon_submit_once.ml#L102",
+          "scope": "P2: 실제 terminal Outcome_unknown를 Progress.Refused Execution으로 보존; RPC pending unknown과 구분"
+        }
+      ],
+      "replacement_status": "공유 owner는 request body/digest/summary/history 보존. E04/E06 data/owner는 생산 실행 미연결. 남은 범위: prepare→retain→bind→dispatch once 실제 연결과 재개 경계 구현. exact444 source P2: actual terminal Outcome_unknown가 Rejected 뒤 frontier에서 빠져 후속 일반 wake에 새 root/provider 호출 가능. 기존 ID submit-once는 유지되지만 source 재호출 차단 수리가 남음. 실행 재현/전체 stack FAIL 판정은 아니다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "D04",
+      "name": "오류·거절·불확실 결과의 typed 처리 일관화",
+      "criterion": "transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지",
+      "contract_sha256": "56fd4ca88207a437d9b823da005800092e5f12fbcbe4512c073edbe959afc0e9",
+      "canonical_status_at_pinned_main": "도메인별 차이 있음",
+      "audit_delta": "Keeper call에서 pre-effect refusal·outcome_unknown·worker failure metadata 구분 확인.",
+      "next_gap": "actual terminal Outcome_unknown를 typed source frontier로 유지하고 새 capture/ACK/provider fallback을 차단. definite Invalid_request 정상 재선택과 RPC Sent_unknown/publication-only 복구는 보존. 두 번째·세 번째 일반 wake actual-state 회귀 필요. 모든 새 bridge 결과를 transport/refusal/invalid/unknown과 effect 단계에 맞게 검증.",
+      "completion": "SPECIFIC_SOURCE_P2_GAP_EXISTING_OTHER_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/keeper_lane_addon_runtime.ml",
+          "scope": "pre-effect/unknown/worker failure 분류"
+        },
+        {
+          "kind": "exact_head_source",
+          "url": "https://github.com/jeong-sik/masc/blob/444ce2d57c7a2a74353fb3e8189cdde04d8f94b9/lib/keeper/keeper_librarian_durable_execution.ml#L72",
+          "scope": "P2: 모든 Rejected를 active에서 제외; 뒤 consume_one 빈 frontier 경로"
+        },
+        {
+          "kind": "exact_head_source",
+          "url": "https://github.com/jeong-sik/masc/blob/444ce2d57c7a2a74353fb3e8189cdde04d8f94b9/lib/lane_addon/lane_addon_submit_once.ml#L102",
+          "scope": "P2: 실제 terminal Outcome_unknown를 Progress.Refused Execution으로 보존; RPC pending unknown과 구분"
+        }
+      ],
+      "replacement_status": "도메인별 차이 있음 / 10/23 감사: Keeper call에서 pre-effect refusal·outcome_unknown·worker failure metadata 구분 확인. 남은 범위: 모든 새 bridge 결과를 transport/refusal/invalid/unknown과 effect 단계에 맞게 검증. exact444 source P2: actual terminal Outcome_unknown가 Rejected 뒤 frontier에서 빠져 후속 일반 wake에 새 root/provider 호출 가능. 기존 ID submit-once는 유지되지만 source 재호출 차단 수리가 남음. 실행 재현/전체 stack FAIL 판정은 아니다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "D05",
+      "name": "credential·provider admission·동시 실행 권한을 host에 유지",
+      "criterion": "worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인",
+      "contract_sha256": "7c7b369b8f9ccb8f3ad77ad092b40c6bdf1f8e1b6584d19d52b10780e002b692",
+      "canonical_status_at_pinned_main": "Browser 검증 있음",
+      "audit_delta": "Host credential/provider admission/queue cancel 전 구현은 이번 재감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "현재 identity로 실제 provider admission·취소·동시성 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "Browser 검증 있음 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "D06",
+      "name": "설정 교체·detach 중 늦은 모델 응답 처리",
+      "criterion": "원래 요청의 terminal 증거를 보존하고 새 worker에 오적용하거나 같은 효과를 재생하지 않음",
+      "contract_sha256": "57a94eebd936f30ae83c90af400607620d9061375e7757860e257f886d3a461a",
+      "canonical_status_at_pinned_main": "Browser 범위 검증 있음",
+      "audit_delta": "Late model reply/config/detach 전체 경로는 이번 재실행 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "actual terminal Outcome_unknown를 typed source frontier로 유지하고 새 capture/ACK/provider fallback을 차단. definite Invalid_request 정상 재선택과 RPC Sent_unknown/publication-only 복구는 보존. 두 번째·세 번째 일반 wake actual-state 회귀 필요. 원래 terminal·잘못된 worker 전달 금지·effect replay 방지 실제 검증.",
+      "completion": "SPECIFIC_SOURCE_P2_GAP_EXISTING_OTHER_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "exact_head_source",
+          "url": "https://github.com/jeong-sik/masc/blob/444ce2d57c7a2a74353fb3e8189cdde04d8f94b9/lib/keeper/keeper_librarian_durable_execution.ml#L72",
+          "scope": "P2: 모든 Rejected를 active에서 제외; 뒤 consume_one 빈 frontier 경로"
+        },
+        {
+          "kind": "exact_head_source",
+          "url": "https://github.com/jeong-sik/masc/blob/444ce2d57c7a2a74353fb3e8189cdde04d8f94b9/lib/lane_addon/lane_addon_submit_once.ml#L102",
+          "scope": "P2: 실제 terminal Outcome_unknown를 Progress.Refused Execution으로 보존; RPC pending unknown과 구분"
+        }
+      ],
+      "replacement_status": "Browser 범위 검증 있음 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다. exact444 source P2: actual terminal Outcome_unknown가 Rejected 뒤 frontier에서 빠져 후속 일반 wake에 새 root/provider 호출 가능. 기존 ID submit-once는 유지되지만 source 재호출 차단 수리가 남음. 실행 재현/전체 stack FAIL 판정은 아니다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E01",
+      "name": "Candle Appraiser 판단 실행을 Addon으로 추출",
+      "criterion": "Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인",
+      "contract_sha256": "ec4173c97d5e3507b825a84b57433aa765ed1662c61ed3919f725a0c2d5a5156",
+      "canonical_status_at_pinned_main": "실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도",
+      "audit_delta": "Candle Off owed→On3stage→Paid1회→재연결 불변3결과 public 영수증 직접 읽음. host eb484/worker b427 혼합.",
+      "next_gap": "단일 current 후보 및 loss/cancel/unknown/cleanup 전체 기준·운영 설치 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "과거 native24+5/compiled26/Python13은 서로 다른 경계. 이번 재실행 없음.",
+      "measurement": "실제 host eb484+worker b427 mixed qualification에서 Off owed→On3stage→Paid1회→repeat reconnect 불변3결과. 단일 current 후보나 운영 설치 아님.",
+      "merge": "#44702 REST merged 및 pinned main 조상; Candle #44911 REST merged snapshot 확인.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44702",
+          "scope": "원래 Browser 통합 merged"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44911",
+          "scope": "Candle worker original payout 수리 merged"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-22-candle-host-reconnect/README.md",
+          "scope": "host eb484+worker b427 혼합 실측; operator 설치 아님"
+        }
+      ],
+      "replacement_status": "Candle Off owed→On3stage→Paid1회→재연결 불변3결과 public 영수증 직접 읽음. host eb484/worker b427 혼합. 남은 범위: 단일 current 후보 및 loss/cancel/unknown/cleanup 전체 기준·운영 설치 확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E02",
+      "name": "Workspace Curator의 모델 실행·작업 수명 추출",
+      "criterion": "fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인",
+      "contract_sha256": "3a3001b3ba6c435787ee0f888b42236ee404030cc486390cc6c17beb6dddcb39",
+      "canonical_status_at_pinned_main": "db31 선택79·native29 PASS. 같은 실제 workspace에서 Off 원래 Briefing 복구→On 새 입력→final Off0·6요청 ACK·두 UI [실측](../docs/evidence/2026-10-22-curator-Off-recovery/README.md). 전체 실패 경계·통합·운영 설치 별도",
+      "audit_delta": "db31 Off 원래 Briefing 복구→새 incarnation·새 input→6ACK·최종 Off 실제 영수증 직접 읽음.",
+      "next_gap": "현재 후보·전체 실패·설치 확인. CPU synthetic 실험을 실제 UI timeout 해결로 세지 않음.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "db31 selected79+native24/application5 PASS public 영수증. CPU3회귀는 작성/parser뿐, 새 compiled 결과 미확인.",
+      "measurement": "db31 실제 Off Briefing 복구·새 incarnation/input·6 original ACK·최종 Off. current 후보나 운영 설치 아님.",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-22-curator-Off-recovery/README.md",
+          "scope": "db31 actual host/worker/두 UI 6 originals Off recovery"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-curator-cpu-boundary/README.md",
+          "scope": "CPU source isolation와 synthetic 실험 별도"
+        }
+      ],
+      "replacement_status": "db31 Off 원래 Briefing 복구→새 incarnation·새 input→6ACK·최종 Off 실제 영수증 직접 읽음. 남은 범위: 현재 후보·전체 실패·설치 확인. CPU synthetic 실험을 실제 UI timeout 해결로 세지 않음.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E03",
+      "name": "Librarian 실행의 Addon 경계 검토·추출",
+      "criterion": "checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증",
+      "contract_sha256": "888cc7d5c5ddf2987b449fced97b39fcc87c82a9d4885b09e7e964d1347b8420",
+      "canonical_status_at_pinned_main": "#45044 공통 admission202·#45045 원래 batch35 PASS. absorption65cb 컴파일 FAIL 보존, 수리#45049 exact82f gate60+취소8 PASS. 원래 host 실행 proof 연결 중; worker 추출·전체 실행 미완료",
+      "audit_delta": "이전 디자인/초기 실패 이후16층 존재. REST stack 전체를 읽음. source 전체 PASS 재판정은 아님.",
+      "next_gap": "actual terminal Outcome_unknown를 typed source frontier로 유지하고 새 capture/ACK/provider fallback을 차단. definite Invalid_request 정상 재선택과 RPC Sent_unknown/publication-only 복구는 보존. 두 번째·세 번째 일반 wake actual-state 회귀 필요. 최신 whole16 source/최소 실행 결속, real LLM history→Memory/cursor commit·Off/On 원래 복구.",
+      "completion": "SPECIFIC_SOURCE_P2_GAP_EXISTING_OTHER_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "현재16층 compiled 실행 결과 미확인. 이전8bd78 head run39899986422의184PASS/1FAIL은 PR 본문 기록으로 보존; 새 head 성공 아님.",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "감사 초기 REST45095 open16층 snapshot을 보존. 이후 #45357 exact444ce2d5가07:00:59Z merged(3931736b)임을 별도 REST로 직접 확인. 현재 pending PR에서는 제거.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "rest_native_stack",
+          "url": "https://api.github.com/repos/jeong-sik/masc/stacks/45095",
+          "scope": "16층 open snapshot. 감사 중 top ebd0ac2→444ce2d5로 이동."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "본문의 actual configured Runtime/Agent fixture와 이전184PASS/1FAIL·새 head 실행 한계"
+        },
+        {
+          "kind": "github_pr_post_pin",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "07:03:28Z 재관측: exact444ce2d5 merged at07:00:59Z, merge3931736b. 초기 open snapshot을 대체하는 현재 병합 상태."
+        },
+        {
+          "kind": "exact_head_source",
+          "url": "https://github.com/jeong-sik/masc/blob/444ce2d57c7a2a74353fb3e8189cdde04d8f94b9/lib/keeper/keeper_librarian_durable_execution.ml#L72",
+          "scope": "P2: 모든 Rejected를 active에서 제외; 뒤 consume_one 빈 frontier 경로"
+        },
+        {
+          "kind": "exact_head_source",
+          "url": "https://github.com/jeong-sik/masc/blob/444ce2d57c7a2a74353fb3e8189cdde04d8f94b9/lib/lane_addon/lane_addon_submit_once.ml#L102",
+          "scope": "P2: 실제 terminal Outcome_unknown를 Progress.Refused Execution으로 보존; RPC pending unknown과 구분"
+        }
+      ],
+      "replacement_status": "이전 디자인/초기 실패 이후16층 존재. REST stack 전체를 읽음. source 전체 PASS 재판정은 아님. 남은 범위: 최신 whole16 source/최소 실행 결속, real LLM history→Memory/cursor commit·Off/On 원래 복구. REST16층은 open이며 top45357가 ebd0ac2에서444ce2d5로 이동. 이전184PASS/1FAIL을 새 head에 이월하지 않는다. 이후 #45357 exact444ce2d5는07:00:59Z merged(3931736b); 현재 pending PR에서 제거. 병합이 새 실행 성공이나 E03 전체 완료를 뜻하지 않는다. exact444 source P2: actual terminal Outcome_unknown가 Rejected 뒤 frontier에서 빠져 후속 일반 wake에 새 root/provider 호출 가능. 기존 ID submit-once는 유지되지만 source 재호출 차단 수리가 남음. 실행 재현/전체 stack FAIL 판정은 아니다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E04",
+      "name": "HITL Auto Judge 실행의 Addon 경계 검토·추출",
+      "criterion": "승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존",
+      "contract_sha256": "27472a43c2ee26bd6131c62c7d11c6fa572faaefa3658586e0472cc86d4a8195",
+      "canonical_status_at_pinned_main": "조사·설계, Required",
+      "audit_delta": "Required attestation+#45365 original+#45369 durable owner는 main. production prepare/retain caller 검색상 없음.",
+      "next_gap": "attempt별 prepare→retain→bind/release/before_advance→실제 worker bridge. 결정·consume은 host.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "#45356 Required 기반 merged; E04는 #45365 original·#45369 owner도 merged.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45356",
+          "scope": "Required admission attestation만"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45365",
+          "scope": "HITL original만"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45369",
+          "scope": "durable owner만"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/hitl_judge_owner.ml",
+          "scope": "retain/load 구현. 실제 production caller 미연결 검색과 구분"
+        }
+      ],
+      "replacement_status": "Required attestation+#45365 original+#45369 durable owner는 main. production prepare/retain caller 검색상 없음. 남은 범위: attempt별 prepare→retain→bind/release/before_advance→실제 worker bridge. 결정·consume은 host.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E05",
+      "name": "Board Attention 실행의 Addon 경계 검토·추출",
+      "criterion": "durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존",
+      "contract_sha256": "1062b9c6fc03eb43f663a09df7379800fff5769ec4ff2e2cf3c08c930c065a5f",
+      "canonical_status_at_pinned_main": "조사·설계, Required",
+      "audit_delta": "Required registry는 Board에도 기반. Board-specific original/worker bridge는 직접 확인 안 함.",
+      "next_gap": "Board 판단 original·lookup·host commit 경계를 조사하고 실제 분리 범위 구현.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "#45356 Required 기반 merged; E04는 #45365 original·#45369 owner도 merged.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45356",
+          "scope": "Required 서비스 기반. Board-specific bridge 완료 아님"
+        }
+      ],
+      "replacement_status": "Required registry는 Board에도 기반. Board-specific original/worker bridge는 직접 확인 안 함. 남은 범위: Board 판단 original·lookup·host commit 경계를 조사하고 실제 분리 범위 구현.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E06",
+      "name": "Verifier 실행의 Addon 경계 검토·추출",
+      "criterion": "증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개",
+      "contract_sha256": "38db7bcf6548ceb0a6e6079b16cf5dd820f5ac64a2c6f910dc58b56b1fbcbbdf",
+      "canonical_status_at_pinned_main": "조사·설계",
+      "audit_delta": "#45390 original+owner ML/MLI는 main. subject/question/lookup/evidence·attempt 저장 존재, production caller 미연결.",
+      "next_gap": "review protocol·lookup/image·bind/release/before_advance 유지한 worker bridge; Task/Goal commit은 host.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "#45390 merged; pinned main14a4026c 자체가 그 merge commit.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45390",
+          "scope": "Original와 owner 병합. 실제 bridge 완료 아님"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/verifier_review_original.mli",
+          "scope": "원래 subject/question/lookup/image 계약"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/keeper/verifier_review_owner.ml",
+          "scope": "attempt retain/load 구현. 생산 소비자 연결 아님"
+        }
+      ],
+      "replacement_status": "#45390 original+owner ML/MLI는 main. subject/question/lookup/evidence·attempt 저장 존재, production caller 미연결. 남은 범위: review protocol·lookup/image·bind/release/before_advance 유지한 worker bridge; Task/Goal commit은 host.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E07",
+      "name": "Fusion compute/results/report의 실제 조합 사용 검증",
+      "criterion": "native/container/provider 계산·원래 run·immutable 결과 연결·명시적 전달·실제 Agent 읽기 확인",
+      "contract_sha256": "c2a3860b30171ff31e6044d3947ef82d1904c27c13a83c71b83b6b03f25240ca",
+      "canonical_status_at_pinned_main": "패키지 존재",
+      "audit_delta": "Fusion compute/report/results 패키지 경로 존재만 확인. 실제 worker authority 전체 감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "native/container/provider/run·immutable report delivery·실제 Agent 결과 읽기 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "패키지 존재 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E08",
+      "name": "MSX/DOS의 설치·상태 복원·실제 게임 사용 검증",
+      "criterion": "`msx-machine`·`dos-machine`·`dos-world`의 설치 On/Off/교체·명시적 checkpoint 복원·기존 media/save 보존과 실제 화면/입력 확인",
+      "contract_sha256": "17a1f0461f7faacdd347c90017af342bab117e5f2ff50bcad1d36561355162be",
+      "canonical_status_at_pinned_main": "별도 worker·image 검증 있음",
+      "audit_delta": "MSX/DOS source·실측은 이번 재감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "설치 On/Off/교체·checkpoint 복원·media/save 보존과 실제 화면·입력 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "별도 worker·image 검증 있음 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E09",
+      "name": "Voice·VST 실행 소유 경계 분리",
+      "criterion": "TTS/STT/realtime/session/player/device 수명과 결과·오류를 분리; 실제 입출력과 해제 정리 확인",
+      "contract_sha256": "b2899d620e0ce4ff6dca63d6e6a5fa0bffa302fe71ce969b17c2e1dd52699c75",
+      "canonical_status_at_pinned_main": "VST는 관측만, Voice는 설계 필요",
+      "audit_delta": "Voice/VST 실행 소유·설치 source는 이번 재감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "TTS/STT/realtime/session/player/device 수명·실제 I/O·cleanup 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "VST는 관측만, Voice는 설계 필요 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E10",
+      "name": "Slack/Discord Connector의 선택적 Addon 경계 정리",
+      "criterion": "polling/cursor/subscription/인증/재접속·중복 전달 방지·host 메시지 권한 유지",
+      "contract_sha256": "3274c36b3cc7146d3435481725379c0a68943e7f19ca3767cfa226c7558d0d34",
+      "canonical_status_at_pinned_main": "조사·설계",
+      "audit_delta": "원래 Connector event·durable acceptance 전 ACK 금지·원래 route/full-history/workspace 소비자 확인.",
+      "next_gap": "다른 Keeper로 rebind 시 전역 original-owner discovery+binding serialization. 전체 Addon 추출 별도.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "Dashboard provenance30+tsc PASS 저자 영수증; OCaml store/callback 회귀 작성/parser, compiled 결과 미확인.",
+      "measurement": "live Slack/Discord ingress·실제 installed runtime 관측 없음.",
+      "merge": "#45378/79 merged.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45378",
+          "scope": "typed original Connector identity"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45379",
+          "scope": "durable acceptance 전 ACK 금지"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-connector-durable-ingress/README.md",
+          "scope": "30 Dashboard 검사의 실행 범위·OCaml 미실행·global rebind 미완료"
+        }
+      ],
+      "replacement_status": "원래 Connector event·durable acceptance 전 ACK 금지·원래 route/full-history/workspace 소비자 확인. 남은 범위: 다른 Keeper로 rebind 시 전역 original-owner discovery+binding serialization. 전체 Addon 추출 별도.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E11",
+      "name": "Web Search의 provider·cache·credential 경계 추출",
+      "criterion": "실제 검색/fallback/취소/출처 보존; provider credential을 host에 유지",
+      "contract_sha256": "8771e2d60dcfe8b56fd00bbb0370513b9b0d2de2476c28e8ef0af4c97c8a4932",
+      "canonical_status_at_pinned_main": "조사·설계",
+      "audit_delta": "Web Search extraction source는 이번 직접 재감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "provider/cache/host credential 경계 조사 후 실제 search/fallback/cancel/source 보존.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "조사·설계 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "E12",
+      "name": "나머지 패키지의 공통 계약 적합성·실사용 점검",
+      "criterion": "output-statistics, value-difference, frame-progress, web-project, wkbl-score-runs, operator-quiz, msx-observer의 설치/도구/Skill/출력 연결을 실제 검증",
+      "contract_sha256": "f1081933551066e9914d8d8f0ba6ae2ca830ec693c6cf4214581f9c3c46d28d5",
+      "canonical_status_at_pinned_main": "패키지 존재",
+      "audit_delta": "#45357 Candle 기반 deferred fixture는 원래 나열7패키지 실사용 검증을 대신하지 않음.",
+      "next_gap": "원래7패키지 각각 install/tool/Skill/output 실제 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "현재16층 compiled 실행 결과 미확인. 이전8bd78 head run39899986422의184PASS/1FAIL은 PR 본문 기록으로 보존; 새 head 성공 아님.",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "감사 초기 REST45095 open16층 snapshot을 보존. 이후 #45357 exact444ce2d5가07:00:59Z merged(3931736b)임을 별도 REST로 직접 확인. 현재 pending PR에서는 제거.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "rest_native_stack",
+          "url": "https://api.github.com/repos/jeong-sik/masc/stacks/45095",
+          "scope": "16층 open snapshot. 감사 중 top ebd0ac2→444ce2d5로 이동."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "본문의 actual configured Runtime/Agent fixture와 이전184PASS/1FAIL·새 head 실행 한계"
+        },
+        {
+          "kind": "github_pr_post_pin",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "07:03:28Z 재관측: exact444ce2d5 merged at07:00:59Z, merge3931736b. 초기 open snapshot을 대체하는 현재 병합 상태."
+        }
+      ],
+      "replacement_status": "#45357 Candle 기반 deferred fixture는 원래 나열7패키지 실사용 검증을 대신하지 않음. 남은 범위: 원래7패키지 각각 install/tool/Skill/output 실제 검증. 이후 #45357 exact444ce2d5는07:00:59Z merged(3931736b); 현재 pending PR에서 제거. 병합이 새 실행 성공이나 E03 전체 완료를 뜻하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "F01",
+      "name": "Firefox/Chrome/Safari와 연결 방식의 능력 표 및 자동 선택",
+      "criterion": "필요한 동작·실제 연결·profile/세션 권한으로 선택; 미지원은 명확히 표시하고 임의 중복 세션을 만들지 않음",
+      "contract_sha256": "a4ee26b1fd7c22c75366d10a21ea17eb2df69e921f88635935d4bd79c07115fe",
+      "canonical_status_at_pinned_main": "부분 구현, 후속 필요",
+      "audit_delta": "능력표/자동선택 ML·MLI: requiredActions·실제 연결/session/model 가능성·exact bound identity. Safari adapter 없음.",
+      "next_gap": "엔진/연결/profile별 실제 선택 검증. 설치된 Safari만으로 지원이라고 하지 않음.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 browser suite 실행 없음. source/catalog은 지원 선언이며 effect 성공 증거 아님.",
+      "measurement": "공개 ego probe be182db5 navigation/read/screenshot·cleanup,8d62947e fixture click/right/double/hover/fill/key/select/scroll·stale document 거절. server HTTP/Keeper turn/로그인 사이트 제외; current 전체 후보 증거 아님.",
+      "merge": "현재 main capability/selection 구현 존재; #45399 ego drag는 main log09fce971 확인.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_capabilities.ml",
+          "scope": "현재 실제 public capability/명시적 미지원"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_selection.ml",
+          "scope": "권한을 부여하지 않는 선택/requiredActions 정책"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego-input/README.md",
+          "scope": "8d62947e 실제 fixture 입력. current full candidate·LLM·real app 아님"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego/README.md",
+          "scope": "be182db5 실제 navigation/read/cleanup. server HTTP/Keeper turn 제외"
+        }
+      ],
+      "replacement_status": "능력표/자동선택 ML·MLI: requiredActions·실제 연결/session/model 가능성·exact bound identity. Safari adapter 없음. 남은 범위: 엔진/연결/profile별 실제 선택 검증. 설치된 Safari만으로 지원이라고 하지 않음.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "F02",
+      "name": "탭·창·context·이동·frame/shadow DOM 경계 검증",
+      "criterion": "새 탭/전환/닫기·navigation·frame 전환에서 원래 target identity와 문서 상태 보존",
+      "contract_sha256": "0809aa12f6c6a1c7db37876a55d030371d506f43161ff089158e4098b775c9d3",
+      "canonical_status_at_pinned_main": "기존 구현 있음",
+      "audit_delta": "탭/context/frame별 제약은 능력표에 존재. close_window는 public 미지원.",
+      "next_gap": "각 엔진의 원래 target/document·frame/shadow/window 경계를 실제 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 browser suite 실행 없음. source/catalog은 지원 선언이며 effect 성공 증거 아님.",
+      "measurement": "공개 ego probe be182db5 navigation/read/screenshot·cleanup,8d62947e fixture click/right/double/hover/fill/key/select/scroll·stale document 거절. server HTTP/Keeper turn/로그인 사이트 제외; current 전체 후보 증거 아님.",
+      "merge": "현재 main capability/selection 구현 존재; #45399 ego drag는 main log09fce971 확인.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_capabilities.ml",
+          "scope": "현재 실제 public capability/명시적 미지원"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_selection.ml",
+          "scope": "권한을 부여하지 않는 선택/requiredActions 정책"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego-input/README.md",
+          "scope": "8d62947e 실제 fixture 입력. current full candidate·LLM·real app 아님"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego/README.md",
+          "scope": "be182db5 실제 navigation/read/cleanup. server HTTP/Keeper turn 제외"
+        }
+      ],
+      "replacement_status": "탭/context/frame별 제약은 능력표에 존재. close_window는 public 미지원. 남은 범위: 각 엔진의 원래 target/document·frame/shadow/window 경계를 실제 검증.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "F03",
+      "name": "포인터 행동의 완성도와 좌표·대상 정확성 검증",
+      "criterion": "hover, click, double/right click, down/up, drag/drop을 실제 UI 변화로 확인; stale 좌표 거절",
+      "contract_sha256": "979bc294bc0c09cef26ce6c455ed07a59f79e38eaf96eec0330c35ef8194ffaf",
+      "canonical_status_at_pinned_main": "기존 hover/drag 경로 있음",
+      "audit_delta": "Native click/hover/double/right/drag와 stale geometry 제약. pointer_down/up public 미지원. ego drag는 #45399 후속 확장.",
+      "next_gap": "새 ego drag/drop·미지원 down/up 지원 범위와 원래 Slack toolbar 마킹 완주 실측.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 browser suite 실행 없음. source/catalog은 지원 선언이며 effect 성공 증거 아님.",
+      "measurement": "공개 ego probe be182db5 navigation/read/screenshot·cleanup,8d62947e fixture click/right/double/hover/fill/key/select/scroll·stale document 거절. server HTTP/Keeper turn/로그인 사이트 제외; current 전체 후보 증거 아님.",
+      "merge": "현재 main capability/selection 구현 존재; #45399 ego drag는 main log09fce971 확인.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_capabilities.ml",
+          "scope": "현재 실제 public capability/명시적 미지원"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_selection.ml",
+          "scope": "권한을 부여하지 않는 선택/requiredActions 정책"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego-input/README.md",
+          "scope": "8d62947e 실제 fixture 입력. current full candidate·LLM·real app 아님"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego/README.md",
+          "scope": "be182db5 실제 navigation/read/cleanup. server HTTP/Keeper turn 제외"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45399",
+          "scope": "후속 ego drag source 확장. 앞 probe의 drag 거절과 구분"
+        }
+      ],
+      "replacement_status": "Native click/hover/double/right/drag와 stale geometry 제약. pointer_down/up public 미지원. ego drag는 #45399 후속 확장. 남은 범위: 새 ego drag/drop·미지원 down/up 지원 범위와 원래 Slack toolbar 마킹 완주 실측.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "F04",
+      "name": "키보드·텍스트·스크롤·확대축소의 일관된 지원",
+      "criterion": "focus, 입력/선택/편집, 조합키/IME, 영역 스크롤, zoom 및 화면 좌표 변환 확인",
+      "contract_sha256": "a5fbd48c1852b13ddab4c440c43118000e8951015a6face6651bc3d78fa575c4",
+      "canonical_status_at_pinned_main": "전수 확인 필요",
+      "audit_delta": "type/fill/select/key/scroll/viewport 조건부 구현. backend별 zoom/touch 차이, 전체 IME 보장 없음.",
+      "next_gap": "실제 IME composition/edit/focus/zoom/좌표 변환을 엔진별 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 browser suite 실행 없음. source/catalog은 지원 선언이며 effect 성공 증거 아님.",
+      "measurement": "공개 ego probe be182db5 navigation/read/screenshot·cleanup,8d62947e fixture click/right/double/hover/fill/key/select/scroll·stale document 거절. server HTTP/Keeper turn/로그인 사이트 제외; current 전체 후보 증거 아님.",
+      "merge": "현재 main capability/selection 구현 존재; #45399 ego drag는 main log09fce971 확인.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_capabilities.ml",
+          "scope": "현재 실제 public capability/명시적 미지원"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_selection.ml",
+          "scope": "권한을 부여하지 않는 선택/requiredActions 정책"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego-input/README.md",
+          "scope": "8d62947e 실제 fixture 입력. current full candidate·LLM·real app 아님"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego/README.md",
+          "scope": "be182db5 실제 navigation/read/cleanup. server HTTP/Keeper turn 제외"
+        }
+      ],
+      "replacement_status": "type/fill/select/key/scroll/viewport 조건부 구현. backend별 zoom/touch 차이, 전체 IME 보장 없음. 남은 범위: 실제 IME composition/edit/focus/zoom/좌표 변환을 엔진별 검증.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "F05",
+      "name": "파일·클립보드·dialog·popup·권한 상호작용 범위 점검",
+      "criterion": "upload/download와 artifact 보존, clipboard, dialog, popup, browser 권한 화면의 지원/운영자 개입 경계 명시",
+      "contract_sha256": "0ae099024a3d8ed8536798bc58d5f969d36f1fd5563f5aaa585b37ebd2d86ddf",
+      "canonical_status_at_pinned_main": "파일 일부 실측 있음",
+      "audit_delta": "Owned Gecko upload/download/dialog, BiDi operator-owned dialog 거절. clipboard public 미지원.",
+      "next_gap": "file/artifact/dialog/popup/권한 UI와 운영자 개입 범위를 엔진별 실제 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 browser suite 실행 없음. source/catalog은 지원 선언이며 effect 성공 증거 아님.",
+      "measurement": "공개 ego probe be182db5 navigation/read/screenshot·cleanup,8d62947e fixture click/right/double/hover/fill/key/select/scroll·stale document 거절. server HTTP/Keeper turn/로그인 사이트 제외; current 전체 후보 증거 아님.",
+      "merge": "현재 main capability/selection 구현 존재; #45399 ego drag는 main log09fce971 확인.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_capabilities.ml",
+          "scope": "현재 실제 public capability/명시적 미지원"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_selection.ml",
+          "scope": "권한을 부여하지 않는 선택/requiredActions 정책"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego-input/README.md",
+          "scope": "8d62947e 실제 fixture 입력. current full candidate·LLM·real app 아님"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego/README.md",
+          "scope": "be182db5 실제 navigation/read/cleanup. server HTTP/Keeper turn 제외"
+        }
+      ],
+      "replacement_status": "Owned Gecko upload/download/dialog, BiDi operator-owned dialog 거절. clipboard public 미지원. 남은 범위: file/artifact/dialog/popup/권한 UI와 운영자 개입 범위를 엔진별 실제 검증.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "F06",
+      "name": "Browser 읽기·진단·출력 기능의 능력별 점검",
+      "criterion": "screenshot/PDF, console/network, cookie/storage, history·성능 관측 등을 engine별로 검증; 미지원 기능은 성공으로 응답하지 않음",
+      "contract_sha256": "38efc410b23d44ff603d464d99b519ed28a8f15e8ccb101cdf2609d8930c282e",
+      "canonical_status_at_pinned_main": "일부 구현",
+      "audit_delta": "Screenshot/console/network/cookie/storage/emulation/block 요청은 엔진별 조건. PDF/performance는 public catalog에 없음.",
+      "next_gap": "엔진별 diagnostic/PDF/performance 지원·미지원과 실제 출력 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 browser suite 실행 없음. source/catalog은 지원 선언이며 effect 성공 증거 아님.",
+      "measurement": "공개 ego probe be182db5 navigation/read/screenshot·cleanup,8d62947e fixture click/right/double/hover/fill/key/select/scroll·stale document 거절. server HTTP/Keeper turn/로그인 사이트 제외; current 전체 후보 증거 아님.",
+      "merge": "현재 main capability/selection 구현 존재; #45399 ego drag는 main log09fce971 확인.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_capabilities.ml",
+          "scope": "현재 실제 public capability/명시적 미지원"
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_selection.ml",
+          "scope": "권한을 부여하지 않는 선택/requiredActions 정책"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego-input/README.md",
+          "scope": "8d62947e 실제 fixture 입력. current full candidate·LLM·real app 아님"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-browser-live-ego/README.md",
+          "scope": "be182db5 실제 navigation/read/cleanup. server HTTP/Keeper turn 제외"
+        }
+      ],
+      "replacement_status": "Screenshot/console/network/cookie/storage/emulation/block 요청은 엔진별 조건. PDF/performance는 public catalog에 없음. 남은 범위: 엔진별 diagnostic/PDF/performance 지원·미지원과 실제 출력 확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "G01",
+      "name": "패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기",
+      "criterion": "원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동",
+      "contract_sha256": "0bcab888498bb8f9b605619b4737cda981da769346a931a4f4f628c85e01b979",
+      "canonical_status_at_pinned_main": "Stack #44803의 #44801·#44802·#44830 main 병합 확인(770ca204·912f1108·1a8c3744). host application 연결과 historical62/후속92건 증거 구분 보존. 새 main 조합의 native/UI·설치 증거는 별도",
+      "audit_delta": "Features=내장+Plugin, Plugins=설치 관리. 서버 정본 role·두 UI·exact 원래 action target 소스 main.",
+      "next_gap": "현재 artifact와 실제 feature/package/worker/model/tool/Skill 연결 화면 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이전70f438d0 keys56+inventory17 PASS. 후속 d769 candidate Dashboard5suite64+tsc PASS 저자 영수증. exact f6f183a4 CI39912368422 compile warning4 FAIL; 겹친 실행은 합산하지 않음.",
+      "measurement": "Dashboard 실제 component+synthetic API fixture 관측은 앞 후보 범위. 새 후속 visible TUI/installed runtime 아님.",
+      "merge": "#45394/95·#45415–17 merged. 후속 #45426 warning4 source repair merged는 pinned main 이후 별도 상태.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        }
+      ],
+      "replacement_status": "Features=내장+Plugin, Plugins=설치 관리. 서버 정본 role·두 UI·exact 원래 action target 소스 main. 남은 범위: 현재 artifact와 실제 feature/package/worker/model/tool/Skill 연결 화면 확인. 기존70f438d0 73 PASS·d769 Dashboard64/tsc PASS와 별도로 f6f183a4 선택 CI39912368422는 compile FAIL. 이후 #45426 명시 분기 수리는 merged지만 새6suite/artifact/실제 TUI 성공은 미확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "G02",
+      "name": "입력→Hook→worker→모델→출력/소비자의 연결 관계 표시",
+      "criterion": "실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음",
+      "contract_sha256": "a3a8f1966ffd7e267256db15abf92259efaeaacd66620f17d27182d67c8f386b",
+      "canonical_status_at_pinned_main": "일부 Flow 있음",
+      "audit_delta": "Flow/Technical 원래 target remap은 main. 전체 input→Hook→model→consumer graph 감사 아님.",
+      "next_gap": "실제 ref로 graph 검증, 관측을 권한으로 사용하지 않는지 확인. Catalog/Preview 후속 별도.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이전70f438d0 keys56+inventory17 PASS. 후속 d769 candidate Dashboard5suite64+tsc PASS 저자 영수증. exact f6f183a4 CI39912368422 compile warning4 FAIL; 겹친 실행은 합산하지 않음.",
+      "measurement": "Dashboard 실제 component+synthetic API fixture 관측은 앞 후보 범위. 새 후속 visible TUI/installed runtime 아님.",
+      "merge": "#45394/95·#45415–17 merged. 후속 #45426 warning4 source repair merged는 pinned main 이후 별도 상태.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        }
+      ],
+      "replacement_status": "Flow/Technical 원래 target remap은 main. 전체 input→Hook→model→consumer graph 감사 아님. 남은 범위: 실제 ref로 graph 검증, 관측을 권한으로 사용하지 않는지 확인. Catalog/Preview 후속 별도. 기존70f438d0 73 PASS·d769 Dashboard64/tsc PASS와 별도로 f6f183a4 선택 CI39912368422는 compile FAIL. 이후 #45426 명시 분기 수리는 merged지만 새6suite/artifact/실제 TUI 성공은 미확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "G03",
+      "name": "요청부터 종료·정리까지 원래 timeline/trace 연결",
+      "criterion": "request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적",
+      "contract_sha256": "e2a2aa16c44b88453a6ad012c5b9d498556f1a7812d3f7b6703411eec1e786c4",
+      "canonical_status_at_pinned_main": "Candle 동일 종단 재조회가 elapsed를 덮는 실제 결함을 #44920에서 수리: 첫 receipt 보존·실패 append 재시도·읽기 불가 payload 보존. source 독립 PASS, exact b8a160 선택 검사 transport10+contract2+flow24 합36건 PASS. 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요",
+      "audit_delta": "기존 host_requests/timing 수리 증거 보존. 전체 timeline 현재 후보 재감사 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "같은 current 후보 실제 UI에서 request/run/instance/revision·wait/commit/cleanup 연결 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "Candle 동일 종단 재조회가 elapsed를 덮는 실제 결함을 #44920에서 수리: 첫 receipt 보존·실패 append 재시도·읽기 불가 payload 보존. source 독립 PASS, exact b8a160 선택 검사 transport10+contract2+flow24 합36건 PASS. 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "G04",
+      "name": "교체·경로/ID 변경·이전 소유자 이력 표시",
+      "criterion": "새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근",
+      "contract_sha256": "265b8178458c30a32b00faaf37fec2b4fa9b9059f489f5735617db903b89c1bb",
+      "canonical_status_at_pinned_main": "후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도",
+      "audit_delta": "같은 경로 다른 ID 역사와 role sorting·Inspect exact anchor 보존. 원래 numeric retarget FAIL 기록 보존.",
+      "next_gap": "새 current binary에서 filtered/replaced/manual/retained/history/menu 원래 target 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이전70f438d0 keys56+inventory17 PASS. 후속 d769 candidate Dashboard5suite64+tsc PASS 저자 영수증. exact f6f183a4 CI39912368422 compile warning4 FAIL; 겹친 실행은 합산하지 않음.",
+      "measurement": "Dashboard 실제 component+synthetic API fixture 관측은 앞 후보 범위. 새 후속 visible TUI/installed runtime 아님.",
+      "merge": "#45394/95·#45415–17 merged. 후속 #45426 warning4 source repair merged는 pinned main 이후 별도 상태.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        }
+      ],
+      "replacement_status": "같은 경로 다른 ID 역사와 role sorting·Inspect exact anchor 보존. 원래 numeric retarget FAIL 기록 보존. 남은 범위: 새 current binary에서 filtered/replaced/manual/retained/history/menu 원래 target 확인. 기존70f438d0 73 PASS·d769 Dashboard64/tsc PASS와 별도로 f6f183a4 선택 CI39912368422는 compile FAIL. 이후 #45426 명시 분기 수리는 merged지만 새6suite/artifact/실제 TUI 성공은 미확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "G05",
+      "name": "에이전트 작업 중 표시와 현재 포인터/입력 활동 표시",
+      "criterion": "실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리",
+      "contract_sha256": "ad9a204d754b98b3a1f7ca81d7552b10b6dd42b4c4189d5f555bcfa575447634",
+      "canonical_status_at_pinned_main": "범위별 재확인 필요",
+      "audit_delta": "Pointer feedback MLI는 trusted event의 실제 좌표만 관측하고 intended target과 구분. 전체 consumer 미감사.",
+      "next_gap": "실제 agent working/pointer event→UI와 완료/중단/detach 표시 정리 관측.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "browser_pointer_feedback.mli interface만 직접 확인; 전체 표시 consumer/실제 UI 미확인.",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/lib/browser_pointer_feedback.mli",
+          "scope": "trusted input event 좌표 원칙만 확인. 전체 consumer/실측 아님"
+        }
+      ],
+      "replacement_status": "Pointer feedback MLI는 trusted event의 실제 좌표만 관측하고 intended target과 구분. 전체 consumer 미감사. 남은 범위: 실제 agent working/pointer event→UI와 완료/중단/detach 표시 정리 관측.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "G06",
+      "name": "두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화",
+      "criterion": "draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능",
+      "contract_sha256": "ef8d7b1b20b2d28d908bb210ca89e0a642574725d9bfc6dae790cb25f8408b55",
+      "canonical_status_at_pinned_main": "6f68 bare global Slice HTTP200·retained refresh·cross-run 거절·복구 관측. #44895 exactd06에서 Evidence 보존 뒤 원래 row/selection/receipt와 Slice EOF 유지·장애 해제 후 정상 보존 실측. application 관측 보존 독립 SOURCE PASS; 모든 workspace/revision 경계 미완료",
+      "audit_delta": "원래 선택 상실 notice·같은 경로 교체 거절·실제 query→typed 관리 action 소스 main.",
+      "next_gap": "Current 후보 actual draft/late response/stale/unknown/workspace/recovery를 두 UI/API로 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이전70f438d0 keys56+inventory17 PASS. 후속 d769 candidate Dashboard5suite64+tsc PASS 저자 영수증. exact f6f183a4 CI39912368422 compile warning4 FAIL; 겹친 실행은 합산하지 않음.",
+      "measurement": "Dashboard 실제 component+synthetic API fixture 관측은 앞 후보 범위. 새 후속 visible TUI/installed runtime 아님.",
+      "merge": "#45394/95·#45415–17 merged. 후속 #45426 warning4 source repair merged는 pinned main 이후 별도 상태.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        }
+      ],
+      "replacement_status": "원래 선택 상실 notice·같은 경로 교체 거절·실제 query→typed 관리 action 소스 main. 남은 범위: Current 후보 actual draft/late response/stale/unknown/workspace/recovery를 두 UI/API로 확인. 기존70f438d0 73 PASS·d769 Dashboard64/tsc PASS와 별도로 f6f183a4 선택 CI39912368422는 compile FAIL. 이후 #45426 명시 분기 수리는 merged지만 새6suite/artifact/실제 TUI 성공은 미확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "H01",
+      "name": "같은 후보의 API·worker·Dashboard·TUI 조합 검증",
+      "criterion": "On/Off와 Remove TOML+worker→재설치를 구분해 실행; 정확한 source/build 조합을 기록하고 서로 다른 증거 층을 합쳐 완료로 세지 않음",
+      "contract_sha256": "367fd7cd35edde8fd6ab78f3ff8b50cb578cf291f6233a9b0a6a41df9adf9258",
+      "canonical_status_at_pinned_main": "같은6f68의 API·실제 worker·Dashboard·TUI 조합으로 Off와 Remove TOML+worker를 구분하고 재설치/세 incarnation/원래 이력/정리를 관측. Evidence 후 row 소실 발견으로 전체 성공 판정은 보류; 수정 후보 실행과 다른 패키지/운영 설치 별도",
+      "audit_delta": "후속 UI hash 범위만 current main 결속. 원래6f68/d06/db31·Candle 혼합 qualification은 각 identity 보존.",
+      "next_gap": "동일 exact 후보 API/worker/Dashboard/TUI OnOffRemove/reinstall/history/cleanup 통합 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이전70f438d0 keys56+inventory17 PASS. 후속 d769 candidate Dashboard5suite64+tsc PASS 저자 영수증. exact f6f183a4 CI39912368422 compile warning4 FAIL; 겹친 실행은 합산하지 않음.",
+      "measurement": "Dashboard 실제 component+synthetic API fixture 관측은 앞 후보 범위. 새 후속 visible TUI/installed runtime 아님.",
+      "merge": "#45394/95·#45415–17 merged. 후속 #45426 warning4 source repair merged는 pinned main 이후 별도 상태.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        }
+      ],
+      "replacement_status": "후속 UI hash 범위만 current main 결속. 원래6f68/d06/db31·Candle 혼합 qualification은 각 identity 보존. 남은 범위: 동일 exact 후보 API/worker/Dashboard/TUI OnOffRemove/reinstall/history/cleanup 통합 검증. 기존70f438d0 73 PASS·d769 Dashboard64/tsc PASS와 별도로 f6f183a4 선택 CI39912368422는 compile FAIL. 이후 #45426 명시 분기 수리는 merged지만 새6suite/artifact/실제 TUI 성공은 미확인.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "H02",
+      "name": "실제 LLM·실제 앱에서 작업 완주",
+      "criterion": "fixture 검증과 구분해 실제 Agent의 discovery→Skill→선택→실행→결과 확인을 수행; hover toolbar/drag 등 원래 증상 해결 확인",
+      "contract_sha256": "bb567b6d93dcd3bcee4e8c4998031b99f7f875f3825b5c5c3d8a0e9ec1805ce0",
+      "canonical_status_at_pinned_main": "Browser 모델 일부는 scripted",
+      "audit_delta": "open #45357는 real configured Runtime/Agent Tool_set fixture. actual LLM+real app 완주 아님.",
+      "next_gap": "실제 Agent discovery→Skill→선택→actual app effect/result 및 원래 Slack toolbar/drag 증상 확인.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "현재16층 compiled 실행 결과 미확인. 이전8bd78 head run39899986422의184PASS/1FAIL은 PR 본문 기록으로 보존; 새 head 성공 아님.",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "감사 초기 REST45095 open16층 snapshot을 보존. 이후 #45357 exact444ce2d5가07:00:59Z merged(3931736b)임을 별도 REST로 직접 확인. 현재 pending PR에서는 제거.",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "rest_native_stack",
+          "url": "https://api.github.com/repos/jeong-sik/masc/stacks/45095",
+          "scope": "16층 open snapshot. 감사 중 top ebd0ac2→444ce2d5로 이동."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "본문의 actual configured Runtime/Agent fixture와 이전184PASS/1FAIL·새 head 실행 한계"
+        },
+        {
+          "kind": "github_pr_post_pin",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "07:03:28Z 재관측: exact444ce2d5 merged at07:00:59Z, merge3931736b. 초기 open snapshot을 대체하는 현재 병합 상태."
+        }
+      ],
+      "replacement_status": "병합된 #45357는 real configured Runtime/Agent Tool_set fixture. actual LLM+real app 완주 아님. 남은 범위: 실제 Agent discovery→Skill→선택→actual app effect/result 및 원래 Slack toolbar/drag 증상 확인. 이후 #45357 exact444ce2d5는07:00:59Z merged(3931736b); 현재 pending PR에서 제거. 병합이 새 실행 성공이나 E03 전체 완료를 뜻하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "H03",
+      "name": "실패·중단·재시작·설정 교체 복구 검증",
+      "criterion": "실행 중 Off, 지연/유실 응답, 부분 생성, 죽은 worker, 정리 실패·engine 변경·lease 거절에서 중복 효과/잘못된 삭제 없이 복구",
+      "contract_sha256": "2b37ed1ce5359e9c3aee6ea916a4f88ed669a5b1b114563535f3deb7d7401a73",
+      "canonical_status_at_pinned_main": "부분 시나리오 있음",
+      "audit_delta": "Curator Off 복구/Candle bounded reconnect/ego cleanup 각각의 범위만 보존. 모든 실패군 검증 아님.",
+      "next_gap": "한 current 후보의 lost/late/partial/deadworker/cleanup/engine/lease 실제 실패 복구.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44702",
+          "scope": "원래 Browser 통합 merged"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/44911",
+          "scope": "Candle worker original payout 수리 merged"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-22-candle-host-reconnect/README.md",
+          "scope": "host eb484+worker b427 혼합 실측; operator 설치 아님"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-22-curator-Off-recovery/README.md",
+          "scope": "db31 actual host/worker/두 UI 6 originals Off recovery"
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-curator-cpu-boundary/README.md",
+          "scope": "CPU source isolation와 synthetic 실험 별도"
+        }
+      ],
+      "replacement_status": "Curator Off 복구/Candle bounded reconnect/ego cleanup 각각의 범위만 보존. 모든 실패군 검증 아님. 남은 범위: 한 current 후보의 lost/late/partial/deadworker/cleanup/engine/lease 실제 실패 복구.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "H04",
+      "name": "반복 연결과 장시간 연속 사용 검증 계획·실측",
+      "criterion": "제품의 10턴 이상·1/2/4/24h+ 목표에 연결한 시나리오·실측 범위를 정하고 연속성·누수·복구 근거 수집; 매 작은 PR에 전체 장기 검증을 반복하는 gate로 삼지 않음",
+      "contract_sha256": "ecd8f78a5e8e2928252dc40c0fb41228f6ccdc7090312c2cac1cf5ea93ffef0f",
+      "canonical_status_at_pinned_main": "후속 실측 계획",
+      "audit_delta": "장기 시나리오/누수는 이번 조사·실측 안 함. 기존 bounded 근거의 완료 여부를 이번 감사에서 변경하지 않는다.",
+      "next_gap": "10turn/1·2·4·24h+ 제품 목표와 연결해 계획·실측. bounded reconnect를 장기 성공으로 세지 않음.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        }
+      ],
+      "replacement_status": "후속 실측 계획 / 10/23: 기존 bounded 근거 보존, 현재 source 변경 영향·전체 행 검토는 이번 범위 밖. 원래 남은 범위만 유지하며 새 current-candidate/운영 설치 gate를 추가하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "H05",
+      "name": "반응 속도·자원·동시 작업 영향 측정",
+      "criterion": "동일 작업 조건의 전후 latency·queue·CPU·memory 및 TUI/Dashboard 반응을 측정; 다른 Keeper 영향 확인",
+      "contract_sha256": "76bab33f406fa4cb6656d5ec982f9dbe36687d927199454ec8c9d3b378fb630d",
+      "canonical_status_at_pinned_main": "후속 실측",
+      "audit_delta": "Curator CPU synthetic8MiB observer gap31.416–32.966ms→1.183–2.099ms. 실제 timeout 해결의 인과 증거 아님.",
+      "next_gap": "동일 작업·후보 전후 actual latency/queue/CPU/memory/두 UI/다른 Keeper 영향 측정.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "공개 standalone synthetic CPU isolation 실험. 실제 Curator input/설치 speedup·TUI latency·동일조건 live 전후 결과 아님.",
+      "merge": "해당 행의 전체 관련 PR 전수 판정 아님",
+      "installation": "이번 감사 범위 밖. 원래 criterion에 없는 운영 설치를 새 완료 조건으로 요구하지 않음.",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-curator-cpu-boundary/README.md",
+          "scope": "synthetic CPU scheduling 실험이며 실제 UI 개선·인과 증명 아님"
+        }
+      ],
+      "replacement_status": "Curator CPU synthetic8MiB observer gap31.416–32.966ms→1.183–2.099ms. 실제 timeout 해결의 인과 증거 아님. 남은 범위: 동일 작업·후보 전후 actual latency/queue/CPU/memory/두 UI/다른 Keeper 영향 측정.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    },
+    {
+      "id": "H06",
+      "name": "사용 안내·최종 통합·설치 후 확인",
+      "criterion": "manifest/예제/운영·개발 가이드 갱신, 승인된 스택 통합, 선택된 실제 설치본의 identity 및 UI 재확인; Release/Tag라면 해당 전체 검증 별도 수행",
+      "contract_sha256": "854383298447355dc2107a63a9f2d7e2d0ce0b0c6101e05272311b6143a2bc39",
+      "canonical_status_at_pinned_main": "PR 단계",
+      "audit_delta": "Category/Features/Plugins guide·public evidence 추가됨. canonical54 표는10/22 checkpoint에서 멈춤.",
+      "next_gap": "승인 통합·선택 실제 설치본 identity 및 두 UI 확인. Release/Tag라면 별도 full 검증.",
+      "completion": "NO_NEW_COMPLETION_VERDICT_EXISTING_BOUNDED_EVIDENCE_PRESERVED",
+      "source": "위 audit_delta의 직접 읽은 경계만 확인; 전체 행 source PASS 아님",
+      "tests": "이번 감사에서 실행하지 않음; 원래 표의 과거 결과 보존",
+      "measurement": "새 current-main 실측 없음; 원래 표의 과거 실측은 해당 identity만",
+      "merge": "감사 초기 REST45095 open16층 snapshot을 보존. 이후 #45357 exact444ce2d5가07:00:59Z merged(3931736b)임을 별도 REST로 직접 확인. 현재 pending PR에서는 제거.",
+      "installation": "운영 설치본 identity·실제 동작 미확인",
+      "authoritative_source_refs": [
+        {
+          "kind": "pinned_main_source",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/reports/addon-lane-full-worklist-20261021.md",
+          "scope": "원래 기준·당시 상태 정본. 새 구현·실행 증거 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45385",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45386",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45394",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45395",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45415",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45416",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45417",
+          "scope": "해당 경계의 실제 병합; 실행·설치 증명 아님."
+        },
+        {
+          "kind": "published_receipt",
+          "url": "https://github.com/jeong-sik/masc/blob/14a4026c26d0e4dcbca3c50a515f123c950d439f/docs/evidence/2026-10-23-addon-role-ui-followup/README.md",
+          "scope": "동결 source와 저자 실행 범위"
+        },
+        {
+          "kind": "completed_run",
+          "url": "https://github.com/jeong-sik/masc/actions/runs/39912368422",
+          "scope": "exact f6f183a4 compile FAIL"
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45426",
+          "scope": "고정 main 이후 warning4 명시 분기 수리 merged. 새 실행 성공 미확인."
+        },
+        {
+          "kind": "rest_native_stack",
+          "url": "https://api.github.com/repos/jeong-sik/masc/stacks/45095",
+          "scope": "16층 open snapshot. 감사 중 top ebd0ac2→444ce2d5로 이동."
+        },
+        {
+          "kind": "github_pr",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "본문의 actual configured Runtime/Agent fixture와 이전184PASS/1FAIL·새 head 실행 한계"
+        },
+        {
+          "kind": "github_pr_post_pin",
+          "url": "https://github.com/jeong-sik/masc/pull/45357",
+          "scope": "07:03:28Z 재관측: exact444ce2d5 merged at07:00:59Z, merge3931736b. 초기 open snapshot을 대체하는 현재 병합 상태."
+        }
+      ],
+      "replacement_status": "Category/Features/Plugins guide·public evidence 추가됨. canonical54 표는10/22 checkpoint에서 멈춤. 남은 범위: 승인 통합·선택 실제 설치본 identity 및 두 UI 확인. Release/Tag라면 별도 full 검증. 이후 #45357 exact444ce2d5는07:00:59Z merged(3931736b); 현재 pending PR에서 제거. 병합이 새 실행 성공이나 E03 전체 완료를 뜻하지 않는다.",
+      "existing_evidence_disposition": "canonical_status의 기존 bounded 근거를 그대로 보존. current source 영향 미확인은 기존 근거의 실패/취소 판정이 아님."
+    }
+  ],
+  "post_pin_note": {
+    "pr": 45426,
+    "merged": true,
+    "merge_commit": "123f2f821a60f5c6d2250d6dbea7f049aec1faae",
+    "meaning": "Actual REST diff enumerates Classified|Unclassified in final branch. Source repair merged after pinned main; preserves original failed CI, no successful rerun or install claim."
+  },
+  "limits": [
+    "Read-only source/GitHub audit; no source edit, build, test, CI dispatch/watch, install or runtime mutation.",
+    "Unexamined source/criteria are explicitly open, no blanket source PASS or completion.",
+    "Author execution receipts remain distinct from independent source review and this audit.",
+    "Current PR search was targeted, not full repository census.",
+    "REST merge_commit ancestry false for45054 retained without inferring source absence; Native Stack merge identities require source comparison."
+  ],
+  "replacement_status_policy": "각 ID의 원래 이름·완료 기준 불변. replacement_status는 확인된 현재 상태/남은 범위만 바꾸기 위한 초안이며, 미검토 행의 기존 상태와 한계를 함께 보존한다.",
+  "prior_failures_preserved": [
+    "f6f183a439f962ac723d938c11fdca6d69f2f431 run39912368422 warning4 compile FAIL",
+    "Librarian earlier8bd78 run39899986422 184PASS/1FAIL: current PR body record; not independently downloaded this audit",
+    "earlier65cb gate compile FAIL and initial45054 FAIL retained in canonical history; not re-executed"
+  ],
+  "evidence_policy": "기존 bounded 완료/실행/실측 근거는 보존한다. 이번 재감사 범위 밖이라는 이유로 기존 완료를 취소하거나 모든 행에 새 current-candidate/운영 설치 재실행을 요구하지 않는다. 현재 source 변경의 영향 미확인은 미확인으로만 기록한다. 운영 설치는 원래 해당 criterion이 요구할 때만 적용한다.",
+  "post_pin_librarian": {
+    "number": 45357,
+    "merged": true,
+    "merged_at": "2026-10-23T07:00:59Z",
+    "head": "444ce2d57c7a2a74353fb3e8189cdde04d8f94b9",
+    "merge_commit": "3931736b436de0a143b95ca0dd54618c983a6d71",
+    "observed_at": "2026-10-23T07:03:28.246907+00:00",
+    "source_finding": "P2 actual terminal Outcome_unknown가 Rejected로 정산된 뒤 active에서 빠져 다음 일반 wake에서 겹치는 unread source를 새 ID로 provider 호출할 수 있음. 독립 보고서와 exact444 source의 active/finish/consume 분기를 직접 읽음. 실행 재현/전체 stack verdict 아님.",
+    "finding_report": "librarian-unknown-refusal-current-audit-20261023/response.md"
+  },
+  "next_priorities": [
+    "#45426 수리 exact source의 최소 UI suite/artifact 결과 확인; 기존 f6f FAIL 보존.",
+    "병합된 Librarian exact444의 terminal Outcome_unknown source frontier P2를 typed 수리하고 후속2/3 wake 회귀.",
+    "E04/E06 actual producer→owner→worker bridge; host judgment/commit authority 유지.",
+    "E10 global rebind original owner/binding serialization.",
+    "나머지 original criterion별 아직 남은 구현·실측을 조사. 기존 bounded 근거를 무효화하거나 새 blanket gate를 만들지 않음."
+  ]
+}

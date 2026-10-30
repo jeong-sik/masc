@@ -1,0 +1,20 @@
+{
+  "all_recorded_pids": [
+    76809,
+    76939,
+    77158,
+    5218,
+    20809,
+    92745,
+    5266,
+    5338
+  ],
+  "remaining": [
+    {
+      "pid": 77158,
+      "observation": "77158     1 S    /Users/dancer/.local/bin/ego-browser"
+    }
+  ],
+  "space25_after_native_detach": "absent; inspected via listTaskSpaces",
+  "native_detach_completed": true
+}

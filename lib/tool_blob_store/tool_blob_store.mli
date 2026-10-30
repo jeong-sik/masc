@@ -1,0 +1,262 @@
+(** Content-addressed blob store for tool outputs.
+
+    Backend: filesystem under [base_path/.masc/tool_blobs/<sha[0..1]>/<sha>].
+    Two-character sharding bounds each directory to ~256 of the total set.
+    Writes are atomic via [Fs_compat.save_file_atomic] (tempfile + rename).
+
+    Concurrent writes of the same content are safe: same sha256 -> same path,
+    last writer wins with byte-identical content. *)
+
+type t
+
+type invalid_sha256 = Tool_output.invalid_sha256 =
+  | Invalid_sha256_length of { actual : int }
+  | Invalid_sha256_character of { index : int; found : char }
+
+val validate_sha256 : string -> (unit, invalid_sha256) result
+val invalid_sha256_to_string : invalid_sha256 -> string
+
+type fetch_error =
+  | Invalid_sha256 of invalid_sha256
+  | Owned_read_failed of Fs_compat.owned_regular_file_read_error
+  | Too_large of { path : string; actual : int; maximum : int }
+  | Invalid_max_bytes of int
+  | Integrity_mismatch of {
+      path : string;
+      expected : string;
+      actual : string;
+    }
+
+val fetch_error_to_string : fetch_error -> string
+
+val create : base_path:string -> t
+(** Create a blob store rooted at [base_path/.masc/tool_blobs/].
+    Directory creation is lazy (happens on first [put]). *)
+
+val root_dir : t -> string
+(** Absolute path of the store root. Mainly for diagnostics/testing. *)
+
+val preview_max : int
+(** Hard ceiling on the preview length {!put} produces, in bytes.
+
+    Callers measuring a string body's marker use {!make_preview} so planning
+    and addressing share the exact sanitized bytes. Nothing outside this
+    module should restate the ceiling; {!Tool_output.make_artifact_ref}
+    does not enforce it, so it is a property of {!put}, not of
+    {!Tool_output.artifact_ref}. *)
+
+val make_preview : string -> string
+(** Exact sanitized leading preview used by string blob addressing. Pure;
+    callers may use it to measure a marker before storing its original bytes. *)
+
+val put : t -> bytes:string -> mime:string -> Tool_output.t
+(** Store [bytes] under its sha256 digest. {!address} then {!put_addressed},
+    which is what a caller storing one body wants; the halves are separate for
+    a caller holding many, not because this one is going away.
+
+    Returns [Tool_output.Stored {sha256; bytes; preview; mime}] where
+    [preview] is the leading sanitized run of [bytes], at most
+    {!preview_max} bytes. Valid Unicode is preserved; malformed UTF-8 sequences
+    (including a sequence cut at the prefix boundary) and control bytes are
+    replaced with [?], and newline, carriage return and tab become spaces.
+
+    Idempotent: the same bytes always yield the same content address. The
+    first put of an address in this process writes it atomically, repairing
+    any corrupt prior bytes without a duplicate read/hash. A later put of an
+    address this process wrote with [put] does not write again, because
+    maintenance deletes only from the offline helper under the BasePath
+    process lease. If {!fetch} or {!fetch_range} then fails to return
+    validated bytes for it (missing, digest mismatch, or a read error), it
+    forgets the address and the next put writes it again. {!put_durable}
+    writes on every call and does not count as a write here.
+
+    @raises Sys_error if the blob write fails (disk full, EACCES, ...). Callers
+    must handle this at their typed boundary and must not emit a marker for
+    bytes that were never persisted. A provider projection must not put an
+    oversized payload back inline because that defeats externalization. *)
+
+type addressed
+(** The half of a {!put} that reads and writes no file: the sha256 of a body,
+    the preview cut from it, and the address those name. *)
+
+val address : t -> bytes:string -> mime:string -> addressed
+(** The content address of [bytes] under [mime], computed without touching the
+    filesystem. {!put_addressed} then stores it.
+
+    A {!put} of an address this process already wrote does not write, so for a
+    caller holding many bodies the hashing here is the whole cost of the put.
+    Splitting it out lets that caller compute the addresses away from the domain
+    it runs on and keep only the rare write on its own fiber: model input
+    demotion addresses every aged tool result of the whole history on every
+    provider request, thousands of bodies on a long-lived keeper, and hashing
+    them held the main Eio domain for 0.7 to 1.6 seconds per request
+    (2026-09-16 fiber trace).
+
+    @raises Invalid_argument if [mime] is empty, as {!put} does, naming
+    [address] rather than [put]. *)
+
+val addressed_bytes : addressed -> string
+(** The body {!put_addressed} writes. A caller that must put back what it did
+    not manage to store reads it here rather than keeping its own copy, so the
+    bytes written and the bytes restored cannot disagree. *)
+
+val put_addressed : addressed -> Tool_output.t
+(** Store an {!address}ed body. Same contract as {!put}, of which this is the
+    writing half: idempotent, skips an address this process already wrote, and
+    raises [Sys_error] if the write fails. *)
+
+val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
+(** Strict variant of {!put}. The payload and its parent directory must both
+    fsync successfully before the typed content address is returned. This is
+    the producer boundary for a durable record that will outlive the current
+    process and point back to the blob.
+
+    The owned, no-follow directory chain is checked before and after creation;
+    each directory and the ownership root are synced before payload publication.
+    The caller keeps this workspace subtree process-owned while writing, as for
+    other path-based owned writers. Preparation and I/O run in a system thread
+    when called from Eio. Unsafe directory chains raise [Sys_error] before any
+    payload is written.
+
+    Cancellation propagates. Other write or sync failures raise [Sys_error]
+    without returning a reference. *)
+
+val put_durable_reuse : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
+(** Strictly publish once per process, then reuse the address only after a
+    successful integrity-checked read. Ordinary [put] does not establish this
+    durability evidence. Missing or damaged bytes are strictly republished. *)
+
+val put_file_durable_blocking : t -> path:string -> mime:string -> Tool_output.artifact_ref
+(** The same durable file ingestion, executed synchronously on the caller.
+    Only use inside an existing blocking job or CPU worker; it does not
+    offload hashing and copying to another system thread. *)
+
+val put_file_descriptor_durable_blocking :
+  t -> source:Unix.file_descr -> expected_sha256:string -> mime:string -> Tool_output.artifact_ref
+(** Ingest an already opened and authority-checked regular descriptor. The caller
+    retains it and must grant exclusive use of its shared file offset during this
+    synchronous operation. No pathname is opened. A duplicate is closed on every
+    exit, and the original descriptor remains open. Both passes must match the
+    expected digest before a durable reference is returned. Call only inside a
+    blocking job; descriptor identity and parent ownership belong to the caller. *)
+
+val put_file_durable : t -> path:string -> mime:string -> Tool_output.artifact_ref
+(** Store an internal regular spool file without loading its complete contents
+    into memory. The caller owns the source file; this operation never removes
+    it. Hashing and copying use the same open descriptor and a fixed-size byte
+    buffer. The copied bytes are hashed again before publication, so a source
+    modified between the two passes cannot publish bytes under the wrong
+    content address.
+
+    The complete operation runs in a system thread when called from Eio and
+    uses the same mandatory payload/parent syncs as {!put_durable}. Source I/O,
+    non-regular sources, changed source contents, and publication failures
+    raise [Sys_error] without returning a reference. Invalid media types raise
+    [Invalid_argument]; cancellation propagates.
+
+    This bounds ingestion memory only. The first uncached {!fetch_range}
+    validates its artifact with a streaming digest, not a whole-file
+    materialisation. *)
+
+val fetch : t -> sha256:string -> (string option, fetch_error) result
+(** Validate and retrieve bytes by sha256. Returns [Ok None] only when the
+    validated path is absent. The owned-file read validates the no-follow
+    parent chain and [lstat]/[fstat] identity before and after descriptor I/O.
+    Read and content-integrity failures remain typed. Cancellation propagates. *)
+
+val fetch_bounded :
+  t -> sha256:string -> max_bytes:int -> (string option, fetch_error) result
+(** Validate the digest while reading at most [max_bytes] through one owned
+    descriptor. An oversized file returns [Too_large] before whole-file
+    allocation. Negative bounds return [Invalid_max_bytes]. This does not
+    populate the snapshot cache used by {!fetch_range}. *)
+
+val max_served_bytes : int
+(** Largest artifact the HTTP artifact routes materialise in one response.
+    A writer that records a reference for a reader behind those routes — a
+    Board attachment, which the dashboard opens only through them — refuses
+    anything larger, so every accepted reference is one the reader can open. *)
+
+type range =
+  { content : string
+  ; total_bytes : int
+  }
+
+val fetch_range :
+  t ->
+  sha256:string ->
+  offset:int ->
+  max_bytes:int ->
+  (range option, fetch_error) result
+(** Read at most [max_bytes] from [offset]. The first uncached read performs a
+    streaming whole-file sha256 validation through a fixed-size buffer and
+    never materialises the artifact; later pages whose owned descriptor
+    snapshot is unchanged use bounded range I/O. A nonexistent shard fails
+    fast on the initial range-read descriptor open, before any content is
+    read. The validation cache is bounded, so an evicted or changed snapshot
+    is revalidated with the same streaming digest before any bytes are
+    returned, preserving {!fetch}'s content-address integrity without hashing
+    the whole artifact on every page or materialising it in memory. The
+    streaming read takes the window and the digest from one owned descriptor,
+    so the bytes it returns are the bytes it hashed (#38972). Bounds and
+    filesystem failures remain typed. Cancellation propagates. *)
+
+module For_testing : sig
+  val put_file_durable
+    :  after_hash:(unit -> unit)
+    -> t
+    -> path:string
+    -> mime:string
+    -> Tool_output.artifact_ref
+  (** The production ingestion path with a fault-injection boundary between
+      hashing the source and copying it. The callback runs in the same
+      blocking job and must not perform Eio effects. *)
+
+  val fetch_range
+    :  after_window_read:(unit -> unit)
+    -> t
+    -> sha256:string
+    -> offset:int
+    -> max_bytes:int
+    -> (range option, fetch_error) result
+  (** The production {!fetch_range} with a fault-injection boundary on the
+      streaming digest path: after the window has been read and before the
+      digest decides whether it is admitted. It runs when the snapshot cache
+      holds no entry or a changed entry for the shard and the read found the
+      shard, in the calling fiber, not in a blocking job. A test rewrites the
+      shard here to stand in for a put that lands between reading and
+      admitting. *)
+
+  val validated_snapshot
+    :  t
+    -> sha256:string
+    -> Fs_compat.owned_regular_file_snapshot option
+  (** The snapshot the range cache currently holds as validated for this
+      address, if any. *)
+end
+
+val list_all : t -> string list
+(** List all sha256 hashes currently in the store. O(n) in store size.
+    Mainly used by tests. Offline retention is owned exclusively by
+    {!Tool_blob_maintenance} under the BasePath process lease. *)
+
+type list_error =
+  { path : string
+  ; reason : string
+  }
+
+val list_all_result : t -> (string list, list_error) result
+(** Typed production listing. Directory read/stat failures never collapse to
+    an empty store. *)
+
+type delete_error =
+  { sha256 : string
+  ; path : string
+  ; reason : string
+  }
+
+val delete : t -> sha256:string -> (bool, delete_error) result
+(** Delete one exact blob. [Ok false] means it is already absent; filesystem
+    failures remain typed and visible. Bulk retention/deletion is owned
+    exclusively by offline {!Tool_blob_maintenance} under the BasePath process
+    lease; callers must not synthesize a partial consumer keep-set. *)

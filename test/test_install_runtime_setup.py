@@ -1,0 +1,2433 @@
+"""Selected-only rendering and transactional publication through the real helper."""
+import contextlib
+import io
+import importlib.util
+import json
+import os
+import pty
+import select
+import signal
+import termios
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from unittest.mock import patch
+
+BINARY = None
+if len(sys.argv) > 2 and sys.argv[1] == '--binary':
+    BINARY = str(Path(sys.argv.pop(2)).resolve())
+    sys.argv.pop(1)
+
+ROOT = Path(__file__).resolve().parents[1]
+MODULE = importlib.util.spec_from_file_location('runtime_setup', ROOT / 'scripts/install-runtime-setup.py')
+assert MODULE is not None and MODULE.loader is not None
+SETUP = importlib.util.module_from_spec(MODULE)
+MODULE.loader.exec_module(SETUP)
+
+
+def spec(choice='vllm'):
+    result = dict(choice=choice, model='operator/model-exact', max_context=8192, tools=True, streaming=False)
+    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
+        result['endpoint'] = 'http://127.0.0.1:9/v1'
+        if choice == 'messages':
+            result['provider_kind'] = 'anthropic'
+    elif choice == 'antigravity':
+        result.update(credential_file='/operator/token-file', timeout_s=180)
+    return result
+
+
+def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/api/v1', key='OPENROUTER_API_KEY'):
+    result = dict(choice='openai_compatible', model=model_id, max_context=1000000, tools=True, streaming=True,
+                  endpoint=endpoint, api_key_env=key, provider_id=provider,
+                  provider_display_name=provider, model_key=SETUP.model_slug(model_id),
+                  provider_declared=False, reasoning_effort='high')
+    return result
+
+
+def presentation_readiness(base='/tmp/workspace', parser='started', renderer='missing') -> dict:
+    return dict(schema='masc.presentation_tools_readiness.v1', scope='workspace_host_runtime',
+                base_path=base, presentation_inspection='not_run',
+                pdf_tools=dict(schema='masc.pdf_tools_readiness.v1', status='tools_available',
+                    scope='current_process_environment', pdf_inspection='not_run',
+                    checks=[dict(command=tool, status='started') for tool in ('pdftotext', 'pdftoppm')]),
+                status='tools_available' if parser == renderer == 'started' else 'unavailable',
+                checks=[dict(component='python_pptx', command=base + '/.masc/runtime-tools/presentation/bin/python3', status=parser),
+                        dict(component='libreoffice', command='soffice', status=renderer)])
+
+
+class PresentationPrerequisites(unittest.TestCase):
+    def test_partial_install_stays_unavailable_and_uses_selected_workspace(self):
+        readiness = presentation_readiness()
+        catalog = dict(schema='masc.prerequisite_actions.v1', dependency_readiness=readiness,
+                       actions=[dict(id='presentation_parser_install', label='Install parser', detail='Workspace parser',
+                                     source_url='https://python-pptx.readthedocs.io/en/latest/user/install.html', requires_admin=False)])
+        receipt = dict(schema='masc.prerequisite_action_result.v1', status='commands_completed_recheck_required',
+                       readiness='unavailable', dependency_readiness=readiness)
+        output = io.StringIO()
+        with patch.object(SETUP.subprocess, 'run', side_effect=[
+                subprocess.CompletedProcess([], 0, json.dumps(catalog), ''),
+                subprocess.CompletedProcess([], 0, json.dumps(receipt), '')]) as run, \
+                patch.object(SETUP, 'pick', return_value=(0, 'Install parser')), contextlib.redirect_stderr(output):
+            self.assertTrue(SETUP.prerequisite_menu('masc', 'presentation-tools', base_path='/tmp/workspace'))
+        self.assertTrue(all(call.args[0][-2:] == ['--base-path', '/tmp/workspace'] for call in run.call_args_list))
+        self.assertIn('libreoffice: missing', output.getvalue())
+        self.assertNotIn('Both presentation dependencies started successfully', output.getvalue())
+
+    def test_claimed_ready_cannot_hide_a_failed_parser(self):
+        readiness = presentation_readiness(parser='failed', renderer='started')
+        readiness['status'] = 'tools_available'
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.decode_presentation_tools_readiness(readiness)
+
+    def test_ready_other_workspace_does_not_enable_the_selected_workspace(self):
+        with self.assertRaisesRegex(SETUP.SetupError, 'another workspace'):
+            SETUP.decode_presentation_tools_readiness(
+                presentation_readiness(base='/tmp/other', renderer='started'), '/tmp/selected')
+
+    def test_presentation_readiness_requires_poppler(self):
+        readiness = presentation_readiness(renderer='started')
+        readiness['pdf_tools']['checks'][1]['status'] = 'missing'
+        readiness['pdf_tools']['status'] = 'unavailable'
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.decode_presentation_tools_readiness(readiness)
+        readiness['status'] = 'unavailable'
+        self.assertFalse(SETUP.decode_presentation_tools_readiness(readiness).available)
+
+    def test_presentation_timeout_returns_to_setup(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=subprocess.TimeoutExpired('masc', 20)):
+            with self.assertRaisesRegex(SETUP.SetupError, 'in time'):
+                SETUP.presentation_tools_status('masc', '/tmp/workspace')
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_impress_readiness_requires_generated_pdf(self):
+        for output, expected in [(None, 'failed'), ('not a PDF', 'failed'), ('%PDF-1.7\n', 'started')]:
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as directory:
+                commands = Path(directory) / 'commands'
+                commands.mkdir()
+                renderer = commands / 'soffice'
+                renderer.write_text('#!' + sys.executable + '\n' +
+                    'import pathlib, sys\n' +
+                    "assert sys.argv[sys.argv.index('--convert-to') + 1] == 'pdf:impress_pdf_Export'\n" +
+                    "directory = pathlib.Path(sys.argv[sys.argv.index('--outdir') + 1])\n" +
+                    "assert pathlib.Path(sys.argv[-1]).suffix == '.fodp'\n" +
+                    ('pass\n' if output is None else "(directory / 'probe.pdf').write_text(" + repr(output) + ")\n"))
+                renderer.chmod(0o755)
+                env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
+                assert BINARY is not None
+                result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools',
+                    '--base-path', directory], env=env, capture_output=True, text=True, check=True)
+                observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
+                renderer_check = next(row for row in observed.checks if row['component'] == 'libreoffice')
+                self.assertEqual(renderer_check['status'], expected)
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_successful_install_commands_cannot_hide_failed_renderer_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            commands = Path(directory) / 'commands'
+            commands.mkdir()
+            # Package managers are fixtures: this test must never install host packages.
+            for name, code in [('brew', 0), ('sudo', 0), ('soffice', 7)]:
+                command = commands / name
+                command.write_text('#!/bin/sh\nexit ' + str(code) + '\n')
+                command.chmod(0o755)
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
+            base = Path(directory) / 'workspace'
+            base.mkdir()
+            assert BINARY is not None
+            args = [BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)]
+            catalog = subprocess.run(args, env=env, capture_output=True, text=True, check=True)
+            actions = json.loads(catalog.stdout)['actions']
+            if not any(row['id'] == 'presentation_renderer_install' for row in actions):
+                self.skipTest('host has only manual renderer instructions')
+            result = subprocess.run(args + ['--execute', 'presentation_renderer_install'],
+                                    env=env, capture_output=True, text=True)
+            receipt = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(receipt['status'], 'failed')
+            self.assertEqual(receipt['readiness'], 'unavailable')
+            self.assertEqual(list(base.iterdir()), [], 'renderer fixture cannot create a parser environment')
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_native_catalog_does_not_substitute_another_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / 'workspace'
+            base.mkdir()
+            commands = Path(directory) / 'commands'
+            commands.mkdir()
+            renderer = commands / 'soffice'
+            renderer.write_text('#!/bin/sh\nprintf "fixture LibreOffice version\\n"\n')
+            renderer.chmod(0o755)
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
+            before = list(base.iterdir())
+            assert BINARY is not None
+            result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)],
+                                    env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(list(base.iterdir()), before, 'detection must not install or create a workspace environment')
+            observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
+            checks = {row['component']: row for row in observed.checks}
+            self.assertEqual(checks['python_pptx']['status'], 'missing')
+            self.assertEqual(checks['libreoffice']['status'], 'failed')
+            self.assertFalse(observed.available)
+            # An actual isolated interpreter without third-party packages must
+            # fail the import, even though the interpreter itself starts.
+            venv = base / '.masc/runtime-tools/presentation'
+            subprocess.run([sys.executable, '-I', '-m', 'venv', '--without-pip', str(venv)], check=True)
+            result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)],
+                                    env=env, capture_output=True, text=True, check=True)
+            observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
+            parser = next(row for row in observed.checks if row['component'] == 'python_pptx')
+            self.assertEqual(parser['status'], 'failed')
+            self.assertIn('pptx', parser['detail'])
+            self.assertFalse(observed.available)
+
+
+class ModelSelection(unittest.TestCase):
+    def test_account_model_preserves_exact_native_image_declaration_and_context(self):
+        source = dict(choice='codex', command='codex', account_home='/owned/codex')
+        for declared in (True, False, None):
+            with self.subTest(declared=declared), patch.object(
+                    SETUP, 'catalog_models', return_value=[
+                        dict(id='different-model', supports_image_input=True),
+                        dict(id='selected-model', supports_image_input=declared)]):
+                _, selected = SETUP.resolve_model_spec(
+                    source, dict(id='selected-model', context=750000), 10, binary='/fixture/masc')
+                self.assertEqual(selected['max_context'], 750000)
+                self.assertEqual(selected['account_home'], '/owned/codex')
+                if declared is None:
+                    self.assertNotIn('supports_image_input', selected)
+                else:
+                    self.assertIs(selected['supports_image_input'], declared)
+
+    def setUp(self):
+        renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
+        self.renderer = renderer.start()
+        self.addCleanup(renderer.stop)
+
+    def test_independent_catalog_sources_are_visible_without_runtime_bindings(self):
+        inventory = dict(runtimes=[], integrations=[dict(
+            id='openrouter', display_name='OpenRouter', protocol='openai-compatible-http',
+            endpoint='https://openrouter.ai/api/v1', api_key_env='OPENROUTER_API_KEY',
+            origin='agent_core_catalog', setup_support='new_connection', provider_kind='openai_compat')])
+        with patch.object(SETUP, 'official_client_path', return_value=None):
+            rows = SETUP.connection_sources('/fixture', inventory)
+        source = next(row for row in rows if row['provider_id'] == 'openrouter')
+        self.assertEqual(source['choice'], 'openai_compatible')
+        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(source['rows'], [])
+
+    def test_integration_only_private_auth_is_preserved_or_explicitly_protected(self):
+        for kind in ('file', 'inline'):
+            integration = dict(id='private-provider', display_name='Private', protocol='openai-compatible-http',
+                               endpoint='https://example.com/v1', origin='runtime_config',
+                               setup_support='new_connection', credential_kind=kind)
+            if kind == 'file':
+                integration['credential_file'] = '/private/owned-api-key'
+            with patch.object(SETUP, 'official_client_path', return_value=None):
+                source = SETUP.connection_sources('/fixture', dict(runtimes=[], integrations=[integration]))[0]
+            self.assertEqual(source['credential_kind'], kind)
+            if kind == 'file':
+                with patch.object(SETUP, 'native_discover_models', return_value=([], 'server')) as discover:
+                    SETUP.source_models('/fixture', source, 10)
+                self.assertEqual(discover.call_args.args[1]['credential_file'], '/private/owned-api-key')
+                _, selected = SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
+                self.assertEqual(selected['credential_file'], '/private/owned-api-key')
+                self.assertNotIn('api_key_env', selected)
+            else:
+                with patch.object(SETUP, 'native_discover_models', side_effect=AssertionError('anonymous request')):
+                    self.assertEqual(SETUP.source_models('/fixture', source, 10)[0], [])
+                with self.assertRaisesRegex(SETUP.SetupError, 'protected credential'):
+                    SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
+
+    def test_private_key_is_piped_and_removed_when_setup_does_not_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = Path(directory, 'pending-key')
+            def save(argv, **kwargs):
+                self.assertEqual(argv, ['/fixture/masc', 'runtime-store-credential'])
+                self.assertEqual(kwargs['input'], 'hidden-secret')
+                self.assertNotIn('hidden-secret', str(argv))
+                key.write_text(kwargs['input'])
+                key.chmod(0o600)
+                return subprocess.CompletedProcess(argv, 0, json.dumps(dict(
+                    schema='masc.private_credential_reference.v1', credential_file=str(key))), '')
+            with patch.object(SETUP.sys.stdin, 'isatty', return_value=True), \
+                    patch.object(SETUP.getpass, 'getpass', return_value='hidden-secret'), \
+                    patch.object(SETUP.subprocess, 'run', side_effect=save), \
+                    SETUP.PendingCredentials('/fixture/masc') as credentials:
+                self.assertEqual(credentials.save(), str(key))
+                self.assertTrue(key.exists())
+            self.assertFalse(key.exists())
+
+    def test_successfully_committed_key_remains_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = Path(directory, 'committed-key')
+            key.write_text('hidden-secret')
+            key.chmod(0o600)
+            result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+                schema='masc.private_credential_reference.v1', credential_file=str(key))), '')
+            with patch.object(SETUP.sys.stdin, 'isatty', return_value=True), \
+                    patch.object(SETUP.getpass, 'getpass', return_value='hidden-secret'), \
+                    patch.object(SETUP.subprocess, 'run', return_value=result), \
+                    SETUP.PendingCredentials('/fixture/masc') as credentials:
+                path = credentials.save()
+                credentials.retain([dict(credential_file=path)])
+            self.assertTrue(key.exists())
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+
+    def test_antigravity_account_switch_drops_old_models_and_context(self):
+        source = dict(choice='antigravity', endpoint='', api_key_env='',
+                      credential_file='/private/new-account', credential_kind='file',
+                      credential_replaced=True, rows=[
+                          dict(id='old.shared', model='shared-model', max_context=8192),
+                          dict(id='old.exclusive', model='old-account-only', max_context=16384)])
+        with patch.object(SETUP, 'antigravity_models', return_value=[
+                dict(id='shared-model', label='Shared model', context=None),
+                dict(id='new-model', label='New model', context=65536)]):
+            models, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual([model['id'] for model in models], ['shared-model', 'new-model'])
+        self.assertIsNone(models[0]['context'])
+        self.assertEqual(models[1]['context'], 65536)
+        self.assertTrue(all(model['existing'] is None for model in models))
+
+    def test_replaced_key_creates_new_binding_instead_of_reusing_old_env_auth(self):
+        source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1',
+                      api_key_env='', credential_file='/private/saved-key', credential_kind='file',
+                      credential_replaced=True, rows=[dict(id='old.binding', model='same-model',
+                      max_context=8192, tools=True)])
+        with patch.object(SETUP, 'native_discover_models', return_value=(
+                [dict(id='same-model', label='Model', context=None)], 'server')):
+            models, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual(len(models), 1)
+        self.assertIsNone(models[0]['existing'])
+        runtime, selected = SETUP.resolve_model_spec(source, models[0], 10)
+        self.assertNotEqual(runtime, 'old.binding')
+        self.assertEqual(selected['credential_file'], '/private/saved-key')
+        self.assertNotIn('api_key_env', selected)
+
+    def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
+        # Cache filtering (visibility, duplicate ids, malformed names) is the
+        # binary's job now; the wizard only consumes runtime-model-list rows.
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='observed-id', label='Visible model', max_context=4567)]}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
+            selected = SETUP.select_model('/fixture/masc', 'codex')
+        self.assertEqual(selected, dict(model='observed-id', max_context=4567))
+        self.assertIn('Installed MASC model catalog', terminal.getvalue())
+
+    def test_astra_uses_codex_effective_context_instead_of_api_maximum(self):
+        # Effective-vs-architectural window resolution is the binary catalog's
+        # contract; the wizard keeps whatever window the row states.
+        def cli(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='gpt-6-astra', label='GPT-6-Astra', max_context=272000)]}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+            selected = SETUP.select_model('/fixture/masc', 'codex')
+        self.assertEqual(selected, dict(model='gpt-6-astra', max_context=272000))
+
+    def test_fresh_codex_uses_client_catalog_before_rendering_connection(self):
+        # The vendor CLI is never driven from the wizard: one runtime-model-list
+        # call answers. Environment isolation around the vendor CLI is verified
+        # by the binary's own suite.
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='catalog-id', label='Client model', max_context=272000)]}), '')
+        source = dict(choice='codex', endpoint='', api_key_env='', command='/owned/codex', rows=[])
+        with patch('subprocess.run', side_effect=cli):
+            models, origin = SETUP.source_models('/fixture/masc', source, 10)
+            _, selected = SETUP.resolve_model_spec(source, models[0], 10)
+        self.assertEqual(selected['model'], 'catalog-id')
+        self.assertEqual(selected['max_context'], 272000)
+        self.assertEqual(selected['command'], '/owned/codex')
+        self.assertIn('MASC model catalog', origin)
+
+    def test_unavailable_codex_catalog_does_not_inherit_api_capacity(self):
+        # With no catalog and no discovery the wizard has nothing to offer:
+        # cancelling is the only honest path (no guessed capacity).
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'models': []}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('q\n')), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+            SETUP.select_model('/fixture/masc', 'codex')
+
+    def test_http_models_offer_actual_server_id_and_configured_limit(self):
+        # Discovery is owned by the native runtime: the wizard calls the
+        # binary and trusts its observation. Wire-format parsing of /models
+        # (including max_model_len) is verified by the OCaml discovery suite.
+        def native(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-discover-models')
+            return subprocess.CompletedProcess(argv, 0, json.dumps({
+                'source': 'account_or_server_model_list', 'account_availability_verified': False,
+                'models': [dict(id='served-model', label='served-model', context=8192)]}), '')
+        with patch('subprocess.run', side_effect=native), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+            selected = SETUP.select_model('/fixture/masc', 'vllm', 'http://server.example/v1')
+        self.assertEqual(selected, dict(model='served-model', max_context=8192))
+
+    def test_context_lookup_rejects_wrong_identity_and_bool(self):
+        replies=[dict(model='another',max_context=123),dict(model='manual',max_context=True)]
+        for reply in replies:
+            def cli(argv,**kwargs):
+                return subprocess.CompletedProcess(argv,0,json.dumps({'models':[]} if argv[1]=='runtime-model-list' else reply),'')
+            with self.subTest(reply=reply), patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('manual\nq\n')), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+                SETUP.select_model('/fixture/masc','claude_code')
+
+
+class RuntimeSetupAdapter(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='native-setup-adapter-')
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.revision = 'a' * 64
+        self.requests = []
+        self.transports = []
+
+    def native(self, argv, **kwargs):
+        command = argv[1]
+        self.assertEqual(argv[0], '/fixture/masc')
+        self.transports.append(command)
+        payload = None
+        if command != 'runtime-setup-inventory':
+            path = Path(argv[-1])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertNotIn('operator/model-exact', str(argv))
+            payload = json.loads(path.read_text())
+            self.requests.append((path, payload))
+        if command == 'runtime-setup-render':
+            assert payload is not None
+            value = dict(runtime_id='native.' + payload['model'], runtime_toml='native runtime')
+        elif command == 'runtime-setup-inventory':
+            value = dict(runtimes=[dict(id='original.model')], setup_revision=self.revision)
+        elif command == 'runtime-setup-batch':
+            assert payload is not None
+            value = dict(runtime_id=payload['default_runtime_id'], runtime_ids=payload['runtime_ids'],
+                         configured=True, commit=dict(durability='durable', warnings=[]), validation='passed', readiness='verified' if payload['verify'] else 'not_probed')
+        else:
+            self.fail('Unexpected native command: ' + command)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), '')
+
+    def test_native_identity_and_private_transport_are_used_without_local_rendering(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            identity, runtime = SETUP.render(spec(), '/fixture/masc')
+        self.assertEqual((identity, runtime), ('native.operator/model-exact', b'native runtime'))
+        self.assertFalse(self.requests[0][0].exists())
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.render(spec(), None)
+
+    def test_multi_selection_uses_original_revision_and_native_default_order(self):
+        first, second = spec(), dict(spec(), model='other-model')
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            result = SETUP.configure_many('/fixture/masc', self.base, [first, second],
+                ['original.model', 'native.operator/model-exact', 'native.other-model'],
+                default_id='native.other-model', verify=True, expected_revision=self.revision)
+        self.assertNotIn('runtime-setup-inventory', self.transports)
+        request = self.requests[-1][1]
+        self.assertEqual(request['expected_revision'], self.revision)
+        self.assertEqual(request['runtime_ids'], ['native.other-model', 'original.model', 'native.operator/model-exact'])
+        self.assertEqual(result['readiness'], 'verified')
+        self.assertEqual(request['connections'], [first, second])
+
+    def test_noninteractive_configuration_observes_before_rendering(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            SETUP.configure('/fixture/masc', self.base, spec())
+        self.assertEqual(self.transports, ['runtime-setup-inventory', 'runtime-setup-render', 'runtime-setup-batch'])
+
+    def test_existing_account_is_resolved_before_terminal_selection_and_batch(self):
+        original = self.native
+        def native(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv[1] == 'runtime-setup-render' and '--base-path' in argv:
+                self.assertEqual(argv[argv.index('--base-path') + 1], str(self.base))
+                payload = json.loads(Path(argv[-1]).read_text())
+                result.stdout = json.dumps(dict(runtime_id='operator_account.' + payload['model'], runtime_toml='prepared'))
+            return result
+        source = dict(choice='codex', command='codex', account_home='/fixture/account', credential_kind='none',
+                      origin='runtime_config', provider_id='operator_account')
+        with patch.object(SETUP.subprocess, 'run', side_effect=native), \
+             patch.object(SETUP, 'catalog_models', return_value=[]):
+            identity, selected = SETUP.resolve_model_spec(source, dict(id='new-model', context=8192),
+                10, binary='/fixture/masc', base_path=self.base)
+            self.assertEqual(identity, 'operator_account.new-model')
+            self.assertEqual(selected['existing_provider_id'], 'operator_account')
+            result = SETUP.configure_many('/fixture/masc', self.base, [selected], [identity],
+                expected_revision=self.revision)
+        self.assertEqual(self.requests[-1][1]['runtime_ids'], ['operator_account.new-model'])
+        self.assertEqual(result['runtime_id'], identity)
+
+    def test_antigravity_saved_reference_retains_exact_provider_and_file(self):
+        for action, changed_file, previously_replaced, save_selected in [
+                ('saved', False, False, False), ('saved', True, False, False),
+                ('saved', True, False, True), ('current', True, False, False),
+                ('signin', True, False, False), ('saved', True, True, False),
+                ('saved', True, True, True)]:
+            with self.subTest(action=action, changed_file=changed_file, previously_replaced=previously_replaced,
+                              save_selected=save_selected):
+                original = self.base / 'saved-oauth'
+                replacement = self.base / 'new-oauth'
+                for path in [original, replacement]:
+                    path.write_text('private fixture')
+                    path.chmod(0o600)
+                returned = str(replacement if changed_file else original)
+                source = dict(choice='antigravity', command='agy', credential_file=str(original),
+                              credential_kind='file', origin='runtime_config', provider_id='operator_account',
+                              provider_timeout_s=824.5,
+                              rows=[dict(id='operator_account.existing', model='existing', max_context=16384, tools=True)])
+                if previously_replaced:
+                    source['credential_replaced'] = True
+                receipt = dict(schema='masc.antigravity_account.v1', credential_file=returned,
+                               provider_timeout_s=180, invocation_verified=False,
+                               catalog=dict(source='antigravity_cli_models', account_availability_verified=False,
+                                            models=[dict(id='existing', label='Existing'), dict(id='new-model', label='New')]))
+                account_calls = []
+                def native(argv, **kwargs):
+                    if argv[1] == 'runtime-antigravity-account':
+                        account_calls.append(argv)
+                        return subprocess.CompletedProcess(argv, 0, json.dumps(receipt), '')
+                    return self.native(argv, **kwargs)
+                replaced = action != 'saved' or previously_replaced
+                selected_file = str(original) if action == 'saved' else returned
+                with SETUP.PendingCredentials('/fixture/masc', self.base) as credentials, \
+                     patch.object(SETUP, 'pick', return_value=[{'saved': 0, 'current': 1, 'signin': 2}[action]]), \
+                     patch.object(SETUP, 'antigravity_context', return_value=8192), \
+                     patch.object(SETUP.subprocess, 'run', side_effect=native):
+                    prepared = SETUP.prepare_antigravity_account(source, credentials)
+                    self.assertEqual(bool(prepared.get('credential_replaced')), replaced)
+                    models, _ = SETUP.source_models('/fixture/masc', prepared, 10)
+                    existing = next(row for row in models if row['id'] == 'existing')
+                    self.assertEqual(existing['existing'] is None, replaced)
+                    _, selected = SETUP.resolve_model_spec(prepared, next(row for row in models if row['id'] == 'new-model'),
+                        10, binary='/fixture/masc', base_path=self.base)
+                    self.assertEqual(selected.get('existing_provider_id'), None if replaced else 'operator_account')
+                    self.assertEqual(self.requests[-1][1].get('existing_provider_id'), selected.get('existing_provider_id'))
+                    self.assertEqual(selected['credential_file'], selected_file)
+                    self.assertEqual(selected['timeout_s'], 824.5 if action == 'saved' else 180)
+                    self.assertEqual(selected_file in credentials.pending, replaced)
+                    if action == 'saved' and changed_file:
+                        self.assertIn(returned, credentials.pending, 'native discovery clone remains cleanup-owned')
+                    # Success retains the selected source, never its discovery clone.
+                    if save_selected:
+                        credentials.retain([selected])
+                self.assertEqual(Path(selected_file).exists(), save_selected or not replaced)
+                if returned != selected_file:
+                    self.assertFalse(Path(returned).exists(), 'cancel or save cleans the native discovery clone')
+                self.assertEqual('--credential-file' in account_calls[0], action == 'saved')
+                self.assertEqual('--sign-in' in account_calls[0], action == 'signin')
+
+    def test_antigravity_inventory_carries_timeout_for_bound_and_unbound_providers(self):
+        row = dict(id='bound.existing', provider_id='bound', display_name='Bound',
+                   protocol='antigravity-cli', command='agy', credential_kind='file',
+                   credential_file='/fixture/oauth', model='existing', provider_timeout_s=824.5)
+        def integration(name):
+            return dict(
+                id=name,
+                display_name=name,
+                protocol="antigravity-cli",
+                command="agy",
+                credential_kind="file",
+                credential_file="/fixture/oauth",
+                provider_timeout_s=824.5,
+                origin="runtime_config",
+                setup_support="new_connection",
+            )
+        inventory = dict(runtimes=[row], integrations=[integration('bound'), integration('unbound')])
+        with patch.object(SETUP, 'official_client_path', return_value=None):
+            sources = SETUP.connection_sources('/fixture/masc', inventory)
+        for provider_id in ['bound', 'unbound']:
+            source = next(row for row in sources if row['provider_id'] == provider_id)
+            self.assertEqual(source['provider_timeout_s'], 824.5)
+
+    def test_prepared_implicit_native_home_retains_selected_provider(self):
+        source = dict(choice='codex', command='codex', account_home=None, credential_kind='none',
+                      origin='runtime_config', provider_id='operator_account', label='Codex')
+        selected_home = str(self.base / 'codex-home')
+        with patch.dict(os.environ, {'CODEX_HOME': selected_home}), \
+             patch.object(SETUP, 'official_client_path', return_value='/located/codex'), \
+             patch.object(SETUP, 'pick', return_value=[0]), \
+             patch.object(SETUP, 'catalog_models', return_value=[]), \
+             patch.object(SETUP.subprocess, 'run', side_effect=self.native):
+            prepared = SETUP.prepare_connection('/fixture/masc', source, None)
+            _, selected = SETUP.resolve_model_spec(prepared, dict(id='new-model', context=8192),
+                10, binary='/fixture/masc', base_path=self.base)
+        self.assertEqual(selected['existing_provider_id'], 'operator_account')
+        self.assertEqual(selected['command'], 'codex')
+        self.assertEqual(selected['account_home'], selected_home)
+
+    def test_native_verification_failure_identifies_connection_without_raw_diagnostics(self):
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error',
+                        failure=dict(code='client_not_authenticated',
+                                     message='The official client is not signed in.',
+                                     detail='claude auth status reported loggedIn=false'))
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), 'private provider diagnostics')):
+            with self.assertRaises(SETUP.VerificationError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertEqual(error.exception.runtime_id, 'failed.runtime')
+        self.assertEqual(error.exception.failure['code'], 'client_not_authenticated')
+        self.assertEqual(error.exception.failure['message'], 'The official client is not signed in.')
+        self.assertNotIn('private provider diagnostics', str(error.exception))
+
+    def test_verification_failure_without_a_failure_object_stays_quiet(self):
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), '')):
+            with self.assertRaises(SETUP.VerificationError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertEqual(error.exception.failure, {})
+
+    def test_a_killed_verification_says_how_it_ended_without_its_log(self):
+        # 2026-09-15: the child died by SIGKILL and this screen said only that
+        # runtime setup did not finish.
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_unreadable', runtime_id='setup.runtime',
+                        error='Runtime "setup.runtime" verification returned no readable report '
+                              '(killed by SIGKILL; stdout is not JSON: Blank input data)',
+                        detail='[INFO] catalog loaded\n[INFO] overlay installed')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), 'private provider diagnostics')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertNotIsInstance(error.exception, SETUP.VerificationError)
+        self.assertIn('killed by SIGKILL', str(error.exception))
+        self.assertNotIn('catalog loaded', str(error.exception))
+        self.assertNotIn('private provider diagnostics', str(error.exception))
+
+    def test_an_error_sentence_the_terminal_cannot_show_still_names_its_kind(self):
+        response = dict(schema='masc.runtime_setup_error.v1', kind='validation_failed', runtime_id=None,
+                        error='did not pass validation\nwith a second line')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), '')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertIn('(validation_failed)', str(error.exception))
+        self.assertNotIn('second line', str(error.exception))
+
+    def test_a_failure_without_the_error_schema_names_the_exit(self):
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 3, json.dumps(dict(unexpected=True)), '')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertIn('(exit 3)', str(error.exception))
+
+    def test_verification_reason_prints_the_native_account_of_the_failure(self):
+        with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            SETUP.print_verification_reason(dict(code='client_not_authenticated',
+                                                 message='The official client is not signed in.',
+                                                 detail='claude auth status reported loggedIn=false'))
+            SETUP.print_verification_reason({})
+        text = stderr.getvalue()
+        self.assertIn('client_not_authenticated: The official client is not signed in.', text)
+        self.assertIn('  claude auth status reported loggedIn=false', text)
+        self.assertEqual(text.count('\n'), 2)
+
+    def test_verification_failure_says_whether_it_is_temporary(self):
+        # A busy provider read the same as a refused key, and operators stopped
+        # the install to find out whether waiting would do.
+        def shown(code):
+            with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+                failure = dict(code=code, message='fixture message', detail='fixture detail')
+                SETUP.print_verification_reason(failure)
+                SETUP.print_verification_next_step(failure)
+            return stderr.getvalue()
+        busy = shown('provider_overloaded')
+        self.assertIn('[Provider busy (temporary)] provider_overloaded: fixture message', busy)
+        self.assertIn('Retry shortly', busy)
+        self.assertIn('[Credential refused] provider_auth_refused:', shown('provider_auth_refused'))
+        self.assertIn('[Model check failed] provider_rejected:', shown('provider_rejected'))
+        # Captured output is not a terminal, so it carries no escape codes.
+        self.assertNotIn('\x1b[', busy)
+
+    def test_color_follows_no_color(self):
+        with patch.object(SETUP.sys.stderr, 'isatty', return_value=True), \
+                patch.dict(SETUP.os.environ, {'TERM': 'xterm', 'NO_COLOR': ''}):
+            self.assertEqual(SETUP.paint('x', 'fail'), '\x1b[1;31mx\x1b[0m')
+        with patch.object(SETUP.sys.stderr, 'isatty', return_value=True), \
+                patch.dict(SETUP.os.environ, {'TERM': 'xterm', 'NO_COLOR': '1'}):
+            self.assertEqual(SETUP.paint('x', 'fail'), 'x')
+
+    def test_ctrl_c_in_the_picker_cancels_without_a_traceback(self):
+        master, slave = pty.openpty()
+        # CI can start Python with SIGINT ignored; this child models a foreground terminal.
+        program = ('import importlib.util,json,signal; '
+                   'signal.signal(signal.SIGINT, signal.default_int_handler); '
+                   's=importlib.util.spec_from_file_location("setup",' +
+                   repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
+                   '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);\n'
+                   'try:\n'
+                   '    m.pick("Choose a connection", ["Claude Code / claude-opus-5-5"])\n'
+                   'except m.SetupError as error:\n'
+                   '    print(json.dumps({"cancelled": str(error)}))')
+        process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,
+                                   stdout=subprocess.PIPE, env=dict(os.environ, TERM='xterm'))
+        try:
+            terminal = b''
+            while b'1/1 shown' not in terminal:
+                self.assertTrue(select.select([master], [], [], 5)[0], 'picker did not render')
+                terminal += os.read(master, 65536)
+            # cbreak keeps ISIG on, so a real terminal delivers Ctrl-C as
+            # SIGINT, never as the \x03 byte the key loop handles. The child
+            # is not this pty's foreground group, so the same signal is sent
+            # directly; the line discipline would deliver exactly this.
+            os.kill(process.pid, signal.SIGINT)
+            while True:
+                ready = select.select([master, process.stdout], [], [], 5)[0]
+                self.assertTrue(ready, 'picker did not finish')
+                if master in ready:
+                    terminal += os.read(master, 65536)
+                if process.stdout in ready:
+                    break
+            output, _ = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, terminal)
+            self.assertIn(b'setup cancelled; existing connections were preserved', output)
+            self.assertNotIn(b'Traceback', terminal + output)
+        finally:
+            process.kill()
+            process.wait()
+            assert process.stdout is not None
+            process.stdout.close()
+            os.close(master)
+            os.close(slave)
+
+    def test_ctrl_c_outside_the_picker_exits_as_a_cancelled_setup(self):
+        argv = ['setup', '--binary', '/fixture/masc', '--wizard', '--base-path', '/fixture/workspace']
+        with patch.object(SETUP.sys, 'argv', argv), \
+                patch.object(SETUP, 'wizard', side_effect=KeyboardInterrupt), \
+                self.assertRaises(SystemExit) as error:
+            SETUP.main()
+        self.assertEqual(error.exception.code, 'runtime setup cancelled; existing connections were preserved')
+
+    def test_changed_configuration_is_not_reobserved_to_silently_accept_stale_choices(self):
+        def cli(argv, **kwargs):
+            if argv[1] == 'runtime-setup-batch':
+                return subprocess.CompletedProcess(argv, 1, json.dumps(dict(schema='masc.runtime_setup_error.v1',
+                    kind='changed_configuration', error='Configuration changed; refresh the selection before saving.')), '')
+            return self.native(argv, **kwargs)
+        with patch.object(SETUP.subprocess, 'run', side_effect=cli), self.assertRaisesRegex(SETUP.SetupError, 'Configuration changed'):
+            SETUP.configure_many('/fixture/masc', self.base, [spec()], expected_revision=self.revision)
+        self.assertNotIn('runtime-setup-inventory', self.transports)
+
+    def test_unjoined_success_receipt_is_refused(self):
+        with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'native_setup_command', return_value=dict(runtime_id='wrong.model', runtime_ids=['wrong.model'],
+                    configured=True, commit=dict(durability='durable', warnings=[]), validation='passed', readiness='verified')), self.assertRaises(SETUP.SetupError):
+            SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True, expected_revision=self.revision)
+
+    def test_visible_save_reports_durability_uncertainty_without_retry(self):
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True,
+                       validation='passed', readiness='verified', commit=dict(durability='unconfirmed', warnings=[]))
+        with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'native_setup_command', return_value=receipt) as native, \
+                patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                             expected_revision=self.revision), receipt)
+        native.assert_called_once()
+        self.assertIn('disk durability is unconfirmed', stderr.getvalue())
+        self.assertIn('Do not repeat setup', stderr.getvalue())
+        for commit in (None, {}, dict(durability='unknown')):
+            with self.subTest(commit=commit), patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=dict(receipt, commit=commit)), \
+                    self.assertRaises(SETUP.SetupError):
+                SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                                     expected_revision=self.revision)
+
+    def test_lock_release_warning_is_safe_and_does_not_repeat_save(self):
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True,
+                       validation='passed', readiness='verified', commit=dict(durability='durable',
+                       warnings=[dict(code='runtime_config_lock_release_unconfirmed', detail='private-server-path')]))
+        with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'native_setup_command', return_value=receipt) as native, \
+                patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                             expected_revision=self.revision), receipt)
+        native.assert_called_once()
+        self.assertIn('lock release is unconfirmed', stderr.getvalue())
+        self.assertNotIn('private-server-path', stderr.getvalue())
+        for warnings in (None, [dict(code='unknown')]):
+            with self.subTest(warnings=warnings), patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=dict(receipt,
+                        commit=dict(durability='durable', warnings=warnings))), self.assertRaises(SETUP.SetupError):
+                SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=True,
+                                     expected_revision=self.revision)
+
+    def test_usage_limited_receipt_is_accepted_and_names_the_unmeasured_runtime(self):
+        # A spent quota or a rate limit publishes the runtime and the receipt
+        # names it, so a published configuration is not reported as
+        # unconfirmed.
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, commit=dict(durability='durable', warnings=[]), validation='passed',
+                       readiness='usage_limited',
+                       unverified=[dict(runtime_id='native.model', code='quota_exhausted')])
+        def configure(answer, verify=True):
+            with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=answer):
+                return SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=verify,
+                                            expected_revision=self.revision)
+        with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(configure(receipt)['readiness'], 'usage_limited')
+        self.assertIn('native.model (quota_exhausted)', stderr.getvalue())
+        for unreadable in (dict(receipt, unverified=[]),
+                           dict(receipt, unverified=[dict(runtime_id='other.model', code='quota_exhausted')]),
+                           dict(receipt, unverified=[dict(runtime_id='native.model')]),
+                           dict(receipt, readiness='verified')):
+            with self.assertRaises(SETUP.SetupError):
+                configure(unreadable)
+        with self.assertRaises(SETUP.SetupError):
+            configure(receipt, verify=False)
+
+    def test_partly_checked_receipt_names_what_was_not_checked_again(self):
+        # A save that left a bound runtime uncalled is neither verified nor
+        # usage-limited. The receipt says which, and a verified receipt that
+        # carries the same list is refused instead of read as a full check.
+        receipt = dict(runtime_id='native.model', runtime_ids=['native.model'], configured=True, commit=dict(durability='durable', warnings=[]), validation='passed',
+                       readiness='partly_checked', unverified=[], not_rechecked=['native.model'])
+        def configure(answer, verify=True):
+            with patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                    patch.object(SETUP, 'native_setup_command', return_value=answer):
+                return SETUP.configure_many('/fixture/masc', self.base, [spec()], verify=verify,
+                                            expected_revision=self.revision)
+        with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(configure(receipt)['readiness'], 'partly_checked')
+        self.assertIn('Saved without checking these again: native.model', stderr.getvalue())
+        limited = dict(receipt, unverified=[dict(runtime_id='native.model', code='quota_exhausted')])
+        with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            self.assertEqual(configure(limited)['readiness'], 'partly_checked')
+        self.assertIn('native.model (quota_exhausted)', stderr.getvalue())
+        for unreadable in (dict(receipt, not_rechecked=[]),
+                           dict(receipt, not_rechecked=['other.model']),
+                           dict(receipt, unverified=[dict(runtime_id='other.model', code='quota_exhausted')]),
+                           dict(receipt, readiness='verified'),
+                           dict(receipt, readiness='verified', unverified=None)):
+            with self.assertRaises(SETUP.SetupError):
+                configure(unreadable)
+        with self.assertRaises(SETUP.SetupError):
+            configure(receipt, verify=False)
+
+    def test_lost_commit_receipt_does_not_delete_selected_credentials(self):
+        key = self.base / 'pending-key'
+        key.write_text('fixture-only-private-key')
+        key.chmod(0o600)
+        selected = dict(spec(), credential_file=str(key))
+        with SETUP.PendingCredentials('/fixture/masc') as credentials, \
+                patch.object(SETUP, 'render', return_value=('native.model', b'', b'')), \
+                patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[], setup_revision=self.revision)), \
+                patch.object(SETUP, 'select_connections', return_value=(['native.model'], [selected], {'native.model':'Selected model'})), \
+                patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
+                patch.object(SETUP, 'configure_many', side_effect=SETUP.SetupError('receipt lost')), \
+                contextlib.redirect_stderr(io.StringIO()):
+            credentials.register_account_reference(str(key))
+            SETUP.wizard_with_credentials('/fixture/masc', self.base, 10, credentials)
+        self.assertTrue(key.exists())
+
+
+class CodexExplicitRefresh(unittest.TestCase):
+    def test_refresh_bypasses_cached_discovery_and_keeps_exact_context(self):
+        source = dict(choice='codex', command='/owned/codex', endpoint='', api_key_env='', rows=[])
+        receipt = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache',
+                       models=[dict(id='new-model', label='New model', context=272000, is_default=True,
+                                    supported_reasoning_efforts=['low', 'ultra', 'future-effort'],
+                                    default_reasoning_effort='future-effort')])
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
+                patch.object(SETUP, 'catalog_models', return_value=[]):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
+        self.assertEqual(rows[0]['context'], 272000)
+        self.assertEqual(rows[0]['supported_reasoning_efforts'], ['low', 'ultra', 'future-effort'])
+        self.assertEqual(rows[0]['default_reasoning_effort'], 'future-effort')
+        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models', '--cli-path', '/owned/codex'])
+        self.assertIn('refreshed', origin)
+
+    def test_private_inventory_account_reaches_terminal_refresh(self):
+        for bound in (False, True):
+            with self.subTest(bound=bound):
+                row = dict(id='selected.fixture', provider_id='selected', display_name='Codex selected',
+                           protocol='codex-app-server', command='/owned/codex', account_home='/selected/home',
+                           model='fixture', max_context=4096, tools=True, streaming=True)
+                integration = dict(id='selected', display_name='Codex selected', protocol='codex-app-server',
+                                   command='/owned/codex', account_home='/selected/home',
+                                   origin='runtime_config', setup_support='existing_binding')
+                with patch.object(SETUP, 'official_client_path', return_value=None):
+                    sources = SETUP.connection_sources('/owned/masc',
+                        dict(runtimes=[row] if bound else [], integrations=[integration]))
+                selected = next(s for s in sources if s['provider_id'] == 'selected')
+                receipt = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache', models=[])
+                with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run:
+                    SETUP.refresh_codex_models('/owned/masc', selected)
+                self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models',
+                    '--cli-path', '/owned/codex', '--account-home', '/selected/home'])
+
+    def test_unavailable_refresh_is_labeled_offline_fallback(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[])
+        with patch.object(SETUP, 'refresh_codex_models', side_effect=SETUP.SetupError('Online unavailable; cached fallback.')), \
+                patch.object(SETUP, 'catalog_models', return_value=[dict(id='cached', label='Cached', context=123)]):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
+        self.assertEqual(rows[0]['id'], 'cached')
+        self.assertIn('cached fallback', origin)
+
+    def test_new_codex_model_spec_preserves_selected_account_home(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='',
+                      rows=[], account_home='/selected/home')
+        with patch.object(SETUP, 'render', return_value=('codex.new-model', b'')) as renderer:
+            _, selected = SETUP.resolve_model_spec(
+                source, dict(id='new-model', context=8192,
+                             supported_reasoning_efforts=['low', 'future-effort'],
+                             default_reasoning_effort='future-effort'), 10)
+        self.assertEqual(selected['account_home'], '/selected/home')
+        self.assertNotIn('reasoning_effort', selected,
+                         'advertised client default stays informational, not an explicit runtime control')
+        self.assertEqual(renderer.call_args.args[0]['account_home'], '/selected/home')
+
+    def test_new_codex_model_spec_omits_undeclared_account_home(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[])
+        with patch.object(SETUP, 'render', return_value=('codex.new-model', b'')):
+            _, selected = SETUP.resolve_model_spec(
+                source, dict(id='new-model', context=8192), 10)
+        self.assertNotIn('account_home', selected)
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_native_refresh_has_no_old_cache_or_turn_and_preserves_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            ambient = home / '.codex'
+            ambient.mkdir()
+            (ambient / 'auth.json').write_text('{"fixture":"wrong-ambient"}')
+            ambient_before = {p.name: p.read_bytes() for p in ambient.iterdir()}
+            original = home / 'selected-codex'
+            original.mkdir()
+            (original / 'auth.json').write_text('{"fixture":"private"}')
+            (original / 'auth.json').chmod(0o600)
+            (original / 'models_cache.json').write_text('{"models":[{"slug":"stale","context_window":1}]}')
+            before = {p.name: p.read_bytes() for p in original.iterdir()}
+            client = home / 'fake-codex'
+            client.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+home = pathlib.Path(os.environ['CODEX_HOME'])
+assert home != pathlib.Path(os.environ['HOME']) / '.codex'
+assert json.loads((home / 'auth.json').read_text()) == {'fixture': 'private'}
+assert not (home / 'models_cache.json').exists()
+requests = pathlib.Path(sys.argv[0]).with_suffix('.requests.jsonl')
+for line in sys.stdin:
+    request = json.loads(line)
+    with requests.open('a') as out:
+        out.write(json.dumps(request) + '\\n')
+    method = request['method']
+    if method == 'initialized': continue
+    if method == 'initialize': result = {'userAgent':'fixture/1'}
+    elif method == 'account/read': result = {'account':{'type':'apiKey'}, 'requiresOpenaiAuth':True}
+    elif method == 'model/list':
+        (home / 'models_cache.json').write_text(json.dumps({'models':[{'slug':'fresh-model','context_window':272000}]}))
+        result = {'data':[{'id':'ui-id','model':'fresh-model','displayName':'Fresh model','isDefault':True,
+            'supportedReasoningEfforts':[
+                {'reasoningEffort':'low', 'description':'Fast responses'},
+                {'reasoningEffort':'ultra', 'description':'Automatic task delegation'},
+                {'reasoningEffort':'future-effort', 'description':'New account-specific level'}],
+            'defaultReasoningEffort':'future-effort'}], 'nextCursor':None}
+    else: raise AssertionError('unexpected operation ' + method)
+    print(json.dumps({'id':request['id'],'result':result}), flush=True)
+''')
+            client.chmod(0o700)
+            assert BINARY is not None
+            result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', str(client), '--account-home', str(original)],
+                env=dict(os.environ, HOME=str(home), CODEX_HOME=str(ambient)), capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertEqual(receipt['source'], 'isolated_cli_cache')
+            self.assertEqual(receipt['models'][0]['id'], 'fresh-model')
+            self.assertEqual(receipt['models'][0]['context'], 272000)
+            self.assertEqual(receipt['models'][0]['supported_reasoning_efforts'],
+                             ['low', 'ultra', 'future-effort'])
+            self.assertEqual(receipt['models'][0]['default_reasoning_effort'], 'future-effort')
+            self.assertFalse(receipt['account_availability_verified'])
+            requests = [json.loads(line) for line in client.with_suffix('.requests.jsonl').read_text().splitlines()]
+            self.assertEqual([request['method'] for request in requests],
+                             ['initialize', 'initialized', 'account/read', 'model/list'])
+            self.assertEqual(before, {p.name: p.read_bytes() for p in original.iterdir()})
+            self.assertEqual(ambient_before, {p.name: p.read_bytes() for p in ambient.iterdir()})
+            self.assertNotIn('private', result.stdout)
+
+
+class SelectedNativeAccounts(unittest.TestCase):
+    def test_muse_client_selection_uses_registered_name(self):
+        receipt = json.dumps(dict(schema='masc.runtime_client_path.v1', path='/owned/muse'))
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, receipt, '')) as run:
+            self.assertEqual(SETUP.official_client_path('/masc', 'muse', 'muse'), '/owned/muse')
+        self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-client-path', '--client', 'muse-code', '--command', 'muse'])
+
+    def test_configured_home_remains_default_and_can_be_changed(self):
+        for choice in ['claude_code', 'codex', 'muse']:
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as home:
+                configured = Path(home) / 'configured'
+                alternate = Path(home) / 'alternate'
+                configured.mkdir()
+                source = dict(choice=choice, account_home=str(configured), label=choice)
+                with patch.object(SETUP, 'pick', return_value=[0]) as pick:
+                    self.assertEqual(SETUP.select_native_account(source), source)
+                self.assertIn(str(configured), pick.call_args.args[1][0])
+                with patch.object(SETUP, 'pick', return_value=[1]), \
+                     patch.object(SETUP, 'ask_text', return_value=str(alternate)):
+                    changed = SETUP.select_native_account(source)
+                self.assertEqual(changed['account_home'], str(alternate))
+                self.assertTrue(changed['credential_replaced'])
+                self.assertEqual(source['account_home'], str(configured))
+
+    def test_new_account_requires_explicit_selection(self):
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, {'HOME': home}), patch.object(SETUP, 'pick', return_value=[0]) as pick:
+                selected = SETUP.select_native_account(dict(choice='muse', label='Muse'))
+            pick.assert_called_once()
+            self.assertEqual(selected['account_home'], home)
+            self.assertNotIn('credential_replaced', selected)
+
+    def test_effective_default_account_reuses_existing_model_settings(self):
+        for choice, variable, leaf in [('claude_code', 'CLAUDE_CONFIG_DIR', '.claude'),
+                                       ('codex', 'CODEX_HOME', '.codex'),
+                                       ('muse', None, '')]:
+            for override in [False, True] if variable else [False]:
+                for alternate in [False, True]:
+                    with self.subTest(choice=choice, override=override, alternate=alternate), tempfile.TemporaryDirectory() as home:
+                        effective = str(Path(home) / ('override' if override else leaf))
+                        env = {'HOME': home, 'CLAUDE_CONFIG_DIR': '', 'CODEX_HOME': ''}
+                        if variable and override:
+                            env[variable] = effective
+                        existing = dict(id='kept.binding', model='reported', max_context=8192, tools=True)
+                        source = dict(choice=choice, label=choice, rows=[existing])
+                        observed = [dict(id='reported', label='Reported', context=8192)]
+                        with patch.dict(os.environ, env), patch.object(SETUP, 'pick', return_value=[int(alternate)]), \
+                             patch.object(SETUP, 'ask_text', return_value=str(Path(home) / 'another')):
+                            selected = SETUP.select_native_account(source)
+                        with patch.object(SETUP, 'catalog_models', return_value=observed), \
+                             patch.object(SETUP, 'muse_models', return_value=(observed, 'native')):
+                            models, _ = SETUP.source_models('/masc', selected, 10)
+                        self.assertEqual(len(models), 1)
+                        if alternate:
+                            self.assertTrue(selected['credential_replaced'])
+                            self.assertIsNone(models[0]['existing'])
+                        else:
+                            self.assertEqual(selected['account_home'], effective)
+                            self.assertNotIn('credential_replaced', selected)
+                            self.assertEqual(models[0]['existing']['max_context'], 8192)
+                            self.assertEqual(SETUP.resolve_model_spec(selected, models[0], 10),
+                                             ('kept.binding', None))
+                        self.assertEqual(source['rows'], [existing])
+
+    def test_first_login_prepares_private_selected_account_directories(self):
+        for choice, variable, leaf in [('claude_code', 'CLAUDE_CONFIG_DIR', '.claude'),
+                                       ('codex', 'CODEX_HOME', '.codex')]:
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as home:
+                with patch.dict(os.environ, {'HOME': home, variable: ''}), patch.object(SETUP, 'pick', return_value=[0]):
+                    selected = SETUP.select_native_account(dict(choice=choice, label=choice))
+                account = Path(home) / leaf
+                self.assertEqual(selected['account_home'], str(account))
+                self.assertEqual(account.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(list(account.iterdir()), [])
+
+    def test_account_selection_refuses_an_existing_file(self):
+        with tempfile.TemporaryDirectory() as home:
+            path = Path(home) / 'account'
+            path.write_text('keep this file')
+            with patch.object(SETUP, 'pick', return_value=[1]), patch.object(SETUP, 'ask_text', return_value=str(path)):
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.select_native_account(dict(choice='codex', label='Codex'))
+            self.assertEqual(path.read_text(), 'keep this file')
+
+    def test_muse_catalog_source_is_not_account_verification(self):
+        source = dict(choice='muse', command='/owned/muse', account_home='/selected', rows=[])
+        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                       invocation_verified=False, account_availability_verified=False,
+                       models=[dict(id='reported', label='Reported', context=8192),
+                               dict(id='unknown', label='Unknown', context=None)])
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run:
+            rows, origin = SETUP.muse_models('/owned/masc', source, 7.5)
+        self.assertEqual(rows[1]['context'], None)
+        self.assertIn('not yet verified', origin)
+        self.assertEqual(run.call_args.args[0][-4:], ['--account-home', '/selected', '--timeout-s', '7.5'])
+        for catalog_source in ['fakeCatalog', 'unresolvedCatalog', 'futureCatalog']:
+            with self.subTest(source=catalog_source), patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(dict(receipt, source=catalog_source)), '')):
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.muse_models('/owned/masc', source, 7.5)
+
+    def test_non_object_native_catalogs_report_retryable_setup_errors(self):
+        source = dict(command='/owned/client', account_home='/selected')
+        for payload in [None, [], True, 3, 'invalid']:
+            for discover in [SETUP.muse_models, SETUP.refresh_codex_models]:
+                with self.subTest(payload=payload, discover=discover.__name__), patch.object(
+                        SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), '')):
+                    with self.assertRaises(SETUP.SetupError):
+                        discover('/masc', source, *([10] if discover is SETUP.muse_models else []))
+
+    def test_reselected_account_does_not_inherit_prior_membership_or_context(self):
+        source = dict(choice='codex', command='codex', account_home='/selected', credential_replaced=True,
+                      rows=[dict(id='prior.shared', model='shared', max_context=999999, tools=True),
+                            dict(id='prior.absent', model='absent', max_context=999999, tools=True)])
+        with patch.object(SETUP, 'catalog_models', return_value=[dict(id='shared', label='Shared', context=None)]):
+            rows, _ = SETUP.source_models('/masc', source, 10)
+        self.assertEqual([row['id'] for row in rows], ['shared'])
+        self.assertIsNone(rows[0]['context'])
+        self.assertIsNone(rows[0]['existing'])
+
+    def test_muse_selection_only_offers_admissible_catalog_models(self):
+        source = dict(choice='muse', command='muse', account_home='/selected', label='Muse', rows=[])
+        model = dict(id='reported', label='Reported', context=8192)
+        with patch.object(SETUP, 'connection_sources', return_value=[source]), \
+             patch.object(SETUP, 'pick_connection_sources', return_value=([source], [0])), \
+             patch.object(SETUP, 'prepare_connection', return_value=source), \
+             patch.object(SETUP, 'source_models', return_value=([model], 'providerCatalog')), \
+             patch.object(SETUP, 'pick', return_value=[0]) as pick, \
+             patch.object(SETUP, 'resolve_model_spec', return_value=('muse.reported', dict(model='reported'))) as resolve:
+            selected, specs, _ = SETUP.select_connections('/masc', {}, 10)
+        labels = pick.call_args.args[1]
+        self.assertNotIn('Advanced: enter an exact model ID', labels)
+        self.assertEqual(labels[-2:], ['Refresh model list', 'Back to connection selection'])
+        self.assertEqual(selected, ['muse.reported'])
+        self.assertEqual(specs, [dict(model='reported')])
+        self.assertEqual(resolve.call_args.args[1]['context'], 8192)
+
+    def test_muse_discovery_offers_selected_signin_before_catalog(self):
+        source = dict(choice='muse', command='/selected/muse', account_home='/selected/account')
+        catalog = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                       invocation_verified=False, account_availability_verified=False,
+                       models=[dict(id='reported', label='Reported', context=8192)])
+        replies = [subprocess.CompletedProcess([], 3, '', 'opaque diagnostic'),
+                   subprocess.CompletedProcess([], 0),
+                   subprocess.CompletedProcess([], 0, json.dumps(catalog), '')]
+        with patch.dict(os.environ, {'HOME': '/ambient', 'XDG_CONFIG_HOME': '/ambient/config'}), \
+             patch.object(SETUP, 'pick', return_value=[0]) as pick, \
+             patch.object(SETUP.subprocess, 'run', side_effect=replies) as run:
+            rows, origin = SETUP.muse_models('/masc', source, 7.5)
+        pick.assert_called_once()
+        self.assertEqual(rows[0]['id'], 'reported')
+        self.assertIn('not yet verified', origin)
+        # masc runs the sign-in so the child gets the Muse login environment;
+        # the masc process itself keeps the caller's HOME.
+        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                         '--cli-path', '/selected/muse', '--account-home', '/selected/account'])
+        self.assertNotIn('env', run.call_args_list[1].kwargs)
+        self.assertEqual(run.call_args_list[0].args, run.call_args_list[2].args)
+
+    def test_muse_discovery_cancel_and_failed_signin_do_not_continue(self):
+        source = dict(choice='muse', command='/selected/muse', account_home='/selected/account')
+        for action, login_status, calls in [(1, 0, 1), (0, 1, 2)]:
+            replies = [subprocess.CompletedProcess([], 3, '', ''), subprocess.CompletedProcess([], login_status)]
+            with self.subTest(action=action), patch.object(SETUP, 'pick', return_value=[action]), \
+                 patch.object(SETUP.subprocess, 'run', side_effect=replies) as run:
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.muse_models('/masc', source, 10)
+                self.assertEqual(run.call_count, calls)
+
+    def test_muse_general_discovery_failure_does_not_request_signin(self):
+        source = dict(choice='muse', account_home='/selected/account')
+        with patch.object(SETUP, 'pick', side_effect=AssertionError('not an authentication failure')), \
+             patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'login required')):
+            with self.assertRaises(SETUP.SetupError):
+                SETUP.muse_models('/masc', source, 10)
+
+    def test_select_model_muse_uses_selected_native_account(self):
+        source = dict(choice='muse', command='muse', label='Muse Code', account_home='/selected')
+        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                       invocation_verified=False, account_availability_verified=False,
+                       models=[dict(id='reported', label='Reported', context=8192)])
+        output = io.StringIO()
+        with patch.object(SETUP, 'select_native_account', return_value=source) as select_account, \
+             patch.object(SETUP, 'official_client_path', return_value='/owned/muse') as resolve, \
+             patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
+             patch.object(SETUP, 'native_discover_models', side_effect=AssertionError('Muse is not HTTP discovery')), \
+             patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(output):
+            self.assertEqual(SETUP.select_model('/masc', 'muse', timeout=7.5),
+                             dict(model='reported', max_context=8192, account_home='/selected', command='/owned/muse'))
+        select_account.assert_called_once()
+        resolve.assert_called_once_with('/masc', 'muse', 'muse')
+        self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-muse-models', '--cli-path', '/owned/muse',
+                                                '--account-home', '/selected', '--timeout-s', '7.5'])
+        self.assertIn('providerCatalog', output.getvalue())
+        self.assertIn('not yet verified', output.getvalue())
+
+    def test_standalone_muse_rejects_unlisted_id_and_requires_reported_context(self):
+        source = dict(choice='muse', command='muse', account_home='/selected')
+        for answer in ['1', 'reported']:
+            with self.subTest(answer=answer), \
+                 patch.object(SETUP, 'select_native_account', return_value=source), \
+                 patch.object(SETUP, 'official_client_path', return_value='/owned/muse'), \
+                 patch.object(SETUP, 'muse_models', return_value=([dict(id='reported', label='Reported', context=8192)], 'providerCatalog')), \
+                 patch.object(SETUP.sys, 'stdin', io.StringIO('unlisted\n' + answer + '\n')), \
+                 contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertEqual(SETUP.select_model('/masc', 'muse'),
+                                 dict(model='reported', max_context=8192, account_home='/selected', command='/owned/muse'))
+                self.assertIn('Choose a model reported', output.getvalue())
+        for context in [None, 0, True, -1]:
+            with self.subTest(context=context), \
+                 patch.object(SETUP, 'select_native_account', return_value=source), \
+                 patch.object(SETUP, 'official_client_path', return_value='/owned/muse'), \
+                 patch.object(SETUP, 'muse_models', return_value=([dict(id='reported', label='Reported', context=context)], 'providerCatalog')), \
+                 patch.object(SETUP.sys, 'stdin', io.StringIO('reported\n999999\n')), \
+                 contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+                SETUP.select_model('/masc', 'muse')
+        with patch.object(SETUP, 'select_native_account', return_value=source), \
+             patch.object(SETUP, 'official_client_path', return_value='/owned/muse'), \
+             patch.object(SETUP, 'muse_models', return_value=([], 'providerCatalog')), \
+             contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+            SETUP.select_model('/masc', 'muse')
+
+    def test_standalone_muse_login_uses_resolved_cli_and_returns_selected_account(self):
+        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                       invocation_verified=False, account_availability_verified=False,
+                       models=[dict(id='reported', label='Reported', context=8192)])
+        with tempfile.TemporaryDirectory() as root:
+            home = str(Path(root) / 'alternate-account')
+            completed = [subprocess.CompletedProcess([], 3, '', 'auth required'),
+                         subprocess.CompletedProcess([], 0, '', ''),
+                         subprocess.CompletedProcess([], 0, json.dumps(receipt), '')]
+            with patch.object(SETUP, 'pick', side_effect=[[1], [0]]), \
+                 patch.object(SETUP, 'ask_text', return_value=home), \
+                 patch.object(SETUP, 'official_client_path', return_value='/vendor/bin/muse') as locate, \
+                 patch.object(SETUP.subprocess, 'run', side_effect=completed) as run, \
+                 patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+                selected = SETUP.select_model('/masc', 'muse')
+            locate.assert_called_once_with('/masc', 'muse', 'muse')
+            self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                             '--cli-path', '/vendor/bin/muse', '--account-home', home])
+            self.assertEqual(selected, dict(model='reported', max_context=8192,
+                                           account_home=home, command='/vendor/bin/muse'))
+
+    def test_standalone_muse_signin_uses_resolved_client(self):
+        source = dict(choice='muse', command='muse', label='Muse Code', account_home='/selected')
+        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                       invocation_verified=False, account_availability_verified=False,
+                       models=[dict(id='reported', label='Reported', context=8192)])
+        replies = [subprocess.CompletedProcess([], 3, '', ''),
+                   subprocess.CompletedProcess([], 0),
+                   subprocess.CompletedProcess([], 0, json.dumps(receipt), '')]
+        with patch.object(SETUP, 'select_native_account', return_value=dict(source)), \
+             patch.object(SETUP, 'official_client_path', return_value='/owned/muse'), \
+             patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+             patch.object(SETUP, 'pick', return_value=[0]), \
+             patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_model('/masc', 'muse')['account_home'], '/selected')
+        self.assertEqual(run.call_args_list[0].args[0][3], '/owned/muse')
+        self.assertEqual(run.call_args_list[1].args[0], ['/masc', 'runtime-account-login', '--client', 'muse',
+                                                         '--cli-path', '/owned/muse', '--account-home', '/selected'])
+        with patch.object(SETUP, 'select_native_account', return_value=dict(source)), \
+             patch.object(SETUP, 'official_client_path', return_value=None), \
+             patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SETUP.SetupError):
+                SETUP.select_model('/masc', 'muse')
+
+    def test_native_catalog_rows_must_carry_a_context_member(self):
+        muse = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                    invocation_verified=False, account_availability_verified=False,
+                    models=[dict(id='reported', label='Reported')])
+        codex = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache',
+                     models=[dict(id='reported', label='Reported')])
+        for discover, payload in [(SETUP.muse_models, muse), (SETUP.refresh_codex_models, codex)]:
+            with self.subTest(discover=discover.__name__), patch.object(
+                    SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), '')):
+                with self.assertRaises(SETUP.SetupError):
+                    discover('/masc', dict(command='/owned/client', account_home='/selected'),
+                             *([10] if discover is SETUP.muse_models else []))
+        present = dict(id='reported', label='Reported', context=None)
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                [], 0, json.dumps(dict(muse, models=[present])), '')):
+            rows, _ = SETUP.muse_models('/masc', dict(command='/owned/client', account_home='/selected'), 10)
+        self.assertIn('context', rows[0])
+
+    def test_account_default_is_unavailable_without_home(self):
+        for choice, variable in [('claude_code', 'CLAUDE_CONFIG_DIR'), ('codex', 'CODEX_HOME'), ('muse', '')]:
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as home:
+                alternative = Path(home) / 'explicit'
+                environment = {'HOME': '/unused'}
+                if variable:
+                    environment[variable] = ''
+                with patch.dict(os.environ, environment):
+                    del os.environ['HOME']
+                    with patch.object(SETUP, 'pick', side_effect=AssertionError('no default to offer')) as pick, \
+                         patch.object(SETUP, 'ask_text', return_value=str(alternative)) as ask:
+                        selected = SETUP.select_native_account(dict(choice=choice, label=choice))
+                pick.assert_not_called()
+                ask.assert_called_once()
+                self.assertEqual(selected['account_home'], str(alternative))
+                self.assertTrue(alternative.is_dir())
+        with tempfile.TemporaryDirectory() as home:
+            configured = Path(home) / 'configured'
+            configured.mkdir()
+            with patch.dict(os.environ, {'HOME': '/unused'}):
+                del os.environ['HOME']
+                with patch.object(SETUP, 'pick', return_value=[0]) as pick:
+                    selected = SETUP.select_native_account(dict(choice='codex', label='Codex',
+                                                                account_home=str(configured)))
+            pick.assert_called_once()
+            self.assertEqual(selected['account_home'], str(configured))
+            self.assertNotIn('credential_replaced', selected)
+
+    def test_new_muse_binding_uses_observed_context_not_declared_context(self):
+        for tools in [False, True]:
+            for observed in [[], [dict(id='reported', label='Reported', context=None)],
+                             [dict(id='reported', label='Reported', context=8192)]]:
+                with self.subTest(tools=tools, observed=observed):
+                    existing = dict(id='muse.existing', model='reported', tools=tools, max_context=999999)
+                    source = dict(choice='muse', command='muse', account_home='/selected', rows=[existing])
+                    with patch.object(SETUP, 'muse_models', return_value=(observed, 'providerCatalog')):
+                        rows, _ = SETUP.source_models('/masc', source, 10)
+                    self.assertEqual(len(rows), 1)
+                    context = observed[0]['context'] if observed else None
+                    self.assertEqual(rows[0]['context'], context)
+                    with patch.object(SETUP, 'render', return_value=('muse.new', 'toml')) as render, \
+                         patch.object(SETUP, 'ask_text', return_value='32768'):
+                        if tools:
+                            self.assertEqual(SETUP.resolve_model_spec(source, rows[0], 10), ('muse.existing', None))
+                            render.assert_not_called()
+                        elif context is None:
+                            with self.assertRaises(SETUP.SetupError):
+                                SETUP.resolve_model_spec(source, rows[0], 10)
+                            render.assert_not_called()
+                        else:
+                            _, spec = SETUP.resolve_model_spec(source, rows[0], 10)
+                            self.assertEqual(spec['max_context'], 8192)
+
+    def test_existing_muse_binding_is_reused_without_a_byte_capacity(self):
+        source = dict(choice='muse')
+        existing = dict(id='muse.selected', tools=True)
+        with patch.object(SETUP, 'render', side_effect=AssertionError('preserve existing configuration')):
+            self.assertEqual(SETUP.resolve_model_spec(source, dict(existing=existing), 10), ('muse.selected', None))
+
+    def test_muse_asks_no_byte_budget_and_unknown_context_refused(self):
+        source = dict(choice='muse', command='muse', account_home='/selected', rows=[])
+        with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no operator byte budget')), patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
+            _, spec = SETUP.resolve_model_spec(source, dict(id='selected', context=8192), 10)
+        self.assertEqual(spec['account_home'], '/selected')
+        with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no invented context')):
+            with self.assertRaises(SETUP.SetupError):
+                SETUP.resolve_model_spec(source, dict(id='unknown', context=None), 10)
+
+    def test_declared_account_sign_in_is_run_by_masc(self):
+        # runtime-account-login builds the child's environment (test_setup_cli
+        # checks it); the wizard passes no environment of its own.
+        for protocol, client, command in [('codex-app-server', 'codex', 'codex'),
+                                          ('claude-code', 'claude', 'claude'),
+                                          ('muse-serve', 'muse', 'muse')]:
+            with self.subTest(protocol=protocol):
+                inventory = dict(runtimes=[dict(id='selected', protocol=protocol,
+                    command=command, account_home='/selected/account')])
+                self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory),
+                                 ['/masc', 'runtime-account-login', '--client', client, '--cli-path', command,
+                                  '--account-home', '/selected/account'])
+
+    def test_inherited_home_sign_in_runs_the_client_on_the_callers_home(self):
+        for protocol, command in [('codex-app-server', ['codex', 'login', '--device-auth']),
+                                  ('claude-code', ['claude', 'auth', 'login'])]:
+            with self.subTest(protocol=protocol):
+                inventory = dict(runtimes=[dict(id='selected', protocol=protocol, command=command[0])])
+                self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory), command)
+        without_home = dict(runtimes=[dict(id='selected', protocol='muse-serve', command='muse')])
+        self.assertIsNone(SETUP.login_command('/masc', 'selected', [], without_home))
+
+
+class ModelReleaseSelection(unittest.TestCase):
+    def test_discovery_release_join_keeps_context_and_unknown_models(self):
+        recent = dict(status='official_release', kind='general_availability',
+                      released_on='2026-07-09', recency='within_three_calendar_months',
+                      source_url='https://official.example/release')
+        release_catalog = dict(schema='masc.model_release_catalog.v1', models=[
+            dict(publisher='openai', model_id='exact-recent', release=recent),
+            dict(publisher='anthropic', model_id='other-publisher', release=recent)])
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[],
+                      model_release_catalog=release_catalog)
+        observed = [dict(id='unknown', label='Unknown', context=272000, created=9999999999),
+                    dict(id='exact-recent', label='Recent', context=272000),
+                    dict(id='exact-recent-alias', label='Unproven alias', context=1000),
+                    dict(id='other-publisher', label='Other publisher', context=2000)]
+        with patch.object(SETUP, 'catalog_models', return_value=observed):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10)
+        self.assertEqual(rows[0]['id'], 'exact-recent')
+        self.assertEqual(rows[0]['context'], 272000)
+        self.assertEqual(len(rows), 4)
+        self.assertIn('recent release', SETUP.model_choice_label(rows[0]))
+        for row in rows[1:]:
+            self.assertIsNone(row['release'])
+            self.assertIn('release date unknown', SETUP.model_choice_label(row))
+        self.assertIn('model catalog', origin)
+        # An explicit gateway is not an official publisher identity.
+        self.assertIsNone(SETUP.release_metadata(dict(source, endpoint='https://gateway.example'), 'exact-recent'))
+
+    def test_limited_release_is_visible_without_general_release_recommendation(self):
+        row = dict(id='limited', label='Limited', release=dict(status='official_release',
+            kind='limited_release', released_on='2026-09-03', recency='within_three_calendar_months'))
+        self.assertFalse(SETUP.recently_released(row))
+        self.assertIn('limited release 2026-09-03', SETUP.model_choice_label(row))
+
+
+class NamedCatalogSources(unittest.TestCase):
+    INVENTORY = {'runtimes': [], 'integrations': [
+        {'id': 'openrouter', 'display_name': 'openrouter', 'protocol': 'openai-compatible-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://openrouter.ai/api/v1',
+         'api_key_env': 'OPENROUTER_API_KEY', 'provider_kind': 'openai_compat'},
+        {'id': 'already', 'display_name': 'already', 'protocol': 'openai-compatible-http',
+         'origin': 'runtime_config', 'setup_support': 'existing_binding',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
+         'api_key_env': 'ALREADY_API_KEY'},
+        {'id': 'wrongwire', 'display_name': 'wrongwire', 'protocol': 'messages-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test',
+         'api_key_env': 'EXAMPLE_API_KEY'},
+        {'id': 'nokey', 'display_name': 'nokey', 'protocol': 'openai-compatible-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
+         'api_key_env': ''},
+    ]}
+
+    def catalog_sources(self, inventory):
+        with patch.object(SETUP, 'official_client_path', return_value=None):
+            sources = SETUP.connection_sources('/fixture', inventory)
+        return [source for source in sources if source.get('catalog_provider')]
+
+    def test_unconfigured_catalog_integrations_become_named_sources(self):
+        sources = self.catalog_sources(self.INVENTORY)
+        self.assertEqual([source['provider_id'] for source in sources], ['openrouter'])
+        source = sources[0]
+        self.assertEqual(source['choice'], 'openai_compatible')
+        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(source['api_key_env'], 'OPENROUTER_API_KEY')
+        self.assertEqual(source['credential_kind'], 'env')
+        self.assertEqual(source['rows'], [])
+
+    def test_an_older_binary_without_integrations_yields_no_catalog_sources(self):
+        self.assertEqual(self.catalog_sources({'runtimes': []}), [])
+
+    def test_render_skips_the_provider_section_the_workspace_config_declares(self):
+        _, runtime = SETUP.render(dict(named_spec('z-ai/glm-5.3'), provider_declared=True,
+                                      reasoning_effort=None))
+        self.assertNotIn(b'"providers"', runtime)
+        self.assertNotIn(b'reasoning-effort', runtime)
+        self.assertNotIn(b'wizard-default', runtime)
+
+    def test_resolve_rejects_a_served_id_the_catalog_does_not_curate(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.resolve_model_spec(source, dict(id='vendor/uncurated', label='x', context=None, existing=None), 1)
+
+    def test_resolve_rejects_a_catalog_row_without_tool_support(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = {'id': 'google/gemma3-4b', 'label': 'google/gemma3-4b', 'max_context': 1000000,
+                   'accepted_reasoning_efforts': None, 'supports_tools': False, 'supports_streaming': True}
+        with self.assertRaises(SETUP.SetupError) as raised:
+            SETUP.resolve_model_spec(source, dict(id=catalog['id'], label='x', context=None,
+                                                  existing=None, catalog=catalog), 1)
+        self.assertIn('tool support', str(raised.exception))
+
+    def test_a_failed_catalog_read_is_an_error_not_an_empty_list(self):
+        failure = subprocess.CompletedProcess([], 1, '', 'provider listing exploded')
+        with patch('subprocess.run', return_value=failure):
+            with self.assertRaises(SETUP.SetupError) as raised:
+                SETUP.provider_catalog_models('binary', 'openrouter')
+        self.assertIn('provider listing exploded', str(raised.exception))
+
+    def test_resolve_builds_a_named_spec_from_the_catalog_row(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = {'id': 'anthropic/claude-opus-5', 'label': 'anthropic/claude-opus-5', 'max_context': 1000000,
+                   'accepted_reasoning_efforts': ['none', 'high'], 'default_reasoning_effort': 'high',
+                   'supports_tools': True, 'supports_streaming': True}
+        runtime_id, spec = SETUP.resolve_model_spec(
+            source, dict(id=catalog['id'], label='x', context=None, existing=None, catalog=catalog), 1)
+        self.assertEqual(runtime_id, 'openrouter.openrouter-anthropic-claude-opus-5')
+        self.assertEqual(spec['max_context'], 1000000)
+        self.assertTrue(spec['tools'])
+        self.assertEqual(spec['reasoning_effort'], 'high')
+
+    def test_source_models_leads_with_curated_rows_and_keeps_discovery_extras(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog_rows = [
+            {'id': 'anthropic/claude-opus-5', 'label': 'anthropic/claude-opus-5', 'max_context': 1000000,
+             'accepted_reasoning_efforts': ['none', 'high'], 'default_reasoning_effort': 'high',
+             'supports_tools': True, 'supports_streaming': True},
+        ]
+        with patch.object(SETUP, 'provider_catalog_models', return_value=catalog_rows), \
+             patch.object(SETUP, 'native_discover_models', return_value=(
+                 [dict(id='anthropic/claude-opus-5', label='claude opus', context=99,
+                       supported_reasoning_efforts=['high', 'future-effort'],
+                       default_reasoning_effort='future-effort'),
+                  dict(id='vendor/uncurated', label='uncurated', context=7)],
+                 'Current account/server model list')):
+            rows, origin = SETUP.source_models('binary', source, 1)
+        self.assertEqual(rows[0]['id'], 'anthropic/claude-opus-5')
+        self.assertEqual(rows[0]['context'], 99)
+        self.assertEqual(rows[0]['supported_reasoning_efforts'], ['high', 'future-effort'])
+        self.assertEqual(rows[0]['default_reasoning_effort'], 'future-effort')
+        self.assertEqual(rows[0]['label'], 'anthropic/claude-opus-5')
+        self.assertEqual(rows[0]['catalog']['default_reasoning_effort'], 'high')
+        self.assertEqual(rows[0]['catalog'], catalog_rows[0])
+        self.assertEqual(rows[1]['id'], 'vendor/uncurated')
+        self.assertNotIn('catalog', rows[1])
+
+    # test_discovery_reads_openrouters_context_length_field moved to the OCaml
+    # discovery suite (test/test_runtime_model_discovery.py): wire parsing of
+    # context_length/max_model_len belongs to the native runtime now.
+class MultipleSelection(unittest.TestCase):
+    def setUp(self):
+        renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
+        self.renderer = renderer.start()
+        self.addCleanup(renderer.stop)
+    def terminal_choice(self, keys, expected):
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        program = ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +
+                   repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
+                   '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
+                   'print(json.dumps(m.pick("Choose connections",["Codex","Claude","Ollama"],multiple=True)))')
+        process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,
+                                   stdout=subprocess.PIPE, env=dict(os.environ, TERM='xterm'))
+        try:
+            terminal = b''
+            while b'0 selected' not in terminal:
+                self.assertTrue(select.select([master], [], [], 5)[0], 'picker did not render')
+                terminal += os.read(master, 65536)
+            os.write(master, keys)
+            # macOS waits for terminal output to drain while restoring termios.
+            # Keep consuming the UI, just as a real terminal emulator does.
+            while True:
+                ready = select.select([master, process.stdout], [], [], 5)[0]
+                self.assertTrue(ready, 'picker did not finish')
+                if master in ready:
+                    terminal += os.read(master, 65536)
+                if process.stdout in ready:
+                    break
+            output, _ = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, terminal)
+            self.assertEqual(json.loads(output), expected)
+            restored = termios.tcgetattr(slave)
+            # PENDIN is kernel-maintained pending-input state on macOS, not a
+            # terminal mode chosen by the picker.
+            restored[3] &= ~getattr(termios, 'PENDIN', 0)
+            original[3] &= ~getattr(termios, 'PENDIN', 0)
+            self.assertEqual(restored, original)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            assert process.stdout is not None
+            process.stdout.close()
+            os.close(master)
+            os.close(slave)
+
+    def _picker_program(self, labels, multiple=False, guarded=False):
+        call = 'm.pick("Pick", ' + repr(labels) + (', multiple=True' if multiple else '') + ')'
+        if guarded:
+            body = ('try:\n'
+                    '    print(json.dumps(%s))\n'
+                    'except Exception as error:\n'
+                    '    print(json.dumps({"error": error.__class__.__name__}))' % call)
+        else:
+            body = 'print(json.dumps(%s))' % call
+        return ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +
+                repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
+                '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);\n' + body)
+
+    def _drive_picker(self, program, steps):
+        """steps: (needle, keys, occurrences) triples; the picker redraws one
+        frame per key, so a repeated footer proves the key was consumed."""
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,
+                                   stdout=subprocess.PIPE, env=dict(os.environ, TERM='xterm'))
+        terminal = b''
+        try:
+            for needle, keys, occurrences in steps:
+                deadline = time.monotonic() + 5
+                while terminal.count(needle) < occurrences:
+                    remaining = max(0.1, deadline - time.monotonic())
+                    self.assertTrue(select.select([master], [], [], remaining)[0],
+                                    'picker never showed ' + repr(needle) + '; tail: ' + repr(terminal[-300:]))
+                    terminal += os.read(master, 65536)
+                if keys:
+                    os.write(master, keys)
+            while True:
+                ready = select.select([master, process.stdout], [], [], 5)[0]
+                self.assertTrue(ready, 'picker did not finish')
+                if master in ready:
+                    terminal += os.read(master, 65536)
+                if process.stdout in ready:
+                    break
+            output, _ = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, terminal)
+            restored = termios.tcgetattr(slave)
+            restored[3] &= ~getattr(termios, 'PENDIN', 0)
+            original[3] &= ~getattr(termios, 'PENDIN', 0)
+            self.assertEqual(restored, original)
+            return json.loads(output), terminal
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            assert process.stdout is not None
+            process.stdout.close()
+            os.close(master)
+            os.close(slave)
+
+    def test_filter_typing_narrows_and_returns_the_real_index(self):
+        result, terminal = self._drive_picker(self._picker_program(['Anthropic Claude', 'OpenAI GPT', 'Google Gemini']), [
+            (b'3/3 shown', b'gpt', 1),
+            (b'1/3 shown', b'\r', 1),
+        ])
+        self.assertEqual(result, [1])
+        self.assertIn(b'Filter: gpt', terminal)
+
+    def test_multiple_choices_made_under_a_filter_keep_real_indexes(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Alpha two', 'Beta one'], multiple=True), [
+            (('0 selected · 3/3 shown').encode(), b'alph', 1),
+            (b'2/3 shown', b' ', 1),
+            (('1 selected · 2/3 shown').encode(), b'\x1b', 1),
+            (('1 selected · 3/3 shown').encode(), b'\x1b[B\x1b[B', 1),
+            ('› [ ] Beta one'.encode(), b' ', 1),
+            ('› [x] Beta one'.encode(), b'\r', 1),
+        ])
+        self.assertEqual(result, [0, 2])
+
+    def test_enter_with_no_filter_matches_waits_instead_of_selecting(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Beta one']), [
+            (b'2/2 shown', b'zzz', 1),
+            (b'no matches', b'\r', 1),
+            # Enter must redraw instead of returning: a second frame with the
+            # same footer is the proof the key was consumed as a no-op.
+            (b'no matches', b'\x7f\x7f\x7f', 2),
+            (b'2/2 shown', b'\r', 2),
+        ])
+        self.assertEqual(result, [0])
+
+    def test_esc_without_a_filter_still_cancels(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Beta one'], guarded=True), [
+            (b'2/2 shown', b'\x1b', 1),
+        ])
+        self.assertEqual(result, {'error': 'SetupError'})
+
+    def test_q_and_k_type_into_the_filter_instead_of_commanding(self):
+        # Model ids start with any letter (qwen, kimi): every printable byte
+        # is filter text, movement is arrows only and q no longer cancels.
+        result, terminal = self._drive_picker(self._picker_program(['qwen big', 'kimi-k3', 'beta one']), [
+            (b'3/3 shown', b'qwen', 1),
+            (b'Filter: qwen', b'\r', 1),
+        ])
+        self.assertEqual(result, [0])
+        result, terminal = self._drive_picker(self._picker_program(['kimi-k3', 'beta one']), [
+            (b'2/2 shown', b'kimi', 1),
+            (b'Filter: kimi', b'\r', 1),
+        ])
+        self.assertEqual(result, [0])
+
+    def test_a_byte_right_after_esc_clears_the_filter_and_is_kept(self):
+        result, _ = self._drive_picker(self._picker_program(['alpha one', 'golf two']), [
+            (b'2/2 shown', b'al', 1),
+            (b'Filter: al', b'\x1bg', 1),
+            (b'Filter: g', b'\r', 1),
+        ])
+        self.assertEqual(result, [1])
+
+    def test_narrowing_then_clearing_keeps_the_cursor_on_its_row(self):
+        labels = ['opt-{}'.format(index) for index in range(10)] + ['needle row']
+        result, _ = self._drive_picker(self._picker_program(labels), [
+            (b'11/11 shown', b'needle', 1),
+            (b'1/11 shown', b'\x1b', 1),
+            (b'11/11 shown', b'\r', 1),
+        ])
+        self.assertEqual(result, [10])
+
+    def test_terminal_arrows_space_and_enter_preserve_multiple_choices_and_restore_tty(self):
+        self.terminal_choice(b' \x1b[B \r', [0, 1])
+
+    def test_enter_selects_focused_option_without_space_or_typing(self):
+        self.terminal_choice(b'\x1b[B\r', [1])
+
+    def test_accessible_enter_selects_first_option(self):
+        with patch('sys.stdin', io.StringIO('\n')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.pick('Connections', ['Codex', 'Claude'], multiple=True), [0])
+
+    def test_fast_setup_still_exposes_every_provider_through_browse(self):
+        sources = [dict(choice='claude_code', command='claude', command_path='/owned/claude', credential_file=None,
+                        api_key_env='', endpoint='', label='Claude Code'),
+                   dict(choice='openai_compatible', command='', command_path=None, credential_file=None,
+                        api_key_env='FIXTURE_NO_API_KEY', endpoint='https://example.org', label='Another provider')]
+        with patch.dict(os.environ, {'FIXTURE_NO_API_KEY': ''}), \
+                patch.object(SETUP, 'pick', side_effect=[[3], [1]]) as picker:
+            shown, selected = SETUP.pick_connection_sources(sources)
+        self.assertEqual(len(picker.call_args_list[0].args[1]), 4)
+        self.assertIn('Fast setup', picker.call_args_list[0].args[0])
+        self.assertEqual(shown[selected[0]], sources[1])
+    def test_accessible_number_input_selects_several_without_model_typing(self):
+        with patch('sys.stdin', io.StringIO('1,3\n')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.pick('Connections', ['Codex', 'Claude', 'Ollama'], multiple=True), [0, 2])
+
+    def test_ollama_loads_only_selected_model_and_uses_effective_context(self):
+        # The native serving-context observation owns load and the effective
+        # window; the wizard records what it reports, not the listed maximum.
+        source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
+        with patch.object(SETUP, 'native_serving_context',
+                          return_value=dict(context=16384, tools=True)) as native:
+            identity, configured = SETUP.resolve_model_spec(source, {'id': 'owned-qwen', 'context': 999999}, 10,
+                                                            binary='/fixture/masc')
+        native.assert_called_once_with('/fixture/masc', source, 'owned-qwen', 10, load=True)
+        self.assertEqual(configured['max_context'], 16384)
+        self.renderer.assert_called_once_with(configured, '/fixture/masc', base_path=None)
+        self.assertEqual(identity, 'fixture.native-model')
+
+    def test_wizard_ollama_context_uses_native_private_reference(self):
+        source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='',
+                      credential_kind='file', credential_file='/private/key', command='')
+        with patch.object(SETUP, 'native_serving_context',
+                          return_value=dict(context=16384, tools=True)) as native:
+            _, configured = SETUP.resolve_model_spec(source, dict(id='owned-model', context=999999), 10,
+                                                      binary='/fixture/masc')
+        native.assert_called_once_with('/fixture/masc', source, 'owned-model', 10, load=True)
+        self.assertEqual(configured['max_context'], 16384)
+        self.assertEqual(configured['credential_file'], '/private/key')
+
+    def test_ollama_architecture_maximum_never_becomes_effective_context(self):
+        # The native observation owns the effective window. When it reports
+        # none, the wizard refuses to inherit the listed architecture maximum
+        # and only an explicit operator value may proceed.
+        with patch.object(SETUP, 'native_serving_context', return_value=dict(context=None, tools=True)):
+            source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
+            with patch('sys.stdin', io.StringIO('q\n')), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SETUP.SetupError):
+                SETUP.resolve_model_spec(source, dict(id='owned-qwen', context=None), 10, binary='/fixture/masc')
+
+    def test_workspace_context_is_matched_to_same_connection_and_exact_model(self):
+        source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1', api_key_env='OWNED_KEY',
+                      rows=[dict(id='glm.model', model='glm-5.3', max_context=200000, tools=True)])
+        with patch.object(SETUP, 'native_discover_models', return_value=([
+                dict(id='glm-5.3',label='GLM',context=None), dict(id='different-model',label='Other',context=None)], 'server')):
+            rows, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual(rows[0]['context'], 200000)
+        self.assertIsNone(rows[1]['context'])
+        self.assertEqual(SETUP.resolve_model_spec(source, rows[0], 10), ('glm.model', None))
+
+    def test_model_labels_cannot_inject_terminal_escape_sequences(self):
+        self.assertNotIn('\x1b', SETUP.terminal_text('model\x1b[2J'))
+
+    def test_distinct_existing_bindings_for_same_model_remain_selectable(self):
+        source = dict(choice='openai_compatible', endpoint='http://localhost:8080/v1', api_key_env='', rows=[
+            dict(id='provider.small', model='same-model', max_context=8192, tools=True),
+            dict(id='provider.large', model='same-model', max_context=16384, tools=True)])
+        with patch.object(SETUP, 'native_discover_models', return_value=([dict(id='same-model',label='Model',context=None)], 'server')):
+            models, _ = SETUP.source_models('/fixture', source, 10)
+        self.assertEqual([row['existing']['id'] for row in models], ['provider.small','provider.large'])
+        self.assertEqual([row['context'] for row in models], [8192,16384])
+
+    def test_protected_credentials_are_not_silently_cloned_without_auth(self):
+        for kind in ('inline','file','unknown'):
+            source = dict(choice='openai_compatible', credential_kind=kind)
+            with self.subTest(kind=kind), self.assertRaisesRegex(SETUP.SetupError, 'protected credential'):
+                SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
+            existing = dict(id='existing.id',tools=True)
+            self.assertEqual(SETUP.resolve_model_spec(source, dict(existing=existing), 10), ('existing.id',None))
+
+    def test_unreachable_selected_server_returns_to_recovery_menu(self):
+        with patch.object(SETUP, 'configured_inventory', return_value={}), \
+             patch.object(SETUP, 'select_connections', side_effect=OSError('private endpoint diagnostics')), \
+             patch.object(SETUP, 'pick', return_value=[1]), contextlib.redirect_stderr(io.StringIO()) as terminal:
+            result = SETUP.wizard('/fixture', '/workspace', 10)
+        # Leaving through the recovery menu after a failure is not the operator
+        # deferring the step: nothing was saved, so the journey must not report
+        # a saved workspace or exit 0.
+        self.assertEqual(result['readiness'], 'failed')
+        self.assertNotIn('private endpoint diagnostics', terminal.getvalue())
+
+    def test_invalid_existing_workspace_can_choose_unused_sibling_without_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / 'workspace'
+            base.mkdir()
+            old = base / 'old-state'
+            old.write_bytes(b'preserve this state')
+            replies = [subprocess.CompletedProcess([],1,json.dumps(dict(status='needs_attention',issues=[
+                dict(path=str(old),detail='unsupported schema')]))),
+                subprocess.CompletedProcess([],0,json.dumps(dict(status='ready',read_only=True,scope='keeper_goal_state_schema')))]
+            with patch('subprocess.run',side_effect=replies), patch.object(SETUP,'pick',return_value=[0]), \
+                 patch.object(SETUP,'workspace_upgrade_catalog',return_value=dict(keepers=[],backups=[])), \
+                 patch('sys.stdin.isatty',return_value=True), contextlib.redirect_stderr(io.StringIO()):
+                result = SETUP.workspace_check('/fixture',base)
+            self.assertEqual(result['base_path'], str(base.resolve()) + '-new')
+            self.assertEqual(old.read_bytes(), b'preserve this state')
+            self.assertFalse(Path(result['base_path']).exists())
+
+
+@unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
+class WorkspaceFromCurrentDirectory(unittest.TestCase):
+    """RFC workspace-root-resolution stage 1, run against the real binary.
+
+    Measured on 0.35.16 with an empty HOME: inside a workspace, `masc init`
+    exited 1 with "MASC_BASE_PATH is not set" right after logging the cwd.
+    """
+
+    def run_masc(self, home, cwd, *argv):
+        assert BINARY is not None
+        environment = dict(HOME=str(home), PATH=os.environ.get('PATH', '/usr/bin:/bin'),
+                           XDG_CONFIG_HOME=str(home / 'config'))
+        return subprocess.run([BINARY, *argv], cwd=cwd, env=environment,
+                              capture_output=True, text=True, timeout=120)
+
+    def test_init_inside_a_workspace_uses_it_and_outside_names_the_choices(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            workspace = home / 'ws'
+            elsewhere = home / 'elsewhere'
+            workspace.mkdir()
+            elsewhere.mkdir()
+            seeded = self.run_masc(home, elsewhere, 'init', '--config-only', '--base-path', str(workspace))
+            self.assertEqual(seeded.returncode, 0, seeded.stderr)
+            inside = self.run_masc(home, workspace, 'init', '--config-only')
+            self.assertEqual(inside.returncode, 0, inside.stderr)
+            root = os.path.realpath(workspace) + '/.masc/config'
+            self.assertIn('root=' + root + ')', inside.stdout)
+            outside = self.run_masc(home, elsewhere, 'init', '--config-only')
+            self.assertNotEqual(outside.returncode, 0)
+            self.assertIn('No MASC workspace was found', outside.stderr)
+            self.assertIn('--base-path', outside.stderr)
+            self.assertFalse((elsewhere / '.masc').exists())
+
+    def test_doctor_and_setup_answer_in_the_same_order_as_init(self):
+        # The setup journey offers the workspace doctor reports, so a workspace
+        # cwd has to reach doctor too; setup without a terminal refuses by name.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            workspace = home / 'ws'
+            elsewhere = home / 'elsewhere'
+            workspace.mkdir()
+            elsewhere.mkdir()
+            seeded = self.run_masc(home, elsewhere, 'init', '--config-only', '--base-path', str(workspace))
+            self.assertEqual(seeded.returncode, 0, seeded.stderr)
+            doctor = self.run_masc(home, workspace, 'doctor', '--json')
+            self.assertEqual(doctor.returncode, 0, doctor.stderr)
+            self.assertEqual(json.loads(doctor.stdout)['base_path'], os.path.realpath(workspace))
+            nowhere = self.run_masc(home, elsewhere, 'doctor', '--json')
+            self.assertIsNone(json.loads(nowhere.stdout)['base_path'])
+            setup = self.run_masc(home, elsewhere, 'setup', '--no-tui')
+            self.assertNotEqual(setup.returncode, 0)
+            self.assertIn('No MASC workspace was found', setup.stderr)
+
+
+@unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
+class InstalledModelCatalog(unittest.TestCase):
+    def test_astra_client_and_provider_contexts_resolve_their_own_exact_rows(self):
+        assert BINARY is not None
+        result=subprocess.run([BINARY,'runtime-model-list','codex'],check=True,capture_output=True,text=True)
+        models=json.loads(result.stdout)['models']
+        self.assertNotIn('gpt-5.6-luna', {row['id'] for row in models},
+                         'an API-only context row is not native Codex context evidence')
+        astra=next(row for row in models if row['id']=='gpt-6-astra')
+        self.assertEqual(astra['max_context'],272000)
+        result=subprocess.run([BINARY,'runtime-model-info','gpt-6-astra','--client','codex'],check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(result.stdout)['max_context'],272000)
+        result=subprocess.run([BINARY,'runtime-model-info','gpt-6-astra','--provider','openai-responses'],
+                              check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(result.stdout)['max_context'],1050000)
+        result=subprocess.run([BINARY,'runtime-model-list','--provider','openai-responses'],
+                              check=True,capture_output=True,text=True)
+        provider_models=json.loads(result.stdout)['models']
+        provider_astra=next(row for row in provider_models if row['id']=='gpt-6-astra')
+        self.assertEqual(provider_astra['max_context'],1050000)
+        provider_luna=next(row for row in provider_models if row['id']=='gpt-5.6-luna')
+        self.assertEqual(provider_luna['max_context'],1050000)
+        result=subprocess.run([BINARY,'runtime-model-info','gpt-5.6-luna','--provider','openai-responses'],
+                              check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(result.stdout)['max_context'],1050000)
+        fallback=subprocess.run([BINARY,'runtime-model-info','gpt-5.6-luna','--client','codex'],
+                                check=True,capture_output=True,text=True)
+        self.assertEqual(json.loads(fallback.stdout)['max_context'],1050000)
+        unknown=subprocess.run([BINARY,'runtime-model-info','gpt-unknown-fixture','--client','codex'],capture_output=True,text=True)
+        self.assertNotEqual(unknown.returncode,0)
+        self.assertEqual(unknown.stdout,'')
+
+    def test_claude_list_includes_sonnet5_5_and_selects_without_context_question(self):
+        assert BINARY is not None
+        result=subprocess.run([BINARY,'runtime-model-list','claude-code'],check=True,capture_output=True,text=True)
+        catalog=json.loads(result.stdout)
+        self.assertIs(catalog['account_availability_verified'],False)
+        models=catalog['models']
+        sonnet=next(row for row in models if row['id']=='claude-sonnet-5-5')
+        self.assertEqual(sonnet['max_context'],1000000)
+        self.assertTrue(all(row['id'].startswith('claude-') and row['max_context']>0 for row in models))
+        self.assertNotIn('claude_code',{row['id'] for row in models})
+        index=models.index(sonnet)+1
+        with patch('sys.stdin',io.StringIO(str(index)+'\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
+            selected=SETUP.select_model(BINARY,'claude_code')
+        self.assertEqual(selected,dict(model='claude-sonnet-5-5',max_context=1000000))
+        self.assertIn('No number to enter',terminal.getvalue())
+        self.assertNotIn('Documented/configured context limit',terminal.getvalue())
+
+    def test_provider_mode_lists_curated_rows_for_a_named_catalog_provider(self):
+        assert BINARY is not None
+        result=subprocess.run([BINARY,'runtime-model-list','--provider','openrouter'],check=True,capture_output=True,text=True)
+        catalog=json.loads(result.stdout)
+        self.assertIs(catalog['account_availability_verified'],False)
+        flash=next(row for row in catalog['models'] if row['id']=='deepseek/deepseek-v4-flash')
+        self.assertEqual(flash['max_context'],1048576)
+        self.assertIn('none',flash['accepted_reasoning_efforts'])
+        self.assertEqual(flash['default_reasoning_effort'],'high')
+        self.assertIs(flash['supports_tools'],True)
+        self.assertIs(flash['supports_streaming'],True)
+
+    def test_provider_mode_rejects_unknown_ids_and_bare_invocations(self):
+        assert BINARY is not None
+        unknown=subprocess.run([BINARY,'runtime-model-list','--provider','not-a-provider'],capture_output=True,text=True)
+        self.assertNotEqual(unknown.returncode,0)
+        self.assertEqual(unknown.stdout,'')
+        self.assertIn('not-a-provider',unknown.stderr)
+        neither=subprocess.run([BINARY,'runtime-model-list'],capture_output=True,text=True)
+        self.assertNotEqual(neither.returncode,0)
+        self.assertEqual(neither.stdout,'')
+
+
+@unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
+class CompiledRuntimeSetup(unittest.TestCase):
+    def test_native_fractional_identity_survives_json_transport(self):
+        selected = dict(spec('antigravity'), timeout_s=824.844977148233)
+        first = SETUP.render(selected, BINARY)
+        second = SETUP.render(dict(selected, timeout_s=824.8449771482331), BINARY)
+        self.assertEqual(first, second)
+        self.assertIn(b'operator/model-exact', first[1])
+
+    def test_a_credential_file_spec_lands_in_the_binding_credentials_table(self):
+        import tomllib
+        configured = dict(spec('messages'), credential_file='/private/saved-key')
+        _, runtime = SETUP.render(configured, BINARY)
+        providers = tomllib.loads(runtime.decode())['providers']
+        self.assertEqual(next(iter(providers.values()))['credentials'],
+                         dict(type='file', path='/private/saved-key'))
+
+    def test_selection_revision_detects_later_workspace_edit_before_any_publish(self):
+        fixture = ROOT / 'scripts/fixtures/release-evidence'
+        with tempfile.TemporaryDirectory(prefix='runtime-native-cas-') as directory:
+            base = Path(directory)
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
+            env = {k:v for k,v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
+            with patch.dict(os.environ, env, clear=True):
+                original_selection = SETUP.configured_inventory(BINARY, base)
+                runtime = config / 'runtime.toml'
+                runtime.write_bytes(runtime.read_bytes() + b'\n# later operator edit\n')
+                before = runtime.read_bytes()
+                with self.assertRaisesRegex(SETUP.SetupError, 'Configuration changed'):
+                    SETUP.configure_many(BINARY, base, [spec()], expected_revision=original_selection['setup_revision'])
+                self.assertEqual(before, runtime.read_bytes())
+
+    def test_saved_antigravity_native_clone_reuses_selected_sibling_and_custom_timeout(self):
+        import base64
+        with tempfile.TemporaryDirectory(prefix='saved-antigravity-boundary-') as tmp:
+            base = Path(tmp).resolve()
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            original = base / 'saved-oauth'
+            def encode(value):
+                return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+            original.write_text(json.dumps(dict(auth_method='synthetic-oauth',
+                token=dict(access_token='fixture', token_type='Bearer', refresh_token='fixture', expiry='2000-01-01T00:00:00Z'),
+                id_token=encode(dict(alg='RS256')) + '.' + encode(dict(iss='https://accounts.google.com',
+                    sub='saved-antigravity-fixture', aud='synthetic-client')) + '.synthetic-signature')))
+            original.chmod(0o600)
+            client = base / 'agy-fixture'
+            catalog = dict(status='SUCCESS', num_turns=0, usage=dict(total_tokens=0),
+                           command=dict(name='models', data=dict(models=[dict(id='existing', label='Existing'),
+                                                                      dict(id='new-model', label='New model')])))
+            client.write_text('#!' + sys.executable + '\nimport json,sys\nassert sys.argv[-1] == "models"\nprint(' + repr(json.dumps(catalog)) + ')\n')
+            client.chmod(0o700)
+            def provider_text(name):
+                return (
+                    "[providers." + name + ']\nprotocol = "antigravity-cli"\n'
+                    "command = " + json.dumps(str(client)) + "\nis-non-interactive = true\ntimeout-s = 824.5\n"
+                    "[providers." + name + '.credentials]\ntype = "file"\npath = ' + json.dumps(str(original)) + "\n"
+                )
+            (config / 'runtime.toml').write_text('[runtime]\ndefault = "selected.existing"\n'
+                + provider_text('selected') + provider_text('sibling')
+                + '[models.existing]\napi-name = "existing"\nmax-context = 8192\ntools-support = true\n'
+                  '[selected.existing]\nwizard-default = true\n[sibling.existing]\nwizard-default = true\n')
+            real_run = subprocess.run
+            clones = []
+            def record_native(argv, **kwargs):
+                response = real_run(argv, **kwargs)
+                if argv[1] == 'runtime-antigravity-account' and response.returncode == 0:
+                    clones.append(json.loads(response.stdout)['credential_file'])
+                return response
+            env = {key: value for key, value in os.environ.items() if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            with patch.dict(os.environ, env, clear=True), SETUP.PendingCredentials(BINARY, base) as credentials, \
+                 patch.object(SETUP.subprocess, 'run', side_effect=record_native), \
+                 patch.object(SETUP, 'pick', return_value=[0]), \
+                 patch.object(SETUP, 'antigravity_context', return_value=8192):
+                inventory = SETUP.configured_inventory(BINARY, base)
+                source = next(row for row in SETUP.connection_sources(BINARY, inventory) if row['provider_id'] == 'selected')
+                prepared = SETUP.prepare_connection(BINARY, source, credentials)
+                self.assertEqual(len(clones), 1)
+                self.assertNotEqual(clones[0], str(original), 'exercise the real native producer clone')
+                models, _ = SETUP.source_models(BINARY, prepared, 10)
+                self.assertIsNotNone(next(row for row in models if row['id'] == 'existing')['existing'])
+                runtime_id, selected = SETUP.resolve_model_spec(prepared, next(row for row in models if row['id'] == 'new-model'),
+                    10, binary=BINARY, base_path=base)
+                self.assertTrue(runtime_id.startswith('selected.'), 'exact sibling choice survives native resolution')
+                self.assertEqual(selected['credential_file'], str(original))
+                self.assertEqual(selected['timeout_s'], 824.5)
+                self.assertEqual(selected['existing_provider_id'], 'selected')
+                credentials.retain([selected])
+            self.assertTrue(original.exists())
+            self.assertFalse(Path(clones[0]).exists())
+
+    def test_multiple_models_bind_imp_and_reselection_preserves_both_connections(self):
+        import tomllib
+        fixture = ROOT / 'scripts/fixtures/release-evidence'
+        with tempfile.TemporaryDirectory(prefix='runtime-multiple-cli-') as tmp:
+            base = Path(tmp)
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
+            models = [spec(), dict(spec(), model='second-owned-model')]
+            ids = [SETUP.render(model, BINARY)[0] for model in models]
+            env = {k:v for k,v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
+            with patch.dict(os.environ,env,clear=True):
+                SETUP.configure_many(BINARY,base,models,ids,default_id=ids[1])
+                configured = tomllib.loads((config / 'runtime.toml').read_text())
+                self.assertEqual(configured['runtime']['default'],ids[1])
+                self.assertEqual(configured['runtime']['assignments']['imp'],ids[1])
+                self.assertEqual(configured['runtime']['lanes'][ids[1]]['candidates'],[ids[1],ids[0]])
+                SETUP.configure_many(BINARY,base,[],[ids[0]])
+                inventory = SETUP.configured_inventory(BINARY,base)
+                self.assertTrue(set(ids) <= {row['id'] for row in inventory['runtimes']})
+                configured = tomllib.loads((config / 'runtime.toml').read_text())
+                self.assertEqual(configured['runtime']['assignments']['imp'],ids[0])
+
+    def test_seed_workspace_saves_connections_and_points_the_librarian_lane_at_the_default(self):
+        # The shipped seed, not the release-evidence fixture: the seed already
+        # declares [runtime.exact_output_lanes.librarian_exact], so a second
+        # writer of that table fails on a single connection here, where the
+        # fixture, which declares no such table, fails only on two.
+        import tomllib
+        def seeded(tmp):
+            config = Path(tmp) / '.masc/config'
+            config.mkdir(parents=True)
+            (config / 'runtime.toml').write_bytes((ROOT / 'config/runtime.toml').read_bytes())
+            return Path(tmp), config / 'runtime.toml'
+        def librarian(runtime):
+            return tomllib.loads(runtime.read_text())['runtime']['exact_output_lanes']['librarian_exact']
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
+        with patch.dict(os.environ, env, clear=True):
+            with tempfile.TemporaryDirectory(prefix='runtime-seed-one-') as tmp:
+                base, runtime = seeded(tmp)
+                http = spec()
+                http_id = SETUP.render(http, BINARY)[0]
+                SETUP.configure(BINARY, base, http)
+                # Setup rewrites the slots and keeps the seed's output budget.
+                budget = dict(max_output_tokens=8192)
+                self.assertEqual(librarian(runtime), dict(slots=[http_id], cli_slots=[], **budget))
+                client = spec('claude_code')
+                client_id = SETUP.render(client, BINARY, base_path=base)[0]
+                SETUP.configure(BINARY, base, client)
+                self.assertEqual(librarian(runtime), dict(slots=[], cli_slots=[client_id], **budget))
+            with tempfile.TemporaryDirectory(prefix='runtime-seed-two-') as tmp:
+                base, runtime = seeded(tmp)
+                models = [spec(), dict(spec(), model='second-owned-model')]
+                ids = [SETUP.render(model, BINARY)[0] for model in models]
+                SETUP.configure_many(BINARY, base, models, ids, default_id=ids[1])
+                self.assertEqual(
+                    librarian(runtime), dict(slots=[ids[1]], cli_slots=[], max_output_tokens=8192))
+
+    def test_real_validator_accepts_each_transport_and_reuses_identical_connection(self):
+        fixture = ROOT / 'scripts/fixtures/release-evidence'
+        for choice in SETUP.CHOICES:
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory(prefix='runtime-setup-cli-') as tmp:
+                base = Path(tmp)
+                config = base / '.masc/config'
+                config.mkdir(parents=True)
+                (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
+                selected = spec(choice)
+                if choice == 'antigravity':
+                    token = base / 'credential-file'
+                    token.write_text('fixture-only-token')
+                    selected['credential_file'] = str(token)
+                elif choice == 'muse':
+                    account = base / 'selected-muse-account'
+                    account.mkdir(mode=0o700)
+                    selected.update(account_home=str(account))
+                env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
+                with patch.dict(os.environ, env, clear=True):
+                    result = SETUP.configure(BINARY, base, selected)
+                    self.assertEqual(result['validation'], 'passed')
+                    self.assertEqual(result['readiness'], 'not_probed')
+                    before = (config / 'runtime.toml').read_bytes()
+                    second = SETUP.configure(BINARY, base, selected)
+                    self.assertEqual(second['runtime_id'], result['runtime_id'])
+                    self.assertEqual(before, (config / 'runtime.toml').read_bytes())
+
+@unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
+class CompiledLocalVoiceSetup(unittest.TestCase):
+    REMOTE_TTS = """
+[voice.tts]
+default_model = "remote-model"
+default_voice = "remote-voice"
+[voice.tts.agent_voices]
+imp = "imp-remote-voice"
+[[voice.tts.endpoints]]
+id = "remote-tts"
+kind = "openai_compat"
+base_url = "https://voice.fixture.invalid/v1"
+"""
+    REMOTE_STT = """
+[voice.stt]
+default_model = "remote-transcription-model"
+send_on_stop = true
+[[voice.stt.endpoints]]
+id = "remote-stt"
+kind = "openai_compat"
+base_url = "https://voice.fixture.invalid/v1"
+"""
+
+    @contextlib.contextmanager
+    def workspace(self, voice=''):
+        fixture = ROOT / 'scripts/fixtures/release-evidence'
+        with tempfile.TemporaryDirectory(prefix='voice-install-') as directory:
+            base = Path(directory)
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
+            runtime = config / 'runtime.toml'
+            existing = runtime.read_text()
+            if voice:
+                # Match table headers only. An inline table such as
+                # [voice] followed by tts = { ... } is outside this guard.
+                voice_sections = [
+                    line.strip()
+                    for line in existing.splitlines()
+                    if line.strip().startswith(('[voice.tts', '[voice.stt'))
+                ]
+                if voice_sections:
+                    raise AssertionError(
+                        'release-evidence runtime fixture already declares '
+                        f'{voice_sections}; update test/test_install_runtime_setup.py '
+                        'together with scripts/fixtures/release-evidence/runtime.toml.'
+                    )
+            runtime.write_text(existing + voice)
+            yield base, runtime
+
+    # voice-local-setup looks --voice up in the list say prints before it
+    # writes. The host running this may have no say at all -- the release job
+    # is Linux -- or a different list, so these run against a say that lists
+    # Yuna and nothing else, which is the host they describe.
+    FAKE_SAY = ("#!/bin/sh\n"
+                "if [ \"$1\" = -v ] && [ \"$2\" = '?' ]; then\n"
+                "  printf 'Yuna                ko_KR    # hello\\n'; exit 0\n"
+                "fi\n"
+                "exit 1\n")
+
+    def configure(self, base, *arguments):
+        assert BINARY is not None
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+        with tempfile.TemporaryDirectory(prefix='voice-fake-say-') as bin_dir:
+            say = Path(bin_dir) / 'say'
+            say.write_text(self.FAKE_SAY)
+            say.chmod(0o755)
+            env['PATH'] = bin_dir + os.pathsep + env.get('PATH', '')
+            return subprocess.run(
+                [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
+                capture_output=True, text=True, env=env, check=False)
+
+    def test_a_voice_say_does_not_list_is_refused_and_nothing_is_written(self):
+        # say does not fail on a name it does not have: measured 2026-09-13,
+        # say -v NoSuchVoice exited 0 with the same bytes as -v Yuna, and
+        # before this check the command wrote default_voice = "NoSuchVoice".
+        for name in ('NoSuchVoice', 'Yu'):
+            with self.subTest(name=name), self.workspace() as (base, runtime):
+                before = runtime.read_bytes()
+                result = self.configure(base, '--voice', name)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(f'say has no voice named "{name}"', result.stderr)
+                self.assertIn('Nothing was written.', result.stderr)
+                self.assertEqual(runtime.read_bytes(), before)
+        # say matches names without regard to case, so the check does too.
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    @contextlib.contextmanager
+    def voice_mcp_server(self, status=200):
+        """A voice MCP endpoint that records each tools/call and answers it."""
+        import http.server
+        import threading
+        calls = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length', '0'))
+                calls.append(json.loads(self.rfile.read(length)))
+                body = json.dumps({'jsonrpc': '2.0', 'id': 1, 'result': {
+                    'content': [{'type': 'text', 'text': '{"status": "spoken"}'}]}}).encode()
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format, *_args):
+                del format
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f'http://127.0.0.1:{server.server_address[1]}/mcp', calls
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def verify_voice(self, voice):
+        assert BINARY is not None
+        with self.workspace(voice) as (base, runtime):
+            env = {key: value for key, value in os.environ.items()
+                   if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            env.update(MASC_BASE_PATH=str(base), MASC_CONFIG_DIR=str(runtime.parent))
+            return subprocess.run([BINARY, 'voice-verify', '--json', '--message', 'check'],
+                                  capture_output=True, text=True, env=env, check=False)
+
+    # A configuration whose only speaker is an MCP tool used to be reported as
+    # nothing answering, and voice-verify exited 1 for a voice that worked. The
+    # probe asks agent_speak, the tool a turn calls.
+    def test_mcp_voice_probe_asks_agent_speak(self):
+        assert BINARY is not None
+        for status, state, code in ((200, 'answered', 0), (500, 'refused', 1)):
+            with self.subTest(status=status), self.voice_mcp_server(status) as (url, calls):
+                result = self.verify_voice(
+                    '\n[voice.tts]\ndefault_voice = "fixture-voice"\ndefault_model = "fixture-model"\n'
+                    '[[voice.tts.endpoints]]\nid = "mcp"\nkind = "voice_mcp"\n'
+                    f'mcp_url = "{url}"\n')
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                attempt = json.loads(result.stdout)['tts'][0]
+                self.assertEqual(attempt['state'], state, attempt)
+                self.assertEqual(len(calls), 1, calls)
+                params = calls[0]['params']
+                self.assertEqual(params['name'], 'agent_speak')
+                self.assertEqual(params['arguments']['message'], 'check')
+                self.assertEqual(params['arguments']['voice'], 'fixture-voice')
+                if state == 'answered':
+                    self.assertIn('fixture-voice', attempt['detail'])
+
+    def test_a_disabled_mcp_endpoint_is_not_asked(self):
+        assert BINARY is not None
+        with self.voice_mcp_server() as (url, calls):
+            result = self.verify_voice(
+                '\n[voice.tts]\ndefault_voice = "fixture-voice"\ndefault_model = "fixture-model"\n'
+                '[[voice.tts.endpoints]]\nid = "mcp"\nkind = "voice_mcp"\n'
+                f'mcp_url = "{url}"\nenabled = false\n')
+            self.assertEqual(result.returncode, 1, result.stderr)
+            attempt = json.loads(result.stdout)['tts'][0]
+            self.assertEqual(attempt['state'], 'skipped')
+            self.assertEqual(attempt['detail'], 'disabled in the configuration')
+            self.assertEqual(calls, [])
+
+    def test_speaking_keeps_remote_defaults_and_scopes_the_local_voice(self):
+        import tomllib
+        with self.workspace(self.REMOTE_TTS) as (base, runtime):
+            before = tomllib.loads(runtime.read_text())['voice']['tts']
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            after = tomllib.loads(runtime.read_text())['voice']['tts']
+            for key in ('default_model', 'default_voice', 'agent_voices'):
+                self.assertEqual(after[key], before[key])
+            self.assertEqual(after['endpoints'][0], before['endpoints'][0])
+            self.assertEqual(after['endpoints'][1]['default_voice'], 'Yuna')
+            self.assertEqual(after['endpoints'][1]['kind'], 'macos_say')
+
+    def test_a_new_tts_section_keeps_per_keeper_voice_overrides_effective(self):
+        import tomllib
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertEqual(tts['default_voice'], 'Yuna')
+            self.assertEqual(len(tts['endpoints']), 1)
+            endpoint = tts['endpoints'][0]
+            self.assertEqual(endpoint['id'], 'macos-say')
+            self.assertEqual(endpoint['kind'], 'macos_say')
+            # An endpoint voice outranks per-Keeper mappings. The fresh
+            # section owns this default so those mappings remain effective.
+            self.assertNotIn('default_voice', endpoint)
+
+    def test_a_directory_that_was_never_initialized_is_told_to_run_init(self):
+        # Voice is a section of the configuration masc init writes. Measured
+        # before this: exit 1 and the raw Sys_error text for the missing file,
+        # which names neither the workspace nor what to run.
+        with tempfile.TemporaryDirectory(prefix='voice-no-init-') as directory:
+            base = Path(directory)
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn('No masc workspace at', result.stderr)
+            self.assertIn('masc init --base-path', result.stderr)
+            self.assertNotIn('Sys_error', result.stderr)
+            self.assertEqual(list(base.iterdir()), [])
+
+    def test_setting_the_same_voice_again_keeps_per_keeper_voices_effective(self):
+        # The second run finds a [voice.tts] section -- the first run's -- and
+        # that section is say's own, so its default is the place for the voice.
+        # Measured before the placement asked who owns the default: the second
+        # run put default_voice on the endpoint and a keeper mapped to another
+        # voice spoke in this one. A workspace already left that way is
+        # repaired by the next run, because the endpoint is written whole.
+        import tomllib
+        with self.workspace() as (base, runtime):
+            for _ in range(2):
+                result = self.configure(base, '--voice', 'Yuna')
+                self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertEqual(tts['default_voice'], 'Yuna')
+            self.assertEqual(len(tts['endpoints']), 1)
+            self.assertNotIn('default_voice', tts['endpoints'][0])
+        stale = ('\n[[voice.tts.endpoints]]\nid = "macos-say"\nkind = "macos_say"\n'
+                 'enabled = true\ndefault_voice = "Yuna"\n\n[voice.tts]\ndefault_voice = "Yuna"\n')
+        with self.workspace(stale) as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertNotIn('default_voice', tts['endpoints'][0])
+
+    def test_voice_verify_checks_the_workspace_it_is_pointed_at(self):
+        # A workspace set up with --base-path is checked with --base-path. The
+        # loader finds runtime.toml through the environment, so without the flag
+        # and with nothing exported there is no workspace to check -- and the
+        # answer says that, rather than naming a JSON file nobody made.
+        # On a host without `say` the endpoint refuses; the configuration is
+        # still found, which is what this asks.
+        assert BINARY is not None
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            env = {key: value for key, value in os.environ.items()
+                   if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            # A fresh HOME as well: a workspace recorded as the default under the
+            # real one is found without the flag, which is right, but is not the
+            # machine this describes.
+            with tempfile.TemporaryDirectory(prefix='voice-verify-elsewhere-') as elsewhere, \
+                    tempfile.TemporaryDirectory(prefix='voice-verify-home-') as home:
+                env['HOME'] = home
+                pointed = subprocess.run(
+                    [BINARY, 'voice-verify', '--base-path', str(base), '--message', 'check'],
+                    capture_output=True, text=True, env=env, cwd=elsewhere, check=False)
+                self.assertIn('macos-say', pointed.stdout, pointed.stderr)
+                self.assertNotIn('voice config missing', pointed.stdout)
+                unpointed = subprocess.run(
+                    [BINARY, 'voice-verify', '--message', 'check'],
+                    capture_output=True, text=True, env=env, cwd=elsewhere, check=False)
+                self.assertEqual(unpointed.returncode, 1)
+                self.assertIn('no workspace is resolved', unpointed.stdout, unpointed.stderr)
+
+    def test_a_local_model_lands_on_its_own_endpoint(self):
+        # The file used to be written as the section's default_model, which is
+        # what every remote endpoint in the section is asked for, so this was
+        # refused outright. It goes on the whisper endpoint now.
+        import tomllib
+        with self.workspace(self.REMOTE_STT) as (base, runtime):
+            before = tomllib.loads(runtime.read_text())['voice']['stt']
+            result = self.configure(base, '--voice', 'Yuna', '--model', '/fixture/ggml.bin')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            after = tomllib.loads(runtime.read_text())['voice']['stt']
+            self.assertEqual(after['default_model'], before['default_model'])
+            self.assertEqual(after['endpoints'][0], before['endpoints'][0])
+            local = [e for e in after['endpoints'] if e['id'] == 'whisper-local']
+            self.assertEqual(len(local), 1, after)
+            self.assertEqual(local[0]['model'], '/fixture/ggml.bin')
+            self.assertEqual(local[0]['kind'], 'whisper_cli')
+
+    def test_standalone_source_is_not_shadowed_by_partial_toml(self):
+        for contents in ('{"tts":null,"stt":null}', 'invalid JSON'):
+            with self.subTest(contents=contents), self.workspace() as (base, runtime):
+                standalone = base / '.masc/voice_config.json'
+                standalone.write_text(contents)
+                before = runtime.read_bytes()
+                result = self.configure(base, '--voice', 'Yuna')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(str(standalone), result.stderr)
+                self.assertEqual(runtime.read_bytes(), before)
+                self.assertEqual(standalone.read_text(), contents)
+
+    def test_existing_toml_remains_authoritative_over_standalone(self):
+        with self.workspace(self.REMOTE_TTS) as (base, _runtime):
+            standalone = base / '.masc/voice_config.json'
+            standalone.write_text('unused invalid JSON')
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(standalone.read_text(), 'unused invalid JSON')
+
+    def test_an_endpoint_name_collision_does_not_replace_a_provider(self):
+        with self.workspace(self.REMOTE_TTS.replace('remote-tts', 'macos-say')) as (base, runtime):
+            before = runtime.read_bytes()
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('already names another provider', result.stderr)
+            self.assertEqual(runtime.read_bytes(), before)
+
+
+class WorkspaceChildEnvironment(unittest.TestCase):
+    TERMINAL = {'MASC_BASE_PATH': '/terminal/base', 'MASC_CONFIG_DIR': '/terminal/config',
+                'PATH': '/usr/bin', 'HOME': '/home/op'}
+
+    def test_the_boundary_removes_the_terminal_workspace_overrides(self):
+        with patch.dict(os.environ, self.TERMINAL, clear=True):
+            env = SETUP.workspace_child_env()
+        self.assertNotIn('MASC_BASE_PATH', env)
+        self.assertNotIn('MASC_CONFIG_DIR', env)
+        self.assertEqual(env, {'PATH': '/usr/bin', 'HOME': '/home/op'})
+
+    def test_a_workspace_prerequisite_catalog_runs_without_the_overrides(self):
+        catalog = {'schema': 'masc.prerequisite_actions.v1', 'actions': []}
+        completed = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.prerequisite_catalog('/bin/masc', 'presentation-tools',
+                                       workspace_args=('--base-path', '/workspace'))
+        env = run.call_args.kwargs['env']
+        self.assertNotIn('MASC_BASE_PATH', env)
+        self.assertNotIn('MASC_CONFIG_DIR', env)
+        self.assertEqual(env['PATH'], '/usr/bin')
+
+    def test_a_non_workspace_prerequisite_keeps_the_inherited_environment(self):
+        catalog = {'schema': 'masc.prerequisite_actions.v1', 'actions': []}
+        completed = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.prerequisite_catalog('/bin/masc', 'pdf-tools')
+        self.assertIsNone(run.call_args.kwargs['env'])
+
+    def test_native_setup_command_strips_only_with_a_workspace(self):
+        rendered = subprocess.CompletedProcess([], 0, '{"toml": "x"}', '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=rendered) as run:
+            SETUP.native_setup_command('/bin/masc', 'runtime-setup-render',
+                                       arguments=('--base-path', '/workspace'))
+        env = run.call_args.kwargs['env']
+        self.assertNotIn('MASC_BASE_PATH', env)
+        self.assertNotIn('MASC_CONFIG_DIR', env)
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=rendered) as run:
+            SETUP.native_setup_command('/bin/masc', 'runtime-setup-render')
+        self.assertIsNone(run.call_args.kwargs['env'])
+
+    def test_imp_github_login_runs_without_the_overrides(self):
+        from types import SimpleNamespace
+        completed = subprocess.CompletedProcess([], 0, '', '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.connect_imp_github('/bin/masc', '/workspace',
+                                     SimpleNamespace(host_login=None))
+        argv, kwargs = run.call_args.args[0], run.call_args.kwargs
+        self.assertIn('--base-path', argv)
+        self.assertNotIn('MASC_CONFIG_DIR', kwargs['env'])
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run, \
+                patch.object(SETUP, 'read_host_github_token', return_value='token'):
+            SETUP.connect_imp_github('/bin/masc', '/workspace',
+                                     SimpleNamespace(host_login='octo'))
+        argv, kwargs = run.call_args.args[0], run.call_args.kwargs
+        self.assertIn('--base-path', argv)
+        self.assertNotIn('MASC_CONFIG_DIR', kwargs['env'])
+
+    def test_onboarding_status_strips_only_with_a_workspace(self):
+        state = {'schema': 'masc.onboarding_status.v1', 'scope': 'configuration_observation',
+                 'opening': 'needs_journey', 'checks': []}
+        completed = subprocess.CompletedProcess([], 0, json.dumps(state), '')
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.onboarding_status('/bin/masc', base_path='/workspace')
+        self.assertNotIn('MASC_BASE_PATH', run.call_args.kwargs['env'])
+        with patch.dict(os.environ, self.TERMINAL, clear=True), \
+                patch('subprocess.run', return_value=completed) as run:
+            SETUP.onboarding_status('/bin/masc')
+        self.assertIsNone(run.call_args.kwargs['env'])
+
+
+if __name__ == '__main__':
+    unittest.main()

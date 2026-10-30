@@ -1,0 +1,1520 @@
+(** Auth Module Tests *)
+
+(* Initialize RNG for crypto operations *)
+let () = Mirage_crypto_rng_unix.use_default ()
+
+open Alcotest
+module Auth = Auth
+module Tool_spec = Tool_spec
+module Tool_dispatch = Tool_dispatch
+module Types = Masc_domain
+
+(* [Alcotest.(check bool)] prints only [false] when a substring assertion on an
+   error text fails, so the actual detail never reaches the log. Asserting
+   through [failf] prints the needle and the text that was searched. *)
+let check_contains ~name ~needle detail =
+  if not (String_util.contains_substring detail needle) then
+    Alcotest.failf "%s: %S is missing from %S" name needle detail
+
+(* Setup a temp directory for testing *)
+let setup_test_workspace () =
+  (* Use PID + timestamp for deterministic unique dir *)
+  let unique_id = Printf.sprintf "masc-auth-test-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
+  let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
+  Unix.mkdir tmp 0o755;
+  let masc_dir = Filename.concat tmp Common.masc_dirname in
+  Unix.mkdir masc_dir 0o755;
+  tmp
+
+let cleanup_test_workspace dir =
+  (* Simple recursive delete *)
+  let rec rm_rf path =
+    if Sys.is_directory path then begin
+      Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Sys.remove path
+  in
+  try rm_rf dir with _ -> ()
+
+let permission_bits path =
+  (Unix.stat path).Unix.st_perm land 0o777
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  try
+    let result = f () in
+    (match previous with
+     | Some v -> Unix.putenv name v
+     | None -> Unix.putenv name "");
+    result
+  with exn ->
+    (match previous with
+     | Some v -> Unix.putenv name v
+     | None -> Unix.putenv name "");
+    raise exn
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let with_eio_runtime f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_guard.disable ();
+      Fs_compat.clear_fs ())
+    f
+
+let capture_stderr f =
+  let pipe_read, pipe_write = Unix.pipe () in
+  let saved_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  (try f () with _ -> ());
+  flush stderr;
+  Unix.dup2 saved_stderr Unix.stderr;
+  Unix.close saved_stderr;
+  Unix.set_nonblock pipe_read;
+  let buf = Buffer.create 256 in
+  let tmp = Bytes.create 256 in
+  let rec read_all () =
+    match Unix.read pipe_read tmp 0 256 with
+    | 0 -> ()
+    | n ->
+        Buffer.add_subbytes buf tmp 0 n;
+        read_all ()
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+    | exception _ -> ()
+  in
+  read_all ();
+  Unix.close pipe_read;
+  Buffer.contents buf
+
+let strict_unknown_tool_denial_count ~agent_name ~tool_class =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_auth_strict_unknown_tool_denials
+    ~labels:[ ("agent_name", agent_name); ("tool_class", tool_class) ]
+    ()
+
+let keeper_strict_auth_regression_tools =
+  [
+    "tool_search_files";
+    "tool_execute";
+    "keeper_task_claim";
+    "tool_read_file";
+    "masc_board_search";
+    "keeper_tools_list";
+    "keeper_capability_search";
+    "keeper_analyze_image";
+    "masc_browser_tabs";
+    "masc_browser_read";
+    "masc_browser_session";
+    "masc_browser_goto";
+    "masc_browser_interact";
+    "masc_web_search";
+    "masc_web_fetch";
+    "masc_file_list";
+    "masc_file_upload";
+    "masc_file_delete";
+  ]
+
+(* ============================================ *)
+(* Token generation tests                       *)
+(* ============================================ *)
+
+let test_token_generation () =
+  let token = Auth.generate_token () in
+  check int "token length is 64 hex chars" 64 (String.length token);
+  check bool "token is hex" true
+    (String.for_all (fun c ->
+      (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
+    ) token)
+
+let test_sha256_hash () =
+  let hash1 = Auth.sha256_hash "hello" in
+  let hash2 = Auth.sha256_hash "hello" in
+  let hash3 = Auth.sha256_hash "world" in
+  check string "same input same hash" hash1 hash2;
+  check bool "different input different hash" true (hash1 <> hash3);
+  check int "hash length is 64 chars" 64 (String.length hash1)
+
+let test_eqaf_equality_truth_table () =
+  let equal = Auth_credential_token.constant_time_string_equal in
+  check bool "empty strings" true (equal "" "");
+  check bool "same contents" true (equal "0123456789abcdef" "0123456789abcdef");
+  check bool "different first byte" false (equal "1123456789abcdef" "0123456789abcdef");
+  check bool "different last byte" false (equal "0123456789abcdee" "0123456789abcdef");
+  check bool "different lengths" false (equal "short" "longer")
+
+(* ============================================ *)
+(* Auth config tests                            *)
+(* ============================================ *)
+
+let test_default_auth_config () =
+  let cfg = Masc_domain.default_auth_config in
+  check bool "auth enabled by default" true cfg.enabled;
+  check bool "token required by default" true cfg.require_token;
+  check int "24hr expiry by default" 24 cfg.token_expiry_hours
+
+let test_auth_config_parse_defaults_match_default_config () =
+  match Masc_domain.auth_config_of_yojson (`Assoc [ "enabled", `Bool true ]) with
+  | Error msg -> fail ("auth_config_of_yojson failed: " ^ msg)
+  | Ok parsed ->
+    check
+      bool
+      "omitted require_token matches default_auth_config"
+      Masc_domain.default_auth_config.require_token
+      parsed.require_token;
+    check
+      int
+      "omitted token_expiry_hours matches default_auth_config"
+      Masc_domain.default_auth_config.token_expiry_hours
+      parsed.token_expiry_hours
+;;
+
+let test_auth_config_rejects_present_invalid_fields () =
+  let invalid_inputs =
+    [ `Int 42
+    ; `Assoc [ "require_token", `Null ]
+    ; `Assoc [ "require_token", `String "true" ]
+    ; `Assoc [ "workspace_secret_hash", `Bool false ]
+    ; `Assoc [ "workspace_secret_hash", `String "abc" ]
+    ; `Assoc [ "token_expiry_hours", `String "24" ]
+    ; `Assoc [ "token_expiry_hours", `Int 0 ]
+    ; `Assoc [ "token_expiry_hours", `Int (-1) ]
+    ; `Assoc [ "token_expiry_hours", `Int 8_761 ]
+    ; `Assoc [ "unknown", `Bool true ]
+    ; `Assoc [ "enabled", `Bool true; "enabled", `Bool false ]
+    ]
+  in
+  List.iter
+    (fun json ->
+       match Masc_domain.auth_config_of_yojson json with
+       | Error _ -> ()
+       | Ok _ -> fail "present invalid auth configuration must be rejected")
+    invalid_inputs
+;;
+
+let test_load_auth_config_rejects_malformed_file () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      Auth.save_auth_config dir Masc_domain.default_auth_config;
+      let file = Auth.auth_config_file dir in
+      write_file file {|{"require_token":null}|};
+      match Auth.load_auth_config dir with
+      | _ -> fail "malformed auth configuration file must not load"
+      | exception (Auth.Auth_config_error { file = actual_file; reason } as error) ->
+        check string "error identifies config file" file actual_file;
+        check_contains ~name:"error identifies invalid field"
+          ~needle:"require_token" reason;
+        check string "public exception hides path and parser detail"
+          "Auth.Auth_config_error"
+          (Printexc.to_string error))
+;;
+
+let test_save_load_auth_config () =
+  let dir = setup_test_workspace () in
+  let cfg = { Masc_domain.default_auth_config with enabled = true; require_token = true } in
+  Auth.save_auth_config dir cfg;
+  let loaded = Auth.load_auth_config dir in
+  check bool "enabled persisted" true loaded.enabled;
+  check bool "require_token persisted" true loaded.require_token;
+  cleanup_test_workspace dir
+
+let test_auth_config_reloads_same_metadata_rewrite () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      Auth.save_auth_config dir Masc_domain.default_auth_config;
+      let file = Auth.auth_config_file dir in
+      let original = read_file file in
+      let original_mtime = (Unix.stat file).st_mtime in
+      ignore (Auth.load_auth_config dir);
+      let invalid_prefix = {|{"require_token":null}|} in
+      let padding_length = String.length original - String.length invalid_prefix in
+      if padding_length < 0 then fail "saved auth config must fit malformed fixture";
+      let invalid =
+        invalid_prefix ^ String.make padding_length ' '
+      in
+      write_file file invalid;
+      Unix.utimes file original_mtime original_mtime;
+      match Auth.load_auth_config dir with
+      | _ -> fail "same-metadata malformed rewrite must be rejected"
+      | exception Auth.Auth_config_error _ -> ())
+;;
+
+let test_auth_config_save_is_atomic_and_rejects_invalid_values () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      Auth.save_auth_config dir Masc_domain.default_auth_config;
+      let file = Auth.auth_config_file dir in
+      let first_inode = (Unix.stat file).st_ino in
+      let updated =
+        { Masc_domain.default_auth_config with require_token = false }
+      in
+      Auth.save_auth_config dir updated;
+      let second_inode = (Unix.stat file).st_ino in
+      check bool "atomic replacement changes inode" true (first_inode <> second_inode);
+      let invalid = { updated with token_expiry_hours = 0 } in
+      (match Auth.save_auth_config dir invalid with
+       | () -> fail "invalid expiry must not be persisted"
+       | exception Auth.Auth_config_error _ -> ());
+      check bool "last valid policy preserved" false (Auth.load_auth_config dir).require_token)
+;;
+
+let test_save_load_auth_config_in_eio_runtime () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let cfg = { Masc_domain.default_auth_config with enabled = true; require_token = true } in
+        Auth.save_auth_config dir cfg;
+        let loaded = Auth.load_auth_config dir in
+        check bool "enabled persisted in eio" true loaded.enabled;
+        check bool "require_token persisted in eio" true loaded.require_token))
+
+(* With no config file, the stat's ENOENT is the whole load: nothing else in it
+   suspends. A fiber beside the load runs before the load returns only when
+   the stat hands the scheduler back while it waits. *)
+let test_load_auth_config_yields_while_it_stats () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let beside_ran = ref false in
+        let beside_ran_before_return = ref false in
+        let loaded = ref None in
+        Eio.Fiber.both
+          (fun () ->
+            loaded := Some (Auth.load_auth_config dir);
+            beside_ran_before_return := !beside_ran)
+          (fun () -> beside_ran := true);
+        check bool "a missing file loads the default" true
+          (!loaded = Some Masc_domain.default_auth_config);
+        check bool "the fiber beside the load ran while it waited" true
+          !beside_ran_before_return))
+
+let test_auth_config_saved_private () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let cfg = { Masc_domain.default_auth_config with enabled = true } in
+      Auth.save_auth_config dir cfg;
+      check int "auth config mode 0600" 0o600
+        (permission_bits (Auth.auth_config_file dir)))
+
+(* ============================================ *)
+(* Credential management tests                  *)
+(* ============================================ *)
+
+let test_create_credential () =
+  let dir = setup_test_workspace () in
+  let result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok (raw_token, cred) ->
+      check string "agent_name matches" "claude" cred.agent_name;
+      check bool "role is Worker" true (cred.role = Masc_domain.Worker);
+      check int "raw token is 64 chars" 64 (String.length raw_token);
+      check int "stored token is 64 chars" 64 (String.length cred.token)
+  | Error _ ->
+      fail "create_token should succeed"
+
+let test_credential_saved_private () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      match Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker with
+      | Ok _ ->
+          check int "credential mode 0600" 0o600
+            (permission_bits (Auth.credential_file dir "claude"))
+      | Error e ->
+          fail
+            (Printf.sprintf "create_token should succeed: %s"
+               (Masc_domain.masc_error_to_string e)))
+
+let test_removed_admin_field_fails_closed_through_authorization () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      match Auth.create_token dir ~agent_name:"stale-admin" ~role:Masc_domain.Admin with
+      | Error e ->
+        fail
+          (Printf.sprintf "create_token should succeed: %s"
+             (Masc_domain.masc_error_to_string e))
+      | Ok (raw_token, _) ->
+        let path = Auth.credential_file dir "stale-admin" in
+        let stale_json =
+          match Yojson.Safe.from_string (read_file path) with
+          | `Assoc fields -> `Assoc (("admin", `Bool true) :: fields)
+          | _ -> fail "credential writer must emit an object"
+        in
+        write_file path (Yojson.Safe.to_string stale_json);
+        check
+          bool
+          "load rejects removed field"
+          true
+          (Option.is_none (Auth.load_credential dir "stale-admin"));
+        check
+          bool
+          "authorization fails closed"
+          true
+          (Result.is_error
+             (Auth.authorize_tool_v2
+                dir
+                ~agent_name:"stale-admin"
+                ~token:(Some raw_token)
+                ~tool_name:"masc_status")))
+
+let test_workspace_secret_saved_private () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      ignore (Auth.init_workspace_secret dir);
+      check int "workspace secret mode 0600" 0o600
+        (permission_bits (Auth.workspace_secret_file dir)))
+
+(* Every check_permission/resolve_role_with_auth_config call now threads
+   auth_cfg.workspace_secret_hash through, so this cached path is exercised
+   indirectly by test_workspace_secret_grants_recovery_admin. This test pins
+   the ~cached_hash:None fallback directly, since nothing else reaches it. *)
+let test_verify_workspace_secret_falls_back_to_file_when_uncached () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = Auth.init_workspace_secret dir in
+      check bool "correct secret verifies via on-disk fallback"
+        true
+        (Auth.verify_workspace_secret dir ~cached_hash:None secret);
+      check bool "wrong secret is rejected via on-disk fallback"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:None "not-the-secret"))
+
+let test_verify_workspace_secret_uses_cached_hash () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = "a-known-secret-value" in
+      let hash = Auth.sha256_hash secret in
+      check bool "matching cached hash verifies without reading the file"
+        true
+        (Auth.verify_workspace_secret dir ~cached_hash:(Some hash) secret);
+      check bool "mismatched cached hash is rejected"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:(Some hash) "wrong-secret"))
+
+let test_verify_workspace_secret_fails_closed_when_file_unreadable () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = Auth.init_workspace_secret dir in
+      (* Directory in place of the secret file: the on-disk fallback must
+         reject cleanly rather than raise into the caller. *)
+      Sys.remove (Auth.workspace_secret_file dir);
+      Unix.mkdir (Auth.workspace_secret_file dir) 0o755;
+      check bool "unreadable secret file fails closed, does not raise"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:None secret))
+
+let test_verify_token () =
+  let dir = setup_test_workspace () in
+  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Admin in
+  let verify_result = match create_result with
+    | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"claude" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match create_result, verify_result with
+  | Ok _, Ok cred ->
+      check string "verified agent matches" "claude" cred.agent_name;
+      check bool "verified role matches" true (cred.role = Masc_domain.Admin)
+  | Ok _, Error e ->
+      fail (Printf.sprintf "verify_token should succeed: %s" (Masc_domain.masc_error_to_string e))
+  | Error _, _ ->
+      fail "create_token should succeed"
+
+let test_verify_wrong_token () =
+  let dir = setup_test_workspace () in
+  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
+  let verify_result = match create_result with
+    | Ok _ -> Auth.verify_token dir ~agent_name:"claude" ~token:"wrongtoken"
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match create_result, verify_result with
+  | Ok _, Ok _ ->
+      fail "verify_token should fail with wrong token"
+  | Ok _, Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
+      (* Expected *)
+      ()
+  | Ok _, Error e ->
+      fail (Printf.sprintf "wrong error type: %s" (Masc_domain.masc_error_to_string e))
+  | Error _, _ ->
+      fail "create_token should succeed"
+
+let test_verify_token_reports_token_owner_on_agent_mismatch () =
+  let dir = setup_test_workspace () in
+  let create_result = Auth.create_token dir ~agent_name:"codex" ~role:Masc_domain.Worker in
+  let verify_result =
+    match create_result with
+    | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"gemini" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match create_result, verify_result with
+  | Ok _, Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) ->
+      let rendered = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) in
+      check bool "mismatch message points at the token owner" true
+        (String.contains rendered '(');
+      check_contains ~name:"mismatch message names token owner"
+        ~needle:"bearer token belongs to codex" rendered;
+      check_contains ~name:"mismatch message explains fix"
+        ~needle:"masc login --agent gemini --role worker --shell" rendered
+  | Ok _, Ok _ ->
+      fail "verify_token should fail when token owner and requested agent differ"
+  | Ok _, Error e ->
+      fail
+        (Printf.sprintf "wrong error type for mismatch: %s"
+           (Masc_domain.masc_error_to_string e))
+  | Error _, _ ->
+      fail "create_token should succeed"
+
+let test_verify_token_allows_generated_alias_for_token_owner_prefix () =
+  let dir = setup_test_workspace () in
+  let create_result = Auth.create_token dir ~agent_name:"mu-king" ~role:Masc_domain.Worker in
+  let verify_result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir ~agent_name:"mu-king-warm-heron" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match create_result, verify_result with
+  | Ok _, Ok cred ->
+      check string "token owner credential returned" "mu-king" cred.agent_name;
+      check bool "role preserved" true (cred.role = Masc_domain.Worker)
+  | Ok _, Error e ->
+      fail
+        (Printf.sprintf "generated alias should reuse owner token: %s"
+           (Masc_domain.masc_error_to_string e))
+  | Error _, _ ->
+      fail "create_token should succeed"
+
+(* The owner-alias fallback maps only a generated nickname to the credential of
+   its stable prefix. The last segment of any other dashed name is not an owner,
+   so the token of "bar" must not authenticate "foo-bar". *)
+let test_verify_token_rejects_dashed_name_that_ends_in_the_token_owner () =
+  let dir = setup_test_workspace () in
+  let result =
+    match Auth.create_token dir ~agent_name:"bar" ~role:Masc_domain.Worker with
+    | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"foo-bar" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok cred ->
+      fail (Printf.sprintf "the token of bar authenticated foo-bar as %s" cred.agent_name)
+  | Error _ -> ()
+
+let test_resolve_agent_from_token () =
+  let dir = setup_test_workspace () in
+  let create_result = Auth.create_token dir ~agent_name:"resolver" ~role:Masc_domain.Worker in
+  let resolve_result =
+    match create_result with
+    | Ok (raw_token, _) -> Auth.resolve_agent_from_token dir ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match resolve_result with
+  | Ok agent_name -> check string "resolved agent" "resolver" agent_name
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_list_credentials () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Admin in
+  let _ = Auth.create_token dir ~agent_name:"gemini" ~role:Masc_domain.Worker in
+  let _ = Auth.create_token dir ~agent_name:"codex" ~role:Masc_domain.Worker in
+  let creds = Auth.list_credentials dir in
+  cleanup_test_workspace dir;
+  check int "3 credentials" 3 (List.length creds)
+
+let test_delete_credential () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
+  Auth.delete_credential dir "claude";
+  let creds = Auth.list_credentials dir in
+  cleanup_test_workspace dir;
+  check int "0 credentials after delete" 0 (List.length creds)
+
+let test_ordinary_credential_changes_remain_visible () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let name = "ordinary-reader" in
+      let first_token = "ordinary-first-token" in
+      let next_token = "ordinary-next-token" in
+      let first : Masc_domain.agent_credential =
+        { id = None; agent_id = None; agent_name = name;
+          token = Auth.sha256_hash first_token; role = Masc_domain.Worker;
+          created_at = "2026-01-01T00:00:00Z"; expires_at = None }
+      in
+      Auth.save_credential dir first;
+      check bool "ordinary credential loads" true
+        (Auth.load_credential dir name = Some first);
+      check bool "initial token verifies" true
+        (Result.is_ok (Auth.verify_token dir ~agent_name:name ~token:first_token));
+      let path = Auth.credential_file dir name in
+      let replacement =
+        { first with token = Auth.sha256_hash next_token; role = Masc_domain.Admin }
+      in
+      (* Replace outside the Auth writer: the next read must observe the file
+         without relying on an in-process cache invalidation notification. *)
+      let replace cred =
+        let staged = path ^ ".replacement" in
+        write_file staged (Yojson.Safe.to_string (Masc_domain.agent_credential_to_yojson cred));
+        Unix.rename staged path
+      in
+      replace replacement;
+      check bool "replacement token and role are observed" true
+        (Auth.load_credential dir name = Some replacement);
+      check bool "replaced token is rejected" true
+        (Result.is_error (Auth.verify_token dir ~agent_name:name ~token:first_token));
+      check bool "replacement token verifies" true
+        (Result.is_ok (Auth.verify_token dir ~agent_name:name ~token:next_token));
+      replace { replacement with expires_at = Some "2000-01-01T00:00:00Z" };
+      check bool "replacement expiry remains enforced" true
+        (match Auth.verify_token dir ~agent_name:name ~token:next_token with
+         | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _)) -> true
+         | _ -> false);
+      List.iter (fun contents ->
+        write_file path contents;
+        check bool "corrupt credential is not reused" true
+          (Option.is_none (Auth.load_credential dir name)))
+        [ "{"; "[]"; {|{"agent_name":"ordinary-reader"}|} ];
+      replace replacement;
+      check bool "repaired file is read afresh" true
+        (Auth.load_credential dir name = Some replacement);
+      Unix.unlink path;
+      check bool "deleted credential is not reused" true
+        (Option.is_none (Auth.load_credential dir name)))
+
+let test_load_credential_redirect_stub () =
+  (* UUID-backed credentials write a redirect stub so legacy exact-name
+     lookups continue to work after Phase-3 migration. *)
+  let dir = setup_test_workspace () in
+  let id = Masc_domain.Credential_id.generate () in
+  let cred : Masc_domain.agent_credential =
+    {
+      id = Some id;
+      agent_id = None;
+      agent_name = "lambda";
+      token = "hashed-token";
+      role = Masc_domain.Worker;
+      created_at = "2026-01-01T00:00:00Z";
+      expires_at = None;
+    }
+  in
+  Auth.save_credential dir cred;
+  let stub_hit = Auth.load_credential dir "lambda" in
+  let uuid_hit = Auth.load_credential dir (Masc_domain.Credential_id.to_string id) in
+  cleanup_test_workspace dir;
+  (match stub_hit with
+   | Some loaded when loaded.agent_name = "lambda" -> ()
+   | _ -> fail "redirect stub should resolve to UUID-backed credential");
+  (match uuid_hit with
+   | Some loaded when loaded.agent_name = "lambda" -> ()
+   | _ -> fail "direct UUID lookup should resolve")
+
+let test_delete_uuid_backed_credential_removes_redirect_target () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let id = Masc_domain.Credential_id.generate () in
+      let raw_token = "uuid-backed-secret" in
+      let cred : Masc_domain.agent_credential =
+        {
+          id = Some id;
+          agent_id = None;
+          agent_name = "lambda";
+          token = Auth.sha256_hash raw_token;
+          role = Masc_domain.Worker;
+          created_at = "2026-01-01T00:00:00Z";
+          expires_at = None;
+        }
+      in
+      Auth.save_credential dir cred;
+      (match Auth.verify_token dir ~agent_name:"lambda" ~token:raw_token with
+       | Ok _ -> ()
+       | Error e ->
+           fail
+             (Printf.sprintf
+                "uuid-backed credential should verify before delete: %s"
+                (Masc_domain.masc_error_to_string e)));
+      Auth.delete_credential dir "lambda";
+      check bool "agent stub removed" true
+        (Option.is_none (Auth.load_credential dir "lambda"));
+      check bool "uuid target removed" true
+        (Option.is_none
+           (Auth.load_credential dir (Masc_domain.Credential_id.to_string id)));
+      (match Auth.find_credential_by_token dir ~token:raw_token with
+       | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
+       | Error e ->
+           fail
+             (Printf.sprintf
+                "expected deleted token to be invalid: %s"
+                (Masc_domain.masc_error_to_string e))
+       | Ok cred ->
+           fail (Printf.sprintf "deleted token still resolves to %s" cred.agent_name));
+      check int "0 credentials after uuid-backed delete" 0
+        (List.length (Auth.list_credentials dir)))
+
+let test_load_credential_exact_wins_over_fallback () =
+  (* If both the nickname file and the prefix file exist, the exact
+     match wins so a per-nickname override remains possible. *)
+  let dir = setup_test_workspace () in
+  let _ = Auth.create_token dir ~agent_name:"lambda" ~role:Masc_domain.Worker in
+  let _ = Auth.create_token dir ~agent_name:"lambda-fair-tapir" ~role:Masc_domain.Admin in
+  let resolved = Auth.load_credential dir "lambda-fair-tapir" in
+  cleanup_test_workspace dir;
+  match resolved with
+  | Some cred when cred.agent_name = "lambda-fair-tapir" && cred.role = Masc_domain.Admin -> ()
+  | Some cred ->
+      fail (Printf.sprintf "unexpected resolution: %s/%s" cred.agent_name
+              (Masc_domain.agent_role_to_string cred.role))
+  | None -> fail "exact match should resolve"
+
+let test_extract_agent_type_prefix_keeper_aliases () =
+  check (option string) "keeper simple alias" (Some "alpha")
+    (Auth.extract_agent_type_prefix "keeper-alpha-agent");
+  check (option string) "keeper hyphenated alias" (Some "omicron-improver")
+    (Auth.extract_agent_type_prefix "keeper-omicron-improver-agent");
+  check (option string) "generated nickname" (Some "lambda")
+    (Auth.extract_agent_type_prefix "lambda-fair-tapir");
+  check (option string) "hyphenated generated nickname" (Some "mu-king")
+    (Auth.extract_agent_type_prefix "mu-king-warm-heron");
+  check (option string) "hyphenated generated nickname unique" (Some "mu-king")
+    (Auth.extract_agent_type_prefix "mu-king-warm-heron-a3b2");
+  check (option string) "plain name stays plain" (Some "alpha")
+    (Auth.extract_agent_type_prefix "alpha");
+  check (option string) "two segment keeper fallback unchanged" (Some "keeper")
+    (Auth.extract_agent_type_prefix "keeper-alpha")
+
+let test_verify_token_keeper_exact_match () =
+  (* UUID-based storage removes nickname-prefix collapse.  Keeper
+     credentials must be looked up by their exact agent_name. *)
+  let dir = setup_test_workspace () in
+  let result =
+    match Auth.ensure_keeper_credential dir ~agent_name:"keeper-alpha-agent" with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir ~agent_name:"keeper-alpha-agent" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok cred ->
+      check string "keeper credential exact match" "keeper-alpha-agent" cred.agent_name
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "keeper credential should verify with exact agent_name: %s"
+           (Masc_domain.masc_error_to_string e))
+
+(* Was: this test validated a legacy fallback where a bare-form
+   credential ("alpha") was accepted as a verification source for a
+   canonical lookup ("keeper-alpha-agent"). That fallback was the
+   mechanism by which dual-identity credentials silently coexisted --
+   any path that minted a bare credential created a second valid
+   identity for the same keeper.
+
+   PR-3a self-heals dual-identity: ensure_keeper_credential archives
+   the bare-form credential when its token differs from the canonical.
+   The bare token therefore must NOT verify against the canonical
+   name after bootstrap. Spec: AuthIdentityFSM.tla I1
+   IdentityBindsToken (a token must bind to exactly one principal). *)
+let test_verify_token_keeper_alias_archives_dual_identity_bare () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      match Auth.create_token dir ~agent_name:"alpha" ~role:Masc_domain.Worker with
+      | Error e ->
+          fail
+            (Printf.sprintf "stable keeper token creation failed: %s"
+               (Masc_domain.masc_error_to_string e))
+      | Ok (stale_bare_token, _) -> (
+          match
+            Auth.ensure_keeper_credential dir
+              ~agent_name:"keeper-alpha-agent"
+          with
+          | Error e ->
+              fail
+                (Printf.sprintf "keeper credential bootstrap failed: %s"
+                   (Masc_domain.masc_error_to_string e))
+          | Ok _ -> (
+              check bool "canonical credential exists" true
+                (Option.is_some
+                   (Auth.load_credential dir "keeper-alpha-agent"));
+              (* PR-3a behavior: bare credential is archived, the bare
+                 token is now stale and must not authenticate. *)
+              match
+                Auth.verify_token dir ~agent_name:"keeper-alpha-agent"
+                  ~token:stale_bare_token
+              with
+              | Ok cred ->
+                  fail
+                    (Printf.sprintf
+                       "stale bare token must NOT verify against canonical \
+                        after PR-3a self-heal (got cred owner=%s)"
+                       cred.agent_name)
+              | Error _ -> ())))
+
+let test_load_credential_missing_keeper_alias_stays_quiet () =
+  let dir = setup_test_workspace () in
+  let resolved, stderr_output =
+    Fun.protect
+      ~finally:(fun () -> cleanup_test_workspace dir)
+      (fun () ->
+        let resolved = ref None in
+        let stderr_output =
+          capture_stderr (fun () ->
+            resolved := Auth.load_credential dir "keeper-alpha-agent")
+        in
+        (!resolved, stderr_output))
+  in
+  check (option string) "missing keeper alias returns none" None
+    (Option.map (fun cred -> cred.Masc_domain.agent_name) resolved);
+  check string "missing keeper alias emits no parse noise" ""
+    (String.trim stderr_output)
+
+let test_verify_token_rejects_dashboard_dev_legacy_alias () =
+  let dir = setup_test_workspace () in
+  let result =
+    match Auth.create_token dir ~agent_name:"dashboard-dev" ~role:Masc_domain.Admin with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir ~agent_name:"dashboard" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok cred -> fail (Printf.sprintf "unexpected credential owner: %s" cred.agent_name)
+  | Error e ->
+      let rendered = Masc_domain.masc_error_to_string e in
+      check_contains ~name:"legacy dashboard-dev bearer rejected for dashboard"
+        ~needle:"bearer token belongs to dashboard-dev" rendered
+
+let test_save_raw_token_credential_uses_provided_token () =
+  let dir = setup_test_workspace () in
+  let raw_token = "fixed-admin-token" in
+  let save_result =
+    Auth.save_raw_token_credential dir ~agent_name:"bootstrap-admin"
+      ~role:Masc_domain.Admin ~raw_token
+  in
+  let verify_result =
+    match save_result with
+    | Ok _ ->
+        Auth.verify_token dir ~agent_name:"bootstrap-admin" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match verify_result with
+  | Ok cred ->
+      check string "saved credential owner" "bootstrap-admin" cred.agent_name;
+      check bool "saved credential role is admin" true (cred.role = Masc_domain.Admin)
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "provided raw token should verify after save_raw_token_credential: %s"
+           (Masc_domain.masc_error_to_string e))
+
+let test_save_raw_token_credential_rejects_blank_token () =
+  let dir = setup_test_workspace () in
+  let result =
+    Auth.save_raw_token_credential dir ~agent_name:"bootstrap-admin"
+      ~role:Masc_domain.Admin ~raw_token:"   "
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken reason)) ->
+    check string "explicit blank token error"
+      "Raw token must not be blank or whitespace-only" reason
+  | Error error ->
+    failf "expected InvalidToken, received %s" (Masc_domain.masc_error_to_string error)
+  | Ok _ -> fail "blank raw token must be rejected"
+
+let test_save_raw_token_credential_in_eio_runtime () =
+  let dir = setup_test_workspace () in
+  let raw_token = "runtime-admin-token" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        match
+          Auth.save_raw_token_credential dir ~agent_name:"bootstrap-admin"
+            ~role:Masc_domain.Admin ~raw_token
+        with
+        | Ok cred ->
+            check string "saved credential owner" "bootstrap-admin" cred.agent_name;
+            check int "credential mode 0600" 0o600
+              (permission_bits (Auth.credential_file dir "bootstrap-admin"))
+        | Error e ->
+            fail
+              (Printf.sprintf
+                 "save_raw_token_credential should work inside Eio runtime: %s"
+                 (Masc_domain.masc_error_to_string e))))
+
+let test_save_file_backed_raw_token_credential_persists_private_bearer () =
+  let dir = setup_test_workspace () in
+  let raw_token = "file-backed-admin-token" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      match
+        Auth.save_file_backed_raw_token_credential dir
+          ~agent_name:"bootstrap-admin" ~role:Masc_domain.Admin ~raw_token
+      with
+      | Error error ->
+          failf "file-backed credential save failed: %s"
+            (Masc_domain.masc_error_to_string error)
+      | Ok credential ->
+          check string "stored token hash" credential.token
+            (Auth.sha256_hash raw_token);
+          check (option string) "raw token file is readable" (Some raw_token)
+            (Auth.load_raw_token dir ~agent_name:"bootstrap-admin");
+          let token_file =
+            Filename.concat (Auth.auth_dir dir) "bootstrap-admin.token"
+          in
+          check int "raw token file mode" 0o600 (permission_bits token_file);
+          match
+            Auth.verify_token dir ~agent_name:"bootstrap-admin" ~token:raw_token
+          with
+          | Ok verified ->
+              check bool "file-backed role is admin" true
+                (verified.role = Masc_domain.Admin)
+          | Error error ->
+              failf "file-backed bearer should verify: %s"
+                (Masc_domain.masc_error_to_string error))
+
+let test_ensure_keeper_credential_uses_per_keeper_token () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let ensure_result =
+        with_env "MASC_TOKEN" "" (fun () ->
+          Auth.ensure_keeper_credential dir ~agent_name:"keeper-omicron-improver-agent")
+      in
+      match ensure_result with
+      | Ok (raw_token, cred) ->
+          let raw_token_path =
+            Filename.concat (Auth.auth_dir dir)
+              "keeper-omicron-improver-agent.token"
+          in
+          check string "keeper credential exact name" "keeper-omicron-improver-agent" cred.agent_name;
+          check bool "keeper credential has uuid id" true (Option.is_some cred.id);
+          check bool "keeper credential is worker" true (cred.role = Masc_domain.Worker);
+          check bool "keeper bearer is not the shared internal token" false
+            (Auth.verify_internal_keeper_token dir ~token:raw_token);
+          check bool "internal keeper token hash persisted" true
+            (Sys.file_exists (Auth.internal_keeper_token_hash_file dir));
+          check bool "persisted raw token file created" true
+            (Sys.file_exists raw_token_path);
+          check string "raw token hashes to keeper credential"
+            cred.token (Auth.sha256_hash raw_token);
+          check bool "keeper credential persisted by exact name" true
+            (Option.is_some (Auth.load_credential dir "keeper-omicron-improver-agent"));
+          check bool "no normalized keeper credential persisted" true
+            (Option.is_none (Auth.load_credential dir "omicron-improver"));
+          (match
+             Auth.verify_token dir ~agent_name:"keeper-omicron-improver-agent"
+               ~token:raw_token
+           with
+           | Ok verified ->
+               check string "keeper bearer verifies exact agent"
+                 "keeper-omicron-improver-agent" verified.agent_name
+           | Error e ->
+               fail
+                 (Printf.sprintf
+                    "per-keeper bearer token should verify: %s"
+                    (Masc_domain.masc_error_to_string e)))
+      | Error e ->
+          fail
+            (Printf.sprintf
+               "ensure_keeper_credential should mint a per-keeper token: %s"
+               (Masc_domain.masc_error_to_string e)))
+
+let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let first_result =
+        with_env "MASC_TOKEN" "" (fun () ->
+          Auth.ensure_keeper_credential dir ~agent_name:"keeper-omicron-improver-agent")
+      in
+      let raw_token_path =
+        Filename.concat (Auth.auth_dir dir) "keeper-omicron-improver-agent.token"
+      in
+      let shared_raw_token = "shared-codex-token" in
+      let _ =
+        Auth.save_raw_token_credential dir ~agent_name:"codex-mcp-client"
+          ~role:Masc_domain.Admin ~raw_token:shared_raw_token
+      in
+      let reused_result =
+        with_env "MASC_TOKEN" shared_raw_token (fun () ->
+          Auth.ensure_keeper_credential dir ~agent_name:"keeper-omicron-improver-agent")
+      in
+      match first_result, reused_result with
+      | Ok (first_raw_token, first_cred), Ok (reused_raw_token, reused_cred) ->
+          check bool "persisted raw token file created" true
+            (Sys.file_exists raw_token_path);
+          check int "persisted raw token file mode 0600" 0o600
+            (permission_bits raw_token_path);
+          check string "first credential uses exact keeper name" "keeper-omicron-improver-agent"
+            first_cred.agent_name;
+          check string "reused credential keeps exact keeper name" "keeper-omicron-improver-agent"
+            reused_cred.agent_name;
+          check string "persisted keeper raw token reused" first_raw_token
+            reused_raw_token
+      | Error e, _ | _, Error e ->
+          fail
+            (Printf.sprintf
+               "ensure_keeper_credential should reuse persisted keeper token: %s"
+               (Masc_domain.masc_error_to_string e)))
+
+let test_ensure_keeper_credential_reuses_uuid () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let result =
+        with_env "MASC_INTERNAL_MCP_TOKEN" "shared-keeper-token" (fun () ->
+          match
+            Auth.ensure_keeper_credential dir ~agent_name:"keeper-omicron-improver-agent"
+          with
+          | Error e -> Error e
+          | Ok (_, first_cred) -> (
+              match
+                Auth.ensure_keeper_credential dir
+                  ~agent_name:"keeper-omicron-improver-agent"
+              with
+              | Error e -> Error e
+              | Ok (_, second_cred) -> Ok (first_cred, second_cred)))
+      in
+      match result with
+      | Error e ->
+          fail
+            (Printf.sprintf
+               "ensure_keeper_credential should keep a stable UUID: %s"
+               (Masc_domain.masc_error_to_string e))
+      | Ok (first_cred, second_cred) -> (
+          match first_cred.id, second_cred.id with
+          | Some first_id, Some second_id ->
+              check string "keeper credential UUID stable"
+                (Masc_domain.Credential_id.to_string first_id)
+                (Masc_domain.Credential_id.to_string second_id);
+              check int "one logical keeper credential" 1
+                (List.length (Auth.list_credentials dir))
+          | _ -> fail "keeper credentials should be UUID-backed"))
+
+(* ============================================ *)
+(* Permission tests                             *)
+(* ============================================ *)
+
+let test_worker_permissions () =
+  check bool "worker can read" true
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReadState);
+  check bool "worker can claim" true
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanClaimTask);
+  check bool "worker can broadcast" true
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanBroadcast);
+  check bool "worker cannot admin" false
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanAdmin);
+  check bool "worker cannot init" false
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanInit)
+
+let test_admin_permissions () =
+  check bool "admin can read" true
+    (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanReadState);
+  check bool "admin can init" true
+    (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanInit);
+  check bool "admin can reset" true
+    (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanReset);
+  check bool "admin can admin" true
+    (Masc_domain.has_permission Masc_domain.Admin Masc_domain.CanAdmin)
+
+(* ============================================ *)
+(* Authorization tests                          *)
+(* ============================================ *)
+
+let test_auth_disabled_allows_all () =
+  let dir = setup_test_workspace () in
+  Auth.save_auth_config dir
+    { Masc_domain.default_auth_config with enabled = false; require_token = false };
+  let result = Auth.check_permission dir ~agent_name:"anyone" ~token:None ~permission:Masc_domain.CanInit in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> ()
+  | Error _ -> fail "should allow when auth disabled"
+
+let test_auth_enabled_requires_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result = Auth.check_permission dir ~agent_name:"claude" ~token:None ~permission:Masc_domain.CanClaimTask in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "should require token"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+  | Error _ -> fail "wrong error type"
+
+let test_auth_enabled_with_valid_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
+  let check_result = match create_result with
+    | Ok (raw_token, _) ->
+        Auth.check_permission dir ~agent_name:"claude" ~token:(Some raw_token) ~permission:Masc_domain.CanClaimTask
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match check_result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_permission_denied_for_worker_admin_action () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
+  let check_result = match create_result with
+    | Ok (raw_token, _) ->
+        Auth.check_permission dir ~agent_name:"worker_agent" ~token:(Some raw_token) ~permission:Masc_domain.CanInit
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match check_result with
+  | Ok () -> fail "worker should not get admin action"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+(* Regression for the bootstrap-grace bypass: the grace branch used to match
+   a bare, unauthenticated [agent_name] string against [read_initial_admin]
+   with no proof of possession. Any caller could self-declare that name via
+   an unauthenticated request header (server_auth.ml's x-masc-agent) and be
+   granted Admin outright. It must now require the workspace secret. *)
+let test_bootstrap_grace_rejects_agent_name_impersonation_without_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result =
+    Auth.check_permission dir ~agent_name:"test-admin" ~token:None
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "agent_name impersonation without a token must not grant access"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_bootstrap_grace_rejects_agent_name_impersonation_with_wrong_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result =
+    Auth.check_permission dir ~agent_name:"test-admin" ~token:(Some "not-the-secret")
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "a wrong/guessed token must not grant recovery admin"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_workspace_secret_grants_recovery_admin () =
+  let dir = setup_test_workspace () in
+  let secret, _bootstrap_token =
+    Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin"
+  in
+  (* Proof of possession of the workspace secret must grant recovery admin
+     regardless of the caller's self-declared agent_name. *)
+  let result =
+    Auth.check_permission dir ~agent_name:"anyone" ~token:(Some secret)
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_resolve_role_rejects_agent_name_impersonation_without_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result = Auth.resolve_role dir ~agent_name:"test-admin" ~token:None in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok role ->
+    fail (Printf.sprintf "impersonation without a token must not resolve a role, got %s"
+      (Masc_domain.show_agent_role role))
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_resolve_role_workspace_secret_grants_admin () =
+  let dir = setup_test_workspace () in
+  let secret, _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result = Auth.resolve_role dir ~agent_name:"anyone" ~token:(Some secret) in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok Masc_domain.Admin -> ()
+  | Ok role -> fail (Printf.sprintf "expected Admin, got %s" (Masc_domain.show_agent_role role))
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_authorize_unknown_masc_tool_strict_denied () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+          ~tool_name:"masc_unknown_tool"
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "unregistered masc_* tool should be denied"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_authorize_unknown_non_masc_tool_strict_denied () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
+  let before =
+    strict_unknown_tool_denial_count
+      ~agent_name:"worker_agent" ~tool_class:"external"
+  in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+          ~tool_name:"external_unknown_tool"
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "unknown non-masc tool should be denied in strict mode"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) ->
+      check (float 0.0001) "denial counter increments"
+        (before +. 1.0)
+        (strict_unknown_tool_denial_count
+           ~agent_name:"worker_agent" ~tool_class:"external")
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_authorize_retired_dotted_tool_prefixes_strict_denied () =
+  let retired_unlisted_tools =
+    [ "decision.unlisted_tool"; "experiment.unlisted_tool"; "client.unlisted_tool" ]
+  in
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+               (match
+                  Auth.authorize_tool
+                    dir
+                    ~agent_name:"worker_agent"
+                    ~token:(Some raw_token)
+                    ~tool_name
+                with
+                | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> Ok ()
+                | Ok () -> fail ("unexpected allow: " ^ tool_name)
+                | Error e -> Error e))
+          (Ok ())
+          retired_unlisted_tools
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_authorize_known_keeper_tool_strict_worker_allowed () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let create_result =
+    Auth.create_token dir ~agent_name:"keeper-delta-agent" ~role:Masc_domain.Worker
+  in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+                 Auth.authorize_tool dir ~agent_name:"keeper-delta-agent"
+                   ~token:(Some raw_token) ~tool_name)
+          (Ok ()) keeper_strict_auth_regression_tools
+    | Error e -> Error e
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
+  (match Tool_catalog.registered_metadata "masc_browser_session" with
+   | Some metadata ->
+     check bool "browser lifecycle requires write authority" true
+       (metadata.required_permission = Masc_domain.CanBroadcast)
+   | None -> fail "browser session has no catalog authority");
+  let result =
+    List.fold_left
+      (fun acc tool_name ->
+         match acc with
+         | Error _ as e -> e
+         | Ok () ->
+             Auth.authorize_tool_for_role ~agent_name:"keeper-delta-agent"
+               ~role:Masc_domain.Worker ~tool_name)
+      (Ok ()) keeper_strict_auth_regression_tools
+  in
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_authorize_tool_v2_unknown_internal_denied () =
+  let result =
+    Auth.authorize_tool_for_role ~agent_name:"worker_agent"
+      ~role:Masc_domain.Worker ~tool_name:"masc_unlisted_tool"
+  in
+  match result with
+  | Ok () -> fail "unregistered masc_* tool should be denied"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_authorize_tool_v2_enforces_catalog_permission () =
+  List.iter
+    (fun tool_name ->
+       (match
+          Auth.authorize_tool_for_role
+            ~agent_name:"worker_agent"
+            ~role:Masc_domain.Worker
+            ~tool_name
+        with
+        | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+        | Ok () -> fail (tool_name ^ " unexpectedly accepted Worker")
+        | Error e -> fail (Masc_domain.masc_error_to_string e));
+       match
+         Auth.authorize_tool_for_role
+           ~agent_name:"admin_agent"
+           ~role:Masc_domain.Admin
+           ~tool_name
+       with
+       | Ok () -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e))
+    [ "masc_start"; "masc_keeper_up"; "masc_keeper_reset"; "masc_keeper_down" ]
+;;
+
+let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
+  let result =
+    Auth.authorize_tool_for_role ~agent_name:"keeper-delta-agent"
+      ~role:Masc_domain.Worker ~tool_name:"keeper_totally_fake"
+  in
+  match result with
+  | Ok () -> fail "unknown keeper_* prefix should not bypass strict auth"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_tool_auth_strict_env_cannot_disable_fail_closed () =
+  let result =
+    with_env "MASC_TOOL_AUTH_STRICT" "0" (fun () ->
+        check bool "strict mode remains enabled" true
+          (Auth.is_tool_auth_strict_enabled ());
+        Auth.authorize_tool_for_role ~agent_name:"worker"
+          ~role:Masc_domain.Worker ~tool_name:"external_totally_fake")
+  in
+  match result with
+  | Ok () -> fail "MASC_TOOL_AUTH_STRICT=0 must deny unknown external tools"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+(* ============================================ *)
+(* Enable/disable tests                         *)
+(* ============================================ *)
+
+let test_enable_disable_auth () =
+  let dir = setup_test_workspace () in
+  let initially_enabled = Auth.is_auth_enabled dir in
+  let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"test-admin" in
+  let enabled = Auth.is_auth_enabled dir in
+  Auth.disable_auth dir;
+  let disabled_again = not (Auth.is_auth_enabled dir) in
+  cleanup_test_workspace dir;
+  check bool "auth enabled initially" true initially_enabled;
+  check bool "auth enabled after enable" true enabled;
+  check bool "auth disabled after disable" true disabled_again
+
+(* ============================================ *)
+(* Test suite                                   *)
+(* ============================================ *)
+
+let () =
+  Random.init 42;
+  run "Auth" [
+    "token_generation", [
+      test_case "parse defaults match default_auth_config" `Quick
+        test_auth_config_parse_defaults_match_default_config;
+      test_case "reject present invalid config fields" `Quick
+        test_auth_config_rejects_present_invalid_fields;
+      test_case "generate token" `Quick test_token_generation;
+      test_case "sha256 hash" `Quick test_sha256_hash;
+      test_case "Eqaf equality truth table" `Quick test_eqaf_equality_truth_table;
+    ];
+    "config", [
+      test_case "default config" `Quick test_default_auth_config;
+      test_case "save/load config" `Quick test_save_load_auth_config;
+      test_case "reload rejects same-metadata rewrite" `Quick
+        test_auth_config_reloads_same_metadata_rewrite;
+      test_case "atomic save rejects invalid values" `Quick
+        test_auth_config_save_is_atomic_and_rejects_invalid_values;
+      test_case "reject malformed config file" `Quick
+        test_load_auth_config_rejects_malformed_file;
+      test_case "save/load config in Eio runtime" `Quick
+        test_save_load_auth_config_in_eio_runtime;
+      test_case "load yields while it stats" `Quick
+        test_load_auth_config_yields_while_it_stats;
+      test_case "auth config saved private" `Quick
+        test_auth_config_saved_private;
+    ];
+    "credentials", [
+      test_case "create credential" `Quick test_create_credential;
+      test_case "credential saved private" `Quick
+        test_credential_saved_private;
+      test_case "removed admin field fails closed through authorization" `Quick
+        test_removed_admin_field_fails_closed_through_authorization;
+      test_case "verify token" `Quick test_verify_token;
+      test_case "verify wrong token" `Quick test_verify_wrong_token;
+      test_case "verify token reports token owner on agent mismatch" `Quick
+        test_verify_token_reports_token_owner_on_agent_mismatch;
+      test_case "verify token allows generated alias for owner prefix" `Quick
+        test_verify_token_allows_generated_alias_for_token_owner_prefix;
+      test_case "dashed name ending in the token owner is rejected" `Quick
+        test_verify_token_rejects_dashed_name_that_ends_in_the_token_owner;
+      test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
+      test_case "list credentials" `Quick test_list_credentials;
+      test_case "delete credential" `Quick test_delete_credential;
+      test_case "ordinary credential replacement corruption and deletion remain visible" `Quick
+        test_ordinary_credential_changes_remain_visible;
+      test_case "load_credential redirect stub resolves" `Quick
+        test_load_credential_redirect_stub;
+      test_case "delete uuid-backed credential removes target" `Quick
+        test_delete_uuid_backed_credential_removes_redirect_target;
+      test_case "load_credential exact match wins over fallback" `Quick
+        test_load_credential_exact_wins_over_fallback;
+      test_case "extract_agent_type_prefix keeper aliases" `Quick
+        test_extract_agent_type_prefix_keeper_aliases;
+      test_case "verify_token keeper exact match" `Quick
+        test_verify_token_keeper_exact_match;
+      test_case "verify_token keeper alias archives dual-identity bare" `Quick
+        test_verify_token_keeper_alias_archives_dual_identity_bare;
+      test_case "load_credential missing keeper alias stays quiet" `Quick
+        test_load_credential_missing_keeper_alias_stays_quiet;
+      test_case "verify_token rejects dashboard-dev legacy alias" `Quick
+        test_verify_token_rejects_dashboard_dev_legacy_alias;
+      test_case "save_raw_token_credential uses provided token" `Quick
+        test_save_raw_token_credential_uses_provided_token;
+      test_case "save_raw_token_credential rejects blank token" `Quick
+        test_save_raw_token_credential_rejects_blank_token;
+      test_case "save_raw_token_credential works in eio runtime" `Quick
+        test_save_raw_token_credential_in_eio_runtime;
+      test_case "file-backed raw credential persists private bearer" `Quick
+        test_save_file_backed_raw_token_credential_persists_private_bearer;
+      test_case "ensure_keeper_credential uses per-keeper token" `Quick
+        test_ensure_keeper_credential_uses_per_keeper_token;
+      test_case "ensure_keeper_credential reuses uuid" `Quick
+        test_ensure_keeper_credential_reuses_uuid;
+      test_case
+        "ensure_keeper_credential reuses persisted raw token when env mismatched"
+        `Quick
+        test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched;
+    ];
+    "permissions", [
+      test_case "worker permissions" `Quick test_worker_permissions;
+      test_case "admin permissions" `Quick test_admin_permissions;
+    ];
+    "authorization", [
+      test_case "auth disabled allows all" `Quick test_auth_disabled_allows_all;
+      test_case "auth enabled requires token" `Quick test_auth_enabled_requires_token;
+      test_case "auth enabled with valid token" `Quick test_auth_enabled_with_valid_token;
+      test_case "permission denied for worker admin action" `Quick
+        test_permission_denied_for_worker_admin_action;
+      test_case "bootstrap grace rejects agent_name impersonation without token"
+        `Quick test_bootstrap_grace_rejects_agent_name_impersonation_without_token;
+      test_case "bootstrap grace rejects agent_name impersonation with wrong token"
+        `Quick test_bootstrap_grace_rejects_agent_name_impersonation_with_wrong_token;
+      test_case "workspace secret grants recovery admin"
+        `Quick test_workspace_secret_grants_recovery_admin;
+      test_case "resolve_role rejects agent_name impersonation without token"
+        `Quick test_resolve_role_rejects_agent_name_impersonation_without_token;
+      test_case "resolve_role workspace secret grants admin"
+        `Quick test_resolve_role_workspace_secret_grants_admin;
+      test_case "strict unknown masc tool denied"
+        `Quick test_authorize_unknown_masc_tool_strict_denied;
+      test_case "strict unknown non-masc tool denied"
+        `Quick test_authorize_unknown_non_masc_tool_strict_denied;
+      test_case "strict retired dotted tool prefixes denied"
+        `Quick test_authorize_retired_dotted_tool_prefixes_strict_denied;
+      test_case "strict known keeper tool allows worker"
+        `Quick test_authorize_known_keeper_tool_strict_worker_allowed;
+      test_case "strict v2 known keeper tool allows worker"
+        `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
+      test_case "strict v2 unknown internal tool denied"
+        `Quick test_authorize_tool_v2_unknown_internal_denied;
+      test_case "strict v2 catalog permission enforced"
+        `Quick test_authorize_tool_v2_enforces_catalog_permission;
+      test_case "strict v2 fake keeper prefix denied"
+        `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
+      test_case "tool auth strict env cannot disable fail-closed"
+        `Quick test_tool_auth_strict_env_cannot_disable_fail_closed;
+    ];
+    "enable_disable", [
+      test_case "enable/disable auth" `Quick test_enable_disable_auth;
+      test_case "workspace secret saved private" `Quick test_workspace_secret_saved_private;
+      test_case "verify_workspace_secret falls back to file when uncached" `Quick
+        test_verify_workspace_secret_falls_back_to_file_when_uncached;
+      test_case "verify_workspace_secret uses cached hash" `Quick
+        test_verify_workspace_secret_uses_cached_hash;
+      test_case "verify_workspace_secret fails closed when file unreadable" `Quick
+        test_verify_workspace_secret_fails_closed_when_file_unreadable;
+    ];
+  ]

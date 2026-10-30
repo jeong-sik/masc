@@ -1,0 +1,20 @@
+build frames=128 mean=0.35ms p50=0.26 p95=0.79 p99=1.66 max=1.74
+  build[keeper-list] frames=69 mean=0.32ms p50=0.23 p95=0.75 p99=0.89 max=1.74
+  build[keeper-detail] frames=53 mean=0.41ms p50=0.29 p95=0.79 p99=1.46 max=1.66
+  build[keeper-message] frames=4 mean=0.17ms p50=0.16 p95=0.29 p99=0.29 max=0.29
+  build[overview] frames=2 mean=0.19ms p50=0.22 p95=0.22 p99=0.22 max=0.22
+  worst[0] frame=20 1.74ms tag=keeper-list
+  worst[1] frame=84 1.66ms tag=keeper-detail
+  worst[2] frame=80 1.46ms tag=keeper-detail
+  worst[3] frame=87 1.18ms tag=keeper-detail
+  worst[4] frame=30 0.89ms tag=keeper-list
+present frames=128 mean=1.32ms p50=0.01 p95=0.11 p99=0.23 max=165.06
+  present[keeper-list] frames=69 mean=0.01ms p50=0.00 p95=0.01 p99=0.05 max=0.17
+  present[keeper-detail] frames=53 mean=3.17ms p50=0.04 p95=0.12 p99=0.20 max=165.06
+  present[keeper-message] frames=4 mean=0.04ms p50=0.02 p95=0.11 p99=0.11 max=0.11
+  present[overview] frames=2 mean=0.11ms p50=0.23 p95=0.23 p99=0.23 max=0.23
+  worst[0] frame=84 165.06ms tag=keeper-detail
+  worst[1] frame=1 0.23ms tag=overview
+  worst[2] frame=88 0.20ms tag=keeper-detail
+  worst[3] frame=3 0.17ms tag=keeper-list
+  worst[4] frame=72 0.13ms tag=keeper-detail

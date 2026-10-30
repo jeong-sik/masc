@@ -1,0 +1,27 @@
+{
+  "captured_at": "2026-08-19T03:05:00Z",
+  "purpose": "Log 행 duration 축: rotation을 건넌 causal completeness + #29011 링 절단 신호 라이브 검증",
+  "findings": {
+    "ring_truncation_signal_live": {
+      "probe": "GET /api/v1/dashboard/logs?limit=3",
+      "response_ring": { "start_seq": 11594, "total": 61594, "dropped_before": true },
+      "verdict": "#29011 착륙 기능이 라이브 응답에 실림 — '원인 없음'과 '창 밖'이 구분됨 (total 61,594 중 ring 50,000 유지, 11,594 이전 절단 명시)"
+    },
+    "rotation_causal_completeness": {
+      "probe": "system_log_2026-08-18.jsonl last_seq vs system_log_2026-08-19.jsonl first_seq",
+      "values": { "prev_last_seq": 115827, "cur_first_seq": 115828, "gap": 1 },
+      "verdict": "자정 rotation 경계 인과 사슬 무결 — gap=1"
+    },
+    "durable_chain": {
+      "files": ["system_log_2026-08-16.jsonl", "system_log_2026-08-17.jsonl", "system_log_2026-08-18.jsonl", "system_log_2026-08-19.jsonl"],
+      "keep_days": 7,
+      "rows_08_18": 156780,
+      "rows_08_19_partial": 14467
+    },
+    "seq_identity_space": {
+      "observation": "오늘 파일 안에서 seq 115828..(재시작 09:21)..0..61639 — seq는 프로세스-로컬 공간, durable 파일은 재시작을 건너 연속 보존",
+      "implication": "라이브 ring의 seq와 durable 파일의 seq를 같은 공간으로 다루면 안 됨; 재시작 경계는 durable에서 seq 리셋으로 관측 가능"
+    }
+  },
+  "multi_lane_duration_note": "Multi Lane duration 축은 현 배포 설정(lane 1개·assignment 0)에서 구조적으로 측정 불가 — 다중 lane 실가동이 선행 조건 (행 자체 기록과 일치)"
+}

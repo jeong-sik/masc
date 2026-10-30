@@ -1,0 +1,206 @@
+(** Private provider-neutral exact-output requirement and ready-plan admission.
+
+    This module owns the pure requirement projection, frozen generation plan,
+    and measured-flow error normalization. The public facade only orchestrates
+    outer-flow evidence and generation execution. *)
+
+type schema_fingerprint
+type domain_schema
+
+type minimum_guarantee =
+  | Json_syntax
+  (** Prompt-only JSON contract.  AGENT_CORE appends the schema instruction and
+          validates the response locally; it does not send a provider-native
+          response-format request. *)
+  | Provider_schema (** Explicit opt-in to a provider-native schema request. *)
+
+type actual_assurance =
+  | Json_syntax_only
+  | Provider_schema_requested
+
+type output_requirement = private
+  { schema : domain_schema
+  ; source_schema_fingerprint : schema_fingerprint
+  ; minimum_guarantee : minimum_guarantee
+  }
+
+type plan_provenance = private
+  { source_schema_fingerprint : schema_fingerprint
+  ; effective_schema_fingerprint : schema_fingerprint option
+  ; actual_assurance : actual_assurance
+  ; catalog_generation : Exact_output_resolver.catalog_generation
+  ; catalog_evidence : Exact_output_resolver.catalog_evidence
+  ; target_identity : Exact_output_resolver.target_identity
+  }
+
+type ready_plan = private
+  { plan : Exact_output_plan.t
+  ; provenance : plan_provenance
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; catalog_generation : Exact_output_resolver.catalog_generation
+  ; catalog_evidence : Exact_output_resolver.catalog_evidence
+  ; target_identity : Exact_output_resolver.target_identity
+  ; measurement : Exact_output_flow_admission.measurement_evidence
+  }
+
+type token_capacity_observation =
+  { accepted_through_tokens : int
+  ; rejected_from_tokens : int option
+  }
+
+type token_capacity_rejection =
+  | Capacity_evidence_not_yet_valid of
+      { now_unix_s : int
+      ; checked_at_unix_s : int
+      }
+  | Capacity_evidence_expired of
+      { now_unix_s : int
+      ; expires_at_unix_s : int
+      }
+  | Capacity_boundary_unknown of
+      { input_tokens : int
+      ; accepted_through_tokens : int
+      ; rejected_from_tokens : int option
+      }
+  | Capacity_input_rejected of
+      { input_tokens : int
+      ; accepted_through_tokens : int
+      ; rejected_from_tokens : int
+      }
+(** Why a measured token-capacity observation could not admit the request:
+    the probe evidence is not yet valid, has expired, left the boundary
+    unobserved, or the probe itself rejected the input size. Mirrors the
+    [Serving_constraint] rejection constructors one-to-one. *)
+
+type context_fit = Prepared_completion_request.context_fit
+
+type wire_admission_error =
+  | Capability_snapshot_missing
+  | Output_contract_unavailable
+  | Cross_feature_not_allowed
+  | Global_admission_not_allowed
+  | Invalid_connect_timeout
+  | Invalid_body_timeout
+  | Missing_deadline of { provider_id : string option }
+      (** No body timeout reached the plan; the response body would be read
+          with no deadline. [provider_id] names the provider whose
+          declaration is missing, [None] when the config names none. See
+          {!Exact_output_plan.output_admission_error}. *)
+  | Caller_supplied_header_not_allowed
+  | Unsupported_image_input
+  | Unsupported_document_input
+  | Unsupported_audio_input
+  | Unsupported_system_prompt
+  | Token_measurement_required of token_capacity_observation
+  | Context_limit_unavailable
+  | Invalid_context_limit
+  | Output_reservation_unavailable
+  | Measured_context_window_exceeded of context_fit
+  | Measured_serving_constraint_rejected of token_capacity_rejection
+  | Token_measurement_failed
+  | Unsupported_target_model of { model_id : string }
+  | Target_request_rejected of Http_client.http_error
+      (** What the provider config or its credentials refused, kept as the
+          transport said it. *)
+  | Request_serialization_rejected of Http_client.http_error
+      (** What the serializer refused, kept as it said it. *)
+  | Measured_request_mismatch
+      (** The measured request is not the one the plan froze. *)
+
+type admission_error =
+  | Provider_schema_unavailable
+  | Unsupported_schema_keyword of string
+  | Unsupported_schema_type of string
+  | Invalid_schema
+      (** The output requirement itself is not expressible on the wire:
+          the provider-native schema is unavailable for this contract, or a
+          keyword/type in the requirement is rejected. *)
+  | Wire_admission_rejected of wire_admission_error
+      (** Every remaining gate — deadlines, capabilities, image/document/
+          audio/system-prompt restrictions, frozen-header rules, token
+          measurement, context fit, and the target-model admission gate
+          ({!wire_admission_error.Unsupported_target_model}). *)
+
+
+type request_body_projection = private { actual_bytes : int }
+
+type 'callback_error flow_request_error =
+  | Flow_request_admission_failed of
+      admission_error * Exact_output_flow_admission.measurement_evidence
+  | Flow_request_measurement_start_failed of string
+  | Flow_request_before_measurement_dispatch_failed of
+      Exact_output_flow_admission.measurement_receipt * 'callback_error
+  | Flow_request_measurement_terminal_callback_failed of
+      Exact_output_flow_admission.measurement_receipt * 'callback_error
+
+val schema_fingerprint_to_string : schema_fingerprint -> string
+
+val domain_schema : output_requirement -> Yojson.Safe.t
+(** The schema the requirement was built with, unbranded. Same reason as
+    {!schema_instruction_text}: an executor whose transport carries a schema of
+    its own must hand over the caller's, not a local copy that can drift. *)
+
+val schema_instruction_text : output_requirement -> string
+(** The exact sentence appended to the prompt when the wire cannot carry the
+    schema ([Off]/[JsonMode]); see [Exact_output.schema_instruction_text]. *)
+
+val make_output_requirement
+  :  schema:Yojson.Safe.t
+  -> minimum_guarantee:minimum_guarantee
+  -> output_requirement
+
+val project_request_body
+  :  target:Exact_output_resolver.projection_target
+  -> messages:Types.message list
+  -> output_requirement
+  -> (request_body_projection, admission_error) result
+(** Purely serialize the exact provider request body for one credential-free
+    admitted-target projection. The returned count is produced by the same
+    provider serializer used by admission. Token/context fit is deliberately
+    outside this body-only contract. The same wire gates as {!admit} apply —
+    including {!Unsupported_target_model} — so a projected body can never
+    disagree with a plan admission on the same inputs. *)
+
+val admit
+  :  target:Exact_output_resolver.selected_target
+  -> messages:Types.message list
+  -> output_requirement
+  -> (ready_plan, admission_error) result
+(** Freeze the generation plan for an already-measured-free path: runs every
+    pure contract check, ending in the output-contract gate — the target's
+    {!Exact_output_resolver.selected_target_model_admitted} (itself
+    {!Exact_output_catalog_binding.target_model_admitted} on the target's own
+    catalog id and capabilities) must be [true], otherwise this fails with
+    {!Wire_admission_rejected} carrying
+    {!Unsupported_target_model.[Unsupported_target_model]}. All remaining
+    checks report through {!wire_admission_error} inside
+    {!Wire_admission_rejected}. *)
+
+val admit_candidate_request
+  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> clock:_ Eio.Time.clock
+  -> on_measurement_receipt:(Exact_output_flow_admission.measurement_receipt -> unit)
+  -> before_measurement_dispatch:
+       (Exact_output_flow_admission.measurement_receipt -> (unit, 'callback_error) result)
+  -> on_measurement_terminal:
+       (Exact_output_flow_admission.measurement_receipt -> (unit, 'callback_error) result)
+  -> target:Exact_output_resolver.selected_target
+  -> messages:Types.message list
+  -> output_requirement
+  -> (ready_plan, 'callback_error flow_request_error) result
+(** [admit] plus a provider-native token measurement, run through the caller
+    given network and clock: admission runs first (same gates, so
+    {!Flow_request_admission_failed} carries the full {!admission_error}),
+    then the count-tokens probe dispatches on [net] with its timeouts run on
+    [clock], and the three callbacks bracket the probe: [before_measurement_dispatch] may veto
+    ({!Flow_request_before_measurement_dispatch_failed} wraps the callback's
+    own error), [on_measurement_receipt] observes, and
+    [on_measurement_terminal] receives the final probe result, whose failure
+    surfaces as {!Flow_request_measurement_terminal_callback_failed}. Any
+    callback failure aborts the flow without consuming an admission. *)
+
+val plan_provenance : ready_plan -> plan_provenance
+val plan_fingerprint : ready_plan -> string
+val connect_timeout_s : ready_plan -> float option
+val body_timeout_s : ready_plan -> float option

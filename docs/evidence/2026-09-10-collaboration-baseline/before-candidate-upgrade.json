@@ -1,0 +1,48 @@
+{
+  "observed_at": 1789046215.2892559,
+  "files": {
+    "tasks/backlog.json": {
+      "sha256": "32f25330a8d54d56e081c4a6f996ad498f57e766b758ee50b6ded7e8296bfcb1",
+      "bytes": 1753
+    },
+    "tasks/goal_task_links.json": {
+      "sha256": "ace0a271672e832a68741f3d6726f37df6b357ca4cfe59f7cc612d9c3e3f2ef3",
+      "bytes": 175
+    },
+    "goals.json": {
+      "sha256": "6eaf785b6f660035ed3d79ac63315b73543af9b0f75607fbc2315702794b1e3f",
+      "bytes": 1460
+    },
+    "config/runtime.toml": {
+      "sha256": "2227b792b3c9516ddc8d967d4a1a7386a3823da6aec42b732ff607ab4fc3a03f",
+      "bytes": 2742
+    },
+    "config/keepers/exhibit-editor.toml": {
+      "sha256": "38c22672c50e3fa982f12cd0b97163985363412a106c88ee6f98ee2512003d24",
+      "bytes": 612
+    },
+    "config/keepers/exhibit-designer.toml": {
+      "sha256": "30501da7c16f29e7fa5f5f4f0abb91c26ffb0375a7c02237d004299a3bf987c8",
+      "bytes": 631
+    },
+    "playground/docker/exhibit-editor/booklet.pdf": {
+      "sha256": "b4dbe93e87b176772144c9535cc4f6e2824cac4e9725d9b781187439aca09eb6",
+      "bytes": 118186
+    },
+    "playground/docker/exhibit-editor/poster.png": {
+      "sha256": "e0455dde3457ffeb2c041f6ca816865836f5a7f0355485370e630cc2a375a392",
+      "bytes": 93730
+    },
+    "playground/docker/exhibit-editor/evidence.json": {
+      "sha256": "b1f13cf20c1be3d7945639dc1b8016e95f240343dd664c75ed9a3793ad244a8e",
+      "bytes": 791
+    }
+  },
+  "operator_state": {
+    "pid": 71727,
+    "counter": 29,
+    "binary": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/masc-observed.exe",
+    "binary_sha256": "beb1324c0ab4341595df6ac69cdee0571df3e16c3a4583f857130a10de817a1a",
+    "expected_commit": "68c7668a976a2ac7db36a80f10deaea3516ec469"
+  }
+}

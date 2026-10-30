@@ -1,0 +1,316 @@
+(** Immutable AGENT_CORE exact-output publication for MASC runtime routing. *)
+
+type t
+type publication_error =
+  | Registry_not_published
+  | Publication_busy
+  | Replacement_base_changed
+  | Duplicate_lane_id of
+      { position : int
+      ; lane_id : string
+      }
+  | Empty_lane of { lane_id : string }
+  | Blank_lane_slot of
+      { lane_id : string
+      ; position : int
+      }
+  | Duplicate_lane_slot of
+      { lane_id : string
+      ; position : int
+      ; slot_id : string
+      }
+  | Invalid_lane_slot of
+      { lane_id : string
+      ; position : int
+      ; slot_id : string
+      ; cause : Agent_core.Exact_output.target_ref_error
+      }
+  | Lane_thinking_not_encodable of
+      { lane_id : string
+      ; slot_id : string
+      ; thinking : bool
+      ; rejection : Llm_provider.Complete_common.thinking_control_request_rejection
+      }
+      (** The lane declares [thinking] and this admitted slot's model cannot
+          carry it, so every request on the slot would be refused. *)
+  | Required_lane_unavailable of { lane_id : string }
+  | Required_lane_disabled of { lane_id : string }
+  | Resolver_snapshot_rejected of Agent_core.Exact_output.resolver_snapshot_error
+      (** The resolver snapshot for a replacement could not be built from the
+          text being committed. *)
+
+type rejected_slot =
+  { lane_id : string
+  ; position : int
+  ; slot_id : string
+  }
+
+type rejected_slot_diagnosis =
+  | Declared_target_binding_rejected
+      (** The overlay declares a target with this id, but its provider
+          binding was rejected at resolver load; the binding report names
+          the cause and the slot itself needs no change. *)
+  | Configured_runtime_only of
+      { provider_id : string
+      ; api_name : string
+      }
+      (** The id names a runtime.toml runtime and no overlay target shares
+          it. What to do depends on how the lane dispatches: a lane that
+          dispatches by configured runtime id (verifier_exact) needs a
+          same-id overlay target added; a lane that dispatches by admitted
+          target needs the target id in the slot instead. *)
+  | Unknown_to_both_registries
+      (** Neither a declared exact target nor an enabled configured runtime:
+          the catalog moved on, the runtime is disabled, or the id is
+          mistyped. *)
+
+type prepared_replacement
+
+(** What committing a prepared replacement does to the published registry. *)
+type replacement_outcome =
+  | Registry_replaced
+      (** A new registry, admitted against a resolver snapshot built from the
+          committed text, is published with the write. *)
+  | Registry_unpublished
+      (** No registry was published when the replacement was prepared, and the
+          replacement publishes none: only boot and setup resume publish the
+          first one. *)
+
+type ('not_committed, 'committed) replacement_effect =
+  | Not_committed of 'not_committed
+  | Committed of 'committed
+
+type runtime_observation =
+  { candidate : Runtime_candidate_backpressure.candidate
+  ; quota_scope : Runtime_quota_window.scope
+  }
+(** Frozen alongside a target derived from the same materialized runtime.
+    Full replacement catalog targets carry no runtime observation. *)
+
+type selected_slot =
+  { slot_id : string
+  ; admitted_target : Agent_core.Exact_output.admitted_target
+  ; runtime_observation : runtime_observation option
+  }
+
+type resolved_lane =
+  { selected_slots : selected_slot list
+  ; cli_slots : string list
+        (** Official-client runtime ids the lane walks as one-shot fallbacks
+            after every catalog slot is exhausted, in declaration order.
+            Carried verbatim from [cli_slots]; whether an id resolves to a
+            live official-client runtime is answered at execution with a
+            typed error, and a lane with only cli slots is still resolvable
+            (RFC cli-runtimes-as-lane-slots). *)
+  }
+
+type lane_resolution_error =
+  | Exact_lane_unconfigured of { lane_id : string }
+  | Exact_lane_off of { lane_id : string; owner : Runtime_schema.exact_lane_owner }
+  | No_admitted_lane_slots of { lane_id : string }
+
+val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)
+(** Wake a consumer after a successful publication changes this lane's
+    declaration, admitted target identities, or materialized runtime bindings,
+    including absent-to-present. Runtime binding equality includes opaque
+    credential identity; no secret is rendered or persisted.
+    Callbacks run outside the publication mutex and must only signal work,
+    never run it inline. Callback exceptions, including callback cancellation,
+    are isolated from the already-committed publication result.
+    The returned function unsubscribes the consumer.
+
+    Closing a replacement fence also wakes every consumer when {!current}
+    refused a reader with [Publication_busy] while the fence stood, whether
+    the write committed, failed or kept the previous registry: that reader
+    parked work only the fence's end can admit. A fence that refused no
+    reader wakes only the consumers its commit changed.
+
+    Credential changes are observed only for slots with runtime observations
+    in a successful publication. Standalone overlay targets without a runtime
+    observation, environment changes or refresh outside publication, and an
+    external provider recovering are not events from this subscription. *)
+
+val publish
+  :  ?runtime_observations:(string * runtime_observation) list
+  -> ?required_lane_ids:string list
+  -> ?addon_served_lane_ids:string list
+  -> ?excused_lane_ids:string list
+  -> lanes:Runtime_schema.exact_output_lane_decl list
+  -> Agent_core.Exact_output.resolver_snapshot
+  -> (t, publication_error) result
+(** Validate and atomically publish one complete resolver-and-lane registry.
+    Invalid declarations are rejected before the Atomic is changed.
+
+    Every declaration string present in the frozen catalog is converted to an
+    immutable AGENT_CORE admitted-target handle before publication. Credential
+    presence is deliberately excluded from publication admission. Unknown
+    catalog targets are retained as typed [rejected_slot] observations and do
+    not suppress admitted siblings. Blank or duplicate ids (including across
+    [slots] and [cli_slots]) and malformed target
+    refs remain fatal. A required lane must retain at least one admitted slot,
+    or be served by an Addon lane that holds one: an Addon lane whose exact
+    output is named by the required lane's id (for example
+    [hitl_auto_judge_exact]) counts only when that id is also in
+    [addon_served_lane_ids], the caller's attestation that dispatch routes the
+    service to that Addon. A [runtime.toml] table with the right name is never
+    enough, since it loads without any installation behind it. The default
+    [[]] keeps every required lane on its builtin slots. The registry keeps
+    [addon_served_lane_ids] whole like [required_lane_ids], and a replacement
+    inherits it. A required lane is excused only by [excused_lane_ids] (a lane
+    rule 3 emptied): that lane is unavailable alone. The registry keeps
+    [required_lane_ids] whole, so a replacement requires an excused lane again
+    unless it excuses it too.
+    Disabled declarations retain their candidates and may be empty. Blank
+    and duplicate candidates are still rejected; live target and thinking
+    capability admission apply only when enabled. A required lane cannot be disabled,
+    even through [excused_lane_ids].
+    Returns [Publication_busy] while a replacement reservation is active. *)
+
+val check_publication
+  :  ?required_lane_ids:string list
+  -> ?addon_served_lane_ids:string list
+  -> ?excused_lane_ids:string list
+  -> lanes:Runtime_schema.exact_output_lane_decl list
+  -> Agent_core.Exact_output.resolver_snapshot
+  -> (unit, publication_error) result
+(** The admission {!publish} runs for the same arguments, without publishing
+    and without the publication lock: [Error] is what {!publish} would refuse.
+    The deployment preflight asks it for a runtime.toml before the build that
+    would publish from it is installed. *)
+
+val unpublish : unit -> (unit, publication_error) result
+(** Revoke the current registry for future lookups after owner configuration
+    makes authority unavailable. Existing in-flight immutable snapshots remain
+    intact. Refuses while a configuration replacement reservation is active. *)
+
+val prepare_replacement
+  :  runtime_observations:(string * runtime_observation) list
+  -> lanes:Runtime_schema.exact_output_lane_decl list
+  -> excused_lane_ids:string list
+  -> load_resolver_snapshot:
+       (unit
+        -> ( Agent_core.Exact_output.resolver_snapshot
+           , Agent_core.Exact_output.resolver_snapshot_error )
+           result)
+  -> (prepared_replacement, publication_error) result
+(** Admit [lanes] against the resolver snapshot [load_resolver_snapshot]
+    builds, requiring the published registry's required lanes less
+    [excused_lane_ids], and return an immutable candidate tied to the currently published
+    registry's identity. The snapshot is built only when a registry is
+    published; the candidate never reuses a handle admitted against the
+    previous snapshot, so a changed binding (its body deadline, its endpoint)
+    reaches the candidate. This performs no global mutation or publication
+    fence. When no registry exists, only an empty lane set can be prepared. *)
+
+val prepare_retention : unit -> prepared_replacement option
+(** A candidate that is the published registry itself. Committing it keeps
+    that registry, under the same reservation a replacement takes, for a
+    config commit whose text the registry cannot be rebuilt from when the
+    file on disk could not be rebuilt either. [None] when nothing is
+    published. *)
+
+val replacement_outcome : prepared_replacement -> replacement_outcome
+
+val transact_replacement
+  :  prepared_replacement
+  -> apply_write:(unit -> ('not_committed, 'committed) replacement_effect)
+  -> (('not_committed, 'committed) replacement_effect, publication_error) result
+(** Reserve the candidate's exact base, run [apply_write] outside the publication
+    mutex while all acquisitions observe [Publication_busy], then close the
+    private reservation. [Not_committed] preserves the published registry;
+    [Committed] publishes the immutable candidate exactly once. The opaque
+    reservation never escapes to [apply_write], so it cannot be finished or aborted
+    by another caller. An exception clears the fence and is re-raised with its
+    original backtrace; effects that made an external commit visible must
+    therefore return [Committed] rather than raise. *)
+
+val current : unit -> (t, publication_error) result
+(** Return the currently published registry. Returns [Publication_busy] while
+    a replacement reservation fences new acquisitions, and
+    [Registry_not_published] before bootstrap has published one. *)
+
+val rejected_slots : t -> rejected_slot list
+
+val rejected_target_bindings
+  :  t
+  -> Agent_core.Exact_output.rejected_target_binding list
+(** Declared targets the resolver snapshot of [t] excluded because their
+    provider or model has no catalog row. *)
+
+val declared_lanes : t -> Runtime_schema.exact_output_lane_decl list
+(** Every lane table runtime.toml declares, built-in and add-on, in file
+    order, before admission dropped anything. *)
+
+val declared_lane
+  :  t
+  -> lane_id:string
+  -> Runtime_schema.exact_output_lane_decl option
+(** The lane exactly as runtime.toml declared it, before admission dropped
+    anything. A caller that reports a slot's position needs this: the admitted
+    lists alone cannot say which line of the file a slot came from once a
+    sibling was rejected. *)
+
+val diagnose_rejected_slot
+  :  t
+  -> rejected_slot
+  -> configured_runtime:(string -> (string * string) option)
+  -> rejected_slot_diagnosis
+(** Why a slot was rejected, for the boot report. A target the overlay
+    declares but whose binding the resolver rejected is named first, read
+    from the snapshot this registry holds; otherwise [configured_runtime]
+    decides, answering with the runtime's [(provider_id, api_name)] when the
+    id is an enabled runtime.toml runtime. The caller supplies that lookup
+    because this module sits below [Runtime]. *)
+
+val catalog_absent_assignments :
+  Agent_core.Exact_output.resolver_snapshot ->
+  assignments:(string * string) list ->
+  (string * string) list
+(** Keeper assignments (from [[runtime.assignments]]) whose target is absent
+    from the frozen model catalog. Unlike a rejected lane slot this changes
+    no admission — the assignment silently stops resolving and the keeper
+    falls back to the default runtime — so callers must report it rather than
+    let it degrade quietly. Pure. *)
+
+val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error) result
+(** Acquire one lane exclusively from the immutable admitted handles retained
+    by the supplied registry. This does not resolve credentials or
+    select provider targets; AGENT_CORE owns those operations while executing the
+    exact flow. Slot declaration order is preserved. [Exact_lane_off] refuses
+    new acquisitions from a disabled declaration. Earlier registry and run
+    snapshots remain valid until their existing work finishes. *)
+
+val catalog_generation_fingerprint : t -> string
+(** Opaque identity of the frozen catalog generation. This exposes neither
+    credentials nor serialized provider configuration. *)
+
+val publication_error_to_string : publication_error -> string
+val resolver_snapshot_error_to_string
+  :  Agent_core.Exact_output.resolver_snapshot_error
+  -> string
+val binding_component_to_string
+  :  Agent_core.Exact_output.resolver_binding_component
+  -> string
+val lane_resolution_error_to_string : lane_resolution_error -> string
+
+module For_testing : sig
+  val classify_rejected_slot
+    :  rejected_slot
+    -> declared_target_rejected:(string -> bool)
+    -> configured_runtime:(string -> (string * string) option)
+    -> rejected_slot_diagnosis
+  (** The pure classification behind {!diagnose_rejected_slot}, with both
+      lookups injected so the precedence can be pinned without a snapshot
+      that carries a rejected binding. *)
+
+  type reservation
+  type reservation_error = Reservation_inactive
+
+  val reserve_replacement
+    :  prepared_replacement
+    -> (reservation, publication_error) result
+
+  val finish_replacement : reservation -> (unit, reservation_error) result
+  val abort_replacement : reservation -> (unit, reservation_error) result
+  val reservation_error_to_string : reservation_error -> string
+end

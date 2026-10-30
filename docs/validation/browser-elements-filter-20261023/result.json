@@ -1,0 +1,79 @@
+{
+  "observations": [
+    {
+      "args": {},
+      "total": 1,
+      "selectors": [
+        "#inbox > input:nth-of-type(1)"
+      ]
+    },
+    {
+      "args": {
+        "within": "#inbox",
+        "selector": "[role=row]"
+      },
+      "total": 2,
+      "withinMatches": 1,
+      "selectorMatches": 4,
+      "selectors": [
+        "#inbox > div:nth-of-type(1)",
+        "#inbox > div:nth-of-type(2)"
+      ]
+    },
+    {
+      "args": {
+        "within": ":scope",
+        "selector": "[role=row]"
+      },
+      "total": 3,
+      "withinMatches": 1,
+      "selectorMatches": 4,
+      "selectors": [
+        "#inbox > div:nth-of-type(1)",
+        "#inbox > div:nth-of-type(2)",
+        "html:nth-of-type(1) > body:nth-of-type(1) > div:nth-of-type(1)"
+      ]
+    },
+    {
+      "args": {
+        "within": "#missing",
+        "selector": "[role=row]"
+      },
+      "total": 0,
+      "withinMatches": 0,
+      "selectorMatches": 4,
+      "selectors": []
+    },
+    {
+      "args": {
+        "selector": "#missing"
+      },
+      "total": 0,
+      "selectorMatches": 0,
+      "selectors": []
+    },
+    {
+      "args": {
+        "selector": "input[type=password]"
+      },
+      "total": 1,
+      "selectorMatches": 1,
+      "selectors": [
+        "#inbox > input:nth-of-type(1)"
+      ]
+    }
+  ],
+  "click": {
+    "action": "click",
+    "title": "Browser filter fixture",
+    "scrollX": 0,
+    "scrollY": 0
+  },
+  "opened": "Opened: second",
+  "screenshot": "fixture.png",
+  "scope": "Candidate JS in Chromium DOM; not a Zen extension or public Add-on end-to-end test",
+  "scripts": {
+    "lib/browser_page_script.ml": "acafd3f62659bc9daf10cb82c6964e24da3281de7e275001f11cd4349bdccb56",
+    "connectors/browser/extension/background.js": "84eb7de94c7734eb38d3a4679c10ea7e7df6ba021b1cfd6e991518aac354136f"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "run": 39683131079,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39683131079",
+  "head": "cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d",
+  "status": "completed",
+  "conclusion": "success",
+  "selection": {
+    "minimal": true,
+    "eio_backend": "posix",
+    "suites": {
+      "test_lane_addon_request_progress": 11,
+      "test_workspace_curator_addon_commit": 34,
+      "test_lane_addon_request_discovery": 7
+    }
+  },
+  "tests": 52,
+  "test_source_hashes": {
+    "test_lane_addon_request_progress": "b12f24c76ffce54bb8322d70a5aadd63aaeb11a6f7d76bfa73a487cf04a03d68",
+    "test_workspace_curator_addon_commit": "269eab950a7034cc3bc2120e4868fd2cd985ccfaf67bc4e6e9df3ca199600d12",
+    "test_lane_addon_request_discovery": "86c9b5fce531896503139e63f9dfb4a9a8063a24bea06d6159b815b89dfe1fb4"
+  },
+  "full_log_sha256": "8780db2b97f99d28002bd4d3fb4b556a1c0a57529762970891dec75d35ed46d4",
+  "extract": [
+    "test suite\tCheckout\t2026-10-21T21:59:40.3476088Z   ref: cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d",
+    "test suite\tCheckout\t2026-10-21T21:59:40.5642784Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d",
+    "test suite\tCheckout\t2026-10-21T21:59:50.5763027Z  * branch              cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d -> FETCH_HEAD",
+    "test suite\tCheckout\t2026-10-21T21:59:50.5771777Z [command]/usr/bin/git rev-parse --verify --quiet cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d^{object}",
+    "test suite\tCheckout\t2026-10-21T21:59:50.5793975Z cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d",
+    "test suite\tCheckout\t2026-10-21T21:59:50.5877487Z [command]/usr/bin/git checkout --progress --force cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d",
+    "test suite\tCheckout\t2026-10-21T21:59:52.7923996Z Note: switching to 'cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d'.",
+    "test suite\tCheckout\t2026-10-21T21:59:52.8033166Z cf7dd1ccb1792616f293d4b4c55a1dcd8e66f25d",
+    "test suite\tTest\t2026-10-21T22:00:56.3346568Z [targeted] dune build test/test_lane_addon_request_progress.exe test/test_workspace_curator_addon_commit.exe test/test_lane_addon_request_discovery.exe addons/workspace-curator/lane.toml addons/workspace-curator/schemas/classification.json addons/workspace-curator/schemas/briefing.json",
+    "test suite\tTest\t2026-10-21T22:03:46.4759724Z Test Successful in 0.111s. 11 tests run.",
+    "test suite\tTest\t2026-10-21T22:03:47.4064379Z Test Successful in 0.786s. 34 tests run.",
+    "test suite\tTest\t2026-10-21T22:03:47.5394977Z Test Successful in 0.040s. 7 tests run."
+  ],
+  "limits": "Only generic observer journal and original ownership/commit/discovery fixtures atcf7. New typed Curator receipt and prepare source is excluded. No registry reconciliation/delivery, actual provider/Off lifecycle, production cutover, installed UI or original54-task completion."
+}

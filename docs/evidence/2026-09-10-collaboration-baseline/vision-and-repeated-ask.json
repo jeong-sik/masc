@@ -1,0 +1,123 @@
+[
+  {
+    "ts": 1789043020.62225,
+    "keeper": "exhibit-designer",
+    "tool": "keeper_analyze_image",
+    "input": {
+      "artifact": "crop_text.png",
+      "query": "이 이미지의 한글 텍스트를 정확히 읽어서 알려주세요. 글자가 깨지거나 자모가 분리되어 있지 않은지, 줄바꿈이 어색하지 않은지 확인해주세요. 배지, 제목, 부제, 정보 문구가 각각 무엇으로 보이나요?"
+    },
+    "output": "{\"ok\":false,\"error\":\"invalid_artifact\",\"failure_class\":\"policy_rejection\",\"detail\":\"Vision_artifact_store.load: malformed handle (expected 64-char lowercase hex): \\\"crop_text.png\\\" Copy the exact artifact returned by the image-producing tool.\"}\nfailure_class=policy_rejection — Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.",
+    "disposition": "failed"
+  },
+  {
+    "ts": 1789043020.625708,
+    "keeper": "exhibit-designer",
+    "tool": "keeper_analyze_image",
+    "input": {
+      "artifact": "poster.png",
+      "query": "이 포스터 초안의 전체 구도를 평가해주세요. 색상 팔레트(딥그린, 세이지, 아이보리, 안개블루, 골드)가 조화로운지, 중앙 그래픽이 제목을 방해하지 않는지, 전시 포스터로서 차분하고 친근한 느낌이 나는지 솔직하게 평가해주세요."
+    },
+    "output": "{\"ok\":false,\"error\":\"invalid_artifact\",\"failure_class\":\"policy_rejection\",\"detail\":\"Vision_artifact_store.load: malformed handle (expected 64-char lowercase hex): \\\"poster.png\\\" Copy the exact artifact returned by the image-producing tool.\"}\nfailure_class=policy_rejection — Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.",
+    "disposition": "failed"
+  },
+  {
+    "ts": 1789043036.361298,
+    "keeper": "exhibit-designer",
+    "tool": "keeper_analyze_image",
+    "input": {
+      "artifact": "5dff20ba91a057c19fc9bbcb6e3e9f240ab52598884e2ea7fbeaacdf7b9e07bc",
+      "query": "이 이미지의 한글 텍스트를 정확히 읽어서 알려주세요. 글자가 깨지거나 자모가 분리되어 있지 않은지, 줄바꿈이 어색하지 않은지 확인해주세요. 제목, 부제, 정보 문구가 각각 무엇으로 보이나요?"
+    },
+    "output": "{\"ok\":false,\"error\":\"artifact_not_found\",\"failure_class\":\"workflow_rejection\",\"detail\":\"Vision_artifact_store.load: not found: /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/config/keepers/exhibit-designer.vision/5dff20ba91a057c19fc9bbcb6e3e9f240ab52598884e2ea7fbeaacdf7b9e07bc Observe again and use the artifact returned for this Keeper.\"}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+    "disposition": "failed"
+  },
+  {
+    "ts": 1789043036.370358,
+    "keeper": "exhibit-designer",
+    "tool": "keeper_analyze_image",
+    "input": {
+      "artifact": "9ab1edb5e2ac5e633a0b7636eb9ddc5461fd9cc71ecd277dd97ead4bc59479b7",
+      "query": "이 포스터 초안의 전체 구도를 평가해주세요. 색상 팔레트(딥그린, 세이지, 아이보리, 안개블루, 골드)가 조화로운지, 중앙 그래픽이 제목을 방해하지 않는지, 전시 포스터로서 차분하고 친근한 느낌이 나는지 솔직하게 평가해주세요."
+    },
+    "output": "{\"ok\":false,\"error\":\"artifact_not_found\",\"failure_class\":\"workflow_rejection\",\"detail\":\"Vision_artifact_store.load: not found: /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/config/keepers/exhibit-designer.vision/9ab1edb5e2ac5e633a0b7636eb9ddc5461fd9cc71ecd277dd97ead4bc59479b7 Observe again and use the artifact returned for this Keeper.\"}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+    "disposition": "failed"
+  },
+  {
+    "ts": 1789043125.76108,
+    "keeper": "exhibit-editor",
+    "tool": "keeper_analyze_image",
+    "input": {
+      "artifact": "renders/page1.png",
+      "query": "이 이미지의 한글 텍스트를 전부 읽어 주세요. 글자가 잘리거나 겹치는 곳이 있으면 그 위치도 알려주세요."
+    },
+    "output": "{\"ok\":false,\"error\":\"invalid_artifact\",\"failure_class\":\"policy_rejection\",\"detail\":\"Vision_artifact_store.load: malformed handle (expected 64-char lowercase hex): \\\"renders/page1.png\\\" Copy the exact artifact returned by the image-producing tool.\"}\nfailure_class=policy_rejection — Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.",
+    "disposition": "failed"
+  },
+  {
+    "ts": 1789043125.785118,
+    "keeper": "exhibit-editor",
+    "tool": "keeper_analyze_image",
+    "input": {
+      "artifact": "renders/page2.png",
+      "query": "이 이미지의 한글 텍스트를 전부 읽어 주세요. 글자가 잘리거나 겹치는 곳이 있으면 그 위치도 알려주세요."
+    },
+    "output": "{\"ok\":false,\"error\":\"invalid_artifact\",\"failure_class\":\"policy_rejection\",\"detail\":\"Vision_artifact_store.load: malformed handle (expected 64-char lowercase hex): \\\"renders/page2.png\\\" Copy the exact artifact returned by the image-producing tool.\"}\nfailure_class=policy_rejection — Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.",
+    "disposition": "failed"
+  },
+  {
+    "ts": 1789043553.085058,
+    "keeper": "exhibit-editor",
+    "tool": "masc_ask",
+    "input": {
+      "questions": [
+        {
+          "free_text": true,
+          "free_text_hint": "예: 2026.10.1~10.31 / 서울 성수동 OO갤러리",
+          "header": "확정된 전시 일정과 장소",
+          "mode": "single",
+          "prompt": "《기억의 정원》에 실제 전시 공간과 일정이 추가된다고 하셨는데, 확정된 일정(시작~종료)과 장소(걸명·주소)를 알려주세요. 아직 미정이면 '미정'이라고 답해 주시면 '하이브리드 전시 예정, 일정·장소는 추후 공지'로만 표기하겠습니다.",
+          "question_id": "confirmed-schedule-venue"
+        }
+      ],
+      "task_id": "task-001"
+    },
+    "output": "{\"ask_id\":\"askd0d27a5b6924b32f\",\"keeper_name\":\"exhibit-editor\",\"questions\":[{\"question_id\":\"confirmed-schedule-venue\",\"header\":\"확정된 전시 일정과 장소\"}],\"open_count\":1}",
+    "disposition": "completed"
+  },
+  {
+    "ts": 1789043585.698059,
+    "keeper": "exhibit-editor",
+    "tool": "masc_ask",
+    "input": {
+      "questions": [
+        {
+          "choices": [
+            {
+              "choice_id": "schedule-now",
+              "description": "확정된 일정·장소를 바로 알려준다",
+              "label": "확정 일정·장소 알려주기"
+            },
+            {
+              "choice_id": "tbd-hybrid",
+              "description": "하이브리드 전시 예정이나 일정·장소는 아직 미정",
+              "label": "하이브리드 예정, 일정·장소 미정"
+            },
+            {
+              "choice_id": "keep-online-only",
+              "description": "현재 공개용으론 온라인 가상 전시만 표기하고 실제 공간 정보는 추후 공지",
+              "label": "온라인만 표기, 실제 공간은 추후 공지"
+            }
+          ],
+          "header": "확정 정보 확인",
+          "mode": "single",
+          "prompt": "《기억의 정원》 안내 책자·포스터에 넣을 '실제 전시 공간·일정' 정보의 상태를 알려주세요. 이미 답해 주신 내용이 있지만 제 쪽 메모리에 정확한 문구가 남지 않아 재확인합니다.",
+          "question_id": "confirm-schedule-status"
+        }
+      ],
+      "task_id": "task-001"
+    },
+    "output": "{\"ask_id\":\"ask953959b82773c773\",\"keeper_name\":\"exhibit-editor\",\"questions\":[{\"question_id\":\"confirm-schedule-status\",\"header\":\"확정 정보 확인\"}],\"open_count\":2}",
+    "disposition": "completed"
+  }
+]

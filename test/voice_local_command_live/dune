@@ -1,0 +1,13 @@
+; Runs say and espeak-ng for real and checks a file with audio in it appeared.
+; Each command's cases are skipped where that command is not installed.
+
+(test
+ (name test_voice_local_command_live)
+ (libraries
+  alcotest
+  astring
+  unix
+  masc
+  masc.voice_config
+  masc.voice_runtime_overlay
+  masc.voice_bridge_core))

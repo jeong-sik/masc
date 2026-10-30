@@ -1,0 +1,18 @@
+{
+  "observed_at": "2026-10-21T12:42:42.535179+00:00",
+  "engine_id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7",
+  "instances": [
+    {
+      "container_id": "daabc0b0e7dc27732b9dae1f5be668097a3227cfe4c3ad6cd227461daf0e4ca1",
+      "inspect_exit": 1,
+      "detail": "error: no such object: daabc0b0e7dc27732b9dae1f5be668097a3227cfe4c3ad6cd227461daf0e4ca1\n",
+      "state": null
+    },
+    {
+      "container_id": "7db15b1ec4199bdff95e3d32f5f5890b9cf34c7f615b0260920a801feab5c1d9",
+      "inspect_exit": 1,
+      "detail": "error: no such object: 7db15b1ec4199bdff95e3d32f5f5890b9cf34c7f615b0260920a801feab5c1d9\n",
+      "state": null
+    }
+  ]
+}

@@ -1,0 +1,1482 @@
+open Cmdliner
+
+open Result.Syntax
+
+let errorf format = Printf.ksprintf (fun message -> Error (`Msg message)) format
+
+let cmdliner_result = function
+  | Ok value -> `Ok value
+  | Error (`Msg message) -> `Error (false, message)
+;;
+
+let validate_signal_file path =
+  try
+    In_channel.with_open_text path (fun input ->
+      let rec loop line_number row_count =
+        match In_channel.input_line input with
+        | None -> Ok row_count
+        | Some line ->
+          let* json =
+            try Ok (Yojson.Safe.from_string line) with
+            | Yojson.Json_error detail ->
+              errorf
+                "schedule signal JSON is malformed path=%s line=%d: %s"
+                path
+                line_number
+                detail
+          in
+          let* (_ : Schedule_runner.wake_signal) =
+            Schedule_runner.wake_signal_of_yojson json
+            |> Result.map_error (fun detail ->
+              `Msg
+                (Printf.sprintf
+                   "schedule signal contract rejected path=%s line=%d: %s"
+                   path
+                   line_number
+                   detail))
+          in
+          loop (line_number + 1) (row_count + 1)
+      in
+      loop 1 0)
+  with
+  | Sys_error detail ->
+    errorf "schedule signal file is unreadable path=%s: %s" path detail
+;;
+
+let validate_signals paths =
+  let* row_count =
+    List.fold_left
+      (fun result path ->
+         let* count = result in
+         let* file_count = validate_signal_file path in
+         Ok (count + file_count))
+      (Ok 0)
+      paths
+  in
+  Printf.printf "%d\n%!" row_count;
+  Ok ()
+;;
+
+(* The two rejection classes call for different operator action, so each
+   verdict carries a single-token [class=] label: cmdliner re-wraps the error
+   text at the terminal margin and can split a phrase across lines, a token
+   survives intact. *)
+let validate_current_meta path =
+  Masc.Keeper_meta_store.validate_current_meta_file_result path
+  |> Result.map_error (function
+    | Masc.Keeper_meta_store.Unreadable detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta is unreadable class=unreadable_file path=%s \
+            (on boot the runtime refuses this keeper instead of \
+            re-materialising it; repair file access or file kind; \
+            quarantine cannot bypass this I/O failure): %s"
+           path
+           detail)
+    | Masc.Keeper_meta_store.Invalid_json detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta is invalid JSON class=invalid_json path=%s \
+            (repair the content or explicitly accept boot quarantine and \
+            the loss of this Keeper's persisted state): %s"
+           path
+           detail)
+    | Masc.Keeper_meta_store.Not_current detail ->
+      `Msg
+        (Printf.sprintf
+           "current keeper meta production validation rejected \
+            class=not_current_schema path=%s (boot refuses this content \
+            unless quarantine is explicitly accepted, losing accumulated \
+            counters and the task binding; strip retired fields or fill \
+            missing ones): %s"
+           path
+           detail))
+;;
+
+(* Read the original bytes with the production decoder: jq object projection
+   loses duplicate fields before it can judge the intent field. The decoder
+   refuses any intent on an awaiting row, so a row this version would
+   reinterpret as a completion fails the whole backlog here. *)
+let validate_task_backlog path =
+  try
+    let json = Yojson.Safe.from_file path in
+    let* (_backlog, _diagnostics) =
+      Masc_domain.backlog_of_yojson_with_diagnostics json
+      |> Result.map_error (fun detail ->
+        `Msg (Printf.sprintf "task backlog contract rejected path=%s: %s" path detail))
+    in
+    Ok ()
+  with
+  | Sys_error detail -> errorf "task backlog unreadable path=%s: %s" path detail
+  | Yojson.Json_error detail -> errorf "task backlog JSON malformed path=%s: %s" path detail
+;;
+
+(* The gate prints this next to its verdict so the operator can tell a
+   freshly built helper from an older installed one. [binary_commit] is the
+   SHA the Dune build rule embeds; a helper built outside a checkout has none. *)
+let print_build_commit () =
+  match (Masc.Build_identity.current ()).Masc.Build_identity.binary_commit with
+  | Some commit -> Printf.printf "%s\n%!" commit
+  | None -> Printf.printf "unstamped\n%!"
+;;
+
+let validate_schedule_ledger path =
+  try
+    let json = Yojson.Safe.from_file path in
+    let* state =
+      Schedule_store.state_of_yojson json
+      |> Result.map_error (fun detail ->
+        `Msg
+          (Printf.sprintf
+             "schedule ledger contract rejected path=%s: %s"
+             path
+             detail))
+    in
+    let nonempty field value =
+      if String.equal (String.trim value) ""
+      then errorf "schedule ledger has an empty %s path=%s" field path
+      else Ok ()
+    in
+    let* () =
+      List.fold_left
+        (fun result (schedule : Schedule_domain.schedule_request) ->
+           let* () = result in
+           nonempty "schedule.schedule_instance_id" schedule.schedule_instance_id)
+        (Ok ())
+        state.schedules
+    in
+    let* () =
+      List.fold_left
+        (fun result (wake : Schedule_domain.wake_record) ->
+           let* () = result in
+           nonempty "wake.schedule_instance_id" wake.schedule_instance_id)
+        (Ok ())
+        state.wakes
+    in
+    let in_progress =
+      List.filter
+        (fun (wake : Schedule_domain.wake_record) ->
+           match wake.status with
+           | Schedule_domain.Wake_running -> true
+           | Schedule_domain.Wake_succeeded
+           | Schedule_domain.Wake_failed -> false)
+        state.wakes
+    in
+    let wake_json (wake : Schedule_domain.wake_record) =
+      `Assoc
+        [ "schedule_instance_id", `String wake.schedule_instance_id
+        ; "schedule_id", `String wake.schedule_id
+        ; "due_at", `Float wake.due_at
+        ; "status", `String (Schedule_domain.wake_status_to_string wake.status)
+        ]
+    in
+    Yojson.Safe.to_channel
+      stdout
+      (`Assoc
+         [ "in_progress_count", `Int (List.length in_progress)
+         ; "in_progress", `List (List.map wake_json in_progress)
+         ]);
+    output_char stdout '\n';
+    flush stdout;
+    Ok ()
+  with
+  | Sys_error detail ->
+    errorf "schedule ledger file is unreadable path=%s: %s" path detail
+  | Yojson.Json_error detail ->
+    errorf "schedule ledger JSON is malformed path=%s: %s" path detail
+;;
+
+let child_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> 128 + signal
+;;
+
+let lease_owner_environment_key = "MASC_DEPLOYMENT_LEASE_OWNER_PID="
+;;
+
+let environment_without_lease_owner () =
+  Unix.environment ()
+  |> Array.to_list
+  |> List.filter (fun binding ->
+    not (String.starts_with ~prefix:lease_owner_environment_key binding))
+;;
+
+let environment_for_lease_child () =
+  Printf.sprintf "%s%d" lease_owner_environment_key (Unix.getpid ())
+  :: environment_without_lease_owner ()
+  |> Array.of_list
+;;
+
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid |> snd with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+;;
+
+let run_child command environment =
+  match command with
+  | [] -> errorf "lease command is empty"
+  | executable :: _ ->
+    (try
+       let arguments = Array.of_list command in
+       (* [Process_eio_detached] redirects child output and returns immediately.
+          Deployment preparation must inherit the operator streams and be reaped
+          synchronously, so this helper owns the process group directly. *)
+       let forwarded_signals = [ Sys.sigterm; Sys.sigint ] in
+       let previous_signal_mask =
+         Unix.sigprocmask Unix.SIG_BLOCK forwarded_signals
+       in
+       let restore_signal_mask () =
+         (* See the pre-fork signal masking protocol below. *)
+         ignore (Unix.sigprocmask Unix.SIG_SETMASK previous_signal_mask)
+       in
+       let pid =
+         try Unix.fork () with
+         | exn ->
+           restore_signal_mask ();
+           raise exn
+       in
+       if pid = 0
+       then (
+         try
+           (* See the parent-side process-group signal forwarding below. *)
+           ignore (Unix.setsid ());
+           restore_signal_mask ();
+           Unix.execvpe executable arguments environment
+         with
+         | exn ->
+           Printf.eprintf
+             "deployment command failed to start executable=%s: %s\n%!"
+             executable
+             (Printexc.to_string exn);
+           Unix._exit 127);
+       let forwarded_signal = ref None in
+       let signal_process_group signal =
+         try Unix.kill (-pid) signal with
+         | Unix.Unix_error (Unix.ESRCH, _, _) ->
+           (try Unix.kill pid signal with
+            | Unix.Unix_error (Unix.ESRCH, _, _) -> ())
+       in
+       let forward signal =
+         forwarded_signal := Some signal;
+         signal_process_group signal
+       in
+       let previous_sigterm =
+         try Sys.signal Sys.sigterm (Sys.Signal_handle forward) with
+         | exn ->
+           restore_signal_mask ();
+           raise exn
+       in
+       let previous_sigint =
+         try Sys.signal Sys.sigint (Sys.Signal_handle forward) with
+         | exn ->
+           Sys.set_signal Sys.sigterm previous_sigterm;
+           restore_signal_mask ();
+           raise exn
+       in
+       restore_signal_mask ();
+       Fun.protect
+         ~finally:(fun () ->
+           (* See the pre-fork signal masking protocol above. *)
+           ignore (Unix.sigprocmask Unix.SIG_BLOCK forwarded_signals);
+           (match !forwarded_signal with
+            | Some _ ->
+              (try Unix.kill (-pid) Sys.sigkill with
+               | Unix.Unix_error (Unix.ESRCH, _, _) -> ())
+            | None -> ());
+           Sys.set_signal Sys.sigterm previous_sigterm;
+           Sys.set_signal Sys.sigint previous_sigint;
+           restore_signal_mask ())
+         (fun () ->
+            let status = waitpid_nointr pid in
+            match !forwarded_signal with
+            | Some signal -> Ok (Unix.WSIGNALED signal)
+            | None -> Ok status)
+     with
+     | Unix.Unix_error (error, syscall, argument) ->
+       errorf
+         "deployment command failed to start or wait syscall=%s argument=%s: %s"
+         syscall
+         argument
+         (Unix.error_message error))
+;;
+
+let verify_base_path_lease_owner base_path owner_pid =
+  if owner_pid <= 0
+  then errorf "lease owner PID must be positive"
+  else
+    let lease_dir = (Host_config.host ()).base_path_lease_dir in
+    match
+      Server_startup_takeover.acquire_base_path_lock
+        ~run_dir:lease_dir
+        base_path
+    with
+    | Server_startup_takeover.Base_path_already_owned { owner; _ }
+      when Server_startup_takeover.base_path_owner_pid owner = Some owner_pid ->
+      Ok ()
+    | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+      let pid = Server_startup_takeover.base_path_owner_pid owner in
+      errorf
+        "workspace writer lease owner mismatch base_path=%s expected_pid=%d actual_pid=%s"
+        base_path
+        owner_pid
+        (match pid with
+         | Some value -> string_of_int value
+         | None -> "unknown")
+    | Server_startup_takeover.Base_path_rejected rejection ->
+      errorf
+        "workspace writer lease verification rejected base_path=%s: %s"
+        base_path
+        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+    | Server_startup_takeover.Base_path_acquired lease ->
+      Server_startup_takeover.release_base_path_lease lease;
+      errorf
+        "workspace writer lease is not held by the expected process base_path=%s expected_pid=%d"
+        base_path
+        owner_pid
+;;
+
+let run_under_base_path_lease base_path command =
+  match command with
+  | [] -> errorf "lease-run requires a command"
+  | _ :: _ ->
+    let lease_dir = (Host_config.host ()).base_path_lease_dir in
+    (match
+       Server_startup_takeover.acquire_base_path_lock
+         ~run_dir:lease_dir
+         base_path
+     with
+     | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+      let pid = Server_startup_takeover.base_path_owner_pid owner in
+       errorf
+         "workspace writer lease is already owned base_path=%s pid=%s"
+         base_path
+         (match pid with
+          | Some value -> string_of_int value
+          | None -> "unknown")
+     | Server_startup_takeover.Base_path_rejected rejection ->
+       errorf
+         "workspace writer lease rejected base_path=%s: %s"
+         base_path
+         (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+     | Server_startup_takeover.Base_path_acquired lease ->
+       let status =
+         Fun.protect
+           ~finally:(fun () ->
+             Server_startup_takeover.release_base_path_lease lease)
+           (fun () -> run_child command (environment_for_lease_child ()))
+       in
+       let* status = status in
+       Stdlib.exit (child_exit_code status))
+;;
+
+let run_tool_blob_maintenance base_path delete_previous_candidates =
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
+  match
+    Server_startup_takeover.acquire_base_path_lock
+      ~run_dir:lease_dir
+      base_path
+  with
+  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+    let pid = Server_startup_takeover.base_path_owner_pid owner in
+    errorf
+      "workspace writer lease is already owned base_path=%s pid=%s"
+      base_path
+      (match pid with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+  | Server_startup_takeover.Base_path_rejected rejection ->
+    errorf
+      "workspace writer lease rejected base_path=%s: %s"
+      base_path
+      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+  | Server_startup_takeover.Base_path_acquired lease ->
+    Fun.protect
+      ~finally:(fun () ->
+        Server_startup_takeover.release_base_path_lease lease)
+      (fun () ->
+         match Unix.realpath base_path with
+         | exception exn ->
+           errorf
+             "workspace BasePath canonicalization failed base_path=%s: %s"
+             base_path
+             (Printexc.to_string exn)
+         | canonical_base_path ->
+           let mode =
+             if delete_previous_candidates
+             then Tool_blob_maintenance.Delete_previous_candidates
+             else Tool_blob_maintenance.Observe_only
+           in
+           (match
+              Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
+                ~base_path:canonical_base_path
+                ~mode
+            with
+            | Error error ->
+              errorf
+                "tool blob maintenance failed base_path=%s: %s"
+                canonical_base_path
+                (Tool_blob_maintenance.error_to_string error)
+            | Ok report ->
+              Yojson.Safe.to_channel
+                stdout
+                (`Assoc
+                  [ "base_path", `String canonical_base_path
+                  ; "live_references", `Int report.live_references
+                  ; "blobs_observed", `Int report.blobs_observed
+                  ; "candidates_recorded", `Int report.candidates_recorded
+                  ; "deleted", `Int report.deleted
+                  ]);
+              output_char stdout '\n';
+              flush stdout;
+              Ok ()))
+;;
+
+(* #39331 milestone B: the reference-based sweep for every Keeper's kept
+   vision store. It runs under the same exclusive BasePath lease as
+   [tool-blob-maintenance] so a sweep never races a live writer, and it
+   reports per-store counts so the operator can measure before/after. A
+   store whose scan cannot complete is reported and makes the command fail;
+   the sweep itself deletes nothing in that store. *)
+let run_vision_kept_maintenance base_path =
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
+  match
+    Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path
+  with
+  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+    let pid = Server_startup_takeover.base_path_owner_pid owner in
+    errorf
+      "workspace writer lease is already owned base_path=%s pid=%s"
+      base_path
+      (match pid with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+  | Server_startup_takeover.Base_path_rejected rejection ->
+    errorf
+      "workspace writer lease rejected base_path=%s: %s"
+      base_path
+      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+  | Server_startup_takeover.Base_path_acquired lease ->
+    Fun.protect
+      ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+      (fun () ->
+         match Unix.realpath base_path with
+         | exception exn ->
+           errorf
+             "workspace BasePath canonicalization failed base_path=%s: %s"
+             base_path
+             (Printexc.to_string exn)
+         | canonical_base_path ->
+           let masc_dir =
+             Common.masc_dir_from_base_path ~base_path:canonical_base_path
+           in
+           let keepers_dir =
+             Config_dir_resolver.keepers_dir_for_base_path
+               ~base_path:canonical_base_path
+           in
+           let* vision_dirs =
+             match Sys.readdir keepers_dir with
+             | exception Sys_error reason ->
+               errorf "keepers dir unreadable path=%s: %s" keepers_dir reason
+             | entries ->
+               Ok
+                 (Array.to_list entries
+                  |> List.filter (fun name -> Filename.check_suffix name ".vision")
+                  |> List.sort String.compare
+                  |> List.map (fun name -> Filename.concat keepers_dir name))
+           in
+           let reports =
+             List.map
+               (fun dir ->
+                  let keeper = Filename.basename dir in
+                  keeper, dir, Multimodal.Vision_kept_maintenance.run ~masc_dir ~dir)
+               vision_dirs
+           in
+           let failed =
+             List.filter_map
+               (fun (keeper, dir, result) ->
+                  match result with
+                  | Ok _ -> None
+                  | Error error ->
+                    Some
+                      (Printf.sprintf
+                         "%s (%s): %s"
+                         keeper
+                         dir
+                         (Multimodal.Vision_kept_maintenance.error_to_string error)))
+               reports
+           in
+           if failed <> []
+           then
+             errorf
+               "vision kept maintenance failed: %s"
+               (String.concat "; " failed)
+           else begin
+             Yojson.Safe.to_channel
+               stdout
+               (`Assoc
+                 [ "base_path", `String canonical_base_path
+                 ; ( "stores"
+                   , `List
+                       (List.map
+                          (fun (keeper, dir, result) ->
+                             match result with
+                             | Ok (report : Multimodal.Vision_kept_maintenance.report) ->
+                               `Assoc
+                                 [ "keeper", `String keeper
+                                 ; "dir", `String dir
+                                 ; "scanned", `Int report.scanned
+                                 ; "live", `Int report.live
+                                 ; ( "candidates_recorded"
+                                   , `Int report.candidates_recorded
+                                   )
+                                 ; "deleted", `Int report.deleted
+                                 ; ( "reclaimed_bytes"
+                                   , `Intlit
+                                       (Int64.to_string report.reclaimed_bytes)
+                                   )
+                                 ; "remaining_count", `Int report.remaining_count
+                                 ; ( "remaining_bytes"
+                                   , `Intlit
+                                       (Int64.to_string report.remaining_bytes)
+                                   )
+                                 ]
+                             | Error error ->
+                               `Assoc
+                                 [ "keeper", `String keeper
+                                 ; "dir", `String dir
+                                 ; ( "error"
+                                   , `String
+                                       (Multimodal.Vision_kept_maintenance.error_to_string
+                                          error)
+                                   )
+                                 ])
+                          reports)
+                   )
+                 ]);
+             output_char stdout '\n';
+             flush stdout;
+             Ok ()
+           end)
+;;
+
+(* task-2187 (H5): the same reference-based sweep for every Keeper's stored
+   media readings ([<masc_dir>/media-readings/<keeper>/]). Same lease, same
+   failure rule as [vision-kept-maintenance]: a directory whose scan cannot
+   complete fails the command and deletes nothing in that directory. *)
+let run_media_reading_maintenance base_path =
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
+  match
+    Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path
+  with
+  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+    let pid = Server_startup_takeover.base_path_owner_pid owner in
+    errorf
+      "workspace writer lease is already owned base_path=%s pid=%s"
+      base_path
+      (match pid with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+  | Server_startup_takeover.Base_path_rejected rejection ->
+    errorf
+      "workspace writer lease rejected base_path=%s: %s"
+      base_path
+      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+  | Server_startup_takeover.Base_path_acquired lease ->
+    Fun.protect
+      ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+      (fun () ->
+         match Unix.realpath base_path with
+         | exception exn ->
+           errorf
+             "workspace BasePath canonicalization failed base_path=%s: %s"
+             base_path
+             (Printexc.to_string exn)
+         | canonical_base_path ->
+           let module M = Masc.Keeper_media_reading_maintenance in
+           let masc_dir =
+             Common.masc_dir_from_base_path ~base_path:canonical_base_path
+           in
+           (* One scan of the durable consumers serves every keeper directory. *)
+           (match
+              ( M.keeper_dirs ~masc_dir
+              , Tool_blob_maintenance.live_references
+                  ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
+                  ~base_path:canonical_base_path )
+            with
+            | Error error, _ ->
+              errorf "media reading store unreadable: %s" (M.error_to_string error)
+            | Ok _, Error error ->
+              errorf
+                "durable reference scan failed base_path=%s: %s"
+                canonical_base_path
+                (Tool_blob_maintenance.error_to_string error)
+            | Ok dirs, Ok live ->
+              let reports =
+                List.map (fun dir -> Filename.basename dir, dir, M.run ~live ~dir) dirs
+              in
+              let failed =
+                List.filter_map
+                  (fun (keeper, dir, result) ->
+                     match result with
+                     | Ok _ -> None
+                     | Error error ->
+                       Some (Printf.sprintf "%s (%s): %s" keeper dir (M.error_to_string error)))
+                  reports
+              in
+              if failed <> []
+              then errorf "media reading maintenance failed: %s" (String.concat "; " failed)
+              else begin
+                Yojson.Safe.to_channel
+                  stdout
+                  (`Assoc
+                    [ "base_path", `String canonical_base_path
+                    ; ( "stores"
+                      , `List
+                          (List.filter_map
+                             (fun (keeper, dir, result) ->
+                                match result with
+                                | Error _ -> None
+                                | Ok (report : M.report) ->
+                                  Some
+                                    (`Assoc
+                                      [ "keeper", `String keeper
+                                      ; "dir", `String dir
+                                      ; "scanned", `Int report.scanned
+                                      ; "live", `Int report.live
+                                      ; "candidates_recorded", `Int report.candidates_recorded
+                                      ; "deleted", `Int report.deleted
+                                      ; ( "reclaimed_bytes"
+                                        , `Intlit (Int64.to_string report.reclaimed_bytes) )
+                                      ; "remaining_count", `Int report.remaining_count
+                                      ; ( "remaining_bytes"
+                                        , `Intlit (Int64.to_string report.remaining_bytes) )
+                                      ]))
+                             reports) )
+                    ]);
+                output_char stdout '\n';
+                flush stdout;
+                Ok ()
+              end))
+;;
+
+let handoff_base_path_lease
+      base_path
+      next_executable
+      next_arguments
+      prepare_command
+  =
+  match prepare_command with
+  | [] -> errorf "lease-handoff requires a preparation command"
+  | _ ->
+    let lease_dir = (Host_config.host ()).base_path_lease_dir in
+    (match
+       Server_startup_takeover.acquire_base_path_lock
+         ~run_dir:lease_dir
+         base_path
+     with
+     | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+      let pid = Server_startup_takeover.base_path_owner_pid owner in
+       errorf
+         "workspace writer lease is already owned base_path=%s pid=%s"
+         base_path
+         (match pid with
+          | Some value -> string_of_int value
+          | None -> "unknown")
+     | Server_startup_takeover.Base_path_rejected rejection ->
+       errorf
+         "workspace writer lease rejected base_path=%s: %s"
+         base_path
+         (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+     | Server_startup_takeover.Base_path_acquired lease ->
+       let release () = Server_startup_takeover.release_base_path_lease lease in
+       (match run_child prepare_command (environment_for_lease_child ()) with
+        | Error _ as error ->
+          release ();
+          error
+        | Ok prepare_status ->
+          let prepare_exit_code = child_exit_code prepare_status in
+          if prepare_exit_code <> 0
+          then (
+            release ();
+            Stdlib.exit prepare_exit_code)
+          else (
+            match Server_startup_takeover.prepare_base_path_lease_exec_handoff lease with
+            | Error rejection ->
+              release ();
+              errorf
+                "workspace writer lease handoff rejected base_path=%s: %s"
+                base_path
+                (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+            | Ok () ->
+              let arguments = Array.of_list (next_executable :: next_arguments) in
+              let environment = environment_without_lease_owner () |> Array.of_list in
+              (try Unix.execve next_executable arguments environment with
+               | exn ->
+                 release ();
+                 errorf
+                   "deployment runtime handoff failed executable=%s: %s"
+                   next_executable
+                   (Printexc.to_string exn)))))
+;;
+
+let signal_files =
+  let doc = "Validate each schedule signal JSONL file with the production decoder." in
+  Arg.(non_empty & pos_all file [] & info [] ~docv:"SIGNAL_FILE" ~doc)
+;;
+
+let validate_signals_cmd =
+  let doc = "validate current schedule signal rows" in
+  Cmd.v
+    (Cmd.info "validate-signals" ~doc)
+    Term.(ret (const (fun paths -> cmdliner_result (validate_signals paths)) $ signal_files))
+;;
+
+let durable_filenames_cmd =
+  let doc = "print the durable event-queue filenames this binary reads and writes" in
+  Cmd.v
+    (Cmd.info "durable-filenames" ~doc)
+    Term.(
+      const (fun () ->
+        (* The preflight script builds fixtures at these exact names. It used
+           to spell them out, so bumping the snapshot filename in OCaml left
+           the fixtures one version behind and the self-test failed. *)
+        Printf.printf
+          "snapshot=%s\nwal=%s\n"
+          Keeper_event_queue_persistence.snapshot_filename
+          Keeper_event_queue_persistence.transition_wal_filename)
+      $ const ())
+;;
+
+let current_meta_file =
+  let doc = "Validate one persisted Keeper meta against the current closed schema." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"KEEPER_META" ~doc)
+;;
+
+let validate_current_meta_cmd =
+  let doc = "validate one keeper meta with the production decoder" in
+  Cmd.v
+    (Cmd.info "validate-current-meta" ~doc)
+    Term.(
+      ret
+        (const (fun path -> cmdliner_result (validate_current_meta path))
+           $ current_meta_file))
+;;
+
+let task_backlog_file =
+  let doc = "Validate one task backlog without changing its bytes." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"TASK_BACKLOG" ~doc)
+;;
+
+let validate_task_backlog_cmd =
+  let doc = "validate one task backlog with the production decoder" in
+  Cmd.v (Cmd.info "validate-task-backlog" ~doc)
+    Term.(ret (const (fun path -> cmdliner_result (validate_task_backlog path))
+               $ task_backlog_file))
+;;
+
+let build_commit_cmd =
+  let doc = "print the git commit stamped into this helper at build time" in
+  Cmd.v (Cmd.info "build-commit" ~doc) Term.(const print_build_commit $ const ())
+;;
+
+let schedule_ledger_file =
+  let doc = "Validate one current schedule ledger." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"SCHEDULE_LEDGER" ~doc)
+;;
+
+let validate_schedule_ledger_cmd =
+  let doc = "validate one schedule ledger with the production decoder" in
+  Cmd.v
+    (Cmd.info "validate-schedule-ledger" ~doc)
+    Term.(
+      ret
+        (const
+           (fun path -> cmdliner_result (validate_schedule_ledger path))
+         $ schedule_ledger_file))
+;;
+
+let base_path =
+  let doc = "Workspace BasePath whose process-lifetime writer lease must be free." in
+  Arg.(required & opt (some dir) None & info [ "base-path" ] ~docv:"PATH" ~doc)
+;;
+
+let command =
+  let doc = "Command executed while the BasePath writer lease remains held." in
+  Arg.(non_empty & pos_all string [] & info [] ~docv:"COMMAND" ~doc)
+;;
+
+let lease_run_cmd =
+  let doc = "run a deployment check under the canonical BasePath writer lease" in
+  Cmd.v
+    (Cmd.info "lease-run" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path command ->
+              cmdliner_result (run_under_base_path_lease base_path command))
+         $ base_path
+         $ command))
+;;
+
+let delete_previous_candidates =
+  let doc =
+    "Delete blobs present in both the previous and current complete candidate snapshots."
+  in
+  Arg.(value & flag & info [ "delete-previous-candidates" ] ~doc)
+;;
+
+let tool_blob_maintenance_cmd =
+  let doc =
+    "scan tool-blob ownership under the exclusive BasePath lease; record candidates by default"
+  in
+  Cmd.v
+    (Cmd.info "tool-blob-maintenance" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path delete_previous_candidates ->
+              cmdliner_result
+                (run_tool_blob_maintenance
+                   base_path
+                   delete_previous_candidates))
+         $ base_path
+         $ delete_previous_candidates))
+;;
+
+let vision_kept_maintenance_cmd =
+  let doc =
+    "sweep un-referenced kept vision artifacts under the exclusive BasePath lease"
+  in
+  Cmd.v
+    (Cmd.info "vision-kept-maintenance" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path ->
+              cmdliner_result (run_vision_kept_maintenance base_path))
+         $ base_path))
+;;
+
+let media_reading_maintenance_cmd =
+  let doc =
+    "sweep stored keeper media readings no durable record carries any more, under \
+     the exclusive BasePath lease"
+  in
+  Cmd.v
+    (Cmd.info "media-reading-maintenance" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path ->
+              cmdliner_result (run_media_reading_maintenance base_path))
+         $ base_path))
+;;
+
+(* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
+   the operator watches, so any file or row this build cannot read stops it.
+   The Lane Add-on records follow, each refused file named with the step that
+   clears it: their fix is moving that file aside, not a store-wide upgrade
+   (#45106). *)
+let validate_stores base_path =
+  let module D = Masc.Keeper_durable_store in
+  let module L = Masc.Lane_addon_store_preflight in
+  let print_store (name, on_refusal, result) =
+    match result with
+    | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
+    | Ok (report : D.report) ->
+      Printf.printf "%s rows=%d refused=%d\n%!" name report.rows report.refused;
+      (match report.first_refusal with
+       | None -> ()
+       | Some detail ->
+         Printf.printf "  first refusal: %s\n%!" detail;
+         Printf.printf "  on refusal: %s\n%!" on_refusal;
+         Printf.printf
+           "  fresh state: docs/guides/DURABLE-STORE-HARD-CUT.md; preserve evidence and reconcile readers before setting files aside\n%!")
+  in
+  let reports =
+    List.filter_map
+      (fun id ->
+         Option.map
+           (fun scan ->
+              let report = D.name id, D.on_refusal scan, D.run scan ~base_path in
+              print_store report;
+              report)
+           (D.preflight_scan id))
+      D.Id.all
+  in
+  let print_lane_addon (name, on_refusal, result) =
+    match result with
+    | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
+    | Ok (report : L.report) ->
+      Printf.printf
+        "%s rows=%d refused=%d\n%!"
+        name
+        report.rows
+        (List.length report.refusals);
+      List.iter
+        (fun (refusal : L.refusal) ->
+           Printf.printf
+             "  refusal: %s: %s: %s\n%!"
+             refusal.path
+             (L.decoder_name refusal.decoder)
+             refusal.detail;
+           Printf.printf "  fresh state: %s\n%!" (L.fresh_state_step refusal))
+        report.refusals;
+      if report.refusals <> [] then Printf.printf "  on refusal: %s\n%!" on_refusal
+  in
+  let lane_addon_reports =
+    List.map
+      (fun store ->
+         let report = L.name store, L.on_refusal store, L.scan store ~base_path in
+         print_lane_addon report;
+         report)
+      L.Store.all
+  in
+  let refused =
+    List.fold_left
+      (fun total (_, _, result) ->
+         match result with
+         | Ok (report : D.report) -> total + report.refused
+         | Error _ -> total)
+      0
+      reports
+    + List.fold_left
+        (fun total (_, _, result) ->
+           match result with
+           | Ok (report : L.report) -> total + List.length report.refusals
+           | Error _ -> total)
+        0
+        lane_addon_reports
+  in
+  let failed_scans =
+    List.filter_map
+      (fun (name, _, result) ->
+         match result with
+         | Error _ -> Some name
+         | Ok _ -> None)
+      reports
+    @ List.filter_map
+        (fun (name, _, result) ->
+           match result with
+           | Error _ -> Some name
+           | Ok _ -> None)
+        lane_addon_reports
+  in
+  if failed_scans <> []
+  then errorf "store scan failed: %s" (String.concat ", " failed_scans)
+  else if refused = 0
+  then Ok ()
+  else
+    let refused_stores =
+      List.filter_map
+        (fun (name, _, result) ->
+           match result with
+           | Ok (report : D.report) when report.refused > 0 ->
+             Some (Printf.sprintf "%s=%d" name report.refused)
+           | Ok _ | Error _ -> None)
+        reports
+      @ List.filter_map
+          (fun (name, _, result) ->
+             match result with
+             | Ok (report : L.report) when report.refusals <> [] ->
+               Some (Printf.sprintf "%s=%d" name (List.length report.refusals))
+             | Ok _ | Error _ -> None)
+          lane_addon_reports
+    in
+    errorf
+      "%d stored row(s) the runtime about to serve them cannot read (%s)"
+      refused
+      (String.concat "; " refused_stores)
+;;
+
+let validate_stores_cmd =
+  let doc =
+    "read every durable store this gate knows with the production decoders \
+     and report the rows the runtime could not read"
+  in
+  Cmd.v
+    (Cmd.info "validate-stores" ~doc)
+    Term.(ret (const (fun base_path -> cmdliner_result (validate_stores base_path)) $ base_path))
+;;
+
+(* The runtime.toml this BasePath's server reads, judged the way the raw save
+   ([POST /api/v1/runtime/config/raw]) judges text before it writes and the way
+   boot loads it. #39040 narrowed [\[skills\] resource-read-max-bytes] while the
+   live file kept the old value, and the restarted server refused the whole
+   Skill table: every Keeper ran without Skills for about five hours (#39311).
+
+   The model catalog is installed first, as boot does, because an
+   [AGENT_CORE_MODEL_CATALOG] replacement changes which runtimes load. Then, in
+   order, the first refusal wins:
+   - the Keeper setting schema, which the save checks and which boot refuses to
+     start on ([Server_runtime_bootstrap.apply_runtime_toml]);
+   - [Runtime.validate_config_text], the rest of the save check. Its checks
+     that compare the text with the file a save replaces find nothing here,
+     because that file is this text;
+   - the [\[fusion\]] table as every Fusion run loads it;
+   - boot's runtime initialisation, refused when it would disable a runtime
+     the catalog does not carry, leave a Keeper without its runtime, or leave
+     an exact-output slot out for a missing body deadline, the states /health
+     reports as degraded;
+   - boot's exact-output registry step, without publishing.
+   Initialisation fills this process's runtime state. The helper exits after
+   its verdict, so nothing else reads that state. *)
+let keeper_setting_errors (report : Keeper_runtime_config.validation_report) =
+  List.filter_map
+    (fun (issue : Keeper_runtime_config.validation_issue) ->
+       match issue.severity with
+       | Keeper_runtime_config.Error ->
+         Some (Printf.sprintf "%s: %s" issue.key issue.detail)
+       | Keeper_runtime_config.Warning -> None)
+    report.issues
+;;
+
+let catalog_degradation_to_string (degradation : Runtime.startup_degradation) =
+  let keepers =
+    List.map
+      (fun (assignment : Runtime.unavailable_runtime_assignment) ->
+         Printf.sprintf
+           "Keeper %s assigned to %s"
+           assignment.Runtime.keeper_name
+           assignment.runtime_id)
+      degradation.Runtime.unavailable_assignments
+  in
+  Printf.sprintf
+    "boot would disable %d runtime(s) the model catalog does not carry: %s; \
+     Keepers left without their runtime: %s"
+    (List.length degradation.disabled_runtime_ids)
+    (String.concat
+       ", "
+       (List.map
+          Runtime.missing_catalog_model_to_string
+          degradation.report.Runtime.missing_models))
+    (match keepers with
+     | [] -> "none"
+     | _ :: _ -> String.concat ", " keepers)
+;;
+
+let exact_slot_degradation_to_string (degradation : Runtime_config_error.exact_slot_degradation) =
+  Printf.sprintf
+    "boot would leave these exact-output slots out: %s%s"
+    (String.concat
+       "; "
+       (List.map Runtime_config_error.exact_slot_body_deadline_gap_to_string degradation.Runtime_config_error.gaps))
+    (match degradation.emptied_lane_ids with
+     | [] -> ""
+     | lane_ids -> "; lanes left with no slot: " ^ String.concat ", " lane_ids)
+;;
+
+let judge_runtime_config ~base_path ~config_root path =
+  let judged =
+    try
+      let (_ : string option) =
+        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
+      in
+      let* observation = Runtime.load_config_observation ~runtime_config_path:path () in
+      let source_text = observation.Runtime.source_text in
+      let* _, skill_notices =
+        Skill_source_config.parse_text_with_notices source_text
+        |> Result.map_error
+             (Skill_source_config.rejection_message ~config_path:path)
+      in
+      let* () =
+        match skill_notices with
+        | [] -> Ok ()
+        | _ :: _ ->
+          Error
+            ("Skill settings ignored by this binary and refused by the next: "
+             ^ Skill_source_config.notice_message ~config_path:path skill_notices)
+      in
+      let* report =
+        Keeper_runtime_config.validate_source_text source_text
+        |> Result.map_error (fun detail -> "runtime config parse failed: " ^ detail)
+      in
+      let* () =
+        if Keeper_runtime_config.validation_report_is_valid report
+        then Ok ()
+        else
+          Error
+            ("Keeper setting refused: " ^ String.concat "; " (keeper_setting_errors report))
+      in
+      let* () = Runtime.validate_config_text ~runtime_config_path:path source_text in
+      let* (_ : Fusion_policy.t) = Masc.Fusion_config_loader.load ~base_path in
+      let* () =
+        match Runtime.init_default_degraded_observation observation with
+        | Error error -> Error (Runtime.strict_init_error_to_string error)
+        | Ok (Runtime.Initialized_degraded degradation) ->
+          Error (catalog_degradation_to_string degradation)
+        | Ok Runtime.Initialized -> Ok ()
+      in
+      let* () =
+        let degradation = Runtime.exact_slot_degradation () in
+        match degradation.Runtime_config_error.gaps with
+        | [] -> Ok ()
+        | _ :: _ -> Error (exact_slot_degradation_to_string degradation)
+      in
+      Server_runtime_bootstrap.check_exact_output_registry ~config_root ();
+      (* This is a dependency observation, not an automatic installation or a
+         new deployment/turn gate. Explicitly disabled Memory stays disabled;
+         a route admitted here still has no running worker/provider proof. *)
+      let memory = Masc.Keeper_memory_execution_availability.snapshot
+          ~config:(Masc.Workspace.default_config base_path) ~mode:`Preflight
+        |> Masc.Keeper_memory_execution_availability.to_json in
+      Printf.printf "memory execution preflight: %s\n%!" (Yojson.Safe.to_string memory);
+      Ok ()
+    with
+    | Env_config_core.Config_error detail -> Error detail
+  in
+  match judged with
+  | Error detail ->
+    Printf.printf "runtime.toml refused path=%s: %s\n%!" path detail;
+    errorf "runtime.toml is one this build refuses path=%s" path
+  | Ok () ->
+    Printf.printf "runtime.toml accepted path=%s\n%!" path;
+    Ok ()
+;;
+
+(* The path is the one boot locks for this BasePath, read by
+   [Runtime.config_path]'s rules. A relative BasePath is made absolute first:
+   the resolver anchors a relative one at itself. *)
+let validate_runtime_config base_path allow_empty_workspace =
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error (error, _, _) ->
+    errorf
+      "workspace BasePath cannot be resolved base_path=%s: %s"
+      base_path
+      (Unix.error_message error)
+  | base_path ->
+    let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+    let config_root = resolution.config_root.path in
+    let path = Filename.concat config_root Config_dir_resolver.runtime_toml_filename in
+    let empty_workspace () =
+      Printf.printf "runtime.toml absent path=%s empty_workspace=allowed\n%!" path;
+      Ok ()
+    in
+    (* Boot's own config-root decision says whether it writes the file. *)
+    let absent () =
+      match Server_runtime_config_root_bootstrap.missing_runtime_toml_at_boot ~base_path with
+      | Server_runtime_config_root_bootstrap.Written_at_boot ->
+        Printf.printf "runtime.toml absent path=%s boot_writes_seed=yes\n%!" path;
+        Ok ()
+      | Server_runtime_config_root_bootstrap.Left_missing (_ : string)
+        when allow_empty_workspace -> empty_workspace ()
+      | Server_runtime_config_root_bootstrap.Left_missing reason ->
+        errorf
+          "runtime.toml is absent path=%s and boot does not write one (%s), so \
+           the server would start with no model; wrong --base-path or \
+           MASC_CONFIG_DIR? pass --allow-empty-workspace only for an \
+           intentional new workspace"
+          path
+          reason
+    in
+    (match resolution.config_root.source with
+     | Config_dir_resolver.Invalid_env
+       when allow_empty_workspace && not (Sys.file_exists config_root) ->
+       (* Boot creates the MASC_CONFIG_DIR it is given and writes nothing in it. *)
+       empty_workspace ()
+     | Config_dir_resolver.Invalid_env ->
+       errorf
+         "runtime config root is invalid base_path=%s: %s"
+         base_path
+         (String.concat "; " resolution.warnings)
+     | Config_dir_resolver.Missing -> absent ()
+     | Config_dir_resolver.Env | Config_dir_resolver.Local_masc ->
+       if Sys.file_exists path
+       then judge_runtime_config ~base_path ~config_root path
+       else absent ())
+;;
+
+let allow_empty_workspace =
+  let doc =
+    "The workspace is intentionally new, so a runtime.toml that is absent, and \
+     that boot would not write, passes instead of being refused."
+  in
+  Arg.(value & flag & info [ "allow-empty-workspace" ] ~doc)
+;;
+
+(* A browser lane host installed on a workspace whose server has no browser
+   Add-on declared is answered with HTTP 503 on every poll since #44295. The
+   declaration is the operator's to save, so this only reports it. *)
+let validate_browser_addon base_path =
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error (error, _, _) ->
+    errorf
+      "workspace BasePath cannot be resolved base_path=%s: %s"
+      base_path
+      (Unix.error_message error)
+  | base_path ->
+    (match
+       ( Masc.Browser_addon_preflight.report (Masc.Browser_addon_preflight.judge ~base_path)
+       , Masc.Browser_addon_preflight.report_doubled
+           (Masc.Browser_addon_preflight.doubled_sources ~base_path) )
+     with
+     | Ok line, Ok () ->
+       Printf.printf "%s\n%!" line;
+       Ok ()
+     | Error message, Ok () | Ok _, Error message -> errorf "%s" message
+     | Error host, Error doubled -> errorf "%s; %s" host doubled)
+;;
+
+let validate_browser_addon_cmd =
+  let doc =
+    "refuse a workspace that has a browser lane host installed and no browser \
+     Add-on declaration, since its host polls would all be answered with HTTP 503"
+  in
+  Cmd.v
+    (Cmd.info "validate-browser-addon" ~doc)
+    Term.(ret (const (fun base_path -> cmdliner_result (validate_browser_addon base_path)) $ base_path))
+;;
+
+let validate_runtime_config_cmd =
+  let doc =
+    "judge the runtime.toml this BasePath's server reads with the raw save \
+     check and with what boot does with it"
+  in
+  Cmd.v
+    (Cmd.info "validate-runtime-config" ~doc)
+    Term.(
+      ret
+        (const (fun base_path allow_empty_workspace ->
+           cmdliner_result (validate_runtime_config base_path allow_empty_workspace))
+         $ base_path
+         $ allow_empty_workspace))
+;;
+
+(* The workspace masc would run against, found the way every masc command
+   finds it ([Workspace_root]: --base-path, MASC_BASE_PATH, a current directory
+   holding .masc/config, then the recorded default). A local install asks this
+   before it checks runtime.toml, so the shell does not restate the order.
+   Finding none is an answer, not a failure: [workspace=none], exit 0. *)
+let resolve_workspace requested =
+  match Workspace_root.resolve_current ~flag:requested with
+  | Ok workspace ->
+    Printf.printf
+      "workspace=resolved\nroot=%s\nsource=%s\n%!"
+      workspace.Workspace_root.root
+      (Workspace_root.source_label workspace.Workspace_root.source)
+  | Error (Workspace_root.No_workspace _ | Workspace_root.Unanchored _) ->
+    Printf.printf "workspace=none\n%!"
+;;
+
+let requested_base_path =
+  let doc =
+    "Workspace named on the command line. Without it, the one masc itself \
+     would use."
+  in
+  Arg.(value & opt (some string) None & info [ "base-path" ] ~docv:"PATH" ~doc)
+;;
+
+let resolve_workspace_cmd =
+  let doc = "print the workspace masc would run against and where it came from" in
+  Cmd.v
+    (Cmd.info "resolve-workspace" ~doc)
+    Term.(const resolve_workspace $ requested_base_path)
+;;
+
+(* A hard-cut field leaves rows no current decoder can read. [replay] refuses
+   to compact while such a row is on disk and the row only leaves through
+   compaction, so the store keeps it and its retention bound stops applying —
+   #29277. Cutting the store is a deployment step because it drops rows, and
+   the operator has to see how many before authorising it. *)
+let run_registry_cuts =
+  [ ( Masc.Exact_lane_run_registry.storage_filename
+    , Masc.Exact_lane_run_registry.cut_replay_log )
+  ; Fusion_run_registry.storage_filename, Fusion_run_registry.cut_replay_log
+  ; ( Masc.Verification_run_registry.storage_filename
+    , Masc.Verification_run_registry.cut_replay_log )
+  ; ( Masc.Goal_verification_run_registry.storage_filename
+    , Masc.Goal_verification_run_registry.cut_replay_log )
+  ]
+;;
+
+let scan_run_registries base_path ~execute =
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  List.map
+    (fun (filename, cut) ->
+       let report = cut ~execute (Filename.concat masc_dir filename) in
+       Printf.printf
+         "%s lines=%d unreadable=%d retained=%d whole_file=%b rewritten=%b\n%!"
+         filename
+         report.Run_registry_core.lines_read
+         report.malformed_lines
+         report.retained_entries
+         report.reached_end
+         report.rewritten;
+       filename, report)
+    run_registry_cuts
+;;
+
+let cut_run_registries_report ~execute reports =
+  let dropped =
+    List.fold_left
+      (fun total (_, r) -> total + r.Run_registry_core.malformed_lines)
+      0
+      reports
+  in
+  (* A store whose last line is unterminated is left alone, which is what a
+     crashed server leaves behind — exactly the state a deployment runs into.
+     Reporting that as success would tell the deployment preflight the store
+     was cleaned when it was not. *)
+  let unfinished =
+    List.filter (fun (_, r) -> not r.Run_registry_core.reached_end) reports
+    |> List.map fst
+  in
+  if unfinished <> []
+  then
+    errorf
+      "store(s) end in an unterminated line and were left alone: %s"
+      (String.concat ", " unfinished)
+  else if not execute
+  then
+    if dropped = 0
+    then Ok ()
+    else
+      errorf
+        "%d unreadable row(s) across the run registries; re-run with --execute \
+         to cut them"
+        dropped
+  else (
+    let uncut =
+      List.filter
+        (fun (_, r) ->
+           r.Run_registry_core.malformed_lines > 0 && not r.rewritten)
+        reports
+      |> List.map fst
+    in
+    if uncut = []
+    then Ok ()
+    else
+      errorf
+        "store(s) still hold unreadable rows after the cut: %s"
+        (String.concat ", " uncut))
+;;
+
+(* The rewrite replaces the inode and drops rows that are Running on disk, so
+   it must not run under a live server. The lease is the same one
+   [tool-blob-maintenance] takes for its own destructive pass. *)
+let cut_run_registries base_path ~execute =
+  if not execute
+  then cut_run_registries_report ~execute (scan_run_registries base_path ~execute)
+  else (
+    let lease_dir = (Host_config.host ()).base_path_lease_dir in
+    match
+      Server_startup_takeover.acquire_base_path_lock
+        ~run_dir:lease_dir
+        base_path
+    with
+    | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+      let pid = Server_startup_takeover.base_path_owner_pid owner in
+      errorf
+        "workspace writer lease is already owned base_path=%s pid=%s"
+        base_path
+        (match pid with
+         | Some value -> string_of_int value
+         | None -> "unknown")
+    | Server_startup_takeover.Base_path_rejected rejection ->
+      errorf
+        "workspace writer lease rejected base_path=%s: %s"
+        base_path
+        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+    | Server_startup_takeover.Base_path_acquired lease ->
+      Fun.protect
+        ~finally:(fun () ->
+          Server_startup_takeover.release_base_path_lease lease)
+        (fun () ->
+           cut_run_registries_report
+             ~execute
+             (scan_run_registries base_path ~execute)))
+;;
+
+let execute_cut =
+  let doc = "Rewrite each store, dropping the rows no current decoder reads." in
+  Arg.(value & flag & info [ "execute" ] ~doc)
+;;
+
+let cut_run_registries_cmd =
+  let doc =
+    "report run-registry rows the current decoders refuse; --execute rewrites \
+     the stores without them (run with the server stopped)"
+  in
+  Cmd.v
+    (Cmd.info "cut-run-registries" ~doc)
+    Term.(
+      ret
+        (const (fun base_path execute ->
+           cmdliner_result (cut_run_registries base_path ~execute))
+         $ base_path
+         $ execute_cut))
+;;
+
+let owner_pid =
+  let doc = "Expected process ID of the current BasePath lease owner." in
+  Arg.(required & opt (some int) None & info [ "owner-pid" ] ~docv:"PID" ~doc)
+;;
+
+let verify_lease_owner_cmd =
+  let doc = "verify the exact process that owns the canonical BasePath lease" in
+  Cmd.v
+    (Cmd.info "verify-lease-owner" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path owner_pid ->
+              cmdliner_result (verify_base_path_lease_owner base_path owner_pid))
+         $ base_path
+         $ owner_pid))
+;;
+
+let next_executable =
+  let doc = "Runtime executable that replaces the lease owner after preparation." in
+  Arg.(required & opt (some string) None & info [ "next-executable" ] ~docv:"PATH" ~doc)
+;;
+
+let next_arguments =
+  let doc = "One runtime argument. Repeat for every argument in order." in
+  Arg.(value & opt_all string [] & info [ "next-argument" ] ~docv:"ARG" ~doc)
+;;
+
+let lease_handoff_cmd =
+  let doc = "prepare a deployment under lease, then atomically exec the new runtime" in
+  Cmd.v
+    (Cmd.info "lease-handoff" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path next_executable next_arguments command ->
+              cmdliner_result
+                (handoff_base_path_lease
+                   base_path
+                   next_executable
+                   next_arguments
+                   command))
+         $ base_path
+         $ next_executable
+         $ next_arguments
+         $ command))
+;;
+
+let () =
+  let doc = "typed helpers for runtime deployment preflight" in
+  exit
+    (Cmd.eval
+       (Cmd.group
+          (Cmd.info "masc-deployment-preflight-helper" ~doc)
+          [ durable_filenames_cmd
+          ; lease_run_cmd
+          ; lease_handoff_cmd
+          ; tool_blob_maintenance_cmd
+          ; vision_kept_maintenance_cmd
+          ; media_reading_maintenance_cmd
+          ; verify_lease_owner_cmd
+          ; validate_current_meta_cmd
+          ; validate_task_backlog_cmd
+          ; build_commit_cmd
+          ; validate_schedule_ledger_cmd
+          ; validate_signals_cmd
+          ; cut_run_registries_cmd
+          ; validate_stores_cmd
+          ; validate_runtime_config_cmd
+          ; validate_browser_addon_cmd
+          ; resolve_workspace_cmd
+          ]))
+;;

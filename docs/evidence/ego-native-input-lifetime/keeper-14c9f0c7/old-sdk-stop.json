@@ -1,0 +1,8 @@
+{
+  "source": "14c9f0c701768ed3242e3fcde219b3dfaf9a80ce",
+  "pid": 77158,
+  "reason": "old idle candidate SDK remained after server SIGTERM; new candidate explicit detach had already finished25 and exited its own SDK",
+  "identity_path_and_hash_reverified": true,
+  "signal": "SIGTERM",
+  "scope": "owned old candidate only; not a claim that generic server-signal cleanup was repaired"
+}

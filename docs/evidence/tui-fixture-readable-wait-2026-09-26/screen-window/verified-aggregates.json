@@ -1,0 +1,22 @@
+[
+  {
+    "role": "whole",
+    "transitions": 300,
+    "worst_flush_ms_by_session": [
+      23.265,
+      0.21,
+      25.301
+    ],
+    "median_session_worst_flush_ms": 23.265
+  },
+  {
+    "role": "window",
+    "transitions": 300,
+    "worst_flush_ms_by_session": [
+      24.357,
+      24.944,
+      25.309
+    ],
+    "median_session_worst_flush_ms": 24.944
+  }
+]

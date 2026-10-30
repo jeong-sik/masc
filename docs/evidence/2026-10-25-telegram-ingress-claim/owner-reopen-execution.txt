@@ -1,0 +1,12 @@
+Actual checkout + Owner recovery assertions + suite result (ANSI removed):
+test suite	Checkout	2026-10-24T17:49:36.9938996Z   ref: f2d8447e218dd222a508cafa81365cc4dc0466c0
+test suite	Checkout	2026-10-24T17:49:48.8656337Z HEAD is now at f2d8447e test(keeper): verify native origin refusal without stale error wording
+test suite	Test	2026-10-24T17:57:44.6344739Z ^[[33mASSERT^[[0m A has the actual queued operation
+test suite	Test	2026-10-24T17:57:44.6398411Z ^[[33mASSERT^[[0m B cannot take the same persisted update after reopen
+test suite	Test	2026-10-24T17:57:44.6398940Z ^[[33mASSERT^[[0m conflict never reached B's Gate admission
+test suite	Test	2026-10-24T17:57:44.6402245Z ^[[33mASSERT^[[0m A still owns exactly one operation
+test suite	Test	2026-10-24T17:57:44.6405403Z ^[[33mASSERT^[[0m B remains empty
+test suite	Test	2026-10-24T17:57:44.6450893Z ^[[33mASSERT^[[0m exact original-owner retry confirms custody
+test suite	Test	2026-10-24T17:57:44.6455564Z ^[[33mASSERT^[[0m closed and reopened A store still has one operation
+test suite	Test	2026-10-24T17:57:44.6458357Z ^[[33mASSERT^[[0m closed and reopened B store still has zero
+test suite	Test	2026-10-24T17:57:44.7199032Z ^[[32mTest Successful^[[0m in 2.149s. 93 tests run.

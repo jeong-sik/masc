@@ -1,0 +1,13 @@
+{
+  "scope": "actual native decoder plus source-sliced parser and schema consumer tests; real ECMAScript regex over generated schema; cached Fusion_types dependency; no full suites or provider run",
+  "baseline": "fe6964a5f55bd65db3bc2cdd96463fa2ee0e4f12",
+  "source_sha256": {
+    "lib/fusion_core/fusion_judge_parse.ml": "8336ded32d0622bd0ee9a1adebb95ca14033cba5dbc448ed4152a2b79c386c13",
+    "lib/fusion_core/fusion_judge_parse.mli": "a2089aec1547586c50c827a1a79c38ab376b3c849dd1d049e52bfaaa0044fa9e",
+    "lib/fusion_core/dune": "5706db3354289f527cdf8fe48c434718ba6c32e4563c90b48b38d1c96d2d0da9",
+    "config/prompts/fusion.judge.md": "46eb90668f8cadc5840f5dfaaa924edaa79b426eb4aaf92f866c42d5f97e3fc6",
+    "test/fusion_core/test_fusion.ml": "4851dac2617e08b33fbfa1fd40c9681b6f01024333d6e21e643115e93ba1870e",
+    "lib/keeper/keeper_structured_output_schema.ml": "d0ec1acc88780b8ee2d42dd28cc0ede2fde35252786ea8d53ae7914993a883cb",
+    "test/test_keeper_structured_output_schema.ml": "63c0a2d5ddb825f8f8d94e16e53a36ef248699716237722a452c237eed78165b"
+  }
+}

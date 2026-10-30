@@ -1,0 +1,170 @@
+(* The probe report is a contract: the CLI prints it, and the wizard surfaces
+   will read the same JSON. What these fix is the shape and the three words,
+   because a reader that meets a fourth has a result this module did not write.
+
+   The probes themselves reach endpoints over the network, so they are measured
+   rather than unit-tested; docs/VOICE-RUNBOOK.md carries a dated run against a
+   live configuration. *)
+
+let attempt endpoint_id kind outcome : Masc.Voice_bridge.probe_attempt =
+  { Masc.Voice_bridge.endpoint_id; kind; outcome }
+
+let field name json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some (`String value) -> value
+     | Some _ | None -> Alcotest.failf "field %s is not a string in the report" name)
+  | _ -> Alcotest.fail "the report is not an object"
+
+let test_each_state_has_its_own_word () =
+  let of_outcome outcome =
+    field "state" (Masc.Voice_bridge.probe_attempt_json
+                     (attempt "e" Voice_config.Openai_compat outcome))
+  in
+  Alcotest.(check string) "answered" "answered"
+    (of_outcome (Masc.Voice_bridge.Answered "24285 bytes of audio"));
+  Alcotest.(check string) "refused" "refused"
+    (of_outcome (Masc.Voice_bridge.Refused "connection refused"));
+  Alcotest.(check string) "skipped" "skipped"
+    (of_outcome (Masc.Voice_bridge.Skipped "disabled in the configuration"))
+
+let test_the_report_names_the_endpoint_and_its_kind () =
+  let json =
+    Masc.Voice_bridge.probe_attempt_json
+      (attempt "whisper-local" Voice_config.Openai_compat
+         (Masc.Voice_bridge.Answered "heard it"))
+  in
+  Alcotest.(check string) "the endpoint id is carried" "whisper-local"
+    (field "endpoint_id" json);
+  Alcotest.(check string) "so is the kind, spelled as the config spells it"
+    "openai_compat" (field "kind" json)
+
+(* A transcript reaches an operator through this field. Escaping it as an OCaml
+   literal turns every non-ASCII language into byte numbers, which is what the
+   first measured run of the CLI printed for Korean. *)
+let test_a_transcript_survives_as_written () =
+  let spoken = "음성 연결을 확인합니다." in
+  let json =
+    Masc.Voice_bridge.probe_attempt_json
+      (attempt "whisper-local" Voice_config.Openai_compat
+         (Masc.Voice_bridge.Answered ("heard " ^ spoken)))
+  in
+  Alcotest.(check string) "the transcript is carried verbatim" ("heard " ^ spoken)
+    (field "detail" json)
+
+let test_the_readable_line_says_which_state_it_is () =
+  Alcotest.(check string) "answered" "answered: 24285 bytes of audio"
+    (Masc.Voice_bridge.probe_outcome_to_string
+       (Masc.Voice_bridge.Answered "24285 bytes of audio"));
+  Alcotest.(check string) "refused" "refused: connection refused"
+    (Masc.Voice_bridge.probe_outcome_to_string
+       (Masc.Voice_bridge.Refused "connection refused"));
+  Alcotest.(check string) "skipped reads as not asked, not as a failure"
+    "not asked: disabled in the configuration"
+    (Masc.Voice_bridge.probe_outcome_to_string
+       (Masc.Voice_bridge.Skipped "disabled in the configuration"))
+
+(* Which transport is asked for a transcript. Every kind is spelled out rather
+   than grouped, because the bug this pins was a kind that existed and was
+   never considered: the two command kinds reached main while the probe still
+   matched on three, and nothing was red until a build. *)
+let test_every_kind_says_how_it_transcribes () =
+  let transcriber = Masc.Voice_bridge.transcriber_of_kind in
+  let open Masc.Voice_bridge in
+  Alcotest.(check bool) "openai_compat is an address" true
+    (transcriber Voice_config.Openai_compat = Over_http);
+  Alcotest.(check bool) "so is elevenlabs" true
+    (transcriber Voice_config.Elevenlabs_direct = Over_http);
+  Alcotest.(check bool) "whisper is run, not reached" true
+    (transcriber Voice_config.Whisper_cli = By_command);
+  Alcotest.(check bool) "say speaks and has no ear" true
+    (transcriber Voice_config.Macos_say = Does_not_transcribe);
+  Alcotest.(check bool) "espeak-ng speaks and has no ear either" true
+    (transcriber Voice_config.Espeak_ng = Does_not_transcribe);
+  Alcotest.(check bool) "the mcp endpoint carries a tool call, not audio" true
+    (transcriber Voice_config.Voice_mcp = Does_not_transcribe)
+
+let transcript json =
+  match Masc.Voice_bridge.transcript_of_stt_json json with
+  | Ok text -> Ok text
+  | Error reason -> Error reason
+
+(* Silence is an answer. A person who recorded nothing and a person whose
+   endpoint answered an error both need to know which of the two happened, and
+   an empty transcript is how the first one reads. *)
+let test_an_empty_transcript_is_still_a_transcript () =
+  Alcotest.(check (result string string)) "what was heard"
+    (Ok "안녕하세요") (transcript (`Assoc [ "text", `String "안녕하세요" ]));
+  Alcotest.(check (result string string)) "and hearing nothing"
+    (Ok "") (transcript (`Assoc [ "text", `String "" ]))
+
+(* The body that has no transcript in it. Read as an empty transcript, this
+   endpoint would be reported as a quiet microphone -- the one thing the probe
+   is there to tell apart from an endpoint that did not answer properly. *)
+let test_a_body_without_a_transcript_is_not_silence () =
+  let refused json =
+    match transcript json with
+    | Error _ -> true
+    | Ok _ -> false
+  in
+  Alcotest.(check bool) "an error body names no transcript" true
+    (refused (`Assoc [ "error", `String "model not found" ]));
+  Alcotest.(check bool) "neither does a number in the text field" true
+    (refused (`Assoc [ "text", `Int 3 ]));
+  Alcotest.(check bool) "nor a body that is not an object at all" true
+    (refused (`List []))
+
+(* An answered TTS probe names the voice it asked for, so a reader confirming
+   which voice a keeper got reads it rather than a byte count. A say voice that
+   is not installed never reaches this: test/voice_say_voice_probe holds that
+   the probe refuses it. *)
+let test_an_answer_names_the_voice_it_asked_for () =
+  Alcotest.(check string) "the voice as configured"
+    "124690 bytes of audio in \"Flo (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))\""
+    (Masc.Voice_bridge.spoke_detail ~bytes:124690
+       ~voice:"Flo (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))");
+  (* Readable, not escaped into byte numbers: a Korean voice name through %S
+     is unreadable, and the name is the whole point of reporting it. *)
+  Alcotest.(check bool) "the name survives as itself" true
+    (Astring.String.is_infix
+       ~affix:"\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4"
+       (Masc.Voice_bridge.spoke_detail ~bytes:1
+          ~voice:"Flo (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))"))
+
+(* A reader who never picked one has been listening to the system voice all
+   along. Saying so beats reporting a voice named "". *)
+let test_no_voice_reads_as_the_system_voice () =
+  Alcotest.(check string) "blank" "512 bytes of audio in the system voice"
+    (Masc.Voice_bridge.spoke_detail ~bytes:512 ~voice:"   ")
+
+let () =
+  Alcotest.run
+    "voice_probe"
+    [ ( "what an answer says"
+      , [ Alcotest.test_case "an answer names the voice it asked for" `Quick
+            test_an_answer_names_the_voice_it_asked_for
+        ; Alcotest.test_case "no voice reads as the system voice" `Quick
+            test_no_voice_reads_as_the_system_voice
+        ] )
+    ; ( "report contract"
+      , [ Alcotest.test_case "each state has its own word" `Quick
+            test_each_state_has_its_own_word
+        ; Alcotest.test_case "the report names the endpoint and its kind" `Quick
+            test_the_report_names_the_endpoint_and_its_kind
+        ; Alcotest.test_case "a transcript survives as written" `Quick
+            test_a_transcript_survives_as_written
+        ; Alcotest.test_case "the readable line says which state it is" `Quick
+            test_the_readable_line_says_which_state_it_is
+        ] )
+    ; ( "which transport answers a transcript"
+      , [ Alcotest.test_case "every kind says how it transcribes" `Quick
+            test_every_kind_says_how_it_transcribes
+        ; Alcotest.test_case "an empty transcript is still a transcript" `Quick
+            test_an_empty_transcript_is_still_a_transcript
+        ; Alcotest.test_case "a body without a transcript is not silence" `Quick
+            test_a_body_without_a_transcript_is_not_silence
+        ;
+
+        ] )
+    ]

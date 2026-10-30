@@ -1,0 +1,125 @@
+{
+  "is_derivative": true,
+  "entries": [
+    {
+      "keeper": "audit-live-glm",
+      "execution_id": "execution-node-e2670fec6758d0bb60ee78a27c4d8fa6",
+      "entry": {
+        "ts": 1793048034.217586,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793048013383-00000",
+        "session_id": "trace-1793048013383-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "execution_id": "execution-node-e2670fec6758d0bb60ee78a27c4d8fa6",
+        "physical_execution_id": "execution-node-e2670fec6758d0bb60ee78a27c4d8fa6",
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "result_bytes": 269,
+        "input_fingerprint": "05b96bfc843fc69aff79f9544384d5ade0727ab7aa24913f4d2d4816e2056423",
+        "output_fingerprint": "435b4a81e1b8d2f07788a22fd3506ec2a0268baf6d2d6ef225633c3003fefaab",
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"6\", \"schedule_id\": \"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba\", \"author_id\": \"audit-live-glm\", \"author_kind\": \"automated_actor\", \"created_at\": 1793048034.209748, \"body\": \"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9\"}, \"note_count\": 1}"
+      }
+    },
+    {
+      "keeper": "audit-live-glm",
+      "execution_id": "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+      "entry": {
+        "ts": 1793048048.853037,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793048013383-00000",
+        "session_id": "trace-1793048013383-00000",
+        "turn": 3,
+        "keeper_turn_id": 2,
+        "execution_id": "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+        "physical_execution_id": "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "result_bytes": 284,
+        "input_fingerprint": "58f076f4c4edd0c670c6ab21f909cd5bb02a6b5155afb7aa9e25ed2d2fb2bf83",
+        "output_fingerprint": "4587f8fa6d1cf4eb9bbfaf69c980e6b57f8eb81141d637077bd77f4b75dd5ba9",
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"11\", \"schedule_id\": \"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\", \"author_id\": \"audit-live-glm\", \"author_kind\": \"automated_actor\", \"created_at\": 1793048048.849434, \"body\": \"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND\"}, \"note_count\": 1}"
+      }
+    },
+    {
+      "keeper": "audit-live-glm",
+      "execution_id": "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+      "entry": {
+        "ts": 1793048072.511824,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+        },
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793048013383-00000",
+        "session_id": "trace-1793048013383-00000",
+        "turn": 7,
+        "keeper_turn_id": 3,
+        "execution_id": "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+        "physical_execution_id": "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+        "tool_use_id": "call_7575f0bd4fad48d296939782",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "result_bytes": 277,
+        "input_fingerprint": "6c788c35396355ae400ad149b365f945b76d239e88486efa1f1f7e8bf491b7d5",
+        "output_fingerprint": "6e2e525cad637ea3cf0daf9ae9b18b803677bc22ac53ff66a7bb5793ffa4751e",
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"12\", \"schedule_id\": \"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba\", \"author_id\": \"audit-live-glm\", \"author_kind\": \"automated_actor\", \"created_at\": 1793048072.48934, \"body\": \"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B\"}, \"note_count\": 2}"
+      }
+    }
+  ],
+  "comparison_to_durable_original": [
+    {
+      "execution_id": "execution-node-e2670fec6758d0bb60ee78a27c4d8fa6",
+      "identity_input_equal": true,
+      "output_string_byte_equal": false,
+      "decoded_output_equal": true,
+      "raw_output_sha256": "5403812d31e8a08f588e55ee345246e845fb8c7384fa613909533783ad5640b8",
+      "captured_api_output_sha256": "650cae0bff526af7e1b333a909f347a6425eca79779bdd4a1e6f6374a7ee5d3b"
+    },
+    {
+      "execution_id": "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+      "identity_input_equal": true,
+      "output_string_byte_equal": false,
+      "decoded_output_equal": true,
+      "raw_output_sha256": "f79474bdbbd2d9e63f636c1f8b5ba60bd8aa15eb18c433a2ea472577d7f754ea",
+      "captured_api_output_sha256": "9aeb02d1eb8da1b08ad4c06f8de5dda0e10f84ef51100c044fffa22e1919f42a"
+    },
+    {
+      "execution_id": "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+      "identity_input_equal": true,
+      "output_string_byte_equal": false,
+      "decoded_output_equal": true,
+      "raw_output_sha256": "5de7ddc31e888e30d55f215bff41ddc7eb523012a81450bed3dfbf9c2d258a7c",
+      "captured_api_output_sha256": "18a7c114d4a7a95edcafed3dcabacfc89ef2f5937e393b10c91fd70a814fb39e"
+    }
+  ],
+  "scope": "Exact API capture field projection. Controller sanitization/re-serialization changed output-string bytes; decoded JSON identity is independently checked. No byte-identical API wire claim."
+}

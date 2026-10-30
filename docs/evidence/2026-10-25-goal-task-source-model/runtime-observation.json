@@ -1,0 +1,94 @@
+{
+  "schema": "masc.task-source.runtime-observation.v1",
+  "source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+  "source_checkout_head": "5ef6623937fab2a04f10862605b7d7db56ab8bdb",
+  "effective_roots_equal_owned_plan": true,
+  "embedded_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "executable_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+  "status": "ok",
+  "overall_status": "degraded",
+  "overall_status_reasons": [
+    "keeper_memory_execution:addon_unattached"
+  ],
+  "runtime_startup_degradation": {
+    "schema": "masc.runtime_startup_degradation.v1",
+    "status": "ok",
+    "degraded": false,
+    "operator_action_required": false,
+    "terminal_reason": "none",
+    "missing_catalog_model_count": 0,
+    "disabled_runtime_ids": [],
+    "status_reasons": [],
+    "operator_action_reasons": [],
+    "exact_slot_body_deadline_gaps": [],
+    "exact_lanes_emptied_by_body_deadline_gaps": [],
+    "exact_output_registry_stale": null
+  },
+  "admitted_lanes": [
+    {
+      "lane_id": "board_attention_exact",
+      "declared_slots": [
+        "glm-coding.glm-5-3"
+      ],
+      "admitted_slots": [
+        "glm-coding.glm-5-3"
+      ],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "admission_error": null
+    },
+    {
+      "lane_id": "hitl_auto_judge",
+      "declared_slots": [
+        "glm-coding.glm-5-3"
+      ],
+      "admitted_slots": [
+        "glm-coding.glm-5-3"
+      ],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "admission_error": null
+    },
+    {
+      "lane_id": "librarian_exact",
+      "declared_slots": [],
+      "admitted_slots": [],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "admission_error": "exact-output lane \"librarian_exact\" is not configured"
+    },
+    {
+      "lane_id": "verifier_exact",
+      "declared_slots": [
+        "glm-coding.glm-5-3"
+      ],
+      "admitted_slots": [
+        "glm-coding.glm-5-3"
+      ],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "admission_error": null
+    },
+    {
+      "lane_id": "browser_stagehand_exact",
+      "declared_slots": [],
+      "admitted_slots": [],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "admission_error": "exact-output lane \"browser_stagehand_exact\" is not configured"
+    },
+    {
+      "lane_id": "candle_appraiser",
+      "declared_slots": [],
+      "admitted_slots": [],
+      "cli_slots": [],
+      "dropped_slots": [],
+      "admission_error": "exact-output lane \"candle_appraiser\" is not configured"
+    }
+  ],
+  "all9_reported_models": "glm-5.3",
+  "independent_model_families": false,
+  "production_installation": false,
+  "fleet_readiness_claim": false
+}

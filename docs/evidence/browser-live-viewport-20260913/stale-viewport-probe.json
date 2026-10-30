@@ -1,0 +1,28 @@
+{
+  "actor": "owned probe, outside TUI",
+  "input": {
+    "lane": "live",
+    "tabId": 1,
+    "action": "scroll_at",
+    "point": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "viewport": {
+      "documentId": "2861b6da87b465c5144127bfd5af4870",
+      "width": 1366.0,
+      "height": 683.0,
+      "scrollX": 0.0,
+      "scrollY": 0.0
+    },
+    "x": 0,
+    "y": 120,
+    "expectedUrl": "http://127.0.0.1:54718/index.html#details",
+    "clientId": "ae865f36-42fa-4e0a-9489-f3139728025c"
+  },
+  "status": 400,
+  "response": {
+    "ok": false,
+    "error": "page_url_changed"
+  }
+}

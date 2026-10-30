@@ -1,0 +1,77 @@
+{
+  "scope": "Post-Task revision for Goal; distinct from approved task snapshot",
+  "files": [
+    {
+      "path": "booklet.pdf",
+      "bytes": 102608,
+      "sha256": "ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb",
+      "declared_match": true
+    },
+    {
+      "path": "poster.png",
+      "bytes": 86709,
+      "sha256": "2b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386",
+      "declared_match": true
+    },
+    {
+      "path": "renders/page1.png",
+      "bytes": 64091,
+      "sha256": "3db665442ed4dbcef2eafc5a769868ce9772814f9ecc7edd7acf2ba726e1b34c",
+      "declared_match": true
+    },
+    {
+      "path": "renders/page2.png",
+      "bytes": 81051,
+      "sha256": "c85b181149d6bfd3fec00ad3fbd3e51eb75d2bb48d0a562c1e90cd6620eed731",
+      "declared_match": true
+    },
+    {
+      "path": "renders/page3.png",
+      "bytes": 80753,
+      "sha256": "9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62",
+      "declared_match": true
+    }
+  ],
+  "pdfinfo": "Title:           untitled\nSubject:         unspecified\nKeywords:        \nAuthor:          anonymous\nCreator:         ReportLab PDF Library - www.reportlab.com\nProducer:        ReportLab PDF Library - www.reportlab.com\nCreationDate:    Thu Sep 10 22:55:59 2026 KST\nModDate:         Thu Sep 10 22:55:59 2026 KST\nCustom Metadata: no\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           3\nEncrypted:       no\nPage size:       595.276 x 841.89 pts (A4)\nPage rot:        0\nFile size:       102608 bytes\nOptimized:       no\nPDF version:     1.4\n",
+  "pixel_comparison": [
+    {
+      "page": 1,
+      "actual_size": [
+        1241,
+        1754
+      ],
+      "declared_size": [
+        1241,
+        1754
+      ],
+      "size_matches_manifest": true,
+      "pixels_identical": true
+    },
+    {
+      "page": 2,
+      "actual_size": [
+        1241,
+        1754
+      ],
+      "declared_size": [
+        1241,
+        1754
+      ],
+      "size_matches_manifest": true,
+      "pixels_identical": true
+    },
+    {
+      "page": 3,
+      "actual_size": [
+        1241,
+        1754
+      ],
+      "declared_size": [
+        1241,
+        1754
+      ],
+      "size_matches_manifest": true,
+      "pixels_identical": true
+    }
+  ]
+}

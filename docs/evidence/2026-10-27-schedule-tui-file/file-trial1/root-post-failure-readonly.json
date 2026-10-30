@@ -1,0 +1,57 @@
+{
+  "observed_unix": 1793054228.639173,
+  "derivative": true,
+  "scope": "Fresh read-only post-observer evidence; original FAIL unchanged",
+  "http_receipts": [
+    {
+      "path": "/health?full=1",
+      "bytes": 33154,
+      "sha256": "15925897c9de275be45614d171074bef4b5964766ee6255cef906f488902eb07"
+    },
+    {
+      "path": "/api/v1/keepers/turns",
+      "bytes": 193,
+      "sha256": "fa7366e5d61df642fdd99612279cdfef0ed631d05351af11c31c48b58da94dc6"
+    },
+    {
+      "path": "/api/v1/dashboard/scheduled-automation?schedule_id=audit-file-job-950cf3f5d41a4a0b874e5152eadd7d5e",
+      "bytes": 8869,
+      "sha256": "3b588dc328beb32ad7eef6bd7e552799760bab5ca1741a33bbd705f9f9739769"
+    }
+  ],
+  "idle": true,
+  "turn_status": "ok",
+  "queue_evidence": {
+    "projection_status": "matched_terminal_completed",
+    "source": "durable_event_queue_snapshot",
+    "queue": "keeper_event_queue",
+    "stimulus": "schedule_due",
+    "keeper_name": "audit-file-ce44a31266bd45a2b82ba58ce53124d0",
+    "schedule_instance_id": "01a17a5a-6d77-7000-8310-a034d865237a",
+    "schedule_id": "audit-file-job-950cf3f5d41a4a0b874e5152eadd7d5e",
+    "post_id": "41c1a71e915fbcff23b0d974871ae6287226974c4c74666c534e428bfa676344",
+    "wake_due_at": 1793054110.04766,
+    "wake_due_at_iso": "2026-10-26T22:35:10Z",
+    "wake_payload_digest": "5466af81443ed0b5a4f4318764c5ffba10169e3310f30751d24303909b9f0162",
+    "schedule_status": "succeeded",
+    "pending_count": 0,
+    "read_errors": [],
+    "resolved_owner": "audit-file-ce44a31266bd45a2b82ba58ce53124d0",
+    "terminal_outcome": "completed",
+    "terminal_reason": null,
+    "matched_bucket": "terminal",
+    "matched_post_id": "41c1a71e915fbcff23b0d974871ae6287226974c4c74666c534e428bfa676344",
+    "matched_payload_kind": "schedule_due",
+    "matched_arrived_at": 1793054110.905511,
+    "matched_arrived_at_iso": "2026-10-26T22:35:10Z",
+    "matched_schedule_id": "audit-file-job-950cf3f5d41a4a0b874e5152eadd7d5e",
+    "matched_schedule_instance_id": "01a17a5a-6d77-7000-8310-a034d865237a",
+    "matched_due_at": 1793054110.04766,
+    "matched_due_at_iso": "2026-10-26T22:35:10Z",
+    "matched_payload_digest": "5466af81443ed0b5a4f4318764c5ffba10169e3310f30751d24303909b9f0162",
+    "matched_age_seconds": 117.73200798034668
+  },
+  "note_count": 0,
+  "source": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "pid": 24402
+}

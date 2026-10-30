@@ -1,0 +1,45 @@
+{
+  "at": 1792751318.625406,
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/lane-addons/declaration",
+    "body": {
+      "file_name": "result-statistics.toml",
+      "source_text": "enabled = true\nid = \"result-statistics\"\nrun_id = \"exact-launcher-review\"\nmanifest_path = \"/tmp/masc-exact-launcher-review-20261023/workspace/packages/output-statistics/lane.toml\"\n[binding]\nsources = [{source_id = \"phrase-input\", kind = \"lane_output\", installation_id = \"phrase-source\", output_id = \"phrase\", selection = \"latest_completed\"}]\n",
+      "mode": "save",
+      "expected_source_revision": "ce81603d0a1bcd727635bcd43415171e1bee6a9eb1ae4e9f41bacd4fb1a4b6e7"
+    },
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "861"
+    },
+    "body": {
+      "document": {
+        "file_name": "result-statistics.toml",
+        "source_path": "/tmp/masc-exact-launcher-review-20261023/workspace/.masc/config/lane-addons/result-statistics.toml",
+        "source_text": "enabled = true\nid = \"result-statistics\"\nrun_id = \"exact-launcher-review\"\nmanifest_path = \"/tmp/masc-exact-launcher-review-20261023/workspace/packages/output-statistics/lane.toml\"\n[binding]\nsources = [{source_id = \"phrase-input\", kind = \"lane_output\", installation_id = \"phrase-source\", output_id = \"phrase\", selection = \"latest_completed\"}]\n",
+        "source_revision": "b83f00fa409b2ad7ec81104605965273be580004b5e6f18d341c0e621962cc43",
+        "desired_revision": "4d1deae7eb25d85e0c0191c4f91b9694445df2f48b6727d747a67100494fe306",
+        "validation": {
+          "valid": true,
+          "messages": []
+        }
+      },
+      "write": {
+        "state": "saved",
+        "durability": "durable",
+        "detail": null
+      },
+      "application": "pending_reconciliation"
+    }
+  }
+}

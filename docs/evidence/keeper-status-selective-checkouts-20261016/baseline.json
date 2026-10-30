@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-16T08:02:38.820Z",
+  "source": "existing live masc_keeper_status MCP response",
+  "keeper": "e-masc-the-leader",
+  "request": {
+    "name": "e-masc-the-leader",
+    "fast": true,
+    "tail_turns": 0,
+    "tail_messages": 0
+  },
+  "runtime_identity": "separate health observation; no candidate runtime installed",
+  "samples": 1,
+  "raw_response_utf8_bytes": 50753,
+  "compact_response_utf8_bytes": 50747,
+  "checkout_projection_utf8_bytes": 15082,
+  "checkout_entries": 32,
+  "tool_roundtrip_wall_ms": 4674,
+  "projection_estimate": {
+    "kind": "JSON-only estimate from same captured document, not candidate execution",
+    "compact_response_utf8_bytes": 35740,
+    "saved_compact_bytes": 15007
+  },
+  "limits": [
+    "no task latency measurement",
+    "no candidate execution or install",
+    "one response only",
+    "RPC wall time is not sandbox inspection time"
+  ],
+  "local_health_observation": {
+    "endpoint": "GET /health?full=1",
+    "effective_base_path": "/Users/dancer/me",
+    "embedded_binary_commit": "84fc7aa7fc88db5547a15dcd8e1b356241b58595",
+    "release_version": "0.56.0",
+    "provenance": "separate self-observed local runtime health; candidate was not installed"
+  }
+}

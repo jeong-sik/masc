@@ -1,0 +1,46 @@
+{
+  "observed_at": "2026-09-07T14:07:17.918404+00:00",
+  "pr_number": 34059,
+  "head_sha": "033899936e6a3b00c19ba053c5da1f44f98db33c",
+  "run_id": 34129759344,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34129759344",
+  "conclusion": "success",
+  "passed_total": 139,
+  "failed_total": 0,
+  "suites": [
+    {
+      "suite": "driver_failover",
+      "passed": 59,
+      "failed": 0
+    },
+    {
+      "suite": "lane_preference",
+      "passed": 18,
+      "failed": 0
+    },
+    {
+      "suite": "quota_window",
+      "passed": 13,
+      "failed": 0
+    },
+    {
+      "suite": "runtime_routing",
+      "passed": 49,
+      "failed": 0
+    }
+  ],
+  "required_checks": {
+    "run_id": 34129461225,
+    "conclusion": "success",
+    "head_sha": "033899936e6a3b00c19ba053c5da1f44f98db33c"
+  },
+  "merge": {
+    "merged": true,
+    "merged_at": "2026-09-07T14:04:35Z",
+    "merge_commit_sha": "76a19882881bcc7d9a32203fe1304c8449207afb"
+  },
+  "limits": [
+    "No live provider request or successful production candidate failover proof.",
+    "Initial e3fae151 run34128775931 failed at test compilation; fixture corrected on this head."
+  ]
+}

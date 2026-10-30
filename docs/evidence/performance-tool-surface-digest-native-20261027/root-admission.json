@@ -1,0 +1,54 @@
+{
+  "schema": "masc.root-native-digest-comparison-admission.v1",
+  "at_utc": "2026-10-27T00:11:11.218056+00:00",
+  "source_sha256": {
+    "plan.json": "9a550effd9a218fb27430df13ebe48edbbad8b189cf69e75e278ba6829e6a41a",
+    "execution-qualification.json": "14c304cd3fa4c3635bc6792219a26ba133fa545ca7485a40080635bf40585f73",
+    "run_native.py": "c7f2de2efba3c687a1444a37e624a48f8cecda68534e3de77dc5bf12d158475f",
+    "derive_observations.py": "15dd208f7dc1a96a066c06d550e2a854ec9dc6db595afefa5b8a033ef3e141ce",
+    "validator_execution.py": "6b669783616575cbf31becb7950947a932b92c5d0a7dbcb1cc2c3206a4ccf029"
+  },
+  "independent_review": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-source-review-v1/README.md",
+    "sha256": "401eafe2b8d4b94ac43c7630470c6f1a790c2023d46c239721466dbe015015bd",
+    "verdict": "PASS_SOURCE_PLAN_AND_ARTIFACT_RECORDS_ONLY",
+    "root_full_read": true,
+    "source_checks_sha256": "d8a200aa238a3fe12ac6997649e661144fb6edf4427cd88ef3f7bb0e985fdca8"
+  },
+  "author_readme_sha256": "7d9e7e14ec7957266058e6300e16f54a4bf500aca3242136da37458216fdabf8",
+  "root_verifier_sha256": "781e9e8dcc993c4e4bce9e6909bdb026491deee13078040c0f256f17309a2876",
+  "prior_terminal_native_cohorts": 31,
+  "other_private_measurement_sessions": [],
+  "serial_cells": [
+    [
+      "candidate",
+      2
+    ],
+    [
+      "candidate",
+      30
+    ],
+    [
+      "control",
+      300
+    ],
+    [
+      "candidate",
+      300
+    ],
+    [
+      "candidate",
+      300
+    ],
+    [
+      "control",
+      300
+    ]
+  ],
+  "decision": "Admit six exact fresh cells one at a time, contingent on every actual native/helper root CLI0, owned closed receipts, original byte/path and captured metadata equality before next; never replay a failed/partial leaf.",
+  "metadata_equality_operator_gate": "metadata_all_equal is True in external closed verification, in addition to original_byte_path_conserved is True",
+  "frozen_plan_execute_unchanged": false,
+  "qualifications": "native55resource/jobSUCCESS vs overallFAIL and outer11932UNKNOWN remain; only two identitychild0 are recorded; distinct builders/source-only production diff/loaded-library limits retained",
+  "results_claimed": false,
+  "full_goal_complete": false
+}

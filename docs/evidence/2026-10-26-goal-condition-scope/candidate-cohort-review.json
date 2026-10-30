@@ -1,0 +1,520 @@
+{
+  "schema": "masc.goal.condition-scope-controls.independent-actual-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T18:25:23.323226+00:00",
+  "reviewer": "measurement_publication_review",
+  "task_id": "task-2682",
+  "verdict": "PASS_BOUNDED_TWO_FINITE_CONDITION_CONTROLS",
+  "trace_integrity": "PASS",
+  "bounded_condition_outcomes": "PASS",
+  "assessment": "In the new428e cohort, both model runs read the complete declared three-record source and correctly evaluated each composite condition: stage_id exists exactly once and exit_code is0. N retained all three records but correctly rejected because build=7 leaves2/3 passing; P approved because all three are0. One raw-file read per control contained all three observations. This is not proof that the prior original11 A1 gap is generally repaired.",
+  "identity": {
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "actual_binary_readback_SHA_verified": true,
+    "same_embedded_source_binary_and_runtime_instance_in_two_frozen_health_snapshots": true,
+    "candidate_prompt_bytes": 8143,
+    "candidate_prompt_sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d",
+    "runtime_mechanism": "Two normal authenticated persisted proof/lookup overrides in a fresh isolated runtime on frozen3e. Normal source binding identifies the untouched3e checkout/managed baseline;428e is not claimed compiled into that binary.",
+    "prompt_overrides": [
+      {
+        "key": "goal_verification.proof",
+        "bytes": 4162,
+        "sha256": "cef0c43408be9f232380ef0626d46fc687056738af87f480ac667ef1cdc2da02",
+        "normal_API_response_ok": true,
+        "candidate_section_exact": true,
+        "effective_value_exact": true,
+        "managed_file_value_unchanged": true
+      },
+      {
+        "key": "goal_verification.lookup",
+        "bytes": 3575,
+        "sha256": "25a7a2ee1a052c9ed6dd0d4eb7378f60b637524a8b479745e903f4fba0768648",
+        "normal_API_response_ok": true,
+        "candidate_section_exact": true,
+        "effective_value_exact": true,
+        "managed_file_value_unchanged": true
+      }
+    ],
+    "only_two_effective_keys_changed": true,
+    "managed_file_values_unchanged": true,
+    "admitted_verifier_slots": [
+      "glm-coding.glm-5.3-flash"
+    ],
+    "requested_models": [
+      "glm-5.3-flash"
+    ],
+    "reported_models": [
+      "glm-5.3-flash"
+    ],
+    "unknown_reported_models": 0,
+    "API_model_name_not_weight_identity": true
+  },
+  "predeclared_contract_and_fixture": {
+    "prepare_and_dispatch_controls_exact_equal": true,
+    "target_both": "세 필수 조건 충족 3/3",
+    "mandatory_stage_ids": [
+      "verify",
+      "regression",
+      "build"
+    ],
+    "condition_per_stage": "Exactly one observation for that stage_id, with exit_code0.",
+    "one_source_may_provide_multiple_observations": true,
+    "extra_read_or_command_rerun_not_required": true,
+    "producer_report_both": "3/3, reported_passed3, measured_pass",
+    "six_actual_recorded_Python_fixture_commands": true,
+    "driver_bytes": 7557,
+    "driver_sha256": "b5ffe7c00fb165477e374adcbb21e0ac068a62e2562c4aaf4a3a79407a715c4a",
+    "driver_matches_frozen_launch_binding": true,
+    "fixture_scope": "Small Python print/exit commands labelled as stages; neither project compiler/build verification nor Docker grading nor new A1 product behavior.",
+    "source_record_and_execution_IDs_distinct_by_control": true,
+    "operator_expected_outcome_fields_not_rendered_in_actual_prompt": true,
+    "operator_prepared_unblinded_controls": true
+  },
+  "controls": [
+    {
+      "control": "N",
+      "goal_id": "goal-condition-scope-n-20261026",
+      "criterion_revision": "a56c4067c5f5f40cd862d359368c5f76",
+      "request_id": "b4e894d5921d361a678e5c2b21645129",
+      "run_id": "01a17446-a807-7000-8eeb-f537e07371ab",
+      "measurement_id": "74a21d50623982a3196bd3fc3528f3c2",
+      "metric": "공유 Goal playground 상대 condition-data/N/index.json이 가리키는 recorded-stages.json의 실제 기록을 직접 읽는다. 선언된 필수 조건은 verify, regression, build 세 stage_id가 각각 한 번 존재하고 각 기록의 exit_code가 0인 것이다. 세 조건 모두 충족한 개수를 측정한다. 하나의 원문에 세 기록이 함께 있어도 재조회나 명령 재실행은 요구하지 않는다. index의 reported_passed와 성공 라벨은 실행 기록 대신 사용하지 않는다. 이 기록은 Python fixture 명령이며 프로젝트 빌드나 Docker grader 실행이 아니다.",
+      "target": "세 필수 조건 충족 3/3",
+      "reported_value": "3/3",
+      "recorded_exit_codes": [
+        0,
+        0,
+        7
+      ],
+      "actual_passing_conditions": 2,
+      "structured_verdict": "REJECT",
+      "completion_state": "proof_refuted",
+      "Goal_phase": "executing",
+      "native_stages": [
+        "reviewed",
+        "committed"
+      ],
+      "model_POSTs": 4,
+      "unique_tools": 3,
+      "actual_provider_context_equals_retained_Original": true,
+      "candidate_template_literals_in_actual_prompt": true,
+      "retained_prompt_sha256": "3311fbcc93d59e677c53150040110d388fae4fbffae2e8249a898b1aaed459a5",
+      "raw_source_bytes": 1405,
+      "raw_source_sha256": "2c2f7ab6ce849d85b9524a085b63575f3ea8b3e7d6c6cfdb159a0635a8f3bec5",
+      "all3_raw_observations": [
+        {
+          "execution_id": "N-verify",
+          "stage_id": "verify",
+          "exit_code": 0,
+          "stdout": "N-verify\n",
+          "stderr": "",
+          "controlled_fixture": true
+        },
+        {
+          "execution_id": "N-regression",
+          "stage_id": "regression",
+          "exit_code": 0,
+          "stdout": "N-regression\n",
+          "stderr": "",
+          "controlled_fixture": true
+        },
+        {
+          "execution_id": "N-build",
+          "stage_id": "build",
+          "exit_code": 7,
+          "stdout": "N-build\n",
+          "stderr": "",
+          "controlled_fixture": true
+        }
+      ],
+      "reason_sha256": "6c1de9c850d463b34edab99534db4ade1a56cd13587ad88272bd828224565d05",
+      "verdict_ACK_native_registry_and_persisted_evidence_full_reason_equal": true,
+      "evaluator_execution_call_and_response_ID_join": true,
+      "recorded_command_starts_precede_measurement_timestamp": true,
+      "elapsed_s": 38.22994112968445,
+      "Tool_steps": [
+        {
+          "call_id": "call_-7138063915979629510",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "condition-data/N/index.json"
+          },
+          "wire_response_id": "request-000003",
+          "disposition": "completed",
+          "finished_at": 1792952156.162428,
+          "Tool_result_bytes": 566,
+          "Tool_result_sha256": "3178e2a6f9658b67c8cefbef2b5966c12d0981fda0f8f08efdd209c00e489979",
+          "read_content_bytes": 206,
+          "source_sha256": "21fde5b924fab9db6e1c90fe3baf6960f86cad4f4d2875872f135a8f2e3dfe8f"
+        },
+        {
+          "call_id": "call_-7138080683531953031",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "condition-data/N/recorded-stages.json"
+          },
+          "wire_response_id": "request-000004",
+          "disposition": "completed",
+          "finished_at": 1792952160.672934,
+          "Tool_result_bytes": 2139,
+          "Tool_result_sha256": "931030945631a93571b44754dc88fc96b8f00a48b9c247c79cefe19d8470a5a9",
+          "read_content_bytes": 1405,
+          "source_sha256": "2c2f7ab6ce849d85b9524a085b63575f3ea8b3e7d6c6cfdb159a0635a8f3bec5",
+          "all3_declared_stage_observations_in_one_read": true
+        },
+        {
+          "call_id": "call_-7138073983382971097",
+          "name": "report_review_verdict",
+          "arguments": {
+            "verdict": "REJECT",
+            "reason_sha256": "6c1de9c850d463b34edab99534db4ade1a56cd13587ad88272bd828224565d05"
+          },
+          "wire_response_id": "request-000006",
+          "disposition": "completed",
+          "finished_at": 1792952179.648822,
+          "Tool_result_bytes": 975,
+          "Tool_result_sha256": "4310784157431d93945aabfc5fd2f2757e34dbb38ac757201220f2550b356a63"
+        }
+      ],
+      "wire_metadata": [
+        {
+          "control": "N",
+          "wire_id": "request-000003",
+          "request_sha256": "a79847d2207ba051e5e27623055793a657108631307857bb5fab1082bf3afba5",
+          "response_sha256": "626b3f5f7a5a63c328c34ba1b1303f51338e74de2871c7e88e9ca9898fa9aad3",
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "control": "N",
+          "wire_id": "request-000004",
+          "request_sha256": "11b1d3c060cf9d56f2f2b9942d726216991a650466b31d6a7167449556bd22ac",
+          "response_sha256": "8c25050914b777f02864faec11e512ca36730d0df76de8aca6c45ceafa35e974",
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "control": "N",
+          "wire_id": "request-000006",
+          "request_sha256": "7d3900a8d12db49f6eadf2b0eea8107049b57f80a94e913500aae5503aeac107",
+          "response_sha256": "9077e12676bbae3a46b51897ba574a5c4cb91c83dceafac1231cdf5b2ba3aabe",
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "control": "N",
+          "wire_id": "request-000008",
+          "request_sha256": "7fcaa621ae120e1546657a5758c6731a5685038eb2626cd3c73552f1540b9581",
+          "response_sha256": "5a3a400a0e3b3f55a4bb090a4237b3890150c33d968191459b8d01b37333708b",
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        }
+      ],
+      "owner_progress_events": [
+        "dispatch_intended",
+        "judgment_retained",
+        "commit_intended",
+        "commit_unknown",
+        "commit_retry_observed",
+        "commit_observed",
+        "observer_registration_intended",
+        "observer_completion_intended",
+        "observer_registration_recorded",
+        "observer_completion_recorded"
+      ]
+    },
+    {
+      "control": "P",
+      "goal_id": "goal-condition-scope-p-20261026",
+      "criterion_revision": "2e0a0bd99a2c4e483e39b02ad411cd67",
+      "request_id": "95a5f30fa22e7c4d632dea7c0dd923e5",
+      "run_id": "01a17446-a7f1-7000-a162-0dc75bc3bf11",
+      "measurement_id": "a42e3b4d8306e7ffd9b11037d68aa6a1",
+      "metric": "공유 Goal playground 상대 condition-data/P/index.json이 가리키는 recorded-stages.json의 실제 기록을 직접 읽는다. 선언된 필수 조건은 verify, regression, build 세 stage_id가 각각 한 번 존재하고 각 기록의 exit_code가 0인 것이다. 세 조건 모두 충족한 개수를 측정한다. 하나의 원문에 세 기록이 함께 있어도 재조회나 명령 재실행은 요구하지 않는다. index의 reported_passed와 성공 라벨은 실행 기록 대신 사용하지 않는다. 이 기록은 Python fixture 명령이며 프로젝트 빌드나 Docker grader 실행이 아니다.",
+      "target": "세 필수 조건 충족 3/3",
+      "reported_value": "3/3",
+      "recorded_exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "actual_passing_conditions": 3,
+      "structured_verdict": "APPROVE",
+      "completion_state": "proof_proven",
+      "Goal_phase": "awaiting_confirmation",
+      "native_stages": [
+        "reviewed",
+        "committed"
+      ],
+      "model_POSTs": 4,
+      "unique_tools": 3,
+      "actual_provider_context_equals_retained_Original": true,
+      "candidate_template_literals_in_actual_prompt": true,
+      "retained_prompt_sha256": "280773f3af6c1fc955868d24919d09b7d884a4206cc86e1d14faf2da6ca53c7b",
+      "raw_source_bytes": 1405,
+      "raw_source_sha256": "6dd6035122290237df060da0f3d8c65335031018664dd309b23e14c4ed38f2ff",
+      "all3_raw_observations": [
+        {
+          "execution_id": "P-verify",
+          "stage_id": "verify",
+          "exit_code": 0,
+          "stdout": "P-verify\n",
+          "stderr": "",
+          "controlled_fixture": true
+        },
+        {
+          "execution_id": "P-regression",
+          "stage_id": "regression",
+          "exit_code": 0,
+          "stdout": "P-regression\n",
+          "stderr": "",
+          "controlled_fixture": true
+        },
+        {
+          "execution_id": "P-build",
+          "stage_id": "build",
+          "exit_code": 0,
+          "stdout": "P-build\n",
+          "stderr": "",
+          "controlled_fixture": true
+        }
+      ],
+      "reason_sha256": "856026d5da131953119e7df868f48d3572110e3cac284073b75a8a3f21fa9104",
+      "verdict_ACK_native_registry_and_persisted_evidence_full_reason_equal": true,
+      "evaluator_execution_call_and_response_ID_join": true,
+      "recorded_command_starts_precede_measurement_timestamp": true,
+      "elapsed_s": 42.54720687866211,
+      "Tool_steps": [
+        {
+          "call_id": "call_-7138069173019600466",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "condition-data/P/index.json"
+          },
+          "wire_response_id": "request-000002",
+          "disposition": "completed",
+          "finished_at": 1792952159.230998,
+          "Tool_result_bytes": 566,
+          "Tool_result_sha256": "03dfb2f9df1dc802903c9e15cc7e7e101b39fbd262ce568a9c96848806827ec8",
+          "read_content_bytes": 206,
+          "source_sha256": "bbf3e28d7e919f326f61f869d2a6f7794c47fb78ffb5be87195ef4a7ced03445"
+        },
+        {
+          "call_id": "call_-7138071543841551985",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "condition-data/P/recorded-stages.json"
+          },
+          "wire_response_id": "request-000005",
+          "disposition": "completed",
+          "finished_at": 1792952162.796017,
+          "Tool_result_bytes": 2139,
+          "Tool_result_sha256": "91d0c695e3b21cad47b0fe43707850c8cb432024eae6401eab29d166e15d2738",
+          "read_content_bytes": 1405,
+          "source_sha256": "6dd6035122290237df060da0f3d8c65335031018664dd309b23e14c4ed38f2ff",
+          "all3_declared_stage_observations_in_one_read": true
+        },
+        {
+          "call_id": "call_-7138069585336460274",
+          "name": "report_review_verdict",
+          "arguments": {
+            "verdict": "APPROVE",
+            "reason_sha256": "856026d5da131953119e7df868f48d3572110e3cac284073b75a8a3f21fa9104"
+          },
+          "wire_response_id": "request-000007",
+          "disposition": "completed",
+          "finished_at": 1792952186.310966,
+          "Tool_result_bytes": 1151,
+          "Tool_result_sha256": "a558c2f2008e030b723d0c5b1c4da303785b521e2b2a86e1cd61028d5156a0e8"
+        }
+      ],
+      "wire_metadata": [
+        {
+          "control": "P",
+          "wire_id": "request-000002",
+          "request_sha256": "f48cd127573e7151c587d194f42fa1386f95e71dae4e263118a49718e5978e8c",
+          "response_sha256": "8470408d12a1112d57ac239641401149f30325daa10ed62e4cc7a4688578f2c0",
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "control": "P",
+          "wire_id": "request-000005",
+          "request_sha256": "7f348157f57f28269bc4e6b9dd8af70fffa3a91bdd5f11741e177ca8a3c8ead1",
+          "response_sha256": "a2f2d8979a2eef11492724a5ad99008e184e7419378506f25954a93fa4670d60",
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "control": "P",
+          "wire_id": "request-000007",
+          "request_sha256": "6192861b37c2c48b7b63ebdd7eb0b7e96391495e4094aad523bbf9372f7c98ee",
+          "response_sha256": "e1d367153340eddbf88afcffb2f451c960032e033c81ed15145a391588e180ef",
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "control": "P",
+          "wire_id": "request-000009",
+          "request_sha256": "16d347dea0d212f049a87ddc814e02a549bb4d0772af23262220c9d7fea93250",
+          "response_sha256": "849c292f43893a942a067dfdfbc95aafe5751fba79c9b0d4ab5a1a905ba1093a",
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        }
+      ],
+      "owner_progress_events": [
+        "dispatch_intended",
+        "judgment_retained",
+        "commit_intended",
+        "commit_unknown",
+        "commit_retry_observed",
+        "commit_observed",
+        "observer_registration_intended",
+        "observer_completion_intended",
+        "observer_registration_recorded",
+        "observer_completion_recorded"
+      ]
+    }
+  ],
+  "counts_and_lineage": {
+    "actual_Goal_runs": 2,
+    "normal_proof_request_once_each": true,
+    "provider_POSTs": 8,
+    "provider_POSTs_per_control": {
+      "N": 4,
+      "P": 4
+    },
+    "GET_models": 1,
+    "unique_tool_calls": 6,
+    "unique_Tool_results": 6,
+    "tool_calls_per_control": 3,
+    "sequence_each": "index Read, one full raw-stages Read containing three observations, structured verdict, then final response after verdict acknowledgment.",
+    "all8_user_and_system_contexts_equal_their_retained_Original": true,
+    "all_provider_roundtrips_assigned_to_exact_Goal_Original": true,
+    "all_Tool_call_IDs_join_actual_following_request_Tool_bodies": true,
+    "all4_full_lookup_content_bodies_byte_equal_original_source_files": true,
+    "both_structured_verdicts_equal_ACK_retained_native_and_persisted_evidence": true,
+    "native_registration_reviewed_committed_share_exact_run_request_revision": true,
+    "evaluator_execution_receipts_join_provider_response_and_tool_use_IDs": true,
+    "POSTs_and_reviewed_committed_stages_not_independent_trials": true,
+    "commit_unknown_to_observed_retry_history_retained_not_extra_model_execution": true
+  },
+  "reason_assessment": {
+    "N": "Reason correctly distinguishes all three stage IDs being present from all three succeeding. It uses raw build exit7 to measure2/3 rather than trusting reported3/3.",
+    "P": "Reason correctly compares all three0 exits and exact stage IDs to3/3, acknowledges one shared raw source and explicitly keeps Python fixture scope separate from project/Docker execution.",
+    "recorded_timestamps": "All six recorded command start timestamps precede the applicable measurement recorded_at; this checks the recorded chronology only, not independent clock attestation.",
+    "unexpected_reason_or_verdict_error_in_these_two_controls": false
+  },
+  "typed_persisted_outcomes": {
+    "N": {
+      "verdict": "REJECT",
+      "completion": "proof_refuted",
+      "phase": "executing"
+    },
+    "P": {
+      "verdict": "APPROVE",
+      "completion": "proof_proven",
+      "phase": "awaiting_confirmation"
+    },
+    "native_stages_each": [
+      "reviewed",
+      "committed"
+    ],
+    "safe_persisted_projection_exact_equal_frozen_stores": true,
+    "human_confirmation": false
+  },
+  "prior149_A1_FAIL_boundary": {
+    "prior_manifest_bytes": 31353,
+    "prior_manifest_sha256": "526d578d8500b71168dbcf9b685ed96cc0cdf6ea36e1a341b8bcaf2cf19d2e6b",
+    "prior_review_bytes": 50955,
+    "prior_review_sha256": "bf1a2f942d7361a4af1fc6a2a713faada618297d353988f99980e424ca9eed19",
+    "prior_review_verdict": "FAIL_PROOF_SUFFICIENCY_P2_A1_THREE_STAGE_BEHAVIOR_UNCHECKED",
+    "those_two_frozen_files_unchanged_on_readback": true,
+    "entire149_leaf_reaudit_repeated_in_this_unit": false,
+    "prior_retained_verdict_or_original_inputs_modified_by_reviewer": false,
+    "new_N_P_results_prove_original_A1_gap_generally_removed": false,
+    "original11_replay_performed_on428e": false,
+    "fresh_current_prompt_Docker_verify_regression_build_or_project_compilation": false,
+    "review_does_not_backfill_previous_missing_A1_model_read": true
+  },
+  "separation_and_limits": {
+    "new428e_finite_controls_count": 2,
+    "prior529f149_replay_pooled": false,
+    "prior35b_three_controls_pooled": false,
+    "prior529f_aggregation_control_pooled": false,
+    "matched_baseline_causal_A_B": false,
+    "reliability_or_independent_model_estimate": false,
+    "original_primary3067_Goal_proof_or_completion": false,
+    "production_application_or_install": false,
+    "current_PR_head_source_native_build_or_whole_stack_approval": false,
+    "deterministic_general_condition_coverage_guarantee": false,
+    "scope": "Two independently identified Goals in one unblinded operator-controlled cohort. Observed correctness here does not establish a general repair or a population result."
+  },
+  "cleanup": {
+    "recorded_owned_processes": [
+      {
+        "pid": 76294,
+        "original_identity_verified": true,
+        "signal": "SIGTERM",
+        "process_absence_verified": true
+      },
+      {
+        "pid": 76286,
+        "original_identity_verified": true,
+        "signal": "SIGTERM",
+        "process_absence_verified": true
+      }
+    ],
+    "bounds": "The two tracked server/proxy PIDs only. Reviewer did not replay live ps or stop and makes no primary/fleet/descendant/global absence claim.",
+    "stop_receipt_sha256": "43615087a52827f13b96abdef5f71f749b6491e2b902099400b185048db5bbec"
+  },
+  "integrity_and_projection": {
+    "manifest_bytes": 13409,
+    "manifest_sha256": "6dbc056b6a4ddec142c8518e433308716863497f99090a63d87a75710dce3d82",
+    "files_excluding_manifest": 75,
+    "total_leaf_bytes": 2421544,
+    "all75_bytes_SHA_and_inventory_verified": true,
+    "safe_projection_bindings": [
+      {
+        "label": "safe-results/result.json",
+        "bytes": 6512,
+        "sha256": "c82077100755a004f7faf3b45cbbc0ca0bd25e2e43aa4333c447de90bd97fb06"
+      },
+      {
+        "label": "safe-results/actual-tool-sequence.json",
+        "bytes": 11690,
+        "sha256": "f280ff7d4752ac557cc6fdb9031c77bb8fd59b8370e12873ef62a09e0e47bc0b"
+      },
+      {
+        "label": "safe-results/persisted-outcome.json",
+        "bytes": 10634,
+        "sha256": "046c7e9187e8ab02577f3615610f987700b971d3da313a7ed3964079de328c25"
+      },
+      {
+        "label": "safe-results/owned-stop.json",
+        "bytes": 599,
+        "sha256": "43615087a52827f13b96abdef5f71f749b6491e2b902099400b185048db5bbec"
+      }
+    ],
+    "sanitized_stage_observations_match_original_fields": true,
+    "absolute_executable_argv_and_full_private_paths_not_exported": true,
+    "raw_model_Thinking_credentials_headers_full_provider_messages_or_raw_prompts_exported": false
+  },
+  "new_P0_P1_P2_in_this_bounded_cohort_integrity_or_outcomes": [],
+  "actions": {
+    "new_API_provider_model_test_build_native_CI_Docker_calls": 0,
+    "code_PR_operations_Goal_Task_Board_store_or_existing_artifact_mutations": 0,
+    "external_messages_or_new_agents": 0,
+    "formal_GitHub_approval_or_merge": false,
+    "review_outputs": "External review.json and private review derivation helper outside Git; the helper is not a public artifact."
+  }
+}

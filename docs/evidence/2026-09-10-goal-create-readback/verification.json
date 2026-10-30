@@ -1,0 +1,14 @@
+{
+  "scope": "isolated MCP creation and readback only",
+  "port": 18937,
+  "binary_commit": "c08357ea1f78f1a04564cc96dbd2f38eb8c4e857",
+  "binary_sha256": "78aac0493a966a3ef5dee3c7aecb973e7ea0d4ed2d3d07d3036076dcc0005452",
+  "missing_target_rejected": true,
+  "rejected_id_absent_from_readback": true,
+  "created_criterion_revision_retained": true,
+  "sha256": {
+    "create.json": "5901f969c1c00b2feb445d2685b3352beb5578542c4158e34f7985ff5c1a9724",
+    "reject.json": "7e5f8acb989b3c5b501158a93e1dc6b81560363c7ca48be1a3992b6ff3b0c5ce",
+    "readback.json": "067ebe677b8195a3c5c4181ad2bbda64c64b9805bf5610ec9f88a05d18582da8"
+  }
+}

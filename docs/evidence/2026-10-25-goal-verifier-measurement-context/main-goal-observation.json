@@ -1,0 +1,48 @@
+{
+  "schema": "masc.goal-verifier-measurement.public-projection.v1",
+  "source_hash": [
+    {
+      "source_label": "live_alignment/goal-list-085924.json",
+      "sha256": "b14398a1237dbf835d4b02b437dd569354e276f9a7519a757a776f2ecc969b05"
+    }
+  ],
+  "publication_scope": {
+    "included": [
+      "one historical Goal API row",
+      "its reported measurement identity and value",
+      "canonical acceptance hash"
+    ],
+    "excluded": [
+      "other Goal rows",
+      "full Task backlog",
+      "measurement evidence note prose"
+    ],
+    "limits": [
+      "Reported11/11 covers heterogeneous explicitly scoped cases; not all-current-head regression, installed production or universal model success.",
+      "A reported metric is not independent verification of every linked original.",
+      "No new current phase query, Goal transition or human confirmation performed."
+    ]
+  },
+  "observed_at": "2026-10-25T08:59:24Z",
+  "goal": {
+    "id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "phase": "executing",
+    "updated_at": "2026-10-25T08:58:22Z"
+  },
+  "completion_state": "idle",
+  "measurement": {
+    "state": "reported",
+    "record": {
+      "id": "ff5d3c4d17dd26b6393a97b4d942e201",
+      "goal_id": "goal-outcome-driven-work-20261024",
+      "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+      "observed_value": "11/11 fixed acceptance cases within explicit source/runtime scopes; latest328 configured GLM-5.3 G2/G3 scopedPASS, no not_measured case. Older G1/G4/A1–A7 scopes and historical failures retained; not all tests at one head.",
+      "actor": "codex-goal-outcomes-20261024",
+      "recorded_at": "2026-10-25T00:41:14Z"
+    }
+  },
+  "canonical_acceptance_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+  "human_confirmation_observed": false,
+  "broader_user_objective_complete_claimed": false
+}

@@ -1,0 +1,42 @@
+{
+  "schema": "masc.task-source.validation-scope.v1",
+  "current_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "prior_source": "0f72a33d9530195a2a3e721ed375974cc7952266",
+  "remaining_native_selection": [
+    "test_verification_collaboration_evidence",
+    "test_tui_evidence_link"
+  ],
+  "prior_passing_suites": {
+    "source": "0f72a33d9530195a2a3e721ed375974cc7952266",
+    "run": 40195449903,
+    "cases": 56,
+    "suites": [
+      "test_verification_authority_tools",
+      "test_goal_verifier_original",
+      "test_verifier_review_worker"
+    ],
+    "not_called_current_head_execution": true
+  },
+  "current_changes_since_prior": [
+    "bin/masc_tui_evidence_link.ml",
+    "bin/masc_tui_evidence_link.mli",
+    "test/test_tui_evidence_link.ml",
+    "test/test_verification_collaboration_evidence.ml"
+  ],
+  "unchanged_product_input_hashes": {
+    "lib/verification_authority_tools.ml": "ed48872fca7eb34471bb667e52c7c315e45cb91a6277196a2014388f82b5b154",
+    "lib/verification_collaboration_evidence.ml": "6056bc8f0ac4f543f1018f5e947d151843cde66fc6d36e2834fb42a843cdddcc",
+    "lib/workspace/workspace_verification_snapshot.ml": "3ad0792480c776327958867f367899df8c7597b1f84f6d6447f74fb4c666d1fa",
+    "config/prompts/keeper.md": "ba3fd5964f8e448cc01dfcfa2e9949a7c67d8c578d38a07f413f4ee20844ebab",
+    "config/prompts/verification.md": "e63ec4341cd59f3a4ca2e692969bf19e2a7764ed6c63f3471438ebb83fbc7fa8"
+  },
+  "first_native_compile_failure": 40194054307,
+  "second_native_compile_failure": 40194890796,
+  "third_native_partial_failure": 40195449903,
+  "first_runtime_bundle_compile_failure": 40195108277,
+  "full_regression": "not_run",
+  "previous_full_regression_run_head_suites": "not_established",
+  "actual_model": "not_run",
+  "production_installation": false,
+  "original_goal_complete": false
+}

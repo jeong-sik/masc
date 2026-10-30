@@ -1,0 +1,3659 @@
+{
+  "baseline": "aea8424926ea79f110315eec5ab429ac51043598",
+  "meaning": "Files directly read for named boundaries, callers and scenarios, not complete semantic audits. baseline identifies the initial inventory; a focused reading baseline overrides it. Historical paths remain recorded even after removal by later refactors. Symbol-search-only records remain in discovery_only_sources and are excluded from files and focused_reading_scopes.",
+  "files": [
+    "bin/deployment_preflight_helper.ml",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_async_protocol.ml",
+    "bin/masc_tui_async_read.ml",
+    "bin/masc_tui_board_requests.ml",
+    "bin/masc_tui_board_updates.ml",
+    "bin/masc_tui_board_upload.ml",
+    "bin/masc_tui_http.ml",
+    "bin/masc_tui_io_domain.ml",
+    "bin/masc_tui_io_domain.mli",
+    "bin/masc_tui_kept_reads.ml",
+    "bin/masc_tui_lane_application.ml",
+    "bin/masc_tui_lane_subscriptions.ml",
+    "bin/masc_tui_loader.ml",
+    "bin/masc_tui_machine_live.ml",
+    "bin/masc_tui_render_schedule.ml",
+    "bin/masc_tui_runtime_account_form.ml",
+    "bin/masc_tui_runtime_config_edit.ml",
+    "bin/masc_tui_runtime_config_edit.mli",
+    "bin/masc_tui_usage_trend.ml",
+    "docs/constitution.xml",
+    "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+    "lib/auth/auth.ml",
+    "lib/auth/auth.mli",
+    "lib/auth/auth_credential_base.ml",
+    "lib/backend/backend.ml",
+    "lib/board/board_core_persist.ml",
+    "lib/board/board_dispatch.ml",
+    "lib/board/board_votes.ml",
+    "lib/board_tool_adapter/board_tool_post.ml",
+    "lib/browser_host/browser_host.ml",
+    "lib/browser_host/browser_host.mli",
+    "lib/browser_host/dune",
+    "lib/browser_lane/browser_action.mli",
+    "lib/browser_lane/browser_lane.ml",
+    "lib/browser_lane/browser_upload_lease.ml",
+    "lib/browser_lane/browser_upload_lease.mli",
+    "lib/browser_lane/dune",
+    "lib/browser_webdriver.ml",
+    "lib/completion_authority_agent.ml",
+    "lib/core/eio_guard.ml",
+    "lib/dated_jsonl/dated_jsonl.ml",
+    "lib/dated_jsonl/dated_jsonl.mli",
+    "lib/dated_jsonl/dated_jsonl_store.ml",
+    "lib/dune",
+    "lib/exec/command_gate/shell_command_gate.ml",
+    "lib/exec/exec_dispatch.ml",
+    "lib/exec/exec_dispatch.mli",
+    "lib/exec/parser/bash.ml",
+    "lib/exec/parser/bash_lexer.mll",
+    "lib/exec/parser/bash_subset.mly",
+    "lib/exec/parser/dune",
+    "lib/exec/shell_ir.mli",
+    "lib/exec/test/test_bash_parser.ml",
+    "lib/exec/test/test_exec_dispatch_pipeline_streaming.ml",
+    "lib/exec/test/test_shell_ir_subst_exec.ml",
+    "lib/exec_policy/exec_policy.ml",
+    "lib/exec_policy/execute_script_paths.ml",
+    "lib/fs_compat/atomic_replace.mli",
+    "lib/fs_compat/atomic_write.ml",
+    "lib/fs_compat/fd_cache.ml",
+    "lib/fusion/fusion_decision.ml",
+    "lib/fusion_core/fusion_config.ml",
+    "lib/fusion_core/fusion_config.mli",
+    "lib/fusion_core/fusion_config_writer.ml",
+    "lib/fusion_core/fusion_config_writer.mli",
+    "lib/fusion_core/fusion_policy.ml",
+    "lib/gate/channel_gate_connector.ml",
+    "lib/gate/channel_gate_connector.mli",
+    "lib/gate/channel_gate_slack_state.ml",
+    "lib/gate/connector_ingress_lane.ml",
+    "lib/gate/connector_ingress_lane.mli",
+    "lib/goal/goal_phase.mli",
+    "lib/goal/goal_store.ml",
+    "lib/jsonl_writer/jsonl_writer.ml",
+    "lib/keeper/keeper_agent_run.ml",
+    "lib/keeper/keeper_antigravity_runtime.ml",
+    "lib/keeper/keeper_approval_queue.ml",
+    "lib/keeper/keeper_board_attention_partition_generation.ml",
+    "lib/keeper/keeper_board_attention_partition_generation.mli",
+    "lib/keeper/keeper_board_attention_worker.ml",
+    "lib/keeper/keeper_board_attention_worker.mli",
+    "lib/keeper/keeper_board_attention_worker_wake.ml",
+    "lib/keeper/keeper_board_attention_worker_wake.mli",
+    "lib/keeper/keeper_browser_upload.ml",
+    "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+    "lib/keeper/keeper_chat_media_store.ml",
+    "lib/keeper/keeper_chat_media_store.mli",
+    "lib/keeper/keeper_claude_code_runtime.ml",
+    "lib/keeper/keeper_codex_runtime.ml",
+    "lib/keeper/keeper_composition_continuation_wake.ml",
+    "lib/keeper/keeper_composition_dependency_result.ml",
+    "lib/keeper/keeper_composition_dependency_result.mli",
+    "lib/keeper/keeper_gate_readonly.ml",
+    "lib/keeper/keeper_heartbeat_loop.ml",
+    "lib/keeper/keeper_heartbeat_loop_scheduling.ml",
+    "lib/keeper/keeper_keepalive.ml",
+    "lib/keeper/keeper_librarian_durable_consumer.ml",
+    "lib/keeper/keeper_librarian_queue_refresh.ml",
+    "lib/keeper/keeper_librarian_runtime.ml",
+    "lib/keeper/keeper_media_reading.ml",
+    "lib/keeper/keeper_media_reading.mli",
+    "lib/keeper/keeper_memory_os_current.ml",
+    "lib/keeper/keeper_multimodal_input.ml",
+    "lib/keeper/keeper_multimodal_input.mli",
+    "lib/keeper/keeper_post_turn.ml",
+    "lib/keeper/keeper_sandbox_docker.ml",
+    "lib/keeper/keeper_tag_dispatch.ml",
+    "lib/keeper/keeper_tool_composition_surface.ml",
+    "lib/keeper/keeper_tool_descriptor.ml",
+    "lib/keeper/keeper_tool_emission_hook.ml",
+    "lib/keeper/keeper_tool_execute_runtime.ml",
+    "lib/keeper/keeper_tool_execute_typed_input.ml",
+    "lib/keeper/keeper_tool_in_process_runtime.ml",
+    "lib/keeper/keeper_tool_plan_executor.ml",
+    "lib/keeper/keeper_tool_runtime.ml",
+    "lib/keeper/keeper_tools_agent_core_bundle.ml",
+    "lib/keeper/keeper_turn.ml",
+    "lib/keeper/keeper_turn_driver.ml",
+    "lib/keeper/keeper_vision_ingest.ml",
+    "lib/keeper/keeper_vision_ingest.mli",
+    "lib/keeper/keeper_vision_tool.ml",
+    "lib/keeper_tooling/execute_shell_ir.ml",
+    "lib/keeper_tooling/shell_costume.ml",
+    "lib/masc_log/log.ml",
+    "lib/mcp_server_eio_execute.ml",
+    "lib/multimodal/artifact.mli",
+    "lib/multimodal/dune",
+    "lib/multimodal/keeper_emitter.ml",
+    "lib/multimodal/multimodal_hydrator.mli",
+    "lib/multimodal/multimodal_keeper_bridge.ml",
+    "lib/multimodal/multimodal_keeper_bridge.mli",
+    "lib/multimodal/payload.mli",
+    "lib/multimodal/tool_emission.ml",
+    "lib/multimodal/vision_analyze.ml",
+    "lib/multimodal/vision_analyze.mli",
+    "lib/multimodal/vision_artifact_store.ml",
+    "lib/multimodal/vision_artifact_store.mli",
+    "lib/multimodal/vision_kept_maintenance.ml",
+    "lib/multimodal/vision_kept_maintenance.mli",
+    "lib/multimodal/wirein_helpers.ml",
+    "lib/multimodal/workspace.ml",
+    "lib/multimodal/workspace.mli",
+    "lib/multimodal/workspace_holder.ml",
+    "lib/multimodal/workspace_holder.mli",
+    "lib/process/process_eio.ml",
+    "lib/runtime/dune",
+    "lib/runtime/runtime.ml",
+    "lib/runtime/runtime.mli",
+    "lib/runtime/runtime_antigravity.ml",
+    "lib/runtime/runtime_config_projection.ml",
+    "lib/runtime/runtime_config_text.ml",
+    "lib/runtime/runtime_config_text.mli",
+    "lib/runtime/runtime_muse_usage.ml",
+    "lib/runtime/runtime_provider_usage_read.ml",
+    "lib/runtime/runtime_provider_usage_window.ml",
+    "lib/runtime/runtime_provider_usage_window.mli",
+    "lib/runtime/runtime_quota_window.ml",
+    "lib/runtime/runtime_schema.ml",
+    "lib/schedule/dune",
+    "lib/schedule/schedule_domain.mli",
+    "lib/schedule/schedule_occurrence_id.ml",
+    "lib/schedule/schedule_occurrence_id.mli",
+    "lib/schedule/schedule_runner.ml",
+    "lib/schedule/schedule_runner.mli",
+    "lib/schedule/schedule_runner_status.ml",
+    "lib/schedule/schedule_service.ml",
+    "lib/schedule/schedule_service.mli",
+    "lib/schedule/schedule_store.ml",
+    "lib/schedule/schedule_store.mli",
+    "lib/server/dune",
+    "lib/server/keeper_stream_media_accum.ml",
+    "lib/server/keeper_stream_media_accum.mli",
+    "lib/server/server_bootstrap_maintenance.ml",
+    "lib/server/server_dashboard_runtime_request.ml",
+    "lib/server/server_dashboard_runtime_resolved_json.ml",
+    "lib/server/server_discord_in_process_gateway.ml",
+    "lib/server/server_provider_usage_history.ml",
+    "lib/server/server_provider_usage_history.mli",
+    "lib/server/server_routes_http_keeper_stream.ml",
+    "lib/server/server_routes_http_routes_activity.ml",
+    "lib/server/server_routes_http_routes_channel_gate.ml",
+    "lib/server/server_routes_http_routes_dashboard.ml",
+    "lib/server/server_routes_http_routes_provider_runs.ml",
+    "lib/server/server_routes_http_runtime.ml",
+    "lib/server/server_schedule_consumers.ml",
+    "lib/server/server_slack_in_process_gateway.ml",
+    "lib/task/task_goal_assignment.ml",
+    "lib/task/tool_task.ml",
+    "lib/toml_line_editor/toml_line_editor.ml",
+    "lib/tool_schedule.ml",
+    "lib/tui_decode.ml",
+    "lib/tui_decode_connectors.ml",
+    "lib/tui_decode_usage.ml",
+    "lib/tui_decode_usage.mli",
+    "lib/verification_protocol.ml",
+    "lib/workspace/workspace_backlog.ml",
+    "lib/workspace/workspace_task.ml",
+    "lib/workspace/workspace_task_lifecycle.ml",
+    "lib/workspace/workspace_task_transition_executor.ml",
+    "lib/workspace/workspace_task_transition_executor.mli",
+    "lib/workspace/workspace_task_transitions.ml",
+    "lib/workspace/workspace_task_verification.ml",
+    "lib/workspace/workspace_utils_ops.ml",
+    "lib/workspace/workspace_verification_store.ml",
+    "packages/agent_core/lib/agent/agent.ml",
+    "packages/agent_core/lib/agent/agent_execution_runner.ml",
+    "packages/agent_core/lib/agent/agent_lifecycle.ml",
+    "packages/agent_core/lib/agent/agent_lifecycle_events.ml",
+    "packages/agent_core/lib/agent/agent_run_loop_support.ml",
+    "packages/agent_core/lib/execution_event_store.ml",
+    "packages/agent_core/lib/execution_journal.ml",
+    "packages/agent_core/lib/llm_provider/complete_stream.ml",
+    "packages/agent_core/lib/llm_provider/complete_stream_acc.ml",
+    "packages/agent_core/lib/llm_provider/complete_stream_error.ml",
+    "packages/agent_core/lib/llm_provider/complete_stream_error.mli",
+    "packages/agent_core/lib/llm_provider/complete_stream_state.ml",
+    "packages/agent_core/lib/llm_provider/complete_sync.ml",
+    "packages/agent_core/lib/llm_provider/provider_admission.ml",
+    "packages/agent_core/lib/llm_provider/provider_admission_state.ml",
+    "packages/agent_core/lib/llm_provider/streaming.ml",
+    "packages/agent_core/test/test_agent_lifecycle.ml",
+    "packages/agent_core/test/test_execution_event_store.ml",
+    "packages/agent_core/test/test_pipeline.ml",
+    "packages/agent_core/test/test_provider_admission.ml",
+    "packages/agent_core/test/test_wire_parse_dump.ml",
+    "test/deps/dune",
+    "test/dune",
+    "test/multimodal/test_vision_artifact_store.ml",
+    "test/multimodal/test_workspace_holder.ml",
+    "test/stanzas/test_provider_usage_history_snapshots.inc",
+    "test/test_auth_token_rotation_transaction.ml",
+    "test/test_board_delete_rewrite_requeue.ml",
+    "test/test_board_persistence_load_contract.ml",
+    "test/test_board_vote_persistence.ml",
+    "test/test_browser_controls.ml",
+    "test/test_browser_lane.ml",
+    "test/test_browser_lane_watched_work.ml",
+    "test/test_channel_gate_connector_routes.ml",
+    "test/test_dated_jsonl_store.ml",
+    "test/test_exact_output_catalog_precedence.ml",
+    "test/test_fusion_config_edit.ml",
+    "test/test_fusion_decision.ml",
+    "test/test_gate_keeper_backend.ml",
+    "test/test_goal_store.ml",
+    "test/test_h5_media_failover_continuity.ml",
+    "test/test_keeper_approval_queue.ml",
+    "test/test_keeper_board_attention_worker.ml",
+    "test/test_keeper_composition_nested.ml",
+    "test/test_keeper_librarian_capacity_callback.ml",
+    "test/test_keeper_librarian_cli_lane.ml",
+    "test/test_keeper_memory_os_current.ml",
+    "test/test_keeper_prompt_metrics.ml",
+    "test/test_keeper_stream_media_accum.ml",
+    "test/test_keeper_turn_driver_failover.ml",
+    "test/test_model_inference_metrics.ml",
+    "test/test_provider_usage_history_snapshots.ml",
+    "test/test_provider_usage_snapshots.ml",
+    "test/test_provider_usage_windows.ml",
+    "test/test_runtime_antigravity.ml",
+    "test/test_runtime_per_keeper_routing.ml",
+    "test/test_schedule_consumer_dispatch.ml",
+    "test/test_schedule_runner.ml",
+    "test/test_schedule_store.ml",
+    "test/test_schedule_tool_wiring.ml",
+    "test/test_server_discord_trigger_policy.ml",
+    "test/test_server_runtime_bootstrap.ml",
+    "test/test_server_slack_trigger_policy.ml",
+    "test/test_task_transition_broadcast.ml",
+    "test/test_tui_board_attachments.ml",
+    "test/test_tui_credential.ml",
+    "test/test_tui_decode.ml",
+    "test/test_tui_io_domain.ml",
+    "test/test_tui_kept_reads.ml",
+    "test/test_tui_machine_live.ml",
+    "test/test_tui_overview_providers.ml",
+    "test/test_tui_render_schedule.ml",
+    "test/test_tui_runtime_config_edit.ml",
+    "test/test_verification.ml",
+    "test/test_vision_kept_maintenance.ml"
+  ],
+  "focused_reading_scopes": [
+    {
+      "path": "packages/agent_core/lib/agent/agent_lifecycle.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/agent/agent_lifecycle_events.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/agent/agent_execution_runner.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/agent/agent_run_loop_support.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/agent/agent.ml",
+      "ranges": [
+        [
+          155,
+          330
+        ],
+        [
+          794,
+          980
+        ]
+      ],
+      "scope": "Selected standard/advanced loop and execution-scope seams; definitions searched elsewhere"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/provider_admission.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/provider_admission_state.ml",
+      "ranges": null,
+      "scope": "Full source including inline tests"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_acc.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_state.ml",
+      "ranges": [
+        [
+          1,
+          100
+        ],
+        [
+          274,
+          375
+        ]
+      ],
+      "scope": "Selected state shape and helpers; long full-file output was truncated, not full semantic coverage"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_sync.ml",
+      "ranges": [
+        [
+          1,
+          230
+        ]
+      ],
+      "scope": "Selected synchronous parsing boundary"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream.ml",
+      "ranges": [
+        [
+          1,
+          240
+        ],
+        [
+          1100,
+          1205
+        ],
+        [
+          1270,
+          1318
+        ]
+      ],
+      "scope": "Selected event mapping, inline tests and finalization caller"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_error.ml",
+      "ranges": [
+        [
+          1,
+          130
+        ],
+        [
+          204,
+          356
+        ],
+        [
+          788,
+          826
+        ]
+      ],
+      "scope": "Candidate projection and diagnostic implementation plus excerpt assertions; other test output was partial"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_error.mli",
+      "ranges": null,
+      "scope": "Full public signature"
+    },
+    {
+      "path": "packages/agent_core/test/test_wire_parse_dump.ml",
+      "ranges": null,
+      "scope": "Full existing diagnostic sink scenario"
+    },
+    {
+      "path": "packages/agent_core/test/test_pipeline.ml",
+      "ranges": [
+        [
+          1811,
+          1920
+        ]
+      ],
+      "scope": "Native cancellation scenario setup and dispatch boundaries; terminal-disposition registrations also searched"
+    },
+    {
+      "path": "packages/agent_core/test/test_provider_admission.ml",
+      "ranges": [
+        [
+          220,
+          340
+        ],
+        [
+          886,
+          996
+        ]
+      ],
+      "scope": "Publication/reconfiguration and all-path bounded-wait scenarios"
+    },
+    {
+      "path": "packages/agent_core/test/test_agent_lifecycle.ml",
+      "ranges": [
+        [
+          1,
+          105
+        ],
+        [
+          114,
+          220
+        ]
+      ],
+      "scope": "Snapshot and transition scenarios"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "docs/constitution.xml",
+      "scope": "full file, exact baseline"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+      "scope": "full file, exact baseline"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_io_domain.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_io_domain.mli",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_io_domain.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_http.ml",
+      "scope": "merged PR diff plus current ranges 170-315,317-762,2418-2637; function inventory; system-thread handoff census"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui.ml",
+      "scope": "ranges 1605-1882,2790-2965,11450-11835,13201-13312,13687-13780,15005-15065,15630-15742,16685-16714,18101-18167,19615-19678,30578-30691; orchestration symbol inventory"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_async_protocol.ml",
+      "scope": "ranges 463-486,907-952 and Board completion occurrence census"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_board_requests.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_board_updates.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_board_upload.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_kept_reads.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_render_schedule.ml",
+      "scope": "decision core lines 1-68; remainder not used for candidate selection"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_machine_live.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_async_read.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/core/eio_guard.ml",
+      "scope": "lines 1-130"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/tui_decode.ml",
+      "scope": "lines 1115-1179"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/server/server_routes_http_routes_activity.ml",
+      "scope": "lines 1245-1363"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/board_tool_adapter/board_tool_post.ml",
+      "scope": "lines 56-165"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/board/board_core_persist.ml",
+      "scope": "lines 620-755"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "lib/board/board_dispatch.ml",
+      "scope": "lines 345-394"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_board_attachments.ml",
+      "scope": "lines 290-397"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_kept_reads.ml",
+      "scope": "full file"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_machine_live.ml",
+      "scope": "lines 1-245"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_credential.ml",
+      "scope": "refusal/refresh tests and registration contexts only"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_render_schedule.ml",
+      "scope": "lines 1-135"
+    },
+    {
+      "path": "lib/browser_lane/browser_upload_lease.ml",
+      "ranges": null,
+      "scope": "Full ownership and staging implementation",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_lane/browser_upload_lease.mli",
+      "ranges": null,
+      "scope": "Full ownership interface",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_lane/browser_lane.ml",
+      "ranges": [
+        [
+          385,
+          421
+        ],
+        [
+          577,
+          680
+        ]
+      ],
+      "scope": "Client ownership, retirement, waiters, result acknowledgement and dispatch",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_host/browser_host.ml",
+      "ranges": [
+        [
+          1,
+          245
+        ]
+      ],
+      "scope": "Native framing, reply/poll decoding and configuration context only",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_host/browser_host.mli",
+      "ranges": null,
+      "scope": "Full public host contract; implementation beyond selected spans is not audited",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_lane/browser_action.mli",
+      "ranges": null,
+      "scope": "Full closed action interface",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_host/dune",
+      "ranges": null,
+      "scope": "Library ownership/dependencies",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_lane/dune",
+      "ranges": null,
+      "scope": "Library ownership/dependencies",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/browser_webdriver.ml",
+      "ranges": [
+        [
+          48,
+          63
+        ],
+        [
+          160,
+          195
+        ]
+      ],
+      "scope": "Upload claim-before-mutation and invalid-session teardown edges only",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "lib/keeper/keeper_browser_upload.ml",
+      "ranges": [
+        [
+          60,
+          93
+        ]
+      ],
+      "scope": "Authorized readers and staged-file adapter",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "test/test_browser_controls.ml",
+      "ranges": [
+        [
+          170,
+          225
+        ]
+      ],
+      "scope": "Upload refusal, uncertain transport/teardown and cancellation scenarios",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "test/test_browser_lane.ml",
+      "ranges": [
+        [
+          45,
+          95
+        ],
+        [
+          303,
+          321
+        ]
+      ],
+      "scope": "Stale selection, queue timeout, disconnect and duplicate acknowledgement scenarios",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "path": "test/test_browser_lane_watched_work.ml",
+      "ranges": [
+        [
+          64,
+          120
+        ]
+      ],
+      "scope": "Reply/command arrival at timeout boundary scenarios",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime.ml",
+      "ranges": [
+        [
+          1459,
+          1483
+        ],
+        [
+          1716,
+          1811
+        ],
+        [
+          2039,
+          2089
+        ],
+        [
+          2500,
+          2625
+        ],
+        [
+          3058,
+          3730
+        ]
+      ],
+      "scope": "Declared-lane resolution priority; observations, locks and receipts; save validation/commit; complete first-run, conversation and exact-slot edit implementation."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime.mli",
+      "ranges": [
+        [
+          970,
+          1143
+        ]
+      ],
+      "scope": "Public lane edit signatures, CAS, refusal behavior, Fusion rename limits and slot move contract."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime_config_text.ml",
+      "ranges": [
+        [
+          1,
+          478
+        ]
+      ],
+      "scope": "Complete pure text editor and route-reference helper implementation."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime_config_text.mli",
+      "ranges": [
+        [
+          1,
+          65
+        ]
+      ],
+      "scope": "Complete public text-helper and route-reference interface."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime_config_projection.ml",
+      "ranges": [
+        [
+          65,
+          107
+        ]
+      ],
+      "scope": "Typed lane-set CAS error and config lock receipt ownership."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime_schema.ml",
+      "ranges": [
+        [
+          25,
+          45
+        ],
+        [
+          413,
+          435
+        ],
+        [
+          520,
+          596
+        ]
+      ],
+      "scope": "API-format schema channel; immutable raw declaration/config products; provider and binding key lookups."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/dune",
+      "ranges": [
+        [
+          1,
+          86
+        ]
+      ],
+      "scope": "Public unwrapped runtime library and private module registration/dependencies."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/server/server_routes_http_routes_dashboard.ml",
+      "ranges": [
+        [
+          1090,
+          1212
+        ]
+      ],
+      "scope": "Routing endpoint consumes typed CAS errors and string edit refusals, audits changes and returns commit receipts."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/server/server_dashboard_runtime_request.ml",
+      "ranges": [
+        [
+          145,
+          265
+        ]
+      ],
+      "scope": "Request decoding, reserved route namespace, CAS shape, exact move direction and per-slot operation construction."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/server/server_dashboard_runtime_resolved_json.ml",
+      "ranges": [
+        [
+          59,
+          73
+        ]
+      ],
+      "scope": "Resolved projection consumes canonical public exact-slot-format classification."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "bin/masc_tui_http.ml",
+      "ranges": [
+        [
+          2020,
+          2126
+        ]
+      ],
+      "scope": "TUI transport submits single-slot edits rather than rebuilding declared state and retains existing wire action names."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_config.mli",
+      "ranges": [
+        [
+          1,
+          81
+        ]
+      ],
+      "scope": "Complete configuration error and relaxed seat-reading contracts."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_config.ml",
+      "ranges": [
+        [
+          245,
+          269
+        ]
+      ],
+      "scope": "Relaxed seat enumeration reads both panel grammars, catches only TOML type error."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_config_writer.mli",
+      "ranges": [
+        [
+          1,
+          84
+        ]
+      ],
+      "scope": "Complete writer interface and source-preservation/addressability constraints."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_config_writer.ml",
+      "ranges": [
+        [
+          810,
+          865
+        ]
+      ],
+      "scope": "Pure preset upsert follows source layout and refuses unaddressable existing declarations."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_policy.ml",
+      "ranges": [
+        [
+          80,
+          100
+        ]
+      ],
+      "scope": "Seat kinds, enumeration order and immutable map of all seat routes."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/toml_line_editor/toml_line_editor.ml",
+      "ranges": [
+        [
+          1090,
+          1144
+        ]
+      ],
+      "scope": "Typed table removal/rename outcomes, structural-header handling and trailing-newline normalization."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "test/test_runtime_per_keeper_routing.ml",
+      "ranges": [
+        [
+          1215,
+          1745
+        ],
+        [
+          1910,
+          2085
+        ]
+      ],
+      "scope": "Read complete conversation create/remove/rename/default/CAS and exact set/append/drop/move/replace scenario bodies, plus HTTP/CLI placement and schema-channel cases."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "test/test_fusion_config_edit.ml",
+      "ranges": [
+        [
+          235,
+          615
+        ]
+      ],
+      "scope": "Read complete seat-linked lane edit scenarios, invalid-unrelated-presets distinction, unreadable seat refusal, raw save behavior and writer refusal."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "test/test_exact_output_catalog_precedence.ml",
+      "ranges": [
+        [
+          1120,
+          1196
+        ]
+      ],
+      "scope": "Real frozen-catalog publication scenario verifies rejected-but-declared slot preservation and updated registry admission."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "test/dune",
+      "ranges": [
+        [
+          1410,
+          1420
+        ],
+        [
+          1487,
+          1495
+        ],
+        [
+          2159,
+          2170
+        ]
+      ],
+      "scope": "Existing scenario target names, libraries and catalog fixture dependency; not executed."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/parser/bash_lexer.mll",
+      "ranges": [
+        [
+          1,
+          492
+        ]
+      ],
+      "scope": "Lexer rules, process-global counter, recursive substitution callback and quote/heredoc refusal ownership."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/parser/bash_subset.mly",
+      "ranges": [
+        [
+          1,
+          137
+        ]
+      ],
+      "scope": "Menhir raw grammar and semantic action ordering, pipeline/sequence/redirection construction."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/parser/bash.ml",
+      "ranges": [
+        [
+          1,
+          230
+        ]
+      ],
+      "scope": "Raw grammar to closed Shell_ir conversion, refusal translation, top-level and nested parser entrypoints."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/parser/dune",
+      "ranges": [
+        [
+          1,
+          16
+        ]
+      ],
+      "scope": "Actual ocamllex/Menhir generator and nested library declarations."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/exec_dispatch.mli",
+      "ranges": [
+        [
+          1,
+          97
+        ]
+      ],
+      "scope": "Public recursive dispatch, output/callback, validation and shared timeout epoch contracts."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/exec_dispatch.ml",
+      "ranges": [
+        [
+          22,
+          232
+        ],
+        [
+          393,
+          1071
+        ]
+      ],
+      "scope": "Redirect planning/capture, timeout arithmetic, recursive substitution, pipeline/sequence runner selection and dispatch effects; lines 1-21 and 233-392 not directly read."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/shell_ir.mli",
+      "ranges": [
+        [
+          1,
+          108
+        ]
+      ],
+      "scope": "Canonical closed IR, substitution argv semantics, sandbox/cwd inheritance and nonempty sequence encoding."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/command_gate/shell_command_gate.ml",
+      "ranges": [
+        [
+          249,
+          361
+        ]
+      ],
+      "scope": "Recursive structural refusal and pure typed/raw verdict before effectful gate log."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_tool_execute_typed_input.ml",
+      "ranges": [
+        [
+          1,
+          155
+        ],
+        [
+          231,
+          350
+        ]
+      ],
+      "scope": "Typed source ownership, shadow findings and Command/Argv lowering to literal Simple IR."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_tool_execute_runtime.ml",
+      "ranges": [
+        [
+          502,
+          540
+        ],
+        [
+          550,
+          615
+        ],
+        [
+          737,
+          793
+        ],
+        [
+          819,
+          855
+        ]
+      ],
+      "scope": "IR preparation, gate observation callback, shadow findings, authorized dispatch and host lease; not whole runtime."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper_tooling/execute_shell_ir.ml",
+      "ranges": [
+        [
+          1,
+          103
+        ]
+      ],
+      "scope": "Typed gate and path validation before Exec_dispatch, preserving target ownership."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec_policy/execute_script_paths.ml",
+      "ranges": [
+        [
+          187,
+          258
+        ]
+      ],
+      "scope": "Script parse consumption and static path destination findings; not whole containment policy."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec_policy/exec_policy.ml",
+      "ranges": [
+        [
+          130,
+          184
+        ]
+      ],
+      "scope": "parse_string_to_ir mode-specific failure translation and associated typed guards."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/test/test_shell_ir_subst_exec.ml",
+      "ranges": [
+        [
+          1,
+          280
+        ]
+      ],
+      "scope": "Existing parser-to-dispatch substitution scenarios, timeout observer, target/cwd inheritance and backpressure examples; source only."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/test/test_bash_parser.ml",
+      "ranges": [
+        [
+          56,
+          83
+        ],
+        [
+          325,
+          419
+        ],
+        [
+          669,
+          748
+        ]
+      ],
+      "scope": "Pipeline order, nested substitutions/refusal/token budget and newline/heredoc/token-piece scenarios; source only."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/process/process_eio.ml",
+      "ranges": [
+        [
+          90,
+          125
+        ],
+        [
+          1142,
+          1259
+        ],
+        [
+          1368,
+          1601
+        ]
+      ],
+      "scope": "Explicit relative timeout contract and selected status-split/native pipeline resource, spawn/drain/cancel ownership; not whole process library."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_sandbox_docker.ml",
+      "ranges": [
+        [
+          360,
+          440
+        ]
+      ],
+      "scope": "Docker command parse and rewritten host-path validation; parsed IR is validation input, not dispatched child AST."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_tool_runtime.ml",
+      "ranges": [
+        [
+          120,
+          205
+        ]
+      ],
+      "scope": "Descriptor route into typed Execute owner; unrelated runtime arms only as context."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper_tooling/shell_costume.ml",
+      "ranges": [
+        [
+          1,
+          82
+        ]
+      ],
+      "scope": "Closed shell argv recognition and pure parser-backed shadow classification."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_gate_readonly.ml",
+      "ranges": [
+        [
+          475,
+          530
+        ]
+      ],
+      "scope": "Read-only classification parses raw script then classifies IR, without logging or executing it."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/test/test_exec_dispatch_pipeline_streaming.ml",
+      "ranges": [
+        [
+          1,
+          67
+        ]
+      ],
+      "scope": "Live callback-before-completion scenario and full returned chunk concatenation; source only."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/dune",
+      "ranges": [
+        [
+          1,
+          11
+        ]
+      ],
+      "scope": "Library membership and dependencies; not a whole-library semantic audit.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "build_declaration",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/payload.mli",
+      "ranges": [
+        [
+          1,
+          42
+        ]
+      ],
+      "scope": "Payload representation/serialization contract, including lossy lazy payload rehydration warning; implementation not read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/artifact.mli",
+      "ranges": [
+        [
+          1,
+          133
+        ]
+      ],
+      "scope": "Typed artifact identity/provenance/interface contract; implementation not read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/multimodal_hydrator.mli",
+      "ranges": [
+        [
+          1,
+          92
+        ]
+      ],
+      "scope": "Hydration identity/effect contract; implementation not read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/multimodal_keeper_bridge.mli",
+      "ranges": [
+        [
+          1,
+          85
+        ]
+      ],
+      "scope": "Working-context ingestion interface.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_analyze.mli",
+      "ranges": [
+        [
+          1,
+          50
+        ]
+      ],
+      "scope": "Pure request/classification interface.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_kept_maintenance.mli",
+      "ranges": [
+        [
+          1,
+          58
+        ]
+      ],
+      "scope": "Two-pass kept-root maintenance contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_artifact_store.ml",
+      "ranges": [
+        [
+          1,
+          262
+        ]
+      ],
+      "scope": "Content-addressed frame/kept store, prune/unlink outcomes and verified fallback load.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_artifact_store.mli",
+      "ranges": [
+        [
+          1,
+          81
+        ]
+      ],
+      "scope": "Private handle, explicit prune and typed load contracts; completed after initially truncated interface read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_kept_maintenance.ml",
+      "ranges": [
+        [
+          1,
+          299
+        ]
+      ],
+      "scope": "Root validation, full reference scan, previous/current candidate intersection, atomic snapshot and deletion order.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/wirein_helpers.ml",
+      "ranges": [
+        [
+          1,
+          70
+        ]
+      ],
+      "scope": "Working-context parse/strip and metadata pure helpers.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/multimodal_keeper_bridge.ml",
+      "ranges": [
+        [
+          1,
+          119
+        ]
+      ],
+      "scope": "Closed artifact kinds, hydration and preserved external-ID metadata.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/workspace_holder.ml",
+      "ranges": [
+        [
+          1,
+          18
+        ]
+      ],
+      "scope": "Atomic immutable snapshot publication and CAS retry.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/workspace.ml",
+      "ranges": [
+        [
+          1,
+          89
+        ]
+      ],
+      "scope": "Immutable artifact registry/timeline/DAG updates.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/tool_emission.ml",
+      "ranges": [
+        [
+          1,
+          76
+        ]
+      ],
+      "scope": "Reserved-key typed extraction and ordered batch emission.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/keeper_emitter.ml",
+      "ranges": [
+        [
+          1,
+          52
+        ]
+      ],
+      "scope": "Working-context emission serialization.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/workspace.mli",
+      "ranges": [
+        [
+          1,
+          101
+        ]
+      ],
+      "scope": "Immutable workspace and DAG-retention public contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/workspace_holder.mli",
+      "ranges": [
+        [
+          1,
+          47
+        ]
+      ],
+      "scope": "Effect-free CAS callback contract and global owner.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_multimodal_input.mli",
+      "ranges": [
+        [
+          1,
+          83
+        ]
+      ],
+      "scope": "Typed input carrier and request conversion public contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_media_reading.ml",
+      "ranges": [
+        [
+          1,
+          366
+        ]
+      ],
+      "scope": "Audio/PDF reader shell, durable keyed readings, per-walk memo and lazily started deadline.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_media_reading.mli",
+      "ranges": [
+        [
+          1,
+          105
+        ]
+      ],
+      "scope": "Reading identity/cache/deadline and projection interface.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_chat_media_store.ml",
+      "ranges": [
+        [
+          1,
+          271
+        ]
+      ],
+      "scope": "Generated media MIME table, typed decode/cap/persistence errors, token storage and cleanup.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_chat_media_store.mli",
+      "ranges": [
+        [
+          1,
+          73
+        ]
+      ],
+      "scope": "Generated media persistence and reader-reference contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_tool_emission_hook.ml",
+      "ranges": [
+        [
+          1,
+          121
+        ]
+      ],
+      "scope": "Per-keeper short mutex-protected emitter accumulation and drain effect owner.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/multimodal/vision_analyze.ml",
+      "ranges": [
+        [
+          1,
+          27
+        ]
+      ],
+      "scope": "Pure request validation and nonempty/empty/truncated extraction classification.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/server/keeper_stream_media_accum.ml",
+      "ranges": [
+        [
+          1,
+          378
+        ]
+      ],
+      "scope": "Complete durable media state machine, diagnostics and final persistence projection.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/server/keeper_stream_media_accum.mli",
+      "ranges": [
+        [
+          1,
+          40
+        ]
+      ],
+      "scope": "Abstract accumulator API; exact scope and reload order contract.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_keeper_stream_media_accum.ml",
+      "ranges": [
+        [
+          1,
+          431
+        ]
+      ],
+      "scope": "Real temporary-store public accumulator scenarios; all bodies and registration read, no execution.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_vision_ingest.mli",
+      "ranges": [
+        [
+          1,
+          120
+        ]
+      ],
+      "scope": "Ingestion versus fallback projection, reference passthrough and per-walk cache contract; full reread.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "interface",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_vision_ingest.ml",
+      "ranges": [
+        [
+          1,
+          363
+        ]
+      ],
+      "scope": "Image validation/store-before-read, delegated/native carrier policy, eager budget and per-walk memo; missing initial middle supplemented.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_post_turn.ml",
+      "ranges": [
+        [
+          1,
+          160
+        ]
+      ],
+      "scope": "Emitter drain, hydration before CAS, pure workspace update and checkpoint metadata; lifecycle tail not read.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/server/server_routes_http_keeper_stream.ml",
+      "ranges": [
+        [
+          1995,
+          2088
+        ],
+        [
+          2155,
+          2220
+        ],
+        [
+          2330,
+          2552
+        ]
+      ],
+      "scope": "Actual turn-local collector creation/raw event feed/runtime attempt boundary, failed-reply persistence, and selected assistant-row persistence: construction at 2370-2373, helper append at 2408-2414, control Assistant_row at 2465-2467, Visible_blocks at 2486-2488, visible spoken reply at 2514-2516. Direct-continuation and Tool_calls_only branches do not use that assistant append; not every successful/control outcome persists media. Not the whole HTTP handler.",
+      "read_at": "mixed: initial ranges 1995-2088 and 2155-2220 carried byte-identically; final pinned source reread 2330-2552 after review",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "read_baselines": [
+        "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+        "d3e01a8d75986ef32807d10d81c50dfa6d31bebf"
+      ],
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "ranges": [
+        [
+          1,
+          145
+        ],
+        [
+          435,
+          470
+        ],
+        [
+          540,
+          665
+        ],
+        [
+          920,
+          1035
+        ],
+        [
+          1110,
+          1185
+        ],
+        [
+          1480,
+          1545
+        ]
+      ],
+      "scope": "Selected live bridge state/scope disposition, runtime reset, media finalization, terminal and failure policies; not whole tool/reasoning bridge.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_turn_driver.ml",
+      "ranges": [
+        [
+          1400,
+          1450
+        ],
+        [
+          2240,
+          2305
+        ],
+        [
+          2420,
+          2465
+        ]
+      ],
+      "scope": "Real candidate-local projection and one projector per walk; original inputs remain for later candidates. Not whole candidate engine.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_h5_media_failover_continuity.ml",
+      "ranges": [
+        [
+          1,
+          406
+        ]
+      ],
+      "scope": "Observational serialization/projection/checkpoint harness: most equality outcomes are printed, not asserted; not proof of a real provider failover. First span read at final pin, remainder carried from identical initial file.",
+      "read_at": "mixed: final baseline lines 1-260; identical initial file lines 260-406",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "read_baselines": [
+        "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+        "d3e01a8d75986ef32807d10d81c50dfa6d31bebf"
+      ],
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "bin/deployment_preflight_helper.ml",
+      "ranges": [
+        [
+          475,
+          525
+        ]
+      ],
+      "scope": "Actual kept-root maintenance command consumer, base-path resolution and error aggregation; command not executed.",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "carry": "Whole-file byte-identical comparison to final baseline; direct reading remains limited to listed ranges."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_vision_tool.ml",
+      "ranges": [
+        [
+          1,
+          118
+        ],
+        [
+          392,
+          470
+        ],
+        [
+          775,
+          938
+        ]
+      ],
+      "scope": "Latest-main frame/kept store effects, provider request construction, typed structured response classification, candidate result handling and run_vision boundary. Entire initial-to-main delta inspected; most candidate-loop and CLI failure internals not read.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_gate_keeper_backend.ml",
+      "ranges": [
+        [
+          2564,
+          2735
+        ]
+      ],
+      "scope": "Live bridge native media URL, tool/media conflict, bad base64 and wire-cap scenario bodies; last range ends inside cap scenario, so not a full scenario-suite claim.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_vision_kept_maintenance.ml",
+      "ranges": [
+        [
+          35,
+          155
+        ]
+      ],
+      "scope": "Real-store referenced/unreferenced/two-pass/reappearing reference/missing-load and symlink refusal scenarios.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/multimodal/test_workspace_holder.ml",
+      "ranges": [
+        [
+          93,
+          123
+        ]
+      ],
+      "scope": "Cross-domain CAS publication scenario and suite registration, not executed.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/multimodal/test_vision_artifact_store.ml",
+      "ranges": [
+        [
+          245,
+          338
+        ]
+      ],
+      "scope": "Protected-new-frame/future-mtime, invalid-limit, re-store mtime, unlink-failure and verified frame fallback scenarios. Permission-based unlink fixture is not portable proof under privileged runners.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "packages/agent_core/lib/llm_provider/streaming.ml",
+      "ranges": [
+        [
+          270,
+          350
+        ],
+        [
+          3190,
+          3260
+        ]
+      ],
+      "scope": "Actual synthetic media event producer and inline source scenario; Gemini inlineData MediaDelta emission. Other parsers and provider implementations remain outside scope.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_multimodal_input.ml",
+      "ranges": [
+        [
+          214,
+          297
+        ],
+        [
+          489,
+          563
+        ]
+      ],
+      "scope": "Exactly one image carrier, URL/file-id validation and MIME/data URL normalization into typed provider blocks; not complete parser/attachment census.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_keeper_turn_driver_failover.ml",
+      "ranges": [
+        [
+          1070,
+          1185
+        ],
+        [
+          1230,
+          1415
+        ]
+      ],
+      "scope": "Actual project_input_for_attempt with real reading store and injected reader: attachment facts, restarted cache reuse, type identity, shared/lazy deadline and once-per-walk failed-read retry.",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "kind": "source_or_scenario",
+      "full_file": false
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_worker.ml",
+      "ranges": [
+        [
+          1,
+          512
+        ],
+        [
+          1660,
+          1755
+        ],
+        [
+          1950,
+          2255
+        ]
+      ],
+      "scope": "Complete contention scheduler and adjacent separate deferred scheduler; exact-claim contention producer, drain result routing, production scheduler installation/worker lifecycle and For_testing exposure.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_worker.mli",
+      "ranges": [
+        [
+          1,
+          100
+        ],
+        [
+          150,
+          170
+        ],
+        [
+          320,
+          365
+        ]
+      ],
+      "scope": "Public contention/drain/rearm results, opaque testing schedulers and callback contract; selected surrounding worker contracts only.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_worker_wake.ml",
+      "ranges": [
+        [
+          1,
+          119
+        ]
+      ],
+      "scope": "Wake registration identity, coalescing request, unregister, resume and await resource state.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_worker_wake.mli",
+      "ranges": [
+        [
+          1,
+          44
+        ]
+      ],
+      "scope": "Process-local hints versus durable authority and successful Not_registered contract.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_keepalive.ml",
+      "ranges": [
+        [
+          400,
+          453
+        ],
+        [
+          1400,
+          1482
+        ]
+      ],
+      "scope": "Actual lane-switch worker installation, Watched_work call, stop promise and heartbeat-finalizer wiring; not full keepalive.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_partition_generation.ml",
+      "ranges": [
+        [
+          1,
+          24
+        ]
+      ],
+      "scope": "Canonical generation equality/serialization and checked advancement; scheduler must not replace generation identity with time.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/keeper/keeper_board_attention_partition_generation.mli",
+      "ranges": [
+        [
+          1,
+          16
+        ]
+      ],
+      "scope": "Opaque durable generation identity and transition contract.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "lib/dune",
+      "ranges": [
+        [
+          1,
+          50
+        ]
+      ],
+      "scope": "Existing private-module registration and parent library context for a narrow optional rearm-state module.",
+      "kind": "build_declaration",
+      "read_at": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "carry": "Directly reread lines 1-50 at refreshed main; complete delta only removes four private modules from unmerged campaign layers."
+    },
+    {
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "path": "test/test_keeper_board_attention_worker.ml",
+      "ranges": [
+        [
+          1,
+          150
+        ],
+        [
+          960,
+          1295
+        ],
+        [
+          4408,
+          4468
+        ]
+      ],
+      "scope": "Fixture ownership, complete five contention/rescan scenario bodies and registration; adjacent claims read only as context, no suite execution.",
+      "kind": "semantic",
+      "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "carry": "Whole-file byte-identical comparison to refreshed main."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/dune",
+      "ranges": [
+        [
+          1,
+          34
+        ]
+      ],
+      "scope": "Actual standalone unwrapped schedule library and dependency direction.",
+      "kind": "build_declaration",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_runner.mli",
+      "ranges": [
+        [
+          1,
+          160
+        ]
+      ],
+      "scope": "Consumer dispatch/hold/result and opaque acceptance proof interface.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_runner.ml",
+      "ranges": [
+        [
+          1,
+          665
+        ]
+      ],
+      "scope": "Complete runner: typed signal codec, seen-key recovery/cache, append progress, dispatch/acceptance and held tick decision.",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_store.mli",
+      "ranges": [
+        [
+          1,
+          348
+        ]
+      ],
+      "scope": "Complete ledger API including note identity, mutation/refusal, recovery observation, wake acceptance/failure and retention contracts.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_service.mli",
+      "ranges": [
+        [
+          1,
+          84
+        ]
+      ],
+      "scope": "Service create/update/cancel and clock/actor ownership interface.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_service.ml",
+      "ranges": [
+        [
+          1,
+          129
+        ]
+      ],
+      "scope": "Service argument validation, identity/clock boundary and delegation to store.",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_domain.mli",
+      "ranges": [
+        [
+          1,
+          222
+        ]
+      ],
+      "scope": "Closed schedule/wake/recurrence types and opaque payload/cancellation contract; implementation not reviewed.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_occurrence_id.ml",
+      "ranges": [
+        [
+          1,
+          19
+        ]
+      ],
+      "scope": "Canonical persisted occurrence identity construction.",
+      "kind": "source_or_scenario",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_occurrence_id.mli",
+      "ranges": [
+        [
+          1,
+          16
+        ]
+      ],
+      "scope": "Private string occurrence identity and exact input contract.",
+      "kind": "interface",
+      "full_file": true,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_store.ml",
+      "ranges": [
+        [
+          195,
+          498
+        ],
+        [
+          615,
+          944
+        ],
+        [
+          1064,
+          1394
+        ]
+      ],
+      "scope": "Ledger codec/load/write/cache; note append and ID/count helpers; ordinary locked mutation examples; exact wake and recurring/recovery settlement. Top error definitions, prune_wakes and retention helper bodies were not read.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/schedule/schedule_runner_status.ml",
+      "ranges": [
+        [
+          1,
+          170
+        ]
+      ],
+      "scope": "Immutable status record, Atomic publication and pure tick count fold only; later completion/read/projection helpers not reviewed.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/tool_schedule.ml",
+      "ranges": [
+        [
+          533,
+          578
+        ],
+        [
+          1285,
+          1419
+        ]
+      ],
+      "scope": "Workflow/runtime error projections, direct note append/list, and exhaustive action dispatch/registration. Start of first span is inside cancellation result context; not whole tool.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_bootstrap_maintenance.ml",
+      "ranges": [
+        [
+          83,
+          205
+        ],
+        [
+          594,
+          665
+        ]
+      ],
+      "scope": "Actual runner tick with consumer and clock, status/log/cache effects, cancellation escape and one-time startup recovery before sequential sleep/tick loop. Not full maintenance.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_schedule_consumers.ml",
+      "ranges": [
+        [
+          900,
+          1210
+        ],
+        [
+          1255,
+          1373
+        ]
+      ],
+      "scope": "Existing occurrence reconciliation, absent-occurrence supersession/durable enqueue, callback acceptance, intake fence, self-clock/hold and fence-owner redrive. Disposition index/transfer internals and broad Keeper lifecycle not reviewed.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/mcp_server_eio_execute.ml",
+      "ranges": [
+        [
+          403,
+          451
+        ]
+      ],
+      "scope": "Concrete MCP Mod_schedule route to Tool_schedule.dispatch with caller and admission/withdrawal wiring; only immediate route span.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/keeper/keeper_tag_dispatch.ml",
+      "ranges": [
+        [
+          105,
+          132
+        ]
+      ],
+      "scope": "Concrete Keeper tag route to schedule dispatch, with no schedule-file transaction introduced in this route span.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/keeper/keeper_tool_in_process_runtime.ml",
+      "ranges": [
+        [
+          2010,
+          2058
+        ]
+      ],
+      "scope": "Concrete handle_masc_schedule_with_outcome route and existing context construction; surrounding spawn tail only as context.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/workspace/workspace_utils_ops.ml",
+      "ranges": [
+        [
+          252,
+          316
+        ],
+        [
+          630,
+          707
+        ]
+      ],
+      "scope": "Unconditional encoded JSON backend/local write path and separate explicit file-lock/lease helpers; no read-version CAS argument in the inspected write API. Full backend internals not read.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_schedule_store.ml",
+      "ranges": [
+        [
+          1,
+          113
+        ],
+        [
+          1163,
+          1183
+        ],
+        [
+          1530,
+          1693
+        ],
+        [
+          1740,
+          1810
+        ]
+      ],
+      "scope": "Real workspace fixture, corruption refusal/preserved bytes, busy domain-pool encode/decode and cache scenarios, sequential note/terminal-retention scenario. No execution.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_schedule_tool_wiring.ml",
+      "ranges": [
+        [
+          90,
+          140
+        ],
+        [
+          1530,
+          1583
+        ],
+        [
+          1715,
+          1775
+        ]
+      ],
+      "scope": "Actual Tool_schedule dispatch fixture and unnamed/spoofed note-author refusal scenarios; no positive concurrent-note scenario inspected.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_schedule_runner.ml",
+      "ranges": [
+        [
+          362,
+          430
+        ],
+        [
+          830,
+          938
+        ],
+        [
+          1182,
+          1232
+        ]
+      ],
+      "scope": "Seen recovery/write failure, occurrence-versus-declaration failure, retry identity and held/no-advance scenarios. Permission-based write failure fixture is not portable proof under privileged execution.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_schedule_consumer_dispatch.ml",
+      "ranges": [
+        [
+          2450,
+          2504
+        ],
+        [
+          3120,
+          3286
+        ]
+      ],
+      "scope": "Real Keeper queue storage failure/retry, offline owner durable acceptance, self-clock and failed acceptance commit reconciliation; no behavior execution.",
+      "kind": "source_or_scenario",
+      "full_file": false,
+      "audit_area": "Round8 Schedule"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_provider_usage_history.ml",
+      "ranges": [
+        [
+          1,
+          291
+        ]
+      ],
+      "scope": "Complete owner, encoding, strict item decoding, two-stage reduction, journal/error shell and response.",
+      "kind": "source_or_scenario",
+      "blob": "237ee7d43761d39ad97b90ea3d552e39043bf6a7",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_provider_usage_history.mli",
+      "ranges": [
+        [
+          1,
+          34
+        ]
+      ],
+      "scope": "Complete stable public API; window variant and read contract, opaque scope identity.",
+      "kind": "interface",
+      "blob": "a897473d60bbadb28e5da90927897ca905af394e",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_provider_usage_window.ml",
+      "ranges": [
+        [
+          1,
+          105
+        ],
+        [
+          858,
+          914
+        ],
+        [
+          1011,
+          1077
+        ]
+      ],
+      "scope": "Canonical report types/source wire names/shape, observer resource state and accepted-report publication order.",
+      "kind": "source_or_scenario",
+      "blob": "dbd55dd9e13d291515bca1ce23641c574da2b882",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_provider_usage_window.mli",
+      "ranges": [
+        [
+          28,
+          43
+        ],
+        [
+          228,
+          231
+        ],
+        [
+          284,
+          317
+        ]
+      ],
+      "scope": "Canonical utilization, complete/sparse distinction, observer contract and latest sink failure.",
+      "kind": "interface",
+      "blob": "f49ec972673c22a4ec41c3a24a88ccae5d8d2372",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_provider_usage_read.ml",
+      "ranges": [
+        [
+          73,
+          91
+        ],
+        [
+          108,
+          124
+        ],
+        [
+          222,
+          231
+        ],
+        [
+          577,
+          585
+        ]
+      ],
+      "scope": "Real HTTP/CLI read producers stamp observations and publish accepted reports.",
+      "kind": "source_or_scenario",
+      "blob": "fd963e71398fcdbc5c4b72193b1cad4ab744acf5",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_muse_usage.ml",
+      "ranges": [
+        [
+          1,
+          68
+        ]
+      ],
+      "scope": "Real Muse producer: prior quota rest, canonical report, time-stamped record; cancellation may occur in durable sink.",
+      "kind": "source_or_scenario",
+      "blob": "81059eac69a523684e8765edf4c26dba86356c66",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/keeper/keeper_claude_code_runtime.ml",
+      "ranges": [
+        [
+          137,
+          142
+        ]
+      ],
+      "scope": "Claude stream usage keeps admitted turn quota scope.",
+      "kind": "source_or_scenario",
+      "blob": "331567eee30223008efd9804a8b71b754dcc6821",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/keeper/keeper_codex_runtime.ml",
+      "ranges": [
+        [
+          246,
+          251
+        ]
+      ],
+      "scope": "Codex stream usage keeps admitted turn quota scope.",
+      "kind": "source_or_scenario",
+      "blob": "c1b891822b9f8c2afc53b3b16f135effaa7dade6",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/runtime/runtime_quota_window.ml",
+      "ranges": [
+        [
+          91,
+          104
+        ]
+      ],
+      "scope": "Single existing scope digest authority; credential location is not authenticated account ID.",
+      "kind": "source_or_scenario",
+      "blob": "62158a1ca24893c3bf0523c5b715b8c52aa41da9",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_bootstrap_maintenance.ml",
+      "ranges": [
+        [
+          423,
+          441
+        ]
+      ],
+      "scope": "Production history observer installation during background-maintenance setup.",
+      "kind": "source_or_scenario",
+      "blob": "25d9220779746a03032f3fb85b44f16c3f841a89",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_routes_http_routes_provider_runs.ml",
+      "ranges": [
+        [
+          7,
+          34
+        ],
+        [
+          53,
+          198
+        ],
+        [
+          325,
+          372
+        ]
+      ],
+      "scope": "Actual history HTTP route, cache admission/refresh/error behavior and cancellation.",
+      "kind": "source_or_scenario",
+      "blob": "4e78f49b2b793a4c597aa896448607a1ff1f0bcc",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/server_dashboard_runtime_resolved_json.ml",
+      "ranges": [
+        [
+          315,
+          344
+        ]
+      ],
+      "scope": "Current usage projection shares History.scope_id with retained history.",
+      "kind": "source_or_scenario",
+      "blob": "00bbf8bb125381391e612a3ca7128d636cc11276",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/dated_jsonl/dated_jsonl.ml",
+      "ranges": [
+        [
+          143,
+          172
+        ],
+        [
+          228,
+          248
+        ],
+        [
+          300,
+          306
+        ],
+        [
+          375,
+          430
+        ],
+        [
+          609,
+          614
+        ],
+        [
+          808,
+          849
+        ],
+        [
+          1182,
+          1200
+        ],
+        [
+          1224,
+          1292
+        ]
+      ],
+      "scope": "Actual append mutex/path clock, strict chronological read, syntax-error reporting, file resource/error boundaries.",
+      "kind": "source_or_scenario",
+      "blob": "a61d9eb35479a560f28b98376ee2b29bb452fcd1",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/dated_jsonl/dated_jsonl.mli",
+      "ranges": [
+        [
+          1,
+          88
+        ],
+        [
+          364,
+          383
+        ]
+      ],
+      "scope": "Opaque store, typed storage errors and recent_entry, physical JSONL traversal contract.",
+      "kind": "interface",
+      "blob": "f84d2f9af78f07474006e54d6936d4da627364ee",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/dated_jsonl/dated_jsonl_store.ml",
+      "ranges": [
+        [
+          106,
+          132
+        ],
+        [
+          179,
+          196
+        ]
+      ],
+      "scope": "16-day history retention and UTC append-day identity, independent of observation timestamps.",
+      "kind": "source_or_scenario",
+      "blob": "270c00a906920ad7c4282d5fe6d1ad8354206c6a",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/jsonl_writer/jsonl_writer.ml",
+      "ranges": [
+        [
+          1,
+          16
+        ]
+      ],
+      "scope": "Canonical UTC gmtime day helper shared by file paths and Log date keys.",
+      "kind": "source_or_scenario",
+      "blob": "ecf906d23b3dc030884cb434dc1d28f7f03494ad",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/masc_log/log.ml",
+      "ranges": [
+        [
+          174,
+          185
+        ]
+      ],
+      "scope": "Existing pure Log.format_utc_date_of delegates to writer day_key.",
+      "kind": "source_or_scenario",
+      "blob": "9077a95e5a2aa42bcfc73a0b3282485111b9ac9e",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/tui_decode_usage.ml",
+      "ranges": [
+        [
+          172,
+          235
+        ]
+      ],
+      "scope": "Actual JSON response decoder and typed measured/empty report payload.",
+      "kind": "source_or_scenario",
+      "blob": "b76de320ad8a860fa3559a6a04b3706d634f150c",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/tui_decode_usage.mli",
+      "ranges": [
+        [
+          67,
+          91
+        ]
+      ],
+      "scope": "Public consumer types and uncertainty count.",
+      "kind": "interface",
+      "blob": "5cc5ae4612855cd4aa2fe948d4e3953b60ae8688",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "bin/masc_tui_http.ml",
+      "ranges": [
+        [
+          2027,
+          2030
+        ]
+      ],
+      "scope": "Actual client GET path and day parameter.",
+      "kind": "source_or_scenario",
+      "blob": "b6e16f47b96a1b8b251319e7eee5ce0a08483ebc",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "bin/masc_tui_loader.ml",
+      "ranges": [
+        [
+          979,
+          1001
+        ]
+      ],
+      "scope": "Cache error/loading/unavailable handling before typed history decode.",
+      "kind": "source_or_scenario",
+      "blob": "b29426a6406a1c33ed0d4d25519072222d6919cc",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "bin/masc_tui_usage_trend.ml",
+      "ranges": [
+        [
+          1,
+          100
+        ]
+      ],
+      "scope": "Actual data projection preserves UTC days, measured zero, no report and successful empty report; no UI proof claimed.",
+      "kind": "source_or_scenario",
+      "blob": "8eef724b68861bb339cb1a26a99464f3defdec7c",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_provider_usage_history_snapshots.ml",
+      "ranges": [
+        [
+          1,
+          173
+        ]
+      ],
+      "scope": "Complete six actual-file scenarios and decoder continuity; direct target for S8.",
+      "kind": "source_or_scenario",
+      "blob": "46ae3c88908f4bded3a3d9af6ca56cac857d2914",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_tui_overview_providers.ml",
+      "ranges": [
+        [
+          583,
+          709
+        ]
+      ],
+      "scope": "Adjacent consumer scenarios, including typed empty/uncapped samples; some assertions inspect rendering, so do not add/recommend such gates.",
+      "kind": "source_or_scenario",
+      "blob": "10886de664f1233276551907772ee0b86232abb8",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_model_inference_metrics.ml",
+      "ranges": [
+        [
+          1728,
+          1760
+        ]
+      ],
+      "scope": "Exclusion evidence: this is distinct runtime decision/cost history, not the provider-usage history owner.",
+      "kind": "source_or_scenario",
+      "blob": "1ecb90c8a371afd3203a82fe268995844bad04cb",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/test_dated_jsonl_store.ml",
+      "ranges": [
+        [
+          234,
+          245
+        ]
+      ],
+      "scope": "Adjacent retained store lifecycle scenario; no change proposed.",
+      "kind": "source_or_scenario",
+      "blob": "20aee515a1e4ff54967f9c30c3209763359ea170",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "lib/server/dune",
+      "ranges": [
+        [
+          1,
+          17
+        ]
+      ],
+      "scope": "New private module registration; server library already owns the effect shell.",
+      "kind": "build_declaration",
+      "blob": "c76dc1d4ab77ebab247a030306ebbb4f30e771b3",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/stanzas/test_provider_usage_history_snapshots.inc",
+      "ranges": [
+        [
+          1,
+          4
+        ]
+      ],
+      "scope": "Existing test registration; no new executable required.",
+      "kind": "build_declaration",
+      "blob": "aa66634fd5f487cc343d1a552b3a4bc579547008",
+      "audit_area": "Round8 S8 design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "path": "test/deps/dune",
+      "ranges": [
+        [
+          1,
+          6
+        ],
+        [
+          19,
+          49
+        ],
+        [
+          145,
+          153
+        ]
+      ],
+      "scope": "Existing re-exported dated_jsonl/Eio/server/runtime dependencies suffice.",
+      "kind": "build_declaration",
+      "blob": "70d3515a1e159ad22a84e8beaaafb6ccd5dced35",
+      "audit_area": "Round8 S8 design"
+    }
+  ],
+  "discovery_only_sources": [
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_async_protocol.mli",
+      "scope": "Board completion occurrence census only"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_loader.ml",
+      "scope": "top-level symbol inventory only"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_board_composer.ml",
+      "scope": "test function inventory and draft-related lines"
+    }
+  ],
+  "audit_history": [
+    {
+      "round": 5,
+      "area": "TUI",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "raw_record_count": 29,
+      "direct_reading_records": 26,
+      "discovery_only_records": 3,
+      "meaning": "The original 29 records and their scopes remain split between focused_reading_scopes and discovery_only_sources. This accounting correction adds no retrospective source-reading claim."
+    },
+    {
+      "round": 6,
+      "area": "Exec and lane planning",
+      "direct_reading_records": 42,
+      "new_unique_paths": 36,
+      "unique_files_after_round": 193,
+      "focused_records_after_round": 98,
+      "meaning": "21 Exec source/generator/build/test records and 21 lane-planning records. Two Exec governance reads are excluded from these semantic-reading totals. Discovery searches are retained separately. The historical ml/mli census denominator is unchanged."
+    },
+    {
+      "round": 7,
+      "area": "Multimodal/media and Board contention rearm design",
+      "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+      "raw_direct_or_context_records": 57,
+      "direct_reading_records": 53,
+      "new_unique_paths": 50,
+      "unique_files_after_round": 243,
+      "focused_records_after_round": 151,
+      "new_paths": [
+        "bin/deployment_preflight_helper.ml",
+        "lib/dune",
+        "lib/keeper/keeper_board_attention_partition_generation.ml",
+        "lib/keeper/keeper_board_attention_partition_generation.mli",
+        "lib/keeper/keeper_board_attention_worker.mli",
+        "lib/keeper/keeper_board_attention_worker_wake.ml",
+        "lib/keeper/keeper_board_attention_worker_wake.mli",
+        "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+        "lib/keeper/keeper_chat_media_store.ml",
+        "lib/keeper/keeper_chat_media_store.mli",
+        "lib/keeper/keeper_media_reading.ml",
+        "lib/keeper/keeper_media_reading.mli",
+        "lib/keeper/keeper_multimodal_input.ml",
+        "lib/keeper/keeper_multimodal_input.mli",
+        "lib/keeper/keeper_post_turn.ml",
+        "lib/keeper/keeper_tool_emission_hook.ml",
+        "lib/keeper/keeper_turn_driver.ml",
+        "lib/keeper/keeper_vision_ingest.ml",
+        "lib/keeper/keeper_vision_ingest.mli",
+        "lib/keeper/keeper_vision_tool.ml",
+        "lib/multimodal/artifact.mli",
+        "lib/multimodal/dune",
+        "lib/multimodal/keeper_emitter.ml",
+        "lib/multimodal/multimodal_hydrator.mli",
+        "lib/multimodal/multimodal_keeper_bridge.ml",
+        "lib/multimodal/multimodal_keeper_bridge.mli",
+        "lib/multimodal/payload.mli",
+        "lib/multimodal/tool_emission.ml",
+        "lib/multimodal/vision_analyze.ml",
+        "lib/multimodal/vision_analyze.mli",
+        "lib/multimodal/vision_artifact_store.ml",
+        "lib/multimodal/vision_artifact_store.mli",
+        "lib/multimodal/vision_kept_maintenance.ml",
+        "lib/multimodal/vision_kept_maintenance.mli",
+        "lib/multimodal/wirein_helpers.ml",
+        "lib/multimodal/workspace.ml",
+        "lib/multimodal/workspace.mli",
+        "lib/multimodal/workspace_holder.ml",
+        "lib/multimodal/workspace_holder.mli",
+        "lib/server/keeper_stream_media_accum.ml",
+        "lib/server/keeper_stream_media_accum.mli",
+        "lib/server/server_routes_http_keeper_stream.ml",
+        "packages/agent_core/lib/llm_provider/streaming.ml",
+        "test/multimodal/test_vision_artifact_store.ml",
+        "test/multimodal/test_workspace_holder.ml",
+        "test/test_gate_keeper_backend.ml",
+        "test/test_h5_media_failover_continuity.ml",
+        "test/test_keeper_stream_media_accum.ml",
+        "test/test_keeper_turn_driver_failover.ml",
+        "test/test_vision_kept_maintenance.ml"
+      ],
+      "excluded_readings": [
+        {
+          "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+          "path": "docs/constitution.xml",
+          "ranges": [
+            [
+              1,
+              555
+            ]
+          ],
+          "scope": "Full repository contract; initial full read plus missing-middle supplement.",
+          "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+          "kind": "governance"
+        },
+        {
+          "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+          "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+          "ranges": [
+            [
+              1,
+              352
+            ]
+          ],
+          "scope": "Full contributor procedure and source-review/build restrictions.",
+          "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+          "kind": "governance"
+        },
+        {
+          "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+          "path": ".agents/skills/ocaml-coding/SKILL.md",
+          "ranges": [
+            [
+              1,
+              184
+            ]
+          ],
+          "scope": "OCaml checklist refreshed; no implementation performed.",
+          "read_at": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+          "kind": "governance"
+        },
+        {
+          "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+          "path": "docs/audits/ocaml-refactoring/README.md",
+          "ranges": [
+            [
+              165,
+              190
+            ]
+          ],
+          "scope": "Current K3 candidate, invariants, consumers and historical scenario references. Historical stack document; this path is absent on refreshed main, so its baseline is intentionally not promoted.",
+          "kind": "audit_context"
+        }
+      ],
+      "review_corrections": [
+        {
+          "artifact": "multimodal-round7",
+          "updates": [
+            {
+              "reason": "Independent review P3: earlier success-consumer evidence ended at media-block construction, before actual append and branch selection.",
+              "previous_artifact_sha256": "86c4df40acd5d0cd87aa29fe4f5fbe5c54f9f930a0a5332311393a4ec512b3b8",
+              "review_report": "masc-round7-audit-design-review.md",
+              "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+              "additional_direct_read": {
+                "path": "lib/server/server_routes_http_keeper_stream.ml",
+                "ranges": [
+                  [
+                    2330,
+                    2506
+                  ],
+                  [
+                    2507,
+                    2552
+                  ]
+                ]
+              },
+              "correction": "Extended the existing path, without adding a new consulted file. Directly read the append helper and selected control/media-only branches plus normal Visible_reply/Some invocation. Narrowed claims to those branches; direct-continuation and tool-only outcomes are not asserted to persist media.",
+              "count_effect": "No change: 47 direct paths, 3 governance, 44 source/scenario records."
+            }
+          ]
+        },
+        {
+          "artifact": "k3-design-round7",
+          "updates": [
+            {
+              "reason": "Independent review P3: distinguish subsequent scheduling from request-callback reentrancy.",
+              "previous_artifact_sha256": "f89854be9eccd1fe70531258386157abe057ba725363d2bdad7bea562ecf8548",
+              "review_report": "masc-round7-audit-design-review.md",
+              "baseline": "d3e01a8d75986ef32807d10d81c50dfa6d31bebf",
+              "reread": {
+                "path": "test/test_keeper_board_attention_worker.ml",
+                "ranges": [
+                  [
+                    1147,
+                    1237
+                  ]
+                ]
+              },
+              "correction": "Narrow wording correction to the returned-error scenario. Its existing read range already covers this body; no new file/coverage count. True request-callback reentrancy remains separately attributed to 1202-1213."
+            }
+          ]
+        }
+      ],
+      "input_artifacts": [
+        {
+          "name": "multimodal-round7",
+          "sha256": "0d287bf117f8a0ff047c7094001099474c9fe532002ec69a690792378ea31d9b"
+        },
+        {
+          "name": "k3-design-round7",
+          "sha256": "77b8ca21a60c6e6f0d9fa4a59856ac5c212da140097bea28cb32840b5929129d"
+        }
+      ],
+      "meaning": "44 multimodal/media source/interface/build/scenario records and 9 K3 records (8 semantic, 1 build declaration). Three multimodal governance records and one K3 README audit-context record are retained here but excluded from files/focused additions. Interface reads do not imply implementation review. Historical census denominators and previous round counts are unchanged."
+    },
+    {
+      "round": 8,
+      "area": "Schedule ledger/runner and S8 provider-history design",
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "direct_reading_records": 51,
+      "schedule_records": 22,
+      "s8_records": 29,
+      "new_unique_paths": 37,
+      "unique_files_after_round": 280,
+      "focused_records_after_round": 202,
+      "new_paths": [
+        "bin/masc_tui_loader.ml",
+        "bin/masc_tui_usage_trend.ml",
+        "lib/dated_jsonl/dated_jsonl.ml",
+        "lib/dated_jsonl/dated_jsonl.mli",
+        "lib/jsonl_writer/jsonl_writer.ml",
+        "lib/keeper/keeper_claude_code_runtime.ml",
+        "lib/keeper/keeper_codex_runtime.ml",
+        "lib/keeper/keeper_tag_dispatch.ml",
+        "lib/keeper/keeper_tool_in_process_runtime.ml",
+        "lib/masc_log/log.ml",
+        "lib/mcp_server_eio_execute.ml",
+        "lib/runtime/runtime_muse_usage.ml",
+        "lib/runtime/runtime_quota_window.ml",
+        "lib/schedule/dune",
+        "lib/schedule/schedule_occurrence_id.ml",
+        "lib/schedule/schedule_occurrence_id.mli",
+        "lib/schedule/schedule_runner.ml",
+        "lib/schedule/schedule_runner.mli",
+        "lib/schedule/schedule_runner_status.ml",
+        "lib/schedule/schedule_service.ml",
+        "lib/schedule/schedule_service.mli",
+        "lib/schedule/schedule_store.ml",
+        "lib/schedule/schedule_store.mli",
+        "lib/server/dune",
+        "lib/server/server_bootstrap_maintenance.ml",
+        "lib/server/server_schedule_consumers.ml",
+        "lib/tool_schedule.ml",
+        "lib/tui_decode_usage.ml",
+        "lib/tui_decode_usage.mli",
+        "test/deps/dune",
+        "test/stanzas/test_provider_usage_history_snapshots.inc",
+        "test/test_dated_jsonl_store.ml",
+        "test/test_schedule_consumer_dispatch.ml",
+        "test/test_schedule_runner.ml",
+        "test/test_schedule_store.ml",
+        "test/test_schedule_tool_wiring.ml",
+        "test/test_tui_overview_providers.ml"
+      ],
+      "excluded_readings": [
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": "docs/constitution.xml",
+          "ranges": [
+            [
+              1,
+              555
+            ]
+          ],
+          "scope": "Full read plus 180-325 supplement for initially truncated middle.",
+          "kind": "governance",
+          "full_file": true,
+          "audit_area": "Round8 Schedule"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+          "ranges": [
+            [
+              1,
+              352
+            ]
+          ],
+          "scope": "Full contributor procedure read after constitution.",
+          "kind": "governance",
+          "full_file": true,
+          "audit_area": "Round8 Schedule"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": ".agents/skills/ocaml-coding/SKILL.md",
+          "ranges": [
+            [
+              1,
+              184
+            ]
+          ],
+          "scope": "Prior full Round7 read carried by whole-file byte comparison; no new abbreviated skill reading claimed.",
+          "kind": "governance_carried",
+          "full_file": true,
+          "audit_area": "Round8 Schedule"
+        },
+        {
+          "baseline": "c12ccd6d4348c31e62b1d1cfdda313b318094c53",
+          "path": "docs/audits/ocaml-refactoring/README.md",
+          "ranges": [
+            [
+              196,
+              220
+            ],
+            [
+              632,
+              656
+            ]
+          ],
+          "scope": "K4 attempt evidence and S7 connector lane lifecycle inspected to avoid duplicate candidates. Other schedule mentions and queue totals were searched only.",
+          "kind": "audit_context",
+          "full_file": false,
+          "audit_area": "Round8 Schedule"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": "docs/constitution.xml",
+          "ranges": [
+            [
+              1,
+              555
+            ]
+          ],
+          "scope": "Full required contract; pure effects boundary, typed ownership, no local builds, evidence limits.",
+          "kind": "governance",
+          "blob": "98ead93d57ca1dd113b3094a1fd353997224c628",
+          "audit_area": "Round8 S8 design"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+          "ranges": [
+            [
+              1,
+              352
+            ]
+          ],
+          "scope": "Full contributor workflow; source review and focused consumer reachability.",
+          "kind": "governance",
+          "blob": "fa12d6c3701d364164bd918e2b34c283042a0ad3",
+          "audit_area": "Round8 S8 design"
+        },
+        {
+          "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+          "path": ".agents/skills/ocaml-coding/SKILL.md",
+          "ranges": [
+            [
+              1,
+              184
+            ]
+          ],
+          "scope": "Full skill read; result boundaries, cancellation propagation, legitimate resource mutation, interfaces.",
+          "kind": "governance",
+          "blob": "35a6bf28411c666f8d9e75fe2099589dfe804dfe",
+          "audit_area": "Round8 S8 design"
+        },
+        {
+          "baseline": "c12ccd6d4348c31e62b1d1cfdda313b318094c53",
+          "path": "docs/audits/ocaml-refactoring/README.md",
+          "ranges": [
+            [
+              657,
+              682
+            ]
+          ],
+          "scope": "Existing S8 candidate; absent from main baseline, so pinned separately to campaign commit.",
+          "kind": "audit_context",
+          "blob": "56d4c2d6426d5c09f6c3f45ae460351acfe12c0c",
+          "audit_area": "Round8 S8 design"
+        }
+      ],
+      "input_artifacts": [
+        {
+          "name": "schedule-round8",
+          "sha256": "4959921573cb089a75b268b0bbbc35fb1f0a931bda8c7e16fdad7dbd24cd2e5c"
+        },
+        {
+          "name": "s8-design-round8",
+          "sha256": "e107e931e9faf4fa5ba021fd3256f570e49572cf279bc0b0c31c38f353f47004"
+        }
+      ],
+      "review_corrections": [
+        {
+          "artifact": "schedule-round8",
+          "updates": []
+        },
+        {
+          "artifact": "s8-design-round8",
+          "updates": [
+            {
+              "reason": "Independent Round8 review P3: do not characterize constitution legacy_residue as a general preference or imply an approval exception.",
+              "previous_artifact_sha256": "7f3a9e0a870e7de6d8175c35383678e863818e9162a235a965d611e6a2b9750b",
+              "correction": "Only the final limitation wording is replaced. Existing source behavior, proposal scope and direct-read accounting are unchanged.",
+              "replacement": "This bounded extraction preserves the reader’s existing alias and absent-marker-state decoding behavior; changing those stored-history semantics is outside this proposed patch. No compatibility policy or exception to the constitution is introduced."
+            }
+          ]
+        }
+      ],
+      "memory_os_integration": {
+        "source": "Root-provided REST merged-state plus local commit-ancestry observation; no new semantic source reading",
+        "observed_main": "776383528786929d01f8103e27823041c3cee755",
+        "pull_requests": [
+          {
+            "number": 43347,
+            "merge_commit": "11c2f3c08d7e20fd9338197188b8a39cab3368b0",
+            "merged_at": "2026-10-16T23:22:02Z",
+            "included_in_main": "776383528786929d01f8103e27823041c3cee755",
+            "merged": true
+          },
+          {
+            "number": 43348,
+            "merge_commit": "8ff0aa5d695df60d72132a06863f3bd6c4e2f547",
+            "merged_at": "2026-10-16T23:22:03Z",
+            "included_in_main": "776383528786929d01f8103e27823041c3cee755",
+            "merged": true
+          },
+          {
+            "number": 43353,
+            "merge_commit": "c5337092c70bc5cf6a615f481684810db40a7116",
+            "merged_at": "2026-10-16T23:22:04Z",
+            "included_in_main": "776383528786929d01f8103e27823041c3cee755",
+            "merged": true
+          }
+        ],
+        "campaign_context": "c12ccd6d4348c31e62b1d1cfdda313b318094c53 is a distinct historical campaign checkout; integration is not imputed to its Memory OS source."
+      },
+      "meaning": "22 Schedule and 29 S8 source/interface/build/scenario records; six governance and two README-context records excluded. Shared files can have separate scoped records from each audit; unique paths are counted once. test_model_inference_metrics is retained only as directly read exclusion evidence, not a direct S8 scenario. Historical census denominators and round counts remain unchanged."
+    }
+  ],
+  "generator_inputs": {
+    "baseline": "684336274720034611073beab836159fd4ee3b94",
+    "tracked_generator_input_count": 2,
+    "paths": [
+      "lib/exec/parser/bash_lexer.mll",
+      "lib/exec/parser/bash_subset.mly"
+    ],
+    "reason": "A .ml/.mli-only census omits authored lexer and grammar inputs that generate production OCaml modules. Both have now been directly read, and parser/dune confirms ocamllex plus Menhir.",
+    "accounting": "Record two generator-source inputs separately from the historical .ml/.mli denominator. Do not relabel this bounded path audit as complete exec, process, or whole-repository coverage."
+  },
+  "discovery_searches": [
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "method": "git ls-tree plus filename filters",
+      "scope": "Parser, exec, process and shell-related tracked paths; only paths listed in direct_read_paths count as reads.",
+      "examples": [
+        "lib/keeper_tooling/shell_costume.mli",
+        "test/test_shell_costume.ml",
+        "test/test_keeper_tool_execute_typed_input.ml",
+        "test/test_process_eio_coverage.ml",
+        "test/test_process_eio_detached.ml",
+        "lib/exec/test/test_shell_ir_chaining_benchmark.ml",
+        "lib/exec_policy/exec_policy.mli"
+      ]
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "method": "git grep production parser/dispatch references",
+      "scope": "Bash.parse_string, parse_string_to_ir, Shell_ir.Subst, Exec_dispatch.dispatch and Execute_shell_ir.dispatch under lib and bin. References guide caller tracing; no claim all aliases or external library consumers were enumerated.",
+      "examples": [
+        "lib/keeper/keeper_gate_replay.ml",
+        "lib/keeper/keeper_shell_tool_command.ml",
+        "lib/keeper/keeper_tool_execute_observe.ml",
+        "lib/exec_policy/exec_policy_literal_words.ml"
+      ]
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "method": "git grep Domain.spawn, Domain_manager.run, Domain_pool and Executor_pool submission references; broad result output was bounded",
+      "scope": "Only symbol-level scheduler discovery; no end-to-end parser invocation on two production domains established. These results are excluded from direct-read counts.",
+      "examples": [
+        "lib/core/domain_pool.ml",
+        "lib/core/domain_pool_ref.ml",
+        "lib/core/executor_pool_ref.mli",
+        "lib/server/server_h2_gateway_helpers.ml",
+        "lib/server/server_dashboard_http_runtime_support.ml",
+        "lib/keeper/keeper_turn_sandbox_runtime.ml",
+        "bin/masc_tui_io_domain.ml"
+      ]
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "method": "Lane helper/consumer discovery, excluded from this round reading counts",
+      "records": [
+        {
+          "path": "lib/runtime/runtime_instance.ml",
+          "scope": "Read lines 1-40 for ownership context and symbol occurrence showing id_of_binding at line 132 delegates to Runtime_schema.binding_key. No full module review."
+        },
+        {
+          "path": "test/test_runtime_muse_serve_config.ml",
+          "scope": "Occurrence census only: public exact_slot_list_key_of_api_format used at line 124."
+        },
+        {
+          "path": "test/test_runtime_config_validity.ml",
+          "scope": "Occurrence census only: public exact_slot_list_key_of_api_format used at lines 6070 and 6072."
+        },
+        {
+          "path": "lib/prompt_preset.ml",
+          "scope": "Occurrence census only: public Runtime_config_text.remove_runtime_assignment_text and update_runtime_assignment_text at lines 800 and 807."
+        }
+      ]
+    },
+    {
+      "method": "rg --files and filename filters",
+      "scope": "lib/multimodal and media/vision/audio/image/video names across lib/test/Agent Core; only direct_read_paths count as reads.",
+      "examples": [
+        "lib/multimodal/payload.ml",
+        "lib/multimodal/artifact.ml",
+        "lib/multimodal/multimodal_hydrator.ml",
+        "lib/multimodal/vision_artifact_reference.ml",
+        "lib/server/server_routes_http_routes_multimodal.ml",
+        "lib/keeper/keeper_autonomous_stream.ml",
+        "test/multimodal/test_payload.ml",
+        "test/multimodal/test_multimodal_hydrator.ml"
+      ],
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "area": "Round 7 multimodal discovery; initial worktree searches, not promoted to final-baseline semantic reads"
+    },
+    {
+      "method": "rg symbol/caller/function-name matches",
+      "scope": "Keeper media/vision producer/consumer and test names; no full read inferred from matches.",
+      "examples": [
+        "lib/keeper/keeper_media_reading_maintenance.ml",
+        "test/test_keeper_media_reading_maintenance.ml",
+        "test/test_keeper_vision_ingest.ml",
+        "test/test_keeper_chat_media_store.ml",
+        "test/test_keeper_turn_driver_accept.ml",
+        "lib/browser_screenshot.ml",
+        "packages/agent_core/lib/llm_provider/complete_stream_state.ml"
+      ],
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "area": "Round 7 multimodal discovery; initial worktree searches, not promoted to final-baseline semantic reads"
+    },
+    {
+      "method": "Initially truncated interface reads, intentionally omitted from direct accounting",
+      "scope": "Only names and incomplete context were retained.",
+      "examples": [
+        "lib/multimodal/tool_emission.mli",
+        "lib/multimodal/keeper_emitter.mli",
+        "lib/keeper/keeper_vision_tool.mli"
+      ],
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "area": "Round 7 multimodal discovery; initial worktree searches, not promoted to final-baseline semantic reads"
+    },
+    {
+      "method": "Governance/path discovery",
+      "scope": "Only root AGENTS and docs-site AGENTS discovered; no nested lib/test instructions found in the initial scoped census. Campaign README candidate-name lookup was search-only.",
+      "examples": [],
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "area": "Round 7 multimodal discovery; initial worktree searches, not promoted to final-baseline semantic reads"
+    },
+    {
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "paths": [
+        "test/dune"
+      ],
+      "scope": "Read name-list snippets at 470-490 and 824-850 and searched stanza headers; these only establish test name occurrences, not a full build stanza/target dependency review. Excluded from consulted semantic files.",
+      "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
+      "area": "Round 7 Board contention rearm design"
+    },
+    {
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "paths": [
+        "lib/keeper/keeper_board_attention_partition.ml",
+        "lib/keeper/keeper_board_attention_partition.mli"
+      ],
+      "scope": "Occurrence search for Generation alias/advancement and contention references only. Generation module itself was read directly; no partition persistence audit claimed.",
+      "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
+      "area": "Round 7 Board contention rearm design"
+    },
+    {
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "scope": "Complete symbol search for make_contention_rearm_scheduler/schedule_contention_rearm/reset_contention_rearms/apply_drain_rearm under lib, bin and test, excluding the owner implementation/interface, found only test/test_keeper_board_attention_worker.ml consumers. This does not enumerate arbitrary aliases or external library users.",
+      "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
+      "area": "Round 7 Board contention rearm design"
+    },
+    {
+      "baseline": "82b908bbd4550d9c1ac2b15e22485351bb706b21",
+      "scope": "Search for contention cancellation test names and fork/sleep cancellation references was discovery only; lack of hits is not a full-suite absence proof.",
+      "method": "K3 source/test symbol discovery; excluded from direct-reading totals",
+      "area": "Round 7 Board contention rearm design"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "git ls-tree and filename filters",
+      "scope": "Schedule module/test/generator path inventory and scoped AGENTS discovery. Root and docs-site AGENTS only; no nested schedule/test instructions found. Names are not source reads.",
+      "examples": [
+        "lib/schedule/schedule_domain.ml",
+        "lib/schedule/schedule_contract_values.ml",
+        "lib/schedule/schedule_supported_kinds.ml",
+        "lib/schedule_payload_projection.ml",
+        "lib/schedule_projection.ml",
+        "test/test_schedule_domain.ml",
+        "test/test_schedule_service.ml",
+        "test/test_schedule_interval_runner_tick.ml"
+      ],
+      "area": "Round8 Schedule discovery/context; excluded from focused totals"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "git grep direct references plus module alias/open/include and function-name inventories",
+      "scope": "Schedule_runner.tick, commit_acceptance, Schedule_store.append_note, Schedule_store module aliases and Tool_schedule.dispatch guided the listed direct reads. One direct qualified production append caller and an open Schedule_store test consumer found; arbitrary external consumers are not exhaustively enumerated.",
+      "examples": [
+        "lib/schedule_payload_projection.mli",
+        "lib/server_keeper_waiting_inventory.ml",
+        "test/test_schedule_tool_toml_parity.ml",
+        "test/test_server_dashboard_http_schedule_actions.ml"
+      ],
+      "area": "Round8 Schedule discovery/context; excluded from focused totals"
+    },
+    {
+      "baseline": "c12ccd6d4348c31e62b1d1cfdda313b318094c53",
+      "path": "docs/audits/ocaml-refactoring/consulted-sources.json",
+      "method": "Metadata JSON files query",
+      "scope": "Compared existing consulted path set: schedule_domain.mli was already retained; no prior Schedule note transaction candidate. This context lookup adds no semantic reading count.",
+      "area": "Round8 Schedule discovery/context; excluded from focused totals"
+    },
+    {
+      "baseline": "c12ccd6d4348c31e62b1d1cfdda313b318094c53",
+      "path": "docs/audits/ocaml-refactoring/README.md",
+      "method": "Keyword and heading matches outside the explicitly read K4/S7 sections",
+      "scope": "Existing K3/retained scheduler boundaries and Round7 queue counts were discovery/context, not fresh source review.",
+      "area": "Round8 Schedule discovery/context; excluded from focused totals"
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_provider_usage_windows.ml",
+      "matches": [
+        268,
+        665
+      ],
+      "reason": "scope_id consumers discovered by git grep; bodies not reviewed for S8."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_tui_runtime_listing.ml",
+      "matches": [
+        1299
+      ],
+      "reason": "scope_id consumer discovered, not a history read scenario."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_server_runtime_startup_maintenance.ml",
+      "matches": [
+        184,
+        186
+      ],
+      "reason": "Retention mention discovered only; do not claim full scenario coverage."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_dated_jsonl.ml",
+      "reason": "Listed storage test target only; no bodies read."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_dated_jsonl_count_cache.ml",
+      "reason": "Filename discovery only; unrelated storage count cache is not S8 state."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "test/test_dated_jsonl_off_fiber.ml",
+      "reason": "Filename discovery only; no storage offload change proposed."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "bin/masc_tui.ml",
+      "matches": [
+        11353,
+        11679,
+        11875
+      ],
+      "reason": "History load/apply call sites discovered only; loader and typed trend implementation were reviewed directly."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "bin/masc_tui_render.ml",
+      "matches": [
+        10992,
+        11210
+      ],
+      "reason": "Rendering entrypoints discovered only; no screen or layout review claimed."
+    },
+    {
+      "baseline": "c5337092c70bc5cf6a615f481684810db40a7116",
+      "method": "S8 symbol/path discovery; no new semantic read",
+      "path": "dashboard",
+      "reason": "Exact endpoint/decode search found no additional browser consumer. This is bounded search evidence, not a general dashboard audit."
+    }
+  ]
+}

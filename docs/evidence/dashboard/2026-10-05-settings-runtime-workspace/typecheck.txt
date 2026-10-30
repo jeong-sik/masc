@@ -1,0 +1,2 @@
+Command (dashboard cwd): node node_modules/typescript/bin/tsc --noEmit
+Exit: 0

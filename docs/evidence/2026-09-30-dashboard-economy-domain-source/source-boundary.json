@@ -1,0 +1,46 @@
+{
+  "scope": "static source import approximation on local partial candidate; not actual emitted Rollup chunks or full API parent source tree",
+  "parent_graph_sha256": "f9f7ec68f55ff62fc5c7af490a139644349e73afca8bd145a4a3a31e8f258404",
+  "parent_graph_local_head": "e472ff8a4554e8a644920446afb46f275d7efcde",
+  "entry": "dashboard/src/main.ts",
+  "before_reachable_module_count": 238,
+  "after_reachable_module_count": 238,
+  "before_reachable_effect_source_modules": [
+    "dashboard/src/api/schemas/candle-observation.ts",
+    "dashboard/src/api/schemas/keeper-portrait.ts"
+  ],
+  "after_reachable_effect_source_modules": [],
+  "eager_paths": [
+    [
+      "main.ts",
+      "app.ts",
+      "store.ts",
+      "api/schemas/candle-observation.ts",
+      "effect"
+    ],
+    [
+      "main.ts",
+      "app.ts",
+      "store.ts",
+      "keeper-store-normalize.ts",
+      "api/schemas/keeper-portrait.ts",
+      "effect"
+    ]
+  ],
+  "additional_eager_normalizer_callers": [
+    "store-normalizers.ts",
+    "mission-normalizers.ts",
+    "operator-normalizers.ts",
+    "agent-core-runtime-store.ts",
+    "lib/keeper-operational-state.ts"
+  ],
+  "candidate_import_changes": {
+    "dashboard/src/api/schemas/candle-observation.ts": [
+      "dashboard/src/lib/type-guards.ts"
+    ],
+    "dashboard/src/api/schemas/keeper-portrait.ts": [
+      "dashboard/src/lib/type-guards.ts"
+    ]
+  },
+  "acceptance_requires": "unchanged dashboard-bundle-preload.test.ts on the final published head; source closure is not bundle proof"
+}

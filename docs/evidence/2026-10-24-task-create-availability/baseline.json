@@ -1,0 +1,125 @@
+{
+  "captured_at_utc": "2026-10-24T09:35:59.673140+00:00",
+  "scope": "read-only actual raw HTTP canary observations; no provider response Thinking content retained",
+  "candidate_binary_commit": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+  "candidate_executable_sha256": "0d246b36b1cafa6828733301a384e10435609bf3f5a00c7dd2bf6db8936f4e43",
+  "model": "gemma4:e2b",
+  "initial_request": {
+    "path": "/tmp/masc-goal-wire-7501aec0/request-000003.request",
+    "bytes": 73127,
+    "sha256": "a842806027d75fb9cf1edde83380edde3e519ffbb73fc1d58a0a25e38bfe6b95"
+  },
+  "initial_tools": [
+    "Execute",
+    "Grep",
+    "Read",
+    "Edit",
+    "Write",
+    "WebSearch",
+    "WebFetch",
+    "BrowserTabs",
+    "BrowserSession",
+    "BrowserGoto",
+    "BrowserInstruct",
+    "keeper_lane_status",
+    "keeper_tools_list",
+    "keeper_capability_search",
+    "keeper_context_status",
+    "keeper_artifact_read",
+    "keeper_memory_search",
+    "keeper_tasks_list",
+    "keeper_task_claim",
+    "keeper_task_done",
+    "keeper_candle_balance",
+    "keeper_candle_catalog",
+    "keeper_candle_purchase",
+    "keeper_candle_equip",
+    "keeper_candle_gift",
+    "masc_board_post",
+    "masc_board_list",
+    "masc_board_post_get",
+    "masc_board_comment",
+    "masc_board_search",
+    "keeper_tool_search"
+  ],
+  "initial_request_contains": {
+    "goal_id": true,
+    "criterion_revision": true,
+    "measurement_id": true
+  },
+  "create_response": {
+    "path": "/tmp/masc-goal-wire-7501aec0/request-000006.response",
+    "bytes": 98573,
+    "sha256": "2d0c7ba5d6316fd3a24fa695bcd2fafdb4b138e847e031a4ffb83cd89f96b9bd"
+  },
+  "create_response_receipt": {
+    "path": "/tmp/masc-goal-wire-7501aec0/request-000006.receipt.json",
+    "bytes": 385,
+    "sha256": "4987022f3727b0eec147e6a6c9b923eb770130cc07e66603386d78b3bf49b88e"
+  },
+  "create_tool_calls": [
+    {
+      "id": "call_ckg6snr0",
+      "function": {
+        "index": 0,
+        "name": "keeper_task_create",
+        "arguments": {
+          "description": "workspace/acceptance.json 파일에서 'alpha' 값을 true로 변경하고, 변경 사항을 확인 및 검증 제출합니다.",
+          "goal_id": "goal-canary-three-results",
+          "title": "workspace/acceptance.json의 alpha를 true로 설정하기"
+        }
+      }
+    }
+  ],
+  "backlog": {
+    "path": "/tmp/masc-goal-canary-7501aec0/.masc/tasks/backlog.json",
+    "bytes": 257,
+    "sha256": "8800375f1ebb372416c530d1ba10ff289f3eae5a9df38a1ef8a47557e159b75b"
+  },
+  "persisted_tasks": [],
+  "health": {
+    "path": "/tmp/masc-goal-canary-7501aec0/health.json",
+    "bytes": 35051,
+    "sha256": "1cd68a972a6e16b9fad601af2cd569b0b2cfcb92d7c57ff5fd7df976be2aa252"
+  },
+  "result": "Goal context delivered; Task creation requested by model but schema absent from initial offered tools; no persisted Task at captured read",
+  "create_dispatch_request": {
+    "path": "/tmp/masc-goal-wire-7501aec0/request-000006.request",
+    "bytes": 74474,
+    "sha256": "ac8c4d52abe9245147293da472fde10aacffb886e8f7e41757f3542cec0b6709",
+    "tool_names": [
+      "Execute",
+      "Grep",
+      "Read",
+      "Edit",
+      "Write",
+      "WebSearch",
+      "WebFetch",
+      "BrowserTabs",
+      "BrowserSession",
+      "BrowserGoto",
+      "BrowserInstruct",
+      "keeper_lane_status",
+      "keeper_tools_list",
+      "keeper_capability_search",
+      "keeper_context_status",
+      "keeper_artifact_read",
+      "keeper_memory_search",
+      "keeper_tasks_list",
+      "keeper_task_claim",
+      "keeper_task_done",
+      "keeper_candle_balance",
+      "keeper_candle_catalog",
+      "keeper_candle_purchase",
+      "keeper_candle_equip",
+      "keeper_candle_gift",
+      "masc_board_post",
+      "masc_board_list",
+      "masc_board_post_get",
+      "masc_board_comment",
+      "masc_board_search",
+      "keeper_tool_search"
+    ]
+  },
+  "measurement_attempt_failure": "not observed; measurement schema is absent in the same initial request"
+}

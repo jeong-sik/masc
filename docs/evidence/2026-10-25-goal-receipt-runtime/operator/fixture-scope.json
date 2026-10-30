@@ -1,0 +1,11 @@
+{
+  "recorded_at": "2026-10-24T16:33:21.976372+00:00",
+  "goal_id": "goal-canary-three-results",
+  "task_id": "task-001",
+  "model_selected_goal_link": false,
+  "controlled_preapproval_public_mcp_link": true,
+  "link_receipt": "controlled-goal-link-receipt.json",
+  "owner_execution_reminders": 0,
+  "postapproval_keeper_messages": 0,
+  "scope": "G2 fails in this cohort. Public MCP linking establishes only the G3 fixture condition. First partial Task approval only, not independent LLM verdict or human Goal confirmation."
+}

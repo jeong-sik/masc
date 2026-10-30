@@ -1,0 +1,28 @@
+model editing.000.output
+ASSERT one account
+ASSERT both variants
+ASSERT original context preserved
+ASSERT copied context changed
+ASSERT same account
+ASSERT copy does not round price
+ASSERT copy does not steal default
+ASSERT same API model
+ASSERT temperature precision retained
+ASSERT order unchanged
+ASSERT duplicate name refused
+
+model editing.001.output
+ASSERT binding-local context
+ASSERT original model specification
+ASSERT Esc cancels
+ASSERT bad integer refused
+ASSERT fits narrow form
+
+model editing.002.output
+ASSERT inline values cannot silently disappear
+ASSERT failure visible on short terminal
+
+model editing.003.output
+ASSERT Ollama serving context changes with variant
+ASSERT clearing context inherits the model serving context
+ASSERT clearing context removes the override

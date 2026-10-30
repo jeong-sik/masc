@@ -1,0 +1,22 @@
+{
+  "observed_turn": 4,
+  "observed_trace_id": "trace-1792852134711-00000",
+  "backend_source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+  "frontend_source_base": "cf60643a1680b6c1cfa678feb5c97034b3bd8d22",
+  "frontend_delta": "panel label/hint changed to Captured prompt / last recorded prompt; same API decoder/rendering",
+  "api_url": "http://127.0.0.1:61867/api/v1/keepers/goal-canary/last-prompt",
+  "api_sha256": "4cbf04ac081b283f042a6935e4bbcfa232c6084ea6b3fa0dc607a00e90bce145",
+  "capture_file_sha256": "f5688cfa027b98b2d8a2d66d09a110c43206daa3003d9bf65d4ae5bbb6ca4758",
+  "wire_request": "request-000019.request",
+  "wire_request_sha256": "79c160e303e8cbead51cb69235f72d4dcc256dce25836267e3b9a370fd83b137",
+  "exact_api_system_equals_actual_wire_system": true,
+  "system_utf8_bytes": 24979,
+  "system_sha256": "0843cd91a6d874e10ce9d693012fc2fbca0f19e1b9933f9edb2e0e54e248adf5",
+  "screenshot_sha256": "6e7a4f161693d7933a2d6d746ae4d05cab4451588458df11cfbc46e8adfe9d35",
+  "scope": "Actual own isolated backend/API and Vite frontend; screenshot viewed. Last captured turn4, not G2 turn1 or a forecast/remote retention proof. Dev MCP proxy validates same Origin then translates it to fixed backend Host; application/backend unchanged.",
+  "api_capture_fields_equal_persisted_capture": true,
+  "api_extra_envelope_fields": [
+    "dashboard_surface",
+    "keeper"
+  ]
+}

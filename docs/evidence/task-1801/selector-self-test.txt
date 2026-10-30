@@ -1,0 +1,39 @@
+# local_run_id: 9d3fbcb3-7856-4adc-9047-5fae426a5eab
+# recorded_at: 2026-09-28T07:26Z
+# head: 6da68d7c8 (polish/task-1801-selector-setenv-bin-exe)
+# purpose: task-1801 acceptance (a) and (b) -- the selector self-test passes
+#   with the new rule, and fails when the rule is removed.
+#
+# --- (a) green: the new rule selects the two deployment suites ---
+# command: printf 'bin/deployment_preflight_helper.ml\n' | python3 scripts/ci/referencing_suites.py
+stanza test/test_deployment_runtime_config.ml
+stanza test/test_deployment_store_directories.ml
+#
+# command: python3 scripts/ci/test_referencing_suites.py
+referencing_suites self-test: all cases pass
+#
+# command: bash scripts/ci/run-edited-tests.sh --self-test
+run-edited-tests self-test: all cases pass
+#
+# --- (b) intended-red: remove the stanza rule, the self-test fails ---
+# mutation: remove the `stanza` emission from referencing_suites.py main()
+#   (the two lines that print `stanza <suite>`), nothing else.
+# command: bash scripts/ci/run-edited-tests.sh --self-test
+FAIL a bin executable edit selects the suites whose stanza runs it
+     want: test/test_deployment_runtime_config.ml test/test_deployment_store_directories.ml
+     got:  test/test_deployment_queue_preflight_mutation.py test/test_keeper_toml.ml
+run-edited-tests self-test: 1 case(s) failed
+exit=1
+#
+# --- (b) intended-red: remove the preflight trigger, the self-test fails ---
+# mutation: remove the `if [ -n "${preflight_script_changed}" ]` block from
+#   run-edited-tests.sh select_sources(), nothing else.
+# command: bash scripts/ci/run-edited-tests.sh --self-test
+FAIL the preflight script selects the suites that run it
+     want: test/test_deployment_runtime_config.ml test/test_deployment_store_directories.ml
+     got:  test/test_install_script.ml test/test_keeper_board_attention_worker.ml
+run-edited-tests self-test: 1 case(s) failed
+exit=1
+#
+# Both mutations were reverted before the next command; `git status --short`
+# was empty after each.

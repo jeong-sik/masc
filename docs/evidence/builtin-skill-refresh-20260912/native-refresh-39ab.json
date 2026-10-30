@@ -1,0 +1,145 @@
+{
+  "source_commit": "39ab9c606f9120d3439ea4792d73f589558e9661",
+  "binary_sha256": "851155332616a581227dd35bcd7e17b151f6ebf7d21fd26889859502de30bb1c",
+  "euid": 502,
+  "commands": [
+    {
+      "label": "unreadable-operator-directory-after-fix",
+      "arguments": [
+        "init",
+        "--skills-only",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs"
+      ],
+      "exit": 0,
+      "stdout": "preserved Skill browser-lanes (cannot inspect package: Sys_error(\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs/.masc/skills/browser-lanes/references: Permission denied\"))\ninit: 0 written, 0 skipped, 0 failed, 0 builtin Skill package(s) installed or updated (root=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs/.masc/config)\n",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "seed-isolated-workspace",
+      "arguments": [
+        "init",
+        "--skills-only",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw"
+      ],
+      "exit": 0,
+      "stdout": "init: 0 written, 0 skipped, 0 failed, 12 builtin Skill package(s) installed or updated (root=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw/.masc/config)\n",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "inspect-before-edit",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw"
+      ],
+      "exit": 0,
+      "stdout": "package: browser-lanes\ninstalled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\nbundled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\nownership: recorded, unchanged since installation\nReview the complete package, then use --apply --expected-revision 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c --expected-bundle-revision 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c.\n",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "export-reviewed-bundle",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw",
+        "--export-to",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw/exported-for-review"
+      ],
+      "exit": 0,
+      "stdout": "Bundled package exported to /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw/exported-for-review\nbundled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\n",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "reject-stale-installed-revision",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw",
+        "--apply",
+        "--expected-revision",
+        "6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c",
+        "--expected-bundle-revision",
+        "6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\nSkill package changed; inspect it again (revision=ac5f586bdfb9a7a3e5eb159c50a0c39fefe46c562f588cc5cac7c4028fcbb461)\n"
+    },
+    {
+      "label": "inspect-operator-tree",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw"
+      ],
+      "exit": 0,
+      "stdout": "package: browser-lanes\ninstalled revision: ac5f586bdfb9a7a3e5eb159c50a0c39fefe46c562f588cc5cac7c4028fcbb461\nbundled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\nownership: modified since installation; review operator changes before replacement\nReview the complete package, then use --apply --expected-revision ac5f586bdfb9a7a3e5eb159c50a0c39fefe46c562f588cc5cac7c4028fcbb461 --expected-bundle-revision 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c.\n",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "reject-unreviewed-bundle",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw",
+        "--apply",
+        "--expected-revision",
+        "ac5f586bdfb9a7a3e5eb159c50a0c39fefe46c562f588cc5cac7c4028fcbb461",
+        "--expected-bundle-revision",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\nBundled Skill package changed; export and review it again (revision=6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c)\n"
+    },
+    {
+      "label": "apply-reviewed-complete-package",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw",
+        "--apply",
+        "--expected-revision",
+        "ac5f586bdfb9a7a3e5eb159c50a0c39fefe46c562f588cc5cac7c4028fcbb461",
+        "--expected-bundle-revision",
+        "6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c"
+      ],
+      "exit": 0,
+      "stdout": "Updated browser-lanes; previous package: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw/.masc/skill-packages/browser-lanes-f6b1b1\nRefresh the running Skill catalog before a new instruction invocation.\n",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "inspect-published-package",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw"
+      ],
+      "exit": 0,
+      "stdout": "package: browser-lanes\ninstalled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\nbundled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\nownership: recorded, unchanged since installation\nReview the complete package, then use --apply --expected-revision 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c --expected-bundle-revision 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c.\n",
+      "stderr": "[2026-09-12 21:45:32] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    }
+  ],
+  "checks": [
+    "paired unreadable-directory init now exits 0; complete package and receipt preserved",
+    "stale installed digest rejects without mutation",
+    "wrong reviewed bundle digest rejects without mutation",
+    "explicit apply publishes exact exported bytes and retains complete previous tree",
+    "receipt and inspected installed revision match actual exported bundle revision"
+  ],
+  "review_workspace": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-refresh-39-review-4j87__cw",
+  "limitations": [
+    "No live installation changed or server started.",
+    "Source39ab predates mounted-root fix; this does not validate that later change.",
+    "Post-publication fsync injection is covered by compiled suite, not this CLI probe."
+  ]
+}

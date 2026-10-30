@@ -1,0 +1,47 @@
+
+(** Tool_usage_log -- Durable call logging for non-public registered tools.
+
+    Persists tool invocations to [.masc/tool_usage/YYYY-MM/DD.jsonl] via
+    {!Dated_jsonl}. External discovery membership is not reused as Keeper
+    visibility or authorization policy.
+
+    @since 2.190.0 -- Issue #5120 *)
+
+val init : base_path:string -> unit -> unit
+(** [init ~base_path ()] creates the Dated_jsonl store under
+    [<base>/.masc/tool_usage/]. Must be called before [install].
+    The server's prune pass removes its day files by age. *)
+
+val install : on_io_failure:(site:string -> exn -> unit) -> unit
+(** [install ~on_io_failure] registers a {!Tool_dispatch} observer that logs
+    non-public registered tool calls to the JSONL store. Public tools are
+    already covered by their external call telemetry. [on_io_failure ~site exn]
+    is invoked when a JSONL append
+    raises; the installer supplies keeper FD/disk pressure handling so this
+    module does not reference the keeper subsystem (Tool->Keeper dependency
+    direction). *)
+
+val log_call :
+  on_io_failure:(site:string -> exn -> unit) ->
+  tool_name:string ->
+  disposition:('completed, 'deferred, 'failed) Tool_result.disposition ->
+  caller:string option ->
+  unit
+(** [log_call ~on_io_failure ~tool_name ~disposition ~caller] appends a single
+    entry to the JSONL store. Primarily used by the dispatch observer; exposed
+    for testing. [on_io_failure] receives the append exception (if any). *)
+
+val source_metadata_json : masc_root:string -> Yojson.Safe.t
+(** [source_metadata_json ~masc_root] reports the durable store's location,
+    entry count, freshness and coverage gaps as one standalone object.
+    Callers that nest it under a key of their own need this;
+    {!attach_source_metadata} merges the same fields into an existing
+    object instead. *)
+
+val attach_source_metadata : masc_root:string -> Yojson.Safe.t -> Yojson.Safe.t
+(** [attach_source_metadata ~masc_root json] overlays {!source_metadata_json}
+    fields onto an existing tool usage summary object. *)
+
+val read_recent : ?n:int -> unit -> Yojson.Safe.t list
+(** [read_recent ~n ()] reads the most recent [n] entries (default 10000)
+    from the JSONL store. Returns [] if store is not initialized. *)

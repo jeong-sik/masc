@@ -1,0 +1,153 @@
+module Gate = Masc_exec_command_gate.Shell_command_gate
+
+type field = Connector
+
+type call =
+  | Spawn
+
+type t =
+  | Move_to_field of {
+      field : field;
+      because : string;
+    }
+  | Call_this_instead of {
+      call : call;
+      because : string;
+    }
+  | Unrepresentable of {
+      construct : Masc_exec.Parsed.reason_too_complex;
+      because : string;
+    }
+
+(* RFC execute-boundary-is-the-sandbox. Every sentence below was written while
+   the subset was what ran, so "this tool does not do that" was a fact about
+   the tool. It is not one any more: [command] is a shell, and an argv-shaped
+   shell normalises into it, so a caller who wrote [$(...)] or [$PWD] or a
+   loop wrote something that works.
+
+   Advising against it is not merely stale, it is the failure this module was
+   written to end -- 2026-08-31, lane-smith was told "this tool runs no shell"
+   for a working [$PWD] and rewrote it into an absolute path. What is left is
+   [&], where another call is the better move, and a nested pipeline, where a
+   field still is; for the rest the honest answer is that there is nothing to
+   say. *)
+let a_shell_is_the_answer construct because =
+  Unrepresentable { construct; because }
+;;
+
+(* Exhaustive on purpose.  A construct cannot join the excluded list without
+   someone choosing whether the caller should have done something else. *)
+let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
+  (* Still true, and not about the subset: the shell that runs the line exits
+     when the line ends, so [&] leaves a child with no handle to wait on or
+     stop. Spawn is the tool that returns one. *)
+  | `Background ->
+    Call_this_instead
+      { call = Spawn
+      ; because =
+          "the shell running this line exits when the line does, so [&] \
+           leaves a child with no handle to wait on, read from, or stop"
+      }
+  | `Shell_builtin name as construct ->
+    a_shell_is_the_answer
+      construct
+      (match name with
+       | "eval" ->
+         "eval re-parses its arguments in the running shell. The keeper \
+          sandbox image already exports the switch environment (OPAMROOT, \
+          OPAM_SWITCH_PREFIX), so drop the eval $(opam env ...) wrapper \
+          entirely"   (* RFC-shell-ir-typed-command-substitution §1/§3 *)
+       | _ ->
+         "source and . run text in the running shell; a shell runs this \
+          line, so it does what you wrote — the typed argv form cannot \
+          say it")
+  | ( `Heredoc
+    | `Here_string
+    | `Cmd_subst
+    | `Param_expansion
+    | `Arith_expansion
+    | `Glob_brace
+    | `Subshell
+    | `Proc_subst
+    | `Control_flow
+    | `Function_def
+    | `Redirect ) as construct ->
+    a_shell_is_the_answer
+      construct
+      "a shell runs this line, so it does what you wrote. The typed argv form \
+       cannot say it, and argv is the form that gets path scope -- use it \
+       when the line does not need a shell"
+  | `Unknown_construct _ as construct ->
+    a_shell_is_the_answer
+      construct
+      "the parser could not name this construct. The shell still runs the \
+       line; only the classification is missing"
+;;
+
+let of_reason : Gate.too_complex_reason -> t = function
+  | Gate.Unsupported_construct construct -> of_construct construct
+  | Gate.Unsupported_nested_pipeline ->
+    Move_to_field
+      { field = Connector
+      ; because =
+          "a pipeline is a flat list of stages. Name each stage once rather \
+           than nesting one pipeline inside another"
+      }
+;;
+
+let field_name = function
+  | Connector -> "connector"
+;;
+
+(* The category the census counts. RFC execute-subset-dispositions §3.7 keys
+   its corpus table on these, so they stay put when what the caller types is
+   renamed. *)
+let call_name = function
+  | Spawn -> "spawn"
+;;
+
+(* What the caller types. [Spawn] is one concrete tool, so it is named
+   exactly -- "call spawn instead" sent the reader looking for a tool nobody
+   has. This library cannot see the tool schemas, so a test at a layer that
+   sees both holds the two together. *)
+let call_instruction = function
+  | Spawn -> "keeper_spawn"
+;;
+
+let tag = function
+  | Move_to_field { field; _ } -> "move_to_field:" ^ field_name field
+  | Call_this_instead { call; _ } -> "call_this_instead:" ^ call_name call
+  | Unrepresentable _ -> "unrepresentable"
+;;
+
+(* The sentence templates live in config/prompts/subset_rewrite.md; this
+   module picks the slot and supplies the data. A template that does not
+   render is logged and falls back to the bare [because] — the one piece of
+   data the caller always has — never to prose written here (#32848
+   precedent). [tag] stays inline: it is the census category identifier (RFC
+   execute-subset-dispositions §3.7 keys its corpus table on these), not
+   model-facing prose. *)
+let render_advice key vars ~fallback =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Misc.warn
+      "subset_rewrite advice %s did not render, falling back to the bare data: %s"
+      key
+      detail;
+    fallback
+;;
+
+let to_string = function
+  | Move_to_field { field; because } ->
+    render_advice
+      Prompt_names.subset_rewrite_move_to_field
+      [ "field", field_name field; "because", because ]
+      ~fallback:because
+  | Call_this_instead { call; because } ->
+    render_advice
+      Prompt_names.subset_rewrite_call_this_instead
+      [ "call", call_instruction call; "because", because ]
+      ~fallback:because
+  | Unrepresentable { construct = _; because } -> because
+;;

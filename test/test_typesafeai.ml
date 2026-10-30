@@ -1,0 +1,793 @@
+(** Unit tests for TypeSafe AI System One integration and Board Attention adapter. *)
+
+module T = Masc.Typesafeai_types
+module C = Masc.Typesafeai_config
+module B = Masc.Typesafeai_board_attention
+module J = Masc.Keeper_board_attention_judgment
+
+let test_request_encoding () =
+  let state = `Assoc [ "text", `String "Please review this pull request" ] in
+  let questions =
+    [ ( "is_review"
+      , T.Noul
+          { instructions = "Is this requesting a review?"
+          ; criteria = Some ("Yes, explicit review request", "No, other topic")
+          } )
+    ; ( "team"
+      , T.Choice
+          { instructions = "Which team should review?"
+          ; criteria =
+              [ "frontend", Some "React / UI changes"
+              ; "backend", Some "OCaml / database changes"
+              ]
+          } )
+    ; ( "urgency"
+      , T.Score
+          { instructions = "Review urgency level"
+          ; criteria = [ "low"; "medium"; "high" ]
+          } )
+    ]
+  in
+  let req = T.request_to_yojson ~model:"jev-latest" ~state ~questions in
+  match req with
+  | `Assoc fields ->
+    Alcotest.(check string) "model is jev-latest" "jev-latest"
+      (match List.assoc_opt "model" fields with
+       | Some (`String s) -> s
+       | _ -> Alcotest.fail "missing model");
+    Alcotest.(check bool) "has state" true (List.mem_assoc "state" fields);
+    Alcotest.(check bool) "has questions" true (List.mem_assoc "questions" fields)
+  | _ -> Alcotest.fail "request must be an assoc"
+;;
+
+let test_response_decoding () =
+  let json_str =
+    {|{
+      "model": "jev-latest",
+      "answers": {
+        "is_review": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "team": {
+          "type": "choice",
+          "choice": "backend",
+          "probabilities": { "frontend": 0.05, "backend": 0.95 },
+          "confidence": 0.92
+        },
+        "urgency": {
+          "type": "score",
+          "score": 1.25,
+          "probabilities": { "2": 0.25, "0": 0, "1": 0.75 },
+          "confidence": 0.5
+        }
+      },
+      "usage": {
+        "input_tokens": 120,
+        "output_tokens": 0
+      }
+    }|}
+  in
+  let json = Yojson.Safe.from_string json_str in
+  match T.eval_response_of_yojson json with
+  | Error err -> Alcotest.fail ("decoding failed: " ^ err)
+  | Ok res ->
+    Alcotest.(check string) "model matches" "jev-latest" res.model;
+    Alcotest.(check int) "3 answers" 3 (List.length res.answers);
+    (match List.assoc_opt "is_review" res.answers with
+     | Some (T.Noul_answer { noul }) ->
+       Alcotest.(check (float 0.001)) "noul is 0.96" 0.96 noul
+     | _ -> Alcotest.fail "expected noul answer");
+    (match List.assoc_opt "team" res.answers with
+     | Some (T.Choice_answer { choice; confidence; probabilities }) ->
+       Alcotest.(check string) "choice is backend" "backend" choice;
+       Alcotest.(check (float 0.001)) "confidence is 0.92" 0.92 confidence;
+       Alcotest.(check (list (pair string (float 0.001))))
+         "choice probabilities retain named options"
+         [ "frontend", 0.05; "backend", 0.95 ] probabilities
+     | _ -> Alcotest.fail "expected choice answer");
+    (match List.assoc_opt "urgency" res.answers with
+     | Some (T.Score_answer { score; confidence; probabilities }) ->
+       Alcotest.(check (float 0.001)) "score is 1.25" 1.25 score;
+       Alcotest.(check (float 0.001)) "confidence is 0.5" 0.5 confidence;
+       Alcotest.(check int) "all score levels are retained" 3 (List.length probabilities);
+       Alcotest.(check (list (pair int (float 0.001))))
+         "score probabilities retain level indices in response order"
+         [ 2, 0.25; 0, 0.0; 1, 0.75 ]
+         probabilities
+     | _ -> Alcotest.fail "expected score answer");
+    (match res.usage with
+     | Some u ->
+       Alcotest.(check int) "input tokens" 120 u.input_tokens;
+       Alcotest.(check int) "output tokens free" 0 u.output_tokens
+     | None -> Alcotest.fail "expected usage")
+;;
+
+let test_score_response_rejects_invalid_probabilities () =
+  let check_error (label, probability_fields) =
+    let response =
+      `Assoc
+        [ "model", `String "jev-latest"
+        ; "answers",
+          `Assoc
+            [ "urgency",
+              `Assoc
+                ([ "type", `String "score"
+                 ; "score", `Float 1.25
+                 ; "confidence", `Float 0.5
+                 ] @ probability_fields)
+            ]
+        ]
+    in
+    match T.eval_response_of_yojson response with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "score response accepted %s" label
+  in
+  List.iter check_error
+    [ "missing probabilities", []
+    ; "null probabilities", [ "probabilities", `Null ]
+    ; "an array", [ "probabilities", `List [ `Float 0.5; `Float 0.5 ] ]
+    ; "an empty map", [ "probabilities", `Assoc [] ]
+    ; "a nonnumeric probability",
+      [ "probabilities", `Assoc [ "0", `Float 0.5; "1", `String "0.5" ] ]
+    ; "a nonnumeric level", [ "probabilities", `Assoc [ "high", `Float 1.0 ] ]
+    ; "a fractional level", [ "probabilities", `Assoc [ "1.5", `Float 1.0 ] ]
+    ; "a negative level", [ "probabilities", `Assoc [ "-1", `Float 1.0 ] ]
+    ]
+;;
+
+let test_choice_response_rejects_empty_probabilities () =
+  let response =
+    Yojson.Safe.from_string
+      {|{"model":"jev-latest","answers":{"team":{
+        "type":"choice","choice":"backend","confidence":0.9,"probabilities":{}
+      }}}|}
+  in
+  match T.eval_response_of_yojson response with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "choice response accepted empty probabilities"
+;;
+
+let test_response_rejects_every_nonfinite_answer_field () =
+  let forms =
+    [ "noul", (fun number -> Printf.sprintf {|{"type":"noul","noul":%s}|} number)
+    ; "choice confidence",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"choice","choice":"yes","confidence":%s,"probabilities":{"yes":1}}|}
+          number)
+    ; "choice probability",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"choice","choice":"yes","confidence":1,"probabilities":{"yes":%s}}|}
+          number)
+    ; "score",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":%s,"confidence":1,"probabilities":{"0":1}}|}
+          number)
+    ; "score confidence",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":0,"confidence":%s,"probabilities":{"0":1}}|}
+          number)
+    ; "score probability",
+      (fun number ->
+        Printf.sprintf
+          {|{"type":"score","score":0,"confidence":1,"probabilities":{"0":%s}}|}
+          number)
+    ]
+  in
+  List.iter (fun (field, form) ->
+    List.iter (fun number ->
+      let answer = form number in
+      let response =
+        Yojson.Safe.from_string
+          (Printf.sprintf {|{"model":"jev-test","answers":{"q":%s}}|} answer)
+      in
+      match T.eval_response_of_yojson response with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "accepted non-finite %s: %s" field number)
+      [ "NaN"; "Infinity"; "-Infinity"; "1e400"; "-1e400" ]) forms
+;;
+
+let test_score_above_one_is_not_confidence () =
+  List.iter (fun score ->
+    let response = Yojson.Safe.from_string
+        (Printf.sprintf {|{"model":"jev-test","answers":{"q":{"type":"score","score":%s,"confidence":1,"probabilities":{"2":1}}}}|} score) in
+    match T.eval_response_of_yojson response with
+    | Ok { T.answers = [("q", T.Score_answer { score; _ })]; _ } ->
+      Alcotest.(check (float 0.0)) "score retains its own scale" 2.0 score
+    | Ok _ -> Alcotest.fail "unexpected answer"
+    | Error reason -> Alcotest.fail reason)
+    ["2"; "2.0"]
+;;
+
+let test_response_rejects_out_of_range_confidence () =
+  List.iter (fun shape ->
+    List.iter (fun number ->
+      let answer = Printf.sprintf shape number in
+      let response = Yojson.Safe.from_string
+          (Printf.sprintf {|{"model":"jev-test","answers":{"q":%s}}|} answer) in
+      match T.eval_response_of_yojson response with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "accepted out-of-range confidence: %s" answer)
+      ["-0.1"; "1.5"; "-1"; "2"])
+    [ {|{"type":"choice","choice":"yes","confidence":%s,"probabilities":{"yes":1}}|}
+    ; {|{"type":"score","score":0,"confidence":%s,"probabilities":{"0":1}}|}
+    ]
+;;
+
+let test_response_preserves_answers_with_unknown_usage () =
+  let counts input output =
+    `Assoc [ "input_tokens", input; "output_tokens", output ]
+  in
+  let cases =
+    [ "absent", None, None
+    ; "null", Some `Null, None
+    ; "not an object", Some (`String "unknown"), None
+    ; "empty object", Some (`Assoc []), None
+    ; "missing input", Some (`Assoc [ "output_tokens", `Int 0 ]), None
+    ; "missing output", Some (`Assoc [ "input_tokens", `Int 12 ]), None
+    ; "string input", Some (counts (`String "12") (`Int 0)), None
+    ; "string output", Some (counts (`Int 12) (`String "0")), None
+    ; "float input", Some (counts (`Float 12.0) (`Int 0)), None
+    ; "float output", Some (counts (`Int 12) (`Float 0.0)), None
+    ; "negative input", Some (counts (`Int (-1)) (`Int 0)), None
+    ; "negative output", Some (counts (`Int 12) (`Int (-1))), None
+    ; "measured zero", Some (counts (`Int 0) (`Int 0)), Some (0, 0)
+    ; "measured counts", Some (counts (`Int 12) (`Int 3)), Some (12, 3)
+    ]
+  in
+  List.iter (fun (label, usage, expected) ->
+    let response =
+      `Assoc
+        ([ "model", `String "jev-test"
+         ; "answers", `Assoc [ "q", `Assoc [ "type", `String "noul"; "noul", `Int 1 ] ]
+         ] @ match usage with None -> [] | Some usage -> [ "usage", usage ])
+    in
+    match T.eval_response_of_yojson response with
+    | Error detail -> Alcotest.failf "%s usage rejected a valid answer: %s" label detail
+    | Ok response ->
+      (match response.answers with
+       | [ "q", T.Noul_answer { noul = 1.0 } ] -> ()
+       | _ -> Alcotest.failf "%s usage changed the answer" label);
+      Alcotest.(check (option (pair int int))) label expected
+        (Option.map (fun (usage : T.usage) -> usage.input_tokens, usage.output_tokens)
+           response.usage)) cases
+;;
+
+type team =
+  | Frontend
+  | Backend
+
+let team_label = function
+  | Frontend -> "frontend"
+  | Backend -> "backend"
+;;
+
+let teams () =
+  match
+    T.choice_set
+      ~options:[ Frontend; Backend ]
+      ~label:team_label
+      ~describe:(function
+        | Frontend -> Some "React / UI changes"
+        | Backend -> Some "OCaml / database changes")
+  with
+  | Ok set -> set
+  | Error detail -> Alcotest.fail detail
+;;
+
+let choice_answer ~choice ~probabilities =
+  T.Choice_answer { choice; probabilities; confidence = 0.9 }
+;;
+
+let test_choice_set_builds_request_and_decodes_answer () =
+  (match T.question_to_yojson (T.choice_of_set ~instructions:"Which team?" (teams ())) with
+   | `Assoc fields ->
+     (match List.assoc_opt "criteria" fields with
+      | Some (`Assoc criteria) ->
+        Alcotest.(check (list string))
+          "the request offers the set's labels, in order"
+          [ "frontend"; "backend" ]
+          (List.map fst criteria)
+      | _ -> Alcotest.fail "a choice question must carry a criteria map")
+   | _ -> Alcotest.fail "question must be an assoc");
+  match
+    T.decode_choice
+      (teams ())
+      (choice_answer ~choice:"backend" ~probabilities:[ "frontend", 0.05; "backend", 0.95 ])
+  with
+  | Ok { T.choice = Backend; reported_probabilities = [ (Frontend, _); (Backend, _) ]; _ } -> ()
+  | Ok _ -> Alcotest.fail "the answer decoded to the wrong options"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_answer_outside_the_set_is_an_error () =
+  let check_error label answer =
+    match T.decode_choice (teams ()) answer with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s decoded to an option" label
+  in
+  check_error
+    "a choice the question did not offer"
+    (choice_answer ~choice:"infra" ~probabilities:[ "frontend", 0.5; "backend", 0.5 ]);
+  check_error
+    "a probability key the question did not offer"
+    (choice_answer ~choice:"backend" ~probabilities:[ "backend", 0.9; "infra", 0.1 ]);
+  check_error
+    "a score answer"
+    (T.Score_answer { score = 1.0; probabilities = []; confidence = 0.9 })
+;;
+
+let test_choice_protocol_before_effect_authority () =
+  List.iter (fun (name, probabilities) ->
+    Alcotest.(check bool) name true
+      (Result.is_error (T.decode_choice (teams ())
+        (choice_answer ~choice:"backend" ~probabilities))))
+    ["missing option", ["backend", 1.];
+     "duplicate option", ["frontend", 0.; "backend", 1.; "backend", 0.];
+     "out of bounds", ["frontend", -1.; "backend", 2.];
+     "all zero", ["frontend", 0.; "backend", 0.];
+     "choice contradicts distribution", ["frontend", 1.; "backend", 0.];
+     "nonfinite probability", ["frontend", nan; "backend", 1.]];
+  let tied = T.Choice_answer {choice="backend"; confidence=0.; probabilities=["frontend",0.5;"backend",0.5]} in
+  Alcotest.(check bool) "ties and zero confidence are protocol-valid" true
+    (Result.is_ok (T.decode_choice (teams ()) tied))
+;;
+
+let test_reported_choice_preserves_nonunit_values () =
+  let options = ["mergeable"; "different_context"; "loses_knowledge"; "uncertain"] in
+  let choices = match T.choice_set ~options ~label:Fun.id ~describe:(fun _ -> None) with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  List.iter (fun (choice, values) ->
+    let probabilities = List.combine options values in
+    let wire = T.answer_to_yojson (choice_answer ~choice ~probabilities) in
+    let answer = match T.answer_of_yojson wire with
+      | Ok answer -> answer | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "wire roundtrip preserves raw values" true (T.answer_to_yojson answer = wire);
+    match T.decode_choice choices answer with
+    | Error detail -> Alcotest.fail detail
+    | Ok decoded ->
+      Alcotest.(check string) "reported selection" choice decoded.choice;
+      Alcotest.(check bool) "no normalization or rounding" true (decoded.reported_probabilities = probabilities);
+      Alcotest.(check (float 0.)) "sum remains diagnostic"
+        (List.fold_left (+.) 0. values) decoded.reported_probability_sum)
+    ["mergeable", [0.8;0.01;0.17;0.01];
+     "loses_knowledge", [0.02;0.;0.8;0.17];
+     "mergeable", [0.8;0.01;0.19;0.01]];
+  let canonical_values = [0.7;0.2;0.1;0.] in
+  let canonical = List.combine options canonical_values in
+  List.iter (fun probabilities ->
+    let decoded = match T.decode_choice choices
+        (choice_answer ~choice:"mergeable" ~probabilities) with
+      | Ok decoded -> decoded | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "raw member order remains available" true
+      (decoded.reported_probabilities=probabilities);
+    Alcotest.(check (float 0.)) "diagnostic sum ignores JSON key permutation"
+      (List.fold_left (+.) 0. canonical_values) decoded.reported_probability_sum)
+    [canonical; List.rev canonical; List.tl canonical @ [List.hd canonical]];
+  (* A sum of 1.6 is deliberately accepted as reported values. It does not
+     become a certified normalized distribution by passing Choice decoding. *)
+  (match T.decode_choice (teams ())
+      (choice_answer ~choice:"backend" ~probabilities:["frontend",0.8;"backend",0.8]) with
+   | Error detail -> Alcotest.fail detail
+   | Ok decoded -> Alcotest.(check (float 0.)) "non-normalized sum is preserved" 1.6 decoded.reported_probability_sum);
+  List.iter (fun confidence ->
+    Alcotest.(check bool) "invalid confidence still rejected" true
+      (Result.is_error (T.decode_choice choices
+        (T.Choice_answer {choice="mergeable";probabilities=List.combine options [0.8;0.01;0.17;0.01];confidence}))))
+    [nan;infinity;(-0.1);1.1]
+;;
+
+let test_choice_set_rejects_no_options_and_shared_labels () =
+  let describe _ = None in
+  (match T.choice_set ~options:[] ~label:team_label ~describe with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a choice set with no options was accepted");
+  match T.choice_set ~options:[ Frontend; Backend ] ~label:(fun _ -> "team") ~describe with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "two options sharing a label were accepted"
+;;
+
+let test_config_defaults () =
+  let first, rest = Runtime_schema.default_typesafeai.Runtime_schema.destinations in
+  Alcotest.(check string) "default endpoint"
+    "https://api.typesafe.ai/v1/systemone" first.Runtime_schema.endpoint;
+  Alcotest.(check string) "default model" "jev-latest" first.Runtime_schema.model;
+  Alcotest.(check string) "default key variable" "TYPESAFEAI_API_KEY" first.Runtime_schema.api_key_env;
+  Alcotest.(check int) "the vendor's own server alone" 0 (List.length rest)
+;;
+
+
+let policy
+      ?(enabled = true)
+      ?(destinations = Runtime_schema.default_typesafeai.Runtime_schema.destinations)
+      ?(board_attention = true)
+      ?(board_attention_confidence_floor =
+        Runtime_schema.default_typesafeai.Runtime_schema.board_attention_confidence_floor)
+      ?(absorb_gate = false)
+      ?(context_review = false)
+      ?(skill_applicability = false)
+      ?(librarian_preflight = false)
+      ?(workspace_memory_selection_enabled = false)
+      ?(memory_recall = Runtime_schema.Memory_recall_off)
+      ?(excluded_keepers = [])
+      ()
+  : Runtime_schema.typesafeai
+  =
+  { Runtime_schema.lane_enabled = enabled
+  ; destinations
+  ; board_attention
+  ; board_attention_confidence_floor
+  ; absorb_gate
+  ; context_review
+  ; skill_applicability
+  ; librarian_preflight
+  ; workspace_memory_selection_enabled
+  ; memory_recall
+  ; excluded_keepers
+  }
+;;
+
+let with_policy p f = Masc_test_deps.with_typesafeai_policy p f
+let with_key key f = Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" key f
+
+let destination
+      ?(endpoint = "https://fixture.invalid/systemone")
+      ?(model = "jev-next")
+      ?(api_key_env = "TYPESAFEAI_API_KEY")
+      ()
+  : Runtime_schema.typesafeai_destination
+  =
+  { Runtime_schema.endpoint; model; api_key_env }
+;;
+
+(* The lane reads the published [typesafeai] table; before any load that is
+   the default, and the key alone comes from the environment. *)
+let test_config_reads_the_published_policy () =
+  with_policy (policy ()) (fun () ->
+    Alcotest.(check bool) "the default table names the vendor's own server alone" true
+      (C.configured_destinations ()
+       = Runtime_schema.default_typesafeai.Runtime_schema.destinations));
+  let named = destination (), [] in
+  with_policy (policy ~destinations:named ()) (fun () ->
+    Alcotest.(check bool) "the table's destinations" true (C.configured_destinations () = named))
+;;
+
+(* A destination is asked only when the variable it names holds a key. The
+   armed ones keep the table's order, so a first destination without a key
+   leaves the second to be asked first. *)
+let test_only_destinations_with_a_key_are_armed () =
+  let second_key = "MASC_TEST_TYPESAFEAI_SECOND_KEY" in
+  let typesafe = destination ~endpoint:"https://fixture.invalid/typesafe" ~model:"jev-latest" () in
+  let openrouter =
+    destination
+      ~endpoint:"https://fixture.invalid/openrouter"
+      ~model:"~typesafe/jev-latest"
+      ~api_key_env:second_key
+      ()
+  in
+  let armed () =
+    match C.lane_destinations () with
+    | Error reason -> [ C.unavailable_reason_to_string reason ]
+    | Ok (first, rest) ->
+      List.map
+        (fun (armed : Masc.Typesafeai_client.destination) ->
+           String.concat "|" [ armed.endpoint; armed.model; armed.api_key ])
+        (first :: rest)
+  in
+  let with_second key f = Masc_test_deps.with_process_env second_key key f in
+  with_policy (policy ~destinations:(typesafe, [ openrouter ]) ()) (fun () ->
+    with_key (Some "k-typesafe") (fun () ->
+      with_second (Some "k-openrouter") (fun () ->
+        Alcotest.(check (list string)) "both armed, in the table's order"
+          [ "https://fixture.invalid/typesafe|jev-latest|k-typesafe"
+          ; "https://fixture.invalid/openrouter|~typesafe/jev-latest|k-openrouter"
+          ]
+          (armed ()));
+      with_second None (fun () ->
+        Alcotest.(check (list string)) "only the destination whose variable holds a key"
+          [ "https://fixture.invalid/typesafe|jev-latest|k-typesafe" ]
+          (armed ());
+        Alcotest.(check (list string)) "the one left out is named for the boot report"
+          [ second_key ]
+          (List.map
+             (fun (left_out : Runtime_schema.typesafeai_destination) -> left_out.api_key_env)
+             (C.unarmed_destinations ()))));
+    with_key None (fun () ->
+      with_second (Some "k-openrouter") (fun () ->
+        Alcotest.(check (list string)) "the second alone is armed"
+          [ "https://fixture.invalid/openrouter|~typesafe/jev-latest|k-openrouter" ]
+          (armed ()));
+      with_second None (fun () ->
+        Alcotest.(check (list string)) "no key anywhere" [ "no_armed_destination" ] (armed ());
+        Alcotest.(check int) "a lane that is simply off singles nothing out" 0
+          (List.length (C.unarmed_destinations ())))))
+;;
+
+let test_config_readiness_is_typed_and_credential_free () =
+  with_key None (fun () ->
+    with_policy (policy ()) (fun () ->
+      match C.readiness () with
+      | C.Off -> ()
+      | C.Configured _ -> Alcotest.fail "a missing key reported JEV configured"));
+  with_key (Some "secret-not-for-projection") (fun () ->
+    with_policy (policy ~enabled:false ()) (fun () ->
+      match C.readiness () with
+      | C.Off -> ()
+      | C.Configured _ -> Alcotest.fail "a lane turned off reported JEV configured");
+    (* The projection names a destination by its observation URL: whatever the
+       configured endpoint carries in userinfo or query stays out of it. *)
+    let configured =
+      destination
+        ~endpoint:"https://user:url-secret@fixture.invalid/systemone?token=url-secret"
+        ~model:"jev-next"
+        ()
+    in
+    with_policy (policy ~destinations:(configured, []) ()) (fun () ->
+      match C.readiness () with
+      | C.Off -> Alcotest.fail "an enabled configuration reported JEV off"
+      | C.Configured { destinations } ->
+        Alcotest.(check (list (pair string string)))
+          "readiness carries the armed destinations, never a key"
+          [ "https://fixture.invalid/systemone", "jev-next" ]
+          (List.map
+             (fun (d : Masc.Typesafeai_client.destination_id) -> d.destination_uri, d.model)
+             destinations)))
+;;
+
+(* Each gate has its own switch on top of the lane's: a key turns the lane
+   on, and a gate can still be turned off by name without touching the other. *)
+let test_each_gate_has_its_own_switch () =
+  let gates () = C.is_board_attention_enabled (), C.is_absorb_gate_enabled () in
+  with_key (Some "synthetic-jev-key") (fun () ->
+    with_policy (policy ()) (fun () ->
+      Alcotest.(check (pair bool bool))
+        "a key with the default table turns the board gate on and leaves the absorb gate off"
+        (true, false) (gates ()));
+    with_policy (policy ~board_attention:false ~absorb_gate:true ()) (fun () ->
+      (match C.readiness () with
+       | C.Off -> ()
+       | C.Configured _ -> Alcotest.fail "a disabled Board gate reported JEV configured");
+      Alcotest.(check (pair bool bool)) "each switch reaches only its own gate"
+        (false, true) (gates ()));
+    with_policy (policy ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check (pair bool bool)) "the absorb gate turned on leaves the board gate on"
+        (true, true) (gates ()));
+    with_policy (policy ~enabled:false ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check (pair bool bool)) "the lane off turns both gates off"
+        (false, false) (gates ())));
+  with_key None (fun () ->
+    with_policy (policy ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check (pair bool bool)) "without a key neither gate is on"
+        (false, false) (gates ())))
+;;
+
+(* A keeper named in [excluded_keepers] is never asked about, whichever gate
+   asks; every other keeper gets the key. The reason a gate is off is the
+   first of the gate's switch, the exclusion, the lane switch and the key:
+   what the operator declared comes before what the lane can do, so a gate
+   that is on and unaskable is told apart from one that was told not to ask. *)
+let test_an_excluded_keeper_keeps_its_content_home () =
+  let state = function
+    | Error reason -> C.unavailable_reason_to_string reason
+    | Ok ((first : Masc.Typesafeai_client.destination), _) -> "on:" ^ first.api_key
+  in
+  let excluded = "kidsnote-slack-context-collector" in
+  with_key (Some "synthetic-jev-key") (fun () ->
+    with_policy (policy ~absorb_gate:true ~excluded_keepers:[ excluded ] ()) (fun () ->
+      Alcotest.(check string) "the absorb gate excludes the named keeper" "keeper_excluded"
+        (state (C.absorb_gate_destinations ~keeper_id:excluded));
+      Alcotest.(check string) "the Board gate excludes the same keeper" "keeper_excluded"
+        (state (C.board_attention_destinations ~keeper_id:excluded));
+      Alcotest.(check string) "another keeper gets the key at the absorb gate" "on:synthetic-jev-key"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher"));
+      Alcotest.(check string) "and at the Board gate" "on:synthetic-jev-key"
+        (state (C.board_attention_destinations ~keeper_id:"polisher"));
+      Alcotest.(check bool) "the exclusion is one question" true (C.is_excluded ~keeper_id:excluded));
+    with_policy (policy ~excluded_keepers:[ "polisher" ] ()) (fun () ->
+      Alcotest.(check string) "an exclusion does not turn a gate on" "absorb_gate_disabled"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~absorb_gate:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
+      Alcotest.(check string) "the exclusion is named before the lane switch" "keeper_excluded"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check string) "a gate that is on names the lane switch" "lane_disabled"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~absorb_gate:false ()) (fun () ->
+      Alcotest.(check string) "a gate that is off names its own switch, not the lane's"
+        "absorb_gate_disabled"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher"))));
+  with_key None (fun () ->
+    with_policy (policy ~absorb_gate:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
+      Alcotest.(check string) "the exclusion is named before the missing key" "keeper_excluded"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check string) "a gate that is on names the missing key" "no_armed_destination"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher"))))
+;;
+
+let test_context_and_skill_reviews_require_their_own_opt_in () =
+  let state = function
+    | Ok _ -> "enabled"
+    | Error reason -> C.unavailable_reason_to_string reason
+  in
+  let check_reviews label expected =
+    Alcotest.(check (pair string string)) label expected
+      (state (C.context_review_destinations ~keeper_id:"polisher"),
+       state (C.skill_applicability_destinations ~keeper_id:"polisher"))
+  in
+  with_key (Some "synthetic-jev-key") (fun () ->
+    with_policy (policy ()) (fun () ->
+      check_reviews "a key alone does not send new Context or Skill data"
+        ("context_review_disabled", "skill_applicability_disabled"));
+    with_policy (policy ~context_review:true ()) (fun () ->
+      check_reviews "Context opt-in leaves Skill review off"
+        ("enabled", "skill_applicability_disabled"));
+    with_policy (policy ~skill_applicability:true ()) (fun () ->
+      check_reviews "Skill opt-in leaves Context review off"
+        ("context_review_disabled", "enabled"));
+    with_policy (policy ~context_review:true ~skill_applicability:true
+        ~excluded_keepers:[ "polisher" ] ()) (fun () ->
+      check_reviews "both reviews honor the common exclusion"
+        ("keeper_excluded", "keeper_excluded"));
+    with_policy (policy ~enabled:false ~context_review:true ~skill_applicability:true ()) (fun () ->
+      check_reviews "lane disabled" ("lane_disabled", "lane_disabled")));
+  with_key None (fun () ->
+    with_policy (policy ~context_review:true ~skill_applicability:true ()) (fun () ->
+      check_reviews "both reviews require a key" ("no_armed_destination", "no_armed_destination")))
+;;
+
+let test_workspace_memory_selection_requires_its_own_opt_in () =
+  let state () = match C.workspace_memory_selection_destinations ~keeper_id:"reader" with
+    | Ok _ -> "enabled"
+    | Error reason -> C.unavailable_reason_to_string reason in
+  with_key (Some "synthetic-jev-key") (fun () ->
+    with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true
+        ~librarian_preflight:true ()) (fun () ->
+      Alcotest.(check string) "other gates cannot authorize shared-memory selection"
+        "workspace_memory_selection_disabled" (state ()));
+    with_policy (policy ~workspace_memory_selection_enabled:true ~board_attention:false ()) (fun () ->
+      Alcotest.(check string) "selection has an independent opt-in" "enabled" (state ()));
+    with_policy (policy ~workspace_memory_selection_enabled:true ~excluded_keepers:["reader"] ()) (fun () ->
+      Alcotest.(check string) "selection honors Keeper exclusion" "keeper_excluded" (state ()));
+    with_policy (policy ~workspace_memory_selection_enabled:true ~enabled:false ()) (fun () ->
+      Alcotest.(check string) "selection honors lane disable" "lane_disabled" (state ())));
+  with_key None (fun () ->
+    with_policy (policy ~workspace_memory_selection_enabled:true ()) (fun () ->
+      Alcotest.(check string) "selection requires an armed destination" "no_armed_destination" (state ())))
+;;
+
+(* Recall is asked about a keeper only when the switch is on and the scope
+   covers it. A keeper outside the scope is told apart from nothing else: the
+   operator did not turn recall on for it. *)
+let test_memory_recall_requires_its_own_opt_in_and_scope () =
+  let state ?(keeper_id = "reader") () = match C.memory_recall_destinations ~keeper_id with
+    | Ok _ -> "enabled"
+    | Error reason -> C.unavailable_reason_to_string reason in
+  let all = Runtime_schema.Memory_recall_on Runtime_schema.All_keepers in
+  let listed first rest = Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) in
+  with_key (Some "synthetic-jev-key") (fun () ->
+    with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true
+        ~librarian_preflight:true ~workspace_memory_selection_enabled:true ()) (fun () ->
+      Alcotest.(check string) "other gates cannot authorize recall"
+        "memory_recall_disabled" (state ()));
+    with_policy (policy ~memory_recall:all ~board_attention:false ()) (fun () ->
+      Alcotest.(check string) "recall has an independent opt-in" "enabled" (state ()));
+    with_policy (policy ~memory_recall:(listed "reader" [ "other" ]) ()) (fun () ->
+      Alcotest.(check string) "a listed keeper" "enabled" (state ());
+      Alcotest.(check string) "another listed keeper" "enabled" (state ~keeper_id:"other" ());
+      Alcotest.(check string) "a keeper outside the list" "memory_recall_disabled"
+        (state ~keeper_id:"stranger" ()));
+    with_policy (policy ~memory_recall:all ~excluded_keepers:[ "reader" ] ()) (fun () ->
+      Alcotest.(check string) "all keepers still honors Keeper exclusion" "keeper_excluded" (state ()));
+    with_policy (policy ~memory_recall:(listed "reader" []) ~excluded_keepers:[ "reader" ] ()) (fun () ->
+      Alcotest.(check string) "a listed keeper still honors Keeper exclusion" "keeper_excluded" (state ()));
+    with_policy (policy ~memory_recall:(listed "reader" []) ~excluded_keepers:[ "stranger" ] ()) (fun () ->
+      Alcotest.(check string) "a keeper outside the list is out of scope before it is excluded"
+        "memory_recall_disabled" (state ~keeper_id:"stranger" ()));
+    with_policy (policy ~memory_recall:all ~enabled:false ()) (fun () ->
+      Alcotest.(check string) "recall honors lane disable" "lane_disabled" (state ())));
+  with_key None (fun () ->
+    with_policy (policy ~memory_recall:all ()) (fun () ->
+      Alcotest.(check string) "recall requires an armed destination" "no_armed_destination" (state ())))
+;;
+
+(* Names are checked against the declared Keeper roster at boot. *)
+let test_unknown_excluded_keepers_are_named () =
+  with_policy (policy ~excluded_keepers:[ "kidsnote-slack-context-collector"; "collecter" ] ()) (fun () ->
+    Alcotest.(check (list string)) "the name that is no keeper" [ "collecter" ]
+      (C.unknown_excluded_keepers ~known:[ "kidsnote-slack-context-collector"; "polisher" ]))
+;;
+
+(* A misspelt name limits recall to nobody by that name; there is no name to
+   check when recall is off or covers everybody. *)
+let test_unknown_memory_recall_keepers_are_named () =
+  let known = [ "won-chik"; "goo-yang-bong" ] in
+  let unknown memory_recall = with_policy (policy ~memory_recall ()) (fun () ->
+    C.unknown_memory_recall_keepers ~known) in
+  Alcotest.(check (list string)) "the names that are no keeper, in order" [ "wonchik"; "gooyangbong" ]
+    (unknown (Runtime_schema.Memory_recall_on
+      (Runtime_schema.Listed_keepers ("wonchik", [ "won-chik"; "gooyangbong" ]))));
+  Alcotest.(check (list string)) "a name written twice is reported once" [ "wonchik" ]
+    (unknown (Runtime_schema.Memory_recall_on
+      (Runtime_schema.Listed_keepers ("wonchik", [ "won-chik"; "wonchik" ]))));
+  Alcotest.(check (list string)) "every name right" []
+    (unknown (Runtime_schema.Memory_recall_on
+      (Runtime_schema.Listed_keepers ("won-chik", [ "goo-yang-bong" ]))));
+  Alcotest.(check (list string)) "all keepers name nobody" []
+    (unknown (Runtime_schema.Memory_recall_on Runtime_schema.All_keepers));
+  Alcotest.(check (list string)) "off names nobody" [] (unknown Runtime_schema.Memory_recall_off)
+;;
+
+
+let () =
+  Alcotest.run "typesafeai"
+    [ ( "codecs"
+      , [ Alcotest.test_case "request_encoding" `Quick test_request_encoding
+        ; Alcotest.test_case "response_decoding" `Quick test_response_decoding
+        ; Alcotest.test_case
+            "score response rejects invalid probabilities"
+            `Quick
+            test_score_response_rejects_invalid_probabilities
+        ; Alcotest.test_case
+            "choice response rejects empty probabilities"
+            `Quick
+            test_choice_response_rejects_empty_probabilities
+        ; Alcotest.test_case
+            "every non-finite answer field is rejected"
+            `Quick
+            test_response_rejects_every_nonfinite_answer_field
+        ; Alcotest.test_case "out-of-range confidence is rejected" `Quick
+            test_response_rejects_out_of_range_confidence
+        ; Alcotest.test_case "score above one is not confidence" `Quick
+            test_score_above_one_is_not_confidence
+        ; Alcotest.test_case
+            "unknown usage preserves valid answers without inventing zero"
+            `Quick
+            test_response_preserves_answers_with_unknown_usage
+        ; Alcotest.test_case
+            "choice set builds the request and decodes the answer"
+            `Quick
+            test_choice_set_builds_request_and_decodes_answer
+        ; Alcotest.test_case "reported Choice values are not normalized" `Quick
+            test_reported_choice_preserves_nonunit_values
+        ; Alcotest.test_case "Choice protocol precedes effect authority" `Quick
+            test_choice_protocol_before_effect_authority
+        ; Alcotest.test_case
+            "an answer outside the choice set is an error"
+            `Quick
+            test_answer_outside_the_set_is_an_error
+        ; Alcotest.test_case
+            "a choice set needs options with distinct labels"
+            `Quick
+            test_choice_set_rejects_no_options_and_shared_labels
+        ] )
+    ; ( "config"
+      , [ Alcotest.test_case "defaults" `Quick test_config_defaults
+        ; Alcotest.test_case "typed credential-free readiness" `Quick
+            test_config_readiness_is_typed_and_credential_free
+        ; Alcotest.test_case "reads the published policy" `Quick
+            test_config_reads_the_published_policy
+        ; Alcotest.test_case "only destinations with a key are armed" `Quick
+            test_only_destinations_with_a_key_are_armed
+        ; Alcotest.test_case "an excluded keeper keeps its content home, at both gates" `Quick
+            test_an_excluded_keeper_keeps_its_content_home
+        ; Alcotest.test_case "Context and Skill reviews require separate opt-in" `Quick
+            test_context_and_skill_reviews_require_their_own_opt_in
+        ; Alcotest.test_case "Shared memory selection requires separate opt-in" `Quick
+            test_workspace_memory_selection_requires_its_own_opt_in
+        ; Alcotest.test_case "Memory recall requires separate opt-in and scope" `Quick
+            test_memory_recall_requires_its_own_opt_in_and_scope
+        ; Alcotest.test_case "unknown excluded keepers are named" `Quick
+            test_unknown_excluded_keepers_are_named
+        ; Alcotest.test_case "unknown memory recall keepers are named" `Quick
+            test_unknown_memory_recall_keepers_are_named
+        ; Alcotest.test_case "each gate has its own switch" `Quick
+            test_each_gate_has_its_own_switch
+        ] )
+
+    ]
+;;

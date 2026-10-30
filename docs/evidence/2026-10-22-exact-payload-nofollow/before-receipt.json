@@ -1,0 +1,21 @@
+{
+  "schema": "masc.isolated-payload-symlink-observation.v1",
+  "started_at": "2026-10-22T08:07:44.155230+00:00",
+  "binary_source": "6475a2beb9d454be530baaf55430957dc4a5b9af",
+  "binary_sha256": "56f717348870a7e63485049515ab861d979ae5d74586a6bb0745570c7d9f6324",
+  "marker_before_bytes": 54,
+  "marker_before_sha256": "af5de73f15fbab0a96afde396318f18761e214a787aee55c1934a3b9c4eb836c",
+  "target_entirely_owned_fixture": true,
+  "operational_data_touched": false,
+  "marker_after_exists": false,
+  "symlink_after_lexists": true,
+  "observed_at": "2026-10-22T08:08:00.060325+00:00",
+  "marker_restored_sha256": "af5de73f15fbab0a96afde396318f18761e214a787aee55c1934a3b9c4eb836c",
+  "marker_restored": true,
+  "finding": "A symlink directory entry in own payload root was followed during startup sweep, deleting the own marker outside workspace; rmdir then logged ENOTDIR. Existing behavior reproduced with native source6475.",
+  "own_server_stopped": true,
+  "protected_deleted_in_before_fixture": 1,
+  "protected_before_bytes": 54,
+  "full_C3_fixture_contract_executed": false,
+  "provenance": "Controlled native before experiment performed by the parent agent; this PR writer read its receipt and source, but did not execute the native before or after fixture."
+}

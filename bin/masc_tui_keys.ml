@@ -1,0 +1,2531 @@
+(* The key table — data first, then the display projections. Most dispatch
+   remains the ordered match in masc_tui.ml; cross-surface shortcuts whose
+   spelling is shared with the displays classify through this module too.
+   That keeps one binding record authoritative for both behaviour and
+   discoverability (#30356 taught the cost of the two drifting apart). *)
+
+open Masc_tui_types
+
+type group = Navigate | Act | Search | Meta
+
+(* Whether a binding answers while a surface's detail is open. A surface that
+   owns a detail draws one footer for two states, so it advertised exactly one
+   key the dispatcher refuses in the state on screen: [Right / Enter] once a
+   detail is already open, [[ / ]] while it is not. The fact was in the table
+   already -- but only as prose inside [help] ("while a detail is open"), which
+   no footer can read. This is that same fact as a value, so the footer and the
+   dispatcher stop disagreeing. *)
+type detail_state =
+  | Either  (** answers in both states; the default *)
+  | List_only  (** only while no detail is open *)
+  | Detail_only  (** only while a detail is open *)
+
+type binding = {
+  key : string;
+  label : string;
+  label_ko : string option;
+  help : string option;
+  group : group;
+  detail : detail_state;
+}
+
+let b ?help ?ko ?(detail = Either) group key label =
+  { key; label; label_ko = ko; help; group; detail }
+
+(* [None] is shared by all Config panes; [Some panes] belongs only to those
+   input handlers. Keep availability beside the binding, not in a second key
+   list inferred from the rendered label. *)
+let config_bindings =
+  [ b ~ko:"선택 / 스크롤" Navigate "j/k" "select / scroll", Some
+      [ Config_runtime; Config_models; Config_params; Config_prompts
+      ; Config_presets; Config_themes; Config_voice ]
+  ; b ~ko:"다음 탭" Navigate "p" "next pane"
+      ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
+  ; b ~ko:"활동" Navigate "A" "activity"
+      ~help:"event history under System", None
+  ; b ~ko:"로그" Navigate "L" "logs"
+      ~help:"server logs under System", None
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ~help:"pages runtime.toml, the voice reading and the detail of params, prompts \
+             and presets, and moves the selection a page on models and themes",
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_presets
+           ; Config_themes; Config_voice ]
+  ; b ~ko:"상세 처음/끝" Navigate "Home/End" "detail"
+      ~help:"first or last wrapped detail row of a selected preset, or of a prompt registry or asset document",
+      Some [ Config_presets; Config_prompts ]
+  ; b ~ko:"적용 상태" Navigate "v" "read status"
+      ~help:"runtime.toml: source revision, validation issues, and application/restart details",
+      Some [ Config_runtime ]
+  ; b ~ko:"런타임" Navigate "9" "Runtime"
+      ~help:"runtime status, lane routing, probes and connected clients", None
+  ; b ~ko:"리소스" Navigate "s" "resources"
+      ~help:"the MCP resource catalog, off the ring under System", None
+  ; b ~ko:"도구" Navigate "t" "tools"
+      ~help:"the tool catalog, receipts, and usage, off the ring under System", None
+  ; b ~ko:"편집" Act "e" "edit"
+      ~help:"runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
+    (* One item, because they are one action: on params [e] and [Enter] both
+       open the same type-aware field ([handle_runtime_param_edit_open]
+       ~advanced:false). Apart, this pane spent two of its slots on one door,
+       and the fitter -- which reads position, not meaning -- gave up [E] at
+       80 cells, the only other thing the pane does. A reader left with
+       [e:edit] and [Enter:edit / use] would also read the pane as having one
+       way to edit and no advanced one. *)
+  ; b ~ko:"모델 복사" Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
+  ; b ~ko:"전체 상세" Navigate "v" "full details" ~help:"read complete account/model settings without editing", Some [Config_models]
+  ; b ~ko:"모델 원본" Act "m" "model source", Some [Config_models]
+  ; b ~ko:"편집" Act "e / Enter" "edit"
+      ~help:"on params: edit the selected value with a type-aware field",
+      Some [ Config_params ]
+  ; b ~ko:"JSON 편집" Act "E" "advanced JSON"
+      ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
+    (* Split from the pair above. What [Enter] does on themes is not editing,
+       and one label reading "edit / use" made each pane carry the other's
+       word: a params reader met "use" with nothing to use. *)
+  ; b ~ko:"적용" Act "Enter" "use"
+      ~help:"on themes, use that colour scheme", Some [ Config_themes ]
+  ; b ~ko:"기본값" Act "x" "default"
+      ~help:"parameters: return the selected value to its default", Some [ Config_params ]
+  ; b ~ko:"재정의 해제" Act "x" "clear override"
+      ~help:"prompts: clear the selected override", Some [ Config_prompts ]
+  ; b ~ko:"터미널 색상" Act "x" "terminal colours"
+      ~help:"themes: follow terminal colours", Some [ Config_themes ]
+  ; b ~ko:"필터" Act "f" "filter"
+      ~help:"on themes, cycle All / Dark / Light schemes", Some [ Config_themes ]
+    (* Pane-scoped writes. Each of these is the only key that does what it
+       does, and none of them were listed: presets could be made and put
+       back, and the prompt list could be switched between three readings,
+       with nothing on screen saying so. Short labels: the pane each belongs
+       to and what it does are in the help, which the ? overlay draws in
+       full. *)
+  ; b ~ko:"새로 저장" Act "n" "new"
+      ~help:"on presets, name a preset holding the current configuration; in the name field PgUp/PgDn and Home/End scroll details",
+      Some [ Config_presets ]
+  ; b ~ko:"미전송 명령 복사" Act "c" "copy unsent command"
+      ~help:"presets: copy the next retained unsent chat save command to the terminal clipboard",
+      Some [ Config_presets ]
+  ; b ~ko:"미전송 원문 보기" Act "v" "show unsent originals"
+      ~help:"presets: show hidden unsent chat save receipts and their original commands",
+      Some [ Config_presets ]
+  ; b ~ko:"입력" Act "i" "input"
+      ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
+  ; b ~ko:"계정 추가" Act "a" "add account"
+      ~help:"runtime.toml: declare an account by copying a provider", Some [ Config_runtime ]
+  ; b ~ko:"기억 판정" Act "m" "recall"
+      ~help:"runtime.toml: choose which keepers memory recall asks Jev about", Some [ Config_runtime ]
+  ; b ~ko:"조각" Act "a" "fragments"
+      ~help:"prompts: show or hide internal fragments", Some [ Config_prompts ]
+  ; b ~ko:"키퍼 목소리" Act "a" "keeper voices"
+      ~help:"voice: assign a voice to a keeper", Some [ Config_voice ]
+    (* [u] and the retained-draft keys come after [a]: a cut row drops them
+       first, and while a draft is retained the runtime.toml pane names them
+       in its own heading. *)
+  ; b ~ko:"복원" Act "u" "restore"
+      ~help:"presets: restore the selected preset; press twice to confirm", Some [ Config_presets ]
+  ; b ~ko:"리비전 채택" Act "u" "adopt revision"
+      ~help:"runtime.toml: keep the draft and adopt the displayed current file revision; S saves",
+      Some [ Config_runtime ]
+    (* Upper case, as Runtime's lane removal: x on the other panes puts a
+       default back, and a delete cannot be put back. *)
+  ; b ~ko:"삭제" Act "D" "delete"
+      ~help:"on presets, delete the selected one; press twice to confirm. \
+             A preset listed with ! under a valid name is deleted with \
+             /preset delete <name>",
+      Some [ Config_presets ]
+  ; b ~ko:"저장 알림 숨기기" Act "x" "hide save notice"
+      ~help:"presets: hide the most recent save notice; unconfirmed saves remain guarded",
+      Some [ Config_presets ]
+  ; b ~ko:"초안 저장" Act "S" "save draft"
+      ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
+      Some [ Config_runtime ]
+  ; b ~ko:"파일 비교" Act "C" "compare file"
+      ~help:"runtime.toml: switch between the retained draft and the current file read with r",
+      Some [ Config_runtime ]
+  ; b ~ko:"현재 본문 사용" Act "U" "use current text"
+      ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
+      Some [ Config_runtime ]
+  ; b ~ko:"초안 버리기" Act "X" "discard draft"
+      ~help:"runtime.toml: discard only the local draft and read the current file",
+      Some [ Config_runtime ]
+  ; b ~ko:"자산" Act "o" "assets"
+      ~help:"on prompts, switch between the read-only runtime assets and \
+             the registry you can override",
+      Some [ Config_prompts ]
+  (* "back", not the destination's name: [Esc] is pinned on every row, so
+     each cell of its label comes out of the pane's own keys. Spelled
+     "dashboard", params at 80 columns gave up [E], its only way to the JSON
+     value. The help names where it goes. *)
+  ; b ~ko:"뒤로" Act "Esc" "back" ~help:"back to Dashboard", None
+  ; b ~ko:"새로고침" Meta "r" "reload", None
+  ; b ~ko:"다음" Meta "Tab" "next", None
+  ; b ~ko:"종료" Meta "q" "quit", None
+  ]
+
+(* The Runtime keys, by the reading they act on. [p] goes somewhere different
+   from each reading, so the footer names where it goes from here while the
+   cheat sheet names the whole walk. The lane edits -- [e], [a], [x], [J]/[K],
+   [D] -- act on the keeper lane under the cursor, and the all-runtimes reading
+   has no lane row to act on. *)
+type runtime_key =
+  | Every_reading of binding
+  | Keeper_lanes_only of binding
+  | Reading_edit
+  | Reading_walk
+
+let runtime_reading_walk_help =
+  "walk the three substrate readings; the third is the Features surface"
+
+let runtime_keys =
+  [ Every_reading (b Navigate "j/k" "move / scroll")
+  ; Every_reading (b Navigate "PgUp/PgDn" "detail page")
+  ; Every_reading
+      (b Act "Right / Enter" "detail"
+         ~help:"show the full runtime, lane, dispatch, and probe fields")
+  ; Every_reading
+      (b Act "h" "dim refusals"
+         ~help:"toggle de-emphasis for exhausted, rate-limited, and spent runtimes")
+  ; Every_reading
+      (b Act "v" "routes / status"
+         ~help:"read complete default and media routes, boot admission and probe diagnostics")
+  ; Reading_walk
+  ; Every_reading
+      (b Navigate "c" "clients"
+         ~help:"everyone attached to this workspace, off the ring under Runtime")
+  ; Reading_edit
+  ; Keeper_lanes_only
+      (b Act "a" "new lane"
+         ~help:"name a new lane, then pick its first runtime; e adds the rest")
+  ; Keeper_lanes_only
+      (b Act "x" "drop candidate"
+         ~help:"take the candidate under the cursor out of its lane; the last one \
+                cannot go, remove the lane instead")
+  ; Keeper_lanes_only
+      (b Act "J/K" "move candidate" ~help:"move the candidate under the cursor down or up its lane")
+  ; Keeper_lanes_only
+      (b Act "f" "default runtime"
+         ~help:"replace [runtime].default, what a keeper with no assignment walks")
+  ; Keeper_lanes_only
+      (b Act "m" "vision runtimes"
+         ~help:"edit [runtime].media_failover in the slot editor; refused while \
+                boot dropped one of its entries")
+  ; Keeper_lanes_only
+      (b Act "R" "rename lane"
+         ~help:"give the lane under the cursor another name; the assignments \
+                that route to it and [runtime].default, when it names it, are \
+                rewritten in the same write. The field opens on the name it \
+                has now")
+  ; Keeper_lanes_only
+      (b Act "D" "remove lane"
+         ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \
+                assigned to it")
+  ; Every_reading (b Act "Left / Esc" "back")
+  ; Every_reading
+      (b Search "/" "find" ~help:"jump the cursor to a matching lane id or runtime id")
+  ; Every_reading (b Search "n / N" "next / previous match")
+  ]
+
+let runtime_sheet_binding = function
+  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Reading_edit ->
+    b Act "e" "model settings / add candidate"
+      ~help:"on all runtimes, open the selected binding in Config Models; \
+             on keeper lanes, append a candidate to the lane under the cursor"
+  | Reading_walk ->
+    b Navigate "p" "keeper lanes / all runtimes / service lanes"
+      ~help:runtime_reading_walk_help
+
+let runtime_footer_binding ~(mode : runtime_mode) = function
+  | Every_reading binding -> Some binding
+  | Keeper_lanes_only binding ->
+    (match mode with
+     | Runtime_lanes -> Some binding
+     | Runtime_all -> None)
+  | Reading_edit ->
+    Some
+      (match mode with
+       | Runtime_all ->
+         b Act "e" "model settings"
+           ~help:"open the selected binding in Config Models; Esc then c copies a variant"
+       | Runtime_lanes ->
+         b Act "e" "add candidate"
+           ~help:"append a candidate to the candidate order of the lane under the cursor")
+  | Reading_walk ->
+    Some
+      (b Navigate "p"
+         (match mode with
+          | Runtime_lanes -> "all runtimes"
+          | Runtime_all -> "service lanes")
+         ~help:runtime_reading_walk_help)
+
+(* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
+   The terminal used to take this byte for flow control -- raw mode clears
+   IXON now, which is what makes it bindable at all. A letter would not do:
+   in the composer every letter is text.
+
+   The byte and the printed name sit together because the chat pane prints
+   the name on the folded line while masc_tui.ml matches the byte. Apart,
+   one of them drifts and the line names a key that does nothing. *)
+let expand_turn_key = "\019"
+let expand_turn_label = "Ctrl-S"
+
+(* The control keys a body row names beside a figure or a draft. They are
+   here, beside the bindings that list them, so a row and the footer cannot
+   spell one key two ways: the composer said "^Y" under a footer saying
+   "Ctrl-Y", and the context header "^X" for a key the table did not list. *)
+let voice_speak_key = "Ctrl-Y"
+let voice_listen_key = "Ctrl-A"
+let roster_toggle_key = "Ctrl-B"
+let chat_schedules_key = Masc_tui_types.chat_schedule_toggle_key
+let chat_schedules_label = Masc_tui_types.chat_schedule_toggle_label
+
+(* [t] on a keeper: the Keeper Calls view, where a call's served input and
+   output are drawn whole. Named for the rows that fold a long payload and
+   say where the rest is. *)
+let keeper_calls_key = "t"
+
+(* Ctrl-X opens the context inspector from the chat. It is named on the
+   context header, beside the figure it explains, and nowhere else: the
+   footer has no room for a key whose home is that row. *)
+let context_inspector_key = "\024"
+let context_inspector_label = "Ctrl-X"
+
+
+let keepers_jump =
+  b Meta "3" "keepers"
+    ~help:"jump to Keepers when the active field or panel does not use 3"
+
+let mouse_toggle_key = "f2"
+let mouse_toggle_label = "F2"
+
+let global =
+  [ b Meta "Tab / Shift-Tab" "next / previous surface"
+  ; keepers_jump
+  ; b Meta "r" "refresh the current surface"
+  ; b Meta "i" "focus the composer; on Dashboard, choose a Keeper"
+  ; b Meta ":" "command palette"
+  ; b Meta ";"
+      "agenda: what is coming, and who is waiting on you; Enter opens a row"
+  ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
+  ; b Meta "?" "this help"
+  ; b Meta "&"
+      "Collab: watch MSX/DOS and manage play links (also `:` go Collab)"
+  ; b Meta roster_toggle_key "show or hide the Keeper roster"
+      ~help:"show or hide the Keeper roster; it starts hidden and the \
+             choice persists across navigation and resizing"
+  ; b Meta "Ctrl-L"
+      "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
+       right now, and on its Changes tab the selected keeper's files (press the header to switch)"
+      ~help:"cycle the Activity pane narrow, wide or hidden; the wheel over the pane \
+             scrolls the full list; a press picks a keeper, a second press opens its chat; \
+             /activity order turns the order of its calls, /activity scroll moves the pane"
+  ; b Navigate "Ctrl-W" "focus the Activity pane"
+      ~help:"focus the Activity pane: a cursor lands on its first row, j/k walk the rows a press \
+             acts on and scroll past the last, Enter opens or closes the call under it, \
+             Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until \
+             the draft is empty"
+  ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
+  ; b Meta mouse_toggle_label "mouse to the terminal and back; with masc, a drag copies one pane"
+      ~help:"the mouse starts with masc: a drag selects inside the pane it began in \
+             (Keeper roster, surface or Activity pane) and copies it on release via OSC 52, \
+             a press that does not move clicks, and Esc drops a selection still held; \
+             F2 hands the mouse to the terminal for its own selection across the \
+             whole window, and F2 again takes it back"
+  ; b Navigate "Ctrl-]" "follow the reference under the cursor"
+      ~help:"follow the reference under the cursor; Esc on the surface it opens comes back here"
+  ; b Meta "q" "quit"
+  ]
+
+(* The plain-listing tail every converted footer shares. *)
+let listing_refresh = b Meta "r" "refresh"
+let listing_next = b Meta "Tab" "next"
+let listing_quit = b Meta "q" "quit"
+let listing_meta = [ listing_refresh; listing_next; listing_quit ]
+
+(* Tools' [r] keeps the listing's footer word, but what it reloads follows
+   what is open there -- the original Task, the original request, or the
+   list -- and the sheet says which. A binding of its own, so
+   [sheet_bindings] keeps it where it drops the shared tail. *)
+let tools_refresh =
+  b Meta "r" "refresh"
+    ~help:"refresh the open original Task body/history, original request \
+           detail, or Tools list"
+
+let keeper_actions =
+  [ b Act "c" "chat" ~help:"chat with the keeper"
+  ; b Act "l" "logs"
+  ; b Act keeper_calls_key "calls" ~help:"tool calls"
+  ; b Act "u" "runtime" ~help:"pick a runtime candidate order"
+  ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
+  ; b Act "p / w" "pause / wake"
+  ; b Act "s" "shutdown"
+  ; b Act "e" "settings"
+  ; b Act "f" "files" ~help:"file changes this keeper wrote"
+  ; b Act "a" "new" ~help:"new keeper"
+  ; b Act "x" "delete" ~help:"stop and permanently remove the confirmed keeper"
+  ; b Navigate "D" "deletions" ~help:"durable deletion records, failures and cleanup retry"
+
+  ]
+
+(* The keys that move a row list by more than a step. Shared rather than
+   retyped per surface: they answer wherever [row_list] in masc_tui.ml finds a
+   list, and that is one decision, so the table should not be able to claim
+   them for one listing and forget them on the next. *)
+let row_list_page = b Navigate "PgUp/PgDn" "page"
+let row_list_jumps =
+  [ row_list_page
+  ; b Navigate "Home/End" "top/bottom"
+  ]
+
+(* The same two, minus the page key, for the surfaces whose own entry already
+   spells one because a detail pane under them pages too. *)
+let row_list_edges = [ b Navigate "Home/End" "top/bottom" ]
+
+(* The two keys the whole surface exists for, as one binding. Spelled apart
+   ("y" and "n") they were two items a fitted row could drop one at a time,
+   and the row that cannot lose the way to answer keeps its keys by that
+   spelling: [Masc_tui_footer.never_dropped_keys] pins "y / n", which the open
+   approval's own footer never said. *)
+let approval_decide =
+  b Act "y / n" "decide" ~help:"y confirms, n denies the approval under the cursor"
+
+let approval_retry =
+  b Act "R" "retry Auto Judge"
+    ~help:"only when the blocked row is safely rearmable"
+
+let approval_move = b Navigate "j/k" "move"
+let approval_read =
+  b Act "Enter" "read the whole ask"
+    ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
+           Home/End reach its ends, [ / ] step asks, Esc goes back"
+let approval_answer =
+  b Act "a" "answer a question"
+    ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
+let approval_installation_results =
+  b Act "g" "installation Results"
+    ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"
+let approval_origin =
+  b Act "o / O" "source / inspect"
+    ~help:"o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn"
+let approval_walk =
+  b Navigate "[ / ]" "ask"
+    ~help:"while browsing or answering a question, move to the previous or next ask; \
+           with an approval detail open, move to the previous or next approval"
+let approval_workspace =
+  b Act "w" "Workspace mode"
+    ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
+let approval_outside =
+  b Act "e" "Outside mode"
+    ~help:"choose how calls into outside services are reviewed; Enter applies"
+let approval_question =
+  b Navigate "Left/Right" "question"
+    ~help:"while answering, step through the open ask's questions; \
+           j/k and the arrows do the same"
+let approval_pick =
+  b Act "1-9" "pick"
+    ~help:"while answering, choose by the position the server listed"
+let approval_write =
+  b Act "t" "write"
+    ~help:"while answering, open the free-text editor; Enter saves it, \
+           Esc drops it"
+let approval_skip =
+  b Act "s" "skip"
+    ~help:"while answering, leave this question unanswered"
+let approval_clear =
+  b Act "c" "clear"
+    ~help:"while answering, drop what is drafted for this question"
+let approval_back =
+  b Act "Esc" "back"
+    ~help:"leave the answering mode; with the editor open it drops the draft first"
+
+(* Where a Fusion run's caller and its Board evidence are, on the list and
+   in the detail alike: one binding each, so the two footers cannot name the
+   key two ways. *)
+(* The keys a post answers to, in the Board's surface list and in the read
+   footer alike. The read pane spelled them a second time in its own row --
+   "[c] Reply   [v/V] Vote (+/-)   [Y] Copy Link   [Esc] Back" -- above a
+   footer that spelled c, Y and Esc again and had no vote key at all, so that
+   row was the only place on the screen that said v votes. *)
+let board_vote_key =
+  b Act "v / V" "up / down"
+    ~help:"press twice to vote: v up, V down; while reading, on the selected \
+           comment when the comments have focus, otherwise on the post"
+let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
+let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
+let board_read_focus_key =
+  b Navigate "b" "post / comments" ~detail:Detail_only
+    ~help:"switch the focused reading window; on the comments, j/k select a \
+           comment and PgUp/PgDn scroll by rows"
+
+let fusion_caller_key = b Navigate "K" "calling Keeper"
+let fusion_board_key = b Navigate "B" "Board evidence"
+
+let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
+
+let for_surface = function
+  | Overview ->
+      [ b Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
+      ; b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
+      ; b Navigate "p" "requests" ~help:"approvals and questions"
+      ; b Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and tasks waiting on you"
+      ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
+      ; b Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"
+      ]
+      @ listing_meta
+  | Acting ->
+      [ b Navigate "e / l" "Events / Logs"
+          ~help:"Events, or the server's own log lines"
+      ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
+      (* [Navigate], not [Act]: the group is documented as "doing something to
+         the thing under the cursor", and this key does nothing to the event
+         the cursor is on -- it chooses which events the list holds at all,
+         the way Planning spells its own filter. The group is also the
+         retention order, so in [Act] this key was given up before
+         [Home/End]. *)
+      ; b Navigate "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
+      (* "evidence", not "event evidence": every row on this surface is an
+         event, so the label was saying the surface's own subject back to the
+         reader. The six cells it gives back are what lets [f] stay on the row
+         beside it -- see the footer case in test_tui_keys. *)
+      ; b Act "Enter" "evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
+      (* One key, one row. Esc closes the evidence pane when one is open
+         (masc_tui.ml guards the close on acting_detail) and otherwise
+         leaves the surface, so two rows read as two bindings. *)
+      ; b Act "Esc" "back"
+          ~help:"close event evidence; from the list, back to Dashboard"
+      (* One row per action. g and G reach the ends Home and End reach, and
+         l the tab 2 opens; a row for each spent two of the footer's places
+         on actions it already showed, and at 120 columns the fitter dropped
+         Enter -- the key that opens an event -- to keep them. The rows are
+         the spellings every other reader shares; the extras are in help. *)
+      ; b Navigate "Home/End" "newest / oldest"
+          ~help:"g and G as well; the ring counts back from the newest, so \
+                 its top is now"
+      ; b Meta "Tab" "next"
+      ; b Meta "q" "quit"
+      ]
+  | Metrics ->
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "p" "Usage / Telemetry"
+          ~help:"switch between quota and Keeper usage, and engine telemetry"
+      ; b Navigate "f" "account" ~help:"search quota accounts; selection follows Plan and Trend"
+      ; b Navigate "a" "all accounts" ~help:"clear the quota account selection"
+      ; b Navigate "x" "hide/show unusable" ~help:"show or hide the accounts that cannot be used now"
+      ; b Navigate "v" "Plan / Trend / Keepers" ~help:"cycle the Usage reading"
+      ; b Navigate "w" "1d / 7d / 14d"
+          ~help:"on Usage: cycle the exact UTC day window for provider report history"
+      ; b Navigate "1 / 2 / 3" "telemetry section"
+          ~help:"on Telemetry: Engine, Work, or Tools"
+      ; b Act "Esc" "Dashboard"
+      ; b Meta "r" "refresh"
+      ; b Meta "Tab" "next"
+      ; b Meta "q" "quit"
+      ]
+  | Keepers Keeper_list ->
+      (b Navigate "j/k" "move" ~help:"move the roster cursor")
+      :: (b Navigate "v" "view" ~help:"cycle compact / detailed / grouped")
+      :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
+      :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
+      :: (b Act "K" "relations" ~help:"read the first page of Keeper-origin requests queued for the selected Keeper")
+      :: (b Act "Right / Enter" "detail" ~help:"keeper detail")
+      :: keeper_actions
+      @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
+        ; b Search "n / N" "next / previous match"
+        ; b Act "Esc" "dashboard"
+        ]
+      @ row_list_jumps @ listing_meta
+  | Keepers Keeper_detail ->
+      [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
+        (* The tabs come from the list the strip draws. Named by hand this row
+           said "Info / Settings / Secrets / GitHub" while the strip drew
+           nine, so a reader who trusted the sheet did not know Sandbox,
+           Identity, Channels, Automation or Runs existed -- and Sandbox is
+           the second tab. Config's [p] had the same drift and a test to
+           catch it; this row cannot drift at all now. *)
+      ; b Navigate "[ / ]" "tabs"
+          ~help:
+            ("detail tabs: "
+             ^ String.concat " / "
+                 (List.map Masc_tui_types.keeper_detail_tab_label
+                    Masc_tui_types.keeper_detail_tabs))
+      ; b Act "o" "logs"
+          ~help:"open container logs in Sandbox; Keeper activity elsewhere"
+      ; b Act "U" "runtime"
+          ~help:"pick a runtime candidate order (on the Channels tab U is unbind all)"
+      ; b Act "Left / Esc" "back"
+      ; b Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
+      ]
+      @ List.filter
+          (fun binding -> binding.key <> "l" && binding.key <> "u")
+          keeper_actions
+  | Keepers Keeper_logs ->
+      (* The shared tail was missing here while the renderer's own footer
+         string carried it, so the sheet and the footer disagreed about
+         whether r/q worked on this screen. *)
+      (* The page and edge keys have arms of this screen's own (masc_tui.ml:
+         [home] and [end] set [log_scroll], and the page dispatcher walks the
+         tail window), and the table named none of them. Rows are drawn newest
+         first, so these two are not the top and bottom of a list: Home is
+         now and End is the oldest row the tail window holds. *)
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "now / oldest"
+      ; b Act "Left / Esc" "back"
+      ]
+      @ listing_meta
+  | Keepers Keeper_calls ->
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "Home/End" "top/bottom"
+      ; b Act "Left / Esc" "back"
+      ]
+      @ listing_meta
+  | Keepers Keeper_message ->
+      [ b Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
+      ; b Navigate "Right" "chat"
+          ~help:"roster focused: return focus to the chat composer"
+      ; (* One key, two focuses: the roster when it holds focus, the history
+           when the chat is scrolled back. Listed once so the table keeps the
+           one-key-one-row contract (#33236). *)
+        b Navigate "Up / Down" "roster move / scroll"
+          ~help:"roster focused: move; chat scrolled back: adjust by one line"
+      ; b Act "Enter" "send / open"
+          ~help:"send from chat, or open the selected Keeper from the roster"
+      ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
+      ; b Act voice_speak_key "speak"
+          ~help:"record into the draft; again to stop and keep what was said"
+      ; b Act voice_listen_key "keep listening"
+          ~help:"continuous capture on/off: each sentence starts the next capture"
+      ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
+      ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
+      ; b Act "Ctrl-K / Ctrl-P" "queued line"
+          ~help:"cancel / edit the last queued line"
+      ; b Act chat_schedules_label "Job status"
+          ~help:"fold or expand this Keeper's scheduled Jobs, pending occurrences, holds and latest result"
+      ; b Act "Ctrl-T" "queue"
+          ~help:"inspect and manage waiting turns"
+      ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
+      ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
+      ; b Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
+      ; b Act expand_turn_label "turn detail"
+          ~help:
+            "unfold the running turn's status rows, or fold them back to the \
+             progress line"
+      ; b Act "Ctrl-N" "journal detail"
+          (* The three words are the states' own, the way Ctrl-R above spells
+             its own. Pressing this answers "Librarian/Memory timeline: full",
+             so a help promising "full detail" sends a reader looking for a
+             state the pane never names. *)
+          ~help:"cycle Memory journal summary / full / hidden"
+      ; b Act "Ctrl-F" "message metadata"
+          ~help:"cycle no clock / inline clock / full timestamp and request id"
+      ; b Act "Ctrl-O" "image / diagram"
+          ~help:"preview the newest image or Mermaid diagram; /images lists all; any key returns"
+      ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
+      ; b Act "/copy" "copy reply"
+          ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
+      ; b Act "Q / Ctrl-Q" "leave"
+          ~help:"Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting"
+      ; (* One key, two focuses, listed once for the reason [Up / Down] above
+           is: the dispatcher reads Esc from the roster as the way back to the
+           composer and from the chat as the way off the screen. Spelled as two
+           bindings, both reached the same row and the footer drew
+           [Right / Esc:chat] and [Esc:back] side by side. *)
+        b Act "Esc" "chat / back"
+          ~help:
+            "roster focused: return to the composer; chat focused: back, and \
+             during a turn interrupt it"
+      ]
+  | Keepers Keeper_runtime_pick ->
+      (* The picker claims its own keys through [Masc_tui_pick_list], page and
+         edge among them, and the table carried both inside [j/k]'s help
+         instead of declaring them. Prose there reaches the sheet and never
+         the footer.
+
+         Only the page pair is declared: measured through the fitter at
+         eighty cells, declaring both costs [d] and [/] their place, and [d]
+         is the one key this screen exists for. [d]'s label is shortened in
+         the same breath -- with "use the default" spelled out it did not fit
+         beside the page pair either, and its help still says what it drops
+         and what it follows. The edge pair stays in the help until #39082
+         decides what this screen owes a guard that reads help for key
+         names. *)
+      [ b Navigate "j/k" "move" ~help:"move; Home/End jump to the top or bottom"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "/" "filter"
+          ~help:"type to narrow the lanes and runtimes; Esc drops the filter"
+      ; b Act "Enter" "choose"
+      ; b Act "d" "default"
+          ~help:"drop this Keeper's own binding and follow [runtime].default"
+      ; b Act "Esc" "back"
+      ]
+  | Lanes ->
+      [ b Navigate "j/k" "move" ~help:"move the lane cursor"
+      (* One destination, two keys. [o] came from #35915 and [A] from #35761,
+         and each arrived with its own binding and its own wording -- the
+         footer then spent two of its items saying "Lane Add-ons" and
+         "add-ons", the heading named [o], and the guide named [A]. The
+         dispatch was one arm the whole time ([Some "o" | Some "O" | Some "A"]
+         on Lanes), so the table says so too. Both keys stay: a PTY walk
+         presses [A] and the guide's first line names it. *)
+      ; b Navigate "o / A" "Plugins"
+          ~help:"inspect Lane Add-on declarations, instances and observations"
+      ; b Navigate "d" "reading" ~help:"read the selected Lane's complete configuration and observation"
+      ; b Navigate "i" "read issues" ~help:"read inventory problems without hiding the Lane list"
+      ; b Act "Right / Enter" "open"
+          ~help:"open exact runs, the selected Browser or machine, or a package configuration/instance"
+      ; b Act "a" "exact: add slot"
+          ~help:"add a candidate to the selected exact-output lane's walk order"
+      ; b Act "Space" "activity"
+          ~help:"open Exact or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
+      ; b Act "s" "exact: models"
+          ~help:"edit the model order: r replaces the selected model/effort, \
+                 a adds a fallback, 1 makes it first within its HTTP/CLI group, \
+                 x removes, J/K reorders, Enter/d opens the selected \
+                 slot's config table, e opens the lane table, Esc closes; \
+                 HTTP runs before CLI"
+        (* The lane detail spent four rows on the file's shape and on this
+           key, the same two sentences under every lane. They are here, where
+           the key is. *)
+      ; b Navigate "e" "exact: config"
+          ~help:
+            "open this lane's runtime.exact_output_lanes section in the \
+             preview-checked runtime.toml editor; slots is a catalog-ref array \
+             and cli_slots an official-client runtime-id array, either may be \
+             left out, and an enabled lane needs one slot across the two"
+      ; b Navigate "[ / ]" "exact output"
+          ~help:
+            "on a Lane Add-on package row, choose one of its exact outputs; the \
+             preview lists each with its binding: bound, unbound, off, or a \
+             table the package does not declare. e then opens that output's \
+             runtime.addon_exact_lanes table, or says runtime.toml has none yet"
+      ; b Navigate "p" "runtime"
+          ~help:"open the Runtime surface"
+      ; b Act "Esc" "dashboard" ~help:"back to Dashboard"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching lane; the run list \
+                 and a run's detail carry no searchable rows"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Clients ->
+      [ b Navigate "j/k" "move" ~help:"move the roster cursor"
+      ; b Act "Enter" "detail" ~help:"read the client's full identity and observation"
+        (* Two doors, one action: both call [goto_surface Runtime]. As two
+           bindings the sheet printed the answer twice, one row under the
+           other, and the second row's help differed from the first by a
+           pronoun. The compound spelling is the one the table already uses
+           for [Left / Esc] and [o / A], and [key_atoms] splits the slash, so
+           the footer keeps its Esc pin and both keys stay counted. *)
+      ; b Act "p / Esc" "runtime"
+          ~help:"back to the Runtime surface this hangs off"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching attached name"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Board ->
+      [ b Navigate "j/k" "move"
+      ; b Act "Right / Enter" "read" ~help:"read the post"
+      ; b Act "Left / Esc" "back" ~help:"close the post"
+      ; b Act "w" "write" ~help:"write a post"
+      ; board_vote_key
+      ; board_reply_key
+      ; b Navigate "1–9" "attachment" ~detail:Detail_only
+          ~help:"read a stored File/Score here; u:source m:Markdown h:HTML y:copy s:save r:retry Esc:post. Other media use their existing action."
+      (* Three keys below answer only while a post is open, and the table said
+         so in prose the footer cannot read. The list footer named them and
+         the dispatcher refused all three there: [[ / ]] steps the open post
+         ([step_board_read] returns on [Board_list]), [z] and [h/l] want a
+         detail pane beside the list. *)
+      ; b Navigate "S" "successor" ~detail:Detail_only
+          ~help:"follow the closed post's recorded successor; Esc returns to this post"
+      ; b Navigate "[ / ]" "previous / next post" ~detail:Detail_only
+          ~help:"while reading, open the post before or after this one"
+      ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
+      ; b Search "f / F" "next / previous hearth"
+          ~help:"move forward or backward through all hearths"
+      ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
+      ; b Navigate "z" "wide detail" ~detail:Detail_only
+          ~help:"hide or show the post list while reading"
+      ; board_read_focus_key
+      ; board_copy_key
+      ; b Navigate "Ctrl-W" "pane"
+          ~help:"cycle the post list, the detail pane, and the Activity pane when it is drawn"
+      ; b Navigate "h/l" "pane" ~detail:Detail_only
+          ~help:"focus the post list or detail pane"
+        (* Beside [f], not instead of it: [f] narrows the list to one hearth,
+           this jumps the cursor to a post without changing what is listed. *)
+      ; b Navigate "PgUp/PgDn" "page"
+          ~help:"page through the focused post list, body, or comments"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_edges @ listing_meta
+  | Approvals ->
+      [ approval_move
+        (* The list draws each ask on one row. Enter is where a multi-line
+           argument is readable before y answers it. *)
+      ; approval_read
+      ; approval_decide
+      ; approval_retry
+        (* The footer names this key and the sheet did not, so an operator who
+           pressed [?] to find out how to answer a Keeper's question found
+           every other key on the surface and not that one. The approval queue
+           owns this surface's arrows and its y/n, which is why answering
+           opens as its own mode rather than as a key on the row. *)
+      ; approval_answer
+      ; approval_installation_results
+      ; approval_origin
+      ; approval_walk
+      ; approval_workspace
+      ; approval_outside
+        (* The answering mode's own keys. It opens with [a] and rewrites the
+           footer entirely, so the sheet was the only place left to learn
+           them -- and it named none: [?] on this surface found every
+           browsing key and nothing about answering a question. Each help
+           says when the key answers, the way [[ / ]] above does. *)
+      ; approval_question
+      ; approval_pick
+      ; approval_write
+      ; approval_skip
+      ; approval_clear
+      ; approval_back
+      ]
+      @ row_list_jumps @ listing_meta
+  | Planning ->
+      [ b Navigate "j/k" "move"
+      ; b Act "b" "summary" ~detail:List_only
+          ~help:"read captured Goal totals, the global Task backlog, history, and snapshot changes"
+      ; b Navigate "t" "Goals / Tasks"
+          ~help:"switch between Goals and the active task list"
+      ; b Navigate "p" "Approvals"
+          ~help:"open operator approvals and Keeper questions; Esc returns to Work"
+      ; b Navigate "v" "next Work tab"
+          ~help:"Goals, then the two task surfaces: Task Review and \
+                 Task Verdicts. Not stages of one flow"
+      ; b Act "Right / Enter" "detail" ~detail:List_only
+      ; b Act "Left / Esc" "back"
+      ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
+      ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+          ~help:"while a detail is open, step to the row before or after it"
+      ; b Act "c" "request completion"
+          ~help:"send the goal to the completion judge; press again to submit"
+      ; b Act "a" "confirm proof"
+          ~help:"read the proven Goal evidence; press again to confirm that exact proof"
+      ; b Act "x" "drop"
+          ~help:"type why the goal is dropped; Enter drops it and cancels its unclaimed tasks"
+      ; b Act "o" "reopen"
+      ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
+        (* Over the goals [f] and [s] left on screen, in the order they are
+           drawn: the search walks what the list shows, not the snapshot. *)
+      ; b Search "/" "find" ~help:"jump the cursor to a matching goal id or title"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Schedules ->
+      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Act "Right / Enter" "details" ~detail:List_only
+          ~help:"open schedule details"
+      ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+          ~help:"while a detail is open, step to the row before or after it"
+      ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
+      ; b Act "e" "modify"
+          ~help:"edit the selected active schedule; running/finished rows refuse"
+      ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
+      ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
+      ]
+      @ row_list_edges @ listing_meta
+  | Verification ->
+      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
+      ; b Navigate "v" "next Work tab"
+          ~help:"on to Task Verdicts, then back to Goals"
+      ; b Navigate "h" "queue / history"
+          ~help:"the queue is what a task is still waiting on; the history is \
+                 every request ever submitted, which nothing removes"
+      ; b Act "Right / Enter" "details" ~detail:List_only
+          ~help:"read the request and evidence"
+      ; b Act "Left / Esc" "back" ~help:"back to the list"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+          ~help:"while a detail is open, step to the row before or after it"
+      ; b Navigate "< / >" "newer / older"
+          ~help:"step either list a page at a time; one page holds two \
+                 hundred rows, so a shorter queue arrives whole"
+      (* One item, spelled the way Approvals spells its own pair. Apart, the
+         fitter gave up [x] and then [a], and what was left was a queue of
+         work with no visible way to act on it -- which is the one thing this
+         surface exists for. [Masc_tui_footer.never_dropped_keys] pins the
+         pair whole; pinning [a] or [x] alone would pin the [a] that creates
+         a keeper and the [x] that deletes one. *)
+      ; b Navigate "e / E" "다음 / 이전 증거" ~detail:Detail_only
+          ~help:"read one submitted evidence item at a time"
+      ; b Act "i" "증거 목록 접기/펼치기" ~detail:Detail_only
+      ; b Act "o" "증거 열기" ~detail:Detail_only
+          ~help:"download the retained copy and open it with a local application"
+      ; b Act "s" "증거 사본 저장" ~detail:Detail_only
+          ~help:"save this exact evidence item privately on this machine; its local path stays in the detail"
+      ; b Act "a / x" "approve / reject"
+          ~help:"a approves the row under the cursor (press twice); x rejects \
+                 with a reason ($EDITOR form)"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching task id, title, or submitter; \
+                 the queue answers this, an open detail does not"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Harness ->
+      [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
+      ; b Navigate "v" "next Work tab" ~help:"back round to Goals"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Act "Right / Enter" "verdict" ~detail:List_only
+          ~help:"open the full evaluator verdict"
+      ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+          ~help:"while a detail is open, step to the row before or after it"
+        (* One item, spelled the way Verification spells its own pair. Apart,
+           the fitter gives them up one at a time, and the screen that loses
+           them first is the verdict pane -- the one place an operator reads a
+           ruling in full before answering it. [Masc_tui_footer.never_dropped_keys]
+           pins the pair whole; pinning [y] or [x] alone would pin the [y] of
+           every [y / n] and the [x] that deletes a keeper.
+
+           [x], not [n]: this surface answers the row search, and [n] / [N]
+           step it. *)
+      ; b Act "y / x" "agree / overrule"
+          ~help:"y records the machine's verdict as yours; x records the \
+                 opposite, with $EDITOR taking the reason"
+      ; b Act "Y" "copy task" ~help:"copy a link to the task in Work"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_edges @ listing_meta
+  | Fusion ->
+      (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
+         footer is [footer_hints_fusion_detail], which also appends the live
+         scroll position this static table cannot know. *)
+      [ b Navigate "j/k" "move"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+          ~help:"while a detail is open, step to the row before or after it"
+      ; fusion_caller_key
+      ; fusion_board_key
+        (* Spelled as Keepers spells its own [a]: new. The form is the
+           schema form the Lane Add-ons action uses, so its keys are that
+           form's; the footer names them while it is open. *)
+      ; b Act "a" "new run"
+          ~help:"launch a Fusion run from the list: pick the Keeper, preset \
+                 and topology, type the prompt, then Ctrl-S reviews and \
+                 Enter starts it"
+      ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching run id, Keeper or preset; an \
+                 open run's detail carries no searchable rows"
+      ; b Search "n / N" "next / previous match"
+      ; b Act "Esc" "back" ~help:"leave detail, or return to Dashboard"
+      ]
+      @ row_list_edges @ listing_meta
+  | Memory ->
+      [ b Navigate "j/k" "move" ~help:"move the keeper row"
+      ; b Act "Enter" "facts"
+          ~help:"browse what the selected keeper actually remembers"
+      ; b Act "v" "health details"
+          ~help:"read the complete fleet summary and selected keeper health in a scrollable capture"
+      ; b Act "a / A" "all fleet"
+          ~help:"browse and search consolidated memory across the entire fleet"
+      ; b Act "s" "sort"
+          ~help:"cycle sort keepers (facts, size, delta, state, name)"
+      ; b Act "u" "units"
+          ~help:"switch stored memory and request input between tokens and KiB"
+      ; b Act "d" "detail"
+          ~help:"show the selected keeper's ledger rows, or fold them back to \
+                 its state, last save and actions"
+      ; b Act "Esc" "clear / back"
+          ~help:"clear the filter, or return to Dashboard"
+      ; b Search "/" "filter"
+          ~help:"show only keepers whose id or state matches"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Repositories ->
+      [ b Navigate "v" "full details" ~help:"read the complete selected path, Keeper assignments and errors"
+      ; b Navigate "j/k" "scroll"
+      ; b Act "Enter" "browse"
+          ~help:"open the repository tree, or the selected changed file"
+      ; b Navigate "H" "recent activity" ~help:"recorded clone writes by Keeper and Task in the last day"
+      ; b Act "d" "Git changes"
+          ~help:"show the selected repository's current working-tree changes"
+      ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
+      ; b Act "Left / Esc" "back"
+          ~help:"leave Git changes, or return to Dashboard"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching repository, or to a changed \
+                 path while Git changes is open"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Changes ->
+      (* "move", not "scroll": the keys move the marked row and the window
+         follows it, which is also what the surface's own footer says. *)
+      [ b Navigate "j/k" "move"
+      ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
+      ; b Act "Right / Enter" "written diff"
+          ~help:"what the call wrote, as a diff"
+      ; b Act "Left / Esc" "back" ~help:"close the diff"
+      ; b Act "d" "tree diff" ~help:"what the tree holds now"
+      ; b Act "v" "view code"
+          ~help:"the file on the Code surface, read from the keeper's own \
+                 workspace"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching written path"
+      ; b Search "n / N" "next / previous match"
+      ; b Act "o" "editor" ~help:"open in $EDITOR / $NVIM"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Connectors ->
+      [ b Navigate "B" "Browser Lane"
+          ~help:"read browser tabs and page text; choose Automatic, Work browser, or a connected browser"
+      ; b Act "Ctrl-O" "Browser screenshot"
+          ~help:"inside Browser Lane: preview the selected tab; any key returns"
+      ; b Navigate "j/k" "scroll"
+      ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
+      ; b Act "Esc" "keeper" ~help:"back to the selected Keeper"
+      ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Runtime ->
+      List.map runtime_sheet_binding runtime_keys @ row_list_edges @ listing_meta
+  | Config ->
+      List.map fst config_bindings
+  | Resources ->
+      (* Two panes with two meanings, and the keys below say so once rather
+         than per row: with the list focused the cursor moves and [/] lands
+         it on a match; with the text focused the same keys move the reading.
+         Both ends answer to Home and End. *)
+      [ b Act "f" "format" ~help:"cycle all resources, artifacts, Markdown and HTML"
+      ; b Act "c" "check / uncheck"
+          ~help:"explicitly toggle shared confirmation for the selected exact report revision"
+      ; b Navigate "u" "next unchecked"
+          ~help:"select the next unchecked report in this format/day scope; open it when the reader is focused"
+      ; b Act "t" "today" ~help:"toggle the local publication day captured at this keypress"
+      ; b Act "w" "layout" ~help:"switch full-width list/reader and side-by-side browsing"
+      ; b Act "v" "document / source" ~detail:Detail_only
+          ~help:"show the document or its original text syntax; copied bytes stay original"
+      ; b Act "i" "report info" ~detail:Detail_only
+          ~help:"expand the URI, type, size and complete report metadata"
+      ; b Navigate "j/k" "move"
+          ~help:"move the list; with the text focused, scroll it"
+      ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
+      ; b Navigate "Ctrl-W" "focus"
+          ~help:"cycle the resource list, the text, and the Activity pane when it is drawn"
+      ; b Navigate "J/K" "scroll text"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+          ~help:"while the detail is focused, read the adjacent resource"
+      ; b Navigate "PgUp/PgDn" "page"
+          ~help:"a page of the list, or of the text when it is focused"
+      ; b Navigate "Home/End" "top/bottom"
+          ~help:"the first or last resource, or the ends of the text when it \
+                 is focused"
+      ; b Act "Enter" "read" ~help:"read the selected resource"
+      ; b Navigate "{ / }" "older / newer revision" ~detail:Detail_only
+          ~help:"read the adjacent published report revision from its validated history"
+      ; b Navigate ", / ." "image" ~detail:Detail_only
+          ~help:"select the previous or next image or Mermaid diagram in the loaded resource"
+      ; b Act "Ctrl-O" "preview image" ~detail:Detail_only
+          ~help:"open the selected image or Pele diagram from the retained resource bytes"
+      ; b Navigate "( / )" "text part" ~detail:Detail_only
+          ~help:"select the previous or next original text part for copying"
+      ; b Act "s" "save original" ~detail:Detail_only
+          ~help:"choose a local destination; exclusively create the selected report revision's exact bytes"
+      ; b Act "o" "open Dashboard" ~detail:Detail_only
+          ~help:"open the selected fixed report revision; the browser uses its own authentication"
+      ; b Act "P" "external sharing" ~detail:Detail_only
+          ~help:"enable or revoke external access to all revisions of this report"
+      ; b Act "U" "reconcile share" ~detail:Detail_only
+          ~help:"inspect the original recorded share operation"
+      ; b Act "!" "confirm share recovery" ~detail:Detail_only
+          ~help:"confirm the displayed original operation after its preview is shown"
+      ; b Act "Y" "copy public link" ~detail:Detail_only
+          ~help:"copy the selected revision's link when external sharing is enabled"
+      ; b Act "R" "reread revision" ~detail:Detail_only
+          ~help:"reread the exact open resource, including an older report revision"
+      ; b Act "y" "copy source" ~detail:Detail_only
+          ~help:"send the selected text part's original bytes via OSC 52; terminal support is unconfirmed"
+      ; b Act "Esc" "back"
+          ~help:"the text hands back to the list; the list leaves for System"
+      ; b Search "/" "find"
+          ~help:"find a resource name in the list, or text in the loaded detail"
+      ; b Search "n / N" "next / previous match"
+      ; b Meta "r" "reload"
+      ; b Meta "Tab" "next"
+      ; b Meta "q" "quit"
+      ]
+  | Code ->
+      (* A row surface: masc_tui_types gives it a searchable row list
+         (code_entries), so the cursor and "/" are real here, and Enter drills
+         one directory level (the /workspace/children route is lazy). Claimed
+         from those two facts rather than from the render, so the footer does
+         not advertise a key nothing handles. *)
+      [ b Navigate "j/k" "move"
+      ; b Navigate "h/l" "pane" ~help:"focus the tree or open file"
+      ; b Search "Ctrl-P" "file finder"
+          ~help:"filter all tracked and nonignored files in the owning Git checkout; Enter opens, Esc returns"
+      ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
+        (* Esc walks back out the way Enter came in: it closes an open file
+           first, and only climbs a directory once no file is open. From the
+           project root, Esc alone leaves for Workspace, the ring parent --
+           Left stays on the surface, the same convention as every other
+           off-ring child. A key that works and is not listed is the same
+           drift as a listed key that does nothing, pointing the other way. *)
+      ; b Act "Left / Esc" "back"
+          ~help:"close the history, then the file, then climb one \
+                 directory; Esc at the project root leaves for Workspace"
+      ; b Navigate "Shift-Left / Shift-Right" "pan"
+          ~help:"with a file open, scroll it sideways one cell at a time"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a match: the tree, or the open file's \
+                 lines"
+      ; b Search "n / N" "next / previous match"
+      ; b Act "K" "hover"
+          ~help:"ask the language server what a name on the cursor line is \
+                 (one name asks at once; several open the palette as \
+                 choices); read the complete answer with j/k or paging, Esc returns to code"
+      ; b Act "R" "references"
+          ~help:"ask the language server where a name on the cursor line is \
+                 used; needs the project's reference index, and says which \
+                 command builds it when there is none"
+      ; b Act "D" "definition"
+          ~help:"jump to where a name on the cursor line is defined (one \
+                 name jumps at once; several open the palette as choices)"
+      ; b Act "B" "back"
+          ~help:"walk back through the definition jumps, newest first"
+      ; b Act "e" "edit draft" ~help:"edit exact server source in $EDITOR; retain draft in this session"
+      ; b Act "S" "save draft" ~help:"explicitly save using the original revision; a conflict retains the draft"
+      ; b Act "V" "draft comparison" ~help:"compare original/current server source with the retained draft"
+      ; b Act "X" "discard draft" ~help:"discard only the local draft, after any submitted save settles"
+      ; b Act "A (draft)" "adopt revision" ~help:"after rereading and comparing a conflict, explicitly adopt the server revision"
+      ; b Act "y" "copy source"
+          ~help:"send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed"
+      ; b Act "b" "blame"
+          ~help:"who last touched each run of lines, in the margin; b again \
+                 drops it"
+      ; b Act "m" "notes"
+          ~help:"the memos in the open file: comments on their own row \
+                 reading masc(name): text, or masc(name) question: text; m \
+                 again closes the list"
+      ; b Act "d" "diff"
+          ~help:"on the project tree, list every working-tree change; on an \
+                 open file, show that file's diff against HEAD"
+      ; b Act "Enter (history)" "open"
+          ~help:"a commit answers with its pull request, from its (#N) and \
+                 the repository's remote"
+      ; b Act "H" "history"
+          ~help:"the commits that touched the open file, newest first \
+                 (H or Esc closes)"
+      ]
+      @ row_list_jumps @ listing_meta
+  | Tools ->
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "top/bottom"
+      ; b Navigate "p" "section"
+          ~help:"available / async runs / receipts / usage / all tools"
+      ; b Navigate "J/K" "Skill"
+          ~help:"in async runs, select an original request; otherwise select \
+                 a published Skill"
+      ; b Act "f" "Composition performance"
+          ~help:"outside async requests, select the next Composition and load its exact-revision performance charts"
+      ; b Act "Ctrl-O" "Skill graph" ~help:"outside async requests, preview the declared composition with Pele"
+      (* Enter's Skill-evidence role (outside async runs, masc_tui.ml: the
+         "\r" arm) is named on the sheet's Enter row only. The footer table
+         cannot carry Enter -- the fitter never drops it -- so advertising it
+         here squeezed the action diagnosis out of the 98-cell row and broke
+         the sheet-only contract (test_tui_keys, tools_async_bindings). *)
+      ; b Navigate "[ / ]" "Keeper" ~help:"change the effective Keeper surface"
+      ; b Act "c / C" "new Skill"
+          ~help:"open $EDITOR on a template for a new Skill; c starts an \
+                 instruction Skill, C starts a composition Skill"
+      ; b Act "e" "edit Skill"
+          ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
+      ; b Act "Esc" "system"
+          ~help:"return from original Task to request, then request to list; \
+                 otherwise back to the System surface it hangs off"
+      ]
+      @ [ tools_refresh; listing_next; listing_quit ]
+  | System_logs ->
+      [ b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
+      ; b Navigate "e" "Events"
+      ; b Navigate "j/k" "move / scroll"
+      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+          ~help:"while detail is open, inspect the adjacent visible log entry"
+      ; b Act "l" "level floor"
+          ~help:"raise the minimum level; after error, back to everything"
+      ; b Act "v" "verbose"
+          ~help:"toggle DEBUG rows directly; off uses the INFO floor"
+      ; b Act "c" "category"
+          ~help:"cycle through the categories this page carries"
+      ; b Act "Right / Enter" "detail"
+          ~help:"show the full message, source, category, turn, and JSON details"
+      ; b Act "Left / Esc" "back"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching module, keeper, or message, \
+                 over the rows the level and category filters leave"
+      ; b Search "n / N" "next / previous match"
+      ]
+      @ row_list_edges @ listing_meta
+
+let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
+
+let hints_in_order ?(lang = Lang_en) bindings =
+  bindings
+  |> List.map (fun { key; label; label_ko; _ } ->
+      let label = match lang with
+        | Lang_ko -> Option.value label_ko ~default:label
+        | Lang_en -> label
+      in
+      key ^ ":" ^ label)
+  |> String.concat "  "
+
+(* Sort by group, then flatten to the footer's "key:label  key:label" form.
+   Both the static per-surface footer and the Fusion detail footer (which
+   appends a live scroll position) render through this one projection. *)
+let hints_of_bindings ?(lang = Lang_en) bindings =
+  bindings
+  |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
+  |> hints_in_order ~lang
+
+(* [detail_open] is how a surface that owns a detail says which of its two
+   states is on screen. A surface without a detail leaves it out, and then
+   every binding stands -- which is what every caller did before this argument
+   existed, so their footers are unchanged. A surface that does own one and
+   forgets to pass it falls back to that same behaviour, which is the bug this
+   argument exists to end; [test_tui_footer_detail_state] is what keeps a new
+   surface from quietly landing there. *)
+(* Whether a binding answers in the state a footer is drawing. Its own
+   function because two footers filter their surface's table by hand --
+   Resources for the focused pane, Code for the open one -- and a second
+   reading of this rule beside them is how a key comes back to a footer that
+   refuses it. *)
+let answers_in_state ?detail_open binding =
+  match detail_open, binding.detail with
+  | _, Either -> true
+  | None, (List_only | Detail_only) -> true
+  | Some open_, List_only -> not open_
+  | Some open_, Detail_only -> open_
+
+let footer_hints ?detail_open surface =
+  hints_of_bindings
+    (List.filter (answers_in_state ?detail_open) (for_surface surface))
+
+type approvals_footer =
+  | Approval_browsing
+  | Approval_writing
+  | Approval_armed
+  | Approval_answering of { has_choices : bool; takes_text : bool }
+
+(* The approval queue and its question reader use the same binding records as
+   Help. Their modes need a deliberate order and, for Enter, a mode-specific
+   verb; the dispatcher gives that key a different action in each mode. *)
+let footer_hints_approvals mode =
+  let hint ?label (binding : binding) =
+    binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
+  in
+  let row items = String.concat "  " items in
+  match mode with
+  | Approval_browsing ->
+      row
+        [ hint approval_move; hint approval_decide; hint approval_workspace
+        ; hint approval_outside; hint approval_walk; hint approval_answer; hint approval_origin
+        ; hint listing_refresh; hint listing_next
+        ]
+  | Approval_writing ->
+      row [ hint ~label:"save" approval_read; hint ~label:"cancel" approval_back ]
+  | Approval_armed ->
+      "Press Enter again to send  |  "
+      ^ row [ hint approval_skip; hint approval_clear; hint approval_back ]
+  | Approval_answering { has_choices; takes_text } ->
+      row
+        ([ hint approval_question; hint row_list_page; hint approval_walk; hint approval_origin ]
+        @ (if has_choices then [ hint approval_pick ] else [])
+        @ (if takes_text then [ hint approval_write ] else [])
+        @ [ hint approval_skip; hint approval_clear
+          ; hint ~label:"answer" approval_read; hint approval_back
+          ])
+
+(* Whether this surface's table scopes any binding to one of the two states.
+   A surface this answers [true] for owes [footer_hints] a [~detail_open] from
+   both of its renderers; [test_tui_footer_detail_state] reads this rather
+   than a list written by hand beside it. *)
+let has_detail_scoped_keys surface =
+  List.exists
+    (fun binding ->
+      match binding.detail with
+      | Either -> false
+      | List_only | Detail_only -> true)
+    (for_surface surface)
+
+let footer_hints_metrics ~telemetry =
+  for_surface Metrics
+  |> List.filter (fun binding ->
+         if telemetry then not (List.mem binding.key [ "w"; "v"; "f"; "a"; "x" ])
+         else not (String.equal binding.key "1 / 2 / 3"))
+  |> hints_of_bindings
+
+(* The keys an open approval answers to. Its footer was written out in the
+   renderer, which is how it came to spell the decision keys apart from the
+   queue behind it and to call [R] something the key table does not. *)
+let footer_hints_approval_detail =
+  hints_of_bindings
+    [ b Navigate "j/k" "scroll"
+    ; approval_decide
+    ; approval_retry
+    ; b Act "Esc" "back"
+    ]
+
+(* The Board draft's two footers were written out in the renderer, and the
+   pane above them then spelled the same key a second way: "Ctrl-E: $EDITOR"
+   over a footer saying "Ctrl-E:$EDITOR", with "Enter: newline" beside it
+   that the footer never named. Both rows project from here, and the pane
+   keeps to what the draft is and where it goes. *)
+let board_compose_writing_bindings ~reply =
+  [ b Act "Enter" "newline" ~help:"newline in the draft; Esc opens the send menu"
+  ; b Act "Ctrl-E" "$EDITOR" ~help:"hand the draft to $EDITOR and take it back"
+  ]
+  (* A comment's wire carries text only, so the hint appears where the key
+     works -- a reply's Ctrl-A says why instead of staging. *)
+  @ (if reply then []
+     else [ b Act "Ctrl-A" "attach" ~help:"stage a local file to upload with the post" ])
+  @ [ b Meta "Esc" "menu" ~help:"send, discard, or keep writing"
+    ; b Meta "Tab" "surfaces"
+    ]
+
+(* No [q] here: while the draft has the keys, [q] is a printable scalar and
+   goes into the draft like any other letter. Leaving is Esc and then d. *)
+let footer_hints_board_compose_writing ~reply =
+  "type to write  " ^ hints_of_bindings (board_compose_writing_bindings ~reply)
+
+(* The path input after Ctrl-A owns the compose keys until the file is staged
+   or the input is cancelled. *)
+let board_attach_input_bindings =
+  [ b Act "Enter" "stage"
+  ; b Meta "Esc" "cancel"
+  ]
+
+let footer_hints_board_attach_input =
+  "type the file path  " ^ hints_of_bindings board_attach_input_bindings
+
+let board_compose_armed_bindings ~reply =
+  [ b Act "s" "send" ]
+  @ [ b Act "e" "edit in $EDITOR" ]
+  @ (if reply then [] else [ b Act "h" "cycle hearth" ~help:"a new post's sub-board" ])
+  @ [ b Act "d" "discard"; b Meta "Esc" "keep writing" ]
+
+let footer_hints_board_compose_armed ~reply =
+  hints_of_bindings (board_compose_armed_bindings ~reply)
+
+(* No [q] here either: while a drop reason has the keys, every printable
+   scalar is a letter of it. *)
+let goal_drop_reason_bindings =
+  [ b Act "Enter" "drop" ~help:"drop the goal with this reason; its unclaimed tasks are cancelled"
+  ; b Meta "Esc" "cancel" ~help:"close the reason; the goal stays as it is"
+  ]
+
+let footer_hints_goal_drop_reason =
+  "type why  " ^ hints_of_bindings goal_drop_reason_bindings
+
+(* A pane's own keys, then the keys all seven panes share. *)
+let config_pane_bindings pane =
+  let own =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with
+        | Some panes when List.mem pane panes -> Some binding
+        | Some _ | None -> None)
+      config_bindings
+  in
+  let shared =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with None -> Some binding | Some _ -> None)
+      config_bindings
+  in
+  (own, shared)
+
+(* The pane's own keys lead the row and the shared ones follow. A cut row
+   gives up its back first, and the shared keys are the ones a reader already
+   met on the pane before -- the reason r, Tab and q close every row. Sorted
+   as one list, the hops to Runtime, Resources and Tools outlived every key a
+   pane answers itself: at 120 columns presets lost n and u, and the runtime
+   assets lost o, their only way back to the registry. *)
+let config_row ~lang ~own ~shared =
+  String.concat "  "
+    (List.filter
+       (fun row -> not (String.equal row ""))
+       [ hints_of_bindings ~lang own; hints_of_bindings ~lang shared ])
+
+let footer_hints_config ~lang ~pane =
+  let own, shared = config_pane_bindings pane in
+  (* Save notices name x, c and v when applicable; retain them in help without
+     spending footer slots when there is nothing to hide or copy. *)
+  let own = match pane with
+    | Config_presets -> List.filter (fun binding ->
+        binding.key <> "x" && binding.key <> "c" && binding.key <> "v") own
+    | Config_runtime | Config_models | Config_params | Config_prompts
+    | Config_themes | Config_voice -> own
+  in
+  match pane with
+  | Config_params | Config_presets ->
+    (* At 80 cells the page/selection hints otherwise outlive E, the only
+       door to advanced JSON. The pane body already names those navigation
+       keys; keep its distinct edit actions ahead of them in the footer.
+       Presets the same at 120: n, u and D are the pane's three writes, and
+       behind the navigation keys D was the one cut. *)
+    let actions, navigation =
+      List.partition (fun binding -> binding.group = Act) own in
+    String.concat "  "
+      [ hints_of_bindings ~lang actions; hints_of_bindings ~lang navigation
+      ; hints_of_bindings ~lang shared ]
+  | Config_runtime | Config_models | Config_prompts | Config_themes | Config_voice ->
+    config_row ~lang ~own ~shared
+
+(* The keeper-voice screen: two lists and one write. The keys are its own --
+   the keeper walks under [j]/[k] and the voice under the arrows, so an
+   assignment cannot be made by moving one axis and hoping the other
+   followed -- and the row is built here rather than written as a string, so
+   the spellings are the table's. *)
+let voice_agent_bindings =
+  [ b ~ko:"키퍼" Navigate "j/k" "keeper"
+  ; b ~ko:"목소리" Navigate "\xe2\x86\x90/\xe2\x86\x92" "voice"
+  ; b ~ko:"상세 페이지" Navigate "PgUp/PgDn" "metadata page"
+  ; b ~ko:"상세 처음/끝" Navigate "Home/End" "metadata edges"
+  ; b ~ko:"도움말" Meta "?" "help"
+  ; b ~ko:"배정" Act "Enter" "assign" ~help:"write this keeper's voice into voice.tts.agent_voices"
+  ; b ~ko:"뒤로" Act "Esc" "back" ~help:"leave the screen; nothing is written"
+  ]
+
+let patch_review_bindings =
+  [ b Navigate "Shift+←/→" "pan"
+      ~help:"Shift-Left / Shift-Right moves diff text horizontally while file coordinates remain fixed"
+  ; b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn / d/u" "page"
+  ; b Navigate "Home/End / g/G" "edges"
+  ; b Act "e" "edit" ~help:"leave review and open the project file in your editor"
+  ; b Meta "?" "help"
+  ; b Meta "Esc" "close" ~help:"Esc, q or Q closes the patch reader"
+  ]
+
+let runtime_detail_bindings_for ~ko ~routes =
+  let text korean english = if ko then korean else english in
+  (if routes then [] else [ b Act "e" (text "모델 설정" "model settings") ])
+  @ [ b Navigate "j/k" (text "스크롤" "scroll")
+    ; b Navigate "PgUp/PgDn" (text "페이지" "page")
+    ; b Navigate "Home/End" (text "처음/끝" "edges")
+    ; b Act "Left / Esc" (text "목록" "list")
+    ; b Meta "r" (text "새로고침" "refresh")
+    ; b Meta "Tab" (text "다음" "next")
+    ; b Meta "?" (text "도움말" "help")
+    ]
+
+let footer_hints_patch_review () = hints_of_bindings patch_review_bindings
+let footer_hints_runtime_detail ?(ko = false) ?(routes = false) () =
+  hints_of_bindings (runtime_detail_bindings_for ~ko ~routes)
+
+let voice_agent_bindings_for_saving saving =
+  if saving then [ b ~ko:"도움말" Meta "?" "help"; b ~ko:"뒤로" Act "Esc" "back" ]
+  else voice_agent_bindings
+
+let footer_hints_voice_agent ~lang ?(saving = false) () =
+  hints_of_bindings ~lang (voice_agent_bindings_for_saving saving)
+
+(* The account form on runtime.toml takes every key while it is open, so the
+   pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
+   field. The form's row names only what the form reads. *)
+let runtime_account_form_bindings =
+  [ b Navigate "\xe2\x86\x90/\xe2\x86\x92" "provider"
+      ~help:"on the provider field, the next or previous provider to copy"
+  ; b Navigate "\xe2\x86\x91/\xe2\x86\x93" "field"
+  ; b Act "Enter" "next / save"
+      ~help:"move to the next field; on the last one, declare the account and save"
+  ; b Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ]
+
+let footer_hints_runtime_account_form () =
+  hints_of_bindings runtime_account_form_bindings
+
+(* The recall form takes every key while it is open, so the pane's row --
+   [e], [r], [Tab], [q] -- would name keys the form reads as its own. The row
+   names only what the form reads. *)
+let memory_recall_form_bindings =
+  [ b ~ko:"행" Navigate "\xe2\x86\x91/\xe2\x86\x93" "row"
+      ~help:"between the range row and the keeper rows"
+  ; b ~ko:"범위" Navigate "\xe2\x86\x90/\xe2\x86\x92" "range"
+      ~help:"on the range row: off, picked keepers only, or every keeper"
+  ; b ~ko:"고르기" Act "Space" "pick"
+      ~help:"on a keeper row, pick or drop that keeper; on the range row, the next range"
+  ; b ~ko:"저장" Act "Enter" "save"
+      ~help:"write the choice into runtime.toml through the preview and save [e] uses"
+  ; b ~ko:"취소" Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ]
+
+let footer_hints_memory_recall_form () =
+  hints_of_bindings memory_recall_form_bindings
+
+(* After a save the form shows the sign-in command and types nothing, so
+   [y] copies it as it does in the link and browser views. *)
+let runtime_account_saved_bindings =
+  [ b Act "y" "copy sign-in"
+      ~help:"send the sign-in command to the terminal clipboard (OSC 52)"
+  ; b Act "Enter / Esc" "close"
+  ]
+
+let footer_hints_runtime_account_saved () =
+  hints_of_bindings runtime_account_saved_bindings
+
+(* The prompts pane's read-only half. [o] swaps the registry for the assets
+   shipped with the binary, and there [a], [i], [e] and [x] answer with a
+   notice rather than acting (masc_tui.ml), so the row leaves them out and
+   names where [o] goes back to. *)
+let footer_hints_prompt_assets ~lang =
+  let registry_only = [ "a"; "i"; "e"; "x" ] in
+  let own, shared = config_pane_bindings Config_prompts in
+  let own =
+    own
+    |> List.filter (fun binding -> not (List.mem binding.key registry_only))
+    |> List.map (fun binding ->
+           if String.equal binding.key "o" then
+             { binding with label = "registry"; label_ko = Some "프롬프트 목록" }
+           else binding)
+  in
+  config_row ~lang ~own ~shared
+
+(* Work's task list, while it owns j/k. The Goals pane under the same
+   surface reads [footer_hints Planning]; this is the other half of that one
+   screen, so its keys come from a table too rather than from the renderer. *)
+let work_tasks_bindings =
+  [ b Navigate "j/k" "select" ~help:"move through Work's open tasks"
+  ; b Navigate "t / Esc" "Goals" ~help:"hand j/k back to the Goals list"
+  ; b Act "Enter" "detail" ~help:"open the selected task"
+  ]
+  @ listing_meta
+
+let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
+
+(* The Code surface's footer, which the renderer used to spell by hand. It
+   named d, H, m and w and nothing else, so the three language-server keys
+   never appeared on the screen they work on -- and neither did blame or the
+   row search when those arrived. Projected here, from the table the help
+   sheet already reads, and narrowed to what the current mode answers: an
+   overlay owns the pane, so the keys that act on the code underneath are
+   dead while it is up, and the tree pane answers none of the file keys. *)
+type code_pane =
+  | Code_tree  (** the file list has focus *)
+  | Code_file  (** a file is open and nothing covers it *)
+  | Code_diff
+  | Code_notes  (** wrapped memo document is drawn over the file *)
+  | Code_history  (** complete history document is drawn over the file *)
+
+let footer_hints_code_hover = hints_of_bindings
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Navigate "Esc / Left" "return to code"
+  ; b Meta "?" "help"
+  ]
+
+let code_notes_bindings =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Act "m" "close"
+  ; b Navigate "Esc" "back"
+  ; b Meta "?" "help"
+  ]
+
+let code_history_bindings =
+  [ b Act "t" "Task" ~help:"inspect the Task named by the selected Keeper record; Esc returns to this history position"
+  ; b Act "d" "recorded diff" ~help:"expand or collapse the selected Keeper call's recorded text; failed calls show attempted text"
+  ; b Meta "r" "refresh"
+  ; b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "H" "close"
+  ; b Navigate "Home/End" "edges"
+  ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
+  ; b Navigate "Left / Esc" "back"
+  ; b Meta "?" "help"
+  ]
+
+let footer_hints_code ~pane =
+  let file_keys =
+    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "y"; "b"; "d"; "H"; "m" ]
+  in
+  (* One key belongs to one pane and was showing on all three: [Enter
+     (history)] opens a commit's pull request and only the history view has
+     commits. Named apart from [file_keys] because it is the overlay's own,
+     not the file's. *)
+  let overlay_keys = [ "Enter (history)" ] in
+  let dead =
+    match pane with
+    | Code_tree -> overlay_keys @ file_keys
+    | Code_file -> overlay_keys
+    | Code_diff -> overlay_keys @ ("Right / Enter" ::
+        List.filter (fun key -> not (String.equal key "Shift-Left / Shift-Right")) file_keys)
+    | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys
+    | Code_history ->
+        (* [Right / Enter] names the tree and file panes' open. With the
+           history overlay up, the one arm behind Right and Enter takes the
+           overlay's branch instead, so the row drew two items holding the
+           Enter atom and called both of them "open". *)
+        "Right / Enter" :: file_keys
+  in
+  let visible = for_surface Code
+      |> List.filter (fun b -> not (List.mem b.key dead)) in
+  let visible = match pane with
+    | Code_diff ->
+        let pan, others = List.partition
+            (fun b -> String.equal b.key "Shift-Left / Shift-Right") visible in
+        List.map (fun b -> { b with key = "Shift-←/→" }) pan
+        @ List.map (fun b ->
+            if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b) others
+    | Code_tree | Code_file | Code_notes | Code_history -> visible in
+  visible
+  |> List.map (fun b ->
+       if String.equal b.key "j/k" then
+         { b with label = (match pane with
+           | Code_tree -> "move"
+           | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
+       else b)
+  |> hints_of_bindings
+  |> fun hints ->
+      match pane with
+      | Code_notes -> hints_of_bindings code_notes_bindings
+      | Code_history -> hints_of_bindings code_history_bindings
+      | Code_tree | Code_file | Code_diff -> hints
+
+(* The Runtime footer is the table's, with the two keys that depend on the
+   reading on screen: [p] names where it goes from here, and [e] names the edit
+   owned by the selected runtime or keeper lane. The renderer
+   used to spell its own line -- "j/k:scroll  Enter:detail  p:%s  Tab:next
+   q:quit  r:live refresh" -- which never named [c], the one key to Clients,
+   or [Esc], the way back to Config, and called the global refresh a live
+   one. *)
+let footer_hints_runtime ~(mode : runtime_mode) =
+  List.filter_map (runtime_footer_binding ~mode) runtime_keys
+  @ row_list_edges @ listing_meta
+  |> hints_of_bindings
+
+let footer_hints_resources ~detail_focus =
+  for_surface Resources
+  (* The focused pane is this surface's two states: [[ / ]] reads the
+     adjacent resource and the dispatcher answers it only with the text
+     focused. *)
+  |> List.filter (answers_in_state ~detail_open:detail_focus)
+  |> List.map (fun binding ->
+         if String.equal binding.key "j/k" then
+           { binding with label = (if detail_focus then "scroll text" else "move") }
+         else binding)
+  |> hints_of_bindings
+
+let opens_keepers ~message_mode key =
+  (not message_mode) && String.equal key keepers_jump.key
+
+let chat_quiet_leave ~input_supported ~turn_active ~draft_empty key =
+  (String.equal key "Q"
+   && (not input_supported || (turn_active && draft_empty)))
+  || (String.length key = 1 && Char.code key.[0] = 17)
+
+(* An armed two-press action expires on the next unrelated input: otherwise
+   it waits indefinitely and a later press of the same key -- after the
+   cursor has moved, after a refresh -- submits work the operator armed
+   minutes ago for something else.
+
+   Two facts, not one. [input_seen] says the loop actually read something:
+   the loop turns on a timeout as well, and a turn that read nothing is not
+   an unrelated input. [key] says what it read, and it is [None] for a
+   mouse report, a paste, and a graphics reply -- deliberate input that is
+   not the second press, so it cancels.
+
+   The rule lives here because the dispatch loop restated it once per armed
+   field and the connector unbind's restatement read the timeout turn as an
+   unrelated key. Its arm therefore survived one iteration: the two [u]
+   presses removed a binding only when both bytes arrived in the same
+   read. *)
+let cancels_two_press ~input_seen ~key ~second_press =
+  input_seen
+  &&
+  match key with
+  | None -> true
+  | Some pressed -> not (List.exists (String.equal pressed) second_press)
+
+(* The Fusion detail view: the keys table owns the key list; the renderer
+   owns the live scroll numbers it appends after them. ([view] stays
+   [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.)
+   [position] is the window the renderer drew ({!Masc_tui_scroll.window_text}),
+   so the footer agrees with what is on screen.
+
+   [K] and [B] answer in the detail as they do on the list (masc_tui.ml
+   matches them under [Fusion_detail]); the footer left them out, and a body
+   row said "K Keeper · B Board" in its own notation instead. *)
+let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
+    ~(layout : board_read_layout) ~has_attachments ~has_successor =
+  let pane_keys =
+    match layout with
+    | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
+    | Board_read_wide | Board_read_one_pane -> []
+  in
+  (* The label is where the key goes, and [z] goes both ways. Drawn as "wide"
+     in either state it named the screen an operator was already looking at:
+     on a wide detail the footer offered to widen it. On one pane there is no
+     second layout to reach, and the key is not drawn. *)
+  let width_key =
+    match layout with
+    | Board_read_split -> [ b Navigate "z" "wide" ]
+    | Board_read_wide -> [ b Navigate "z" "list" ]
+    | Board_read_one_pane -> []
+  in
+  (* On the comments j/k move the selection, not the rows, and the vote keys
+     act on that selection: the labels say which, so v cannot be read as a
+     vote on the post above. *)
+  let vote_key =
+    if focus_comments && not focus_posts then
+      b Act "v / V" "comment up / down"
+    else board_vote_key
+  in
+  hints_of_bindings
+    ([ b Navigate "j/k"
+         (if focus_posts then "posts"
+          else if focus_comments then "comment" else "body")
+     ; board_read_focus_key
+     ; b Navigate "[/]" "post"
+     ; b Navigate "PgUp/PgDn" "page"
+     ]
+     @ (if has_successor then [b Navigate "S" "successor"] else [])
+     @ pane_keys @ width_key
+     (* [o] goes after the pane and width keys. The fitter gives up the last
+        droppable hint first, so a key placed ahead of them pushes them off:
+        at 120 cells the split footer lost Ctrl-W:switch, and at 130
+        z:wide, to "o:all comments". Placed here it is the Navigate hint
+        dropped first, and up to 134 cells the row is the one drawn before
+        [o] existed. *)
+     (* A post with attachments numbers them for the open key; the hint
+        rides ahead of [o] with a short label, so a narrow footer gives it
+        up before the comment reader, which the fitter drops last on this
+        row. Measured at 140 cells: [o] and this hint ride the same drop
+        wave as [c], [Y], [r] and [Tab] — the row is over budget long
+        before this key existed. *)
+     @ (if has_attachments then [ b Navigate "1-9" "open" ] else [])
+     @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
+     @ [ vote_key
+       ; board_reply_key
+       ; board_copy_key
+       ; b Act "Left / Esc" "back"
+       ; b Meta "r" "refresh"
+       ; b Meta "Tab" "next"
+       ])
+
+(* A missing post has no read pane or copy target. Keep only the Board
+   bindings that still act while loading or after a failed read. *)
+let footer_hints_board_pending =
+  for_surface Board
+  |> List.filter (fun binding ->
+         List.exists (String.equal binding.key) [ "r"; "Left / Esc"; "Tab" ])
+  |> hints_of_bindings
+
+(* The scroll position is not here. It is not a key and it cannot be looked
+   up, so it travels to the footer as its own argument
+   ([Masc_tui_footer.line]'s [?position]) rather than as two spaces on the end
+   of this string -- spelled that way the fitter read it as one more key item
+   and gave it up first, and on this surface it was never drawn. *)
+let footer_hints_fusion_detail =
+  hints_of_bindings
+    ([ b Navigate "j/k" "scroll"
+     ; b Navigate "PgUp/PgDn" "page"
+     (* The table scopes this key to the open detail, and this footer is what
+        an open detail draws, so the key belongs on it. It was on the list
+        footer instead, where the dispatcher refuses it. *)
+     ; b Navigate "[ / ]" "previous / next"
+         ~help:"step to the run before or after this one"
+     ; fusion_caller_key
+     ; fusion_board_key
+     ; b Act "Y" "copy"
+     ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
+     ]
+     @ listing_meta)
+
+(* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
+   masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
+   name the drill-downs the same way the Fusion detail footer does. *)
+let footer_hints_lanes_run_list =
+  hints_of_bindings
+    ([ b Navigate "j/k" "move" ~help:"move the run cursor"
+     ; b Act "Right / Enter" "prompt" ~help:"open the run's prompt and output"
+     ; b Act "]" "older" ~help:"load the next retained-run page from the server"
+     ; b Act "Left / Esc" "back" ~help:"back to the lane overview"
+     ]
+     @ listing_meta)
+
+(* The position travels as [Masc_tui_footer.line]'s [?position], for the
+   reason spelled over [footer_hints_fusion_detail]. *)
+let footer_hints_lanes_run_detail =
+  hints_of_bindings
+    ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
+     ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
+     ; b Act "Left / Esc" "back" ~help:"back to the run list"
+     ]
+     @ listing_meta)
+
+let preflight_detail_binding =
+  b Act "d" "JEV evidence" ~help:"in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence"
+
+let footer_hints_lanes_run_detail_for ~preflight =
+  if preflight then hints_of_bindings [preflight_detail_binding] ^ "  " ^ footer_hints_lanes_run_detail
+  else footer_hints_lanes_run_detail
+
+let footer_hints_git_changes =
+  hints_of_bindings
+    ([ b Navigate "j/k" "move"
+     ; b Act "Right / d / Enter" "diff"
+     ; b Act "v" "open in code"
+     ; b Act "p" "open PR"
+     ; b Act "t/g" "task / goal"
+     ; b Act "Left / Esc" "back"
+     ]
+     @ listing_meta)
+
+let footer_hints_git_diff =
+  hints_of_bindings
+    ([ b Navigate "Shift-Left / Shift-Right" "pan"
+     ; b Navigate "j/k" "scroll"
+     ; b Act "v" "open in code"
+     ; b Act "p" "open PR"
+     ; b Act "t/g" "task / goal"
+     ; b Act "Left / Esc" "back to files"
+     ]
+     @ listing_meta)
+
+(* The Memory fact browser drawn over the health table. Its own row because
+   the keys change with it: the cursor moves rows instead of scrolling the
+   table, [c] narrows by the categories the loaded store holds, and Esc
+   closes the browser rather than leaving the surface.
+
+   The footer row and the sheet read this one list. The keys are not the
+   health row's under these names -- Enter opens the reading, s reorders
+   instead of pausing a keeper -- so a reader who has not pressed them learns
+   them only from [?], which is what [?] answers. *)
+let bindings_memory_facts =
+  [ b Navigate "j/k" "move"
+  ; b Act "Enter" "detail"
+      ~help:"read the whole fact in a wide overlay that owns the terminal"
+  ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
+  ; b Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
+  ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
+  ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
+  ; b Search "/" "filter" ~help:"live text filter / search"
+  ; b Search "n / N" "next / previous match"
+  ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
+  ]
+  @ row_list_edges @ listing_meta
+
+let footer_hints_memory_facts ~cols =
+  let bindings =
+    if cols >= Masc_tui_roster_pane.threshold_cols then bindings_memory_facts
+    else List.filter (fun (binding : binding) -> binding.key <> "d") bindings_memory_facts
+  in
+  hints_of_bindings bindings
+
+(* The reading the browser's Enter opens. One fact scrolls under the cursor
+   instead of the cursor moving rows, so it owns page and edge keys the
+   browser row has none of. The window marker it leads with is not a key, and
+   the renderer adds it. *)
+let bindings_memory_fact_detail =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "g / G" "top/bottom"
+      ~help:"jump to the first or last line of the fact"
+  ; b Act "Esc" "close" ~help:"return to the fact list"
+  ]
+
+let memory_fact_detail_hints = hints_of_bindings bindings_memory_fact_detail
+
+(* The reading Activity's [Enter] opens on an event row. One event's evidence
+   scrolls under the cursor instead of the cursor moving rows, so it owns page
+   and edge keys the feed row has none of. *)
+let bindings_acting_evidence =
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "g / G" "top/bottom"
+      ~help:"jump to the first or last line of the event evidence"
+  ; b Act "Left / Esc" "back to events"
+      ~help:"close the snapshot and return to the live event feed"
+  ]
+  @ [ b Meta "Tab" "next"; b Meta "q" "quit" ]
+
+let acting_evidence_hints = hints_of_bindings bindings_acting_evidence
+
+(* One section per surface family; the strip's spelling names it. Keepers
+   sub-modes collapse into the two sections an operator thinks in. *)
+let help_surfaces : (string * surface) list =
+  [ "Dashboard", Overview
+  ; "Work", Planning
+  ; "Keepers", Keepers Keeper_list
+  ; "Usage", Metrics
+  ; "Board", Board
+  ; "Workspace", Repositories
+  ; "System", Config
+  ; "Activity", Acting
+  ; "Keeper detail", Keepers Keeper_detail
+  ; "Chat", Keepers Keeper_message
+  (* Three screens a Keeper detail drills into, each with keys of its own and
+     no section until now: [?] there opened on Global and named no section for
+     the screen the reader was standing on. Named the way their titles read
+     ("Keepers > <keeper> > logs"), which is also how Schedules is named
+     below. The runtime picker earns its own: [d] follows [runtime].default
+     and [/] narrows the list, and neither is guessable. *)
+  ; "Keepers / Logs", Keepers Keeper_logs
+  ; "Keepers / Calls", Keepers Keeper_calls
+  ; "Keepers / Runtime", Keepers Keeper_runtime_pick
+  ; "Features", Lanes
+  ; "System / Runtime / Clients", Clients
+  ; "Approvals", Approvals
+  ; "Work / Task Review", Verification
+  ; "Work / Task Verdicts", Harness
+  ; "Fusion", Fusion
+  (* "Schedules", the name the title bar and the palette both use. It read
+     "Keeper detail / Automation" -- a Keeper detail tab that has no keys of
+     its own and no route to this screen -- so a reader who typed "go
+     Schedules" and pressed [?] found this screen's keys under the name of a
+     screen they were not on. The family is Keepers, which is where the strip
+     puts the highlight while this surface is open. *)
+  ; "Keepers / Schedules", Schedules
+  ; "Memory", Memory
+  ; "Workspace / Code", Code
+  ; "Changes", Changes
+  ; "System / Runtime", Runtime
+  ; "System / Resources", Resources
+  ; "System / Tools", Tools
+  ; "System / Logs", System_logs
+  (* Its keys are the least guessable on the product -- [B] opens the Browser
+     Lane, [Ctrl-O] previews a tab, [b / u] bind and unbind a channel -- and
+     the sheet built no section for them at all. *)
+  ; "Connectors", Connectors
+  ]
+
+(* The paragraphs docs/guides/TUI-KEYS.md prints under a section's table, in
+   the order they read there. A key whose behaviour outgrows its one-line
+   help cell -- what an asynchronous save keeps, what a retained observation
+   means -- is explained here because that document is generated from this
+   module: a paragraph written into it by hand fails [test_tui_keys_doc], and
+   regenerating deletes it. Each paragraph is Markdown, with the line breaks
+   the document prints.
+
+   Keyed by surface, the same key as the section, so a paragraph cannot land
+   under a title that merely reads alike. Reference only: the [?] sheet lists
+   keys and does not draw these. *)
+let reference_notes : surface -> string list = function
+  | Keepers Keeper_list ->
+      (* The last paragraph also explains the Runtime catalogue, Overview and
+         Board readers. It reads under Keepers because the reference has
+         carried it there. *)
+      [ "Keeper settings `e` reads a fresh snapshot asynchronously before opening the\n\
+         external editor. After the editor returns, workspace rechecking and the guarded\n\
+         save also run asynchronously; navigation stays available while the receipt is\n\
+         pending. Repeated `e` shares that pending save. The footer retains progress or\n\
+         failure for the selected Keeper, and a late receipt cannot refresh another Keeper."
+      ; "After a refusal or unconfirmed result, `e` reads current settings and restores\n\
+         only your changed values for review in the editor. Untouched fields use current\n\
+         values. The old revision and context-shrink confirmation are not reused; saving\n\
+         requires the new editor roundtrip. Original input and receipts stay with their\n\
+         operation. Sandbox shortcuts use the same owned save operation: they read current\n\
+         settings and the required revision before sending the selected profile. Repeated\n\
+         keys share a pending same-Keeper save; selecting a new profile never rewrites it.\n\
+         An already observed matching profile sends no POST. Failed shortcuts retain their\n\
+         selection; an explicit next key rereads current before another save. Retained editor\n\
+         changes survive shortcut operations. The external editor keeps its own terminal\n\
+         interaction. Runtime and painted latency remain unmeasured."
+      ; "Keeper Runtime picker assignments also retain an owned operation: original\n\
+         Keeper, workspace, concrete Runtime or clear-to-default choice, current snapshot,\n\
+         and assignment revision. Navigation stays available; a pending same-Keeper\n\
+         Settings, Sandbox or assignment save prevents another dispatch without closing\n\
+         the picker. Different Keepers retain independent operations. The existing config\n\
+         read and assignment POST remain the two logical save requests. Local workspace\n\
+         and read authority are checked again before POST; server assignment CAS remains\n\
+         the write precondition. This adds no atomic server workspace precondition."
+      ; "Progress, warnings, conflicts and uncertain outcomes stay with the original\n\
+         operation for this TUI session. Cancellation before possible dispatch is not-sent;\n\
+         after possible dispatch it is unconfirmed. HTTP 400 can include an IO failure,\n\
+         so it does not prove that no write happened. Explicitly choosing again reads\n\
+         current revision; the old request never resends itself. A committed receipt proves\n\
+         configured assignment and the application results it reports, not which Runtime\n\
+         is executing a current Keeper turn. Execution and painted latency remain unmeasured."
+      ; "Runtime catalogue consumers share an in-flight catalogue read for the same\n\
+         workspace. Explicit refresh and post-save demand wait for one fresh follow-up\n\
+         after that read, rather than starting overlapping catalogue requests. Further\n\
+         refreshes during the follow-up may require another read. Last observed rows stay\n\
+         visible with refreshing/stale status and the latest refresh failure. A successful\n\
+         empty response completes the read; it does not keep saying loading. Exact slot\n\
+         replacement still waits for a fresh catalogue. Nested pickers and recent-context\n\
+         catalogue demand resume after workspace reconfirmation. A different workspace\n\
+         clears the old rows and demand. This sharing covers the catalogue launcher;\n\
+         Overview and the Runtime operator surface retain their separate readers.\n\
+         Catalogue rows, configured default route and Keeper assignments share one\n\
+         validated observation. A missing usage-window observation stays an explicit\n\
+         unknown alongside an otherwise usable catalogue.\n\
+         Overview keeps catalogue and usage availability independent: valid usage remains\n\
+         available after catalogue validation fails, and usage failure leaves healthy\n\
+         catalogue rows usable. Both observations belong to the same response; a failed\n\
+         usage read does not borrow a prior response's quota identity.\n\
+         Full-refresh progress labels a composed read as partial when one returned result\n\
+         failed, naming both failed and received components. This covers Runtime\n\
+         catalogue/usage, Board posts/hearths and available Keeper roster/Candle results.\n\
+         Partial is separate from full receipt; unfinished logical readers remain interrupted when\n\
+         the refresh stops. These notices do not grant action authority or confirm Task completion.\n\
+         Board also reports its posts/hearth readers before the pair returns. A completed\n\
+         child remains visible when its parent fails or stops. A caught child cancellation\n\
+         is interrupted; a started child without a terminal observation is unfinished.\n\
+         Child intervals describe those observations, not proven worker exit or screen paint.\n\
+         Board posts and hearth data also arrive independently under their original request.\n\
+         Ready posts do not wait for the census; a pending or failed census retains its\n\
+         last successful value. One dataset does not consume its sibling's result, and a\n\
+         terminal bundle does not replay early data. Board remains pending while either\n\
+         dataset is outstanding. These are UI-state rules; actual paint latency is unmeasured.\n\
+         Census now distinguishes not read, initial reading, received (including empty),\n\
+         unavailable and a retained observation after failure. Refreshing/stale values stay\n\
+         available for hearth navigation; the census row and palette identify them as last\n\
+         observed. Header/sidebar totals use only a received census without a pending census\n\
+         read. A collector ending without a census result records unavailability. Workspace\n\
+         withdrawal clears census values and candidates along with other Board data.\n\
+         The post list has its own typed observation and pending slot. Initial loading,\n\
+         not read, received empty and failed are distinct. Refresh/failure retains posts,\n\
+         selected identity and compose input; list/sidebar and palette qualify retained\n\
+         posts as last observed. A detail response enriches one matching row while keeping\n\
+         the list's failure and pending ownership. Missing terminal results remain\n\
+         unavailable, and workspace withdrawal clears list candidates. Changing sort/hearth\n\
+         keeps the old listing with its original query until a new one succeeds, even if the\n\
+         old result was empty. The listing/sidebar and palette qualify that observation;\n\
+         its sort explanation, age column and census total use the observed query. Requested\n\
+         controls stay separate, and detail enrichment does not relabel the list.\n\
+         Admission diagnostics additionally keep the response's query, the controls at\n\
+         application and the retained listing's query separate for success/failure. Missing\n\
+         owned terminal data has no invented response query. These are request-linked log\n\
+         fields; actual runtime logs and visible behavior remain separate evidence.\n\
+         Full/navigation dispatch diagnostics also retain the original and current source\n\
+         request through cold identity handoff. Planned Board conditions stay fixed even\n\
+         if controls move; an originally non-Board read stays unrequested in that context.\n\
+         Dispatch/rebind/cleanup observations are separate from actual HTTP starts, received\n\
+         data and paint. A missing finish record remains an unfinished observation."
+      ]
+  | Config ->
+      [ "Runtime model and account form saves keep input and its opening revision while\n\
+         workspace checks, source reading, preview and guarded commit run outside the\n\
+         key handler. Repeated submission shares the pending operation. During a pending\n\
+         save, Esc leaves the form and keeps its operation; reopening Models with e/c or\n\
+         runtime.toml with a restores the original input. A disconnected commit remains\n\
+         unconfirmed and cannot be submitted again from that retained form. Ctrl-X closes\n\
+         a retained terminal form and rereads configuration; the next open starts fresh.\n\
+         The original receipt stays in session history. Confirmed account saves retain\n\
+         their sign-in command in the session log. File commit, durability and runtime\n\
+         application remain separate facts. Runtime and painted input latency are unmeasured."
+      ; "The runtime.toml editor also returns to the input loop before its save finishes;\n\
+         S retries a retained draft through the same owned asynchronous save. Its original\n\
+         path, source revision and complete edited text are submitted together. Repeated\n\
+         saves wait for the existing operation. Navigation keeps the draft; a late receipt\n\
+         can complete only its original editing intent, including after ordinary source\n\
+         refreshes, and cannot delete a later edit with the same text."
+      ; "After an unconfirmed commit or durability result, older comparisons and already\n\
+         in-flight reads cannot authorize retry. Read current with r, then explicitly use\n\
+         u to keep your text and choose that revision, or U to replace the text. Choosing\n\
+         a new base from a pre-outcome reading also cannot bypass revalidation. X discards\n\
+         only the local draft; it does not claim that a pending server write was cancelled.\n\
+         These changes do not make the external editor itself asynchronous or establish\n\
+         measured key/paint latency."
+      ; "Config source observations prepare whole-source tokenization, terminal sanitization\n\
+         and the model table together from one immutable reading before UI admission.\n\
+         Preparation uses the shared CPU path: the model table consumes already interpreted\n\
+         server declarations instead of reparsing Runtime source or expanding local credential\n\
+         homes. It reads no UI, environment, request ownership or palette state. The server\n\
+         model envelope must match the reading's exact path and revision. Missing, unavailable\n\
+         or malformed model evidence stays failed; source and other observations remain usable.\n\
+         Source-only form parsing still retains Runtime's environment effects.\n\
+         Account-group/model interpretation failure leaves the source available; email\n\
+         observation failure stays independent. Model selection and source revision come\n\
+         from that same reading."
+      ; "Ordinary refreshes reuse an unchanged retained draft's existing tokenization and\n\
+         the matching observation's current-file projection. Sharing tokenization does\n\
+         not share editing ownership, adopt a revision or authorize retry. Existing\n\
+         workspace/read authority, generation checks and queued follow-up policy still\n\
+         control admission. Diagnostic clocks distinguish request start, prepared result\n\
+         and UI admission decision; these are not painted-frame or key-latency evidence."
+      ]
+  | Approvals ->
+      [ "When a selected question is too tall for the compact Approvals panel, it keeps\n\
+         a short preview from the original question instead of disappearing behind a\n\
+         hidden-question count. Where space permits, the preview points to `a` for the\n\
+         complete Ask and its answers. The preview does not select or submit an answer;\n\
+         the existing answer reader keeps the full prompt, choices and draft. With only\n\
+         one content row, the selected preview takes that row; with none, no extra hidden\n\
+         count is drawn beyond the available space."
+      ]
+  | Tools ->
+      [ "Work Task detail and Tools original Task detail use source-bound history pages.\n\
+         `H` extends the captured prefix; a failed page retains the same cursor for an\n\
+         explicit retry. `r` requests a fresh latest prefix while keeping the prior\n\
+         observation visible. The page demand follows terminal height, with no total\n\
+         history cap. Exhaustion means the observed stored prefix ended; retained-away\n\
+         history and Task completion are separate facts. Tools cadence does not reset a\n\
+         paged history. A source change can refuse the cursor; use `r` to read anew."
+      ; "Task body and history prepare independently. Their notices distinguish waiting\n\
+         to start, arranging the text, waiting for the prepared result, and waiting for\n\
+         the display state to update. An earlier display stays labelled while a newer\n\
+         one is prepared. These stages describe display preparation, not Task progress\n\
+         or completion."
+      ]
+  | Keepers (Keeper_detail | Keeper_message | Keeper_logs | Keeper_calls
+            | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+  | Connectors | Runtime | Resources | System_logs -> []
+
+let entries bindings =
+  List.map
+    (fun { key; label; help; _ } -> (key, Option.value help ~default:label))
+    bindings
+
+(* The reader's own surface first, then the keys that work everywhere, then
+   the rest as reference. A sheet that opens on Planning while the reader is
+   on Overview is a list to search rather than an answer: the question [?]
+   asks is "what can I do here", and twenty other surfaces are what sits
+   underneath that answer.
+
+   [current] is matched exactly rather than by ring position. The Keepers
+   sub-modes are three sections here and one entry on the strip, and a reader
+   in the chat is asking for the chat's keys, not the roster's. A surface with
+   no section of its own simply matches nothing and the sheet reads as it did
+   before this argument existed. *)
+let here_marker = " \xc2\xb7 you are here"
+
+(* The Keeper detail tabs. Until 2026-08-30 the renderer drew these as
+   hand-written strings in its own [tab_hint] match, so the detail tabs were
+   a second key list this module did not own -- the exact split the header
+   above says cannot happen. [T] was missing from that string as well as
+   from here, so toggling a provider was undocumented on every screen.
+
+   The tabs' keys are conditional on the tab rather than the surface, which
+   is why they are not in [for_surface]: listing them there would advertise
+   them on the five tabs where they do nothing. *)
+let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
+  match tab with
+  | Detail_items ->
+      [ b Navigate "j/k" "preview"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "first/last"
+      ; b Navigate "v" "view" ~help:"all, owned, can buy, then face/neck/head/hand/base"
+      ; b Navigate "Space" "compare" ~help:"compare the try-on picture with the current outfit"
+      ; b Act "a" "ask Keeper" ~help:"prepare a price-bounded buy/equip chat draft; Enter sends it"
+      ]
+  | Detail_github ->
+      [ b Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"
+      ; b Act "P" "token" ~help:"set fine-grained PAT / token"
+      ]
+      (* One digit per scope the login can ask for, in the order the tab
+         lists them, so a scope added to the server's list gets its key here
+         without a second edit. *)
+      @ List.mapi
+          (fun index scope ->
+            b Act (string_of_int (index + 1))
+              (Masc.Keeper_github_identity.login_scope_to_string scope)
+              ~help:"tick or untick this scope for the next L login")
+          Masc.Keeper_github_identity.all_login_scopes
+  | Detail_sandbox ->
+      [ b Act "o" "actual logs"
+      ; b Act "d/m/s" "backend"
+          ~help:"set the sandbox backend in place: docker / microvm / remote_ssh"
+      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Meta "R" "refresh"
+      ]
+  | Detail_instructions ->
+      [ b Act "e" "edit JSON in $EDITOR"
+          ~help:"the settings form; only changed fields are sent"
+      ]
+  | Detail_identity ->
+      [ (* Arrows first: the digits only reach the first nine rows and the
+           list is a declaration directory that can hold more. *)
+        b Navigate "arrows+enter" "connect"
+      ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
+      ; b Act "A" "app"
+          ~help:"open the app-registration form for it -- it asks for a Client ID"
+      ; b Act "D D" "disconnect"
+          ~help:
+            "twice: forget the stored token, drop the tools it attached, and ask \
+             the provider to revoke what it still holds"
+      ; b Search "/" "filter"
+      ; b Meta "R" "refresh"
+      ]
+  | Detail_channels ->
+      [ b Navigate "j/k" "transport"
+      ; b Navigate "J/K" "binding"
+      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Act "b / e / u u" "bind / reassign / remove"
+          ~help:"bind a channel, reassign the selected row, or remove it twice-confirmed"
+        (* Takes [U] from the runtime picker on this tab only, the way [u]
+           is taken above: the picker stays on every other tab. *)
+      ; b Act "U U" "unbind all"
+          ~help:"remove every channel binding of this Keeper on every \
+                 transport, twice-confirmed; a channel rebound to another \
+                 Keeper meanwhile is left as is"
+      ]
+  | Detail_info ->
+      (* Lowercase [b] beside [B]: one partition, then all of them. It was
+         [Q], but the global quit test takes [Q] as well as [q] and runs
+         first, so the key armed the exit instead of the requeue. *)
+      [ b Act "b" "requeue board"
+          ~help:
+            "requeue the oldest blocked Board-attention partition; \
+             its judgment call may run a second time"
+      ; b Act "B" "requeue all board"
+          ~help:
+            "requeue every waiting Board-attention partition in order, with \
+             a separate audited CAS for each; judgment calls may run again"
+      ]
+  | Detail_terminal ->
+      (* [g] is the approval-gate toggle on every tab, so the Terminal does not
+         borrow it for the top the way readers elsewhere do. *)
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "oldest/follow"
+          ~help:"Home goes to the oldest output kept; End goes back to the \
+                 bottom and follows new output again"
+      ]
+  | Detail_secrets | Detail_automation | Detail_runs -> []
+
+(* The single keys a binding's key names, in this table's own notation:
+   alternatives apart with "/" ("d/m/s", "Left / Esc"), a key pressed twice
+   apart with a space ("u u"), and a chord with "+" ("arrows+enter"). *)
+let key_atoms key =
+  String.split_on_char '/' key
+  |> List.concat_map (String.split_on_char ' ')
+  |> List.concat_map (String.split_on_char '+')
+  |> List.filter (fun atom -> not (String.equal atom ""))
+  |> List.sort_uniq String.compare
+
+(* The keys a detail tab's own arms answer before the Keeper controls do.
+   Sandbox takes [s] for the remote_ssh backend and [o] for its container
+   logs; Channels takes [j/k] and [e]; Settings takes [e]. *)
+let keeper_detail_tab_taken_keys tab =
+  List.concat_map
+    (fun binding -> key_atoms binding.key)
+    (keeper_detail_tab_bindings tab)
+
+(* The keys the detail footer leads with. Same [key:label] spelling as the
+   rest of the row, and the tab switch leads because it is on every tab. *)
+let keeper_detail_tab_hint tab =
+  String.concat "  "
+    ("[ ]:tab"
+     :: List.map
+          (fun binding -> binding.key ^ ":" ^ binding.label)
+          (keeper_detail_tab_bindings tab))
+
+(* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as
+   [listing_meta] spells them -- is said once, under Global. Repeated under
+   every surface it took three of the dozen rows an 80x24 sheet shows of the
+   reader's own section. A surface that names one of those keys its own way
+   ([r] reload on Config) keeps that row: it says something Global does not.
+   Footers keep the tail, since a footer is all a surface shows. *)
+let sheet_bindings surface =
+  List.filter
+    (fun binding -> not (List.mem binding listing_meta))
+    (for_surface surface)
+
+(* Keys Tools answers only in its async runs pane, and Work only with a Task
+   detail open. The Tools footer is one row for all five panes and the Goals
+   footer never has a Task detail under it, so listing these in
+   [for_surface] would advertise them where they do nothing. The sheet
+   carries them, each sentence naming where the key answers. *)
+let tools_async_bindings =
+  [ b Act "Enter" "read request / Skill evidence"
+      ~help:"in async runs, read the selected original request; \
+             otherwise load retained evidence for the selected Skill"
+  ; b Navigate "t / T" "source Task"
+      ~help:"from async request detail, read its original source Task and history"
+  ; b Navigate "H" "earlier history"
+      ~help:"from original Task detail, read earlier stored history; retains \
+             the observed prefix on failure"
+  ; b Act "o / O" "exact lookup"
+      ~help:"in async runs, edit the original submitter, request ID and \
+             target Keeper for an exact lookup"
+  ]
+
+let work_task_detail_bindings =
+  [ b Navigate "H" "earlier history"
+      ~help:"in Task detail, extend the observed history with its known \
+             earlier page"
+  ]
+
+(* Each section with the surface it answers for; Global and the mark legends
+   answer for none. The sheet reads the sections, the key reference reads the
+   surface as well, for the paragraphs under a table. *)
+let located_sections ?current () =
+  let sections =
+    List.map
+      (fun (title, surface) ->
+         (* The Keeper detail tabs each own keys the surface list cannot
+            hold, and the sheet is where a reader looks for them. Append
+            them under the surface with the tab named, so [?] answers
+            "what does T do" -- which nothing did before 2026-08-30. *)
+         let tab_entries =
+           match surface with
+           | Keepers Keeper_detail ->
+               List.concat_map
+                 (fun tab ->
+                    List.map
+                      (fun (key, help) ->
+                         ( key
+                         , Printf.sprintf "on the %s tab: %s"
+                             (Masc_tui_types.keeper_detail_tab_label tab)
+                             help ))
+                      (entries (keeper_detail_tab_bindings tab)))
+                 Masc_tui_types.keeper_detail_tabs
+           (* The fact browser and the reading its Enter opens have the same
+              problem the tabs above have: keys the surface list cannot hold,
+              on screens the reader is standing on. The Memory section is
+              where they look, so both rows go there with the screen named. *)
+           | Memory ->
+               List.map
+                 (fun (key, help) -> (key, "in the facts browser: " ^ help))
+                 (entries bindings_memory_facts)
+               @ List.map
+                   (fun (key, help) -> (key, "in the fact detail: " ^ help))
+                   (entries bindings_memory_fact_detail)
+           | Lanes -> entries [preflight_detail_binding]
+           | Planning -> entries work_task_detail_bindings
+           | Tools -> entries tools_async_bindings
+           | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
+           | Overview | Acting | Metrics | Clients | Board | Approvals | Schedules
+           | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+           | Config | Resources | System_logs -> []
+         in
+         (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
+      help_surfaces
+  in
+  let here, rest =
+    match current with
+    | None -> ([], sections)
+    | Some current ->
+        List.partition (fun (surface, _) -> surface = current) sections
+  in
+  List.map (fun (surface, (title, keys)) -> (Some surface, (title ^ here_marker, keys))) here
+  @ (None, ("Global", entries global))
+    :: (List.map (fun (surface, section) -> (Some surface, section)) rest
+        (* The marks last, as reference, the way the slash commands read as
+           reference. One reader of them has no words beside it: the Keepers
+           rows draw each glyph with its status word and so does the chat
+           header, but the roster pane beside the chat is 34 cells wide and
+           draws the glyph alone (masc_tui_render_prim.ml: "Without it the pane
+           says a keeper exists and nothing else"). Selecting keepers until
+           every state has been seen was the only way that reader could learn
+           the marks, and a rare one such as failing may never be selected.
+
+           Masc_tui_keeper_mark carried this list for exactly this and nothing
+           read it. Its shape is already the sheet's: a mark, and what it
+           means. Last rather than beside Global because the section order up
+           to there is asserted. *)
+        @ List.map (fun section -> (None, section))
+        [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* The Keepers header words and the Mode S letters. They were two
+             rows above every roster: an empty roster spent them on columns
+             it had nothing in, a narrow one on columns it did not draw, and
+             beside the Activity pane both rows were cut. *)
+          ; ("Keeper columns", Masc_tui_keeper_mark.column_legend)
+          (* The Board's first column is the only place these three appear, and
+             the column has no room for a legend of its own: its header already
+             spends three rows and the hearth row is cut at 150 columns. *)
+          (* The Memory roster's ST column. The words were a literal row the
+             surface drew above every roster -- including a roster that had
+             failed to read, where the column it explained was not on screen.
+             Same move as the Keeper columns above: the row goes, the sheet
+             keeps the words, and the glyphs now come from the function the
+             column draws with. *)
+          ; ("Memory marks", Masc_tui_memory_mark.legend)
+          ; ("Board marks", Masc_tui_board_kind_mark.legend)
+          (* The Code tree's file marks. A folder takes the arrow and a file
+             takes its kind's mark, and neither carries a word -- the name
+             beside it says the extension the mark was read from, not what the
+             mark means. Seven marks drew with nothing anywhere saying so. *)
+          ; ("File marks", Masc_tui_file_icon.legend)
+          (* Planning's own legend says the marks its list is drawing, which
+             is what keeps that line inside a narrow frame -- so a mark no
+             goal carries right now has nowhere else to be explained. Here. *)
+          ; ("Judge marks", Masc_tui_planning_proof_mark.legend)
+          (* The marks and phrases on a chat's tool and skill rows. Six
+             outcome marks, eight skill phrases and two words of proof sat on
+             every transcript with nothing anywhere saying what one meant;
+             an operator reading them asked what "받아서 씀" received and
+             wrote (2026-09-14). *)
+          ; ("Chat marks", Masc_tui_keeper_chat_transcript.legend)
+          (* The first column of Config's two list panes. The prompt registry
+             draws three marks and the params list two, and the words for
+             them were only in the detail pane below the list -- for the one
+             row the cursor was on. A reader scanning twenty rows could tell
+             a marked row from an unmarked one and not what the mark said. *)
+          ; ("Prompt marks", Masc_tui_config_mark.prompt_legend)
+          ; ("Param marks", Masc_tui_config_mark.param_legend)
+          ])
+
+let help_sections ?current () = List.map snd (located_sections ?current ())
+
+type reference_section = {
+  section_title : string;
+  section_rows : (string * string) list;
+  section_notes : string list;
+}
+
+(* The sheet's sections in the sheet's order, each with the paragraphs
+   [reference_notes] keeps for its surface. The rows are the sheet's rows, so
+   the document and [?] cannot list different keys. *)
+let reference_sections () =
+  List.map
+    (fun (surface, (section_title, section_rows)) ->
+       let section_notes =
+         match surface with
+         | Some surface -> reference_notes surface
+         | None -> []
+       in
+       { section_title; section_rows; section_notes })
+    (located_sections ())
+
+let workspace_activity_bindings ~context =
+  [ b Navigate "j/k" (if context then "scroll" else "select")
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Act "Enter / Right" "file" ~help:"open the selected recorded file in Code"
+  ; b Act "r / R" "refresh"
+  ; b Navigate "Esc / Left" (if context then "list" else "repositories")
+  ; b Navigate "?" "help"
+  ] @ (if context then [b Navigate "Home/End / g/G" "edges"]
+       else [b Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
+
+let exact_activity_bindings =
+  [ b Act "Space" "change activity draft" ~help:"preserve configuration; no write until s"
+  ; b Act "s" "save" ~help:"preview and save against the original file revision"
+  ; b Act "r" "read current" ~help:"keep edits; otherwise follow current file"
+  ; b Act "u" "reapply activity" ~help:"keep only the desired on/off change over the current file; s then saves"
+  ; b Act "x" "discard draft" ~help:"use the displayed current file; no write"
+  ; b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "top/bottom"
+  ; b Navigate "Esc / q" "back" ~help:"retain the activity draft for this workspace and lane"
+  ]
+
+let about_bindings =
+  [b Act "c" "candle"; b Meta "Esc" "close"; b Meta "?" "help"]
+
+let context_bindings ~cols (state : state) =
+  let module Inspector = Masc_tui_context_inspector in
+  let split = cols >= Masc_tui_roster_pane.threshold_cols in
+  let tabs = [b Navigate "1/2/3/4 or Tab" "switch"] in
+  let turns = match state.context_inspector_target with
+    | Inspector.Recent _ -> [b Navigate "[ / ]" "turn"]
+    | Inspector.Pinned _ -> [] in
+  let refresh = [b Meta "r" "refresh"] in
+  let help = [b Meta "?" "help"] in
+  if Option.is_some state.search then
+    [b Search "type" "query"; b Act "Enter" "keep search"; b Meta "Esc" "cancel search"]
+  else match state.context_inspector_tab, state.context_inspector_exact with
+  | Inspector.Response, _ ->
+      tabs @ turns @ [b Navigate "j/k" "scroll"; b Navigate "PgUp/PgDn" "page";
+        b Navigate "Home/End" "top/bottom"] @ refresh @ [b Meta "Esc" "return"] @ help
+  | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map), Some _ ->
+      [b Navigate "4" "response"; b Navigate "j/k" "scroll"; b Meta "Esc" "list"] @ help
+  | (Inspector.Exact_input | Inspector.Input_map), None ->
+      tabs @ turns
+      @ (if state.context_inspector_tab = Inspector.Exact_input
+            && Option.is_some state.context_inspector_reading then [b Search "/" "search"] else [])
+      @ [b Navigate "j/k" (if split then "select or scroll" else "select")]
+      @ (if split then [b Navigate "h/l" "pane"] else [])
+      @ [b Act "Enter" "open exact"] @ refresh @ [b Meta "Esc" "close"] @ help
+  | Inspector.Composition, None ->
+      tabs @ turns @ [b Navigate "j/k" "scroll"] @ refresh @ [b Meta "Esc" "close"] @ help
+
+let footer_hints_about () = hints_of_bindings about_bindings
+let footer_hints_context ~cols state = hints_of_bindings (context_bindings ~cols state)
+
+let queue_bindings state panel =
+  let close = [b Meta "Esc" "back"; b Meta "?" "help"] in
+  if Option.is_some panel.qp_detail then
+    [b Navigate "j/k" "scroll"; b Navigate "PgUp/PgDn" "page";
+     b Navigate "Home/End" "edges"; b Meta "Enter / Esc" "list"; b Meta "?" "help"]
+  else
+    let actions =
+      if panel.qp_reading <> Queue_current || not (server_authority_ready state) then []
+      else match queue_panel_priority state ~items:(queue_panel_items state panel) panel with
+        | Queue_local_order -> [b Act "n" "first locally"; b Act "l" "last locally"]
+        | Queue_server_order -> [b Act "n" "run next"; b Act "l" "move last"]
+        | Queue_event_urgency -> [b Act "n" "immediate priority"; b Act "l" "low priority"]
+        | Queue_no_priority -> [] in
+    actions @ [b Navigate "↑/↓ / j/k" "select"; b Navigate "Enter" "read"]
+    @ [b Navigate "f" (match panel.qp_layout with
+         | Masc_tui_queue_layout.Adaptive -> "prefer full"
+         | Expanded -> "allow context");
+       b Navigate "PgUp/PgDn" "page"; b Navigate "Home/End" "edges";
+       b Act "r" "refresh"] @ close
+
+(* The selected action has higher priority than generic movement. The shared
+   default group sort would put every navigation key ahead of it and cause
+   next/last to disappear first as the footer gives up its tail. *)
+let footer_hints_queue state panel = hints_in_order (queue_bindings state panel)
+
+let help_sections_for_state ~cols (state : state) =
+  let active =
+    if state.about_open then Some ("About", about_bindings)
+    else if state.context_inspector_open then Some ("Context", context_bindings ~cols state)
+    else if Option.is_some state.queue_panel then
+      Option.map (fun panel -> "Queue", queue_bindings state panel) state.queue_panel
+    else if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
+    else if state.view = Lanes && Option.is_some state.exact_activity_open then
+      Some ("Exact activity", exact_activity_bindings)
+    else if state.view = Lanes && Option.is_some state.machine_activity_open then
+      Some ("Machine activity", exact_activity_bindings)
+    else if Option.is_some state.voice_agent_voices then
+      let bindings =
+        match state.voice_agent_voices with
+        | Some session -> voice_agent_bindings_for_saving session.vas_saving
+        | None -> voice_agent_bindings
+      in
+      Some ("Keeper voices", bindings)
+    else if state.view = Runtime && Option.is_some state.runtime_detail_target then
+      let routes = state.runtime_detail_target = Some Runtime_routes in
+      Some ("Runtime detail", runtime_detail_bindings_for ~ko:(state.ui_language = Lang_ko) ~routes)
+    else if state.view = Acting && Option.is_some state.acting_detail then
+      Some ("Event evidence", bindings_acting_evidence)
+    else if state.view = Code && state.code_focus_file = Right_pane
+            && state.code_history_open && not state.repository_changes_open then
+      Some ("Code history", code_history_bindings)
+    else if state.view = Code && state.code_focus_file = Right_pane
+            && state.code_notes_open && not state.repository_changes_open then
+      Some ("Code memos", code_notes_bindings)
+    else if state.view = Repositories && not state.repository_changes_open
+            && Option.is_some state.workspace_activity_repo then
+      let context = Option.is_some state.workspace_activity_context_scroll in
+      Some ((if context then "Activity context" else "Workspace Activity"),
+            workspace_activity_bindings ~context)
+    else None
+  in
+  match active with
+  | None -> help_sections ~current:state.view ()
+  | Some (title, bindings) ->
+      (title ^ here_marker, entries bindings) :: help_sections ()
+
+let footer_hints_browser_lane =
+  hints_of_bindings
+    [ b Navigate "b" "choose browser"
+    ; b Navigate "A" "advanced browsers"
+    ; b Navigate "[ / ]" "tab"
+    ; b Navigate "j/k" "text"
+    ; b Act "Ctrl-O" "screenshot"
+    ; b Act "g" "URL"
+    ; b Act "o / x" "work browser / close"
+    ; b Act "r" "refresh"
+    ; b Navigate "Ctrl-^ / Esc" "hide lane"
+    ]

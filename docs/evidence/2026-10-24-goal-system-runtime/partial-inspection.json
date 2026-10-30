@@ -1,0 +1,87 @@
+{
+  "at": "2026-10-24T14:35:47.287975+00:00",
+  "task": {
+    "id": "task-001",
+    "title": "Set alpha to true in acceptance.json",
+    "description": "Read workspace/acceptance.json. Change the value of the \"alpha\" field to true. Ensure \"beta\" and \"gamma\" remain false. Use artifact:workspace/acceptance.json as evidence for verification. Do not modify \"beta\" or \"gamma\" until this task is approved.",
+    "priority": 2,
+    "files": [],
+    "created_at": "2026-10-24T14:29:27Z",
+    "created_by": "goal-canary",
+    "contract": {
+      "strict": true,
+      "required_evidence": [
+        "artifact:workspace/acceptance.json"
+      ]
+    },
+    "handoff_context": {
+      "summary": "File workspace/acceptance.json was updated to {\"alpha\": true, \"beta\": false, \"gamma\": false}. This modification was performed to fulfill the requested task.",
+      "evidence_refs": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "updated_at": "2026-10-24T14:34:13Z",
+      "updated_by": "goal-canary"
+    },
+    "status": "awaiting_verification",
+    "assignee": "goal-canary",
+    "started_at": "2026-10-24T14:33:47Z",
+    "submitted_at": "2026-10-24T14:34:13Z",
+    "verification_id": "vrf-c6c42865031b8d50dce397b39f68ecfc"
+  },
+  "goal_links": {
+    "version": 1,
+    "last_updated": "2026-10-24T14:29:27Z",
+    "links": [
+      {
+        "goal_id": "goal-canary-three-results",
+        "task_ids": [
+          "task-001"
+        ]
+      }
+    ]
+  },
+  "artifact_value": {
+    "alpha": true,
+    "beta": false,
+    "gamma": false
+  },
+  "artifact_sha256": "5fa852df4c27a68cc7e0c127b94c0fe2169a33f55201d50b20618a9ba45e9f06",
+  "artifact_bytes": 46,
+  "operator_evidence": {
+    "ok": true,
+    "result": {
+      "task_id": "task-001",
+      "verification_id": "vrf-c6c42865031b8d50dce397b39f68ecfc",
+      "producer": "goal-canary",
+      "authority_kind": "human_operator",
+      "authority_actor": "goal-canary-operator",
+      "evidence": {
+        "access": "available",
+        "request": {
+          "id": "vrf-c6c42865031b8d50dce397b39f68ecfc",
+          "task_id": "task-001",
+          "worker": "goal-canary",
+          "created_at": 1792852453.275342
+        },
+        "items": [
+          {
+            "kind": "artifact",
+            "reference": "artifact:workspace/acceptance.json",
+            "content": "{\"alpha\": true, \"beta\": false, \"gamma\": false}",
+            "bytes": 46,
+            "truncated": false
+          },
+          {
+            "kind": "note",
+            "content": "File workspace/acceptance.json was updated to {\"alpha\": true, \"beta\": false, \"gamma\": false}. This modification was performed to fulfill the requested task."
+          },
+          {
+            "kind": "note",
+            "content": "Task completed: Set alpha to true in acceptance.json. beta and gamma were explicitly kept as false. This was done in accordance with the request, pending approval."
+          }
+        ]
+      }
+    }
+  },
+  "provenance": "controlled operator_proxy, not independent LLM or human Goal confirmation"
+}

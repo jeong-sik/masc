@@ -1,0 +1,175 @@
+{
+  "run_id": 40116634161,
+  "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "scope": "Observed remote native targeted run only; no repaired-source PASS, installation, vendor or model-success claim",
+  "raw_job_log": {
+    "path": "/tmp/masc-authority-3280-job.log",
+    "sha256": "188f6c4fe588ab36098c9f14d29cc49ccc0cf2bda50e9d96215d7ec16d65b3b3",
+    "bytes": 404357
+  },
+  "summary": {
+    "requested_suites": 7,
+    "completed_pass_suites": 6,
+    "completed_pass_tests": 245,
+    "timeout_suites": 1,
+    "claude_explicit_failures": 3
+  },
+  "suites": [
+    {
+      "name": "direct Goal context on actual provider wire",
+      "start_log_line": 768,
+      "passed_cases_observed": 8,
+      "failed_cases_observed": [],
+      "result": "pass",
+      "tests_run": 8,
+      "completion_log_line": 978,
+      "target_suite": "test_keeper_direct_goal_provider_wire"
+    },
+    {
+      "name": "keeper official-client host",
+      "start_log_line": 984,
+      "passed_cases_observed": 88,
+      "failed_cases_observed": [],
+      "result": "pass",
+      "tests_run": 88,
+      "completion_log_line": 1683,
+      "target_suite": "test_keeper_official_client_host"
+    },
+    {
+      "name": "keeper_claude_code_runtime",
+      "start_log_line": 1689,
+      "passed_cases_observed": 53,
+      "failed_cases_observed": [
+        {
+          "group": "lifecycle",
+          "index": 0,
+          "title_from_log": "actual Start authority User and la...",
+          "log_line": 1812,
+          "exact_log_line": "2026-10-24T17:38:21.9378193Z   [FAIL]        lifecycle              0   actual Start authority User and la...",
+          "preceding_assertions_or_error": [
+            {
+              "log_line": 1809,
+              "text": "2026-10-24T17:38:21.9370817Z ASSERT first Start then held Resume"
+            },
+            {
+              "log_line": 1810,
+              "text": "2026-10-24T17:38:21.9371931Z ASSERT actual adapter shares one post-hook issuer snapshot"
+            },
+            {
+              "log_line": 1811,
+              "text": "2026-10-24T17:38:21.9372530Z ASSERT standing System never contains this-turn authority"
+            }
+          ]
+        },
+        {
+          "group": "lifecycle",
+          "index": 8,
+          "title_from_log": "native Gate resume refused as full...",
+          "log_line": 2028,
+          "exact_log_line": "2026-10-24T17:38:50.1928865Z   [FAIL]        lifecycle              8   native Gate resume refused as full...",
+          "preceding_assertions_or_error": [
+            {
+              "log_line": 2026,
+              "text": "2026-10-24T17:38:50.1921863Z ASSERT the Gate resume is not respawned"
+            },
+            {
+              "log_line": 2027,
+              "text": "2026-10-24T17:38:50.1922606Z ASSERT a Gate resume sends its changed unread evidence and new input only"
+            }
+          ]
+        },
+        {
+          "group": "lifecycle",
+          "index": 13,
+          "title_from_log": "checkpointless polling repetition ...",
+          "log_line": 2149,
+          "exact_log_line": "2026-10-24T17:39:02.7039500Z   [FAIL]        lifecycle             13   checkpointless polling repetition ...",
+          "preceding_assertions_or_error": [
+            {
+              "log_line": 2144,
+              "text": "2026-10-24T17:39:02.6965099Z [2026-10-24 17:39:02] [WARN] [Keeper/claude-fixture] claude-fixture: turn terminal (non-exhaustion error) \u2014 err=Internal error: invalid Keeper chat operation: input writer capture requires an inherited executing child runtime=claude.claude"
+            },
+            {
+              "log_line": 2145,
+              "text": "2026-10-24T17:39:02.6977438Z [2026-10-24 17:39:02] [WARN] [Keeper/claude-fixture] keeper_turn_error incident_id=trace-claude-fixture#1 detail=Internal error: invalid Keeper chat operation: input writer capture requires an inherited executing child"
+            },
+            {
+              "log_line": 2146,
+              "text": "2026-10-24T17:39:02.6994703Z [2026-10-24 17:39:02] [ERROR] [Keeper/claude-fixture] claude-fixture: keeper cycle FAILED runtime=none lane=claude.claude error_origin=none attempts=[] deferred_next_runtime=none max_context=200000 context_budget=200000 primary_budget=200000 requested_override=none system_and_user_bytes=25427 cycle_latency=35ms error=Internal error: invalid Keeper chat operation: input writer capture requires an inherited executing child"
+            },
+            {
+              "log_line": 2147,
+              "text": "2026-10-24T17:39:02.7021455Z [2026-10-24 17:39:02] [WARN] [Keeper] claude-fixture: turn failure observed (consecutive=1); Keeper lifecycle remains active: Internal error: invalid Keeper chat operation: input writer capture requires an inherited executing child"
+            },
+            {
+              "log_line": 2148,
+              "text": "2026-10-24T17:39:02.7023574Z ASSERT Internal error: invalid Keeper chat operation: input writer capture requires an inherited executing child"
+            }
+          ]
+        }
+      ],
+      "result": "timeout",
+      "runner_exit_code": 124,
+      "runner_timeout_seconds": 600,
+      "completion_log_line": 2818,
+      "exact_runner_result": "2026-10-24T17:48:07.7200169Z [targeted] test/test_keeper_claude_code_runtime: TIMEOUT exit 124 after 600s; the hung case is the one after the last [OK] line above",
+      "target_suite": "test_keeper_claude_code_runtime",
+      "first_unfinished_case": {
+        "group": "lifecycle",
+        "index": 48,
+        "registered_title": "repeated tool stop records pre-result turn identity",
+        "function_at_source3280": "test_repeated_tool_stop_records_pre_result_turn_identity",
+        "basis": "suite runner states hung case follows last OK; source3280 registration follows lifecycle47 blank-system case",
+        "last_completed_case": {
+          "group": "lifecycle",
+          "index": 47,
+          "title_from_log": "blank system prompt is refused not...",
+          "log_line": 2812,
+          "exact_log_line": "2026-10-24T17:45:01.3457148Z   [OK]          lifecycle             47   blank system prompt is refused not..."
+        },
+        "scope": "case48 was entered but has no terminal PASS/FAIL observation; later cases are unexecuted/unknown"
+      },
+      "failure_details_limit": "The suite timed out before Alcotest final failure summaries; raw job log records failure locations and preceding assertions, not complete expected/received strings."
+    },
+    {
+      "name": "keeper_run_tools_hooks",
+      "start_log_line": 2822,
+      "passed_cases_observed": 66,
+      "failed_cases_observed": [],
+      "result": "pass",
+      "tests_run": 66,
+      "completion_log_line": 3215,
+      "target_suite": "test_keeper_run_tools_hooks"
+    },
+    {
+      "name": "keeper prompt capture",
+      "start_log_line": 3221,
+      "passed_cases_observed": 10,
+      "failed_cases_observed": [],
+      "result": "pass",
+      "tests_run": 10,
+      "completion_log_line": 3288,
+      "target_suite": "test_keeper_prompt_capture"
+    },
+    {
+      "name": "keeper_next_request_forecast",
+      "start_log_line": 3294,
+      "passed_cases_observed": 32,
+      "failed_cases_observed": [],
+      "result": "pass",
+      "tests_run": 32,
+      "completion_log_line": 3486,
+      "target_suite": "test_keeper_next_request_forecast"
+    },
+    {
+      "name": "turn_record",
+      "start_log_line": 3492,
+      "passed_cases_observed": 41,
+      "failed_cases_observed": [],
+      "result": "pass",
+      "tests_run": 41,
+      "completion_log_line": 3730,
+      "target_suite": "test_turn_record"
+    }
+  ]
+}

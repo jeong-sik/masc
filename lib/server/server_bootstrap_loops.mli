@@ -1,0 +1,272 @@
+(** Server Bootstrap Loops — install tooling and spawn the long-running
+    keeper / maintenance fibers during server startup.
+
+    Called once from [bin/main_eio.ml] after [Mcp_server.server_state] is
+    constructed.  Every entry returns either [unit] or a small
+    diagnostic record; lifecycle of the spawned fibers is bound to the
+    caller's [Switch].  Public surface is intentionally tiny — most of
+    the work lives in private helpers in the [.ml]. *)
+
+val register_lane_fleet_backend : unit -> unit
+(** Register the production Lane Broadcast recipient snapshot and transcript
+    projector without starting Keeper loops. Used by normal server startup and
+    isolated host qualification, both with the same delivery implementation. *)
+
+type keeper_persistence_report =
+  { shutdown : Keeper_shutdown_runtime.restored_inventory
+  ; fusion_delivery :
+      ( Fusion_delivery_projector.recovery_report
+      , Fusion_delivery_obligation.error )
+        result
+  }
+
+type keeper_persistence_failure_phase =
+  | Resolving_base_path
+  | Restoring_shutdown
+  | Recovering_persistence
+  | Starting_keeper_loops
+
+type keeper_persistence_raised_cause =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type keeper_persistence_failure_cause =
+  | Base_path_identity_unavailable_cause of keeper_persistence_raised_cause
+  | Noncanonical_config_cause of
+      { configured_base_path : string
+      ; canonical_base_path : string
+      ; configured_backend_base_path : string
+      ; expected_backend_base_path : string
+      }
+  | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable_cause of string
+  | Unexpected_exception_cause of keeper_persistence_raised_cause
+  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.refusal list
+  | Lifecycle_invariant_cause of string
+
+type keeper_persistence_failure =
+  { phase : keeper_persistence_failure_phase
+  ; base_path : string
+  ; cause : keeper_persistence_failure_cause
+  }
+
+type keeper_persistence_prepare_error =
+  | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable of string
+  | Preparation_base_path_identity_unavailable of keeper_persistence_failure
+  | Preparation_config_not_canonical of keeper_persistence_failure
+  | Preparation_in_progress
+  | Preparation_awaiting_claim
+  | Preparation_already_claimed
+  | Preparation_failed_previously of keeper_persistence_failure
+  | Preparation_ownership_lost
+  | Store_quarantine_refused of Keeper_store_boot_reconcile.refusal list
+      (** Boot examined the keeper stores, found some this build cannot
+          decode, and the operator did not pass [--accept-store-quarantine].
+          The files stay where they are (RFC-0420). *)
+
+type prepared_keeper_persistence
+type claimed_keeper_persistence
+
+type keeper_persistence_claim_error =
+  | Claim_base_path_mismatch
+  | Claim_base_path_identity_unavailable of keeper_persistence_failure
+  | Claim_superseded
+  | Claim_already_claimed
+  | Claim_failed_previously of keeper_persistence_failure
+
+type keeper_persistence_start_error =
+  | Start_base_path_mismatch of
+      { claimed_base_path : string
+      ; state_base_path : string
+      }
+  | Start_base_path_identity_unavailable of keeper_persistence_failure
+  | Start_superseded
+  | Start_in_progress
+  | Start_already_started
+  | Start_execution_failed of keeper_persistence_failure
+  | Start_failed_previously of keeper_persistence_failure
+
+exception Keeper_persistence_start_failed of keeper_persistence_start_error
+
+val prepare_keeper_persistence :
+  ?requested_base_path:string ->
+  accept_store_quarantine:bool ->
+  config:Workspace.config ->
+  unit ->
+  (prepared_keeper_persistence, keeper_persistence_prepare_error) result
+(** Synchronously configure/restore the durable queue, then recover keeper
+    message requests against one canonical BasePath identity captured at entry.
+    Direct chat checkpoints are request-local and deliberately excluded from a
+    global startup inventory. Only an idle process lifecycle may prepare; ready
+    state cannot be replaced by a second preparation. Per-record failures remain
+    typed in the report and do not stop unrelated Keeper lanes.
+    [requested_base_path] is diagnostic identity only; every persistence and
+    backend operation uses the canonical [config]. [accept_store_quarantine]
+    is the operator's [--accept-store-quarantine]: without it a keeper store
+    this build cannot decode makes preparation fail with
+    [Store_quarantine_refused] and nothing is moved (RFC-0420). An unread store inventory
+    refuses preparation even with the flag; repair directory access first.
+    Keeper metadata, official-client session and event-queue file I/O failures also
+    refuse with the flag; repair
+    file access or the file kind instead of quarantining unread bytes.
+    Queue owner, inspection, coherence, missing-state and cleanup failures
+    likewise refuse; an observed queue journal permits only explicit resume
+    after its recorded entries validate.
+    Failed quarantine moves also refuse preparation: accepting the move does
+    not authorize continuing with the unreadable store still in place. *)
+
+val keeper_persistence_prepare_error_to_string :
+  keeper_persistence_prepare_error -> string
+
+val claim_prepared_keeper_persistence :
+  config:Workspace.config ->
+  prepared_keeper_persistence ->
+  (claimed_keeper_persistence, keeper_persistence_claim_error) result
+(** Atomically claim the ready preparation exactly once. The current config
+    path is resolved again and must identify the canonical BasePath captured by
+    preparation, including across symlink retargeting. A racing or repeated
+    claim returns [Claim_already_claimed]; stale tokens and retained lifecycle
+    failures remain distinct typed errors. Call only after every other fallible
+    pre-readiness step. *)
+
+val keeper_persistence_claim_error_to_string :
+  keeper_persistence_claim_error -> string
+
+val keeper_persistence_start_error_to_string :
+  keeper_persistence_start_error -> string
+
+val start_keeper_loops :
+  claimed_persistence:claimed_keeper_persistence ->
+  invalidate_full_health_snapshot:(unit -> unit) ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  proc_mgr:Eio_unix.Process.mgr_ty Eio.Process.mgr ->
+  Mcp_server.server_state -> unit
+(** Spawn the keepalive bootstrap, supervisor sweep, and tool-execution
+    fibers under [sw].  Each fiber is bound to the switch so a graceful
+    shutdown cancels them in order. The claimed token is affine: start reserves
+    it before spawning, rejects concurrent or repeated use, and revalidates the
+    current state BasePath against the preparation's canonical identity.
+    Synchronous startup failure is retained in the lifecycle and raised as
+    [Keeper_persistence_start_failed]. Autoboot waits for explicit runtime
+    availability and uses the claimed persistence report for admission. Agent
+    session discovery is independent background work; it does not gate Keeper
+    bootstrap, and elapsed discovery time does not authorize a failure. *)
+
+exception Keeper_lifecycle_surfaces_partly_dropped of string list
+(** A keeper lifecycle refresh came back naming cache prefixes it could not
+    drop ({!Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh}).
+    The listener raises it so a partial refresh and a raising one reach the
+    batch the same way. *)
+
+(** What the Keeper lifecycle listener did with one event it took off its
+    subscription. *)
+type keeper_lifecycle_refresh =
+  | Lifecycle_refreshed
+  | Lifecycle_ignored
+  (** Not a lifecycle event. Nothing about a Keeper changed. *)
+  | Lifecycle_undecodable
+  (** A lifecycle event whose payload did not decode. Which Keeper changed is
+      unknown, so the caches cannot be patched precisely. *)
+  | Lifecycle_refresh_failed of
+      { keeper_name : string
+      ; event : Keeper_lifecycle_events.lifecycle_event
+      ; error : exn
+      }
+  | Lifecycle_handling_failed of exn
+  (** A raise outside the refresh itself — decoding the payload, the malformed
+      counter, a log call. What the event should have changed is unknown. *)
+
+module For_testing : sig
+  type keeper_loops_start_ownership
+
+  val autoboot_proactive_warmup_sec :
+    base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
+
+  val board_sse_event_params : Board_dispatch.board_sse_event -> Yojson.Safe.t
+
+  val broadcast_mention_wakeup_action :
+    string option -> [ `Suppress_no_target | `Wake_keeper of string ]
+
+  val deliver_broadcast_mention :
+    config:Workspace.config ->
+    base_path:string ->
+    is_running:(string -> bool) ->
+    is_registered_keeper:(string -> bool) ->
+    wakeup:(string -> unit) ->
+    Workspace_broadcast.broadcast_delivery ->
+    Workspace_broadcast.mention_delivery
+
+  val goal_notification_backend : Goal_delivery.backend
+  val append_workspace_message_to_recipient : base_path:string ->
+    sender_authority:Lane_addon_broadcast_delivery.sender_authority -> Workspace_broadcast.broadcast_delivery ->
+    keeper_name:string -> (unit,string) result
+  val project_workspace_message_to_fleet :
+    base_path:string ->
+    registered_keepers:(unit -> (string * string) list) ->
+    Workspace_broadcast.broadcast_delivery ->
+    unit
+
+  val mention_transcript_settled : Workspace_broadcast.mention_delivery -> bool
+
+  val install_workspace_message_mutation_invalidation :
+    invalidate_full_health_snapshot:(unit -> unit) -> unit -> unit
+
+  val reset_keeper_persistence_lifecycle : unit -> unit
+
+  val prepared_base_paths : prepared_keeper_persistence -> string * string
+
+  val begin_keeper_loops_start :
+    config:Workspace.config ->
+    claimed_keeper_persistence ->
+    (keeper_loops_start_ownership, keeper_persistence_start_error) result
+
+  val finish_keeper_loops_start :
+    keeper_loops_start_ownership ->
+    (unit, keeper_persistence_start_error) result
+
+  val refresh_dashboard_for_keeper_lifecycle :
+    config:Workspace.config ->
+    keeper_name:string ->
+    Keeper_lifecycle_events.lifecycle_event ->
+    unit
+
+  val raise_if_surfaces_partly_dropped :
+    Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh -> unit
+  (** [()] for a refresh that dropped every cache it owns, and
+      {!Keeper_lifecycle_surfaces_partly_dropped} for one that did not. This is
+      the step that puts a partial refresh on the batch's failure path. *)
+
+  val handle_keeper_lifecycle_batch :
+    refresh:(keeper_name:string -> Keeper_lifecycle_events.lifecycle_event -> unit) ->
+    invalidate_all:(unit -> unit) ->
+    Runtime_event_bus.batch ->
+    keeper_lifecycle_refresh list
+  (** One drained batch of the lifecycle listener: each event is refreshed on
+      its own, and an undecodable lifecycle event, refresh failure, or overflow drop calls
+      [invalidate_all] once after the batch. *)
+
+  val refresh_keeper_lifecycle_once :
+    subscription:Runtime_event_bus.handle ->
+    refresh:(keeper_name:string -> Keeper_lifecycle_events.lifecycle_event -> unit) ->
+    invalidate_all:(unit -> unit) ->
+    broadcast:(unit -> unit) ->
+    keeper_lifecycle_refresh list
+  (** One turn of the lifecycle listener fiber: drain [subscription], refresh
+      the batch, and [broadcast] when the batch carried events or lost some.
+      This is what the fiber runs between sleeps. *)
+end
+
+val start_background_maintenance :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Time.clock ->
+  env:Eio_unix.Stdenv.base ->
+  Mcp_server.server_state -> string * string
+(** Spawn the periodic maintenance fibers (cost ledger flush,
+    dashboard cache warmer, etc.) under [sw].
+    Returns a [(summary, diagnostics_hint)] pair printed at boot so an
+    operator can see what schedules are active and where to look when
+    one stops. *)

@@ -1,0 +1,10 @@
+allocated grand=546 GB (table=774 GB)
+librarian-path share: 55.6%
+   284.5 GB  52.1%  LIBRARIAN/lane_addon_tool_request_owner
+   192.8 GB  35.3%  lane_addon/lane_addon_store
+    23.4 GB   4.3%  keeper/keeper_chat_store
+    15.8 GB   2.9%  other:dated_jsonl/dated_jsonl
+    13.6 GB   2.5%  LIBRARIAN/keeper_librarian_durable_request
+     7.5 GB   1.4%  other:fs_compat/fs_compat
+     5.8 GB   1.1%  LIBRARIAN/keeper_librarian_durable_capture
+     2.7 GB   0.5%  lane_addon/lane_addon_action

@@ -1,0 +1,2 @@
+python3 scripts/lint-ignore-without-comment.py --include-tests --strict --target lib/auth/auth.mli lib/auth/auth_credential_token.mli lib/auth/auth_credential_base.ml lib/auth/auth_credential_token.ml lib/server/server_runtime_startup_credentials.ml test/test_auth_rotate_shared_tokens_10304.ml test/test_auth_token_rotation_transaction.ml
+exit_code=0

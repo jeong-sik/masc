@@ -1,0 +1,34 @@
+{
+  "schema": "masc.keeper_chat_operation.v1",
+  "operation_id": "kmsg-ceac33bade997261de37b919b7ba0e0a",
+  "sequence": "4",
+  "created_at": 1788989128.263124,
+  "execution_digest": "117980c2ee655c2ca0b15cfbdd9ef349a6062648a1d0a6c0f596cf5913a45cdd",
+  "source": {
+    "channel": "agent",
+    "channel_user_id": "",
+    "channel_user_name": "",
+    "channel_workspace_id": "",
+    "continuation_channel": {
+      "kind": "dashboard",
+      "thread_id": "keeper:memory-guide-proof"
+    },
+    "conversation_id": null,
+    "external_message_id": null,
+    "extra_mentions": [],
+    "schema": "masc.keeper_chat_operation.source.v1",
+    "submitted_by": "guide-integration",
+    "surface": {
+      "kind": "agent"
+    },
+    "thread_id": "keeper:memory-guide-proof",
+    "user_row_origin": "needs_append",
+    "workspace_id": null
+  },
+  "input": null,
+  "state": "Failed",
+  "completed_at": 1788989128.344097,
+  "failure_kind": "Turn_exception",
+  "failure_detail": "turn_failed: Invalid request (attempt_rejected): model \"glm-5.3-flash\" is reasoning-capable but its capability record declares thinking_control_format=No_thinking_control: enable_thinking=false cannot be encoded and would be silently dropped, letting the model think freely and corrupt JSON-mode output. Declare a thinking_control_format for this model in Capabilities.for_model_id (models.toml), or route to a model that supports disabling thinking (resolved thinking_control_format=none from the model capability row).",
+  "outcome_ref": null
+}

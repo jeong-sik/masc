@@ -1,0 +1,31 @@
+{
+  "provenance": "operator_proxy",
+  "client": "OpenSSH_10.3p1, LibreSSL 3.3.6",
+  "endpoint": "dedicated loopback Linux SSH fixture",
+  "candidate_binary_exercised": false,
+  "steps": [
+    {
+      "operation": "authenticate master with dedicated pin file",
+      "result_exit": 0
+    },
+    {
+      "operation": "reuse same master with empty UserKnownHostsFile and GlobalKnownHostsFile=none",
+      "result_exit": 0
+    },
+    {
+      "operation": "connect independently with same empty UserKnownHostsFile and GlobalKnownHostsFile=none",
+      "result_exit": 255,
+      "stderr": "No ED25519 host key is known for [127.0.0.1]:56243 and you have requested strict checking. Host key verification failed."
+    },
+    {
+      "operation": "terminate owned test master using ssh -O exit",
+      "result_exit": 0
+    }
+  ],
+  "conclusion": "an authenticated ControlMaster bypasses subsequent pin-file checks; an independent connection rejects absent trust",
+  "not_measured": [
+    "candidate Keeper connection behavior",
+    "handshake latency under load",
+    "same-path client-key rotation"
+  ]
+}

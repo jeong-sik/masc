@@ -1,0 +1,32 @@
+{
+  "base": "23dad1927b8de74259dc3389f390ef1643319219",
+  "checked_at": "2026-10-04T10:25:31.527172+00:00",
+  "before": {
+    "draft_retention_failed": 1,
+    "typed_patch_pending_raw_edit_failed": 1
+  },
+  "focused_after": {
+    "passed": 102,
+    "files": 3
+  },
+  "typescript": "pass",
+  "session_editor_test_lint": "pass",
+  "api_lint": "two unchanged no-nested-ternary errors at 987:56 and 989:7; checked parent via stdin with exact current filename",
+  "browser": "10 assertions, two explicit raw saves, zero page errors",
+  "native_backend": "not_run",
+  "tui": "not_run",
+  "deployment": "not_run",
+  "node": "v26.3.0",
+  "sha256": {
+    "dashboard/src/lib/runtime-toml-session.ts": "6268dfc4cee44d740f2d00ccf980f6c4d6f2abb3067e919acbcd9add72e11426",
+    "dashboard/src/components/runtime-toml-editor.ts": "f99335be974559fac6ca71fd6755bae88666f5b76ead698a7e3eceb992ebbc33",
+    "dashboard/src/components/runtime-toml-editor.test.ts": "73d3f59fd93c400d9480f117a1f15247d12fc26ef63c6302d364c10eaf4b7ba8",
+    "dashboard/src/components/runtime-panel.test.ts": "affc479df9a88db0d48871934fb27094e12afb2b88425dad5bf1dc0df0a2c67b",
+    "dashboard/src/api/dashboard-runtime.ts": "73742658b7837ec449654462d76590bada92640dbfd83c54c6cee0fbb024fe81",
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": "78d833a150787d2c92e289d8b118d825681891febc6f08b9b073e37c7531f510",
+    "dashboard/evidence/2026-10-04-runtime-drafts/fixture.ts": "5a150ce9a23e97385f7ca40a46519fb828058a44f72bb31072acc020e4a9cf01",
+    "dashboard/evidence/2026-10-04-runtime-drafts/fixture.html": "9f4c700477d08c4723f16895d7d1c5a354de75fe862d62e957b005de689789cd",
+    "dashboard/evidence/2026-10-04-runtime-drafts/browser-fixture.mjs": "74d763a932552987ffe0bd4947d4c1f2bb6641e36b29a4eff6cd246bfefeb4d2",
+    "dashboard/evidence/2026-10-04-runtime-drafts/lanes.mjs": "61eb199d1ddfa9fe204ae6e2c2a1bd227abdab199232d351be4a92ec605088ad"
+  }
+}

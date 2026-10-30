@@ -1,0 +1,9 @@
+Testing `play-skills'.
+This run has ID `9NAO5VYD'.
+
+  [OK]          skills          0   declared under another id.
+  [OK]          skills          1   attached by hand.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/play-skills'.
+Test Successful in 0.882s. 2 tests run.
+exit=0

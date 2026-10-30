@@ -1,0 +1,54 @@
+type lifecycle =
+  | Acquired
+  | Acquire_failed
+  | Release_confirmed
+  | Release_incomplete
+
+type resource = {
+  instance_id : string;
+  run_id : string;
+  package_id : string;
+  package_revision : string;
+  resource : Lane_addon_lifecycle.resource option;
+  detail : string option;
+}
+
+let wire_name = function
+  | Acquired -> "masc.lane.resource.acquired"
+  | Acquire_failed -> "masc.lane.resource.acquire_failed"
+  | Release_confirmed -> "masc.lane.resource.release_confirmed"
+  | Release_incomplete -> "masc.lane.resource.release_incomplete"
+
+let all = [ Acquired; Acquire_failed; Release_confirmed; Release_incomplete ]
+
+let optional = function Some value -> `String value | None -> `Null
+
+let event lifecycle (resource : resource) =
+  Agent_core.Event_bus.mk_event
+    ~correlation_id:resource.instance_id
+    ~run_id:resource.run_id
+    (Agent_core.Event_bus.Custom
+       ( wire_name lifecycle
+       , `Assoc
+           [ ("instance_id", `String resource.instance_id)
+           ; ("run_id", `String resource.run_id)
+           ; ("package_id", `String resource.package_id)
+           ; ("package_revision", `String resource.package_revision)
+           ; ("container_id", optional (Option.bind resource.resource Lane_addon_lifecycle.container_id))
+           ; ("resource", Option.fold ~none:`Null ~some:Lane_addon_lifecycle.resource_to_json resource.resource)
+           ; ("detail", optional resource.detail) ] ))
+
+(* The bus is down for a whole window, not one event: warn once until a
+   publish succeeds instead of once per acquire/release. *)
+let bus_down_warned = Atomic.make false
+
+let publish lifecycle (resource : resource) =
+  let event = event lifecycle resource in
+  match Event_bus_slots.get_masc () with
+  | Some bus ->
+    Atomic.set bus_down_warned false;
+    Runtime_event_bus.publish bus event
+  | None ->
+    if Atomic.compare_and_set bus_down_warned false true then
+      Log.Misc.warn
+        "Lane Add-on resource event was not published: event bus is not initialized"

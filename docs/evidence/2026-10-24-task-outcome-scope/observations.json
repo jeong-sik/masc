@@ -1,0 +1,189 @@
+{
+  "baseline": {
+    "approved": {
+      "metrics": {
+        "agent_id": "producer",
+        "period_start": -603800.0,
+        "period_end": 1000.0,
+        "record_count": 1,
+        "total_tasks": 1,
+        "conflicting_tasks": 0,
+        "completed_tasks": 1,
+        "successful_tasks": 1,
+        "failed_tasks": 0,
+        "avg_completion_time_s": 1.0,
+        "task_completion_rate": 1.0,
+        "task_success_rate": 1.0,
+        "error_rate": 0.0,
+        "handoff_tasks": 0,
+        "completed_handoff_tasks": 0,
+        "successful_handoff_tasks": 0,
+        "handoff_task_success_rate": null,
+        "unique_collaborators": []
+      },
+      "components": {
+        "completion": 1.0,
+        "reliability": 1.0,
+        "speed": 1.0,
+        "handoff_task_success": null
+      }
+    },
+    "mixed": {
+      "metrics": {
+        "agent_id": "producer",
+        "period_start": -603800.0,
+        "period_end": 1000.0,
+        "record_count": 2,
+        "total_tasks": 2,
+        "conflicting_tasks": 0,
+        "completed_tasks": 2,
+        "successful_tasks": 1,
+        "failed_tasks": 1,
+        "avg_completion_time_s": 1.5,
+        "task_completion_rate": 1.0,
+        "task_success_rate": 0.5,
+        "error_rate": 0.5,
+        "handoff_tasks": 0,
+        "completed_handoff_tasks": 0,
+        "successful_handoff_tasks": 0,
+        "handoff_task_success_rate": null,
+        "unique_collaborators": []
+      },
+      "components": {
+        "completion": 1.0,
+        "reliability": 0.5,
+        "speed": 0.6666666666666666,
+        "handoff_task_success": null
+      }
+    },
+    "pending": {
+      "metrics": {
+        "agent_id": "producer",
+        "period_start": -603800.0,
+        "period_end": 1000.0,
+        "record_count": 1,
+        "total_tasks": 1,
+        "conflicting_tasks": 0,
+        "completed_tasks": 0,
+        "successful_tasks": 0,
+        "failed_tasks": 0,
+        "avg_completion_time_s": null,
+        "task_completion_rate": 0.0,
+        "task_success_rate": null,
+        "error_rate": null,
+        "handoff_tasks": 0,
+        "completed_handoff_tasks": 0,
+        "successful_handoff_tasks": 0,
+        "handoff_task_success_rate": null,
+        "unique_collaborators": []
+      },
+      "components": {
+        "completion": 0.0,
+        "reliability": null,
+        "speed": null,
+        "handoff_task_success": null
+      }
+    }
+  },
+  "candidate": {
+    "approved": {
+      "metrics": {
+        "agent_id": "producer",
+        "period_start": -603800.0,
+        "period_end": 1000.0,
+        "record_count": 1,
+        "outcome_basis": "task_lifecycle",
+        "external_acceptance": {
+          "kind": "unobserved",
+          "completed_tasks": 1
+        },
+        "total_tasks": 1,
+        "conflicting_tasks": 0,
+        "completed_tasks": 1,
+        "successful_tasks": 1,
+        "failed_tasks": 0,
+        "avg_completion_time_s": 1.0,
+        "task_completion_rate": 1.0,
+        "task_success_rate": 1.0,
+        "error_rate": 0.0,
+        "handoff_tasks": 0,
+        "completed_handoff_tasks": 0,
+        "successful_handoff_tasks": 0,
+        "handoff_task_success_rate": null,
+        "unique_collaborators": []
+      },
+      "components": {
+        "completion": 1.0,
+        "task_lifecycle_success": 1.0,
+        "speed": 1.0,
+        "handoff_task_success": null
+      }
+    },
+    "mixed": {
+      "metrics": {
+        "agent_id": "producer",
+        "period_start": -603800.0,
+        "period_end": 1000.0,
+        "record_count": 2,
+        "outcome_basis": "task_lifecycle",
+        "external_acceptance": {
+          "kind": "unobserved",
+          "completed_tasks": 2
+        },
+        "total_tasks": 2,
+        "conflicting_tasks": 0,
+        "completed_tasks": 2,
+        "successful_tasks": 1,
+        "failed_tasks": 1,
+        "avg_completion_time_s": 1.5,
+        "task_completion_rate": 1.0,
+        "task_success_rate": 0.5,
+        "error_rate": 0.5,
+        "handoff_tasks": 0,
+        "completed_handoff_tasks": 0,
+        "successful_handoff_tasks": 0,
+        "handoff_task_success_rate": null,
+        "unique_collaborators": []
+      },
+      "components": {
+        "completion": 1.0,
+        "task_lifecycle_success": 0.5,
+        "speed": 0.6666666666666666,
+        "handoff_task_success": null
+      }
+    },
+    "pending": {
+      "metrics": {
+        "agent_id": "producer",
+        "period_start": -603800.0,
+        "period_end": 1000.0,
+        "record_count": 1,
+        "outcome_basis": "task_lifecycle",
+        "external_acceptance": {
+          "kind": "unobserved",
+          "completed_tasks": 0
+        },
+        "total_tasks": 1,
+        "conflicting_tasks": 0,
+        "completed_tasks": 0,
+        "successful_tasks": 0,
+        "failed_tasks": 0,
+        "avg_completion_time_s": null,
+        "task_completion_rate": 0.0,
+        "task_success_rate": null,
+        "error_rate": null,
+        "handoff_tasks": 0,
+        "completed_handoff_tasks": 0,
+        "successful_handoff_tasks": 0,
+        "handoff_task_success_rate": null,
+        "unique_collaborators": []
+      },
+      "components": {
+        "completion": 0.0,
+        "task_lifecycle_success": null,
+        "speed": null,
+        "handoff_task_success": null
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "is_derivative": true,
+  "original_source": "artifacts/schedule-actual-repair-20261027/probe_startup_recovery_actual.py",
+  "original_sha256": "7a1cbfaf8ab103bdcd920983016e966f33d8f81debcd04f9451df6a02eb65a7c",
+  "source": "artifacts/schedule-actual-repair-20261027/probe_startup_recovery_actual_v2.py",
+  "sha256": "b55ef2652223b4062188007599f884fb782b2789ffdadab7c173c5940823ba33",
+  "change": "Use contextlib.closing for select.kqueue.close; current Python object has no context manager protocol. No scenario/oracle/product change.",
+  "first_run": "runs/startup-recovery-1: TypeError before schedule creation/watch/Running; not product recovery failure. Original controller/captures preserved.",
+  "os_capability": {
+    "python_kqueue_context_manager": false,
+    "explicit_closing_worked": true,
+    "owned_vnode_event_observed": true,
+    "observed_events": [
+      {
+        "filter": -4,
+        "fflags": 10
+      }
+    ]
+  },
+  "executed_server_v2": false
+}

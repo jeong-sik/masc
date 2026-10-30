@@ -1,0 +1,19 @@
+{
+  "cwd": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+  "hostname": "7c0b77a2fd78",
+  "notes": "after\n",
+  "sha256": "7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919",
+  "denied_effect_exists": false,
+  "preserved_files": {
+    "retained file.bin": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21"
+  },
+  "initial": {
+    "marker": "b8e1b7b5a00e42b78bce74a41e158ba7",
+    "cwd": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+    "hostname": "7c0b77a2fd78",
+    "uid": 1000,
+    "bootstrap_env": "bootstrap-environment-preserved",
+    "bootstrap_tool": "bootstrap-tool-preserved",
+    "retained_sha256": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21"
+  }
+}

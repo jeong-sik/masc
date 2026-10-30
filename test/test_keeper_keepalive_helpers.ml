@@ -1,0 +1,1536 @@
+module Types = Masc_domain
+
+(** Focused tests for keepalive identity reconciliation, directed wake
+    selection, directive diagnostics, and status-tick observation shape. *)
+
+open Alcotest
+open Masc
+module KK = Masc.Keeper_keepalive
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+
+(* These tests check how the Board routes a text, not who is declared: every
+   name with the shape of a Keeper name stands for itself. *)
+let every_name_declared =
+  Recipient_lookup.make (fun candidate ->
+    Ok
+      (Result.to_option
+         (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate))))
+;;
+
+let with_temp_workspace f =
+  let base_path = Filename.temp_dir "keeper-heartbeat-current-task" "" in
+  let config = Workspace.default_config base_path in
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      rm_rf base_path)
+    (fun () ->
+      ignore (Workspace.init config ~agent_name:None : string);
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      f config)
+
+(* The Board tests below write through the dispatcher inside an Eio run, so the
+   backend gets its recipient lookup before the first write. *)
+let with_board_workspace f =
+  with_temp_workspace (fun config ->
+    Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+    f config)
+
+let make_keepalive_meta ~name =
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("trace_id", `String ("trace-" ^ name));
+        (* sandbox_profile and network_mode left the JSON wire schema — they
+           arrive from keeper.toml now. This fixture only ever set them to the
+           record defaults ("local" / "inherit"), so dropping them changes
+           nothing this suite asserts. *)
+      ]
+  in
+  (* The strict parser demands every persisted field; this suite only cares
+     about identity and task ownership, so it uses the fixture helper that
+     fills record defaults — the same seam the other keeper suites use. *)
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Error err -> fail ("meta_of_json failed: " ^ err)
+  | Ok meta -> meta
+
+let make_in_progress_task ~id ~assignee : Types.task =
+  {
+    id;
+    title = "Heartbeat current task";
+    description = "";
+    task_status =
+      Types.InProgress { assignee; started_at = "2026-06-26T00:00:00Z" };
+    priority = 3;
+    files = [];
+    created_at = "2026-06-26T00:00:00Z";
+    created_by = Some "test";
+    predecessor_task_id = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
+    do_not_reclaim_reason = None;
+    skills = [];
+  }
+
+(* Reconcile persists the recovered current_task_id through the per-Keeper
+   Owner, and the Owner inventory is installed once at boot — a fixture that
+   skips the install reproduces "Keeper owner inventory is not installed"
+   instead of the reconcile under test (issue #31192). Mirrors the
+   [install_from_store] fixtures in test_keeper_effective_meta_overlay /
+   test_heartbeat_integration. *)
+let with_owner_runtime config f =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let install () =
+    match
+      Keeper_owner_registry.install_from_store
+        ~sw
+        ~operation_runner:None
+        ~on_turn_slot_released:None
+        config
+    with
+    | Ok _ -> ()
+    | Error error ->
+      fail (Keeper_owner_registry.install_error_to_string error)
+  in
+  f ~install
+
+let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
+  with_temp_workspace (fun config ->
+    with_owner_runtime config @@ fun ~install ->
+    let keeper_name = "heartbeat-current-task-owner" in
+    let agent_name = keeper_name in
+    let task_id = "task-heartbeat-current" in
+    let meta = make_keepalive_meta ~name:keeper_name in
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> ()
+     | Error err -> fail ("write_meta failed: " ^ err));
+    install ();
+    Workspace.write_backlog config
+      {
+        Types.tasks = [ make_in_progress_task ~id:task_id ~assignee:agent_name ];
+        task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; delivered_completion_rejections = [];
+        last_updated = "2026-06-26T00:00:01Z";
+        version = 2;
+      };
+    ignore
+      (Keeper_registry.For_testing.register
+         ~base_path:config.Workspace.base_path
+         keeper_name
+         meta);
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_registry.For_testing.unregister ~base_path:config.Workspace.base_path keeper_name)
+      (fun () ->
+        check string "heartbeat task id" task_id
+          (KK.current_task_id_for_agent ~config agent_name);
+        let current_from_registry =
+          match Keeper_registry.get ~base_path:config.Workspace.base_path keeper_name with
+          | Some entry ->
+            Keeper_runtime_contract.current_task_id_opt entry.meta
+          | None -> None
+        in
+        check (option string) "registry current task reconciled" (Some task_id)
+          current_from_registry;
+        let current_from_disk =
+          match Keeper_meta_store.read_meta config keeper_name with
+          | Ok (Some persisted) ->
+            Keeper_runtime_contract.current_task_id_opt persisted
+          | Ok None -> None
+          | Error err -> fail ("read_meta failed: " ^ err)
+        in
+        check (option string) "persisted current task reconciled" (Some task_id)
+          current_from_disk))
+
+let is_warn_unknown_keeper = function
+  | KK.Warn_unknown_keeper -> true
+  | KK.Debug_throttled_unknown_keeper -> false
+
+let is_debug_throttled_unknown_keeper = function
+  | KK.Debug_throttled_unknown_keeper -> true
+  | KK.Warn_unknown_keeper -> false
+
+let test_not_in_registry_warn_due_first_event () =
+  check bool "first unknown-keeper directive warns" true
+    (KK.not_in_registry_warn_due ~previous:None ~now:1_000.0 ())
+
+let test_not_in_registry_warn_due_throttles_within_window () =
+  check bool "same window throttles" false
+    (KK.not_in_registry_warn_due
+       ~previous:(Some 1_000.0)
+       ~now:(1_000.0 +. (KK.not_in_registry_warn_cooldown_s /. 2.0))
+       ())
+
+let test_not_in_registry_warn_due_recovers_on_clock_regression () =
+  check bool "clock regression does not suppress forever" true
+    (KK.not_in_registry_warn_due ~previous:(Some 1_000.0) ~now:999.0 ())
+
+let test_not_in_registry_warn_state_is_per_agent () =
+  let open KK in
+  let state = StringMap.add "keeper-a-agent" 1_000.0 StringMap.empty in
+  let decision_a, _ =
+    not_in_registry_warn_state_step
+      ~agent_name:"keeper-a-agent"
+      ~now:(1_000.0 +. (not_in_registry_warn_cooldown_s /. 2.0))
+      state
+  in
+  let decision_b, updated =
+    not_in_registry_warn_state_step
+      ~agent_name:"keeper-b-agent"
+      ~now:(1_000.0 +. (not_in_registry_warn_cooldown_s /. 2.0))
+      state
+  in
+  check bool "same agent throttled" true
+    (is_debug_throttled_unknown_keeper decision_a);
+  check bool "different agent warns" true (is_warn_unknown_keeper decision_b);
+  check bool "different agent recorded" true
+    (Option.is_some (StringMap.find_opt "keeper-b-agent" updated))
+
+let test_not_in_registry_warn_state_is_bounded () =
+  let open KK in
+  let state =
+    List.fold_left
+      (fun acc i ->
+         StringMap.add
+           ("keeper-" ^ string_of_int i ^ "-agent")
+           (2_000.0 -. float_of_int i)
+           acc)
+      StringMap.empty
+      [ 0; 1; 2; 3; 4 ]
+  in
+  let decision, updated =
+    not_in_registry_warn_state_step
+      ~max_entries:3
+      ~agent_name:"keeper-new-agent"
+      ~now:2_001.0
+      state
+  in
+  check bool "new unknown keeper still warns" true (is_warn_unknown_keeper decision);
+  check int "warn throttle map is capped" 3 (StringMap.cardinal updated);
+  check bool "new unknown keeper is retained" true
+    (Option.is_some (StringMap.find_opt "keeper-new-agent" updated));
+  check bool "oldest unknown keeper is pruned" true
+    (Option.is_none (StringMap.find_opt "keeper-4-agent" updated))
+
+module KKS = Masc.Keeper_keepalive_signal
+module KWOBS = Masc.Keeper_world_observation_board_signal
+module KBA = Masc.Keeper_board_audience
+module KBAC = Masc.Keeper_board_attention_candidate
+
+let make_board_resume_meta name =
+  let json =
+    `Assoc
+      [ ("name", `String name)
+      ; ("trace_id", `String ("trace-" ^ name))
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Error err -> fail ("meta_of_json failed: " ^ err)
+  | Ok meta -> meta
+;;
+
+let test_directed_wake_cuts_configured_sleep () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make true in
+    let outcome =
+      KKS.interruptible_sleep
+        ~clock:(Eio.Stdenv.clock env)
+        ~stop
+        ~wakeup
+        (fun () -> 30.0)
+    in
+    check bool "directed wake returns Woken" true
+      (match outcome with
+       | KKS.Woken -> true
+       | KKS.Stopped | KKS.Timeout -> false);
+    check bool "wake atomic is consumed" false (Atomic.get wakeup))
+;;
+
+let test_explicit_stop_cuts_configured_sleep () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make true in
+    let wakeup = Atomic.make false in
+    let outcome =
+      KKS.interruptible_sleep
+        ~clock:(Eio.Stdenv.clock env)
+        ~stop
+        ~wakeup
+        (fun () -> 30.0)
+    in
+    check bool "explicit stop returns Stopped" true
+      (match outcome with
+       | KKS.Stopped -> true
+       | KKS.Woken | KKS.Timeout -> false))
+;;
+
+let test_cadence_wake_consumes_only_active_sleep () =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make false in
+    let cadence_sleeping = Atomic.make false in
+    let outcome = ref None in
+    Eio.Fiber.both
+      (fun () ->
+         outcome :=
+           Some
+             (KKS.interruptible_sleep
+                ~cadence_sleeping
+                ~clock
+                ~stop
+                ~wakeup
+                (fun () -> 30.0)))
+      (fun () ->
+         while not (Atomic.get cadence_sleeping) do
+           Eio.Time.sleep clock 0.001
+         done;
+         check bool "active sleeper CAS succeeds" true
+           (Atomic.compare_and_set cadence_sleeping true false));
+    check bool "cadence wake returns Woken" true
+      (match !outcome with
+       | Some KKS.Woken -> true
+       | Some (KKS.Stopped | KKS.Timeout) | None -> false);
+    check bool "sleep handshake is cleared" false
+      (Atomic.get cadence_sleeping))
+;;
+
+let test_cadence_handshake_precedes_duration_resolution () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make false in
+    let cadence_sleeping = Atomic.make false in
+    let handshake_was_visible = ref false in
+    let outcome =
+      KKS.interruptible_sleep
+        ~cadence_sleeping
+        ~clock:(Eio.Stdenv.clock env)
+        ~stop
+        ~wakeup
+        (fun () ->
+          handshake_was_visible := Atomic.get cadence_sleeping;
+          ignore (Atomic.compare_and_set cadence_sleeping true false : bool);
+          0.0)
+    in
+    check bool "duration resolves after handshake" true !handshake_was_visible;
+    check bool "cadence change during resolution is observed" true
+      (match outcome with
+       | KKS.Woken -> true
+       | KKS.Stopped | KKS.Timeout -> false))
+;;
+
+(* #34653: the provider backoff sleep is not cut short by a wakeup. Every
+   stimulus that interrupted it re-ran the same rate-limited call (183 failed
+   turns in 41 minutes, median 30 s apart against a declared 600 s). The
+   wakeup is consumed when the duration ends, so the tick still happens once
+   per signal, only later. *)
+let test_backoff_sleep_serves_a_wakeup_only_after_the_duration () =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make true in
+    let duration = 0.05 in
+    let started = Eio.Time.now clock in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~clock
+        ~stop
+        ~wakeup
+        (fun () -> duration)
+    in
+    let elapsed = Eio.Time.now clock -. started in
+    (* Wall-clock reads around a monotonic sleep: allow the sub-microsecond
+       rounding of the sleep deadline (#34663 review). *)
+    check bool "the full duration elapsed before the wakeup was served" true
+      (elapsed >= duration -. 0.001);
+    check bool "the pending wakeup is served as Woken once the sleep ends" true
+      (match outcome with
+       | KKS.Woken -> true
+       | KKS.Stopped | KKS.Timeout -> false);
+    check bool "wake atomic is consumed" false (Atomic.get wakeup))
+;;
+
+let test_backoff_sleep_without_a_wakeup_times_out () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make false in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~clock:(Eio.Stdenv.clock env)
+        ~stop
+        ~wakeup
+        (fun () -> 0.01)
+    in
+    check bool "no wakeup means Timeout" true
+      (match outcome with
+       | KKS.Timeout -> true
+       | KKS.Stopped | KKS.Woken -> false))
+;;
+
+let test_stop_still_cuts_a_backoff_sleep () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make true in
+    let wakeup = Atomic.make true in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~clock:(Eio.Stdenv.clock env)
+        ~stop
+        ~wakeup
+        (fun () -> 30.0)
+    in
+    check bool "stop ends a backoff sleep at once" true
+      (match outcome with
+       | KKS.Stopped -> true
+       | KKS.Woken | KKS.Timeout -> false))
+;;
+
+let test_dependency_change_interrupts_provider_rest () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make true in
+    let invalidated = ref false in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~interrupt_when:(fun () -> !invalidated)
+        ~clock:(Eio.Stdenv.clock env) ~stop ~wakeup
+        (fun () -> invalidated := true; 3600.0)
+    in
+    check bool "dependency changes re-evaluate the lane before provider release" true
+      (match outcome with KKS.Woken -> true | KKS.Stopped | KKS.Timeout -> false);
+    check bool "the queued wake is consumed once" false (Atomic.get wakeup))
+;;
+
+let test_board_goal_keyword_overlap_is_not_wake_reason () =
+  let meta = make_board_resume_meta "keyword-overlap" in
+  let signal : Board_dispatch.board_signal =
+    { kind = Board_dispatch.Board_post_created
+    ; post_id = "post-keyword-overlap"
+    ; author = "external-author"
+    ; title = "test"
+    ; content = "this test overlaps the keeper goal but does not address it"
+    ; hearth = None
+    ; updated_at = Some 123.0
+    }
+  in
+  match KWOBS.wake_reason ~meta ~signal with
+  | KWOBS.Available None -> ()
+  | KWOBS.Available (Some reason) ->
+    failf "goal keyword overlap woke as %s" (KWOBS.wake_reason_label reason)
+  | KWOBS.Unavailable unavailable ->
+    failf "Board fixture unavailable: %s" (KWOBS.unavailable_to_string unavailable)
+
+let check_exact_board_mention ~content ~expected =
+  let meta = make_board_resume_meta "foo" in
+  let signal : Board_dispatch.board_signal =
+    { kind = Board_dispatch.Board_post_created
+    ; post_id = "post-exact-mention"
+    ; author = "external-author"
+    ; title = "test"
+    ; content
+    ; hearth = None
+    ; updated_at = Some 123.0
+    }
+  in
+  let matched = KWOBS.match_signal ~meta ~signal in
+  check bool content expected matched.explicit_mention
+
+let test_board_mentions_use_exact_typed_keeper_ids () =
+  check_exact_board_mention ~content:"@foo please inspect" ~expected:true;
+  check_exact_board_mention ~content:"@foobar is a different lane" ~expected:false;
+  check_exact_board_mention ~content:"mail foo@example.com" ~expected:false
+
+let audience_signal ?(kind = Board_dispatch.Board_post_created) ~author content :
+  Board_dispatch.board_signal
+  =
+  { kind
+  ; post_id = "post-audience"
+  ; author
+  ; title = "audience"
+  ; content
+  ; hearth = None
+  ; updated_at = Some 123.0
+  }
+;;
+
+(* The audience the write boundary derives from a signal's text: a post reads an
+   address from its title and body, a comment from its content. *)
+let write_boundary_audience ~post_kind ~visibility (signal : Board_dispatch.board_signal) =
+  let derived =
+    match signal.kind with
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
+      Board.audience_for_post
+        ~lookup:every_name_declared
+        ~post_kind
+        ~visibility
+        ~title:signal.title
+        ~content:signal.content
+      |> Result.map fst
+    | Board_dispatch.Board_comment_added _ ->
+      Board.audience_for_comment ~lookup:every_name_declared ~content:signal.content
+      |> Result.map fst
+    | Board_dispatch.Board_reaction_changed _ -> Ok Board.audience_for_reaction
+    | Board_dispatch.Board_vote_cast _ -> Ok Board.audience_for_vote
+  in
+  Result.map
+    (fun board_audience ->
+       match KBA.of_board_audience board_audience with
+       | Ok audience -> audience
+       | Error error -> fail (KBA.classification_error_to_string error))
+    derived
+;;
+
+let classified ?(visibility = Board.Internal) signal =
+  match write_boundary_audience ~post_kind:Board.Human_post ~visibility signal with
+  | Ok audience -> audience
+  | Error error -> fail (Board.show_board_error error)
+;;
+
+let route ~audience ~meta signal =
+  match KBA.route_for_keeper ~audience ~meta ~signal with
+  | KWOBS.Available route -> route
+  | KWOBS.Unavailable unavailable ->
+    fail (KWOBS.unavailable_to_string unavailable)
+;;
+
+let test_closed_board_audience_routes_only_its_authority () =
+  let alpha =
+    { (make_board_resume_meta "alpha") with board_interests = [ "research" ] }
+  in
+  let beta =
+    { (make_board_resume_meta "beta") with board_interests = [ "research" ] }
+  in
+  let targeted = audience_signal ~author:"external-author" "@alpha inspect" in
+  let targeted_audience = classified targeted in
+  check bool "explicit address classifies as Targets" true
+    (match targeted_audience with KBA.Targets _ -> true | _ -> false);
+  check bool "target receives direct delivery" true
+    (match route ~audience:targeted_audience ~meta:alpha targeted with
+     | KBA.Deliver KWOBS.Explicit_mention -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+  check bool "non-target is retired, not judged" true
+    (match route ~audience:targeted_audience ~meta:beta targeted with
+     | KBA.Ignore -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable -> false);
+  (* W1: a non-Keeper target mixed into the audience must not fail the whole
+     classification — the valid Keeper target keeps live routing, and both
+     audience consumers (routing and structural [mention_ids_of_signal])
+     project the exact same Keeper id set.
+     [Keeper_id.of_string] mints a raw-fallback id for non-Keeper names
+     (RFC-0232 §3.4), so this also pins that behavior against regressions. *)
+  let mixed_audience =
+    audience_signal ~author:"external-author" "@alpha @human-b inspect"
+  in
+  let mixed_classified = classified mixed_audience in
+  check bool "mixed Keeper and non-Keeper targets still classify" true
+    (match mixed_classified with KBA.Targets _ -> true | _ -> false);
+  check bool "valid Keeper target keeps direct delivery with a mixed audience" true
+    (match route ~audience:mixed_classified ~meta:alpha mixed_audience with
+     | KBA.Deliver KWOBS.Explicit_mention -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+  check bool "both audience consumers project the same Keeper id set" true
+    (match mixed_classified with
+     | KBA.Targets targets ->
+       List.equal
+         Keeper_identity.Keeper_id.equal
+         targets
+         (KWOBS.mention_ids_of_signal mixed_audience)
+     | KBA.Broadcast | KBA.Thread_participants | KBA.Discoverable -> false);
+  let discoverable = audience_signal ~author:"external-author" "new research" in
+  let discoverable_audience = classified discoverable in
+  check bool "new unaddressed post is discoverable" true
+    (match discoverable_audience with KBA.Discoverable -> true | _ -> false);
+  check bool "discoverable enters judgment only for non-author" true
+    (match route ~audience:discoverable_audience ~meta:alpha discoverable with
+     | KBA.Judge_discoverable -> true
+     | KBA.Deliver _ | KBA.Ignore -> false);
+  let no_interests = { alpha with board_interests = [] } in
+  check bool "empty interests do not disable exact delivery" true
+    (match route ~audience:targeted_audience ~meta:no_interests targeted with
+     | KBA.Deliver KWOBS.Explicit_mention -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+  check bool "empty interests turn targetless discovery off" true
+    (match route ~audience:discoverable_audience ~meta:no_interests discoverable with
+     | KBA.Ignore -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable -> false);
+  let hearth_only = { discoverable with hearth = Some "@alpha" } in
+  check bool "Board category cannot become recipient authority" true
+    (match classified hearth_only with KBA.Discoverable -> true | _ -> false);
+  check bool "Board category is absent from mention metrics" false
+    (KWOBS.match_signal ~meta:alpha ~signal:hearth_only).explicit_mention;
+  let self_authored = audience_signal ~author:"alpha" "new research" in
+  check bool "author lane never judges its own post" true
+    (match route ~audience:(classified self_authored) ~meta:alpha self_authored with
+     | KBA.Ignore -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable -> false);
+  let broadcast = audience_signal ~author:"external-author" "@@all inspect" in
+  check bool "exact Keeper broadcast is direct delivery" true
+    (match route ~audience:(classified broadcast) ~meta:beta broadcast with
+     | KBA.Deliver KWOBS.Broadcast -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+  let comment =
+    audience_signal
+      ~kind:
+        (Board_dispatch.Board_comment_added
+           { comment_id =
+               (Board.Comment_id.of_string "c-00000000000000000000000000000001"
+                |> Result.get_ok)
+           ; parent_id = None
+           })
+      ~author:"external-author"
+      "thread update"
+  in
+  check bool "unaddressed comment is thread-scoped" true
+    (match classified comment with KBA.Thread_participants -> true | _ -> false);
+  check bool "Direct thread follow-up stays participant-scoped" true
+    (match classified ~visibility:Board.Direct comment with
+     | KBA.Thread_participants -> true
+     | _ -> false);
+  let inherited_title =
+    { comment with title = "original post for @alpha"; content = "plain follow-up" }
+  in
+  check bool "inherited post title cannot re-address a comment" true
+    (match classified inherited_title with
+     | KBA.Thread_participants -> true
+     | _ -> false);
+  check bool "structural matcher ignores inherited title address" false
+    (KWOBS.match_signal ~meta:alpha ~signal:inherited_title).explicit_mention;
+  let inherited_reaction =
+    audience_signal
+      ~kind:
+        (Board_dispatch.Board_reaction_changed
+           { target_type = Board.Reaction_post
+           ; target_id = "post-audience"
+           ; user_id = "external-author"
+           ; emoji = "eyes"
+           ; reacted = true
+           })
+      ~author:"external-author"
+      "original post body for @alpha"
+  in
+  check bool "inherited post body cannot re-address a reaction" true
+    (match classified inherited_reaction with
+     | KBA.Thread_participants -> true
+     | _ -> false);
+  let unsupported = audience_signal ~author:"external-author" "@@delta inspect" in
+  check bool "unsupported broadcast fails closed" true
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Internal unsupported with
+     | Error (Board.Validation_error _) -> true
+     | Error _ | Ok _ -> false);
+  check bool "Direct without targets fails closed" true
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Direct discoverable with
+     | Error (Board.Validation_error _) -> true
+     | Error _ | Ok _ -> false);
+  let mixed = audience_signal ~author:"external-author" "@alpha @@delta inspect" in
+  check bool "mixed direct target and unsupported selector fails closed" true
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Internal mixed with
+     | Error (Board.Validation_error _) -> true
+     | Error _ | Ok _ -> false);
+  let direct_broadcast = audience_signal ~author:"external-author" "@@all inspect" in
+  check bool "@@all on a Direct post fails closed" true
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Direct direct_broadcast with
+     | Error (Board.Validation_error _) -> true
+     | Error _ | Ok _ -> false);
+  check bool "@@all on a non-Direct post still broadcasts" true
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Internal direct_broadcast with
+     | Ok KBA.Broadcast -> true
+     | Error _ | Ok _ -> false);
+  check bool "a system post reads no address from its text" true
+    (match write_boundary_audience ~post_kind:Board.System_post ~visibility:Board.Internal mixed with
+     | Ok KBA.Discoverable -> true
+     | Error _ | Ok _ -> false)
+
+(* The text of a system post is evidence, so a lane whose name appears in it is
+   not addressed. An Unlisted system post is thread activity; the lane that the
+   same text names on a human post is delivered to. *)
+let test_system_post_text_does_not_wake_the_named_lane () =
+  let alpha =
+    { (make_board_resume_meta "alpha") with board_interests = [ "research" ] }
+  in
+  let signal =
+    audience_signal ~author:"platform" "Rejected task t (vrf:v): @alpha please redo"
+  in
+  let audience_of post_kind =
+    match write_boundary_audience ~post_kind ~visibility:Board.Unlisted signal with
+    | Ok audience -> audience
+    | Error error -> fail (Board.show_board_error error)
+  in
+  let system = audience_of Board.System_post in
+  check bool "an unlisted system post is thread activity" true
+    (match system with KBA.Thread_participants -> true | _ -> false);
+  check bool "the lane its text names is not woken" true
+    (match route ~audience:system ~meta:alpha signal with
+     | KBA.Ignore -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable -> false);
+  let human = audience_of Board.Human_post in
+  check bool "the same text on a human post addresses the lane" true
+    (match human with KBA.Targets _ -> true | _ -> false);
+  check bool "and the lane is delivered to" true
+    (match route ~audience:human ~meta:alpha signal with
+     | KBA.Deliver KWOBS.Explicit_mention -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+  (* The edit of a system post is read the same way. *)
+  let edited = { signal with kind = Board_dispatch.Board_post_updated { content_updated_at = 1.0 } } in
+  check bool "an edited system post wakes no lane either" true
+    (match route ~audience:system ~meta:alpha edited with
+     | KBA.Ignore -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable -> false)
+
+let write_board_lane_config config (meta : Keeper_meta_contract.keeper_meta) =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Out_channel.with_open_text (Filename.concat keepers_dir (meta.name ^ ".toml"))
+    (fun oc -> Printf.fprintf oc
+      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nboard_interests = [%s]\n"
+      (String.concat ", " (List.map (Printf.sprintf "%S") meta.board_interests)))
+;;
+
+let persist_and_register_board_lane config meta =
+  write_board_lane_config config meta;
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> fail ("write_meta failed: " ^ detail));
+  ignore
+    (Keeper_registry.For_testing.register
+       ~base_path:config.Workspace.base_path
+       meta.Keeper_meta_contract.name
+       meta)
+;;
+
+let board_queue_length config keeper_name =
+  match
+    Keeper_registry_event_queue.snapshot_result
+      ~base_path:config.Workspace.base_path
+      keeper_name
+  with
+  | Ok queue -> Keeper_event_queue.length queue
+  | Error detail -> fail ("event queue snapshot failed: " ^ detail)
+;;
+
+let board_attention_count config keeper_name =
+  match
+    KBAC.load_candidates
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+  with
+  | Ok candidates -> List.length candidates
+  | Error detail -> fail ("load_candidates failed: " ^ detail)
+;;
+
+let persist_board_signal (signal : Board_dispatch.board_signal) =
+  match
+    Board_dispatch.create_post
+      ~author:signal.author
+      ~content:signal.content
+      ~title:signal.title
+      ~post_kind:Board.Human_post
+      ~visibility:Board.Internal
+      ?hearth:signal.hearth
+      ()
+  with
+  | Error error -> fail (Board.show_board_error error)
+  | Ok post ->
+    let signal = { signal with post_id = Board.Post_id.to_string post.id } in
+    let audience =
+      match
+        Board.audience_for_post
+          ~lookup:every_name_declared
+          ~post_kind:post.post_kind
+          ~visibility:post.visibility
+          ~title:post.title
+          ~content:post.body
+      with
+      | Ok (audience, _unresolved) -> audience
+      | Error error -> fail (Board.show_board_error error)
+    in
+    { Board_dispatch.signal; audience }
+;;
+
+let overwrite_file path contents =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel contents)
+;;
+
+let test_exact_mentions_deliver_and_wake_each_lane_independently () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.For_testing.clear
+    (fun () ->
+       let alpha = make_board_resume_meta "alpha" in
+       let beta = make_board_resume_meta "beta" in
+       let gamma = make_board_resume_meta "gamma" in
+       persist_and_register_board_lane config alpha;
+       persist_and_register_board_lane config beta;
+       persist_and_register_board_lane config gamma;
+       let signal : Board_dispatch.addressed_board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-multi-lane"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@alpha @beta inspect independently"
+         ; hearth = None
+         ; updated_at = Some 123.0
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "alpha durable queue" 1 (board_queue_length config "alpha");
+       check int "beta durable queue" 1 (board_queue_length config "beta");
+       check int "non-target durable queue" 0 (board_queue_length config "gamma");
+       check int "non-target attention fan-out" 0
+         (board_attention_count config "gamma");
+       List.iter
+         (fun keeper_name ->
+            match Keeper_registry.get ~base_path:config.base_path keeper_name with
+            | Some entry ->
+              check bool (keeper_name ^ " independently woken") true
+                (Atomic.get entry.fiber_wakeup)
+            | None -> fail (keeper_name ^ " registry entry missing"))
+         [ "alpha"; "beta" ])
+;;
+
+let test_mixed_address_signal_is_dropped_at_routing () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.For_testing.clear
+    (fun () ->
+       (* Policy pin (P2-1): a post mixing a valid [@keeper] target with an
+          unsupported [@@] selector is rejected whole — the valid target is
+          NOT partially routed.  #25378 pinned this at routing; the write
+          boundary now rejects the post before any signal exists, which is
+          the same fail-closed policy enforced one layer earlier. *)
+       let alpha = make_board_resume_meta "alpha" in
+       let beta = make_board_resume_meta "beta" in
+       persist_and_register_board_lane config alpha;
+       persist_and_register_board_lane config beta;
+       (match
+          Board_dispatch.create_post
+            ~author:"external-author"
+            ~content:"@alpha @@delta inspect"
+            ~title:"mixed address"
+            ~post_kind:Board.Human_post
+            ~visibility:Board.Internal
+            ()
+        with
+        | Ok _ -> fail "mixed-address post must be rejected at the write boundary"
+        | Error (Board.Validation_error _) -> ()
+        | Error error -> fail (Board.show_board_error error));
+       check int "mixed-address target durable queue" 0
+         (board_queue_length config "alpha");
+       check int "mixed-address non-target durable queue" 0
+         (board_queue_length config "beta");
+       match Keeper_registry.get ~base_path:config.base_path "alpha" with
+       | Some entry ->
+         check bool "mixed-address target not woken" false
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "alpha registry entry missing")
+;;
+
+let test_paused_exact_mention_is_durable_without_wake () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.For_testing.clear
+    (fun () ->
+       let meta = make_board_resume_meta "pausedlane" in
+       persist_and_register_board_lane config meta;
+       (match
+          Keeper_registry.dispatch_event
+            ~base_path:config.base_path
+            meta.name
+            Keeper_state_machine.Operator_pause
+        with
+        | Ok _ -> ()
+        | Error _ -> fail "failed to pause Keeper fixture");
+       let signal : Board_dispatch.addressed_board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-paused-lane"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@pausedlane retain this"
+         ; hearth = None
+         ; updated_at = Some 124.0
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "paused durable queue" 1 (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "paused lane wake hint remains false" false
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "paused registry entry missing")
+;;
+
+let test_restarting_exact_mention_is_durable_with_deferred_wake () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.For_testing.clear
+    (fun () ->
+       let meta = make_board_resume_meta "restartlane" in
+       write_board_lane_config config meta;
+       (match Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error detail -> fail ("write_meta failed: " ^ detail));
+       (match
+          Keeper_registry.register_restarting
+            ~base_path:config.base_path
+            meta.name
+            meta
+        with
+        | Ok _ -> ()
+        | Error _ -> fail "failed to register Restarting Keeper fixture");
+       let signal : Board_dispatch.addressed_board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-restarting-lane"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@restartlane retain this while relaunching"
+         ; hearth = None
+         ; updated_at = Some 124.5
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "Restarting durable queue" 1
+         (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "Restarting lane keeps deferred wake hint" false
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "Restarting registry entry missing")
+;;
+
+let test_lane_meta_failure_does_not_block_next_durable_delivery () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.For_testing.clear
+    (fun () ->
+       let broken = make_board_resume_meta "zzzbroken" in
+       let healthy = make_board_resume_meta "aaahealthy" in
+       persist_and_register_board_lane config broken;
+       persist_and_register_board_lane config healthy;
+       (match Keeper_registry.all ~base_path:config.base_path () with
+        | first :: _ ->
+          check string "fixture processes failing lane first" broken.name first.name
+        | [] -> fail "lane-isolation registry fixture is empty");
+       overwrite_file
+         (Keeper_types_profile.keeper_meta_path config broken.name)
+         "{ malformed Keeper metadata";
+       let signal : Board_dispatch.addressed_board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-lane-isolation"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@zzzbroken @aaahealthy inspect independently"
+         ; hearth = None
+         ; updated_at = Some 125.0
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "unreadable lane has no queued signal" 0
+         (board_queue_length config broken.name);
+       check int "next lane receives durable signal" 1
+         (board_queue_length config healthy.name))
+;;
+
+(* The nested reply targets the keeper's exact parent comment. Its author
+   must be read successfully from the Board store before direct delivery. *)
+let create_thread_fixture config ~keeper_name =
+  let meta = make_board_resume_meta keeper_name in
+  persist_and_register_board_lane config meta;
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"external-author"
+        ~content:"thread topic"
+        ~title:"thread"
+        ~post_kind:Board.Human_post
+        ~visibility:Board.Internal
+        ()
+    with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let add_comment ?parent_id ~author ~content () =
+    match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id () with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok comment -> comment
+  in
+  let parent = add_comment ~author:meta.Keeper_meta_contract.name ~content:"keeper was here" () in
+  let comment = add_comment ~parent_id:(Board.Comment_id.to_string parent.id)
+      ~author:"external-author" ~content:"follow up" () in
+  let signal : Board_dispatch.addressed_board_signal =
+    { signal =
+        { kind =
+            Board_dispatch.Board_comment_added
+              { comment_id = comment.id; parent_id = comment.parent_id }
+        ; post_id
+        ; author = "external-author"
+        ; title = "thread"
+        ; content = "follow up"
+        ; hearth = None
+        ; updated_at = Some 125.5
+        }
+    ; audience = Board.Thread_participants
+    }
+  in
+  meta, signal
+;;
+
+(* A thread signal whose post is gone from the store has an unavailable
+   relevance read. The push path routes once, delivers nothing and does not
+   wake the lane. *)
+let test_thread_signal_for_a_swept_post_delivers_nothing () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, signal = create_thread_fixture config ~keeper_name:"sweptlane" in
+       (match Board_dispatch.delete_post ~post_id:signal.signal.post_id with
+        | Ok Board.Durable_deletion -> ()
+        | Ok (Board.Deletion_persistence_pending detail) -> fail detail
+        | Error error -> fail (Board.show_board_error error));
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "lane queue stays empty" 0 (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "lane not woken" false (Atomic.get entry.fiber_wakeup)
+       | None -> fail "sweptlane registry entry missing")
+;;
+
+(* The author of a post is a thread participant. [check_self_comment_status]
+   only looks for the keeper's own comments, so before the authorship check an
+   answer to a keeper's question never reached the keeper that asked. Measured
+   on the live Board: 72 of 98 external comments on Keeper posts did not wake
+   the poster. This fixture is the one the old rule missed — the keeper wrote
+   the post and never commented on it. *)
+let create_self_post_fixture config ~keeper_name =
+  let meta = make_board_resume_meta keeper_name in
+  persist_and_register_board_lane config meta;
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:meta.Keeper_meta_contract.name
+        ~content:"does anyone know why the fixture is empty?"
+        ~title:"question from the keeper"
+        ~post_kind:Board.Human_post
+        ~visibility:Board.Internal
+        ()
+    with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment =
+    match
+      Board_dispatch.add_comment
+        ~post_id
+        ~author:"external-author"
+        ~content:"it is empty because the loader skips it"
+        ()
+    with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok comment -> comment
+  in
+  let signal : Board_dispatch.addressed_board_signal =
+    { signal =
+        { kind =
+            Board_dispatch.Board_comment_added
+              { comment_id = comment.id; parent_id = comment.parent_id }
+        ; post_id
+        ; author = "external-author"
+        ; title = "question from the keeper"
+        ; content = "it is empty because the loader skips it"
+        ; hearth = None
+        ; updated_at = Some 130.5
+        }
+    ; audience = Board.Thread_participants
+    }
+  in
+  meta, signal
+;;
+
+let test_comment_on_own_post_wakes_the_author () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, signal = create_self_post_fixture config ~keeper_name:"posterlane" in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "author lane receives the comment" 1
+         (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "author woken by a comment on its own post" true
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "posterlane registry entry missing")
+;;
+
+(* #29457: votes travel the same hook as comments and reactions. This drives
+   the real producer ([Board_dispatch.vote] / [vote_comment]) through the real
+   hook into the durable queue, so the whole path is measured: one vote on
+   the keeper's writing is one stimulus for the author lane; a duplicate
+   same-direction vote is [Already_voted] and adds nothing; the keeper's own
+   vote on its own writing addresses nobody. *)
+let vote_queue_kinds config keeper_name =
+  match
+    Keeper_registry_event_queue.snapshot_result
+      ~base_path:config.Workspace.base_path
+      keeper_name
+  with
+  | Error detail -> fail ("event queue snapshot failed: " ^ detail)
+  | Ok queue ->
+    Keeper_event_queue.to_list queue
+    |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Board_signal { kind = Keeper_event_queue.Vote_cast vote; _ } ->
+        Some vote
+      | _ -> None)
+;;
+
+let create_post_exn ~author ~title ~content =
+  match
+    Board_dispatch.create_post
+      ~author
+      ~content
+      ~title
+      ~post_kind:Board.Human_post
+      ~visibility:Board.Internal
+      ()
+  with
+  | Error error -> fail (Board.show_board_error error)
+  | Ok post -> Board.Post_id.to_string post.id
+;;
+
+let test_vote_on_own_post_wakes_the_author_once () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta = make_board_resume_meta "voterlane" in
+       persist_and_register_board_lane config meta;
+       Board_dispatch.set_board_signal_hook (fun signal ->
+         KKS.wakeup_relevant_keeper_for_board_signal ~config signal);
+       let post_id =
+         create_post_exn
+           ~author:meta.Keeper_meta_contract.name
+           ~title:"keeper finding"
+           ~content:"the loader skips empty fixtures"
+       in
+       (match Board_dispatch.vote ~voter:"external-voter" ~post_id ~direction:Board.Up with
+        | Error error -> fail (Board.show_board_error error)
+        | Ok _ -> ());
+       check int "one vote is one stimulus for the author" 1
+         (board_queue_length config meta.name);
+       (match vote_queue_kinds config meta.name with
+        | [ vote ] ->
+          check string "stimulus names the voter" "external-voter" vote.voter;
+          check string "stimulus names the voted-on author"
+            meta.Keeper_meta_contract.name vote.target_author;
+          (match vote.direction with
+           | Keeper_event_queue.Vote_up -> ()
+           | Keeper_event_queue.Vote_down -> fail "direction must be up");
+          (match vote.target with
+           | Keeper_event_queue.Vote_on_post id -> check string "post target" post_id id
+           | Keeper_event_queue.Vote_on_comment _ -> fail "target must be the post")
+        | votes -> failf "expected one vote stimulus, got %d" (List.length votes));
+       (match Keeper_registry.get ~base_path:config.base_path meta.name with
+        | Some entry ->
+          check bool "author woken by the vote" true (Atomic.get entry.fiber_wakeup)
+        | None -> fail "voterlane registry entry missing");
+       (* Same voter, same direction: Already_voted, nothing new to act on. *)
+       (match Board_dispatch.vote ~voter:"external-voter" ~post_id ~direction:Board.Up with
+        | Error (Board.Already_voted _) -> ()
+        | Ok _ -> fail "expected Already_voted"
+        | Error error -> fail (Board.show_board_error error));
+       check int "duplicate vote adds no stimulus" 1 (board_queue_length config meta.name);
+       (* The keeper voting on its own post addresses no lane. *)
+       (match
+          Board_dispatch.vote
+            ~voter:meta.Keeper_meta_contract.name
+            ~post_id
+            ~direction:Board.Up
+        with
+        | Error error -> fail (Board.show_board_error error)
+        | Ok _ -> ());
+       check int "self vote adds no stimulus" 1 (board_queue_length config meta.name))
+;;
+
+(* A comment vote addresses the comment's author, not the post's. *)
+let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let poster = make_board_resume_meta "posterlane" in
+       let commenter = make_board_resume_meta "commenterlane" in
+       persist_and_register_board_lane config poster;
+       persist_and_register_board_lane config commenter;
+       Board_dispatch.set_board_signal_hook (fun signal ->
+         KKS.wakeup_relevant_keeper_for_board_signal ~config signal);
+       let post_id =
+         create_post_exn
+           ~author:poster.Keeper_meta_contract.name
+           ~title:"question"
+           ~content:"why is the fixture empty?"
+       in
+       let comment_id =
+         match
+           Board_dispatch.add_comment
+             ~post_id
+             ~author:commenter.Keeper_meta_contract.name
+             ~content:"the loader skips it"
+             ()
+         with
+         | Error error -> fail (Board.show_board_error error)
+         | Ok comment -> Board.Comment_id.to_string comment.id
+       in
+       (* The comment itself woke the poster; measure only the vote from here. *)
+       let poster_before = board_queue_length config poster.name in
+       let commenter_before = board_queue_length config commenter.name in
+       (match
+          Board_dispatch.vote_comment
+            ~voter:"external-voter"
+            ~comment_id
+            ~direction:Board.Down
+        with
+        | Error error -> fail (Board.show_board_error error)
+        | Ok _ -> ());
+       check int "commenter receives the comment vote" (commenter_before + 1)
+         (board_queue_length config commenter.name);
+       check int "poster is not addressed by a vote on someone else's comment"
+         poster_before
+         (board_queue_length config poster.name);
+       match vote_queue_kinds config commenter.name with
+       | [ vote ] ->
+         (match vote.target with
+          | Keeper_event_queue.Vote_on_comment id -> check string "comment target" comment_id id
+          | Keeper_event_queue.Vote_on_post _ -> fail "target must be the comment");
+         (match vote.direction with
+          | Keeper_event_queue.Vote_down -> ()
+          | Keeper_event_queue.Vote_up -> fail "direction must be down")
+       | votes -> failf "expected one vote stimulus, got %d" (List.length votes))
+;;
+
+(* #27329 regression: a comment signal classifies as [Thread_participants],
+   and a lane that never touched the thread has no deterministic address —
+   [wake_reason] answers [Available None] for it. That folded to [Ignore]
+   for every non-participant lane, so a comment could never reach attention
+   judgment: [Judge_discoverable] was produced only for the [Discoverable]
+   audience. Now the [None] fold escalates to
+   [Judge_discoverable] for comment signals and the push path records the
+   attention candidate, while the participant lane keeps its direct
+   delivery. *)
+let test_comment_routes_bystander_lane_to_attention_judgment () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, addressed = create_thread_fixture config ~keeper_name:"threadlane" in
+       let bystander =
+         { (make_board_resume_meta "bystanderlane") with
+           board_interests = [ "thread review" ]
+         }
+       in
+       persist_and_register_board_lane config bystander;
+       let bystander =
+         match Keeper_meta_store.read_effective_meta config bystander.name with
+         | Ok (Some meta) -> meta
+         | Ok None -> fail "configured bystander metadata missing"
+         | Error detail -> fail detail
+       in
+       check (list string) "bystander interests come from actual TOML"
+         [ "thread review" ] bystander.board_interests;
+       let audience =
+         match KBA.of_board_audience addressed.Board_dispatch.audience with
+         | Ok audience -> audience
+         | Error error -> fail (KBA.classification_error_to_string error)
+       in
+       check bool "participant lane keeps direct delivery" true
+         (match route ~audience ~meta addressed.Board_dispatch.signal with
+          | KBA.Deliver KWOBS.Reply_to_self_comment -> true
+          | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+       check bool "bystander lane escalates to judgment" true
+         (match route ~audience ~meta:bystander addressed.Board_dispatch.signal with
+          | KBA.Judge_discoverable -> true
+          | KBA.Deliver _ | KBA.Ignore -> false);
+       check bool "empty-interest bystander is not judged" true
+         (match
+            route
+              ~audience
+              ~meta:{ bystander with board_interests = [] }
+              addressed.Board_dispatch.signal
+          with
+          | KBA.Ignore -> true
+          | KBA.Deliver _ | KBA.Judge_discoverable -> false);
+       KKS.wakeup_relevant_keeper_for_board_signal ~config addressed;
+       check int "participant lane still wakes directly" 1
+         (board_queue_length config meta.Keeper_meta_contract.name);
+       check int "bystander lane is not directly woken" 0
+         (board_queue_length config bystander.Keeper_meta_contract.name);
+       check int "bystander lane holds one attention candidate" 1
+         (board_attention_count config bystander.Keeper_meta_contract.name);
+       check int "participant lane holds no attention candidate" 0
+         (board_attention_count config meta.Keeper_meta_contract.name))
+;;
+
+(* RFC-provider-path-rest §3.3: a path's rest comes from the provider's answer
+   alone. A usable hint rests that long (at least 1 s, #35246) whatever the
+   keeper cadence is; without one a throttle rests the named floor and a hard
+   quota rests the fallback cap. A usable provider hint outlives that cap. *)
+let test_path_rest_follows_the_answer_not_the_cadence () =
+  let rest = Keeper_runtime_failure_route.path_rest_sec ~cap_sec:900.0 in
+  let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
+  let rate_limited = Keeper_runtime_failure_route.Rate_limited in
+  let hard_quota = Keeper_runtime_failure_route.Hard_quota in
+  check (float 0.001) "a stated 5 s rests 5 s" 5.0
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 5.0));
+  check (float 0.001) "a stated 120 s rests 120 s" 120.0
+    (rest ~retry_class:hard_quota ~retry_after_hint:(Some 120.0));
+  check (float 0.001) "a sub-second hint rests one second" 1.0
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 0.001));
+  check (float 0.001) "an unstated throttle rests the floor" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:None);
+  check (float 0.001) "an unstated provider capacity refusal rests the floor" floor_sec
+    (rest ~retry_class:Keeper_runtime_failure_route.Provider_capacity
+       ~retry_after_hint:None);
+  check (float 0.001) "an unstated hard quota rests the cap" 900.0
+    (rest ~retry_class:hard_quota ~retry_after_hint:None);
+  check (float 0.001) "a zero hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 0.0));
+  check (float 0.001) "a negative hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some (-5.0)));
+  check (float 0.5) "a NaN hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some nan));
+  check (float 0.001) "a stated reset outlives the fallback cap" 120000.0
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some 120000.0));
+  check (float 0.001) "a hard quota reset outlives the fallback cap" 4470.0
+    (rest ~retry_class:hard_quota ~retry_after_hint:(Some 4470.0));
+  check (float 0.001) "an infinite hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some infinity));
+  check bool "default cap is not below the named floor" true
+    (Float.compare Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec floor_sec
+     >= 0)
+;;
+
+(* ── Test runner ─── *)
+
+(* Audit S9: the Owner-registry rejection at shutdown comes in two shapes,
+   the Owner itself stopping and the Owner inventory stopping. Both must
+   complete the cycle without a turn; only the second used to fall into the
+   crash arm. *)
+let test_owner_inventory_stopping_completes_the_cycle () =
+  let status = Keeper_heartbeat_loop.owner_turn_rejection_cycle_status in
+  let name = function
+    | Keeper_heartbeat_loop.Turn_cycle_completed -> "completed"
+    | Keeper_heartbeat_loop.Turn_cycle_interrupted -> "interrupted"
+    | Keeper_heartbeat_loop.Turn_cycle_crashed -> "crashed"
+    | Keeper_heartbeat_loop.Turn_cycle_busy _ -> "busy"
+  in
+  check string "inventory stopping completes the cycle" "completed"
+    (name
+       (status
+          (Keeper_owner_registry.Command_lookup_failed
+             Keeper_owner_registry.Inventory_stopping)));
+  check string "owner stopping completes the cycle" "completed"
+    (name
+       (status
+          (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping)));
+  check string "owner not found is a crash" "crashed"
+    (name
+       (status
+          (Keeper_owner_registry.Command_lookup_failed
+             (Keeper_owner_registry.Owner_not_found "keeper-a"))));
+  check string "owner closed is a crash" "crashed"
+    (name
+       (status (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_closed)))
+;;
+
+let test_owner_inventory_stopping_refreshes_work_heartbeat () =
+  let action =
+    Keeper_heartbeat_loop.decide_keepalive_cycle_action
+      (Keeper_heartbeat_loop.owner_turn_rejection_cycle_status
+         (Keeper_owner_registry.Command_lookup_failed
+            Keeper_owner_registry.Inventory_stopping))
+  in
+  let refreshes =
+    match action with
+    | Keeper_heartbeat_loop.Record_turn_status
+        Keeper_heartbeat_loop.Refresh_work_heartbeat -> true
+    | Keeper_heartbeat_loop.Record_turn_status
+        Keeper_heartbeat_loop.Preserve_work_heartbeat
+    | Keeper_heartbeat_loop.Skip_interrupted_turn
+    | Keeper_heartbeat_loop.Defer_autonomous_work _ -> false
+  in
+  check bool "shutdown boundary does not preserve the lease as a crash would" true
+    refreshes
+;;
+
+let test_comments_address_post_and_direct_parent_only () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> Board_dispatch.set_board_signal_hook (fun _ -> ()); Keeper_registry.For_testing.clear ())
+    (fun () ->
+      let poster = make_board_resume_meta "poster" in
+      let parent_author = make_board_resume_meta "parent-author" in
+      let participant = { (make_board_resume_meta "past-participant") with board_interests = [ "research" ] } in
+      List.iter (persist_and_register_board_lane config) [poster; parent_author; participant];
+      let post = match Board_dispatch.create_post ~author:poster.name ~content:"research question"
+          ~title:"thread" ~post_kind:Board.Human_post ~visibility:Board.Internal () with
+        | Ok post -> post | Error error -> fail (Board.show_board_error error) in
+      let post_id = Board.Post_id.to_string post.id in
+      let add ?parent_id author =
+        match Board_dispatch.add_comment ~post_id ~author ~content:"same text" ?parent_id () with
+        | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
+      let parent = add parent_author.name in
+      ignore (add participant.name);
+      let last_signal = ref None in
+      Board_dispatch.set_board_signal_hook (fun addressed ->
+        last_signal := Some addressed;
+        KKS.wakeup_relevant_keeper_for_board_signal ~config addressed);
+      ignore (add "external-author");
+      check int "top-level comment reaches poster" 1 (board_queue_length config poster.name);
+      check int "past comment does not address its author" 0 (board_queue_length config parent_author.name);
+      check int "other participant is not directly addressed" 0 (board_queue_length config participant.name);
+      check int "interested non-target receives judgment candidate" 1 (board_attention_count config participant.name);
+      ignore (add ~parent_id:(Board.Comment_id.to_string parent.id) "external-author");
+      check int "nested comment still reaches poster" 2 (board_queue_length config poster.name);
+      check int "nested comment reaches exact parent author" 1 (board_queue_length config parent_author.name);
+      check int "unrelated participant remains undelivered" 0 (board_queue_length config participant.name);
+      check int "interested non-target judges each distinct comment" 2 (board_attention_count config participant.name);
+      let signal = (Option.get !last_signal).Board_dispatch.signal in
+      let missing = Board.Comment_id.of_string "c-00000000000000000000000000000001" |> Result.get_ok in
+      let signal = match signal.kind with
+        | Board_dispatch.Board_comment_added identity ->
+          { signal with kind = Board_dispatch.Board_comment_added { identity with parent_id = Some missing } }
+        | _ -> assert false in
+      check bool "missing direct parent is unavailable, not a guessed recipient" true
+        (match KWOBS.wake_reason ~meta:parent_author ~signal with
+         | KWOBS.Unavailable { error = Board.Read_comment_not_found _; _ } -> true
+         | _ -> false))
+;;
+
+let () =
+  run
+    "keeper keepalive helpers"
+    [ ( "current_task_reconciliation"
+      , [ test_case
+            "heartbeat reconciles empty current_task_id from active backlog"
+            `Quick
+            test_current_task_id_for_agent_reconciles_from_empty_registry_task
+        ] )
+    ; ( "owner_turn_rejection"
+      , [ test_case "owner inventory stopping completes the cycle" `Quick
+            test_owner_inventory_stopping_completes_the_cycle
+        ; test_case "owner inventory stopping refreshes the work heartbeat" `Quick
+            test_owner_inventory_stopping_refreshes_work_heartbeat
+        ] )
+    ; ( "directive_orphan_warn_gate"
+      , [ test_case "first unknown keeper directive warns" `Quick
+            test_not_in_registry_warn_due_first_event
+        ; test_case "same unknown keeper is throttled within window" `Quick
+            test_not_in_registry_warn_due_throttles_within_window
+        ; test_case "clock regression does not suppress forever" `Quick
+            test_not_in_registry_warn_due_recovers_on_clock_regression
+        ; test_case "warn gate is per agent" `Quick
+            test_not_in_registry_warn_state_is_per_agent
+        ; test_case "warn gate state is bounded" `Quick
+            test_not_in_registry_warn_state_is_bounded
+        ] )
+    ; ( "board_signal_delivery"
+      , [ test_case "comments address post and exact parent only" `Quick
+            test_comments_address_post_and_direct_parent_only
+        ; test_case "goal keyword overlap is not a wake reason" `Quick
+            test_board_goal_keyword_overlap_is_not_wake_reason
+        ; test_case "mentions use exact typed Keeper ids" `Quick
+            test_board_mentions_use_exact_typed_keeper_ids
+        ; test_case "closed audience routes only its authority" `Quick
+            test_closed_board_audience_routes_only_its_authority
+        ; test_case
+            "system post text does not wake the named lane"
+            `Quick
+            test_system_post_text_does_not_wake_the_named_lane
+        ; test_case "exact mentions deliver and wake every lane" `Quick
+            test_exact_mentions_deliver_and_wake_each_lane_independently
+        ; test_case "mixed address signal is dropped at routing" `Quick
+            test_mixed_address_signal_is_dropped_at_routing
+        ; test_case "paused exact mention is durable without wake" `Quick
+            test_paused_exact_mention_is_durable_without_wake
+        ; test_case "Restarting exact mention is durable with deferred wake" `Quick
+            test_restarting_exact_mention_is_durable_with_deferred_wake
+        ; test_case "lane metadata failure does not block next durable delivery" `Quick
+            test_lane_meta_failure_does_not_block_next_durable_delivery
+        ; test_case "thread signal for a swept post delivers nothing" `Quick
+            test_thread_signal_for_a_swept_post_delivers_nothing
+        ; test_case "comment routes bystander lane to attention judgment" `Quick
+            test_comment_routes_bystander_lane_to_attention_judgment
+        ; test_case "comment on own post wakes the author" `Quick
+            test_comment_on_own_post_wakes_the_author
+        ; test_case "vote on own post wakes the author once" `Quick
+            test_vote_on_own_post_wakes_the_author_once
+        ; test_case "vote on own comment wakes the commenter not the poster" `Quick
+            test_vote_on_own_comment_wakes_the_commenter_not_the_poster
+        ] )
+    ; ( "interruptible_cadence"
+      , [ test_case "directed wake cuts configured sleep" `Quick
+            test_directed_wake_cuts_configured_sleep
+        ; test_case "explicit stop cuts configured sleep" `Quick
+            test_explicit_stop_cuts_configured_sleep
+        ; test_case "cadence wake consumes only active sleep" `Quick
+            test_cadence_wake_consumes_only_active_sleep
+        ; test_case "cadence handshake precedes duration resolution" `Quick
+            test_cadence_handshake_precedes_duration_resolution
+        ; test_case "a path's rest follows the answer, not the cadence" `Quick
+            test_path_rest_follows_the_answer_not_the_cadence
+        ; test_case "backoff sleep serves a wakeup only after the duration" `Quick
+            test_backoff_sleep_serves_a_wakeup_only_after_the_duration
+        ; test_case "backoff sleep without a wakeup times out" `Quick
+            test_backoff_sleep_without_a_wakeup_times_out
+        ; test_case "stop still cuts a backoff sleep" `Quick
+            test_stop_still_cuts_a_backoff_sleep
+        ; test_case "dependency change interrupts provider rest" `Quick
+            test_dependency_change_interrupts_provider_rest
+        ] )
+    ]
+;;

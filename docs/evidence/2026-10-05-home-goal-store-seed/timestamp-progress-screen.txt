@@ -1,0 +1,30 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  01:09:09  HTTP [connecte…
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+   p:Approvals / Questions
+   Health: ok
+   Work: not observed
+
+   Needs your decision
+    Goal confirmations not read · inspect sources; Operator tasks not read · inspect sources
+    Approvals and questions: confirm queue not fully read; held calls not fully read; Gate queue …
+
+   Continue
+    Choose a Keeper  · start a conversation
+   Selection changed · j/k to choose again
+
+
+
+
+
+
+
+
+
+
+
+
+
+  press x again to drop goal goal-arm-40176  j/k:choose  Enter:open  p:requests  q:quit  …?
+ Choose a Keeper before writing · i:choose

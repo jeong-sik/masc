@@ -1,0 +1,840 @@
+module Exact_output = Agent_core.Exact_output
+module String_set = Set.Make (String)
+module String_map = Map.Make (String)
+
+type admitted_slot =
+  { slot_id : string
+  ; admitted_target : Exact_output.admitted_target
+  }
+
+type admitted_lane =
+  { owner : Runtime_schema.exact_lane_owner
+  ; enabled : bool
+  ; slots : admitted_slot list
+  ; cli_slots : string list
+    (* Official-client runtime ids walked as one-shot fallbacks after every
+       catalog slot is exhausted. Carried verbatim from the declaration:
+       whether an id resolves to a live official-client runtime is an
+       execution-time question the lane runner answers with a typed error,
+       and the projection shows the declaration either way. *)
+  ; max_output_tokens : int option
+    (* The lane's declared output budget, carried verbatim. [None] means the
+       declaration named none, and the lane's requests carry no [max_tokens]
+       of their own. *)
+  ; thinking : bool option
+    (* The lane's thinking choice, carried verbatim. [None] leaves each slot's
+       catalog [enable_thinking] as it is. *)
+  }
+
+type rejected_slot =
+  { lane_id : string
+  ; position : int
+  ; slot_id : string
+  }
+
+type rejected_slot_diagnosis =
+  | Declared_target_binding_rejected
+  | Configured_runtime_only of
+      { provider_id : string
+      ; api_name : string
+      }
+  | Unknown_to_both_registries
+
+(* An exact lane admits overlay [[targets]] ids; a runtime.toml runtime id
+   is invisible to it even when both name the same model, and the two
+   registries share a naming scheme, so an operator can write the wrong one
+   and read "absent from the frozen catalog" as the catalog having moved on
+   (verifier_exact, 2026-09-02). A declared target whose provider binding was
+   rejected also lands here, since the resolver drops it from the admitted
+   set; that case is named first so it is not mistaken for a runtime id that
+   happens to share the string. The runtime lookup is injected because the
+   registry sits below [Runtime]; the binding verdict comes from the
+   snapshot the registry already holds. *)
+let classify_rejected_slot (slot : rejected_slot) ~declared_target_rejected ~configured_runtime =
+  if declared_target_rejected slot.slot_id
+  then Declared_target_binding_rejected
+  else (
+    match configured_runtime slot.slot_id with
+    | Some (provider_id, api_name) -> Configured_runtime_only { provider_id; api_name }
+    | None -> Unknown_to_both_registries)
+;;
+
+type runtime_observation =
+  { candidate : Runtime_candidate_backpressure.candidate
+  ; quota_scope : Runtime_quota_window.scope
+  }
+
+type t =
+  { runtime_observations : (string * runtime_observation) list
+  ; resolver_snapshot : Exact_output.resolver_snapshot
+  ; declared_lanes : Runtime_schema.exact_output_lane_decl list
+  ; exact_output_lanes : admitted_lane list
+  ; rejected_slots : rejected_slot list
+  ; required_lane_ids : string list
+  ; addon_served_lane_ids : string list
+  }
+
+let catalog_generation_fingerprint t =
+  Exact_output.resolver_catalog_generation t.resolver_snapshot
+  |> Exact_output.catalog_generation_fingerprint
+
+type publication_error =
+  | Registry_not_published
+  | Publication_busy
+  | Replacement_base_changed
+  | Duplicate_lane_id of
+      { position : int
+      ; lane_id : string
+      }
+  | Empty_lane of { lane_id : string }
+  | Blank_lane_slot of
+      { lane_id : string
+      ; position : int
+      }
+  | Duplicate_lane_slot of
+      { lane_id : string
+      ; position : int
+      ; slot_id : string
+      }
+  | Invalid_lane_slot of
+      { lane_id : string
+      ; position : int
+      ; slot_id : string
+      ; cause : Exact_output.target_ref_error
+      }
+  | Lane_thinking_not_encodable of
+      { lane_id : string
+      ; slot_id : string
+      ; thinking : bool
+      ; rejection : Llm_provider.Complete_common.thinking_control_request_rejection
+      }
+  | Required_lane_unavailable of { lane_id : string }
+  | Required_lane_disabled of { lane_id : string }
+  | Resolver_snapshot_rejected of Exact_output.resolver_snapshot_error
+
+type selected_slot =
+  { slot_id : string
+  ; admitted_target : Exact_output.admitted_target
+  ; runtime_observation : runtime_observation option
+  }
+
+type resolved_lane =
+  { selected_slots : selected_slot list
+  ; cli_slots : string list
+  }
+
+type lane_resolution_error =
+  | Exact_lane_unconfigured of { lane_id : string }
+  | Exact_lane_off of { lane_id : string; owner : Runtime_schema.exact_lane_owner }
+  | No_admitted_lane_slots of { lane_id : string }
+
+type prepared_replacement =
+  { base : t option
+  ; candidate : t option
+  }
+
+type replacement_outcome =
+  | Registry_replaced
+  | Registry_unpublished
+
+type ('not_committed, 'committed) replacement_effect =
+  | Not_committed of 'not_committed
+  | Committed of 'committed
+
+type reservation =
+  { identity : unit ref
+  ; candidate : t option
+  }
+
+type reservation_error = Reservation_inactive
+
+let published : t option Atomic.t = Atomic.make None
+let publication_mutex = Mutex.create ()
+let active_reservation : reservation option ref = ref None
+
+(* Whether [current] turned a reader away with [Publication_busy] while the
+   active fence stood. Such a reader parked work it could not admit, and the
+   fence's end is what lets it in again, whatever the write's outcome. *)
+let busy_reader_refused = ref false
+
+type lane_subscription = { lane_id : string; wake : unit -> unit }
+let lane_subscriptions : lane_subscription list ref = ref []
+
+let subscribe_lane_changes ~lane_id wake =
+  let subscription = { lane_id; wake } in
+  Mutex.protect publication_mutex (fun () ->
+    lane_subscriptions := subscription :: !lane_subscriptions);
+  fun () -> Mutex.protect publication_mutex (fun () ->
+    lane_subscriptions := List.filter (fun current -> current != subscription) !lane_subscriptions)
+;;
+
+let lane_publication registry lane_id =
+  match registry with
+  | None -> None, []
+  | Some registry ->
+    let declaration = List.find_opt
+        (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+           String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
+        registry.declared_lanes in
+    let targets = match List.find_opt
+        (fun (lane : admitted_lane) ->
+           String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
+        registry.exact_output_lanes with
+      | None -> []
+      | Some lane -> List.map (fun (slot : admitted_slot) ->
+          let binding = List.assoc_opt slot.slot_id registry.runtime_observations
+            |> Option.map (fun (observation : runtime_observation) -> observation.candidate) in
+          slot.slot_id,
+          (Exact_output.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
+           |> Result.map (fun (candidate : Exact_output.flow_candidate) ->
+             Exact_output.target_identity_fingerprint
+               (Exact_output.flow_candidate_identity candidate).target_identity)),
+          binding) lane.slots in
+    declaration, targets
+;;
+
+(* Capture subscribers with the committed transition under the publication
+   lock; invoke them only after releasing it. Comparing lane-local identities
+   avoids waking a refused consumer for unrelated catalog publications. *)
+let changed_subscribers ~previous ~current =
+  List.filter (fun subscription ->
+    let before, before_targets = lane_publication previous subscription.lane_id in
+    let after, after_targets = lane_publication current subscription.lane_id in
+    let same_declaration = match before, after with
+      | None, None -> true
+      | Some before, Some after -> Runtime_schema.equal_exact_output_lane_decl before after
+      | None, Some _ | Some _, None -> false in
+    let same_targets = List.equal
+        (fun (before_id, before_target, before_binding)
+             (after_id, after_target, after_binding) ->
+          String.equal before_id after_id && before_target = after_target
+          && Option.equal Runtime_candidate_backpressure.same_candidate_binding
+               before_binding after_binding)
+        before_targets after_targets in
+    not same_declaration || not same_targets) !lane_subscriptions
+;;
+
+let notify_lane_changes subscriptions =
+  (* Publication is already committed. A wake callback's cancellation is a
+     subscriber failure, not cancellation of the preceding write: propagating
+     it would hide the committed receipt from the runtime-config caller.
+     Callbacks only signal work; cancellation from [apply_write] still escapes
+     through [transact_replacement]'s pre-publication exception path. *)
+  List.iter (fun subscription ->
+    try subscription.wake () with
+    | exn -> Log.Misc.warn "exact-output lane publication subscriber failed lane=%s: %s"
+        subscription.lane_id (Printexc.to_string exn)) subscriptions
+;;
+
+open Result.Syntax
+
+let admit_lane_slots resolver_snapshot admitted_by_id
+    (lane : Runtime_schema.exact_output_lane_decl) =
+  let lane_id = Runtime_schema.exact_lane_key lane.owner in
+  let rec validate_cli position seen = function
+    | [] -> Ok ()
+    | slot_id :: rest ->
+      if String.trim slot_id = "" then
+        Error (Blank_lane_slot {lane_id;position})
+      else if String_set.mem slot_id seen then
+        Error (Duplicate_lane_slot {lane_id;position;slot_id})
+      else validate_cli (position + 1) (String_set.add slot_id seen) rest
+  in
+  let* () = validate_cli (List.length lane.slot_ids + 1)
+    (String_set.of_list lane.slot_ids) lane.cli_slot_ids in
+  let rec loop position seen admitted_by_id admitted_slots rejected_slots = function
+    | [] ->
+      Ok (List.rev admitted_slots, admitted_by_id, List.rev rejected_slots)
+    | slot_id :: rest ->
+      if String.equal (String.trim slot_id) ""
+      then Error (Blank_lane_slot { lane_id; position })
+      else if String_set.mem slot_id seen
+      then Error (Duplicate_lane_slot { lane_id; position; slot_id })
+      else if not lane.enabled then
+        (match Exact_output.admit_target_ref resolver_snapshot slot_id with
+         | Error (Exact_output.Target_ref_rejected cause) ->
+             Error (Invalid_lane_slot {lane_id;position;slot_id;cause})
+         | Ok _ | Error (Exact_output.Target_not_in_catalog _) ->
+             loop (position + 1) (String_set.add slot_id seen) admitted_by_id
+               admitted_slots rejected_slots rest)
+      else
+        let admitted = String_map.find_opt slot_id admitted_by_id in
+        (match admitted with
+         | Some admitted_target ->
+           loop
+             (position + 1)
+             (String_set.add slot_id seen)
+             admitted_by_id
+             (({ slot_id; admitted_target } : admitted_slot) :: admitted_slots)
+             rejected_slots
+             rest
+         | None ->
+           (match Exact_output.admit_target_ref resolver_snapshot slot_id with
+            | Error (Exact_output.Target_ref_rejected cause) ->
+              Error
+                (Invalid_lane_slot
+                   { lane_id; position; slot_id; cause })
+            | Error (Exact_output.Target_not_in_catalog _) ->
+              loop
+                (position + 1)
+                (String_set.add slot_id seen)
+                admitted_by_id
+                admitted_slots
+                ({ lane_id; position; slot_id } :: rejected_slots)
+                rest
+            | Ok admitted_target ->
+              loop
+                (position + 1)
+                (String_set.add slot_id seen)
+                (String_map.add slot_id admitted_target admitted_by_id)
+                (({ slot_id; admitted_target } : admitted_slot) :: admitted_slots)
+                rejected_slots
+                rest))
+  in
+  match lane.slot_ids, lane.cli_slot_ids with
+  | [], [] when lane.enabled -> Error (Empty_lane { lane_id })
+  | slot_ids, _ -> loop 1 String_set.empty admitted_by_id [] [] slot_ids
+;;
+
+(* A lane's [thinking] is refused here, where the lane is published, when a
+   slot's model cannot carry it: a reasoning-effort ladder without [none]
+   cannot turn thinking off, and a row with no thinking control cannot turn it
+   on. Admitting it would publish a lane that refuses every request it makes. *)
+let validate_lane_thinking (lane : Runtime_schema.exact_output_lane_decl) slots =
+  match lane.thinking with
+  | None -> Ok ()
+  | Some thinking ->
+    let rec loop = function
+      | [] -> Ok ()
+      | (slot : admitted_slot) :: rest ->
+        let projected =
+          Exact_output.projection_target
+            (Exact_output.admitted_target_with_enable_thinking
+               slot.admitted_target
+               thinking)
+        in
+        (match
+           Llm_provider.Complete_common.thinking_control_request_rejection
+             ?anthropic_thinking_control:projected.anthropic_thinking_control
+             ~caps:projected.capabilities
+             projected.config
+         with
+         | None -> loop rest
+         | Some rejection ->
+           Error
+             (Lane_thinking_not_encodable
+                { lane_id = Runtime_schema.exact_lane_key lane.owner; slot_id = slot.slot_id; thinking; rejection }))
+    in
+    loop slots
+;;
+
+let admit_lanes ~admitted_by_id resolver_snapshot lanes =
+  let rec loop position seen admitted_by_id admitted_lanes rejected_slots = function
+    | [] -> Ok (List.rev admitted_lanes, List.rev rejected_slots)
+    | (lane : Runtime_schema.exact_output_lane_decl) :: rest ->
+      let lane_id = Runtime_schema.exact_lane_key lane.owner in
+      if String_set.mem lane_id seen
+      then Error (Duplicate_lane_id { position; lane_id })
+      else
+        let* slots, admitted_by_id, lane_rejected_slots =
+          admit_lane_slots resolver_snapshot admitted_by_id lane
+        in
+        let* () = if lane.enabled then validate_lane_thinking lane slots else Ok () in
+        loop
+          (position + 1)
+          (String_set.add lane_id seen)
+          admitted_by_id
+          ({ owner = lane.owner
+           ; enabled = lane.enabled
+           ; slots
+           ; cli_slots = lane.cli_slot_ids
+           ; max_output_tokens = lane.max_output_tokens
+           ; thinking = lane.thinking
+           }
+           :: admitted_lanes)
+          (List.rev_append lane_rejected_slots rejected_slots)
+          rest
+  in
+  loop 1 String_set.empty admitted_by_id [] [] lanes
+;;
+
+(* A lane serves a required service when it holds an admitted slot and either
+   is that builtin lane or is an Addon lane whose exact output carries the
+   service's id AND the caller attested that id in [addon_served_lane_ids].
+   A table in [runtime.toml] alone never serves: its name is only a name, and
+   it loads without any installation behind it. The attestation is the
+   caller's claim that dispatch routes the service to that Addon, so a
+   publication never turns a missing builtin judge into a request-time
+   failure. *)
+let serves_required_lane ~addon_served_lane_ids lane_id (lane : admitted_lane) =
+  let has_slot =
+    match lane with
+    | { slots = _ :: _; _ } | { cli_slots = _ :: _; _ } -> true
+    | { slots = []; cli_slots = []; _ } -> false
+  in
+  has_slot
+  &&
+  match lane.owner with
+  | Runtime_schema.Builtin _ -> String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id
+  | Runtime_schema.Addon { output; _ } ->
+    String.equal output lane_id && List.exists (String.equal lane_id) addon_served_lane_ids
+;;
+
+let validate_required_lanes ~addon_served_lane_ids required_lane_ids admitted_lanes =
+  let rec loop = function
+    | [] -> Ok ()
+    | lane_id :: rest ->
+      if List.exists (serves_required_lane ~addon_served_lane_ids lane_id) admitted_lanes
+      then loop rest
+      else Error (Required_lane_unavailable { lane_id })
+  in
+  loop required_lane_ids
+;;
+
+let with_publication_lock f =
+  Mutex.lock publication_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock publication_mutex) f
+;;
+
+(* A required lane rule 3 emptied is excused at this one publication: it is
+   unavailable alone and every other lane still publishes. The registry keeps
+   the full required list, so the next publication requires the lane again
+   unless that text empties it too. *)
+let required_less_excused required_lane_ids ~excused_lane_ids =
+  List.filter
+    (fun lane_id -> not (List.exists (String.equal lane_id) excused_lane_ids))
+    required_lane_ids
+;;
+
+(* [publish]'s admission, which changes nothing: the lanes a publication would
+   admit and the slots it would reject, or the error that refuses it. *)
+let admit_publication ~required_lane_ids ~addon_served_lane_ids ~excused_lane_ids ~lanes resolver_snapshot =
+  let* () =
+    match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+      not lane.enabled && List.mem (Runtime_schema.exact_lane_key lane.owner) required_lane_ids) lanes with
+    | Some lane -> Error (Required_lane_disabled { lane_id = Runtime_schema.exact_lane_key lane.owner })
+    | None -> Ok ()
+  in
+  let* exact_output_lanes, rejected_slots =
+    admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
+  in
+  let* () =
+    validate_required_lanes
+      ~addon_served_lane_ids
+      (required_less_excused required_lane_ids ~excused_lane_ids)
+      exact_output_lanes
+  in
+  Ok (exact_output_lanes, rejected_slots)
+;;
+
+let check_publication ?(required_lane_ids = []) ?(addon_served_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
+  admit_publication ~required_lane_ids ~addon_served_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
+  |> Result.map (fun (_admitted_lanes, _rejected_slots) -> ())
+;;
+
+let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(addon_served_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
+  let* registry, subscriptions = with_publication_lock (fun () ->
+  match !active_reservation with
+  | Some _ -> Error Publication_busy
+  | None ->
+    let* exact_output_lanes, rejected_slots =
+      admit_publication ~required_lane_ids ~addon_served_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
+    in
+    let registry =
+      { runtime_observations
+      ; resolver_snapshot
+      ; declared_lanes = lanes
+      ; exact_output_lanes
+      ; rejected_slots
+      ; required_lane_ids
+      ; addon_served_lane_ids
+      }
+    in
+    let previous = Atomic.get published in
+    Atomic.set published (Some registry);
+    Ok (registry, changed_subscribers ~previous ~current:(Some registry))) in
+  notify_lane_changes subscriptions;
+  Ok registry
+;;
+
+let unpublish () =
+  with_publication_lock (fun () ->
+    match !active_reservation with
+    | Some _ -> Error Publication_busy
+    | None -> Atomic.set published None; Ok ())
+;;
+
+let current () =
+  with_publication_lock
+  @@ fun () ->
+  match !active_reservation with
+  | Some _ ->
+    busy_reader_refused := true;
+    Error Publication_busy
+  | None ->
+    (match Atomic.get published with
+     | Some registry -> Ok registry
+     | None -> Error Registry_not_published)
+;;
+
+let reserve candidate =
+  let reservation = { identity = ref (); candidate } in
+  active_reservation := Some reservation;
+  busy_reader_refused := false;
+  Ok reservation
+;;
+
+(* Every replacement admits its lanes against a resolver snapshot built from
+   the text being committed. A snapshot frozen at boot answered a saved
+   provider change -- a new [exact-body-timeout-s], a new binding -- with the
+   targets the process started on, while the save reported the change applied
+   (#38779). Handles admitted against the previous snapshot are never reused,
+   because they carry that snapshot's binding. *)
+let prepare_replacement ~runtime_observations ~lanes ~excused_lane_ids ~load_resolver_snapshot =
+  let base = Atomic.get published in
+  match base, lanes with
+  | None, [] -> Ok { base; candidate = None }
+  | None, _ :: _ -> Error Registry_not_published
+  | Some previous, _ ->
+    let* resolver_snapshot =
+      load_resolver_snapshot ()
+      |> Result.map_error (fun error -> Resolver_snapshot_rejected error)
+    in
+    let* exact_output_lanes, rejected_slots =
+      admit_publication ~required_lane_ids:previous.required_lane_ids
+        ~addon_served_lane_ids:previous.addon_served_lane_ids
+        ~excused_lane_ids ~lanes resolver_snapshot
+    in
+    Ok
+      { base
+      ; candidate =
+          Some
+            { runtime_observations
+            ; resolver_snapshot
+            ; declared_lanes = lanes
+            ; exact_output_lanes
+            ; rejected_slots
+            ; required_lane_ids = previous.required_lane_ids
+            ; addon_served_lane_ids = previous.addon_served_lane_ids
+            }
+      }
+;;
+
+let prepare_retention () =
+  match Atomic.get published with
+  | None -> None
+  | Some _ as base -> Some { base; candidate = base }
+;;
+
+let replacement_outcome (prepared : prepared_replacement) =
+  match prepared.candidate with
+  | Some _ -> Registry_replaced
+  | None -> Registry_unpublished
+;;
+
+let same_registry_identity left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right -> left == right
+  | None, Some _ | Some _, None -> false
+;;
+
+
+let reserve_replacement prepared =
+  with_publication_lock
+  @@ fun () ->
+  match !active_reservation with
+  | Some _ -> Error Publication_busy
+  | None ->
+    let actual = Atomic.get published in
+    if same_registry_identity prepared.base actual
+    then reserve prepared.candidate
+    else
+      Error Replacement_base_changed
+;;
+
+let same_reservation left right = left.identity == right.identity
+
+(* The subscribers to wake as a fence closes: those whose lane the commit
+   changed, or every subscriber when a reader was refused during the fence,
+   since [current] cannot say which lane that reader asked about. Called under
+   the publication lock; it reads and resets the refusal. *)
+let fence_close_subscribers changed =
+  let refused = !busy_reader_refused in
+  busy_reader_refused := false;
+  if refused then !lane_subscriptions else changed
+;;
+
+let close_private_transaction reservation ~publish =
+  let subscriptions = with_publication_lock (fun () ->
+  (* [reservation] never leaves [transact_replacement]'s closure. Other
+     publication operations can only observe the active fence, so no external
+     caller can consume or replace this exact token while [apply_write] runs. *)
+  active_reservation := None;
+  fence_close_subscribers
+    (if not publish then []
+     else match reservation.candidate with
+       | None -> []
+       | Some registry ->
+         let previous = Atomic.get published in
+         Atomic.set published (Some registry);
+         changed_subscribers ~previous ~current:(Some registry))) in
+  notify_lane_changes subscriptions
+;;
+
+let transact_replacement prepared ~apply_write =
+  let* reservation = reserve_replacement prepared in
+  match apply_write () with
+  | Not_committed _ as outcome ->
+    close_private_transaction reservation ~publish:false;
+    Ok outcome
+  | Committed _ as outcome ->
+    close_private_transaction reservation ~publish:true;
+    Ok outcome
+  | exception exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    close_private_transaction reservation ~publish:false;
+    Printexc.raise_with_backtrace exception_ backtrace
+;;
+
+let finish_replacement reservation =
+  let* subscriptions = with_publication_lock (fun () ->
+  match !active_reservation with
+  | Some active when same_reservation active reservation ->
+    active_reservation := None;
+    let previous = Atomic.get published in
+    Option.iter (fun registry -> Atomic.set published (Some registry)) active.candidate;
+    Ok (fence_close_subscribers (changed_subscribers ~previous ~current:(Atomic.get published)))
+  | Some _ | None -> Error Reservation_inactive) in
+  notify_lane_changes subscriptions;
+  Ok ()
+;;
+
+let abort_replacement reservation =
+  let* subscriptions = with_publication_lock (fun () ->
+  match !active_reservation with
+  | Some active when same_reservation active reservation ->
+    active_reservation := None;
+    Ok (fence_close_subscribers [])
+  | Some _ | None -> Error Reservation_inactive) in
+  notify_lane_changes subscriptions;
+  Ok ()
+;;
+let rejected_slots registry = registry.rejected_slots
+
+let rejected_target_bindings registry =
+  Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
+;;
+
+let declared_lanes registry = registry.declared_lanes
+
+let declared_lane registry ~lane_id =
+  List.find_opt
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
+    registry.declared_lanes
+;;
+
+let diagnose_rejected_slot registry (slot : rejected_slot) ~configured_runtime =
+  let rejected_bindings =
+    Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
+    |> List.map (fun (binding : Exact_output.rejected_target_binding) -> binding.target_ref)
+  in
+  classify_rejected_slot
+    slot
+    ~declared_target_rejected:(fun slot_id -> List.mem slot_id rejected_bindings)
+    ~configured_runtime
+;;
+
+(* Keeper assignments whose target left the frozen catalog. These do not
+   reject a lane slot — the assignment just silently stops resolving and the
+   keeper falls through to the default runtime — which is exactly why they
+   need their own report: on 2026-08-28 three keepers ran on retired targets
+   for days with no log line naming them, only measured fallback traffic. *)
+let catalog_absent_assignments resolver_snapshot ~(assignments :
+    (string * string) list) : (string * string) list =
+  List.filter_map
+    (fun (keeper_name, target_ref) ->
+       match Exact_output.admit_target_ref resolver_snapshot target_ref with
+       | Error (Exact_output.Target_not_in_catalog _) -> Some (keeper_name, target_ref)
+       | Error (Exact_output.Target_ref_rejected _)
+       | Ok _ -> None)
+    assignments
+;;
+
+let resolve_lane registry ~lane_id =
+  match
+    List.find_opt
+      (fun lane -> String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
+      registry.exact_output_lanes
+  with
+  | None -> Error (Exact_lane_unconfigured { lane_id })
+  | Some { enabled = false; owner; _ } -> Error (Exact_lane_off { lane_id; owner })
+  | Some lane ->
+    (* A lane is empty only when it has NOTHING to run: cli fallbacks keep a
+       lane alive even when every catalog slot was dropped (and a cli-only
+       judge lane is a supported shape — RFC cli-runtimes-as-lane-slots). *)
+    if lane.slots = [] && lane.cli_slots = []
+    then Error (No_admitted_lane_slots { lane_id })
+    else
+      let selected_slots =
+        List.map
+          (fun (slot : admitted_slot) ->
+             let admitted_target =
+               match lane.max_output_tokens with
+               | Some max_tokens ->
+                 Exact_output.admitted_target_with_max_tokens
+                   slot.admitted_target
+                   max_tokens
+               | None -> slot.admitted_target
+             in
+             let admitted_target =
+               match lane.thinking with
+               | Some enable_thinking ->
+                 Exact_output.admitted_target_with_enable_thinking
+                   admitted_target
+                   enable_thinking
+               | None -> admitted_target
+             in
+             ({ slot_id = slot.slot_id; admitted_target;
+                runtime_observation = List.assoc_opt slot.slot_id registry.runtime_observations } : selected_slot))
+          lane.slots
+      in
+      Ok { selected_slots; cli_slots = lane.cli_slots }
+;;
+
+let catalog_source_to_string = function
+  | Exact_output.Embedded_catalog -> "embedded"
+  | Exact_output.Full_replacement_catalog -> "full replacement"
+;;
+
+let collision_to_string = function
+  | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
+  | Exact_output.Duplicate_target_identity -> "duplicate target identity"
+  | Exact_output.Provider_alias_shadow -> "provider alias shadow"
+;;
+
+let binding_component_to_string = function
+  | Exact_output.Target_provider -> "provider"
+  | Exact_output.Target_model -> "model"
+;;
+
+let endpoint_error_to_string = function
+  | Exact_output.Malformed_base_url -> "malformed base URL"
+  | Exact_output.Base_url_userinfo_not_allowed -> "base URL userinfo is not allowed"
+  | Exact_output.Base_url_query_not_allowed -> "base URL query is not allowed"
+  | Exact_output.Base_url_fragment_not_allowed -> "base URL fragment is not allowed"
+  | Exact_output.Invalid_request_path -> "invalid request path"
+  | Exact_output.Unsupported_gemini_request_path ->
+    "Gemini exact targets require the generated endpoint surface"
+  | Exact_output.Invalid_gemini_model_path -> "invalid Gemini model path"
+;;
+
+let resolver_snapshot_error_to_string = function
+  | Exact_output.Catalog_read_failed { path; detail } ->
+    Printf.sprintf "catalog read failed (%s): %s" path detail
+  | Exact_output.Catalog_parse_failed { source; detail } ->
+    Printf.sprintf "%s catalog parse failed: %s" (catalog_source_to_string source) detail
+  | Exact_output.Target_catalog_invalid { source; detail } ->
+    Printf.sprintf
+      "%s target catalog is invalid: %s"
+      (catalog_source_to_string source)
+      detail
+  | Exact_output.Catalog_collision collision -> collision_to_string collision
+  | Exact_output.Target_binding_missing { target_ref; component } ->
+    Printf.sprintf
+      "target %S is missing its %s binding"
+      target_ref
+      (binding_component_to_string component)
+  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
+    Printf.sprintf
+      "target %S endpoint is invalid: %s"
+      target_ref
+      (endpoint_error_to_string cause)
+;;
+
+let publication_error_to_string = function
+  | Registry_not_published -> "exact-output registry has not been published"
+  | Publication_busy -> "exact-output registry publication is reserved"
+  | Replacement_base_changed ->
+    "exact-output replacement base changed since it was prepared"
+  | Duplicate_lane_id { position; lane_id } ->
+    Printf.sprintf "exact-output lane %d duplicates lane id %S" position lane_id
+  | Empty_lane { lane_id } ->
+    Printf.sprintf "exact-output lane %S has no slots" lane_id
+  | Blank_lane_slot { lane_id; position } ->
+    Printf.sprintf "exact-output lane %S slot %d is blank" lane_id position
+  | Duplicate_lane_slot { lane_id; position; slot_id } ->
+    Printf.sprintf
+      "exact-output lane %S slot %d duplicates target ref %S"
+      lane_id
+      position
+      slot_id
+  | Invalid_lane_slot { lane_id; position; slot_id; cause } ->
+    let detail =
+      match cause with
+      | Exact_output.Empty_target_ref -> "empty target ref"
+      | Exact_output.Invalid_target_ref -> "invalid target ref"
+    in
+    Printf.sprintf
+      "exact-output lane %S slot %d (%S): %s"
+      lane_id
+      position
+      slot_id
+      detail
+  | Lane_thinking_not_encodable { lane_id; slot_id; thinking; rejection } ->
+    let detail =
+      match rejection with
+      | Llm_provider.Complete_common.Enable_not_declared ->
+        "the model declares no thinking control"
+      | Llm_provider.Complete_common.Enable_not_encodable ->
+        "the model's thinking control cannot turn thinking on"
+      | Llm_provider.Complete_common.Disable_not_encodable ->
+        "the model's thinking control cannot turn thinking off"
+      | Llm_provider.Complete_common.Disable_outside_effort_ladder _ ->
+        "the model's reasoning-effort ladder has no none, so thinking cannot be \
+         turned off"
+      | Llm_provider.Complete_common.Request_control_invalid _ ->
+        "the model's request control refuses the setting"
+    in
+    Printf.sprintf
+      "exact-output lane %S cannot send thinking = %b on slot %S: %s; remove \
+       thinking from the lane or the slot from its slots"
+      lane_id
+      thinking
+      slot_id
+      detail
+  | Required_lane_disabled { lane_id } ->
+    Printf.sprintf "required exact-output lane %S cannot be disabled" lane_id
+  | Required_lane_unavailable { lane_id } ->
+    Printf.sprintf
+      "required exact-output lane %S has no admitted target in the frozen catalog"
+      lane_id
+  | Resolver_snapshot_rejected error ->
+    "exact-output resolver snapshot: " ^ resolver_snapshot_error_to_string error
+;;
+
+let lane_resolution_error_to_string = function
+  | Exact_lane_off { lane_id; owner } ->
+    Printf.sprintf "exact-output lane %S is off; set %s.enabled = true to accept new work" lane_id
+      (Runtime_schema.exact_lane_table_name owner)
+  | Exact_lane_unconfigured { lane_id } ->
+    Printf.sprintf "exact-output lane %S is not configured" lane_id
+  | No_admitted_lane_slots { lane_id } ->
+    Printf.sprintf "exact-output lane %S has no admitted slots" lane_id
+;;
+
+let reservation_error_to_string = function
+  | Reservation_inactive -> "exact-output registry reservation is inactive"
+;;
+
+module For_testing = struct
+  let classify_rejected_slot = classify_rejected_slot
+  type nonrec reservation = reservation
+  type nonrec reservation_error = reservation_error = Reservation_inactive
+
+  let reserve_replacement = reserve_replacement
+  let finish_replacement = finish_replacement
+  let abort_replacement = abort_replacement
+  let reservation_error_to_string = reservation_error_to_string
+end

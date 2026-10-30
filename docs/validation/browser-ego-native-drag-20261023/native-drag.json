@@ -1,0 +1,77 @@
+{
+  "scope": "production JS native drag helper in real ego; not OCaml adapter end-to-end",
+  "spaceId": 7,
+  "geometry": {
+    "from": {
+      "x": 142,
+      "y": 304
+    },
+    "to": {
+      "x": 570,
+      "y": 304
+    }
+  },
+  "route": [
+    {
+      "x": 142,
+      "y": 304
+    },
+    {
+      "x": 356,
+      "y": 304
+    },
+    {
+      "x": 570,
+      "y": 304
+    },
+    {
+      "x": 570,
+      "y": 304
+    }
+  ],
+  "outcome": {
+    "error": null,
+    "released": true
+  },
+  "result": {
+    "completed": true,
+    "status": "Dropped · native input verified",
+    "events": [
+      {
+        "type": "pointerdown",
+        "trusted": true,
+        "buttons": 1,
+        "x": 142,
+        "y": 304
+      },
+      {
+        "type": "pointermove",
+        "trusted": true,
+        "buttons": 1,
+        "x": 356,
+        "y": 304
+      },
+      {
+        "type": "pointermove",
+        "trusted": true,
+        "buttons": 1,
+        "x": 570,
+        "y": 304
+      },
+      {
+        "type": "pointermove",
+        "trusted": true,
+        "buttons": 1,
+        "x": 570,
+        "y": 304
+      },
+      {
+        "type": "pointerup",
+        "trusted": true,
+        "buttons": 0,
+        "x": 570,
+        "y": 304
+      }
+    ]
+  }
+}

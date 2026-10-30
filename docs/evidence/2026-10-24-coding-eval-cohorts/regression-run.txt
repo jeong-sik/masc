@@ -1,0 +1,32 @@
+Testing `coding_eval_cases'.
+This run has ID `8NHN36TK'.
+
+  [SKIP]        corpus          0   corpus decodes.
+  [SKIP]        corpus          1   pristine red, solution green.
+  [SKIP]        corpus          2   case.json rejects undeclared keys.
+  [SKIP]        corpus          3   test_files defaults to check.sh.
+  [SKIP]        corpus          4   test_files rejects path traversal.
+  [SKIP]        corpus          5   solution may not ship the oracle.
+  [SKIP]        corpus          6   case.json accepts a regression guard.
+  [SKIP]        corpus          7   case.json accepts a build probe.
+  [OK]          report          0   fixed rows pipeline.
+  [OK]          report          1   model memory and experiment cohorts stay ...
+  [OK]          report          2   solved-task cost includes failures and un...
+  [OK]          report          3   duplicate samples are refused.
+  [OK]          report          4   experiment identity is required.
+  [SKIP]        report          5   real harness rows decode.
+  [SKIP]        report          6   failed admission records its episode with...
+  [SKIP]        report          7   status response identifies the admitted o...
+  [SKIP]        report          8   operation identity is observed, never inf...
+  [SKIP]        report          9   admission must return an operation identity.
+  [OK]          report         10   inconsistent row refused.
+  [OK]          report         11   regression failure gates passed.
+  [OK]          report         12   regressed bucket.
+  [OK]          report         13   gave-up bucket.
+  [OK]          report         14   off-target-edit bucket.
+  [OK]          report         15   build-failed bucket.
+  [OK]          report         16   wrong-solution bucket.
+  [OK]          report         17   uninstrumented failure stays coarse.
+
+Full test results in `/private/tmp/masc-coding-cohort-probe-20261024-r6/candidate/test-logs/coding_eval_cases'.
+Test Successful in 0.016s. 13 tests run.

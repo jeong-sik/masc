@@ -1,0 +1,27 @@
+{
+  "observed_at": "2026-10-23T08:54:34.479418+00:00",
+  "source_sha": "25faf14776f1115e962a4c4873e668af386211ad",
+  "workflow_sha": "104cfcb40b0faf1149594a0cc23dc26ea3fb19e3",
+  "artifact_id": 12487769816,
+  "artifact_url": "https://github.com/jeong-sik/masc/actions/runs/39924354630/artifacts/12487769816",
+  "files": {
+    "masc": {
+      "sha256": "6784173ffd7f44452df96a038a873e2f12dd93c33f3a96d50d5fb4a390274f4e",
+      "matches_receipt": true
+    },
+    "masc-tui": {
+      "sha256": "142351f30da3ec27ea243777757251c4498e70a674684915dae2dea55a79937e",
+      "matches_receipt": true
+    },
+    "key-reference.md": {
+      "sha256": "ff7801c80c97cb5c4aed57139da799c706da0675253018a8bd6f7b5d23eaebdf",
+      "matches_receipt": true
+    }
+  },
+  "server_build_commit": "25faf14776f1115e962a4c4873e668af386211ad",
+  "tui_build_commit": "25faf14776f1115e962a4c4873e668af386211ad",
+  "build_commit_commands_exit_code": 0,
+  "installed_runtime_verified": false,
+  "visible_ui_verified": false,
+  "behavior_passed": false
+}

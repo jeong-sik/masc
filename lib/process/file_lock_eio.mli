@@ -1,0 +1,202 @@
+(** File_lock_eio — cooperative per-key locking via [Eio.Mutex] + [flock].
+
+    Two-layer locking for local filesystem paths:
+
+    + {b Eio.Mutex} (cooperative) — prevents blocking the Eio fiber
+      scheduler; serialises fibers within the process so most contention
+      is resolved cooperatively.
+    + {b Unix.lockf F_TLOCK} (non-blocking) — preserves cross-process
+      safety; acquired after the Eio.Mutex. If another process holds
+      the flock the caller yields and retries.
+
+    Distributed backend paths (non-local keys in
+    [workspace_utils_ops.ml]) are not affected. *)
+
+(** {1 Tuning constants} *)
+
+(** {1 Low-level flock helpers}
+
+    Used by non-Eio systhread contexts. Prefer {!with_lock} for
+    ordinary callers. *)
+
+exception Flock_timeout of { caller : string; path : string; attempts : int }
+
+val wait_after_contention : unit -> unit
+(** Cooperatively pace a retry after a nonwaiting file-lock attempt reports
+    contention, using the existing file-lock retry interval. The wait is
+    cancellable and imposes no timeout or attempt limit. Call from a fiber
+    running on an Eio Unix backend. *)
+
+type durable_lock_phase =
+  | Open_lock_file
+  | Acquire_process_lock
+  | Release_process_lock
+
+type unix_failure =
+  { error : Unix.error
+  ; operation : string
+  ; argument : string
+  }
+
+type durable_lock_error =
+  { lock_path : string
+  ; phase : durable_lock_phase
+  ; cause : unix_failure
+  ; cleanup_failure : unix_failure option
+  }
+
+val durable_lock_error_to_string : durable_lock_error -> string
+
+(** Non-blocking [F_TLOCK] with retry. On success returns the open
+    file descriptor holding the lock. On timeout closes the fd and
+    raises {!Flock_timeout}. [clock] is accepted but ignored in this
+    variant (systhread-friendly). *)
+val acquire_flock_retry :
+  ?clock:'a option ->
+  lock_path:string ->
+  mode:Unix.open_flag list ->
+  perm:int ->
+  ?max_attempts:int ->
+  ?sleep_sec:float ->
+  caller:string ->
+  unit ->
+  Unix.file_descr
+
+(** [release_flock_fd fd] unlocks (best-effort) and closes [fd]. *)
+val release_flock_fd : Unix.file_descr -> unit
+
+(** {1 High-level scoped locking} *)
+
+val lock_file_path : string -> string
+(** Physical flock file used by {!with_lock} for the supplied logical key.
+    Store readers use this same path contract to distinguish bookkeeping
+    from event data. Does not create or inspect the file. *)
+
+(** [with_mutex path f] runs [f] while holding the cooperative
+    per-[path] Eio.Mutex only. Use for in-memory backends that need
+    single-process fiber serialisation but have no filesystem
+    artifact to flock. *)
+val with_mutex : string -> (unit -> 'a) -> 'a
+
+(** [with_lock ?clock path f] runs [f] while holding both the
+    cooperative Eio.Mutex and an OS-level flock on [path ^ ".lock"].
+    The flock uses non-blocking F_TLOCK retries — max 200 attempts,
+    ~2s total with default sleeps. *)
+val with_lock :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  string ->
+  (unit -> 'a) ->
+  'a
+
+(** Cross-context/process transaction lock on the explicit [lock_path]. Eio
+    admission is cooperatively cancellable and unbounded; cancellation is
+    masked only after the OS lock is held, through body execution and release.
+    The parent directory must exist. I/O failures are typed and body exceptions
+    survive cleanup errors. *)
+type 'a durable_lock_observation =
+  | Lock_not_acquired of durable_lock_error
+  | Body_completed of
+      { value : 'a
+      ; release_error : durable_lock_error option
+      }
+
+val with_durable_lock_observed :
+  lock_path:string -> (unit -> 'a) -> 'a durable_lock_observation
+(** Preserve a completed body value even when releasing the process lock
+    fails. Open/acquire failures return [Lock_not_acquired] without running the
+    body. Body exceptions retain their original exception and raw backtrace. *)
+
+type 'a durable_lock_attempt =
+  | Lock_held_elsewhere
+      (** Another fiber of this process, or another process, holds the lock
+          now. [f] did not run and nothing was waited for. *)
+  | Lock_attempted of 'a durable_lock_observation
+
+val try_with_durable_lock_observed :
+  lock_path:string -> (unit -> 'a) -> 'a durable_lock_attempt
+(** {!with_durable_lock_observed} for a caller that must not wait: one
+    attempt at each layer, and [Lock_held_elsewhere] when either is held. *)
+
+val acquire_liveness_lock :
+  sw:Eio.Switch.t -> lock_path:string -> (unit, durable_lock_error) result
+(** Hold an existing stable private lease inode until [sw]'s release hooks run,
+    after all children and their protected settlement have drained. Acquisition
+    through release registration is cancellation-protected; registration failure
+    closes the descriptor and preserves the original exception. A conflicting
+    owner returns an acquisition error without waiting. The switch owns the
+    opaque descriptor, with idempotent close and no early-release operation.
+    Missing authority is never created or replaced. *)
+
+val try_with_liveness_lock_observed :
+  lock_path:string -> (unit -> 'a) -> 'a durable_lock_attempt
+(** Nonwaiting inspection of the same liveness lock across fibers/processes.
+    Separate opens in the same process conflict, and closing an inspection
+    descriptor does not release another owner's flock. The existing file must
+    be a private, uniquely linked regular file belonging to the effective uid;
+    symlinks, missing/replaced paths and unavailable locks return errors.
+    This callback also remains cancellable, with protected descriptor release.
+    A successful short callback observes an inactive owner, not execution or
+    replay authority. *)
+
+val try_with_shared_liveness_lock_observed :
+  lock_path:string -> (unit -> 'a) -> 'a durable_lock_attempt
+(** Read-only inspection under a shared nonwaiting flock on the same stable
+    private inode. Independent readers may overlap; an exclusive owner or
+    writer still refuses admission without waiting. This uses the same
+    no-follow identity checks, cancellable callback and protected descriptor
+    release as {!try_with_liveness_lock_observed}. The callback must not mutate
+    the protected operation or derive effect permission from a shared lease. *)
+
+val with_durable_lock :
+  lock_path:string -> (unit -> 'a) -> ('a, durable_lock_error) result
+(** Compatibility projection of {!with_durable_lock_observed}. A release
+    failure remains [Error] here; transaction owners that distinguish their
+    completed body result must use the observed surface. *)
+
+module For_testing : sig
+  val holders_and_waiters : lock_path:string -> int
+  (** Read the existing entry reference count without changing lock state. *)
+  val with_durable_lock_observed_with_release_failure :
+    release_failure:durable_lock_error ->
+    lock_path:string ->
+    (unit -> 'a) ->
+    'a durable_lock_observation
+  (** Acquire and release the real durable lock, then deterministically report
+      [release_failure] through the same [Body_completed] path used by a real
+      release error. The file descriptor is released before the injected
+      observation is returned. *)
+end
+
+(** {1 Observability hook} *)
+
+(** Fires after every {!acquire_flock_retry} / {!acquire_flock_retry_cooperative}
+    attempt sequence completes — once per [acquire_*] invocation, with
+    [outcome] = ["acquired"] or ["timeout"].
+
+    [retries] is the number of failed [F_TLOCK] attempts before the
+    final outcome (0 = succeeded on the first attempt).  [elapsed_s]
+    is the wall-clock time spent in the retry loop excluding [openfile].
+
+    Default no-op.  Wired at startup ([lib/workspace.ml]) to a Otel_metric_store
+    counter ([masc_file_lock_retries_total]) and histogram
+    ([masc_file_lock_acquire_seconds]) so contention storms surface in
+    metrics.  [masc_process] cannot depend on [Otel_metric_store] (sub-library
+    boundary), so emission goes through this Atomic ref. *)
+val on_lock_attempt_fn :
+  (caller:string -> retries:int -> elapsed_s:float -> outcome:string -> unit)
+    Atomic.t
+
+(** Observability hook fired on every CAS retry inside [atomic_update*].
+    The lock table is shared by [prune_stale_entries] and [get_entry];
+    high fiber contention (many fibers traversing the table for
+    different paths) drives retry rate, the precise contention signal
+    that was previously invisible. Wired at startup ([lib/workspace.ml]) to
+    a no-label Otel_metric_store counter ([masc_file_lock_table_cas_retries]).
+    [masc_process] cannot depend on [Otel_metric_store] (sub-library
+    boundary), so emission goes through this Atomic ref. *)
+val on_cas_retry_fn : (unit -> unit) Atomic.t
+
+(** {1 Diagnostics} *)
+
+(** Current number of tracked lock paths. *)
+val lock_count : unit -> int

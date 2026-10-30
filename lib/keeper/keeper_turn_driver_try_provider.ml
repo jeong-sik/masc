@@ -1,0 +1,3563 @@
+(** Keeper_turn_driver_try_provider — extracted [try_provider] closure.
+
+    RFC-0051 PR-3a: closure-to-toplevel-fn conversion with explicit ctx record.
+    The [try_provider] closure was defined inside [Keeper_turn_driver.run_named]
+    and captured ~51 variables from the enclosing scope. This module makes
+    that boundary explicit via a record, so the compiler verifies every
+    dependency and the function body is independently testable.
+
+    @since RFC-0051 PR-3a *)
+
+
+(** A reading of the keeper's live in-turn progress signal (#28417).
+
+    Mirrors the two fields of [Keeper_registry_types.turn_observation] the
+    stall decision needs. Kept as its own record so this module does not
+    depend on [Keeper_registry]: the caller supplies the reading, this module
+    decides. *)
+type provider_progress_sample =
+  { last_progress_at : float
+        (** Unix timestamp of the most recent in-turn progress signal
+            (registry transitions, Agent Core streaming events, completed
+            tool calls). *)
+  ; active_tool_count : int
+        (** Tools issued but not yet completed. A tool that runs for minutes
+            refreshes no progress signal while it runs, so a non-zero count
+            means "working", not "stalled" -- the exclusion
+            [Keeper_registry_types]' [active_tool_count] doc comment has
+            described since RFC-0197 without any code ever reading it. *)
+  ; awaiting_approval : bool
+        (** Whether a tool call from this keeper is parked waiting for an
+            operator to answer.
+
+            A held call refreshes no progress signal and is not counted in
+            [active_tool_count]: the approval gate runs at [pre_tool_use],
+            and [ToolCalled] -- what raises that count -- is published inside
+            [execute_admitted], which the gate runs before. So a keeper
+            waiting on a person looked exactly like a provider that had
+            stopped answering, and with a deadline configured under the
+            180s approval bound the watchdog cancelled the attempt and
+            reported "provider call made no progress". The provider had
+            answered; nobody had. *)
+  }
+
+(* Classified saved facts for this dispatch; assistant and tool saves remain
+   distinct so response persistence cannot authorize retrying saved effects. *)
+type checkpoint_progress =
+  | No_checkpoint_stage
+  | Checkpoint_stage_reached
+  | Tool_results_saved of { tool_result_saves : int }
+  | Assistant_checkpoint_saved of
+      { assistant_saves : int
+      ; tool_result_saves : int option
+      }
+
+type continuity_point =
+  | Without_snapshot
+  | Summarized of
+  { snapshot : Librarian_continuity_snapshot.t
+  ; covered_messages : Agent_core.Types.message list
+  }
+  | Absorbed of
+  { trace_id : string
+  ; end_atom : int
+  ; last_atom_digest : string
+  }
+
+type continuity = {point : continuity_point; unread : Keeper_librarian_request_unread.t}
+let without_snapshot = {point=Without_snapshot;unread=Keeper_librarian_request_unread.empty}
+let request_unread continuity = continuity.unread
+
+type continuity_choice =
+  | Chose_no_point
+  | Chose_a_librarian_point
+
+(* The one question a caller outside this module asks of a continuity: did
+   the turn start at a Librarian point, or at none? Answering it here keeps
+   [continuity] abstract -- its constructors carry a snapshot checked against
+   this dispatch's checkpoint, and nothing outside should be able to make
+   one. *)
+let continuity_choice continuity = match continuity.point with
+  | Without_snapshot -> Chose_no_point
+  | Summarized _ | Absorbed _ -> Chose_a_librarian_point
+;;
+
+(* The Librarian's durable position, when it is a place in this history: the
+   position names this trace and the atom before it opens with the message
+   the position recorded -- the same test the Librarian's own range selection
+   applies to its position (Keeper_librarian_range, RFC librarian-lifecycle
+   section 4.4 row 5). A position of another trace, past this history, or
+   over a message the history no longer holds at that index is no place here,
+   and the caller falls back as it would with no position at all. *)
+let absorbed_history ~trace_id ~messages (progress : Keeper_librarian_progress.t) =
+  let position = progress.Keeper_librarian_progress.position in
+  let end_atom = position.Keeper_librarian_progress.end_atom in
+  if not (String.equal position.Keeper_librarian_progress.trace_id trace_id) || end_atom < 1
+  then None
+  else (
+    match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
+    | Some opening when String.equal opening position.Keeper_librarian_progress.last_atom_digest ->
+      Some
+        ( end_atom
+        , {point=Absorbed
+            { trace_id
+            ; end_atom
+            ; last_atom_digest = position.Keeper_librarian_progress.last_atom_digest
+            };unread=Keeper_librarian_request_unread.empty} )
+    | Some _ | None -> None)
+;;
+
+let covered_messages ~end_atom messages =
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  List.filter_map (fun (message, label) -> match label with
+    | Runtime_model_input_tail_window.Atom atom when atom < end_atom -> Some message
+    | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned -> None)
+    labelled
+;;
+
+let completed_history_end ~trace_id ~lines ~messages =
+  Librarian_continuity_snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages
+  |> Result.map (fun range -> range.Keeper_librarian_range.end_atom)
+;;
+
+(* RFC keeper-context-window-in-tokens §13.4: where a request with no
+   absorbed point starts. The end of the last completed turn on this
+   history, verified against it; 0 when the history has no completed turn.
+   A boundary store this process cannot read, or a boundary the history in
+   hand does not match, is [Turn_boundary_unknown]: the range then opens on
+   the newest atom alone and the origin says so, rather than on the whole
+   history under a boundary that was never read (§13.4 does not fold an
+   unknown start into 0). Under the small input policy no completed-turn
+   boundary demotes tool bodies either. Reading it logs nothing: a request
+   whose range it opens says so ([Keeper_carried_front.warn_range_opens_on_newest_atom]),
+   and the dispatches that read it but start from a seed or a Librarian
+   point, or the forecast that only looks, have nothing to report. *)
+let turn_start ~config ~keeper_name ~trace_id ~messages =
+  let unknown reason = Keeper_carried_front.Turn_boundary_unknown { reason } in
+  match
+    Keeper_turn_boundaries.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  with
+  | Error detail -> unknown ("boundary read failed: " ^ detail)
+  | Ok lines ->
+    (match completed_history_end ~trace_id ~lines ~messages with
+     | Ok end_atom -> Keeper_carried_front.Turn_boundary { end_atom }
+     | Error Librarian_continuity_snapshot.Uncovered_history ->
+       Keeper_carried_front.Turn_boundary { end_atom = 0 }
+     | Error
+         ((Librarian_continuity_snapshot.Unmatched_history
+          | Librarian_continuity_snapshot.Range_stopped _
+          | Librarian_continuity_snapshot.Trace_mismatch
+          | Librarian_continuity_snapshot.History_changed
+          | Librarian_continuity_snapshot.Prefix_changed
+          | Librarian_continuity_snapshot.Invalid_snapshot _
+          | Librarian_continuity_snapshot.Read_failed _
+          | Librarian_continuity_snapshot.Write_failed _) as error) ->
+       unknown (Librarian_continuity_snapshot.error_to_string error))
+;;
+
+let prepare_continuity ~trace_id ~lines ~messages snapshot =
+  Result.map (fun _ ->
+    {point=Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages };
+     unread=Keeper_librarian_request_unread.of_results ~snapshot:(Ok snapshot.unread_messages) ~memory:(Ok [])})
+    (Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot)
+;;
+
+let validate_continuity ~messages continuity = match continuity.point with
+  | Without_snapshot -> Ok ()
+  | Absorbed { end_atom; last_atom_digest; _ } ->
+    (match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
+     | Some opening when String.equal opening last_atom_digest -> Ok ()
+     | Some _ | None ->
+       Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+         { field = "librarian.progress"; detail = "Absorbed conversation changed during dispatch" })))
+  | Summarized continuity ->
+  let current = covered_messages ~end_atom:continuity.snapshot.end_atom messages in
+  if List.equal Agent_core.Types.Message_value.equal current continuity.covered_messages
+  then Ok ()
+  else Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+    { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
+;;
+
+(* The turn's choice with the baseline the dispatch-time check compares
+   against taken from [messages], the list one attempt starts from.
+
+   The choice itself is the turn's and is made once, on the keeper's
+   checkpoint history ([continuity_for_request]). A candidate can be handed
+   another rendering of that same history: a runtime that cannot see an
+   image is given a reading of it in the image's place, for that candidate
+   alone (RFC-0265 media degrade, [Keeper_vision_ingest]). The bytes under
+   the covered atoms differ then, while no atom moved and nothing was
+   rewritten. Compared against the checkpoint's bytes, every request of such
+   a candidate was refused: pr-updater answered nothing on 66 dispatches on
+   2026-09-21 and 30 more the next day, 15 of them after walking the whole
+   lane, with two image occurrences inside a snapshot that covered almost
+   its entire history (#37812).
+
+   Taken once per attempt from that attempt's own list, the per-request
+   check answers the question it was written for: did this list change while
+   the attempt was in flight. Whether the choice fits the history at all was
+   already answered, against the history itself, when it was made. *)
+let continuity_for_attempt ~messages continuity =
+  let point=match continuity.point with
+  | Without_snapshot -> Without_snapshot
+  | Summarized { snapshot; covered_messages = _ } ->
+    Summarized
+      { snapshot
+      ; covered_messages =
+          covered_messages
+            ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom
+            messages
+      }
+  | Absorbed { trace_id; end_atom; last_atom_digest } ->
+    (match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
+     | Some opening -> Absorbed { trace_id; end_atom; last_atom_digest = opening }
+     | None ->
+       (* This list has no atom where the position points. That is not a
+          rendering of the history the choice was made on, so the digest
+          stands and every request of this attempt is refused, as before. *)
+       Absorbed { trace_id; end_atom; last_atom_digest }) in
+  {continuity with point}
+;;
+
+type librarian_position_kind =
+  | No_position
+  | Librarian_snapshot of Librarian_continuity_snapshot.t
+  | Librarian_progress of { end_atom : int }
+
+type librarian_position = {point:librarian_position_kind;unread:Keeper_librarian_request_unread.t}
+let no_librarian_position =
+  {point=No_position;unread={Keeper_librarian_request_unread.snapshot=Unavailable;memory=Unavailable}}
+
+(* The one continuity this turn chose, as a position in the exact list a
+   lane is about to cut. An official client composes its own request from
+   that list more than once in a turn, and the list grows between
+   compositions, so each call checks it against the choice the way the Agent
+   Core branch checks each request ([validate_continuity]). *)
+let librarian_position ~messages (continuity : continuity) =
+  Result.map
+    (fun () ->
+       let point=match continuity.point with
+       | Summarized { snapshot; _ } -> Librarian_snapshot snapshot
+       | Absorbed { end_atom; _ } -> Librarian_progress { end_atom }
+       | Without_snapshot -> No_position in
+       {point;unread=continuity.unread})
+    (validate_continuity ~messages continuity)
+;;
+
+let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
+  "[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n"
+  ^ snapshot.working_state
+;;
+
+(* Where a request starts, from what the keeper's files say (RFC
+   keeper-context-window-in-tokens §13.4, §13.6): a snapshot that fits this
+   history, else the Librarian's durable position when it is a place in this
+   history, else this turn's own boundary.
+
+   A turn needs no snapshot to go out: the position and the turn boundary
+   still say where it starts. So a snapshot that cannot be read, cannot be
+   checked against the boundary log, or covers bytes that have changed is one
+   that does not fit, never a reason to refuse the turn (#37762). A refused
+   turn also ran no Librarian round, so a snapshot whose covered bytes changed
+   was never written again. A snapshot file that cannot be decoded is rebuilt
+   by the Librarian's next continuity pass, which replaces it on commit. A
+   snapshot file or a boundary log that cannot be read stops that pass, so
+   those stay until the file is fixed; they are warnings because each names a
+   file to fix rather than a history that moved on. A covered prefix or a read position that
+   changes while the request is in flight is still refused, by
+   [validate_continuity].
+
+   [lines] is read only when a snapshot is saved. What was passed over and
+   why comes back beside the choice rather than going to the log here, so
+   a caller that only looks -- the next-request forecast -- takes the same
+   choice without writing the turn's log lines. *)
+type continuity_note =
+  | Snapshot_unusable of { why : string }
+  | Progress_unreadable of { why : string; detail : string }
+  | Unread_memory_unreadable of { detail : string }
+  | Started_at_read_position of { why : string; end_atom : int }
+  | Started_at_turn_boundary of { why : string }
+
+let choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress ~memory_unread =
+  let choose () =
+  let absorbed_or_turn_start ~why notes =
+    let absorbed, notes =
+      match progress () with
+      | Ok (Some progress) -> absorbed_history ~trace_id ~messages progress, notes
+      | Ok None -> None, notes
+      | Error detail -> None, Progress_unreadable { why; detail } :: notes
+    in
+    match absorbed with
+    | Some (end_atom, continuity) ->
+      continuity, List.rev (Started_at_read_position { why; end_atom } :: notes)
+    | None -> without_snapshot, List.rev (Started_at_turn_boundary { why } :: notes)
+  in
+  let unusable ~why = absorbed_or_turn_start ~why [ Snapshot_unusable { why } ] in
+  match snapshot with
+  | Error detail -> unusable ~why:("snapshot unreadable: " ^ detail)
+  | Ok None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved" []
+  | Ok (Some snapshot) ->
+    (match lines () with
+     | Error detail -> unusable ~why:("turn boundaries unreadable: " ^ detail)
+     | Ok lines ->
+       (match prepare_continuity ~trace_id ~lines ~messages snapshot with
+        | Ok restored ->
+          (match snapshot.Librarian_continuity_snapshot.catch_up_end_atom with
+           | None -> restored, []
+           | Some target ->
+             (* A rewrite from atom 0 that fits but has not reached where a
+                request starts without it, as of the Librarian's last round:
+                used now, it would move the start back and send everything
+                after its end again. Checked after the fit, so a snapshot
+                that also stopped fitting is logged as not fitting. *)
+             absorbed_or_turn_start
+               ~why:(Printf.sprintf
+                       "the snapshot is being rewritten from atom 0 and ends at atom %d, short of %d"
+                       snapshot.Librarian_continuity_snapshot.end_atom target)
+               [])
+        | Error
+            ((Librarian_continuity_snapshot.Trace_mismatch
+             | Librarian_continuity_snapshot.History_changed
+             | Librarian_continuity_snapshot.Uncovered_history
+             | Librarian_continuity_snapshot.Unmatched_history) as mismatch) ->
+          (* The history moved on from the snapshot. The Librarian's durable
+             position may still fit: goo-yang-bong's did on 2026-09-22 while
+             its snapshot did not, and the keeper sent its 12,720 atoms,
+             16.4 MB, 44 cycles in a row until the position was used. *)
+          absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch) []
+        | Error
+            ((Librarian_continuity_snapshot.Prefix_changed
+             | Librarian_continuity_snapshot.Invalid_snapshot _
+             | Librarian_continuity_snapshot.Range_stopped _
+             | Librarian_continuity_snapshot.Read_failed _
+             | Librarian_continuity_snapshot.Write_failed _) as error) ->
+          unusable ~why:(Librarian_continuity_snapshot.error_to_string error))) in
+  let continuity,notes=choose () in
+  let memory_unread=memory_unread () in
+  let snapshot_unread=Result.map (Option.fold ~none:[]
+    ~some:(fun (snapshot : Librarian_continuity_snapshot.t) -> snapshot.unread_messages)) snapshot in
+  let unread=Keeper_librarian_request_unread.of_results ~snapshot:snapshot_unread ~memory:memory_unread in
+  let notes=match memory_unread with
+    | Ok _ -> notes
+    | Error detail -> notes@[Unread_memory_unreadable {detail}] in
+  {continuity with unread},notes
+;;
+
+let log_continuity_note ~keeper_name = function
+  | Unread_memory_unreadable {detail} ->
+    Log.Keeper.warn ~keeper_name "Librarian unread evidence unavailable for request: %s" detail
+  | Snapshot_unusable { why } ->
+    Log.Keeper.warn ~keeper_name
+      "Librarian continuity snapshot cannot be used (%s); the request starts without it"
+      why
+  | Progress_unreadable { why; detail } ->
+    Log.Keeper.warn ~keeper_name
+      "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
+      why detail
+  | Started_at_read_position { why; end_atom } ->
+    Log.Keeper.info ~keeper_name
+      "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
+      why end_atom
+  | Started_at_turn_boundary { why } ->
+    Log.Keeper.info ~keeper_name
+      "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
+      why
+;;
+
+let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress ~memory_unread =
+  let continuity, notes = choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress ~memory_unread in
+  List.iter (log_continuity_note ~keeper_name) notes;
+  continuity
+;;
+
+(* The keeper's own files, read the way every turn reads them. *)
+let read_keeper_continuity ~config ~keeper_name ~trace_id ~messages =
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  choose_continuity ~trace_id ~messages
+    ~snapshot:(Keeper_librarian_continuity.read ~config ~keeper_name)
+    ~memory_unread:(fun () -> Keeper_memory_os_current.read_unread_messages
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+      ~keeper_id:keeper_name)
+    ~lines:(fun () -> Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:keeper_name)
+    ~progress:(fun () ->
+      Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name
+      |> Result.map_error Keeper_librarian_progress.read_error_to_string)
+;;
+
+(** Explicit context record for the extracted [try_provider] function.
+
+    Each field corresponds to a variable captured by the original closure.
+    Fields are grouped by role: runtime identity, agent config, transport,
+    session/checkpoint, Eio primitives, callbacks, and event bus. *)
+type request_input =
+  | Keeper_history of { trace_id : string; continuity : continuity }
+  | Completion_review
+
+let input_trace_id = function
+  | Keeper_history { trace_id; _ } -> Some trace_id
+  | Completion_review -> None
+
+let input_continuity = function
+  | Keeper_history { continuity; _ } -> Some continuity
+  | Completion_review -> None
+
+type try_provider_ctx =
+  { (* Runtime identity *)
+    runtime_id : string
+  ; error_runtime_id : string
+  ; (* Where the carried range starts when the process holds no ledger for
+       this (keeper, runtime) pair: the range the newest completed Agent Core
+       turn record on the trace measured, whichever runtime ran it. Read once
+       per attempt, on that path only. *)
+    carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; request_input : request_input
+  ; input_policy : Keeper_input_policy.t
+  ; turn_boundary : Keeper_carried_front.turn_start
+  ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
+  ; (* Where a front moved after a refusal is kept for the rest of the
+       turn. The position is a fact about the history, not about the
+       candidate that was refused, so the lane's next candidate composes
+       from it instead of starting over from the turn start. *)
+    hold_carried_front : Keeper_carried_front.seed -> unit
+  ; restore_carried_front : Keeper_carried_front.seed option -> unit
+  ; base_path : string
+  ; media_store : Agent_core.History.media_store
+  ; keeper_name : string
+  ; name : string
+  ; (* Agent config — fields passed through the runtime candidate boundary. *)
+    goal : string
+  ; goal_blocks : Agent_core.Types.content_block list option
+  ; (* Metadata AGENT_CORE stamps on the User message it creates for the goal:
+       the input speaker (RFC-0468 §3.2). *)
+    goal_metadata : Agent_core.Types.metadata
+  ; system_prompt : string
+  ; tools : Agent_core.Tool.t list
+  ; initial_messages : Agent_core.Types.message list
+  ; argument_demotion_seed : Agent_core.Types.message list option
+  ; argument_replay_prefix : Keeper_replay_prefix.projection
+  ; model_input_projection : Keeper_history_projection.t option
+  ; stream_idle_timeout_s : float
+    (* Bound on the silent gap between two streamed lines. It re-arms after
+       every line, so it detects a stalled stream, not a long turn. The keeper
+       always has one: the operator's value or the RFC-0345 floor. AGENT_CORE
+       reads it as an option; that [Some] is built once, where this record is
+       projected onto [Runtime_agent.config]. *)
+  ; first_event_timeout_s : float
+    (* Bound on the silent wait for the FIRST streaming provider event
+       (TTFT/prefill), distinct from [stream_idle_timeout_s] which arms only
+       after that event (RFC-AC-037). Always set, for the same reason. *)
+  ; body_timeout_s : float option
+  ; (* #27349, axis changed by #28417: the ceiling for THIS provider call
+       attempt. Distinct from [stream_idle_timeout_s] (streaming inter-line
+       gap) and [body_timeout_s] (non-streaming body read only): both of
+       those are AGENT_CORE-internal and observe the transport only, which is
+       why they left the non-streaming and pre-first-token (Queue)
+       stalls of #27355 unprotected.
+
+       #27349 measured this against total elapsed wall-clock. Elapsed cannot
+       separate "a turn that stopped" from "a turn that is taking a while",
+       and on 2026-08-12 the same 900s value did both at once: it correctly
+       rotated 4 wedged attempts (65 minutes with zero trajectory
+       events) and killed a healthy Keeper attempt 6 seconds after a
+       successful tool call (30+ tool calls inside the window, longest
+       progress gap 120s). #28417 moves the measurement onto the progress
+       signal, which is the distinction #27355's own observation side always
+       documented -- see the OTel help text emitted for
+       [InFlightElapsedSeconds]: "a supervising consumer judges staleness
+       against progress, not against this value alone."
+
+       Always set: the operator's value or the resolved layer's failsafe
+       floor. There is no "off" (an attempt this could not end would be one
+       only an operator could end). *)
+    provider_call_deadline_sec : float
+  ; (* #28417: reads the keeper's live turn progress signal. Injected as a
+       callback instead of calling [Keeper_registry] from here so the stall
+       decision stays a pure function of its inputs (unit-testable with no
+       registry on disk) and this module keeps its current dependency set.
+
+       [None] disables progress-awareness and the deadline degrades to the
+       pre-#28417 elapsed ceiling. That is the conservative direction: it can
+       fire early on a healthy turn, never late on a wedged one. *)
+    provider_progress_probe : (unit -> provider_progress_sample option) option
+  ; temperature : float option
+  ; accept : Agent_core.Types.api_response -> bool
+  ; hooks : Agent_core.Hooks.hooks option
+  (* Installed on the config below when present: its pre_tool_use composes
+     over [hooks] as the outer set, and its callback is what AGENT_CORE calls
+     to settle an ElicitToolApproval. Absent means no call is held. *)
+  ; approval_gate : Keeper_tool_approval_gate.t option
+  ; raw_trace : Agent_core.Raw_trace.t option
+  ; trace_link : (string * string) option
+  ; (* Transport *)
+    transport_resolved : Masc_grpc_transport.t
+  ; (* Session / checkpoint *)
+    checkpoint_sidecar : Yojson.Safe.t option
+  ; cache_system_prompt : bool
+  ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
+  ; checkpoint_progress : checkpoint_progress Atomic.t
+  ; context_injector : Agent_core.Hooks.context_injector option
+  ; context : Agent_core.Context.t option
+  ; enable_thinking : bool option
+  ; preserve_thinking : bool option
+  ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
+  ; agent_core_checkpoint : Agent_core.Checkpoint.t option
+  ; on_request_evidence : (Request_observation.evidence -> unit) option
+  ; on_request_execution_ready : (runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result) option
+  ; native_binding : Keeper_direct_native_continuation.binding option
+  ; native_retired_history_cut : Keeper_direct_native_continuation.retired_history_cut option
+  ; (* Eio concurrency *)
+    sw : Eio.Switch.t
+  ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  ; (* Callbacks *)
+    on_event : (Agent_core.Types.sse_event -> unit) option
+  ; on_yield : (unit -> unit) option
+  ; on_resume : (unit -> unit) option
+  ; agent_ref : Agent_core.Agent.t option ref option
+  ; on_runtime_observation :
+      (Runtime_observation.runtime_observation -> unit) option
+  ; on_request_wire_observation :
+      (runtime_id:string ->
+       body_bytes:int ->
+       serialized:Llm_provider.Request_wire_observer.observation option ->
+       projected_messages:Agent_core.Types.message list option ->
+       unit)
+        option
+  ; on_model_input_window_observation :
+      (measurement:Turn_record.model_input_measurement
+       -> Runtime_model_input_tail_window.window_observation
+       -> unit)
+        option
+  ; on_response_observed_model_input :
+      (Turn_record.response_observed_model_input -> unit) option
+  ; (* Event bus *)
+    event_bus : Agent_core.Event_bus.t option
+  ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
+  ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
+  ; turn_start : Mtime.t
+  ; seq_ref : int ref
+  }
+
+let emit_runtime_manifest
+      (ctx : try_provider_ctx)
+      ?status
+      ?decision
+      event
+  =
+  match ctx.runtime_manifest_context, ctx.runtime_manifest_append with
+  | Some manifest_ctx, Some append ->
+    let decision =
+      (* RFC-0206: the runtime-engine manifest base fields are gone; the
+         decision payload carries only its own fields now. *)
+      match decision with
+      | None -> Some (`Assoc [])
+      | Some (`Assoc _) as d -> d
+      | Some other -> Some (`Assoc [ ("decision", other) ])
+    in
+    ctx.seq_ref := !(ctx.seq_ref) + 1;
+    let elapsed_ms =
+      let ns =
+        Mtime.Span.to_uint64_ns
+          (Mtime.span ctx.turn_start (Mtime_clock.now ()))
+      in
+      Some (Int64.to_int (Int64.div ns 1_000_000L))
+    in
+    let decision =
+      let decision =
+        match decision with
+        | Some value -> value
+        | None -> `Assoc []
+      in
+      Some
+        (Keeper_runtime_manifest.with_clock_refs
+           ~clock_refs:
+             (Keeper_runtime_manifest.clock_refs_for_context manifest_ctx ~event
+                ?elapsed_ms ~logical_seq:!(ctx.seq_ref) ())
+           decision)
+    in
+    Keeper_runtime_manifest.make_for_context manifest_ctx ~event
+      ~runtime_id:ctx.runtime_id ?logical_seq:(Some !(ctx.seq_ref))
+      ?status ?decision ()
+    |> append
+  | _ -> ()
+
+(* Records a same-runtime retry after a refusal moved the carried front, on
+   the existing per-attempt manifest channel (the same [Provider_lane_resolved]
+   event this module already emits for the ordinary "resolved" case) rather
+   than a new [event_kind] for one narrow signal. *)
+let emit_carried_range_retry_manifest (ctx : try_provider_ctx) ~retry decision =
+  emit_runtime_manifest ctx
+    ~status:"context_overflow_eviction_retry"
+    ~decision:(`Assoc (("retry", `Int retry) :: decision))
+    Keeper_runtime_manifest.Provider_lane_resolved
+;;
+
+let accept_rejected_error ~runtime_id ~(response : Agent_core.Types.api_response) =
+  let rejection =
+    Keeper_tooling.Response.accept_rejection_of_response ~runtime_id response
+  in
+  let reason_kind =
+    match rejection.kind with
+    | Keeper_tooling.Response.No_usable_progress ->
+      Some Keeper_internal_error.Accept_no_usable_progress
+    | Keeper_tooling.Response.Predicate_rejected ->
+      Some Keeper_internal_error.Accept_predicate_rejected
+  in
+  Keeper_internal_error.core_error_of_masc_internal_error
+    (Keeper_internal_error.Accept_rejected
+       {
+         scope = runtime_id;
+         model =
+           Some
+             (Boundary_redaction.to_string
+                Boundary_redaction.runtime_model_label);
+         reason_kind;
+         response_shape =
+           Option.map
+             Keeper_internal_error.accept_response_shape_of_agent_core
+             rejection.response_shape;
+         (* RFC-0271 §4.5: preserve the provider's typed stop_reason so the
+            classifier can tell a [MaxTokens] truncation from a clean [EndTurn]
+            no-progress terminal. *)
+         stop_reason = Some response.stop_reason;
+         reason = rejection.reason;
+       })
+
+let apply_accept
+      ~runtime_id
+      ~accept
+      (run_result : Runtime_agent.run_result)
+  =
+  match run_result.stop_reason with
+  | Runtime_agent.InputRequired _
+  | Runtime_agent.Yielded_to_operation_queued _
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
+    (* These are typed host-control terminals, not model deliverables. Running
+       the normal response accept predicate over their question/blank carrier
+       would turn them into [Accept_rejected] and incorrectly rotate providers,
+       discarding typed control evidence. *)
+    Ok run_result
+  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+    Error
+      (Keeper_internal_error.core_error_of_masc_internal_error
+         (Keeper_internal_error.Host_stopped_turn
+            { runtime_id; stop = Keeper_internal_error.Repeated_tool_call }))
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+    Error
+      (Keeper_internal_error.core_error_of_masc_internal_error
+         (Keeper_internal_error.Host_stopped_turn
+            { runtime_id; stop = Keeper_internal_error.Repeated_assistant_text }))
+  | Runtime_agent.Completed _ ->
+    if accept run_result.response
+    then Ok run_result
+    else
+      Error
+        (accept_rejected_error
+           ~runtime_id
+           ~response:run_result.response)
+
+let is_end_turn_empty_completion (error : Agent_core.Error.t) =
+  match error with
+  | Agent_core.Error.Provider provider_error ->
+    Llm_provider.Error.is_end_turn_empty_completion provider_error
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+
+let complete_saved_tool_terminal ~tool_results_saved_in_attempt
+    ~observed_provider_turn_ordinal ~checkpoint result =
+  match result, tool_results_saved_in_attempt, checkpoint, observed_provider_turn_ordinal with
+  | Error error, true, Some (checkpoint : Agent_core.Checkpoint.t), Some provider_turn_ordinal
+    when is_end_turn_empty_completion error ->
+    (* The shared SDK still rejects empty completions. Only this Keeper owns
+       proof that its tool results were saved in this attempt. The failure
+       carries no provider response id or usage; do not invent either. *)
+    Ok
+      { Runtime_agent.response =
+          { Agent_core.Types.id = ""
+          ; model = checkpoint.model
+          ; content = []
+          ; stop_reason = Agent_core.Types.EndTurn
+          ; usage = None
+          ; telemetry = None
+          }
+      ; checkpoint = Some checkpoint
+      ; cooperative_boundary = None
+      ; session_id = checkpoint.session_id
+      ; session_resumed = None
+      ; turns = checkpoint.turn_count
+      ; trace_ref = None
+      ; run_validation = None
+      ; runtime_observation = None
+      ; stop_reason = Runtime_agent.Completed { provider_turn_ordinal }
+      }
+  | Ok _, _, _, _ | Error _, _, _, _ -> result
+;;
+
+(** Run a single provider attempt within the runtime.
+
+    This is the extracted body of the [try_provider] closure that was
+    defined inside [Keeper_turn_driver.run_named]. The [ctx] record
+    makes all captured dependencies explicit.
+
+    @param ctx Explicit closure context (captures from [run_named]).
+    @param candidate The opaque runtime candidate to attempt.
+    @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
+    sample is not recorded here; the caller records it only after the runtime
+    accept predicate accepts the response. *)
+(* Reaching a later stage never erases classified saved progress. *)
+let rec observe_checkpoint_stage progress (stage : Agent_core.Agent.checkpoint_stage) =
+  let current = Atomic.get progress in
+  match current with
+  | Checkpoint_stage_reached | Tool_results_saved _ | Assistant_checkpoint_saved _ -> ()
+  | No_checkpoint_stage ->
+    if not (Atomic.compare_and_set progress current Checkpoint_stage_reached)
+    then observe_checkpoint_stage progress stage
+;;
+
+(* RFC last-path-resumes-after-progress §3.2: a chat operation resumes from its
+   latest saved checkpoint, so only a stage written after tools ran, and
+   written to that checkpoint, is progress a resumed attempt does not repeat.
+   [After_assistant_collected] is saved before accept judges the answer and
+   keeps a refused one, so counting it as tool retry progress would resume
+   into the same refusal.
+
+   Only the sink's owner may call this. A sink answers [Ok ()] for a write it
+   skipped as well as for one it made: the keeper's checkpoint store answers
+   [Stale_noop] when the canonical checkpoint is already ahead of the incoming
+   turn, and the keeper's sink turns that into [Ok ()]
+   ([Keeper_agent_run], [Keeper_checkpoint_store.Stale_noop]). Reading progress
+   off that answer would claim a checkpoint the operation would not resume
+   from, and the tools it holds would run a second time. *)
+let tool_result_save_count progress =
+  match Atomic.get progress with
+  | Tool_results_saved { tool_result_saves } -> tool_result_saves
+  | Assistant_checkpoint_saved {tool_result_saves=Some count;_} -> count
+  | Assistant_checkpoint_saved {tool_result_saves=None;_}
+  | No_checkpoint_stage | Checkpoint_stage_reached -> 0
+;;
+
+let assistant_checkpoint_save_count progress =
+  match Atomic.get progress with
+  | Assistant_checkpoint_saved {assistant_saves;_} -> assistant_saves
+  | No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _ -> 0
+;;
+
+let rec record_saved_tool_stage progress ~after_tool_results =
+  let current = Atomic.get progress in
+  let count = match current with
+    | Tool_results_saved { tool_result_saves } -> tool_result_saves
+    | Assistant_checkpoint_saved {tool_result_saves=Some count;_} -> count
+    | Assistant_checkpoint_saved {tool_result_saves=None;_}
+    | No_checkpoint_stage | Checkpoint_stage_reached -> 0
+  in
+  let tool_result_saves = if after_tool_results then count + 1 else count in
+  let next = match current with
+    | Assistant_checkpoint_saved {assistant_saves;_} ->
+      Assistant_checkpoint_saved {assistant_saves;tool_result_saves=Some tool_result_saves}
+    | No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _ ->
+      Tool_results_saved {tool_result_saves} in
+  if not (Atomic.compare_and_set progress current next)
+  then record_saved_tool_stage progress ~after_tool_results
+;;
+
+let rec record_saved_assistant_stage progress =
+  let current = Atomic.get progress in
+  let assistant_saves, tool_result_saves = match current with
+    | No_checkpoint_stage | Checkpoint_stage_reached -> 1, None
+    | Tool_results_saved {tool_result_saves} -> 1, Some tool_result_saves
+    | Assistant_checkpoint_saved {assistant_saves;tool_result_saves} ->
+      assistant_saves + 1, tool_result_saves in
+  let next = Assistant_checkpoint_saved {assistant_saves;tool_result_saves} in
+  if not (Atomic.compare_and_set progress current next)
+  then record_saved_assistant_stage progress
+;;
+
+let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage) =
+  match stage with
+  | Agent_core.Agent.After_tool_results_appended ->
+    record_saved_tool_stage progress ~after_tool_results:true
+  | Agent_core.Agent.After_context_injection ->
+    record_saved_tool_stage progress ~after_tool_results:false
+  | Agent_core.Agent.After_assistant_collected -> record_saved_assistant_stage progress
+  | Agent_core.Agent.After_input_wait_changed
+  | Agent_core.Agent.After_rejected_response_dropped ->
+    ()
+;;
+
+(* The stage is marked before the save is delegated: a failed save still ends
+   same-run retry, because the attempt may already hold effects. What the sink
+   did with the checkpoint is not read here -- its answer does not say whether
+   anything was written -- so the sink's owner marks that itself with
+   [observe_checkpoint_saved]. A dispatch whose owner marks nothing holds no
+   saved tool results, and its lane's last candidate ends the turn as it did
+   before this observation existed. *)
+let observing_checkpoint_sink progress sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+  observe_checkpoint_stage progress snapshot.stage;
+  match sink with
+  | None -> Ok ()
+  | Some sink -> sink snapshot
+;;
+
+let same_run_retry_allowed progress =
+  match Atomic.get progress with
+  | No_checkpoint_stage -> true
+  | Checkpoint_stage_reached | Tool_results_saved _ | Assistant_checkpoint_saved _ -> false
+;;
+
+let tool_results_saved progress =
+  match Atomic.get progress with
+  | Tool_results_saved _ -> true
+  | Assistant_checkpoint_saved {tool_result_saves=Some _;_} -> true
+  | Assistant_checkpoint_saved {tool_result_saves=None;_}
+  | No_checkpoint_stage | Checkpoint_stage_reached -> false
+;;
+
+(* #28417: how often the stall watchdog samples the progress signal while a
+   provider attempt runs. Small enough that the reported stall time stays
+   close to the configured threshold, large enough that a fleet of keepers
+   does not poll the registry continuously. Detection therefore lands in
+   [threshold_sec, threshold_sec + progress_poll_interval_sec). *)
+let progress_poll_interval_sec = 15.0
+
+let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~permit_wait ~sample =
+  let judge ~attempt_started_at ~sample =
+    match sample with
+    | Some { last_progress_at; active_tool_count; awaiting_approval } ->
+    (* A tool call that runs for minutes refreshes no progress signal while
+       it runs, so tools in flight are work, not a stall. The 2026-08-12
+       live attempt spent 120s inside one [Execute] and was healthy.
+
+       A call held at the approval gate is the same shape and not the same
+       fact: it is not the provider that has gone quiet, it is a person who
+       has not answered yet. Cancelling the attempt there loses a turn the
+       provider completed and files the loss against the provider. The wait
+       has its own bound -- [Keeper_tool_approval_registry.await] races the
+       answer against [timeout_sec] and settles either way -- so exempting it
+       here does not leave anything unbounded. *)
+    (not awaiting_approval)
+    && active_tool_count = 0
+    && now -. last_progress_at > threshold_sec
+    | None ->
+      (* Probe absent, or the keeper has no live turn observation to read.
+         Falling back to elapsed time reproduces the pre-#28417 ceiling: losing
+         the progress signal must not silently disable enforcement and leave a
+         wedged attempt running unbounded. *)
+      now -. attempt_started_at > threshold_sec
+  in
+  (* A wait for the binding's admission permit is queueing, not the provider
+     gone quiet, and the only waits that write the cell are the bounded ones
+     (Agent Core writes it for no other), so the admission bound ends it and
+     nothing here needs to. Standing down for it leaves nothing unbounded,
+     and the record then says [Queue] instead of racing the admission bound
+     with a coarser clock. The wait's end is the instant the attempt's own
+     budgets start from -- a stream granted late runs under its first-event
+     budget from the grant -- so the watchdog counts from that instant too,
+     as it counts from a lease's resumption, not from before the wait. *)
+  match permit_wait with
+  | Llm_provider.Provider_admission.Waiting_for_permit -> false
+  | Llm_provider.Provider_admission.Before_any_wait -> judge ~attempt_started_at ~sample
+  | Llm_provider.Provider_admission.Wait_settled_at settled_at ->
+    judge
+      ~attempt_started_at:(max settled_at attempt_started_at)
+      ~sample:
+        (Option.map
+           (fun sample -> { sample with last_progress_at = max settled_at sample.last_progress_at })
+           sample)
+;;
+
+type provider_lease_phase =
+  | Provider_active_since of float
+  | Provider_yielded
+
+let observe_provider_lease ~now ~on_yield ~on_resume =
+  let phase = Atomic.make (Provider_active_since (now ())) in
+  let yield () =
+    Atomic.set phase Provider_yielded;
+    Option.iter (fun notify -> notify ()) on_yield
+  in
+  let resume () =
+    Option.iter (fun notify -> notify ()) on_resume;
+    Atomic.set phase (Provider_active_since (now ()))
+  in
+  phase, yield, resume
+;;
+
+let provider_lease_stalled ~lease_phase ~now ~threshold_sec ~attempt_started_at
+    ~permit_wait ~sample =
+  match lease_phase with
+  | Provider_yielded -> false
+  | Provider_active_since resumed_at ->
+    let sample = Option.map (fun sample ->
+      { sample with last_progress_at = max resumed_at sample.last_progress_at }) sample in
+    attempt_stalled ~now ~threshold_sec
+      ~attempt_started_at:(max resumed_at attempt_started_at) ~permit_wait ~sample
+;;
+
+(* #28417: blocks until the attempt has gone [threshold_sec] without a
+   progress signal, then returns. [probe] is contracted not to raise (the
+   injection site converts a failed registry read into [None]), so a
+   transient read failure degrades this fiber to the elapsed fallback instead
+   of cancelling the attempt it is watching. *)
+let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
+    ~lease_phase ~permit_wait =
+  Eio.Time.sleep clock progress_poll_interval_sec;
+  let sample =
+    match probe with
+    | Some read -> read ()
+    | None -> None
+  in
+  (* [Time_compat.now], not [Eio.Time.now clock]: the value this is subtracted
+     from ([turn_observation.last_progress_at]) is stamped by
+     [Keeper_registry_setup.stamp_turn_progress] with [Time_compat.now], and a
+     difference between two clocks is only meaningful when both readings come
+     from the same one. [clock] is used for sleeping, not for dating. *)
+  if provider_lease_stalled
+       ~lease_phase:(Atomic.get lease_phase)
+       ~now:(Time_compat.now ())
+       ~threshold_sec
+       ~attempt_started_at
+       ~permit_wait:(Atomic.get permit_wait)
+       ~sample
+  then ()
+  else await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
+    ~lease_phase ~permit_wait
+;;
+
+(* The memo is keyed by message value ([Agent_core.Types.Message_value]). Each
+   request passes its history through [Complete_common.transmitted_history],
+   which allocates a new record for every message
+   ([Reasoning_history_projection.project]), so the key has to survive a rebuilt
+   record. A float zero and its negative inside a raw JSON payload share one
+   entry while encoding one byte apart; the bytes are judged against a cap
+   of hundreds of kilobytes, and never converted to tokens. *)
+module Message_measurement_cache = Hashtbl.Make (Agent_core.Types.Message_value)
+
+let memoize_message_measurement measure =
+  let cache = Message_measurement_cache.create 128 in
+  fun message ->
+    match Message_measurement_cache.find_opt cache message with
+    | Some bytes -> bytes
+    | None ->
+      let bytes = measure message in
+      Message_measurement_cache.add cache message bytes;
+      bytes
+;;
+
+(* Model-input projection walks the durable message history and encodes every
+   candidate it measures. Live Keeper checkpoints carry tens of thousands of
+   messages, so doing that work on the main Eio domain starves unrelated HTTP
+   fibers even though no provider call has started yet. The server installs a
+   shared CPU-weighted [Domain_pool]; non-Eio/unit callers retain the typed
+   inline fallback owned by [Domain_pool_ref]. *)
+let offload_model_input_cpu f =
+  let work = Agent_core.Base.Schema_observation.capture (fun () ->
+    Agent_core.Base.Schema_observation.measure ~site:Worker_work f)
+  in
+  Agent_core.Base.Schema_observation.measure ~site:Worker_queue_and_await
+    (fun () -> Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ work)
+
+(* The request bytes that are not conversation history, measured with the
+   same encoder as the history: tool schemas and the system prompt. Charged
+   against the window before any atom is considered. *)
+let declared_request_reserve_bytes ~system_prompt ~tools =
+  let tool_schema_bytes =
+    Agent_core.Base.Schema_observation.with_site Reserve_encode (fun () ->
+      List.fold_left
+        (fun acc tool ->
+           acc
+           + Agent_core.Tool.wire_bytes_of_schema tool.Agent_core.Tool.schema)
+        0
+        tools)
+  in
+  let system_prompt_bytes =
+    String.length (Yojson.Safe.to_string (`String system_prompt))
+  in
+  tool_schema_bytes + system_prompt_bytes
+;;
+
+(* The carried range as one request composes it (RFC
+   keeper-context-window-in-tokens §10.4, §13.4, §13.6). With a Librarian
+   continuity that fits this history the front is its position: the
+   snapshot's, with the working state ahead of the range, or the read
+   position alone. Without one the front comes from the ledger or its
+   cold-start seed, and without either the range starts at the end of the
+   last completed turn on this history ([completed_end_atom]), so only this
+   turn's own atoms go out. Nothing here declares a cap.
+
+   RFC-0363 demotion runs first over the unmodified history: the atoms older
+   than the current turn — the [demote_before] boundary the caller computes
+   from [ctx.initial_messages] (RFC-0351 §4) — have their aged tool results
+   rewritten to readable addresses, and the range is then read off the
+   rewritten list. Demotion neither adds nor removes atoms, so the front is
+   the same position on both lists, and [history_atom_count] is the count
+   of the whole history, which the reported share keeps as denominator.
+
+   No cut refuses and nothing here measures a size against anything: the
+   marks and the provider judge the request once it is counted, and the
+   request body is the provider's to accept or refuse. #28845's demotion of
+   the current turn's own tool results runs on the refusal path, never at
+   composition time: after a size refusal that the lane's own answer did not
+   turn into an accepted request, [current_turn_results] is
+   [Current_turn_demoted] and the atoms from the turn boundary to the end of
+   the refused request join the demotion, so this turn's results leave as
+   externalized markers while earlier turns stay as the policy composes them
+   ([current_turn_demotion_sequence]). *)
+type current_turn_results =
+  | Current_turn_verbatim
+  | Current_turn_demoted of { refused_atom_count : int }
+
+let current_turn_results_to_string = function
+  | Current_turn_verbatim -> "verbatim"
+  | Current_turn_demoted { refused_atom_count } ->
+    Printf.sprintf "demoted_through_%d" refused_atom_count
+;;
+
+type composed =
+  { planned : Keeper_model_input_demotion.plan_result
+  ; projection : Runtime_model_input_tail_window.projection
+  ; transmitted_bytes : int
+  ; history_atom_count : int
+  ; origin : Keeper_carried_front.origin
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+  ; demote_from : int
+        (* The first atom the demotion may touch: 0 but for a demoted current
+           turn on a range whose earlier turns stay verbatim, where it is the
+           turn's first atom. *)
+  ; demote_before : int
+        (* The boundary the demotion actually applied: 0 when demotion is off,
+           the refused request's atom count once the current turn is demoted. *)
+  }
+
+(* A request as the ledger reads it, with the history it was composed from:
+   the ledger checks its last positions against that history, and a halving
+   names its new front by it. *)
+type sent_request =
+  { request : Keeper_model_input_ledger.request
+  ; digest_at : int -> string option
+  ; origin : Keeper_carried_front.origin
+        (* Where the range the request carried started: a refusal of a
+           range a seed or a Librarian point opened ahead of the turn
+           boundary is answered from that boundary
+           ([turn_boundary_resend_sequence]). *)
+  }
+
+(* What one candidate carries between its requests and the retry policy
+   around it: its working ledger, the range the last request composed, what
+   the compositions do with the current turn's tool results, and how to ask
+   whether demoting them would shorten the last request. *)
+type attempt_state =
+  { last_request : sent_request option ref
+  ; request_range : Keeper_continuity_request.range option ref
+  ; ledger : Keeper_model_input_ledger.t option ref
+  ; current_turn_results : current_turn_results ref
+        (* Read by every composition, so every request of a resent attempt
+           keeps the same results as markers and the results the resent
+           attempt produces, which lie past the refused atoms, go verbatim. *)
+  ; current_turn_demotion : (unit -> int option) option ref
+        (* Set by each composition: the atom count of the request it composed
+           when demoting this turn's tool results in those atoms would carry fewer
+           bytes, [None] when it would change nothing. *)
+  }
+
+(* The ledger's session: the history the carried positions belong to. The
+   turn's trace id on the keeper's own turns; an attempt without one has no
+   durable history and shares nothing. *)
+let ledger_session (ctx : try_provider_ctx) =
+  match (input_trace_id ctx.request_input) with
+  | Some session -> session
+  | None -> "-"
+;;
+
+(* The candidate can narrow its requests without turning a refused range
+   into the next turn's starting point. AfterTurn records responses in the
+   table; its observation also replaces this candidate's working value. *)
+let new_attempt_state (ctx : try_provider_ctx) =
+  { last_request = ref None
+  ; request_range = ref None
+  ; ledger = ref (match ctx.request_input with
+      | Completion_review -> None
+      | Keeper_history _ -> Keeper_model_input_ledger.Table.lookup
+          ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
+          ~session_id:(ledger_session ctx))
+  ; current_turn_results = ref Current_turn_verbatim
+  ; current_turn_demotion = ref None
+  }
+;;
+
+(* An empty base path turns demotion off, so no atom is below the boundary. *)
+let applied_demote_before ~base_path ~demote_before =
+  if String.equal base_path "" then 0 else demote_before
+;;
+
+let demotion_plan ?completed_arguments ?(demote_from = 0)
+    ~measure_message_bytes ~base_path ~demote_before messages =
+  if String.equal base_path ""
+  then { Keeper_model_input_demotion.messages; pending = [] }
+  else Keeper_model_input_demotion.plan ?completed_arguments
+      ~demote_from ~measure_message_bytes ~demote_before messages
+;;
+
+(* Where a request's carried range opens (RFC keeper-context-window-in-tokens
+   §13.4, §13.6; RFC librarian-lifecycle §4.10), from values the caller read:
+   a snapshot that fits this history, else the Librarian's read position in
+   it, else a seed this history still opens with the same message, else where
+   the last completed turn on this history ended. A Librarian point yields to
+   a later start the provider accepted on this history: the newest
+   response-observed turn record, or the turn boundary a size refusal moved
+   this turn to. That start never passes this turn's boundary. Nothing else
+   chooses the start: the turn's composition and the next-request forecast
+   both ask here, so the forecast shows the start the request will have. A
+   seed this history does not hold is dropped and returned with the reason. *)
+type librarian_point =
+  | At_snapshot of Librarian_continuity_snapshot.t
+  | At_read_position of { end_atom : int }
+
+type range_start =
+  | From_snapshot of Librarian_continuity_snapshot.t
+  | From_read_position of { end_atom : int }
+  | Past_librarian_point of
+      { point : librarian_point
+      ; accepted : Keeper_carried_front.seed
+      }
+  | From_seed of Keeper_carried_front.seed
+  | From_turn_boundary of Keeper_carried_front.turn_start
+
+type start_choice =
+  { start : range_start
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+  }
+
+let librarian_point_end_atom = function
+  | At_snapshot snapshot -> snapshot.Librarian_continuity_snapshot.end_atom
+  | At_read_position { end_atom } -> end_atom
+;;
+
+(* Rule 7 of RFC librarian-lifecycle §4.10: an accepted start is at most
+   this turn's boundary, so this turn's input always rides. A start past it
+   is moved back to it, named by the message that opens the boundary atom;
+   a boundary this history does not name keeps no accepted start. An unknown
+   boundary bounds nothing, and the projection still carries the newest
+   atom ({!Keeper_carried_front.clamp}). *)
+let within_turn_boundary ~history_digest_at ~turn_boundary (seed : Keeper_carried_front.seed) =
+  match seed.front, turn_boundary with
+  | Model_input_front.At_atom _, Keeper_carried_front.Turn_boundary { end_atom }
+    when seed.first_atom > end_atom ->
+    Option.map
+      (fun front_digest -> { seed with first_atom = end_atom; front = Model_input_front.At_atom front_digest })
+      (history_digest_at end_atom)
+  | (Model_input_front.At_atom _ | Model_input_front.After_history _ | Model_input_front.Empty_history),
+    (Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _) ->
+    Some seed
+;;
+
+let from_librarian_point ~accepted ~history_digest_at ~turn_boundary point =
+  let at_point =
+    match point with
+    | At_snapshot snapshot -> From_snapshot snapshot
+    | At_read_position { end_atom } -> From_read_position { end_atom }
+  in
+  let past_point =
+    Option.bind accepted (fun seed ->
+      match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
+      | Error (_ : Keeper_carried_front.dropped_front) -> None
+      | Ok seed -> within_turn_boundary ~history_digest_at ~turn_boundary seed)
+  in
+  match past_point with
+  | Some seed when seed.Keeper_carried_front.first_atom > librarian_point_end_atom point ->
+    Past_librarian_point { point; accepted = seed }
+  | Some (_ : Keeper_carried_front.seed) | None -> at_point
+;;
+
+let choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary =
+  let without_point () =
+    match front with
+    | None -> { start = From_turn_boundary turn_boundary; outlived_seed = None }
+    | Some seed ->
+      (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
+       | Ok seed -> { start = From_seed seed; outlived_seed = None }
+       | Error dropped ->
+         { start = From_turn_boundary turn_boundary; outlived_seed = Some (seed, dropped) })
+  in
+  let at_point point =
+    { start = from_librarian_point ~accepted ~history_digest_at ~turn_boundary point
+    ; outlived_seed = None
+    }
+  in
+  match Option.map (fun (value : continuity) -> value.point) continuity with
+  | Some (Summarized { snapshot; _ }) -> at_point (At_snapshot snapshot)
+  | Some (Absorbed { end_atom; _ }) -> at_point (At_read_position { end_atom })
+  | Some Without_snapshot | None -> without_point ()
+;;
+
+let range_start_origin = function
+  | From_snapshot snapshot ->
+    Keeper_carried_front.Librarian_snapshot
+      { end_atom = snapshot.Librarian_continuity_snapshot.end_atom
+      ; boundary_line = snapshot.Librarian_continuity_snapshot.end_boundary_line
+      }
+  | From_read_position { end_atom } -> Keeper_carried_front.Librarian_progress { end_atom }
+  | Past_librarian_point { point; accepted } ->
+    Keeper_carried_front.Past_librarian_point
+      { librarian_end_atom = librarian_point_end_atom point
+      ; source = accepted.Keeper_carried_front.source
+      }
+  | From_seed seed -> Keeper_carried_front.Carried seed.Keeper_carried_front.source
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
+    Keeper_carried_front.Turn_start { end_atom }
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown { reason }) ->
+    Keeper_carried_front.Turn_start_unknown { reason }
+;;
+
+(* The range [start] opens, over [messages] of [atom_count] atoms. A
+   snapshot's working state rides ahead of the atoms it does not cover, and
+   a Librarian point may leave no history atom at all: a Librarian that has
+   read everything, which is the only state a purge leaves it in. A seed or
+   a turn boundary always carries the newest atom ({!Keeper_carried_front.clamp});
+   an unknown boundary carries that atom alone. *)
+let working_state_message snapshot : Agent_core.Types.message =
+  { origin = Llm_provider.Types.Agent_instruction;  role = Agent_core.Types.User
+  ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
+  ; name = None; tool_call_id = None
+  ; metadata = Runtime_model_input_tail_window.working_state_metadata
+  }
+;;
+
+let project_range_start ~unread ~measure_message_bytes ~atom_count start messages =
+  let messages=Keeper_librarian_request_unread.attach ~role:Agent_core.Types.User unread messages in
+  match start with
+  | From_snapshot snapshot ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~allow_empty_history:true
+      ~history_already_announced:true ~measure_message_bytes
+      ~first_atom:snapshot.Librarian_continuity_snapshot.end_atom
+      (working_state_message snapshot :: messages)
+  | From_read_position { end_atom } ->
+    (* No summary stands in for the absorbed atoms; the omission preamble
+       says older turns are left out. *)
+    Runtime_model_input_tail_window.project_from_atom
+      ~allow_empty_history:true ~measure_message_bytes ~first_atom:end_atom messages
+  | Past_librarian_point { point = At_snapshot snapshot; accepted } ->
+    (* The working state still rides: it summarizes the atoms before the
+       point, and the range opens at the accepted start after it. *)
+    Runtime_model_input_tail_window.project_from_atom
+      ~history_already_announced:true ~measure_message_bytes
+      ~allow_empty_history:(Model_input_front.permits_empty accepted.front)
+      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count accepted)
+      (working_state_message snapshot :: messages)
+  | Past_librarian_point { point = At_read_position _; accepted } ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes
+      ~allow_empty_history:(Model_input_front.permits_empty accepted.front)
+      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count accepted)
+      messages
+  | From_seed (seed : Keeper_carried_front.seed) ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes
+      ~allow_empty_history:(Model_input_front.permits_empty seed.front)
+      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count seed)
+      messages
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes
+      ~first_atom:(Keeper_carried_front.clamp ~atom_count end_atom)
+      messages
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes
+      ~first_atom:(Keeper_carried_front.newest_atom ~atom_count)
+      messages
+;;
+
+let compose_carried_model_input
+      ?(input_policy = Keeper_input_policy.Wide)
+      ?continuity
+      ?completed_arguments
+      ~measure_message_bytes
+      ~(front : Keeper_carried_front.seed option)
+      ~(accepted : Keeper_carried_front.seed option)
+      ~(history_digest_at : int -> string option)
+      ~current_turn_results
+      ~base_path
+      ~demote_before
+      ~turn_boundary
+      messages
+  =
+  let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
+  (* A front whose index this history does not open with the same message
+     names no atom of it: the history is shorter than the front, or a purge
+     rewrote the message that opens it. The request starts over as with no front
+     rather than carrying the newest atom alone from a position that would
+     never widen again. A history that only lost an unsaved attempt's tail
+     keeps the position. *)
+  let { start; outlived_seed } =
+    choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
+  in
+  (* A range that opens on a seed reaches behind this turn, so its aged tool
+     results are demoted at the turn boundary on either path that carries
+     one. A range that opens at the turn boundary or at a Librarian point
+     carries no atom behind it that demotion could shorten. *)
+  let ordinary_demote_before =
+    match input_policy, Option.map (fun (value : continuity) -> value.point) continuity with
+    | Keeper_input_policy.Small, _ -> demote_before
+    | Keeper_input_policy.Wide, Some (Summarized _ | Absorbed _) -> 0
+    | Wide, Some Without_snapshot ->
+      (match start with
+       | From_seed _ -> demote_before
+       | From_snapshot _ | From_read_position _ | Past_librarian_point _
+       | From_turn_boundary _ -> 0)
+    | Wide, None -> demote_before
+  in
+  (* After a size refusal this turn's own atoms join the demotion, whatever
+     the policy and the continuity: from where this turn began -- the turn
+     boundary, or the newest atom alone when the boundary could not be read
+     -- to the end of the refused request. Earlier turns stay as the policy
+     composes them: when the ordinary boundary already reaches this turn the
+     two ranges meet and one range from 0 covers both, and when it demotes
+     nothing the range starts at this turn. *)
+  let demote_from, demote_before =
+    match current_turn_results with
+    | Current_turn_verbatim -> 0, ordinary_demote_before
+    | Current_turn_demoted { refused_atom_count } ->
+      let turn_start =
+        match turn_boundary with
+        | Keeper_carried_front.Turn_boundary { end_atom } ->
+          Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
+        | Keeper_carried_front.Turn_boundary_unknown _ ->
+          Keeper_carried_front.newest_atom ~atom_count:history_atom_count
+      in
+      if ordinary_demote_before >= turn_start
+      then 0, refused_atom_count
+      else turn_start, refused_atom_count
+  in
+  let planned =
+    demotion_plan ?completed_arguments ~demote_from ~measure_message_bytes ~base_path ~demote_before messages
+  in
+  (* A response-observed persisted seed is evidence for the range it names.
+     Composition consumes that evidence; it does not reinterpret the prior
+     outcome as a size refusal. A size refusal of this range is answered
+     after the attempt: with no continuity by the in-turn ladder, which owns
+     any further move toward the newest atom; otherwise by one resend from
+     the turn boundary ([turn_boundary_resend_sequence]). *)
+  let projection, transmitted_bytes =
+    project_range_start
+      ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread continuity)
+      ~measure_message_bytes
+      ~atom_count:history_atom_count
+      start
+      planned.Keeper_model_input_demotion.messages
+  in
+  { planned
+  ; projection
+  ; transmitted_bytes
+  ; history_atom_count
+  ; origin = range_start_origin start
+  ; outlived_seed
+  ; demote_from
+  ; demote_before = applied_demote_before ~base_path ~demote_before
+  }
+;;
+
+(* Whether demoting the refused request's tool results changes it: the same
+   range composed under [Current_turn_demoted], against the range it composed,
+   both measured with the plan's placeholders, which no stored marker exceeds.
+   Fewer bytes means the resend differs from the refused request; equal means
+   there is nothing to demote in it. The answer is the refused request's atom
+   count, the boundary the demotion moves past. *)
+let current_turn_demotion ~(refused : composed) ~(demoted : composed) =
+  if demoted.transmitted_bytes < refused.transmitted_bytes
+  then Some refused.history_atom_count
+  else None
+;;
+
+(* One request: the range composed in the durable vocabulary, its demotions
+   materialized, then the wire's view of the carried range. [composed] and
+   [carried] count atoms of the checkpoint history — the vocabulary of the
+   ledger, the seed and the forecast — and [transmitted] is the dialect's
+   reasoning projection over [carried] alone, or why it declined. The
+   projection reads block kinds only, so it runs on the history and the media
+   stay [Stored] until the request is resolved; [carried_wire] is [carried]
+   resolved, which the prefix-binding check reads. The order is the
+   point: a position measured on one runtime names the same atom on every
+   runtime whatever reasoning each dialect replays or deletes, a dialect that
+   deletes a whole reasoning-only assistant message shortens the wire list
+   and not the history the front is a position in, and the projection walks
+   the carried range rather than the whole checkpoint. Projecting first
+   would make the atom count a property of the dialect, so a front read from
+   another runtime's record could fall under
+   [Keeper_carried_front.for_history] and start over from the turn start. *)
+type request_view =
+  { composed : composed
+  ; completed_arguments : Keeper_model_input_demotion.completed_arguments option
+  ; argument_prefix_protected : bool
+  ; carried : Agent_core.Types.message list
+  ; carried_wire : Agent_core.Llm_provider.Types.message list
+  ; transmitted :
+      ( Agent_core.Types.message list
+        , Agent_core.Llm_provider.Reasoning_history_projection.error )
+        result
+  }
+
+(* The carried range, and only it, with its media read back from the store. *)
+let resolve_carried ~to_wire carried =
+  let rec resolve acc = function
+    | [] -> Ok (List.rev acc)
+    | message :: rest ->
+      (match to_wire message with
+       | Ok wire -> resolve (wire :: acc) rest
+       | Error _ as error -> error)
+  in
+  resolve [] carried
+;;
+
+let unchecked_request_view
+      ~tools
+      ?(input_policy = Keeper_input_policy.Wide)
+      ?continuity
+      ?completed_arguments
+      ~provider_config
+      ~measure_message_bytes
+      ~front
+      ~accepted
+      ~history_digest_at
+      ~current_turn_results
+      ~base_path
+      ~demote_before
+      ~turn_boundary
+      ~materialize
+      ~to_wire
+      messages
+  =
+  let composed =
+    offload_model_input_cpu (fun () ->
+      compose_carried_model_input
+        ~input_policy ?continuity ?completed_arguments
+        ~measure_message_bytes
+        ~front
+        ~accepted
+        ~history_digest_at
+        ~current_turn_results
+        ~base_path
+        ~demote_before
+        ~turn_boundary
+        messages)
+  in
+  let carried =
+    match composed.planned.Keeper_model_input_demotion.pending with
+    | [] -> composed.projection.Runtime_model_input_tail_window.messages
+    | pending -> materialize ~pending composed.projection.Runtime_model_input_tail_window.messages
+  in
+  Result.map
+    (fun carried_wire ->
+       let transmitted =
+         offload_model_input_cpu (fun () ->
+           Agent_core.Llm_provider.Complete_common.transmitted_history
+             ~tools ~config:provider_config
+             carried)
+       in
+       { composed
+       ; carried
+       ; carried_wire
+       ; transmitted
+       ; completed_arguments
+       ; argument_prefix_protected = false
+       })
+    (resolve_carried ~to_wire carried)
+;;
+
+module Message_indices = Set.Make (Int)
+
+(* Composition removes old unread carriers, retains pinned messages and the
+   selected atom suffix, and adds only prefix carriers (unread, working state,
+   omission preamble). This parallel vector follows occurrences, including
+   repeated identical records; it never searches by digest or tool ID. *)
+let carried_source_indices ~messages (view : request_view) =
+  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
+  let retained =
+    List.mapi (fun index (message, label) -> index, message, label) labelled
+    |> List.filter_map (fun (index, message, label) ->
+      if Runtime_model_input_tail_window.is_unread_context message then None
+      else match label with
+        | Runtime_model_input_tail_window.Pinned -> Some (Some index)
+        | Runtime_model_input_tail_window.Atom atom ->
+          if atom >= view.composed.projection.dropped_atoms then Some (Some index) else None)
+  in
+  let synthetic_count = List.length view.carried - List.length retained in
+  if synthetic_count < 0 then None
+  else Some (Array.of_list (List.init synthetic_count (fun _ -> None) @ retained))
+;;
+
+let request_view
+      ?(input_policy = Keeper_input_policy.Wide) ?continuity ?completed_arguments
+      ?(tools = []) ~provider_config ~measure_message_bytes ~front ~accepted
+      ~history_digest_at ~current_turn_results ~base_path ~demote_before
+      ~turn_boundary ~materialize ~to_wire messages =
+  let open Result.Syntax in
+  let build ?(materialize = materialize) completed_arguments =
+    unchecked_request_view ~tools ~input_policy ?continuity ?completed_arguments
+      ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
+      ~current_turn_results ~base_path ~demote_before ~turn_boundary ~materialize
+      ~to_wire messages
+  in
+  let* candidate = build completed_arguments in
+  match completed_arguments with
+  | None -> Ok candidate
+  | Some arguments ->
+    let retained_reasoning view =
+      let* retained =
+        Agent_core.Llm_provider.Complete_common.retained_prefix_reasoning_indices
+          ~config:provider_config ~tools view.carried_wire
+        |> Result.map_error (fun _ -> ())
+      in
+      match retained with
+      | None -> Ok None
+      | Some indices ->
+        (match carried_source_indices ~messages view with
+         | None -> Error ()
+         | Some sources ->
+           let rec collect result = function
+             | [] -> Ok (Some result)
+             | index :: rest ->
+               if index < 0 || index >= Array.length sources then Error ()
+               else match sources.(index) with
+                 | None -> Error ()
+                 | Some source -> collect (Message_indices.add source result) rest
+           in
+           collect Message_indices.empty indices)
+    in
+    let candidate_reasoning = offload_model_input_cpu (fun () -> retained_reasoning candidate) in
+    match candidate_reasoning with
+    | Ok None -> Ok candidate
+    | Ok (Some _) | Error () ->
+      let captured = offload_model_input_cpu (fun () -> Keeper_model_input_demotion.capture_materialized
+          ~pending:candidate.composed.planned.pending
+          ~before:candidate.composed.projection.messages ~after:candidate.carried) in
+      (match captured with
+       | None ->
+         (* A custom materializer broke slot correspondence. Return the
+            Result-only path outright; its new outcome is never an oracle
+            for re-enabling arguments. *)
+         let+ view = build None in
+         { view with argument_prefix_protected = true }
+       | Some _ ->
+      let replay ~pending messages = offload_model_input_cpu (fun () ->
+        Keeper_model_input_demotion.replay_materialized captured ~pending messages) in
+      let* baseline = build ~materialize:replay None in
+      let baseline_reasoning = offload_model_input_cpu (fun () -> retained_reasoning baseline) in
+      let baseline_fallback () = Ok { baseline with argument_prefix_protected = true } in
+      (match baseline_reasoning, candidate_reasoning with
+       | Ok (Some baseline_sources), Ok (Some candidate_sources) ->
+         let missing = Message_indices.diff baseline_sources candidate_sources in
+         if Message_indices.is_empty missing then Ok candidate
+         else
+           let protected_arguments =
+             Keeper_model_input_demotion.protect_argument_prefix
+               ~through_message:(Message_indices.max_elt missing) arguments
+           in
+           let* final = build ~materialize:replay (Some protected_arguments) in
+           (* Restoring an earlier argument changes the chain again. Verify
+              the actual final materialization, including failed blob writes. *)
+           (match offload_model_input_cpu (fun () -> retained_reasoning final) with
+            | Ok (Some final_sources) when Message_indices.subset baseline_sources final_sources ->
+              Ok { final with argument_prefix_protected = true }
+            | Ok None | Ok (Some _) | Error () -> baseline_fallback ())
+       | (Ok None | Error ()), (Ok None | Ok (Some _) | Error ()) -> baseline_fallback ()
+       | Ok (Some _), (Ok None | Error ()) -> baseline_fallback ()))
+;;
+
+(* Where the next request's range starts (RFC keeper-context-window-in-tokens
+   §10.3, §10.4). The candidate's working ledger answers only while this
+   request's history still opens its front and newest atom with the
+   messages it recorded; one that does not is dropped here, where the
+   mismatch is first seen, and is returned so the caller can say so. The
+   observed table entry is checked independently before being removed. Kept
+   instead, its front would be dropped by [Keeper_carried_front.for_history]
+   on every request while its stale blocks and front still answered the
+   refusal path, which then retried the whole history without end. The cold
+   seed is read only when no ledger answers. *)
+let carried_front ~ledger ~keeper_name ~runtime_id ~session_id ~digest_at ~after_refusal ~cold =
+  let after_refusal =
+    Option.bind after_refusal (fun seed ->
+      match Keeper_carried_front.for_history ~digest_at seed with
+      | Ok seed -> Some seed
+      | Error reason ->
+        Log.Keeper.warn ~keeper_name
+          "model input refusal front dropped runtime=%s reason=%s front=%s"
+          runtime_id
+          (Keeper_carried_front.dropped_front_to_string reason)
+          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed));
+        None)
+  in
+  let without_ledger () =
+    match after_refusal with Some _ as front -> front | None -> cold ()
+  in
+  let dropped =
+    match !ledger with
+    | Some current when not (Keeper_model_input_ledger.holds ~digest_at current) ->
+      (* Validate the actual table entry before removing it: another response
+         may have replaced the snapshot this candidate started from. *)
+      ledger :=
+        (match
+           Keeper_model_input_ledger.Table.lookup_in_history
+             ~keeper_name ~runtime_id ~session_id ~digest_at
+         with
+         | Keeper_model_input_ledger.Table.Holds observed -> Some observed
+         | Keeper_model_input_ledger.Table.Dropped_stale _
+         | Keeper_model_input_ledger.Table.Absent -> None);
+      Some current
+    | Some _ | None -> None
+  in
+  match !ledger with
+  | Some current ->
+    let front = Keeper_carried_front.of_ledger current in
+    (match after_refusal, front with
+     | Some refused, Some carried when refused.first_atom > carried.first_atom ->
+       Some refused, dropped
+     | Some refused, None -> Some refused, dropped
+     | (Some _ | None), (Some _ | None) -> front, dropped)
+  | None -> without_ledger (), dropped
+;;
+
+(* The carried range runs here rather than in the caller because its front
+   belongs to the (keeper, runtime) pair: the ledger the previous response on
+   this very attempt may have just moved. A caller that composed the range
+   ahead of runtime selection would have to guess which runtime's ledger
+   applies. The range stays ahead of [ctx.model_input_projection] so that
+   projection's projected-prefix precondition keeps holding against the list
+   it receives.
+
+   [state] receives, per request, the range this stage composed, so the
+   response's usage can be written against it in the ledger and a refusal
+   can be answered with a move of that very front; it hands this stage what
+   to do with the current turn's tool results and takes back the probe that
+   says whether demoting them would change the request. *)
+type argument_binding_state =
+  | Arguments_unbound
+  | Arguments_bound of Keeper_model_input_demotion.completed_arguments option
+
+let argument_binding_error_to_string = function
+  | Keeper_model_input_demotion.Invalid_argument_seed error ->
+    Keeper_transcript_unit.show_structural_error error
+  | Argument_seed_prefix_mismatch Keeper_replay_prefix.Prefix_longer_than_messages ->
+    "completed argument seed is longer than the canonical request"
+  | Argument_seed_prefix_mismatch Keeper_replay_prefix.Prefix_message_mismatch ->
+    "completed argument seed differs from the canonical request"
+  | Argument_replay_prefix_mismatch error -> Keeper_replay_prefix.restore_error_to_string error
+  | Argument_occurrence_mismatch -> "completed ToolUse sequence differs from the dispatch request"
+;;
+
+(* One conversion per message per attempt: the requests of an attempt carry
+   mostly the same history, and resolving a [Stored] block reads and checks
+   its blob. Keyed like [Message_measurement_cache]. *)
+let memoize_wire_message media_store =
+  let cache = Message_measurement_cache.create 128 in
+  fun message ->
+    match Message_measurement_cache.find_opt cache message with
+    | Some wire -> Ok wire
+    | None ->
+      Result.map
+        (fun wire ->
+           Message_measurement_cache.add cache message wire;
+           wire)
+        (Agent_core.History.to_wire_message media_store message)
+;;
+
+let bounded_model_input_projection
+      (ctx : try_provider_ctx)
+      ~(state : attempt_state)
+      ~agent_cell
+      ~media_store
+      ~on_resolved
+      ~(provider_config : Llm_provider.Provider_config.t)
+  : Agent_core.Agent.model_input_projection
+  =
+  match ctx.request_input with
+  | Completion_review ->
+    (fun messages ->
+       let open Result.Syntax in
+       let* messages =
+         match ctx.model_input_projection with
+         | None -> Ok messages
+         | Some project -> project messages
+       in
+       on_resolved messages;
+       Agent_core.History.to_wire_messages media_store messages
+       |> Result.map_error (fun error -> Agent_core.Error.Media error))
+  | Keeper_history _ ->
+  let reserved_bytes, prefix_digest =
+    offload_model_input_cpu (fun () ->
+      let reserved_bytes =
+        declared_request_reserve_bytes ~system_prompt:ctx.system_prompt ~tools:ctx.tools
+      in
+      (* Give the worker cancellation branch a scheduling point between stages.
+         This preparation retains its CPU permit until both stages return. *)
+      Eio_guard.fair_yield ();
+      (* The fixed prefix the ledger compares consecutive requests under: one
+         digest per attempt, since the system prompt and tool list are fixed for
+         the attempt's lifetime. *)
+      let prefix_digest =
+        Keeper_model_input_ledger.prefix_digest
+          ~system_prompt:ctx.system_prompt
+          ~tools:ctx.tools
+      in
+      reserved_bytes, prefix_digest)
+  in
+  (* One memo per provider attempt, not per request.  A turn issues one
+     projection per provider request — measured on the live wire capture:
+     83 requests for turn 12263, 62 for 15638 — and every request re-measures
+     the same history, which is tens of thousands of messages on a live
+     Keeper.  Building the memo inside the per-request closure threw that work
+     away between requests.
+
+     Safe to share: [run_try_provider] builds one closure per provider
+     attempt, so no two Keepers share a memo; AGENT_CORE drives the turn loop
+     sequentially (no [Fiber.fork] around [prepare_turn_for_agent] in
+     pipeline_stage_prepare.ml); and [Domain_pool.submit_cpu] is
+     [Eio.Executor_pool.submit_exn], which blocks until the job finishes, so
+     successive jobs are ordered even when they land on different domains.
+
+     The memo is keyed by message value ([Agent_core.Types.Message_value]), so
+     a record that projection rebuilt for this request still hits the entry an
+     earlier request measured. *)
+  let measure_message_bytes =
+    memoize_message_measurement (Keeper_context_core.message_measurer ())
+  in
+  (* Scoped to the attempt for the same reason and with the same safety: the
+     demotion boundary is pinned to the turn's seed, so every request of this
+     attempt demotes the same aged tool results, and addressing one is a
+     sha256 over its whole body. Built inside the per-request closure it would
+     be thrown away between the attempt's 62 to 83 requests, which is what it
+     was before. *)
+  let demotion_addresses = Keeper_model_input_demotion.create_address_memo () in
+  let store_failure_reported = ref false in
+  let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
+  let references_enabled = match ctx.input_policy with
+    | Keeper_input_policy.Small ->
+      reader_available
+      && (match ctx.turn_boundary with
+          | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom > 0
+          | Keeper_carried_front.Turn_boundary_unknown _ -> false)
+    | Keeper_input_policy.Wide -> false in
+  let demotion_base_path = if references_enabled then ctx.base_path else "" in
+  (* Core may deserialize a retained native checkpoint after dispatch. Bind
+     once to its first actual request, while closure eligibility still comes
+     exclusively from the pre-admission seed. Result resends never rebind it. *)
+  let argument_binding = ref Arguments_unbound in
+  let argument_protection_reported = ref false in
+  let completed_arguments_for messages =
+    match !argument_binding with
+    | Arguments_bound arguments -> arguments
+    | Arguments_unbound ->
+      let arguments =
+        if not references_enabled || String.equal ctx.base_path "" then None
+        else match ctx.argument_demotion_seed, ctx.turn_boundary with
+          | Some seed, Keeper_carried_front.Turn_boundary { end_atom } ->
+            (match offload_model_input_cpu (fun () ->
+               Keeper_model_input_demotion.bind_completed_arguments
+                 ~completed_before:end_atom ~seed
+                 ~replay_prefix:ctx.argument_replay_prefix messages) with
+             | Ok arguments -> Some arguments
+             | Error error ->
+               Log.Keeper.warn ~keeper_name:ctx.keeper_name
+                 "input policy kept original tool arguments: %s"
+                 (argument_binding_error_to_string error);
+               None)
+          | None, (Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _)
+          | Some _, Keeper_carried_front.Turn_boundary_unknown _ -> None
+      in
+      argument_binding := Arguments_bound arguments;
+      arguments
+  in
+  (* The current turn's results leave as markers only for a Keeper that can
+     open them again: the marker names a body [artifact_read] reads back. *)
+  let current_turn_demotion_base_path = if reader_available then ctx.base_path else "" in
+  Log.Keeper.info ~keeper_name:ctx.keeper_name
+    "input policy runtime=%s selected=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b body_externalization_enabled=%b"
+    ctx.runtime_id (Keeper_input_policy.to_string ctx.input_policy)
+    (Keeper_carried_front.turn_start_to_string ctx.turn_boundary) reader_available references_enabled;
+
+  (* Scoped to the attempt, written by the one fiber that drives it. The
+     closure below runs per provider request — 62 to 83 of them in one keeper
+     turn on the traces this window's own comment cites — and a keeper whose
+     carried range holds a malformed tag declines on every one of them until
+     the range moves past it. Narrating that per request is the shape this
+     codebase already had to undo once: [Reasoning_history_projection.observe]'s
+     comment records a WARN firing ~973x/day about routine normalisation
+     before it was demoted. *)
+  let decline_reported = ref false in
+  (* Once per attempt, not per request, for the same reason: where the range
+     started for the first request, and a range that passes the request-body
+     cap. Each is a fact an operator reads against the declaration; neither
+     changes what is sent. *)
+  let front_reported = ref false in
+  let outlived_reported = ref false in
+  (* The cold-start seed is read once per attempt and only when no ledger
+     answers; every response updates the working ledger even without usage. *)
+  let cold_seed = lazy (ctx.carried_front_seed ()) in
+  let to_wire = memoize_wire_message media_store in
+  fun messages ->
+    state.request_range := None;
+    (* Discovery may widen the Agent's tools between provider rounds. The
+       binding head must use this request's live, ordered tool surface. *)
+    let prefix_tools =
+      Keeper_agent_tool_surface.on_the_wire ~agent_cell ~built:ctx.tools
+      |> Agent_core.Tool_set.of_list |> Agent_core.Tool_set.to_list
+      |> fun tools ->
+      Agent_core.Base.Schema_observation.surface ~site:Request_surface
+        (fun () -> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools);
+      tools
+      |> List.map Agent_core.Tool.schema_to_json
+    in
+    let open Result.Syntax in
+    let* () = match (input_continuity ctx.request_input) with
+      | None -> Ok ()
+      | Some continuity -> offload_model_input_cpu (fun () -> validate_continuity ~messages continuity)
+    in
+    let completed_arguments = completed_arguments_for messages in
+    (* [messages] is the durable history, the checkpoint's messages, in which
+       the ledger, the seed and the forecast count atoms; the range is
+       composed in that vocabulary and the wire's projection runs afterwards
+       over the carried range alone ([request_view]). *)
+    let history_digest_at =
+      offload_model_input_cpu (fun () ->
+        Runtime_model_input_tail_window.atom_opening_digest messages)
+    in
+    (* A turn with no Librarian point still carries the seed: the ledger's
+       front, or the range the newest turn record joined to a response
+       (RFC keeper-context-window-in-tokens §13.4). Only an absorbed point
+       replaces it. A refusal of the range a seed opened holds the turn
+       boundary as the turn's front ([turn_boundary_resend_sequence]), which
+       [carried_front] reads here as it reads any front a refusal moved. *)
+    let front, dropped_ledger =
+      match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
+      | Some (Summarized _ | Absorbed _) -> None, None
+      | None | Some Without_snapshot -> carried_front
+        ~ledger:state.ledger
+        ~keeper_name:ctx.keeper_name
+        ~runtime_id:ctx.runtime_id
+        ~session_id:(ledger_session ctx)
+        ~digest_at:history_digest_at
+        ~after_refusal:(ctx.carried_front_after_refusal ())
+        ~cold:(fun () -> (Lazy.force cold_seed).Keeper_carried_front.seed)
+    in
+    Option.iter
+      (fun stale ->
+         match !(state.ledger) with
+         | Some observed ->
+           Log.Keeper.info
+             ~keeper_name:ctx.keeper_name
+             "model input working ledger replaced runtime=%s: the history this request \
+              composes from does not hold the working ledger; the observed table entry \
+              does working=%s observed=%s"
+             ctx.runtime_id
+             (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json stale))
+             (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json observed))
+         | None ->
+           Log.Keeper.info
+             ~keeper_name:ctx.keeper_name
+             "model input working ledger dropped runtime=%s: the history this request \
+              composes from does not open the ledger's front or newest atom with the \
+              message it recorded ledger=%s"
+             ctx.runtime_id
+             (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json stale)))
+      dropped_ledger;
+    (* A turn with a Librarian point starts past it only where the provider
+       accepted a later start on this history (RFC librarian-lifecycle
+       §4.10, rules 1 and 2): the turn boundary a size refusal moved this
+       turn to, else the newest response-observed turn record. Both are read
+       from the turn and from the file, never from the process's ledger, so
+       a restart and a lane's next candidate choose the same start. *)
+    let accepted =
+      match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
+      | Some (Summarized _ | Absorbed _) ->
+        (match ctx.carried_front_after_refusal () with
+         | Some _ as held -> held
+         | None -> (Lazy.force cold_seed).Keeper_carried_front.seed)
+      | None | Some Without_snapshot -> None
+    in
+    let current_turn_results = !(state.current_turn_results) in
+    let base_path =
+      match current_turn_results with
+      | Current_turn_verbatim -> demotion_base_path
+      | Current_turn_demoted _ -> current_turn_demotion_base_path
+    in
+    (* Completed-turn evidence, not attempt seed length, protects unfinished
+       resumed tool work. Capacity refusal does not move this boundary. *)
+    (* Zero when the policy demotes nothing ([demotion_base_path] empty, as on
+       Wide), so a demoted current turn does not take the earlier turns with
+       it: its range then starts at this turn. *)
+    let demote_before =
+      applied_demote_before ~base_path:demotion_base_path
+        ~demote_before:
+          (match ctx.turn_boundary with
+           | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom
+           | Keeper_carried_front.Turn_boundary_unknown _ -> 0)
+    in
+    let* view =
+      request_view
+        ~input_policy:ctx.input_policy ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+        ~tools:prefix_tools
+        ~provider_config
+        ~measure_message_bytes
+        ~front
+        ~accepted
+        ~history_digest_at
+        ~current_turn_results
+        ~base_path
+        ~demote_before
+        ~turn_boundary:ctx.turn_boundary
+        ~materialize:(fun ~pending messages ->
+          (* Blob materialization writes files, so it stays on the owning Eio
+             fiber rather than in the CPU domain pool. The store skips writing
+             an address this process already wrote, so on a long-lived keeper
+             the sha256 over every aged body was all this call did, and it
+             held this domain for one uninterrupted run of 0.7 to 1.6 seconds
+             per request (2026-09-16 trace). The attempt's memo answers every
+             request after the first; whatever is left goes to the pool.
+
+             A reverted body is larger than the marker it was measured as; the
+             range is a position, not a size, so the same atoms go out and the
+             provider counts them. *)
+          let outcome =
+            Keeper_model_input_demotion.materialize
+              ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
+              ~addresses:demotion_addresses
+              ~pending
+              messages
+          in
+          if outcome.Keeper_model_input_demotion.reverted > 0 && not !store_failure_reported then (
+            store_failure_reported := true;
+            Log.Keeper.warn ~keeper_name:ctx.keeper_name
+              "input policy kept original tool bodies after externalization failure: count=%d"
+              outcome.reverted);
+          outcome.Keeper_model_input_demotion.messages)
+        ~to_wire
+        messages
+      |> Result.map_error (fun error -> Agent_core.Error.Media error)
+    in
+    (* A failed store can change the actual prefix a newly produced reasoning
+       block binds to. Recheck each request and only narrow the frozen set. *)
+    argument_binding := Arguments_bound view.completed_arguments;
+    let completed_arguments = view.completed_arguments in
+    if view.argument_prefix_protected && not !argument_protection_reported then (
+      argument_protection_reported := true;
+      Log.Keeper.info ~keeper_name:ctx.keeper_name
+        "input policy kept tool argument prefix to preserve signed reasoning replay");
+    let composed = view.composed in
+    Keeper_carried_front.warn_if_origin_is_unknown_start
+      ~keeper_name:ctx.keeper_name composed.origin;
+    let history_atom_count = composed.history_atom_count in
+    (* Asked only after a refusal ([current_turn_demotion_sequence]). *)
+    state.current_turn_demotion :=
+      Some
+        (fun () ->
+           offload_model_input_cpu (fun () ->
+             let demoted =
+               compose_carried_model_input
+                 ~input_policy:ctx.input_policy ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+                 ~measure_message_bytes
+                 ~front
+                 ~accepted
+                 ~history_digest_at
+                 ~current_turn_results:
+                   (Current_turn_demoted { refused_atom_count = history_atom_count })
+                 ~base_path:current_turn_demotion_base_path
+                 ~demote_before
+                 ~turn_boundary:ctx.turn_boundary
+                 messages
+             in
+             current_turn_demotion ~refused:composed ~demoted));
+    let windowed =
+      match view.transmitted with
+      | Ok transmitted -> transmitted
+      | Error error ->
+        (* The backend runs this same projection over this same list and
+           refuses the request with its typed error, which the turn's failure
+           route reads; the carried range is handed over for that refusal,
+           and nothing is observed for a body that does not go out. A
+           malformed tag outside the carried range never reaches the
+           projection. *)
+        if not !decline_reported
+        then (
+          decline_reported := true;
+          Log.Keeper.warn
+            "%s: reasoning projection declined over the carried range; the \
+             backend refuses the request: %s"
+            ctx.keeper_name
+            (Agent_core.Llm_provider.Reasoning_history_projection
+             .error_to_string
+               error));
+        view.carried
+    in
+    if not !front_reported
+    then (
+      front_reported := true;
+      let transmitted_bytes =
+        offload_model_input_cpu (fun () ->
+          List.fold_left
+            (fun sum message -> sum + measure_message_bytes message)
+            0
+            view.carried)
+      in
+      emit_runtime_manifest ctx
+        ~status:(match view.transmitted with
+          | Ok _ -> "history_projection_prepared"
+          | Error _ -> "history_projection_declined")
+        ~decision:(`Assoc
+          [ "scope", `String "first_request_projection_in_provider_attempt_not_delivery"
+          ; "source_message_count", `Int (List.length messages)
+          ; "projected_message_count", `Int (List.length windowed)
+          ; "history_atom_count", `Int history_atom_count
+          ; "first_atom", `Int composed.projection.Runtime_model_input_tail_window.dropped_atoms
+          ; "origin", `String (Keeper_carried_front.origin_to_string composed.origin)
+          ; "projected_bytes", `Int transmitted_bytes
+          ; "reserved_bytes", `Int reserved_bytes
+          ; "input_policy", `String (Keeper_input_policy.to_string ctx.input_policy)
+          ; "current_turn_results", `String (current_turn_results_to_string current_turn_results)
+          ]) Keeper_runtime_manifest.History_projection_observed;
+      Log.Keeper.info
+        ~keeper_name:ctx.keeper_name
+        "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
+         transmitted_bytes=%d reserved_bytes=%d current_turn_results=%s"
+        ctx.runtime_id
+        (Keeper_carried_front.origin_to_string composed.origin)
+        composed.projection.Runtime_model_input_tail_window.dropped_atoms
+        (history_atom_count - composed.projection.Runtime_model_input_tail_window.dropped_atoms)
+        history_atom_count
+        transmitted_bytes
+        reserved_bytes
+        (current_turn_results_to_string current_turn_results);
+      (* The cold seed is read only when no ledger answered; when it was, the
+         records it could not decode and a refused turn-boundary store are
+         part of why the range started where it did. *)
+      if Lazy.is_val cold_seed
+      then
+        Keeper_carried_front.warn_seed_read_failures
+          ~keeper_name:ctx.keeper_name
+          ~runtime_id:ctx.runtime_id
+          (Lazy.force cold_seed));
+    (match composed.outlived_seed with
+     | Some (seed, dropped) when not !outlived_reported ->
+       outlived_reported := true;
+       Log.Keeper.warn
+         ~keeper_name:ctx.keeper_name
+         "model input carried range dropped its front runtime=%s seed=%s reason=%s \
+          history_atoms=%d: the history does not open that atom with the same message, \
+          and the request starts over"
+         ctx.runtime_id
+         (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed))
+         (Keeper_carried_front.dropped_front_to_string dropped)
+         history_atom_count
+     | Some _ | None -> ());
+    (match view.transmitted with
+     | Ok _ ->
+       Option.iter
+         (fun observe ->
+            Option.iter
+              (observe ~measurement:Turn_record.Wire_shape)
+              (Runtime_model_input_tail_window.observe
+                 ~digest_at:history_digest_at
+                 ~history_atom_count
+                 composed.projection))
+         ctx.on_model_input_window_observation
+     | Error _ -> ());
+    (* What this request carried, for the ledger the after-turn hook writes
+       once the provider reports its count, and for the front a refusal
+       moves: the carried atom range and the bytes of the per-request tail
+       (the pinned messages), so a difference between two requests can be
+       attributed to the atoms appended between them, and whether it carried
+       the turn context, whose count is not a sample of the history. Read
+       back from the carried list, in the durable vocabulary: the atoms in it
+       and [history_atom_count] are absolute on every path, and the preamble
+       is tail, not an atom, as the range itself treats it. *)
+    (let transmitted_atoms, tail_bytes, turn_context =
+       offload_model_input_cpu (fun () ->
+         let history, preamble =
+           List.partition
+             (fun message ->
+                not (Runtime_model_input_tail_window.is_synthetic_preamble message))
+             view.carried
+         in
+         let labelled, transmitted_atoms =
+           Runtime_model_input_tail_window.annotate history
+         in
+         let pinned_bytes =
+           List.fold_left
+             (fun sum (message, label) ->
+                match label with
+                | Runtime_model_input_tail_window.Pinned ->
+                  sum + measure_message_bytes message
+                | Runtime_model_input_tail_window.Atom _ -> sum)
+             0
+             labelled
+         in
+         let preamble_bytes =
+           List.fold_left
+             (fun sum message -> sum + measure_message_bytes message)
+             0
+             preamble
+         in
+         ( transmitted_atoms
+         , pinned_bytes + preamble_bytes
+         , List.exists Runtime_model_input_tail_window.is_extra_context history ))
+     in
+     let first_atom = history_atom_count - transmitted_atoms in
+     (* Both positions are read off the lookup over the history the range was
+        composed from, whose atom count [history_atom_count] is.
+        - (Some, Some): the range carried atoms [first_atom] to the newest.
+        - (None, None): the history has no atom; nothing was carried.
+        - (None, Some _): the saved working state covers every history atom,
+          so the request carries only pinned context and no raw atom.
+        - (Some _, None): cannot occur. A front index below the atom count
+          puts the newest index at or above it, and both are read from the
+          same lookup.
+        Every pair but the first records no position: the next observation
+        checks nothing against it and starts no block from it. *)
+     let ends =
+       match
+         history_digest_at first_atom, history_digest_at (history_atom_count - 1)
+       with
+       | Some front_digest, Some end_digest ->
+         Keeper_model_input_ledger.Carried_atoms { front_digest; end_digest }
+       | None, (Some _ | None) | Some _, None -> Keeper_model_input_ledger.No_atom_carried
+     in
+     state.last_request
+     := Some
+          { request =
+              { Keeper_model_input_ledger.prefix_digest
+              ; first_atom
+              ; atom_count = history_atom_count
+              ; ends
+              ; tail_bytes
+              ; turn_context
+              ; demote_before = view.composed.demote_before
+              }
+          ; digest_at = history_digest_at
+          ; origin = view.composed.origin
+          });
+    let result = match ctx.model_input_projection with
+      | None -> Ok windowed
+      | Some inner -> inner windowed in
+    let result=Result.map (Keeper_librarian_request_unread.attach ~role:Agent_core.Types.User
+      (Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread (input_continuity ctx.request_input))) result in
+    (match view.transmitted, result with
+     | Ok _, Ok projected ->
+       let changed = match ctx.model_input_projection with
+         | None -> false
+         | Some _ -> offload_model_input_cpu (fun () ->
+             not (List.equal Agent_core.Types.Message_value.equal windowed projected)) in
+       state.request_range := Some
+         { Keeper_continuity_request.origin = composed.origin
+         ; first_atom = composed.projection.Runtime_model_input_tail_window.dropped_atoms
+         ; total_atoms = history_atom_count
+         ; custom_projection_changed = changed
+         }
+     | Error _, (Ok _ | Error _) | Ok _, Error _ -> ());
+    let* projected = result in
+    on_resolved projected;
+    (* Only the request is resolved, after every projection: the carried
+       messages are already in the attempt's conversion memo from [view]. *)
+    resolve_carried ~to_wire projected
+    |> Result.map_error (fun error -> Agent_core.Error.Media error)
+;;
+
+let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (ctx : try_provider_ctx) candidate =
+  (* The dispatch-wide progress also protects retries. Acceptance needs a
+     narrower fact: this attempt wrote a tool-result checkpoint. Earlier
+     attempts and context-only saves do not authorize a quiet terminal. *)
+  let tool_result_saves_before = tool_result_save_count ctx.checkpoint_progress in
+  (* This cell belongs to this SDK invocation only. It is a witness for the
+     saved-tool empty-terminal normalization, never normal success authority.
+     A replay that emitted no new AfterTurn leaves it empty and stays failed. *)
+  let observed_provider_turn_ordinal = ref None in
+  let saved_provider_turn_ordinal = ref None in
+  let retained_results_projected = ref false in
+  let final_projected_messages = ref None in
+  let capture_provider_ordinal (config : Runtime_agent.config) =
+    let capture = { Agent_core.Hooks.empty with after_turn = Some (function
+      | Agent_core.Hooks.AfterTurn { turn; _ } ->
+        observed_provider_turn_ordinal := Some turn;
+        Agent_core.Hooks.Continue
+      | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
+      | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _
+      | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _
+      | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ ->
+        Agent_core.Hooks.Continue) } in
+    let hooks = match config.hooks with
+      | None -> capture
+      | Some outer -> Agent_core.Hooks.compose ~outer ~inner:capture in
+    { config with hooks = Some hooks }
+  in
+  let last_request = state.last_request in
+  (* Named so the trace attributes runs during the provider attempt (request
+     assembly, streaming, tool loop) to [turn:provider]. *)
+  Eio_guard.with_named_switch "turn:provider" @@ fun () ->
+  let resolved_lane =
+    match ctx.tools with
+    | [] -> "none"
+    | _ :: _ -> "inline"
+  in
+  emit_runtime_manifest ctx
+    ~status:"resolved"
+    ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
+    Keeper_runtime_manifest.Provider_lane_resolved;
+  let checkpoint_sink =
+    fun (snapshot : Agent_core.Agent.checkpoint_snapshot) ->
+      let assistant_saves_before = assistant_checkpoint_save_count ctx.checkpoint_progress in
+      let saved = observing_checkpoint_sink ctx.checkpoint_progress ctx.checkpoint_sink snapshot in
+      (match saved, snapshot.stage with
+       | Ok (), Agent_core.Agent.After_assistant_collected
+         when assistant_checkpoint_save_count ctx.checkpoint_progress > assistant_saves_before ->
+         (* Only the caller's classified Saved branch advances this witness.
+            A stale/no-op sink may also return Ok, but has no saved authority.
+            Pair the save in this exact callback with this SDK invocation's
+            actual AfterTurn ordinal; checkpoint counters are not ordinals. *)
+         saved_provider_turn_ordinal := !observed_provider_turn_ordinal
+       | (Ok () | Error _),
+         (Agent_core.Agent.After_input_wait_changed | After_tool_results_appended
+         | After_context_injection | After_rejected_response_dropped | After_assistant_collected) -> ());
+      saved
+  in
+  (* The attempt's bounded wait for the binding's admission permit, as Agent
+     Core writes it: on while the wait is on, then the instant it settled.
+     The stall watchdog reads it on each poll. *)
+  let permit_wait = Atomic.make Llm_provider.Provider_admission.Before_any_wait in
+  let config_result =
+    let base_config =
+      Runtime_candidate.default_config
+        ~media_store:ctx.media_store
+        ~name:ctx.name
+        ~system_prompt:ctx.system_prompt
+        ~tools:ctx.tools
+        candidate
+    in
+    (* The gate's pre_tool_use runs before whatever hooks the turn brought:
+       composed as [outer], so a call it holds never reaches them, and a call
+       it lets through is still theirs to decide on. *)
+    let hooks_with_gate =
+      match ctx.approval_gate with
+      | None -> ctx.hooks
+      | Some (gate : Keeper_tool_approval_gate.t) ->
+        let gate_hooks =
+          { Agent_core.Hooks.empty with pre_tool_use = Some (gate.pre_tool_use ~identity_tool_index:gate.identity_tool_index) }
+        in
+        Some
+          (match ctx.hooks with
+           | None -> gate_hooks
+           | Some hooks ->
+             Agent_core.Hooks.compose ~outer:gate_hooks ~inner:hooks)
+    in
+    (* Usage observation (RFC keeper-context-window-in-tokens): the
+       provider's inclusive prompt total for the request the composition just
+       built. The ledger records the request's carried range against the
+       count, one line per provider call, so the accepted range and tail
+       changes remain observations of the provider's actual input. Composed
+       outermost and always [Continue], so it neither delays nor decides anything the
+       turn's own hooks do. *)
+    let ledger_hooks =
+      { Agent_core.Hooks.empty with
+        after_turn =
+          Some
+            (function
+              | Agent_core.Hooks.AfterTurn { response; _ } ->
+                (match !last_request with
+                 | Some { request; digest_at; _ } ->
+                   (match request.Keeper_model_input_ledger.ends with
+                    | Keeper_model_input_ledger.Carried_atoms
+                        { front_digest; _ } ->
+                      Option.iter
+                        (fun observe ->
+                           observe
+                             { Turn_record.runtime_profile = ctx.runtime_id
+                             ; window =
+                                 { transmitted_atoms =
+                                     request.atom_count - request.first_atom
+                                 ; total_atoms = request.atom_count
+                                 ; measurement = Turn_record.Wire_shape
+                                 ; model_input_front = Model_input_front.At_atom front_digest
+                                 }
+                             })
+                        ctx.on_response_observed_model_input
+                    | Keeper_model_input_ledger.No_atom_carried ->
+                      (* The floor (#39013) is an answer: the response
+                         carried none of its history, so the scan must meet
+                         this record and drop it, not walk past it and
+                         resurrect an older front the floor made untenable.
+                         [Empty_history] with a past-end position is that
+                         floor seed; [for_history] drops it as
+                         [Front_atom_missing]. *)
+                      Option.iter
+                        (fun observe ->
+                           observe
+                             { Turn_record.runtime_profile = ctx.runtime_id
+                             ; window =
+                                 { transmitted_atoms = 0
+                                 ; total_atoms = request.atom_count
+                                 ; measurement = Turn_record.Wire_shape
+                                 ; model_input_front = Model_input_front.Empty_history
+                                 }
+                             })
+                        ctx.on_response_observed_model_input);
+                   let usage =
+                     Option.bind response.Agent_core.Types.usage
+                       (fun (u : Agent_core.Types.api_usage) ->
+                          Keeper_model_input_ledger.usage_of_counts
+                            ~input_tokens:u.input_tokens
+                            ~cache_read_input_tokens:u.cache_read_input_tokens)
+                   in
+                   let observation =
+                     Keeper_model_input_ledger.Table.observe
+                       ~keeper_name:ctx.keeper_name
+                       ~runtime_id:ctx.runtime_id
+                       ~session_id:(ledger_session ctx)
+                       ~digest_at
+                       ~request
+                       ~usage
+                   in
+                   state.ledger := Some observation.Keeper_model_input_ledger.ledger;
+                   let line =
+                     Yojson.Safe.to_string
+                       (Keeper_model_input_ledger.observation_to_json observation)
+                   in
+                   (* The routine step is one line per provider call, so it
+                      goes out at debug like the rest of this projection's
+                      per-request narration; the events that change what the
+                      ledger can attribute are rare and go out at info. *)
+                   (match observation.Keeper_model_input_ledger.event with
+                    | Keeper_model_input_ledger.Appended _
+                    | Keeper_model_input_ledger.Repeated ->
+                      Log.Keeper.debug
+                        ~keeper_name:ctx.keeper_name
+                        "model input ledger runtime=%s %s"
+                        ctx.runtime_id
+                        line
+                    | Keeper_model_input_ledger.Started
+                    | Keeper_model_input_ledger.Front_moved _
+                    | Keeper_model_input_ledger.Front_cut_through_block _
+                    | Keeper_model_input_ledger.Front_widened
+                    | Keeper_model_input_ledger.Prefix_changed
+                    | Keeper_model_input_ledger.History_reset ->
+                      Log.Keeper.info
+                        ~keeper_name:ctx.keeper_name
+                        "model input ledger runtime=%s %s"
+                        ctx.runtime_id
+                        line)
+                 | None -> ());
+                Agent_core.Hooks.Continue
+              | Agent_core.Hooks.BeforeTurn _
+              | Agent_core.Hooks.BeforeTurnParams _
+              | Agent_core.Hooks.PreToolUse _
+              | Agent_core.Hooks.PostToolUse _
+              | Agent_core.Hooks.PostToolUseFailure _
+              | Agent_core.Hooks.OnStop _
+              | Agent_core.Hooks.OnError _
+              | Agent_core.Hooks.OnToolError _ -> Agent_core.Hooks.Continue)
+      }
+    in
+    let hooks_with_gate =
+      Some
+        (match hooks_with_gate with
+         | None -> ledger_hooks
+         | Some hooks -> Agent_core.Hooks.compose ~outer:ledger_hooks ~inner:hooks)
+    in
+    (* Runtime/model configuration is authoritative; the run-level value only
+       fills an omitted provider temperature. *)
+    let temperature =
+      match base_config.temperature with
+      | Some _ as configured -> configured
+      | None -> ctx.temperature
+    in
+    Ok
+      { base_config with
+        (* AGENT_CORE boundary: the keeper's two stream floors are always set,
+           so the option AGENT_CORE reads is built here and nowhere else. *)
+        stream_idle_timeout_s = Some ctx.stream_idle_timeout_s
+          ; first_event_timeout_s = Some ctx.first_event_timeout_s
+          ; body_timeout_s = ctx.body_timeout_s
+          ; (* The wait for the binding's admission permit is time in which
+               this attempt makes no progress, so the no-progress threshold
+               is its bound too. Ended here it is a typed [Queue] timeout
+               with nothing sent and the same rotation; left to the attempt
+               watchdog it was "made no progress" with the queue invisible. *)
+            admission_timeout_s = Some ctx.provider_call_deadline_sec
+          ; permit_wait = Some permit_wait
+          ; temperature
+          ; hooks = hooks_with_gate
+          ; tool_approval =
+              Option.map
+                (fun (gate : Keeper_tool_approval_gate.t) -> gate.tool_approval)
+                ctx.approval_gate
+          ; description =
+              Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
+          ; runtime_id = Some ctx.runtime_id
+          ; execution_actor = (if String.trim ctx.keeper_name = "" then None else Some ctx.keeper_name)
+          ; transport = ctx.transport_resolved
+          ; checkpoint_sidecar = ctx.checkpoint_sidecar
+          ; session_id = (input_trace_id ctx.request_input)
+          ; cache_system_prompt = ctx.cache_system_prompt
+          ; checkpoint_sink = Some checkpoint_sink
+          ; context_injector = ctx.context_injector
+          ; context = ctx.context
+          ; enable_thinking = ctx.enable_thinking
+          ; preserve_thinking = ctx.preserve_thinking
+          ; event_bus = ctx.event_bus
+          ; initial_messages = ctx.initial_messages
+            (* AGENT_CORE's provider-specific serialization boundary reports
+               every request's exact body size; the canonical checkpoint's
+               bytes cannot stand in for it — they cover
+               [{system_prompt, messages}] and exclude tool schemas and every
+               provider-specific stream field. AGENT_CORE runs this observer
+               after those are injected, so the value is the exact byte count
+               that reaches the provider. Diagnostic only: AGENT_CORE reports a
+               raised callback as typed failure evidence and does not rewrite
+               the provider result. *)
+            (* Serialising the admitted body walks every message in the request,
+               on every provider request of the turn; on a live keeper that held
+               the main domain for 168-229 ms at a time (RFC
+               main-domain-scheduler-latency section 8.8). The pool runs it; the
+               closure reads immutable request values only. *)
+          ; serialization_executor =
+              Some { Agent_core.Agent.run = (fun f -> Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f) }
+          ; pre_dispatch_serialization_observer =
+              Some
+                (fun observation ->
+                   let range = !(state.request_range) in
+                   state.request_range := None;
+                   Option.iter (fun range ->
+                     let selection = match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
+                       | Some (Summarized { snapshot; _ }) ->
+                         Keeper_continuity_request.Summarized snapshot
+                       | Some (Absorbed { trace_id; end_atom; _ }) ->
+                         Keeper_continuity_request.Absorbed { trace_id; end_atom }
+                       | Some Without_snapshot -> Keeper_continuity_request.Without_snapshot
+                       | None -> Keeper_continuity_request.Not_applied in
+                     Keeper_continuity_request.record_best_effort
+                       ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread (input_continuity ctx.request_input))
+                       ~config:(Workspace.default_config ctx.base_path)
+                       ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
+                       ~selection ~range ~wire:observation) range;
+                   let input = match Option.map (fun (value : continuity) -> value.point) (input_continuity ctx.request_input) with
+                     | Some (Summarized {snapshot; _}) ->
+                       Keeper_continuity_observation.Summarized
+                         { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
+                           boundary_line = snapshot.end_boundary_line }
+                     | Some (Absorbed { trace_id; end_atom; _ }) ->
+                       Keeper_continuity_observation.Absorbed { trace_id; end_atom }
+                     | Some Without_snapshot -> Keeper_continuity_observation.Without_snapshot
+                     | None -> Keeper_continuity_observation.Not_applied in
+                   if Option.is_some (input_trace_id ctx.request_input) then
+                     Keeper_continuity_observation.record
+                     ~config:(Workspace.default_config ctx.base_path) ~keeper_name:ctx.keeper_name
+                     { prepared_at = Time_compat.now (); runtime_id = ctx.runtime_id; input;
+                       request_bytes = observation.Llm_provider.Request_wire_observer.body_bytes };
+                   Option.iter
+                     (fun observe ->
+                        observe
+                          ~runtime_id:ctx.runtime_id
+                          ~body_bytes:
+                            observation
+                              .Llm_provider.Request_wire_observer.body_bytes
+                          ~serialized:(Some observation)
+                          ~projected_messages:!final_projected_messages)
+                     ctx.on_request_wire_observation;
+                   Ok ())
+          ; raw_trace = ctx.raw_trace
+          ; trace_link = ctx.trace_link
+          ; (* An AGENT_CORE run releases the provider lease before the tools
+               it executes and takes it back for the next model turn, so the
+               attempt watchdog below measures each model turn from its own
+               resumption and never counts that tool time as provider
+               silence. A completion review has no registry progress to read;
+               on this runtime the lease is what bounds each of its model
+               turns. An official client runs its tools inside one provider
+               call, so its attempt has no such boundary. *)
+            yield_on_tool = true
+          }
+  in
+  (* The caller's cell when it has one, because the turn's tools captured it
+     and [Runtime_agent.run] fills it at agent creation -- before any of them
+     can execute. Not reset between attempts: a tool only runs inside an
+     attempt that already filled it, and the value this leaves behind is the
+     same one [checkpoint_after_attempt] wrote before. *)
+  let attempt_agent_ref : Agent_core.Agent.t option ref =
+    match ctx.agent_ref with
+    | Some cell -> cell
+    | None -> ref None
+  in
+  let agent_before_attempt = !attempt_agent_ref in
+  let config_result =
+    Result.bind config_result (fun config ->
+      let snapshot = match ctx.request_input with
+        | Completion_review -> Ok None
+        | Keeper_history _ ->
+          Keeper_client_tool_outbox.load ~base_path:ctx.base_path ~keeper_name:ctx.keeper_name
+          |> Result.map Option.some
+          |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
+      Result.map (fun snapshot -> config, snapshot) snapshot)
+  in
+  match config_result with
+  | Error err -> Error err, None, None
+  | Ok (config, retained_results) ->
+    (* Installed here rather than on the record above because the projection
+       needs the provider config that record is still producing: it measures
+       the history that config's serializer will carry, and asking a config
+       that does not exist yet would mean measuring something else. *)
+    let media_store = config.Runtime_agent.media_store in
+    let resolved_history = ref None in
+    let project = bounded_model_input_projection ctx ~state
+        ~on_resolved:(fun history -> resolved_history := Some history)
+        ~agent_cell:attempt_agent_ref ~media_store
+        ~provider_config:config.Runtime_agent.provider_cfg in
+    let retained_message = Option.bind retained_results Keeper_client_tool_outbox.context_message in
+    let retained_bytes = match retained_message with
+      | None -> 0
+      | Some message -> offload_model_input_cpu (fun () ->
+          let measure = Keeper_context_core.message_measurer () in
+          measure message) in
+    let config =
+      { config with
+        model_input_projection =
+          Some
+            (fun messages ->
+               final_projected_messages := None;
+               resolved_history := None;
+               let open Result.Syntax in
+               let* retained_wire =
+                 match retained_message with
+                 | None -> Ok None
+                 | Some message ->
+                   Agent_core.History.to_wire_message media_store message
+                   |> Result.map Option.some
+                   |> Result.map_error (fun error -> Agent_core.Error.Media error)
+               in
+               Result.map (fun messages ->
+               let messages = match retained_wire with
+               | None -> messages
+               | Some message ->
+                 retained_results_projected := true;
+                 (* This is mandatory per-request data, not another history
+                    atom. Keep the ledger's tail and attribution honest even
+                    when the caller supplied no custom projection. The bounded
+                    projection resets both observations on every request. *)
+                 state.last_request := Option.map (fun request ->
+                   {request with request={request.request with
+                     tail_bytes=request.request.tail_bytes + retained_bytes}}) !(state.last_request);
+                 state.request_range := Option.map (fun range ->
+                   {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
+                 List.filter (fun message -> not (Keeper_client_tool_outbox.is_wire_context_message message))
+                   messages @ [message] in
+               (* The recorded input is the history this request was resolved
+                  from, with the retained-result carrier where the wire puts
+                  it, so its media stay [Stored] references. *)
+               final_projected_messages := Option.map (fun history ->
+                 match retained_message with
+                 | None -> history
+                 | Some retained ->
+                   List.filter (fun message -> not (Keeper_client_tool_outbox.is_context_message message))
+                     history @ [retained]) !resolved_history;
+               messages) (project messages))
+      }
+    in
+    (* Explicit stream stall detection is handled by AGENT_CORE's
+       [stream_idle_timeout_s]. No separate liveness FSM for the common
+       case — provider stall is primarily an AGENT_CORE-level concern.
+       #27349/#28417: [ctx.provider_call_deadline_sec] is the MASC-side
+       no-progress ceiling on this whole attempt, armed below on every
+       attempt. No per-lane capacity gate — provider load is managed by
+       operator adjusting keeper count. *)
+    (* Tools and recovery judgment run after the main provider releases its
+       inference lease. Observe that boundary synchronously: direct chat can
+       lack the unified turn's asynchronous tool-count mirror. Its absence
+       must not turn a running image subcall into a main-provider timeout.
+       Delegated calls retain their own configured transport boundaries. *)
+    let lease_phase, on_yield, on_resume =
+      observe_provider_lease ~now:Time_compat.now
+        ~on_yield:ctx.on_yield ~on_resume:ctx.on_resume
+    in
+    let run_attempt_switch () =
+      Eio.Switch.run (fun attempt_sw ->
+        let run_fn () =
+          Eio_guard.check_if_ready ();
+          let module Native = Keeper_direct_native_continuation in
+          let boundary = match ctx.native_binding, ctx.on_request_evidence with
+            | Some binding, Some _ -> Some (Native.capture_request_boundary binding)
+            | None, _ | Some _, None -> None in
+          let input, checkpoint = match continuation_checkpoint with
+            | Some checkpoint -> Native.Continue_from_checkpoint, Some checkpoint
+            | None ->
+              let blocks = match ctx.goal_blocks with
+                | Some blocks -> blocks
+                | None -> [Agent_core.Types.Text ctx.goal] in
+              Native.New_input { blocks; metadata = ctx.goal_metadata }, ctx.agent_core_checkpoint in
+          let journal_required = Option.is_some ctx.on_request_evidence
+            || Option.is_some ctx.on_request_execution_ready in
+          let prepared, request_execution = match ctx.native_binding, journal_required with
+            | None, false -> Ok (config, checkpoint, input), None
+            | None, true ->
+              (match Keeper_request_execution.prepare
+                  ?on_scope_ready:(Option.map (fun ready ~call_id ->
+                    ready ~runtime_id:ctx.runtime_id ~execution:(Types_core.Native_execution {call_id})) ctx.on_request_execution_ready)
+                  ~base_path:ctx.base_path
+                  ~keeper_name:ctx.keeper_name ~config () with
+               | Ok (execution, config) -> Ok (config, checkpoint, input), Some (Ok execution)
+               | Error detail -> Error (Agent_core.Error.Internal detail), Some (Error detail))
+            | Some binding, _ ->
+              (Native.prepare ~binding ~runtime_id:ctx.runtime_id ~config
+                ~agent_core_checkpoint:checkpoint ~input ~agent_ref:attempt_agent_ref
+                ?retired_history_cut:ctx.native_retired_history_cut ()
+              |> Result.map (fun prepared ->
+                Native.config prepared, Native.prepared_checkpoint prepared,
+                Native.prepared_input prepared)
+              |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)), None in
+          let prepared = Result.map
+            (fun (config, checkpoint, input) ->
+              observed_provider_turn_ordinal := None;
+              saved_provider_turn_ordinal := None;
+              retained_results_projected := false;
+              capture_provider_ordinal config, checkpoint, input)
+            prepared in
+          let result = match prepared with
+          | Error _ as error -> error
+          | Ok (config, checkpoint, Native.Continue_from_checkpoint) ->
+            (match checkpoint with
+             | None -> Error (Agent_core.Error.Internal "native continuation has no exact checkpoint")
+             | Some checkpoint ->
+              Runtime_agent.continue_from_checkpoint
+                ~sw:attempt_sw
+                ~net:ctx.net
+                ~config
+                ~checkpoint
+                ?on_event:ctx.on_event
+                ~on_yield
+                ~on_resume
+                ~agent_ref:attempt_agent_ref
+                ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                ())
+          | Ok (config, checkpoint, Native.New_input { blocks; metadata }) ->
+              Runtime_agent.run_blocks
+                ~sw:attempt_sw
+                ~net:ctx.net
+                ~config
+                ?agent_core_checkpoint:checkpoint
+                ?on_event:ctx.on_event
+                ~on_yield
+                ~on_resume
+                ~agent_ref:attempt_agent_ref
+                ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                ~input_metadata:metadata
+                blocks
+
+          in
+          (match ctx.on_request_evidence, ctx.native_binding, request_execution with
+           | Some observe, Some binding, _ ->
+             let evidence = match boundary with
+               | Some (Ok boundary) -> Native.request_evidence binding ~boundary ~runtime_id:ctx.runtime_id
+               | Some (Error detail) -> Request_observation.Read_failed detail
+               | None -> Request_observation.Read_failed "native request boundary was not captured" in
+             observe evidence
+           | Some observe, None, Some (Ok execution) ->
+             observe (Keeper_request_execution.request_evidence execution)
+           | Some observe, None, Some (Error detail) ->
+             observe (Request_observation.Read_failed detail)
+           | None, _, _ | Some _, None, None -> ());
+          result
+        in
+        run_fn ())
+    in
+    (* #28417: the attempt races a stall watchdog through [Eio.Fiber.first],
+       which cancels whichever fiber loses. This replaces #27349's
+       [Eio.Time.with_timeout_exn] wrap because that primitive can only count
+       elapsed time, while the verdict now depends on the keeper's progress
+       signal — something only a polling fiber can observe.
+
+       Cancellation semantics are unchanged: the attempt's own
+       [Eio.Switch.run] still unwinds when it loses the race, and
+       [Eio.Cancel.Cancelled] raised by an OUTER cancellation (switch
+       shutdown, etc.) still propagates unmodified because neither branch
+       catches it. AGENT_CORE's internal
+       [stream_idle_timeout_s]/[body_timeout_s] firing remains a typed RETURN
+       VALUE inside [Runtime_agent.run]'s result rather than an exception, so
+       it still cannot be misclassified as this deadline firing. *)
+    let threshold_sec = ctx.provider_call_deadline_sec in
+    let result =
+      match Eio_context.get_clock_opt () with
+      | Some clock ->
+        (* A queued person's message does not cancel an admitted provider
+           attempt. The turn may yield after a settled tool result; its
+           configured no-progress bounds and explicit shutdown still apply. *)
+        (* Same clock as [last_progress_at] (see [await_attempt_stall]): the
+           elapsed fallback and the progress comparison must not read two
+           different clocks. *)
+        let attempt_started_at = Time_compat.now () in
+        let attempt_fiber () = `Attempt_finished (run_attempt_switch ()) in
+        let stall_fiber () =
+          await_attempt_stall
+            ~clock
+            ~threshold_sec
+            ~attempt_started_at
+            ~lease_phase
+            ~probe:ctx.provider_progress_probe
+            ~permit_wait;
+          `Attempt_stalled
+        in
+        (match
+           Eio.Fiber.first
+             ~combine:(fun a b ->
+               (* Keep a completed answer when the stall watchdog and the
+                  provider resolve in the same scheduler pass. *)
+               match a, b with
+               | `Attempt_finished _, _ -> a
+               | _, `Attempt_finished _ -> b
+               | `Attempt_stalled, `Attempt_stalled -> a)
+             attempt_fiber stall_fiber
+         with
+         | `Attempt_finished attempt_result -> attempt_result
+         | `Attempt_stalled ->
+           Error
+             (Agent_core.Error.Api
+                (Llm_provider.Retry.Timeout
+                   { message =
+                       Printf.sprintf
+                         "provider call made no progress for %.0fs \
+                          (runtime_id=%s)"
+                         threshold_sec
+                         ctx.runtime_id
+                       (* [Wall_clock] is kept deliberately: the existing
+                          classifiers
+                          ([Runtime_attempt_fsm.should_try_next],
+                          [Keeper_provider_runtime_boundary.is_provider_timeout_error])
+                          already route this phase to declared-lane candidate
+                          rotation, and this is still a wall-clock-derived
+                          verdict. Introducing a new phase would change retry
+                          policy, which #28417 does not intend to touch. *)
+                   ; phase = Some Llm_provider.Http_client.Wall_clock
+                   })))
+      | None ->
+        (* A process with no clock in [Eio_context] cannot count the
+           threshold down. It could not run the attempt either:
+           [Runtime_agent.build] reads the same [Eio_context.get_clock_opt]
+           and refuses a stream-idle budget it has no clock to arm, and the
+           driver always declares one. This arm refuses that condition one
+           layer earlier, in the name of the deadline it could not set; the
+           two read one clock source, so neither can run what the other
+           refuses. The server installs its clock at boot before any turn,
+           so a turn that gets here is a wiring fault; typed, and nothing
+           was sent. *)
+        Error
+          (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig
+                { field = "provider_call_deadline_sec"
+                ; detail =
+                    Printf.sprintf
+                      "provider call attempt refused: this process has no \
+                       clock to bound the %.0fs no-progress threshold with; \
+                       nothing was sent (runtime_id=%s)"
+                      threshold_sec
+                      ctx.runtime_id
+                }))
+    in
+    let checkpoint_after =
+      Keeper_turn_driver_helpers.checkpoint_after_attempt
+        ?agent_before_attempt ?session_id:(input_trace_id ctx.request_input) ?working_context:ctx.checkpoint_sidecar
+        ?agent_ref:ctx.agent_ref
+        !attempt_agent_ref
+    in
+    (* A replay may complete from an already-terminal checkpoint without
+       sending any new request. An error can also be normalized below from a
+       saved effect. Neither proves that this receipt snapshot was consumed. *)
+    let completed_received_result = match result with
+      | Ok ({ Runtime_agent.stop_reason = Completed {provider_turn_ordinal}; _ }) ->
+        !retained_results_projected
+        && !observed_provider_turn_ordinal = Some provider_turn_ordinal
+        && !saved_provider_turn_ordinal = Some provider_turn_ordinal
+      | Ok {Runtime_agent.stop_reason=(Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+          | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ | InputRequired _);_}
+      | Error _ -> false in
+    let execution_observation =
+      match result with
+      | Ok (run_result : Runtime_agent.run_result) -> run_result.runtime_observation
+      | Error _ -> None
+    in
+    let result =
+      match result with
+      | Ok run_result ->
+        (match
+           apply_accept
+             ~runtime_id:ctx.error_runtime_id
+             ~accept:ctx.accept
+             run_result
+         with
+         | Ok _ as accepted -> accepted
+         | Error _ as rejected ->
+           (* Keep the reasoning observation for a rejected thinking-only
+              response. This records evidence after the provider finished;
+              it writes nothing for other response shapes. *)
+           Keeper_wire_capture.capture_rejected_reasoning
+             ~base_path:ctx.base_path
+             ~keeper_name:ctx.keeper_name
+             ?turn_id:
+               (Option.bind ctx.runtime_manifest_context
+                  (fun (context : Keeper_runtime_manifest.turn_context) ->
+                     context.manifest_keeper_turn_id))
+             ?trace_id:(input_trace_id ctx.request_input)
+             ~runtime_id:ctx.runtime_id
+             run_result.response;
+           rejected)
+      | Error _ as err ->
+        complete_saved_tool_terminal
+          ~observed_provider_turn_ordinal:!observed_provider_turn_ordinal
+          ~tool_results_saved_in_attempt:
+            (tool_result_save_count ctx.checkpoint_progress > tool_result_saves_before)
+          ~checkpoint:checkpoint_after
+          err
+    in
+    let observation =
+      match execution_observation, result with
+      | Some observation, result ->
+        let acceptance = match result with
+          | Ok _ -> Runtime_observation.Accepted
+          | Error error -> Runtime_observation.Rejected (Agent_core.Error.to_string error) in
+        Some (Runtime_observation.record_host_acceptance
+          ~keeper_name:ctx.keeper_name
+          ?turn_id:(Option.bind ctx.runtime_manifest_context (fun context ->
+            context.Keeper_runtime_manifest.manifest_keeper_turn_id))
+          observation acceptance)
+      | None, Ok run_result -> run_result.Runtime_agent.runtime_observation
+      | None, Error err ->
+        Option.map (fun _emit ->
+          Runtime_observation.observe_uncaptured_failure
+            ~runtime_id:ctx.runtime_id ~keeper_name:ctx.keeper_name
+            ?turn_id:(Option.bind ctx.runtime_manifest_context (fun context ->
+              context.Keeper_runtime_manifest.manifest_keeper_turn_id))
+            ~error:(Agent_core.Error.to_string err) ())
+          ctx.on_runtime_observation
+    in
+    Option.iter (fun emit -> Option.iter emit observation) ctx.on_runtime_observation;
+    let result = Result.map (fun (run_result : Runtime_agent.run_result) ->
+      { run_result with runtime_observation = observation }) result in
+    let result = Result.bind result (fun run_result ->
+      match retained_results with
+      | Some snapshot when completed_received_result ->
+        Keeper_client_tool_outbox.settle_after_turn snapshot ~stop_reason:run_result.Runtime_agent.stop_reason
+        |> Result.map (fun () -> run_result)
+        |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
+      | Some _ | None -> Ok run_result) in
+    result, checkpoint_after, None
+;;
+
+(* #27320: same-runtime retry stage for a typed provider context overflow on
+   the official-client lanes ([Keeper_claude_code_runtime],
+   [Keeper_codex_runtime]). Their first request carries the whole windowed
+   history, or the start-prompt ceiling a Muse or Antigravity runtime derives
+   from its declared window ([Runtime_instance.prompt_capacity_bytes]).
+   A ContextOverflow there means that view is more than the client carries,
+   not that the request was malformed: a smaller view of the SAME
+   conversation can still answer the same turn, so the lane retries the same
+   candidate rather than rotating runtimes immediately. The Agent Core lane
+   answers the same refusal by moving the carried front instead
+   ([run_try_provider_with_history_recovery]). *)
+(* Halving needs no token/byte conversion constant: the provider is the
+   oracle for whether a view fits. Each retry is a content-free mechanical
+   convergence step consulted only after a typed overflow, not a size
+   estimate. *)
+let context_overflow_shrink_divisor = 2
+
+let default_context_overflow_shrink_capacity ~capacity =
+  capacity / context_overflow_shrink_divisor
+;;
+
+(* The refusals that say the request outgrew what carries it: the provider's
+   context overflow and the provider's refusal of the request body.
+   Each is answered by moving the carried front, never by rotating first: a
+   shorter range of the SAME conversation can still answer the same turn.
+   Enumerated so a new variant forces a decision here instead of a silent
+   [false]. *)
+let is_size_refusal = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) -> true
+  (* A refusal whose cause agent core does not model names no size. Tool
+     schema errors, unsupported parameters and unreadable images arrive
+     here too, and a shorter range answers none of them: every retry would
+     be another billed request, and the one that passed would hold its cut
+     front for every later turn although nothing was too large
+     (Retry.invalid_request_reason documents the same contract). The
+     refusal stays in hand for the declared-lane walk, which may ask
+     another candidate with the same range. A provider whose size refusal
+     is prose only reaches here as well: reading the sentence would be a
+     string classifier, so its size needs a typed reason at the parse
+     boundary before this ladder answers it. *)
+  | Agent_core.Error.Api
+      ( InvalidRequest
+          { reason =
+              ( Unknown_invalid_request
+              | Json_parse_error
+              | Attempt_rejected
+              | Refusal_body_not_received )
+          ; _
+          }
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
+
+(* The shrink-retry policy is expressed over an injected [attempt] callback
+   so it stays testable without an Eio-backed provider: the official-client
+   lanes wire their real attempt for production; tests can inject a canned
+   Ok/Error sequence to verify the halving sequence, the walk to the floor,
+   and the same-run-retry-authority gate on their own.
+
+   Classifies with [is_size_refusal] above -- the context overflow and the
+   provider's refusal of the request body, enumerated exhaustively -- rather
+   than [Keeper_error_classify.is_context_overflow]: the latter depends on
+   [Keeper_turn_driver], which depends on this module (it calls
+   [run_try_provider]), so reaching it here would close a module cycle.
+   [same_run_retry_authorized] mirrors the exact same-run authority gate
+   [Keeper_turn_driver]'s declared-lane walk applies before rotating
+   candidates ([same_run_retry_allowed] / [checkpoint_progress]): a
+   shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
+   mutated agent state at a durable checkpoint stage. *)
+let context_overflow_shrink_sequence
+      ?(shrink_capacity = fun ~capacity:_ ~default_capacity ->
+        default_capacity)
+      ?(final_shrink_capacity = fun ~capacity:_ -> None)
+      ?(on_memory_capacity_refusal : Keeper_memory_delivery_reprojection.t =
+          fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged)
+      ?(on_memory_retry = fun () -> ())
+      ~starting_capacity
+      ~same_run_retry_authorized
+      ~shrink_admits_history
+      ~on_shrink_retry
+      ~(attempt : capacity:int -> ('ok, Agent_core.Error.t) result)
+      ()
+  : ('ok, Agent_core.Error.t) result
+  =
+  let rec go ~capacity ~shrink_attempt =
+    match attempt ~capacity with
+    | Ok _ as ok -> ok
+    | Error error as failed ->
+      if is_size_refusal error && same_run_retry_authorized ()
+      then (
+        match on_memory_capacity_refusal ~refusal:error with
+        | Error _ -> failed
+        | Ok Keeper_memory_delivery_reprojection.Reprojected ->
+          on_memory_retry ();
+          go ~capacity ~shrink_attempt
+        | Ok Keeper_memory_delivery_reprojection.Unchanged ->
+        let default_capacity =
+          default_context_overflow_shrink_capacity ~capacity
+        in
+        let ordinary_capacity =
+          shrink_capacity ~capacity ~default_capacity
+        in
+        (* The walk carries no attempt count: it ends where no strictly
+           smaller view exists. A lane that has measured its floor names it
+           through [final_shrink_capacity]; once the ordinary target would
+           reach or pass that floor, the floor itself is the next attempt,
+           and its refusal is the floor verdict. Measured 2026-09-05 on
+           keeper geek-scout: a 4.1 MB history against a 128k-token model was
+           refused at 1.9 MB, 507 KB and 498 KB and then committed as
+           [Bootstrap_floor_exceeded] with 79 messages still attached; the
+           floor had never been asked, and the keeper sat on an operator
+           recovery it could have walked out of in two more attempts. *)
+        let shrunk_capacity =
+          match final_shrink_capacity ~capacity with
+          | Some floor_capacity
+            when ordinary_capacity <= floor_capacity ->
+            floor_capacity
+          | Some _ | None -> ordinary_capacity
+        in
+        (* Halving is a bet that the same request fits once less history
+           rides along. The bet is void when the part that cannot be cut --
+           tool schemas, system prompt, and the unmeasured-field allowance --
+           already fills the smaller capacity: every atom would be dropped and
+           the window would still refuse, one size lower. #31684 measured that
+           on a live keeper: a 469638-byte reserve against capacities of
+           131072 then 65536, three refusals per turn, none of which could
+           have succeeded. Returning the original failure here hands the turn
+           to the declared-lane walk. *)
+        if shrunk_capacity >= capacity
+           || not (shrink_admits_history ~capacity:shrunk_capacity)
+        then failed
+        else (
+          on_shrink_retry
+            ~shrink_attempt:(shrink_attempt + 1)
+            ~previous_capacity:capacity
+            ~capacity:shrunk_capacity;
+          go
+            ~capacity:shrunk_capacity
+            ~shrink_attempt:(shrink_attempt + 1)))
+      else failed
+  in
+  go ~capacity:starting_capacity ~shrink_attempt:0
+;;
+
+(* The refusals the turn boundary resend answers (RFC librarian-lifecycle
+   §4.10, rule 1). A typed size refusal, and also a refusal whose reason
+   agent core does not model: every live size refusal measured so far
+   arrives that way -- a 400 whose only size signal is its sentence, with
+   no typed code (RFC librarian-lifecycle §4.10 lists the measured wires) --
+   and reading the sentence
+   would be a string classifier. [is_size_refusal] names only the two typed
+   size refusals (#38286); this check keeps the third.
+   - A refusal that was not about size draws the same refusal from the
+     boundary. The held front is then given back ([turn_boundary_resend_sequence]),
+     so a later candidate that the declared-lane walk asks opens on the
+     original range and no accepted start at the boundary is recorded.
+   - A refusal that was about size leaves a gap the Librarian still reads.
+     Once it reaches the accepted start the request starts at its point
+     again (rule 5), so no context is lost for good.
+   - The cost: one more request for each 400 whose reason is unknown.
+   Enumerated so a new variant forces a decision here. *)
+let boundary_resend_on = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest
+         { reason = (Request_body_refused_by_provider _ | Unknown_invalid_request); _ }) ->
+    true
+  | Agent_core.Error.Api
+      ( InvalidRequest
+          { reason = (Json_parse_error | Attempt_rejected | Refusal_body_not_received); _ }
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
+
+(* The lane's answer to a size refusal of a range that opened before this
+   turn's boundary (RFC keeper-context-window-in-tokens §13.4; RFC
+   librarian-lifecycle §4.10, rule 1). When the provider refuses such a range
+   -- one a seed opened, or one opened at a Librarian point or at the accepted
+   start past it -- with a refusal [boundary_resend_on] names, and the turn
+   boundary lies after that range's
+   first atom, the boundary is held as the turn's front and the same
+   candidate is asked once more. The front belongs to the turn (§10.4): a
+   later candidate or lane opens there instead of on the refused range. An
+   accepted request is what the turn record keeps, so the next turn starts
+   from that boundary until the range grows back through responses or, with
+   a Librarian point, the Librarian reads past it. A refused boundary
+   request, a refusal of a range that opened at or after the boundary, and
+   every other error end the sequence with the error in hand. The range is
+   never halved on this path.
+
+   The front stays held only when the boundary request is accepted or is
+   refused for a typed size ([is_size_refusal]). A boundary request refused
+   for any other reason says the boundary did not answer the refusal, so
+   the front held before it comes back: without that, the later candidate
+   the walk asks opens at the boundary, its success records that boundary as
+   the accepted start, and every later turn starts there -- context cut for
+   a refusal that was never about size. *)
+let turn_boundary_resend_sequence
+      ~same_run_retry_authorized
+      ~(refused_range : unit -> (Keeper_carried_front.origin * int) option)
+      ~(turn_start_front : unit -> Keeper_carried_front.seed option)
+      ~(held_front : unit -> Keeper_carried_front.seed option)
+      ~(restore_front : Keeper_carried_front.seed option -> unit)
+      ~(hold_front : Keeper_carried_front.seed -> unit)
+      ~(on_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
+      ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
+      ()
+  : ('ok, Agent_core.Error.t) result
+  =
+  match attempt () with
+  | Ok _ as ok -> ok
+  | Error error as failed ->
+    (match refused_range () with
+     | Some
+         ( ( Keeper_carried_front.Carried _
+           | Keeper_carried_front.Librarian_snapshot _
+           | Keeper_carried_front.Librarian_progress _
+           | Keeper_carried_front.Past_librarian_point _ )
+         , refused_first_atom )
+       when boundary_resend_on error && same_run_retry_authorized () ->
+       (match turn_start_front () with
+        | Some (front : Keeper_carried_front.seed)
+          when front.first_atom > refused_first_atom ->
+          let before = held_front () in
+          hold_front front;
+          on_turn_start error front;
+          (match attempt () with
+           | Ok _ as ok -> ok
+           | Error resent as refused ->
+             if not (is_size_refusal resent) then restore_front before;
+             refused)
+        | Some (_ : Keeper_carried_front.seed) | None -> failed)
+     | Some
+         ( ( Keeper_carried_front.Carried _
+           | Keeper_carried_front.Librarian_snapshot _
+           | Keeper_carried_front.Librarian_progress _
+           | Keeper_carried_front.Past_librarian_point _
+           | Keeper_carried_front.Turn_start _
+           | Keeper_carried_front.Turn_start_unknown _ )
+         , _ )
+     | None -> failed)
+;;
+
+(* #28845's step, the last answer to a size refusal on every continuity
+   (RFC keeper-context-window-in-tokens §10.4, §13.9). When [first] -- the
+   lane's own answer, which on a turn with an absorbed point is one attempt --
+   ends with a refusal [is_size_refusal] names, [same_run_retry_authorized]
+   holds, and [demotable] names the refused request's atom count because
+   demoting this turn's tool results in those atoms would carry fewer bytes,
+   [demote] makes the compositions demote them and [resend] runs once on the
+   same candidate; its result is returned as it is. The range is not
+   narrowed. Nothing to demote, or any other failure, returns the failure at
+   once. A failed turn writes no boundary line, so without this step the next
+   turn composes the same range and the same results and is refused again. *)
+let current_turn_demotion_sequence
+      ~same_run_retry_authorized
+      ~(demotable : unit -> int option)
+      ~(demote : Agent_core.Error.t -> refused_atom_count:int -> unit)
+      ~(first : unit -> ('ok, Agent_core.Error.t) result)
+      ~(resend : unit -> ('ok, Agent_core.Error.t) result)
+      ()
+  : ('ok, Agent_core.Error.t) result
+  =
+  match first () with
+  | Ok _ as ok -> ok
+  | Error error as failed ->
+    if is_size_refusal error && same_run_retry_authorized ()
+    then (
+      match demotable () with
+      | Some refused_atom_count ->
+        demote error ~refused_atom_count;
+        resend ()
+      | None -> failed)
+    else failed
+;;
+
+let native_retry_allowed (ctx : try_provider_ctx) =
+  match ctx.native_binding with
+  | None -> true
+  | Some binding ->
+    Keeper_direct_native_continuation.binding_effect_observation ~binding
+    |> Keeper_provider_attempt_effect.allows_same_turn_retry
+;;
+
+let memory_capacity_retry_sequence ~same_run_retry_authorized
+    ~on_memory_capacity_refusal ~on_projection_failure ~attempt () =
+  let rec go () = match attempt () with
+    | Ok _ as result -> result
+    | Error error as failed ->
+      if not (is_size_refusal error && same_run_retry_authorized ()) then failed
+      else match on_memory_capacity_refusal ~refusal:error with
+        | Error _ -> on_projection_failure (); failed
+        | Ok Keeper_memory_delivery_reprojection.Unchanged -> failed
+        | Ok Reprojected -> go () in
+  go ()
+;;
+
+let run_try_provider_with_history_recovery
+      ?(on_memory_capacity_refusal = fun ~refusal:_ ->
+        Ok Keeper_memory_delivery_reprojection.Unchanged)
+      ?continuation_checkpoint
+      (ctx : try_provider_ctx)
+      candidate
+  =
+  let state = new_attempt_state ctx in
+  match ctx.request_input with
+  | Completion_review ->
+    run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
+  | Keeper_history { continuity; _ } ->
+  let checkpoint_after = ref None in
+  let success_sample = ref None in
+  let attempt_once () =
+    let attempt_result, attempt_checkpoint_after, attempt_success_sample =
+      run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
+    in
+    checkpoint_after := attempt_checkpoint_after;
+    success_sample := attempt_success_sample;
+    attempt_result
+  in
+  let projection_failed = ref false in
+  let same_run_retry_authorized () =
+    not !projection_failed
+    && same_run_retry_allowed ctx.checkpoint_progress && native_retry_allowed ctx in
+  let attempt () = memory_capacity_retry_sequence
+    ~same_run_retry_authorized ~on_memory_capacity_refusal
+    ~on_projection_failure:(fun () -> projection_failed := true)
+    ~attempt:attempt_once () in
+  (* The lane's own answer to a size refusal, which depends on where the
+     range started; what is left after it is the current turn's demotion. *)
+  let boundary_resend ?(on_turn_start_extra = fun (_ : Keeper_carried_front.seed) -> ()) ~source () =
+    turn_boundary_resend_sequence
+      ~same_run_retry_authorized
+      ~refused_range:(fun () ->
+        Option.map
+          (fun (sent : sent_request) ->
+             sent.origin, sent.request.Keeper_model_input_ledger.first_atom)
+          !(state.last_request))
+      ~turn_start_front:(fun () ->
+        Option.bind !(state.last_request) (fun (sent : sent_request) ->
+          let atom_count = sent.request.Keeper_model_input_ledger.atom_count in
+          let first_atom =
+            match ctx.turn_boundary with
+            | Keeper_carried_front.Turn_boundary { end_atom } ->
+              Keeper_carried_front.clamp ~atom_count end_atom
+            | Keeper_carried_front.Turn_boundary_unknown _ ->
+              Keeper_carried_front.newest_atom ~atom_count
+          in
+          Option.map
+            (fun front_digest ->
+               { Keeper_carried_front.first_atom; front = Model_input_front.At_atom front_digest; source })
+            (sent.digest_at first_atom)))
+      ~held_front:ctx.carried_front_after_refusal
+      ~restore_front:ctx.restore_carried_front
+      ~hold_front:ctx.hold_carried_front
+      ~on_turn_start:(fun error front ->
+        on_turn_start_extra front;
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input carried range refused runtime=%s: the turn's front moves to \
+           the turn boundary and the same candidate is asked again front=%s error=%s"
+          ctx.runtime_id
+          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
+          (Agent_core.Error.to_string error))
+      ~attempt
+      ()
+  in
+  let range_answer () =
+    match continuity.point with
+    | Summarized _ | Absorbed _ ->
+      boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal ()
+    | Without_snapshot ->
+      boundary_resend
+        ~on_turn_start_extra:(fun (_ : Keeper_carried_front.seed) ->
+          (* The refused seed gives way to the turn start; an unknown one puts
+             the front on the newest atom alone for the rest of the turn. *)
+          match ctx.turn_boundary with
+          | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+            Keeper_carried_front.warn_range_opens_on_newest_atom
+              ~keeper_name:ctx.keeper_name ~reason
+          | Keeper_carried_front.Turn_boundary _ -> ())
+        ~source:Keeper_carried_front.Turn_start_after_seed_refusal
+        ()
+  in
+  let result =
+    current_turn_demotion_sequence
+      ~same_run_retry_authorized
+      ~demotable:(fun () ->
+        Option.bind !(state.current_turn_demotion) (fun demotion -> demotion ()))
+      ~demote:(fun error ~refused_atom_count ->
+        let step = Current_turn_demoted { refused_atom_count } in
+        state.current_turn_results := step;
+        let decision =
+          [ "kind", `String "demoted_current_turn"
+          ; "refused_atom_count", `Int refused_atom_count
+          ]
+        in
+        emit_carried_range_retry_manifest ctx ~retry:1 decision;
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input current turn demoted runtime=%s: the refused request's tool \
+           results leave as markers and the same candidate is asked once more %s error=%s"
+          ctx.runtime_id
+          (Yojson.Safe.to_string (`Assoc decision))
+          (Agent_core.Error.to_string error))
+      ~first:range_answer
+      ~resend:attempt
+      ()
+  in
+  result, !checkpoint_after, !success_sample
+;;
+
+let run_try_provider ?continuation_checkpoint ctx candidate =
+  run_try_provider_attempt ?continuation_checkpoint ~state:(new_attempt_state ctx) ctx candidate
+;;
+
+let checkpoint_before_incomplete_response (checkpoint : Agent_core.Checkpoint.t) =
+  match List.rev checkpoint.messages with
+  | ({ Agent_core.Types.role = Agent_core.Types.Assistant; _ } :
+      Agent_core.Types.message)
+    :: earlier ->
+    Some { checkpoint with messages = List.rev earlier }
+  | ({ role =
+         ( Agent_core.Types.User
+         | Agent_core.Types.System
+         | Agent_core.Types.Tool )
+       ; _
+       } : Agent_core.Types.message)
+    :: _
+  | [] ->
+    None
+;;
+
+(* Every no-progress rejection the provider stopped at [MaxTokens] cuts the
+   checkpoint before the incomplete response. Whether that cut is followed by a
+   continuation attempt is a separate question -- see
+   [run_try_provider_with_truncation_recovery]. The retry kind is read
+   afterwards, by the lane, to decide whether a failed or unreachable
+   continuation rotates (no deliverable content) or ends the lane (partial
+   content). *)
+let max_tokens_truncation_error error =
+  match Keeper_internal_error.classify_masc_internal_error error with
+  | Some (Keeper_internal_error.Accept_rejected { reason_kind; stop_reason; _ }) ->
+    reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+    && stop_reason = Some Agent_core.Types.MaxTokens
+  | Some
+      ( Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Official_client_recovery_required _
+      | Keeper_internal_error.Provider_attempt_effect_fenced _
+      | Keeper_internal_error.Tool_correction_lost _
+      | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Runtime_connection_closed _
+      | Keeper_internal_error.Receipt_persistence_failed _
+      | Keeper_internal_error.Gate_replay_repair_required _ )
+  | None ->
+    false
+;;
+
+let thinking_was_enabled = function
+  | Some false -> false
+  | Some true | None -> true
+;;
+
+(* What a max-tokens rejection owes the checkpoint. Two things were decided by
+   one condition here, and only one of them is about thinking.
+
+   Turning thinking off is the remedy for a budget spent thinking, so it is
+   worth a second attempt only when thinking was on and this candidate's wire
+   can be told to stop. The second half is not rhetorical: some rows declare a
+   thinking control that has no off state, and a categorical effort row whose
+   ladder omits the off value cannot spell the disable at all. Which surfaces
+   those are is catalog data, recorded in agent_core's
+   docs/design/provider-reasoning-dialects.md; the decision here reads the
+   typed answer. Attempting the retry on such a row spends the turn on a
+   request refused before dispatch, and on a lane with one candidate there is
+   nothing to rotate to (#36972).
+   Dropping the rejected response is owed either way: accept judged it
+   unusable, and a checkpoint that keeps it feeds it back as input on every
+   later turn.
+
+   Measured on a live keeper, 2026-09-03, with thinking off throughout: the model
+   collapsed into one repeated word, accept rejected it at max_tokens, and
+   message_assistant_text climbed 136 KB -> 308 KB over twelve turns, stepping
+   30-40 KB on each collapse -- the size of the rejected text. Larger input
+   makes the next collapse likelier, so the refused response was financing its
+   own repeat.
+
+   Decided without running anything, so the decision is checkable on its own. *)
+type truncation_recovery =
+  | Recovery_not_applicable
+  | Retry_without_thinking of Agent_core.Checkpoint.t
+  | Drop_rejected_response of Agent_core.Checkpoint.t
+
+let truncation_recovery ~enable_thinking ~thinking_can_be_disabled ~result ~checkpoint =
+  match result, checkpoint with
+  | Error error, Some checkpoint when max_tokens_truncation_error error -> (
+    match checkpoint_before_incomplete_response checkpoint with
+    | None -> Recovery_not_applicable
+    | Some cut ->
+      if thinking_was_enabled enable_thinking && thinking_can_be_disabled
+      then Retry_without_thinking cut
+      else Drop_rejected_response cut)
+  | Error _, _ | Ok _, _ -> Recovery_not_applicable
+;;
+
+(* A cut checkpoint is worth nothing unless the next turn loads it. The agent
+   core's sink already persisted the checkpoint that carries the rejected
+   response, at [After_assistant_collected]; this write, at the same turn
+   count, replaces it. The lane's callers do not persist what this function
+   returns: the Error branch drops [checkpoint_after], so the durable state
+   would otherwise still hold the refused text. Measured on one measured Keeper,
+   2026-09-05: the same 31 KB collapse sat in the checkpoint four times, one
+   copy per rejected turn (#33267). *)
+let persist_dropped_response
+      ~(checkpoint_sink : Agent_core.Agent.checkpoint_sink option)
+      ~now
+      (cut : Agent_core.Checkpoint.t)
+  =
+  match checkpoint_sink with
+  | None -> Ok ()
+  | Some sink ->
+    sink
+      { Agent_core.Agent.stage = Agent_core.Agent.After_rejected_response_dropped
+      ; turn = cut.turn_count
+      ; checkpoint = cut
+      ; timestamp = now
+      }
+;;
+
+(* Effort is a thinking modifier: the wires that admit it at all reject the
+   pair enable_thinking=false + reasoning_effort
+   (backend_anthropic.validate_thinking_controls fails the request), so the
+   no-thinking retry below must strip it from the candidate — otherwise the
+   retry dies in request validation instead of continuing the turn it was
+   meant to rescue. *)
+let candidate_without_reasoning_effort (candidate : Runtime_candidate.t) : Runtime_candidate.t =
+  Runtime_candidate.of_provider_config
+    { (Runtime_candidate.provider_cfg candidate) with
+      Llm_provider.Provider_config.reasoning_effort = None
+    }
+;;
+
+(* Asked of the request the retry would actually send, not of an approximation
+   of it: the same candidate, effort stripped, thinking off.
+
+   [Complete_common.validate_all] is the admission every request meets on its
+   way out ([Complete.complete], [Complete_sync], [Complete_stream] all begin
+   there), and it routes the thinking question by provider kind, each kind to
+   the rule that actually governs it. A narrower predicate would answer for
+   some kinds and guess for the rest: read on its own,
+   [thinking_control_request_rejection] calls a row whose thinking control
+   lives on a separate capability axis unable to disable, when that wire turns
+   thinking off by sending no thinking field at all. *)
+let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
+  let retry_cfg =
+    { (Runtime_candidate.provider_cfg (candidate_without_reasoning_effort candidate)) with
+      Llm_provider.Provider_config.enable_thinking = Some false
+    ; preserve_thinking = Some false
+    }
+  in
+  Result.is_ok (Llm_provider.Complete_common.validate_all retry_cfg)
+;;
+
+let run_try_provider_with_truncation_recovery
+      ?on_memory_capacity_refusal
+      ?continuation_checkpoint
+      (ctx : try_provider_ctx)
+      candidate
+  =
+  let first_result, checkpoint_after, success_sample =
+    run_try_provider_with_history_recovery ?on_memory_capacity_refusal ?continuation_checkpoint ctx candidate
+  in
+  let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
+  if not (native_retry_allowed ctx) then first_result, checkpoint_after, success_sample
+  else match
+    truncation_recovery
+      ~enable_thinking:ctx.enable_thinking
+      ~thinking_can_be_disabled
+      ~result:first_result
+      ~checkpoint:checkpoint_after
+  with
+  | Recovery_not_applicable -> first_result, checkpoint_after, success_sample
+  | Retry_without_thinking continuation_checkpoint ->
+    let cut = match ctx.native_binding with
+      | None -> Ok None
+      | Some binding ->
+        Keeper_direct_native_continuation.authorize_incomplete_response_cut
+          ~binding ~checkpoint:continuation_checkpoint () |> Result.map Option.some in
+    (match cut with
+     | Error detail -> Error (Agent_core.Error.Internal detail), checkpoint_after, success_sample
+     | Ok native_retired_history_cut ->
+    emit_runtime_manifest ctx
+      ~status:"max_tokens_continuation"
+      ~decision:
+        (`Assoc
+          [ "continuation", `String "post_tool_checkpoint"
+          ; "thinking", `String "disabled"
+          ])
+      Keeper_runtime_manifest.Provider_lane_resolved;
+    run_try_provider
+      ~continuation_checkpoint
+      { ctx with enable_thinking = Some false; preserve_thinking = Some false;
+                 native_retired_history_cut }
+      (candidate_without_reasoning_effort candidate))
+  | Drop_rejected_response cut ->
+    let persisted =
+      persist_dropped_response
+        ~checkpoint_sink:ctx.checkpoint_sink
+        ~now:(Unix.gettimeofday ())
+        cut
+    in
+    (match persisted with
+     | Ok () -> ()
+     | Error reason ->
+       Log.Keeper.warn
+         ~keeper_name:ctx.keeper_name
+         "rejected response could not be dropped from the checkpoint and returns as \
+          input next turn: %s"
+         reason);
+    emit_runtime_manifest ctx
+      ~status:"max_tokens_rejected_response_dropped"
+      ~decision:
+        (`Assoc
+          ([ "continuation", `String "none"
+           ; ( "thinking"
+             , `String
+                 (if thinking_can_be_disabled
+                  then "already_disabled"
+                  else "cannot_be_disabled") )
+           ; ( "checkpoint_write"
+             , `String
+                 (match persisted with
+                  | Ok () -> "installed"
+                  | Error _ -> "refused") )
+           ]
+           @
+           match persisted with
+           | Ok () -> []
+           | Error reason -> [ "refusal", `String reason ]))
+      Keeper_runtime_manifest.Provider_lane_resolved;
+    first_result, Some cut, success_sample
+;;
+
+module For_testing = struct
+  let observe_provider_lease = observe_provider_lease
+  let apply_accept = apply_accept
+  let tool_result_save_count = tool_result_save_count
+  let checkpoint_before_incomplete_response = checkpoint_before_incomplete_response
+  let max_tokens_truncation_error = max_tokens_truncation_error
+
+  type nonrec truncation_recovery = truncation_recovery =
+    | Recovery_not_applicable
+    | Retry_without_thinking of Agent_core.Checkpoint.t
+    | Drop_rejected_response of Agent_core.Checkpoint.t
+
+  let truncation_recovery = truncation_recovery
+  let persist_dropped_response = persist_dropped_response
+  let candidate_without_reasoning_effort = candidate_without_reasoning_effort
+  let retry_without_thinking_admitted = retry_without_thinking_admitted
+  let memoize_message_measurement = memoize_message_measurement
+  let carried_front = carried_front
+  let message_measurement_hash = Agent_core.Types.Message_value.hash
+  let compose_carried_model_input = compose_carried_model_input
+  let request_view = request_view
+  let current_turn_demotion = current_turn_demotion
+  let offload_model_input_cpu = offload_model_input_cpu
+end

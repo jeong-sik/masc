@@ -1,0 +1,318 @@
+// Tool-call output store.
+//
+// The keeper chat stream never carries tool *results* — TOOL_CALL_END only
+// flips a row to "delivered" (keeper-stream.ts), and the persisted chat
+// history row holds the arguments only (keeper_chat_store). The output lives
+// on a separate surface, GET /api/v1/keepers/:name/tool-calls. Both surfaces
+// carry MASC's canonical execution_id, which is the only cross-store join
+// authority. Provider tool_use_id remains opaque, optional correlation data:
+// it may be blank or reused and never identifies a dashboard row or output.
+import { signal } from '@preact/signals'
+import type { ToolCallEntry } from './api/dashboard'
+import { ApiRequestError, currentStoredTokenRevision, subscribeStoredTokenChanges } from './api/core'
+import { isAdminRequired } from './api/admin-required'
+import { fetchKeeperToolCall } from './api/dashboard-keeper-tool-calls'
+
+export function nonBlankToolCallId(
+  toolCallId: string | null | undefined,
+): string | null {
+  return toolCallId?.trim() ? toolCallId : null
+}
+
+function nonBlankExecutionId(executionId: string | null | undefined): string | null {
+  return executionId?.trim() ? executionId : null
+}
+
+// Global join table: (Keeper, canonical execution_id) → tool-call IO entry.
+// Replaced (not mutated) on each merge so signal subscribers re-render.
+export const toolCallOutputsByIdentity = signal<Map<string, ToolCallEntry>>(new Map())
+
+function outputKey(keeper: string, executionId: string): string {
+  return JSON.stringify([keeper, executionId])
+}
+
+export type ExactToolOutputState =
+  | { kind: 'idle' } | { kind: 'loading' }
+  | { kind: 'loaded'; entry: ToolCallEntry }
+  | { kind: 'missing' } | { kind: 'ambiguous' } | { kind: 'failed' } | { kind: 'admin-required' }
+
+const idleExactOutput: ExactToolOutputState = { kind: 'idle' }
+const exactOutputs = signal(new Map<string, ExactToolOutputState>())
+export const exactToolOutputResetRevision = signal(0)
+interface ExactOutputSubscription {
+  keeper: string
+  executionId: string
+  authRevision: number
+  resetRevision: number
+  subscribers: Set<symbol>
+  hydratedThrough: number | null
+  controller: AbortController | null
+}
+const exactSubscriptions = new Map<string, ExactOutputSubscription>()
+
+export function lookupExactToolOutput(
+  keeper: string | null | undefined,
+  executionId: string | null | undefined,
+): ExactToolOutputState {
+  return keeper?.trim() && executionId?.trim()
+    ? exactOutputs.value.get(outputKey(keeper, executionId)) ?? idleExactOutput
+    : idleExactOutput
+}
+
+function setExactOutput(key: string, state: ExactToolOutputState): void {
+  exactOutputs.value = new Map(exactOutputs.peek()).set(key, state)
+}
+
+function requestExactOutput(key: string, subscription: ExactOutputSubscription): void {
+  subscription.controller?.abort()
+  const controller = new AbortController()
+  subscription.controller = controller
+  const current = () => exactSubscriptions.get(key) === subscription
+    && subscription.controller === controller && !controller.signal.aborted
+    && subscription.authRevision === currentStoredTokenRevision()
+    && subscription.resetRevision === exactToolOutputResetRevision.peek()
+  setExactOutput(key, { kind: 'loading' })
+  void fetchKeeperToolCall(subscription.keeper, subscription.executionId, { signal: controller.signal }).then(entry => {
+    if (!current()) return
+    subscription.controller = null
+    setExactOutput(key, { kind: 'loaded', entry })
+    recordToolCallOutputs([entry])
+  }, error => {
+    if (!current()) return
+    subscription.controller = null
+    let kind: 'admin-required' | 'missing' | 'ambiguous' | 'failed' = 'failed'
+    if (isAdminRequired(error)) kind = 'admin-required'
+    else if (error instanceof ApiRequestError && error.status === 404) kind = 'missing'
+    else if (error instanceof ApiRequestError && error.status === 409) kind = 'ambiguous'
+    setExactOutput(key, { kind })
+  })
+}
+
+/** One request per identity; each visible row owns only its subscription. */
+export function subscribeExactToolOutput(
+  keeper: string, executionId: string, authRevision: number, hydratedThrough: number | null,
+): () => void {
+  if (authRevision !== currentStoredTokenRevision()) return () => {}
+  const key = outputKey(keeper, executionId)
+  let subscription = exactSubscriptions.get(key)
+  if (!subscription) {
+    subscription = { keeper, executionId, authRevision, hydratedThrough,
+      resetRevision: exactToolOutputResetRevision.peek(), subscribers: new Set(), controller: null }
+    exactSubscriptions.set(key, subscription)
+  }
+  const owner = Symbol()
+  subscription.subscribers.add(owner)
+  const newHydration = subscription.hydratedThrough !== hydratedThrough
+  subscription.hydratedThrough = hydratedThrough
+  if (lookupExactToolOutput(keeper, executionId).kind !== 'loaded'
+    && (!subscription.controller || newHydration)) requestExactOutput(key, subscription)
+  const held = subscription
+  return () => {
+    if (exactSubscriptions.get(key) !== held) return
+    held.subscribers.delete(owner)
+    if (held.subscribers.size !== 0) return
+    held.controller?.abort()
+    exactSubscriptions.delete(key)
+    if (exactOutputs.peek().get(key)?.kind === 'loading') setExactOutput(key, idleExactOutput)
+  }
+}
+
+export function retryExactToolOutput(keeper: string | null, executionId: string | null | undefined): void {
+  if (!keeper || !executionId) return
+  const key = outputKey(keeper, executionId)
+  const subscription = exactSubscriptions.get(key)
+  if (subscription && subscription.authRevision === currentStoredTokenRevision()) requestExactOutput(key, subscription)
+}
+
+interface ToolCallOutputHydrationState {
+  inFlight: number
+  coveredSinceMs: number | null
+  coveredThroughMs: number | null
+  failed: boolean
+  failureReason: string | null
+  lastStartedAtMs: number | null
+  lastCompletedAtMs: number | null
+}
+
+export const toolCallOutputHydrationByKeeper = signal<Record<string, ToolCallOutputHydrationState>>({})
+
+export type ToolCallOutputHydrationStatus = 'idle' | 'hydrating' | 'hydrated' | 'failed'
+
+export interface ToolCallOutputHydrationContract {
+  source: 'tool_calls_endpoint'
+  status: ToolCallOutputHydrationStatus
+  failureReason: string | null
+  startedAtMs: number | null
+  completedAtMs: number | null
+  coveredSinceMs: number | null
+  coveredThroughMs: number | null
+}
+
+function keeperKey(keeperName: string): string {
+  return keeperName.trim()
+}
+
+function currentHydrationState(keeperName: string): ToolCallOutputHydrationState {
+  return toolCallOutputHydrationByKeeper.value[keeperName] ?? {
+    inFlight: 0,
+    coveredSinceMs: null,
+    coveredThroughMs: null,
+    failed: false,
+    failureReason: null,
+    lastStartedAtMs: null,
+    lastCompletedAtMs: null,
+  }
+}
+
+function updateHydrationState(
+  keeperName: string,
+  update: (current: ToolCallOutputHydrationState) => ToolCallOutputHydrationState,
+): void {
+  const key = keeperKey(keeperName)
+  if (!key) return
+  const current = currentHydrationState(key)
+  const next = update(current)
+  if (
+    current.inFlight === next.inFlight
+    && current.coveredSinceMs === next.coveredSinceMs
+    && current.coveredThroughMs === next.coveredThroughMs
+    && current.failed === next.failed
+    && current.failureReason === next.failureReason
+    && current.lastStartedAtMs === next.lastStartedAtMs
+    && current.lastCompletedAtMs === next.lastCompletedAtMs
+  ) return
+  toolCallOutputHydrationByKeeper.value = {
+    ...toolCallOutputHydrationByKeeper.value,
+    [key]: next,
+  }
+}
+
+export function markToolCallOutputsHydrating(keeperName: string): number {
+  const startedAtMs = Date.now()
+  const key = keeperKey(keeperName)
+  if (!key) return startedAtMs
+  updateHydrationState(key, current => ({
+    ...current,
+    inFlight: current.inFlight + 1,
+    failed: false,
+    failureReason: null,
+    lastStartedAtMs: startedAtMs,
+  }))
+  return startedAtMs
+}
+
+function mergeCoveredSince(current: number | null, next: number | null): number | null {
+  if (current == null || next == null) return null
+  return Math.min(current, next)
+}
+
+export function markToolCallOutputsHydrated(
+  keeperName: string,
+  coveredThroughMs: number,
+  coveredSinceMs: number | null = null,
+): void {
+  updateHydrationState(keeperName, current => ({
+    ...current,
+    inFlight: Math.max(0, current.inFlight - 1),
+    coveredSinceMs: current.coveredThroughMs == null
+      ? coveredSinceMs
+      : mergeCoveredSince(current.coveredSinceMs, coveredSinceMs),
+    coveredThroughMs: Math.max(current.coveredThroughMs ?? 0, coveredThroughMs),
+    failed: false,
+    failureReason: null,
+    lastCompletedAtMs: Date.now(),
+  }))
+}
+
+export function markToolCallOutputsHydrationFailed(
+  keeperName: string,
+  reason: string | null = null,
+): void {
+  const key = keeperKey(keeperName)
+  if (!key) return
+  updateHydrationState(key, current => ({
+    ...current,
+    inFlight: Math.max(0, current.inFlight - 1),
+    failed: true,
+    failureReason: reason,
+    lastCompletedAtMs: Date.now(),
+  }))
+}
+
+export function toolCallOutputsCoveredThroughMs(keeperName: string): number | null {
+  const key = keeperKey(keeperName)
+  return key ? (toolCallOutputHydrationByKeeper.value[key]?.coveredThroughMs ?? null) : null
+}
+
+export function toolCallOutputsCoveredSinceMs(keeperName: string): number | null {
+  const key = keeperKey(keeperName)
+  return key ? (toolCallOutputHydrationByKeeper.value[key]?.coveredSinceMs ?? null) : null
+}
+
+export function toolCallOutputHydrationStatus(keeperName: string): ToolCallOutputHydrationStatus {
+  const key = keeperKey(keeperName)
+  if (!key) return 'idle'
+  const state = toolCallOutputHydrationByKeeper.value[key]
+  if (!state) return 'idle'
+  if (state.inFlight > 0) return 'hydrating'
+  if (state.failed) return 'failed'
+  if (state.coveredThroughMs != null) return 'hydrated'
+  return 'idle'
+}
+
+export function toolCallOutputHydrationFailureReason(keeperName: string): string | null {
+  const key = keeperKey(keeperName)
+  return key ? (toolCallOutputHydrationByKeeper.value[key]?.failureReason ?? null) : null
+}
+
+export function toolCallOutputHydrationContract(
+  keeperName: string,
+): ToolCallOutputHydrationContract {
+  const key = keeperKey(keeperName)
+  const state = key ? toolCallOutputHydrationByKeeper.value[key] : undefined
+  return {
+    source: 'tool_calls_endpoint',
+    status: key ? toolCallOutputHydrationStatus(key) : 'idle',
+    failureReason: state?.failureReason ?? null,
+    startedAtMs: state?.lastStartedAtMs ?? null,
+    completedAtMs: state?.lastCompletedAtMs ?? null,
+    coveredSinceMs: state?.coveredSinceMs ?? null,
+    coveredThroughMs: state?.coveredThroughMs ?? null,
+  }
+}
+
+/** Merge tool-call entries by exact Keeper and canonical execution_id. */
+export function recordToolCallOutputs(entries: readonly ToolCallEntry[]): void {
+  let changed = false
+  const next = new Map(toolCallOutputsByIdentity.value)
+  for (const entry of entries) {
+    const executionId = nonBlankExecutionId(entry.execution_id)
+    if (!executionId || !entry.keeper.trim()) continue
+    next.set(outputKey(entry.keeper, executionId), entry)
+    changed = true
+  }
+  if (changed) toolCallOutputsByIdentity.value = next
+}
+
+/** Look up output only within its explicit Keeper scope. */
+export function lookupToolCallOutput(
+  keeper: string | null | undefined,
+  executionId: string | null | undefined,
+): ToolCallEntry | null {
+  const id = nonBlankExecutionId(executionId)
+  if (!id || !keeper?.trim()) return null
+  return toolCallOutputsByIdentity.value.get(outputKey(keeper, id)) ?? null
+}
+
+/** Test/teardown helper: drop all recorded outputs. */
+export function resetToolCallOutputs(): void {
+  for (const subscription of exactSubscriptions.values()) subscription.controller?.abort()
+  exactSubscriptions.clear()
+  exactOutputs.value = new Map()
+  exactToolOutputResetRevision.value++
+  toolCallOutputsByIdentity.value = new Map()
+  toolCallOutputHydrationByKeeper.value = {}
+}
+
+// Raw results belong to the credentials that authorized their retrieval.
+subscribeStoredTokenChanges(resetToolCallOutputs)

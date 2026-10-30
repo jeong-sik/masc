@@ -1,0 +1,3157 @@
+(** Docker routing and Execute result scenarios. Missing-image cases verify
+    route selection; Docker CLI fixtures execute real subprocesses and verify
+    their outputs. These fixtures do not exercise container isolation. *)
+
+module Workspace = Masc.Workspace
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_tool_execute_runtime = Masc.Keeper_tool_execute_runtime
+module Keeper_workspace_ops = Masc.Keeper_workspace_ops
+module Keeper_tool_dispatch_runtime = Masc.Keeper_tool_dispatch_runtime
+module Keeper_registry = Masc.Keeper_registry
+module Keeper_sandbox_runtime_setup = Masc.Keeper_sandbox_runtime_setup
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_sandbox_exec_failure = Masc.Keeper_sandbox_exec_failure
+module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
+module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
+module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
+module Keeper_github_identity = Masc.Keeper_github_identity
+module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
+module Keeper_identity = Masc.Keeper_identity
+module Keeper_types = Keeper_types
+module Keeper_alerting_path = Masc.Keeper_alerting_path
+module Fs_compat = Fs_compat
+module Json = Yojson.Safe.Util
+
+(* ── Helpers ─────────────────────────────────────────────────────── *)
+
+let with_env key value f =
+  let prior = try Some (Sys.getenv key) with Not_found -> None in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
+let with_cwd path f =
+  let prior = Sys.getcwd () in
+  Sys.chdir path;
+  Fun.protect ~finally:(fun () -> Sys.chdir prior) f
+
+(* A child started without stdin content holds this process's own stdin, and
+   the fake docker scripts below drain it with [cat]. With stdin open (a
+   terminal, or a pipe that a background task keeps open) that waits for an end
+   of input that never comes, and every call through such a script times out.
+   No case here takes input from outside, so stdin reads as empty. *)
+let read_stdin_as_empty () =
+  let null = Unix.openfile Filename.null [ Unix.O_RDONLY ] 0 in
+  Unix.dup2 null Unix.stdin;
+  Unix.close null
+
+let with_config_dir config_dir f =
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      f ())
+
+let temp_dir () =
+  let dir = Filename.temp_file "keeper_sandbox_docker_route_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Array.iter
+          (fun name -> rm (Filename.concat path name))
+          (Sys.readdir path);
+        Unix.rmdir path
+    | _ -> Unix.unlink path
+    | exception Unix.Unix_error _ -> ()
+  in
+  try rm dir with _ -> ()
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+  output_string oc content
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
+
+let docker_log_has_container_execution log =
+  String_util.contains_substring ("\n" ^ log) "\nrun "
+  || String_util.contains_substring ("\n" ^ log) "\nexec "
+
+let env_file_path_from_docker_line line =
+  let rec loop = function
+    | "--env-file" :: path :: _ -> Some path
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  loop (String.split_on_char ' ' line)
+
+let mount_source_for_destination line destination =
+  let suffix = ":" ^ destination ^ ":ro" in
+  let rec loop = function
+    | "-v" :: mount :: rest ->
+      if String.ends_with ~suffix mount
+      then Some (String.sub mount 0 (String.length mount - String.length suffix))
+      else loop rest
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  loop (String.split_on_char ' ' line)
+
+let mount_sources_for_destination log destination =
+  String.split_on_char '\n' log
+  |> List.filter_map (fun line -> mount_source_for_destination line destination)
+;;
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+
+let run_process_ok ~cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = waitpid_nointr pid in
+      let code = process_exit_code status in
+      if code <> 0 then
+        Alcotest.failf "command failed (%d): %s" code
+          (String.concat " " (Array.to_list argv)))
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
+
+let write_repositories_toml ~base_path ~repo_name ~url =
+  let config_dir =
+    Filename.concat (Filename.concat base_path Common.masc_dirname) "config"
+  in
+  ensure_dir config_dir;
+  write_file
+    (Filename.concat config_dir "repositories.toml")
+    (Printf.sprintf
+       "[repository.%s]\n\
+        name = \"%s\"\n\
+        url = \"%s\"\n\
+        local_path = \"repos/%s\"\n\
+        aliases = []\n\
+        default_branch = \"main\"\n\
+        keepers = []\n\
+        status = \"Active\"\n\
+        auto_sync = false\n\
+        sync_interval = 300\n\
+        created_at = 0\n\
+        updated_at = 0\n"
+       repo_name
+       repo_name
+       (String.escaped url)
+       repo_name)
+
+let setup_ready_repo_with_origin ~config ~repo_name ~repo =
+  let base_path = config.Workspace.base_path in
+  let remote = Filename.concat base_path (Printf.sprintf ".remote-%s.git" repo_name) in
+  let seed = Filename.concat base_path (Printf.sprintf "seed-%s" repo_name) in
+  git_ok ~cwd:base_path
+    [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; seed ];
+  git_ok ~cwd:seed [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:seed [ "config"; "user.name"; "Test" ];
+  write_file (Filename.concat seed "README.md") "v1\n";
+  git_ok ~cwd:seed [ "add"; "README.md" ];
+  git_ok ~cwd:seed [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:seed [ "push"; "-q"; "origin"; "main" ];
+  ensure_dir (Filename.dirname repo);
+  git_ok ~cwd:(Filename.dirname repo) [ "clone"; "-q"; remote; repo ];
+  write_repositories_toml ~base_path ~repo_name ~url:remote
+
+let ensure_git_repo repo =
+  ensure_dir repo;
+  if not (Sys.file_exists (Filename.concat repo ".git")) then
+    git_ok ~cwd:repo [ "init"; "-q" ]
+
+let docker_image_available image =
+  let cmd =
+    Printf.sprintf "docker image inspect %s > /dev/null 2>&1" (Filename.quote image)
+  in
+  Sys.command cmd = 0
+
+let make_meta ~name ~sandbox () =
+  let fields =
+    [
+      ("name", `String name);
+      ("trace_id", `String ("trace-" ^ name));
+    ]
+  in
+  let json =
+    `Assoc fields
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta ->
+    { meta with
+      sandbox_profile = sandbox
+    ; always_allow = Some true
+    }
+  | Error e -> Alcotest.fail e
+
+let with_eio_fs f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:Process_eio.reset_for_testing f
+
+let setup ~sandbox f =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  ensure_dir (Filename.concat base Common.masc_dirname);
+  let config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir config_dir;
+  let config = Workspace.default_config base in
+  ensure_dir (Workspace.keepers_runtime_dir config);
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Keeper_registry.For_testing.clear ();
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox () in
+  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  ensure_dir playground;
+  let repos_toml = Filename.concat config_dir "repositories.toml" in
+  write_file repos_toml
+    (Printf.sprintf
+       "[repository.masc]\n\
+        name = \"masc\"\n\
+        url = \"%s\"\n\
+        local_path = \"repos/masc\"\n\
+        aliases = []\n\
+        default_branch = \"main\"\n\
+        status = \"Active\"\n\
+        keepers = [\"acme-sandbox\"]\n\
+        auto_sync = false\n\
+        sync_interval = 300\n\
+        created_at = 0\n\
+        updated_at = 0\n"
+       playground);
+  f ~config ~meta ~playground
+
+let setup_with_sandbox ~sandbox f =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  ensure_dir (Filename.concat base Common.masc_dirname);
+  let config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir config_dir;
+  let config = Workspace.default_config base in
+  ensure_dir (Workspace.keepers_runtime_dir config);
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Keeper_registry.For_testing.clear ();
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox () in
+  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  ensure_dir playground;
+  let repos_toml = Filename.concat config_dir "repositories.toml" in
+  write_file repos_toml
+    (Printf.sprintf
+       "[repository.masc]\n\
+        name = \"masc\"\n\
+        url = \"%s\"\n\
+        local_path = \"repos/masc\"\n\
+        aliases = []\n\
+        default_branch = \"main\"\n\
+        status = \"Active\"\n\
+        keepers = [\"acme-sandbox\"]\n\
+        auto_sync = false\n\
+        sync_interval = 300\n\
+        created_at = 0\n\
+        updated_at = 0\n"
+       playground);
+  f ~config ~meta ~playground
+
+let with_turn_sandbox_factory ~config ~meta f =
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory) @@ fun () ->
+  f factory
+
+let test_turn_sandbox_factory_ignores_mid_turn_registry_profile_drift () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground:_ ->
+  let local_meta =
+    { meta with
+      Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
+    }
+  in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  ignore
+    (Keeper_registry.For_testing.register
+       ~base_path:config.Workspace.base_path
+       meta.name
+       local_meta);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_factory.cleanup factory;
+      Keeper_registry.For_testing.unregister ~base_path:config.Workspace.base_path meta.name)
+  @@ fun () ->
+  let docker_playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  match Keeper_sandbox_factory.resolve factory ~cwd:docker_playground with
+  | Runtime { runtime; _ } ->
+    Alcotest.(check string)
+      "runtime host root stays on the turn's Docker profile"
+      (Keeper_alerting_path.normalize_path_for_check_stripped docker_playground)
+      (Keeper_turn_sandbox_runtime.host_root runtime)
+  | No_factory | Remote_ssh_profile ->
+    Alcotest.fail "mid-turn registry drift must not change Docker dispatch to Local"
+
+let with_fake_docker script f =
+  let dir = temp_dir () in
+  let docker_path = Filename.concat dir "docker" in
+  let gh_path = Filename.concat dir "gh" in
+  let fake_gh_auth_status_ok =
+    "#!/bin/sh\n\
+     if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
+       exit 0\n\
+     fi\n\
+     printf 'gh:%s\\n' \"$*\"\n\
+     exit 0\n";
+  in
+  write_file docker_path script;
+  write_file gh_path fake_gh_auth_status_ok;
+  Unix.chmod docker_path 0o755;
+  Unix.chmod gh_path 0o755;
+  let path =
+    match Sys.getenv_opt "PATH" with
+    | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
+    | _ -> dir
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" docker_path @@ fun () ->
+  with_env "PATH" path f
+
+let message_mentions needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  scan 0
+
+(* The leak this guard exists to stop: on 2026-08-29 ten persistent containers
+   were found on the host daemon, named for temp base_paths whose owner pids
+   were gone. Nothing reclaims those -- outliving the owner is normal for a
+   persistent container between server restarts, so the sweep leaves it, and no
+   teardown owns a workspace nobody reopens. *)
+let test_guard_refuses_the_real_daemon_without_a_fake () =
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" "" @@ fun () ->
+  with_env "MASC_TEST_ALLOW_REAL_DOCKER" "" @@ fun () ->
+  match
+    Keeper_sandbox_runtime_setup.refuse_real_daemon_under_test
+      ~what:"start a persistent container"
+  with
+  | () -> Alcotest.fail "a test executable was allowed at the host daemon"
+  | exception Failure message ->
+    Alcotest.(check bool) "the refusal says how to fix it" true
+      (message_mentions "MASC_TEST_FAKE_DOCKER_PATH" message)
+
+(* A fake is the ordinary case and must stay silent, or every docker test in
+   this file dies. It did, while the guard was only checking for a test
+   executable. *)
+let test_guard_is_silent_with_a_fake () =
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" "/tmp/does-not-need-to-exist" @@ fun () ->
+  Keeper_sandbox_runtime_setup.refuse_real_daemon_under_test
+    ~what:"start a persistent container"
+
+(* And a test that means it can still reach the daemon. *)
+let test_guard_yields_to_an_explicit_opt_in () =
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" "" @@ fun () ->
+  with_env "MASC_TEST_ALLOW_REAL_DOCKER" "1" @@ fun () ->
+  Keeper_sandbox_runtime_setup.refuse_real_daemon_under_test
+    ~what:"start a persistent container"
+
+let test_docker_command_skips_empty_path_segment () =
+  let cwd = temp_dir () in
+  let path_dir = temp_dir () in
+  let cwd_docker = Filename.concat cwd "docker" in
+  let path_docker = Filename.concat path_dir "docker" in
+  write_file cwd_docker "#!/bin/sh\nexit 66\n";
+  write_file path_docker "#!/bin/sh\nexit 0\n";
+  Unix.chmod cwd_docker 0o755;
+  Unix.chmod path_docker 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir cwd;
+      cleanup_dir path_dir)
+  @@ fun () ->
+  with_cwd cwd @@ fun () ->
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" "" @@ fun () ->
+  with_env "PATH" (":" ^ path_dir) @@ fun () ->
+  Alcotest.(check string)
+    "empty PATH segment skipped"
+    path_docker
+    (Masc.Keeper_sandbox_runtime.docker_command ())
+
+let with_tool_policy_config f = f ()
+
+let parse_field raw field =
+  Yojson.Safe.from_string raw |> Json.member field
+
+let parse_string_field raw field =
+  parse_field raw field |> Json.to_string_option
+
+(* A completed Execute records its route ([via], [requested_sandbox],
+   [sandbox_profile]) in the ledger's execution evidence, not in the text the
+   model reads (#39035). *)
+let evidence_string_field (outcome : Masc.Keeper_tool_execution.t) field =
+  Option.bind
+    (Masc.Keeper_tool_call_log.execution_evidence_of_metadata outcome.metadata)
+    (fun evidence -> Json.member field evidence |> Json.to_string_option)
+
+let response_mentions raw field needle =
+  match parse_string_field raw field with
+  | None -> false
+  | Some s ->
+      let len = String.length needle in
+      let n = String.length s in
+      let rec loop i =
+        if i + len > n then false
+        else if String.sub s i len = needle then true
+        else loop (i + 1)
+      in
+      loop 0
+
+let parse_bool_field raw field =
+  parse_field raw field |> Json.to_bool_option
+
+let parse_status_exit_code raw =
+  match parse_field raw "status" |> Json.member "code" |> Json.to_int_option with
+  | Some code -> code
+  | None -> Alcotest.failf "missing status.code in %s" raw
+
+let assert_docker_route_fires ~config ~meta ~playground =
+  let rel_dir = "scratch" in
+  let rel_path = Filename.concat rel_dir "demo.txt" in
+  let host_path = Filename.concat playground rel_path in
+  ensure_dir (Filename.dirname host_path);
+  ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
+  let cases =
+    [
+      ( "rg",
+        `Assoc
+          [
+            ("op", `String "rg");
+            ("pattern", `String "alpha");
+            ("path", `String rel_dir);
+          ] );
+    ]
+  in
+  List.iter
+    (fun (op, args) ->
+      let raw =
+        Keeper_workspace_ops.handle_tool_search_files ~turn_sandbox_factory:None ~config ~meta ~args
+      in
+      if not (response_mentions raw "error" "sandbox_image") then
+        Alcotest.failf "unexpected %s docker-route response: %s" op raw)
+    cases
+
+(* ── Tests ───────────────────────────────────────────────────────── *)
+
+let test_readonly_ops_route_through_docker () =
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  assert_docker_route_fires ~config ~meta ~playground
+
+let test_cat_legacy_keeper_skips_docker () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+  @@ fun ~config ~meta ~playground ->
+  let host_path = Filename.concat playground "scratch/x" in
+  ensure_dir (Filename.dirname host_path);
+  ignore (Fs_compat.save_file_atomic host_path "matrix");
+  let raw =
+    Keeper_workspace_ops.handle_tool_search_files ~turn_sandbox_factory:None ~config ~meta
+      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
+  in
+  Alcotest.(check bool)
+    "legacy keeper does not surface docker image error"
+    false
+    (response_mentions raw "error" "sandbox_image")
+
+let fake_docker_rg_no_match_script =
+  "#!/bin/sh\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"inspect\" ]; then\n\
+  printf 'fake-container-id\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"ps\" ]; then\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"exec\" ]; then\n\
+  shift\n\
+  while [ \"$#\" -gt 0 ]; do\n\
+    case \"$1\" in\n\
+      -i|--interactive) shift ;;\n\
+      -w|--workdir|-e|--env|-u|--user) shift 2 ;;\n\
+      --) shift; break ;;\n\
+      *) shift; break ;;\n\
+    esac\n\
+  done\n\
+  if [ \"$1\" = \"rg\" ]; then\n\
+    exit 1\n\
+  fi\n\
+  cat >/dev/null\n\
+  printf 'stdout:%s\\n' \"$*\"\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"rm\" ]; then\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation\\n' >&2\n\
+  exit 2\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then\n\
+    shift\n\
+    break\n\
+  fi\n\
+  shift\n\
+done\n\
+script=$(cat)\n\
+case \"$script\" in\n\
+  *rg*) exit 1 ;;\n\
+esac\n\
+if [ \"$1\" = \"rg\" ]; then\n\
+  exit 1\n\
+fi\n\
+printf '%s\\n' \"$*\"\n\
+exit 0\n"
+
+let fake_docker_bash_rg_no_match_script =
+  "#!/bin/sh\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"inspect\" ]; then\n\
+  case \"$3\" in\n\
+    *State.Running*) printf 'true\\n' ;;\n\
+    *) printf 'fake-container-id\\n' ;;\n\
+  esac\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"exec\" ]; then\n\
+  case \"$*\" in\n\
+    *rg*) exit 1 ;;\n\
+  esac\n\
+  printf 'stdout:%s\\n' \"$*\"\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"rm\" ]; then\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  printf 'fake-container-id\\n'\n\
+  exit 0\n\
+fi\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let test_rg_no_match_remains_successful_in_docker_route () =
+  with_fake_docker fake_docker_rg_no_match_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let host_path = Filename.concat playground "scratch/demo.txt" in
+  ensure_dir (Filename.dirname host_path);
+  ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
+  let raw =
+    Keeper_workspace_ops.handle_tool_search_files ~turn_sandbox_factory:None ~config ~meta
+      ~args:
+        (`Assoc
+            [
+              ("op", `String "rg");
+              ("pattern", `String "missing");
+              ("path", `String "scratch");
+            ])
+  in
+  Alcotest.(check (option bool)) "rg no-match stays ok" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check int) "rg keeps exit=1 status" 1
+    (parse_status_exit_code raw);
+  Alcotest.(check int) "rg no-match returns empty matches" 0
+    (parse_field raw "matches" |> Json.to_list |> List.length)
+
+let test_unknown_workspace_op_is_unsupported_before_docker () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground:_ ->
+  let raw =
+    Keeper_workspace_ops.handle_tool_search_files
+      ~turn_sandbox_factory:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("op", `String "future_repo_op");
+            ("url", `String "https://github.com/jeong-sik/masc.git");
+          ])
+  in
+  (match parse_bool_field raw "ok" with
+   | Some true -> Alcotest.failf "unknown op unexpectedly succeeded: %s" raw
+   | Some false | None -> ());
+  Alcotest.(check bool)
+    "non-rg op fails closed with unsupported-op error"
+    true
+    (response_mentions raw "error" "does not support op");
+  Alcotest.(check (option string))
+    "handler preserves requested op, not rewritten to rg"
+    (Some "future_repo_op")
+    (parse_string_field raw "op")
+
+
+let json_string_list values =
+  `List (List.map (fun value -> `String value) values)
+
+let tool_execute_typed_exec_args ?(argv = []) ~cwd program =
+  `Assoc
+    [
+      ("argv", json_string_list (program :: argv));
+      ("cwd", `String cwd);
+      ("timeout_sec", `Float 5.0);
+    ]
+
+
+let tool_execute_command_args ~cwd script =
+  `Assoc
+    [
+      ("command", `String script);
+      ("cwd", `String cwd);
+      ("timeout_sec", `Float 5.0);
+    ]
+
+let tool_execute_typed_env_wrapper_args ~cwd =
+  `Assoc
+    [
+      ("argv", `List [ `String "env"; `String "id" ]);
+      ("cwd", `String cwd);
+      ("timeout_sec", `Float 5.0);
+    ]
+
+
+let check_typed_validation_error needle raw =
+  (match parse_bool_field raw "ok" with
+   | Some true -> Alcotest.failf "typed command unexpectedly succeeded: %s" raw
+   | Some false | None -> ());
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed");
+  Alcotest.(check bool) "validation error surfaced" true
+    (response_mentions raw "error" needle)
+
+(* A Remote_ssh caller resolves its endpoint from the keeper's declaration
+   before the turn factory's profile is compared, so the Remote_ssh cases of
+   the drift test need a declaration and an endpoint to resolve. The endpoint
+   table comes from the typed record, as in test_keeper_ssh_secret_policy. *)
+let declare_ssh_endpoint ~(config : Workspace.config) ~keeper_name =
+  let config_dir =
+    Filename.concat (Filename.concat config.base_path Common.masc_dirname) "config"
+  in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  ensure_dir keepers_dir;
+  write_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    "[keeper]\n\
+     instructions = \"factory profile drift test\"\n\
+     sandbox_profile = \"remote_ssh\"\n\
+     remote_endpoint = \"fixture\"\n";
+  write_file
+    (Filename.concat config_dir "runtime.toml")
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "fixture"
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"fixture"
+         ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = [ "LANG" ]
+         ; capabilities = []
+         ; private_home = false
+         ; allowed_paths = []
+         })
+
+let test_execute_rejects_factory_profile_drift_in_every_direction () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta:docker ~playground:_ ->
+  declare_ssh_endpoint ~config ~keeper_name:docker.name;
+  let microvm =
+    { docker with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
+  in
+  let remote =
+    { docker with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh }
+  in
+  let assert_mismatch ~factory_meta ~caller_meta =
+    let cwd = Keeper_sandbox.host_root_abs_of_meta ~config caller_meta in
+    let factory = Keeper_sandbox_factory.create ~config ~meta:factory_meta () in
+    Fun.protect
+      ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+    @@ fun () ->
+    let raw =
+      Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+        ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+        ~turn_sandbox_factory:(Some factory)
+        ~config
+        ~meta:caller_meta
+        ~args:(tool_execute_typed_exec_args ~cwd "pwd" ~argv:[])
+        ()
+    in
+    Alcotest.(check (option string))
+      ("typed contract mismatch: " ^ raw)
+      (Some "sandbox_profile_contract_mismatch")
+      (parse_string_field raw "code")
+  in
+  assert_mismatch ~factory_meta:docker ~caller_meta:microvm;
+  assert_mismatch ~factory_meta:microvm ~caller_meta:docker;
+  assert_mismatch ~factory_meta:docker ~caller_meta:remote;
+  assert_mismatch ~factory_meta:remote ~caller_meta:docker
+
+
+
+let test_execute_without_catalog_image_fails_before_docker () =
+  with_fake_docker
+    "#!/bin/sh\n\
+     printf '%s\\n' \"$*\" >> \"$MASC_KEEPER_TEST_DOCKER_LOG\"\n\
+     exit 2\n"
+  @@ fun () ->
+
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "pwd" ~argv:[])
+      ()
+  in
+  Alcotest.(check (option bool)) "Docker request did not run on Host" None
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "missing Docker image is explicit" true
+    (response_mentions raw "error" "sandbox_image_unresolved");
+
+  Alcotest.(check (option string)) "no local fallback" None
+    (parse_string_field raw "sandbox_fallback");
+  Alcotest.(check bool) "Docker not started for an unresolved image" false
+    (Sys.file_exists log_path)
+
+let test_execute_legacy_skips_docker () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
+  @@ fun ~config ~meta ~playground ->
+  let outside_cwd = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:None ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String outside_cwd) ])
+      ()
+  in
+  Alcotest.(check bool)
+    "legacy Execute does not surface docker image error"
+    false
+    (response_mentions raw "error" "sandbox_image")
+
+let fake_docker_echo_script =
+  "#!/bin/sh\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+state_inspect_count_file=\"$(dirname \"$0\")/echo-state-inspect.count\"\n\
+read_count() { if [ -f \"$1\" ]; then cat \"$1\"; else printf '0'; fi }\n\
+write_count() { printf '%s' \"$2\" > \"$1\"; }\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"inspect\" ]; then\n\
+  case \"$3\" in\n\
+    *State.Running*)\n\
+      count=$(read_count \"$state_inspect_count_file\")\n\
+      count=$((count + 1))\n\
+      write_count \"$state_inspect_count_file\" \"$count\"\n\
+      if [ \"$count\" = \"1\" ]; then\n\
+        printf 'no such container\\n' >&2\n\
+        exit 1\n\
+      fi\n\
+      printf 'true\\n'\n\
+      exit 0\n\
+      ;;\n\
+    *) printf 'fake-container-id\\n' ;;\n\
+  esac\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"ps\" ]; then\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"exec\" ]; then\n\
+  shift\n\
+  while [ \"$#\" -gt 0 ]; do\n\
+    case \"$1\" in\n\
+      -i|--interactive) shift ;;\n\
+      -w|--workdir|-e|--env|-u|--user) shift 2 ;;\n\
+      --) shift; break ;;\n\
+      *) shift; break ;;\n\
+    esac\n\
+  done\n\
+  cat >/dev/null\n\
+  printf 'stdout:%s\\n' \"$*\"\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"rm\" ]; then\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
+  exit 2\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then\n\
+    shift\n\
+    break\n\
+  fi\n\
+  shift\n\
+done\n\
+cat >/dev/null\n\
+printf 'stdout:%s\\n' \"$*\"\n\
+exit 0\n"
+
+let test_execute_typed_env_wrapper_target_allowed () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_env_wrapper_args ~cwd:playground)
+      ()
+  in
+  Alcotest.(check (option bool)) "typed env wrapper succeeds" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed");
+  Alcotest.(check int) "env wrapper exit status" 0 (parse_status_exit_code raw)
+
+
+let test_execute_typed_repeated_executable_arg_is_preserved () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:
+        (tool_execute_typed_exec_args
+           ~cwd:playground
+           ~argv:[ "echo"; "hello" ]
+           "echo")
+      ()
+  in
+  Alcotest.(check (option bool)) "repeated argv[0] remains valid" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed");
+  Alcotest.(check int) "echo exit status" 0 (parse_status_exit_code raw);
+  Alcotest.(check bool)
+    "output preserves caller-authored argv"
+    true
+    (response_mentions raw "output" "echo hello")
+
+
+let test_execute_git_status_readonly () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status"; "--short" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "git status succeeds"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed")
+
+let fake_docker_missing_image_script =
+  "#!/bin/sh\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf 'Error: No such image: %s\\n' \"$3\" >&2\n\
+  exit 1\n\
+fi\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  printf 'docker run should not execute when image inspect fails\\n' >&2\n\
+  exit 2\n\
+fi\n\
+printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
+exit 2\n"
+
+let fake_docker_timeout_then_ok_script =
+  "#!/bin/sh\n\
+state_dir=$(dirname \"$0\")\n\
+run_count_file=\"$state_dir/timeout-run.count\"\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+read_count() { if [ -f \"$1\" ]; then cat \"$1\"; else printf '0'; fi }\n\
+write_count() { printf '%s' \"$2\" > \"$1\"; }\n\
+if [ \"$1\" = \"info\" ]; then printf '[]\n'; exit 0; fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then printf '[]\n'; exit 0; fi\n\
+if [ \"$1\" = \"rm\" ]; then exit 0; fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation: %s\n' \"$1\" >&2\n\
+  exit 2\n\
+fi\n\
+count=$(read_count \"$run_count_file\")\n\
+count=$((count + 1))\n\
+write_count \"$run_count_file\" \"$count\"\n\
+if [ \"$count\" = \"1\" ]; then\n\
+  printf 'process error: timeout after 5s\n' >&2\n\
+  exit 124\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then shift; break; fi\n\
+  shift\n\
+done\n\
+printf 'retry-ok\n'\n\
+exit 0\n"
+
+let fake_docker_daemon_unavailable_then_ok_script =
+  "#!/bin/sh\n\
+state_dir=$(dirname \"$0\")\n\
+run_count_file=\"$state_dir/daemon-unavailable-run.count\"\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+read_count() { if [ -f \"$1\" ]; then cat \"$1\"; else printf '0'; fi }\n\
+write_count() { printf '%s' \"$2\" > \"$1\"; }\n\
+if [ \"$1\" = \"info\" ]; then printf '[]\n'; exit 0; fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then printf '[]\n'; exit 0; fi\n\
+if [ \"$1\" = \"rm\" ]; then exit 0; fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation: %s\n' \"$1\" >&2\n\
+  exit 2\n\
+fi\n\
+count=$(read_count \"$run_count_file\")\n\
+count=$((count + 1))\n\
+write_count \"$run_count_file\" \"$count\"\n\
+if [ \"$count\" = \"1\" ]; then\n\
+  printf 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n' >&2\n\
+  exit 1\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then shift; break; fi\n\
+  shift\n\
+done\n\
+printf 'retry-ok\n'\n\
+exit 0\n"
+
+(* A stopped daemon refuses every subcommand with the same message, including
+   the container probes that run before [docker run]. *)
+let fake_docker_daemon_down_script =
+  "#!/bin/sh\n\
+printf 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n' >&2\n\
+exit 1\n"
+
+let test_execute_guest_start_failure_reports_sandbox_and_conditions () =
+  with_fake_docker fake_docker_daemon_down_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta =
+    { meta with
+      Keeper_meta_contract.sandbox_image = Some "base"
+    ; network_mode = Keeper_types_profile_sandbox.Network_inherit
+    }
+  in
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "gh" ~argv:[ "auth"; "status" ])
+      ()
+  in
+  let fields =
+    match Yojson.Safe.from_string raw with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "Execute failure is not a JSON object"
+  in
+  Alcotest.(check int) "one error field" 1
+    (List.length (List.filter (fun (name, _) -> String.equal name "error") fields));
+  Alcotest.(check bool) "daemon detail is preserved" true
+    (match List.assoc_opt "error" fields with
+     | Some (`String message) ->
+       String_util.contains_substring message "Cannot connect to the Docker daemon"
+     | Some _ | None -> false);
+  Alcotest.(check (option string)) "machine-readable failure code"
+    (Some "sandbox_guest_unavailable")
+    (match List.assoc_opt "code" fields with
+     | Some (`String code) -> Some code
+     | Some _ | None -> None);
+  Alcotest.(check (option string)) "failure names the preparation stage"
+    (Some "sandbox_guest_prepare")
+    (match List.assoc_opt "failure_stage" fields with
+     | Some (`String stage) -> Some stage
+     | Some _ | None -> None);
+  Alcotest.(check (option string)) "failure names the effective network mode"
+    (Some "inherit")
+    (match List.assoc_opt "network_mode" fields with
+     | Some (`String mode) -> Some mode
+     | Some _ | None -> None);
+  Alcotest.(check bool) "Docker failure invents no microVM backend" false
+    (List.mem_assoc "microvm_backend" fields)
+;;
+
+let test_execute_identity_failure_after_start_reports_identity_code () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir ~config ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  write_file hosts_path "github.com:\n  user: keeper-user\n  oauth_token: stable-token\n";
+  Unix.chmod hosts_path 0o600;
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let execute () =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "guest starts with a valid identity" (Some true)
+    (parse_bool_field (execute ()) "ok");
+  (* The guest keeps running while its credential file becomes a directory.
+     The guest is healthy, so the failure must name the identity. *)
+  Sys.remove hosts_path;
+  Unix.mkdir hosts_path 0o700;
+  let raw = execute () in
+  Alcotest.(check (option string)) "identity failure keeps its own code"
+    (Some "github_identity_snapshot_unavailable")
+    (parse_string_field raw "code");
+  Alcotest.(check bool) "identity detail is preserved" true
+    (response_mentions raw "error" "must be a regular file");
+  Alcotest.(check (option string)) "identity failure is not a guest failure" None
+    (parse_string_field raw "failure_stage")
+;;
+
+(* Both container starts read the Keeper's GitHub identity: creation mounts it
+   and adoption refreshes the derived git config. A start that refuses the
+   identity says so; it is not a sandbox failure. *)
+let test_execute_identity_refused_at_container_creation_reports_identity_code () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir ~config ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  (* The credential file is a directory before any container exists. *)
+  Unix.mkdir (Filename.concat github_config_dir "hosts.yml") 0o700;
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  Alcotest.(check (option string)) "creation that refuses the identity keeps the identity code"
+    (Some "github_identity_snapshot_unavailable")
+    (parse_string_field raw "code");
+  Alcotest.(check bool) "identity detail is preserved" true
+    (response_mentions raw "error" "must be a regular file");
+  Alcotest.(check (option string)) "it is not a guest failure" None
+    (parse_string_field raw "failure_stage")
+;;
+
+let test_execute_identity_refused_at_container_adoption_reports_identity_code () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir ~config ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  write_file hosts_path "github.com:\n  user: keeper-user\n  oauth_token: stable-token\n";
+  Unix.chmod hosts_path 0o600;
+  let execute factory =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  (with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+   Alcotest.(check (option bool)) "the first runtime creates the container" (Some true)
+     (parse_bool_field (execute factory) "ok"));
+  (* A new runtime finds that container running and adopts it. By then the
+     credential file is a directory. *)
+  Sys.remove hosts_path;
+  Unix.mkdir hosts_path 0o700;
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw = execute factory in
+  Alcotest.(check (option string)) "adoption that refuses the identity keeps the identity code"
+    (Some "github_identity_snapshot_unavailable")
+    (parse_string_field raw "code");
+  Alcotest.(check bool) "identity detail is preserved" true
+    (response_mentions raw "error" "must be a regular file");
+  Alcotest.(check (option string)) "it is not a guest failure" None
+    (parse_string_field raw "failure_stage")
+;;
+
+let test_docker_run_does_not_retry_generic_timeout () =
+  with_fake_docker fake_docker_timeout_then_ok_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  match
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"echo hi"
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
+  with
+  | Error msg -> Alcotest.failf "unexpected docker timeout result error: %s" msg
+  | Ok result ->
+    Alcotest.(check int) "generic timeout is terminal" 124
+      (match result.status with
+       | Unix.WEXITED n -> n
+       | _ -> -1);
+    Alcotest.(check bool) "second run was not replayed" false
+      (String_util.contains_substring result.output "retry-ok")
+
+let test_docker_run_does_not_retry_daemon_unavailable () =
+  with_fake_docker fake_docker_daemon_unavailable_then_ok_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  match
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"echo hi"
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
+  with
+  | Error msg -> Alcotest.failf "unexpected daemon-unavailable result error: %s" msg
+  | Ok result ->
+    Alcotest.(check int) "daemon unavailable is surfaced" 1
+      (match result.status with
+       | Unix.WEXITED n -> n
+       | _ -> -1);
+    Alcotest.(check bool) "daemon error output is preserved" true
+      (String_util.contains_substring result.output "Cannot connect to the Docker daemon");
+    Alcotest.(check bool) "daemon failure is not replayed" false
+      (String_util.contains_substring result.output "retry-ok")
+
+let test_execute_git_routes_through_docker () =
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:None ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "Docker git did not run on Host" None
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "missing factory is explicit" true
+    (response_mentions raw "error" "requires a turn sandbox factory");
+  Alcotest.(check (option string)) "no local fallback" None
+    (parse_string_field raw "sandbox_fallback")
+
+let test_execute_git_uses_turn_runtime () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
+      ()
+  in
+  (match parse_bool_field raw "ok" with
+   | Some true -> ()
+   | other ->
+     Alcotest.failf
+       "git bash succeeds through turn docker: ok=%s raw=%s"
+       (match other with
+        | Some true -> "Some true"
+        | Some false -> "Some false"
+        | None -> "None")
+       raw);
+  let log = read_file log_path in
+  Alcotest.(check bool) "git started docker session" true
+    (String_util.contains_substring log "run -d");
+  Alcotest.(check bool) "git used docker exec" true
+    (String_util.contains_substring log "\nexec ")
+
+let test_execute_git_without_github_bundle_succeeds () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "typed git succeeds without GH bundle" (Some true)
+    (parse_bool_field raw "ok");
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "typed git uses docker exec" true
+    (String_util.contains_substring log "\nexec ");
+  Alcotest.(check bool) "typed git has no failure class" true
+    Yojson.Safe.Util.(member "failure_class" (Yojson.Safe.from_string raw) = `Null)
+
+let test_execute_git_c_option_is_owned_by_cli () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:
+        (tool_execute_typed_exec_args ~cwd:playground "git"
+           ~argv:[ "-C"; "repos/masc/.worktrees/missing"; "status" ])
+      ()
+  in
+  Alcotest.(check (option bool))
+    "MASC does not reject product-specific CLI syntax"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "opaque argv reaches the sandbox" true
+    (Sys.file_exists log_path)
+
+let test_execute_missing_playground_blocks_before_docker () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let mount_source =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Keeper_alerting_path.normalize_path_for_check
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  cleanup_dir playground;
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let err =
+    match
+      Keeper_sandbox_docker.run_trusted_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"pwd"
+      ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+    with
+    | Ok _ -> Alcotest.fail "expected missing playground to block before docker"
+    | Error err -> err
+  in
+  Alcotest.(check bool)
+    "missing bind source is typed"
+    true
+    (String_util.contains_substring err "mount_source_not_found");
+  Alcotest.(check bool)
+    "full mount path is surfaced"
+    true
+    (String_util.contains_substring err mount_source);
+  Alcotest.(check bool)
+    "base path hash is surfaced"
+    true
+    (String_util.contains_substring err "base_path_hash=");
+  Alcotest.(check bool) "docker was not invoked" false (Sys.file_exists log_path)
+
+let test_execute_git_c_bare_worktrees_is_owned_by_cli () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  let worktree = Filename.concat repo ".worktrees/task-229" in
+  ensure_dir worktree;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  git_ok ~cwd:worktree [ "init"; "-q" ];
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:
+        (tool_execute_typed_exec_args ~cwd:playground "git"
+           ~argv:[ "-C"; ".worktrees/task-229"; "status"; "-sb" ])
+      ()
+  in
+  Alcotest.(check (option bool))
+    "MASC does not infer repository semantics from argv"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "opaque argv reaches the sandbox" true
+    (Sys.file_exists log_path)
+
+let test_execute_git_push_routes_docker () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  ensure_dir repo;
+  git_ok ~cwd:playground [ "init"; "-q" ];
+  git_ok ~cwd:playground [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:playground [ "config"; "user.name"; "test" ];
+  git_ok ~cwd:playground [ "commit"; "--allow-empty"; "-m"; "initial"; "-q" ];
+  git_ok ~cwd:playground [ "branch"; "-m"; "main" ];
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "test" ];
+  git_ok ~cwd:repo [ "remote"; "add"; "origin"; playground ];
+  git_ok ~cwd:repo [ "fetch"; "origin"; "-q" ];
+  git_ok ~cwd:repo [ "branch"; "-m"; "main" ];
+  git_ok ~cwd:repo [ "reset"; "--hard"; "origin/main" ];
+  git_ok ~cwd:repo [ "branch"; "--set-upstream-to=origin/main"; "main" ];
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:
+        (tool_execute_typed_exec_args ~cwd:repo "git"
+           ~argv:[ "push"; "origin"; "feature/proof" ])
+      ()
+  in
+  let raw = outcome.raw_output in
+  Alcotest.(check (option bool)) "git push succeeds even without write access"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "git push routes through docker" (Some "docker")
+    (evidence_string_field outcome "via");
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "docker container was invoked" true
+    (docker_log_has_container_execution log)
+
+let test_execute_git_push_routes_through_docker () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:
+        (tool_execute_typed_exec_args ~cwd:repo "git"
+           ~argv:[ "push"; "origin"; "feature/proof" ])
+      ()
+  in
+  let raw = outcome.raw_output in
+  Alcotest.(check (option bool)) "push succeeds via fake docker" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "push via docker" (Some "docker")
+    (evidence_string_field outcome "via");
+  let log = read_file log_path in
+  Alcotest.(check bool) "git push started docker session" true
+    (String_util.contains_substring log "run -d");
+  Alcotest.(check bool) "git push used typed docker exec argv" true
+    (String_util.contains_substring log "\nexec ")
+
+let test_tool_search_files_repo_review_is_unsupported () =
+  with_tool_policy_config @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_workspace_ops.handle_tool_search_files
+      ~turn_sandbox_factory:None ~config ~meta
+      ~args:
+        (`Assoc
+           [ ("op", `String "gh")
+           ; ("cmd", `String "pr review 123 --approve --body ok")
+           ; ("cwd", `String playground)
+           ])
+  in
+  (match parse_bool_field raw "ok" with
+   | Some true -> Alcotest.failf "repo action unexpectedly succeeded: %s" raw
+   | Some false | None -> ());
+  Alcotest.(check bool)
+    "repo action op fails closed with unsupported-op error"
+    true
+    (response_mentions raw "error" "does not support op");
+  Alcotest.(check (option string))
+    "handler preserves requested op, not rewritten to rg"
+    (Some "gh")
+    (parse_string_field raw "op")
+
+let docker_run_line log_path =
+  read_file log_path
+  |> String.split_on_char '\n'
+  |> List.find_opt (String.starts_with ~prefix:"run ")
+  |> function
+  | Some line -> line
+  | None -> Alcotest.fail "expected docker run log line"
+
+let test_docker_shell_missing_image_fails_before_run () =
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "missing:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"pwd"
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
+  with
+  | Ok _ -> Alcotest.fail "expected missing image preflight error"
+  | Error msg ->
+    Alcotest.(check bool) "structured image inspect error" true
+      (String_util.contains_substring msg "image_inspect_error");
+    Alcotest.(check bool) "next action preserves generic inspection guidance" true
+      (String_util.contains_substring msg "exact command output above");
+    let log = read_file log_path in
+    Alcotest.(check bool) "image inspect attempted" true
+      (String_util.contains_substring log "image inspect missing:test");
+    Alcotest.(check bool) "docker run skipped" false
+      (String_util.contains_substring log "\nrun ")
+
+let test_docker_shell_ir_parse_failure_blocks_before_run () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  match
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"echo \"unterminated"
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
+  with
+  | Ok _ -> Alcotest.fail "expected unsupported shell syntax to block before docker"
+  | Error msg ->
+    Alcotest.(check bool)
+      "parse failure is explicit"
+      true
+      (String_util.contains_substring msg "unsupported shell command shape");
+    Alcotest.(check bool)
+      "blocked command is attached"
+      true
+      (String_util.contains_substring msg "[blocked_cmd=echo \"unterminated]");
+    Alcotest.(check bool)
+      "docker preflight not reached"
+      false
+      (Sys.file_exists log_path)
+
+let test_execute_missing_image_without_factory_fails_closed () =
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "missing:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:(tool_execute_command_args ~cwd:playground "ls lib/ | head -20")
+      ()
+  in
+  Alcotest.(check (option bool)) "Docker request did not run on Host" None
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "missing factory is explicit" true
+    (response_mentions raw "error" "requires a turn sandbox factory");
+  Alcotest.(check (option string)) "no local fallback" None
+    (parse_string_field raw "sandbox_fallback");
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "image inspect skipped without factory" false
+    (String_util.contains_substring log "image inspect missing:test");
+  Alcotest.(check bool) "docker run skipped" false
+    (String_util.contains_substring log "\nrun ")
+
+let test_execute_outside_playground_rejects_before_image_preflight () =
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground:_ ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "missing:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let cwd = Filename.concat config.Workspace.base_path "outside-playground" in
+  ensure_dir cwd;
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_command_args ~cwd "ls lib/ | head -20")
+      ()
+  in
+  Alcotest.(check (option bool)) "legacy ok omitted" None
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "typed path rejection"
+    (Some "cwd_outside_sandbox")
+    (parse_string_field raw "code");
+  Alcotest.(check (option string)) "docker not requested" None
+    (parse_string_field raw "requested_sandbox");
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "image inspect skipped" false
+    (String_util.contains_substring log "image inspect missing:test");
+  Alcotest.(check bool) "docker run skipped" false
+    (String_util.contains_substring log "\nrun ")
+
+let test_image_change_selects_distinct_persistent_container () =
+  let script = {|#!/bin/sh
+state_dir="$(dirname "$0")"
+printf '%s\n' "$*" >> "$MASC_KEEPER_TEST_DOCKER_LOG"
+case "$1" in
+  info) printf '[]\n'; exit 0 ;;
+  image) printf '[]\n'; exit 0 ;;
+  inspect)
+    for arg do name="$arg"; done
+    if [ ! -f "$state_dir/$name" ]; then
+      printf 'no such container\n' >&2; exit 1
+    fi
+    case "$3" in *State.Running*) printf 'true\n';; *) printf 'fixture-id\n';; esac
+    exit 0 ;;
+  run)
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in --name) name="$2"; shift 2;; *) shift;; esac
+    done
+    touch "$state_dir/$name"
+    printf 'fixture-id\n'; exit 0 ;;
+  ps) exit 0 ;;
+  rm|stop) printf 'unexpected destructive action\n' >&2; exit 2 ;;
+  *) printf 'unexpected fixture command\n' >&2; exit 2 ;;
+esac
+|} in
+  with_fake_docker script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "image-adoption.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let sentinel = Filename.concat playground "existing-work.txt" in
+  write_file sentinel "preserved workspace";
+  let runtime image =
+    Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok image) () in
+  let select runtime =
+    match Keeper_turn_sandbox_runtime.exec_argv ~validate_cached_container:true
+      runtime ~cwd:playground ~command_argv:["printf"; "probe"] with
+    | Error detail -> Alcotest.fail detail
+    | Ok argv ->
+      let name = match Keeper_turn_sandbox_runtime.For_testing.get_state runtime with
+        | Running {container_name} -> container_name
+        | Not_started -> Alcotest.fail "real Docker route never started" in
+      Alcotest.(check bool) "exec targets selected persistent container" true
+        (List.mem name argv);
+      name in
+  let old = runtime "fixture:old" in
+  let first = select old in
+  let same = select (runtime "fixture:old") in
+  Alcotest.(check string) "same image adopts existing container" first same;
+  let next = runtime "fixture:documents" in
+  let second = select next in
+  Alcotest.(check bool) "new image selects another container" false (first = second);
+  Alcotest.(check string) "same new image adopts" second
+    (select (runtime "fixture:documents"));
+  Alcotest.(check string) "existing turn retains its container" first (select old);
+  Alcotest.(check string) "workspace root survives image change"
+    (Keeper_turn_sandbox_runtime.host_root old)
+    (Keeper_turn_sandbox_runtime.host_root next);
+  Alcotest.(check string) "workspace contents retained" "preserved workspace" (read_file sentinel);
+  let lines = String.split_on_char '\n' (read_file log_path) in
+  let runs = List.filter (String.starts_with ~prefix:"run ") lines in
+  Alcotest.(check int) "only two actual Docker create subprocesses" 2 (List.length runs);
+  List.iter (fun image ->
+    Alcotest.(check bool) "creation uses requested image" true
+      (List.exists (fun line -> List.mem image (String.split_on_char ' ' line)) runs))
+    ["fixture:old"; "fixture:documents"];
+  Alcotest.(check bool) "old container is never stopped or removed" false
+    (List.exists (fun line -> String.starts_with ~prefix:"rm " line
+                          || String.starts_with ~prefix:"stop " line) lines)
+
+(* [docker run] exits 0 and the daemon is then asked about the container it
+   made. The fake's [run] creates nothing it can later inspect; with the
+   stall file present it also makes every later inspect and [ps] fail, as a
+   daemon that stopped answering does. *)
+let fake_docker_after_run_script = {|#!/bin/sh
+state_dir="$(dirname "$0")"
+printf '%s\n' "$*" >> "$MASC_KEEPER_TEST_DOCKER_LOG"
+if [ -f "$state_dir/stalled" ]; then
+  case "$1" in
+    inspect|ps)
+      printf 'Cannot connect to the Docker daemon: context deadline exceeded\n' >&2
+      exit 1 ;;
+  esac
+fi
+case "$1" in
+  info) printf '[]\n'; exit 0 ;;
+  image) printf '[]\n'; exit 0 ;;
+  inspect) printf 'no such container\n' >&2; exit 1 ;;
+  run)
+    if [ -f "$state_dir/stall-after-run" ]; then touch "$state_dir/stalled"; fi
+    printf 'fixture-id\n'; exit 0 ;;
+  ps) exit 0 ;;
+  rm) exit 0 ;;
+  *) printf 'unexpected fixture command\n' >&2; exit 2 ;;
+esac
+|}
+
+let start_after_run ~stall_after_run =
+  with_fake_docker fake_docker_after_run_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "after-run.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  if stall_after_run
+  then
+    write_file
+      (Filename.concat
+         (Filename.dirname (Sys.getenv "MASC_TEST_FAKE_DOCKER_PATH"))
+         "stall-after-run")
+      "";
+  let runtime =
+    Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "fixture:after-run") ()
+  in
+  let result =
+    Keeper_turn_sandbox_runtime.exec_argv ~validate_cached_container:true runtime
+      ~cwd:playground ~command_argv:[ "printf"; "probe" ]
+  in
+  let started =
+    match Keeper_turn_sandbox_runtime.For_testing.get_state runtime with
+    | Running _ -> true
+    | Not_started -> false
+  in
+  result, started, String.split_on_char '\n' (read_file log_path)
+;;
+
+let ran_and_removed lines =
+  ( List.exists (String.starts_with ~prefix:"run ") lines
+  , List.exists (String.starts_with ~prefix:"rm ") lines )
+;;
+
+(* The daemon stalled after the run, so nobody can say whether the container
+   is up. It is not removed; the next start probes the stable name again. *)
+let test_a_stall_after_docker_run_does_not_remove_the_container () =
+  let result, started, lines = start_after_run ~stall_after_run:true in
+  (match result with
+   | Ok _ -> Alcotest.fail "a container nobody could ask about was used"
+   | Error _ -> ());
+  let ran, removed = ran_and_removed lines in
+  Alcotest.(check bool) "the container was created" true ran;
+  Alcotest.(check bool) "no rm after the run" false removed;
+  Alcotest.(check bool) "the start is not recorded as running" false started
+;;
+
+(* The daemon answered and does not list the container: removed, as before. *)
+let test_a_container_missing_after_docker_run_is_removed () =
+  let result, started, lines = start_after_run ~stall_after_run:false in
+  (match result with
+   | Ok _ -> Alcotest.fail "a container the daemon does not list was used"
+   | Error _ -> ());
+  let ran, removed = ran_and_removed lines in
+  Alcotest.(check bool) "the container was created" true ran;
+  Alcotest.(check bool) "the name is removed" true removed;
+  Alcotest.(check bool) "the start is not recorded as running" false started
+;;
+
+(* A sandboxed spawn is the Execute argv handed to a spawner instead of run,
+   so what has to hold is that the argv is the container's: an [exec] against
+   the running container, as the keeper's uid, with the container cwd. If this
+   drifts from what [run_exec_with_status_split] uses, a spawn and an Execute
+   for the same command stop landing in the same place.
+
+   This pins the construction. It does not run it -- see the PR note on what
+   is left unproven. *)
+let test_exec_argv_is_the_container_argv () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta
+  @@ fun factory ->
+  match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd:playground with
+  | Keeper_sandbox_factory.No_factory | Keeper_sandbox_factory.Remote_ssh_profile ->
+    Alcotest.fail "a docker keeper must resolve to a runtime"
+  | Keeper_sandbox_factory.Runtime { runtime; _ } ->
+    (match
+       Keeper_turn_sandbox_runtime.exec_argv
+         ~validate_cached_container:false
+         runtime
+         ~cwd:playground
+         ~command_argv:[ "printf"; "hello" ]
+     with
+     | Error detail -> Alcotest.failf "exec_argv must build an argv: %s" detail
+     | Ok argv ->
+       let joined = String.concat " " argv in
+       Alcotest.(check bool)
+         (Printf.sprintf "it is a container exec: %s" joined)
+         true
+         (List.exists (String.equal "exec") argv);
+       Alcotest.(check bool)
+         "it runs as the keeper uid"
+         true
+         (List.exists (String.equal "--user") argv);
+       Alcotest.(check bool)
+         "it names the keeper container"
+         true
+         (List.exists
+            (fun a -> String_util.contains_substring a "masc-keeper-")
+            argv);
+       Alcotest.(check bool)
+         "the command is the tail"
+         true
+         (match List.rev argv with
+          | "hello" :: "printf" :: _ -> true
+          | _ -> false))
+;;
+
+let test_docker_shell_mounts_masc_config_runtime_paths () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let masc_root =
+    Filename.concat config.Workspace.base_path Common.masc_dirname
+  in
+  let tasks_host = Filename.concat masc_root "tasks" in
+  ensure_dir tasks_host;
+  write_file (Filename.concat tasks_host "backlog.json") "{}";
+  write_file (Filename.concat masc_root "board_posts.jsonl") "";
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  match
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"pwd"
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
+  with
+  | Error msg -> Alcotest.failf "expected fake docker run, got %s" msg
+  | Ok result ->
+    (match result.Keeper_sandbox_docker.status with
+     | Unix.WEXITED 0 -> ()
+     | Unix.WEXITED code -> Alcotest.failf "expected exit 0, got %d" code
+     | Unix.WSIGNALED code -> Alcotest.failf "expected exit 0, signaled %d" code
+     | Unix.WSTOPPED code -> Alcotest.failf "expected exit 0, stopped %d" code);
+    let line = docker_run_line log_path in
+    let log = read_file log_path in
+    let container_root = Keeper_sandbox.container_root meta.name in
+    let host_config_dir =
+      Filename.concat (Filename.concat config.Workspace.base_path Common.masc_dirname) "config"
+    in
+    let container_config_dir =
+      Masc.Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    in
+    Alcotest.(check bool) "MASC config mounted read-only" true
+      (String_util.contains_substring
+         line
+         (host_config_dir ^ ":" ^ container_config_dir ^ ":ro"));
+    Alcotest.(check bool) "container MASC_BASE_PATH pinned" true
+      (String_util.contains_substring line "MASC_BASE_PATH=/tmp/masc-runtime");
+    Alcotest.(check bool) "container MASC_CONFIG_DIR pinned" true
+      (String_util.contains_substring line ("MASC_CONFIG_DIR=" ^ container_config_dir));
+    Alcotest.(check bool) "oneshot container has ttl label" true
+      (String_util.contains_substring line "masc.mcp.ttl_sec=");
+    (* -v is part of the removal, not a caller's option: the sandbox image
+       declares VOLUME ["/tmp/keeper-creds"], so dropping the flag orphans one
+       anonymous volume per oneshot container. *)
+    Alcotest.(check bool) "oneshot cleanup removes the container with its volume" true
+      (String_util.contains_substring log "\nrm -f -v masc-keeper-");
+    Alcotest.(check bool) "tasks mounted under runtime root" true
+      (String_util.contains_substring
+         line
+         (tasks_host ^ ":/tmp/masc-runtime/.masc/tasks:ro"));
+    Alcotest.(check bool) "tasks not nested under playground bind mount" false
+      (String_util.contains_substring
+         line
+         (tasks_host ^ ":" ^ container_root ^ "/.masc/tasks:ro"));
+    Alcotest.(check bool) "tasks not mounted at host absolute target" false
+      (String_util.contains_substring
+         line
+         (tasks_host ^ ":" ^ tasks_host ^ ":ro"));
+    Alcotest.(check bool) "auth state not mounted" false
+      (String_util.contains_substring line "/.masc/auth/")
+
+let run_docker_shell_command ~config ~(meta : Keeper_meta_contract.keeper_meta) ~playground
+    ~log_path =
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
+  ensure_dir repo;
+  if not (Sys.file_exists (Filename.concat repo ".git")) then
+    git_ok ~cwd:repo [ "init"; "-q" ];
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  (match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
+   | Some expected ->
+       Alcotest.(check string) "fake docker command selected" expected
+         (Masc.Keeper_sandbox_runtime.docker_command ())
+   | None -> ());
+  match
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config ~meta ~cwd:playground ~timeout_sec:5.0
+      ~cmd:"git status"
+      ~network_mode:Keeper_types_profile_sandbox.Network_inherit
+  with
+  | Error msg ->
+      Alcotest.failf "expected fake docker shell run, got %s" msg
+  | Ok result ->
+      let observed =
+        match result.Keeper_sandbox_docker.status with
+        | Unix.WEXITED code -> ("exit", code)
+        | Unix.WSIGNALED code -> ("signaled", code)
+        | Unix.WSTOPPED code -> ("stopped", code)
+      in
+      if observed <> ("exit", 0) then
+        Alcotest.failf "expected fake docker exit 0, got %s %d; log=%S; output=%S"
+          (fst observed) (snd observed) (read_file log_path)
+          result.Keeper_sandbox_docker.output;
+      docker_run_line log_path
+
+let test_docker_shell_skips_missing_ssh_auth_sock () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Config_dir_resolver.reset ();
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let missing_sock =
+    Filename.concat config.Workspace.base_path "missing-agent.sock"
+  in
+  with_env "SSH_AUTH_SOCK" missing_sock @@ fun () ->
+  let line =
+    run_docker_shell_command ~config ~meta ~playground ~log_path
+  in
+  Alcotest.(check bool) "missing ssh-agent socket is not mounted" false
+    (String_util.contains_substring line missing_sock);
+  Alcotest.(check bool) "missing ssh-agent env is not forwarded" false
+    (String_util.contains_substring line "SSH_AUTH_SOCK=")
+
+let test_docker_shell_inherit_network_omits_invalid_network_flag () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let line =
+    run_docker_shell_command ~config ~meta ~playground ~log_path
+  in
+  Alcotest.(check bool) "network inherit never uses invalid flag value" false
+    (String_util.contains_substring line "--network inherit")
+
+let test_docker_shell_mounts_numeric_user_identity () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let line =
+    with_env "GH_TOKEN" "host-token" @@ fun () ->
+    with_env "GITHUB_TOKEN" "github-token" @@ fun () ->
+    run_docker_shell_command ~config ~meta ~playground ~log_path
+  in
+  Alcotest.(check bool) "ambient GH_TOKEN not forwarded" false
+    (String_util.contains_substring line "GH_TOKEN=");
+  Alcotest.(check bool) "ambient GITHUB_TOKEN not forwarded" false
+    (String_util.contains_substring line "GITHUB_TOKEN=");
+  let identity_dir = Filename.concat playground ".docker-identity" in
+  let passwd_path = Filename.concat identity_dir "passwd" in
+  let group_path = Filename.concat identity_dir "group" in
+  Alcotest.(check bool) "passwd file mounted" true
+    (String_util.contains_substring line (passwd_path ^ ":/etc/passwd:ro"));
+  Alcotest.(check bool) "group file mounted" true
+    (String_util.contains_substring line (group_path ^ ":/etc/group:ro"));
+  Alcotest.(check bool) "USER env forwarded" true
+    (String_util.contains_substring line "USER=keeper");
+  Alcotest.(check bool) "passwd maps host uid" true
+    (String_util.contains_substring (read_file passwd_path)
+       (Printf.sprintf "keeper:x:%d:%d:" (Unix.getuid ()) (Unix.getgid ())));
+  Alcotest.(check bool) "group maps host gid" true
+    (String_util.contains_substring (read_file group_path)
+       (Printf.sprintf "keeper:x:%d:" (Unix.getgid ())))
+
+let test_docker_shell_projects_keeper_secret_dir () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let secret_root =
+    Filename.concat
+      (Filename.concat (Filename.concat config.Workspace.base_path Common.masc_dirname) "secrets")
+      (Workspace_utils.safe_filename meta.name)
+  in
+  let token_path = Filename.concat (Filename.concat secret_root "env") "GH_TOKEN" in
+  let ssh_path =
+    Filename.concat
+      (Filename.concat secret_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  ensure_dir (Filename.dirname token_path);
+  ensure_dir (Filename.dirname ssh_path);
+  write_file token_path "projected-token\n";
+  write_file ssh_path "PRIVATE KEY";
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let line = run_docker_shell_command ~config ~meta ~playground ~log_path in
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let container_masc_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    |> Filename.dirname
+  in
+  let github_container_dir =
+    Keeper_github_identity.container_config_dir
+      ~container_masc_dir
+      ~keeper_name:meta.name
+  in
+  let github_snapshot =
+    match mount_source_for_destination line github_container_dir with
+    | None -> Alcotest.fail "missing read-only Keeper GitHub snapshot mount"
+    | Some path -> path
+  in
+  Alcotest.(check bool) "operator-owned GitHub config is not mounted" true
+    (not (String.equal github_snapshot github_config_dir));
+  Alcotest.(check bool) "one-shot GitHub snapshot is cleaned" false
+    (Sys.file_exists github_snapshot);
+  Alcotest.(check bool) "projected raw token not in docker argv" false
+    (String_util.contains_substring line "projected-token");
+  Alcotest.(check bool) "projected env uses env-file" true
+    (String_util.contains_substring line "--env-file ");
+  Alcotest.(check bool) "projected file mounted read-only" true
+    (String_util.contains_substring line (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+  (match env_file_path_from_docker_line line with
+   | None -> Alcotest.fail "missing --env-file path in docker log"
+   | Some env_file ->
+     Alcotest.(check bool) "env-file cleaned after docker run" false
+       (Sys.file_exists env_file))
+
+let test_docker_shell_names_the_keeper_as_git_author_only () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let line =
+    run_docker_shell_command ~config ~meta ~playground ~log_path
+  in
+  Alcotest.(check bool) "git author name is the keeper" true
+    (String_util.contains_substring line ("GIT_AUTHOR_NAME=" ^ meta.name));
+  Alcotest.(check bool) "does not synthesize git author email" false
+    (String_util.contains_substring line "GIT_AUTHOR_EMAIL=");
+  Alcotest.(check bool) "git committer name is the keeper" true
+    (String_util.contains_substring line ("GIT_COMMITTER_NAME=" ^ meta.name));
+  Alcotest.(check bool) "does not synthesize git committer email" false
+    (String_util.contains_substring line "GIT_COMMITTER_EMAIL=")
+
+let test_execute_fake_docker_executes () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  let raw = outcome.raw_output in
+  Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "bash via=docker" (Some "docker")
+    (evidence_string_field outcome "via");
+  Alcotest.(check bool) "bash output includes fake docker stdout" true
+    (response_mentions raw "output" "stdout:")
+
+(* The Docker protocol remains the existing fixture; its exec arm is a real
+   child that drains two independently generated source files. *)
+let fake_docker_file_output_script =
+  {|#!/bin/sh
+if [ "$1" = "exec" ]; then
+  printf '%s\n' "$*" >> "$MASC_KEEPER_TEST_DOCKER_LOG"
+  fixture_dir=${MASC_KEEPER_TEST_DOCKER_LOG%/*}
+  printf x >> "$fixture_dir/exec-count"
+  if [ "${2-}" = "-i" ]; then cat >/dev/null; fi
+  cat "$fixture_dir/source.stdout"
+  cat "$fixture_dir/source.stderr" >&2
+  IFS= read -r exit_code < "$fixture_dir/exit-code"
+  exit "$exit_code"
+fi
+|} ^ fake_docker_echo_script
+;;
+
+module Output_sha = Agent_core_sha256
+
+let write_large_execute_source ~path ~stream ~private_token ~combined =
+  let block = String.make 4095 (if stream = `Stdout then 'a' else 'b') ^ "\n" in
+  let capture_ceiling = Common.max_process_capture_head_bytes + Common.max_process_capture_tail_bytes in
+  let blocks = 1 + (capture_ceiling / String.length block) in
+  let digest = ref Output_sha.empty in
+  let combined = ref combined in
+  let bytes = ref 0 in
+  let label = if stream = `Stdout then "STDOUT" else "STDERR" in
+  Out_channel.with_open_bin path (fun channel ->
+    let emit actual expected =
+      output_string channel actual;
+      digest := Output_sha.feed_string !digest expected;
+      combined := Output_sha.feed_string !combined expected;
+      bytes := !bytes + String.length expected
+    in
+    let emit_same value = emit value value in
+    emit_same (label ^ "-BEGIN\n");
+    for i = 0 to blocks - 1 do
+      emit_same block;
+      if i = blocks / 2 then
+        match private_token with
+        | None -> emit_same (label ^ "-MIDDLE\n")
+        | Some token ->
+          (* The token crosses a bounded redaction flush within one long
+             record, independently of the process pipe's chunk boundaries. *)
+          let before = String.make 4090 'p' in
+          let after = String.make 5000 'q' ^ "\n" in
+          emit (before ^ token ^ after) (before ^ "[REDACTED]" ^ after)
+    done;
+    emit_same (label ^ "-END\n"));
+  Output_sha.(to_hex (get !digest)), !bytes, !combined
+;;
+
+let execute_artifact raw field =
+  match Tool_output.normalized_artifact_ref_of_json (parse_field raw field) with
+  | Tool_output.Decoded_normalized_artifact_ref artifact -> artifact
+  | Tool_output.Not_normalized_artifact_ref -> Alcotest.fail (field ^ " is not an artifact")
+  | Tool_output.Invalid_normalized_artifact_ref { detail } -> Alcotest.fail detail
+;;
+
+let verify_execute_artifact_pages store (artifact : Tool_output.artifact_ref) ~sha ~bytes =
+  Alcotest.(check string) "artifact addresses the full expected output" sha artifact.sha256;
+  Alcotest.(check int) "artifact includes every output byte" bytes artifact.bytes;
+  let rec pages offset digest =
+    match Tool_blob_store.fetch_range store ~sha256:artifact.sha256 ~offset ~max_bytes:65536 with
+    | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+    | Ok None -> Alcotest.fail "published output artifact is absent"
+    | Ok (Some page) ->
+      Alcotest.(check int) "page reports complete output length" bytes page.total_bytes;
+      if String.length page.content = 0 then (
+        Alcotest.(check int) "EOF follows the tail" bytes offset;
+        Alcotest.(check string) "all pages reproduce the complete output"
+          sha Output_sha.(to_hex (get digest)))
+      else pages (offset + String.length page.content) (Output_sha.feed_string digest page.content)
+  in
+  pages 0 Output_sha.empty
+;;
+
+let test_execute_preserves_large_docker_output ~exit_code ~private_output ~storage_failure () =
+  with_fake_docker fake_docker_file_output_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let stdout_path = Filename.concat config.Workspace.base_path "source.stdout" in
+  let stderr_path = Filename.concat config.Workspace.base_path "source.stderr" in
+  let counter_path = Filename.concat config.Workspace.base_path "exec-count" in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  let private_token =
+    if private_output then Some "private-execute-fixture-token-9e320ad6" else None
+  in
+  (match private_token with
+   | None -> ()
+   | Some token ->
+     let path = Filename.concat
+         (Filename.concat
+            (Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "secrets")
+            (Workspace_utils.safe_filename meta.name)) "env/GH_TOKEN" in
+     ensure_dir (Filename.dirname path);
+     write_file path (token ^ "\n"));
+  let stdout_sha, stdout_bytes, combined =
+    write_large_execute_source ~path:stdout_path ~stream:`Stdout ~private_token ~combined:Output_sha.empty
+  in
+  let stderr_sha, stderr_bytes, combined =
+    write_large_execute_source ~path:stderr_path ~stream:`Stderr ~private_token ~combined
+  in
+  let store = Tool_blob_store.create ~base_path:config.base_path in
+  if storage_failure then write_file (Tool_blob_store.root_dir store) "not a directory";
+  write_file (Filename.concat config.base_path "exit-code") (string_of_int exit_code ^ "\n");
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let streamed_stdout = ref Output_sha.empty in
+  let streamed_stderr = ref Output_sha.empty in
+  let leaked = ref false in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.on_release sw (fun () ->
+    Masc.Keeper_keepalive_signal.register_record_execute_stream_chunk
+      (fun ~keeper_name:_ ~stream_id:_ ~stream:_ _ -> ()));
+  Masc.Keeper_keepalive_signal.register_record_execute_stream_chunk
+    (fun ~keeper_name:_ ~stream_id:_ ~stream chunk ->
+      (match private_token with
+       | Some token when String_util.contains_substring chunk token -> leaked := true
+       | Some _ | None -> ());
+      match stream with
+      | `Stdout -> streamed_stdout := Output_sha.feed_string !streamed_stdout chunk
+      | `Stderr -> streamed_stderr := Output_sha.feed_string !streamed_stderr chunk);
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "emit-file-fixture" ~argv:[]) ()
+  in
+  let raw = outcome.raw_output in
+  Alcotest.(check string) "the fake Docker exec really ran exactly once" "x" (read_file counter_path);
+  Alcotest.(check int) "the child's actual exit status is retained" exit_code (parse_status_exit_code raw);
+  Alcotest.(check bool) "private token never reached streaming observers" false !leaked;
+  Alcotest.(check string) "stdout stream is complete and redacted"
+    stdout_sha Output_sha.(to_hex (get !streamed_stdout));
+  Alcotest.(check string) "stderr stream is complete and redacted"
+    stderr_sha Output_sha.(to_hex (get !streamed_stderr));
+  (match private_token with
+   | None -> ()
+   | Some token -> Alcotest.(check bool) "response does not expose the private token" false
+       (String_util.contains_substring raw token));
+  if storage_failure then (
+    Alcotest.(check bool) "storage failure is a failure after an actual execution" true
+      (match outcome.disposition, outcome.failure_effect_disposition with
+       | Tool_result.Failed _, Tool_result.Proven_post_effect -> true
+       | _ -> false);
+    Alcotest.(check (option string)) "storage failure follows the completed process"
+      (Some "execute_output_externalization_failed") (parse_string_field raw "code");
+    List.iter (fun field -> Alcotest.(check bool) "no false artifact is published" true
+      (parse_field raw field = `Null)) [ "stdout_artifact"; "stderr_artifact"; "output_artifact" ])
+  else (
+    Alcotest.(check bool) "a nonzero child is a completed Execute result" true
+      (match outcome.disposition with Tool_result.Completed () -> true | _ -> false);
+    Alcotest.(check (option bool)) "success matches the real exit status"
+      (Some (exit_code = 0)) (parse_bool_field raw "ok");
+    Alcotest.(check (option string)) "the files reached actual EOF"
+      (Some "complete") (parse_string_field raw "output_completeness");
+    Sys.remove stdout_path;
+    Sys.remove stderr_path;
+    verify_execute_artifact_pages store (execute_artifact raw "stdout_artifact")
+      ~sha:stdout_sha ~bytes:stdout_bytes;
+    verify_execute_artifact_pages store (execute_artifact raw "stderr_artifact")
+      ~sha:stderr_sha ~bytes:stderr_bytes;
+    verify_execute_artifact_pages store (execute_artifact raw "output_artifact")
+      ~sha:Output_sha.(to_hex (get combined)) ~bytes:(stdout_bytes + stderr_bytes))
+;;
+
+let test_turn_runtime_projects_keeper_secret_dir () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let secret_root =
+    Filename.concat
+      (Filename.concat (Filename.concat config.Workspace.base_path Common.masc_dirname) "secrets")
+      (Workspace_utils.safe_filename meta.name)
+  in
+  let token_path = Filename.concat (Filename.concat secret_root "env") "GH_TOKEN" in
+  let ssh_path =
+    Filename.concat
+      (Filename.concat secret_root "files")
+      "home/keeper/.ssh/id_ed25519"
+  in
+  ensure_dir (Filename.dirname token_path);
+  ensure_dir (Filename.dirname ssh_path);
+  write_file token_path "projected-token\n";
+  write_file ssh_path "PRIVATE KEY";
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  (* A configured identity is what makes the persistent container mount the
+    stable directory; an unconfigured keeper mounts nothing. *)
+  let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  write_file hosts_path "github.com:\n  user: keeper-user\n  oauth_token: stable-token\n";
+  Unix.chmod hosts_path 0o600;
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let github_snapshot_path = ref None in
+  with_turn_sandbox_factory ~config ~meta (fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
+    (parse_bool_field raw "ok");
+  let log = read_file log_path in
+  Alcotest.(check bool) "projected raw token not in docker argv" false
+    (String_util.contains_substring log "projected-token");
+  Alcotest.(check bool) "turn container uses env-file" true
+    (String_util.contains_substring log "--env-file ");
+  Alcotest.(check bool) "turn container mounts file read-only" true
+    (String_util.contains_substring log
+       (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let container_masc_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    |> Filename.dirname
+  in
+  let github_container_dir =
+    Keeper_github_identity.container_config_dir
+      ~container_masc_dir
+      ~keeper_name:meta.name
+  in
+  (* The container is keeper-lifetime: it mounts the stable GitHub config
+     directory itself, read-only, so a host login reaches a running
+     container through the bind mount and no per-turn snapshot directory
+     exists. *)
+  (match mount_source_for_destination log github_container_dir with
+   | None -> Alcotest.fail "missing stable Keeper GitHub config mount"
+   | Some mount_source ->
+     Alcotest.(check bool) "turn container mounts the stable identity dir" true
+       (String.equal mount_source github_config_dir);
+     github_snapshot_path := Some mount_source);
+  (match env_file_path_from_docker_line log with
+   | None -> Alcotest.fail "missing --env-file path in docker log"
+   | Some env_file ->
+     Alcotest.(check bool) "env-file cleaned after container start" false
+       (Sys.file_exists env_file)));
+  match !github_snapshot_path with
+  | None -> Alcotest.fail "stable GitHub config mount was not recorded"
+  | Some github_config_dir ->
+    Alcotest.(check bool) "stable identity dir survives turn cleanup" true
+      (Sys.file_exists github_config_dir)
+
+let test_turn_runtime_redacts_the_stable_identity_mount () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let snapshot_token = "snapshot-token-before-central-rotation" in
+  let rotated_token = "central-token-after-container-start" in
+  let relogin_token = "central-token-after-relogin" in
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  write_file
+    hosts_path
+    ("github.com:\n  user: keeper-user\n  oauth_token: " ^ snapshot_token ^ "\n");
+  Unix.chmod hosts_path 0o600;
+  with_env "MASC_STREAM_EXECUTE_OUTPUT" "false" @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let snapshots = ref [] in
+  with_turn_sandbox_factory ~config ~meta (fun factory ->
+  let execute value =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ value ])
+      ()
+  in
+  (* Redaction tracks the live identity file: the token hosts.yml currently
+     holds never reaches a response, and rotation reaches the running
+     container through the mount with no per-turn snapshot to retire.
+     Superseded tokens are no longer redacted -- that defense came from
+     retired snapshot directories, and a persistent container has none. *)
+  ignore (execute "hello");
+  write_file
+    hosts_path
+    ("github.com:\n  user: keeper-user\n  oauth_token: " ^ rotated_token ^ "\n");
+  Unix.chmod hosts_path 0o600;
+  let rotated_raw = execute rotated_token in
+  Alcotest.(check bool) "current token never reaches response" false
+    (String_util.contains_substring rotated_raw rotated_token);
+  if not (String_util.contains_substring rotated_raw "[REDACTED]")
+  then Alcotest.failf "current token was not redacted: %s" rotated_raw;
+  write_file hosts_path "{}\n";
+  Unix.chmod hosts_path 0o600;
+  write_file
+    hosts_path
+    ("github.com:\n  user: keeper-user\n  oauth_token: " ^ relogin_token ^ "\n");
+  Unix.chmod hosts_path 0o600;
+  let relogin_raw = execute relogin_token in
+  Alcotest.(check bool) "re-login token never reaches response" false
+    (String_util.contains_substring relogin_raw relogin_token);
+  if not (String_util.contains_substring relogin_raw "[REDACTED]")
+  then Alcotest.failf "re-login token was not redacted: %s" relogin_raw;
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let container_masc_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    |> Filename.dirname
+  in
+  let github_container_dir =
+    Keeper_github_identity.container_config_dir
+      ~container_masc_dir
+      ~keeper_name:meta.name
+  in
+  (* One keeper-lifetime mount: rotation, logout, and re-login all happen on
+     the host side of the stable directory and reach the running container
+     through the bind mount. There is nothing per-turn to create or clean. *)
+  snapshots :=
+    mount_sources_for_destination (read_file log_path) github_container_dir
+    |> List.sort_uniq String.compare;
+  Alcotest.(check int) "one stable mount across the whole rotation" 1
+    (List.length !snapshots);
+  (match !snapshots with
+   | [ stable ] ->
+     Alcotest.(check bool) "the stable config dir is the mount" true
+       (String.equal stable github_config_dir);
+     Alcotest.(check bool) "stable identity dir survives turn cleanup" true
+       (Sys.file_exists stable)
+   | _ -> Alcotest.fail "expected exactly the stable identity mount"))
+
+let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
+  with_tool_policy_config @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:
+        (tool_execute_command_args ~cwd:playground "ls lib/ | head -20")
+      ()
+  in
+  let raw = outcome.raw_output in
+  Alcotest.(check (option bool)) "safe pipeline is allowed" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string))
+    "safe pipeline routes through docker"
+    (Some "docker")
+    (evidence_string_field outcome "via");
+  Alcotest.(check bool) "bash output includes fake docker stdout" true
+    (response_mentions raw "output" "stdout:")
+
+let test_execute_exit_one_remains_failure_in_docker_route () =
+  with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let lib =
+    Filename.concat
+      (Filename.concat (Filename.concat playground "repos") "masc")
+      "lib"
+  in
+  ensure_git_repo (Filename.dirname lib);
+  ensure_dir lib;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib "sample.ml") "alpha\n");
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:
+        (tool_execute_typed_exec_args ~cwd:playground "rg"
+           ~argv:[ "missing_one|missing_two"; "repos/masc/lib" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "exit one is not success"
+    (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check int) "rg keeps exit=1 status" 1
+    (parse_status_exit_code raw)
+
+let test_execute_blocks_file_redirect_before_docker () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "echo hello > out.txt");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  (match parse_bool_field raw "ok" with
+   | Some true -> Alcotest.failf "legacy cmd unexpectedly succeeded: %s" raw
+   | Some false | None -> ());
+  Alcotest.(check (option string))
+    "typed boundary error"
+    (Some
+       "$.cmd is not a supported typed Execute field; accepted: argv, command, \
+        shell, cwd, timeout_sec, intent")
+    (parse_string_field raw "error");
+  Alcotest.(check bool) "docker was not invoked" false
+    (Sys.file_exists log_path)
+
+let test_execute_repo_checks_routes_through_docker () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:
+        (tool_execute_typed_exec_args ~cwd:playground "gh"
+           ~argv:[ "pr"; "checks"; "15659"; "--repo"; "jeong-sik/masc" ])
+      ()
+  in
+  let raw = outcome.raw_output in
+  Alcotest.(check (option bool)) "typed gh succeeds" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string))
+    "typed gh routes through docker"
+    (Some "docker")
+    (evidence_string_field outcome "via");
+  Alcotest.(check (option string))
+    "no legacy shell next-tool bridge"
+    None
+    (parse_string_field raw "required_next_tool");
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "docker container was invoked" true
+    (docker_log_has_container_execution log)
+
+
+let test_execute_rewrites_host_path_command_for_docker () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let container_root = Keeper_sandbox.container_root meta.name in
+  ensure_git_repo (Filename.concat (Filename.concat playground "repos") "masc");
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:
+        (tool_execute_typed_exec_args ~cwd:playground "ls"
+           ~argv:
+             [
+               Printf.sprintf "%s/repos/masc"
+                 (Keeper_alerting_path.strip_trailing_slashes playground);
+             ])
+      ()
+  in
+  Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "command uses container path" true
+    (response_mentions raw "output"
+       (Filename.concat container_root "repos/masc"));
+  Alcotest.(check bool) "command no longer leaks host playground path" false
+    (response_mentions raw "output" playground)
+
+let test_docker_mount_failure_message_preserves_path () =
+  let mount_path =
+    "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/masc/.worktrees/"
+    ^ String.make 320 'a'
+    ^ "/repo"
+  in
+  let output =
+    "docker: Error response from daemon: failed to create task for container: "
+    ^ "failed to create shim task: OCI runtime create failed: "
+    ^ "runc create failed: unable to start container process: "
+    ^ "error during container init: error mounting \""
+    ^ mount_path
+    ^ "\" to rootfs at \"/workspace\": stat "
+    ^ mount_path
+    ^ ": no such file or directory"
+  in
+  let message =
+    Keeper_sandbox_exec_failure.docker_failure_message
+      ~image:"masc-keeper-sandbox:local"
+      ~status:(Unix.WEXITED 125)
+      ~output
+  in
+  Alcotest.(check bool) "full mount path preserved" true
+    (String_util.contains_substring message mount_path);
+  Alcotest.(check bool) "mount marker emitted" true
+    (String_util.contains_substring message "docker_mount_failure=true");
+  Alcotest.(check bool) "status emitted" true
+    (String_util.contains_substring message "status=\"exit=125\"")
+
+(* A failed [docker run] that printed only a container id used to read as
+   "docker_container_start_failed: <hex>": no exit status, and nothing to say
+   whether a container of that name was left behind (#31363). *)
+let container_id_only = "49e2edb7faf9d6b3de3552a1273ca31e847c72f9b91af7e487c07836efe17610"
+let start_prefix = "docker_container_start_failed"
+
+let run_failure ?(output = container_id_only) ?container_state ~status () =
+  Keeper_sandbox_exec_failure.docker_run_failure_message
+    ~prefix:start_prefix
+    ~image:"masc-keeper-sandbox:local"
+    ?container_state
+    ~status
+    ~output
+    ()
+
+let contains = String_util.contains_substring
+
+(* Number of non-overlapping occurrences of [needle] in [haystack]. *)
+let occurrences haystack needle =
+  let n = String.length needle in
+  let rec go from count =
+    if from + n > String.length haystack
+    then count
+    else if String.equal (String.sub haystack from n) needle
+    then go (from + n) (count + 1)
+    else go (from + 1) count
+  in
+  go 0 0
+
+let test_run_failure_message_carries_status_and_container_state () =
+  let observed =
+    run_failure
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_stopped)
+      ()
+  in
+  Alcotest.(check bool) "keeps the prefix" true
+    (contains observed (start_prefix ^ ": status=exit=125"));
+  Alcotest.(check bool) "keeps the container id" true (contains observed container_id_only);
+  Alcotest.(check bool) "reports a container of that name that is not running" true
+    (contains observed "container_after_run=stopped");
+  let none_left =
+    run_failure
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_absent)
+      ()
+  in
+  Alcotest.(check bool) "reports no container of that name" true
+    (contains none_left "container_after_run=absent");
+  let unprobed =
+    run_failure
+      ~status:(Unix.WSIGNALED 9)
+      ~container_state:(Error "docker inspect timed out")
+      ()
+  in
+  Alcotest.(check bool) "a signal is named as a signal" true
+    (contains unprobed "status=signal=9");
+  Alcotest.(check bool) "a failed probe is unknown, not a guess" true
+    (contains unprobed "container_after_run=unknown")
+
+let test_run_failure_message_without_a_probe_names_no_container_state () =
+  let message = run_failure ~status:(Unix.WEXITED 125) () in
+  Alcotest.(check bool) "status still stated" true (contains message "status=exit=125");
+  Alcotest.(check bool) "a caller that did not probe does not claim a state" false
+    (contains message "container_after_run")
+
+let test_run_failure_message_names_empty_output () =
+  let message = run_failure ~output:"  \n" ~status:(Unix.WEXITED 1) () in
+  Alcotest.(check bool) "empty output is marked, not left blank" true
+    (contains message "output=<no output>");
+  Alcotest.(check bool) "a plain failure carries no mount marker" false
+    (contains message "docker_mount_failure=true")
+
+let test_run_failure_message_trims_output () =
+  let message = run_failure ~output:(container_id_only ^ "\n") ~status:(Unix.WEXITED 125) () in
+  Alcotest.(check bool) "no newline splits the line" false (String.contains message '\n')
+
+let test_run_failure_message_keeps_mount_context () =
+  let mount_path = "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/masc" in
+  let output =
+    "docker: Error response from daemon: failed to create task for container: "
+    ^ "failed to create shim task: OCI runtime create failed: "
+    ^ "runc create failed: unable to start container process: "
+    ^ "error during container init: error mounting \""
+    ^ mount_path
+    ^ "\" to rootfs at \"/workspace\": stat "
+    ^ mount_path
+    ^ ": no such file or directory"
+  in
+  let message =
+    run_failure
+      ~output
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_stopped)
+      ()
+  in
+  Alcotest.(check bool) "mount marker kept" true
+    (contains message "docker_mount_failure=true");
+  Alcotest.(check bool) "mount path kept" true (contains message mount_path);
+  Alcotest.(check int) "status stated once" 1 (occurrences message "status=exit=125")
+
+let test_docker_mount_failure_structured_details () =
+  let mount_path =
+    "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/agent_core/.worktrees/"
+    ^ String.make 280 'b'
+  in
+  let output =
+    "OCI runtime create failed: runc create failed: error during container init: "
+    ^ "error mounting \""
+    ^ mount_path
+    ^ "\" to rootfs"
+  in
+  match
+    Keeper_sandbox_runtime.docker_mount_failure_details
+      ~base_path_hash:"hash456"
+      ~keeper_name:"nu"
+      ~image:"masc-keeper-sandbox:local"
+      ~status_label:"exit=125"
+      ~container_kind:"turn"
+      ~network_label:"none"
+      ~output
+      ()
+  with
+  | None -> Alcotest.fail "expected structured docker mount failure details"
+  | Some json ->
+    let field name = Json.member name json |> Json.to_string in
+    Alcotest.(check string) "event" "keeper_docker_mount_failure" (field "event");
+    Alcotest.(check string) "mount_path" mount_path (field "mount_path");
+    Alcotest.(check string) "base_path_hash" "hash456" (field "base_path_hash");
+    Alcotest.(check string) "keeper" "nu" (field "keeper");
+    Alcotest.(check string) "container_kind" "turn" (field "container_kind");
+    Alcotest.(check string) "network" "none" (field "network")
+
+let test_docker_mount_failure_path_is_bounded () =
+  let mount_path = "/host_mnt/" ^ String.make 5000 'x' in
+  let output =
+    "OCI runtime create failed: error during container init: error mounting \""
+    ^ mount_path
+    ^ "\""
+  in
+  match Keeper_sandbox_runtime.docker_mount_failure_path output with
+  | None -> Alcotest.fail "expected bounded mount path"
+  | Some path ->
+    Alcotest.(check int) "bounded mount path length" 4096 (String.length path);
+    Alcotest.(check bool) "bounded path remains prefix" true
+      (String.starts_with ~prefix:path mount_path)
+
+let test_docker_mount_failure_requires_path () =
+  let output =
+    "OCI runtime create failed: error during container init: error mounting without quoted path"
+  in
+  Alcotest.(check (option string)) "missing path is not a mount diagnostic" None
+    (Keeper_sandbox_runtime.docker_mount_failure_path output);
+  Alcotest.(check string) "missing path has no mount context" ""
+    (Keeper_sandbox_runtime.docker_mount_failure_context_suffix output)
+
+let test_docker_mount_failure_requires_daemon_origin () =
+  let app_output = {|application stderr: error mounting "./fixtures" failed|} in
+  Alcotest.(check (option string)) "app output is not a mount diagnostic" None
+    (Keeper_sandbox_runtime.docker_mount_failure_path app_output);
+  Alcotest.(check string) "app output has no mount context" ""
+    (Keeper_sandbox_runtime.docker_mount_failure_context_suffix app_output);
+  let marker_output = {|mount_path="/tmp/user-output"|} in
+  Alcotest.(check (option string)) "marker-only output is not daemon-originated" None
+    (Keeper_sandbox_runtime.docker_mount_failure_path marker_output)
+  ;
+  let app_oci_output =
+    {|application stderr: OCI runtime create failed: error mounting "./fixtures"|}
+  in
+  Alcotest.(check (option string)) "runtime-like app output lacks init origin" None
+    (Keeper_sandbox_runtime.docker_mount_failure_path app_oci_output)
+
+(* The sandbox image declares VOLUME ["/tmp/keeper-creds"], so Docker mints a
+   fresh anonymous volume for every container it starts. A removal that omits
+   -v leaves that volume behind unnamed and unreferenced; 9,563 such orphans
+   were observed in the daemon metadata index, and 4,795 again on 2026-09-01
+   because only one of the five removal sites carried the flag. The flag now
+   lives in the argv, so this pins the argv rather than each call site. *)
+let test_container_removal_reclaims_anonymous_volumes () =
+  let argv = Keeper_sandbox_runtime.docker_remove_argv "keeper-sandbox-probe" in
+  let n = List.length argv in
+  let tail = List.filteri (fun i _ -> i >= n - 4) argv in
+  Alcotest.(check (list string))
+    "removal argv ends in rm -f -v <container>"
+    [ "rm"; "-f"; "-v"; "keeper-sandbox-probe" ]
+    tail
+;;
+
+let () =
+  read_stdin_as_empty ();
+  Alcotest.run "Keeper_sandbox_docker_route"
+    [
+      ( "docker_route_fires",
+        [
+          Alcotest.test_case
+            "docker tool execute ops route through docker"
+            `Quick test_readonly_ops_route_through_docker;
+          Alcotest.test_case
+            "docker Execute refuses an unresolved image before startup"
+            `Quick test_execute_without_catalog_image_fails_before_docker;
+          Alcotest.test_case
+            "docker Execute git cmd routes through docker"
+            `Quick test_execute_git_routes_through_docker;
+          Alcotest.test_case
+            "docker Execute git uses turn runtime"
+            `Quick test_execute_git_uses_turn_runtime;
+          Alcotest.test_case
+            "docker Execute git works without credential bundle"
+            `Quick test_execute_git_without_github_bundle_succeeds;
+          Alcotest.test_case
+            "docker keeper leaves git -C syntax to the CLI"
+            `Quick test_execute_git_c_option_is_owned_by_cli;
+          Alcotest.test_case
+            "docker keeper does not infer repository cwd from argv"
+            `Quick test_execute_git_c_bare_worktrees_is_owned_by_cli;
+          Alcotest.test_case
+            "readonly keeper git status works"
+            `Quick test_execute_git_status_readonly;
+          Alcotest.test_case
+            "docker keeper git push routes through sandbox"
+            `Quick test_execute_git_push_routes_docker;
+          Alcotest.test_case
+            "docker keeper git push routes through docker"
+            `Quick test_execute_git_push_routes_through_docker;
+          Alcotest.test_case
+            "tool_search_files repo review is unsupported"
+            `Quick test_tool_search_files_repo_review_is_unsupported;
+          Alcotest.test_case
+            "docker Execute executes through fake docker"
+            `Quick test_execute_fake_docker_executes;
+          Alcotest.test_case
+            "docker Execute preserves every stdout and stderr byte as paged artifacts"
+            `Quick (test_execute_preserves_large_docker_output
+              ~exit_code:0 ~private_output:false ~storage_failure:false);
+          Alcotest.test_case
+            "failed docker Execute preserves complete redacted output without replay"
+            `Quick (test_execute_preserves_large_docker_output
+              ~exit_code:17 ~private_output:true ~storage_failure:false);
+          Alcotest.test_case
+            "docker output storage failure retains the executed status without replay"
+            `Quick (test_execute_preserves_large_docker_output
+              ~exit_code:17 ~private_output:false ~storage_failure:true);
+          Alcotest.test_case
+            "docker Execute safe pipe redirect routes through docker"
+            `Quick test_execute_allows_validator_safe_pipe_redirect_in_docker_route;
+          Alcotest.test_case
+            "docker Execute exit one remains failure"
+            `Quick test_execute_exit_one_remains_failure_in_docker_route;
+          Alcotest.test_case
+            "docker Execute blocks file redirects before docker"
+            `Quick test_execute_blocks_file_redirect_before_docker;
+          Alcotest.test_case
+            "docker Execute routes repo checks through docker"
+            `Quick test_execute_repo_checks_routes_through_docker;
+          Alcotest.test_case
+            "docker Execute rewrites host paths before exec"
+            `Quick test_execute_rewrites_host_path_command_for_docker;
+          Alcotest.test_case
+            "docker mount failure preserves full path"
+            `Quick test_docker_mount_failure_message_preserves_path;
+          Alcotest.test_case
+            "docker run failure carries status and container state"
+            `Quick test_run_failure_message_carries_status_and_container_state;
+          Alcotest.test_case
+            "docker run failure without a probe claims no container state"
+            `Quick test_run_failure_message_without_a_probe_names_no_container_state;
+          Alcotest.test_case
+            "docker run failure names empty output"
+            `Quick test_run_failure_message_names_empty_output;
+          Alcotest.test_case
+            "docker run failure trims its output"
+            `Quick test_run_failure_message_trims_output;
+          Alcotest.test_case
+            "docker run failure keeps mount context"
+            `Quick test_run_failure_message_keeps_mount_context;
+          Alcotest.test_case
+            "docker mount failure emits structured details"
+            `Quick test_docker_mount_failure_structured_details;
+          Alcotest.test_case
+            "docker mount failure path is bounded"
+            `Quick test_docker_mount_failure_path_is_bounded;
+          Alcotest.test_case
+            "docker mount failure requires extracted path"
+            `Quick test_docker_mount_failure_requires_path;
+          Alcotest.test_case
+            "docker mount failure requires daemon origin"
+            `Quick test_docker_mount_failure_requires_daemon_origin;
+        ] );
+      ( "docker_route_skipped",
+        [
+          Alcotest.test_case "legacy keeper skips docker route" `Quick
+            test_cat_legacy_keeper_skips_docker;
+          Alcotest.test_case "legacy Execute skips docker route" `Quick
+            test_execute_legacy_skips_docker;
+        ] );
+      ( "docker_route_contract",
+        [
+          Alcotest.test_case "rg no-match remains successful" `Quick
+            test_rg_no_match_remains_successful_in_docker_route;
+          Alcotest.test_case "unknown workspace op is unsupported before docker" `Quick
+            test_unknown_workspace_op_is_unsupported_before_docker;
+          Alcotest.test_case
+            "turn sandbox factory ignores mid-turn registry profile drift"
+            `Quick test_turn_sandbox_factory_ignores_mid_turn_registry_profile_drift;
+          Alcotest.test_case
+            "docker command skips empty PATH segment"
+            `Quick test_docker_command_skips_empty_path_segment;
+          Alcotest.test_case
+            "guard refuses the real daemon without a fake"
+            `Quick test_guard_refuses_the_real_daemon_without_a_fake;
+          Alcotest.test_case
+            "guard is silent with a fake"
+            `Quick test_guard_is_silent_with_a_fake;
+          Alcotest.test_case
+            "guard yields to an explicit opt-in"
+            `Quick test_guard_yields_to_an_explicit_opt_in;
+          Alcotest.test_case
+            "tool_execute typed env wrapper target executes"
+            `Quick test_execute_typed_env_wrapper_target_allowed;
+          Alcotest.test_case
+            "tool_execute typed repeated executable arg is preserved"
+            `Quick test_execute_typed_repeated_executable_arg_is_preserved;
+          Alcotest.test_case
+            "tool_execute rejects factory profile drift in every direction"
+            `Quick test_execute_rejects_factory_profile_drift_in_every_direction;
+          Alcotest.test_case
+            "docker shell skips missing SSH_AUTH_SOCK"
+            `Quick test_docker_shell_skips_missing_ssh_auth_sock;
+          Alcotest.test_case
+            "docker shell inherit network omits invalid docker flag"
+            `Quick test_docker_shell_inherit_network_omits_invalid_network_flag;
+          Alcotest.test_case
+            "docker shell mounts MASC config runtime paths"
+            `Quick test_docker_shell_mounts_masc_config_runtime_paths;
+          Alcotest.test_case "docker shell missing image fails before run" `Quick
+            test_docker_shell_missing_image_fails_before_run;
+          Alcotest.test_case
+            "docker shell parse failure blocks before run"
+            `Quick
+            test_docker_shell_ir_parse_failure_blocks_before_run;
+          Alcotest.test_case "tool_execute missing image without factory fails closed" `Quick
+            test_execute_missing_image_without_factory_fails_closed;
+          Alcotest.test_case
+            "tool_execute outside playground rejects before image preflight"
+            `Quick
+            test_execute_outside_playground_rejects_before_image_preflight;
+          Alcotest.test_case
+            "missing playground bind source blocks before docker"
+            `Quick test_execute_missing_playground_blocks_before_docker;
+          Alcotest.test_case
+            "docker shell mounts passwd entry for numeric uid"
+            `Quick test_docker_shell_mounts_numeric_user_identity;
+          Alcotest.test_case
+            "docker shell projects keeper secret directory"
+            `Quick test_docker_shell_projects_keeper_secret_dir;
+          Alcotest.test_case
+            "docker shell names the keeper as git author, no email"
+            `Quick test_docker_shell_names_the_keeper_as_git_author_only;
+          Alcotest.test_case
+            "turn runtime projects keeper secret directory"
+            `Quick test_turn_runtime_projects_keeper_secret_dir;
+          Alcotest.test_case
+            "turn runtime redacts its mounted GitHub snapshot"
+            `Quick test_turn_runtime_redacts_the_stable_identity_mount;
+          Alcotest.test_case
+            "Execute guest start failure reports sandbox and conditions"
+            `Quick test_execute_guest_start_failure_reports_sandbox_and_conditions;
+          Alcotest.test_case
+            "Execute identity failure after start keeps the identity code"
+            `Quick test_execute_identity_failure_after_start_reports_identity_code;
+          Alcotest.test_case
+            "Execute identity refused at container creation keeps the identity code"
+            `Quick test_execute_identity_refused_at_container_creation_reports_identity_code;
+          Alcotest.test_case
+            "Execute identity refused at container adoption keeps the identity code"
+            `Quick test_execute_identity_refused_at_container_adoption_reports_identity_code;
+          Alcotest.test_case
+            "docker run does not retry generic timeout"
+            `Quick
+            test_docker_run_does_not_retry_generic_timeout;
+          Alcotest.test_case
+            "image change preserves old container and adopts matching image"
+            `Quick test_image_change_selects_distinct_persistent_container;
+          Alcotest.test_case
+            "a stall after docker run does not remove the container"
+            `Quick test_a_stall_after_docker_run_does_not_remove_the_container;
+          Alcotest.test_case
+            "a container missing after docker run is removed"
+            `Quick test_a_container_missing_after_docker_run_is_removed;
+          Alcotest.test_case
+            "exec_argv is the container argv"
+            `Quick
+            test_exec_argv_is_the_container_argv;
+          Alcotest.test_case
+            "container removal reclaims anonymous volumes"
+            `Quick
+            test_container_removal_reclaims_anonymous_volumes;
+          Alcotest.test_case
+            "docker run does not retry daemon unavailable"
+            `Quick
+            test_docker_run_does_not_retry_daemon_unavailable;
+        ] );
+    ]

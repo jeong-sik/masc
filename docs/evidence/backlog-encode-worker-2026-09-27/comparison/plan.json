@@ -1,0 +1,181 @@
+{
+  "sessions": [
+    {
+      "name": "ascii-identity-01-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 1
+    },
+    {
+      "name": "ascii-identity-01-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 1
+    },
+    {
+      "name": "ascii-identity-02-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 2
+    },
+    {
+      "name": "ascii-identity-02-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 2
+    },
+    {
+      "name": "ascii-identity-03-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 3
+    },
+    {
+      "name": "ascii-identity-03-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 3
+    },
+    {
+      "name": "ascii-gzip-01-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 1
+    },
+    {
+      "name": "ascii-gzip-01-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 1
+    },
+    {
+      "name": "ascii-gzip-02-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 2
+    },
+    {
+      "name": "ascii-gzip-02-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 2
+    },
+    {
+      "name": "ascii-gzip-03-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 3
+    },
+    {
+      "name": "ascii-gzip-03-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 3
+    },
+    {
+      "name": "multilingual-identity-01-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 1
+    },
+    {
+      "name": "multilingual-identity-01-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 1
+    },
+    {
+      "name": "multilingual-identity-02-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 2
+    },
+    {
+      "name": "multilingual-identity-02-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 2
+    },
+    {
+      "name": "multilingual-identity-03-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 3
+    },
+    {
+      "name": "multilingual-identity-03-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 3
+    },
+    {
+      "name": "multilingual-gzip-01-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 1
+    },
+    {
+      "name": "multilingual-gzip-01-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 1
+    },
+    {
+      "name": "multilingual-gzip-02-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 2
+    },
+    {
+      "name": "multilingual-gzip-02-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 2
+    },
+    {
+      "name": "multilingual-gzip-03-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 3
+    },
+    {
+      "name": "multilingual-gzip-03-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 3
+    }
+  ],
+  "tasks": 250,
+  "cycles": 20,
+  "runner_sha256": "81cb56a1afe93b2859854273f9b868ac48e2297c9998843499677181c7d7ba37",
+  "driver_sha256": "5dc06093e0c47e735e37dd9c4e8f90a598312c931f65033ca728f2ed8bd170dd",
+  "verifier_sha256": "d4a5e3591a2710dfb22ef064016897dc0de1c19db872e172ba595761e4fc5cf7",
+  "observer_commit": "637551d63fe6514860b4e2579ebd0319054e45c7",
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "python": "3.12.14 (main, Aug 13 2026, 02:47:42) [GCC 13.3.0]",
+  "scope": "fresh TCP; timer through body read, before decompression/parse; concurrent phase separate"
+}

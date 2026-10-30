@@ -1,0 +1,19 @@
+{
+  "observed_at": "2026-10-21T16:07:40.254234+00:00",
+  "processes": {
+    "server": {
+      "pid": 36568,
+      "ps_exit_code": 1,
+      "stdout": ""
+    },
+    "tui": {
+      "pid": 38955,
+      "ps_exit_code": 1,
+      "stdout": ""
+    }
+  },
+  "port_connect_ex": {
+    "49436": 61,
+    "49435": 61
+  }
+}

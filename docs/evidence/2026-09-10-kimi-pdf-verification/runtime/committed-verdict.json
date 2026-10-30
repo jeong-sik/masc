@@ -1,0 +1,13 @@
+{
+  "type": "task_completion_verdict",
+  "from_status": "awaiting_verification",
+  "to_status": "done",
+  "ts": "2026-09-10T00:21:38Z",
+  "task_id": "task-001",
+  "authority_kind": "system_llm_agent",
+  "authority_actor": "verifier_exact",
+  "producer": "pdf-proof-producer",
+  "verification_id": "vrf-e98a49e8b919f2e8d0b3b7d180861d83",
+  "evaluator_runtime": "kimi_coding.kimi-for-coding",
+  "verdict": "approved"
+}

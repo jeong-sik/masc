@@ -1,0 +1,26 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40212409214
+Complete raw log SHA256: 2b336313e2bbd6e71fd3fac20f26a9e66cc33fa7f6d209408b32f92a5a03819a
+Complete raw log bytes: 264763
+Selected checkout, changed assertions, failures and summaries only; omitted assertions are not claimed by this excerpt.
+
+test suite	Checkout	2026-10-25T16:35:47.9670052Z HEAD is now at 60b34cc7 refactor(tool): bind canonical occurrence before Gate and derive product identity
+test suite	Test	2026-10-25T16:37:24.9204206Z ASSERT same occurrence identities and sequence after observer failure
+test suite	Test	2026-10-25T16:37:25.0545680Z ASSERT called observation arrives before effect
+test suite	Test	2026-10-25T16:37:25.0546854Z ASSERT partial delivery retries only the unacknowledged occurrence
+test suite	Test	2026-10-25T16:37:25.0548278Z ASSERT one canonical called and completed identity
+test suite	Test	2026-10-25T16:37:25.0578870Z ASSERT bus occurrence uses canonical sequence
+test suite	Test	2026-10-25T16:37:25.0579895Z ASSERT bus occurrence uses canonical event id
+test suite	Test	2026-10-25T16:37:25.0580458Z ASSERT bus occurrence uses canonical run id
+test suite	Test	2026-10-25T16:37:25.0580946Z ASSERT bus occurrence uses canonical correlation id
+test suite	Test	2026-10-25T16:37:25.0581412Z ASSERT canonical parent event is preserved
+test suite	Test	2026-10-25T16:37:25.0581926Z ASSERT no synthetic lifecycle causation replaces source facts
+test suite	Test	2026-10-25T16:37:25.0585422Z ASSERT filtered empty pages still advance source cursor
+test suite	Test	2026-10-25T16:37:25.0585979Z ASSERT public cursor catch-up matches live canonical observations
+test suite	Test	2026-10-25T16:37:25.0615564Z ASSERT reopened cursor retries the identical undelivered event
+test suite	Test	2026-10-25T16:37:25.0616648Z ASSERT acknowledged catch-up has no repeat
+test suite	Test	2026-10-25T16:37:25.4598471Z Test Successful in 1.177s. 79 tests run.
+test suite	Test	2026-10-25T16:37:27.4820849Z Test Successful in 0.253s. 6 tests run.
+test suite	Test	2026-10-25T16:37:29.5851782Z Test Successful in 0.344s. 20 tests run.
+test suite	Test	2026-10-25T16:37:36.0043247Z Test Successful in 4.690s. 22 tests run.
+test suite	Test	2026-10-25T16:40:58.7452779Z File "test/test_keeper_execution_join.ml", line 828, characters 13-21:
+test suite	Test	2026-10-25T16:40:58.7453855Z Error: Unbound module Masc.Ids

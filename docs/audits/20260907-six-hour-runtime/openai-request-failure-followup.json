@@ -1,0 +1,37 @@
+{
+  "observed_at": "2026-09-07T14:15:47.135628+00:00",
+  "window_start": "2026-09-07T13:05:26Z",
+  "window_end": "2026-09-07T14:05:26Z",
+  "runtime_id": "openai.gpt-5.5",
+  "signals": [
+    {
+      "kind": "reasoning_tool_api_contract",
+      "count": 49,
+      "error": "Function tools with reasoning_effort are not supported for gpt-5.5 in /v1/chat/completions.",
+      "resolution_work": "Existing PR34055 adds the Responses catalog row. Separate protocol expansion stopped to avoid duplication. Actual runtime-to-HTTP integration and exact GPT5.5 effort contract repair are in progress on a dependent stack."
+    },
+    {
+      "kind": "model_access",
+      "count": 52,
+      "error": "Project does not have access to model gpt-5.5.",
+      "resolution_work": "Root implemented PR34087 exacta0e412d45b: actual Api401/403 may advance to a declared candidate only under existing caller/effect authority. Three scenarios and independent source review complete; remote tests pending. Account access is not restored."
+    },
+    {
+      "kind": "duplicate_description",
+      "count": 3,
+      "error": "Duplicate JSON key description at tools.function.parameters.properties.shell.description.",
+      "resolution_work": "PR34075 exact96061 isolated codec46/46 and required checks PASS; merged57f5a74ea6 at14:25:25Z. Broader109/112 failure disclosed separately."
+    }
+  ],
+  "official_source": {
+    "url": "https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.5",
+    "section": "API and model parameters",
+    "paraphrase": "Use Responses for reasoning, tool calling and multi-turn use cases."
+  },
+  "raw_payloads_or_credentials_retained": false,
+  "live_mutations_performed": false,
+  "limits": [
+    "Three measured diagnostic families, not an exhaustive ERROR classification.",
+    "Authorization failure is not solved by changing API shape."
+  ]
+}

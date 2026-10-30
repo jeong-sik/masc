@@ -1,0 +1,38 @@
+name = "keeper_spawn_wait"
+description = """
+Wait for a spawned process to exit or output matching text.
+
+The wait ends as soon as the event occurs. timeout_sec is required."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "handle"
+type = "string"
+required = true
+description = "Handle returned by keeper_spawn."
+
+[[params]]
+name = "until"
+type = "string"
+enum = ["exit", "output_contains"]
+required = true
+description = "Event to wait for: exit or output_contains."
+
+[[params]]
+name = "needle"
+type = "string"
+description = "Required when until is output_contains. Substring to match."
+
+[[params]]
+name = "stream"
+type = "string"
+enum = ["stdout", "stderr"]
+description = "Stream to watch (stdout or stderr). Defaults to stdout."
+
+[[params]]
+name = "timeout_sec"
+type = "number"
+required = true
+description = "Timeout bound in seconds."

@@ -1,0 +1,30 @@
+{
+  "is_derivative": true,
+  "comparisons": [
+    {
+      "execution_id": "execution-node-97395b91d401fd4313b29c3a64936143",
+      "output_field_utf8_bytes_equal": false,
+      "decoded_output_JSON_equal": true,
+      "original_output_utf8_sha256": "c5d42b21f1a058ef27d43fe434888cd8411454ed5f872266599709ed3c6a7ef6",
+      "controller_output_utf8_sha256": "2778243f3d7d6030e928069663c6fbcb3a8031f3fe6309115f788e23e2c9a6ee"
+    },
+    {
+      "execution_id": "execution-node-71fa1d4234c523d5ab8329d4d0a51dbd",
+      "output_field_utf8_bytes_equal": false,
+      "decoded_output_JSON_equal": true,
+      "original_output_utf8_sha256": "91aa2ea5a60881a70ba15622bf3b6c1673c31d9a05983e8f88ca909d8889bccd",
+      "controller_output_utf8_sha256": "ad889fce0adc2f2e618912c3541a08510b44924403d14d864d831b3aa840c5d6"
+    },
+    {
+      "execution_id": "execution-node-95f7aedce92dadf8948df8f2f75fc325",
+      "output_field_utf8_bytes_equal": false,
+      "decoded_output_JSON_equal": true,
+      "original_output_utf8_sha256": "d98fa955fbb154f69e24ecd6eb216032ddffff80f3673a7d7503042705f94425",
+      "controller_output_utf8_sha256": "3e3af881ad5f05ffaaff62bd3b7bd5f4d84c67916b6396af651985f1db5229f4"
+    }
+  ],
+  "final_interpretation": "Withheld pending independent source/input/runtime review. Observer mechanical PASS does not imply semantic PASS or absence of additional effects.",
+  "additional_effect_note_ids": [
+    "13"
+  ]
+}

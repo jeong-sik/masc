@@ -1,0 +1,30 @@
+{
+  "default_ocamllsp_merlin_execve": {
+    "path": "/Users/dancer/me/scripts/dune",
+    "mode": "0644",
+    "executable": false,
+    "observed_error": "Unix.EACCES"
+  },
+  "corrected_toolchain_dune": {
+    "path": "/Users/dancer/.opam/5.5.0/bin/dune",
+    "mode": "0755",
+    "executable": true
+  },
+  "operator_path_change": "Prepend the resolved directory of the existing OCaml toolchain executables to the owned service PATH before its next authorized restart; retain other PATH entries.",
+  "source_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+  "owned_child_pids": [
+    47680,
+    69968,
+    73141,
+    97202
+  ],
+  "all_exited": true,
+  "live_server_restarted": false,
+  "local_product_build": false,
+  "proxy_rootcause_claim": "not demonstrated; same failure reproduces without proxy",
+  "remaining_diagnostics": [
+    "No config found for file lsp-acceptance-sample.ml",
+    "typed hole",
+    "Syntax error, expecting fun_expr"
+  ]
+}

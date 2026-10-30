@@ -1,0 +1,139 @@
+# Status of every committed probe response, derived from the files themselves:
+# an error body carries the gateway's code; a body with choices is a 200.
+# (probe.sh wrote the same statuses to status.log, which *.log in .gitignore
+# kept out of the commit.)
+probe-claude-fable51-basic.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-ceiling.json	402	This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens
+probe-claude-fable51-effort-high.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-effort-low.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-effort-max.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-effort-medium.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-effort-minimal.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-effort-none.json	400	Reasoning is mandatory for this endpoint and cannot be disabled.
+probe-claude-fable51-effort-xhigh.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-reasoning-split.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-reasoning.json	200	finish=stop provider=Anthropic
+probe-claude-fable51-toolcall.json	400	Provider returned error
+probe-claude-haiku45-basic.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-ceiling.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-effort-high.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-effort-low.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-effort-max.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-effort-medium.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-effort-minimal.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-effort-none.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-effort-xhigh.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-reasoning-budget-high.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-reasoning-budget-none.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-reasoning-split.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-reasoning.json	200	finish=stop provider=Amazon Bedrock
+probe-claude-haiku45-toolcall-thinking.json	200	finish=tool_calls provider=Amazon Bedrock
+probe-claude-haiku45-toolcall.json	200	finish=tool_calls provider=Amazon Bedrock
+probe-claude-opus5-toolcall-thinking.json	200	finish=tool_calls provider=Claude Platform on AWS
+probe-claude-sonnet5-toolcall-thinking.json	200	finish=tool_calls provider=Claude Platform on AWS
+probe-gemini31-pro-basic.json	200	finish=stop provider=Google
+probe-gemini31-pro-ceiling.json	200	finish=stop provider=Google
+probe-gemini31-pro-effort-high.json	200	finish=stop provider=Google
+probe-gemini31-pro-effort-low.json	200	finish=stop provider=Google
+probe-gemini31-pro-effort-max.json	200	finish=stop provider=Google
+probe-gemini31-pro-effort-medium.json	200	finish=stop provider=Google
+probe-gemini31-pro-effort-minimal.json	200	finish=stop provider=Google
+probe-gemini31-pro-effort-none.json	400	Reasoning is mandatory for this endpoint and cannot be disabled.
+probe-gemini31-pro-effort-xhigh.json	200	finish=stop provider=Google
+probe-gemini31-pro-reasoning-split.json	200	finish=stop provider=Google
+probe-gemini31-pro-reasoning.json	200	finish=length provider=Google
+probe-gemini31-pro-toolcall.json	200	finish=tool_calls provider=Google
+probe-glm53-flashx-basic.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-ceiling.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-effort-high.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-effort-low.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-effort-max.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-effort-medium.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-effort-minimal.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-effort-none.json	400	Reasoning is mandatory for this endpoint and cannot be disabled.
+probe-glm53-flashx-effort-xhigh.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-reasoning-split.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-reasoning.json	200	finish=stop provider=Z.AI
+probe-glm53-flashx-toolcall.json	200	finish=tool_calls provider=Z.AI
+probe-gpt56-luna-basic.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-ceiling.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-effort-high.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-effort-low.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-effort-max.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-effort-medium.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-effort-minimal.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-effort-none.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-effort-xhigh.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-reasoning-split.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-reasoning.json	200	finish=stop provider=OpenAI
+probe-gpt56-luna-toolcall.json	200	finish=tool_calls provider=OpenAI
+probe-gpt56-terra-basic.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-ceiling.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-effort-high.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-effort-low.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-effort-max.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-effort-medium.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-effort-minimal.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-effort-none.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-effort-xhigh.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-reasoning-split.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-reasoning.json	200	finish=stop provider=OpenAI
+probe-gpt56-terra-toolcall.json	200	finish=tool_calls provider=OpenAI
+probe-gpt6-astra-basic.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-ceiling.json	402	This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens
+probe-gpt6-astra-effort-high.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-effort-low.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-effort-max.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-effort-medium.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-effort-minimal.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-effort-none.json	400	Reasoning is mandatory for this endpoint and cannot be disabled.
+probe-gpt6-astra-effort-xhigh.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-reasoning-split.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-reasoning.json	200	finish=stop provider=OpenAI
+probe-gpt6-astra-toolcall.json	200	finish=tool_calls provider=OpenAI
+probe-grok47-basic.json	200	finish=stop provider=xAI
+probe-grok47-ceiling.json	200	finish=stop provider=xAI
+probe-grok47-effort-high.json	200	finish=stop provider=xAI
+probe-grok47-effort-low.json	200	finish=stop provider=xAI
+probe-grok47-effort-max.json	200	finish=stop provider=xAI
+probe-grok47-effort-medium.json	200	finish=stop provider=xAI
+probe-grok47-effort-minimal.json	200	finish=stop provider=xAI
+probe-grok47-effort-none.json	400	Reasoning is mandatory for this endpoint and cannot be disabled.
+probe-grok47-effort-xhigh.json	200	finish=stop provider=xAI
+probe-grok47-reasoning-split.json	200	finish=stop provider=xAI
+probe-grok47-reasoning.json	200	finish=stop provider=xAI
+probe-grok47-toolcall.json	200	finish=tool_calls provider=xAI
+probe-minimax-m3-basic.json	200	finish=stop provider=AtlasCloud
+probe-minimax-m3-ceiling.json	200	finish=stop provider=AtlasCloud
+probe-minimax-m3-effort-high.json	200	finish=stop provider=Novita
+probe-minimax-m3-effort-low.json	200	finish=stop provider=Novita
+probe-minimax-m3-effort-max.json	200	finish=stop provider=Novita
+probe-minimax-m3-effort-medium.json	200	finish=stop provider=Novita
+probe-minimax-m3-effort-minimal.json	200	finish=stop provider=Novita
+probe-minimax-m3-effort-none.json	200	finish=stop provider=Novita
+probe-minimax-m3-effort-xhigh.json	200	finish=stop provider=Novita
+probe-minimax-m3-reasoning-split.json	200	finish=stop provider=Novita
+probe-minimax-m3-reasoning.json	200	finish=stop provider=GMICloud
+probe-minimax-m3-toolcall.json	200	finish=tool_calls provider=CoreWeave
+probe-qwen38-flash-basic.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-ceiling.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-effort-high.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-effort-low.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-effort-max.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-effort-medium.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-effort-minimal.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-effort-none.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-effort-xhigh.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-reasoning-split.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-reasoning.json	200	finish=stop provider=Alibaba
+probe-qwen38-flash-toolcall.json	400	Provider returned error
+probe-claude-fable51-stream.sse	200	stream ended with [DONE]
+probe-claude-haiku45-stream.sse	200	stream ended with [DONE]
+probe-gemini31-pro-stream.sse	200	stream ended with [DONE]
+probe-glm53-flashx-stream.sse	200	stream ended with [DONE]
+probe-gpt56-luna-stream.sse	200	stream ended with [DONE]
+probe-gpt56-terra-stream.sse	200	stream ended with [DONE]
+probe-gpt6-astra-stream.sse	200	stream ended with [DONE]
+probe-grok47-stream.sse	200	stream ended with [DONE]
+probe-minimax-m3-stream.sse	200	stream ended with [DONE]
+probe-qwen38-flash-stream.sse	200	stream ended with [DONE]

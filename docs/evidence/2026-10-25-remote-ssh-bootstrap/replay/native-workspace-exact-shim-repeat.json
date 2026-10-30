@@ -1,0 +1,14 @@
+{
+  "owner": 1000,
+  "group": 0,
+  "mode": 448,
+  "entries": [
+    "retained file.bin"
+  ],
+  "length": 39,
+  "sha256": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21",
+  "file_owner": 1000,
+  "file_group": 1000,
+  "file_mode": 420,
+  "github_hosts_exists": false
+}

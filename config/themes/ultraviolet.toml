@@ -1,0 +1,20 @@
+name = "ultraviolet"
+light = false
+
+[palette]
+base00 = "0d0518"
+base01 = "150a26"
+base02 = "21123a"
+base03 = "4a2d75"
+base04 = "8560b8"
+base05 = "e0d0ff"
+base06 = "f0e8ff"
+base07 = "ffffff"
+base08 = "ff4d94"
+base09 = "ff8adf"
+base0a = "f2ff5c"
+base0b = "5cff9e"
+base0c = "4ddbff"
+base0d = "7a8cff"
+base0e = "a64dff"
+base0f = "ff5ce0"

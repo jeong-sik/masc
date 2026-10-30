@@ -1,0 +1,20 @@
+{
+  "qualified_at": "2026-10-21T15:54:32.950521+00:00",
+  "run": 39626945820,
+  "source_sha": "6f68dbc38d7c3dfd53fd1ded00f6a4bd3622609d",
+  "workflow_sha": "003f52e210d31abe087f0edeba335e5bb095f4af",
+  "hashes": {
+    "masc": "070b48ec73a5da0b43a47e0977134482ef34b089d08bdcd01cff12ee23ac8a03",
+    "masc-tui": "1184f859e7183e9193229eac697918b296dfb2f0bfbd6cb5821b44aa62e79a05",
+    "key-reference.md": "7aae284947e0a787ed89cf8d991b501ce60890803eadac6bf308b10291cf3fa9"
+  },
+  "executed_build_identities": {
+    "masc": "6f68dbc38d7c3dfd53fd1ded00f6a4bd3622609d",
+    "masc-tui": "6f68dbc38d7c3dfd53fd1ded00f6a4bd3622609d"
+  },
+  "tests": {
+    "test_tui_lane_addons": 24,
+    "test_lane_addon_application": 5
+  },
+  "scope": "Artifact integrity and executed binary identities; runtime/UI separate"
+}

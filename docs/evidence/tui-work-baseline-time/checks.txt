@@ -1,0 +1,12 @@
+Focused TUI build: PASS
+Ruff: PASS
+Pyright: 0 errors
+Surface color/no-color plus baseline refresh: PASS (3 journeys,35 captures)
+Baseline retained, current timestamp advanced, deltas+2/+3/+1: PASS
+60/80columns current backlog counters and80x16 selected Goal: PASS
+BROWSER_PTY_FRAME_MATCH=PASS work-narrow
+BROWSER_PTY_FRAME_MATCH=PASS work-short
+BROWSER_PTY_FRAME_MATCH=PASS work-baseline-refresh
+Board vote hint at80columns: PASS
+Recent/Activity pane content floor: PASS
+Broader Board/Recent states and other audit areas still pending

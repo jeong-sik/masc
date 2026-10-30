@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name endpoint_job_peer)
+ (public_name masc.endpoint_job_peer)
+ (modules endpoint_job_peer)
+ (libraries eio eio.unix unix)
+ (foreign_stubs (language c) (names endpoint_job_peer_stubs)))

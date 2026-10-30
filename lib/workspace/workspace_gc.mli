@@ -1,0 +1,109 @@
+(** Workspace_gc — heartbeat and explicit garbage collection.
+
+    Public surface for [workspace_gc.ml].  Extracted from [workspace.ml] for
+    modularity (#4638).  See issue #10751 for the broader [workspace/]
+    [.mli] coverage push.
+
+    Side effects:
+    - [heartbeat] touches [agents_dir config].
+    - [gc] touches the explicit retention surfaces documented below.
+    - [archive_terminal_tasks] touches only the task backlog and
+      [tasks-archive.json].
+      Callers must hold no other workspace lock when invoking these functions.
+    - Board artifact cleanup is wired via [Workspace_hooks] callbacks at
+      startup; this module does not depend on the board layer
+      directly. *)
+
+(** What a heartbeat did. Only [Heartbeat_updated] means the agent's
+    [last_seen] was written; the other two mean the call did nothing and are
+    not evidence that the workspace is writable.
+
+    This was a status string, and both readers got it wrong. The MCP handler
+    tested the first three bytes for a warning sign no branch here ever
+    emits — so every heartbeat reported success. The keeper's
+    work-as-heartbeat refresher treated any call that did not raise as a live
+    workspace, which a missing agent file satisfies. *)
+type heartbeat_outcome =
+  | Heartbeat_updated of string  (** resolved agent name *)
+  | Agent_file_invalid of string  (** resolved agent name *)
+  | Agent_not_found of string  (** requested agent name *)
+
+(** The status string the outcome used to be, byte for byte. *)
+val heartbeat_message : heartbeat_outcome -> string
+
+(** Update the agent's [last_seen] timestamp on disk.
+
+    [agent_name] is resolved through {!Workspace_identity.resolve_agent_name}
+    so canonical/alias forms both work. The agent file is mutated under
+    [with_file_lock]. *)
+val heartbeat :
+  Workspace_utils_backend_setup.config -> agent_name:string -> heartbeat_outcome
+
+(** [tasks-archive.json] could not take the tasks {!gc} was about to archive
+    (unreadable, unparsable, or a failed write). The payload names the file and
+    the cause. The backlog was not changed. *)
+exception Task_archive_failed of string
+
+(** Archive terminal backlog tasks without touching any other retention
+    surface. This is the task phase of {!gc} on its own: backlog tasks in a
+    terminal state ([Done]/[Cancelled]) older than [days] move to
+    [tasks-archive.json], and non-terminal tasks a prior buggy pass stranded
+    in the archive are restored to the live backlog. Old workspace messages
+    and backend pubsub are left alone. Scheduled maintenance calls this; the
+    manual [masc_gc] tool calls {!gc} for the full pass.
+
+    Non-terminal tasks — including [AwaitingVerification] obligations — are
+    never archived; a completion authority must still be able to commit a
+    verdict against the live task.
+
+    Returns the live task rows after the pass plus a multi-line summary
+    string. Write order and locking are {!gc}'s task phase unchanged:
+    archived tasks reach the archive before the backlog commit drops them,
+    under the shared backlog lock.
+
+    Raises {!Task_archive_failed} when the archive cannot take the tasks to
+    archive, before the backlog is touched, or cannot be read or written to
+    drop the restored tasks, after the backlog commit and the restore events
+    (the next pass drops them).
+    Raises [Backlog_read_failed] when the backlog cannot be read. *)
+val archive_terminal_tasks :
+  Workspace_utils_backend_setup.config -> days:int -> unit -> Masc_domain.task list * string
+
+(** Run the explicit workspace garbage-collection pass. [days] has no default:
+    the caller owns the retention decision rather than inheriting a fixed
+    runtime heuristic.
+
+    {ol
+    {- archive backlog tasks in a terminal state ([Done]/[Cancelled]) older
+       than [days] days, via {!archive_terminal_tasks}.
+       Non-terminal tasks — including [AwaitingVerification] obligations — are
+       never archived; a completion authority must still be able to commit a
+       verdict against the live task}
+    {- self-heal: restore any non-terminal task a prior buggy pass stranded in
+       [tasks-archive.json] back into the live backlog}
+    {- delete workspace messages older than [days], except messages whose
+       body mentions an open task id}
+    {- run the backend pubsub retention cleanup (a no-op for the filesystem
+       backend)}}
+
+    Archived tasks are appended to [tasks-archive.json] via
+    {!Workspace_task_id.append_archive_tasks}; restored tasks are removed from
+    it via {!Workspace_task_id.drop_archive_tasks}.  The backlog is rewritten
+    with [version + 1] when anything changes.  Returns a multi-line summary
+    string.
+
+    Order of the writes: archived tasks go into the archive before the backlog
+    commit that removes them, so a crash between the two leaves them in both
+    stores and the next pass finishes the job. Restored tasks go the other
+    way, into the backlog before the archive drop. The orphan snapshot, backlog
+    commit and archive cleanup all run under the shared backlog lock, so another
+    GC pass cannot restore an older copy or remove a newly archived terminal row.
+    Nested archive locks are always acquired after the backlog lock.
+
+    Raises {!Task_archive_failed} when the archive cannot take the tasks to
+    archive, before the backlog is touched, or cannot be read or written to
+    drop the restored tasks, after the backlog commit and the restore events
+    (the next pass drops them).
+    Raises [Backlog_read_failed] when the backlog cannot be read. *)
+val gc :
+  Workspace_utils_backend_setup.config -> days:int -> unit -> string

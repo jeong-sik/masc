@@ -1,0 +1,19 @@
+{
+  "derivative": true,
+  "original_slice_response_sha256": "5e7c68ad0df77a1e106c8e1edc898f7ee52775da48396c08c00584f720c47520",
+  "original_slice_response_bytes": 543,
+  "query_lane_id": "quiz/measures",
+  "actual_observed_lane_id": "01a17977-8fdd-7000-81ef-e3acaf537c1e/quiz/measures",
+  "failure": "controller oracle queried local lane_id rather than the observed instance-namespaced ID; empty complete slice is the expected exact-filter response",
+  "source_basis": [
+    "lib/lane_addon/lane_addon_runtime.ml:855",
+    "lib/lane_addon/lane_addon_store.ml:994"
+  ],
+  "product_missing_artifact_claim": false,
+  "unexecuted": [
+    "host blob/volume byte comparison",
+    "protocol copy/hash",
+    "Worker/Admin control cancellation"
+  ],
+  "next_run": "Separate fresh lane-export-2; no changes to first run captures/controller."
+}

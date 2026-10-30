@@ -1,0 +1,198 @@
+{
+  "compiler": "5.5.1",
+  "sources": {
+    "lib/lane_addon/lane_addon_catalog.mli": "3c4cdc6273922882040241148c8dde17af5c75e87f953911afb310ec717d537c",
+    "lib/lane_addon/lane_addon_catalog.ml": "3478cf4276ddb8cde44e198fedb4577f50b6375761693c70b48f8f36e15e5eb1",
+    "bin/masc_tui_package_browser.mli": "bcfeaad2decb2dc467a0cc0188f398e14613a2d436984d07a9edd9bcc36977b4",
+    "bin/masc_tui_package_browser.ml": "7e99e6a398a8bd10a011d2427dabf0075cac6e3d0e80a11806ff3b206670793c",
+    "test/test_tui_package_browser.ml": "48807b1200d3c5636e69cee8858c65b59c7eba53a93dec17422c09f325183626",
+    "bin/masc_tui_schema_form.mli": "aa827790d476f60429cb510c7036b2bfb24d10e7bb515dcb182a2e64f0332f1f",
+    "bin/masc_tui_lane_declaration.mli": "60d720162b8389b279ee2c0c32c35d3f83b5a994f924475aa4f642ff89cf5043",
+    "bin/masc_tui_lane_installer.mli": "698b254fb6cd65b3281a70e3676da9f69d94d2f22d1b01ddb99440b923515f07",
+    "bin/masc_tui_lane_installer.ml": "bac35348d7e2e53f7a60f28d1076f8de4db42f89f8ce39f55891c38819a0984c"
+  },
+  "commands": [
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "unix,yojson,alcotest",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "lane_addon_catalog.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "unix,yojson,alcotest",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "lane_addon_catalog.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "unix,yojson,alcotest",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "unix,yojson,alcotest",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_package_browser.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "unix,yojson,alcotest",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_package_browser.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "unix,yojson,alcotest",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "test_tui_package_browser.ml"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "unix,yojson,alcotest",
+        "-linkpkg",
+        "lane_addon_catalog.cmo",
+        "masc.cmo",
+        "masc_tui_package_browser.cmo",
+        "test_tui_package_browser.cmo",
+        "-o",
+        "check.exe"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "./check.exe"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_schema_form.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_lane_declaration.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_lane_installer.mli"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-c",
+        "masc_tui_lane_installer.ml"
+      ],
+      "returncode": 0
+    }
+  ],
+  "scratch": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-package-discovery-nu1rxfoc",
+  "scope": "Actual catalog filesystem discovery and browser state machine. Masc is only a namespace alias to the complete actual catalog. Installer is separately typechecked against actual source interfaces without linking or executing its form/declaration dependencies. Manifest callback is controlled; real manifest parser, server, schema installer, native PTY and deployment are not executed.",
+  "documentation_only_deltas": [
+    {
+      "path": "lib/lane_addon/lane_addon_catalog.mli",
+      "executed_sha256": "3c4cdc6273922882040241148c8dde17af5c75e87f953911afb310ec717d537c",
+      "current_sha256": "ea3b5144109b32b69d8bde4e3faa9004c68632ed2eb975b8659872df900c7213",
+      "change": "Interface documentation clarifies the check/open race. Signatures and all executed implementations/tests are unchanged; original run and hashes are retained."
+    }
+  ]
+}

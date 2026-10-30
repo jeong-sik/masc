@@ -1,0 +1,24 @@
+# Box's remote MCP server.
+#
+# Only the server is named. Its endpoints, the scopes it publishes and whether
+# a client has to be made by hand come from what it serves, so none of that
+# can go stale here.
+#
+# Measured 2026-08-27: an MCP initialize is refused with 401, it publishes its protected-resource document at the origin while
+# serving MCP below it, so the location comes from the 401's
+# WWW-Authenticate header, and the
+# authorization server it names offers S256. It publishes no registration endpoint, so this needs an app made by
+# hand: create one, then post its client id and secret to
+# /api/v1/keepers/oauth/client. It names no scopes, so none are asked for.
+
+id = "box"
+label = "Box"
+mcp_url = "https://mcp.box.com/mcp"
+
+access_token_env = "BOX_ACCESS_TOKEN"
+expires_at_env = "BOX_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.box/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

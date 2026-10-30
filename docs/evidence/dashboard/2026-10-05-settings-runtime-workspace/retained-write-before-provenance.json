@@ -1,0 +1,16 @@
+{
+  "head": "8763173e4b9a7ddba8c0e120c8a93eff0be5b93f",
+  "source_sha256": {
+    "dashboard/src/components/settings-surface.test.ts": "1dc8efc7c6bb02d34a221f2071e31eaee88ed9bf397f3b09606d98fdcc2c21ba",
+    "dashboard/src/lib/settings-runtime-session.ts": "cb92af3d6490a50cb8c70de8bbc12c3f756310261a35a1a39872dea3000f81f3",
+    "dashboard/src/components/settings-surface.ts": "28fee9c693602f9438125fdade27cb7bb3d7aeaa8043331f21d8e8d4769ff400"
+  },
+  "result": "2 failed / 2 passed / 66 skipped",
+  "log": "retained-write-before.txt",
+  "test_copy": "retained-write-before-test.ts",
+  "scope": "Product files pinned to head; augmented regression test injected and copied separately. Tests use actual Settings with mocked transport, not backend writes.",
+  "original_log_sha256": "c8baa71ac5f82553e5fe81b3d2310a8c65ecb123127bf28d0cdba002c2e9583b",
+  "log_sha256": "be7ad883fefbd538947cdc1684bec265976428176f3b23c323eca23950179837",
+  "copied_log_normalization": "Outer blank whitespace removed.",
+  "test_copy_sha256": "1dc8efc7c6bb02d34a221f2071e31eaee88ed9bf397f3b09606d98fdcc2c21ba"
+}

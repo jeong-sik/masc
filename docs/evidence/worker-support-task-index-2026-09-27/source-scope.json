@@ -1,0 +1,27 @@
+{
+  "baseline": "63b6a34a2e5d8a5388ff8da6088fb6755e81506f",
+  "candidate": "6420fbe9e7e15a1cd24d95cda83b1a385f008a58",
+  "observer": "f0349b29fe7fd44ff4b5de53646799840771ee60",
+  "changed_paths": [
+    "changelog.d/39412.md",
+    "lib/dashboard/dashboard_execution_builders.ml",
+    "lib/dashboard/dashboard_execution_builders.mli",
+    "test/test_dashboard_briefing.ml"
+  ],
+  "changed_product_files": {
+    "lib/dashboard/dashboard_execution_builders.ml": "a3c15896d92b5c8fb81dc6467488109207be28b8dc48789ea80a5bc12467a7ae",
+    "lib/dashboard/dashboard_execution_builders.mli": "a51280fc8e421a8896090d1da900873337a16e21048b4efdb5f5f05cea6a8884"
+  },
+  "focused_ci": {
+    "run": 36263884592,
+    "job": 108464735191,
+    "head": "6420fbe9e7e15a1cd24d95cda83b1a385f008a58",
+    "cases": {
+      "dashboard_briefing": 24,
+      "dashboard_continuity_briefs": 13,
+      "dashboard_http_core": 132
+    },
+    "log_sha256": "89807f72fcb91ccdae800b8e4e474f1f8d05575d5433d2b6dd2bc62113fa0f18"
+  },
+  "scope": "Candidate is exactly the PR source/changelog head from this baseline. This isolated all-Todo workload does not measure claimed-task index updates or the integrated production runtime."
+}

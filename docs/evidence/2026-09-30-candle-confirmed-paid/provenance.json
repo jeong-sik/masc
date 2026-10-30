@@ -1,0 +1,12 @@
+{
+  "source_head": "d0bc9de53aaa62956fb602de8548399b323ab5d5",
+  "run_id": 36600485412,
+  "job_id": 109516287582,
+  "workflow_conclusion": "success",
+  "suite": "test_candle_goal_flow",
+  "cases": 10,
+  "test_source_sha256": "b02db923441a7c89df3cadcc59616f69e095a8a89869565388a1dd87f76937fe",
+  "raw_log_sha256": "226f32bc411470a5845e461347b8e68b4189869b81069c0bf6803e2299c13480",
+  "model_edge": "injected typed appraisal responses; production proof commit invoked directly",
+  "live_mutations": false
+}

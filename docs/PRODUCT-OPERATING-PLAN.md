@@ -1,0 +1,192 @@
+---
+status: live
+---
+
+# Product Operating Plan
+
+> Current package version: v0.66.0
+> Latest changelog entry: v0.66.0 (2026-10-29)
+> Latest published GitHub release: v0.66.0 (2026-10-29)
+> Updated: 2026-10-29
+> Release line: pre-1.0 (`0.y.z`)
+
+## Product Scope
+
+`masc` is a harness for running several coding agents against one repository: a workspace server over MCP, supervised Keepers, and a terminal UI, in one binary.
+
+Primary user:
+
+- one engineer or a small trusted team running multiple coding agents against the same checkout or worktree
+
+Scope stack:
+
+1. Repo workspace collaboration, reached through the TUI and MCP
+2. Keeper runtime and supervised delivery
+3. Operator visibility: the TUI first; the dashboard is maintained, not grown
+
+The front-door promise is level 1. Levels 2-3 are supported surfaces.
+
+## Capability Posture
+
+| Capability | Current status | Promise level | Evidence | Main gap | Next action |
+|-----------|----------------|---------------|----------|----------|-------------|
+| Workspace and task hygiene | Done | Front door | `README.md`, `docs/spec/01-system-overview.md` | docs were too spread out | keep as default entry path |
+| Worktree and collision control | Done | Front door | README, workspace/tool coverage, live usage | onboarding clarity | keep in front-door docs |
+| Supervised execution + Supervisor | Working | Advanced | `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
+| Keeper continuity | Working | Advanced | `docs/KEEPER-STATE-OWNERSHIP.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | live restore and independent-lane evidence must remain observable | validate typed checkpoint restore and domain receipts with the runbook |
+| Terminal UI | Working | Front door | `README.md`, `docs/TUI-GUIDE.md` | surfaces and keys still change on `main` | keep every operator action reachable from the TUI |
+| Dashboard core read models | Working | Maintained | `docs/DASHBOARD-INTEGRATION.md` | transport truth and config visibility gaps | keep it building, type-checked, and truthful; new operator features land in the TUI first |
+| Remote-safe operator | Working | Supporting | `docs/spec/09-server-transport.md`, `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` | auth and release posture still need tightening | keep surface reduced and explicit |
+| Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |
+| Auth and API contract posture | Not done for product promise | Advanced / supporting | `docs/PRODUCT-REVIEW.md` | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |
+| Config introspection | Working | Supporting | `masc_config`, `/api/v1/runtime/resolved`, `/api/v1/runtime/config/raw` | dashboard and MCP config read surfaces coexist | keep runtime config read/write contracts consistent |
+| Release evidence and local proof | Working | Front door | `docs/RELEASE-EVIDENCE.md`, `scripts/release-evidence.sh`, release workflow artifact | deployment-specific proof is still env-gated | keep release/main evidence bundle attached to artifacts |
+| Release and doc truth | Working | Front door | doc truth lane + version truth + agent core pin doc sync | release/doc changes previously bypassed runtime gates | keep build/lint/health tied to release/doc/version changes |
+
+Status legend:
+
+- Done: code + tests + trustworthy product promise
+- Working: code exists and is usable, but not yet the safest promise
+- Not done for product promise: code may exist, but the user-facing promise is still too weak
+- Deferred: visible but outside the current 6-8 week focus
+
+## GitHub Operating Model
+
+### Labels
+
+Classification is declared in the issue body and projected onto labels. Nothing else sets them.
+
+````text
+```masc-triage
+kind: defect
+area: turn
+impact: breaks-continuity
+root: silent
+must-do: true
+```
+````
+
+The vocabulary SSOT is `.github/issue-taxonomy.json`. Labels are set from the `masc-triage`
+block when the issue is created; nothing reconciles them afterwards.
+`APPLY=1 bash scripts/sync-issue-labels.sh` reports and repairs drift between the
+repository labels and the SSOT.
+
+| Axis | Cardinality | Values |
+|------|-------------|--------|
+| `kind` | exactly one | `defect` `gap` `capability` `erosion` `inquiry` `refactor` `test` `docs` |
+| `area` | exactly one | `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime` `transport` `dashboard` `connector` `observability` `persistence` `ci` `keeper` |
+| `impact` | exactly one | `breaks-continuity` `breaks-collab` `blinds-operator` `degrades` `internal` |
+| `root` | zero or more | `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt` |
+| `must-do` | flag | `true` when the product promise is broken right now |
+
+Two rules settle the overlaps the table cannot spell out:
+
+- `area` is where the fix lands, not where the symptom shows. A panel rendering a stale metric is
+  `dashboard` when the panel is wrong and `observability` when the metric is.
+- `impact` takes the highest row that applies. The values are ordered, so an issue that both blinds the
+  operator and stops turns is `breaks-continuity`.
+
+### Priority comes from impact, not from an assertion
+
+`impact` is ordered, and that order is the priority order:
+
+1. `breaks-continuity` - turns stop, or a keeper cannot recall its own last ten turns
+2. `breaks-collab` - keepers stop reaching each other, or output lands where nobody reads it
+3. `blinds-operator` - it runs, but nobody can see it
+4. `degrades` - friction, performance, or accuracy
+5. `internal` - development flow only
+
+There is no separate priority or scheduling label. Severity is derived from which product failure the issue
+causes, so it can be argued about with evidence instead of asserted. A roadmap decides *when* work happens;
+a label decides *what is at stake*.
+
+`root` is optional and follows `docs/spec/16-root-cause-rubric.md`. A missing `root` is not a triage
+violation; the rubric only applies when a structural marker actually matches. Multiple values are allowed,
+and overlap is real - a boundary violation that also swallows errors takes both.
+
+### Issue intake
+
+Humans file through the issue form; keepers file with `gh issue create`. Both produce the same fenced
+`masc-triage` block, so there is one format and one parser. An issue filed without the block gets a comment
+naming the expected shape, and no labels. Do not pass `--label` to `gh issue create`: labels set that way
+have no declaration behind them.
+
+### PR status labels
+
+The `Issue Taxonomy` workflow skips pull requests outright: `kind`/`area`/`impact` describe a problem and a
+PR is an answer.
+
+The former `pr/*` status-label projection was retired with automatic PR
+workflows. GitHub's native mergeability, review decision, and unresolved-thread
+views are the source of truth instead of a second state machine maintained by
+scheduled reconciliation.
+
+### PR rules
+
+Every PR should include:
+
+- `## Summary`
+- `## Product impact`
+- `## Evidence`
+- `## Review evidence`
+- `## Linked issue`
+
+Each PR should link at least one issue and state which promise it affects:
+
+- `repo workspace collaboration`
+- `supervised delivery`
+- `ops visibility`
+- `none/internal`
+
+### Release rules
+
+- while pre-1.0, `0.y.0` carries one promise train
+- `0.y.z` releases stabilize the current promise only
+- `1.0.0` stays reserved until the front-door promise is trustworthy without release-truth caveats
+- do not tag with open `must-do` issues
+- do not tag if version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`
+
+## 6-8 Week Tracks
+
+### Track A. Product truth and onboarding
+
+- keep the README on the TUI-first harness posture: shared workspace, supervised Keepers, terminal front door
+- keep advanced delivery paths visible but clearly secondary
+- align roadmap, changelog, and product review
+- replace stale or ambiguous “what is this product?” prose with one consistent promise
+
+### Track B. GitHub planning hygiene
+
+- enforce issue taxonomy with forms and a lightweight workflow
+- enforce PR section discipline with a sticky hygiene comment
+- keep release blockers meaningful
+- make release truth check automatic instead of remembered
+
+### Track C. Promise hardening
+
+- restore truthful CI gates
+- fix transport / health read-model drift
+- add config visibility foundation
+- keep auth/API contract hardening visible, but treat it as the next advanced slice after front-door truth
+
+## Current Research and Implementation Queue
+
+Implement now:
+
+- CI truth and quick-suite recovery
+- release evidence bundle + front-door proof contract
+- transport health truth
+- config centralization groundwork
+- product/docs/release truth automation
+
+Research next:
+
+- non-local auth defaults and REST contract versioning
+- supervised-delivery readiness and verifier budget reliability
+- bounded keeper continuity contract beyond same-trace proof
+- read-only diagnosis bundles for operator workflows
+
+Keep visible, but defer:
+
+- package extraction and large library breakup
+- broad Eio architecture cleanup

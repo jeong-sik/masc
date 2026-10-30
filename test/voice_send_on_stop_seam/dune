@@ -1,0 +1,7 @@
+; The one setting that crosses from the voice section into the TUI. Both sides
+; had tests and both passed while they read different keys, so this links the
+; writer and the reader in one process.
+
+(test
+ (name test_voice_send_on_stop_seam)
+ (libraries alcotest masc.voice_setup masc.runtime masc.voice_config masc_tui_config unix))

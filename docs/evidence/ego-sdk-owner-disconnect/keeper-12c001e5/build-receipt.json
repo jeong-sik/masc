@@ -1,0 +1,31 @@
+{
+  "source_commit": "12c001e55e27c7a9340ae27f956e112fd5360c76",
+  "source_tree": "6b6d0206722dc57385a4e587682e16e9b0be95be",
+  "workflow_head": "98a1508e6ecbda1d38d33aa7d0eb7f366b420ddf",
+  "run_id": "40113070920",
+  "run_attempt": "1",
+  "platform": "macos-arm64",
+  "binaries": {
+    "masc": {
+      "bytes": 105813888,
+      "sha256": "a06ae16b9b56be7d24b89ed122db185f3d41a7936cec9e9f94a77dce53eb7d40"
+    },
+    "masc-browser-addon-worker": {
+      "bytes": 49427280,
+      "sha256": "831bf9b6ef6b42bc4e7a658f47e64b273193715e4f00c06d826077ddc128ab03"
+    },
+    "masc-native-addon-launcher": {
+      "bytes": 3523680,
+      "sha256": "10f6a10c95eeb61a3e6500f0c420550fd7e2d96a9be04a8e0fd16e3ff42e9f1e"
+    }
+  },
+  "build_targets": [
+    "bin/main_eio.exe",
+    "bin/masc_browser_addon_worker.exe",
+    "bin/masc_native_addon_launcher.exe"
+  ],
+  "behavior_executed": false,
+  "installed": false,
+  "release_verified": false,
+  "relocatable_runtime_verified": false
+}

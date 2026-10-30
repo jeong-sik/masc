@@ -1,0 +1,107 @@
+[
+  {
+    "kind": "full",
+    "identity": {
+      "binary_commit": "b43722cb596bed252b7c4bb626173773550d1438",
+      "runtime_instance_id": "01a160dc-5497-7000-a47b-361987628cc8",
+      "executable_sha256": "5753a7d54b223acb673462a8ebe17ad1588535129fc2f143ba39144600a5e7e3"
+    },
+    "dashboard_surface": {
+      "status": "mismatched",
+      "dashboard_source_commit": "0ba6e814fe3e4701fa86355055d8e4197e84fdd0",
+      "binary_source_commit": "b43722cb596bed252b7c4bb626173773550d1438",
+      "index_sha256": "7f12243efe4b8031a6dc57bc31d8b6c5201a039522f5c66a6d9801163b87d019"
+    },
+    "full_health_snapshot": {
+      "status": "ready",
+      "snapshot_age_ms": 3638,
+      "stale_reason": null,
+      "stale_age_ms": null,
+      "computed_at_unix": 1792633914.78424,
+      "duration_ms": 122,
+      "ttl_ms": 60000,
+      "refresh_in_flight": false,
+      "refresh_requested": false,
+      "refresh_worker_active": false,
+      "refresh_worker_submissions_total": 774,
+      "refresh_worker_joins_total": 2,
+      "invalidation_generation": 2381,
+      "refresh_wakeup_coalesce_ms": 100,
+      "refresh_started_at_unix": null,
+      "refresh_timeout_ms": 20000,
+      "component_timed_out": false,
+      "error": null,
+      "last_good_available": true,
+      "section_timings": [
+        {
+          "name": "keeper_identity_drift",
+          "ms": 18
+        },
+        {
+          "name": "publication_recovery_activation",
+          "ms": 0
+        },
+        {
+          "name": "keeper_reaction_ledger",
+          "ms": 46
+        },
+        {
+          "name": "keeper_owner",
+          "ms": 0
+        },
+        {
+          "name": "keeper_board_event_collection",
+          "ms": 0
+        },
+        {
+          "name": "keeper_hitl_gate",
+          "ms": 0
+        },
+        {
+          "name": "paused_keepers",
+          "ms": 0
+        },
+        {
+          "name": "keeper_event_queue",
+          "ms": 4
+        },
+        {
+          "name": "keeper_waiting_inventory",
+          "ms": 5
+        },
+        {
+          "name": "fd_accountant",
+          "ms": 0
+        },
+        {
+          "name": "disk_observation",
+          "ms": 0
+        },
+        {
+          "name": "keeper_fleet_safety",
+          "ms": 5
+        },
+        {
+          "name": "skill_catalog",
+          "ms": 0
+        }
+      ],
+      "stale_since_ts": null
+    }
+  },
+  {
+    "kind": "probe",
+    "identity": {
+      "binary_commit": "b43722cb596bed252b7c4bb626173773550d1438",
+      "runtime_instance_id": "01a160dc-5497-7000-a47b-361987628cc8",
+      "executable_sha256": "5753a7d54b223acb673462a8ebe17ad1588535129fc2f143ba39144600a5e7e3"
+    },
+    "dashboard_surface": {
+      "status": "mismatched",
+      "dashboard_source_commit": "0ba6e814fe3e4701fa86355055d8e4197e84fdd0",
+      "binary_source_commit": "b43722cb596bed252b7c4bb626173773550d1438",
+      "index_sha256": "7f12243efe4b8031a6dc57bc31d8b6c5201a039522f5c66a6d9801163b87d019"
+    },
+    "full_health_snapshot": null
+  }
+]

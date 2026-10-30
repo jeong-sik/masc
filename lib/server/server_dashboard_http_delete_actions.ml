@@ -1,0 +1,1666 @@
+(** Dashboard delete action handlers — board, tasks, goals, agents.
+
+    Extracted from server_routes_http_routes_dashboard.ml.
+    Contains POST handler logic for /api/v1/dashboard/board/delete,
+    /api/v1/dashboard/tasks/delete, /api/v1/dashboard/goals/delete,
+    /api/v1/dashboard/goals/sweep, /api/v1/dashboard/agents/purge.
+    Keeper purge is durable and asynchronous; plain-agent purge remains an
+    exact synchronous cleanup. *)
+
+module Http = Http_server_eio
+
+
+type agent_purge_cleanup_result =
+  { agent_name : string
+  ; workspace_unbound : bool
+  }
+
+type path_removal = Path_absent | Path_removed
+
+type plain_agent_resolve_error =
+  | Invalid_plain_agent_name of string
+  | Plain_agent_artifact_read_failed of string
+
+let invalid_request field =
+  Printf.sprintf "invalid request: requires {\"%s\":\"...\"}" field
+;;
+
+let respond_ok ~request reqd =
+  Http.Response.json_value ~compress:true ~request (`Assoc [ ("ok", `Bool true) ]) reqd
+;;
+
+let respond_ok_with_warning ~request reqd warning =
+  Http.Response.json_value
+    ~compress:true
+    ~request
+    (`Assoc
+      [ ("ok", `Bool true); ("partial_cleanup", `Bool true); ("warning", `String warning) ])
+    reqd
+;;
+
+let respond_error ?(status = `Bad_request) ~request reqd message =
+  Http.Response.json_value ~status ~request
+    (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
+    reqd
+;;
+
+let path_error operation path exn =
+  Printf.sprintf "%s failed for %s: %s" operation path (Printexc.to_string exn)
+;;
+
+let lstat_path_blocking path =
+  try Ok (Some (Unix.lstat path)) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exn -> Error (path_error "lstat" path exn)
+;;
+
+let lstat_path path =
+  try Eio_guard.run_in_systhread ~label:"dashboard-delete-lstat" (fun () -> lstat_path_blocking path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (path_error "systhread lstat" path exn)
+;;
+
+let unlink_path_blocking path =
+  try
+    Unix.unlink path;
+    Ok Path_removed
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Path_absent
+  | exn -> Error (path_error "unlink" path exn) (* cancel-guard-ok: Unix.unlink performs no Eio operation *)
+;;
+
+let rmdir_path_blocking path =
+  try
+    Unix.rmdir path;
+    Ok Path_removed
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Path_absent
+  | exn -> Error (path_error "rmdir" path exn) (* cancel-guard-ok: Unix.rmdir performs no Eio operation *)
+;;
+
+let rec remove_path_strict_blocking path =
+  match lstat_path_blocking path with
+  | Error _ as error -> error
+  | Ok None -> Ok Path_absent
+  | Ok (Some stat) ->
+    (match stat.Unix.st_kind with
+     | Unix.S_DIR ->
+       let entries =
+         try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
+         | exn -> Error (path_error "readdir" path exn) (* cancel-guard-ok: Sys.readdir performs no Eio operation. *)
+       in
+       (match entries with
+        | Error _ as error -> error
+        | Ok entries ->
+          let rec remove_entries = function
+            | [] -> rmdir_path_blocking path
+            | entry :: rest ->
+              (match remove_path_strict_blocking (Filename.concat path entry) with
+               | Error _ as error -> error
+               | Ok (Path_absent | Path_removed) -> remove_entries rest)
+          in
+          remove_entries entries)
+     | Unix.S_REG
+     | Unix.S_LNK
+     | Unix.S_CHR
+     | Unix.S_BLK
+     | Unix.S_FIFO
+     | Unix.S_SOCK -> unlink_path_blocking path)
+;;
+
+let remove_path_strict path =
+  try Eio_guard.run_in_systhread ~label:"dashboard-delete-remove" (fun () -> remove_path_strict_blocking path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (path_error "systhread recursive removal" path exn)
+;;
+
+let rec remove_paths_strict = function
+  | [] -> Ok ()
+  | path :: rest ->
+    (match remove_path_strict path with
+     | Error _ as error -> error
+     | Ok outcome ->
+       Log.Misc.debug
+         "[dashboard_purge] artifact path=%s outcome=%s"
+         path
+         (match outcome with Path_absent -> "absent" | Path_removed -> "removed");
+       remove_paths_strict rest)
+;;
+
+let validate_agent_alias alias =
+  match Workspace.validate_agent_name alias with
+  | Ok _ -> Ok alias
+  | Error detail ->
+    Error (Printf.sprintf "invalid exact agent purge owner %S: %s" alias detail)
+;;
+
+let validate_keeper_agent_alias alias =
+  match Keeper_id.Keeper_name.of_string alias with
+  | Ok keeper_name -> Ok (Keeper_id.Keeper_name.to_string keeper_name)
+  | Error detail ->
+    Error (Printf.sprintf "invalid exact Keeper purge owner %S: %s" alias detail)
+;;
+
+let exact_agent_aliases ~validate_alias agent_names =
+  let aliases =
+    agent_names
+    |> List.filter_map String_util.trim_nonempty
+    |> List.sort_uniq String.compare
+  in
+  let rec validate acc = function
+    | [] -> Ok (List.rev acc)
+    | alias :: rest ->
+      (match validate_alias alias with
+       | Error _ as error -> error
+       | Ok alias -> validate (alias :: acc) rest)
+  in
+  validate [] aliases
+;;
+
+let agent_file_path config agent_name =
+  Filename.concat (Workspace.agents_dir config)
+    (Workspace.safe_filename agent_name ^ ".json")
+;;
+
+let plain_agent_candidate_names requested_name =
+  let trimmed = String.trim requested_name in
+  [ trimmed ]
+  |> List.filter (fun value -> value <> "")
+;;
+
+let plain_agent_artifacts_exist config agent_name =
+  let rec any_path_exists = function
+    | [] -> Ok false
+    | path :: rest ->
+      (match lstat_path path with
+       | Error _ as error -> error
+       | Ok (Some _) -> Ok true
+       | Ok None -> any_path_exists rest)
+  in
+  any_path_exists
+    [ agent_file_path config agent_name
+    ; Metrics_store_eio.agent_metrics_dir config agent_name
+    ; Auth.credential_file config.base_path agent_name
+    ]
+;;
+
+let resolve_plain_agent_target config requested_name =
+  match
+    exact_agent_aliases
+      ~validate_alias:validate_agent_alias
+      (plain_agent_candidate_names requested_name)
+  with
+  | Error detail -> Error (Invalid_plain_agent_name detail)
+  | Ok [] -> Ok None
+  | Ok (agent_name :: _) ->
+    (match plain_agent_artifacts_exist config agent_name with
+     | Error detail -> Error (Plain_agent_artifact_read_failed detail)
+     | Ok true -> Ok (Some agent_name)
+     | Ok false -> Ok None)
+;;
+
+let plain_agent_resolve_error_to_string = function
+  | Invalid_plain_agent_name detail -> detail
+  | Plain_agent_artifact_read_failed detail -> detail
+;;
+
+let plain_agent_resolve_status = function
+  | Invalid_plain_agent_name _ -> `Bad_request
+  | Plain_agent_artifact_read_failed _ -> `Internal_server_error
+;;
+
+let agent_purge_cleanup_result_to_json
+    { agent_name
+    ; workspace_unbound
+    } =
+  `Assoc
+    [ ("agent_name", `String agent_name)
+    ; ("workspace_unbound", `Bool workspace_unbound)
+    ]
+;;
+
+let validate_credentials config aliases =
+  let owner_matches (credential : Masc_domain.agent_credential) =
+    List.exists (String.equal credential.agent_name) aliases
+  in
+  let rec validate = function
+    | [] -> Ok ()
+    | alias :: rest ->
+      let alias_path = Auth.credential_file config.Workspace.base_path alias in
+      (match lstat_path alias_path with
+       | Error _ as error -> error
+       | Ok None -> validate rest
+       | Ok (Some _) ->
+         let loaded =
+           try Ok (Auth.load_credential config.base_path alias) with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> Error (path_error "credential read" alias_path exn)
+         in
+         (match loaded with
+          | Error _ as error -> error
+          | Ok None ->
+            Error
+              (Printf.sprintf
+                 "credential artifact is present but unreadable: owner=%s path=%s"
+                 alias
+                 alias_path)
+          | Ok (Some credential) when owner_matches credential ->
+            validate rest
+          | Ok (Some credential) ->
+            Error
+              (Printf.sprintf
+                 "credential artifact owner mismatch: requested=%s persisted=%s path=%s"
+                 alias
+                 credential.agent_name
+                 alias_path)))
+  in
+  validate aliases
+;;
+
+let delete_credentials config aliases =
+  Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+    (* Revalidate after admission: the earlier preflight preceded workspace
+       cleanup and must not authorize deleting a different credential. Auth
+       owns the complete alias/UUID/raw-token deletion; no stale paths remain. *)
+    Result.bind (validate_credentials config aliases) (fun () ->
+      let rec delete_aliases = function
+        | [] -> Ok ()
+        | alias :: rest ->
+          (match Auth.delete_credential_in_transaction transaction alias with
+           | Ok () -> delete_aliases rest
+           | Error error ->
+             Error (Printf.sprintf "credential deletion failed for exact owner %s: %s"
+               alias (Masc_domain.masc_error_to_string error)))
+      in
+      delete_aliases aliases))
+  |> Result.map_error Masc_domain.masc_error_to_string
+  |> Result.join
+;;
+
+let unbind_exact_workspace_agents config aliases =
+  try
+    let state = Workspace.read_state config in
+    let unbound =
+      List.filter
+        (fun alias -> List.exists (String.equal alias) state.active_agents)
+        aliases
+    in
+    if unbound <> []
+    then
+      ignore
+        (Workspace.update_state config (fun current ->
+           { current with
+             active_agents =
+               List.filter
+                 (fun active -> not (List.exists (String.equal active) aliases))
+                 current.active_agents
+           }));
+    Ok unbound
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "exact workspace agent unbind failed for [%s]: %s"
+         (String.concat "," aliases)
+         (Printexc.to_string exn))
+;;
+
+let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
+  match exact_agent_aliases ~validate_alias agent_names with
+  | Error _ as error -> error
+  | Ok aliases ->
+    (match validate_credentials config aliases with
+     | Error _ as error -> error
+     | Ok () ->
+       (match unbind_exact_workspace_agents config aliases with
+        | Error _ as error -> error
+        | Ok unbound ->
+          let cleanup_results =
+            List.map
+              (fun agent_name ->
+                 { agent_name
+                 ; workspace_unbound =
+                     List.exists (String.equal agent_name) unbound
+                 })
+              aliases
+          in
+          let filesystem_paths =
+            aliases
+            |> List.concat_map (fun alias ->
+                 [ agent_file_path config alias
+                 ; Metrics_store_eio.agent_metrics_dir config alias
+                 ])
+            |> List.sort_uniq String.compare
+          in
+          (match remove_paths_strict filesystem_paths with
+           | Error _ as error -> error
+           | Ok () ->
+             (match delete_credentials config aliases with
+              | Error _ as error -> error
+              | Ok () ->
+                List.iter
+                  (fun result ->
+                     Log.Misc.info
+                       "[agent_purge] exact owner=%s workspace_unbound=%b"
+                       result.agent_name
+                       result.workspace_unbound)
+                  cleanup_results;
+                Ok cleanup_results))))
+;;
+
+let keeper_artifact_path config keeper_name artifact =
+  let open Keeper_shutdown_types in
+  match artifact with
+  | Keeper_metrics_store_artifact ->
+    Some (Keeper_types_support.keeper_metrics_dir config keeper_name)
+  | Keeper_root_logs_artifact | Keeper_runtime_configuration_artifact -> None
+  | Keeper_runtime_directory_artifact ->
+    Some (Filename.concat (Keeper_fs.keeper_dir config) keeper_name)
+  | Keeper_memory_current_artifact ->
+    Some
+      (Keeper_memory_os_current.path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_memory_admission_queue_artifact ->
+    Some
+      (Keeper_memory_admission_queue.path
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_librarian_range_receipt_artifact ->
+    Some
+      (Keeper_memory_os_current.durable_range_receipt_path
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_librarian_unread_ledger_artifact ->
+    Some (Keeper_memory_os_current.unread_ledger_path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
+  | Keeper_memory_epoch_artifact ->
+    Some (Keeper_memory_os_current.epoch_path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
+  | Keeper_memory_publication_artifact ->
+    Some (Keeper_memory_os_current.publication_receipt_path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
+  | Keeper_memory_retraction_plan_artifact ->
+    Some
+      (Keeper_memory_os_current.retraction_plan_receipt_path
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_memory_source_current_artifact ->
+    Some
+      (Keeper_memory_source_current.path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_working_context_recall_artifact ->
+    Some (Keeper_librarian_context_recall.path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_name)
+  | Keeper_working_context_artifact ->
+    Some (Keeper_librarian_context.path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
+  | Keeper_memory_journal_artifact ->
+    Some
+      (Keeper_memory_os_current.journal_path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_memory_journal_lock_artifact ->
+    Some
+      (Keeper_memory_os_current.journal_path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name
+       |> Fs_compat.private_jsonl_lock_path)
+  | Keeper_memory_absorbed_artifact ->
+    Some
+      (Keeper_memory_absorbed.path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_memory_events_artifact ->
+    Some
+      (Keeper_memory_os_events.path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
+  | Keeper_turn_boundaries_artifact ->
+    Some
+      (Keeper_turn_boundaries.path_for_keepers_dir
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
+         ~keeper_id:keeper_name)
+  | Keeper_librarian_progress_artifact ->
+    Some
+      (Keeper_librarian_progress.path_for_keepers_dir
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
+         ~keeper_id:keeper_name)
+  | Keeper_external_read_cursor_artifact ->
+    Some (Keeper_external_read_cursor.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name)
+  | Keeper_librarian_official_progress_artifact ->
+    Some
+      (Keeper_librarian_official_progress.path_for_keepers_dir
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
+         ~keeper_id:keeper_name)
+  | Keeper_playground_bundles_artifact -> None
+  | Keeper_configuration_artifact ->
+    Some
+      (Filename.concat
+         (Config_dir_resolver.keepers_dir_for_base_path
+            ~base_path:config.Workspace.base_path)
+         (keeper_name ^ ".toml"))
+  | Keeper_chat_store_artifact ->
+    Some
+      (Keeper_chat_store.chat_path
+         ~base_dir:config.Workspace.base_path
+         ~keeper_name)
+  | Keeper_board_attention_candidates_artifact ->
+    Some
+      (Keeper_board_attention_candidate.ledger_path
+         ~base_path:config.Workspace.base_path
+         ~keeper_name)
+  | Keeper_board_attention_partitions_artifact ->
+    Some
+      (Keeper_board_attention_partition.ledger_path
+         ~base_path:config.Workspace.base_path
+         ~keeper_name)
+  | Keeper_antigravity_home_artifact path -> Some path
+  | Keeper_antigravity_prepare_lock_artifact path -> Some path
+  | Keeper_muse_home_artifact path -> Some path
+  | Agent_artifact_bundle _ -> None
+;;
+
+type official_client_purge_warning =
+  | Runtime_toml_unreadable of
+      { path : string
+      ; detail : string
+      }
+  | Keeper_not_assigned
+  | Empty_lane_candidates of { lane_id : string }
+  | Candidate_binding_missing of { runtime_id : string }
+  | Candidate_provider_missing of
+      { runtime_id : string
+      ; provider_id : string
+      }
+  | Antigravity_credentials_not_file of
+      { runtime_id : string
+      ; provider_id : string
+      }
+  | Muse_account_home_missing of
+      { runtime_id : string
+      ; provider_id : string
+      }
+
+let official_client_purge_warning_to_string = function
+  | Runtime_toml_unreadable { path; detail } ->
+    Printf.sprintf "runtime.toml unreadable (%s): %s" path detail
+  | Keeper_not_assigned -> "keeper has no runtime assignment"
+  | Empty_lane_candidates { lane_id } ->
+    Printf.sprintf "assigned lane %s declares no candidates" lane_id
+  | Candidate_binding_missing { runtime_id } ->
+    Printf.sprintf "runtime binding %s not found" runtime_id
+  | Candidate_provider_missing { runtime_id; provider_id } ->
+    Printf.sprintf
+      "provider %s for runtime binding %s not found"
+      provider_id
+      runtime_id
+  | Antigravity_credentials_not_file { runtime_id; provider_id } ->
+    Printf.sprintf
+      "antigravity provider %s for runtime binding %s has no file credentials"
+      provider_id
+      runtime_id
+  | Muse_account_home_missing { runtime_id; provider_id } ->
+    Printf.sprintf
+      "muse provider %s for runtime binding %s has no account_home"
+      provider_id
+      runtime_id
+;;
+
+(* The official-client owner homes are named by a hash of the Keeper name and
+   an OAuth source (Antigravity) or account home (Muse) that lives in
+   runtime.toml. Derive the paths across every candidate in the assigned lane
+   before the removal loop commits keeper removal, which deletes the
+   assignment this resolution reads; an unresolvable configuration logs a
+   typed warning and omits the entry rather than failing the purge, since a
+   same-name successor cannot re-derive the leaf either way. *)
+let resolve_official_client_purge_artifacts config ~keeper_name =
+  let open Keeper_shutdown_types in
+  let runtime_root = Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path in
+  let runtime_toml =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.Workspace.base_path
+  in
+  let dedup_artifacts artifacts =
+    let seen = Hashtbl.create (List.length artifacts) in
+    List.filter
+      (fun artifact ->
+         match keeper_artifact_path config keeper_name artifact with
+         | None -> true
+         | Some path ->
+           if Hashtbl.mem seen path
+           then false
+           else (
+             Hashtbl.replace seen path ();
+             true))
+      artifacts
+  in
+  match Runtime_toml.parse_file runtime_toml with
+  | Error errors ->
+    let detail =
+      errors
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+           Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "; "
+    in
+    [], [ Runtime_toml_unreadable { path = runtime_toml; detail } ]
+  | Ok cfg ->
+    let resolve_candidate runtime_id =
+      match
+        List.find_opt
+          (fun (binding : Runtime_schema.binding) ->
+             String.equal (Runtime_schema.binding_key binding) runtime_id)
+          cfg.bindings
+      with
+      | None -> [], [ Candidate_binding_missing { runtime_id } ]
+      | Some binding ->
+        (match Runtime_schema.provider_of_id cfg binding.provider_id with
+         | None ->
+           [], [ Candidate_provider_missing { runtime_id; provider_id = binding.provider_id } ]
+         | Some provider ->
+           (match provider.api_format with
+            | Runtime_schema.Antigravity_cli_runtime ->
+              (match provider.credentials with
+               | Some (Runtime_schema.File oauth_source) ->
+                 let owner_leaf =
+                   Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source
+                 in
+                 ( [ Keeper_antigravity_home_artifact
+                       (Runtime_antigravity_home.keeper_home_dir ~runtime_root ~owner_leaf)
+                   ; Keeper_antigravity_prepare_lock_artifact
+                       (Runtime_antigravity_home.keeper_prepare_lock_path ~runtime_root ~owner_leaf)
+                   ]
+                 , [] )
+               | Some (Runtime_schema.Env _ | Runtime_schema.Inline _) | None ->
+                 ( []
+                 , [ Antigravity_credentials_not_file
+                       { runtime_id; provider_id = binding.provider_id }
+                   ] ))
+            | Runtime_schema.Muse_serve_runtime ->
+              (match provider.account_home with
+               | None ->
+                 ( []
+                 , [ Muse_account_home_missing
+                       { runtime_id; provider_id = binding.provider_id }
+                   ] )
+               | Some account_home ->
+                 ( [ Keeper_muse_home_artifact
+                       (Runtime_muse_home.keeper_identity_dir ~runtime_root ~keeper_name ~account_home)
+                   ]
+                 , [] ))
+            | Runtime_schema.Codex_app_server_runtime
+            | Runtime_schema.Claude_code_runtime
+            | Runtime_schema.Messages_api
+            | Runtime_schema.Chat_completions_api
+            | Runtime_schema.Ollama_api
+            | Runtime_schema.Gemini_api
+            | Runtime_schema.Vertex_gemini_api -> [], []))
+    in
+    (match List.assoc_opt keeper_name cfg.keeper_assignments with
+     | None -> [], [ Keeper_not_assigned ]
+     | Some route_id ->
+       let candidate_ids, route_warnings =
+         match
+           List.find_opt
+             (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id route_id)
+             cfg.lane_decls
+         with
+         | Some lane ->
+           (match lane.candidate_ids with
+            | [] -> [], [ Empty_lane_candidates { lane_id = lane.id } ]
+            | candidates -> candidates, [])
+         | None -> [ route_id ], []
+       in
+       let artifacts_rev, warnings_rev =
+         List.fold_left
+           (fun (acc_art, acc_warn) runtime_id ->
+              let arts, warns = resolve_candidate runtime_id in
+              List.rev_append arts acc_art, List.rev_append warns acc_warn)
+           ([], List.rev route_warnings)
+           candidate_ids
+       in
+       dedup_artifacts (List.rev artifacts_rev), List.rev warnings_rev)
+;;
+
+let official_client_purge_artifacts config ~keeper_name =
+  let artifacts, warnings =
+    resolve_official_client_purge_artifacts config ~keeper_name
+  in
+  List.iter
+    (fun warning ->
+       Log.Keeper.warn
+         "dashboard Keeper purge (%s): official-client home not derivable: %s"
+         keeper_name
+         (official_client_purge_warning_to_string warning))
+    warnings;
+  artifacts
+;;
+
+let keeper_playground_paths config keeper_name =
+  Keeper_types_profile.all_sandbox_profiles
+  |> List.map (fun profile ->
+       Filename.concat
+         config.Workspace.base_path
+         (Keeper_sandbox.host_root_rel_of_profile profile keeper_name))
+  |> List.sort_uniq String.compare
+;;
+
+let purge_keeper_root_logs config keeper_name =
+  let root = Keeper_fs.keeper_dir config in
+  let entries =
+    try Eio_guard.run_in_systhread ~label:"keeper-purge-log-inventory"
+      (fun () -> match Unix.opendir root with
+        | dir -> Fun.protect ~finally:(fun () -> Unix.closedir dir) (fun () ->
+            let rec read acc = match Unix.readdir dir with
+              | "." | ".." -> read acc
+              | name -> read (name :: acc)
+              | exception End_of_file -> Ok (List.rev acc) in
+            read [])
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (path_error "readdir" root exn)
+  in
+  let belongs_to_keeper basename =
+    Keeper_runtime_root_entry.classify_basename basename
+    |> List.exists (function
+      | Keeper_runtime_root_entry.Keeper { keeper_name = owner;
+          artifact = (Decision_log | Feedback_log | Tla_trace_log); _ } ->
+        String.equal owner keeper_name
+      | Keeper { artifact = Metadata; _ } -> false)
+  in
+  let rec remove = function
+    | [] -> Ok ()
+    | basename :: rest when not (belongs_to_keeper basename) -> remove rest
+    | basename :: rest ->
+      let path = Filename.concat root basename in
+      match lstat_path path with
+      | Error _ as error -> error
+      | Ok None -> remove rest
+      | Ok (Some { Unix.st_kind = (Unix.S_REG | Unix.S_LNK); _ }) ->
+        Fs_compat.invalidate_cached_writer path;
+        (match remove_path_strict path with
+         | Error _ as error -> error
+         | Ok _ -> remove rest)
+      | Ok (Some { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK); _ }) ->
+        Error ("Keeper log path is not a file: " ^ path)
+  in
+  Result.bind entries remove
+;;
+
+let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
+  let open Keeper_shutdown_types in
+  (* The Librarian lane is the server's and outlives the Keeper, so a unit for
+     this Keeper may still be running whichever operation asks for the purge
+     (dashboard purge completion, configuration removal). It is cancelled and
+     waited for before any file goes, or it could write the progress file back
+     after the purge deleted it (RFC librarian-lifecycle section 8).
+     [request_cancel] only accepts a request from the lane's owner domain. *)
+  let remove_artifacts () =
+    Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
+    Keeper_continuity_observation.forget ~config ~keeper_name;
+    let artifacts =
+      Keeper_shutdown_types.dashboard_purge_artifact_plan
+        ~keeper_name:keeper_name
+        context
+      @ official_client_purge_artifacts config ~keeper_name
+    in
+    let rec remove = function
+      | [] -> Ok ()
+      | Keeper_configuration_artifact :: rest when not remove_configuration -> remove rest
+      | Keeper_runtime_configuration_artifact :: rest ->
+        (match Runtime.with_keeper_assignment_transaction
+          ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.Workspace.base_path)
+          ~keeper_name:keeper_name Runtime.commit_keeper_removal with
+         | Error _ as error -> error
+         | Ok receipt ->
+           List.iter (fun warning -> Log.Keeper.warn "Keeper runtime configuration cleanup: %s"
+             (Yojson.Safe.to_string (Runtime.config_lock_warning_to_yojson warning))) receipt.warnings;
+           (match receipt.value with Error _ as error -> error | Ok _ -> remove rest))
+      | Keeper_root_logs_artifact :: rest ->
+        (match purge_keeper_root_logs config keeper_name with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
+      | Agent_artifact_bundle aliases :: rest ->
+        (match
+           purge_agent_filesystem_artifacts
+             ~validate_alias:validate_keeper_agent_alias
+             config
+             aliases
+         with
+         | Error _ as error -> error
+         | Ok _ -> remove rest)
+      | Keeper_playground_bundles_artifact :: rest ->
+        (match
+           remove_paths_strict
+             (keeper_playground_paths config keeper_name)
+         with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
+      | Keeper_board_attention_candidates_artifact :: rest ->
+        (match Keeper_board_attention_candidate.purge
+           ~base_path:config.Workspace.base_path ~keeper_name with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
+      | Keeper_board_attention_partitions_artifact :: rest ->
+        (match Keeper_board_attention_partition.purge
+           ~base_path:config.Workspace.base_path ~keeper_name with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
+      | (( Keeper_metrics_store_artifact
+         | Keeper_runtime_directory_artifact
+         | Keeper_memory_current_artifact
+         | Keeper_librarian_range_receipt_artifact
+         | Keeper_librarian_unread_ledger_artifact
+         | Keeper_memory_admission_queue_artifact
+         | Keeper_memory_epoch_artifact
+         | Keeper_memory_publication_artifact
+         | Keeper_memory_retraction_plan_artifact
+         | Keeper_memory_source_current_artifact
+         | Keeper_working_context_recall_artifact
+         | Keeper_working_context_artifact
+         | Keeper_memory_journal_artifact
+         | Keeper_memory_journal_lock_artifact
+         | Keeper_memory_absorbed_artifact
+         | Keeper_memory_events_artifact
+         | Keeper_turn_boundaries_artifact
+         | Keeper_librarian_progress_artifact
+         | Keeper_external_read_cursor_artifact
+         | Keeper_librarian_official_progress_artifact
+         | Keeper_configuration_artifact
+         | Keeper_chat_store_artifact
+         | Keeper_antigravity_home_artifact _
+         | Keeper_antigravity_prepare_lock_artifact _
+         | Keeper_muse_home_artifact _ ) as artifact) :: rest ->
+        (match keeper_artifact_path config keeper_name artifact with
+         | None ->
+           Error "dashboard Keeper purge artifact plan lost its typed projection"
+         | Some path ->
+           (match artifact with
+            | Keeper_metrics_store_artifact ->
+              Dated_jsonl.prepare_for_directory_removal
+                (Keeper_types_support.keeper_metrics_store
+                   config
+                   keeper_name);
+              Keeper_status_metrics.invalidate_tool_audit_cache
+                config
+                ~keeper_name:keeper_name
+            | Keeper_memory_journal_artifact
+            | Keeper_root_logs_artifact
+            | Keeper_runtime_directory_artifact
+            | Keeper_memory_current_artifact
+            | Keeper_librarian_range_receipt_artifact
+            | Keeper_librarian_unread_ledger_artifact
+            | Keeper_memory_admission_queue_artifact
+            | Keeper_memory_epoch_artifact
+            | Keeper_memory_publication_artifact
+            | Keeper_memory_retraction_plan_artifact
+            | Keeper_memory_source_current_artifact
+            | Keeper_working_context_recall_artifact
+            | Keeper_working_context_artifact
+            | Keeper_memory_journal_lock_artifact
+            | Keeper_memory_absorbed_artifact
+            | Keeper_memory_events_artifact
+            | Keeper_turn_boundaries_artifact
+            | Keeper_librarian_progress_artifact
+            | Keeper_external_read_cursor_artifact
+            | Keeper_librarian_official_progress_artifact
+            | Keeper_playground_bundles_artifact
+            | Keeper_runtime_configuration_artifact
+            | Keeper_configuration_artifact
+            | Keeper_chat_store_artifact
+            | Keeper_board_attention_candidates_artifact
+            | Keeper_board_attention_partitions_artifact
+            | Keeper_antigravity_home_artifact _
+            | Keeper_antigravity_prepare_lock_artifact _
+            | Keeper_muse_home_artifact _
+            | Agent_artifact_bundle _ -> ());
+           (match (match artifact with
+             | Keeper_configuration_artifact ->
+               Runtime.with_manifest_config_lock ~manifest_path:path
+                 ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path
+                   ~base_path:config.Workspace.base_path)
+                 (fun () -> remove_path_strict path)
+             | Keeper_metrics_store_artifact | Keeper_root_logs_artifact
+             | Keeper_runtime_directory_artifact | Keeper_memory_current_artifact
+             | Keeper_librarian_range_receipt_artifact | Keeper_memory_admission_queue_artifact
+             | Keeper_librarian_unread_ledger_artifact
+             | Keeper_memory_epoch_artifact
+             | Keeper_memory_publication_artifact | Keeper_memory_retraction_plan_artifact
+             | Keeper_memory_source_current_artifact | Keeper_working_context_recall_artifact
+             | Keeper_working_context_artifact | Keeper_memory_journal_artifact
+             | Keeper_memory_journal_lock_artifact | Keeper_memory_absorbed_artifact
+             | Keeper_memory_events_artifact | Keeper_turn_boundaries_artifact
+             | Keeper_librarian_progress_artifact | Keeper_external_read_cursor_artifact
+             | Keeper_librarian_official_progress_artifact | Keeper_playground_bundles_artifact
+             | Keeper_runtime_configuration_artifact | Keeper_chat_store_artifact
+             | Keeper_board_attention_candidates_artifact
+             | Keeper_board_attention_partitions_artifact | Agent_artifact_bundle _
+             | Keeper_antigravity_home_artifact _ | Keeper_antigravity_prepare_lock_artifact _
+             | Keeper_muse_home_artifact _ -> remove_path_strict path) with
+            | Error _ as error -> error
+            | Ok outcome ->
+              (match artifact with
+               | Keeper_runtime_directory_artifact ->
+                 Keeper_fs.invalidate_dir path
+               | Keeper_metrics_store_artifact
+               | Keeper_root_logs_artifact
+               | Keeper_memory_current_artifact
+               | Keeper_librarian_range_receipt_artifact
+               | Keeper_librarian_unread_ledger_artifact
+               | Keeper_memory_admission_queue_artifact
+               | Keeper_memory_epoch_artifact
+               | Keeper_memory_publication_artifact
+            | Keeper_memory_retraction_plan_artifact
+               | Keeper_memory_source_current_artifact
+               | Keeper_working_context_recall_artifact
+               | Keeper_working_context_artifact
+               | Keeper_memory_journal_artifact
+               | Keeper_memory_journal_lock_artifact
+               | Keeper_memory_absorbed_artifact
+               | Keeper_memory_events_artifact
+               | Keeper_turn_boundaries_artifact
+               | Keeper_librarian_progress_artifact
+               | Keeper_external_read_cursor_artifact
+            | Keeper_librarian_official_progress_artifact
+               | Keeper_playground_bundles_artifact
+               | Keeper_runtime_configuration_artifact
+               | Keeper_configuration_artifact
+               | Keeper_chat_store_artifact
+               | Keeper_board_attention_candidates_artifact
+               | Keeper_board_attention_partitions_artifact
+               | Keeper_antigravity_home_artifact _
+               | Keeper_antigravity_prepare_lock_artifact _
+               | Keeper_muse_home_artifact _
+               | Agent_artifact_bundle _ -> ());
+              Log.Keeper.debug
+                "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"
+                keeper_name
+                path
+                (match outcome with
+                 | Path_absent -> "absent"
+                 | Path_removed -> "removed");
+              remove rest))
+    in
+    remove artifacts
+  in
+  match Eio_context.run_on_owner_domain (fun () ->
+    Keeper_memory_lane.with_librarian_purge
+      ~base_path:config.Workspace.base_path ~keeper_name (fun () ->
+        Keeper_memory_os_current.with_program_reset
+          ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+            ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name remove_artifacts))
+  with
+  | Ok result -> result
+  | Error error -> Error ("Librarian lane could not be stopped before purge: "
+      ^ Keeper_memory_lane.purge_cancel_error_to_string error)
+;;
+
+let handle_dashboard_keeper_purge_completion config operation =
+  match Event_bus_slots.get_masc () with
+  | None -> Error "MASC lifecycle event bus is not installed"
+  | Some _ ->
+    (match operation.Keeper_shutdown_types.cleanup_intent.reason with
+     | Keeper_shutdown_types.Dashboard_keeper_purge context ->
+       let operation_id =
+         Keeper_shutdown_types.Operation_id.to_string operation.operation_id
+       in
+       (match
+          Server_schedule_consumers.cancel_keeper_schedules
+            config
+            ~keeper_name:operation.keeper_name
+        with
+        | Error error ->
+          Error (Schedule_store.store_error_to_string error)
+        | Ok () ->
+          (match purge_keeper_artifacts config ~keeper_name:operation.keeper_name ~remove_configuration:true context with
+           | Error _ as error -> error
+           | Ok () ->
+          Keeper_supervisor_publish_lifecycle.publish_lifecycle
+            ~event:
+              (Keeper_lifecycle_events.Custom_event
+                 { verb = Keeper_lifecycle_events.Purged; phase = None })
+            operation.keeper_name
+            (Printf.sprintf
+               "requested_name=%s shutdown_operation=%s"
+               context.requested_name
+               operation_id)
+            ();
+          Log.Keeper.info
+            "dashboard Keeper purge completion delivered: keeper=%s operation=%s"
+            operation.keeper_name
+            operation_id;
+          Ok ()))
+     | Operator_stop_retain_meta
+     | Operator_stop_remove_meta
+     | Supervisor_cleanup ->
+       Error "dashboard purge completion does not belong to a dashboard purge operation")
+;;
+
+let handle_keeper_lifecycle_completion config operation = function
+  | Keeper_shutdown_types.Dashboard_keeper_purged ->
+    handle_dashboard_keeper_purge_completion config operation
+  | Supervisor_cleaned as action ->
+    Keeper_supervisor_cleanup.handle_completion config operation action
+;;
+
+let close_optional_string json field =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt field fields with
+     | None -> Ok None
+     | Some (`String value) -> Ok (Some value)
+     | Some _ -> Error (invalid_request field))
+  | _ -> Error (invalid_request field)
+;;
+
+let close_optional_bool json field =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt field fields with
+     | None -> Ok None
+     | Some (`Bool value) -> Ok (Some value)
+     | Some _ -> Error (invalid_request field))
+  | _ -> Error (invalid_request field)
+;;
+
+let parse_board_close_request json =
+  let open Result.Syntax in
+  let* post_id =
+    match Safe_ops.json_string_opt "post_id" json with
+    | Some post_id -> Ok post_id
+    | None -> Error (invalid_request "post_id")
+  in
+  let* successor_id = close_optional_string json "successor_id" in
+  let* no_successor = close_optional_bool json "no_successor" in
+  let* summary =
+    match Safe_ops.json_string_opt "summary" json with
+    | Some summary -> Ok summary
+    | None -> Error (invalid_request "summary")
+  in
+  let* successor =
+    match successor_id, no_successor with
+    | Some _, Some _ -> Error "give successor_id or no_successor, not both"
+    | Some id, None -> Ok (Board.Successor id)
+    | None, Some true -> Ok Board.No_successor
+    | None, Some false ->
+      Error
+        "no_successor=false is not a decision; pass successor_id or \
+         no_successor=true"
+    | None, None -> Error "close requires successor_id or no_successor=true"
+  in
+  Ok (post_id, successor, summary)
+;;
+
+let handle_board_close_post ~agent_name req reqd body_str =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    match parse_board_close_request json with
+    | Error msg -> respond_error ~request:req reqd msg
+    | Ok (post_id, successor, summary) ->
+      (match
+         Board_dispatch.set_closed
+           ~post_id ~closed_by:agent_name ~successor ~summary ()
+       with
+       | Ok () -> respond_ok ~request:req reqd
+       | Error err ->
+         let status =
+           match err with
+           | Board.Validation_error _ -> `Bad_request
+           | Board_types.Invalid_id _ | Board_types.Post_not_found _
+           | Board_types.Comment_not_found _ | Board_types.Io_error _ | Board_types.Already_voted _
+           | Board_types.Already_exists _ | Board_types.Unauthorized _
+           (* Closing reads no text, so the recipient lookup never runs here;
+              the arm only keeps the match complete. *)
+           | Board_types.Recipient_lookup_failed _ -> `Not_found
+         in
+         respond_error ~status ~request:req reqd
+           (Board_tool.board_error_to_string err))
+  with Yojson.Json_error _ ->
+    respond_error ~request:req reqd (invalid_request "post_id")
+;;
+
+module For_testing = struct
+  type nonrec official_client_purge_warning = official_client_purge_warning =
+    | Runtime_toml_unreadable of
+        { path : string
+        ; detail : string
+        }
+    | Keeper_not_assigned
+    | Empty_lane_candidates of { lane_id : string }
+    | Candidate_binding_missing of { runtime_id : string }
+    | Candidate_provider_missing of
+        { runtime_id : string
+        ; provider_id : string
+        }
+    | Antigravity_credentials_not_file of
+        { runtime_id : string
+        ; provider_id : string
+        }
+    | Muse_account_home_missing of
+        { runtime_id : string
+        ; provider_id : string
+        }
+
+  let official_client_purge_warning_to_string =
+    official_client_purge_warning_to_string
+  let resolve_official_client_purge_artifacts =
+    resolve_official_client_purge_artifacts
+  let purge_agent_artifacts config agent_names =
+    purge_agent_filesystem_artifacts ~validate_alias:validate_agent_alias config agent_names
+    |> Result.map (fun _ -> ())
+  let purge_keeper_artifacts = purge_keeper_artifacts
+  let handle_board_close_post = handle_board_close_post
+end
+
+let keeper_purge_resolve_status = function
+  | Keeper_dashboard_purge.Empty_requested_name -> `Bad_request
+  | Invalid_requested_name _ -> `Bad_request
+  | Keeper_metadata_unreadable _ -> `Internal_server_error
+  | Keeper_metadata_name_mismatch _ -> `Conflict
+  | Keeper_owner_unavailable _ -> `Service_unavailable
+  | Keeper_operation_unreadable _ -> `Internal_server_error
+  (* Not 500: the record is readable and the state is exact. It is a conflict
+     the operator resolves by releasing the fence. *)
+  | Keeper_purge_blocked _ -> `Conflict
+;;
+
+let keeper_purge_submit_status = function
+  | Keeper_shutdown_runtime.Worker_start_error _ -> `Service_unavailable
+  | Existing_operation_load_error _ -> `Internal_server_error
+  | Prepare_error _
+  | Existing_operation_lane_mismatch _
+  | Existing_operation_intent_mismatch _ -> `Conflict
+;;
+
+let respond_keeper_purge_operation_accepted ~request reqd operation =
+  match operation.Keeper_shutdown_types.cleanup_intent.reason with
+  | Keeper_shutdown_types.Dashboard_keeper_purge _ ->
+    Http.Response.json_value
+      ~status:`Accepted
+      ~compress:true
+      ~request
+      (`Assoc
+         [ ("ok", `Bool true)
+         ; ("accepted", `Bool true)
+         ; ("target_kind", `String "keeper")
+         ; ("keeper_name", `String operation.keeper_name)
+         ; ( "operation_id"
+           , `String
+               (Keeper_shutdown_types.Operation_id.to_string
+                  operation.operation_id) )
+         ])
+      reqd
+  | Operator_stop_retain_meta
+  | Operator_stop_remove_meta
+  | Supervisor_cleanup ->
+    respond_error
+      ~status:`Internal_server_error
+      ~request
+      reqd
+      "dashboard purge acceptance received a non-dashboard lifecycle operation"
+;;
+
+let cleanup_configuration_artifacts config keeper_name =
+  match Server_schedule_consumers.cancel_keeper_schedules config ~keeper_name with
+  | Error error -> Error (Schedule_store.store_error_to_string error)
+  | Ok () -> purge_keeper_artifacts config ~keeper_name ~remove_configuration:false
+      { Keeper_shutdown_types.requested_name = keeper_name }
+;;
+
+let respond_configuration_removal ~request reqd
+    (receipt : Keeper_configuration_removal.receipt) =
+  Http.Response.json_value ~request
+    (`Assoc ["ok", `Bool true; "accepted", `Bool true;
+      "target_kind", `String "keeper"; "operation_kind", `String "configuration_removal";
+      "keeper_name", `String receipt.keeper_name;
+      "operation_id", `String (Keeper_shutdown_types.Operation_id.to_string receipt.operation_id)]) reqd
+;;
+
+let keeper_purge_status_to_json (operation : Keeper_shutdown_types.t) =
+  let completed = match operation.phase with
+    | Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ } -> true
+    | Keeper_shutdown_types.Finalized { completion = Keeper_shutdown_types.Completion_delivered (Keeper_shutdown_types.Supervisor_cleaned);_}
+    | Keeper_shutdown_types.Finalized { completion = (Keeper_shutdown_types.Completion_not_requested | (Keeper_shutdown_types.Completion_pending _ | Keeper_shutdown_types.Completion_delivery_failed _));_}
+    | Keeper_shutdown_types.Prepared | Keeper_shutdown_types.Joining_lanes
+    | Keeper_shutdown_types.Joined_idle | Keeper_shutdown_types.Finalizing_tasks _
+    | Keeper_shutdown_types.Cleanup_ready _ | Keeper_shutdown_types.Reconciliation_required _
+    | Keeper_shutdown_types.Owner_absent _ | Keeper_shutdown_types.Operator_absence_acknowledged _
+    | Keeper_shutdown_types.Blocked _ | Keeper_shutdown_types.Superseded _ -> false in
+  `Assoc ["completed", `Bool completed;
+    "can_retry", `Bool (match operation.phase with
+      | Finalized { completion = (Completion_pending Dashboard_keeper_purged
+          | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } -> true
+      | Keeper_shutdown_types.Finalized { completion = Keeper_shutdown_types.Completion_pending (Keeper_shutdown_types.Supervisor_cleaned);_}
+      | Keeper_shutdown_types.Finalized { completion = Keeper_shutdown_types.Completion_delivery_failed { action = Keeper_shutdown_types.Supervisor_cleaned;_};_}
+      | Keeper_shutdown_types.Finalized { completion = (Keeper_shutdown_types.Completion_not_requested | Keeper_shutdown_types.Completion_delivered _);_}
+      | Keeper_shutdown_types.Prepared | Keeper_shutdown_types.Joining_lanes
+      | Keeper_shutdown_types.Joined_idle | Keeper_shutdown_types.Finalizing_tasks _
+      | Keeper_shutdown_types.Cleanup_ready _ | Keeper_shutdown_types.Reconciliation_required _
+      | Keeper_shutdown_types.Owner_absent _ | Keeper_shutdown_types.Operator_absence_acknowledged _
+      | Keeper_shutdown_types.Blocked _ | Keeper_shutdown_types.Superseded _ -> false);
+    "phase", `String (Keeper_shutdown_types.phase_to_string operation.phase);
+    "failure", (match operation.phase with
+      | Blocked failure -> `String failure.detail
+      | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } -> `String detail
+      | Keeper_shutdown_types.Finalized { completion = (Keeper_shutdown_types.Completion_not_requested | (Keeper_shutdown_types.Completion_pending _ | Keeper_shutdown_types.Completion_delivered _));_}
+      | Keeper_shutdown_types.Prepared | Keeper_shutdown_types.Joining_lanes
+      | Keeper_shutdown_types.Joined_idle | Keeper_shutdown_types.Finalizing_tasks _
+      | Keeper_shutdown_types.Cleanup_ready _ | Keeper_shutdown_types.Reconciliation_required _
+      | Keeper_shutdown_types.Owner_absent _ | Keeper_shutdown_types.Operator_absence_acknowledged _
+      | Keeper_shutdown_types.Superseded _ -> `Null);
+    "operation", Keeper_shutdown_store.to_json operation]
+;;
+
+let add_delete_action_routes router =
+  router
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/keepers/configuration-deletions/retry" (fun state _actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             try
+               let json = Yojson.Safe.from_string body in
+               match Safe_ops.json_string_opt "keeper_name" json, Safe_ops.json_string_opt "operation_id" json with
+               | Some keeper_name, Some raw_id ->
+                 (match Keeper_shutdown_types.Operation_id.of_string raw_id with
+                  | Error detail -> respond_error ~request:req reqd detail
+                  | Ok operation_id ->
+                    let config = Mcp_server.workspace_config state in
+                    match Keeper_configuration_removal.retry ~config ~keeper_name ~operation_id
+                      ~cleanup:(cleanup_configuration_artifacts config) with
+                    | Ok receipt -> respond_configuration_removal ~request:req reqd receipt
+                    | Error error -> respond_error ~status:`Conflict ~request:req reqd
+                        (Keeper_configuration_removal.error_to_string error))
+               | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
+             with Yojson.Json_error _ -> respond_error ~request:req reqd "invalid deletion retry JSON"))
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/keepers/deletions/retry" (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             try
+               let json = Yojson.Safe.from_string body in
+               match Safe_ops.json_string_opt "keeper_name" json,
+                     Safe_ops.json_string_opt "operation_id" json with
+               | Some keeper_name, Some raw_id ->
+                 (match Keeper_shutdown_types.Operation_id.of_string raw_id with
+                  | Error detail -> respond_error ~request:req reqd detail
+                  | Ok operation_id ->
+                    match Keeper_shutdown_runtime.retry_completion
+                      ~config:(Mcp_server.workspace_config state) ~keeper_name ~operation_id with
+                    | Ok operation -> respond_keeper_purge_operation_accepted ~request:req reqd operation
+                    | Error `Not_ready -> respond_error ~status:`Conflict ~request:req reqd
+                        "operation is not awaiting Dashboard purge completion"
+                    | Error (`Submit error) -> respond_error
+                        ~status:(keeper_purge_submit_status error) ~request:req reqd
+                        (Keeper_shutdown_runtime.submit_error_to_string error))
+               | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
+             with Yojson.Json_error _ -> respond_error ~request:req reqd "invalid deletion retry JSON"))
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/dashboard/keepers/deletions" (fun state _agent_name req reqd ->
+           let config = Mcp_server.workspace_config state in
+           match Keeper_shutdown_store.scan_inventory ~config with
+           | Error error -> respond_error ~status:`Internal_server_error ~request:req reqd
+               (Keeper_shutdown_store.error_to_string error)
+           | Ok entries ->
+             let operations, errors = List.fold_left (fun (operations, errors) entry ->
+               match entry with
+               | Keeper_shutdown_store.Operation operation ->
+                 (match operation.cleanup_intent.reason with
+                  | Dashboard_keeper_purge _ -> keeper_purge_status_to_json operation :: operations, errors
+                  | Keeper_shutdown_types.Operator_stop_retain_meta
+                  | Keeper_shutdown_types.Operator_stop_remove_meta
+                  | Keeper_shutdown_types.Supervisor_cleanup -> operations, errors)
+               | Corrupt_record record ->
+                 operations, `Assoc ["keeper_name", `String record.keeper_name;
+                   "operation_id", `String (Keeper_shutdown_types.Operation_id.to_string record.operation_id);
+                   "error", `String (Keeper_shutdown_store.error_to_string record.error)] :: errors)
+               ([], []) entries in
+             let configuration_removals, configuration_errors =
+               match Keeper_configuration_removal.list ~config with
+               | Ok inventory -> List.map Keeper_configuration_removal.to_json inventory.receipts, inventory.errors
+               | Error error -> [], [Keeper_configuration_removal.error_to_string error] in
+             Http.Response.json_value ~request:req
+               (`Assoc ["operations", `List (List.rev operations);
+                 "errors", `List (List.rev errors);
+                 "configuration_removals", `List configuration_removals;
+                 "configuration_errors", `List (List.map (fun error -> `String error) configuration_errors)]) reqd)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/dashboard/keepers/purge-status" (fun state _agent_name req reqd ->
+           match Server_utils.query_param req "keeper_name",
+                 Server_utils.query_param req "operation_id" with
+           | Some keeper_name, Some raw_id ->
+             (match Keeper_shutdown_types.Operation_id.of_string raw_id with
+              | Error detail -> respond_error ~request:req reqd detail
+              | Ok operation_id ->
+                let config = Mcp_server.workspace_config state in
+                match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
+                | Error error ->
+                  let status = match error with
+                    | Keeper_shutdown_store.Not_found _ -> `Not_found
+                    | Keeper_shutdown_store.Already_exists _ | Keeper_shutdown_store.Io_error _
+                    | Keeper_shutdown_store.Decode_error _
+                    | Keeper_shutdown_store.Invalid_operation _
+                    | Keeper_shutdown_store.Identity_mismatch _
+                    | Keeper_shutdown_store.Revision_conflict _
+                    | Keeper_shutdown_store.Supersession_phase_mismatch _
+                    | Keeper_shutdown_store.Supersession_intent_mismatch _
+                    | Keeper_shutdown_store.Invalid_supersession_actor _ -> `Internal_server_error in
+                  respond_error ~status ~request:req reqd
+                    (Keeper_shutdown_store.error_to_string error)
+                | Ok operation ->
+                  match operation.cleanup_intent.reason with
+                  | Keeper_shutdown_types.Dashboard_keeper_purge _ ->
+                    Http.Response.json_value ~request:req
+                      (keeper_purge_status_to_json operation) reqd
+                  | Operator_stop_retain_meta | Operator_stop_remove_meta | Supervisor_cleanup ->
+                    respond_error ~status:`Conflict ~request:req reqd
+                      "operation is not a Dashboard Keeper purge")
+           | _ -> respond_error ~request:req reqd
+                    "keeper_name and operation_id are required")
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/delete" (fun _state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None ->
+                 respond_error ~request:req reqd (invalid_request "post_id")
+             | Some post_id ->
+             match Board_dispatch.delete_post ~post_id with
+             | Ok outcome ->
+                 let status, persistence, details =
+                   match outcome with
+                   | Board.Durable_deletion -> `OK, "durable", []
+                   | Board.Deletion_persistence_pending detail ->
+                     `Accepted, "pending", ["detail", `String detail]
+                 in
+                 Http.Response.json_value ~status ~request:req
+                   (`Assoc
+                     ([ "ok", `Bool true
+                      ; "post_id", `String post_id
+                      ; "applied", `Bool true
+                      ; "persistence", `String persistence
+                      ] @ details)) reqd
+             | Error err ->
+                 let status =
+                   match err with
+                   | Board.Invalid_id _ | Board.Validation_error _ -> `Bad_request
+                   | Board.Post_not_found _ | Board.Comment_not_found _ -> `Not_found
+                   | Board.Io_error _ | Board.Recipient_lookup_failed _ -> `Service_unavailable
+                   | Board.Already_voted _ | Board.Already_exists _ -> `Conflict
+                   | Board.Unauthorized _ -> `Forbidden
+                 in
+                 respond_error ~status ~request:req reqd
+                   (Board_tool.board_error_to_string err)
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "post_id")
+         )
+       )
+
+  (* Pin is an operator-curated board mutation: same CanAdmin gate and auth
+     helper as board/delete, so it lives alongside it rather than as an
+     agent-facing MCP tool (which would let any keeper self-pin). *)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/pin" (fun _state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None ->
+                 respond_error ~request:req reqd (invalid_request "post_id")
+             | Some post_id ->
+             (* [json_bool] folds "key absent" and "value unparseable" onto the
+                same default, and this default pins. {"pinned":"nope"} therefore
+                pinned the post while plainly meaning something else. Absence
+                still pins — that is the route's name — but a value the parser
+                cannot read is a client error. *)
+             match
+               (match Yojson.Safe.Util.member "pinned" json with
+                | `Null -> Ok true
+                | _ ->
+                  (match Safe_ops.json_bool_opt "pinned" json with
+                   | Some b -> Ok b
+                   | None -> Error ()))
+             with
+             | Error () -> respond_error ~request:req reqd (invalid_request "pinned")
+             | Ok pinned ->
+             match Board_dispatch.set_pinned ~post_id ~pinned with
+             | Ok () -> respond_ok ~request:req reqd
+             | Error err ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Board_tool.board_error_to_string err)
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "post_id")
+         )
+       )
+
+  (* Close is the operator tier of the three-tier close permission model
+     (task-1758/#39356): author self-service and configured-moderator are
+     separate, not-yet-added surfaces (an agent-facing MCP tool and a config
+     concept that does not exist yet, respectively) — tracked as follow-up
+     scope on #39356, not folded in here. [closed_by] is the operator's own
+     bound agent_name from the CanAdmin token, same identity source
+     [with_token_permission_auth] already resolves for every other route in
+     this file, not a client-supplied field (a client could otherwise claim
+     to be anyone). *)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/close" (fun _state agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           handle_board_close_post ~agent_name req reqd body_str
+         )
+       )
+
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/reopen" (fun _state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None -> respond_error ~request:req reqd (invalid_request "post_id")
+             | Some post_id ->
+             match Board_dispatch.reopen ~post_id with
+             | Ok () -> respond_ok ~request:req reqd
+             | Error err ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Board_tool.board_error_to_string err)
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "post_id")
+         )
+       )
+
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/dashboard/tasks/deletions" (fun state _agent_name req reqd ->
+           match Workspace.deletion_receipts_r (Mcp_server.workspace_config state) with
+           | Error message -> respond_error ~status:`Internal_server_error ~request:req reqd message
+           | Ok observation ->
+             let copies_state, copy_errors = match observation.copies with
+               | Workspace_backlog.Copies_consistent -> "consistent", []
+               | Workspace_backlog.Copies_unavailable errors -> "unavailable", errors in
+             Http.Response.json_value ~request:req
+               (`Assoc ["receipts", `List (List.map Masc_domain.task_deletion_receipt_to_yojson observation.receipts);
+                 "copies", `Assoc ["state", `String copies_state;
+                   "errors", `List (List.map (fun error -> `String error) copy_errors)]]) reqd)
+
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/deletions/retry" (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             try
+               let json = Yojson.Safe.from_string body_str in
+               match Safe_ops.json_string_opt "deletion_id" json with
+               | None -> respond_error ~request:req reqd (invalid_request "deletion_id")
+               | Some deletion_id ->
+                 match Workspace.retry_task_deletion_r (Mcp_server.workspace_config state) ~deletion_id with
+                 | Error (Workspace.Unknown_deletion _) ->
+                   respond_error ~status:`Not_found ~request:req reqd "unknown deletion identity"
+                 | Error (Workspace.Task_identity_reused task_id) ->
+                   respond_error ~status:`Conflict ~request:req reqd
+                     ("deletion identity conflicts with a live Task: " ^ task_id)
+                 | Error (Workspace.Deletion_storage_error error) ->
+                   respond_error ~status:`Internal_server_error ~request:req reqd
+                     (Masc_domain.masc_error_to_string error)
+                 | Ok outcome ->
+                   let errors = match outcome with
+                     | Workspace.Task_deleted | Workspace.Task_already_absent -> []
+                     | Workspace.Task_delete_cleanup_failed errors -> errors in
+                   Http.Response.json_value ~request:req
+                     (`Assoc ["deletion_id", `String deletion_id; "ok", `Bool (errors=[]);
+                       "errors", `List (List.map (fun error -> `String error) errors)]) reqd
+             with Yojson.Json_error _ -> respond_error ~request:req reqd (invalid_request "deletion_id")))
+
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/delete" (fun state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "task_id" json with
+             | None ->
+                 respond_error ~request:req reqd (invalid_request "task_id")
+             | Some task_id ->
+             let config = (Mcp_server.workspace_config state) in
+             match Workspace.delete_task_r config ~task_id with
+             | Ok outcome ->
+               let status, errors = match outcome with
+                 | Workspace.Task_deleted -> "deleted", []
+                 | Workspace.Task_already_absent -> "already_absent", []
+                 | Workspace.Task_delete_cleanup_failed errors -> "cleanup_failed", errors in
+               Http.Response.json_value ~request:req
+                 (`Assoc ["ok", `Bool (errors = []); "task_id", `String task_id;
+                   "task_deleted", `Bool true; "status", `String status;
+                   "errors", `List (List.map (fun error -> `String error) errors)]) reqd
+             | Error err ->
+                 respond_error ~status:`Internal_server_error ~request:req reqd
+                   (Printf.sprintf "task delete failed: %s"
+                      (Masc_domain.masc_error_to_string err))
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "task_id")
+         )
+       )
+
+  (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Operator
+     surface (CanAdmin); shares the validated backend
+     [Task.Goal_assignment.set_task_goal] with the masc_task_set_goal MCP tool,
+     so the precondition checks live in exactly one place. *)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/assign-goal" (fun state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match
+               ( Safe_ops.json_string_opt "task_id" json
+               , Safe_ops.json_string_opt "goal_id" json )
+             with
+             | None, _ -> respond_error ~request:req reqd (invalid_request "task_id")
+             | _, None -> respond_error ~request:req reqd (invalid_request "goal_id")
+             | Some raw_task_id, Some raw_goal_id ->
+             let task_id = String.trim raw_task_id in
+             let goal_id = String.trim raw_goal_id in
+             if String.equal task_id "" then
+               respond_error ~request:req reqd (invalid_request "task_id")
+             else if String.equal goal_id "" then
+               respond_error ~request:req reqd (invalid_request "goal_id")
+             else
+             let config = (Mcp_server.workspace_config state) in
+             (match Task.Goal_assignment.set_task_goal config ~task_id ~goal_id with
+              | Ok () -> respond_ok ~request:req reqd
+              | Error
+                  (( Task.Goal_assignment.Unknown_task _
+                   | Task.Goal_assignment.Unknown_goal _ ) as err) ->
+                respond_error ~status:`Not_found ~request:req reqd
+                  (Task.Goal_assignment.set_task_goal_error_to_string err)
+              | Error
+                  (( Task.Goal_assignment.Task_finished _
+                   | Task.Goal_assignment.Already_assigned _ ) as err) ->
+                respond_error ~status:`Conflict ~request:req reqd
+                  (Task.Goal_assignment.set_task_goal_error_to_string err)
+              (* RFC-0444 PR-2: a goal store this build cannot read is the
+                 typed envelope, with the status this file's siblings use
+                 for a dependency that is not there. *)
+              | Error (Task.Goal_assignment.Goal_source_unavailable unavailable) ->
+                Http.Response.json_value ~status:`Service_unavailable ~request:req
+                  (Goal_unavailable_envelope.to_yojson unavailable) reqd
+              | Error
+                  (( Task.Goal_assignment.Goal_lock_failed _
+                   | Task.Goal_assignment.Backlog_read_failed _
+                   | Task.Goal_assignment.Link_write_failed _ ) as err) ->
+                respond_error ~status:`Internal_server_error ~request:req reqd
+                  (Task.Goal_assignment.set_task_goal_error_to_string err))
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "task_id")
+         )
+       )
+
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/delete" (fun state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "goal_id" json with
+             | None ->
+                 respond_error ~request:req reqd (invalid_request "goal_id")
+             | Some goal_id ->
+             let config = (Mcp_server.workspace_config state) in
+             match Goal_store.delete_goal config ~goal_id with
+             | Ok outcome ->
+                 (* The Goal is gone, so no later measurement can name it;
+                    its observation row is dropped after the Goal lock is
+                    released. A failure is reported like an orphaned link:
+                    the Goal stays deleted and the response says what was
+                    left behind. *)
+                 let link_warning =
+                   match outcome with
+                   | Goal_store.Deleted -> None
+                   | Goal_store.Deleted_with_orphaned_links warning -> Some warning
+                 in
+                 let measurement_warning =
+                   match Goal_measurement.remove_goal config ~goal_id with
+                   | Ok () -> None
+                   | Error detail ->
+                       Log.Misc.warn
+                         "dashboard goal delete: goal %s removed but its measurement was not: %s"
+                         goal_id detail;
+                       Some
+                         (Printf.sprintf
+                            "goal deleted but failed to remove the measurement for %s: %s"
+                            goal_id detail)
+                 in
+                 (match List.filter_map Fun.id [ link_warning; measurement_warning ] with
+                  | [] -> respond_ok ~request:req reqd
+                  | warnings ->
+                      respond_ok_with_warning ~request:req reqd
+                        (String.concat "; " warnings))
+             | Error (Goal_store.Unknown_goal _ as err) ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                  (Goal_store.delete_goal_error_to_string err)
+             | Error (Goal_store.Persistence_failed _ as err) ->
+                 respond_error ~status:`Internal_server_error ~request:req reqd
+                   (Goal_store.delete_goal_error_to_string err)
+             | Error (Goal_store.Store_unavailable unavailable) ->
+                 Http.Response.json_value ~status:`Service_unavailable ~request:req
+                   (Goal_unavailable_envelope.to_yojson unavailable) reqd
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "goal_id")
+         )
+       )
+
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/agents/purge" (fun state actor req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             (* Validate and dispatch against one captured workspace.  The
+                check precedes both existing-operation retries and new purges. *)
+             let config = (Mcp_server.workspace_scope state).config in
+             match Workspace.validate_expected_workspace ~config json with
+             | Error Workspace.Invalid_workspace_precondition ->
+               respond_error ~request:req reqd "invalid expected_workspace precondition"
+             | Error Workspace.Workspace_precondition_failed ->
+               let refusal = Request_workspace_precondition.Workspace_mismatch in
+               Http.Response.json_value ~status:`Conflict ~request:req
+                 (Server_refusal.json
+                    ~code:(Request_workspace_precondition.refusal_code refusal)
+                    ~fields:[ "ok", `Bool false ]
+                    (Request_workspace_precondition.refusal_message refusal))
+                 reqd
+             | Ok json ->
+             (match Safe_ops.json_string_opt "agent_name" json with
+             | None ->
+               respond_error ~request:req reqd (invalid_request "agent_name")
+             | Some requested_name ->
+               (match
+                  Keeper_dashboard_purge.existing_operation
+                    config
+                    requested_name
+                with
+                | Error error ->
+                  respond_error
+                    ~status:(keeper_purge_resolve_status error)
+                    ~request:req
+                    reqd
+                    (Keeper_dashboard_purge.resolve_error_to_string error)
+                | Ok (Some operation) ->
+                  respond_keeper_purge_operation_accepted
+                    ~request:req
+                    reqd
+                    operation
+                | Ok None ->
+                  (match Keeper_dashboard_purge.resolve config requested_name with
+                  | Error error ->
+                    respond_error
+                      ~status:(keeper_purge_resolve_status error)
+                      ~request:req
+                      reqd
+                      (Keeper_dashboard_purge.resolve_error_to_string error)
+                  | Ok (Some (Keeper_dashboard_purge.Configuration_only { keeper_name; _ })) ->
+                    (match Keeper_configuration_removal.submit ~config ~keeper_name ~actor
+                      ~cleanup:(cleanup_configuration_artifacts config) with
+                     | Ok receipt -> respond_configuration_removal ~request:req reqd receipt
+                     | Error error -> respond_error ~status:`Conflict ~request:req reqd
+                         (Keeper_configuration_removal.error_to_string error))
+                  | Ok (Some (Keeper_dashboard_purge.Runtime_keeper keeper_target)) ->
+                  (match
+                     Keeper_dashboard_purge.submit
+                       ~config
+                       ~actor
+                       keeper_target
+                   with
+                   | Error error ->
+                     respond_error
+                       ~status:(keeper_purge_submit_status error)
+                       ~request:req
+                       reqd
+                       (Keeper_shutdown_runtime.submit_error_to_string error)
+                   | Ok operation ->
+                     respond_keeper_purge_operation_accepted
+                       ~request:req
+                       reqd
+                       operation)
+                  | Ok None ->
+                    (match resolve_plain_agent_target config requested_name with
+                    | Error error ->
+                      respond_error
+                        ~status:(plain_agent_resolve_status error)
+                        ~request:req
+                        reqd
+                        (plain_agent_resolve_error_to_string error)
+                    | Ok (Some agent_name) ->
+                      (match
+                         purge_agent_filesystem_artifacts
+                           ~validate_alias:validate_agent_alias
+                           config
+                           [ agent_name ]
+                       with
+                       | Error msg ->
+                         respond_error
+                           ~status:`Internal_server_error
+                           ~request:req
+                           reqd
+                           msg
+                       | Ok cleanup_results ->
+                      Http.Response.json_value ~compress:true ~request:req
+                        (`Assoc
+                           [
+                             ("ok", `Bool true);
+                             ("accepted", `Bool false);
+                             ("target_kind", `String "agent");
+                             ("agent_name", `String agent_name);
+                             ( "cleanup_results",
+                               `List
+                                 (List.map agent_purge_cleanup_result_to_json
+                                    cleanup_results) );
+                           ])
+                        reqd)
+                    | Ok None ->
+                      respond_error ~status:`Not_found ~request:req reqd
+                        "agent or keeper not found"))))
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "agent_name")
+         )
+       )

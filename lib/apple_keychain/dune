@@ -1,0 +1,14 @@
+(include_subdirs no)
+(library
+ (name apple_keychain)
+ (public_name masc.apple_keychain)
+ (foreign_stubs (language c) (names apple_keychain_stubs))
+ (c_library_flags (:include framework_flags.sexp)))
+(rule
+ (target framework_flags.sexp)
+ (enabled_if (= %{system} macosx))
+ (action (write-file framework_flags.sexp "(-framework Security -framework CoreFoundation)")))
+(rule
+ (target framework_flags.sexp)
+ (enabled_if (<> %{system} macosx))
+ (action (write-file framework_flags.sexp "()")))

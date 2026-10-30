@@ -1,0 +1,117 @@
+{
+  "outcome": "incomplete",
+  "checks": [
+    {
+      "name": "non-root effective UID for real permission refusal",
+      "passed": true
+    },
+    {
+      "name": "binary hash matches verified input",
+      "passed": true
+    },
+    {
+      "name": "owned port differs from primary",
+      "passed": true
+    },
+    {
+      "name": "A verified owned candidate identity",
+      "passed": true
+    },
+    {
+      "name": "create-only owner registered audit-settle-a",
+      "passed": true
+    },
+    {
+      "name": "explicit pause committed audit-settle-a",
+      "passed": true
+    },
+    {
+      "name": "create-only owner registered audit-settle-b",
+      "passed": true
+    },
+    {
+      "name": "explicit pause committed audit-settle-b",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "MCP initialized",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "masc_keeper_status succeeds",
+      "passed": true
+    },
+    {
+      "name": "initial manual paused zero-turn audit-settle-a",
+      "passed": true
+    },
+    {
+      "name": "bounded successful MCP response",
+      "passed": true
+    },
+    {
+      "name": "masc_keeper_status succeeds",
+      "passed": true
+    },
+    {
+      "name": "initial manual paused zero-turn audit-settle-b",
+      "passed": true
+    },
+    {
+      "name": "actual POSIX exclusive lock excludes separate-process shared lock",
+      "passed": true
+    },
+    {
+      "name": "actual POSIX release permits shared lock",
+      "passed": true
+    },
+    {
+      "name": "startup-active same owned process identity",
+      "passed": true
+    },
+    {
+      "name": "canonical create audit-settle-wal-setup",
+      "passed": true
+    },
+    {
+      "name": "HTTP Admin human_operator stamp audit-settle-wal-setup",
+      "passed": true
+    },
+    {
+      "name": "public setup source accepted at exact queue address",
+      "passed": true
+    },
+    {
+      "name": "public setup cancel succeeds",
+      "passed": true
+    },
+    {
+      "name": "exact setup cancellation terminal and authoritative queue empty",
+      "passed": false
+    }
+  ],
+  "cleanup_errors": [],
+  "final_cleanup_forced_kills": [],
+  "process_exit_codes": {
+    "A": 0
+  },
+  "observer_deadline_means": "incomplete observation, not producer terminal or product timing failure",
+  "restart_count": 0,
+  "not_proven": [
+    "power-loss durability",
+    "model execution",
+    "arbitrary exactly-once effects",
+    "opaque finish-stamp bit equality",
+    "process-restart pending preservation",
+    "all scheduler races",
+    "whole feature"
+  ]
+}

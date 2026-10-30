@@ -1,0 +1,25 @@
+{
+  "captured_at": "2026-10-03T07:54:06.192222+00:00",
+  "base_sha": "43f24e914de2a529b6d8a8ae61c3adc860327e61",
+  "provenance": "local candidate fixture PTY with exact browser replay",
+  "source_sha256": {
+    "bin/masc_tui_home.ml": "4c1013634ba34de1eae5c3b9377b8ff348451a05f9e82a90f6c1edfd5a55c304",
+    "test/test_tui_home_decision_cards_pty.py": "b5e67279c45455284dfb7217db6018dc120fff9c8a97677204259a8f3dc98098",
+    "test/test_tui_home_decision_receipt_pty.py": "d54b177a28e25894093ab894b91eb4c56623c319704a03d6b2d41f47fa9f6e6b",
+    "test/test_tui_keyboard_overview_pty.py": "e27871a3df75bdc6500f802fa79522633a71004fe1ac9f7f692fcf4b5b41aaa0",
+    "test/test_tui_keyboard_rosters_pty.py": "7c9d6ae4292fd95d11a42a5586647494a92ca7b81f076062b7f1fffc2e531de9"
+  },
+  "binary_sha256": "b4168d4376dd317fcfb18d199da0aae56192377700f8d0220bd916da765db669",
+  "frames": [
+    "dashboard-unread-80",
+    "dashboard-empty-80",
+    "dashboard-loading-120"
+  ],
+  "known_limitations": {
+    "python_diagnostics": 63,
+    "diagnostic_delta": "none after line mapping",
+    "python_issue": 40984,
+    "isolated_source_and_receipt_issue": 40989
+  },
+  "production_verified": false
+}

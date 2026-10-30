@@ -1,0 +1,315 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  _resetJournalForTests,
+  journal,
+  normalizeSSEDispatchType,
+  recordServerPushEvent,
+} from './sse'
+import { appendThreadEntry, keeperThreads } from './keeper-state'
+import { operationDeliveryProvenance } from './keeper-delivery-provenance'
+import { parseSSEMessage } from './schemas/sse'
+
+describe('Keeper operation server push', () => {
+  const operationId = 'kmsg-operation-1'
+
+  beforeEach(() => {
+    keeperThreads.value = {}
+    appendThreadEntry('sangsu', {
+      id: 'operation-reply',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: 'Queued',
+      rawText: 'Queued',
+      timestamp: null,
+      delivery: 'queued',
+      streamState: null,
+      deliveryProvenance: operationDeliveryProvenance(
+        operationId,
+        'terminal_result',
+      ),
+      details: null,
+    })
+  })
+
+  it.each([undefined, 0, 2])('decodes text scope %s from wire into the exact operation bubble', (scope) => {
+    const decoded = parseSSEMessage(JSON.parse(JSON.stringify({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: operationId,
+      ag_ui_event: {
+        type: 'TEXT_MESSAGE_CONTENT',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        messageId: 'message-1',
+        delta: '실제 답변',
+        timestamp: 1,
+        ...(scope === undefined ? {} : { textStreamScope: scope }),
+      },
+    })))
+    expect(decoded?.ag_ui_event).toMatchObject({ type: 'TEXT_MESSAGE_CONTENT', delta: '실제 답변' })
+    if (!decoded) throw new Error('wire event was dropped')
+    recordServerPushEvent(decoded)
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'operation-reply')
+    expect(entry?.text).toBe('실제 답변')
+    expect(entry?.delivery).toBe('streaming')
+  })
+  it.each([-1, 0.5, '2', null, {}, Number.MAX_SAFE_INTEGER + 1])(
+    'refuses malformed wire text scope %s before text delivery', (scope) => {
+      const decoded = parseSSEMessage(JSON.parse(JSON.stringify({
+        type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: operationId,
+        ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:sangsu',
+          runId: 'run-1', messageId: 'message-1', delta: 'must not appear',
+          timestamp: 1, textStreamScope: scope },
+      })))
+      expect(decoded?.ag_ui_event).toMatchObject({
+        type: 'CUSTOM',
+        name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+        value: {
+          kind: 'sse_parse_failed',
+          reason: expect.stringContaining('textStreamScope'),
+        },
+      })
+      if (!decoded) throw new Error('expected an operation protocol error')
+      recordServerPushEvent(decoded)
+      const entry = keeperThreads.value.sangsu?.find(item => item.id === 'operation-reply')
+      expect(entry?.text).not.toContain('must not appear')
+      expect(entry?.delivery).toBe('sending')
+      expect(entry?.error).toContain('Expected textStreamScope non-negative integer')
+    })
+
+})
+
+describe('normalizeSSEDispatchType', () => {
+  it('routes Event_bus audit events to the audit handler', () => {
+    expect(normalizeSSEDispatchType('agent_core:masc:audit_event')).toBe('audit_event')
+  })
+
+  it('keeps board slash events on their explicit cases', () => {
+    expect(normalizeSSEDispatchType('masc/board_post')).toBe('masc/board_post')
+  })
+
+  it('strips legacy masc slash prefix for core events', () => {
+    expect(normalizeSSEDispatchType('masc/keeper_turn_complete')).toBe('keeper_turn_complete')
+  })
+})
+
+describe('server-push Agent Core typed-payload handlers', () => {
+  beforeEach(() => {
+    _resetJournalForTests()
+  })
+
+  function emitEvent(payload: Record<string, unknown>): void {
+    recordServerPushEvent(payload as unknown as Parameters<typeof recordServerPushEvent>[0])
+  }
+
+  function lastJournalEntry() {
+    // journal.value is newest-first (RingBuffer.toArray ordering)
+    return journal.value[0]
+  }
+
+  it('creates a journal entry from a typed agent_core:agent_started payload', () => {
+    emitEvent({
+      type: 'agent_core:agent_started',
+      event_type: 'agent_started',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: null,
+      tool_name: null,
+      payload: { agent_name: 'alpha', task_id: 't1' },
+    })
+    expect(lastJournalEntry()?.text).toBe('Agent run started · t1')
+    expect(lastJournalEntry()?.agent).toBe('alpha')
+  })
+
+  it('creates a journal entry from a typed agent_core:agent_completed payload', () => {
+    emitEvent({
+      type: 'agent_core:agent_completed',
+      event_type: 'agent_completed',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: null,
+      tool_name: null,
+      payload: {
+        agent_name: 'alpha',
+        task_id: 't1',
+        elapsed_s: 12.5,
+        success: true,
+        result: 'ok',
+      },
+    })
+    expect(journal.value).toHaveLength(1)
+    expect(lastJournalEntry()?.text).toBe('Agent run completed · t1 · 12.5s')
+  })
+
+  it('records a cooperative yield without calling it completion', () => {
+    emitEvent({
+      type: 'agent_core:agent_yielded',
+      event_type: 'agent_yielded',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: 2,
+      tool_name: null,
+      payload: { agent_name: 'alpha', task_id: 't1', turn: 2, elapsed_s: 1.5 },
+    })
+    expect(lastJournalEntry()?.text).toBe('Agent run yielded · T2 · 1.5s')
+  })
+
+  it('records a typed input request without calling it failure', () => {
+    emitEvent({
+      type: 'agent_core:agent_input_required',
+      event_type: 'agent_input_required',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: null,
+      tool_name: null,
+      payload: {
+        agent_name: 'alpha',
+        task_id: 't1',
+        elapsed_s: 1.5,
+        request_id: 'request-1',
+        participant_name: 'operator',
+        question: 'Continue?',
+        schema: null,
+        timeout_s: null,
+        created_at: 1_000,
+      },
+    })
+    expect(lastJournalEntry()?.text).toBe('Agent input required · request-1')
+  })
+
+  it('creates a journal entry from a typed agent_core:agent_failed payload with all error fields', () => {
+    emitEvent({
+      type: 'agent_core:agent_failed',
+      event_type: 'agent_failed',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: null,
+      tool_name: null,
+      payload: {
+        agent_name: 'alpha',
+        task_id: 't1',
+        elapsed_s: 3.0,
+        error: 'boom',
+        error_domain: 'api',
+        error_code: 'rate_limited',
+        error_retryable: true,
+        error_detail: { variant: 'rate_limited', message: 'slow down' },
+      },
+    })
+    expect(journal.value).toHaveLength(1)
+    expect(lastJournalEntry()?.text).toBe('Agent run failed · t1 · 3.0s · boom')
+  })
+
+  it('drops a malformed agent_core:agent_started payload and logs a warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const beforeCount = journal.value.length
+    emitEvent({
+      type: 'agent_core:agent_started',
+      event_type: 'agent_started',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: null,
+      tool_name: null,
+      payload: { agent_name: 'alpha', task_id: 42 },
+    })
+    expect(journal.value).toHaveLength(beforeCount)
+    expect(warnSpy).toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('creates a journal entry from a typed agent_core:tool_called payload', () => {
+    emitEvent({
+      type: 'agent_core:tool_called',
+      event_type: 'tool_called',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: null,
+      turn: null,
+      tool_name: 'bash',
+      payload: { agent_name: 'alpha', tool_name: 'bash' },
+    })
+    expect(lastJournalEntry()?.text).toBe('Tool called: bash')
+    expect(lastJournalEntry()?.agent).toBe('alpha')
+  })
+
+  it('creates a journal entry from a typed agent_core:turn_completed payload', () => {
+    emitEvent({
+      type: 'agent_core:turn_completed',
+      event_type: 'turn_completed',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: null,
+      turn: 5,
+      tool_name: null,
+      payload: { agent_name: 'alpha', turn: 5 },
+    })
+    expect(lastJournalEntry()?.text).toBe('Turn completed · T5')
+  })
+
+  it('creates a journal entry from a typed agent_core:handoff_requested payload', () => {
+    emitEvent({
+      type: 'agent_core:handoff_requested',
+      event_type: 'handoff_requested',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: null,
+      turn: null,
+      tool_name: null,
+      payload: { from_agent: 'alpha', to_agent: 'beta', reason: 'load' },
+    })
+    expect(lastJournalEntry()?.text).toBe('Handoff requested · alpha→beta · load')
+  })
+})
+
+describe('keeper turn KV reuse', () => {
+  beforeEach(() => {
+    _resetJournalForTests()
+  })
+
+  function complete(fields: { cache_n?: number | null; prompt_n?: number | null }) {
+    recordServerPushEvent({
+      type: 'keeper_turn_complete',
+      name: 'sangsu',
+      turn: 42,
+      input_tokens: 10,
+      output_tokens: 5,
+      tool_calls_made: 1,
+      ...fields,
+    })
+    return journal.value[0]?.text ?? ''
+  }
+
+  it('shows the turn sum the server put on keeper_turn_complete', () => {
+    expect(complete({ cache_n: 3508, prompt_n: 66 })).toContain('KV 재사용 3508/3574tok (98%)')
+  })
+
+  it('leaves the suffix off when the turn reported no wire timings', () => {
+    expect(complete({ cache_n: null, prompt_n: null })).not.toContain('KV 재사용')
+  })
+})

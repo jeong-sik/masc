@@ -1,0 +1,23 @@
+(include_subdirs no)
+
+(library
+ (name masc_build_commit)
+ (public_name masc.build_commit)
+ (wrapped false))
+
+; Embed the git commit and its timestamp together (RFC-0382 follow-up,
+; "binary unknown" root fix). The probe is a script rather than an inline
+; command so the checkout path, the container fallback and the validation of
+; the injected value stay readable; it carries its own reasoning.
+; (universe) re-runs the probe every build; downstream recompiles only when
+; the emitted hash changes. Sandboxing is disabled so git can ascend to the
+; checkout being built.
+(rule
+ (targets build_commit_generated.ml)
+ (deps
+  (sandbox none)
+  (universe))
+ (action
+  (with-stdout-to
+   %{targets}
+   (run bash %{dep:probe-commit.sh}))))

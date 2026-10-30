@@ -1,0 +1,20 @@
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -intf lib/auth/auth.mli
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -intf lib/auth/auth_credential_token.mli
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl lib/auth/auth_credential_base.ml
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl lib/auth/auth_credential_token.ml
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl lib/server/server_runtime_startup_credentials.ml
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl test/test_auth_rotate_shared_tokens_10304.ml
+exit_code=0
+
+/Users/dancer/.opam/5.5.1/bin/ocamlc -stop-after parsing -impl test/test_auth_token_rotation_transaction.ml
+exit_code=0

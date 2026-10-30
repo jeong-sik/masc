@@ -1,0 +1,27 @@
+{
+  "run": "40110334799",
+  "source_sha": "3014cfce79636f1e41cc39f6019a3428c6912145",
+  "conclusion": "failure",
+  "suites": {
+    "test_goal_verification_gate": {
+      "passed": 50,
+      "failed": 0,
+      "result": "[targeted] test/test_goal_verification_gate: OK in 1s"
+    },
+    "test_goal_tool_toml_parity": {
+      "passed": 1,
+      "failed": 0,
+      "result": "[targeted] test/test_goal_tool_toml_parity: OK in 0s"
+    },
+    "test_keeper_direct_goal_provider_wire": {
+      "passed": 5,
+      "failed": 1,
+      "result": "[targeted] test/test_keeper_direct_goal_provider_wire: FAIL exit 1 in 1s"
+    }
+  },
+  "failure": "Existing Empty direct HTTP wire assertion expected no Active Goals; new parent authoritative empty-set contract sends Active Goals (0).",
+  "failure_log_sha256": "0baaf56c0d34fc5fc41b94cf1a2db4b3e3ac462eb5f4a4c5664d10ec615031c7",
+  "repair_author_commit": "c352e598968c5d6003c584a0dd4d079669974cad",
+  "repair_integrated_commit": "ec664e53b7eda6a7dae4eb09daa04b56ad98997d",
+  "repair_scope": "Test-only. Product inputs identical to 3014; repaired native run dispatched separately."
+}

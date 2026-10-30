@@ -1,0 +1,10 @@
+{
+  "at": "2026-10-24T14:03:53.836351+00:00",
+  "old_integration_root": "/tmp/masc-goal-outcomes-20261024",
+  "observed_external_transition": "top branch881969e0 switched to lower eval-grader-boundary; duplicate-key commit cherry-picked/amended",
+  "new_integration_root": "/tmp/masc-goal-integration-20261024",
+  "owned_branch": "codex/goal-tool-round-context-20261024",
+  "owned_head": "881969e0f5cb4b3527ef53f095f52d552c374de5",
+  "actions": "new checkout of own existing top branch; external lower changes left untouched; future pushes limited to owned top branch",
+  "runtime_fixture_source_comparison": "transport-harness/runtime.toml SHA25693fcafc48eeb98f5182b5c73273c97e63496f6e2fcebccc1bb0e66b40ee01a77 equal across roots at observation"
+}

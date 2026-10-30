@@ -1,0 +1,10 @@
+{
+  "http_status": 200,
+  "body": {
+    "recorded": true,
+    "ask_id": "ask953959b82773c773",
+    "answer_count": 1,
+    "delivered": true,
+    "open_remaining": 0
+  }
+}

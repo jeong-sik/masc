@@ -1,0 +1,388 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC — INSTRUMENT TONE (계측기)
+   A tone layer over the v2 skin. Removes decoration, cools the ink
+   to a neutral gray ladder, hands every accent back except one
+   brass voltage, and makes mono + numbers the structural voice.
+   Loaded LAST. Activated by html[data-tone="instrument"].
+   ══════════════════════════════════════════════════════════════ */
+
+[data-skin="v2"][data-tone="instrument"] {
+  /* Surfaces — flat, cold, four honest steps */
+  --bg-deep: #0a0b0e; --bg-panel: #0d0f13; --bg-panel-alt: #111318;
+  --bg-card: #14161b; --bg-card-hover: #1a1d23; --bg-sunken: #0b0c10; --bg-well: #07080a;
+
+  /* Hairlines — one tone, one weight */
+  --border-main: #23262d; --border-soft: #191c21; --border-highlight: #333842;
+
+  /* Ink — neutral gray ladder, wide steps so hierarchy is read by
+     value, not by hue. Bone/warm text retired. */
+  --text-bright: #eef1f5; --text-primary: #c3c9d3; --text-mid: #98a0ad;
+  --text-dim: #6d7482; --text-faint: #4d5460;
+
+  /* One voltage. Brass, desaturated, no glow. */
+  --volt: #c3a05c; --volt-strong: #ddbe86; --volt-dim: #5f4d26;
+  --volt-ink: #100d06; --volt-glow: transparent; --volt-wash: rgba(195,160,92,0.07);
+  --accent-brass: #c3a05c; --accent-brass-dim: #5f4d26; --accent-glow: transparent;
+
+  /* Status reads as instrumentation, not as branding */
+  --status-ok: #4f9161; --status-warn: #b0862f; --status-bad: #c05242;
+  --status-idle: #5a6170; --status-busy: #4e7f9b;
+  --accent-blood: #c05242; --accent-viscera: #cc6a55; --accent-ice: #5e93ad;
+  --info: #7e93a8; --info-dim: #3c4956;
+
+  /* Engraved, not squishy */
+  --radius-2xs: 0; --radius-xs: 2px; --radius-sm: 2px; --radius-md: 3px;
+  --radius-lg: 4px; --radius-pill: 2px;
+
+  --shadow-card: none; --shadow-panel: none; --shadow-glow: none;
+  --shadow-pop: 0 10px 28px rgba(0,0,0,0.55), 0 0 0 1px var(--border-main);
+
+  /* Type — mono is the chrome, Noto Sans KR is the prose */
+  --font-display: 'JetBrains Mono', 'Noto Sans KR', ui-monospace, monospace;
+  --font-ui: 'Noto Sans KR', 'JetBrains Mono', -apple-system, sans-serif;
+  --font-body: 'Noto Sans KR', 'JetBrains Mono', -apple-system, sans-serif;
+
+  /* Ladder — one big jump to the subject, everything else quiet */
+  --fs-t1: 17px; --fw-t1: 500; --tr-t1: 0.02em;
+  --fs-t2: 13px; --fw-t2: 500; --tr-t2: 0.06em;
+  --fs-t3: 10px; --fw-t3: 500; --tr-t3: 0.16em;
+  --fs-t4: 9px;  --fw-t4: 500; --tr-t4: 0.2em;
+
+  --pad-surface: 20px 20px 44px; --gap-card: 12px; --gap-row: 4px;
+
+  /* Pills lose their tinted grounds — colour survives as text + pip */
+  --pill-bg-neutral: transparent; --pill-bg-ok: transparent; --pill-bg-warn: transparent;
+  --pill-bg-bad: transparent; --pill-bg-volt: transparent; --pill-bg-info: transparent;
+
+}
+
+/* ── Flat ground. No bokeh, no gradients anywhere in the chrome ── */
+[data-tone="instrument"] .v2-app { background: var(--bg-deep); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+[data-tone="instrument"] .v2-top { height: 44px; background: var(--bg-panel); }
+[data-tone="instrument"] .v2-nav,
+[data-tone="instrument"] .roster { background: var(--bg-panel); }
+[data-tone="instrument"] .chat-head,
+[data-tone="instrument"] .composer { background: var(--bg-panel); }
+
+/* ── No glow, anywhere. Selection is a hairline and a 2px rule. ── */
+[data-tone="instrument"] .nav-home { box-shadow: none; border-radius: 2px; }
+[data-tone="instrument"] .nav-item.on { color: var(--volt-strong); background: var(--bg-panel-alt); }
+[data-tone="instrument"] .nav-item.on::before { width: 2px; left: -10px; border-radius: 0; box-shadow: none; }
+[data-tone="instrument"] .kp-row.sel { background: var(--bg-panel-alt); border-color: var(--border-highlight); box-shadow: none; }
+[data-tone="instrument"] .kp-row.sel::before { width: 2px; left: -6px; top: 0; bottom: 0; border-radius: 0; box-shadow: none; }
+[data-tone="instrument"] .send:hover { box-shadow: none; background: var(--volt-strong); }
+[data-tone="instrument"] .roster-search:focus,
+[data-tone="instrument"] .composer-box.focus,
+[data-tone="instrument"] .kc-text:focus { box-shadow: none; border-color: var(--volt-dim); }
+[data-tone="instrument"] .sigil.heartbeat { box-shadow: none; animation: none; }
+[data-tone="instrument"] .sigil.heartbeat::after { content: ""; position: absolute; right: -3px; bottom: -3px; width: 5px; height: 5px; background: var(--status-ok); }
+
+/* ── Identity: one ink, not twelve slot colors. The keeper in focus
+      is the only one wearing brass. ── */
+[data-tone="instrument"] .sigil { position: relative; background: var(--bg-panel-alt); color: var(--text-mid); border: 1px solid var(--border-main); border-radius: 2px; font-weight: 500; letter-spacing: 0.02em; }
+[data-tone="instrument"] .kp-row.sel .sigil,
+[data-tone="instrument"] .chat-av[data-sigil] .sigil { color: var(--volt-strong); border-color: var(--volt-dim); background: var(--bg-card); }
+[data-tone="instrument"] .chat-av[data-sigil] .sigil { border-radius: 2px; font-size: 14px; }
+[data-tone="instrument"] .sigil-chip { color: var(--text-mid); border-color: var(--border-main); background: transparent; border-radius: 2px; }
+[data-tone="instrument"] .kp-av, [data-tone="instrument"] .chat-av, [data-tone="instrument"] .msg-av { border-radius: 2px; border-color: var(--border-main); filter: saturate(0.6) contrast(1.02); }
+[data-tone="instrument"] .msg-av.op { background: transparent; color: var(--volt-strong); border-color: var(--volt-dim); }
+[data-tone="instrument"] .is-fallback { background: var(--bg-panel-alt); color: var(--text-mid); border-color: var(--border-main); }
+
+/* ── Chrome type: mono, uppercase, quiet. The subject line is the
+      only thing allowed to be large. ── */
+[data-tone="instrument"] .v2-wordmark b { font-weight: 500; letter-spacing: 0.14em; font-size: 13px; }
+[data-tone="instrument"] .v2-wordmark .ver { background: transparent; color: var(--volt); border: 1px solid var(--volt-dim); border-radius: 2px; padding: 1px 5px; font-weight: 500; }
+[data-tone="instrument"] .v2-top .crumb { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.14em; }
+[data-tone="instrument"] .chat-id h2 { font-family: var(--font-display); font-size: 18px; font-weight: 500; letter-spacing: 0.02em; }
+[data-tone="instrument"] .kp-name, [data-tone="instrument"] .msg-hd .who { font-family: var(--font-ui); font-weight: 500; letter-spacing: -0.005em; }
+[data-tone="instrument"] .kp-name { font-size: 13.5px; }
+[data-tone="instrument"] .roster-title h3 { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.18em; color: var(--text-mid); font-weight: 500; }
+[data-tone="instrument"] .roster-title .count,
+[data-tone="instrument"] .kp-att { border-radius: 2px; }
+
+/* ── Accent discipline: state and count chips stop shouting. Colour
+      survives only as a 5px dot or a single letterform. ── */
+[data-tone="instrument"] .v2-statchip { border-radius: 2px; background: transparent; color: var(--text-mid); font-family: var(--font-display); font-size: 10px; letter-spacing: 0.08em; }
+[data-tone="instrument"] .v2-statchip.live,
+[data-tone="instrument"] .v2-statchip.warn { color: var(--text-mid); border-color: var(--border-main); }
+[data-tone="instrument"] .v2-statchip b { color: var(--text-bright); font-weight: 500; }
+[data-tone="instrument"] .kp-state { font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0.04em; }
+[data-tone="instrument"] .src-badge { border-radius: 2px; font-family: var(--font-display); color: var(--text-dim); border-color: var(--border-soft); }
+[data-tone="instrument"] .kc-trait, [data-tone="instrument"] .wk-vchip, [data-tone="instrument"] .wk-approval,
+[data-tone="instrument"] .sub-tag, [data-tone="instrument"] .sub-sandbox { background: transparent; border-radius: 2px; }
+
+[data-tone="instrument"] .v2-statchip.attn,
+[data-tone="instrument"] .v2-statchip.attn.warn,
+[data-tone="instrument"] .v2-statchip.attn.bad,
+[data-tone="instrument"] .v2-statchip.appr { background: transparent; border-color: var(--border-main); color: var(--text-mid); }
+[data-tone="instrument"] .v2-statchip.attn.bad b { color: var(--status-bad); }
+[data-tone="instrument"] .v2-statchip.attn.warn b { color: var(--status-warn); }
+[data-tone="instrument"] .v2-statchip.attn:hover,
+[data-tone="instrument"] .v2-statchip.appr:hover { border-color: var(--volt-dim); color: var(--text-bright); }
+[data-tone="instrument"] .nav-badge { background: transparent; border: 1px solid color-mix(in oklab, var(--status-bad) 55%, transparent); color: var(--status-bad); border-radius: 2px; box-shadow: none; font-weight: 500; }
+[data-tone="instrument"] .kp-att { background: transparent; border-color: var(--border-main); color: var(--status-bad); font-weight: 500; }
+[data-tone="instrument"] .kpf-att { background: transparent; }
+[data-tone="instrument"] .dot2 { width: 6px; height: 6px; border-radius: 0; box-shadow: none; }
+[data-tone="instrument"] .dot2.ok, [data-tone="instrument"] .dot2.warn,
+[data-tone="instrument"] .dot2.bad, [data-tone="instrument"] .dot2.busy { box-shadow: none; }
+[data-tone="instrument"] .msg .msg-av.op,
+[data-tone="instrument"] .dmsg .dmsg-av.op { background: transparent; color: var(--volt-strong); border: 1px solid var(--volt-dim); border-radius: 2px; font-weight: 500; }
+
+/* ── Reading: Korean-first prose. No bubble tail geometry, no
+      emboss — a measured page with a brass margin rule on the
+      operator's own turn. ── */
+[data-tone="instrument"] .bubble {
+  border-radius: 2px; box-shadow: none; background: var(--bg-panel-alt);
+  font-family: var(--font-ui); font-size: 15px; line-height: 1.78;
+  letter-spacing: -0.005em; word-break: keep-all; overflow-wrap: anywhere;
+  padding: 14px 18px;
+}
+[data-tone="instrument"] .bubble.user { background: var(--bg-card); border-radius: 2px; border-color: var(--border-main); border-left: 2px solid var(--volt-dim); box-shadow: none; color: var(--text-bright); }
+[data-tone="instrument"] .bubble li::marker { color: var(--text-faint); }
+[data-tone="instrument"] .bubble code { border-radius: 2px; color: var(--text-bright); background: var(--bg-well); }
+[data-tone="instrument"] .bubble a, [data-tone="instrument"] .inline-link { color: var(--volt-strong); text-decoration-color: var(--volt-dim); }
+[data-tone="instrument"] .bubble a:hover, [data-tone="instrument"] .inline-link:hover { color: var(--volt); text-decoration-color: var(--volt); }
+[data-tone="instrument"] .composer textarea { font-family: var(--font-ui); font-size: 14px; line-height: 1.7; letter-spacing: -0.005em; }
+[data-tone="instrument"] .composer-box { border-radius: 3px; }
+
+/* ── Buttons: never fill on hover, brighten the hairline instead ── */
+[data-tone="instrument"] .act, [data-tone="instrument"] .rfilter, [data-tone="instrument"] .ctool,
+[data-tone="instrument"] .rfilter-icon, [data-tone="instrument"] .roster-sort { border-radius: 2px; }
+[data-tone="instrument"] .act:hover, [data-tone="instrument"] .rfilter:hover { border-color: var(--volt-dim); color: var(--volt-strong); background: transparent; }
+[data-tone="instrument"] .rfilter.on { background: transparent; color: var(--volt-strong); border-color: var(--volt-dim); }
+
+/* ── The one filled mark on screen is the brand stamp; even that is
+      engraved rather than painted. ── */
+[data-tone="instrument"] .nav-home { background: transparent; color: var(--volt); border: 1px solid var(--volt-dim); }
+
+/* ── Cross-surface accent flattening: tinted chip grounds off, status
+      colour survives as text or a pip. ── */
+[data-tone="instrument"] .fl-chip { --chip-bg: transparent; }
+[data-tone="instrument"] .fl-hpill.bad,
+[data-tone="instrument"] .fl-att,
+[data-tone="instrument"] .fl-as-tag.bad,
+[data-tone="instrument"] .fl-lanes-bp,
+[data-tone="instrument"] .rp-mono,
+[data-tone="instrument"] .rp-trait,
+[data-tone="instrument"] .reg-tag,
+[data-tone="instrument"] .rw-pick-card.on { background: transparent; }
+[data-tone="instrument"] .rw-pick-card.on { box-shadow: none; border-color: var(--volt-dim); }
+[data-tone="instrument"] .rs-node, [data-tone="instrument"] .rd-layer,
+[data-tone="instrument"] .fl-q-hb-dot { box-shadow: none; }
+[data-tone="instrument"] .rs-node, [data-tone="instrument"] .rd-layer,
+[data-tone="instrument"] .rp-layer, [data-tone="instrument"] .rk-f-lyr { border-radius: 0; }
+[data-tone="instrument"] .fl-sec-new { color: var(--text-faint); border-color: var(--border-soft); background: transparent; }
+[data-tone="instrument"] .kpi, [data-tone="instrument"] .ov-card,
+[data-tone="instrument"] .fl-lane, [data-tone="instrument"] .reg-persona,
+[data-tone="instrument"] .reg-panel { box-shadow: none; }
+
+/* Keeper slot identity collapses to one cool ink — the roster reads by name
+   and state, not by twelve competing hues. Set on .v2-app because v2.css
+   declares the slot palette there. */
+[data-tone="instrument"] .v2-app {
+  --kp1:#8c95a3; --kp2:#8c95a3; --kp3:#8c95a3; --kp4:#8c95a3;
+  --kp5:#8c95a3; --kp6:#8c95a3; --kp7:#8c95a3; --kp8:#8c95a3;
+  --kp9:#8c95a3; --kp10:#8c95a3; --kp11:#8c95a3; --kp12:#8c95a3;
+}
+
+/* ══════ POLISH PASS ══════════════════════════════════════════
+   Fixes from the first read: the filter row was clipping, the roster
+   read as a stack of cards instead of an index, and everything sat at
+   one density. Gray mono only works when the spacing does the talking.
+   ════════════════════════════════════════════════════════════ */
+
+/* Filter row wraps instead of clipping at 285px */
+[data-tone="instrument"] .roster-filters { flex-wrap: wrap; row-gap: 6px; padding: 10px 12px; }
+[data-tone="instrument"] .rfilter-icon { margin-left: 0; }
+[data-tone="instrument"] .roster-sort { margin-left: auto; max-width: 88px; }
+
+/* Roster reads as an index: hairline-separated rows, no card chrome */
+[data-tone="instrument"] .roster-list { padding: 0; }
+[data-tone="instrument"] .kp-row {
+  border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0;
+  padding: 11px 12px 11px 14px; background: transparent;
+}
+[data-tone="instrument"] .kp-row:hover { background: var(--bg-panel-alt); }
+[data-tone="instrument"] .kp-row.sel { background: var(--bg-card); border-bottom-color: var(--border-main); }
+[data-tone="instrument"] .kp-row.sel::before { left: 0; }
+[data-tone="instrument"] .kp-state { color: var(--text-dim); }
+[data-tone="instrument"] .kp-row.sel .kp-state { color: var(--text-mid); }
+[data-tone="instrument"] .kp-ago { font-family: var(--font-display); font-size: 10.5px; color: var(--text-faint); }
+
+/* Group headers become ruled labels, not floating text */
+[data-tone="instrument"] .kp-group {
+  font-family: var(--font-display); font-size: 9.5px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--text-faint);
+  padding: 16px 12px 7px 14px; border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+}
+
+/* Header: the subject gets real size, the meta drops to a mono line */
+[data-tone="instrument"] .chat-head { padding: 14px 20px; border-bottom: 1px solid var(--border-main); }
+[data-tone="instrument"] .chat-id h2 { font-size: 21px; letter-spacing: 0.01em; color: var(--text-bright); }
+[data-tone="instrument"] .chat-id .name-row { gap: 12px; align-items: center; }
+
+/* Reading column: air around the turns, quiet speaker labels */
+[data-tone="instrument"] .msg { margin-bottom: 26px; }
+[data-tone="instrument"] .msg-hd { gap: 9px; margin-bottom: 8px; }
+[data-tone="instrument"] .msg-hd .who { font-size: 12.5px; color: var(--text-mid); }
+[data-tone="instrument"] .msg-hd .when { font-family: var(--font-display); font-size: 10.5px; color: var(--text-faint); }
+[data-tone="instrument"] .day-sep { color: var(--text-faint); font-family: var(--font-display); font-size: 9.5px; letter-spacing: 0.2em; }
+[data-tone="instrument"] .bubble { max-width: 68ch; }
+
+/* ══════ CORRECTION PASS ══════════════════════════════════════
+   Feedback: too many visible lines, corners too hard, and status /
+   counts / icons stopped being findable once everything was outlined.
+   So: lines are demoted, quiet fills come back to carry chips (fill
+   instead of border), radius returns, and status gets real weight.
+   ════════════════════════════════════════════════════════════ */
+
+[data-skin="v2"][data-tone="instrument"] {
+  /* Lines recede — the ones that remain are barely there */
+  --border-main: #1c1f25; --border-soft: #141619; --border-highlight: #2b3038;
+  /* Softened corners */
+  --radius-2xs: 2px; --radius-xs: 3px; --radius-sm: 4px; --radius-md: 5px;
+  --radius-lg: 7px; --radius-pill: 999px;
+  /* Chips read by fill, not by outline */
+  --pill-bg-neutral: #1b1e24; --pill-bg-ok: rgba(79,145,97,0.16);
+  --pill-bg-warn: rgba(176,134,47,0.17); --pill-bg-bad: rgba(192,82,66,0.17);
+  --pill-bg-volt: rgba(195,160,92,0.15); --pill-bg-info: rgba(78,127,155,0.16);
+}
+
+/* Radii back on the things I had squared off */
+[data-tone="instrument"] .sigil, [data-tone="instrument"] .sigil-chip,
+[data-tone="instrument"] .kp-av, [data-tone="instrument"] .chat-av,
+[data-tone="instrument"] .msg-av, [data-tone="instrument"] .msg-av.op,
+[data-tone="instrument"] .nav-home, [data-tone="instrument"] .v2-wordmark .ver,
+[data-tone="instrument"] .act, [data-tone="instrument"] .rfilter,
+[data-tone="instrument"] .ctool, [data-tone="instrument"] .rfilter-icon,
+[data-tone="instrument"] .roster-sort, [data-tone="instrument"] .src-badge,
+[data-tone="instrument"] .v2-statchip, [data-tone="instrument"] .kp-att,
+[data-tone="instrument"] .nav-badge { border-radius: 5px; }
+[data-tone="instrument"] .bubble, [data-tone="instrument"] .bubble.user { border-radius: 6px; }
+[data-tone="instrument"] .dot2 { border-radius: 999px; width: 7px; height: 7px; }
+
+/* Chips: filled ground, no visible outline, brighter numerals.
+   A number should be the loudest thing in its own chip. */
+[data-tone="instrument"] .v2-statchip,
+[data-tone="instrument"] .v2-statchip.attn,
+[data-tone="instrument"] .v2-statchip.attn.warn,
+[data-tone="instrument"] .v2-statchip.attn.bad,
+[data-tone="instrument"] .v2-statchip.appr { background: #1b1e24; border-color: transparent; color: var(--text-mid); }
+[data-tone="instrument"] .v2-statchip b { color: var(--text-bright); font-weight: 600; font-size: 11.5px; }
+[data-tone="instrument"] .v2-statchip.attn.bad b { color: #e08575; }
+[data-tone="instrument"] .v2-statchip.attn.warn b { color: #dcae52; }
+[data-tone="instrument"] .v2-statchip:hover,
+[data-tone="instrument"] .v2-statchip.attn:hover { background: #23272f; border-color: transparent; color: var(--text-bright); }
+
+/* Attention counts and nav badges: filled, findable */
+[data-tone="instrument"] .kp-att { background: rgba(192,82,66,0.2); border-color: transparent; color: #e79483; font-weight: 600; font-size: 10.5px; }
+[data-tone="instrument"] .nav-badge { background: #c05242; border-color: transparent; color: #150a08; font-weight: 700; }
+[data-tone="instrument"] .fl-chip { --chip-bg: #1b1e24; }
+[data-tone="instrument"] .fl-hpill.bad, [data-tone="instrument"] .fl-att { background: rgba(192,82,66,0.18); border-color: transparent; }
+
+/* Status legible at a glance: brighter label, solid pip, no outline */
+[data-tone="instrument"] .kp-state { color: var(--text-primary); font-size: 11px; font-weight: 500; }
+[data-tone="instrument"] .kp-row.sel .kp-state { color: var(--text-bright); }
+
+/* Icons and tool buttons stop being ghosts */
+[data-tone="instrument"] .act, [data-tone="instrument"] .ctool,
+[data-tone="instrument"] .rfilter-icon { background: #171a1f; border-color: transparent; color: var(--text-mid); }
+[data-tone="instrument"] .act:hover, [data-tone="instrument"] .ctool:hover,
+[data-tone="instrument"] .rfilter-icon:hover { background: #23272f; border-color: transparent; color: var(--text-bright); }
+[data-tone="instrument"] .rfilter { background: #171a1f; border-color: transparent; color: var(--text-mid); }
+[data-tone="instrument"] .rfilter:hover { background: #23272f; border-color: transparent; color: var(--text-bright); }
+[data-tone="instrument"] .rfilter.on { background: var(--volt); border-color: transparent; color: var(--volt-ink); font-weight: 600; }
+
+/* Fewer lines in the roster: no per-row rule, selection carries it */
+[data-tone="instrument"] .kp-row { border-bottom: 0; }
+[data-tone="instrument"] .kp-row.sel { border-radius: 6px; margin: 0 6px; padding-left: 12px; }
+[data-tone="instrument"] .kp-row.sel::before { left: 0; border-radius: 6px 0 0 6px; }
+[data-tone="instrument"] .kp-group { border-bottom: 0; background: transparent; }
+[data-tone="instrument"] .roster-filters { border-bottom-color: var(--border-soft); }
+
+/* Left rail was left out of the icon-legibility pass — the glyphs there
+   carry no label, so they need the same treatment as .act / .ctool. */
+[data-tone="instrument"] .nav-item { color: var(--text-mid); border-radius: 5px; }
+[data-tone="instrument"] .nav-item:hover { background: #23272f; color: var(--text-bright); }
+
+/* ══════ PROVENANCE ═══════════════════════════════════════════
+   Who sent this, and through what — currently carried by one 9px
+   badge, which disappears the moment colour is rationed. So the
+   origin moves into the structure of the turn: a coloured spine on
+   the bubble's leading edge, a filled source badge, and a broadcast
+   frame that can never be mistaken for speech.
+   ════════════════════════════════════════════════════════════ */
+
+[data-skin="v2"][data-tone="instrument"] {
+  --src-dashboard: #c3a05c;   /* operator console — brass, the house channel */
+  --src-discord:   #7b86d8;
+  --src-slack:     #4fa38f;
+  --src-imessage:  #5b93d6;
+  --src-telegram:  #57a8cf;
+  --src-broadcast: #b0862f;
+}
+
+/* Keeper turn: 3px spine on the left, tinted by the channel it arrived on */
+[data-tone="instrument"] .msg .bubble { border-left: 3px solid var(--border-highlight); }
+[data-tone="instrument"] .msg:has(.src-badge.dashboard) .bubble { border-left-color: var(--src-dashboard); }
+[data-tone="instrument"] .msg:has(.src-badge.discord) .bubble { border-left-color: var(--src-discord); }
+[data-tone="instrument"] .msg:has(.src-badge.slack) .bubble { border-left-color: var(--src-slack); }
+[data-tone="instrument"] .msg:has(.src-badge.imessage) .bubble { border-left-color: var(--src-imessage); }
+[data-tone="instrument"] .msg:has(.src-badge.telegram) .bubble { border-left-color: var(--src-telegram); }
+
+/* Operator's own turn: mirrored spine on the right, brass ground, brass
+   monogram. It should be readable as "mine" from across the room. */
+[data-tone="instrument"] .msg.from-user .bubble {
+  border-left: 0; border-right: 3px solid var(--volt);
+  background: rgba(195,160,92,0.09); border-top-color: transparent;
+  border-bottom-color: transparent; color: var(--text-bright);
+}
+[data-tone="instrument"] .msg.from-user .msg-av.op {
+  background: var(--volt); color: var(--volt-ink); border-color: var(--volt);
+  font-weight: 700; letter-spacing: 0.04em;
+}
+[data-tone="instrument"] .msg.from-user .msg-hd .who { color: var(--volt-strong); font-weight: 600; }
+
+/* Source badge: filled, legible, and prefixed with a channel glyph so it
+   reads at a glance instead of needing to be spelled out. */
+[data-tone="instrument"] .src-badge {
+  font-family: var(--font-display); font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.12em; padding: 2.5px 7px; border: 0; border-radius: 4px;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+[data-tone="instrument"] .src-badge::before { font-size: 9px; opacity: 0.9; }
+[data-tone="instrument"] .src-badge.dashboard { background: rgba(195,160,92,0.18); color: #e3c789; }
+[data-tone="instrument"] .src-badge.dashboard::before { content: "\25A6"; }
+[data-tone="instrument"] .src-badge.discord { background: rgba(123,134,216,0.18); color: #a6aeea; }
+[data-tone="instrument"] .src-badge.discord::before { content: "\25C8"; }
+[data-tone="instrument"] .src-badge.slack { background: rgba(79,163,143,0.18); color: #7cc4b1; }
+[data-tone="instrument"] .src-badge.slack::before { content: "\229E"; }
+[data-tone="instrument"] .src-badge.imessage { background: rgba(91,147,214,0.18); color: #8cb4e4; }
+[data-tone="instrument"] .src-badge.imessage::before { content: "\25CB"; }
+[data-tone="instrument"] .src-badge.telegram { background: rgba(87,168,207,0.18); color: #8dc4dd; }
+[data-tone="instrument"] .src-badge.telegram::before { content: "\25B8"; }
+
+/* Broadcast: not a message, an announcement. Full-width band, ruled top
+   and bottom, amber label — structurally unlike any speech turn. */
+[data-tone="instrument"] .bcast {
+  background: rgba(176,134,47,0.07); border: 0;
+  border-top: 1px solid rgba(176,134,47,0.4); border-bottom: 1px solid rgba(176,134,47,0.4);
+  border-radius: 0;
+}
+[data-tone="instrument"] .bcast-note { padding: 12px 12px 13px; }
+[data-tone="instrument"] .bcast-hd, [data-tone="instrument"] .bcast-tag {
+  font-family: var(--font-display); letter-spacing: 0.16em; text-transform: uppercase;
+  font-size: 9.5px; font-weight: 600; color: var(--src-broadcast);
+}
+[data-tone="instrument"] .bcast-tag { background: rgba(176,134,47,0.2); color: #dcae52; border: 0; border-radius: 4px; padding: 2.5px 7px; }
+[data-tone="instrument"] .bcast { margin: 14px 0; }
+[data-tone="instrument"] .bcast-hd { background: transparent; border-bottom-color: rgba(176,134,47,0.22); }
+[data-tone="instrument"] .bcast-count { background: rgba(176,134,47,0.18); border: 0; color: #dcae52; font-weight: 600; }
+[data-tone="instrument"] .bcast-rcpt::before { box-shadow: none; }
+/* My own turn that came in over a connector: brass says mine, the channel
+   tint rides the top edge so both facts are visible at once. */
+[data-tone="instrument"] .msg.from-user:has(.src-badge.discord) .bubble { border-top: 2px solid var(--src-discord); }
+[data-tone="instrument"] .msg.from-user:has(.src-badge.slack) .bubble { border-top: 2px solid var(--src-slack); }
+[data-tone="instrument"] .msg.from-user:has(.src-badge.imessage) .bubble { border-top: 2px solid var(--src-imessage); }
+[data-tone="instrument"] .msg.from-user:has(.src-badge.telegram) .bubble { border-top: 2px solid var(--src-telegram); }

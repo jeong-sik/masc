@@ -1,0 +1,326 @@
+type native_continuation =
+  { binding : Keeper_direct_native_continuation.binding
+  ; resumed : Keeper_direct_native_continuation.resumed option
+  }
+
+type direct_continuation =
+  | Checkpoint_continuation of Keeper_direct_checkpoint_continuation.admission
+  | Runtime_continuation of Keeper_direct_runtime_continuation.admission
+  | Gate_continuation of Keeper_direct_gate_continuation.admission
+
+(** Orchestration of one Keeper turn.
+
+    Prepares Keeper context, tools and hooks, then dispatches through
+    [Keeper_turn_driver.run_named]. The selected [Runtime_execution.t]
+    determines whether AGENT_CORE or an official client runs the model/tool loop.
+    Re-exports [Keeper_agent_result] and [Keeper_agent_prompt_metrics] for
+    existing callers. *)
+
+include module type of Keeper_agent_prompt_metrics
+include module type of Keeper_agent_tool_surface
+include module type of Keeper_agent_result
+include module type of Keeper_agent_error
+
+module Contract_helpers = Keeper_agent_run_contract_helpers
+module Turn_helpers = Keeper_agent_run_turn_helpers
+
+(** Outcome of building the per-turn AGENT_CORE raw-trace sink
+    ([.masc/keepers/<name>/raw-traces/turn-*.jsonl]). [Sink_degraded] is
+    the typed health record for trace-store failures: the turn still
+    dispatches (untraced, so [run_result.trace_ref]/[run_validation] stay
+    [None] for that turn) — trace-store state never fails a turn
+    pre-dispatch. *)
+type raw_trace_sink_outcome =
+  | Sink_ready of Agent_core.Raw_trace.t
+  | Sink_degraded of Agent_core.Error.t
+
+(** Typed reason for an autonomous Keeper run to release its lane after AGENT_CORE
+    completes a tool boundary. *)
+type durable_stimulus_summary = {
+  pending_count : int;
+  head : Keeper_event_queue.stimulus option;
+  head_age_sec : float;
+  kinds : Keeper_event_queue.stimulus_payload list;
+}
+(** What the turn yielded to. It yields when a row of a kind that may preempt
+    reached the queue after its intake, or when an approved Gate resolution is
+    deliverable; [head] is that row. A yield record without this says only that
+    a yield happened, not what it yielded to — which cannot distinguish healthy
+    cooperation from a keeper that never finishes a turn. *)
+
+type yield_reason =
+  | Operation_queued
+  | Durable_stimulus_waiting of durable_stimulus_summary
+
+type yield_request = {
+  reason : yield_reason;
+}
+
+val durable_stimulus_summary
+  :  now:float
+  -> Keeper_event_queue.t
+  -> durable_stimulus_summary
+(** Project the queue snapshot the yield decision already read. [now] is
+    supplied by the caller so the age is measured against the same clock the
+    decision used. *)
+
+val durable_stimulus_summary_to_string : durable_stimulus_summary -> string
+
+val terminal_effect_boundary_decision
+  :  Keeper_tools_agent_core.terminal_effect_state
+  -> (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
+(** Production boundary projection for Keeper tool results. Generic deferred
+    tool transitions retain the normal durable-stimulus checkpoint; deferred
+    external effects yield the current provider loop so their durable
+    resolution can wake a later turn. Failed terminal effects retain their typed
+    [Tool_result.tool_failure_class] in the exact structured Keeper error
+    envelope. *)
+
+module For_testing : sig
+  val finalize_turn_surface :
+    response_text:string ->
+    stop_reason:Runtime_agent.stop_reason ->
+    Keeper_tools_agent_core.terminal_effect_state ->
+    (Keeper_turn_outcome.t * Keeper_tool_execution.terminal_effect_receipt option,
+     Agent_core.Error.t) result
+  val native_tool_boundary :
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    terminal_effect_state:Keeper_tools_agent_core.terminal_effect_state ->
+    yield_requested:(unit -> (yield_request option, string) result) option ->
+    (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
+  val tool_boundary_state :
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    Keeper_tools_agent_core.terminal_effect_state ->
+    (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
+  val official_client_tool_boundary :
+    repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    yield_requested:(unit -> (yield_request option, string) result) option ->
+    tool_name:string ->
+    (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
+  val registry_progress_on_event
+    :  record_turn_progress:(string -> unit)
+    -> (Agent_core.Types.sse_event -> unit) option
+    -> Agent_core.Types.sse_event
+    -> unit
+  val progress_keeper_tool_names_for_contract
+    :  actual_keeper_tool_names:string list
+    -> tool_calls:tool_call_detail list
+    -> string list
+
+  val response_policy_for_turn
+    :  turn_kind:Turn_record.turn_kind
+    -> input_speaker:Keeper_input_speaker.t
+    -> world_observation:Keeper_world_observation.world_observation option
+    -> hitl_resolution:Keeper_event_queue.hitl_resolution option
+    -> history_assistant_source:string
+    -> Keeper_tooling.Response.completion_policy
+
+  val with_completion_clause
+    :  input_speaker:Keeper_input_speaker.t
+    -> response_policy:Keeper_tooling.Response.completion_policy
+    -> string
+    -> string
+
+  val normalize_final_response_text
+    :  response_policy:Keeper_tooling.Response.completion_policy
+    -> keeper_name:string
+    -> runtime_id:string
+    -> run_result:Runtime_agent.run_result
+    -> text:string
+    -> tool_names:string list
+    -> unit
+    -> (string, Agent_core.Error.t) result
+
+  (** AGENT_CORE raw-trace sink for keeper turns: a fresh per-turn file under
+      [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes
+      it into [Keeper_turn_driver.run_named] so
+      [run_result.trace_ref]/[run_validation] are populated. *)
+  val keeper_raw_trace_sink
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> raw_trace_sink_outcome
+
+  (** Dispatch adapter over {!keeper_raw_trace_sink}: [Sink_degraded]
+      becomes [None] (turn runs untraced) after emitting the typed
+      degrade record (warn log + [Keeper_metrics.RawTraceSinkDegraded]
+      counter). Never raises; never fails the turn. *)
+  val raw_trace_for_dispatch
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> Agent_core.Raw_trace.t option
+
+  (** Run reference-aware cleanup only after the current TurnRecord commit
+      attempt. A missing/degraded sink is a no-op; cleanup failure is logged
+      and never changes the turn result. *)
+  val prune_raw_traces_after_turn_record
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> Agent_core.Raw_trace.t option
+    -> unit
+
+  val runtime_yield_reason
+    :  yield_request
+    -> Runtime_agent.cooperative_yield_reason
+
+  val dispatch_after_provider_transcript_admission
+    :  messages:Agent_core.Types.message list
+    -> checkpoint:Agent_core.Checkpoint.t option
+    -> dispatch:
+         (checkpoint:Agent_core.Checkpoint.t option -> Agent_core.Types.message list -> ('a, Agent_core.Error.t) result)
+    -> ('a, Agent_core.Error.t) result
+
+  (** Exact-run reference recorded on the turn record. Accepts a reference
+      whose session identity matches the keeper trace; the AGENT_CORE runtime
+      identity carried by the reference is recorded, not compared, because it
+      names a different identity space than the keeper agent name. *)
+  val turn_record_raw_trace_run_ref
+    :  expected_session_id:string
+    -> Agent_core.Raw_trace.run_ref
+    -> (Turn_record.raw_trace_run_ref, string) result
+
+  val raw_trace_reference_for_turn
+    :  turn_trace_ref:Agent_core.Raw_trace.run_ref option
+    -> sink:Agent_core.Raw_trace.t option
+    -> Agent_core.Raw_trace.run_ref option
+  (** Which run this turn's TurnRecord names for retention. [turn_trace_ref] is
+      what the turn result reported and is absent on every failed turn; the
+      sink's last finished run covers that case, since a keeper sink holds one
+      turn. *)
+
+end
+
+(** {1 Turn execution} *)
+
+(** Run a single keeper turn.
+
+    @param config Workspace configuration
+    @param meta Keeper metadata
+    @param base_dir Session base directory for checkpoints
+    @param max_context Maximum context window tokens
+     @param build_turn_prompt Callback: receives the base keeper system prompt
+            and checkpoint message history, returns the final turn system prompt
+    @param user_message The user's message to the keeper
+    @param input_speaker Who said [user_message] (RFC-0468 §3.2). Stamped on
+           the User message this turn creates, where it is created; the
+           Librarian reads it from the checkpoint. Required so no entry point
+           can leave its input unattributed.
+    @param turn_kind Producer-owned lane identity for the durable turn record
+    @param user_blocks Optional structured user-authored AGENT_CORE content blocks for
+           the current turn. [user_message] remains the display/history
+           fallback and must not contain raw media payloads.
+    @param runtime_id Typed runtime profile name for model selection
+     @param world_observation Structured keeper world snapshot used by
+            advisory execution-progress checks. When omitted, the progress check
+            does not infer world state from prompt text.
+    @param history_user_source Source label for user messages in history
+    @param history_assistant_source Source label for assistant messages in history
+    @param temperature Subsystem temperature fallback; a selected runtime model
+           declaration takes precedence
+    @param on_event Optional event callback
+    @param trajectory_acc Optional trajectory accumulator for recording
+    @param shared_context Optional shared AGENT_CORE context for cross-turn state
+    @param event_bus Optional MASC event bus
+    @param event_scope Producer scope shared with a turn subscriber. Omission
+      creates a fresh scope for this execution.
+    @param observation_token Captured registry observation ownership. Omission
+      disables observation updates; it never adopts a currently active turn.
+    @param preview The caller's explicitly captured execution writer. Reused
+      across Task/context/prompt/tool setup; omission starts a writer here.
+      This never resolves another writer by Keeper name or recent activity. *)
+val run_turn
+  : ?event_scope:Keeper_turn_scope.t
+  -> ?preview:Keeper_turn_preview.writer
+  -> ?observation_token:Keeper_turn_observation_token.t
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
+  -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+  -> base_dir:string
+  -> max_context:int
+  -> build_turn_prompt:
+       (base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
+  -> user_message:string
+  -> input_speaker:Keeper_input_speaker.t
+  -> turn_kind:Turn_record.turn_kind
+  -> approval_admission:Keeper_approval_origin.admission
+     (** Host-owned direct operation or exact admitted-source context. It is
+         not inferred from rendered prompts and does not change exact-grant
+         authorization when this turn continues an approval. *)
+  -> skill_snapshot:Skill_catalog_snapshot.t
+  -> task_skill_selection:
+       (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result
+  -> ?user_blocks:Agent_core.Types.content_block list
+  -> runtime_id:string
+  -> ?world_observation:Keeper_world_observation.world_observation
+  -> ?answered_ask_inputs:Keeper_unified_prompt.answered_ask_turn_input list
+  -> ?history_user_source:string
+  -> ?user_turn_record:Keeper_run_prompt.user_turn_record
+  -> ?history_assistant_source:string
+  -> ?temperature:float
+  -> ?on_event:(Agent_core.Types.sse_event -> unit)
+  -> ?on_tool_stream_observation:
+       (Keeper_hooks_agent_core.tool_stream_observation -> unit)
+  -> ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit)
+  -> ?tool_result_commit_policy:Keeper_hooks_agent_core.tool_result_commit_policy
+  -> ?approval_gate:Keeper_tool_approval_gate.t
+  -> ?trajectory_acc:Trajectory.accumulator
+     (* The receipt's degraded-retry report takes no caller argument. A caller
+        knows only that a lane was deferred to this turn, and that is what
+        [deferred_runtime_lane] below carries. Whether the turn took the lane
+        up is read here, from the runtime the walk started on. Callers used to
+        assert it, and the unified path asserted "a lane is pending" (#37108). *)
+  -> ?direct_resume:direct_continuation
+  -> ?native_continuation:native_continuation
+  -> ?official_task_reference:Keeper_official_task_reference.t
+  -> ?on_gate_evidence_admitted:(Agent_core.Checkpoint.t -> (unit, string) result)
+  -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
+  -> ?runtime_retry_deferral:Keeper_turn_driver.runtime_retry_deferral
+  -> ?on_runtime_attempt_failed:
+       (runtime_id:string
+        -> dispatch:Keeper_attempt_dispatch.t
+        -> error:Agent_core.Error.t
+        -> unit)
+       (* Called once per candidate the runtime walk attempted and that ended
+          in an error, with that candidate's own id, whether the walk invoked
+          its provider or client, and the error. A failure returns no
+          [run_result], so this is the only place the caller learns which
+          candidates the walk reached and with what. *)
+  -> ?on_produced_checkpoint:
+       (runtime_id:string -> attempt:int -> Agent_core.Checkpoint.t -> unit)
+  -> ?on_runtime_lane_terminal_error:
+       (Keeper_turn_driver.lane_terminal_error -> unit)
+       (* Called once per runtime walk that returns a candidate's error as
+          the lane's error, with the candidate that produced it. *)
+  -> ?on_runtime_selected:(runtime_id:string -> unit)
+       (* Called once when the runtime walk returns a result, with the
+          candidate that produced it, before the answer is finalized. A turn
+          can still fail after this: this is the only place the caller learns
+          which candidate answered when finalization then rejects the turn. *)
+  -> ?on_deferred_runtime_consumed:(unit -> unit)
+  -> ?shared_context:Agent_core.Context.t
+  -> ?repetition_execution:Keeper_repetition_scope.Execution.t
+  -> ?event_bus:Agent_core.Event_bus.t
+  -> ?trace_link:string * string
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?on_gate_deferred:(string -> unit)
+  -> ?yield_requested:
+       (unit -> (yield_request option, string) result)
+       (* Evaluated after a settled tool result on either runtime path. A
+          direct turn may yield to a newer queued person only with its
+          resumable checkpoint. Snapshot failures remain explicit errors. *)
+  -> ?on_checkpoint_stage:(Agent_core.Agent.checkpoint_stage -> unit)
+  -> unit
+  -> turn_settlement
+     (* The turn's result, and the two degraded-retry lanes decided beside the
+        runtime observation. Returning them makes the facts available but does
+        not force a caller to use every field. The compile-time boundary is at
+        the consumers: [append_decision_record] and the success handler require
+        both lanes, so a path that writes their records cannot silently omit
+        them (#37376). *)
+
+val capture_skill_snapshot : base_path:string -> Skill_catalog_snapshot.t
+(** Capture one immutable Skill revision outside provider retry/failover loops.
+    Every attempt of the same logical turn must receive the same value. *)

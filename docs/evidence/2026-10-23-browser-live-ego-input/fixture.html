@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ego input fixture</title>
+<style>
+  body { margin: 0; font: 14px sans-serif; }
+  .box { position: absolute; width: 120px; height: 40px; border: 1px solid #888; }
+  #send { left: 20px; top: 20px; }
+  #ctx { left: 200px; top: 20px; }
+  #dbl { left: 380px; top: 20px; }
+  #hov { left: 20px; top: 100px; }
+  #name { left: 200px; top: 100px; }
+  #month { left: 380px; top: 100px; }
+  #pane { position: absolute; left: 20px; top: 180px; width: 200px; height: 100px; overflow: auto; }
+  #pane div { height: 1000px; }
+  #next { position: absolute; left: 260px; top: 180px; }
+  #log { position: absolute; left: 20px; top: 320px; }
+</style>
+</head>
+<body>
+<button id="send" class="box">send</button>
+<div id="ctx" class="box">context</div>
+<div id="dbl" class="box">double</div>
+<div id="hov" class="box">hover</div>
+<form id="form"><input id="name" class="box" type="text"></form>
+<select id="month" class="box"><option value="1">January</option><option value="10">October</option></select>
+<div id="pane"><div>scroll</div></div>
+<a id="next" href="/next.html">next</a>
+<pre id="log"></pre>
+<script>
+  const log = line => { document.getElementById('log').textContent += line + '\n'; };
+  const at = event => event.clientX + ',' + event.clientY;
+  document.getElementById('send').addEventListener('click', event => log('click send ' + at(event) + ' trusted=' + event.isTrusted));
+  document.getElementById('ctx').addEventListener('contextmenu', event => { event.preventDefault(); log('contextmenu ctx ' + at(event)); });
+  document.getElementById('dbl').addEventListener('dblclick', event => log('dblclick dbl trusted=' + event.isTrusted));
+  document.getElementById('hov').addEventListener('mouseenter', event => log('mouseenter hov trusted=' + event.isTrusted));
+  document.getElementById('name').addEventListener('keydown', event => log('keydown ' + event.key + ' trusted=' + event.isTrusted));
+  document.getElementById('form').addEventListener('submit', event => { event.preventDefault(); log('submit name=' + document.getElementById('name').value); });
+  document.getElementById('month').addEventListener('change', event => log('change month=' + event.target.value));
+  let scrolled = false;
+  document.getElementById('pane').addEventListener('scroll', event => {
+    if (!scrolled) { scrolled = true; setTimeout(() => log('scroll pane top=' + event.target.scrollTop), 300); }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "pid": 65867,
+  "launcher_pid": 65862,
+  "phase": "after acknowledged 16-row Info resize, before timed detail scrolling",
+  "requested_duration_s": 5,
+  "requested_interval_ms": 1,
+  "started_monotonic_ns": 776981103271750,
+  "binary_source": "c7bdc04f78e3b6c09abae94e28852b37f8274da7",
+  "runner_sha256": "65722ef0243c5273208d1dee1b6292fe97d250c40112545bf30ee0ccf0eb2a6d",
+  "scenario_sha256": "edbff282f963c645e808982ca11fab4e7841b4b45cf6b3208c25f2df6b84dcc8",
+  "helper_sha256": "4841c61f45457db49dac8afb8a6714a8a9f109671a33e5e9b96b7cf8d4bd39d8",
+  "transitions": 24006,
+  "sample_exit": 0,
+  "scope": "Native profile only: one roster cycle followed by 6000 alternating detail cycles; first detail precondition reconstructed, later opposite-window acknowledgements replace whole-history precondition reconstruction. Each new input still awaits its new expected window and FRAME_END. Sampling perturbs timings; not comparative latency evidence. No physical display/live runtime/deployment proof.",
+  "interpretation": "The inherited session_resources scope in the raw receipt is inapplicable here: it includes profiler, ps and pgrep CPU. Do not interpret it as TUI-only CPU. This is a sampled diagnostic, not a latency comparison."
+}

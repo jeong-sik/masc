@@ -1,0 +1,40 @@
+Raw workflow log SHA256: 95006e97a831c59e2282e8cc67d2add109a8ca9628f75069c98aa838b22283d0
+Source: https://github.com/jeong-sik/masc/actions/runs/40194434684
+
+test suite	Checkout	2026-10-25T12:44:27.8855691Z HEAD is now at 3d640e1f test(responses): require SSE full-reasoning replay conformance
+test suite	Checkout	2026-10-25T12:44:27.8984665Z [command]/usr/bin/git log -1 --format=%H
+test suite	Test	2026-10-25T12:45:41.3475184Z   [FAIL]        public SSE          0   full history.
+test suite	Test	2026-10-25T12:45:41.3476708Z   [FAIL]        public SSE          1   summary then full.
+test suite	Test	2026-10-25T12:45:41.3479344Z   [FAIL]        public SSE          2   full then summary.
+test suite	Test	2026-10-25T12:45:41.3480480Z   [FAIL]        public SSE          3   summary-only control.
+test suite	Test	2026-10-25T12:45:41.3481542Z   [FAIL]        public SSE          4   part ordering.
+test suite	Test	2026-10-25T12:45:41.3482556Z   [FAIL]        public SSE          5   repeated boundaries.
+test suite	Test	2026-10-25T12:45:41.3483624Z   [FAIL]        public SSE          6   item done without output.
+test suite	Test	2026-10-25T12:45:41.3484668Z   [OK]          public SSE          7   delta without output.
+test suite	Test	2026-10-25T12:45:41.3485811Z   [FAIL]        public SSE          8   conflict.
+test suite	Test	2026-10-25T12:45:41.3486828Z   [FAIL]        public SSE          9   truncation.
+test suite	Test	2026-10-25T12:45:41.3488057Z   [FAIL]        public SSE         10   explicit empty.
+test suite	Test	2026-10-25T12:45:41.3489067Z   [FAIL]        public SSE         11   missing item.
+test suite	Test	2026-10-25T12:45:41.3489963Z   [OK]          public SSE         12   omitted channel.
+test suite	Test	2026-10-25T12:45:41.3490886Z   [FAIL]        public SSE         13   whitespace then full.
+test suite	Test	2026-10-25T12:45:41.3491842Z   [OK]          public SSE         14   Unicode chunks.
+test suite	Test	2026-10-25T12:45:41.3492916Z   [OK]          public SSE         15   multiple native items.
+test suite	Test	2026-10-25T12:45:41.3493857Z   [OK]          public SSE         16   opaque transition.
+test suite	Test	2026-10-25T12:45:41.3494419Z   [OK]          public SSE         17   opaque conflict.
+test suite	Test	2026-10-25T12:45:41.3494955Z   [OK]          public SSE         18   late plaintext.
+test suite	Test	2026-10-25T12:45:41.3495960Z   [FAIL]        public SSE         19   item identity.
+test suite	Test	2026-10-25T12:45:41.3497281Z │ [FAIL]        public SSE          0   full history.                          │
+test suite	Test	2026-10-25T12:45:41.3507446Z │ [FAIL]        public SSE          1   summary then full.                     │
+test suite	Test	2026-10-25T12:45:41.3515004Z │ [FAIL]        public SSE          2   full then summary.                     │
+test suite	Test	2026-10-25T12:45:41.3523829Z │ [FAIL]        public SSE          3   summary-only control.                  │
+test suite	Test	2026-10-25T12:45:41.3529356Z │ [FAIL]        public SSE          4   part ordering.                         │
+test suite	Test	2026-10-25T12:45:41.3536132Z │ [FAIL]        public SSE          5   repeated boundaries.                   │
+test suite	Test	2026-10-25T12:45:41.3542558Z │ [FAIL]        public SSE          6   item done without output.              │
+test suite	Test	2026-10-25T12:45:41.3547427Z │ [FAIL]        public SSE          8   conflict.                              │
+test suite	Test	2026-10-25T12:45:41.3552327Z │ [FAIL]        public SSE          9   truncation.                            │
+test suite	Test	2026-10-25T12:45:41.3556929Z │ [FAIL]        public SSE         10   explicit empty.                        │
+test suite	Test	2026-10-25T12:45:41.3561937Z │ [FAIL]        public SSE         11   missing item.                          │
+test suite	Test	2026-10-25T12:45:41.3566705Z │ [FAIL]        public SSE         13   whitespace then full.                  │
+test suite	Test	2026-10-25T12:45:41.3571952Z │ [FAIL]        public SSE         19   item identity.                         │
+test suite	Test	2026-10-25T12:45:41.3575821Z 13 failures! in 0.001s. 20 tests run.
+test suite	Test	2026-10-25T12:45:41.3581529Z ##[error]Process completed with exit code 1.

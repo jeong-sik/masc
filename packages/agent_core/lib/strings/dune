@@ -1,0 +1,20 @@
+; Agent_core_strings — byte-wise string helpers with no dependencies.
+;
+; agent_core's canonical helpers live in Base.Util, but agent_core_base depends
+; on llm_provider, so every layer below base was unable to reach them and kept
+; private copies instead. This library sits below all of them.
+;
+; The module is named Agent_core_strings rather than String_util because both
+; this library and the coordinator String_util library are (wrapped false); two modules of the
+; same name would collide when linked into one executable.
+;
+; Keep this library dependency-free. A dependency added here is inherited by
+; every caller, and the copies come back.
+
+(include_subdirs no)
+
+(library
+ (name agent_core_strings)
+ (public_name masc.agent_core.strings)
+ (wrapped false)
+ (modules agent_core_strings))

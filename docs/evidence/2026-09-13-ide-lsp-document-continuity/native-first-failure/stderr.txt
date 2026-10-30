@@ -1,0 +1,13 @@
+/-----------------------------------------------------------------------
+| Internal error: Uncaught exception.
+| Jsonrpc: json conversion failed: invalid structured value
+| Raised at Jsonrpc__Import.Json.error in file "jsonrpc/src/import.ml", line 22, characters 23-50
+| Called from Jsonrpc__Import.Option.map in file "jsonrpc/src/import.ml", line 7, characters 21-26
+| Called from Jsonrpc.Packet.t_of_fields in file "jsonrpc/src/jsonrpc.ml", line 264, characters 22-78
+| Called from Lsp__Io.Make.read in file "lsp/src/io.ml", line 106, characters 25-58
+| Called from Fiber__Scheduler.exec in file "fiber/src/scheduler.ml", line 73, characters 8-11
+| Re-raised at Stdune__Exn.raise_with_backtrace in file "otherlibs/stdune/src/exn.ml" (inlined), line 38, characters 27-56
+| Called from Stdune__Exn_with_backtrace.reraise in file "otherlibs/stdune/src/exn_with_backtrace.ml", line 20, characters 33-71
+| Called from Fiber__Scheduler.exec in file "fiber/src/scheduler.ml", line 73, characters 8-11
+\-----------------------------------------------------------------------
+

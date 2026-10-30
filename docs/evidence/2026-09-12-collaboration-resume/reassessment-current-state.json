@@ -1,0 +1,60 @@
+{
+  "observed_at": "2026-09-12T11:22:48.615440+00:00",
+  "runtime": {
+    "version": "0.35.13",
+    "overall_status": "degraded",
+    "overall_status_reasons": [
+      "keeper_owner:operation_store_unavailable",
+      "keeper_event_queue:runnable_backlog=7"
+    ]
+  },
+  "runtime_build": {
+    "binary_commit": "53203f998a2df9f6149e1c033d5602836a8d7066",
+    "executable_sha256": "494eb5859625dbc592f6360e20bdac76ce8be9040224c5fbae94f7382cf88d11",
+    "executable_path": "/private/tmp/masc-runtime-53203/main_eio.exe",
+    "runtime_instance_id": "01a0953a-a053-7000-8ae4-051cceac386f",
+    "started_at": "2026-09-12T10:47:22Z"
+  },
+  "goal": {
+    "id": "exhibition-publication-baseline",
+    "phase": "awaiting_confirmation",
+    "criterion_revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+    "proof_state": "proof_proven",
+    "verification_run_id": "01a0953c-5e01-7000-9ed9-1003a66990c1",
+    "request_id": "03d1e4d404bc00f3e2c475e9ccf023d4",
+    "human_confirmation_submitted": false
+  },
+  "integration_pr": {
+    "baseRefName": "main",
+    "headRefOid": "bac7df436934671d2c24509129379ab5b1088e19",
+    "state": "OPEN",
+    "url": "https://github.com/jeong-sik/masc/pull/35429"
+  },
+  "direct_continuation_ci": {
+    "run_id": 34689988053,
+    "head": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "native_test_step": "failure",
+    "repair_investigation": "in_progress",
+    "identified_cause": "HTTP test cases share process-local Runtime_lane_preference; settled-hook assertion leaves test promise unresolved"
+  },
+  "installed_release": {
+    "source_commit": "53203f998a2df9f6149e1c033d5602836a8d7066",
+    "release_tree": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/5439c4fc14cae122d58cc49e0d88ae357fe90899bb10a1690fc21cc271e5c021",
+    "release_receipt_sha256": "5439c4fc14cae122d58cc49e0d88ae357fe90899bb10a1690fc21cc271e5c021",
+    "binary_sha256": "e0097c297e747f4c908e7a17e3c3009cea435bcbaf05fe334de3c8d18c6b09f8",
+    "installed_files_verified": true,
+    "running_from_this_installation": false
+  },
+  "operator_helper_preflight": {
+    "installed_tree_verified": true,
+    "embedded_source_verified": true,
+    "wrong_source_rejected": true,
+    "server_started": false,
+    "independent_review": "no concrete P1/P2 findings; existing owned-process checks preserved"
+  },
+  "acceptance_limits": [
+    "Integration candidate has not passed native CI or live acceptance.",
+    "Installed release has not been started; the existing raw CI binary remains active.",
+    "Operator-assisted collaboration does not prove spontaneous autonomous completion."
+  ]
+}

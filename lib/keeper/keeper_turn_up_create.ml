@@ -1,0 +1,427 @@
+(** Keeper_turn_up_create -- create a new keeper from parsed arguments.
+
+    Extracted from keeper_turn_up.ml (Ok None branch).
+    Handles initial keeper meta construction, checkpoint creation,
+    keepalive start, and response JSON generation. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
+open Keeper_keepalive
+open Keeper_turn_up_args
+
+
+(* The envelope a successful create hands back. It names the isolation the
+   keeper actually landed on. [network_mode] is a keeper_up argument; when the
+   caller omits it the keeper takes its sandbox profile's default, and docker
+   and microvm both default to none. This envelope is where the creating
+   operator learns which of the two happened. Without it a keeper whose
+   instructions name a network service is created blocked, and the block first
+   shows up as a credential error inside the guest. *)
+let create_response_json ~name ~trace_id ~instructions ~activation_mode ~input_policy
+    ~max_context_override ~sandbox_profile ~network_mode ~agent_core_env =
+  `Assoc
+    [ ("name", `String name)
+    ; ("agent_name", `String name)
+    ; ("trace_id", `String trace_id)
+    ; ("instructions", `String instructions)
+    ; ("activation_mode", Keeper_activation_mode.to_yojson activation_mode)
+    ; ("input_policy", Keeper_input_policy.to_yojson input_policy)
+    ; ("max_context_override", Json_util.int_opt_to_json max_context_override)
+    ; ("sandbox_profile", `String (sandbox_profile_to_string sandbox_profile))
+    ; ("network_mode", `String (network_mode_to_string network_mode))
+    ; ( "agent_core_env"
+      , `Assoc (List.map (fun (k, v) -> (k, `String v)) agent_core_env) )
+    ]
+;;
+
+let write_initial_meta ~intake_token ~initial_input config meta =
+  match
+    Keeper_owner_registry.create_meta
+      ~intake_token
+      ~initial_input
+      ~base_path:config.Workspace.base_path
+      meta
+  with
+  | Ok (Some _) -> Ok ()
+  | Ok None -> Error "Keeper owner removed metadata during create"
+  | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
+
+let with_committed_config ~revision ~warnings result =
+  Tool_result.with_metadata
+    (`Assoc ["keeper_config_write", `Assoc
+        ["revision", Keeper_turn_up_config_persistence.config_revision_to_yojson revision;
+         "applied", `Bool true;
+         "warnings", `List (List.map Keeper_turn_up_config_persistence.warning_to_yojson warnings)]])
+    result
+
+let create_keeper ~expected_config_revision (ctx : _ context)
+    (p : parsed_args) : tool_result =
+  Log.Keeper.info "create_keeper: starting for name=%s" p.name;
+  let task_id = Printf.sprintf "keeper_create_%s" p.name in
+  let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
+  Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
+  let input_policy = match p.input_policy_opt, p.profile_defaults.input_policy with
+    | Some policy, _ | None, Some policy -> policy
+    | None, None -> Keeper_input_policy.default in
+  let activation_mode =
+    Dashboard_utils.first_some p.activation_mode_opt p.profile_defaults.activation_mode
+    (* DET-OK: fixed compile-time default, not random or clock-derived. *)
+    |> Option.value ~default:Keeper_activation_mode.default
+  in
+  let sandbox_profile_res =
+    match
+      resolve_sandbox_profile
+        ?requested:p.sandbox_profile_opt
+        ~fallback:p.profile_defaults.sandbox_profile
+        ()
+    with
+    | None ->
+      Error
+        (Keeper_meta_contract.missing_required_sandbox_profile_error
+           ~keeper_name:p.name
+           p.profile_defaults)
+    | Some sandbox_profile -> Ok sandbox_profile
+  in
+    match sandbox_profile_res with
+    | Error err ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[("keeper", p.name); ("event", "create_sandbox_validation")]
+          ();
+        Log.Keeper.warn "create_keeper failed sandbox validation for %s: %s"
+          p.name err;
+        tool_result_error ~class_:Tool_result.Policy_rejection err
+    | Ok sandbox_profile ->
+      match
+        resolve_requested_network_mode
+          ~requested:p.network_mode_opt
+          ~sandbox_profile
+          ~fallback:p.profile_defaults.network_mode
+      with
+      | Error message ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[("keeper", p.name); ("event", "create_network_mode_validation")]
+          ();
+        Log.Keeper.warn "create_keeper failed network_mode validation for %s: %s"
+          p.name message;
+        tool_result_error ~class_:Tool_result.Policy_rejection message
+      | Ok network_mode ->
+            let mention_targets =
+              resolve_mention_targets
+                ~mention_targets_opt:p.mention_targets_opt
+                ~fallback_targets:p.profile_defaults.mention_targets
+                ~name:p.name
+            in
+            let board_interests =
+              resolve_board_interests
+                ~board_interests_opt:p.board_interests_opt
+                ~fallback_interests:p.profile_defaults.board_interests
+            in
+              let instructions = Option.value ~default:"" p.instructions_opt in
+              Progress.Tracker.step tracker ~message:"Initializing session directory" ();
+              match Keeper_input_birth.generate ~keeper_name:p.name () with
+              | Error err ->
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string LifecycleDispatchRejections)
+                    ~labels:[("keeper", p.name); ("event", "create_invalid_trace_id")]
+                    ();
+                  Log.Keeper.error
+                    "create_keeper failed: generated invalid trace_id for name=%s: %s"
+                    p.name err;
+                  Progress.stop_tracking task_id;
+                  tool_result_error ~class_:Tool_result.Runtime_failure "internal keeper trace_id generation failed"
+              | Ok creation ->
+                  let trace_id_t = Keeper_input_birth.trace_id creation in
+                  let trace_id = Keeper_id.Trace_id.to_string trace_id_t in
+                  (match
+                     Keeper_shutdown_intake_fence.run_durable_intake_observing
+                       ~base_path:ctx.config.base_path
+                       ~keeper_name:p.name
+                       (fun intake_token ->
+      let meta : Keeper_meta_contract.keeper_meta = {
+        id = None;
+        name = p.name;
+        instructions;
+        sandbox_profile;
+        sandbox_image = p.profile_defaults.sandbox_image;
+        network_mode;
+        microvm_backend = p.profile_defaults.microvm_backend;
+        microvm_memory = p.profile_defaults.microvm_memory;
+        microvm_cpus = p.profile_defaults.microvm_cpus;
+        mention_targets;
+        board_interests;
+        created_at = now_iso ();
+        updated_at = now_iso ();
+        max_context_override = p.max_context_override_opt;
+        paused = false;
+        latched_reason = None;
+        activation_mode;
+        input_policy;
+        current_task_id = None;
+        telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
+        telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
+        always_allow = p.profile_defaults.always_allow;
+        voice_always_allow = p.profile_defaults.voice_always_allow;
+        runtime = {
+          usage = {
+            total_turns = 0;
+            total_input_tokens = 0;
+            total_output_tokens = 0;
+            total_tokens = 0;
+            total_cost_usd = Keeper_cost_coverage.empty;
+            last_turn_ts = 0.0;
+            last_input_tokens = 0;
+            last_output_tokens = 0;
+            last_total_tokens = 0;
+            last_usage_reported_at = None;
+            last_latency_ms = 0;
+          };
+          usage_cursor = None;
+          last_usage_resolution = None;
+          proactive_rt = {
+            count_total = 0;
+            last_ts = 0.0;
+            visible_count_total = 0;
+            last_visible_ts = 0.0;
+            last_outcome = Proactive_never_started;
+            last_reason = "";
+            last_preview = "";
+          };
+          trace_id = trace_id_t;
+          message_scope_ack_id = None;
+	          last_runtime_attempt = None;
+	        };
+      keeper_id = Some (Keeper_input_birth.keeper_uid creation);
+      agent_core_env = p.profile_defaults.agent_core_env;
+      } in
+      let prompt_profile_defaults =
+        { p.profile_defaults with
+          remote_endpoint =
+            if p.remote_endpoint_present
+            then p.remote_endpoint_opt
+            else p.profile_defaults.remote_endpoint
+        }
+      in
+      match
+        Keeper_run_context.build_base_system_prompt
+          ~config:ctx.config
+          ~profile_defaults:prompt_profile_defaults
+          ~meta
+      with
+      (* #38354: the initial checkpoint is not saved with a prompt that lacks
+         the world's articles. Nothing has been written yet, so creating the
+         keeper again once the ledger reads is a clean retry. *)
+      | Error (Keeper_run_context.Workspace_unavailable detail) ->
+        Progress.stop_tracking task_id;
+        tool_result_error ~class_:Tool_result.Dependency_unavailable detail
+      | Error (Keeper_run_context.Constitution_unreadable error) ->
+        let detail = World_constitution_store.read_error_to_string error in
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[("keeper", p.name); ("event", "create_constitution_unreadable")]
+          ();
+        Log.Keeper.error "create_keeper failed for name=%s: %s" p.name detail;
+        Progress.stop_tracking task_id;
+        tool_result_error ~class_:Tool_result.Runtime_failure detail
+      (* A prompt slot that is missing or fails to render refuses creation
+         the same way: nothing has been written yet, so fixing the asset and
+         creating again is a clean retry. *)
+      | exception Invalid_argument detail ->
+        let detail = "prompt unrenderable: " ^ detail in
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[("keeper", p.name); ("event", "create_prompt_unrenderable")]
+          ();
+        Log.Keeper.error "create_keeper failed for name=%s: %s" p.name detail;
+        Progress.stop_tracking task_id;
+        tool_result_error ~class_:Tool_result.Runtime_failure detail
+      | Ok (_, system_prompt) ->
+      Progress.Tracker.step tracker ~message:"Writing declarative keeper configuration" ();
+      (match
+         Keeper_turn_up_config_persistence.commit_configuration
+           ~expected_revision:expected_config_revision
+           ~config:ctx.config
+           ~parsed:p
+           ~meta
+           ~publish:(fun _outcome revision ->
+           let publish () =
+             let bundle_paths =
+               Cancel_safe.protect
+                 ~on_exn:(fun exn ->
+                   Log.Keeper.error
+                     "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
+                     p.name
+                     (Printexc.to_string exn);
+                   Otel_metric_store.inc_counter
+                     Keeper_metrics.(to_string LifecycleDispatchRejections)
+                     ~labels:
+                       [ ("keeper", p.name); ("event", "sandbox_bundle_init_raised") ]
+                     ();
+                   [])
+                 (fun () ->
+                   Keeper_alerting_path.ensure_sandbox_bundle_for_profile
+                     ~config:ctx.config
+                     ~name:p.name
+                     ~sandbox_profile)
+             in
+             List.iter
+               (fun path ->
+                 if not (Sys.file_exists path)
+                 then (
+                   Log.Keeper.warn
+                     "create_keeper sandbox bundle path missing post-init: keeper=%s path=%s"
+                     p.name
+                     path;
+                   Otel_metric_store.inc_counter
+                     Keeper_metrics.(to_string LifecycleDispatchRejections)
+                     ~labels:
+                       [ ("keeper", p.name)
+                       ; ("event", "sandbox_bundle_missing_post_init")
+                       ]
+                     ()))
+               bundle_paths;
+             Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
+             let checkpoint_result =
+               try
+                 let open Result.Syntax in
+                 let* initial_session = Keeper_input_birth.reserve_session
+                   ~base_path:ctx.config.base_path ~intake_token creation
+                   |> Result.map_error Keeper_input_birth.error_to_string in
+                 let session = Keeper_context_runtime.create_session
+                   ~session_id:trace_id ~base_dir:(Keeper_input_birth.session_root initial_session) in
+                 let* checkpoint,outcome = Keeper_context_core.save_agent_core_checkpoint_classified
+                   ~base_path:ctx.config.base_path
+                   ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+                   ~keeper_name:meta.name ~session ~agent_name:meta.name
+                   ~ctx:(Keeper_context_runtime.create ~eio:true ~system_prompt)
+                   |> Result.map_error (Keeper_context_core.checkpoint_write_error_to_string
+                     ~persistence_error_to_string:Fun.id) in
+                 Keeper_input_birth.retain_initial initial_session ~checkpoint ~outcome
+                   |> Result.map_error Keeper_input_birth.error_to_string
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Keeper_context_core.log_keeper_exn
+                   ~label:"save_agent_core_checkpoint (init) exception"
+                   exn;
+                 Error (Printexc.to_string exn)
+             in
+             match checkpoint_result with
+             | Error detail ->
+               Error (`Checkpoint detail)
+             | Ok initial_input ->
+               Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
+               Result.map_error (fun detail -> `Metadata detail)
+                 (write_initial_meta ~intake_token ~initial_input ctx.config meta)
+           in
+           let published =
+             try publish () with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Error (`Metadata (Printexc.to_string exn))
+           in
+           (published, revision))
+           ()
+       with
+       | Error e ->
+         let detail = Keeper_turn_up_config_persistence.error_to_string e in
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string LifecycleDispatchRejections)
+           ~labels:[("keeper", p.name); ("event", "create_config_persistence")]
+           ();
+         Log.Keeper.error
+           "create_keeper failed: declarative config write error for name=%s: %s"
+           p.name
+           detail;
+         Progress.stop_tracking task_id;
+         tool_result_error ~class_:Tool_result.Runtime_failure
+           (Printf.sprintf "declarative keeper config write failed: %s" detail)
+       | Ok { value = (Error (`Checkpoint detail), revision); warnings } ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string CheckpointFailures)
+           ~labels:
+             [ ("keeper", p.name)
+             ; ( "site"
+               , Keeper_checkpoint_failure_operation.(to_label Create_initial_save) )
+             ]
+           ();
+         Log.Keeper.error
+           "create_keeper failed: initial checkpoint save error for name=%s: %s"
+           p.name
+           detail;
+         Progress.stop_tracking task_id;
+         tool_result_error
+           ~class_:Tool_result.Runtime_failure
+           (Printf.sprintf "configuration saved, but initial checkpoint save failed: %s" detail)
+         |> with_committed_config ~revision ~warnings
+       | Ok { value = (Error (`Metadata e), revision); warnings } ->
+         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
+           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
+         Log.Keeper.error
+           "create_keeper failed: owner metadata commit error for name=%s: %s"
+           p.name
+           e;
+         Progress.stop_tracking task_id;
+         tool_result_error ~class_:Tool_result.Runtime_failure
+           ("configuration saved, but owner publication failed: " ^ e)
+         |> with_committed_config ~revision ~warnings
+       | Ok { value = (Ok (), revision); warnings } ->
+        Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
+          p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+        Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
+        Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
+        let launch_outcome = start_keepalive ~intake_token ctx meta in
+        (match launch_outcome with
+         | Keepalive_started _ ->
+        Progress.Tracker.complete tracker ~message:"Keeper created" ();
+        Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+        let json =
+          create_response_json
+            ~name:meta.name
+            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ~instructions:meta.instructions
+            ~activation_mode:meta.activation_mode
+            ~input_policy:meta.input_policy
+            ~max_context_override:meta.max_context_override
+            ~sandbox_profile:meta.sandbox_profile
+            ~network_mode:meta.network_mode
+            ~agent_core_env:meta.agent_core_env
+        in
+        tool_result_ok_data json
+         | ( Keepalive_already_registered _
+           | Keepalive_lifecycle_denied _
+           | Keepalive_registration_rejected _
+           | Keepalive_fiber_start_rejected _
+           | Keepalive_launch_callback_failed _
+           | Keepalive_lane_ownership_lost
+           | Keepalive_fork_rejected _ ) as rejected ->
+           Progress.stop_tracking task_id;
+           tool_result_error ~class_:Tool_result.Runtime_failure
+             (Printf.sprintf
+                "keeper metadata was created but lane launch failed: %s"
+                (start_keepalive_outcome_to_string rejected)))
+        |> with_committed_config ~revision ~warnings))
+                   with
+                   | result, None -> result
+                   | result, Some operation_id ->
+                     (* Observed, not obeyed. A reservation records that a
+                        shutdown began; a shutdown that never finalises never
+                        clears it, and refusing here left the sweep re-trying
+                        every 30s against a slot nothing could release —
+                        15h32m and 38,910 abandoned sessions on 2026-08-20
+                        (#29566). Creation proceeds and names what it saw. *)
+                     Otel_metric_store.inc_counter
+                       Keeper_metrics.(to_string LifecycleDispatchRejections)
+                       ~labels:
+                         [ ("keeper", p.name)
+                         ; ("event", "create_over_shutdown_admission")
+                         ]
+                       ();
+                     Log.Keeper.warn
+                       "keeper created while a shutdown reservation stood: \
+                        keeper=%s operation=%s"
+                       p.name
+                       (Keeper_shutdown_types.Operation_id.to_string operation_id);
+                     result)

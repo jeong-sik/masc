@@ -1,0 +1,11 @@
+{
+  "arguments": {
+    "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second",
+    "keeper_name": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+    "due_in_sec": 1,
+    "message": "Append exactly one durable note to your own schedule_id \"audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second\" with body \"SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_SECOND\" using masc_schedule_note_add, read it back, then finish this job. Do not perform the first scheduled job's remaining steps or write any note on its schedule. Do not create other work, send messages, invoke shell tools, or ask for confirmation."
+  },
+  "json_value_sha256": "999bf6fad2d488c428069c70d2160aeb6487ddd02efeeb0454d82d9943db2526",
+  "json_value_bytes": 594,
+  "recorded_before_admission": true
+}

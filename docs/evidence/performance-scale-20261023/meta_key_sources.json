@@ -1,0 +1,16 @@
+{
+  "before": "5f1002b04848ca14506155a55211e099bdb916c9",
+  "scope": "Interpret complete before/after metadata-key modules with their signatures.\n\nChecks exact result equality for malformed/reordered keys, then measures warm\nvalid objects. No metadata value decoding, filesystem I/O, Eio, native server\nor active Keeper behavior is measured.\n",
+  "source_sha256": {
+    "lib/shared_types/json_kind.ml": "da7b24b5e91dca844f1cfcc39ab588c0fc0a7fad864b578352e7bd762a6c1fe9",
+    "lib/core/json_util.ml": "b1fea064f3da9252986044b2d6087ea95bbb229a944119ed84d38cc1a2f43281",
+    "Before:lib/keeper/keeper_meta_json_current_schema.ml": "b9b853914bf69c16de3f4bb6ba41d84a9c3366a308da0634cf40c8f2dc3c8ab2",
+    "Before:lib/keeper/keeper_meta_json_current_schema.mli": "b437742bdbc0b81cf7f7c6ba72de82804aa66058264fe1df898de5181e951f87",
+    "lib/keeper/keeper_meta_json_current_schema.ml": "86214bbb8f3085214b7c87b4bcfc73a98a70c6cfcf70c56e3e33f47196363373",
+    "After:lib/keeper/keeper_meta_json_current_schema.ml": "86214bbb8f3085214b7c87b4bcfc73a98a70c6cfcf70c56e3e33f47196363373",
+    "lib/keeper/keeper_meta_json_current_schema.mli": "4beb4875dfb33a82a7254a8de3e43df578658ec107061ee79511437f7fbdcbd8",
+    "After:lib/keeper/keeper_meta_json_current_schema.mli": "4beb4875dfb33a82a7254a8de3e43df578658ec107061ee79511437f7fbdcbd8",
+    "test/fixtures/item-http/keeper.json": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909",
+    "docs/evidence/performance-scale-20261023/meta_key_cases.ml": "ab77652b99f0ea4cefa493e67a13abcdfec5eec1ec9e0e4571255a95cd8899ac"
+  }
+}

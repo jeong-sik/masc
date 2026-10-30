@@ -1,0 +1,46 @@
+{
+  "observed_at_unix": 1793047909.085354,
+  "workflow": "Minimal manual checks",
+  "run_id": 40396800146,
+  "workflow_ref": "main",
+  "workflow_execution_head": "9377c7f3025d68e3856d2afd3762468dabc77813",
+  "source_input": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "artifact_id": 12687003191,
+  "archive_sha256": "a9e1eff4b3ddc6b43c14fa2fc48b7f468634d902ff487d9337b57bc4f5cb5927",
+  "observations": [
+    {
+      "executable": "masc",
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+      "sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "bytes": 111121488,
+      "args": [
+        "build-commit"
+      ],
+      "exit_code": 0,
+      "stdout_utf8": "a3950a189b9cc5a7ce82cb725699455d79923f42\n",
+      "stdout_sha256": "e85cea7924e543a024241f5dc112e17e090c24193b19b3775038fca8d3dc6765",
+      "stderr_bytes": 82,
+      "stderr_sha256": "099392de5f7979a85a6ee76efe1bb24ccab1390967ee16bc4cda8a679acbed8e"
+    },
+    {
+      "executable": "masc-tui",
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc-tui",
+      "sha256": "b0a45e199a808f1968265056b78bc755021a4b1a475093cb7c51356a295ee6ca",
+      "bytes": 108743920,
+      "args": [
+        "--build-commit"
+      ],
+      "exit_code": 0,
+      "stdout_utf8": "a3950a189b9cc5a7ce82cb725699455d79923f42\n",
+      "stdout_sha256": "e85cea7924e543a024241f5dc112e17e090c24193b19b3775038fca8d3dc6765",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "native_addon_launcher_digest_verified": true,
+  "installed": false,
+  "server_runtime_started": false,
+  "visible_ui_verified": false,
+  "verification_source_sha256": "9b7ade13d0ae128bfade43ca2f908cf07d6760c8eea09da4238ea20ec4a1bfef",
+  "previous_attempt": "verification-attempt-1.json"
+}

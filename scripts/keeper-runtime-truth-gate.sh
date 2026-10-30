@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# keeper-runtime-truth-gate.sh - read-only proof gate for one keeper turn.
+#
+# Validates that a persisted keeper turn has a runtime manifest, receipt link,
+# checkpoint link, provider-lane decision fields, and optional runtime-trace API
+# coverage. It does not start keepers or mutate live runtime state.
+#
+# Usage:
+#   scripts/keeper-runtime-truth-gate.sh --base-path "$MASC_BASE_PATH" --keeper sangsu
+#   scripts/keeper-runtime-truth-gate.sh --base-path "$MASC_BASE_PATH" --keeper sangsu \
+#     --trace-id trace-... --turn-id 42 --server-url http://127.0.0.1:8931
+
+set -euo pipefail
+
+_gate_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_gate_repo_root="$(cd "$_gate_script_dir/.." && pwd)"
+# shellcheck source=lib/keeper-store-layout.sh
+source "$_gate_script_dir/lib/keeper-store-layout.sh"
+
+# The OCaml owner declares these dirnames; naming one it dropped fails here
+# instead of checking a directory that does not exist and passing on the empty
+# result (#27583).
+MANIFEST_STORE_DIR="$(keeper_store_dirname "$_gate_repo_root" runtime-manifests)"
+RECEIPT_STORE_DIR="$(keeper_store_dirname "$_gate_repo_root" execution-receipts)"
+
+default_base_path() {
+  if [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  else
+    pwd
+  fi
+}
+
+BASE_PATH="$(default_base_path)"
+KEEPER=""
+TRACE_ID=""
+TURN_ID=""
+MODE="provider"
+SERVER_URL=""
+LIMIT=200
+EXPECT_TOOL_CALL_LOG=0
+
+usage() {
+  sed -n '2,/^$/p' "$0"
+}
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+log() {
+  printf '[runtime-truth-gate] %s\n' "$*" >&2
+}
+
+urlencode() {
+  jq -rn --arg value "$1" '$value | @uri'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base-path) BASE_PATH="$2"; shift 2 ;;
+    --keeper) KEEPER="$2"; shift 2 ;;
+    --trace-id) TRACE_ID="$2"; shift 2 ;;
+    --turn-id) TURN_ID="$2"; shift 2 ;;
+    --mode) MODE="$2"; shift 2 ;;
+    --server-url) SERVER_URL="${2%/}"; shift 2 ;;
+    --limit) LIMIT="$2"; shift 2 ;;
+    --expect-tool-call-log) EXPECT_TOOL_CALL_LOG=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown flag: $1" >&2; usage; exit 64 ;;
+  esac
+done
+
+command -v jq >/dev/null || fail "jq required"
+
+
+case "$MODE" in
+  any|provider) ;;
+  *) fail "--mode must be 'any' or 'provider'" ;;
+esac
+
+[[ -n "$KEEPER" ]] || fail "--keeper required"
+
+KEEPER_DIR="$BASE_PATH/.masc/keepers/$KEEPER"
+MANIFEST_DIR="$KEEPER_DIR/$MANIFEST_STORE_DIR"
+[[ -d "$MANIFEST_DIR" ]] || fail "runtime manifest directory missing: $MANIFEST_DIR"
+
+if [[ -z "$TRACE_ID" ]]; then
+  manifest_candidates=()
+  while IFS= read -r -d '' candidate; do
+    manifest_candidates+=("$candidate")
+  done < <(find "$MANIFEST_DIR" -type f -name '*.jsonl' -print0)
+  [[ ${#manifest_candidates[@]} -gt 0 ]] || fail "no runtime manifest JSONL files under $MANIFEST_DIR"
+  latest_manifest="${manifest_candidates[0]}"
+  for candidate in "${manifest_candidates[@]}"; do
+    if [[ "$candidate" -nt "$latest_manifest" ]]; then
+      latest_manifest="$candidate"
+    fi
+  done
+  TRACE_ID="$(basename "$latest_manifest" .jsonl)"
+else
+  latest_manifest="$MANIFEST_DIR/$TRACE_ID.jsonl"
+fi
+
+[[ -f "$latest_manifest" ]] || fail "manifest file missing: $latest_manifest"
+
+if [[ -z "$TURN_ID" ]]; then
+  TURN_ID="$(jq -sr '[ .[] | .keeper_turn_id | select(. != null) ] | last // empty' "$latest_manifest")"
+  [[ -n "$TURN_ID" ]] || fail "turn id not supplied and no keeper_turn_id found in $latest_manifest"
+fi
+
+turn_rows="$(jq -c --argjson turn "$TURN_ID" \
+  'select(.keeper_turn_id == $turn or (.keeper_turn_id == null and .event == "turn_finished"))' \
+  "$latest_manifest")"
+[[ -n "$turn_rows" ]] || fail "no manifest rows for turn_id=$TURN_ID in $latest_manifest"
+
+event_count="$(printf '%s\n' "$turn_rows" | jq -s 'length')"
+log "base_path=$BASE_PATH keeper=$KEEPER trace_id=$TRACE_ID turn_id=$TURN_ID manifest_rows=$event_count"
+
+turn_finished_status="$(printf '%s\n' "$turn_rows" | jq -r '
+  select(.event == "turn_finished")
+  | .status // empty
+' | tail -n1)"
+turn_finished_status="${turn_finished_status:-unknown}"
+
+has_event() {
+  local event="$1"
+  printf '%s\n' "$turn_rows" | jq -e --arg event "$event" 'select(.event == $event)' >/dev/null
+}
+
+require_event() {
+  local event="$1"
+  has_event "$event" || fail "missing manifest event: $event"
+}
+
+require_event "receipt_appended"
+require_event "turn_finished"
+
+if [[ "$MODE" = "provider" ]]; then
+  require_event "provider_lane_resolved"
+  require_event "runtime_routed"
+
+  # runtime_routed is appended per candidate the router considers, so a turn
+  # carries several of them against one closure; comparing the counts reports
+  # a dangling dispatch on almost every real turn. What the retired
+  # provider_attempt_started / provider_attempt_finished pair asserted was
+  # that the dispatch closed at all, so this asks for presence. A turn closes
+  # with runtime_completed or with runtime_failed; a failure is a closure.
+  if ! has_event "runtime_completed" && ! has_event "runtime_failed"; then
+    fail "runtime dispatch never closed: runtime_routed present, runtime_completed and runtime_failed both absent"
+  fi
+
+  if ! has_event "checkpoint_saved"; then
+    [[ "$turn_finished_status" = "error" ]] \
+      || fail "missing manifest event: checkpoint_saved"
+    log "checkpoint_saved absent for terminal error turn; accepting rollback/no-checkpoint path"
+  fi
+
+  if ! has_event "event_bus_correlated"; then
+    [[ "$turn_finished_status" = "error" ]] \
+      || fail "missing manifest event: event_bus_correlated"
+    log "event_bus_correlated absent for terminal error turn; accepting pre-correlation failure path"
+  fi
+
+  # Both ids are optional at the producer (keeper_unified_turn.ml passes them as
+  # `?event_bus_correlation_id` / `?event_bus_run_id`), and a row carrying
+  # neither is reported by the runtime lens as clock_event_bus_uncorrelated.
+  # So this pins the type when a field is present; it must not assert presence.
+  if has_event "event_bus_correlated"; then
+    printf '%s\n' "$turn_rows" | jq -e '
+      select(.event == "event_bus_correlated")
+      | (.decision.correlation_id == null or (.decision.correlation_id | type == "string"))
+        and (.decision.run_id == null or (.decision.run_id | type == "string"))
+    ' >/dev/null || fail "event_bus_correlated carries a non-string correlation_id or run_id"
+  fi
+
+  printf '%s\n' "$turn_rows" | jq -e '
+    select(.event == "provider_lane_resolved")
+    | .decision.runtime_engine == "masc_keeper_named_runtime"
+      and .decision.agent_core_dispatch_mode == "single_provider_agent_run"
+      and .decision.agent_core_internal_runtime_allowed == false
+      and (.decision.materialized_tool_names | type == "array")
+  ' >/dev/null || fail "provider_lane_resolved is missing keeper/AGENT_CORE boundary or lane fields"
+fi
+
+receipt_path="$(printf '%s\n' "$turn_rows" | jq -r '
+  select(.event == "receipt_appended")
+  | .links.receipt_path // empty
+' | tail -n1)"
+[[ -n "$receipt_path" ]] || fail "receipt_appended row lacks links.receipt_path"
+[[ -f "$receipt_path" ]] || fail "linked receipt path missing: $receipt_path"
+
+checkpoint_path="$(printf '%s\n' "$turn_rows" | jq -r '
+  select(.event == "checkpoint_saved")
+  | .links.checkpoint_path // empty
+' | tail -n1)"
+if [[ "$MODE" = "provider" ]]; then
+  if has_event "checkpoint_saved"; then
+    [[ -n "$checkpoint_path" ]] || fail "checkpoint_saved row lacks links.checkpoint_path"
+    [[ -f "$checkpoint_path" ]] || fail "linked checkpoint path missing: $checkpoint_path"
+  else
+    checkpoint_path=""
+  fi
+fi
+
+receipt_match="$(jq -sr --arg trace "$TRACE_ID" --argjson turn "$TURN_ID" '
+  [ .[] | select((.trace_id // "") == $trace or (.turn_count // null) == $turn) ]
+  | length
+' "$receipt_path")"
+[[ "$receipt_match" -gt 0 ]] || fail "linked receipt does not contain trace_id=$TRACE_ID or turn_count=$TURN_ID"
+
+tools_used_count="$(jq -sr '
+  [ .[] | (.tools_used // [])[]? ] | length
+' "$receipt_path")"
+
+tool_log_path="$(printf '%s\n' "$turn_rows" | jq -r '
+  select(.event == "turn_finished")
+  | .links.tool_call_log_path // empty
+' | tail -n1)"
+
+if [[ "$EXPECT_TOOL_CALL_LOG" = "1" || "$tools_used_count" -gt 0 ]]; then
+  [[ -n "$tool_log_path" ]] || fail "tool use was present/expected but turn_finished lacks tool_call_log_path"
+  [[ -f "$tool_log_path" ]] || fail "linked tool-call log path missing: $tool_log_path"
+fi
+
+if [[ -n "$SERVER_URL" ]]; then
+  keeper_enc="$(urlencode "$KEEPER")"
+  trace_enc="$(urlencode "$TRACE_ID")"
+  api_url="$SERVER_URL/api/v1/keepers/$keeper_enc/runtime-trace?trace_id=$trace_enc&turn_id=$TURN_ID&limit=$LIMIT"
+  api_json="$(curl -fsS --max-time 10 "$api_url")" || fail "runtime-trace API request failed: $api_url"
+  printf '%s' "$api_json" | jq -e --arg trace "$TRACE_ID" --argjson turn "$TURN_ID" '
+    .trace_id == $trace
+    and (.turn_id == $turn or .turn_id == null)
+    and (.manifest_total_rows // 0) > 0
+    and ((.manifest_rows // []) | length) > 0
+	    and ((.linked_artifacts.receipts // []) | length) > 0
+	    and ((.turn_identity.manifest_keeper_turn_ids // []) | index($turn) != null)
+	    and ((.turn_identity.receipt_appended_count // 0) > 0)
+	  ' >/dev/null || fail "runtime-trace API response does not cover manifest/receipt chain"
+  log "runtime-trace API ok: $api_url"
+fi
+
+cat <<EOF
+keeper-runtime-truth-gate: PASS
+  base_path: $BASE_PATH
+  keeper: $KEEPER
+  trace_id: $TRACE_ID
+  turn_id: $TURN_ID
+  mode: $MODE
+  manifest_path: $latest_manifest
+  manifest_rows_checked: $event_count
+  receipt_path: $receipt_path
+  checkpoint_path: ${checkpoint_path:-none}
+  tool_call_log_path: ${tool_log_path:-none}
+EOF

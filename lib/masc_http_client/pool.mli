@@ -1,0 +1,317 @@
+(** RFC-0107 Phase D Connection Pool.
+
+    Design rationale lives in [docs/rfc/RFC-0107-phase-d-pool-design.md].
+    Critical findings absorbed from Phase B Prior Art research
+    ([docs/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.md]):
+
+    - piaf's [Client.t] is per-endpoint, not multi-host. We build the
+      [Host_key -> piaf Client.t queue] layer ourselves on top.
+    - cohttp upstream patch is not viable (issue #85 closed 2014, eio
+      not covered). piaf is the only rational transport choice.
+    - Eio #244 "exactly-one-owner" principle motivates the no-double-
+      release invariant enforced by the scoped [request] API (no naked
+      acquire / release exposed). *)
+
+(** Opaque per-process connection pool. Attaches to a long-lived
+    [Eio.Switch] (typically server root_sw via [Eio_context]). The pool
+    survives turn boundaries; per-host connection state evicts on
+    [idle_ttl]. *)
+type t
+
+(** Pool tuning parameters. Conservative defaults derived from
+    RFC-0101 §2 nofile cap (10240).
+
+    [max_idle_per_host]: bound on idle (reusable) connections kept per
+    {scheme, host, port} tuple after a request completes.
+
+    [max_total_idle]: bound on idle connections across all hosts. When
+    exceeded, the LRU host's oldest idle connection is evicted before
+    a new one is parked.
+
+    [idle_ttl_seconds]: idle connection's max age before eviction. A
+    pool fiber walks idle queues periodically; expired entries are
+    dropped from the pool and told to stop, and their own daemon closes
+    them.
+
+    [connect_timeout_seconds]: max wait when establishing a fresh
+    connection, shared by DNS resolution, every TCP probe address, and
+    Piaf client creation (including TLS). Surfaces as
+    [Error "connect timeout ..."] to the caller.
+
+    [connect_failure_cooldown_seconds]: after a connect to a host fails,
+    requests to that host fast-fail without opening a socket for this
+    long. Suppresses attempts after a reported failure; already concurrent
+    cold requests can still connect. Socket cleanup belongs to each client
+    scope independently of this cooldown. Zero disables backoff.
+    Expired failures are removed by lookup and the idle eviction fiber;
+    successful creation and shutdown also clear failure state. *)
+type config = {
+  max_idle_per_host : int;
+  max_total_idle    : int;
+  idle_ttl_seconds  : float;
+  connect_timeout_seconds : float;
+  connect_failure_cooldown_seconds : float;
+}
+
+val default_config : config
+(** [{ max_idle_per_host = 8; max_total_idle = 256;
+       idle_ttl_seconds = 60.0; connect_timeout_seconds = 5.0;
+       connect_failure_cooldown_seconds = 5.0 }]. *)
+
+val shutdown : t -> unit
+(** Idempotently stop accepting idle connections and close parked client scopes.
+    Parent switch teardown also closes these scopes without an explicit call.
+    In-flight requests must have completed before explicit shutdown; late
+    releases close their clients instead of parking them. *)
+
+val create :
+  sw:Eio.Switch.t ->
+  env:Eio_unix.Stdenv.base ->
+  ?config:config ->
+  unit ->
+  t
+(** Initialize the pool on a long-lived switch (server root_sw). All client
+    scopes remain bounded by [sw], including while idle or in flight.
+
+    [env] is the full Eio standard environment, required by the piaf
+    transport (h1/h2 client creation). Each client has a child switch owned
+    by a daemon on [sw]. Failed/cancelled creation closes that child switch
+    before returning; successful clients retain it through idle reuse.
+    Shutdown joins those fibers before returning. Eviction does not: it
+    signals and returns, because a walk that joins cannot be interrupted
+    part way through without stranding the clients it has not reached yet. *)
+
+(* ── Request API ───────────────────────────────────────────────── *)
+
+(** Typed HTTP response. Mirrors [Masc_http_client] response shape so
+    the migration shim is a one-line wrap. *)
+type response = {
+  status : int;
+  headers : (string * string) list;
+  body : string;
+}
+
+type http_method = [ `GET | `POST | `PUT | `DELETE | `HEAD | `PATCH ]
+
+val request :
+  t ->
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_seconds:float ->
+  ?max_body_bytes:int ->
+  method_:http_method ->
+  url:string ->
+  ?headers:(string * string) list ->
+  ?body:string ->
+  unit ->
+  (response, string) result
+(** Scoped one-shot request. Acquires a connection from the per-host
+    pool (or creates one if the pool is empty / under
+    [max_idle_per_host]), issues the request, releases the connection
+    back to the pool for keep-alive reuse, and returns the typed
+    response.
+
+    [max_body_bytes] optionally bounds received response bytes. An oversized
+    fixed length is refused before reading; other bodies are checked before
+    each chunk is appended. Refusal names the HTTP status and closes the
+    partially read connection, without returning a partial body.
+    Omission leaves response size unrestricted; a negative limit is invalid.
+
+    Failure modes (all return [Error]):
+    - DNS / TCP / TLS failure during connect
+    - HTTP read error during reuse (pool drops the bad connection)
+    - timeout when [clock] and [timeout_seconds] are both provided and
+      the request has not finished by then; a response that arrived as
+      the window passed is the result
+
+    Notably absent: silent retry. If a reused connection fails, the
+    caller sees [Error] with the underlying reason. Caller decides
+    whether to retry — N-of-M silent retry is an
+    RFC-0107 §"Workaround Rejection Bar" anti-pattern. *)
+
+(** {2 RFC-0129 — idle-timeout request with streaming progress}
+
+    Replaces the wall-clock total-timeout pattern used by [request].
+    Chunk arrival on the response body resets the idle timer; a stream
+    that keeps delivering bytes is never cancelled, regardless of total
+    elapsed time. A stream that stops producing bytes for longer than
+    [idle_timeout_sec] is cancelled.
+
+    Progress fields are returned on both the [Ok] and [Error] branches
+    so runtime rotation receipts can attach them without a side-channel.
+
+    Design rationale: docs/rfc/RFC-0129-http-idle-timeout-and-streaming-progress.md *)
+
+(** Body streaming progress observed during a single request. All
+    timestamps are seconds since request start (monotonic). *)
+type body_progress = {
+  first_byte_at_sec : float option;
+  last_chunk_at_sec : float option;
+  bytes_received    : int;
+}
+
+val empty_body_progress : body_progress
+
+(** {2 Streaming request}
+
+    [request] reads a response body whole and hands it over once the body
+    ends. A caller rendering a live view of a server-sent event stream needs
+    the chunks as they arrive, which is what [request_streaming] gives it. *)
+
+(** Whether a successful stream's body is kept whole as well as handed to
+    [on_chunk], and so what {!Streamed} carries as its body. *)
+type _ body_retention =
+  | Keep_body : string body_retention
+      (** The caller decodes the whole body once the stream ends. *)
+  | Discard_body : unit body_retention
+      (** [on_chunk] is the body's only reader. A subscription that stays open
+          for hours holds none of what it has handed on. *)
+
+(** What a streaming request produced.
+
+    The cases are separate because a caller that streams a wire protocol
+    cannot interpret an error body in that protocol: a 401 carries a JSON
+    object, not events. Feeding it to the caller's chunk consumer would
+    surface as a protocol error rather than as the status it is. *)
+type 'body stream_outcome =
+  | Streamed of
+      { status : int
+      ; headers : (string * string) list
+      ; body : 'body
+            (** The whole body under [Keep_body], [()] under [Discard_body]. *)
+      ; progress : body_progress
+      }
+  | Buffered of response
+      (** Non-success status: the body was read whole and [on_chunk] was
+          never called. *)
+
+val request_streaming :
+  t ->
+  retention:'body body_retention ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  method_:http_method ->
+  url:string ->
+  ?headers:(string * string) list ->
+  ?body:string ->
+  ?on_response:(status:int -> headers:(string * string) list -> unit) ->
+  on_chunk:(string -> unit) ->
+  unit ->
+  ('body stream_outcome, string) result
+(** [request_streaming t ~retention ~clock ~idle_timeout_sec ~method_ ~url
+    ~on_chunk ()] issues one request and calls [on_chunk] with each body chunk
+    as it arrives. [retention] decides whether a successful body is also kept
+    whole. A non-success body is always kept, for {!Buffered}.
+
+    [on_response], when supplied, runs once after response headers arrive and
+    before any body chunk is delivered, including for non-success statuses.
+    It lets a streaming protocol establish response identity before consuming
+    data. Exceptions propagate through the normal connection cleanup path.
+
+    The connection lifecycle matches {!request}: parked on success, closed on
+    error, released under cancellation.
+
+    [clock] measures progress and protocol-specific idle periods. Chunk arrival
+    resets the idle timer. An infinite idle window leaves lifetime to the
+    request owner and cancellation, as needed for human-driven login.
+
+    [on_chunk] runs on the calling fiber between reads. Work done in it delays
+    the next read, so a caller should append to its own state and render
+    elsewhere rather than block here. *)
+
+(* ── Telemetry ─────────────────────────────────────────────────── *)
+
+(** Non-mutating pool snapshot for Otel_metric_store / dashboard. Phase D.4
+    wires this to the metrics layer. *)
+type stats = {
+  idle_per_host : (string * int) list;
+  total_idle : int;
+  total_inflight : int;
+  reuse_count_total : int;
+  evict_count_total : int;
+  (** Increments when the periodic eviction fiber catches an
+      exception while sweeping idle entries. Operator-visible signal
+      that the pool's TTL cleanup is silently failing. Surfaced as
+      [masc_pool_evict_failure_total] in Otel_metric_store. *)
+  evict_failure_count_total : int;
+  create_count_total : int;
+}
+
+val stats : t -> stats
+
+(** {1 Test-only — internal data structures}
+
+    Exposed for unit testing of the pure pieces (Host_key normalization,
+    config defaults) without requiring piaf integration. Do not call
+    from production code. *)
+module For_testing : sig
+  (** The same ownership handoff used by buffered and streaming requests. *)
+  module Lease : module type of Pool_client_lease
+
+  val request_body : string -> Piaf.Body.t
+  (** The same finite request body used by buffered and streaming calls. *)
+  (** The request window [request] arms, on its own: a result the work
+      finished as the window passed stands; the timeout is the result only
+      when the work has not finished. *)
+  val with_request_timeout :
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    timeout_seconds:float ->
+    (unit -> ('a, string) result) ->
+    ('a, string) result
+
+  (** Drive the real establishment sequence with controlled DNS, TCP and
+      client stages, without fabricating a Piaf client. A client whose
+      creation finished as the window closed is the result; "connect
+      timeout" is the result only when no stage had finished. *)
+  val establish_connection :
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    timeout_seconds:float ->
+    resolve:(unit -> 'addr list) ->
+    connect:('addr -> unit) ->
+    create:('addr -> ('client, string) result) ->
+    ('client, string) result
+
+  val connect_failure_count : t -> int
+  val evict_expired_entries : t -> float -> unit
+
+  module Host_key : sig
+    type t = {
+      scheme : string;
+      host   : string;
+      port   : int;
+    }
+    val of_uri : Uri.t -> t
+    val to_string : t -> string
+    val compare : t -> t -> int
+  end
+
+  (** Exposed so unit tests can drive idle-timeout logic against a
+      mock [Piaf.Body.t] built from [Piaf_stream.create], without
+      standing up a real HTTP server. *)
+  val read_body_with_idle :
+    retention:'retained body_retention ->
+    ?progress_ref:body_progress ref ->
+    ?on_chunk:(string -> unit) ->
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    start_sec:float ->
+    idle_timeout_sec:float ->
+    Piaf.Body.t ->
+    ('retained * body_progress, string * body_progress) result
+
+  (** The idle-queue decision, separated from the resource so it can be
+      driven with plain values: given (client, last_used) in park order,
+      the first still inside [ttl], what is left, and what was expired on
+      the way. Exposed because the alternative is fabricating a
+      [Piaf.Client.t], and the rule this encodes -- never hand out a
+      connection past its TTL, whether or not the eviction fiber ran
+      (#30831) -- is worth a test that does not need a server. *)
+  val take_live :
+    now:float -> ttl:float -> ('a * float) list -> 'a option * ('a * float) list * 'a list
+
+  (** [ensure_host_header ~uri headers] fills in a correct
+      ["host"] header (including the port when [uri] names one) when
+      [headers] does not already carry one, case-insensitively. Exposed so
+      unit tests can pin the Host-header-port fix (masc, 2026-08-16)
+      without standing up a real HTTP server. *)
+  val ensure_host_header :
+    uri:Uri.t -> (string * string) list option -> (string * string) list option
+end

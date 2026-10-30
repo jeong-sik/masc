@@ -1,0 +1,171 @@
+{
+  "base": "70f438d054df3c0fe4eaf51853d4775cc42bab81",
+  "worktree": "/tmp/masc-addon-inventory-category-authority-20261023",
+  "observed_at": "2026-10-23T06:14:13.012920+00:00",
+  "files": [
+    {
+      "path": "bin/masc_tui_lane_inventory.ml",
+      "bytes": 21361,
+      "sha256": "b8022baf79cfec543a5982f1f061603218839322f7edc20ed5621359cad13f9d"
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.mli",
+      "bytes": 4512,
+      "sha256": "a314eadd76bd3a01b7d12a073ae7448d846c72c1093b89209761ed0e2534177e"
+    },
+    {
+      "path": "dashboard/src/api/fixtures/lane-inventory.json",
+      "bytes": 13845,
+      "sha256": "cb44a69ae132a1d42ee0120a13b5c4934246950540a70d546434cdc2956fbde5"
+    },
+    {
+      "path": "dashboard/src/api/lane-inventory.ts",
+      "bytes": 9546,
+      "sha256": "e0062b0df6e2ce950cf7002a21d0a78c130f865f018b9735a619e1185ada54c2"
+    },
+    {
+      "path": "dashboard/src/lib/lane-addon-category.test.ts",
+      "bytes": 6265,
+      "sha256": "2a04dfb7159010b85a16fa2ea84fbcb4432da57e0bc6f2003b8a714847c2e3bd"
+    },
+    {
+      "path": "dashboard/src/lib/lane-addon-category.ts",
+      "bytes": 3477,
+      "sha256": "213a7b7b1f2a7a438322fadf97eba3bcfeea52751f02e64d01b2c1d7f4adb97c"
+    },
+    {
+      "path": "lib/server/server_lane_inventory.ml",
+      "bytes": 17096,
+      "sha256": "7ddbf9ffd3fed0d5a0494baa7febc2d5d30fe7f5b79cf70d595b761ea7134579"
+    },
+    {
+      "path": "lib/server/server_lane_inventory.mli",
+      "bytes": 4637,
+      "sha256": "cc8a9d156adb328430ef35e345a0fd7307ac3cb64d18226324877503499fafa1"
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.ml",
+      "bytes": 20896,
+      "sha256": "348d01bb580de332c7cbf250ec90d3f979bc0e33c5df722070d0a8ff5c1d29e2"
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.mli",
+      "bytes": 4239,
+      "sha256": "053f8dd5071389e994d32b6e0d142b2428e5f48510c40b00d94628f90fcc8d39"
+    },
+    {
+      "path": "test/dune",
+      "bytes": 207674,
+      "sha256": "677f865ea3c739bd1a4e4d261c6f77e4eb27ee6ffed81b92ff493b15a7308deb"
+    },
+    {
+      "path": "test/test_server_lane_inventory.ml",
+      "bytes": 40248,
+      "sha256": "9266a2ec56e977db0b58049a3008aaafeb7b888634c33a5ff5e1dbbd64a2db25"
+    },
+    {
+      "path": "test/test_tui_keys.ml",
+      "bytes": 81872,
+      "sha256": "af6bd73f3a729525de2b8f5f7b866ed618038fd59cf9834828f4783637f78a1d"
+    },
+    {
+      "path": "test/test_tui_lane_inventory.ml",
+      "bytes": 32470,
+      "sha256": "fb4c3998e19b0cc42a34403b6644901b7549096d1a532eb39e1389720625efcc"
+    }
+  ],
+  "patch": {
+    "path": "/tmp/masc-addon-goal-resume-20261021/inventory-category-authority-20261023.patch",
+    "bytes": 24213,
+    "sha256": "69b5505e7ab08bae2b54daf87b6287bc592c4fac69367d46d338080d364de54a"
+  },
+  "checks": {
+    "parser": {
+      "files": 9,
+      "status": "PASS",
+      "chunk": "33ff9a",
+      "command": "ocamlc -stop-after parsing -c <each changed ML/MLI>"
+    },
+    "diff_check": {
+      "status": "PASS",
+      "chunk": "ac84e0",
+      "command": "git diff --check"
+    },
+    "dashboard_selected": {
+      "status": "PASS",
+      "suites": 5,
+      "tests": 64,
+      "chunk": "18b360",
+      "command": "pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/lane-inventory.test.ts src/lib/lane-addon-category.test.ts src/components/lane-inventory-panel.test.ts src/lib/lane-navigation.test.ts src/components/lane-navigation-flow.test.ts",
+      "duration_s": 20.71,
+      "start_local": "2026-10-23 15:08:20 Asia/Seoul"
+    },
+    "typescript": {
+      "status": "PASS",
+      "chunk": "79dd4e",
+      "command": "pnpm exec tsc --noEmit"
+    }
+  },
+  "not_run": [
+    "OCaml typing",
+    "OCaml tests",
+    "Dune build",
+    "CI",
+    "live runtime",
+    "visible TUI"
+  ],
+  "direct_consumers": [
+    {
+      "interface": "Server_lane_inventory row_to_json optional builtin ui_category",
+      "consumers": [
+        "Tui_decode_lane_inventory.decode",
+        "dashboard/src/api/lane-inventory.ts"
+      ],
+      "verification": [
+        "test_server_lane_inventory before_reconcile (added actual snapshot encode/decode/TUI category integration)",
+        "dashboard api/lib/component 5 selected suites"
+      ]
+    },
+    {
+      "interface": "Tui_decode_lane_inventory.row.ui_category",
+      "consumers": [
+        "Masc_tui_lane_inventory.row_category",
+        "test/test_tui_keys.ml record fixtures",
+        "test/test_tui_lane_inventory.ml record fixture"
+      ],
+      "verification": [
+        "test_tui_lane_inventory builtin_role_is_server_metadata (added strict metadata/original identity state regression)",
+        "test_tui_keys record fixture adaptations"
+      ]
+    },
+    {
+      "interface": "Dashboard LaneInventoryRow.ui_category",
+      "consumers": [
+        "inventoryCategory",
+        "groupAddonCategories",
+        "LaneInventoryPanel",
+        "laneTargetFor"
+      ],
+      "verification": [
+        "five selected Dashboard suites, 64 PASS",
+        "tsc --noEmit PASS"
+      ]
+    }
+  ],
+  "constraints": [
+    "No execution/category authority coupling",
+    "Current package declaration and manual original worker roles preserved",
+    "No inferred role from technical IDs or labels",
+    "No production mapping duplicated in TUI/Dashboard",
+    "No commits or push"
+  ],
+  "followup": {
+    "scope": "Merge duplicate row_category MLI docs and state server-authored builtin role",
+    "changed_from_original": [
+      "bin/masc_tui_lane_inventory.mli"
+    ],
+    "original_manifest": "inventory-category-authority-frozen-20261023-original.json",
+    "original_patch": "inventory-category-authority-20261023-original.patch",
+    "checks": "MLI parser and diff-check PASS; previous TS source bytes remain identical"
+  }
+}

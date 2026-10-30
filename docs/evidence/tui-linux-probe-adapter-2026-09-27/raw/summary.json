@@ -1,0 +1,343 @@
+{
+  "experiment_commit": "91905edec1b431446b3b268c4aca609b11dc6e7c",
+  "run_id": "36265260527",
+  "run_attempt": "1",
+  "started_at": "2026-09-26T19:15:06.298604+00:00",
+  "finished_at": "2026-09-26T19:15:11.931057+00:00",
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "python": "3.14.7 (main, Aug  6 2026, 02:19:46) [GCC 13.3.0]",
+  "perf_counter": {
+    "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+    "monotonic": true,
+    "adjustable": false,
+    "resolution": 1e-09
+  },
+  "scenario_sha256": "2b12d51f3fb64d0a32924804c601a2f9e489729962da303a6049cada1114af55",
+  "helper_sha256": "0aae96ef81f3c33db4a9c79648888e29d9770421dbcdef11faf918cbd0f30ebb",
+  "input_cycles": 2,
+  "retained_channels": 250,
+  "preflight": {
+    "metadata_sha256": "5ee56d0c08a735b95330e4d4b7b1f9d8201925600c61e4c02933702fe5a3a2c1",
+    "visible_keepers": [
+      "alpha",
+      "beta"
+    ],
+    "retained_channels": {
+      "count": 250,
+      "fixture_sha256": "a57996f8ba3a01b5357180200dbd61d7ec7433dbd799b07ec2609efe4e2b73a8",
+      "loaded_header": "250 here / 251 total",
+      "returned_tab": "Info"
+    }
+  },
+  "session_resources": [
+    {
+      "role": "baseline",
+      "repetition": 1,
+      "child_user_seconds": 0.056743999999999996,
+      "child_system_seconds": 0.031761,
+      "child_cpu_seconds": 0.088505,
+      "wall_seconds": 2.554754348,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "candidate",
+      "repetition": 1,
+      "child_user_seconds": 0.063914,
+      "child_system_seconds": 0.027826,
+      "child_cpu_seconds": 0.09174,
+      "wall_seconds": 2.542223897,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    }
+  ],
+  "scenario_environment_keys": [
+    "LANG",
+    "PATH"
+  ],
+  "identities": {
+    "baseline": {
+      "source": "63b6a34a2e5d8a5388ff8da6088fb6755e81506f",
+      "artifact": {
+        "id": 10913715720,
+        "node_id": "MDg6QXJ0aWZhY3QxMDkxMzcxNTcyMA==",
+        "name": "linux-x64-probe-63b6a34a2e5d8a5388ff8da6088fb6755e81506f-attempt-1",
+        "size_in_bytes": 110576866,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10913715720",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10913715720/zip",
+        "expired": false,
+        "digest": "sha256:dd8ef738dac55de87302fe63101addb49e67f775f045d401f991ce77d669ec0f",
+        "created_at": "2026-09-26T19:01:16Z",
+        "updated_at": "2026-09-26T19:01:16Z",
+        "expires_at": "2026-10-03T19:01:04Z",
+        "workflow_run": {
+          "id": 36263898895,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "perf/worker-support-baseline-probe-20260927",
+          "head_sha": "63b6a34a2e5d8a5388ff8da6088fb6755e81506f"
+        }
+      },
+      "run_id": 36263898895,
+      "sha256": {
+        "deployment_preflight_helper.exe": "cf5ee9264648eb303a58b935928baf39f21505aa8da54d69a91e80ee9eacdb97",
+        "main_eio.exe": "8d9f7b5508e9b1ec7e2d5d445099cc26ce8cc091d40a703a783b4b82fd04786c",
+        "masc_browser_host.exe": "f00767faf8b453ded6e95926b78bac9f32918a96e930cb0fa265b220ee160049",
+        "masc_tui.exe": "2d1c935ef60074c7d4635dc5f9abaf536a9ec019327d5ce1cc0718b80afdd958"
+      },
+      "build_workflow": ".github/workflows/linux-x64-probe.yml",
+      "scope": "CI probe output; not release, deployment or performance acceptance",
+      "binary": "<CI_CHECKOUT>/runtime-baseline/masc_tui.exe"
+    },
+    "candidate": {
+      "source": "6420fbe9e7e15a1cd24d95cda83b1a385f008a58",
+      "artifact": {
+        "id": 10913895110,
+        "node_id": "MDg6QXJ0aWZhY3QxMDkxMzg5NTExMA==",
+        "name": "linux-x64-probe-6420fbe9e7e15a1cd24d95cda83b1a385f008a58-attempt-1",
+        "size_in_bytes": 110576997,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10913895110",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10913895110/zip",
+        "expired": false,
+        "digest": "sha256:0917680df7830a8e849abaebc8b3ec3d6fe3d1dc7d9d6e062be91fdd5470a01e",
+        "created_at": "2026-09-26T19:01:16Z",
+        "updated_at": "2026-09-26T19:01:16Z",
+        "expires_at": "2026-10-03T19:01:05Z",
+        "workflow_run": {
+          "id": 36263900169,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "perf/worker-support-task-index-20260927",
+          "head_sha": "6420fbe9e7e15a1cd24d95cda83b1a385f008a58"
+        }
+      },
+      "run_id": 36263900169,
+      "sha256": {
+        "deployment_preflight_helper.exe": "25ec17f25ec46bc8037ea46f39c769b89ec1e640b4a5a21a3e3318794a6f2366",
+        "main_eio.exe": "4f6087fcba46e18a444ef4b83aca16dee6d02c71b03db93a29ec9301e8fc0e93",
+        "masc_browser_host.exe": "f00767faf8b453ded6e95926b78bac9f32918a96e930cb0fa265b220ee160049",
+        "masc_tui.exe": "6b58bc5540bc2fef8daf3967c433089e94fd8747e1d4f1c58aa5379ebafdd80c"
+      },
+      "build_workflow": ".github/workflows/linux-x64-probe.yml",
+      "scope": "CI probe output; not release, deployment or performance acceptance",
+      "binary": "<CI_CHECKOUT>/runtime-candidate/masc_tui.exe"
+    }
+  },
+  "execution_order": [
+    "baseline",
+    "candidate"
+  ],
+  "rows": [
+    {
+      "action": "arrow down",
+      "baseline": {
+        "samples_ms": [
+          0.42997,
+          0.318936
+        ],
+        "median_ms": 0.37445300000000004,
+        "min_ms": 0.318936,
+        "max_ms": 0.42997
+      },
+      "candidate": {
+        "samples_ms": [
+          0.499044,
+          0.240593
+        ],
+        "median_ms": 0.3698185,
+        "min_ms": 0.240593,
+        "max_ms": 0.499044
+      }
+    },
+    {
+      "action": "arrow up",
+      "baseline": {
+        "samples_ms": [
+          0.320229,
+          0.327625
+        ],
+        "median_ms": 0.32392699999999996,
+        "min_ms": 0.320229,
+        "max_ms": 0.327625
+      },
+      "candidate": {
+        "samples_ms": [
+          0.273414,
+          0.254938
+        ],
+        "median_ms": 0.26417599999999997,
+        "min_ms": 0.254938,
+        "max_ms": 0.273414
+      }
+    },
+    {
+      "action": "wheel down",
+      "baseline": {
+        "samples_ms": [
+          0.392547,
+          0.315436
+        ],
+        "median_ms": 0.3539915,
+        "min_ms": 0.315436,
+        "max_ms": 0.392547
+      },
+      "candidate": {
+        "samples_ms": [
+          0.290824,
+          0.23611
+        ],
+        "median_ms": 0.263467,
+        "min_ms": 0.23611,
+        "max_ms": 0.290824
+      }
+    },
+    {
+      "action": "wheel up",
+      "baseline": {
+        "samples_ms": [
+          0.331305,
+          0.312683
+        ],
+        "median_ms": 0.321994,
+        "min_ms": 0.312683,
+        "max_ms": 0.331305
+      },
+      "candidate": {
+        "samples_ms": [
+          0.248695,
+          0.20441
+        ],
+        "median_ms": 0.2265525,
+        "min_ms": 0.20441,
+        "max_ms": 0.248695
+      }
+    },
+    {
+      "action": "page down",
+      "baseline": {
+        "samples_ms": [
+          0.316579,
+          1.253917
+        ],
+        "median_ms": 0.785248,
+        "min_ms": 0.316579,
+        "max_ms": 1.253917
+      },
+      "candidate": {
+        "samples_ms": [
+          0.244737,
+          1.205564
+        ],
+        "median_ms": 0.7251505,
+        "min_ms": 0.244737,
+        "max_ms": 1.205564
+      }
+    },
+    {
+      "action": "page up",
+      "baseline": {
+        "samples_ms": [
+          0.275995,
+          0.253195
+        ],
+        "median_ms": 0.264595,
+        "min_ms": 0.253195,
+        "max_ms": 0.275995
+      },
+      "candidate": {
+        "samples_ms": [
+          0.242888,
+          0.21646
+        ],
+        "median_ms": 0.229674,
+        "min_ms": 0.21646,
+        "max_ms": 0.242888
+      }
+    },
+    {
+      "action": "detail key down",
+      "baseline": {
+        "samples_ms": [
+          1.276264,
+          0.804753
+        ],
+        "median_ms": 1.0405085,
+        "min_ms": 0.804753,
+        "max_ms": 1.276264
+      },
+      "candidate": {
+        "samples_ms": [
+          1.079258,
+          0.830989
+        ],
+        "median_ms": 0.9551235,
+        "min_ms": 0.830989,
+        "max_ms": 1.079258
+      }
+    },
+    {
+      "action": "detail key up",
+      "baseline": {
+        "samples_ms": [
+          1.113755,
+          0.816227
+        ],
+        "median_ms": 0.964991,
+        "min_ms": 0.816227,
+        "max_ms": 1.113755
+      },
+      "candidate": {
+        "samples_ms": [
+          0.966423,
+          0.8235
+        ],
+        "median_ms": 0.8949615,
+        "min_ms": 0.8235,
+        "max_ms": 0.966423
+      }
+    },
+    {
+      "action": "detail wheel down",
+      "baseline": {
+        "samples_ms": [
+          0.846856,
+          0.825082
+        ],
+        "median_ms": 0.835969,
+        "min_ms": 0.825082,
+        "max_ms": 0.846856
+      },
+      "candidate": {
+        "samples_ms": [
+          0.814246,
+          0.854821
+        ],
+        "median_ms": 0.8345335,
+        "min_ms": 0.814246,
+        "max_ms": 0.854821
+      }
+    },
+    {
+      "action": "detail wheel up",
+      "baseline": {
+        "samples_ms": [
+          0.803996,
+          0.798139
+        ],
+        "median_ms": 0.8010675,
+        "min_ms": 0.798139,
+        "max_ms": 0.803996
+      },
+      "candidate": {
+        "samples_ms": [
+          0.798254,
+          0.824487
+        ],
+        "median_ms": 0.8113705,
+        "min_ms": 0.798254,
+        "max_ms": 0.824487
+      }
+    }
+  ],
+  "goal_ms": 0.1,
+  "all_candidate_observations_below_goal": false,
+  "scope": "same runner, temporary fixtures, input to acknowledged PTY frame; includes observer and OS scheduling; no physical display or live server proof"
+}

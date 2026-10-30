@@ -1,0 +1,362 @@
+{
+  "operation_id": "kmsg-c4f87474bf5a9c9c9ab07ad6c2ad6c86",
+  "state": "Succeeded",
+  "outer_call_count": 13,
+  "outer_errors": 4,
+  "outer_result_bytes": 25153,
+  "composition_invocations": 1,
+  "successful_compositions": 0,
+  "compositions": [
+    {
+      "execution_id": "exec-1789238338567-0007",
+      "success": false,
+      "nodes": [
+        {
+          "node_id": "click",
+          "execution_id": "exec-1789238338564-0006",
+          "tool_name": "BrowserInteract",
+          "input": {
+            "lane": "live",
+            "action": "follow_link",
+            "clientId": "a93a5385-6faa-44ea-8bfc-e5761f2cfadf4",
+            "tabId": 1,
+            "documentId": "7f5d10a92e901baa5ace12d3ab48d099",
+            "nodeId": "n5",
+            "expectedUrl": "http://127.0.0.1:53404/index.html"
+          },
+          "schedule": {
+            "planned_index": 0,
+            "batch_index": 0,
+            "batch_size": 1,
+            "execution_mode": "serial"
+          },
+          "result": {
+            "effect_disposition": "proven_pre_effect",
+            "failure_class": "workflow_rejection",
+            "disposition": "failed",
+            "data": null,
+            "message": "invalid_client_id",
+            "tool_name": "masc_browser_interact",
+            "duration_ms": 0.02384185791015625
+          },
+          "tool_use_id": "composition:36:01a096ea-6404-7000-bc3c-9500f1bf1a68:41:exec-d4fd0f4f-f3f7-4cda-b91e-d834c8dbae65:5:click",
+          "failure_effect_disposition": "proven_pre_effect",
+          "deferred_kind": null,
+          "result_bytes": 17,
+          "truncated_to": null
+        }
+      ],
+      "effect_disposition": "proven_pre_effect",
+      "raw_suffix": "\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes."
+    }
+  ],
+  "direct_follow_receipts": [
+    {
+      "execution_id": "exec-1789238341838-0008",
+      "receipt": {
+        "clientId": "a93a5385-6faa-44ea-8bfc-e576f2cfadf4",
+        "tabId": 1,
+        "action": "follow_link",
+        "urlBefore": "http://127.0.0.1:53404/index.html",
+        "url": "http://127.0.0.1:53404/index.html",
+        "destinationUrl": "http://127.0.0.1:53404/alpha.html",
+        "navigationSource": {
+          "url": "http://127.0.0.1:53404/index.html",
+          "documentId": "7f5d10a92e901baa5ace12d3ab48d099"
+        },
+        "title": "Overview · Team Channels",
+        "scrollX": 0,
+        "scrollY": 0
+      }
+    },
+    {
+      "execution_id": "exec-1789238351280-000b",
+      "receipt": {
+        "clientId": "a93a5385-6faa-44ea-8bfc-e576f2cfadf4",
+        "tabId": 1,
+        "action": "follow_link",
+        "urlBefore": "http://127.0.0.1:53404/alpha.html",
+        "url": "http://127.0.0.1:53404/alpha.html",
+        "destinationUrl": "http://127.0.0.1:53404/beta.html",
+        "navigationSource": {
+          "url": "http://127.0.0.1:53404/alpha.html",
+          "documentId": "7e65fee094d93525fd472819105e1e02"
+        },
+        "title": "Alpha · Team Channels",
+        "scrollX": 0,
+        "scrollY": 0
+      }
+    },
+    {
+      "execution_id": "exec-1789238356318-000d",
+      "receipt": {
+        "clientId": "a93a5385-6faa-44ea-8bfc-e576f2cfadf4",
+        "tabId": 1,
+        "action": "follow_link",
+        "urlBefore": "http://127.0.0.1:53404/beta.html",
+        "url": "http://127.0.0.1:53404/beta.html",
+        "destinationUrl": "http://127.0.0.1:53404/gamma.html",
+        "navigationSource": {
+          "url": "http://127.0.0.1:53404/beta.html",
+          "documentId": "25004c78f1cafeb026e3534fa9c080e2"
+        },
+        "title": "Beta · Team Channels",
+        "scrollX": 0,
+        "scrollY": 0
+      }
+    }
+  ],
+  "wrong_client_inputs": [
+    {
+      "execution_id": "exec-1789238327539-0002",
+      "supplied": "a93a5385-6faa-44ea-8bfc-e5761f2cfadf4",
+      "observed": "a93a5385-6faa-44ea-8bfc-e576f2cfadf4",
+      "supplied_is_uuid": false
+    },
+    {
+      "execution_id": "exec-1789238332069-0004",
+      "supplied": "a93a5385-6faa-44ea-8bfc-e5761f2cfadf4",
+      "observed": "a93a5385-6faa-44ea-8bfc-e576f2cfadf4",
+      "supplied_is_uuid": false
+    },
+    {
+      "execution_id": "exec-1789238338567-0007",
+      "supplied": "a93a5385-6faa-44ea-8bfc-e5761f2cfadf4",
+      "observed": "a93a5385-6faa-44ea-8bfc-e576f2cfadf4",
+      "supplied_is_uuid": false
+    }
+  ],
+  "outer_calls": [
+    {
+      "execution_id": "exec-1789238324170-0001",
+      "tool_use_id": "exec-5b31f4f2-92de-47bf-a7d0-59e729190cef",
+      "tool": "keeper_skill",
+      "input": {
+        "identity": {
+          "source_id": "project-masc",
+          "package_id": "team-channels-fixture",
+          "name": "team-channels-fixture"
+        }
+      },
+      "success": true,
+      "output": "# Team Channels\n\nUse this instruction with browser-lanes for the Team Channels fixture only.\nThe Channels navigation contains ordinary same-tab links. Observe its link targets\nand reuse those targets within this site; do not infer paths from channel names.\nFor a Browser Lane observation in regions view, first read the selected region using BrowserRead mode=scene and its observed documentId/nodeId as scope. BrowserRead expectedUrl is supported only with scene or regions, never elements. A channel's main landmark is labelled with its channel name. Its article is the\nvisible message list. The sidebar is a navigation summary, not message evidence.\n\nCollect the requested channels' visible messages, sender, time, decision, open\nrequest, and message permalink. Check the channel heading and message content after\nnavigation. Preserve a small per-channel result before leaving it. Reuse observed\nsame-site links instead of reopening the channel index for every channel.\n\nA message author is not an assigned owner. Only report an owner when the message explicitly assigns that responsibility; otherwise say the owner is not specified. A mention must occur in a message and name the requested person. Distinguish older\nsuperseded decisions from current decisions. Derive shared work from the messages\nacross channels, with the per-channel sources. Do not invent a site API, token,\nconnector, or hidden history. Report the visible coverage and any missing channel.\n\nFor an observed live same-tab anchor, prefer the available keeper_compose_browser-live-click-content tool with its actual clientId/tabId/documentId/nodeId/expectedUrl. It follows the observed anchor and reads destination visible content in one ordered call. Do not infer the next document/node identity from the previous page; use links returned in the new scene. Use that result directly if it contains the requested channel heading and message evidence. Only read a fresh region map and scoped message content if this observed coverage is insufficient; still exclude navigation summary snippets from evidence. If the click node completed but the read failed, retry only BrowserRead on the same client/tab with its navigationSource and expectedUrl; do not replay the composition.\n",
+      "raw_result_bytes": 2246,
+      "declared_result_bytes": 2246
+    },
+    {
+      "execution_id": "exec-1789238327539-0002",
+      "tool_use_id": "exec-1b0e1e19-c844-4db9-b24d-b682762d0f72",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "live",
+        "tabId": 1,
+        "clientId": "a93a5385-6faa-44ea-8bfc-e5761f2cfadf4",
+        "expectedUrl": "http://127.0.0.1:53404/index.html",
+        "mode": "scene",
+        "scope": {
+          "documentId": "7f5d10a92e901baa5ace12d3ab48d099",
+          "nodeId": "n1"
+        },
+        "maxChars": 12000
+      },
+      "success": false,
+      "output": "invalid_client_id\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+      "raw_result_bytes": 219,
+      "declared_result_bytes": 17
+    },
+    {
+      "execution_id": "exec-1789238329240-0003",
+      "tool_use_id": "exec-e779d4b2-5063-4f7d-a8c1-cfd74bf15845",
+      "tool": "BrowserTabs",
+      "input": {
+        "lane": "live"
+      },
+      "success": true,
+      "output": "{\"tabs\":[{\"id\":1,\"index\":0,\"windowId\":3,\"active\":true,\"title\":\"Overview · Team Channels\",\"url\":\"http://127.0.0.1:53404/index.html\"}],\"clientId\":\"a93a5385-6faa-44ea-8bfc-e576f2cfadf4\"}",
+      "raw_result_bytes": 184,
+      "declared_result_bytes": 184
+    },
+    {
+      "execution_id": "exec-1789238332069-0004",
+      "tool_use_id": "exec-2516b5dc-bde4-4f10-b17f-ff66b02572b8",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "live",
+        "tabId": 1,
+        "clientId": "a93a5385-6faa-44ea-8bfc-e5761f2cfadf4",
+        "mode": "scene",
+        "maxChars": 12000
+      },
+      "success": false,
+      "output": "invalid_client_id\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+      "raw_result_bytes": 219,
+      "declared_result_bytes": 17
+    },
+    {
+      "execution_id": "exec-1789238334496-0005",
+      "tool_use_id": "exec-a9d84ec1-5e0c-436a-bdbd-aa6ff95051fb",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "live",
+        "tabId": 1,
+        "mode": "scene",
+        "maxChars": 12000
+      },
+      "success": true,
+      "output": "{\"tabId\":1,\"schema\":\"masc.browser.scene.v1\",\"documentId\":\"7f5d10a92e901baa5ace12d3ab48d099\",\"url\":\"http://127.0.0.1:53404/index.html\",\"title\":\"Overview · Team Channels\",\"viewport\":{\"width\":1366,\"height\":683,\"scrollX\":0,\"scrollY\":0},\"nodes\":[{\"kind\":\"text\",\"nodeId\":\"n4\",\"tag\":\"h2\",\"text\":\"Channels\",\"rects\":[{\"x\":39,\"y\":61.41667175292969,\"width\":121.55000305175781,\"height\":28}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"control\",\"nodeId\":\"n5\",\"tag\":\"a\",\"text\":\"Alpha\",\"rects\":[{\"x\":39,\"y\":111.83332824707031,\"width\":46.05000305175781,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/alpha.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"control\",\"nodeId\":\"n6\",\"tag\":\"a\",\"text\":\"Beta\",\"rects\":[{\"x\":39,\"y\":130.8333282470703,\"width\":37.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/beta.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"control\",\"nodeId\":\"n7\",\"tag\":\"a\",\"text\":\"Gamma\",\"rects\":[{\"x\":39,\"y\":149.8333282470703,\"width\":64.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/gamma.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"text\",\"nodeId\":\"n8\",\"tag\":\"h1\",\"text\":\"Team Channels\",\"rects\":[{\"x\":253,\"y\":63.116668701171875,\"width\":263.3999938964844,\"height\":37}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":36,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n9\",\"tag\":\"p\",\"text\":\"Open a channel to read its visible messages. The channel pages contain the current decisions.\",\"rects\":[{\"x\":253,\"y\":124.23333740234375,\"width\":755.7166748046875,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n10\",\"tag\":\"h2\",\"text\":\"Navigation summary\",\"rects\":[{\"x\":1125,\"y\":61.41667175292969,\"width\":138.03334045410156,\"height\":28},{\"x\":1125,\"y\":89.41667175292969,\"width\":120.05000305175781,\"height\":28}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n11\",\"tag\":\"p\",\"text\":\"Old cached snippet: @Mina ship Cedar on Friday.\",\"rects\":[{\"x\":1125,\"y\":139.8333282470703,\"width\":159.14999389648438,\"height\":19},{\"x\":1125,\"y\":158.8333282470703,\"width\":174.4166717529297,\"height\":19},{\"x\":1125,\"y\":177.8333282470703,\"width\":53.69999694824219,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n12\",\"tag\":\"p\",\"text\":\"This is not the channel message list.\",\"rects\":[{\"x\":1125,\"y\":214.8333282470703,\"width\":180.1666717529297,\"height\":19},{\"x\":1125,\"y\":233.8333282470703,\"width\":105.06666564941406,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"}],\"chars\":230,\"truncated\":false,\"scope\":null,\"view\":\"content\",\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"source\":\"live\",\"clientId\":\"a93a5385-6faa-44ea-8bfc-e576f2cfadf4\",\"elapsed_ms\":7.279791}",
+      "raw_result_bytes": 3463,
+      "declared_result_bytes": 3463
+    },
+    {
+      "execution_id": "exec-1789238338567-0007",
+      "tool_use_id": "exec-d4fd0f4f-f3f7-4cda-b91e-d834c8dbae65",
+      "tool": "keeper_compose_browser-live-click-content",
+      "input": {
+        "clientId": "a93a5385-6faa-44ea-8bfc-e5761f2cfadf4",
+        "tabId": 1,
+        "documentId": "7f5d10a92e901baa5ace12d3ab48d099",
+        "expectedUrl": "http://127.0.0.1:53404/index.html",
+        "nodeId": "n5"
+      },
+      "success": false,
+      "output": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789238338564-0006\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"a93a5385-6faa-44ea-8bfc-e5761f2cfadf4\",\"tabId\":1,\"documentId\":\"7f5d10a92e901baa5ace12d3ab48d099\",\"nodeId\":\"n5\",\"expectedUrl\":\"http://127.0.0.1:53404/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"invalid_client_id\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":0.02384185791015625},\"tool_use_id\":\"composition:36:01a096ea-6404-7000-bc3c-9500f1bf1a68:41:exec-d4fd0f4f-f3f7-4cda-b91e-d834c8dbae65:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":17,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789238338564-0006\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"a93a5385-6faa-44ea-8bfc-e5761f2cfadf4\",\"tabId\":1,\"documentId\":\"7f5d10a92e901baa5ace12d3ab48d099\",\"nodeId\":\"n5\",\"expectedUrl\":\"http://127.0.0.1:53404/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"invalid_client_id\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":0.02384185791015625},\"tool_use_id\":\"composition:36:01a096ea-6404-7000-bc3c-9500f1bf1a68:41:exec-d4fd0f4f-f3f7-4cda-b91e-d834c8dbae65:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":17,\"truncated_to\":null}]}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+      "raw_result_bytes": 2097,
+      "declared_result_bytes": 2097
+    },
+    {
+      "execution_id": "exec-1789238341838-0008",
+      "tool_use_id": "exec-1fa9a27e-f02b-40c9-894a-6ab4e043e481",
+      "tool": "BrowserInteract",
+      "input": {
+        "lane": "live",
+        "action": "follow_link",
+        "tabId": 1,
+        "documentId": "7f5d10a92e901baa5ace12d3ab48d099",
+        "nodeId": "n5",
+        "expectedUrl": "http://127.0.0.1:53404/index.html"
+      },
+      "success": true,
+      "output": "{\"clientId\":\"a93a5385-6faa-44ea-8bfc-e576f2cfadf4\",\"tabId\":1,\"action\":\"follow_link\",\"urlBefore\":\"http://127.0.0.1:53404/index.html\",\"url\":\"http://127.0.0.1:53404/index.html\",\"destinationUrl\":\"http://127.0.0.1:53404/alpha.html\",\"navigationSource\":{\"url\":\"http://127.0.0.1:53404/index.html\",\"documentId\":\"7f5d10a92e901baa5ace12d3ab48d099\"},\"title\":\"Overview · Team Channels\",\"scrollX\":0,\"scrollY\":0}",
+      "raw_result_bytes": 398,
+      "declared_result_bytes": 398
+    },
+    {
+      "execution_id": "exec-1789238344903-0009",
+      "tool_use_id": "exec-34aea71f-6d00-4fdb-8aab-a6a6031b98eb",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "live",
+        "tabId": 1,
+        "mode": "text",
+        "maxChars": 12000,
+        "navigationSource": {
+          "url": "http://127.0.0.1:53404/index.html",
+          "documentId": "7f5d10a92e901baa5ace12d3ab48d099"
+        }
+      },
+      "success": false,
+      "output": "expectedUrl supports top-document scene or regions only\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+      "raw_result_bytes": 257,
+      "declared_result_bytes": 55
+    },
+    {
+      "execution_id": "exec-1789238347738-000a",
+      "tool_use_id": "exec-b346e341-5f71-4245-8d11-4edab8f6f6c3",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "live",
+        "tabId": 1,
+        "mode": "scene",
+        "maxChars": 20000,
+        "navigationSource": {
+          "url": "http://127.0.0.1:53404/index.html",
+          "documentId": "7f5d10a92e901baa5ace12d3ab48d099"
+        }
+      },
+      "success": true,
+      "output": "{\"tabId\":1,\"schema\":\"masc.browser.scene.v1\",\"documentId\":\"7e65fee094d93525fd472819105e1e02\",\"url\":\"http://127.0.0.1:53404/alpha.html\",\"title\":\"Alpha · Team Channels\",\"viewport\":{\"width\":1366,\"height\":683,\"scrollX\":0,\"scrollY\":0},\"nodes\":[{\"kind\":\"text\",\"nodeId\":\"n1\",\"tag\":\"h2\",\"text\":\"Channels\",\"rects\":[{\"x\":39,\"y\":61.41667175292969,\"width\":121.55000305175781,\"height\":28}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"control\",\"nodeId\":\"n2\",\"tag\":\"a\",\"text\":\"Alpha\",\"rects\":[{\"x\":39,\"y\":111.83332824707031,\"width\":46.05000305175781,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/alpha.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"control\",\"nodeId\":\"n3\",\"tag\":\"a\",\"text\":\"Beta\",\"rects\":[{\"x\":39,\"y\":130.8333282470703,\"width\":37.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/beta.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"control\",\"nodeId\":\"n4\",\"tag\":\"a\",\"text\":\"Gamma\",\"rects\":[{\"x\":39,\"y\":149.8333282470703,\"width\":64.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/gamma.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"text\",\"nodeId\":\"n5\",\"tag\":\"h1\",\"text\":\"Alpha channel\",\"rects\":[{\"x\":253,\"y\":63.116668701171875,\"width\":245.98333740234375,\"height\":37}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":36,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n6\",\"tag\":\"strong\",\"text\":\"Mina\",\"rects\":[{\"x\":253,\"y\":137.23333740234375,\"width\":41.01666259765625,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n7\",\"tag\":\"time\",\"text\":\"2026-09-12 09:00\",\"rects\":[{\"x\":299.01666259765625,\"y\":140.23333740234375,\"width\":110.5,\"height\":15}],\"sourceContext\":null,\"color\":\"rgb(82, 96, 109)\",\"fontSize\":14,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n8\",\"tag\":\"p\",\"text\":\"Superseded plan: ship Cedar on Friday.\",\"rects\":[{\"x\":253,\"y\":174.23333740234375,\"width\":316.98333740234375,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"control\",\"nodeId\":\"n9\",\"tag\":\"a\",\"text\":\"Message link\",\"rects\":[{\"x\":253,\"y\":211.23333740234375,\"width\":105.08332824707031,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/alpha.html#a1\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"text\",\"nodeId\":\"n10\",\"tag\":\"strong\",\"text\":\"Hana\",\"rects\":[{\"x\":253,\"y\":255.23333740234375,\"width\":44.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n11\",\"tag\":\"time\",\"text\":\"2026-09-12 10:00\",\"rects\":[{\"x\":302.0333251953125,\"y\":258.23333740234375,\"width\":110.5,\"height\":15}],\"sourceContext\":null,\"color\":\"rgb(82, 96, 109)\",\"fontSize\":14,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n12\",\"tag\":\"p\",\"text\":\"Current decision: ship Cedar Tuesday after accessibility approval. @Mina please approve the accessibility checklist Monday. Shared dependency: schema v4.\",\"rects\":[{\"x\":253,\"y\":292.23333740234375,\"width\":743.25,\"height\":19},{\"x\":253,\"y\":311.23333740234375,\"width\":511.08331298828125,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"control\",\"nodeId\":\"n13\",\"tag\":\"a\",\"text\":\"Message link\",\"rects\":[{\"x\":253,\"y\":348.23333740234375,\"width\":105.08332824707031,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/alpha.html#a2\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"text\",\"nodeId\":\"n14\",\"tag\":\"p\",\"text\":\"Coverage: currently displayed messages only.\",\"rects\":[{\"x\":253,\"y\":385.23333740234375,\"width\":366.98333740234375,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n15\",\"tag\":\"h2\",\"text\":\"Navigation summary\",\"rects\":[{\"x\":1125,\"y\":61.41667175292969,\"width\":138.03334045410156,\"height\":28},{\"x\":1125,\"y\":89.41667175292969,\"width\":120.05000305175781,\"height\":28}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n16\",\"tag\":\"p\",\"text\":\"Old cached snippet: @Mina ship Cedar on Friday.\",\"rects\":[{\"x\":1125,\"y\":139.8333282470703,\"width\":159.14999389648438,\"height\":19},{\"x\":1125,\"y\":158.8333282470703,\"width\":174.4166717529297,\"height\":19},{\"x\":1125,\"y\":177.8333282470703,\"width\":53.69999694824219,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n17\",\"tag\":\"p\",\"text\":\"This is not the channel message list.\",\"rects\":[{\"x\":1125,\"y\":214.8333282470703,\"width\":180.1666717529297,\"height\":19},{\"x\":1125,\"y\":233.8333282470703,\"width\":105.06666564941406,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"}],\"chars\":436,\"truncated\":false,\"scope\":null,\"view\":\"content\",\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"source\":\"live\",\"clientId\":\"a93a5385-6faa-44ea-8bfc-e576f2cfadf4\",\"elapsed_ms\":7.0525}",
+      "raw_result_bytes": 5860,
+      "declared_result_bytes": 5860
+    },
+    {
+      "execution_id": "exec-1789238351280-000b",
+      "tool_use_id": "exec-b171e476-5f4c-47cc-a613-504a9a29b164",
+      "tool": "BrowserInteract",
+      "input": {
+        "lane": "live",
+        "action": "follow_link",
+        "tabId": 1,
+        "documentId": "7e65fee094d93525fd472819105e1e02",
+        "nodeId": "n3",
+        "expectedUrl": "http://127.0.0.1:53404/alpha.html"
+      },
+      "success": true,
+      "output": "{\"clientId\":\"a93a5385-6faa-44ea-8bfc-e576f2cfadf4\",\"tabId\":1,\"action\":\"follow_link\",\"urlBefore\":\"http://127.0.0.1:53404/alpha.html\",\"url\":\"http://127.0.0.1:53404/alpha.html\",\"destinationUrl\":\"http://127.0.0.1:53404/beta.html\",\"navigationSource\":{\"url\":\"http://127.0.0.1:53404/alpha.html\",\"documentId\":\"7e65fee094d93525fd472819105e1e02\"},\"title\":\"Alpha · Team Channels\",\"scrollX\":0,\"scrollY\":0}",
+      "raw_result_bytes": 394,
+      "declared_result_bytes": 394
+    },
+    {
+      "execution_id": "exec-1789238353697-000c",
+      "tool_use_id": "exec-ad56c6b3-9992-42bc-8ee8-f21717cb60f2",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "live",
+        "tabId": 1,
+        "mode": "scene",
+        "maxChars": 20000,
+        "navigationSource": {
+          "url": "http://127.0.0.1:53404/alpha.html",
+          "documentId": "7e65fee094d93525fd472819105e1e02"
+        }
+      },
+      "success": true,
+      "output": "{\"tabId\":1,\"schema\":\"masc.browser.scene.v1\",\"documentId\":\"25004c78f1cafeb026e3534fa9c080e2\",\"url\":\"http://127.0.0.1:53404/beta.html\",\"title\":\"Beta · Team Channels\",\"viewport\":{\"width\":1366,\"height\":683,\"scrollX\":0,\"scrollY\":0},\"nodes\":[{\"kind\":\"text\",\"nodeId\":\"n1\",\"tag\":\"h2\",\"text\":\"Channels\",\"rects\":[{\"x\":39,\"y\":61.41667175292969,\"width\":121.55000305175781,\"height\":28}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"control\",\"nodeId\":\"n2\",\"tag\":\"a\",\"text\":\"Alpha\",\"rects\":[{\"x\":39,\"y\":111.83332824707031,\"width\":46.05000305175781,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/alpha.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"control\",\"nodeId\":\"n3\",\"tag\":\"a\",\"text\":\"Beta\",\"rects\":[{\"x\":39,\"y\":130.8333282470703,\"width\":37.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/beta.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"control\",\"nodeId\":\"n4\",\"tag\":\"a\",\"text\":\"Gamma\",\"rects\":[{\"x\":39,\"y\":149.8333282470703,\"width\":64.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/gamma.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"text\",\"nodeId\":\"n5\",\"tag\":\"h1\",\"text\":\"Beta channel\",\"rects\":[{\"x\":253,\"y\":63.116668701171875,\"width\":224.01666259765625,\"height\":37}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":36,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n6\",\"tag\":\"strong\",\"text\":\"Joon\",\"rects\":[{\"x\":253,\"y\":137.23333740234375,\"width\":43.01666259765625,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n7\",\"tag\":\"time\",\"text\":\"2026-09-12 09:30\",\"rects\":[{\"x\":301.01666259765625,\"y\":140.23333740234375,\"width\":110.5,\"height\":15}],\"sourceContext\":null,\"color\":\"rgb(82, 96, 109)\",\"fontSize\":14,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n8\",\"tag\":\"p\",\"text\":\"Current decision: finish schema v4 migration Monday for Cedar. Owner: Joon. @Mina please confirm the client payload before migration starts.\",\"rects\":[{\"x\":253,\"y\":174.23333740234375,\"width\":803.9166870117188,\"height\":19},{\"x\":253,\"y\":193.23333740234375,\"width\":329.29998779296875,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"control\",\"nodeId\":\"n9\",\"tag\":\"a\",\"text\":\"Message link\",\"rects\":[{\"x\":253,\"y\":230.23333740234375,\"width\":105.08332824707031,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/beta.html#b1\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"text\",\"nodeId\":\"n10\",\"tag\":\"p\",\"text\":\"Coverage: currently displayed messages only.\",\"rects\":[{\"x\":253,\"y\":267.23333740234375,\"width\":366.98333740234375,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n11\",\"tag\":\"h2\",\"text\":\"Navigation summary\",\"rects\":[{\"x\":1125,\"y\":61.41667175292969,\"width\":138.03334045410156,\"height\":28},{\"x\":1125,\"y\":89.41667175292969,\"width\":120.05000305175781,\"height\":28}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n12\",\"tag\":\"p\",\"text\":\"Old cached snippet: @Mina ship Cedar on Friday.\",\"rects\":[{\"x\":1125,\"y\":139.8333282470703,\"width\":159.14999389648438,\"height\":19},{\"x\":1125,\"y\":158.8333282470703,\"width\":174.4166717529297,\"height\":19},{\"x\":1125,\"y\":177.8333282470703,\"width\":53.69999694824219,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n13\",\"tag\":\"p\",\"text\":\"This is not the channel message list.\",\"rects\":[{\"x\":1125,\"y\":214.8333282470703,\"width\":180.1666717529297,\"height\":19},{\"x\":1125,\"y\":233.8333282470703,\"width\":105.06666564941406,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"}],\"chars\":352,\"truncated\":false,\"scope\":null,\"view\":\"content\",\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"source\":\"live\",\"clientId\":\"a93a5385-6faa-44ea-8bfc-e576f2cfadf4\",\"elapsed_ms\":4.95275}",
+      "raw_result_bytes": 4717,
+      "declared_result_bytes": 4717
+    },
+    {
+      "execution_id": "exec-1789238356318-000d",
+      "tool_use_id": "exec-9457977d-3cde-42fa-9f2c-48afe4fc47c7",
+      "tool": "BrowserInteract",
+      "input": {
+        "lane": "live",
+        "action": "follow_link",
+        "tabId": 1,
+        "documentId": "25004c78f1cafeb026e3534fa9c080e2",
+        "nodeId": "n4",
+        "expectedUrl": "http://127.0.0.1:53404/beta.html"
+      },
+      "success": true,
+      "output": "{\"clientId\":\"a93a5385-6faa-44ea-8bfc-e576f2cfadf4\",\"tabId\":1,\"action\":\"follow_link\",\"urlBefore\":\"http://127.0.0.1:53404/beta.html\",\"url\":\"http://127.0.0.1:53404/beta.html\",\"destinationUrl\":\"http://127.0.0.1:53404/gamma.html\",\"navigationSource\":{\"url\":\"http://127.0.0.1:53404/beta.html\",\"documentId\":\"25004c78f1cafeb026e3534fa9c080e2\"},\"title\":\"Beta · Team Channels\",\"scrollX\":0,\"scrollY\":0}",
+      "raw_result_bytes": 391,
+      "declared_result_bytes": 391
+    },
+    {
+      "execution_id": "exec-1789238359028-000e",
+      "tool_use_id": "exec-1e89eb31-e9e8-4d72-83c4-2d3ec1b8eff9",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "live",
+        "tabId": 1,
+        "mode": "scene",
+        "maxChars": 20000,
+        "navigationSource": {
+          "url": "http://127.0.0.1:53404/beta.html",
+          "documentId": "25004c78f1cafeb026e3534fa9c080e2"
+        }
+      },
+      "success": true,
+      "output": "{\"tabId\":1,\"schema\":\"masc.browser.scene.v1\",\"documentId\":\"713565c33fdcec83ce8371980ad23d5d\",\"url\":\"http://127.0.0.1:53404/gamma.html\",\"title\":\"Gamma · Team Channels\",\"viewport\":{\"width\":1366,\"height\":683,\"scrollX\":0,\"scrollY\":0},\"nodes\":[{\"kind\":\"text\",\"nodeId\":\"n1\",\"tag\":\"h2\",\"text\":\"Channels\",\"rects\":[{\"x\":39,\"y\":61.41667175292969,\"width\":121.55000305175781,\"height\":28}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"control\",\"nodeId\":\"n2\",\"tag\":\"a\",\"text\":\"Alpha\",\"rects\":[{\"x\":39,\"y\":111.83332824707031,\"width\":46.05000305175781,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/alpha.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"control\",\"nodeId\":\"n3\",\"tag\":\"a\",\"text\":\"Beta\",\"rects\":[{\"x\":39,\"y\":130.8333282470703,\"width\":37.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/beta.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"control\",\"nodeId\":\"n4\",\"tag\":\"a\",\"text\":\"Gamma\",\"rects\":[{\"x\":39,\"y\":149.8333282470703,\"width\":64.03334045410156,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/gamma.html\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"text\",\"nodeId\":\"n5\",\"tag\":\"h1\",\"text\":\"Gamma channel\",\"rects\":[{\"x\":253,\"y\":63.116668701171875,\"width\":278.066650390625,\"height\":37}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":36,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n6\",\"tag\":\"strong\",\"text\":\"Sora\",\"rects\":[{\"x\":253,\"y\":137.23333740234375,\"width\":40.01666259765625,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n7\",\"tag\":\"time\",\"text\":\"2026-09-12 10:15\",\"rects\":[{\"x\":298.01666259765625,\"y\":140.23333740234375,\"width\":110.5,\"height\":15}],\"sourceContext\":null,\"color\":\"rgb(82, 96, 109)\",\"fontSize\":14,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n8\",\"tag\":\"p\",\"text\":\"Current decision: run Cedar end-to-end QA Wednesday against schema v4. Owner: Sora. No additional request for Mina in this channel.\",\"rects\":[{\"x\":253,\"y\":174.23333740234375,\"width\":743.2999877929688,\"height\":19},{\"x\":253,\"y\":193.23333740234375,\"width\":337.33331298828125,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"control\",\"nodeId\":\"n9\",\"tag\":\"a\",\"text\":\"Message link\",\"rects\":[{\"x\":253,\"y\":230.23333740234375,\"width\":105.08332824707031,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(22, 82, 166)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\",\"href\":\"http://127.0.0.1:53404/gamma.html#g1\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"clickable\":true},{\"kind\":\"text\",\"nodeId\":\"n10\",\"tag\":\"p\",\"text\":\"Coverage: currently displayed messages only.\",\"rects\":[{\"x\":253,\"y\":267.23333740234375,\"width\":366.98333740234375,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n11\",\"tag\":\"h2\",\"text\":\"Navigation summary\",\"rects\":[{\"x\":1125,\"y\":61.41667175292969,\"width\":138.03334045410156,\"height\":28},{\"x\":1125,\"y\":89.41667175292969,\"width\":120.05000305175781,\"height\":28}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n12\",\"tag\":\"p\",\"text\":\"Old cached snippet: @Mina ship Cedar on Friday.\",\"rects\":[{\"x\":1125,\"y\":139.8333282470703,\"width\":159.14999389648438,\"height\":19},{\"x\":1125,\"y\":158.8333282470703,\"width\":174.4166717529297,\"height\":19},{\"x\":1125,\"y\":177.8333282470703,\"width\":53.69999694824219,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"},{\"kind\":\"text\",\"nodeId\":\"n13\",\"tag\":\"p\",\"text\":\"This is not the channel message list.\",\"rects\":[{\"x\":1125,\"y\":214.8333282470703,\"width\":180.1666717529297,\"height\":19},{\"x\":1125,\"y\":233.8333282470703,\"width\":105.06666564941406,\"height\":19}],\"sourceContext\":null,\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"whiteSpace\":\"normal\"}],\"chars\":344,\"truncated\":false,\"scope\":null,\"view\":\"content\",\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"source\":\"live\",\"clientId\":\"a93a5385-6faa-44ea-8bfc-e576f2cfadf4\",\"elapsed_ms\":5.582}",
+      "raw_result_bytes": 4708,
+      "declared_result_bytes": 4708
+    }
+  ],
+  "answer": "확인한 현재 결정과 작업은 다음과 같습니다.\n\n- **Alpha**\n  - 현재 결정: Cedar를 **접근성 승인 후 화요일에 배포**\n  - 담당자: 명시되지 않음\n  - Mina 요청: 월요일까지 접근성 체크리스트 승인 요청\n  - [근거 메시지](http://127.0.0.1:53404/alpha.html#a2)\n  - 참고: 금요일 배포안은 이전 결정으로 대체됨([이전 메시지](http://127.0.0.1:53404/alpha.html#a1))\n\n- **Beta**\n  - 현재 결정: Cedar의 **schema v4 마이그레이션을 월요일 완료**\n  - 담당자: **Joon**\n  - Mina 요청: 마이그레이션 전 클라이언트 payload 확인 요청\n  - [근거 메시지](http://127.0.0.1:53404/beta.html#b1)\n\n- **Gamma**\n  - 현재 결정: schema v4 기준 Cedar **E2E QA를 수요일 실행**\n  - 담당자: **Sora**\n  - Mina 요청: 추가 요청 없음\n  - [근거 메시지](http://127.0.0.1:53404/gamma.html#g1)\n\n세 채널의 공통 작업은 **Cedar 릴리스 진행을 위해 schema v4를 공통 기준으로 삼고**, 접근성 승인·payload 확인·마이그레이션·E2E QA를 순서대로 완료하는 것입니다.\n\n읽은 범위: Team Channels의 Alpha, Beta, Gamma 각 채널 페이지에서 현재 화면에 표시된 메시지 목록을 모두 읽었습니다. Alpha의 이전 결정도 함께 확인해 현재 결정과 구분했습니다. 우측 네비게이션의 “Old cached snippet”은 메시지 목록이 아니므로 근거에서 제외했습니다. 각 채널 페이지 자체가 “currently displayed messages only”라고 표시하므로, 숨겨진 과거 메시지나 추가 페이지까지 확인한 것은 아닙니다.",
+  "observed_elapsed_seconds": 55.264,
+  "byte_count_mismatches": [
+    "exec-1789238327539-0002",
+    "exec-1789238332069-0004",
+    "exec-1789238344903-0009"
+  ],
+  "scope": "Actual live extension/native-host experiment. Keeper operation success is separate from composition success; raw failure suffixes and byte discrepancies are preserved."
+}

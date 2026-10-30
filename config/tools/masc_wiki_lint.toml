@@ -1,0 +1,29 @@
+name = "masc_wiki_lint"
+description = """
+Check the wiki and report what is wrong with it, without changing anything.
+
+Reads every page and returns counts and a list of findings: broken_link (a [text](page.md) link to a page that does not exist), unsupported_link (a link shape the check does not follow: an anchor, a relative path, a [[wikilink]]), orphan (no page links to it), orphan_unconfirmed (no readable page links to it, but a page whose header does not read could), missing_sources (no ## Sources section with a repo:, board:, artifact: or url: line), hearsay_only (only said: lines), unreadable_page (its header does not read, with the reason), revision_log_gap (log.md records an r<N> the page never reached; log_revision and page_revision carry both numbers), revision_log_hole (the log skips an r<N> below the highest one it records for the page; missing carries the skipped number -- a line that reached the page and never reached the log; no hole is reported at all when the log has any dropped line, and the column starts at the lowest revision the log records for the page). It reads log.md too and returns log_unknown_action and log_unreadable_line, the counts of log lines whose action word it does not know and of log lines it cannot read; revision_log_hole_suppressed is true when either count is above zero, which switches the revision_log_hole check off, so an empty revision_log_hole list is not read as \"no holes\". Fix log.md by hand to switch the check back on. Writes nothing and calls no model. Findings are sorted by page and carry the line number; when the list is long the response ends with a next_cursor to pass back as cursor."""
+
+# Held back from the request until the model asks for it by name.
+defer_loading = true
+
+[[params]]
+name = "page"
+type = "string"
+description = "Only findings about this page (the page name, without .md). The whole wiki is still read, because an orphan is decided from every page."
+
+[[params]]
+name = "kind"
+type = "string"
+description = "Only findings of this kind."
+enum = ["broken_link", "unsupported_link", "orphan", "orphan_unconfirmed", "missing_sources", "hearsay_only", "unreadable_page", "revision_log_gap", "revision_log_hole"]
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "How many findings to return at most (default 50, at most 200). The response also stops early when it reaches about 12 KB."
+
+[[params]]
+name = "cursor"
+type = "string"
+description = "The next_cursor of the previous response, to read the findings after it."

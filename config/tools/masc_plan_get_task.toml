@@ -1,0 +1,8 @@
+defer_loading = true
+name = "masc_plan_get_task"
+title = "Get Current Task"
+description = """
+Get the task_id you're currently working on (session-scoped). Use when \
+resuming work after a context switch or verifying your current assignment. \
+Auto-cleared on session end."""
+additional_properties = false

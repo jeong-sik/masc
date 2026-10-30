@@ -1,0 +1,35 @@
+name = "masc_dos_load"
+description = """
+Boot a DOS program on the shared machine.
+
+Omit program to list the inventory. A name is an inventory entry, never a \
+host path. A directory boots its executable with the files beside it \
+mounted; boot names the executable when there are several. Runs until the \
+program waits for a key or the boot budget ends, and returns the \
+observation (see masc_dos_screen) -- read it to see where it got.
+
+A new machine's first save copies the autosave to autosave-prev, replacing \
+what autosave-prev held. When both are on disk the load is refused and names \
+them: what autosave-prev holds would be lost, and the autosave survives as \
+autosave-prev. Restore autosave-prev first to keep it, or pass \
+discard_previous_autosave=true to let it go. With no autosave-prev nothing \
+is lost and no flag is needed."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "program"
+type = "string"
+description = "Name in the programs inventory. Omit to list what is there."
+
+[[params]]
+name = "boot"
+type = "string"
+description = "Executable inside a game directory, e.g. KOEI.COM. A file name, not a path."
+
+[[params]]
+name = "discard_previous_autosave"
+type = "boolean"
+description = "Set true only after a refused load showed what autosave-prev holds and you do not need it. The new machine's first save then replaces it. Default false."
+default = false

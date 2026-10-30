@@ -1,0 +1,11 @@
+[
+  "heartbeat_failures",
+  "turn_failures",
+  "runtime_exhausted",
+  "provider_runtime_error",
+  "official_client_recovery_required",
+  "turn_configuration_error",
+  "fiber_unresolved",
+  "exception",
+  "operator_interrupt"
+]

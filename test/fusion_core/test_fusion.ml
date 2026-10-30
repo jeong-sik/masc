@@ -1,0 +1,2145 @@
+(* Standalone alcotest for the pure fusion core (RFC-0252 §6/§9, RFC-0252-A).
+   Proves: deterministic gate branches, TOML config validation + heterogeneous
+   panel-group parsing + legacy flat desugar (byte-identity), depth guard, and
+   the pure judge-arg derivations that keep a single-group preset behaving as
+   today. *)
+
+open Fusion_types
+
+(* alcotest testable over the derived show/eq of gate_decision. *)
+let gate = Alcotest.testable pp_gate_decision equal_gate_decision
+
+(* alcotest testable over a preset — the @@deriving eq is the byte-identity
+   contract for the legacy-flat == single-group golden. *)
+let preset_t = Alcotest.testable Fusion_policy.pp_preset Fusion_policy.equal_preset
+
+let base_group : Fusion_policy.panel_group =
+  { Fusion_policy.models = [ "a"; "b"; "c" ]
+  ; label = ""
+  ; system_prompt = "panel"
+  ; web_tools = false
+  ; max_output_tokens = None
+  ; timeout_s = None
+  }
+
+(* RFC-0280: presets는 [Validated_preset.t]라 private — of_preset로만 생성. 테스트
+   리터럴은 유효하므로 get_ok (실패하면 테스트 setup 버그). *)
+let validated (p : Fusion_policy.preset) : Fusion_policy.Validated_preset.t =
+  match Fusion_policy.Validated_preset.of_preset p with
+  | Ok vp -> vp
+  | Error _ -> Alcotest.fail "test setup: preset literal failed validation"
+
+(* validated preset에서 raw preset 필드를 읽는 coercion 단축. *)
+let raw = Fusion_policy.Validated_preset.preset
+
+let base_policy : Fusion_policy.t =
+  { Fusion_policy.enabled = true
+  ; default_preset = "trio"
+  ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
+  ; presets =
+      [ validated
+          { Fusion_policy.name = "trio"
+          ; panels = [ base_group ]
+          ; judge = "a"
+          ; judge_system_prompt = "judge"
+          ; judge_max_output_tokens = None
+  ; judge_timeout_s = None
+          ; judges = []
+          ; min_answered = Fusion_policy.default_min_answered
+          }
+      ]
+  }
+
+let req ?(preset = "trio") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool_call)
+    ?(web_tools = false) () : fusion_request =
+  { run_id = "r1"
+  ; keeper = "k"
+  ; prompt = "p"
+  ; preset
+  ; web_tools
+  ; roster = preset_roster
+  ; depth
+  ; trigger
+  }
+
+let decide ?(policy = base_policy) r = Fusion_policy.decide ~policy r
+
+(* --- gate branches (RFC-0252 §6) --- *)
+
+let test_disabled () =
+  let policy = { base_policy with Fusion_policy.enabled = false } in
+  Alcotest.check gate "disabled" (Deny Disabled) (decide ~policy (req ()))
+
+let test_unknown_preset () =
+  Alcotest.check gate "unknown preset"
+    (Deny (Preset_unknown "nope"))
+    (decide (req ~preset:"nope" ()))
+
+let test_depth_nested () =
+  Alcotest.check gate "nested depth"
+    (Deny Depth_exceeded)
+    (decide (req ~depth:Fusion_depth.Nested ()))
+
+(* trigger는 발동 이유 라벨일 뿐 — 게이트는 종류로 거부하지 않는다(심의 가치는
+   키퍼/LLM이 판단). 구조(enabled/preset/depth)만 통과하면 어떤 trigger든 Allow. *)
+let test_low_confidence_trigger_allowed () =
+  let r = req ~trigger:Low_confidence () in
+  Alcotest.check gate "low_confidence label -> allow" (Allow r) (decide r)
+
+let test_high_stakes_trigger_allowed () =
+  let r = req ~trigger:(High_stakes "anything") () in
+  Alcotest.check gate "high_stakes label -> allow" (Allow r) (decide r)
+
+let test_allow () =
+  let r = req () in
+  Alcotest.check gate "all pass -> allow" (Allow r) (decide r)
+
+(* --- config (RFC-0252 §9, RFC-0252-A) --- *)
+
+let parse s = Otoml.Parser.from_string s
+
+let test_config_absent () =
+  match Fusion_config.of_toml (parse "foo = 1") with
+  | Ok p -> Alcotest.(check bool) "absent [fusion] -> disabled" false p.Fusion_policy.enabled
+  | Error _ -> Alcotest.fail "expected Ok disabled"
+
+let valid_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "trio"
+staged_judge_group_size = 3
+[fusion.presets.trio]
+web_tools = false
+panel = ["a", "b", "c"]
+judge = "j"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "synthesize the panel"
+|}
+
+let test_config_valid () =
+  match Fusion_config.of_toml (parse valid_toml) with
+  | Ok p ->
+    Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
+    Alcotest.(check int) "staged judge group size" 3
+      p.Fusion_policy.staged_judge_group_size;
+    Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       Alcotest.(check int) "one group (legacy desugar)" 1
+         (List.length preset.Fusion_policy.panels);
+       Alcotest.(check int) "three models total" 3
+         (List.length (Fusion_policy.preset_models preset));
+       (match preset.Fusion_policy.panels with
+        | [ g ] ->
+          Alcotest.(check bool) "web_tools" false g.Fusion_policy.web_tools;
+          Alcotest.(check (option int)) "max_output_tokens default" None
+            g.Fusion_policy.max_output_tokens
+        | _ -> Alcotest.fail "expected one group")
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* JoJ-capable preset: [[fusion.presets.X.judges]] array-of-tables 파싱 경로 (RFC-0283).
+   config/runtime.toml [fusion.presets.quorum] 의 구조를 미러한다(모델 id는 placeholder).
+   topology=judge_of_judges는 orchestrator 런타임에서 judges >= 2 를 요구하므로
+   (fusion_orchestrator.run_judge_of_judges), JoJ를 키퍼가 실제로 쓰려면 judges>=2 preset이
+   shipped config에 있어야 한다. 이 테스트는 그 preset이 의존하는 TOML array-of-tables 파싱
+   (Fusion_config.parse_judge_spec)을 end-to-end로 고정한다 — 기존 Validated_preset 테스트는
+   OCaml-구성 judges만 다뤄 이 파싱 경로를 덮지 않는다. *)
+let joj_preset_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "quorum"
+[fusion.presets.quorum]
+panel = ["pa", "pb", "pc"]
+judge = "meta-reducer"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "reconcile the first-judge syntheses"
+
+[[fusion.presets.quorum.judges]]
+model = "judge-evidence"
+label = "evidence"
+system_prompt = "judge through an evidence lens"
+
+[[fusion.presets.quorum.judges]]
+model = "judge-coverage"
+label = "coverage"
+system_prompt = "judge through a coverage lens"
+|}
+
+let test_config_joj_preset_parses () =
+  match Fusion_config.of_toml (parse joj_preset_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       let judges = preset.Fusion_policy.judges in
+       Alcotest.(check int) "two first judges (JoJ requires >= 2)" 2
+         (List.length judges);
+       Alcotest.(check bool) "meta judge set" true
+         (String.trim preset.Fusion_policy.judge <> "");
+       Alcotest.(check (list string))
+         "judge models parsed from [[...judges]] array-of-tables"
+         [ "judge-evidence"; "judge-coverage" ]
+         (List.map (fun (j : Fusion_policy.judge_spec) -> j.Fusion_policy.jmodel) judges);
+       Alcotest.(check (list string)) "distinct judge lenses parsed"
+         [ "evidence"; "coverage" ]
+         (List.map (fun (j : Fusion_policy.judge_spec) -> j.Fusion_policy.jlabel) judges)
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "JoJ preset must parse+validate, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* --- byte-identity: legacy flat preset == single explicit panel group --- *)
+
+let golden_flat_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+web_tools = true
+max_output_tokens_per_panel = 2048
+panel = ["a", "b", "c"]
+judge = "j"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "synthesize"
+judge_max_output_tokens = 1024
+|}
+
+let golden_single_group_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+judge = "j"
+judge_system_prompt = "synthesize"
+judge_max_output_tokens = 1024
+[[fusion.presets.p.panels]]
+panel = ["a", "b", "c"]
+panel_system_prompt = "answer independently"
+web_tools = true
+max_output_tokens_per_panel = 2048
+|}
+
+let test_config_panels_golden () =
+  match
+    Fusion_config.of_toml (parse golden_flat_toml),
+    Fusion_config.of_toml (parse golden_single_group_toml)
+  with
+  | Ok flat, Ok grouped ->
+    Alcotest.check preset_t "length-1 panels-list == flat desugar"
+      (raw (List.hd flat.Fusion_policy.presets))
+      (raw (List.hd grouped.Fusion_policy.presets));
+    (* legacy(라벨 없음) 패널 정체성 = model 그대로 → 정체성 축도 byte-identical
+       (RFC-0278). 라벨이 도입돼도 기존 config의 정체성은 변하지 않는다. *)
+    Alcotest.(check (list string)) "legacy panelist ids = models"
+      [ "a"; "b"; "c" ]
+      (Fusion_policy.preset_panelist_ids (raw (List.hd flat.Fusion_policy.presets)))
+  | _ -> Alcotest.fail "both must parse Ok"
+
+(* --- heterogeneous multi-group parse --- *)
+
+let multi_group_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "mixed"
+[fusion.presets.mixed]
+judge = "j"
+judge_system_prompt = "synthesize"
+[[fusion.presets.mixed.panels]]
+panel = ["fast1", "fast2"]
+panel_system_prompt = "quick"
+web_tools = false
+[[fusion.presets.mixed.panels]]
+panel = ["careful1"]
+panel_system_prompt = "deliberate"
+web_tools = true
+|}
+
+let test_config_heterogeneous () =
+  match Fusion_config.of_toml (parse multi_group_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       Alcotest.(check int) "two groups" 2 (List.length preset.Fusion_policy.panels);
+       Alcotest.(check int) "three models total" 3
+         (List.length (Fusion_policy.preset_models preset));
+       (match preset.Fusion_policy.panels with
+        | [ g1; g2 ] ->
+          Alcotest.(check bool) "g1 no web" false g1.Fusion_policy.web_tools;
+          Alcotest.(check bool) "g2 web" true g2.Fusion_policy.web_tools;
+          Alcotest.(check (option int)) "g1 default max output" None
+            g1.Fusion_policy.max_output_tokens;
+          Alcotest.(check (option int)) "g2 default max output" None
+            g2.Fusion_policy.max_output_tokens
+        | _ -> Alcotest.fail "expected two groups")
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* --- strict config errors (Unknown→Permissive 회피) --- *)
+
+let test_config_empty_panels () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+panels = []
+judge = "j"
+judge_system_prompt = "x"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Empty_panels present" true
+      (List.mem (Fusion_config.Empty_panels "p") es)
+  | Ok _ -> Alcotest.fail "expected Error Empty_panels"
+
+let test_config_conflicting_grammar () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+panel = ["a"]
+panel_system_prompt = "y"
+judge = "j"
+judge_system_prompt = "x"
+[[fusion.presets.p.panels]]
+panel = ["b"]
+panel_system_prompt = "z"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Conflicting_panel_grammar present" true
+      (List.mem (Fusion_config.Conflicting_panel_grammar "p") es)
+  | Ok _ -> Alcotest.fail "expected Error Conflicting_panel_grammar"
+
+(* 라벨 없는 두 그룹의 동일 model → 같은 정체성("dup") → Duplicate_panelist. *)
+let test_config_duplicate_panelist () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+judge = "j"
+judge_system_prompt = "x"
+[[fusion.presets.p.panels]]
+panel = ["dup", "other"]
+panel_system_prompt = "y"
+[[fusion.presets.p.panels]]
+panel = ["dup"]
+panel_system_prompt = "z"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Duplicate_panelist present" true
+      (List.mem (Fusion_config.Duplicate_panelist ("p", "dup")) es)
+  | Ok _ -> Alcotest.fail "expected Error Duplicate_panelist"
+
+(* 같은 model을 서로 다른 라벨로 둔 두 그룹(ensemble) → 정체성이 달라
+   ["skeptic (claude)"; "optimist (claude)"] → Ok. RFC-0278의 핵심 시나리오. *)
+let same_model_diff_prompt_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "dialectic"
+[fusion.presets.dialectic]
+judge = "j"
+judge_system_prompt = "synthesize"
+[[fusion.presets.dialectic.panels]]
+panel = ["claude"]
+label = "skeptic"
+panel_system_prompt = "argue against"
+[[fusion.presets.dialectic.panels]]
+panel = ["claude"]
+label = "optimist"
+panel_system_prompt = "argue for"
+|}
+
+let test_config_same_model_diff_prompt () =
+  match Fusion_config.of_toml (parse same_model_diff_prompt_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       Alcotest.(check int) "two groups" 2 (List.length preset.Fusion_policy.panels);
+       Alcotest.(check int) "two models total (same id twice raw)" 2
+         (List.length (Fusion_policy.preset_models preset));
+       Alcotest.(check (list string)) "distinct panelist identities"
+         [ "skeptic (claude)"; "optimist (claude)" ]
+         (Fusion_policy.preset_panelist_ids preset);
+       Alcotest.(check bool) "no duplicate panelist" true
+         (Fusion_policy.preset_duplicate_panelist preset = None)
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* 같은 model을 라벨 없이 두 그룹에 두면 정체성 충돌 → Duplicate_panelist (모호성 거부). *)
+let test_config_same_model_no_label_rejected () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+judge = "j"
+judge_system_prompt = "x"
+[[fusion.presets.p.panels]]
+panel = ["claude"]
+panel_system_prompt = "a"
+[[fusion.presets.p.panels]]
+panel = ["claude"]
+panel_system_prompt = "b"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Duplicate_panelist (claude) present" true
+      (List.mem (Fusion_config.Duplicate_panelist ("p", "claude")) es)
+  | Ok _ -> Alcotest.fail "expected Error Duplicate_panelist (no label, same model)"
+
+(* panelist_id SSOT: 라벨 없으면 model 그대로(byte-identity), 있으면 "label (model)". *)
+let test_panelist_id () =
+  Alcotest.(check string) "no label -> model" "claude"
+    (Fusion_policy.panelist_id ~label:"" ~model:"claude");
+  Alcotest.(check string) "label -> label (model)" "skeptic (claude)"
+    (Fusion_policy.panelist_id ~label:"skeptic" ~model:"claude")
+
+(* panelist_id 포맷("%s (%s)")은 단사가 아니다: label=""+model="skeptic (claude)"와
+   label="skeptic"+model="claude"가 같은 "skeptic (claude)"로 렌더된다. 이 둘은 정체성
+   namespace에서 실제로 충돌(심판이 동일 태그 둘을 구분 못 함)하므로, 같은 렌더 정체성을
+   parse-time에 거부하는 것이 sound하다 — fail-closed (silent 손실 아님). 현실 provider.model
+   id는 " (...)"를 포함하지 않아 latent하지만, 비단사 경계의 거부 동작을 핀한다. *)
+let test_config_panelist_id_collision_fail_closed () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+judge = "j"
+judge_system_prompt = "x"
+[[fusion.presets.p.panels]]
+panel = ["skeptic (claude)"]
+panel_system_prompt = "a"
+[[fusion.presets.p.panels]]
+panel = ["claude"]
+label = "skeptic"
+panel_system_prompt = "b"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Duplicate_panelist (skeptic (claude)) present" true
+      (List.mem (Fusion_config.Duplicate_panelist ("p", "skeptic (claude)")) es)
+  | Ok _ ->
+    Alcotest.fail "expected Error Duplicate_panelist (non-injective panelist_id collision)"
+
+let test_config_empty_presets () =
+  match Fusion_config.of_toml (parse "[fusion]\nenabled = true\n") with
+  | Error es ->
+    Alcotest.(check bool) "Empty_presets present" true
+      (List.mem Fusion_config.Empty_presets es)
+  | Ok _ -> Alcotest.fail "expected Error Empty_presets"
+
+let test_config_large_panel_is_valid () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "large"
+[fusion.presets.large]
+panel = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"]
+panel_system_prompt = "analyze"
+judge = "a"
+judge_system_prompt = "synthesize"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Ok policy ->
+    let preset =
+      Fusion_policy.find_preset policy "large"
+      |> Option.map Fusion_policy.Validated_preset.preset
+    in
+    Alcotest.(check int)
+      "all configured panel models survive validation"
+      12
+      (Option.fold ~none:0 ~some:(fun value ->
+         List.length (Fusion_policy.preset_models value)) preset)
+  | Error _ -> Alcotest.fail "provider-independent panel width was rejected"
+
+let test_config_no_panel_models () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "empty"
+[fusion.presets.empty]
+panel = []
+panel_system_prompt = "analyze"
+judge = "a"
+judge_system_prompt = "synthesize"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error errors ->
+    Alcotest.(check bool)
+      "No_panel_models present"
+      true
+      (List.mem (Fusion_config.No_panel_models "empty") errors)
+  | Ok _ -> Alcotest.fail "model-free panel preset was accepted"
+
+let test_config_invalid_min_answered () =
+  let check_invalid value =
+    let s =
+      Printf.sprintf
+        {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+panel = ["a", "b"]
+panel_system_prompt = "y"
+judge = "j"
+judge_system_prompt = "x"
+min_answered = %d
+|}
+        value
+    in
+    match Fusion_config.of_toml (parse s) with
+    | Error es ->
+      Alcotest.(check bool) "Invalid_min_answered present" true
+        (List.mem (Fusion_config.Invalid_min_answered ("p", value)) es)
+    | Ok _ -> Alcotest.fail "expected Error Invalid_min_answered"
+  in
+  check_invalid 0;
+  check_invalid (-1);
+  (* 2 panels -> max allowed is 2, so 3 is out of range *)
+  check_invalid 3
+
+let test_config_missing_default () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "ghost"
+[fusion.presets.trio]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Missing_default_preset present" true
+      (List.mem (Fusion_config.Missing_default_preset "ghost") es)
+  | Ok _ -> Alcotest.fail "expected Error Missing_default_preset"
+
+let test_config_missing_prompt () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Missing_prompt present" true
+      (List.mem (Fusion_config.Missing_prompt "p1") es)
+  | Ok _ -> Alcotest.fail "expected Error Missing_prompt"
+
+(* enabled인데 preset의 judge 모델 id 누락(="") → 빈 runtime_id로 종합 불가. 로드 거부. *)
+let test_config_missing_judge_model () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = ""
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Missing_judge_model present" true
+      (List.mem (Fusion_config.Missing_judge_model "p1") es)
+  | Ok _ -> Alcotest.fail "expected Error Missing_judge_model"
+
+let test_config_bad_staged_judge_group_size () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+staged_judge_group_size = 1
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_staged_judge_group_size present" true
+      (List.mem (Fusion_config.Invalid_staged_judge_group_size 1) es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_staged_judge_group_size"
+
+(* council 프리셋 계약 (config/runtime.toml [fusion.presets.council] 미러):
+   judge 6명 = staged_judge_group_size(3)의 정확한 배수이자 >= group_size*2 —
+   staged_judge_of_judges 자격을 만족하는 최초의 shipped preset shape.
+   staged_judge_groups가 lens 입력 순서를 보존한 2 그룹을 만드는 것까지 고정해,
+   프리셋을 줄이거나(ragged) group_size를 키우는 회귀가 여기서 잡히게 한다. *)
+let council_shaped_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "council"
+staged_judge_group_size = 3
+[fusion.presets.council]
+panel = ["pa", "pb", "pc"]
+judge = "meta-reducer"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "reconcile the stage syntheses"
+
+[[fusion.presets.council.judges]]
+model = "j1"
+label = "evidence"
+system_prompt = "evidence lens"
+
+[[fusion.presets.council.judges]]
+model = "j2"
+label = "coverage"
+system_prompt = "coverage lens"
+
+[[fusion.presets.council.judges]]
+model = "j3"
+label = "risk"
+system_prompt = "risk lens"
+
+[[fusion.presets.council.judges]]
+model = "j1"
+label = "feasibility"
+system_prompt = "feasibility lens"
+
+[[fusion.presets.council.judges]]
+model = "j2"
+label = "simplicity"
+system_prompt = "simplicity lens"
+
+[[fusion.presets.council.judges]]
+model = "j3"
+label = "adversarial"
+system_prompt = "adversarial lens"
+|}
+
+let test_config_council_preset_is_staged_eligible () =
+  match Fusion_config.of_toml (parse council_shaped_toml) with
+  | Error es ->
+    Alcotest.failf "council fixture must parse+validate, got: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       Alcotest.(check int) "six first-round judges" 6
+         (List.length preset.Fusion_policy.judges);
+       (match
+          Fusion_policy.staged_judge_groups
+            ~group_size:p.Fusion_policy.staged_judge_group_size
+            preset.Fusion_policy.judges
+        with
+        | Error e ->
+          Alcotest.failf "council must be staged-eligible, got: %s"
+            (Fusion_policy.staged_judge_group_error_message e)
+        | Ok groups ->
+          Alcotest.(check int) "two exact stages" 2 (List.length groups);
+          Alcotest.(check (list (list string)))
+            "stage grouping preserves lens input order"
+            [ [ "evidence"; "coverage"; "risk" ]
+            ; [ "feasibility"; "simplicity"; "adversarial" ]
+            ]
+            (List.map
+               (List.map (fun j -> j.Fusion_policy.jlabel))
+               groups))
+     | presets ->
+       Alcotest.failf "expected exactly one preset, got %d" (List.length presets))
+
+(* Every seat of a shipped preset must name something the same file declares:
+   a [runtime.lanes.X] route or a [provider.model] binding. A seat that names
+   neither resolves to nothing, and the preset that looks configured fails at
+   the first run instead of at the build. *)
+let test_shipped_runtime_preset_seats_name_declared_routes () =
+  let seed = In_channel.with_open_bin "../../config/runtime.toml" In_channel.input_all in
+  let toml = Otoml.Parser.from_string seed in
+  let table path =
+    match Otoml.find_opt toml Otoml.get_table path with
+    | Some entries -> List.map fst entries
+    | None -> []
+  in
+  let lanes = table [ "runtime"; "lanes" ] in
+  let bindings =
+    List.concat_map
+      (fun provider -> List.map (fun model -> provider ^ "." ^ model) (table [ provider ]))
+      (table [ "providers" ])
+  in
+  let declared route = List.mem route lanes || List.mem route bindings in
+  let policy =
+    match Fusion_config.of_toml toml with
+    | Ok policy -> policy
+    | Error errors ->
+      Alcotest.failf "shipped runtime.toml must load: %s"
+        (String.concat "; " (List.map Fusion_config.config_error_message errors))
+  in
+  Alcotest.(check bool) "the seed declares lanes and bindings to check against" true
+    (lanes <> [] && bindings <> []);
+  List.iter
+    (fun validated ->
+       let preset = raw validated in
+       let seats =
+         List.concat_map
+           (fun (group : Fusion_policy.panel_group) -> group.models)
+           preset.Fusion_policy.panels
+         @ (preset.Fusion_policy.judge
+            :: List.map
+                 (fun (judge : Fusion_policy.judge_spec) -> judge.jmodel)
+                 preset.Fusion_policy.judges)
+       in
+       List.iter
+         (fun route ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%s seat %s is declared" preset.Fusion_policy.name route)
+              true (declared route))
+         seats)
+    policy.Fusion_policy.presets
+;;
+
+let test_shipped_runtime_council_is_staged_eligible () =
+  let runtime_toml =
+    In_channel.with_open_bin "../../config/runtime.toml" In_channel.input_all
+  in
+  match Fusion_config.of_toml (parse runtime_toml) with
+  | Error errors ->
+    Alcotest.failf "shipped runtime.toml must validate, got: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error errors))
+  | Ok policy ->
+    (match
+       List.find_opt
+         (fun validated ->
+            String.equal
+              (raw validated).Fusion_policy.name
+              "council")
+         policy.Fusion_policy.presets
+     with
+     | None -> Alcotest.fail "shipped runtime.toml has no council preset"
+     | Some validated ->
+       let preset = raw validated in
+       match
+         Fusion_policy.staged_judge_groups
+           ~group_size:policy.Fusion_policy.staged_judge_group_size
+           preset.Fusion_policy.judges
+       with
+       | Ok [ first_stage; second_stage ] ->
+         Alcotest.(check (list string))
+           "shipped first stage lenses"
+           [ "evidence"; "coverage"; "risk" ]
+           (List.map (fun judge -> judge.Fusion_policy.jlabel) first_stage);
+         Alcotest.(check (list string))
+           "shipped second stage lenses"
+           [ "feasibility"; "simplicity"; "adversarial" ]
+           (List.map (fun judge -> judge.Fusion_policy.jlabel) second_stage)
+       | Ok groups ->
+         Alcotest.failf "shipped council must have two stages, got %d"
+           (List.length groups)
+       | Error error ->
+         Alcotest.failf "shipped council is not staged-eligible: %s"
+           (Fusion_policy.staged_judge_group_error_message error))
+
+(* 회귀 가드: quorum 형태(2 judges)는 staged 비자격 — 이 fail-closed가 council
+   추가 전 모든 shipped preset의 상태였다. *)
+let test_config_two_judges_not_staged_eligible () =
+  let judge ~model ~label =
+    { Fusion_policy.jmodel = model
+    ; jlabel = label
+    ; jsystem_prompt = label ^ " lens"
+    ; jweb_tools = false
+    ; jmax_output_tokens = None
+    ; jtimeout_s = None
+    }
+  in
+  let judges =
+    [ judge ~model:"j1" ~label:"evidence"; judge ~model:"j2" ~label:"coverage" ]
+  in
+  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
+  | Error (Fusion_policy.Staged_too_few_judges { group_size = 3; judges = 2 }) -> ()
+  | Error e ->
+    Alcotest.failf "expected Staged_too_few_judges, got: %s"
+      (Fusion_policy.staged_judge_group_error_message e)
+  | Ok _ -> Alcotest.fail "two judges must not be staged-eligible"
+
+let test_config_invalid_max_output_tokens () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+max_output_tokens_per_panel = 0
+judge_max_output_tokens = -1
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_max_output_tokens present" true
+      (List.exists
+         (function Fusion_config.Invalid_max_output_tokens _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_max_output_tokens"
+
+(* 데드라인 축(RFC-0252 §9). [panel_timeout_s]/[judge_timeout_s]/1차 심판
+   [timeout_s]는 오랫동안 운영 config에 존재하면서 파서에 소비자가 없었다 —
+   subscription CLI 패널이 실측 34.7s까지 걸려 240s를 선언해 뒀는데 그 값이 어디에도
+   도달하지 않았다. 파싱·검증·per-judge 폴백을 핀한다. *)
+let test_config_parses_timeouts () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+panel_timeout_s = 240.0
+judge_timeout_s = 180
+[[fusion.presets.p1.judges]]
+model = "a"
+label = "evidence"
+system_prompt = "lens"
+timeout_s = 90.5
+[[fusion.presets.p1.judges]]
+model = "b"
+label = "coverage"
+system_prompt = "lens"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.failf "expected Ok, got %d error(s): %s" (List.length es)
+      (String.concat "; " (List.map Fusion_config.show_config_error es))
+  | Ok cfg ->
+    (match cfg.Fusion_policy.presets with
+     | [ vp ] ->
+       let p = Fusion_policy.Validated_preset.preset vp in
+       let group = List.hd p.Fusion_policy.panels in
+       Alcotest.(check (option (float 0.001)))
+         "panel_timeout_s reaches the group" (Some 240.0)
+         group.Fusion_policy.timeout_s;
+       (* 정수 리터럴도 초 값으로 읽힌다 — 운영자가 180과 180.0을 구분해 쓸 이유가 없다. *)
+       Alcotest.(check (option (float 0.001)))
+         "integer judge_timeout_s is accepted as seconds" (Some 180.0)
+         p.Fusion_policy.judge_timeout_s;
+       (match p.Fusion_policy.judges with
+        | [ evidence; coverage ] ->
+          Alcotest.(check (option (float 0.001)))
+            "per-judge timeout_s is parsed" (Some 90.5)
+            evidence.Fusion_policy.jtimeout_s;
+          Alcotest.(check (option (float 0.001)))
+            "a judge without its own deadline stays None (preset supplies it)" None
+            coverage.Fusion_policy.jtimeout_s
+        | js -> Alcotest.failf "expected 2 judges, got %d" (List.length js))
+     | ps -> Alcotest.failf "expected 1 preset, got %d" (List.length ps))
+
+let test_config_rejects_nonpositive_timeout () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+panel_timeout_s = 0
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_timeout_s present" true
+      (List.exists
+         (function Fusion_config.Invalid_timeout_s _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_timeout_s for a zero deadline"
+
+let test_config_rejects_negative_judge_timeout () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+judge_timeout_s = -30.0
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_timeout_s present" true
+      (List.exists
+         (function Fusion_config.Invalid_timeout_s _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_timeout_s for a negative deadline"
+
+(* 데드라인 미선언은 유효하다 — 그 경우 런타임/provider 선언이 유일한 값으로 남는다.
+   이 대조군이 없으면 위 두 거부 테스트는 "모든 preset을 거부해도" 통과한다. *)
+let test_config_absent_timeouts_are_valid () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.failf "a preset without deadlines must load: %s"
+      (String.concat "; " (List.map Fusion_config.show_config_error es))
+  | Ok cfg ->
+    (match cfg.Fusion_policy.presets with
+     | [ vp ] ->
+       let p = Fusion_policy.Validated_preset.preset vp in
+       Alcotest.(check (option (float 0.001)))
+         "no preset judge deadline" None p.Fusion_policy.judge_timeout_s;
+       Alcotest.(check (option (float 0.001)))
+         "no panel group deadline" None
+         (List.hd p.Fusion_policy.panels).Fusion_policy.timeout_s
+     | ps -> Alcotest.failf "expected 1 preset, got %d" (List.length ps))
+
+(* enabled인데 default_preset 생략(="") → preset 생략 호출이 폭빽할 default가 없어
+   항상 Preset_unknown ""로 deny. 빈 default_preset도 로드 거부. *)
+let test_config_empty_default_preset () =
+  let s =
+    {|
+[fusion]
+enabled = true
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Missing_default_preset \"\" present" true
+      (List.mem (Fusion_config.Missing_default_preset "") es)
+  | Ok _ -> Alcotest.fail "expected Error Missing_default_preset"
+
+(* Mirrors the disabled [fusion] seed shipped in config/runtime.toml: a populated
+   default_preset + trio panel while enabled=false must parse to [Ok]
+   (Empty_presets / Missing_default_preset are enabled-gated). Pins the
+   seed-template structure (legacy flat grammar) against parser drift. *)
+let seed_disabled_toml =
+  {|
+[fusion]
+enabled = false
+default_preset = "trio"
+staged_judge_group_size = 3
+[fusion.presets.trio]
+web_tools = false
+panel = [
+  "deepseek.deepseek-v4-pro",
+  "glm-coding.glm-5-turbo",
+  "ollama_cloud.deepseek-v4-flash",
+]
+judge = "deepseek.deepseek-v4-pro"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "synthesize the panel"
+|}
+
+let test_config_disabled_with_preset () =
+  match Fusion_config.of_toml (parse seed_disabled_toml) with
+  | Ok p ->
+    Alcotest.(check bool) "seed disabled" false p.Fusion_policy.enabled;
+    Alcotest.(check int) "seed staged group size" 3
+      p.Fusion_policy.staged_judge_group_size;
+    Alcotest.(check int) "trio preset present" 1 (List.length p.Fusion_policy.presets);
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       Alcotest.(check int) "trio panel size (flattened)" 3
+         (List.length (Fusion_policy.preset_models preset))
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "seed [fusion] must parse, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* --- RFC-0280: Validated_preset.of_preset smart constructor (검증 SSOT) ---
+   config의 config_error 매핑과 별개로 smart constructor 자체를 직접 핀한다. 각 테스트는
+   목표 결함 하나만 두고 나머지는 유효하게 해, 검증 순서(size→prompt→judge→dup→mtc)에서
+   그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
+let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
+    ?(judges = []) ?(min_answered = Fusion_policy.default_min_answered)
+    (name : string) : Fusion_policy.preset =
+  { Fusion_policy.name
+  ; panels
+  ; judge
+  ; judge_system_prompt = judge_prompt
+  ; judge_max_output_tokens = None
+  ; judge_timeout_s = None
+  ; judges
+  ; min_answered
+  }
+
+let test_validated_ok () =
+  match Fusion_policy.Validated_preset.of_preset (mk_preset "ok") with
+  | Ok vp ->
+    Alcotest.(check int) "validated preset reads panels via coercion" 1
+      (List.length (raw vp).Fusion_policy.panels)
+  | Error _ -> Alcotest.fail "expected Ok for a valid preset"
+
+let test_validated_no_panel_models () =
+  let empty_group = { base_group with Fusion_policy.models = [] } in
+  match
+    Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ empty_group ] "empty")
+  with
+  | Error Fusion_policy.Validated_preset.No_panel_models -> ()
+  | _ -> Alcotest.fail "expected No_panel_models for zero models"
+
+let test_validated_missing_prompt () =
+  let no_prompt = { base_group with Fusion_policy.system_prompt = "" } in
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ no_prompt ] "np") with
+  | Error Fusion_policy.Validated_preset.Missing_prompt -> ()
+  | _ -> Alcotest.fail "expected Missing_prompt for empty system_prompt"
+
+let test_validated_missing_judge () =
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judge:"" "nj") with
+  | Error Fusion_policy.Validated_preset.Missing_judge_model -> ()
+  | _ -> Alcotest.fail "expected Missing_judge_model for empty judge"
+
+let test_validated_duplicate_panelist () =
+  let g model = { base_group with Fusion_policy.models = [ model ] } in
+  match
+    Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ g "x"; g "x" ] "dup")
+  with
+  | Error (Fusion_policy.Validated_preset.Duplicate_panelist "x") -> ()
+  | _ -> Alcotest.fail "expected Duplicate_panelist x for same model no label"
+
+let test_validated_bad_max_output_tokens () =
+  let bad = { base_group with Fusion_policy.max_output_tokens = Some 0 } in
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ bad ] "mot") with
+  | Error (Fusion_policy.Validated_preset.Bad_max_output_tokens 0) -> ()
+  | _ -> Alcotest.fail "expected Bad_max_output_tokens 0"
+
+(* --- JOJ 1차 심판 목록 검증 (RFC-0283) --- *)
+
+let base_judge : Fusion_policy.judge_spec =
+  { Fusion_policy.jmodel = "jm"
+  ; jlabel = ""
+  ; jsystem_prompt = "lens"
+  ; jweb_tools = false
+  ; jmax_output_tokens = None
+    ; jtimeout_s = None
+  }
+
+(* judges=[]면 (simple/refine/conditional preset) 기존과 동일하게 유효 = byte-identity. *)
+let test_validated_judges_empty_ok () =
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[] "je") with
+  | Ok _ -> ()
+  | Error _ -> Alcotest.fail "empty judges must stay valid (simple/refine/conditional)"
+
+(* 두 1차 심판이 같은 lens(다른 model)면 통과; 같은 정체성이면 Duplicate_judge. *)
+let test_validated_judges_ok () =
+  let j m = { base_judge with Fusion_policy.jmodel = m } in
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ j "a"; j "b" ] "jok") with
+  | Ok _ -> ()
+  | Error _ -> Alcotest.fail "distinct judge models must validate"
+
+let test_validated_judge_prompt_missing () =
+  let no_lens = { base_judge with Fusion_policy.jsystem_prompt = "" } in
+  match
+    Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ base_judge; no_lens ] "jnp")
+  with
+  | Error Fusion_policy.Validated_preset.Judge_panel_prompt_missing -> ()
+  | _ -> Alcotest.fail "expected Judge_panel_prompt_missing for empty judge lens"
+
+let test_validated_duplicate_judge () =
+  let j m = { base_judge with Fusion_policy.jmodel = m } in
+  match
+    Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ j "x"; j "x" ] "jdup")
+  with
+  | Error (Fusion_policy.Validated_preset.Duplicate_judge "x") -> ()
+  | _ -> Alcotest.fail "expected Duplicate_judge x for same judge identity"
+
+let test_validated_judge_bad_max_output_tokens () =
+  let bad = { base_judge with Fusion_policy.jmax_output_tokens = Some (-1) } in
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ bad ] "jmot") with
+  | Error (Fusion_policy.Validated_preset.Bad_max_output_tokens (-1)) -> ()
+  | _ -> Alcotest.fail "expected Bad_max_output_tokens -1 for judge"
+
+let judge_named model = { base_judge with Fusion_policy.jmodel = model }
+
+let test_staged_judge_groups_exact_3x3 () =
+  let judges = List.init 9 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
+  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
+  | Ok groups ->
+    Alcotest.(check int) "three groups" 3 (List.length groups);
+    Alcotest.(check (list int)) "3x3 group sizes" [ 3; 3; 3 ]
+      (List.map List.length groups);
+    (match groups with
+     | first :: _ ->
+       (match first with
+        | j :: _ -> Alcotest.(check string) "first judge preserved" "j1" j.Fusion_policy.jmodel
+        | [] -> Alcotest.fail "first group should not be empty")
+     | [] -> Alcotest.fail "expected groups")
+  | Error e ->
+    Alcotest.failf "expected 3x3 groups, got %s"
+      (Fusion_policy.show_staged_judge_group_error e)
+
+let test_staged_judge_groups_too_few () =
+  let judges = List.init 5 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
+  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
+  | Error (Fusion_policy.Staged_too_few_judges { group_size = 3; judges = 5 }) -> ()
+  | _ -> Alcotest.fail "expected Staged_too_few_judges for 5 judges at group size 3"
+
+let test_staged_judge_groups_ragged () =
+  let judges = List.init 8 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
+  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
+  | Error (Fusion_policy.Staged_ragged_judges { group_size = 3; judges = 8 }) -> ()
+  | _ -> Alcotest.fail "expected Staged_ragged_judges for 8 judges at group size 3"
+
+let test_staged_judge_groups_bad_size () =
+  match Fusion_policy.staged_judge_groups ~group_size:1 [ judge_named "j1"; judge_named "j2" ] with
+  | Error (Fusion_policy.Staged_group_size_below_min 1) -> ()
+  | _ -> Alcotest.fail "expected Staged_group_size_below_min"
+
+(* --- JOJ 1차 심판 TOML 파싱 (RFC-0283). parse_judge_spec + finish_preset의
+       [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
+       검증 테스트는 OCaml record를 직접 구성해 config 레이어를 우회하므로, TOML 키
+       이름(model/label/system_prompt/web_tools/max_output_tokens)과 getter
+       매핑은 이 테스트만 커버한다 — 잘못된 키/getter는 여기서만 잡힌다. panel
+       sub-table에는 동형 golden(test_config_panels_golden 등)이 있으나 judge에는
+       없었다. --- *)
+let judges_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "joj"
+[fusion.presets.joj]
+judge = "meta-model"
+judge_system_prompt = "reconcile"
+[[fusion.presets.joj.panels]]
+panel = ["p1", "p2"]
+panel_system_prompt = "answer"
+[[fusion.presets.joj.judges]]
+model = "judge-a"
+label = "strict"
+system_prompt = "lens A"
+web_tools = true
+max_output_tokens = 1536
+[[fusion.presets.joj.judges]]
+model = "judge-b"
+label = "lenient"
+system_prompt = "lens B"
+|}
+
+let test_config_judges_parse () =
+  match Fusion_config.of_toml (parse judges_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       (match (raw vp).Fusion_policy.judges with
+        | [ ja; jb ] ->
+          (* judge-a: 5개 키를 모두 distinct 값으로 채워 키↔getter 매핑을 핀한다. *)
+          Alcotest.(check string) "ja model" "judge-a" ja.Fusion_policy.jmodel;
+          Alcotest.(check string) "ja label" "strict" ja.Fusion_policy.jlabel;
+          Alcotest.(check string) "ja prompt" "lens A" ja.Fusion_policy.jsystem_prompt;
+          Alcotest.(check bool) "ja web" true ja.Fusion_policy.jweb_tools;
+          Alcotest.(check (option int)) "ja max output" (Some 1536)
+            ja.Fusion_policy.jmax_output_tokens;
+          (* judge-b: 누락 키는 find_or default 경로 (web=false). *)
+          Alcotest.(check string) "jb model" "judge-b" jb.Fusion_policy.jmodel;
+          Alcotest.(check string) "jb prompt" "lens B" jb.Fusion_policy.jsystem_prompt;
+          Alcotest.(check bool) "jb web default" false jb.Fusion_policy.jweb_tools;
+          Alcotest.(check (option int)) "jb max output default" None
+            jb.Fusion_policy.jmax_output_tokens
+        | _ -> Alcotest.fail "expected exactly two parsed judges")
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* judges sub-table 없는 preset → preset.judges = [] (단일 심판 위상 config). *)
+let test_config_no_judges () =
+  match Fusion_config.of_toml (parse golden_single_group_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       Alcotest.(check int) "no judges sub-table = empty list" 0
+         (List.length (raw vp).Fusion_policy.judges)
+     | _ -> Alcotest.fail "expected one preset")
+  | Error _ -> Alcotest.fail "golden must parse Ok"
+
+(* --- execution-axis judge web-tool derivation. --- *)
+
+let g_web4 : Fusion_policy.panel_group =
+  { Fusion_policy.models = [ "a" ]
+  ; label = ""
+  ; system_prompt = "p"
+  ; web_tools = true
+  ; max_output_tokens = None
+  ; timeout_s = None
+  }
+
+let test_judge_args_single_group_identity () =
+  let groups = [ g_web4 ] in
+  Alcotest.(check bool) "judge web = req||group, req=false, group=true" true
+    (Fusion_policy.judge_web_tools_of ~req_web_tools:false groups);
+  Alcotest.(check bool) "judge web = req||group, both false" false
+    (Fusion_policy.judge_web_tools_of ~req_web_tools:false
+       [ { g_web4 with Fusion_policy.web_tools = false } ]);
+  Alcotest.(check bool) "judge web = req||group, req=true overrides" true
+    (Fusion_policy.judge_web_tools_of ~req_web_tools:true
+       [ { g_web4 with Fusion_policy.web_tools = false } ])
+
+let test_judge_args_multi_group () =
+  let g_no_web = { g_web4 with Fusion_policy.web_tools = false } in
+  Alcotest.(check bool) "any group may request judge web tools" true
+    (Fusion_policy.judge_web_tools_of ~req_web_tools:false [ g_no_web; g_web4 ])
+
+(* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
+
+let jdecision = Alcotest.testable pp_judge_decision equal_judge_decision
+
+let valid_judge_json =
+  {|{
+    "consensus": [ { "text": "X is true", "supporting_models": ["a","b"] } ],
+    "contradictions": [ { "topic": "Y", "positions": [ {"model":"a","stance":"yes"}, {"model":"b","stance":"no"} ], "evidence": ["e1"] } ],
+    "partial_coverage": [ { "topic": "Z", "addressed_by": ["a"], "missing": "depth" } ],
+    "unique_insights": [ { "text": "novel", "model": "b" } ],
+    "blind_spots": [ "edge case" ],
+    "resolved_answer": "the answer",
+    "decision": { "kind": "answer", "answer": "the answer" }
+  }|}
+
+let test_judge_valid () =
+  match Fusion_judge_parse.of_string valid_judge_json with
+  | Ok js ->
+    Alcotest.(check string) "resolved" "the answer" js.resolved_answer;
+    Alcotest.(check int) "consensus" 1 (List.length js.consensus);
+    Alcotest.(check int) "contradictions" 1 (List.length js.contradictions);
+    Alcotest.(check int) "positions" 2
+      (List.length (List.hd js.contradictions).positions);
+    Alcotest.(check int) "blind_spots" 1 (List.length js.blind_spots);
+    Alcotest.check jdecision "decision" (Answer "the answer") js.decision
+  | Error e -> Alcotest.failf "expected Ok, got %s" e
+
+let test_judge_recommend () =
+  let s =
+    {|{ "resolved_answer": "r", "decision": { "kind": "recommend", "action": "claim task 5", "rationale": "best fit" } }|}
+  in
+  match Fusion_judge_parse.of_string s with
+  | Ok js ->
+    Alcotest.check jdecision "recommend"
+      (Recommend { action = "claim task 5"; rationale = "best fit" }) js.decision
+  | Error e -> Alcotest.failf "expected Ok, got %s" e
+
+let test_judge_insufficient () =
+  let s =
+    {|{ "resolved_answer": "", "decision": { "kind": "insufficient", "missing": ["data","time"] } }|}
+  in
+  match Fusion_judge_parse.of_string s with
+  | Ok js ->
+    Alcotest.check jdecision "insufficient"
+      (Insufficient { missing_for_decision = [ "data"; "time" ] }) js.decision
+  | Error _ -> Alcotest.fail "expected Ok"
+
+let test_judge_rejects_blank_conclusions () =
+  List.iter
+    (fun blank ->
+      let answer text = `Assoc [ "kind", `String "answer"; "answer", `String text ] in
+      let recommend action rationale =
+        `Assoc [ "kind", `String "recommend"; "action", `String action
+               ; "rationale", `String rationale ] in
+      List.iter
+        (fun (resolved, decision, field) ->
+          let json = `Assoc [ "resolved_answer", `String resolved; "decision", decision ] in
+          match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+          | Error detail -> Alcotest.(check string) "blank field is diagnosed"
+              ("judge." ^ field ^ ": expected nonblank string") detail
+          | Ok _ -> Alcotest.fail (field ^ " accepted a blank conclusion"))
+        [ blank, answer "supported", "resolved_answer"
+        ; "supported", answer blank, "decision.answer"
+        ; blank, recommend "act" "evidence", "resolved_answer"
+        ; "supported", recommend blank "evidence", "decision.action"
+        ; "supported", recommend "act" blank, "decision.rationale"
+        ])
+    [ ""; " \t\n\r\012"; "\u{00a0}"; "\u{0085}"; "\u{3000}"
+    ; "\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}"
+    ];
+  let answer = "\u{00a0}근거를 보존합니다. Evidence.\u{3000}\n" in
+  let json = `Assoc [ "resolved_answer", `String answer
+    ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String answer ] ] in
+  match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+  | Ok synthesis -> Alcotest.(check string) "meaningful content is preserved"
+      answer synthesis.resolved_answer
+  | Error detail -> Alcotest.fail detail
+
+let test_judge_unknown_kind () =
+  match
+    Fusion_judge_parse.of_string
+      {|{ "resolved_answer": "r", "decision": { "kind": "frobnicate" } }|}
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected Error on unknown decision kind"
+
+let test_judge_missing_resolved () =
+  match
+    Fusion_judge_parse.of_string {|{ "decision": { "kind": "answer", "answer": "a" } }|}
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected Error on missing resolved_answer"
+
+let test_judge_missing_decision () =
+  match Fusion_judge_parse.of_string {|{ "resolved_answer": "r" }|} with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected Error on missing decision"
+
+let test_judge_code_fence () =
+  let s =
+    "```json\n{ \"resolved_answer\": \"r\", \"decision\": { \"kind\": \"answer\", \"answer\": \"a\" } }\n```"
+  in
+  match Fusion_judge_parse.of_string s with
+  | Ok js -> Alcotest.(check string) "fenced resolved" "r" js.resolved_answer
+  | Error e -> Alcotest.failf "expected Ok, got %s" e
+
+let test_judge_decision_schema_branches () =
+  let open Yojson.Safe.Util in
+  let branches =
+    Fusion_judge_parse.output_schema
+    |> member "oneOf"
+    |> to_list
+    |> List.map (fun branch -> branch |> member "properties" |> member "decision")
+  in
+  let actual =
+    List.map
+      (fun branch ->
+        let kind =
+          branch |> member "properties" |> member "kind" |> member "enum"
+          |> to_list |> List.hd |> to_string
+        in
+        let required =
+          branch |> member "required" |> to_list |> List.map to_string
+        in
+        kind, required)
+      branches
+  in
+  Alcotest.(check (list (pair string (list string))))
+    "decision schema requires exactly the fields its decoder reads"
+    [ "answer", [ "kind"; "answer" ]
+    ; "recommend", [ "kind"; "action"; "rationale" ]
+    ; "insufficient", [ "kind" ]
+    ]
+    actual
+
+let test_judge_rejects_null_optional_and_unknown_field () =
+  let required =
+    [ "resolved_answer", `String "r"
+    ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String "a" ]
+    ]
+  in
+  let cases =
+    [ ( "null optional field"
+      , `Assoc
+          (("partial_coverage",
+            `List
+              [ `Assoc [ "topic", `String "t"; "missing", `Null ] ])
+           :: required)
+      , "judge.partial_coverage[0].missing: expected string" )
+    ; ( "unknown field"
+      , `Assoc (("confidence", `Float 0.8) :: required)
+      , "judge.confidence: unknown field" )
+    ]
+  in
+  List.iter
+    (fun (label, json, expected) ->
+      match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+      | Error detail -> Alcotest.(check string) label expected detail
+      | Ok _ -> Alcotest.fail (label ^ " was accepted"))
+    cases
+
+let test_judge_rejects_lossy_collections () =
+  let required =
+    [ "resolved_answer", `String "r"
+    ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String "a" ]
+    ]
+  in
+  let claim text = `Assoc [ "text", `String text ] in
+  let position model stance =
+    `Assoc [ "model", `String model; "stance", `String stance ]
+  in
+  let cases =
+    [ ( "consensus item"
+      , "consensus"
+      , `List [ claim "kept"; `Assoc [ "supporting_models", `List [] ] ] )
+    ; ( "contradiction item"
+      , "contradictions"
+      , `List [ `Assoc [ "positions", `List [] ] ] )
+    ; ( "nested position"
+      , "contradictions"
+      , `List
+          [ `Assoc
+              [ "topic", `String "t"
+              ; "positions",
+                  `List
+                    [ position "a" "yes"
+                    ; `Assoc [ "model", `String "b" ]
+                    ]
+              ]
+          ] )
+    ; ( "coverage item"
+      , "partial_coverage"
+      , `List [ `Assoc [ "addressed_by", `List [] ] ] )
+    ; ( "insight item"
+      , "unique_insights"
+      , `List [ `Assoc [ "text", `String "novel" ] ] )
+    ; ( "blind spot"
+      , "blind_spots"
+      , `List [ `String "kept"; `Int 7 ] )
+    ; ( "supporting model"
+      , "consensus"
+      , `List
+          [ `Assoc
+              [ "text", `String "point"
+              ; "supporting_models", `List [ `String "a"; `Int 7 ]
+              ]
+          ] )
+    ; ( "wrong collection type"
+      , "consensus"
+      , `String "not an array" )
+    ]
+  in
+  let accepted =
+    List.fold_left
+      (fun accepted (label, field, value) ->
+        let json = `Assoc ((field, value) :: required) |> Yojson.Safe.to_string in
+        match Fusion_judge_parse.of_string json with
+        | Error detail ->
+          Alcotest.(check bool)
+            (label ^ " names the malformed field") true
+            (String.starts_with ~prefix:("judge." ^ field) detail);
+          accepted
+        | Ok _ -> label :: accepted)
+      [] cases
+    |> List.rev
+  in
+  if accepted <> [] then
+    Alcotest.failf "accepted %d/%d malformed collections without error: %s"
+      (List.length accepted) (List.length cases) (String.concat ", " accepted)
+
+(* ---- 심의 위상(topology) ---------------------------------------------- *)
+
+(* round-trip drift-guard: of_string(to_string t) = Some t (전수). 닫힌 합이라
+   forward는 컴파일러가 보장하지만 역방향(string→variant)은 string 입력이라 강제되지
+   않으므로 여기서 핀(closed-sum-string-whitelist 안티패턴의 역방향 단언). *)
+let test_topology_roundtrip () =
+  List.iter
+    (fun t ->
+      Alcotest.(check (option string))
+        (Printf.sprintf "roundtrip %s" (fusion_topology_to_string t))
+        (Some (fusion_topology_to_string t))
+        (Option.map fusion_topology_to_string
+           (fusion_topology_of_string (fusion_topology_to_string t))))
+    all_fusion_topologies
+
+(* fail-closed: 닫힌 합 밖(오타·대문자·빈문자열·미래 위상명)은 None. *)
+let test_topology_unknown_is_none () =
+  List.iter
+    (fun s ->
+      Alcotest.(check bool)
+        (Printf.sprintf "unknown %S -> None" s)
+        true
+        (Option.is_none (fusion_topology_of_string s)))
+    [ ""; "Simple"; "REFINE"; "Judge_of_judges"; "joj"; "bogus"; " simple" ]
+
+(* wire vocabulary 핀 — 도구 스키마 허용값/에러 메시지가 이 목록에서 파생된다. *)
+let test_topology_strings () =
+  Alcotest.(check (list string))
+    "all topology wire strings"
+    [ "simple"; "refine"; "conditional"; "judge_of_judges"; "staged_judge_of_judges" ]
+    all_fusion_topology_strings
+
+(* Conditional 에스컬레이트 정책 — 닫힌 합 전수 값-핀. Insufficient만 escalate. *)
+let test_escalation_policy () =
+  Alcotest.(check bool) "Insufficient escalates" true
+    (decision_warrants_escalation (Insufficient { missing_for_decision = [ "x" ] }));
+  Alcotest.(check bool) "Answer does not escalate" false
+    (decision_warrants_escalation (Answer "done"));
+  Alcotest.(check bool) "Recommend does not escalate" false
+    (decision_warrants_escalation (Recommend { action = "a"; rationale = "r" }))
+
+(* ---- render_prior_synthesis (refine 프롬프트 입력) --------------------- *)
+
+let str_contains ~needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  if nl = 0 then true
+  else begin
+    let rec scan i =
+      if i + nl > hl then false
+      else if String.equal (String.sub haystack i nl) needle then true
+      else scan (i + 1)
+    in
+    scan 0
+  end
+
+let full_synthesis decision : judge_synthesis =
+  { consensus = [ { text = "C-TEXT"; supporting_models = [ "m1"; "m2" ] } ]
+  ; contradictions =
+      [ { topic = "TOPIC-X"
+        ; positions = [ ("m1", "yes"); ("m2", "no") ]
+        ; evidence = [ "EV-1" ]
+        }
+      ]
+  ; partial_coverage =
+      [ { gap_topic = "GAP-Y"; addressed_by = [ "m1" ]; missing = Some "MISS-Z" } ]
+  ; unique_insights = [ { insight_text = "INSIGHT-W"; from_model = "m3" } ]
+  ; blind_spots = [ "BLIND-V" ]
+  ; resolved_answer = "RESOLVED-U"
+  ; decision
+  }
+
+let check_contains label needle hay =
+  Alcotest.(check bool) (Printf.sprintf "contains %s" label) true
+    (str_contains ~needle hay)
+
+(* lossless: 7필드 전부 렌더 문자열에 살아남는다 (resolved_answer로 collapse하지 않음 —
+   B2/워크어라운드#2 회피의 회귀 가드). *)
+let test_render_lossless_fields () =
+  let r = render_prior_synthesis (full_synthesis (Answer "ANS-T")) in
+  check_contains "consensus text" "C-TEXT" r;
+  check_contains "supporting model" "m2" r;
+  check_contains "contradiction topic" "TOPIC-X" r;
+  check_contains "contradiction stance" "no" r;
+  check_contains "evidence" "EV-1" r;
+  check_contains "coverage gap" "GAP-Y" r;
+  check_contains "coverage missing" "MISS-Z" r;
+  check_contains "insight" "INSIGHT-W" r;
+  check_contains "insight model" "m3" r;
+  check_contains "blind spot" "BLIND-V" r;
+  check_contains "resolved answer" "RESOLVED-U" r
+
+(* decision 닫힌 합 3변형이 서로 구분되게 렌더된다 (exhaustive match, catch-all 없음). *)
+let test_render_decision_answer () =
+  let r = render_prior_synthesis (full_synthesis (Answer "ANS-T")) in
+  check_contains "answer decision" "Answer: ANS-T" r
+
+let test_render_decision_recommend () =
+  let r =
+    render_prior_synthesis
+      (full_synthesis (Recommend { action = "ACT-R"; rationale = "WHY-R" }))
+  in
+  check_contains "recommend action" "ACT-R" r;
+  check_contains "recommend rationale" "WHY-R" r
+
+let test_render_decision_insufficient () =
+  let r =
+    render_prior_synthesis
+      (full_synthesis (Insufficient { missing_for_decision = [ "NEED-A"; "NEED-B" ] }))
+  in
+  check_contains "insufficient label" "Insufficient" r;
+  check_contains "insufficient missing a" "NEED-A" r;
+  check_contains "insufficient missing b" "NEED-B" r
+
+(* 빈 리스트는 "(none)"으로 렌더 — 섹션 구조가 항상 노출되어 테스트/모델이 의존 가능. *)
+let test_render_empty_lists () =
+  let empty : judge_synthesis =
+    { consensus = []
+    ; contradictions = []
+    ; partial_coverage = []
+    ; unique_insights = []
+    ; blind_spots = []
+    ; resolved_answer = ""
+    ; decision = Answer ""
+    }
+  in
+  let r = render_prior_synthesis empty in
+  check_contains "consensus header" "CONSENSUS:" r;
+  check_contains "blind spots header" "BLIND SPOTS:" r;
+  check_contains "none placeholder" "(none)" r
+
+(* --- RFC-0284: judge_outcome 관측 record yojson round-trip ---
+   판 노드 관측이 직렬화/역직렬화 무손실인지(board judges:[] emit + 디스크/SSE 호환).
+   First는 panelist_id를, decision 닫힌 합 3변형을, 성공/실패 노드를 모두 핀한다. *)
+let test_judge_outcome_roundtrip () =
+  let synth d : judge_synthesis =
+    { consensus = [ { text = "c"; supporting_models = [ "m" ] } ]
+    ; contradictions = []
+    ; partial_coverage = []
+    ; unique_insights = []
+    ; blind_spots = [ "b" ]
+    ; resolved_answer = "ra"
+    ; decision = d }
+  in
+  let nodes =
+    [ Synthesized
+        { role = Single
+        ; synthesis = synth (Answer "a")
+        ; usage = { input_tokens = 1; output_tokens = 2 } }
+    ; Synthesized
+        { role = First "skeptic (claude)"
+        ; synthesis = synth (Recommend { action = "do"; rationale = "why" })
+        ; usage = zero_usage }
+    ; Synthesized
+        { role = Meta
+        ; synthesis = synth (Insufficient { missing_for_decision = [ "x" ] })
+        ; usage = zero_usage }
+    ; Synthesized
+        { role = Refine_pass; synthesis = synth (Answer "r"); usage = zero_usage }
+    ; Judge_failed
+        { failed_role = Meta
+        ; failure = Provider_error "boom"
+        ; usage = { input_tokens = 9; output_tokens = 10 }
+        ; elapsed_s = None
+        }
+    ]
+  in
+  List.iter
+    (fun o ->
+      match judge_outcome_of_yojson (judge_outcome_to_yojson o) with
+      | Ok o' ->
+        Alcotest.(check bool) "judge_outcome roundtrip" true (equal_judge_outcome o o')
+      | Error e -> Alcotest.failf "judge_outcome roundtrip failed: %s" e)
+    nodes
+
+(* An empty panel result is objective input absence, not an N-of-M policy. *)
+let test_panels_unavailable_failure () =
+  let reason = No_panel_answers { total = 3 } in
+  let failure : judge_failure = Panels_unavailable reason in
+  Alcotest.(check string) "failure_code tag" "panels_unavailable"
+    (judge_failure_tag failure);
+  Alcotest.(check string) "failure text = rendered skip reason"
+    "fusion aborted: none of 3 panels returned an answer"
+    (judge_failure_text failure);
+  Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure)
+
+(* --- min_answered 런타임 quorum 강제: judge 실행 전 panel 입력 계약 검사 ---
+   orchestrator는 judge dispatch 전에 [judge_skip_reason]을 호출해 미달 시 typed
+   [Panels_unavailable]로 skip한다 (미달 응답을 judge에 넘기는 silent degrade 금지 —
+   quorum은 입력 계약이다). 판정은 순수 함수로 분리해 여기서 exhaustive하게 핀다. *)
+
+let quorum_answered model : panel_outcome =
+  Answered { model; answer = "a"; usage = zero_usage }
+
+let quorum_failed model : panel_outcome =
+  Failed { failed_model = model; reason = Provider_error "boom"; usage = zero_usage }
+
+let skip_reason_t = Alcotest.testable pp_skip_reason equal_skip_reason
+
+(* (a) min_answered=2인데 응답 1개 → typed skip (judge 미실행). *)
+let test_quorum_shortfall () =
+  let panel = [ quorum_answered "a"; quorum_failed "b"; quorum_failed "c" ] in
+  Alcotest.(check (option skip_reason_t)) "answered 1 < min_answered 2"
+    (Some (Quorum_shortfall { answered = 1; required = 2 }))
+    (judge_skip_reason ~panel ~min_answered:2)
+
+(* (b) min_answered=2, 응답 2개 → judge 진행 (skip 사유 없음). *)
+let test_quorum_met () =
+  let panel = [ quorum_answered "a"; quorum_answered "b"; quorum_failed "c" ] in
+  Alcotest.(check (option skip_reason_t)) "answered 2 >= min_answered 2" None
+    (judge_skip_reason ~panel ~min_answered:2)
+
+(* (c) 기본값(default_min_answered=1)은 강제 전과 정확히 같은 동작:
+   응답 1개면 judge 실행, 0개면 No_panel_answers. *)
+let test_quorum_default_preserves_current_behavior () =
+  Alcotest.(check (option skip_reason_t)) "1 answered, default -> judge runs" None
+    (judge_skip_reason
+       ~panel:[ quorum_answered "a"; quorum_failed "b" ]
+       ~min_answered:Fusion_policy.default_min_answered);
+  Alcotest.(check (option skip_reason_t)) "0 answered, default -> No_panel_answers"
+    (Some (No_panel_answers { total = 2 }))
+    (judge_skip_reason
+       ~panel:[ quorum_failed "a"; quorum_failed "b" ]
+       ~min_answered:Fusion_policy.default_min_answered)
+
+(* (d) min_answered=패널 수(3)인데 전원 실패 → 응답 0 = 입력 부재 typed skip.
+   전멸은 정족수 정책이 아니라 objective input absence라 No_panel_answers를 유지한다
+   (위 test_panels_unavailable_failure의 구분과 동일). *)
+let test_quorum_full_panel_all_failed () =
+  let panel = [ quorum_failed "a"; quorum_failed "b"; quorum_failed "c" ] in
+  Alcotest.(check (option skip_reason_t)) "min_answered 3, all failed -> typed skip"
+    (Some (No_panel_answers { total = 3 }))
+    (judge_skip_reason ~panel ~min_answered:3)
+
+(* quorum 미달도 패널-측 사유로 분류된다 — judge 메커니즘 실패로 오귀속하지 않게
+   failure_code는 panels_unavailable을 유지하고 텍스트에 도달/요구 수를 노출한다. *)
+let test_quorum_shortfall_failure_surface () =
+  let failure : judge_failure =
+    Panels_unavailable (Quorum_shortfall { answered = 1; required = 2 })
+  in
+  Alcotest.(check string) "failure_code tag" "panels_unavailable"
+    (judge_failure_tag failure);
+  Alcotest.(check string) "failure text = rendered skip reason"
+    "fusion aborted: panel quorum not met (1 of 2 required answers)"
+    (judge_failure_text failure);
+  Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure)
+
+(* min_answered must be in the policy range 1..total panels (inclusive).
+   base_group has 3 models, so 0 and 4 are rejected; full-panel quorum (3) is allowed. *)
+let test_validated_bad_min_answered () =
+  let check_bad mn label =
+    match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:mn label) with
+    | Error (Fusion_policy.Validated_preset.Min_answered_below_min got)
+    | Error (Fusion_policy.Validated_preset.Min_answered_above_max got) ->
+      Alcotest.(check int) (label ^ " reports value") mn got
+    | _ -> Alcotest.failf "%s: expected min_answered error" label
+  in
+  check_bad 0 "min_answered=0";
+  check_bad 4 "min_answered>panels";
+  (* full-panel quorum is now allowed (3 answered required for 3 panels). *)
+  (match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:3 "ok3") with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "min_answered=3 with 3 panels should be Ok");
+  (* in-range stays Ok (3 models, require 2) *)
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:2 "ok2") with
+  | Ok _ -> ()
+  | Error _ -> Alcotest.fail "min_answered=2 with 3 panels should be Ok"
+
+let test_min_answered_constants () =
+  Alcotest.(check int) "default_min_answered" 1 Fusion_policy.default_min_answered;
+  Alcotest.(check int) "min_answered_floor" 1 Fusion_policy.min_answered_floor
+
+let test_judge_error_node_timed_out () =
+  let timeout_node =
+    Fusion_types.Judge_failed
+      { Fusion_types.failed_role = First "j"
+      ; failure = Fusion_types.Timeout
+      ; usage = Fusion_types.zero_usage
+      ; elapsed_s = Some 5.0
+      }
+  in
+  let unavailable_node =
+    Fusion_types.Judge_failed
+      { Fusion_types.failed_role = First "j"
+      ; failure = Fusion_types.Provider_error "provider unavailable"
+      ; usage = Fusion_types.zero_usage
+      ; elapsed_s = None
+      }
+  in
+  match
+    ( Fusion_types.judge_outcome_of_yojson
+        (Fusion_types.judge_outcome_to_yojson timeout_node)
+    , Fusion_types.judge_outcome_of_yojson
+        (Fusion_types.judge_outcome_to_yojson unavailable_node) )
+  with
+  | Ok (Judge_failed n1), Ok (Judge_failed n2) ->
+    Alcotest.(check bool) "timeout node roundtrips timed_out" true
+      (Fusion_types.judge_failure_is_timeout n1.failure);
+    Alcotest.(check (option (float 0.001))) "timeout node roundtrips elapsed_s"
+      (Some 5.0) n1.elapsed_s;
+    Alcotest.(check bool) "provider node roundtrips timed_out" false
+      (Fusion_types.judge_failure_is_timeout n2.failure);
+    Alcotest.(check (option (float 0.001))) "unavailable elapsed roundtrips"
+      None n2.elapsed_s
+  | _ -> Alcotest.fail "expected Judge_failed roundtrip"
+
+let test_deliberation_evidence_roundtrip () =
+  let actor = Panel_actor "panel-a" in
+  let preview = { text = {|{"query":"fusion"}|}; bytes = 18; truncated = false } in
+  let called : tool_called_event =
+    { actor
+    ; agent_name = "panel-a"
+    ; tool_use_id = "tool-1"
+    ; turn = 1
+    ; planned_index = 0
+    ; tool_name = "masc_web_search"
+    ; input = preview
+    }
+  in
+  let evidence : Fusion_types.deliberation_evidence =
+    { question = "Which implementation is sound?"
+    ; panel = []
+    ; judge = Error Fusion_types.Empty_result
+    ; judges = []
+    ; judge_usage = { input_tokens = 11; output_tokens = 7 }
+    ; tool_trace =
+        { observed_actors = [ actor ]
+        ; events = [ Tool_called called ]
+        ; dropped_events = 0
+        ; gaps = []
+        }
+    ; seat_routes =
+        [ { seat = Panel_seat "skeptic (fusion-panel)"
+          ; route = "fusion-panel"
+          ; answered_by = Some "claude_code.claude-sonnet-5"
+          ; failed_attempts =
+              [ { attempt_runtime = "ollama_cloud.deepseek-v4-pro"
+                ; attempt_failure = Panel_attempt_failed (Bridge_error "bootstrap")
+                }
+              ]
+          }
+        ; { seat = Judge_seat (First "lens (fusion-judge)")
+          ; route = "fusion-judge"
+          ; answered_by = None
+          ; failed_attempts =
+              [ { attempt_runtime = "ollama_cloud.deepseek-v4-pro"
+                ; attempt_failure = Judge_attempt_failed (Parse_error "not json")
+                }
+              ; { attempt_runtime = "claude_code.claude-sonnet-5"
+                ; attempt_failure = Judge_attempt_failed Timeout
+                }
+              ]
+          }
+        ]
+    }
+  in
+  let encoded = Fusion_types.deliberation_evidence_to_yojson evidence in
+  (match Fusion_types.deliberation_evidence_of_yojson encoded with
+  | Ok decoded ->
+    Alcotest.(check bool)
+      "typed evidence is lossless"
+      true
+      (Fusion_types.equal_deliberation_evidence evidence decoded)
+  | Error detail -> Alcotest.fail detail)
+;;
+
+let test_tool_trace_merge_caps_with_explicit_drops () =
+  let actor = Panel_actor "panel-a" in
+  let preview = { text = "{}"; bytes = 2; truncated = false } in
+  let events =
+    List.init (max_tool_trace_events + 1) (fun index ->
+      Tool_called
+        { actor
+        ; agent_name = "panel-a"
+        ; tool_use_id = "tool-" ^ string_of_int index
+        ; turn = 1
+        ; planned_index = index
+        ; tool_name = "masc_web_search"
+        ; input = preview
+        })
+  in
+  let merged =
+    merge_tool_traces
+      [ { observed_actors = [ actor ]; events; dropped_events = 0; gaps = [] } ]
+  in
+  Alcotest.(check int) "run ledger cap" max_tool_trace_events
+    (List.length merged.events);
+  Alcotest.(check int) "cap overflow is explicit" 1 merged.dropped_events;
+  Alcotest.(check int) "observed actor survives cap" 1
+    (List.length merged.observed_actors)
+;;
+
+(* --- 실행별 명단 (RFC fusion-seat-routes §2.4): Fusion_policy.with_roster --- *)
+
+let roster ?judge ?panel () = { judge_route = judge; panel_routes = panel }
+
+let with_roster_ok label p r =
+  match Fusion_policy.with_roster p r with
+  | Ok vp -> raw vp
+  | Error invalid ->
+    Alcotest.failf "%s: expected Ok, got %s" label
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+let test_roster_preset_roster_keeps_preset () =
+  let p = mk_preset "keep" in
+  Alcotest.check preset_t "preset_roster leaves the preset as it is" p
+    (with_roster_ok "preset_roster" p preset_roster)
+
+let test_roster_judge_override () =
+  let p = mk_preset ~judges:[ base_judge; { base_judge with Fusion_policy.jmodel = "jm2" } ] "j" in
+  Alcotest.check preset_t "only the judge seat moves"
+    { p with Fusion_policy.judge = "fusion-judge" }
+    (with_roster_ok "judge override" p (roster ~judge:"fusion-judge" ()))
+
+(* 새 panel 은 라벨 없는 그룹 하나이고 설정은 첫 그룹에서 온다. 둘째 그룹의 설정이
+   섞이지 않고, 1차 judge 명단과 min_answered 는 그대로다. *)
+let test_roster_panel_override_takes_first_group_settings () =
+  let first : Fusion_policy.panel_group =
+    { models = [ "a"; "b" ]
+    ; label = "skeptic"
+    ; system_prompt = "first group prompt"
+    ; web_tools = true
+    ; max_output_tokens = Some 700
+    ; timeout_s = Some 45.0
+    }
+  in
+  let second : Fusion_policy.panel_group =
+    { models = [ "c" ]
+    ; label = "builder"
+    ; system_prompt = "second group prompt"
+    ; web_tools = false
+    ; max_output_tokens = Some 300
+    ; timeout_s = Some 10.0
+    }
+  in
+  let judges = [ base_judge; { base_judge with Fusion_policy.jmodel = "jm2" } ] in
+  let p = mk_preset ~panels:[ first; second ] ~judges ~min_answered:2 "two-groups" in
+  Alcotest.check preset_t "one unlabelled group built from the first group"
+    { p with
+      Fusion_policy.panels =
+        [ { first with Fusion_policy.models = [ "lane-x"; "runtime.y" ]; label = "" } ]
+    }
+    (with_roster_ok "panel override" p (roster ~panel:[ "lane-x"; "runtime.y" ] ()))
+
+let test_roster_min_answered_above_new_panel () =
+  (* base_group has 3 seats, so min_answered = 3 is valid for the preset itself. *)
+  match
+    Fusion_policy.with_roster (mk_preset ~min_answered:3 "quorum") (roster ~panel:[ "x" ] ())
+  with
+  | Error (Fusion_policy.Validated_preset.Min_answered_above_max 3) -> ()
+  | Ok _ -> Alcotest.fail "a panel smaller than min_answered must be rejected, not clamped"
+  | Error invalid ->
+    Alcotest.failf "expected Min_answered_above_max 3, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+let test_roster_duplicate_route () =
+  match Fusion_policy.with_roster (mk_preset "dup") (roster ~panel:[ "x"; "x" ] ()) with
+  | Error (Fusion_policy.Validated_preset.Duplicate_panelist "x") -> ()
+  | Ok _ -> Alcotest.fail "the same route twice must be rejected"
+  | Error invalid ->
+    Alcotest.failf "expected Duplicate_panelist x, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+(* A route read from a tool argument or a CLI flag passes through
+   [route_name]. Without it two spellings of one route become two seats, and
+   the duplicate check above never sees them as the same. *)
+let test_route_name_reads_one_name_per_route () =
+  Alcotest.(check (option string)) "padding is not part of the name" (Some "sonnet")
+    (route_name "  sonnet ");
+  Alcotest.(check (option string)) "a tab counts as padding" (Some "a.b") (route_name "\ta.b\n");
+  Alcotest.(check (option string)) "blank is no route" None (route_name "   ");
+  Alcotest.(check (option string)) "empty is no route" None (route_name "");
+  Alcotest.(check (option string)) "inner spaces stay" (Some "a b") (route_name " a b ");
+  match
+    Fusion_policy.with_roster (mk_preset "pad")
+      (roster
+         ~panel:
+           (List.filter_map route_name [ " x"; "x " ])
+         ())
+  with
+  | Error (Fusion_policy.Validated_preset.Duplicate_panelist "x") -> ()
+  | Ok _ -> Alcotest.fail "two spellings of one route must collide as one seat"
+  | Error invalid ->
+    Alcotest.failf "expected Duplicate_panelist x, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+let test_roster_empty_panel () =
+  match Fusion_policy.with_roster (mk_preset "empty") (roster ~panel:[] ()) with
+  | Error Fusion_policy.Validated_preset.No_panel_models -> ()
+  | Ok _ -> Alcotest.fail "an empty panel is a roster, not the absence of one"
+  | Error invalid ->
+    Alcotest.failf "expected No_panel_models, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
+let deny_reason_t = Alcotest.testable pp_deny_reason equal_deny_reason
+
+let test_effective_preset_typed_denials () =
+  let effective preset r =
+    Fusion_policy.effective_preset ~policy:base_policy ~preset ~roster:r
+    |> Result.map raw
+  in
+  (match effective "nope" preset_roster with
+   | Error reason ->
+     Alcotest.check deny_reason_t "unknown preset" (Preset_unknown "nope") reason
+   | Ok _ -> Alcotest.fail "unknown preset must be denied");
+  (match effective "trio" (roster ~panel:[] ()) with
+   | Error (Roster_invalid _) -> ()
+   | Error reason ->
+     Alcotest.failf "expected Roster_invalid, got %s" (show_deny_reason reason)
+   | Ok _ -> Alcotest.fail "an invalid roster must be denied");
+  match effective "trio" (roster ~judge:"fusion-judge" ()) with
+  | Ok p -> Alcotest.(check string) "effective judge" "fusion-judge" p.Fusion_policy.judge
+  | Error reason -> Alcotest.failf "valid roster denied: %s" (show_deny_reason reason)
+
+let () =
+  Alcotest.run "fusion_core"
+    [ ( "gate"
+      , [ Alcotest.test_case "disabled" `Quick test_disabled
+        ; Alcotest.test_case "unknown_preset" `Quick test_unknown_preset
+        ; Alcotest.test_case "depth_nested" `Quick test_depth_nested
+        ; Alcotest.test_case "low_confidence_trigger_allowed" `Quick
+            test_low_confidence_trigger_allowed
+        ; Alcotest.test_case "high_stakes_trigger_allowed" `Quick
+            test_high_stakes_trigger_allowed
+        ; Alcotest.test_case "allow" `Quick test_allow
+        ] )
+    ; ( "config"
+      , [ Alcotest.test_case "absent" `Quick test_config_absent
+        ; Alcotest.test_case "valid" `Quick test_config_valid
+        ; Alcotest.test_case "joj_preset_parses" `Quick test_config_joj_preset_parses
+        ; Alcotest.test_case "panels_golden" `Quick test_config_panels_golden
+        ; Alcotest.test_case "heterogeneous" `Quick test_config_heterogeneous
+        ; Alcotest.test_case "empty_panels" `Quick test_config_empty_panels
+        ; Alcotest.test_case "conflicting_grammar" `Quick test_config_conflicting_grammar
+        ; Alcotest.test_case "duplicate_panelist" `Quick test_config_duplicate_panelist
+        ; Alcotest.test_case "same_model_diff_prompt" `Quick
+            test_config_same_model_diff_prompt
+        ; Alcotest.test_case "same_model_no_label_rejected" `Quick
+            test_config_same_model_no_label_rejected
+        ; Alcotest.test_case "panelist_id" `Quick test_panelist_id
+        ; Alcotest.test_case "panelist_id_collision_fail_closed" `Quick
+            test_config_panelist_id_collision_fail_closed
+        ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
+        ; Alcotest.test_case "large_panel_is_valid" `Quick test_config_large_panel_is_valid
+        ; Alcotest.test_case "no_panel_models" `Quick test_config_no_panel_models
+        ; Alcotest.test_case "invalid_min_answered" `Quick
+            test_config_invalid_min_answered
+        ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
+        ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
+        ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model
+        ; Alcotest.test_case "bad_staged_judge_group_size" `Quick
+            test_config_bad_staged_judge_group_size
+        ; Alcotest.test_case "council_staged_eligible" `Quick
+            test_config_council_preset_is_staged_eligible
+        ; Alcotest.test_case "shipped_runtime_preset_seats_name_declared_routes" `Quick
+            test_shipped_runtime_preset_seats_name_declared_routes
+        ; Alcotest.test_case "shipped_runtime_council_staged_eligible" `Quick
+            test_shipped_runtime_council_is_staged_eligible
+        ; Alcotest.test_case "two_judges_not_staged_eligible" `Quick
+            test_config_two_judges_not_staged_eligible
+        ; Alcotest.test_case "invalid_max_output_tokens" `Quick
+            test_config_invalid_max_output_tokens
+        ; Alcotest.test_case "timeouts_parse" `Quick test_config_parses_timeouts
+        ; Alcotest.test_case "zero_timeout_rejected" `Quick
+            test_config_rejects_nonpositive_timeout
+        ; Alcotest.test_case "negative_judge_timeout_rejected" `Quick
+            test_config_rejects_negative_judge_timeout
+        ; Alcotest.test_case "absent_timeouts_valid" `Quick
+            test_config_absent_timeouts_are_valid
+        ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
+        ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
+        ; Alcotest.test_case "judges_parse" `Quick test_config_judges_parse
+        ; Alcotest.test_case "no_judges" `Quick test_config_no_judges
+        ] )
+    ; ( "validated_preset"
+      , [ Alcotest.test_case "ok" `Quick test_validated_ok
+        ; Alcotest.test_case "no_panel_models" `Quick test_validated_no_panel_models
+        ; Alcotest.test_case "missing_prompt" `Quick test_validated_missing_prompt
+        ; Alcotest.test_case "missing_judge" `Quick test_validated_missing_judge
+        ; Alcotest.test_case "duplicate_panelist" `Quick test_validated_duplicate_panelist
+        ; Alcotest.test_case "bad_max_output_tokens" `Quick
+            test_validated_bad_max_output_tokens
+        ; Alcotest.test_case "judges_empty_ok" `Quick test_validated_judges_empty_ok
+        ; Alcotest.test_case "judges_ok" `Quick test_validated_judges_ok
+        ; Alcotest.test_case "judge_prompt_missing" `Quick test_validated_judge_prompt_missing
+        ; Alcotest.test_case "duplicate_judge" `Quick test_validated_duplicate_judge
+        ; Alcotest.test_case "judge_bad_max_output_tokens" `Quick
+            test_validated_judge_bad_max_output_tokens
+        ] )
+    ; ( "staged_judge_groups"
+      , [ Alcotest.test_case "exact_3x3" `Quick test_staged_judge_groups_exact_3x3
+        ; Alcotest.test_case "too_few" `Quick test_staged_judge_groups_too_few
+        ; Alcotest.test_case "ragged" `Quick test_staged_judge_groups_ragged
+        ; Alcotest.test_case "bad_size" `Quick test_staged_judge_groups_bad_size
+        ] )
+    ; ( "judge_args"
+      , [ Alcotest.test_case "single_group_identity" `Quick
+            test_judge_args_single_group_identity
+        ; Alcotest.test_case "multi_group" `Quick test_judge_args_multi_group
+        ] )
+    ; ( "judge_parse"
+      , [ Alcotest.test_case "valid" `Quick test_judge_valid
+        ; Alcotest.test_case "recommend" `Quick test_judge_recommend
+        ; Alcotest.test_case "insufficient" `Quick test_judge_insufficient
+        ; Alcotest.test_case "blank conclusions are rejected" `Quick
+            test_judge_rejects_blank_conclusions
+        ; Alcotest.test_case "unknown_kind" `Quick test_judge_unknown_kind
+        ; Alcotest.test_case "missing_resolved" `Quick test_judge_missing_resolved
+        ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
+        ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
+        ; Alcotest.test_case "decision_schema_branches" `Quick
+            test_judge_decision_schema_branches
+        ; Alcotest.test_case "reject_null_and_unknown" `Quick
+            test_judge_rejects_null_optional_and_unknown_field
+        ; Alcotest.test_case "reject_lossy_collections" `Quick test_judge_rejects_lossy_collections
+        ] )
+    ; ( "topology"
+      , [ Alcotest.test_case "roundtrip" `Quick test_topology_roundtrip
+        ; Alcotest.test_case "unknown_is_none" `Quick test_topology_unknown_is_none
+        ; Alcotest.test_case "wire_strings" `Quick test_topology_strings
+        ; Alcotest.test_case "escalation_policy" `Quick test_escalation_policy
+        ; Alcotest.test_case "render_lossless_fields" `Quick test_render_lossless_fields
+        ; Alcotest.test_case "render_decision_answer" `Quick test_render_decision_answer
+        ; Alcotest.test_case "render_decision_recommend" `Quick
+            test_render_decision_recommend
+        ; Alcotest.test_case "render_decision_insufficient" `Quick
+            test_render_decision_insufficient
+        ; Alcotest.test_case "render_empty_lists" `Quick test_render_empty_lists
+        ] )
+    ; ( "judge_outcome"
+      , [ Alcotest.test_case "roundtrip" `Quick test_judge_outcome_roundtrip
+        ; Alcotest.test_case "timed_out_elapsed_s" `Quick
+            test_judge_error_node_timed_out
+        ; Alcotest.test_case "deliberation evidence roundtrip" `Quick
+            test_deliberation_evidence_roundtrip
+        ; Alcotest.test_case "tool trace cap records drops" `Quick
+            test_tool_trace_merge_caps_with_explicit_drops
+        ] )
+    ; ( "roster"
+      , [ Alcotest.test_case "preset_roster keeps the preset" `Quick
+            test_roster_preset_roster_keeps_preset
+        ; Alcotest.test_case "judge override" `Quick test_roster_judge_override
+        ; Alcotest.test_case "panel override takes first group settings" `Quick
+            test_roster_panel_override_takes_first_group_settings
+        ; Alcotest.test_case "min_answered above new panel" `Quick
+            test_roster_min_answered_above_new_panel
+        ; Alcotest.test_case "duplicate route" `Quick test_roster_duplicate_route
+        ; Alcotest.test_case "route_name reads one name per route" `Quick
+            test_route_name_reads_one_name_per_route
+        ; Alcotest.test_case "empty panel" `Quick test_roster_empty_panel
+        ; Alcotest.test_case "effective preset typed denials" `Quick
+            test_effective_preset_typed_denials
+        ] )
+    ; ( "panel_guard"
+      , [ Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered
+        ; Alcotest.test_case "min_answered_constants" `Quick test_min_answered_constants
+        ; Alcotest.test_case "panels_unavailable_failure" `Quick
+            test_panels_unavailable_failure
+        ; Alcotest.test_case "quorum_shortfall" `Quick test_quorum_shortfall
+        ; Alcotest.test_case "quorum_met" `Quick test_quorum_met
+        ; Alcotest.test_case "quorum_default_preserves_current_behavior" `Quick
+            test_quorum_default_preserves_current_behavior
+        ; Alcotest.test_case "quorum_full_panel_all_failed" `Quick
+            test_quorum_full_panel_all_failed
+        ; Alcotest.test_case "quorum_shortfall_failure_surface" `Quick
+            test_quorum_shortfall_failure_surface
+        ] )
+    ]

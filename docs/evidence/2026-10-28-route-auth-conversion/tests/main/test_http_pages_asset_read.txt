@@ -1,0 +1,46 @@
+[2026-10-29 00:17:46] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `http_pages_asset_read'.
+This run has ID `9WCS0Q85'.
+
+  [OK]          read_file                 0   binary round-trip.
+  [OK]          read_file                 1   empty file.
+  [OK]          read_file                 2   missing file -> Error.
+> [FAIL]        dashboard_assets          0   H1/H2 missing static asset -> 404.
+  [FAIL]        dashboard_assets          1   H1/H2 static asset read error -...
+  [OK]          dashboard_etag            0   body content hash.
+  [OK]          env_helper                0   missing env restored as unset.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        dashboard_assets          0   H1/H2 missing static asset -...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[exception] Stdlib.Effect.Unhandled(Eio__core__Cancel.Get_context)
+            Raised by primitive operation at Eio__core__Cancel.Fiber_context.get_vars in file "lib_eio/core/cancel.ml" (inlined), line 226, characters 9-37
+            Called from Eio__core__Fiber.get in file "lib_eio/core/fiber.ml" (inlined), line 288, characters 28-62
+            Called from Server_h2_response_resources.current_exn in file "lib/server/server_h2_response_resources.ml", line 48, characters 27-52
+            Called from Server_h2_gateway_helpers.h2_respond_body in file "lib/server/server_h2_gateway_helpers.ml", line 58, characters 4-49
+            Called from Server_h2_gateway_routes_extra.dispatch in file "lib/server/server_h2_gateway_routes_extra.ml", line 271, characters 14-72
+            Called from Dune__exe__Test_http_pages_asset_read.http2_dashboard_asset_response.(fun) in file "test/test_http_pages_asset_read.ml", lines 178-185, characters 8-14
+            Called from H2__Server_connection.handle_headers in file "lib/server_connection.ml", line 351, characters 8-30
+            Called from Angstrom__Parser.Monad.(>>|).(fun).succ' in file "lib/parser.ml", line 64, characters 61-66
+            Called from Angstrom__Parser.to_exported_state.(fun) in file "lib/parser.ml", line 32, characters 29-57
+            Called from H2__Parse.Reader.read_with_more in file "lib/parse.ml", line 652, characters 41-69
+            Called from Dune__exe__Test_http_pages_asset_read.http2_dashboard_asset_response.transfer.dr in file "test/test_http_pages_asset_read.ml", line 198, characters 34-69
+            Called from Dune__exe__Test_http_pages_asset_read.http2_dashboard_asset_response.transfer.dr in file "test/test_http_pages_asset_read.ml", line 204, characters 15-35
+            Called from Stdlib__List.fold_left in file "list.ml", line 125, characters 24-34
+            Called from Dune__exe__Test_http_pages_asset_read.http2_dashboard_asset_response.transfer.dr in file "test/test_http_pages_asset_read.ml", lines 194-207, characters 10-18
+            Called from Dune__exe__Test_http_pages_asset_read.http2_dashboard_asset_response.pump in file "test/test_http_pages_asset_read.ml", lines 217-220, characters 6-42
+            Called from Dune__exe__Test_http_pages_asset_read.http2_dashboard_asset_response in file "test/test_http_pages_asset_read.ml", line 232, characters 2-9
+            Called from Dune__exe__Test_http_pages_asset_read.test_dashboard_static_missing_statuses.(fu in file "test/test_http_pages_asset_read.ml", line 253, characters 6-67
+            Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+            Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+            Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+            Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+            Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+            Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+            
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/http_pages_asset_read/dashboard_assets.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/http_pages_asset_read'.
+2 failures! in 0.029s. 7 tests run.
+exit=1

@@ -1,0 +1,40 @@
+{
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 2022,
+      "sha256": "52a14b17fd1205b2a1ca6d574f9e989ad4405a0ad0f9035261fe11c1a10133eb"
+    },
+    {
+      "file": "controlled-inputs.json",
+      "bytes": 1268,
+      "sha256": "4915b5fdddbf67e730161c2b04273c2c21d4775e803ca7b6003e145c64ea3f95"
+    },
+    {
+      "file": "leading_user.result.json",
+      "bytes": 1168,
+      "sha256": "0badc8e99e57e45c7ab1641dfc5c3af807c815a03ff3b0f38913b78bd5fba9d6"
+    },
+    {
+      "file": "model.json",
+      "bytes": 129,
+      "sha256": "d78a2deac0103aa4e7ae23d0f6eaef4fb394b260ac571a235fad2fd58fddd232"
+    },
+    {
+      "file": "replay_pair.py",
+      "bytes": 2859,
+      "sha256": "b06e82e540269f15e9864528dc2526e833e47accd2e281eb8dce1a2702f538ff"
+    },
+    {
+      "file": "system_suffix.result.json",
+      "bytes": 1045,
+      "sha256": "ef4d4bd883ddfef5ceedf7d2304384db527424f14d4a1985ed9d521e06baf858"
+    },
+    {
+      "file": "tail_user.result.json",
+      "bytes": 938,
+      "sha256": "07e33c65fd8c427047f9248a06ba8df16d64c3a8c01b241b0b153b5ece590715"
+    }
+  ],
+  "scope": "selected public receipts and summaries; private tokens and provider Thinking excluded"
+}

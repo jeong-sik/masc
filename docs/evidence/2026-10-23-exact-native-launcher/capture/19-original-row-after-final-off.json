@@ -1,0 +1,178 @@
+{
+  "at": 1792751439.6908119,
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/lane-addons/slice?run_id=exact-launcher-review&lane_id=01a1684d-3b95-7000-bd0e-95b4c4c6d51b%2Foutputs%2Fphrase-source%2Fstatistics",
+    "body": null,
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "etag": "W/\"cd50b3ad9e03\"",
+      "cache-control": "no-cache",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "4295"
+    },
+    "body": {
+      "complete": true,
+      "rows": [
+        {
+          "id": "01a1684d-3b95-7000-bd0e-95b4c4c6d51b/1/475d063e48d715e5b4cf8939ff79c2628e2710a466bb4f3c9ed1a07221cded7e",
+          "lane_id": "01a1684d-3b95-7000-bd0e-95b4c4c6d51b/outputs/phrase-source/statistics",
+          "kind": "value",
+          "title": "Supplied output row statistics",
+          "observed_at": 1792751254.472828,
+          "subject_id": "phrase-source",
+          "clock": null,
+          "actor": null,
+          "fields": {
+            "source_id": "phrase-input",
+            "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+            "source_event_id": "01a1684c-8c30-7000-9443-b69f977e36d8/output/1",
+            "scope": "supplied_latest_completed_output",
+            "observed_row_count": 1,
+            "observed_by_kind": {
+              "event": 0,
+              "value": 1,
+              "relation": 0
+            },
+            "input_complete": true,
+            "producer": {
+              "installation_id": "phrase-source",
+              "instance_id": "01a1684c-8c30-7000-9443-b69f977e36d8",
+              "run_id": "exact-launcher-review",
+              "configuration_revision": "66b81849b23e07c0b5eca3aea49252688a9bb54934fc7e10b18a22b420e22f55",
+              "package_revision": "0.1.0",
+              "observation_seq": 1,
+              "output_id": "phrase",
+              "output_selection": {
+                "lanes": [
+                  "phrase"
+                ]
+              },
+              "coverage_scope": "whole_producer"
+            },
+            "producer_status": {
+              "source_id": "01a1684c-8c30-7000-9443-b69f977e36d8",
+              "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+              "cursor": "1",
+              "complete": true,
+              "detail": null
+            },
+            "upstream_coverage": [
+              {
+                "source_id": "vst-phrase",
+                "incarnation": "declared-exact-launcher-fixture",
+                "cursor": "1",
+                "complete": true,
+                "detail": "Explicit local input fixture; no real audio rendering or playback"
+              }
+            ],
+            "upstream_rows": [
+              {
+                "id": "01a1684c-8c30-7000-9443-b69f977e36d8/1/df190e41c5630e388583104efefd679f32eb20e31085f8b347a966b188a37d4c",
+                "lane_id": "01a1684c-8c30-7000-9443-b69f977e36d8/phrase",
+                "kind": "value",
+                "subject_id": "exact-launcher-fixture:1",
+                "observed_at": 1792751169.9861279,
+                "clock": null,
+                "actor": null,
+                "evidence": [
+                  {
+                    "uri": "lane-evidence:c8893b39d0e80a15acbe0c17f5b6767aa97bc440f752f53dced7a0087c2f5942",
+                    "sha256": "c8893b39d0e80a15acbe0c17f5b6767aa97bc440f752f53dced7a0087c2f5942"
+                  }
+                ]
+              }
+            ]
+          },
+          "evidence": [
+            {
+              "uri": "lane-evidence:36ab26a96cc33bbf8998bc3a9fc527ab17ff06c833fdbc9ccafe38306ec2a230",
+              "sha256": "36ab26a96cc33bbf8998bc3a9fc527ab17ff06c833fdbc9ccafe38306ec2a230"
+            }
+          ],
+          "related_ids": []
+        }
+      ],
+      "coverage": [
+        {
+          "source_id": "vst-phrase",
+          "incarnation": "declared-exact-launcher-fixture",
+          "cursor": "1",
+          "complete": true,
+          "detail": "Explicit local input fixture; no real audio rendering or playback"
+        },
+        {
+          "source_id": "vst-phrase",
+          "incarnation": "declared-exact-launcher-fixture",
+          "cursor": "2",
+          "complete": true,
+          "detail": "Explicit local input fixture v2: two observations; no audio or playback"
+        },
+        {
+          "source_id": "retained:01a1684c-8c30-7000-9443-b69f977e36d8",
+          "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "cursor": "scanned:2/of:2",
+          "complete": true,
+          "detail": "window [unbounded, unbounded]; rows and source coverage inspected through 2/of:2; no matching row records omitted; all inspected source coverage returned; retained observations readable"
+        },
+        {
+          "source_id": "phrase-input",
+          "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "cursor": "2",
+          "complete": true,
+          "detail": null
+        },
+        {
+          "source_id": "retained:01a1684e-3662-7000-a3bc-86863a09eb2f",
+          "incarnation": "01a1684e-3662-7000-a3bc-86863a09eb2f",
+          "cursor": "scanned:1/of:1",
+          "complete": true,
+          "detail": "window [unbounded, unbounded]; rows and source coverage inspected through 1/of:1; no matching row records omitted; all inspected source coverage returned; retained observations readable"
+        },
+        {
+          "source_id": "phrase-input",
+          "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "cursor": "1",
+          "complete": true,
+          "detail": null
+        },
+        {
+          "source_id": "retained:01a1684d-3b95-7000-bd0e-95b4c4c6d51b",
+          "incarnation": "01a1684d-3b95-7000-bd0e-95b4c4c6d51b",
+          "cursor": "scanned:1/of:1",
+          "complete": true,
+          "detail": "window [unbounded, unbounded]; rows and source coverage inspected through 1/of:1; no matching row records omitted; all inspected source coverage returned; retained observations readable"
+        },
+        {
+          "source_id": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "incarnation": "01a1684c-8c30-7000-9443-b69f977e36d8",
+          "cursor": "2",
+          "complete": true,
+          "detail": "detached; retained range only"
+        },
+        {
+          "source_id": "01a1684e-3662-7000-a3bc-86863a09eb2f",
+          "incarnation": "01a1684e-3662-7000-a3bc-86863a09eb2f",
+          "cursor": "1",
+          "complete": true,
+          "detail": "detached; retained range only"
+        },
+        {
+          "source_id": "01a1684d-3b95-7000-bd0e-95b4c4c6d51b",
+          "incarnation": "01a1684d-3b95-7000-bd0e-95b4c4c6d51b",
+          "cursor": "1",
+          "complete": true,
+          "detail": "detached; retained range only"
+        }
+      ]
+    }
+  }
+}

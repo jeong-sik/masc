@@ -1,0 +1,6 @@
++ 1152ms devtools port 55789
++ 1583ms browser Chrome/154.0.8037.57
++ 1642ms Extensions.loadUnpacked -> hjhcoogdpgkmdicaipfcopkjagnfailn (matches id computed from path) origins: extension
++ 1955ms masc readiness expression -> {"result":{"type":"object","value":{}},"exceptionDetails":{"exceptionId":1,"text":"Uncaught (in promise) ReferenceError: setTimeout is not defined","lineNumber":3,"columnNumber":7,"scriptId":"3","stackTrace":{"callFrames":[{"functionName":"check","scriptId":"3","url":"","lineNumber":2,"columnNumber":6},{"functionName":"","scriptId":"3","url":"","lineNumber":4,"columnNumber":2},{"functionName":"","scriptId":"3","url":"","lineNumber":0,"columnNumber":0}]},"exception":{"type":"object","subtype":"error","className":"ReferenceError","description":"ReferenceError: setTimeout is not defined\n    at check (<anonymous>:3:7)\n    at <anonymous>:5:3\n    at new Promise (<anonymous>)\n    at <anonymous>:1:1","objectId":"-2568383769713974229.1.1"}}}
++ 2956ms marker one second later -> {"result":{"type":"object","value":{"protocolVersion":"2.0.0","serverInfo":{"name":"stagehand","version":"1.0.2"}}}}
++ 2957ms stagehand globals -> ["__stagehandSendToHost","__stagehand_runtime","__stagehandReceiveFromHost"]

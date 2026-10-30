@@ -1,0 +1,148 @@
+{
+  "is_derivative": true,
+  "method": "Select scheduler, build identity, effective base and overall health from original controller snapshots; raw HTTP response identity remains separate and was semantically compared. No raw-response byte identity is claimed for pretty JSON or this selection.",
+  "observations": [
+    {
+      "snapshot": "startup-failed-health.json",
+      "snapshot_sha256": "cb1b70d09952f6c6ed26603778f9f885c4c2c4f7d093105c23559c87de880fce",
+      "snapshot_bytes": 26681,
+      "raw_http": {
+        "stage": "startup-error-B",
+        "method": "GET",
+        "path": "/health?full=1",
+        "observed_at": 1793042466.859259,
+        "status": 200,
+        "body_path": "00067-response.bin",
+        "body_bytes": 20963,
+        "body_sha256": "4b99fd4dc30a4cab7ff173fdac7bd98b2060138186ee008e35c06cdfbec5d4a9"
+      },
+      "selected": {
+        "status": "ok",
+        "overall_status": "warming",
+        "effective_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-startup-actual-3_guv0tp",
+        "build": {
+          "binary_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+          "executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+          "runtime_instance_id": "01a179a8-c42d-7000-9223-d9c4b029a87f",
+          "started_at": "2026-10-26T19:21:05Z"
+        },
+        "schedule_runner": {
+          "schema": "masc.schedule.runner_status.v1",
+          "status": "degraded",
+          "tick_in_flight": false,
+          "tick_count": 1,
+          "success_count": 0,
+          "failure_count": 1,
+          "crash_count": 0,
+          "last_tick_started_at": 1793042466.761033,
+          "last_tick_finished_at": 1793042466.775955,
+          "last_success_at": null,
+          "last_error_at": 1793042466.775955,
+          "last_error": "startup recovery failed: schedule persistence failed: backend_set failed for schedules.json: (Backend_types.IOError\n   \"Eio.Io Unix_error (Is a directory, \\\"openat\\\", \\\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-startup-actual-3_guv0tp/.masc/schedules.json.tmp-atomic\\\"),\\n  opening <fs:/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-startup-actual-3_guv0tp/.masc/schedules.json.tmp-atomic>\")",
+          "last_duration_sec": 0.014921903610229492,
+          "last_counts": null,
+          "totals": {
+            "due_changed": 0,
+            "emitted": 0,
+            "rescheduled": 0,
+            "dispatch_succeeded": 0,
+            "dispatch_failed": 0,
+            "dispatch_unsupported": 0,
+            "dispatch_start_rejected": 0,
+            "wake_enqueued": 0,
+            "wake_skipped_no_keeper": 0,
+            "wake_skipped_missing_schedule": 0,
+            "wake_skipped_non_keeper_actor": 0,
+            "wake_skipped_unregistered_keeper": 0,
+            "wake_failed": 0
+          },
+          "pending_settlement_count": 0,
+          "settlement_errors": [],
+          "held": [],
+          "stale_after_sec": 60.0,
+          "last_tick_age_sec": 0.08409500122070312,
+          "last_success_age_sec": null,
+          "last_error_age_sec": 0.08409500122070312
+        }
+      }
+    },
+    {
+      "snapshot": "restored-health.json",
+      "snapshot_sha256": "626b0603b19a1b92d20d06b26b0f58562e3d766e7bde6d3591a48bd1a081073f",
+      "snapshot_bytes": 42013,
+      "raw_http": {
+        "stage": "restored-health-B",
+        "method": "GET",
+        "path": "/health?full=1",
+        "observed_at": 1793042481.845772,
+        "status": 200,
+        "body_path": "00138-response.bin",
+        "body_bytes": 32488,
+        "body_sha256": "c7c5821f663c2af9e2f5c55670856fa2cac1e4eaff13651fcedafd2b5216ed49"
+      },
+      "selected": {
+        "status": "ok",
+        "overall_status": "degraded",
+        "effective_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-startup-actual-3_guv0tp",
+        "build": {
+          "binary_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+          "executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+          "runtime_instance_id": "01a179a8-c42d-7000-9223-d9c4b029a87f",
+          "started_at": "2026-10-26T19:21:05Z"
+        },
+        "schedule_runner": {
+          "schema": "masc.schedule.runner_status.v1",
+          "status": "ok",
+          "tick_in_flight": false,
+          "tick_count": 2,
+          "success_count": 1,
+          "failure_count": 1,
+          "crash_count": 0,
+          "last_tick_started_at": 1793042481.777703,
+          "last_tick_finished_at": 1793042481.818114,
+          "last_success_at": 1793042481.818114,
+          "last_error_at": 1793042466.775955,
+          "last_error": "startup recovery failed: schedule persistence failed: backend_set failed for schedules.json: (Backend_types.IOError\n   \"Eio.Io Unix_error (Is a directory, \\\"openat\\\", \\\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-startup-actual-3_guv0tp/.masc/schedules.json.tmp-atomic\\\"),\\n  opening <fs:/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-startup-actual-3_guv0tp/.masc/schedules.json.tmp-atomic>\")",
+          "last_duration_sec": 0.04041099548339844,
+          "last_counts": {
+            "due_changed": 0,
+            "emitted": 0,
+            "rescheduled": 0,
+            "dispatch_succeeded": 2,
+            "dispatch_failed": 0,
+            "dispatch_unsupported": 0,
+            "dispatch_start_rejected": 0,
+            "wake_enqueued": 2,
+            "wake_skipped_no_keeper": 0,
+            "wake_skipped_missing_schedule": 0,
+            "wake_skipped_non_keeper_actor": 0,
+            "wake_skipped_unregistered_keeper": 0,
+            "wake_failed": 0
+          },
+          "totals": {
+            "due_changed": 0,
+            "emitted": 0,
+            "rescheduled": 0,
+            "dispatch_succeeded": 2,
+            "dispatch_failed": 0,
+            "dispatch_unsupported": 0,
+            "dispatch_start_rejected": 0,
+            "wake_enqueued": 2,
+            "wake_skipped_no_keeper": 0,
+            "wake_skipped_missing_schedule": 0,
+            "wake_skipped_non_keeper_actor": 0,
+            "wake_skipped_unregistered_keeper": 0,
+            "wake_failed": 0
+          },
+          "pending_settlement_count": 0,
+          "settlement_errors": [],
+          "held": [],
+          "stale_after_sec": 60.0,
+          "last_tick_age_sec": 0.029321908950805664,
+          "last_success_age_sec": 0.029321908950805664,
+          "last_error_age_sec": 15.071480989456177
+        }
+      }
+    }
+  ]
+}

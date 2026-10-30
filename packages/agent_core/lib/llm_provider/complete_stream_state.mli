@@ -1,0 +1,72 @@
+(** Pure state machine for assembling provider stream events.
+
+    The transport shell owns the current snapshot. This module only resolves a
+    typed event into a new immutable snapshot and projects a terminal receipt;
+    it performs no I/O, logging, clock access, or synchronization. *)
+
+type t
+
+(** What the provider announced a content block to be. *)
+type block_kind =
+  | Text_block
+  | Thinking_block
+  | Reasoning_details_block
+  | Redacted_thinking_block
+  | Tool_use_block
+  | Tool_result_block of { is_error : bool }
+  | Image_block
+  | Document_block
+  | Audio_block
+  | Unknown_block of string
+
+(** The kind announced for the block at [index], open or closed; [None] for
+    a block no start event announced. A reader classifying a block's stop
+    event asks this, because the stop event carries only the index. *)
+val block_kind_at : t -> int -> block_kind option
+
+type receipt =
+  | Completed of Types.api_response
+  | Failed of Types.stream_error
+
+(** Empty stream state. *)
+val empty : t
+
+(** Assembly-only compatibility API. [transition state event] returns the next
+    immutable snapshot, but callers projecting live events must use
+    {!transition_with_resolution}. The first terminal stream failure is sticky:
+    later events cannot mutate or replace it. *)
+val transition : t -> Types.sse_event -> t
+
+(** Resolve one raw event against the canonical state.
+    [Types.Stream_event_accepted] carries the
+    exact event downstream consumers must project; an explicitly typed
+    [TextSnapshot] may become its unseen [TextDelta] suffix.
+    [Types.Stream_event_suppressed] means the raw event must not be projected
+    (an exact/older typed snapshot replay, or input after a sticky failure).
+    [Types.Stream_event_rejected] carries the first sticky typed failure.
+    Ordinary [TextDelta] values always append, including repeated text.
+    Content repetition does not establish a terminal or failure boundary.
+    Text and reasoning continue until a provider terminal, typed protocol
+    failure, or cancellation at the transport shell. *)
+val transition_with_resolution
+  :  t
+  -> Types.sse_event
+  -> t * Types.stream_event_resolution
+
+(** Whether a typed provider or wire failure has been captured. *)
+val has_failed : t -> bool
+
+(** The first captured typed failure, when present. *)
+val failure : t -> Types.stream_error option
+
+(** Resolve the accumulated state into one typed terminal receipt. Missing
+    stop semantics and malformed content remain distinct failures.
+
+    Response [usage] is [None] when no usage field was observed in the input
+    events. Explicit
+    counter or cost zero is an observation; an all-[None] delta is not.
+    Inline Chat carrier witnesses are validated against exact accumulated block
+    identities and persisted in response telemetry.
+    This does not restore per-field absence already lost by a parser or by
+    the integer fields of {!Types.api_usage}. *)
+val finalize : t -> receipt

@@ -1,0 +1,418 @@
+{
+  "observed_at": "2026-10-16T15:17:57.345645+00:00",
+  "scope": "Controlled isolated native before/after; one changed-health sample per arm and viewport; not production latency or throughput",
+  "baseline_source": "683c7950682b45a2591002e09f654515ccf02155",
+  "candidate_source": "f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c",
+  "baseline_server_source": "683c7950682b45a2591002e09f654515ccf02155",
+  "delay_seconds": 2.0,
+  "collector_attempt_count": 14,
+  "collector_failures": 2,
+  "captured_attempts": 12,
+  "rows": [
+    {
+      "arm": "baseline",
+      "viewport": [
+        120,
+        36
+      ],
+      "attempt": 6,
+      "fixture_sha256": "20a5411360dbef927f7a9021b802e5656ede61d312bcb12f964ca7c99831aada",
+      "meta_fixture_sha256": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909",
+      "observer_sha256": "cc83ff8cecc178b3e5f76404ac339bf11faac4acdaa87a626e52ead9ebdc08b7",
+      "binary_identity": {
+        "server": {
+          "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-macos-arm64",
+          "sha256": "9cc1f84b908aa7978a7ed6d4364022edc8db1fee0762b082ecb38ce8e993fadf",
+          "source": "683c7950682b45a2591002e09f654515ccf02155",
+          "returncode": 0,
+          "stderr": "[2026-10-17 00:15:34] [INFO] [MCP] Tag registry initialized: 178 tools registered\n"
+        },
+        "tui": {
+          "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-tui-macos-arm64",
+          "sha256": "a66362553de8975dd9e9fe67929e70fc6ac5193e0daedb531b96f2bb765be889",
+          "source": "683c7950682b45a2591002e09f654515ccf02155",
+          "returncode": 0,
+          "stderr": ""
+        }
+      },
+      "roster_admitted_ms": null,
+      "terminal_refresh_ms": null,
+      "baseline_timing_note": "Baseline has no admission timer; timing is bounded by manually inspected captured frames, not invented from candidate instrumentation",
+      "warm_http_boundaries": [
+        {
+          "path": "/api/v1/gate/keepers",
+          "warm": true,
+          "delayed": false,
+          "started_ms": 10507.502833963372,
+          "finished_ms": 10555.41962501593,
+          "status": 200,
+          "rewritten_fixture_rows": 2,
+          "relative_to_warm_key_start_ms": 49.608874949626625,
+          "relative_to_warm_key_finish_ms": 97.52566600218415
+        },
+        {
+          "path": "/api/v1/dashboard/briefing",
+          "warm": true,
+          "delayed": true,
+          "started_ms": 10507.63220898807,
+          "finished_ms": 12515.155792003497,
+          "status": 304,
+          "rewritten_fixture_rows": 0,
+          "relative_to_warm_key_start_ms": 49.7382499743253,
+          "relative_to_warm_key_finish_ms": 2057.2618329897523
+        },
+        {
+          "path": "/api/v1/operator",
+          "warm": true,
+          "delayed": true,
+          "started_ms": 10506.995958974585,
+          "finished_ms": 12515.400292002596,
+          "status": 200,
+          "rewritten_fixture_rows": 0,
+          "relative_to_warm_key_start_ms": 49.10199996083975,
+          "relative_to_warm_key_finish_ms": 2057.5063329888508
+        }
+      ],
+      "manual_frame_observation": {
+        "warm-0.1": "two previous offline rows",
+        "warm-0.5": "two previous offline rows",
+        "warm-2.5": "two failing rows"
+      },
+      "physical_paint_measured": false
+    },
+    {
+      "arm": "early-roster",
+      "viewport": [
+        120,
+        36
+      ],
+      "attempt": 6,
+      "fixture_sha256": "20a5411360dbef927f7a9021b802e5656ede61d312bcb12f964ca7c99831aada",
+      "meta_fixture_sha256": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909",
+      "observer_sha256": "cc83ff8cecc178b3e5f76404ac339bf11faac4acdaa87a626e52ead9ebdc08b7",
+      "binary_identity": {
+        "server": {
+          "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-macos-arm64",
+          "sha256": "9cc1f84b908aa7978a7ed6d4364022edc8db1fee0762b082ecb38ce8e993fadf",
+          "source": "683c7950682b45a2591002e09f654515ccf02155",
+          "returncode": 0,
+          "stderr": "[2026-10-17 00:15:34] [INFO] [MCP] Tag registry initialized: 178 tools registered\n"
+        },
+        "tui": {
+          "path": "/private/tmp/masc-tui-observability-evidence-20261016/early-roster-native-subset/masc-tui-macos-arm64",
+          "sha256": "a45f76b90db249a19a76976fcbc7e827fe8f660242dc84f419820fcad4076183",
+          "source": "f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c",
+          "returncode": 0,
+          "stderr": ""
+        }
+      },
+      "roster_admitted_ms": 54.594,
+      "terminal_refresh_ms": 2046.112958,
+      "baseline_timing_note": null,
+      "warm_http_boundaries": [
+        {
+          "path": "/api/v1/gate/keepers",
+          "warm": true,
+          "delayed": false,
+          "started_ms": 10408.299832954071,
+          "finished_ms": 10436.715290998109,
+          "status": 200,
+          "rewritten_fixture_rows": 2,
+          "relative_to_warm_key_start_ms": 16.145417001098394,
+          "relative_to_warm_key_finish_ms": 44.56087504513562
+        },
+        {
+          "path": "/api/v1/dashboard/briefing",
+          "warm": true,
+          "delayed": true,
+          "started_ms": 10408.23437506333,
+          "finished_ms": 12414.452333003283,
+          "status": 304,
+          "rewritten_fixture_rows": 0,
+          "relative_to_warm_key_start_ms": 16.079959110356867,
+          "relative_to_warm_key_finish_ms": 2022.2979170503095
+        },
+        {
+          "path": "/api/v1/operator",
+          "warm": true,
+          "delayed": true,
+          "started_ms": 10408.69970805943,
+          "finished_ms": 12414.534999988973,
+          "status": 200,
+          "rewritten_fixture_rows": 0,
+          "relative_to_warm_key_start_ms": 16.545292106457055,
+          "relative_to_warm_key_finish_ms": 2022.380584036
+        }
+      ],
+      "manual_frame_observation": {
+        "warm-0.1": "two failing rows",
+        "warm-0.5": "two failing rows",
+        "warm-2.5": "two failing rows"
+      },
+      "physical_paint_measured": false
+    },
+    {
+      "arm": "baseline",
+      "viewport": [
+        80,
+        24
+      ],
+      "attempt": 7,
+      "fixture_sha256": "20a5411360dbef927f7a9021b802e5656ede61d312bcb12f964ca7c99831aada",
+      "meta_fixture_sha256": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909",
+      "observer_sha256": "cc83ff8cecc178b3e5f76404ac339bf11faac4acdaa87a626e52ead9ebdc08b7",
+      "binary_identity": {
+        "server": {
+          "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-macos-arm64",
+          "sha256": "9cc1f84b908aa7978a7ed6d4364022edc8db1fee0762b082ecb38ce8e993fadf",
+          "source": "683c7950682b45a2591002e09f654515ccf02155",
+          "returncode": 0,
+          "stderr": "[2026-10-17 00:15:34] [INFO] [MCP] Tag registry initialized: 178 tools registered\n"
+        },
+        "tui": {
+          "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-tui-macos-arm64",
+          "sha256": "a66362553de8975dd9e9fe67929e70fc6ac5193e0daedb531b96f2bb765be889",
+          "source": "683c7950682b45a2591002e09f654515ccf02155",
+          "returncode": 0,
+          "stderr": ""
+        }
+      },
+      "roster_admitted_ms": null,
+      "terminal_refresh_ms": null,
+      "baseline_timing_note": "Baseline has no admission timer; timing is bounded by manually inspected captured frames, not invented from candidate instrumentation",
+      "warm_http_boundaries": [
+        {
+          "path": "/api/v1/gate/keepers",
+          "warm": true,
+          "delayed": false,
+          "started_ms": 10449.10912506748,
+          "finished_ms": 10508.776834001765,
+          "status": 200,
+          "rewritten_fixture_rows": 2,
+          "relative_to_warm_key_start_ms": 12.280583032406867,
+          "relative_to_warm_key_finish_ms": 71.94829196669161
+        },
+        {
+          "path": "/api/v1/dashboard/briefing",
+          "warm": true,
+          "delayed": true,
+          "started_ms": 10447.862334083766,
+          "finished_ms": 12459.06891708728,
+          "status": 304,
+          "rewritten_fixture_rows": 0,
+          "relative_to_warm_key_start_ms": 11.033792048692703,
+          "relative_to_warm_key_finish_ms": 2022.2403750522062
+        },
+        {
+          "path": "/api/v1/operator",
+          "warm": true,
+          "delayed": true,
+          "started_ms": 10448.52425006684,
+          "finished_ms": 12461.92787506152,
+          "status": 200,
+          "rewritten_fixture_rows": 0,
+          "relative_to_warm_key_start_ms": 11.695708031766117,
+          "relative_to_warm_key_finish_ms": 2025.0993330264464
+        }
+      ],
+      "manual_frame_observation": {
+        "warm-0.1": "two previous offline rows",
+        "warm-0.5": "two previous offline rows",
+        "warm-2.5": "two failing rows"
+      },
+      "physical_paint_measured": false
+    },
+    {
+      "arm": "early-roster",
+      "viewport": [
+        80,
+        24
+      ],
+      "attempt": 7,
+      "fixture_sha256": "20a5411360dbef927f7a9021b802e5656ede61d312bcb12f964ca7c99831aada",
+      "meta_fixture_sha256": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909",
+      "observer_sha256": "cc83ff8cecc178b3e5f76404ac339bf11faac4acdaa87a626e52ead9ebdc08b7",
+      "binary_identity": {
+        "server": {
+          "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-macos-arm64",
+          "sha256": "9cc1f84b908aa7978a7ed6d4364022edc8db1fee0762b082ecb38ce8e993fadf",
+          "source": "683c7950682b45a2591002e09f654515ccf02155",
+          "returncode": 0,
+          "stderr": "[2026-10-17 00:15:34] [INFO] [MCP] Tag registry initialized: 178 tools registered\n"
+        },
+        "tui": {
+          "path": "/private/tmp/masc-tui-observability-evidence-20261016/early-roster-native-subset/masc-tui-macos-arm64",
+          "sha256": "a45f76b90db249a19a76976fcbc7e827fe8f660242dc84f419820fcad4076183",
+          "source": "f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c",
+          "returncode": 0,
+          "stderr": ""
+        }
+      },
+      "roster_admitted_ms": 78.039,
+      "terminal_refresh_ms": 2109.435208,
+      "baseline_timing_note": null,
+      "warm_http_boundaries": [
+        {
+          "path": "/api/v1/gate/keepers",
+          "warm": true,
+          "delayed": false,
+          "started_ms": 10541.226082947105,
+          "finished_ms": 10580.705625005066,
+          "status": 200,
+          "rewritten_fixture_rows": 2,
+          "relative_to_warm_key_start_ms": 31.296791974455118,
+          "relative_to_warm_key_finish_ms": 70.77633403241634
+        },
+        {
+          "path": "/api/v1/dashboard/briefing",
+          "warm": true,
+          "delayed": true,
+          "started_ms": 10540.551124955527,
+          "finished_ms": 12565.653332974762,
+          "status": 304,
+          "rewritten_fixture_rows": 0,
+          "relative_to_warm_key_start_ms": 30.621833982877433,
+          "relative_to_warm_key_finish_ms": 2055.7240420021117
+        },
+        {
+          "path": "/api/v1/operator",
+          "warm": true,
+          "delayed": true,
+          "started_ms": 10540.63604096882,
+          "finished_ms": 12566.426582983695,
+          "status": 200,
+          "rewritten_fixture_rows": 0,
+          "relative_to_warm_key_start_ms": 30.7067499961704,
+          "relative_to_warm_key_finish_ms": 2056.497292011045
+        }
+      ],
+      "manual_frame_observation": {
+        "warm-0.1": "two failing rows",
+        "warm-0.5": "two failing rows",
+        "warm-2.5": "two failing rows"
+      },
+      "physical_paint_measured": false
+    }
+  ],
+  "attempts": [
+    {
+      "attempt": 1,
+      "arm": "baseline",
+      "collector_status": "failed",
+      "error": "Screen.report_device_status() got an unexpected keyword argument 'private'",
+      "fixture_rows_rewritten": 0,
+      "interpretation": "collector failed on an unsupported private terminal status query"
+    },
+    {
+      "attempt": 1,
+      "arm": "early-roster",
+      "collector_status": "failed",
+      "error": "Screen.report_device_status() got an unexpected keyword argument 'private'",
+      "fixture_rows_rewritten": 0,
+      "interpretation": "collector failed on an unsupported private terminal status query"
+    },
+    {
+      "attempt": 2,
+      "arm": "baseline",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 0,
+      "interpretation": "captured, but empty roster cannot demonstrate changed-data availability"
+    },
+    {
+      "attempt": 2,
+      "arm": "early-roster",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 0,
+      "interpretation": "captured, but empty roster cannot demonstrate changed-data availability"
+    },
+    {
+      "attempt": 3,
+      "arm": "baseline",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 0,
+      "interpretation": "captured, but navigation overlay consumed refresh key; warm refresh not exercised"
+    },
+    {
+      "attempt": 3,
+      "arm": "early-roster",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 0,
+      "interpretation": "captured, but navigation overlay consumed refresh key; warm refresh not exercised"
+    },
+    {
+      "attempt": 4,
+      "arm": "baseline",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 2,
+      "interpretation": "valid Dashboard refresh and state admission; pause field not visible in this view"
+    },
+    {
+      "attempt": 4,
+      "arm": "early-roster",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 2,
+      "interpretation": "valid Dashboard refresh and state admission; pause field not visible in this view"
+    },
+    {
+      "attempt": 5,
+      "arm": "baseline",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 2,
+      "interpretation": "valid Keeper-table refresh and state admission; pause field not visible at these widths"
+    },
+    {
+      "attempt": 5,
+      "arm": "early-roster",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 2,
+      "interpretation": "valid Keeper-table refresh and state admission; pause field not visible at these widths"
+    },
+    {
+      "attempt": 6,
+      "arm": "baseline",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 2,
+      "interpretation": "matched changed-health observation at 120x36"
+    },
+    {
+      "attempt": 6,
+      "arm": "early-roster",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 2,
+      "interpretation": "matched changed-health observation at 120x36"
+    },
+    {
+      "attempt": 7,
+      "arm": "baseline",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 2,
+      "interpretation": "matched changed-health observation at 80x24"
+    },
+    {
+      "attempt": 7,
+      "arm": "early-roster",
+      "collector_status": "captured",
+      "error": null,
+      "fixture_rows_rewritten": 2,
+      "interpretation": "matched changed-health observation at 80x24"
+    }
+  ],
+  "manual_review": "Native PTY frames inspected by root; no layout/text/row-order assertions or pass/fail matching",
+  "remaining": [
+    "Cold-start authority and other datasets still use terminal bundle",
+    "No old/new real-model cohort",
+    "No production install/restart or physical terminal paint measurement",
+    "No independent approval obtained in this unit"
+  ]
+}

@@ -1,0 +1,35 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40212994708
+Complete raw log SHA256: 6ce09e22b2e0eeadbe57445708ad591520f465efa84d84e61eb33b9906deaaf9
+Complete raw log bytes: 212910
+Selected checkout, changed assertions and summaries; complete selected-suite totals are 79 + 6 + 30 = 115 PASS.
+
+test suite	Checkout	2026-10-25T16:43:11.2890929Z HEAD is now at cd54792a test(execution): use public product execution id module
+test suite	Test	2026-10-25T16:44:58.1730577Z ASSERT canonical success committed before trace fault
+test suite	Test	2026-10-25T16:44:58.1750438Z ASSERT fault occurs after canonical terminal observation
+test suite	Test	2026-10-25T16:44:58.1767668Z ASSERT fresh reader sees same canonical terminal
+test suite	Test	2026-10-25T16:44:58.3519178Z ASSERT called observation arrives before effect
+test suite	Test	2026-10-25T16:44:58.3519978Z ASSERT partial delivery retries only the unacknowledged occurrence
+test suite	Test	2026-10-25T16:44:58.3520636Z ASSERT one canonical called and completed identity
+test suite	Test	2026-10-25T16:44:58.3539438Z ASSERT bus occurrence uses canonical sequence
+test suite	Test	2026-10-25T16:44:58.3539964Z ASSERT bus occurrence uses canonical event id
+test suite	Test	2026-10-25T16:44:58.3540446Z ASSERT bus occurrence uses canonical run id
+test suite	Test	2026-10-25T16:44:58.3540964Z ASSERT bus occurrence uses canonical correlation id
+test suite	Test	2026-10-25T16:44:58.3541533Z ASSERT canonical parent event is preserved
+test suite	Test	2026-10-25T16:44:58.3544789Z ASSERT filtered empty pages still advance source cursor
+test suite	Test	2026-10-25T16:44:58.3545190Z ASSERT public cursor catch-up matches live canonical observations
+test suite	Test	2026-10-25T16:44:58.3558345Z ASSERT reconstructed settlement retains live canonical occurrence
+test suite	Test	2026-10-25T16:44:58.3559915Z ASSERT acknowledged catch-up has no repeat
+test suite	Test	2026-10-25T16:44:58.4873077Z ASSERT shared audience preserves global canonical order
+test suite	Test	2026-10-25T16:44:58.4873546Z ASSERT distinct audience preserves canonical order
+test suite	Test	2026-10-25T16:44:58.4903292Z ASSERT canonical source retains every child regardless of audience
+test suite	Test	2026-10-25T16:44:59.0406355Z ASSERT callback agrees with canonical terminal evidence
+test suite	Test	2026-10-25T16:44:59.1234939Z Test Successful in 1.913s. 79 tests run.
+test suite	Test	2026-10-25T16:45:00.9227876Z ASSERT exact canonical input
+test suite	Test	2026-10-25T16:45:00.9228781Z ASSERT canonical settlement order
+test suite	Test	2026-10-25T16:45:01.0263475Z Test Successful in 0.514s. 6 tests run.
+test suite	Test	2026-10-25T16:47:37.6495836Z ASSERT real Tool effect once
+test suite	Test	2026-10-25T16:47:37.6496435Z ASSERT producer association exists before bridge consume
+test suite	Test	2026-10-25T16:47:37.6496786Z ASSERT post-hook row commit precedes completion delivery
+test suite	Test	2026-10-25T16:47:37.7068827Z ASSERT real bridge resolves the completed canonical occurrence
+test suite	Test	2026-10-25T16:47:37.7109825Z ASSERT canonical event evidence is retained
+test suite	Test	2026-10-25T16:47:37.7128901Z Test Successful in 0.344s. 30 tests run.

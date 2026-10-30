@@ -1,0 +1,18 @@
+{
+  "tasks": [
+    {
+      "id": "task-001",
+      "title": "Imp onboarding check",
+      "description": "Verify initial onboarding setup and confirm baseline state for this keeper session.",
+      "priority": 3,
+      "files": [],
+      "created_at": "2026-09-09T05:08:18Z",
+      "created_by": "imp",
+      "status": "todo"
+    }
+  ],
+  "pending_completion_rejections": [],
+  "task_deletion_receipts": [],
+  "last_updated": "2026-09-09T05:08:18Z",
+  "version": 2
+}

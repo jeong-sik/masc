@@ -1,0 +1,7 @@
+{
+  "pid": 92852,
+  "at": 1793049167.2463129,
+  "queue_mode": "0o555",
+  "ledger_staging_directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/schedules.json.tmp-atomic",
+  "no_domain_bytes_authored": true
+}

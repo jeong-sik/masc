@@ -1,0 +1,174 @@
+[2026-09-10 09:09:53] [INFO] [MCP] Tag registry initialized: 151 tools registered
+[2026-09-10 09:09:54] [WARN] [Dashboard] dashboard source identity unavailable — inspect /health dashboard_surface.recovery
+[2026-09-10 09:09:54] [INFO] [Server] [auto 127.0.0.1:18945] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-09-10 09:09:54] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-09-10 09:09:54] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-09-10 09:09:54] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-09-10 09:09:54] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-09-10 09:09:54] [INFO] [Server] preserved existing base-path config root without refilling operator-owned entries: /private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/config
+[2026-09-10 09:09:54] [INFO] [Server] installed 10 builtin Skill package(s)
+[2026-09-10 09:09:54] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-09-10 09:09:54] [INFO] [Misc] model_catalog: deployment overlay /private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/config/agent-core-models-overlay.toml installed onto embedded catalog
+[2026-09-10 09:09:54] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":null,"source":"default"}}
+[2026-09-10 09:09:54] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-10 09:09:54] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-10 09:09:54] [INFO] [Backend] Board: JSONL default backend
+[2026-09-10 09:09:54] [INFO] [Board] Board flusher actor started
+[2026-09-10 09:09:54] [INFO] [Board] JSONL backend initialized
+[2026-09-10 09:09:54] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4-flash
+[2026-09-10 09:09:54] [INFO] [Server] Skill snapshot ready at boot: snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d skills=0 rejections=0
+[2026-09-10 09:09:54] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published with deployment overlay /private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/config/agent-core-models-overlay.toml
+[2026-09-10 09:09:54] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-09-10 09:09:54] [INFO] [Server] State created (runtime state) in 0.2s
+[2026-09-10 09:09:54] [INFO] [Server] publication recovery owner discovery settled
+[2026-09-10 09:09:54] [WARN] [Server] startup admin token drift repaired for admin via MASC_ADMIN_TOKEN
+[2026-09-10 09:09:54] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-09-10 09:09:54] [INFO] [Keeper] keeper_owner: installed 0 single-owner actor(s) before persistence recovery
+[2026-09-10 09:09:54] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000067 examined=0 failures=0
+[2026-09-10 09:09:54] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.000226 examined=0 failures=0
+[2026-09-10 09:09:54] [INFO] [Keeper] boot reconcile: examined=0 readable=0 quarantined=0 failed=0
+[2026-09-10 09:09:54] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.000072 examined=0 failures=0
+[2026-09-10 09:09:54] [INFO] [Server] Runtime_params restored from /private/tmp/masc-verifier-image-runtime-large-4a/base
+[2026-09-10 09:09:54] [INFO] [Server] Bootstrap completed in 0.0s
+[2026-09-10 09:09:54] [INFO] [Server] Domain_pool created (14 domains) for dashboard/keeper compute
+[2026-09-10 09:09:54] [INFO] [ServerBootstrap] resolved: source=local_masc path=/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/config
+[2026-09-10 09:09:54] [INFO] [Misc] prompt assets synced from binary: 25 copied, 0 overwritten
+[2026-09-10 09:09:55] [INFO] [Misc] tool assets synced from binary: 167 copied, 0 overwritten
+[2026-09-10 09:09:55] [INFO] [Misc] mcp assets synced from binary: 2 copied, 0 overwritten
+[2026-09-10 09:09:55] [INFO] [Server] keeper_gate: installed durable queue base_path=/private/tmp/masc-verifier-image-runtime-large-4a/base pending=0 replayed=0 replay_failed=0
+[2026-09-10 09:09:55] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-09-10 09:09:55] [INFO] [Server] lazy_task_group: starting initialize (parallel, 1 tasks)
+[2026-09-10 09:09:55] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-09-10 09:09:55] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-09-10 09:09:55] [INFO] [Server] lazy_task_group: finished initialize
+[2026-09-10 09:09:55] [INFO] [Server] lazy_task_group: starting cleanup (parallel, 1 tasks)
+[2026-09-10 09:09:55] [INFO] [Server] lazy_task: starting jsonl_prune
+[2026-09-10 09:09:55] [INFO] [Server] lazy_task: finished jsonl_prune
+[2026-09-10 09:09:55] [INFO] [Server] lazy_task_group: finished cleanup
+[2026-09-10 09:09:55] [INFO] [Keeper] autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false
+[2026-09-10 09:09:55] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-09-10 09:09:55] [INFO] [startup] subsystems: keeper loops started
+[2026-09-10 09:09:55] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-09-10 09:09:55] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-09-10 09:09:55] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-09-10 09:09:55] [INFO] [Server] host_fd_pressure_poller: started path=/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-09-10 09:09:55] [INFO] [Metrics] tool_metrics_persist: hydrated 0 record(s), pruned=0 record(s)
+[2026-09-10 09:09:55] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-10 09:09:55] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-10 09:09:55] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-09-10 09:09:55] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-09-10 09:09:55] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-09-10 09:09:55] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-09-10 09:09:55] [INFO] [Server] keeper transition outbox startup discovered=0 processed=0 deferred=0 converged=0 no_pending=0 claim_busy=0 shutdown_reserved=0 failures=0
+[2026-09-10 09:09:55] [INFO] [Server] browser-lane: automation has no browser.webdriver_url
+[2026-09-10 09:09:55] [WARN] [Server] imessage: in-process gateway not started (chat.db at /Users/dancer/Library/Messages/chat.db is not readable: grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access)
+MASC MCP Server listening on http://127.0.0.1:18945
+   Base path: /private/tmp/masc-verifier-image-runtime-large-4a/base
+   MASC dir: /private/tmp/masc-verifier-image-runtime-large-4a/base/.masc
+   Process cwd: /private/tmp/masc-verifier-image-runtime-large-4a/base
+   MASC_BASE_PATH(env): /private/tmp/masc-verifier-image-runtime-large-4a/base
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+[2026-09-10 09:09:55] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)
+[2026-09-10 09:09:55] [INFO] [Dashboard] starting execution refresh loop
+[2026-09-10 09:09:55] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-09-10 09:09:55] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-09-10 09:09:55] [INFO] [Dashboard] starting mission refresh loop
+[2026-09-10 09:09:55] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-09-10 09:09:55] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-09-10 09:09:55] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-09-10 09:09:55] [INFO] [Dashboard] execution_trust warm cache done (0.0s)
+[2026-09-10 09:09:55] [INFO] [Dashboard] board surface pre-warmed (1.7ms)
+[2026-09-10 09:09:55] [INFO] [Dashboard] planning surface pre-warmed (1.7ms)
+[2026-09-10 09:09:55] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (1.1ms)
+[2026-09-10 09:09:55] [INFO] [Dashboard] config surface pre-warmed (3.4ms)
+[2026-09-10 09:09:55] [INFO] [Dashboard] execution warm cache done (0.0s)
+[2026-09-10 09:09:55] [INFO] [Dashboard] light shell cache pre-warmed (11.3ms)
+[2026-09-10 09:09:55] [INFO] [Dashboard] shell cache pre-warmed (13.5ms)
+[2026-09-10 09:09:55] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (13.6ms total)
+[2026-09-10 09:09:55] [INFO] [MCP] tools/call: masc_keeper_up (id=10, session=mcp_VUltSwx_J9B_1Pcj)
+[2026-09-10 09:09:55] [INFO] [Session] [AgentRegistry] New identity: admin (session=9e2c3c2b, mcp=mcp_VUltSwx_J9B_1Pcj)
+[2026-09-10 09:09:55] [INFO] [Session] Session registered: admin (total: 1)
+[2026-09-10 09:09:55] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-09-10 09:09:55] [INFO] [Server] startup maintenance: finished microvm_guest_sweep elapsed_s=0.576
+[2026-09-10 09:09:56] [INFO] [Keeper] create_keeper: starting for name=image-producer
+[2026-09-10 09:09:56] [INFO] [Keeper] create_keeper: starting keepalive for name=image-producer
+[2026-09-10 09:09:56] [INFO] [Keeper] registry: registering keeper name=image-producer base_path=/private/tmp/masc-verifier-image-runtime-large-4a/base phase=offline
+[2026-09-10 09:09:56] [INFO] [Keeper] registry: phase transition name=image-producer old=offline new=running event=fiber_started
+[2026-09-10 09:09:56] [INFO] [Keeper] board_attention_worker_start keeper=image-producer epoch=board-attention-worker-1dcc690a-c1c7-4a42-afd8-dc41b4b65592
+[2026-09-10 09:09:56] [INFO] [Keeper] create_keeper: completed for name=image-producer trace_id=trace-1788998996316-00000
+[2026-09-10 09:09:56] [INFO] [Keeper] board_attention_worker_drain keeper=image-producer outcome=drained judgments=0 steps=0
+[2026-09-10 09:09:56] [INFO] [Keeper] board cursor initialized at empty current head for image-producer: (1788998996.334565, no post)
+[2026-09-10 09:09:56] [INFO] [MCP] masc_keeper_up -> {"runtime_class":"keeper","name":"image-producer","agent_name":"image-producer",...
+[2026-09-10 09:09:56] [INFO] [MCP] tools/call completed: masc_keeper_up (outcome=ok)
+[2026-09-10 09:09:56] [INFO] [MCP] tools/call: masc_add_task (id=11, session=mcp_VUltSwx_J9B_1Pcj)
+[2026-09-10 09:09:56] [INFO] [Misc] workspace broadcast committed from=admin mention=none request_id=wmsg-14b2b806141890e08f0ff1d74f3c9c0b seq=1 bytes=48
+[2026-09-10 09:09:56] [INFO] [MCP] masc_add_task -> {"ok":true,"task_id":"task-001","summary":"Added task-001: Three synthetic rende...
+[2026-09-10 09:09:56] [INFO] [MCP] tools/call completed: masc_add_task (outcome=ok)
+[2026-09-10 09:09:56] [INFO] [MCP] tools/call: masc_keeper_msg (id=12, session=mcp_VUltSwx_J9B_1Pcj)
+[2026-09-10 09:09:56] [INFO] [MCP] masc_keeper_msg -> {"operation_id":"kmsg-249bf61fb7b5f1eb8d6c3e0f5ca278cc","state":"queued","queued...
+[2026-09-10 09:09:56] [INFO] [MCP] tools/call completed: masc_keeper_msg (outcome=ok)
+[2026-09-10 09:09:56] [INFO] [Keeper] image-producer: pre_dispatch: lane image_fixture.producer turn budget bound by a smaller sibling window: entry effective=131072 lane-min effective=32768
+[2026-09-10 09:09:56] [INFO] [Dashboard] patched keeper-dependent dashboard caches (1 lifecycle event(s))
+[2026-09-10 09:09:56] [INFO] [runtime_agent] agent_core-image_fixture.producer: resume checkpoint_turn_count=0
+[2026-09-10 09:09:56] [INFO] [Keeper/image-producer] turn=0 total_turns=0 runtime_lane=runtime tokens=20 context_window=131072 wall_tok_s=2375.8 latency_ms=10 thinking_kind=none
+[2026-09-10 09:09:56] [INFO] [Misc] workspace broadcast committed from=image-producer mention=none request_id=wmsg-4f3b7d2375370cae852417e8573dfc6a seq=2 bytes=16
+[2026-09-10 09:09:56] [INFO] [Task] task task-001 claim by image-producer
+[2026-09-10 09:09:56] [INFO] [Misc] workspace broadcast committed from=image-producer mention=none request_id=wmsg-ae6eb48097aebc5c22691b271ea956b7 seq=3 bytes=16
+[2026-09-10 09:09:56] [INFO] [Task] task task-001 start by image-producer
+[2026-09-10 09:09:56] [INFO] [Keeper] keeper:image-producer tool_call tool=keeper_task_claim source=tools/keeper_task_claim.toml params=[task_id] input_shape=[task_id=string:8] outcome=ok out_len=591
+[2026-09-10 09:09:56] [INFO] [agent_core:agent] turn completed turn=1 elapsed_run_sec=0.100 turn_duration_sec=0.100 model=image-producer stop=tools_executed
+[2026-09-10 09:09:56] [INFO] [Keeper/image-producer] turn=1 total_turns=0 runtime_lane=runtime tokens=20 context_window=131072 wall_tok_s=2977.8 latency_ms=7 thinking_kind=none
+[2026-09-10 09:09:56] [WARN] [Task/task-001] [verification-submit] task=task-001 has no contract — completion_contract and evidence will be empty in the verification record
+[2026-09-10 09:09:56] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-788f11e65028f26a6e9faa094061d7b0 producer=image-producer
+[2026-09-10 09:09:56] [INFO] [Task] task task-001 submit_for_verification by image-producer
+[2026-09-10 09:09:56] [INFO] [Keeper] keeper:image-producer tool_call tool=keeper_task_done source=tools/keeper_task_done.toml params=[task_id,result,evidence_refs] input_shape=[evidence_refs=array:3,result=string:95,task_id=string:8] outcome=ok out_len=121
+[2026-09-10 09:09:56] [INFO] [agent_core:agent] turn completed turn=2 elapsed_run_sec=0.182 turn_duration_sec=0.082 model=image-producer stop=tools_executed
+[2026-09-10 09:09:56] [INFO] [agent_core:agent] turn completed turn=1 elapsed_run_sec=0.039 turn_duration_sec=0.039 model=image-verifier stop=tools_executed tool_rounds=1 tool_round_ceiling=none
+[2026-09-10 09:09:56] [INFO] [Keeper/image-producer] turn=2 total_turns=0 runtime_lane=runtime tokens=20 context_window=131072 wall_tok_s=3056.2 latency_ms=7 thinking_kind=none
+[2026-09-10 09:09:56] [INFO] [agent_core:agent] turn completed turn=3 elapsed_run_sec=0.223 turn_duration_sec=0.041 model=image-producer stop=end_turn
+[2026-09-10 09:09:56] [INFO] [Telemetry] runtime candidate terminal: model=runtime outcome=success latency_ms=223
+[2026-09-10 09:09:56] [ERROR] [Keeper/image-producer] memory os librarian failed lane=librarian_exact: exact-output lane "librarian_exact" is not configured current_snapshot=absent
+[2026-09-10 09:09:56] [INFO] [agent_core:agent] turn completed turn=2 elapsed_run_sec=0.101 turn_duration_sec=0.062 model=image-verifier stop=end_turn
+[2026-09-10 09:09:56] [INFO] [Telemetry] runtime candidate terminal: model=runtime outcome=success latency_ms=101
+[2026-09-10 09:09:56] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=image_fixture.vision reason=Synthetic HTTP fixture received three exact PNG data URIs; byte transport only, no visual quality judgement.
+[2026-09-10 09:09:56] [INFO] [Task] task task-001 done by image-producer
+[2026-09-10 09:09:56] [INFO] [Misc] system LLM completion authority committed task_id=task-001 verification_id=vrf-788f11e65028f26a6e9faa094061d7b0 authority=verifier_exact verdict=APPROVE
+[2026-09-10 09:09:56] [INFO] [Keeper] image-producer: keeper cycle OK runtime_lane=runtime tokens=20 latency=321ms mode=tool_use stop=completed
+[2026-09-10 09:09:56] [INFO] [Keeper] start_keepalive: skipped image-producer (already registered)
+[2026-09-10 09:09:56] [INFO] [Keeper] keeper_stream: request terminal keeper=image-producer request_id=kmsg-249bf61fb7b5f1eb8d6c3e0f5ca278cc status=done
+[2026-09-10 09:09:56] [INFO] [MCP] tools/call: masc_tasks (id=15, session=mcp_VUltSwx_J9B_1Pcj)
+[2026-09-10 09:09:56] [INFO] [MCP] masc_tasks -> Quest Board ━━━━━━━━━━━━━━━━━━━━━━...
+[2026-09-10 09:09:56] [INFO] [MCP] tools/call completed: masc_tasks (outcome=ok)
+[2026-09-10 09:09:56] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-09-10 09:09:56] [INFO] [Server] [Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)
+[2026-09-10 09:09:56] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-09-10 09:09:57] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-09-10 09:09:57] [INFO] [Server] Cancelling orchestrator...
+[2026-09-10 09:09:57] [INFO] [agent_core:event] agent started agent=agent_core-image_fixture.producer task_id=evt-abaa71247148a9039a2bab7bcaa8b786
+[2026-09-10 09:09:57] [INFO] [agent_core:event] agent completed agent=agent_core-image_fixture.producer task_id=evt-abaa71247148a9039a2bab7bcaa8b786 elapsed_s=0.224
+[2026-09-10 09:09:57] [INFO] [Server] [Shutdown] orchestrator cancelled (0.00s)
+[2026-09-10 09:09:57] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-09-10 09:09:57] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-09-10 09:09:57] [INFO] [Keeper] transition_audit: shutdown flush wrote 3 records
+[2026-09-10 09:09:57] [INFO] [Server] [Shutdown] registered hooks completed (0.00s)
+[2026-09-10 09:09:57] [INFO] [Server] [Shutdown] hooks total: 0.00s
+[2026-09-10 09:09:57] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 09:09:57] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-09-10 09:09:57] [INFO] [Pulse] stopped after 2 beats
+[2026-09-10 09:09:57] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 09:09:57] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 09:09:57] [INFO] [Server] [auto 127.0.0.1:18945] stats: h2=0 h1=10
+[2026-09-10 09:09:57] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-09-10 09:09:57] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-09-10 09:09:57] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-09-10 09:09:57] [INFO] [Keeper] registry: phase transition name=image-producer old=running new=draining event=stop_requested
+[2026-09-10 09:09:57] [INFO] [Keeper] registry: lifecycle name=image-producer phase=draining event=draining detail=
+[2026-09-10 09:09:57] [INFO] [Keeper] registry: phase transition name=image-producer old=draining new=stopped event=drain_complete
+[2026-09-10 09:09:57] [INFO] [Keeper] registry: lifecycle name=image-producer phase=stopped event=stopped detail=drain_complete

@@ -1,0 +1,545 @@
+{
+  "schema": "masc.root-private-digest-warm-observations.v1",
+  "at_utc": "2026-10-26T22:57:59.973812+00:00",
+  "verdict": "PASS_CLOSED_ACTUAL_WARM_CARRIER_ROWS_ONLY",
+  "actual_tool_exit_code": 0,
+  "stderr_bytes": 0,
+  "records": 240,
+  "phases": 224,
+  "strata": 14,
+  "timed_calls_per_role": {
+    "old": 82888,
+    "new": 82888
+  },
+  "independently_reconstructed_fixture_bytes_and_sha_match": 14,
+  "source_and_image_hash_entries_conserved": 29,
+  "stdout_sha256": "2b50dec00cf8e2c3cd2f8fb2a0e8e84b6839bbabf953ef8e10d359c562c02bbc",
+  "metadata": {
+    "kind": "metadata",
+    "status": "WARM_PRIVATE_CARRIER_ONLY",
+    "ocaml_version": "5.5.1",
+    "word_bits": 64,
+    "backend": "Bytecode",
+    "os_type": "Unix",
+    "gc_controls": {
+      "minor_heap_size": 262144,
+      "major_heap_increment": 0,
+      "space_overhead": 120,
+      "max_overhead": 0,
+      "allocation_policy": 0
+    },
+    "clock": "Mtime_clock.counter/count",
+    "process_cpu": "Sys.time",
+    "allocation": "Gc.allocated_bytes delta; caller-domain and measurement overhead included",
+    "full_major_before_each_phase": true,
+    "warmup_per_role_per_stratum": 3,
+    "abba_cycles_per_stratum": 4,
+    "cold_or_peak_RSS_measured": false,
+    "actual_Agent_core_loaded": false,
+    "fixture_projection_shared_by_both_roles": true
+  },
+  "comparisons": [
+    {
+      "stratum": "empty",
+      "entries": 0,
+      "canonical_bytes": 2,
+      "iterations_per_phase": 5000,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "elapsed_ns": {
+        "old_median_per_call": "754.9500",
+        "new_median_per_call": "546.9374",
+        "candidate_change_percent": "-27.55316246109013841976289821",
+        "old_min_per_call": "745.075",
+        "old_max_per_call": "776.0416",
+        "new_min_per_call": "529.8916",
+        "new_max_per_call": "569.4332"
+      },
+      "allocated_B": {
+        "old_median_per_call": "856.0496",
+        "new_median_per_call": "920.0496",
+        "candidate_change_percent": "7.476202313510805915918890700",
+        "old_min_per_call": "856.0496",
+        "old_max_per_call": "856.0496",
+        "new_min_per_call": "920.0496",
+        "new_max_per_call": "920.0496"
+      },
+      "cpu_s": {
+        "old_median_per_call": "7.546E-7",
+        "new_median_per_call": "5.435E-7",
+        "candidate_change_percent": "-27.97508613835144447389345349",
+        "old_min_per_call": "7.456E-7",
+        "old_max_per_call": "7.766E-7",
+        "new_min_per_call": "5.306E-7",
+        "new_max_per_call": "5.658E-7"
+      }
+    },
+    {
+      "stratum": "singleton-builtin",
+      "entries": 1,
+      "canonical_bytes": 229,
+      "iterations_per_phase": 2000,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "e3fa6d81c7bcc09cb3708204db9a37ac351219a1b87ec05409ddd80ad697b554",
+      "elapsed_ns": {
+        "old_median_per_call": "9654.1875",
+        "new_median_per_call": "9731.177",
+        "candidate_change_percent": "0.797472599325422258475920400",
+        "old_min_per_call": "9627.75",
+        "old_max_per_call": "9742.9165",
+        "new_min_per_call": "9654.375",
+        "new_max_per_call": "9902.75"
+      },
+      "allocated_B": {
+        "old_median_per_call": "4880.124",
+        "new_median_per_call": "4960.124",
+        "candidate_change_percent": "1.639302607884553753142338200",
+        "old_min_per_call": "4880.124",
+        "old_max_per_call": "4880.124",
+        "new_min_per_call": "4960.124",
+        "new_max_per_call": "4960.124"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.00000964200000000005",
+        "new_median_per_call": "0.00000971900000000005",
+        "candidate_change_percent": "0.798589504252225686633975000",
+        "old_min_per_call": "0.0000096195000000",
+        "old_max_per_call": "0.00000970399999999995",
+        "new_min_per_call": "0.0000096505",
+        "new_max_per_call": "0.0000098195"
+      }
+    },
+    {
+      "stratum": "singleton-attached",
+      "entries": 1,
+      "canonical_bytes": 328,
+      "iterations_per_phase": 2000,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "c394966866832b34212ee51ea1555d1e5e5df6083d37a86af142bd1bea1922a1",
+      "elapsed_ns": {
+        "old_median_per_call": "13438.7915",
+        "new_median_per_call": "13248.30225",
+        "candidate_change_percent": "-1.417458184391059270470860420",
+        "old_min_per_call": "13085.0415",
+        "old_max_per_call": "14649.875",
+        "new_min_per_call": "12892.6875",
+        "new_max_per_call": "15108.479"
+      },
+      "allocated_B": {
+        "old_median_per_call": "6392.124",
+        "new_median_per_call": "6464.124",
+        "candidate_change_percent": "1.126386158966878614995578900",
+        "old_min_per_call": "6392.124",
+        "old_max_per_call": "6392.124",
+        "new_min_per_call": "6464.124",
+        "new_max_per_call": "6464.124"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.000013177500000000025",
+        "new_median_per_call": "0.000013148249999999975",
+        "candidate_change_percent": "-0.2219692657943460027143506100",
+        "old_min_per_call": "0.0000130045",
+        "old_max_per_call": "0.0000136909999999999",
+        "new_min_per_call": "0.0000128950000000001",
+        "new_max_per_call": "0.0000141600000000001"
+      }
+    },
+    {
+      "stratum": "tiny-2",
+      "entries": 2,
+      "canonical_bytes": 556,
+      "iterations_per_phase": 1000,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "544347ca5125feebf255fe39609ada29bc504447ea474ddb228e06c685b573a2",
+      "elapsed_ns": {
+        "old_median_per_call": "22739.5625",
+        "new_median_per_call": "22394.250",
+        "candidate_change_percent": "-1.518553842009933128660676740",
+        "old_min_per_call": "21946.75",
+        "old_max_per_call": "28254.959",
+        "new_min_per_call": "22101.459",
+        "new_max_per_call": "23469.708"
+      },
+      "allocated_B": {
+        "old_median_per_call": "11496.248",
+        "new_median_per_call": "10504.248",
+        "candidate_change_percent": "-8.628902229666583393120955640",
+        "old_min_per_call": "11496.248",
+        "old_max_per_call": "11496.248",
+        "new_min_per_call": "10504.248",
+        "new_max_per_call": "10504.248"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.0000223865000000001",
+        "new_median_per_call": "0.0000223645",
+        "candidate_change_percent": "-0.0982735130551890725503627000",
+        "old_min_per_call": "0.0000219139999999998",
+        "old_max_per_call": "0.0000275879999999999",
+        "new_min_per_call": "0.000022104",
+        "new_max_per_call": "0.00002289"
+      }
+    },
+    {
+      "stratum": "tiny-16",
+      "entries": 16,
+      "canonical_bytes": 4441,
+      "iterations_per_phase": 128,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "c09a0d2de3b2dee8ae885b3dd1ecb3e5a4db5a91e4470f7f0679e6ccbe6ee66b",
+      "elapsed_ns": {
+        "old_median_per_call": "175513.5078125",
+        "new_median_per_call": "174895.343750",
+        "candidate_change_percent": "-0.3522031268159604346691798900",
+        "old_min_per_call": "174252.9296875",
+        "old_max_per_call": "178124.671875",
+        "new_min_per_call": "174098.3046875",
+        "new_max_per_call": "175904.296875"
+      },
+      "allocated_B": {
+        "old_median_per_call": "88969.9375",
+        "new_median_per_call": "73617.9375",
+        "candidate_change_percent": "-17.25526670174405821067368964",
+        "old_min_per_call": "88969.9375",
+        "old_max_per_call": "88969.9375",
+        "new_min_per_call": "73617.9375",
+        "new_max_per_call": "73617.9375"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.00017505859375000234375",
+        "new_median_per_call": "0.00017460546875000312500",
+        "candidate_change_percent": "-0.2588419056115105365359061300",
+        "old_min_per_call": "0.00017408593750000234375",
+        "old_max_per_call": "0.00017755468750000234375",
+        "new_min_per_call": "0.000173937500000003125",
+        "new_max_per_call": "0.00017542968749999765625"
+      }
+    },
+    {
+      "stratum": "tiny-128",
+      "entries": 128,
+      "canonical_bytes": 35521,
+      "iterations_per_phase": 16,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "90275195065b1d44c9c3a2ff76da8e0dc61c6541d7078a275bde2a03f7fdd63a",
+      "elapsed_ns": {
+        "old_median_per_call": "1405005.21875",
+        "new_median_per_call": "1395799.46875",
+        "candidate_change_percent": "-0.6552110894072079403085847100",
+        "old_min_per_call": "1387088.5625",
+        "old_max_per_call": "1426317.6875",
+        "new_min_per_call": "1390229.1875",
+        "new_max_per_call": "1430041.625"
+      },
+      "allocated_B": {
+        "old_median_per_call": "707559.5",
+        "new_median_per_call": "578527.5",
+        "candidate_change_percent": "-18.23620487040312510820644766",
+        "old_min_per_call": "707559.5",
+        "old_max_per_call": "707559.5",
+        "new_min_per_call": "578527.5",
+        "new_max_per_call": "578527.5"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.00139996875000000625",
+        "new_median_per_call": "0.001393343749999990625",
+        "candidate_change_percent": "-0.4732248487700597190792260100",
+        "old_min_per_call": "0.001386437500000025",
+        "old_max_per_call": "0.0014105625",
+        "new_min_per_call": "0.0013888750000000125",
+        "new_max_per_call": "0.0014176874999999625"
+      }
+    },
+    {
+      "stratum": "tiny-512",
+      "entries": 512,
+      "canonical_bytes": 142081,
+      "iterations_per_phase": 4,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "47072e6087517acf4f018e18846e3b55a47eaf89595c65d2a17195be0ea2c1a3",
+      "elapsed_ns": {
+        "old_median_per_call": "6272224.0",
+        "new_median_per_call": "5615125.125",
+        "candidate_change_percent": "-10.47632984727586259674399384",
+        "old_min_per_call": "6155270.75",
+        "old_max_per_call": "6822239.5",
+        "new_min_per_call": "5563114.5",
+        "new_max_per_call": "5875916.75"
+      },
+      "allocated_B": {
+        "old_median_per_call": "2827974.0",
+        "new_median_per_call": "2309646.0",
+        "candidate_change_percent": "-18.32859849489422462865641622",
+        "old_min_per_call": "2827974.0",
+        "old_max_per_call": "2827974.0",
+        "new_min_per_call": "2309646.0",
+        "new_max_per_call": "2309646.0"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.006252000000000025",
+        "new_median_per_call": "0.00559099999999995",
+        "candidate_change_percent": "-10.57261676263711383310635542",
+        "old_min_per_call": "0.00615375",
+        "old_max_per_call": "0.0066705",
+        "new_min_per_call": "0.005557000000000075",
+        "new_max_per_call": "0.00576825"
+      }
+    },
+    {
+      "stratum": "description16KiB-1",
+      "entries": 1,
+      "canonical_bytes": 16606,
+      "iterations_per_phase": 128,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "816ef26070d0bc2d0e2c3aab37efc1cc8cb22fa88a09aee8dfaa1b20ddeba9ab",
+      "elapsed_ns": {
+        "old_median_per_call": "302431.1484375",
+        "new_median_per_call": "306728.02734375",
+        "candidate_change_percent": "1.420779218162439710257399200",
+        "old_min_per_call": "297932.2890625",
+        "old_max_per_call": "312947.265625",
+        "new_min_per_call": "300593.1015625",
+        "new_max_per_call": "311356.4453125"
+      },
+      "allocated_B": {
+        "old_median_per_call": "54081.9375",
+        "new_median_per_call": "54161.9375",
+        "candidate_change_percent": "0.147923694486722114939021900",
+        "old_min_per_call": "54081.9375",
+        "old_max_per_call": "54081.9375",
+        "new_min_per_call": "54161.9375",
+        "new_max_per_call": "54161.9375"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.000301128906250000390625",
+        "new_median_per_call": "0.00030489453125",
+        "candidate_change_percent": "1.250502665749845956618109300",
+        "old_min_per_call": "0.0002973828125",
+        "old_max_per_call": "0.0003128671875",
+        "new_min_per_call": "0.0003001796875",
+        "new_max_per_call": "0.0003073984375"
+      }
+    },
+    {
+      "stratum": "description1KiB-16",
+      "entries": 16,
+      "canonical_bytes": 20713,
+      "iterations_per_phase": 32,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "8eb9aeea730f76a4b29efed0ed31a3f7c554ac1add48aa9cd3137b8b71ebea53",
+      "elapsed_ns": {
+        "old_median_per_call": "455811.18750",
+        "new_median_per_call": "437789.046875",
+        "candidate_change_percent": "-3.953860966828507253345992080",
+        "old_min_per_call": "442097.65625",
+        "old_max_per_call": "461914.0625",
+        "new_min_per_call": "429985.6875",
+        "new_max_per_call": "444541.6875"
+      },
+      "allocated_B": {
+        "old_median_per_call": "152863.75",
+        "new_median_per_call": "91415.75",
+        "candidate_change_percent": "-40.19788864266381009232077585",
+        "old_min_per_call": "152863.75",
+        "old_max_per_call": "152863.75",
+        "new_min_per_call": "91415.75",
+        "new_max_per_call": "91415.75"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.0004538124999999765625",
+        "new_median_per_call": "0.000435062500000015625",
+        "candidate_change_percent": "-4.131662305459172204016602010",
+        "old_min_per_call": "0.00044218750000003125",
+        "old_max_per_call": "0.00045990625",
+        "new_min_per_call": "0.0004300625",
+        "new_max_per_call": "0.00044065625000003125"
+      }
+    },
+    {
+      "stratum": "description1KiB-128",
+      "entries": 128,
+      "canonical_bytes": 165697,
+      "iterations_per_phase": 4,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "9a60a45ab951ed5baadac2c11942302b267b3171441b8f6890ae91f013e7ea0e",
+      "elapsed_ns": {
+        "old_median_per_call": "3737578.125",
+        "new_median_per_call": "3517130.25",
+        "candidate_change_percent": "-5.898147613971279864551326270",
+        "old_min_per_call": "3518614.75",
+        "old_max_per_call": "4423562.5",
+        "new_min_per_call": "3416604.25",
+        "new_max_per_call": "5358041.75"
+      },
+      "allocated_B": {
+        "old_median_per_call": "1229462.0",
+        "new_median_per_call": "710158.0",
+        "candidate_change_percent": "-42.23831236752335574421982949",
+        "old_min_per_call": "1229462.0",
+        "old_max_per_call": "1229462.0",
+        "new_min_per_call": "710158.0",
+        "new_max_per_call": "710158.0"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.0036990",
+        "new_median_per_call": "0.003512749999999875",
+        "candidate_change_percent": "-5.035144633688158961881589620",
+        "old_min_per_call": "0.00351925",
+        "old_max_per_call": "0.0041964999999995",
+        "new_min_per_call": "0.00341724999999975",
+        "new_max_per_call": "0.004630"
+      }
+    },
+    {
+      "stratum": "description16KiB-128",
+      "entries": 128,
+      "canonical_bytes": 2131777,
+      "iterations_per_phase": 1,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "a750b4398494e791d65a902ba98ce43801f59c89160121dba93e8a382ca5f1e5",
+      "elapsed_ns": {
+        "old_median_per_call": "38704729.5",
+        "new_median_per_call": "35149729",
+        "candidate_change_percent": "-9.184925320302264352474030340",
+        "old_min_per_call": "38231750",
+        "old_max_per_call": "40309167",
+        "new_min_per_call": "35003292",
+        "new_max_per_call": "35700667"
+      },
+      "allocated_B": {
+        "old_median_per_call": "11029328.0",
+        "new_median_per_call": "2707144.0",
+        "candidate_change_percent": "-75.45504132255383102216200298",
+        "old_min_per_call": "11029328.0",
+        "old_max_per_call": "11029328.0",
+        "new_min_per_call": "2707144.0",
+        "new_max_per_call": "2707144.0"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.0385359999999995",
+        "new_median_per_call": "0.03506399999999945",
+        "candidate_change_percent": "-9.009757110234832491139586810",
+        "old_min_per_call": "0.038176000000001",
+        "old_max_per_call": "0.040239",
+        "new_min_per_call": "0.034938",
+        "new_max_per_call": "0.0354619999999995"
+      }
+    },
+    {
+      "stratum": "mixed-large-first",
+      "entries": 16,
+      "canonical_bytes": 20818,
+      "iterations_per_phase": 16,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "f0a13de18a54e555565d537a130a311de7d94e838f1c37393c9304bb66575505",
+      "elapsed_ns": {
+        "old_median_per_call": "442842.4375",
+        "new_median_per_call": "449916.65625",
+        "candidate_change_percent": "1.597457278470516954464193600",
+        "old_min_per_call": "438312.5",
+        "old_max_per_call": "450390.625",
+        "new_min_per_call": "444526",
+        "new_max_per_call": "456822.875"
+      },
+      "allocated_B": {
+        "old_median_per_call": "122031.5",
+        "new_median_per_call": "122263.5",
+        "candidate_change_percent": "0.190114847395959240032286700",
+        "old_min_per_call": "122031.5",
+        "old_max_per_call": "122031.5",
+        "new_min_per_call": "122263.5",
+        "new_max_per_call": "122263.5"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.0004426250",
+        "new_median_per_call": "0.0004489375",
+        "candidate_change_percent": "1.426150804857384919514261500",
+        "old_min_per_call": "0.0004385000000000625",
+        "old_max_per_call": "0.000449625",
+        "new_min_per_call": "0.00044475",
+        "new_max_per_call": "0.00045381249999996875"
+      }
+    },
+    {
+      "stratum": "mixed-large-middle",
+      "entries": 16,
+      "canonical_bytes": 20818,
+      "iterations_per_phase": 16,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "6bc04b93e842bc61ccd3a864eda29ca3767a9cf490907a62fe65269cd9d92794",
+      "elapsed_ns": {
+        "old_median_per_call": "449255.21875",
+        "new_median_per_call": "449227.8750",
+        "candidate_change_percent": "-0.0060864624068432148847464000",
+        "old_min_per_call": "430799.4375",
+        "old_max_per_call": "458627.5625",
+        "new_min_per_call": "443059.9375",
+        "new_max_per_call": "468778.625"
+      },
+      "allocated_B": {
+        "old_median_per_call": "129935.5",
+        "new_median_per_call": "122831.5",
+        "candidate_change_percent": "-5.467328020440911067414217050",
+        "old_min_per_call": "129935.5",
+        "old_max_per_call": "129935.5",
+        "new_min_per_call": "122831.5",
+        "new_max_per_call": "122831.5"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.00044715624999996875",
+        "new_median_per_call": "0.000448437499999953125",
+        "candidate_change_percent": "0.286532951285924001184659000",
+        "old_min_per_call": "0.0004304999999999625",
+        "old_max_per_call": "0.00045875",
+        "new_min_per_call": "0.0004426874999999375",
+        "new_max_per_call": "0.0004653125"
+      }
+    },
+    {
+      "stratum": "mixed-large-last",
+      "entries": 16,
+      "canonical_bytes": 20818,
+      "iterations_per_phase": 16,
+      "phase_rows_per_role": 8,
+      "expected_sha256": "d1696412f92ce31363526cd6812bd9c15941f65b02897c1889d06c98db13fcf9",
+      "elapsed_ns": {
+        "old_median_per_call": "444753.875",
+        "new_median_per_call": "448207.03125",
+        "candidate_change_percent": "0.776419598367748903817870100",
+        "old_min_per_call": "441658.8125",
+        "old_max_per_call": "457377.625",
+        "new_min_per_call": "443450.5",
+        "new_max_per_call": "462921.875"
+      },
+      "allocated_B": {
+        "old_median_per_call": "138183.5",
+        "new_median_per_call": "122831.5",
+        "candidate_change_percent": "-11.10986478125101766853495533",
+        "old_min_per_call": "138183.5",
+        "old_max_per_call": "138183.5",
+        "new_min_per_call": "122831.5",
+        "new_max_per_call": "122831.5"
+      },
+      "cpu_s": {
+        "old_median_per_call": "0.00044428125",
+        "new_median_per_call": "0.00044765624999996875",
+        "candidate_change_percent": "0.759653935422381655764225900",
+        "old_min_per_call": "0.0004418124999999375",
+        "old_max_per_call": "0.0004555",
+        "new_min_per_call": "0.000443625",
+        "new_max_per_call": "0.0004590625"
+      }
+    }
+  ],
+  "limits": [
+    "warm standalone interpreted already-JSON carrier only; no actual Agent_core/private MLI/runtime",
+    "exact same pure callback/input object projection for both timed roles",
+    "one full major collection before every phase outside measured window; preserve raw GC/counter readings",
+    "actual Gc.allocated_bytes caller-domain delta includes measurement overhead; no invented subtraction",
+    "byte and SHA preflight outside timed loops; every computed digest goes to an opaque-consumed mutable sink; last result compared",
+    "Mtime monotonic clock and process CPU only; no target fleet CPU/latency/SLO",
+    "no cold startup/peak RSS measurement or claim in this bounded stage; these remain unmeasured",
+    "retain every phase and every regression; no combined cross-stratum or service gain claim"
+  ],
+  "independent_actual_data_audit": "PENDING",
+  "typed_Agent_core_or_native_or_service_gain_claimed": false
+}

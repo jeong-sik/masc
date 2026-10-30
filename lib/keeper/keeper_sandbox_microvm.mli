@@ -1,0 +1,1002 @@
+(** microVM argv for the [Micro_vm] sandbox profile.
+
+    Command construction only: nothing here starts a VM. Dispatch does --
+    [Keeper_turn_sandbox_runtime] boots and adopts the guest, and the remote
+    lane ([Keeper_sandbox_remote]) drives its shim over the guest's exec.
+    The guest's working tree is on a Keeper-named volume (RFC-0400); that
+    name does not establish exclusive workspace ownership. The host
+    playground is never mounted into it.
+
+    Every builder takes the runtime the keeper declared. A surface that took
+    the runtime only on teardown pointed a keeper's boot and its cleanup at
+    two different CLIs, which is #32837. See the implementation for the
+    measured cost of the Apple backend and for the Docker hardening flags
+    each runtime does not accept. *)
+
+val unsupported_docker_flags : string list
+(** Docker hardening flags [container run] rejects. [container] errors on an
+    unknown option rather than ignoring it, so this list is what a reader
+    must weigh when choosing the profile, not a runtime fallback. *)
+
+val policy_network_name : keeper_name:string -> string
+(** The host-only network this keeper's [Network_policy] guest is attached
+    to. One per keeper, not one for the fleet: separate subnets stop a guest
+    from reaching a neighbour's proxy and using its allowlist.
+
+    Every result fits Apple's 63-byte limit and starts and ends with a
+    lowercase alphanumeric character. An original name that is already
+    lowercase, bounded, alphanumeric-ended, and outside the reserved
+    [-<32 lowercase hex>] shape keeps its existing spelling. Other names use
+    a trimmed segment and a 128-bit SHA-256 digest of the original, untrimmed
+    name, preserving identity through case folding, escaping, truncation, and
+    digest-shaped inputs. *)
+
+val policy_network_create_argv_for :
+  Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result
+(** Create the host-only network the policy lane attaches to. Only the
+    backend that carries the lane answers; the others refuse, so a backend
+    that gained a policy arm without gaining this fails here rather than
+    booting a guest onto a network nobody created. *)
+
+val policy_network_list_argv_for : Keeper_microvm_backend.t -> (string list, string) result
+(** List networks, to see whether {!policy_network_name} already exists. *)
+
+val policy_network_present : keeper_name:string -> listing:string -> (bool, string) result
+(** Whether [container network list --format json] carries
+    {!policy_network_name}. Compared as a decoded [id], so nothing depends on
+    how the CLI spaces a column, and a network whose name contains this one's
+    cannot answer for it.
+
+    Unparseable output is an error rather than "absent": reading a failed
+    decode as absence would drive a create against a network that may already
+    exist, and the guest would then be refused with a message about creation
+    rather than about the listing that could not be read. *)
+
+val policy_network_inspect_argv_for :
+  Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result
+(** Inspect the policy network, to learn the gateway a guest on it reaches
+    the host at.
+
+    Carries no [--format json], unlike {!policy_network_list_argv_for}:
+    [network inspect] rejects the flag and already answers JSON. The two
+    subcommands do not agree, and they were measured rather than assumed. *)
+
+val policy_network_gateway : inspect:string -> (string, string) result
+(** The canonical IPv4 [status.ipv4Gateway] of exactly one inspected network.
+    Accepts a single object or one-element array. Duplicate row/status keys,
+    unknown shapes and non-IPv4 gateways refuse without echoing raw input.
+
+    Read rather than assumed: container assigns the subnet when the network
+    is created, so a compiled-in address would be right only until a host had
+    a network already on it. Absent or unparseable output is an error, not a
+    fallback -- a guest handed the wrong gateway reaches nothing and says
+    nothing about why. *)
+
+type policy_proxy =
+  { gateway : string
+  ; port : int
+  }
+(** Where a policy guest's one route is: the gateway it sees the host at, and
+    the port its keeper's proxy bound. Both are discovered at boot -- the
+    gateway from the network, the port from the listener -- so neither is a
+    constant. *)
+
+val network_args_for :
+  Keeper_microvm_backend.t ->
+  dns:string option ->
+  keeper_name:string ->
+  policy_proxy:policy_proxy option ->
+  Keeper_types_profile_sandbox.network_mode ->
+  (string list, string) result
+(** How one runtime is told to close or open the guest's network.
+
+    A closed network is an isolation property, so the spelling is per runtime
+    rather than one grammar sent to all three. [container] and [nerdctl] take
+    Docker's [--network none] and [--dns]; [Network_inherit] there is
+    container's NAT, which routes outside and needs a nameserver passed in
+    (the guest's resolver points at the gateway and the gateway refuses DNS
+    from inside, so without one the guest routes fine and resolves nothing).
+
+    [msb] rejects both Docker spellings and has its own: [Network_none] is
+    [--no-net]. [Network_inherit] is [Error] rather than an empty argv --
+    msb's network with no flag has not been measured, and an omission would
+    be a guess at how open the guest is. *)
+
+val image_present_for :
+  Keeper_microvm_backend.t ->
+  name:string option ->
+  image:string ->
+  timeout_sec:float ->
+  (unit, string) result
+(** Gate the run on the image already being in this runtime's own store.
+    None of the three has a [--pull=never]: without this, a missing image is
+    fetched from a registry rather than refused. The refusal names the CLI
+    that was asked, so an [msb] keeper is not told to install Apple's.
+    Never builds an image. The same inspect response supplies the presence
+    result and lock-marker warning; an absent marker does not block admission. *)
+
+type image_probe_phase =
+  | Image_inspect
+  | Image_list
+
+type image_probe_failure =
+  { phase : image_probe_phase
+  ; status : Unix.process_status
+  ; stdout : string
+  ; stderr : string
+  ; reason : string
+  }
+
+type image_probe_outcome =
+  | Image_present
+  | Image_missing
+  | Image_cli_unavailable
+  | Image_probe_failed of image_probe_failure
+
+val image_present_result_for :
+  Keeper_microvm_backend.t ->
+  name:string option ->
+  image:string ->
+  image_probe_outcome ->
+  (unit, string) result
+(** The gate's answer for one probe outcome. [name] is the Keeper's catalog
+    name, when declared. A missing image gives the recovery steps the
+    selected backend supports: [masc sandbox-image] builds into [container]'s
+    and [nerdctl]'s store, a build reaches [msb]'s through [msb load], and on
+    every backend [masc sandbox-image promote] records a tag that store has. *)
+
+type json_shape =
+  | Json_array
+      (** One array of records: [container image list --format json],
+          [container image inspect], [msb image list --format json],
+          [nerdctl image inspect --mode native]. *)
+  | Json_object
+      (** One bare object: [msb image inspect --format json], which answers a
+          record rather than the array of one Docker's grammar returns. *)
+  | Json_lines
+      (** One JSON object per line: [nerdctl images] with a Go template. *)
+
+val image_listing_shape_for : Keeper_microvm_backend.t -> json_shape
+(** Which shape this runtime's image listing arrives in. Reading a line
+    stream with the array check would call a healthy listing malformed and
+    turn "the image is missing" into "the probe could not say". *)
+
+val image_listing_argv_for : Keeper_microvm_backend.t -> string list
+(** The listing that proves this runtime's image store was readable.
+    [image list --format json] for [container] and [msb]; [images] with a Go
+    template for [nerdctl], which has no [image list] subcommand. *)
+
+val image_inspect_shape_for : Keeper_microvm_backend.t -> json_shape
+(** Which shape this runtime answers a single-image inspect in. [msb] answers
+    an object where the other two answer an array of one; reading its answer
+    with the array check reports [Image_probe_failed] for an image that is
+    present, which is the inverse of what the probe is for. *)
+
+val image_inspect_argv_for : Keeper_microvm_backend.t -> image:string -> string list
+(** The single-image inspect, in the machine form each CLI documents.
+    [container image inspect] answers JSON with no flag; [msb image inspect]
+    answers a human table unless given [--format json]; [nerdctl image
+    inspect] documents [--mode=(dockercompat|native)] and no default, so the
+    mode is named. *)
+
+val classify_image_probe :
+  inspect_shape:json_shape ->
+  listing_shape:json_shape ->
+  inspect:Unix.process_status * string * string ->
+  listing:(Unix.process_status * string * string) option ->
+  image_probe_outcome
+(** Classify an image inspect without reading human error prose. Successful
+    inspect output must parse in [inspect_shape]. Exit 1 is [Image_missing]
+    only when a subsequent image listing also succeeds in [listing_shape],
+    proving that the runtime and its image store were readable. Every
+    unavailable or malformed observation fails closed. *)
+
+val image_lock_marker_from_inspect : string -> string option
+(** Find the sandbox lock digest label in a runtime's JSON image-inspect
+    response. [None] means the image has no marker. *)
+
+val classify_image_probe_for :
+  Keeper_microvm_backend.t ->
+  image:string ->
+  inspect:Unix.process_status * string * string ->
+  listing:(Unix.process_status * string * string) option ->
+  image_probe_outcome
+(** Backend-aware image admission. Nerdctl native records must contain a
+    nonempty Image.Name and Target.digest. An immutable requested digest must
+    match the returned target; alternate names for the same content are valid.
+    Empty native inspection is not evidence that an image is present. *)
+
+val image_probe_for :
+  Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> image_probe_outcome
+(** Run the structured probe against one runtime and retain its typed outcome
+    before the public sandbox boundary renders an operator-facing error. *)
+
+type constraint_refusal =
+  { guest_constraint : Keeper_microvm_backend.guest_constraint
+  ; reason : string
+  }
+
+val constraint_refusals_message :
+  Keeper_microvm_backend.t -> constraint_refusal list -> string
+(** One [microvm_constraint_unexpressible:] line naming the runtime and every
+    guarantee it could not spell, with each runtime's own reason. No cap and
+    no "and N more": a boot refusal an operator has to guess the rest of is
+    the reason the guarantee was silently dropped before. *)
+
+val turn_start_argv_for :
+  Keeper_microvm_backend.t ->
+  container_name:string ->
+  label_args:string list ->
+  uid:int ->
+  gid:int ->
+  guest_size:Keeper_microvm_guest_size.t ->
+  network_args:string list ->
+  mount_args:string list ->
+  image:string ->
+  constraints:Keeper_microvm_backend.guest_constraint list ->
+  (string list, constraint_refusal list) result
+(** Guest boot argv, or the guarantees this runtime cannot express.
+
+    Same lifecycle as the Docker persistent lane: detached guest holding
+    [tail -f /dev/null], commands by [exec]. Nothing of the host playground
+    is mounted; everything the guest may see arrives through [mount_args],
+    which the caller builds -- config, GitHub identity, the work volume and
+    the shim. The working directory is {!work_volume_guest_root}.
+    Workspace-state mounts and the /etc/passwd identity mounts remain absent.
+
+    [constraints] are asked for by name. An [Isolation] guarantee this
+    runtime has no flag for makes the whole call [Error]: booting without it
+    would hand the keeper a weaker sandbox than the profile it declared, and
+    nothing in the argv would say so. A [Lifecycle] one is recorded on the
+    guest as a [masc.mcp.microvm_dropped] label and the boot continues,
+    because teardown removes the guest explicitly either way. An
+    [Observation] one is recorded the same way: without its scratch the shim
+    answers observe requests with [observe_scratch_error] and the gate keeps
+    the judge for them, so the guest is usable and the label says what it
+    lacks.
+
+    The booted guest also carries [masc.mcp.microvm_backend], so a listing
+    can tell which runtime it came from without reading the keeper's TOML. *)
+
+val exec_argv_for :
+  Keeper_microvm_backend.t ->
+  container_name:string ->
+  uid:int ->
+  gid:int ->
+  container_cwd:string ->
+  stdin:bool ->
+  command_argv:string list ->
+  string list
+(** One command inside a running guest. [msb] needs [--] between the guest
+    name and the command and spells stdin [--stream]; the other two take the
+    command bare with [-i]. *)
+
+val shim_exec_prefix_for :
+  ?stdin:bool ->
+  Keeper_microvm_backend.t ->
+  container_name:string ->
+  uid:int ->
+  gid:int ->
+  remote_root:string ->
+  shim_config_path:string ->
+  (string list, string) result
+(** The prefix the remote lane delivers a framed request through, ending at
+    the guest name so the caller appends the shim path.
+
+    The prefix carries the writable guest [HOME]
+    ({!Keeper_microvm_backend.scratch_guest_root}, so the shim does not inherit
+    an image [HOME] on the read-only rootfs), the config location, and the
+    identity the shim runs under. All three CLIs document the environment
+    entries the first two need ([msb exec] has [-e, --env]).
+
+    [container exec --user] documents [name|uid[:gid]] and nerdctl takes
+    Docker's. [msb exec --user] documents a guest user name and no numeric form,
+    so msb omits [--user]; the work volume's [uid=,gid=] mount places writes
+    at the right host uid. *)
+
+val stop_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> string list
+
+val delete_force_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> string list
+(** For a guest that survived as stopped (e.g. the host rebooted out from
+    under a remove-on-exit flag); running guests are taken down with
+    {!stop_argv_for}. *)
+
+val logs_tail_argv_for :
+  Keeper_microvm_backend.t -> tail:int -> container_id:string -> string list
+(** The last [tail] lines of a guest's stdio. [container] takes [-n]; [msb]
+    rejects [-n] and takes [--tail], and [nerdctl] documents both. *)
+
+(** {2 The work volume and the shim (RFC-0400)}
+
+    The keeper's working tree lives on a persistent Keeper-named volume mounted
+    at {!work_volume_guest_root}; that path is the remote lane's [remote_root].
+    Same-named Keepers in separate workspaces may share that volume.
+    Apple uses an ext4 disk; nerdctl uses a managed host directory with no
+    enforced capacity. The following FD measurements apply only to Apple.
+    A tree on Apple's virtiofs share pins one host file
+    descriptor -- one host vnode -- per inode the guest touches against a
+    [kern.maxvnodes] of 263,168; measured writing 20,000 files on container
+    1.3.1: ext4 volume 26 -> 26 host descriptors, virtiofs 26 -> 20,027.
+    See the implementation for the panics this prevents. The static
+    [masc-exec-shim] and its config travel in one host directory mounted
+    read-only at {!shim_guest_dir}. *)
+
+val work_volume_guest_root : string
+
+(** [masc-keeper-work-<keeper_name>], or an error when the name carries
+    anything outside [A-Za-z0-9._-]. *)
+val work_volume_name : keeper_name:string -> (string, string) result
+
+val apple_volume_create_argv : volume_name:string -> size:string -> string list
+(** Apple's sized-volume spelling. Named after the runtime rather than left
+    as the lane's default: [msb] rejects [-s] and wants [--kind disk --size],
+    and [nerdctl volume create] documents no size flag at all.
+    {!ensure_work_volume_for} is the entry that answers for all three. *)
+
+type apple_boot_failure =
+  | Apple_invalid_boot_plan of Keeper_microvm_boot_plan.invalid_plan list
+  | Apple_network_unavailable of string
+  | Apple_constraints_unexpressible of constraint_refusal list
+
+val microvm_backend_label_key : string
+
+val apple_turn_start_argv :
+  container_name:string -> plan:Keeper_microvm_boot_plan.t ->
+  lifecycle_labels:(string * string) list -> dns:string option ->
+  policy_proxy:policy_proxy option -> (string list, apple_boot_failure) result
+(** The actual Apple Boot projection. Stable labels and every requested
+    boot field come from [plan]; its canonical digest labels the same argv.
+    DNS and policy route values are execution inputs excluded from the digest.
+    Does not change adoption, identity lifetime, sweep or shim authority. *)
+
+val apple_guest_facts : container_name:string -> string -> Keeper_microvm_boot_plan.reading
+(** Strictly reads one Apple inspect row. Missing/duplicate security fields,
+    unknown mount types and malformed values are [Unreadable], never absence.
+    Retains the image descriptor and exact platform for a separate authoritative
+    image-entrypoint observation; initProcess is the complete effective command. *)
+
+val work_volume_mount_args : volume_name:string -> string list
+
+val trim_guest_root : string
+(** [/masc-trim]: where {!apple_work_volume_trim_argv} mounts the volume. *)
+
+val work_volume_trim_name : keeper_name:string -> string
+(** Stable bounded helper name. The keeper name must be a valid work-volume
+    segment. Existing names of at most 63 bytes retain their exact spelling. *)
+
+val apple_work_volume_trim_argv :
+  keeper_name:string -> volume_name:string -> image:string -> string list
+(** [container run --rm] of [image] as root with every capability dropped
+    and only [CAP_SYS_ADMIN] added back, no network, a read-only root and
+    a fixed findmnt/tune2fs script setting persistent ext4 discard.
+    Subsequent mounts automatically discard freed blocks. Run only while no guest has the volume
+    attached: a second ext4 mount of the same volume corrupts it. *)
+
+val discard_configuration_script_with : findmnt:string -> tune2fs:string -> guest_root:string -> string
+(** The same fixed helper payload with explicit tool/mount paths, allowing
+    actual process fixtures without touching a mounted volume. Resolve its
+    mounted device and run tune2fs only; a failed discovery stops before tuning. *)
+
+val remove_apple_work_volume_trim :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> (unit, string) result
+(** Delete the stable helper using the removal budget, then prove its absence
+    using actual complete canonical CLI capture and the shared strict all-row
+    inventory decoder under the I/O budget. [run] supplies only the delete
+    effect, never absence authority. The name is shared across workspaces;
+    callers must establish ownership separately before using this low-level
+    operation. Keeper boot and teardown do not use it. *)
+
+type discard_read_failure =
+  | Discard_backend_unsupported of Keeper_microvm_backend.t
+  | Discard_volume_name_invalid of string
+  | Discard_inspect_unavailable of Keeper_microvm_cli_output.error
+  | Discard_inspect_failed of Unix.process_status
+  | Discard_inspect_invalid_json
+  | Discard_inspect_invalid of Keeper_volume_filesystem.inspect_failure
+  | Discard_volume_mismatch of { expected : string; actual : string }
+  | Discard_image_unreadable of Keeper_volume_filesystem.read_failure
+
+type work_volume_discard_default =
+  | Discard_default_set
+  | Discard_default_absent
+  | Superblock_unreadable of discard_read_failure
+
+val read_work_volume_discard_default :
+  backend:Keeper_microvm_backend.t -> keeper_name:string -> timeout_sec:float ->
+  work_volume_discard_default
+(** Inspect the current backend's expected Keeper-named work volume, require
+    its exact name and ext4 source, then read the host superblock. This does
+    not establish exclusive workspace ownership. Apple
+    uses complete canonical CLI capture. Other backends explicitly refuse.
+    No cached source, caller-provided image or preview authorizes this read. *)
+
+val discard_read_failure_message : discard_read_failure -> string
+
+type discard_configuration =
+  | Discard_already_set
+  | Discard_unreadable of discard_read_failure
+  | Discard_helper_finished of
+      { status : Unix.process_status
+      ; output : string
+      ; after : work_volume_discard_default
+      }
+
+val reclaim_apple_work_volume :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> on_cleanup_error:(string -> unit)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> volume_name:string
+  -> image:string
+  -> (discard_configuration, string) result
+(** Read the actual work volume before any helper operation. Set/unreadable
+    results start no helper and issue no helper cleanup. Only an absent flag
+    permits one tune2fs helper, bracketed by strict absence checks, including
+    protected cleanup on cancellation. A helper's status is retained and its
+    subsequent superblock reading is separate; exit0 never guesses a set bit.
+    [Error] refuses a guest mount when helper absence cannot be proved.
+    This low-level operation does not establish workspace or helper ownership;
+    Keeper boot does not call it while those identities are unverified. *)
+
+val volume_repair_guest_root : string
+(** [/masc-repair]: where {!apple_volume_repair_argv} mounts the volume. *)
+
+val volume_repair_name : keeper_name:string -> string
+(** Stable bounded helper name, [masc-keeper-work-<keeper>-repair]. *)
+
+val volume_repair_script_with :
+  findmnt:string -> umount:string -> e2fsck:string -> guest_root:string -> string
+(** {!volume_repair_script} over the given tool paths and mount point, so a
+    test can run the same script against stub tools. *)
+
+val volume_repair_script : string
+(** Unmount {!volume_repair_guest_root}, stop if it is still mounted, then
+    [e2fsck -f -y] and [e2fsck -f -n] on its device, printing both exit
+    codes. The script exits 0 once e2fsck has run, whatever it found: the
+    caller reads the host superblock to decide the outcome
+    (RFC keeper-volume-filesystem-repair §3.3). *)
+
+val apple_volume_repair_argv :
+  keeper_name:string -> volume_name:string -> image:string -> string list
+(** [container run --rm] of [image] as root with every capability dropped and
+    [CAP_SYS_ADMIN] added back (to unmount), no network, a read-only root
+    with a [/tmp] tmpfs, and {!volume_repair_script} as entrypoint. Run only
+    while no guest has the volume attached. *)
+
+val remove_apple_volume_repair :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> (unit, string) result
+(** {!remove_apple_work_volume_trim} for the repair helper. *)
+
+type volume_repair_run =
+  { status : Unix.process_status
+  ; stdout : string  (** As captured by [run_helper]. *)
+  ; stderr : string
+  ; cleanup : (unit, string) result
+        (** Removing the helper after it ran. A failure here does not undo
+            what e2fsck wrote. *)
+  }
+
+val repair_apple_volume :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> run_helper:(string list -> Unix.process_status * string * string)
+  -> on_start:(unit -> unit)
+  -> on_cleanup_error:(string -> unit)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> volume_name:string
+  -> image:string
+  -> (volume_repair_run, string) result
+(** Remove a repair helper a previous server left, call [on_start], then run
+    {!apple_volume_repair_argv} through [run_helper], which has no timeout.
+    The switch release removes the helper and proves its absence after
+    success, failure or cancellation. [Error] means a stale helper could not
+    be removed, so the helper never started. This low-level operation does not
+    establish workspace or helper ownership. *)
+
+val keeper_work_root : keeper_name:string -> string
+(** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
+
+val shim_guest_dir : string
+val shim_binary_name : string
+val shim_config_name : string
+
+val shim_sidecar_name : string
+(** [masc-exec-shim.sha256], written by [scripts/install.sh] beside the shim
+    it placed: the sha256 the release's SHA256SUMS gave for that asset, in
+    [sha256sum] format (digest, two spaces, asset name). *)
+
+(** RFC-0427 B-2: what the boot knows about the shim it is about to run. *)
+type shim_provenance =
+  | Shim_verified of { sha256 : string }
+      (** the binary's digest equals the sidecar's *)
+  | Shim_unverified  (** no sidecar: a hand-built shim, run as it is *)
+
+val verify_shim_sidecar : dir:string -> (shim_provenance, string) result
+(** Reads [dir/masc-exec-shim.sha256] if present and compares it with the
+    digest of [dir/masc-exec-shim], reading its current bytes on every call.
+    File metadata is not an integrity identity: an in-place writer can keep
+    the size and restore the modification time. The boot caller runs this
+    read-only verification on the shared executor when installed.
+    [Error] names the case: [microvm_shim_hash_mismatch] (both
+    digests in the text), [microvm_shim_sidecar_invalid],
+    [microvm_shim_sidecar_unreadable], [microvm_shim_unreadable]. Never
+    raises. *)
+val shim_guest_path : string
+val shim_config_guest_path : string
+val shim_mount_args : host_dir:string -> string list
+
+val shim_config_content : payload_path:string -> string
+(** [remote_root=<work root>], [path=<payload_path>] and
+    [env_allowlist=<config env names + GIT_CONFIG_GLOBAL>]: the lines the
+    guest's shim reads.
+    No [scratch_root]: the boot mounts the scratch filesystem at the shim's
+    default ({!Keeper_microvm_backend.scratch_guest_root}), and a shim one
+    release behind refuses any key it does not know, failing every request
+    on the guest. *)
+
+val remote_env_allowlist : string list
+val remote_connect_timeout_sec : int
+val remote_max_concurrent_sessions : int
+
+(** Volume ids in a [container volume list --format json] payload. *)
+val volume_names_of_json : Yojson.Safe.t -> (string list, string) result
+
+type volume_probe_outcome =
+  | Volume_present
+  | Volume_absent
+  | Volume_probe_failed of string
+
+(** [container volume inspect] exits 1 for "no such volume" and also for a
+    stopped container system, so a 1 is confirmed against the listing instead
+    of being read as absence -- creating over an existing volume would land on
+    a keeper's working tree. Pure, so the ambiguity is testable. *)
+val classify_volume_probe
+  :  volume_name:string
+  -> inspect:Unix.process_status * string * string
+  -> listing:(Unix.process_status * string * string) option
+  -> volume_probe_outcome
+
+(** Apple provisions a capacity-limited guest disk. Nerdctl provisions a
+    persistent managed directory and logs that [size] is not enforced.
+    [`Ensured] means idempotent create followed by strict inspect confirmation;
+    it does not claim to distinguish a new volume from an existing one.
+
+    On Apple, a typed process timeout after create triggers one exact-name
+    volume probe. Confirmed presence returns [`Already_present], without
+    claiming which actor created the volume. Absence or an unreadable probe
+    retains the create failure; neither proves that the backend had no effect.
+    The create is never replayed here. Other create failures and cancellation
+    keep their existing behavior. This does not retain a pending operation
+    across calls or guarantee recovery after restart. *)
+val ensure_work_volume_for
+  :  Keeper_microvm_backend.t
+  -> volume_name:string
+  -> size:string
+  -> timeout_sec:float
+  -> ([ `Created | `Already_present | `Ensured ], string) result
+
+(** {2 The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)}
+
+    [Apple_container] only. Msb's and nerdctl's named work volumes are host
+    directories -- deleting a file inside either returns host disk
+    immediately, with no VM disk image in between, so the problem this
+    section exists for does not occur there (see the implementation for the
+    measurement). Apple's is a sparse virtio-blk image, so a guest
+    [rm -rf _build] frees nothing on the host until the blocks are
+    discarded. The disk accepts discard, but a keeper guest cannot issue it
+    (its capability set is empty). Boot does not currently run the discard
+    helper while workspace ownership is unverified, so deleted work blocks
+    may remain allocated on the host. The build volume gets no discard
+    configuration. A Keeper's
+    [_build] is placed on a separate volume apart from {!work_volume_guest_root}.
+    Its name does not establish exclusive ownership: deleting it may affect
+    another workspace or an active build even if the output is derived. *)
+
+val build_volume_guest_root : string
+(** [/masc-build], distinct from {!work_volume_guest_root}. *)
+
+val build_volume_name : keeper_name:string -> (string, string) result
+(** [masc-keeper-build-<keeper_name>], or an error when the name carries
+    anything outside [A-Za-z0-9._-]. *)
+
+val build_volume_mount_args : volume_name:string -> string list
+
+(** What [_build] is right now, as far as the plan cares. *)
+type build_link_state =
+  | Build_absent
+  | Build_symlink of string
+  | Build_real_directory
+
+type build_link_plan =
+  | Link_create of string
+  | Link_preserve_symlink of { existing : string; expected : string }
+  | Link_already_correct
+  | Link_refused_real_directory
+  | Link_refused_invalid_path of { detail : string; state : build_link_state }
+      (** The checkout's path names no build target ({!build_link_target}'s
+          [Error] is [detail]). [state] is what the scan found, so a real
+          [_build] the next boot removes is still reported. *)
+
+val build_link_target : playground_relative:string -> (string, string) result
+(** The checkout's [_build] target inside {!build_volume_guest_root}: the
+    playground-relative path with its [/] segments flattened to [:], since
+    dune's [_build] symlink has no parent directory the guest can [mkdir -p]
+    through. A segment already containing [:] is refused rather than let two
+    checkouts collide onto one build directory. *)
+
+val plan_build_link : target:string -> build_link_state -> build_link_plan
+(** Deciding is separate from acting so the refusal is testable. The scan
+    runs inside a live guest, where a build may be using a real [_build], so
+    the plan never deletes one; the caller reports
+    {!Link_refused_real_directory} and the checkout keeps building on the
+    unified work volume until the next owned first handoff removes it
+    ({!first_handoff_build_cleanup_script}). A differently targeted symlink
+    is left in place and reported: its ownership is not established here. *)
+
+val apple_volume_delete_argv : volume_name:string -> string list
+(** [container volume delete NAME], including build-volume recreation. *)
+
+val apple_volume_list_argv : unit -> string list
+(** [container volume list --format json]: the listing the volume probe and
+    the volume removal both read. *)
+
+val apple_volume_inspect_argv : volume_name:string -> string list
+(** [container volume inspect NAME]: the JSON whose [configuration.source]
+    names the volume's host image ({!Keeper_volume_filesystem.image_of_inspect}). *)
+
+val remove_apple_keeper_volumes :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> keeper_name:string
+  -> (unit, string) result
+(** Low-level operation to delete the work and build volumes named for
+    [keeper_name]. These names are shared across workspaces: the caller must
+    establish that every owner has released them before calling this function.
+    A missing guest alone is not such proof. The operation names them by
+    {!work_volume_name} and {!build_volume_name}, then prove both absent from
+    one volume listing. Both deletes are attempted whatever either returns;
+    an already-absent volume is a success. A volume still listed, an
+    unreadable listing, or a keeper name those functions refuse is [Error].
+    This function does not establish ownership. *)
+
+val recreate_apple_build_volume
+  :  volume_name:string
+  -> size:string
+  -> timeout_sec:float
+  -> ([ `Created | `Already_present ], string) result
+(** Delete the volume if present, then create it with
+    {!apple_volume_create_argv}. [container volume create] is not idempotent,
+    so existence is settled by a [container volume] probe rather than by
+    reading its "already exists" message. Called once per fresh guest boot
+    (RFC-keeper-build-output-returns-to-a-disposable-volume): [_build] is
+    entirely derived, so
+    starting the volume empty every time costs one cold build and returns
+    the host disk the previous life's volume had grown to, since a keeper
+    guest cannot discard its own blocks and `container volume` has no
+    attach/detach to swap the volume under a running guest. A probe failure refuses rather than
+    guesses; deleting on an ambiguous answer risks a volume this call did
+    not create the record for.
+
+    A create timeout uses the same single exact-name reconciliation as
+    {!ensure_work_volume_for}: confirmed presence returns [`Already_present],
+    without replaying create or asserting its origin. An absent/unreadable
+    post-timeout probe remains a create failure, not proof of no backend effect.
+    There is no pending-operation recovery across calls or restart. *)
+
+(** {3 Finding checkouts and their [_build] state inside the guest}
+
+    A [Micro_vm] keeper's tree is [Endpoint_owned]
+    ({!Keeper_types_profile_sandbox.tree_location_of_profile}): the host
+    keeps only a bookkeeping bundle, and a host-side file operation on it
+    would silently miss the tree. So the walk, the [_build] state read, and
+    the symlink itself all run inside the guest over
+    [container exec]. Only the decision ({!plan_build_link}) stays host-side
+    and pure. *)
+
+val build_root_scan_depth : int
+(** How far below the keeper's work root a checkout is looked for. Observed
+    layouts: depth 1 ([polisher/masc-t362]), depth 2
+    ([lane-smith/repos/wt-370]). *)
+
+val build_root_marker : string
+(** [dune-project]: the marker for the build output this addresses.
+    [_build] is dune's name and dune's alone; other ecosystems' output
+    directories ([node_modules], [target], [dist]) are not handled here
+    (measured: npm deletes and replaces a [node_modules] symlink on every
+    install, defeating a symlink outright). *)
+
+val build_output_dir_name : string
+
+val build_keep_marker : string
+(** [.masc-keep-build]: a checkout holding this file keeps its real
+    [_build] through a guest boot. *)
+
+val first_handoff_build_cleanup_script : keeper_work_root:string -> string
+(** Pure payload for the owned guest's first turn handoff, under its uid/gid
+    through the exec-shim runner. The same scan depth/markers skip the root,
+    [.git], symlinked output and [.masc-keep-build]. Each real [_build] first
+    moves into a private mktemp child of [.masc-build-removing]; only after
+    all renames does deletion clear that reserved pending directory, including
+    interrupted prior cleanup. Paths are [-exec] arguments, never lines.
+    Root/pending symlinks refuse. Failure is reported by the script status;
+    the caller logs it and may continue boot. Never run on attached reads or
+    a guest this process has already handed to a turn. *)
+
+val build_scan_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> keeper_work_root:string
+  -> uid:int
+  -> gid:int
+  -> string list
+(** One [find -exec] scan, cwd the keeper's work root: reports each checkout
+    using NUL-framed fields without changing it. [find] without [-L] does not
+    descend through symlinks. [_build] and [.git] are pruned rather than
+    descended. Runs as the keeper's uid:gid; the guest must provide [readlink
+    -n]. *)
+
+type build_scan_row =
+  { checkout : string
+  ; state : build_link_state
+  }
+
+val build_scan_rows_of_output : string -> (build_scan_row list, string) result
+(** Parses the NUL-framed stdout of {!build_scan_argv_for}. A malformed or
+    truncated stream is refused as a whole before any link action. *)
+
+type build_link_row =
+  { checkout : string
+  ; target : string option
+  ; plan : build_link_plan
+  }
+
+val build_link_rows_of_scan : build_scan_row list -> build_link_row list
+(** Every scanned checkout's target and plan, decided purely
+    ({!plan_build_link}) -- touches no guest state. *)
+
+val build_link_warning : build_link_plan -> string option
+(** Static warning for preserved or refused entries, without guest-provided
+    paths, targets or refusal details. A scanned [Build_real_directory] can be
+    any existing non-symlink entry; warn that a later first owned handoff can
+    remove it if it is a directory and the keep marker is absent. *)
+
+val build_link_actions : build_link_row list -> (string * string) list
+(** The [(checkout, target)] pairs that actually need a guest command --
+    input to {!build_link_apply_request_for}. A row already correct, or
+    refused, needs none. *)
+
+val build_link_targets : build_link_row list -> string list
+(** Every target that must exist before a build runs: the targets of
+    {!build_link_actions} and of rows already linked. A fresh boot recreates
+    the build volume empty, so an already-correct link dangles until its
+    target is created again -- input to {!build_target_mkdir_request}. *)
+
+val build_link_apply_request_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> keeper_work_root:string
+  -> uid:int
+  -> gid:int
+  -> actions:(string * string) list
+  -> string list * string
+(** The exec argv and its NUL-framed stdin, with checkout and target payload
+    paths absent from argv; the working root is still an argv value. Python 3
+    in isolated mode verifies the complete payload length, field count and
+    SHA-256 before attempting any symlink. The first of [/usr/bin/python3] and
+    [/usr/local/bin/python3] that passes the shell's [-x] check is selected.
+    If neither passes, the helper exits 127. A selected interpreter that fails
+    is not followed by another. An existing destination is not replaced.
+    Checkout parents are not fenced. A failed effect may be partial. *)
+
+val build_target_mkdir_request : container_name:string -> targets:string list -> string list * string
+(** The exec argv and NUL-framed stdin for creating each target with mode 0777,
+    run as root inside the guest after payload verification by the Python 3
+    helper described in {!build_link_apply_request_for}.
+    Necessary because dune does not create the directory a [_build] symlink
+    points at -- it [lstat]s [_build], sees the link, and opens
+    [_build/.lock] straight away, and the host cannot create the target
+    either since it lives inside the build volume's ext4 image. Mode 0777 applies
+    only to newly created directories, since Apple Container's user
+    namespace refuses even guest root changing an existing one's mode. A
+    failed or interrupted effect may be partial. Images need a working Python 3
+    at [/usr/bin/python3] or [/usr/local/bin/python3]. *)
+
+val work_volume_search_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> string list option
+(** For nerdctl, add search permission on the root-owned work volume before
+    using its keeper directory. Run only after confirming the guest mount.
+    Other backends need no permission change. *)
+
+val keeper_work_root_mkdir_argv_for :
+  Keeper_microvm_backend.t -> container_name:string -> keeper_name:string -> string list
+(** Create {!keeper_work_root} inside the guest, in one exec. The host
+    does not access the working tree directly. Apple uses an ext4 disk and
+    nerdctl a runtime-managed directory. The volume
+    root is initially root-owned and Apple's user namespace refuses a later
+    chmod, so creation runs as root with an explicit writable mode that
+    applies only to a new directory. Idempotent. *)
+
+val keeper_work_root_write_probe_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> uid:int
+  -> gid:int
+  -> keeper_name:string
+  -> string list
+(** Create and remove a temporary file in {!keeper_work_root} as [uid:gid],
+    the identity the keeper's commands run under. Exit 0 is accepted as a
+    successful probe. A nonzero exit or signal leaves the result unverified: the
+    container command, creation, cleanup, or metadata inspection may have
+    failed. The guest script attempts to report owner and mode with [stat],
+    but absence of that output does not establish a permissions problem. *)
+
+val work_volume_mounted_probe_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> string list
+(** Boot invariant (RFC-0052): read [/proc/mounts] as root inside the guest.
+    A successful command emits an explicit mounted or not-mounted observation.
+    A failed command or an unrecognised response is not evidence of absence;
+    use {!work_volume_mount_probe_of_result} to interpret it.
+
+    Runs before the mkdir and the write probe above because neither can tell
+    a mounted volume from a writable directory on the guest rootfs: with the
+    mount absent both succeed, and the guest then serves an ephemeral tree
+    whose writes evaporate on the next boot while every log line names the
+    volume. [grep -F] (fixed string) over [/proc/mounts] rather than
+    [mountpoint(1)], which the sandbox image does not ship; the pattern
+    carries the mountpoint field's surrounding spaces so a prefix of the path
+    cannot match. *)
+
+type work_volume_mount_probe =
+  | Work_volume_mounted
+  | Work_volume_not_mounted
+  | Work_volume_probe_unverified of
+      { status : Unix.process_status
+      ; stdout : string
+      ; stderr : string
+      }
+
+val work_volume_mount_probe_of_result
+  :  status:Unix.process_status
+  -> stdout:string
+  -> stderr:string
+  -> work_volume_mount_probe
+(** Decode only a successful probe's complete response. Transport failures,
+    timeouts, and invalid responses leave the mount state unverified. *)
+
+val keeper_vm_container_kind : string
+
+val inspect_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> string list
+(** The argv that makes this backend report a guest's state in the shape
+    {!running_of_inspect_json_for} parses. *)
+
+val running_of_inspect_json_for
+  :  Keeper_microvm_backend.t
+  -> string
+  -> (bool, string) result
+(** Whether the guest this backend describes is running.
+
+    Each backend owns its own parse: [container inspect] must answer exactly
+    one object with duplicate-free row/status keys and state [running] or
+    [stopped]. Other states are unknown, not stopped.
+    [msb inspect --format json] answers a flat
+    object whose [status] is capitalised. A shape the chosen parser does not
+    recognise is [Error]. It is never [Ok false] -- read as "not running", an
+    unrecognised answer takes a live guest down and boots a second beside
+    it. *)
+
+val live_containers_of_json :
+  base_path:string ->
+  keeper_name:string ->
+  Yojson.Safe.t ->
+  (Keeper_sandbox_runtime.live_container list, string) result
+(** Decode only the guests labelled for this base path and keeper out of a
+    [Labelled_json_array] listing. Unrelated host containers are not
+    projected into Keeper status. *)
+
+type container_listing =
+  | Labelled_json_array of string list
+      (** The argv whose output nests [configuration.labels], which is where
+          the base path hash, the keeper name and the owner pid live. *)
+  | Nerdctl_labelled_json_lines of string list
+      (** Explicit Go-template fields including LabelsMap and Runtime.
+          This is nerdctl's own flat record, not an Apple-shaped projection. *)
+  | Listing_not_established of string
+      (** Why this runtime's listing cannot be scoped to a base path and
+          keeper. Named rather than answered with the Apple argv: read as "no
+          guests", an unscopable listing is the answer that leaves a guest
+          running with nothing able to reap it. *)
+
+val container_listing_for : Keeper_microvm_backend.t -> container_listing
+(** [Labelled_json_array] for [container list --all --format json].
+    [Nerdctl_labelled_json_lines] for nerdctl ps with explicit LabelsMap.
+    [Listing_not_established] for msb, whose listing rows carry no labels
+    (they live in msb inspect under active_config.labels). *)
+
+val list_live_containers_for :
+  Keeper_microvm_backend.t ->
+  base_path:string ->
+  keeper_name:string ->
+  timeout_sec:float ->
+  (Keeper_sandbox_runtime.live_container list, string) result
+(** Read the labelled guest inventory for one microvm Keeper.
+    [microvm_container_listing_unsupported] when this runtime's listing
+    cannot be scoped, rather than an empty inventory that reads as "none". *)
+
+val guest_listing_argv_for : Keeper_microvm_backend.t -> string list
+(** The listing that settles a guest name after {!inspect_argv_for} ended any
+    way but exit 0: the {!container_listing_for} argv for Apple and nerdctl,
+    and [msb list --format json] for msb, whose rows carry the name and status
+    even though they carry no labels. *)
+
+val classify_guest_probe_for :
+  Keeper_microvm_backend.t ->
+  container_name:string ->
+  inspect:Unix.process_status * string ->
+  listing:(Unix.process_status * string * string) option ->
+  (Keeper_sandbox_runtime.docker_container_state, string) result
+(** A guest's state from its [inspect] and, when inspect did not exit 0, the
+    {!guest_listing_argv_for} listing as [(status, stdout, stderr)].
+
+    Inspect exit 0 is parsed by {!running_of_inspect_json_for} and the listing
+    is not read. Any other end of inspect is not an answer: a missing name and
+    a runtime that could not look exit alike. Then a listing that exited 0 and
+    does not name the guest is [Docker_container_absent], and one that names
+    it with a state is that state. Everything else is [Error] -- no listing, a
+    failed or unreadable listing, a row whose name cannot be read, the guest
+    named twice, or named by a runtime whose rows carry no state (nerdctl) --
+    because read as absent, an unanswered probe lets a caller delete a running
+    guest and release the snapshot it still mounts. *)
+
+type sweep_candidate =
+  { container_id : string
+  ; keeper_name : string option
+  ; owner_pid : int option
+  }
+
+type sweep_outcome =
+  { removed : string list
+  ; failed : (string * string) list
+  }
+
+val nerdctl_live_containers_of_json_lines :
+  base_path:string -> keeper_name:string -> string ->
+  (Keeper_sandbox_runtime.live_container list, string) result
+(** Strictly decode nerdctl's explicit template and scope by Kata runtime,
+    component, base-path hash, keeper name and microVM kind. Running remains
+    unknown because ps Status is display text, not a state protocol. *)
+
+val nerdctl_sweep_candidates_of_json_lines :
+  base_path:string -> is_pid_alive:(int -> bool) -> string ->
+  (sweep_candidate list, string) result
+(** Only positively identified Kata guests with positive, parsed dead owner
+    PIDs are candidates. Malformed inventory rejects the whole snapshot. *)
+
+val sweep_abandoned_guests :
+  base_path:string ->
+  command_available:(string -> bool) ->
+  timeout_sec:float ->
+  is_pid_alive:(int -> bool) ->
+  run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
+  (Keeper_microvm_backend.t * sweep_outcome) list
+(** Sweep only the process-bound Nerdctl/Kata backend, retaining its dead-owner
+    rule. Apple guests are selected from current declarations by the runtime's
+    complete inventory sweep and never by an owner PID here. Microsandbox has
+    no established labelled inventory. An absent Nerdctl CLI contributes no row;
+    unreadable inventory removes nothing and contributes an empty outcome. *)

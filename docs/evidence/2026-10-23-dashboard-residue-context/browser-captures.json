@@ -1,0 +1,27 @@
+[
+  {
+    "file": "masc-residue-context-before-20261023.png",
+    "sha256": "f14714ac884fbabbc0dc2f704c476deba58a494f4a0284d01e2824a8e5289d8b",
+    "scope": "private local browser capture; not a public repository asset"
+  },
+  {
+    "file": "masc-residue-context-after-collapsed-20261023.png",
+    "sha256": "aa8a180aad40f0d4e98b73c7eb954ad5f0bc0124816d5cf560f63838d0a1874d",
+    "scope": "private local browser capture; not a public repository asset"
+  },
+  {
+    "file": "masc-cleanup-final-context-expanded-20261023.png",
+    "sha256": "5a178d709b2156647be72af290b1fe5a82f9af4f3d3034cb50335d83117e528f",
+    "scope": "private local browser capture; not a public repository asset"
+  },
+  {
+    "file": "masc-cleanup-canonical-monitor-20261023.png",
+    "sha256": "aa4d654f2d61da38e51443a5426a5e25ee3887abb3ab4c72d7bc151b44e8ca1f",
+    "scope": "private local browser capture; not a public repository asset"
+  },
+  {
+    "file": "masc-cleanup-canonical-connectors-20261023.png",
+    "sha256": "2f839e3564b7c48534aa4b6accd4a4fd41677046d028d382fe528b8bc4701e62",
+    "scope": "private local browser capture; not a public repository asset"
+  }
+]

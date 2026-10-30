@@ -1,0 +1,7 @@
+{
+  "server.py": "44d510e52ad1155cdd654f2606a89ce0bbe8a3472e48758f51810a653bd1a853",
+  "lane.toml": "bc9ff6e8198828ec6c19c40655f5d0a642a99321862048810d70a2f050f24bdf",
+  "skills/ego-native/scripts/host.py": "4df3bf7e3e2bf817474c3f569ddf7dcfaa10971c461a173438de2e132e305242",
+  "skills/ego-native/scripts/runtime.mjs": "d2818b72d1aa9d3411feb512aecd4561830d53862bd7cf7d8148fac622ff9813",
+  "skills/ego-native/scripts/contract.py": "3cc255b8f192acee0b1fccbb9977a667c7b617b1131a47103813f9fe34f44ae2"
+}

@@ -1,0 +1,15 @@
+{
+  "source": "5a267962cfc33270e378c7f19e0eaf25e7dc7f29",
+  "sha256": {
+    "dune-project": "f617fba22de25cb24a0aff94a0853e8577d3e42897123bccb7edb3a5a1581010",
+    "lib/runtime_model/dune": "257bb217387d5c13c3db4e115d0b0d5720f6d9a66e58a02fa98421aa96b3e699",
+    "lib/runtime_model/provider_kind_resolver.ml": "9ae3e28d34f970cd39f0b1ad6506d505a2a086e1cb2acac7488ee06caf002535",
+    "lib/runtime_model/runtime_model_resolve.ml": "de6a240150c3475eec1a06be6ee3b1802ff0d319fb9bb5bb8358ef709f05487f",
+    "lib/runtime_model/runtime_model_resolve.mli": "9d03bd94282862710045808ea7623ea592e3ab536019b416729ec3776a0d5ab8",
+    "lib/runtime_model/runtime_model_string.ml": "4decc9603f59998c801393d109c54a3bcdede9e08df0dbc802907b8549ebdb7e",
+    "lib/runtime_model/runtime_model_string.mli": "33d0c547b69da30fc1822bf916b45ab3fb5e8d1eb1951cb6183a43e4e1a4f40f",
+    "masc.opam": "e8d7f11c353034bd022e820756945eb160d62ce10e43bdb3070c9706fe917890",
+    "test/stanzas/test_runtime_model_label_binding.inc": "ec0b7c97bca6fa97b6b043e46f3af159700a4cbee9139dc4e954f7935f0ca153",
+    "test/test_runtime_model_label_binding.ml": "e95d5f1f44e3d9beafcee6346dd2874066bed6a5715c7f3f560034812c7df099"
+  }
+}

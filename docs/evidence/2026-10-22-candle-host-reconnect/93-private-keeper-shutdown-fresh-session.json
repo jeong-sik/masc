@@ -1,0 +1,85 @@
+{
+  "at": "2026-10-21T17:27:41.813898+00:00",
+  "identity": "local-admin",
+  "method": "POST",
+  "path": "/mcp",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "f7d1bdbf3d1043e1b690e4312abb0705",
+    "method": "tools/call",
+    "params": {
+      "name": "masc_keeper_down",
+      "arguments": {
+        "name": "candle-host-qualifier",
+        "remove_meta": false,
+        "remove_session": false
+      }
+    }
+  },
+  "http_status": 200,
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "f7d1bdbf3d1043e1b690e4312abb0705",
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.60.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"accepted\":true,\"schema_version\":8,\"revision\":0,\"operation_id\":\"shutdown-a73cdcf2-6a11-4e13-afe8-11b42039d23d\",\"keeper_name\":\"candle-host-qualifier\",\"lane_ownership\":{\"kind\":\"registered_lane\",\"lane_id\":\"lane-b7bdd0f4-d4c1-4527-8f45-83ae8b768f39\"},\"trace_id\":\"trace-1792601812952-00000\",\"actor\":\"local-admin\",\"cleanup_intent\":{\"reason\":{\"kind\":\"operator_stop_retain_meta\"},\"remove_session\":false},\"turn_disposition\":{\"kind\":\"no_inflight_turn\"},\"expected_backlog_version\":8,\"owned_task_ids\":[],\"join_evidence\":null,\"phase\":{\"kind\":\"prepared\"},\"created_at\":\"2026-10-21T17:27:41Z\",\"updated_at\":\"2026-10-21T17:27:41Z\"}",
+            "status": "ok",
+            "tool": "masc_keeper_down"
+          },
+          "trace_id": "\"f7d1bdbf3d1043e1b690e4312abb0705\"",
+          "agent_id": "local-admin",
+          "tool": "masc_keeper_down",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-10-21T17:27:41Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"accepted\":true,\"schema_version\":8,\"revision\":0,\"operation_id\":\"shutdown-a73cdcf2-6a11-4e13-afe8-11b42039d23d\",\"keeper_name\":\"candle-host-qualifier\",\"lane_ownership\":{\"kind\":\"registered_lane\",\"lane_id\":\"lane-b7bdd0f4-d4c1-4527-8f45-83ae8b768f39\"},\"trace_id\":\"trace-1792601812952-00000\",\"actor\":\"local-admin\",\"cleanup_intent\":{\"reason\":{\"kind\":\"operator_stop_retain_meta\"},\"remove_session\":false},\"turn_disposition\":{\"kind\":\"no_inflight_turn\"},\"expected_backlog_version\":8,\"owned_task_ids\":[],\"join_evidence\":null,\"phase\":{\"kind\":\"prepared\"},\"created_at\":\"2026-10-21T17:27:41Z\",\"updated_at\":\"2026-10-21T17:27:41Z\"}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "accepted": true,
+        "schema_version": 8,
+        "revision": 0,
+        "operation_id": "shutdown-a73cdcf2-6a11-4e13-afe8-11b42039d23d",
+        "keeper_name": "candle-host-qualifier",
+        "lane_ownership": {
+          "kind": "registered_lane",
+          "lane_id": "lane-b7bdd0f4-d4c1-4527-8f45-83ae8b768f39"
+        },
+        "trace_id": "trace-1792601812952-00000",
+        "actor": "local-admin",
+        "cleanup_intent": {
+          "reason": {
+            "kind": "operator_stop_retain_meta"
+          },
+          "remove_session": false
+        },
+        "turn_disposition": {
+          "kind": "no_inflight_turn"
+        },
+        "expected_backlog_version": 8,
+        "owned_task_ids": [],
+        "join_evidence": null,
+        "phase": {
+          "kind": "prepared"
+        },
+        "created_at": "2026-10-21T17:27:41Z",
+        "updated_at": "2026-10-21T17:27:41Z"
+      }
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n+ [\n+   '/api/v1/dashboard/keepers/deletions',\n+   '/api/v1/dashboard/keepers/deletions'\n+ ]\n- []\n",
+  "errors": [],
+  "unexpected": [
+    "/api/v1/dashboard/keepers/deletions",
+    "/api/v1/dashboard/keepers/deletions"
+  ],
+  "mutations": [
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = false # preserve comment\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = false # preserve comment\n",
+        "expected_source_revision": "592b09a3d4c96c0cb9ead5dd943f9a97e1514300b4a45826c0ddf934d31581f3"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = false # preserve comment\n# concurrent other writer\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = false # preserve comment\n# concurrent other writer\n",
+        "expected_source_revision": "0b096c2e7bb09268325c3ccccc73cf2cf8cd653e2d25a26b4428add5bdc6666e"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/setup/resume",
+      "body": {}
+    },
+    {
+      "path": "/api/v1/runtime/config/raw/preview",
+      "body": {
+        "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = true # preserve comment\n# concurrent other writer\n"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/config/raw",
+      "body": {
+        "source_text": "# operator notes\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\", \"second\"]\ncli_slots = [\"client\"]\nenabled = true # preserve comment\n# concurrent other writer\n",
+        "expected_source_revision": "3a23c6e453a5cc1686adac5a45c9e606da3f1716bec218a5d1ffb9e0a54e9fb5"
+      }
+    },
+    {
+      "path": "/api/v1/runtime/setup/resume",
+      "body": {}
+    }
+  ],
+  "body": "Synthetic HTTP · actual Status, Lane activity, raw editor, router and API · no backend/model execution\n\nFixture All LanesFixture Runtime\nKeeper FleetInternal AgentsTool MonitorRuntimeObservatorySkillsAll LanesLane Add-onsLane · Queue\nALL LANES\n\nBuilt-in Lane kinds, package declarations and manual workers.\n\nRefresh Lanes\n\nObserved 2026-08-24T07:47:49.715Z · 12 inventory rows\n\nPackage read: complete · manager present\n\nExact run reading: 60 of 60\n\nFind a Lane\nLIBRARIAN\n\nSelects the next Memory OS snapshot from immutable Keeper history.\n\nexact/librarian_exact\n\nOff · candidate configuration retained; accepted runs finish\n\noff · 0 running · 12 retained runs\n\n활동 설정 닫기\n\n끄면 새 요청을 받지 않습니다. 이미 접수한 작업은 마무리하며 후보 설정은 보존합니다.\n\n관측 상태: off · 0 실행 중\n\n파일 설정: 켜짐 · HTTP 2 / CLI 1 후보\n\n활동 초안: 켜짐\n활동 설정 저장현재 설정 읽기초안 버리기\n\n커밋 #7 · 라우팅 적용됨 · Skill catalog 게시됨 (configured) · Exact registry 이전 상태 유지 · 지금 파일로는 다음 부팅 때 게시되지 않음 (synthetic registry admission refused) · 파일 내구성 확인됨\n\n설정 파일과 저장 기준\nExact runs and diagnosticsRuntime settings · Lane candidates\nObserved configuration and worker details\nExact retained reading\nBOARD ATTENTION\n\nexact/board_attention_exact\n\nJudges one durable Board candidate for Keeper attention.\n\n1 HTTP · 0 CLI admitted\n\nrunning · 1 running · 12 retained runs\n\nInspect Board Attention\nHITL AUTO JUDGE\n\nexact/hitl_auto_judge\n\nProduces the structured judgment for one held approval.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect HITL Auto Judge\nLIBRARIAN\n\nexact/librarian_exact\n\nSelects the next Memory OS snapshot from immutable Keeper history.\n\nOff · candidate configuration retained; accepted runs finish\n\noff · 0 running · 12 retained runs\n\nInspect Librarian\nWORKSPACE CURATOR\n\nexact/workspace_curator_exact\n\nSynthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect Workspace Curator\nVERIFIER\n\nexact/verifier_exact\n\nReviews Task completion and Goal proof evidence.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect Verifier\nBROWSER STAGEHAND\n\nexact/browser_stagehand_exact\n\nAnswers structured model requests from the Stagehand browser lane; run records are not retained yet.\n\n1 HTTP · 0 CLI admitted\n\nno_retained_observation · 0 running · 0 retained runs\n\nInspect Browser Stagehand\nCANDLE APPRAISER\n\nexact/candle_appraiser\n\nAppraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.\n\n1 HTTP · 0 CLI admitted\n\nidle · 0 running · 12 retained runs\n\nInspect Candle Appraiser\nLIVE BROWSER\n\nbrowser/live\n\nBrowser backend observation.\n\n0 connected clients\n\nInspect Live browser\nBROWSER AUTOMATION\n\nbrowser/automation\n\nBrowser backend observation.\n\nExecutor not registered\n\nInspect Browser automation\nBROWSER STAGEHAND\n\nbrowser/stagehand\n\nBrowser backend observation.\n\nExecutor not registered\n\nInspect Browser Stagehand\nMSX\n\nmachine/msx\n\nPublished machine state.\n\nNo screen observed\n\nInspect MSX\nDOS\n\nmachine/dos\n\nPublished machine state.\n\nNo screen observed\n\nInspect DOS"
+}

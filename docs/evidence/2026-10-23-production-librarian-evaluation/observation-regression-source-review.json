@@ -1,0 +1,23 @@
+{
+  "product_head": "9ed280ba2a16b5f82e58b3201eaddb9b77560a6a",
+  "working_head": "9ed280ba2a16b5f82e58b3201eaddb9b77560a6a",
+  "source_verdict": "PASS: no additional P0/P1/P2 found in the two-file source delta",
+  "scope": "uncommitted regression and changelog only; no native execution/model/Dune/CI/GitHub approval",
+  "product_14_files_unchanged": true,
+  "files": [
+    {
+      "file": "test/test_exact_output_binding_wire.ml",
+      "sha256": "aab2d5792a8e0fa9642b7f11939710162e90299190c3b1ce71affb95e591daaa",
+      "bytes": 15346,
+      "state": "tracked uncommitted diff"
+    },
+    {
+      "file": "changelog.d/45651.md",
+      "sha256": "302fdfeeba6b8e4327e9d9e0dd03a60b20d240ef5d297ee928c66864fbc6d345",
+      "bytes": 439,
+      "state": "new untracked changelog"
+    }
+  ],
+  "regression_diff_sha256": "bd693ce805c72dc95854c379ce57198758361589f5d865b5fdd8c8e5cb0410bf",
+  "report_sha256": "5bb33c6fd3f721f7f564b9b5d539da61ec56256fbfbc5358530688840fb17d40"
+}

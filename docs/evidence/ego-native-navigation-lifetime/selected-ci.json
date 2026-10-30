@@ -1,0 +1,22 @@
+{
+  "source": "a96d1a9d1f428b8d4832f8a65ad00c2e44086c09",
+  "run_id": 40107798441,
+  "conclusion": "success",
+  "scope": "selected three suites, not full regression",
+  "suites": {
+    "test_browser_ego_peer": {
+      "tests": 31,
+      "seconds": 3.018
+    },
+    "test_browser_lane_watched_work": {
+      "tests": 8,
+      "seconds": 0.001
+    },
+    "test_browser_addon_live_ego": {
+      "tests": 11,
+      "seconds": 21.672
+    }
+  },
+  "total_tests": 50,
+  "log_sha256": "f4ff390b1e2f094b8e5b56fb191c6f47ce10ca67866db93e0b59c12f1318869a"
+}

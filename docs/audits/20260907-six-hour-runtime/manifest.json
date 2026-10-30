@@ -1,0 +1,14 @@
+{
+  "window_start_utc": "2026-09-06T20:58:23Z",
+  "window_end_utc": "2026-09-07T02:58:23Z",
+  "records": 102600,
+  "levels": {
+    "INFO": 92944,
+    "WARN": 8764,
+    "ERROR": 892
+  },
+  "frozen_local_window": "/private/tmp/masc-log-audit-20260907/window.jsonl",
+  "sha256": "4cadc5dc84b85e1e82e9765aa53a54619db851aa023341e23111c93494ba0920",
+  "raw_window_committed": false,
+  "reason": "Raw window includes unrelated live tool and conversation content; selected evidence only."
+}

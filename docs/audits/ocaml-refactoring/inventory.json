@@ -1,0 +1,995 @@
+{
+  "baseline": "aea8424926ea79f110315eec5ab429ac51043598",
+  "scope": "All tracked .ml/.mli files; production: lib/, bin/, packages/agent_core/lib/.",
+  "meaning": "Descriptive census only; no semantic inspection or defect follows from a count.",
+  "production_manifest_sha256": "bbb2ba86b71d38a9f03656ac7c84ad22b0f10898a52557754786d7d6057db88b",
+  "counts": {
+    "production": {
+      ".ml": 2583,
+      ".mli": 2427
+    },
+    "documentation_or_experiment": {
+      ".ml": 24
+    },
+    "test": {
+      ".ml": 1941,
+      ".mli": 4
+    },
+    "tooling": {
+      ".ml": 15,
+      ".mli": 3
+    }
+  },
+  "production_areas": {
+    "bin": {
+      "implementations": 291,
+      "lines": 168636,
+      "with_interface": 242
+    },
+    "lib/(root)": {
+      "implementations": 259,
+      "lines": 82559,
+      "with_interface": 247
+    },
+    "lib/activity_graph": {
+      "implementations": 4,
+      "lines": 2066,
+      "with_interface": 4
+    },
+    "lib/ag_ui": {
+      "implementations": 1,
+      "lines": 187,
+      "with_interface": 1
+    },
+    "lib/agent_observation": {
+      "implementations": 1,
+      "lines": 381,
+      "with_interface": 1
+    },
+    "lib/apple_keychain": {
+      "implementations": 1,
+      "lines": 10,
+      "with_interface": 1
+    },
+    "lib/attribution": {
+      "implementations": 2,
+      "lines": 174,
+      "with_interface": 2
+    },
+    "lib/auth": {
+      "implementations": 12,
+      "lines": 4579,
+      "with_interface": 10
+    },
+    "lib/autonomous": {
+      "implementations": 1,
+      "lines": 39,
+      "with_interface": 1
+    },
+    "lib/backend": {
+      "implementations": 4,
+      "lines": 1203,
+      "with_interface": 4
+    },
+    "lib/board": {
+      "implementations": 17,
+      "lines": 5652,
+      "with_interface": 17
+    },
+    "lib/board_addressing": {
+      "implementations": 1,
+      "lines": 142,
+      "with_interface": 1
+    },
+    "lib/board_tool_adapter": {
+      "implementations": 10,
+      "lines": 2808,
+      "with_interface": 6
+    },
+    "lib/board_types": {
+      "implementations": 1,
+      "lines": 779,
+      "with_interface": 1
+    },
+    "lib/bounded_event_dedupe": {
+      "implementations": 1,
+      "lines": 109,
+      "with_interface": 1
+    },
+    "lib/briefing_compactors": {
+      "implementations": 2,
+      "lines": 102,
+      "with_interface": 2
+    },
+    "lib/browser_configuration": {
+      "implementations": 1,
+      "lines": 136,
+      "with_interface": 1
+    },
+    "lib/browser_host": {
+      "implementations": 1,
+      "lines": 963,
+      "with_interface": 1
+    },
+    "lib/browser_lane": {
+      "implementations": 7,
+      "lines": 1107,
+      "with_interface": 5
+    },
+    "lib/build_version": {
+      "implementations": 1,
+      "lines": 13,
+      "with_interface": 1
+    },
+    "lib/cancel_safe": {
+      "implementations": 1,
+      "lines": 23,
+      "with_interface": 1
+    },
+    "lib/candle": {
+      "implementations": 11,
+      "lines": 1797,
+      "with_interface": 11
+    },
+    "lib/candle_config": {
+      "implementations": 1,
+      "lines": 316,
+      "with_interface": 1
+    },
+    "lib/candle_runtime": {
+      "implementations": 13,
+      "lines": 1527,
+      "with_interface": 13
+    },
+    "lib/candle_store": {
+      "implementations": 1,
+      "lines": 267,
+      "with_interface": 1
+    },
+    "lib/compression": {
+      "implementations": 3,
+      "lines": 172,
+      "with_interface": 3
+    },
+    "lib/config": {
+      "implementations": 26,
+      "lines": 6193,
+      "with_interface": 26
+    },
+    "lib/config_dir_resolver": {
+      "implementations": 1,
+      "lines": 532,
+      "with_interface": 1
+    },
+    "lib/config_journal": {
+      "implementations": 1,
+      "lines": 390,
+      "with_interface": 1
+    },
+    "lib/core": {
+      "implementations": 26,
+      "lines": 3881,
+      "with_interface": 26
+    },
+    "lib/cost_ledger": {
+      "implementations": 1,
+      "lines": 375,
+      "with_interface": 1
+    },
+    "lib/crypto_rng": {
+      "implementations": 1,
+      "lines": 17,
+      "with_interface": 1
+    },
+    "lib/dashboard": {
+      "implementations": 43,
+      "lines": 14249,
+      "with_interface": 43
+    },
+    "lib/dashboard_eval_feed": {
+      "implementations": 1,
+      "lines": 248,
+      "with_interface": 1
+    },
+    "lib/dashboard_tla_specs": {
+      "implementations": 1,
+      "lines": 311,
+      "with_interface": 1
+    },
+    "lib/dashboard_utils": {
+      "implementations": 2,
+      "lines": 120,
+      "with_interface": 2
+    },
+    "lib/dated_jsonl": {
+      "implementations": 3,
+      "lines": 2275,
+      "with_interface": 3
+    },
+    "lib/discovery_cache": {
+      "implementations": 1,
+      "lines": 73,
+      "with_interface": 1
+    },
+    "lib/dos_lane": {
+      "implementations": 1,
+      "lines": 1305,
+      "with_interface": 1
+    },
+    "lib/dos_pad": {
+      "implementations": 1,
+      "lines": 164,
+      "with_interface": 1
+    },
+    "lib/dos_tools": {
+      "implementations": 1,
+      "lines": 1082,
+      "with_interface": 0
+    },
+    "lib/dos_worker": {
+      "implementations": 1,
+      "lines": 262,
+      "with_interface": 1
+    },
+    "lib/egress_host": {
+      "implementations": 1,
+      "lines": 273,
+      "with_interface": 1
+    },
+    "lib/egress_proxy": {
+      "implementations": 1,
+      "lines": 137,
+      "with_interface": 1
+    },
+    "lib/egress_proxy_net": {
+      "implementations": 1,
+      "lines": 274,
+      "with_interface": 1
+    },
+    "lib/eio_context": {
+      "implementations": 1,
+      "lines": 302,
+      "with_interface": 1
+    },
+    "lib/event_bus_slots": {
+      "implementations": 1,
+      "lines": 57,
+      "with_interface": 1
+    },
+    "lib/exec": {
+      "implementations": 23,
+      "lines": 4908,
+      "with_interface": 12
+    },
+    "lib/exec_policy": {
+      "implementations": 6,
+      "lines": 1038,
+      "with_interface": 5
+    },
+    "lib/exec_shim": {
+      "implementations": 3,
+      "lines": 1327,
+      "with_interface": 2
+    },
+    "lib/exec_ssh_protocol": {
+      "implementations": 1,
+      "lines": 567,
+      "with_interface": 1
+    },
+    "lib/fd_accountant": {
+      "implementations": 1,
+      "lines": 198,
+      "with_interface": 1
+    },
+    "lib/fs_compat": {
+      "implementations": 21,
+      "lines": 15483,
+      "with_interface": 21
+    },
+    "lib/fusion": {
+      "implementations": 16,
+      "lines": 5227,
+      "with_interface": 16
+    },
+    "lib/fusion_core": {
+      "implementations": 8,
+      "lines": 3342,
+      "with_interface": 8
+    },
+    "lib/gate": {
+      "implementations": 29,
+      "lines": 8496,
+      "with_interface": 29
+    },
+    "lib/goal": {
+      "implementations": 10,
+      "lines": 3908,
+      "with_interface": 10
+    },
+    "lib/host_config": {
+      "implementations": 1,
+      "lines": 221,
+      "with_interface": 1
+    },
+    "lib/ide": {
+      "implementations": 4,
+      "lines": 650,
+      "with_interface": 4
+    },
+    "lib/ide_memo": {
+      "implementations": 1,
+      "lines": 185,
+      "with_interface": 1
+    },
+    "lib/json_field": {
+      "implementations": 1,
+      "lines": 95,
+      "with_interface": 1
+    },
+    "lib/jsonl_writer": {
+      "implementations": 1,
+      "lines": 16,
+      "with_interface": 1
+    },
+    "lib/keeper": {
+      "implementations": 650,
+      "lines": 261431,
+      "with_interface": 636
+    },
+    "lib/keeper_approval": {
+      "implementations": 1,
+      "lines": 843,
+      "with_interface": 1
+    },
+    "lib/keeper_chat_delivery_identity": {
+      "implementations": 1,
+      "lines": 369,
+      "with_interface": 1
+    },
+    "lib/keeper_chat_operations": {
+      "implementations": 5,
+      "lines": 3994,
+      "with_interface": 5
+    },
+    "lib/keeper_checkpoint_ref": {
+      "implementations": 1,
+      "lines": 62,
+      "with_interface": 1
+    },
+    "lib/keeper_contract": {
+      "implementations": 6,
+      "lines": 1500,
+      "with_interface": 6
+    },
+    "lib/keeper_execution_scope": {
+      "implementations": 2,
+      "lines": 196,
+      "with_interface": 2
+    },
+    "lib/keeper_failure_taxonomy": {
+      "implementations": 13,
+      "lines": 120,
+      "with_interface": 13
+    },
+    "lib/keeper_hooks_agent_core_types": {
+      "implementations": 1,
+      "lines": 334,
+      "with_interface": 1
+    },
+    "lib/keeper_identity": {
+      "implementations": 8,
+      "lines": 1343,
+      "with_interface": 8
+    },
+    "lib/keeper_metrics": {
+      "implementations": 7,
+      "lines": 692,
+      "with_interface": 7
+    },
+    "lib/keeper_operation_identity": {
+      "implementations": 1,
+      "lines": 28,
+      "with_interface": 1
+    },
+    "lib/keeper_paste_naming": {
+      "implementations": 1,
+      "lines": 38,
+      "with_interface": 1
+    },
+    "lib/keeper_portrait": {
+      "implementations": 5,
+      "lines": 2103,
+      "with_interface": 5
+    },
+    "lib/keeper_registry": {
+      "implementations": 11,
+      "lines": 1689,
+      "with_interface": 11
+    },
+    "lib/keeper_runtime": {
+      "implementations": 23,
+      "lines": 11424,
+      "with_interface": 22
+    },
+    "lib/keeper_sandbox_image": {
+      "implementations": 2,
+      "lines": 289,
+      "with_interface": 2
+    },
+    "lib/keeper_toml": {
+      "implementations": 2,
+      "lines": 562,
+      "with_interface": 2
+    },
+    "lib/keeper_tool_call_index": {
+      "implementations": 1,
+      "lines": 903,
+      "with_interface": 1
+    },
+    "lib/keeper_tool_name": {
+      "implementations": 1,
+      "lines": 46,
+      "with_interface": 1
+    },
+    "lib/keeper_tooling": {
+      "implementations": 5,
+      "lines": 474,
+      "with_interface": 5
+    },
+    "lib/keeper_types": {
+      "implementations": 1,
+      "lines": 50,
+      "with_interface": 1
+    },
+    "lib/keeper_types_profile_sandbox": {
+      "implementations": 1,
+      "lines": 207,
+      "with_interface": 1
+    },
+    "lib/keeper_usage_trust": {
+      "implementations": 1,
+      "lines": 53,
+      "with_interface": 1
+    },
+    "lib/lane_addon": {
+      "implementations": 23,
+      "lines": 7320,
+      "with_interface": 23
+    },
+    "lib/lane_addon_call_context": {
+      "implementations": 1,
+      "lines": 76,
+      "with_interface": 1
+    },
+    "lib/lane_addon_tool_result": {
+      "implementations": 1,
+      "lines": 29,
+      "with_interface": 1
+    },
+    "lib/lane_registry": {
+      "implementations": 4,
+      "lines": 213,
+      "with_interface": 4
+    },
+    "lib/local_runtime_pool": {
+      "implementations": 1,
+      "lines": 303,
+      "with_interface": 1
+    },
+    "lib/lockfree_atomic": {
+      "implementations": 1,
+      "lines": 21,
+      "with_interface": 1
+    },
+    "lib/lsp_client": {
+      "implementations": 9,
+      "lines": 1575,
+      "with_interface": 9
+    },
+    "lib/machine_action_feed": {
+      "implementations": 1,
+      "lines": 28,
+      "with_interface": 1
+    },
+    "lib/machine_checkpoint": {
+      "implementations": 1,
+      "lines": 291,
+      "with_interface": 1
+    },
+    "lib/machine_configuration": {
+      "implementations": 1,
+      "lines": 32,
+      "with_interface": 1
+    },
+    "lib/machine_controller_contract": {
+      "implementations": 1,
+      "lines": 98,
+      "with_interface": 1
+    },
+    "lib/machine_input_history": {
+      "implementations": 1,
+      "lines": 60,
+      "with_interface": 1
+    },
+    "lib/machine_live_publication": {
+      "implementations": 1,
+      "lines": 6,
+      "with_interface": 1
+    },
+    "lib/machine_observation_packet": {
+      "implementations": 1,
+      "lines": 34,
+      "with_interface": 1
+    },
+    "lib/machine_pad_layout": {
+      "implementations": 1,
+      "lines": 93,
+      "with_interface": 1
+    },
+    "lib/markup_document": {
+      "implementations": 1,
+      "lines": 82,
+      "with_interface": 1
+    },
+    "lib/masc_http_client": {
+      "implementations": 3,
+      "lines": 1684,
+      "with_interface": 3
+    },
+    "lib/masc_log": {
+      "implementations": 2,
+      "lines": 1330,
+      "with_interface": 2
+    },
+    "lib/mcp_client": {
+      "implementations": 1,
+      "lines": 362,
+      "with_interface": 1
+    },
+    "lib/mcp_session": {
+      "implementations": 1,
+      "lines": 43,
+      "with_interface": 1
+    },
+    "lib/mcp_transport_protocol": {
+      "implementations": 2,
+      "lines": 706,
+      "with_interface": 2
+    },
+    "lib/model_inference_metrics": {
+      "implementations": 6,
+      "lines": 2143,
+      "with_interface": 6
+    },
+    "lib/monotonic_deadline": {
+      "implementations": 1,
+      "lines": 43,
+      "with_interface": 1
+    },
+    "lib/msx_lane": {
+      "implementations": 2,
+      "lines": 1282,
+      "with_interface": 2
+    },
+    "lib/msx_tool": {
+      "implementations": 1,
+      "lines": 50,
+      "with_interface": 1
+    },
+    "lib/msx_tools": {
+      "implementations": 1,
+      "lines": 536,
+      "with_interface": 0
+    },
+    "lib/msx_worker": {
+      "implementations": 3,
+      "lines": 348,
+      "with_interface": 2
+    },
+    "lib/multimodal": {
+      "implementations": 13,
+      "lines": 1426,
+      "with_interface": 13
+    },
+    "lib/operator": {
+      "implementations": 21,
+      "lines": 4783,
+      "with_interface": 21
+    },
+    "lib/otel_dispatch_hook": {
+      "implementations": 1,
+      "lines": 222,
+      "with_interface": 1
+    },
+    "lib/otel_genai": {
+      "implementations": 1,
+      "lines": 162,
+      "with_interface": 1
+    },
+    "lib/otel_metric_store": {
+      "implementations": 10,
+      "lines": 1044,
+      "with_interface": 10
+    },
+    "lib/otel_metrics": {
+      "implementations": 1,
+      "lines": 57,
+      "with_interface": 1
+    },
+    "lib/otel_spans": {
+      "implementations": 3,
+      "lines": 900,
+      "with_interface": 3
+    },
+    "lib/otel_trace_context": {
+      "implementations": 1,
+      "lines": 134,
+      "with_interface": 1
+    },
+    "lib/owner_process_identity": {
+      "implementations": 1,
+      "lines": 16,
+      "with_interface": 1
+    },
+    "lib/parse_outcome": {
+      "implementations": 1,
+      "lines": 39,
+      "with_interface": 1
+    },
+    "lib/play": {
+      "implementations": 4,
+      "lines": 580,
+      "with_interface": 4
+    },
+    "lib/pool_metrics": {
+      "implementations": 1,
+      "lines": 38,
+      "with_interface": 1
+    },
+    "lib/process": {
+      "implementations": 17,
+      "lines": 4402,
+      "with_interface": 17
+    },
+    "lib/prompt_registry": {
+      "implementations": 6,
+      "lines": 2403,
+      "with_interface": 6
+    },
+    "lib/provider_tool_support": {
+      "implementations": 1,
+      "lines": 45,
+      "with_interface": 1
+    },
+    "lib/pulse": {
+      "implementations": 1,
+      "lines": 293,
+      "with_interface": 1
+    },
+    "lib/random_id": {
+      "implementations": 1,
+      "lines": 93,
+      "with_interface": 1
+    },
+    "lib/repo_manager": {
+      "implementations": 6,
+      "lines": 1471,
+      "with_interface": 6
+    },
+    "lib/run_registry_core": {
+      "implementations": 1,
+      "lines": 886,
+      "with_interface": 1
+    },
+    "lib/runtime": {
+      "implementations": 87,
+      "lines": 38177,
+      "with_interface": 86
+    },
+    "lib/runtime_model": {
+      "implementations": 7,
+      "lines": 815,
+      "with_interface": 7
+    },
+    "lib/runtime_toml_namespace": {
+      "implementations": 1,
+      "lines": 48,
+      "with_interface": 1
+    },
+    "lib/schedule": {
+      "implementations": 8,
+      "lines": 3852,
+      "with_interface": 8
+    },
+    "lib/secret_patterns": {
+      "implementations": 1,
+      "lines": 379,
+      "with_interface": 1
+    },
+    "lib/server": {
+      "implementations": 232,
+      "lines": 96775,
+      "with_interface": 225
+    },
+    "lib/shared_types": {
+      "implementations": 2,
+      "lines": 30,
+      "with_interface": 2
+    },
+    "lib/skill_config": {
+      "implementations": 1,
+      "lines": 595,
+      "with_interface": 1
+    },
+    "lib/skill_reference": {
+      "implementations": 2,
+      "lines": 324,
+      "with_interface": 2
+    },
+    "lib/skill_snapshot": {
+      "implementations": 1,
+      "lines": 699,
+      "with_interface": 1
+    },
+    "lib/skill_snapshot_service": {
+      "implementations": 1,
+      "lines": 463,
+      "with_interface": 1
+    },
+    "lib/slack_lane": {
+      "implementations": 1,
+      "lines": 92,
+      "with_interface": 0
+    },
+    "lib/sse_event": {
+      "implementations": 1,
+      "lines": 485,
+      "with_interface": 1
+    },
+    "lib/sse_wire": {
+      "implementations": 1,
+      "lines": 230,
+      "with_interface": 1
+    },
+    "lib/string_util": {
+      "implementations": 1,
+      "lines": 456,
+      "with_interface": 1
+    },
+    "lib/task": {
+      "implementations": 13,
+      "lines": 2969,
+      "with_interface": 13
+    },
+    "lib/telemetry_coverage_gap": {
+      "implementations": 1,
+      "lines": 82,
+      "with_interface": 1
+    },
+    "lib/telemetry_unified": {
+      "implementations": 1,
+      "lines": 1425,
+      "with_interface": 1
+    },
+    "lib/telemetry_unified_source": {
+      "implementations": 2,
+      "lines": 308,
+      "with_interface": 2
+    },
+    "lib/terminal_size": {
+      "implementations": 1,
+      "lines": 38,
+      "with_interface": 1
+    },
+    "lib/time_codec": {
+      "implementations": 1,
+      "lines": 56,
+      "with_interface": 1
+    },
+    "lib/time_compat": {
+      "implementations": 1,
+      "lines": 7,
+      "with_interface": 1
+    },
+    "lib/toml_line_editor": {
+      "implementations": 1,
+      "lines": 1144,
+      "with_interface": 1
+    },
+    "lib/tool": {
+      "implementations": 8,
+      "lines": 1477,
+      "with_interface": 8
+    },
+    "lib/tool_blob_store": {
+      "implementations": 3,
+      "lines": 1831,
+      "with_interface": 3
+    },
+    "lib/tool_call_projection": {
+      "implementations": 1,
+      "lines": 570,
+      "with_interface": 1
+    },
+    "lib/tool_call_quality_benchmark": {
+      "implementations": 7,
+      "lines": 1245,
+      "with_interface": 7
+    },
+    "lib/tool_catalog_surfaces": {
+      "implementations": 1,
+      "lines": 168,
+      "with_interface": 1
+    },
+    "lib/tool_input_contract": {
+      "implementations": 1,
+      "lines": 1037,
+      "with_interface": 1
+    },
+    "lib/tool_invocation_ref": {
+      "implementations": 1,
+      "lines": 35,
+      "with_interface": 1
+    },
+    "lib/tool_metrics_store": {
+      "implementations": 1,
+      "lines": 391,
+      "with_interface": 1
+    },
+    "lib/tool_schemas": {
+      "implementations": 27,
+      "lines": 1252,
+      "with_interface": 27
+    },
+    "lib/tool_schemas_specs": {
+      "implementations": 1,
+      "lines": 32,
+      "with_interface": 1
+    },
+    "lib/tool_spawn": {
+      "implementations": 1,
+      "lines": 241,
+      "with_interface": 1
+    },
+    "lib/tool_surface": {
+      "implementations": 27,
+      "lines": 2624,
+      "with_interface": 9
+    },
+    "lib/tool_types": {
+      "implementations": 7,
+      "lines": 872,
+      "with_interface": 7
+    },
+    "lib/trajectory": {
+      "implementations": 1,
+      "lines": 966,
+      "with_interface": 1
+    },
+    "lib/turn_fsm": {
+      "implementations": 1,
+      "lines": 370,
+      "with_interface": 1
+    },
+    "lib/types": {
+      "implementations": 16,
+      "lines": 4039,
+      "with_interface": 16
+    },
+    "lib/types_boundary": {
+      "implementations": 1,
+      "lines": 15,
+      "with_interface": 1
+    },
+    "lib/typesafeai": {
+      "implementations": 6,
+      "lines": 1185,
+      "with_interface": 6
+    },
+    "lib/voice": {
+      "implementations": 3,
+      "lines": 2611,
+      "with_interface": 3
+    },
+    "lib/voice_bridge_core": {
+      "implementations": 2,
+      "lines": 1111,
+      "with_interface": 2
+    },
+    "lib/voice_config": {
+      "implementations": 1,
+      "lines": 1011,
+      "with_interface": 1
+    },
+    "lib/voice_runtime_overlay": {
+      "implementations": 1,
+      "lines": 755,
+      "with_interface": 1
+    },
+    "lib/voice_setup": {
+      "implementations": 1,
+      "lines": 263,
+      "with_interface": 1
+    },
+    "lib/voice_wizard": {
+      "implementations": 1,
+      "lines": 380,
+      "with_interface": 1
+    },
+    "lib/watched_work": {
+      "implementations": 1,
+      "lines": 22,
+      "with_interface": 1
+    },
+    "lib/web_search_setup": {
+      "implementations": 1,
+      "lines": 321,
+      "with_interface": 1
+    },
+    "lib/webmcp": {
+      "implementations": 1,
+      "lines": 127,
+      "with_interface": 1
+    },
+    "lib/workspace": {
+      "implementations": 43,
+      "lines": 12168,
+      "with_interface": 41
+    },
+    "lib/workspace_connection": {
+      "implementations": 1,
+      "lines": 68,
+      "with_interface": 1
+    },
+    "lib/workspace_memory": {
+      "implementations": 8,
+      "lines": 2257,
+      "with_interface": 8
+    },
+    "lib/world_constitution": {
+      "implementations": 4,
+      "lines": 495,
+      "with_interface": 4
+    },
+    "packages/agent_core/lib": {
+      "implementations": 69,
+      "lines": 25090,
+      "with_interface": 63
+    },
+    "packages/agent_core/lib/agent": {
+      "implementations": 19,
+      "lines": 6485,
+      "with_interface": 14
+    },
+    "packages/agent_core/lib/base": {
+      "implementations": 9,
+      "lines": 1966,
+      "with_interface": 9
+    },
+    "packages/agent_core/lib/llm_provider": {
+      "implementations": 120,
+      "lines": 57809,
+      "with_interface": 108
+    },
+    "packages/agent_core/lib/mcp_protocol_bundle": {
+      "implementations": 1,
+      "lines": 6,
+      "with_interface": 0
+    },
+    "packages/agent_core/lib/pipeline": {
+      "implementations": 9,
+      "lines": 2975,
+      "with_interface": 4
+    },
+    "packages/agent_core/lib/protocol": {
+      "implementations": 5,
+      "lines": 1693,
+      "with_interface": 5
+    },
+    "packages/agent_core/lib/strings": {
+      "implementations": 1,
+      "lines": 34,
+      "with_interface": 1
+    }
+  }
+}

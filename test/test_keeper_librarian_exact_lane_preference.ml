@@ -1,0 +1,664 @@
+open Alcotest
+open Masc
+
+module Fixture = Exact_output_fixture
+module Librarian = Keeper_librarian
+module Memory = Keeper_memory_os_types
+module Runtime = Keeper_librarian_runtime
+
+let contains ~needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec scan index =
+    if index + n > h
+    then false
+    else String.equal (String.sub haystack index n) needle || scan (index + 1)
+  in
+  n = 0 || scan 0
+;;
+
+let ordinary_requirement =
+  Agent_core.Exact_output.make_output_requirement
+    ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+    ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
+;;
+
+let with_temp_base prefix f =
+  let base_path = Filename.temp_dir prefix "" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
+;;
+
+let prompt_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root "config/prompts"
+  | None -> Filename.concat (Sys.getcwd ()) "config/prompts"
+;;
+
+let selection_output =
+  `Assoc
+    [ "working_contexts", `List []
+    ; ( Librarian.wire_field_new_claims
+      , `List
+          [ `Assoc
+              [ Librarian.wire_field_claim
+                , `String "preferred librarian committed"
+              ; Librarian.wire_field_category, `String "fact"
+              ]
+          ] )
+    ; Librarian.wire_field_dropped, `List []
+    ]
+;;
+
+let input () : Librarian.input =
+  { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-librarian-preference" ~absolute_turn:1
+  ; historical_task_contexts = []; goal_context = Masc.Keeper_librarian.No_task
+  ; keeper_id = Masc_test_deps.keeper_id_fixture "preference-keeper"
+  ; keeper_instructions = "Curate current memory."
+  ; current = None
+  ; messages =
+      [ Agent_core.Types.make_message
+          ~role:Agent_core.Types.User
+          [ Agent_core.Types.Text "remember the preferred result" ]
+      ]
+  ; tool_observations = []
+  ; working_context = Masc.Keeper_librarian_context.empty
+  ; counterpart_observations = []
+  }
+;;
+
+let test_keeper_preference_reorders_the_librarian_lane () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  with_temp_base "librarian-per-keeper-preference" @@ fun base_path ->
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir (prompt_root ());
+  Prompt_defaults.init ();
+  let first =
+    Fixture.start_server
+      ~sw
+      ~net
+      ~clock
+      (Fixture.Reply (Fixture.openai_response selection_output))
+  in
+  let preferred =
+    Fixture.start_server
+      ~sw
+      ~net
+      ~clock
+      (Fixture.Reply (Fixture.openai_response selection_output))
+  in
+  let snapshot =
+    Fixture.resolver_snapshot
+      ~source:"librarian-per-keeper-preference"
+      [ { Fixture.id = "librarian-default"; base_url = first.base_url }
+      ; { Fixture.id = "librarian-preferred"; base_url = preferred.base_url }
+      ]
+  in
+  (match
+     Runtime_exact_output_registry.publish
+       ~lanes:
+         [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
+           ; enabled = true
+           ; slot_ids = [ "librarian-default"; "librarian-preferred" ]
+           ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096; thinking = None
+           }
+         ]
+       snapshot
+   with
+   | Ok _ -> ()
+  | Error error ->
+    fail
+      (Runtime_exact_output_registry.publication_error_to_string error));
+  (match
+     Keeper_exact_lane_preference.validate_admitted_slot
+       ~lane_id:"librarian_exact"
+       ~slot_id:"librarian-preferred"
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("admitted preference was refused: " ^ detail));
+  (match
+     Keeper_exact_lane_preference.validate_admitted_slot
+       ~lane_id:"librarian_exact"
+       ~slot_id:"librarian-unknown"
+   with
+   | Error _ -> ()
+   | Ok () -> fail "unknown preference passed authoring validation");
+  (match
+     Keeper_exact_lane_preference.set
+       (Workspace.default_config base_path)
+       ~actor:"test"
+       ~keeper_name:"librarian-preference"
+       ~lane_id:"librarian_exact"
+       (Some "librarian-removed")
+   with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  (* A slot the lane stopped offering leaves the declared order: the lane
+     keeps running instead of failing on every pass. *)
+  (match
+     Result.bind
+       (Runtime_exact_output_registry.current ()
+        |> Result.map_error Runtime_exact_output_registry.publication_error_to_string)
+       (fun registry ->
+          Runtime_exact_output_registry.resolve_lane registry ~lane_id:"librarian_exact"
+          |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string)
+   with
+   | Error detail -> fail detail
+   | Ok resolved ->
+     (match
+        Keeper_exact_lane_preference.apply
+          ~base_path
+          ~keeper_name:"librarian-preference"
+          ~lane_id:"librarian_exact"
+          resolved
+      with
+      | Error detail -> fail ("a stale preference failed the lane: " ^ detail)
+      | Ok applied ->
+        check
+          (list string)
+          "a stale preference keeps the declared order"
+          [ "librarian-default"; "librarian-preferred" ]
+          (List.map
+             (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+             applied.Runtime_exact_output_registry.selected_slots)));
+  (match
+     Keeper_exact_lane_preference.set
+       (Workspace.default_config base_path)
+       ~actor:"test"
+       ~keeper_name:"librarian-preference"
+       ~lane_id:"librarian_exact"
+       (Some "librarian-preferred")
+   with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Runtime.run_best_effort
+    ~base_path
+    ~keepers_dir
+    ~keeper_id:"librarian-preference"
+    ~expected_revision:None
+    (input ());
+  check int "default Librarian slot not called" 0 (Fixture.post_count first);
+  check int
+    "preferred Librarian slot called once"
+    1
+    (Fixture.post_count preferred);
+  match
+    Keeper_memory_os_current.read_for_keepers_dir
+      ~keepers_dir
+      ~keeper_id:"librarian-preference"
+  with
+  | Ok (Some snapshot) ->
+    check
+      (list string)
+      "preferred result committed"
+      [ "preferred librarian committed" ]
+      (List.map (fun (fact : Memory.fact) -> fact.claim) snapshot.facts)
+  | Ok None -> fail "preferred Librarian result was not committed"
+  | Error detail -> fail detail
+;;
+
+(* Working-context organization must survive an independent Memory OS store
+   failure. A directory at the snapshot path deterministically rejects the
+   memory read/write even when the test runs with elevated filesystem access. *)
+let test_context_commits_when_memory_store_fails () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  with_temp_base "librarian-independent-context" @@ fun base_path ->
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir (prompt_root ());
+  Prompt_defaults.init ();
+  let keeper_id = "librarian-independent-context" in
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Unix.mkdir keepers_dir 0o700;
+  let memory_path =
+    Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  Unix.mkdir memory_path 0o700;
+  let blocker = Filename.concat memory_path "not-a-memory-snapshot" in
+  Out_channel.with_open_bin blocker (fun channel ->
+    output_string channel "preserve the invalid path fixture");
+  let output =
+    match selection_output with
+    | `Assoc fields ->
+      `Assoc
+        (("working_contexts",
+          `List [ `Assoc
+            [ "merge_contexts", `List []
+            ; "sources", `List [ `String "s1" ]
+            ; "context", `String "The campaign still needs a status check."
+            ; "next_steps", `List [ `String "Check the current campaign status." ]
+            ] ])
+         :: List.remove_assoc "working_contexts" fields)
+    | _ -> fail "selection fixture must be an object"
+  in
+  let server =
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response output))
+  in
+  let snapshot =
+    Fixture.resolver_snapshot
+      ~source:"librarian-independent-context"
+      [ { Fixture.id = "librarian-context"; base_url = server.base_url } ]
+  in
+  (match
+     Runtime_exact_output_registry.publish
+       ~lanes:
+         [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
+           ; enabled = true
+           ; slot_ids = [ "librarian-context" ]
+           ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096; thinking = None
+           } ]
+       snapshot
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Runtime_exact_output_registry.publication_error_to_string error));
+  let source : Keeper_librarian_context.source =
+    { reference = "event:campaign:immutable-source"
+    ; content = `Assoc [ "request", `String "Check the campaign status." ]
+    }
+  in
+  let inp =
+    { (input ()) with
+      working_context =
+        { Keeper_librarian_context.empty with sources = [ source ] }
+    }
+  in
+  Runtime.run_best_effort
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None inp;
+  check int "the exact provider ran" 1 (Fixture.post_count server);
+  (match Keeper_librarian_context.read ~keepers_dir ~keeper_id with
+   | Ok (Some context) ->
+     check (list string) "original queue source remains organized"
+       [ source.reference ]
+       (Keeper_librarian_context.current_references context);
+     check (list string) "the selected context survives memory failure"
+       [ "The campaign still needs a status check." ]
+       (List.map
+          (fun (pocket : Keeper_librarian_context.pocket) -> pocket.context)
+          context.pockets)
+   | Ok None -> fail "memory failure prevented working-context commit"
+   | Error detail -> fail detail);
+  check bool "memory snapshot was not written over the invalid path" true
+    (Sys.is_directory memory_path && Sys.file_exists blocker);
+  let journal =
+    Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
+  in
+  check bool "the memory failure is recorded" true
+    (List.exists
+       (function
+         | Ok (Keeper_memory_os_current.Journal_failed _) -> true
+         | Ok (Keeper_memory_os_current.Journal_committed _)
+         | Ok (Keeper_memory_os_current.Journal_quarantined _)
+         | Error _ -> false)
+       journal);
+  check bool "no successful memory commit is reported" false
+    (List.exists
+       (function
+         | Ok (Keeper_memory_os_current.Journal_committed _) -> true
+         | Ok (Keeper_memory_os_current.Journal_failed _)
+         | Ok (Keeper_memory_os_current.Journal_quarantined _)
+         | Error _ -> false)
+       journal)
+;;
+
+(* How the answer below gets its working contexts wrong. *)
+type organization_slip =
+  | Refused  (** It organizes no source, so it cannot account for the one pending. *)
+  | Missing  (** It leaves the field out. *)
+
+(* The mirror of the case above: a Memory answer whose working contexts fail
+   the selector, or are left out, still commits its Memory decision on the
+   slot that answered. The pending input stays unorganized for a later pass,
+   and the run record says why. On the live Librarian lane (2026-09-21) one
+   slot answered this way 219 times, and each time the Memory decision was
+   thrown away with it. *)
+let test_memory_commits_when_working_contexts_slip slip () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  with_temp_base "librarian-refused-context" @@ fun base_path ->
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir (prompt_root ());
+  Prompt_defaults.init ();
+  let keeper_id =
+    match slip with
+    | Refused -> "librarian-refused-context"
+    | Missing -> "librarian-missing-context"
+  in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let answer =
+    match slip, selection_output with
+    | Refused, output -> output
+    | Missing, `Assoc fields -> `Assoc (List.remove_assoc "working_contexts" fields)
+    | Missing, _ -> fail "selection fixture must be an object"
+  in
+  let answering =
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response answer))
+  in
+  let successor =
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response selection_output))
+  in
+  let snapshot =
+    Fixture.resolver_snapshot
+      ~source:keeper_id
+      [ { Fixture.id = "librarian-answering"; base_url = answering.base_url }
+      ; { Fixture.id = "librarian-successor"; base_url = successor.base_url }
+      ]
+  in
+  (match
+     Runtime_exact_output_registry.publish
+       ~lanes:
+         [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
+           ; enabled = true
+           ; slot_ids = [ "librarian-answering"; "librarian-successor" ]
+           ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096; thinking = None
+           } ]
+       snapshot
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Runtime_exact_output_registry.publication_error_to_string error));
+  let source : Keeper_librarian_context.source =
+    { reference = "event:campaign:pending-source"
+    ; content = `Assoc [ "request", `String "Check the campaign status." ]
+    }
+  in
+  let inp =
+    { (input ()) with
+      historical_task_contexts =
+        [{Keeper_librarian_task_context.scope=
+            {source=Official_turn;attribution=Observed
+              {turn_ref=(input ()).turn_ref;
+               task_context=Keeper_turn_task_context.Task_source_unavailable "admission source unavailable"}};
+          first_message=0;after_message=1;first_tool_observation=0;after_tool_observation=0}];
+      working_context =
+        { Keeper_librarian_context.empty with sources = [ source ] }
+    }
+  in
+  Runtime.run_best_effort
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None inp;
+  check int "the slot that answered is called once" 1 (Fixture.post_count answering);
+  check int "the answer is not re-asked of the successor" 0
+    (Fixture.post_count successor);
+  (match
+     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+   with
+   | Ok (Some snapshot) ->
+     check (list string) "the Memory decision is committed"
+       [ "preferred librarian committed" ]
+       (List.map (fun (fact : Memory.fact) -> fact.claim) snapshot.facts)
+   | Ok None -> fail "a refused organization threw away the Memory decision"
+   | Error detail -> fail detail);
+  (match Keeper_librarian_context.read ~keepers_dir ~keeper_id with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "a refused organization was committed"
+   | Error detail -> fail detail);
+  let registry = Exact_lane_run_registry.global () in
+  let run =
+    match
+      List.filter
+        (fun (run : Exact_lane_run_registry.run) -> String.equal run.actor keeper_id)
+        (Exact_lane_run_registry.list_runs registry)
+    with
+    | [ run ] -> Exact_lane_run_registry.get registry ~run_id:run.run_id
+    | runs -> failf "expected one Librarian run, found %d" (List.length runs)
+  in
+  match run with
+  | Some { input=Exact_lane_run_registry.Exact_input receipt;
+      status = Exact_lane_run_registry.Completed { output; _ }; _ } ->
+    let actual = Yojson.Safe.Util.member "actual_input" receipt in
+    let expected = Keeper_librarian_task_context.to_json inp.historical_task_contexts in
+    check string "receipt retains exact historical message association"
+      (Yojson.Safe.to_string expected)
+      (Yojson.Safe.to_string (Yojson.Safe.Util.member "historical_task_contexts" actual));
+    let variables = Yojson.Safe.Util.member "rendered_prompt_variables" actual in
+    check string "rendered context matches receipt association"
+      (Yojson.Safe.to_string expected)
+      Yojson.Safe.Util.(member "historical_task_contexts" variables |> to_string);
+    check bool "associated message is in rendered history" true
+      (contains ~needle:"[turn=0 role=user speaker=unknown] remember the preferred result"
+        Yojson.Safe.Util.(member "conversation_history" variables |> to_string));
+    let write = Yojson.Safe.Util.member "context_write" output in
+    let status = Yojson.Safe.Util.(member "status" write |> to_string) in
+    (match slip with
+     | Refused ->
+       check string "the run record names the refusal" "answer_refused" status;
+       check bool "and carries the selector's reason" true
+         (contains
+            ~needle:"working context must account for every source exactly once"
+            (Yojson.Safe.Util.(member "detail" write |> to_string)))
+     | Missing ->
+       check string "the run record names the missing organization" "answer_missing"
+         status)
+  | Some { status = Exact_lane_run_registry.Running; _ }
+  | Some { status = Exact_lane_run_registry.Completion_persistence_failed _; _ } ->
+    fail "the Librarian run did not complete"
+  | None -> fail "the Librarian run disappeared"
+;;
+
+(* 2026-09-11 regression: a failover slot whose request cannot be projected
+   at all -- a structural refusal, not a size -- must not fail the lane's
+   pre-flight. The appended openrouter.openrouter-deepseek-v4-flash refused
+   projection on every librarian run of that evening and took the healthy
+   slots down with it. A model with enable_thinking=true but no thinking
+   capability contract is the exact structural refusal (request_serialization_rejected)
+   that hit openrouter-deepseek-v4-flash in production. *)
+let test_excluded_last_slot_preserves_domain_failure () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  let first =
+    (* A completed but contract-invalid answer advances the exact flow to its
+       next candidate. The filtered flow has no next candidate and therefore
+       reports the domain rejection; the old wiring entered the structurally
+       unusable slot and changed the failure class. *)
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response (`Assoc [])))
+  in
+  let message text =
+    Llm_provider.Types.make_message
+      ~role:Llm_provider.Types.User
+      [ Llm_provider.Types.Text text ]
+  in
+  let publish slots =
+    let snapshot =
+      Fixture.resolver_snapshot
+        ~source:"librarian-preflight-exclusion"
+        ~enable_thinkings:[ ("librarian-bad", true) ]
+        [ { Fixture.id = "librarian-first"; base_url = first.base_url }
+        ; { Fixture.id = "librarian-bad"; base_url = first.base_url }
+        ]
+    in
+    (match
+       Runtime_exact_output_registry.publish
+         ~lanes:
+           [ { Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian
+             ; enabled = true
+             ; slot_ids = slots
+             ; cli_slot_ids = []
+             ; max_output_tokens = Some 4_096; thinking = None
+             } ]
+         snapshot
+     with
+     | Ok _ -> ()
+     | Error error ->
+       fail (Runtime_exact_output_registry.publication_error_to_string error));
+    match Runtime_exact_output_registry.current () with
+    | Error error ->
+      fail (Runtime_exact_output_registry.publication_error_to_string error)
+    | Ok registry ->
+      (match
+         Runtime_exact_output_registry.resolve_lane registry
+           ~lane_id:"librarian_exact"
+       with
+       | Ok resolved -> resolved.Runtime_exact_output_registry.selected_slots
+       | Error error ->
+         fail
+           (Runtime_exact_output_registry.lane_resolution_error_to_string error))
+  in
+  let selected_slots =
+    publish [ "librarian-first"; "librarian-bad" ]
+  in
+  (match
+     Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots ~messages:[ message "one small prompt" ]
+   with
+   | Ok preflight ->
+     check (list string)
+       "only projectable slots remain in execution order"
+       [ "librarian-first" ]
+       (List.map
+          (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+          preflight.Runtime.selected_slots);
+     (* The slot id the run is without, and what that slot refused. The reason
+        is the operator's only account of why a lane is one slot short, so it
+        carries the provider config's own sentence, not just the kind. *)
+     check (list string)
+       "the refused slot is reported, not fatal"
+       [ "librarian-bad" ]
+       (List.map (fun (refusal : Runtime.slot_refusal) -> refusal.slot_id)
+          preflight.Runtime.unusable);
+     (match preflight.Runtime.unusable with
+      | [ refusal ] ->
+        let reason =
+          Agent_core.Exact_output.admission_error_reason refusal.cause
+        in
+        check bool
+          "the refusal names its kind"
+          true
+          (String.starts_with
+             ~prefix:"wire_admission_rejected:target_request_rejected("
+             reason);
+        check bool
+          "and carries what the config refused"
+          true
+          (contains ~needle:"masc-exact-fixture-model" reason)
+      | unusable ->
+        failf "expected one refused slot, got %d" (List.length unusable))
+   | Error error ->
+     fail (Runtime.extraction_error_to_string error));
+  with_temp_base "librarian-preflight-execution" @@ fun base_path ->
+  (match
+     Runtime.For_testing.execute_exact_output_classified ~continuity:None
+       ~clock
+       ~net
+       ~base_path
+       ~keeper_id:"librarian-preflight-execution"
+       ~selected_input:(input ())
+       ~messages:[ message "one small prompt" ]
+       ()
+   with
+   | Ok ((_selection, _output), selected_slot) ->
+     failf "contract-invalid only usable slot unexpectedly answered as %s"
+       (Runtime.served_slot_id selected_slot)
+   | Error error ->
+     check bool "filtered flow reports domain rejection" true
+       (Runtime.For_testing.classified_error_kind error
+        = Keeper_memory_os_current.Domain_output_invalid);
+     check bool "failure retains the domain boundary" true
+       (Astring.String.is_prefix
+          ~affix:"domain output invalid:"
+          (Runtime.For_testing.classified_error_detail error));
+     check int "the only usable slot was attempted" 1 (Fixture.post_count first));
+  let selected_slots = publish [ "librarian-bad" ] in
+  match
+    Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots ~messages:[ message "one small prompt" ]
+  with
+  | Ok _ -> fail "a ladder with no projectable slot passed pre-flight"
+  | Error error ->
+    let text = Runtime.extraction_error_to_string error in
+    check bool "the failure names the refusing slot" true
+      (Astring.String.is_infix ~affix:"librarian-bad" text);
+    check bool "the failure names the refusal reason" true
+      (Astring.String.is_infix ~affix:"target_request_rejected" text)
+;;
+
+(* The exported empty-ladder verdict, pinned: it reports nothing, exactly as
+   the caller that routes an empty slot list to the cli lane expects it to. *)
+let test_an_empty_ladder_reports_nothing () =
+  let message =
+    Llm_provider.Types.make_message
+      ~role:Llm_provider.Types.User
+      [ Llm_provider.Types.Text "one small prompt" ]
+  in
+  match Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots:[] ~messages:[ message ] with
+  | Ok preflight ->
+    check int "no selected slots" 0 (List.length preflight.Runtime.selected_slots);
+    check int "nothing to exclude" 0 (List.length preflight.Runtime.unusable)
+  | Error error -> fail (Runtime.extraction_error_to_string error)
+;;
+
+let () =
+  run
+    "Keeper Librarian exact-lane preference"
+    [ ( "production adapter"
+      , [ test_case
+            "Keeper preference selects first slot and commits"
+            `Quick
+            test_keeper_preference_reorders_the_librarian_lane
+        ; test_case
+            "working context commits despite Memory OS store failure"
+            `Quick
+            test_context_commits_when_memory_store_fails
+        ; test_case
+            "Memory commits when its working contexts are refused"
+            `Quick
+            (test_memory_commits_when_working_contexts_slip Refused)
+        ; test_case
+            "Memory commits when its working contexts are left out"
+            `Quick
+            (test_memory_commits_when_working_contexts_slip Missing)
+        ; test_case "excluded last slot preserves domain failure" `Quick
+            test_excluded_last_slot_preserves_domain_failure
+        ; test_case "an empty ladder reports nothing" `Quick
+            test_an_empty_ladder_reports_nothing
+        ] )
+    ]
+;;

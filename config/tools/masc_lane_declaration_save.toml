@@ -1,0 +1,33 @@
+name = "masc_lane_declaration_save"
+description = """
+Create or save a Lane installation TOML using its exact source revision.
+
+Create requires an absent file and forbids expected_source_revision. Save requires that revision from a read. Invalid or duplicate declarations are rejected before write. A committed receipt means bytes were stored; inspect desired/applied state separately."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "mode"
+type = "string"
+required = true
+enum = ["create", "save"]
+description = "create never replaces an existing file; save compares the exact source revision."
+
+[[params]]
+name = "file_name"
+type = "string"
+required = true
+description = "One direct-child .toml filename, returned by read or chosen for a new declaration."
+
+[[params]]
+name = "source_text"
+type = "string"
+required = true
+description = "Complete declaration TOML; relative paths resolve from its final configuration directory."
+
+[[params]]
+name = "expected_source_revision"
+type = "string"
+min_length = 64
+max_length = 64
+description = "Required for save and forbidden for create. Exact raw source SHA-256 returned by read."

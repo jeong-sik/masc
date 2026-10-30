@@ -1,0 +1,371 @@
+open Alcotest
+open Masc
+
+module Router = Masc.Http_server_eio.Router
+
+let () = Mirage_crypto_rng_unix.use_default ()
+let () = Random.self_init ()
+
+let test_dir () =
+  let path = Filename.temp_file "masc-fusion-run-detail" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  path
+;;
+
+let rec cleanup_dir path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+  then (
+    Sys.readdir path
+    |> Array.iter (fun name -> cleanup_dir (Filename.concat path name));
+    Unix.rmdir path)
+  else Sys.remove path
+;;
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv key value
+      | None -> Unix.putenv key "")
+    f
+;;
+
+let json = testable Yojson.Safe.pp Yojson.Safe.equal
+
+let test_h1_route_is_registered () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let routes =
+    Server_routes_http_routes_dashboard.add_routes
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (Router.create ())
+  in
+  let request = Httpun.Request.create `GET "/api/v1/dashboard/fusion-runs/run-123" in
+  (match Router.resolve routes request with
+   | `Matched route ->
+     check string
+       "H1 fusion detail prefix"
+       "/api/v1/dashboard/fusion-runs/"
+       route.path
+   | `Method_not_allowed -> fail "H1 fusion detail GET was method-not-allowed"
+   | `Not_found -> fail "H1 fusion detail GET route was not registered")
+
+;;
+
+let with_board f =
+  let base_path = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      cleanup_dir base_path)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_path (fun () ->
+         Eio_main.run @@ fun env ->
+         Fs_compat.set_fs (Eio.Stdenv.fs env);
+         Board.reset_global_for_test ();
+         Board_dispatch.reset_for_test ();
+         Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+         f ()))
+;;
+
+let test_list_and_unknown_detail_responses () =
+  with_board @@ fun () ->
+  let registry = Fusion_run_registry.create () in
+  Fusion_run_registry.register_running
+    registry
+    ~run_id:"fusion-list-run"
+    ~keeper:"fusion-detail-keeper"
+    ~preset:"test"
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+    ~started_at:1.0;
+  let list_json =
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+      ~registry
+  in
+  check int "list count" 1 Yojson.Safe.Util.(list_json |> member "count" |> to_int);
+  check string
+    "list run id"
+    "fusion-list-run"
+    Yojson.Safe.Util.(list_json |> member "runs" |> index 0 |> member "run_id" |> to_string);
+  check string
+    "new run exposes accepted stage"
+    "accepted"
+    Yojson.Safe.Util.(list_json |> member "runs" |> index 0 |> member "stage" |> to_string);
+  check json
+    "accepted stage has an explicit empty progress object"
+    (`Assoc [])
+    Yojson.Safe.Util.(list_json |> member "runs" |> index 0 |> member "progress");
+  Fusion_run_registry.mark_progress registry ~run_id:"fusion-list-run"
+    ~progress:
+      (Fusion_run_registry.Progress_judge_running
+         { expected = 3; answered = 2; failed = 1 });
+  let progressing_json =
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+      ~registry
+  in
+  let progressing = Yojson.Safe.Util.(progressing_json |> member "runs" |> index 0) in
+  check string "list exposes live judge stage" "judge"
+    Yojson.Safe.Util.(progressing |> member "stage" |> to_string);
+  check int "list exposes answered count" 2
+    Yojson.Safe.Util.(progressing |> member "progress" |> member "panel_answered" |> to_int);
+  let status, json =
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+      ~registry
+      ~path:"/api/v1/dashboard/fusion-runs/unknown-fusion-run"
+  in
+  check bool "unknown detail is 404" true (status = `Not_found);
+  check string
+    "unknown run is named"
+    "no retained fusion run named unknown-fusion-run"
+    Yojson.Safe.Util.(json |> member "error" |> to_string)
+;;
+
+let test_detail_uses_exact_typed_board_origin () =
+  with_board @@ fun () ->
+  let registry = Fusion_run_registry.create () in
+  let pending_run_id = "fusion-detail-pending" in
+  Fusion_run_registry.register_running
+    registry
+    ~run_id:pending_run_id
+    ~keeper:"fusion-detail-keeper"
+    ~preset:"test"
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+    ~started_at:10.0;
+  (match
+     Board_dispatch.create_post
+       ~author:"fusion-detail-test"
+       ~content:("mentions " ^ pending_run_id)
+       ~post_kind:Board.System_post
+       ~meta_json:(`Assoc [ "fusion_run_id", `String pending_run_id ])
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Board.show_board_error error));
+  let wrong_source_origin : Board.post_origin =
+    { turn_ref = None
+    ; source = Some "not-fusion"
+    ; fusion_run_id = Some pending_run_id
+    ; fusion_producer = Some "fusion-detail-test"
+    }
+  in
+  (match
+     Board_dispatch.create_post
+       ~author:"fusion-detail-test"
+       ~content:"typed run id with the wrong source"
+       ~post_kind:Board.System_post
+       ~origin:wrong_source_origin
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Board.show_board_error error));
+  let pending_status, pending_json =
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+      ~registry
+      ~path:("/api/v1/dashboard/fusion-runs/" ^ pending_run_id)
+  in
+  check bool "known running run is 200" true (pending_status = `OK);
+  let pending_evidence = Yojson.Safe.Util.member "evidence" pending_json in
+  check string
+    "text, meta, and a non-fusion origin do not count as evidence"
+    "pending"
+    Yojson.Safe.Util.(pending_evidence |> member "status" |> to_string);
+  check bool
+    "pending post is explicit null"
+    true
+    (Yojson.Safe.Util.member "post" pending_evidence = `Null);
+  Fusion_run_registry.mark_completed
+    registry
+    ~run_id:pending_run_id
+    ~outcome:Fusion_run_registry.Succeeded;
+  let completed_status, completed_json =
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+      ~registry
+      ~path:("/api/v1/dashboard/fusion-runs/" ^ pending_run_id)
+  in
+  check bool "known completed run is 200" true (completed_status = `OK);
+  let completed_evidence = Yojson.Safe.Util.member "evidence" completed_json in
+  check string
+    "completed run without exact post is absent"
+    "absent"
+    Yojson.Safe.Util.(completed_evidence |> member "status" |> to_string);
+  check bool
+    "absent post is explicit null"
+    true
+    (Yojson.Safe.Util.member "post" completed_evidence = `Null);
+  let recorded_run_id = "fusion-detail-recorded" in
+  Fusion_run_registry.register_running
+    registry
+    ~run_id:recorded_run_id
+    ~keeper:"fusion-detail-keeper"
+    ~preset:"test"
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
+    ~started_at:20.0;
+  let origin : Board.post_origin =
+    { turn_ref = None
+    ; source = Some "fusion"
+    ; fusion_run_id = Some recorded_run_id
+    ; fusion_producer = Some "fusion-detail-keeper"
+    }
+  in
+  let panel_meta =
+    `List
+      [ `Assoc
+          [ "model", `String "first"
+          ; "status", `String "answered"
+          ; "answer", `String "answer-sentinel"
+          ]
+      ; `Assoc
+          [ "model", `String "second"
+          ; "status", `String "failed"
+          ; "reason_code", `String "timeout"
+          ; "reason_detail", `String "failure-sentinel"
+          ]
+      ]
+  in
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"fusion-detail-test"
+        ~content:"exact typed origin evidence"
+        ~post_kind:Board.System_post
+        ~meta_json:(`Assoc [ "panel", panel_meta ])
+        ~origin
+        ()
+    with
+    | Ok post -> post
+    | Error error -> fail (Board.show_board_error error)
+  in
+  Fusion_run_registry.mark_completed
+    registry
+    ~run_id:recorded_run_id
+    ~outcome:
+      (Fusion_run_registry.Succeeded_with_summary
+         { decision = Fusion_run_registry.decision_preview_of_string "answer"
+         ; summary = "answer-sentinel"
+         });
+  let recorded_status, recorded_json =
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+      ~registry
+      ~path:("/api/v1/dashboard/fusion-runs/" ^ recorded_run_id)
+  in
+  check bool "recorded run is 200" true (recorded_status = `OK);
+  let recorded_evidence = Yojson.Safe.Util.member "evidence" recorded_json in
+  check string
+    "exact origin is recorded"
+    "recorded"
+    Yojson.Safe.Util.(recorded_evidence |> member "status" |> to_string);
+  let post_json = Yojson.Safe.Util.member "post" recorded_evidence in
+  check string
+    "exact indexed post is returned"
+    (Board.Post_id.to_string post.id)
+    Yojson.Safe.Util.(post_json |> member "id" |> to_string);
+  check string "completed decision is projected" "answer"
+    Yojson.Safe.Util.(recorded_json |> member "run" |> member "decision" |> to_string);
+  check string "completed summary is projected" "answer-sentinel"
+    Yojson.Safe.Util.(recorded_json |> member "run" |> member "summary" |> to_string);
+  check string
+    "returned post keeps typed run origin"
+    recorded_run_id
+    Yojson.Safe.Util.(post_json |> member "origin" |> member "fusion_run_id" |> to_string);
+  check json
+    "panel evidence keeps source order and failure fields"
+    panel_meta
+    Yojson.Safe.Util.(post_json |> member "meta" |> member "panel")
+;;
+
+let test_replay_failure_keeps_historical_evidence_readable () =
+  with_board @@ fun () ->
+  let replay_path = Filename.temp_file "fusion-replay-visibility" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove replay_path) @@ fun () ->
+  let initial = Fusion_run_registry.create ~path:replay_path () in
+  let lost_id = "lost-observation" in
+  Fusion_run_registry.register_running initial ~run_id:lost_id ~keeper:"caller"
+    ~preset:"test" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:10.;
+  let channel = open_out_gen [Open_append; Open_binary] 0o600 replay_path in
+  output_string channel
+    {|{"event":"complete","id":"lost-observation","completion":null}
+|};
+  close_out channel;
+  let before = Fs_compat.load_file replay_path in
+  let registry = Fusion_run_registry.replay replay_path in
+  let origin : Board.post_origin =
+    { turn_ref = None; source = Some "fusion"; fusion_run_id = Some lost_id; fusion_producer = Some "caller" } in
+  let post = match Board_dispatch.create_post ~author:"caller"
+      ~content:"The original measured conclusion remains readable."
+      ~post_kind:Board.System_post ~origin () with
+    | Ok post -> post
+    | Error error -> fail (Board.show_board_error error) in
+  (* A text mention and a different source must not become a history entry. *)
+  let wrong_origin = { origin with source = Some "other";
+                                  fusion_run_id = Some "wrong-source" } in
+  (match Board_dispatch.create_post ~author:"caller" ~content:lost_id
+      ~post_kind:Board.System_post ~origin:wrong_origin () with
+   | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+  let response = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+      ~registry in
+  let open Yojson.Safe.Util in
+  check int "invalid completion never becomes a lifecycle row" 0
+    (response |> member "count" |> to_int);
+  let replay = member "replay" response in
+  check int "startup retains invalid row count" 1
+    (replay |> member "malformed_lines" |> to_int);
+  check int "startup retains omitted worker count" 1
+    (replay |> member "dropped_running" |> to_int);
+  let references = response |> member "historical_evidence" |> to_list in
+  check int "only exact Fusion origin is listed" 1 (List.length references);
+  let reference = List.hd references in
+  check string "reference uses original Board id" (Board.Post_id.to_string post.id)
+    (reference |> member "post_id" |> to_string);
+  check bool "no invented lifecycle or completion timestamp" true
+    (member "status" reference = `Null && member "finished_at" reference = `Null);
+  (match Masc.Tui_decode_fusion.decode_fusion_snapshot response with
+   | Error detail -> fail detail
+   | Ok snapshot ->
+       check int "TUI can select the historical result" 1
+         (List.length snapshot.fus_historical_evidence);
+       check bool "TUI knows the startup read lost rows" true
+         (match snapshot.fus_replay with
+          | Masc.Tui_decode_fusion.Fusion_replayed { malformed_lines = 1; dropped_running = 1;
+                                        incomplete = false } -> true
+          | _ -> false));
+  let status, detail = Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+      ~registry
+      ~path:("/api/v1/dashboard/fusion-runs/" ^ lost_id) in
+  check bool "unretained lifecycle remains 404" true (status = `Not_found);
+  check string "404 offers an exact Board reference" (Board.Post_id.to_string post.id)
+    (detail |> member "historical_evidence" |> member "post_id" |> to_string);
+  (match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with
+   | Ok actual -> check string "original result remains readable" post.body actual.body
+   | Error error -> fail (Board.show_board_error error));
+  check string "diagnostic read preserves malformed source" before (Fs_compat.load_file replay_path);
+  Fusion_run_registry.register_running registry ~run_id:lost_id ~keeper:"caller"
+    ~preset:"test" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:20.;
+  let retained = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+      ~registry in
+  check int "retained run does not duplicate its Board history" 0
+    (retained |> member "historical_evidence" |> to_list |> List.length)
+;;
+
+let () =
+  run
+    "dashboard fusion run projection"
+    [ ( "routes"
+      , [ test_case "H1 route is registered" `Quick
+            test_h1_route_is_registered
+        ] )
+    ; ( "responses"
+      , [ test_case "list and unknown detail responses" `Quick
+            test_list_and_unknown_detail_responses
+        ; test_case "detail uses exact typed Board origin" `Quick
+            test_detail_uses_exact_typed_board_origin
+        ; test_case "replay failure keeps historical evidence readable" `Quick
+            test_replay_failure_keeps_historical_evidence_readable
+        ] )
+    ]
+;;

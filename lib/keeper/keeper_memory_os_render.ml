@@ -1,0 +1,59 @@
+open Keeper_memory_os_types
+
+let recorded_at fact = Masc_domain.iso8601_of_unix_seconds fact.first_seen
+
+(* A Board source is rendered as the ids the Board tools accept, so the model
+   can open it; no prose is added here. *)
+let basis_label fact =
+  match fact.basis with
+  | Observed Transcript -> "observed"
+  | Observed (Board { post_id; comment_id = None }) ->
+    Printf.sprintf "observed board=%s" (Board_types.Post_id.to_string post_id)
+  | Observed (Board { post_id; comment_id = Some comment_id }) ->
+    Printf.sprintf
+      "observed board=%s comment=%s"
+      (Board_types.Post_id.to_string post_id)
+      (Board_types.Comment_id.to_string comment_id)
+  | Derived _ -> "derived"
+;;
+
+let render_fact fact =
+  Printf.sprintf
+    "- [category=%s recorded=%s origin=%s basis=%s] %s"
+    (category_to_string fact.category)
+    (recorded_at fact)
+    (origin_kind_to_string fact.origin.kind)
+    (basis_label fact)
+    fact.claim
+;;
+
+let render_facts facts =
+  facts |> List.map render_fact |> String.concat "\n"
+;;
+
+let facts_payload_bytes ~ordinary_facts ~source_lines =
+  List.map render_fact ordinary_facts @ source_lines
+  |> String.concat "\n"
+  |> String.length
+;;
+
+let bytes_within_budget actual =
+  actual <= Env_config.KeeperMemoryOs.facts_max_bytes ()
+;;
+
+let facts_within_budget ~ordinary_facts ~source_lines =
+  bytes_within_budget (facts_payload_bytes ~ordinary_facts ~source_lines)
+;;
+
+let check_facts_budget ~previous_bytes ~ordinary_facts ~source_lines =
+  let actual = facts_payload_bytes ~ordinary_facts ~source_lines in
+  let maximum = Env_config.KeeperMemoryOs.facts_max_bytes () in
+  if bytes_within_budget actual || actual < previous_bytes
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "current Memory OS facts exceed commit budget: %d bytes > %d bytes; drop facts before committing"
+         actual
+         maximum)
+;;

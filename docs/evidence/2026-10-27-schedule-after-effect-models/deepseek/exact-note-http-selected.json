@@ -1,0 +1,87 @@
+{
+  "is_derivative": true,
+  "entries": [
+    {
+      "keeper": "audit-live-deepseek",
+      "execution_id": "execution-node-97395b91d401fd4313b29c3a64936143",
+      "entry": {
+        "ts": 1793044490.93504,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+          "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+        },
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"6\", \"schedule_id\": \"audit-real-model-ba22dc383b7246c1b57a73aa007ec19d\", \"author_id\": \"audit-live-deepseek\", \"author_kind\": \"automated_actor\", \"created_at\": 1793044490.927056, \"body\": \"SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3\"}, \"note_count\": 1}",
+        "execution_id": "execution-node-97395b91d401fd4313b29c3a64936143",
+        "tool_use_id": "call_kh567egb",
+        "keeper_turn_id": 1,
+        "turn": 7,
+        "trace_id": "trace-1793044476404-00000",
+        "session_id": "trace-1793044476404-00000",
+        "wire_outcome": "ok",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "physical_execution_id": "execution-node-97395b91d401fd4313b29c3a64936143",
+        "input_fingerprint": "3fd9552ebec43d86fff60c20f823c8e06f3c79b8c60321ebe1d6f86fd8e3a617",
+        "output_fingerprint": "7ab6601dcb3428ace64f6fd8772b9937d7dea8fe6cb91c0ca28322cae7e9faa4"
+      }
+    },
+    {
+      "keeper": "audit-live-deepseek",
+      "execution_id": "execution-node-71fa1d4234c523d5ab8329d4d0a51dbd",
+      "entry": {
+        "ts": 1793044496.134747,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+          "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND"
+        },
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"11\", \"schedule_id\": \"audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second\", \"author_id\": \"audit-live-deepseek\", \"author_kind\": \"automated_actor\", \"created_at\": 1793044496.128044, \"body\": \"SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND\"}, \"note_count\": 1}",
+        "execution_id": "execution-node-71fa1d4234c523d5ab8329d4d0a51dbd",
+        "tool_use_id": "call_te88isk4",
+        "keeper_turn_id": 2,
+        "turn": 10,
+        "trace_id": "trace-1793044476404-00000",
+        "session_id": "trace-1793044476404-00000",
+        "wire_outcome": "ok",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "physical_execution_id": "execution-node-71fa1d4234c523d5ab8329d4d0a51dbd",
+        "input_fingerprint": "87fc63a93d4a9219df3ee0e889f58f8114dc7d3c320fa6a33cfa2ab58fd1b3f2",
+        "output_fingerprint": "119e52ef0d25629e00f56a6cc4dbc3a5bdeb656b052d867e9e2dff9acb7f2d00"
+      }
+    },
+    {
+      "keeper": "audit-live-deepseek",
+      "execution_id": "execution-node-95f7aedce92dadf8948df8f2f75fc325",
+      "entry": {
+        "ts": 1793044507.540728,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_AFTER_B",
+          "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d"
+        },
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"12\", \"schedule_id\": \"audit-real-model-ba22dc383b7246c1b57a73aa007ec19d\", \"author_id\": \"audit-live-deepseek\", \"author_kind\": \"automated_actor\", \"created_at\": 1793044507.534183, \"body\": \"SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_AFTER_B\"}, \"note_count\": 2}",
+        "execution_id": "execution-node-95f7aedce92dadf8948df8f2f75fc325",
+        "tool_use_id": "call_r20ncexs",
+        "keeper_turn_id": 3,
+        "turn": 14,
+        "trace_id": "trace-1793044476404-00000",
+        "session_id": "trace-1793044476404-00000",
+        "wire_outcome": "ok",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "physical_execution_id": "execution-node-95f7aedce92dadf8948df8f2f75fc325",
+        "input_fingerprint": "ec86085807709c40d4b7d56c714315f65ef224418686c0bdf136534d92f3e333",
+        "output_fingerprint": "ecea9be778fae3747b330b20a87365b03b539e121b4a698664c8eae18813de29"
+      }
+    }
+  ],
+  "scope": "Three required-marker execution lookups only. Note13 has original durable tool evidence but no additional exact HTTP lookup in this capture. The controller recursively sanitized/re-serialized embedded JSON output strings; not raw HTTP-response byte copies."
+}

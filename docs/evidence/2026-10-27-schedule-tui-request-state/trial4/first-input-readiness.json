@@ -1,0 +1,84 @@
+{
+  "tui_pid": 99192,
+  "session": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/logs/tui/session-99192-5dfa1e",
+  "capture_id": "09fc40d4-fba4-4605-aabb-e960d9f0d0da:0",
+  "keeper_read": [
+    {
+      "seq": 12,
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/logs/tui/session-99192-5dfa1e/system_log_2026-10-26.jsonl",
+      "line": 13,
+      "event": {
+        "schema": "masc.tui-local-read-observation/v2",
+        "capture_id": "09fc40d4-fba4-4605-aabb-e960d9f0d0da:0",
+        "phase": "requested",
+        "at_ns": "92558041",
+        "pid": 99192,
+        "source": "keepers",
+        "intent": "poll",
+        "request_id": 0,
+        "demand_revision": "0",
+        "workspace_revision": 1,
+        "workspace_fingerprint": "f7a6e7739f7468b5111ab02b0c0ff85ae30e92d05a19b09239e7c839bc255da0"
+      }
+    },
+    {
+      "seq": 36,
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/logs/tui/session-99192-5dfa1e/system_log_2026-10-26.jsonl",
+      "line": 37,
+      "event": {
+        "schema": "masc.tui-local-read-observation/v2",
+        "capture_id": "09fc40d4-fba4-4605-aabb-e960d9f0d0da:0",
+        "phase": "ui_admission",
+        "at_ns": "108497041",
+        "outcome": "accepted"
+      }
+    },
+    {
+      "seq": 38,
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/logs/tui/session-99192-5dfa1e/system_log_2026-10-26.jsonl",
+      "line": 39,
+      "event": {
+        "schema": "masc.tui-local-read-observation/v2",
+        "capture_id": "09fc40d4-fba4-4605-aabb-e960d9f0d0da:0",
+        "phase": "ui_application",
+        "at_ns": "108525416",
+        "outcome": "applied"
+      }
+    }
+  ],
+  "startup": {
+    "seq": 55,
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/logs/tui/session-99192-5dfa1e/system_log_2026-10-26.jsonl",
+    "line": 56,
+    "event": {
+      "phase": "capabilities_applied",
+      "pid": 99192,
+      "dispatched_ns": "72266791",
+      "observed_ns": "279580333",
+      "decoder_installed_ns": "276854041",
+      "capabilities_applied": {
+        "at_ns": "279580333",
+        "value": {
+          "palette_known": false,
+          "theme_mode": null,
+          "graphics": "unknown",
+          "cell_pixels": null
+        }
+      },
+      "caller_observed": {
+        "at_ns": "276708708",
+        "value": "returned"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/logs/tui/session-99192-5dfa1e/system_log_2026-10-26.jsonl",
+      "observed_prefix_bytes": 25987,
+      "observed_prefix_sha256": "3f634ee02fc631a840d0c2cd28770ef748bd25e7b639fcb9bd1fedfbcfc3d1ff",
+      "scope": "Snapshot prefix of live append-only log; full private log not copied."
+    }
+  ],
+  "observed_at": 1793056657.622804,
+  "scope": "Existing same-PID Keeper state apply and terminal decoder/capability apply before first key; not specific Keeper membership, usable input or paint proof. Later target GET remains required."
+}

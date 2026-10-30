@@ -1,0 +1,204 @@
+{
+  "at": 1792748153.4847932,
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/lane-addons?instance_id=01a1681c-664d-7000-9b12-e905430e98a5",
+    "body": null,
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "etag": "W/\"6c4436ed97d0\"",
+      "cache-control": "no-cache",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "3988"
+    },
+    "body": {
+      "configuration": {
+        "directory": "/tmp/masc-addon-nonempty-review-20261023/workspace/.masc/config/lane-addons",
+        "complete": true,
+        "issues": [],
+        "declarations": [
+          {
+            "id": "phrase-source",
+            "source_path": "/tmp/masc-addon-nonempty-review-20261023/workspace/.masc/config/lane-addons/phrase-source.toml",
+            "enabled": true,
+            "source_revision": "f83beb43d0304834d36443ffef98d5dddcc9f102d437d382d8fbf7d4d15dab93",
+            "desired_revision": "1c0863ca6287e269fb2eafc34435786039f81ad318c5d2732b6ab005c0a7168b",
+            "applied_revision": "1c0863ca6287e269fb2eafc34435786039f81ad318c5d2732b6ab005c0a7168b",
+            "instance_id": "01a1681c-35b8-7000-b89c-4aa711972d7e",
+            "application": {
+              "kind": "applied",
+              "instance_id": "01a1681c-35b8-7000-b89c-4aa711972d7e"
+            },
+            "ui_category": "voice_media"
+          },
+          {
+            "id": "result-statistics",
+            "source_path": "/tmp/masc-addon-nonempty-review-20261023/workspace/.masc/config/lane-addons/result-statistics.toml",
+            "enabled": true,
+            "source_revision": "238bdd305bd240b6b67326a30518ec4cb654783ca4b557139e67f65306d9f5ed",
+            "desired_revision": "685f738bb6d2f6fab3dd89984c42985b2dc9f1a871ca897d36ea502ad9a13ac9",
+            "applied_revision": "685f738bb6d2f6fab3dd89984c42985b2dc9f1a871ca897d36ea502ad9a13ac9",
+            "instance_id": "01a1681d-74da-7000-af11-ca81ee22e3a2",
+            "application": {
+              "kind": "applied",
+              "instance_id": "01a1681d-74da-7000-af11-ca81ee22e3a2"
+            },
+            "ui_category": "analysis"
+          }
+        ]
+      },
+      "instances": [
+        {
+          "runtime_presence": "retained",
+          "phase": {
+            "kind": "detached"
+          },
+          "lifecycle": {
+            "kind": "detached",
+            "release": {
+              "kind": "native_released",
+              "installation_id": "result-statistics",
+              "instance_id": "01a1681c-664d-7000-9b12-e905430e98a5"
+            }
+          },
+          "configuration": {
+            "id": "result-statistics",
+            "source_path": "/tmp/masc-addon-nonempty-review-20261023/workspace/.masc/config/lane-addons/result-statistics.toml",
+            "revision": "685f738bb6d2f6fab3dd89984c42985b2dc9f1a871ca897d36ea502ad9a13ac9"
+          },
+          "observation_seq": 1,
+          "instance_id": "01a1681c-664d-7000-9b12-e905430e98a5",
+          "incarnation": "01a1681c-664d-7000-9b12-e905430e98a5",
+          "action_schema": null,
+          "run_id": "nonempty-review",
+          "addon_id": "output-statistics",
+          "title": "Latest completed output statistics",
+          "revision": "0.1.0",
+          "execution_authority": {
+            "kind": "host_process",
+            "installation_id": "result-statistics"
+          },
+          "resolved_image": null,
+          "rows_count": 1,
+          "observation_pending": true,
+          "coalesced_wakes": 0,
+          "unchanged_source_refreshes": 0,
+          "binding": {
+            "sources": [
+              {
+                "source_id": "phrase-input",
+                "kind": "lane_output",
+                "installation_id": "phrase-source",
+                "output_id": "phrase",
+                "selection": "latest_completed"
+              }
+            ]
+          },
+          "source_access": {
+            "kind": "operator_configuration"
+          },
+          "package": {
+            "runtime": "host_process",
+            "ui_category": "analysis",
+            "id": "output-statistics",
+            "revision": "0.1.0",
+            "title": "Latest completed output statistics",
+            "contributions": [
+              "derive"
+            ],
+            "command": [
+              "python3",
+              "server.py"
+            ],
+            "directory": "/private/tmp/masc-addon-nonempty-review-20261023/workspace/packages/output-statistics",
+            "action_tool": null,
+            "state_storage": "ephemeral",
+            "tool_invocation": "direct",
+            "exported_tools": [],
+            "outputs": {
+              "statistics": {
+                "all_lanes": true
+              }
+            },
+            "refresh_policy": "every_hint",
+            "model_access": "disabled",
+            "binding_schema": {
+              "type": "object",
+              "properties": {
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "Latest completed named output of another installation in the same run",
+                    "properties": {
+                      "source_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Name this input carries inside the package"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "lane_output"
+                      },
+                      "installation_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Stable id of the producing installation declaration"
+                      },
+                      "output_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Named output port published by the producer"
+                      },
+                      "selection": {
+                        "type": "string",
+                        "const": "latest_completed"
+                      }
+                    },
+                    "required": [
+                      "source_id",
+                      "kind",
+                      "installation_id",
+                      "selection"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "sources"
+              ],
+              "additionalProperties": false
+            },
+            "presentation": {
+              "description": null,
+              "readings": []
+            },
+            "skills_directory": null,
+            "resources": {
+              "max_reply_bytes": 4194304
+            }
+          },
+          "visibility": {
+            "kind": "shared"
+          },
+          "resource": {
+            "kind": "host_process",
+            "pid": 32420,
+            "started": "darwin:1792748054.097262"
+          }
+        }
+      ],
+      "rows": [],
+      "coverage": []
+    }
+  }
+}

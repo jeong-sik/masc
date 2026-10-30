@@ -1,0 +1,9 @@
+{
+  "system_prompt": "Answer concisely. Remember facts supplied earlier in this conversation and distinguish them from assumptions.",
+  "prompts": [
+    "For this conversation, the project codename is Lantern and its release color is violet. Acknowledge both facts.",
+    "What are the project codename and release color?",
+    "Change the release color to amber. State the current project facts.",
+    "Which fact changed, and what was its previous value?"
+  ]
+}

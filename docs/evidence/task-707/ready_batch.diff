@@ -1,0 +1,273 @@
+diff --git a/lib/keeper/keeper_heartbeat_stimulus_intake.ml b/lib/keeper/keeper_heartbeat_stimulus_intake.ml
+index ac621bf0..be795de7 100644
+--- a/lib/keeper/keeper_heartbeat_stimulus_intake.ml
++++ b/lib/keeper/keeper_heartbeat_stimulus_intake.ml
+@@ -65,7 +65,8 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
+   | Keeper_event_queue.Task_cancelled _
+   | Keeper_event_queue.Workspace_message _
+   | Keeper_event_queue.Delegate_completed _
+-  | Keeper_event_queue.Composition_completed _ ->
++  | Keeper_event_queue.Composition_completed _
++  | Keeper_event_queue.Task_outcome _ ->
+     Keeper_world_observation.pending_board_event_of_stimulus
+       ~meta:meta_after_triage
+       stim
+@@ -236,6 +237,11 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
+     None
+   | Keeper_event_queue.Completion_authority_rejected _ ->
+     Some Keeper_world_observation.Completion_authority_rejection_stimulus
++  (* Dedicated turn_reason, same principle as the rejection twin: the producer
++     must be able to tell a verdict wake from an autonomous tick — and an
++     approved turn must never be described as a rejection. *)
++  | Keeper_event_queue.Task_outcome _ ->
++    Some Keeper_world_observation.Task_outcome_stimulus
+   (* Dedicated turn_reason: the author has to be able to tell a cancellation
+      wake from an autonomous tick, otherwise the turn is indistinguishable from
+      the 96%-of-turns scheduled channel and the cancellation reads as noise. *)
+@@ -428,6 +434,19 @@ let consume_single_heartbeat_stimulus
+          | Keeper_event_queue.Composition_cancelled _ -> "cancelled")
+         meta_after_triage.name;
+       pending_board_events_of_stimulus_result ~meta_after_triage stim
++    | Keeper_event_queue.Task_outcome outcome ->
++      (* The approval twin of the rejection log line beside it: a verdict the
++         Keeper submitted evidence for has landed, surfaced as a
++         pending_board_event so this turn acts on it instead of the producer
++         discovering its closed task by projection drift. *)
++      Log.Keeper.info
++        "turn entry: task outcome delivered task_id=%s verification_id=%s \
++         authority_kind=%s (keeper=%s)"
++        outcome.to_task_id
++        outcome.to_verification_id
++        (Masc_domain.completion_authority_kind outcome.to_authority)
++        meta_after_triage.name;
++      pending_board_events_of_stimulus_result ~meta_after_triage stim
+     | Keeper_event_queue.Workspace_message message ->
+       (* The transcript row committed at the delivery boundary carries the
+          content and the message lane reads it, so there is no observation to
+@@ -479,7 +498,8 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
+   | Keeper_event_queue.Task_cancelled _
+   | Keeper_event_queue.Workspace_message _
+   | Keeper_event_queue.Delegate_completed _
+-  | Keeper_event_queue.Composition_completed _ ->
++  | Keeper_event_queue.Composition_completed _
++  | Keeper_event_queue.Task_outcome _ ->
+     true
+ ;;
+ 
+@@ -507,14 +527,32 @@ let resolution_has_durable_record
+         | None -> true))
+ ;;
+ 
++(* A resolution whose continuation slot is settled has nothing left for a
++   turn to do: the turn that received its replay completed, checkpointed, or
++   failed after the provider answered. Projecting it again hands the model
++   evidence it already consumed, which is the loop #32956 measured (one
++   approval on 24 turns). [reconcile_spent_selection] retires the queue entry
++   when the queue reaches it. *)
++let continuation_settled
++      ~base_path
++      ~keeper_name
++      (resolution : Keeper_event_queue.hitl_resolution)
++  =
++  Keeper_approval_queue.continuation_settled_chat_projection_present
++    ~base_path
++    ~keeper_name
++    ~approval_id:resolution.approval_id
++;;
++
+ (* #28809: a ready [Hitl_resolved] may sit behind the stimulus that woke this
+    turn — typically a redelivered workspace message whose own earlier turn
+    deferred on that very approval. The resolution is durable truth in the
+    approval journal, not queue-ordered content, so a turn may project it as
+    cycle context without admitting it (the queue entry is untouched here).
+-   After the projected replay
+-   spends the grant, [reconcile_spent_selection] retires the still-queued
+-   entry without costing a turn. *)
++   After the projected replay spends the grant and the receiving turn settles
++   the continuation, [reconcile_spent_selection] retires the still-queued
++   entry without costing a turn; until then the resolution is projected
++   again, because the model has not seen its outcome yet. *)
+ let ready_hitl_resolution_peek ~base_path ~keeper_name =
+   match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+   | Error _ -> None
+@@ -526,6 +564,7 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
+            if
+              stimulus_ready_for_intake ~base_path stimulus
+              && resolution_has_durable_record ~base_path resolution
++             && not (continuation_settled ~base_path ~keeper_name resolution)
+            then Some resolution
+            else None
+          | Keeper_event_queue.Board_signal _
+@@ -539,7 +578,8 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
+          | Keeper_event_queue.Task_cancelled _
+          | Keeper_event_queue.Workspace_message _
+          | Keeper_event_queue.Delegate_completed _
+-         | Keeper_event_queue.Composition_completed _ -> None)
++         | Keeper_event_queue.Composition_completed _
++         | Keeper_event_queue.Task_outcome _ -> None)
+       (Keeper_event_queue.to_list pending)
+ ;;
+ 
+@@ -564,6 +604,16 @@ let reconcile_spent_selection
+   =
+   match selection.source.Keeper_event_queue.payload with
+   | Schedule_due _ -> Ok Selection_actionable
++  | Hitl_resolved {approval_id; decision=Keeper_event_queue.Hitl_approved; _}
++    when Keeper_approval_queue.continuation_settled_chat_projection_present
++      ~base_path:config.Workspace_utils.base_path ~keeper_name ~approval_id ->
++    (* The native input receipt proves delivery, independently of whether the
++       model chose to spend a non-replayable one-shot grant. Keep that grant's
++       authority untouched while retiring the delivered input wake. *)
++    (match Keeper_registry_event_queue.ack_pending_result
++       ~base_path:config.Workspace_utils.base_path keeper_name ~selection with
++     | Ok () -> Ok Spent_grant_replay_acknowledged
++     | Error message -> Error ("native continuation input ack failed: " ^ message))
+   | Hitl_resolved
+       { approval_id; decision = Keeper_event_queue.Hitl_approved; _ } ->
+     (* An approved grant is one-shot, but consumption alone is not terminal:
+@@ -572,9 +622,11 @@ let reconcile_spent_selection
+        [Keeper_gate_replay] keeps the raw result in-process and needs this wake
+        to repair publication without running the effect again.
+ 
+-       Retire only [consumed + durable outcome + continuation receipt]. The
+-       final receipt is written after the replay-owning model turn completed or
+-       durably checkpointed; without it, a crash between effect journaling and
++       Retire only [consumed + durable outcome + continuation settlement]. The
++       settlement is written after the replay-owning model turn completed,
++       durably checkpointed, or failed after the provider answered (#32956:
++       a failed continuation used to leave no receipt, so the same approval
++       rode 24 turns); without it, a crash between effect journaling and
+        model continuation must replay the evidence into a fresh turn instead of
+        silently draining the wake. A read error, an unconsumed grant, or a
+        consumed grant without its outcome stays actionable. *)
+@@ -610,7 +662,7 @@ let reconcile_spent_selection
+            | Ok () ->
+              if
+                not
+-                 (Keeper_approval_queue.continuation_chat_projection_present
++                 (Keeper_approval_queue.continuation_settled_chat_projection_present
+                     ~base_path:config.Workspace_utils.base_path
+                     ~keeper_name
+                     ~approval_id)
+@@ -707,7 +759,7 @@ let reconcile_spent_selection
+      | Ok () ->
+        if
+          not
+-           (Keeper_approval_queue.continuation_chat_projection_present
++           (Keeper_approval_queue.continuation_settled_chat_projection_present
+               ~base_path:config.Workspace_utils.base_path
+               ~keeper_name
+               ~approval_id)
+@@ -730,6 +782,9 @@ let reconcile_spent_selection
+   | Fusion_completed _
+   | Connector_attention _
+   | Completion_authority_rejected _
++  (* A committed approval cannot be un-committed, so the selection stays worth
++     a turn — the same rule as the rejection twin beside it. *)
++  | Task_outcome _
+   (* A committed cancellation cannot be undone or settled elsewhere, so the
+      selection is always still worth a turn. *)
+   | Task_cancelled _
+@@ -774,7 +829,8 @@ let heartbeat_event_intake
+     | Keeper_event_queue.Task_cancelled _
+     | Keeper_event_queue.Workspace_message _
+     | Keeper_event_queue.Delegate_completed _
+-    | Keeper_event_queue.Composition_completed _ ->
++    | Keeper_event_queue.Composition_completed _
++    | Keeper_event_queue.Task_outcome _ ->
+       None
+   in
+   let ready_batch selections =
+@@ -789,34 +845,46 @@ let heartbeat_event_intake
+           selections
+       in
+       let hitl_selected = ref false in
+-      List.filter
+-        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+-           stimulus_ready_for_intake ~base_path selection.source
+-           &&
+-           match selection.source.payload with
+-           | Keeper_event_queue.Hitl_resolved _ ->
+-             (* One tool bundle carries one exact cycle grant. Admitting two
+-                HITL resolutions would replay only the first while a completed
+-                turn ACKed both durable sources. Leave later resolutions queued
+-                for their own exact replay turn. *)
+-             if !hitl_selected
+-             then false
+-             else (
+-               hitl_selected := true;
+-               true)
+-           | _ ->
+-             (match
+-                Keeper_event_queue.connector_attention_channel
+-                  selection.source.payload,
+-                first_connector_conversation
+-              with
+-              | None, _ -> true
+-              | Some _, None -> false
+-              | Some channel, Some first_channel ->
+-                Keeper_continuation_channel.same_conversation
+-                  channel
+-                  first_channel))
+-        selections
++      let admitted =
++        List.filter
++          (fun (selection : Keeper_event_queue_state.pending_selection) ->
++             stimulus_ready_for_intake ~base_path selection.source
++             &&
++             match selection.source.payload with
++             | Keeper_event_queue.Hitl_resolved _ ->
++               (* One tool bundle carries one exact cycle grant. Admitting two
++                  HITL resolutions would replay only the first while a completed
++                  turn ACKed both durable sources. Leave later resolutions queued
++                  for their own exact replay turn. *)
++               if !hitl_selected
++               then false
++               else (
++                 hitl_selected := true;
++                 true)
++             | _ ->
++               (match
++                  Keeper_event_queue.connector_attention_channel
++                    selection.source.payload,
++                  first_connector_conversation
++                with
++                | None, _ -> true
++                | Some _, None -> false
++                | Some channel, Some first_channel ->
++                  Keeper_continuation_channel.same_conversation
++                    channel
++                    first_channel))
++          selections
++      in
++      (* RFC-event-queue-admit-all-ready bounds the batch: a steady arrival
++         rate must not turn into an unbounded backlog. Selections past the
++         bound stay pending for a later turn instead of being dropped. *)
++      let max_events = Env_config_keeper.KeeperAdmissionBounds.max_events () in
++      let rec take n = function
++        | [] -> []
++        | _ when n <= 0 -> []
++        | x :: rest -> x :: take (n - 1) rest
++      in
++      take max_events admitted
+   in
+   let connector_attention_items_of_batch selections =
+     let event_ids =
+@@ -847,7 +915,8 @@ let heartbeat_event_intake
+     | Keeper_event_queue.Task_cancelled _
+     | Keeper_event_queue.Workspace_message _
+     | Keeper_event_queue.Delegate_completed _
+-    | Keeper_event_queue.Composition_completed _ -> false
++    | Keeper_event_queue.Composition_completed _
++    | Keeper_event_queue.Task_outcome _ -> false
+   in
+   let consume_batch selections =
+     let connector_attention_items =
+@@ -1018,6 +1087,7 @@ let heartbeat_event_intake
+             | Keeper_world_observation.Fusion_completed
+             | Keeper_world_observation.External_attention _
+             | Keeper_world_observation.Completion_authority_rejected _
++            | Keeper_world_observation.Task_outcome _
+             | Keeper_world_observation.Task_cancelled _
+             | Keeper_world_observation.Delegate_completed
+             | Keeper_world_observation.Ask_answered_row

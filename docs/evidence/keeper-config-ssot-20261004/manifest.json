@@ -1,0 +1,22 @@
+{
+  "base": "a3461f1fb69fc85041ab62ae0d27a60902c1c90d",
+  "compiler": "OCaml 5.5.1",
+  "scope": "isolated native config readers after late boot-store writes, then process env precedence; not full server startup or file rotation",
+  "source_sha256": {
+    "lib/config/env_config_keeper.ml": "d216727136d7fc64d1b393dd3f8d767afe02eb9fba6add2f2934b6a787481561",
+    "lib/config/env_config_keeper.mli": "2f3d8af3f480244663cb6f490fcb3dfb9f541a4b90b710aeb7c2d7b5068a5e06",
+    "lib/config/env_config_keeper_supervisor.ml": "434ca69786ef7f22194bd3eeec31ddab107866c9de59d18537dc33aacd7677f1",
+    "lib/config/env_config_keeper_supervisor.mli": "125fd8d1de0b46c7964cc97307abdcf1207f35ee5b43a7bbb1ea08e1dd653477"
+  },
+  "binaries_sha256": {
+    "baseline": "44b80fe4ac38df96ad9d86c44033822e2dcc70f3b3ceef1328f514d261476fcb",
+    "candidate": "a722752dade0ec47dc01a2734aeb597326dee69695b69ab0bcc396cee365b542"
+  },
+  "checks": {
+    "boot_readers": "8/8 values match late boot overrides",
+    "env_precedence": "100 overrides TOML 17",
+    "full_TOML_rotation_integration": "authored, not run",
+    "full_product_build": "not run"
+  },
+  "cached_dependency_objects": 39
+}

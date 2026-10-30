@@ -1,0 +1,46 @@
+{
+  "observed_at": "2026-09-07T13:01:38.868271+00:00",
+  "head_sha": "797b117d2ae2f588f8164653d969201f9d27cbd6",
+  "pr_number": 34041,
+  "run_id": 34124088524,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34124088524",
+  "conclusion": "failure",
+  "passed_total": 117,
+  "failed_total": 1,
+  "suites": [
+    {
+      "suite": "test_keeper_tool_dispatch_runtime",
+      "passed": 66,
+      "failed": 1
+    },
+    {
+      "suite": "test_runtime_agent_advanced_outcome",
+      "passed": 5,
+      "failed": 0
+    },
+    {
+      "suite": "test_keeper_official_client_host",
+      "passed": 46,
+      "failed": 0
+    }
+  ],
+  "failure": "Existing composable output coverage check reports keeper_lane_status has no producer probe. This change adds no keeper_lane_status registration or output contract. No separately executed baseline.",
+  "limits": [
+    "Selected suites only. Full run is FAILURE despite passing new boundary cases.",
+    "No deployment, automatic resume, shared-history composition or journal/native integration proof."
+  ],
+  "new_boundary_cases": {
+    "count": 3,
+    "passed": 3,
+    "case_indices": [
+      41,
+      42,
+      43
+    ]
+  },
+  "gate_deferred_completion_case": {
+    "index": 44,
+    "passed": true,
+    "cooperative_boundary": "None"
+  }
+}

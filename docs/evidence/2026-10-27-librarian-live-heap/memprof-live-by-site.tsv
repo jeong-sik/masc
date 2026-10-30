@@ -1,0 +1,25 @@
+read	memprof_live_gb	site_share_pct	site_gb	site (first three masc frames)
+2	8.69	31.2	2.71	Lane_addon_tool_request_owner.request_of_body <- Lane_addon_tool_request_owner.load <- Keeper_librarian_original_gate.Make.current_reading.
+2	8.69	7.0	0.60	Lane_addon_store.record_bytes <- Lane_addon_store.read_owned_tool_request_bytes. <- Lane_addon_store.protect
+2	8.69	6.1	0.53	Keeper_librarian_durable_request.parse <- Keeper_librarian_durable_request.of_json <- Keeper_librarian_durable_request.restore
+2	8.69	5.3	0.46	Lane_addon_tool_request_owner.request_of_body <- Lane_addon_tool_request_owner.load
+2	8.69	4.9	0.42	Keeper_librarian_durable_capture.json_text <- Keeper_librarian_durable_capture.to_json <- Keeper_librarian_durable_request.of_json
+2	8.69	4.5	0.40	Lane_addon_store.record_bytes <- Lane_addon_store.verify_record_bytes <- Lane_addon_store.settle_verified_record
+2	8.69	4.4	0.38	Lane_addon_tool_request_owner.request_of_body <- Lane_addon_tool_request_owner.load <- Keeper_librarian_durable_commit.reload
+2	8.69	4.4	0.38	Keeper_librarian_durable_capture.decode_text <- Keeper_librarian_durable_capture.of_json <- Keeper_librarian_durable_request.of_json
+2	8.69	3.3	0.29	Keeper_librarian_durable_request.of_json <- Keeper_librarian_durable_request.restore
+2	8.69	2.3	0.20	Agent_core.Checkpoint_codec.of_string_with_encoding_memo
+2	8.69	2.1	0.18	Agent_core.Checkpoint_codec.held_read_message <- Agent_core.Checkpoint_codec.of_string_with_encoding_memo.hold <- Agent_core.Checkpoint_codec.of_string_with_encoding_memo
+2	8.69	1.3	0.12	Keeper_librarian_durable_request.of_json <- Keeper_librarian_durable_request.restore <- Keeper_librarian_durable_commit.reload
+3	6.82	20.4	1.40	Lane_addon_tool_request_owner.request_of_body <- Lane_addon_tool_request_owner.load <- Keeper_librarian_durable_commit.reload
+3	6.82	8.7	0.60	Lane_addon_tool_request_owner.request_of_body <- Lane_addon_tool_request_owner.load <- Keeper_librarian_original_gate.Make.current_reading.
+3	6.82	8.1	0.55	Keeper_librarian_durable_capture.decode_text <- Keeper_librarian_durable_capture.of_json <- Keeper_librarian_durable_request.of_json
+3	6.82	6.8	0.46	Keeper_librarian_durable_request.parse <- Keeper_librarian_durable_request.of_json <- Keeper_librarian_durable_request.restore
+3	6.82	5.2	0.36	Keeper_librarian_durable_request.of_json <- Keeper_librarian_durable_request.restore
+3	6.82	5.0	0.34	Lane_addon_tool_request_owner.request_of_body <- Lane_addon_tool_request_owner.load <- Lane_addon_tool_request_owner.load_listed
+3	6.82	4.5	0.31	Keeper_librarian_durable_capture.json_text <- Keeper_librarian_durable_capture.to_json <- Keeper_librarian_durable_request.of_json
+3	6.82	4.1	0.28	Lane_addon_store.record_bytes <- Lane_addon_store.read_owned_tool_request_bytes. <- Lane_addon_store.protect
+3	6.82	3.5	0.24	Lane_addon_store.record_bytes <- Lane_addon_store.verify_record_bytes <- Lane_addon_store.settle_verified_record
+3	6.82	2.9	0.20	Agent_core.Checkpoint_codec.of_string_with_encoding_memo
+3	6.82	2.6	0.18	Agent_core.Checkpoint_codec.held_read_message <- Agent_core.Checkpoint_codec.of_string_with_encoding_memo.hold <- Agent_core.Checkpoint_codec.of_string_with_encoding_memo
+3	6.82	2.5	0.17	(no masc frame)

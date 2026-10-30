@@ -1,0 +1,9 @@
+(include_subdirs no)
+
+(library
+ (name provider_tool_support)
+ (public_name masc.provider_tool_support)
+ (wrapped false)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries masc.agent_core masc.agent_core.llm_provider))

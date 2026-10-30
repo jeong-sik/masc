@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Own one planned frozen Python validator child and retain its closed result."""
+import argparse
+from contextlib import ExitStack
+import hashlib
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+READER_SHA256 = '0825b96717c9939c7751c918258713476d207b4c8da8db825b5c8eba6fdf56c2'
+DERIVED_FILES = ('inventory-sweep-audit.json', 'slow-status-completion-alignment.json',
+                 'post-run-audit.json', 'operation-wall-samples.json', 'mcp-wire-outliers.json')
+SCHEMA = 'masc.owned-python-validator-execution.v1'
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def read(path):
+    return json.loads(path.read_bytes())
+
+
+def digest(path):
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def canonical(value):
+    path = Path(value)
+    require(path.is_absolute() and path == path.resolve(), 'noncanonical absolute path: ' + str(path))
+    return path
+
+
+def dump_new(path, value):
+    with path.open('x') as stream:
+        json.dump(value, stream, indent=2)
+        stream.write('\n')
+
+
+def artifact(path):
+    require(path.is_file() and not path.is_symlink() and path == path.resolve(), 'missing/nonregular artifact: ' + str(path))
+    raw = path.read_bytes()
+    return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}
+
+
+def contract(plan_path, qualification_path, cell_index):
+    require(__debug__, 'assertions must be enabled')
+    plan_path, qualification_path = canonical(plan_path), canonical(qualification_path)
+    plan, qualification = read(plan_path), read(qualification_path)
+    own_path = Path(__file__).resolve()
+    executor = plan['validator_executor']
+    require(canonical(executor['path']) == own_path, 'executor path mismatch')
+    require(plan_path == own_path.with_name('plan.json') and qualification_path == own_path.with_name('execution-qualification.json'), 'plan/qualification must be adjacent reviewed inputs')
+    require(digest(plan_path) == qualification['plan_sha256'], 'qualification plan digest mismatch')
+    require(digest(own_path) == executor['sha256'] == qualification['validator_executor_sha256'], 'executor digest mismatch')
+    reader = canonical(plan['reader']['path'])
+    require(digest(reader) == plan['reader']['sha256'] == qualification['reader_sha256'] == READER_SHA256, 'reader must be the frozen reviewed source')
+    require(qualification['reader_path'] == str(reader), 'qualification reader path mismatch')
+    deriver = own_path.with_name('derive_observations.py')
+    require(digest(deriver) == plan['deriver_sha256'] == qualification['deriver_sha256'], 'deriver digest mismatch')
+    python = Path(sys.executable).resolve()
+    require(executor['python_executable'] == str(python) and executor['cwd'] == str(own_path.parent), 'Python/cwd mismatch')
+    require(executor['required_derivatives'] == list(DERIVED_FILES) == qualification['validator_required_derivatives'], 'required derivative set mismatch')
+    require(type(cell_index) is int and 1 <= cell_index <= len(plan['order']) == 6, 'unknown planned cell')
+    destinations = []
+    packets = [canonical(cell['output']) for cell in plan['order']]
+    for index, item in enumerate(plan['order'], 1):
+        audit_output = canonical(item['audit_output'])
+        execution_output = canonical(item['validator_execution_output'])
+        require(item['validator_execution_receipt'] == str(execution_output / 'execution.json'), 'execution receipt path mismatch')
+        require(item['validator_execution_stdout'] == str(execution_output / 'stdout.log') and item['validator_execution_stderr'] == str(execution_output / 'stderr.log'), 'planned stream paths mismatch')
+        require(item['validator_execution_command'] == [str(python), '-B', '-E', str(own_path), '--plan', str(plan_path), '--qualification', str(qualification_path), '--cell', str(index)], 'planned executor argv mismatch')
+        destinations.extend([audit_output, execution_output])
+    require(len(set(destinations)) == 12, 'reused execution/audit output')
+    require(all(not p.is_relative_to(packet) and not packet.is_relative_to(p) for p in destinations for packet in packets), 'output overlaps an original packet')
+    require(all(not left.is_relative_to(right) and not right.is_relative_to(left)
+                for i, left in enumerate(destinations) for right in destinations[i + 1:]), 'external outputs overlap')
+    cell = plan['order'][cell_index - 1]
+    packet, audit_output, execution_output = (canonical(cell[key]) for key in ['output', 'audit_output', 'validator_execution_output'])
+    argv = [str(python), '-B', '-E', str(reader), str(packet), '--output', str(audit_output)]
+    require(cell['revised_reader_command'] == argv, 'planned reader argv mismatch')
+    bindings = {name: {'path': str(path), 'sha256': digest(path)} for name, path in
+                [('plan', plan_path), ('qualification', qualification_path), ('executor', own_path), ('reader', reader), ('deriver', deriver)]}
+    common = {'schema': SCHEMA, 'cell_index': cell_index, 'packet_path': str(packet),
+              'audit_output': str(audit_output), 'execution_output': str(execution_output),
+              'argv': argv, 'cwd': str(own_path.parent), 'input_bindings': bindings,
+              'required_derivatives': list(DERIVED_FILES), 'clock': 'time.perf_counter_ns'}
+    return cell, common
+
+
+def signal_owned(process, number, sent):
+    # Popen(start_new_session=True) creates exactly this owned process group.
+    if process is not None and process.poll() is None:
+        require(type(process.pid) is int and process.pid > 0, 'invalid owned PID')
+        try:
+            os.killpg(process.pid, number)
+            sent.append({'owned_process_group': process.pid, 'signal': number})
+        except ProcessLookupError:
+            pass  # The same child can have exited between poll and signal.
+
+
+def execute(plan_path, qualification_path, cell_index):
+    cell, common = contract(plan_path, qualification_path, cell_index)
+    packet, audit_output, execution_output = (Path(common[key]) for key in ['packet_path', 'audit_output', 'execution_output'])
+    require(packet.is_dir(), 'native packet is not closed/present')
+    require(not audit_output.exists() and not audit_output.is_symlink(), 'audit output must be missing; only the reader creates it')
+    require(not execution_output.exists() and not execution_output.is_symlink(), 'execution output already exists; no replay')
+    require(audit_output.parent.is_dir() and execution_output.parent.is_dir(), 'output parent unavailable')
+    execution_output.mkdir()  # Exclusive fresh execution ownership.
+    clocks = {'requested_ns': time.perf_counter_ns(), 'spawned_ns': None, 'returned_ns': None, 'closed_ns': None}
+    process, returncode, reaped, first_signal = None, None, False, None
+    sent, errors = [], []
+    previous_handlers = {}
+
+    def cancelled(number, _frame):
+        nonlocal first_signal
+        if first_signal is None:
+            first_signal = number
+            signal_owned(process, number, sent)
+
+    try:
+        for number in [signal.SIGINT, signal.SIGTERM]:
+            previous_handlers[number] = signal.signal(number, cancelled)
+        with ExitStack() as stack:
+            stdout = stack.enter_context((execution_output / 'stdout.log').open('xb'))
+            stderr = stack.enter_context((execution_output / 'stderr.log').open('xb'))
+            dump_new(execution_output / 'launch-intent.json', {**common, 'complete': False, 'requested_ns': clocks['requested_ns']})
+            require(first_signal is None, 'cancelled before child admission')
+            try:
+                process = subprocess.Popen(common['argv'], cwd=common['cwd'], stdout=stdout, stderr=stderr, start_new_session=True)
+                clocks['spawned_ns'] = time.perf_counter_ns()
+                dump_new(execution_output / 'owned-child.json', {'pid': process.pid, 'process_group': process.pid,
+                         'start_new_session': True, 'spawned_ns': clocks['spawned_ns']})
+                if first_signal is not None:
+                    signal_owned(process, first_signal, sent)
+                returncode = process.wait()
+                reaped = True
+                clocks['returned_ns'] = time.perf_counter_ns()
+            finally:
+                if process is not None and not reaped:
+                    signal_owned(process, first_signal or signal.SIGTERM, sent)
+                    returncode = process.wait()
+                    reaped = True
+                    clocks['returned_ns'] = time.perf_counter_ns()
+    except BaseException as error:
+        errors.append({'type': type(error).__name__, 'message': str(error)})
+    finally:
+        for number, previous in previous_handlers.items():
+            signal.signal(number, previous)
+    # Child wait and ExitStack closure precede every success hash/receipt.
+    streams, derivatives = {}, {}
+    for name in ['stdout', 'stderr']:
+        try:
+            streams[name] = artifact(execution_output / (name + '.log'))
+        except Exception as error:
+            errors.append({'type': type(error).__name__, 'message': str(error)})
+    for name in DERIVED_FILES:
+        try:
+            derivatives[name] = artifact(audit_output / name)
+        except Exception as error:
+            errors.append({'type': type(error).__name__, 'message': str(error)})
+    closed_hashes = {}
+    for name, binding in common['input_bindings'].items():
+        try:
+            closed_hashes[name] = digest(Path(binding['path']))
+            require(closed_hashes[name] == binding['sha256'], name + ' source changed during validator execution')
+        except Exception as error:
+            errors.append({'type': type(error).__name__, 'message': str(error)})
+    failure_path = audit_output / 'audit-failure.json'
+    failure_present = failure_path.exists() or failure_path.is_symlink()
+    if failure_present:
+        errors.append({'type': 'ReaderFailureReceipt', 'message': str(failure_path)})
+    complete = reaped and type(returncode) is int and returncode == 0 and first_signal is None and not sent and not errors
+    clocks['closed_ns'] = time.perf_counter_ns()
+    receipt = {**common, 'status': 'succeeded' if complete else ('cancelled' if first_signal is not None else 'failed'),
+               'complete': complete, 'child_pid': process.pid if process is not None else None,
+               'child_process_group': process.pid if process is not None else None,
+               'child_reaped': reaped, 'child_returncode': returncode, 'cancellation_signal': first_signal,
+               'signals_sent': sent, 'clocks': clocks, 'streams': streams, 'derived_files': derivatives,
+               'closed_source_hashes': closed_hashes, 'audit_failure_file_present': failure_present, 'errors': errors}
+    dump_new(execution_output / 'execution.json', receipt)
+    return receipt  # No success stdout or later diagnostic write can mask this child exit.
+
+
+def validate_receipt(plan_path, qualification_path, cell_index, inputs):
+    cell, expected = contract(plan_path, qualification_path, cell_index)
+    path = Path(cell['validator_execution_receipt'])
+    require(path.is_file() and not path.is_symlink(), 'missing execution receipt')
+    raw = path.read_bytes()
+    receipt = json.loads(raw)
+    for key, value in expected.items():
+        require(receipt[key] == value, 'execution binding mismatch: ' + key)
+    require(receipt['status'] == 'succeeded' and receipt['complete'] is True, 'validator did not complete successfully')
+    require(receipt['child_reaped'] is True and type(receipt['child_returncode']) is int and receipt['child_returncode'] == 0, 'reader child did not exit0/reap')
+    require(type(receipt['child_pid']) is int and receipt['child_pid'] > 0 and type(receipt['child_process_group']) is int and receipt['child_process_group'] == receipt['child_pid'], 'invalid child ownership')
+    require(receipt['cancellation_signal'] is None and receipt['signals_sent'] == [] and receipt['errors'] == [], 'cancelled/failed completion')
+    require(receipt['audit_failure_file_present'] is False, 'failed reader completion')
+    clocks = [receipt['clocks'][key] for key in ['requested_ns', 'spawned_ns', 'returned_ns', 'closed_ns']]
+    require(all(type(value) is int and value >= 0 for value in clocks) and clocks == sorted(clocks), 'execution clocks not integer/closed/ordered')
+    require(receipt['closed_source_hashes'] == {name: item['sha256'] for name, item in expected['input_bindings'].items()}, 'source closure mismatch')
+    failure = Path(expected['audit_output']) / 'audit-failure.json'
+    require(not failure.exists() and not failure.is_symlink(), 'reader failure file exists')
+    require(set(receipt['streams']) == {'stdout', 'stderr'} and set(receipt['derived_files']) == set(DERIVED_FILES), 'incomplete closed output set')
+    inputs[str(path)] = hashlib.sha256(raw).hexdigest()
+    for binding in expected['input_bindings'].values():
+        inputs[binding['path']] = binding['sha256']
+    for name in ['stdout', 'stderr']:
+        actual = artifact(Path(expected['execution_output']) / (name + '.log'))
+        require(receipt['streams'][name] == actual, 'stream hash/path/size mismatch: ' + name)
+        inputs[actual['path']] = actual['sha256']
+    for name in DERIVED_FILES:
+        actual = artifact(Path(expected['audit_output']) / name)
+        require(receipt['derived_files'][name] == actual, 'derived hash/path/size mismatch: ' + name)
+        inputs[actual['path']] = actual['sha256']
+    return receipt
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--plan', required=True, type=Path)
+    parser.add_argument('--qualification', required=True, type=Path)
+    parser.add_argument('--cell', required=True, type=int, help='one exact 1-based planned cell')
+    args = parser.parse_args()
+    receipt = execute(args.plan, args.qualification, args.cell)
+    return 0 if receipt['complete'] else (130 if receipt['status'] == 'cancelled' else 1)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

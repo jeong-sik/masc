@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Run one fresh digest campaign cell after all prior native/reader closure gates."""
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+REVISION = HERE
+PLAN_SHA = '9a550effd9a218fb27430df13ebe48edbbad8b189cf69e75e278ba6829e6a41a'
+QUAL_SHA = '14c304cd3fa4c3635bc6792219a26ba133fa545ca7485a40080635bf40585f73'
+EXECUTOR_SHA = '6b669783616575cbf31becb7950947a932b92c5d0a7dbcb1cc2c3206a4ccf029'
+OWNER_SOURCE = ROOT / 'dispatch-profile-owner-held-preparation-v4/reviewed_runner_owner.py'
+OWNER_SHA = 'ebf10213716afe9ea9d338cee57ed21b8c3016e41161e2ace5763b8385786401'
+
+
+def require(condition, detail):
+    if not condition:
+        raise ValueError(detail)
+
+
+def read(path):
+    return json.loads(path.read_bytes())
+
+
+def digest(path):
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def write_new(path, value):
+    with path.open('x') as stream:
+        json.dump(value, stream, indent=2)
+        stream.write('\n')
+
+
+def source_module(path, expected, name):
+    require(digest(path) == expected, 'reviewed source changed: ' + str(path))
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+
+def prepare(cell_index):
+    require(__debug__, 'assertions must remain enabled')
+    require(type(cell_index) is int and 1 <= cell_index <= 6, 'only one exact new campaign cell may be launched')
+    plan_path, qual_path = REVISION / 'plan.json', REVISION / 'execution-qualification.json'
+    require(digest(plan_path) == PLAN_SHA and digest(qual_path) == QUAL_SHA, 'reviewed plan/qualification changed')
+    plan, qualification = read(plan_path), read(qual_path)
+    require(plan['native_controller_path'] == str(Path(__file__).resolve()), 'controller path differs')
+    require([(cell['role'], cell['keepers']) for cell in plan['order']] == [
+        ('candidate', 2), ('candidate', 30), ('control', 300),
+        ('candidate', 300), ('candidate', 300), ('control', 300)], 'fixed new native order differs')
+    require(plan['validator_executor']['sha256'] == EXECUTOR_SHA, 'reviewed validator executor differs')
+    require(digest(REVISION / 'validator_execution.py') == EXECUTOR_SHA, 'actual validator executor changed')
+    require(digest(Path(plan['reader']['path'])) == plan['reader']['sha256'] == qualification['reader_sha256'], 'frozen reader changed')
+    require(plan['runner_owner'] == {'path': str(OWNER_SOURCE), 'sha256': OWNER_SHA}, 'reviewed runner owner differs')
+    deriver = source_module(REVISION / 'derive_observations.py', plan['deriver_sha256'], 'reviewed_digest_closures')
+    prior_inputs, gates = {}, []
+    for index in range(1, cell_index):
+        gates.append(deriver.checked_campaign_closure(index, plan, qualification, prior_inputs))
+    cell = plan['order'][cell_index - 1]
+    role = cell['role']
+    output = Path(cell['output'])
+    require(output.is_absolute() and output == output.resolve()
+            and not output.exists() and not output.is_symlink(), 'native output exists/noncanonical; never replay')
+    for key in ('audit_output', 'validator_execution_output', 'native_invocation_output', 'native_tool_record', 'validator_tool_record'):
+        path = Path(cell[key])
+        require(path.is_absolute() and path == path.resolve()
+                and not path.exists() and not path.is_symlink(), 'cell output/record already exists or is noncanonical')
+    for binding in plan['qualified_metadata'].values():
+        require(digest(Path(binding['path'])) == binding['sha256'], 'qualified metadata changed')
+    runner = Path(plan['runner']['path'])
+    require(digest(runner) == plan['runner']['sha256'], 'native runner changed')
+    binary = Path(plan['native_paths'][role + '_binary'])
+    repo = Path(plan['native_paths'][role + '_repo'])
+    require(digest(binary) == qualification[role + '_server_sha256'], 'qualified native binary changed')
+    require(digest(repo / plan['fixture_path']) == plan['fixture_sha256'], 'runtime fixture changed')
+    source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+    require(source == plan[role + '_application_source'], 'support checkout source differs')
+    require(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=repo) == b'',
+            'support checkout is dirty')
+    python = Path(sys.executable).resolve()
+    require(str(python) == plan['validator_executor']['python_executable'], 'pinned Python path differs')
+    argv = deriver.expected_native_argv(cell, plan)
+    owner_module = source_module(OWNER_SOURCE, OWNER_SHA, 'reviewed_native_runner_owner')
+    return plan, cell, argv, gates, prior_inputs, owner_module
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--cell', required=True, type=int, choices=tuple(range(1, 7)))
+    parser.add_argument('--execute', action='store_true')
+    args = parser.parse_args()
+    require(args.execute, 'review and actual prior closure gates must precede explicit execution')
+    plan, cell, argv, gates, inputs, reviewed = prepare(args.cell)
+    directory = Path(cell['native_invocation_output'])
+    require(not directory.exists() and not directory.is_symlink(), 'native invocation already retained; no replay')
+    directory.mkdir()
+    record = {'schema': 'masc.owned-digest-native-cell.v1', 'cell': args.cell,
+        'packet_path': cell['output'], 'argv': argv, 'controller_sha256': digest(Path(__file__)),
+        'runner_owner_path': str(OWNER_SOURCE), 'runner_owner_sha256': OWNER_SHA,
+        'plan_sha256': PLAN_SHA, 'qualification_sha256': QUAL_SHA, 'prior_input_sha256': inputs,
+        'prior_closure_gates': gates, 'requested_ns': time.perf_counter_ns(),
+        'load_average_before': os.getloadavg(), 'status': 'started'}
+    write_new(directory / 'launch-intent.json', record)
+    owner = reviewed.RunnerOwner()
+    caught, returncode = None, None
+    try:
+        with owner:
+            with (directory / 'stdout.log').open('xb') as stdout, (directory / 'stderr.log').open('xb') as stderr:
+                returncode = owner.run(argv, stdout, stderr)
+    except BaseException as error:
+        caught = error
+    finalization_error = None
+    try:
+        if caught is not None:
+            record['error'] = {'type': type(caught).__name__, 'detail': str(caught)}
+        if owner.child is not None:
+            returncode = owner.child.returncode
+        record.update(returned_ns=time.perf_counter_ns(), native_runner_returncode=returncode,
+                      supervision=owner.receipt(), load_average_after=os.getloadavg(),
+                      status='runner_closed0' if caught is None and returncode == 0 else 'failed_or_interrupted')
+        record['closed_streams'] = {name: {'path': str(directory / (name + '.log')),
+            'sha256': digest(directory / (name + '.log')), 'bytes': (directory / (name + '.log')).stat().st_size}
+            for name in ('stdout', 'stderr') if (directory / (name + '.log')).is_file()}
+        write_new(directory / 'execution.json', record)
+    except BaseException as error:
+        finalization_error = error
+    if isinstance(caught, reviewed.ParentCancellation):
+        owner.redispatch(caught)
+    if caught is not None:
+        raise caught
+    if finalization_error is not None:
+        raise finalization_error
+    return 0 if returncode == 0 else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

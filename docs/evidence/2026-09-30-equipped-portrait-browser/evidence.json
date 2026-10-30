@@ -1,0 +1,229 @@
+{
+  "scope": "Real browser executing the actual dashboard KeeperPortrait component; API fixture serves unchanged native HTTP-router CI PNGs. Not a live deployment or full dashboard navigation test.",
+  "source_head": "7df3bd2d41c71d3a41597e578d32618cc5662b0c",
+  "source_dirty": false,
+  "source_hashes": {
+    "dashboard/src/components/keeper-portrait.ts": "32d5674bbcf249c59059de5cf1a31ee36bfa99a7633094b18eb693fa21a2b84d",
+    "dashboard/src/api/schemas/keeper-portrait.ts": "03e1135e22901b2030a53869101ddb2db46b1dfe9ab8030f763f2a79ae3cfe33",
+    "dashboard/src/api/core.ts": "c82d87d1f09bf138c5578d3d38da1472fd0c25c0fe47387bd12c01490f04f727"
+  },
+  "native_component_hashes": {
+    "dashboard/src/components/keeper-portrait.ts": "32d5674bbcf249c59059de5cf1a31ee36bfa99a7633094b18eb693fa21a2b84d",
+    "dashboard/src/api/schemas/keeper-portrait.ts": "03e1135e22901b2030a53869101ddb2db46b1dfe9ab8030f763f2a79ae3cfe33",
+    "dashboard/src/api/core.ts": "c82d87d1f09bf138c5578d3d38da1472fd0c25c0fe47387bd12c01490f04f727"
+  },
+  "harness_sha256": "e2fa01ade56d98e1432f66dcae5f883b44fc2272f2777aea7e9ca9806ac031b4",
+  "native_ci_run": "36593262327",
+  "native_ci_head": "2c413a064c82f57c722fed3c7f99c485c1c0429f",
+  "native_ci_metadata": {
+    "conclusion": "",
+    "headSha": "2c413a064c82f57c722fed3c7f99c485c1c0429f",
+    "status": "in_progress",
+    "url": "https://github.com/jeong-sik/masc/actions/runs/36593262327"
+  },
+  "native_manifest": {
+    "keeper": "portrait-http-probe",
+    "pixel_size": 160,
+    "before": {
+      "face": "bare_face",
+      "neck": "bare_neck",
+      "head": "beanie",
+      "hand": "empty_hand",
+      "base": "dish_oak"
+    },
+    "equipped": {
+      "face": "bare_face",
+      "neck": "bare_neck",
+      "head": "crown",
+      "hand": "empty_hand",
+      "base": "dish_oak"
+    },
+    "before_etag": "\"fda7fe90d9f8\"",
+    "equipped_etag": "\"85a25b26cc80\"",
+    "build": {
+      "release_version": "dev",
+      "binary_version": "dev",
+      "repo_version": "0.48.0",
+      "commit": "2c413a064c82f57c722fed3c7f99c485c1c0429f",
+      "commit_source": "embedded",
+      "binary_commit": "2c413a064c82f57c722fed3c7f99c485c1c0429f",
+      "binary_commit_source": "embedded",
+      "ocaml_dos_core": {
+        "source_digest": "338277ba6cc5b69d499c769d4351d73c",
+        "pinned_source_digest": "338277ba6cc5b69d499c769d4351d73c",
+        "matches_pin": true
+      },
+      "provenance_source": "self_observed",
+      "executable_sha256": "c05d6fea8f28f9f4389962814fb3ee8e7e7bc1b9c3045443032622919f9d8fd2",
+      "binary_commit_unix_ts": 1790697026,
+      "binary_commit_age_seconds": 530,
+      "repo_head_commit": "2c413a06",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1790697026,
+      "repo_head_commit_age_seconds": 530,
+      "executable_path": "/home/runner/work/masc/masc/_build/default/test/test_keeper_portrait_http.exe",
+      "executable_dir": "/home/runner/work/masc/masc/_build/default/test",
+      "repo_root": "/home/runner/work/masc/masc",
+      "runtime_instance_id": "01a0ede4-48b9-7000-a54e-5661212e7745",
+      "started_at": "2026-09-29T15:59:16Z",
+      "uptime_seconds": 0
+    },
+    "scope": "real HTTP router fixture after purchase and equip; not live deployment"
+  },
+  "native_fixture_log": "::group::{Keeper portrait HTTP}\nTesting `\u001b[1mKeeper portrait HTTP\u001b[0m'.\n\u001b[2mThis run has ID `OHOZM8FM'.\n\n\u001b[0m  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          0   route is exact.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          1   default and requested size.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          2   bad sizes are refused, not clamped.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          3   name, size, presence, in that order.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          4   same name, same bytes.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          5   a held tag is answered without drawing.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          6   tags follow build, name and size.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          7   unscoped tags follow the bytes.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          8   cache stays within its byte budget.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36manswer\u001b[0m          9   equipment wire changes actual PNG and cac...\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36mrouter\u001b[0m          0   PNG with a strong tag and 304.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36mrouter\u001b[0m          1   400 and 404.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36mrouter\u001b[0m          2   strict auth needs a read token.\n  \u001b[33m[SKIP]\u001b[0m        \u001b[36mrouter\u001b[0m          3   GET leaves keeper metadata untouched.\n  \u001b[32m[OK]\u001b[0m          \u001b[36mrouter\u001b[0m          4   purchase equip reset and remote portrait ...\n\nFull test results in `\u001b[36m~/work/masc/masc/_build/default/test/_build/_tests/Keeper portrait HTTP\u001b[0m'.\n\u001b[32mTest Successful\u001b[0m in 0.648s. 1 test run.\n::endgroup::\n[2026-09-29 15:59:16] [INFO] [MCP] Tag registry initialized: 190 tools registered\n",
+  "native_roster_readings": {
+    "before": {
+      "state": "ready",
+      "equipment": {
+        "face": "bare_face",
+        "neck": "bare_neck",
+        "head": "beanie",
+        "hand": "empty_hand",
+        "base": "dish_oak"
+      }
+    },
+    "equipped": {
+      "state": "ready",
+      "equipment": {
+        "face": "bare_face",
+        "neck": "bare_neck",
+        "head": "crown",
+        "hand": "empty_hand",
+        "base": "dish_oak"
+      }
+    }
+  },
+  "native_pngs": {
+    "before": {
+      "sha256": "2315c65765a93b609dc0e41d956d31436ecfd6e2df9e678c12a2aaad20a1998c",
+      "width": 160,
+      "height": 160
+    },
+    "equipped": {
+      "sha256": "5ada15fb0e286c90c094c057bdfb7fe8ae4a7e2ed844c49ce87e72e177a1ff71",
+      "width": 160,
+      "height": 160
+    }
+  },
+  "browser": {
+    "name": "Chromium",
+    "version": "149.0.7827.55",
+    "viewport": {
+      "width": 1000,
+      "height": 650
+    },
+    "device_scale_factor": 2
+  },
+  "requests": [
+    {
+      "index": 0,
+      "phase": "before",
+      "url": "/api/v1/keepers/portrait-http-probe/portrait.png?size=160",
+      "authorization_matches_fixture": true,
+      "cache_control": "max-age=0",
+      "pragma": null,
+      "if_none_match": null,
+      "served": true,
+      "body_sha256": "2315c65765a93b609dc0e41d956d31436ecfd6e2df9e678c12a2aaad20a1998c"
+    },
+    {
+      "index": 1,
+      "phase": "equipped",
+      "url": "/api/v1/keepers/portrait-http-probe/portrait.png?size=160",
+      "authorization_matches_fixture": true,
+      "cache_control": "max-age=0",
+      "pragma": null,
+      "if_none_match": "\"fda7fe90d9f8\"",
+      "served": true,
+      "body_sha256": "5ada15fb0e286c90c094c057bdfb7fe8ae4a7e2ed844c49ce87e72e177a1ff71"
+    },
+    {
+      "index": 2,
+      "phase": "recovery",
+      "url": "/api/v1/keepers/portrait-http-probe/portrait.png?size=160",
+      "authorization_matches_fixture": true,
+      "cache_control": "max-age=0",
+      "pragma": null,
+      "if_none_match": "\"85a25b26cc80\"",
+      "served": true,
+      "body_sha256": "5ada15fb0e286c90c094c057bdfb7fe8ae4a7e2ed844c49ce87e72e177a1ff71"
+    }
+  ],
+  "browser_errors": [],
+  "screenshots": [
+    {
+      "name": "01-before",
+      "file": "01-before.png",
+      "sha256": "5ff1bc818099bd7d62f76f24b05e76c075360660dbf3f745968c1c524f406ea9"
+    },
+    {
+      "name": "02-equipped",
+      "file": "02-equipped.png",
+      "sha256": "a7128cd795a2f0775f237b0e711e5b96be8baaea959c58c617f0e588a3cb1790"
+    },
+    {
+      "name": "03-unavailable",
+      "file": "03-unavailable.png",
+      "sha256": "3c39d0ca2f307f93ca426d3cd214c4d2813d8de046fdb8bcf09771c0cf0b0c4b"
+    },
+    {
+      "name": "04-recovery-loading",
+      "file": "04-recovery-loading.png",
+      "sha256": "fc9b91728c48a7b19db8f5ad30b0b7f9e3186db3143b3519a0d5c365973d669c"
+    },
+    {
+      "name": "05-recovered",
+      "file": "05-recovered.png",
+      "sha256": "ad09543f9c18345b2e9b68aad472632c3105d18ece1f06b8c531926db0857658"
+    }
+  ],
+  "assertions": [
+    "initial rendered image blob equals the native before PNG",
+    "same Keeper equipment change requests fresh bytes and revokes the old blob",
+    "Unavailable removes the prior picture, revokes its URL, and performs no PNG request",
+    "same-equipment recovery shows loading without a stale revoked image while response is held",
+    "recovered blob contains exactly the same native equipped PNG bytes",
+    "all three requests retain auth/no-cache, use the same Keeper URL, and all blobs have distinct object URLs"
+  ],
+  "fetch_options": [
+    {
+      "url": "/api/v1/keepers/portrait-http-probe/portrait.png?size=160",
+      "cache": "no-cache"
+    },
+    {
+      "url": "/api/v1/keepers/portrait-http-probe/portrait.png?size=160",
+      "cache": "no-cache"
+    },
+    {
+      "url": "/api/v1/keepers/portrait-http-probe/portrait.png?size=160",
+      "cache": "no-cache"
+    }
+  ],
+  "object_urls": {
+    "created": [
+      {
+        "url": "blob:http://127.0.0.1:5173/2f38d1f0-b387-4807-a375-8703754ac266",
+        "size": 3535,
+        "type": "image/png",
+        "sha256": "2315c65765a93b609dc0e41d956d31436ecfd6e2df9e678c12a2aaad20a1998c"
+      },
+      {
+        "url": "blob:http://127.0.0.1:5173/b7ce7b45-3b68-425f-afa1-670b6f627c96",
+        "size": 3525,
+        "type": "image/png",
+        "sha256": "5ada15fb0e286c90c094c057bdfb7fe8ae4a7e2ed844c49ce87e72e177a1ff71"
+      },
+      {
+        "url": "blob:http://127.0.0.1:5173/7c0e35aa-2fb7-4301-b372-f06a40d6456e",
+        "size": 3525,
+        "type": "image/png",
+        "sha256": "5ada15fb0e286c90c094c057bdfb7fe8ae4a7e2ed844c49ce87e72e177a1ff71"
+      }
+    ],
+    "revoked": [
+      "blob:http://127.0.0.1:5173/2f38d1f0-b387-4807-a375-8703754ac266",
+      "blob:http://127.0.0.1:5173/b7ce7b45-3b68-425f-afa1-670b6f627c96"
+    ]
+  },
+  "status": "passed"
+}

@@ -1,0 +1,1296 @@
+open Alcotest
+module Capabilities = Llm_provider.Capabilities
+module Capability_vocab = Llm_provider.Capability_vocab
+module Model_catalog = Llm_provider.Model_catalog
+module Serving_constraint = Llm_provider.Serving_constraint
+
+let first_model_id ~suite catalog =
+  match Model_catalog.model_entries catalog with
+  | [] -> failf "%s: repo model catalog should not be empty" suite
+  | (entry : Model_catalog.model_entry) :: _ ->
+    Llm_provider.Model_identifiers.Model_id.to_string entry.model_id
+;;
+
+let with_clean_model_catalog_override f =
+  Model_catalog.clear_global ();
+  Fun.protect ~finally:Model_catalog.clear_global f
+;;
+
+(* Exact model declarations used by subscriptions. The second value records
+   the former family row: differing runtime slot aliases must now miss. *)
+let subscription_model_rows =
+  [ "claude-opus-5-5", "claude-opus-5-5"
+  ; "claude-fable-5", "claude-fable-5"
+    (* Fable 5.1 needs a row of its own even though "claude-fable-5" prefixes
+       it: 5.1 reads cached tokens at 0.025x the base input price and 5 reads
+       them at 0.1x. Landing 5.1 on the shorter row would bill its cache reads
+       at four times the real rate, which no lookup failure would announce. *)
+  ; "claude-fable-5-1", "claude-fable-5-1"
+  ; "claude-sonnet-5", "claude-sonnet-5"
+    (* Sonnet 5.5 refuses forced tool use where sonnet-5 takes it, and
+       "claude-sonnet-5" prefixes it, so it needs its own row. *)
+  ; "claude-sonnet-5-5", "claude-sonnet-5-5"
+  ; "claude-haiku-5-5", "claude-haiku-5-5"
+  ; "gpt-5.6-sol", "gpt-5.6-sol"
+  ; "gpt-5.6-terra", "gpt-5.6-terra"
+  ; "gpt-5.6-luna", "gpt-5.6"
+  ; "gpt-5.5", "gpt-5.5"
+  ; "gpt-6-sol", "gpt-6-sol"
+  ; "gpt-6.1-sol", "gpt-6.1-sol"
+  ; "gpt-6-astra", "gpt-6-astra"
+  ; "gpt-6-luna", "gpt-6-luna"
+  ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
+  ; "claude-opus-5-5-high", "claude-opus-5-5"
+  ; "claude-opus-5-5-medium", "claude-opus-5-5"
+  ; "claude-opus-5-5-low", "claude-opus-5-5"
+  ; "claude-sonnet-5-5-high", "claude-sonnet-5-5"
+  ; "claude-sonnet-5-5-medium", "claude-sonnet-5-5"
+  ; "claude-sonnet-5-5-low", "claude-sonnet-5-5"
+  ; "gemini-4-argon-high", "gemini-4-argon"
+  ; "gemini-4-argon-medium", "gemini-4-argon"
+  ; "gemini-4-argon-low", "gemini-4-argon"
+  ; "gemini-3.8-flash-high", "gemini-3.8-flash"
+  ; "gemini-3.8-flash-medium", "gemini-3.8-flash"
+  ; "gemini-3.8-flash-low", "gemini-3.8-flash"
+  ; "gemini-3.7-flash-high", "gemini-3.7-flash"
+  ; "gemini-3.7-flash-medium", "gemini-3.7-flash"
+  ; "gemini-3.7-flash-low", "gemini-3.7-flash"
+  ; "gemini-3.6-flash-high", "gemini-3.6-flash"
+  ; "gemini-3.6-flash-medium", "gemini-3.6-flash"
+  ; "gemini-3.6-flash-low", "gemini-3.6-flash"
+  ; "gemini-3.5-flash-high", "gemini-3.5-flash"
+  ; "gemini-3.1-pro-high", "gemini-3.1-pro"
+  ; "gpt-oss-120b-medium", "gpt-oss-120b"
+  ]
+;;
+
+(* An adaptive completion request on a 5.5 row carries the server-side
+   thinking-block binding (#42713): [type] stays "adaptive" and
+   [block_binding.prefix_mismatch_behavior] is "drop_block". The field is only
+   valid with the [thinking-binding-controls-2026-08-01] beta header, which the
+   request headers must add for exactly these bodies.
+   https://platform.claude.com/docs/en/build-with-claude/preserved-thinking *)
+let is_adaptive_with_drop_block thinking =
+  Yojson.Safe.Util.member "type" thinking = `String "adaptive"
+  && Yojson.Safe.Util.member "block_binding" thinking
+     = `Assoc [ "prefix_mismatch_behavior", `String "drop_block" ]
+;;
+
+let beta_header_values headers =
+  List.concat_map
+    (fun (name, value) ->
+      if String.equal (String.lowercase_ascii name) "anthropic-beta"
+      then String.split_on_char ',' value |> List.map String.trim
+      else [])
+    headers
+;;
+
+(* Haiku 5.5 departs from the "anthropic" base in three places, and each one is
+   a request the API answers with 400 when the row is wrong: sampling fields,
+   the shape that turns thinking off, and the effort that shape may carry. Its
+   price is the fourth: the model is priced by prompt length and a row holds one
+   rate, so the row states none.
+   https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide *)
+let test_haiku_5_5_row_reaches_the_wire () =
+  let module Backend = Llm_provider.Backend_anthropic in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let model_id = "claude-haiku-5-5" in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku 5.5 wire" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
+    let config ?temperature ?top_p ?top_k ?enable_thinking ?reasoning_effort () =
+      Llm_provider.Provider_config.make
+        ~kind:Anthropic ~model_id
+        ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+        ?temperature ?top_p ?top_k ?enable_thinking ?reasoning_effort ()
+    in
+    let body config = Backend.build_request ~config ~messages () |> Yojson.Safe.from_string in
+    let member name body = Yojson.Safe.Util.member name body in
+    let thinking body = member "thinking" body in
+    let sampled = body (config ~temperature:0.2 ~top_p:0.5 ~top_k:40 ()) in
+    check bool "temperature is not sent" true (member "temperature" sampled = `Null);
+    check bool "top_p is not sent" true (member "top_p" sampled = `Null);
+    check bool "top_k is not sent" true (member "top_k" sampled = `Null);
+    check (option bool) "top_k is not offered" (Some false)
+      (Option.map
+         (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
+         (Capabilities.for_model_id_catalog model_id));
+    check bool "default leaves adaptive choice to the provider" true
+      (thinking (body (config ())) = `Null);
+    check bool "thinking on asks for adaptive and binds its blocks" true
+      (is_adaptive_with_drop_block (thinking (body (config ~enable_thinking:true ()))));
+    (let adaptive_body =
+       Backend.build_request ~config:(config ~enable_thinking:true ()) ~messages ()
+     in
+     check bool "the binding field brings its beta header" true
+       (List.mem "thinking-binding-controls-2026-08-01"
+          (beta_header_values (Backend.request_headers ~body:adaptive_body []))));
+    check bool "a request without the binding sends no beta header" true
+      (beta_header_values
+         (Backend.request_headers
+            ~body:(Backend.build_request ~config:(config ~enable_thinking:false ()) ~messages ())
+            [])
+       = []);
+    let off = body (config ~enable_thinking:false ()) in
+    check bool "thinking off sends disabled" true
+      (thinking off = `Assoc [ "type", `String "disabled" ]);
+    check bool "the disabled request names no effort" true
+      (member "output_config" off = `Null);
+    List.iter (fun effort ->
+      let disabled = config ~enable_thinking:false ~reasoning_effort:effort () in
+      let check_wire wire =
+        check bool "explicit low-high effort keeps disabled thinking" true
+          (thinking wire = `Assoc ["type", `String "disabled"]);
+        check string "explicit effort reaches output config" (Effort.to_string effort)
+          (Yojson.Safe.Util.(member "output_config" wire |> member "effort" |> to_string)) in
+      check_wire (body disabled);
+      check_wire (Backend.build_count_tokens_request ~config:disabled ~messages ()
+                  |> Yojson.Safe.from_string);
+      let artifact = match Backend.build_request_artifact_with_thinking_control
+        ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_disabled_through_high)
+        ~config:disabled ~messages () with
+        | Ok value -> value
+        | Error _ -> fail "disabled effort artifact was refused" in
+      check_wire (Backend.request_payload artifact |> Yojson.Safe.from_string))
+      [Effort.Low; Effort.Medium; Effort.High];
+    (* The API takes [disabled] at high effort or below and answers 400 above
+       it, so these two must not reach the wire. *)
+    List.iter
+      (fun effort ->
+        check bool
+          (Printf.sprintf "thinking off at %s is refused" (Effort.to_string effort))
+          true
+          (match body (config ~enable_thinking:false ~reasoning_effort:effort ()) with
+           | _ -> false
+           | exception Invalid_argument _ -> true))
+      [ Effort.XHigh; Effort.Max ];
+    check bool "no flat price is stated" true
+      (Option.is_none (Llm_provider.Pricing.pricing_for_model_opt model_id)))
+;;
+
+(* Every entry point reaches the shared Anthropic serializer: ordinary and
+   streaming inspection, plus the explicit-policy artifact used by exact
+   generation/counting. Rejection preserves the caller's history. *)
+let test_haiku_prefill_admission () =
+  let module P = Llm_provider in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku prefill" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let user = P.Types.make_message ~role:User [ Text "hello" ] in
+    let assistant = P.Types.make_message ~role:Assistant [ Text "Continue:" ] in
+    let expected_refusal =
+      "Backend_anthropic.build_request: model \"claude-haiku-5-5\" does not accept a final assistant prefill; end messages with a user turn" in
+    let prefill = [user; assistant] in
+    let continued = prefill @ [user] in
+    let config ?enable_thinking ?(response_format = P.Types.Off)
+        ?(kind = P.Provider_config.Anthropic)
+        ?(model_id = "claude-haiku-5-5") () =
+      P.Provider_config.make ~kind ~model_id
+        ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+        ?enable_thinking ~response_format () in
+    List.iter (fun enable_thinking ->
+      List.iter (fun response_format ->
+      let config = config ?enable_thinking ~response_format () in
+      List.iter (fun stream ->
+        check bool "prefill rejected before ordinary/streaming request is emitted" true
+          (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
+           | Error (P.Http_client.AcceptRejected {reason}) -> String.equal reason expected_refusal
+           | Ok _ | Error _ -> false);
+        check bool "user-ending history with previous assistant remains accepted" true
+          (Result.is_ok
+            (P.Complete.inspect_serialized_request ~stream ~config ~messages:continued ())))
+        [false; true];
+      check bool "exact shared serializer artifact rejects the same prefill" true
+        (match P.Backend_anthropic.build_request_artifact_with_thinking_control
+          ~stream:false ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_default)
+          ~config ~messages:prefill () with
+         | _ -> false
+         | exception Invalid_argument reason -> String.equal reason expected_refusal);
+      check bool "counting cannot admit a refused completion" true
+        (match P.Backend_anthropic.build_count_tokens_request ~config ~messages:prefill () with
+         | _ -> false
+         | exception Invalid_argument reason -> String.equal reason expected_refusal)) [P.Types.Off; JsonMode]) [None; Some false];
+    List.iter (fun config ->
+      List.iter (fun stream ->
+        check bool "other model and Kimi continuation behavior is preserved" true
+          (Result.is_ok
+            (P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill ())))
+        [false; true])
+      [config ~model_id:"claude-haiku-4-5" ();
+       config ~kind:P.Provider_config.Kimi ~model_id:"kimi-k2" ()];
+    check (list string) "refusal never rewrites assistant content" ["Continue:"]
+      (List.filter_map (function P.Types.Text text -> Some text | _ -> None) assistant.content))
+;;
+
+let test_documented_claude_prefill_exclusions () =
+  let module P = Llm_provider in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude prefill exclusions" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let user = P.Types.make_message ~role:User [Text "hello"] in
+    let assistant = P.Types.make_message ~role:Assistant [Text "Continue:"] in
+    let prefill = [user; assistant] in
+    let config model_id = P.Provider_config.make ~kind:Anthropic ~model_id
+      ~base_url:"https://api.anthropic.com" ~max_tokens:1024 () in
+    List.iter (fun model_id ->
+      let config = config model_id in
+      let expected = Printf.sprintf
+        "Backend_anthropic.build_request: model %S does not accept a final assistant prefill; end messages with a user turn"
+        model_id in
+      check (option bool) (model_id ^ " catalog excludes prefill") (Some false)
+        (Option.map (fun (caps : Capabilities.capabilities) -> caps.supports_assistant_prefill)
+           (Capabilities.for_model_id_catalog model_id));
+      List.iter (fun stream ->
+        check bool (model_id ^ " refuses final assistant before dispatch") true
+          (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
+           | Error (P.Http_client.AcceptRejected {reason}) -> String.equal reason expected
+           | Ok _ | Error _ -> false);
+        check bool (model_id ^ " retains accepted user-ending history") true
+          (Result.is_ok (P.Complete.inspect_serialized_request ~stream ~config
+            ~messages:(prefill @ [user]) ()))) [false; true])
+      ["claude-fable-5"; "claude-fable-5-1"; "claude-mythos-5"; "claude-mythos-preview";
+       "claude-opus-5-5"; "claude-sonnet-5"; "claude-sonnet-5-5"];
+    List.iter (fun model_id ->
+      check bool (model_id ^ " keeps existing default admission") true
+        (Result.is_ok (P.Complete.inspect_serialized_request ~stream:false
+          ~config:(config model_id) ~messages:prefill ())))
+      ["claude-haiku-4-5"; "unlisted-model"])
+;;
+
+let test_subscription_models_resolve_their_own_rows () =
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"subscription model rows" in
+  List.iter (fun (model_id, former_row) ->
+    let found = Model_catalog.lookup catalog
+      (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) in
+    if String.equal model_id former_row then
+      match found with
+      | None -> failf "declared exact model %s is missing" model_id
+      | Some (entry : Model_catalog.model_entry) ->
+        check string "exact declaration" model_id
+          (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
+    else check bool "a runtime alias is not an API model declaration" true
+      (Option.is_none found)) subscription_model_rows
+;;
+
+let test_sonnet_5_5_thinking_modes_reach_the_wire () =
+  let module Backend = Llm_provider.Backend_anthropic in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Sonnet 5.5 wire" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
+    let config ?enable_thinking ?reasoning_effort () =
+      Llm_provider.Provider_config.make
+        ~kind:Anthropic ~model_id:"claude-sonnet-5-5"
+        ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+        ?enable_thinking ?reasoning_effort ()
+    in
+    let body config = Backend.build_request ~config ~messages () |> Yojson.Safe.from_string in
+    let thinking body = Yojson.Safe.Util.member "thinking" body in
+    check bool "default leaves adaptive choice to the provider" true
+      (thinking (body (config ())) = `Null);
+    List.iter
+      (fun effort ->
+        let cfg = config ~enable_thinking:false ?reasoning_effort:effort () in
+        check bool "lowest mode is between_tools on completion" true
+          (thinking (body cfg) = `Assoc [ "type", `String "between_tools" ]);
+        let count = Backend.build_count_tokens_request ~config:cfg ~messages ()
+          |> Yojson.Safe.from_string in
+        check bool "token count shares the lowest thinking mode" true
+          (thinking count = `Assoc [ "type", `String "between_tools" ]);
+        check (option string) "explicit effort survives with between_tools"
+          (Option.map Effort.to_string effort)
+          (match Yojson.Safe.Util.member "output_config" (body cfg) with
+           | `Null -> None
+           | output -> Yojson.Safe.Util.(output |> member "effort" |> to_string_option)))
+      [ None; Some Effort.Low; Some Medium; Some High ];
+    List.iter
+      (fun effort ->
+        let cfg = config ~enable_thinking:false ~reasoning_effort:effort () in
+        List.iter
+          (fun build ->
+            match build ~config:cfg ~messages () with
+            | (_ : string) -> fail "between_tools admitted unsupported effort"
+            | exception Invalid_argument _ -> ())
+          [ (fun ~config ~messages () -> Backend.build_request ~config ~messages ())
+          ; (fun ~config ~messages () -> Backend.build_count_tokens_request ~config ~messages ())
+          ];
+        check bool "higher efforts remain available with adaptive thinking" true
+          (is_adaptive_with_drop_block
+             (thinking (body (config ~enable_thinking:true ~reasoning_effort:effort ())))))
+      [ Effort.XHigh; Max ])
+;;
+
+(* The effort ladders are written out as literals rather than read back from the
+   row under test: a comparison that sources both sides from the catalog passes
+   whatever the catalog happens to say, including a row that admits nothing. *)
+let subscription_model_efforts =
+  [ None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+    (* Probed on /v1/responses 2026-09-07: sol, terra and luna each answer 400
+       for "minimal" -- the message names the model -- and 200 for none, low,
+       medium, high, xhigh and max. The list this replaces came from the
+       2026-06-29 gpt-5.1 reference and was wrong at both ends. These observations
+       belong to the Responses provider, not the separate bare model rows. *)
+  ; Some "openai-responses", "gpt-5.6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-5.6-terra", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-5.6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; Some "openai-responses", "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+    (* The codex lane clamps a binding's effort to the bare row
+       (Keeper_official_client_host.clamp_reasoning_effort_to_catalog). Without
+       "max" here a codex max binding went out as xhigh, and gpt-5.5 fell to the
+       "gpt-5" row, which sent xhigh as high. The Codex cache (2026-09-30)
+       now lists low..ultra for Sol and Terra; gpt-5.5 keeps low..xhigh. *)
+  ; None, "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
+  ; None, "gpt-5.6-terra", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
+  ; None, "gpt-5.5", [ "low"; "medium"; "high"; "xhigh" ]
+    (* Probed on /v1/responses 2026-09-23: sol and luna answer 400 for
+       "minimal" with "Supported values are: 'none', 'low', 'medium', 'high',
+       'xhigh', and 'max'". Opus 5.5's ladder is the platform model page's
+       effort parameter set (checked 2026-09-23), as the other Claude rows. *)
+  ; None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "claude-sonnet-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "claude-haiku-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ; "ultra" ]
+  ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
+  ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
+  ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gemini-4-argon", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.8-flash", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.7-flash", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.6-flash", [ "minimal"; "low"; "medium"; "high" ]
+  ]
+;;
+
+let test_subscription_models_admit_their_reasoning_efforts () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"subscription model efforts"
+  in
+  List.iter
+    (fun (provider_name, model_id, expected) ->
+       let entry =
+         match provider_name with
+         | None -> Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
+         | Some provider_name -> Model_catalog.lookup_for_provider catalog ~provider_name
+             ~model_id:(Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
+       in
+       match entry with
+       | None -> failf "%s resolves to no catalog row" model_id
+       | Some (entry : Model_catalog.model_entry) ->
+         check
+           (option (list string))
+           (Printf.sprintf "%s admits its declared reasoning efforts" model_id)
+           (Some expected)
+           entry.accepted_reasoning_efforts)
+    subscription_model_efforts
+;;
+
+let test_responses_sol_rejects_codex_only_ultra () =
+  let module Config = Llm_provider.Provider_config in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Responses Sol effort" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let config effort = Config.make ~kind:OpenAI_compat
+      ~provider_id:"openai-responses" ~model_id:"gpt-6-sol"
+      ~base_url:"https://api.openai.com/v1" ~reasoning_effort:effort () in
+    check bool "Responses Sol accepts its maximum supported effort" true
+      (Result.is_ok (Config.validate_reasoning_effort_request_typed (config Effort.Max)));
+    (match Config.validate_reasoning_effort_request_typed (config Effort.Ultra) with
+     | Error (Config.Unsupported_reasoning_effort { effort = Effort.Ultra; accepted; _ }) ->
+         check bool "Responses Sol refusal retains Max in the admitted ladder" true
+           (List.mem Effort.Max accepted);
+         check bool "Responses Sol does not admit Codex Ultra" false
+           (List.mem Effort.Ultra accepted)
+     | Error rejection -> fail (Config.reasoning_effort_request_rejection_to_message rejection)
+     | Ok () -> fail "Responses Sol must refuse Ultra before provider dispatch");
+    check (option int) "scoped Sol keeps the full context window"
+      (Some 1050000) (Config.context_window (config Effort.Max)))
+;;
+
+(* Cache pricing the fleet's Anthropic rows have to carry: [Pricing.estimate_cost]
+   returns [Incomplete] when a usage record reports cache tokens the row prices
+   with no multiplier, and [annotate_usage_cost] then leaves [cost_usd] at None.
+   A row that prices only input and output therefore records no cost at all for
+   a cached turn, which is every turn once a system prompt is cached.
+
+   The list covers the Anthropic models masc runs. The Mythos rows are left out
+   because they are not part of that set; they carry the same gap, and Mythos
+   5.1 shares Fable 5.1's 0.025x cache read, so a row of its own comes with
+   whichever change starts running them. Haiku 5.5 is left out because its row
+   states no price at all, so it has no multiplier to carry. *)
+let anthropic_cache_pricing_rows =
+  [ "claude-opus-5-5", 1.25, 0.05
+  ; "claude-sonnet-5", 1.25, 0.1
+  ; "claude-sonnet-5-5", 1.25, 0.05
+  ; "claude-fable-5", 1.25, 0.1
+  ; "claude-fable-5-1", 1.25, 0.025
+  ]
+;;
+
+let test_anthropic_rows_price_cache_tokens () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"anthropic cache pricing"
+  in
+  List.iter
+    (fun (model_id, expected_write, expected_read) ->
+       match Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) with
+       | None -> failf "%s resolves to no catalog row" model_id
+       | Some (entry : Model_catalog.model_entry) ->
+         check
+           (option (float 0.0001))
+           (Printf.sprintf "%s prices cache writes" model_id)
+           (Some expected_write)
+           entry.cache_write_multiplier;
+         check
+           (option (float 0.0001))
+           (Printf.sprintf "%s prices cache reads" model_id)
+           (Some expected_read)
+           entry.cache_read_multiplier)
+    anthropic_cache_pricing_rows
+;;
+
+(* What the Messages API answered for each model on 2026-10-08. A sampling
+   parameter with a non-default value came back 400 on every one of them, so a
+   row has to keep all three off the wire. Forced tool use -- tool_choice "any"
+   or a named tool -- came back 400 on the three marked false and 200 on the
+   rest. The flags are read through the resolved capabilities, the way a
+   request is checked, so a 5.5 or 5.1 id that fell back to the shorter row
+   would show here. *)
+let claude_rows_forced_tool_choice =
+  [ "claude-opus-5-5", false
+  ; "claude-sonnet-5", true
+  ; "claude-sonnet-5-5", false
+  ; "claude-fable-5", true
+  ; "claude-fable-5-1", false
+  ; "claude-haiku-5-5", true
+  ]
+;;
+
+let test_claude_rows_keep_sampling_parameters_off_the_wire () =
+  let module Backend = Llm_provider.Backend_anthropic in
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude sampling"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
+    List.iter
+      (fun (model_id, _) ->
+         let config =
+           Llm_provider.Provider_config.make
+             ~kind:Anthropic ~model_id
+             ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+             ~temperature:0.2 ~top_p:0.5 ~top_k:40 ()
+         in
+         let body = Backend.build_request ~config ~messages () |> Yojson.Safe.from_string in
+         List.iter
+           (fun field ->
+              check bool
+                (Printf.sprintf "%s does not send %s" model_id field)
+                true
+                (Yojson.Safe.Util.member field body = `Null))
+           [ "temperature"; "top_p"; "top_k" ];
+         check (option bool)
+           (model_id ^ " does not offer top_k")
+           (Some false)
+           (Option.map
+              (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
+              (Capabilities.for_model_id_catalog model_id)))
+      claude_rows_forced_tool_choice)
+;;
+
+let test_claude_rows_state_forced_tool_choice_as_the_api_takes_it () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude tool_choice"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun (model_id, accepted) ->
+         match Capabilities.for_model_id_catalog model_id with
+         | None -> failf "%s resolves to no capabilities" model_id
+         | Some (caps : Capabilities.capabilities) ->
+           check bool
+             (model_id ^ " required tool_choice")
+             accepted
+             caps.supports_required_tool_choice;
+           check bool
+             (model_id ^ " named tool_choice")
+             accepted
+             caps.supports_named_tool_choice)
+      claude_rows_forced_tool_choice)
+;;
+
+let test_load_default_catalog () =
+  let expected =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"model catalog default"
+  in
+  match Model_catalog.load_default () with
+  | Error msg -> failf "default model catalog should load: %s" msg
+  | Ok catalog ->
+    check
+      bool
+      "embedded default is exactly the AGENT_CORE models.toml catalog"
+      true
+      (Model_catalog.model_entries expected = Model_catalog.model_entries catalog
+       && Model_catalog.provider_entries expected = Model_catalog.provider_entries catalog
+      )
+;;
+
+let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"Ollama Cloud v1 vendor rows"
+  in
+  let entries = Model_catalog.model_entries catalog in
+  List.iter
+    (fun model_id ->
+       let matches =
+         List.filter
+           (fun (entry : Model_catalog.model_entry) ->
+              String.equal
+                (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
+                model_id
+              && entry.provider_name = Some "ollama_cloud")
+           entries
+       in
+       match matches with
+       | [ entry ] ->
+         check
+           (option string)
+           (model_id ^ " capability base")
+           (Some "ollama_cloud")
+           entry.base_label;
+         check
+           (option int)
+           (model_id ^ " context")
+           (Some 262_144)
+           entry.max_context_tokens;
+         check (option bool) (model_id ^ " tools") (Some true) entry.supports_tools;
+         check
+           (option bool)
+           (model_id ^ " reasoning")
+           (Some true)
+           entry.supports_reasoning;
+         (* The row states no thinking control of its own. It used to, and the
+            value it stated was a wire: ollama_cloud is reachable over both
+            the native /api/chat and the OpenAI-compatible /v1, and a row
+            cannot know which one a deployment points it at. The wire now
+            selects the base at resolution time, so an undeclared field here
+            is the row saying the right thing rather than staying silent. *)
+         check
+           bool
+           (model_id ^ " leaves the thinking control to the wire")
+           true
+           (entry.thinking_control_format = None);
+         check
+           (option bool)
+           (model_id ^ " json mode")
+           (Some true)
+           entry.supports_response_format_json;
+         check
+           (option bool)
+           (model_id ^ " no native schema guarantee")
+           (Some false)
+           entry.supports_structured_output;
+         check
+           (option bool)
+           (model_id ^ " image input")
+           (Some true)
+           entry.supports_image_input;
+         check
+           (option bool)
+           (model_id ^ " native streaming")
+           (Some true)
+           entry.supports_native_streaming
+       | [] -> failf "missing ollama_cloud/%s catalog row" model_id
+       | _ -> failf "duplicate ollama_cloud/%s catalog rows" model_id)
+    [ "gemma4:31b-cloud" ]
+;;
+
+(* No ollama_cloud row states a thinking control of its own.
+
+   The value such a row would state is a wire, and this provider is reachable
+   over two ([[providers]] identity_kinds = ["ollama", "openai_compat"]). A row
+   cannot know which one a deployment points it at, so a row that states one is
+   guessing, and the guess is wrong for every deployment on the other wire.
+   [capabilities_base_by_identity_kind] answers instead, at resolution time.
+
+   Before that existed the same declaration was edited five times in five
+   weeks, each edit correct for the row it touched and each leaving the class
+   open — 17 rows saying ollama_think (unencodable on /v1) and 8 hand-corrected
+   to "none" (which claims a control does not exist when one does). This is the
+   ratchet against that returning: adding a row is fine, adding a wire to a row
+   is not.
+
+   Rows that declare supports_reasoning = false keep their own declaration. A
+   model that does not reason has no control on either wire, so nothing about
+   the wire is being guessed (RFC-one-provider-two-wires §5). *)
+let test_no_ollama_cloud_row_states_a_wire () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"Ollama Cloud rows leave the wire to the provider"
+  in
+  let offenders =
+    Model_catalog.model_entries catalog
+    |> List.filter (fun (entry : Model_catalog.model_entry) ->
+      match entry.provider_name with
+      | Some "ollama_cloud" ->
+        entry.supports_reasoning = Some true
+        && Option.is_some entry.thinking_control_format
+      | Some _ | None -> false)
+    |> List.map (fun (entry : Model_catalog.model_entry) ->
+           Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
+    |> List.sort String.compare
+  in
+  check
+    (list string)
+    "no reasoning-capable ollama_cloud row states a thinking control"
+    []
+    offenders
+;;
+
+let test_in_memory_catalog_rejects_invalid_generated_input () =
+  match
+    Model_catalog.of_toml_string
+      ~source:"invalid embedded candidate"
+      "[[models]]\nmodel_id = \"broken\"\nsupports_tools = \"yes\""
+  with
+  | Error msg ->
+    check
+      string
+      "invalid field is diagnosed"
+      "model entry \"broken\" field \"supports_tools\" expected bool"
+      msg
+  | Ok _ -> fail "invalid in-memory catalog must fail validation"
+;;
+
+let test_global_loads_default_catalog_for_capabilities () =
+  let expected =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"model catalog default production path"
+  in
+  let model_id =
+    first_model_id ~suite:"model catalog default production path" expected
+  in
+  with_clean_model_catalog_override (fun () ->
+    match Capabilities.for_model_id_catalog model_id with
+    | Some _ -> ()
+    | None ->
+      failf
+        "Capabilities.for_model_id_catalog should resolve %S through embedded/default \
+         Model_catalog.global"
+        model_id)
+;;
+
+let constraint_catalog ?expires_at ?rejected_from () =
+  Printf.sprintf
+    "[[models]]\n\
+     model_id = \"evidence-model\"\n\
+     provider_name = \"evidence-runtime\"\n\
+     max_context_tokens = 1048576\n\
+     serving_constraint_source_kind = \"probe\"\n\
+     serving_constraint_source = \"probe://incident/2793\"\n\
+     serving_constraint_checked_at_unix_s = 100\n\
+     serving_constraint_confidence = \"high\"\n\
+     %sserving_constraint_accepted_through_tokens = 524298\n\
+     %s"
+    (Option.fold
+       ~none:""
+       ~some:(Printf.sprintf "serving_constraint_expires_at_unix_s = %d\n")
+       expires_at)
+    (Option.fold
+       ~none:""
+       ~some:(Printf.sprintf "serving_constraint_rejected_from_tokens = %d\n")
+       rejected_from)
+;;
+
+let parsed_constraint toml =
+  match Model_catalog.of_toml_string ~source:"serving constraint fixture" toml with
+  | Error message -> fail message
+  | Ok catalog ->
+    (match Model_catalog.model_entries catalog with
+     | [ { Model_catalog.serving_constraint = Some constraint_; _ } ] -> constraint_
+     | _ -> fail "expected exactly one model with one serving constraint")
+;;
+
+let test_serving_constraint_projects_exact_interval () =
+  let constraint_ =
+    parsed_constraint (constraint_catalog ~expires_at:200 ~rejected_from:524299 ())
+  in
+  check
+    bool
+    "accepted observation is admitted"
+    true
+    (Serving_constraint.admit ~now_unix_s:150 ~input_tokens:524298 constraint_ = Ok ());
+  match Serving_constraint.admit ~now_unix_s:150 ~input_tokens:524299 constraint_ with
+  | Error
+      (Serving_constraint.Input_rejected
+         { input_tokens = 524299; accepted_through = 524298; rejected_from = 524299 }) ->
+    ()
+  | Ok () | Error _ -> fail "rejected observation did not remain exact"
+;;
+
+let test_serving_constraint_stale_evidence_fails_closed () =
+  let constraint_ =
+    parsed_constraint (constraint_catalog ~expires_at:200 ~rejected_from:524299 ())
+  in
+  match Serving_constraint.check_evidence ~now_unix_s:200 constraint_ with
+  | Error
+      (Serving_constraint.Evidence_expired { now_unix_s = 200; expires_at_unix_s = 200 })
+    -> ()
+  | Ok () | Error _ -> fail "expired serving evidence was accepted"
+;;
+
+let test_probe_serving_constraint_requires_expiry () =
+  match
+    Serving_constraint.make
+      ~source_kind:Serving_constraint.Probe
+      ~source_ref:"probe://incident/2793"
+      ~checked_at_unix_s:100
+      ~confidence:Serving_constraint.Medium
+      ~accepted_through:524298
+      ~rejected_from:524299
+      ()
+  with
+  | Error Serving_constraint.Missing_probe_expiry -> ()
+  | Error _ | Ok _ -> fail "probe evidence without explicit expiry was accepted"
+;;
+
+let test_catalog_only_runtime_projects_serving_constraint () =
+  let catalog =
+    Model_catalog.of_toml_string
+      ~source:"catalog-only serving constraint fixture"
+      (constraint_catalog ~expires_at:200 ~rejected_from:524299 ())
+    |> Result.get_ok
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    match
+      Capabilities.for_provider_model_id
+        ~wire:None
+        ~provider:(Llm_provider.Model_catalog.Declared_provider "evidence-runtime")
+        ~model_id:"evidence-model"
+    with
+    | Some { Capabilities.serving_constraint = Some constraint_; _ } ->
+      check
+        int
+        "resolved runtime preserves observed acceptance"
+        524298
+        constraint_.Serving_constraint.observation.accepted_through
+    | Some _ | None -> fail "catalog-only normal runtime lost its serving constraint")
+;;
+
+let test_serving_constraint_partial_group_fails_closed () =
+  match
+    Model_catalog.of_toml_string
+      ~source:"partial serving constraint fixture"
+      "[[models]]\n\
+       model_id = \"partial-evidence\"\n\
+       serving_constraint_source_kind = \"probe\"\n\
+       serving_constraint_accepted_through_tokens = 524298\n"
+  with
+  | Error message ->
+    check
+      bool
+      "diagnostic identifies the grouped declaration"
+      true
+      (String.starts_with ~prefix:"model entry \"partial-evidence\"" message)
+  | Ok _ -> fail "partial serving-constraint declaration must fail closed"
+;;
+
+(* keeper_analyze_image on glm-coding.glm-4.6v died on HTTP 400 code 1210
+   ("The max_tokens parameter is illegal. [1,32768]") at 2026-09-07T15:24:58Z:
+   the vision tool asked for 65536, the clamp landed on 40960, and 40960 is the
+   glm capabilities_base ceiling, not this model's. A runtime config always
+   carries its provider id, so it resolves through the provider-scoped lookup
+   with bare fallback off -- the path taken here -- and that path never read
+   the bare glm-4.6v row. The provider-scoped rows are what make the model's
+   own ceiling reachable from a runtime. *)
+let test_glm_vision_rows_reach_a_runtime_lookup () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"glm vision runtime rows"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun provider_label ->
+        match
+          Capabilities.for_provider_model_id
+            ~wire:(Some Llm_provider.Provider_kind.Glm)
+            ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
+            ~model_id:"glm-4.6v"
+        with
+        | Some caps ->
+          check
+            (option int)
+            (provider_label ^ " resolves glm-4.6v to its own output ceiling")
+            (Some 32_768)
+            caps.Capabilities.max_output_tokens;
+          check
+            bool
+            (provider_label ^ " keeps glm-4.6v image-capable")
+            true
+            caps.Capabilities.supports_image_input;
+          (* Z.AI's GLM-4.6V streaming example emits this typed delta field:
+             https://docs.z.ai/guides/vlm/glm-4.6v *)
+          (match (Llm_provider.Reasoning_dialect.of_capabilities caps).streaming with
+           | Delta_field "reasoning_content" -> ()
+           | No_streaming_reasoning | Delta_field _
+           | Delta_field_and_details _ | Template_parser ->
+             fail (provider_label ^ " drops GLM-4.6V reasoning deltas"))
+        | None -> fail (provider_label ^ " resolves no capabilities for glm-4.6v"))
+      [ "glm-coding"; "glm" ])
+;;
+
+(* A Terminal-Bench trial on kimi_coding.kimi-for-coding (2026-09-23T19:15Z)
+   ended its first turn on HTTP 400 "invalid temperature: only 1 is allowed
+   for this model": the keeper default 0.4 reached the wire because the
+   provider-scoped row, which a runtime lookup reads instead of the bare row,
+   declared no fixed sampling. The endpoint fixes temperature for every model
+   on this plan, so the request must leave it out, thinking on or off. *)
+let test_kimi_coding_rows_leave_temperature_out () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"kimi coding sampling"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun model_id ->
+        match
+          Capabilities.for_provider_model_id
+            ~wire:None
+            ~provider:(Llm_provider.Model_catalog.Declared_provider "kimi_coding")
+            ~model_id
+        with
+        | None -> fail ("kimi_coding resolves no capabilities for " ^ model_id)
+        | Some caps ->
+          let dialect = Llm_provider.Reasoning_dialect.of_capabilities caps in
+          List.iter
+            (fun enable_thinking ->
+              check
+                bool
+                (Printf.sprintf
+                   "kimi_coding.%s omits temperature (enable_thinking=%s)"
+                   model_id
+                   (match enable_thinking with
+                    | None -> "unset"
+                    | Some b -> string_of_bool b))
+                true
+                (Llm_provider.Reasoning_dialect.ignores_sampling_param
+                   dialect
+                   ~enable_thinking
+                   Capabilities.Temperature))
+            [ None; Some true; Some false ])
+      [ "kimi-for-coding"; "k3"; "k3-256k" ])
+;;
+
+(* The bare row and its two provider-scoped twins are three catalog keys
+   ((provider_name, model_id) is the duplicate check), so nothing in the
+   loader keeps them in step. They describe one Z.AI model; pin the limits
+   and the vision flags to the same values so a later edit to one row cannot
+   leave a runtime on a different ceiling than the bare-id callers see. *)
+let test_glm_vision_rows_agree () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"glm vision row agreement"
+  in
+  let rows =
+    List.filter
+      (fun (entry : Model_catalog.model_entry) ->
+         String.equal
+           (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
+           "glm-4.6v")
+      (Model_catalog.model_entries catalog)
+  in
+  check
+    (list (option string))
+    "glm-4.6v has the bare row and its two provider-scoped twins"
+    [ None; Some "glm"; Some "glm-coding" ]
+    (List.sort
+       compare
+       (List.map (fun (entry : Model_catalog.model_entry) -> entry.provider_name) rows));
+  List.iter
+    (fun (entry : Model_catalog.model_entry) ->
+      let label =
+        match entry.provider_name with
+        | Some provider -> provider
+        | None -> "bare"
+      in
+      check (option int) (label ^ " output ceiling") (Some 32_768) entry.max_output_tokens;
+      check (option int) (label ^ " context window") (Some 128_000) entry.max_context_tokens;
+      check (option bool) (label ^ " image input") (Some true) entry.supports_image_input;
+      check
+        (option bool)
+        (label ^ " multimodal inputs")
+        (Some true)
+        entry.supports_multimodal_inputs)
+    rows
+;;
+
+(* Every number here was read from OpenRouter's own GET /api/v1/models
+   metadata or measured on the wire on 2026-09-10
+   (evidence/task-openrouter-support/) or 2026-09-22
+   (evidence/task-openrouter-new-models/). Provider-scoped lookup is an exact
+   id match, so each row is asserted on its own rather than through a prefix. *)
+let openrouter_rows =
+  (* id, context, max output, input $/1M, output $/1M, image input *)
+  [ "anthropic/claude-opus-5", 1_000_000, 128_000, 5.0, 25.0, None
+  ; "anthropic/claude-sonnet-5", 1_000_000, 128_000, 2.0, 10.0, None
+  ; "openai/gpt-5.5", 1_050_000, 128_000, 5.0, 30.0, None
+  ; "openai/gpt-5.6-sol", 1_050_000, 128_000, 2.0, 10.0, None
+  ; "google/gemini-3.8-flash", 1_048_576, 65_536, 0.75, 3.75, None
+  ; "x-ai/grok-4.6", 500_000, 450_000, 2.0, 6.0, None
+  ; "moonshotai/kimi-k3", 1_048_576, 943_718, 3.0, 15.0, None
+  ; "z-ai/glm-5.3-flash", 1_310_720, 131_072, 0.075, 0.25, None
+  ; "z-ai/glm-5.3", 1_310_720, 943_718, 1.4, 4.4, Some false
+  ; "deepseek/deepseek-v4.1-flash", 1_048_576, 384_000, 0.3, 1.2, None
+  ; "deepseek/deepseek-v4-flash", 1_048_576, 384_000, 0.088606, 0.177212, Some false
+  ; "deepseek/deepseek-v4-pro", 1_048_576, 384_000, 0.95526, 1.91052, Some false
+  ; "qwen/qwen3.8-max-0902", 1_000_000, 131_072, 2.0, 6.0, None
+  ; "anthropic/claude-fable-5.1", 1_000_000, 128_000, 10.0, 50.0, None
+  ; "anthropic/claude-haiku-4.5", 200_000, 64_000, 1.0, 5.0, None
+  ; "openai/gpt-6-astra", 1_050_000, 128_000, 10.0, 50.0, None
+  ; "openai/gpt-5.6-terra", 1_050_000, 128_000, 2.0, 12.0, None
+  ; "openai/gpt-5.6-luna", 1_050_000, 128_000, 0.2, 1.2, None
+  ; "google/gemini-3.1-pro-preview", 1_048_576, 65_536, 2.0, 12.0, None
+  ; "x-ai/grok-4.7", 500_000, 450_000, 1.6, 4.8, None
+  ; "qwen/qwen3.8-flash", 1_000_000, 131_072, 0.15, 0.47, None
+  ; "z-ai/glm-5.3-flashx", 1_048_576, 131_072, 0.37, 1.25, None
+  ]
+;;
+
+let openrouter_entry entries model_id =
+  match
+    List.filter
+      (fun (entry : Model_catalog.model_entry) ->
+         String.equal
+           (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
+           model_id
+         && entry.provider_name = Some "openrouter")
+      entries
+  with
+  | [ entry ] -> entry
+  | [] -> Alcotest.failf "no openrouter row for %s" model_id
+  | _ :: _ :: _ -> Alcotest.failf "duplicate openrouter rows for %s" model_id
+;;
+
+let test_openrouter_rows_preserve_probe_truth () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter rows"
+  in
+  let entries = Model_catalog.model_entries catalog in
+  List.iter
+    (fun (model_id, context, max_output, price_in, price_out, image_input) ->
+       let entry = openrouter_entry entries model_id in
+       check
+         (option string)
+         (model_id ^ " capability base")
+         (Some "openai_chat_extended")
+         entry.base_label;
+       check (option int) (model_id ^ " context") (Some context) entry.max_context_tokens;
+       check
+         (option int)
+         (model_id ^ " max output")
+         (Some max_output)
+         entry.max_output_tokens;
+       check
+         (option (float 1e-9))
+         (model_id ^ " input price")
+         (Some price_in)
+         entry.input_per_million;
+       check
+         (option (float 1e-9))
+         (model_id ^ " output price")
+         (Some price_out)
+         entry.output_per_million;
+       (* The gateway mirrors reasoning into reasoning_details[] on every one
+          of these models, and gpt-5.5 puts its only reasoning artifact there
+          with delta.reasoning = null. A row declaring plain "delta:reasoning"
+          would read that null and drop the item. *)
+       check
+         (option string)
+         (model_id ^ " reasoning stream")
+         (Some "delta_details:reasoning")
+         entry.reasoning_streaming_format;
+       check
+         (option string)
+         (model_id ^ " reasoning output")
+         (Some "split_reasoning_fields")
+         entry.reasoning_output_format;
+       check
+         (option string)
+         (model_id ^ " reasoning replay")
+         (Some "drop_without_tool")
+         entry.reasoning_replay;
+       check
+         (option bool)
+         (model_id ^ " image input")
+         image_input
+         entry.supports_image_input)
+    openrouter_rows
+;;
+
+(* Rows that lower a claim the openai_chat_extended base makes. The tool_choice
+   pair is a wire measurement; the modality trio is the gateway's own input
+   list. Left at the base value each one would be a false claim. *)
+let test_openrouter_rows_lower_contradicted_base_claims () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter overrides"
+  in
+  let entries = Model_catalog.model_entries catalog in
+  List.iter
+    (fun model_id ->
+       let entry = openrouter_entry entries model_id in
+       check
+         (option bool)
+         (model_id ^ " refuses required tool choice")
+         (Some false)
+         entry.supports_required_tool_choice;
+       check
+         (option bool)
+         (model_id ^ " refuses named tool choice")
+         (Some false)
+         entry.supports_named_tool_choice)
+    [ "anthropic/claude-fable-5.1"; "qwen/qwen3.8-flash" ];
+  check
+    (option bool)
+    "glm-5.3-flashx is not offered structured_outputs"
+    (Some false)
+    (openrouter_entry entries "z-ai/glm-5.3-flashx").supports_structured_output;
+  let qwen = openrouter_entry entries "qwen/qwen3.8-max-0902" in
+  check
+    (option bool)
+    "qwen refuses required tool choice"
+    (Some false)
+    qwen.supports_required_tool_choice;
+  check
+    (option bool)
+    "qwen refuses named tool choice"
+    (Some false)
+    qwen.supports_named_tool_choice;
+  List.iter
+    (fun model_id ->
+       let entry = openrouter_entry entries model_id in
+       check
+         (option bool)
+         (model_id ^ " is text-only")
+         (Some false)
+         entry.supports_multimodal_inputs)
+    [ "z-ai/glm-5.3"; "deepseek/deepseek-v4-flash"; "deepseek/deepseek-v4-pro" ]
+;;
+
+(* The effort ladder is the difference between a thinking turn and an
+   Undeclared_reasoning_effort_capability, and five endpoints refuse the
+   disable rung outright, so the split is measured rung by rung rather than
+   assumed uniform (probe7-*, 12 models x 7 rungs, 2026-09-10). *)
+let openrouter_effort_ladders =
+  let with_disable =
+    [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  in
+  let without_disable = [ "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ] in
+  List.map
+    (fun model_id -> model_id, without_disable)
+    [ "google/gemini-3.8-flash"
+    ; "x-ai/grok-4.6"
+    ; "z-ai/glm-5.3"
+    ; "z-ai/glm-5.3-flash"
+    ; "qwen/qwen3.8-max-0902"
+    ; "anthropic/claude-fable-5.1"
+    ; "openai/gpt-6-astra"
+    ; "google/gemini-3.1-pro-preview"
+    ; "x-ai/grok-4.7"
+    ; "z-ai/glm-5.3-flashx"
+    (* Free-model admission probe: this endpoint refuses disabled reasoning. *)
+    ; "liquid/lfm-2.5-2.6b:free"
+    ]
+  @ List.map
+      (fun model_id -> model_id, with_disable)
+      [ "anthropic/claude-opus-5"
+      ; "anthropic/claude-sonnet-5"
+      ; "openai/gpt-5.5"
+      ; "openai/gpt-5.6-sol"
+      ; "moonshotai/kimi-k3"
+      ; "deepseek/deepseek-v4-flash"
+      ; "deepseek/deepseek-v4.1-flash"
+      ; "deepseek/deepseek-v4-pro"
+      ; "anthropic/claude-haiku-4.5"
+      ; "openai/gpt-5.6-terra"
+      ; "openai/gpt-5.6-luna"
+      ; "qwen/qwen3.8-flash"
+      (* Free-model admission probes explicitly reported zero reasoning
+         tokens for an accepted [none] request. *)
+      ; "cohere/north-mini-code:free"
+      ]
+;;
+
+let test_openrouter_rows_declare_their_measured_effort_ladder () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter efforts"
+  in
+  let entries = Model_catalog.model_entries catalog in
+  check
+    int
+    "every OpenRouter row in the catalog has a measured ladder"
+    (List.length
+       (List.filter
+          (fun (entry : Model_catalog.model_entry) ->
+             entry.provider_name = Some "openrouter")
+          entries))
+    (List.length openrouter_effort_ladders);
+  List.iter
+    (fun (model_id, expected) ->
+       let entry = openrouter_entry entries model_id in
+       check
+         (option (list string))
+         (model_id ^ " effort ladder")
+         (Some expected)
+         entry.accepted_reasoning_efforts)
+    openrouter_effort_ladders
+;;
+
+(* F422: the six single-value capability vocab parsers answered [""] with
+   [Some <default>], so an empty string was the one unknown value that never
+   failed closed. The [_of_string] assertions below fail on origin/main
+   (they return [Some Default_reasoning_replay], [Some Assistant_tool_content_null],
+   [Some Chat_max_tokens], [Some Rich_json_schema], [Some No_reasoning_output_format],
+   [Some No_content_inline_reasoning]) and pass once the arms are deleted.
+
+   The catalog half pins the boundary that already refuses an empty value:
+   [parse_entry] checks the raw string against [Capability_vocab.*_values]
+   before it is stored, so a catalog row with [tool_schema_conformance = ""]
+   fails closed with the key named. Together the two halves say that an empty
+   vocab value is unknown at every layer, not "the default" at one of them. *)
+let test_empty_capability_vocab_value_is_rejected () =
+  let rejects name parse =
+    check bool (name ^ " rejects \"\"") true (Option.is_none (parse ""));
+    check bool (name ^ " rejects whitespace") true (Option.is_none (parse "  "))
+  in
+  rejects "reasoning_replay" Capability_vocab.reasoning_replay_override_of_string;
+  rejects
+    "assistant_tool_content_format"
+    Capability_vocab.assistant_tool_content_format_of_string;
+  rejects "chat_output_budget_field" Capability_vocab.chat_output_budget_field_of_string;
+  rejects "tool_schema_conformance" Capability_vocab.tool_schema_conformance_of_string;
+  rejects "reasoning_output_format" Capability_vocab.reasoning_output_format_of_string;
+  rejects "content_inline_reasoning" Capability_vocab.content_inline_reasoning_of_string;
+  let toml =
+    "[[models]]\nmodel_id = \"vocab-model\"\ntool_schema_conformance = \"\"\n"
+  in
+  let expected_reason =
+    "model entry \"vocab-model\" field \"tool_schema_conformance\" has unknown value \
+     \"\" (canonical: rich, conformant)"
+  in
+  match Model_catalog.of_toml_string ~source:"empty vocab value" toml with
+  | Error message -> check string "strict loader names the key" expected_reason message
+  | Ok _ -> fail "strict loader accepted tool_schema_conformance = \"\""
+;;
+
+let () =
+  run
+    "model catalog default"
+    [ ( "embedded catalog"
+      , [ test_case "load_default" `Quick test_load_default_catalog
+        ; test_case
+            "anthropic rows price cache tokens"
+            `Quick
+            test_anthropic_rows_price_cache_tokens
+        ; test_case
+            "Claude rows keep sampling parameters off the wire"
+            `Quick
+            test_claude_rows_keep_sampling_parameters_off_the_wire
+        ; test_case
+            "Claude rows state forced tool_choice as the API takes it"
+            `Quick
+            test_claude_rows_state_forced_tool_choice_as_the_api_takes_it
+        ; test_case
+            "Ollama Cloud v1 vendor rows preserve probe truth"
+            `Quick
+            test_ollama_cloud_v1_vendor_rows_preserve_probe_truth
+        ; test_case
+            "no Ollama Cloud row states a wire"
+            `Quick
+            test_no_ollama_cloud_row_states_a_wire
+        ; test_case
+            "invalid generated input fails closed"
+            `Quick
+            test_in_memory_catalog_rejects_invalid_generated_input
+        ; test_case
+            "global uses embedded default"
+            `Quick
+            test_global_loads_default_catalog_for_capabilities
+        ; test_case
+            "serving constraint preserves exact interval"
+            `Quick
+            test_serving_constraint_projects_exact_interval
+        ; test_case
+            "stale serving evidence fails closed"
+            `Quick
+            test_serving_constraint_stale_evidence_fails_closed
+        ; test_case
+            "probe serving evidence requires expiry"
+            `Quick
+            test_probe_serving_constraint_requires_expiry
+        ; test_case
+            "catalog-only runtime projects serving evidence"
+            `Quick
+            test_catalog_only_runtime_projects_serving_constraint
+        ; test_case
+            "partial serving evidence fails closed"
+            `Quick
+            test_serving_constraint_partial_group_fails_closed
+        ; test_case
+            "subscription models resolve their own rows"
+            `Quick
+            test_subscription_models_resolve_their_own_rows
+        ; test_case
+            "Sonnet 5.5 thinking modes reach the wire"
+            `Quick
+            test_sonnet_5_5_thinking_modes_reach_the_wire
+        ; test_case
+            "Haiku 5.5 row reaches the wire"
+            `Quick
+            test_haiku_5_5_row_reaches_the_wire
+        ; test_case "Haiku final assistant admission" `Quick test_haiku_prefill_admission
+        ; test_case "Documented Claude prefill exclusions" `Quick
+            test_documented_claude_prefill_exclusions
+        ; test_case
+            "subscription models admit their reasoning efforts"
+            `Quick
+            test_subscription_models_admit_their_reasoning_efforts
+        ; test_case "Responses Sol rejects Codex-only Ultra" `Quick
+            test_responses_sol_rejects_codex_only_ultra
+        ; test_case
+            "glm vision rows reach a runtime lookup"
+            `Quick
+            test_glm_vision_rows_reach_a_runtime_lookup
+        ; test_case
+            "kimi coding rows leave temperature out"
+            `Quick
+            test_kimi_coding_rows_leave_temperature_out
+        ; test_case
+            "glm vision rows agree"
+            `Quick
+            test_glm_vision_rows_agree
+        ; test_case
+            "OpenRouter rows preserve probe truth"
+            `Quick
+            test_openrouter_rows_preserve_probe_truth
+        ; test_case
+            "OpenRouter rows lower contradicted base claims"
+            `Quick
+            test_openrouter_rows_lower_contradicted_base_claims
+        ; test_case
+            "OpenRouter rows declare their measured effort ladder"
+            `Quick
+            test_openrouter_rows_declare_their_measured_effort_ladder
+        ; test_case
+            "empty capability vocab value is rejected"
+            `Quick
+            test_empty_capability_vocab_value_is_rejected
+        ] )
+    ]
+;;

@@ -1,0 +1,14 @@
+[keeper]
+activation_mode = "autonomous"
+# sandbox_profile takes docker / microvm / remote_ssh. If the server itself runs
+# inside a container, docker here means Docker-in-Docker — mount the host docker
+# socket or use microvm.
+sandbox_profile = "docker"
+sandbox_image = "base"
+network_mode = "inherit"
+
+instructions = """
+@tech_lead가 배정한 작업이나 미배정 프론트엔드 작업을 맡아, 자신의 체크아웃에 작업 브랜치를 만들어 구현하세요.
+
+백엔드 API 계약을 먼저 확인하고 차이가 있으면 조율하세요. 상태는 가능한 한 기존 값에서 계산하고, 불필요한 effect를 만들지 마세요. QA가 확인할 수 있도록 PR 링크와 검증 결과를 남기세요. ready 전환 판단은 @tech_lead에게 맡기세요.
+"""

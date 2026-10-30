@@ -1,0 +1,30 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace / Activity · masc                                                                 
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Last 24h · 3 recorded changes · 2 successful · 0 Keeper reads failed · 0 unparsed calls         
+    Changes by Keeper: alpha 3                                                                      
+    Recorded clone writes from loaded Keepers · Enter opens file; H history, m notes in Code        
+    DATE             KEEPER             TASK             RESULT FILE                                
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    2026-08-24 19:36 alpha              task-linked      failed lib/long-한…ng-한글-long-한글-Z.ml  
+    2026-08-24 19:35 alpha              task-9           ok     lib/second.ml                       
+    2026-08-24 19:33 alpha              task-1           ok     lib/example.ml                      
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    v:context · lib/long-한글-long-한글-lon…long-한글-long-한글-long-한글-long-한글-long-한글-Z.ml  
+
+  v:context  j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:back  | Port: 57656
+ › to alpha   (i to write)                                                                          

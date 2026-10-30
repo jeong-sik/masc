@@ -1,0 +1,243 @@
+(** A single-turn Antigravity CLI client.
+
+    This is an official-client runtime boundary, not an
+    {!Llm_provider.Llm_transport}. Antigravity owns its OAuth session, model
+    turn, and built-in tools. *)
+
+type effort =
+  | Low
+  | Medium
+  | High
+
+type execution_mode =
+  | Plan
+  | Accept_edits
+
+type config =
+  { cli_path : string
+  ; cwd : string
+  ; add_dirs : string list
+    (** Extra absolute workspace roots beside [cwd], each passed as its own
+        [--add-dir]. Empty keeps [cwd] as the only root. *)
+  ; model : string
+  ; agent : string option
+  ; effort : effort option
+  ; execution_mode : execution_mode
+  ; sandbox : bool
+  ; disable_slash_commands : bool
+  ; admission_timeout_s : float
+    (** Finite bound for the post-spawn wait for the first [init] event and its
+        admission callback. *)
+  ; timeout_s : float option
+    (** Maximum silence between valid stream-json messages while the model
+        turn is running. It is not a total turn-duration bound, and it is not
+        armed while the last step the CLI reported is a running tool step: the
+        CLI writes nothing between a tool step's [ACTIVE] update and its
+        [DONE] or [ERROR] update, so that silence has no idle timer.
+        [None] removes the deadline after the first valid [init] event and its
+        admission callback: the spawned client decides when its own turn ends.
+        The post-spawn pre-init phase remains bounded by [admission_timeout_s].
+        Declared as [turn-timeout-s] in runtime config, where [0] selects
+        [None]. *)
+  ; output_schema : Yojson.Safe.t option
+    (** JSON Schema the CLI enforces on the turn's final answer
+        ([--json-schema]). Validation with a re-prompt, not constrained
+        decoding. Only the result event's [structured_output] carries the value
+        that passed; the narrated response beside it can still hold a draft the
+        schema rejects, so this adapter reports the structured value as the
+        turn's text when the field is present. *)
+  }
+
+val structured_output_instruction : schema:Yojson.Safe.t -> string
+(** The sentence that tells the model how a turn run with
+    [config.output_schema] takes its answer: as the arguments of the CLI's
+    [finish] tool, in the first response, with no other tool. A value written
+    as text is refused by the CLI with a re-prompt that sends the whole prompt
+    again. [schema] is serialized the way the [--json-schema] flag carries it. *)
+
+val official_client_environment : ?home_dir:string -> unit -> string array
+(** Provider-owned account environment with an optional isolated HOME. This
+    excludes API-key/provider-routing variables and user tool configuration. *)
+
+val default_config : cwd:string -> model:string -> config
+val default_timeout_s : float
+(** Native default for official-client admission and idle liveness. *)
+
+val tool_step_idle_timeout_s : float
+(** Backstop idle bound for CLI event silence inside a tool step (2h).
+    Silence there is the protocol, so this must stay far above any
+    plausible healthy tool: it exists only so a wedged tool cannot hold
+    its CLI spawn slot forever (#43259). Expiry fails the turn with
+    typed [Timeout]. *)
+
+type conversation_mode =
+  | Start
+  | Resume of { conversation_id : string }
+(** [Start] asks the official client to create a new project so cached
+    workspace state cannot select an earlier conversation. [Resume] names the
+    exact durable conversation and never creates a project. *)
+
+type usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; thinking_tokens : int
+  ; cache_read_tokens : int
+  ; total_tokens : int
+  }
+(** Counts exactly as the CLI reports them, which is an {b exclusive} prompt
+    count: the parse accepts a frame only when
+    [total_tokens = input_tokens + output_tokens], so [cache_read_tokens] is
+    outside both. {!Agent_core.Types.api_usage.input_tokens} is the inclusive
+    total instead, so a caller converting to it must add the cache components
+    through [Backend_anthropic.usage_of_wire_counts] rather than copying the
+    fields across. *)
+
+type permission_mode =
+  | Always_proceed
+  | Request_review
+  | Unrecognized_permission_mode of string
+      (** A mode the CLI announced that this tree does not model. Nothing
+          branches on [permission_mode], so an unseen member is carried rather
+          than rejected: rejecting it ended the turn and parked the session. *)
+
+type turn_result =
+  { conversation_id : string
+  ; model : string
+  ; text : string
+  ; num_turns : int
+  ; usage : usage
+  ; permission_mode : permission_mode
+  ; tool_steps : int
+  ; tool_errors : int
+  ; trajectory_error : string option
+      (** The CLI marks the whole result [ERROR] when any trajectory step
+          errored, even one the model corrected before replying. When a
+          reply was produced the turn is complete and the step error is
+          carried here; [None] for a clean [SUCCESS] result. *)
+  ; resumed : bool
+  ; wall_duration_s : float
+  }
+
+type response_ending = Response_done | Response_error
+
+type stream_event =
+  | Turn_started of
+      { conversation_id : string
+      ; model : string
+      }
+  | Text_delta of
+      { step_index : int option
+      ; text : string
+      }
+      (** A piece of the answer. [step_index] is the [step_update] step that
+          carried it: agy writes each response step under its own index, so
+          two indexes are two assistant messages (measured 2026-09-25, agy
+          1.2.11: steps 1 and 3 around tool step 2). [None] when the step
+          named no usable index, and for the result event's response, which
+          is forwarded only when no step carried text. *)
+  | Text_completed of { step_index : int; ending : response_ending }
+      (** The identified [agent_response] step reached DONE/ERROR, after its
+          final text delta. This closes only that response's content, not the
+          turn or any native tool. An absent/drifted step index cannot prove
+          which content ended, so it emits no guessed completion. *)
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
+  | Usage_reported of
+      { conversation_id : string
+      ; model : string
+      ; num_turns : int
+      ; usage : usage
+      }
+      (** The result event's usage, the conversation's running count, with the
+          conversation and its turn count the event states. Emitted before
+          the result decides whether the turn succeeded, so a failed turn
+          still reports it. *)
+  | Turn_finished of { text : string }
+
+type error =
+  | Invalid_config of string
+  | Spawn_failed of string
+  | Protocol_error of
+      { stage : string
+      ; detail : string
+      }
+  | State_callback_failed of string
+  | Turn_failed of string
+  | Process_exited of string
+  | Unhandled_exception of string
+      (** An exception nothing in the runtime expected, caught as the turn
+          leaves it: a host-side failure, not something the CLI sent. The
+          string is the exception. That catch-all re-raises
+          [Out_of_memory], [Stack_overflow] and [Sys.Break] instead. *)
+  | Child_fd_ceiling_exceeded of
+      { count : int option
+      ; ceiling : int
+      }
+      (** The CLI child was failed for file-table safety, not for anything
+          it answered. [Some count] past [ceiling] is a sick workspace
+          (deterministic: refiring the same turn re-kills it, so the
+          workspace needs operator action, not retries). [None] means the
+          sample itself hit EMFILE/ENFILE on a live child: system pressure,
+          refused closed rather than risk ENFILE. *)
+  | Timeout of float
+
+val error_to_string : error -> string
+
+val redact_stderr_tail : string -> string
+(** Shared structural secret masking. The shared stderr capture masks complete
+    retained input before display truncation. Once the raw byte bound is
+    exceeded the entire diagnostic is omitted, including later lines, so a
+    multiline credential cannot survive a dropped identifying prefix. *)
+
+val validate_turn :
+  ?conversation_mode:conversation_mode ->
+  config ->
+  prompt:string ->
+  (unit, error) result
+
+val context_submission_to_json : Runtime_official_client_write.t -> Yojson.Safe.t
+(** Content-free proof that the prompt was written to the client's stdin and
+    EOF delivered. Not the client's acceptance. *)
+
+val run_turn :
+  ?conversation_mode:conversation_mode ->
+  ?home_dir:string ->
+  ?before_spawn:(unit -> unit) ->
+  ?on_spawned:(pid:int -> unit) ->
+  ?on_prompt_sent:(unit -> unit) ->
+  ?on_context_submission:(Runtime_official_client_write.t -> unit) ->
+  ?on_terminal_received:(unit -> unit) ->
+    (** Pure observer after the matching result is decoded, before stream or
+        usage callbacks and process draining; not a consumption ACK. *)
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  ?on_conversation_ready:(conversation_id:string -> (unit, string) result) ->
+  ?on_stream_event:(stream_event -> unit) ->
+  config ->
+  prompt:string ->
+  (turn_result, error) result
+(** [before_spawn] runs after validation and spawn-slot admission, immediately
+    before creating the process. A callback failure prevents spawning.
+
+    [on_spawned] receives the actual child PID immediately after a successful
+    spawn, before any prompt is sent. The process manager determines whether
+    this PID also leads an owned foreground group.
+
+    [on_prompt_sent] runs once after the complete prompt has been written to
+    the spawned client's stdin and EOF has been delivered. It does not claim
+    provider acceptance or successful execution. Spawn, validation, and partial
+    write failures do not call it. Callback failures fail the runtime turn.
+
+    [on_context_submission] receives the receipt of those stdin bytes (one
+    [Whole_write] slot) just before [on_prompt_sent]. Its non-reserved
+    exceptions are logged as unavailable measurement and the turn continues.
+
+    [home_dir], when present, replaces inherited [HOME] and removes inherited
+    XDG directory overrides before spawning the official client. *)
+
+module For_testing : sig
+  val tool_step_timeout_s : config -> float option
+  (** Phase mapping for tool steps: pins that the phase carries the
+      [tool_step_idle_timeout_s] backstop instead of no bound. *)
+end

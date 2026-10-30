@@ -1,0 +1,3721 @@
+(** Declarative Runtime TOML parser.
+
+    Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
+    layers 1-3 plus [[runtime].default] into a self-standing
+    {!Runtime_schema.config}. Reserved top-level namespaces: providers,
+    models, model_sets, runtime, web_search, exec (the [\[exec.ssh.endpoints.*\]] SSH
+    endpoint registry, Phase 1 SSH lane spec §4.2). Dropped routing namespaces
+    system, routes, and profiles are rejected rather than ignored. A top-level
+    table whose name [\[providers\]] declares carries that provider's model
+    bindings as sub-tables; every other top-level table belongs to a different
+    parser and is left alone.
+
+    Routing layers are intentionally NOT parsed (see {!Runtime_toml} mli):
+    Layer 4 aliases, Layer 5 routes/system/profiles, and the
+    strategy/cycle-policy/scoring tables are dropped from
+    {!Runtime_schema}, so this parser neither reads nor populates them. *)
+
+type parse_error =
+  { path : string
+  ; message : string
+  }
+[@@deriving show]
+
+(* --- Error accumulation --- *)
+
+let error path message = [ { path; message } ]
+
+let unknown_table_keys ~(path : string) ~(expected : string list) (entries : (string * Otoml.t) list) =
+  List.concat_map
+    (fun (key, _) ->
+       if List.mem key expected
+       then []
+       else
+         error
+           (path ^ "." ^ key)
+           (Printf.sprintf
+              "unknown [%s] key %S; expected %s"
+              path
+              key
+              (String.concat ", " expected)))
+    entries
+;;
+
+(** [typed_find kind path tbl key getter] wraps [Otoml.find_opt] so that a
+    type mismatch produces a structured [parse_error] instead of raising
+    [Otoml.Type_error] past the parser boundary. *)
+let typed_find (kind : string) (path : string) (tbl : Otoml.t) (key : string) getter
+  : ('a option, parse_error list) result
+  =
+  try Ok (Otoml.find_opt tbl getter [ key ]) with
+  | Otoml.Type_error msg ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf "%s must be %s; got %s" key kind msg))
+;;
+
+(** [typed_find_or kind path tbl key getter ~default] is {!typed_find} for a
+    key whose absence means [default]. *)
+let typed_find_or
+      (kind : string)
+      (path : string)
+      (tbl : Otoml.t)
+      (key : string)
+      getter
+      ~default
+  : ('a, parse_error list) result
+  =
+  Result.map (Option.value ~default) (typed_find kind path tbl key getter)
+;;
+
+let strict_float_find (path : string) (tbl : Otoml.t) (key : string)
+  : (float option, parse_error list) result
+  =
+  match Otoml.find_opt tbl Fun.id [ key ] with
+  | None -> Ok None
+  | Some (Otoml.TomlFloat value) -> Ok (Some value)
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlBoolean _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error (error (path ^ "." ^ key) (key ^ " must be a float"))
+;;
+
+let positive_finite_float_opt_field
+      ~(path : string)
+      ~(key : string)
+      (value_result : (float option, parse_error list) result)
+  : (float option, parse_error list) result
+  =
+  match value_result with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value > 0.0 && Float.is_finite value -> Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf
+            "%s must be a positive finite float; got %g"
+            key
+            value))
+;;
+
+let required_non_empty_string
+      ?(trim_result = false)
+      (tbl : Otoml.t)
+      ~(path : string)
+      ~(key : string)
+      ~(message : string)
+  : (string, parse_error list) result
+  =
+  match typed_find "a string" path tbl key Otoml.get_string with
+  | Error errors -> Error errors
+  | Ok (Some value) when String.trim value <> "" ->
+    Ok (if trim_result then String.trim value else value)
+  | Ok (Some _ | None) -> Error (error (path ^ "." ^ key) message)
+;;
+
+(* Partition a list of per-entry parse results into a single
+   collected result. Either every entry parsed (return [Ok all]),
+   or at least one entry failed (return [Error] with every error
+   concatenated). Removes the historical two-pass pattern where the
+   success branch carried a dead [Error _ -> None] arm guarded by a
+   prior [if errs <> []]: with this helper the dead arm cannot be
+   written, so a future caller cannot accidentally re-introduce a
+   silent drop. *)
+let partition_results
+  (results : ('a, parse_error list) result list)
+  : ('a list, parse_error list) result
+  =
+  let oks, errs =
+    List.partition_map
+      (function
+        | Ok x -> Either.Left x
+        | Error e -> Either.Right e)
+      results
+  in
+  if errs <> [] then Error (List.concat errs) else Ok oks
+;;
+
+(* --- Protocol string -> Runtime_schema.api_format --- *)
+
+type editor_transport = Runtime_protocol.editor_transport = Endpoint | Command
+
+type editor_semantics = Runtime_protocol.editor_semantics = Http_provider | Official_client
+
+type editor_credential_policy = Runtime_protocol.editor_credential_policy =
+  | Credentials_optional
+  | Credentials_forbidden
+  | Credentials_file_required
+
+type editor_protocol = Runtime_protocol.editor_protocol =
+  { protocol : string
+  ; transport : editor_transport
+  ; semantics : editor_semantics
+  ; credential_policy : editor_credential_policy
+  ; requires_non_interactive : bool
+  ; provider_fields : string list
+  ; required_provider_fields : string list
+  }
+
+let editor_protocols = Runtime_protocol.editor_protocols
+let api_format_of_protocol = Runtime_protocol.api_format_of_protocol
+
+(* --- Transport extraction --- *)
+
+let transport_of_provider ~(path : string) (tbl : Otoml.t) (id : string)
+  : (Runtime_schema.transport, parse_error list) result
+  =
+  match
+    ( typed_find "a string" path tbl "endpoint" Otoml.get_string
+    , typed_find "a string" path tbl "command" Otoml.get_string )
+  with
+  | Error endpoint_errors, Error command_errors -> Error (endpoint_errors @ command_errors)
+  | Error errors, Ok _ | Ok _, Error errors -> Error errors
+  | Ok (Some url), Ok None -> Ok (Runtime_schema.Http url)
+  | Ok None, Ok (Some cmd) -> Ok (Runtime_schema.Cli cmd)
+  | Ok (Some _), Ok (Some _) ->
+    Error
+      (error
+         path
+         (Printf.sprintf "provider %s: cannot specify both 'endpoint' and 'command'" id))
+  | Ok None, Ok None ->
+    Error
+      (error
+         path
+         (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id))
+;;
+
+module Ns = Runtime_toml_namespace
+
+let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
+
+(* A provider's bindings are a top-level table named after its id, so the id
+   may not be a table another reader owns: [Runtime_toml_namespace] for the
+   tables with a reader of their own, the keeper runtime settings'
+   namespaces from their registry, and the obsolete tables this loader still
+   refuses. Only provider ids become top-level tables; a model id sits under
+   [[models]] and inside [[<provider>.<model>]], and an SSH endpoint under
+   [[exec.ssh.endpoints]], so neither can collide and neither is checked. *)
+let reserved_provider_ids =
+  List.map Ns.key Ns.all
+  @ Keeper_runtime_config.owned_namespaces
+  @ obsolete_top_level_namespaces
+;;
+
+let is_reserved name = List.exists (String.equal name) reserved_provider_ids
+
+(* Provider ids stay dot-free: a Runtime id is the literal string
+   "<provider>.<model>", so a dot inside the provider id would make that
+   compound ambiguous. Model ids admit '.' because they carry upstream API
+   model names verbatim (gpt-5.3-codex-spark, mimo-v2.5), written as quoted
+   TOML keys that Otoml already parses. *)
+let valid_runtime_id_component ~allow_dot value =
+  let length = String.length value in
+  length > 0
+  &&
+  let rec loop index =
+    if index = length
+    then true
+    else (
+      match value.[index] with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> loop (index + 1)
+      | '.' when allow_dot -> loop (index + 1)
+      | _ -> false)
+  in
+  loop 0
+;;
+
+let runtime_id_charset ~allow_dot =
+  if allow_dot then "[A-Za-z0-9._-]+" else "[A-Za-z0-9_-]+"
+;;
+
+let validate_runtime_id_component ~allow_dot ~kind ~path value =
+  if valid_runtime_id_component ~allow_dot value
+  then Ok ()
+  else
+    Error
+      (error
+         path
+         (Printf.sprintf "%s id must match %s" kind (runtime_id_charset ~allow_dot)))
+;;
+
+let validate_provider_id ~path value =
+  match validate_runtime_id_component ~allow_dot:false ~kind:"provider" ~path value with
+  | Error _ as refused -> refused
+  | Ok () when is_reserved value ->
+    Error
+      (error
+         path
+         (Printf.sprintf
+            "provider id %S collides with a reserved top-level runtime.toml namespace"
+            value))
+  | Ok () -> Ok ()
+;;
+
+(* --- Layer 1: Providers --- *)
+
+let parse_credential (tbl : Otoml.t) (path : string)
+  : (Runtime_schema.credential, parse_error list) result
+  =
+  match
+    required_non_empty_string
+      ~trim_result:true
+      tbl
+      ~path
+      ~key:"type"
+      ~message:"credential requires non-empty 'type'"
+  with
+  | Error errs -> Error errs
+  | Ok cred_type ->
+    (match cred_type with
+     | "env" ->
+       Result.map
+         (fun key -> Runtime_schema.Env key)
+         (required_non_empty_string
+            ~trim_result:true
+            tbl
+            ~path
+            ~key:"key"
+            ~message:"credential type 'env' requires non-empty 'key'")
+     | "file" ->
+       (* A leading "~/" is the operator's home at read time, the same rule
+          [Env_config_core.normalize_path_lexically] applies to every other
+          path a config names. The seed config ships the Antigravity token
+          under "~/.gemini/…" so it is one file for every workspace on a
+          machine; expanding here keeps [Runtime_adapter]'s absolute-path
+          rule true of the value it sees. *)
+       Result.map
+         (fun path -> Runtime_schema.File (Env_config_core.expand_home_prefix path))
+         (required_non_empty_string
+            ~trim_result:true
+            tbl
+            ~path
+            ~key:"path"
+            ~message:"credential type 'file' requires non-empty 'path'")
+     | "inline" ->
+       Result.map
+         (fun value -> Runtime_schema.Inline value)
+         (required_non_empty_string
+            tbl
+            ~path
+            ~key:"value"
+            ~message:"credential type 'inline' requires non-empty 'value'")
+     | t -> Error (error (path ^ ".type") (Printf.sprintf "unknown credential type %S" t)))
+;;
+
+let capability_keys =
+  [ "supports-inline-tools"; "argv-prompt-preflight"; "uses-messages-caching" ]
+;;
+
+(** Parse a [providers.<id>.capabilities] sub-table. Every key must be one of
+    {!capability_keys}; any other key fails the load so a stale or misspelled
+    capability is never silently dropped. *)
+let parse_capabilities ~(path : string) (tbl : Otoml.t)
+  : (Runtime_schema.capabilities, parse_error list) result
+  =
+  let path = path ^ ".capabilities" in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key capability_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown capabilities key %S; expected %s"
+                  key
+                  (String.concat ", " capability_keys)))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+    | Otoml.TomlTableArray _ -> error path "capabilities must be a TOML table"
+  in
+  if unknown_key_errors <> []
+  then Error unknown_key_errors
+  else (
+    let b key = typed_find_or "a boolean" path tbl key Otoml.get_boolean ~default:false in
+    let ( let* ) = Result.bind in
+    let* supports_inline_tools = b "supports-inline-tools" in
+    let* argv_prompt_preflight = b "argv-prompt-preflight" in
+    let* uses_anthropic_caching = b "uses-messages-caching" in
+    Ok
+      { Runtime_schema.supports_inline_tools
+      ; argv_prompt_preflight
+      ; uses_anthropic_caching
+      })
+;;
+
+(** Parse a [providers.<id>.headers] sub-table into a sorted association
+    list. Caller invokes only when the sub-table key exists, so the
+    returned list distinguishes "declared but empty / all entries rejected"
+    (empty list) from "no sub-table" (caller passes [None]).
+
+    Non-table values at the sub-table position emit a WARN and yield an
+    empty list. Non-string header values emit a per-entry WARN and are
+    dropped. The result is sorted by key for deterministic show/eq. *)
+let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
+  match Otoml.get_table tbl with
+  (* RFC-0145 — narrow to the only exception [Otoml.get_table] raises
+     on a non-table value.  Unrelated runtime exceptions propagate. *)
+  | exception Otoml.Type_error _ ->
+    Log.Runtime.warn "runtime_toml: %s — expected TOML table, got non-table value; treating as empty"
+        path;
+    []
+  | entries ->
+    let pairs =
+      List.filter_map
+        (fun (k, v) ->
+           match Otoml.get_string v with
+           | s -> Some (k, s)
+           (* RFC-0145 — narrow to the only exception [Otoml.get_string]
+              raises on a non-string value. *)
+           | exception Otoml.Type_error _ ->
+             Log.Runtime.warn "runtime_toml: %s.%s — non-string header value, ignoring" path k;
+             None)
+        entries
+    in
+    List.sort (fun (a, _) (b, _) -> String.compare a b) pairs
+;;
+
+let antigravity_cli_option_keys = [ "agent"; "effort"; "timeout-s"; "add-dirs" ]
+
+let antigravity_forbidden_option_keys =
+  [ "execution-mode"; "sandbox"; "disable-slash-commands" ]
+;;
+
+let antigravity_optional_string ~(path : string) (tbl : Otoml.t) key =
+  match typed_find "a string" path tbl key Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when String.trim value = "" ->
+    Error (error (path ^ "." ^ key) (key ^ " must be non-empty when present"))
+  | Ok (Some value) when not (String.equal value (String.trim value)) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (key ^ " must not have leading or trailing whitespace"))
+  | Ok (Some value) -> Ok (Some value)
+;;
+
+let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
+    (api_format : Runtime_schema.api_format)
+  : (Runtime_schema.antigravity_cli_options option, parse_error list) result
+  =
+  match api_format with
+  | Antigravity_cli_runtime ->
+    let authority_error =
+      List.find_opt
+        (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
+        antigravity_forbidden_option_keys
+      |> Option.map (fun key ->
+        error
+          (path ^ "." ^ key)
+          (Printf.sprintf "unsupported antigravity-cli provider field %S" key))
+    in
+    (match authority_error with
+     | Some error -> Error error
+     | None ->
+    let agent_result = antigravity_optional_string ~path tbl "agent" in
+    let effort_result = antigravity_optional_string ~path tbl "effort" in
+    (* [add-dirs] entries must be absolute: the CLI resolves a relative
+       [--add-dir] against its own cwd, which is the keeper base path, so a
+       relative entry silently names a path inside the base the operator did
+       not mean. Reject at load instead. *)
+    let add_dirs_result =
+      match Otoml.find_opt tbl Fun.id [ "add-dirs" ] with
+      | None -> Ok []
+      | Some (Otoml.TomlArray entries) ->
+        let dirs, errs =
+          List.fold_left
+            (fun (dirs, errs) entry ->
+               match entry with
+               | Otoml.TomlString value when String.trim value = "" ->
+                 dirs, errs @ error (path ^ ".add-dirs") "add-dirs entries must be non-empty"
+               | Otoml.TomlString value when Filename.is_relative value ->
+                 ( dirs
+                 , errs
+                   @ error
+                       (path ^ ".add-dirs")
+                       (Printf.sprintf
+                          "add-dirs entries must be absolute paths, got %S"
+                          value) )
+               | Otoml.TomlString value -> dirs @ [ value ], errs
+               | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+               | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+               | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+               | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> dirs, errs @ error (path ^ ".add-dirs") "add-dirs entries must be strings")
+            ([], [])
+            entries
+        in
+        (match errs with
+         | [] -> Ok dirs
+         | errs -> Error errs)
+      | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+      | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+      | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+      | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _)
+      | Some (Otoml.TomlTableArray _) -> Error (error (path ^ ".add-dirs") "add-dirs must be an array of strings")
+    in
+    let timeout_result =
+      match
+        strict_float_find path tbl "timeout-s"
+        |> positive_finite_float_opt_field ~path ~key:"timeout-s"
+      with
+      | Error _ as error -> error
+      | Ok None ->
+        Error
+          (error
+             (path ^ ".timeout-s")
+             "timeout-s is required for protocol antigravity-cli")
+      | Ok (Some timeout_s) -> Ok timeout_s
+    in
+    (match agent_result, effort_result, add_dirs_result, timeout_result with
+     | Error errors, _, _, _
+     | _, Error errors, _, _
+     | _, _, Error errors, _
+     | _, _, _, Error errors -> Error errors
+     | Ok agent, Ok effort, Ok add_dirs, Ok timeout_s ->
+       let effort_result =
+         match effort with
+         | None -> Ok None
+         | Some "low" -> Ok (Some Runtime_schema.Antigravity_low)
+         | Some "medium" -> Ok (Some Runtime_schema.Antigravity_medium)
+         | Some "high" -> Ok (Some Runtime_schema.Antigravity_high)
+         | Some value ->
+           Error
+             (error
+                (path ^ ".effort")
+                (Printf.sprintf "effort must be low, medium, or high; got %S" value))
+       in
+       (match effort_result with
+        | Error errors -> Error errors
+        | Ok effort ->
+          Ok (Some { Runtime_schema.agent; effort; timeout_s; add_dirs }))))
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
+  | Codex_app_server_runtime
+  | Claude_code_runtime
+  | Muse_serve_runtime ->
+    (match
+       List.find_opt
+         (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
+         (antigravity_cli_option_keys @ antigravity_forbidden_option_keys)
+     with
+     | None -> Ok None
+     | Some key ->
+       Error
+         (error
+            (path ^ "." ^ key)
+            (Printf.sprintf "%s is valid only for protocol antigravity-cli" key)))
+;;
+
+let usage_read_key = "usage-read"
+let usage_read_refresh_key = "refresh-s"
+let usage_read_keys = [ "shape"; "url"; usage_read_refresh_key ]
+let usage_read_url_scheme = "https"
+
+let usage_read_shape_of_string = function
+  | "openrouter-key" -> Some Runtime_schema.Openrouter_key
+  | "zai-quota-limit" -> Some Runtime_schema.Zai_quota_limit
+  | "kimi-coding-usages" -> Some Runtime_schema.Kimi_coding_usages
+  | "ollama-balance" -> Some Runtime_schema.Ollama_balance
+  | _ -> None
+;;
+
+let usage_read_shape_field ~path tbl =
+  match typed_find "a string" path tbl "shape" Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Error (error (path ^ ".shape") "missing required field 'shape'")
+  | Ok (Some raw) ->
+    (match usage_read_shape_of_string raw with
+     | Some shape -> Ok shape
+     | None ->
+       Error
+         (error
+            (path ^ ".shape")
+            (Printf.sprintf
+               "unknown shape %S — expected one of %s"
+               raw
+               (String.concat
+                  ", "
+                  (List.map
+                     Runtime_schema.usage_read_shape_to_string
+                     Runtime_schema.all_usage_read_shapes)))))
+;;
+
+let non_empty_host uri =
+  match Uri.host uri with
+  | Some host when String.length host > 0 -> Some (String.lowercase_ascii host)
+  | Some _ | None -> None
+;;
+
+(* The read sends the provider's key, so only an absolute https URL is
+   accepted, and only on the host the provider's own [endpoint] names: a typo
+   or another host in [url] would otherwise receive the key on every boot. *)
+let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
+  match typed_find "a string" path tbl "url" Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Error (error (path ^ ".url") "missing required field 'url'")
+  | Ok (Some url) ->
+    let uri = Uri.of_string url in
+    (match Uri.scheme uri, non_empty_host uri with
+     | Some scheme, Some host when String.equal scheme usage_read_url_scheme ->
+       (match transport with
+        | Runtime_schema.Cli _ ->
+          Error
+            (error
+               (path ^ ".url")
+               "usage-read needs a provider with an HTTP endpoint; this one runs a command")
+        | Runtime_schema.Http endpoint ->
+          (match non_empty_host (Uri.of_string endpoint) with
+           | Some endpoint_host when String.equal endpoint_host host -> Ok url
+           | Some endpoint_host ->
+             Error
+               (error
+                  (path ^ ".url")
+                  (Printf.sprintf
+                     "url host %S must be the provider endpoint host %S; the read \
+                      sends the provider's key"
+                     host
+                     endpoint_host))
+           | None ->
+             Error
+               (error
+                  (path ^ ".url")
+                  (Printf.sprintf "the provider endpoint %S has no host" endpoint))))
+     | Some _, (Some _ | None) | None, (Some _ | None) ->
+       Error
+         (error
+            (path ^ ".url")
+            (Printf.sprintf "url must be an absolute https:// URL, got %S" url)))
+;;
+
+(* The read sends the API key the runtime's HTTP execution was built with,
+   and its windows are recorded under the quota scope of that key.  An
+   official-client runtime (Codex, Claude Code, Antigravity, Muse Code) logs
+   in with the vendor's subscription, and its quota scope names no API key
+   (Antigravity's names the OAuth file of that login), so an API-key read
+   there would file one account's usage under another.  Codex and
+   Antigravity are read through their own client instead
+   (Runtime_provider_usage_read). *)
+let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
+  match api_format with
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> []
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Muse_serve_runtime ->
+    error
+      path
+      "usage-read is only for an API-key HTTP provider; this protocol runs an \
+       official client"
+;;
+
+(** Parse [providers.<id>.usage-read]. Every key must be one of
+    {!usage_read_keys}. The read authenticates with the provider's own
+    credentials, so a provider that declares none is refused here rather
+    than sending an unauthenticated request at start. *)
+let parse_usage_read
+    ~(path : string)
+    ~(api_format : Runtime_schema.api_format)
+    ~(credentials : Runtime_schema.credential option)
+    ~(transport : Runtime_schema.transport)
+    (tbl : Otoml.t)
+  : (Runtime_schema.usage_read option, parse_error list) result
+  =
+  let path = path ^ "." ^ usage_read_key in
+  match Otoml.find_opt tbl Fun.id [ usage_read_key ] with
+  | None -> Ok None
+  | Some ((Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as usage_tbl) ->
+    let unknown_key_errors =
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key usage_read_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown usage-read key %S; expected %s"
+                  key
+                  (String.concat ", " usage_read_keys)))
+        entries
+    in
+    let credential_errors =
+      match credentials with
+      | Some _ -> []
+      | None ->
+        error path "usage-read needs the provider's [credentials]; none are declared"
+    in
+    let execution_errors = usage_read_execution_errors ~path api_format in
+    let refresh_result =
+      strict_float_find path usage_tbl usage_read_refresh_key
+      |> positive_finite_float_opt_field ~path ~key:usage_read_refresh_key
+    in
+    (match
+       ( unknown_key_errors @ execution_errors @ credential_errors
+       , usage_read_shape_field ~path usage_tbl
+       , usage_read_url_field ~path ~transport usage_tbl
+       , refresh_result )
+     with
+     | [], Ok shape, Ok url, Ok refresh_s ->
+       Ok (Some { Runtime_schema.shape; url; refresh_s })
+     | ( ([] | _ :: _) as errors
+       , ((Ok _ | Error _) as shape)
+       , ((Ok _ | Error _) as url)
+       , ((Ok _ | Error _) as refresh) ) ->
+       let field_errors = function
+         | Ok _ -> []
+         | Error errors -> errors
+       in
+       Error (errors @ field_errors shape @ field_errors url @ field_errors refresh))
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (error path "usage-read must be a TOML table")
+;;
+
+let positive_int_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (int option, parse_error list) result
+  =
+  match typed_find "an integer" path tbl key Otoml.get_integer with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value > 0 -> Ok (Some value)
+  | Ok (Some value) ->
+       Error
+         (error
+            (path ^ "." ^ key)
+            (Printf.sprintf
+               "%s must be a positive integer; got %d"
+               key
+               value))
+;;
+
+(* This is the provider table's field contract. Nested tables retain their
+   own decoders; arbitrary HTTP header names are not provider keys. Model-set
+   is consumed later when bindings are materialized and still belongs here. *)
+let provider_keys =
+  [ "enabled"; "display-name"; "provider-name"; "protocol"; "endpoint"; "command"
+  ; "is-non-interactive"; "credentials"; "capabilities"; "healthcheck"; "headers"
+  ; "kind"; "max-context"; "account-home"; "request-path"; "model-set"; usage_read_key
+  ; Runtime_schema.connect_timeout_s_key; Runtime_schema.exact_body_timeout_s_key
+  ; Runtime_schema.admission_priority_run_limit_key
+  ] @ antigravity_cli_option_keys @ antigravity_forbidden_option_keys
+;;
+
+let parse_provider (id : string) (tbl : Otoml.t)
+  : (Runtime_schema.provider, parse_error list) result
+  =
+  let path = Ns.(path Providers) id in
+  let ( let* ) = Result.bind in
+  let* () =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      (match unknown_table_keys ~path ~expected:provider_keys entries with
+       | [] -> Ok ()
+       | errors -> Error errors)
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error (error path "provider must be a TOML table")
+  in
+  let enabled_result =
+    typed_find "a boolean" path tbl "enabled" Otoml.get_boolean
+  in
+  let display_name_result =
+    match
+      ( typed_find "a string" path tbl "display-name" Otoml.get_string
+      , typed_find "a string" path tbl "provider-name" Otoml.get_string )
+    with
+    | Error errors, _ | _, Error errors -> Error errors
+    | Ok (Some name), Ok _ | Ok None, Ok (Some name) -> Ok name
+    | Ok None, Ok None -> Ok id
+  in
+  let protocol_result =
+    match typed_find "a string" path tbl "protocol" Otoml.get_string with
+    | Error errors -> Error errors
+    | Ok None -> Error (error (path ^ ".protocol") "missing required field 'protocol'")
+    | Ok (Some p) ->
+      Result.map_error
+        (fun detail -> error (path ^ ".protocol") detail)
+        (Runtime_protocol.resolve p)
+  in
+  let transport_result = transport_of_provider ~path tbl id in
+  match display_name_result, protocol_result, transport_result with
+  | Error errors, _, _ | _, Error errors, _ | _, _, Error errors -> Error errors
+  | Ok display_name, Ok (protocol, api_format), Ok transport ->
+    let request_path_result =
+      match typed_find "a string" path tbl "request-path" Otoml.get_string with
+      | Error _ as error -> error
+      | Ok None -> Ok None
+      | Ok (Some value) ->
+        let uri = Uri.of_string value in
+        (match transport with
+         | Http _ when value <> "" && value.[0] = '/'
+             && Uri.scheme uri = None && Uri.host uri = None
+             && Uri.query uri = [] && Uri.fragment uri = None
+             && not (String.exists (function '\000'..'\032' | '\127' -> true | _ -> false) value) ->
+           Ok (Some value)
+         | Http _ | Cli _ -> Error (error (path ^ ".request-path")
+             "request-path must be an HTTP endpoint-relative absolute path without query or fragment"))
+    in
+    let account_home_result =
+      match typed_find "a string" path tbl "account-home" Otoml.get_string with
+      | Error errors -> Error errors
+      | Ok None -> Ok None
+      | Ok (Some home) ->
+        (match api_format with
+         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime
+           when Runtime_account_home.is_valid home -> Ok (Some home)
+         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime ->
+           Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
+         | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
+         | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
+         | Runtime_schema.Antigravity_cli_runtime -> Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
+    in
+    let is_non_interactive_result =
+      typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false
+    in
+    let credentials_result =
+      match Otoml.find_opt tbl Fun.id [ "credentials" ] with
+      | Some cred_tbl ->
+        Result.map Option.some (parse_credential cred_tbl (path ^ ".credentials"))
+      | None -> Ok None
+    in
+    let antigravity_cli_result = antigravity_cli_options ~path tbl api_format in
+    (match credentials_result, antigravity_cli_result with
+     | Error errs, _ | _, Error errs -> Error errs
+     | Ok credentials, Ok antigravity_cli ->
+       let capabilities_result =
+         match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
+         | None -> Ok None
+         | Some capabilities_tbl ->
+           Result.map Option.some (parse_capabilities ~path capabilities_tbl)
+       in
+       let healthcheck_result =
+         match Otoml.find_opt tbl Fun.id [ "healthcheck" ] with
+         | None -> Ok None
+         | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as healthcheck_tbl) ->
+           (match
+              typed_find
+                "a string"
+                (path ^ ".healthcheck")
+                healthcheck_tbl
+                "path"
+                Otoml.get_string
+            with
+            | Error _ as error -> error
+            | Ok None -> Ok None
+            | Ok (Some healthcheck_path) when String.length healthcheck_path > 0
+                                           && Char.equal healthcheck_path.[0] '/' ->
+              Ok (Some healthcheck_path)
+            | Ok (Some healthcheck_path) ->
+              Error
+                (error
+                   (path ^ ".healthcheck.path")
+                   (Printf.sprintf
+                      "healthcheck.path must be absolute, got %S"
+                      healthcheck_path)))
+         | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+         | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+         | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+         | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
+           Error
+             (error (path ^ ".healthcheck") "healthcheck must be a TOML table")
+       in
+       let usage_read_result = parse_usage_read ~path ~api_format ~credentials ~transport tbl in
+       let headers =
+         match Otoml.find_opt tbl Fun.id [ "headers" ] with
+         | None -> None
+         | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
+       in
+       (* Optional per-provider bound on the phase before the response headers
+          (agent-core boundary). There is no kind-based default behind it:
+          [resolve_explicit_deadline] maps [None] to [Unbounded]
+          (http_client.ml). A keeper turn is still bounded by the keeper's
+          first-event budget, but an exact-output slot is not, which is why
+          plan admission refuses a target carrying neither deadline. *)
+       (* The dialect an endpoint speaks, for an endpoint AGENT_CORE has no
+          provider row for. Only [protocol] is required: it names the request
+          shape, and for a catalogued provider the catalog row names the
+          dialect. The two are not the same fact — glm-coding speaks GLM over
+          an OpenAI-compatible shape — so an uncatalogued endpoint has to say
+          which one it is or nothing can choose its capability base. *)
+       let wire_kind_result =
+         match typed_find "a string" path tbl "kind" Otoml.get_string with
+         | Error errors -> Error errors
+         | Ok None -> Ok None
+         | Ok (Some raw) ->
+           (match Llm_provider.Provider_config.provider_kind_of_string raw with
+            | Some kind -> Ok (Some kind)
+            | None ->
+              Error
+                (error
+                   (path ^ ".kind")
+                   (Printf.sprintf
+                      "unknown kind %S — expected one of %s"
+                      raw
+                      (String.concat
+                         ", "
+                         (List.map
+                            Llm_provider.Provider_config.string_of_provider_kind
+                            Llm_provider.Provider_config.all_provider_kinds)))))
+       in
+       let connect_timeout_key = Runtime_schema.connect_timeout_s_key in
+       let connect_timeout_result =
+         strict_float_find path tbl connect_timeout_key
+         |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
+       in
+       let exact_body_timeout_key = Runtime_schema.exact_body_timeout_s_key in
+       let exact_body_timeout_result =
+         strict_float_find path tbl exact_body_timeout_key
+         |> positive_finite_float_opt_field ~path ~key:exact_body_timeout_key
+       in
+       (let ( let* ) = Result.bind in
+        let* max_context = positive_int_opt_field ~path ~key:"max-context" tbl in
+        let* admission_priority_run_limit =
+          positive_int_opt_field ~path ~key:Runtime_schema.admission_priority_run_limit_key tbl
+        in
+        let* capabilities = capabilities_result in
+        let* enabled_opt = enabled_result in
+        let* healthcheck_path = healthcheck_result in
+        let* connect_timeout_s = connect_timeout_result in
+        let* exact_body_timeout_s = exact_body_timeout_result in
+        let* is_non_interactive = is_non_interactive_result in
+        let* wire_kind = wire_kind_result in
+        let* request_path = request_path_result in
+        let* account_home = account_home_result in
+        let* usage_read = usage_read_result in
+          let enabled = match enabled_opt with Some value -> value | None -> true in
+          Ok
+            { Runtime_schema.id
+            ; enabled
+            ; display_name
+            ; protocol
+            ; api_format
+            ; wire_kind
+            ; request_path
+            ; transport
+            ; is_non_interactive
+            ; credentials
+            ; max_context
+            ; account_home
+            ; capabilities
+            ; healthcheck_path
+            ; headers
+            ; connect_timeout_s
+            ; exact_body_timeout_s
+            ; admission_priority_run_limit
+            ; antigravity_cli
+            ; usage_read
+            }))
+;;
+
+let parse_providers (toml : Otoml.t)
+  : (Runtime_schema.provider list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Providers) ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results
+      (List.map
+         (fun (id, tbl) ->
+            match
+              validate_provider_id ~path:(Ns.(path Providers) id) id
+            with
+            | Error _ as error -> error
+            | Ok () -> parse_provider id tbl)
+         entries)
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (error (Ns.(key Providers)) "[providers] must be a TOML table")
+;;
+
+(* --- Layer 2: Models --- *)
+
+let thinking_control_token_key = "thinking-control-token"
+
+let exact_non_empty_string_opt_field ~(path : string) (tbl : Otoml.t) (key : string)
+  : (string option, parse_error list) result
+  =
+  match typed_find "a string" path tbl key Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when String.trim value = "" ->
+    Error (error (path ^ "." ^ key) (key ^ " must be non-empty"))
+  | Ok (Some value) when value <> String.trim value ->
+    Error (error (path ^ "." ^ key) (key ^ " must not have leading or trailing whitespace"))
+  | Ok (Some value) -> Ok (Some value)
+;;
+
+let parse_thinking_control_format ~(path : string) ~(token : string option) (raw : string)
+  : (Runtime_schema.thinking_control_format, parse_error list) result
+  =
+  (* Mirrors the AGENT_CORE catalog contract (agent-core boundary): [Chat_template_token]
+     carries its token, so a chat-template-token declaration without a
+     [thinking-control-token] key — or a blank/padded token, or a token on a
+     non-token format — fails the load instead of detonating per request. *)
+  let reject_orphan_token format =
+    match token with
+    | None -> Ok format
+    | Some _ ->
+      Error
+        (error
+           (path ^ "." ^ thinking_control_token_key)
+           (Printf.sprintf
+              "thinking-control-token is only valid with \
+               thinking-control-format = \"chat-template-token\" (got %S)"
+              raw))
+  in
+  match String.lowercase_ascii (String.trim raw) with
+  | "" | "none" | "no-thinking-control" | "no_thinking_control" ->
+    reject_orphan_token Runtime_schema.No_thinking_control
+  | "thinking-object" | "thinking_object" ->
+    reject_orphan_token Runtime_schema.Thinking_object
+  | "thinking-object-adaptive" | "thinking_object_adaptive" ->
+    reject_orphan_token Runtime_schema.Thinking_object_adaptive
+  | "thinking-object-only" | "thinking_object_only" ->
+    reject_orphan_token Runtime_schema.Thinking_object_only
+  | "chat-template-kwargs" | "chat_template_kwargs" ->
+    reject_orphan_token Runtime_schema.Chat_template_kwargs
+  | "chat-template-token" | "chat_template_token" ->
+    (match token with
+     | Some t when String.trim t = t && t <> "" ->
+       Ok (Runtime_schema.Chat_template_token t)
+     | Some _ ->
+       Error
+         (error
+            (path ^ "." ^ thinking_control_token_key)
+            "thinking-control-token must be a non-empty string without \
+             leading or trailing whitespace")
+     | None ->
+       Error
+         (error
+            (path ^ ".thinking-control-format")
+            "chat-template-token requires a thinking-control-token key \
+             naming the template token (e.g. \"<|think|>\")"))
+  | "ollama-think" | "ollama_think" -> reject_orphan_token Runtime_schema.Ollama_think
+  | "reasoning-effort" | "reasoning_effort" ->
+    reject_orphan_token Runtime_schema.Reasoning_effort
+  | "reasoning-effort-default-on" | "reasoning_effort_default_on" ->
+    reject_orphan_token Runtime_schema.Reasoning_effort_default_on
+  | other ->
+    (* Unknown enum members fail the load, mirroring how this parser already
+       rejects unknown protocols / credential types. A silent downgrade to
+       No_thinking_control hid config typos that disable thinking control for a
+       model that needs it. *)
+    Error
+      (error
+         (path ^ ".thinking-control-format")
+         (Printf.sprintf
+            "unknown thinking-control-format %S — expected one of \
+             none|thinking-object|thinking-object-adaptive|thinking-object-only|chat-template-kwargs|chat-template-token|ollama-think|reasoning-effort|reasoning-effort-default-on"
+            other))
+;;
+
+(* Keys under [models.*.capabilities] a released masc once read and no longer
+   reads. Recognized rather than rejected so a capabilities table written by
+   an older build does not refuse every save of the file (#45985); exact-name
+   matching keeps the misspelt-key typo guard whole. The value is ignored. *)
+let legacy_model_capability_keys = [ "supports-reasoning-budget" ]
+
+let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
+  : (Runtime_schema.model_capabilities, parse_error list) result
+  =
+  let keys =
+    [ "max-output-tokens"
+    ; "thinking-control-format"
+    ; thinking_control_token_key
+    ; "anthropic-thinking-control"
+    ; "reasoning-streaming-format"
+    ; "supports-tool-choice"
+    ; "supports-required-tool-choice"
+    ; "supports-named-tool-choice"
+    ; "supports-parallel-tool-calls"
+    ; "supports-image-input"
+    ; "supports-audio-input"
+    ; "supports-video-input"
+    ; "supports-multimodal-inputs"
+    ; "supports-response-format-json"
+    ; "supports-structured-output"
+    ; "supports-system-prompt"
+    ; "supports-assistant-prefill"
+    ; "supports-prompt-caching"
+    ; "supports-top-k"
+    ; "supports-min-p"
+    ; "supports-seed"
+    ; "emits-usage-tokens"
+    ]
+  in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key keys
+           then []
+           else if List.mem key legacy_model_capability_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown model capabilities key %S; expected %s"
+                  key
+                  (String.concat ", " keys)))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+    | Otoml.TomlTableArray _ -> error path "capabilities must be a TOML table"
+  in
+  let ( let* ) = Result.bind in
+  let* () =
+    match unknown_key_errors with
+    | [] -> Ok ()
+    | errors -> Error errors
+  in
+  (* Exact TOML presence: [None] is "the operator wrote nothing here", which
+     each consumer resolves against the layer it owns. A [false] default here
+     made an unwritten key indistinguishable from a written [false] (#37435). *)
+  let b key = typed_find "a boolean" path tbl key Otoml.get_boolean in
+  let reasoning_streaming_format_result =
+    match typed_find "a string" path tbl "reasoning-streaming-format" Otoml.get_string with
+    | Error errors -> Error errors
+    | Ok None -> Ok None
+    | Ok (Some raw) ->
+      (match Llm_provider.Capability_vocab.reasoning_streaming_format_of_string raw with
+       | Some format -> Ok (Some format)
+       | None ->
+         Error
+           (error
+              (path ^ ".reasoning-streaming-format")
+              (Printf.sprintf
+                 "unknown reasoning-streaming-format %S — expected %s"
+                 raw
+                 Llm_provider.Capability_vocab.reasoning_streaming_format_syntax)))
+  in
+  let anthropic_thinking_control_result =
+    match typed_find "a string" path tbl "anthropic-thinking-control" Otoml.get_string with
+    | Error errors -> Error errors
+    | Ok None -> Ok None
+    | Ok (Some raw) ->
+      (* Both spellings, like the sibling thinking-control-format: the catalog
+         vocabulary is underscore-joined, the dashboard projection is
+         hyphen-joined, and either must round-trip through this parser. *)
+      let normalized = String.map (fun c -> if Char.equal c '-' then '_' else c) raw in
+      (match Llm_provider.Capability_vocab.anthropic_thinking_control_of_string normalized with
+       | Some policy ->
+         Ok (Some (Llm_provider.Capabilities.anthropic_thinking_control_of_vocab_value policy))
+       | None ->
+         Error
+           (error
+              (path ^ ".anthropic-thinking-control")
+              (Printf.sprintf
+                 "unknown anthropic-thinking-control %S — expected %s"
+                 raw
+                 (String.concat
+                    "|"
+                    Llm_provider.Capability_vocab.anthropic_thinking_control_values))))
+  in
+  let positive_int_opt_field key =
+    match typed_find "an integer" path tbl key Otoml.get_integer with
+    | Error _ as error -> error
+    | Ok None -> Ok None
+    | Ok (Some n) when n > 0 -> Ok (Some n)
+    | Ok (Some n) ->
+      Log.Runtime.warn "runtime_toml: %s.capabilities.%s = %d — expected positive integer, ignoring"
+          path
+          key
+          n;
+      Ok None
+  in
+  let thinking_control_format_result =
+    match
+      ( typed_find "a string" path tbl "thinking-control-format" Otoml.get_string
+      , exact_non_empty_string_opt_field ~path tbl thinking_control_token_key )
+    with
+    | Error errs, _ | _, Error errs -> Error errs
+    | Ok None, Ok token ->
+      (match token with
+       | None -> Ok Runtime_schema.No_thinking_control
+       | Some _ ->
+         Error
+           (error
+              (path ^ "." ^ thinking_control_token_key)
+              "thinking-control-token requires thinking-control-format = \
+               \"chat-template-token\""))
+    | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
+  in
+  let* thinking_control_format = thinking_control_format_result in
+  let* reasoning_streaming_format = reasoning_streaming_format_result in
+  let* anthropic_thinking_control = anthropic_thinking_control_result in
+  let* max_output_tokens = positive_int_opt_field "max-output-tokens" in
+  let* supports_tool_choice = b "supports-tool-choice" in
+  let* supports_required_tool_choice = b "supports-required-tool-choice" in
+  let* supports_named_tool_choice = b "supports-named-tool-choice" in
+  let* supports_parallel_tool_calls = b "supports-parallel-tool-calls" in
+  let* supports_image_input = b "supports-image-input" in
+  let* supports_audio_input = b "supports-audio-input" in
+  let* supports_video_input = b "supports-video-input" in
+  let* supports_multimodal_inputs = b "supports-multimodal-inputs" in
+  let* supports_response_format_json = b "supports-response-format-json" in
+  let* supports_structured_output = b "supports-structured-output" in
+  let* supports_system_prompt = b "supports-system-prompt" in
+  let* supports_assistant_prefill = b "supports-assistant-prefill" in
+  let* supports_prompt_caching = b "supports-prompt-caching" in
+  let* supports_top_k = b "supports-top-k" in
+  let* supports_min_p = b "supports-min-p" in
+  let* supports_seed = b "supports-seed" in
+  let* emits_usage_tokens = b "emits-usage-tokens" in
+  Ok
+    { Runtime_schema.max_output_tokens
+    ; supports_tool_choice
+    ; supports_required_tool_choice
+    ; supports_named_tool_choice
+    ; supports_parallel_tool_calls
+    ; thinking_control_format
+    ; declared_thinking_control_format =
+        (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with
+         | None -> None
+         | Some _ -> Some thinking_control_format)
+    ; anthropic_thinking_control
+    ; reasoning_streaming_format
+    ; supports_image_input
+    ; supports_audio_input
+    ; supports_video_input
+    ; supports_multimodal_inputs
+    ; supports_response_format_json
+    ; supports_structured_output
+    ; supports_system_prompt
+    ; supports_assistant_prefill
+    ; supports_prompt_caching
+    ; supports_top_k
+    ; supports_min_p
+    ; supports_seed
+    ; emits_usage_tokens
+    }
+;;
+
+(* LLM sampling temperature bounds. OpenAI/Kimi/DeepSeek accept [0.0, 2.0]; a
+   value outside this range is a config error, not something to silently clamp.
+   0.0 (greedy) is valid, so temperature is NOT parsed through the
+   positive-float path. *)
+let temperature_min = 0.0
+let temperature_max = 2.0
+let probability_min = 0.0
+let probability_max = 1.0
+
+let number_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  match Otoml.find_opt tbl Fun.id [ key ] with
+  | None -> Ok None
+  | Some value ->
+    let as_float =
+      match value with
+      | Otoml.TomlFloat v -> Some v
+      | Otoml.TomlInteger v -> Some (float_of_int v)
+      | Otoml.TomlString _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+      | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+      | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> None
+    in
+    (match as_float with
+     | None -> Error (error (path ^ "." ^ key) (key ^ " must be a number"))
+     | Some value -> Ok (Some value))
+;;
+
+let bounded_number_opt_field
+      ~(path : string)
+      ~(key : string)
+      ~(lower : float)
+      ~(upper : float)
+      (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  match number_opt_field ~path ~key tbl with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when Float.is_finite value && value >= lower && value <= upper ->
+    Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf
+            "%s must be a finite number in [%g, %g]; got %g"
+            key
+            lower
+            upper
+            value))
+;;
+
+(* Read the optional per-model [reasoning-effort]. Parsed into the typed
+   effort at load time rather than carried as a string: an unknown value is
+   an operator typo, and rejecting it here means no later consumer has to
+   decide what an unparseable effort means. *)
+let reasoning_effort_opt_field ~(path : string) (tbl : Otoml.t)
+  : (Llm_provider.Reasoning_effort.t option, parse_error list) result
+  =
+  match typed_find "a string" path tbl "reasoning-effort" Otoml.get_string with
+  | Error errors -> Error errors
+  | Ok None -> Ok None
+  | Ok (Some raw) ->
+    (match Llm_provider.Reasoning_effort.of_string raw with
+     | Some effort -> Ok (Some effort)
+     | None ->
+       Error
+         [ { path
+           ; message =
+               Printf.sprintf
+                 "reasoning-effort %S is not a known effort; expected one of %s"
+                 raw
+                 Llm_provider.Reasoning_effort.values_for_log
+           }
+         ])
+;;
+
+(* Read the optional per-model [turn-timeout-s]. Named distinctly from the
+   antigravity provider key [timeout-s] because the two sit at different layers
+   and the model value wins: an operator reading a config with both should be
+   able to tell which one bounds the turn without consulting the resolver. *)
+(* Unlike the other float fields, [0] is meaningful here rather than invalid:
+   it declares that no deadline is installed, so the spawned client decides
+   when its own turn ends. Absent stays distinct from [0] — absent keeps the
+   adapter default, [0] removes the bound — so the two cannot be confused
+   downstream. Negative and non-finite remain rejected. *)
+let turn_timeout_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  match number_opt_field ~path ~key:"turn-timeout-s" tbl with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value >= 0.0 && Float.is_finite value -> Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ ".turn-timeout-s")
+         (Printf.sprintf
+            "turn-timeout-s must be a non-negative finite number (0 removes \
+             the deadline), got %g"
+            value))
+;;
+
+
+(* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
+   both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
+   [Ok None] (caller keeps its fallback). Wrong type or out of
+   [temperature_min, temperature_max] → parse error: reject at load rather than
+   send an out-of-range value the provider would reject at request time. *)
+let temperature_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  bounded_number_opt_field
+    ~path
+    ~key:"temperature"
+    ~lower:temperature_min
+    ~upper:temperature_max
+    tbl
+;;
+
+let probability_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  bounded_number_opt_field
+    ~path
+    ~key
+    ~lower:probability_min
+    ~upper:probability_max
+    tbl
+;;
+
+let sampling_capability_errors
+      ~(path : string)
+      ~(capabilities : Runtime_schema.model_capabilities option)
+      ~(top_k : int option)
+      ~(min_p : float option)
+  : parse_error list
+  =
+  match capabilities with
+  | None -> []
+  | Some capabilities ->
+    (* A declaration-layer question: did the operator authorize this sampling
+       field for this model? Not declared is not authorized, exactly as before
+       #37435 — the wire's preset does not answer it, because the operator is
+       the one asserting the model accepts the field. *)
+    let sampling_error ~key ~declared =
+      match declared with
+      | Some true -> []
+      | Some false ->
+        error
+          (path ^ "." ^ key)
+          (Printf.sprintf "%s is set but %s.capabilities.supports-%s is false" key path key)
+      | None ->
+        error
+          (path ^ "." ^ key)
+          (Printf.sprintf
+             "%s is set but %s.capabilities.supports-%s is not declared"
+             key
+             path
+             key)
+    in
+    let top_k_errors =
+      match top_k with
+      | Some _ -> sampling_error ~key:"top-k" ~declared:capabilities.supports_top_k
+      | None -> []
+    in
+    let min_p_errors =
+      match min_p with
+      | Some _ -> sampling_error ~key:"min-p" ~declared:capabilities.supports_min_p
+      | None -> []
+    in
+    top_k_errors @ min_p_errors
+;;
+
+(* Every key [parse_model] reads. Any other key fails the load: a misspelt
+   [tools_support = true] would otherwise load as a model without tool
+   support and the keeper would run with an empty tool list. *)
+let model_keys =
+  [ "api-name"
+  ; "model-name"
+  ; "max-context"
+  ; "tools-support"
+  ; "thinking-support"
+  ; "preserve-thinking"
+  ; "streaming"
+  ; "capabilities"
+  ; "temperature"
+  ; "top-p"
+  ; "top-k"
+  ; "min-p"
+  ; "reasoning-effort"
+  ; "reasoning-uncontrolled"
+  ; "turn-timeout-s"
+  ]
+;;
+
+(* Keys a released masc once read from [models.*] and no longer reads. They
+   are recognized rather than rejected so an operator's file written by an
+   older build still saves: a save revalidates the whole file, and one dead
+   key anywhere in it would otherwise refuse every unrelated edit (#45985).
+   Recognition is by exact name, not a prefix rule, so a genuinely misspelt
+   key still fails the load with the "unknown key" the typo guard exists to
+   give. The value is ignored -- the semantics moved to [max-context] in
+   18b85e62df -- and [ignored_legacy_model_keys] says it was seen. *)
+let legacy_model_keys = [ "max-prompt-bytes" ]
+
+let model_unknown_key_errors ~path (tbl : Otoml.t) =
+  match tbl with
+  | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+    List.concat_map
+      (fun (key, _) ->
+         if List.mem key model_keys
+         then []
+         else if List.mem key legacy_model_keys
+         then []
+         else
+           error
+             (path ^ "." ^ key)
+             (Printf.sprintf
+                "unknown model key %S; expected one of %s"
+                key
+                (String.concat ", " model_keys)))
+      entries
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ ->
+    error path (Printf.sprintf "[%s] must be a TOML table" path)
+;;
+
+let parse_model (id : string) (tbl : Otoml.t)
+  : (Runtime_schema.model_spec, parse_error list) result
+  =
+  let path = Ns.(path Models) id in
+  match model_unknown_key_errors ~path tbl with
+  | _ :: _ as errors -> Error errors
+  | [] ->
+  let api_name_result =
+    match
+      ( typed_find "a string" path tbl "api-name" Otoml.get_string
+      , typed_find "a string" path tbl "model-name" Otoml.get_string )
+    with
+    | Error errors, _ | _, Error errors -> Error errors
+    | Ok (Some name), Ok _ | Ok None, Ok (Some name) -> Ok name
+    | Ok None, Ok None -> Ok id
+  in
+  (* [max-context] is an explicit operator override, not a required field: a
+     runtime whose model is covered by the AGENT_CORE capability catalog can leave it
+     unset and inherit the catalog's max-context (see
+     [Runtime_instance.resolve_max_context_of_runtime]). An operator-supplied value
+     must still be positive; [materialize_config] fail-closes at load time on
+     a runtime that resolves neither source (RFC-0206 §2.1). *)
+  let max_context_result = positive_int_opt_field ~path ~key:"max-context" tbl in
+  (
+    let tools_support_result =
+      typed_find_or "a boolean" path tbl "tools-support" Otoml.get_boolean ~default:false
+    in
+    let thinking_support_result =
+      typed_find "a boolean" path tbl "thinking-support" Otoml.get_boolean
+    in
+    let preserve_thinking_result =
+      typed_find "a boolean" path tbl "preserve-thinking" Otoml.get_boolean
+    in
+    let streaming_result =
+      typed_find_or "a boolean" path tbl "streaming" Otoml.get_boolean ~default:true
+    in
+    let capabilities_result =
+      match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
+      | None -> Ok None
+      | Some t ->
+        Result.map Option.some (parse_model_capabilities ~path:(path ^ ".capabilities") t)
+    in
+    let temperature_result = temperature_opt_field ~path tbl in
+    let top_p_result = probability_opt_field ~path ~key:"top-p" tbl in
+    let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
+    let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
+    let reasoning_effort_result = reasoning_effort_opt_field ~path tbl in
+    let reasoning_uncontrolled_result =
+      typed_find_or
+        "a boolean"
+        path
+        tbl
+        "reasoning-uncontrolled"
+        Otoml.get_boolean
+        ~default:false
+    in
+    let turn_timeout_result = turn_timeout_opt_field ~path tbl in
+    let ( let* ) = Result.bind in
+    let* api_name = api_name_result in
+    let* tools_support = tools_support_result in
+    let* thinking_support = thinking_support_result in
+    let* preserve_thinking = preserve_thinking_result in
+    let* streaming = streaming_result in
+    let* max_context = max_context_result in
+    let* capabilities = capabilities_result in
+    let* temperature = temperature_result in
+    let* top_p = top_p_result in
+    let* top_k = top_k_result in
+    let* min_p = min_p_result in
+    let* reasoning_effort = reasoning_effort_result in
+    let* reasoning_uncontrolled = reasoning_uncontrolled_result in
+    (* A row that names an effort and also says it sends no control asks for
+       two different requests, and nothing downstream can honour both. Letting
+       one silently win is how a lane ends up reasoning while the config reads
+       as if it does not, which is the confusion this key exists to remove. *)
+    let* () =
+      match reasoning_effort, reasoning_uncontrolled with
+      | Some _, true ->
+        Error
+          (error
+             (path ^ ".reasoning-uncontrolled")
+             "reasoning-uncontrolled cannot sit on a model that also declares \
+              reasoning-effort: one sends the declared effort, the other sends \
+              no control at all")
+      | Some _, false | None, (true | false) -> Ok ()
+    in
+    let* turn_timeout_s = turn_timeout_result in
+    match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
+    | _ :: _ as errors -> Error errors
+    | [] ->
+      Ok
+        { Runtime_schema.id
+        ; api_name
+        ; tools_support
+        ; max_context
+        ; thinking_support
+        ; preserve_thinking
+        ; streaming
+        ; temperature
+        ; top_p
+        ; top_k
+        ; min_p
+        ; reasoning_effort
+        ; reasoning_uncontrolled
+        ; turn_timeout_s
+        ; capabilities        })
+;;
+
+let parse_models (toml : Otoml.t)
+  : (Runtime_schema.model_spec list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Models) ] with
+  | None -> Ok []
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (error (Ns.(key Models)) "[models] must be a TOML table")
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results
+      (List.map
+         (fun (id, tbl) ->
+            match
+              validate_runtime_id_component
+                ~allow_dot:true
+                ~kind:"model"
+                ~path:(Ns.(path Models) id)
+                id
+            with
+            | Error _ as error -> error
+            | Ok () -> parse_model id tbl)
+         entries)
+;;
+
+(* --- [exec.ssh.endpoints] registry (Phase 1 SSH lane, spec §4.2) --- *)
+
+let exec_ssh_endpoint_keys =
+  [ "host"
+  ; "user"
+  ; "port"
+  ; "identity_file"
+  ; "known_hosts_file"
+  ; "remote_root"
+  ; "connect_timeout_sec"
+  ; "max_concurrent_sessions"
+  ; "env_allowlist"
+  ; "capabilities"
+  ; "private_home"
+  ; "allowed_paths"
+  ]
+;;
+
+(* Required endpoint strings reject surrounding whitespace rather than
+   storing padding verbatim — symmetric with [exact_non_empty_string_opt_field]
+   on the optional fields of the same record. *)
+let exec_ssh_required_string ~(path : string) (tbl : Otoml.t) ~(key : string)
+  : (string, parse_error list) result
+  =
+  match
+    required_non_empty_string
+      tbl
+      ~path
+      ~key
+      ~message:(Printf.sprintf "endpoint requires non-empty '%s'" key)
+  with
+  | Error _ as error -> error
+  | Ok value when value <> String.trim value ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (key ^ " must not have leading or trailing whitespace"))
+  | Ok value -> Ok value
+;;
+
+(* The shim maps keeper paths under [remote_root] (spec §4.2 path mapping); a
+   relative root would make that translation cwd-dependent, so the value is
+   rejected at load — the same fail-closed shape as the [healthcheck.path must
+   be absolute] check in [parse_provider]. *)
+let exec_ssh_remote_root_field ~(path : string) (tbl : Otoml.t)
+  : (string, parse_error list) result
+  =
+  (* Non-emptiness is proven by [exec_ssh_required_string], so the [0] index
+     cannot raise. *)
+  match exec_ssh_required_string ~path tbl ~key:"remote_root" with
+  | Error _ as error -> error
+  | Ok remote_root when Char.equal remote_root.[0] '/' -> Ok remote_root
+  | Ok remote_root ->
+    Error
+      (error
+         (path ^ ".remote_root")
+         (Printf.sprintf "remote_root must be absolute, got %S" remote_root))
+;;
+
+(* ssh accepts ports 1..65535; [positive_int_opt_field] covers the lower
+   bound, this adds the upper one so a typo is a load error instead of a
+   dispatch-time ssh failure. *)
+let exec_ssh_port_field ~(path : string) (tbl : Otoml.t)
+  : (int option, parse_error list) result
+  =
+  match positive_int_opt_field ~path ~key:"port" tbl with
+  | Error _ as error -> error
+  | Ok (Some port) when port > 65535 ->
+    Error
+      (error
+         (path ^ ".port")
+         (Printf.sprintf "port must be in 1..65535; got %d" port))
+  | Ok port -> Ok port
+;;
+
+(* One [allowed_paths] entry names an endpoint-side root that Execute path
+   checks compare lexically (the endpoint may be another machine, so the host
+   cannot resolve it). The entry must therefore already be in the form the
+   comparison needs: absolute, with no empty, [.] or [..] segment (so no
+   trailing or doubled '/'), and not [/] itself, which would lift the
+   boundary entirely. *)
+let exec_ssh_allowed_path_error (value : string) : string option =
+  if String.equal value "" || not (Char.equal value.[0] '/')
+  then Some "must be absolute"
+  else if String.equal value "/"
+  then Some "must not be the filesystem root"
+  else (
+    let segments =
+      String.split_on_char '/' (String.sub value 1 (String.length value - 1))
+    in
+    if
+      List.exists
+        (fun segment ->
+           String.equal segment ""
+           || String.equal segment "."
+           || String.equal segment "..")
+        segments
+    then Some "must be normalized (no empty, '.' or '..' segment, no trailing '/')"
+    else None)
+;;
+
+(* The roots belong to the endpoint, not to one keeper: every keeper on it
+   under [remote_root] may name them. A root that is [remote_root] or one of
+   its ancestors would therefore let each keeper name the others' areas. *)
+let exec_ssh_allowed_path_covers_remote_root ~remote_root value =
+  let rec strip_trailing_slash dir =
+    let n = String.length dir in
+    if n > 1 && Char.equal dir.[n - 1] '/'
+    then strip_trailing_slash (String.sub dir 0 (n - 1))
+    else dir
+  in
+  let remote_root = strip_trailing_slash remote_root in
+  String.equal value remote_root
+  || String.starts_with ~prefix:(value ^ "/") remote_root
+;;
+
+let exec_ssh_allowed_paths_field ~(path : string) (tbl : Otoml.t)
+  : (string list, parse_error list) result
+  =
+  match
+    typed_find
+      "an array of strings"
+      path
+      tbl
+      "allowed_paths"
+      (Otoml.get_array Otoml.get_string)
+  with
+  | Error _ as err -> err
+  | Ok None -> Ok []
+  | Ok (Some values) ->
+    let entry_errors =
+      List.concat
+        (List.mapi
+           (fun index value ->
+              match exec_ssh_allowed_path_error value with
+              | None -> []
+              | Some reason ->
+                error
+                  (Printf.sprintf "%s.allowed_paths[%d]" path index)
+                  (Printf.sprintf "allowed_paths entry %s, got %S" reason value))
+           values)
+    in
+    (match entry_errors with
+     | [] -> Ok values
+     | _ :: _ -> Error entry_errors)
+;;
+
+(** Parse one [\[exec.ssh.endpoints.<name>\]] table. Every key must be one of
+    {!exec_ssh_endpoint_keys}; any other key fails the load so a misspelled
+    knob is never silently dropped. [host], [user], and [remote_root] are
+    required non-empty strings and reject surrounding whitespace (padding is
+    a typo, not a value); [remote_root] must additionally be absolute, since
+    the shim's path mapping is defined against it. [port] must be in
+    1..65535; every other key carries the spec default. The two file defaults
+    resolve here, where the endpoint name is in scope, to base-relative paths
+    with the name substituted (see {!Exec_ssh_endpoint}). Unknown
+    [capabilities] values warn-and-ignore per the spec table — they are
+    Phase 2 reservations, not Phase 1 knobs. Each [allowed_paths] entry must
+    be absolute and normalized and not [/]; any other entry fails the load. *)
+let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
+  : (Exec_ssh_endpoint.t, parse_error list) result
+  =
+  let path = Ns.(path Exec) ("ssh.endpoints." ^ name) in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key exec_ssh_endpoint_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown exec ssh endpoint key %S; expected %s"
+                  key
+                  (String.concat ", " exec_ssh_endpoint_keys)))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+    | Otoml.TomlTableArray _ -> error path "endpoint must be a TOML table"
+  in
+  let host_result = exec_ssh_required_string ~path tbl ~key:"host" in
+  let user_result = exec_ssh_required_string ~path tbl ~key:"user" in
+  let destination_result =
+    match host_result, user_result with
+    | Ok host, Ok user ->
+      Exec_ssh_endpoint.validate_destination ~host ~user
+      |> Result.map_error (fun message -> error path message)
+    | Error _, _ | _, Error _ -> Ok ()
+  in
+  let remote_root_result = exec_ssh_remote_root_field ~path tbl in
+  let port_result = exec_ssh_port_field ~path tbl in
+  let identity_file_result = exact_non_empty_string_opt_field ~path tbl "identity_file" in
+  let known_hosts_file_result =
+    exact_non_empty_string_opt_field ~path tbl "known_hosts_file"
+  in
+  let connect_timeout_sec_result =
+    positive_int_opt_field ~path ~key:"connect_timeout_sec" tbl
+  in
+  let max_concurrent_sessions_result =
+    positive_int_opt_field ~path ~key:"max_concurrent_sessions" tbl
+  in
+  let string_array_field key =
+    Result.map
+      (Option.value ~default:[])
+      (typed_find
+         "an array of strings"
+         path
+         tbl
+         key
+         (Otoml.get_array Otoml.get_string))
+  in
+  let env_allowlist_result = string_array_field "env_allowlist" in
+  let capabilities_result = string_array_field "capabilities" in
+  (* RFC-0422 §3.4: the operator's declaration that the account home is the
+     keeper's alone. Absent is [false], so a shared account keeps the judge
+     for every write until someone says otherwise in this file. *)
+  let private_home_result =
+    typed_find_or "a boolean" path tbl "private_home" Otoml.get_boolean ~default:false
+  in
+  let allowed_paths_result = exec_ssh_allowed_paths_field ~path tbl in
+  (* Checked once both fields parsed, like [destination_result]: a field that
+     failed already reports its own error. *)
+  let allowed_paths_cover_result =
+    match remote_root_result, allowed_paths_result with
+    | Ok remote_root, Ok allowed_paths ->
+      (match
+         List.concat
+           (List.mapi
+              (fun index value ->
+                 if exec_ssh_allowed_path_covers_remote_root ~remote_root value
+                 then
+                   error
+                     (Printf.sprintf "%s.allowed_paths[%d]" path index)
+                     (Printf.sprintf
+                        "allowed_paths entry must not be remote_root or an ancestor of it, got %S"
+                        value)
+                 else [])
+              allowed_paths)
+       with
+       | [] -> Ok ()
+       | _ :: _ as cover_errors -> Error cover_errors)
+    | Error _, _ | _, Error _ -> Ok ()
+  in
+  let errs = function Ok _ -> [] | Error errs -> errs in
+  let field_errors =
+    errs host_result
+    @ errs user_result
+    @ errs destination_result
+    @ errs remote_root_result
+    @ errs port_result
+    @ errs identity_file_result
+    @ errs known_hosts_file_result
+    @ errs connect_timeout_sec_result
+    @ errs max_concurrent_sessions_result
+    @ errs env_allowlist_result
+    @ errs capabilities_result
+    @ errs private_home_result
+    @ errs allowed_paths_result
+    @ errs allowed_paths_cover_result
+  in
+  match unknown_key_errors with
+  | _ :: _ -> Error (unknown_key_errors @ field_errors)
+  | [] ->
+    (match
+       ( host_result
+       , user_result
+       , destination_result
+       , remote_root_result
+       , port_result
+       , identity_file_result
+       , known_hosts_file_result
+       , connect_timeout_sec_result
+       , max_concurrent_sessions_result
+       , env_allowlist_result
+       , capabilities_result
+       , private_home_result
+       , allowed_paths_result
+       , allowed_paths_cover_result )
+     with
+     | ( Ok host
+       , Ok user
+       , Ok ()
+       , Ok remote_root
+       , Ok port
+       , Ok identity_file
+       , Ok known_hosts_file
+       , Ok connect_timeout_sec
+       , Ok max_concurrent_sessions
+       , Ok env_allowlist
+       , Ok declared_capabilities
+       , Ok private_home
+       , Ok allowed_paths
+       , Ok () ) ->
+       let capabilities =
+         List.filter
+           (fun capability ->
+              if List.mem capability Exec_ssh_endpoint.known_capabilities
+              then true
+              else (
+                Log.Runtime.warn
+                  "runtime_toml: %s.capabilities — unknown capability %S, ignoring"
+                  path
+                  capability;
+                false))
+           declared_capabilities
+       in
+       Ok
+         { Exec_ssh_endpoint.name
+         ; host
+         ; user
+         ; port = Option.value ~default:Exec_ssh_endpoint.default_port port
+         ; identity_file =
+             Option.value
+               ~default:(Exec_ssh_endpoint.default_identity_file ~name)
+               identity_file
+         ; known_hosts_file =
+             Option.value
+               ~default:(Exec_ssh_endpoint.default_known_hosts_file ~name)
+               known_hosts_file
+         ; remote_root
+         ; connect_timeout_sec =
+             Option.value
+               ~default:Exec_ssh_endpoint.default_connect_timeout_sec
+               connect_timeout_sec
+         ; max_concurrent_sessions =
+             Option.value
+               ~default:Exec_ssh_endpoint.default_max_concurrent_sessions
+               max_concurrent_sessions
+         ; env_allowlist
+         ; capabilities
+         ; private_home
+         ; allowed_paths
+         }
+     (* [field_errors] is non-empty exactly when some field result is [Error],
+        so this arm always carries at least one error. *)
+     | ( (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _) ) -> Error field_errors)
+;;
+
+(* [exec] owns exactly [ssh] and [exec.ssh] owns exactly [endpoints]: the
+   namespace is closed, so any sibling key is a typo the load names rather
+   than silently dropping — the same fail-closed posture as unknown provider
+   capabilities keys. *)
+let exec_single_child ~(path : string) ~(child_key : string) (value : Otoml.t)
+  : (Otoml.t option, parse_error list) result
+  =
+  match value with
+  | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+    let stray, children =
+      List.partition (fun (key, _) -> not (String.equal key child_key)) entries
+    in
+    let stray_errors =
+      List.concat_map
+        (fun (key, _) ->
+           error
+             (path ^ "." ^ key)
+             (Printf.sprintf
+                "unknown [%s] key %S; expected only [%s.%s]"
+                path
+                key
+                path
+                child_key))
+        stray
+    in
+    (match stray_errors, children with
+     | _ :: _, _ -> Error stray_errors
+     | [], [] -> Ok None
+     | [], [ (_, child) ] -> Ok (Some child)
+     (* A repeated table key is rejected by the TOML parser itself, so more
+        than one [child_key] entry cannot reach here; fail loud rather than
+        silently picking one if that invariant ever breaks. *)
+     | [], _ :: _ :: _ ->
+       Error
+         (error
+            (path ^ "." ^ child_key)
+            (Printf.sprintf "duplicate [%s.%s] table" path child_key)))
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ ->
+    Error (error path (Printf.sprintf "[%s] must be a TOML table" path))
+;;
+
+(** Walk [\[exec.ssh.endpoints.*\]] tables into the endpoint registry. Each
+    endpoint name passes {!validate_runtime_id_component} dot-free, matching
+    provider ids. Absent [\[exec\]] section yields an empty registry. *)
+(* [\[egress.keepers.<name>\]] — one keeper's allowlist (RFC-0415).
+
+   Every rule is parsed here, at config load, rather than when a request
+   arrives. A rule a resolver could read differently than [Egress_host] does
+   is an operator mistake, and finding it while the file is being read is the
+   difference between refusing to boot and serving a live allowlist with a
+   hole in it. *)
+let egress_keeper_keys = [ "allow" ]
+
+let parse_egress_keeper ~(name : string) (tbl : Otoml.t)
+  : (Egress_allowlist.t, parse_error list) result
+  =
+  let path = Ns.(path Egress) ("keepers." ^ name) in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key egress_keeper_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown egress keeper key %S; expected %s"
+                  key
+                  (String.concat ", " egress_keeper_keys)))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> error path "expected a table"
+  in
+  match unknown_key_errors with
+  | _ :: _ as errors -> Error errors
+  | [] ->
+    (match
+       typed_find "an array of strings" path tbl "allow" (Otoml.get_array Otoml.get_string)
+     with
+     | Error errors -> Error errors
+     | Ok None ->
+       (* An entry that declares no [allow] is almost certainly a mistake, and
+          the safe reading of it -- an allowlist that admits nothing -- is
+          already what omitting the whole table gives. Refusing says which of
+          the two the operator meant. *)
+       error path "egress keeper table has no 'allow' array"
+       |> fun errors -> Error errors
+     | Ok (Some raws) ->
+       let parsed =
+         List.map
+           (fun raw ->
+              match Egress_host.rule_of_string raw with
+              | Ok rule -> Ok rule
+              | Error parse_error ->
+                Error
+                  (error
+                     (path ^ ".allow")
+                     (Printf.sprintf
+                        "%S is not a host this lane will match: %s"
+                        raw
+                        (Egress_host.parse_error_to_string parse_error))))
+           raws
+       in
+       let errors = List.concat_map (function Error e -> e | Ok _ -> []) parsed in
+       (match errors with
+        | _ :: _ -> Error errors
+        | [] ->
+          Ok
+            { Egress_allowlist.keeper_name = name
+            ; allow = List.filter_map (function Ok rule -> Some rule | Error _ -> None) parsed
+            }))
+;;
+
+(** Walk [\[egress.keepers.*\]] into the allowlist registry. An absent
+    [\[egress\]] section yields an empty registry, which is not permission:
+    a keeper in the policy lane with no entry reaches nothing. *)
+let parse_egress_allowlists (toml : Otoml.t)
+  : (Egress_allowlist.t list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Egress) ] with
+  | None -> Ok []
+  | Some egress_value ->
+    (match exec_single_child ~path:(Ns.(key Egress)) ~child_key:"keepers" egress_value with
+     | Error _ as error -> error
+     | Ok None -> Ok []
+     | Ok (Some keepers_value) ->
+       (match keepers_value with
+        | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+          partition_results (List.map (fun (name, tbl) -> parse_egress_keeper ~name tbl) entries)
+        | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error (error (Ns.(path Egress) "keepers") "expected a table")))
+;;
+
+let parse_exec_endpoints (toml : Otoml.t)
+  : (Exec_ssh_endpoint.t list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Exec) ] with
+  | None -> Ok []
+  | Some exec_value ->
+    (match exec_single_child ~path:(Ns.(key Exec)) ~child_key:"ssh" exec_value with
+     | Error _ as error -> error
+     | Ok None -> Ok []
+     | Ok (Some ssh_value) ->
+       (match exec_single_child ~path:(Ns.(key Exec) ^ ".ssh") ~child_key:"endpoints" ssh_value with
+        | Error _ as error -> error
+        | Ok None -> Ok []
+        | Ok (Some endpoints_value) ->
+          (match endpoints_value with
+           | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+             partition_results
+               (List.map
+                  (fun (name, tbl) ->
+                     match
+                       validate_runtime_id_component
+                         ~allow_dot:false
+                         ~kind:"exec ssh endpoint"
+                         ~path:(Ns.(path Exec) ("ssh.endpoints." ^ name))
+                         name
+                     with
+                     | Error _ as error -> error
+                     | Ok () -> parse_exec_ssh_endpoint ~name tbl)
+                  entries)
+           | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+           | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+           | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+           | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+             Error
+               (error
+                  (Ns.(path Exec) "ssh.endpoints")
+                  "[exec.ssh.endpoints] must be a TOML table of endpoint tables"))))
+;;
+
+(* [lsp.servers]: the command that starts a language's server, keyed by the
+   language's wire id. It replaces the client's table for that language and
+   no other. A key that names no language and a value that is not a
+   non-empty array of strings are refused at load: a server nobody can
+   start is a typo, not a preference. *)
+let parse_lsp_server ~(lang_id : string) (value : Otoml.t)
+  : (string * (string * string list), parse_error list) result
+  =
+  let path = Ns.(path Lsp) ("servers." ^ lang_id) in
+  match Lsp_process_manager.language_of_lang_id lang_id with
+  | None ->
+    Error
+      (error
+         path
+         (Printf.sprintf
+            "unknown language %S; expected one of %s"
+            lang_id
+            (String.concat
+               ", "
+               (List.map
+                  Lsp_process_manager.lang_id_of_language
+                  Lsp_process_manager.all_languages))))
+  | Some _ ->
+    (match value with
+     | Otoml.TomlArray items ->
+       let words =
+         List.map
+           (function
+             | Otoml.TomlString word -> Some word
+             | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+             | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> None)
+           items
+       in
+       (match List.filter_map Fun.id words with
+        | (executable :: _ as argv) when List.for_all Option.is_some words ->
+          Ok (lang_id, (executable, argv))
+        | _ ->
+          Error
+            (error
+               path
+               "expected a non-empty array of strings: the executable, then its arguments"))
+     | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+     | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+     | Otoml.TomlLocalTime _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error
+         (error path "expected an array of strings: the executable, then its arguments"))
+;;
+
+let parse_lsp_servers (toml : Otoml.t)
+  : ((string * (string * string list)) list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Lsp) ] with
+  | None -> Ok []
+  | Some lsp_value ->
+    (match exec_single_child ~path:(Ns.(key Lsp)) ~child_key:"servers" lsp_value with
+     | Error _ as error -> error
+     | Ok None -> Ok []
+     | Ok (Some servers_value) ->
+       (match servers_value with
+        | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+          partition_results
+            (List.map (fun (lang_id, value) -> parse_lsp_server ~lang_id value) entries)
+        | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error (error (Ns.(path Lsp) "servers") "expected a table of language = [\"command\", ...]")))
+;;
+
+(* --- Reserved namespace detection --- *)
+
+let reject_obsolete_top_level_namespaces (toml : Otoml.t)
+  : (unit, parse_error list) result
+  =
+  let top_entries = Otoml.get_table toml in
+  let errors =
+    List.filter_map
+      (fun namespace ->
+         if List.mem_assoc namespace top_entries
+         then
+           Some
+             { path = namespace
+             ; message =
+                 (Printf.sprintf
+                    "obsolete top-level namespace %S is not supported"
+                    namespace)
+             }
+         else None)
+      obsolete_top_level_namespaces
+  in
+  if errors = [] then Ok () else Error errors
+;;
+
+(* --- Layer 3: Bindings from provider tables --- *)
+
+(* [Otoml.t] is a 3rd-party closed variant with 12 value constructors;
+   this parser only ever distinguishes "table-shaped" (TomlTable /
+   TomlInlineTable) from everything else. Enumerating the other 10 once
+   here satisfies warning 4 and means an [otoml] version bump that adds a
+   value constructor breaks exactly this site rather than a dozen call
+   sites. *)
+let is_toml_table : Otoml.t -> bool = function
+  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> true
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ -> false
+
+let unknown_binding_keys ~path ~binding_keys entries =
+  List.concat_map
+    (fun (key, _) ->
+       if List.mem key binding_keys
+       then []
+       else
+         error
+           (path ^ "." ^ key)
+           (Printf.sprintf
+              "unknown binding key %S; a model binding declares only %s"
+              key
+              (String.concat ", " binding_keys)))
+    entries
+;;
+
+let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml.t)
+  : (Runtime_schema.binding, parse_error list) result
+  =
+  let path = Printf.sprintf "%s.%s" provider_id model_id in
+  (* The keys a binding declares are the keys this function reads: every read
+     below goes through these two readers, which note the key. Anything else
+     under [<provider>.<model>] is refused, a nested table included -- a
+     misspelled [max-concurent] would otherwise load as a binding without
+     the cap the operator meant to declare. So every read below stays
+     unconditional and bound before the check at the top of the [let*] chain:
+     a read placed after it, or only in one branch, would refuse its own key. *)
+  let read_keys = ref [] in
+  let typed_find kind path tbl key getter =
+    read_keys := key :: !read_keys;
+    typed_find kind path tbl key getter
+  in
+  let typed_find_or kind path tbl key getter ~default =
+    Result.map (Option.value ~default) (typed_find kind path tbl key getter)
+  in
+  (* [max-concurrent] is an explicit operator override, not a required binding
+     property. Absence means "no static client-side cap", and it also means no
+     endpoint admission at all: [Provider_admission] holds a permit only for
+     a binding that declares this key, so an undeclared binding dispatches
+     straight out, and its provider's [admission-priority-run-limit] does not
+     reach it. What remains for it is live health/backoff and whatever the
+     provider itself refuses with (e.g. HTTP 429): this side stops sending
+     only once the other side says no.
+
+     Whether HTTP bindings should be required to declare it is open; the
+     measurements are on #25401.
+
+     An explicit non-positive value is a configuration error: 0 was historically
+     used as an omission sentinel, and negative values are meaningless. Reject
+     them at load time rather than silently downgrading to "no cap". *)
+  let enabled_result = typed_find "a boolean" path tbl "enabled" Otoml.get_boolean in
+  let is_default_result = typed_find "a boolean" path tbl "is-default" Otoml.get_boolean in
+  let wizard_default_result =
+    typed_find "a boolean" path tbl "wizard-default" Otoml.get_boolean
+  in
+  let disable_parallel_tool_use_result =
+    typed_find_or "a boolean" path tbl "disable-parallel-tool-use"
+      Otoml.get_boolean ~default:false
+  in
+  let max_context_result =
+    match typed_find "an integer" path tbl "max-context" Otoml.get_integer with
+    | Ok (Some n) when n <= 0 ->
+      Error (error (path ^ ".max-context") "max-context must be a positive integer")
+    | (Ok (None) | Error _ | Ok (Some _)) as result -> result
+  in
+  let max_concurrent_result =
+    match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
+    | Ok None -> Ok None
+    | Ok (Some n) when n > 0 -> Ok (Some n)
+    | Ok (Some n) ->
+      Error
+        (error
+           (path ^ ".max-concurrent")
+           (Printf.sprintf
+              "max-concurrent must be a positive integer or omitted for no static cap; got %d"
+              n))
+    | Error _ as e -> e
+  in
+  (* Request-side output budget. AGENT_CORE omits the wire field when this is
+     absent, so the provider's own default decides -- 65536 on ollama.com/v1,
+     which is where a collapsed generation runs to. Positive or omitted: 0 would
+     mean "ask for no output at all", which no caller wants and every envelope
+     rejects differently. *)
+  let max_tokens_result =
+    match typed_find "an integer" path tbl "max-tokens" Otoml.get_integer with
+    | Ok None -> Ok None
+    | Ok (Some n) when n > 0 -> Ok (Some n)
+    | Ok (Some n) ->
+      Error
+        (error
+           (path ^ ".max-tokens")
+           (Printf.sprintf
+              "max-tokens must be a positive integer, or omitted to let the provider \
+               apply its own default; got %d"
+              n))
+    | Error _ as e -> e
+  in
+  let price_input_result = typed_find "a float" path tbl "price-input" Otoml.get_float in
+  let price_output_result = typed_find "a float" path tbl "price-output" Otoml.get_float in
+  let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
+  let num_ctx_result = typed_find "an integer" path tbl "num-ctx" Otoml.get_integer in
+  let repeat_penalty_result =
+    match typed_find "a float" path tbl "repeat-penalty" Otoml.get_float with
+    | Ok (Some value) when Float.compare value 0.0 <= 0 ->
+      Error
+        (error
+           (path ^ ".repeat-penalty")
+           (Printf.sprintf
+              "repeat-penalty must be greater than 0 (1.0 disables the penalty); got %g"
+              value))
+    | (Ok (None) | Error _ | Ok (Some _)) as other -> other
+  in
+  let repeat_last_n_result =
+    match typed_find "an integer" path tbl "repeat-last-n" Otoml.get_integer with
+    | Ok (Some value) when value < -1 ->
+      Error
+        (error
+           (path ^ ".repeat-last-n")
+           (Printf.sprintf
+              "repeat-last-n must be -1 (whole context), 0 (disabled), or a positive \
+               window; got %d"
+              value))
+    | (Ok (None) | Error _ | Ok (Some _)) as other -> other
+  in
+  let return_progress_result =
+    typed_find "a boolean" path tbl "return-progress" Otoml.get_boolean
+  in
+  let ( let* ) = Result.bind in
+  let* () =
+    match
+      unknown_binding_keys
+        ~path
+        ~binding_keys:(List.rev !read_keys)
+        (Otoml.get_table tbl)
+    with
+    | [] -> Ok ()
+    | errors -> Error errors
+  in
+  let* enabled_opt = enabled_result in
+  let enabled = match enabled_opt with Some value -> value | None -> true in
+  let* is_default_opt = is_default_result in
+  let is_default = Option.value is_default_opt ~default:false (* DET-OK: fallback to false if omitted *) in
+  let* wizard_default_opt = wizard_default_result in
+  let wizard_default =
+    Option.value wizard_default_opt ~default:false
+    (* DET-OK: omitted means not selected for install wizard. *)
+  in
+  let* max_context = max_context_result in
+  let* max_concurrent = max_concurrent_result in
+  let* disable_parallel_tool_use = disable_parallel_tool_use_result in
+  let* max_tokens = max_tokens_result in
+  let* price_input = price_input_result in
+  let* price_output = price_output_result in
+  let* keep_alive = keep_alive_result in
+  let* num_ctx = num_ctx_result in
+  let* repeat_penalty = repeat_penalty_result in
+  let* repeat_last_n = repeat_last_n_result in
+  let* return_progress = return_progress_result in
+  Ok
+    { Runtime_schema.provider_id
+    ; model_id
+    ; enabled
+    ; is_default
+    ; wizard_default
+    ; max_context
+    ; max_concurrent
+    ; disable_parallel_tool_use
+    ; max_tokens
+    ; price_input
+    ; price_output
+    ; keep_alive
+    ; num_ctx
+    ; repeat_penalty
+    ; repeat_last_n
+    ; return_progress
+    }
+;;
+
+(* Parse one provider table ([<provider>.*]) into its bindings. Each direct
+   sub-key is a model binding table. *)
+let parse_provider_table (provider_id : string) (tbl : Otoml.t)
+  : (Runtime_schema.binding list, parse_error list) result
+  =
+  let entries = Otoml.get_table tbl in
+  partition_results
+    (List.map
+       (fun (model_id, sub) ->
+          let path = Printf.sprintf "%s.%s" provider_id model_id in
+          if is_toml_table sub
+          then parse_binding_fields provider_id model_id sub
+          else
+            Error
+              (error
+                 path
+                 (Printf.sprintf
+                    "[%s] holds model bindings; %S must be a [%s] table"
+                    provider_id
+                    model_id
+                    path)))
+       entries)
+;;
+
+(* Top-level table names that own a binding group, taken from the [\[providers\]]
+   keys as written rather than from successfully parsed providers: a malformed
+   provider row must be reported as a provider error, not silently reclassify its
+   bindings as some other namespace. *)
+let declared_provider_ids (toml : Otoml.t) : string list =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Providers) ] with
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) -> List.map fst entries
+  | Some (Otoml.TomlString _) | None | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> []
+;;
+
+(* Sets are source-level declarations, expanded into the same typed bindings
+   as explicit tables. The runtime has one provider × model resolution path;
+   account homes, credentials, quotas and overrides still belong to providers
+   and bindings rather than being copied into model specifications. *)
+let parse_model_sets (toml : Otoml.t)
+  : ((string * string list) list, parse_error list) result
+  =
+  let namespace = Ns.(key Model_sets) in
+  let declared_models =
+    match Otoml.find_opt toml Fun.id [ Ns.(key Models) ] with
+    | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+      List.map fst entries
+    | Some (Otoml.TomlString _) | None | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+    | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+    | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+    | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> []
+  in
+  let parse_set (id, tbl) =
+    let path = Ns.(path Model_sets) id in
+    if not (is_toml_table tbl)
+    then Error (error path "model set must be a TOML table")
+    else (
+      let unknown =
+        List.concat_map
+          (fun (key, _) ->
+             if String.equal key "models" then []
+             else error (path ^ "." ^ key) "unknown model set key; expected models")
+          (Otoml.get_table tbl)
+      in
+      match typed_find "an array of strings" path tbl "models"
+              (Otoml.get_array Otoml.get_string) with
+      | Error errors -> Error (unknown @ errors)
+      | Ok None -> Error (unknown @ error (path ^ ".models") "models is required")
+      | Ok (Some models) ->
+        let references =
+          List.concat_map
+            (fun model ->
+               if List.mem model declared_models then []
+               else error (path ^ ".models") (Printf.sprintf "unknown model %S" model))
+            models
+        in
+        let duplicates =
+          if List.length models = List.length (List.sort_uniq String.compare models)
+          then []
+          else error (path ^ ".models") "model ids must not repeat"
+        in
+        match unknown @ references @ duplicates with
+        | [] -> Ok (id, models)
+        | errors -> Error errors)
+  in
+  match Otoml.find_opt toml Fun.id [ namespace ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results (List.map parse_set entries)
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error namespace "model_sets must be a TOML table")
+;;
+
+let parse_bindings (toml : Otoml.t)
+  : (Runtime_schema.binding list, parse_error list) result
+  =
+  let top_entries = Otoml.get_table toml in
+  let declared = declared_provider_ids toml in
+  (* A top-level table describes a provider's bindings only when [\[providers\]]
+     declares that provider. The namespace used to be defined by exclusion —
+     anything not on the reserved list — which made every unrelated config
+     section a phantom binding group: [\[voice.tts\]] and [\[fusion.presets\]]
+     each parsed as a binding whose provider did not exist, and the loader had to
+     drop unresolved bindings quietly for boot to survive them. That silence is
+     what hid a real dangling reference (masc#28403). Naming the namespace
+     positively lets {!Runtime.load_list} treat an unresolved binding as the typo
+     it is. Scalar / array entries are still excluded because
+     [parse_provider_table] would crash on them. *)
+  let provider_tables =
+    List.filter
+      (fun (name, value) ->
+        (not (is_reserved name)) && is_toml_table value && List.mem name declared)
+      top_entries
+  in
+  let ( let* ) = Result.bind in
+  let* sets = parse_model_sets toml in
+  let* explicit =
+    Result.map List.concat
+      (partition_results
+         (List.map
+            (fun (provider_id, tbl) -> parse_provider_table provider_id tbl)
+            provider_tables))
+  in
+  let provider_set_bindings provider_id =
+    let path = Ns.(path Providers) provider_id in
+    match Otoml.find_opt toml Fun.id [ Ns.(key Providers); provider_id ] with
+    | None -> Ok []
+    | Some tbl when is_toml_table tbl ->
+      (match typed_find "a string" path tbl "model-set" Otoml.get_string with
+       | Error errors -> Error errors
+       | Ok None -> Ok []
+       | Ok (Some name) ->
+         (match List.assoc_opt name sets with
+          | None ->
+            Error (error (path ^ ".model-set") (Printf.sprintf "unknown model set %S" name))
+          | Some models ->
+            let missing =
+              List.filter
+                (fun model_id ->
+                   not (List.exists (fun (binding : Runtime_schema.binding) ->
+                     String.equal binding.provider_id provider_id
+                     && String.equal binding.model_id model_id) explicit))
+                models
+            in
+            partition_results
+              (List.map
+                 (fun model_id -> parse_binding_fields provider_id model_id (Otoml.TomlTable []))
+                 missing)))
+    | Some _ -> Ok [] (* parse_providers reports the malformed provider. *)
+  in
+  let* generated = partition_results (List.map provider_set_bindings declared) in
+  Ok (explicit @ List.concat generated)
+;;
+
+(* --- Top-level parse --- *)
+
+(* Extract the [Ok] payload from a parse result that the caller has
+   just proven via the [all_errors = []] guard. The [Error _] branch
+   is statically unreachable; reaching it indicates a refactor has
+   desynchronized the collect site from the extraction site. Crash with
+   [invalid_arg] rather than silently substituting an empty list,
+   which would mask a corrupt config. *)
+let extract_after_all_errors_guard ~label = function
+  | Ok x -> x
+  | Error _ ->
+    invalid_arg
+      (Printf.sprintf
+         "runtime_toml.parse_toml: %s — guarded extraction reached Error branch; \
+          collect/extract desync"
+         label)
+;;
+
+(* [[runtime.assignments]] — keeper name → runtime id ["provider.model"]. The
+   sole SSOT for keeper-to-runtime assignment. Each
+   value must be a TOML string (an opaque runtime id resolved later against the
+   binding list at {!Runtime.load_list}). A non-string value is a parse error,
+   not a silent drop — an operator typo (e.g. an inline table) must fail loud
+   rather than route the keeper to the default. *)
+let parse_keeper_assignments (toml : Otoml.t)
+  : ((string * string) list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "assignments" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    let oks, errs =
+      List.partition_map
+        (fun (keeper_name, value) ->
+          match value with
+          | Otoml.TomlString runtime_id -> Left (keeper_name, runtime_id)
+          | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+          | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+          | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+          | Otoml.TomlTableArray _ -> Right
+              { path = Ns.(path Runtime) ("assignments." ^ keeper_name)
+              ; message = "keeper runtime assignment must be a string runtime id"
+              })
+        entries
+    in
+    if errs <> [] then Error errs else Ok oks
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
+    Error
+      [ { path = Ns.(path Runtime) "assignments"
+        ; message = "[runtime.assignments] must be a table of keeper = runtime-id"
+        }
+      ]
+;;
+
+type runtime_section =
+  { default_runtime_id : string option
+  ; media_failover : string list
+  }
+
+let empty_runtime_section =
+  { default_runtime_id = None
+  ; media_failover = []
+  }
+;;
+
+let parse_runtime_string_leaf ~path ~key value =
+  match value with
+  | Otoml.TomlString value -> Ok value
+  | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+  | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error (error path (key ^ " must be a string runtime id"))
+;;
+
+let parse_runtime_media_failover ~path value =
+  (* RFC-0265 — ordered runtime ids for modality-gated reroute. A genuine type
+     mismatch (a scalar where an ordered array is required — a bare string cannot
+     mean a list) is surfaced as a load [Error], consistent with the sibling
+     string leaves ({!parse_runtime_string_leaf}), instead of silently degrading
+     to [] (the repo's Unknown→Permissive anti-pattern). An explicit empty array
+     [] is preserved as the intentional derive-from-declared-caps signal; id typos
+     in a well-typed array are still caught loudly by
+     {!Runtime_config_validation.validate_runtime_references}, which now judges every [runtime]
+     field that names a routing target. *)
+  try Ok (Otoml.get_array Otoml.get_string value) with
+  | Otoml.Type_error msg ->
+    Error
+      (error
+         path
+         (Printf.sprintf "media_failover must be an array of string runtime ids; got %s" msg))
+;;
+
+let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list) result =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime) ] with
+  | None -> Ok empty_runtime_section
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    let section, errs =
+      List.fold_left
+        (fun (section, errs) (key, value) ->
+           match key with
+           | "default" ->
+             (match parse_runtime_string_leaf ~path:(Ns.(key Runtime) ^ ".default") ~key value with
+              | Ok default_runtime_id ->
+                { section with default_runtime_id = Some default_runtime_id }, errs
+              | Error e -> section, errs @ e)
+           | "media_failover" ->
+             (match parse_runtime_media_failover ~path:(Ns.(key Runtime) ^ ".media_failover") value with
+              | Ok media_failover -> { section with media_failover }, errs
+              | Error e -> section, errs @ e)
+           | "assignments" ->
+             (* Parsed by [parse_keeper_assignments], including table-shape
+                validation. It is still recognized here so a malformed scalar
+                does not get reported as an unknown key first. *)
+             section, errs
+           | "lanes" ->
+             (* Parsed by [parse_lanes] after the runtime section is shaped. *)
+             section, errs
+           | "exact_output_lanes" | "addon_exact_lanes" ->
+             (* Parsed separately as raw AGENT_CORE target references. *)
+             section, errs
+           | _ when is_toml_table value ->
+             (* [runtime.<profile>] tables are reserved for runtime profiles and
+                intentionally ignored by this parser layer. *)
+             section, errs
+           | _ ->
+             ( section
+             , errs
+               @ error
+                   (Ns.(path Runtime) key)
+                   (Printf.sprintf
+                      "unknown [runtime] key %S; expected default, \
+                       media_failover, [runtime.lanes], \
+                       [runtime.exact_output_lanes], [runtime.addon_exact_lanes], \
+                       [runtime.assignments], or a table-valued [runtime.<profile>]"
+                      key) )
+        )
+        (empty_runtime_section, [])
+        entries
+    in
+    if errs <> [] then Error errs else Ok section
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error (Ns.(key Runtime)) "[runtime] must be a TOML table")
+;;
+
+(* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
+   table with [candidates] (array of runtime ids). Candidate ids are resolved
+   against materialized runtimes at load time, not here, so the parser returns
+   declarations only.
+
+   [candidates] is the whole vocabulary. The RFC-0206 routing rebirth dropped
+   the strategy ADT (a lane is ordered by construction), and until this check
+   a leftover [strategy = "ordered"] line was accepted and ignored — a key an
+   operator could edit with no effect. Unknown keys fail the load instead,
+   the same shape as [parse_exact_output_lane] below. *)
+let parse_lane ~(id : string) (tbl : Otoml.t)
+  : (Runtime_schema.lane_decl, parse_error list) result
+  =
+  let path = Ns.(path Runtime) ("lanes." ^ id) in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if String.equal key "candidates"
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown lane key %S; expected candidates (lanes are ordered \
+                   by construction; there is no strategy key)"
+                  key))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> []
+  in
+  let candidate_ids_result =
+    match Otoml.find_opt tbl Fun.id [ "candidates" ] with
+    | None -> Error (error (path ^ ".candidates") "lane candidates is required")
+    | Some value ->
+      (try Ok (Otoml.get_array Otoml.get_string value) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".candidates")
+              (Printf.sprintf
+                 "lane candidates must be an array of string runtime ids; got %s"
+                 msg)))
+  in
+  match candidate_ids_result with
+  | Error e -> Error (unknown_key_errors @ e)
+  | Ok _ when unknown_key_errors <> [] -> Error unknown_key_errors
+  | Ok candidate_ids ->
+    if candidate_ids = []
+    then Error (error path "lane must have at least one candidate")
+    else Ok { Runtime_schema.id; candidate_ids }
+;;
+
+let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error list) result =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "lanes" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results
+      (List.map
+         (fun (id, value) ->
+            match value with
+            | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> parse_lane ~id value
+            | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+            | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+            | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
+                (error
+                   (Ns.(path Runtime) ("lanes." ^ id))
+                   "lane must be a table"))
+         entries)
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
+    Error (error (Ns.(path Runtime) "lanes") "[runtime.lanes] must be a table of lane tables")
+;;
+
+let parse_exact_output_lane ~(owner : Runtime_schema.exact_lane_owner) (tbl : Otoml.t)
+  : (Runtime_schema.exact_output_lane_decl, parse_error list) result
+  =
+  let ( let* ) = Result.bind in
+  let path = Runtime_schema.exact_lane_table_name owner in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if
+             String.equal key "enabled"
+             || String.equal key "slots"
+             || String.equal key "cli_slots"
+             || String.equal key "max_output_tokens"
+             || String.equal key "thinking"
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown exact-output lane key %S; expected enabled, slots, cli_slots, \
+                   max_output_tokens or thinking"
+                  key))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> []
+  in
+  let enabled_result = typed_find_or "a boolean" path tbl "enabled" Otoml.get_boolean ~default:true in
+  let slots_result =
+    match Otoml.find_opt tbl Fun.id [ "slots" ] with
+    (* Absent reads as empty, the same as [cli_slots] below. The lane's rule is
+       one slot across the two lists, refused further down; requiring the key
+       on top of that only made a CLI-only lane carry an empty one. *)
+    | None -> Ok []
+    | Some value ->
+      (try Ok (Otoml.get_array Otoml.get_string value) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".slots")
+              (Printf.sprintf
+                 "exact-output lane slots must be an array of opaque strings; got %s"
+                 msg)))
+  in
+  let cli_slots_result =
+    match Otoml.find_opt tbl Fun.id [ "cli_slots" ] with
+    | None -> Ok []
+    | Some value ->
+      (try Ok (Otoml.get_array Otoml.get_string value) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".cli_slots")
+              (Printf.sprintf
+                 "exact-output lane cli_slots must be an array of runtime ids; got %s"
+                 msg)))
+  in
+  let max_output_tokens_result =
+    match Otoml.find_opt tbl Fun.id [ "max_output_tokens" ] with
+    | None -> Ok None
+    | Some value ->
+      (try
+         let n = Otoml.get_integer value in
+         if n <= 0
+         then
+           Error
+             (error
+                (path ^ ".max_output_tokens")
+                (Printf.sprintf
+                   "exact-output lane max_output_tokens must be a positive \
+                    integer; got %d"
+                   n))
+         else Ok (Some n)
+       with Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".max_output_tokens")
+              (Printf.sprintf
+                 "exact-output lane max_output_tokens must be an integer; got %s"
+                 msg)))
+  in
+  let thinking_result =
+    match Otoml.find_opt tbl Fun.id [ "thinking" ] with
+    | None -> Ok None
+    | Some value ->
+      (try Ok (Some (Otoml.get_boolean value)) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".thinking")
+              (Printf.sprintf
+                 "exact-output lane thinking must be true or false; got %s"
+                 msg)))
+  in
+  let slots_result =
+    match slots_result, cli_slots_result, max_output_tokens_result, thinking_result with
+    | Error slot_errors, Error cli_errors, _, _ ->
+      Error (slot_errors @ cli_errors)
+    | Error slot_errors, Ok _, _, _ -> Error slot_errors
+    | Ok _, Error cli_errors, _, _ -> Error cli_errors
+    | Ok _, Ok _, Error budget_errors, _ -> Error budget_errors
+    | Ok _, Ok _, Ok _, Error thinking_errors -> Error thinking_errors
+    | Ok slots, Ok cli_slots, Ok max_output_tokens, Ok thinking ->
+      Ok (slots, cli_slots, max_output_tokens, thinking)
+  in
+  let* enabled = enabled_result in
+  let* () =
+    match owner with
+    | Runtime_schema.Builtin lane
+      when not enabled && Standalone_lane.obligation lane = Standalone_lane.Required ->
+      Error (error (path ^ ".enabled") "required exact-output lane cannot be disabled")
+    (* An add-on lane is always Optional: no server start depends on it. *)
+    | Runtime_schema.Builtin _ | Runtime_schema.Addon _ -> Ok ()
+  in
+  match unknown_key_errors, slots_result with
+  | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
+  | _ :: _, Ok _ -> Error unknown_key_errors
+  | [], (Error _ as error) -> error
+  | [], Ok ([], [], _, _) when enabled ->
+    Error (error path "exact-output lane must have at least one slot")
+  | [], Ok (slot_ids, cli_slot_ids, max_output_tokens, thinking) ->
+    let rec validate_cli position seen = function
+      | [] -> Ok ()
+      | cli_id :: rest ->
+        if String.equal (String.trim cli_id) ""
+        then
+          Error
+            (error
+               (path ^ ".cli_slots")
+               (Printf.sprintf "cli slot %d must not be blank" position))
+        else if List.exists (String.equal cli_id) seen
+        then
+          Error
+            (error
+               (path ^ ".cli_slots")
+               (Printf.sprintf "cli slot %d duplicates %S" position cli_id))
+        else validate_cli (position + 1) (cli_id :: seen) rest
+    in
+    let rec validate position seen = function
+      | [] ->
+        (match validate_cli 1 [] cli_slot_ids with
+         | Error _ as error -> error
+         | Ok () ->
+           Ok { Runtime_schema.owner; enabled; slot_ids; cli_slot_ids; max_output_tokens; thinking })
+      | slot_id :: rest ->
+        if String.equal (String.trim slot_id) ""
+        then
+          Error
+            (error
+               (path ^ ".slots")
+               (Printf.sprintf "exact-output slot %d must not be blank" position))
+        else if List.exists (String.equal slot_id) seen
+        then
+          Error
+            (error
+               (path ^ ".slots")
+               (Printf.sprintf
+                  "exact-output slot %d duplicates %S"
+                  position
+                  slot_id))
+        else validate (position + 1) (slot_id :: seen) rest
+    in
+    validate 1 [] slot_ids
+;;
+
+let parse_exact_output_lanes (toml : Otoml.t)
+  : (Runtime_schema.exact_output_lane_decl list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "exact_output_lanes" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results
+      (List.map
+         (fun (id, value) ->
+            match value with
+            (* A table under a name no lane has would parse, publish, and then
+               never be read: the standalone-lane projection draws one row per
+               [Standalone_lane.t], so a misspelt lane vanished from every
+               surface while the real lane read as unconfigured. *)
+            | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+              (match Standalone_lane.of_id id with
+               | Some lane -> parse_exact_output_lane ~owner:(Runtime_schema.Builtin lane) value
+               | None ->
+                 Error
+                   (error
+                      (Ns.(path Runtime) ("exact_output_lanes." ^ id))
+                      (Printf.sprintf
+                         "unknown exact-output lane %S; expected one of %s"
+                         id
+                         (String.concat
+                            ", "
+                            (List.map Standalone_lane.to_id Standalone_lane.all)))))
+            | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+            | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+            | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
+                (error
+                   (Ns.(path Runtime) ("exact_output_lanes." ^ id))
+                   "exact-output lane must be a table"))
+         entries)
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
+    Error
+      (error
+         (Ns.(path Runtime) "exact_output_lanes")
+         "[runtime.exact_output_lanes] must be a table of lane tables")
+;;
+
+(* [runtime.addon_exact_lanes.<declaration id>.<output>]: the operator binds
+   slots to a Lane Add-on installation's named exact output. Each table takes
+   the keys and rules of a built-in lane table. Declarations load after this
+   file, so a pair no installation declares still loads; nothing is checked
+   against them here. *)
+let parse_addon_exact_output_lanes (toml : Otoml.t)
+  : (Runtime_schema.exact_output_lane_decl list, parse_error list) result
+  =
+  let table_path = Ns.(path Runtime) "addon_exact_lanes" in
+  let not_a_table path what = Error (error path (what ^ " must be a table")) in
+  let parse_output declaration_id (output, value) =
+    let path =
+      String.concat "." [ table_path; Toml_line_editor.render_key declaration_id; Toml_line_editor.render_key output ]
+    in
+    match Runtime_schema.addon_lane ~declaration_id ~output with
+    | Error message -> Error (error path message)
+    | Ok lane ->
+      match value with
+      | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+        parse_exact_output_lane ~owner:(Runtime_schema.Addon lane) value
+      | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+        not_a_table path "an add-on exact-output lane"
+  in
+  let parse_declaration (declaration_id, value) =
+    let path = table_path ^ "." ^ Toml_line_editor.render_key declaration_id in
+    match value with
+    | _ when String.trim declaration_id = "" -> Error (error path "a declaration id must not be blank")
+    | Otoml.TomlTable [] | Otoml.TomlInlineTable [] -> Error (error path "names no exact output")
+    | Otoml.TomlTable outputs | Otoml.TomlInlineTable outputs ->
+      partition_results (List.map (parse_output declaration_id) outputs)
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+      not_a_table path "a declaration's exact outputs"
+  in
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "addon_exact_lanes" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable declarations | Otoml.TomlInlineTable declarations) ->
+    partition_results (List.map parse_declaration declarations) |> Result.map List.concat
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
+    not_a_table table_path "[runtime.addon_exact_lanes]"
+;;
+
+(* [repeat-penalty] and [repeat-last-n] are fields of Ollama's own
+   [/api/chat] [options] object. No other request builder has a field to put
+   them in, so on any other wire the declaration was accepted, dropped without
+   a word, and the operator was left believing the knob was live -- while the
+   repetition loop it exists to stop kept running.
+
+   Probed 2026-08-25 against ollama.com/v1/chat/completions with
+   deepseek-v4-flash:0731 at seed 7: repeat_penalty=1.15 returned 65 completion
+   tokens against a 63-token baseline, so the OpenAI-compatible endpoint ignores
+   the name rather than honouring it under a different one. That endpoint's own
+   repetition controls are [frequency_penalty] / [presence_penalty], which are
+   different functions of the token history and not this value under another
+   spelling -- so there is nothing to translate to, and the declaration is
+   refused rather than silently reinterpreted.
+
+   A binding whose provider is not declared is not judged here: those are
+   dropped downstream by design, and naming them at this Gate would report the
+   wrong defect. *)
+let validate_ollama_only_binding_fields
+      (providers : Runtime_schema.provider list)
+      (bindings : Runtime_schema.binding list)
+  : parse_error list
+  =
+  let api_format_of_provider provider_id =
+    List.find_map
+      (fun (provider : Runtime_schema.provider) ->
+         if String.equal provider.id provider_id
+         then Some provider.api_format
+         else None)
+      providers
+  in
+  List.concat_map
+    (fun (binding : Runtime_schema.binding) ->
+       match api_format_of_provider binding.provider_id with
+       | None | Some Runtime_schema.Ollama_api -> []
+       | Some
+           (( Runtime_schema.Messages_api
+            | Runtime_schema.Chat_completions_api
+            | Runtime_schema.Gemini_api
+            | Runtime_schema.Vertex_gemini_api
+            | Runtime_schema.Codex_app_server_runtime
+            | Runtime_schema.Antigravity_cli_runtime
+            | Runtime_schema.Claude_code_runtime
+            | Runtime_schema.Muse_serve_runtime ) as api_format) ->
+         let path = binding.provider_id ^ "." ^ binding.model_id in
+         let refuse key =
+           error
+             (path ^ "." ^ key)
+             (Printf.sprintf
+                "%s is an Ollama /api/chat option and provider %S speaks %s, whose \
+                 request has no field for it -- the value would be dropped without a \
+                 trace. Remove it, or bind this model to a provider declared with \
+                 protocol = \"ollama-http\"."
+                key
+                binding.provider_id
+                (Runtime_schema.show_api_format api_format))
+         in
+         (match binding.repeat_penalty with
+          | Some _ -> refuse "repeat-penalty"
+          | None -> [])
+         @ (match binding.repeat_last_n with
+            | Some _ -> refuse "repeat-last-n"
+            | None -> []))
+    bindings
+;;
+
+(* [admission-priority-run-limit] orders the queue for an account's permits.
+   Only an HTTP request admitted through [max-concurrent] waits in that
+   queue: official-client runtimes run outside it, and a binding without
+   [max-concurrent] is not admitted. A provider whose bindings cannot use
+   the limit would carry a declaration that orders nothing, so it is refused
+   here, naming the provider. *)
+let validate_priority_run_limit_providers
+      (providers : Runtime_schema.provider list)
+      (bindings : Runtime_schema.binding list)
+  : parse_error list
+  =
+  List.concat_map
+    (fun (provider : Runtime_schema.provider) ->
+       match provider.admission_priority_run_limit with
+       | None -> []
+       | Some limit ->
+         let refuse reason =
+           error
+             (Ns.(path Providers) provider.id
+              ^ "."
+              ^ Runtime_schema.admission_priority_run_limit_key)
+             (Printf.sprintf
+                "%s = %d orders the permit queue of provider %S, but %s. Remove it, \
+                 or declare it where requests wait for a permit."
+                Runtime_schema.admission_priority_run_limit_key
+                limit
+                provider.id
+                reason)
+         in
+         (match provider.api_format with
+          | Runtime_schema.Codex_app_server_runtime
+          | Runtime_schema.Antigravity_cli_runtime
+          | Runtime_schema.Claude_code_runtime
+          | Runtime_schema.Muse_serve_runtime ->
+            refuse
+              (Printf.sprintf
+                 "%s runs as an official client outside account admission"
+                 (Runtime_schema.show_api_format provider.api_format))
+          | Runtime_schema.Messages_api
+          | Runtime_schema.Chat_completions_api
+          | Runtime_schema.Gemini_api
+          | Runtime_schema.Vertex_gemini_api
+          | Runtime_schema.Ollama_api ->
+            if
+              List.exists
+                (fun (binding : Runtime_schema.binding) ->
+                   String.equal binding.provider_id provider.id
+                   && Option.is_some binding.max_concurrent)
+                bindings
+            then []
+            else refuse "none of its bindings declares max-concurrent"))
+    providers
+;;
+
+(* --- [typesafeai] --- *)
+
+let typesafeai_keys =
+  [ "enabled"
+  ; "destinations"
+  ; "board_attention"
+  ; "board_attention_confidence_floor"
+  ; "absorb_gate"
+  ; "context_review"
+  ; "skill_applicability"
+  ; "librarian_preflight"
+  ; "workspace_memory_selection_enabled"
+  ; "memory_recall"
+  ; "memory_recall_scope"
+  ; "memory_recall_keepers"
+  ; "excluded_keepers"
+  ]
+;;
+
+let typesafeai_destination_keys = [ "endpoint"; "model"; "api_key_env" ]
+
+
+let result_errors = function
+  | Ok _ -> []
+  | Error errors -> errors
+;;
+
+(* A keeper name in [excluded_keepers] or [memory_recall_keepers]: a keeper is
+   named by its directory name, so an empty name or one with whitespace names
+   nothing and would exclude nothing, or recall for nobody, while looking as
+   if it did. Whether the name is a keeper of this base path is checked at
+   boot, where the keepers are known. [None] is a key that is not there. *)
+let parse_typesafeai_keeper_names ~(path : string) ~(key : string) (tbl : Otoml.t) =
+  match typed_find "an array of strings" path tbl key (Otoml.get_array Otoml.get_string) with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some names) ->
+    let bad =
+      List.concat_map
+        (fun name ->
+           if String.trim name = "" || String.exists (fun c -> c = ' ' || c = '\t' || c = '\n' || c = '\r') name
+           then
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf "keeper name %S must be non-empty without whitespace" name)
+           else [])
+        names
+    in
+    if bad = [] then Ok (Some names) else Error bad
+;;
+
+let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
+  Result.map
+    (Option.value ~default:[])
+    (parse_typesafeai_keeper_names ~path ~key:"excluded_keepers" tbl)
+;;
+
+(* What the three memory recall keys declare, before the switch decides
+   anything: the switch, and the scope the scope keys name whether the switch
+   is on or off. A file that switched recall off by hand keeps its list here,
+   which {!Runtime_schema.memory_recall} cannot say (off has no scope). *)
+type memory_recall_declaration =
+  { switch : bool
+  ; scope : Runtime_schema.memory_recall_scope option
+  }
+
+let memory_recall_scope_key path = path ^ ".memory_recall_scope"
+
+(* [memory_recall] is the switch and [memory_recall_scope] says which keepers:
+   "all", or "listed" with the names in [memory_recall_keepers]. A "listed"
+   scope with no names is refused, and so is a list next to "all" or to no
+   scope. No way of leaving a key out or writing it empty reaches every
+   keeper, and a list is never ignored while it looks like a limit. The scope
+   keys are read whatever the switch says: a misspelt scope is refused while
+   the switch is off. A switch that is on without a scope is answered here as
+   [{ switch = true; scope = None }]; refusing it is the decision of
+   [parse_typesafeai_memory_recall]. *)
+let parse_typesafeai_memory_recall_declaration ~(path : string) (tbl : Otoml.t)
+  : (memory_recall_declaration, parse_error list) result
+  =
+  let scope_key = memory_recall_scope_key path in
+  let keepers_key = path ^ ".memory_recall_keepers" in
+  let keepers_only_listed =
+    error
+      keepers_key
+      "needs memory_recall_scope = \"listed\"; remove the list or set that scope"
+  in
+  let switch =
+    typed_find_or "a boolean" path tbl "memory_recall" Otoml.get_boolean ~default:false
+  in
+  let scope =
+    match
+      ( typed_find "a string" path tbl "memory_recall_scope" Otoml.get_string
+      , parse_typesafeai_keeper_names ~path ~key:"memory_recall_keepers" tbl )
+    with
+    | Error scope_errors, Error keeper_errors -> Error (scope_errors @ keeper_errors)
+    | Error scope_errors, Ok _ -> Error scope_errors
+    | Ok _, Error keeper_errors -> Error keeper_errors
+    | Ok None, Ok None -> Ok None
+    | Ok None, Ok (Some _) | Ok (Some "all"), Ok (Some _) -> Error keepers_only_listed
+    | Ok (Some "all"), Ok None -> Ok (Some Runtime_schema.All_keepers)
+    | Ok (Some "listed"), Ok (Some (first :: rest)) ->
+      Ok (Some (Runtime_schema.Listed_keepers (first, rest)))
+    | Ok (Some "listed"), Ok (None | Some []) ->
+      Error
+        (error
+           keepers_key
+           "memory_recall_scope = \"listed\" needs at least one keeper name; an empty list does \
+            not mean every keeper")
+    | Ok (Some other), Ok _ ->
+      Error
+        (error
+           scope_key
+           (Printf.sprintf "must be \"all\" or \"listed\", got %S" other))
+  in
+  match switch, scope with
+  | Error switch_errors, Error scope_errors -> Error (switch_errors @ scope_errors)
+  | Error switch_errors, Ok _ -> Error switch_errors
+  | Ok _, Error scope_errors -> Error scope_errors
+  | Ok switch, Ok scope -> Ok { switch; scope }
+;;
+
+(* The switch and the scope are one value for everyone who asks whether a
+   keeper is covered: no scope is read from a switch that is off. *)
+let parse_typesafeai_memory_recall ~(path : string) (tbl : Otoml.t)
+  : (Runtime_schema.memory_recall, parse_error list) result
+  =
+  match parse_typesafeai_memory_recall_declaration ~path tbl with
+  | Error errors -> Error errors
+  | Ok { switch = false; scope = _ } -> Ok Runtime_schema.Memory_recall_off
+  | Ok { switch = true; scope = Some scope } -> Ok (Runtime_schema.Memory_recall_on scope)
+  | Ok { switch = true; scope = None } ->
+    Error
+      (error
+         (memory_recall_scope_key path)
+         "memory_recall = true needs memory_recall_scope: \"all\" or \"listed\" with \
+          memory_recall_keepers")
+;;
+
+(* One entry of [destinations]: the table naming where to post, which model
+   to ask for, and which environment variable holds that server's key. Every
+   field is required. [api_key_env] is a variable name, not a value, so it
+   must look like one: non-empty, no whitespace. *)
+let parse_typesafeai_destination ~(path : string) (entry : Otoml.t)
+  : (Runtime_schema.typesafeai_destination, parse_error list) result
+  =
+  match entry with
+  | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+    let unknown = unknown_table_keys ~path ~expected:typesafeai_destination_keys entries in
+    let required key =
+      match exact_non_empty_string_opt_field ~path entry key with
+      | Ok (Some value) -> Ok value
+      | Ok None -> Error (error (path ^ "." ^ key) (key ^ " is required"))
+      | Error _ as error -> error
+    in
+    let endpoint = required "endpoint" in
+    let model = required "model" in
+    let api_key_env =
+      match required "api_key_env" with
+      | Ok name
+        when String.exists (fun c -> c = ' ' || c = '\t' || c = '\n' || c = '\r') name ->
+        Error
+          (error
+             (path ^ ".api_key_env")
+             (Printf.sprintf
+                "api_key_env %S must name an environment variable without whitespace"
+                name))
+      | (Ok _ | Error _) as other -> other
+    in
+    (match unknown, endpoint, model, api_key_env with
+     | [], Ok endpoint, Ok model, Ok api_key_env ->
+       Ok { Runtime_schema.endpoint; model; api_key_env }
+     | ([] | _ :: _), (Ok _ | Error _), (Ok _ | Error _), (Ok _ | Error _) ->
+       Error
+         (unknown @ result_errors endpoint @ result_errors model @ result_errors api_key_env))
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+  | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+  | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
+      (error path "each destination must be a table with endpoint, model and api_key_env")
+;;
+
+(* [destinations]: an absent key means the vendor's own server alone; a
+   present array names every server asked, in order, and must name at least
+   one. The same server asked for the same model twice would be asked twice,
+   so that pair is refused. *)
+let parse_typesafeai_destinations ~(path : string) (tbl : Otoml.t)
+  : ( Runtime_schema.typesafeai_destination * Runtime_schema.typesafeai_destination list
+    , parse_error list )
+    result
+  =
+  let key_path = path ^ ".destinations" in
+  match Otoml.find_opt tbl Fun.id [ "destinations" ] with
+  | None -> Ok Runtime_schema.default_typesafeai.Runtime_schema.destinations
+  (* An array of inline tables and [[typesafeai.destinations]] headers are the
+     same list written two ways. *)
+  | Some (Otoml.TomlArray entries | Otoml.TomlTableArray entries) ->
+    let parsed =
+      List.mapi
+        (fun index entry ->
+           parse_typesafeai_destination ~path:(Printf.sprintf "%s[%d]" key_path index) entry)
+        entries
+    in
+    (match List.concat_map result_errors parsed, List.filter_map Result.to_option parsed with
+     | [], first :: rest ->
+       let same (a : Runtime_schema.typesafeai_destination) (b : Runtime_schema.typesafeai_destination) =
+         String.equal a.endpoint b.endpoint && String.equal a.model b.model
+       in
+       let rec first_duplicate = function
+         | [] -> None
+         | destination :: later ->
+           if List.exists (same destination) later then Some destination else first_duplicate later
+       in
+       (match first_duplicate (first :: rest) with
+        | None -> Ok (first, rest)
+        | Some duplicate ->
+          Error
+            (error
+               key_path
+               (Printf.sprintf
+                  "destination %s (%s) is listed twice"
+                  duplicate.endpoint
+                  duplicate.model)))
+     | [], [] ->
+       Error
+         (error
+            key_path
+            "destinations must name at least one server; leave the key out for the vendor's own")
+     | errors, _ -> Error errors)
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) -> Error (error key_path "destinations must be an array of tables")
+;;
+
+(* [board_attention_confidence_floor] is a confidence Jev reports, so it is a
+   number from 0 to 1. A value outside that range would settle every answer or
+   none while looking like a floor. *)
+let parse_typesafeai_confidence_floor ~(path : string) (tbl : Otoml.t) ~default =
+  let key = "board_attention_confidence_floor" in
+  match typed_find_or "a float" path tbl key Otoml.get_float ~default with
+  | Error _ as refused -> refused
+  | Ok floor
+    when Float.is_nan floor || Float.compare floor 0.0 < 0 || Float.compare floor 1.0 > 0 ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf "must be a number from 0 to 1, got %g" floor))
+  | Ok floor -> Ok floor
+;;
+
+(* [\[typesafeai\]] -- the TypeSafe AI lane; the key is not here. An absent
+   table is {!Runtime_schema.default_typesafeai}; a present one is read
+   strictly, so a misspelt key is a load error rather than a switch that
+   silently did nothing. *)
+let parse_typesafeai (toml : Otoml.t)
+  : (Runtime_schema.typesafeai, parse_error list) result
+  =
+  let path = Ns.(key Typesafeai) in
+  match Otoml.find_opt toml Fun.id [ path ] with
+  | None -> Ok Runtime_schema.default_typesafeai
+  | Some ((Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as tbl) ->
+    let unknown = unknown_table_keys ~path ~expected:typesafeai_keys entries in
+    let d = Runtime_schema.default_typesafeai in
+    let enabled = typed_find_or "a boolean" path tbl "enabled" Otoml.get_boolean ~default:d.lane_enabled in
+    let destinations = parse_typesafeai_destinations ~path tbl in
+    let board_attention =
+      typed_find_or "a boolean" path tbl "board_attention" Otoml.get_boolean ~default:d.board_attention
+    in
+    let board_attention_confidence_floor =
+      parse_typesafeai_confidence_floor
+        ~path
+        tbl
+        ~default:d.board_attention_confidence_floor
+    in
+    let absorb_gate =
+      typed_find_or "a boolean" path tbl "absorb_gate" Otoml.get_boolean ~default:d.absorb_gate
+    in
+    let context_review =
+      typed_find_or "a boolean" path tbl "context_review" Otoml.get_boolean ~default:d.context_review
+    in
+    let skill_applicability =
+      typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
+    in
+    let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
+    let librarian_preflight =
+      typed_find_or "a boolean" path tbl "librarian_preflight" Otoml.get_boolean
+        ~default:d.librarian_preflight
+    in
+    let workspace_memory_selection_enabled =
+      typed_find_or "a boolean" path tbl "workspace_memory_selection_enabled" Otoml.get_boolean
+        ~default:d.workspace_memory_selection_enabled
+    in
+    let memory_recall = parse_typesafeai_memory_recall ~path tbl in
+    (match
+       ( unknown
+       , enabled
+       , destinations
+       , board_attention
+       , board_attention_confidence_floor
+       , absorb_gate
+       , context_review
+       , skill_applicability
+       , librarian_preflight
+       , workspace_memory_selection_enabled
+       , memory_recall
+       , excluded_keepers )
+     with
+     | ( []
+       , Ok lane_enabled
+       , Ok destinations
+       , Ok board_attention
+       , Ok board_attention_confidence_floor
+       , Ok absorb_gate
+       , Ok context_review
+       , Ok skill_applicability
+       , Ok librarian_preflight
+       , Ok workspace_memory_selection_enabled
+       , Ok memory_recall
+       , Ok excluded_keepers ) ->
+       Ok
+         { Runtime_schema.lane_enabled
+         ; destinations
+         ; board_attention
+         ; board_attention_confidence_floor
+         ; absorb_gate
+         ; context_review
+         ; skill_applicability
+         ; librarian_preflight
+         ; workspace_memory_selection_enabled
+         ; memory_recall
+         ; excluded_keepers
+         }
+     | ( ([] | _ :: _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _) ) ->
+       Error
+         (unknown
+          @ result_errors enabled
+          @ result_errors destinations
+          @ result_errors board_attention
+          @ result_errors board_attention_confidence_floor
+          @ result_errors absorb_gate
+          @ result_errors context_review
+          @ result_errors skill_applicability
+          @ result_errors librarian_preflight
+          @ result_errors workspace_memory_selection_enabled
+          @ result_errors memory_recall
+          @ result_errors excluded_keepers))
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error path "[typesafeai] must be a TOML table")
+;;
+
+let parse_table (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
+  let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
+  let providers_result = parse_providers toml in
+  let models_result = parse_models toml in
+  let runtime_section_result = parse_runtime_section toml in
+  let assignments_result = parse_keeper_assignments toml in
+  let bindings_result = parse_bindings toml in
+  let lanes_result = parse_lanes toml in
+  let exact_output_lanes_result =
+    match parse_exact_output_lanes toml, parse_addon_exact_output_lanes toml with
+    | Ok builtin, Ok addon -> Ok (builtin @ addon)
+    | Error errors, Ok _ | Ok _, Error errors -> Error errors
+    | Error builtin, Error addon -> Error (builtin @ addon)
+  in
+  let exec_ssh_endpoints_result = parse_exec_endpoints toml in
+  let egress_allowlists_result = parse_egress_allowlists toml in
+  let lsp_servers_result = parse_lsp_servers toml in
+  let typesafeai_result = parse_typesafeai toml in
+  let browser_result = Browser_configuration.parse toml
+    |> Result.map_error (fun message -> error (Ns.key Ns.Browser) message) in
+  let machines_result = Machine_configuration.parse toml
+    |> Result.map_error (fun message -> error (Ns.key Ns.Machines) message) in
+  let errs = function Ok _ -> [] | Error errs -> errs in
+  let all_errors =
+    errs obsolete_namespaces_result
+    @ errs providers_result
+    @ errs models_result
+    @ errs runtime_section_result
+    @ errs assignments_result
+    @ errs bindings_result
+    @ errs lanes_result
+    @ errs exact_output_lanes_result
+    @ errs exec_ssh_endpoints_result
+    @ errs egress_allowlists_result
+    @ errs lsp_servers_result
+    @ errs typesafeai_result
+    @ errs browser_result
+    @ errs machines_result
+  in
+  if all_errors <> []
+  then Error all_errors
+  else (
+    let providers =
+      extract_after_all_errors_guard ~label:(Ns.(key Providers)) providers_result
+    in
+    let models = extract_after_all_errors_guard ~label:(Ns.(key Models)) models_result in
+    let keeper_assignments =
+      extract_after_all_errors_guard ~label:"assignments" assignments_result
+    in
+    let bindings =
+      extract_after_all_errors_guard ~label:"bindings" bindings_result
+    in
+    let runtime_section =
+      extract_after_all_errors_guard ~label:(Ns.(key Runtime)) runtime_section_result
+    in
+    let lane_decls =
+      extract_after_all_errors_guard ~label:"lanes" lanes_result
+    in
+    let exact_output_lane_decls =
+      extract_after_all_errors_guard
+        ~label:"exact_output_lanes"
+        exact_output_lanes_result
+    in
+    let exec_ssh_endpoints =
+      extract_after_all_errors_guard
+        ~label:"exec_ssh_endpoints"
+        exec_ssh_endpoints_result
+    in
+    let egress_allowlists =
+      extract_after_all_errors_guard ~label:"egress_allowlists" egress_allowlists_result
+    in
+    let lsp_servers =
+      extract_after_all_errors_guard ~label:"lsp_servers" lsp_servers_result
+    in
+    let browser = extract_after_all_errors_guard ~label:(Ns.key Ns.Browser) browser_result in
+    let machines = extract_after_all_errors_guard ~label:(Ns.key Ns.Machines) machines_result in
+    let typesafeai = extract_after_all_errors_guard ~label:(Ns.(key Typesafeai)) typesafeai_result in
+    (* Cross-table Gates: whether a declaration can take effect depends on
+       another table -- a binding field on its provider's request builder, a
+       provider's run limit on its bindings' permit queue. *)
+    match
+      validate_ollama_only_binding_fields providers bindings
+      @ validate_priority_run_limit_providers providers bindings
+    with
+    | _ :: _ as errors -> Error errors
+    | [] ->
+      Ok
+        { Runtime_schema.providers
+        ; models
+        ; bindings
+        ; default_runtime_id = runtime_section.default_runtime_id
+        ; keeper_assignments
+        ; media_failover = runtime_section.media_failover
+        ; lane_decls
+        ; exact_output_lane_decls
+        ; exec_ssh_endpoints
+        ; egress_allowlists
+        ; lsp_servers
+        ; typesafeai
+        ; browser
+        ; machines
+        })
+;;
+
+let parse_toml = function
+  | Otoml.TomlTable _ as toml -> parse_table toml
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ->
+      Error [{path="<parse>"; message="otoml returned a non-table document root"}]
+;;
+
+let parse_string (content : string) : (Runtime_schema.config, parse_error list) result =
+  match Otoml.Parser.from_string_result content with
+  | Ok toml -> parse_toml toml
+  | Error msg -> Error [ { path = "<parse>"; message = msg } ]
+;;
+
+let memory_recall_declaration_of_string (content : string)
+  : (memory_recall_declaration, parse_error list) result
+  =
+  match Otoml.Parser.from_string_result content with
+  | Error msg -> Error [ { path = "<parse>"; message = msg } ]
+  | Ok toml ->
+    let path = Ns.(key Typesafeai) in
+    (match Otoml.find_opt toml Fun.id [ path ] with
+     | None -> Ok { switch = false; scope = None }
+     | Some ((Otoml.TomlTable _ | Otoml.TomlInlineTable _) as tbl) ->
+       parse_typesafeai_memory_recall_declaration ~path tbl
+     | Some
+         ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+         | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+         | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+         | Otoml.TomlTableArray _ ) -> Error (error path "[typesafeai] must be a TOML table"))
+;;
+
+(* The legacy keys this text still carries, dotted paths like
+   ["models.gpt-5.max-prompt-bytes"], for a save to name in its warning.
+   Read straight off the parsed TOML rather than threading a side channel
+   through [parse_toml]: the keys are ignored there, and the reader that has
+   to name them is the caller, which already holds the document. *)
+let ignored_legacy_keys (content : string) : string list =
+  match Otoml.Parser.from_string_result content with
+  | Error _ -> []
+  | Ok toml ->
+    let entries_of = function
+      | Otoml.TomlTable entries | Otoml.TomlInlineTable entries -> entries
+      | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+      | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+      | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+      | Otoml.TomlTableArray _ -> []
+    in
+    let model_entries id =
+      match Otoml.find_opt toml Fun.id [ "models"; id ] with
+      | Some tbl -> entries_of tbl
+      | None -> []
+    in
+    let models =
+      match Otoml.find_opt toml Fun.id [ "models" ] with
+      | Some tbl ->
+        List.filter_map
+          (fun (id, _) -> if id <> "" then Some id else None)
+          (entries_of tbl)
+      | None -> []
+    in
+    List.concat_map
+      (fun id ->
+         let caps =
+           match List.assoc_opt "capabilities" (model_entries id) with
+           | Some tbl -> entries_of tbl
+           | None -> []
+         in
+         List.filter_map
+           (fun (key, _) ->
+              if List.mem key legacy_model_keys
+              then Some (Printf.sprintf "models.%s.%s" id key)
+              else if List.mem key legacy_model_capability_keys
+              then Some (Printf.sprintf "models.%s.capabilities.%s" id key)
+              else None)
+           (model_entries id)
+         @ List.filter_map
+              (fun (key, _) ->
+                 if List.mem key legacy_model_capability_keys
+                 then Some (Printf.sprintf "models.%s.capabilities.%s" id key)
+                 else None)
+              caps)
+      models
+    |> List.sort_uniq String.compare
+;;
+
+let parse_file (path : string) : (Runtime_schema.config, parse_error list) result =
+  try
+    let toml = Otoml.Parser.from_file path in
+    parse_toml toml
+  with
+  | Otoml.Parse_error (_, msg) -> Error [ { path; message = msg } ]
+  | Sys_error msg -> Error [ { path; message = msg } ]
+;;

@@ -1,0 +1,23 @@
+{
+  "retained_at": "2026-10-28T17:49:06.651926+00:00",
+  "source_sha": "c2bdd3cc4b4106e83b3ea2b68413e902dd61143d",
+  "binary_sha256": "08def3f40aa31311a7711478515e18b64402a90b864a492657172b46bbce2166",
+  "workflow": "Minimal manual checks",
+  "run": 40732646584,
+  "workflow_ref": "main",
+  "workflow_sha": "2909fcaf49a579d376b6de5618a7aa9538654fed",
+  "workflow_conclusion": "cancelled",
+  "native_job_conclusion": "success",
+  "capture_files": {
+    "c2-actions.jsonl": "2a7e722832970156bad19e92186478d498183a6bfd5c7bcda6f3ba0bb34ed3a4",
+    "c2-count1-adaptive-80x24.txt": "eeaa9f6aa4c67da26bf8fee62a67850085a572ee5ab04c7a320c428fc03890c6",
+    "c2-count1-selected-80x24.txt": "2c322f8cd358cb5a5c2a3cfb86fcbfad91d8fe4d2b535c10ebd3341948dc5d50",
+    "c2-count18-adaptive-80x24.txt": "0883cbe35a38fcdc7c99c5fc0affcd57da3107b69f7c9dfabdbbdb6c818fe819",
+    "c2-matched-footer-80x24.txt": "7e5c26c4323974d4b06a74e50a44bd064cf1832832c9b835119c5e1d0f7a7c37",
+    "fixture-events.jsonl": "604cb047c9c84cdd68ee881625575a5d2c8756ebb65254b5a22dd7172f7b261e",
+    "fixture.py": "d7ba56da0b4af082537d2ba28cb8859f83f0e57939b0ad3e077effe28e173ddb",
+    "matched-fixture.py": "017aa45118a86c84fa14e22a1243b8ca5ae5d4d2d3ba8221da163c10abb1149e",
+    "native-receipt.json": "27924385dfc2de9361d38cb53fac24f3517b0aff633d66eb66893c9b62f03919"
+  },
+  "scope": "Revised placement and footer warning condition observed on c2, not later viewport input changes. Matching footer fixture only claims the TUI source SHA in synthetic health metadata; no matching real server binary."
+}

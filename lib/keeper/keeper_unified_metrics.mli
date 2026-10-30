@@ -1,0 +1,182 @@
+(** Keeper_unified_metrics — Observation helpers, decision records, and
+    metrics update for the unified keeper cycle.
+
+    Extracted from keeper_unified_turn.ml.
+
+    @since 0.120.0 *)
+
+(** Derive the trigger list from the observation. *)
+val observed_triggers_of_observation :
+  Keeper_world_observation.world_observation ->
+  string list
+
+(** Derive the affordance list from the observation. *)
+val observed_affordances_of_observation :
+  Keeper_world_observation.world_observation ->
+  string list
+
+type turn_mode =
+  | Tool_use
+  | Text_response
+  | Skip_text
+  | Noop
+
+type usage_trust = Keeper_usage_trust.t =
+  | Usage_missing
+  | Usage_trusted
+  | Usage_untrusted of string list
+
+val classify_usage_trust :
+  usage_reported:bool ->
+  usage:Agent_core.Types.api_usage ->
+  usage_trust
+(** Classify usage counters without reconstructing concrete provider/model
+    identity. *)
+
+val usage_trust_to_string : usage_trust -> string
+
+val usage_trust_reasons : usage_trust -> string list
+
+(** Canonical metric names for the per-turn usage-trust counters
+    (#9959).  Exposed so tests can pin the names without hard-coding
+    string literals.
+
+    Labels:
+    - [usage_trust_outcome_metric]: [("keeper", ...); ("outcome",
+      "trusted" | "missing" | "untrusted")]
+    - [usage_anomaly_reason_metric]: [("keeper", ...); ("reason", ...)]
+      where [reason] is one of the strings [classify_usage_trust]
+      attaches to [Usage_untrusted]. *)
+val usage_trust_outcome_metric : string
+val usage_anomaly_reason_metric : string
+
+(** [record_usage_trust ~keeper_name ~trust] increments the outcome
+    counter once and, for [Usage_untrusted] outcomes, also
+    increments [usage_anomaly_reason_metric] per reason and logs a
+    warn line.
+
+    Intended for a single per-turn emit site — currently
+    [update_metrics_from_result]. Other classify sites serialize
+    [trust] into the JSONL ledger without bumping the counter so
+    the counter rate equals the per-turn rate. *)
+val record_usage_trust :
+  keeper_name:string ->
+  trust:usage_trust ->
+  unit
+
+val context_max_bucket : int -> string
+(** #9953: bucket a raw [context_max] integer into a bounded
+    label vocabulary [zero | 64k | 128k | 200k | 256k | 1m |
+    other].  Pure helper exposed so dashboards / runbooks can
+    reference the same string mapping the metric uses. *)
+
+val record_context_max_observation :
+  keeper:string ->
+  context_max:int ->
+  unit
+(** #9953: emit the
+    [masc_keeper_context_max_observed_total
+       {keeper, model_used, resolved_model_id, context_max_bucket}]
+    counter for one turn.  The historical model labels are emitted as the
+    neutral ["runtime"] lane. Intended to be called once per snapshot-write so
+    the counter rate equals the per-turn rate. *)
+
+(** {1 #9943: long-turn observer}
+
+    [turn_latency_bucket ms] returns the bucket label for a turn that
+    took [ms] milliseconds.  The vocabulary is bounded
+    ([under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]) so
+    Otel_metric_store cardinality stays at [keeper × 5].
+
+    [record_turn_latency_bucket] increments
+    {!Keeper_metrics.(to_string TurnLatencyBucket)} on the matching
+    bucket and emits a [Log.Keeper.warn] line when [latency_ms]
+    crosses {!long_turn_warn_threshold_ms}.  Threshold reads
+    [MASC_KEEPER_LONG_TURN_WARN_MS] (ms, default
+    [long_turn_warn_threshold_ms_default = 600_000] = 10 min) on each
+    call so operators can dial it without restart. *)
+val turn_latency_bucket : int -> string
+
+val long_turn_warn_threshold_ms_default : int
+
+val long_turn_warn_threshold_ms : unit -> int
+
+val record_turn_latency_bucket :
+  keeper:string -> latency_ms:int -> unit
+
+val record_turn_latency_by_model_bucket :
+  keeper:string ->
+  channel:string ->
+  runtime_profile:string ->
+  latency_ms:int ->
+  unit
+
+
+val update_metrics_from_result :
+  Keeper_meta_contract.keeper_meta ->
+  latency_ms:int ->
+  observation:Keeper_world_observation.world_observation ->
+  usage_resolution:Keeper_usage_resolution.t ->
+  usage_cursor:Keeper_usage_resolution.cursor option ->
+  ?is_autonomous_turn:bool ->
+  Keeper_agent_run.run_result ->
+  Keeper_meta_contract.keeper_meta
+
+val update_metrics_from_failure :
+  Keeper_meta_contract.keeper_meta ->
+  latency_ms:int ->
+  observation:Keeper_world_observation.world_observation ->
+  reason:string ->
+  ?core_error:Agent_core.Error.t ->
+  unit ->
+  Keeper_meta_contract.keeper_meta
+(** Adds resolved attempt token deltas and advances the usage cursor. Cost
+    coverage is accumulated once from all actual readings by the terminal
+    commit path, including attempts without readings. *)
+val with_attempt_spend :
+  Keeper_meta_contract.keeper_meta ->
+  resolved:Keeper_turn_spend.resolved list ->
+  usage_cursor:Keeper_usage_resolution.cursor option ->
+  Keeper_meta_contract.keeper_meta
+
+
+val append_metrics_snapshot :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  observation:Keeper_world_observation.world_observation ->
+  keeper_turn_id:int ->
+  result:Keeper_agent_run.run_result ->
+  latency_ms:int ->
+  usage_resolution:Keeper_usage_resolution.t ->
+  turn_cost:float ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  checkpoint_bytes:int option ->
+  message_count:int ->
+  unit ->
+  unit
+
+val append_decision_record :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
+  observation:Keeper_world_observation.world_observation ->
+  latency_ms:int ->
+  outcome:Keeper_decision_outcome.t ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
+  execution_path:Keeper_unified_metrics_decision.execution_path ->
+  degraded_retry_applied:Keeper_error_classify.degraded_retry option ->
+  degraded_retry_deferred:Keeper_error_classify.degraded_retry option ->
+  ?turn_mode:turn_mode ->
+  ?result:Keeper_agent_run.run_result option ->
+  ?usage_resolution:Keeper_usage_resolution.t option ->
+  ?error:string ->
+  ?terminal_reason:Keeper_turn_terminal.t ->
+  ?executed_runtime_id:string ->
+  unit ->
+  unit
+
+val turn_mode_of_result : Keeper_agent_run.run_result -> turn_mode
+
+val turn_mode_to_string : turn_mode -> string
+
+val work_kind_of_json : Yojson.Safe.t -> string option

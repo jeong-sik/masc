@@ -1,0 +1,729 @@
+(* Shared dependency re-export for MASC test suite.
+   Also hosts tiny test helpers that need a single SSOT across files. *)
+
+module Server_grpc_tool_dispatch = Server_grpc_tool_dispatch
+
+(** Install the Eio clock + optional switch in every registry the lib
+    code reads from.
+
+    MASC stores clock state in two places: [Time_compat] (sleep/now) and
+    [Eio_context] (Dashboard_cache and other lib/ code that needs the raw
+    [float Eio.Time.clock_ty]). Historically harnesses called only
+    [Time_compat.set_clock], so anything hitting [Eio_context.get_clock_opt]
+    failed with [failwith "Eio clock unavailable"] on the first cache-compute
+    path. Main CI skipped Build and Test for 100+ dashboard-only commits, so
+    the regression was invisible.
+
+    Call this once per harness after [Eio_main.run @@ fun env ->]
+    (and [Eio.Switch.run @@ fun sw ->] if the test publishes a switch). *)
+let init_eio_clock ?sw env =
+  let clock = Eio.Stdenv.clock env in
+  Time_compat.set_clock clock;
+  Eio_context.set_clock clock;
+  Option.iter Eio_context.set_switch sw
+
+(** Run [f] with [sw] installed as the server root switch, then put back the
+    Eio context the caller had. A Keeper lane forks only on the server root
+    switch ([Keeper_lane.fork_server_owned]); a fixture that starts lanes
+    (keeper up, keeper create, supervisor launch) without one has them
+    refused. *)
+let with_server_root_switch ~sw f =
+  let previous = Eio_context.snapshot_state () in
+  Eio_context.set_switch sw;
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state previous) f
+
+(* An empty value is not an absent one: timeout and config readers distinguish
+   a missing variable from [Unix.putenv key ""], which they reject as
+   malformed. OCaml 5.5 added [Unix.unsetenv], while the test suite continues
+   to bind the shared [masc_test_unsetenv] C stub so existing test binaries and
+   [with_process_env] share one variable-removal primitive. *)
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+(* Runs [f] with [key] set to [value] ([None]: absent) in the process
+   environment -- the channel a shell declares a setting through. It outranks
+   a boot override for a [Toml_and_env] setting and is not read for a
+   [Toml_only] one. Puts back what the shell running the suite had exported.
+   A case declares its value over an inherited one instead of skipping under
+   it. *)
+let with_process_env key value f =
+  let inherited = Sys.getenv_opt key in
+  let install = function
+    | Some value -> Unix.putenv key value
+    | None -> unsetenv key
+  in
+  install value;
+  Fun.protect ~finally:(fun () -> install inherited) f
+;;
+
+(* Runs [f] with [values] ((name, value) pairs) as the runtime file's values,
+   the way the loader leaves them: every file-owned registry name declared and
+   the given values in the boot store, so the shell's own values for any of
+   those names are not consulted. The store and the declaration are emptied
+   before and after. *)
+let with_file_owned_values values f =
+  Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.declare_file_owned
+    (Keeper_runtime_setting_registry.file_owned_env_names @ List.map fst values);
+  List.iter (fun (name, value) -> Config_boot_overrides.set name value) values;
+  Fun.protect ~finally:Config_boot_overrides.reset_for_tests f
+;;
+
+(** Publish a [typesafeai] policy for the duration of [f], then restore the
+    one that was published: what [Runtime.set_loaded] does on load, for a test
+    that has no runtime.toml. *)
+let with_typesafeai_policy (policy : Runtime_schema.typesafeai) f =
+  let inherited = Runtime_typesafeai_policy.current () in
+  Runtime_typesafeai_policy.publish policy;
+  Fun.protect ~finally:(fun () -> Runtime_typesafeai_policy.publish inherited) f
+;;
+
+let init_unified_tool_registry () =
+  if not (Tool_dispatch.is_tag_registry_initialized ()) then
+    (Masc.Unified_tool_registry.register_all ();
+     Masc.Unified_tool_registry.enforce_visible_tag_coverage ())
+
+(** Test fixture parser for current-schema [keeper_meta] JSON. Focused fixtures
+    may specify only the fields relevant to a test; every omitted persisted
+    field is completed from one deterministic current-schema object before the
+    production parser sees it. *)
+let meta_of_json_fixture (json : Yojson.Safe.t) =
+  let fixture_config_keys =
+    [ "mention_targets"
+    ; "board_interests"
+    ; "always_allow"
+    ; "activation_mode"
+    ; "telemetry_feedback_enabled"
+    ; "telemetry_feedback_window_hours"
+    ]
+  in
+  let mem_key key keys = List.exists (String.equal key) keys in
+  let sanitize_trace_fragment s =
+    let buf = Buffer.create (String.length s) in
+    String.iter
+      (fun c ->
+        match c with
+        | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' ->
+            Buffer.add_char buf c
+        | _ -> Buffer.add_char buf '-')
+      s;
+    match String.trim (Buffer.contents buf) with
+    | "" -> "fixture"
+    | fragment -> fragment
+  in
+  let json', fixture_json =
+    match json with
+    | `Assoc fields ->
+      let module Schema = Masc.Keeper_meta_json_current_schema in
+      let name =
+        match List.assoc_opt "name" fields with
+        | Some (`String value) -> value
+        | _ -> "fixture"
+      in
+      let trace_id =
+        let candidate = "trace-" ^ sanitize_trace_fragment name in
+        if String.length candidate <= 64 then candidate
+        else String.sub candidate 0 64
+      in
+      let default_value = function
+        | Schema.Schema -> `String "masc.keeper_meta.v2"
+        | Schema.Name -> `String name
+        | Schema.Instructions -> `String ""
+        | Schema.Trace_id -> `String trace_id
+        | Schema.Created_at | Schema.Updated_at ->
+          `String "1970-01-01T00:00:00Z"
+        | Schema.Total_turns
+        | Schema.Total_input_tokens
+        | Schema.Total_output_tokens
+        | Schema.Total_tokens
+        | Schema.Last_input_tokens
+        | Schema.Last_output_tokens
+        | Schema.Last_total_tokens
+        | Schema.Last_latency_ms
+        | Schema.Proactive_count_total
+        | Schema.Proactive_visible_count_total -> `Int 0
+        | Schema.Total_cost_usd
+        | Schema.Last_turn_ts
+        | Schema.Last_proactive_ts
+        | Schema.Last_visible_proactive_ts -> `Float 0.
+        | Schema.Last_proactive_outcome ->
+          `String
+            (Masc.Keeper_meta_contract.proactive_cycle_outcome_to_string
+               Masc.Keeper_meta_contract.Proactive_never_started)
+        | Schema.Last_proactive_reason
+        | Schema.Last_proactive_preview -> `String ""
+        | Schema.Message_scope_ack_id
+        | Schema.Usage_cursor
+        | Schema.Last_usage_resolution
+        | Schema.Last_runtime_attempt
+        | Schema.Latched_reason
+        | Schema.Current_task_id
+        | Schema.Keeper_id -> `Null
+        | Schema.Paused -> `Bool false
+        | Schema.Agent_core_env -> `Assoc []
+      in
+      let field_values =
+        List.map
+          (fun field ->
+             let key = Schema.field_name field in
+             let value =
+               match List.assoc_opt key fields with
+               | Some value -> value
+               | None -> default_value field
+             in
+             field, value)
+          Schema.all_fields
+      in
+      let unknown_fields =
+        List.filter
+          (fun (key, _) ->
+             (not (mem_key key Schema.current_field_names))
+             && not (mem_key key fixture_config_keys))
+          fields
+      in
+      let canonical_fields =
+        match Schema.object_of_field_values field_values with
+        | `Assoc canonical_fields -> canonical_fields
+        | _ -> invalid_arg "current keeper fixture schema did not produce an object"
+      in
+      `Assoc (canonical_fields @ unknown_fields), json
+    | other -> other, other
+  in
+  (* Production [meta_of_json] no longer reads TOML-only config keys from JSON
+     (TOML is the SSOT; the runtime JSON carries only runtime state). Focused
+     fixtures still set config inline for convenience, so this test helper
+     re-applies those keys onto the parsed record. This keeps config injection a
+     test-only concern and does not resurrect the production JSON read path. *)
+  match Masc.Keeper_meta_json_parse.meta_of_json json' with
+  | Error _ as e -> e
+  | Ok meta ->
+    let open Masc.Keeper_meta_contract in
+    let bool_opt key = Safe_ops.json_bool_opt key fixture_json in
+    let apply_bool_opt key current =
+      match bool_opt key with Some _ as v -> v | None -> current
+    in
+    let apply_string_list key current =
+      match Safe_ops.json_string_list key fixture_json with
+      | [] -> current
+      | xs -> xs
+    in
+    Ok
+      { meta with
+        mention_targets = apply_string_list "mention_targets" meta.mention_targets
+      ; board_interests = apply_string_list "board_interests" meta.board_interests
+      ; activation_mode =
+          (match Safe_ops.json_string_opt "activation_mode" fixture_json with
+           | None -> meta.activation_mode
+           | Some raw ->
+             match Masc.Keeper_activation_mode.of_string raw with
+             | Some mode -> mode
+             | None -> invalid_arg "invalid fixture activation_mode")
+      ; always_allow = apply_bool_opt "always_allow" meta.always_allow
+      ; telemetry_feedback_enabled =
+          apply_bool_opt "telemetry_feedback_enabled" meta.telemetry_feedback_enabled
+      ; telemetry_feedback_window_hours =
+          (match
+             Safe_ops.json_int_opt "telemetry_feedback_window_hours" fixture_json
+           with
+           | Some _ as v -> v
+           | None -> meta.telemetry_feedback_window_hours)
+      }
+
+(** Current-schema [keeper_meta] JSON exactly as the production writer emits it.
+
+    Schema-conformance tests use this instead of a hand-written object so the
+    fixture cannot drift from the writer: the only caller-supplied value is the
+    name, and every other key comes from [meta_to_json]. A fixture that stopped
+    matching the schema would therefore be a writer change, not a stale literal. *)
+let current_meta_json_fixture ~name () =
+  match meta_of_json_fixture (`Assoc [ ("name", `String name) ]) with
+  | Ok meta -> Masc.Keeper_meta_json.meta_to_json meta
+  | Error detail ->
+    failwith ("current_meta_json_fixture could not build current meta: " ^ detail)
+
+(** The identity a fixture [Keeper_librarian.input] names as the Keeper whose
+    memory it curates. Raises [Failure] on a blank name, which no fixture
+    should pass. *)
+let keeper_id_fixture name =
+  match Masc.Keeper_identity.Keeper_id.of_string name with
+  | Some id -> id
+  | None -> failwith "keeper_id_fixture: the keeper name is blank"
+
+(** Walk up the directory tree from [Sys.getcwd()] until [dune-project] is
+    found, then return that directory.
+    Raises [Failure] with a descriptive message if the marker file
+    cannot be found by the time the filesystem root is reached. *)
+let find_project_root () =
+  let marker = "dune-project" in
+  let start_dir = Sys.getcwd () in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when Sys.file_exists (Filename.concat root marker) -> root
+  | _ ->
+  let rec walk dir =
+    if Sys.file_exists (Filename.concat dir marker) then dir
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then
+        failwith
+          (Printf.sprintf
+             "Could not find %s when walking upward from %s"
+             marker start_dir)
+      else
+        walk parent
+  in
+  walk start_dir
+
+let validate_source_relpath rel =
+  let fail reason =
+    failwith
+      (Printf.sprintf
+         "Masc_test_deps.source_path requires a clean repo-relative path: %S (%s)"
+         rel
+         reason)
+  in
+  if String.equal rel "" then fail "empty path";
+  if not (Filename.is_relative rel) then fail "absolute path";
+  if String.starts_with ~prefix:"./" rel then fail "leading ./";
+  let parts = String.split_on_char '/' rel in
+  List.iter
+    (function
+      | "" -> fail "empty path segment"
+      | "." -> fail "current-directory path segment"
+      | ".." -> fail "parent-directory path segment"
+      | _ -> ())
+    parts
+
+let source_path rel =
+  validate_source_relpath rel;
+  Filename.concat (find_project_root ()) rel
+
+let read_file path =
+  try
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let n = in_channel_length ic in
+        really_input_string ic n)
+  (* Catch only [Sys_error] so OOM/Stack_overflow/Sys.Break and other fatal or
+     async exceptions propagate instead of being folded into a [Failure]. *)
+  with Sys_error msg ->
+    failwith
+      (Printf.sprintf
+         "Masc_test_deps.read_file failed for %S: %s"
+         path
+         msg)
+
+let sorted_strings = List.sort String.compare
+
+(** Create an isolated temporary workspace for tests that need credentials.
+    The directory and its [.masc/] subtree are removed by
+    {!cleanup_test_workspace}. *)
+let setup_test_workspace () =
+  let unique_id =
+    Printf.sprintf "masc-sse-test-%d-%d"
+      (Unix.getpid ())
+      (int_of_float (Unix.gettimeofday () *. 1000.))
+  in
+  let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
+  Unix.mkdir tmp 0o755;
+  let masc_dir = Filename.concat tmp Common.masc_dirname in
+  Unix.mkdir masc_dir 0o755;
+  tmp
+
+let cleanup_test_workspace dir =
+  (* [Unix.lstat], not [Sys.is_directory]: the latter follows symlinks, so a
+     link to a directory would make [Sys.readdir] enumerate the *target* and
+     this loop delete entries outside the workspace. [S_LNK] falls through to
+     [Sys.remove], which unlinks the link itself. *)
+  let rec rm_rf path =
+    match Unix.lstat path with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
+      Unix.rmdir path
+    | _ -> Sys.remove path
+  in
+  try rm_rf dir with _ -> ()
+
+(** Run a test callback with a fresh, inventoried publication-recovery registry.
+    Existing startup state is rejected instead of duplicating the production
+    reconciliation policy in a test helper; startup reconciliation has its own
+    integration tests. [registry_root] is owned by the caller and must outlive
+    [sw]. *)
+let with_publication_recovery_registry ~sw ~fs ~registry_root f =
+  let registry_root = Eio.Path.(fs / registry_root) in
+  match
+    Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
+  with
+  | Error error ->
+    failwith
+      ("test publication recovery registry open failed: "
+       ^ Fs_compat.Publication_recovery.registry_error_to_string error)
+  | Ok publication_recovery_registry ->
+    (match
+       Fs_compat.Publication_recovery.discover_owners
+         publication_recovery_registry
+     with
+     | Error error ->
+       failwith
+         ("test publication recovery discovery failed: "
+          ^ Fs_compat.Publication_recovery.discovery_error_to_string
+              error)
+     | Ok [] -> f publication_recovery_registry
+     | Ok rows ->
+       failwith
+         ("fresh test publication recovery registry contains owners: "
+          ^ String.concat
+              "; "
+              (List.map
+                 Fs_compat.Publication_recovery.owner_discovery_row_to_string
+                 rows)))
+;;
+
+let publication_recovery_provider registry =
+  Masc.Keeper_publication_recovery_availability.constant
+    (Masc.Keeper_publication_recovery_availability.Available registry)
+;;
+
+let non_runtime_publication_recovery_provider =
+  Masc.Keeper_publication_recovery_availability.non_runtime_provider
+;;
+
+let rng_initialized = Atomic.make false
+
+let ensure_rng_initialized () =
+  if Atomic.compare_and_set rng_initialized false true then
+    Mirage_crypto_rng_unix.use_default ()
+
+(** Create a valid bearer token for [agent_name] in [workspace] and return
+    the [Masc.Sse.registration_auth] record used by {!Masc.Sse.register}. *)
+let make_sse_auth workspace agent_name =
+  ensure_rng_initialized ();
+  match Auth.create_token workspace ~agent_name ~role:Masc_domain.Worker with
+  | Ok (raw_token, _cred) -> { Masc.Sse.config = workspace; token = Some raw_token }
+  | Error e ->
+      failwith
+        (Printf.sprintf "make_sse_auth failed for %s: %s"
+           agent_name
+           (Masc_domain.masc_error_to_string e))
+
+let assert_same_string_set ~label ~expected ~actual =
+  let expected = sorted_strings expected in
+  let actual = sorted_strings actual in
+  if actual <> expected then begin
+    Printf.printf "Expected %s : [%s]\n" label
+      (String.concat "; " expected);
+    Printf.printf "Actual   %s : [%s]\n" label
+      (String.concat "; " actual);
+    let only_expected =
+      List.filter (fun s -> not (List.mem s actual)) expected
+    in
+    let only_actual =
+      List.filter (fun s -> not (List.mem s expected)) actual
+    in
+    Printf.printf "Only expected : [%s]\n"
+      (String.concat "; " only_expected);
+    Printf.printf "Only actual   : [%s]\n"
+      (String.concat "; " only_actual);
+    failwith (label ^ " differs")
+  end
+
+(* Which sandbox a fixture's keeper runs in.
+
+   Nothing used to answer this, so the profile came from the placeholder
+   keeper_meta_json_parse.ml fills in -- the same file whose comment says
+   reading that field as authority is a bug regardless of the value being a
+   safe backend. Every suite that builds a meta from JSON inherited Docker
+   without asking for it, and on a machine with no Docker daemon every case
+   in those suites failed on the same container probe.
+
+   Docker stays the default because that is what a CI runner has.
+   MASC_TEST_SANDBOX names another; an unreadable value is a hard failure
+   rather than a silent fallback, because falling back would put the run
+   under a backend the operator did not pick and did not see. *)
+let fixture_sandbox_profile () =
+  match Sys.getenv_opt "MASC_TEST_SANDBOX" with
+  | None -> Masc.Keeper_types_profile.Docker
+  | Some raw ->
+    (match
+       Masc.Keeper_types_profile.sandbox_profile_of_string (String.trim raw)
+     with
+     | Some profile -> profile
+     | None ->
+       failwith
+         (Printf.sprintf
+            "MASC_TEST_SANDBOX=%S is not one of %s"
+            raw
+            (String.concat
+               ", "
+               Masc.Keeper_types_profile.valid_sandbox_profile_strings)))
+;;
+
+(* A keeper nothing declares is not configured (#36066, audit F386): the
+   profile loader answers [Declaration_not_found], and every reader that
+   loads the profile first -- the official-client posture resolve, the SSH
+   endpoint resolve, effective meta, the dashboard projections -- refuses
+   the keeper before any meta snapshot is read. A fixture that writes a meta
+   or runs a turn under a base path declares the keeper at the one path
+   [Config_dir_resolver] spells for it, the way [keeper up] does.
+
+   The declaration's instructions are the keeper's profile text, which a
+   turn does not read as its system prompt; the runtime fixtures pass that
+   prompt explicitly, blank ones included, so the text here is fixed and
+   non-blank. [keeper.name] is not written: the loader derives the name from
+   the file name and refuses a key that disagrees with it.
+
+   [sandbox_profile] is a required argument so each suite states what its
+   path reads: [Keeper_meta_contract.effective_meta_result] refuses a
+   declaration with no sandbox_profile, while the posture and endpoint
+   resolves read only the fields they name and take [None]. Effective metadata
+   also requires [sandbox_image] for Docker/Micro_vm. An existing declaration
+   is overwritten. *)
+let declare_fixture_keeper ?sandbox_image ~base_path ~sandbox_profile name =
+  let path = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let fields =
+    ("instructions", Otoml.TomlString (name ^ " fixture instructions"))
+    :: (match sandbox_profile with
+        | None -> []
+        | Some profile ->
+          [ ( "sandbox_profile"
+            , Otoml.TomlString
+                (Masc.Keeper_types_profile.sandbox_profile_to_string profile) )
+          ])
+    @ (match sandbox_image with
+       | None -> []
+       | Some image -> ["sandbox_image", Otoml.TomlString image])
+  in
+  Out_channel.with_open_bin path (fun output ->
+    output_string
+      output
+      (Otoml.Printer.to_string
+         (Otoml.TomlTable [ "keeper", Otoml.TomlTable fields ])))
+;;
+
+(* The image the live sandbox suites look for in the host's Docker store and
+   promote as [base] in each run's catalog; build it with
+   [masc sandbox-image --tag masc-sandbox-test:ci]. *)
+let live_sandbox_image_tag = "masc-sandbox-test:ci"
+
+
+(* A Keeper's container starts from the build its [sandbox_image] name has in
+   the host's image catalog, so a fixture that reaches a container start
+   promotes one for its workspace, at the config root the runtime resolves
+   for that base path. Names are the ones the binary ships ([base], [ocaml]);
+   each [(name, reference)] is promoted in the selected store (Docker by
+   default). Nothing asks the store whether it holds the reference. Any
+   builds the workspace had are replaced. *)
+
+
+let write_sandbox_image_catalog
+    ?(store = Masc.Keeper_sandbox_image_catalog.Docker_daemon)
+    ~base_path images =
+  let module Catalog = Masc.Keeper_sandbox_image_catalog in
+  let or_fail to_string = function
+    | Ok value -> value
+    | Error error -> failwith ("write_sandbox_image_catalog: " ^ to_string error)
+  in
+  let shipped =
+    match Embedded_config.read Catalog.shipped_file_name with
+    | Some text -> text
+    | None -> failwith "write_sandbox_image_catalog: this binary ships no image catalog"
+  in
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  let config_root = resolution.Config_dir_resolver.config_root.Config_dir_resolver.path in
+  Fs_compat.mkdir_p config_root;
+  (try Sys.remove (Filename.concat config_root Catalog.file_name) with Sys_error _ -> ());
+  let catalog, expected =
+    Catalog.load_for_change ~config_root ~shipped |> or_fail Catalog.load_error_to_string
+  in
+  let catalog =
+    List.fold_left
+      (fun catalog (name, reference) ->
+        Catalog.promote catalog ~name ~store ~reference
+        |> or_fail Catalog.change_error_to_string)
+      catalog images
+  in
+  Catalog.save ~config_root ~expected catalog |> or_fail Catalog.save_error_to_string
+;;
+
+(* The factory a fixture's guest command is dispatched through.
+
+   Typed Shell IR guest dispatch refuses to run without one:
+
+     {"error":"typed Shell IR guest dispatch requires a turn sandbox factory
+       (no factory provided)"}
+
+   Every profile a fixture can name is a guest profile, so a suite whose case
+   must actually run its command wires the same factory the production turn
+   bundle wires. The factory creates its runtime lazily: a case that never
+   dispatches a guest command starts no container. What a case that did
+   dispatch owes at the end is the removal {!with_fixture_sandbox} runs once
+   the body has returned or raised. *)
+let fixture_turn_sandbox_factory ~config ~meta =
+  Some (Masc.Keeper_sandbox_factory.create ~config ~meta ())
+;;
+
+(* The persistent container a fixture's keeper started, removed. The factory
+   never removes it: production removes it at keeper teardown, and
+   [Keeper_sandbox_factory.cleanup] only drops the handle. Not an [at_exit]:
+   that cleanup takes an Eio mutex and the docker call goes through
+   Process_eio, and at process exit neither effect has a handler --
+   test_keeper_tool_dispatch_runtime.exe ended in Effect.Unhandled that way
+   on CI (run 34296943348). Call this inside the fixture's Eio context, after
+   the body and before the keeper is unregistered. Only a run allowed the
+   real daemon can have started a container.
+
+   The wait for the daemon is the same [Cleanup_rm] budget production reads
+   for this removal ([Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name]),
+   so a lane that tunes it tunes both. A removal failure comes back as the
+   [Error] the runtime reported; {!with_fixture_sandbox} turns it into a case
+   failure once the body's own outcome is known. *)
+let teardown_fixture_sandbox
+    ~(config : Masc.Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+  : (unit, string) result
+  =
+  if Env_config_core.real_docker_allowed_under_test ()
+  then
+    Masc.Keeper_sandbox_runtime.remove_persistent_containers
+      ~keeper_name:meta.name
+      ~base_path:config.base_path
+      ~timeout_sec:
+        (Env_config_sandbox.Shell_timeout.timeout_sec
+           ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+           ())
+      ()
+  else Ok ()
+;;
+
+(* What one fixture case is worth once its body has run and its sandbox has
+   been torn down. The body is run first and its outcome kept whatever the
+   teardown does; a teardown failure then carries that outcome with it, so a
+   case that failed twice reports both and a case whose body passed still
+   fails. Written as a sum so a suite can assert the arbitration without a
+   daemon. *)
+type 'a fixture_case_verdict =
+  | Case_passed of 'a
+  | Case_raised of exn * Printexc.raw_backtrace
+  | Teardown_failed of
+      { keeper_name : string
+      ; body_failure : string option
+      ; detail : string
+      }
+
+let fixture_case_verdict
+    ~keeper_name
+    ~(body : ('a, exn * Printexc.raw_backtrace) result)
+    ~(teardown : (unit, string) result)
+  : 'a fixture_case_verdict
+  =
+  match body, teardown with
+  | Ok value, Ok () -> Case_passed value
+  | Error (exn, backtrace), Ok () -> Case_raised (exn, backtrace)
+  | Ok _, Error detail -> Teardown_failed { keeper_name; body_failure = None; detail }
+  | Error (exn, _), Error detail ->
+    Teardown_failed
+      { keeper_name; body_failure = Some (Printexc.to_string exn); detail }
+;;
+
+let fixture_case_failure_message ~keeper_name ~body_failure ~detail =
+  match body_failure with
+  | None -> Printf.sprintf "fixture sandbox teardown for %s: %s" keeper_name detail
+  | Some body_failure ->
+    Printf.sprintf
+      "%s; and then fixture sandbox teardown for %s: %s"
+      body_failure
+      keeper_name
+      detail
+;;
+
+(* Run one fixture case's body, then remove the sandbox its keeper may have
+   started, and fail the case if that removal failed. Wrap the body with this
+   inside whatever [Fun.protect] still owns the keeper registration and the
+   temp dir: those run after, in the finally, whatever this decides. *)
+let with_fixture_sandbox
+    ~(config : Masc.Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+    (body : unit -> 'a)
+  : 'a
+  =
+  let body =
+    match body () with
+    | value -> Ok value
+    | exception exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  let teardown = teardown_fixture_sandbox ~config ~meta in
+  match fixture_case_verdict ~keeper_name:meta.name ~body ~teardown with
+  | Case_passed value -> value
+  | Case_raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+  | Teardown_failed { keeper_name; body_failure; detail } ->
+    Alcotest.fail (fixture_case_failure_message ~keeper_name ~body_failure ~detail)
+;;
+
+(* Actual native credential shape, synthetic values only. The subject remains
+   stable when rotating access/refresh credentials and the OpenID timestamp. *)
+let antigravity_oauth_fixture ?(revision = "initial") subject =
+  let encode json = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+      (Yojson.Safe.to_string json) in
+  let id_token = encode (`Assoc ["alg", `String "RS256"; "typ", `String "JWT"])
+    ^ "." ^ encode (`Assoc ["iss", `String "https://accounts.google.com";
+        "sub", `String subject; "aud", `String "synthetic-client";
+        "iat", `Int (if revision = "initial" then 1 else 2)])
+    ^ ".synthetic-signature" in
+  Yojson.Safe.to_string (`Assoc ["auth_method", `String "synthetic-oauth";
+    "token", `Assoc ["access_token", `String (subject ^ ":" ^ revision);
+      "token_type", `String "Bearer"; "refresh_token", `String ("refresh:" ^ revision);
+      "expiry", `String (if revision = "initial" then "2000-01-01T00:00:00Z" else "2000-01-02T00:00:00Z")];
+    "id_token", `String id_token])
+;;
+
+(** Write [checkpoint] at [path] as the Keeper checkpoint store lays it out
+    (RFC-0476 §3.2): its messages as one closed-turn bundle under
+    [session_dir]'s objects, then a head that names it. Answers the head bytes.
+    For a fixture that places a canonical, archived or retained checkpoint by
+    hand. *)
+let write_checkpoint_head ~session_dir ~path (checkpoint : Agent_core.Checkpoint.t) =
+  let module Objects = Agent_core.Checkpoint_objects in
+  match Objects.plan_save (Objects.create_memo ()) Objects.Turn_closes checkpoint with
+  | Error error -> invalid_arg ("write_checkpoint_head: " ^ Agent_core.Error.to_string error)
+  | Ok plan ->
+    (* The store's writers need the session root to exist, as the session
+       lock's location makes it. *)
+    Fs_compat.mkdir_p session_dir;
+    (match Masc.Keeper_checkpoint_object_store.write ~session_dir plan.objects with
+     | Error error ->
+       invalid_arg
+         ("write_checkpoint_head: " ^ Masc.Keeper_checkpoint_object_store.write_error_to_string error)
+     | Ok (_ : int) -> ());
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Out_channel.with_open_bin path (fun channel -> output_string channel plan.head_bytes);
+    plan.head_bytes
+
+(** [bytes], a checkpoint head, with the checkpoint field's [name] set to
+    [value]: the same head for other content (RFC-0476 §3.2). *)
+let checkpoint_head_bytes_with_field bytes name value =
+  match Yojson.Safe.from_string bytes with
+  | `Assoc fields ->
+    Yojson.Safe.to_string
+      (`Assoc
+        (List.map
+           (fun (key, field_value) ->
+              match key, field_value with
+              | "checkpoint", `Assoc checkpoint ->
+                ( key
+                , `Assoc
+                    (List.map
+                       (fun (field, current) ->
+                          if String.equal field name then field, value else field, current)
+                       checkpoint) )
+              | _ -> key, field_value)
+           fields))
+  | _ -> invalid_arg "checkpoint_head_bytes_with_field: not a JSON object"
+
+(** The head at [path] with its checkpoint field naming [version], as a build
+    of that [checkpoint_version] would have written it. *)
+let checkpoint_head_with_version path version =
+  checkpoint_head_bytes_with_field
+    (In_channel.with_open_bin path In_channel.input_all)
+    "version" (`Int version)

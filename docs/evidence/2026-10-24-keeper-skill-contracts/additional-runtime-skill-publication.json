@@ -1,0 +1,126 @@
+{
+  "at": "2026-10-24T06:54:33.109261+00:00",
+  "evidence_scope": "Existing installed server editor preview, revision CAS atomic save, catalog publication and editor/disk/catalog readback only. No DNS diagnostic, network workaround, dependency repair, build, test or new Keeper activation was executed.",
+  "server_commit": "8eac5c07c290d134a9ef6acb1e298584bf9a1366",
+  "before_snapshot_revision": "1010f1f01a388e3095c3948787f2f5f455fe301a6103cec96febf8ac99069367",
+  "surface_count_before": 49,
+  "packages": [
+    {
+      "package": "microvm-dns-outage",
+      "original_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "microvm-dns-outage",
+          "name": "microvm-dns-outage"
+        },
+        "content_revision": "5509a70549d771f7cacb98844d319626e7cd64f217aab12cf5613a4122dbffb8"
+      },
+      "updated_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "microvm-dns-outage",
+          "name": "microvm-dns-outage"
+        },
+        "content_revision": "166b6ce96d12f21c3835603e40dad9a1388d7dd4f96014bd1720f4c5fec6e97b"
+      },
+      "before": {
+        "bytes": 5349,
+        "sha256": "6a0bd1a97397ca798c077f5d2ca3f4850609abf4b5c263cb8eaa34bbc757bbf6"
+      },
+      "after": {
+        "bytes": 5131,
+        "sha256": "f9c3ecf5fda3d76246f2246b43026d7fb278e520273672369148fdb23bdd3532"
+      },
+      "save_status": "saved_and_published",
+      "save_ms": 20.154,
+      "backup_verified_before_write": true,
+      "editor_and_disk_reread_match": true,
+      "diagnostics": [],
+      "catalog_reread_match": true,
+      "contract_corrections": [
+        "Separate a failed hostname lookup from a resolver root-cause hypothesis",
+        "Compare the same hostname and query type; validate DNS response state and answer",
+        "Explain DoH bootstrap resolve accurately and preserve TLS verification",
+        "Remove historical GitHub addresses and incidental lane wrapper dependencies",
+        "Keep failed collection, unverified HTTP content, valid empty data and uncertain writes distinct"
+      ]
+    },
+    {
+      "package": "machine-lane-pin-receipt",
+      "original_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "machine-lane-pin-receipt",
+          "name": "machine-lane-pin-receipt"
+        },
+        "content_revision": "8718a4cd1a429304ae28b670b245b969a80e5c3a30629f528dabb97e8b9d6138"
+      },
+      "updated_reference": {
+        "identity": {
+          "source_id": "project-agents",
+          "package_id": "machine-lane-pin-receipt",
+          "name": "machine-lane-pin-receipt"
+        },
+        "content_revision": "1efba5b209d02ae37a9ffe8fef67fdb6501c24af4a76d48f8b930d95b03050c9"
+      },
+      "before": {
+        "bytes": 5131,
+        "sha256": "61114030d0bbc6630ac2fd305a9b28babc1c3d455235c267e834cead3f4ea1ba"
+      },
+      "after": {
+        "bytes": 5393,
+        "sha256": "794c815f65a4aac17bdb9361e6d62451a39ab75aff16273b237c20ead542b018"
+      },
+      "save_status": "saved_and_published",
+      "save_ms": 16.713,
+      "backup_verified_before_write": true,
+      "editor_and_disk_reread_match": true,
+      "diagnostics": [],
+      "catalog_reread_match": true,
+      "contract_corrections": [
+        "Follow current repository execution and dependency repair contracts",
+        "Distinguish read-only pin check from pin application and reinstall",
+        "Record actual complete workspace dependency sources instead of identity-only replacement",
+        "Do not execute a retained test executable after a failed build",
+        "Keep environment failure, source review, local execution and installed product evidence separate"
+      ]
+    }
+  ],
+  "completed_at": "2026-10-24T06:54:33.187274+00:00",
+  "after_snapshot_revision": "66b9d08963414a1e6ae875bfec4006f095d4bcb84264d131f12c42e6894e058c",
+  "surface_count_after": 49,
+  "refresh": {
+    "ok": true,
+    "snapshot_revision": "66b9d08963414a1e6ae875bfec4006f095d4bcb84264d131f12c42e6894e058c",
+    "publication": "unchanged"
+  },
+  "server_executable_sha256": "9364d95b986b21aa17b9b066b9eb31d4364b131fd1ab1d8c6d94daa903b9107d",
+  "server_runtime_instance_id": "01a16ca9-a497-7000-addd-ce768568a718",
+  "publication_script_sha256": "2408abea07698f2c00ebfaf65ec81279b934e032a37ec28fa7a77e7311b14f48",
+  "official_sources": [
+    {
+      "title": "curl error codes",
+      "url": "https://curl.se/libcurl/c/libcurl-errors.html"
+    },
+    {
+      "title": "curl DoH bootstrap and resolve",
+      "url": "https://github.com/curl/curl/blob/master/docs/cmdline-opts/doh-url.md"
+    },
+    {
+      "title": "DNS response header and question contract",
+      "url": "https://www.rfc-editor.org/rfc/rfc1035"
+    },
+    {
+      "title": "Git HTTP custom resolution",
+      "url": "https://git-scm.com/docs/git-config#Documentation/git-config.txt-httpcurloptResolve"
+    },
+    {
+      "title": "GitHub IP address changes",
+      "url": "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+    },
+    {
+      "title": "Dune external library lookup",
+      "url": "https://dune.readthedocs.io/en/stable/usage.html#finding-external-libraries"
+    }
+  ]
+}

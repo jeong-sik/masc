@@ -1,0 +1,784 @@
+import { html } from 'htm/preact'
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
+import { parseLaneAddonSnapshot, parseLaneAddonSlice, parseLaneAddonActionReceipt } from '../api/lane-addons'
+
+const api = vi.hoisted(() => ({
+  fetchLaneAddons: vi.fn(), fetchLaneAddonSlice: vi.fn(), attachLaneAddon: vi.fn(),
+  observeLaneAddon: vi.fn(), detachLaneAddon: vi.fn(), preserveLaneAddonEvidence: vi.fn(),
+  requestLaneAddonAction: vi.fn(), fetchLaneAddonAction: vi.fn(),
+}))
+const transport = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+vi.mock('../api/core', async original => ({ ...await original<typeof import('../api/core')>(), ...transport }))
+vi.mock('../api/lane-addons', async original => ({
+  ...await original<typeof import('../api/lane-addons')>(), ...api,
+}))
+import { LaneAddonsPanel } from './lane-addons-panel'
+import { LaneAddonReadings } from './lane-addon-readings'
+
+const row = {
+  id: 'external-evidence-1', lane_id: 'unregistered-domain', kind: 'relation',
+  title: 'Same target, different observed revision', observed_at: 1789064000,
+  subject_id: 'target-production', actor: null,
+  clock: { domain: 'frame', value: '1234' }, fields: { expected: 'A', observed: 'B' },
+  evidence: [{ uri: 'artifact://source/1', sha256: null }], related_ids: ['receipt-3'],
+}
+const coverage = [{ source_id: 'opaque-input', incarnation: 'run-2', cursor: '7', complete: false, detail: 'Source gap' }]
+const packageContract = { binding_schema: null, presentation: { description: null, readings: [] }, outputs: { frames: { lanes: ['msx/frame'] }, statistics: { all_lanes: true } } }
+const snapshot = {
+  configuration: null,
+  instances: [{ instance_id: 'instance-1', run_id: 'run-2', addon_id: 'unregistered-package',
+    runtime_presence: 'live', title: 'User supplied layer', revision: 'digest-1', phase: { kind: 'observing' },
+    configuration: null, incarnation: 'incarnation-1', action_schema: null,
+    package: packageContract,
+    observation_seq: 1, rows_count: 1 }], rows: [row], coverage,
+}
+const actionSnapshot = {
+  ...snapshot,
+  instances: [{ ...snapshot.instances[0], action_schema: { type: 'object', properties: {
+    context: { type: 'object' }, request_id: { type: 'string' },
+    action: { type: 'object', properties: { operation: { enum: ['publish', 'pause'] } }, required: ['operation'] },
+  } } }],
+}
+const actionRequest = {
+  instance_id: 'instance-1', expected_incarnation: 'incarnation-1', request_id: 'request-1', action: { operation: 'publish' },
+}
+const actionReceipt = {
+  instance_id: 'instance-1', incarnation: 'incarnation-1', request_id: 'request-1', requester: 'dashboard-user',
+  executor: null, input_sha256: 'receipt-input-digest', action: actionRequest.action,
+  state: 'queued', result: null, detail: null,
+}
+let workspaceEpoch = 0
+beforeEach(() => {
+  const epoch = `lane-panel-${++workspaceEpoch}`
+  invalidateExecutionSnapshotGeneration(epoch, 0)
+  hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+    status: { project: 'fixture', workspace_root: '/workspace' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
+})
+afterEach(() => { cleanup(); vi.resetAllMocks() })
+
+describe('optional Lane Add-on surface', () => {
+  it('exposes nested browser callers in the normal observation list and selected event', async () => {
+    const browserRow = { ...row, lane_id: 'instance-1/browser/connections', fields: {
+      state: 'serving', owned_backends: { automation: { activity: 'disabled', registered: false, session: 'closed', locate: false },
+        stagehand: { activity: 'unobserved', registered: false, session: 'unknown', locate: false } }, clients: [{ clientId: 'client-original', browser: 'ego_lite',
+        version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Goal Space' },
+        spaceObservation: { spaceId: 32, spaceName: 'Goal Space', ownership: 'agentDelegatedToUser', observedAt: 42 },
+        interactions: [{ requestId: 'request-original', actor: 'keeper/research', action: 'page.read', tabId: 0, phase: 'running' }],
+        lastActivities: [] }],
+    } }
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [browserRow],
+      instances: [{ ...snapshot.instances[0], addon_id: 'browser' }] }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    const connections = await view.findByLabelText(`Browser connections for ${row.id}`)
+    expect(connections.textContent).toContain('keeper/research · page.read · Tab 0')
+    expect(connections.textContent).toContain('Last SDK control observation: agentDelegatedToUser')
+    expect(connections.textContent).toContain('1970-01-01T00:00:42.000Z')
+    expect(connections.textContent).toContain('Space 32 · Goal Space')
+    expect(within(connections).getByLabelText('Automation browser session').textContent).toContain('Browser session at observation: closed')
+    fireEvent.click(view.getByRole('button', { name: `Inspect event: ${row.title} · ${row.id}` }))
+    const focused = await view.findByLabelText('Selected Lane event')
+    expect(within(focused).getByLabelText(`Browser connections for ${row.id}`).textContent).toContain('request-original')
+    expect(within(focused).getByLabelText('Stagehand browser session').textContent).toContain('Browser session at observation: unknown')
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+    expect(api.observeLaneAddon).not.toHaveBeenCalled()
+  })
+  it('keeps provider waits and delivery failure attached to the original worker after replacement', async () => {
+    const original = { ...snapshot.instances[0], runtime_presence: 'retained',
+      host_requests: { cycles: 2,
+        waiting: [{ request_id: 'original-wait', reason: { reason: 'provider_unavailable', detail: 'quota closed' } }],
+        issue: { kind: 'result_delivery_failed', request_id: 'original-result', detail: 'owner disconnected' } } }
+    const replacement = { ...snapshot.instances[0], instance_id: 'instance-new', incarnation: 'incarnation-new',
+      host_requests: { cycles: 0, waiting: [], issue: null } }
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, instances: [original, replacement] }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    const oldCycle = await view.findByLabelText('Host requests for instance-1 · incarnation incarnation-1')
+    expect(oldCycle.textContent).toContain('original-wait')
+    expect(oldCycle.textContent).toContain('quota closed')
+    expect(oldCycle.textContent).toContain('original-result')
+    expect(oldCycle.textContent).toContain('owner disconnected')
+    const newCycle = view.getByLabelText('Host requests for instance-new · incarnation incarnation-new')
+    expect(newCycle.textContent).not.toContain('original-wait')
+    expect(newCycle.textContent).not.toContain('original-result')
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+    expect(api.observeLaneAddon).not.toHaveBeenCalled()
+  })
+  it('shows an unreadable cycle while preserving the worker and completed rows', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, instances: [
+      { ...snapshot.instances[0], host_requests: { cycles: 1, waiting: [{ request_id: 'original', reason: { reason: 'new' } }], issue: null } },
+    ] }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    const cycle = await view.findByLabelText('Host requests for instance-1 · incarnation incarnation-1')
+    expect(cycle.textContent).toContain('unreadable')
+    expect(view.getByLabelText('Worker instance-1 · incarnation incarnation-1')).toBeTruthy()
+    expect(view.getAllByText(row.title).length).toBeGreaterThan(0)
+  })
+  it('offers the editor for the loader-supported suffix-only TOML filename', async () => {
+    const sourcePath = '/config/.toml'
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete: true, issues: [], declarations: [
+        { id: 'suffix-only', source_path: sourcePath, enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'r1', applied_revision: null, instance_id: null },
+      ] }, instances: [],
+    }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    expect(await view.findByRole('button', { name: `Edit TOML ${sourcePath}` })).toBeTruthy()
+  })
+  it('renders the owning package display contract in order while retaining raw fields and binding schema', async () => {
+    const bindingSchema = { type: 'object', properties: { sources: { type: 'array' } }, required: ['sources'] }
+    const readings = [
+      { lane_id: 'quality', path: ['missing'], label: 'Missing records', unit: 'records', format: 'number' },
+      { lane_id: 'quality', path: ['ready'], label: 'Ready', unit: null, format: 'boolean' },
+      { lane_id: 'quality', path: ['note'], label: 'Operator note', unit: null, format: 'text' },
+      { lane_id: 'quality', path: ['details'], label: 'Details', unit: null, format: 'json' },
+    ]
+    const owned = { ...row, lane_id: 'instance-1/quality', fields: {
+      missing: 0, ready: false, note: '<img src=x onerror=alert(1)>\nsecond line', details: { count: 7 },
+    } }
+    const decoded = parseLaneAddonSnapshot({ ...snapshot, rows: [owned], instances: [
+      { ...snapshot.instances[0], package: { ...packageContract, binding_schema: bindingSchema,
+        presentation: { description: 'Declared quality observations', readings } } },
+      { ...snapshot.instances[0], instance_id: 'instance-2', package: { ...packageContract,
+        presentation: { description: null, readings: [{ ...readings[0], label: 'Other instance reading' }] } } },
+    ] })
+    expect(decoded.instances[0]?.package.binding_schema).toEqual(bindingSchema)
+    expect(decoded.instances[0]?.package.presentation.readings).toEqual(readings)
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    // Inspect the actual displayed contract, including false and zero values.
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dt')].map(node => node.textContent))
+      .toEqual(['Missing records', 'Ready', 'Operator note', 'Details'])
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent))
+      .toEqual(['0 records', 'false', '<img src=x onerror=alert(1)>\nsecond line', '{"count":7}'])
+    expect(group.querySelector('img')).toBeNull()
+    expect(group.textContent).not.toContain('Other instance reading')
+    expect(screen.getByText('Declared quality observations')).toBeTruthy()
+    expect(screen.getByText(`Fields and original evidence · ${row.id}`)).toBeTruthy()
+    expect(screen.getAllByText(/artifact:\/\/source\/1/).length).toBeGreaterThan(0)
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+  })
+  it('shows unavailable for absent or incorrectly typed readings without inventing successful values', async () => {
+    const fields = { wrongNumber: '0', wrongBoolean: 'false', scalar: 1, nullValue: null }
+    const readings = [
+      { path: ['absent'], label: 'Missing' },
+      { path: ['wrongNumber'], label: 'Wrong number' },
+      { path: ['scalar', 'nested'], label: 'Invalid path' },
+      { path: ['__proto__'], label: 'Inherited property' },
+    ].map(item => ({ ...item, lane_id: 'quality', format: 'number', unit: 'records' }))
+    const decoded = parseLaneAddonSnapshot({ ...snapshot, rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract, presentation: {
+        description: null, readings: [...readings,
+          { lane_id: 'quality', path: ['wrongBoolean'], label: 'Wrong boolean', format: 'boolean', unit: null },
+          { lane_id: 'quality', path: ['nullValue'], label: 'Null JSON', format: 'json', unit: null }],
+      } } }] })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · field unavailable', 'Unavailable · field does not match declared display format',
+      'Unavailable · field path does not address an object', 'Unavailable · field unavailable',
+      'Unavailable · field does not match declared display format', 'null',
+    ])
+    expect(group.textContent).not.toContain('0 records')
+  })
+  it('refuses rounded JSON integer readings while preserving safe numbers and fractions', async () => {
+    const fields = JSON.parse('{"tooLarge":9007199254740993,"tooSmall":-9007199254740993,"maxSafe":9007199254740991,"minSafe":-9007199254740991,"fraction":1.25,"zero":0}') as Record<string, unknown>
+    const readings = Object.keys(fields).map(key => ({
+      lane_id: 'quality', path: [key], label: key, format: 'number', unit: null,
+    }))
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings } } }],
+    })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      '9007199254740991', '-9007199254740991', '1.25', '0',
+    ])
+  })
+  it('refuses rounded or nonfinite numbers anywhere in JSON readings', async () => {
+    const fields = JSON.parse('{"object":{"count":9007199254740993},"array":[{"counts":[0,-9007199254740993]}],"scalar":9007199254740993,"overflow":{"count":1e400},"safe":{"counts":[9007199254740991,-9007199254740991,1.25,0],"label":"9007199254740993","empty":null,"ready":false}}') as Record<string, unknown>
+    const readings = Object.keys(fields).map(key => ({
+      lane_id: 'quality', path: [key], label: key, format: 'json', unit: null,
+    }))
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings } } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    expect([...group.querySelectorAll('dd')].map(node => node.textContent)).toEqual([
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · integer exceeds JavaScript’s exact range',
+      'Unavailable · field does not match declared display format',
+      '{"counts":[9007199254740991,-9007199254740991,1.25,0],"label":"9007199254740993","empty":null,"ready":false}',
+    ])
+  })
+  it('renders deeply nested valid JSON readings without recursive validation overflow', async () => {
+    const raw = '['.repeat(12000) + '{"count":7}' + ']'.repeat(12000)
+    const fields = JSON.parse('{"deep":' + raw + '}') as Record<string, unknown>
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['deep'], label: 'Deep', format: 'json', unit: null },
+        ] } } }],
+    })
+    api.fetchLaneAddons.mockResolvedValue(decoded)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+    // Whether the compact formatter still handles 12000 levels is the
+    // engine's native stack limit, not this code: V8 on Node 22 stops near
+    // 3,650 levels for compact and pretty output alike. Both declared outcomes
+    // are valid; the fixture's depth is what overflowed the old recursive
+    // validator, and the pretty raw-fields output always exceeds it first.
+    const formatterLimit = 'Unavailable · JSON nesting exceeds this browser’s formatter capacity'
+    const declared = group.querySelector('dd')?.textContent ?? ''
+    expect(declared === raw || declared.startsWith(formatterLimit)).toBe(true)
+    expect(screen.getByText('Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `Inspect ${row.title} · ${row.id}` }))
+    const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+    expect(detail.getByText('Deep')).toBeTruthy()
+    expect(detail.getByText(declared === raw ? raw : formatterLimit)).toBeTruthy()
+    expect(detail.getByText('Raw fields display unavailable: JSON nesting exceeds this browser’s formatter capacity.')).toBeTruthy()
+    expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+  })
+  it('keeps the panel usable when the browser compact formatter rejects a deep valid reading', async () => {
+    const fields = JSON.parse('{"deep":' + '['.repeat(12000) + '7' + ']'.repeat(12000) + '}') as Record<string, unknown>
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['deep'], label: 'Deep', format: 'json', unit: null },
+        ] } } }],
+    })
+    const deep = decoded.rows[0]!.fields.deep
+    const stringify = JSON.stringify
+    const formatter = vi.spyOn(JSON, 'stringify').mockImplementation((...args: Parameters<typeof JSON.stringify>) => {
+      if (args[0] === deep) throw new RangeError('fixture browser compact formatter limit')
+      return stringify(...args)
+    })
+    try {
+      api.fetchLaneAddons.mockResolvedValue(decoded)
+      const screen = render(html`<${LaneAddonsPanel} />`)
+      const group = await screen.findByLabelText(`Package readings for ${row.id}`)
+      expect(group.textContent).toContain('Unavailable · JSON nesting exceeds this browser’s formatter capacity')
+      expect(group.textContent).not.toContain('field does not match declared display format')
+      fireEvent.click(screen.getByRole('button', { name: `Inspect ${row.title} · ${row.id}` }))
+      const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+      expect(detail.getByText('Unavailable · JSON nesting exceeds this browser’s formatter capacity')).toBeTruthy()
+      expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+    } finally { formatter.mockRestore() }
+  })
+  it.each([
+    ['{"first":[9007199254740993],"second":1e400}', 'integer exceeds JavaScript’s exact range'],
+    ['{"first":[1e400],"second":9007199254740993}', 'field does not match declared display format'],
+  ])('preserves first invalid JSON number in display order: %s', (raw, reason) => {
+    const decoded = parseLaneAddonSnapshot({ ...snapshot,
+      rows: [{ ...row, lane_id: 'instance-1/quality', fields: JSON.parse('{"value":' + raw + '}') }],
+      instances: [{ ...snapshot.instances[0], package: { ...packageContract,
+        presentation: { description: null, readings: [
+          { lane_id: 'quality', path: ['value'], label: 'Value', format: 'json', unit: null },
+        ] } } }],
+    })
+    const view = render(html`<${LaneAddonReadings} row=${decoded.rows[0]!} instances=${decoded.instances} />`)
+    expect(view.getByText(`Unavailable · ${reason}`)).toBeTruthy()
+  })
+  it('rejects malformed package display contracts instead of discarding them', () => {
+    const reading = { lane_id: 'quality', path: ['count'], label: 'Count', unit: null, format: 'number' }
+    for (const invalid of [{ ...reading, path: [] }, { ...reading, format: 'status' }, { ...reading, unit: 7 }]) {
+      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0],
+        package: { ...packageContract, presentation: { description: null, readings: [invalid] } },
+      }] })).toThrow()
+    }
+  })
+
+  it('opens original evidence from horizontal lanes without filtering and includes empty workers', async () => {
+    const owned = { ...row, lane_id: 'instance-1/msx/frame' }
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [owned],
+      instances: [...snapshot.instances, { ...snapshot.instances[0], instance_id: 'empty-worker',
+        title: 'Empty worker', phase: { kind: 'failed', message: 'Source unavailable' }, rows_count: 0 }] }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const event = await screen.findByRole('button', { name: `Inspect ${row.title} · ${row.id}` })
+    fireEvent.click(event)
+    const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+    expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+    expect((screen.getByLabelText('Since (Unix seconds)') as HTMLInputElement).value).toBe('')
+    expect(screen.getAllByText('Empty worker · failed').length).toBeGreaterThan(0)
+    fireEvent.click(detail.getByRole('button', { name: 'Select this evidence and its instance' }))
+    expect(screen.getByRole('button', { name: 'Preserve selected evidence' }).hasAttribute('disabled')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Preserve selected evidence' }))
+    await waitFor(() => expect(api.preserveLaneAddonEvidence).toHaveBeenCalledWith('instance-1', [row.id], undefined))
+  })
+  it('allows keyboard selection of simultaneous observations and exposes missing relationship targets', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [row, { ...row, id: 'overlap', title: 'Second event' }] }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.keyDown(await screen.findByRole('button', { name: 'Inspect Second event · overlap' }), { key: 'Enter' })
+    const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+    expect(detail.getByText('Selected: Second event')).toBeTruthy()
+    expect(detail.getByText(/receipt-3 \(outside this view\)/)).toBeTruthy()
+    expect(detail.getByRole('button', { name: 'Select this evidence and its instance' }).hasAttribute('disabled')).toBe(true)
+  })
+  it('projects an unknown package and its common evidence without a domain-specific renderer', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByText('User supplied layer')
+    expect(screen.getByText('Same target, different observed revision')).toBeTruthy()
+    expect(screen.getByText(/actor unknown/)).toBeTruthy()
+    expect(screen.getByText(/Source gap/)).toBeTruthy()
+    expect(screen.getByText(/World time: frame 1234/)).toBeTruthy()
+    expect(screen.getByText('Configuration service has not started.')).toBeTruthy()
+    expect(screen.getByText('Not managed by TOML')).toBeTruthy()
+    const ports = within(screen.getByLabelText('Output ports for instance-1'))
+    expect(ports.getByText('Output frames: msx/frame')).toBeTruthy()
+    expect(ports.getByText('Output statistics: all package lanes')).toBeTruthy()
+    expect(api.preserveLaneAddonEvidence).not.toHaveBeenCalled()
+    expect(screen.queryByRole('region', { name: 'Package actions' })).toBeNull()
+    expect(screen.queryByLabelText('Action JSON')).toBeNull()
+  })
+  it('separates requested off from observed worker cleanup', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/workspace/.masc/config/lane-addons', complete: false, issues: [],
+        declarations: [
+          { id: 'stopping', source_path: '/workspace/.masc/config/lane-addons/stopping.toml',
+            enabled: false, source_revision: 'r1', application: { kind: 'cleaning' }, desired_revision: 'same-inputs', applied_revision: 'same-inputs', instance_id: 'instance-1' },
+          { id: 'off', source_path: '/workspace/.masc/config/lane-addons/off.toml',
+            enabled: false, source_revision: 'r1', application: { kind: 'cleaning' }, desired_revision: 'same-inputs', applied_revision: null, instance_id: null },
+        ] },
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const table = within(await screen.findByRole('table', { name: 'TOML declarations' }))
+    expect(table.getAllByText('Application unknown · configuration inventory is incomplete')).toHaveLength(2)
+    expect(table.getAllByText('Requested: Off')).toHaveLength(2)
+    expect(table.getAllByText('Inventory incomplete')).toHaveLength(2)
+    expect(table.queryByText('Desired revision applied')).toBeNull()
+    expect(table.queryByText('Not yet applied')).toBeNull()
+  })
+  it('shows installed and pending TOML declarations independently of observation health', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true, issues: [],
+        declarations: [
+          { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml',
+            enabled: true, source_revision: 'r1', application: { kind: 'applied', instance_id: 'instance-1' }, desired_revision: 'configuration-1', applied_revision: 'configuration-1', instance_id: 'instance-1' },
+          { id: 'game', source_path: '/workspace/.masc/config/lane-addons/game.toml',
+            enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'configuration-2', applied_revision: null, instance_id: null },
+        ] },
+      instances: [{ ...snapshot.instances[0], phase: { kind: 'failed', message: 'Browser owner is busy' },
+        configuration: { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml', revision: 'configuration-1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const declarations = within(await screen.findByRole('table', { name: 'TOML declarations' }))
+    expect(screen.getByText('/workspace/.masc/config/lane-addons')).toBeTruthy()
+    expect(screen.getByText('Configuration read: complete')).toBeTruthy()
+    expect(declarations.getByText('Worker running · instance-1')).toBeTruthy()
+    expect(declarations.getAllByText('Requested: On')).toHaveLength(2)
+    expect(declarations.getByText('Needs attention')).toBeTruthy()
+    expect(declarations.getByText('Waiting for first application')).toBeTruthy()
+    expect(declarations.getByText('Waiting for worker startup')).toBeTruthy()
+    expect(declarations.getByText('No instance')).toBeTruthy()
+    expect(screen.getByText('failed')).toBeTruthy()
+    expect(declarations.getByText('Browser owner is busy')).toBeTruthy()
+    expect(within(screen.getByLabelText('Configuration for instance-1')).getByText('Installed configuration: configuration-1')).toBeTruthy()
+    expect(api.attachLaneAddon).not.toHaveBeenCalled()
+    expect(api.observeLaneAddon).not.toHaveBeenCalled()
+  })
+  it.each([
+    ['partial inventory', false, [], []],
+    ['invalid owned file', true, [], [{ source_path: '/config/site.toml', id: null, message: 'invalid TOML' }]],
+    ['same ID issue elsewhere', true, [], [{ source_path: '/config/other.toml', id: 'website', message: 'duplicate ID' }]],
+    ['owned file renamed to another ID', true, [{ id: 'renamed', source_path: '/config/site.toml', enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'r2', applied_revision: null, instance_id: null }], []],
+    ['duplicate ID declarations', true, [
+      { id: 'website', source_path: '/config/site.toml', enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'r1', applied_revision: 'r1', instance_id: 'instance-1' },
+      { id: 'website', source_path: '/config/other.toml', enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'r1', applied_revision: null, instance_id: null },
+    ], []],
+  ] as const)('blocks removal for backend refusal: %s', async (_name, complete, declarations, issues) => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete, declarations, issues },
+      instances: [{ ...snapshot.instances[0], configuration: { id: 'website', source_path: '/config/site.toml', revision: 'r1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const removal = await screen.findByRole('button', { name: 'Resolve TOML before removal' })
+    expect((removal as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(removal)
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+  })
+  it.each([false, true])('allows configured cleanup when its file is absent (unrelated issue=%s)', async unrelated => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/config', complete: true, declarations: [],
+        issues: unrelated ? [{ source_path: '/config/other.toml', id: null, message: 'invalid TOML' }] : [] },
+      instances: [{ ...snapshot.instances[0], configuration: { id: 'website', source_path: '/config/site.toml', revision: 'r1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const removal = await screen.findByRole('button', { name: 'Remove TOML + worker' })
+    expect((removal as HTMLButtonElement).disabled).toBe(false)
+  })
+  it('keeps the previous instance visible while a changed declaration and parse errors remain unresolved', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true,
+        issues: [
+          { source_path: '/workspace/.masc/config/lane-addons/site.toml', id: 'website', message: 'Replacement binding could not be applied' },
+          { source_path: '/workspace/.masc/config/lane-addons/broken.toml', id: null, message: 'Expected a closing quote' },
+        ],
+        declarations: [{ id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml',
+          enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'configuration-2', applied_revision: 'configuration-1', instance_id: 'instance-1' }] },
+      instances: [{ ...snapshot.instances[0],
+        configuration: { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml', revision: 'configuration-1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const declarations = within(await screen.findByRole('table', { name: 'TOML declarations' }))
+    expect(screen.getByText('Configuration read: complete')).toBeTruthy()
+    expect(declarations.getByText('configuration-2')).toBeTruthy()
+    expect(declarations.getByText('configuration-1')).toBeTruthy()
+    expect(declarations.getByText('Waiting for worker startup')).toBeTruthy()
+    const removal = screen.getByRole('button', { name: 'Resolve TOML before removal' })
+    expect(removal.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(removal)
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+    expect(screen.getByText(/Resolve the changed declaration with Edit TOML/)).toBeTruthy()
+    expect(screen.getAllByRole('alert').map(alert => alert.textContent)).toEqual([
+      expect.stringContaining('/workspace/.masc/config/lane-addons/site.toml · website — Replacement binding could not be applied'),
+      expect.stringContaining('/workspace/.masc/config/lane-addons/broken.toml — Expected a closing quote'),
+    ])
+    expect(screen.getByText('observing')).toBeTruthy()
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true, declarations: [],
+        issues: [{ source_path: '/workspace/.masc/config/lane-addons/site.toml', id: null, message: 'Invalid TOML string' }] },
+      instances: [{ ...snapshot.instances[0],
+        configuration: { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml', revision: 'configuration-1' } }],
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('No readable TOML declarations.')
+    expect(screen.getByRole('alert').textContent).toContain('/workspace/.masc/config/lane-addons/site.toml — Invalid TOML string')
+    expect(screen.getByText('observing')).toBeTruthy()
+    expect(within(screen.getByLabelText('Configuration for instance-1')).getByText('Installed configuration: configuration-1')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit TOML for instance-1' })).toBeTruthy()
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+  })
+  it('keeps detached history without offering edits to absent or differently owned files', async () => {
+    const directory = '/workspace/.masc/config/lane-addons'
+    const sourcePath = `${directory}/site.toml`
+    const historical = { ...snapshot.instances[0], phase: { kind: 'detached' },
+      configuration: { id: 'website', source_path: sourcePath, revision: 'configuration-1' } }
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory, complete: true, declarations: [], issues: [] }, instances: [historical],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByText('No readable TOML declarations.')
+    expect(screen.getByLabelText('Configuration for instance-1').textContent).toContain('configuration-1')
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1' })).toBeNull()
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory, complete: true, issues: [], declarations: [{ id: 'replacement-owner', source_path: sourcePath,
+        enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'configuration-2', applied_revision: null, instance_id: null }] }, instances: [historical],
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('replacement-owner')
+    expect(screen.getByRole('button', { name: `Edit TOML ${sourcePath}` })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1' })).toBeNull()
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory, complete: true, declarations: [], issues: [{ source_path: sourcePath, id: null,
+        message: 'Current file needs repair' }] }, instances: [historical],
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('No readable TOML declarations.')
+    expect(screen.getByRole('button', { name: `Edit TOML ${sourcePath}` })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1' })).toBeNull()
+  })
+  it('allows detaching while observation is in progress without waiting for observe', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
+    api.detachLaneAddon.mockResolvedValue({ phase: { kind: 'detaching' } })
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const detach = await screen.findByRole('button', { name: 'Remove worker' })
+    expect((screen.getByRole('button', { name: 'Observe' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(detach)
+    await waitFor(() => expect(api.detachLaneAddon).toHaveBeenCalledWith('instance-1'))
+  })
+  it('distinguishes semantic lanes from the same package and keeps their full identities accessible', async () => {
+    const instance = '14f6117d-6e50-4f10-850e-a3f15cca3312'
+    const lanes = [`${instance}/custom/expectation`, `${instance}/custom/browser`]
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows:
+      lanes.map((lane_id, index) => ({ ...row, id: `row-${index}`, lane_id })) }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const svg = await screen.findByRole('group', { name: 'Parallel lanes with events and recorded relationships' })
+    const labels = [...svg.querySelectorAll('g text[aria-label]')].filter(label => lanes.includes(label.getAttribute('aria-label')!))
+    expect(labels.map(label => label.lastChild?.textContent)).toEqual([
+      'custom/browser · 5cca3312', 'custom/expectation · 5cca3312',
+    ])
+    expect(labels.map(label => label.getAttribute('aria-label')).sort()).toEqual([...lanes].sort())
+    expect(labels.map(label => label.querySelector('title')?.textContent).sort()).toEqual([...lanes].sort())
+  })
+  it('distinguishes matching local lanes from UUIDv7 instances sharing a timestamp prefix', async () => {
+    const instances = ['0198ca47-9000-7000-8000-aaaa11111111', '0198ca47-9000-7000-8000-aaaa22222222']
+    const lanes = instances.map(instance => `${instance}/custom/observation`)
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      instances: instances.map(instance_id => ({ ...snapshot.instances[0], instance_id })), rows:
+      lanes.map((lane_id, index) => ({ ...row, id: `row-${index}`, lane_id })) }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const svg = await screen.findByRole('group', { name: 'Parallel lanes with events and recorded relationships' })
+    const labels = [...svg.querySelectorAll('g text[aria-label]')].filter(label => lanes.includes(label.getAttribute('aria-label')!))
+    expect(labels.map(label => label.lastChild?.textContent)).toEqual([
+      'custom/observation · 11111111', 'custom/observation · 22222222',
+    ])
+    expect(labels.map(label => label.getAttribute('aria-label'))).toEqual(lanes)
+  })
+  it('queries the selected time and lane, showing partial coverage and explicit evidence action', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
+    api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [{ ...row, lane_id: 'instance-1/unregistered-domain' }], coverage, complete: false }))
+    api.preserveLaneAddonEvidence.mockResolvedValue({ retained: true })
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByText('User supplied layer')
+    fireEvent.input(screen.getByLabelText('Run filter'), { target: { value: 'run-2' } })
+    fireEvent.input(screen.getByLabelText('Lane filter'), { target: { value: 'unregistered-domain' } })
+    fireEvent.input(screen.getByLabelText('Since (Unix seconds)'), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
+    await screen.findByText('Slice: partial')
+    expect(api.fetchLaneAddonSlice).toHaveBeenCalledWith({ run_id: 'run-2', lane_id: 'unregistered-domain', since: 0, until: undefined }, expect.any(AbortSignal))
+    fireEvent.click(screen.getByRole('radio'))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'Preserve selected evidence' }))
+    await waitFor(() => expect(api.preserveLaneAddonEvidence).toHaveBeenCalledWith('instance-1', ['external-evidence-1'], undefined))
+  })
+  it('keeps a failed optional read local and allows leaving while a read remains pending', async () => {
+    api.fetchLaneAddons.mockRejectedValueOnce(new Error('observer unreachable'))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByRole('alert')
+    expect(screen.getByRole('alert').textContent).toContain('observer unreachable')
+    api.fetchLaneAddons.mockImplementation(() => new Promise(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    const signal = api.fetchLaneAddons.mock.calls.at(-1)?.[0] as AbortSignal
+    screen.unmount()
+    expect(signal.aborted).toBe(true)
+  })
+  it('attaches a user package with the supplied binding through the common contract', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ configuration: null, instances: [], rows: [], coverage: [] }))
+    api.attachLaneAddon.mockResolvedValue({ instance_id: 'new-instance' })
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByText('No attached packages.')
+    fireEvent.click(screen.getByText('Attach a package'))
+    fireEvent.input(screen.getByLabelText('Manifest path'), { target: { value: '/packages/user-layer/manifest.json' } })
+    fireEvent.input(screen.getByLabelText('Run ID'), { target: { value: 'run-custom' } })
+    fireEvent.input(screen.getByLabelText('Binding JSON'), { target: { value: '{"subject_id":"existing-target"}' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Attach' }))
+    await waitFor(() => expect(api.attachLaneAddon).toHaveBeenCalledWith('/packages/user-layer/manifest.json', 'run-custom', { subject_id: 'existing-target' }))
+  })
+  it('selects a cross-lane time range by dragging and submits that exact query window', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [
+      { ...row, id: 'first', observed_at: 1000 },
+      { ...row, id: 'second', lane_id: 'another-lane', observed_at: 2000 },
+    ] }))
+    api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [], coverage, complete: false }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const svg = await screen.findByRole('group', { name: 'Parallel lanes with events and recorded relationships' })
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 960, top: 0, height: 100,
+      right: 960, bottom: 100, x: 0, y: 0, toJSON: () => ({}) })
+    fireEvent.pointerDown(svg, { pointerId: 7, button: 0, isPrimary: true, clientX: 430 })
+    fireEvent.pointerUp(svg, { pointerId: 7, button: 0, isPrimary: true, clientX: 770 })
+    expect((screen.getByLabelText('Since (Unix seconds)') as HTMLInputElement).value).toBe('1250')
+    expect((screen.getByLabelText('Until (Unix seconds)') as HTMLInputElement).value).toBe('1750')
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
+    await waitFor(() => expect(api.fetchLaneAddonSlice).toHaveBeenCalledWith(
+      { run_id: '', lane_id: '', since: 1250, until: 1750 }, expect.any(AbortSignal)))
+  })
+  it('does not restore a cleared slice when its older request finishes', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
+    let finish: ((result: unknown) => void) | undefined
+    api.fetchLaneAddonSlice.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByText('User supplied layer')
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
+    const signal = api.fetchLaneAddonSlice.mock.calls[0]?.[1] as AbortSignal
+    fireEvent.click(screen.getByRole('button', { name: 'Clear slice' }))
+    expect(signal.aborted).toBe(true)
+    finish?.(parseLaneAddonSlice({ rows: [{ ...row, title: 'Late discarded result' }], coverage, complete: false }))
+    await waitFor(() => expect(screen.queryByText('Late discarded result')).toBeNull())
+    expect(screen.getByText('Same target, different observed revision')).toBeTruthy()
+  })
+  it('rejects unknown control states and malformed common rows instead of inventing defaults', () => {
+    expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], phase: { kind: 'mystery' } }] })).toThrow()
+    expect(() => parseLaneAddonSnapshot({ ...snapshot, rows: [{ ...row, observed_at: 'yesterday' }] })).toThrow()
+    expect(() => parseLaneAddonSnapshot({ instances: [], rows: [], coverage: [] })).toThrow()
+    expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], configuration: undefined }] })).toThrow()
+    expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], incarnation: undefined }] })).toThrow()
+    expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], action_schema: undefined }] })).toThrow()
+    for (const outputs of [{ bad: { lanes: [] } }, { bad: { all_lanes: false } }, { bad: { all_lanes: true, lanes: ['frame'] } }]) {
+      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], package: { ...packageContract, outputs } }] })).toThrow()
+    }
+  })
+  it('submits an advertised package action with an exact binding while slice and other controls remain usable', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))
+    api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [{ ...row, lane_id: 'instance-1/unregistered-domain' }], coverage, complete: false }))
+    let accept: ((value: unknown) => void) | undefined
+    api.requestLaneAddonAction.mockImplementation(() => new Promise(resolve => { accept = resolve }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const selector = await screen.findByLabelText('Action instance')
+    expect(screen.queryByRole('button', { name: 'Send new request' })).toBeNull()
+    fireEvent.change(selector, { target: { value: 'instance-1:incarnation-1' } })
+    expect(screen.getByText('Advertised action schema')).toBeTruthy()
+    fireEvent.input(screen.getByLabelText('Action JSON'), { target: { value: '{"operation":"publish"}' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send new request' }))
+    await screen.findByText('Awaiting acceptance receipt')
+    const request = api.requestLaneAddonAction.mock.calls[0]?.[0]
+    expect(request).toEqual({ ...actionRequest, request_id: expect.any(String) })
+    expect(request.request_id).toMatch(/^[0-9a-f-]{36}$/)
+    expect((screen.getByRole('button', { name: 'Send new request' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Remove worker' }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
+    await screen.findByText('Slice: partial')
+    expect(api.fetchLaneAddonSlice).toHaveBeenCalledTimes(1)
+    accept?.(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id }))
+    await screen.findByText('Queued')
+    expect((screen.getByRole('button', { name: 'Send new request' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(api.fetchLaneAddonAction).not.toHaveBeenCalled()
+    expect(api.fetchLaneAddons).toHaveBeenCalledTimes(1)
+
+    api.fetchLaneAddonAction.mockResolvedValueOnce(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id, state: 'running', executor: { kind: 'container', id: 'worker-7' } }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
+    await screen.findByText('Running')
+    expect(api.fetchLaneAddonAction).toHaveBeenCalledWith(request, expect.any(AbortSignal))
+    api.fetchLaneAddonAction.mockResolvedValueOnce(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id,
+      state: 'confirmed', executor: { kind: 'container', id: 'worker-7' }, result: { accepted_operation: 'publish' } }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
+    await screen.findByText('Package confirmed returned result')
+    expect(screen.getByText(/Completion of the surrounding task requires separate evidence/)).toBeTruthy()
+    expect(screen.getByLabelText('Package returned result').textContent).toContain('accepted_operation')
+    expect(api.requestLaneAddonAction).toHaveBeenCalledTimes(1)
+  })
+  it('retains uncertain requests without replay and cancels a held status read independently of slice', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))
+    api.requestLaneAddonAction.mockRejectedValue(new Error('connection closed before receipt'))
+    api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [], coverage, complete: false }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.change(await screen.findByLabelText('Action instance'), { target: { value: 'instance-1:incarnation-1' } })
+    fireEvent.input(screen.getByLabelText('Action JSON'), { target: { value: '{"operation":"pause"}' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send new request' }))
+    await screen.findByText('Current action status unavailable')
+    const request = api.requestLaneAddonAction.mock.calls[0]?.[0]
+    expect(screen.getByText(`Request ID: ${request.request_id}`)).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('The request may have been accepted')
+    api.fetchLaneAddonAction.mockImplementation(() => new Promise(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
+    await screen.findByRole('button', { name: 'Checking request status…' })
+    fireEvent.click(screen.getByRole('button', { name: 'Slice' }))
+    await screen.findByText('Slice: partial')
+    const statusSignal = api.fetchLaneAddonAction.mock.calls[0]?.[1] as AbortSignal
+    expect(statusSignal.aborted).toBe(false)
+    expect(api.requestLaneAddonAction).toHaveBeenCalledTimes(1)
+    expect(api.fetchLaneAddonAction).toHaveBeenCalledWith(request, expect.any(AbortSignal))
+    screen.unmount()
+    expect(statusSignal.aborted).toBe(true)
+  })
+  it.each([
+    ['outcome_unknown', 'Outcome unknown'], ['failed_before_effect', 'Failed before effect'],
+  ])('reports %s honestly without turning the receipt into successful completion', async (state, label) => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))
+    api.requestLaneAddonAction.mockImplementation(request => Promise.resolve(parseLaneAddonActionReceipt({ ...actionReceipt,
+      request_id: request.request_id, state, detail: 'Worker reported its current evidence boundary' })))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.change(await screen.findByLabelText('Action instance'), { target: { value: 'instance-1:incarnation-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send new request' }))
+    await screen.findByText(label)
+    expect(screen.getByText('Worker reported its current evidence boundary')).toBeTruthy()
+    expect(screen.queryByText('Package confirmed returned result')).toBeNull()
+    expect(api.requestLaneAddonAction).toHaveBeenCalledTimes(1)
+  })
+  it('requires selection after incarnation replacement while preserving old receipts and giving new requests unique IDs', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))
+    api.requestLaneAddonAction.mockImplementation(request => Promise.resolve(parseLaneAddonActionReceipt({ ...actionReceipt,
+      request_id: request.request_id, incarnation: request.expected_incarnation })))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.change(await screen.findByLabelText('Action instance'), { target: { value: 'instance-1:incarnation-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send new request' }))
+    await screen.findByText('Queued')
+    const original = api.requestLaneAddonAction.mock.calls[0]?.[0]
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...actionSnapshot,
+      instances: [{ ...actionSnapshot.instances[0], incarnation: 'incarnation-2' }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('The selected instance is no longer available for new actions. Select an active instance.')
+    expect(screen.queryByRole('button', { name: 'Send new request' })).toBeNull()
+    api.fetchLaneAddonAction.mockResolvedValue(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: original.request_id, state: 'outcome_unknown' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
+    await screen.findByText('Outcome unknown')
+    expect(api.fetchLaneAddonAction).toHaveBeenCalledWith(original, expect.any(AbortSignal))
+    fireEvent.change(screen.getByLabelText('Action instance'), { target: { value: 'instance-1:incarnation-2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send new request' }))
+    await screen.findByText('Queued')
+    const next = api.requestLaneAddonAction.mock.calls[1]?.[0]
+    expect(next.expected_incarnation).toBe('incarnation-2')
+    expect(next.request_id).not.toBe(original.request_id)
+    expect(screen.getByText(`Request ID: ${original.request_id}`)).toBeTruthy()
+    expect(screen.getByText(`Request ID: ${next.request_id}`)).toBeTruthy()
+  })
+  it('keeps original receipt reads after a live worker becomes retained', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))
+    api.requestLaneAddonAction.mockImplementation(request => Promise.resolve(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id })))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.change(await screen.findByLabelText('Action instance'), { target: { value: 'instance-1:incarnation-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send new request' }))
+    await screen.findByText('Queued')
+    const original = api.requestLaneAddonAction.mock.calls[0]![0]
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...actionSnapshot,
+      instances: [{ ...actionSnapshot.instances[0], runtime_presence: 'retained' }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(screen.queryByLabelText('Action instance')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'Send new request' })).toBeNull()
+    expect((screen.getByRole('button', { name: 'Observe' }) as HTMLButtonElement).disabled).toBe(true)
+    api.fetchLaneAddonAction.mockResolvedValue(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: original.request_id, state: 'confirmed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
+    await screen.findByText('Package confirmed returned result')
+    expect(api.fetchLaneAddonAction).toHaveBeenCalledWith(original, expect.any(AbortSignal))
+    expect(api.requestLaneAddonAction).toHaveBeenCalledTimes(1)
+  })
+  it('keeps last recorded status visible when a later receipt read fails', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))
+    api.requestLaneAddonAction.mockImplementation(request => Promise.resolve(parseLaneAddonActionReceipt({ ...actionReceipt, request_id: request.request_id })))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.change(await screen.findByLabelText('Action instance'), { target: { value: 'instance-1:incarnation-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send new request' }))
+    await screen.findByText('Queued')
+    api.fetchLaneAddonAction.mockRejectedValue(new Error('receipt storage unavailable'))
+    fireEvent.click(screen.getByRole('button', { name: 'Check request status' }))
+    await screen.findByText('Current action status unavailable')
+    expect(screen.getByText('Last recorded status: Queued')).toBeTruthy()
+    expect(api.requestLaneAddonAction).toHaveBeenCalledTimes(1)
+  })
+  it('rejects non-object action input and hides new actions for detached instances', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.change(await screen.findByLabelText('Action instance'), { target: { value: 'instance-1:incarnation-1' } })
+    fireEvent.input(screen.getByLabelText('Action JSON'), { target: { value: '[]' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send new request' }))
+    await screen.findByText('Action must be a JSON object matching the advertised schema.')
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...actionSnapshot,
+      instances: [{ ...actionSnapshot.instances[0], phase: { kind: 'detached' } }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('The selected instance is no longer available for new actions. Select an active instance.')
+    expect((screen.getByRole('button', { name: 'Send new request' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+  })
+  it('uses real action transport with exact request identity and rejects mismatched or malformed receipts', async () => {
+    const actual = await vi.importActual<typeof import('../api/lane-addons')>('../api/lane-addons')
+    transport.post.mockResolvedValue(actionReceipt)
+    expect(await actual.requestLaneAddonAction(actionRequest)).toEqual(actionReceipt)
+    expect(transport.post).toHaveBeenCalledWith('/api/v1/lane-addons/actions', actionRequest)
+    const signal = new AbortController().signal
+    transport.get.mockResolvedValue({ ...actionReceipt, state: 'running' })
+    await actual.fetchLaneAddonAction(actionRequest, signal)
+    expect(transport.get).toHaveBeenCalledWith('/api/v1/lane-addons/actions?instance_id=instance-1&request_id=request-1', { signal })
+    for (const wrong of [{ incarnation: 'new-owner' }, { instance_id: 'different-target' }, { request_id: 'different-request' }]) {
+      transport.get.mockResolvedValue({ ...actionReceipt, ...wrong })
+      await expect(actual.fetchLaneAddonAction(actionRequest)).rejects.toThrow('does not match')
+    }
+    expect(() => parseLaneAddonActionReceipt({ ...actionReceipt, state: 'completed' })).toThrow()
+    expect(() => parseLaneAddonActionReceipt({ ...actionReceipt, action: [] })).toThrow()
+    expect(() => parseLaneAddonActionReceipt({ ...actionReceipt, result: 'success' })).toThrow()
+  })
+})

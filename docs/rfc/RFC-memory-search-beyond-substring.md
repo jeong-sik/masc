@@ -1,0 +1,268 @@
+---
+rfc: "memory-search-beyond-substring"
+title: "Memory search: from substring containment to ranked candidates and judged recall"
+status: Draft
+created: 2026-09-24
+updated: 2026-10-28
+author: claude (requested by fsy)
+supersedes: []
+superseded_by: null
+related: ["0247", "0418", "0456", "0463", "librarian-absorb-gate", "keeper-recall-reaches-the-turn"]
+---
+
+# Memory 검색을 substring 너머로 — 현황, absorb gate 상수, 개선 방향
+
+이 문서는 제안으로 시작했다. 단계 0(측정, §3.0)은 이 RFC 와 같은 PR 에 들어갔고, 단계 1 부터는 단계마다 별도 PR 로 낸다.
+
+## 1. 현황: `keeper_memory_search` 는 두 단 substring 매칭이다
+
+Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
+(`Keeper_tool_memory_runtime.keeper_memory_search_with_outcome`, 스키마 `config/tools/keeper_memory_search.toml`).
+`keeper_memory_recall.ml` 의 키워드 분류기는 이미 지워졌고, "무엇을 떠올릴지"는 Keeper 가 이 도구에
+넣는 query 로 정한다. 그러니 이 도구가 못 찾으면 Keeper 는 모른다고 판단한다.
+
+매칭 규칙(`answering`, `keeper_tool_memory_runtime.ml:109`):
+
+| 단 | 조건 | 구현 |
+|---|---|---|
+| 1단 (whole) | claim 이 query 전체를 한 덩어리로 포함 | `String_util.contains_substring_ci` (`string_util.ml:55`) |
+| 2단 (fragments) | query 를 공백으로 자른 **모든** 토큰이 claim 어딘가에 substring 으로 있음 (AND) | `String_util.contains_all_tokens_ci` (`string_util.ml:176`) |
+
+- 대소문자 무시는 ASCII 만(`Char.lowercase_ascii`). 토큰 분리도 ASCII 공백만.
+- 점수가 없다. 각 단 안에서는 스냅숏 저장 순서를 그대로 쓰고 `take limit` 으로 자른다.
+- 순서: 일반 현재 기억 1단 → source-bound 1단 → 일반 2단 → source-bound 2단.
+- `limit` 은 1~10, 기본 5 (`Keeper_tool_memory_runtime` 의 `limit` 인자 해석).
+- 같은 `answering` 을 `source=absorbed`(흡수된 원문 행)가 공유한다. `source=history`(`search_history`,
+  체크포인트 user 메시지 → trace 히스토리)는 같은 두 규칙을 자기 코드로 적용하고 각 단을 최신순으로 둔다.
+
+### 1.1 이 방식이 놓치는 것
+
+| 경우 | 예 | 결과 |
+|---|---|---|
+| 다른 말로 쓴 같은 뜻 | 기억 "배포 스크립트는 …", query "deploy script" | 0건 |
+| query 쪽 토큰이 더 긴 교착어 | 기억 "소주", query "소주를" | 0건 (역방향은 매칭됨) |
+| query 에 단어 하나가 더 있음 | 기억에 없는 "관련" 이 query 에 섞임 | 2단 AND 가 전부 탈락 |
+| 한/영 혼용, 약어 | "PR" vs "풀 리퀘스트", "CI" vs "빌드" | 0건 |
+| 매칭이 많을 때 | 흔한 단어 query | 오래 저장된 순서대로 5건, 관련도와 무관 |
+| 비ASCII 대소문자/공백 | 전각 공백, 그리스·키릴 대문자 | 매칭 실패 |
+
+`constitution.xml` 의 실패 조건 "비슷한 이야기를 반복한다. 10턴 전 자신의 발화나 행동을 모른다" 와
+바로 이어지는 지점이다. 검색이 `no_match: true` 를 돌려주면 Keeper 는 이미 아는 것을 다시 조사하거나
+다시 적는다.
+
+### 1.2 현재 측정되는 것과 안 되는 것
+
+- 회수 사건은 기록된다: 반환된 `memory_id` 마다 query 를 담은 `Retrieved { query }` 사건(RFC-0418,
+  `record_memory_events`).
+- 검색마다 결정 로그(`<keeper>.decisions.jsonl`)에 `event = "memory_search"` 한 줄이 남는다: query, source,
+  `match_count`, `matched_memory_ids`. 0건 query 도 여기 남는다.
+- 단계 0 이전에 없던 것(§3.0 에서 더함): 몇 개 중에서 찾았는지(후보 수)가 로그에 없고, 검색 결과를 세는 OTel 카운터가 없고, 로그를 모아
+  0건 비율과 "0건 뒤 다른 말로 다시 찾은" 사례를 뽑는 도구가 없다. 개선 효과를 재려면 이것부터 있어야 한다(§3.0).
+
+## 2. absorb gate 의 상수와 휴리스틱
+
+`lib/keeper/keeper_librarian_absorb_gate.ml` (RFC-librarian-absorb-gate). Librarian 이 여러 기억을 새
+claim 하나로 묶을 때, 원문 문장마다 판정 모델(TypeSafe Jev)에게 "claim 이 이 문장을 전하는가"를 묻는다.
+검색과 직접 호출 관계는 없지만, 흡수된 원문이 `source=absorbed` 검색의 대상이 되므로 같은 기억 품질 문제의
+다른 끝이다.
+
+| 상수 / 규칙 | 값 | 위치 | 근거 기록 | 평가 |
+|---|---|---|---|---|
+| `conveyed_boundary` | 0.5 | `:146` | mli 에 0.3/0.5/0.7 재집계(84원문, 314문장): 채점기 일치율 88%, 흡수율 38% | 근거 충분. 이동은 RFC §7 의 2단계 몫 |
+| 역방향 질문의 동점 처리 | 0.5 정확히는 "전하지 못함" | `judge_copies` | 동점이 claim 을 버리게 하지 않으려는 비대칭 | 의도가 명시됨 |
+| `request_bytes_limit` | 32,000 B | `:169` | OpenRouter 32k 토큰 한도를 바이트로 (토큰 ≥ 1바이트) | provider hard limit 이라 constitution 예외에 해당 |
+| `state_bytes_limit` | 16,000 B (절반) | `:170` | claim 과 질문이 한 요청을 나눠 씀. 운영 claim 최대 14,127B, p99 5,394B | 근거 충분 |
+| `questions_per_request` | 64 | `:147` | mli 는 "요청 크기 상한"이라고만 적음. 수치 근거 없음 | **근거 미기록.** 바이트 한도가 이미 요청 크기를 묶으므로 중복일 수 있음 |
+| `min_statement_chars` | 20 (code point) | `:6` | #37079 채점기와 경계를 맞춤 | **휴리스틱.** 20자 미만 조각을 다음 조각에 붙임 |
+| 문장 경계 | 줄바꿈, `. ! ? ;` + 공백, `다.`, ` — ` | `:33-34`, 분할 루프 | 채점기와 동일 | **문자열 휴리스틱.** `다.` 로 끝나지 않는 한국어 문체(`~함`, `~음`, 명사형 종결)나 목록형 기억은 한 문장으로 뭉침 |
+| 공백 판정 | ASCII 공백만 | `is_ascii_space` | 보정 코퍼스에 비ASCII 공백 없음 | 검색과 같은 ASCII 한정 |
+
+정리하면 판정 자체(`conveyed_boundary`)와 크기 한도는 근거가 있고, **문장 자르기**(20자, 구두점 목록)와
+`questions_per_request = 64` 가 근거가 약한 휴리스틱이다. 문장 자르기는 판정 단위를 정하므로 결과에 영향을 준다:
+긴 원문이 한 문장으로 뭉치면 부분만 전해도 "전하지 못함"이 되어 흡수가 막히고, 잘게 쪼개지면 질문 수가 늘어난다.
+
+## 3. 개선 방향
+
+원칙은 RFC-0247 §1 의 교정된 경계를 그대로 따른다:
+**"결정론 = 구조 + 값싼 후보 생성. 판단 = 실제 결정."** 그리고 constitution `<when_stuck>` 의
+"괴상한 비교문 대신 Lane 을 늘린다". 검색에서 이는 다음을 뜻한다.
+
+- 문자열 매칭은 **후보 생성기**로 강등하고, 후보를 고르는 결정은 LLM 판단으로 옮긴다.
+- 후보 생성 자체도 순서 없는 substring 이 아니라 순위가 있는 lexical 검색으로 바꾼다.
+- 임베딩/벡터 검색은 RFC-0247 §3 에서 **소유자 결정으로 거부**됐다(오프라인·결정론·재현성, 외부 의존).
+  이 문서는 그것을 다시 제안하지 않는다. 다시 열려면 소유자 결정이 먼저다.
+
+### 3.0 단계 0 — 먼저 잰다 (권장 첫 PR)
+
+- 결정 로그의 `memory_search` 줄에 `durable_candidates`(검색한 durable 기억·흡수 행 수, history 는 세지 않는다),
+  `read_errors`, `turn_ref`(`<trace_id>#<absolute_turn>`, RFC-0233 §7. `trace_id` 는 Keeper 실행 식별자라 턴을
+  가르지 못한다)를 더하고, 검색마다 `masc_keeper_memory_search_total{source, outcome}` 카운터를 올린다(outcome:
+  `matched` | `no_match` | `no_match_partial_read` | `store_unavailable`). 일부 저장소를 못 읽은 0건은 순위
+  개선으로 답할 수 없으므로 `no_match` 와 따로 세고 재생 세트에서 뺀다.
+- `scripts/memory-search-miss-report.py`: 결정 로그를 읽어 Keeper·source 별 0건 비율을 내고, 0건 query 와
+  "같은 Keeper 가 0건 뒤 다른 query 로 다시 찾아 맞힌" 쌍을 JSONL **재생 세트**로 뽑는다. 재검색 쌍은 "찾았어야
+  했는데 첫 표현으로 못 찾은" 사례의 가장 값싼 증거다. 이 세트가 이후 단계의 합격선이다(단계별로 같은 세트에서
+  회수율 비교).
+- 비용: 코드 변경 작음, 행동 변화 없음.
+
+### 3.1 단계 1 — 순위 있는 lexical 후보 생성 (SQLite FTS5 + BM25)
+
+저장소에 이미 선례가 있다: `lib/keeper/keeper_capability_search.ml` 은 요청마다 `:memory:` SQLite 에 FTS5
+가상 테이블을 만들고 BM25 로 순위를 매긴다("SQLite FTS5 owns tokenization and BM25 ranking; this module adds
+no stop-word, substring, regular-expression, or intent heuristics"). 같은 모양을 기억 검색에 쓴다.
+
+- 인덱스: 요청마다 현재 스냅숏(+source-bound, 필요 시 absorbed)으로 메모리 DB 를 만든다. 영속 인덱스가
+  없으니 스냅숏과 어긋날 상태가 생기지 않는다(`authoritative_read_only` 불변식과 충돌 없음).
+- 토크나이저: `unicode61` 만으로는 한국어 교착 접미사("소주를")를 못 맞춘다. `trigram` 토크나이저는 부분 문자열을
+  맞추고 유니코드 대소문자를 접는다. 단 **3글자 미만 토큰은 trigram 으로 못 찾는다**("소주", "PR").
+- 구현(2026-09-27, `lib/keeper/keeper_memory_search_index.ml`): `trigram` 테이블 하나. query 의 공백 토큰을
+  각각 FTS5 문자열로 인용해 OR 로 묻는다(Keeper 가 친 글자가 FTS5 문법으로 읽히지 않는다). 3글자 미만 토큰은
+  인덱스에서 아무것도 맞추지 않을 뿐 오류가 아니고, 기존 "토큰 전부 substring" 규칙이 계속 답한다. 그래서
+  `unicode61` 두 번째 테이블은 두지 않았다.
+- 의미 변화: 1단(query 전체를 한 덩어리로 포함)은 그대로 저장 순서로 맨 앞에 둔다. 2단은 AND(토큰 전부 포함)에서
+  "토큰 하나라도 포함(인덱스) 또는 토큰 전부 substring"으로 넓어지고 BM25 순으로 정렬된다. 단어 하나가 더 섞여도
+  결과가 사라지지 않고, 토큰을 더 많이 가진 claim 이 앞에 온다. 1단 안의 순위는 매기지 않는다. 정확히 맞은 것
+  여럿 중에서 고르는 일은 단계 2 판정의 몫이고, 한 단어 query 의 결과 순서도 그래서 바뀌지 않는다.
+- `source=all` 에서 흡수 행을 빼는 기준(`answered_by`)은 "query 전체나 토큰 전부를 가진 claim" 으로 남긴다.
+  토큰 하나만 공유하는 claim 은 찾아지긴 해도 흡수 행이 말한 것을 말하지 않는다.
+- `source=history` 는 이 단계에서 바꾸지 않는다: `answering` 을 거치지 않으므로 여전히 query 전체 또는 토큰
+  전부(AND)를 요구하고 최신순이다. 도구 설명도 그렇게 말한다.
+- 인덱스를 만들지 못하면(SQLite 오류, 예: trigram 이 없는 3.34 미만 SQLite) 2단은 저장 순서로 두고 substring
+  규칙만으로 답한다. 같은 원인이 매 검색마다 되풀이되므로 경고는 프로세스당 한 번만 남긴다.
+- 출력은 그대로 `memory_id`·store·basis. 도구 스키마 설명만 바뀐다.
+- constitution 과의 관계: 검색 결과는 Keeper 에게 보여주는 후보일 뿐 제어 흐름 분기가 아니다. 그리고 매칭
+  로직을 직접 짜는 대신 생태계 라이브러리(SQLite FTS5)에 맡긴다(`<libraries>`).
+
+### 3.2 단계 2 — 판단으로 고르기 (recall 판정 lane)
+
+lexical 은 "다른 말로 쓴 같은 뜻"을 원리적으로 못 찾는다. 임베딩을 거부한 이상 이 간극은 LLM 판단으로 메운다.
+두 모양 중 하나를 고른다.
+
+**2a. 선택형 (권장).** query 와 현재 기억 목록(`memory_id` + claim)을 판정 모델에 주고 "이 질문에 답하는 기억"을
+고르게 한다. 출력은 닫힌 집합: 입력에 있던 `memory_id` 목록만 유효하고, 모르는 id 는 디코드 실패로 버린다
+(`strict_parse_no_default`). 단계 1 의 BM25 상위 N 을 앞에, 나머지를 뒤에 두거나, 스냅숏이 요청 한도에
+들어가면 전부 준다. absorb gate 와 같은 TypeSafe 계열 lane 이나 로컬 Standalone 모델(constitution
+`<providers><local>`) 을 쓴다.
+
+**2b. 질의 확장형.** 판정 모델이 query 를 한/영 동의어·다른 표현 몇 개로 바꾸고, 각각을 단계 1 에 넣는다.
+싸지만 결정은 여전히 lexical 이 한다. 2a 가 불가능할 때의 대안이다.
+
+공통 설계:
+- `persist_before_model_call`: 판정 요청 전에 query 를 먼저 기록한다.
+- 판정 lane 이 꺼져 있거나 실패하면 단계 1 결과를 그대로 돌려주고, 응답에 판정이 없었음을 typed 로 표시한다
+  (조용히 빈 결과로 떨어지지 않게, `failure_keeps_evidence`).
+- 호출 모드: `no_match` 이거나 후보가 `limit` 을 넘을 때만 판정을 부르는 안과, 항상 부르는 안이 있다.
+  비용은 constitution 상 문제가 아니지만 **지연**은 턴 안에서 쌓인다. Keeper 는 한 턴에 검색을 여러 번 부를 수
+  있고 모델 판정은 초 단위일 수 있다. 그래서 단계 0 이 턴당 검색 횟수를 재고(결정 로그의 `turn_ref`),
+  그 분포와 판정 한 번의 지연을 곱해서 항상/조건부를 고른다.
+
+#### 3.2.1 구체안 (2026-09-27, 제안)
+
+§5 결정(2a 선택형) 위에서 코드가 이미 가진 것에 맞춘 모양이다. 아래 "고를 것"은 fsy 가 정한다.
+
+**lane.** `Standalone_lane.t`(`lib/runtime/standalone_lane.mli`)에 `Memory_recall` 을 더하고, 다른 standalone lane 처럼
+`[runtime.exact_output_lanes.memory_recall]` 로 slot 을 정한다. 닫힌 합이라 새 constructor 를 빠뜨린 match 는
+컴파일이 막는다. lane 이 선언되지 않으면 단계 2 는 꺼져 있고 단계 1 결과가 그대로 나간다. 이 lane 을
+[RFC-keeper-recall-reaches-the-turn](RFC-keeper-recall-reaches-the-turn.md) 의 턴마다 하는 판정에도 쓸지는
+그 RFC 의 열린 결정 8 이다.
+
+**범위.** 판정은 `source=current` 와 `source=all` 의 현재 기억 부분에만 쓴다. `source=absorbed` 와
+`source=history` 는 판정을 부르지 않는다. 호출자가 고른 범위 밖의 사실을 돌려주면 안 되기 때문이다. `source=all`
+에서 absorbed 와 history 는 단계 1 결과 그대로 나간다(고를 것 2).
+
+**`source=all` 합성.** `source=all` 의 호출 조건(고를 것 1)은 현재 기억 부분의 단계 1 결과로 본다. 판정을 부르면
+합칠 목록은 "판정이 고른 현재 기억(판정 순서)" 뒤에 "absorbed 와 history 후보를 지금처럼 `answering` 으로
+정렬한 것(query 전체 일치 먼저, 그다음 조각 일치)"을 붙인 것이고, 이 **전체**에 지금처럼 `take limit` 을 한 번
+적용한다. 판정이 고른 것은 query 문자열을 품지 않을 수 있으므로 `answering` 재정렬을 거치지 않는다. 한도를 넘으면
+뒤쪽, 곧 absorbed·history 쪽이 먼저 잘린다. 판정이 현재 기억에 대한 결정 권한을 가지기 때문이다. 예를 들어
+`limit=1` 에서 판정이 현재 기억 하나를 고르고 단계 1 이 absorbed 하나를 찾으면 현재 기억 하나만 나간다. 판정을
+부르지 않았거나 실패했으면 지금의 `source=all` 동작과 같다. 고를 것 1 이 (a) 이면 판정을 부를 때 현재 기억의
+단계 1 결과는 0건이므로, 판정이 아무것도 고르지 않은 경우의 결과도 지금 동작과 같다. 응답, `match_count`,
+`matched_memory_ids`, `Retrieved` 는 모두 `take limit` 뒤의 이 최종 목록을 따른다(아래 "최종 결과가 부수효과를
+정한다").
+
+**입력.** query, 그리고 후보 목록. 후보의 식별자는 판별된 참조다: 일반 기억은 `{"kind":"memory_id","id":…}`,
+source-bound 기억은 `{"kind":"source_sha256","id":…}`. `fact_match_to_json` 이 두 모양을 이미 구분하므로
+그대로 쓴다. 후보는 현재 스냅숏(일반 + source-bound) 전체에서 고르되,
+단계 1 이 찾은 것을 BM25 순으로 앞에 두고 나머지를 저장 순서로 뒤에 둔다. 요청 한 번의 크기는 lane 의
+`max_output_tokens` 와 따로 입력 바이트 상한 하나로 자르고, 넘치는 후보는 요청을 나누지 않고 잘라낸다(잘렸다는
+사실과 개수는 결정 로그와 **도구 응답** 양쪽에 남는다). 응답의 `recall_coverage`
+`{"candidates": n, "omitted": m}` 가 있어야 Keeper 가 "판정이 없다고 했다"와 "판정이 일부만 봤다"를 구분한다.
+한 검색이 판정을 여러 번 부르지 않게 하려는 것이다.
+
+**출력과 검증.** exact-output JSON `{"selected": [<참조>, ...]}`. 검증은 "입력 후보의 부분집합, 중복 없음, 개수는
+호출의 `limit`(1~10) 이하"다. `limit` 을 넘는 답은 자르지 않고 디코드 실패로 버린다.
+workspace curator 의 `Workspace_memory_proposal.decode` 는 입력과 **같은** 집합을 요구하는데, 여기서는
+부분집합이면 된다. 모르는 id 가 하나라도 있으면 답 전체를 디코드 실패로 버리고 기본값을 채우지 않는다
+(`strict_parse_no_default`). 결과 순서는 판정이 준 순서를 쓰고, 판정이 고른 것 뒤에 단계 1 의 나머지를 붙이지
+않는다. 판정이 "없다"고 하면 0건이다.
+
+**기록.** `persist_before_model_call` 을 따라, 판정을 부르기 전에 결정 로그에 `memory_recall_request` 줄(query,
+후보 수, 잘린 수, `turn_ref`)을 먼저 쓴다. 이 쓰기가 실패하면 판정을 부르지 않는다. 지금 `memory_search` 줄의
+쓰기는 실패해도 카운터만 올리고 넘어가는데, 요청 줄은 그 모양을 쓰지 않고 성공해야만 다음으로 간다. 판정 뒤의
+`memory_search` 줄에는 `recall` 칸을 더한다: `not_configured | not_invoked | request_not_persisted | judged |
+lane_failed | decode_rejected`. `not_invoked` 는 lane 은 있지만 호출 조건(고를 것 1)에 맞지 않아 부르지 않은
+경우다. 실패는 단계 1 결과를 그대로 돌려주고 응답에도 같은 값을 싣는다(`failure_keeps_evidence`). 카운터
+`masc_keeper_memory_search_total` 에 `recall` 라벨을 더한다.
+
+**최종 결과가 부수효과를 정한다.** 판정이 결과를 바꾸면 응답만이 아니라 `Retrieved` 사건(`record_memory_events`),
+결정 로그의 `match_count`·`matched_memory_ids`, 검색 outcome 카운터가 모두 **최종으로 돌려준 집합**을 쓴다.
+그러지 않으면 0건에서 판정이 찾아 준 기억은 `Retrieved` 가 남지 않고, 호출 조건을 넓힌 뒤에는 판정이 버린
+lexical 결과가 보이지도 않았는데 강화된다.
+
+**tool handler.** `keeper_memory_search_with_outcome` 은 지금 `sw`/`clock`/`net` 을 받지 않는다. 판정은 턴 안에서
+결과를 기다리는 동기 호출이므로 `Tool_analyze_image` 처럼 턴 범위 `ctx.sw`/`ctx.clock`/`ctx.net` 을 넘긴다. 턴이
+끝나면 같이 취소되는 것이 맞다.
+
+**고를 것.**
+1. 호출 조건: (a) 단계 1 이 0건일 때만, (b) 후보가 `limit` 을 넘을 때도, (c) 항상. 권장은 (a) 로 시작하는 것이다.
+   지연은 0건일 때만 늘고, 단계 0 의 miss 비율이 판정이 얼마나 자주 불릴지를 그대로 알려 준다. 단계 0 은
+   2026-09-26 에 들어가서 아직 운영 데이터가 거의 없다. 며칠 모은 뒤 `scripts/memory-search-miss-report.py` 로
+   miss 비율과 턴당 검색 수를 보고 (b)/(c) 로 넓힐지 정한다.
+2. absorbed 와 history 도 판정에 넣을지. 권장은 **현재 기억만**이다. history 는 원문 메시지라 크고, absorbed 는
+   단계 1 이 이미 `answered_by` 로 현재 기억과 묶는다.
+
+**PR 순서.** (i) `Memory_recall` lane 과 설정 검증, (ii) 판정 호출·검증·기록(판정 lane 없으면 지금과
+같음), (iii) 호출 조건을 넓히는 일은 운영 데이터를 본 뒤 따로.
+
+### 3.3 단계 3 — 연상 (선택)
+
+RFC-0247 의 그래프 한 홉(구조적 provenance, `Revised` 사슬, 같은 trace 에서 함께 `Retrieved` 된 기억)으로
+검색 결과 옆에 "관련 기억" 을 붙인다. 결정론적이고 임베딩이 없다. 단계 2 판정의 입력 후보를 넓히는 용도로도 쓴다.
+
+### 3.4 absorb gate 쪽 제안
+
+1. **문장을 쓸 때 구조로 받는다.** Librarian 출력 계약(RFC-0456)의 claim 을 문장 배열로 받으면 gate 는
+   문자열을 자를 필요가 없고 `min_statement_chars` 와 구두점 목록이 사라진다. 판정 단위를 쓰는 쪽(LLM)이
+   정한다. 검색에도 도움이 된다: 단계 1 인덱스를 문장 단위로 만들 수 있다. 가장 근본적인 안이지만 출력 계약과
+   Librarian 프롬프트를 함께 바꿔야 한다.
+2. 1 이 부담스러우면: **문장 경계 보정을 재측정한다.** `다.` 외의 한국어 종결(`~함.`, `~음.`, 목록 `- `)이
+   운영 기억에서 얼마나 되는지 #37079 코퍼스로 세고, 한 문장으로 뭉친 원문의 흡수율을 따로 본다. 수치가 나오기
+   전에는 경계 목록을 늘리지 않는다(문자열 휴리스틱을 더 쌓는 방향이라서).
+3. **`questions_per_request = 64` 의 근거를 적거나 없앤다.** 바이트 한도가 요청 크기를 이미 묶는다. 64 가 모델
+   쪽 문항 수 한도(TypeSafe 문서)에서 온 것이면 그 출처를 주석에 적고, 아니면 바이트 한도만 남긴다.
+4. `conveyed_boundary`, 바이트 한도는 그대로 둔다. 근거가 기록돼 있고 이동은 absorb gate RFC §7 2단계의 일이다.
+
+## 4. 권장 순서
+
+| 순서 | 내용 | 행동 변화 | 크기 |
+|---|---|---|---|
+| 1 | 단계 0 관측 + 재생 세트 | 없음 | 작음 |
+| 2 | 단계 1 FTS5/BM25 (capability_search 모양 재사용) | 검색 결과 순서·범위 | 중간 |
+| 3 | 단계 2a 선택형 recall 판정 | 의미 기반 회수 | 중간 |
+| 4 | absorb gate 3번(64 근거) | 없음 | 아주 작음 |
+| 5 | absorb gate 1번(문장 배열 출력) | Librarian 계약 | 큼, 별도 RFC |
+| 6 | 단계 3 연상 | 결과에 관련 기억 추가 | RFC-0247 진척에 따름 |
+
+각 단계는 main 기반 독립 PR 로 나눌 수 있다. 2 와 3 은 실제 의존이 있으므로 stacked PR 로 한다.
+
+## 5. 결정 (2026-09-24, fsy)
+
+- 단계 2 는 **2a 선택형**으로 간다.
+- 임베딩 거부(RFC-0247 §3)는 유지한다.
+- 순서는 §4 표대로 단계 0 부터 진행한다.
+
+## 6. 안 하는 것
+
+- 영속 검색 인덱스. 스냅숏과 어긋날 두 번째 진실을 만들지 않는다.
+- 불용어 목록, 형태소 규칙, 정규식 같은 직접 짠 텍스트 휴리스틱.

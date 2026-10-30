@@ -1,0 +1,23 @@
+import { render } from 'preact'
+import { html } from 'htm/preact'
+import './styles/global.css'
+import './styles/tokens.css'
+import './styles/keeper-v2/colors_and_type.css'
+import './styles/keeper-v2/v2.css'
+import { KeeperConversationPanel } from './components/keeper-shared'
+import { shellAuthSummary } from './store'
+const originalFetch = window.fetch.bind(window)
+const requests: string[] = []
+Object.assign(window, { queueProofRequests: requests })
+window.fetch = async (input, init) => {
+ const url = new URL(String(input), location.origin)
+ requests.push(url.pathname + url.search)
+ if (url.pathname.endsWith('/chat/operations')) {
+   const cursor = url.searchParams.get('after_sequence') ?? 'start'
+   return originalFetch(`/dashboard/queue-proof/${cursor}.json`, init)
+ }
+ if (url.pathname.endsWith('/chat/history')) return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
+ return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+}
+shellAuthSummary.value = { effective_role: 'worker', can_keeper_msg: true } as typeof shellAuthSummary.value
+render(html`<${KeeperConversationPanel} keeperName="proof" placeholder="Queue reconstruction proof" layout="primary" />`, document.getElementById('app')!)

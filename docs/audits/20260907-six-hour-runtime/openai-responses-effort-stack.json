@@ -1,0 +1,39 @@
+{
+  "pr_number": 34093,
+  "head_sha": "0d7dcbd555e72f3475b3b3b955dbaa1163fa0183",
+  "base_pr": 34055,
+  "base_sha": "9c98d378e4304493cea6d99c91c5fbc064e3b9b1",
+  "run_id": 34133788720,
+  "observed_at": "2026-09-07T14:38:08.276771+00:00",
+  "state": "historical dependency stack:117/117 PASS; superseded catalog base under adaptation",
+  "source_review": "author and independent root review complete",
+  "changed_production_contract": "Only accepted_reasoning_efforts in three GPT5.5 rows: none, low, medium, high, xhigh.",
+  "official_source": "https://developers.openai.com/api/docs/models/gpt-5.5",
+  "limits": [
+    "No new runtime protocol; discarded proposal retained only in an unpublished worktree.",
+    "No production API request, configuration change or account access proof.",
+    "Main independently merged PR34066 and removed the old GPT5.5 rows. This old catalog diff will not be restored; integration proof is being moved to current main."
+  ],
+  "conclusion": "success",
+  "passed_total": 117,
+  "failed_total": 0,
+  "suites": [
+    {
+      "suite": "runtime_provider_auth_headers",
+      "passed": 58
+    },
+    {
+      "suite": "model_catalog_default",
+      "passed": 14
+    },
+    {
+      "suite": "backend_openai_codec",
+      "passed": 45
+    }
+  ],
+  "scenarios_executed": {
+    "responses_requests": 6,
+    "chat_none_requests": 2,
+    "minimal_rejected_before_http": 1
+  }
+}

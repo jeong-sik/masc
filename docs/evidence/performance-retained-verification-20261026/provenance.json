@@ -1,0 +1,103 @@
+{
+  "baseline_ref": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+  "sources": {
+    "baseline": {
+      "full_file_sha256": "55e00dcbbbc4d2d226760e0df2faa25c5ff07853346ad064f8a78e7489d48b05",
+      "extracted_sha256": "2152bef49f6b720e29dfe72b65bd3e88a77b2afa74ccd69ec9a0ebe45918c56c"
+    },
+    "candidate": {
+      "full_file_sha256": "0eb3f17cf3c4a0d9fea65c4adb652ab9a4b5174c00eae80d9f99e721ad514388",
+      "extracted_sha256": "e43609a68e155220ef6743c849b0363b2d0cc0e034610b7ad4ec7f463bbe97c9"
+    }
+  },
+  "scope": "exact helper OCaml 5.5 interpreter; real local fsync; no native/server/fleet result",
+  "order": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline"
+  ],
+  "generated_probe_sha256": "8ef49302cc352559f34c309e4d49efc261a43a15c8e25c16a835f5789266dc92",
+  "returncode": 0,
+  "interpreter": "5.5.1",
+  "clock": "Mtime_clock.elapsed_ns; monotonic elapsed time, not exclusive CPU",
+  "runner_sha256": "3fc705205d9518b67d9c58b607b1c62ad2c5ae43f65d585ee3031b43fc399784",
+  "command": "See README: interpreter only, no compilation; Unix and Mtime bytecode libraries.",
+  "current_files": {
+    "README.md": {
+      "bytes": 8104,
+      "sha256": "14b1d7eca6105a597a626eddd620528952e4645aa38bfba4db9018dc72fe52dd"
+    },
+    "ci-selected-c3cb371.json": {
+      "bytes": 5661,
+      "sha256": "b0817ef42dae228d75f7742c53fbd364b24a2b326c2d340ea5a15cd21ca241a5"
+    },
+    "comparison.json": {
+      "bytes": 4094,
+      "sha256": "0c7d70f12249794cf0a78c5db379055a948fef1f7da0833b617fc0234884ab50"
+    },
+    "live-window-summary.json": {
+      "bytes": 69497,
+      "sha256": "2004560ea33ac0614a3b4efa781c7536c22a9212405f467f0afae187c90554e0"
+    },
+    "measurements.csv": {
+      "bytes": 1038,
+      "sha256": "3140518c18c6070484a3002d26a4ec6c47a2a5f62184eeea88cede18f421c212"
+    },
+    "memprof-00.json": {
+      "bytes": 84925,
+      "sha256": "d8131772c781385f448c8c832287bb85f1de2cfbd9c5f66954423ec23610d57e"
+    },
+    "memprof-06.json": {
+      "bytes": 86722,
+      "sha256": "37ab705ad983ca1e5bb086b8d7f2517434e8f4e59c89d6ab445f68657c353f17"
+    },
+    "probe.ml": {
+      "bytes": 19917,
+      "sha256": "8ef49302cc352559f34c309e4d49efc261a43a15c8e25c16a835f5789266dc92"
+    },
+    "review.json": {
+      "bytes": 4317,
+      "sha256": "964a70c2fca5b62caf30def01142d5da436f94e60c9dd09ea863f35c0655a2ff"
+    },
+    "reviewed.diff.gz": {
+      "bytes": 2476,
+      "sha256": "85ebc2cb9c91891a41b74f2362d1a638ec7d9e677eeefc7cd1151a761587f3e8"
+    },
+    "run_probe.py": {
+      "bytes": 8432,
+      "sha256": "3fc705205d9518b67d9c58b607b1c62ad2c5ae43f65d585ee3031b43fc399784"
+    },
+    "source-review.md": {
+      "bytes": 2435,
+      "sha256": "98c8f5fc690d0c91a27874e29397a9da6e455125686b253ed311059965421a1b"
+    },
+    "stderr.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stdout.txt": {
+      "bytes": 2580,
+      "sha256": "73fce5cf3fcc42e0d4db37d7521622b9e9f187df530820079dfebb61af9dbc64"
+    }
+  },
+  "previous_source_runs": [
+    {
+      "path": "artifacts/runs/extreme-perf-20261026/retained-verification-probe-v1/actual-r1",
+      "manifest_sha256": "b746acf93d1a0160febecc6b08606f7bcc218165c9be86ea9cd0d891c5b053ee",
+      "scope": "earlier candidate source/instrumentation; retained locally, not pooled with the final source"
+    },
+    {
+      "path": "artifacts/runs/extreme-perf-20261026/retained-verification-probe-v1/actual-r2-monotonic-short-read",
+      "manifest_sha256": "676d4d3a6a3db6570c811573846027c56d3b6506d64afdf93acf1e745bf95978",
+      "scope": "earlier candidate source/instrumentation; retained locally, not pooled with the final source"
+    }
+  ],
+  "review_diff_storage": {
+    "original": "reviewed.diff",
+    "retained": "reviewed.diff.gz",
+    "encoding": "gzip",
+    "decompressed_sha256": "75fa4cdf1d3d30be2487baa56a27442c5efb54a0105fe5de192ae944a1c03432",
+    "reason": "Preserve exact raw diff context bytes without treating their context-space rows as source whitespace."
+  }
+}

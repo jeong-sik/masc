@@ -1,0 +1,53 @@
+name = "masc_wiki_update"
+description = """
+Replace the body of an existing wiki page.
+
+Pass the revision you read as \
+base_revision (the `revision:` line in the page header). If the page changed \
+since then the call is refused, and the refusal carries the current revision \
+and body: merge your change into that body and call again with that revision. \
+The page keeps its name, author, created date and source. Every update adds \
+one line to the wiki log (log.md) with your note."""
+
+# Held back from the request until the model asks for it by name.
+defer_loading = true
+
+[[params]]
+name = "page"
+type = "string"
+required = true
+description = "Name of the page to change."
+
+[[params]]
+name = "base_revision"
+type = "integer"
+required = true
+description = "The page's revision when you read it."
+
+[[params]]
+name = "body"
+type = "string"
+required = true
+description = "The whole new page body (markdown). It replaces the old body."
+
+[[params]]
+name = "note"
+type = "string"
+required = true
+description = "One line saying what changed and why. It becomes this change's line in the wiki log."
+
+[[params]]
+name = "title"
+type = "string"
+description = "New title on one line. Omit to keep the current title."
+
+[[params]]
+name = "summary"
+type = "string"
+description = "New one-line summary. Omit to keep the current summary."
+
+[[params]]
+name = "tags"
+type = "array"
+items = { type = "string" }
+description = "New list of tags, each one line with no comma and no whitespace at either end. An empty list removes the tags. Omit to keep the current tags."

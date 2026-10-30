@@ -1,0 +1,367 @@
+(** Versioned JSON codec and per-operation JSONL journal for
+    [Keeper_chat_events.keeper_chat_event] (RFC-0412 §4.1).
+    Persisted codec v2 refuses earlier epochs without rewriting their files. *)
+
+(** One journaled event: the bus-assigned sequence number, the publish-time
+    timestamp (Unix epoch seconds), and the event itself. *)
+type journaled_event =
+  { seq : int  (** 0-based, monotonically increasing within one operation. *)
+  ; ts : float
+  ; event : Keeper_chat_events.keeper_chat_event
+  }
+
+val page_default_limit : int
+(** How many lines one read of the journal returns when the reader names no
+    count (RFC-0412 §3.2, the v2 events endpoint). *)
+
+val page_max_limit : int
+(** The most lines one read may ask for. Defined once, here, for both sides
+    of the wire: the endpoint admits [1..page_max_limit], and a client that
+    pages at the ceiling reads this same value, so its ask can never exceed
+    what the endpoint admits. *)
+
+val keeper_chat_event_to_json : Keeper_chat_events.keeper_chat_event -> Yojson.Safe.t
+(** Tagged-object encoding: [{"type": <snake_case tag>, ...payload}]. *)
+
+val keeper_chat_event_of_json :
+  Yojson.Safe.t -> (Keeper_chat_events.keeper_chat_event, string) result
+(** Strict inverse of {!keeper_chat_event_to_json}. Unknown tags are an
+    [Error]. *)
+
+type version_mismatch = { expected : int; actual : int }
+[@@deriving show, eq]
+
+type decode_failure =
+  | Unsupported_version of version_mismatch
+  | Malformed of string
+
+val version_mismatch_to_string : version_mismatch -> string
+val decode_failure_to_string : decode_failure -> string
+
+val journaled_event_to_json : journaled_event -> Yojson.Safe.t
+val journaled_event_of_json : Yojson.Safe.t -> (journaled_event, decode_failure) result
+(** Only persisted codec v2 is supported. The explicit version is checked before
+    the payload; v1 and unknown epochs are refused without migration or defaults. *)
+
+val journaled_event_to_string : journaled_event -> string
+(** Single journal line payload (no trailing newline). *)
+
+(** {1 Journal} *)
+
+type journal
+(** An open per-operation journal: a resolved path. *)
+
+val events_dirname : string
+(** The store's directory name under [.masc] — the one literal behind
+    {!events_dir}, the audit sweep, and the retention pruner (which walks a
+    masc root it already holds). *)
+
+val events_dir : base_dir:string -> string
+(** [<base>/.masc/keeper_chat_events]: the root every keeper's journals live
+    under, [<events_dir>/<keeper>/<operation_id>.jsonl]. *)
+
+val turn_events_dirname : string
+(** Separate store for autonomous turn journals, keyed by typed turn reference. *)
+
+val turn_journal_path :
+  base_dir:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> string
+
+val open_turn_journal :
+  base_dir:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> unit -> journal
+(** Same envelope and failure policy as operation journals, without inventing
+    a chat operation for an autonomous turn. *)
+
+val journal_path :
+  base_dir:string -> keeper_name:string -> operation_id:string -> string
+(** [<base>/.masc/keeper_chat_events/<keeper>/<operation_id>.jsonl], with both
+    segments passed through
+    [Workspace_utils_backend_setup.sanitize_namespace_segment] (the
+    [Keeper_chat_store.sanitize_name] precedent); [operation_id] is
+    client-derived, so it is sanitized too. *)
+
+val open_journal :
+  base_dir:string -> keeper_name:string -> operation_id:string -> unit -> journal
+(** Resolves the path and creates the parent directory. Fail-open: directory
+    creation failure is logged, not raised. *)
+
+val append :
+  journal -> seq:int -> ts:float -> Keeper_chat_events.keeper_chat_event -> unit
+(** Synchronously appends one envelope line (fsync + truncate-rollback via
+    [Fs_compat.append_private_jsonl_durable_locked_result]). [seq] and [ts]
+    are the bus stamps ({!Keeper_chat_events.published}): the journal never
+    reads a clock of its own, so the line and the live projection of the same
+    event agree. Installed as the bus hook it is exactly
+    [Keeper_chat_events.create ~on_publish:(append journal)]. Fail-open: every
+    failure is logged via [Log.Keeper.error] and swallowed — including raw
+    [Unix.Unix_error]s the transaction layer does not convert into its result
+    type — so journaling never breaks the live turn. A non-finite float
+    ([ts], [cost_usd], [duration_sec]) would emit invalid JSON, so such an
+    event is logged and skipped instead of appended. Only
+    [Eio.Cancel.Cancelled] propagates. *)
+
+val append_result :
+  journal -> seq:int -> ts:float -> Keeper_chat_events.keeper_chat_event ->
+  (unit, string) result
+(** The same durable append with its commit result exposed. [Ok ()] confirms
+    the event was written and synced; a descriptor cleanup failure after that
+    commit is logged separately. The existing first row must belong to v2; this
+    check holds the append lock and precedes any torn-tail truncation. Unsupported
+    epochs and a fragment-only file that cannot establish an epoch are preserved
+    byte-for-byte. [Error] never authorizes a live replay cursor.
+    Only [Eio.Cancel.Cancelled] propagates. *)
+
+(** Why a read of a journal produced no entries. *)
+type read_failure =
+  | Journal_missing  (** No file at the path: nothing journaled yet, or pruned. *)
+  | Journal_unreadable of string
+      (** The file exists but could not be opened or read (the exception's
+          text). *)
+  | Journal_unsupported_version of version_mismatch
+      (** The explicit persisted epoch is unsupported; the file is preserved. *)
+  | Journal_corrupt of string  (** A complete row failed the strict decode. *)
+
+val read_journal_path_result : string -> (journaled_event list, read_failure) result
+(** Every complete row of the journal at an already-resolved path, strictly
+    decoded, creating nothing on disk — unlike {!open_journal}, which mkdirs
+    the parent. The read goes through
+    [Fs_compat.read_private_jsonl_rows_locked_result]: it holds the per-path
+    mutex and a shared file lock against the exclusive lock {!append} takes,
+    so it never observes a write in flight, and it runs in a systhread when
+    called from an Eio fiber. The writer's framing rule is applied on the
+    way out: a final fragment with no trailing newline is the remains of an
+    append that never completed, not a row — it is logged, the complete rows
+    before it are returned, and the next append cuts it before writing, so
+    any later row follows exactly those rows. A bad complete row is
+    [Journal_corrupt]; a complete foreign-epoch row is [Journal_unsupported_version].
+    Never raises except [Eio.Cancel.Cancelled]. *)
+
+val read_journal : journal -> (journaled_event list, read_failure) result
+(** {!read_journal_path_result} over an open journal's path. *)
+
+val read_journal_rows_path : string -> (string, read_failure) result
+(** The complete rows of the journal at an already-resolved path, as bytes,
+    read under the same lock and framing as {!read_journal_path_result} (a
+    torn tail is logged and left out) but not decoded: every row ends in
+    ['\n']. {!page_of_rows} decodes the rows one page needs. Never raises
+    except [Eio.Cancel.Cancelled]. *)
+
+val next_sequence : ?require_existing:bool -> journal -> (int, read_failure) result
+(** Cursor for a new producer segment of the same operation. Missing journals
+    start at zero unless [require_existing] is true for a retained continuation;
+    corrupt, unreadable, unsupported-epoch or torn journals refuse resume. A retained continuation
+    also requires a durable last Run_finished/Event_error boundary, so a dropped
+    final append cannot reuse a sequence already delivered to a live reader. *)
+
+(** What {!record_terminal_error} left in the journal. *)
+type terminal_error_receipt =
+  | Recorded_terminal_error of { seq : int; ts : float }
+      (** This call appended the terminal. *)
+  | Existing_terminal_error of { seq : int; ts : float; message : string }
+      (** The journal already ended in an [Event_error]; nothing was written
+          and [message] is the one it carries. *)
+
+type operation_settlement =
+  { operation_id : Keeper_chat_operation.Operation_id.t
+  ; completed_at : float
+  }
+(** Identity of the immutable operation failure in the operation store. *)
+
+type terminal_error_segment = Existing_segment | Operation_settlement of operation_settlement
+(** An operation terminal stores its exact settlement identity in the journal
+    envelope. Earlier segment errors cannot acknowledge it; retrying the same
+    durable settlement reuses its terminal even after another process exit. *)
+
+val find_operation_terminal :
+  journal -> settlement:operation_settlement -> (terminal_error_receipt option, string) result
+(** Read the matching final operation terminal. Missing or different settlement
+    metadata returns [None]; malformed metadata is an error. *)
+
+val record_terminal_error :
+  ?segment:terminal_error_segment -> journal -> ts:float -> message:string -> (terminal_error_receipt, string) result
+(** Ends a settled operation's journal with an [Event_error] unless [Existing_segment] already
+    ends in one. [Operation_settlement] appends unless that exact durable
+    settlement already owns the last error. A [Run_finished] earlier in the journal is a continuation
+    boundary, not a record of this failure, so it does not stop the append.
+    Every settlement path that has no live stream to carry its terminal
+    (Owner settlement, restart recovery) records it here, so a reader that
+    reopens the operation finds the terminal the settled record already holds.
+    A fragment after the last newline (an append the crash cut) is not a row:
+    the terminal takes the sequence after the last complete row and the append
+    cuts the fragment, so a crashed append does not leave the journal without
+    its terminal. An [Operation_settlement] whose terminal is already the last
+    row and fits in a bounded tail window is answered from that tail. The rows
+    before it are then not decoded or validated, since nothing is written: a
+    journal whose earlier rows the full read would refuse still answers with
+    its terminal. Every other case, including a failed tail read, reads the
+    whole journal. [Error] names a journal that could not be
+    read or appended; the caller decides whether that blocks anything. [ts] is
+    the caller's clock, as for {!append}. *)
+
+(** {1 Replay position} *)
+
+(** Where a client wants a journal read to start: the whole turn, or only the
+    entries after the seq it already holds. On the wire ([since_seq] on the
+    chat-stream POST body and the v2 events query) the field is absent for
+    the whole turn and a non-negative integer otherwise; a negative integer
+    is rejected at the boundary. Decoded once there, at the boundary, and
+    passed through replay as this type. *)
+type replay_position =
+  | Whole_turn
+  | After_seq of int
+
+val replay_position_of_wire : int option -> replay_position option
+(** The request-side spelling: an absent field is [Whole_turn], [n >= 0] is
+    [After_seq n], a negative integer is [None]. The only place the wire's
+    absence rule is read. *)
+
+val replay_position_to_wire : replay_position -> int option
+(** Inverse of {!replay_position_of_wire}: the field to write, or nothing. *)
+
+val replay_position_to_string : replay_position -> string
+(** For log lines: ["whole_turn"], or the held seq. *)
+
+val replay_position_to_yojson : replay_position -> Yojson.Safe.t
+(** The response-side spelling ([next_since_seq] on the v2 events page): a
+    response field cannot be absent the way a request field can, so
+    [Whole_turn] is [`Null] and [After_seq n] is [`Int n]. *)
+
+val replay_position_of_yojson : Yojson.Safe.t -> replay_position option
+(** Inverse of {!replay_position_to_yojson}, for a client reading a page:
+    [`Null] is [Whole_turn], [`Int n] with [n >= 0] is [After_seq n], anything
+    else is [None]. *)
+
+val seq_is_after : replay_position -> int -> bool
+(** Whether an entry with this seq lies past the position: every seq for
+    [Whole_turn], [seq > held] for [After_seq held]. *)
+
+val replay_position_advance : replay_position -> int -> replay_position
+(** The position after an entry with this seq was received: [After_seq seq]
+    when it lies past the position ({!seq_is_after}), the position unchanged
+    otherwise. *)
+
+(** {1 Page} *)
+
+(** Where in the journal's bytes a page starts reading: the first row, or the
+    byte offset a previous page handed back ([next_since_offset] on the v2
+    events page). On the request the field ([since_offset]) is absent for the
+    first row and a non-negative integer otherwise; a negative integer is
+    rejected at the boundary. *)
+type page_start = private
+  | From_first_row
+  | From_offset of int
+      (** Built only through {!page_start_of_wire} or {!first_row}: a negative
+          offset is not a cursor, and nothing else may invent one. *)
+
+val first_row : page_start
+(** Read from the journal's first row. *)
+
+val page_start_of_wire : int option -> page_start option
+(** The request-side spelling: absent is {!first_row}, [n >= 0] is the offset,
+    a negative integer is [None]. *)
+
+val page_start_to_wire : page_start -> int option
+(** Inverse of {!page_start_of_wire}: the field to write, or nothing. *)
+
+val page_start_offset : page_start -> int
+(** The byte offset a page starts at: [0] for {!first_row}. *)
+
+(** One page of a journal. *)
+type page =
+  { events : journaled_event list
+        (** At most the page's limit, past [since_seq], in journal order. *)
+  ; has_more : bool  (** A row past [since_seq] follows the last event served. *)
+  ; next_offset : int
+        (** The offset just past the last row the page read as its own — the
+            last event served, or the last row skipped for lying at or before
+            [since_seq] — and the page's own start offset when it read none.
+            An empty page therefore still hands back a cursor pair this
+            reader accepts. *)
+  }
+
+(** Why a cursor could not be placed in the journal's rows. The wire spelling
+    is the [error] code of the 400 the events endpoint answers with, so the
+    server and the TUI name these three the same way. *)
+type cursor_refusal =
+  | Offset_past_rows
+  | Offset_inside_row
+  | Cursor_pair_mismatch
+
+val all_of_cursor_refusal : cursor_refusal list
+val cursor_refusal_to_wire : cursor_refusal -> string
+val cursor_refusal_of_wire : string -> cursor_refusal option
+
+(** How a held offset and a held seq failed to be the two halves of one page's
+    answer. Both ends are checked: an offset behind its seq would serve rows
+    the client holds, one ahead of it would skip rows nobody ever serves. *)
+type cursor_mismatch =
+  | Offset_without_held_seq of int
+      (** An offset with no [since_seq]: the whole journal starts at the first
+          row, so an offset places nothing. *)
+  | Row_before_offset_past_held_seq of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }  (** The row before the offset already lies past the held seq. *)
+  | Row_at_offset_not_past_held_seq of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }  (** The row at the offset does not lie past the held seq. *)
+
+(** Why a page could not be served from the rows. *)
+type page_failure =
+  | Page_offset_past_rows of
+      { offset : int
+      ; rows_end : int
+      }  (** The start offset lies past the complete rows. *)
+  | Page_offset_inside_row of int  (** The start offset is not right after a ['\n']. *)
+  | Page_cursor_mismatch of cursor_mismatch
+      (** The two cursors did not come from the same page. *)
+  | Page_limit_not_positive of int
+      (** A page of fewer than one row serves nothing and never advances. *)
+  | Page_unsupported_version of version_mismatch
+  | Page_corrupt of string  (** A row the page decoded failed the strict decode. *)
+
+val page_failure_to_string : page_failure -> string
+
+val empty_page : page_start -> page
+(** No events, no more, and the start offset handed back. *)
+
+val page_of_rows :
+  path:string ->
+  since_seq:replay_position ->
+  start:page_start ->
+  limit:int ->
+  string ->
+  (page, page_failure) result
+(** Serve one page from complete rows ({!read_journal_rows_path}; [path]
+    only names the journal in a corrupt row's message). A held offset is
+    checked against [since_seq] first (the row before it and the row at it),
+    then rows are decoded one at a time from [start]: rows whose seq is not
+    past [since_seq] are skipped and carry [next_offset] with them (from the
+    first row with a held seq, the skipped rows are found by bisecting the
+    rows, since seqs increase down the journal, and are not all decoded), at most
+    [limit] are served, and one more row past [since_seq] decides [has_more].
+    Rows after that are not decoded, so a corrupt row fails the page that
+    reaches it, not every page. Blank rows are skipped. A [limit] below one is
+    [Page_limit_not_positive]. Pure and total: it touches no file and raises
+    for no constructible argument, so a caller can run it on a pool domain. *)
+
+val read_page_path :
+  path:string ->
+  since_seq:replay_position ->
+  start:page_start ->
+  limit:int ->
+  ((page, page_failure) result, read_failure) result
+(** One page of the journal at [path]: the answer {!page_of_rows} gives over
+    {!read_journal_rows_path}, read from the file without the whole journal.
+    From a held offset, or from the first row without a held seq, it reads
+    the nearest non-blank row before the offset and [limit + 1] rows from it,
+    and more only when blank rows or rows at or before [since_seq] used part
+    of them; paging through a journal reads it about once. A page from the
+    first row with a held seq reads the whole journal, which {!page_of_rows}
+    bisects to find where the page starts. Each window is read under the
+    journal's lock on its own, so a journal pruned between two windows of one
+    page fails that page with [Journal_missing]. Reads take the lock in a
+    systhread when called from an Eio fiber, so a caller may run it on a pool
+    domain. Never raises except [Eio.Cancel.Cancelled]. *)

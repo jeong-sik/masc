@@ -1,0 +1,125 @@
+{
+  "is_derivative": true,
+  "entries": [
+    {
+      "keeper": "audit-live-deepseek",
+      "execution_id": "execution-node-25ad4730843904db3d0af24772d02cf4",
+      "entry": {
+        "ts": 1793049665.98925,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+          "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0"
+        },
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793049660076-00000",
+        "session_id": "trace-1793049660076-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "execution_id": "execution-node-25ad4730843904db3d0af24772d02cf4",
+        "physical_execution_id": "execution-node-25ad4730843904db3d0af24772d02cf4",
+        "tool_use_id": "call_xqkxm6d3",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "result_bytes": 274,
+        "input_fingerprint": "c6f21b4104efeeaff615078aa7b7b4fa612673a797eda3ebcb6c01c01883aa4c",
+        "output_fingerprint": "92d4ac4cb68c5db50cacfaa48f008a6c31a2f3f2f3c4f610dbdfded39e85f044",
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"6\", \"schedule_id\": \"audit-real-model-9d05dc9680b84cafa6813d8204202b8f\", \"author_id\": \"audit-live-deepseek\", \"author_kind\": \"automated_actor\", \"created_at\": 1793049665.984938, \"body\": \"SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0\"}, \"note_count\": 1}"
+      }
+    },
+    {
+      "keeper": "audit-live-deepseek",
+      "execution_id": "execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+      "entry": {
+        "ts": 1793049674.229358,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_SECOND",
+          "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f-second"
+        },
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793049660076-00000",
+        "session_id": "trace-1793049660076-00000",
+        "turn": 4,
+        "keeper_turn_id": 2,
+        "execution_id": "execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+        "physical_execution_id": "execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+        "tool_use_id": "call_2i979tjt",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "result_bytes": 289,
+        "input_fingerprint": "07425020157cdc7f349b9a58c96d52c22d1a5c602238318d6b3fc23bceccbe9b",
+        "output_fingerprint": "f24d87d115471d4f575e95275cb0b4634d2710e786647c305875484b1291f47e",
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"11\", \"schedule_id\": \"audit-real-model-9d05dc9680b84cafa6813d8204202b8f-second\", \"author_id\": \"audit-live-deepseek\", \"author_kind\": \"automated_actor\", \"created_at\": 1793049674.222739, \"body\": \"SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_SECOND\"}, \"note_count\": 1}"
+      }
+    },
+    {
+      "keeper": "audit-live-deepseek",
+      "execution_id": "execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+      "entry": {
+        "ts": 1793049681.965843,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_AFTER_B",
+          "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f"
+        },
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793049660076-00000",
+        "session_id": "trace-1793049660076-00000",
+        "turn": 7,
+        "keeper_turn_id": 2,
+        "execution_id": "execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+        "physical_execution_id": "execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+        "tool_use_id": "call_mwgm2aqz",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "result_bytes": 283,
+        "input_fingerprint": "bf8786a6e8c7b078f8fa2a330254d4f0cfbedfddc425211a0aa0c40a3a92af10",
+        "output_fingerprint": "05d3228ec90f109fd943a403493d1d11be0a5c31e11302903efcea98304b304d",
+        "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"12\", \"schedule_id\": \"audit-real-model-9d05dc9680b84cafa6813d8204202b8f\", \"author_id\": \"audit-live-deepseek\", \"author_kind\": \"automated_actor\", \"created_at\": 1793049681.882445, \"body\": \"SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_AFTER_B\"}, \"note_count\": 2}"
+      }
+    }
+  ],
+  "comparison_to_durable_original": [
+    {
+      "execution_id": "execution-node-25ad4730843904db3d0af24772d02cf4",
+      "identity_input_equal": true,
+      "output_string_byte_equal": false,
+      "decoded_output_equal": true,
+      "raw_output_sha256": "b31dec43e356c2af404bb591c91e112c20efd0cd472a31522d8ce532dfc050c1",
+      "captured_api_output_sha256": "c4692dcb4c0346bf3fb3ed0cabaf7d9bd30650374975bbb273941d4af3564432"
+    },
+    {
+      "execution_id": "execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+      "identity_input_equal": true,
+      "output_string_byte_equal": false,
+      "decoded_output_equal": true,
+      "raw_output_sha256": "775fbb233bf7bf7d0e252365fcabda1493845a61a765db98a17b51fccd6e91d0",
+      "captured_api_output_sha256": "d5aecfd2949b57743141faecc3630cb0a1a2cc5024833a30e12f8ad7e971027f"
+    },
+    {
+      "execution_id": "execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+      "identity_input_equal": true,
+      "output_string_byte_equal": false,
+      "decoded_output_equal": true,
+      "raw_output_sha256": "c4aa3ec79a037a426ffd29e563425bf3ed85a0f885c311d45b33d7cbd4290b13",
+      "captured_api_output_sha256": "de314ca2723db17ea0b30f4f4656e369959fabe94b82bd2a6841068fa54b0489"
+    }
+  ],
+  "scope": "Exact API capture field projection. Controller sanitization/re-serialization changed output-string bytes; decoded JSON identity is independently checked. No byte-identical API wire claim."
+}

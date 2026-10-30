@@ -1,0 +1,22 @@
+{
+  "schema": "masc.prerequisite_publisher_observation.v1",
+  "scope": "download_and_platform_signature_only",
+  "version": "4.90.0",
+  "build": "238679",
+  "architecture": "arm64",
+  "source_url": "https://desktop.docker.com/mac/main/arm64/238679/Docker.dmg",
+  "checksum_url": "https://desktop.docker.com/mac/main/arm64/238679/checksums.txt",
+  "sha256": "c131ee28ef56248d4abee2268c05235b19216b015ddf632727cef1b95a6f995c",
+  "bundle_id": "com.docker.docker",
+  "publisher": "Developer ID Application: Docker Inc (9BNSXJN65R)",
+  "team_id": "9BNSXJN65R",
+  "codesign_requirement": "anchor apple generic and identifier \"com.docker.docker\" and certificate leaf[subject.OU] = \"9BNSXJN65R\"",
+  "codesign_deep_strict_exit": 0,
+  "spctl_exit": 0,
+  "spctl_source": "Notarized Developer ID",
+  "mounted_read_only": true,
+  "detached": true,
+  "installation_executed": false,
+  "application_launched": false,
+  "service_started": false
+}

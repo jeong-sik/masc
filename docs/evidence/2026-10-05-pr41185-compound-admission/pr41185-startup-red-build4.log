@@ -1,0 +1,4 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-2685772235.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005 test/test_server_browser_stagehand.exe test/test_browser_surface.exe test/test_browser_stagehand_executor.exe test/test_browser_activity.exe

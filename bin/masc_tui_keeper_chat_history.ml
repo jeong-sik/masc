@@ -1,0 +1,1843 @@
+module Transcript = Masc_tui_keeper_chat_transcript
+module Delivery_identity = Keeper_chat_delivery_identity
+
+(* The surface vocabulary, mirrored from [Surface_ref.t]. Only the parts a
+   label needs are kept: which surface, and the name a webhook or gate goes
+   by. [test_tui_chat_surface_mirror] compares the kinds decoded here against
+   [Surface_ref]'s own JSON, so a variant added there fails a test instead of
+   quietly drawing rows with no origin. The Gate phase below takes the other
+   road and names the HITL contract's closed sum directly. *)
+module Surface = struct
+  (* Slack and Discord carry which channel the row came in on. A Keeper can be
+     bound to several -- one keeper has five Discord channels -- and without it
+     every one of them reads as the same place.
+
+     A reference, not a name: the store has only the platform's id today, and
+     naming it would mean the label lied about what it knows. When the id is
+     resolved to a name the field carries that instead and nothing here
+     changes. *)
+  (* Which room, and which kind of answer that is. A name and an id are cut
+     from opposite ends: Discord ids are snowflakes that share a long prefix,
+     so the tail is what tells two channels apart, while a name differs at the
+     front and loses its meaning from the back -- [#kinossam-dev] cut to a
+     tail reads [...ssam-dev].
+
+     A variant rather than a marker on the string: "does it start with #" is a
+     guess about text, and this is a fact the decoder already knows. *)
+  type channel =
+    | Channel_name of string
+    | Channel_id of string
+
+  type t =
+    | Dashboard
+    | Discord of { channel : channel option }
+    | Slack of { channel : channel option }
+    | Webhook of string
+    | Agent
+    | Broadcast
+    | Gate of string
+end
+
+type speaker =
+  | Operator
+  | Named of string
+  (* The row named an author the producer could not resolve: [speaker_name] was
+     absent, or it repeated [speaker_id]. Both are the store saying "someone,
+     and I do not know who".
+
+     Kept apart from [Operator] because that one means "the person reading this
+     pane wrote it". Folding an unknown author into it turned 272 messages from
+     Slack and Discord into the operator's own words. *)
+  | Unresolved of { id : string option }
+
+type kind =
+  | Addressed_to_keeper of
+      { speaker : speaker
+      ; surface : Surface.t option
+      }
+  | Said_by_keeper
+  | Autonomous_reply
+  | Delivery_failed of
+      { origin_request_id : string option
+      ; recovered_at : float option
+      }
+  | Tool_calls of Transcript.tool_block
+  | Skill_activity of Transcript.skill_activity list
+  | Reasoning of string list
+  | Gate_activity of
+      { approval_id : string
+      ; phase : Keeper_approval_lifecycle.approval_lifecycle_phase
+      ; tool : string option
+      ; summary : string option
+      }
+  | Memory_activity of
+      { summary : string option
+      ; journal : Masc_tui_message_layout.journal_line list
+      ; pass : Masc_tui_message_layout.memory_pass
+      }
+  | Fusion_conclusion of fusion_conclusion
+
+and fusion_conclusion =
+  { fusion_run_id : string option
+  ; fusion_board_post_id : string
+  }
+
+let tool_rows block =
+  let projection = Transcript.project_tool_block Transcript.Full block in
+  (* Steps only. The context inspector lists what the turn ran, and a rollup
+     over those steps is not itself a step. *)
+  projection.details
+
+(* The surface half of the label. An operator's own surfaces say nothing extra:
+   a dashboard row from a named person is that person, and the pane the
+   operator is looking at needs no badge to say so. Every other surface is
+   where the row came in from, which is the fact the label exists to carry. *)
+(* What a row carries besides its words. The store has held these since the
+   composer learned to stage a file; this reader never looked, so a message
+   that arrived with a 70 KB image read as the sentence beside it and nothing
+   else. The bytes stay in the store -- the pane needs to know a file is
+   there, not to hold it. *)
+type attachment_note =
+  { att_name : string
+  ; att_mime : string
+  ; att_bytes : int
+  ; att_width : int option
+  ; att_height : int option
+  ; att_image : Masc_tui_image_preview.preview
+  }
+
+type row =
+  { at : float
+  ; structural_id : string option
+  ; turn_sequence : int option
+  ; turn_id : string option
+  ; operation_id : string option
+  ; execution_source : Masc_tui_keeper_chat_log.journal_source option
+  ; kind : kind
+  ; text : string
+  ; attachments : attachment_note list
+  ; media : Masc_tui_chat_media.t list
+  }
+
+type decoded =
+  { rows : row list
+  ; dropped : int
+  }
+
+(* The first value under [key], like [List.assoc_opt] but comparing the keys
+   as strings: this runs for every field of every row of a history page, and
+   the polymorphic comparison it replaces was the largest single cost of
+   decoding one. *)
+let assoc_opt (key : string) (fields : (string * 'a) list) =
+  let rec find = function
+    | [] -> None
+    | (name, value) :: rest -> if String.equal name key then Some value else find rest
+  in
+  find fields
+
+let string_field fields name =
+  match assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | Some _ | None -> None
+
+let find_substring ~needle text =
+  let needle_len = String.length needle in
+  let text_len = String.length text in
+  let rec loop offset =
+    if offset + needle_len > text_len then None
+    else if String.sub text offset needle_len = needle then Some offset
+    else loop (offset + 1)
+  in
+  if needle_len = 0 then Some 0 else loop 0
+;;
+
+type interruption_cause =
+  | Host_shutdown
+  | Runtime_turn_interrupted
+  | Provider_connection_closed
+
+(* RFC-0454 P2. The runtime says which of the two stopped the turn, and the
+   keeper carries that value to the turn boundary, so this reader matches a
+   constructor. It used to search the row's words for two sentences the
+   runtime happened to print ("MASC runtime shutdown interrupted the active
+   Codex turn", "Provider 'codex_app_server' unavailable: stdout closed"); a
+   reworded sentence made the pane quietly wrong, and only Codex spelled the
+   second one, so the Claude Code runtime's identical failure drew nothing.
+
+   A fence closes over whatever failed the attempt, and that cause can be
+   another MASC error, so the walk follows [Fenced_masc] down. [Fenced_core]
+   is agent-core's projection and holds no MASC value to find. *)
+let rec interruption_cause_of_internal_error
+  : Keeper_internal_error.masc_internal_error -> interruption_cause option
+  = function
+  (* Which of the two host stops it was. They are separate arms on the value
+     for exactly this reason: MASC shutting down and the runtime calling its
+     own turn off are different facts, and folding them told the operator the
+     host had gone down when it had not. *)
+  | Keeper_internal_error.Host_stopped_turn { stop; _ } ->
+    (match stop with
+     | Keeper_internal_error.Host_graceful_shutdown -> Some Host_shutdown
+     | Keeper_internal_error.Runtime_reported_interrupt ->
+       Some Runtime_turn_interrupted
+     | Keeper_internal_error.Repeated_tool_call
+     | Keeper_internal_error.Repeated_assistant_text -> None)
+  | Keeper_internal_error.Runtime_connection_closed _ ->
+    Some Provider_connection_closed
+  | Keeper_internal_error.Provider_attempt_effect_fenced { cause; _ }
+  | Keeper_internal_error.Tool_correction_lost { cause; _ } ->
+    (match cause with
+     | Keeper_internal_error.Fenced_masc error ->
+       interruption_cause_of_internal_error error
+     | Keeper_internal_error.Fenced_core _ -> None)
+  | Keeper_internal_error.Official_client_recovery_required _
+  | Keeper_internal_error.Runtime_exhausted _
+  | Keeper_internal_error.Resumable_cli_session _
+  | Keeper_internal_error.Accept_rejected _
+  | Keeper_internal_error.Internal_unhandled_exception _
+  | Keeper_internal_error.Internal_bridge_exception _
+  | Keeper_internal_error.Internal_contract_rejected _
+  | Keeper_internal_error.Incomplete_tool_transcript _
+  | Keeper_internal_error.Terminal_effect_failed _
+  | Keeper_internal_error.Receipt_persistence_failed _
+  | Keeper_internal_error.Gate_replay_repair_required _ -> None
+;;
+
+(* A fence forbids replaying the turn in place when an effect was attempted,
+   and that is the part of the badge the operator acts on. It is a property of
+   the fence, not of what the fence closed over, so it is read at the outermost
+   fence and not carried up from the nested cause. *)
+let effect_attempted_of_internal_error
+  : Keeper_internal_error.masc_internal_error -> bool
+  = function
+  | Keeper_internal_error.Provider_attempt_effect_fenced
+      { effect_disposition; _ }
+  | Keeper_internal_error.Tool_correction_lost { effect_disposition; _ } ->
+    (match effect_disposition with
+     | Keeper_provider_attempt_effect_core.Effect_attempted -> true
+     | Keeper_provider_attempt_effect_core.No_effect_observed
+     | Keeper_provider_attempt_effect_core.Observation_unavailable -> false)
+  | Keeper_internal_error.Host_stopped_turn _
+  | Keeper_internal_error.Runtime_connection_closed _
+  | Keeper_internal_error.Official_client_recovery_required _
+  | Keeper_internal_error.Runtime_exhausted _
+  | Keeper_internal_error.Resumable_cli_session _
+  | Keeper_internal_error.Accept_rejected _
+  | Keeper_internal_error.Internal_unhandled_exception _
+  | Keeper_internal_error.Internal_bridge_exception _
+  | Keeper_internal_error.Internal_contract_rejected _
+  | Keeper_internal_error.Incomplete_tool_transcript _
+  | Keeper_internal_error.Terminal_effect_failed _
+  | Keeper_internal_error.Receipt_persistence_failed _
+  | Keeper_internal_error.Gate_replay_repair_required _ -> false
+;;
+
+(* The row keeps the failure as the prefixed JSON the keeper logged. Finding
+   the marker is still a scan over the row's text -- RFC-0454 P3 gives the row
+   a failure field of its own and this goes with it -- but what the scan finds
+   is decoded by the producer's own parser, so nothing here spells a kind. *)
+let masc_error_marker = "[masc_agent_core_error]"
+
+let internal_error_of_failure text =
+  match find_substring ~needle:masc_error_marker text with
+  | None -> None
+  | Some marker_at ->
+    let after_marker = marker_at + String.length masc_error_marker in
+    (match String.index_from_opt text after_marker '{' with
+     | None -> None
+     | Some json_at ->
+       (* Read one value and let the rest of the line be. [from_string] wants
+          the envelope to run to the end of the text, so a producer that
+          appends anything after it -- and several rows already carry a
+          trailing sentence -- turned the whole row back into an unreadable
+          failure. There is no substring fallback left to catch that. *)
+       let lexbuf =
+         Lexing.from_string (String.sub text json_at (String.length text - json_at))
+       in
+       (match
+          Yojson.Safe.from_lexbuf (Yojson.Safe.init_lexer ()) ~stream:true lexbuf
+        with
+        | exception Yojson.Json_error _ -> None
+        | exception End_of_file -> None
+        | json -> Keeper_internal_error.parse_masc_internal_error_json json))
+;;
+
+let interruption_of_failure text =
+  Option.bind (internal_error_of_failure text) (fun error ->
+    Option.map
+      (fun cause -> cause, effect_attempted_of_internal_error error)
+      (interruption_cause_of_internal_error error))
+;;
+
+let present_delivery_failure ?recovered_at text =
+  match interruption_of_failure text with
+  | None -> None
+  | Some (cause, effect_attempted) ->
+    let subject =
+      match cause with
+      | Host_shutdown -> "Runtime shutdown interrupted this turn"
+      | Runtime_turn_interrupted -> "The runtime reported this turn as interrupted"
+      | Provider_connection_closed ->
+        "Provider connection closed during this turn"
+    in
+    let lifecycle, recovered =
+      match recovered_at with
+      | Some _ -> "lane recovered in a later Keeper reply", true
+      | None -> "recovery pending", false
+    in
+    let replay =
+      if effect_attempted then
+        " · same-turn replay blocked to avoid duplicate tool calls"
+      else ""
+    in
+    Some (Printf.sprintf "%s · %s%s · details in Logs" subject lifecycle replay, recovered)
+;;
+
+let float_field fields name =
+  match assoc_opt name fields with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
+  | Some _ | None -> None
+
+(* A channel reference, cut to its tail rather than its head. Discord ids are
+   snowflakes: consecutive channels share a long prefix, so [1356818755795157113]
+   and [1356818756755525815] are the same string for the first eleven digits.
+   Cutting the head is what tells them apart.
+
+   Cutting it here is safe because the surface half is now weighed whole:
+   {!Masc_tui_message_layout.fit_speaker} keeps the pair or keeps the speaker,
+   so what this shortens is either drawn as it is or not drawn. *)
+let channel_reference_cells = 8
+
+let short_channel reference =
+  let length = String.length reference in
+  if length <= channel_reference_cells then reference
+  else
+    "\xe2\x80\xa6"
+    ^ String_util.utf8_suffix ~max_bytes:channel_reference_cells reference
+
+let connector_label name channel =
+  match channel with
+  | None -> Some name
+  (* A room name is left whole. The label is fitted to the speaker column
+     further down, and cutting again here would only cut it shorter. *)
+  | Some (Surface.Channel_name room) -> Some (name ^ " #" ^ String.trim room)
+  (* An id is shortened here so that the pair has a chance of fitting at all;
+     see the note above on why one cut is all it gets. *)
+  | Some (Surface.Channel_id reference) ->
+      Some (name ^ " " ^ short_channel (String.trim reference))
+
+let surface_label : Surface.t -> string option = function
+  | Surface.Dashboard -> None
+  | Surface.Agent -> Some "agent"
+  | Surface.Broadcast -> Some "broadcast"
+  | Surface.Slack { channel } -> connector_label "slack" channel
+  | Surface.Discord { channel } -> connector_label "discord" channel
+  | Surface.Webhook source -> Some source
+  | Surface.Gate label -> Some label
+;;
+
+(* Unknown kinds decode to [None]: a build that meets a surface it was not
+   taught draws the row unlabelled rather than inventing a name for it. *)
+let channel_reference_of fields =
+  match string_field fields "channel_name" with
+  | Some name when String.trim name <> "" ->
+      Some (Surface.Channel_name (String.trim name))
+  | Some _ | None -> (
+    (* A blank name is the absence the resolver reports, not a room called
+       "". The id still says which room. *)
+    match string_field fields "channel_id" with
+    | Some id when String.trim id <> "" -> Some (Surface.Channel_id id)
+    | Some _ | None -> None)
+
+let surface_of_json : Yojson.Safe.t -> Surface.t option = function
+  | `Assoc fields ->
+      (match string_field fields "kind" with
+       | Some "dashboard" -> Some Surface.Dashboard
+       (* The name where the workspace let us ask, the id where it did not.
+          Both answer "which room", and the id was always better than the bare
+          connector badge -- five channels of one Keeper read as one place
+          before either. *)
+       | Some "discord" ->
+           Some
+             (Surface.Discord
+                { channel = channel_reference_of fields })
+       | Some "slack" ->
+           Some (Surface.Slack { channel = channel_reference_of fields })
+       (* The server requires [source] and [label] ([Surface_ref.of_json]).
+          A row without one is malformed and is left unlabelled like an
+          unknown kind; naming it after its kind would claim the server said
+          so. *)
+       | Some "webhook" ->
+           Option.map
+             (fun source -> Surface.Webhook source)
+             (string_field fields "source")
+       | Some "agent" -> Some Surface.Agent
+       | Some "broadcast" -> Some Surface.Broadcast
+       | Some "gate" ->
+           Option.map (fun label -> Surface.Gate label) (string_field fields "label")
+       | Some _ | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+;;
+
+(* Who and where, apart. The speaker column is narrower than the two joined,
+   and joined they were cut as one string: [fit_middle] keeps a third of the
+   head and two thirds of the tail, and the tail of "<who> · <where>" is the
+   where. One live pane had twelve broadcast rows from an agent named
+   [codex-mcp-client], every one drawn as "…p-…roadcast" -- two ellipses, and
+   neither half of the name left. *)
+let addressed_label_parts speaker surface =
+  let name =
+    match speaker with
+    | Operator -> "you"
+    | Named name -> name
+    (* Whole. An unresolved author is still a particular author, and the
+       column's own fit keeps two thirds of the tail -- which is the half that
+       tells two ids apart. Shortened here as well, the row was cut twice and
+       kept neither end. *)
+    | Unresolved { id = Some id } -> id
+    | Unresolved { id = None } -> "someone"
+  in
+  (name, Option.bind surface surface_label)
+;;
+
+(* What one server row is, before consecutive tool rows are folded. Parsed once
+   so the fold below matches on a closed sum rather than re-reading strings. *)
+type parsed =
+  | Utterance of row
+  | Tool_call of
+      { at : float
+      ; structural_id : string option
+      ; turn_sequence : int option
+      ; turn_id : string option
+      ; operation_id : string option
+      ; execution_source : Masc_tui_keeper_chat_log.journal_source option
+      ; call_id : string option
+      ; execution_id : string option
+      ; tool_name : string
+      ; args : string
+      }
+
+let int_field fields name =
+  match assoc_opt name fields with
+  | Some (`Int value) -> Some value
+  | Some _ | None -> None
+
+let bool_field_opt fields name =
+  match assoc_opt name fields with
+  | Some (`Bool value) -> Some value
+  | Some _ | None -> None
+
+(* The transcript carries an exact operation key for direct turns and a
+   [turn_ref] for autonomous turns. Keep whichever authority the producer
+   supplied; timestamps and row adjacency are not turn identity. *)
+(* An autonomous turn records which turn it is inside the [autonomous_turn]
+   marker and nowhere else. Measured on one live pane: of 598 chat rows, 198
+   were autonomous, and every one of them carried a marker id while none
+   carried a [turn_ref] or a delivery key. Read from those two places alone,
+   every autonomous row belonged to no turn -- so the pane could not bracket a
+   turn's work, could not fold a repeated speaker, and could not tell two
+   turns apart. 108 of those rows carried a trace, which is where the tool
+   calls are. *)
+let autonomous_turn_id_of_fields fields =
+  match assoc_opt "autonomous_turn" fields with
+  | Some (`Assoc marker) -> string_field marker "turn_id"
+  | Some _ | None -> None
+
+let explicit_turn_id_of_fields fields =
+  match string_field fields "turn_ref" with
+  | Some _ as turn_ref -> turn_ref
+  | None -> autonomous_turn_id_of_fields fields
+;;
+
+let turn_id_of_fields fields =
+  let explicit_turn () = explicit_turn_id_of_fields fields in
+  match Delivery_identity.delivery_provenance_of_fields fields with
+  | Ok (Some provenance) ->
+      (match provenance.Delivery_identity.delivery_key with
+       | Delivery_identity.Operation_native {operation_id=request_id; _}
+       | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
+       | Delivery_identity.Operation request_id ->
+           Some (Delivery_identity.Request_id.to_string request_id)
+       | Delivery_identity.Fusion_run _
+       | Delivery_identity.Workspace_message _
+       | Delivery_identity.Connector_message _
+       | Delivery_identity.Approval_lifecycle _ ->
+           (* A delivery key proves append identity, not which turn read it.
+              Passive broadcasts have no turn. Approval-continuation tools
+              carry an explicit turn_ref distinct from their approval key. *)
+           explicit_turn ())
+  | Ok None | Error _ -> explicit_turn ()
+
+(* Only an Operation key owns the operation journal endpoint. Autonomous
+   rows use their explicit turn_ref; other delivery keys retain append
+   identity without acquiring an operation or inventing turn ownership. *)
+let operation_id_of_fields fields =
+  match Delivery_identity.delivery_provenance_of_fields fields with
+  | Ok
+      (Some
+         { Delivery_identity.delivery_key =
+             (Delivery_identity.Operation request_id
+              | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
+              | Delivery_identity.Operation_native {operation_id=request_id; _})
+         ; _
+         }) ->
+      Some (Delivery_identity.Request_id.to_string request_id)
+  | Ok
+      (Some
+         { Delivery_identity.delivery_key =
+             ( Delivery_identity.Fusion_run _ | Delivery_identity.Workspace_message _
+             | Delivery_identity.Connector_message _
+             | Delivery_identity.Approval_lifecycle _ )
+         ; _
+         }) ->
+      None
+  | Ok None | Error _ -> None
+
+let execution_source_of_fields fields =
+  match operation_id_of_fields fields with
+  | Some operation_id -> Some (Masc_tui_keeper_chat_log.Operation operation_id)
+  | None ->
+      (match Delivery_identity.delivery_provenance_of_fields fields with
+       | Ok None ->
+           let raw = explicit_turn_id_of_fields fields in
+           Option.bind raw (fun raw ->
+             Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
+               (Ids.Turn_ref.of_string raw))
+       | Ok (Some { Delivery_identity.delivery_key =
+                      (Delivery_identity.Fusion_run _
+                      | Delivery_identity.Workspace_message _
+                      | Delivery_identity.Connector_message _
+                      | Delivery_identity.Approval_lifecycle _); _ }) ->
+           Option.bind (string_field fields "turn_ref") (fun raw ->
+             Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
+               (Ids.Turn_ref.of_string raw))
+       | Ok (Some { Delivery_identity.delivery_key =
+                      (Delivery_identity.Operation _
+                      | Delivery_identity.Operation_checkpoint _
+                      | Delivery_identity.Operation_native _); _ })
+       | Error _ -> None)
+;;
+
+let turn_sequence_of_fields fields =
+  Option.bind (explicit_turn_id_of_fields fields) (fun raw ->
+    Option.map Ids.Turn_ref.absolute_turn (Ids.Turn_ref.of_string raw))
+;;
+
+let structural_id_of_fields fields projection =
+  Option.map
+    (fun id -> id ^ ":" ^ projection)
+    (string_field fields "id")
+;;
+
+(* The row's text with one line per file under it.
+
+   A file posted with no caption arrives with [text] empty, and joining on it
+   anyway put a blank line above the file — the reader sees a gap where a
+   sentence would be (task-552). The connector side makes the same choice when
+   it composes an inbound message; the two have to agree or the same message
+   reads differently depending on which path wrote it. *)
+let text_with_attachments ~format_bytes ~text ~notes =
+  match notes with
+  | [] -> text
+  | notes ->
+    (* The note's shape follows what the row can actually say. An image with
+       parsed dimensions reads like the reference the operator pasted from
+       -- [#1 name · 3456×2168 · 12.3 KB] -- where a size in bytes answered
+       "how big is the file", not "how big is it". Anything else keeps the
+       mime it already had; the index is the order the attachments arrive
+       in, so a reply can name [#2] and mean one file. *)
+    let line index (n : attachment_note) =
+      let dimensions =
+        match (n.att_width, n.att_height) with
+        (* The separator is the multiplication sign the comment above names
+           and the test pins, not an ASCII letter x. Both shipped in the same
+           commit as this line and disagreed with it, so this assertion had
+           never passed. *)
+        | Some width, Some height ->
+          Printf.sprintf " \xc2\xb7 %d\xc3\x97%d" width height
+        | _ -> if n.att_mime = "" then "" else " \xc2\xb7 " ^ n.att_mime
+      in
+      Printf.sprintf "\xe2\x8e\x98 #%d %s%s%s" (index + 1) n.att_name
+        (if n.att_bytes > 0 then
+           Printf.sprintf " \xc2\xb7 %s" (format_bytes n.att_bytes)
+         else "")
+        dimensions
+    in
+    let files = String.concat "\n" (List.mapi line notes) in
+    if String.trim text = "" then files
+    else
+      let separator = if text.[String.length text - 1] = '\n' then "" else "\n" in
+      text ^ separator ^ files
+
+let attachment_notes_of fields =
+  match assoc_opt "attachments" fields with
+  | Some (`List items) ->
+      List.filter_map
+        (function
+          | `Assoc item ->
+              (* A row that names a file without naming it is not an
+                 attachment this pane can say anything about. *)
+              (match string_field item "name" with
+               | None -> None
+               | Some name ->
+                   Some
+                     { att_name = name
+                     ; att_mime =
+                         Option.value (string_field item "mime_type")
+                           ~default:""
+                     ; att_bytes =
+                         Option.value (int_field item "size") ~default:0
+                     ; att_width = int_field item "width"
+                     ; att_height = int_field item "height"
+                     ; att_image = Masc_tui_image_preview.persisted_attachment
+                         ~name ~mime:(Option.value (string_field item "mime_type") ~default:"")
+                         ~data:(string_field item "data")
+                     })
+          | _ -> None)
+        items
+  | Some _ | None -> []
+
+let list_field (fields : (string * Yojson.Safe.t) list) name =
+  match assoc_opt name fields with
+  | Some (`List values) -> Some values
+  | Some _ | None -> None
+
+let memory_fact_line sign (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      (match string_field fields "category", string_field fields "claim" with
+       | Some category, Some claim ->
+           let tone =
+             match Masc.Keeper_memory_os_types.category_of_string category with
+             | Some Code_change -> Masc_tui_message_layout.Tone_code_change
+             | Some (Lesson | Validated_approach) -> Tone_learning
+             | Some (Preference | Goal | Constraint) -> Tone_intent
+             | Some Blocker -> Tone_blocker
+             (* A category a newer producer added reads as a fact until this
+                build is taught it; its word is still drawn as sent. *)
+             | Some (Fact | Custom _) | None -> Tone_fact
+           in
+           Some (Masc_tui_message_layout.Journal_fact { sign; category; tone; claim })
+       | Some _, None | None, Some _ | None, None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+let memory_drop_line (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      (match string_field fields "memory_id", string_field fields "reason" with
+       | Some memory_id, Some reason ->
+           Some (Masc_tui_message_layout.Journal_drop { memory_id; reason })
+       | Some _, None | None, Some _ | None, None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+(* The plain-text form of a journal line, for what reads the row as text:
+   link detection, copying, a search. The pane draws the typed line. *)
+let journal_line_text = function
+  | Masc_tui_message_layout.Journal_fact { sign; category; claim; tone = _ } ->
+      Printf.sprintf "%s [%s] %s"
+        (Masc_tui_message_layout.journal_sign_text sign) category claim
+  | Masc_tui_message_layout.Journal_drop { memory_id; reason } ->
+      Printf.sprintf "drop %s \xe2\x80\x94 %s" memory_id reason
+
+let memory_source_label (fields : (string * Yojson.Safe.t) list) =
+  match assoc_opt "source" fields with
+  | Some (`Assoc source) ->
+      (match string_field source "kind" with
+       | Some "librarian" -> "Librarian"
+       | Some "explicit_write" -> "Memory write"
+       | Some value -> "Memory " ^ value
+       | None -> "Memory")
+  | Some _ | None -> "Memory"
+
+let memory_float_identity at =
+  Printf.sprintf "%Lx" (Int64.bits_of_float at)
+;;
+
+let identity_text value =
+  Printf.sprintf "%d:%s" (String.length value) value
+;;
+
+(* The Memory journal wire has no generic row id. A committed revision is its
+   producer identity; a failed observation has no revision, so its exact
+   producer fields form the key. Length-prefixing text keeps the identity
+   injective without a delimiter heuristic or a lossy digest. *)
+let memory_committed_structural_id ~at ~revision =
+  Printf.sprintf "memory:committed:%d:%s" revision (memory_float_identity at)
+;;
+
+let memory_failed_structural_id ~at ~trace_id ~kind ~detail ~snapshot_present =
+  Printf.sprintf "memory:failed:%s:%s:%s:%s:%b"
+    (memory_float_identity at)
+    (identity_text trace_id)
+    (identity_text kind)
+    (identity_text detail)
+    snapshot_present
+;;
+
+let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
+  match
+    float_field fields "recorded_at",
+    int_field fields "revision",
+    assoc_opt "change" fields
+  with
+  | Some at, Some revision, Some (`Assoc change) ->
+      (match
+         list_field change "added",
+         list_field change "removed",
+         int_field change "retained"
+       with
+       | Some added, Some removed, Some retained ->
+           let added_lines =
+             List.map (memory_fact_line Masc_tui_message_layout.Journal_added) added
+           in
+           let removed_lines =
+             List.map (memory_fact_line Masc_tui_message_layout.Journal_removed) removed
+           in
+           let dropped_lines =
+             match list_field fields "dropped" with
+             | None -> Some []
+             | Some dropped ->
+                 let lines = List.map memory_drop_line dropped in
+                 if List.exists Option.is_none lines
+                 then None
+                 else Some (List.filter_map Fun.id lines)
+           in
+           if List.exists Option.is_none (added_lines @ removed_lines)
+           then None
+           else
+             Option.map
+               (fun dropped_lines ->
+                  (* One header line, then the lines typed. The per-fact
+                     wording used to repeat "now in current memory" on every
+                     line; the header says once what the state is now, and
+                     each line's sign says which way its fact went. The counts
+                     read as the signs the lines below carry. *)
+                  let summary =
+                    Printf.sprintf
+                      "%s \xc2\xb7 revision %d \xc2\xb7 +%d \xe2\x88\x92%d \xc2\xb7 %d retained"
+                      (memory_source_label fields)
+                      revision
+                      (List.length added)
+                      (List.length removed)
+                      retained
+                  in
+                  let journal =
+                    List.filter_map Fun.id added_lines
+                    @ List.filter_map Fun.id removed_lines
+                    @ dropped_lines
+                  in
+                  { at
+                  ; structural_id =
+                      Some (memory_committed_structural_id ~at ~revision)
+                  ; turn_sequence = None
+                  ; turn_id = None
+                  ; operation_id = None
+                  ; execution_source = None
+                  ; kind =
+                      Memory_activity
+                        { summary = Some summary
+                        ; journal
+                        ; pass = Masc_tui_message_layout.Pass_committed
+                        }
+                  ; media = []
+                  ; attachments = []
+                  ; text =
+                      String.concat "\n"
+                        (summary :: List.map journal_line_text journal)
+                  })
+               dropped_lines
+       | Some _, Some _, None | Some _, None, _ | None, _, _ -> None)
+  | Some _, Some _, Some _
+  | Some _, Some _, None
+  | Some _, None, _
+  | None, _, _ -> None
+
+let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
+  match
+    float_field fields "recorded_at",
+    string_field fields "trace_id",
+    string_field fields "kind",
+    string_field fields "detail",
+    bool_field_opt fields "snapshot_present"
+  with
+  | Some at, Some trace_id, Some kind, Some detail, Some snapshot_present ->
+      let summary = Printf.sprintf "Librarian failed \xc2\xb7 %s" kind in
+      Some
+        { at
+        ; structural_id =
+            Some
+              (memory_failed_structural_id ~at ~trace_id ~kind ~detail
+                 ~snapshot_present)
+        ; turn_sequence = None
+        ; turn_id = None
+        ; operation_id = None
+        ; execution_source = None
+        ; kind =
+            Memory_activity
+              { summary = Some summary
+              ; journal = []
+              ; pass = Masc_tui_message_layout.Pass_failed { kind }
+              }
+        ; media = []
+        ; attachments = []
+        ; text =
+            Printf.sprintf "%s\n%s\nsnapshot present: %s"
+              summary
+              detail
+              (if snapshot_present then "yes" else "no")
+        }
+  | Some _, Some _, Some _, Some _, None
+  | Some _, Some _, Some _, None, _
+  | Some _, Some _, None, _, _
+  | Some _, None, _, _, _
+  | None, _, _, _, _ -> None
+
+let memory_row_of_json = function
+  | `Assoc fields ->
+      (match bool_field_opt fields "ok" with
+       | Some false ->
+           (match string_field fields "error", string_field fields "structural_id" with
+            | Some error, Some structural_id ->
+                let summary = "Memory journal unreadable: " ^ error in
+                Some
+                { at = 0.0
+                ; structural_id = Some structural_id
+                ; turn_sequence = None
+                ; turn_id = None
+                ; operation_id = None
+                ; execution_source = None
+                ; kind =
+                    Memory_activity
+                      { summary = Some summary
+                      ; journal = []
+                      ; pass = Masc_tui_message_layout.No_pass
+                      }
+                ; text = summary
+                ; media = []
+                ; attachments = []
+                }
+            | Some _, None | None, Some _ | None, None -> None)
+       | Some true ->
+           (match string_field fields "outcome" with
+            | Some "committed" -> memory_committed_row fields
+            | Some "failed" -> memory_failed_row fields
+            | Some _ | None -> None)
+       | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+let memory_rows_of_json = function
+  | `Assoc fields ->
+      (match assoc_opt "entries" fields with
+       | Some (`List entries) ->
+           let rows = List.map memory_row_of_json entries in
+           Ok
+             { rows = List.filter_map Fun.id rows
+             ; dropped = List.length (List.filter Option.is_none rows)
+             }
+       | Some _ | None -> Error "memory journal response has no entries array")
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "memory journal response is not an object"
+
+let non_blank_lines text =
+  String.split_on_char '\n' text
+  |> List.filter (fun line -> String.trim line <> "")
+
+(* What an autonomous turn's trace block adds up to, in the order the turn
+   made it: the reasoning the server carried, the tool steps, and the counts
+   of what it did not carry. Kept as data until the end so one row of output
+   is built from the whole block rather than a row per step -- 917 withheld
+   reasoning steps on one live keeper would otherwise draw as 917 rows that
+   each say nothing. *)
+type trace_summary =
+  { reasoning : string list  (** non-blank lines, in order *)
+  ; withheld : int  (** reasoning steps the server scrubbed *)
+  ; tools : Transcript.tool_activity list
+  ; omitted : int  (** steps the server dropped from this surface *)
+  }
+
+let empty_trace = { reasoning = []; withheld = 0; tools = []; omitted = 0 }
+
+let persisted_outcome fields : Transcript.tool_outcome =
+  match string_field fields "status" with
+  | Some "ok" -> Transcript.Returned
+  | Some "err" -> Transcript.Failed
+  | Some "pending" -> Transcript.Never_returned
+  | Some _ | None -> Transcript.Outcome_unrecorded
+
+(* The wire step kinds are [think], [reason], and [tool]. A kind this build
+   was not taught is counted as omitted rather than dropped without a trace:
+   the turn did something here, and a shorter block would read as a shorter
+   turn. Steps are folded in wire order and the lists reversed once at the
+   end. *)
+let add_trace_step summary (step : Yojson.Safe.t) =
+  match step with
+  | `Assoc fields -> (
+      match string_field fields "kind" with
+      | Some "think" ->
+          (match Masc.Keeper_chat_blocks.reasoning_visibility_of_fields Content_withheld fields with
+          | Error _ -> { summary with omitted = summary.omitted + 1 }
+          | Ok true -> { summary with withheld = summary.withheld + 1 }
+          | Ok false ->
+            let text = Option.value ~default:"" (string_field fields "text") in
+            { summary with
+              reasoning = List.rev_append (non_blank_lines text) summary.reasoning
+            })
+      | Some "reason" ->
+          let text = Option.value ~default:"" (string_field fields "text") in
+          let detail =
+            Option.value ~default:"" (string_field fields "detail")
+          in
+          { summary with
+            reasoning =
+              List.rev_append
+                (non_blank_lines text @ non_blank_lines detail)
+                summary.reasoning
+          }
+      | Some "tool" -> (
+          match string_field fields "name" with
+          | None -> { summary with omitted = summary.omitted + 1 }
+          | Some tool_name ->
+              let args =
+                match assoc_opt "args" fields with
+                | None | Some `Null -> ""
+                | Some json -> Yojson.Safe.to_string json
+              in
+              { summary with
+                tools =
+                  Transcript.make_tool_activity
+                    ?execution_id:(string_field fields "execution_id")
+                    ~call_id:(string_field fields "tool_call_id") ~tool_name
+                    ~args ~outcome:(persisted_outcome fields)
+                    ~duration:(string_field fields "dur") ()
+                  :: summary.tools
+              })
+      | Some _ | None -> { summary with omitted = summary.omitted + 1 })
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      { summary with omitted = summary.omitted + 1 }
+
+let add_trace_block summary (block : Yojson.Safe.t) =
+  match block with
+  | `Assoc fields -> (
+      match string_field fields "t" with
+      | Some "trace" ->
+          let steps =
+            match assoc_opt "trace" fields with
+            | Some (`List steps) -> steps
+            | Some _ | None -> []
+          in
+          let summary = List.fold_left add_trace_step summary steps in
+          { summary with
+            omitted =
+              summary.omitted + Option.value ~default:0 (int_field fields "omitted")
+          }
+      | Some "thinking" ->
+          (match Masc.Keeper_chat_blocks.reasoning_visibility_of_fields Redacted fields with
+          | Error _ -> { summary with omitted = summary.omitted + 1 }
+          | Ok true -> { summary with withheld = summary.withheld + 1 }
+          | Ok false ->
+            let text =
+              Option.value ~default:"" (string_field fields "content")
+            in
+            { summary with
+              reasoning = List.rev_append (non_blank_lines text) summary.reasoning
+            })
+      (* Every other block kind is prose the row's [content] already carries
+         as text; reading it again would draw the reply twice. *)
+      | Some _ | None -> summary)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      summary
+
+let trace_summary_of fields =
+  match assoc_opt "blocks" fields with
+  | Some (`List blocks) ->
+      let summary = List.fold_left add_trace_block empty_trace blocks in
+      { summary with
+        reasoning = List.rev summary.reasoning
+      ; tools = List.rev summary.tools
+      }
+  | Some _ | None -> empty_trace
+
+(* A [Fusion] block is a pointer, not prose: the row's content already carries
+   the deliberation conclusion text, and the block names the run and the board
+   post holding the panel/judge detail. It becomes its own row so the
+   transcript says where the conclusion came from. board_post_id is required
+   the same way the dashboard's block normalizer requires it -- without it the
+   pointer has nothing to point at. *)
+let fusion_conclusions_of fields =
+  match assoc_opt "blocks" fields with
+  | Some (`List blocks) ->
+      List.filter_map
+        (fun block ->
+           match block with
+           | `Assoc block_fields
+             when String.equal
+                    (Option.value ~default:"" (string_field block_fields "t"))
+                    "fusion" ->
+               (* An empty id points at nothing; the dashboard's normalizer
+                  drops the same row, so both surfaces read one vocabulary. *)
+               let board_post_id =
+                 match string_field block_fields "board_post_id" with
+                 | Some id when String.trim id <> "" -> Some id
+                 | _ -> None
+               in
+               Option.map
+                 (fun board_post_id ->
+                    { fusion_run_id = string_field block_fields "run_id"
+                    ; fusion_board_post_id = board_post_id
+                    })
+                 board_post_id
+           | _ -> None)
+        blocks
+  | Some _ | None -> []
+
+let skill_projection_schema = "masc.keeper_chat.skill_activations.v2"
+
+type skill_projection =
+  { activities : Transcript.skill_activity list
+  ; replaces_raw_skill_tools : bool
+  }
+
+let no_skill_projection = { activities = []; replaces_raw_skill_tools = false }
+
+let required_string fields name =
+  match string_field fields name with
+  | Some value when String.trim value <> "" -> Ok value
+  | Some _ | None -> Error ("missing or blank " ^ name)
+
+let skill_problem state detail =
+  Transcript.make_skill_activity ~skill_name:"Skill evidence" ~state
+    ~actions:[] ~detail ()
+
+let decode_skill_action = function
+  | `Assoc fields -> required_string fields "tool_name"
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "Skill action is not an object"
+
+let decode_skill_activation = function
+  | `Assoc fields ->
+      let open Result.Syntax in
+      let* identity =
+        match assoc_opt "identity" fields with
+        | Some (`Assoc identity) -> Ok identity
+        | Some _ | None -> Error "Skill activation identity is not an object"
+      in
+      let* skill_name = required_string identity "name" in
+      let* skill_tool_use_id = required_string fields "skill_tool_use_id" in
+      let* turn_ref = required_string fields "turn_ref" in
+      let* content_revision = required_string fields "content_revision" in
+      let* runtime_id = required_string fields "runtime_id" in
+      let* actions =
+        match assoc_opt "actions" fields with
+        | Some (`List actions) ->
+            List.fold_left
+              (fun result action ->
+                let* reversed = result in
+                let* name = decode_skill_action action in
+                Ok (name :: reversed))
+              (Ok []) actions
+            |> Result.map List.rev
+        | Some _ | None -> Error "Skill activation actions is not a list"
+      in
+      let* delivered =
+        match assoc_opt "delivery" fields with
+        | Some `Null -> Ok false
+        | Some (`Assoc _) -> Ok true
+        | Some _ | None -> Error "Skill activation delivery is invalid"
+      in
+      (* The ledger's own closed kinds ([Keeper_skill_activation_ledger.
+         invocation_to_yojson]): a kind it does not write is a row this
+         build cannot read, not a read. *)
+      let* invocation, execution_id =
+        match assoc_opt "invocation" fields with
+        | Some (`Assoc invocation) -> (
+            match string_field invocation "kind" with
+            | Some "instruction" -> Ok (Transcript.Instruction_read, None)
+            | Some "composition" ->
+                let* tool_name = required_string invocation "tool_name" in
+                let* execution_id = required_string invocation "execution_id" in
+                Ok (Transcript.Composition_run { tool_name }, Some execution_id)
+            | Some "nested_composition" ->
+                let* tool_name = required_string invocation "tool_name" in
+                Ok (Transcript.Composition_run { tool_name }, None)
+            | Some other -> Error ("Skill activation invocation kind is unknown: " ^ other)
+            | None -> Error "Skill activation invocation has no kind")
+        | Some _ | None -> Error "Skill activation invocation is not an object"
+      in
+      let* execution = match invocation with
+        | Transcript.Instruction_read -> Ok None
+        | Transcript.Composition_run _ ->
+          (match assoc_opt "execution" fields with
+           | None -> Error "Composition execution evidence is missing"
+           | Some json ->
+             let* execution = Masc.Keeper_skill_execution_projection.of_yojson json in
+             match execution with
+             | Masc.Keeper_skill_execution_projection.Recorded { execution_id = observed; _ }
+                 when execution_id <> Some observed ->
+               Error "Composition execution differs from its original invocation"
+             | Masc.Keeper_skill_execution_projection.Recorded _
+             | Masc.Keeper_skill_execution_projection.Unrecorded
+             | Masc.Keeper_skill_execution_projection.Unavailable _ -> Ok (Some execution)) in
+      let state =
+        match delivered, actions with
+        | false, _ -> Transcript.Skill_served_only
+        | true, [] -> Transcript.Skill_delivered
+        | true, _ :: _ -> Transcript.Skill_used
+      in
+      Ok
+        (Transcript.make_skill_activity ~invocation ~skill_tool_use_id ~turn_ref
+           ~content_revision ~runtime_id ?execution_id ?execution ~skill_name ~state ~actions ())
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "Skill activation is not an object"
+
+let skill_projection_of_fields fields =
+  match assoc_opt "skill_activations" fields with
+  | None | Some `Null -> no_skill_projection
+  | Some (`Assoc projection) ->
+      let schema = string_field projection "schema" in
+      let status = string_field projection "status" in
+      if schema <> Some skill_projection_schema then
+        { activities =
+            [ skill_problem Transcript.Skill_evidence_unavailable
+                "Skill evidence schema is unavailable to this TUI" ]
+        ; replaces_raw_skill_tools = false
+        }
+      else
+        (match status with
+         | Some "available" ->
+             (match assoc_opt "activations" projection with
+              | Some (`List activations) ->
+                  let decoded = List.map (fun json ->
+                    let open Result.Syntax in
+                    let* activity = decode_skill_activation json in
+                    if activity.Transcript.turn_ref = explicit_turn_id_of_fields fields then Ok activity
+                    else Error "Skill activation belongs to another exact turn") activations in
+                  let activities =
+                    List.map
+                      (function
+                        | Ok activity -> activity
+                        | Error detail ->
+                            skill_problem Transcript.Skill_evidence_unavailable
+                              detail)
+                      decoded
+                  in
+                  let complete =
+                    activations <> []
+                    && List.for_all
+                         (function Ok _ -> true | Error _ -> false)
+                         decoded
+                  in
+                  if activities = [] then
+                    { activities =
+                        [ skill_problem Transcript.Skill_evidence_missing
+                            "The exact turn ledger contains no matching activation" ]
+                    ; replaces_raw_skill_tools = false
+                    }
+                  else
+                    { activities; replaces_raw_skill_tools = complete }
+              | Some _ | None ->
+                  { activities =
+                      [ skill_problem Transcript.Skill_evidence_unavailable
+                          "Skill activation evidence is not a list" ]
+                  ; replaces_raw_skill_tools = false
+                  })
+         | Some "missing" ->
+             { activities =
+                 [ skill_problem Transcript.Skill_evidence_missing
+                     (Option.value ~default:"No activation matched this exact turn"
+                        (string_field projection "detail")) ]
+             ; replaces_raw_skill_tools = false
+             }
+         | Some "not_recorded" | Some "unavailable" | Some "invalid_turn_ref" ->
+             { activities =
+                 [ skill_problem Transcript.Skill_evidence_unavailable
+                     (Option.value ~default:"Skill activation evidence is unavailable"
+                        (string_field projection "detail")) ]
+             ; replaces_raw_skill_tools = false
+             }
+         | Some _ | None ->
+             { activities =
+                 [ skill_problem Transcript.Skill_evidence_unavailable
+                     "Skill evidence status is unknown" ]
+             ; replaces_raw_skill_tools = false
+             })
+  | Some _ ->
+      { activities =
+          [ skill_problem Transcript.Skill_evidence_unavailable
+              "Skill activation evidence is not an object" ]
+      ; replaces_raw_skill_tools = false
+      }
+
+(* Only a projection for the same original invocation can replace a raw
+   call. Equal counts and repeated tool names carry no execution authority. *)
+let skill_matches_tool (skill : Transcript.skill_activity) (tool : Transcript.tool_activity) =
+  match Transcript.skill_activity_of_tool tool, skill.invocation with
+  | Some raw_skill, Some Transcript.Instruction_read ->
+    Option.is_some tool.call_id && skill.skill_tool_use_id = tool.call_id
+    && raw_skill.invocation = Some Transcript.Instruction_read
+  | Some _, Some (Transcript.Composition_run { tool_name }) ->
+    String.equal tool_name tool.tool_name
+    && Option.is_some skill.execution_id && skill.execution_id = tool.execution_id
+    && (match tool.call_id with None -> true | Some id -> skill.skill_tool_use_id = Some id)
+  | Some _, None | None, _ -> false
+
+let skill_projection_covers_tool projection (tool : Transcript.tool_activity) =
+  List.exists (fun (skill : Transcript.skill_activity) ->
+    skill_matches_tool skill tool &&
+    match skill.invocation with
+    | Some Transcript.Instruction_read -> tool.outcome = Transcript.Returned
+    | Some (Transcript.Composition_run _) ->
+      (match skill.execution with
+       | Some (Masc.Keeper_skill_execution_projection.Recorded _) -> true
+       | None | Some (Masc.Keeper_skill_execution_projection.Unrecorded
+                    | Masc.Keeper_skill_execution_projection.Unavailable _) -> false)
+    | None -> false) projection.activities
+
+let without_raw_skill_tools summary projection =
+  { summary with tools = List.filter
+      (fun tool -> not (skill_projection_covers_tool projection tool)) summary.tools }
+
+let reconcile_skill_projection_with_trace summary projection =
+  let projection = { projection with activities = List.map
+    (fun (skill : Transcript.skill_activity) ->
+      let call_failed = skill.call_failed || List.exists (fun (tool : Transcript.tool_activity) ->
+        tool.outcome = Transcript.Failed && skill_matches_tool skill tool) summary.tools in
+      Transcript.make_skill_activity ?invocation:skill.invocation
+        ?skill_tool_use_id:skill.skill_tool_use_id ?turn_ref:skill.turn_ref
+        ?content_revision:skill.content_revision ?runtime_id:skill.runtime_id
+        ?execution_id:skill.execution_id ?execution:skill.execution ?detail:skill.detail
+        ~call_failed ~skill_name:skill.skill_name ~state:skill.state ~actions:skill.actions ()) projection.activities } in
+  if not projection.replaces_raw_skill_tools then projection
+  else if List.exists (fun tool ->
+    Option.is_some (Transcript.skill_activity_of_tool tool)
+    && not (skill_projection_covers_tool projection tool)) summary.tools then
+    { projection with activities = projection.activities @
+        [ skill_problem Transcript.Skill_evidence_unavailable
+            "Unmatched Skill execution evidence retained in raw calls" ] }
+  else projection
+
+(* One row for the turn's skill work, as the trace's tool steps are one
+   block: the pane counts the invocations on the row and unfolds them under
+   the tool toggle. *)
+let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at
+    projection =
+  match projection.activities with
+  | [] -> []
+  | activities ->
+      [ Utterance
+          { at
+          ; structural_id = Option.map (fun id -> id ^ ":skills") source_id
+          ; turn_sequence
+          ; turn_id
+          ; operation_id
+          ; execution_source
+          ; kind = Skill_activity activities
+          ; text = ""
+          ; media = []
+          ; attachments = []
+          }
+      ]
+
+(* The rows an assistant row's blocks become: one reasoning block, one
+   tool block, then what the turn said. The trace interleaves think and
+   tool steps; they are gathered into one block each, the way the live pane
+   draws a turn, rather than drawn as one row per step. A withheld count
+   rides the reasoning block and an omitted count the tool block -- omitted
+   steps are steps the turn took, so a block that has nothing but that count
+   is still a block of steps. *)
+let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at summary =
+  let identity projection =
+    Option.map (fun id -> id ^ ":" ^ projection) source_id
+  in
+  let omitted_note =
+    if summary.omitted = 0 then []
+    else
+      [ Printf.sprintf "(%s not carried by the transcript)"
+          (Masc_tui_message_layout.count_noun summary.omitted "step")
+      ]
+  in
+  let withheld_note =
+    if summary.withheld = 0 then []
+    else
+      (* "content withheld" read as "someone is holding it back", and the
+         reader then looked for a way to see it. There is none: RFC-0358 s2
+         admits a reasoning step and its timestamp, and [Trajectory
+         .withheld_thinking_entry] cannot carry text at all -- both producers
+         of [Trace_think] hardcode an empty one. The count is the whole fact. *)
+      [ Printf.sprintf "%s · text not recorded"
+          (Masc_tui_message_layout.count_noun summary.withheld "reasoning step")
+      ]
+  in
+  let reasoning = summary.reasoning @ withheld_note in
+  let tool_block =
+    Transcript.tool_block ~omitted_steps:summary.omitted summary.tools
+  in
+  match reasoning, summary.tools, summary.omitted with
+  | [], [], 0 -> []
+  | [], [], _ ->
+      (* No reasoning and no calls: the omitted count is the only thing the
+         block said, and remains a typed transcript omission rather than a
+         synthetic tool call. *)
+      [ Utterance
+          { at
+          ; structural_id = identity "trace-tools"
+          ; turn_sequence
+          ; turn_id
+          ; operation_id
+          ; execution_source
+          ; kind = Tool_calls tool_block
+          ; text = ""
+          ; media = []
+          ; attachments = []
+          }
+      ]
+  | reasoning, [], _ ->
+      [ Utterance
+          { at
+          ; structural_id = identity "trace-reasoning"
+          ; turn_sequence
+          ; turn_id
+          ; operation_id
+          ; execution_source
+          ; kind = Reasoning (reasoning @ omitted_note)
+          ; text = ""
+          ; media = []
+          ; attachments = []
+          }
+      ]
+  | [], _ :: _, _ ->
+      [ Utterance
+          { at
+          ; structural_id = identity "trace-tools"
+          ; turn_sequence
+          ; turn_id
+          ; operation_id
+          ; execution_source
+          ; kind = Tool_calls tool_block
+          ; text = ""
+          ; media = []
+          ; attachments = []
+          }
+      ]
+  | reasoning, _ :: _, _ ->
+      [ Utterance
+          { at
+          ; structural_id = identity "trace-reasoning"
+          ; turn_sequence
+          ; turn_id
+          ; operation_id
+          ; execution_source
+          ; kind = Reasoning reasoning
+          ; text = ""
+          ; media = []
+          ; attachments = []
+          }
+      ; Utterance
+          { at
+          ; structural_id = identity "trace-tools"
+          ; turn_sequence
+          ; turn_id
+          ; operation_id
+          ; execution_source
+          ; kind = Tool_calls tool_block
+          ; text = ""
+          ; media = []
+          ; attachments = []
+          }
+      ]
+
+(* [None] is an entry this reader could not make sense of; [Some rows] is one
+   it read, and those rows are empty when the entry is real and draws nothing.
+   The two were one empty list, and [rows_of_json] counted every empty one as
+   dropped -- so once #33692 stopped drawing a wake that produced nothing,
+   every such turn was reported to the operator as a row that could not be
+   read.
+
+   Annotated rather than inferred: an inferred parameter widens to an open
+   variant and accepts tags Yojson does not have, which leaves the match below
+   exhaustive over nothing. yojson 3 has no `Tuple or `Variant. *)
+module StringSet = Set.Make (String)
+
+let operation_delivery_id_of_fields fields =
+  match assoc_opt "delivery_key" fields with
+  | Some (`Assoc key_fields) -> (
+      match string_field key_fields "kind" with
+      | Some "operation" -> string_field key_fields "operation_id"
+      | Some _ | None -> None)
+  | Some _ | None -> None
+
+let transcript_slot_kind_of_fields fields =
+  match assoc_opt "transcript_slot" fields with
+  | Some (`Assoc slot_fields) -> string_field slot_fields "kind"
+  | Some _ | None -> None
+
+let terminal_failure_operation_ids (entries : Yojson.Safe.t list) =
+  List.fold_left
+    (fun acc (entry : Yojson.Safe.t) ->
+       match entry with
+       | `Assoc fields ->
+           let is_terminal_failure =
+             string_field fields "role" = Some "request_failure"
+             && transcript_slot_kind_of_fields fields = Some "terminal_result"
+           in
+           (match operation_delivery_id_of_fields fields with
+            | Some op_id when is_terminal_failure -> StringSet.add op_id acc
+            | Some _ | None -> acc)
+       | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+           acc)
+    StringSet.empty
+    entries
+
+let parse_row ?(terminal_failure_ops = StringSet.empty) (entry : Yojson.Safe.t)
+  : parsed list option
+  =
+  match entry with
+  | `Assoc fields -> (
+      let at = Option.value ~default:0.0 (float_field fields "ts") in
+      let content = Option.value ~default:"" (string_field fields "content") in
+      let turn_id = turn_id_of_fields fields in
+      let operation_id = operation_id_of_fields fields in
+      let execution_source = execution_source_of_fields fields in
+      let turn_sequence = turn_sequence_of_fields fields in
+      let source_id = string_field fields "id" in
+      match string_field fields "role" with
+      | Some "user" ->
+          (* [speaker_name] and [surface] are what the server already sends;
+             reading them is the whole difference between "you" and the 23
+             other authors that share this role. A surface this build cannot
+             decode is dropped to [None] rather than guessed at. *)
+          let speaker_id = string_field fields "speaker_id" in
+          let authority = Option.bind (string_field fields "speaker_authority")
+              Masc.Keeper_chat_store.authority_of_label in
+          let speaker = match authority with
+            | Some Masc.Keeper_chat_store.Owner -> Operator
+            | Some (Masc.Keeper_chat_store.External | Masc.Keeper_chat_store.Keeper) ->
+                (match string_field fields "speaker_name" with
+                 | Some name when String.trim name <> ""
+                     && not (Option.equal String.equal (Some name) speaker_id) -> Named name
+                 | Some _ | None -> Unresolved {id=speaker_id})
+            | None -> Unresolved {id=speaker_id}
+          in
+          let surface =
+            match assoc_opt "surface" fields with
+            | None | Some `Null -> None
+            | Some json -> surface_of_json json
+          in
+          Some
+            [ Utterance
+                { at
+                ; structural_id = structural_id_of_fields fields "utterance"
+                ; turn_sequence
+                ; turn_id
+                ; operation_id
+                ; execution_source
+                ; kind = Addressed_to_keeper { speaker; surface }
+                ; text = content
+                ; media = []
+                ; attachments = attachment_notes_of fields
+                }
+            ]
+      | Some "request_failure" ->
+          (* The server already sends the append-once identity it stored
+             the row under. Only an operation key names a turn this client
+             dispatched; the other producers get [None] rather than a
+             borrowed id. *)
+          let origin_request_id = operation_delivery_id_of_fields fields in
+          let redundant_settled_failure =
+            transcript_slot_kind_of_fields fields = Some "settled_failure"
+            &&
+            match origin_request_id with
+            | Some op_id -> StringSet.mem op_id terminal_failure_ops
+            | None -> false
+          in
+          if redundant_settled_failure then
+            Some []
+          else
+            Some
+              [ Utterance
+                { at
+                ; structural_id = structural_id_of_fields fields "failure"
+                ; turn_sequence
+                ; turn_id =
+                    (match turn_id with
+                     | Some _ -> turn_id
+                     | None -> origin_request_id)
+                ; (* The failure is the operation's: the key it was stored
+                     under names it even when the row carries no transcript
+                     slot for the provenance reader. *)
+                  operation_id =
+                    (match operation_id with
+                     | Some _ -> operation_id
+                     | None -> origin_request_id)
+                ; execution_source =
+                    (match execution_source with
+                     | Some _ -> execution_source
+                     | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
+                ; kind = Delivery_failed { origin_request_id; recovered_at = None }
+                ; text = content
+                ; media = (match assoc_opt "blocks" fields with
+                    | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [])
+                ; attachments = attachment_notes_of fields
+                }
+            ]
+      | Some "assistant" -> (
+          (* An autonomous turn persists what it did as a trace block and
+             often says nothing in [content]: on one live keeper 32 of
+             183 assistant rows were blank that way, and each drew as a
+             timestamp over an empty line. Exact Skill evidence leads the
+             turn as its own card; reasoning and ordinary calls follow as
+             the trace carried them, then the text, when there is any, is
+             what the turn said afterwards. A row with neither keeps its
+             empty line -- that is what the server holds for it.
+
+             Only a row the server marks [autonomous_turn] is read this
+             way. A direct-conversation turn can carry a trace block too
+             -- the server joins the raw trace onto rows with a turn ref
+             -- but its calls are already in the transcript as
+             [role: "tool"] rows, and reading both drew every call twice. *)
+          let autonomous =
+            match assoc_opt "autonomous_turn" fields with
+            | Some (`Assoc _) -> true
+            | Some _ | None -> false
+          in
+          let skill_projection = skill_projection_of_fields fields in
+          let fusion_rows =
+            List.map
+              (fun fusion ->
+                 Utterance
+                   { at
+                   ; structural_id =
+                       Option.map (fun id -> id ^ ":fusion") source_id
+                   ; turn_sequence
+                   ; turn_id
+                   ; operation_id
+                   ; execution_source
+                   ; kind = Fusion_conclusion fusion
+                   ; text = ""
+                   ; media = []
+                   ; attachments = []
+                   })
+              (fusion_conclusions_of fields)
+          in
+          let skill_rows, trace_rows =
+            let summary = trace_summary_of fields in
+            let skill_projection = reconcile_skill_projection_with_trace summary skill_projection in
+            if autonomous then
+              let summary =
+                if skill_projection.replaces_raw_skill_tools then
+                  without_raw_skill_tools summary skill_projection
+                else summary
+              in
+              ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
+                  ~operation_id ~execution_source at skill_projection
+              , rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at
+                  summary )
+            else
+              ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
+                  ~operation_id ~execution_source at skill_projection
+              , [] )
+          in
+          let media = match assoc_opt "blocks" fields with
+            | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [] in
+          let said =
+            (* An autonomous turn that wrote nothing has nothing to say.
+               With a trace the calls are the turn; without one the wake
+               produced neither, and as a row it was a speaker label over
+               an empty line -- which a later change filled with a middle
+               dot so the line would not look broken. Eleven of the
+               fourteen Keeper rows on one live screen were that dot.
+
+               A direct turn keeps its blank row: someone asked, and an
+               empty answer is part of that exchange. Nobody asked for an
+               autonomous one.
+
+               Trimmed rather than compared against "": a reply of a
+               single newline is as blank as no reply, and an exact
+               comparison let it through to be drawn as the dot.
+
+               Skill rows count as the turn's visible content too: when
+               the projection replaces the raw skill tool, trace_rows is
+               empty and an older guard let an empty utterance row through
+               under the Skill row. *)
+            if
+              String.trim content = ""
+              && media = []
+              && (autonomous || skill_rows <> [] || trace_rows <> [])
+            then []
+            else
+              [ Utterance
+                  { at
+                  ; structural_id =
+                      structural_id_of_fields fields "utterance"
+                  ; turn_sequence
+                  ; turn_id
+                  ; operation_id
+                  ; execution_source
+                  ; kind = if autonomous then Autonomous_reply else Said_by_keeper
+                  ; text = content
+                  ; media
+                  ; attachments = []
+                  }
+              ]
+          in
+          Some (fusion_rows @ skill_rows @ trace_rows @ said))
+      | Some "system" ->
+          (* Durable approval lifecycle rows are server-owned status, never
+             Keeper speech. A row that carries the typed lifecycle is read as
+             that fact: the store also writes a rendered sentence, and reading
+             the sentence instead put the gate's steps in the Memory journal
+             lane, where they interleaved with memory commits and read as
+             conversation. Rows without the payload keep the neutral lane.
+
+             The phase is parsed here, once, into the HITL contract's closed
+             sum: every reader after this matches on constructors, so a phase
+             the contract adds fails their compile instead of drawing as "unknown".
+             A payload that is present but not a lifecycle -- no approval id
+             to fold the step under, or a label the vocabulary does not hold
+             -- is an undecodable row and is dropped and counted like any
+             other, never filed under Memory where it would hide. *)
+          let kind =
+            match assoc_opt "approval_lifecycle" fields with
+            | None ->
+                Some
+                  (Memory_activity
+                     { summary = None
+                     ; journal = []
+                     ; pass = Masc_tui_message_layout.No_pass
+                     })
+            | Some (`Assoc lifecycle) -> (
+              let approval_id =
+                match string_field lifecycle "approval_id" with
+                | Some id when String.trim id <> "" -> Some id
+                | Some _ | None -> None
+              in
+              let phase =
+                Option.bind (string_field lifecycle "phase")
+                  Keeper_approval_lifecycle.approval_lifecycle_phase_of_label
+              in
+              match approval_id, phase with
+              | Some approval_id, Some phase ->
+                Some
+                  (Gate_activity
+                     { approval_id
+                     ; phase
+                     ; tool = string_field lifecycle "tool_name"
+                     ; summary = string_field lifecycle "call_summary"
+                     })
+              | None, None | None, Some _ | Some _, None -> None)
+            | Some
+                ( `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null
+                | `String _ ) ->
+              None
+          in
+          (match kind with
+           (* A lifecycle this reader does not know is an entry it could not
+              read, not an entry with nothing in it. *)
+           | None -> None
+           | Some kind ->
+             Some
+               [ Utterance
+                 { at
+                 ; structural_id = structural_id_of_fields fields "system"
+                 ; turn_sequence
+                 ; turn_id
+                 ; operation_id
+                 ; execution_source
+                 ; kind
+                 ; text = content
+                 ; media = []
+                 ; attachments = []
+                 }
+             ])
+      | Some "tool" -> (
+          (* A row with no tool name would draw as a marker and nothing else,
+             which says less than no row -- the same call the connector trail
+             makes. *)
+          match string_field fields "tool_call_name" with
+          | Some tool_name ->
+              Some
+                [ Tool_call
+                  { at
+                  ; structural_id = structural_id_of_fields fields "tool"
+                  ; turn_sequence
+                  ; turn_id
+                  ; operation_id
+                  ; execution_source
+                  ; call_id = string_field fields "tool_call_id"
+                  ; execution_id = string_field fields "execution_id"
+                  ; tool_name
+                  ; args = content
+                  }
+              ]
+          | None -> None)
+      | Some _ | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+(* Fold consecutive tool calls into one block, the way a live turn draws its
+   calls, and keep every other row where it was. Order is the server's: it
+   appends in order and its own note asks a client not to re-sort rows that
+   carry no [ts]. These are the rows Full and Results draw; Compact gathers
+   one turn's blocks into one when the pane builds its rows
+   ([Masc_tui_types.gather_chat_tool_rows]), so the stance is a view, not a
+   second decode. *)
+let fold_tool_blocks parsed_rows =
+  let flush pending acc =
+    match List.rev pending with
+    | [] -> acc
+    | (at, _, turn_sequence, turn_id, operation_id, execution_source, _, _, _, _) :: _ as calls ->
+        let structural_id =
+          let ids =
+            List.filter_map
+              (fun (_, structural_id, _, _, _, _, _, _, _, _) -> structural_id)
+              calls
+          in
+          match ids with
+          | [] -> None
+          | ids -> Some ("tool-block:" ^ String.concat "+" ids)
+        in
+        let activities =
+          List.map
+            (fun (_, _, _, _, _, _, call_id, execution_id, tool_name, args) ->
+              let outcome =
+                match execution_id with
+                | Some _ -> Transcript.Returned
+                | None -> Transcript.Outcome_unrecorded
+              in
+              Transcript.make_tool_activity ?execution_id ~call_id ~tool_name ~args
+                ~outcome ~duration:None ())
+            calls
+        in
+        { at
+        ; structural_id
+        ; turn_sequence
+        ; turn_id
+        ; operation_id
+        ; execution_source
+        ; kind = Tool_calls (Transcript.tool_block activities)
+        ; text = ""
+        ; media = []
+        ; attachments = []
+        }
+        :: acc
+  in
+  let rec loop pending acc = function
+    | [] -> List.rev (flush pending acc)
+    | Tool_call
+        { at
+        ; structural_id
+        ; turn_sequence
+        ; turn_id
+        ; operation_id
+        ; execution_source
+        ; call_id
+        ; execution_id
+        ; tool_name
+        ; args
+        }
+      :: rest ->
+        let next =
+          ( at
+          , structural_id
+          , turn_sequence
+          , turn_id
+          , operation_id
+          , execution_source
+          , call_id
+          , execution_id
+          , tool_name
+          , args )
+        in
+        (match pending with
+         | (_, _, _, pending_turn, _, pending_source, _, _, _, _) :: _
+           when pending_turn <> turn_id || pending_source <> execution_source ->
+             loop [ next ] (flush pending acc) rest
+         | _ -> loop (next :: pending) acc rest)
+    | Utterance row :: rest -> loop [] (row :: flush pending acc) rest
+  in
+  loop [] [] parsed_rows
+
+(* A delivery failure remains a failure record, but a later real keeper
+   utterance answers the operator's practical question: the lane recovered.
+   Scan the append order backwards so the evidence comes from a row after the
+   interruption, never merely from a healthy badge or a newer timestamp.
+
+   Only failures this reader can classify are annotated. A later reply must
+   not turn an unrelated timeout/auth/config error into a recovered restart. *)
+let annotate_recovered_interruptions rows =
+  let rec loop later_reply_at acc = function
+    | [] -> acc
+    | row :: rest ->
+      let row, later_reply_at =
+        match row.kind with
+        | Said_by_keeper | Autonomous_reply
+          when String.trim row.text <> "" ->
+          row, Some row.at
+        | Delivery_failed failure ->
+          let recognized = Option.is_some (present_delivery_failure row.text) in
+          let recovered_at = if recognized then later_reply_at else None in
+          { row with
+            kind =
+              Delivery_failed
+                { origin_request_id = failure.origin_request_id; recovered_at }
+          }, later_reply_at
+        | Addressed_to_keeper _ | Said_by_keeper | Autonomous_reply
+        | Tool_calls _ | Skill_activity _ | Reasoning _ | Gate_activity _
+        | Memory_activity _ | Fusion_conclusion _ ->
+          row, later_reply_at
+      in
+      loop later_reply_at (row :: acc) rest
+  in
+  loop None [] (List.rev rows)
+;;
+
+let rows_of_json (payload : Yojson.Safe.t) =
+  match payload with
+  | `List entries ->
+      let terminal_failure_ops = terminal_failure_operation_ids entries in
+      let parsed = List.map (parse_row ~terminal_failure_ops) entries in
+      (* What the operator is told could not be read. An entry that was read
+         and draws nothing -- a wake that produced neither speech nor work --
+         is not one of them. *)
+      let dropped = List.length (List.filter Option.is_none parsed) in
+      let rows =
+        fold_tool_blocks (List.concat (List.filter_map Fun.id parsed))
+        |> annotate_recovered_interruptions
+      in
+      Ok { rows; dropped }
+  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
+      Error "keeper chat history did not come back as an array of rows"
+
+type page =
+  { decoded : decoded
+  ; has_more : bool
+  ; next_cursor : string option
+  }
+
+type page_error = Page_stale | Page_read_failed of string
+let page_error_to_string = function
+  | Page_stale -> "Conversation history changed; the next older read starts from its newest page."
+  | Page_read_failed detail -> detail
+
+let page_of_json (payload : Yojson.Safe.t) =
+  match payload with
+  | `Assoc fields ->
+    (match assoc_opt "schema" fields, assoc_opt "messages" fields,
+           assoc_opt "has_more" fields, assoc_opt "next_cursor" fields with
+     | Some (`String "masc.keeper_chat_history.page.v2"), Some (`List _ as messages),
+       Some (`Bool has_more), Some cursor_json ->
+       let cursor = match cursor_json with
+         | `Null -> Ok None
+         | `String value when String.trim value <> "" -> Ok (Some value)
+         | _ -> Error "keeper chat page has an invalid cursor"
+       in
+       let open Result.Syntax in
+       let* next_cursor = cursor in
+       if has_more <> Option.is_some next_cursor
+       then Error "keeper chat page cursor disagrees with has_more"
+       else
+         let* decoded = rows_of_json messages in
+         if decoded.dropped <> 0
+         then Error "keeper chat page contains unreadable rows; cursor was not advanced"
+         else Ok { decoded; has_more; next_cursor }
+     | _ -> Error "keeper chat page has an unknown or incomplete v2 envelope")
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error "keeper chat page did not come back as an object"

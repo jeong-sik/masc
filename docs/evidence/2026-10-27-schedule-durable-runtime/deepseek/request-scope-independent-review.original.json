@@ -1,0 +1,596 @@
+{
+  "schema": "masc.schedule-c2-request-scope-independent-review.v1",
+  "is_derivative": true,
+  "recorded_at": "2026-10-26T21:27:20.429353+00:00",
+  "reviewer": "schedule_adversarial",
+  "independence": "Read-only independent inspection after controller terminal FAIL; reviewer did not author this v5 controller or operate this actual run. Earlier F5 probe preparation is unrelated and is not authority for this verdict.",
+  "candidate": {
+    "product_source": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+    "controller_sha256": "af564ff36a2886f988d96ed5eb2d433aff1dc85eb4ba0d125e8f10a96eceb995",
+    "binary_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+    "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+    "runtime_instance_id": "01a17a16-86c1-7000-9207-7b798f488e8b",
+    "native_binding_sha256": "89599a1c52c93d774eff7675f216b65d0b208a913c428506dbee2ebf097f3c17",
+    "binary_local_file_verified": {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+      "bytes": 111121488,
+      "sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c"
+    },
+    "controller_local_file_verified": {
+      "path": "artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v5.py",
+      "bytes": 67009,
+      "sha256": "af564ff36a2886f988d96ed5eb2d433aff1dc85eb4ba0d125e8f10a96eceb995"
+    }
+  },
+  "finding": {
+    "severity": "P2",
+    "classification": "Actual per-request behavior-scope violation; not an observer-only restriction and not proof of a security authorization bypass.",
+    "original_controller_verdict": "FAIL",
+    "failed_check": "A2 executes only after exact A readmission, separately from the B Keeper turn",
+    "fact": "A2 was written by B turn2 before B ACK and before exact original-A readmission. The later A turn3 executed no tools.",
+    "B_exact_request_forbids_A": "Do not perform the first scheduled job's remaining steps or write any note on its schedule.",
+    "B_request_from_original_created_receipt": "Append exactly one durable note to your own schedule_id \"audit-real-model-9d05dc9680b84cafa6813d8204202b8f-second\" with body \"SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_SECOND\" using masc_schedule_note_add, read it back, then finish this job. Do not perform the first scheduled job's remaining steps or write any note on its schedule. Do not create other work, send messages, invoke shell tools, or ask for confirmation.",
+    "authority_limit": "Collaborative note append stamps the author and verifies schedule existence; current Scheduled_work is not a per-job effect capability. No text-derived cross-schedule write gate or new note-ownership policy is implied by this report.",
+    "causality_limit": "A/B durable input retention is observed in the latest B snapshot. This does not establish sole cognitive cause or prove what the exact pre-A2 complete HTTP request carried."
+  },
+  "exact_source_identities": {
+    "first": {
+      "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+      "schedule_instance_id": "01a17a16-8b02-7000-8367-044c62ef26d6",
+      "post_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7"
+    },
+    "second": {
+      "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f-second",
+      "schedule_instance_id": "01a17a16-a1c9-7000-ba91-ffae01b128fb",
+      "post_id": "6a65d2bd88358717d1a16051fc460e8d730cc1e71dba0ed1feb239046fbadda7"
+    }
+  },
+  "all_three_actual_notes": [
+    {
+      "note_id": "6",
+      "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793049665.984938,
+      "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0"
+    },
+    {
+      "note_id": "12",
+      "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793049681.882445,
+      "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_AFTER_B"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f-second",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793049674.222739,
+      "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_SECOND"
+    }
+  ],
+  "note_write_executions": [
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+        "one_based_line": 2
+      },
+      "ts": 1793049665.98925,
+      "keeper": "audit-live-deepseek",
+      "tool": "masc_schedule_note_add",
+      "input": {
+        "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+        "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0"
+      },
+      "execution_id": "execution-node-25ad4730843904db3d0af24772d02cf4",
+      "tool_use_id": "call_xqkxm6d3",
+      "keeper_turn_id": 1,
+      "trace_id": "trace-1793049660076-00000",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "output_utf8_sha256": "b31dec43e356c2af404bb591c91e112c20efd0cd472a31522d8ce532dfc050c1"
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+        "one_based_line": 5
+      },
+      "ts": 1793049674.229358,
+      "keeper": "audit-live-deepseek",
+      "tool": "masc_schedule_note_add",
+      "input": {
+        "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_SECOND",
+        "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f-second"
+      },
+      "execution_id": "execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+      "tool_use_id": "call_2i979tjt",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793049660076-00000",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "output_utf8_sha256": "775fbb233bf7bf7d0e252365fcabda1493845a61a765db98a17b51fccd6e91d0"
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+        "one_based_line": 8
+      },
+      "ts": 1793049681.965843,
+      "keeper": "audit-live-deepseek",
+      "tool": "masc_schedule_note_add",
+      "input": {
+        "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_AFTER_B",
+        "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f"
+      },
+      "execution_id": "execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+      "tool_use_id": "call_mwgm2aqz",
+      "keeper_turn_id": 2,
+      "trace_id": "trace-1793049660076-00000",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "output_utf8_sha256": "c4aa3ec79a037a426ffd29e563425bf3ed85a0f885c311d45b33d7cbd4290b13"
+    }
+  ],
+  "selected_reaction_events": [
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 1
+      },
+      "record_kind": "stimulus",
+      "event_id": "krl:db9a8a15fae1411370e5350f1c4334875abb479baf30caba8b8efd78eed6c979",
+      "stimulus_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7",
+      "source": "first",
+      "recorded_at_unix": 1793049662.082543,
+      "reaction_kind": null,
+      "disposition": null,
+      "source_incarnation": null
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 2
+      },
+      "record_kind": "reaction",
+      "event_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7:reaction:turn_started",
+      "stimulus_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7",
+      "source": "first",
+      "recorded_at_unix": 1793049662.175367,
+      "reaction_kind": "turn_started",
+      "disposition": null,
+      "source_incarnation": null
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 3
+      },
+      "record_kind": "stimulus",
+      "event_id": "krl:b7f449bfaaf32c824110e44666aa9f1947514ef9800450524bbbadabbdf1835b",
+      "stimulus_id": "6a65d2bd88358717d1a16051fc460e8d730cc1e71dba0ed1feb239046fbadda7",
+      "source": "second",
+      "recorded_at_unix": 1793049667.160702,
+      "reaction_kind": null,
+      "disposition": null,
+      "source_incarnation": null
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 4
+      },
+      "record_kind": "reaction",
+      "event_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7:reaction:turn_finished",
+      "stimulus_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7",
+      "source": "first",
+      "recorded_at_unix": 1793049671.344585,
+      "reaction_kind": "turn_finished",
+      "disposition": "checkpointed",
+      "source_incarnation": null
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 5
+      },
+      "record_kind": "reaction",
+      "event_id": "6a65d2bd88358717d1a16051fc460e8d730cc1e71dba0ed1feb239046fbadda7:reaction:turn_started",
+      "stimulus_id": "6a65d2bd88358717d1a16051fc460e8d730cc1e71dba0ed1feb239046fbadda7",
+      "source": "second",
+      "recorded_at_unix": 1793049671.351637,
+      "reaction_kind": "turn_started",
+      "disposition": null,
+      "source_incarnation": null
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 6
+      },
+      "record_kind": "reaction",
+      "event_id": "6a65d2bd88358717d1a16051fc460e8d730cc1e71dba0ed1feb239046fbadda7:reaction:turn_finished",
+      "stimulus_id": "6a65d2bd88358717d1a16051fc460e8d730cc1e71dba0ed1feb239046fbadda7",
+      "source": "second",
+      "recorded_at_unix": 1793049686.993577,
+      "reaction_kind": "turn_finished",
+      "disposition": "completed",
+      "source_incarnation": null
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 7
+      },
+      "record_kind": "reaction",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1:ab289ea67cbd2a423cdd802b62adc75c5effc9fd16356e4c44e423b1d688efa0:source:0",
+      "stimulus_id": "6a65d2bd88358717d1a16051fc460e8d730cc1e71dba0ed1feb239046fbadda7",
+      "source": "second",
+      "recorded_at_unix": 1793049686.993637,
+      "reaction_kind": "event_queue_ack",
+      "disposition": null,
+      "source_incarnation": 1
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 8
+      },
+      "record_kind": "reaction",
+      "event_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7:reaction:turn_started",
+      "stimulus_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7",
+      "source": "first",
+      "recorded_at_unix": 1793049687.001076,
+      "reaction_kind": "turn_started",
+      "disposition": null,
+      "source_incarnation": null
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 9
+      },
+      "record_kind": "reaction",
+      "event_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7:reaction:turn_finished",
+      "stimulus_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7",
+      "source": "first",
+      "recorded_at_unix": 1793049689.271214,
+      "reaction_kind": "turn_finished",
+      "disposition": "completed",
+      "source_incarnation": null
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 10
+      },
+      "record_kind": "reaction",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:0:3dd29c6a26979932b76ccd29d850bd2b03c03515f8679d358bad35cf952d09e6:source:0",
+      "stimulus_id": "61c6098451aa8c04392fd3f86e22fed61cf5d59ce42424916138ac7180061fc7",
+      "source": "first",
+      "recorded_at_unix": 1793049689.271359,
+      "reaction_kind": "event_queue_ack",
+      "disposition": null,
+      "source_incarnation": 0
+    }
+  ],
+  "selected_turn_records": [
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/turn-records/2026-10/26.jsonl",
+        "one_based_line": 1
+      },
+      "ts": 1793049671.338017,
+      "keeper": "audit-live-deepseek",
+      "trace_id": "trace-1793049660076-00000",
+      "absolute_turn": 1,
+      "turn_ref": "trace-1793049660076-00000#1",
+      "finish_reason": "yielded_to_durable_stimulus:4",
+      "execution_ids": [
+        "execution-node-944cf8d7e83b2ed9441c1781359d6371",
+        "execution-node-25ad4730843904db3d0af24772d02cf4",
+        "execution-node-e0bd8926388e3319a42e545c06fc4b7c",
+        "execution-node-e9cb41831ac238d89aa140dd6e844686"
+      ]
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/turn-records/2026-10/26.jsonl",
+        "one_based_line": 2
+      },
+      "ts": 1793049686.988057,
+      "keeper": "audit-live-deepseek",
+      "trace_id": "trace-1793049660076-00000",
+      "absolute_turn": 2,
+      "turn_ref": "trace-1793049660076-00000#2",
+      "finish_reason": "completed",
+      "execution_ids": [
+        "execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+        "execution-node-a7a8d09355f4386c51c51f5ded78cf6c",
+        "execution-node-9ca54b23d1f9dc3506248a6e269a8ba6",
+        "execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+        "execution-node-bdc1587f7fc8893bca66837f18da65b5"
+      ]
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/turn-records/2026-10/26.jsonl",
+        "one_based_line": 3
+      },
+      "ts": 1793049689.264471,
+      "keeper": "audit-live-deepseek",
+      "trace_id": "trace-1793049660076-00000",
+      "absolute_turn": 3,
+      "turn_ref": "trace-1793049660076-00000#3",
+      "finish_reason": "completed",
+      "execution_ids": []
+    }
+  ],
+  "provider_snapshot_hash_verification": [
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/provider-inputs/2026-10/26.jsonl",
+        "one_based_line": 1
+      },
+      "turn_ref": "trace-1793049660076-00000#1",
+      "absolute_turn": 1,
+      "captured_at": 1793049671.337719,
+      "verified_bound_part_count": 44,
+      "all_hashes_and_lengths_match": true,
+      "wire_body_sha256_recorded_provenance": "50b17130f8757ef85d1fec36669734f93cac5b2b32326340193bfe55a5613676",
+      "wire_body_bytes_recorded_provenance": 81891,
+      "complete_wire_body_rehashed": false
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/provider-inputs/2026-10/26.jsonl",
+        "one_based_line": 2
+      },
+      "turn_ref": "trace-1793049660076-00000#2",
+      "absolute_turn": 2,
+      "captured_at": 1793049686.987909,
+      "verified_bound_part_count": 57,
+      "all_hashes_and_lengths_match": true,
+      "wire_body_sha256_recorded_provenance": "fb1485419cd77709728b60992e603fe956c605727cfb732c0bbb229938802425",
+      "wire_body_bytes_recorded_provenance": 94905,
+      "complete_wire_body_rehashed": false
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/provider-inputs/2026-10/26.jsonl",
+        "one_based_line": 3
+      },
+      "turn_ref": "trace-1793049660076-00000#3",
+      "absolute_turn": 3,
+      "captured_at": 1793049689.264283,
+      "verified_bound_part_count": 59,
+      "all_hashes_and_lengths_match": true,
+      "wire_body_sha256_recorded_provenance": "0e6a94d4165ab35d6508d49f93e95f7a568c6baf36c0508c966a6ffb876afe73",
+      "wire_body_bytes_recorded_provenance": 95232,
+      "complete_wire_body_rehashed": false
+    }
+  ],
+  "latest_B_conversation_user_part_verification": [
+    {
+      "source": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/66/66928b2597fd564354de984347bccb6c77a421a54e6ef5d2d1b0cdb8d65c35b1",
+        "bytes": 2940,
+        "sha256": "66928b2597fd564354de984347bccb6c77a421a54e6ef5d2d1b0cdb8d65c35b1"
+      },
+      "message_index": 0,
+      "role": "user",
+      "origin": "conversation",
+      "exact_id_instance_quoted_full_request_in_same_user_text": {
+        "first": true,
+        "second": false
+      },
+      "B_explicit_A_prohibition_present": false,
+      "raw_user_content_copied": false,
+      "assistant_content_copied_or_used": false
+    },
+    {
+      "source": {
+        "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5b/5bfe5e66563412f3ea82c8ae576e38dd30d16ea27875c8e9778d660c109009b5",
+        "bytes": 2222,
+        "sha256": "5bfe5e66563412f3ea82c8ae576e38dd30d16ea27875c8e9778d660c109009b5"
+      },
+      "message_index": 9,
+      "role": "user",
+      "origin": "conversation",
+      "exact_id_instance_quoted_full_request_in_same_user_text": {
+        "first": false,
+        "second": true
+      },
+      "B_explicit_A_prohibition_present": true,
+      "raw_user_content_copied": false,
+      "assistant_content_copied_or_used": false
+    }
+  ],
+  "raw_bound_files": [
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/provenance.json",
+      "bytes": 6076,
+      "sha256": "e7d0d4d1f384842f754970dace8584dae56e8851fa56b89f4a46772d4f810631"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/created.json",
+      "bytes": 4850,
+      "sha256": "0f88ac0f4b67f93cf32cb006e029a1f838bd4eff597eea8eced4a90acaa82a64"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/first-created.json",
+      "bytes": 2626,
+      "sha256": "a7f8d16533db31325af32551991bf765b026a78fc2506048c7ed52581a6b4e7e"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/result.json",
+      "bytes": 322,
+      "sha256": "7ba8b7a665a1a1f7c57a87467f5641d5fa3c0a91690e10398e9023917f988e6b"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/checks.json",
+      "bytes": 5962,
+      "sha256": "6c9252df30f4dcfa12d32f57ec3a48fde9f3a348ed0c608e931a77287cc7f5a0"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/all-scenario-effects.json",
+      "bytes": 19706,
+      "sha256": "781eb349c13d635897e5252b42ce38cd36aadf17c4b9e7806a82ef58355471c4"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/tool-call-selection.json",
+      "bytes": 41714,
+      "sha256": "d74c48e879a517cca0a6f992866fd300082eb2e5354e639c5a05742cddfa1911"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/provider-input-selected.json",
+      "bytes": 109265,
+      "sha256": "f379cfd7237276008d00690abfb70233b7f39b74ae6155ce91d23b37054369cd"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/last-observation.json",
+      "bytes": 19980,
+      "sha256": "9d30c0b9777f26a287ca9c9f7d7c5afc1533c3bdc0ec28c0756dc0513bcb29eb"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/observation-ended-process.json",
+      "bytes": 362,
+      "sha256": "3a7b4f6b52d926a0ace74ce81466998d744feb1761bc2087409d2403b0c4ad65"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-final-readonly-observation.json",
+      "bytes": 5929,
+      "sha256": "c7dd2a530d696c82c1a2804e6db77c0c16a18e1e0c098775d442fc443327948d"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-owned-server-stop.json",
+      "bytes": 485,
+      "sha256": "54415a27291db5e1945c091790ff7cfc87df5f9f795481742af5bede1245fff1"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+      "bytes": 43934,
+      "sha256": "95b4a1ee703cd0b5562065b188669ab32641c20cd67a61cf01fa28e4cf2a79a1"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/turn-records/2026-10/26.jsonl",
+      "bytes": 13982,
+      "sha256": "95d4bd222d63fcb8fb7dddc8bffa8f3fbd0e9c95cb0c82ea703bc260729aa7e1"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+      "bytes": 10061,
+      "sha256": "e33e15edd9c7e404e005d6bc228b473a3eb2257686b20cb824323c09a62cb630"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/provider-inputs/2026-10/26.jsonl",
+      "bytes": 40171,
+      "sha256": "af1863679715b067dd218b393bc6fb4781d31018103250fe15fad09b02c8dbe7"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/schedules.json",
+      "bytes": 5805,
+      "sha256": "d9f34b2e6473555ba349edab8fd4ee71e3b49278a4090b72df82a8ff365fc8e8"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/event-queue-v19.json",
+      "bytes": 2414,
+      "sha256": "cf57d4b22f2a91990c5d33e0a7023874ec096490d9c61ae2311ecda04d6c57df"
+    }
+  ],
+  "source_evidence": [
+    {
+      "source_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "path": "lib/tool_schedule.ml",
+      "file_sha256": "0c9eb68dc0436870c85f663f918d55f07b807f5503f7abe73114a372b1aeb5f0",
+      "file_bytes": 59714,
+      "one_based_lines": [
+        1384,
+        1407
+      ],
+      "fact": "Note-add stamps authenticated caller as author; this path does not bind mutation to the current Scheduled_work source."
+    },
+    {
+      "source_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "path": "lib/schedule/schedule_store.ml",
+      "file_sha256": "82d0fdc88f0e88b63a881f4d5badb27fe4ac424e6ac103feaa55b02db1687ef2",
+      "file_bytes": 64954,
+      "one_based_lines": [
+        744,
+        760
+      ],
+      "fact": "append_note checks that schedule exists under ledger lock; it does not check the currently admitted job scope."
+    },
+    {
+      "source_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "path": "lib/keeper/keeper_heartbeat_stimulus_intake.ml",
+      "file_sha256": "13f0fdb19ae85aa5d289022dfff5dc3f867ccfeeeb605f52ded2caac73136558",
+      "file_bytes": 63028,
+      "one_based_lines": [
+        813,
+        834
+      ],
+      "fact": "Scheduled_work isolates exact pending selection for intake/source scope."
+    },
+    {
+      "source_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "path": "lib/keeper/keeper_unified_prompt.ml",
+      "file_sha256": "55f607445980c9f6471410abce9f9572f4ba806e336d9f3cb402d98247985126",
+      "file_bytes": 96880,
+      "one_based_lines": [
+        1977,
+        2000
+      ],
+      "fact": "Admitted scheduled instructions are now ordinary durable user input."
+    },
+    {
+      "source_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "path": "lib/types/prompt_block_id.ml",
+      "file_sha256": "29d4f8d8ce8bbf3bf53fd304a4ed95e48ee609d83de2ea2f8946c78d3255268e",
+      "file_bytes": 3845,
+      "one_based_lines": [
+        87,
+        91
+      ],
+      "fact": "Post-tool dynamic context is still omitted; current admitted-work identity has no separate typed prompt block here."
+    }
+  ],
+  "final_observation": {
+    "source": {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-final-readonly-observation.json",
+      "bytes": 5929,
+      "sha256": "c7dd2a530d696c82c1a2804e6db77c0c16a18e1e0c098775d442fc443327948d"
+    },
+    "target_idle": true,
+    "pending_count": 0,
+    "synthetic_note_count": 3,
+    "scope": "Fresh read-only API and owned primary/queue observation after the original observer stopped. Not a replacement controller verdict."
+  },
+  "producer_exit_limit": {
+    "observer_end_producer_returncode": null,
+    "root_stop_receipt": {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-owned-server-stop.json",
+      "bytes": 485,
+      "sha256": "54415a27291db5e1945c091790ff7cfc87df5f9f795481742af5bede1245fff1"
+    },
+    "root_reported_signal": "SIGTERM",
+    "forced_kill": false,
+    "root_reported_exit_status": null,
+    "limit": "Observer was already terminal FAIL. Root later stopped only the owned server; root was not its parent, so process disappearance/SIGTERM is not a wait-status or graceful-exit0 proof."
+  },
+  "bounded_repair_direction": [
+    "Preserve the failure and original source/incarnation evidence; do not rescue or replay the completed requests.",
+    "Consider a typed current-admitted-work identity/frame retained across tool rounds and rebound on exact A readmission. Keep request body at User authority and Gate separate.",
+    "A prompt/source-attribution repair requires new actual evidence and does not promise hard effect isolation. Enforcing cross-schedule write denial would change collaborative API policy and needs an explicit contract decision."
+  ],
+  "evidence_limits": [
+    "Only this derivative report is written; original controllers, captures, product files and processes are not changed.",
+    "No API/model/send/retry/resume/cancel/stop, CI or binary execution was performed by this review.",
+    "No private reasoning, prompts, tool credentials or control tokens are copied. The B request and all notes are synthetic scenario effects.",
+    "44/57/59 available latest-per-turn bound parts were verified; full first/intermediate/pre-A2 wire bodies were not reconstructed or rehashed.",
+    "Source/controller approval and compilation/native identity do not certify runtime request isolation or model correctness.",
+    "Three required notes once is not proof that they executed in the correct admitted source turn; this run remains FAIL.",
+    "No whole-feature, cross-provider, restart/failover, installation or arbitrary exactly-once claim."
+  ]
+}

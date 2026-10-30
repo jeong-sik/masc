@@ -1,0 +1,266 @@
+{
+  "recorded_at": "2026-10-25T00:20:31.069813+00:00",
+  "scope": "Published cohort, operator, artifact/registered-state and UI files; excludes this manifest. No raw provider thinking or credentials.",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2911,
+      "sha256": "2cbcaed010bb9329345be9747999b79f6d22eda776d015ebe398cefe0cfb1bfb"
+    },
+    {
+      "path": "acceptance-11of11-snapshot.json",
+      "bytes": 26469,
+      "sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e"
+    },
+    {
+      "path": "alpha-request-input.json",
+      "bytes": 658,
+      "sha256": "2e743234a3834c010b3e20c09d5f261bb0910780c7d003e336e522b4c4aff418"
+    },
+    {
+      "path": "binary-binding.json",
+      "bytes": 384,
+      "sha256": "d7c09d9c99ed67442b841ded16fa956b72a1c569451041918051c9d29f455f9d"
+    },
+    {
+      "path": "experiment-intent.json",
+      "bytes": 975,
+      "sha256": "f8a814c291b30b4201e0618712f6e8d722e948cdec0bf4086d135d69cf559ee9"
+    },
+    {
+      "path": "goal-baseline.json",
+      "bytes": 4525,
+      "sha256": "e06cb8cd41aa97c2949f5af8c3d311a5c6e47be0a3d80b128747cb30601e2cff"
+    },
+    {
+      "path": "goal-create.json",
+      "bytes": 4522,
+      "sha256": "b4ae589325452482dc84eb7a2f0a1f85d3d2deb0ce32a771ba4fac7aa0146b67"
+    },
+    {
+      "path": "identity.json",
+      "bytes": 398,
+      "sha256": "73a13481dad3e2bd0ac5e131d69e75ce1dd2bd11d64c1d5d93a3e2c24b7efcb9"
+    },
+    {
+      "path": "independent-parent-ui-source-review.json",
+      "bytes": 35954,
+      "sha256": "2515ba6ce82809c5cbb2a060468db1dbdbf3bb18ef421c5e413591d8194fe660"
+    },
+    {
+      "path": "keeper-create.json",
+      "bytes": 2214,
+      "sha256": "64d8bf41ef19f5c150519479101e63c80130b6cad497251d2b479c827f53aa68"
+    },
+    {
+      "path": "main-artifact-10of11-update.json",
+      "bytes": 698,
+      "sha256": "decfdcdada080f7ff33d6d438775e40f177b7fcfd245d67d0c81281121ad49b9"
+    },
+    {
+      "path": "main-artifact-11of11-update.json",
+      "bytes": 682,
+      "sha256": "91f673c316492a65160dcb081db60f72c7560bf6b743e332bba32035a1681f78"
+    },
+    {
+      "path": "main-health-read-timeouts.json",
+      "bytes": 427,
+      "sha256": "c8c0b2495cbf10ce5064cb3e661e1850b3ffab4cb74869a2f66745975dcf2211"
+    },
+    {
+      "path": "main-registered-state-read.json",
+      "bytes": 1089,
+      "sha256": "4cfee8bd60221e4000c5253d9236a736495ce568b124d43d7a6825c411ba3a1c"
+    },
+    {
+      "path": "operator/approval-intent.json",
+      "bytes": 337,
+      "sha256": "f0af749e20a8e44002da43e9a1f72793cc8d811312b3e39cc424c18ee67c236c"
+    },
+    {
+      "path": "operator/approval-receipt.json",
+      "bytes": 118,
+      "sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112"
+    },
+    {
+      "path": "operator/gate-sleep-approval-intent.json",
+      "bytes": 412,
+      "sha256": "975af44808bfb51cb0111a87a80a189230fbaf8da11d64fb6eddbb780659b902"
+    },
+    {
+      "path": "operator/gate-sleep-approval-receipt.json",
+      "bytes": 230,
+      "sha256": "9ea64be03b4f7cb0c18521618feaca529e9fcaa46a2afe2f8ea9fa95216e106f"
+    },
+    {
+      "path": "operator/partial-artifact.json",
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    {
+      "path": "operator/partial-inspection.json",
+      "bytes": 4397,
+      "sha256": "3c8bbef3ce306e81fafcd9c16094ceb9f9c49b0b96839a2437223fdd4ff261e5"
+    },
+    {
+      "path": "operator/task-approval-timing-amendment.json",
+      "bytes": 1048,
+      "sha256": "e8a41edd96252a35c2b5538396408aeb5532f77bba7ff4ee142f36735a35b323"
+    },
+    {
+      "path": "postapproval/20261024T182033823891Z.json",
+      "bytes": 198904,
+      "sha256": "2bc096ff79c7e35363c8afe9102e2670ce88dd8ab3d8af17b4795ad8e369d5cb"
+    },
+    {
+      "path": "postapproval/actual-tool-sequence-and-receipts.json",
+      "bytes": 10317,
+      "sha256": "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b"
+    },
+    {
+      "path": "postapproval/artifact-current-final.json",
+      "bytes": 53,
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+    },
+    {
+      "path": "postapproval/artifact-task2-immutable.json",
+      "bytes": 53,
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+    },
+    {
+      "path": "postapproval/diagnosis.json",
+      "bytes": 19261,
+      "sha256": "bcac55d465afdfe99e3c6e87ee9201890792ca01d542975f922e34ceb217eb0b"
+    },
+    {
+      "path": "postapproval/freeze.py",
+      "bytes": 9279,
+      "sha256": "eeb52866e9854dc78bd6a82c7b1ac156defde2f61275a87d1c9041b91ec8f803"
+    },
+    {
+      "path": "postapproval/observe.py",
+      "bytes": 6532,
+      "sha256": "5e85815a3c1267f77118eb9c373d1551ead1e3a9df087731f8047e6190a01f04"
+    },
+    {
+      "path": "postapproval/operation-boundary-events.json",
+      "bytes": 1827,
+      "sha256": "ad111e6d8ced1fe472accc6a3f167c9a63d5d64674b7f6149f3dd584788978e8"
+    },
+    {
+      "path": "postapproval/source-terminal-state.json",
+      "bytes": 2216,
+      "sha256": "a51b6bf35788ea841ef07db088e34e6e2f0a525f9448f8cf5d99a2082724682d"
+    },
+    {
+      "path": "preapproval/README.md",
+      "bytes": 2541,
+      "sha256": "0737beb7b46fbb406a440bb69d1031fc7bbe23968c9042342d4ff3e18988f602"
+    },
+    {
+      "path": "preapproval/current-artifact-at-checkpoint.json",
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    {
+      "path": "preapproval/g2-alpha-checkpoint.json",
+      "bytes": 10858,
+      "sha256": "274853f11422b41e1d34fbff7c3d532f8ac80f3e7d62c99339484eee49d17ae1"
+    },
+    {
+      "path": "preapproval/gate-checkpoint.json",
+      "bytes": 2695,
+      "sha256": "064ec7603936e0c16e9a5627a1869071b455975801a0c5b0a2024d7461abf987"
+    },
+    {
+      "path": "preapproval/observe.py",
+      "bytes": 6439,
+      "sha256": "48d3420f001a85c62762c6cff763dc17f5dc55ab1a9a0b0d7afd4bf3bcc1774c"
+    },
+    {
+      "path": "preapproval/preverdict-readcheck.json",
+      "bytes": 1578,
+      "sha256": "5004b3c72a6cf7fed7cf6344290463dccf275d88dfa16a8a7e5035cc4483d6c3"
+    },
+    {
+      "path": "preapproval/submitted-artifact-at-checkpoint.json",
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    {
+      "path": "previous-qwen-runtime-stop.json",
+      "bytes": 797,
+      "sha256": "bd16b638f0b3fbd699ee6833c4ef301c99e163a386e50f68911a444add3d4eed"
+    },
+    {
+      "path": "ui/README.md",
+      "bytes": 4357,
+      "sha256": "217311854e5d607b48937dec38ea0bbf71261475b9c3ee39065885656c2f829d"
+    },
+    {
+      "path": "ui/artifact-manifest.json",
+      "bytes": 2424,
+      "sha256": "a3c66723cba88e4676dbb1a1af4c9f67b171f0092d254621b4443c58f1ed1a1c"
+    },
+    {
+      "path": "ui/browser-completion.json",
+      "bytes": 232,
+      "sha256": "f2ecf1d78155da31c31733ea6ea32a62f704d5c8cbead8781ab2c03765a948a9"
+    },
+    {
+      "path": "ui/cross-layer-check.json",
+      "bytes": 861,
+      "sha256": "de0a5a59a05263e4c5e056321699d923e2dcf5df04e9daca9e940684a11a36d0"
+    },
+    {
+      "path": "ui/frontend-stop.json",
+      "bytes": 465,
+      "sha256": "b70cdc8ea0f96a33bf5a4719709f359766240877458f351e7523e7d0f0abd5bd"
+    },
+    {
+      "path": "ui/goal-detail-projection.json",
+      "bytes": 5652,
+      "sha256": "641799f34202756ccd2958b3863582087a5c171a568ca3c5e20814ac6a77fcce"
+    },
+    {
+      "path": "ui/goal-measurement-dom.json",
+      "bytes": 3655,
+      "sha256": "926c0e43b4f7be672305a823035372412617c40f547e2b6630415f5bcb461486"
+    },
+    {
+      "path": "ui/goal-measurement-proof-pending.png",
+      "bytes": 139436,
+      "sha256": "f347c5261b9ee6eb16144aadaf510642375c838ab33d3380ce894f19faa30b3e"
+    },
+    {
+      "path": "ui/goal-task-status-dom.json",
+      "bytes": 1437,
+      "sha256": "ea346a7f5e8345605d0398af001896822aa37cc37c1424eeb0a3ab54fcee9c8f"
+    },
+    {
+      "path": "ui/goal-task-status.png",
+      "bytes": 134859,
+      "sha256": "475e20b1ecc32d629a58ba22e9719077803a22ba87057dfeeba3c0789ec9e7f3"
+    },
+    {
+      "path": "ui/goals-api.json",
+      "bytes": 5428,
+      "sha256": "d959c10be5b5898ddb15ebf922bb890c152ea984bdeea42e9aeca324e4257d75"
+    },
+    {
+      "path": "ui/measurement-tool-observations.json",
+      "bytes": 6521,
+      "sha256": "39b55ddab01ce4d57373a7c22372a7de2ca90b3a667a6336b5f1cf5635921a07"
+    },
+    {
+      "path": "ui/persisted-values.json",
+      "bytes": 5289,
+      "sha256": "98d8d4045627351fce6b66c37a5e0f1ec8d718f31a6ad4d0f137bfd6bbc4d7d2"
+    },
+    {
+      "path": "ui/runtime-binding.json",
+      "bytes": 4732,
+      "sha256": "7b1dd29c427036f163c928f8d8656cf020bab5cfccbbed10ec9a12ef17df19ae"
+    }
+  ]
+}

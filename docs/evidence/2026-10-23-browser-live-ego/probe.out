@@ -1,0 +1,24 @@
+measured_at 2026-10-22T16:33:38Z
+commit be182db57173bafe7101e74897f0617e89414b89
+ego_browser ego-browser 0.6.0.16
+client ego_lite ego_task_space 0.6.0.16 154.0.8037.44
+tabs.list              0.15s {"ok":true,"data":[{"id":1,"index":0,"url":"chrome://newtab/","title":"새 탭","active":true}]}
+open_tab               0.40s {"ok":true,"data":{"tabId":2,"action":"open_tab","created":true,"url":"https://example.com/","title":"Example Domain","active":true}}
+page.read 2            0.14s {"ok":true,"data":{"tabId":2,"url":"https://example.com/","title":"Example Domain","text":"This domain is for use in documentation examples without needing permission. Thi","chars":917,"truncated":true}}
+page.elements 2        0.11s {"ok":true,"data":{"tabId":2,"url":"https://example.com/","title":"Example Domain","total":1,"truncated":false,"elements":[{"selector":"html:nth-of-type(1) > body:nth-of-type(1) > a:nth-of-type(1)","tag":"a","role":null,"type":null,"name":"","text":"Learn more...
+page.scene 2           0.10s {"ok":true,"data":{"tabId":2,"schema":"masc.browser.scene.v1","documentId":"9aa6333488f637aa292eeb64826e478b","url":"https://example.com/","title":"Example Domain","viewport":{"width":1611,"height":917,"scrollX":0,"scrollY":0},"nodes":[{"kind":"raster","nodeId...
+page.capture 2         0.21s 115536 base64 bytes
+click 2                0.00s refused by the lane table before reaching ego
+goto 2                 0.44s {"ok":true,"data":{"tabId":2,"action":"goto","url":"https://en.wikipedia.org/wiki/OCaml","title":"OCaml - Wikipedia"}}
+page.read 2            0.12s {"ok":true,"data":{"tabId":2,"url":"https://en.wikipedia.org/wiki/OCaml","title":"OCaml - Wikipedia","text":"Jump to content\nMain menu\nSearch\nDonate\nCreate account\nLog in\nContents hide\n(Top","chars":31353,"truncated":true}}
+goto 2 refused port    0.17s {"ok":false,"error":"page.goto failed: net::ERR_UNSAFE_PORT","effectPhase":"partial","data":{"tabId":2,"action":"goto","url":"http://127.0.0.1:9/","title":"127.0.0.1"}}
+goto 1 (p1)            0.18s {"ok":true,"data":{"tabId":1,"action":"goto","url":"https://example.org/","title":"Example Domain"}}
+goto javascript        0.00s {"ok":false,"error":"an ego connection opens and moves to absolute HTTP(S) URLs only","effectPhase":"not_started"}
+close_tab 2            0.16s {"ok":true,"data":{"tabId":2,"action":"close_tab","closed":true}}
+page.read 2 after      0.00s {"ok":false,"error":"browser tab is no longer present","effectPhase":"not_started"}
+tabs.list              0.13s {"ok":true,"data":[{"id":1,"index":0,"url":"https://example.org/","title":"Example Domain","active":true}]}
+retire receipt
+clients left 0
+run returned
+spaces left with this name: 0
+

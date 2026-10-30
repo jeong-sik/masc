@@ -1,0 +1,53 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/36671784007
+Head (run metadata): abfe0affb12bc8c2e6b93f9bc8fd3c8bd75a6c08
+Artifact: suite-runner-log 11079556226
+Raw suite log SHA256: 2c11957facb3554081f4ae337dfd40726f10d584497dad8c45ede630d8b5500e
+Scope: first 40-column color fixture rendered the diff but lost pan hint. Pan-motion checks were not reached.
+
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] test_tui_code_diff_pan_pty: start 2026-09-30T05:44:55Z (dune alias)
+File "test/stanzas/test_tui_code_diff_pan_pty.inc", lines 1-5, characters 0-225:
+1 | (rule
+2 |  (alias runtest-test_tui_code_diff_pan_pty)
+3 |  (deps test_tui_code_diff_pan_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+4 |  (action
+5 |   (run python3 %{dep:test_tui_code_diff_pan_pty.py} %{dep:../bin/masc_tui.exe})))
+(cd _build/default/test && /usr/bin/python3 ./test_tui_code_diff_pan_pty.py ../bin/masc_tui.exe)
+Traceback (most recent call last):
+  File "/home/runner/work/masc/masc/_build/default/test/./test_tui_code_diff_pan_pty.py", line 82, in <module>
+    run(sys.argv[1], no_color)
+  File "/home/runner/work/masc/masc/_build/default/test/./test_tui_code_diff_pan_pty.py", line 75, in run
+    h.run_terminal_scenario(executable, description=f"Code diff pan NO_COLOR={no_color}",
+  File "/home/runner/work/masc/masc/_build/default/test/test_tui_keyboard_input.py", line 2310, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+  File "/home/runner/work/masc/masc/_build/default/test/./test_tui_code_diff_pan_pty.py", line 42, in interact
+    assert "Shift-Left / Shift-Right" in initial, initial
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError:  ‹4 Board  ▸Workspace  System
+
+   MASC Workspace / Code  05:45:24  H…  
+   ▸ diff col 1 vs HEAD: lib/a.ml       
+ ────────────────────────────────────── 
+        1     - - let old = "rrrrrrrr…  
+        -     1 + let x = "가가가가가…  
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+                                        
+
+  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)              
+[targeted] test_tui_code_diff_pan_pty: FAIL exit 1 in 29s
+
+Test Successful in 0.019s. 126 tests run.
+Test Successful in 0.000s. 17 tests run.

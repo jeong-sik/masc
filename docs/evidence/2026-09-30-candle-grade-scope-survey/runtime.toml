@@ -1,0 +1,46 @@
+
+["runtime"]
+"default" = "glm-coding.glm-5.3-flash"
+
+["runtime"."exact_output_lanes"]
+
+["runtime"."exact_output_lanes"."candle_appraiser"]
+"slots" = ["glm-coding.glm-5.3-flash"]
+"cli_slots" = []
+"max_output_tokens" = 4096
+
+["providers"]
+
+["providers"."glm-coding"]
+"display-name" = "Z.AI Coding"
+"protocol" = "openai-compatible-http"
+"endpoint" = "https://api.z.ai/api/coding/paas/v4"
+"connect-timeout-s" = 1200.0
+"exact-body-timeout-s" = 1200.0
+
+["providers"."glm-coding"."credentials"]
+"type" = "env"
+"key" = "ZAI_API_KEY_SB"
+
+["providers"."glm-coding"."usage-read"]
+"shape" = "zai-quota-limit"
+"url" = "https://api.z.ai/api/monitor/usage/quota/limit"
+"refresh-s" = 600.0
+
+["models"]
+
+["models"."glm-5.3-flash"]
+"api-name" = "glm-5.3-flash"
+"max-context" = 1000000
+"tools-support" = true
+"thinking-support" = true
+"preserve-thinking" = false
+"streaming" = true
+"turn-timeout-s" = 180.0
+
+["glm-coding"]
+
+["glm-coding"."glm-5.3-flash"]
+"context-high-water-tokens" = 100000
+"context-low-water-tokens" = 70000
+"max-concurrent" = 4

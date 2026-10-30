@@ -1,0 +1,144 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] test_tui_browser_history: start 2026-09-12T18:36:51Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_browser_history.py ../bin/masc_tui.exe)
+Browser observation history: PASS
+[targeted] test_tui_browser_history: OK in 24s
+[targeted] dune build test/test_tui_ask_selection_wiring.exe test/test_tui_browser_history_model.exe test/test_browser_composition.exe skills/browser-live-click-regions/SKILL.md skills/browser-navigate-content/SKILL.md skills/browser-navigate-regions/SKILL.md
+[targeted] test/test_tui_ask_selection_wiring: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_tui_ask_selection_wiring: start 2026-09-12T18:37:22Z
+::group::{tui_ask_selection_wiring}
+Testing `tui_ask_selection_wiring'.
+This run has ID `FXJ3UZGW'.
+
+ASSERT the cursor moves from the browsing arm as well as the answering one
+  [OK]          selection          0   the list can be walked before answering.
+ASSERT the browsing footer and the answering one share a name
+ASSERT and no second spelling survives beside it
+  [OK]          selection          1   the two modes give the walk one name.
+ASSERT [/]:ask is the name one surface uses
+ASSERT [/]:keeper is the name one surface uses
+ASSERT [/]:post is the name one surface uses
+ASSERT [/]:observation is the name one surface uses
+ASSERT the question reader explains the same ask walk
+ASSERT declared footer labels and one reader explanation
+  [OK]          selection          2   the bracket keys keep one vocabulary.
+ASSERT the keys move the ask cursor
+ASSERT and the question cursor under it
+  [OK]          selection          3   the caret reads the cursor the keys move.
+ASSERT the executable reaches the domain's write
+ASSERT through a slot, which is the only way in
+  [OK]          free text          0   a written answer can be reached.
+ASSERT begin_ask_text_entry is wired to a key
+ASSERT commit_ask_text_entry is wired to a key
+ASSERT cancel_ask_text_entry is wired to a key
+  [OK]          free text          1   the editor opens, saves and abandons.
+ASSERT the editor is cleared with the draft
+  [OK]          free text          2   leaving the mode closes the editor.
+ASSERT the editor takes the keyboard before the digits do
+  [OK]          free text          3   typing outranks the choice digits.
+ASSERT the write key is named once
+ASSERT and the digits keep their own label
+  [OK]          free text          4   the footer names the editor key.
+ASSERT the surface hands the panel a budget
+ASSERT and the panel plans what fits
+  [OK]          budget             0   the panel draws against a budget.
+ASSERT the reader moves its own scroll
+ASSERT both movers ask the renderer for the end
+ASSERT the reader names the ends it answers
+ASSERT and the page it already answered
+  [OK]          ends               0   the reader reaches its own ends.
+
+Test Successful in 1.695s. 11 tests run.
+::endgroup::
+[targeted] test/test_tui_ask_selection_wiring: OK in 1s
+[targeted] test/test_tui_browser_history_model: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_tui_browser_history_model: start 2026-09-12T18:37:24Z
+Browser history model: PASS
+[targeted] test/test_tui_browser_history_model: OK in 0s
+[targeted] test/test_browser_composition: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_browser_composition: start 2026-09-12T18:37:24Z
+::group::{browser composition}
+Testing `browser composition'.
+This run has ID `0DKQS2SP'.
+
+ASSERT destination reference has a declared string type
+ASSERT activation exposes a typed active receipt
+ASSERT other interactions need no active receipt
+ASSERT ordinary clicks need no destination receipt
+  [OK]          native skill          0   runtime destination output contract.
+ASSERT follow uses the observed document and link
+ASSERT follow-up reads regions on the pinned tab and client
+ASSERT composition completes
+ASSERT exact ordered browser route
+  [OK]          native skill          1   observed click then region read.
+ASSERT follow uses the observed document and link
+ASSERT failure is retained
+ASSERT failed click is not retried and no read runs
+  [OK]          native skill          2   failed click stops without replay.
+ASSERT follow uses the observed document and link
+ASSERT follow-up reads regions on the pinned tab and client
+ASSERT successful click is never replayed after read failure
+ASSERT settled click receipt remains available
+  [OK]          native skill          3   read failure retains successful cli...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT explicit automation lane
+ASSERT same observed tab
+ASSERT the selected observation precedes the site decision
+ASSERT guard follows the actual redirect receipt
+ASSERT navigation and observation complete
+ASSERT one ordered pair
+  [OK]          native skill          4   navigation uses redirected landing ...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT failure remains visible
+ASSERT no dependent read or navigation retry
+  [OK]          native skill          5   navigation failure stops before read.
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT explicit automation lane
+ASSERT same observed tab
+ASSERT the selected observation precedes the site decision
+ASSERT guard follows the actual redirect receipt
+ASSERT failed observation does not replay navigation
+ASSERT settlement records that navigation already took effect
+ASSERT completed navigation remains available for recovery
+  [OK]          native skill          6   read failure retains navigation rec...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT failure remains visible
+ASSERT no dependent read or navigation retry
+  [OK]          native skill          7   malformed navigation receipt stops ...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT explicit automation lane
+ASSERT same observed tab
+ASSERT the selected observation precedes the site decision
+ASSERT guard follows the actual redirect receipt
+ASSERT navigation and observation complete
+ASSERT one ordered pair
+  [OK]          native skill          8   content uses redirected landing URL.
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT failure remains visible
+ASSERT no dependent read or navigation retry
+  [OK]          native skill          9   content navigation failure stops be...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT explicit automation lane
+ASSERT same observed tab
+ASSERT the selected observation precedes the site decision
+ASSERT guard follows the actual redirect receipt
+ASSERT failed observation does not replay navigation
+ASSERT settlement records that navigation already took effect
+ASSERT completed navigation remains available for recovery
+  [OK]          native skill         10   content read failure retains naviga...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT failure remains visible
+ASSERT no dependent read or navigation retry
+  [OK]          native skill         11   content rejects malformed navigatio...
+
+Test Successful in 0.014s. 12 tests run.
+::endgroup::
+[targeted] test/test_browser_composition: OK in 0s

@@ -1,0 +1,8 @@
+test suite	Test	2026-10-22T00:07:09.4283897Z Test Successful in 3.939s. 37 tests run.
+test suite	Test	2026-10-22T00:07:09.4379311Z [targeted] test/test_exact_lane_run_registry: OK in 4s
+test suite	Test	2026-10-22T00:07:09.5997709Z Test Successful in 0.005s. 17 tests run.
+test suite	Test	2026-10-22T00:07:09.6042814Z [targeted] test/test_server_standalone_lane_projection: OK in 0s
+test suite	Test	2026-10-22T00:07:09.8370942Z Test Successful in 0.100s. 14 tests run.
+test suite	Test	2026-10-22T00:07:09.8444202Z [targeted] test/test_candle_appraiser_transport: OK in 0s
+test suite	Test	2026-10-22T00:07:10.7172196Z Test Successful in 0.698s. 55 tests run.
+test suite	Test	2026-10-22T00:07:10.7253911Z [targeted] test/test_keeper_librarian_absorb_gate: OK in 1s

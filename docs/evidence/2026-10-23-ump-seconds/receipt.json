@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "sourceHead": "b2963400bba364d1e91a4ba932fe48f2838093ef",
+  "sourceBase": "0bdba486b5d8e862d865262ae724ca43ce7984f2",
+  "nodeExecutionHead": "d5d56535a76c30f2d5386168ed49ba58288c51d5",
+  "postExecutionDelta": "Two TUI labels clarified original source time versus earliest recorded provenance; no decision logic changed.",
+  "checks": {
+    "nodePassed": 118,
+    "nodeFailed": 0,
+    "priorFocused": {
+      "passed": 10,
+      "note": "Before the final sixth controller case; integrated run includes it."
+    },
+    "independentDecimalOracle": {
+      "comparisons": 2496,
+      "result": "PASS",
+      "oracle": "Python Fraction against frozen Node module"
+    },
+    "sourceTui": {
+      "result": "PASS",
+      "originalPackets": 5,
+      "derivedMessages": 9,
+      "originalAssetRetained": true,
+      "variantPlaced": true,
+      "authoredClockAndRecordedProvenance": true,
+      "reopenedExportSixFilesIdentical": true,
+      "exportSHA256": "1369cb212da41c05d0e8e8b3ca22fe0c9bacacdd4d7b275c1f074cdac751c9c1",
+      "limits": [
+        "Synthetic capture fixture; no TUI playback requested",
+        "No intermediate undo/redo snapshots in this journey",
+        "No screen wording/layout assertions",
+        "Source viewer only; default installation unchanged"
+      ]
+    }
+  },
+  "artifacts": {
+    "integrated-tests.log": {
+      "sha256": "2da06f8d5e2ff894ee96f994f2a789e360839e6f37871cd65e7ac154395b47b6",
+      "bytes": 13578
+    },
+    "focused-tests.log": {
+      "sha256": "86599f9d357f0144e9260d11d44d687a9676e981772256818da36182843b29f4",
+      "bytes": 1307
+    },
+    "source/journey.json": {
+      "sha256": "0cde8676abebc50b5d7948501d9826d0ba9a6b72edf33979db199c6a12a45ab7",
+      "bytes": 4042
+    },
+    "source/verification.json": {
+      "sha256": "140d3cc78990e026175089f2b6cae18ed9784efa597eeadfc717d353997c352e",
+      "bytes": 542
+    },
+    "core-independent-probe.json": {
+      "sha256": "6d6a440b3f5bb6083a184322f277a8f9294889d55e5a1afe3b3ccc79fbdbac0a",
+      "bytes": 499
+    }
+  },
+  "goalComplete": false,
+  "limits": [
+    "Source TUI uses a synthetic capture fixture, not a physical recording",
+    "TUI journey did not request audition; no screen wording/layout assertions",
+    "Intermediate TUI undo/redo snapshots were not independently captured",
+    "No default or private seconds-capable installed launcher was tested",
+    "No new Swift/native build or device test was run for this seconds-only layer",
+    "No Dune/full build or CI dispatch/watch",
+    "Decimal seconds are nearest-tick quantized, half ties away from zero; UI seconds are approximate",
+    "Tempo/beat editing, voice/gesture grouping, embedded clocks, message insertion/removal, raw practice editing and MIDI2 Clip import remain"
+  ]
+}

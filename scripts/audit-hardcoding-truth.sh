@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Hardcoding/truth audit for active MASC implementation surfaces.
+# The goal is to separate confirmed semantic debt from broad grep noise.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+FAIL_ON_CONFIRMED=0
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/audit-hardcoding-truth.sh [--fail-on-confirmed]
+
+Scans active source/CI/test surfaces for hardcoded semantic routing,
+heuristic provider classification, fake-test detector noise, and advisory
+gates that can hide failures.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --fail-on-confirmed)
+      FAIL_ON_CONFIRMED=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if ! command -v rg >/dev/null 2>&1; then
+  echo "ERROR: ripgrep (rg) is required" >&2
+  exit 2
+fi
+
+confirmed=0
+
+section() {
+  printf '\n=== %s ===\n' "$1"
+}
+
+mark_confirmed() {
+  confirmed=$((confirmed + 1))
+  printf 'CONFIRMED[%d]: %s\n' "$confirmed" "$1"
+}
+
+print_matches() {
+  local label="$1"
+  local file="$2"
+  local pattern="$3"
+  local matches
+  matches="$(rg -n "$pattern" "$file" 2>/dev/null || true)"
+  if [ -n "$matches" ]; then
+    mark_confirmed "$label"
+    printf '%s\n' "$matches"
+  fi
+}
+
+echo "=== Hardcoding / Truth Audit ==="
+echo "Repo: $(pwd)"
+echo "Head: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+section "Typed Boundary Metadata"
+legacy_helper_pattern='is_main_''worktree_''boundary_''exempt'
+legacy_phrase_pattern='main-''worktree ''boundary|worktree ''boundary'
+tool_catalog_files=(
+  lib/tool/tool_catalog.ml
+  lib/tool/tool_catalog.mli
+)
+for file in "${tool_catalog_files[@]}"; do
+  # Without this the two checks below print "PASS: ... is absent" over a scan
+  # of nothing, which is what they said while the catalog sat in lib/tool/ and
+  # this list still named lib/.
+  [ -f "$file" ] || {
+    echo "audit-hardcoding-truth: scan target is gone: $file" >&2
+    exit 1
+  }
+done
+
+legacy_boundary_matches="$(
+  rg -n "${legacy_helper_pattern}|${legacy_phrase_pattern}" \
+    "${tool_catalog_files[@]}" 2>/dev/null || true
+)"
+if [ -n "$legacy_boundary_matches" ]; then
+  mark_confirmed "legacy checkout follow-up helper surface still exists"
+  printf '%s\n' "$legacy_boundary_matches"
+else
+  echo "PASS: legacy checkout follow-up helper surface is absent."
+fi
+
+legacy_effect_pattern='effect_''domain|effect''Domain'
+if rg -q "$legacy_effect_pattern" "${tool_catalog_files[@]}"; then
+  mark_confirmed "Tool_catalog still exposes generic effect-domain metadata"
+else
+  echo "PASS: generic Tool_catalog effect-domain metadata is absent."
+fi
+
+section "Confirmed String/Heuristic Semantics"
+print_matches \
+  "keeper agent surface still derives affordance groups from tool-name strings" \
+  lib/keeper/keeper_agent_run.ml \
+  'tool_required_affordances|String\.starts_with|String\.equal[[:space:]]+[a-zA-Z_]+[[:space:]]+"(keeper|masc)_[^"]+"'
+
+if [ -e lib/provider_adapter.ml ] || [ -e lib/provider_adapter.mli ]; then
+  mark_confirmed "legacy Provider_adapter implementation files still exist"
+  ls -1 lib/provider_adapter.ml lib/provider_adapter.mli 2>/dev/null || true
+else
+  echo "PASS: legacy Provider_adapter implementation files are absent."
+fi
+
+section "Broad Active-Source Smell Sample"
+rg -n \
+  'DESIGN SMELL|hardcoded|heuristic|string matching|String\.starts_with|List\.mem .*\\[ "' \
+  lib scripts test .github \
+  -g '*.ml' -g '*.mli' -g '*.sh' -g '*.yml' \
+  2>/dev/null \
+  | rg -v 'audit-hardcoding-truth|_build|vendor|node_modules' \
+  | head -80 || true
+
+section "Result"
+echo "Confirmed active issue groups: $confirmed"
+if [ "$confirmed" -gt 0 ]; then
+  echo "Status: findings"
+  if [ "$FAIL_ON_CONFIRMED" -eq 1 ]; then
+    exit 1
+  fi
+else
+  echo "Status: pass"
+fi

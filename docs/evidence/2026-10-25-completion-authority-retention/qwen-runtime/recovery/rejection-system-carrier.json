@@ -1,0 +1,12 @@
+{
+  "scope": "Actual serialized leading System excerpt for the controlled rejected Task source. Public authority payload only; no model thinking.",
+  "request": "/tmp/masc-goal-wire-2be9d216-qwen/request-000010.request",
+  "request_sha256": "03cfaaae6221a2a1346c32f1b234abcb0286c59759603c5d3e075b06f1e60a92",
+  "system_sha256": "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72",
+  "matching_line_numbers_1based": [
+    133,
+    135
+  ],
+  "authority_excerpt": "\n### Completion Authority Decisions (1)\nRows below are typed decisions from the completion-authority boundary. system_llm_agent is the system LLM agent and human_operator is HITL; neither is a Keeper, and this record grants no tool or task authority by itself. Re-read the current Task and verification state before choosing a follow-up action.\n- post_id=\"completion-authority-rejected:task-001:vrf-5dd15968c9ec601c495335d00cc7b471\" task_id=\"task-001\" verification_id=\"vrf-5dd15968c9ec601c495335d00cc7b471\" authority_kind=\"human_operator\" authority_actor=\"goal-canary-operator\" reason=\"Controlled operator-proxy rejection: the initial owner explicitly required only alpha=true with beta=false and gamma=false before the first Task approval. The immutable submitted artifact has all three true. Restore beta/gamma=false, reread actual bytes, and resubmit the alpha-only artifact. The narrowed model-authored contract does not erase the original owner requirement. This is a Task verification verdict, not human Goal confirmation.\"\n",
+  "byte_scope_note": "Excerpt split/join normalizes final trailing newline; full System digest binds original string."
+}

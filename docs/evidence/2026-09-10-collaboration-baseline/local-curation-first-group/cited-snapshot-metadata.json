@@ -1,0 +1,61 @@
+{
+  "snapshot_id": "snapshot1",
+  "keeper_id": "exhibit-designer",
+  "store": "ordinary",
+  "snapshot_sha256": "6f5ef50e90a848c63c3df613eb2d8c1c88705958d7bbc9ec7c99b4260b4196aa",
+  "metadata": {
+    "revision": 11,
+    "updated_at": 1789050180.773266,
+    "source": {
+      "kind": "librarian",
+      "trace_id": "trace-1789042574909-00000"
+    },
+    "change": {
+      "added": [
+        {
+          "claim": "운영자가 확정한 task-001 행사 설정은 허구의 오프라인 전시 《기억의 정원》, 초등 고학년·보호자 대상, 2026-10-17 토요일 14:00–17:00, 은빛정류장 전시실, 입장료는 물료가 아니라 물(0원 표기도 승인)이며, 제공되지 않은 작가·주최·주소·링크는 산출물에 만들지 않는다.",
+          "category": "constraint",
+          "first_seen": 1789050180.773175,
+          "last_seen": 1789050180.773175,
+          "origin": {
+            "kind": "injected",
+            "trace_id": ""
+          },
+          "basis": {
+            "kind": "observed"
+          }
+        }
+      ],
+      "removed": [
+        {
+          "claim": "exhibit-editor가 task-001을 claim하여 책자 3페이지 텍스트·편집 구성을 담당하고, Keeper는 시각 디자인(포스터 색감·타이포·그래픽 모티프)을 전담하는 협업 관계이다.",
+          "category": "fact",
+          "first_seen": 1789042910.860721,
+          "last_seen": 1789042910.860721,
+          "origin": {
+            "kind": "injected",
+            "trace_id": ""
+          },
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "claim": "운영자가 확정한 task-001 행사 설정은 허구의 오프라인 전시 《기억의 정원》, 초등 고학년·보호자 대상, 2026-10-17 토요일 14:00–17:00, 은빛정류장 전시실, 입장료 물료가 아니라 물(0원 표기도 승인)이며, 제공되지 않은 작가·주최·주소·링크는 산출물에 만들지 않는다.",
+          "category": "constraint",
+          "first_seen": 1789047344.666198,
+          "last_seen": 1789047344.666198,
+          "origin": {
+            "kind": "injected",
+            "trace_id": ""
+          },
+          "basis": {
+            "kind": "observed"
+          }
+        }
+      ],
+      "retained": 9,
+      "invalidated": []
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "recorded_at_utc": "2026-10-26T19:50:16.875762+00:00",
+  "test_source_sha256": "e9b3b09aa540e40266c27a95f8ad30be22e3c19657b0051b27558ce342a0e371",
+  "response_diff_sha256": "027924621dcf61c0cd40c5ff28d8f9b078fead74c60bb098f1c7de98d8f83390",
+  "only_inherited_resume_branch_changed": true,
+  "new_projection_tests_unchanged": true,
+  "all_original_assertion_bytes_and_terminal_awaits_preserved": true,
+  "all_inspected_product_sources_unchanged": true,
+  "parse_only": {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-keeper-owner-projection-map-20261027/test/test_keeper_owner.ml",
+      "-o",
+      "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-runtime-response-v1/test_keeper_owner.parsed"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "whitespace": {
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "runtime_CI_native_HTTP_Dune": false,
+  "commit_push": false
+}

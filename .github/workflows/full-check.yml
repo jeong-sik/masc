@@ -1,0 +1,147 @@
+name: Release full checks
+permissions:
+  contents: read
+concurrency:
+  group: release-full-checks-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  distribution:
+    name: distribution and installation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+    - name: Install distribution verification tools
+      run: 'set -euo pipefail
+
+        bash scripts/ci/apt-refresh.sh
+
+        sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml gcc libc6-dev binutils
+
+        '
+    - name: Verify release distribution fixtures
+      run: |
+        python3 test/test_release_dashboard_bundle.py -v
+    - name: Installer onboarding and removal behavior
+      run: 'python3 test/test_package_macos_runtime.py
+
+        python3 test/test_installer_dependencies.py -v
+
+        python3 test/test_installer_wizard.py -v
+
+        python3 test/test_installer_upgrade.py -v
+
+        python3 test/test_installer_uninstall.py -v
+
+        python3 test/test_install_runtime_setup.py -v
+
+        python3 test/test_onboarding_journey.py -v
+
+        '
+    - name: Check committed credentials
+      run: python3 scripts/ci/check-committed-secrets.py
+  check:
+    name: OCaml type checks (development and release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+    - name: Free disk space
+      run: "set -euo pipefail\ncleanup_pids=()\nsudo rm -rf /usr/local/lib/android & cleanup_pids+=(\"$!\")\nsudo\
+        \ rm -rf /usr/share/dotnet & cleanup_pids+=(\"$!\")\nsudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=(\"\
+        $!\")\nsudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=(\"$!\")\nsudo docker image prune --all --force\
+        \ & cleanup_pids+=(\"$!\")\nfor cleanup_pid in \"${cleanup_pids[@]}\"; do\n  wait \"${cleanup_pid}\" ||\
+        \ true\ndone\n"
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup OCaml toolchain
+      uses: ./.github/actions/setup-ocaml-toolchain
+    - name: Pin external OCaml dependencies
+      uses: ./.github/actions/pin-ocaml-deps
+      with:
+        pin-flags: --with-bisect
+    - name: Install system and OCaml dependencies
+      uses: ./.github/actions/install-ocaml-deps
+      with:
+        install-flags: --with-test
+        os-packages: jq ripgrep
+    - name: Build
+      env:
+        DUNE_JOBS: '4'
+      run: 'set -euo pipefail
+
+        dune build @check
+
+        dune build --profile release @check
+
+        '
+    - name: masc.opam matches dune-project regeneration
+      run: bash scripts/check-opam-file-regenerated.sh
+  dashboard-types:
+    name: dashboard typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Set up Node
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '22'
+    - name: Install dashboard dependencies
+      working-directory: dashboard
+      run: 'set -euo pipefail
+
+        corepack enable && corepack prepare pnpm@10.31.0 --activate
+
+        pnpm install --frozen-lockfile
+
+        '
+    - name: Type-check
+      working-directory: dashboard
+      run: pnpm typecheck
+    - name: Verify dashboard payload consumers
+      working-directory: dashboard
+      run: >-
+        pnpm exec vitest run --config vitest.config.ts
+        --no-file-parallelism --maxWorkers=1
+        src/api/dashboard-goals.test.ts
+        src/api/dashboard-scheduled-automation.test.ts
+        src/api/dashboard-turn-records.test.ts
+        src/api/dashboard-verification-runs.test.ts
+        src/api/schemas/keeper-portrait.test.ts
+        src/components/goals/goal-tree.test.ts
+        src/components/keeper-lifecycle-timeline.test.ts
+        src/components/memory-inspector.test.ts
+  required-success:
+    if: ${{ always() }}
+    name: Release checks passed
+    needs:
+    - distribution
+    - check
+    - dashboard-types
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+    - name: Require every full check
+      env:
+        RESULTS: ${{ toJSON(needs) }}
+      run: 'python3 - <<''PYCODE''
+
+        import json, os
+
+        results = json.loads(os.environ[''RESULTS''])
+
+        raise SystemExit(0 if all(job[''result''] == ''success'' for job in results.values()) else 1)
+
+        PYCODE
+
+        '
+'on':
+  workflow_call: {}
+  workflow_dispatch: {}

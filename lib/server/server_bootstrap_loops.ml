@@ -1,0 +1,2300 @@
+(** Server_bootstrap_loops — Keeper loops and background maintenance.
+
+    Extracted from Server_runtime_bootstrap to isolate the large
+    subsystem-spawning functions into a focused module. *)
+
+(* Stable djb2-style hash for the autoboot warmup jitter.
+
+   Post-#13119 follow-up: the previous implementation used native
+   [int] arithmetic with a final [land 0x3FFF_FFFF] mask.  That is
+   NOT actually platform-stable: on 31-bit OCaml the intermediate
+   [acc lsl 5] overflow wraps differently than on 63-bit OCaml
+   before the mask is applied, so the same keeper name can hash to
+   different buckets depending on architecture.
+
+   Fix: do all arithmetic in [Int32], whose wrap-around behavior is
+   identical on every supported runtime.  Mask to 30 bits and convert
+   back to [int].  30 bits ≈ 1G distinct buckets, far more than any
+   realistic [stagger_window_sec]. *)
+let stable_keeper_name_hash_mask_i32 = 0x3FFF_FFFFl
+
+let stable_keeper_name_hash name =
+  let acc = ref 5381l in
+  String.iter
+    (fun ch ->
+       let shifted = Int32.shift_left !acc 5 in
+       let summed = Int32.add (Int32.add shifted !acc) (Int32.of_int (Char.code ch)) in
+       acc := Int32.logand summed stable_keeper_name_hash_mask_i32)
+    name;
+  Int32.to_int !acc
+;;
+
+let autoboot_proactive_warmup_sec ~base_warmup ~stagger_window_sec ~keeper_name =
+  let base_warmup = max 0 base_warmup in
+  let stagger_window_sec = max 0 stagger_window_sec in
+  if stagger_window_sec = 0
+  then base_warmup
+  else base_warmup + (stable_keeper_name_hash keeper_name mod (stagger_window_sec + 1))
+;;
+
+let keeper_agent_status_of_phase = function
+  | Keeper_state_machine.Running -> Masc_domain.Active
+  | Keeper_state_machine.Paused -> Masc_domain.Listening
+  | Keeper_state_machine.Failing
+  | Keeper_state_machine.Draining
+  | Keeper_state_machine.Restarting -> Masc_domain.Busy
+  | Keeper_state_machine.Offline
+  | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Crashed -> Masc_domain.Inactive
+;;
+
+let keeper_registry_agent ~now (entry : Keeper_registry.registry_entry) : Masc_domain.agent =
+  let agent_name = entry.name in
+  let agent_meta : Masc_domain.agent_meta =
+    { session_id = "keeper-registry:" ^ entry.name
+    ; agent_type = "keeper"
+    ; pid = None
+    ; hostname = None
+    ; tty = None
+    ; parent_task = None
+    ; keeper_name = Some entry.name
+    ; keeper_id = None
+    }
+  in
+  { Masc_domain.id = None
+  ; name = agent_name
+  ; agent_type = "keeper"
+  ; status = keeper_agent_status_of_phase entry.phase
+  ; capabilities = []
+  ; current_task = None
+  ; session_bound_at = now
+  ; last_seen = now
+  ; meta = Some agent_meta
+  }
+;;
+
+let keeper_registry_runtime_agents (config : Workspace_utils_backend_setup.config) =
+  let now = Masc_domain.now_iso () in
+  Keeper_registry.all ~base_path:config.base_path ()
+  |> List.map (keeper_registry_agent ~now)
+;;
+
+let board_sse_event_params event =
+  match event with
+  | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
+    let preview =
+      if String.length content > 200 then String.sub content 0 200 else content
+    in
+    let base =
+      [ "type", `String "post_created"
+      ; "event_type", `String "post.created"
+      ; "post_id", `String post_id
+      ; "author", `String author
+      ; "author_identity", Server_utils.board_actor_identity_json author
+      ; "title", `String title
+      ; "content", `String preview
+      ; "post_kind", `String (Board.post_kind_to_string post_kind)
+      ]
+    in
+    `Assoc
+      (match hearth with
+       | Some h -> ("hearth", `String h) :: base
+       | None -> base)
+  | Board_dispatch.Comment_added { post_id; comment_id; author } ->
+    `Assoc
+      [ "type", `String "comment_added"
+      ; "event_type", `String "comment.created"
+      ; "post_id", `String post_id
+      ; "comment_id", `String comment_id
+      ; "author", `String author
+      ; "author_identity", Server_utils.board_actor_identity_json author
+      ]
+  | Board_dispatch.Post_voted { post_id; voter; direction } ->
+    let dir = Board_votes.vote_direction_to_string direction in
+    `Assoc
+      [ "type", `String "post_voted"
+      ; "event_type", `String "vote.changed"
+      ; "target_type", `String "post"
+      ; "post_id", `String post_id
+      ; "voter", `String voter
+      ; "voter_identity", Server_utils.board_actor_identity_json voter
+      ; "direction", `String dir
+      ]
+  | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
+    let dir = Board_votes.vote_direction_to_string direction in
+    `Assoc
+      [ "type", `String "comment_voted"
+      ; "event_type", `String "vote.changed"
+      ; "target_type", `String "comment"
+      ; "comment_id", `String comment_id
+      ; "voter", `String voter
+      ; "voter_identity", Server_utils.board_actor_identity_json voter
+      ; "direction", `String dir
+      ]
+  | Board_dispatch.Reaction_changed { target_type; target_id; user_id; emoji; reacted } ->
+    `Assoc
+      [ "type", `String "reaction_changed"
+      ; "event_type", `String "reaction.changed"
+      ; "target_type", `String (Board.reaction_target_type_to_string target_type)
+      ; "target_id", `String target_id
+      ; "user_id", `String user_id
+      ; "user_identity", Server_utils.board_actor_identity_json user_id
+      ; "emoji", `String emoji
+      ; "reacted", `Bool reacted
+      ]
+;;
+
+(* Origin label carried on the [keeper_chat_appended] SSE event. Derived from
+   the surface the row is written with rather than spelled out here:
+   [Surface_ref.lane_label] is the single derivation site for these labels, so
+   a writer that invents its own string drifts from the row it announces. *)
+let workspace_message_chat_source = Surface_ref.lane_label Surface_ref.Agent
+
+let broadcast_mention_wakeup_action = function
+  | Some target when String.trim target <> "" -> `Wake_keeper target
+  | Some _ | None -> `Suppress_no_target
+
+let resolve_broadcast_mention_target ~config target =
+  match Keeper_meta_store.read_effective_meta config target with
+  | Error detail -> Error detail
+  | Ok (Some meta) -> Ok (Some (target, meta))
+  | Ok None ->
+    Keeper_meta_store.persisted_keeper_for_mention_target
+      config
+      ~mention_target:target
+
+(* Who wrote a workspace message, as the recipient's transcript records it.
+   A sender the Keeper registry holds under exactly this name is that Keeper
+   (RFC-0468 §3.2); anyone else is an external author. The registry match is
+   the proof, not the shape of [from_agent]: people and external bots mint
+   the same id shape. *)
+let workspace_message_speaker ~is_registered_keeper ~from_agent
+  : Keeper_chat_store.speaker
+  =
+  let external_author : Keeper_chat_store.speaker =
+    { speaker_id = Some from_agent
+    ; speaker_name = Some from_agent
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  match Keeper_identity.Keeper_id.of_string from_agent with
+  | Some keeper_id when is_registered_keeper from_agent ->
+    Keeper_chat_store.keeper_speaker keeper_id
+  | Some _ | None -> external_author
+;;
+
+let deliver_broadcast_mention
+      ~config
+      ~base_path
+      ~is_running
+      ~is_registered_keeper
+      ~wakeup
+      (delivery : Workspace_broadcast.broadcast_delivery)
+  =
+  match broadcast_mention_wakeup_action delivery.mention with
+  | `Suppress_no_target -> Workspace_broadcast.Passive
+  | `Wake_keeper requested_target ->
+    let delivery_key =
+      Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id
+      |> Result.map (fun request_id ->
+        Keeper_chat_delivery_identity.Workspace_message request_id)
+    in
+    (match resolve_broadcast_mention_target ~config requested_target with
+     | Error message ->
+       Log.Keeper.error
+         "broadcast mention target metadata is unavailable; delivery deferred keeper=%s request_id=%s seq=%d: %s"
+         requested_target delivery.request_id delivery.seq message;
+       Workspace_broadcast.Deferred Workspace_broadcast.Target_state_unavailable
+     | Ok None ->
+       Log.Keeper.warn
+         "broadcast mention target has no persisted Keeper metadata; delivery rejected keeper=%s request_id=%s seq=%d"
+         requested_target delivery.request_id delivery.seq;
+       Workspace_broadcast.Rejected Workspace_broadcast.Target_not_configured
+     | Ok (Some (target, meta)) ->
+       (match Keeper_identity.Keeper_id.of_string target, delivery_key with
+        | None, _ ->
+          Log.Keeper.error
+            "broadcast mention target identity is invalid; delivery rejected keeper=%s request_id=%s seq=%d"
+            target delivery.request_id delivery.seq;
+          Workspace_broadcast.Rejected Workspace_broadcast.Invalid_target
+        | Some _, Error message ->
+          Log.Keeper.error
+            "broadcast mention request identity is invalid; delivery rejected keeper=%s request_id=%s seq=%d: %s"
+            target delivery.request_id delivery.seq message;
+          Workspace_broadcast.Rejected Workspace_broadcast.Invalid_request
+        | Some _target_id, Ok delivery_key ->
+          let speaker =
+            workspace_message_speaker
+              ~is_registered_keeper
+              ~from_agent:delivery.from_agent
+          in
+          let mention_ids =
+            target :: meta.Keeper_meta_contract.mention_targets
+            |> List.filter_map Keeper_identity.Keeper_id.of_string
+            |> List.sort_uniq Keeper_identity.Keeper_id.compare
+          in
+          (* The transcript row is committed but the dashboard is not told, so
+             the conversation window shows the message only after a reload —
+             every other intake (Slack, Discord, fusion, dashboard) announces
+             its row. *)
+          let announce_chat_row () =
+            Keeper_chat_broadcast.chat_appended
+              ~keeper_name:target
+              ~source:workspace_message_chat_source
+              ~content:delivery.content
+              ()
+          in
+          (* The message becomes an entry in the target's linear drain, so it
+             is ordered against every other stimulus, deduplicated by the
+             workspace request identity, and readable in the operator queue
+             view. The durable commit precedes the wake hint, so a keeper woken
+             by the hint always finds the entry. *)
+          let commit_queue_entry () =
+            let message =
+              { Keeper_event_queue.wmsg_request_id = delivery.request_id
+              ; wmsg_from = delivery.from_agent
+              }
+            in
+            let stimulus =
+              { Keeper_event_queue.post_id =
+                  Keeper_event_queue.workspace_message_post_id message
+              ; urgency = Keeper_event_queue.Immediate
+              ; arrived_at = Unix.gettimeofday ()
+                (* NDT-OK: stimulus receipt time, used only for ordering/age *)
+              ; payload = Keeper_event_queue.Workspace_message message
+              }
+            in
+            match
+              Keeper_registry_event_queue.enqueue_stimulus_durable_result
+                ~base_path
+                target
+                stimulus
+            with
+            | Keeper_registry_event_queue.Stimulus_enqueued
+            | Keeper_registry_event_queue.Stimulus_already_present -> ()
+            | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string KeepaliveSignalFailures)
+                ~labels:
+                  [ "keeper", target; "phase", "workspace_message_delivery" ]
+                ();
+              Log.Keeper.error
+                "keeper message durable delivery failed keeper=%s request_id=%s: %s"
+                target delivery.request_id detail
+          in
+          let request_wake () =
+            commit_queue_entry ();
+            if is_running target
+            then (
+              wakeup target;
+              Log.Keeper.info
+                "broadcast mention accepted; wake requested for registered keeper=%s request_id=%s seq=%d"
+                target delivery.request_id delivery.seq)
+            else
+              Log.Keeper.info
+                "broadcast mention accepted for stopped keeper; pending chat row retained keeper=%s request_id=%s seq=%d"
+                target delivery.request_id delivery.seq
+          in
+          (match
+             Keeper_chat_store.append_user_message_once
+               ~base_dir:base_path
+               ~keeper_name:target
+               ~delivery_key
+               ~content:delivery.content
+               ~surface:Surface_ref.Agent
+               ~external_message_id:delivery.request_id
+               ~speaker
+               ~extra_mentions:mention_ids
+               ()
+           with
+           | Ok (Keeper_chat_store.Appended _) ->
+             announce_chat_row ();
+             request_wake ();
+             Workspace_broadcast.Accepted
+           | Ok (Keeper_chat_store.Already_present { row_id }) ->
+             let messages =
+               Keeper_chat_store.load_all ~base_dir:base_path ~keeper_name:target
+             in
+             if not
+                  (List.exists
+                     (fun (message : Keeper_chat_store.chat_message) ->
+                        String.equal message.id row_id)
+                     messages)
+             then (
+               Log.Keeper.error
+                 "broadcast mention accepted row could not be reloaded keeper=%s request_id=%s row_id=%s"
+                 target delivery.request_id row_id;
+               Workspace_broadcast.Deferred Workspace_broadcast.Intake_store_unavailable)
+             else (
+               let pending =
+                 Keeper_world_observation_message_scope.pending_messages_of_messages
+                   ?ack_id:meta.runtime.message_scope_ack_id
+                   ~targets:
+                     (Keeper_world_observation_message_scope.message_feed_targets meta)
+                   messages
+                 |> List.exists
+                      (fun (pending : Keeper_world_observation_message_scope.pending_message) ->
+                         String.equal pending.message_id row_id)
+               in
+               if pending then request_wake ();
+               Log.Keeper.info
+                 "broadcast mention was already accepted keeper=%s request_id=%s seq=%d pending=%b"
+                 target delivery.request_id delivery.seq pending;
+               Workspace_broadcast.Already_accepted)
+           | Error message ->
+             Log.Keeper.error
+               "broadcast mention intake deferred; wake suppressed keeper=%s request_id=%s seq=%d: %s"
+               target delivery.request_id delivery.seq message;
+             Workspace_broadcast.Deferred Workspace_broadcast.Intake_store_unavailable)))
+
+(* A committed workspace message is conversation the whole fleet sits in, the
+   same way a bound connector channel is conversation the Keeper bound to it
+   sits in. Every registered Keeper other than the author gets the transcript
+   row, so a Keeper's window shows what the other Keepers said and not only
+   what the operator said to it.
+
+   The row is visibility, not a request: no mention is stamped, no queue entry
+   is committed and no Keeper is woken, so one announcement cannot open a turn
+   on every Keeper. Run this after {!deliver_broadcast_mention}: the named
+   target's row is written there with its mention ids, and
+   [append_user_message_once] keeps that first write, so the stamp survives
+   and this pass reports the target as already present. *)
+(* [Accepted] and [Already_accepted] mean the mention row is committed and
+   stamped; [Passive] means no mention row will ever be written. Every other
+   outcome leaves the mention path still owing that transcript a stamped row,
+   and the projection must not claim the key first. *)
+let mention_transcript_settled = function
+  | Workspace_broadcast.Passive
+  | Workspace_broadcast.Accepted
+  | Workspace_broadcast.Already_accepted -> true
+  | Workspace_broadcast.Pending
+  | Workspace_broadcast.Deferred _
+  | Workspace_broadcast.Rejected _ -> false
+
+let append_workspace_message_to_recipient ~base_path ~sender_authority
+    (delivery : Workspace_broadcast.broadcast_delivery) ~keeper_name =
+  let open Result.Syntax in
+  let* recipient = Keeper_id.Keeper_name.of_string keeper_name in
+  let keeper_name = Keeper_id.Keeper_name.to_string recipient in
+  let* request_id=Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id in
+  let delivery_key=Keeper_chat_delivery_identity.Workspace_message request_id in
+  let* speaker = match sender_authority with
+    | Lane_addon_broadcast_delivery.Keeper_sender ->
+        (match Keeper_identity.Keeper_id.of_string delivery.from_agent with
+         | Some keeper_id -> Ok (Keeper_chat_store.keeper_speaker keeper_id)
+         | None -> Error "admitted Keeper sender identity is invalid")
+    | External_sender ->
+        Ok {Keeper_chat_store.speaker_id=Some delivery.from_agent;
+          speaker_name=Some delivery.from_agent; speaker_authority=Keeper_chat_store.External} in
+  (* The store runs on this fiber: it takes Eio_guard mutexes, which raise on a
+     system thread, and Fs_compat already moves the file transaction itself to
+     a system thread. *)
+  let appended=Keeper_chat_store.append_user_message_once ~base_dir:base_path ~keeper_name ~delivery_key
+      ~content:delivery.content ~surface:Surface_ref.Broadcast ~external_message_id:delivery.request_id
+      ~speaker ~mention_policy:Keeper_chat_store.Passive_context () in
+  match appended with
+  | Error detail -> Error detail
+  | Ok (Keeper_chat_store.Already_present _) -> Ok ()
+  | Ok (Keeper_chat_store.Appended _) ->
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:workspace_message_chat_source
+        ~content:delivery.content (); Ok ()
+
+let goal_notification_backend : Goal_delivery.backend = {
+  snapshot=(fun ~config ->
+    (* Persisted Keepers are the audience even before autoboot fills the live
+       registry. A directory read failure must not become an empty snapshot. *)
+    Eio_unix.run_in_systhread (fun () ->
+      Keeper_meta_store.persisted_keeper_names_read_only_result config));
+  project=(fun ~config ~delivery ~recipient ->
+    append_workspace_message_to_recipient ~base_path:config.Workspace_utils.base_path
+      ~sender_authority:Lane_addon_broadcast_delivery.External_sender delivery ~keeper_name:recipient);
+}
+
+let register_lane_fleet_backend () =
+  Lane_addon_runtime.register_fleet_backend {
+    snapshot=(fun ~config ~caller ~access ->
+      let registered=Keeper_registry.all ~base_path:config.Workspace.base_path () in
+      Lane_addon_broadcast_delivery.sender_snapshot ~caller ~access
+        ~registered:(List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) registered));
+    project=(fun ~config ~sender_authority ~delivery ~recipient ->
+      append_workspace_message_to_recipient ~base_path:config.Workspace.base_path
+        ~sender_authority delivery ~keeper_name:recipient);
+  }
+
+let project_workspace_message_to_fleet
+      ~base_path
+      ~registered_keepers
+      (delivery : Workspace_broadcast.broadcast_delivery)
+  =
+  match delivery.audience with
+  | Workspace_broadcast.System_record ->
+    (* A lifecycle or task-FSM announcement belongs to the activity record, not
+       to anyone's conversation. Projecting it would also cost one full
+       transcript read-and-scan per registered Keeper on the commit path — on
+       the reference workspace 4.53 MB per message, for the 17 of 18 messages
+       nobody would want to read.
+
+       A replayed row also lands here: [delivery_of_message] cannot recover the
+       live declaration, so a restart between commit and delivery loses the
+       projection. Logged rather than silent, because there is no second
+       chance — the outbox marker is deleted once the mention settles. *)
+    Log.Keeper.debug
+      "fleet projection skipped for a system record request_id=%s from=%s"
+      delivery.request_id delivery.from_agent
+  | Workspace_broadcast.Fleet_conversation ->
+  match Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id with
+  | Error detail ->
+    Log.Keeper.error
+      "fleet projection skipped; request identity invalid request_id=%s: %s"
+      delivery.request_id detail
+  | Ok request_id ->
+    let delivery_key =
+      Keeper_chat_delivery_identity.Workspace_message request_id
+    in
+    let registered = registered_keepers () in
+    let speaker =
+      workspace_message_speaker
+        ~is_registered_keeper:(fun name ->
+          List.exists
+            (fun (keeper_name, _agent_name) -> String.equal keeper_name name)
+            registered)
+        ~from_agent:delivery.from_agent
+    in
+    (* Exact comparison against the identities the registry holds, not a minted
+       [Keeper_id]. That mint does not round-trip a keeper whose name has three
+       or more hyphenated parts: measured with [adm-race-cf-000], the minted
+       comparison failed to recognise the author and it received its own speech
+       back as an external line. The registry entry already carries both the
+       keeper name and the agent name, so this costs no extra read. *)
+    let authored_by_recipient ~keeper_name ~agent_name =
+      let same candidate =
+        String.equal
+          (String.lowercase_ascii (String.trim candidate))
+          (String.lowercase_ascii (String.trim delivery.from_agent))
+      in
+      same keeper_name || same agent_name
+    in
+    (* Fanout width is not otherwise observable: the registry keeps an entry
+       until it is unregistered, so the recipient count drifts upward within a
+       server lifetime and each recipient costs one transcript transaction. *)
+    let recipients = ref 0 in
+    let appended = ref 0 in
+    let failed = ref 0 in
+    registered
+    |> List.iter (fun (keeper_name, agent_name) ->
+      if not (authored_by_recipient ~keeper_name ~agent_name)
+      then (
+        incr recipients;
+        match
+          Keeper_chat_store.append_user_message_once
+            ~base_dir:base_path
+            ~keeper_name
+            ~delivery_key
+            ~content:delivery.content
+            ~surface:Surface_ref.Broadcast
+            ~external_message_id:delivery.request_id
+            ~speaker
+            ()
+        with
+        | Ok (Keeper_chat_store.Appended _) ->
+          incr appended;
+          Keeper_chat_broadcast.chat_appended
+            ~keeper_name
+            ~source:workspace_message_chat_source
+            ~content:delivery.content
+            ()
+        | Ok (Keeper_chat_store.Already_present _) -> ()
+        | Error detail ->
+          incr failed;
+          Log.Keeper.error
+            "fleet projection failed keeper=%s request_id=%s: %s"
+            keeper_name delivery.request_id detail));
+    Log.Keeper.info
+      "fleet projection request_id=%s from=%s recipients=%d appended=%d failed=%d"
+      delivery.request_id delivery.from_agent !recipients !appended !failed
+;;
+
+module Projection_for_testing = struct
+  let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
+  let board_sse_event_params = board_sse_event_params
+  let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
+  let deliver_broadcast_mention = deliver_broadcast_mention
+  let project_workspace_message_to_fleet = project_workspace_message_to_fleet
+  let goal_notification_backend = goal_notification_backend
+  let append_workspace_message_to_recipient = append_workspace_message_to_recipient
+  let mention_transcript_settled = mention_transcript_settled
+end
+
+let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
+let log_dashboard_fiber_crash =
+  Server_bootstrap_loops_fiber.log_dashboard_fiber_crash
+let filteri_with_fair_yield =
+  Server_bootstrap_loops_fiber.filteri_with_fair_yield
+type keeper_persistence_report =
+  { shutdown : Keeper_shutdown_runtime.restored_inventory
+  ; fusion_delivery :
+      ( Fusion_delivery_projector.recovery_report
+      , Fusion_delivery_obligation.error )
+        result
+  }
+
+type keeper_persistence_failure_phase =
+  | Resolving_base_path
+  | Restoring_shutdown
+  | Recovering_persistence
+  | Starting_keeper_loops
+
+type keeper_persistence_raised_cause =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type keeper_persistence_failure_cause =
+  | Base_path_identity_unavailable_cause of keeper_persistence_raised_cause
+  | Noncanonical_config_cause of
+      { configured_base_path : string
+      ; canonical_base_path : string
+      ; configured_backend_base_path : string
+      ; expected_backend_base_path : string
+      }
+  | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable_cause of string
+  | Unexpected_exception_cause of keeper_persistence_raised_cause
+  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.refusal list
+  | Lifecycle_invariant_cause of string
+
+type keeper_persistence_failure =
+  { phase : keeper_persistence_failure_phase
+  ; base_path : string
+  ; cause : keeper_persistence_failure_cause
+  }
+
+type keeper_persistence_prepare_error =
+  | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable of string
+  | Preparation_base_path_identity_unavailable of keeper_persistence_failure
+  | Preparation_config_not_canonical of keeper_persistence_failure
+  | Preparation_in_progress
+  | Preparation_awaiting_claim
+  | Preparation_already_claimed
+  | Preparation_failed_previously of keeper_persistence_failure
+  | Preparation_ownership_lost
+  | Store_quarantine_refused of Keeper_store_boot_reconcile.refusal list
+
+type keeper_persistence_base_path =
+  { requested : string
+  ; canonical : string
+  ; backend_base_path : string
+  }
+
+type prepared_keeper_persistence =
+  { base_path : keeper_persistence_base_path
+  ; report : keeper_persistence_report
+  }
+
+type claimed_keeper_persistence =
+  { claimed_base_path : keeper_persistence_base_path
+  ; claimed_report : keeper_persistence_report
+  }
+
+type keeper_persistence_claim_error =
+  | Claim_base_path_mismatch
+  | Claim_base_path_identity_unavailable of keeper_persistence_failure
+  | Claim_superseded
+  | Claim_already_claimed
+  | Claim_failed_previously of keeper_persistence_failure
+
+type keeper_persistence_start_error =
+  | Start_base_path_mismatch of
+      { claimed_base_path : string
+      ; state_base_path : string
+      }
+  | Start_base_path_identity_unavailable of keeper_persistence_failure
+  | Start_superseded
+  | Start_in_progress
+  | Start_already_started
+  | Start_execution_failed of keeper_persistence_failure
+  | Start_failed_previously of keeper_persistence_failure
+
+exception Keeper_persistence_start_failed of keeper_persistence_start_error
+
+type failed_lifecycle =
+  { failure : keeper_persistence_failure
+  ; prepared : prepared_keeper_persistence option
+  ; claimed : claimed_keeper_persistence option
+  }
+
+type preparation_lifecycle =
+  | Idle
+  | Preparing of unit ref
+  | Ready of prepared_keeper_persistence
+  | Claimed of prepared_keeper_persistence * claimed_keeper_persistence
+  | Starting of prepared_keeper_persistence * claimed_keeper_persistence
+  | Started of prepared_keeper_persistence * claimed_keeper_persistence
+  | Failed of failed_lifecycle
+
+let persistence_lifecycle = Atomic.make Idle
+
+module Keeper_name_set = Set.Make (String)
+
+let preparation_stage_started () = Mtime_clock.now ()
+
+let preparation_stage_elapsed_seconds started =
+  Mtime.Span.to_float_ns (Mtime.span started (Mtime_clock.now ())) /. 1e9
+;;
+
+let observe_preparation_stage ~stage ~started ~examined ~failures =
+  let elapsed_seconds = preparation_stage_elapsed_seconds started in
+  let labels = [ "stage", stage ] in
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string PersistencePreparationStageDuration)
+    ~labels
+    elapsed_seconds;
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string PersistencePreparationExamined)
+    ~labels
+    (Float.of_int examined);
+  Log.Server.info
+    "keeper_persistence_prepare: stage=%s elapsed_seconds=%.6f examined=%d failures=%d"
+    stage
+    elapsed_seconds
+    examined
+    failures
+;;
+
+let keeper_persistence_failure_phase_to_string = function
+  | Resolving_base_path -> "resolving_base_path"
+  | Restoring_shutdown -> "restoring_shutdown"
+  | Recovering_persistence -> "recovering_persistence"
+  | Starting_keeper_loops -> "starting_keeper_loops"
+;;
+
+let keeper_persistence_raised_cause_to_string { exception_; backtrace } =
+  let exception_text = Printexc.to_string exception_ in
+  let backtrace_text = Printexc.raw_backtrace_to_string backtrace in
+  if String.equal backtrace_text ""
+  then exception_text
+  else exception_text ^ "\n" ^ backtrace_text
+;;
+
+let keeper_persistence_failure_cause_to_string = function
+  | Base_path_identity_unavailable_cause cause
+  | Unexpected_exception_cause cause ->
+    keeper_persistence_raised_cause_to_string cause
+  | Noncanonical_config_cause
+      { configured_base_path
+      ; canonical_base_path
+      ; configured_backend_base_path
+      ; expected_backend_base_path
+      } ->
+    Printf.sprintf
+      "noncanonical workspace config base_path=%S canonical=%S backend_base_path=%S expected_backend_base_path=%S"
+      configured_base_path
+      canonical_base_path
+      configured_backend_base_path
+      expected_backend_base_path
+  | Shutdown_inventory_unavailable_cause error ->
+    Keeper_shutdown_store.error_to_string error
+  | Shutdown_admission_unavailable_cause detail -> detail
+  | Store_quarantine_refused_cause undecodable ->
+    Keeper_store_boot_reconcile.refusal_to_string undecodable
+  | Lifecycle_invariant_cause detail -> detail
+;;
+
+let keeper_persistence_failure_to_string failure =
+  Printf.sprintf
+    "keeper persistence failed phase=%s base_path=%S detail=%s"
+    (keeper_persistence_failure_phase_to_string failure.phase)
+    failure.base_path
+    (keeper_persistence_failure_cause_to_string failure.cause)
+;;
+
+let keeper_persistence_prepare_error_to_string = function
+  | Shutdown_inventory_unavailable error ->
+    "shutdown inventory unavailable: " ^ Keeper_shutdown_store.error_to_string error
+  | Shutdown_admission_unavailable detail ->
+    "shutdown admission restore unavailable: " ^ detail
+  | Preparation_base_path_identity_unavailable failure ->
+    keeper_persistence_failure_to_string failure
+  | Preparation_config_not_canonical failure ->
+    keeper_persistence_failure_to_string failure
+  | Preparation_in_progress ->
+    "keeper persistence preparation is already in progress"
+  | Preparation_awaiting_claim ->
+    "keeper persistence preparation is ready and awaiting its owning claim"
+  | Preparation_already_claimed ->
+    "keeper persistence ownership was already claimed for this process"
+  | Preparation_failed_previously failure ->
+    "keeper persistence lifecycle already failed in this process: "
+    ^ keeper_persistence_failure_to_string failure
+  | Preparation_ownership_lost ->
+    "keeper persistence preparation lost its lifecycle ownership"
+  | Store_quarantine_refused undecodable ->
+    Keeper_store_boot_reconcile.refusal_to_string undecodable
+;;
+
+let failure_cause_of_prepare_error = function
+  | Shutdown_inventory_unavailable error ->
+    Shutdown_inventory_unavailable_cause error
+  | Shutdown_admission_unavailable detail ->
+    Shutdown_admission_unavailable_cause detail
+  | Store_quarantine_refused undecodable -> Store_quarantine_refused_cause undecodable
+  | Preparation_base_path_identity_unavailable failure
+  | Preparation_config_not_canonical failure ->
+    failure.cause
+  | ( Preparation_in_progress
+    | Preparation_awaiting_claim
+    | Preparation_already_claimed
+    | Preparation_failed_previously _
+    | Preparation_ownership_lost ) as error ->
+    Lifecycle_invariant_cause
+      (keeper_persistence_prepare_error_to_string error)
+;;
+
+let prepare_keeper_persistence_owned
+      ~base_path_identity
+      ~set_phase
+      ~accept_store_quarantine
+      ~config
+  =
+  let base_path = config.Workspace.base_path in
+  set_phase Restoring_shutdown;
+  let shutdown_started = preparation_stage_started () in
+  let shutdown_inventory =
+    match Keeper_shutdown_store.scan_inventory ~config with
+    | Error error -> Error (Shutdown_inventory_unavailable error)
+    | Ok entries ->
+      (match Keeper_shutdown_runtime.restore_inventory_admission ~config entries with
+       | Ok restored -> Ok restored
+       | Error detail -> Error (Shutdown_admission_unavailable detail))
+  in
+  (match shutdown_inventory with
+   | Ok restored ->
+     observe_preparation_stage
+       ~stage:"shutdown"
+       ~started:shutdown_started
+       ~examined:
+         (List.length restored.operations
+          + List.length restored.corrupt_records)
+       ~failures:(List.length restored.corrupt_records)
+   | Error _ ->
+     observe_preparation_stage
+       ~stage:"shutdown"
+       ~started:shutdown_started
+       ~examined:0
+       ~failures:1);
+  match shutdown_inventory with
+  | Error _ as error -> error
+  | Ok shutdown ->
+  set_phase Recovering_persistence;
+  (* A store this build cannot decode is settled now, in one place, before
+     any keeper loop reads it: a schema hard cut finishes at the first boot
+     instead of surfacing per keeper, hours later, on whichever read or write
+     happens to come first. Moving a store aside changes what its keeper
+     remembers, so boot refuses unless the operator asked for it with
+     --accept-store-quarantine (RFC-0420). Nothing else runs yet, so no
+     writer races the rename. *)
+  let store_reconcile_started = preparation_stage_started () in
+  let examination = Keeper_store_boot_reconcile.examine config in
+  match
+    Keeper_store_boot_reconcile.admit
+      ~accept_quarantine:accept_store_quarantine
+      examination
+  with
+  | Error undecodable ->
+    observe_preparation_stage
+      ~stage:"store_reconcile"
+      ~started:store_reconcile_started
+      ~examined:
+        (examination.Keeper_store_boot_reconcile.readable + List.length undecodable)
+      ~failures:(List.length undecodable);
+    Error (Store_quarantine_refused undecodable)
+  | Ok examination ->
+  let store_reconcile =
+    Keeper_store_boot_reconcile.quarantine ~now:(Time_compat.now ()) config examination
+  in
+  observe_preparation_stage
+    ~stage:"store_reconcile"
+    ~started:store_reconcile_started
+    ~examined:store_reconcile.Keeper_store_boot_reconcile.examined
+    ~failures:(List.length store_reconcile.Keeper_store_boot_reconcile.failed);
+  Log.Keeper.info "%s" (Keeper_store_boot_reconcile.summary store_reconcile);
+  match store_reconcile.Keeper_store_boot_reconcile.failed with
+  | _ :: _ as failures ->
+    Error
+      (Store_quarantine_refused
+         (List.map (fun failure -> Keeper_store_boot_reconcile.Quarantine_failed failure)
+            failures))
+  | [] ->
+  (* RFC-0240 §2.4. Close tool cycles left open by process death before
+     anything reads a checkpoint. Persistence stores the open cycle on purpose
+     so recovery knows which calls were dispatched, but nothing closed it, so
+     provider admission rejected the history on every reload and the lane
+     stayed permanently unresumable. This must run
+     here rather than in a shutdown hook: an ungraceful kill runs no hook, and
+     keeper loops have not started yet, so no writer races the CAS. *)
+  let transcript_tail_started = preparation_stage_started () in
+  let transcript_tail = Keeper_transcript_tail_recovery.recover_open_tails config in
+  observe_preparation_stage
+    ~stage:"transcript_tail"
+    ~started:transcript_tail_started
+    ~examined:transcript_tail.examined
+    ~failures:transcript_tail.failed;
+  if transcript_tail.closed > 0
+     || transcript_tail.unparseable > 0
+     || transcript_tail.failed > 0
+  then
+    Log.Keeper.warn
+      "transcript_tail_recovery: examined=%d closed=%d tool_results_appended=%d unparseable=%d failed=%d"
+      transcript_tail.examined
+      transcript_tail.closed
+      transcript_tail.tool_results_appended
+      transcript_tail.unparseable
+      transcript_tail.failed;
+  let fusion_delivery_recovery =
+    Fusion_delivery_projector.recover_startup ~base_path ()
+  in
+  (match fusion_delivery_recovery with
+   | Error error ->
+     Log.Keeper.error
+       "fusion_delivery: startup inventory unavailable error=%s"
+       (Fusion_delivery_obligation.error_to_string error)
+   | Ok report ->
+     if
+       report.staging_cleanup.inspected > 0
+       || report.staging_cleanup.failures <> []
+     then
+       Log.Keeper.warn
+         "fusion_delivery: startup staging inspected=%d deleted=%d preserved=%d failures=%d"
+         report.staging_cleanup.inspected
+         report.staging_cleanup.deleted
+         report.staging_cleanup.preserved
+         (List.length report.staging_cleanup.failures);
+     List.iter
+       (fun (error : Fusion_delivery_projector.recovery_record_error) ->
+          Log.Keeper.error
+            "fusion_delivery: startup projection retained request_id=%s error=%s"
+            (* DET-OK: log placeholder for malformed records; never feeds a branch. *)
+            (Option.value error.request_id ~default:"<malformed-record>")
+            error.detail)
+       report.record_errors;
+     if report.projected > 0 || report.pending > 0
+     then
+       Log.Keeper.warn
+         "fusion_delivery: startup recovery examined=%d projected=%d pending=%d"
+       report.examined report.projected report.pending);
+  (* Design D2 (task-1665): bind the late-approval store to its journal and
+     restore synchronously at boot, before any turn can consult it — a
+     remembered answer must already stand when the first identical retry
+     after this restart arrives, and a lazy restore could answer an ask the
+     operator already settled. The uncertain count (consume rows whose
+     deliver row never landed) is reported, not silently dropped: the tool
+     those decisions returned to may have dispatched already. *)
+  let late_uncertain =
+    let store = Keeper_late_approval.shared () in
+    Keeper_late_approval.bind_to_journal ~base_path store;
+    Keeper_late_approval.journal_uncertain store
+  in
+  if late_uncertain > 0 then
+    Log.Keeper.warn
+      "late_approval_journal: restored with uncertain_consume=%d \
+       (delivery and external outcome unknown; no closing deliver row; \
+       operator confirmation required, never reapplied)"
+      late_uncertain;
+  (* Tool-approval-mode overrides persist like the operator's other
+     authorization choices (runtime.toml, keeper config); replay them before
+     any keeper loop can consult the registry. An unreadable store is an
+     error, not a quiet return to Auto: the registry keeps whatever it held,
+     the error stays visible via last_restore_error, and the boot log names
+     it — a file that cannot be read must not be the way back to the looser
+     default. *)
+  (match
+     Keeper_tool_approval_mode.bind
+       ~base_path
+       (Keeper_tool_approval_mode.shared ())
+   with
+   | Ok () -> ()
+   | Error detail ->
+     Log.Keeper.error
+       "tool_approval_mode_store: restore failed, overrides left as last \
+        known: %s"
+       detail);
+  let prepared =
+    { base_path = base_path_identity
+    ; report =
+      { shutdown
+        ; fusion_delivery = fusion_delivery_recovery
+        }
+    }
+  in
+  Ok prepared
+;;
+
+let rec acquire_preparation_ownership preparing =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Idle ->
+    if Atomic.compare_and_set persistence_lifecycle current preparing
+    then Ok ()
+    else acquire_preparation_ownership preparing
+  | Ready _ -> Error Preparation_awaiting_claim
+  | Preparing _ -> Error Preparation_in_progress
+  | Claimed _ | Starting _ | Started _ -> Error Preparation_already_claimed
+  | Failed failed -> Error (Preparation_failed_previously failed.failure)
+;;
+
+let persistence_failure ~phase ~base_path ~cause = { phase; base_path; cause }
+
+let raised_cause exception_ backtrace = { exception_; backtrace }
+
+let failed_lifecycle ?prepared ?claimed failure =
+  Failed { failure; prepared; claimed }
+;;
+
+let log_lifecycle_transition_loss ~from_phase ~failure =
+  Log.Server.error
+    "keeper persistence lifecycle lost terminal transition from=%s failure=%s"
+    from_phase
+    (keeper_persistence_failure_to_string failure)
+;;
+
+let prepare_keeper_persistence ?requested_base_path ~accept_store_quarantine ~config () =
+  let preparing = Preparing (ref ()) in
+  match acquire_preparation_ownership preparing with
+  | Error _ as error -> error
+  | Ok () ->
+    let config_base_path = config.Workspace.base_path in
+    let requested_base_path =
+      (* DET-OK: omission selects the explicit typed-config BasePath; no
+         ambient path or guessed owner enters this branch. *)
+      Option.value requested_base_path ~default:config_base_path
+    in
+    let phase = ref Resolving_base_path in
+    let outcome =
+      match
+        let canonical_result =
+          match Fs_compat.realpath config_base_path with
+          | canonical -> Ok canonical
+          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+          | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
+            Error
+              (raised_cause exception_ (Printexc.get_raw_backtrace ()))
+        in
+        match canonical_result with
+        | Error raised ->
+          let failure =
+            persistence_failure
+              ~phase:Resolving_base_path
+              ~base_path:config_base_path
+              ~cause:(Base_path_identity_unavailable_cause raised)
+          in
+          Error (Preparation_base_path_identity_unavailable failure)
+        | Ok canonical_base_path ->
+          let base_path_identity =
+            let expected_backend_base_path =
+            (Workspace.backend_config_for canonical_base_path)
+              .Backend_types.base_path
+            in
+            { requested = requested_base_path
+            ; canonical = canonical_base_path
+            ; backend_base_path = expected_backend_base_path
+            }
+          in
+          let expected_backend_base_path = base_path_identity.backend_base_path in
+          let configured_backend_base_path =
+            config.backend_config.Backend_types.base_path
+          in
+          if
+            not (String.equal config_base_path canonical_base_path)
+            || not
+                 (String.equal
+                    configured_backend_base_path
+                    expected_backend_base_path)
+          then
+            let failure =
+              persistence_failure
+                ~phase:Resolving_base_path
+                ~base_path:config_base_path
+                ~cause:
+                  (Noncanonical_config_cause
+                     { configured_base_path = config_base_path
+                     ; canonical_base_path
+                     ; configured_backend_base_path
+                     ; expected_backend_base_path
+                     })
+            in
+            Error (Preparation_config_not_canonical failure)
+          else
+            prepare_keeper_persistence_owned
+              ~base_path_identity
+              ~set_phase:(fun next_phase -> phase := next_phase)
+              ~accept_store_quarantine
+              ~config
+      with
+      | outcome -> outcome
+      (* This handler already propagates, at the end of its body. It runs
+         first so the lifecycle leaves [preparing]; a cancellation that
+         skipped it would strand the state machine there. *)
+      | exception exn -> (* cancel-guard-ok: records the failed lifecycle and then re-throws with the original backtrace, past the guard's lookahead *)
+        let backtrace = Printexc.get_raw_backtrace () in
+        let failure =
+          persistence_failure
+            ~phase:!phase
+            ~base_path:requested_base_path
+            ~cause:
+              (Unexpected_exception_cause (raised_cause exn backtrace))
+        in
+        if
+          not
+            (Atomic.compare_and_set
+               persistence_lifecycle
+               preparing
+               (failed_lifecycle failure))
+        then log_lifecycle_transition_loss ~from_phase:"preparing" ~failure;
+        Printexc.raise_with_backtrace exn backtrace
+    in
+    (match outcome with
+     | Ok prepared ->
+       if Atomic.compare_and_set persistence_lifecycle preparing (Ready prepared)
+       then Ok prepared
+       else Error Preparation_ownership_lost
+     | Error error ->
+       let failure =
+         match error with
+         | Preparation_base_path_identity_unavailable failure
+         | Preparation_config_not_canonical failure -> failure
+         | Preparation_in_progress | Preparation_awaiting_claim | Preparation_already_claimed
+         | Preparation_ownership_lost | Shutdown_inventory_unavailable _
+         | Shutdown_admission_unavailable _ | Preparation_failed_previously _
+         | Store_quarantine_refused _ -> persistence_failure
+             ~phase:!phase
+             ~base_path:requested_base_path
+             ~cause:(failure_cause_of_prepare_error error)
+       in
+       if
+         Atomic.compare_and_set
+           persistence_lifecycle
+           preparing
+           (failed_lifecycle failure)
+       then Error error
+       else Error Preparation_ownership_lost)
+;;
+
+type base_path_validation_error =
+  | Base_path_mismatch of { observed_canonical : string }
+  | Base_path_identity_unavailable of keeper_persistence_failure
+
+let validate_config_base_path ~phase base_path config =
+  let state_base_path = config.Workspace.base_path in
+  let state_backend_base_path =
+    config.backend_config.Backend_types.base_path
+  in
+  match Fs_compat.realpath state_base_path with
+  | observed_canonical ->
+    if
+      String.equal state_base_path base_path.canonical
+      && String.equal observed_canonical base_path.canonical
+      && String.equal state_backend_base_path base_path.backend_base_path
+    then Ok ()
+    else Error (Base_path_mismatch { observed_canonical })
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception ((Unix.Unix_error _ | Sys_error _) as cause) ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Error
+      (Base_path_identity_unavailable
+         (persistence_failure
+            ~phase
+            ~base_path:state_base_path
+            ~cause:
+              (Base_path_identity_unavailable_cause
+                 (raised_cause cause backtrace))))
+;;
+
+let rec claim_prepared_keeper_persistence ~config prepared =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Ready latest when latest == prepared ->
+    (match
+       validate_config_base_path
+         ~phase:Resolving_base_path
+         prepared.base_path
+         config
+     with
+     | Error (Base_path_mismatch _) -> Error Claim_base_path_mismatch
+     | Error (Base_path_identity_unavailable failure) ->
+       Error (Claim_base_path_identity_unavailable failure)
+     | Ok () ->
+      let claimed =
+        { claimed_base_path = prepared.base_path
+        ; claimed_report = prepared.report
+        }
+      in
+      if
+        Atomic.compare_and_set
+          persistence_lifecycle
+          current
+          (Claimed (prepared, claimed))
+      then Ok claimed
+      else claim_prepared_keeper_persistence ~config prepared)
+  | Claimed (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Starting (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Started (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Failed { prepared = Some latest; failure; _ } when latest == prepared ->
+    Error (Claim_failed_previously failure)
+  | Idle
+  | Preparing _
+  | Ready _
+  | Claimed _
+  | Starting _
+  | Started _
+  | Failed _ ->
+    Error Claim_superseded
+;;
+
+let keeper_persistence_claim_error_to_string = function
+  | Claim_base_path_mismatch ->
+    "prepared persistence BasePath does not match server state"
+  | Claim_base_path_identity_unavailable failure ->
+    "server state BasePath identity is unavailable during persistence claim: "
+    ^ keeper_persistence_failure_to_string failure
+  | Claim_superseded -> "prepared persistence token is stale"
+  | Claim_already_claimed -> "prepared persistence token was already claimed"
+  | Claim_failed_previously failure ->
+    "prepared persistence token claim already failed: "
+    ^ keeper_persistence_failure_to_string failure
+;;
+
+type keeper_loops_start_ownership =
+  { starting : preparation_lifecycle
+  ; prepared : prepared_keeper_persistence
+  ; claimed : claimed_keeper_persistence
+  }
+
+let rec acquire_keeper_loops_start ~config claimed =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Claimed (prepared, latest) when latest == claimed ->
+    (match
+       validate_config_base_path
+         ~phase:Starting_keeper_loops
+         claimed.claimed_base_path
+         config
+     with
+     | Error (Base_path_mismatch _) ->
+       Error
+         (Start_base_path_mismatch
+            { claimed_base_path = claimed.claimed_base_path.canonical
+            ; state_base_path = config.Workspace.base_path
+            })
+     | Error (Base_path_identity_unavailable failure) ->
+       Error (Start_base_path_identity_unavailable failure)
+     | Ok () ->
+      let starting = Starting (prepared, claimed) in
+      if Atomic.compare_and_set persistence_lifecycle current starting
+      then Ok { starting; prepared; claimed }
+      else acquire_keeper_loops_start ~config claimed)
+  | Starting (_, latest) when latest == claimed -> Error Start_in_progress
+  | Started (_, latest) when latest == claimed -> Error Start_already_started
+  | Failed { claimed = Some latest; failure; _ } when latest == claimed ->
+    Error (Start_failed_previously failure)
+  | Idle
+  | Preparing _
+  | Ready _
+  | Claimed _
+  | Starting _
+  | Started _
+  | Failed _ ->
+    Error Start_superseded
+;;
+
+let finish_keeper_loops_start ownership =
+  if
+    Atomic.compare_and_set
+      persistence_lifecycle
+      ownership.starting
+      (Started (ownership.prepared, ownership.claimed))
+  then Ok ()
+  else
+    match Atomic.get persistence_lifecycle with
+    | Started (_, latest) when latest == ownership.claimed ->
+      Error Start_already_started
+    | Failed { claimed = Some latest; failure; _ }
+      when latest == ownership.claimed ->
+      Error (Start_failed_previously failure)
+    | Idle
+    | Preparing _
+    | Ready _
+    | Claimed _
+    | Starting _
+    | Started _
+    | Failed _ ->
+      Error Start_superseded
+;;
+
+let keeper_persistence_start_error_to_string = function
+  | Start_base_path_mismatch { claimed_base_path; state_base_path } ->
+    Printf.sprintf
+      "claimed persistence BasePath %S does not match server state BasePath %S"
+      claimed_base_path
+      state_base_path
+  | Start_base_path_identity_unavailable failure ->
+    "server state BasePath identity is unavailable during Keeper-loop start: "
+    ^ keeper_persistence_failure_to_string failure
+  | Start_superseded -> "claimed persistence token is stale"
+  | Start_in_progress -> "claimed persistence token is already starting Keeper loops"
+  | Start_already_started -> "claimed persistence token already started Keeper loops"
+  | Start_execution_failed failure ->
+    "claimed persistence token failed while starting Keeper loops: "
+    ^ keeper_persistence_failure_to_string failure
+  | Start_failed_previously failure ->
+    "claimed persistence token start already failed: "
+    ^ keeper_persistence_failure_to_string failure
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Keeper_persistence_start_failed error ->
+      Some (keeper_persistence_start_error_to_string error)
+    | _ -> None)
+;;
+
+exception Keeper_lifecycle_surfaces_partly_dropped of string list
+
+let () =
+  Printexc.register_printer (function
+    | Keeper_lifecycle_surfaces_partly_dropped prefixes ->
+      Some
+        (Printf.sprintf
+           "keeper lifecycle refresh left these caches undropped: %s"
+           (String.concat ", " prefixes))
+    | _ -> None)
+;;
+
+(* A refresh that could not drop one of its prefixes leaves entries this event
+   was meant to remove, and it reports the prefixes rather than only warning.
+   It reaches the batch as the same failure a raising refresh does, so the
+   listener keeps one notion of "this refresh did not happen" and one recovery
+   for it: the whole keeper-dependent cache is invalidated instead of the
+   surface keeping a row the event already changed (#37175). *)
+let raise_if_surfaces_partly_dropped = function
+  | Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_refreshed -> ()
+  | Server_dashboard_http_keeper_api_lifecycle_post.Surfaces_partly_dropped prefixes ->
+    raise (Keeper_lifecycle_surfaces_partly_dropped prefixes)
+;;
+
+let refresh_dashboard_for_keeper_lifecycle ~config ~keeper_name event =
+  raise_if_surfaces_partly_dropped
+    (Server_dashboard_http_keeper_api.refresh_keeper_execution_surfaces
+       ~config
+       ~name:keeper_name
+       event)
+;;
+
+(* What the lifecycle listener did with one event it took off its
+   subscription. *)
+type keeper_lifecycle_refresh =
+  | Lifecycle_refreshed
+  | Lifecycle_ignored
+  (** Not a lifecycle event. Nothing about a Keeper changed. *)
+  | Lifecycle_undecodable
+  (** A lifecycle event whose payload did not decode. Which Keeper changed is
+      unknown, so the caches cannot be patched precisely. *)
+  | Lifecycle_refresh_failed of
+      { keeper_name : string
+      ; event : Keeper_lifecycle_events.lifecycle_event
+      ; error : exn
+      }
+  | Lifecycle_handling_failed of exn
+  (** A raise outside the refresh itself — decoding the payload, the malformed
+      counter, a log call. What the event should have changed is unknown. *)
+
+let refresh_decoded_keeper_lifecycle ~refresh ~keeper_name event =
+  (* Lifecycle events also arrive from MCP and shutdown completion, not only
+     the dashboard POST handlers. Drop their source snapshot and parameterized
+     caches before patching the current execution row, so a purged Keeper
+     cannot be rebuilt from the five-second snapshot that still names its
+     removed meta. *)
+  match refresh ~keeper_name event with
+  | () -> Lifecycle_refreshed
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Dashboard.error
+      "keeper lifecycle refresh failed keeper=%s event=%s: %s\n%s"
+      keeper_name
+      (Keeper_lifecycle_events.lifecycle_event_to_string event)
+      (Printexc.to_string error)
+      (Printexc.raw_backtrace_to_string backtrace);
+    Lifecycle_refresh_failed { keeper_name; event; error }
+;;
+
+let handle_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
+  match evt.payload with
+  | Agent_core.Event_bus.Custom ("masc.keeper.lifecycle", payload) ->
+    (match
+       ( Safe_ops.json_string_opt "event" payload
+       , Safe_ops.json_string_opt "keeper_name" payload )
+     with
+     | Some event, Some keeper_name ->
+       (match
+          Keeper_lifecycle_events.lifecycle_event_of_wire
+            ~event
+            ~phase:(Safe_ops.json_string_opt "phase" payload)
+        with
+        | Some event -> refresh_decoded_keeper_lifecycle ~refresh ~keeper_name event
+        | None ->
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_keeper_lifecycle_malformed
+            ();
+          Lifecycle_undecodable)
+     | None, _ | Some _, None ->
+       (* A payload missing [event] or [keeper_name] bumps a counter, so a
+          systematic encoding bug that would lose every cache invalidation
+          shows up in [rate(...)] alerts. *)
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_keeper_lifecycle_malformed
+         ();
+       Lifecycle_undecodable)
+  | Agent_core.Event_bus.Custom (_, _)
+  | Agent_core.Event_bus.AgentStarted _
+  | Agent_core.Event_bus.AgentCompleted _
+  | Agent_core.Event_bus.AgentYielded _
+  | Agent_core.Event_bus.AgentInputRequired _
+  | Agent_core.Event_bus.AgentFailed _
+  | Agent_core.Event_bus.ToolCalled _
+  | Agent_core.Event_bus.ToolCompleted _
+  | Agent_core.Event_bus.TurnStarted _
+  | Agent_core.Event_bus.TurnReady _
+  | Agent_core.Event_bus.TurnCompleted _
+  | Agent_core.Event_bus.HandoffRequested _
+  | Agent_core.Event_bus.HandoffCompleted _
+  | Agent_core.Event_bus.ElicitationCompleted _
+  | Agent_core.Event_bus.ToolApprovalCompleted _
+  | Agent_core.Event_bus.InferenceTelemetry _ ->
+    Log.Dashboard.debug "ignored non-lifecycle event";
+    Lifecycle_ignored
+;;
+
+(* Everything one event costs stays inside this guard, not just the refresh:
+   a raise while decoding the payload, bumping the malformed counter or
+   logging would otherwise end the batch and take the events after it.
+   The Cancelled arm speaks for the counter bump too only since #37349 — until
+   then the metric store caught every exception under [inc_counter], so its
+   catch-all stood between the malformed branch and this match. *)
+let refresh_keeper_lifecycle_event ~refresh evt =
+  match handle_keeper_lifecycle_event ~refresh evt with
+  | result -> result
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Dashboard.error
+      "keeper lifecycle event handling failed: %s\n%s"
+      (Printexc.to_string error)
+      (Printexc.raw_backtrace_to_string backtrace);
+    Lifecycle_handling_failed error
+;;
+
+(* The recovery drops the same caches a refresh drops, so it can fail the same
+   way the refresh that called for it just did. Keep that failure inside the
+   batch: the caller still gets its results and still broadcasts, and the next
+   batch or the 60s execution refresh is what recovers. *)
+let invalidate_keeper_dependent_caches ~invalidate_all =
+  match invalidate_all () with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Dashboard.error
+      "keeper lifecycle listener could not invalidate the keeper-dependent \
+       dashboard caches: %s\n%s"
+      (Printexc.to_string error)
+      (Printexc.raw_backtrace_to_string backtrace)
+;;
+
+(* One drained batch of the lifecycle listener. Each event is refreshed on
+   its own, so an event whose refresh raises costs only its own patch and
+   the events after it are still refreshed. A failed refresh leaves the
+   cached surfaces in an unknown state for that Keeper, an undecodable
+   payload does not name the Keeper it changed, and an overflow drop loses
+   events nobody can name. In each case [invalidate_all] drops every
+   Keeper-dependent dashboard cache once the batch is through, and the next
+   read rebuilds them from current state. Returns one result per event, in
+   order. *)
+let handle_keeper_lifecycle_batch
+      ~refresh
+      ~invalidate_all
+      (drained : Runtime_event_bus.batch)
+  =
+  (* [fold_left], not [List.map]: the stdlib leaves [map]'s application order
+     unspecified, and two events for one Keeper in one batch (Started, then
+     Stopped) patch the same cached row. *)
+  let results =
+    List.rev
+      (List.fold_left
+         (fun refreshed evt -> refresh_keeper_lifecycle_event ~refresh evt :: refreshed)
+         []
+         drained.Runtime_event_bus.events)
+  in
+  let undecodable, refresh_failures, handling_failures =
+    List.fold_left
+      (fun (undecodable, refresh_failures, handling_failures) -> function
+         | Lifecycle_refreshed | Lifecycle_ignored ->
+           undecodable, refresh_failures, handling_failures
+         | Lifecycle_undecodable ->
+           undecodable + 1, refresh_failures, handling_failures
+         | Lifecycle_refresh_failed _ ->
+           undecodable, refresh_failures + 1, handling_failures
+         | Lifecycle_handling_failed _ ->
+           undecodable, refresh_failures, handling_failures + 1)
+      (0, 0, 0)
+      results
+  in
+  (match results with
+   | [] -> ()
+   | _ :: _ ->
+     Log.Dashboard.info
+       "patched keeper-dependent dashboard caches (%d lifecycle event(s))"
+       (List.length results));
+  let dropped =
+    match drained.Runtime_event_bus.overflow_loss with
+    | Runtime_event_bus.Nothing_dropped -> 0
+    | Runtime_event_bus.Dropped count -> count
+  in
+  (match dropped, undecodable, refresh_failures, handling_failures with
+   | 0, 0, 0, 0 -> ()
+   | dropped, undecodable, refresh_failures, handling_failures ->
+     Log.Dashboard.warn
+       "keeper lifecycle listener lost updates: dropped=%d undecodable=%d \
+        refresh_failures=%d handling_failures=%d; invalidating every \
+        keeper-dependent dashboard cache"
+       dropped
+       undecodable
+       refresh_failures
+       handling_failures;
+     invalidate_keeper_dependent_caches ~invalidate_all);
+  results
+;;
+
+(* One turn of the lifecycle listener: drain the subscription, refresh the
+   batch, and broadcast namespace truth when the batch carried events or lost
+   some. Separate from the fiber so a test can run a turn against a real
+   subscription. *)
+let refresh_keeper_lifecycle_once ~subscription ~refresh ~invalidate_all ~broadcast =
+  let drained = Runtime_event_bus.drain_reporting_drops subscription in
+  let results = handle_keeper_lifecycle_batch ~refresh ~invalidate_all drained in
+  (match drained.Runtime_event_bus.events, drained.overflow_loss with
+   | [], Runtime_event_bus.Nothing_dropped -> ()
+   | _ :: _, (Runtime_event_bus.Nothing_dropped | Runtime_event_bus.Dropped _)
+   | [], Runtime_event_bus.Dropped _ -> broadcast ());
+  results
+;;
+
+let install_workspace_message_mutation_invalidation
+      ~invalidate_full_health_snapshot
+      ()
+  =
+  Atomic.set Workspace_hooks.on_workspace_message_mutation_fn
+    (fun config ~request_id ~mention_delivery ->
+       (try
+          Dashboard_cache.invalidate_prefix
+            (Printf.sprintf "dashboard.workspace:%s;" config.Workspace.base_path);
+          Dashboard_cache.invalidate_prefix
+            (Printf.sprintf "workspace:%s:" config.base_path);
+          Sse.broadcast
+            (`Assoc
+               [ "type", `String "workspace_message_delivery_changed"
+               ; "request_id", `String request_id
+               ; ( "mention_delivery"
+                 , `String
+                     (Masc_domain.message_mention_delivery_to_string
+                        mention_delivery) )
+               ])
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Keeper.warn
+            "workspace message projection invalidation failed request_id=%s: %s"
+            request_id
+            (Printexc.to_string exn));
+       try invalidate_full_health_snapshot () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "workspace message full-health invalidation failed request_id=%s: %s"
+           request_id
+           (Printexc.to_string exn))
+;;
+
+let start_keeper_loops_owned
+      ~claimed_persistence
+      ~workspace_scope
+      ~invalidate_full_health_snapshot
+      ~sw
+      ~clock
+      ~net
+      ~proc_mgr
+      (state : Mcp_server.server_state)
+  =
+  Progress.set_sse_callback Sse.broadcast;
+  Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
+  Server_keeper_skill_publish.install ();
+  (* Bus creation carries no queue policy. Each subscriber owns its bounded,
+     non-blocking queue contract. *)
+  let event_bus = Agent_core.Event_bus.create () in
+  (* Eio fiber isolation: each subsystem runs in its own fiber.
+     If one crashes, others keep running — Eio's structured concurrency.
+     Subsystem_health tracks liveness at module level (no init timing dependency). *)
+  let fork_subsystem name f =
+    Subsystem_health.register name;
+    fork_logged_fiber
+      ~sw
+      ~on_error:(fun exn ->
+        Subsystem_health.mark_dead name;
+        Log.Server.error "subsystem %s crashed: %s" name (Printexc.to_string exn))
+      f
+  in
+  let config = workspace_scope.Mcp_server.config in
+  (match Workspace_broadcast.validate_current_message_schema config with
+   | Ok () -> ()
+   | Error rejections ->
+     raise (Workspace_broadcast.Current_message_schema_rejected rejections));
+  (* The owner inventory is installed by [initialize_owner_state_blocking]
+     before persistence preparation. Shutdown admission recovery is itself an
+     Owner command after the single-owner hard cut, so installing it here was
+     too late whenever a durable shutdown fence survived process death. *)
+  (* [claimed_persistence] can only be constructed by the typed one-shot claim
+     boundary before readiness publication. No late exception can turn an
+     already-visible HTTP state into a degraded bootstrap. *)
+  (* Completion recovery can publish [Supervisor_cleaned] and invoke
+     [Supervisor_cleaned]. Install the production hook before any durable
+     receipt is replayed. *)
+  Keeper_subprocess_registry.register_default_cleanup_hook ();
+  Keeper_shutdown_finalize.register_completion_handler
+    (fun config operation action ->
+      Server_dashboard_http_delete_actions.handle_keeper_lifecycle_completion
+        config
+        operation
+        action);
+  (* Create and install the MASC-owned event bus alongside Agent Core's.
+     MASC domain events (masc.keeper.*, masc.harness.*, ...) publish here per
+     the Event_bus contract. Dashboard SSE consumers receive both buses through
+     the same relay. *)
+  let masc_event_bus = Agent_core.Event_bus.create () in
+  Event_bus_slots.set_masc masc_event_bus;
+  (* Event_bus → SSE bridge: relay both Agent Core and MASC buses to dashboard. *)
+  Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:masc_event_bus;
+  (* Admission waits go on the MASC bus once its relay is subscribed, so
+     every reported wait reaches agent-core-events. *)
+  Provider_admission_events.install ~sw masc_event_bus;
+  (* Telemetry feedback loop: observe Agent Core per-turn signals without
+     deserializing provider/model-bearing payloads. *)
+  Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;
+  let keeper_lifecycle_sub =
+    Runtime_event_bus.subscribe
+      ~capacity:256
+      ~overflow:Agent_core.Event_bus.Drop_oldest
+      ~purpose:"lifecycle_listener"
+      ~filter:(Agent_core.Event_bus.filter_topic "masc.keeper.lifecycle")
+      masc_event_bus
+  in
+  Eio.Switch.on_release sw (fun () ->
+    Runtime_event_bus.unsubscribe masc_event_bus keeper_lifecycle_sub);
+  (* Replay durable completion receipts only after the MASC event bus has its
+     SSE/metrics subscribers and lifecycle hooks are installed. Otherwise a
+     boot-time [Supervisor_cleaned] publish can return successfully while every
+     process-local sink is still absent. *)
+  fork_subsystem "keeper_shutdown_recovery" (fun () ->
+    let restored = claimed_persistence.claimed_report.shutdown in
+      List.iter
+        (fun (corrupt : Keeper_shutdown_store.corrupt_record) ->
+           Log.Keeper.error
+             "corrupt shutdown operation retained under an exact Keeper admission fence: keeper=%s operation=%s path=%s error=%s"
+             corrupt.Keeper_shutdown_store.keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string corrupt.operation_id)
+             corrupt.path
+             (Keeper_shutdown_store.error_to_string corrupt.error))
+        restored.corrupt_records;
+      Eio.Switch.run (fun recovery_sw ->
+        List.iter
+          (fun operation ->
+             fork_logged_fiber
+               ~sw:recovery_sw
+               ~on_error:(fun exn ->
+                 Log.Keeper.error
+                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
+                   operation.Keeper_shutdown_types.keeper_name
+                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                   (Printexc.to_string exn))
+               (fun () ->
+                 let corrupt_owner_fence =
+                   List.find_opt
+                     (fun fence ->
+                        String.equal
+                          fence.Keeper_shutdown_runtime.keeper_name
+                          operation.Keeper_shutdown_types.keeper_name)
+                     restored.corrupt_owner_fences
+                 in
+                 match
+                   Keeper_shutdown_runtime.recover_operation_with_corrupt_owner_fence
+                     ~config
+                     ~corrupt_owner_fence
+                     operation
+                 with
+                 | Ok recovered ->
+                   Log.Keeper.info
+                     "recovered shutdown operation keeper=%s operation=%s"
+                     recovered.Keeper_shutdown_types.keeper_name
+                     (Keeper_shutdown_types.Operation_id.to_string recovered.operation_id)
+                 | Error detail ->
+                   Log.Keeper.error
+                     "shutdown recovery failed keeper=%s operation=%s error=%s"
+                     operation.Keeper_shutdown_types.keeper_name
+                     (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                     detail))
+          restored.operations));
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_dashboard_fiber_crash "keeper lifecycle listener")
+    (fun () ->
+    let config = Mcp_server.workspace_config state in
+    let invalidate_keeper_execution_surfaces =
+      Server_dashboard_http_keeper_api_lifecycle_post.invalidate_keeper_execution_surfaces
+        ~config
+    in
+    let rec loop () =
+      (try
+         let (_ : keeper_lifecycle_refresh list) =
+           refresh_keeper_lifecycle_once
+             ~subscription:keeper_lifecycle_sub
+             ~refresh:(refresh_dashboard_for_keeper_lifecycle ~config)
+             ~invalidate_all:invalidate_keeper_execution_surfaces
+             ~broadcast:(fun () ->
+               Server_dashboard_http.broadcast_namespace_truth_snapshot state)
+         in
+         ()
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Dashboard.error
+           "keeper lifecycle listener iteration failed: %s"
+           (Printexc.to_string exn));
+      Eio.Time.sleep
+        clock
+        Env_config_keeper.KeeperBootstrap.keeper_listener_retry_interval_sec;
+      loop ()
+    in
+    loop ());
+  (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
+  Keeper_keepalive.set_bus event_bus;
+  Board_dispatch.set_board_signal_hook (fun signal ->
+    let config = Mcp_server.workspace_config state in
+    Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
+      ~dispatch_attention:(Keeper_board_attention_fanout.dispatch ~sw ~clock ~base_path:config.base_path)
+      ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw ~clock ~config)
+      ~config
+      signal);
+  Board_dispatch.set_board_sse_hook (fun event ->
+    let params = board_sse_event_params event in
+    Server_dashboard_http_core_cache.invalidate_board_projections ();
+    Sse.broadcast
+      (`Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "method", `String "notifications/board"
+          ; "params", params
+          ]);
+    (* Emit activity event so Discord/external connectors can detect board posts *)
+    let activity_kind, activity_actor, activity_subject, activity_payload =
+      match event with
+      | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth }
+        ->
+        let base =
+          [ "post_id", `String post_id
+          ; "title", `String title
+          ; "content", `String content
+          ; "author", `String author
+          ; "author_identity", Server_utils.board_actor_identity_json author
+          ; "post_kind", `String (Board.post_kind_to_string post_kind)
+          ]
+        in
+        let payload_fields =
+          match hearth with
+          | Some h -> ("hearth", `String h) :: base
+          | None -> base
+        in
+        ( Event_kind.Board.to_string Event_kind.Board.Posted
+        , Server_utils.board_actor_entity author
+        , Some (Activity_graph.entity ~kind:"post" post_id)
+        , `Assoc payload_fields )
+      | Board_dispatch.Comment_added { post_id; comment_id; author } ->
+        ( Event_kind.Board.to_string Event_kind.Board.Commented
+        , Server_utils.board_actor_entity author
+        , Some (Activity_graph.entity ~kind:"post" post_id)
+        , `Assoc
+            [ "post_id", `String post_id
+            ; "comment_id", `String comment_id
+            ; "author", `String author
+            ; "author_identity", Server_utils.board_actor_identity_json author
+            ] )
+      | Board_dispatch.Post_voted { post_id; voter; direction } ->
+        let dir = Board_votes.vote_direction_to_string direction in
+        ( Event_kind.Board.to_string Event_kind.Board.Voted
+        , Server_utils.board_actor_entity voter
+        , Some (Activity_graph.entity ~kind:"post" post_id)
+        , `Assoc
+            [ "post_id", `String post_id
+            ; "voter", `String voter
+            ; "voter_identity", Server_utils.board_actor_identity_json voter
+            ; "direction", `String dir
+            ] )
+      | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
+        let dir = Board_votes.vote_direction_to_string direction in
+        ( Event_kind.Board.to_string Event_kind.Board.Voted
+        , Server_utils.board_actor_entity voter
+        , Some (Activity_graph.entity ~kind:"comment" comment_id)
+        , `Assoc
+            [ "comment_id", `String comment_id
+            ; "voter", `String voter
+            ; "voter_identity", Server_utils.board_actor_identity_json voter
+            ; "direction", `String dir
+            ] )
+      | Board_dispatch.Reaction_changed
+          { target_type; target_id; user_id; emoji; reacted } ->
+        ( Event_kind.Board.to_string Event_kind.Board.Voted
+        , Server_utils.board_actor_entity user_id
+        , Some
+            (Activity_graph.entity
+               ~kind:(Board.reaction_target_type_to_string target_type)
+               target_id)
+        , `Assoc
+            [ "target_type", `String (Board.reaction_target_type_to_string target_type)
+            ; "target_id", `String target_id
+            ; "user_id", `String user_id
+            ; "user_identity", Server_utils.board_actor_identity_json user_id
+            ; "emoji", `String emoji
+            ; "reacted", `Bool reacted
+            ] )
+    in
+    (* P2 silent-failure fix: Activity_graph.emit failures (Discord
+       webhook, audit trail writes, etc.) were previously ignored
+       entirely.  An operator seeing board activity on the dashboard
+       had no signal that the external systems failed to receive the
+       event.  Catch + warn surfaces the failure in operator logs
+       without aborting the SSE broadcast that already succeeded. *)
+    try
+      ignore
+        (Activity_graph.emit
+           (Mcp_server.workspace_config state)
+           ~actor:activity_actor
+           ?subject:activity_subject
+           ~kind:activity_kind
+           ~payload:activity_payload
+           ~tags:[ "board"; activity_kind ]
+           ())
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Misc.warn
+        "board: Activity_graph.emit kind=%s failed: %s"
+        activity_kind
+        (Printexc.to_string exn));
+  (* An edit, pin, close, reopen, delete or thread change raises no event above,
+     and the cached pages still answer from before it. *)
+  Board_dispatch.set_board_write_hook
+    Server_dashboard_http_core_cache.invalidate_board_projections;
+  (* Wire broadcast -> keeper delivery. An explicit mention commits a queue
+     entry and wakes the named keeper. Every registered keeper then gets the
+     same transcript row for its conversation window, with no mention stamp,
+     no queue entry and no wake, so one broad announcement cannot create a
+     fleet-wide turn storm. Board signals have their own capped wake path. *)
+  let broadcast_mention_handler =
+    fun (delivery : Workspace_broadcast.broadcast_delivery) ->
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
+    let mention_outcome =
+      deliver_broadcast_mention
+        ~config
+        ~base_path
+        ~is_running:(fun target ->
+          Option.is_some (Keeper_registry.get ~base_path target))
+        ~is_registered_keeper:(Keeper_registry.is_registered ~base_path)
+        ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
+        delivery
+    in
+    (* The projection writes under the same delivery key the mention path uses,
+       and the chat store is first-write-wins on that key. If the mention
+       delivery returned without writing its row — the target's metadata was
+       unavailable, or its identity was ambiguous — an unstamped projection row
+       would claim the key, and the retry that follows could never stamp it:
+       the reloaded row carries only content-derived mentions, so a keeper
+       whose feed targets do not match the text reads as already answered, the
+       wake is skipped, and the message is recorded as delivered. Project only
+       once the mention path is done with that transcript. *)
+    (if not (mention_transcript_settled mention_outcome)
+     then
+       Log.Keeper.warn
+         "fleet projection deferred with the mention delivery request_id=%s outcome=%s"
+         delivery.request_id
+         (Workspace_broadcast.mention_delivery_kind mention_outcome)
+     else
+       (* The fanout must not be able to change what the mention delivery
+          reported. The dispatcher turns an escaping exception into
+          [Deferred Handler_failed], which would relabel an accepted mention
+          as an undelivered one. *)
+       (try
+       project_workspace_message_to_fleet
+         ~base_path
+         ~registered_keepers:(fun () ->
+           Keeper_registry.all ~base_path ()
+           |> List.map (fun (entry : Keeper_registry.registry_entry) ->
+             entry.name, entry.name))
+         delivery
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+          Log.Keeper.warn
+            "fleet projection failed request_id=%s: %s"
+            delivery.request_id
+            (Printexc.to_string exn)));
+    mention_outcome
+  in
+  Goal_delivery.register_backend goal_notification_backend;
+  register_lane_fleet_backend ();
+  Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
+  install_workspace_message_mutation_invalidation
+    ~invalidate_full_health_snapshot
+    ();
+  let workspace_config = Mcp_server.workspace_config state in
+  fork_logged_fiber
+    ~sw
+    ~on_error:(Server_bootstrap_loops_fiber.log_server_fiber_crash
+                 "broadcast mention recovery")
+    (fun () ->
+       Eio.Fiber.yield ();
+       match Workspace_broadcast.reconcile_pending_mentions workspace_config with
+       | Error detail ->
+         Log.Keeper.error "broadcast mention recovery unavailable: %s" detail
+       | Ok report ->
+         List.iter
+           (fun (receipt : Workspace_broadcast.mention_outbox_quarantine_receipt) ->
+              Log.Keeper.error
+                "broadcast mention quarantine source=%s quarantine=%s reason=%s sha256=%s detail=%s"
+                receipt.source_name
+                receipt.quarantine_name
+                (Workspace_broadcast.mention_outbox_quarantine_reason_to_string
+                   receipt.reason)
+                receipt.raw_sha256
+                receipt.detail)
+           report.quarantine_receipts;
+         if report.pending_rows > 0 || report.corrupt_rows > 0
+         then
+           Log.Keeper.info
+             "broadcast mention recovery outbox=%d pending=%d accepted=%d already_accepted=%d deferred=%d rejected=%d corrupt=%d"
+             report.outbox_rows
+             report.pending_rows
+             report.accepted
+             report.already_accepted
+             report.deferred
+             report.rejected
+             report.corrupt_rows);
+  (* Register observation cancellation together with Keeper-owner stopping. *)
+  (try
+     let cancel_orphan_observation =
+       Workspace_orphan_observation.start ~sw ~clock (Mcp_server.workspace_config state)
+     in
+     Shutdown_hooks.register_keeper_shutdown (fun () ->
+       let base_path = (Mcp_server.workspace_config state).base_path in
+       (match Keeper_owner_registry.begin_stopping_all ~base_path with
+        | Error Keeper_owner_registry.Inventory_stopping -> ()
+        | Error
+            (( Keeper_owner_registry.Inventory_not_installed _
+             | Keeper_owner_registry.Owner_not_found _
+             | Keeper_owner_registry.Owner_unavailable _
+             | Keeper_owner_registry.Owner_initialization_failed _ ) as error) ->
+          Log.Keeper.error
+            "keeper_owner: shutdown inventory fence failed error=%s"
+            (Keeper_owner_registry.lookup_error_to_string error)
+        | Ok results ->
+          List.iter
+            (function
+              | Ok () -> ()
+              | Error error ->
+                Log.Keeper.error
+                  "keeper_owner: shutdown child settlement failed error=%s"
+                  (Keeper_owner.error_to_string error))
+            results);
+       cancel_orphan_observation ())
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Server.error
+       "subsystem orphan observation failed to start: %s"
+       (Printexc.to_string exn));
+  fork_subsystem "session_cleanup" (fun () ->
+    Session.start_mcp_session_cleanup_loop ~sw ~clock ());
+  (* No verification_timeout fork: completion-authority obligations remain
+     pending until a typed verdict; a wall-clock sweep must not cancel them. *)
+  (* Auto-boot keepers from keeper meta and start keepalive loops.
+     Each unbooted keeper retries in its own fiber until it registers, so
+     transient model/discovery failures neither abandon that lane nor block
+     supervisor startup or sibling lanes. See #5717. *)
+  fork_subsystem "keeper_autoboot" (fun () ->
+    Runtime_startup_state.await_available ();
+    let persisted, launched =
+      if not (Env_config.KeeperBootstrap.enabled ())
+      then (
+        Log.Keeper.info "autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false";
+        (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "autoboot: keeper names unread: %s" detail;
+           []), [])
+      else (
+      (* Ownership and runtime prerequisites are already established above.
+         Agent session discovery merges through its own actor and must not
+         delay unrelated Keeper startup or be failed by elapsed time. *)
+      let masc_root = Workspace.masc_dir config in
+      let keeper_dir = Keeper_fs.keeper_dir config in
+      let shutdown_blocked_names =
+        claimed_persistence.claimed_report.shutdown.blocked_keeper_names
+        |> Keeper_name_set.of_list
+      in
+      (* No Keeper list boots no Keeper from it: autoboot starts only
+         Keepers whose metadata names them. *)
+      let all_names =
+        (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "autoboot: keeper names unread: %s" detail;
+           [])
+      in
+      let all_count = List.length all_names in
+      Log.Keeper.info
+        "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
+        config.base_path
+        masc_root
+        keeper_dir
+        all_count;
+      let bootable_names = Keeper_runtime.bootable_keeper_names config in
+      (* A keeper filtered out here is config-bootable but its admission is
+         still owned by a durable shutdown operation from the boot scan.
+         Stamp it into the excluded list instead of dropping it silently —
+         the 2026-07-21 wedge left one Keeper absent from both the boot set and
+         the excluded list, so the outage was invisible in the autoboot
+         report. Boot recovery settles recoverable operations in this same
+         bootstrap, after which the supervisor's periodic pass registers the
+         keeper; this snapshot stays honest about what autoboot itself saw. *)
+      let names, shutdown_fenced_exclusions =
+        List.partition_map
+          (fun name ->
+             if Keeper_name_set.mem name shutdown_blocked_names
+             then
+               Either.Right
+                 Keeper_runtime.
+                   { keeper_name = name; reason = Shutdown_admission_fence }
+             else Either.Left name)
+          bootable_names
+      in
+      let exclusions =
+        Keeper_runtime.autoboot_excluded_keeper_reasons config
+        @ shutdown_fenced_exclusions
+      in
+      let keeper_boot_ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "keeper-autoboot"
+        ; sw
+        ; clock
+        ; proc_mgr = Some proc_mgr
+        ; net = state.net
+        ; publication_recovery_provider =
+            Mcp_server.publication_recovery_availability_provider state
+        }
+      in
+      Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
+      Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
+      if exclusions <> []
+      then (
+        let rendered =
+          exclusions
+          |> List.map (fun Keeper_runtime.{ keeper_name; reason } ->
+            Printf.sprintf
+              "%s=%s"
+              keeper_name
+              (Keeper_runtime.autoboot_exclusion_reason_to_string reason))
+          |> String.concat ", "
+        in
+        Log.Keeper.info
+          "autoboot: excluded %d configured keeper(s): [%s]"
+          (List.length exclusions)
+          rendered);
+      let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
+      let stagger_window = Keeper_config.keeper_bootstrap_stagger_step_sec () in
+      (* Attempt to boot a single keeper. Returns true if started. *)
+      let try_boot_one ?(log_prefix = "autoboot") _idx name =
+        try
+          Log.Keeper.info "%s: loading meta for %s" log_prefix name;
+          match Keeper_runtime.load_or_materialize_boot_meta keeper_boot_ctx name with
+          | Error e ->
+            Log.Keeper.error "%s: failed to load meta for %s: %s" log_prefix name e;
+            false
+          | Ok { meta = m; materialized } ->
+            if Keeper_registry.is_running ~base_path:config.base_path m.name
+            then (
+              Log.Keeper.info
+                "%s: %s already running%s"
+                log_prefix
+                m.name
+                (if materialized then " (materialized from TOML)" else "");
+              true)
+            else (
+              let warmup =
+                autoboot_proactive_warmup_sec
+                  ~base_warmup
+                  ~stagger_window_sec:stagger_window
+                  ~keeper_name:name
+              in
+              Log.Keeper.info
+                "%s: calling start_keepalive for %s (warmup=%ds)"
+                log_prefix
+                name
+                warmup;
+              let ctx : _ Keeper_types_profile.context =
+                { config
+                ; agent_name = m.name
+                ; sw
+                ; clock
+                ; proc_mgr = Some proc_mgr
+                ; net = state.net
+                ; publication_recovery_provider =
+                    Mcp_server.publication_recovery_availability_provider state
+                }
+              in
+              let launch_outcome =
+                Keeper_keepalive.start_keepalive
+                  ~proactive_warmup_sec:warmup
+                  ctx
+                  m
+              in
+              (match launch_outcome with
+               | Keeper_keepalive.Keepalive_started _
+               | Keeper_keepalive.Keepalive_already_registered _ -> ()
+               | (Keeper_keepalive.Keepalive_lane_ownership_lost | Keeper_keepalive.Keepalive_lifecycle_denied _ | Keeper_keepalive.Keepalive_registration_rejected _ | Keeper_keepalive.Keepalive_fiber_start_rejected _ | Keeper_keepalive.Keepalive_launch_callback_failed _ | Keeper_keepalive.Keepalive_fork_rejected _) as outcome -> Log.Keeper.warn
+                   "%s: start_keepalive rejected %s: %s"
+                   log_prefix
+                   m.name
+                   (Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+              (* start_keepalive registers the keeper synchronously via
+                 register_offline and then forks the keepalive fiber.  The
+                 fiber flips the registry to running asynchronously on the
+                 next Eio tick, so querying is_running here is a race that
+                 keepers with a larger proactive-warmup idx lose
+                 deterministically (keeper-a=165s / keeper-b=150s / keeper-c=135s
+                 produced the bulk of the false-positive "not in registry"
+                 WARNs).  Check the synchronous is_registered predicate
+                 instead — the running transition is observed later by the
+                 retry loop.  See #7889. *)
+              let registered =
+                Keeper_registry.is_registered ~base_path:config.base_path m.name
+              in
+              if registered
+              then Log.Keeper.info "%s: started keepalive for %s" log_prefix m.name
+              else
+                Log.Keeper.warn
+                  "%s: start_keepalive returned but %s not registered"
+                  log_prefix
+                  m.name;
+              registered)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Keeper.error
+            "%s: exception for %s: %s"
+            log_prefix
+            name
+            (Printexc.to_string exn);
+          false
+      in
+      (* Initial boot pass *)
+      let booted =
+        filteri_with_fair_yield (fun idx name -> try_boot_one idx name) names
+      in
+      let booted_count = List.length booted in
+      let total = List.length names in
+      Log.Keeper.info "autoboot: initial pass %d/%d keepers started" booted_count total;
+      (* Retry loop for keepers that failed initial boot *)
+      if booted_count < total
+      then (
+        let retry_interval_s =
+          Float.of_int (Keeper_config.keeper_bootstrap_retry_interval_sec ())
+        in
+        let unbooted =
+          List.filter (fun name -> not (List.mem name booted)) names
+        in
+        List.iteri
+          (fun idx name ->
+             fork_logged_fiber
+               ~sw
+               ~on_error:(fun exn ->
+                 Log.Keeper.error
+                   "autoboot retry crashed keeper=%s error=%s"
+                   name
+                   (Printexc.to_string exn))
+               (fun () ->
+               let rec retry_loop round =
+                 if Keeper_registry.is_registered ~base_path:config.base_path name
+                 then
+                   Log.Keeper.info
+                     "autoboot: %s registered after %d retry round(s)"
+                     name
+                     (round - 1)
+                 else (
+                   Eio.Time.sleep clock retry_interval_s;
+                   Log.Keeper.info
+                     "autoboot: retry round %d for unbooted keeper %s"
+                     round
+                     name;
+                   if try_boot_one ~log_prefix:"autoboot-retry" idx name
+                   then
+                     Log.Keeper.info
+                       "autoboot: %s registered on retry round %d"
+                       name
+                       round
+                   else retry_loop (round + 1))
+               in
+               retry_loop 1))
+          unbooted);
+      (* Keeper lifecycle startup has one owner: this subsystem boots the
+         configured roster and then starts its supervisor. The sweep starts
+         even for an empty roster; it is the recovery authority for keepers
+         materialized or registered after boot. This preserves the #10125
+         incident fix: a transiently empty/failed initial pass must not leave
+         the fleet without recovery. Tool dispatch has no fleet-start
+         authority. *)
+      (try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Keeper.error
+          "autoboot: supervisor sweep failed to start: %s"
+          (Printexc.to_string exn));
+      all_names, booted)
+    in
+    (* RFC librarian-lifecycle section 8, stage 4, item 2: a Keeper that
+       autoboot did not launch has no launch transaction to submit its durable
+       Librarian catch-up, so the server submits it here, once, after the
+       exact-output registry is public ([await_available] above). A Keeper
+       that boots later on retry submits its own; the lane serializes the two
+       and the second finds nothing unread. *)
+    let caught_up =
+      Keeper_librarian_queue_refresh.submit_durable_for_unlaunched
+        ~base_path:config.base_path
+        ~persisted
+        ~launched
+    in
+    Log.Keeper.info
+      "autoboot: durable Librarian catch-up submitted for %d unlaunched keeper(s) [%s]"
+      (List.length caught_up)
+      (String.concat ", " caught_up));
+  (* Discord presence bridge — syncs keeper liveness to bot status. *)
+  fork_subsystem "discord_presence" (fun () ->
+    Discord_presence_bridge.start
+      ~sw ~clock ~workspace_config:(Mcp_server.workspace_config state) ());
+  (* Phase 5: unified startup subsystem summary *)
+  Log.Startup.info "subsystems: keeper loops started"
+;;
+
+let start_keeper_loops
+      ~claimed_persistence
+      ~invalidate_full_health_snapshot
+      ~sw
+      ~clock
+      ~net
+      ~proc_mgr
+      (state : Mcp_server.server_state)
+  =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let state_config = workspace_scope.config in
+  (* Claim has already committed admission. Mask cancellation only across the
+     second BasePath validation and [Claimed -> Starting] CAS so a cancelled
+     startup cannot strand a claimed token. The long-running startup body is
+     deliberately outside protection and terminalizes cancellation below. *)
+  match
+    Eio.Cancel.protect (fun () ->
+      acquire_keeper_loops_start ~config:state_config claimed_persistence)
+  with
+  | Error error -> raise (Keeper_persistence_start_failed error)
+  | Ok ownership ->
+    let outcome =
+      match
+        start_keeper_loops_owned
+          ~claimed_persistence
+          ~workspace_scope
+          ~invalidate_full_health_snapshot
+          ~sw
+          ~clock
+          ~net
+          ~proc_mgr
+          state
+      with
+      | () -> Ok ()
+      | exception exn -> Error (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: PROVISIONAL, delete with #37372. The captured exception is dispatched at line 2192, where an Eio.Cancel.Cancelled arm re-throws it with its backtrace. *)
+    in
+    (match outcome with
+     | Ok () ->
+       (match finish_keeper_loops_start ownership with
+        | Ok () -> ()
+        | Error error -> raise (Keeper_persistence_start_failed error))
+     | Error (exn, backtrace) ->
+       let failure =
+         persistence_failure
+           ~phase:Starting_keeper_loops
+           ~base_path:claimed_persistence.claimed_base_path.canonical
+           ~cause:
+             (Unexpected_exception_cause (raised_cause exn backtrace))
+       in
+       if
+         not
+           (Atomic.compare_and_set
+              persistence_lifecycle
+              ownership.starting
+              (failed_lifecycle
+                 ~prepared:ownership.prepared
+                 ~claimed:ownership.claimed
+                 failure))
+       then log_lifecycle_transition_loss ~from_phase:"starting" ~failure;
+       (match exn with
+        | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace exn backtrace
+        | _ ->
+          Printexc.raise_with_backtrace
+            (Keeper_persistence_start_failed
+               (Start_execution_failed failure))
+            backtrace))
+;;
+
+module For_testing = struct
+  include Projection_for_testing
+
+  let install_workspace_message_mutation_invalidation =
+    install_workspace_message_mutation_invalidation
+  ;;
+
+  type nonrec keeper_loops_start_ownership = keeper_loops_start_ownership
+
+  let reset_keeper_persistence_lifecycle () = Atomic.set persistence_lifecycle Idle
+
+  let prepared_base_paths prepared =
+    prepared.base_path.requested, prepared.base_path.canonical
+  ;;
+
+  let begin_keeper_loops_start = acquire_keeper_loops_start
+  let finish_keeper_loops_start = finish_keeper_loops_start
+  let refresh_dashboard_for_keeper_lifecycle =
+    refresh_dashboard_for_keeper_lifecycle
+  let raise_if_surfaces_partly_dropped = raise_if_surfaces_partly_dropped
+  let handle_keeper_lifecycle_batch = handle_keeper_lifecycle_batch
+  let refresh_keeper_lifecycle_once = refresh_keeper_lifecycle_once
+end
+
+
+(* Background maintenance loops
+   extracted to [Server_bootstrap_maintenance] (godfile decomp). *)
+include Server_bootstrap_maintenance

@@ -1,0 +1,13 @@
+name = "masc_lane_declaration_read"
+description = """
+Read one Lane installation TOML, including invalid source for repair.
+
+Use its exact source_path from masc_lane_inspect. Returns raw source_revision for edit conflicts separately from semantic desired_revision. Only direct declarations in the resolved Lane configuration directory are readable."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "source_path"
+type = "string"
+required = true
+description = "Exact declaration source_path returned by Lane inspection."

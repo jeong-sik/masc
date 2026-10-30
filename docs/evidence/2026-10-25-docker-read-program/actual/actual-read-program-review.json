@@ -1,0 +1,170 @@
+{
+  "schema": "masc.read-program.actual-review.public.v1",
+  "verdict": "PASS_SCOPED_ENTRYPOINT_COUNTERFACTUAL_WITH_CLEANUP_TIME_LIMITS",
+  "scope": "Eight direct Docker CLI invocations; no new MASC binary, model/provider episode, source approval or native test execution.",
+  "baseline_source_reference": "45592d21f7f1c11226e75c857d1983f7b0eef9d5",
+  "source_driver_sha256": "65bc8f7043e2ea08c77b4d0d40384dc8e1c7f522a2a94363331b74f35edceaca",
+  "original_receipt_sha256": "d69ee94ff07505e7112aeecf3a8e7cfafb241f6fe82626c8a3a9ce4dbcff467f",
+  "original_results_sha256": "39aef0ec3d143d4684cabe8bd5e4b3e3a365ba74479efb8a2aa0086eddca50ad",
+  "private_input_manifest_sha256": "9f1ba361dc4fecc0a15bc36ec9f763e4ffdeb887bac628061fa417463f7637bb",
+  "private_original_files_hashed": 29,
+  "image": {
+    "immutable_id": "sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d",
+    "recorded_entrypoint": [
+      "docker-entrypoint.sh"
+    ],
+    "recorded_cmd": [
+      "node"
+    ],
+    "metadata_scope": "Recorded driver inspection projection and immutable-ID argv binding; reviewer did not query Docker and full original image-inspect output was not retained."
+  },
+  "input": {
+    "bytes": 7,
+    "sha256": "d29210777777dac0b3d12f6a656a073c9ba717cf6932dbc01b0cc6dc1e7779b8",
+    "readonly_bind": true,
+    "driver_before_after_hash_equal": true,
+    "review_readback_matches": true
+  },
+  "counterfactual": {
+    "runs": 8,
+    "cases": 4,
+    "variants": [
+      "image_default",
+      "caller_program"
+    ],
+    "treatment": "Only caller_program adds --entrypoint with an empty argument. Names/CID-file paths are distinct per invocation; normalized image/program/isolation/input argv are otherwise equal.",
+    "expected_and_observed_exits": {
+      "missing_rg": [
+        1,
+        127
+      ],
+      "real_grep_no_match": [
+        1,
+        1
+      ],
+      "real_grep_match": [
+        0,
+        0
+      ],
+      "real_cat_read": [
+        0,
+        0
+      ]
+    },
+    "rows": [
+      {
+        "case": "missing_rg",
+        "variant": "image_default",
+        "started_at": "2026-10-25T11:37:41.801764+00:00",
+        "exit_code": 1,
+        "stdout_bytes": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_bytes": 648,
+        "stderr_sha256": "f68848f17c7de567ae3093a3fb1829ade058044d4d748267b5eba8bbae5449dd"
+      },
+      {
+        "case": "missing_rg",
+        "variant": "caller_program",
+        "started_at": "2026-10-25T11:37:41.990294+00:00",
+        "exit_code": 127,
+        "stdout_bytes": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_bytes": 305,
+        "stderr_sha256": "5c698f71ac163f2bf8d179c47b8175f9bab5bbb3eca804bdd676ee115660b733"
+      },
+      {
+        "case": "real_grep_no_match",
+        "variant": "image_default",
+        "started_at": "2026-10-25T11:37:42.183708+00:00",
+        "exit_code": 1,
+        "stdout_bytes": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_bytes": 0,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "real_grep_no_match",
+        "variant": "caller_program",
+        "started_at": "2026-10-25T11:37:42.377918+00:00",
+        "exit_code": 1,
+        "stdout_bytes": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_bytes": 0,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "real_grep_match",
+        "variant": "image_default",
+        "started_at": "2026-10-25T11:37:42.556947+00:00",
+        "exit_code": 0,
+        "stdout_bytes": 9,
+        "stdout_sha256": "b682326eebf12d37d9faf0d5a627862cf21750679a2d3e2e4950f7a50ae4a7f7",
+        "stderr_bytes": 0,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "real_grep_match",
+        "variant": "caller_program",
+        "started_at": "2026-10-25T11:37:42.724605+00:00",
+        "exit_code": 0,
+        "stdout_bytes": 9,
+        "stdout_sha256": "b682326eebf12d37d9faf0d5a627862cf21750679a2d3e2e4950f7a50ae4a7f7",
+        "stderr_bytes": 0,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "real_cat_read",
+        "variant": "image_default",
+        "started_at": "2026-10-25T11:37:42.912347+00:00",
+        "exit_code": 0,
+        "stdout_bytes": 7,
+        "stdout_sha256": "d29210777777dac0b3d12f6a656a073c9ba717cf6932dbc01b0cc6dc1e7779b8",
+        "stderr_bytes": 0,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "real_cat_read",
+        "variant": "caller_program",
+        "started_at": "2026-10-25T11:37:43.109037+00:00",
+        "exit_code": 0,
+        "stdout_bytes": 7,
+        "stdout_sha256": "d29210777777dac0b3d12f6a656a073c9ba717cf6932dbc01b0cc6dc1e7779b8",
+        "stderr_bytes": 0,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "all_raw_stdout_stderr_hashes_match": true,
+    "all_cid_files_match_rows": true,
+    "legitimate_grep_and_cat_outputs_byte_equal": true
+  },
+  "inference_ko": "동일 image/input에서 default image entrypoint는 missing rg 요청을 Node MODULE_NOT_FOUND/exit1로 만들었고, entrypoint reset은 rg 실행 파일 없음/exit127을 드러냈다. 정상 grep의 no-match exit1, match exit0 및 cat read exit0/바이트는 유지됐다. 이번 실패의 entrypoint 관여를 지지하는 직접 CLI counterfactual이다.",
+  "cleanup": {
+    "original_probe": {
+      "declared_rm": true,
+      "owned_cids_recorded": 8,
+      "recorded_inspect_nonzero_count": 8,
+      "absence_proven_from_nonzero_inspect_alone": false,
+      "limit_ko": "최초 inspect의 비0는 daemon/권한 오류 등과 부재를 구분하지 못한다. raw stdout/stderr와 실제 code도 보존되지 않았다."
+    },
+    "later_observation": {
+      "receipt_sha256": "6aeed54d73def4c3c1d90f758d8fc4f702a60026155f016f67ad914e5ea25c76",
+      "observed_at": "2026-10-25T11:43:57.672876+00:00",
+      "exact_owned_cids_matched": 8,
+      "successful_exact_id_filtered_lists": 8,
+      "all_query_stdout_and_stderr_empty": true,
+      "daemon_stable_during_queries_recorded": true,
+      "current_absence_on_observed_daemon_supported": true,
+      "same_daemon_as_probe_proven": false,
+      "historical_inspect_reasons_or_removal_time_proven": false,
+      "limit_ko": "후속 관측은 그때 연결된 daemon에서8개 exact CID가 없었다는 범위다. probe 시점 daemon ID가 없어 동일 daemon의 역사적 삭제 완료/시점을 입증하지 않는다. daemon-info 전후 원문은 receipt에 없으므로 stability Boolean/hash를 독립 재계산한 것은 아니다."
+    }
+  },
+  "remaining_scope_ko": [
+    "grep 통제는 실제 ripgrep 정상 실행 실측이 아니다. 이 image에서는 rg 자체가 없었다.",
+    "ENTRYPOINT reset은 image script의 command rewriting을 우회한 통제다. 모든 executable/PATH의 내용·신뢰성을 일반적으로 attestation하지 않는다.",
+    "새 source84003fe04의 제품 변경·실제 Grep handler fixture는 별도 source/native 리뷰 범위이며 이 보고서가 승인하지 않는다.",
+    "microVM/SSH, 새 MASC binary/model 실행, production 설치나 원래 전체 Goal 완료를 입증하지 않는다.",
+    "초기 실패2건의 raw stderr와 원본 cleanup 주장은 그대로 보존했다. 이 reviewer는 Docker/API/provider/native/CI/process를 호출하거나 원본·제품을 변경하지 않았다."
+  ],
+  "publication": "Allowlisted identifiers, hashes, metadata and bounded findings only. No private paths, full raw output, credentials or container/daemon IDs are published."
+}

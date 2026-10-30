@@ -1,0 +1,82 @@
+{
+  "schema": "masc.skill-causality-evidence.v1",
+  "generated_at": "2026-08-27T01:59:38Z",
+  "source": {
+    "fix_merge_commit": "6feaeac9e2abcc9ca3c44c7fb21da272f040082b",
+    "current_origin_main": "82716332612ab5c49e0715a22f3f66ed9ba88a63",
+    "fix_is_origin_main_ancestor": true
+  },
+  "pull_request": {
+    "number": 31044,
+    "state": "MERGED",
+    "head_ref_oid": "243a73902806550ea3d7f6c00babffcb149a9753",
+    "merge_commit": "6feaeac9e2abcc9ca3c44c7fb21da272f040082b",
+    "merged_at": "2026-08-26T21:05:29Z",
+    "url": "https://github.com/jeong-sik/masc/pull/31044"
+  },
+  "live": {
+    "binary_commit": "82716332612ab5c49e0715a22f3f66ed9ba88a63",
+    "binary_commit_source": "embedded",
+    "started_at": "2026-08-27T01:54:13Z",
+    "startup": "ready",
+    "config": "ok",
+    "config_errors": 0,
+    "fleet": "ok",
+    "dashboard": "ok"
+  },
+  "operation": {
+    "operation_id": "codex-official-skill-causality-20260827-0617",
+    "state": "Succeeded",
+    "outcome_ref": "trace-1787654779375-00001#295",
+    "submitted_by": "masc-tui"
+  },
+  "causality": {
+    "snapshot_revision": "2bd7e7eab5f12bbdcd350304c13b3b579c8f991ea64f86ad096215e150747c22",
+    "runtime_id": "antigravity_subscription.gemini-3-6-flash-high",
+    "skill": {
+      "source_id": "project-masc",
+      "package_id": "turn-opening",
+      "name": "turn-opening",
+      "content_revision": "a44f8a4628a6eb0b71fa222b4cc1c3f3f620a6e48d230648a006b768cee4c756"
+    },
+    "turn_ref": "trace-1787654779375-00001#295",
+    "skill_tool_use_id": "call_agent_core_64f7566f92d86044b31d4823c67fa907_7d03_7",
+    "activation_agent_core_turn": 11,
+    "delivery_agent_core_turn": 11,
+    "action": {
+      "tool_use_id": "call_agent_core_64f7566f92d86044b31d4823c67fa907_7d03_9",
+      "tool_name": "keeper_time_now",
+      "agent_core_turn": 11
+    },
+    "summary": {
+      "instruction_invocations": 1,
+      "skill_bodies_served": 1,
+      "instruction_deliveries": 1,
+      "instruction_actions_observed": 1,
+      "invalid_transitions": 0
+    },
+    "transition_rejections": []
+  },
+  "durability": {
+    "ledger": {
+      "path": "/Users/dancer/me/.masc/traces/trace-1787654779375-00001/skill-activations.json",
+      "sha256": "4648a7fd4e191d2b272cbc2c68577e6d1a92b44e879eddab50e6673aae5fff37",
+      "bytes": 1977
+    },
+    "operation_store": {
+      "path": "/Users/dancer/me/.masc/keepers/analyst/chat-operations.sqlite3",
+      "state": "succeeded",
+      "outcome_ref": "trace-1787654779375-00001#295"
+    },
+    "supervisor_log": "/Users/dancer/me/.masc/logs/masc-supervisor-8935-codex.log"
+  },
+  "tests": {
+    "source_commit": "6feaeac9e2abcc9ca3c44c7fb21da272f040082b",
+    "targeted_total": 19,
+    "targeted_passed": 19,
+    "targeted_exit": 0,
+    "dune_check_exit": 0,
+    "stdout": "test-stdout.log"
+  }
+}
+

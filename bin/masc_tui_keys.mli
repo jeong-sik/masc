@@ -1,0 +1,376 @@
+(** The key bindings, declared once.
+
+    Dispatch mostly stays the ordered match in masc_tui.ml. Cross-surface
+    shortcuts whose spelling is shared with the displays classify here too.
+    Footer hints and the help overlay project from the same binding records,
+    so behaviour and the two displays cannot silently choose different keys.
+
+    Conventions the projections enforce: keys spell as typed (j/k, Enter,
+    Esc, Tab, Ctrl-B); hints read [key:label] joined by two spaces; groups
+    print in a fixed order so the same action sits in the same place on
+    every screen. *)
+
+type group =
+  | Navigate  (** moving the cursor or the viewport *)
+  | Act       (** doing something to the thing under the cursor *)
+  | Search    (** finding a row *)
+  | Meta      (** refresh, surface switching, quit *)
+
+(** Whether a binding answers while a surface's detail is open.
+
+    A surface that owns a detail draws one footer for two states, so it used
+    to advertise exactly one key the dispatcher refuses in the state on
+    screen: [Right / Enter] once a detail is already open, [[ / ]] while it
+    is not. The fact was in the table already, but only as prose inside
+    [help], which no footer can read. *)
+type detail_state =
+  | Either  (** answers in both states; the default *)
+  | List_only  (** only while no detail is open *)
+  | Detail_only  (** only while a detail is open *)
+
+type binding = {
+  key : string;
+  label : string;      (** the footer's short word *)
+  label_ko : string option; (** Korean footer label when supplied *)
+  help : string option;  (** the overlay's longer sentence; [label] if absent *)
+  group : group;
+  detail : detail_state;  (** which of a detail-owning surface's two states *)
+}
+
+val expand_turn_key : string
+(** Ctrl-S: fold the turn dashboard to its progress line, or unfold it. *)
+
+val expand_turn_label : string
+(** How that key is printed on the folded line. Beside the byte so the name
+    and the binding cannot drift apart. *)
+
+val voice_speak_key : string
+val voice_listen_key : string
+(** Ctrl-Y and Ctrl-A as the table spells them, for the rows that name them
+    beside a draft or a capture. *)
+
+
+val mouse_toggle_key : string
+val mouse_toggle_label : string
+(** F2: give mouse selection to the terminal or reclaim it for MASC. Kept
+    separate from chat's Ctrl-T queue action. *)
+
+val roster_toggle_key : string
+(** Ctrl-B, as the roster pane's title names it. *)
+
+val chat_schedules_key : string
+val chat_schedules_label : string
+(** F9 folds/expands the current chat Keeper's upcoming Jobs. *)
+
+val keeper_calls_key : string
+(** [t] on a keeper: the Keeper Calls view, where a call's served input and
+    output are drawn whole. *)
+
+val context_inspector_key : string
+val context_inspector_label : string
+(** Ctrl-X: the byte the chat matches and the name the context header prints
+    beside the figure it explains. The table lists no footer binding for it;
+    its home is that row. *)
+
+val global : binding list
+(** Shared bindings shown once in Help. Text input and modal panels can own a
+    printable key before its cross-surface fallback runs; each such binding's
+    help text states that boundary. *)
+
+val keepers_jump : binding
+(** The shared Keepers jump. Its [key] is the one {!opens_keepers} matches and
+    the one the Dashboard's first-use steps name. *)
+
+val opens_keepers : message_mode:bool -> string -> bool
+(** Whether [key] is the shared Keepers jump after earlier input owners have
+    declined it. Message mode never treats the printable {!keepers_jump} key
+    as this jump. *)
+
+val chat_quiet_leave : input_supported:bool -> turn_active:bool -> draft_empty:bool -> string -> bool
+(** [Q] leaves a transcript-only viewport, or an active turn with an empty
+    visible draft. Ctrl-Q leaves independently of the draft and turn state.
+    Neither key requests a turn interrupt. *)
+
+val cancels_two_press :
+  input_seen:bool -> key:string option -> second_press:string list -> bool
+(** Whether the input the loop just read cancels a standing two-press
+    confirmation whose second press is one of [second_press].
+
+    [input_seen] is whether the loop read anything at all: it also turns on
+    a timeout, and a turn that read nothing cancels nothing. [key] is what
+    it read, and it is [None] for a mouse report, a paste, and a graphics
+    reply -- deliberate input that is not the second press, so it cancels.
+
+    The dispatch loop restated this rule once per armed field, and the
+    connector unbind's restatement read the timeout turn as an unrelated
+    key: its arm lived for one loop iteration, and two [u] presses removed a
+    binding only when both bytes arrived in the same read. *)
+
+val for_surface : Masc_tui_types.surface -> binding list
+(** The surface's own bindings, in declaration order within each group.
+    Feeds both projections; a surface whose footer is not yet converted is
+    still read by the help overlay. *)
+
+val keeper_navigation_hints : string
+(** Keys while the Keeper navigator opened with Left holds focus. *)
+
+val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
+(** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
+    Meta order.
+
+    [detail_open] is how a surface that owns a detail says which of its two
+    states is on screen, so the footer drops the key the dispatcher refuses
+    there. A surface without a detail leaves it out and every binding stands.
+    Left out by a surface that does own one, every binding stands too -- the
+    behaviour from before this argument existed, and the one
+    {!has_detail_scoped_keys} exists to catch. *)
+
+val footer_hints_metrics : telemetry:bool -> string
+(** Usage footer, showing only the keys for the visible Usage or Telemetry
+    reading. *)
+
+type approvals_footer =
+  | Approval_browsing
+  | Approval_writing
+  | Approval_armed
+  | Approval_answering of { has_choices : bool; takes_text : bool }
+
+val footer_hints_approvals : approvals_footer -> string
+(** Project the Approvals queue and question reader's modal footers from the
+    same binding records as the Help sheet. *)
+
+val has_detail_scoped_keys : Masc_tui_types.surface -> bool
+(** Whether this surface's table scopes any binding to one of the two states,
+    and so owes [footer_hints] a [~detail_open] from both of its renderers.
+    Read by the test that keeps a new detail-owning surface from landing
+    without it. *)
+
+val footer_hints_config : lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.config_pane -> string
+(** Config bindings available on the active pane. The surface-wide help keeps
+    the union, with pane restrictions explained by each binding. *)
+
+val footer_hints_board_compose_writing : reply:bool -> string
+(** The Board draft while it takes letters: a literal "type to write" and the
+    keys that are not letters. [reply] drops the attach key a comment has no
+    wire for. *)
+
+val footer_hints_goal_drop_reason : string
+(** A Goal drop reason while it takes letters: a literal "type why" and the
+    keys that are not letters. *)
+
+val footer_hints_board_attach_input : string
+(** The Board attach path input while it takes letters: a literal "type the
+    file path" and its two keys. The path itself is drawn on the pane. *)
+
+val footer_hints_board_compose_armed : reply:bool -> string
+(** The Board draft's send menu after Esc. [reply] drops the hearth cycle a
+    comment has no use for. *)
+
+val footer_hints_approval_detail : string
+(** The keys an open approval answers to. The decision keys are one item
+    ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
+    the scroll before it gives up the answer. *)
+
+val footer_hints_voice_agent : lang:Masc_tui_types.ui_language -> ?saving:bool -> unit -> string
+(** The keeper-voice screen's own row: the keeper axis, the voice axis, the
+    write and the way out. Its keys are not the Config pane's, so the row is
+    the screen's rather than the pane's. *)
+
+val footer_hints_runtime_account_form : unit -> string
+(** The runtime.toml account form's row: the provider axis, the fields, the
+    save and the way out. The form takes every other key as typing, so the
+    pane's row would name keys that no longer do what it says. *)
+
+val footer_hints_memory_recall_form : unit -> string
+(** The runtime.toml recall form's row: the rows, the range, the pick, the
+    save and the way out. The form takes every key, so the pane's row would
+    name keys that no longer do what it says. *)
+
+val footer_hints_runtime_account_saved : unit -> string
+(** The account form's row after a save: the copy of the sign-in command
+    and the way out. *)
+
+val footer_hints_prompt_assets : lang:Masc_tui_types.ui_language -> string
+(** The prompts pane while it shows the read-only runtime assets: its keys
+    without the ones that edit the registry, and [o] named for the way back. *)
+
+val work_tasks_bindings : binding list
+(** Work's task list while it owns j/k. *)
+
+val footer_hints_work_tasks : string
+(** {!work_tasks_bindings} as a footer. *)
+
+type code_pane =
+  | Code_tree  (** the file list has focus *)
+  | Code_file  (** a file is open and nothing covers it *)
+  | Code_diff
+  | Code_notes  (** wrapped memo document is drawn over the file *)
+  | Code_history  (** complete history document is drawn over the file *)
+
+val footer_hints_code_hover : string
+(** Keys for the full hover reading over the current Code file. *)
+
+val footer_hints_code : pane:code_pane -> string
+(** The Code footer, narrowed to what [pane] answers.
+
+    Separate from {!footer_hints} because this surface has three modes and a
+    key live in one is dead in another. It was a literal in the renderer
+    naming [d], [H], [m] and [w], which is why the three language-server
+    questions never appeared on the screen they work on, and why blame and
+    the row search did not either when they arrived. *)
+
+val footer_hints_runtime : mode:Masc_tui_types.runtime_mode -> string
+(** The Runtime footer: {!for_surface} [Runtime] with [p] labelled for where it
+    goes from [mode], and [e] only on the keeper-lane reading. *)
+
+val footer_hints_resources : detail_focus:bool -> string
+(** The Resources footer, with [j/k] relabelled for the focused pane. All
+    other keys still project from {!for_surface}. *)
+
+val footer_hints_board_read :
+  focus_posts:bool ->
+  focus_comments:bool ->
+  full_history:bool ->
+  layout:Masc_tui_types.board_read_layout ->
+  has_attachments:bool ->
+  has_successor:bool ->
+  string
+(** The Board read footer. [focus_posts] is whether j/k moves the post list
+    beside the open post; [focus_comments] chooses the thread instead of the
+    post within the detail pane. [layout] is the one the
+    frame drew ({!Masc_tui_types.board_read_layout}): the split is when h/l
+    and Ctrl-W have a pane to reach, and [z] crosses between the split and the
+    wide detail, its label naming where it goes -- "wide" from a split one,
+    "list" from a wide one. On one pane there is nowhere to go and the key is
+    not drawn. The vote, reply and copy keys are the Board surface list's own
+    bindings. *)
+
+val footer_hints_board_pending : string
+(** Board read controls while the post is loading, missing, or failed.
+    Projects the live [r], [Left / Esc], and [Tab] bindings. *)
+
+val footer_hints_fusion_detail : string
+(** The Fusion detail footer. Separate from {!footer_hints} because the
+    surface is a drill-down the static per-surface table does not name. The
+    window the renderer drew travels beside these as
+    {!Masc_tui_footer.line}'s [?position], not on the end of this string: the
+    fitter gives up key items from the back, and a position is the one item
+    on the row that [?] cannot recover. *)
+
+val footer_hints_lanes_run_list : string
+(** The Lanes run-list footer: the drill-down under a standalone lane row. *)
+
+val footer_hints_lanes_run_detail : string
+val footer_hints_lanes_run_detail_for : preflight:bool -> string
+(** The Lanes run-detail footer. The window the stacked Input/Output list drew
+    travels the way the Fusion detail footer's does; the split panes name
+    theirs in their own titles and pass none. *)
+
+(** The Lanes lane-notice footer. The pane is static, so it keeps only the
+    way back plus the shared tail. *)
+
+val footer_hints_git_changes : string
+(** The shared Git changes list under Repositories, Code, and Chat. *)
+
+val footer_hints_git_diff : string
+(** The Git diff view for a changed file in repository changes. *)
+
+val footer_hints_memory_facts : cols:int -> string
+(** The Memory fact browser opened by Enter on a health row: row movement,
+    the category cycle, search, and the way back to the table. Omits
+    [d:Category pane] on narrow frames where the Category rail does not fit. *)
+
+val bindings_memory_facts : binding list
+(** The fact browser's own keys. Separate from {!for_surface} because they are
+    conditional on the browser being open: the health row's [Enter], [s] and
+    [Esc] mean other things under these names, so [?] files them under Memory
+    with the screen named. *)
+
+val bindings_memory_fact_detail : binding list
+(** The reading the browser's [Enter] opens. One fact scrolls under the
+    cursor instead of the cursor moving rows, so it owns page and edge keys
+    the browser row has none of; [?] files them under Memory with the screen
+    named. *)
+
+val memory_fact_detail_hints : string
+(** The keys the reading's footer row leads with, [key:label] joined by two
+    spaces. Projects {!bindings_memory_fact_detail}, so the footer and the
+    help sheet cannot name different keys. The renderer leads the row with the
+    window marker, which is not a key. *)
+
+val bindings_acting_evidence : binding list
+(** The Activity event-evidence reading opened by [Enter] on an event row.
+    Separate from {!for_surface} [Acting] because it scrolls a pinned event
+    snapshot instead of filtering or stepping the live feed. *)
+
+val acting_evidence_hints : string
+(** The Activity event-evidence footer hints, projected from
+    {!bindings_acting_evidence} so the footer and [?] agree. *)
+
+val keeper_detail_tab_bindings :
+  Masc_tui_types.keeper_detail_tab -> binding list
+(** A detail tab's own keys. Separate from {!for_surface} because they are
+    conditional on the tab, not the surface: listing them per surface would
+    advertise them on the tabs where they do nothing. *)
+
+val key_atoms : string -> string list
+(** The single keys a binding's [key] names: ["d/m/s"] is [d], [m] and [s],
+    ["b / e / u u"] is [b], [e] and [u], ["arrows+enter"] is [arrows] and
+    [enter]. Sorted, without repeats. *)
+
+val keeper_detail_tab_taken_keys : Masc_tui_types.keeper_detail_tab -> string list
+(** The single keys the tab's own bindings answer ({!key_atoms}); a Keeper
+    control on one of them does something else on that tab. *)
+
+val keeper_detail_tab_hint : Masc_tui_types.keeper_detail_tab -> string
+(** The keys the Keeper detail footer leads with, [key:label] joined by two
+    spaces, led by the tab switch. Projects {!keeper_detail_tab_bindings} so
+    the footer and the help sheet cannot name different keys. *)
+
+val sheet_bindings : Masc_tui_types.surface -> binding list
+(** {!for_surface} as the help sheet lists it: without the refresh / next /
+    quit tail the Global section already names. A surface that labels one of
+    those keys its own way keeps it. *)
+
+val here_marker : string
+(** Marker appended to the current surface section title in {!help_sections}. *)
+
+val help_surfaces : (string * Masc_tui_types.surface) list
+(** One sheet section per surface family, and the surface it answers for. Read
+    by the guard that checks a destination the palette offers by name is named
+    that way on the sheet. *)
+
+val help_sections_for_state :
+  cols:int -> Masc_tui_types.state -> (string * (string * string) list) list
+(** Put the active nested reader's own keys first, ahead of surface reference
+    sections. This is the help sheet's state-aware entry point. *)
+
+val footer_hints_patch_review : unit -> string
+val footer_hints_about : unit -> string
+val footer_hints_queue : Masc_tui_types.state -> Masc_tui_types.queue_panel -> string
+val footer_hints_context : cols:int -> Masc_tui_types.state -> string
+val footer_hints_runtime_detail : ?ko:bool -> ?routes:bool -> unit -> string
+
+val help_sections :
+  ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
+(** Sections for the help sheet. [current] puts that surface's own section
+    first and marks it, so the sheet opens on an answer rather than on a list
+    to search. Omitted, the order is the strip's, as it was before the sheet
+    knew where the reader was. *)
+(** The help overlay's sections: Global first, then one section per surface
+    that declares bindings, titled with the strip's spelling. *)
+
+type reference_section = {
+  section_title : string;
+  section_rows : (string * string) list;
+      (** key and help sentence, the same rows {!help_sections} lists *)
+  section_notes : string list;
+      (** Markdown paragraphs printed after the table, in order *)
+}
+
+val reference_sections : unit -> reference_section list
+(** docs/guides/TUI-KEYS.md, section by section: {!help_sections} in the
+    sheet's order, plus the paragraphs a section's surface keeps for the
+    document. The [?] sheet does not draw those paragraphs. *)
+
+val footer_hints_browser_lane : string

@@ -1,0 +1,51 @@
+{
+  "source_sha": "c6e54ff523772596ce70a9b158f89c74fedeab17",
+  "backlog": {
+    "tasks": [
+      {
+        "id": "task-001",
+        "title": "Update acceptance.json alpha to true",
+        "description": "workspace/acceptance.json 파일에서 'alpha' 값을 false에서 true로 변경합니다. 변경 후 파일 내용을 다시 읽어 검증을 제출합니다.",
+        "priority": 3,
+        "files": [],
+        "created_at": "2026-10-24T12:57:00Z",
+        "created_by": "goal-canary",
+        "contract": {
+          "strict": true,
+          "required_evidence": [
+            "masc:blob sha256=bcb758e7c496f1bf85bf17a72ddb853099ae2ea6d36a5afc5197ffc8ab949630"
+          ]
+        },
+        "handoff_context": {
+          "summary": "Successfully updated workspace/acceptance.json.",
+          "evidence_refs": [
+            "artifact:masc:blob sha256=bcb758e7c496f1bf85bf17a72ddb853099ae2ea6d36a5afc5197ffc8ab949630"
+          ],
+          "updated_at": "2026-10-24T12:57:04Z",
+          "updated_by": "goal-canary"
+        },
+        "status": "awaiting_verification",
+        "assignee": "goal-canary",
+        "started_at": "2026-10-24T12:57:01Z",
+        "submitted_at": "2026-10-24T12:57:04Z",
+        "verification_id": "vrf-8c7ad99273768882fc954ac8be9aab22"
+      }
+    ],
+    "pending_completion_rejections": [],
+    "delivered_completion_rejections": [],
+    "pending_completion_approvals": [],
+    "task_deletion_receipts": [],
+    "task_creation_receipts": [],
+    "last_updated": "2026-10-24T12:57:04Z",
+    "version": 5
+  },
+  "backlog_sha256": "b4a419f9d54b83f51ef934ef0421a20e00409827bfdf987b90f2f9949395588c",
+  "goal_links_primary_exists": false,
+  "artifact": {
+    "alpha": true,
+    "beta": true,
+    "gamma": true
+  },
+  "artifact_sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+  "reason": "G2 association failed; keep this unsuccessful run before ending the controlled experiment"
+}

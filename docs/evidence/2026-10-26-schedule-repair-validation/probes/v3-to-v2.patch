@@ -1,0 +1,64 @@
+--- busy-notes-v3.py
++++ busy-notes-v2.py
+@@ -225 +225 @@
+-meta.update(second_schedule_id=second_id,second_marker=second_marker,second_after_first_effect=args.second_after_first_effect,oracle_version=3)
++meta.update(second_schedule_id=second_id,second_marker=second_marker,second_after_first_effect=args.second_after_first_effect,oracle_version=2)
+@@ -242,45 +241,0 @@
+-
+-def durable_overlap_evidence(first_queue, second_queue):
+-    # A fast yield can fall between HTTP observations. Read the canonical
+-    # event history for these exact source identities; do not infer a yield
+-    # from elapsed time or the existence of two notes.
+-    ids = [first_queue.get('post_id'), second_queue.get('post_id')]
+-    if not all(ids):
+-        return {'verified': False, 'reason': 'exact queue source identities unavailable'}
+-    rows = []
+-    ledger_root = base / '.masc/keepers' / keeper / 'reaction-ledger'
+-    for path in sorted(ledger_root.rglob('*.jsonl')):
+-        for line in path.read_text().splitlines():
+-            row = json.loads(line)
+-            if row.get('stimulus_id') in ids:
+-                rows.append(row)
+-    def events(source_id, kind, disposition=None):
+-        return [r['recorded_at_unix'] for r in rows
+-            if r.get('stimulus_id') == source_id
+-            and r.get('reaction', {}).get('kind') == kind
+-            and (disposition is None or r['reaction'].get('disposition') == disposition)]
+-    first_starts = events(ids[0], 'turn_started')
+-    checkpoints = events(ids[0], 'turn_finished', 'checkpointed')
+-    second_arrivals = [r['recorded_at_unix'] for r in rows
+-        if r.get('stimulus_id') == ids[1] and r.get('record_kind') == 'stimulus']
+-    second_starts = events(ids[1], 'turn_started')
+-    second_acks = events(ids[1], 'event_queue_ack')
+-    first_acks = events(ids[0], 'event_queue_ack')
+-    witnesses = []
+-    for start in first_starts:
+-        for arrival in second_arrivals:
+-            for checkpoint in checkpoints:
+-                for successor in second_starts:
+-                    if start < arrival < checkpoint < successor:
+-                        witnesses.append({'first_started': start, 'second_arrived': arrival,
+-                            'first_checkpointed': checkpoint, 'second_started': successor})
+-    selected = [{'event_id': r.get('event_id'), 'stimulus_id': r['stimulus_id'],
+-        'recorded_at_unix': r['recorded_at_unix'], 'record_kind': r.get('record_kind'),
+-        'reaction_kind': r.get('reaction', {}).get('kind'),
+-        'disposition': r.get('reaction', {}).get('disposition')} for r in rows]
+-    return {'verified': bool(witnesses), 'exact_source_ids': ids,
+-        'witnesses': witnesses, 'selected_events': selected,
+-        'no_first_ack_before_successor': bool(second_acks) and bool(first_acks)
+-            and min(first_acks) > max(second_acks),
+-        'first_readmitted_after_successor_ack': bool(second_acks)
+-            and any(t > max(second_acks) for t in first_starts)}
+@@ -382,12 +336,0 @@
+-            if not observed_overlap:
+-                durable = durable_overlap_evidence(exact_queue(a, first), exact_queue(b, second))
+-                (output/'durable-overlap.json').write_text(json.dumps(durable, indent=2)+'\n')
+-                observed_overlap = durable['verified']
+-                if not observed_overlap:
+-                    (output/'fixture-precondition-failed.json').write_text(json.dumps({
+-                        'reason': 'neither sampled overlap nor exact durable overlap established',
+-                        'durable': durable}, indent=2)+'\n')
+-                    process['stop_reason'] = 'terminal and idle; busy fixture precondition not established'
+-                    server.terminate();server.wait(timeout=15)
+-                    process['returncode']=server.returncode;process['stopped_at_unix']=time.time()
+-                    (output/'process-ended.json').write_text(json.dumps(process,indent=2)+'\n')

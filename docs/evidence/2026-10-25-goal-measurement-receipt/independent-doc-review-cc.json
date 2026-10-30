@@ -1,0 +1,158 @@
+{
+  "schema": "masc.independent.docs-evidence-review.v1",
+  "reviewer": "repair_evidence_integrity",
+  "recorded_at": "2026-10-24T16:46:22.790823+00:00",
+  "verdict": "PASS",
+  "scope": "Only frozen ec664e53→cc5104805 docs/evidence/changelog delta; source/API and test repair verdicts carried forward through exact original review artifacts. No new source runtime test, model call, server call, CI query, GitHub approval, publication or repository mutation.",
+  "base": "ec664e53b7eda6a7dae4eb09daa04b56ad98997d",
+  "head": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "raw_diff_sha256": "4901444c946229536fd87d6b914cac19124f747626565d2423ac5df449d5e1a4",
+  "changed_files": 67,
+  "product_tree_equality": {
+    "lib": {
+      "base": "cb4a2cad87e55d84ce16a50a7458d5801e65282d",
+      "head": "cb4a2cad87e55d84ce16a50a7458d5801e65282d",
+      "equal": true
+    },
+    "config": {
+      "base": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "head": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "equal": true
+    },
+    "packages": {
+      "base": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "head": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "equal": true
+    },
+    "bin": {
+      "base": "290bb3af19d632193fefbdd17f59706e9f2df5a8",
+      "head": "290bb3af19d632193fefbdd17f59706e9f2df5a8",
+      "equal": true
+    },
+    "dashboard": {
+      "base": "b17104035461506f7b6388e625bb2d48836598b1",
+      "head": "b17104035461506f7b6388e625bb2d48836598b1",
+      "equal": true
+    },
+    "test": {
+      "base": "b946994be111ce7be8a814ad73a518fcfb8adf3e",
+      "head": "b946994be111ce7be8a814ad73a518fcfb8adf3e",
+      "equal": true
+    },
+    "scripts": {
+      "base": "6af9dcbedb9e3471684696f0199bfb46ca6692b5",
+      "head": "6af9dcbedb9e3471684696f0199bfb46ca6692b5",
+      "equal": true
+    }
+  },
+  "evidence_summary": {
+    "all_changes_docs_or_changelog": true,
+    "json_files_strictly_parsed": 60,
+    "json_duplicate_keys": [],
+    "manifest_files": 3,
+    "manifest_entries_with_matching_bytes_and_hash": 45,
+    "sensitive_key_or_pattern_candidates": 0,
+    "independent_original_json_copies_exact": true,
+    "http_original_copies_exact": true,
+    "frozen_original_results_hash_public_content_and_tools_match": true,
+    "source_receipt_sha256": "d8d17bce7874e9b1449e51a4851b4e667c62397d43643f9045877702532483b8"
+  },
+  "claim_assessments": [
+    {
+      "claim": "Actual54 strict G3",
+      "verdict": "Correct FAIL",
+      "evidence": "Exact original independent runtime audit preserved; actual remaining work and3/3 are positive, but final public verification/completion inference is false, GoalExecuting and Task2/3awaiting. Owner intermediate measurement order miss and no causal exact-ID proof are disclosed."
+    },
+    {
+      "claim": "Frozen3arms",
+      "verdict": "Correct diagnostic-only",
+      "evidence": "Raw streamed response public content and proposed tools match published files; raw thinking excluded. Same model/temp/seed. Baseline adds seed only; phase changes last Tool content; Full additionally changes exact source System Goal paragraph and canonical tool description. Both negative arms and incomplete human-step result retained. No tools executed and no G3 PASS claimed."
+    },
+    {
+      "claim": "Source19 and independent21",
+      "verdict": "Separate scopes preserved",
+      "evidence": "Ordinary source-check19 and exact original independent21 with frozen identity controls use named effect ports, not Goal locks/filesystem/HTTP/model execution."
+    },
+    {
+      "claim": "Native3014 versus test-onlyec",
+      "verdict": "Separate heads/results preserved",
+      "evidence": "3014 Goal50+TOML1 PASS and HTTP5PASS1FAIL remain failure record; ec HTTP6PASS recorded separately with equal product inputs. Read captured reports and original matching failure log; no CI refetch in this task."
+    },
+    {
+      "claim": "macOS binary source binding",
+      "verdict": "Corroborated file identity",
+      "evidence": "Independently hashed 3014 server bd9042e019d31c377e8c9ca72409bc5b152052dc79dd70621f027cc008c475b6 and54 server6a2266ee62065039dfd4f37651b21122f8a239041bd762532392f9f46b5f0b57; embedded source bytes present. Workflow head differs from explicit source, compatible support reuse disclosed. No binary execution/install/release claim by reviewer."
+    },
+    {
+      "claim": "HTTP/MCP actual receipt fixture",
+      "verdict": "Correct controlled transport scope",
+      "evidence": "10public records byte-equal frozen originals; actualExecuting reported-only/unchanged receipts, shared field shape, stale409, final latest measurement MCP. Current after primary/mirror hashes match captured summary. No Keeper/model/humanGoal proof; before-byte equality is original driver assertion, not reconstructed preimage."
+    },
+    {
+      "claim": "Current acceptance10/11",
+      "verdict": "Correct completed54 historical scope in frozencc, with P3 metadata below",
+      "evidence": "G3 remains fixed-contractFAIL and no Goal completion. Current3014cohort outcomes occurred after frozen documentation and are excluded from this verdict; they require separate latest-cohort recording, not an inferred G3PASS."
+    }
+  ],
+  "p0_p1_p2_findings": [],
+  "nonblocking_findings": [
+    {
+      "priority": "P3",
+      "id": "snapshot-asof-and-limit-staleness",
+      "file": "docs/evidence/2026-10-24-goal-outcome-campaign/acceptance-snapshot.json",
+      "details": {
+        "top_measured_at": "2026-10-24T15:35:25.822641+00:00",
+        "latest_g3_measured_at": "2026-10-24T15:40:10.576374+00:00",
+        "stale_limit": "G2 measured pass at3bad single-Goal Gemma canary. G3 measured failure: delivered approval ignored by model; no Goal completion, population success, model independence or microVM end-to-end grading claim."
+      },
+      "impact": "Metadata and limits[2] lag the correctly updated G2/G3 cases; snapshot can appear to predate included measurement and describe only the olderGemma failure. README/cases/strictFAIL/10of11 remain correct.",
+      "minimal_fix": "Update timestamp to captured assessment cutoff and label oldercohort limit as historical or align it with latestcompleted54full-contractFAIL."
+    },
+    {
+      "priority": "P3",
+      "id": "frozen-identity-two-arm-scope",
+      "file": "docs/evidence/2026-10-25-goal-measurement-receipt/frozen-inference/identity.json",
+      "details": "identity.scope says same messages/options/tools with only last Tool receipt different; accurate only baseline↔phase_receipt. Full also changes Systemparagraph+tool21description, accurately documented in README and full-candidate-binding.",
+      "impact": "Standalone identity consumer could attribute Full improvement to receipt alone. No such causal conclusion is made by the main README.",
+      "minimal_fix": "Explicit applies_to baseline,phase_receipt or equivalent two-arm qualifier."
+    }
+  ],
+  "inherited_reviews": [
+    {
+      "file": "docs/evidence/2026-10-25-goal-lookup-runtime/independent-runtime-audit.json",
+      "sha256": "37938372e7fd0b194c060b22bebbec16d319f561c5c632ad7a8b335c4f317cb8"
+    },
+    {
+      "file": "docs/evidence/2026-10-25-goal-measurement-receipt/independent-empty-http-repair-review.json",
+      "sha256": "a6cde40bd4ee13459fd6df13455b6ec5c8b258d14bbf1a833a770ad58d033874"
+    },
+    {
+      "file": "docs/evidence/2026-10-25-goal-measurement-receipt/receipt-source-api-atomicity-3014.json",
+      "sha256": "7c2a16d770563658aeca1105ef0e303a2de6ab92e44981392334352ec50ddeb9"
+    },
+    {
+      "file": "docs/evidence/2026-10-25-goal-measurement-receipt/parent-integration-risk-8c-to-895.json",
+      "sha256": "839c35d5f7fc222d63b57556ad67dfef700a891b0381fa967f51f1fe5e436683"
+    },
+    {
+      "file": "docs/evidence/2026-10-25-goal-measurement-receipt/independent-root-source-check.json",
+      "sha256": "755e9758b03129dd22b1fb8abba6a5b41f0f7b5a03172c57f430656d0af7efcf"
+    }
+  ],
+  "current_review_artifacts": [
+    {
+      "file": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-cc-doc-review-cjizm95p/structural-check.json",
+      "sha256": "e1c140d201ed4a830a2f26aa409c46aa5dc4a2ec325025cebb51ddbd37630e1b"
+    },
+    {
+      "file": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-cc-doc-review-cjizm95p/evidence-checks.json",
+      "sha256": "db6d7b85b7c7caa0876884708b71153af0357d3fa0f6c8f4503e6e3dc12b8168"
+    }
+  ],
+  "limitations": [
+    "Sensitive-data review checks known credential patterns, JSON keys and exact public-only stream extraction; it is not a universal data-loss classifier. No raw thinking is included in this artifact.",
+    "No CI polling/refetch or fresh native/source/model/server execution; captured native/build reports and inherited source reviews remain separately scoped.",
+    "No review of post-cc current3014Keeper results, Goal acceptance mutation, human confirmation, all-stack readiness or production deployment.",
+    "PASS is source/evidence consistency at the stated frozenhead, not product-wide safety, model reliability, Goal completion or GitHub approval."
+  ]
+}

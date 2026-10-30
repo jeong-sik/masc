@@ -1,0 +1,16 @@
+$ ocamlc -w +32+69 -warn-error +a -c masc_tui_runtime_config_edit.mli
+
+$ ocamlc -w +32+69 -warn-error +a -c masc_tui_runtime_config_edit.ml
+
+$ ocamlfind ocamlc -package alcotest -linkpkg masc_tui_runtime_config_edit.cmo test_tui_runtime_config_edit.ml -o test_edit
+
+$ ./test_edit --color=never
+Testing `runtime config draft recovery'.
+This run has ID `1BXDRZ1M'.
+
+  [OK]          operator flows          0   retry after refusal and concurren...
+  [OK]          operator flows          1   replace only after explicit choice.
+  [OK]          operator flows          2   foreign current file cannot repla...
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-config-edit-91pawcc7/_build/_tests/runtime config draft recovery'.
+Test Successful in 0.001s. 3 tests run.

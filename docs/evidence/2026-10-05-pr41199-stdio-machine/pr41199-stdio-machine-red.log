@@ -1,0 +1,59 @@
+F/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/case.py:668: ResourceWarning: unclosed file <_io.BufferedWriter name=5>
+  with outcome.testPartExecutor(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/case.py:668: ResourceWarning: unclosed file <_io.BufferedReader name=6>
+  with outcome.testPartExecutor(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+FFF
+======================================================================
+FAIL: test_dos_off (__main__.MachineStdioAdmission.test_dos_off)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41199-stdio-machine-20261005/test/test_stdio_machine_activity.py", line 156, in test_dos_off
+    run("dos", False)
+    ~~~^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41199-stdio-machine-20261005/test/test_stdio_machine_activity.py", line 131, in run
+    assert expected in text, answer
+           ^^^^^^^^^^^^^^^^
+AssertionError: {'jsonrpc': '2.0', 'id': 2, 'result': {'_meta': {'io.modelcontextprotocol/serverInfo': {'name': 'masc', 'title': 'MASC MCP Server', 'version': '0.49.0'}, 'com.github.yousleepwhen.masc/call': {'envelope': {'kind': 'tool_call', 'summary': 'Machine activity configuration is unavailable', 'status': 'error', 'tool': 'masc_dos_step'}, 'trace_id': '2', 'agent_id': 'agent-9e3938fb', 'tool': 'masc_dos_step', 'duration_ms': 2, 'attempts': 1, 'timestamp': '2026-10-04T21:03:23Z', 'failure_class': 'workflow_rejection'}}, 'resultType': 'complete', 'content': [{'type': 'text', 'text': 'Machine activity configuration is unavailable'}], 'isError': True}}
+
+======================================================================
+FAIL: test_dos_on (__main__.MachineStdioAdmission.test_dos_on)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41199-stdio-machine-20261005/test/test_stdio_machine_activity.py", line 159, in test_dos_on
+    run("dos", True)
+    ~~~^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41199-stdio-machine-20261005/test/test_stdio_machine_activity.py", line 131, in run
+    assert expected in text, answer
+           ^^^^^^^^^^^^^^^^
+AssertionError: {'jsonrpc': '2.0', 'id': 2, 'result': {'_meta': {'io.modelcontextprotocol/serverInfo': {'name': 'masc', 'title': 'MASC MCP Server', 'version': '0.49.0'}, 'com.github.yousleepwhen.masc/call': {'envelope': {'kind': 'tool_call', 'summary': 'Machine activity configuration is unavailable', 'status': 'error', 'tool': 'masc_dos_step'}, 'trace_id': '2', 'agent_id': 'agent-98581448', 'tool': 'masc_dos_step', 'duration_ms': 1, 'attempts': 1, 'timestamp': '2026-10-04T21:03:23Z', 'failure_class': 'workflow_rejection'}}, 'resultType': 'complete', 'content': [{'type': 'text', 'text': 'Machine activity configuration is unavailable'}], 'isError': True}}
+
+======================================================================
+FAIL: test_msx_off (__main__.MachineStdioAdmission.test_msx_off)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41199-stdio-machine-20261005/test/test_stdio_machine_activity.py", line 150, in test_msx_off
+    run("msx", False)
+    ~~~^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41199-stdio-machine-20261005/test/test_stdio_machine_activity.py", line 131, in run
+    assert expected in text, answer
+           ^^^^^^^^^^^^^^^^
+AssertionError: {'jsonrpc': '2.0', 'id': 2, 'result': {'_meta': {'io.modelcontextprotocol/serverInfo': {'name': 'masc', 'title': 'MASC MCP Server', 'version': '0.49.0'}, 'com.github.yousleepwhen.masc/call': {'envelope': {'kind': 'tool_call', 'summary': 'Machine activity configuration is unavailable', 'status': 'error', 'tool': 'masc_msx_step'}, 'trace_id': '2', 'agent_id': 'agent-4ce360bf', 'tool': 'masc_msx_step', 'duration_ms': 1, 'attempts': 1, 'timestamp': '2026-10-04T21:03:24Z', 'failure_class': 'workflow_rejection'}}, 'resultType': 'complete', 'content': [{'type': 'text', 'text': 'Machine activity configuration is unavailable'}], 'isError': True}}
+
+======================================================================
+FAIL: test_msx_on (__main__.MachineStdioAdmission.test_msx_on)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41199-stdio-machine-20261005/test/test_stdio_machine_activity.py", line 153, in test_msx_on
+    run("msx", True)
+    ~~~^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41199-stdio-machine-20261005/test/test_stdio_machine_activity.py", line 131, in run
+    assert expected in text, answer
+           ^^^^^^^^^^^^^^^^
+AssertionError: {'jsonrpc': '2.0', 'id': 2, 'result': {'_meta': {'io.modelcontextprotocol/serverInfo': {'name': 'masc', 'title': 'MASC MCP Server', 'version': '0.49.0'}, 'com.github.yousleepwhen.masc/call': {'envelope': {'kind': 'tool_call', 'summary': 'Machine activity configuration is unavailable', 'status': 'error', 'tool': 'masc_msx_step'}, 'trace_id': '2', 'agent_id': 'agent-2762c35e', 'tool': 'masc_msx_step', 'duration_ms': 0, 'attempts': 1, 'timestamp': '2026-10-04T21:03:24Z', 'failure_class': 'workflow_rejection'}}, 'resultType': 'complete', 'content': [{'type': 'text', 'text': 'Machine activity configuration is unavailable'}], 'isError': True}}
+
+----------------------------------------------------------------------
+Ran 4 tests in 3.289s
+
+FAILED (failures=4)

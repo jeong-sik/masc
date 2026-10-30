@@ -1,0 +1,34 @@
+{
+  "scope": "Isolated backend process, not production installation or latest official-client repair",
+  "identity": {
+    "source_sha": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+    "binary": "/tmp/masc-goal-runtime-2be9d216/masc",
+    "base_path": "/private/tmp/masc-goal-canary-2be9d216-qwen",
+    "pid": 84191,
+    "port": 65337,
+    "provider_proxy_port": 65268,
+    "model": "qwen3:8b",
+    "production_deployment": false
+  },
+  "health_sha256": "f520cdff7ee1d9281a28add7fa267ac2f60326ed1b1881e26e4cc1b8f5f88025",
+  "health_source": {
+    "version": "0.64.0",
+    "build": {
+      "release_version": "0.64.0",
+      "binary_version": "0.64.0",
+      "commit": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+      "commit_source": "embedded",
+      "binary_commit": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "e7824df94868e89a340f9cb56339f5c9b43f2df83ad2e4365cfef8361acccbee",
+      "binary_commit_unix_ts": 1792861421.0,
+      "binary_commit_age_seconds": 2559,
+      "executable_path": "/private/tmp/masc-goal-runtime-2be9d216/masc",
+      "executable_dir": "/private/tmp/masc-goal-runtime-2be9d216",
+      "runtime_instance_id": "01a16ee9-62df-7000-8a0d-2fda83eeb6c2",
+      "started_at": "2026-10-24T17:15:51Z",
+      "uptime_seconds": 1828
+    }
+  }
+}

@@ -1,0 +1,395 @@
+/* posix_spawn(2) for masc's process manager.
+
+   eio_posix spawns children with fork(): the parent runs every atfork
+   handler, and on macOS libmalloc's handler locks each malloc zone
+   (_malloc_fork_parent -> _xzm_foreach_lock). In a process with a 1-2 GB
+   heap that lock held the main domain for about 141 ms per spawn
+   (2026-09-05 stack samples, RFC main-domain-scheduler-latency §8.8).
+   posix_spawn is a system call on macOS and a clone-based path in glibc;
+   neither runs atfork handlers.
+
+   The stub takes everything as plain C data before releasing the runtime
+   lock, so no OCaml value is touched while other domains run. */
+
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <spawn.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#endif
+
+#include <caml/alloc.h>
+#include <caml/fail.h>
+#include <caml/memory.h>
+#include <caml/mlvalues.h>
+#include <caml/signals.h>
+#include <caml/unixsupport.h>
+
+/* posix_spawn_file_actions_addclosefrom_np landed in glibc 2.34. It is the
+   only descriptor-closing mechanism on the platforms that lack
+   POSIX_SPAWN_CLOEXEC_DEFAULT and that this stub is built for: CI and the
+   deployed server are glibc Linux, development is macOS. The musl target in
+   this repo is the exec shim, which links exec_ssh_protocol and unix and
+   never compiles this file. */
+#if defined(__GLIBC__) \
+  && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+#define MASC_HAVE_ADDCLOSEFROM 1
+#else
+#define MASC_HAVE_ADDCLOSEFROM 0
+#endif
+
+extern char **environ;
+
+/* posix_spawn_file_actions_addchdir_np is the portable spelling: glibc >= 2.29
+   and macOS >= 10.15 both have it; macOS 14 marks it deprecated in favour of
+   the POSIX name, which glibc lacks. */
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+static char **strings_of_array(value v_array)
+{
+  mlsize_t n = Wosize_val(v_array);
+  char **out = caml_stat_alloc((n + 1) * sizeof(char *));
+  for (mlsize_t i = 0; i < n; i++) {
+    out[i] = caml_stat_strdup(String_val(Field(v_array, i)));
+  }
+  out[n] = NULL;
+  return out;
+}
+
+static void free_strings(char **strings)
+{
+  for (char **p = strings; *p != NULL; p++) caml_stat_free(*p);
+  caml_stat_free(strings);
+}
+
+/* masc_posix_spawn executable argv env (cwd_opt, own_group) fds
+   fds: (child_fd, parent_fd) list. Equal fds are inherited in place;
+   others are dup2'd. Every other descriptor is closed in the child.
+
+   exec closes only what is marked close-on-exec, so neither fork+exec nor
+   posix_spawn closes a stray descriptor on its own -- measured 2026-09-07,
+   eio_posix's own fork-based manager hands its child a raw Unix.pipe () and
+   this one does not. What makes the difference is asked for explicitly, one
+   mechanism per platform:
+
+     macOS  POSIX_SPAWN_CLOEXEC_DEFAULT -- the kernel closes everything not
+            named by an addinherit_np.
+     glibc  posix_spawn_file_actions_addclosefrom_np (2.34+) plus an
+            explicit close of anything below it that is not a dup2 target.
+
+   The glibc line used to read "masc opens its descriptors close-on-exec",
+   which made the guarantee a whole-process invariant that nothing enforces
+   and any new Unix.pipe () silently breaks -- OCaml's ?cloexec defaults to
+   false, and lib/exec_shim and bin/main_eio each open pipes that way.
+
+   Measured 2026-09-07 on glibc 2.39: with a second child spawned while an
+   unrelated pipe was open, that child inherited the pipe's write end, and
+   the pipe's reader never saw EOF after its own child exited. With
+   addclosefrom_np the EOF arrived. That is the shape the nightly lane hangs
+   in -- four suites past the 90-minute deadline, each holding a defunct
+   child (run 34049510985, issue #33782).
+
+   macOS never showed it because its mechanism is enforced by the kernel,
+   which is also why development does not see what CI does. This is not a
+   parity fix: it makes the glibc branch as strict as the macOS one, and
+   both stricter than the eio manager they otherwise match.
+
+   Returns the child's pid or raises Unix.Unix_error with the errno
+   posix_spawn reported. */
+static value spawn_process(value v_executable, value v_argv, value v_env,
+                           value v_options, value v_fds, int search_path)
+{
+  CAMLparam5(v_executable, v_argv, v_env, v_options, v_fds);
+  value v_cwd = Field(v_options, 0);
+  int own_group = Bool_val(Field(v_options, 1));
+  char *executable = caml_stat_strdup(String_val(v_executable));
+  char **argv = strings_of_array(v_argv);
+  char **env = strings_of_array(v_env);
+  /* Native Eio spawning supplies a path; synchronous PATH spawning supplies
+     an already-open directory. Opening separately keeps cwd failures distinct
+     from exec failures and fixes the directory identity before child setup. */
+  char *cwd = !search_path && Is_some(v_cwd)
+    ? caml_stat_strdup(String_val(Some_val(v_cwd))) : NULL;
+  int cwd_fd = search_path && Is_some(v_cwd) ? Int_val(Some_val(v_cwd)) : -1;
+
+  int fd_count = 0;
+  for (value l = v_fds; l != Val_emptylist; l = Field(l, 1)) fd_count++;
+  int *child_fds = caml_stat_alloc((fd_count + 1) * sizeof(int));
+  int *parent_fds = caml_stat_alloc((fd_count + 1) * sizeof(int));
+  int i = 0;
+  for (value l = v_fds; l != Val_emptylist; l = Field(l, 1), i++) {
+    value pair = Field(l, 0);
+    child_fds[i] = Int_val(Field(pair, 0));
+    parent_fds[i] = Int_val(Field(pair, 1));
+  }
+
+  posix_spawn_file_actions_t actions;
+  posix_spawnattr_t attr;
+  int rc = posix_spawn_file_actions_init(&actions);
+  if (rc == 0) rc = posix_spawnattr_init(&attr);
+  if (rc == 0) {
+    short flags = POSIX_SPAWN_SETSIGMASK;
+#ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
+    flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+#endif
+    sigset_t empty;
+    sigemptyset(&empty);
+    rc = posix_spawnattr_setsigmask(&attr, &empty);
+    if (rc == 0 && own_group) {
+      flags |= POSIX_SPAWN_SETPGROUP;
+      rc = posix_spawnattr_setpgroup(&attr, 0);
+    }
+    if (rc == 0) rc = posix_spawnattr_setflags(&attr, flags);
+  }
+  if (rc == 0 && cwd != NULL) rc = posix_spawn_file_actions_addchdir_np(&actions, cwd);
+  if (rc == 0 && cwd_fd >= 0) rc = posix_spawn_file_actions_addfchdir_np(&actions, cwd_fd);
+  for (int j = 0; rc == 0 && j < fd_count; j++) {
+    if (child_fds[j] == STDIN_FILENO && isatty(parent_fds[j])) {
+      /* No child of this stub reads a terminal it is handed as stdin: it
+         reads /dev/null. A pipe or file passed as stdin is not a terminal
+         and is kept.
+         - A child in its own process group is a background job of that
+           terminal, and its first read stops it with SIGTTIN. `masc setup`
+           run in a terminal lost every Claude Code verification this way;
+           the group owner SIGKILLed the stopped leader before it wrote its
+           report (2026-09-15).
+         - A child left in the parent's group takes input typed for the
+           terminal's foreground job when the parent is that job. When the
+           parent is a background job, the read can stop the parent's whole
+           group. Explicit /dev/tty access needs the separate server-session
+           design in RFC-0470.
+         A child that must read the terminal is started with
+         Unix.create_process in the foreground group, as the installer's
+         prerequisite runner does. */
+      rc = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    } else if (child_fds[j] == parent_fds[j]) {
+#ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
+      rc = posix_spawn_file_actions_addinherit_np(&actions, child_fds[j]);
+#else
+      rc = posix_spawn_file_actions_adddup2(&actions, parent_fds[j], child_fds[j]);
+#endif
+    } else {
+      rc = posix_spawn_file_actions_adddup2(&actions, parent_fds[j], child_fds[j]);
+    }
+  }
+
+#ifndef POSIX_SPAWN_CLOEXEC_DEFAULT
+#if MASC_HAVE_ADDCLOSEFROM
+  /* After every dup2, never before: a parent descriptor can be the source of
+     a dup2 that has not run yet, and closing it early would break it. Once
+     they have run the child holds its own copies, so closing the originals
+     is both safe and the point.
+
+     addclosefrom_np closes from lowfd up, so lowfd has to clear the highest
+     target. Anything below that which is not itself a target is closed one
+     by one; glibc does not fail the spawn when such a descriptor was not
+     open (measured 2026-09-07), so this needs no test for that. Today every
+     caller passes 0/1/2 and the loop finds nothing, but a caller that
+     passes a sparse set gets the same guarantee instead of a quiet gap. */
+  if (rc == 0) {
+    int lowfd = 0;
+    for (int j = 0; j < fd_count; j++) {
+      if (child_fds[j] >= lowfd) lowfd = child_fds[j] + 1;
+    }
+    for (int fd = 0; rc == 0 && fd < lowfd; fd++) {
+      int is_target = 0;
+      for (int j = 0; j < fd_count; j++) {
+        if (child_fds[j] == fd) { is_target = 1; break; }
+      }
+      if (!is_target) rc = posix_spawn_file_actions_addclose(&actions, fd);
+    }
+    if (rc == 0) rc = posix_spawn_file_actions_addclosefrom_np(&actions, lowfd);
+  }
+#else
+#warning "no posix_spawn descriptor-closing mechanism: children inherit every non-CLOEXEC descriptor"
+#endif
+#endif
+
+  pid_t pid = 0;
+  if (rc == 0) {
+    caml_enter_blocking_section();
+    rc = search_path
+      ? posix_spawnp(&pid, executable, &actions, &attr, argv, env)
+      : posix_spawn(&pid, executable, &actions, &attr, argv, env);
+    caml_leave_blocking_section();
+  }
+  posix_spawn_file_actions_destroy(&actions);
+  posix_spawnattr_destroy(&attr);
+  free_strings(argv);
+  free_strings(env);
+  caml_stat_free(child_fds);
+  caml_stat_free(parent_fds);
+  if (cwd != NULL) caml_stat_free(cwd);
+
+  if (rc != 0) {
+    caml_stat_free(executable);
+    errno = rc;
+    uerror(search_path ? "posix_spawnp" : "posix_spawn", v_executable);
+  }
+  caml_stat_free(executable);
+  CAMLreturn(Val_int(pid));
+}
+
+CAMLprim value masc_posix_spawn(value executable, value argv, value env,
+                                value cwd, value fds)
+{
+  return spawn_process(executable, argv, env, cwd, fds, 0);
+}
+
+/* Unix fallback retains libc's PATH lookup semantics and supplies cwd as a
+   directory descriptor, without duplicating setup or process-group creation. */
+CAMLprim value masc_posix_spawnp(value executable, value argv, value env,
+                                 value cwd, value fds)
+{
+  return spawn_process(executable, argv, env, cwd, fds, 1);
+}
+
+CAMLprim value masc_open_process_directory(value v_path)
+{
+  CAMLparam1(v_path);
+  caml_unix_check_path(v_path, "open process cwd");
+  char *path = caml_stat_strdup(String_val(v_path));
+  /* Directory traversal needs search permission, not read/list permission. */
+#if defined(O_PATH)
+  int flags = O_PATH | O_DIRECTORY | O_CLOEXEC;
+#elif defined(O_SEARCH)
+  int flags = O_SEARCH | O_DIRECTORY | O_CLOEXEC;
+#else
+#error "process cwd acquisition requires O_PATH or O_SEARCH"
+#endif
+  caml_enter_blocking_section();
+  int fd;
+  do { fd = open(path, flags); } while (fd < 0 && errno == EINTR);
+  int error = errno;
+#if defined(O_PATH)
+  /* O_PATH does not check the final directory's search permission. Check
+     the acquired directory with the credentials the child will inherit.
+     fchdir still enforces permission if it changes after this check. */
+  if (fd >= 0) {
+    int rc;
+    do { rc = faccessat(fd, ".", X_OK, AT_EACCESS); }
+    while (rc < 0 && errno == EINTR);
+    if (rc < 0) {
+      error = errno;
+      close(fd);
+      fd = -1;
+    }
+  }
+#endif
+  caml_leave_blocking_section();
+  caml_stat_free(path);
+  if (fd < 0) {
+    errno = error;
+    uerror("open process cwd", v_path);
+  }
+  CAMLreturn(Val_int(fd));
+}
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
+/* Observe only. The OCaml owner serializes this with group signalling and
+   final waitpid; no PID can be reused between the last signal and reap. */
+CAMLprim value masc_process_exited_without_reaping(value v_pid)
+{
+  CAMLparam1(v_pid);
+  siginfo_t info;
+  memset(&info, 0, sizeof(info));
+  int rc;
+  do {
+    rc = waitid(P_PID, (id_t)Int_val(v_pid), &info, WEXITED | WNOWAIT | WNOHANG);
+  } while (rc < 0 && errno == EINTR);
+  if (rc < 0) uerror("waitid", Nothing);
+  CAMLreturn(Val_bool(info.si_pid != 0));
+}
+
+/* Observe only: the members of process group [pgid] as
+   (pid, parent pid, zombie, exiting) rows. [exiting] is P_WEXIT, which
+   sysctl reports for a member whose exit has begun (P_LEXIT); a zombie
+   carries it too. Process_group_members decides what the rows mean.
+   None when there is no snapshot -- an unavailable or incomplete one is not
+   evidence of an empty group -- and on every platform but Darwin. */
+CAMLprim value masc_process_group_members(value v_pgid)
+{
+  CAMLparam1(v_pgid);
+  CAMLlocal3(result, rows, row);
+  result = Val_none;
+#if defined(__APPLE__)
+  pid_t pgid = (pid_t)Int_val(v_pgid);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid };
+  size_t size = 0;
+  if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0 && size > 0) {
+    struct kinfo_proc *members = malloc(size);
+    if (members != NULL) {
+      size_t capacity = size;
+      if (sysctl(mib, 4, members, &size, NULL, 0) == 0 &&
+          size > 0 && size <= capacity && size % sizeof(*members) == 0) {
+        size_t count = size / sizeof(*members);
+        rows = caml_alloc((mlsize_t)count, 0);
+        for (size_t i = 0; i < count; i++) {
+          row = caml_alloc_tuple(4);
+          Store_field(row, 0, Val_int(members[i].kp_proc.p_pid));
+          Store_field(row, 1, Val_int(members[i].kp_eproc.e_ppid));
+          Store_field(row, 2, Val_bool(members[i].kp_proc.p_stat == SZOMB));
+          Store_field(row, 3, Val_bool((members[i].kp_proc.p_flag & P_WEXIT) != 0));
+          Store_field(rows, i, row);
+        }
+        result = caml_alloc_some(rows);
+      }
+      free(members);
+    }
+  }
+#endif
+  CAMLreturn(result);
+}
+
+/* Observe only: the process group [pid] is in now, from getpgid(2), which
+   POSIX defines on every platform this file is built for (OCaml's Unix has
+   no binding for it). */
+CAMLprim value masc_process_group_of(value v_pid)
+{
+  CAMLparam1(v_pid);
+  pid_t group = getpgid((pid_t)Int_val(v_pid));
+  if (group < 0) uerror("getpgid", Nothing);
+  CAMLreturn(Val_int(group));
+}
+
+/* Observe only: when process [pid] started, from the kernel's process
+   table, without starting another process (ps) and so without yielding to
+   a reaper. A zombie is still in the table, so a child not yet reaped
+   reads too. Some "darwin:<seconds>.<microseconds>" on Darwin; None when
+   no such process is there, and on every other platform. */
+CAMLprim value masc_process_start_time(value v_pid)
+{
+  CAMLparam1(v_pid);
+  CAMLlocal2(result, text);
+  result = Val_none;
+#if defined(__APPLE__)
+  pid_t pid = (pid_t)Int_val(v_pid);
+  struct kinfo_proc info;
+  size_t size = sizeof(info);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  memset(&info, 0, sizeof(info));
+  if (sysctl(mib, 4, &info, &size, NULL, 0) == 0 && size == sizeof(info) &&
+      info.kp_proc.p_pid == pid) {
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "darwin:%ld.%06ld",
+             (long)info.kp_proc.p_starttime.tv_sec, (long)info.kp_proc.p_starttime.tv_usec);
+    text = caml_copy_string(buffer);
+    result = caml_alloc_some(text);
+  }
+#endif
+  CAMLreturn(result);
+}

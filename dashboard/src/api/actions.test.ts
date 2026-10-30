@@ -1,0 +1,103 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mcpMocks = vi.hoisted(() => ({
+  callMcpTool: vi.fn(() => Promise.resolve('{}')),
+  mcpCallFailureDisposition: vi.fn(),
+  mcpStructuredContentFromError: vi.fn(),
+}))
+
+// claimTask must reach the server. The pre-existing Work-board bug was that a
+// claim only touched local React state and vanished on refresh (#46); this
+// test pins the contract that a claim is routed through the persisted
+// masc_transition FSM tool.
+vi.mock('./mcp', () => mcpMocks)
+vi.mock('./core', async importOriginal => ({
+  ...await importOriginal<typeof import('./core')>(),
+  get: vi.fn(),
+  post: vi.fn(() => Promise.resolve({ ok: true })),
+}))
+
+import { claimTask, deleteBoardPost, deleteTask, sendBroadcast } from './actions'
+import { post } from './core'
+
+describe('claimTask', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('routes an operator claim through masc_transition (todo -> claimed)', async () => {
+    await claimTask('task-123')
+    expect(mcpMocks.callMcpTool).toHaveBeenCalledTimes(1)
+    expect(mcpMocks.callMcpTool).toHaveBeenCalledWith('masc_transition', {
+      task_id: 'task-123',
+      action: 'claim',
+    })
+  })
+
+  it('propagates a transition failure so the caller can roll back the optimistic flag', async () => {
+    mcpMocks.callMcpTool.mockRejectedValueOnce(new Error('todo -> claimed rejected'))
+    await expect(claimTask('task-err')).rejects.toThrow('todo -> claimed rejected')
+  })
+})
+
+describe('Board deletion persistence', () => {
+  it('accepts a durable deletion receipt bound to the requested post', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true, post_id: 'post-9', applied: true, persistence: 'durable' })
+    expect(await deleteBoardPost('post-9')).toEqual({ status: 'deleted', postId: 'post-9' })
+  })
+
+  it('preserves an applied deletion with pending persistence', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true, post_id: 'post-9', applied: true, persistence: 'pending', detail: 'snapshot write failed' })
+    expect(await deleteBoardPost('post-9')).toEqual({ status: 'persistence_pending', postId: 'post-9', detail: 'snapshot write failed' })
+  })
+
+  it.each([
+    { ok: true },
+    { ok: true, post_id: 'different-post', applied: true, persistence: 'durable' },
+    { ok: true, post_id: 'post-9', applied: false, persistence: 'pending', detail: 'not applied' },
+    { ok: true, post_id: 'post-9', applied: true, persistence: 'pending', detail: '' },
+  ])('rejects an unbound or contradictory receipt: %j', async value => {
+    vi.mocked(post).mockResolvedValueOnce(value)
+    await expect(deleteBoardPost('post-9')).rejects.toThrow('receipt')
+  })
+})
+
+describe('deleteTask settlement', () => {
+  it('decodes completed deletion', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true, task_id: 'task-9', task_deleted: true, status: 'deleted', errors: [] })
+    expect(await deleteTask('task-9')).toEqual({ status: 'deleted', taskId: 'task-9' })
+  })
+  it('retains committed deletion with failed cleanup for retry', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: false, task_id: 'task-9', task_deleted: true, status: 'cleanup_failed', errors: ['primary unreadable'] })
+    expect(await deleteTask('task-9')).toEqual({ status: 'cleanup_failed', taskId: 'task-9', errors: ['primary unreadable'] })
+  })
+  it('rejects an unbound or contradictory success receipt', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true })
+    await expect(deleteTask('task-9')).rejects.toThrow('receipt')
+  })
+})
+
+describe('sendBroadcast delivery truth', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('preserves uncertainty for a malformed executed-tool receipt', async () => {
+    const error = new Error('tool response could not be decoded')
+    mcpMocks.callMcpTool.mockRejectedValue(error)
+    mcpMocks.mcpStructuredContentFromError.mockReturnValue({
+      ok: false,
+      request_id: 'wmsg-0123456789abcdef0123456789abcdef',
+      mention_delivery: { kind: 'accepted' },
+    })
+    mcpMocks.mcpCallFailureDisposition.mockReturnValue('known_tool_response')
+
+    await expect(sendBroadcast('dashboard', '@gemini check')).resolves.toEqual({
+      ok: false,
+      requestId: null,
+      deliveryKind: 'outcome_unknown',
+      reason: 'Broadcast returned a malformed delivery receipt.',
+      workspacePersisted: null,
+    })
+  })
+})

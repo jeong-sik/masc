@@ -1,0 +1,32 @@
+{
+  "observed_at": "2026-09-12T18:15:49.895840+00:00",
+  "runtime_root": "/Users/dancer/me/.masc",
+  "endpoint": "http://127.0.0.1:64850",
+  "auth_change": {
+    "wrapper": "/Users/dancer/me/.masc/scripts/claude-subscription",
+    "removed_variable": "ANTHROPIC_API_KEY",
+    "runtime_config_application": "raw_save routing applied, requires_restart=false at 2026-09-12T17:38:45Z"
+  },
+  "standalone_probe": {
+    "command": "env -u ANTHROPIC_API_KEY claude -p \"Reply with exactly OK.\" --model claude-sonnet-5 --tools \"\" --setting-sources \"\" --output-format json",
+    "result": "OK",
+    "is_error": false,
+    "duration_ms": 3254
+  },
+  "keeper_trace": "/Users/dancer/me/.masc/keepers/msx-retro-mania/raw-traces/turn-1789235033340-1fe9-000027.jsonl",
+  "run_starts": [
+    {
+      "record_type": "run_started",
+      "ts": 1789235033.863629,
+      "model": "claude-sonnet-5",
+      "agent_name": "msx-retro-mania"
+    }
+  ],
+  "finished_tool_count": 45,
+  "first_finished_tool": {
+    "record_type": "native_tool_finished",
+    "ts": 1789235112.661806,
+    "tool_name": "mcp__masc__keeper_compose_msx-observe"
+  },
+  "ui_validation": "not yet deployed or visually verified"
+}

@@ -1,0 +1,10 @@
+[2026-10-29 00:26:30] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `keeper shutdown acknowledgement HTTP'.
+This run has ID `S2XXNKR4'.
+
+  [OK]          actual router          0   admin authorization and observatio...
+  [OK]          actual router          1   preview recheck and verified actor...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/keeper shutdown acknowledgement HTTP'.
+Test Successful in 0.414s. 2 tests run.
+exit=0

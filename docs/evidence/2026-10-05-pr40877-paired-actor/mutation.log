@@ -1,0 +1,17 @@
+test_mismatched_or_contradictory_evidence_is_refused (report_test.ReportCliTest.test_mismatched_or_contradictory_evidence_is_refused) ... 
+  test_mismatched_or_contradictory_evidence_is_refused (report_test.ReportCliTest.test_mismatched_or_contradictory_evidence_is_refused) (mode='different_actor') ... FAIL
+
+======================================================================
+FAIL: test_mismatched_or_contradictory_evidence_is_refused (report_test.ReportCliTest.test_mismatched_or_contradictory_evidence_is_refused) (mode='different_actor')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr40877-parent-sync-20261005/test/test_librarian_preflight_report.py", line 1034, in test_mismatched_or_contradictory_evidence_is_refused
+    self.assertIn("paired runs must use the same Keeper actor", result.stderr)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'paired runs must use the same Keeper actor' not found in 'preflight measurement refused: one: input payloads differ; freeze the same input\n'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.729s
+
+FAILED (failures=1)
+Mutation detected: removing paired-actor guard fails the repaired public CLI test.

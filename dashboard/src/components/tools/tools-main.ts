@@ -1,0 +1,250 @@
+// Tools main component — orchestrates inventory and executor views
+
+import { html } from 'htm/preact'
+import { useEffect, useState } from 'preact/hooks'
+import { signal } from '@preact/signals'
+import { SectionCard } from '../common/card'
+import { ToolMetrics } from '../tool-metrics'
+import {
+  toolsData,
+  toolsLoading,
+  toolsError,
+  subscribeToolsAutoRefresh,
+  KEEPER_WAITING_INVENTORY_REFRESH_MS,
+} from './tool-state'
+import { FullInventoryView } from './tool-full-inventory'
+import { ConfigResolutionPanel } from './config-resolution-panel'
+import { ActionButton } from '../common/button'
+import { navigate } from '../../router'
+import { ToolExecutor } from '../tool-executor/tool-executor'
+import { formatElapsedCompact } from '../../lib/format-time'
+import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
+import { ScheduledAutomationPanel } from './scheduled-automation-panel'
+import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import { SkillActivationPanel } from './skill-activation-panel'
+import { fetchDashboardTools, type DashboardToolsResponse } from '../../api'
+import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import {
+  scheduledAutomationProjection,
+  subscribeScheduledAutomationRefresh,
+} from '../schedule/schedule-state'
+
+type ToolsView = 'inventory' | 'executor'
+const activeView = signal<ToolsView>('inventory')
+
+function sourceFreshnessLabel(latestAge: number | null | undefined): string {
+  if (typeof latestAge !== 'number' || !Number.isFinite(latestAge)) {
+    return 'latest n/a'
+  }
+  return `latest ${formatElapsedCompact(latestAge)}`
+}
+
+function validateKeeperReceipt(
+  response: DashboardToolsResponse,
+  expectedKeeper: string,
+): string | null {
+  const effectiveSurface = response.effective_keeper_surface
+  if (!effectiveSurface) return 'Server response omitted effective_keeper_surface'
+  const activations = response.skill_activations
+  if (!activations) return 'Server response omitted skill_activations'
+  if (effectiveSurface.keeper_name !== expectedKeeper) {
+    return `effective_keeper_surface belongs to ${effectiveSurface.keeper_name}, not ${expectedKeeper}`
+  }
+  if (activations.keeper_name !== expectedKeeper) {
+    return `skill_activations belongs to ${activations.keeper_name}, not ${expectedKeeper}`
+  }
+  return null
+}
+
+export function Tools() {
+  const data = toolsData.value
+  const loading = toolsLoading.value
+  const error = toolsError.value
+  const inventory = data?.tool_inventory.tools ?? []
+  // The warming envelope carries a tool_usage of placeholder zeroes --
+  // total_calls, distinct_tools_called and never_called_count all 0
+  // (server_dashboard_http_runtime_info.ml). Passing it on drew those zeroes
+  // as measured observations, which reads as "nothing has ever been called".
+  // Absent is the truthful shape until the projection is built.
+  const warmingEnvelope = data?.is_warming === true || data?.status === 'warming'
+  const usage = warmingEnvelope ? null : (data?.tool_usage ?? null)
+  const callLog = usage?.non_public_call_log
+  const configResolution = data?.config_resolution
+  const runtimeResolution = data?.runtime_resolution
+  const configResolutionWarming = configResolution?.status === 'warming'
+  const runtimeResolutionWarming = runtimeResolution?.status === 'warming'
+  const usageCoverageGap = callLog ? coverageGapDisplay(callLog) : null
+  const keeperNames = (data?.keeper_waiting_inventory?.keepers ?? [])
+    .map(keeper => keeper.keeper_name)
+    .sort((left, right) => left.localeCompare(right))
+  const [selectedKeeper, setSelectedKeeper] = useState<string | null>(null)
+  const [keeperReceipt, setKeeperReceipt] = useState<DashboardToolsResponse | null>(null)
+  const [keeperReceiptLoading, setKeeperReceiptLoading] = useState(false)
+  const [keeperReceiptError, setKeeperReceiptError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // subscribeToolsAutoRefresh performs the first load itself and shares one
+    // visibility-aware poller across the surfaces that read this resource.
+    // Loading once by hand left a cold read's warming envelope on screen for
+    // the whole visit: nothing fetched the finished projection until the
+    // operator refreshed the inventory by hand.
+    const stopTools = subscribeToolsAutoRefresh()
+    // The FSM panel below renders the schedule projection, which is no longer
+    // part of the tools response.
+    const stopSchedule = subscribeScheduledAutomationRefresh()
+    return () => {
+      stopTools()
+      stopSchedule()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedKeeper === null) {
+      setKeeperReceipt(null)
+      setKeeperReceiptError(null)
+      setKeeperReceiptLoading(false)
+      return
+    }
+    let controller: AbortController | null = null
+    const refresh = () => {
+      controller?.abort()
+      controller = new AbortController()
+      const current = controller
+      setKeeperReceiptLoading(true)
+      setKeeperReceiptError(null)
+      void fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal })
+        .then(response => {
+          if (current.signal.aborted) return
+          const receiptError = validateKeeperReceipt(response, selectedKeeper)
+          if (receiptError) {
+            setKeeperReceipt(null)
+            setKeeperReceiptError(receiptError)
+            return
+          }
+          setKeeperReceipt(response)
+        })
+        .catch((cause: unknown) => {
+          if (current.signal.aborted) return
+          setKeeperReceipt(null)
+          setKeeperReceiptError(cause instanceof Error ? cause.message : String(cause))
+        })
+        .finally(() => {
+          if (!current.signal.aborted) setKeeperReceiptLoading(false)
+        })
+    }
+    refresh()
+    const stopRefresh = setupVisibleAutoRefresh(
+      refresh,
+      KEEPER_WAITING_INVENTORY_REFRESH_MS,
+    )
+    return () => {
+      stopRefresh()
+      controller?.abort()
+    }
+  }, [selectedKeeper])
+
+  return html`
+    <div class="v2-lab-surface flex flex-col gap-4">
+      <div class="flex gap-2 mb-4">
+        <${ActionButton} variant=${activeView.value === 'inventory' ? 'primary' : 'ghost'} size="md" class="v2-lab-action"
+          onClick=${() => { activeView.value = 'inventory' }}>인벤토리<//>
+        <${ActionButton} variant=${activeView.value === 'executor' ? 'primary' : 'ghost'} size="md" class="v2-lab-action"
+          onClick=${() => { activeView.value = 'executor' }}>도구 실행기<//>
+      </div>
+      ${activeView.value === 'executor' ? html`<${ToolExecutor} />` : html`<div>
+      <${ConfigResolutionPanel}
+        resolution=${configResolutionWarming ? undefined : configResolution}
+        runtimeResolution=${runtimeResolutionWarming ? undefined : runtimeResolution}
+      />
+      ${configResolutionWarming || runtimeResolutionWarming
+        ? html`<${SectionCard} label="설정 경로" class="section v2-lab-panel mb-4">
+            <div class="text-xs text-[var(--color-fg-muted)]" data-testid="tools-config-resolution-warming">
+              Config and runtime resolution warming
+            </div>
+          <//>`
+        : null}
+
+      <${SectionCard} label="프롬프트 레지스트리" class="section v2-lab-panel mb-4">
+        <div class="text-xs text-[var(--color-fg-muted)] mb-3">
+          전역 프롬프트/오버라이드 편집은 <span class="font-mono">설정 › 프롬프트</span>에서 관리됩니다.
+          여기(Lab)에 있던 중복 편집기는 단일 편집 지점으로 통합했습니다.
+        </div>
+        <${ActionButton} variant="ghost" size="md" class="v2-lab-prompt-cta"
+          onClick=${() => { navigate('settings', { section: 'prompts' }) }}>
+          설정 › 프롬프트 열기 →
+        <//>
+      <//>
+
+      <${SectionCard} label="예약 자동화 FSM" class="section v2-lab-panel mb-4">
+        ${scheduledAutomationProjection.value?.state === 'unavailable'
+          ? html`
+              <div class="text-xs text-[var(--color-status-bad)]" data-testid="tools-schedule-unavailable">
+                schedule ledger 읽기 실패: ${scheduledAutomationProjection.value.reason}
+              </div>
+            `
+          : html`<${ScheduledAutomationPanel}
+              automation=${scheduledAutomationProjection.value?.state === 'available'
+                ? scheduledAutomationProjection.value.data
+                : null}
+            />`}
+      <//>
+
+      <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">
+        <${KeeperWaitingInventoryPanel} inventory=${data?.keeper_waiting_inventory ?? null} />
+      <//>
+
+      <${SectionCard} label="Keeper Skill Receipts" class="section v2-lab-panel mb-4">
+        <${SkillActivationPanel}
+          keeperNames=${keeperNames}
+          selectedKeeper=${selectedKeeper}
+          effectiveSurface=${keeperReceipt?.effective_keeper_surface}
+          activations=${keeperReceipt?.skill_activations}
+          loading=${keeperReceiptLoading}
+          error=${keeperReceiptError}
+          onSelectKeeper=${setSelectedKeeper}
+        />
+      <//>
+
+      <${SectionCard} label="시스템 도구 목록" class="section v2-lab-panel mb-4">
+        <${FullInventoryView}
+          inventory=${inventory}
+          loading=${loading}
+          error=${error}
+        />
+      <//>
+
+      <${SectionCard} label="도구 사용 현황" class="section v2-lab-panel mb-4">
+        ${callLog
+          ? html`
+              <div class="text-xs text-[var(--color-fg-muted)] mb-2">
+                별도 비공개 호출 로그 · 아래 사용 집계의 상태를 나타내지 않습니다.
+              </div>
+              <div class="text-3xs text-[var(--color-fg-muted)] mb-2">
+                <span class="font-mono">${callLog.source ?? '(unknown source)'}</span>
+                <span class="mx-1">·</span>
+                <span class="font-mono ${sourceHealthClass(callLog.health)}">${callLog.health ?? 'unknown'}</span>
+                <span class="mx-1">·</span>
+                <span>${callLog.stale_reason ?? sourceFreshnessLabel(callLog.latest_age_s)}</span>
+                <span class="mx-1">·</span>
+                <span>${callLog.entry_count?.toLocaleString() ?? '알 수 없음'}개 보존 기록</span>
+              </div>
+              ${usageCoverageGap ? html`
+                <div class="mb-2 grid gap-0.5 text-3xs text-[var(--color-status-warn)]">
+                  <span>${usageCoverageGap.summary}</span>
+                  ${usageCoverageGap.details.map(detail => html`<span class="font-mono break-all">${detail}</span>`)}
+                </div>
+              ` : null}
+            `
+          : null}
+        <${ToolMetrics} data=${usage} />
+      <//>
+      ${data?.generated_at
+        ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--color-fg-muted)] text-xs">
+            <span>생성 시각: ${data.generated_at}</span>
+          </div>`
+        : null}
+
+    </div>`}
+    </div>
+  `
+}

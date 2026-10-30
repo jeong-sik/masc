@@ -1,0 +1,24 @@
+[
+  {
+    "arm": "baseline",
+    "binary": "/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-tui-macos-arm64",
+    "sha256": "a66362553de8975dd9e9fe67929e70fc6ac5193e0daedb531b96f2bb765be889",
+    "producer_checksum_match": true,
+    "returncode": -6,
+    "stdout": "",
+    "stderr": "dyld[38782]: Library not loaded: @loader_path/lib/libssl.3.dylib\n  Referenced from: <5FB567BC-D698-3CB8-9393-35A290820975> /private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-tui-macos-arm64\n  Reason: tried: '/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/lib/libssl.3.dylib' (no such file)",
+    "expected_source": "683c7950682b45a2591002e09f654515ccf02155",
+    "scope": "Initial read-only identity attempt before local dependency provisioning; not a running TUI session"
+  },
+  {
+    "arm": "visibility",
+    "binary": "/tmp/masc-tui-observability-evidence-20261016/visibility-native-subset/masc-tui-macos-arm64",
+    "sha256": "cd0b25089780a1d578a1560ec3da4647b630d30b45be1b80e06c619ee304a260",
+    "producer_checksum_match": true,
+    "returncode": -6,
+    "stdout": "",
+    "stderr": "dyld[38844]: Library not loaded: @loader_path/lib/libssl.3.dylib\n  Referenced from: <7EFD163B-32CC-301C-BB07-F4C7AF4CE33F> /private/tmp/masc-tui-observability-evidence-20261016/visibility-native-subset/masc-tui-macos-arm64\n  Reason: tried: '/private/tmp/masc-tui-observability-evidence-20261016/visibility-native-subset/lib/libssl.3.dylib' (no such file)",
+    "expected_source": "5b852597e818d2619c2f64ff6cd0baa307c17c07",
+    "scope": "Initial read-only identity attempt before local dependency provisioning; not a running TUI session"
+  }
+]

@@ -1,0 +1,118 @@
+{
+  "actual_publication_parent": "fc5bb8afc5cfe2a25a74fa70afc3a2477cc04337",
+  "parent_pr": 40241,
+  "local_parent": "3b6652a909723a2b66a4bfcb4ba92032896fbc80",
+  "local_parent_is_partial": true,
+  "local_branch": "fix/dashboard-item-amount-ssot-20260930",
+  "publication_rule": "overlay only this child delta over local parent onto actual publication parent; do not overlay partial whole tree",
+  "changed_source": [
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.ts",
+      "parent_git_blob": "13e3d24ff7601287ac79df48a8cdc99a3c96c94b",
+      "candidate_sha256": "726c78db19fe4c40fd188e81e4de4d6a309661d48e0eebcd1ad15b02c9649b93"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-items.ts",
+      "parent_git_blob": "19516b8d76f20e60ab23b4cac439991d83c97ea6",
+      "candidate_sha256": "aedf63974aede7b11388549fd896ce4eed786d890945840d3ed31336706b0a2b"
+    },
+    {
+      "path": "dashboard/src/api/keeper-items.test.ts",
+      "parent_git_blob": "cbfcf9578823085d1e81e0c6938703f6ca6f4e46",
+      "candidate_sha256": "ea2d10392aac053b62bc23ff7a13afce0bd696d58e9c1804cf0724fe579fda4a"
+    }
+  ],
+  "unchanged_parent_boundaries": [
+    {
+      "path": "dashboard/src/api/keeper-items.ts",
+      "sha256": "a743e69c05b84ec834b6f7127d56df288bccb2246017b0a4af88fec14615cc23",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.ts",
+      "sha256": "e656592642e05cdd20d48ee7e8539b92c28a2c780d079555805430822859a5fe",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/store.ts",
+      "sha256": "a9bc9fa1720208cd6c5439148e6f489fa57103bc448b5e12ee6da937ce828b39",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/sse-store.ts",
+      "sha256": "1a7bce7de0a6a2569b50cc4a7e82918d6eb5bb012c15e6c75251ce284b7102f5",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/keeper-store-normalize.ts",
+      "sha256": "ea3a547ab07c5e850e12e13f5203e32b87e2efe35b6b5652b00543bee9895961",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/components/keeper-items-panel.ts",
+      "sha256": "76fccad068760ac16015e9428eb9045566122ef07007592acb13d3848b0f59c3",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/components/keeper-items-panel.test.ts",
+      "sha256": "6f1f8f583083c936722ee2ea85cea88f527e9d6e879402b297e3f0689c2bb26e",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/components/candle-economy.ts",
+      "sha256": "b2579b77babc70b53569e88c6c9a6f08ea7f23252e4a6205b6436a30a89125d8",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/components/candle-economy.test.ts",
+      "sha256": "0760841c23cd7a213c118cab4cdaf8c5c7abb66fa194f712b96e4e625c78a1d3",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/e2e/keeper-items.mjs",
+      "sha256": "8cc77ec741641442e5774a60fa938deb6d318963e9aea76405fcd2e56f5c7d5a",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/e2e/keeper-items-workspace.mjs",
+      "sha256": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/demo/keeper-items-fixture.ts",
+      "sha256": "1bd0502335e0b8386652cc7dd054ddd2514a9e412ce4c0c45f763a7037ec4785",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/vite.config.ts",
+      "sha256": "ee6d1c8814df4fc5d114e04ab3f82fd3546bda238cb68ce23651d931ca65e350",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/vite.preview.config.ts",
+      "sha256": "89e47e24b788a4fbca82537d7a9296d98053bbd085b0d93a5d9d7a4211408b7f",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/src/dashboard-bundle-preload.test.ts",
+      "sha256": "d3723bbe32a7ea85f6e854bb843eb4c211457a584dc009b036bb99cb1b814c55",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/package.json",
+      "sha256": "e6902e318f7aa58d601c7b1601d3bd1f7c151dac2c000eacb3e6f17c5bedb9a6",
+      "equal_to_local_parent": true
+    },
+    {
+      "path": "dashboard/pnpm-lock.yaml",
+      "sha256": "6490e6d920eae466291aafcafa6bafe4247734eac6a8435784aee6811d8514e9",
+      "equal_to_local_parent": true
+    }
+  ],
+  "public_parser_contract": {
+    "test_import": "dashboard/src/api/keeper-items.test.ts \u2192 ./keeper-items",
+    "public_reexport": "dashboard/src/api/keeper-items.ts \u2192 ./schemas/keeper-items",
+    "amount_authority": "dashboard/src/api/schemas/candle-observation.ts:isCandleAmount"
+  },
+  "ci_for_candidate": "not executed"
+}

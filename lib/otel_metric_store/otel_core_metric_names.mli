@@ -1,0 +1,66 @@
+(** Core runtime, LLM, provider, task, goal, and SSE activity metric-name
+    constants.
+
+    Included by {!Otel_metric_store} so existing callers keep using
+    [Otel_metric_store.metric_*] bindings unchanged. *)
+
+val metric_fd_open : string
+val metric_fd_limit : string
+val metric_mcp_requests : string
+val metric_llm_inference_duration : string
+
+(** [masc_llm_prompt_tok_per_sec] - prefill throughput histogram.
+    Observed in [Keeper_hooks_agent_core] after_turn when [response.telemetry.timings]
+    is [Some] and [prompt_per_second] is positive. Labels: [model], [provider_kind]. *)
+val metric_llm_prompt_tok_per_sec : string
+
+(** [masc_llm_decode_tok_per_sec] - decode throughput histogram.
+    Observed alongside {!metric_llm_prompt_tok_per_sec} from the same turn
+    when [predicted_per_second] is positive. Silent for providers that do
+    not emit timings; inspect [masc_after_turn_telemetry_missing_total] to
+    tell absence apart from zero. *)
+val metric_llm_decode_tok_per_sec : string
+
+val metric_after_turn_hook : string
+val metric_after_turn_telemetry_missing : string
+val metric_after_turn_response_content_empty : string
+val metric_after_turn_telemetry_zero_latency : string
+val metric_tasks : string
+val metric_errors : string
+val metric_error_events : string
+val metric_workspace_route_failures : string
+val metric_active_agents : string
+(** RFC-0294 PR-4: gauge of orphaned tasks, labeled by status_class. *)
+val metric_orphan_tasks : string
+
+val metric_sse_reconnects : string
+val metric_sse_idle_evictions : string
+val metric_sse_rejects : string
+
+(** Counter [masc_mcp_auth_rejects_total{endpoint,reason}] — MCP transport
+    requests rejected at the auth boundary. Before this counter every
+    rejected bearer produced only a client-visible 401 with no
+    server-side trace (2026-08-18 finding: every external MCP credential
+    was stale and the operator surface showed nothing). *)
+val metric_mcp_auth_rejects : string
+
+val metric_tool_input_validation : string
+val metric_llm_provider_http_status : string
+val metric_llm_provider_request_latency : string
+val metric_llm_provider_request_latency_clamped : string
+val metric_llm_provider_streaming_first_chunk : string
+val metric_llm_provider_streaming_inter_chunk : string
+val metric_llm_provider_streaming_first_chunk_invalid : string
+val metric_llm_provider_streaming_inter_chunk_invalid : string
+val metric_llm_provider_capability_drops : string
+val metric_llm_provider_cache_hits : string
+val metric_llm_provider_cache_misses : string
+val metric_llm_provider_requests_started : string
+val metric_llm_provider_errors : string
+val metric_llm_provider_errors_by_reason : string
+val metric_llm_provider_retries : string
+val metric_llm_provider_input_tokens : string
+val metric_llm_provider_output_tokens : string
+val metric_llm_provider_reasoning_tokens : string
+val metric_llm_provider_tool_calls : string
+

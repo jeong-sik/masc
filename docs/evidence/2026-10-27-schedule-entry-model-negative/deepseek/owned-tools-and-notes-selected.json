@@ -1,0 +1,323 @@
+{
+  "schema": "masc.schedule-entry-negative.tools-selection.v1",
+  "scope": "All owned tool rows in original durable file; selected exact input/identity; outputs only for three synthetic note writes and B-turn synthetic note reads. Discovery/Get/artifact-read output contents omitted.",
+  "all_owned_count": 10,
+  "note_add_attempt_count": 3,
+  "notes": [
+    {
+      "note_id": "6",
+      "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+      "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "author_kind": "automated_actor",
+      "created_at": 1793065487.895309,
+      "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second",
+      "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "author_kind": "automated_actor",
+      "created_at": 1793065492.208144,
+      "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_SECOND"
+    },
+    {
+      "note_id": "12",
+      "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+      "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "author_kind": "automated_actor",
+      "created_at": 1793065495.207647,
+      "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_AFTER_B"
+    }
+  ],
+  "rows": [
+    {
+      "tool": "keeper_tool_search",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-720d8b2d3bdb63e04615eb7613edf196",
+      "tool_use_id": "call_b7qmavtk",
+      "ts": 1793065482.229614,
+      "wire_outcome": "ok",
+      "disposition": null,
+      "input": {
+        "names": [
+          "masc_schedule_note_add",
+          "masc_schedule_notes_list",
+          "masc_schedule_get"
+        ]
+      },
+      "original_line": 1,
+      "original_line_sha256_without_newline": "e7a120c71de97cdfaed78f15c6ff454341fe78cc2fb23732a9fb128088fbb665",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#1",
+      "output_json_binding": {
+        "bytes": 317,
+        "sha256": "dbe148e29626fdbd2b95a95700aafec2923f1dd1f815842b87d44aec90546bca",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_get",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-762ac500c1afb2e4cb2e5423c9639aea",
+      "tool_use_id": "call_ouic3gcf",
+      "ts": 1793065483.798685,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236"
+      },
+      "original_line": 2,
+      "original_line_sha256_without_newline": "6b2d04e9e2db366e1dfbc7ccb57e71456d5567e189595e70e2e0a87c17b2e01c",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#1",
+      "output_json_binding": {
+        "bytes": 3822,
+        "sha256": "c10e0ca3435e9d48ead3180f7c613c006a3d35a8da36c3202b358d40d26ed53a",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-982205a34a3af5d7669742f6150b7d7d",
+      "tool_use_id": "call_hrx698w0",
+      "ts": 1793065485.519092,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236"
+      },
+      "original_line": 3,
+      "original_line_sha256_without_newline": "4a755f7277a0d0533696413854236671df8284b9dae90080a2c92416d90d97e3",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#1",
+      "output_json_binding": {
+        "bytes": 117,
+        "sha256": "8a9b178edee2ec475f4f99d4c68d31a259ed64af5993a8e5248bfbe03d304b64",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-67dbfb7c7c627bc3f0083cc2722c9b55",
+      "tool_use_id": "call_i7afk0xk",
+      "ts": 1793065487.968226,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+        "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba"
+      },
+      "original_line": 4,
+      "original_line_sha256_without_newline": "371ebf12ce259bc45e078aea34445d39a5295c4ea308fa6a9534c636190eae75",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#1",
+      "output": {
+        "status": "ok",
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+          "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+          "author_kind": "automated_actor",
+          "created_at": 1793065487.895309,
+          "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba"
+        },
+        "note_count": 1
+      },
+      "primary_note_exact_match": true
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-e12f465338b77c5f9e32726a0cadc06a",
+      "tool_use_id": "call_2f2eyewc",
+      "ts": 1793065489.067608,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second"
+      },
+      "original_line": 5,
+      "original_line_sha256_without_newline": "5b08b342d93de423d23e67de316cd75583e702f9fdcbb0b6ef64c5648fbf3209",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#1",
+      "output_json_binding": {
+        "bytes": 124,
+        "sha256": "76792a5415091a602f9f5af3dede5868bdf21bba81efa6d4584cc044fc8bafed",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-0428c34a3cd7c15379300cb9e7fdc190",
+      "tool_use_id": "call_daxz6735",
+      "ts": 1793065490.432328,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second"
+      },
+      "original_line": 6,
+      "original_line_sha256_without_newline": "64ceb85dd8103b361e66e039eb49210ba3d78116e345db61c32ba68b6bdd8b99",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#1",
+      "output_json_binding": {
+        "bytes": 124,
+        "sha256": "76792a5415091a602f9f5af3dede5868bdf21bba81efa6d4584cc044fc8bafed",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 2,
+      "execution_id": "execution-node-ea5973f5841208dfb75b5f7f711b6ac3",
+      "tool_use_id": "call_1yzidskh",
+      "ts": 1793065492.222543,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_SECOND",
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second"
+      },
+      "original_line": 7,
+      "original_line_sha256_without_newline": "7fbb1904aa7d7e532623e2373eacd037b9c59876e42cdafe87fa7a3350a48832",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#2",
+      "output": {
+        "status": "ok",
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second",
+          "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+          "author_kind": "automated_actor",
+          "created_at": 1793065492.208144,
+          "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_SECOND"
+        },
+        "note_count": 1
+      },
+      "primary_note_exact_match": true
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 2,
+      "execution_id": "execution-node-5ed74dad8cfcfcee7577a25ac54316be",
+      "tool_use_id": "call_5whjrvu7",
+      "ts": 1793065493.486053,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second"
+      },
+      "original_line": 8,
+      "original_line_sha256_without_newline": "eed9231f70840bf2edfcf755607c2d1ecd65e582cb4260d5cce6533c50a83919",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#2",
+      "output": {
+        "status": "ok",
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second",
+        "limit": 50,
+        "notes": [
+          {
+            "note_id": "11",
+            "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236-second",
+            "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+            "author_kind": "automated_actor",
+            "created_at": 1793065492.208144,
+            "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_SECOND"
+          }
+        ]
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 2,
+      "execution_id": "execution-node-64c5591e76b0c80c85cf1ee118356a4a",
+      "tool_use_id": "call_ooege493",
+      "ts": 1793065495.229244,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_AFTER_B",
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236"
+      },
+      "original_line": 9,
+      "original_line_sha256_without_newline": "cc893523cc73ff35216d73b0e7721261e5921fddb923b6406a072d35f0a8a497",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#2",
+      "output": {
+        "status": "ok",
+        "note": {
+          "note_id": "12",
+          "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+          "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+          "author_kind": "automated_actor",
+          "created_at": 1793065495.207647,
+          "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_AFTER_B"
+        },
+        "note_count": 2
+      },
+      "primary_note_exact_match": true
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+      "trace_id": "trace-1793065478099-00000",
+      "keeper_turn_id": 2,
+      "execution_id": "execution-node-f002e81967a37200f31bba72dda7c012",
+      "tool_use_id": "call_dgtpzuu0",
+      "ts": 1793065497.031523,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236"
+      },
+      "original_line": 10,
+      "original_line_sha256_without_newline": "05c5d01cc89e3b1bafbb6321e0267f4b71739d5aa25e51c82b6cfcce6a65b4aa",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "tool_observation_turn_ref": "trace-1793065478099-00000#2",
+      "output": {
+        "status": "ok",
+        "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+        "limit": 50,
+        "notes": [
+          {
+            "note_id": "6",
+            "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+            "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+            "author_kind": "automated_actor",
+            "created_at": 1793065487.895309,
+            "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba"
+          },
+          {
+            "note_id": "12",
+            "schedule_id": "audit-real-model-ab22839971c14a7eb6e5a94c85646236",
+            "author_id": "audit-c3-deepseek-eb3f351b73bd4c59a04ca916170b4adb",
+            "author_kind": "automated_actor",
+            "created_at": 1793065495.207647,
+            "body": "SCHEDULE_EFFECT_63304533b8b44b3c92237752df8967ba_AFTER_B"
+          }
+        ]
+      }
+    }
+  ]
+}

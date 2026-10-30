@@ -1,0 +1,160 @@
+{
+  "is_derivative": true,
+  "method": "Select metadata entries of retained terminal phase triples and exact inventories. The referenced complete health responses remain local and are not included.",
+  "entries": [
+    {
+      "kind": "http",
+      "stage": "first-failure",
+      "method": "GET",
+      "path": "/health?full=1",
+      "origin": "http://127.0.0.1:61467",
+      "request_body": null,
+      "observed_at": 1793049167.4615018,
+      "duration_ms": 2.325625,
+      "status": 200,
+      "error": null,
+      "body_path": "00064-response.bin",
+      "body_bytes": 33150,
+      "body_sha256": "ba688ad56e0fdb6292bf432a26a236e839870948f8429751577bc9968bb386f6"
+    },
+    {
+      "kind": "canonical-ledger-observation",
+      "stage": "first-failure",
+      "observed_at": 1793049167.465734,
+      "body_path": "00065-response.bin",
+      "body_bytes": 2920,
+      "body_sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+    },
+    {
+      "kind": "canonical-queue-observation",
+      "stage": "first-failure",
+      "observed_at": 1793049167.466985,
+      "body_path": "00066-response.bin",
+      "body_bytes": 1402,
+      "body_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+    },
+    {
+      "kind": "http",
+      "stage": "queue-repaired-ledger-fault",
+      "method": "GET",
+      "path": "/health?full=1",
+      "origin": "http://127.0.0.1:61467",
+      "request_body": null,
+      "observed_at": 1793049182.385511,
+      "duration_ms": 3.445958,
+      "status": 200,
+      "error": null,
+      "body_path": "00274-response.bin",
+      "body_bytes": 33157,
+      "body_sha256": "bcf442a9d024bf1c7539e69bf52901c29335cb23aa8f0d8cf2e7e5753fe5ab87"
+    },
+    {
+      "kind": "canonical-ledger-observation",
+      "stage": "queue-repaired-ledger-fault",
+      "observed_at": 1793049182.390799,
+      "body_path": "00275-response.bin",
+      "body_bytes": 2920,
+      "body_sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+    },
+    {
+      "kind": "canonical-queue-observation",
+      "stage": "queue-repaired-ledger-fault",
+      "observed_at": 1793049182.3913972,
+      "body_path": "00276-response.bin",
+      "body_bytes": 1402,
+      "body_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+    },
+    {
+      "kind": "http",
+      "stage": "retry-settled-only",
+      "method": "GET",
+      "path": "/health?full=1",
+      "origin": "http://127.0.0.1:61467",
+      "request_body": null,
+      "observed_at": 1793049197.444913,
+      "duration_ms": 2.351417,
+      "status": 200,
+      "error": null,
+      "body_path": "00481-response.bin",
+      "body_bytes": 32605,
+      "body_sha256": "bae23ea13c288b690c3835f3c0f1cfde593f3b5739a0f911867b16e814279b2b"
+    },
+    {
+      "kind": "canonical-ledger-observation",
+      "stage": "retry-settled-only",
+      "observed_at": 1793049197.449495,
+      "body_path": "00482-response.bin",
+      "body_bytes": 3561,
+      "body_sha256": "8aeb0b6a019c052565a8ab88d1efb2f76f3b0350eb2415d1dceff432fabf8bed"
+    },
+    {
+      "kind": "canonical-queue-observation",
+      "stage": "retry-settled-only",
+      "observed_at": 1793049197.450183,
+      "body_path": "00483-response.bin",
+      "body_bytes": 1402,
+      "body_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+    },
+    {
+      "kind": "http",
+      "stage": "fresh-admission",
+      "method": "GET",
+      "path": "/health?full=1",
+      "origin": "http://127.0.0.1:61467",
+      "request_body": null,
+      "observed_at": 1793049212.4572558,
+      "duration_ms": 2.574375,
+      "status": 200,
+      "error": null,
+      "body_path": "00694-response.bin",
+      "body_bytes": 34458,
+      "body_sha256": "e3dd10e8db29949048df4b52bd59ad172b6b9b57cdcf3dbdf79901c5eef07c3f"
+    },
+    {
+      "kind": "canonical-ledger-observation",
+      "stage": "fresh-admission",
+      "observed_at": 1793049212.46145,
+      "body_path": "00695-response.bin",
+      "body_bytes": 4598,
+      "body_sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c"
+    },
+    {
+      "kind": "canonical-queue-observation",
+      "stage": "fresh-admission",
+      "observed_at": 1793049212.462467,
+      "body_path": "00696-response.bin",
+      "body_bytes": 2066,
+      "body_sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70"
+    },
+    {
+      "kind": "http",
+      "stage": "setup-accepted-inventory",
+      "method": "GET",
+      "path": "/api/v1/keepers/audit-settle-a/waiting-inventory",
+      "origin": "http://127.0.0.1:61467",
+      "request_body": null,
+      "observed_at": 1793049137.285372,
+      "duration_ms": 2.006042,
+      "status": 200,
+      "error": null,
+      "body_path": "00021-response.bin",
+      "body_bytes": 3552,
+      "body_sha256": "f5209615ab0a7d617044921c4b847641dec6d38f5511296f42716c97a94d2847"
+    },
+    {
+      "kind": "http",
+      "stage": "final-exact-inventory",
+      "method": "GET",
+      "path": "/api/v1/keepers/audit-settle-a/waiting-inventory",
+      "origin": "http://127.0.0.1:61467",
+      "request_body": null,
+      "observed_at": 1793049212.483089,
+      "duration_ms": 2.2495,
+      "status": 200,
+      "error": null,
+      "body_path": "00697-response.bin",
+      "body_bytes": 2194,
+      "body_sha256": "cd6b319d07207f1b33f82ce9704031f63708bb20ac2d9d9d3d5c490898aa8274"
+    }
+  ]
+}

@@ -1,0 +1,813 @@
+import { readKeeperCostCoverage } from './lib/keeper-cost-coverage'
+import { readKeeperBoardAddress } from './lib/board-address'
+import { readRuntimeLaneObservation } from './lib/keeper-runtime-walk'
+import { readKeeperPortrait } from './lib/keeper-portrait'
+import { readCandleAccountRevision, readCandleBalance } from './lib/candle-observation'
+import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
+import type {
+  CtxAttribution,
+  CtxCompositionTelemetry,
+  Keeper,
+  KeeperContextMetricsUnavailable,
+  KeeperLifecycleState,
+  KeeperLastTurnUsage,
+  KeeperMetricPoint,
+  KeeperPhase,
+  KeeperProfileConfigErrorKind,
+  KeeperTrustLatestEvent,
+  KeeperTrustTerminalReason,
+  PipelineStage,
+  PromptTelemetry,
+  ProviderHealth,
+  SandboxProfile,
+} from './types'
+import { toSandboxProfile } from './types'
+import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import { isKeeperOffline } from './lib/keeper-predicates'
+import { keeperDisplayStatus } from './lib/keeper-runtime-display'
+import { asKeeperRuntimeBlockerClass } from './lib/runtime-blocker-class'
+import { asTrustDisposition } from './lib/trust-disposition'
+import {
+  asKeeperPauseState,
+  asKeeperRuntimeBlockerState,
+} from './lib/keeper-runtime-state'
+import { normalizeStopCause } from './lib/stop-cause'
+import { normalizeKeeperDiagnostic } from './keeper-state'
+import type { RuntimeRef } from './types'
+
+/** Normalize a raw runtime_ref JSON object into a typed RuntimeRef. */
+function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
+  if (!isRecord(raw)) return null
+  const group = asString(raw.group)
+  if (!group) return null
+  const item = asString(raw.item) ?? null
+  return { group, item }
+}
+
+export function normalizeKeeperContextMetricsUnavailable(
+  raw: unknown,
+): KeeperContextMetricsUnavailable | null {
+  if (raw === null || raw === undefined) return null
+  if (!isRecord(raw)) {
+    return { kind: 'invalid_payload', reported_kind: null, reported_reason: null }
+  }
+
+  const kind = asString(raw.kind) ?? null
+  const reason = asString(raw.reason) ?? null
+  const invalid: KeeperContextMetricsUnavailable = {
+    kind: 'invalid_payload', reported_kind: kind, reported_reason: reason,
+  }
+  if (kind !== 'not_observed') return invalid
+
+  switch (reason) {
+    case 'context_measurement_missing':
+    case 'turn_record_undecodable':
+    case 'turn_record_read_failed':
+    case 'turn_record_without_usage':
+    case 'turn_record_trace_mismatch':
+      return { kind, reason }
+  }
+
+  const count = (value: unknown): number | null | undefined => {
+    if (value === null || value === undefined) return null
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+      ? value : undefined
+  }
+  const raw_input_tokens = count(raw.raw_input_tokens)
+  const context_window = count(raw.context_window)
+  if (raw_input_tokens === undefined || context_window === undefined) return invalid
+
+  switch (reason) {
+    case 'conversation_cumulative_usage':
+      return raw.usage_scope === 'conversation_cumulative'
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    case 'turn_total_usage':
+      return raw.usage_scope === 'turn_total'
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    case 'usage_scope_unavailable':
+      return raw.usage_scope === 'unavailable'
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    case 'context_tokens_exceed_window':
+      return raw.usage_scope === 'per_request'
+        && raw_input_tokens !== null && context_window !== null
+        && context_window > 0 && raw_input_tokens > context_window
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    default:
+      return invalid
+  }
+}
+
+export function normalizeKeeperLastTurnUsage(raw: unknown): KeeperLastTurnUsage | null {
+  if (!isRecord(raw) || raw.source !== 'keeper_runtime_usage') return null
+  const inputTokens = asNumber(raw.input_tokens)
+  const outputTokens = asNumber(raw.output_tokens)
+  const totalTokens = asNumber(raw.total_tokens)
+  if (
+    inputTokens === undefined
+    || outputTokens === undefined
+    || totalTokens === undefined
+    || !Number.isSafeInteger(inputTokens)
+    || !Number.isSafeInteger(outputTokens)
+    || !Number.isSafeInteger(totalTokens)
+    || inputTokens < 0
+    || outputTokens < 0
+    || totalTokens < 0
+  ) {
+    return null
+  }
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: totalTokens,
+    observed_at: asString(raw.observed_at) ?? null,
+    source: 'keeper_runtime_usage',
+  }
+}
+
+function normalizeKeeperLiveActivitySource(raw: unknown): Keeper['last_activity_source'] {
+  const source = asString(raw)?.trim()
+  switch (source) {
+    case 'keeper_meta':
+    case 'tool_call':
+    case 'approval_pending':
+      return source
+    default:
+      return null
+  }
+}
+
+function normalizeKeeperProfileConfigError(raw: unknown): Keeper['config_error'] {
+  if (!isRecord(raw)) return null
+  const reportedKind = asString(raw.kind)
+  if (!reportedKind) return null
+  const kind: KeeperProfileConfigErrorKind =
+    reportedKind === 'read_error'
+    || reportedKind === 'parse_error'
+    || reportedKind === 'profile_error'
+    || reportedKind === 'invalid_name'
+      ? reportedKind
+      : 'unknown'
+  const keeper = asString(raw.keeper)
+  const keeperPath = asString(raw.keeper_path)
+  const failingPath = asString(raw.failing_path)
+  const detail = asString(raw.detail)
+  if (!keeper || !keeperPath || !failingPath || !detail) return null
+  if (
+    raw.terminal_reason !== 'config_invalid'
+    || raw.blocking !== true
+    || raw.operator_action_required !== true
+    || raw.next_action !== 'fix_keeper_toml_config'
+  ) return null
+  return {
+    keeper,
+    keeper_path: keeperPath,
+    failing_path: failingPath,
+    kind,
+    reported_kind: kind === 'unknown' ? reportedKind : null,
+    detail,
+    terminal_reason: 'config_invalid',
+    blocking: true,
+    operator_action_required: true,
+    next_action: 'fix_keeper_toml_config',
+  }
+}
+
+function normalizeKeeperLiveActivity(raw: unknown): Keeper['live_activity'] {
+  if (!isRecord(raw)) return null
+  return {
+    source: normalizeKeeperLiveActivitySource(raw.source),
+    at: toIsoTimestamp(raw.at) ?? asString(raw.at) ?? null,
+    age_s: asNumber(raw.age_s) ?? null,
+    tool: asString(raw.tool) ?? null,
+    turn: asNumber(raw.turn) ?? null,
+    keeper_turn_id: asNumber(raw.keeper_turn_id) ?? null,
+  }
+}
+
+function normalizeKeeperCurrentGate(raw: unknown): Keeper['current_gate'] {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind) ?? null
+  if (!kind) return null
+  return {
+    kind,
+    source: asString(raw.source) ?? null,
+    id: asString(raw.id) ?? null,
+    tool: asString(raw.tool) ?? null,
+    turn_id: asNumber(raw.turn_id) ?? null,
+    at: toIsoTimestamp(raw.at) ?? asString(raw.at) ?? null,
+    age_s: asNumber(raw.age_s) ?? null,
+    disposition: asString(raw.disposition) ?? null,
+    disposition_reason: asString(raw.disposition_reason) ?? null,
+  }
+}
+
+function normalizeKeeperTrustSeverity(raw: unknown): KeeperTrustLatestEvent['severity'] | null {
+  const severity = asString(raw)?.trim().toLowerCase()
+  switch (severity) {
+    case 'ok':
+    case 'warn':
+    case 'bad':
+      return severity
+    default:
+      return null
+  }
+}
+
+/** Reads the roster row's `sandbox_profile` (emitted by
+ *  `dashboard_http_keeper.ml` straight from
+ *  `keeper_sandbox_config.sandbox_profile_to_string`) through the shared closed
+ *  set. The previous switch listed `docker` and `local` only, so a microvm or
+ *  remote_ssh keeper normalized to null and every consumer rendered it as an
+ *  unknown sandbox; `local` is not a string the runtime can emit at all. */
+function normalizeKeeperSandboxProfile(raw: unknown): SandboxProfile | null {
+  return toSandboxProfile(asString(raw))
+}
+
+/** Maps lowercase backend phase strings (`keeper_state_machine.ml:phase_to_string`)
+ *  to PascalCase `KeeperPhase` values. The two unions must stay 1:1 — this is
+ *  enforced at compile time by `_BACKEND_PHASE_COVERAGE_CHECK` below.
+ *
+ *  SSOT contract:
+ *    backend variant added → lowercase entry added AND KeeperPhase union extended.
+ *    KeeperPhase union extended → coverage check fails if lowercase entry missing.
+ *  Drift in either direction surfaces as a typecheck failure, not a silent
+ *  string-as-truth fallback.
+ */
+const BACKEND_PHASE_LOWERCASE_MAP = {
+  offline: 'Offline',
+  running: 'Running',
+  failing: 'Failing',
+  draining: 'Draining',
+  paused: 'Paused',
+  stopped: 'Stopped',
+  crashed: 'Crashed',
+  restarting: 'Restarting',
+} as const satisfies Record<string, KeeperPhase>
+
+/** Forward-compat PascalCase passthrough — accepts already-typed values from
+ *  test fixtures or future backend emit paths. Constrained to `KeeperPhase`
+ *  keys so a typo would fail typecheck. */
+const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
+  Offline: 'Offline',
+  Running: 'Running',
+  Failing: 'Failing',
+  Draining: 'Draining',
+  Paused: 'Paused',
+  Stopped: 'Stopped',
+  Crashed: 'Crashed',
+  Restarting: 'Restarting',
+} as const satisfies Record<KeeperPhase, KeeperPhase>
+
+// Compile-time coverage check: every KeeperPhase variant must appear as a
+// *value* in the lowercase map. If KeeperPhase adds a new arm but the
+// lowercase entry is forgotten, this line fails to typecheck.
+//
+//   type _Missing = Exclude<KeeperPhase, typeof MAP[keyof typeof MAP]>
+//
+// resolves to `never` only when the map is exhaustive over KeeperPhase.
+type _LowercaseMapValueUnion = typeof BACKEND_PHASE_LOWERCASE_MAP[keyof typeof BACKEND_PHASE_LOWERCASE_MAP]
+type _MissingLowercaseCoverage = Exclude<KeeperPhase, _LowercaseMapValueUnion>
+// If the lowercase map drifts away from `KeeperPhase`, `_MissingLowercaseCoverage`
+// resolves to the un-mapped variant string and the `true` literal fails to assign.
+const _BACKEND_PHASE_COVERAGE_CHECK: [_MissingLowercaseCoverage] extends [never] ? true : _MissingLowercaseCoverage = true
+void _BACKEND_PHASE_COVERAGE_CHECK
+
+export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  if (trimmed in BACKEND_PHASE_LOWERCASE_MAP) {
+    return BACKEND_PHASE_LOWERCASE_MAP[trimmed as keyof typeof BACKEND_PHASE_LOWERCASE_MAP]
+  }
+  if (trimmed in BACKEND_PHASE_PASCAL_PASSTHROUGH) {
+    return BACKEND_PHASE_PASCAL_PASSTHROUGH[trimmed as keyof typeof BACKEND_PHASE_PASCAL_PASSTHROUGH]
+  }
+  return null
+}
+
+// Closed runtime mirror of the `PipelineStage` type (types/core.ts:709).
+// `keeper-store-normalize.ts:569` previously cast `asString(row.pipeline_stage)`
+// directly with `as PipelineStage`, which trusted whatever the backend
+// emitted. `toPipelineStage` enforces the boundary at the normalizer
+// edge so an unrecognized string returns `null` instead of polluting
+// the typed value. Mirrors `toKeeperPhase` (line 94) and
+// `toKeeperLifecycleState` (iter65, sibling cleanup PR).
+const PIPELINE_STAGES: ReadonlySet<PipelineStage> = new Set<PipelineStage>([
+  'idle', 'offline',
+  'failing', 'draining', 'paused',
+  'crashed', 'restarting', 'unknown',
+])
+
+export function toPipelineStage(raw: string | null | undefined): PipelineStage | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  return PIPELINE_STAGES.has(trimmed as PipelineStage)
+    ? (trimmed as PipelineStage)
+    : null
+}
+
+function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (
+    raw === 'active'
+    || raw === 'busy'
+    || raw === 'listening'
+    || raw === 'idle'
+    || raw === 'inactive'
+    || raw === 'offline'
+    || raw === 'paused'
+    || raw === 'unbooted'
+    || raw === 'stopped'
+  ) {
+    return raw
+  }
+  if (raw === 'in_progress' || raw === 'claimed') return 'busy'
+  if (raw === 'left') return 'offline'
+  return 'offline'
+}
+
+// Closed set of display strings that `keeperDisplayStatus` may emit
+// when an offline keeper is rendered. Kept as a `const` set so adding
+// a new value at the `KeeperLifecycleState` union type forces a
+// parallel update here.
+const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
+  'active',
+  'idle', 'offline', 'unbooted', 'stopped',
+  'paused', 'crashed', 'unknown',
+])
+
+// Typed parse: replaces the `as KeeperLifecycleState` cast that
+// previously trusted whatever `keeperDisplayStatus` returned. Returns
+// `null` on unrecognized input; callers decide the fallback. Mirrors
+// `toKeeperPhase` (line 94 of this file) in shape.
+export function toKeeperLifecycleState(raw: string | null | undefined): KeeperLifecycleState | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  return KEEPER_LIFECYCLE_STATES.has(trimmed as KeeperLifecycleState)
+    ? (trimmed as KeeperLifecycleState)
+    : null
+}
+
+export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
+  // RFC-0139 PR-2: strict-superset migration off `isOfflineStatus`
+  // (status-only). `isKeeperOffline` adds the terminal-FSM-phase axis
+  // (Offline/Stopped/Crashed) so a keeper crashed mid-tick
+  // is caught even when its wire-format status hasn't transitioned yet.
+  if (isKeeperOffline(keeper)) {
+    // Keep offline-detail labels on a typed display axis. Unknown future
+    // wire values fall back to idle instead of silently expanding UI state.
+    return toKeeperLifecycleState(keeperDisplayStatus(keeper)) ?? 'idle'
+  }
+
+  const series = keeper.metrics_series
+  if (!series || series.length === 0) {
+    return 'idle'
+  }
+  return 'active'
+}
+
+function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const ts = asString(raw.ts)
+  const title = asString(raw.title)
+  const summary = asString(raw.summary)
+  const severity = normalizeKeeperTrustSeverity(raw.severity)
+  if (!kind || !ts || !title || !summary || !severity) return null
+  return {
+    kind,
+    ts,
+    ts_unix: asNumber(raw.ts_unix) ?? null,
+    keeper_turn_id: asNumber(raw.keeper_turn_id) ?? null,
+    task_id: asString(raw.task_id) ?? null,
+    goal_ids: asStringArray(raw.goal_ids),
+    title,
+    summary,
+    severity,
+    next_human_action: asString(raw.next_human_action) ?? null,
+    trace_id: asString(raw.trace_id) ?? null,
+  }
+}
+
+export function normalizeKeeperTrustTerminalReason(raw: unknown): KeeperTrustTerminalReason | null {
+  if (!isRecord(raw)) return null
+  const code = asString(raw.code)
+  if (!code) return null
+  return {
+    code,
+    source: asString(raw.source) ?? null,
+    severity: normalizeKeeperTrustSeverity(raw.severity),
+    summary: asString(raw.summary) ?? null,
+    next_action: asString(raw.next_action) ?? null,
+  }
+}
+
+export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
+  if (!isRecord(raw)) return null
+  const approvalRaw = isRecord(raw.approval_state) ? raw.approval_state : raw.approval
+  const executionRaw = isRecord(raw.execution_summary) ? raw.execution_summary : raw.execution
+  return {
+    disposition: asTrustDisposition(raw.disposition),
+    disposition_reason: asString(raw.disposition_reason) ?? null,
+    operator_disposition: asString(raw.operator_disposition) ?? null,
+    operator_disposition_reason: asString(raw.operator_disposition_reason) ?? null,
+    needs_attention:
+      typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
+    attention_reason: asString(raw.attention_reason) ?? null,
+    next_human_action: asString(raw.next_human_action) ?? null,
+    latest_terminal_reason: normalizeKeeperTrustTerminalReason(raw.latest_terminal_reason),
+    latest_next_action: asString(raw.latest_next_action) ?? null,
+    approval_state: isRecord(approvalRaw)
+      ? {
+          state: asString(approvalRaw.state) ?? null,
+          summary: asString(approvalRaw.summary) ?? null,
+          pending_count: asNumber(approvalRaw.pending_count) ?? null,
+          pending_first: isRecord(approvalRaw.pending_first)
+            ? {
+                id: asString(approvalRaw.pending_first.id) ?? null,
+                tool_name: asString(approvalRaw.pending_first.tool_name) ?? null,
+                task_id: asString(approvalRaw.pending_first.task_id) ?? null,
+                blocker_class: asString(approvalRaw.pending_first.blocker_class) ?? null,
+              }
+            : null,
+          latest_event_at: asString(approvalRaw.latest_event_at) ?? null,
+        }
+      : null,
+    execution_summary: isRecord(executionRaw)
+      ? {
+          runtime_lane_observation: readRuntimeLaneObservation(executionRaw.runtime_lane_observation),
+          provider_attempt_count:
+            asNumber(executionRaw.provider_attempt_count) ?? null,
+          provider_fallback_applied:
+            asBoolean(executionRaw.provider_fallback_applied) ?? null,
+          provider_selected_model: asString(executionRaw.provider_selected_model) ?? null,
+          runtime_outcome: asString(executionRaw.runtime_outcome) ?? null,
+          sandbox_summary: asString(executionRaw.sandbox_summary) ?? null,
+          sandbox_root: asString(executionRaw.sandbox_root) ?? null,
+          completion_observation_summary:
+            asString(executionRaw.completion_observation_summary) ?? null,
+          latest_receipt_at: asString(executionRaw.latest_receipt_at) ?? null,
+        }
+      : null,
+    latest_causal_event: normalizeKeeperTrustLatestEvent(raw.latest_causal_event),
+  }
+}
+
+function normalizePromptSegments(
+  raw: Record<string, unknown> | null,
+  excludedKeys: Set<string>,
+): Record<string, { bytes: number; fingerprint: string | null }> {
+  const segments: Record<string, { bytes: number; fingerprint: string | null }> = {}
+  if (!raw) return segments
+  for (const [key, value] of Object.entries(raw)) {
+    if (excludedKeys.has(key) || !isRecord(value)) continue
+    const bytes = asNumber(value.bytes)
+    const fingerprint = typeof value.fingerprint === 'string' ? value.fingerprint : null
+    if (bytes == null && fingerprint == null) continue
+    segments[key] = {
+      bytes: bytes ?? 0,
+      fingerprint,
+    }
+  }
+  return segments
+}
+
+// A row whose `attribution` is missing or malformed is dropped, not defaulted.
+// Rows written before this shape existed cannot say whether the turn was
+// measured, so answering that question for them would record a judgement
+// nobody made; the panel omits them instead.
+function normalizeCtxAttribution(raw: Record<string, unknown> | null): CtxAttribution | null {
+  if (!raw || !isRecord(raw.attribution)) return null
+  const attribution = raw.attribution
+  if (attribution.status === 'attributed') {
+    const runtimeProfile = asString(attribution.runtime_profile)
+    const attributedBytes = asNumber(attribution.attributed_bytes)
+    if (runtimeProfile == null || attributedBytes == null) return null
+    return {
+      status: 'attributed',
+      runtime_profile: runtimeProfile,
+      attributed_bytes: attributedBytes,
+      segments: normalizePromptSegments(
+        isRecord(attribution.segments) ? attribution.segments : null,
+        new Set(),
+      ),
+    }
+  }
+  if (attribution.status === 'not_measured') {
+    const reason = asString(attribution.reason)
+    if (reason == null) return null
+    return { status: 'not_measured', reason, detail: asString(attribution.detail) ?? null }
+  }
+  return null
+}
+
+export function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item): KeeperMetricPoint | null => {
+      if (!isRecord(item)) return null
+      const ts = asNumber(item.ts_unix)
+      if (ts == null) return null
+      const rawPrompt = isRecord(item.prompt) ? item.prompt : null
+      const rawUsage = isRecord(item.usage) ? item.usage : null
+      const promptSegments: NonNullable<PromptTelemetry['segments']> =
+        normalizePromptSegments(rawPrompt, new Set(['fingerprint', 'total_bytes', 'cacheable_bytes']))
+      const promptFingerprint =
+        (typeof item.prompt_fingerprint === 'string' ? item.prompt_fingerprint : null)
+        ?? (rawPrompt && typeof rawPrompt.fingerprint === 'string' ? rawPrompt.fingerprint : null)
+      const prompt_metrics =
+        promptFingerprint != null || rawPrompt != null || Object.keys(promptSegments).length > 0
+          ? {
+              fingerprint: promptFingerprint,
+              total_bytes: rawPrompt ? (asNumber(rawPrompt.total_bytes) ?? null) : null,
+              cacheable_bytes: rawPrompt ? (asNumber(rawPrompt.cacheable_bytes) ?? null) : null,
+              segments: promptSegments,
+            }
+          : null
+      const rawCtxComposition = isRecord(item.ctx_composition) ? item.ctx_composition : null
+      const attribution = normalizeCtxAttribution(rawCtxComposition)
+      const ctx_composition: CtxCompositionTelemetry | null =
+        rawCtxComposition != null && attribution != null
+          ? {
+              actual_input_tokens: asNumber(rawCtxComposition.actual_input_tokens) ?? null,
+              attribution,
+            }
+          : null
+      const rawTel = isRecord(item.inference_telemetry) ? item.inference_telemetry : null
+      const rawTimings = rawTel && isRecord(rawTel.timings) ? rawTel.timings : null
+      const latencyMs = asNumber(item.latency_ms) ?? null
+      const inputTokens = rawUsage ? (asNumber(rawUsage.input_tokens) ?? null) : null
+      const outputTokens = rawUsage ? (asNumber(rawUsage.output_tokens) ?? null) : null
+      const totalTokens = rawUsage ? (asNumber(rawUsage.total_tokens) ?? null) : null
+      const wallTokensPerSecond =
+        outputTokens != null && latencyMs != null && latencyMs > 0
+          ? outputTokens / (latencyMs / 1000)
+          : null
+      const inference_telemetry = rawTel ? {
+        system_fingerprint: typeof rawTel.system_fingerprint === 'string' ? rawTel.system_fingerprint : null,
+        timings: rawTimings ? {
+          prompt_n: asNumber(rawTimings.prompt_n) ?? null,
+          prompt_ms: asNumber(rawTimings.prompt_ms) ?? null,
+          prompt_per_second: asNumber(rawTimings.prompt_per_second) ?? null,
+          predicted_n: asNumber(rawTimings.predicted_n) ?? null,
+          predicted_ms: asNumber(rawTimings.predicted_ms) ?? null,
+          predicted_per_second: asNumber(rawTimings.predicted_per_second) ?? null,
+          cache_n: asNumber(rawTimings.cache_n) ?? null,
+        } : null,
+        reasoning_tokens: asNumber(rawTel.reasoning_tokens) ?? null,
+        peak_memory_gb: asNumber(rawTel.peak_memory_gb) ?? null,
+        request_latency_ms: asNumber(rawTel.request_latency_ms) ?? null,
+        ttfrc_ms: asNumber(rawTel.ttfrc_ms) ?? null,
+        prefill_ms: asNumber(rawTel.prefill_ms) ?? null,
+      } : null
+      const runtimeObj = isRecord(item.runtime) ? item.runtime : null
+      return {
+        ts,
+        context_ratio: null,
+        context_tokens: null,
+        context_max: null,
+        latency_ms: latencyMs,
+        channel: typeof item.channel === 'string' ? item.channel : 'turn',
+        cost_usd: asNumber(item.cost_usd) ?? Number.NaN,
+        prompt_fingerprint: promptFingerprint,
+        prompt_metrics,
+        ctx_composition,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        total_tokens: totalTokens,
+        wall_tokens_per_second: wallTokensPerSecond,
+        inference_telemetry,
+        runtime_id: runtimeObj ? (asString(runtimeObj.runtime_id) ?? asString(runtimeObj.name) ?? null) : null,
+        runtime_outcome: runtimeObj ? (asString(runtimeObj.outcome) ?? null) : null,
+        runtime_attempt_count: runtimeObj ? (asNumber(runtimeObj.attempt_count) ?? null) : null,
+      }
+    })
+    .filter((item): item is KeeperMetricPoint => item !== null)
+}
+
+// Top-N list keys that contain arrays of { tool/kind/model/..., count } objects
+const TOP_LIST_KEYS = new Set([
+  'top_tools', 'top_work_kinds',
+])
+
+function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefined {
+  if (!isRecord(raw)) return undefined
+
+  const normalized: Keeper['metrics_window'] = {}
+  for (const [key, value] of Object.entries(raw)) {
+    // Top-N lists: array of objects with at least one meaningful value
+    if (TOP_LIST_KEYS.has(key)) {
+      if (!Array.isArray(value)) continue
+      const items = value.filter(item => {
+        if (!isRecord(item)) return false
+        return Object.values(item).some(v =>
+          (typeof v === 'string' && v.trim() !== '') || typeof v === 'number',
+        )
+      })
+      if (items.length > 0) normalized[key] = items
+      continue
+    }
+
+    // Numbers (majority of fields)
+    const numberValue = asNumber(value)
+    if (numberValue != null) {
+      normalized[key] = numberValue
+      continue
+    }
+
+    // Booleans
+    if (typeof value === 'boolean') {
+      normalized[key] = value
+      continue
+    }
+
+    // Strings
+    if (typeof value === 'string' && value.trim() !== '') {
+      normalized[key] = value
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined
+}
+
+export function normalizeKeepers(raw: unknown): Keeper[] {
+  const rows =
+    Array.isArray(raw)
+      ? raw
+      : isRecord(raw) && Array.isArray(raw.keepers)
+        ? raw.keepers
+        : []
+
+  return rows
+    .map((row): Keeper | null => {
+      if (!isRecord(row)) return null
+      const contextRaw = isRecord(row.context) ? row.context : null
+      const metricsWindow = normalizeMetricsWindow(row.metrics_window)
+
+      const name = asString(row.name)
+      if (!name) return null
+
+      // Context fields decode from the wire only when their declared
+      // producer is the TurnRecord projection
+      // (Keeper_context_observation_projection) — the measurement SSOT.
+      // A retired or unknown source drops entirely (numbers and string):
+      // absence is explained by the typed context_metrics_unavailable
+      // channel, never by echoing a retired producer name.
+      const contextUnavailable = normalizeKeeperContextMetricsUnavailable(row.context_metrics_unavailable)
+      const topContextSource = asString(row.context_source) ?? null
+      const topContextMeasured = topContextSource === 'turn_record' && contextUnavailable === null
+      const contextRatio = topContextMeasured ? asNumber(row.context_ratio) ?? null : null
+      const statusRaw = asString(row.status) ?? 'offline'
+      const model = undefined
+      const metricsSeries = normalizeMetricsSeries(row.metrics_series)
+
+      const nestedContextSource = contextRaw ? asString(contextRaw.source) ?? null : null
+      const nestedContextMeasured = nestedContextSource === 'turn_record' && contextUnavailable === null
+      const normalizedContext =
+        contextRaw
+          ? {
+              source: nestedContextMeasured ? nestedContextSource : null,
+              context_ratio: nestedContextMeasured ? asNumber(contextRaw.context_ratio) ?? null : null,
+              context_tokens: nestedContextMeasured ? asNumber(contextRaw.context_tokens) ?? null : null,
+              context_max: nestedContextMeasured ? asNumber(contextRaw.context_max) ?? null : null,
+              observed_at: nestedContextMeasured ? asString(contextRaw.observed_at) ?? null : null,
+              turn_ref: nestedContextMeasured ? asString(contextRaw.turn_ref) ?? null : null,
+              absolute_turn: nestedContextMeasured ? asNumber(contextRaw.absolute_turn) ?? null : null,
+              request_body_bytes: nestedContextMeasured ? asNumber(contextRaw.request_body_bytes) ?? null : null,
+              message_count: asNumber(contextRaw.message_count),
+              has_checkpoint: typeof contextRaw.has_checkpoint === 'boolean' ? contextRaw.has_checkpoint : undefined,
+            }
+          : undefined
+
+      const providerHealth: ProviderHealth | null = null
+      const runtimeBlockerClass = asKeeperRuntimeBlockerClass(row.runtime_blocker_class)
+      const runtimeBlockerSummary = asString(row.runtime_blocker_summary) ?? null
+      const trust = normalizeKeeperTrust(row.runtime_trust ?? row.trust)
+      const terminalReason = trust?.latest_terminal_reason ?? null
+      const nextHumanAction = asString(row.next_human_action) ?? null
+      const stopCause = normalizeStopCause({
+        runtime_blocker_class: runtimeBlockerClass,
+        runtime_blocker_summary: runtimeBlockerSummary,
+        terminal_reason_code: terminalReason?.code ?? null,
+        terminal_reason_summary: terminalReason?.summary ?? null,
+        terminal_reason_severity: terminalReason?.severity ?? null,
+        terminal_reason_next_action: terminalReason?.next_action ?? null,
+        attention_reason: asString(row.attention_reason) ?? trust?.attention_reason ?? null,
+        next_action: nextHumanAction ?? trust?.next_human_action ?? trust?.latest_next_action ?? null,
+      })
+
+      return {
+        name,
+        runtime_class: 'keeper' as const,
+        // Typed parse replaces an `as PipelineStage` cast that trusted
+        // whatever string `row.pipeline_stage` carried (it's `string | null`
+        // upstream — see api/dashboard.ts:265). Unrecognized values fall
+        // back to `'unknown'` (a valid PipelineStage tag) so consumers
+        // can render the keeper as "stage not known yet" rather than
+        // routing an arbitrary backend string through a lying type.
+        pipeline_stage: toPipelineStage(asString(row.pipeline_stage)) ?? 'unknown',
+        pipeline_stage_detail: asString(row.pipeline_stage_detail) ?? null,
+        lifecycle_phase:
+          toKeeperPhase(asString(row.lifecycle_phase))
+          ?? toKeeperPhase(asString(row.phase)),
+        phase: toKeeperPhase(asString(row.phase)),
+        paused: asBoolean(row.paused),
+        registered:
+          typeof row.registered === 'boolean' ? row.registered : undefined,
+        emoji: asString(row.emoji),
+        koreanName: asString(row.koreanName) ?? asString(row.korean_name),
+        keeper_id: asString(row.keeper_id) ?? null,
+        trace_id: asString(row.trace_id),
+        model,
+        primary_model: undefined,
+        active_model: undefined,
+        active_model_label: null,
+        last_model_used: undefined,
+        next_model_hint: null,
+        runtime_id: asString(row.runtime_id) ?? null,
+        runtime_ref: normalizeRuntimeRef(row.runtime_ref),
+        runtime_canonical: asString(row.runtime_canonical) ?? asString(row.selected_runtime_canonical) ?? null,
+        selected_runtime_canonical: asString(row.selected_runtime_canonical) ?? null,
+        declaration_only: row.declaration_only === true,
+        preparation_requirements: Array.isArray(row.preparation_requirements)
+          ? row.preparation_requirements.filter((value): value is 'runtime_check_required' | 'sandbox_check_required' | 'declaration_invalid' =>
+            value === 'runtime_check_required' || value === 'sandbox_check_required' || value === 'declaration_invalid')
+          : [],
+        portrait: readKeeperPortrait(row.portrait),
+        board_address: readKeeperBoardAddress(row.board_address),
+        candle_balance_milli: readCandleBalance(row.candle_balance_milli),
+        candle_account_revision: readCandleAccountRevision(row.candle_account_revision),
+        status: normalizeKeeperAgentStatus(statusRaw),
+        keepalive_running:
+          typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
+        keeper_keepalive_interval_s:
+          asNumber(row.keeper_keepalive_interval_s) ?? null,
+        activation_mode: parseKeeperActivationMode(row.activation_mode) ?? undefined,
+        pause_state: asKeeperPauseState(row.pause_state),
+        runtime_blocker_state: asKeeperRuntimeBlockerState(row.runtime_blocker_state),
+        runtime_blocker_class: runtimeBlockerClass,
+        runtime_blocker_summary: runtimeBlockerSummary,
+        stop_cause: stopCause,
+        needs_attention:
+          typeof row.needs_attention === 'boolean' ? row.needs_attention : null,
+        attention_reason: asString(row.attention_reason) ?? null,
+        next_human_action: nextHumanAction,
+        config_error: normalizeKeeperProfileConfigError(row.config_error),
+        trust,
+        sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
+        sandbox_target: asString(row.sandbox_target) ?? null,
+        keeper_last_error: asString(row.keeper_last_error) ?? null,
+        blocked_task_count: asNumber(row.blocked_task_count) ?? null,
+        goal_progress: isRecord(row.goal_progress)
+          ? {
+              linked_task_count: asNumber(row.goal_progress.linked_task_count) ?? undefined,
+              done_task_count: asNumber(row.goal_progress.done_task_count) ?? undefined,
+              open_task_count: asNumber(row.goal_progress.open_task_count) ?? undefined,
+              blocked_task_count: asNumber(row.goal_progress.blocked_task_count) ?? undefined,
+              convergence: asNumber(row.goal_progress.convergence) ?? null,
+            }
+          : null,
+        created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
+        updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
+        turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
+        total_turns: asNumber(row.total_turns) ?? asNumber(row.turn_count),
+        total_tokens: asNumber(row.total_tokens),
+        cost_coverage: readKeeperCostCoverage(row.total_cost_usd),
+        last_latency_ms: asNumber(row.last_latency_ms),
+        keeper_age_s: asNumber(row.keeper_age_s),
+        last_turn_ago_s: asNumber(row.last_turn_ago_s),
+        last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
+        last_proactive_reason: asString(row.last_proactive_reason) ?? null,
+        last_activity_ago_s: asNumber(row.last_activity_ago_s),
+        last_activity_at: toIsoTimestamp(row.last_activity_at) ?? asString(row.last_activity_at) ?? null,
+        last_activity_source: normalizeKeeperLiveActivitySource(row.last_activity_source),
+        live_activity: normalizeKeeperLiveActivity(row.live_activity),
+        current_gate: normalizeKeeperCurrentGate(row.current_gate),
+        last_proactive_preview: asString(row.last_proactive_preview) ?? null,
+        runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
+        context_ratio: contextRatio,
+        context_tokens: topContextMeasured ? asNumber(row.context_tokens) ?? null : null,
+        context_max: topContextMeasured ? asNumber(row.context_max) ?? null : null,
+        context_source: topContextMeasured ? topContextSource : null,
+        context_metrics_unavailable: contextUnavailable,
+        last_turn_usage: normalizeKeeperLastTurnUsage(row.last_turn_usage),
+        context: normalizedContext,
+        recent_input_preview: asString(row.recent_input_preview) ?? null,
+        recent_output_preview: asString(row.recent_output_preview) ?? null,
+        recent_tool_names: asStringArray(row.recent_tool_names) ?? [],
+        latest_tool_names: asStringArray(row.latest_tool_names) ?? [],
+        latest_tool_call_count: asNumber(row.latest_tool_call_count) ?? null,
+        tool_audit_source: asString(row.tool_audit_source) ?? null,
+        tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
+        diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
+        conversation_tail_count: asNumber(row.conversation_tail_count),
+        addressed_message_count: asNumber(row.addressed_message_count),
+        metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
+        metrics_window: metricsWindow,
+        provider_health: providerHealth,
+      }
+    })
+    .filter((row): row is Keeper => row !== null)
+}

@@ -1,0 +1,35 @@
+{
+  "historical_invalid_rows": 1,
+  "new_run_events": [
+    {
+      "event": "register",
+      "id": "01a094e3-89fc-7000-9517-7a4e524dcc6e",
+      "started_at": 1789204335.100755,
+      "registration": {
+        "goal_id": "exhibition-publication-baseline",
+        "request_id": "e106acb7d86b68c159ee18b0093d3ced",
+        "criterion": {
+          "revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+          "title": "가상 전시 출판물 완성",
+          "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.",
+          "target_value": "5개 기준 모두 충족"
+        },
+        "review_kind": "proof",
+        "authority_actor": "verifier_exact"
+      }
+    },
+    {
+      "event": "complete",
+      "id": "01a094e3-89fc-7000-9517-7a4e524dcc6e",
+      "completion": {
+        "outcome": "deferred",
+        "evaluated_verdict": null,
+        "elapsed_s": 0.7555530071258545,
+        "tools": [],
+        "detail": "Authorization error: You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+        "evaluator_runtime": "kimi_coding.kimi-for-coding"
+      }
+    }
+  ],
+  "verdict_committed": false
+}

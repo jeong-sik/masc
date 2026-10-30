@@ -1,0 +1,22 @@
+; Agent_core_sha256, Agent_core_md5, Agent_core_sha1 — the only hashes masc and
+; agent_core call (RFC-0474 L2).
+;
+; Digestif's string and bytes updates hash their whole argument in one
+; [@@noalloc] C call that does not release the runtime, so every other domain
+; waits at the next stop-the-world barrier until the hash ends. These modules
+; feed bounded slices instead. No other stanza lists digestif, and the project
+; sets (implicit_transitive_deps false), so code outside this library cannot
+; name Digestif.
+;
+; It depends on digestif alone, below every agent_core and masc library. The
+; modules are (wrapped false) under names no other library uses.
+
+(include_subdirs no)
+
+(library
+ (name agent_core_digest)
+ (public_name masc.agent_core.digest)
+ (wrapped false)
+ (modules agent_core_digest_slices agent_core_sha256 agent_core_md5 agent_core_sha1)
+ (private_modules agent_core_digest_slices)
+ (libraries digestif))

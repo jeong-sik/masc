@@ -1,0 +1,616 @@
+(** Runtime_muse_msp — the Muse Session Protocol (MSP) v1 wire codec.
+
+    [muse serve] speaks MSP: newline-delimited JSON-RPC 2.0 over stdio, one
+    object per line. This module is the pure boundary of that protocol. It
+    builds the frames MASC writes and decodes the frames the server writes
+    into closed types. It spawns nothing and holds no state; the process
+    client drives it.
+
+    The source of truth is the stable MSP schema that
+    github.com/meta-models/muse-code-sdk publishes ([schema/msp/msp.d.ts] at
+    22a8a56, host 1.4.11). Every enum the schema marks open ([TurnTerminal],
+    [TurnErrorKind], [ItemKind], [ItemStatus], [MessagePhase],
+    [ApprovalDecision], and the approval subject kind) decodes to a closed
+    variant. The variant has one
+    [Unrecognized_*] arm that keeps the wire value, so a later host's value
+    is reported as itself rather than taken for a value MASC knows. The
+    enums the schema closes ([ApprovalMode], [ReasoningEffort]) have no such
+    arm. *)
+
+type error =
+  { stage : string
+  ; detail : string
+  }
+
+val error_to_string : error -> string
+
+(** {1 Frames} *)
+
+(** A JSON-RPC id. MASC numbers its own requests; the server's requests to
+    MASC carry integers in the published transcripts, but JSON-RPC allows a
+    string, and the published transcripts also answer a string id. *)
+type request_id =
+  | Int_id of int
+  | String_id of string
+
+val request_id_to_json : request_id -> Yojson.Safe.t
+
+type wire_message =
+  | Response of
+      { id : request_id
+      ; result : Yojson.Safe.t
+      }
+  | Response_error of
+      { id : request_id option
+        (** [None] for JSON-RPC's [null] id: an error the server could not
+            tie to a request, such as a line it could not parse. *)
+      ; code : int
+      ; message : string
+      ; data : Yojson.Safe.t option
+      }
+  | Notification of
+      { method_ : string
+      ; params : Yojson.Safe.t
+      }
+  | Server_request of
+      { id : request_id
+      ; method_ : string
+      ; params : Yojson.Safe.t
+      }
+
+val parse_wire_line : string -> (wire_message, error) result
+(** Decode one stdout line. A line that repeats a key anywhere is refused:
+    it parses, but it does not say one thing. A notification with no
+    [params] reads as an empty object; MSP's own [initialized] has none. *)
+
+(** {1 Client to server} *)
+
+type client_info =
+  { name : string  (** [[a-z0-9_]+]; the host refuses anything else. *)
+  ; version : string
+  }
+
+(** A grantable connection capability. MSP leaves this set open, so a name
+    the host grants that MASC does not know is kept verbatim. *)
+type capability =
+  | Session_mcp
+      (** Required before [session/start] or [session/resume] may carry
+          [config.mcpServers]; without the grant the host fails the whole
+          command with [capabilityRequired] (-32010). *)
+  | User_shell
+  | Session_list_stream
+  | Unrecognized_capability of string
+
+val initialize_request
+  :  id:int
+  -> client_info
+  -> requested_capabilities:capability list
+  -> user_input_dialogs:bool
+  -> Yojson.Safe.t
+(** [user_input_dialogs:false] tells the host this client cannot answer a
+    [userInput/request], so the host does not send one. Absent on the wire
+    means capable, so [true] leaves the member off. *)
+
+val initialized_notification : Yojson.Safe.t
+(** Sent once after the [initialize] response. *)
+
+(** The approval enforcement modes. MSP closes this set: a client selects a
+    mode the host already defines and never describes one. *)
+type approval_mode =
+  | Allow_all
+  | Prompt_unmatched
+  | On_request
+  | Deny_unmatched
+
+val approval_mode_to_string : approval_mode -> string
+
+(** The eight reasoning tiers. MSP closes this set. [Effort_none] is
+    refused by the [meta] provider (the CLI exits 2 on it), so a catalog row
+    that names it fails at the host. MASC does not replace it with another
+    tier. *)
+type reasoning_effort =
+  | Effort_none
+  | Effort_minimal
+  | Effort_low
+  | Effort_medium
+  | Effort_high
+  | Effort_xhigh
+  | Effort_max
+  | Effort_ultra
+
+val reasoning_effort_to_string : reasoning_effort -> string
+val reasoning_effort_of_string : string -> reasoning_effort option
+
+type model_catalog_source =
+  | Provider_catalog
+  | Fake_catalog
+  | Unresolved_catalog
+  | Bundled_catalog
+  | Config_catalog
+  | Unknown_catalog_source of string
+
+val model_catalog_source_to_string : model_catalog_source -> string
+
+type model_effort_variants =
+  | Unknown_efforts
+  | Known_efforts of reasoning_effort list
+
+type model_catalog_entry =
+  { model_id : string
+  ; display_label : string
+  ; provider_id : string
+  ; profile_id : string option
+  ; context_limit : int option
+  ; output_limit : int option
+  ; is_default : bool
+  ; variants : model_effort_variants
+  }
+
+type model_catalog =
+  { source : model_catalog_source
+  ; provider_id : string
+  ; profile_id : string option
+  ; models : model_catalog_entry list
+  }
+
+val model_list_request : id:int -> Yojson.Safe.t
+val parse_model_list_result : Yojson.Safe.t -> (model_catalog, error) result
+(** MSP model metadata, preserving its source, nullable limits and explicit
+    unknown efforts. The query names no session or command. Listing models
+    does not prove sign-in, availability to this account, or a model turn. *)
+
+(** A native MCP server added to one session only
+    ([SessionConfig.mcpServers]). The schema closes the transport union.
+    MASC offers its tools through a loopback HTTP bridge, so only the
+    streamable-HTTP arm is built here. *)
+type mcp_server =
+  | Streamable_http of
+      { url : string
+      ; headers : (string * string) list
+      ; required : bool
+        (** [true] makes a server that fails to start fail the session.
+            [false] lets the session run without it. *)
+      }
+
+type session_config = { mcp_servers : (string * mcp_server) list }
+
+val session_start_request
+  :  id:int
+  -> command_id:string
+  -> workspace_root:string
+  -> model_id:string option
+  -> approval_mode:approval_mode option
+  -> config:session_config
+  -> Yojson.Safe.t
+(** [workspace_root] must be absolute; the host folds it into the session's
+    first record. [None] for [model_id] or [approval_mode] leaves the host
+    default in place. *)
+
+val session_resume_request
+  :  id:int
+  -> command_id:string
+  -> session_id:string
+  -> config:session_config
+  -> Yojson.Safe.t
+(** Loads an existing session without replaying its history into the
+    result ([excludeItems]). The host already holds that history, and MASC
+    does not read it back. *)
+
+type input_part =
+  | Text of string
+  | Image of
+      { media_type : string
+      ; base64_data : string  (** Raw base64, no data-URL prefix. *)
+      }
+
+val session_set_approval_mode_request
+  :  id:int
+  -> command_id:string
+  -> session_id:string
+  -> approval_mode
+  -> Yojson.Safe.t
+(** [session/resume] carries no approval mode: a resumed session keeps the
+    one it last had. This command selects the mode for the next action. *)
+
+val session_set_model_request
+  :  id:int
+  -> command_id:string
+  -> session_id:string
+  -> model_id:string
+  -> Yojson.Safe.t
+(** [session/resume] carries no model either. The selection applies to the
+    session's next model calls; when that model already runs, the host
+    answers noop and records nothing. *)
+
+val turn_start_request
+  :  id:int
+  -> session_id:string
+  -> command_id:string
+  -> input:input_part list
+  -> reasoning_effort:reasoning_effort option
+  -> Yojson.Safe.t
+(** [input] must be non-empty; the host refuses an empty list as invalid
+    params. The fresh turn's id is [command_id] (MSP SS3.1.4). *)
+
+val turn_interrupt_request
+  :  id:int
+  -> session_id:string
+  -> command_id:string
+  -> turn_id:string
+  -> Yojson.Safe.t
+
+val usage_read_request : id:int -> Yojson.Safe.t
+
+val server_request_error : request_id -> code:int -> message:string -> Yojson.Safe.t
+(** A JSON-RPC error answer to a server request this client does not serve. *)
+
+val method_not_found : int
+(** JSON-RPC's [-32601]. *)
+
+val server_request_ack : request_id -> Yojson.Safe.t
+(** The empty result that acknowledges a server request. It only admits the
+    request. The decision goes through a separate command, for an approval
+    that is [approval_decide_request]. *)
+
+(** {1 Server to client} *)
+
+type session_durability = Durable | Ephemeral
+(** Recognized host durability states. A future wire state is not evidence
+    that the host can resume sessions and is refused by this decoder. *)
+
+type initialize_result =
+  { server_version : string
+  ; user_agent : string
+  ; muse_home : string
+  ; session_durability : session_durability
+    (** Host-wide storage posture, fixed at host construction. MSP v1 defines
+        an absent field as [Durable]: no host omitting it supports ephemeral
+        sessions. Explicit unknown or malformed values are refused. *)
+  ; schema_fingerprint : string
+  ; granted_capabilities : capability list
+    (** Fixed for the connection's lifetime. *)
+  }
+
+val parse_initialize_result : Yojson.Safe.t -> (initialize_result, error) result
+(** Refuses a [schema.version] other than 1: this codec reads MSP v1 only,
+    and the SDK is a pre-1.0 developer preview, so a host that moved on is
+    named at the handshake rather than by a missing field mid-turn. *)
+
+val corpus_schema_fingerprint : string
+(** The stable schema bundle fingerprint published with the conformance
+    corpus this codec is tested against (muse-code-sdk 22a8a56,
+    [schema/msp/stable/manifest.json]). A host reports its own bundle's
+    fingerprint in [initialize]; the corpus transcripts carry a hand-authored
+    placeholder instead, so this value comes from the manifest. A host that
+    reports another one still speaks v1, but its frames were not the ones
+    proven here; the process client reports the difference rather than
+    refusing it. *)
+
+type session =
+  { session_id : string
+  ; turn_count : int (** The host's nonnegative completed-turn count. *)
+  ; model_id : string option
+  ; workspace_root : string option
+  ; approval_mode : approval_mode option
+    (** [None] means the host did not report a folded mode, not approval. *)
+  }
+
+val parse_session_result : stage:string -> Yojson.Safe.t -> (session, error) result
+(** The [session] member of a [session/start] or [session/resume] result. *)
+
+val parse_set_approval_mode_result : Yojson.Safe.t -> (approval_mode, error) result
+(** Require an accepted [session/setApprovalMode] result and decode its
+    [effectiveMode.mode]. Unknown, missing or malformed modes are refused. *)
+
+val parse_set_model_result : Yojson.Safe.t -> (unit, error) result
+(** Require an accepted [session/setModel] result. The ack carries no model:
+    the host applies the selection to the session's next model calls, or
+    answers noop when that model already runs. *)
+
+type turn_disposition =
+  | Started
+  | Queued
+  | Steered
+  | Unrecognized_disposition of string
+
+type turn_start_ack =
+  { turn_id : string
+  ; disposition : turn_disposition
+  }
+
+val parse_turn_start_result : Yojson.Safe.t -> (turn_start_ack, error) result
+
+(** A turn's summed token counters, verbatim ([TokenUsage]). The schema
+    warns that [cached_tokens] sits inside or beside [input_tokens]
+    depending on the provider, so nothing here adds them. *)
+type token_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; cached_tokens : int
+  ; reasoning_tokens : int
+  ; prompt_tokens : int option
+      (** Counted-once prompt count from [session/tokenUsage]; absent on a
+          raw [turn/completed] aggregate. Never inferred from cache counters. *)
+  ; cache_read_tokens : int option
+  ; cache_write_tokens : int option
+  }
+
+type turn_error_kind =
+  | Step_limit
+  | Config_error
+  | Projection_error
+  | Log_error
+  | Workflow_launch_error
+  | Environment_error
+  | Model_error
+  | Launch_error
+  | Auth_required
+  | Unrecognized_error_kind of string
+
+val turn_error_kind_to_string : turn_error_kind -> string
+
+type turn_error =
+  { kind : turn_error_kind
+  ; message : string
+  ; retryable : bool  (** The host's judgment that the same input may succeed. *)
+  }
+
+type terminal =
+  | Terminal_completed
+  | Terminal_failed of turn_error
+  | Terminal_host_died of { reason : string }
+      (** A "failed" terminal the host synthesized because it died mid-turn.
+          It carries [reason] instead of an error (the schema names `crash`,
+          `crash_inferred` and `incomplete`); the text is kept as the host
+          wrote it and is for diagnostics only. *)
+  | Terminal_cancelled
+  | Unrecognized_terminal of string
+
+type item_kind =
+  | User_message
+  | Agent_message
+  | Reasoning
+  | Tool_call
+  | User_shell
+  | Subagent
+  | Workflow
+  | Reminder_child
+  | Compaction
+  | Unrecognized_item_kind of string
+
+type item_status =
+  | In_progress
+  | Item_completed_status
+  | Item_failed
+  | Item_cancelled
+  | Item_rejected
+  | Item_timed_out
+  | Unrecognized_item_status of string
+
+(** What started a compaction ([CompactionTrigger]); open on the wire. *)
+type compaction_trigger =
+  | Compaction_manual
+  | Compaction_auto
+  | Unrecognized_compaction_trigger of string
+
+val compaction_trigger_to_string : compaction_trigger -> string
+
+(** How a compaction ended ([CompactionOutcome]); open on the wire. *)
+type compaction_outcome =
+  | Compaction_compacted
+  | Compaction_noop
+  | Compaction_failed
+  | Compaction_cancelled
+  | Unrecognized_compaction_outcome of string
+
+val compaction_outcome_to_string : compaction_outcome -> string
+
+(** The members of a [compaction] item, each optional in the schema. A
+    [Compaction_auto] trigger with [Compaction_compacted] means the host
+    rewrote what the model will see: measured on host 1.4.0, an input larger
+    than the window reached the model as a summary of about 4 KB. *)
+type compaction =
+  { trigger : compaction_trigger option
+  ; outcome : compaction_outcome option
+  ; strategy_id : string option  (** The summarizer, as the host names it. *)
+  ; tokens_before : int option
+  ; tokens_after : int option
+  ; reason : string option  (** Display text only; never branched on. *)
+  }
+
+(** The phase the model declared when it committed an agent message
+    ([MessagePhase]); open on the wire. A turn may narrate before and between
+    tool calls ([Commentary]) and then answer ([Final_answer]); the phase,
+    not the message's position in the turn, marks the answer. The host sets
+    it on the completed item and leaves it out of [item/started]. On a
+    completed item the schema reads an absent or unrecognized phase as
+    ["finalAnswer"]; a host that predates the member sends none. *)
+type message_phase =
+  | Commentary
+  | Final_answer
+  | Unrecognized_message_phase of string
+
+(** One transcript item at one revision. Only the members MASC projects are
+    decoded; the schema keeps the rest open. [text] is the accumulated text
+    of an [Agent_message], and [message_phase] its declared phase ([Some]
+    only on an [Agent_message] that carries one). [tool], [call_id], [args]
+    (the model's argument JSON, verbatim) and [visible_output] belong to a
+    [Tool_call]. *)
+type item =
+  { item_id : string
+  ; kind : item_kind
+  ; status : item_status
+  ; revision : int
+  ; turn_id : string option
+  ; text : string option
+  ; message_phase : message_phase option
+  ; tool : string option
+  ; call_id : string option
+  ; args : string option
+  ; visible_output : string option
+  ; compaction : compaction option  (** [Some] on a [Compaction] item only. *)
+  }
+
+(** The field an [item/delta] appends to. Absent on the wire means [text]. *)
+type delta_field =
+  | Delta_text
+  | Delta_output
+  | Delta_summary of int
+  | Unrecognized_delta_field of string
+
+type usage_window =
+  { used_percent : int  (** Verbatim; above 100 when over quota. *)
+  ; resets_at_ms : int
+  ; window_duration_mins : int
+  }
+
+type usage_weekly =
+  { weekly_used_percent : int
+  ; weekly_resets_at_ms : int
+  }
+
+(** The last subscription usage the host observed ([SubscriptionUsage]).
+    It is point-in-time: [observed_at_ms] is when the host received it. *)
+type subscription_usage =
+  { observed_at_ms : int
+  ; tier : string
+  ; window : usage_window
+  ; weekly : usage_weekly
+  }
+
+val exhausted_subscription_reset_ms : subscription_usage -> int option
+(** Latest provider reset among exhausted current/weekly windows. MSP reports
+    percentage integers (100 or above is exhausted) and epoch milliseconds;
+    nonexhausted or already-reset observations contribute no window. *)
+
+type notification =
+  | Turn_started of
+      { session_id : string
+      ; turn_id : string
+      }
+  | Turn_completed of
+      { session_id : string
+      ; turn_id : string
+      ; terminal : terminal
+      ; usage : token_usage option
+      ; reason : string option  (** Display text only; never branched on. *)
+      }
+  | Item_started of
+      { session_id : string
+      ; item : item
+      }
+  | Item_updated of
+      { session_id : string
+      ; item : item
+      }
+  | Item_completed of
+      { session_id : string
+      ; item : item
+      }
+  | Item_delta of
+      { session_id : string
+      ; item_id : string
+      ; field : delta_field
+      ; delta : string
+      }
+  | Usage_changed of subscription_usage
+  | View_gap of
+      { session_id : string option
+      ; after : string
+      ; next : string
+      }
+      (** Dropped view events between two opaque cursors. A missing session
+          identity cannot prove the gap belongs to another subscription. *)
+  | Model_usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model_id : string option
+      ; view_cursor : string
+      ; usage : token_usage
+      }
+      (** [session/tokenUsage], one per model call: the model that produced
+          that usage ([modelId]), [None] when the host did not name it. The
+          counted-once prompt count and raw counters are retained even when
+          [turn/completed] omits its optional aggregate. [view_cursor] is the
+          opaque identity used to avoid counting a replay twice. *)
+  | Unhandled_notification of { method_ : string }
+      (** A method this codec does not project: [session/started] and the
+          other session projections, approval view events, and
+          methods a later host adds. The schema requires clients to tolerate
+          these. The method is kept so an observer can report it. *)
+
+val parse_notification : method_:string -> Yojson.Safe.t -> (notification, error) result
+
+type approval_decision =
+  | Approved
+  | Approved_for_session
+  | Approved_policy_amendment
+  | Denied
+  | Denied_policy_amendment
+  | Timed_out
+  | Abort
+  | Unrecognized_decision of string
+
+type approval_subject_kind =
+  | Subject_shell
+  | Subject_file_access
+  | Subject_network
+  | Subject_unix_socket
+  | Subject_process
+  | Subject_tool
+  | Unrecognized_subject of string
+
+type approval_choice_scope =
+  | Once
+  | Session
+  | Local_persistent
+  | Unrecognized_scope of string
+
+type approval_choice =
+  { choice_id : string
+  ; decision : approval_decision
+  ; scope : approval_choice_scope
+  }
+
+type approval_requirement =
+  { requirement_approval_id : string
+  ; source_index : int
+  }
+
+type approval_request =
+  { session_id : string
+  ; approval_id : string
+  ; requirement : approval_requirement
+  ; turn_id : string
+  ; tool_name : string
+  ; subject_kind : approval_subject_kind
+  ; subject_tool_name : string option
+  ; choices : approval_choice list
+  }
+
+type server_request =
+  | Approval_request of approval_request
+  | User_input_request of
+      { session_id : string
+      ; user_input_id : string
+      ; turn_id : string
+      }
+  | Unhandled_server_request of { method_ : string }
+
+val parse_server_request : method_:string -> Yojson.Safe.t -> (server_request, error) result
+
+val approval_decide_request
+  :  id:int
+  -> command_id:string
+  -> approval_request
+  -> approval_choice
+  -> Yojson.Safe.t
+(** Decides [approval_request] with one of its own [choices]; taking the
+    choice rather than its id keeps a choice the host never offered out of
+    reach. The request's
+    [requirement] is sent back unchanged: MSP uses it to guard against a
+    decision landing on a later stage of the approval. *)
+
+val parse_usage_read_result : Yojson.Safe.t -> (subscription_usage option, error) result
+(** [None] when the host has observed no usage yet. The schema omits the
+    member in that case rather than sending an error. *)

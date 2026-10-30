@@ -1,0 +1,72 @@
+{
+  "scope": "production Item component in a controlled browser fixture; synthetic account and roster revisions",
+  "source_sha": "6f4eb0dabeb7f4ddbb441ef49561085aa60a40f0",
+  "browser_version": "149.0.7827.55",
+  "requests": [
+    {
+      "failed": false,
+      "owned_items": [
+        "crown"
+      ]
+    },
+    {
+      "failed": false,
+      "owned_items": [
+        "crown",
+        "glasses"
+      ]
+    },
+    {
+      "failed": false,
+      "owned_items": [
+        "crown",
+        "glasses"
+      ]
+    },
+    {
+      "failed": true,
+      "owned_items": [
+        "crown",
+        "glasses"
+      ]
+    },
+    {
+      "failed": false,
+      "owned_items": [
+        "crown",
+        "glasses"
+      ]
+    }
+  ],
+  "captures": [
+    {
+      "name": "keeper-items-desktop",
+      "sha256": "f4774216c46af16705688321535d24b08d7bbef6f6a2c0684c6bb2c15dcbda99"
+    },
+    {
+      "name": "keeper-items-mobile",
+      "sha256": "e47fa89f302c0a7a9f352629bbfc1bc2d7ed38ecd5cec0a3a59fbfd47f1a61e3"
+    },
+    {
+      "name": "keeper-items-loading",
+      "sha256": "853c0e4fc636740ddaa5c78530c91c408664e69972aad516d64f3dea6b507322"
+    },
+    {
+      "name": "keeper-items-free-purchase",
+      "sha256": "6a5c6190d87c7ec8613f11bb831a4482259bc3cf82670d54209c8ae20801ea8e"
+    },
+    {
+      "name": "keeper-items-price-change",
+      "sha256": "4ca261a163489f7564d2cc5d1129f1c21b08bb5aa14da034379c49fa0d858a1a"
+    },
+    {
+      "name": "keeper-items-unavailable",
+      "sha256": "fcd2c58e0f7572094545ab46177bcf131be3b6384f1e1ebe6e072f9b5c4cf276"
+    },
+    {
+      "name": "keeper-items-recovered",
+      "sha256": "42c46b3a67e2ed83261e874fa2515de374f778e2f5cc87891a08ba0c55907ae9"
+    }
+  ],
+  "errors": []
+}

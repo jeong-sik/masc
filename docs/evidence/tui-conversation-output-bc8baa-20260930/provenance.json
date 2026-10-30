@@ -1,0 +1,14 @@
+{
+  "provenance": "fixture PTY captured by CI; monochrome frame reconstructed from terminal bytes",
+  "head_sha": "bc8baa583b0e86f12387abce8728fdb4d4880c66",
+  "run_id": 36664252263,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/36664252263",
+  "run_conclusion": "success",
+  "scenario": "autonomous output behind queued chat",
+  "capture_sha256": "75207b66445920497c0e64bd926cdf6775823066d4e059145bd7068cbf582ae6",
+  "limitations": [
+    "before main integration",
+    "not production or installed-binary evidence",
+    "reconstructed image does not verify emulator glyph/color behavior"
+  ]
+}

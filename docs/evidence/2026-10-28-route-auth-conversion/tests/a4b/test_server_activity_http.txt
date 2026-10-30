@@ -1,0 +1,18 @@
+[2026-10-29 00:26:03] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `Server_activity_http'.
+This run has ID `8948A3U1'.
+
+  [OK]          slice_default_events_to_limit          0   len < limit.
+  [OK]          slice_default_events_to_limit          1   len == limit.
+  [OK]          slice_default_events_to_limit          2   len > limit.
+  [OK]          slice_default_events_to_limit          3   empty events.
+  [OK]          slice_default_events_to_limit          4   missing seq fallback.
+  [OK]          slice_default_events_to_limit          5   non-Assoc passthro...
+  [OK]          slice_default_events_to_limit          6   count and limit up...
+  [OK]          prompt_override_request                0   decodes current re...
+  [OK]          prompt_override_request                1   rejects noncanonic...
+  [OK]          runtime_prompt_assets                  0   lists txt assets w...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/Server_activity_http'.
+Test Successful in 0.025s. 10 tests run.
+exit=0

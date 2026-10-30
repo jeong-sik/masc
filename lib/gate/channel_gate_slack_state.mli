@@ -1,0 +1,101 @@
+(** Channel_gate_slack_state — Slack in-process connector state (RFC-0317).
+
+    Implements {!Channel_gate_connector.S} so it can be registered at server
+    startup via [Channel_gate_connector.register (module Channel_gate_slack_state)].
+    The in-process Slack gateway ({!Slack_socket_client}, RFC-0317) is the
+    only transport. Internal helpers are hidden — only the
+    {!Channel_gate_connector.S} surface plus the in-process gateway support is
+    public. Status captures the effective runtime trigger policy on each read,
+    including while disconnected; transport lifecycle is reported separately. *)
+
+include Channel_gate_connector.S
+
+(** {1 In-process gateway support} *)
+
+type keeper_binding_resolution = {
+  keeper_name : string;
+  incoming_channel_id : string;
+  bound_channel_id : string;
+  via_parent : bool;
+}
+
+val resolve_keeper_for_channel_result :
+  channel_id:string ->
+  (keeper_binding_resolution option,
+   Channel_gate_binding_store.binding_store_error) result
+(** Resolve the keeper for [channel_id]. Store read failures remain typed and
+    distinct from an unbound channel. *)
+
+val read_bindings_result :
+  unit ->
+  (Channel_gate_binding_store.binding list,
+   Channel_gate_binding_store.binding_store_error) result
+(** All bindings in the store. The socket gateway resolves per channel; the
+    slack-lane poll fiber iterates the whole list to know what to collect. *)
+
+val record_ready : bot_user_id:string -> unit
+(** Called by the in-process gateway's hello handler. Stores the bot identity
+    that {!status_json} reports as [bot_user_id] / [last_ready_at]. *)
+
+val record_workspace_id : string -> unit
+(** Record the Slack team/workspace ID returned by [auth.test]. *)
+
+val current_workspace_id : unit -> string option
+val clear_workspace_id : unit -> unit
+
+val record_startup_error : string -> unit
+val clear_startup_error : unit -> unit
+(** Record/clear a fail-closed gateway bootstrap error. [status_json] exposes a
+    recorded error as [status = "unhealthy"] instead of presenting an invalid
+    configuration as an ordinary disconnected connector. *)
+
+(** Why the connector cannot do its job. Closed sum: the config boundary
+    reports the connector disabled or misconfigured ([Connector_unavailable]
+    carries its operator-facing reason), or one of the two credentials is
+    unset or blank. The app token is named first because without it the
+    gateway never starts at all. *)
+type credential_error =
+  | Connector_unavailable of string
+  | Missing_app_token
+  | Missing_bot_token
+
+val credential_error : unit -> credential_error option
+(** The current verdict, read from the config boundary at call time. [None]
+    when the connector is enabled and both tokens are present. This is the
+    value {!status_json} folds into its [error] field. *)
+
+val credential_error_message : credential_error -> string
+(** Operator-facing message for one verdict. Total; never blank. *)
+
+(** Typed failure modes for Slack REST actions. Closed sum. *)
+type send_error =
+  | Missing_token
+  | Rest_error of Slack_rest_client.error
+
+val pp_send_error : Format.formatter -> send_error -> unit
+
+val send_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  channel_id:string ->
+  content:string ->
+  ?reply_to_message_id:string ->
+  unit ->
+  (string, send_error) result
+(** Post a single message to a Slack channel via [chat.postMessage]. Returns
+    the created message [ts]. [reply_to_message_id] (a Slack [ts]) posts a
+    threaded reply. Bot token resolved from [SLACK_BOT_TOKEN] at call time so a
+    rotation does not require a server restart. [~clock] bounds the request by
+    [timeout_sec] (default {!Slack_rest_client.default_http_timeout_sec}). *)
+
+val edit_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  channel_id:string ->
+  message_id:string ->
+  content:string ->
+  unit ->
+  (unit, send_error) result
+(** Patch a prior message via [chat.update]. Used by the in-process gateway to
+    project keeper streaming snapshots into one edited reply. [~clock] bounds
+    the request by [timeout_sec]. *)

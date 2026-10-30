@@ -1,0 +1,35 @@
+name = "masc_keeper_audit"
+description = """
+Audit keeper config, prompt, live runtime metadata, registry presence, \
+autoboot, and keepalive state."""
+additional_properties = false
+
+[[params]]
+name = "name"
+type = "string"
+description = """
+Optional keeper handle to audit. When omitted, all known keepers in the \
+current base path/config root are audited."""
+
+[[params]]
+name = "names"
+type = "array"
+items = { type = "string" }
+description = """
+Optional keeper handles to audit. Combined with name when both are provided."""
+
+[[params]]
+name = "limit"
+type = "integer"
+default = 100
+description = """
+Maximum number of keepers to audit when name/names are omitted. Clamped to \
+500."""
+
+[[params]]
+name = "include_ok"
+type = "boolean"
+default = true
+description = """
+If false, return only keepers with audit issues while keeping summary counts \
+over all audited keepers."""

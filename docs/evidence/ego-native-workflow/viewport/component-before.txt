@@ -1,0 +1,57 @@
+✖ known native sequence navigates, waits and returns one final snapshot (2.76375ms)
+✔ full-page workflow snapshot uses the native full_page scope (0.172125ms)
+✔ a failed SDK wait retains prior effects and never runs later steps (0.934292ms)
+✔ an SDK input error stays uncertain and is never retried (0.14475ms)
+✔ a failed read-only wait has no input effect (0.127667ms)
+✔ dialog or SDK control loss stops the sequence without follow-up reads (0.663ms)
+✖ wrong starting URL refuses before input and final snapshot cuts preserve Unicode (0.280292ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 5
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 111.140125
+
+✖ failing tests:
+
+test at test/test_browser_ego_workflow.cjs:29:1
+✖ known native sequence navigates, waits and returns one final snapshot (2.76375ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + {
+  +   index: 5,
+  +   message: 'page.snapshot scope must be one of full_page, only_within_viewport, subtree',
+  +   method: 'snapshot'
+  + }
+  - null
+  
+      at TestContext.<anonymous> (/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-isolated/test/test_browser_ego_workflow.cjs:37:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { index: 5, method: 'snapshot', message: 'page.snapshot scope must be one of full_page, only_within_viewport, subtree' },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/test_browser_ego_workflow.cjs:74:1
+✖ wrong starting URL refuses before input and final snapshot cuts preserve Unicode (0.280292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  undefined !== 'a'
+  
+      at TestContext.<anonymous> (/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-isolated/test/test_browser_ego_workflow.cjs:78:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'a',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

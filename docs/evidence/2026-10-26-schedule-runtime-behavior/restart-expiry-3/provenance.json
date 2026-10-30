@@ -1,0 +1,58 @@
+{
+  "checkout_head": "932d071e624ce26c075f486a4e07b0fd9ac1d4ed",
+  "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+  "binary": "/Users/dancer/.local/bin/masc",
+  "provider": "dead loopback endpoint",
+  "schedule_runner_interval_sec": 1.0,
+  "image_reference": "masc-sandbox:general",
+  "not_proven": [
+    "provider success",
+    "destination delivery",
+    "running lease fault recovery",
+    "TUI execution"
+  ],
+  "launches": [
+    {
+      "stage": "before",
+      "build": {
+        "release_version": "0.64.0",
+        "binary_version": "0.64.0",
+        "commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "commit_source": "embedded",
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "binary_commit_source": "embedded",
+        "provenance_source": "self_observed",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "binary_commit_unix_ts": 1793016452.0,
+        "binary_commit_age_seconds": 1715,
+        "executable_path": "/Users/dancer/.local/bin/masc",
+        "executable_dir": "/Users/dancer/.local/bin",
+        "runtime_instance_id": "01a17835-fec9-7000-a497-db11b456411b",
+        "started_at": "2026-10-26T12:36:06Z",
+        "uptime_seconds": 0
+      },
+      "base": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift"
+    },
+    {
+      "stage": "after",
+      "build": {
+        "release_version": "0.64.0",
+        "binary_version": "0.64.0",
+        "commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "commit_source": "embedded",
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "binary_commit_source": "embedded",
+        "provenance_source": "self_observed",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "binary_commit_unix_ts": 1793016452.0,
+        "binary_commit_age_seconds": 1749,
+        "executable_path": "/Users/dancer/.local/bin/masc",
+        "executable_dir": "/Users/dancer/.local/bin",
+        "runtime_instance_id": "01a17836-7c70-7000-9020-4f72bd2de4c7",
+        "started_at": "2026-10-26T12:36:39Z",
+        "uptime_seconds": 1
+      },
+      "base": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-restart-_l_miift"
+    }
+  ]
+}

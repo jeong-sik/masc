@@ -1,0 +1,208 @@
+(* HTTP routes for prompt presets (#32777).
+
+   GET  /api/v1/presets          — manifests under <base>/.masc/presets
+   GET  /api/v1/presets/show     — ?name=<n>: everything that preset would change
+   POST /api/v1/presets          — {name, description?}: snapshot the live state
+   POST /api/v1/presets/create   — {name, description?}: create without replacing
+   POST /api/v1/presets/restore  — {name}: autosave, then apply the preset
+   POST /api/v1/presets/delete   — {name}: remove the preset, readable or not
+
+   Writes need CanAdmin, like the runtime assignment route. *)
+
+open Server_auth
+module Http = Http_server_eio
+
+let base_path_of state = (Mcp_server.workspace_config state).Workspace.base_path
+
+type save_request =
+  { name : string
+  ; description : string
+  }
+
+let name_field fields =
+  match List.assoc_opt "name" fields with
+  | Some (`String raw) ->
+    let name = String.trim raw in
+    if Prompt_preset.is_valid_name name then Ok name else Error ("invalid preset name: " ^ raw)
+  | Some _ -> Error "name must be a string"
+  | None -> Error "name missing"
+;;
+
+let object_of_body body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> Ok fields
+  | _ -> Error "body must be a JSON object"
+  | exception Yojson.Json_error message -> Error ("invalid JSON: " ^ message)
+;;
+
+(** Exposed for tests: [{name, description?}] with a valid preset name. *)
+let decode_save body =
+  match object_of_body body with
+  | Error _ as error -> error
+  | Ok fields ->
+    (match name_field fields with
+     | Error _ as error -> error
+     | Ok name ->
+       (match List.assoc_opt "description" fields with
+        | None -> Ok { name; description = "" }
+        | Some (`String description) -> Ok { name; description }
+        | Some _ -> Error "description must be a string"))
+;;
+
+let decode_name_request body =
+  match object_of_body body with
+  | Error _ as error -> error
+  | Ok fields -> name_field fields
+;;
+
+let ok_json fields : Yojson.Safe.t = `Assoc (("ok", `Bool true) :: fields)
+let error_json message : Yojson.Safe.t = `Assoc [ "ok", `Bool false; "error", `String message ]
+
+let listing_json (listing : Prompt_preset.listing) =
+  ok_json
+    [ "presets", `List (List.map Prompt_preset.manifest_to_json listing.Prompt_preset.presets)
+    ; ( "unreadable"
+      , `List
+          (List.map
+             (fun (name, reason) -> `Assoc [ "name", `String name; "reason", `String reason ])
+             listing.Prompt_preset.unreadable) )
+    ]
+;;
+
+let write_snapshot ~save state request reqd =
+      Http.Request.read_body_async reqd (fun body ->
+        match decode_save body with
+        | Error message ->
+          respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+        | Ok { name; description } ->
+          let base_path = base_path_of state in
+          let saved =
+            match Prompt_preset.capture ~base_path ~name ~description with
+            | Error message -> Error (`Internal_server_error, message)
+            | Ok snapshot ->
+              save ~base_path snapshot |> Result.map (fun () -> snapshot)
+          in
+          (match saved with
+           | Ok snapshot ->
+             respond_json_value_with_cors request reqd
+               (ok_json [ "preset", Prompt_preset.manifest_to_json
+                   (Prompt_preset.manifest_of_snapshot snapshot) ])
+           | Error (status, message) ->
+             (match status with
+              | `Internal_server_error -> Log.Pages.error "preset save %s failed: %s" name message
+              | `Bad_request | `Conflict -> ());
+             respond_json_value_with_cors ~status:(status :> Httpun.Status.t)
+               request reqd (error_json message)))
+;;
+
+let add_routes router =
+  router
+  |> Server_route.get Server_route.Read_auth "/api/v1/presets" (fun state request reqd ->
+           respond_json_value_with_cors
+             request
+             reqd
+             (listing_json (Prompt_preset.list ~base_path:(base_path_of state))))
+  (* A manifest counts what a preset holds; this names it. Deciding whether
+     to apply one otherwise means applying it and reading the result, which
+     is the decision itself. *)
+  |> Server_route.get Server_route.Read_auth "/api/v1/presets/show" (fun state request reqd ->
+           match
+             Server_mcp_transport_http_session.query_param request "name"
+           with
+           | None ->
+             respond_json_value_with_cors
+               ~status:`Bad_request
+               request
+               reqd
+               (error_json "name is required")
+           | Some raw ->
+             let name = String.trim raw in
+             if not (Prompt_preset.is_valid_name name)
+             then
+               respond_json_value_with_cors
+                 ~status:`Bad_request
+                 request
+                 reqd
+                 (error_json ("invalid preset name: " ^ raw))
+             else (
+               match Prompt_preset.load ~base_path:(base_path_of state) name with
+               | Ok snapshot ->
+                 respond_json_value_with_cors
+                   request
+                   reqd
+                   (let base_path = base_path_of state in
+                    let matching = match Prompt_preset.matches_saved_settings ~base_path snapshot with
+                      | Ok true -> `Assoc ["status", `String "matches"]
+                      | Ok false -> `Assoc ["status", `String "differs"]
+                      | Error message -> `Assoc ["status", `String "unavailable"; "reason", `String message] in
+                    let files = List.map (fun (entry : Prompt_override_persistence.entry) ->
+                        let resolved = Prompt_registry.resolve_prompt entry.key in
+                        `Assoc ["key", `String entry.key;
+                                "path", (match resolved.file_path with Some path -> `String path | None -> `Null);
+                                "source", `String (Prompt_registry.prompt_source_to_string resolved.source)])
+                      snapshot.prompt_overrides in
+                    ok_json [ "preset", Prompt_preset.snapshot_to_json snapshot;
+                              "directory", `String (Prompt_preset.source_directory ~base_path snapshot);
+                              "saved_settings", matching; "prompt_files", `List files;
+                              "default_prompts", Prompt_preset.default_comparison_to_json
+                                (Prompt_preset.compare_defaults snapshot) ])
+               | Error message ->
+                 respond_json_value_with_cors
+                   ~status:`Not_found
+                   request
+                   reqd
+                   (error_json message)))
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets"
+       (write_snapshot ~save:(fun ~base_path snapshot ->
+          Prompt_preset.save ~base_path snapshot
+          |> Result.map_error (fun message -> `Internal_server_error, message)))
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/create"
+       (write_snapshot ~save:(fun ~base_path snapshot ->
+          Prompt_preset.create ~base_path snapshot
+          |> Result.map_error (fun error ->
+            let status = match error with
+              | Prompt_preset.Invalid_name _ -> `Bad_request
+              | Prompt_preset.Already_exists _ -> `Conflict
+              | Prompt_preset.Failed _ -> `Internal_server_error
+            in
+            status, Prompt_preset.create_error_to_string error)))
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/restore" (fun state request reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             match decode_name_request body with
+             | Error message ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+             | Ok name ->
+               (match Prompt_preset.restore ~base_path:(base_path_of state) name with
+                | Ok report ->
+                  respond_json_value_with_cors
+                    request
+                    reqd
+                    (ok_json [ "report", Prompt_preset.report_to_json report ])
+                | Error message ->
+                  Log.Pages.error "preset restore %s failed: %s" name message;
+                  respond_json_value_with_cors
+                    ~status:`Internal_server_error
+                    request
+                    reqd
+                    (error_json message))))
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/delete" (fun state request reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             match decode_name_request body with
+             | Error message ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+             | Ok name ->
+               (match Prompt_preset.delete ~base_path:(base_path_of state) name with
+                | Ok () ->
+                  respond_json_value_with_cors request reqd (ok_json [ "deleted", `String name ])
+                | Error error ->
+                  let message = Prompt_preset.delete_error_to_string error in
+                  let status =
+                    match error with
+                    | Prompt_preset.Delete_invalid_name _ -> `Bad_request
+                    | Prompt_preset.Delete_not_found _ -> `Not_found
+                    | Prompt_preset.Delete_failed _ ->
+                      Log.Pages.error "preset delete %s failed: %s" name message;
+                      `Internal_server_error
+                  in
+                  respond_json_value_with_cors ~status request reqd (error_json message))))
+;;

@@ -1,0 +1,91 @@
+diff --git a/bin/masc_tui_evidence_link.ml b/bin/masc_tui_evidence_link.ml
+index f76e7f992bc04d109a599de314acbd1c1836914f..a453b2398feb0b755be79d1345c609993fbb8c1e 100644
+--- a/bin/masc_tui_evidence_link.ml
++++ b/bin/masc_tui_evidence_link.ml
+@@ -79,6 +79,8 @@ let masc_reference_of_source reference =
+       [ Masc_reference { kind = Masc_tui_link.Board_post; id } ]
+   | Some (Workspace_verification_store.Fusion_source, id) ->
+       [ Masc_reference { kind = Masc_tui_link.Fusion_run; id } ]
++  | Some (Workspace_verification_store.Task_source, id) ->
++      [ Masc_reference { kind = Masc_tui_link.Task; id } ]
+   | None -> []
+ 
+ let without_repeats links =
+diff --git a/bin/masc_tui_evidence_link.mli b/bin/masc_tui_evidence_link.mli
+index 24b279069be4c8f26fd00a663a4d3816048607c3..a2b8953e5076e13e3637f9e532503529f989b15e 100644
+--- a/bin/masc_tui_evidence_link.mli
++++ b/bin/masc_tui_evidence_link.mli
+@@ -2,8 +2,9 @@
+     a closed variant instead of searching text.
+ 
+     Two kinds exist in the data. A submitted source ([board:<id>],
+-    [fusion:<id>]) names a MASC object the TUI can open with its [masc://]
+-    reference. A URL written in a note, in a source's text or in an artifact's
++    [fusion:<id>], [task:<id>]) names a MASC object the TUI can open with its
++    [masc://] reference. Navigation opens the current object; the submitted
++    evidence body remains the immutable snapshot. A URL written in a note, in a source's text or in an artifact's
+     text is an http(s) address. A file artifact's path is the item's own
+     reference line, so it is not repeated as a link: it is a path in the
+     producer's sandbox, not an address the operator can open.
+diff --git a/test/test_tui_evidence_link.ml b/test/test_tui_evidence_link.ml
+index 2bd3671016f96056c9915275920fe55833422852..c93ed707266f55cd97f1a1abe21bf7a14255c737 100644
+--- a/test/test_tui_evidence_link.ml
++++ b/test/test_tui_evidence_link.ml
+@@ -87,6 +87,9 @@ let test_a_submitted_source_links_to_its_masc_object () =
+   Alcotest.(check (list link_testable)) "fusion run"
+     [ Link.Masc_reference { kind = Masc_tui_link.Fusion_run; id = "run-9" } ]
+     (Link.of_item (source ~reference:"fusion:run-9" "{}"));
++  Alcotest.(check (list link_testable)) "Task state source"
++    [ Link.Masc_reference { kind = Masc_tui_link.Task; id = "task-42" } ]
++    (Link.of_item (source ~reference:"task:task-42" "{}"));
+   Alcotest.(check string) "printed as the shared reference"
+     (Masc_tui_link.reference Masc_tui_link.Board_post "post-1")
+     (Link.text (Link.Masc_reference { kind = Masc_tui_link.Board_post; id = "post-1" }))
+diff --git a/test/test_verification_collaboration_evidence.ml b/test/test_verification_collaboration_evidence.ml
+index 61987e1a24dae199e1c73d44bba050be229e7eb9..3d7e8f9d6722c9287905c7b21bb1918eb45d17bf 100644
+--- a/test/test_verification_collaboration_evidence.ml
++++ b/test/test_verification_collaboration_evidence.ml
+@@ -49,8 +49,8 @@ let invalid_input surface name args =
+     check bool "input rejection explains the error" true
+       (String.trim (Tool_result.message result) <> "")
+   | _ -> fail "malformed source input unexpectedly succeeded"
+-let post ~author ~visibility ?origin ?meta_json content =
+-  match Board_dispatch.create_post ~author ~content ~post_kind:Board.System_post
++let post ~author ~visibility ?origin ?meta_json ?(post_kind=Board.System_post) content =
++  match Board_dispatch.create_post ~author ~content ~post_kind
+     ~visibility ~ttl_hours:0 ?origin ?meta_json () with
+   | Ok post -> post
+   | Error error -> failf "post: %s" (Board_tool.board_error_to_string error)
+@@ -108,8 +108,12 @@ let task_args id = `Assoc ["task_ids", `List [`String id]]
+ let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
+   let open Yojson.Safe.Util in
+   let prior = new_task config ~title:"Prior approval" ~description:"Produce the first increment" in
+-  List.iter (fun action -> ignore (Workspace.transition_task_r config ~agent_name:"producer"
+-    ~task_id:prior.id ~action ~notes:"First increment evidence" () |> require "prior transition"))
++  List.iter (fun action -> match Workspace.transition_task_r config ~agent_name:"producer"
++    ~task_id:prior.id ~action ~notes:"First increment evidence"
++    ~prepare_verification_request:(Verification_protocol.create_submit_request ~config) () with
++    | Ok _ -> ()
++    | Error error -> failf "prior %s: %s" (Masc_domain.task_action_to_string action)
++        (Masc_error.to_string error))
+     [Masc_domain.Claim; Masc_domain.Start; Masc_domain.Submit_for_verification];
+   let pending = Workspace.read_backlog_r config |> require "pending primary" in
+   let row = List.find (fun (task : Masc_domain.task) -> task.id = prior.id) pending.tasks in
+@@ -268,7 +272,7 @@ let test_submission_freezes_sources () = with_fixture (fun config ->
+   denied empty "masc_board_post_get" (post_args p) "verification_source_access_denied")
+ 
+ let test_capture_failures_and_corruption () = with_fixture (fun config ->
+-  let p = post ~author:"producer" ~visibility:Board.Direct "@recipient Private original" in
++  let p = post ~author:"producer" ~visibility:Board.Direct ~post_kind:Board.Human_post "@recipient Private original" in
+   let require_error label = function Error _ -> () | Ok _ -> fail label in
+   Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[board_ref p]
+     |> require_error "Goal captured private source";
+@@ -480,7 +484,7 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
+         `Assoc ["source", `String "task"; "backlog_version", `Int primary.version;
+           "backlog_last_updated", `String primary.last_updated; "task", Masc_domain.task_to_yojson task_row]])
+     [task; goal];
+-  let private_post = post ~author:"producer" ~visibility:Board.Direct ~meta_json:metadata "@peer Private source" in
++  let private_post = post ~author:"producer" ~visibility:Board.Direct ~post_kind:Board.Human_post ~meta_json:metadata "@peer Private source" in
+   let task_private = VAT.create ~config ~producer:"producer"
+     ~submitted_evidence:(capture config (Evidence.Task_producer "producer") [board_ref private_post])
+     |> require "private snapshot" in

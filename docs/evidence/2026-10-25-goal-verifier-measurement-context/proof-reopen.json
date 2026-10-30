@@ -1,0 +1,75 @@
+{
+  "schema": "masc.goal-verifier-measurement.public-projection.v1",
+  "source_hash": [
+    {
+      "source_label": "proof_access/proof-reopen-binding.json",
+      "sha256": "dbd87cfd75d9a04538b583920abdb1b99c1048db370f962cf158a75fbf5f3203"
+    }
+  ],
+  "publication_scope": {
+    "included": [
+      "three selected main-Goal events",
+      "archived prior proof identity/outcome",
+      "audit archive-equality conclusion"
+    ],
+    "excluded": [
+      "verdict reason and evidence prose",
+      "complete event log",
+      "physical-user identity inference"
+    ],
+    "limits": [
+      "The recorded Reopen archive and idle reset match the existing typed implementation.",
+      "masc-tui is an actor label, not identification of a physical user or session.",
+      "No motive or cause of any subsequent phase change inferred.",
+      "Historical proof publication is not endorsement of its underlying evidence coverage."
+    ]
+  },
+  "audit_observed_at": "2026-10-25T09:03:45.100767+00:00",
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+  "events": [
+    {
+      "journal_line": 105,
+      "event_type": "goal_phase",
+      "at": "2026-10-25T01:40:44Z",
+      "goal_id": "goal-outcome-driven-work-20261024",
+      "phase": "awaiting_confirmation",
+      "actor_label": "verifier_exact",
+      "verification_run_id": "01a170b2-8083-7000-a7de-ce0fc1eee0b2",
+      "request_id": "b0792fb9b86e66445ccd673bc6463ce2",
+      "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+      "outcome": "proven"
+    },
+    {
+      "journal_line": 106,
+      "event_type": "goal_proof_reopened",
+      "at": "2026-10-25T08:58:22Z",
+      "goal_id": "goal-outcome-driven-work-20261024",
+      "phase": "executing",
+      "actor_label": "masc-tui",
+      "previous_completion": {
+        "state": "proof_proven",
+        "outcome": "proven",
+        "request_id": "b0792fb9b86e66445ccd673bc6463ce2",
+        "verification_run_id": "01a170b2-8083-7000-a7de-ce0fc1eee0b2",
+        "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+        "recorded_at": "2026-10-25T01:40:44Z",
+        "authority": {
+          "kind": "system_llm_agent",
+          "actor": "verifier_exact"
+        }
+      }
+    },
+    {
+      "journal_line": 107,
+      "event_type": "goal_phase",
+      "at": "2026-10-25T08:58:22Z",
+      "goal_id": "goal-outcome-driven-work-20261024",
+      "phase": "executing",
+      "actor_label": "masc-tui"
+    }
+  ],
+  "archive_matches_exact_run_request_and_reason": true,
+  "archive_has_note_field": false,
+  "auditor_runtime_mutations": false
+}

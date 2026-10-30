@@ -1,0 +1,89 @@
+{
+  "at": "2026-10-24T14:52:47.723912+00:00",
+  "task": {
+    "id": "task-001",
+    "title": "Set alpha to true in acceptance.json",
+    "description": "Update the alpha field in workspace/acceptance.json to true while keeping beta and gamma as false until approval.",
+    "priority": 3,
+    "files": [],
+    "created_at": "2026-10-24T14:49:08Z",
+    "created_by": "goal-canary",
+    "contract": {
+      "completion_contract": [
+        "artifact:workspace/acceptance.json contains alpha=true, beta=false, gamma=false"
+      ],
+      "required_evidence": [
+        "artifact:workspace/acceptance.json"
+      ]
+    },
+    "handoff_context": {
+      "summary": "Updated alpha to true in acceptance.json",
+      "evidence_refs": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "updated_at": "2026-10-24T14:50:29Z",
+      "updated_by": "goal-canary"
+    },
+    "status": "awaiting_verification",
+    "assignee": "goal-canary",
+    "started_at": "2026-10-24T14:49:23Z",
+    "submitted_at": "2026-10-24T14:50:29Z",
+    "verification_id": "vrf-eb69d5addcb70d86364abbb773b563e1"
+  },
+  "goal_links": {
+    "version": 1,
+    "last_updated": "2026-10-24T14:52:47Z",
+    "links": [
+      {
+        "goal_id": "goal-canary-three-results",
+        "task_ids": [
+          "task-001"
+        ]
+      }
+    ]
+  },
+  "artifact_value": {
+    "alpha": true,
+    "beta": false,
+    "gamma": false
+  },
+  "artifact_sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+  "artifact_bytes": 55,
+  "operator_evidence": {
+    "ok": true,
+    "result": {
+      "task_id": "task-001",
+      "verification_id": "vrf-eb69d5addcb70d86364abbb773b563e1",
+      "producer": "goal-canary",
+      "authority_kind": "human_operator",
+      "authority_actor": "goal-canary-operator",
+      "evidence": {
+        "access": "available",
+        "request": {
+          "id": "vrf-eb69d5addcb70d86364abbb773b563e1",
+          "task_id": "task-001",
+          "worker": "goal-canary",
+          "created_at": 1792853429.436483
+        },
+        "items": [
+          {
+            "kind": "artifact",
+            "reference": "artifact:workspace/acceptance.json",
+            "content": "{\n  \"alpha\": true,\n  \"beta\": false,\n  \"gamma\": false\n}\n",
+            "bytes": 55,
+            "truncated": false
+          },
+          {
+            "kind": "note",
+            "content": "Completed task-001: Set alpha to true while keeping beta and gamma as false."
+          },
+          {
+            "kind": "note",
+            "content": "Updated alpha to true in acceptance.json"
+          }
+        ]
+      }
+    }
+  },
+  "provenance": "controlled operator_proxy, not independent LLM or human Goal confirmation"
+}

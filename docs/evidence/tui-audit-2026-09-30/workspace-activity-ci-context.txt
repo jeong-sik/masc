@@ -1,0 +1,30 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   Context [1-23/25]                                                                                
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Repository: masc                                                                                
+    Path:                                                                                           
+    lib/long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-  
+    long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long  
+    -한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한   
+    글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-Z.ml                   
+    Keeper: alpha                                                                                   
+    Task ID: task-linked                                                                            
+    Task title: TITLEHEAD 한글 task evidence 한글 task evidence 한글 task evidence 한글 task        
+    evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task  
+    evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task  
+    evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task  
+    evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task  
+    evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task  
+    evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task  
+    evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task  
+    evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task evidence 한글 task  
+    evidence 한글 task evidence TITLEEND                                                            
+    At (epoch seconds): 1787600200.000000                                                           
+    Turn: 11                                                                                        
+    Execution ID:                                                                                   
+    exec-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee  
+    eeeeeeeeeeeeeeeeeeeeeEXECTAIL                                                                   
+
+  j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:file  r:refresh  Esc:list  | Port: 57656
+ › to alpha   (i to write)                                                                          

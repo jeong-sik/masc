@@ -1,0 +1,1352 @@
+(** Server IDE LSP Proxy — WebSocket bridge for Language Server Protocol.
+
+    Architecture:
+    - WebSocket → JSON-RPC dispatcher
+    - Per-language LSP process via Lsp_process_manager
+    - Promise-based routing via Lsp_message_router
+    - Per-connection Eio.Switch.run for scoped lifecycle *)
+
+open Server_auth
+module Http = Http_server_eio
+module Ws_endpoint = Ws_direct_core.Endpoint
+module Ws_wsd = Ws_direct_core.Endpoint.Wsd
+module Ws_msg = Ws_direct_core.Connection.Message
+
+(** Send text frame via WebSocket. *)
+let send_text wsd s = Ws_wsd.send_text wsd s
+;;
+
+type ws_send_msg =
+  | Client_text of string
+  | Stop_client_writer
+
+type inbound_dispatch_msg =
+  | Dispatch_text of string
+  | Stop_dispatch_worker
+
+module Lsp_proxy_limits = struct
+  (* Per-connection backpressure limits.  These are named here because the
+     ws-direct endpoint owns frame sizing, while this module owns post-frame
+     LSP dispatch and outbound writes. *)
+  let outbound_send_queue_capacity = 128
+  let inbound_dispatch_queue_capacity = outbound_send_queue_capacity
+
+  (* More than one dispatch worker keeps a slow LSP spawn/init from stopping
+     unrelated status/lifecycle messages on the WebSocket reader path. *)
+  let inbound_dispatch_worker_count = 4
+
+  (* LSP initialize is the only request whose timeout is owned by this proxy;
+     downstream request timeouts belong to the language server/client contract. *)
+  let initialize_timeout_sec = 10.0
+end
+
+type resolved_lang =
+  | Known_lang of string
+  | Unknown_lang
+
+type document_request_error =
+  | Missing_document_uri
+  | Document_uri_outside_workspace
+
+type resolved_document_request =
+  { uri : string
+  ; relative_path : string
+  ; line : int option
+  ; language : resolved_lang
+  }
+
+(** Per-connection state shared across frame handler and relay fibers.
+
+    [sw] is the server-lifetime switch (LSP processes + their reader
+    fibers are spawned on it).  Per-connection reclamation is explicit
+    via {!disconnect} rather than switch teardown, because under the
+    Gluten upgrade model ({!Server_mcp_transport_ws.respond_and_drive_upgrade})
+    the upgrade handler cannot block to hold a per-connection switch
+    open.  RFC-0281 Phase 2. *)
+(** Per-language LSP health (task-1691). A language is [Connected] once its
+    LSP process is spawned and initialized; it is [Unavailable] (carrying the
+    last error) when the process could not be started or initialized.
+    Degradation is per-language — the whole LSP process is unavailable, not
+    one method — so a single state covers every handler. What a request gets
+    while a language is [Unavailable] depends on the method: the six that go
+    through [relay_or_empty] answer that method's empty result, a relayed
+    method answers a JSON-RPC error, and a document-sync notification is
+    only logged. Every one of them records the state first, so the
+    [masc/lspStatus] notification can report the degradation to the dashboard. *)
+type lang_health =
+  | Connected
+  | Unavailable of string
+
+(** Typed LSP method variant for the methods handled explicitly by the proxy
+    (lifecycle, MASC status, and the textDocument methods that answer empty
+    while the language server is unavailable).  Using a
+    variant removes duplicated wire strings from dispatch and handler sites and
+    makes adding a new handled method a compile-time decision. *)
+type lsp_method =
+  | Initialize
+  | Initialized
+  | Shutdown
+  | Exit
+  | Masc_lsp_status
+  | Did_open
+  | Did_change
+  | Did_save
+  | Did_close
+  | Hover
+  | CodeLens
+  | InlayHint
+  | Diagnostic
+  | Definition
+  | References
+  | Completion
+  | CodeAction
+  | Document_symbol
+  | Folding_range
+  | Document_highlight
+
+module Lsp_method_catalog = struct
+  type classification =
+    | Read_only
+    | Mutation
+    | Lifecycle
+    | Status
+
+  type entry =
+    { method_ : lsp_method
+    ; wire_method : string
+    ; classification : classification
+    }
+
+  let entry method_ =
+    let wire_method, classification =
+      match method_ with
+      | Initialize -> "initialize", Lifecycle
+      | Initialized -> "initialized", Lifecycle
+      | Shutdown -> "shutdown", Lifecycle
+      | Exit -> "exit", Lifecycle
+      | Masc_lsp_status -> "masc/lspStatus", Status
+      | Did_open -> "textDocument/didOpen", Mutation
+      | Did_change -> "textDocument/didChange", Mutation
+      | Did_save -> "textDocument/didSave", Mutation
+      | Did_close -> "textDocument/didClose", Mutation
+      | Hover -> "textDocument/hover", Read_only
+      | CodeLens -> "textDocument/codeLens", Read_only
+      | InlayHint -> "textDocument/inlayHint", Read_only
+      | Diagnostic -> "textDocument/diagnostic", Read_only
+      | Definition -> "textDocument/definition", Read_only
+      | References -> "textDocument/references", Read_only
+      | Completion -> "textDocument/completion", Read_only
+      | CodeAction -> "textDocument/codeAction", Read_only
+      | Document_symbol -> "textDocument/documentSymbol", Read_only
+      | Folding_range -> "textDocument/foldingRange", Read_only
+      | Document_highlight -> "textDocument/documentHighlight", Read_only
+    in
+    { method_; wire_method; classification }
+  ;;
+
+  let entries =
+    [ entry Initialize
+    ; entry Initialized
+    ; entry Shutdown
+    ; entry Exit
+    ; entry Masc_lsp_status
+    ; entry Did_open
+    ; entry Did_change
+    ; entry Did_save
+    ; entry Did_close
+    ; entry Hover
+    ; entry CodeLens
+    ; entry InlayHint
+    ; entry Diagnostic
+    ; entry Definition
+    ; entry References
+    ; entry Completion
+    ; entry CodeAction
+    ; entry Document_symbol
+    ; entry Folding_range
+    ; entry Document_highlight
+    ]
+  ;;
+
+  let of_string method_ =
+    List.find_map
+      (fun entry ->
+         if String.equal entry.wire_method method_ then Some entry.method_ else None)
+      entries
+  ;;
+
+  let to_string method_ = (entry method_).wire_method
+  let classification method_ = (entry method_).classification
+end
+
+let lsp_method_of_string = Lsp_method_catalog.of_string
+let lsp_method_to_string = Lsp_method_catalog.to_string
+let lsp_method_classification = Lsp_method_catalog.classification
+
+(* Who fixes the workspace tree document paths are relative to. The
+   connection URL declares it when it names an IDE scope ([codebase]) or a
+   workspace ([repo_id]/[keeper]); only a connection that declared neither
+   lets the client's [rootUri] choose. *)
+type anchor_authority =
+  | Anchor_declared
+  | Anchor_from_root_uri
+
+type conn_state =
+  { sw : Eio.Switch.t
+  ; router : Lsp_message_router.t
+  ; processes : (string, Lsp_process_manager.lsp_process) Hashtbl.t
+  ; process_mutex : Eio.Mutex.t
+  ; spawn_locks : (string, Eio.Mutex.t) Hashtbl.t
+  ; health : (string, lang_health) Hashtbl.t
+  ; health_mutex : Eio.Mutex.t
+  ; wsd : Ws_wsd.t
+  ; base_path : string
+  ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
+  ; anchor_authority : anchor_authority
+  ; workspace_root : string ref
+  ; send_queue : ws_send_msg Eio.Stream.t
+  ; dispatch_queue : inbound_dispatch_msg Eio.Stream.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t
+  ; disconnected : bool Atomic.t
+        (* RFC-0287: fragment reassembly + size caps now live in the ws-direct
+           Endpoint, which delivers complete messages to [on_message]; the
+           former shared [Ws_inbound] reassembler field is gone. *)
+  }
+
+let base_path_of_state state = (Mcp_server.workspace_config state).base_path
+
+(* A workspace the URL named but that does not resolve refuses the
+   connection. Falling back to the project root would serve a different
+   tree than the one asked for, and every document path would then be
+   answered against it. The codes are the tags the workspace REST routes
+   report for the same variants in their workspace-source header. *)
+let anchor_authority_of_source ~scope source =
+  let refuse code message = Error (Server_ide_scope.ide_error code message) in
+  match source, scope with
+  | `RepositoryUnknown repo_id, _ ->
+    refuse "repository_unknown" ("Unknown repository: " ^ repo_id)
+  | `RepositoryMissing repo_id, _ ->
+    refuse "repository_missing" ("Repository has no local checkout: " ^ repo_id)
+  | `KeeperUnknown name, _ -> refuse "keeper_unknown" ("Unknown keeper: " ^ name)
+  | `PlaygroundMissing name, _ ->
+    refuse "playground_missing" ("Keeper playground directory is missing: " ^ name)
+  | (`Repository _ | `Playground _), _ | `Project, Some _ -> Ok Anchor_declared
+  | `Project, None -> Ok Anchor_from_root_uri
+;;
+
+(* What this connection addresses, read from its URL before the socket is
+   upgraded. Two independent axes: the IDE scope ([codebase], resolved by
+   the same [Server_ide_scope] the REST routes use, so the two surfaces
+   share one vocabulary), and the workspace tree that document paths are
+   relative to, which comes from the workspace axis parameters
+   ([repo_id]/[keeper]) resolved by [resolve_workspace_base]. RFC-0378
+   §5.3b: the scope carries the slug itself. *)
+let lsp_connection_addressing ~state ~uri =
+  match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
+  | Error err -> Error err
+  | Ok scope ->
+    let anchor, source =
+      Server_routes_http_routes_workspace.resolve_workspace_base ~state ~uri
+    in
+    Result.map
+      (fun authority -> authority, anchor)
+      (anchor_authority_of_source ~scope source)
+;;
+
+(* Document URIs resolve against the workspace tree the client opened. *)
+let document_root cs = !(cs.workspace_root)
+;;
+
+let find_process cs lang_id =
+  Eio.Mutex.use_ro cs.process_mutex (fun () -> Hashtbl.find_opt cs.processes lang_id)
+;;
+
+let add_process cs lang_id proc =
+  Eio.Mutex.use_rw ~protect:true cs.process_mutex (fun () ->
+    Hashtbl.replace cs.processes lang_id proc)
+;;
+
+let remove_process_if_current cs lang_id proc =
+  Eio.Mutex.use_rw ~protect:true cs.process_mutex (fun () ->
+    match Hashtbl.find_opt cs.processes lang_id with
+    | Some current when current == proc ->
+      Hashtbl.remove cs.processes lang_id;
+      true
+    | Some _ | None -> false)
+;;
+
+let spawn_lock_for cs lang_id =
+  Eio.Mutex.use_rw ~protect:true cs.process_mutex (fun () ->
+    match Hashtbl.find_opt cs.spawn_locks lang_id with
+    | Some mutex -> mutex
+    | None ->
+      let mutex = Eio.Mutex.create () in
+      Hashtbl.add cs.spawn_locks lang_id mutex;
+      mutex)
+;;
+
+let stop_send_writer cs =
+  try Eio.Fiber.fork ~sw:cs.sw (fun () -> Eio.Stream.add cs.send_queue Stop_client_writer)
+  with
+  | exn -> (* cancel-guard-ok: a step of the one-shot [disconnect] teardown; raising here leaves the writer fiber parked with no second attempt *)
+    Log.Server.warn
+      "LSP WebSocket writer stop signal failed: %s"
+      (Printexc.to_string exn)
+;;
+
+let stop_dispatch_workers cs =
+  try
+    Eio.Fiber.fork ~sw:cs.sw (fun () ->
+      for _ = 1 to Lsp_proxy_limits.inbound_dispatch_worker_count do
+        Eio.Stream.add cs.dispatch_queue Stop_dispatch_worker
+      done)
+  with
+  | exn -> (* cancel-guard-ok: raising here skips [stop_send_writer], and [disconnect] has already latched so nothing runs it again *)
+    Log.Server.warn
+      "LSP dispatch worker stop signal failed: %s"
+      (Printexc.to_string exn)
+;;
+
+(** Signal connection end.  Idempotent (guarded by [disconnected]).
+
+    Explicitly shuts down every spawned LSP process.
+    [Lsp_process_manager.shutdown] closes the process stdin/stdout/stderr
+    flows, which makes the response-reader and stderr-drain fibers' reads
+    raise so those fibers exit — so this reclaims the processes AND their
+    fibers without a switch teardown.  Required because [cs.sw] is the
+    server switch: without explicit shutdown the processes would leak
+    until server shutdown (RFC-0261).  The process table is drained under
+    [process_mutex]; concurrent spawns re-check [disconnected] before they can
+    publish a process.  RFC-0281 Phase 2. *)
+let disconnect cs =
+  if Atomic.compare_and_set cs.disconnected false true
+  then (
+    let processes =
+      Eio.Mutex.use_rw ~protect:true cs.process_mutex (fun () ->
+        let processes =
+          Hashtbl.fold (fun _ proc acc -> proc :: acc) cs.processes []
+        in
+        Hashtbl.clear cs.processes;
+        Hashtbl.clear cs.spawn_locks;
+        processes)
+    in
+    List.iter Lsp_process_manager.shutdown processes;
+    stop_dispatch_workers cs;
+    stop_send_writer cs)
+;;
+
+(** Queue outbound frames behind a single writer fiber.  Callers backpressure on
+    the bounded stream instead of contending on the WebSocket write itself. *)
+let send cs msg =
+  if not (Atomic.get cs.disconnected) then Eio.Stream.add cs.send_queue (Client_text msg)
+;;
+
+let start_send_writer cs =
+  Eio.Fiber.fork_daemon ~sw:cs.sw (fun () ->
+    let rec loop () =
+      match Eio.Stream.take cs.send_queue with
+      | Stop_client_writer -> `Stop_daemon
+      | Client_text msg ->
+        if not (Atomic.get cs.disconnected) then send_text cs.wsd msg;
+        loop ()
+    in
+    try loop () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Server.warn "LSP WebSocket writer stopped: %s" (Printexc.to_string exn);
+      disconnect cs;
+      `Stop_daemon)
+;;
+
+let enqueue_dispatch cs msg =
+  if not (Atomic.get cs.disconnected)
+  then Eio.Stream.add cs.dispatch_queue (Dispatch_text msg)
+;;
+
+(** JSON-RPC request ID — LSP spec allows integer or string. *)
+type req_id = Id_int of int | Id_string of string
+
+let id_to_json = function
+  | Id_int n -> `Int n
+  | Id_string s -> `String s
+
+let req_id_to_int = function
+  | Id_int n -> n
+  | Id_string s -> Hashtbl.hash s
+
+(** Send JSON-RPC response. *)
+let send_response cs id result =
+  let resp = `Assoc [ "jsonrpc", `String "2.0"; "id", id_to_json id; "result", result ] in
+  send cs (Yojson.Safe.to_string resp)
+;;
+
+(** Send JSON-RPC error. [code] is the wire integer — callers use
+    [Mcp_error_code.to_wire_code] for typed codes. *)
+let send_error_json cs (id : Yojson.Safe.t) code msg =
+  let resp =
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", id
+      ; "error", `Assoc [ "code", `Int code; "message", `String msg ]
+      ]
+  in
+  send cs (Yojson.Safe.to_string resp)
+;;
+
+let send_error cs id code msg = send_error_json cs (id_to_json id) code msg
+;;
+
+(* JSON-RPC 2.0 section 5: an error for a message whose id could not be read
+   carries a null id. *)
+let send_error_without_id cs code msg = send_error_json cs `Null code msg
+;;
+
+(** Send JSON-RPC notification (server → client). *)
+let send_client_notification cs method_ params =
+  let notif =
+    `Assoc [ "jsonrpc", `String "2.0"; "method", `String method_; "params", params ]
+  in
+  send cs (Yojson.Safe.to_string notif)
+;;
+
+(* --- LSP health status (task-1691) --- *)
+
+(* Pure projection of one language's health into the [masc/lspStatus] wire
+   shape: [connected] / [command] (the configured LSP executable, [null] when
+   none is mapped) / [last_error]. The health is two states, so [connected]
+   carries it whole and [last_error] says why when it is false. *)
+let lang_status_json ~lang_id (health : lang_health) : Yojson.Safe.t =
+  let command =
+    match Lsp_process_manager.language_of_lang_id lang_id with
+    | Some language -> `String (fst (Runtime.lsp_servers () language))
+    | None -> `Null
+  in
+  let connected, last_error =
+    match health with
+    | Connected -> (true, `Null)
+    | Unavailable err -> (false, `String err)
+  in
+  `Assoc
+    [ "lang", `String lang_id
+    ; "connected", `Bool connected
+    ; "command", command
+    ; "last_error", last_error
+    ]
+;;
+
+(* Pure snapshot of all tracked languages, sorted by lang id for a stable
+   wire order. *)
+let status_snapshot_json (healths : (string * lang_health) list) : Yojson.Safe.t =
+  let sorted = List.sort (fun (a, _) (b, _) -> String.compare a b) healths in
+  `Assoc
+    [ "langs", `List (List.map (fun (l, h) -> lang_status_json ~lang_id:l h) sorted) ]
+;;
+
+let current_status_json cs =
+  Eio.Mutex.use_ro cs.health_mutex (fun () ->
+    status_snapshot_json (Hashtbl.fold (fun l h acc -> (l, h) :: acc) cs.health []))
+;;
+
+(* Push the current status to the client as a [masc/lspStatus] notification,
+   so the dashboard reacts to a health transition without polling. *)
+let push_lsp_status cs status =
+  send_client_notification cs (lsp_method_to_string Masc_lsp_status) status
+;;
+
+(* Record [lang_id]'s health, notifying the client only when it actually
+   changed (so a stream of requests while degraded does not spam
+   notifications). *)
+let set_health cs ~lang_id health =
+  let status =
+    Eio.Mutex.use_rw ~protect:true cs.health_mutex (fun () ->
+      let changed =
+        match Hashtbl.find_opt cs.health lang_id with
+        | Some prev -> prev <> health
+        | None -> true
+      in
+      Hashtbl.replace cs.health lang_id health;
+      if changed
+      then
+        Some
+          (status_snapshot_json
+             (Hashtbl.fold (fun l h acc -> (l, h) :: acc) cs.health []))
+      else None)
+  in
+  match status with
+  | Some status -> push_lsp_status cs status
+  | None -> ()
+;;
+
+(* Unified degraded path shared by every handler (task-1691): mark the
+   language as having no server, log a typed WARN, and notify the client.
+   The caller then answers empty, so the request never fails and the keeper
+   cycle is never blocked by an unavailable LSP. *)
+let note_unavailable cs ~lang_id ~error =
+  Log.Server.warn "LSP server unavailable for %s: %s" lang_id error;
+  set_health cs ~lang_id (Unavailable error)
+;;
+
+let note_process_exit cs (proc : Lsp_process_manager.lsp_process) ~reason =
+  if remove_process_if_current cs proc.lang_id proc
+  then
+    note_unavailable
+      cs
+      ~lang_id:proc.lang_id
+      ~error:("LSP process exited: " ^ reason)
+;;
+
+(** Extract textDocument URI from LSP params. *)
+let extract_uri params =
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "textDocument" fields with
+     | Some (`Assoc doc) ->
+       (match List.assoc_opt "uri" doc with
+        | Some (`String uri) -> Some uri
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+(* Moved to [Lsp_uri] so the Keeper surface spells a [file://] URI the same way
+   this proxy reads one. *)
+let path_of_file_uri = Lsp_uri.path_of_file_uri
+
+(** [fpath_within ~base path] is [Some rel] when the normalized absolute
+    [path] sits inside normalized absolute [base].  The returned relative path
+    contains no [..] segments, so percent-decoded traversal such as
+    [%2F..%2F..] is rejected after normalization. *)
+let fpath_within ~base path =
+  match Fpath.of_string base, Fpath.of_string path with
+  | Ok base, Ok path when Fpath.is_abs base && Fpath.is_abs path ->
+    (* Qualify explicitly instead of [Fpath.(...)]: inside the local open the
+       identifier [base] resolves to [Fpath.base] (t -> t) and shadows the local
+       [base] value, which fails to type-check under fpath 0.7.3. *)
+    let base = Fpath.rem_empty_seg (Fpath.normalize base) in
+    let path = Fpath.rem_empty_seg (Fpath.normalize path) in
+    (match Fpath.relativize ~root:base path with
+     | Some rel ->
+       if List.exists (String.equal "..") (Fpath.segs rel) then None else Some rel
+     | None -> None)
+  | Ok _, (Ok _ | Error _) | Error _, (Ok _ | Error _) -> None
+;;
+
+let relative_to_string rel =
+  let s = Fpath.to_string rel in
+  if String.equal s "." then "" else s
+;;
+
+(* Resolve the existing prefix of an IDE path before appending absent leaves.
+   Unsaved buffers may not exist yet, but an absent leaf below a symlink must
+   still be checked against the symlink's real target. A dangling symlink or
+   any error other than ENOENT is not an absent buffer. *)
+let rec physical_path_allow_missing path =
+  try Some (Fs_compat.realpath path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (* lstat raises only Unix_error: a path it can stat, or any error other
+       than ENOENT, is not an absent buffer. *)
+    let absent =
+      match Unix.lstat path with
+      | (_ : Unix.stats) -> false
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+      | exception Unix.Unix_error _ -> false
+    in
+    if not absent
+    then None
+    else (
+      let parent = Filename.dirname path in
+      if String.equal parent path
+      then None
+      else
+        Option.map
+          (fun resolved -> Filename.concat resolved (Filename.basename path))
+          (physical_path_allow_missing parent))
+  | _ -> None
+;;
+
+let physical_relative_within ~base candidate =
+  match physical_path_allow_missing base, physical_path_allow_missing candidate with
+  | Some physical_base, Some physical_candidate ->
+    fpath_within ~base:physical_base physical_candidate
+  | _ -> None
+;;
+
+let workspace_root_for_initialize ~base_path root_uri =
+  (* [path_of_file_uri] returns a [string] (not [string option]); the previous
+     [Option.bind candidate] did not type-check and left main uncompilable
+     after #23070. Match the string directly. *)
+  let candidate = root_uri |> path_of_file_uri in
+  (* [path_of_file_uri] returns a plain [string], so match on it directly rather
+     than [Option.bind] (which expects a [string option]). *)
+  match
+    (match Fpath.of_string candidate with
+     | Ok p when Fpath.is_abs p -> Some p
+     | Ok _ | Error _ -> None)
+  with
+  | Some candidate ->
+    (* Keep the original segments until realpath: [link/..] is not generally
+       the same path as removing those segments before following [link]. *)
+    (match fpath_within ~base:base_path (Fpath.to_string candidate) with
+     | Some _ ->
+       (match
+          physical_path_allow_missing base_path,
+          physical_path_allow_missing (Fpath.to_string candidate)
+        with
+        | Some physical_base, Some physical_candidate
+          when Option.is_some (fpath_within ~base:physical_base physical_candidate) ->
+          physical_candidate
+        | _ -> base_path)
+     | None -> base_path)
+  | None -> base_path
+;;
+
+(* LSP types rootUri as a DocumentUri or null. The empty string is no URI at
+   all (the browser client sends it because it has no host path to offer),
+   so it names no root, the same as null or an absent field. *)
+let root_uri_of_initialize_params = function
+  | `Assoc fields ->
+    (match List.assoc_opt "rootUri" fields with
+     | Some (`String "") -> None
+     | Some (`String uri) -> Some uri
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+(* The tree this connection resolves documents against once [initialize]
+   lands. A declared anchor is authoritative: letting [rootUri] move it
+   afterwards would express document keys against a root the URL never
+   named. Without a declaration a named [rootUri] decides, and a client
+   that names none keeps the anchor resolved at upgrade. *)
+let workspace_root_after_initialize ~authority ~base_path ~anchor params =
+  match authority, root_uri_of_initialize_params params with
+  | Anchor_declared, _ | Anchor_from_root_uri, None -> anchor
+  | Anchor_from_root_uri, Some root_uri ->
+    workspace_root_for_initialize ~base_path root_uri
+;;
+
+(* What a document URI addresses, decided by its scheme. RFC 3986 schemes
+   compare case-insensitively, so an uppercase file scheme is still a file
+   URI. Any other scheme (untitled, http, ...) names no file in the
+   workspace. A string with no scheme is a path relative to the root. *)
+type document_address =
+  | File_uri
+  | Workspace_relative
+  | Foreign_scheme
+
+let document_address_of_uri uri =
+  match Option.map String.lowercase_ascii (Uri.scheme (Uri.of_string uri)) with
+  | Some "file" -> File_uri
+  | Some _ -> Foreign_scheme
+  | None -> Workspace_relative
+;;
+
+(** Resolve a document URI to a path relative to [base], or [None] when it
+    names nothing inside [base]. Every accepted spelling goes through the
+    same Fpath normalization and [fpath_within] containment, which also
+    rejects traversal introduced by percent-decoded separators such as
+    [%2F..]. *)
+let resolve_relative ~base uri =
+  let contained candidate =
+    match fpath_within ~base candidate with
+    | Some _ ->
+      Option.map relative_to_string (physical_relative_within ~base candidate)
+    | None -> None
+  in
+  match document_address_of_uri uri with
+  | Foreign_scheme -> None
+  | File_uri ->
+    (match Fpath.of_string (path_of_file_uri uri) with
+     | Ok full when Fpath.is_abs full -> contained (Fpath.to_string full)
+     | Ok _ | Error _ -> None)
+  | Workspace_relative ->
+    (* Joined onto the root, then normalized by [fpath_within]: a parent
+       segment that climbs out of the root is rejected like any other
+       escape, and an absolute path (which replaces the root in the join)
+       is held to the same containment. *)
+    (match Fpath.of_string base, Fpath.of_string uri with
+     | Ok root, Ok path -> contained (Fpath.to_string (Fpath.append root path))
+     | Ok _, Error _ | Error _, _ -> None)
+;;
+
+let resolve_lang relative =
+  match Lsp_process_manager.lang_of_path relative with
+  | "unknown" -> Unknown_lang
+  | lang_id -> Known_lang lang_id
+;;
+
+let initialize_capabilities_json () =
+  `Assoc
+    [ "textDocumentSync", `Int 2
+    (* No completionItem/resolve handler exists, so resolve is not offered. *)
+    ; "completionProvider", `Assoc [ "resolveProvider", `Bool false ]
+    ; "hoverProvider", `Bool true
+    ; "definitionProvider", `Bool true
+    ; "referencesProvider", `Bool true
+    ; "documentHighlightProvider", `Bool true
+    ; "documentSymbolProvider", `Bool true
+    ; "foldingRangeProvider", `Bool true
+    ; "selectionRangeProvider", `Bool true
+    ; "documentLinkProvider", `Bool true
+    ; "codeLensProvider", `Assoc [ "resolveProvider", `Bool false ]
+    ; "codeActionProvider", `Bool true
+    ; "inlayHintProvider", `Bool true
+    ; ( "diagnosticProvider"
+      , `Assoc [ "interFileDependencies", `Bool false; "workspaceDiagnostics", `Bool false ]
+      )
+    ]
+;;
+
+(* [workspaceRoot] is a MASC extension on the initialize result. Without it
+   a browser client has no way to name a document: it knows the path it
+   browsed (repo-relative) but not the host tree that path hangs off, so it
+   cannot form the absolute [file:] URI the protocol requires. Advertising
+   the resolved root closes that gap without inventing a URI convention. *)
+let initialize_result_json ~workspace_root () =
+  `Assoc
+    [ "capabilities", initialize_capabilities_json ()
+    ; "masc", `Assoc [ "workspaceRoot", `String workspace_root ]
+    ]
+;;
+
+(** Extract client request ID from JSON-RPC message fields. *)
+let extract_id fields =
+  match List.assoc_opt "id" fields with
+  | Some (`Int n) -> Some (Id_int n)
+  | Some (`String s) -> Some (Id_string s)
+  | _ -> None
+;;
+
+(** Extract line (0-based) from LSP position params. *)
+let extract_line params =
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "position" fields with
+     | Some (`Assoc pos) ->
+       (match List.assoc_opt "line" pos with
+        | Some (`Int n) -> Some n
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+let resolve_document_request ~anchor params =
+  match extract_uri params with
+  | None -> Error Missing_document_uri
+  | Some uri ->
+    (match resolve_relative ~base:anchor uri with
+     | None -> Error Document_uri_outside_workspace
+     | Some relative_path ->
+       let line =
+         match extract_line params with
+         | Some line when line >= 0 -> Some line
+         | Some _ | None -> None
+       in
+       Ok { uri; relative_path; line; language = resolve_lang relative_path })
+;;
+
+(* An initialize answer that arrived as the window closed is the answer; the
+   server is not refused as one that never initialized. Extracted from
+   [ensure_lsp_process] so the deadline-safe path -- [Watched_work.run] keeps
+   the work's outcome when the answer's last byte and the deadline land in the
+   same scheduler pass -- is exercised without spawning a server
+   ([For_testing]). *)
+let await_initialize_under_deadline ~clock ~timeout_sec ~lang_id promise =
+  Watched_work.run
+    ~watcher:(fun () ->
+      Eio.Time.sleep clock timeout_sec;
+      Error
+        (Printf.sprintf
+           "LSP initialize timeout for %s (%.0fs)"
+           lang_id
+           timeout_sec))
+    (fun () -> Ok (Eio.Promise.await promise))
+;;
+
+let language_server_initialize_params ~workspace_root =
+  `Assoc
+    [ "rootUri", `String (Lsp_uri.file_uri_of_path workspace_root)
+    ; "rootPath", `String workspace_root
+    ; "processId", `Int (Unix.getpid ())
+    ; "capabilities", `Assoc
+        [ "textDocument", `Assoc
+            [ "publishDiagnostics", `Assoc [ "versionSupport", `Bool true ] ] ]
+    ]
+;;
+
+(** Ensure LSP process exists for a language.
+    Spawns + initializes on first use, blocking until ready. *)
+let ensure_lsp_process cs lang_id =
+  if Atomic.get cs.disconnected
+  then Error "connection closed"
+  else
+    let spawn_mutex = spawn_lock_for cs lang_id in
+    Eio.Mutex.use_rw ~protect:true spawn_mutex (fun () ->
+      if Atomic.get cs.disconnected
+      then Error "connection closed"
+      else
+    match find_process cs lang_id with
+    | Some proc -> Ok proc
+    | None ->
+      let workspace_root = !(cs.workspace_root) in
+      (match
+         Lsp_process_manager.spawn
+           ~sw:cs.sw
+           ~servers:(Runtime.lsp_servers ())
+           ~lang_id
+           ~workspace_root
+           cs.proc_mgr
+       with
+       | Error err ->
+         let msg = Format.asprintf "%a" Lsp_process_manager.pp_spawn_error err in
+         Log.Server.warn "LSP spawn failed for %s: %s" lang_id msg;
+         Error msg
+       | Ok proc ->
+         Lsp_message_router.start_response_reader
+           ~sw:cs.sw
+           cs.router
+           proc
+           ~on_exit:(Some (fun ~reason -> note_process_exit cs proc ~reason))
+           ~on_notification:(fun ~client_id:_ ~method_ params ->
+             send_client_notification cs method_ params);
+         let init_params = language_server_initialize_params ~workspace_root in
+         let promise =
+           Lsp_message_router.send_request
+             cs.router
+             proc
+             ~method_:(lsp_method_to_string Initialize)
+             ~params:init_params
+             ~client_id:(-1)
+         in
+         let init_result =
+           await_initialize_under_deadline
+             ~clock:cs.clock
+             ~timeout_sec:Lsp_proxy_limits.initialize_timeout_sec
+             ~lang_id
+             promise
+         in
+         (match init_result with
+          | Ok (Ok _) ->
+            Lsp_message_router.send_notification
+              cs.router
+              proc
+              ~method_:(lsp_method_to_string Initialized)
+              ~params:(`Assoc []);
+            if Atomic.get cs.disconnected
+            then (
+              Lsp_process_manager.shutdown proc;
+              Error "connection closed")
+            else (
+              add_process cs lang_id proc;
+              set_health cs ~lang_id Connected;
+              Log.Server.info "LSP server ready: %s" lang_id;
+              Ok proc)
+          | Ok (Error msg) ->
+            Log.Server.warn "LSP initialize failed for %s: %s" lang_id msg;
+            Lsp_process_manager.shutdown proc;
+            Error msg
+          | Error msg ->
+            Log.Server.warn "LSP initialize timeout for %s" lang_id;
+            Lsp_process_manager.shutdown proc;
+            Error msg)))
+;;
+
+(** Forward a request to LSP process, await response, relay to client. *)
+let forward_request cs lang_id method_ params id =
+  match ensure_lsp_process cs lang_id with
+  | Error msg ->
+    (* A relayed method has no empty answer of its own, so this stays a
+       JSON-RPC error — but still record the per-language degradation so
+       [masc/lspStatus] reflects it (task-1691). *)
+    note_unavailable cs ~lang_id ~error:msg;
+    send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg
+  | Ok proc ->
+    let promise =
+      Lsp_message_router.send_request cs.router proc ~method_ ~params ~client_id:(req_id_to_int id)
+    in
+    (match Eio.Promise.await promise with
+     | Ok result -> send_response cs id result
+     | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg)
+;;
+
+(** Forward a notification to LSP process. *)
+let forward_notification cs lang_id method_ params =
+  match ensure_lsp_process cs lang_id with
+  | Error msg ->
+    note_unavailable cs ~lang_id ~error:msg;
+    Log.Server.warn "Cannot forward %s: %s" method_ msg
+  | Ok proc -> Lsp_message_router.send_notification cs.router proc ~method_ ~params
+;;
+
+let forward_document_sync_notification cs method_ params =
+  let wire_method = lsp_method_to_string method_ in
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error _ -> ()
+  | Ok request ->
+    (match request.language with
+     | Unknown_lang -> ()
+     | Known_lang lang_id -> forward_notification cs lang_id wire_method params)
+;;
+
+(* Read-only method allowlist for the catch-all forwarder (task-1692). The
+   observation plane must never forward a write-adjacent request — rename,
+   any formatting, executeCommand, applyEdit, willSaveWaitUntil — to the
+   language server. The methods handled explicitly below (hover,
+   codeAction, ...) are all read-only and never reach the catch-all; this
+   closes the "forward any other textDocument request" hole.
+
+   Default-deny by a typed variant, not a string-prefix classifier: only a
+   listed read method forwards, so a new or unrecognized method is rejected
+   rather than silently passed through, and adding a method forces an explicit
+   classification (RFC-0194 / workaround §2 — no substring allowlist). *)
+type method_disposition =
+  | Forward_read_only
+  | Reject_write_adjacent
+  | Unknown_forwarded_method of string
+
+(* Methods this proxy does not answer itself, and what happens to them.
+
+   The catalog above owns every method the proxy can answer; this table owns
+   the rest. The five that RFC-0378 rung E turned into plain relays —
+   definition, references, documentSymbol, documentHighlight, inlayHint — used
+   to be spelled here as well as there, which is two places deciding the same
+   thing about the same method. [classify_forwarded_method] now asks the
+   catalog first, so they appear once, and
+   [test_forwarded_methods_are_not_also_catalog_methods] fails if a method
+   comes to be named twice again (#28686). *)
+type relay_disposition =
+  | Relay_read_only
+  | Deny_write_adjacent
+
+let relayed_methods =
+  [ "textDocument/signatureHelp", Relay_read_only
+  ; "textDocument/declaration", Relay_read_only
+  ; "textDocument/typeDefinition", Relay_read_only
+  ; "textDocument/implementation", Relay_read_only
+  ; "textDocument/documentColor", Relay_read_only
+  ; "textDocument/colorPresentation", Relay_read_only
+  ; "textDocument/documentLink", Relay_read_only
+  ; "textDocument/selectionRange", Relay_read_only
+  ; "textDocument/linkedEditingRange", Relay_read_only
+  ; "textDocument/moniker", Relay_read_only
+  ; "textDocument/prepareCallHierarchy", Relay_read_only
+  ; "textDocument/prepareTypeHierarchy", Relay_read_only
+  ; "textDocument/semanticTokens/full", Relay_read_only
+  ; "textDocument/semanticTokens/full/delta", Relay_read_only
+  ; "textDocument/semanticTokens/range", Relay_read_only
+    (* Denied explicitly rather than left to the unknown branch, so the refusal
+       says "not permitted" instead of "unrecognized". *)
+  ; "textDocument/rename", Deny_write_adjacent
+  ; "textDocument/prepareRename", Deny_write_adjacent
+  ; "textDocument/formatting", Deny_write_adjacent
+  ; "textDocument/rangeFormatting", Deny_write_adjacent
+  ; "textDocument/onTypeFormatting", Deny_write_adjacent
+  ; "textDocument/willSaveWaitUntil", Deny_write_adjacent
+  ; "workspace/executeCommand", Deny_write_adjacent
+  ; "workspace/applyEdit", Deny_write_adjacent
+  ]
+;;
+
+let classify_forwarded_method method_ =
+  match lsp_method_of_string method_ with
+  (* A catalog method reaching the relay path is one the dispatch above has no
+     arm for. Its classification already says whether the language server may
+     answer it. Mutation, Lifecycle and Status are all handled before this
+     point; refusing them here is the answer that cannot be wrong. *)
+  | Some catalog_method ->
+    (match lsp_method_classification catalog_method with
+     | Lsp_method_catalog.Read_only -> Forward_read_only
+     | Lsp_method_catalog.Mutation
+     | Lsp_method_catalog.Lifecycle
+     | Lsp_method_catalog.Status -> Reject_write_adjacent)
+  | None ->
+    (* workspace/symbol and the LSP */resolve methods are deliberately absent
+       from both tables: their payloads carry no [textDocument.uri], and this
+       multi-language proxy has no SSOT for choosing a server process. They
+       arrive here as [Unknown_forwarded_method] with their wire spelling. *)
+    (match List.assoc_opt method_ relayed_methods with
+     | Some Relay_read_only -> Forward_read_only
+     | Some Deny_write_adjacent -> Reject_write_adjacent
+     | None -> Unknown_forwarded_method method_)
+;;
+
+(* A document URI that names nothing inside the workspace (outside the root,
+   a foreign scheme such as untitled, a relative path that climbs out) is a
+   bad request, not an unavailable server, so it is refused rather than
+   answered empty. *)
+let reject_document_outside_workspace cs id =
+  send_error cs id Mcp_error_code.(to_wire_code Invalid_params) "Path is outside the workspace"
+;;
+
+(* The textDocument methods below answer empty instead of erroring while the
+   language server for the file is unavailable or the file has no server: a
+   JSON-RPC error on hover reads to the client as a broken connection, while
+   an empty hover is a quiet line. The degradation is still recorded per
+   language for [masc/lspStatus]. [empty] is the method's own empty result. *)
+let relay_or_empty cs ~method_ ~(empty : Yojson.Safe.t) params id =
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error Missing_document_uri -> send_response cs id empty
+  | Error Document_uri_outside_workspace -> reject_document_outside_workspace cs id
+  | Ok request ->
+    (match request.language with
+     | Unknown_lang -> send_response cs id empty
+     | Known_lang lang_id ->
+       (match ensure_lsp_process cs lang_id with
+        | Error msg ->
+          note_unavailable cs ~lang_id ~error:msg;
+          send_response cs id empty
+        | Ok proc ->
+          let promise =
+            Lsp_message_router.send_request
+              cs.router
+              proc
+              ~method_:(lsp_method_to_string method_)
+              ~params
+              ~client_id:(req_id_to_int id)
+          in
+          (match Eio.Promise.await promise with
+           | Ok result -> send_response cs id result
+           | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg)))
+;;
+
+let dispatch_fields cs fields =
+  let method_opt =
+    match List.assoc_opt "method" fields with
+    | Some (`String m) -> Some m
+    | _ -> None
+  in
+  let params = List.assoc_opt "params" fields |> Option.value ~default:`Null in
+  let id = extract_id fields in
+  match method_opt, id with
+  | Some method_str, id_opt ->
+    (match lsp_method_of_string method_str, id_opt with
+     (* Client lifecycle *)
+     | Some Initialize, Some n ->
+       cs.workspace_root
+       := workspace_root_after_initialize
+            ~authority:cs.anchor_authority
+            ~base_path:cs.base_path
+            ~anchor:!(cs.workspace_root)
+            params;
+       send_response cs n (initialize_result_json ~workspace_root:!(cs.workspace_root) ())
+     | Some Initialized, _ -> ()
+     | Some Shutdown, Some n -> send_response cs n `Null
+     | Some Exit, _ -> disconnect cs
+     (* Typed LSP health for the dashboard (task-1691): per-language
+        connected / command / last_error. *)
+     | Some Masc_lsp_status, Some n -> send_response cs n (current_status_json cs)
+     | Some Masc_lsp_status, None -> ()
+     | Some ((Did_open | Did_change | Did_save | Did_close) as method_), None ->
+       forward_document_sync_notification cs method_ params
+     | Some ((Did_open | Did_change | Did_save | Did_close) as method_), Some n ->
+       send_error cs n
+         Mcp_error_code.(to_wire_code Invalid_request)
+         (Printf.sprintf
+            "Document-sync LSP method must be a notification: %s"
+            (lsp_method_to_string method_))
+     (* Methods that answer empty while the language has no server *)
+     | Some Hover, Some n -> relay_or_empty cs ~method_:Hover ~empty:`Null params n
+     | Some CodeLens, Some n -> relay_or_empty cs ~method_:CodeLens ~empty:(`List []) params n
+     | Some Diagnostic, Some n ->
+       relay_or_empty cs ~method_:Diagnostic ~empty:(`Assoc [ "items", `List [] ]) params n
+     | Some Completion, Some n -> relay_or_empty cs ~method_:Completion ~empty:(`List []) params n
+     | Some CodeAction, Some n -> relay_or_empty cs ~method_:CodeAction ~empty:(`List []) params n
+     | Some Folding_range, Some n ->
+       relay_or_empty cs ~method_:Folding_range ~empty:(`List []) params n
+     | None, _
+     | Some (Initialize | Shutdown), None
+     | Some (Hover | CodeLens | Diagnostic | Completion | CodeAction | Folding_range), None
+     | Some (InlayHint | Definition | References | Document_symbol | Document_highlight), _ ->
+       (match id_opt with
+        | Some n ->
+          (* Other read-only requests with a textDocument URI → forward to LSP.
+             Write-adjacent / unrecognized methods are rejected here (task-1692)
+             rather than forwarded, so the observation plane never mutates the
+             workspace through the language server. *)
+          (match classify_forwarded_method method_str with
+           | Reject_write_adjacent ->
+             send_error cs n
+               Mcp_error_code.(to_wire_code Invalid_request)
+               ("Read-only LSP proxy: method not permitted: " ^ method_str)
+           | Unknown_forwarded_method unknown ->
+             send_error cs n
+               Mcp_error_code.(to_wire_code Method_not_found)
+               ("Read-only LSP proxy: unknown method not permitted: " ^ unknown)
+           | Forward_read_only ->
+             (match resolve_document_request ~anchor:(document_root cs) params with
+              | Error Missing_document_uri ->
+                send_error cs n
+                  Mcp_error_code.(to_wire_code Method_not_found)
+                  ("Unhandled method: " ^ method_str)
+              | Error Document_uri_outside_workspace ->
+                reject_document_outside_workspace cs n
+              | Ok request ->
+                (match request.language with
+                 | Known_lang lang_id ->
+                   forward_request cs lang_id method_str params n
+                 | Unknown_lang ->
+                   send_error
+                     cs
+                     n
+                     Mcp_error_code.(to_wire_code Invalid_params)
+                     ("No LSP server for: " ^ request.relative_path))))
+        (* No id: a JSON-RPC message without an id is a notification, so it
+           gets no response. *)
+        | None -> ()))
+  (* No method field *)
+  | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
+  | None, None -> ()
+;;
+
+let dispatch_message cs msg =
+  if Atomic.get cs.disconnected
+  then ()
+  else (
+    match Yojson.Safe.from_string msg with
+    | exception Yojson.Json_error err ->
+      (* No id can be read from a frame that is not JSON, so the answer
+         carries a null id (JSON-RPC 2.0 section 5.1). *)
+      send_error_without_id
+        cs
+        Mcp_error_code.(to_wire_code Parse_error)
+        ("Parse error: " ^ err)
+    | `Assoc fields ->
+      (try dispatch_fields cs fields with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Server.error "LSP dispatch error: %s" (Printexc.to_string exn);
+         (* A request that raised still gets an answer for its id; without
+            one the client waits on that request forever. *)
+         (match extract_id fields with
+          | Some n ->
+            send_error cs n Mcp_error_code.(to_wire_code Internal_error) "Internal error"
+          | None -> ()))
+    | _ ->
+      send_error_without_id
+        cs
+        Mcp_error_code.(to_wire_code Invalid_request)
+        "JSON-RPC message must be an object")
+;;
+
+let start_dispatch_workers cs =
+  for _ = 1 to Lsp_proxy_limits.inbound_dispatch_worker_count do
+    Eio.Fiber.fork_daemon ~sw:cs.sw (fun () ->
+      let rec loop () =
+        match Eio.Stream.take cs.dispatch_queue with
+        | Stop_dispatch_worker -> `Stop_daemon
+        | Dispatch_text msg ->
+          (* One frame that raises (a parser failure other than a JSON error,
+             or an answer that cannot be sent) is dropped with a log line;
+             the worker stays up for the frames behind it. *)
+          (if not (Atomic.get cs.disconnected)
+           then (
+             try dispatch_message cs msg with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Log.Server.warn "LSP dispatch frame dropped: %s" (Printexc.to_string exn)));
+          loop ()
+      in
+      try loop () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Server.warn "LSP dispatch worker stopped: %s" (Printexc.to_string exn);
+        `Stop_daemon)
+  done
+;;
+
+(** Register the /api/v1/ide/lsp WebSocket endpoint. *)
+let add_routes ~sw ~clock router =
+  let router =
+    Server_route.ws_get
+      ide_lsp_upgrade_path
+      (fun ~upgrade request reqd ->
+         (* Token-gated like /api/v1/lsp/question, and for the same reason:
+            every connection spawns resident language-server processes. A
+            browser WebSocket cannot set an Authorization header, so the
+            dashboard sends its bearer as the token query parameter, which
+            [Server_auth] admits on this path. *)
+         with_token_permission_auth
+           ~permission:Masc_domain.CanBroadcast
+           (fun state _identity _req reqd ->
+              let origin =
+                match Http.Request.header request "origin" with
+                | Some o -> o
+                | None -> "localhost"
+              in
+              let refuse ~status ~code message =
+                Http.Response.json_value
+                  ~status
+                  ~request
+                  (`Assoc
+                     [ "ok", `Bool false
+                     ; "error", `String message
+                     ; "code", `String code
+                     ])
+                  reqd
+              in
+              (match state.Mcp_server.proc_mgr with
+               | None ->
+                 (* Refused before the upgrade: without a process manager no
+                    language server can ever be spawned on this socket. *)
+                 Log.Server.warn "LSP WebSocket: no proc_mgr available";
+                 refuse
+                   ~status:`Service_unavailable
+                   ~code:"lsp_process_manager_unavailable"
+                   "Language servers cannot be started on this server"
+               | Some proc_mgr ->
+                 let uri = Uri.of_string request.Httpun.Request.target in
+                 (match lsp_connection_addressing ~state ~uri with
+                  | Error err ->
+                    refuse
+                      ~status:`Bad_request
+                      ~code:err.Server_ide_scope.code
+                      err.Server_ide_scope.message
+                  | Ok (anchor_authority, workspace_base) ->
+                 (* RFC-0281: drive the upgraded connection via the shared
+                    attachment SSOT.  The previous code built [ws_conn] and
+                    [ignore]d it (never calling Gluten [upgrade]), so frames
+                    were never read; it also blocked on a per-connection
+                    [Eio.Switch.run] + promise, which the Gluten model
+                    forbids.  Subprocesses are now reclaimed explicitly in
+                    {!disconnect} (called from [Connection_close]/[eof]). *)
+                 (* RFC-0287: drive the upgraded connection via the shared
+                    ws-direct attachment SSOT. The Endpoint reassembles
+                    fragments, validates UTF-8, enforces the size caps, and
+                    auto-replies to pings, so [on_message] receives a complete
+                    LSP message and a violation surfaces as on_close/on_error. *)
+                 (match
+                    Server_mcp_transport_ws.respond_and_drive_upgrade
+                      ~upgrade
+                      ~reqd
+                      ~max_message:(Server_mcp_transport_ws.max_inbound_message_bytes ())
+                      ~max_frame:(Server_mcp_transport_ws.max_inbound_frame_bytes ())
+                      ~handler:(fun wsd ->
+                        Log.Server.info "LSP WebSocket connected from %s" origin;
+                        let cs =
+                          { sw
+                          ; router = Lsp_message_router.create ()
+                          ; processes = Hashtbl.create 4
+                          ; process_mutex = Eio.Mutex.create ()
+                          ; spawn_locks = Hashtbl.create 4
+                          ; health = Hashtbl.create 4
+                          ; health_mutex = Eio.Mutex.create ()
+                          ; wsd
+                          ; base_path = base_path_of_state state
+                          ; proc_mgr
+                          ; anchor_authority
+                          ; workspace_root = ref workspace_base
+                          ; send_queue =
+                              Eio.Stream.create
+                                Lsp_proxy_limits.outbound_send_queue_capacity
+                          ; dispatch_queue =
+                              Eio.Stream.create
+                                Lsp_proxy_limits.inbound_dispatch_queue_capacity
+                          ; clock
+                          ; disconnected = Atomic.make false
+                          }
+                        in
+                        start_send_writer cs;
+                        start_dispatch_workers cs;
+                        Ws_endpoint.handlers
+                          ~on_message:(fun (m : Ws_msg.t) ->
+                            enqueue_dispatch cs (Bigstringaf.to_string m.Ws_msg.payload))
+                          ~on_close:(fun ~code:_ ~reason:_ ->
+                            Log.Server.info "LSP WebSocket disconnecting";
+                            disconnect cs)
+                          ~on_error:(fun reason ->
+                            Log.Server.warn
+                              "LSP inbound rejected (%s); disconnecting" reason;
+                            disconnect cs)
+                          ~on_eof:(fun () ->
+                            Log.Server.info "LSP WebSocket EOF";
+                            disconnect cs)
+                          ())
+                  with
+                  | Ok () -> ()
+                  | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e))))
+           request
+           reqd)
+      router
+  in
+  router
+;;
+
+module For_testing = struct
+  let resolve_relative = resolve_relative
+  let workspace_root_for_initialize = workspace_root_for_initialize
+
+  type nonrec anchor_authority = anchor_authority =
+    | Anchor_declared
+    | Anchor_from_root_uri
+
+  let anchor_authority_of_source = anchor_authority_of_source
+  let workspace_root_after_initialize = workspace_root_after_initialize
+  let initialize_result_json = initialize_result_json
+  let language_server_initialize_params = language_server_initialize_params
+  let inbound_dispatch_worker_count = Lsp_proxy_limits.inbound_dispatch_worker_count
+  let await_initialize_under_deadline = await_initialize_under_deadline
+
+  type nonrec resolved_lang = resolved_lang =
+    | Known_lang of string
+    | Unknown_lang
+
+  let resolve_lang = resolve_lang
+
+  type nonrec document_request_error = document_request_error =
+    | Missing_document_uri
+    | Document_uri_outside_workspace
+
+  type nonrec resolved_document_request = resolved_document_request =
+    { uri : string
+    ; relative_path : string
+    ; line : int option
+    ; language : resolved_lang
+    }
+
+  let resolve_document_request = resolve_document_request
+
+  (* task-1691: the LSP health type + its pure wire projection. *)
+  type health = lang_health =
+    | Connected
+    | Unavailable of string
+
+  let lang_status_json = lang_status_json
+  let status_snapshot_json = status_snapshot_json
+
+  (* task-1692: read-only method allowlist for the catch-all forwarder. *)
+  type disposition = method_disposition =
+    | Forward_read_only
+    | Reject_write_adjacent
+    | Unknown_forwarded_method of string
+
+  let classify_forwarded_method = classify_forwarded_method
+
+  (* task-1694: canonical handled LSP command catalog. *)
+  type method_class = Lsp_method_catalog.classification =
+    | Read_only
+    | Mutation
+    | Lifecycle
+    | Status
+
+  let handled_lsp_methods () =
+    List.map
+      (fun (entry : Lsp_method_catalog.entry) ->
+         entry.wire_method, entry.classification)
+      Lsp_method_catalog.entries
+  ;;
+
+  let classify_handled_lsp_method method_ =
+    Option.map lsp_method_classification (lsp_method_of_string method_)
+  ;;
+
+  let relayed_lsp_methods () =
+    List.map
+      (fun (method_, relay) ->
+         ( method_
+         , match relay with
+           | Relay_read_only -> Forward_read_only
+           | Deny_write_adjacent -> Reject_write_adjacent ))
+      relayed_methods
+  ;;
+
+end

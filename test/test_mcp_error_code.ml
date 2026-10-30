@@ -1,0 +1,290 @@
+(** Uniqueness + range tests for [Mcp_error_code.t] (RFC-0098).
+
+    These tests pin the closed-variant contract: every constructor maps
+    to a unique wire integer, every wire integer lies in the
+    JSON-RPC 2.0 reserved range, and the round-trip survives
+    [to_wire_code]/[of_wire_code]. Drift here will break MCP clients
+    that switch on the integer code. *)
+
+open Alcotest
+module C = Masc.Mcp_error_code
+
+(* JSON-RPC 2.0 defines standard error codes and a server-error range. *)
+let in_jsonrpc_range code =
+  let well_known = [ -32700; -32600; -32601; -32602; -32603 ] in
+  List.mem code well_known || (code >= -32099 && code <= -32000)
+
+let test_wire_codes_unique () =
+  let codes = List.map C.to_wire_code C.all in
+  let unique = List.sort_uniq compare codes in
+  if List.length codes <> List.length unique then
+    Alcotest.failf "wire codes are not unique: %s"
+      (String.concat ", " (List.map string_of_int codes))
+
+let test_wire_codes_in_range () =
+  List.iter
+    (fun t ->
+      let code = C.to_wire_code t in
+      if not (in_jsonrpc_range code) then
+        Alcotest.failf "%a maps to %d which is outside JSON-RPC 2.0 reserved range"
+          C.pp t code)
+    C.all
+
+(* MCP revision 2026-07-28 pins this body, field for field: a client reading a
+   4xx decides from it whether it is talking to a modern server or a legacy
+   one. A missing [data.supported] does not degrade the error, it reclassifies
+   the whole server, so each field is asserted rather than the string as a
+   whole. *)
+let test_unsupported_protocol_version_body_shape () =
+  let body =
+    C.unsupported_protocol_version_body ~requested:"1900-01-01"
+      ~supported:[ "2026-07-28"; "2025-11-25" ]
+  in
+  check bool "version rejection before reading the id is an HTTP error" true
+    (C.is_http_error_response (Yojson.Safe.from_string body));
+  let fields =
+    match Yojson.Safe.from_string body with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "body is not a JSON object"
+  in
+  (match List.assoc_opt "jsonrpc" fields with
+  | Some (`String v) -> Alcotest.(check string) "jsonrpc" "2.0" v
+  | _ -> Alcotest.fail "jsonrpc version missing");
+  (match List.assoc_opt "id" fields with
+  | Some `Null -> ()
+  | _ ->
+      Alcotest.fail
+        "id must be null: the header is rejected before the request id is read");
+  let err =
+    match List.assoc_opt "error" fields with
+    | Some (`Assoc err) -> err
+    | _ -> Alcotest.fail "error object missing"
+  in
+  (match List.assoc_opt "code" err with
+  | Some (`Int code) ->
+      Alcotest.(check int) "code fixed by the spec, not by this server" (-32022) code
+  | _ -> Alcotest.fail "error.code missing");
+  (match List.assoc_opt "message" err with
+  | Some (`String m) ->
+      Alcotest.(check string) "message" "Unsupported protocol version" m
+  | _ -> Alcotest.fail "error.message missing");
+  let data =
+    match List.assoc_opt "data" err with
+    | Some (`Assoc data) -> data
+    | _ ->
+        Alcotest.fail
+          "error.data missing — without it the response is not a recognized \
+           modern error and the client falls back to initialize"
+  in
+  (match List.assoc_opt "supported" data with
+  | Some (`List vs) ->
+      Alcotest.(check (list string))
+        "supported list is what the client retries from"
+        [ "2026-07-28"; "2025-11-25" ]
+        (List.map
+           (function
+             | `String s -> s
+             | _ -> Alcotest.fail "supported entry is not a string")
+           vs)
+  | _ -> Alcotest.fail "data.supported missing");
+  match List.assoc_opt "requested" data with
+  | Some (`String r) -> Alcotest.(check string) "requested echoed back" "1900-01-01" r
+  | _ -> Alcotest.fail "data.requested missing"
+
+let test_round_trip_well_known () =
+  (* [of_wire_code] returns [None] for [Quiet] because the
+     reason/recovered payload is not derivable from the integer alone.
+     Skip [Quiet _] in this round-trip — the contract is documented in
+     the .mli. *)
+  List.iter
+    (fun t ->
+      match t with
+      | C.Quiet _ -> ()
+      | _ ->
+          let code = C.to_wire_code t in
+          match C.of_wire_code code with
+          | Some t' when t' = t -> ()
+          | Some t' ->
+              Alcotest.failf "round-trip drift: %a -> %d -> %a" C.pp t code C.pp
+                t'
+          | None ->
+              Alcotest.failf "of_wire_code returned None for known code %d"
+                code)
+    C.all
+
+let test_of_wire_unknown_returns_none () =
+  (* Unknown integer codes must return [None] rather than collapsing to
+     [Internal_error]. Callers rely on this to detect contract drift —
+     the same rationale as [Auth_error_kind.of_string]. *)
+  let unknowns = [ 0; -1; -32100; -31999; -32500; 200 ] in
+  List.iter
+    (fun code ->
+      match C.of_wire_code code with
+      | None -> ()
+      | Some t ->
+          Alcotest.failf "of_wire_code should return None for %d, got %a" code
+            C.pp t)
+    unknowns
+
+let test_quiet_round_trip_loses_payload () =
+  (* Documentation contract: [Quiet] maps to -32099 but [of_wire_code
+     (-32099)] returns [None] because the payload is not encoded in
+     the integer. *)
+  let q = C.Quiet { reason = "test skip"; recovered = true } in
+  let code = C.to_wire_code q in
+  Alcotest.(check int) "quiet maps to -32099" (-32099) code ;
+  Alcotest.(check (option pass))
+    "of_wire_code (-32099) returns None"
+    None
+    (C.of_wire_code (-32099))
+
+let test_default_messages_non_empty () =
+  List.iter
+    (fun t ->
+      let msg = C.to_wire_message_default t in
+      if String.length msg = 0 then
+        Alcotest.failf "%a has empty default message" C.pp t)
+    C.all
+
+let test_insufficient_scope_is_forbidden_at_minus_32007 () =
+  Alcotest.(check int) "wire code" (-32007) (C.to_wire_code C.Insufficient_scope);
+  (match C.to_http_status C.Insufficient_scope with
+   | `Forbidden -> ()
+   | _ -> Alcotest.fail "Insufficient_scope must map to HTTP 403 Forbidden");
+  Alcotest.(check bool) "the wire code reads back" true
+    (C.of_wire_code (-32007) = Some C.Insufficient_scope)
+
+let test_http_status_quiet_is_ok () =
+  (* By contract: [Quiet _] is not a failure response. Embedded in a
+     200 the client sees the [Quiet] envelope as a declared skip
+     without HTTP error-handling kicking in. *)
+  let q = C.Quiet { reason = "intentional"; recovered = false } in
+  match C.to_http_status q with
+  | `OK -> ()
+  | _ -> Alcotest.fail "Quiet must map to HTTP 200 OK"
+
+let test_sse_register_error_body_uses_jsonrpc_invalid_request () =
+  let open Yojson.Safe.Util in
+  let body =
+    C.jsonrpc_error_body C.Invalid_request ~message:"unknown session stale-mcp"
+    |> Yojson.Safe.from_string
+  in
+  check bool "invalid request envelope is an HTTP error" true
+    (C.is_http_error_response body);
+  check string "jsonrpc" "2.0" (body |> member "jsonrpc" |> to_string);
+  check string "id is null" "null" (body |> member "id" |> Yojson.Safe.to_string);
+  let error = body |> member "error" in
+  check int "invalid request code" (-32600) (error |> member "code" |> to_int);
+  check string "message" "unknown session stale-mcp"
+    (error |> member "message" |> to_string)
+
+let test_allows_null_request_id_only_for_unreadable_id () =
+  let allowed = List.filter C.allows_null_request_id C.all in
+  Alcotest.(check int) "exactly three codes allow a null id" 3 (List.length allowed);
+  Alcotest.(check bool) "Parse_error" true (C.allows_null_request_id C.Parse_error);
+  Alcotest.(check bool) "Invalid_request" true (C.allows_null_request_id C.Invalid_request);
+  (* Third since the MCP 2026-07-28 version check: the declared version is
+     read from the [MCP-Protocol-Version] header and rejected there, so the
+     JSON-RPC body — and the id inside it — is never parsed. Same §5 condition
+     as the other two, reached by a different route. A future rejection driven
+     by the [_meta] key instead does parse the body, and would have to carry
+     the id. *)
+  Alcotest.(check bool) "Unsupported_protocol_version" true
+    (C.allows_null_request_id C.Unsupported_protocol_version);
+  (* Header_mismatch is the "future rejection driven by the _meta key" this
+     comment anticipated. It compares the header against params._meta, so the
+     body parsed and the id is readable -- it does not get a null one. A
+     request whose body is not JSON is reported as Invalid_request instead. *)
+  Alcotest.(check bool) "Header_mismatch" false
+    (C.allows_null_request_id C.Header_mismatch)
+;;
+
+(* Non-ASCII used to leave here as OCaml decimal escapes -- "한" as \236... --
+   and \2 is not an escape JSON knows, so the body did not parse. Header and
+   tool names reach these messages straight off the request. *)
+let test_error_body_is_parseable_json_for_any_message () =
+  List.iter
+    (fun message ->
+      let body = C.jsonrpc_error_body C.Header_mismatch ~message in
+      match Yojson.Safe.from_string body with
+      | `Assoc fields ->
+        let error = List.assoc "error" fields in
+        Alcotest.(check string)
+          "the message survives the round trip"
+          message
+          (Yojson.Safe.Util.(error |> member "message" |> to_string))
+      | _ -> Alcotest.failf "not a JSON object: %s" body
+      | exception Yojson.Json_error e ->
+        Alcotest.failf "%S produced unparseable JSON (%s): %s" message e body)
+    [ "plain ascii"; "Mcp-Method 한글"; {|quote " and \ backslash|} ]
+;;
+
+let test_error_body_with_id_echoes_the_request_id () =
+  let body =
+    C.jsonrpc_error_body_with_id C.Header_mismatch ~id:(`Int 42)
+      ~message:"Mcp-Method header value does not match body method"
+  in
+  check bool "a rejection answering a readable id is not a null-id error" false
+    (C.is_http_error_response (Yojson.Safe.from_string body));
+  Alcotest.(check string)
+    "the id the caller read comes back"
+    "42"
+    (Yojson.Safe.to_string
+       Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "id"));
+  Alcotest.(check int)
+    "and the code is the one 2026-07-28 allocates"
+    (-32020)
+    Yojson.Safe.Util.(
+      Yojson.Safe.from_string body |> member "error" |> member "code" |> to_int)
+;;
+
+let test_allows_null_request_id_rejects_answered_requests () =
+  List.iter
+    (fun code ->
+      match code with
+      | C.Parse_error | C.Invalid_request | C.Unsupported_protocol_version -> ()
+      | other ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s must carry the request id" (Format.asprintf "%a" C.pp other))
+          false
+          (C.allows_null_request_id other))
+    C.all
+;;
+
+let () =
+  Alcotest.run "Mcp_error_code"
+    [
+      ( "wire-codes",
+        [
+          test_case "unique" `Quick test_wire_codes_unique;
+          test_case "in-range" `Quick test_wire_codes_in_range;
+          test_case "round-trip (well-known)" `Quick test_round_trip_well_known;
+          test_case "unsupported protocol version body (MCP 2026-07-28)" `Quick
+            test_unsupported_protocol_version_body_shape;
+          test_case "error body is JSON for any message" `Quick
+            test_error_body_is_parseable_json_for_any_message;
+          test_case "error body with id echoes it" `Quick
+            test_error_body_with_id_echoes_the_request_id;
+          test_case "unknown returns None" `Quick
+            test_of_wire_unknown_returns_none;
+          test_case "Quiet round-trip drops payload" `Quick
+            test_quiet_round_trip_loses_payload;
+        ] );
+      ( "null-request-id",
+        [
+          test_case "only unreadable-id codes allow null" `Quick
+            test_allows_null_request_id_only_for_unreadable_id;
+          test_case "every answered request keeps its id" `Quick
+            test_allows_null_request_id_rejects_answered_requests;
+        ] );
+      ( "messages-and-status",
+        [
+          test_case "default messages non-empty" `Quick
+            test_default_messages_non_empty;
+          test_case "Quiet -> 200 OK" `Quick test_http_status_quiet_is_ok;
+          test_case "Insufficient_scope -> 403 at -32007" `Quick
+            test_insufficient_scope_is_forbidden_at_minus_32007;
+          test_case "SSE register error JSON-RPC body" `Quick
+            test_sse_register_error_body_uses_jsonrpc_invalid_request;
+        ] );
+    ]

@@ -1,0 +1,19 @@
+{
+  "schema": "masc.goal-bootstrap-task-receipts.v1",
+  "task_id": "task-2652",
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "creation_request_id": "codex-goal-playground-bootstrap-20261025-v1",
+  "current_status": "in_progress",
+  "actor": "codex-mcp-client",
+  "observed_at": "2026-10-25T11:00:03.011265+00:00",
+  "backlog_version": 18726,
+  "private_row_snapshot_sha256": "c12de15724a4e23f56c273333065eb2fa2e1efa4bc9d4301b5160f78c6331474",
+  "initial_claim_version_conflict": {
+    "expected_version": 18714,
+    "actual_version": 18716,
+    "outcome": "no_mutation"
+  },
+  "successful_claim_expected_version": 18716,
+  "successful_start_expected_version": 18717,
+  "completion_claimed": false
+}

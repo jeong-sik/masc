@@ -1,0 +1,38 @@
+{
+  "base_head": "9607401db6a914b4241628c80a7724a48ae49ad0",
+  "scope": "Pre-parent-integration review response; no native, browser, full-suite, CI or deployment proof",
+  "source_sha256": {
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": "8597863a9360bb45caf69c92e52e789c31a1c97ea3dbe5c8367d4c59b3dbd2ac",
+    "dashboard/src/api/dashboard-runtime.ts": "c3b31f5b7a9532752d350f95a6e1e871d751171215e8307f16945fa4a5131b2b",
+    "dashboard/src/api/dashboard.ts": "8f97284fe9dbf706d45b4bedcddb166c55d06ac678558b7a39944cedcd691967",
+    "dashboard/src/components/runtime-toml-editor.test.ts": "fec0fe28ce06355fc9ce74cd044580062a617907908fea9b05ba32c7fb234bcf",
+    "dashboard/src/components/settings-surface.test.ts": "90e3600ddc27c4647b9c9d89583fe74d9db45ce69f00fffb19bc7f8fa679ab44",
+    "dashboard/src/components/settings-surface.ts": "6715dbaaf4c51fdc1d5547b49c81f921814a7d4ce132ab37404e52db4da062f5",
+    "dashboard/src/lib/runtime-toml-session.ts": "96c8196cd82598a5c312f14a24c8ade6f5dfcd2e0e403c3272239cb935b7234f"
+  },
+  "artifact_sha256": {
+    "known-refusal-red.log": "7a93569ebcc5a89dcab381dc693e0428f266aec77a5083b77b1d0f563f6dc3c7",
+    "authority-refresh-red.log": "6894887fdc20615a5420f4c482813d766f36894168df62426e5e5d773f859dec",
+    "authority-initial-setup-error.log": "eab69496548d9ee7bba98e3f1a0a6d9c867cdab85b29277189171e3cc27f4826",
+    "first-green-attempt.log": "a46a75fdb9d5b87d12b25ef442d71d9b9682004b02b22e1ece99781ba490da69",
+    "second-green-attempt.log": "76b9089b8c662aaad8d6dbd6abe4aaa6f0788c6aa023c24a2fcf0ce760b1a09b",
+    "tests-final.log": "7f1ac53e76010547d437c6de7c976aeafd5e43b81fbfdf939a093b2e1e1bb46e",
+    "tsc-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint-final.json": "404d414d2892ec3771cb5beff183f68cb4dbbb6a2482c66c03ef9946bbfac2e8",
+    "eslint-head-baseline.json": "fa3c6ad0ab925d5fb04d4cb30e636060122da7e23e5a804a48785397300192f5"
+  },
+  "results": {
+    "focused_vitest": {
+      "files": 3,
+      "passed": 165,
+      "failed": 0
+    },
+    "tsc_exit": 0,
+    "eslint": {
+      "exit": 1,
+      "baseline": 2,
+      "current": 2,
+      "new": 0
+    }
+  }
+}

@@ -1,0 +1,58 @@
+[
+  {
+    "event_id": "krl:9c5084ddaae58afb6ef0d783693e9defdb01facc009faff351022f8d888ff92f",
+    "stimulus_id": "9a3a9312f729f36ef87c3dab02d34cae6700013ef4f4effcac1f285beba013a4",
+    "recorded_at_unix": 1793026769.25067,
+    "kind": "stimulus",
+    "disposition": null
+  },
+  {
+    "event_id": "9a3a9312f729f36ef87c3dab02d34cae6700013ef4f4effcac1f285beba013a4:reaction:turn_started",
+    "stimulus_id": "9a3a9312f729f36ef87c3dab02d34cae6700013ef4f4effcac1f285beba013a4",
+    "recorded_at_unix": 1793026769.498351,
+    "kind": "turn_started",
+    "disposition": null
+  },
+  {
+    "event_id": "krl:468a666285b899e99b2bd2b1500fc78ab32511b65ef40290390a1d691991722b",
+    "stimulus_id": "b3dfe90f39f8ac93e46b37ba8471e26bedecaad12b24e6d759cb92d313f48358",
+    "recorded_at_unix": 1793026782.427361,
+    "kind": "stimulus",
+    "disposition": null
+  },
+  {
+    "event_id": "9a3a9312f729f36ef87c3dab02d34cae6700013ef4f4effcac1f285beba013a4:reaction:turn_finished",
+    "stimulus_id": "9a3a9312f729f36ef87c3dab02d34cae6700013ef4f4effcac1f285beba013a4",
+    "recorded_at_unix": 1793026784.118296,
+    "kind": "turn_finished",
+    "disposition": "completed"
+  },
+  {
+    "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:0:929bfa7a6ad4c0aec887172030400e5d055064fb3dd730134e76bece051c1d98:source:0",
+    "stimulus_id": "9a3a9312f729f36ef87c3dab02d34cae6700013ef4f4effcac1f285beba013a4",
+    "recorded_at_unix": 1793026784.11834,
+    "kind": "event_queue_ack",
+    "disposition": null
+  },
+  {
+    "event_id": "b3dfe90f39f8ac93e46b37ba8471e26bedecaad12b24e6d759cb92d313f48358:reaction:turn_started",
+    "stimulus_id": "b3dfe90f39f8ac93e46b37ba8471e26bedecaad12b24e6d759cb92d313f48358",
+    "recorded_at_unix": 1793026784.127967,
+    "kind": "turn_started",
+    "disposition": null
+  },
+  {
+    "event_id": "b3dfe90f39f8ac93e46b37ba8471e26bedecaad12b24e6d759cb92d313f48358:reaction:turn_finished",
+    "stimulus_id": "b3dfe90f39f8ac93e46b37ba8471e26bedecaad12b24e6d759cb92d313f48358",
+    "recorded_at_unix": 1793026793.623415,
+    "kind": "turn_finished",
+    "disposition": "completed"
+  },
+  {
+    "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1:f6d98d4de29c3b15a5f821d7e1369109c7bb1ff4562f9eec2fd3f6ffe3ede356:source:0",
+    "stimulus_id": "b3dfe90f39f8ac93e46b37ba8471e26bedecaad12b24e6d759cb92d313f48358",
+    "recorded_at_unix": 1793026793.623471,
+    "kind": "event_queue_ack",
+    "disposition": null
+  }
+]

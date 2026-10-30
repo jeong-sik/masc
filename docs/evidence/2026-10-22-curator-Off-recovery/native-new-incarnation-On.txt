@@ -1,0 +1,56 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│Lane Add-ons · 1 declared · 1 active · 0 failed workers                                                                                                       │
+│Retained history · 3 instances · h:open                                                                                                                       │
+│                                                                                                                                                              │
+│> curator-qual-1196 · Workspace Curator worker · attached · 1 records                                                                                         │
+│    Applied · worker 01a16200-c0ae-7000-b20e-0f22a1378663                                                                                                     │
+│    Original Curator executions; ledger and briefing commits remain host-owned                                                                                │
+│    Enter:open  o:observe  d:remove TOML + worker                                                                                                             │
+│                                                                                                                                                              │
+│?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  Reading …                                                │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  Reading …
+ › to curator-source-1196   (i to write)  · Refreshing Keeper list: reading metadata

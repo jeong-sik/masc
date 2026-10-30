@@ -1,0 +1,71 @@
+{
+  "workflow": "Test",
+  "workflow_path": ".github/workflows/test.yml",
+  "run_id": 40365052184,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40365052184",
+  "head": "fa23bf437c3679bb4b7bd7c47eb592675697e370",
+  "ref": "fix/schedule-attempt-authority-20261027",
+  "event": "workflow_dispatch",
+  "status": "completed",
+  "conclusion": "success",
+  "created_at": "2026-10-26T17:03:40Z",
+  "updated_at": "2026-10-26T17:08:46Z",
+  "suites": [
+    {
+      "actual_name": "Schedule_domain",
+      "actual_cases": 37
+    },
+    {
+      "actual_name": "Schedule_store",
+      "actual_cases": 66
+    },
+    {
+      "actual_name": "Schedule_runner",
+      "actual_cases": 24
+    },
+    {
+      "actual_name": "Schedule_tool_wiring",
+      "actual_cases": 64
+    },
+    {
+      "actual_name": "Schedule_consumer_dispatch",
+      "actual_cases": 58
+    },
+    {
+      "actual_name": "dashboard_http_core",
+      "actual_cases": 171
+    }
+  ],
+  "counts": {
+    "OK": 420,
+    "FAIL": 0,
+    "SKIP": 0
+  },
+  "source": {
+    "archive_sha256": "9cf38a715d3da0895f496bb6cde6f79ef3b3bff5e324501702f4229e257780e0",
+    "entry": "ci-run-tests.log",
+    "entry_sha256": "476cdbd8558b81ef1997acaf3eea260427645a55b944f2b73ae24e72b448ad2a",
+    "entry_bytes": 501503,
+    "source_lines": 5497
+  },
+  "selection": {
+    "path": "selected.json",
+    "sha256": "a19c9d9541ebb0bedc64ba44fc0cbdb9f0d01aef33be409bc105ad8ede620514",
+    "bytes": 54300,
+    "rows": 432,
+    "method": "Python splitlines 1-based original source line numbers. Only ANSI SGR sequences removed. Every suite header, case verdict and final summary retained; other output omitted.",
+    "is_derivative": true
+  },
+  "scope": "Selected aliases only. Not full regression, model execution, installed server restart, or production installation. No execution result is transferred to a later head.",
+  "api_source": {
+    "command": [
+      "gh",
+      "api",
+      "repos/jeong-sik/masc/actions/runs/40365052184"
+    ],
+    "observed_at": "2026-10-26T17:47:02.163374+00:00",
+    "stdout_sha256": "069dd56fde0679ed1e4356b10bb548299b6293c01e2a7063846a59bfaa0f02f7",
+    "stdout_bytes": 12185,
+    "semantics": "New terminal REST read during evidence retention; not metadata extracted from the older captured suite log. Full gh stdout retained in ignored evidence work output."
+  }
+}

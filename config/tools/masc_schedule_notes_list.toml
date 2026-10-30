@@ -1,0 +1,31 @@
+name = "masc_schedule_notes_list"
+description = """List the durable notes of one scheduled request. Notes are
+keyed by the stable schedule_id and survive definition replacements
+(masc_schedule_update) and terminal schedule states. Use them to read why a
+schedule exists and what changed and when. A wake does not carry the notes, so a
+woken Keeper reads them here when it needs them. Each page is oldest first;
+the first page is the newest window. When has_more_older is true, pass
+next_before_note_id as before_note_id to read the preceding page. total_count
+is the count at that read. If it changes while paging or on a fresh newest-page
+read before acting, repeat the scan: a newly appended note can have an earlier
+timestamp and appear outside the newest page."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "schedule_id"
+type = "string"
+required = true
+description = "Stable id of the schedule whose notes are listed."
+
+[[params]]
+name = "limit"
+type = "integer"
+minimum = 1
+maximum = 200
+description = "Maximum notes per page (default 50). The newest eligible window is returned oldest first."
+
+[[params]]
+name = "before_note_id"
+type = "string"
+description = "Exclusive note id from this schedule; omit for the newest page. Use next_before_note_id to continue toward older notes."

@@ -1,0 +1,548 @@
+open Alcotest
+module Types = Masc_tui_types
+module Decode = Masc.Tui_decode
+module Layout = Masc_tui_message_layout
+module Render_metrics = Masc_tui_render_metrics
+
+let make_state () =
+  Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+;;
+
+let make_keeper ?(paused = false) name : Decode.keeper =
+  { k_origin = Masc.Tui_decode.Persisted_keeper
+  ; k_name = name
+  ; k_paused = paused
+  ; k_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-09-01T00:00:00Z"; k_updated_at = "2026-09-05T12:00:00Z" }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 10; k_total_tokens = 5000; k_total_cost_usd = Result.get_ok (Keeper_cost_coverage.observe Keeper_cost_coverage.empty (Keeper_cost_coverage.Priced 0.05)); k_last_turn_ts = "2026-09-05T12:00:00Z"; k_last_proactive_outcome = None }
+  }
+;;
+
+let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memory_health.memory_keeper_health =
+  { mkh_keeper_id = keeper_id
+  ; mkh_revision = 1
+  ; mkh_updated_at = Some 1700000000.
+  ; mkh_facts = facts
+  ; mkh_observed_facts = facts - 2
+  ; mkh_derived_facts = 2
+  ; mkh_support_invalidations = 0
+  ; mkh_snapshot_bytes = snapshot_bytes
+  ; mkh_added = facts
+  ; mkh_removed = 0
+  ; mkh_snapshot_present = true
+  ; mkh_context_cycle =
+      { mcc_saved = None; mcc_saved_unreadable = false; mcc_read_position = None;
+        mcc_read_position_unreadable = false; mcc_rewriting_through = None;
+        mcc_prepared = None; mcc_synthesis = None; mcc_unread_snapshot = Ok []; mcc_unread_memory = Ok [] }
+  ; mkh_librarian =
+      { Masc.Tui_decode_memory_health.mlh_state = Some Masc.Tui_decode_memory_health.Pass_drained
+      ; mlh_measured_at = Some 1_775_000_000.0
+      ; mlh_unread_atom_turns = Some 0
+      ; mlh_unread_official_turns = Some 0
+      ; mlh_continuity_unread_atoms = Some 0
+      ; mlh_last_success_at = None
+      ; mlh_last_failure_kind = None
+      ; mlh_stalled = None
+      }
+  ; mkh_librarian_failures = 0
+  ; mkh_vision_ingest_errors = 0
+  ; mkh_vision_ingest_error_reasons = []
+  ; mkh_read_error = None
+  ; mkh_source_revision = 0
+  ; mkh_source_facts = 0
+  ; mkh_source_invalidations = 0
+  ; mkh_source_snapshot_bytes = 0
+  ; mkh_source_snapshot_present = false
+  ; mkh_source_read_error = None
+  ; mkh_alerts = []
+  }
+;;
+
+let make_memory_health ~total_facts ~source_facts ~keepers : Masc.Tui_decode_memory_health.memory_health_snapshot =
+  { mhs_generated_at = 1000.0
+  ; mhs_keepers = keepers
+  ; mhs_refused_keepers = []
+  ; mhs_total_facts = total_facts
+  ; mhs_total_observed_facts = total_facts - source_facts
+  ; mhs_total_derived_facts = 0
+  ; mhs_total_support_invalidations = 0
+  ; mhs_total_snapshot_bytes = 4096
+  ; mhs_total_source_facts = source_facts
+  ; mhs_total_source_invalidations = 0
+  ; mhs_total_source_snapshot_bytes = 1024
+  ; mhs_total_librarian_failures = 0
+  ; mhs_total_librarian_unread_turns = Some 0
+  ; mhs_total_librarian_continuity_unread_atoms = 0
+  ; mhs_total_librarian_continuity_unmeasured = 0
+  ; mhs_total_vision_ingest_errors = 0
+  ; mhs_total_read_errors = 0
+  ; mhs_total_source_read_errors = 0
+  ; mhs_warn_alerts = 0
+  ; mhs_error_alerts = 0
+  ; mhs_starving_keepers = 0
+  }
+;;
+
+let make_gate_pending ~id ~keeper : Decode.gate_pending =
+  { gp_id = id
+  ; gp_keeper = keeper
+  ; gp_operation = "tool_execute"
+  ; gp_display_tool = "bash"
+  ; gp_input_preview = Some "echo test"
+  ; gp_input_rows = Decode.Flattened None
+  ; gp_execution_cwd = None
+  ; gp_execution_sandbox = None
+  ; gp_waiting_s = Some 10.0
+  ; gp_phase = Decode.Gate_queued
+  ; gp_judge_advice = None
+  ; gp_auto_judge_detail = None
+  ; gp_retry_request = None
+  }
+;;
+
+let contains text needle =
+  try ignore (Str.search_forward (Str.regexp_string needle) text 0); true
+  with Not_found -> false
+
+let domain_task ~id ~created_at ~status : Masc_domain.task =
+  { id; title = id; description = ""; task_status = status; priority = 3;
+    files = []; created_at; created_by = Some "producer";
+    predecessor_task_id = None; contract = None;
+    execution_links = Masc_domain.no_execution_links; handoff_context = None;
+    cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None; skills = [] }
+
+let test_calculate_kpis_empty () =
+  let state = make_state () in
+  let kpis = Render_metrics.calculate_kpis state in
+  check bool "unobserved tasks stay unknown" true (Option.is_none kpis.tasks);
+  check bool "unobserved turns stay unknown" true (Option.is_none kpis.turns);
+  let output = String.concat "\n" (Render_metrics.render_section_fleet ~cols:160 state) in
+  (* Under "Engine memory" and "Scheduler lag", which the section draws above
+     each block, so the state is named and the subject is not said twice. *)
+  check bool "missing GC is visible" true
+    (contains output "Engine memory");
+  check bool "missing scheduler is visible" true
+    (contains output "Scheduler lag");
+  (* Three blocks -- the GC, the scheduler and the transport -- each saying
+     the state under its own heading, in the one word. [clip] puts a reset on
+     the end of every line, so the block is matched by its indent and phrase
+     rather than by a whole-line compare. *)
+  check int "each unread block says so, and says it the one way" 3
+    (List.length
+       (List.filter
+          (fun line -> contains line "    not observed")
+          (String.split_on_char '\n' output)));
+  check bool "no fabricated heap" false (contains output "42.5");
+  check bool "no fabricated latency" false (contains output "0.82")
+;;
+
+(* The fleet row draws how many keepers are configured and how many are
+   paused. It used to draw the unpaused ones and leave the reader to
+   subtract, and the subtraction is where the bug was: the count skipped a
+   declared keeper as well as a paused one, so every declared keeper sat
+   inside the difference a reader reads as paused. A declared keeper is not
+   paused -- [Tui_decode.keeper_of_declaration] writes [k_paused = false] and
+   is the only place a keeper with that origin is built. *)
+let make_declared_keeper name : Decode.keeper =
+  { (make_keeper name) with k_origin = Decode.Declared_keeper [] }
+;;
+
+let test_a_declared_keeper_is_not_counted_as_paused () =
+  let state = make_state () in
+  state.keepers <-
+    [ make_keeper "persisted"
+    ; make_keeper ~paused:true "stopped"
+    ; make_declared_keeper "declared" ];
+  let kpis = Render_metrics.calculate_kpis state in
+  check int "three are configured" 3 kpis.total_keepers;
+  check int "one of them is paused" 1 kpis.paused_keepers
+;;
+
+let test_calculate_kpis_populated () =
+  let state = make_state () in
+  state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
+  state.keeper_turns <-
+    [ { Decode.ktr_chat_control_token = None; ktr_keeper_name = "running";
+        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; interrupt_token = "fixture-token"; turn_ref = None; preview = None } };
+      { Decode.ktr_chat_control_token = None; ktr_keeper_name = "idle"; ktr_state = Keeper_turn_idle };
+      { Decode.ktr_chat_control_token = None; ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
+  state.keeper_turns_observed_at <- Some 100.;
+  let kpis = Render_metrics.calculate_kpis state in
+  check int "paused is a configuration count" 1 kpis.paused_keepers;
+  let turns = Option.get kpis.turns in
+  check int "only actual running owners count as running" 1 turns.running;
+  check int "idle is distinct" 1 turns.idle;
+  check int "unavailable is distinct" 1 turns.unavailable;
+  state.keeper_turns_error <- Some "keeper turns load failed: HTTP 503";
+  check bool "stale rows do not remain a current count" true
+    (Option.is_none (Render_metrics.calculate_kpis state).turns);
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "failed observation is visible" true
+    (contains output "keeper turns load failed: HTTP 503");
+  check bool "the render does not add a second failure verdict" false
+    (contains output "Current turn observation failed");
+  check bool "elapsed rows are not advanced as current on failure" false (contains output "lane autonomous")
+;;
+
+let test_scheduler_sample_availability () =
+  List.iter
+    (fun (samples, probe, displayed_probe) ->
+      let state = make_state () in
+      let payload =
+        `Assoc
+          [ ("status", `String "ok")
+          ; ("scheduler", `Assoc
+              [ ("probe", `String probe)
+              ; ("pool_domains", `Int 3)
+              ; ("lag", `Assoc
+                  [ ("samples", `Int samples)
+                  ; ("p95_ms", `Float 512.125)
+                  ; ("stalls", `Int 7)
+                  ])
+              ])
+          ]
+      in
+      state.server_identity <- Some
+        (match Decode.decode_server_identity payload with
+         | Ok identity -> identity
+         | Error detail -> fail detail);
+      state.metrics_section <- Types.Section_fleet;
+      let lines = ref [] in
+      let push line = lines := line :: !lines in
+      Render_metrics.render_metrics_body ~cols:200 ~budget:40 state
+        ~report_scroll:(fun _ -> ())
+        ~push ~push_styled:(fun ~style:_ line -> push line)
+        ~push_selected:push ~push_divider:(fun () -> ())
+        ~push_empty:(fun () -> ());
+      let output = String.concat "\n" (List.rev !lines) in
+      let measured = samples > 0 in
+      check bool "measured p95 requires a positive sample count" measured
+        (contains output "p95 512.125");
+      check bool "stall count requires a positive sample count" measured
+        (contains output "stalls");
+      check bool "sample absence is explicit" (not measured)
+        (contains output "No latency samples in the producer window");
+      check bool "domain observation remains visible in detail" true
+        (contains output "worker domains 3");
+      if not measured then (
+        check bool "card explains absent samples" true
+          (contains output "No latency samples");
+        check bool "card preserves normalized probe observation" true
+          (contains output ("Probe: " ^ displayed_probe));
+        check bool "detail preserves normalized probe observation" true
+          (contains output ("Probe " ^ displayed_probe))))
+    [ (0, "running", "running")
+    ; (0, "", "unreported")
+    ; (-1, " \t ", "unreported")
+    ; (1, "running", "running")
+    ]
+;;
+
+let test_retained_task_outcomes () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-07T12:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_at at = Masc_domain.Done { assignee = "producer"; completed_at = at; notes = None } in
+  let tasks =
+    [ task "old-completed" "2026-09-01T00:00:00Z" (done_at "2026-09-07T11:00:00Z");
+      task "submitted" "2026-09-07T10:00:00Z"
+        (AwaitingVerification { assignee = "producer"; started_at = "2026-09-07T10:00:00Z";
+          submitted_at = "2026-09-07T11:00:00Z"; verification_id = "proof" });
+      task "boundary" "2026-09-06T12:00:00Z" Todo;
+      task "cancelled" "2026-09-07T09:00:00Z"
+        (Cancelled { cancelled_by = "producer"; cancelled_at = "2026-09-07T11:30:00Z"; reason = None });
+      task "older-done" "2026-09-01T00:00:00Z" (done_at "2026-09-05T10:00:00Z");
+      task "invalid" "invalid timestamp" Todo;
+      task "future" "2026-09-08T10:00:00Z" Todo ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  check int "new registrations in the window" 3 flow.recent.created;
+  check int "completion is independent of creation time" 1 flow.recent.completed;
+  check int "cancellation is separate" 1 flow.recent.cancelled;
+  check int "retained done includes old outcomes" 2 flow.current.completed;
+  check int "verification pending is not done" 1 flow.current.awaiting_verification;
+  check int "open includes pending and invalid-date tasks" 4 (Masc_tui_task_flow.open_count flow.current);
+  check int "invalid timestamp count retained" 1 flow.unparseable_timestamps;
+  check (option (float 0.001)) "oldest open registration" (Some (now -. 86400.)) flow.oldest_open_created_at;
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  state.tasks <- [];
+  state.tasks_error <- Some "goal links unavailable";
+  let kpis = Render_metrics.calculate_kpis state in
+  check int "active-only list does not erase completed outcomes" 2 (Option.get kpis.tasks).completed;
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "snapshot window is explicit" true (contains output "2026-09-06 12:00 UTC");
+  check bool "source warning does not erase known counts" true (contains output "New tasks 3 · Done 1 · Cancelled 1");
+  check bool "source warning is visible" true (contains output "goal links unavailable");
+  check bool "old glow cache is not presented as history" false (contains output "Heatmap")
+;;
+
+let test_tasks_error_is_sanitized () =
+  let control = "\027[2J" in
+  let error = "boom " ^ control ^ " wiped" in
+  let state = make_state () in
+  state.task_flow <- None;
+  state.tasks_error <- Some error;
+  let output =
+    String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state)
+  in
+  check bool "the no-snapshot line does not carry the raw control sequence" false
+    (contains output control);
+  check bool "the no-snapshot line escapes it instead" true
+    (contains output "\\x1B[2J");
+  check bool "the error text is still visible" true (contains output "boom");
+  let flow =
+    Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived:[] []
+  in
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  state.tasks_error <- Some error;
+  let output =
+    String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state)
+  in
+  check bool "the snapshot warning does not carry the raw control sequence" false
+    (contains output control);
+  check bool "the snapshot warning escapes it instead" true
+    (contains output "\\x1B[2J")
+;;
+
+let test_assignee_work_and_daily_flow () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_by who at = Masc_domain.Done { assignee = who; completed_at = at; notes = None } in
+  let tasks =
+    [ (* Two completions two and four hours wide: an even sample count has to
+         average the middle pair rather than pick a side. *)
+      task "r1" "2026-09-10T00:00:00Z" (done_by "matrix-reader" "2026-09-10T02:00:00Z");
+      task "r2" "2026-09-10T00:00:00Z" (done_by "matrix-reader" "2026-09-10T04:00:00Z");
+      (* The agent spelling of the same keeper. RFC-0393 removed the suffix
+         strip, so this must stay its own row. *)
+      task "a1" "2026-09-11T00:00:00Z" (done_by "keeper-matrix-reader-agent" "2026-09-11T06:00:00Z");
+      task "o1" "2026-09-11T00:00:00Z"
+        (Claimed { assignee = "matrix-reader"; claimed_at = "2026-09-11T01:00:00Z" });
+      (* Todo carries no assignee and must not invent one. *)
+      task "t1" "2026-09-11T00:00:00Z" Todo;
+      (* [cancelled_by] answers who cancelled, not who held the task. *)
+      task "c1" "2026-09-11T00:00:00Z"
+        (Cancelled { cancelled_by = "polisher"; cancelled_at = "2026-09-11T05:00:00Z";
+          reason = None }) ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  let rows = flow.by_assignee in
+  check int "only states that carry an assignee open a row" 2 (List.length rows);
+  let row name =
+    List.find (fun (r : Masc_tui_task_flow.assignee_flow) -> r.af_assignee = name) rows
+  in
+  check bool "a cancelled task does not attribute work to the canceller" false
+    (List.exists (fun (r : Masc_tui_task_flow.assignee_flow) -> r.af_assignee = "polisher") rows);
+  let matrix_reader = row "matrix-reader" in
+  check int "completed tasks counted" 2 matrix_reader.af_done;
+  check int "claimed work counted as open" 1 matrix_reader.af_open;
+  check (option (float 0.001)) "even sample count averages the middle pair"
+    (Some 3.0) matrix_reader.af_median_lead_hours;
+  let agent = row "keeper-matrix-reader-agent" in
+  check int "the agent spelling keeps its own completions" 1 agent.af_done;
+  check (option (float 0.001)) "a single sample is its own median"
+    (Some 6.0) agent.af_median_lead_hours;
+  check string "the longer queue sorts first" "matrix-reader"
+    (List.hd rows).af_assignee;
+  let days = flow.daily in
+  check int "the span is the declared number of days" Masc_tui_task_flow.daily_days
+    (List.length days);
+  let day_from_end back = List.nth days (Masc_tui_task_flow.daily_days - back) in
+  let today = day_from_end 1 in
+  check int "the span ends on the observation day" 0 today.d_created;
+  let yesterday = day_from_end 2 in
+  check int "creations land on their own day" 4 yesterday.d_created;
+  check int "completions land on their own day" 1 yesterday.d_completed;
+  check int "cancellations stay separate from completions" 1 yesterday.d_cancelled;
+  let before = day_from_end 3 in
+  check int "an earlier day keeps its own creations" 2 before.d_created;
+  check int "an earlier day keeps its own completions" 2 before.d_completed;
+  let quiet = day_from_end Masc_tui_task_flow.daily_days in
+  check int "a day with no activity is present as zero" 0 quiet.d_created;
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "the per-assignee table is drawn" true (contains output "median lead");
+  check bool "the keeper spelling is listed" true (contains output "matrix-reader");
+  check bool "the agent spelling is listed beside it" true
+    (contains output "keeper-matrix-reader-agent");
+  check bool "the span names its last day" true (contains output "09-12");
+  check bool "creations are a row of their own" true (contains output "created");
+  check bool "cancellations are a row of their own" true (contains output "cancelled");
+  check bool "lead time is not presented as work time" false (contains output "work time")
+;;
+
+(* [masc_gc] moves finished tasks into the archive. Their days still
+   happened, so the day bars count them; the board counts and the assignee
+   rows describe what is live, so they do not. A task restored to the
+   backlog but still in the archive is counted once (#38542). *)
+let test_archived_tasks_count_in_the_day_bars_only () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_by who at = Masc_domain.Done { assignee = who; completed_at = at; notes = None } in
+  let live = [ task "live" "2026-09-11T00:00:00Z" (done_by "matrix-reader" "2026-09-11T02:00:00Z") ] in
+  let archived =
+    [ task "gone" "2026-09-02T00:00:00Z" (done_by "matrix-reader" "2026-09-03T00:00:00Z");
+      (* Restored to the backlog, still in the archive: counted once. *)
+      task "live" "2026-09-11T00:00:00Z" (done_by "matrix-reader" "2026-09-11T02:00:00Z") ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived live in
+  let completed_in_span =
+    List.fold_left (fun n (d : Masc_tui_task_flow.day) -> n + d.d_completed) 0 flow.daily
+  in
+  check int "the archived completion lands on its day, the restored one once" 2
+    completed_in_span;
+  check int "the board count is the backlog's" 1 flow.current.completed;
+  check int "the assignee row is the backlog's" 1
+    (List.hd flow.by_assignee).af_done
+;;
+
+let test_assignee_rows_capped () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let tasks =
+    List.init 13 (fun index ->
+      let who = Printf.sprintf "holder-%02d" index in
+      task (Printf.sprintf "t%02d" index) "2026-09-11T00:00:00Z"
+        (Masc_domain.Claimed { assignee = who; claimed_at = "2026-09-11T01:00:00Z" }))
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  check int "every assignee is retained in the snapshot" 13 (List.length flow.by_assignee);
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "the tail is reported rather than dropped" true
+    (contains output "3 further assignees not listed")
+;;
+
+let test_approval_source_observations () =
+  let state = make_state () in
+  (* A successful read of the workspace cannot establish approval source data. *)
+  state.local_keepers <- Types.Local_workspace_read;
+  let kpis = Render_metrics.calculate_kpis state in
+  check (option int) "unread Gate is not zero" None kpis.gate_pending_count;
+  check (option int) "unread held calls are not zero" None kpis.held_approvals_count;
+  let governance () = String.concat "\n" (Render_metrics.render_section_tools ~cols:120 state) in
+  let output = governance () in
+  check bool "first read stays explicit" true (contains output "Pending Gate Calls: not observed");
+  check bool "unread queues cannot claim empty" false (contains output "no active pending");
+  state.gate_snapshot_observed <- true;
+  state.keeper_tool_approvals_observed <- true;
+  let kpis = Render_metrics.calculate_kpis state in
+  check (option int) "observed empty Gate is zero" (Some 0) kpis.gate_pending_count;
+  check (option int) "observed empty held calls are zero" (Some 0) kpis.held_approvals_count;
+  check bool "both observed queues may claim empty" true (contains (governance ()) "no active pending");
+  state.gate_pending <- [ make_gate_pending ~id:"gp1" ~keeper:"alpha" ];
+  state.gate_error <- Some "gate-refresh-offline";
+  let kpis = Render_metrics.calculate_kpis state in
+  check (option int) "stale Gate count is not current" None kpis.gate_pending_count;
+  check (option int) "available held count survives" (Some 0) kpis.held_approvals_count;
+  let output = governance () in
+  check bool "stale source error is visible" true (contains output "gate-refresh-offline");
+  check bool "stale tool is not charted" false (contains output "bash");
+  check bool "partial empty cannot claim all empty" false (contains output "no active pending");
+  state.gate_error <- None;
+  state.gate_rules_unavailable <- Some "rules-store-offline";
+  check (option int) "rules failure does not hide ready queue" (Some 1)
+    (Render_metrics.calculate_kpis state).gate_pending_count;
+  let output = governance () in
+  check bool "partial store error is visible" true (contains output "Standing Rules: unavailable: rules-store-offline");
+  check bool "available tool is charted" true (contains output "bash")
+;;
+
+let escape = "\027[31m"
+
+let drawn lines = String.concat "\n" lines
+
+let test_the_tools_section_escapes_the_word_it_counts_by () =
+  let state = make_state () in
+  let gp =
+    { (make_gate_pending ~id:"gp1" ~keeper:"alpha") with
+      Decode.gp_display_tool = "bash" ^ escape ^ "red"
+    }
+  in
+  state.gate_pending <- [ gp ];
+  state.gate_snapshot_observed <- true;
+  let output = drawn (Render_metrics.render_section_tools ~cols:90 state) in
+  check bool "the chart's label carries no escape" false (contains output escape)
+
+(* The Keeper id is drawn by the same section, fitted to sixteen cells.
+   Fitting is not escaping. *)
+let test_the_tools_section_escapes_a_keeper_id () =
+  let state = make_state () in
+  let kh =
+    make_keeper_health ~keeper_id:("alpha" ^ escape) ~facts:25
+      ~snapshot_bytes:4096
+  in
+  state.memory_health <-
+    Some (make_memory_health ~total_facts:25 ~source_facts:0 ~keepers:[ kh ]);
+  let output = drawn (Render_metrics.render_section_tools ~cols:90 state) in
+  check bool "the fitted id carries none either" false (contains output escape)
+
+(* The probe word reaches three rows through one reader, so it is escaped
+   there rather than at each row. *)
+let test_the_fleet_section_escapes_the_probe_word () =
+  let state = make_state () in
+  state.server_identity <-
+    Some
+      { Decode.sid_version = "0.0.0"
+      ; sid_binary_commit = "deadbeef"
+      ; sid_binary_commit_age_s = None
+      ; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/tmp"
+      ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/tmp"
+      ; sid_executable_in_worktree = None
+      ; sid_state_ready = None
+      ; sid_uptime = None
+      ; sid_sse_clients = None
+      ; sid_gc = None
+      ; sid_scheduler =
+          Some
+            { Decode.ssch_probe = "running" ^ escape
+            ; ssch_samples = 0
+            ; ssch_p50_ms = 0.
+            ; ssch_p95_ms = 0.
+            ; ssch_p99_ms = 0.
+            ; ssch_max_ms = 0.
+            ; ssch_mean_ms = 0.
+            ; ssch_stalls = 0
+            ; ssch_pool_domains = None
+            }
+      };
+  let output = drawn (Render_metrics.render_section_fleet ~cols:90 state) in
+  check bool "the probe row carries no escape" false (contains output escape)
+
+let () =
+  run "tui_render_metrics"
+    [ ( "kpis"
+      , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
+        ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
+        ; test_case "a declared keeper is not counted as paused" `Quick
+            test_a_declared_keeper_is_not_counted_as_paused
+        ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
+        ; test_case "assignee work and daily flow" `Quick test_assignee_work_and_daily_flow
+        ; test_case "assignee rows capped" `Quick test_assignee_rows_capped
+        ; test_case "archived tasks count in the day bars only" `Quick
+            test_archived_tasks_count_in_the_day_bars_only
+        ] )
+    ; ( "overview_pulse"
+      , [] )
+    ; ( "section_pills"
+      , [] )
+    ; ( "sections"
+      , [ test_case "scheduler sample availability" `Quick test_scheduler_sample_availability
+        ; test_case "the tools section escapes the word it counts by" `Quick
+            test_the_tools_section_escapes_the_word_it_counts_by
+        ; test_case "the tools section escapes a Keeper id" `Quick
+            test_the_tools_section_escapes_a_keeper_id
+        ; test_case "the fleet section escapes the probe word" `Quick
+            test_the_fleet_section_escapes_the_probe_word
+        ; test_case "approval source observations" `Quick test_approval_source_observations
+        ;] )
+    ; ( "responsiveness"
+      , [] )
+    ; ( "render_body"
+      , [ test_case "a Tasks read error is sanitized before it is drawn" `Quick
+            test_tasks_error_is_sanitized
+        ;] )
+    ]
+;;

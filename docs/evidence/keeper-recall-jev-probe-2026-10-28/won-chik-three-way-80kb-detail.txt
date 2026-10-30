@@ -1,0 +1,98 @@
+candidates 56; in one request: body 104.1 KB (state 75.0 KB, questions 29.1 KB)
+pieces of at most 80 KB of candidates: 1 ([56] candidates)
+question shape three: needed / maybe_needed / not_needed
+run 1: judged 56 of 56 in 0.47 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.46 s, input tokens 35062, answered by jev-1.14.0
+run 2: judged 56 of 56 in 0.69 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.68 s, input tokens 35062, answered by jev-1.14.0
+run 3: judged 56 of 56 in 0.63 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.62 s, input tokens 35062, answered by jev-1.14.0
+run 4: judged 56 of 56 in 0.51 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.50 s, input tokens 35062, answered by jev-1.14.0
+run 5: judged 56 of 56 in 0.53 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.53 s, input tokens 35062, answered by jev-1.14.0
+run 6: judged 56 of 56 in 0.49 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.49 s, input tokens 35062, answered by jev-1.14.0
+run 7: judged 56 of 56 in 0.57 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.56 s, input tokens 35062, answered by jev-1.14.0
+run 8: judged 56 of 56 in 0.74 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.74 s, input tokens 35062, answered by jev-1.14.0
+run 9: judged 56 of 56 in 0.49 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.48 s, input tokens 35062, answered by jev-1.14.0
+run 10: judged 56 of 56 in 0.48 s wall time
+  56 candidates, body 104.1 KB (state 75.0 KB, questions 29.1 KB): HTTP 200, 0.48 s, input tokens 35062, answered by jev-1.14.0
+label counts over 10 runs: {'needed': 63, 'maybe_needed': 84, 'not_needed': 413}
+of 56 candidates judged in every run, the label changed between runs for 8 (14.3%)
+mean reported confidence 0.47
+mean reported confidence of the changed candidates 0.16, of the others 0.52
+unchanged candidates with a mean confidence at or below 0.23, the highest mean among the changed: 5 of 48
+selected (needed or maybe_needed) in every run: 12, in at least one run: 19
+selected sets: 9 distinct over 10 runs, identical in 1 of 45 run pairs (2.2%)
+  always selected: 8077f8a8ab7d 358db7072bc0 4b8e6b302a67 16dec0513645 5315ec544f84 ce62af02efcf 08f97c4c06b7 190b7ecd8d50 7d52c90ebf79 5715262068b0 e8f99f665358 b3354cf83358
+  sometimes selected: 7a3943d7fe03 2498bdddb0f7 c5849f1b038e 96223d39f66d 15f034b878d2 3c06d24af014 8cb86b5f3496
+mean selected probability above 0.5: 20 candidates, selected in every run: 12, in some runs: 7, in no run: 1
+  per candidate: label counts (needed/maybe_needed/not_needed), mean probabilities, mean selected probability
+  785a10ebac12 labels 0/0/10 mean probabilities 0.11/0.17/0.71 mean selected 0.29
+  7a3943d7fe03 labels 0/5/5 mean probabilities 0.12/0.43/0.45 mean selected 0.55
+  f27ed4c921af labels 0/0/10 mean probabilities 0.19/0.31/0.50 mean selected 0.50
+  2b09be8747f8 labels 0/0/10 mean probabilities 0.07/0.12/0.81 mean selected 0.19
+  62819769bb98 labels 0/0/10 mean probabilities 0.07/0.13/0.80 mean selected 0.20
+  b5e9e32b1ed3 labels 0/0/10 mean probabilities 0.04/0.12/0.84 mean selected 0.16
+  2498bdddb0f7 labels 0/1/9 mean probabilities 0.16/0.36/0.48 mean selected 0.52
+  66c9645f865a labels 0/0/10 mean probabilities 0.04/0.11/0.84 mean selected 0.16
+  8077f8a8ab7d labels 9/1/0 mean probabilities 0.45/0.36/0.19 mean selected 0.81
+  890668ce5cf0 labels 0/0/10 mean probabilities 0.12/0.26/0.62 mean selected 0.38
+  358db7072bc0 labels 10/0/0 mean probabilities 0.53/0.36/0.11 mean selected 0.89
+  838b757961b6 labels 0/0/10 mean probabilities 0.05/0.15/0.80 mean selected 0.20
+  23f6479d81db labels 0/0/10 mean probabilities 0.09/0.18/0.73 mean selected 0.27
+  c5849f1b038e labels 4/5/1 mean probabilities 0.32/0.37/0.31 mean selected 0.69
+  96223d39f66d labels 0/6/4 mean probabilities 0.26/0.37/0.37 mean selected 0.63
+  9ace5c25dcd7 labels 0/0/10 mean probabilities 0.05/0.15/0.80 mean selected 0.20
+  40464109f6be labels 0/0/10 mean probabilities 0.05/0.15/0.79 mean selected 0.21
+  ee3d25c78022 labels 0/0/10 mean probabilities 0.06/0.26/0.68 mean selected 0.32
+  4b8e6b302a67 labels 0/10/0 mean probabilities 0.23/0.49/0.28 mean selected 0.72
+  2e621dd82f74 labels 0/0/10 mean probabilities 0.04/0.14/0.83 mean selected 0.17
+  39bb8eef1fa3 labels 0/0/10 mean probabilities 0.05/0.10/0.85 mean selected 0.15
+  16dec0513645 labels 0/10/0 mean probabilities 0.22/0.45/0.33 mean selected 0.67
+  15f034b878d2 labels 0/1/9 mean probabilities 0.13/0.39/0.49 mean selected 0.51
+  e371a712e933 labels 0/0/10 mean probabilities 0.05/0.17/0.78 mean selected 0.22
+  6ed7f2af7f81 labels 0/0/10 mean probabilities 0.09/0.23/0.68 mean selected 0.32
+  5315ec544f84 labels 10/0/0 mean probabilities 0.54/0.32/0.14 mean selected 0.86
+  3c6e1a05101d labels 0/0/10 mean probabilities 0.07/0.19/0.74 mean selected 0.26
+  5dbba75bde59 labels 0/0/10 mean probabilities 0.13/0.27/0.60 mean selected 0.40
+  8e909aa0fae1 labels 0/0/10 mean probabilities 0.11/0.28/0.60 mean selected 0.40
+  ca75495d80e2 labels 0/0/10 mean probabilities 0.05/0.13/0.82 mean selected 0.18
+  13ee03b52af9 labels 0/0/10 mean probabilities 0.08/0.27/0.66 mean selected 0.34
+  1384a6f72b0c labels 0/0/10 mean probabilities 0.11/0.27/0.63 mean selected 0.37
+  b2c436fb34e6 labels 0/0/10 mean probabilities 0.08/0.25/0.67 mean selected 0.33
+  455a15c64770 labels 0/0/10 mean probabilities 0.13/0.27/0.60 mean selected 0.40
+  3c06d24af014 labels 0/2/8 mean probabilities 0.21/0.37/0.43 mean selected 0.57
+  8cb86b5f3496 labels 0/3/7 mean probabilities 0.26/0.35/0.39 mean selected 0.61
+  ce62af02efcf labels 0/10/0 mean probabilities 0.29/0.46/0.25 mean selected 0.75
+  31fa1a19140c labels 0/0/10 mean probabilities 0.07/0.23/0.70 mean selected 0.30
+  3a6a6d4e5b42 labels 0/0/10 mean probabilities 0.05/0.14/0.81 mean selected 0.19
+  1dc174e98a04 labels 0/0/10 mean probabilities 0.12/0.20/0.68 mean selected 0.32
+  08f97c4c06b7 labels 0/10/0 mean probabilities 0.28/0.40/0.32 mean selected 0.68
+  d994bbabb56d labels 0/0/10 mean probabilities 0.09/0.25/0.66 mean selected 0.34
+  190b7ecd8d50 labels 10/0/0 mean probabilities 0.78/0.16/0.06 mean selected 0.94
+  7d52c90ebf79 labels 10/0/0 mean probabilities 0.58/0.28/0.14 mean selected 0.86
+  5715262068b0 labels 0/10/0 mean probabilities 0.23/0.49/0.28 mean selected 0.72
+  e8f99f665358 labels 0/10/0 mean probabilities 0.18/0.49/0.33 mean selected 0.67
+  282b72858016 labels 0/0/10 mean probabilities 0.12/0.27/0.61 mean selected 0.39
+  b3354cf83358 labels 10/0/0 mean probabilities 0.48/0.37/0.15 mean selected 0.85
+  f3508279535e labels 0/0/10 mean probabilities 0.05/0.13/0.82 mean selected 0.18
+  7c9bb35299ce labels 0/0/10 mean probabilities 0.08/0.17/0.76 mean selected 0.24
+  6c78c4d4b9a5 labels 0/0/10 mean probabilities 0.06/0.11/0.83 mean selected 0.17
+  66c5d9fc46bb labels 0/0/10 mean probabilities 0.04/0.11/0.85 mean selected 0.15
+  444991f60b4f labels 0/0/10 mean probabilities 0.04/0.10/0.86 mean selected 0.14
+  fbf6f0b946c6 labels 0/0/10 mean probabilities 0.04/0.11/0.85 mean selected 0.15
+  e1c4c868f3df labels 0/0/10 mean probabilities 0.07/0.14/0.79 mean selected 0.21
+  c12110c110aa labels 0/0/10 mean probabilities 0.22/0.34/0.45 mean selected 0.55
+  changed: 7a3943d7fe03 labels ['maybe_needed', 'not_needed', 'not_needed', 'maybe_needed', 'not_needed', 'not_needed', 'maybe_needed', 'maybe_needed', 'not_needed', 'maybe_needed'] confidence ['0.18', '0.18', '0.23', '0.22', '0.28', '0.27', '0.16', '0.19', '0.23', '0.18'] probabilities (needed/maybe_needed/not_needed) ['0.12/0.45/0.43', '0.13/0.42/0.45', '0.12/0.39/0.49', '0.15/0.48/0.37', '0.10/0.38/0.52', '0.09/0.40/0.51', '0.14/0.44/0.42', '0.14/0.46/0.40', '0.11/0.40/0.49', '0.14/0.45/0.41']
+  changed: 2498bdddb0f7 labels ['maybe_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed'] confidence ['0.14', '0.38', '0.25', '0.31', '0.27', '0.16', '0.18', '0.16', '0.14', '0.20'] probabilities (needed/maybe_needed/not_needed) ['0.17/0.43/0.40', '0.14/0.27/0.59', '0.14/0.36/0.50', '0.16/0.30/0.54', '0.15/0.34/0.51', '0.17/0.39/0.44', '0.15/0.40/0.45', '0.18/0.38/0.44', '0.18/0.39/0.43', '0.14/0.39/0.47']
+  changed: 8077f8a8ab7d labels ['needed', 'needed', 'needed', 'needed', 'needed', 'needed', 'needed', 'needed', 'needed', 'maybe_needed'] confidence ['0.22', '0.16', '0.27', '0.18', '0.16', '0.13', '0.22', '0.16', '0.18', '0.11'] probabilities (needed/maybe_needed/not_needed) ['0.48/0.35/0.17', '0.44/0.37/0.19', '0.51/0.32/0.17', '0.45/0.36/0.19', '0.44/0.36/0.20', '0.42/0.35/0.23', '0.48/0.35/0.17', '0.44/0.36/0.20', '0.45/0.34/0.21', '0.39/0.41/0.20']
+  changed: c5849f1b038e labels ['maybe_needed', 'maybe_needed', 'maybe_needed', 'needed', 'maybe_needed', 'maybe_needed', 'needed', 'needed', 'not_needed', 'needed'] confidence ['0.18', '0.07', '0.04', '0.03', '0.07', '0.09', '0.09', '0.04', '0.09', '0.02'] probabilities (needed/maybe_needed/not_needed) ['0.25/0.45/0.30', '0.29/0.38/0.33', '0.34/0.36/0.30', '0.35/0.34/0.31', '0.31/0.38/0.31', '0.29/0.39/0.32', '0.39/0.39/0.22', '0.36/0.33/0.31', '0.25/0.36/0.39', '0.35/0.34/0.31']
+  changed: 96223d39f66d labels ['maybe_needed', 'not_needed', 'maybe_needed', 'maybe_needed', 'not_needed', 'maybe_needed', 'maybe_needed', 'not_needed', 'not_needed', 'maybe_needed'] confidence ['0.06', '0.06', '0.09', '0.06', '0.07', '0.09', '0.07', '0.14', '0.10', '0.11'] probabilities (needed/maybe_needed/not_needed) ['0.27/0.37/0.36', '0.28/0.35/0.37', '0.25/0.39/0.36', '0.28/0.37/0.35', '0.26/0.36/0.38', '0.22/0.39/0.39', '0.29/0.38/0.33', '0.21/0.36/0.43', '0.27/0.33/0.40', '0.24/0.41/0.35']
+  changed: 15f034b878d2 labels ['not_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'maybe_needed', 'not_needed', 'not_needed', 'not_needed'] confidence ['0.27', '0.28', '0.23', '0.23', '0.22', '0.34', '0.14', '0.19', '0.28', '0.14'] probabilities (needed/maybe_needed/not_needed) ['0.12/0.37/0.51', '0.12/0.36/0.52', '0.12/0.39/0.49', '0.13/0.38/0.49', '0.13/0.39/0.48', '0.11/0.33/0.56', '0.15/0.43/0.42', '0.13/0.41/0.46', '0.10/0.38/0.52', '0.15/0.42/0.43']
+  changed: 3c06d24af014 labels ['maybe_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'not_needed', 'maybe_needed', 'not_needed', 'not_needed', 'not_needed'] confidence ['0.10', '0.27', '0.10', '0.14', '0.19', '0.20', '0.10', '0.18', '0.09', '0.12'] probabilities (needed/maybe_needed/not_needed) ['0.22/0.40/0.38', '0.17/0.32/0.51', '0.23/0.37/0.40', '0.20/0.37/0.43', '0.17/0.37/0.46', '0.17/0.36/0.47', '0.22/0.40/0.38', '0.22/0.33/0.45', '0.25/0.36/0.39', '0.21/0.38/0.41']
+  changed: 8cb86b5f3496 labels ['not_needed', 'not_needed', 'maybe_needed', 'not_needed', 'not_needed', 'not_needed', 'maybe_needed', 'not_needed', 'not_needed', 'maybe_needed'] confidence ['0.10', '0.10', '0.06', '0.07', '0.18', '0.13', '0.04', '0.09', '0.07', '0.10'] probabilities (needed/maybe_needed/not_needed) ['0.25/0.35/0.40', '0.28/0.32/0.40', '0.29/0.37/0.34', '0.27/0.35/0.38', '0.24/0.31/0.45', '0.26/0.32/0.42', '0.28/0.36/0.36', '0.26/0.35/0.39', '0.26/0.36/0.38', '0.25/0.40/0.35']

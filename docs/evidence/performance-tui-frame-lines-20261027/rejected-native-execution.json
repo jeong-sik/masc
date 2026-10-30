@@ -1,0 +1,50 @@
+{
+  "plan_sha256": "cea2ac651f391ed01c0e4bb8ad60f209ad5b7a5526ebe7e2cff12c6f8b7cad3f",
+  "requested_ns": 227105573239375,
+  "config": {
+    "argv": [
+      "/Users/dancer/.opam/5.5.1/bin/ocamlopt",
+      "-config"
+    ],
+    "requested_ns": 227105574043333,
+    "pid": 84525,
+    "returncode": 0,
+    "reaped": true,
+    "returned_ns": 227105586799458,
+    "stdout_sha256": "29a8f30b956aaf5ec69274fc087c00a875b1ae899a94756ac6509a2c401b823e",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "compile": {
+    "argv": [
+      "/Users/dancer/.opam/5.5.1/bin/ocamlopt",
+      "-I",
+      "+unix",
+      "unix.cmxa",
+      "carrier.ml",
+      "-o",
+      "carrier"
+    ],
+    "requested_ns": 227105587216583,
+    "pid": 84529,
+    "returncode": 0,
+    "reaped": true,
+    "returned_ns": 227106128051375,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "run": {
+    "argv": [
+      "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/tui-frame-lines-native-carrier-v1/carrier"
+    ],
+    "requested_ns": 227106128892125,
+    "pid": 84594,
+    "returncode": 0,
+    "reaped": true,
+    "returned_ns": 227106791131208,
+    "stdout_sha256": "3364338d8f7137cb0289b49adb3d5d39ba811788eed15daf1d565da17e03c5d7",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "returned_ns": 227106797375583,
+  "executable_sha256": "2aba1a0ecdc25cd8bd17e7f3795028207fd3e8e9cbb941dab7447c9f09cb5f06",
+  "source_sha256": "916362435227be25707a7c9feaf9dc96d222889ace231f09a96eda50af4e8554"
+}

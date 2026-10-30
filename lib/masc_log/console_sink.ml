@@ -1,0 +1,221 @@
+(* Console mirror sink — decouples per-record console output from the
+   producing domain.
+
+   Every log record used to reach the console via a direct
+   [Printf.eprintf "...%!"] on the calling fiber. With fd 2 on a pty, a
+   full pty buffer (terminal scrollback, copy-mode selection, slow
+   renderer) blocks [write(2)] OUTSIDE the Eio scheduler and halts the
+   entire domain — observed live on 2026-06-10 11:26-11:28 KST as a
+   fleet-wide ~60 s stall whose log lines were stamped at write time and
+   burst out only after the terminal was released (issue #20684).
+
+   Contract:
+   - The console is a convenience MIRROR. The JSONL file sink
+     ([Log.Persist.write_to_sink]) and the in-memory ring stay
+     authoritative and lossless.
+   - Before [start] (tests, CLI one-shots, pre-boot), [write] attempts the
+     mirror synchronously. Channel I/O failures ([Sys_error]) do not stop the
+     log caller; other writer exceptions propagate unchanged.
+   - After [start], [write] enqueues into a bounded queue drained by a
+     dedicated OS thread; the thread alone performs the possibly-blocking
+     fd write. When the writer is blocked long enough to fill the queue,
+     incoming MIRROR lines are dropped and counted; a marker line
+     reporting the drop count is emitted once the writer unblocks. *)
+
+let capacity = 8192
+let queue : string Queue.t = Queue.create ()
+let mu = Mutex.create ()
+let cond = Condition.create ()
+let enqueue_active = Atomic.make false
+let thread_spawned = Atomic.make false
+let dropped = Atomic.make 0
+
+(* Test seam: the possibly-blocking line writer. Production default is
+   stderr + flush, matching the historical [Printf.eprintf "%s\n%!"]. *)
+let stderr_write line =
+  output_string stderr (line ^ "\n");
+  flush stderr
+
+let writer_override : (string -> unit) option Atomic.t = Atomic.make None
+let after_write_observer : (unit -> unit) option Atomic.t = Atomic.make None
+
+let current_writer () =
+  match Atomic.get writer_override with
+  | Some w -> w
+  | None -> stderr_write
+
+let set_after_write_observer observer =
+  Atomic.set after_write_observer observer
+
+let notify_after_write () =
+  match Atomic.get after_write_observer with
+  | None -> ()
+  | Some observe ->
+    (try observe () with
+     | _ -> ())
+
+let write_line line =
+  (* A partial fd write can corrupt an interactive screen before raising, so
+     notify after every attempt. Observer failure is isolated while the
+     writer's original result or exception remains unchanged. *)
+  Fun.protect ~finally:notify_after_write (fun () -> current_writer () line)
+
+let write_batch ~last_reported_drops batch =
+  Queue.iter
+    (fun line ->
+      try write_line line with
+      | _ ->
+        (* A failing console writer must never take the process down;
+           the file sink still has the record. *)
+        ())
+    batch;
+  let d = Atomic.get dropped in
+  if d > !last_reported_drops
+  then begin
+    (try
+       write_line
+         (Printf.sprintf
+            "[console-sink] dropped %d console line(s) while the console writer \
+             was blocked (file sink unaffected)"
+            (d - !last_reported_drops))
+     with
+     | _ -> ());
+    last_reported_drops := d
+  end
+
+let take_batch_blocking () =
+  Mutex.lock mu;
+  while Queue.is_empty queue do
+    Condition.wait cond mu
+  done;
+  let batch = Queue.create () in
+  Queue.transfer queue batch;
+  Mutex.unlock mu;
+  batch
+
+let writer_loop () =
+  let last_reported_drops = ref 0 in
+  while true do
+    let batch = take_batch_blocking () in
+    write_batch ~last_reported_drops batch
+  done
+
+let start () =
+  Atomic.set enqueue_active true;
+  if Atomic.compare_and_set thread_spawned false true
+  then ignore (Thread.create writer_loop () : Thread.t)
+
+let dropped_count () = Atomic.get dropped
+
+let queue_depth () =
+  Mutex.lock mu;
+  let n = Queue.length queue in
+  Mutex.unlock mu;
+  n
+
+(* A console line is read on a terminal, and in production from the file
+   stderr goes to (masc-server.log, a browser host's host.log). Messages carry
+   text from outside, such as the error a Firefox answers with, so the sink
+   and not each caller decides which bytes a line holds. Printable ASCII and
+   valid UTF-8 are written as they came. A C0 control, DEL, and each byte that
+   does not start valid UTF-8 are written as [\xNN]; a C1 control
+   (U+0080..U+009F, which some terminals obey as a control) as [\u00NN]. These
+   are the forms [Tui_terminal_text] draws. A newline in a message is [\x0A]
+   too: one entry is one line, so text from outside cannot start a line that
+   reads as another entry. The ring and the JSONL file keep the newline. *)
+let kept_as_is byte = byte >= 0x20 && byte < 0x7F
+
+let printable line =
+  if String.for_all (fun ch -> kept_as_is (Char.code ch)) line then line
+  else begin
+    let output = Buffer.create (String.length line + 16) in
+    let rec append index =
+      if index < String.length line then begin
+        let byte = Char.code line.[index] in
+        if kept_as_is byte then begin
+          Buffer.add_char output line.[index];
+          append (index + 1)
+        end
+        else if byte < 0x80 then begin
+          Buffer.add_string output (Printf.sprintf "\\x%02X" byte);
+          append (index + 1)
+        end
+        else begin
+          let decoded = String.get_utf_8_uchar line index in
+          if not (Uchar.utf_decode_is_valid decoded) then begin
+            Buffer.add_string output (Printf.sprintf "\\x%02X" byte);
+            append (index + 1)
+          end
+          else begin
+            let length = Uchar.utf_decode_length decoded in
+            let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+            if code <= 0x9F then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
+            else Buffer.add_string output (String.sub line index length);
+            append (index + length)
+          end
+        end
+      end
+    in
+    append 0;
+    Buffer.contents output
+  end
+
+let write line =
+  (* Sink-level structural secret masking (#28925 gap 3). The console mirror
+     is redirected to a file in production (nohup > masc-server.log), so it
+     is a recording path too and must mask independently of the ring —
+     [Log] hands it the raw pre-[Ring.push] line. Masking reads the line as
+     it came; [printable] runs after it. *)
+  let line = printable (Secret_patterns.redact_text line) in
+  if not (Atomic.get enqueue_active)
+  then begin
+    try write_line line with
+    | Sys_error _ ->
+      (* A channel I/O failure only loses the mirror; the caller records the
+         entry in the ring and file sink after this returns. *)
+      ()
+  end
+  else begin
+    Mutex.lock mu;
+    let full = Queue.length queue >= capacity in
+    if not full
+    then begin
+      Queue.add line queue;
+      Condition.signal cond
+    end;
+    Mutex.unlock mu;
+    if full then ignore (Atomic.fetch_and_add dropped 1 : int)
+  end
+
+module For_testing = struct
+  let set_writer w = Atomic.set writer_override w
+
+  (* Enqueue mode without the OS thread, so tests drain deterministically. *)
+  let set_enqueue_active v = Atomic.set enqueue_active v
+
+  (* The gauge in [Otel_runtime_observables] reads [queue_depth]; tests must
+     read that same function, not a second copy of its body. *)
+  let queued_count = queue_depth
+
+  let drain_now_since last_reported_drops =
+    Mutex.lock mu;
+    let batch = Queue.create () in
+    Queue.transfer queue batch;
+    Mutex.unlock mu;
+    let n = Queue.length batch in
+    let last_reported_drops = ref last_reported_drops in
+    write_batch ~last_reported_drops batch;
+    n, !last_reported_drops
+
+  let drain_now () =
+    fst (drain_now_since (Atomic.get dropped))
+
+  let reset () =
+    Mutex.lock mu;
+    Queue.clear queue;
+    Mutex.unlock mu;
+    Atomic.set enqueue_active false;
+    Atomic.set dropped 0;
+    Atomic.set writer_override None;
+    Atomic.set after_write_observer None
+end

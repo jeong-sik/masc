@@ -1,0 +1,1750 @@
+open Alcotest
+
+module Chat = Masc_tui_keeper_chat_projection
+module Position = Masc.Keeper_chat_event_log
+
+let json_string json = Yojson.Safe.to_string json
+let sse_event json = "data: " ^ json_string json ^ "\n\n"
+
+let request : Chat.request =
+  { request_id = "tui-request-1";
+    keeper_name = "keeper.one";
+    message = "hello";
+    attachments = [];
+    references = [];
+  }
+
+let thread_id = "keeper:" ^ request.keeper_name
+let run_id = "keeper-operation-run-" ^ request.request_id
+let message_id = "keeper-operation-message-" ^ request.request_id
+
+let event event_type fields =
+  `Assoc
+    ([ "type", `String event_type
+     ; "threadId", `String thread_id
+     ; "timestamp", `Float 1.0
+     ]
+     @ fields)
+
+let acceptance ?(operation_id = "tui-request-1") ?(state = "Queued")
+    ?(queued_count = 0) ?interactive () =
+  `Assoc
+    [ "type", `String "CUSTOM"
+    ; "threadId", `String "default"
+    ; "timestamp", `Float 1.0
+    ; "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"
+    ; ( "value"
+      , `Assoc
+          ([ "operation_id", `String operation_id
+          ; "state", `String state
+          ; "queued_count", `Int queued_count
+          ] @ Option.to_list (Option.map (fun receipt -> "interactive", receipt) interactive)) )
+    ]
+
+let reply_details ?(reply = "hello") ?(turn_outcome = "visible_reply")
+    ?(turn_ref = "trace-chat#1") () =
+  event "CUSTOM"
+    [ "runId", `String run_id
+    ; "name", `String "KEEPER_REPLY_DETAILS"
+    ; ( "value"
+      , `Assoc
+          [ "reply", `String reply
+          ; "turn_outcome", `String turn_outcome
+          ; "turn_ref", `String turn_ref
+          ] )
+    ]
+
+let run_started = event "RUN_STARTED" [ "runId", `String run_id ]
+
+let text_start =
+  event "TEXT_MESSAGE_START"
+    [ "runId", `String run_id
+    ; "messageId", `String message_id
+    ; "role", `String "assistant"
+    ]
+
+let delta text =
+  event "TEXT_MESSAGE_CONTENT"
+    [ "runId", `String run_id
+    ; "messageId", `String message_id
+    ; "delta", `String text
+    ]
+
+let text_end =
+  event "TEXT_MESSAGE_END"
+    [ "runId", `String run_id; "messageId", `String message_id ]
+
+let run_finished = event "RUN_FINISHED" [ "runId", `String run_id ]
+
+let run_error ?(accepted = true) ?(code = "turn_failed") message =
+  event "RUN_ERROR"
+    ((if accepted then [ "runId", `String run_id ] else [])
+     @ [ "message", `String message; "code", `String code ])
+
+let decode events =
+  events |> List.map sse_event |> String.concat ""
+  |> Chat.decode_response ~request
+
+let decode_with_provenance events =
+  events |> List.map sse_event |> String.concat ""
+  |> Chat.decode_response_with_provenance ~request
+
+(* A re-POST after a cut stream says where to resume; the whole turn -- a
+   first submit, or a resume with nothing held -- says nothing, so that body
+   is byte-identical to what it always was. The request itself does not
+   change: identity ignores the position. *)
+let test_a_resume_position_rides_beside_the_request () =
+  let request = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
+  check string "the whole turn carries no position"
+    (Printf.sprintf
+       {|{"request_id":%S,"name":"keeper.one","message":"hello"}|}
+       request.request_id)
+    (Chat.request_body ~since_seq:Position.Whole_turn request);
+  check string "a resume names the last seq held"
+    (Printf.sprintf
+       {|{"request_id":%S,"name":"keeper.one","message":"hello","since_seq":5}|}
+       request.request_id)
+    (Chat.request_body ~since_seq:(Position.After_seq 5) request);
+  check string "seq 0 held is a position, not absence"
+    (Printf.sprintf
+       {|{"request_id":%S,"name":"keeper.one","message":"hello","since_seq":0}|}
+       request.request_id)
+    (Chat.request_body ~since_seq:(Position.After_seq 0) request);
+  let attachment =
+    { Chat.attachment_id = "att-1"
+    ; name = "a.png"
+    ; mime_type = "image/png"
+    ; size = 4
+    ; data = "AAAA"
+    }
+  in
+  let with_image =
+    Chat.create_request ~attachments:[ attachment ] ~keeper_name:"keeper.one"
+      ~message:"look" ()
+  in
+  check bool "the position follows the multimodal fields too" true
+    (Yojson.Safe.Util.member "since_seq"
+       (Chat.request_to_yojson ~since_seq:(Position.After_seq 9) with_image)
+     = `Int 9);
+  check bool "identity does not read the position" true
+    (Chat.same_request_identity request request);
+  (* #33728: a reference rides as its user_block carrier and sends no bytes —
+     the attachments array stays absent when only references are staged. *)
+  let with_ref =
+    Chat.create_request
+      ~references:[ Chat.Ref_url "https://example.test/a.png"; Chat.Ref_file_id "file-1" ]
+      ~keeper_name:"keeper.one"
+      ~message:"look"
+      ()
+  in
+  let ref_json = Chat.request_to_yojson ~since_seq:Position.Whole_turn with_ref in
+  check bool "references send no attachments array" true
+    (Yojson.Safe.Util.member "attachments" ref_json = `Null);
+  (match Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "user_blocks" ref_json) with
+   | [ url_block; file_id_block; text_block ] ->
+       check string "url carrier block"
+         "https://example.test/a.png"
+         (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "url" url_block));
+       check string "file_id carrier block"
+         "file-1"
+         (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "file_id" file_id_block));
+       check string "text closes the blocks"
+         "look"
+         (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "text" text_block))
+   | _ -> Alcotest.fail "references-only request should carry two carriers and text");
+  let with_both =
+    Chat.create_request ~attachments:[ attachment ]
+      ~references:[ Chat.Ref_url "https://example.test/a.png" ]
+      ~keeper_name:"keeper.one"
+      ~message:"look"
+      ()
+  in
+  let both_json = Chat.request_to_yojson ~since_seq:Position.Whole_turn with_both in
+  check bool "bytes still ride the attachments array" true
+    (Yojson.Safe.Util.member "attachments" both_json <> `Null);
+  (match Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "user_blocks" both_json) with
+   | [ bytes_block; ref_block; text_block ] ->
+       check bool "bytes block keys by attachment_id" true
+         (Yojson.Safe.Util.member "attachment_id" bytes_block <> `Null);
+       check bool "reference block keys by url, not attachment_id" true
+         (Yojson.Safe.Util.member "url" ref_block <> `Null
+          && Yojson.Safe.Util.member "attachment_id" ref_block = `Null);
+       check bool "text block last" true
+         (Yojson.Safe.Util.member "text" text_block <> `Null)
+   | _ -> Alcotest.fail "bytes+reference request should carry three blocks")
+;;
+
+let test_request_body_and_identity () =
+  let request = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
+  check bool "request id prefix" true
+    (String.starts_with ~prefix:"tui-" request.request_id);
+  let uuid = String.sub request.request_id 4 (String.length request.request_id - 4) in
+  check bool "request id carries canonical UUIDv7" true
+    (Result.is_ok (Random_id.parse_uuid_v7 uuid));
+  check string "exact body"
+    (Printf.sprintf
+       {|{"request_id":%S,"name":"keeper.one","message":"hello"}|}
+       request.request_id)
+    (Chat.request_body ~since_seq:Position.Whole_turn request);
+  let second = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
+  check bool "fresh id per send" false
+    (String.equal request.request_id second.request_id)
+
+(* Since #33103 every projected frame carries id: <seq>. The strict decode
+   reads events, not positions: a body with id lines decodes to exactly what
+   the same body without them does. *)
+let test_active_decode_uses_complete_sse_frames () =
+  let events = [ acceptance (); run_started; text_start; delta "hello";
+    reply_details (); text_end; run_finished ] in
+  let canonical = events |> List.map sse_event |> String.concat "" in
+  let expected = Chat.decode_response_with_provenance ~request canonical in
+  check bool "control completes" true (Result.is_ok expected);
+  List.iter (fun newline ->
+    let wire = "\239\187\191" ^ String.concat "" (List.map (fun event ->
+      let lines = Yojson.Safe.pretty_to_string event |> String.split_on_char '\n' in
+      String.concat newline (List.map (fun line -> "data:" ^ line) lines)
+      ^ newline ^ newline) events) in
+    check bool "actual decoder accepts BOM, no-space and multiline frames" true
+      (Chat.decode_response_with_provenance ~request wire = expected)) ["\n"; "\r\n"; "\r"];
+  check bool "unfinished acceptance is discarded at EOF" true
+    (match Chat.decode_response ~request
+       ("data:" ^ Yojson.Safe.to_string (acceptance ())) with
+     | Error Chat.Missing_acceptance -> true
+     | _ -> false)
+
+let test_id_lines_do_not_change_the_strict_decode () =
+  let events =
+    [ acceptance (); run_started; text_start; delta "hel"; delta "lo"
+    ; reply_details (); text_end; run_finished
+    ]
+  in
+  let plain = events |> List.map sse_event |> String.concat "" in
+  let with_ids =
+    events
+    |> List.mapi (fun seq event -> Printf.sprintf "id: %d\n%s" seq (sse_event event))
+    |> String.concat ""
+  in
+  check bool "id lines classify as Sse_id" true
+    (Chat.classify_sse_line "id: 12" = Chat.Sse_id 12);
+  check bool "the frame end classifies on its own" true
+    (Chat.classify_sse_line "" = Chat.Sse_frame_end);
+  check bool "a non-integer id is ignored" true
+    (Chat.classify_sse_line "id: abc" = Chat.Sse_ignored);
+  check bool "a whitespace-only line is ignored, not a frame end" true
+    (Chat.classify_sse_line "   " = Chat.Sse_ignored);
+  check bool "same outcome with and without id lines" true
+    (Chat.decode_response ~request plain = Chat.decode_response ~request with_ids);
+  match Chat.decode_response ~request with_ids with
+  | Ok (Chat.Turn_completed completed) ->
+      check string "the reply is read through the id lines" "hello" completed.reply
+  | Ok (Chat.Replayed_succeeded _) -> fail "replayed instead of completed"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
+let test_matching_acceptance_and_reply () =
+  match
+    decode
+      [ acceptance (); run_started; text_start; delta "hel"; delta "lo"
+      ; reply_details (); text_end; run_finished
+      ]
+  with
+  | Ok (Chat.Turn_completed completed) ->
+      check string "canonical reply details" "hello" completed.reply;
+      check string "turn ref" "trace-chat#1" completed.turn_ref;
+      check bool "visible outcome" true
+        (completed.turn_outcome = Chat.Visible_reply);
+      check int "queue count" 0 completed.acceptance.queued_count
+  | Ok (Chat.Replayed_succeeded _) -> fail "live response classified as replay"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
+let interactive_fields =
+  [ "outcome", `String "applied"
+  ; "chat_control_token", `String "current-owner-control"
+  ; "signalled", `Bool false
+  ; "resumed", `Bool false
+  ; "interrupt_error", `Null
+  ; "interrupt_error_code", `Null
+  ; "interrupt_incident_id", `Null
+  ]
+
+let replace_fields changes fields =
+  changes @ List.filter (fun (key, _) -> not (List.mem_assoc key changes)) fields
+
+let completed_interactive_stream fields =
+  [ acceptance ~interactive:(`Assoc fields) (); run_started; text_start
+  ; delta "hello"; reply_details (); text_end; run_finished
+  ]
+
+let test_interactive_receipts_reach_terminal_truth () =
+  List.iter (fun (outcome, signalled, resumed) ->
+    let fields = replace_fields
+        ["outcome", `String outcome; "signalled", `Bool signalled;
+         "resumed", `Bool resumed] interactive_fields in
+    match decode (completed_interactive_stream fields) with
+    | Ok (Chat.Turn_completed {acceptance = {interactive = Some receipt; _}; reply; _}) ->
+        check string "terminal reply is confirmed" "hello" reply;
+        check string "new control authority survives" "current-owner-control" receipt.chat_control_token;
+        check bool "actual signal effect survives" signalled receipt.signalled;
+        check bool "actual resume effect survives" resumed receipt.resumed;
+        check (option string) "no interruption failure invented" None receipt.interrupt_error
+    | Ok _ -> fail "interactive stream did not confirm its terminal reply"
+    | Error error -> fail (Chat.stream_error_to_string error))
+    ["applied", false, false; "applied", true, false; "applied", false, true;
+     "stale_control", false, false; "paused", false, false; "replayed", false, false]
+
+let interrupt_failure_fields =
+  [ "interrupt_error", `String "The active turn could not be interrupted."
+  ; "interrupt_error_code", `String "interrupt_failed"
+  ; "interrupt_incident_id", `String request.request_id
+  ]
+
+let test_interrupt_failure_keeps_accepted_operation () =
+  let fields = replace_fields interrupt_failure_fields interactive_fields in
+  match decode (completed_interactive_stream fields) with
+  | Ok (Chat.Turn_completed {acceptance = {interactive = Some receipt; _}; reply; _}) ->
+      check string "accepted operation still completes" "hello" reply;
+      check (option string) "public interrupt failure retained"
+        (Some "The active turn could not be interrupted.") receipt.interrupt_error;
+      check bool "no signal invented" false receipt.signalled
+  | Ok _ -> fail "interrupt failure discarded the accepted operation"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
+let test_interactive_receipts_reject_incomplete_or_unbound_errors () =
+  let failed = replace_fields interrupt_failure_fields interactive_fields in
+  let cases =
+    List.map (fun field -> "missing " ^ field, List.remove_assoc field interactive_fields)
+      ["interrupt_error_code"; "interrupt_incident_id"]
+    @ List.map (fun (label, changes) -> label, replace_fields changes failed)
+      [ "failure without code", ["interrupt_error_code", `Null]
+      ; "unknown failure code", ["interrupt_error_code", `String "guessed"]
+      ; "failure without incident", ["interrupt_incident_id", `Null]
+      ; "blank incident", ["interrupt_incident_id", `String ""]
+      ; "another operation's incident", ["interrupt_incident_id", `String "other-operation"]
+      ; "non-string incident", ["interrupt_incident_id", `Int 1]
+      ; "metadata without failure", ["interrupt_error", `Null]
+      ; "inactive admission with failure", ["outcome", `String "paused"]
+      ]
+    @ [ "unknown field", ("guessed", `Bool true) :: interactive_fields
+      ; "duplicate metadata", ("interrupt_error_code", `Null) :: interactive_fields
+      ; "inactive admission with effects",
+          replace_fields ["outcome", `String "stale_control"; "resumed", `Bool true] interactive_fields
+      ]
+  in
+  List.iter (fun (label, fields) ->
+    match decode (completed_interactive_stream fields) with
+    | Error (Chat.Malformed_event _) -> ()
+    | Error error -> fail (label ^ ": " ^ Chat.stream_error_to_string error)
+    | Ok _ -> fail (label ^ " was accepted")) cases
+
+let test_acceptance_id_mismatch () =
+  match decode [ acceptance ~operation_id:"other-request" () ] with
+  | Error (Chat.Request_id_mismatch _) -> ()
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "mismatched request id was accepted"
+
+let test_run_error_never_returns_partial_delta () =
+  match
+    decode
+      [ acceptance (); run_started; text_start; delta "partial"
+      ; run_error "provider failed"
+      ]
+  with
+  | Error (Chat.Run_failed { accepted = true; message; _ }) ->
+      check string "failure detail" "provider failed" message
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "partial delta hid RUN_ERROR"
+
+let test_pre_acceptance_rejection () =
+  match
+    decode [ run_error ~accepted:false ~code:"invalid_input" "bad request" ]
+  with
+  | Error (Chat.Run_failed { accepted = false; code; _ }) ->
+      check (option string) "rejection code" (Some "invalid_input") code
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "pre-acceptance RUN_ERROR was successful"
+
+let test_interrupted_stream () =
+  match decode [ acceptance (); run_started; text_start; delta "partial" ] with
+  | Error (Chat.Stream_interrupted { accepted = true }) -> ()
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "unterminated stream was successful"
+
+let test_finished_requires_reply_details () =
+  match
+    decode
+      [ acceptance (); run_started; text_start; delta "partial"; text_end
+      ; run_finished
+      ]
+  with
+  | Error Chat.Missing_reply_details -> ()
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "RUN_FINISHED without reply details was successful"
+
+let test_typed_nonvisible_outcomes () =
+  let cases =
+    [ "continuation_checkpoint", Chat.Continuation_checkpoint
+    ; "external_effect_completed", Chat.Terminal_effect_settled
+    ; "external_effect_pending", Chat.Awaiting_gate_approval
+    ; "no_visible_reply", Chat.No_visible_reply
+    ]
+  in
+  List.iter
+    (fun (wire, expected) ->
+       match
+         decode
+           [ acceptance ()
+           ; run_started
+           ; text_start
+           ; reply_details ~reply:"" ~turn_outcome:wire ()
+           ; text_end
+           ; run_finished
+           ]
+       with
+       | Ok (Chat.Turn_completed completed) ->
+           check bool wire true (completed.turn_outcome = expected)
+       | Ok (Chat.Replayed_succeeded _) -> fail (wire ^ " became replay")
+       | Error error -> fail (Chat.stream_error_to_string error))
+    cases
+
+let test_media_only_visible_reply () =
+  match
+    decode
+      [ acceptance (); run_started; text_start
+      ; reply_details ~reply:"" ~turn_outcome:"visible_reply" ()
+      ; text_end; run_finished
+      ]
+  with
+  | Ok (Chat.Turn_completed completed) ->
+      check string "media-only reply keeps empty text" "" completed.reply
+  | Ok (Chat.Replayed_succeeded _) -> fail "media-only turn became replay"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
+let test_terminal_replay_states () =
+  (match decode [ acceptance ~state:"Succeeded" () ] with
+   | Ok (Chat.Replayed_succeeded _) -> ()
+   | Ok (Chat.Turn_completed _) -> fail "terminal replay became live turn"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  List.iter
+    (fun (state, expected) ->
+       match decode [ acceptance ~state () ] with
+       | Error error when expected error -> ()
+       | Error error -> fail (Chat.stream_error_to_string error)
+       | Ok _ -> fail (state ^ " replay was successful"))
+    [ "Failed", (function Chat.Replayed_failed -> true | _ -> false)
+    ; "Cancelled", (function Chat.Replayed_cancelled -> true | _ -> false)
+    ]
+
+let test_operation_record_names_only_a_replayed_ending () =
+  let record_name = function
+    | None -> "none"
+    | Some Chat.Operation_succeeded -> "succeeded"
+    | Some Chat.Operation_failed -> "failed"
+    | Some Chat.Operation_cancelled -> "cancelled"
+  in
+  let record_of events =
+    Chat.operation_record_of_result
+      (Result.map_error (fun error -> Chat.protocol_error error) (decode events))
+  in
+  List.iter
+    (fun (state, expected) ->
+       check string (state ^ " replay is the server's operation record") expected
+         (record_name (record_of [ acceptance ~state () ])))
+    [ "Succeeded", "succeeded"; "Failed", "failed"; "Cancelled", "cancelled" ];
+  check string "a stream that delivered its ending names no record" "none"
+    (record_name
+       (record_of
+          [ acceptance (); run_started; text_start; reply_details (); text_end
+          ; run_finished ]));
+  check string "a stream cut while the operation runs proves nothing" "none"
+    (record_name (record_of [ acceptance (); run_started ]));
+  check string "a transport failure proves nothing about the operation" "none"
+    (record_name
+       (Chat.operation_record_of_result
+          (Error (Chat.Transport_error "connection reset"))))
+
+let test_terminal_replay_flushes_buffered_completion () =
+  match
+    decode
+      [ acceptance ~state:"Succeeded" (); run_started; text_start
+      ; reply_details ~reply:"buffered reply" (); text_end; run_finished
+      ]
+  with
+  | Ok (Chat.Turn_completed completed) ->
+      check string "buffered canonical reply" "buffered reply" completed.reply
+  | Ok (Chat.Replayed_succeeded _) -> fail "buffered completion was discarded"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
+let test_current_wire_only () =
+  let alias =
+    event "content_delta"
+      [ "runId", `String run_id
+      ; "messageId", `String message_id
+      ; "delta", `String "old"
+      ]
+  in
+  check bool "old event alias is not accepted" true
+    (Result.is_error
+       (decode
+          [ acceptance (); run_started; text_start; alias; reply_details ()
+          ; text_end; run_finished
+          ]));
+  check bool "bare JSON is not accepted" true
+    (Result.is_error
+       (Chat.decode_response ~request
+          {|{"result":{"text":"old"}}|}))
+
+let test_lifecycle_identity_is_exact () =
+  let mismatched_finish =
+    event "RUN_FINISHED" [ "runId", `String "keeper-operation-run-other" ]
+  in
+  (match
+     decode
+       [ acceptance (); run_started; text_start; reply_details (); text_end
+       ; mismatched_finish
+       ]
+   with
+   | Error (Chat.Event_identity_mismatch { field = "runId"; _ }) -> ()
+   | Error error -> fail (Chat.stream_error_to_string error)
+   | Ok _ -> fail "mismatched run identity was accepted");
+  let unknown_custom =
+    event "CUSTOM"
+      [ "runId", `String run_id; "name", `String "KEEPER_OLD_ALIAS"
+      ; "value", `Null
+      ]
+  in
+  match
+    decode
+      [ acceptance (); run_started; text_start; unknown_custom
+      ; reply_details (); text_end; run_finished
+      ]
+  with
+  | Error (Chat.Unknown_custom_event "KEEPER_OLD_ALIAS") -> ()
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "unknown custom event was accepted"
+
+let test_thinking_snapshot_requires_owner () =
+  let snapshot = event "CUSTOM"
+    ["runId", `String run_id; "name", `String "KEEPER_THINKING_SNAPSHOT";
+     "value", `Assoc ["index", `Int 0; "snapshot", `String "full"]] in
+  match decode [acceptance (); run_started; text_start; snapshot;
+                reply_details (); text_end; run_finished] with
+  | Error (Chat.Malformed_event _) -> ()
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "unowned thinking replacement was accepted"
+
+let test_runtime_attempt_payload_contract () =
+  let malformed_scalar =
+    event "CUSTOM"
+      [ "runId", `String run_id
+      ; "name", `String "KEEPER_RUNTIME_ATTEMPT_STARTED"
+      ; "value", `String "invalid"
+      ]
+  in
+  (match decode [ acceptance (); run_started; malformed_scalar ] with
+  | Error (Chat.Malformed_event detail) ->
+    check bool "the scalar payload contract is named" true
+      (String_util.contains_substring detail "must be null or an object")
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "scalar runtime-attempt payload was accepted");
+  let unexpected_fields =
+    event "CUSTOM"
+      [ "runId", `String run_id
+      ; "name", `String "KEEPER_RUNTIME_ATTEMPT_STARTED"
+      ; "value", `Assoc [ "unknown_field", `String "val" ]
+      ]
+  in
+  match decode [ acceptance (); run_started; unexpected_fields ] with
+  | Error (Chat.Malformed_event detail) ->
+    check bool "the unexpected fields contract is named" true
+      (String_util.contains_substring detail "unexpected fields")
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "runtime-attempt payload with unexpected fields was accepted"
+;;
+
+let test_current_nonterminal_event_set () =
+  (* The fields the server writes for a native tool observation
+     ([Server_keeper_chat_agui_projection.native_tool_to_json]). *)
+  let native_tool extra =
+    `Assoc
+      ([ "toolStreamScope", `Int 0
+       ; "toolCallBlockIndex", `Int 1
+       ; "toolCallId", `String "native-1"
+       ; "toolCallName", `String "Bash"
+       ]
+       @ extra)
+  in
+  let custom name =
+    let value =
+      if String.equal name "KEEPER_MODEL_CONTENT_ACTIVITY" then
+        Masc.Keeper_chat_events.(
+          model_content_activity_to_json
+            { content_generation = 0
+            ; content_scope = 0
+            ; content_index = 0
+            ; content_provider_message_id = None
+            ; channel = Model_text
+            ; state = Content_observed
+            })
+      else if String.equal name "KEEPER_NATIVE_TOOL_START" then native_tool []
+      else if String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then
+        native_tool
+          [ ( "progress"
+            , Runtime_native_tools.progress_to_json
+                (Runtime_native_tools.Heartbeat_reported { elapsed_seconds = 1 }) )
+          ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_END" then
+        native_tool
+          [ ( "completion"
+            , Runtime_native_tools.completion_to_json Runtime_native_tools.end_observed )
+          ]
+      else if String.equal name "KEEPER_TOOL_RESULT_READY"
+      then
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "executionId", `String "exec-1"
+          ]
+      else if String.equal name "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
+      then
+        `Assoc
+          [ "deliveryKey", `Assoc [ "kind", `String "operation"; "operation_id", `String "kmsg-1" ]
+          ; "executionId", `String "exec-1"
+          ; "ordinal", `Int 0
+          ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_START" then
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "toolCallName", `String "read"
+          ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_END" then
+        (* END carries exactly the completion the strict decoder requires. *)
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "toolCallName", `String "read"
+          ; "completion", `Assoc ["kind", `String "end_observed"; "exit_code", `Null]
+          ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then
+        (* The strict decoder expects the occurrence object and a valid
+           progress object; a Null falls through and is rejected. *)
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "toolCallName", `String "read"
+          ; "progress", `Assoc ["kind", `String "output_observed"; "byte_count", `Int 1]
+          ]
+      else if String.equal name "KEEPER_MEDIA_DELTA" then
+        (* The strict decoder requires a generated media object
+           ([Keeper_chat_events.generated_media_of_json]); a Null is rejected. *)
+        `Assoc
+          [ "index", `Int 0
+          ; "media_type", `String "image/png"
+          ; "media_ref", `String "/api/v1/media/fixture"
+          ; "source_type", `String "base64"
+          ; "response", `Assoc ["content_generation", `Int 0; "stream_scope", `Int 0]
+          ]
+      else if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
+        `Assoc ["operation_id", `String request.request_id; "execution_id", `String "shared-execution"]
+      else if String.equal name "KEEPER_STREAM_PROTOCOL_ERROR" then
+        `Assoc [ "kind", `String "sse_error" ]
+      else if String.equal name "KEEPER_TOOL_APPROVAL_REQUESTED" then
+        `Assoc
+          [ "tool_call_id", `String "tool-1"
+          ; "tool_call_name", `String "Read"
+          ; "args", `String "{}"
+          ; "question", `String "Run Read?"
+          ]
+      else if String.equal name "KEEPER_TOOL_APPROVAL_SETTLED" then
+        `Assoc
+          [ "tool_call_id", `String "tool-1"
+          ; "outcome", `String "approved"
+          ]
+      else if String.equal name "KEEPER_PROVIDER_RETRY" then
+        (* The strict decoder requires the attempt/retry objects; a Null
+           falls through and is rejected. *)
+        `Assoc
+          [ "attempt"
+          , Runtime_native_tasks.attempt_to_json
+                Runtime_native_tasks.{ routing_run_id = "run-attempt-1"
+                                     ; runtime_id = "runtime-1"
+                                     ; lane_attempt_index = 0 }
+          ; "retry"
+          , Runtime_claude_api_retry.to_json
+              Runtime_claude_api_retry.{ observation_id = "obs-1"
+                                       ; attempt = 1
+                                       ; max_retries = 3
+                                       ; retry_delay_ms = 250
+                                       ; error_status = Some 529 }
+          ]
+      else if String.equal name "KEEPER_THINKING_SNAPSHOT" then
+        `Assoc ["index", `Int 0; "snapshot", `String "";
+                "response", `Assoc ["content_generation", `Int 0; "stream_scope", `Int 0]]
+      else if String.equal name "KEEPER_THINKING_DELTA" then
+        (* The strict decoder requires an object with an integer index; a Null
+           falls through and is rejected. The server writes this exact shape
+           (Server_keeper_chat_agui_projection, the Thinking_delta branch). *)
+        `Assoc ["index", `Int 0; "delta", `String "thinking"]
+      else if String.equal name "KEEPER_TOOL_CALL_ADMITTED" then
+        (* Admits the TOOL_CALL_START above: same occurrence, and the provider
+           name is that start's toolCallName. *)
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "providerToolName", `String "read"
+          ; "toolCallName", `String "read"
+          ; "toolCallId", `String "tool-1"
+          ]
+      else `Null
+    in
+    event "CUSTOM"
+      [ "runId", `String run_id; "name", `String name; "value", value ]
+  in
+  let custom_names = Chat.current_custom_names in
+  let tool_events =
+    [ event "TOOL_CALL_START"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
+        ; "toolCallName", `String "read"
+        ]
+    ; event "TOOL_CALL_ARGS"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
+        ; "delta", `String "{}"
+        ]
+    ; event "TOOL_CALL_END"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
+        ]
+    ]
+  in
+  match
+    decode
+      ([ acceptance (); run_started; text_start ]
+       @ tool_events
+       @ List.map custom custom_names
+       @ [ reply_details (); text_end; run_finished ])
+  with
+  | Ok (Chat.Turn_completed _) -> ()
+  | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+  | Error error -> fail (Chat.stream_error_to_string error)
+
+let test_tool_result_ready_requires_exact_canonical_identity () =
+  let result_ready value =
+    event "CUSTOM"
+      [ "runId", `String run_id
+      ; "name", `String "KEEPER_TOOL_RESULT_READY"
+      ; "value", value
+      ]
+  in
+  let invalid_values =
+    [ `Null
+    ; `Assoc
+        [ "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
+        ]
+    ; `Assoc
+        [ "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"; "executionId", `String ""
+        ]
+    ; `Assoc
+        [ "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
+        ; "executionId", `String "exec-1"
+        ; "provider_result", `String "not-part-of-the-contract"
+        ]
+    ]
+  in
+  List.iter
+    (fun value ->
+      match decode [ acceptance (); run_started; result_ready value ] with
+      | Error (Chat.Malformed_event _) -> ()
+      | Error error -> fail (Chat.stream_error_to_string error)
+      | Ok _ -> fail "malformed KEEPER_TOOL_RESULT_READY was accepted")
+    invalid_values
+
+let tool_start ?(scope = 0) ?(block_index = 0) ?provider_message_id ~call_id
+    ~name () =
+  event "TOOL_CALL_START"
+    ([ "runId", `String run_id
+     ; "toolStreamScope", `Int scope
+     ; "toolCallBlockIndex", `Int block_index
+     ; "toolCallId", `String call_id
+     ; "toolCallName", `String name
+     ]
+     @ Option.to_list
+         (Option.map
+            (fun value -> "providerMessageId", `String value)
+            provider_message_id))
+;;
+
+let tool_result_ready ?(scope = 0) ?(block_index = 0) ?provider_message_id
+    ~call_id ~execution_id () =
+  event "CUSTOM"
+    [ "runId", `String run_id
+    ; "name", `String "KEEPER_TOOL_RESULT_READY"
+    ; ( "value"
+      , `Assoc
+          ([ "toolStreamScope", `Int scope
+           ; "toolCallBlockIndex", `Int block_index
+           ; "toolCallId", `String call_id
+           ; "executionId", `String execution_id
+           ]
+           @ Option.to_list
+               (Option.map
+                  (fun value -> "providerMessageId", `String value)
+                  provider_message_id)) )
+    ]
+;;
+
+let completed_tail = [ text_start; reply_details (); text_end; run_finished ]
+
+let tool_quarantined ?(scope = 0) ?(block_index = 0) () =
+  event "CUSTOM"
+    [ "runId", `String run_id
+    ; "name", `String "KEEPER_STREAM_PROTOCOL_ERROR"
+    ; ( "value"
+      , `Assoc
+          [ "kind", `String "tool_replay_mismatch"
+          ; ( "quarantined_occurrence"
+            , `Assoc
+                [ "toolStreamScope", `Int scope
+                ; "toolCallBlockIndex", `Int block_index
+                ] )
+          ] )
+    ]
+;;
+
+let test_tool_result_identity_is_occurrence_scoped_and_write_once () =
+  let decode_completed middle =
+    decode ([ acceptance (); run_started ] @ middle @ completed_tail)
+  in
+  (match
+     decode_completed
+       [ tool_start ~block_index:0 ~call_id:"reused" ~name:"Read" ()
+       ; tool_result_ready ~block_index:0 ~call_id:"reused" ~execution_id:"exec-first" ()
+       ; tool_start ~block_index:1 ~call_id:"reused" ~name:"Write" ()
+       ; tool_result_ready ~block_index:0 ~call_id:"reused" ~execution_id:"exec-first" ()
+       ; tool_result_ready ~block_index:1 ~call_id:"reused" ~execution_id:"exec-second" ()
+       ]
+   with
+   | Ok (Chat.Turn_completed _) -> ()
+   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  (match
+     decode_completed
+       [ tool_start ~call_id:"call-once" ~name:"Read" ()
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one" ()
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one" ()
+       ]
+   with
+   | Ok (Chat.Turn_completed _) -> ()
+   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  (match
+     decode_completed
+       [ tool_start ~call_id:"call-once" ~name:"Read" ()
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one" ()
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-two" ()
+       ]
+   with
+   | Error
+       (Chat.Conflicting_tool_result
+          { recorded_execution_id = "exec-one"
+          ; received_execution_id = "exec-two"
+          ; _
+          }) ->
+       ()
+   | Error error -> fail (Chat.stream_error_to_string error)
+   | Ok _ -> fail "conflicting canonical identity was accepted");
+  (match
+     decode_completed
+       [ tool_start ~block_index:0 ~call_id:"first" ~name:"Read" ()
+       ; tool_start ~block_index:1 ~call_id:"second" ~name:"Write" ()
+       ; tool_result_ready ~block_index:0 ~call_id:"first"
+           ~execution_id:"exec-reused" ()
+       ; tool_result_ready ~block_index:1 ~call_id:"second"
+           ~execution_id:"exec-reused" ()
+       ]
+   with
+   | Error
+       (Chat.Reused_tool_execution_id
+          { execution_id = "exec-reused"
+          ; recorded_occurrence =
+              { stream_scope = 0; block_index = 0; provider_message_id = None }
+          ; received_occurrence =
+              { stream_scope = 0; block_index = 1; provider_message_id = None }
+          }) ->
+       ()
+   | Error error -> fail (Chat.stream_error_to_string error)
+   | Ok _ -> fail "one canonical execution was accepted for two occurrences");
+  match
+    decode_completed
+      [ tool_start ~block_index:0 ~call_id:"duplicate" ~name:"Read" ()
+      ; tool_start ~block_index:1 ~call_id:"duplicate" ~name:"Write" ()
+      ; tool_result_ready ~block_index:1 ~call_id:"duplicate" ~execution_id:"exec-second" ()
+      ]
+  with
+  | Ok (Chat.Turn_completed _) -> ()
+  | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+  | Error error -> fail (Chat.stream_error_to_string error)
+;;
+
+let test_tool_metadata_and_quarantine_are_write_once () =
+  let decode_completed middle =
+    decode ([ acceptance (); run_started ] @ middle @ completed_tail)
+  in
+  let expect_protocol_error label events =
+    match decode_completed events with
+    | Error _ -> ()
+    | Ok _ -> fail (label ^ " was accepted")
+  in
+  expect_protocol_error "changed tool name for one occurrence"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
+    ; tool_start ~call_id:"call-1" ~name:"Write" ()
+    ];
+  expect_protocol_error "changed provider call id on an idempotent result"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
+    ; tool_result_ready ~call_id:"changed" ~execution_id:"exec-1" ()
+    ];
+  expect_protocol_error "changed provider message correlation"
+    [ tool_start ~provider_message_id:"message-a" ~call_id:"call-1"
+        ~name:"Read" ()
+    ; tool_result_ready ~provider_message_id:"message-b" ~call_id:"call-1"
+        ~execution_id:"exec-1" ()
+    ];
+  expect_protocol_error "arguments changed after canonical result"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
+    ; event "TOOL_CALL_ARGS"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0
+        ; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "call-1"
+        ; "delta", `String "{\"changed\":true}"
+        ]
+    ];
+  expect_protocol_error "result after quarantine"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
+    ; tool_quarantined ()
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
+    ];
+  expect_protocol_error "arguments after quarantine"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
+    ; tool_quarantined ()
+    ; event "TOOL_CALL_ARGS"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0
+        ; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "call-1"
+        ; "delta", `String {|{"late":true}|}
+        ]
+    ];
+  (match
+     decode_completed
+       [ tool_start ~call_id:"call-1" ~name:"Read" ()
+       ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
+       ; tool_quarantined ()
+       ]
+   with
+   | Ok (Chat.Turn_completed _) -> ()
+   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+   | Error error ->
+     fail
+       ("quarantine after write-once result failed the whole stream: "
+        ^ Chat.stream_error_to_string error));
+  (match
+     decode_completed
+       [ tool_quarantined ()
+       ; tool_start ~call_id:"call-1" ~name:"Read" ()
+       ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
+       ]
+   with
+   | Ok (Chat.Turn_completed _) -> ()
+   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  expect_protocol_error "null protocol error payload"
+    [ event "CUSTOM"
+        [ "runId", `String run_id
+        ; "name", `String "KEEPER_STREAM_PROTOCOL_ERROR"
+        ; "value", `Null
+        ]
+    ]
+;;
+
+let test_finished_requires_text_end () =
+  match
+    decode
+      [ acceptance (); run_started; text_start; reply_details (); run_finished ]
+  with
+  | Error Chat.Missing_text_end -> ()
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "RUN_FINISHED without TEXT_MESSAGE_END was successful"
+
+let test_protocol_errors_preserve_acceptance_provenance () =
+  let unknown_custom =
+    event "CUSTOM"
+      [ "runId", `String run_id; "name", `String "KEEPER_OLD_ALIAS"
+      ; "value", `Null
+      ]
+  in
+  let accepted_cases =
+    [ "duplicate acceptance", [ acceptance (); acceptance () ]
+    ; ( "duplicate reply details"
+      , [ acceptance (); run_started; reply_details (); reply_details () ] )
+    ; "duplicate run start", [ acceptance (); run_started; run_started ]
+    ; "missing run start", [ acceptance (); text_start ]
+    ; ( "missing reply details"
+      , [ acceptance (); run_started; text_start; text_end; run_finished ] )
+    ; ( "missing text end"
+      , [ acceptance (); run_started; text_start; reply_details (); run_finished ] )
+    ; ( "unknown custom event"
+      , [ acceptance (); run_started; unknown_custom ] )
+    ]
+  in
+  List.iter
+    (fun (label, events) ->
+       match decode_with_provenance events with
+       | Error failure ->
+           check bool (label ^ " retains acceptance") true
+             failure.Chat.acceptance_observed;
+           check bool (label ^ " reaches accepted recovery") true
+             (Chat.error_acceptance_observed (Chat.Protocol_error failure))
+       | Ok _ -> fail (label ^ " unexpectedly succeeded"))
+    accepted_cases;
+  List.iter
+    (fun error ->
+       check bool "public helper infers intrinsic acceptance" true
+         (Chat.error_acceptance_observed (Chat.protocol_error error)))
+    [ Chat.Duplicate_acceptance
+    ; Chat.Duplicate_reply_details
+    ; Chat.Unknown_custom_event "unknown"
+    ; Chat.Duplicate_run_start
+    ; Chat.Missing_run_start "TEXT_MESSAGE_START"
+    ; Chat.Missing_reply_details
+    ; Chat.Missing_text_end
+    ];
+  match Chat.decode_response_with_provenance ~request "data: {bad\n\n" with
+  | Error failure ->
+      check bool "pre-accept malformed stream has no acceptance" false
+        failure.Chat.acceptance_observed
+  | Ok _ -> fail "malformed pre-accept stream unexpectedly succeeded"
+
+let test_terminal_text_sanitization () =
+  let raw = "\027[31mred\027[0m\nnext\027]52;c;Y2xpcA==\007" in
+  let safe = Chat.terminal_safe_text ~preserve_newlines:true raw in
+  check bool "CSI introducer removed" false (String.contains safe '\027');
+  check bool "OSC terminator removed" false (String.contains safe '\007');
+  check bool "requested newline retained" true (String.contains safe '\n');
+  check bool "visible payload retained" true
+    (String.starts_with ~prefix:" [31mred [0m" safe)
+
+let test_terminal_text_escapes_invisible_codepoints () =
+  (* #38445: the Keeper chat boundary must draw bidi controls and zero-width
+     characters as text, not pass them through, so what the operator reads
+     matches the bytes the value carries. *)
+  let rlo = "\xe2\x80\xae" in
+  let safe = Chat.terminal_safe_text ("a" ^ rlo ^ "b") in
+  check string "the bidi override is drawn as its escape text" "a\\u202Eb" safe;
+  check bool "the raw RLO bytes are gone" false
+    (let n = String.length rlo and h = String.length safe in
+     let rec scan i =
+       i + n <= h && (String.sub safe i n = rlo || scan (i + 1))
+     in
+     scan 0);
+  check string "a zero-width space is drawn as its escape text" "a\\u200Bb"
+    (Chat.terminal_safe_text "a\xe2\x80\x8bb");
+  check string "an ordinary string is unchanged" "café"
+    (Chat.terminal_safe_text "café")
+
+(* #38485 review, condition (c): a sent line is stored through this same call
+   ([masc_tui.ml:7552] builds [me_text] with
+   [Keeper_chat.terminal_safe_text ~preserve_newlines:true]) and [recall_land]
+   puts those stored bytes straight back in the composer. So whatever this
+   function does to an emoji is what the operator gets back on the up arrow:
+   while it escaped the joiner, the recall typed six ASCII characters into the
+   input line. This asks the function the composer actually reads from; the
+   key press itself is exercised by the keyboard walk, not here. *)
+let test_a_recalled_line_still_carries_its_emoji () =
+  let zwj = "\xe2\x80\x8d" in
+  let shrug = "\xf0\x9f\xa4\xb7" and male = "\xe2\x99\x82" in
+  let vs16 = "\xef\xb8\x8f" in
+  let typed = "배포 끝났어요 " ^ shrug ^ zwj ^ male ^ vs16 in
+  check string "the stored line is byte for byte what was typed" typed
+    (Chat.terminal_safe_text ~preserve_newlines:true typed);
+  check string "a joiner that holds no emoji together is still escaped"
+    ("a\\u200Db")
+    (Chat.terminal_safe_text ~preserve_newlines:true ("a" ^ zwj ^ "b"))
+
+let test_error_certainty () =
+  check bool "transport is unverified" true
+    (Chat.error_certainty (Chat.Transport_error "cut")
+     = Chat.Outcome_unverified);
+  List.iter
+    (fun status ->
+      let error : Chat.error = Chat.Http_error { status; body = "rejected" } in
+      check bool
+        (Printf.sprintf "HTTP %d before the handler is verified" status)
+        true
+        (Chat.error_certainty error = Chat.Verified_rejected))
+    [ 400; 401; 403; 404 ];
+  List.iter
+    (fun status ->
+      let error : Chat.error = Chat.Http_error { status; body = "ambiguous" } in
+      check bool
+        (Printf.sprintf "HTTP %d may follow upstream dispatch" status)
+        true
+        (Chat.error_certainty error = Chat.Outcome_unverified))
+    [ 408; 409; 425; 429; 500; 502; 503; 504 ];
+  let unauthorized : Chat.error =
+    Chat.Http_error { status = 401; body = "unauthorized" }
+  in
+  check bool "uncertain reconnect keeps HTTP rejection unverified" true
+    (Chat.error_certainty ~was_unverified:true unauthorized
+     = Chat.Outcome_unverified);
+  check bool "pre-accept rejection is verified" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false; message = "bad"; code = Some "invalid_input" }))
+     = Chat.Verified_rejected);
+  check bool "ambiguous replay keeps invalid-input rejection unverified" true
+    (Chat.error_certainty ~was_unverified:true
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false; message = "bad"; code = Some "invalid_input" }))
+     = Chat.Outcome_unverified);
+  check bool "store uncertainty is not a verified rejection" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "store unavailable"
+             ; code = Some "store_unavailable"
+             }))
+     = Chat.Outcome_unverified);
+  (* 2026-10-22: no Keeper had an Owner, the server answered every message
+     before any Owner saw it, and the TUI resent each one every 0.5s. *)
+  check bool "a request that reached no owner is a verified rejection" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "owner unavailable"
+             ; code =
+                 Some
+                   Masc.Keeper_chat_public_error.(code Owner_unavailable)
+             }))
+     = Chat.Verified_rejected);
+  (* A re-POST after a checkpoint or an unverified attempt: this attempt
+     reaching no Owner does not show that the id admitted nothing. *)
+  check bool "a re-POST that reached no owner keeps the fence" true
+    (Chat.error_certainty ~was_unverified:true
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "owner unavailable"
+             ; code =
+                 Some
+                   Masc.Keeper_chat_public_error.(code Owner_unavailable)
+             }))
+     = Chat.Outcome_unverified);
+  check bool "a code this build does not know keeps the fence" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false; message = "unknown"; code = Some "not_a_public_code" }))
+     = Chat.Outcome_unverified);
+  check bool "changed-source idempotency conflict keeps the fence" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "idempotency conflict"
+             ; code = Some "idempotency_conflict"
+             }))
+     = Chat.Outcome_unverified);
+  check bool "uncertain retry keeps pre-accept rejection unverified" true
+    (Chat.error_certainty ~was_unverified:true
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false; message = "store unavailable"; code = None }))
+     = Chat.Outcome_unverified);
+  check bool "post-accept failure is verified" true
+    (Chat.error_certainty
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = true; message = "failed"; code = None }))
+     = Chat.Verified_failed)
+
+let test_reader_unauthenticated () =
+  List.iter
+    (fun status ->
+      let error : Chat.error = Chat.Http_error { status; body = "unauthorized" } in
+      check bool
+        (Printf.sprintf "HTTP %d means the reader could not ask" status)
+        true
+        (Chat.reader_unauthenticated error);
+      (* The same status on the dispatch POST proves the operation was never
+         created. A reconciliation read must not borrow that conclusion, so the
+         two predicates are pinned together here: if someone collapses them,
+         this pair stops disagreeing and the test fails. *)
+      check bool
+        (Printf.sprintf "HTTP %d still reads as a verified dispatch rejection" status)
+        true
+        (Chat.error_certainty error = Chat.Verified_rejected))
+    [ 401; 403 ];
+  List.iter
+    (fun status ->
+      let error : Chat.error = Chat.Http_error { status; body = "other" } in
+      check bool
+        (Printf.sprintf "HTTP %d is not an authentication failure" status)
+        false
+        (Chat.reader_unauthenticated error))
+    [ 400; 404; 409; 500; 503 ];
+  check bool "a cut transport is not an authentication failure" false
+    (Chat.reader_unauthenticated (Chat.Transport_error "cut"));
+  check bool "a protocol failure is not an authentication failure" false
+    (Chat.reader_unauthenticated
+       (Chat.protocol_error
+          (Chat.Run_failed { accepted = false; message = "bad"; code = None })))
+
+let test_unverified_retry_notice_names_the_cause () =
+  let notice error = Chat.unverified_retry_notice ~request_id:"tui-01" error in
+  let has ~needle value = String_util.string_contains_substring ~needle value in
+  let fenced =
+    Chat.protocol_error
+      (Chat.Run_failed
+         { accepted = false
+         ; message = "the operation store is fenced"
+         ; code = Some "store_unavailable"
+         })
+  in
+  (* The server answered this one over a live connection. The line used to open
+     with "connection lost", which is not what happened and sends the operator
+     looking at the network. *)
+  check bool "a rejection is not reported as a lost connection" false
+    (has ~needle:"connection lost" (notice fenced));
+  check bool "the rejection names its code" true
+    (has ~needle:"store_unavailable" (notice fenced));
+  check bool "the rejection carries the server's words" true
+    (has ~needle:"the operation store is fenced" (notice fenced));
+  check bool "the request being reconciled is named" true
+    (has ~needle:"reconciling exact request tui-01 before NEXT" (notice fenced));
+  let dropped = Chat.Transport_error "connection refused" in
+  check bool "a real transport failure still names its cause" true
+    (has ~needle:"connection refused" (notice dropped));
+  (* Every error that reaches this line is [Outcome_unverified]; the two above
+     are the ends of that range. *)
+  check bool "both are unverified outcomes" true
+    (Chat.error_certainty fenced = Chat.Outcome_unverified
+     && Chat.error_certainty dropped = Chat.Outcome_unverified);
+  let injected =
+    Chat.protocol_error
+      (Chat.Run_failed
+         { accepted = false; message = "fenced\x1b[31m"; code = Some "store_unavailable" })
+  in
+  check bool "the server's words cannot move the cursor" false
+    (has ~needle:"\x1b[" (notice injected))
+;;
+
+let test_batch_preserves_original_user_history_once () =
+  let module Store = Keeper_chat_operation_store in
+  let module Payload = Masc.Keeper_chat_operation_payload in
+  let module History = Masc.Keeper_chat_store in
+  let ok = function Ok value -> value | Error detail -> fail detail in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let base_dir = Filename.temp_dir "batch-original-history" "" in
+  let keeper_name = "batch-history" in
+  let store = Store.open_or_create ~path:(Filename.concat base_dir "operations.sqlite3") |> store_ok in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store)) (fun () ->
+    let continuation_channel = Keeper_continuation_channel.dashboard ~thread_id:"keeper:batch-history" |> ok in
+    let source = Payload.source_to_json ~submitted_by:"operator" ~thread_id:"keeper:batch-history"
+      ~continuation_channel ~surface:(Masc.Surface_ref.Dashboard {session_id=None})
+      ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
+      ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~sender_keeper:None ~user_row_origin:History.Needs_append |> ok in
+    let ids = List.map (fun id -> Keeper_chat_operation.Operation_id.of_string id |> ok)
+      ["batch-original-one"; "batch-original-two"] in
+    List.iter2 (fun operation_id message ->
+      let input = Payload.input_to_json ~message ~user_blocks:[] ~turn_instructions:None
+        ~surface_context:None ~attachments:[] in
+      ignore (Store.submit store ~now:1. ~operation_id ~source ~input |> store_ok)) ids ["original one"; "original two"];
+    let claimed = match Store.claim_next ~batch:Masc.Keeper_chat_operation_batch.select store ~now:2. |> store_ok with
+      | Some operation -> operation | None -> fail "no shared claim" in
+    let members = Store.batch_operations store ~operation_id:claimed.operation_id |> store_ok in
+    let persist () = Server_routes_http_keeper_stream.For_testing.persist_batch_user_rows
+      ~base_dir ~keeper_name members |> ok in
+    persist (); persist ();
+    let rows = History.load_all ~base_dir ~keeper_name in
+    check (list string) "original messages appear once, aggregate is not another user row"
+      ["original one"; "original two"] (List.map (fun (row : History.chat_message) -> row.content) rows);
+    List.iter2 (fun operation_id (row : History.chat_message) ->
+      let expected_id = Keeper_chat_delivery_identity.Request_id.of_string
+        (Keeper_chat_operation.Operation_id.to_string operation_id) |> ok in
+      let expected = { Keeper_chat_delivery_identity.delivery_key=Operation expected_id;
+        transcript_slot=Accepted_user } in
+      check bool "each accepted user row retains original request identity" true
+        (row.delivery_provenance = Some expected)) ids rows;
+    ignore (Store.succeed_running store ~now:3. ~operation_id:claimed.operation_id ~outcome_ref:"history-turn" |> store_ok);
+    let members = Store.batch_operations store ~operation_id:claimed.operation_id |> store_ok in
+    check bool "terminal membership retains identities but releases original bodies" true
+      (List.for_all (fun (member : Keeper_chat_operation.t) -> member.input = None) members))
+;;
+
+let test_batch_respects_interleaved_conversation_order () =
+  let module Store = Keeper_chat_operation_store in
+  let module Batch = Masc.Keeper_chat_operation_batch in
+  let module Payload = Masc.Keeper_chat_operation_payload in
+  let module History = Masc.Keeper_chat_store in
+  let ok = function Ok value -> value | Error detail -> fail detail in
+  let store_ok = function
+    | Ok value -> value
+    | Error error -> fail (Store.error_to_string error)
+  in
+  let source thread_id =
+    let continuation_channel =
+      Keeper_continuation_channel.dashboard ~thread_id |> ok
+    in
+    Payload.source_to_json ~submitted_by:"operator" ~thread_id
+      ~continuation_channel
+      ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+      ~channel:"" ~channel_user_id:"" ~channel_user_name:""
+      ~channel_workspace_id:"" ~conversation_id:None
+      ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~sender_keeper:None ~user_row_origin:History.Needs_append
+    |> ok
+  in
+  let source_a = source "keeper:batch-order-a" in
+  let source_b = source "keeper:batch-order-b" in
+  let submit store name source =
+    let operation_id = Keeper_chat_operation.Operation_id.of_string name |> ok in
+    let input =
+      Payload.input_to_json ~message:name ~user_blocks:[]
+        ~turn_instructions:None ~surface_context:None ~attachments:[]
+    in
+    ignore (Store.submit store ~now:1. ~operation_id ~source ~input
+            |> store_ok)
+  in
+  let claim store =
+    match Store.claim_next ~batch:Batch.select store ~now:2. |> store_ok with
+    | Some operation -> operation
+    | None -> fail "queued conversation was not claimed"
+  in
+  let member_names store operation =
+    Store.batch_operations store ~operation_id:operation.Keeper_chat_operation.operation_id
+    |> store_ok
+    |> List.map (fun member ->
+      Keeper_chat_operation.Operation_id.to_string
+        member.Keeper_chat_operation.operation_id)
+  in
+  let with_store name f =
+    let directory = Filename.temp_dir name "" in
+    let store =
+      Store.open_or_create ~path:(Filename.concat directory "operations.sqlite3")
+      |> store_ok
+    in
+    Fun.protect ~finally:(fun () -> ignore (Store.close store))
+      (fun () -> f store)
+  in
+  with_store "batch-interleaved-fifo" (fun store ->
+    submit store "fifo-a-one" source_a;
+    submit store "fifo-b" source_b;
+    submit store "fifo-a-two" source_a;
+    let first = claim store in
+    check (list string) "normal batch stops before another conversation"
+      ["fifo-a-one"] (member_names store first);
+    ignore (Store.succeed_running store ~now:3.
+              ~operation_id:first.operation_id ~outcome_ref:"first-turn"
+            |> store_ok);
+    let second = claim store in
+    check (list string) "interleaved conversation keeps its queue position"
+      ["fifo-b"] (member_names store second);
+    ignore (Store.succeed_running store ~now:3.
+              ~operation_id:second.operation_id ~outcome_ref:"second-turn"
+            |> store_ok);
+    check (list string) "later matching message runs after interleaved one"
+      ["fifo-a-two"] (member_names store (claim store)));
+  with_store "batch-interactive-priority" (fun store ->
+    submit store "priority-a-one" source_a;
+    submit store "priority-b" source_b;
+    submit store "priority-a-two" source_a;
+    let promoted = Keeper_chat_operation.Operation_id.of_string "priority-a-two" |> ok in
+    ignore (Store.move_queued_to_front store ~now:2. ~operation_id:promoted |> store_ok);
+    check (list string) "explicit run-next moves only the requested operation"
+      ["priority-a-two"; "priority-a-one"; "priority-b"]
+      (Store.list_queued store ~after_sequence:None ~limit:10
+       |> store_ok
+       |> List.map (fun operation ->
+         Keeper_chat_operation.Operation_id.to_string
+           operation.Keeper_chat_operation.operation_id));
+    check (list string) "matching prefix batches in its new queue order"
+      ["priority-a-two"; "priority-a-one"]
+      (member_names store (claim store)))
+;;
+
+let test_batch_member_events_pass_request_bound_stream_decode () =
+  let module Events = Masc.Keeper_chat_events in
+  let module Projection = Server_keeper_chat_agui_projection in
+  let member_id = match Keeper_chat_operation.Operation_id.of_string request.request_id with
+    | Ok id -> id | Error detail -> fail detail in
+  let owner_id = match Keeper_chat_operation.Operation_id.of_string "batch-owner" with
+    | Ok id -> id | Error detail -> fail detail in
+  let events =
+    [ Events.Run_started {run_id="keeper-operation-run-batch-owner"; thread_id}
+    ; Events.Batch_bound {operation_id=owner_id; execution_id=owner_id}
+    ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
+    ; Events.Text_delta {text="hello"; response=Unobserved_scope (None)}
+    ; Events.Reply_details {terminal_stream_scope = Some 0; reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+        turn_ref=Ids.Turn_ref.make ~trace_id:"shared" ~absolute_turn:1}
+    ; Events.Text_message_end
+    ; Events.Run_finished {run_id="keeper-operation-run-batch-owner"} ] in
+  let _, projected = List.fold_left (fun (state, rows) event ->
+    let member_event = Masc.Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
+    let state, frame = Projection.project ~timestamp:1. ~redact_text:Fun.id state member_event in
+    state, match frame with None -> rows | Some frame -> Ag_ui.event_to_json frame :: rows)
+    (Projection.initial, []) events in
+  match decode (acceptance () :: List.rev projected) with
+  | Ok (Chat.Turn_completed completed) -> check string "follower receives complete shared reply" "hello" completed.reply
+  | Ok _ -> fail "shared reply did not complete the request"
+  | Error error -> fail (Chat.stream_error_to_string error)
+;;
+
+let test_stale_completion_identity () =
+  let current : Chat.request =
+    { request_id = "tui-current"; keeper_name = "keeper.one"; message = "one"; attachments = []; references = [] }
+  in
+  let same = { current with message = "same identity" } in
+  let stale = { current with request_id = "tui-stale" } in
+  let wrong_keeper = { current with keeper_name = "keeper.two" } in
+  check bool "changed message rejected" false
+    (Chat.same_request_identity current same);
+  check bool "stale request rejected" false
+    (Chat.same_request_identity current stale);
+  check bool "wrong keeper rejected" false
+    (Chat.same_request_identity current wrong_keeper)
+
+(* A one-pixel PNG. The bytes matter: the media type is read from them, so a
+   fixture that only looks like a PNG by filename would pass a test the real
+   path fails. *)
+let png_bytes =
+  "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06"
+;;
+
+let with_temp_file ~suffix contents f =
+  let path = Filename.temp_file "masc-tui-attach-" suffix in
+  let channel = open_out_bin path in
+  output_string channel contents;
+  close_out channel;
+  Fun.protect ~finally:(fun () -> try Sys.remove path with _ -> ()) (fun () -> f path)
+;;
+
+(* The endpoint resolves an image by attachment_id from user_blocks; an
+   attachment no block names is carried and never read. Both halves have to be
+   on the wire or the keeper receives a text-only turn while the operator sees
+   an attached image. *)
+let test_attachment_reaches_both_wire_fields () =
+  let attachment =
+    { Chat.attachment_id = "att-1"
+    ; name = "probe.png"
+    ; mime_type = "image/png"
+    ; size = 12
+    ; data = "AAAA"
+    }
+  in
+  let request =
+    Chat.create_request ~attachments:[ attachment ] ~keeper_name:"k" ~message:"look" ()
+  in
+  let json = Chat.request_to_yojson ~since_seq:Position.Whole_turn request in
+  let member name = Yojson.Safe.Util.member name json in
+  (match member "attachments" with
+   | `List [ one ] ->
+     Alcotest.(check string)
+       "attachment id"
+       "att-1"
+       (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "id" one))
+   | other ->
+     Alcotest.failf "attachments should carry one entry, got %s" (Yojson.Safe.to_string other));
+  match member "user_blocks" with
+  | `List [ image; text ] ->
+    Alcotest.(check string)
+      "block references the attachment"
+      "att-1"
+      (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "attachment_id" image));
+    Alcotest.(check string)
+      "image leads the blocks"
+      "image"
+      (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "type" image));
+    Alcotest.(check string)
+      "message text follows"
+      "look"
+      (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "text" text))
+  | other ->
+    Alcotest.failf "user_blocks should be image then text, got %s" (Yojson.Safe.to_string other)
+;;
+
+(* A request with nothing staged keeps the shape it always had, so a text-only
+   turn is byte-identical to what this surface sent before attachments existed. *)
+let test_no_attachment_sends_no_multimodal_fields () =
+  let json =
+    Chat.request_to_yojson ~since_seq:Position.Whole_turn
+      (Chat.create_request ~keeper_name:"k" ~message:"hi" ())
+  in
+  Alcotest.(check bool)
+    "no attachments key"
+    true
+    (Yojson.Safe.Util.member "attachments" json = `Null);
+  Alcotest.(check bool)
+    "no user_blocks key"
+    true
+    (Yojson.Safe.Util.member "user_blocks" json = `Null)
+;;
+
+let test_media_type_comes_from_bytes_not_extension () =
+  with_temp_file ~suffix:".txt" png_bytes (fun path ->
+    match Masc_tui_attachment.of_file ~path with
+    | Error error ->
+      Alcotest.failf "a PNG named .txt should attach: %s"
+        (Masc_tui_attachment.error_to_string error)
+    | Ok attachment ->
+      Alcotest.(check string) "sniffed media type" "image/png" attachment.Chat.mime_type;
+      Alcotest.(check int) "size is the file's" (String.length png_bytes) attachment.Chat.size;
+      Alcotest.(check string)
+        "data is raw base64, no data-url prefix"
+        (Base64.encode_string png_bytes)
+        attachment.Chat.data)
+;;
+
+(* Bytes that never had a path -- what the clipboard hands over. The name is
+   the operator's label and the endpoint's filename; the media type still
+   comes from the bytes, so a clipboard holding something that is not an image
+   is refused here rather than at the provider. *)
+let test_clipboard_bytes_attach_under_their_own_name () =
+  match Masc_tui_attachment.of_bytes ~name:"image-1.png" png_bytes with
+  | Error error ->
+    Alcotest.failf "clipboard PNG should attach: %s"
+      (Masc_tui_attachment.error_to_string error)
+  | Ok attachment ->
+    Alcotest.(check string) "name is the one given" "image-1.png" attachment.Chat.name;
+    Alcotest.(check string) "sniffed media type" "image/png" attachment.Chat.mime_type;
+    Alcotest.(check int) "size is the bytes'" (String.length png_bytes) attachment.Chat.size
+;;
+
+let test_clipboard_bytes_that_are_not_an_image_are_refused () =
+  match Masc_tui_attachment.of_bytes ~name:"image-1.png" "this is not an image" with
+  | Ok _ -> Alcotest.fail "non-image clipboard bytes must not attach"
+  | Error error ->
+    Alcotest.(check bool)
+      "the error names what was refused, not a path that does not exist"
+      true
+      (String_util.contains_substring
+         (Masc_tui_attachment.error_to_string error)
+         "image-1.png")
+;;
+
+let test_non_image_is_rejected_by_its_bytes () =
+  with_temp_file ~suffix:".png" "this is not an image" (fun path ->
+    match Masc_tui_attachment.of_file ~path with
+    | Ok _ -> Alcotest.fail "a text file named .png must not attach"
+    | Error error ->
+      Alcotest.(check bool)
+        "error names the admitted set"
+        true
+        (String_util.contains_substring
+           (Masc_tui_attachment.error_to_string error)
+           "image/png"))
+;;
+
+(* A drop has three answers and they are not interchangeable. An image is
+   staged; a source file keeps its path, because naming it is why it was
+   dropped; an image that cannot be staged says so, because answering a drop
+   with a filename hides that the image was refused. *)
+let test_a_dropped_image_is_staged () =
+  with_temp_file ~suffix:".png" png_bytes (fun path ->
+    match Masc_tui_attachment.classify_drop ~path with
+    | Masc_tui_attachment.Attach attachment ->
+      Alcotest.(check string) "media type" "image/png" attachment.Chat.mime_type
+    | Masc_tui_attachment.Keep_path -> Alcotest.fail "an image should attach, not keep its path"
+    | Masc_tui_attachment.Refuse error ->
+      Alcotest.failf "an image should attach: %s" (Masc_tui_attachment.error_to_string error))
+;;
+
+let test_a_dropped_non_image_keeps_its_path () =
+  with_temp_file ~suffix:".ml" "let () = print_endline \"hi\"" (fun path ->
+    match Masc_tui_attachment.classify_drop ~path with
+    | Masc_tui_attachment.Keep_path -> ()
+    | Masc_tui_attachment.Attach _ -> Alcotest.fail "a source file must not attach"
+    | Masc_tui_attachment.Refuse _ ->
+      Alcotest.fail "a source file is not a refused image; its path is the point")
+;;
+
+let test_an_unstageable_image_is_refused_not_pathed () =
+  with_temp_file ~suffix:".png" "" (fun path ->
+    match Masc_tui_attachment.classify_drop ~path with
+    | Masc_tui_attachment.Refuse _ -> ()
+    | Masc_tui_attachment.Attach _ -> Alcotest.fail "an empty file must not attach"
+    | Masc_tui_attachment.Keep_path ->
+      Alcotest.fail "an empty .png should say so, not silently become a path")
+;;
+
+let test_checkpoint_segments_replay_until_actual_answer () =
+  let checkpoint = [run_started; text_start;
+    reply_details ~reply:"" ~turn_outcome:"continuation_checkpoint" (); text_end; run_finished] in
+  let body = List.map sse_event ([acceptance ()] @ checkpoint @ checkpoint
+    @ [run_started; text_start; delta "actual answer";
+       reply_details ~reply:"actual answer" ~turn_ref:"trace-chat#3" (); text_end; run_finished])
+    |> String.concat "" in
+  match Chat.decode_response ~request body with
+  | Ok (Chat.Turn_completed completed) ->
+    check string "last segment supplies the answer" "actual answer" completed.reply;
+    check bool "checkpoint is not the final outcome" true (completed.turn_outcome = Chat.Visible_reply)
+  | Ok _ -> fail "checkpoint replay lost the actual answer"
+  | Error error -> fail (Chat.stream_error_to_string error)
+;;
+
+let test_interactive_admission_wire_roundtrip () =
+  let module Stream = Server_routes_http_keeper_stream in
+  let body intent = Chat.request_body ~admission_intent:intent ~since_seq:Position.Whole_turn request in
+  let parse intent = match Stream.parse_keeper_chat_stream_request ~media_store:(Agent_core.History.Memory_store.create ()) (body intent) with
+    | Ok request -> request.Stream.admission_intent | Error detail -> fail detail in
+  (* The server side parses the token with Keeper_interrupt_token.of_string,
+     which rejects non-UUID text, so the roundtrip needs a real token's wire
+     form and compares through its canonical text. *)
+  let token_wire = "6ef5f10c-9d24-4d59-86bd-9ec92015e9a3" in
+  (match parse (Chat.Interactive {control_token = "owner-control"; target = Some (Observed_turn_token token_wire)}) with
+   | Stream.Interactive {control_token; target = Some (Masc.Keeper_owner_registry.Observed_turn_token token)} ->
+     check string "control token survives" "owner-control" control_token;
+     check string "exact turn survives" token_wire (Masc.Keeper_interrupt_token.to_string token)
+   | _ -> fail "interactive intent was lost");
+  (match parse Chat.Queue_only with Stream.Queue_only -> () | _ -> fail "queue-only changed meaning");
+  let malformed = Yojson.Safe.from_string (body (Chat.Interactive {control_token = "owner-control"; target = None})) in
+  let fields = Yojson.Safe.Util.to_assoc malformed in
+  let both = `Assoc (("admission_intent", `Assoc ["kind", `String "interactive"; "control_token", `String "owner-control";
+    "interrupt_token", `String "turn-token"; "operation_id", `String "another-operation"]) :: List.remove_assoc "admission_intent" fields) in
+  (match Stream.parse_keeper_chat_stream_request ~media_store:(Agent_core.History.Memory_store.create ()) (Yojson.Safe.to_string both) with
+   | Error _ -> () | Ok _ -> fail "two independent cancellation targets were accepted")
+
+let test_text_scope_validation () =
+  let frames fields =
+    let scoped = match delta "part" with
+      | `Assoc existing -> `Assoc (existing @ fields)
+      | _ -> fail "text fixture must be an object" in
+    [acceptance (); run_started; text_start; scoped;
+     reply_details ~reply:"part" (); text_end; run_finished] in
+  List.iter (fun fields -> check bool "unknown or valid text scope is accepted" true
+    (Result.is_ok (decode (frames fields)))) [ []; ["textStreamScope", `Int 0]; ["textStreamScope", `Int 2] ];
+  List.iter (fun fields ->
+    check bool "malformed text scope is refused by the strict live contract" true
+      (Result.is_error (decode (frames fields))))
+    [["textStreamScope", `Int (-1)]; ["textStreamScope", `String "2"];
+     ["textStreamScope", `Float 2.]; ["textStreamScope", `Null];
+     ["textStreamScope", `Int 2; "textStreamScope", `Int 3]]
+;;
+
+let () =
+  run "tui_keeper_chat_projection"
+    [ ( "keeper chat"
+      , [ test_case "text scope validation" `Quick test_text_scope_validation
+        ; test_case "checkpoint segments replay until actual answer" `Quick test_checkpoint_segments_replay_until_actual_answer
+        ; test_case "interactive admission serializer matches server authority" `Quick test_interactive_admission_wire_roundtrip
+        ; test_case "exact request body and UUIDv7" `Quick
+            test_request_body_and_identity
+        ; test_case "a resume position rides beside the request" `Quick
+            test_a_resume_position_rides_beside_the_request
+        ; test_case "id lines do not change the strict decode" `Quick
+            test_id_lines_do_not_change_the_strict_decode
+        ; test_case "active decoder complete SSE framing" `Quick
+            test_active_decode_uses_complete_sse_frames
+        ; test_case "matching acceptance and reply" `Quick
+            test_matching_acceptance_and_reply
+        ; test_case "interactive receipts reach terminal truth" `Quick
+            test_interactive_receipts_reach_terminal_truth
+        ; test_case "interrupt failure keeps accepted operation" `Quick
+            test_interrupt_failure_keeps_accepted_operation
+        ; test_case "interactive receipts reject incomplete or unbound errors" `Quick
+            test_interactive_receipts_reject_incomplete_or_unbound_errors
+        ; test_case "acceptance id mismatch" `Quick
+            test_acceptance_id_mismatch
+        ; test_case "RUN_ERROR beats partial delta" `Quick
+            test_run_error_never_returns_partial_delta
+        ; test_case "pre-acceptance rejection" `Quick
+            test_pre_acceptance_rejection
+        ; test_case "interrupted stream" `Quick test_interrupted_stream
+        ; test_case "finished requires reply details" `Quick
+            test_finished_requires_reply_details
+        ; test_case "typed non-visible outcomes" `Quick
+            test_typed_nonvisible_outcomes
+        ; test_case "media-only visible reply" `Quick
+            test_media_only_visible_reply
+        ; test_case "terminal replay states" `Quick test_terminal_replay_states
+        ; test_case "operation record names only a replayed ending" `Quick
+            test_operation_record_names_only_a_replayed_ending
+        ; test_case "terminal replay flushes buffered completion" `Quick
+            test_terminal_replay_flushes_buffered_completion
+        ; test_case "current wire only" `Quick test_current_wire_only
+        ; test_case "exact lifecycle identities" `Quick
+            test_lifecycle_identity_is_exact
+        ; test_case "thinking replacement requires owner" `Quick
+            test_thinking_snapshot_requires_owner
+        ; test_case "runtime attempt payload contract" `Quick
+            test_runtime_attempt_payload_contract
+        ; test_case "current nonterminal event set" `Quick
+            test_current_nonterminal_event_set
+        ; test_case "tool result requires exact canonical identity" `Quick
+            test_tool_result_ready_requires_exact_canonical_identity
+        ; test_case "tool result identity is scoped and write-once" `Quick
+            test_tool_result_identity_is_occurrence_scoped_and_write_once
+        ; test_case "tool metadata and quarantine are write-once" `Quick
+            test_tool_metadata_and_quarantine_are_write_once
+        ; test_case "finished requires text end" `Quick
+            test_finished_requires_text_end
+        ; test_case "protocol errors preserve acceptance provenance" `Quick
+            test_protocol_errors_preserve_acceptance_provenance
+        ; test_case "terminal text sanitization" `Quick
+            test_terminal_text_sanitization
+        ; test_case "terminal text escapes invisible codepoints" `Quick
+            test_terminal_text_escapes_invisible_codepoints
+        ; test_case "a recalled line still carries its emoji" `Quick
+            test_a_recalled_line_still_carries_its_emoji
+        ; test_case "typed error certainty" `Quick test_error_certainty
+        ; test_case "unauthenticated reader keeps the operation open" `Quick
+            test_reader_unauthenticated
+        ; test_case "unverified retry notice names the cause" `Quick
+            test_unverified_retry_notice_names_the_cause
+        ; test_case "batch accepted-user history preserves original identities" `Quick
+            test_batch_preserves_original_user_history_once
+        ; test_case "batch respects interleaved conversation order" `Quick
+            test_batch_respects_interleaved_conversation_order
+        ; test_case "batch member stream retains strict request identity" `Quick
+            test_batch_member_events_pass_request_bound_stream_decode
+        ; test_case "stale completion identity" `Quick
+            test_stale_completion_identity
+        ] )
+    ; ( "attachments"
+      , [ test_case "attachment reaches both wire fields" `Quick
+            test_attachment_reaches_both_wire_fields
+        ; test_case "no attachment sends no multimodal fields" `Quick
+            test_no_attachment_sends_no_multimodal_fields
+        ; test_case "media type comes from bytes" `Quick
+            test_media_type_comes_from_bytes_not_extension
+        ; test_case "non-image is rejected" `Quick
+            test_non_image_is_rejected_by_its_bytes
+        ; test_case "clipboard bytes attach under their own name" `Quick
+            test_clipboard_bytes_attach_under_their_own_name
+        ; test_case "clipboard bytes that are not an image are refused" `Quick
+            test_clipboard_bytes_that_are_not_an_image_are_refused
+        ; test_case "a dropped image is staged" `Quick
+            test_a_dropped_image_is_staged
+        ; test_case "a dropped non-image keeps its path" `Quick
+            test_a_dropped_non_image_keeps_its_path
+        ; test_case "an unstageable image is refused" `Quick
+            test_an_unstageable_image_is_refused_not_pathed
+        ] )
+    ]

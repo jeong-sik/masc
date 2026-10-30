@@ -1,0 +1,37 @@
+{
+  "head": "a1ae5e746be37cf9189b0472cbd7038ecdd59cb9",
+  "parent": "85cbd60991dce63be1c143fe4c0f580237544d22",
+  "own_files": {
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": {
+      "published_blob": "431e423a738ddb62cf6cd6761329ad3507f22540",
+      "integrated_blob": "431e423a738ddb62cf6cd6761329ad3507f22540"
+    },
+    "dashboard/src/api/dashboard-runtime.ts": {
+      "published_blob": "d20b1197f3b2a40db4bf16c891b8e12cf7a590b6",
+      "integrated_blob": "d20b1197f3b2a40db4bf16c891b8e12cf7a590b6"
+    },
+    "dashboard/src/components/runtime-toml-editor.test.ts": {
+      "published_blob": "8a90b8f9102a639f9183688d66e7ec36108c5d04",
+      "integrated_blob": "8a90b8f9102a639f9183688d66e7ec36108c5d04"
+    },
+    "dashboard/src/components/runtime-toml-editor.ts": {
+      "published_blob": "9070600e530e70eebcb4754be6d3a4408a5fe398",
+      "integrated_blob": "9070600e530e70eebcb4754be6d3a4408a5fe398"
+    },
+    "dashboard/src/components/settings-surface.test.ts": {
+      "published_blob": "d79f12831565e6615682fd186dedadc2af917034",
+      "integrated_blob": "d79f12831565e6615682fd186dedadc2af917034"
+    },
+    "dashboard/src/components/settings-surface.ts": {
+      "published_blob": "3951004495fc422a0c6ecf951156cb2465b2f518",
+      "integrated_blob": "3951004495fc422a0c6ecf951156cb2465b2f518"
+    },
+    "dashboard/src/lib/runtime-toml-session.ts": {
+      "published_blob": "fc2ebd3b2a1af477cd875421ff831ba6bc69ee08",
+      "integrated_blob": "fc2ebd3b2a1af477cd875421ff831ba6bc69ee08"
+    }
+  },
+  "native_parent_equal": true,
+  "execution": "not rerun; unchanged own scope",
+  "readme_sha256": "43694b9a83f367cc84bc7f7c356a746bb90348951cd8e89fb34de6c4f3282252"
+}

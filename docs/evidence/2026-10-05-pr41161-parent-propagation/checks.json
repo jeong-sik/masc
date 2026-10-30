@@ -1,0 +1,12 @@
+{
+  "head": "fa5f560930d417d254fe1955b4ed579e74ce8cb4",
+  "parent": "9607401db6a914b4241628c80a7724a48ae49ad0",
+  "tests": 160,
+  "web_exit": 0,
+  "tsc_exit": 0,
+  "files": {
+    "web.log": "ee2d3dcb8f3ba0856fdc6983dc254186e2dc48c02240ebcfcfd1e0e845b61f90",
+    "README.md": "ea1f58683cb1a7d450880020c0983d6c8319bc0794692001e0ef22fa48a49653",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

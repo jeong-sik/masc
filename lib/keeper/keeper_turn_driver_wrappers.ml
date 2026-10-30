@@ -1,0 +1,99 @@
+(** Keeper_turn_driver_wrappers — convenience wrappers extracted from
+    [Keeper_turn_driver].
+
+    These are sibling entry points to {!Keeper_turn_driver.run_named}:
+    - [run_model_by_label]: explicit model-label variant
+    - [run_named_with_masc_tools]: runtime variant + MASC tool bridging
+
+    Extracted from keeper_turn_driver.ml as RFC-0048 PR-2 to reduce the
+    1347-LOC hotspot file.
+
+    @since RFC-0048 PR-2 *)
+
+open Result.Syntax
+include Keeper_turn_driver
+
+(* RFC-0206: re-homed from the deleted Runtime_config_builder.  Resolves a model
+   label to its provider config and builds a Runtime_agent.config; no runtime
+   catalog involved. *)
+(* RFC-0206: the runtime CLI-preflight wrapper is gone; run the attempt
+   directly.  Kept as a thin pass-through so the two call sites read unchanged. *)
+let run_named_with_masc_tools
+    ~runtime_id
+    ?(keeper_name = "")
+    ~walk_owner
+    ~input_source
+    ~goal
+    ?goal_blocks
+    ~base_path
+    ~media_store
+    ~system_prompt
+    ?(native_tools = [])
+    ?tool_requirement
+    ?required_native_posture
+    ?tool_result_projection
+    ?on_selected_runtime
+    ?on_request_execution_ready
+    ~(masc_tools : Masc_domain.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
+    ?temperature
+    ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
+    ?hooks
+    ~raw_trace
+    ?on_event
+    ?on_yield
+    ?on_resume
+    ?attempt_continuation
+    ?on_runtime_attempt_error
+    ?transport
+    ?context
+    ?output_contract
+    ?provider_config_transform
+    ?sw
+    ?net
+    ()
+  : (Runtime_agent.run_result, Agent_core.Error.t) result =
+  let bridged_tools = List.map (fun (td : Masc_domain.tool_schema) ->
+    Tool_bridge.agent_core_tool_of_masc
+      ~base_path
+      ?model_projection:tool_result_projection
+      ~name:td.name ~description:td.description
+      ~input_schema:td.input_schema
+      (fun input -> dispatch ~name:td.name ~args:input)
+  ) masc_tools in
+  let bridged_tools = bridged_tools @ native_tools in
+  let+ selected =
+    Keeper_turn_driver.run_named
+      ~runtime_id
+        ~keeper_name
+      ~walk_owner
+      ~input_source
+      ~goal
+      ?goal_blocks
+      ~base_path
+      ~media_store
+      ~system_prompt
+      ~tools:bridged_tools
+      ~agent_core_tools:bridged_tools
+      ?tool_requirement
+      ?required_native_posture
+      ?temperature
+      ?hooks
+      ~accept
+      ~raw_trace
+      ?on_event
+      ?on_yield
+      ?on_resume
+      ?attempt_continuation
+      ?on_runtime_attempt_error
+      ?on_request_execution_ready
+      ?transport
+      ?context
+      ?output_contract
+      ?provider_config_transform
+      ?sw
+      ?net
+      ()
+  in
+  Option.iter (fun observe -> observe selected.selected_runtime_id) on_selected_runtime;
+  selected.run_result

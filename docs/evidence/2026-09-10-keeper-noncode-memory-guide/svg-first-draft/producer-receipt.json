@@ -1,0 +1,21 @@
+{
+  "tool_receipt": {
+    "ts": 1788985818.533096,
+    "keeper": "memory-guide-proof",
+    "tool": "Write",
+    "output": "{\"ok\":true,\"path\":\"/Users/dancer/.masc-integration/memory-guide-c083/.masc/playground/docker/memory-guide-proof/decision_flow.svg\",\"mode\":\"overwrite\",\"bytes_written\":8810,\"via\":\"docker\"}",
+    "success": true,
+    "execution_id": "exec-1788985818532-000f",
+    "tool_use_id": "call_22a84df348f94b1d805b80fb",
+    "turn_kind": "autonomous",
+    "turn": 13,
+    "keeper_turn_id": 3
+  },
+  "retrieval": {
+    "path": "/Users/dancer/.masc-integration/memory-guide-c083/.masc/playground/docker/memory-guide-proof/decision_flow.svg",
+    "bytes": 8810,
+    "sha256": "fc97870818dff4b553e2d883f02bef268fef6c5e4591244adf7429e69192ef2b",
+    "matches_saved_svg": true
+  },
+  "limitation": "Tool input log is truncated; this joins successful write path and byte count to independently retrieved bytes, not a full logged input digest."
+}

@@ -1,0 +1,17 @@
+{
+  "name": "exhibit-editor",
+  "keepalive_running": true,
+  "last_turn_ago_s": 6.908111810684204,
+  "activation_mode": "autonomous",
+  "keeper_last_error": null,
+  "pending_approval_count": 0,
+  "needs_attention": false,
+  "runtime_blocker_class": null,
+  "chat_operations": {
+    "queued_count": 0,
+    "running_operation_id": null,
+    "terminal_count": 1,
+    "snapshot_available": true,
+    "read_error": null
+  }
+}

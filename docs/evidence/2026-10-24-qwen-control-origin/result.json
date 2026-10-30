@@ -1,0 +1,18 @@
+{
+  "production_lowerer_source_sha256": "92b59eea3e2e541e3dda9d75dd5bf0e69a236981041e2acaf400bd19a7d0179b",
+  "template_sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
+  "scope": "production lowerer with fixture dependencies plus official template",
+  "production_serializer_executed": false,
+  "project_linked": false,
+  "reasoning_projector_executed": false,
+  "provider_called": false,
+  "checks": {
+    "production_lowerer_fixture_checks": true,
+    "original_tail_controls_lose_current_reasoning": true,
+    "lowered_controls_keep_current_reasoning": true,
+    "selective_template_drops_old_reasoning": true,
+    "real_human_with_reserved_tool_syntax_closes_trajectory": true,
+    "tool_media_after_modality_order_keeps_trajectory": true,
+    "full_history_remains_explicit_opt_in": true
+  }
+}

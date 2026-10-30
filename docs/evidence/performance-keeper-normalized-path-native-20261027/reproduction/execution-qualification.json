@@ -1,0 +1,18 @@
+{
+  "created_utc": "2026-10-26T18:40:03.891529+00:00",
+  "plan_sha256": "f4b16e7d4bff8cdac92826726eed0623fa1fb84348b83054e049e430336b789c",
+  "candidate_source": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+  "candidate_server_sha256": "8cf014ab8a9eeb564bd8f0f56d162f77fc619dffe9ea9fb4fdcdd4a6620d1d6f",
+  "candidate_qualification_summary_sha256": "87e203dcb973fde7cbf47b6228272af3bd18035144beabc7cb7cbd1468c96721",
+  "control_source": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+  "control_server_sha256": "1d3da00a22f602005622af1f47442e1171f318e09dabc768123b946a4300f0cb",
+  "artifact_source_is_current_PR_head": true,
+  "current_PR_head": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+  "counter_interpretation": {
+    "source": "health.gc from Gc.quick_stat",
+    "formula": "((minor_words + major_words - promoted_words)_after - (... )_before) * 8",
+    "label": "snapshot-derived allocation counter delta",
+    "limitations": "Cumulative whole-program counters can lag collection boundaries; not Gc.allocated_bytes(), precise instantaneous allocation, allocation rate or function-exclusive allocation."
+  },
+  "scope": "Pre-execution input qualification; no workload or latency success claimed"
+}

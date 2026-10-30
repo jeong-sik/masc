@@ -1,0 +1,106 @@
+{
+  "scope": "actual pure projection/codec/receipt only; no Host.prepare_turn, hooks, SDK, client, transport or remote retention proof",
+  "base_head": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "sources": [
+    {
+      "compiled": "agent_core.ml",
+      "source": "exact role/content/metadata/message fragments; schema and provider-reasoning types excluded",
+      "sha256": "5039e58ead0f480521ed9db5bf8f8cf1d96bb0991c21e1471f56e75918d7a2d9"
+    },
+    {
+      "compiled": "prompt_block_id.mli",
+      "source": "lib/types/prompt_block_id.mli",
+      "sha256": "2f4094a70f64f63b852a32b6ce0fdf402f34bf3f3345de343bf17c14bee67eda"
+    },
+    {
+      "compiled": "prompt_block_id.ml",
+      "source": "lib/types/prompt_block_id.ml",
+      "sha256": "29d4f8d8ce8bbf3bf53fd304a4ed95e48ee609d83de2ea2f8946c78d3255268e"
+    },
+    {
+      "compiled": "keeper_context_layers.mli",
+      "source": "lib/keeper/keeper_context_layers.mli",
+      "sha256": "e1c4e1e44e1ccf629c7709424880a91af6d3c7552709523e1af5ff43fee85741"
+    },
+    {
+      "compiled": "keeper_context_layers.ml",
+      "source": "lib/keeper/keeper_context_layers.ml",
+      "sha256": "2fbefab7ec5f8686eb1a0b936646e28569191f1799608b590f9eb14a62db9259"
+    },
+    {
+      "compiled": "keeper_context_assembly.mli",
+      "source": "lib/keeper/keeper_context_assembly.mli",
+      "sha256": "1479a882a788783bfc430cd44803ed679f6815d2c0a597c94f262810bc0f10ee"
+    },
+    {
+      "compiled": "keeper_context_assembly.ml",
+      "source": "lib/keeper/keeper_context_assembly.ml",
+      "sha256": "484a02f701471656b68403748d48bb6f470bf494261e791cfea9475dcf0d8f48"
+    },
+    {
+      "compiled": "keeper_official_client_context_codec.mli",
+      "source": "lib/keeper/keeper_official_client_context_codec.mli",
+      "sha256": "d03b9cfacd9f99ae4cb4057934cca0671277ae91bd5de997ec23964c0e1ccfea"
+    },
+    {
+      "compiled": "keeper_official_client_context_codec.ml",
+      "source": "lib/keeper/keeper_official_client_context_codec.ml",
+      "sha256": "4811768c182047dd28ef41270f7f25e29bd14e9e14b55578be6dfad46596afb4"
+    },
+    {
+      "compiled": "runtime_official_client_write.ml",
+      "source": "exact pure write-receipt prefix, excludes effectful report",
+      "sha256": "31cb279cb69f5add1bf94ef8e13654d67d6b244b1a8444f4add2bc4540e88c2c"
+    },
+    {
+      "compiled": "keeper_official_client_session_store.ml",
+      "source": "exact carried/held type fragment",
+      "sha256": "d2cba73f2a512dc82a7f41dacd3093a274f818fe43afe88c623060cb930dcd9c"
+    },
+    {
+      "compiled": "runtime_model_input_tail_window.ml",
+      "source": "exact metadata classifiers fragment",
+      "sha256": "60ae79e8569eff0282d566597b009bfdb7b00ba0237ad121c4c4b4ec296a16c7"
+    },
+    {
+      "compiled": "keeper_official_task_reference.ml",
+      "source": "exact task-reference classifier fragment",
+      "sha256": "86cc1cb56ae63e2a20be9772a93b4deea29a8b886575b835772df2c53271d2fd"
+    },
+    {
+      "compiled": "prompt_names.ml",
+      "source": "unexecuted notice key placeholders",
+      "sha256": "4b6b45c1525704639006683b2e809e32047b534822adbc28d59d3ccc69016713"
+    },
+    {
+      "compiled": "prompt_registry.ml",
+      "source": "unreachable notice dependency",
+      "sha256": "fff69dc9a7b2701f5ab7abbac05d633cd1bd237d277d95062c6b77b8774df63d"
+    },
+    {
+      "compiled": "log.ml",
+      "source": "unreachable log dependency",
+      "sha256": "b98152fd5caf2112adc0df44de52367c23393543fa4deea61bee2d6b92727227"
+    },
+    {
+      "compiled": "keeper_context_submission_link.mli",
+      "source": "lib/keeper/keeper_context_submission_link.mli",
+      "sha256": "1a9a3fa6133b8d55e33ce1eaec5d73d06b373fd0afa0f05dcafc0ab018745120"
+    },
+    {
+      "compiled": "keeper_context_submission_link.ml",
+      "source": "lib/keeper/keeper_context_submission_link.ml",
+      "sha256": "f0f057793f66a0620ad696781f6231da6116037025cddde94d72db2ca3169819"
+    }
+  ],
+  "results": [
+    {
+      "variant": "repair",
+      "projection_sha256": "086ce273f9b8b06e83a6fd34c643fc391059e393863fb78a5f9fad41b2bfaadb",
+      "compile_exit": 0,
+      "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
+      "run_exit": 0,
+      "output": "PASS changed Goal reaches a separate Resume User message\nPASS Start names the Goal it sent through System\nPASS same Goal does not accumulate in Resume history\nPASS existing non-Goal world stays held\nPASS a new Goal after session Start is delivered\nPASS Goal never becomes an extra-context source block\nPASS actual projected text matches its receipt slot\nPASS source proof names System\nPASS target proof names official Resume User\nPASS source proof hashes the actual System partition\nPASS selected raw System span is exactly the delivered Goal\nPASS local held omission retains System-derived evidence\nPASS stale System issuer cannot prove new observation\nPASS Completion Authority remains Sent_every_resume\nPASS held authority is actually resent\nPASS authority repeats exact bytes instead of accumulating\nPASS authority receipt selects the physical System carrier\nPASS authority source selects its own unique block\nPASS authority source bytes equal the delivered row\nPASS missing authority issuer remains unknown\nPASS stale authority issuer remains unknown\nPASS Goal receipt cannot attest an absent authority observation\nPASS duplicate authority kinds are rejected before issuing a System carrier\nPASS JSON turn-text slot binds the actual projection\n24 exact-source official Resume checks passed\nPASS unchanged held Goal is omitted while current authority is resent\nPASS only the delivered authority claims an occurrence\nPASS held Goal has separate omission evidence\nPASS combined UTF8 span selects authority rather than Goal\n{\"diagnostic\":\"Official Start authority then no current event\",\"start_system\":\"BASE\\n\\nGOAL \ud604\uc7ac criterion\\n\\nApproved task-first vrf-first operator-\uccab\ubc88\uc9f8\",\"next_system\":\"BASE\",\"next_resume_prompt\":\"NEXT OWNER\",\"scope\":\"Actual source produces no authority-clearing observation; remote first-System retention is adapter policy source, not executed here\"}\nextra Official checks complete; total=28\n"
+    }
+  ]
+}

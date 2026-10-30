@@ -1,0 +1,4 @@
+(executable
+ (name input_probe)
+ (flags (:standard -w -4))
+ (libraries masc masc.browser_lane masc.browser_configuration masc.time_compat yojson eio eio_main unix))

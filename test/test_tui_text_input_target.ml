@@ -1,0 +1,827 @@
+(* Which field takes typed characters, and therefore where a paste goes.
+
+   Typing named seven fields and paste named four, each guard written where
+   its field was added. A paste into the palette, into row search, or into a
+   preset name went to the chat draft the operator was not looking at, or
+   nowhere at all: the operator saw paste work on one screen and do nothing
+   on the next. Both paths read this function now, so what is checked here is
+   the order they share and the conditions each field is claimed under. *)
+
+module Tui_types = Masc_tui_types
+open Alcotest
+
+let target =
+  testable
+    (Fmt.of_to_string (function
+      | None -> "none"
+      | Some Tui_types.Text_collab_form -> "collab-form"
+      | Some Tui_types.Text_account_login -> "account-login"
+      | Some Tui_types.Text_preset_name -> "preset-name"
+      | Some Tui_types.Text_runtime_lane_name -> "runtime-lane-name"
+      | Some Tui_types.Text_runtime_param -> "runtime-param"
+      | Some Tui_types.Text_runtime_model_form -> "runtime-model-form"
+      | Some Tui_types.Text_runtime_account_form -> "runtime-account-form"
+      | Some Tui_types.Text_memory_recall_form -> "memory-recall-form"
+      | Some Tui_types.Text_voice_wizard -> "voice-wizard"
+      | Some Tui_types.Text_palette -> "palette"
+      | Some Tui_types.Text_row_search -> "row-search"
+      | Some Tui_types.Text_runtime_picker_filter -> "runtime-picker-filter"
+      | Some Tui_types.Text_keeper_runtime_picker_filter -> "keeper-runtime-picker-filter"
+      | Some Tui_types.Text_identity_app_form -> "identity-app-form"
+      | Some Tui_types.Text_identity_filter -> "identity-filter"
+      | Some Tui_types.Text_github_token -> "github-token"
+      | Some Tui_types.Text_browser_url -> "browser-url"
+      | Some Tui_types.Text_ask_answer -> "ask-answer"
+      | Some Tui_types.Text_board_draft -> "board-draft"
+      | Some Tui_types.Text_board_attach_path -> "board-attach-path"
+      | Some Tui_types.Text_fusion_launch -> "fusion-launch"
+      | Some Tui_types.Text_goal_drop_reason -> "goal-drop-reason"
+      | Some Tui_types.Text_resource_save -> "resource-save"))
+    ( = )
+;;
+
+let fresh_state () =
+  Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+;;
+
+let test_collab_input_ownership () =
+  let state = fresh_state () in
+  state.palette_open <- true;
+  let view, read = Masc_tui_collab.loading (Masc_tui_collab.create ()) in
+  let view = Masc_tui_collab.listed view read (Ok
+      { Masc.Tui_decode.pis_rows =
+          [{ Masc.Tui_decode.pi_name = "guest1"; pi_expires_at = None; pi_expired = false }]
+      ; pis_controller = Masc.Tui_decode.Play_controller_free }) in
+  let show view = state.collab <- Some view in
+  show view;
+  check target "Collab browsing hides the underlying palette" None
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  let naming, _ = Masc_tui_collab.key view "n" in
+  show naming;
+  check target "the name form owns text" (Some Tui_types.Text_collab_form)
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  check target "a hidden compact form takes no text" None
+    (Tui_types.text_input_target state ~compact_viewport:true);
+  let hours, _ = Masc_tui_collab.key (Masc_tui_collab.paste naming "guest1") "enter" in
+  show hours;
+  check target "the lifetime form owns text" (Some Tui_types.Text_collab_form)
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  let confirmation, _ = Masc_tui_collab.key view "x" in
+  show confirmation;
+  check target "confirmation does not expose the hidden palette" None
+    (Tui_types.text_input_target state ~compact_viewport:false)
+
+let test_model_form_requires_current_workspace_reading () =
+  let state = fresh_state () in
+  let row : Masc_tui_model_runtime_table.row =
+    { model="shared-name"; provider="shared-provider"; api_name=Some "api-model";
+      reasoning_effort=None; temperature=None; context=Some ("binding",8192);
+      model_context=None; max_tokens=None; same_login=[]; login_group=None;
+      account_label=None } in
+  state.config_models_rows <- [row];
+  check bool "retained rows cannot open without a current reading" true
+    (Result.is_error (Tui_types.selected_config_model state));
+  let metadata : Masc_tui_runtime_config_view.metadata =
+    { source_revision="current"; validation=Checked {valid=true;schema_version=1;
+        current_schema_version=1;forward_schema=false;issues=[]};
+      routing=Routing_active; routing_requires_restart=false; keeper=Not_configured;
+      keeper_requires_restart=false; configured_count=0; pending_keys=[];
+      applied_keys=[]; preempted_keys=[] } in
+  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_source_text="";rcv_rows=[];rcv_metadata=metadata;rcv_account_emails=Ok (Masc_tui_account_login.Email_rows {rows=[]; unattributed=0})};
+  check bool "current successful reading permits the selected model" true
+    (Tui_types.selected_config_model state=Ok row);
+  state.runtime_config_view_error <- Some "read failed";
+  check bool "failed raw reading cannot reuse retained rows" true
+    (Result.is_error (Tui_types.selected_config_model state));
+  state.runtime_config_view_error <- None;
+  state.config_models_error <- Some "typed projection failed";
+  check bool "failed model projection cannot open an editor" true
+    (Result.is_error (Tui_types.selected_config_model state));
+  state.runtime_model_form <- Some (Masc_tui_model_form.create Edit row);
+  state.config_models_cursor <- 4;
+  Tui_types.withdraw_config_models state;
+  check int "withdrawal clears former workspace rows" 0 (List.length state.config_models_rows);
+  check int "withdrawal resets model selection" 0 state.config_models_cursor;
+  check bool "withdrawal discards the former workspace form" true (state.runtime_model_form=None);
+  check bool "matching IDs in another workspace require a new reading" true
+    (Result.is_error (Tui_types.selected_config_model state))
+;;
+
+let resolved ?(compact_viewport = false) state =
+  Tui_types.text_input_target state ~compact_viewport
+;;
+
+let identity_surface state =
+  state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
+  state.Tui_types.detail_tab <- Tui_types.Detail_identity
+;;
+
+let test_nothing_claims_a_plain_surface () =
+  check target "no field is taking text" None (resolved (fresh_state ()))
+;;
+
+let test_the_palette_claims_while_it_is_open () =
+  let state = fresh_state () in
+  state.Tui_types.palette_open <- true;
+  check target "palette" (Some Tui_types.Text_palette) (resolved state)
+;;
+
+let test_row_search_claims_while_a_query_is_armed () =
+  let state = fresh_state () in
+  state.Tui_types.search <- Some "que";
+  check target "row search" (Some Tui_types.Text_row_search) (resolved state);
+  (* An empty query is still a query: "/" arms the field before a character
+     lands in it, and that is exactly when a paste is likely. *)
+  state.Tui_types.search <- Some "";
+  check target "armed but empty" (Some Tui_types.Text_row_search)
+    (resolved state)
+;;
+
+let test_a_preset_name_being_typed_claims_over_the_palette () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Config;
+  state.Tui_types.config_pane <- Tui_types.Config_presets;
+  state.Tui_types.preset_save_draft <- Some "nightly";
+  state.Tui_types.palette_open <- true;
+  check target "preset name first" (Some Tui_types.Text_preset_name)
+    (resolved state)
+;;
+
+let test_a_preset_draft_claims_only_on_its_own_pane () =
+  let state = fresh_state () in
+  state.Tui_types.preset_save_draft <- Some "nightly";
+  check target "not on another surface" None (resolved state);
+  state.Tui_types.view <- Tui_types.Config;
+  check target "not on another Config pane" None (resolved state);
+  state.Tui_types.config_pane <- Tui_types.Config_presets;
+  check target "on its own pane" (Some Tui_types.Text_preset_name)
+    (resolved state)
+;;
+
+let test_an_inline_setting_claims_over_the_palette () =
+  let state = fresh_state () in
+  state.Tui_types.runtime_param_edit <-
+    Some
+      { Tui_types.rpe_key = "keeper.turn_budget"
+      ; rpe_value_type = "int"
+      ; rpe_draft = "12"
+      ; rpe_replace_on_type = true
+      ; rpe_mode = Tui_types.Friendly_value
+      ; rpe_choices = []
+      };
+  state.Tui_types.palette_open <- true;
+  check target "runtime param first" (Some Tui_types.Text_runtime_param)
+    (resolved state)
+;;
+
+(* The wizard is a field like the others, and it is open on exactly one pane,
+   so its presence is the whole condition. It claims over the palette and row
+   search the same way a preset name does: what is being typed belongs to the
+   thing that was opened last. *)
+let voice_wizard_open state =
+  state.Tui_types.voice_wizard <-
+    Some
+      (Masc_tui_voice_wizard_session.voice_wizard_open ~section:Voice_setup.Tts
+         ~provider:Voice_wizard.Elevenlabs ~revision:"a-revision")
+;;
+
+let test_the_voice_wizard_claims_over_the_palette () =
+  let state = fresh_state () in
+  voice_wizard_open state;
+  state.Tui_types.palette_open <- true;
+  state.Tui_types.search <- Some "";
+  check target "the wizard first" (Some Tui_types.Text_voice_wizard) (resolved state)
+;;
+
+(* An inline setting is opened from inside the config pane the wizard is on,
+   so the two can be open at once; the one opened last is the runtime param,
+   and it takes the keys. *)
+let test_an_inline_setting_claims_over_the_voice_wizard () =
+  let state = fresh_state () in
+  voice_wizard_open state;
+  state.Tui_types.runtime_param_edit <-
+    Some
+      { Tui_types.rpe_key = "keeper.turn_budget"
+      ; rpe_value_type = "int"
+      ; rpe_draft = "12"
+      ; rpe_replace_on_type = true
+      ; rpe_mode = Tui_types.Friendly_value
+      ; rpe_choices = []
+      };
+  check target "the inline setting first" (Some Tui_types.Text_runtime_param)
+    (resolved state)
+;;
+
+(* Closing it hands the keys back rather than leaving them held by a field
+   nothing draws. *)
+let test_closing_the_wizard_releases_the_keys () =
+  let state = fresh_state () in
+  voice_wizard_open state;
+  state.Tui_types.voice_wizard <- None;
+  check target "nothing claims it now" None (resolved state)
+;;
+
+let test_the_identity_form_claims_before_its_filter () =
+  let state = fresh_state () in
+  identity_surface state;
+  state.Tui_types.identity_filter <- Some "git";
+  check target "filter alone" (Some Tui_types.Text_identity_filter)
+    (resolved state);
+  state.Tui_types.identity_app_form <-
+    Some
+      { Masc_tui_identity_model.iaf_provider = "github"
+      ; iaf_label = "GitHub"
+      ; iaf_field = Masc_tui_identity_model.App_client_id
+      ; iaf_client_id = ""
+      ; iaf_client_secret = ""
+      ; iaf_scopes = ""
+      };
+  check target "form first" (Some Tui_types.Text_identity_app_form)
+    (resolved state)
+;;
+
+let test_the_identity_fields_let_go_of_a_compact_frame () =
+  (* A frame the last paint had to draw compact is not showing these fields,
+     which is the ground the key dispatch already refused them on. *)
+  let state = fresh_state () in
+  identity_surface state;
+  state.Tui_types.identity_filter <- Some "git";
+  check target "drawn" (Some Tui_types.Text_identity_filter) (resolved state);
+  check target "compact" None (resolved ~compact_viewport:true state)
+;;
+
+let test_the_palette_keeps_a_compact_frame () =
+  (* The palette draws over the surface rather than beside it, and its key
+     handler never asked about the viewport. Paste follows typing. *)
+  let state = fresh_state () in
+  state.Tui_types.palette_open <- true;
+  check target "compact" (Some Tui_types.Text_palette)
+    (resolved ~compact_viewport:true state)
+;;
+
+let test_a_board_post_being_written_claims_its_draft () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Board;
+  check target "reading the board" None (resolved state);
+  state.Tui_types.board_mode <- Tui_types.Board_compose;
+  check target "writing a post" (Some Tui_types.Text_board_draft)
+    (resolved state)
+;;
+
+(* A drop reason claims typing only on the detail of the Goal it was opened
+   for: the Server refuses a drop without one, so the letters that are action
+   keys elsewhere on the detail must reach the reason. An armed action is a
+   key, not a field, and a compact frame does not draw the field. *)
+let test_a_drop_reason_claims_typing_on_its_goal_detail () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Planning;
+  state.Tui_types.planning_mode <- Tui_types.Planning_detail "goal-a";
+  check target "reading the detail" None (resolved state);
+  state.Tui_types.goal_action_pending <-
+    Some (Tui_types.Goal_action_armed { goal_id = "goal-a"; action = Goal_phase.Public_action.Pause });
+  check target "an armed action is a key" None (resolved state);
+  state.Tui_types.goal_action_pending <-
+    Some (Tui_types.Goal_drop_reason { goal_id = "goal-a"; reason = "" });
+  check target "typing the reason" (Some Tui_types.Text_goal_drop_reason) (resolved state);
+  check (option string) "the reason is the detail's" (Some "")
+    (Tui_types.goal_drop_reason_for state "goal-a");
+  check target "compact" None (resolved ~compact_viewport:true state);
+  state.Tui_types.planning_mode <- Tui_types.Planning_detail "goal-b";
+  check target "another Goal's detail" None (resolved state);
+  check (option string) "no reason for another Goal" None
+    (Tui_types.goal_drop_reason_for state "goal-b");
+  state.Tui_types.planning_mode <- Tui_types.Planning_list;
+  check target "the list" None (resolved state);
+  state.Tui_types.planning_mode <- Tui_types.Planning_detail "goal-a";
+  check bool "q types into the reason" false
+    (Tui_types.quit_key_allowed_for (resolved state))
+;;
+
+(* The Fusion launch form takes typing only once it is open: while the
+   presets are still being read there is no field, and once the run has
+   started the form is gone and the list is back. A compact frame does not
+   draw the form, so it lets go the way the voice wizard does. *)
+let test_the_fusion_launch_form_claims_while_open () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Fusion;
+  check target "the list takes no text" None (resolved state);
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_reading_presets 1);
+  check target "reading presets is not a field" None (resolved state);
+  let options =
+    { Masc.Tui_decode_fusion.flo_enabled = true
+    ; flo_default_preset = "trio"
+    ; flo_presets = [ "trio" ]
+    }
+  in
+  let form =
+    match
+      Masc_tui_fusion_launch.open_form ~keepers:[ "analyst" ] ~keeper:None ~options
+    with
+    | Ok form -> form
+    | Error detail -> fail detail
+  in
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open form);
+  check target "the open form claims typing" (Some Tui_types.Text_fusion_launch)
+    (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "the form is the Fusion surface's" None (resolved state);
+  state.Tui_types.view <- Tui_types.Fusion;
+  state.Tui_types.fusion_launch <-
+    Some
+      (Tui_types.Fusion_launch_started
+         { fls_run_id = "run-1"
+         ; fls_reads_left = Tui_types.fusion_started_list_reads
+         });
+  check target "a started run is the list again" None (resolved state)
+;;
+
+(* The runtime picker's filter holds typing only once [/] opened it: before
+   that, j/k and e are the picker's keys. It is drawn on Runtime and Lanes,
+   and a compact frame draws neither. *)
+let test_the_runtime_picker_filter_claims_once_opened () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Runtime;
+  Tui_types.open_runtime_lane_pick state (Tui_types.Pick_conversation_lane "primary");
+  check target "the open picker takes no text" None (resolved state);
+  state.Tui_types.runtime_lane_pick <-
+    Some
+      ( Tui_types.Pick_conversation_lane "primary"
+      , Masc_tui_pick_list.type_text Masc_tui_pick_list.closed "gl" );
+  check target "the filter claims typing" (Some Tui_types.Text_runtime_picker_filter)
+    (resolved state);
+  state.Tui_types.view <- Tui_types.Lanes;
+  check target "on Lanes too" (Some Tui_types.Text_runtime_picker_filter) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.runtime_lane_pick <- None;
+  check target "a closed picker holds nothing" None (resolved state)
+;;
+
+(* The Keeper runtime picker's filter holds typing only once [/] opened it:
+   before that, [d] and j/k are the picker's keys. A compact frame draws no
+   picker, so it holds nothing there. *)
+let test_the_keeper_runtime_picker_filter_claims_once_opened () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_runtime_pick;
+  state.Tui_types.runtime_pick_keeper <- Some "alpha";
+  check target "the open picker takes no text" None (resolved state);
+  state.Tui_types.runtime_pick_list <-
+    Masc_tui_pick_list.type_text Masc_tui_pick_list.closed "gl";
+  check target "the filter claims typing"
+    (Some Tui_types.Text_keeper_runtime_picker_filter) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_list;
+  check target "another surface holds nothing" None (resolved state)
+;;
+
+(* A new lane's name is typed on the Runtime surface, where x, J, K and D are
+   lane edits: while the name is open the field takes them as letters. *)
+let test_a_new_lane_name_claims_typing_on_runtime () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Runtime;
+  check target "reading lanes" None (resolved state);
+  state.Tui_types.runtime_lane_name_draft <- Some (Tui_types.Naming_new_lane "");
+  check target "naming a lane" (Some Tui_types.Text_runtime_lane_name) (resolved state);
+  state.Tui_types.view <- Tui_types.Lanes;
+  check target "another surface" None (resolved state)
+;;
+
+(* While the attach path is being typed, typed and pasted text is the path:
+   a pasted path that landed in the draft would be published as post text. *)
+let test_the_attach_path_input_claims_over_the_board_draft () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Board;
+  state.Tui_types.board_mode <- Tui_types.Board_compose;
+  state.Tui_types.board_compose_attach_input <- Some (Buffer.create 16);
+  check target "typing a path" (Some Tui_types.Text_board_attach_path)
+    (resolved state);
+  state.Tui_types.board_compose_attach_input <- None;
+  check target "back to the draft" (Some Tui_types.Text_board_draft)
+    (resolved state)
+;;
+
+let test_the_palette_claims_over_a_board_draft () =
+  (* The palette draws over the board pane, and its key handler runs first.
+     A paste follows the characters. *)
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Board;
+  state.Tui_types.board_mode <- Tui_types.Board_compose;
+  state.Tui_types.palette_open <- true;
+  check target "palette first" (Some Tui_types.Text_palette) (resolved state)
+;;
+
+let test_browser_url_input_ownership () =
+  let state = fresh_state () in
+  let open Tui_types.Browser_lane_view in
+  Tui_types.show_browser_lane state;
+  state.Tui_types.browser_lane <- Some
+    { (switch_source Automation (create ())) with url_draft = Some "https://example.org" };
+  check target "URL owns typing and paste" (Some Tui_types.Text_browser_url) (resolved state);
+  state.Tui_types.palette_open <- true;
+  check target "palette takes priority" (Some Tui_types.Text_palette) (resolved state);
+  state.Tui_types.palette_open <- false;
+  check target "hidden compact URL does not take input" None (resolved ~compact_viewport:true state);
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "hidden URL does not capture another surface" None (resolved state)
+;;
+
+let test_browser_reader_chrome_scope () =
+  let state = fresh_state () in
+  let module Lane = Tui_types.Browser_lane_view in
+  List.iter (fun source ->
+    Tui_types.show_browser_lane state;
+    state.Tui_types.browser_lane <- Some (Lane.switch_source source (Lane.create ()));
+    check bool "reader owns its context row" true
+      (Option.is_some (Tui_types.browser_lane_on_screen state));
+    check int "reader highlights its Runtime family"
+      (Masc_tui_surface_navigation.surface_ring_index state Tui_types.Runtime)
+      (Masc_tui_surface_navigation.surface_ring_index state state.Tui_types.view);
+    state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
+    check bool "retained browser does not hide Keeper chrome" true
+      (Option.is_none (Tui_types.browser_lane_on_screen state)))
+    [Lane.Live; Lane.Automation];
+  state.Tui_types.view <- Tui_types.Connectors;
+  state.Tui_types.browser_lane <- None;
+  check bool "connector routing retains Keeper context" true
+    (Option.is_none (Tui_types.browser_lane_on_screen state));
+  check int "connector routing keeps its existing navigation family"
+    (Masc_tui_surface_navigation.surface_ring_index state (Tui_types.Keepers Tui_types.Keeper_list))
+    (Masc_tui_surface_navigation.surface_ring_index state Tui_types.Connectors)
+;;
+
+let test_reader_discards_active_and_queued_voice () =
+  let state = fresh_state () in
+  state.Tui_types.msg_target_keeper_name <- Some "analyst";
+  state.Tui_types.composer_focused <- true;
+  state.Tui_types.voice_capture <- Some "analyst";
+  state.Tui_types.voice_continuous <- Some "analyst";
+  state.Tui_types.voice_floor <- Some (-50.);
+  state.Tui_types.voice_level_db <- Some (-20.);
+  Masc_tui_message_input.insert state.Tui_types.msg_input "reviewed draft";
+  Tui_types.release_composer_for_browser_reader state;
+  check bool "composer releases input" false state.Tui_types.composer_focused;
+  check (option string) "continuous capture stops" None state.Tui_types.voice_continuous;
+  check bool "calibration and meter clear" true
+    (state.Tui_types.voice_floor = None && state.Tui_types.voice_level_db = None);
+  check (option string) "microphone remains occupied until completion"
+    (Some "analyst") state.Tui_types.voice_capture;
+  check bool "recorder receives discard" true
+    (state.Tui_types.voice_stop_requested = Some Masc.Voice_bridge.Discard);
+  (* Returning to the composer and stopping again cannot resurrect a result
+     already queued before the reader was opened. *)
+  Tui_types.request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
+  check bool "late transcript is discarded" true
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some Tui_types.Voice_withdrawn);
+  check (option string) "completion releases microphone" None state.Tui_types.voice_capture;
+  check bool "duplicate completion has no owner" true
+    (Tui_types.settle_voice_capture state ~keeper:"analyst" = None);
+  check string "existing draft survives reader entry" "reviewed draft"
+    (Masc_tui_message_input.contents state.Tui_types.msg_input);
+  (* A fresh capture explicitly started after returning remains usable. *)
+  state.Tui_types.voice_capture <- Some "analyst";
+  state.Tui_types.voice_stop_requested <- None;
+  check bool "fresh capture delivers" true
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some (Tui_types.Voice_current Masc.Voice_bridge.Keep_what_was_heard));
+  state.Tui_types.voice_capture <- Some "analyst";
+  Tui_types.request_voice_stop state Masc.Voice_bridge.Discard;
+  check bool "operator discard remains a current capture" true
+    (Tui_types.settle_voice_capture state ~keeper:"analyst"
+     = Some (Tui_types.Voice_current Masc.Voice_bridge.Discard))
+;;
+
+let test_workspace_withdrawal_discards_queued_voice () =
+  List.iter (fun return_to_local ->
+    let state = fresh_state () in
+    state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+    state.Tui_types.msg_target_keeper_name <- Some "analyst";
+    state.Tui_types.voice_capture <- Some "analyst";
+    state.Tui_types.voice_continuous <- Some "analyst";
+    state.Tui_types.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;
+    Tui_types.withdraw_voice_capture state;
+    state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_unread;
+    if return_to_local then
+      state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+    check (option string) "withdrawal keeps microphone occupied"
+      (Some "analyst") state.Tui_types.voice_capture;
+    check (option string) "withdrawal stops automatic rearm"
+      None state.Tui_types.voice_continuous;
+    (* A second authority change or a later keep request cannot revive A's
+       completion, even after A becomes the local workspace again. *)
+    Tui_types.withdraw_voice_capture state;
+    Tui_types.request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
+    check bool "queued transcript remains discarded" true
+      (Tui_types.settle_voice_capture state ~keeper:"analyst"
+       = Some Tui_types.Voice_withdrawn);
+    check (option string) "completion releases microphone"
+      None state.Tui_types.voice_capture;
+    check (option string) "completion cannot restart continuous mode"
+      None state.Tui_types.voice_continuous;
+    check string "withdrawn draft stays empty" ""
+      (Masc_tui_message_input.contents state.Tui_types.msg_input))
+    [false; true]
+;;
+
+let test_ask_answer_input_ownership () =
+  let state = fresh_state () in
+  let question : Masc.Tui_decode_asks.ask_question =
+    { aq_id = "q1"; aq_header = "Route"; aq_prompt = "Which route?";
+      aq_mode = Masc.Tui_decode_asks.Ask_single;
+      aq_free_text = Masc.Tui_decode_asks.Ask_choices_only;
+      aq_choices = [{ac_id = "route"; ac_label = "Offered route"; ac_description = None}] }
+  in
+  state.Tui_types.view <- Tui_types.Approvals;
+  state.Tui_types.ask_text_entry <- Some
+    { ate_slot = Masc_tui_ask_projection.free_text_slot
+        ~ask:{ Masc.Tui_decode_asks.ak_asker = Ask_keeper "keeper"; ak_id = "ask-1" } question; ate_text = "draft" };
+  check target "answer owns typing and paste" (Some Tui_types.Text_ask_answer) (resolved state);
+  check target "compact frame hides answer editor" None (resolved ~compact_viewport:true state);
+  state.Tui_types.context_inspector_open <- true;
+  check target "inspector hides answer editor" None (resolved state);
+  state.Tui_types.context_inspector_open <- false;
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "retained answer cannot capture another surface" None (resolved state)
+;;
+
+let test_github_token_claims_input_when_active () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
+  state.Tui_types.detail_tab <- Tui_types.Detail_github;
+  state.Tui_types.github_token_input <- Some "github_pat_123";
+  check target "github token input owns typing" (Some Tui_types.Text_github_token) (resolved state);
+  state.Tui_types.palette_open <- true;
+  check target "palette takes priority over github token" (Some Tui_types.Text_palette) (resolved state);
+  state.Tui_types.palette_open <- false;
+  state.Tui_types.github_token_input <- None;
+  check target "no input when not editing token" None (resolved state)
+;;
+
+(* The account form stands on the runtime.toml pane. Left open behind
+   another pane it must not take that pane's keys, and on a frame too small
+   to draw the pane it lets go the way the other forms do. *)
+let test_the_account_form_claims_only_on_the_runtime_pane () =
+  let state = fresh_state () in
+  let form =
+    match
+      Masc_tui_runtime_account_form.open_on
+        "[providers.codex]\nprotocol = \"codex-app-server\"\ncommand = \"codex\"\n\
+         is-non-interactive = true\n\n[models.m]\napi-name = \"m\"\n\
+         max-context = 1000\ntools-support = true\n\n[codex.m]\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  state.Tui_types.view <- Tui_types.Config;
+  state.Tui_types.config_pane <- Tui_types.Config_runtime;
+  state.Tui_types.runtime_account_form <- Some form;
+  check target "the account form owns typing"
+    (Some Tui_types.Text_runtime_account_form) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.config_pane <- Tui_types.Config_prompts;
+  check target "another pane keeps its keys" None (resolved state)
+;;
+
+(* The recall form stands on the runtime.toml pane too. It takes every key
+   there, so left open behind another pane it must not take that pane's keys,
+   and on a frame too small to draw the pane it lets go. *)
+let test_the_recall_form_claims_only_on_the_runtime_pane () =
+  let state = fresh_state () in
+  let form =
+    match
+      Masc_tui_memory_recall_form.open_on
+        ~keepers:
+          [ { Masc_tui_memory_recall_form.name = "alpha"
+            ; presence = Masc_tui_memory_recall_form.Unknown
+            }
+          ]
+        "[models.probe]\napi-name = \"probe\"\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  state.Tui_types.view <- Tui_types.Config;
+  state.Tui_types.config_pane <- Tui_types.Config_runtime;
+  state.Tui_types.memory_recall_form <- Some form;
+  check target "the recall form owns the keys"
+    (Some Tui_types.Text_memory_recall_form) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.config_pane <- Tui_types.Config_prompts;
+  check target "another pane keeps its keys" None (resolved state)
+;;
+
+(* The server's reading for the recall form is numbered per open. An answer
+   that carries the number of a form the operator already left is dropped, and
+   one that arrives with no form open lands nowhere. *)
+let test_the_recall_form_hears_only_the_answer_of_its_own_open () =
+  let module Form = Masc_tui_memory_recall_form in
+  let state = fresh_state () in
+  let open_form () =
+    match
+      Form.open_on
+        ~keepers:[ { Form.name = "alpha"; presence = Form.Unknown } ]
+        "[models.probe]\napi-name = \"probe\"\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  let server () =
+    match state.Tui_types.memory_recall_form with
+    | Some form -> Some (Form.server form)
+    | None -> None
+  in
+  let answer detail = Form.Server_unavailable detail in
+  state.Tui_types.memory_recall_form <- Some (open_form ());
+  let first = Tui_types.begin_memory_recall_standing_read state in
+  check bool "a form waits" true (server () = Some Form.Server_unread);
+  Tui_types.finish_memory_recall_standing_read state ~generation:first (answer "first");
+  check bool "its own answer lands" true (server () = Some (answer "first"));
+  (* The operator leaves it and opens another. *)
+  state.Tui_types.memory_recall_form <- Some (open_form ());
+  let second = Tui_types.begin_memory_recall_standing_read state in
+  check bool "every open takes a number of its own" true (second <> first);
+  Tui_types.finish_memory_recall_standing_read state ~generation:first (answer "late");
+  check bool "the answer of the form left is dropped" true (server () = Some Form.Server_unread);
+  Tui_types.finish_memory_recall_standing_read state ~generation:second (answer "second");
+  check bool "the answer of this open lands" true (server () = Some (answer "second"));
+  state.Tui_types.memory_recall_form <- None;
+  Tui_types.finish_memory_recall_standing_read state ~generation:second (answer "after");
+  check bool "no form open: the answer lands nowhere" true (server () = None)
+;;
+
+(* When the workspace identity is lost the reply to a reading in flight is
+   retired. The form must say it stopped waiting, and an answer it already has
+   stays. *)
+let test_a_retired_reading_does_not_leave_the_recall_form_waiting () =
+  let module Form = Masc_tui_memory_recall_form in
+  let state = fresh_state () in
+  let form =
+    match
+      Form.open_on
+        ~keepers:[ { Form.name = "alpha"; presence = Form.Unknown } ]
+        "[models.probe]\napi-name = \"probe\"\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  let server () =
+    match state.Tui_types.memory_recall_form with
+    | Some form -> Some (Form.server form)
+    | None -> None
+  in
+  state.Tui_types.memory_recall_form <- Some form;
+  let (_ : int) = Tui_types.begin_memory_recall_standing_read state in
+  check bool "a form waits" true (server () = Some Form.Server_unread);
+  Tui_types.suspend_workspace_readings state;
+  check bool "the form stops waiting for the reply it will not get" true
+    (match server () with Some (Form.Server_unavailable _) -> true | _ -> false);
+  (* An answer the form already has is kept. *)
+  let answered = Form.Server_unavailable "answered" in
+  state.Tui_types.memory_recall_form <- Some (Form.with_server form answered);
+  Tui_types.suspend_workspace_readings state;
+  check bool "an answer is kept" true (server () = Some answered)
+;;
+
+(* The form outlives nothing. The loop asks this every iteration rather than
+   the places that move the surface: the Activity pane's mouse handler and
+   the async Task handoff both change [view] without passing any
+   teardown this form is named in, and the second one tears down the help
+   sheet, the palette and the row search by hand -- a list this would have
+   been the fourth entry in, and the fifth overlay would be missed again. *)
+let test_the_loop_drops_a_launch_form_left_on_another_surface () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Fusion;
+  let options =
+    { Masc.Tui_decode_fusion.flo_enabled = true
+    ; flo_default_preset = "trio"
+    ; flo_presets = [ "trio" ]
+    }
+  in
+  let form () =
+    match Masc_tui_fusion_launch.open_form ~keepers:[ "analyst" ] ~keeper:None ~options with
+    | Ok form -> form
+    | Error detail -> fail detail
+  in
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open (form ()));
+  let generation = state.Tui_types.fusion_launch_generation in
+  check bool "on Fusion the form stands" false (Tui_types.reconcile_fusion_launch state);
+  check bool "kept" true (Option.is_some state.Tui_types.fusion_launch);
+  check int "and spends no generation" generation
+    state.Tui_types.fusion_launch_generation;
+  (* The surface moved without the form hearing about it, which is every
+     door the form does not own. *)
+  state.Tui_types.view <- Tui_types.Changes;
+  check bool "a form that never submitted reports no request in flight" false
+    (Tui_types.reconcile_fusion_launch state);
+  check bool "the form is gone" true (Option.is_none state.Tui_types.fusion_launch);
+  check target "and takes no more text" None (resolved state);
+  check bool "a late answer cannot reopen it" true
+    (state.Tui_types.fusion_launch_generation > generation);
+  (* A read still in flight is dropped the same way. *)
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_reading_presets 1);
+  check bool "an unfinished preset read reports nothing in flight" false
+    (Tui_types.reconcile_fusion_launch state);
+  check bool "and is dropped" true (Option.is_none state.Tui_types.fusion_launch);
+  check bool "nothing open means nothing to drop" false
+    (Tui_types.reconcile_fusion_launch state);
+  (* The one input that reaches the other answer. Everything above leaves a
+     form that never submitted, so without this the function could return a
+     literal [false] and the suite would still be green -- and that answer is
+     the whole reason the operator is told the run may have started. *)
+  let submitted =
+    let typed =
+      List.fold_left
+        (fun form key ->
+          match Masc_tui_fusion_launch.edit ~key form with
+          | Masc_tui_fusion_launch.Editing form -> form
+          | Masc_tui_fusion_launch.Submitted _ -> fail "typing must not submit"
+          | Masc_tui_fusion_launch.Closed -> fail "typing must not close")
+        (form ())
+        [ "tab"; "tab"; "tab"; "w"; "h"; "y"; "\019" ]
+    in
+    match Masc_tui_fusion_launch.edit ~key:"enter" typed with
+    | Masc_tui_fusion_launch.Submitted (waiting, _) -> waiting
+    | Masc_tui_fusion_launch.Editing form ->
+        fail (String.concat " | " ("review Enter must submit" :: Masc_tui_fusion_launch.lines form))
+    | Masc_tui_fusion_launch.Closed -> fail "review Enter must not close"
+  in
+  check bool "the form is waiting on its answer" true
+    (Masc_tui_fusion_launch.submitting submitted);
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open submitted);
+  check bool "a submit still out says the run may have started" true
+    (Tui_types.reconcile_fusion_launch state);
+  check bool "and the form is dropped with it" true
+    (Option.is_none state.Tui_types.fusion_launch);
+  (* Esc keeps the operator on Fusion, so the surface rule would not fire.
+     The drop itself is what the Esc site calls, and it answers the same. *)
+  state.Tui_types.view <- Tui_types.Fusion;
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open submitted);
+  check bool "abandoning while staying on Fusion answers the same" true
+    (Tui_types.abandon_fusion_launch state);
+  check bool "and drops it too" true (Option.is_none state.Tui_types.fusion_launch)
+
+let () =
+  Alcotest.run
+    "tui text input target"
+    [ ( "which field takes text",
+        [ test_case "Collab forms own pasted input" `Quick test_collab_input_ownership;
+          test_case "model forms require current workspace config" `Quick test_model_form_requires_current_workspace_reading;
+          test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
+          test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
+          test_case "workspace withdrawal discards queued voice" `Quick test_workspace_withdrawal_discards_queued_voice;
+          test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
+          test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
+          test_case "github token claims input when active" `Quick test_github_token_claims_input_when_active;
+          test_case "nothing claims a plain surface" `Quick
+            test_nothing_claims_a_plain_surface;
+          test_case "the palette claims while it is open" `Quick
+            test_the_palette_claims_while_it_is_open;
+          test_case "row search claims while a query is armed" `Quick
+            test_row_search_claims_while_a_query_is_armed;
+          test_case "a preset name claims over the palette" `Quick
+            test_a_preset_name_being_typed_claims_over_the_palette;
+          test_case "a preset draft claims only on its own pane" `Quick
+            test_a_preset_draft_claims_only_on_its_own_pane;
+          test_case "the voice wizard claims over the palette" `Quick
+            test_the_voice_wizard_claims_over_the_palette;
+          test_case "an inline setting claims over the voice wizard" `Quick
+            test_an_inline_setting_claims_over_the_voice_wizard;
+          test_case "closing the wizard releases the keys" `Quick
+            test_closing_the_wizard_releases_the_keys;
+          test_case "an inline setting claims over the palette" `Quick
+            test_an_inline_setting_claims_over_the_palette;
+          test_case "the identity form claims before its filter" `Quick
+            test_the_identity_form_claims_before_its_filter;
+          test_case "the identity fields let go of a compact frame" `Quick
+            test_the_identity_fields_let_go_of_a_compact_frame;
+          test_case "the palette keeps a compact frame" `Quick
+            test_the_palette_keeps_a_compact_frame;
+          test_case "a board post being written claims its draft" `Quick
+            test_a_board_post_being_written_claims_its_draft;
+          test_case "the palette claims over a board draft" `Quick
+            test_the_palette_claims_over_a_board_draft;
+          test_case "the attach path input claims over the board draft" `Quick
+            test_the_attach_path_input_claims_over_the_board_draft;
+          test_case "a new lane name claims typing on Runtime" `Quick
+            test_a_new_lane_name_claims_typing_on_runtime;
+          test_case "the runtime picker filter claims once opened" `Quick
+            test_the_runtime_picker_filter_claims_once_opened;
+          test_case "the keeper runtime picker filter claims once opened" `Quick
+            test_the_keeper_runtime_picker_filter_claims_once_opened;
+          test_case "a drop reason claims typing on its Goal detail" `Quick
+            test_a_drop_reason_claims_typing_on_its_goal_detail;
+          test_case "the Fusion launch form claims while open" `Quick
+            test_the_fusion_launch_form_claims_while_open;
+          test_case "the loop drops a launch form left on another surface" `Quick
+            test_the_loop_drops_a_launch_form_left_on_another_surface;
+          test_case "the account form claims only on the runtime pane" `Quick
+            test_the_account_form_claims_only_on_the_runtime_pane;
+          test_case "the recall form claims only on the runtime pane" `Quick
+            test_the_recall_form_claims_only_on_the_runtime_pane;
+        test_case "the recall form hears only the answer of its own open" `Quick
+            test_the_recall_form_hears_only_the_answer_of_its_own_open;
+        test_case "a retired reading does not leave the recall form waiting" `Quick
+            test_a_retired_reading_does_not_leave_the_recall_form_waiting
+        ] )
+    ]
+;;

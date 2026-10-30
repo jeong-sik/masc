@@ -1,0 +1,652 @@
+(** Golden tests for the composite observer surfacing registry state that
+    previously existed in [Keeper_registry.registry_entry] but was never
+    emitted in [snapshot_to_json] (A-PR-2 observability gaps G2/G5/G10):
+
+    - live_turn [selected_runtime_id] / [selected_model] / [active_tool_count] (G2)
+    - last_outcome [selected_runtime_id] / [selected_model] (#37334)
+    - [last_skip] {ts, reasons} (G5)
+    - [board_cursor] {ts, post_id} (G10)
+
+    Each case drives the registry through its public mutators, then asserts
+    the projected JSON. The observer is a pure projection, so these tests
+    pin the wire shape without exercising the full keepalive loop. *)
+
+open Alcotest
+module Keeper_registry = Masc.Keeper_registry
+module Observer = Masc.Keeper_composite_observer
+module J = Yojson.Safe.Util
+
+let temp_base () =
+  let d = Filename.temp_file "keeper_composite_surface_" "" in
+  Unix.unlink d;
+  Unix.mkdir d 0o755;
+  d
+;;
+
+let make_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [
+          ("name", `String name);
+          ("trace_id", `String ("trace-" ^ name));
+        ])
+  with
+  | Ok meta -> meta
+  | Error e -> failwith ("make_meta failed: " ^ e)
+;;
+
+(* Register a keeper and return the fresh entry after [setup] has run its
+   registry mutations, so the observer sees the mutated SSOT. *)
+let observed_json ~base ~name ~setup () =
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+  setup ();
+  match Keeper_registry.get ~base_path:base name with
+  | Some entry -> Observer.snapshot_to_json (Observer.observe entry)
+  | None -> failwith "keeper vanished from registry after register"
+;;
+
+(* ── G2: live turn surfaces the selected model and active tool count ── *)
+
+let test_live_turn_surfaces_model_and_tools () =
+  let base = temp_base () in
+  let name = "live-keeper" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+          ~wake:Keeper_registry.Proactive_tick name;
+        Keeper_registry.set_turn_selected_runtime ~observation_token:(Some observation_token) ~base_path:base name
+          (Some { Keeper_registry.sr_runtime_id = "claude_code.sonnet"; sr_model = Some "claude-sonnet" });
+        Keeper_registry.record_turn_tool_inflight ~observation_token ~base_path:base name ~count:3)
+      ()
+  in
+  check bool "is_live true" true (J.member "is_live" json |> J.to_bool);
+  let live = J.member "live_turn" json in
+  (match live with
+   | `Null -> fail "live_turn should be present while a turn is active"
+   | _ -> ());
+  check string "live_turn.selected_runtime_id surfaced" "claude_code.sonnet"
+    (J.member "selected_runtime_id" live |> J.to_string);
+  check string "live_turn.selected_model surfaced" "claude-sonnet"
+    (J.member "selected_model" live |> J.to_string);
+  check int "live_turn.active_tool_count surfaced" 3
+    (J.member "active_tool_count" live |> J.to_int)
+;;
+
+let test_live_turn_model_null_before_selection () =
+  let base = temp_base () in
+  let name = "live-nomodel" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+          ~wake:Keeper_registry.Proactive_tick name)
+      ()
+  in
+  let live = J.member "live_turn" json in
+  check bool "selected_model is JSON null before routing" true
+    (match J.member "selected_model" live with `Null -> true | _ -> false);
+  check bool "selected_runtime_id is JSON null before routing" true
+    (match J.member "selected_runtime_id" live with `Null -> true | _ -> false);
+  check int "active_tool_count defaults to 0" 0
+    (J.member "active_tool_count" live |> J.to_int)
+;;
+
+(* ── G5: idle keeper surfaces the most recent skip verdict ──────────── *)
+
+let test_last_skip_surfaced () =
+  let base = temp_base () in
+  let name = "skip-keeper" in
+  let reasons = [ "cooldown_pending"; "no_signal" ] in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        Keeper_registry.record_skip_reasons ~base_path:base name ~reasons)
+      ()
+  in
+  let skip = J.member "last_skip" json in
+  (match skip with
+   | `Null -> fail "last_skip should be present after a recorded skip"
+   | _ -> ());
+  check (list string) "last_skip.reasons preserved in order" reasons
+    (J.member "reasons" skip |> J.to_list |> List.map J.to_string);
+  check bool "last_skip.ts is a float" true
+    (match J.member "ts" skip with `Float _ -> true | _ -> false)
+;;
+
+(* ── G10: board cursor ────────────────────────────────────── *)
+
+let test_board_cursor_and_wakeups () =
+  let base = temp_base () in
+  let name = "board-keeper" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        Keeper_registry.set_board_cursor ~base_path:base name 1234.5
+          (Some "post-42");
+        ())
+      ()
+  in
+  let cursor = J.member "board_cursor" json in
+  check (float 1e-6) "board_cursor.ts surfaced" 1234.5
+    (J.member "ts" cursor |> J.to_float);
+  check string "board_cursor.post_id surfaced" "post-42"
+    (J.member "post_id" cursor |> J.to_string)
+;;
+
+(* ── #16 (38-bug campaign PR-5): run_state / wake surfacing ──────────── *)
+
+let test_run_state_in_turn_reports_woken_wake () =
+  let base = temp_base () in
+  let name = "woken-keeper" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+          ~wake:
+            (Keeper_registry.Woken
+               [ Keeper_event_queue.Bootstrap ])
+          name)
+      ()
+  in
+  let rs = J.member "run_state" json in
+  check string "run_state.kind is in_turn" "in_turn"
+    (J.member "kind" rs |> J.to_string);
+  check string "run_state.wake_kind is woken" "woken"
+    (J.member "wake_kind" rs |> J.to_string);
+  check (list string) "run_state.stimulus_kinds preserves order"
+    [ "bootstrap" ]
+    (J.member "stimulus_kinds" rs |> J.to_list |> List.map J.to_string);
+  check bool "run_state.started_at is a float" true
+    (match J.member "started_at" rs with `Float _ -> true | _ -> false)
+;;
+
+let test_run_state_in_turn_reports_proactive_tick () =
+  let base = temp_base () in
+  let name = "proactive-keeper" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+          ~wake:Keeper_registry.Proactive_tick name)
+      ()
+  in
+  let rs = J.member "run_state" json in
+  check string "run_state.wake_kind is proactive_tick" "proactive_tick"
+    (J.member "wake_kind" rs |> J.to_string);
+  check (list string) "run_state.stimulus_kinds is empty" []
+    (J.member "stimulus_kinds" rs |> J.to_list |> List.map J.to_string)
+;;
+
+(* The chat lane installs the same live-turn observation the autonomous lane
+   does, so an operator message must project a live turn — not the idle
+   [waiting] state the dashboard rendered before the chat lane marked its turn
+   boundary. [chat_request] stays distinct from [proactive_tick] so a
+   requested turn is never reported as autonomous activity. *)
+let test_run_state_in_turn_reports_chat_request () =
+  let base = temp_base () in
+  let name = "chat-keeper" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+          ~wake:Keeper_registry.Chat_request name;
+        Keeper_registry.record_turn_tool_inflight ~observation_token ~base_path:base name ~count:2)
+      ()
+  in
+  check bool "is_live true during a chat turn" true
+    (J.member "is_live" json |> J.to_bool);
+  let live = J.member "live_turn" json in
+  (match live with
+   | `Null -> fail "live_turn must be present while a chat turn is active"
+   | _ -> ());
+  check int "live_turn.active_tool_count surfaced for a chat turn" 2
+    (J.member "active_tool_count" live |> J.to_int);
+  let rs = J.member "run_state" json in
+  check string "run_state.kind is in_turn" "in_turn"
+    (J.member "kind" rs |> J.to_string);
+  check string "run_state.wake_kind is chat_request" "chat_request"
+    (J.member "wake_kind" rs |> J.to_string);
+  check (list string)
+    "run_state.stimulus_kinds is empty — a chat turn consumes no stimulus" []
+    (J.member "stimulus_kinds" rs |> J.to_list |> List.map J.to_string)
+;;
+
+let test_chat_turn_clears_live_turn_on_finish () =
+  let base = temp_base () in
+  let name = "chat-keeper-finish" in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+          ~wake:Keeper_registry.Chat_request name;
+        Keeper_registry.mark_turn_finished ~observation_token ~base_path:base name)
+      ()
+  in
+  check bool "is_live false after the chat turn finishes" false
+    (J.member "is_live" json |> J.to_bool);
+  check bool "live_turn cleared" true
+    (match J.member "live_turn" json with `Null -> true | _ -> false);
+  check string "run_state falls back to waiting" "waiting"
+    (J.member "run_state" json |> J.member "kind" |> J.to_string)
+;;
+
+(* #37334: the runtime that answered survives the turn. A lane assigned to one
+   runtime can complete on another after failover; the frozen outcome keeps the
+   exact runtime id next to the model, and an outcome without a runtime keeps
+   both null instead of inventing the assigned lane. *)
+
+let finished_outcome ~name ~selected =
+  let base = temp_base () in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+          ~wake:Keeper_registry.Proactive_tick name;
+        Keeper_registry.set_turn_selected_runtime
+          ~observation_token:(Some observation_token) ~base_path:base name selected;
+        Keeper_registry.mark_turn_finished ~observation_token ~base_path:base name)
+      ()
+  in
+  J.member "last_outcome" json
+;;
+
+let nullable_string field json =
+  match J.member field json with
+  | `Null -> None
+  | `String s -> Some s
+  | _ -> fail (field ^ " must be a string or null")
+;;
+
+let test_last_outcome_keeps_failover_runtime () =
+  let outcome =
+    finished_outcome ~name:"failover-keeper"
+      ~selected:
+        (Some
+           { Keeper_registry.sr_runtime_id = "codex_subscription.gpt-5.6-luna"
+           ; sr_model = Some "gpt-5.6-luna"
+           })
+  in
+  check (option string) "last_outcome.selected_runtime_id"
+    (Some "codex_subscription.gpt-5.6-luna")
+    (nullable_string "selected_runtime_id" outcome);
+  check (option string) "last_outcome.selected_model" (Some "gpt-5.6-luna")
+    (nullable_string "selected_model" outcome)
+;;
+
+let test_last_outcome_runtime_without_model () =
+  let outcome =
+    finished_outcome ~name:"terminal-error-keeper"
+      ~selected:
+        (Some { Keeper_registry.sr_runtime_id = "glm.glm-5"; sr_model = None })
+  in
+  check (option string) "runtime id kept when the model is unknown"
+    (Some "glm.glm-5") (nullable_string "selected_runtime_id" outcome);
+  check (option string) "model stays null" None
+    (nullable_string "selected_model" outcome)
+;;
+
+let test_last_outcome_without_selection_is_null () =
+  let outcome = finished_outcome ~name:"undispatched-keeper" ~selected:None in
+  check (option string) "runtime id null" None
+    (nullable_string "selected_runtime_id" outcome);
+  check (option string) "model null" None (nullable_string "selected_model" outcome)
+;;
+
+(* #37334: which runtime a turn is credited to is decided by how its attempt
+   ended, in one function the turn execution calls. A turn that fails in
+   finalization after the walk produced an answer is credited to the candidate
+   that answered, not to nothing and not to the lane's assignment; a walk that
+   failed is credited to the candidate whose error the lane returned. *)
+
+module Attempt_end = Masc.Keeper_turn_selected_runtime
+
+let selected_pair = function
+  | None -> None
+  | Some (r : Keeper_registry.selected_runtime) -> Some (r.sr_runtime_id, r.sr_model)
+;;
+
+let test_attempt_end_completed_names_the_answering_runtime () =
+  check (option (pair string (option string))) "completed with a model"
+    (Some ("codex_subscription.gpt-5.6-luna", Some "gpt-5.6-luna"))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Completed
+             { runtime_id = "codex_subscription.gpt-5.6-luna"
+             ; selected_model = Some "gpt-5.6-luna"
+             })));
+  check (option (pair string (option string))) "completed without a runtime observation"
+    (Some ("glm.glm-5", None))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Completed { runtime_id = "glm.glm-5"; selected_model = None })))
+;;
+
+let test_attempt_end_failure_after_an_answer_keeps_the_answering_runtime () =
+  check (option (pair string (option string)))
+    "answering runtime outranks the lane's terminal error origin"
+    (Some ("codex_subscription.gpt-5.6-luna", None))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Failed
+             { answering_runtime_id = Some "codex_subscription.gpt-5.6-luna"
+             ; terminal_origin_runtime_id = Some "glm.glm-5"
+             })));
+  check (option (pair string (option string))) "answering runtime alone"
+    (Some ("codex_subscription.gpt-5.6-luna", None))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Failed
+             { answering_runtime_id = Some "codex_subscription.gpt-5.6-luna"
+             ; terminal_origin_runtime_id = None
+             })))
+;;
+
+let test_attempt_end_walk_failure_names_the_terminal_origin () =
+  check (option (pair string (option string))) "terminal error origin"
+    (Some ("glm.glm-5", None))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Failed
+             { answering_runtime_id = None; terminal_origin_runtime_id = Some "glm.glm-5" })))
+;;
+
+let test_attempt_end_without_a_dispatched_candidate_names_none () =
+  check (option (pair string (option string))) "nothing dispatched" None
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Failed
+             { answering_runtime_id = None; terminal_origin_runtime_id = None })))
+;;
+
+(* Two attempts may have the same display counter (including a resumed
+   operation). Late callbacks must retain the identity captured by their turn. *)
+let test_late_predecessor_cannot_finish_successor () =
+  let base = temp_base () in
+  let name = "successor-keeper" in
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+  let entry () =
+    match Keeper_registry.get ~base_path:base name with
+    | Some entry -> entry
+    | None -> fail "registered keeper disappeared"
+  in
+  let live () =
+    match (entry ()).current_turn_observation with
+    | Some obs -> obs
+    | None -> fail "successor observation disappeared"
+  in
+  let a = Masc.Keeper_turn_observation_token.fresh () in
+  let b = Masc.Keeper_turn_observation_token.fresh () in
+  let start token =
+    Keeper_registry.mark_turn_started ~observation_token:token
+      ~base_path:base ~wake:Keeper_registry.Chat_request name
+  in
+  let finish token =
+    Keeper_registry.mark_turn_finished ~observation_token:token ~base_path:base name
+  in
+  let hooks token =
+    Masc.Keeper_hooks_agent_core.make_hooks ~observation_token:token
+      ~config:(Masc.Workspace.default_config base)
+      ~meta_ref:(ref (make_meta name))
+      ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~trace_id:"ownership-test" ~keeper_turn_id:1 ()
+  in
+  let fire_before_turn hooks =
+    match hooks.Agent_core.Hooks.before_turn with
+    | None -> fail "before-turn hook missing"
+    | Some hook ->
+      ignore (hook (Agent_core.Hooks.BeforeTurn { turn = 1; messages = [] }))
+  in
+  start a;
+  let a_hooks = hooks a in
+  let a_counter = (live ()).turn_id in
+  start b;
+  check int "display counters deliberately coincide" a_counter (live ()).turn_id;
+  Keeper_registry.record_turn_tool_inflight ~observation_token:b
+    ~base_path:base name ~count:2;
+  let b_hooks = hooks b in
+  fire_before_turn b_hooks;
+  check (option string) "current hook records progress"
+    (Some "agent_core_before_turn") (live ()).last_progress_kind;
+  Keeper_registry.set_turn_phase ~observation_token:(Some b)
+    ~base_path:base name Keeper_registry.(Packed Turn_routing);
+  Keeper_registry.set_turn_selected_runtime ~observation_token:(Some b)
+    ~base_path:base name
+    (Some { Keeper_registry.sr_runtime_id = "successor-runtime"; sr_model = Some "successor-model" });
+  let measurement : Keeper_registry.turn_measurement =
+    { tm_captured_at = 123.; tm_context_actions = { handoff = false } }
+  in
+  (match Keeper_registry.update_entry ~base_path:base name (fun entry ->
+     { entry with pending_turn_measurement = Some measurement }) with
+   | Ok () -> ()
+   | Error _ -> fail "could not install pending measurement fixture");
+  let before = entry () in
+  Atomic.set before.fiber_wakeup true;
+  fire_before_turn a_hooks;
+  List.iter (fun observation_token ->
+    Keeper_registry.record_turn_progress ~observation_token
+      ~base_path:base name ~event_kind:"late_progress";
+    Keeper_registry.mark_agent_core_turn_started ~observation_token ~base_path:base name;
+    Keeper_registry.mark_turn_measurement ~observation_token ~base_path:base name;
+    Keeper_registry.set_turn_decision_stage ~observation_token ~base_path:base name
+      Keeper_registry.Decision_active_tool_policy_selected;
+    Keeper_registry.set_turn_phase ~observation_token ~base_path:base name
+      Keeper_registry.(Packed Turn_finalizing);
+    Keeper_registry.set_turn_selected_runtime ~observation_token ~base_path:base name
+      (Some { Keeper_registry.sr_runtime_id = "predecessor-runtime"; sr_model = Some "predecessor-model" });
+    Keeper_registry.mark_turn_provider_attempt_started ~observation_token ~base_path:base name;
+    Keeper_registry.mark_turn_runtime_done ~observation_token ~base_path:base name;
+    Keeper_registry.mark_turn_runtime_exhausted ~observation_token ~base_path:base name)
+    [Some a; None];
+  Keeper_registry.record_turn_tool_inflight ~observation_token:a
+    ~base_path:base name ~count:0;
+  finish a;
+  let after = entry () in
+  check bool "stale cleanup leaves the whole successor entry untouched"
+    true (before == after);
+  check bool "successor retains ownership" true
+    (Masc.Keeper_turn_observation_token.equal b (live ()).observation_token);
+  check bool "successor wakeup survives" true (Atomic.get after.fiber_wakeup);
+  let json = Observer.snapshot_to_json (Observer.observe after) in
+  check int "dashboard still sees successor tools" 2
+    (J.member "live_turn" json |> J.member "active_tool_count" |> J.to_int);
+  Keeper_registry.mark_turn_measurement ~observation_token:(Some b)
+    ~base_path:base name;
+  check bool "current turn binds its own reserved measurement" true
+    ((live ()).measurement = Some measurement);
+  check bool "current binding consumes the pending measurement" true
+    ((entry ()).pending_turn_measurement = None);
+  finish b;
+  let completed = entry () in
+  check bool "own finish clears live observation" true
+    (completed.current_turn_observation = None);
+  check bool "own finish records completion" true
+    (Option.is_some completed.last_completed_turn);
+  Atomic.set completed.fiber_wakeup true;
+  finish a;
+  finish b;
+  check bool "duplicate finishes preserve completed entry" true (completed == entry ());
+  check bool "duplicate finish preserves a newly signalled wakeup" true
+    (Atomic.get (entry ()).fiber_wakeup)
+;;
+
+let test_run_state_waiting_when_running_idle () =
+  let base = temp_base () in
+  let name = "waiting-keeper" in
+  let json = observed_json ~base ~name ~setup:(fun () -> ()) () in
+  let rs = J.member "run_state" json in
+  check string "run_state.kind is waiting for a Running keeper with no live turn"
+    "waiting" (J.member "kind" rs |> J.to_string);
+  check int "run_state.queue_depth is 0 for a fresh keeper" 0
+    (J.member "queue_depth" rs |> J.to_int)
+;;
+
+let test_run_state_suspended_for_non_running_phase () =
+  let base = temp_base () in
+  let name = "offline-keeper" in
+  ignore (Keeper_registry.register_offline ~base_path:base name (make_meta name));
+  let json =
+    match Keeper_registry.get ~base_path:base name with
+    | Some entry -> Observer.snapshot_to_json (Observer.observe entry)
+    | None -> failwith "keeper vanished from registry after register_offline"
+  in
+  let rs = J.member "run_state" json in
+  check string "run_state.kind is suspended for an Offline keeper" "suspended"
+    (J.member "kind" rs |> J.to_string);
+  check string "run_state.phase mirrors the raw phase" "offline"
+    (J.member "phase" rs |> J.to_string)
+;;
+
+let test_live_turn_survives_non_running_lifecycle () =
+  let base = temp_base () in
+  List.iter (fun phase ->
+    let phase_name = Keeper_state_machine.phase_to_string phase in
+    let name = "live-" ^ phase_name in
+    ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+    (match Keeper_registry.update_entry ~base_path:base name (fun entry -> { entry with phase }) with
+     | Ok () -> ()
+     | Error _ -> fail "could not set lifecycle fixture");
+    let token = Masc.Keeper_turn_observation_token.fresh () in
+    Keeper_registry.mark_turn_started ~observation_token:token ~base_path:base
+      ~wake:Keeper_registry.Chat_request name;
+    Keeper_registry.record_turn_tool_inflight ~observation_token:token ~base_path:base name ~count:2;
+    let read () =
+      match Keeper_registry.get ~base_path:base name with
+      | None -> fail "keeper disappeared"
+      | Some entry -> Observer.snapshot_to_json (Observer.observe entry) in
+    let live = read () in
+    check string "lifecycle remains visible beside execution" phase_name
+      (J.member "phase" live |> J.to_string);
+    check string "live execution wins over non-running lifecycle" "in_turn"
+      (J.member "run_state" live |> J.member "kind" |> J.to_string);
+    check int "active tools survive projection" 2
+      (J.member "run_state" live |> J.member "active_tool_count" |> J.to_int);
+    Keeper_registry.mark_turn_finished ~observation_token:token ~base_path:base name;
+    check string "without a live turn the lifecycle explains suspension" "suspended"
+      (J.member "run_state" (read ()) |> J.member "kind" |> J.to_string))
+    Keeper_state_machine.[Failing; Paused; Draining]
+;;
+
+let test_nonlive_lifecycle_overrides_stale_turn () =
+  let base = temp_base () in
+  List.iter (fun phase ->
+    let name = "stale-" ^ Keeper_state_machine.phase_to_string phase in
+    ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+    let token = Masc.Keeper_turn_observation_token.fresh () in
+    Keeper_registry.mark_turn_started ~observation_token:token ~base_path:base
+      ~wake:Keeper_registry.Chat_request name;
+    (* Simulate a finish write failure followed by a supervisor phase change. *)
+    (match Keeper_registry.update_entry ~base_path:base name (fun entry -> {entry with phase}) with
+     | Ok () -> () | Error _ -> fail "could not set terminal lifecycle");
+    let entry = match Keeper_registry.get ~base_path:base name with
+      | Some entry -> entry | None -> fail "keeper disappeared" in
+    check bool "stale observation remains in registry fixture" true
+      (Option.is_some entry.current_turn_observation);
+    let json = Observer.snapshot_to_json (Observer.observe entry) in
+    check bool "nonlive owner is not live" false (J.member "is_live" json |> J.to_bool);
+    check bool "live turn is absent" true (J.member "live_turn" json = `Null);
+    check string "turn phase is idle" "idle" (J.member "turn_phase" json |> J.to_string);
+    check string "runtime projection is idle" "idle"
+      (J.member "runtime" json |> J.member "state" |> J.to_string);
+    check bool "source for turn records also hides stale observations" true
+      (Option.is_none (Observer.live_turn_observation entry));
+    let rs = J.member "run_state" json in
+    check string "nonlive owner cannot be in_turn" "suspended" (J.member "kind" rs |> J.to_string);
+    check string "suspended phase is authoritative" (Keeper_state_machine.phase_to_string phase)
+      (J.member "phase" rs |> J.to_string))
+    Keeper_state_machine.[Offline; Stopped; Crashed; Restarting]
+;;
+
+(* ── Idle default shape: additive fields degrade to null/zero ───────── *)
+
+let test_idle_defaults_are_null_or_zero () =
+  let base = temp_base () in
+  let name = "idle-keeper" in
+  let json = observed_json ~base ~name ~setup:(fun () -> ()) () in
+  check bool "live_turn null when idle" true
+    (match J.member "live_turn" json with `Null -> true | _ -> false);
+  check bool "last_skip null before any skip" true
+    (match J.member "last_skip" json with `Null -> true | _ -> false);
+  check bool "turn attempt null before the first turn" true
+    (match J.member "turn_attempt" json with `Null -> true | _ -> false);
+  let cursor = J.member "board_cursor" json in
+  check (float 1e-6) "board_cursor.ts defaults to 0.0" 0.0
+    (J.member "ts" cursor |> J.to_float);
+  check bool "board_cursor.post_id null before consumption" true
+    (match J.member "post_id" cursor with `Null -> true | _ -> false)
+;;
+
+let () =
+  run "keeper_composite_live_turn_surface"
+    [
+      ( "live_turn",
+        [
+          test_case "surfaces selected model and active tool count" `Quick
+            test_live_turn_surfaces_model_and_tools;
+          test_case "model null before runtime selection" `Quick
+            test_live_turn_model_null_before_selection;
+        ] );
+      ( "attempt_end",
+        [
+          test_case "completed names the answering runtime" `Quick
+            test_attempt_end_completed_names_the_answering_runtime;
+          test_case "failure after an answer keeps the answering runtime" `Quick
+            test_attempt_end_failure_after_an_answer_keeps_the_answering_runtime;
+          test_case "walk failure names the terminal origin" `Quick
+            test_attempt_end_walk_failure_names_the_terminal_origin;
+          test_case "no dispatched candidate names none" `Quick
+            test_attempt_end_without_a_dispatched_candidate_names_none;
+        ] );
+      ( "last_outcome",
+        [
+          test_case "keeps the runtime that answered after failover" `Quick
+            test_last_outcome_keeps_failover_runtime;
+          test_case "keeps a runtime id without a model" `Quick
+            test_last_outcome_runtime_without_model;
+          test_case "null when no runtime was selected" `Quick
+            test_last_outcome_without_selection_is_null;
+        ] );
+      ( "last_skip",
+        [ test_case "surfaces recent skip verdict" `Quick test_last_skip_surfaced ]
+      );
+      ( "run_state",
+        [
+          test_case "in_turn reports the woken wake and its stimuli" `Quick
+            test_run_state_in_turn_reports_woken_wake;
+          test_case "in_turn reports the proactive tick wake" `Quick
+            test_run_state_in_turn_reports_proactive_tick;
+          test_case "in_turn reports a chat-lane turn" `Quick
+            test_run_state_in_turn_reports_chat_request;
+          test_case "late predecessor cannot finish successor" `Quick
+            test_late_predecessor_cannot_finish_successor;
+          test_case "chat turn clears the live turn on finish" `Quick
+            test_chat_turn_clears_live_turn_on_finish;
+          test_case "waiting for a Running keeper with no live turn" `Quick
+            test_run_state_waiting_when_running_idle;
+          test_case "stale turns cannot override nonlive phases" `Quick
+            test_nonlive_lifecycle_overrides_stale_turn;
+          test_case "suspended for a non-Running phase" `Quick
+            test_run_state_suspended_for_non_running_phase;
+          test_case "live execution survives a non-running lifecycle" `Quick
+            test_live_turn_survives_non_running_lifecycle;
+        ] );
+      ( "board",
+        [
+          test_case "surfaces cursor and wakeup cardinality" `Quick
+            test_board_cursor_and_wakeups;
+        ] );
+      ( "defaults",
+        [
+          test_case "idle additive fields are null or zero" `Quick
+            test_idle_defaults_are_null_or_zero;
+        ] );
+    ]
+;;

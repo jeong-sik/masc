@@ -1,0 +1,1143 @@
+(** RFC-0107 Phase D Connection Pool — piaf-backed implementation.
+
+    Design constraints from RFC-0107 Phase D design note and Phase B
+    Prior Art research:
+
+    - piaf [Client.t] is per-endpoint (single host). Multi-host pool
+      ([Host_key -> queue]) is built here.
+    - Pool itself is process-lifetime, attached to a long-lived
+      [Eio.Switch] (typically server root_sw).
+    - Scoped [request] API over naked acquire/release for leak resistance
+      (Eio #244 exactly-one-owner principle).
+    - No silent retry — caller decides. (RFC-0107 §"Workaround
+      Rejection Bar" anti-pattern.)
+
+    Sub-modules:
+    - [Host_key]: pure host identity (scheme, host, port) — pool key.
+    - [Idle_entry]: idle piaf [Client.t] + last_used timestamp.
+    - [Stats]: monotonically increasing counters for telemetry. *)
+
+(* ── Config ────────────────────────────────────────────────────── *)
+
+type config = {
+  max_idle_per_host : int;
+  max_total_idle    : int;
+  idle_ttl_seconds  : float;
+  connect_timeout_seconds : float;
+  connect_failure_cooldown_seconds : float;
+}
+
+let default_config = {
+  max_idle_per_host = 8;
+  max_total_idle    = 256;
+  idle_ttl_seconds  = 60.0;
+  connect_timeout_seconds = 5.0;
+  (* TUI refresh ticks every 2 s and issues ~9 surface GETs. After a
+     reported failure, 5 s suppresses subsequent attempts across ticks.
+     Concurrent cold requests can already be connecting when that failure
+     arrives; each owns its own client scope. *)
+  connect_failure_cooldown_seconds = 5.0;
+}
+
+(* ── Host_key ──────────────────────────────────────────────────── *)
+
+module Host_key = struct
+  type t = {
+    scheme : string;   (* "http" | "https" *)
+    host   : string;
+    port   : int;
+  }
+
+  let compare a b =
+    match String.compare a.scheme b.scheme with
+    | 0 -> (match String.compare a.host b.host with
+            | 0 -> Int.compare a.port b.port
+            | n -> n)
+    | n -> n
+
+  let to_string k = Printf.sprintf "%s://%s:%d" k.scheme k.host k.port
+
+  let default_port = function "https" -> 443 | _ -> 80
+
+  let of_uri uri =
+    let scheme = Uri.scheme uri |> Option.value ~default:"http" in
+    (* [Uri.host] returns [Some ""] for URLs like "http:///path" instead
+       of [None] (empty authority section). Treat empty as missing so
+       downstream connect doesn't try to resolve "". *)
+    let host =
+      match Uri.host uri with
+      | Some "" | None -> "localhost"
+      | Some h -> h
+    in
+    let port = Uri.port uri |> Option.value ~default:(default_port scheme) in
+    { scheme; host; port }
+end
+
+module Host_map = Map.Make (Host_key)
+
+(* A daemon keeps each client's switch alive across requests. Closing the
+   scope cancels and joins its protocol fibers, then releases every socket,
+   including sockets Piaf allocated before returning a client or an error.
+   The daemon remains a child of the pool switch, so pool teardown also
+   closes it even when no explicit shutdown was called. *)
+type client = {
+  piaf : Piaf.Client.t;
+  scope : Eio.Switch.t;
+  closed : (unit, exn) result Eio.Promise.t;
+  (* Deliver the stop signal and return. Protected and suspending nowhere, so
+     it is not a cancellation point: cleanup must never change its caller's
+     outcome, and a loop closing several clients must reach all of them. *)
+  request_close : unit -> unit;
+  (* The signal, then a join on the daemon's teardown. Only a caller that owns
+     exactly this client and needs it torn down before proceeding uses it. *)
+  close : unit -> unit;
+}
+
+exception Client_scope_closed
+
+(* Piaf 0.2.0 resolves again and connects only the first address. Keep the
+   successful probe address for construction, without replacing the URI
+   hostname used for Host and TLS verification. Later reconnects/redirects
+   resolve normally: Piaf retains this environment in the client. *)
+module Selected_address_net = struct
+  type tag = [ `Generic | `Unix ]
+  type t = {
+    net : tag Eio.Net.ty Eio.Resource.t;
+    host : string;
+    service : string;
+    address : Eio.Net.Sockaddr.stream;
+    selecting : bool ref;
+  }
+
+  let getaddrinfo t ~service host =
+    if !(t.selecting) && String.equal service t.service
+       && String.equal (String.lowercase_ascii host) t.host then
+      [ (t.address :> Eio.Net.Sockaddr.t) ]
+    else Eio.Net.getaddrinfo t.net ~service host
+
+  let connect t ~sw address = Eio.Net.connect t.net ~sw address
+  let getnameinfo t = Eio.Net.getnameinfo t.net
+  let listen t ~reuse_addr ~reuse_port ~backlog ~sw address =
+    Eio.Net.listen t.net ~reuse_addr ~reuse_port ~backlog ~sw address
+  let datagram_socket t ~reuse_addr ~reuse_port ~sw address =
+    Eio.Net.datagram_socket t.net ~reuse_addr ~reuse_port ~sw address
+end
+
+let with_selected_address (env : Eio_unix.Stdenv.base) uri address f =
+  let key = Host_key.of_uri (Uri.canonicalize uri) in
+  let selecting = ref true in
+  let net = Eio.Resource.T
+    ({ Selected_address_net.net = env#net;
+       host = String.lowercase_ascii key.host;
+       service = string_of_int key.port;
+       address; selecting },
+     Eio.Net.Pi.network (module Selected_address_net)) in
+  let selected_env = object
+    method net = net
+    method stdin = env#stdin
+    method stdout = env#stdout
+    method stderr = env#stderr
+    method domain_mgr = env#domain_mgr
+    method process_mgr = env#process_mgr
+    method clock = env#clock
+    method mono_clock = env#mono_clock
+    method fs = env#fs
+    method cwd = env#cwd
+    method secure_random = env#secure_random
+    method debug = env#debug
+    method backend_id = env#backend_id
+  end in
+  Fun.protect ~finally:(fun () -> selecting := false)
+    (fun () -> f selected_env)
+
+(* An exception as one line of text, for the messages and log rows this pool
+   builds. [Printexc.to_string] reaches Eio's printer, which puts an [Io] error
+   in a vertical box, so each context step it carries starts a new line:
+   "...Unix_error (Connection refused, ...),\n  connecting to tcp:...". Every
+   caller here embeds the text in a one-line message -- "TCP connect failed: %s"
+   -- and a terminal row showed the break as an escaped "\x0A". A horizontal
+   box prints the same break hints as ", ". Any other exception prints as
+   [Printexc.to_string] prints it. *)
+let exn_message exn = Format.asprintf "@[<h>%a@]" Eio.Exn.pp exn
+
+(* Piaf renders [`Exn] through [Printexc.to_string] as well; the rest of its
+   errors are its own one-line text. *)
+let piaf_error_message (err : Piaf.Error.t) =
+  match err with
+  | `Exn exn -> exn_message exn
+  | ( `Protocol_error _ | `TLS_error _ | `Upgrade_not_supported | `Msg _
+    | `Invalid_response_body_length _ | `Malformed_response _
+    | `Connect_error _ | `Bad_gateway | `Bad_request
+    | `Internal_server_error ) as err ->
+    Piaf.Error.to_string err
+
+(* [cleanup] delivers stop signals and returns. It is not a cancellation
+   point, so it can neither replace [exn] nor skip the re-raise below, and no
+   protection is needed here to guarantee either. *)
+let reraise_after_close cleanup exn =
+  let bt = Printexc.get_raw_backtrace () in
+  (try cleanup () with
+   | cleanup_exn -> (* cancel-guard-ok: this arm guards cleanup, whose failure must not replace the exception being propagated, and the function's last statement re-raises that exception with its backtrace; the comment above records that cleanup delivers stop signals and is not a cancellation point. *)
+     Log.Http.warn "HTTP client scope cleanup: %s"
+       (exn_message cleanup_exn));
+  Printexc.raise_with_backtrace exn bt
+
+let create_scoped_client ~sw env uri =
+  let ready, publish = Eio.Promise.create () in
+  let stop, stop_request = Eio.Promise.create () in
+  let closed, finished = Eio.Promise.create () in
+  let request_close () =
+    (* Delivering [stop] is this caller's job and must happen even while it
+       unwinds. It suspends nowhere, so protecting it costs nothing and buys
+       the guarantee every cleanup site now depends on: this call returns.
+       [try_resolve] rather than a check and a resolve, so that guarantee
+       holds by construction instead of by an argument about which callers
+       can reach the same client at once. *)
+    Eio.Cancel.protect (fun () ->
+      (* fire-and-forget: the bool says whether this caller was the one that
+         settled [stop], and no cleanup site needs to know. *)
+      ignore (Eio.Promise.try_resolve stop_request () : bool))
+  in
+  let close () =
+    request_close ();
+    (* [closed] resolves only after the client switch has torn down every Piaf
+       protocol fiber, and nothing in this module bounds that teardown -- it
+       ends when Piaf's fibers honour their cancellation. So the join stays
+       cancellable: a caller pinned here could not answer an operator
+       interrupt. The daemon reaches [closed] either way, for
+       [client_is_live] and the [with_client_scope] watcher. *)
+    match Eio.Promise.await closed with
+    | Ok () | Error (Eio.Cancel.Cancelled _) -> ()
+    | Error exn -> raise exn
+  in
+  (* Eio's fork contract runs the child immediately, before any other fiber.
+     With no yield after this check, the daemon registers and publishes
+     [ready] before another same-domain fiber can cancel [sw]. An already
+     cancelled switch must fail here: fork_daemon would otherwise do nothing.
+     See Eio 1.3 core/eio__core.mli (fork) and eio_posix/sched.ml (Fork). *)
+  Eio.Switch.check sw;
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let outcome =
+      try
+        Eio.Switch.run (fun client_sw ->
+          Eio.Promise.resolve_ok publish client_sw;
+          Eio.Promise.await stop;
+          raise Client_scope_closed)
+      with
+      | Client_scope_closed -> Ok ()
+      | exn -> Error exn (* cancel-guard-ok: the daemon resolves its promises and stops after this arm; the switch observes the cancellation *)
+    in
+    (match outcome with
+     | Error exn ->
+       if not (Eio.Promise.is_resolved ready) then
+         Eio.Promise.resolve_error publish exn
+     | Ok () -> ());
+    Eio.Promise.resolve finished outcome;
+    `Stop_daemon);
+  try
+    let client_sw = Eio.Promise.await_exn ready in
+    match Piaf.Client.create ~sw:client_sw env uri with
+    | Ok piaf ->
+      (* Piaf 0.2.0 can turn cancellation into a connect error. Recheck
+         cancellation at the construction boundary before handing off. *)
+      Eio.Fiber.check ();
+      Eio.Switch.check client_sw;
+      Ok { piaf; scope = client_sw; closed; request_close; close }
+    | Error err ->
+      (* Signal only: the explicit [Fiber.check] below is where this path
+         propagates cancellation, and it must not lose [err] to a join. *)
+      request_close ();
+      Eio.Fiber.check ();
+      Error err
+  with
+  | Eio.Cancel.Cancelled _ as exn -> reraise_after_close request_close exn
+  | exn -> reraise_after_close request_close exn
+
+let close_client client = client.close ()
+let request_close_client client = client.request_close ()
+let client_is_live client =
+  match Eio.Switch.get_error client.scope with
+  | Some _ -> false
+  | None -> not (Eio.Promise.is_resolved client.closed)
+
+(* A protocol fiber may fail before Piaf registers a response callback.
+   Scope teardown then closes the socket but cannot settle Piaf's promise.
+   Observe that teardown during every network wait. The watcher must end
+   before normal release, which can itself close the client scope. The
+   three watchers of this module -- this one, the request window and the
+   idle window -- run through [Watched_work.run]: a request that finished
+   as its watcher fired is the request's result, not the watcher's
+   verdict. *)
+let with_client_scope client ~on_error f =
+  Watched_work.run f ~watcher:(fun () ->
+    match Eio.Promise.await client.closed with
+    | Ok () -> Error (on_error Client_scope_closed)
+    | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | Error exn -> Error (on_error exn))
+
+(* ── Idle entry ────────────────────────────────────────────────── *)
+
+(* A reusable piaf Client.t parked on the pool's switch.  Each entry
+   carries its [last_used_ts] so the eviction fiber can age it out
+   after [idle_ttl_seconds].
+
+   The client's child switch owns the underlying TCP/TLS sockets and
+   survives request boundaries while this entry is parked. *)
+type idle_entry = {
+  client      : client;
+  last_used_ts : float;
+}
+
+(* ── Stats counters (mutable refs) ─────────────────────────────── *)
+
+type stats_counters = {
+  mutable reuse_count_total  : int;
+  mutable evict_count_total  : int;
+  mutable evict_failure_count_total : int;
+  mutable create_count_total : int;
+  mutable inflight           : int;
+}
+
+let new_counters () =
+  { reuse_count_total = 0;
+    evict_count_total = 0;
+    evict_failure_count_total = 0;
+    create_count_total = 0;
+    inflight = 0; }
+
+(* ── Pool state ────────────────────────────────────────────────── *)
+
+(* [idle] is a per-host queue of reusable clients, newest-first (push
+   at head on release, pop from head on acquire — LIFO favors warmest
+   socket).  Protected by [mu] for race-free reads/writes from
+   multiple fibers.  [mu] is [Eio.Mutex] with [~protect:true] so the
+   mutex recovers cleanly when a fiber is cancelled mid-critical-section
+   (e.g. Eio.Cancel from timeout racing) instead of staying permanently
+   poisoned.  We never call user callbacks while holding it. *)
+type t = {
+  sw       : Eio.Switch.t;
+  env      : Eio_unix.Stdenv.base;
+  config   : config;
+  mu       : Eio.Mutex.t;
+  mutable idle : idle_entry list Host_map.t;
+  (* Last connect-failure timestamp per host. A host inside
+     [connect_failure_cooldown_seconds] of its last failure fast-fails
+     without opening a socket. Lookup and the existing eviction fiber
+     remove expired entries; success and shutdown clear them too. *)
+  mutable connect_failures : float Host_map.t;
+  stop     : bool Atomic.t;
+  counters : stats_counters;
+}
+
+(* Mutex-guarded read/write helpers.
+
+   We must NOT hold [mu] while calling piaf (network IO, may sleep).
+   Pattern: pick idle entry under lock → release lock → use entry. *)
+let with_mu t f =
+  Eio.Mutex.use_rw ~protect:true t.mu f
+
+(* ── Idle eviction fiber ───────────────────────────────────────── *)
+
+let evict_expired_entries t now =
+  with_mu t (fun () ->
+    t.connect_failures <- Host_map.filter (fun _ ts ->
+      now -. ts < t.config.connect_failure_cooldown_seconds)
+      t.connect_failures;
+    let evicted_clients = ref [] in
+    let remaining =
+      Host_map.map (fun entries ->
+        List.filter (fun e ->
+          if now -. e.last_used_ts > t.config.idle_ttl_seconds
+          then begin
+            evicted_clients := e.client :: !evicted_clients;
+            t.counters.evict_count_total <- t.counters.evict_count_total + 1;
+            false
+          end else true
+        ) entries
+      ) t.idle
+    in
+    t.idle <- remaining;
+    !evicted_clients)
+  (* Signal only, and every one of them. The pool has already dropped these
+     refs and counted them evicted, so a client skipped here is a socket no
+     later call can reach. Nothing waits for the teardown: the daemon runs it
+     once the signal lands. *)
+  |> List.iter request_close_client
+
+let start_eviction_fiber t =
+  Eio.Fiber.fork_daemon ~sw:t.sw (fun () ->
+    let clock = Eio.Stdenv.clock t.env in
+    let rec loop () =
+      if Atomic.get t.stop then `Stop_daemon
+      else begin
+        Eio.Time.sleep clock (t.config.idle_ttl_seconds /. 2.0);
+        let now = Eio.Time.now clock in
+        (try evict_expired_entries t now
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             t.counters.evict_failure_count_total
+               <- t.counters.evict_failure_count_total + 1;
+             Log.Http.error
+               "[masc_http_client.pool] eviction fiber caught \
+                exception (count=%d): %s"
+               t.counters.evict_failure_count_total
+               (exn_message exn));
+        loop ()
+      end
+    in
+    loop ())
+
+(* ── create / shutdown ──────────────────────────────────────── *)
+
+let shutdown t =
+  Eio.Cancel.protect (fun () ->
+    if Atomic.compare_and_set t.stop false true then (
+      let leftover =
+        with_mu t (fun () ->
+          let all = Host_map.fold (fun _ entries acc -> entries @ acc) t.idle [] in
+          t.idle <- Host_map.empty;
+          t.connect_failures <- Host_map.empty;
+          all)
+      in
+      (* Every signal first, then the joins. Shutdown is the one caller that
+         waits for teardown, and its walk has the shape that stranded clients
+         in the eviction sweep: these are already out of [t.idle], so a join
+         that unwinds part way through would leave the rest holding sockets
+         nothing can reach. Signalling up front makes the order of the joins
+         -- and whether one of them unwinds -- stop mattering. *)
+      List.iter (fun e -> request_close_client e.client) leftover;
+      List.iter (fun e ->
+        try close_client e.client with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Log.Http.warn "HTTP pool shutdown: %s" (exn_message exn))
+        leftover))
+
+let create ~sw ~env ?(config = default_config) () : t =
+  let t = {
+    sw;
+    env;
+    config;
+    mu = Eio.Mutex.create ();
+    idle = Host_map.empty;
+    connect_failures = Host_map.empty;
+    stop = Atomic.make false;
+    counters = new_counters ();
+  } in
+  Eio.Switch.on_release sw (fun () -> shutdown t);
+  start_eviction_fiber t;
+  t
+
+(* ── acquire / release ─────────────────────────────────────────── *)
+
+(* The decision, separated from the resource so it can be driven with plain
+   values: given a queue of (client, last_used) in park order, the first one
+   still inside [ttl], what is left of the queue, and what was found expired
+   on the way.
+
+   Expired entries are dropped rather than skipped. A queue nobody sweeps
+   would otherwise keep them until the eviction fiber next runs, and the
+   whole reason this function exists is that the fiber cannot be relied on
+   to run. *)
+let take_live ?(is_live = fun _ -> true) ~now ~ttl entries =
+  let rec walk expired = function
+    | [] -> (None, [], List.rev expired)
+    | (client, last_used) :: rest ->
+      if now -. last_used > ttl || not (is_live client)
+      then walk (client :: expired) rest
+      else (Some client, rest, List.rev expired)
+  in
+  walk [] entries
+
+(* Try to take a warm client for [key]; returns [None] if the host's queue
+   holds nothing still inside [idle_ttl_seconds].  No network IO.
+
+   The age check is here and not only in [start_eviction_fiber] because that
+   fiber is one fiber: anything that keeps the scheduler from running it --
+   a blocking syscall on this domain, a cancellation, the failure the pool
+   already counts in [evict_failure_count_total] -- leaves entries past
+   their TTL in the queue, and this handed one out without looking. The peer
+   had closed it, and the request failed with "unexpected eof" (#30831).
+
+   Retrying is not the fix. RFC-0107 says no silent retry, and the first
+   place this was seen was an OAuth token exchange, where the code is
+   single-use: a request that got no answer cannot be repeated without
+   risking the tokens it may already have minted. Not handing out a dead
+   connection is the fix. *)
+let try_acquire_idle t key ~now =
+  let expired = ref [] in
+  let client =
+    with_mu t (fun () ->
+      match Host_map.find_opt key t.idle with
+      | None | Some [] -> None
+      | Some entries ->
+        let taken, rest, dead =
+          take_live ~now ~ttl:t.config.idle_ttl_seconds
+            ~is_live:client_is_live
+            (List.map (fun e -> (e.client, e.last_used_ts)) entries)
+        in
+        expired := dead;
+        t.counters.evict_count_total
+          <- t.counters.evict_count_total + List.length dead;
+        t.idle <-
+          (if rest = []
+           then Host_map.remove key t.idle
+           else
+             Host_map.add key
+               (List.map
+                  (fun (client, last_used_ts) -> { client; last_used_ts })
+                  rest)
+               t.idle);
+        (match taken with
+         | Some _ ->
+           t.counters.reuse_count_total <- t.counters.reuse_count_total + 1
+         | None -> ());
+        taken)
+  in
+  (* Outside the lock, like the eviction fiber does, and signal only for the
+     same reason: these are already out of [t.idle]. *)
+  List.iter request_close_client !expired;
+  client
+
+(* ── Connect backoff ───────────────────────────────────────────── *)
+
+let now_ts t =
+  Eio.Time.now (Eio.Stdenv.clock t.env)
+
+let connect_backoff_active t key ~now =
+  with_mu t (fun () ->
+    match Host_map.find_opt key t.connect_failures with
+    | Some ts when now -. ts < t.config.connect_failure_cooldown_seconds -> true
+    | Some _ ->
+      t.connect_failures <- Host_map.remove key t.connect_failures;
+      false
+    | None -> false)
+
+let record_connect_failure t key ~now =
+  with_mu t (fun () ->
+    if not (Atomic.get t.stop)
+       && t.config.connect_failure_cooldown_seconds > 0.0 then
+      t.connect_failures <- Host_map.add key now t.connect_failures)
+
+type connect_failure =
+  | No_addresses
+  | Dns_failure of exn
+  | Tcp_failure of exn
+  | Establishment_timeout
+  | Client_failure of string
+
+let connect_failure_to_string = function
+  | No_addresses -> "DNS resolution failed: no stream addresses"
+  | Dns_failure exn -> "DNS resolution failed: " ^ exn_message exn
+  | Tcp_failure exn -> "TCP connect failed: " ^ exn_message exn
+  | Establishment_timeout -> "connect timeout"
+  | Client_failure msg -> msg
+
+(* One timer covers every yielding establishment stage. Catch only network
+   exceptions; cancellation and unexpected exceptions must still unwind. A
+   client whose creation finished as the window closed is the client: the
+   race keeps the work's outcome, so it is handed on rather than closed and
+   reported as a timeout. *)
+let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
+  Watched_work.run
+    ~watcher:(fun () ->
+      Eio.Time.sleep clock timeout_seconds;
+      Error Establishment_timeout)
+    (fun () ->
+      let addresses =
+        try Ok (resolve ()) with
+        | (Eio.Io _ | Unix.Unix_error _) as exn -> Error (Dns_failure exn)
+      in
+      let rec probe last_failure = function
+        | [] -> Error last_failure
+        | addr :: rest ->
+          let result =
+            try connect addr; Ok () with
+            | (Eio.Io _ | Unix.Unix_error _) as exn -> Error (Tcp_failure exn)
+          in
+          match result with
+          | Ok () ->
+            (* TCP reachability is not client establishment: this address can
+               still fail TLS. The failed client scope has already closed;
+               try the remaining addresses under the same deadline. No HTTP
+               request has been dispatched at this stage. *)
+            (match create addr with
+             | Ok client -> Ok client
+             | Error message -> probe (Client_failure message) rest)
+          | Error failure -> probe failure rest
+      in
+      Result.bind addresses (probe No_addresses))
+
+(* ── Probe-first connect ───────────────────────────────────────── *)
+
+(* TCP-reachability probe on a short-lived child switch. It reports DNS
+   and TCP failures separately, before entering Piaf's creation path.
+
+   Cost: one extra TCP connect+close per fresh client, only on cache
+   miss; idle-reuse requests skip this entirely. The probe is
+   TCP-level for https too — TLS problems still surface from
+   [Piaf.Client.create] and feed the same backoff.
+
+   Piaf creation has its own client scope as well, so TCP/TLS failure
+   or cancellation after the probe also releases its sockets. The probe
+   retains separate DNS/TCP diagnostics; callers
+   still receive cancellation without recording backoff (RFC-0106). *)
+let create_probed_client t key uri =
+  let net = Eio.Stdenv.net t.env in
+  let clock = Eio.Stdenv.clock t.env in
+  (* A cancellation from outside can arrive after create returned a client
+     but before the race hands it to its caller. Keep ownership until that
+     handoff. *)
+  let pending = ref None in
+  try
+    let result = establish_connection ~clock
+      ~timeout_seconds:t.config.connect_timeout_seconds
+      ~resolve:(fun () ->
+        Eio.Net.getaddrinfo_stream net key.Host_key.host
+          ~service:(string_of_int key.Host_key.port))
+      ~connect:(fun addr ->
+        Eio.Switch.run (fun probe_sw ->
+          let flow = Eio.Net.connect ~sw:probe_sw net addr in
+          Eio.Flow.close flow))
+      ~create:(fun address ->
+        match with_selected_address t.env uri address (fun env ->
+          create_scoped_client ~sw:t.sw env uri) with
+        | Ok client -> pending := Some client; Ok client
+        | Error err -> Error (piaf_error_message (err :> Piaf.Error.t)))
+    in
+    (match result with
+     | Error _ -> Option.iter request_close_client !pending
+     | Ok _ -> ());
+    result
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    reraise_after_close (fun () -> Option.iter request_close_client !pending) exn
+  | exn -> reraise_after_close (fun () -> Option.iter request_close_client !pending) exn
+
+(* Build a fresh piaf client for [key], gated on the per-host
+   connect-failure backoff and a TCP reachability probe (see
+   [create_probed_client]). Returns [Result] mirroring piaf's API so
+   callers can surface DNS/TCP/TLS failures distinctly. *)
+let create_fresh t key uri =
+  let now = now_ts t in
+  if connect_backoff_active t key ~now then
+    Error
+      (Printf.sprintf
+         "connect backoff: %s failed recently (cooldown %.0fs)"
+         (Host_key.to_string key)
+         t.config.connect_failure_cooldown_seconds)
+  else
+    match create_probed_client t key uri with
+    | Ok c ->
+      (try
+         with_mu t (fun () ->
+           t.connect_failures <- Host_map.remove key t.connect_failures);
+         t.counters.create_count_total <- t.counters.create_count_total + 1;
+         Ok c
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+         reraise_after_close (fun () -> request_close_client c) exn
+       | exn -> reraise_after_close (fun () -> request_close_client c) exn)
+    | Error err ->
+      record_connect_failure t key ~now:(now_ts t);
+      Error (Printf.sprintf "%s: %s"
+        (connect_failure_to_string err) (Host_key.to_string key))
+
+(* Parking and its ownership transfer share the protected queue mutation.
+   A cancellation while acquiring [mu] still leaves the request responsible
+   for closing its client; after publication the idle queue owns it. *)
+let release t key client ownership ~close_only =
+  let close () = Pool_client_lease.close ownership ~signal:client.request_close in
+  if close_only then close ()
+  else
+    let now = Eio.Time.now (Eio.Stdenv.clock t.env) in
+    let disposition =
+      with_mu t (fun () ->
+        let existing = Host_map.find_opt key t.idle |> Option.value ~default:[] in
+        let total_idle =
+          Host_map.fold (fun _ entries acc -> List.length entries + acc) t.idle 0
+        in
+        if not (Atomic.get t.stop)
+           && client_is_live client
+           && total_idle < t.config.max_total_idle
+        then
+          if List.length existing < t.config.max_idle_per_host then begin
+            let entry = { client; last_used_ts = now } in
+            Pool_client_lease.park ownership ~publish:(fun () ->
+              t.idle <- Host_map.add key (entry :: existing) t.idle);
+            `Parked
+          end else `Evict
+        else `Close)
+    in
+    match disposition with
+    | `Parked -> ()
+    | `Close -> close ()
+    | `Evict ->
+      close ();
+      with_mu t (fun () ->
+        t.counters.evict_count_total <- t.counters.evict_count_total + 1)
+
+(* ── Public request API ────────────────────────────────────────── *)
+
+type response = {
+  status : int;
+  headers : (string * string) list;
+  body : string;
+}
+
+type http_method = [ `GET | `POST | `PUT | `DELETE | `HEAD | `PATCH ]
+
+let method_to_piaf : http_method -> Piaf.Method.t = function
+  | `GET    -> `GET
+  | `POST   -> `POST
+  | `PUT    -> `PUT
+  | `DELETE -> `DELETE
+  | `HEAD   -> `HEAD
+  | `PATCH  -> `Other "PATCH"
+
+let path_and_query uri =
+  let p = Uri.path uri in
+  let p = if p = "" then "/" else p in
+  match Uri.query uri with
+  | [] -> p
+  | _ -> p ^ "?" ^ Uri.encoded_of_query (Uri.query uri)
+
+(* HTTP boundary comparison. Header field names are untyped,
+   case-insensitive wire strings (RFC 7230 §3.2) — "host" is not a closed
+   domain enum this repo controls the shape of, so there is no variant to
+   parse it into. *)
+let has_host_header headers =
+  List.exists
+    (fun (name, _) ->
+       String.lowercase_ascii name = "host" (* STR-OK: see doc comment above *))
+    headers
+
+(* Piaf 0.2.0's own default HTTP/1.1 Host header (piaf/lib/headers.ml's
+   [canonicalize_headers], sourced from [Connection.Info.host]) carries the
+   bare hostname only — it never includes the port, even when the target
+   URI names one that differs from the scheme's default. Confirmed by
+   server-side capture (masc, 2026-08-16): a POST to a non-default local
+   port arrived at the server with [Host: 127.0.0.1] and no port; because
+   the server resolves a portless Host to the scheme's default port
+   (server_request_authority.ml's [effective_port_value]), it no longer
+   matches the port actually bound, and [admit_http1_authority] rejects the
+   request as [Untrusted] — this is what surfaced as
+   [request_authority_untrusted] on every non-default-port POST through
+   this client, including the keeper canary harness's live smoke test.
+
+   We supply an explicit, correct Host header ourselves so Piaf's
+   [add_unless_exists] keeps ours instead of its own truncated one. A
+   caller that already set a "host" header (any case) is left alone —
+   this only fills a gap Piaf leaves, it does not override a deliberate
+   caller choice.
+
+   Only when the URI names a port. That is the whole failure above: a
+   portless Host is wrong exactly when the port is not the scheme's default,
+   and the header Piaf writes is already right otherwise.
+
+   Sending it unconditionally broke HTTP/2. RFC 9113 §8.3.1 carries the
+   authority in the [:authority] pseudo-header and a request that also
+   sends [Host] is malformed, so the peer resets the stream. Observed
+   2026-08-25 against https://ollama.com/v1/models: the same GET returns
+   200 without the header and [Protocol Error (PROTOCOL_ERROR (0x1))] with
+   it. Every runtime on that provider read as unreachable in the dashboard
+   runtime lens while curl reached it, and api.kimi.com — which does not
+   enforce it — stayed green, so the failure looked provider-specific. *)
+(* [None] here is [?headers] genuinely omitted by the caller ("no
+   headers"), not unparsed/malformed external data — [[]] is the only
+   value that means "no headers" for a [(string * string) list], so no
+   information is lost. *)
+let ensure_host_header ~uri headers =
+  let headers = Option.value headers ~default:[] (* DET-OK: sound default, see doc comment above *) in
+  if has_host_header headers
+  then Some headers
+  else (
+    match Uri.host uri, Uri.port uri with
+    | Some host, Some port ->
+      Some (("host", Printf.sprintf "%s:%d" host port) :: headers)
+    | (Some _ | None), _ -> if headers = [] then None else Some headers)
+
+(* Enforce an explicit caller limit before retaining a body chunk. A refused
+   body remains unread; the request owner closes that connection on Error. *)
+let read_response_body ?max_body_bytes ~status body =
+  match max_body_bytes with
+  | None -> Piaf.Body.to_string body
+  | Some limit ->
+    let too_large () =
+      Error (`Msg (Printf.sprintf "HTTP %d: body exceeds %d bytes" status limit))
+    in
+    match Piaf.Body.length body with
+    | `Fixed length when Int64.compare length (Int64.of_int limit) > 0 ->
+      too_large ()
+    | `Fixed _ | `Chunked | `Unknown | `Close_delimited | `Error _ ->
+      let buffer = Buffer.create 0 in
+      let exception Body_limit_exceeded in
+      try
+        match Piaf.Body.iter_string body ~f:(fun chunk ->
+          if String.length chunk > limit - Buffer.length buffer then
+            raise Body_limit_exceeded;
+          Buffer.add_string buffer chunk) with
+        | Ok () -> Ok (Buffer.contents buffer)
+        | Error _ as error -> error
+      with Body_limit_exceeded -> too_large ()
+
+(* A fixed-length stream waits for the transport to flush its payload before
+   closing the writer. Piaf's eager string body closes before flushing; H2
+   0.13 can then emit END_STREAM while bytes remain behind a closed send
+   window. Preserve Content-Length and let the peer's window govern progress. *)
+let request_body body =
+  let length = String.length body in
+  let pending = ref (Some
+    (Piaf.IOVec.make (Bigstringaf.of_string ~off:0 ~len:length body)
+       ~off:0 ~len:length)) in
+  let stream = Piaf.Stream.from ~f:(fun () ->
+    let chunk = !pending in
+    pending := None;
+    chunk) in
+  Piaf.Body.of_stream ~length:(`Fixed (Int64.of_int length)) stream
+
+(* Wrap a single request: acquire-or-create client, send, release.
+   Errors return [Error string]; the connection is dropped (close)
+   on error, parked on success. *)
+let do_request t ?headers ?body ?max_body_bytes ~method_ uri : (response, string) result =
+  let key = Host_key.of_uri uri in
+  let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
+  let acquired =
+    match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
+    | Some c -> Ok c
+    | None -> create_fresh t key host_origin
+  in
+  match acquired with
+  | Error e -> Error e
+  | Ok client ->
+    Pool_client_lease.with_client
+      ~release:(release t key client)
+      ~close:client.request_close
+      (fun ~release:release_once ->
+        let path = path_and_query uri in
+        let body_piaf = Option.map request_body body in
+        t.counters.inflight <- t.counters.inflight + 1;
+        let result =
+          Fun.protect
+            ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
+            (fun () ->
+               try
+                 with_client_scope client ~on_error:(fun exn -> `Exn exn)
+                   (fun () -> Piaf.Client.request client.piaf
+                     ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
+                     ~meth:(method_to_piaf method_) path)
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn -> Error (`Msg (exn_message exn)))
+        in
+        match result with
+        | Error err ->
+          (* Connection is suspect; close, do not park. *)
+          release_once ~close_only:true;
+          Error (piaf_error_message (err :> Piaf.Error.t))
+        | Ok resp ->
+          let status = Piaf.Status.to_code (Piaf.Response.status resp) in
+          let headers_list =
+            Piaf.Response.headers resp |> Piaf.Headers.to_list
+          in
+          let body_result =
+            with_client_scope client ~on_error:(fun exn -> `Exn exn)
+              (fun () -> read_response_body ?max_body_bytes ~status (Piaf.Response.body resp)) in
+          (match body_result with
+           | Error err ->
+             release_once ~close_only:true;
+             Error (piaf_error_message (err :> Piaf.Error.t))
+           | Ok body_str ->
+             release_once ~close_only:false;
+             Ok { status; headers = headers_list; body = body_str }))
+
+(* The request's wall-clock window, when the caller gave one. The one
+   window over a request: [Masc_http_client]'s sync entry points call
+   [request] and arm nothing of their own. *)
+let with_optional_timeout
+    (type a) ?clock ?timeout_seconds (f : unit -> (a, string) result) :
+  (a, string) result =
+  match clock, timeout_seconds with
+  | Some clock, Some t when t > 0.0 ->
+    Watched_work.run f ~watcher:(fun () ->
+      Eio.Time.sleep clock t;
+      Error (Printf.sprintf "Pool.request: timeout after %.1fs" t))
+  | _ -> f ()
+
+let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
+    ?timeout_seconds ?max_body_bytes ~method_ ~url ?headers ?body () =
+  match max_body_bytes with
+  | Some limit when limit < 0 -> Error "max_body_bytes must be non-negative"
+  | Some _ | None ->
+    with_optional_timeout ?clock ?timeout_seconds @@ fun () ->
+    let uri = Uri.of_string url in
+    do_request t ?headers ?body ?max_body_bytes ~method_ uri
+
+(* ── RFC-0129: idle-timeout request with streaming progress ────── *)
+
+type body_progress = {
+  first_byte_at_sec : float option;
+  last_chunk_at_sec : float option;
+  bytes_received    : int;
+}
+
+let empty_body_progress = {
+  first_byte_at_sec = None;
+  last_chunk_at_sec = None;
+  bytes_received    = 0;
+}
+
+(* Whether a body's chunks are also kept whole, and so what a read returns
+   as the body: the joined chunks, or [()] with no buffer at all, which is
+   what a subscription left open for hours needs. *)
+type _ body_retention =
+  | Keep_body : string body_retention
+  | Discard_body : unit body_retention
+
+(* Read [body] chunk-by-chunk, tracking progress, with a watchdog fiber
+   that cancels when no chunk has arrived for [idle_timeout_sec].
+
+   The body iter fiber and the idle watcher race through
+   [Watched_work.run]: a body that ended as the window passed is the
+   body, not an idle stream. The [progress] ref is shared between fibers
+   but only the body fiber writes it (Eio is single-domain, no atomic
+   needed). *)
+let read_body_with_idle
+    (type retained)
+    ~(retention : retained body_retention)
+    ?progress_ref
+    ?on_chunk
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~(start_sec : float)
+    ~(idle_timeout_sec : float)
+    (body : Piaf.Body.t)
+  : (retained * body_progress, string * body_progress) result =
+  let keep, kept =
+    (match retention with
+     | Keep_body ->
+       let held = Buffer.create 16384 in
+       Buffer.add_string held, (fun () -> Buffer.contents held)
+     | Discard_body -> (fun (_chunk : string) -> ()), (fun () -> ())
+      : (string -> unit) * (unit -> retained))
+  in
+  let progress =
+    match progress_ref with
+    | Some progress -> progress
+    | None -> ref empty_body_progress
+  in
+  let now () = Eio.Time.now clock in
+  let observe chunk =
+    keep chunk;
+    (match on_chunk with
+     | None -> ()
+     | Some f -> f chunk);
+    let elapsed = now () -. start_sec in
+    let first =
+      match !progress.first_byte_at_sec with
+      | None -> Some elapsed
+      | s -> s
+    in
+    progress := {
+      first_byte_at_sec = first;
+      last_chunk_at_sec = Some elapsed;
+      bytes_received = !progress.bytes_received + String.length chunk;
+    }
+  in
+  Watched_work.run
+    (fun () ->
+       match Piaf.Body.iter_string ~f:observe body with
+       | Ok () -> Ok (kept (), !progress)
+       | Error err ->
+         Error (piaf_error_message (err :> Piaf.Error.t), !progress))
+    ~watcher:(fun () ->
+       (* Idle watcher: sleep one idle window, then compare the last
+          observed chunk timestamp. If the body fiber did not record a
+          new chunk during the sleep, we declare idle and return Error.
+          Otherwise loop. *)
+       let rec watch () =
+         let last_known = !progress.last_chunk_at_sec in
+         Eio.Time.sleep clock idle_timeout_sec;
+         if !progress.last_chunk_at_sec = last_known then
+           Error
+             (Printf.sprintf "idle timeout after %.1fs" idle_timeout_sec,
+              !progress)
+         else
+           watch ()
+       in
+       if idle_timeout_sec = Float.infinity then Eio.Fiber.await_cancel () else watch ())
+
+(* ── Streaming request ────────────────────────────── *)
+
+(* What a streaming request produced. The two cases are separate because a
+   caller that streams a wire protocol (SSE) cannot interpret an error body
+   in that protocol: a 401 carries a JSON object, not events. Handing it to
+   the caller's chunk consumer would surface as a protocol error rather than
+   as the status it is. [Buffered] therefore reports a non-success response
+   whole and leaves [on_chunk] uncalled. *)
+type 'body stream_outcome =
+  | Streamed of
+      { status : int
+      ; headers : (string * string) list
+      ; body : 'body
+      ; progress : body_progress
+      }
+  | Buffered of response
+
+(* The HTTP definition of a successful status, not a shared setting: other
+   modules spelling out the same range are implementing the same spec rather
+   than reading the same value, so there is nothing here for them to import. *)
+let status_is_success status = status >= 200 && status <= 299
+
+(* Mirrors [do_request]'s connection lifecycle exactly — the release rules and
+   the cancel-protected finalizer are the same; only the body read differs.
+   [clock] measures progress and protocol-specific idle periods. Human-driven
+   sessions can leave idle lifetime to cancellation with an infinite window. *)
+let do_request_streaming
+    (type body)
+    t
+    ~(retention : body body_retention)
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~(idle_timeout_sec : float)
+    ?headers
+    ?body
+    ?on_response
+    ~method_
+    ~(on_chunk : string -> unit)
+    uri
+  : (body stream_outcome, string) result =
+  let key = Host_key.of_uri uri in
+  let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
+  let acquired =
+    match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
+    | Some c -> Ok c
+    | None -> create_fresh t key host_origin
+  in
+  match acquired with
+  | Error e -> Error e
+  | Ok client ->
+    Pool_client_lease.with_client
+      ~release:(release t key client)
+      ~close:client.request_close
+      (fun ~release:release_once ->
+        let path = path_and_query uri in
+        let body_piaf = Option.map request_body body in
+        t.counters.inflight <- t.counters.inflight + 1;
+        let result =
+          Fun.protect
+            ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
+            (fun () ->
+               try
+                 with_client_scope client ~on_error:(fun exn -> `Exn exn)
+                   (fun () -> Piaf.Client.request client.piaf
+                     ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
+                     ~meth:(method_to_piaf method_) path)
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn -> Error (`Msg (exn_message exn)))
+        in
+        match result with
+        | Error err ->
+          release_once ~close_only:true;
+          Error (piaf_error_message (err :> Piaf.Error.t))
+        | Ok resp ->
+          let status = Piaf.Status.to_code (Piaf.Response.status resp) in
+          let headers_list =
+            Piaf.Response.headers resp |> Piaf.Headers.to_list
+          in
+          Option.iter (fun notify -> notify ~status ~headers:headers_list)
+            on_response;
+          let start_sec = Eio.Time.now clock in
+          let read (type retained) (retention : retained body_retention) on_chunk
+            : (retained * body_progress, string) result
+            =
+            with_client_scope client ~on_error:exn_message (fun () ->
+              read_body_with_idle ~retention ?on_chunk ~clock ~start_sec
+                ~idle_timeout_sec (Piaf.Response.body resp)
+              |> Result.map_error fst)
+          in
+          let settle outcome_of = function
+            | Error detail ->
+              release_once ~close_only:true;
+              Error detail
+            | Ok (held, progress) ->
+              release_once ~close_only:false;
+              Ok (outcome_of held progress)
+          in
+          (* A non-success body is read whole whatever the caller asked for,
+             and never reaches [on_chunk]: it is not in the stream's
+             protocol. *)
+          if status_is_success status
+          then
+            read retention (Some on_chunk)
+            |> settle (fun body progress ->
+              Streamed { status; headers = headers_list; body; progress })
+          else
+            read Keep_body None
+            |> settle (fun body _progress ->
+              Buffered { status; headers = headers_list; body }))
+
+let request_streaming
+    t
+    ~retention
+    ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+    ~idle_timeout_sec
+    ~method_
+    ~url
+    ?headers
+    ?body
+    ?on_response
+    ~on_chunk
+    () =
+  let uri = Uri.of_string url in
+  do_request_streaming t ~retention ~clock ~idle_timeout_sec ?headers ?body ~method_
+    ?on_response ~on_chunk uri
+
+(* ── Stats ─────────────────────────────────────────────────────── *)
+
+type stats = {
+  idle_per_host : (string * int) list;
+  total_idle : int;
+  total_inflight : int;
+  reuse_count_total : int;
+  evict_count_total : int;
+  evict_failure_count_total : int;
+  create_count_total : int;
+}
+
+let stats t : stats =
+  with_mu t (fun () ->
+    let idle_per_host =
+      Host_map.bindings t.idle
+      |> List.map (fun (k, v) -> Host_key.to_string k, List.length v)
+    in
+    let total_idle =
+      List.fold_left (fun acc (_, n) -> acc + n) 0 idle_per_host
+    in
+    { idle_per_host;
+      total_idle;
+      total_inflight = t.counters.inflight;
+      reuse_count_total = t.counters.reuse_count_total;
+      evict_count_total = t.counters.evict_count_total;
+      evict_failure_count_total = t.counters.evict_failure_count_total;
+      create_count_total = t.counters.create_count_total; })
+
+(* ── Test-only ─────────────────────────────────────────────────── *)
+
+module For_testing = struct
+  module Lease = Pool_client_lease
+
+  let request_body = request_body
+  let with_request_timeout ~clock ~timeout_seconds f =
+    with_optional_timeout ~clock ~timeout_seconds f
+
+  let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
+    establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create
+    |> Result.map_error connect_failure_to_string
+  let connect_failure_count t =
+    with_mu t (fun () -> Host_map.cardinal t.connect_failures)
+  let evict_expired_entries = evict_expired_entries
+  module Host_key = Host_key
+  let read_body_with_idle = read_body_with_idle
+  let take_live ~now ~ttl entries = take_live ~now ~ttl entries
+  let ensure_host_header = ensure_host_header
+end

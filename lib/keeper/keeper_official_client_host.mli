@@ -1,0 +1,945 @@
+(** Provider-neutral Keeper projection shared by official CLI runtimes.
+
+    This module owns MASC/AGENT_CORE hooks, typed tool execution, and context
+    injection. Protocol adapters only translate the resulting tool records to
+    their official client's wire format. *)
+
+val config_error : field:string -> string -> Agent_core.Error.t
+(** Build the [InvalidConfig] error the official-client adapters report when a
+    runtime is misconfigured. Shared so the three adapters name the offending
+    field the same way. *)
+
+val internal_error : string -> Agent_core.Error.t
+(** Build the [Internal] error for a failure that is neither configuration nor
+    provider behaviour. *)
+
+type prepared_turn =
+  { messages : Agent_core.Types.message list
+  ; system_prompt : string
+  ; start_context : Keeper_context_submission_link.t
+    (** Current-turn User observations kept out of the vendor's standing System
+        and the canonical history. Each Start adapter must use [start_prompt]. *)
+  ; composed_context : Keeper_context_assembly.t option
+    (** The issuer snapshot read once after the hook, shared by Start and Resume.
+        A stale issued System invalidates the snapshot for both projections. *)
+  ; tools : Agent_core.Tool.t list
+  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
+  }
+
+val start_prompt : prepared_turn -> string -> Keeper_context_submission_link.t
+(** Prepend the prepared current-turn User observations to the adapter's Start
+    prompt, once. Does not change messages, history, Goal or pending events. *)
+
+(** What an official-client lane can say about one turn's input handoff.
+
+    [Whole_input_transmitted] carries the MASC-prepared messages handed to the
+    client integration. It does not prove that the client placed every byte in
+    the provider request or model context. Starts hand over the seed history.
+    Codex resume behaviour needs its own evidence and is not inferred from the
+    Claude Code path. Client-owned native conversation and tool history outside
+    the snapshot are not included in this capture. Do not use this receipt to
+    compare per-lane model-input byte totals.
+
+    [Held_by_client_session] means that the lane did not retransmit that
+    history, as on Antigravity and Claude Code resumes. The current goal and
+    the composed per-turn context ({!resume_prompt}) may still be sent. The accumulated client-owned history is not observable
+    here, so attributing the local prepared list would count bytes that were
+    not sent. This distinction is not the [Start]/[Resume] distinction. *)
+type transmitted_model_input =
+  | Whole_input_transmitted of Agent_core.Types.message list
+  | Held_by_client_session
+
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; detail : Keeper_terminal_effect_detail.t
+      }
+
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
+
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
+  { success : bool
+  ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
+  }
+
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
+
+(** What the Keeper tool bundle declares about each projected tool, for the
+    official client to carry.
+
+    The bundle decides this once per turn; the official-client lanes only
+    carry it onto each {!dynamic_tool}:
+    - [loading], from the deferred built-in tools and identity tools. Claude
+      Code reads it as [_meta["anthropic/alwaysLoad"]], Codex as
+      [deferLoading].
+    - [result_bound], from the inline ceiling of the projection each built-in
+      or Skill composition result crosses. Claude Code reads it as
+      [_meta["anthropic/maxResultSizeChars"]]. *)
+type loading_plan =
+  | All_on_demand
+      (** Every projected tool loads on demand and declares no result bound.
+          The shape every lane had before the bundle's declaration reached
+          it; entry points that do not build a Keeper tool bundle keep it. *)
+  | Declared of
+      { on_demand : string list
+            (** Only these tools load on demand; every other projected tool
+                loads upfront. *)
+      ; result_bounds : (string * int) list
+            (** The byte ceiling of each tool whose result MASC bounds. A tool
+                absent here (an attached-service tool) is
+                {!Runtime_official_client_tool.Unbounded}. *)
+      }
+
+val loading_of_plan : loading_plan -> string -> Runtime_official_client_tool.loading
+(** [loading_of_plan plan name] is the loading a tool named [name] gets. *)
+
+val result_bound_of_plan
+  :  loading_plan
+  -> string
+  -> Runtime_official_client_tool.result_bound
+(** [result_bound_of_plan plan name] is the result bound a tool named [name]
+    declares. *)
+
+(** One pre_tool_use rejection (typed [Block]) recorded during a turn.
+    The official-client CLI owns the live conversation; when it
+    escalates the reject to a dead turn this record is the only
+    surviving copy of the corrective round-trip (masc#28885). *)
+type rejected_tool_call =
+  { call_id : string
+  ; tool_name : string
+  ; input : Yojson.Safe.t
+  ; detail : string
+  }
+
+type raw_trace_stage =
+  | Run_start
+  | Reasoning_effort
+  | Context_submission
+  | Assistant_block
+  | Tool_start
+  | Tool_finish
+  | Native_tool_start
+  | Native_tool_finish
+  | Context_compaction
+  | Run_finish
+
+val observe_raw_trace
+  :  keeper_name:string
+  -> stage:raw_trace_stage
+  -> (unit -> ('a, Agent_core.Error.t) result)
+  -> 'a option
+(** Attempt one secondary RAW-trace observation. A typed trace failure is
+    logged and counted but cannot replace the authoritative provider, tool, or
+    cancellation result. Reserved exceptions from the observation still
+    propagate. *)
+
+val record_context_submission
+  :  keeper_name:string
+  -> raw_trace_run:Agent_core.Raw_trace.active_run option
+  -> runtime_profile:string
+  -> client_turn_ordinal:int
+  -> submission:Yojson.Safe.t
+  -> ?logical_context_bindings:Yojson.Safe.t
+  -> unit
+  -> unit
+(** One completed write of Keeper context to an official client, kept as the
+    RAW-trace hook record [client_context_submission] of the turn's attempt.
+    [submission] is the runtime's receipt JSON. Without an attempt binding the
+    measurement is logged as unavailable; a failed trace write is counted by
+    {!observe_raw_trace}. Neither fails the turn. *)
+
+val start_raw_trace
+  :  keeper_name:string
+  -> raw_trace:Agent_core.Raw_trace.t option
+  -> prompt:string
+  -> ?model:string
+  -> ?reasoning_effort:string
+  -> unit
+  -> Agent_core.Raw_trace.active_run option
+
+val finish_raw_error
+  :  keeper_name:string
+  -> Agent_core.Raw_trace.active_run option
+  -> Agent_core.Error.t
+  -> unit
+
+val finish_raw_success
+  :  keeper_name:string
+  -> Agent_core.Raw_trace.active_run option
+  -> Runtime_agent.run_result
+  -> Runtime_agent.run_result
+(** Complete one official-client RAW run. Observation failure cannot replace
+    the authoritative runtime result; a trace reference is returned only when
+    every assistant block and the terminal record were persisted. *)
+
+val record_raw_native_tool
+  :  keeper_name:string
+  -> raw_trace_run:Agent_core.Raw_trace.active_run option
+  -> phase:[ `Started | `Finished ]
+  -> Runtime_native_tools.observation
+  -> unit
+(** Best-effort durable observation of an official client's built-in tool.
+    It is deliberately separate from MASC tool execution and approval rows. *)
+
+val resolve_reasoning_effort :
+  enable_thinking:bool option ->
+  reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  (Llm_provider.Reasoning_effort.t option, Agent_core.Error.t) result
+(** Reconcile provider-neutral thinking control with an explicit
+    official-client effort. An absent effort remains absent. A generic
+    [enable_thinking] value is rejected rather than translated. *)
+
+(** One base64 image pulled out of a goal, ready for a transport that carries
+    images alongside the prompt text. *)
+type image_block =
+  { media_type : string
+  ; base64_data : string
+  }
+
+val text_and_images_of_blocks :
+  media_store:Agent_core.History.media_store ->
+  runtime_label:string ->
+  field:string ->
+  Agent_core.Types.content_block list ->
+  (string * image_block list, Agent_core.Error.t) result
+(** Project a goal into the prompt text plus its base64 images. Use this for a
+    transport that carries images; {!text_of_blocks} is for one that does not,
+    and rejects an image rather than dropping it. A [Stored] image is read
+    from [media_store]; [Url] and [File_id] sources and every other block
+    kind are rejected. *)
+
+val text_of_blocks :
+  runtime_label:string ->
+  field:string ->
+  Agent_core.Types.content_block list ->
+  (string, Agent_core.Error.t) result
+
+val encode_history_message : Agent_core.Types.message -> string
+(** Preserve one canonical message on a text-only official-client wire. Every
+    role uses the same versioned envelope, so raw user bytes cannot spoof the
+    framing layer and typed block payloads, tool identities, structured result
+    content, failure provenance, and message metadata remain visible. *)
+
+val invoke_turn_completion_hooks :
+  runtime_label:string ->
+  keeper_name:string ->
+  turn_count:int ->
+  hooks:Agent_core.Hooks.hooks ->
+  Agent_core.Types.api_response ->
+  (unit, Agent_core.Error.t) result
+(** Run the Agent Core [after_turn] and [on_stop] lifecycle for a completed
+    official-client turn. Host-stop projections use the same hook order as a
+    provider-emitted terminal before their durable session is settled. *)
+
+val is_composed_system_context : Agent_core.Types.message -> bool
+(** Whether this host composed the message for the provider instruction
+    surface: the per-turn context carrier or the Librarian working state.
+    Adapters keep such messages out of the canonical history snapshot and
+    carry them on a resume ({!resume_prompt}). *)
+
+val history_role_label : Agent_core.Types.role -> string
+(** The role line ([SYSTEM:], [USER:], ...) and its newline that an adapter
+    writes in front of one encoded message when it carries messages as prompt
+    text. *)
+
+val is_carried_on_resume : Agent_core.Types.message -> bool
+(** Whether a resume sends this message in front of its prompt: a message
+    {!is_composed_system_context} selects, or the historical task reference
+    ({!Keeper_official_task_reference.is_reference}). Both change per turn or
+    per operation, which the vendor session cannot already hold.
+
+    A resumed Claude Code session sends the system prompt it recorded at its
+    first launch, so a per-turn System message reaches a resumed session only
+    when it carries one of these markers. A new kind of per-turn System
+    context must be tagged with one; an untagged one lands in the system
+    prompt file only, which a resume does not read. *)
+
+type composed_context = Keeper_context_assembly.t
+(** The immutable renderer-issued assembly behind a turn's context carrier.
+    Only exact carrier bytes without an existing prefix and with unique block
+    identities permit splitting. Otherwise the whole carrier is retained. *)
+
+type resume_delivery =
+  { prompt : string
+  ; context_projection : Keeper_context_submission_link.t
+  ; held_context : Keeper_official_client_session_store.held_context list
+  ; unchanged_sections : Keeper_context_layers.source list
+    (** World State sections the prompt left out because the session holds
+        them unchanged, in render order; the prompt names exactly these
+        ({!unchanged_sections_notice}). *)
+  ; partly_held_sections : Keeper_context_layers.source list
+    (** World State sections with rows the prompt sent in part because the
+        session holds some of their rows: each goes out as its head, the rows
+        the session lacks and its tail, in render order; the prompt names
+        exactly these ({!held_rows_notice}). *)
+  }
+
+val start_held_context :
+  ?composed_context:composed_context ->
+  Agent_core.Types.message list ->
+  Keeper_official_client_session_store.held_context list
+(** What a start leaves the new vendor session holding: every context
+    {!is_carried_on_resume} selects, named and digested as {!resume_prompt}
+    names it, except blocks {!Prompt_block_id.resent_when_held} sends every
+    time and World State sections
+    {!Keeper_context_layers.resend_on_resume} sends every time. The issued
+    System Goal observation is also held: a start sends it in the System
+    prompt, while a later changed observation must use the Resume prompt. *)
+
+type carried_summary =
+  { label : string
+  ; bytes : int
+  ; sha256_prefix : string
+  ; resent_every_resume : bool
+  }
+(** One carried context as a log line names it: what composed it, the bytes a
+    resume renders for it, the first 12 hex digits of its digest, and whether
+    its block is sent on every resume. *)
+
+val carried_summaries :
+  ?composed_context:composed_context ->
+  Agent_core.Types.message list ->
+  carried_summary list
+(** The contexts {!resume_prompt} selects, in order, summarized for logging.
+    A lane without a held set compares the digests across turns to see which
+    contexts it resends unchanged. *)
+
+val resume_prompt :
+  goal:string ->
+  held:Keeper_official_client_session_store.held_context list ->
+  ?composed_context:composed_context ->
+  Agent_core.Types.message list ->
+  resume_delivery
+(** The user prompt a lane sends when it resumes a vendor session that already
+    holds the conversation and the system prompt it recorded at its first
+    launch, and what that session holds once the prompt is delivered.
+
+    The messages {!is_carried_on_resume} selects are carried contexts: the
+    historical task reference, the Librarian working state, and the context
+    carrier -- one carried context per typed block when [composed_context]
+    proves its exact text contains only uniquely named blocks and separators,
+    the whole carrier otherwise. [composed_context.system_prompt] supplies
+    separately carried Goal and
+    Completion Authority observations. The latter retains [Sent_every_resume].
+    Each observation uses its own logical block and exact System source proof.
+    The Goal is a carried [Active_goals]
+    context. An official session holds its first System prompt until native
+    compaction, so a changed/new Goal is sent as a separate encoded User
+    observation, with explicit System-derived source attribution. It is not
+    an extra-context carrier and never joins its blocks. A carried
+    context goes out only when [held] does not already name it with the same
+    digest, or when its block is {!Prompt_block_id.resent_when_held}. A
+    resumed vendor session stores every prompt as history, so re-sending an
+    unchanged context each turn grew it by one copy per turn. What goes out is
+    rendered, in order, each behind its {!history_role_label}, in front of
+    [goal] and separated from it by a blank line; blocks sent together form
+    one carrier. Everything else in [messages] is left out: the vendor
+    session holds it. With nothing to send the prompt is [goal] exactly.
+
+    The [Dynamic_context] block is compared one World State section at a time
+    when [composed_context] kept the renderer's partition of its exact text
+    ({!Keeper_context_assembly.dynamic_context_sections}); otherwise it is one
+    carried context like any block. It is left out only when the session holds
+    every section it can leave out and it has none that is sent on every
+    resume ({!Keeper_context_layers.resend_on_resume}). Otherwise it goes out
+    with the sections that changed, the ones sent on every resume and its
+    frame; each section the session holds unchanged is left out, and one
+    System message after the carrier names those ({!unchanged_sections_notice},
+    [unchanged_sections]). A section with rows
+    ({!Keeper_context_layers.Head_and_rows}) is compared row by row: when the
+    rows the session holds, in the order it was sent them, end with the rows
+    this window starts with -- the window moved on and no row it holds was
+    written again -- it goes out as its head, the rows after that run and its
+    tail, and one more System message names it ({!held_rows_notice},
+    [partly_held_sections]). Otherwise it goes out whole, so the session
+    never holds two versions of one row. A line that does not render sends every
+    section whole.
+
+    [held_context] is [held] updated with every carried context this turn
+    composed, whether sent or already held. Composed World State sections
+    replace every section the session held before, and they and the whole
+    [Dynamic_context] block or the whole carrier replace each other, so the
+    set names only the latest copy of each. A claim that does not resume an
+    acknowledged settlement reads [[]]
+    ({!Keeper_official_client_session_store.held_context_for_resume}), and a
+    lane that saw the client compact settles holding nothing, so after either
+    every section goes out again. Antigravity passes [[]] and so
+    sends every carried context; it refuses a task reference before it
+    composes, so on that lane the selection is the composed context alone. *)
+
+val unchanged_sections_notice :
+  Keeper_context_layers.source list -> (string, string) result
+(** The line {!resume_prompt} sends in place of the named World State sections
+    ([keeper.world.frame.unchanged_sections]). *)
+
+val held_rows_notice :
+  Keeper_context_layers.source list -> (string, string) result
+(** The line {!resume_prompt} sends after World State sections it sent in part,
+    saying their earlier rows are still current in the session
+    ([keeper.world.frame.held_rows_sections]). *)
+
+val measure_message_bytes : Agent_core.Types.message -> int
+(** Bytes one message occupies in the canonical MASC encoding
+    ({!encode_history_message}), which is what the range this module composes
+    is reported in. *)
+
+(** Who named the front of a start seed. *)
+type carried_start_front =
+  | Carried_seed of Keeper_carried_front.source
+      (** The seed: the newest completed turn record on this history,
+          whichever runtime measured it, or the narrowest range an unfinished
+          turn reached. *)
+  | Lane_cut
+      (** The lane's own cut, passed as [own_first_atom], sits at or past the
+          seed's position. *)
+  | Turn_start
+      (** No seed held and the lane cut nothing later, so the range starts
+          where the last completed turn on this history ended: this turn's
+          own atoms (RFC keeper-context-window-in-tokens §13.4). *)
+  | Turn_start_unknown of { reason : string }
+      (** No seed, no lane cut, and the turn start could not be read
+          ({!Keeper_carried_front.Turn_boundary_unknown}): the range opened
+          on the newest atom alone. *)
+  | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
+      (** The Librarian absorbed this history through [absorbed_through],
+          the end of the completed turn on boundary-log row [boundary_line],
+          and saved what the keeper was in the middle of. The range starts there
+          and carries that working state in place of the atoms it summarises —
+          the front the Agent Core lane already takes
+          ([Keeper_carried_front.Librarian_snapshot]). [first_atom] is that
+          position clamped to the newest atom, so a range that the Librarian
+          read to the end still carries the turn it answers; the two differ
+          only then. *)
+  | Librarian_progress of { end_atom : int }
+      (** No working state fits, and the Librarian read this history through
+          [end_atom]: the range starts there and nothing is carried for the
+          atoms before it, which are in the keeper's memory
+          ([Keeper_carried_front.Librarian_progress] on the Agent Core lane).
+          [first_atom] is that position clamped to the newest atom. *)
+
+type carried_start =
+  { messages : Agent_core.Types.message list
+        (** The carried range: the atoms from [first_atom], the pinned
+            messages in place, and the preamble when the range opens on a
+            non-[User] message. *)
+  ; projection : Runtime_model_input_tail_window.projection
+  ; history_atom_count : int
+  ; first_atom : int
+  ; transmitted_bytes : int
+  ; front : carried_start_front
+  ; accepted_front : Keeper_carried_front.seed option
+      (** A validated response-observed seed at or past the lane's own cut.
+          Retained when a Librarian snapshot wins so its accepted empty range
+          remains distinguishable from a nonempty range cut down to zero. *)
+  }
+
+(** Where the turn's one continuity choice puts the range, as a position in
+    the messages a lane is about to send
+    ({!Keeper_turn_driver_try_provider.librarian_position}). The choice is
+    made once per turn for every lane
+    ({!Keeper_turn_driver_try_provider.continuity_for_request}); this lane
+    only applies it. A position the messages no longer hold is not a value
+    of this type but an error from the reader ({!librarian_front_reader}),
+    and the lane refuses the request with it before any seed is weighed. *)
+type librarian_position = Keeper_turn_driver_try_provider.librarian_position
+
+val project_source :
+  unread:Keeper_librarian_request_unread.t ->
+  Keeper_history_projection.t option -> Keeper_history_projection.t
+(** Preserve the same frozen unread evidence after a custom source projection.
+    It may change the history view, but cannot remove or replace this evidence.
+    Native requests explicitly carry known empty observations too, allowing a
+    resumed session to supersede older unread evidence. The same carrier is
+    pinned before capacity measurement. *)
+
+type librarian_front_reader =
+  Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
+(** Reads the turn's choice as a position in exactly the messages a lane is
+    about to cut ({!Keeper_turn_driver_try_provider.librarian_position}).
+    [Error] when those messages no longer hold what the choice covered; the
+    lane refuses the request with it, as the Agent Core lane refuses its
+    own. *)
+
+val read_librarian_front
+  :  librarian_front_reader option
+  -> Agent_core.Types.message list
+  -> (librarian_position, Agent_core.Error.t) result
+(** A lane's optional reader applied to its messages, before the range is
+    cut. A lane handed no reader has
+    {!Keeper_turn_driver_try_provider.No_position}. *)
+
+val carried_start_front_to_string : carried_start_front -> string
+
+val warn_if_sent_on_unknown_start : keeper_name:string -> carried_start_front -> unit
+(** {!Keeper_carried_front.warn_range_opens_on_newest_atom} when the range a
+    lane sent opened on an unknown turn start. Called where the lane reports
+    the front it sent, so a Claude Code resume, which sends no range, says
+    nothing; composing a range logs nothing. *)
+
+val continuity_observation_input
+  :  trace_id:string
+  -> continuity:Keeper_turn_driver_try_provider.continuity option
+  -> carried_start_front
+  -> Keeper_continuity_observation.input
+(** What the Memory screen records for a request this lane composed
+    ({!Keeper_continuity_observation}), in the words the Agent Core lane
+    records: [Summarized] when a working state named the front, [Absorbed]
+    when the read position did, [Without_snapshot] when the turn's choice
+    was no absorbed point, and [Not_applied] when the turn made no choice
+    (no trace, or a recovery view) or its choice sat behind the seed or the
+    lane's own cut and so was not applied to this request. *)
+
+val carried_start_range
+  :  keeper_name:string
+  -> runtime_id:string
+  -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
+  -> librarian_front:librarian_position
+  -> own_first_atom:int
+  -> turn_start:Keeper_carried_front.turn_start
+  -> Agent_core.Types.message list
+  -> carried_start
+(** Where an official client's start seed begins
+    (RFC keeper-context-window-in-tokens §10.4).
+
+    The front is a position in the keeper's checkpoint history and this lane
+    cuts from that same history, so a range an Agent Core turn measured names
+    the same atoms here, and a lane walking to this candidate starts where the
+    last completed turn ended instead of at the oldest atom.
+
+    These lanes hold no ledger — it is written from the usage of a request
+    this process composed, and an official client composes its own — so the
+    caller's seed is the whole answer. Without one the range starts at
+    [turn_start], the end of the last completed turn on this history, where
+    the Agent Core path starts when no ledger answers either (RFC
+    keeper-context-window-in-tokens §13.4); a history with no completed turn
+    has [turn_start] 0.
+
+    [librarian_front] is the turn's continuity choice as a position in these
+    messages, read by the lane ({!read_librarian_front}): a fitting working
+    state ([Librarian_snapshot]), the Librarian's read position alone
+    ([Librarian_progress]), or none. That position wins when it is at or past the seed that
+    holds, or the lane's own cut when no seed holds, so a Librarian that read
+    less than the last request carried never moves the range back.
+    [turn_start] is not weighed against it: it is where a request with no
+    absorbed point begins, so a Librarian position behind it still names
+    atoms nothing else carries, and they go out. A read position alone
+    carries nothing for the atoms before it. The working state goes in
+    front of the range, as
+    extra system context, exactly when a [Librarian_snapshot] position is the
+    one that wins: a position the seed or the lane cut already passed stands for
+    atoms the range is carrying anyway, and summarising those would say twice
+    what the request already says. When it does win, the request grows by
+    those bytes, and they are pinned, so a lane that cuts the range to a
+    capacity has to be ready for a composition that does not fit it.
+
+    [own_first_atom] is the front the lane already chose for its own reason
+    (Claude Code and Codex cut their seed to the capacity a typed overflow
+    narrowed the turn to). A seed at or past that cut decides, even when it is
+    older than [turn_start]: the range the last answered request carried is
+    this lane's continuity. Without a seed the range starts at the later of
+    the lane's cut and [turn_start]; a lane with no cut of its own passes 0. A
+    seed whose index this history does not open with the seed's message is
+    dropped and reported, and the range starts over as with no seed. *)
+
+(** {1 One window, one decision (RFC-0460)} *)
+
+type windowed_range =
+  { carried : carried_start
+  ; sent : Agent_core.Types.message list  (** What goes out after the lane's window. *)
+  ; atoms_kept : int  (** How many of the range's durable atoms are in [sent]. *)
+  }
+
+val carried_atoms : carried_start -> int
+(** The durable atoms a range carries, before any window. *)
+
+val read_seed_once
+  :  (unit -> Keeper_carried_front.seed_read) option
+  -> (unit -> Keeper_carried_front.seed_read) option
+(** The same seed read, taken at most once, for a lane that composes a range
+    more than once in a turn ({!compose_librarian_range}). Sequential use on
+    one fiber only. *)
+
+val windowed_projection : windowed_range -> Runtime_model_input_tail_window.projection
+(** The window reading counted against the whole history, for
+    {!Runtime_model_input_tail_window.observe}: the front it names is an atom
+    a later seed can reopen, or the witnessed end of an omitted history. *)
+
+val compose_librarian_range
+  :  keeper_name:string
+  -> runtime_id:string
+  -> compose:(librarian_position -> (windowed_range, Agent_core.Error.t) result)
+  -> librarian_position
+  -> (windowed_range, Agent_core.Error.t) result
+(** Compose and window the range from the turn's Librarian position, with
+    [compose] doing both the way the lane does them.
+
+    A working state goes out only where it displaces none of the atoms after
+    the range it leads. A [Librarian_snapshot] position is composed with it
+    first, and kept when the window left every atom of the range. A witnessed
+    accepted empty range may keep a fitting summary: the current goal travels
+    separately, and no prior conversation atom has to be restored. Otherwise
+    the same position is composed alone ([Librarian_progress] at the
+    snapshot's end), and the working state goes only when the window kept at
+    least the newest atom and as many atoms with it as without it. When it
+    stays out, the request goes with the position alone, a WARN names the
+    reason and the first atom sent, and
+    [masc_keeper_librarian_working_state_not_carried_total] counts it -- the turn is not
+    refused, because that band is usually a Librarian that has not caught up
+    yet. A composition the position alone cannot carry is refused with its
+    own error. Other positions are composed once, as given. *)
+
+type argument_source
+(** One official attempt's frozen raw completed argument authority and address
+    memo. It never authorizes changing a remote client-held conversation. *)
+
+val create_argument_source :
+  input_policy:Keeper_input_policy.t -> base_path:string -> keeper_name:string ->
+  seed:Agent_core.Types.message list option ->
+  replay_prefix:Keeper_replay_prefix.projection ->
+  turn_start:Keeper_carried_front.turn_start -> argument_source option
+(** [None] for Wide, missing raw seed, empty base path, or unknown/empty
+    completed boundary. Creation performs no blob I/O or occurrence binding.
+    The replay authority covers history only: official clients transmit the
+    current goal separately, so its input obligation is not part of this
+    binding. Both exact history prefix guards remain in force. *)
+
+type argument_projection
+
+val argument_projection :
+  argument_source -> tools:Agent_core.Tool.t list ->
+  history_prefix:Agent_core.Types.message list -> argument_projection option
+(** Bind the actual prepared tool surface and caller-owned pinned prefix for a
+    Start/reseed. [None] when that surface cannot recover canonical references
+    or the prefix contains a conversation atom. The caller passes only the
+    exact context it prepended, before its append-only hooks. A Resume must
+    omit this projection; it transmits no MASC history. No I/O is performed. *)
+
+val start_range_projection :
+  input_source:Keeper_request_source.t ->
+  ?argument_projection:argument_projection ->
+  measure_message_bytes:(Agent_core.Types.message -> int) ->
+  capacity_bytes:int ->
+  unbounded_capacity_bytes:int ->
+  reserved_bytes:int ->
+  ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?librarian_front:librarian_front_reader ->
+  ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
+  turn_start:Keeper_carried_front.turn_start ->
+  keeper_name:string ->
+  runtime_id:string ->
+  Agent_core.Types.message list ->
+  (Agent_core.Types.message list, Agent_core.Error.t) result
+(** Capacity-first Start projection shared by Claude Code and Codex. The
+    zero-history floor stays empty; otherwise the latest of the capacity,
+    seed, Librarian, and turn-start fronts is composed and observed once.
+    Source-specific projection runs after this range. Antigravity and Muse
+    Code can use the same projection with unbounded capacity.
+
+    With [argument_projection], only verified closed raw-seed arguments are
+    planned before measuring capacity. Seed/Librarian validation and observation
+    still use the original source and atom coordinates. Summary selection is
+    pure with respect to blobs; only retained slots are materialized once.
+    Actual success/failure outcomes are replayed, every unmaterialized slot is
+    restored, and the full range/summary decision is repeated without I/O.
+    Custom source projection must run after this function returns. *)
+
+val carried_history_projection :
+  input_source:Keeper_request_source.t ->
+  ?argument_projection:argument_projection ->
+  ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?librarian_front:librarian_front_reader ->
+  ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
+  turn_start:Keeper_carried_front.turn_start ->
+  keeper_name:string ->
+  runtime_id:string ->
+  Keeper_history_projection.t option ->
+  Keeper_history_projection.t
+(** Unbounded carried-history composition for clients that compact their own
+    input. Freeze the durable Librarian position before applying the range and
+    source projection. Window/front observations are published only after that
+    final projection succeeds, and retain durable-history coordinates: an
+    appended Gate replay reference cannot become a checkpoint front. *)
+
+val framed_prompt_for_turn :
+  ?composed_context:composed_context ->
+  held:Keeper_official_client_session_store.held_context list ->
+  is_resume:bool ->
+  goal:string ->
+  prepared_turn ->
+  (string, Agent_core.Error.t) result
+(** Input for clients whose Start has no separate System channel. A Start
+    carries the shared Antigravity frame's System label, encoded history and
+    current Goal in order, prefixed once by {!start_prompt}. A Resume uses
+    {!resume_prompt} with the exact held/composed context supplied by its lane.
+    Protocol/session handling and any historical-task input stay with the lane.
+    @raise Invalid_argument when a required frame-label asset is missing. *)
+
+val prepare_turn :
+  runtime_label:string ->
+  keeper_name:string ->
+  turn_count:int ->
+  system_prompt:string ->
+  tools:Agent_core.Tool.t list ->
+  initial_messages:Agent_core.Types.message list ->
+  model_input_projection:
+    (tools:Agent_core.Tool.t list -> Keeper_history_projection.t) option ->
+  hooks:Agent_core.Hooks.hooks option ->
+  composed_context:(unit -> composed_context option) option ->
+  configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  (prepared_turn, Agent_core.Error.t) result
+(** [configured_reasoning_effort] seeds the turn params the
+    [before_turn_params] hook receives, so a hook can still override it.
+
+    [model_input_projection] receives the actual hook-resolved tool surface.
+    In particular [tool_choice=None_] supplies an empty surface; an unsupported
+    forced tool choice is refused before the projection can store references.
+
+    The system prompt is refused when it trims to nothing, after a hook's
+    [system_prompt_override] has been applied, as
+    [InvalidConfig { field = "system_prompt" }]. Every official client runs
+    its own built-in instructions when masc names none, with masc's tool
+    surface still attached, so a blank composition is a configuration defect
+    named here once rather than in each lane (#33165). [composed_context] is
+    read after the hook publishes its assembly. When the selected System
+    bytes are that exact issued carrier, its underlying [base_text] must also
+    be nonblank: a Goal observation does not supply Keeper instructions. A
+    stale assembly cannot substitute for a different selected override. The
+    issuer is read once and retained in [prepared_turn.composed_context]. For
+    an exact issued System, only Completion Authority moves to [start_context]
+    as a User observation; Goal remains in [system_prompt]. A missing or stale
+    issuer leaves the selected System unchanged and cannot attest a new User
+    observation. Ordinary HTTP assembly is unaffected.
+
+    The hook's [extra_system_context] is appended as a raw [System] message
+    carrying [origin = System_context]. Official
+    adapters must keep that message on their provider instruction surface; it
+    is not an Agent Core synthetic User carrier. The Librarian working state
+    is a second [System] message on the same surface, tagged
+    {!Runtime_model_input_tail_window.working_state_metadata}; adapters select
+    both with {!is_composed_system_context}.
+
+    The seed carries the projected history as-is. Nothing is cut here: the
+    provider owns its context window and reports exceeding it as a typed
+    terminal, which the shrink sequence in
+    {!Keeper_turn_driver_try_provider.context_overflow_shrink_sequence}
+    consumes to retry with less. A second ceiling applied before that one
+    measured wire bytes instead of tokens and dropped the oldest atoms with no
+    copy kept. *)
+
+val dynamic_tools :
+  result_scope:Eio.Switch.t option ->
+  ?base_path:string ->
+  content_transport:Runtime_official_client_tool.content_transport ->
+  accepts_image_input:bool ->
+  tool_approval:Agent_core.Hooks.tool_approval_callback option ->
+  runtime_label:string ->
+  keeper_name:string ->
+  turn_count:int ->
+  tools:Agent_core.Tool.t list ->
+  loading_plan:loading_plan ->
+  hooks:Agent_core.Hooks.hooks ->
+  event_bus:Agent_core.Event_bus.t option ->
+  context_injector:Agent_core.Hooks.context_injector option ->
+  context:Agent_core.Context.t option ->
+  terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
+  terminal_error:string option ref ->
+  pre_tool_rejects:rejected_tool_call list ref ->
+  ?on_tool_boundary:(tool_name:string -> (host_stop option, Agent_core.Error.t) result) ->
+  ?on_result_handoff:
+    (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
+  raw_trace_run:Agent_core.Raw_trace.active_run option ->
+  unit ->
+  (dynamic_tool list * Keeper_client_tool_outbox.host_producer option, Agent_core.Error.t) result
+(** Project Agent Core tools onto one official-client turn.
+
+    [Some result_scope] is the real runtime's enclosing switch. Its producers
+    hold exact kernel liveness leases so their results do not wake or enter a
+    concurrent consumer before the runtime drains. [None] is for prevalidation
+    or a standalone projection; every real runtime passes its actual switch.
+    This scope does not acknowledge results or permit tool replay.
+
+    [accepts_image_input] is the runtime's answer to "may a tool result carry an
+    image", read from {!Runtime_agent.runtime_accepts_image_input} so it is the
+    same composition dispatch applies to a turn's own media. When it is [false]
+    an image-bearing result becomes a delivery error before settlement, rather
+    than a payload the provider rejects after the tool has already run.
+
+    [on_tool_boundary ~tool_name] receives the actual settled tool name after tool
+    settlement and result observers, including when
+    exact terminal evidence already stops the turn. Its errors are recorded in
+    [terminal_error] and close the host loop without inventing a checkpoint.
+    An existing terminal result takes priority over a callback stop.
+    With [base_path], every original result is durably retained under its
+    host producer identity before post-execution hooks and context injection.
+    The returned producer is [Some] exactly when tools and [base_path] exist;
+    it freezes physical response writes at the client's terminal boundary.
+    The result's [on_response_sent] marks only an unchanged original response.
+    Retention failure records [terminal_error] and a typed terminal failure,
+    so the runtime cannot settle it as successful consumption. Without
+    [base_path] no producer or durable result is created. Prevalidation omits
+    [base_path].
+
+    [tool_approval] settles a [pre_tool_use] hook that answers
+    [ElicitToolApproval], exactly as it does on AGENT_CORE's own tool loop --
+    both paths go through
+    {!Agent_core.Agent_tool_pre_execution_gate.settle}. Without it such a
+    decision is rejected rather than admitted, so a caller that does not
+    supply one is no more permissive than before.
+
+    Required rather than optional so a new runtime lane cannot inherit [None]
+    by saying nothing. Silence is how one lane came to offer a decision the
+    other refused. Repeated tool names, inputs or receipts do not establish
+    lack of external progress and never synthesize [abort_turn]. *)
+
+val persist_pre_tool_rejects :
+  keeper_name:string ->
+  session_dir:string ->
+  session_id:string ->
+  rejected_tool_call list ->
+  (int, string) result
+(** Append a dead turn's reject round-trips to the canonical checkpoint
+    so the next turn's replay carries the corrective text (masc#28885:
+    every escalated turn lost its correction and the model resent the
+    same broken call). Each reject becomes the pair a surviving turn
+    already persists — an assistant [ToolUse] block answered by a
+    tool-role [ToolResult] with the deterministic validation failure —
+    appended in call order. Returns how many rejects were persisted; an
+    empty list and a missing checkpoint (no replay exists to correct)
+    are both [Ok 0]. Callers flush only on a failed turn: a surviving
+    turn's round-trips reach the checkpoint through the next turn's
+    history, and appending them here too would duplicate them. *)
+
+val with_run_lifecycle_events :
+  event_bus:Agent_core.Event_bus.t option ->
+  keeper_name:string ->
+  (unit -> (Runtime_agent.run_result, Agent_core.Error.t) result) ->
+  (Runtime_agent.run_result, Agent_core.Error.t) result
+(** Publish the same typed start and terminal lifecycle owned by Agent Core.
+    Official clients own their internal model loop, so this host boundary is
+    the single MASC owner for those events. *)
+
+val clamp_reasoning_effort_to_catalog :
+  model_id:string option ->
+  requested:Llm_provider.Reasoning_effort.t option ->
+  Llm_provider.Reasoning_effort.t option
+(** Snap a requested reasoning effort into the catalog's accepted set for
+    [model_id]: the requested effort when it is accepted, otherwise the
+    nearest accepted effort (highest below; lowest when every accepted effort
+    is higher). Pure; pinned by [test_keeper_codex_effort_clamp]. *)
+
+val effective_reasoning_effort :
+  runtime_label:string ->
+  keeper_name:string ->
+  runtime_id:string ->
+  model_id:string option ->
+  requested:Llm_provider.Reasoning_effort.t option ->
+  Llm_provider.Reasoning_effort.t option
+(** {!clamp_reasoning_effort_to_catalog} plus the operator-visible info log
+    when the effort was snapped. One call site per official-client lane, so
+    Codex and Claude Code treat the same declared effort identically. *)
+
+val host_stop_result :
+  runtime_id:string ->
+  model:string ->
+  session_id:string ->
+  turn_id:string ->
+  provider_turn_ordinal:int ->
+  turns_used:int ->
+  latency_ms:int option ->
+  request_context:Runtime_observation.request_context option ->
+  host_stop ->
+  (Runtime_agent.run_result, Agent_core.Error.t) result
+(** Build the provider-neutral checkpoint terminal after an official-client
+    adapter stops its vendor-owned loop. The external client session is the
+    durable continuation owner, so no Agent Core checkpoint is synthesized.
+    [provider_turn_ordinal] comes from that adapter's claimed turn, the same
+    identity sent to its completion hook; [turns_used] remains an independent
+    client count and is never used to derive the ordinal.
+
+    The turn's spend is not observed: no adapter has a terminal usage frame
+    after a host stop, so the response carries no usage and the scope is
+    unavailable. [request_context] is the context the newest request
+    occupied when the adapter saw one (Claude Code's assistant frames).
+
+    Non-failed stops carry a one-attempt runtime observation (masc#31312):
+    the vendor loop did run to reach this boundary, and a [None] observation
+    here made every host-stopped turn classify as [Runtime_not_observed],
+    which the operator disposition surfaced as "unmapped_runtime_state". *)
+
+
+
+val admit_native_posture :
+  posture:Runtime_native_tools.posture ->
+  approval_mode:Keeper_tool_approval_mode.mode ->
+  none_supported:bool ->
+  client_label:string ->
+  (unit, string) result
+(** Pure admission rule for RFC-0390. [Native_none] is refused when the
+    client cannot disable its built-in tools. [Native_full] is refused
+    unless the keeper's approval stance is [Yolo]: built-in calls run inside
+    the vendor process and never reach [ElicitToolApproval], so full native
+    effects are admitted only where every MASC call would also run unasked.
+    This is the typed predicate only — see {!resolve_native_posture} for
+    what a refusal does to the turn. *)
+
+val resolve_native_posture :
+  posture_source:Runtime_native_tools.posture_source ->
+  base_path:string ->
+  keeper_name:string ->
+  client_label:string ->
+  default:Runtime_native_tools.posture ->
+  none_supported:bool ->
+  (Runtime_native_tools.posture, Agent_core.Error.t) result
+(** The two sources of a posture are handled exhaustively.
+    [Program_defined posture]: the program that created the keeper stated
+    the posture; no [keepers/<name>.toml] is read (there is none — the
+    task-completion reviewer runs in a fresh root it owns), and a stated
+    posture is never degraded: failed admission is a config error.
+    [Declared_on_disk]: read the keeper's declared posture from its profile
+    TOML under [base_path], take [default] when the profile declares no
+    [keeper.tools.native], then apply {!admit_native_posture} against the
+    keeper's current approval stance. A profile that fails to load — a
+    keeper nothing declares included (audit F386) — is a config error, not
+    a silent default.
+    An admission refusal does not fail this call: the posture degrades to
+    the safest weaker one ([full] -> [read]; [none] -> [read] where the
+    client cannot disable built-ins) and the downgrade is published as a
+    typed event ([masc.keeper.native_posture_degraded]) — the turn keeps
+    running, the record says what was declared and why it was not honored.
+
+    Reporting cadence differs by branch (#30408 review): the [full] ->
+    [read] degradation is turn state (the approval mode lives in process
+    memory and can flip), so it emits one event per affected turn. The
+    [none]-on-a-client-without-a-disable-switch case is a static
+    profile-vs-assignment contradiction, so it emits once per process per
+    (keeper, client) pair at the first offending resolution and then goes
+    quiet until a resolution honors the declaration (which re-arms the
+    gate). The effective posture returned is unchanged in both branches.
+    The approval stance is in-memory by design; after a restart that means
+    a [full] keeper runs degraded-to-[read] turns, each one recorded,
+    until an operator re-arms [Yolo]. *)

@@ -1,0 +1,19 @@
+{
+  "scope": "Actual operation declaration and handler fragment, unrelated external field types stubbed; not full TUI typing",
+  "operation_declaration_sha256": "fdac984d2bd625a971cd6bae2c9e239cd30b6251522e4d86af9e846d788ddcba",
+  "results": [
+    {
+      "version": "e412_incomplete",
+      "exit": 2,
+      "diagnostic": "File \"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/tmpcnq8quqw/e412_incomplete.ml\", lines 36-41, characters 17-83:\n36 | .................match view.load with\n37 |              | Loading (_, Discover _) -> Browser_lane_view.accept_clients ~generation result view\n38 |              | Idle | No_browser\n39 |              | Loading (_, (Read | Open_session | Close_session | Goto _ | Screenshot _)) | Failed _ ->\n40 |                (if generation=state.browser_lane_generation\n41 |                 then Browser_lane_view.accept_activity result view else view),false\nError (warning 8 [partial-match]): this pattern-matching is not exhaustive.\n  Here is an example of a case that is not matched:\n    Loading\n      (_,\n      (Read_refresh|Scene_read _|Scene_regions _|Scene_refresh _|\n      Scene_scroll _|Scene_focus _|Scene_click _|Scene_follow _|\n      Scene_follow_refresh _|Viewport_refresh _|Viewport_cadence _|\n      Viewport_pointer _))",
+      "fragment_sha256": "eae71e2324fd417c2f28fdcb555e4d5c7e4e74fe2a4f9513117acdae90d0ca68"
+    },
+    {
+      "version": "corrected",
+      "exit": 0,
+      "diagnostic": "",
+      "fragment_sha256": "562e432f683eb73dffb87274117f5b24dc5e8bd347fcd5bb108180ee56eb2b4d"
+    }
+  ],
+  "supersedes": "activity-compile-repro.json used a simplified constructor set and did not prove actual handler exhaustiveness"
+}

@@ -1,0 +1,1099 @@
+(* P7: Pipeline-Native Dispatch
+   Execute Shell_ir.t directly via Process_eio without going through
+   /bin/bash. Simple commands use argv-based spawn. Redirect-free host
+   pipelines use streaming process pipes; redirect-free sandboxed
+   Guest/SSH pipelines stream through the injected pipeline runner.
+   Unsupported shapes fall back to deterministic stdout->stdin chaining. *)
+
+type dispatch_result = {
+  status : Unix.process_status;
+  stdout : string;
+  stderr : string;
+  output_files : Process_output_capture.files option;
+}
+
+open Result.Syntax
+
+(* Naming the descriptors keeps their numbers out of the redirect fold. *)
+let stdin_fd = 0
+let stdout_fd = 1
+let stderr_fd = 2
+
+type redirect_target =
+  | Capture_stdout
+  | Capture_stderr
+  | Drop
+
+type redirect_plan = {
+  stdout_target : redirect_target;
+  stderr_target : redirect_target;
+}
+
+let default_redirect_plan =
+  { stdout_target = Capture_stdout; stderr_target = Capture_stderr }
+
+let redirect_target_of_fd plan = function
+  | 1 -> Ok plan.stdout_target
+  | 2 -> Ok plan.stderr_target
+  | fd -> Error (Printf.sprintf "unsupported redirect fd: %d" fd)
+
+let set_redirect_target plan fd target =
+  match fd with
+  | 1 -> Ok { plan with stdout_target = target }
+  | 2 -> Ok { plan with stderr_target = target }
+  | fd -> Error (Printf.sprintf "unsupported redirect fd: %d" fd)
+
+(* Streams the child holds a file for. [Captured] / [Inherited] mean the
+   stream stays on the capture path, so a command with no file redirect
+   produces exactly the plumbing it did before. *)
+type attachments = {
+  stdin_from : Process_eio.input_origin;
+  stdout_to : Process_eio.output_destination;
+  stderr_to : Process_eio.output_destination;
+}
+
+let no_attachments =
+  { stdin_from = Process_eio.Inherited
+  ; stdout_to = Process_eio.Captured
+  ; stderr_to = Process_eio.Captured
+  }
+
+(* [From_string] counts. It used to not, because nothing put one in
+   [attachments] -- the only [From_string] was built further down from the
+   [stdin_content] argument, inside the path this predicate selects. A literal
+   redirect puts one here, and the path that discards attachments would drop
+   it without a word. *)
+let holds_a_source = function
+  | Process_eio.Inherited -> false
+  | Process_eio.From_string _ | Process_eio.Read_from _ -> true
+
+let holds_a_sink = function
+  | Process_eio.Captured -> false
+  | Process_eio.Written_to _ -> true
+
+let attaches_a_file { stdin_from; stdout_to; stderr_to } =
+  holds_a_source stdin_from || holds_a_sink stdout_to || holds_a_sink stderr_to
+
+(* A redirect target is written as the command sees it, so a relative one is
+   resolved against the command's own cwd. This process's cwd is not that
+   directory -- a command without one runs at the filesystem root -- so a
+   relative target with no cwd names two different files depending on who
+   resolves it, and is refused rather than resolved against a guess. *)
+(* A target already resolved for this host is opened as given. One still in
+   the command's namespace is only this filesystem when the command runs
+   here; the caller checks that before opening. *)
+let redirect_path ~cwd target =
+  match target with
+  | Redirect_scope.On_this_host { path; _ } -> Ok path
+  | Redirect_scope.In_command_namespace scope ->
+    let raw = Path_scope.raw scope in
+    if not (Filename.is_relative raw)
+    then Ok raw
+    else (
+      match cwd with
+      | Some base -> Ok (Filename.concat base raw)
+      | None ->
+        Error
+          (Printf.sprintf
+             "relative redirect target %s needs the command to declare a cwd"
+             raw))
+
+(* A stream owns one direction, so each (descriptor, mode) pair is named
+   rather than collapsed: a new mode has to be decided here, not absorbed. *)
+let sink_of_mode ~path = function
+  | Redirect_scope.Write -> Ok (Process_eio.Written_to { path; append = false })
+  | Redirect_scope.Append -> Ok (Process_eio.Written_to { path; append = true })
+  | Redirect_scope.Read ->
+      Error (Printf.sprintf "an output stream cannot be opened for reading: %s" path)
+
+let attach_file ~cwd attach ~fd ~target ~mode =
+  let* path = redirect_path ~cwd target in
+  if fd = stdin_fd
+  then
+    match mode with
+    | Redirect_scope.Read -> Ok { attach with stdin_from = Process_eio.Read_from { path } }
+    | Redirect_scope.Write | Redirect_scope.Append ->
+        Error (Printf.sprintf "stdin cannot be opened for writing: %s" path)
+  else if fd = stdout_fd
+  then Result.map (fun sink -> { attach with stdout_to = sink }) (sink_of_mode ~path mode)
+  else if fd = stderr_fd
+  then Result.map (fun sink -> { attach with stderr_to = sink }) (sink_of_mode ~path mode)
+  else
+    Error
+      (Printf.sprintf
+         "unsupported redirect fd: %d (a command owns only %d, %d and %d)"
+         fd
+         stdin_fd
+         stdout_fd
+         stderr_fd)
+
+(* A file redirect is carried out by this process, so the path has to name a
+   file on this filesystem. Running on the host, the command's namespace is
+   this one. Running in a container or on a remote host it is not, and only a
+   layer that knows the mounts can translate; until it has, the target says
+   so. *)
+let target_is_openable_here ~(sandbox : Sandbox_target.t) target =
+  match sandbox, target with
+  | _, Redirect_scope.On_this_host _ -> true
+  | Sandbox_target.Host, Redirect_scope.In_command_namespace _ -> true
+  | ( Sandbox_target.Docker _
+    | Sandbox_target.Micro_vm _
+    | Sandbox_target.Ssh _
+    | Sandbox_target.Delegated _ ),
+    Redirect_scope.In_command_namespace _ ->
+    false
+
+(* A sandbox runner hands back what the container wrote as a string: this
+   process never holds the container's pipe, so it cannot give the child a
+   descriptor. The capture happens either way, so writing it out here costs
+   nothing over returning it -- and the bytes stop travelling back to the
+   caller, which is the point of redirecting them. *)
+let deliver_capture destination text =
+  match destination with
+  | Process_eio.Captured -> Ok text
+  | Process_eio.Written_to { path; append } ->
+    (try
+       let flags =
+         [ Open_wronly; Open_creat; (if append then Open_append else Open_trunc) ]
+       in
+       let oc = open_out_gen flags 0o644 path in
+       Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc text);
+       Ok ""
+     with
+     | Sys_error message -> Error (Printf.sprintf "cannot write %s: %s" path message))
+
+let unresolved_target_message ~sandbox target =
+  let path = Path_scope.raw (Redirect_scope.target_as_written target) in
+  match sandbox with
+  | Sandbox_target.Ssh _ ->
+    Printf.sprintf
+      "remote_ssh_redirect_unavailable: remote file redirect %s has no remote \
+       file-operation transport; refusing host fallback"
+      path
+  | Sandbox_target.Host | Docker _ | Micro_vm _ ->
+    Printf.sprintf
+      "a file redirect to %s is not carried out for a sandboxed stage: the path \
+       names a file inside the sandbox and would be opened on this host"
+      path
+  | Sandbox_target.Delegated _ ->
+    Printf.sprintf
+      "a file redirect to %s is not carried out for a delegated stage: the \
+       caller answers with text, not descriptors"
+      path
+
+let redirect_plan_of_redirects ~cwd redirects =
+  let step (plan, attach) = function
+    | Redirect_scope.Fd_to_fd { src; dst } ->
+        let* target = redirect_target_of_fd plan dst in
+        let* plan = set_redirect_target plan src target in
+        Ok (plan, attach)
+    | Redirect_scope.File { fd; target; mode } ->
+      (* Discarding output needs no file: the capture model already has a
+         value for "throw these bytes away". Discarding input does not, so
+         it goes down the attachment path and opens the device. *)
+      (match mode with
+       | Redirect_scope.Write | Redirect_scope.Append
+         when Path_scope.is_discard_sink (Redirect_scope.target_as_written target) ->
+         let* plan = set_redirect_target plan fd Drop in
+         Ok (plan, attach)
+       | Redirect_scope.Write | Redirect_scope.Append | Redirect_scope.Read ->
+         let* attach = attach_file ~cwd attach ~fd ~target ~mode in
+         Ok (plan, attach))
+    | Redirect_scope.Literal { bytes } ->
+      (* Content with no file, and stdin is the only descriptor that can take
+         it, which the type says rather than the run time. *)
+      Ok (plan, { attach with stdin_from = Process_eio.From_string bytes })
+  in
+  List.fold_left
+    (fun acc redirect -> Result.bind acc (fun state -> step state redirect))
+    (Ok (default_redirect_plan, no_attachments))
+    redirects
+
+let add_redirected_output target text (stdout, stderr) =
+  match target with
+  | Capture_stdout -> stdout ^ text, stderr
+  | Capture_stderr -> stdout, stderr ^ text
+  | Drop -> stdout, stderr
+
+let apply_redirect_plan plan result =
+  (* Captured stdout/stderr are already split by the lower process layer, so
+     fd-to-fd redirection is deterministic but cannot preserve temporal
+     interleaving between the two original streams. *)
+  let stdout, stderr =
+    ("", "")
+    |> add_redirected_output plan.stdout_target result.stdout
+    |> add_redirected_output plan.stderr_target result.stderr
+  in
+  let output_files =
+    if plan = default_redirect_plan then result.output_files else None
+  in
+  { result with stdout; stderr; output_files }
+
+let unsupported_redirect_result message =
+  { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = message }
+
+type output_emission =
+  { stdout_emitted : bool ref
+  ; stderr_emitted : bool ref
+  }
+
+let tracked_output_callback on_output_chunk =
+  let emitted = { stdout_emitted = ref false; stderr_emitted = ref false } in
+  match on_output_chunk with
+  | None -> None, emitted
+  | Some on_chunk ->
+      let on_chunk = function
+        | `Stdout chunk ->
+            emitted.stdout_emitted := true;
+            on_chunk (`Stdout chunk)
+        | `Stderr chunk ->
+            emitted.stderr_emitted := true;
+            on_chunk (`Stderr chunk)
+      in
+      Some on_chunk, emitted
+
+(* Delivery rule for a run whose stderr is assembled from two sources — a
+   substitution child's diagnostics and the parent's own — while the parent
+   may already have streamed its stderr through [emitted]. The combined
+   [result.stderr] cannot ride a single already-emitted check: once the
+   parent streams, the stderr flag is set and the child part would be
+   suppressed as already delivered. Emitting the two pieces separately —
+   child first, the children ran first — gives each exactly one
+   delivery. *)
+let emit_split_stderr_captured_output on_output_chunk emitted ~child_stderr
+    (result : dispatch_result) =
+  match on_output_chunk with
+  | None -> result
+  | Some on_chunk ->
+      if (not !(emitted.stdout_emitted)) && result.stdout <> ""
+      then on_chunk (`Stdout result.stdout);
+      if child_stderr <> "" then on_chunk (`Stderr child_stderr);
+      if (not !(emitted.stderr_emitted)) && result.stderr <> ""
+      then on_chunk (`Stderr result.stderr);
+      result
+
+(* The answer when the caller's timeout was spent before a command could
+   spawn: [Process_eio] refuses a nonpositive timeout, so the exhausted
+   budget is reported as the timeout it is. *)
+let budget_exhausted_result () =
+  { output_files = None
+  ; status = Process_eio.timed_out_status
+  ; stdout = ""
+  ; stderr = "timeout budget exhausted by command substitutions"
+  }
+
+let emit_stdout_if_captured on_output_chunk stdout =
+  match on_output_chunk with
+  | None -> ()
+  | Some on_chunk when stdout <> "" -> on_chunk (`Stdout stdout)
+  | Some _ -> ()
+
+let emit_pipeline_stage_result ?(emit_stdout = false) on_output_chunk result =
+  match on_output_chunk with
+  | None -> ()
+  | Some on_chunk ->
+      if emit_stdout && result.stdout <> "" then on_chunk (`Stdout result.stdout);
+      if result.stderr <> "" then on_chunk (`Stderr result.stderr)
+
+let status_is_success = function
+  | Unix.WEXITED 0 -> true
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
+
+let status_is_timeout status =
+  (* Process_eio decides what a timeout status is; this used to repeat its
+     number (#28651). *)
+  match Process_eio.exit_reason_of_status status with
+  | Process_eio.Timed_out -> true
+  | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
+    false
+
+let pipeline_status current stage_status =
+  if status_is_success stage_status then current else stage_status
+
+(* --- arg resolution --- *)
+
+let unsupported_expansion_result () =
+  { status = Unix.WEXITED 2
+  ; stdout = ""
+  ; stderr = "Parameter expansion requires an execution-target environment; use literal arguments or run an explicit script inside the target."
+  ; output_files = None
+  }
+
+let rec resolve_arg = function
+  | Shell_ir.Lit (s, _) -> s
+  | Concat parts ->
+      let buf = Buffer.create 64 in
+      List.iter (fun a -> Buffer.add_string buf (resolve_arg a)) parts;
+      Buffer.contents buf
+  | Var _ -> invalid_arg "Exec_dispatch.resolve_arg: unresolved target environment"
+  | Subst _ -> invalid_arg "Exec_dispatch.resolve_arg: unevaluated substitution"
+
+let resolve_env env_bindings =
+  List.map
+    (fun (k, v) -> k ^ "=" ^ resolve_arg v)
+    env_bindings
+  |> Array.of_list
+
+let env_key entry =
+  match String.index_opt entry '=' with
+  | None -> entry
+  | Some idx -> String.sub entry 0 idx
+
+let resolve_host_env ?base_host_env = function
+  | [] -> base_host_env
+  | env_bindings ->
+      let overrides = resolve_env env_bindings |> Array.to_list in
+      let override_keys = List.map env_key overrides in
+      let base =
+        match base_host_env with
+        | Some env -> env
+        | None -> Unix.environment ()
+      in
+      let inherited =
+        base
+        |> Array.to_list
+        |> List.filter (fun entry ->
+          not (List.mem (env_key entry) override_keys))
+      in
+      Some (Array.of_list (inherited @ overrides))
+
+(* --- simple command execution --- *)
+
+(* Dispatch a simple command via the IR-carried Sandbox_target.
+
+   The [Host] case forks/execs through [Process_eio]; guest and [Ssh] cases
+   are wired up by [lib/keeper] using a closure over its own runtime
+   ([Keeper_turn_sandbox_runtime] for guests, the SSH lane runner for [Ssh]).
+   Which one runs is decided by the keeper's [sandbox_profile] carried on the
+   IR, not by this function. *)
+let process_spec_of_simple (s : Shell_ir.simple) =
+  let bin = Exec_program.to_string s.bin in
+  let argv = bin :: List.map resolve_arg s.args in
+  let env = resolve_env s.env in
+  let cwd =
+    match s.cwd with
+    | None -> None
+    | Some scope -> Some (Path_scope.raw scope)
+  in
+  (argv, env, cwd)
+
+let invalid_pipeline stderr = { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr }
+
+(* bash strips the trailing newlines (only) from a substitution's output;
+   interior newlines survive into the single argv element. *)
+let strip_trailing_newlines s =
+  let n = String.length s in
+  let rec keep i = if i > 0 && s.[i - 1] = '\n' then keep (i - 1) else i in
+  let kept = keep n in
+  if kept = n then s else String.sub s 0 kept
+
+(* Recursive dispatch carries the caller's original budget and epoch together.
+   Relative seconds belong only to the existing checks and process calls; they
+   cannot be passed back to a worker as another invocation's budget. *)
+module Invocation_timeout : sig
+  type t
+
+  val create : timeout_sec:float option -> started:float -> t
+  val is_unlimited : t -> bool
+  val remaining : now:float -> t -> float option
+end = struct
+  type t =
+    | Unlimited
+    | Limited of { budget : float; started : float }
+
+  let create ~timeout_sec ~started =
+    match timeout_sec with
+    | None -> Unlimited
+    | Some budget -> Limited { budget; started }
+
+  let is_unlimited = function
+    | Unlimited -> true
+    | Limited _ -> false
+
+  let remaining ~now = function
+    | Unlimited -> None
+    | Limited { budget; started } -> Some (budget -. (now -. started))
+end
+
+let nanoseconds_per_second = 1_000_000_000.
+
+let monotonic_now () =
+  Int64.to_float (Mtime_clock.elapsed_ns ()) /. nanoseconds_per_second
+
+let remaining_timeout timeout =
+  if Invocation_timeout.is_unlimited timeout then None
+  else Invocation_timeout.remaining ~now:(monotonic_now ()) timeout
+
+(* A stage's own redirections travel with it, so a pipeline that names a file
+   still runs on real process pipes. Dropping to the buffered chain instead
+   would run each stage to completion in turn, which has no backpressure: a
+   producer that only stops when its reader closes -- `yes | head -1` -- never
+   stops at all. *)
+let host_pipeline_specs ?base_host_env stages =
+  let rec loop acc = function
+    | [] -> Some (List.rev acc)
+    | Shell_ir.Simple simple :: rest ->
+        (* [dispatch_pipeline_with_timeout] evaluates substitutions before
+           choosing a runner. Only already evaluated argv can be prepared here. *)
+        if Shell_ir.has_command_substitution (Shell_ir.Simple simple)
+        then None
+        else
+        (match simple.sandbox with
+         | Host ->
+             let argv, _env, cwd = process_spec_of_simple simple in
+             (match redirect_plan_of_redirects ~cwd simple.redirects with
+              | Error _ -> None
+              | Ok (plan, attach) when plan = default_redirect_plan ->
+                  let stage : Process_eio.pipeline_stage =
+                    { argv
+                    ; env = resolve_host_env ?base_host_env simple.env
+                    ; cwd
+                    ; stdin = attach.stdin_from
+                    ; stdout = attach.stdout_to
+                    ; stderr = attach.stderr_to
+                    }
+                  in
+                  loop (stage :: acc) rest
+              (* A capture-side plan -- a merge or a discard -- is applied to
+                 captured text after the run, which a per-stage pipeline has no
+                 place to do. Those stay on the existing path. *)
+              | Ok _ -> None)
+         (* A delegated stage is not a host process, so it cannot join a
+            host process pipeline; it falls back to per-stage dispatch,
+            where the caller answers for it. *)
+         | Docker _ | Micro_vm _ | Ssh _ | Delegated _ -> None)
+    (* A stage that is itself a pipeline or a sequence needs a subshell,
+       which this dispatcher does not spawn. *)
+    | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
+  in
+  loop [] stages
+
+(* The streaming pipeline runner is per sandbox target: every stage must
+   carry the same target value and that target must inject a
+   [pipeline_runner]. Guest and SSH stages collect identically. *)
+let sandbox_pipeline_specs stages =
+  let rec loop pipeline_runner sandbox_target acc = function
+    | [] -> Option.map (fun runner -> runner, List.rev acc) pipeline_runner
+    | Shell_ir.Simple simple :: rest ->
+        (* As in [host_pipeline_specs], stage substitutions are evaluated
+           before native runner selection, not by the per-target runner. *)
+        if Shell_ir.has_command_substitution (Shell_ir.Simple simple)
+        then None
+        else
+        let same_sandbox_target =
+          match sandbox_target with
+          | None -> true
+          | Some first_target -> simple.sandbox == first_target
+        in
+        (match simple.sandbox with
+         | Docker { pipeline_runner = Some runner; _ }
+         | Micro_vm { pipeline_runner = Some runner; _ }
+         | Ssh { pipeline_runner = Some runner; _ }
+           when simple.redirects = [] && same_sandbox_target ->
+             let argv, env, cwd = process_spec_of_simple simple in
+             let stage : Sandbox_target.pipeline_stage = { argv; env; cwd } in
+             let pipeline_runner = Option.value pipeline_runner ~default:runner in
+             let sandbox_target =
+               Option.value sandbox_target ~default:simple.sandbox
+             in
+             loop (Some pipeline_runner) (Some sandbox_target) (stage :: acc) rest
+         | Host | Delegated _ | Docker _ | Micro_vm _ | Ssh _ -> None)
+    (* A stage that is itself a pipeline or a sequence needs a subshell,
+       which this dispatcher does not spawn. *)
+    | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None
+  in
+  loop None None [] stages
+
+let rec dispatch_simple_with_timeout ?base_host_env ?stdin_content ?on_output_chunk
+    ~(timeout : Invocation_timeout.t) (s : Shell_ir.simple) =
+  if Shell_ir.has_variable_expansion (Shell_ir.Simple s) then
+    unsupported_expansion_result ()
+  else
+  let s, subst_stderr =
+    eval_substitutions ?base_host_env ?stdin_content ~timeout s in
+  (* The parent runs in what remains of its budget after its substitutions
+     (RFC shell-ir-typed-command-substitution §2.3: a child runs inside what
+     remains of the parent's timeout, and the parent spends only what the
+     children left). *)
+  let timeout_sec = remaining_timeout timeout in
+  let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
+  let argv, env, cwd = process_spec_of_simple s in
+  let result =
+    match timeout_sec with
+    | Some remaining
+      when (not (Float.is_finite remaining)) || remaining <= 0.0 ->
+      (* The children consumed the budget; [Process_eio] rejects a
+         nonpositive timeout, so the parent answers its own timeout rather
+         than spawning. *)
+      budget_exhausted_result ()
+    | _ -> (
+    match redirect_plan_of_redirects ~cwd s.redirects with
+    | Error message -> unsupported_redirect_result message
+    | Ok (redirect_plan, attachments) when attaches_a_file attachments -> (
+      match
+        List.find_opt
+          (function
+            | Redirect_scope.Fd_to_fd _ | Redirect_scope.Literal _ -> false
+            | Redirect_scope.File { target; _ } ->
+              not (target_is_openable_here ~sandbox:s.sandbox target))
+          s.redirects
+      with
+      | Some (Redirect_scope.File { target; _ }) ->
+        unsupported_redirect_result
+          (unresolved_target_message ~sandbox:s.sandbox target)
+      | Some (Redirect_scope.Fd_to_fd _ | Redirect_scope.Literal _) | None ->
+        (match s.sandbox with
+         | Docker { runner; _ }
+         | Micro_vm { runner; _ }
+         | Ssh { runner; _ }
+         | Delegated { caller = runner } ->
+           (* stdin from a file is read here and handed to the runner as
+              bytes, for the same reason: the runner takes a string. *)
+           let stdin_for_runner =
+             match attachments.stdin_from with
+             | Process_eio.Read_from { path } ->
+               (try
+                  let ic = open_in_bin path in
+                  Some
+                    (Fun.protect
+                       ~finally:(fun () -> close_in ic)
+                       (fun () -> really_input_string ic (in_channel_length ic)))
+                with Sys_error _ -> None)
+             | Process_eio.From_string content -> Some content
+             | Process_eio.Inherited -> stdin_content
+           in
+           (match
+              runner
+                ~on_stdout_chunk:None
+                ~on_stderr_chunk:None
+                ~stdin_content:stdin_for_runner
+                ~argv
+                ~env
+                ~cwd
+            with
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn ->
+              { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+            | Sandbox_target.Transport_failed { failure; reason = _; stdout; stderr; output_files = _ } ->
+              (* The lane never delivered a command result; surface it with the
+                 error already in stderr, so a boxed command is not read as a
+                 clean run. A timeout keeps the timeout status. *)
+              { output_files = None
+              ; status = Sandbox_target.status_of_transport_failure failure
+              ; stdout
+              ; stderr
+              }
+            | Sandbox_target.Ran { status; stdout; stderr; output_files = _ } ->
+              (match
+                 ( deliver_capture attachments.stdout_to stdout
+                 , deliver_capture attachments.stderr_to stderr )
+               with
+               | Error message, _ | _, Error message ->
+                 unsupported_redirect_result message
+               | Ok stdout, Ok stderr ->
+                 apply_redirect_plan redirect_plan { output_files = None; status; stdout; stderr }))
+         | Host ->
+        let host_env = resolve_host_env ?base_host_env s.env in
+        let stdin_from =
+          (* A declared redirect wins over the caller's piped-in bytes: a
+             pipeline stage that names its own input is not reading the
+             previous stage. *)
+          match attachments.stdin_from with
+          | Process_eio.Read_from _ as declared -> declared
+          | Process_eio.From_string _ as declared -> declared
+          | Process_eio.Inherited ->
+            (match stdin_content with
+             | Some content -> Process_eio.From_string content
+             | None -> Process_eio.Inherited)
+        in
+        (match
+           Process_eio.run_argv_with_redirects
+             ?timeout_sec
+             ?env:host_env
+             ?cwd
+             ~stdin:stdin_from
+             ~stdout:attachments.stdout_to
+             ~stderr:attachments.stderr_to
+             argv
+         with
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+           { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+         | Error message -> unsupported_redirect_result message
+         | Ok (status, stdout, stderr) ->
+           apply_redirect_plan redirect_plan { output_files = None; status; stdout; stderr })))
+    | Ok (redirect_plan, _) -> (
+      let child_on_output_chunk =
+        if s.redirects = [] then on_output_chunk else None
+      in
+      match s.sandbox with
+      | Host ->
+        let host_env = resolve_host_env ?base_host_env s.env in
+        let run () =
+          match stdin_content with
+          | None ->
+            (match child_on_output_chunk with
+             | None ->
+               Process_eio.run_argv_with_status_split
+                 ?timeout_sec
+                 ?env:host_env
+                 ?cwd
+                 argv
+             | Some on_chunk ->
+               Process_eio.run_argv_with_status_split_streaming
+                 ?timeout_sec
+                 ?env:host_env
+                 ?cwd
+                 ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                 ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                 argv)
+          | Some stdin_content ->
+            (match child_on_output_chunk with
+             | None ->
+               Process_eio.run_argv_with_stdin_and_status_split
+                 ?timeout_sec
+                 ?env:host_env
+                 ?cwd
+                 ~stdin_content
+                 argv
+             | Some on_chunk ->
+               Process_eio.run_argv_with_stdin_and_status_split
+                 ?timeout_sec
+                 ?env:host_env
+                 ?cwd
+                 ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                 ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                 ~stdin_content
+                 argv)
+        in
+        (match run () with
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+             { output_files = None; status = Unix.WEXITED 1
+             ; stdout = ""
+             ; stderr = Printexc.to_string exn
+             }
+         | status, stdout, stderr ->
+             apply_redirect_plan redirect_plan { output_files = None; status; stdout; stderr })
+      | Docker { runner; _ }
+      | Micro_vm { runner; _ }
+      | Ssh { runner; _ }
+      | Delegated { caller = runner } ->
+        let on_stdout_chunk, on_stderr_chunk =
+          match child_on_output_chunk with
+          | None -> None, None
+          | Some on_chunk ->
+              ( Some (fun chunk -> on_chunk (`Stdout chunk))
+              , Some (fun chunk -> on_chunk (`Stderr chunk)) )
+        in
+        (match
+           runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
+         with
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+             { output_files = None; status = Unix.WEXITED 1
+             ; stdout = ""
+             ; stderr = Printexc.to_string exn
+             }
+         | Sandbox_target.Ran { status; stdout; stderr; output_files } ->
+             apply_redirect_plan redirect_plan { status; stdout; stderr; output_files }
+         | Sandbox_target.Transport_failed { failure; reason = _; stdout; stderr; output_files } ->
+             apply_redirect_plan redirect_plan
+               { status = Sandbox_target.status_of_transport_failure failure
+               ; stdout
+               ; stderr
+               ; output_files
+               })))
+  in
+  emit_split_stderr_captured_output on_output_chunk emitted ~child_stderr:subst_stderr
+    { result with stderr = subst_stderr ^ result.stderr }
+
+(* Evaluating a substitution is dispatch: [dispatch_with_timeout] handles
+   pipelines, sequences and nested substitutions inside the child with
+   the same semantics as any other IR, and the child inherits the parent's
+   dispatch target through [Shell_ir.with_sandbox] (RFC
+   shell-ir-typed-command-substitution §2.3 item 1).  The path jail covers
+   the child: [validate_shell_ir_paths] runs at the gate on cwd and redirect
+   targets and descends into these child stages, which carry literal
+   cwd/redirects of their own; a substitution produces argv text — never a
+   path the gate had not seen (plan risk 1).  Child output is captured,
+   never streamed to the parent's [on_output_chunk]; child stderr joins the
+   parent's stderr.  Nesting depth is bounded only by the shared ~50k-token
+   parse budget (roughly 100KB of source), and the recursion
+   [eval_substitutions] -> [dispatch_with_timeout] ->
+   [dispatch_simple_with_timeout] is not
+   tail-recursive, so a maximally nested source can raise [Stack_overflow]
+   rather than fail closed.  A depth counter is new scope and deliberately
+   not wired here. *)
+and eval_substitutions ?base_host_env ?stdin_content
+    ~(timeout : Invocation_timeout.t) (s : Shell_ir.simple) : Shell_ir.simple * string =
+  let child_stderr = Buffer.create 256 in
+  let rec eval_arg = function
+    | Shell_ir.Subst child ->
+      (* The child inherits the parent's sandbox target and, absent a cwd of
+         its own, the parent's cwd — bash's rule that [$(pwd)] answers the
+         parent's directory. The gate jailed the parent's cwd, so the
+         inherited directory stays inside it; [None] would drop the child
+         into the dispatcher's default directory, which the gate never
+         saw. *)
+      let child = Shell_ir.with_sandbox_cwd s.sandbox s.cwd child in
+      let result =
+        match remaining_timeout timeout with
+        | Some remaining
+          when (not (Float.is_finite remaining)) || remaining <= 0.0 ->
+          (* [Process_eio] refuses a nonpositive timeout, so an exhausted
+             budget is the timeout answer, synthesized rather than run. *)
+          { output_files = None
+          ; status = Process_eio.timed_out_status
+          ; stdout = ""
+          ; stderr =
+              "command substitution exhausted the parent's timeout budget"
+          }
+        | None | Some _ ->
+            (* Keep the original budget and epoch together through nested
+               substitutions, sequences and pipelines. Passing the checked
+               remainder with the original epoch would debit elapsed time
+               again in the child (RFC shell-ir-typed-command-substitution
+               §2.3 item 4). The child also reads the same [stdin_content]
+               the parent will — in bash the two share one file descriptor
+               and race for it; handing each the same bytes is the
+               deterministic reading of that. *)
+            dispatch_with_timeout
+              ?base_host_env
+              ?stdin_content
+              ?on_output_chunk:None
+              ~timeout
+              child
+      in
+      Buffer.add_string child_stderr result.stderr;
+      (* The child's exit status decides nothing (RFC
+         shell-ir-typed-command-substitution §2.3.2 — bash reads the same);
+         its stdout becomes one argv element, trailing newlines stripped. *)
+      Shell_ir.Lit (strip_trailing_newlines result.stdout, Shell_ir.default_meta)
+    | Shell_ir.Concat parts -> Shell_ir.Concat (List.map eval_arg parts)
+    | (Shell_ir.Lit _ | Shell_ir.Var _) as leaf -> leaf
+  in
+  (* env bindings evaluate before args, in line order. *)
+  let env = List.map (fun (k, v) -> k, eval_arg v) s.Shell_ir.env in
+  let args = List.map eval_arg s.Shell_ir.args in
+  ({ s with Shell_ir.env = env; args }, Buffer.contents child_stderr)
+
+(* --- pipeline + entry point (mutually recursive with simple dispatch) --- *)
+
+(* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
+   telemetry at the action boundary; it preserves output delivery but does not
+   record action-level telemetry directly. *)
+and dispatch_pipeline_with_timeout ?base_host_env ?stdin_content
+    ?on_output_chunk ~(timeout : Invocation_timeout.t) stages =
+  if List.exists Shell_ir.has_variable_expansion stages then
+    unsupported_expansion_result ()
+  else
+  let subst_stderr = Buffer.create 256 in
+  (* A substitution must be evaluated before its stage's argv exists.
+     Evaluating here — ahead of choosing the native runners — keeps a
+     substitution-bearing pipeline on the streaming runners: declining to
+     [host_pipeline_specs] would drop the whole pipeline onto the buffered
+     chain, where a producer that only stops when its reader closes ([yes
+     $(printf x) | head -1]) never stops. The evaluated stage is literal,
+     so the native runners accept it. A [Pipeline]/[Sequence] stage is left
+     as is: it declines the native runners and is rejected if reached by the
+     chain, which does not spawn a subshell. *)
+  let eval_stage (stage : Shell_ir.t) =
+    match stage with
+    | Shell_ir.Simple s when Shell_ir.has_command_substitution stage ->
+        let s, child_stderr =
+          eval_substitutions ?base_host_env ?stdin_content ~timeout s
+        in
+        Buffer.add_string subst_stderr child_stderr;
+        Shell_ir.Simple s
+    | (Shell_ir.Simple _ | Shell_ir.Pipeline _ | Shell_ir.Sequence _) as stage ->
+        stage
+  in
+  let stages = List.map eval_stage stages in
+  (* The pipeline runs in what its substitutions left of the caller's
+     timeout; an exhausted budget answers as the timeout it is, the same
+     rule a simple command follows after its children. The chain keeps the
+     original [timeout]; only the native process runner takes [remaining]. *)
+  let remaining = remaining_timeout timeout in
+  let budget_refusal =
+    match remaining with
+    | Some left
+      when (not (Float.is_finite left)) || left <= 0.0 ->
+        Some (budget_exhausted_result ())
+    | _ -> None
+  in
+  let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
+  let decomposed_stage_callback ~is_final (simple : Shell_ir.simple) on_output_chunk =
+    match on_output_chunk with
+    | None -> None
+    | Some _ when simple.redirects <> [] -> None
+    | Some on_chunk ->
+        Some
+          (function
+          | `Stdout chunk ->
+              if is_final then on_chunk (`Stdout chunk)
+          | `Stderr chunk -> on_chunk (`Stderr chunk))
+  in
+  let result =
+    match budget_refusal with
+    | Some refusal -> refusal
+    | None -> (
+    match stages with
+    | [] ->
+        invalid_pipeline "empty pipeline not supported in native dispatch"
+    | [ _ ] ->
+        invalid_pipeline "single-stage pipeline not supported in native dispatch"
+    | _ ->
+        (match host_pipeline_specs ?base_host_env stages with
+         | Some specs ->
+             (match
+                match on_output_chunk with
+                | None ->
+                    Process_eio.run_argv_pipeline_with_status_split
+                      ?timeout_sec:remaining
+                      specs
+                | Some on_chunk ->
+                    Process_eio.run_argv_pipeline_with_status_split
+                      ?timeout_sec:remaining
+                      ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                      ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                      specs
+              with
+              | Ok (status, stdout, stderr) -> { output_files = None; status; stdout; stderr }
+              | Error message -> unsupported_redirect_result message)
+         | None -> (
+             match sandbox_pipeline_specs stages with
+             | Some (runner, specs) ->
+                 let on_stdout_chunk, on_stderr_chunk =
+                   match on_output_chunk with
+                   | None -> None, None
+                   | Some on_chunk ->
+                       ( Some (fun chunk -> on_chunk (`Stdout chunk))
+                       , Some (fun chunk -> on_chunk (`Stderr chunk)) )
+                 in
+                 let status, stdout, stderr =
+                   Sandbox_target.status_tuple
+                     (runner ~on_stdout_chunk ~on_stderr_chunk ~stages:specs)
+                 in
+                 { output_files = None; status; stdout; stderr }
+             | None ->
+                 let rec chain ~prev_stdout ~status ~stderr = function
+                   | [] -> { output_files = None; status; stdout = prev_stdout; stderr }
+                   | Shell_ir.Simple s :: rest ->
+                       let is_final = match rest with [] -> true | _ -> false in
+                       let stage_on_output_chunk =
+                         decomposed_stage_callback ~is_final s on_output_chunk
+                       in
+                       let stage_result =
+                         dispatch_simple_with_timeout
+                           ?base_host_env
+                           ?on_output_chunk:stage_on_output_chunk
+                           ~stdin_content:prev_stdout
+                           ~timeout
+                           s
+                       in
+                       let stage_streamed =
+                         Option.is_some stage_on_output_chunk
+                       in
+                       let status = pipeline_status status stage_result.status in
+                       let stderr = stderr ^ stage_result.stderr in
+                       if status_is_timeout stage_result.status
+                       then (
+                         (* OCaml binds [else] to the nearest [if]: without
+                            the parentheses the [else] below attached to
+                            [if not is_final], so a streamed final-stage
+                            timeout re-emitted output that had already been
+                            streamed live, and a non-streamed (redirected)
+                            stage timeout emitted nothing. *)
+                         let () =
+                           if stage_streamed
+                           then (
+                             if not is_final
+                             then
+                               emit_stdout_if_captured
+                                 on_output_chunk
+                                 stage_result.stdout)
+                           else
+                             emit_pipeline_stage_result
+                               ~emit_stdout:true
+                               on_output_chunk
+                               stage_result
+                         in
+                         { output_files = None; status; stdout = stage_result.stdout; stderr })
+                       else (
+                         let () =
+                           if stage_streamed
+                           then ()
+                           else
+                             emit_pipeline_stage_result
+                               ~emit_stdout:is_final
+                               on_output_chunk
+                               stage_result
+                         in
+                         chain
+                           ~prev_stdout:stage_result.stdout
+                           ~status
+                           ~stderr
+                           rest)
+                   | (Pipeline _ | Sequence _) :: _ ->
+                       { output_files = None; status = Unix.WEXITED 1
+                       ; stdout = ""
+                       ; stderr =
+                           stderr
+                           ^ "a pipeline stage that is itself a pipeline or a \
+                              sequence needs a subshell, which native dispatch \
+                              does not spawn"
+                       }
+                 in
+                 (match stages with
+                  | [] | [ _ ] ->
+                      invalid_pipeline "invalid pipeline arity in native dispatch"
+                  | first :: rest -> (
+                    match first with
+                    | Shell_ir.Simple s ->
+                        let first_on_output_chunk =
+                          decomposed_stage_callback
+                            ~is_final:false
+                            s
+                            on_output_chunk
+                        in
+                        let first_result =
+                          dispatch_simple_with_timeout
+                            ?base_host_env
+                            ?on_output_chunk:first_on_output_chunk
+                            ~timeout
+                            s
+                        in
+                        let first_streamed =
+                          Option.is_some first_on_output_chunk
+                        in
+                        let status =
+                          pipeline_status (Unix.WEXITED 0) first_result.status
+                        in
+                        if status_is_timeout first_result.status
+                        then (
+                          let () =
+                            if first_streamed
+                            then
+                              emit_stdout_if_captured
+                                on_output_chunk
+                                first_result.stdout
+                            else
+                              emit_pipeline_stage_result
+                                ~emit_stdout:true
+                                on_output_chunk
+                                first_result
+                          in
+                          { output_files = None; status
+                          ; stdout = first_result.stdout
+                          ; stderr = first_result.stderr
+                          })
+                        else (
+                          let () =
+                            if first_streamed
+                            then ()
+                            else
+                              emit_pipeline_stage_result
+                                on_output_chunk
+                                first_result
+                          in
+                          chain
+                            ~prev_stdout:first_result.stdout
+                            ~status
+                            ~stderr:first_result.stderr
+                            rest)
+                    | Pipeline _ | Sequence _ ->
+                        invalid_pipeline
+                          "a pipeline stage that is itself a pipeline or a \
+                           sequence needs a subshell, which native dispatch \
+                           does not spawn" )))))
+  in
+  emit_split_stderr_captured_output
+    on_output_chunk
+    emitted
+    ~child_stderr:(Buffer.contents subst_stderr)
+    { result with stderr = Buffer.contents subst_stderr ^ result.stderr }
+
+(* [a && b] runs b only when a exited zero, and [a || b] only when it did
+   not, exactly as a shell reads them. Whatever ran last decides, so a run of
+   connectors reads left to right without any precedence of its own. Output
+   from every command that ran is concatenated in the order it ran. *)
+and dispatch_sequence_with_timeout ?base_host_env ?stdin_content ?on_output_chunk
+    ~(timeout : Invocation_timeout.t) ~head ~tail () =
+  let run ir =
+    dispatch_with_timeout ?base_host_env ?stdin_content ?on_output_chunk ~timeout ir
+  in
+  let took_the_branch connector (status : Unix.process_status) =
+    match connector, status with
+    | Shell_ir.And_if, Unix.WEXITED 0 -> true
+    | Shell_ir.And_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> false
+    | Shell_ir.Or_if, Unix.WEXITED 0 -> false
+    | Shell_ir.Or_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> true
+    | Shell_ir.Seq, _ -> true
+  in
+  let rec step acc = function
+    | [] -> acc
+    | (connector, ir) :: rest ->
+      if not (took_the_branch connector acc.status)
+      then step acc rest
+      else (
+        let next = run ir in
+        step
+          { output_files = None; status = next.status
+          ; stdout = acc.stdout ^ next.stdout
+          ; stderr = acc.stderr ^ next.stderr
+          }
+          rest)
+  in
+  step (run head) tail
+
+and dispatch_with_timeout ?base_host_env ?stdin_content ?on_output_chunk
+    ~(timeout : Invocation_timeout.t) (ir : Shell_ir.t) =
+  if Shell_ir.has_variable_expansion ir then unsupported_expansion_result ()
+  else
+  match ir with
+  | Shell_ir.Simple s ->
+    dispatch_simple_with_timeout
+      ?base_host_env ?stdin_content ?on_output_chunk ~timeout s
+  | Pipeline stages ->
+    dispatch_pipeline_with_timeout
+      ?base_host_env ?stdin_content ?on_output_chunk ~timeout stages
+  | Sequence { head; tail } ->
+    dispatch_sequence_with_timeout
+      ?base_host_env ?stdin_content ?on_output_chunk ~timeout ~head ~tail ()
+
+(* The public optional arguments are decoded once. Direct simple/pipeline calls
+   retain their default epoch capture before variable rejection; general dispatch
+   still rejects variables before reaching any default clock read. *)
+let dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
+    ?(started = monotonic_now ()) (s : Shell_ir.simple) =
+  let timeout = Invocation_timeout.create ~timeout_sec ~started in
+  dispatch_simple_with_timeout
+    ?base_host_env ?stdin_content ?on_output_chunk ~timeout s
+
+let dispatch_pipeline ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk
+    ?(started = monotonic_now ()) stages =
+  let timeout = Invocation_timeout.create ~timeout_sec ~started in
+  dispatch_pipeline_with_timeout
+    ?base_host_env ?stdin_content ?on_output_chunk ~timeout stages
+
+let dispatch ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ?started
+    (ir : Shell_ir.t) =
+  if Shell_ir.has_variable_expansion ir then unsupported_expansion_result ()
+  else
+  match ir with
+  | Shell_ir.Simple s ->
+    dispatch_simple
+      ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ?started s
+  | Pipeline stages ->
+    dispatch_pipeline
+      ?base_host_env ?timeout_sec ?stdin_content ?on_output_chunk ?started stages
+  | Sequence { head; tail } ->
+    let started =
+      match started with
+      | Some started -> started
+      | None -> monotonic_now ()
+    in
+    let timeout = Invocation_timeout.create ~timeout_sec ~started in
+    dispatch_sequence_with_timeout
+      ?base_host_env ?stdin_content ?on_output_chunk ~timeout ~head ~tail ()

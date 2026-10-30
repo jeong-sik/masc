@@ -1,0 +1,2221 @@
+(** RFC-0387 — B1 creation requirement + verification ledger + the stage-2
+    completion gate.
+
+    B1: creation without a declared success condition ([metric] +
+    [target_value]) is a typed rejection. Partial updates retain omitted
+    fields, and changed effective criteria must remain non-blank.
+
+    Ledger: verdict commits round-trip through the file store, the decoders
+    are strict (unknown fields / unknown variants are decode errors), a store
+    that does not decode refuses every mutation AND fails every read loudly —
+    never a silent "not verified yet".
+
+    Stage 2 gate: [request_complete] moves Executing -> Verifying and persists
+    the durable proof request BEFORE the phase write. Public MCP callers cannot
+    name verifier commits. Only the application-owned typed verifier boundary
+    can prove/refute completion, with non-blank
+    evidence and fixed [verifier_exact] authority. A repeated
+    [request_complete] on Verifying answers [Already], wakes an existing
+    pending proof again, and re-arms the request when the ledger lost it (the
+    P0-2 wedge). The FSM is the only transition decider; the ledger records. *)
+
+open Alcotest
+open Masc
+open Workspace_types
+
+(* The keeper.world frame prose this suite asserts ("증명 대기 중" in the Active
+   Goals rows) moved out of the .ml sources into config/prompts/keeper.md as
+   world.* keys, rendered through the prompt registry at assembly time.
+   Loading them into the registry is what [Prompt_defaults.init] does below;
+   the registry locates config/prompts itself under Dune. *)
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
+let () =
+  Masc.Prompt_defaults.init ()
+;;
+
+let temp_dir () =
+  let path = Filename.temp_file "goal_verification_gate_" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let rm_rf dir =
+  let rec rm path =
+    if Sys.file_exists path
+    then
+      if Sys.is_directory path
+      then (
+        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
+        Unix.rmdir path)
+      else Sys.remove path
+  in
+  try rm dir with
+  | _ -> ()
+;;
+
+let with_workspace f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* The server delivers Goal notices with the guard enabled; with it off,
+     guarded store mutexes are skipped and a wrong-context call passes. *)
+  Eio_guard.enable ();
+  let dir = temp_dir () in
+  let previous_delivery = Goal_delivery.For_testing.replace_backend
+    (Some Server_bootstrap_loops.For_testing.goal_notification_backend) in
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_guard.disable ();
+      ignore (Goal_delivery.For_testing.replace_backend previous_delivery);
+      rm_rf dir)
+    (fun () ->
+       let config = Workspace.default_config dir in
+       ignore (Workspace.init config ~agent_name:(Some "planner"));
+       f config)
+;;
+
+let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
+  { Tool_workspace.config; agent_name }
+;;
+
+let dispatch ctx ~name args =
+  match Tool_workspace.dispatch ctx ~name ~args:(`Assoc args) with
+  | Some result -> result
+  | None -> fail (name ^ " not handled")
+;;
+
+let body_of result = Yojson.Safe.from_string (Tool_result.message result)
+
+let must_succeed label result =
+  if Tool_result.is_success result
+  then body_of result
+  else fail (Printf.sprintf "%s: expected success, got %s" label
+               (Tool_result.message result))
+;;
+
+let must_fail label result =
+  if Tool_result.is_success result
+  then fail (Printf.sprintf "%s: expected rejection, got success" label)
+  else body_of result
+;;
+
+let json_state json path =
+  List.fold_left
+    (fun acc key -> Yojson.Safe.Util.member key acc)
+    json path
+  |> Yojson.Safe.Util.to_string
+;;
+
+let json_bool json path =
+  List.fold_left
+    (fun acc key -> Yojson.Safe.Util.member key acc)
+    json path
+  |> Yojson.Safe.Util.to_bool
+;;
+
+let isolated_criterion =
+  Goal_store.Criterion { revision = "test-criterion"; title = "Ledger proof";
+    metric = Some "verified services"; target_value = Some "3" }
+;;
+
+let current_criterion config goal_id =
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> Goal_store.criterion_of_goal goal
+  | Goal_store.Goal_absent -> fail ("missing Goal criterion: " ^ goal_id)
+  | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
+;;
+
+let proof_identity config goal_id =
+  match Goal_verification.get_record_authoritative config ~goal_id with
+  | Ok (Some { completion = Goal_verification.Proof_pending pending; _ }) ->
+    pending.request_id, pending.criterion
+  | Ok (Some { completion = Goal_verification.Proof_proven v | Goal_verification.Proof_refuted v; _ }) ->
+    v.request_id, v.criterion
+  | Ok _ -> fail "test setup needs a bound proof request"
+  | Error detail -> fail detail
+;;
+
+let verdict ?(evidence = "observed by the verifier")
+    ?(request_id = "no-pending-request") ?(criterion = isolated_criterion) outcome : Goal_verification.verdict =
+  { Goal_verification.outcome
+  ; request_id
+  ; criterion
+  ; verification_run_id = "goal-verifier-test-run"
+  ; authority = Masc_domain.System_llm_agent { agent_run_id = "test-verifier" }
+  ; evidence
+  ; recorded_at = Masc_domain.now_iso ()
+  }
+;;
+
+(* Poison both stores to test failed historical reads as well as authoritative
+   mutations. A healthy mirror may serve history, but never authorizes a write. *)
+let poison_ledger config =
+  let poison path =
+    Out_channel.with_open_bin path (fun oc ->
+      Out_channel.output_string oc "not json")
+  in
+  let primary = Goal_verification.verifications_path config in
+  poison primary;
+  poison (primary ^ ".last-good")
+;;
+
+(* B1 *)
+
+let test_create_requires_a_success_condition () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let rejected =
+    must_fail
+      "create without metric"
+      (dispatch ctx ~name:"masc_goal_upsert" [ "title", `String "No condition" ])
+  in
+  check string "typed validation error" "validation_error"
+    (json_state rejected [ "error_code" ]);
+  check bool "the message names the missing condition" true
+    (String_util.contains_substring
+       (Yojson.Safe.to_string rejected)
+       "metric and target_value");
+  (* A blank value rejects exactly like an absent one. *)
+  let blank =
+    must_fail
+      "create with blank target_value"
+      (dispatch
+         ctx
+         ~name:"masc_goal_upsert"
+         [ "title", `String "Blank condition"
+         ; "metric", `String "verified services"
+         ; "target_value", `String "   "
+         ])
+  in
+  check string "typed validation error" "validation_error"
+    (json_state blank [ "error_code" ])
+;;
+
+let test_create_with_a_success_condition_succeeds () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let body =
+    must_succeed
+      "create with a success condition"
+      (dispatch
+         ctx
+         ~name:"masc_goal_upsert"
+         [ "title", `String "Verifiable goal"
+         ; "metric", `String "verified services"
+         ; "target_value", `String "3"
+         ])
+  in
+  check string "created" "created" (json_state body [ "action" ])
+;;
+
+let test_partial_update_preserves_success_condition () =
+  with_workspace
+  @@ fun config ->
+  let goal, _ =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Created with a condition"
+        ~metric:"m"
+        ~target_value:"1"
+        ()
+    with
+    | Ok payload -> payload
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  (* A partial rename uses the stored metric and target when checking the
+     changed effective criterion. No re-declaration is required. *)
+  match
+    Goal_store.upsert_goal config ~id:goal.id ~title:"Renamed" ()
+  with
+  | Ok (updated, `updated _) ->
+    check (option string) "metric retained" goal.metric updated.metric;
+    check (option string) "target retained" goal.target_value updated.target_value
+  | Ok (_, `created) -> fail "an existing id must update, not create"
+  | Error error -> fail ("partial update rejected: " ^ Goal_store.write_error_to_string error)
+;;
+
+let test_undecodable_goal_store_reports_corruption_not_b1 () =
+  with_workspace
+  @@ fun config ->
+  (* Poison the GOAL store: the create/update split is decided inside the
+     write lock on the decoded state, so a corrupt store must surface the
+     fail-closed persistence error — not "metric and target_value are
+     required", which would misreport corruption as a caller mistake. *)
+  let goals_path = Goal_store.goals_path config in
+  let poison path =
+    Out_channel.with_open_bin path (fun oc ->
+      Out_channel.output_string oc "not json")
+  in
+  poison goals_path;
+  poison (goals_path ^ ".last-good");
+  match Goal_store.upsert_goal config ~title:"x" ~metric:"m" ~target_value:"1" () with
+  | Ok _ -> fail "upsert_goal wrote over an undecodable store"
+  (* The refusal is the store's typed Unavailable, never the B1 rejection:
+     the create/update split is decided only on a state that was read. *)
+  | Error (Goal_store.Store_unavailable { reason = Goal_store.Not_json _; _ }) -> ()
+  | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _
+          | Goal_store.Rejected _ | Goal_store.Persist_failed _ as other) ->
+    fail ("expected Store_unavailable Not_json, got: " ^ Goal_store.write_error_to_string other)
+;;
+
+(* Ledger: record/read round-trip *)
+
+(* Ledger: record-only discipline (stage 1 pins the preconditions the stage-2
+   gate relies on) *)
+
+let test_proof_verdict_requires_a_pending_request () =
+  with_workspace
+  @@ fun config ->
+  match
+    Goal_verification.record_proof_verdict
+      config
+      ~goal_id:"goal-no-request"
+      (verdict Goal_verification.Proven)
+  with
+  | Ok _ -> fail "proof verdict committed without a pending request"
+  | Error msg ->
+    check bool "the refusal names the missing request" true
+      (String_util.contains_substring msg "does not match the pending request")
+;;
+
+(* Ledger: strict decode, fail-closed mutations, fail-loud reads *)
+
+let test_undecodable_ledger_fails_closed_and_loud () =
+  with_workspace
+  @@ fun config ->
+  ignore
+    (match
+       Goal_verification.mark_proof_pending config ~goal_id:"goal-corrupt" ~criterion:isolated_criterion
+     with
+     | Ok _ -> ()
+     | Error msg -> fail msg);
+  poison_ledger config;
+  (* Mutations refuse. *)
+  (match
+     Goal_verification.mark_proof_pending config ~goal_id:"goal-corrupt" ~criterion:isolated_criterion
+   with
+   | Ok _ -> fail "mutation proceeded on an undecodable ledger"
+   | Error _ -> ());
+  (* Reads fail LOUD: an undecodable ledger is an Error, never [None] — a
+     corrupt store must not render as "not verified yet". *)
+  (match Goal_verification.get_record config ~goal_id:"goal-corrupt" with
+   | Ok _ -> fail "lenient read disguised a corrupt ledger as absence"
+   | Error msg ->
+     check bool "the decode failure is named" true
+       (String_util.contains_substring msg "did not decode"));
+  match Goal_verification.load_records config with
+  | Ok _ -> fail "bulk read disguised a corrupt ledger"
+  | Error msg ->
+    check bool "the decode failure is named" true
+      (String_util.contains_substring msg "did not decode")
+;;
+
+let test_unknown_ledger_field_is_a_decode_error () =
+  with_workspace
+  @@ fun config ->
+  ignore
+    (match
+       Goal_verification.mark_proof_pending config ~goal_id:"goal-strict" ~criterion:isolated_criterion
+     with
+     | Ok _ -> ()
+     | Error msg -> fail msg);
+  (* Hand-edit the committed store: add an unknown field to the one row. *)
+  let path = Goal_verification.verifications_path config in
+  let json = Yojson.Safe.from_file path in
+  let poisoned =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             match key, value with
+             | "records", `List [ `Assoc row ] ->
+               ( "records"
+               , `List [ `Assoc (("surprise_field", `Bool true) :: row) ] )
+             | _ -> key, value)
+           fields)
+    | _ -> fail "unexpected ledger shape"
+  in
+  Yojson.Safe.to_file path poisoned;
+  Yojson.Safe.to_file (path ^ ".last-good") poisoned;
+  match Goal_verification.get_record config ~goal_id:"goal-strict" with
+  | Ok _ -> fail "an unknown field decoded silently"
+  | Error msg ->
+    check bool "the unknown field is named" true
+      (String_util.contains_substring msg "surprise_field")
+;;
+
+let test_human_confirmation_requires_bound_verdict () =
+  with_workspace
+  @@ fun config ->
+  (match Goal_verification.mark_proof_pending config ~goal_id:"goal-human-missing-verdict" ~criterion:isolated_criterion with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let path = Goal_verification.verifications_path config in
+  let json = Yojson.Safe.from_file path in
+  let poisoned =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              match key, value with
+              | "records", `List [ `Assoc row ] ->
+                let row =
+                  List.map
+                    (fun (field, value) ->
+                       if String.equal field "completion"
+                       then field, `Assoc [ "state", `String "human_confirmed" ]
+                       else field, value)
+                    row
+                in
+                key, `List [ `Assoc row ]
+              | _ -> key, value)
+           fields)
+    | _ -> fail "unexpected ledger shape"
+  in
+  Yojson.Safe.to_file path poisoned;
+  Yojson.Safe.to_file (path ^ ".last-good") poisoned;
+  match Goal_verification.get_record config ~goal_id:"goal-human-missing-verdict" with
+  | Ok _ -> fail "human confirmation without proof decoded silently"
+  | Error msg ->
+    check bool "the missing bound verdict is rejected" true
+      (String_util.contains_substring msg "goal_verification.verdict")
+;;
+
+(* Observability: the read surfaces join the ledger *)
+
+let test_goal_list_joins_the_ledger () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let created =
+    must_succeed
+      "create goal"
+      (dispatch
+         ctx
+         ~name:"masc_goal_upsert"
+         [ "title", `String "Observable goal"
+         ; "metric", `String "verified services"
+         ; "target_value", `String "3"
+         ])
+  in
+  let goal_id = json_state created [ "goal_id" ] in
+  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" []) in
+  let goals = Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list in
+  (match goals with
+   | [ goal_json ] ->
+     check string "completion renders idle" "idle"
+       (json_state goal_json [ "verification"; "completion"; "state" ])
+   | _ -> fail "expected one listed goal");
+  (* A durable request shows up in the same join. *)
+  ignore
+    (match Goal_verification.mark_proof_pending config ~goal_id ~criterion:(current_criterion config goal_id) with
+     | Ok _ -> ()
+     | Error msg -> fail msg);
+  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" []) in
+  let goals = Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list in
+  match goals with
+  | [ goal_json ] ->
+    check string "the request is observable" "proof_pending"
+      (json_state goal_json [ "verification"; "completion"; "state" ])
+  | _ -> fail "expected one listed goal"
+;;
+
+let test_goal_list_renders_a_ledger_error_state () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  ignore
+    (must_succeed
+       "create goal"
+       (dispatch
+          ctx
+          ~name:"masc_goal_upsert"
+          [ "title", `String "Goal beside a corrupt ledger"
+          ; "metric", `String "m"
+          ; "target_value", `String "1"
+          ]));
+  poison_ledger config;
+  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" []) in
+  let goals = Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list in
+  match goals with
+  | [ goal_json ] ->
+    check string "corruption renders as ledger_error, not as the default"
+      "ledger_error"
+      (json_state goal_json [ "verification"; "state" ])
+  | _ -> fail "expected one listed goal"
+;;
+
+(* {1 Stage 2 — the completion gate (RFC-0387 §3.2/§3.3/§4/§5)} *)
+
+let create_goal ctx title =
+  let created =
+    must_succeed
+      "create goal"
+      (dispatch
+         ctx
+         ~name:"masc_goal_upsert"
+         [ "title", `String title
+         ; "metric", `String "m"
+         ; "target_value", `String "1"
+         ])
+  in
+  json_state created [ "goal_id" ]
+;;
+
+let test_measurement_requires_current_criterion_and_evidence () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Measure actual work" in
+  let goal =
+    match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+        fail "created Goal is not readable"
+  in
+  let args revision evidence =
+    [ "goal_id", `String goal_id
+    ; "criterion_revision", `String revision
+    ; "observed_value", `String "0"
+    ; "evidence", `String evidence
+    ]
+  in
+  ignore (must_fail "missing evidence"
+            (dispatch ctx ~name:"masc_goal_measure"
+               (args goal.criterion_revision "")));
+  let measured =
+    must_succeed "record explicit measurement"
+      (dispatch ctx ~name:"masc_goal_measure"
+         (args goal.criterion_revision "artifact:measured-count"))
+  in
+  check string "the tool calls it reported" "reported_only"
+    (json_state measured [ "measurement_status" ]);
+  check string "recording leaves completion unchanged" "unchanged"
+    (json_state measured [ "completion_effect" ]);
+  check string "the tool exposes the actual current phase" "executing"
+    (json_state measured [ "goal_at_recording"; "phase" ]);
+  let first_measurement = Goal_measurement.projection (Goal_measurement.load config) goal in
+  check string "actual is stored exactly" "0"
+    (json_state first_measurement [ "record"; "observed_value" ]);
+  check string "evidence survives" "artifact:measured-count"
+    (json_state first_measurement [ "record"; "evidence" ]);
+  let listed = must_succeed "goal list after measurement"
+      (dispatch ctx ~name:"masc_goal_list" []) in
+  (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
+   | [ goal_json ] ->
+       check string "list reports actual state" "reported"
+         (json_state goal_json [ "measurement"; "state" ]);
+       check string "list preserves reported zero" "0"
+         (json_state goal_json [ "measurement"; "record"; "observed_value" ])
+   | _ -> fail "expected one listed Goal");
+  let cache_before = Goal_projection_generation.current () in
+  (match Goal_measurement.record config ~goal_id
+           ~criterion_revision:goal.criterion_revision ~observed_value:"1"
+           ~evidence:"artifact:updated-count" ~actor:"test" with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  check int "successful write changes dashboard cache key" (cache_before + 1)
+    (Goal_projection_generation.current ());
+  (match Goal_measurement.load config with
+   | Ok [ row ] ->
+       check string "latest replaces prior value" "1" row.observed_value;
+       check string "latest replaces prior evidence" "artifact:updated-count" row.evidence
+   | Ok _ | Error _ -> fail "measurement snapshot kept more than one row for a Goal");
+  let before_revision = Goal_projection_generation.current () in
+  let changed =
+    match Goal_store.upsert_goal config ~id:goal_id ~target_value:"2" () with
+    | Ok (goal, _) -> goal
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  check bool "criterion change refreshes dashboard cache" true
+    (Goal_projection_generation.current () > before_revision);
+  check string "old criterion is not current" "not_recorded"
+    (json_state (Goal_measurement.projection (Goal_measurement.load config) changed)
+       [ "state" ]);
+  let listed = must_succeed "goal list after criterion revision"
+      (dispatch ctx ~name:"masc_goal_list" []) in
+  (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
+   | [ goal_json ] ->
+       check string "revised criterion has no actual" "not_recorded"
+         (json_state goal_json [ "measurement"; "state" ])
+   | _ -> fail "expected one listed Goal");
+  ignore (must_fail "stale criterion"
+            (dispatch ctx ~name:"masc_goal_measure"
+               (args goal.criterion_revision "artifact:stale")))
+;;
+
+let transition ctx goal_id ?note ?evidence action =
+  (* A drop must say why; a test that does not care gets this sentence. *)
+  let note = match note with
+    | None when String.equal action "drop" -> Some "scenario no longer needs this Goal"
+    | Some _ | None -> note in
+  let args =
+    [ "goal_id", `String goal_id; "action", `String action ]
+    @ (match note with
+       | Some note -> [ "note", `String note ]
+       | None -> [])
+    @ (match evidence with
+       | Some evidence -> [ "evidence", `String evidence ]
+       | None -> [])
+  in
+  dispatch ctx ~name:"masc_goal_transition" args
+;;
+
+let measurable_goal config ctx title =
+  let goal_id = create_goal ctx title in
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> goal
+  | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+      fail "created Goal is not readable"
+;;
+
+let record_evidence config (goal : Goal_store.goal) evidence =
+  Goal_measurement.record config ~goal_id:goal.id
+    ~criterion_revision:goal.criterion_revision ~observed_value:"7" ~evidence
+    ~actor:"test"
+;;
+
+let test_measurement_receipt_preserves_lifecycle_and_criterion () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal = measurable_goal config ctx "Measurement reports lifecycle, not completion" in
+  List.iter
+    (fun phase ->
+       let at_recording =
+         match Goal_store.transact_goal config ~goal_id:goal.id
+                 (fun current -> Ok ({ current with phase }, ())) with
+         | Ok (current, ()) -> current
+         | Error error -> fail (Goal_store.write_error_to_string error)
+       in
+       let paths = [ Goal_store.goals_path config; Goal_store.goals_path config ^ ".last-good" ] in
+       let before = List.map (fun path -> path, Fs_compat.load_file path) paths in
+       let receipt = must_succeed "measure an existing lifecycle state"
+           (dispatch ctx ~name:"masc_goal_measure"
+              [ "goal_id", `String goal.id
+              ; "criterion_revision", `String at_recording.criterion_revision
+              ; "observed_value", `String "1"
+              ; "evidence", `String "note:the declared metric was observed"
+              ]) in
+       check string "measurement remains a report" "reported_only"
+         (json_state receipt [ "measurement_status" ]);
+       check string "measurement performs no completion transition" "unchanged"
+         (json_state receipt [ "completion_effect" ]);
+       check bool "receipt binds the exact Goal, including suspension restore state" true
+         (Yojson.Safe.Util.member "goal_at_recording" receipt
+          = Goal_store.goal_to_yojson at_recording);
+       check bool "report is not named verification" true
+         (Yojson.Safe.Util.member "verification" receipt = `Null);
+       List.iter (fun (path, bytes) ->
+         check string "recording leaves Goal lifecycle bytes unchanged" bytes
+           (Fs_compat.load_file path)) before;
+       let stored = Yojson.Safe.from_string (Fs_compat.load_file (Goal_measurement.path config)) in
+       (match Yojson.Safe.Util.member "measurements" stored with
+        | `List [ `Assoc fields ] ->
+            check (list string) "durable observation schema has no receipt or lifecycle copy"
+              [ "actor"; "criterion_revision"; "evidence"; "goal_id"; "id";
+                "observed_value"; "recorded_at" ]
+              (List.sort String.compare (List.map fst fields))
+        | _ -> fail "expected one durable measurement row"))
+    Goal_phase.all;
+  let receipt = match record_evidence config goal "note:before a criterion edit" with
+    | Ok receipt -> receipt
+    | Error error -> fail (Goal_measurement.error_to_string error) in
+  let captured = `Assoc (Goal_measurement.receipt_fields receipt) in
+  let changed = match Goal_store.upsert_goal config ~id:goal.id ~target_value:"2" () with
+    | Ok (changed, _) -> changed
+    | Error error -> fail (Goal_store.write_error_to_string error) in
+  check bool "criterion really changed after recording" true
+    (changed.criterion_revision <> receipt.goal_at_recording.criterion_revision);
+  check bool "serializing an issued receipt does not reread a later Goal" true
+    (captured = `Assoc (Goal_measurement.receipt_fields receipt));
+  check string "measurement and transaction Goal name the same criterion"
+    receipt.measurement.criterion_revision receipt.goal_at_recording.criterion_revision;
+  (match record_evidence config goal "note:stale criterion" with
+   | Error (Goal_measurement.Conflict _) -> ()
+   | Ok _ -> fail "a stale criterion produced a receipt"
+   | Error error -> fail (Goal_measurement.error_to_string error))
+;;
+
+(* "Evidence-backed" means the product's Evidence Reference grammar, the one
+   Task completion accepts, not any non-blank text: a Keeper sending
+   evidence "done" must not put a reported value on the Goal tree. *)
+let test_measurement_evidence_is_an_evidence_reference () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal = measurable_goal config ctx "Evidence must resolve" in
+  List.iter
+    (fun evidence ->
+       match record_evidence config goal evidence with
+       | Error (Goal_measurement.Invalid_request _) -> ()
+       | Error ((Goal_measurement.Conflict _ | Goal_measurement.Store_error _) as error) ->
+           fail
+             (Printf.sprintf "evidence %S: expected Invalid_request, got %s" evidence
+                (Goal_measurement.error_to_string error))
+       | Ok _ -> fail (Printf.sprintf "evidence %S is not a reference but was recorded" evidence))
+    [ "done"; "100%"; "https://example.com/proof"; "note:   "; "board:";
+      "artifact:"; "artifact:/abs"; "artifact:../x" ];
+  (match Goal_measurement.load config with
+   | Ok [] -> ()
+   | Ok _ -> fail "rejected evidence left a measurement row"
+   | Error detail -> fail detail);
+  let refused =
+    must_fail "tool rejects evidence that is not a reference"
+      (dispatch ctx ~name:"masc_goal_measure"
+         [ "goal_id", `String goal.id
+         ; "criterion_revision", `String goal.criterion_revision
+         ; "observed_value", `String "100%"
+         ; "evidence", `String "done"
+         ])
+  in
+  check string "the tool refuses it as a validation error"
+    (Tool_args.error_code_to_string Tool_args.Validation_error)
+    (json_state refused [ "error_code" ]);
+  List.iter
+    (fun evidence ->
+       match record_evidence config goal evidence with
+       | Ok receipt ->
+           check string "reference is stored as given" evidence
+             receipt.measurement.evidence
+       | Error error ->
+           fail
+             (Printf.sprintf "evidence %S was refused: %s" evidence
+                (Goal_measurement.error_to_string error)))
+    [ "artifact:reports/cases.json"; "note:seven cases passed in CI"; "board:p-123";
+      "fusion:run-9" ]
+;;
+
+(* The store is read with the same evidence check: a row whose evidence is
+   not a reference makes the snapshot unreadable instead of being shown as a
+   reported value. The first write is the control that the hand-written row
+   shape is one [load] accepts. *)
+let test_stored_non_reference_evidence_is_unreadable () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal = measurable_goal config ctx "Stored evidence is checked" in
+  let store evidence =
+    Fs_compat.save_file (Goal_measurement.path config)
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ "version", `Int 1
+           ; "measurements",
+             `List
+               [ `Assoc
+                   [ "id", `String "measurement-1"
+                   ; "goal_id", `String goal.id
+                   ; "criterion_revision", `String goal.criterion_revision
+                   ; "observed_value", `String "7"
+                   ; "evidence", `String evidence
+                   ; "actor", `String "test"
+                   ; "recorded_at", `String "2026-09-25T00:00:00Z"
+                   ]
+               ]
+           ]))
+  in
+  store "artifact:reports/cases.json";
+  (match Goal_measurement.load config with
+   | Ok [ row ] -> check string "control row loads" "artifact:reports/cases.json" row.evidence
+   | Ok rows -> fail (Printf.sprintf "control: expected 1 row, found %d" (List.length rows))
+   | Error detail -> fail ("control row was refused: " ^ detail));
+  store "done";
+  (match Goal_measurement.load config with
+   | Error _ -> ()
+   | Ok _ -> fail "a stored row with evidence \"done\" was loaded");
+  check string "the Goal shows the store as unavailable" "unavailable"
+    (json_state (Goal_measurement.projection (Goal_measurement.load config) goal) [ "state" ])
+;;
+
+(* Deleting a Goal takes its observation row with it, so the snapshot is
+   bounded by the Goals that exist. A closed Goal still takes an
+   observation: recording never moves the phase. *)
+let test_measurement_rows_follow_goal_existence_not_phase () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let kept = measurable_goal config ctx "Kept" in
+  let deleted = measurable_goal config ctx "Deleted" in
+  List.iter
+    (fun (goal, evidence) ->
+       match record_evidence config goal evidence with
+       | Ok _ -> ()
+       | Error error -> fail (Goal_measurement.error_to_string error))
+    [ kept, "artifact:kept"; deleted, "artifact:deleted" ];
+  (match Goal_store.delete_goal config ~goal_id:deleted.id with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+  (match Goal_measurement.remove_goal config ~goal_id:deleted.id with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  (match Goal_measurement.load config with
+   | Ok [ row ] -> check string "only the live Goal keeps a row" kept.id row.goal_id
+   | Ok rows -> fail (Printf.sprintf "expected 1 row, found %d" (List.length rows))
+   | Error detail -> fail detail);
+  ignore (must_succeed "drop" (transition ctx kept.id "drop"));
+  (match record_evidence config kept "note:metric seen again after the drop" with
+   | Ok receipt ->
+       check string "a dropped Goal records the new observation"
+         "note:metric seen again after the drop" receipt.measurement.evidence;
+       check string "the receipt records its actual dropped phase" "dropped"
+         (Goal_phase.to_string receipt.goal_at_recording.phase)
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  (match Goal_store.find_goal config ~goal_id:kept.id with
+   | Goal_store.Goal_found goal ->
+       check string "the observation did not move the phase" "dropped"
+         (Goal_phase.to_string goal.phase)
+   | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+       fail "dropped Goal is not readable")
+;;
+
+let verifier_transition config goal_id decision evidence =
+  let request_id, criterion = proof_identity config goal_id in
+  Workspace_goals.commit_verifier_decision
+    ~tool_name:"goal_verifier_commit"
+    ~start_time:(Tool_timing.start ())
+    config
+    ~goal_id
+    ~verification_run_id:"goal-verifier-test-run"
+    ~request_id
+    ~criterion
+    ~decision
+    ~evidence
+;;
+
+let stored_phase config goal_id =
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> Goal_phase.to_string goal.Goal_store.phase
+  | Goal_store.Goal_absent -> fail ("goal not found: " ^ goal_id)
+  | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
+;;
+
+let ledger_record config goal_id =
+  match Goal_verification.get_record config ~goal_id with
+  | Ok (Some record) -> record
+  | Ok None -> fail ("no ledger row for " ^ goal_id)
+  | Error msg -> fail msg
+;;
+
+let goal_events_text config =
+  let path =
+    Filename.concat
+      (Filename.dirname (Goal_verification.verifications_path config))
+      "goal_events.jsonl"
+  in
+  if Sys.file_exists path
+  then (
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let b = Buffer.create 256 in
+         (try
+            while true do
+              Buffer.add_string b (input_line ic);
+              Buffer.add_char b '\n'
+            done
+          with
+          | End_of_file -> ());
+         Buffer.contents b))
+  else ""
+;;
+
+(* (a) The completion request enters the gate; the durable proof request is
+   visible in the response and in the ledger. *)
+let test_reopen_without_any_verification_history () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Reopen before any completion request" in
+  let path = Goal_verification.verifications_path config in
+  check bool "creation does not need a proof ledger" false (Sys.file_exists path);
+  let repeated = must_succeed "already executing without proof" (transition ctx goal_id "reopen") in
+  check bool "fresh goal reopen is a no-op" true (json_bool repeated [ "noop" ]);
+  ignore (must_succeed "drop" (transition ctx goal_id "drop"));
+  let reopened = must_succeed "reopen without proof" (transition ctx goal_id "reopen") in
+  check string "reopened goal executes" "executing" (json_state reopened [ "goal"; "phase" ]);
+  check bool "reopen invents no verification history" false (Sys.file_exists path)
+;;
+
+let test_reopened_goal_enters_a_new_verification_cycle () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Reopen a proven goal" in
+  ignore (must_succeed "first request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "first proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "original proof"));
+  let previous = ledger_record config goal_id in
+  ignore (must_succeed "reopen" (transition ctx goal_id "reopen"));
+  check string "reopen returns to execution" "executing" (stored_phase config goal_id);
+  check bool "the previous proof is no longer the active proof" true
+    ((ledger_record config goal_id).completion = Goal_verification.Completion_idle);
+  let history = goal_events_text config in
+  let archived =
+    String.split_on_char '\n' history
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun event ->
+      json_state event [ "event_type" ] = "goal_proof_reopened")
+  in
+  (match archived, previous.completion with
+   | [ event ], Goal_verification.Proof_proven verdict ->
+     check string "original evidence remains in history" verdict.evidence
+       (json_state event [ "payload"; "previous_completion"; "verdict"; "evidence" ]);
+     check string "original verifier attempt remains in history" verdict.verification_run_id
+       (json_state event [ "payload"; "previous_completion"; "verdict"; "verification_run_id" ]);
+     check string "original proof time remains in history" verdict.recorded_at
+       (json_state event [ "payload"; "previous_completion"; "verdict"; "recorded_at" ])
+   | _ -> fail "reopen must preserve the original verdict once");
+  let repeated = must_succeed "repeat reopened execution" (transition ctx goal_id "reopen") in
+  check bool "repeated reopen is a no-op" true (json_bool repeated [ "noop" ]);
+  check string "repeated reopen emits no duplicate history" history (goal_events_text config);
+  ignore (must_succeed "new completion request" (transition ctx goal_id "request_complete"));
+  check string "new request reaches verifying" "verifying" (stored_phase config goal_id);
+  (match Goal_verification_agent.For_testing.collect_pending config with
+   | Ok { Goal_verification_agent.For_testing.collected = work; _ } -> check bool "the verifier can collect the new proof request" true
+       (List.exists (fun (work : Goal_verification_agent.For_testing.pending_work) -> work.goal_id = goal_id) work)
+   | Error failure -> fail (Goal_verification_agent.For_testing.scan_failure_to_string failure));
+  (* Reopen from the new Verifying goes back to Executing and archives the
+     pending request; the stale request cannot be answered afterwards. *)
+  let stale_request, stale_criterion = proof_identity config goal_id in
+  ignore (must_succeed "reopen from verifying" (transition ctx goal_id "reopen"));
+  check string "reopen from verifying returns to execution" "executing" (stored_phase config goal_id);
+  check bool "the pending request is no longer active" true
+    ((ledger_record config goal_id).completion = Goal_verification.Completion_idle);
+  let archived_pending =
+    String.split_on_char '\n' (goal_events_text config)
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun event ->
+      json_state event [ "event_type" ] = "goal_proof_reopened"
+      && (match Yojson.Safe.Util.(event |> member "payload" |> member "previous_completion"
+                                   |> member "request_id") with
+          | `String request_id -> String.equal request_id stale_request
+          | _ -> false))
+  in
+  check int "the pending request is archived once" 1 (List.length archived_pending);
+  ignore (must_fail "stale answer after reopen"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~request_id:stale_request ~criterion:stale_criterion
+       ~verification_run_id:"stale-verifier-run"
+       ~decision:Workspace_goals.Proof_proven ~evidence:"stale proof"));
+  check string "stale answer leaves the goal executing" "executing" (stored_phase config goal_id);
+  ignore (must_succeed "third completion request" (transition ctx goal_id "request_complete"));
+  let request_id, criterion = proof_identity config goal_id in
+  ignore (must_succeed "second proof"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~request_id ~criterion ~verification_run_id:"second-verifier-run"
+       ~decision:Workspace_goals.Proof_proven ~evidence:"new execution proof"));
+  check string "new execution can complete" "awaiting_confirmation" (stored_phase config goal_id);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_proven verdict ->
+    check string "new proof owns the active verdict" "second-verifier-run" verdict.verification_run_id
+  | _ -> fail "second execution did not retain its own proof"
+;;
+
+(* A goal failure takes its class from its error code
+   ([Tool_args.failure_class_of_error_code]). An argument the caller can
+   correct is a policy rejection; a phase that does not admit the call is a
+   workflow rejection. *)
+let test_goal_failures_take_the_class_of_their_code () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let class_of result =
+    Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class result)
+  in
+  let goal_id = create_goal ctx "Classify goal failures" in
+  check (option string) "an action that does not exist"
+    (Some "policy_rejection")
+    (class_of (transition ctx goal_id "not_an_action"));
+  check (option string) "a goal that does not exist"
+    (Some "policy_rejection")
+    (class_of (transition ctx "goal-that-does-not-exist" "drop"));
+  ignore (must_succeed "drop" (transition ctx goal_id "drop"));
+  check (option string) "evidence for a goal with no proof request"
+    (Some "workflow_rejection")
+    (class_of
+       (dispatch ctx ~name:"masc_goal_transition"
+          [ "goal_id", `String goal_id
+          ; "action", `String "request_complete"
+          ; "evidence_refs", `List [ `String "board:post-1" ]
+          ]))
+;;
+
+(* A refusal the proof-request transaction decides keeps its code and
+   writes nothing. *)
+let test_proof_request_refusal_keeps_its_code () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Refuse a proof request" in
+  ignore (must_succeed "drop" (transition ctx goal_id "drop"));
+  (match Workspace_goals.request_current_proof config ~goal_id with
+   | Error (Workspace_goals.Refused { code = Tool_args.Precondition_failed; _ }) -> ()
+   | Error (Workspace_goals.Refused { code; message }) ->
+     failf "refused as %s: %s" (Tool_args.error_code_to_string code) message
+   | Error (Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
+   | Ok _ -> fail "a dropped goal accepted a proof request");
+  check string "nothing was written" "dropped" (stored_phase config goal_id)
+;;
+
+let test_dropped_pending_proof_gets_a_new_request_after_reopen () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Drop a request before its phase write" in
+  let criterion = current_criterion config goal_id in
+  (match Goal_verification.mark_proof_pending config ~goal_id ~criterion with
+   | Ok _ -> () | Error detail -> fail detail);
+  let old_request, old_criterion = proof_identity config goal_id in
+  ignore (must_succeed "drop before phase write" (transition ctx goal_id "drop"));
+  ignore (must_succeed "reopen" (transition ctx goal_id "reopen"));
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Completion_idle -> ()
+   | _ -> fail "reopen retained the abandoned pending request");
+  let archived = String.split_on_char '\n' (goal_events_text config)
+    |> List.filter (fun text -> String.trim text <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.find (fun event -> json_state event [ "event_type" ] = "goal_proof_reopened") in
+  check string "abandoned request remains in history" old_request
+    (json_state archived [ "payload"; "previous_completion"; "request_id" ]);
+  ignore (must_succeed "new request" (transition ctx goal_id "request_complete"));
+  let new_request, _ = proof_identity config goal_id in
+  check bool "new execution has a distinct request identity" false
+    (String.equal old_request new_request);
+  ignore (must_fail "old answer after reopen"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"old-run"
+       ~request_id:old_request ~criterion:old_criterion
+       ~decision:Workspace_goals.Proof_proven ~evidence:"old execution proof"));
+  check string "new execution remains verifying" "verifying" (stored_phase config goal_id);
+  let still_pending, _ = proof_identity config goal_id in
+  check string "old answer did not consume the new request" new_request still_pending
+;;
+
+(* The operator can leave [Verifying] without a verdict. A verdict the verifier
+   delivers afterwards names a phase the goal is no longer in: it is refused,
+   the goal stays where the operator put it, and the ledger does not take it. *)
+let test_verdict_after_drop_from_verifying_is_refused () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Drop while the verifier is silent" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  check string "verifying before drop" "verifying" (stored_phase config goal_id);
+  let request_id, criterion = proof_identity config goal_id in
+  let dropped = must_succeed "drop from verifying" (transition ctx goal_id "drop") in
+  check string "drop moves verifying to dropped" "dropped"
+    (json_state dropped [ "goal"; "phase" ]);
+  ignore (must_fail "late verdict after drop"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"late-run"
+       ~request_id ~criterion
+       ~decision:Workspace_goals.Proof_proven ~evidence:"late proof"));
+  check string "late verdict does not resurrect the goal" "dropped"
+    (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _
+   | Goal_verification.Human_confirmed _ -> fail "late verdict was recorded"
+   | Goal_verification.Proof_pending _ | Goal_verification.Completion_idle -> ())
+;;
+
+let test_reopen_from_verifying_clears_the_pending_request () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Reopen while the verifier is silent" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let request_id, criterion = proof_identity config goal_id in
+  let reopened = must_succeed "reopen from verifying" (transition ctx goal_id "reopen") in
+  check string "reopen moves verifying to executing" "executing"
+    (json_state reopened [ "goal"; "phase" ]);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Completion_idle -> ()
+   | _ -> fail "reopen from verifying retained the pending request");
+  ignore (must_fail "late refutation after reopen"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"late-run"
+       ~request_id ~criterion
+       ~decision:(Workspace_goals.Proof_refuted { reason = "late" })
+       ~evidence:"late refutation"));
+  check string "late verdict leaves the goal executing" "executing"
+    (stored_phase config goal_id)
+;;
+
+let test_repeated_reopen_preserves_a_new_refuted_proof () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "A repeated reopen cannot erase a new refutation" in
+  ignore (must_succeed "first request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "first proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "first proof"));
+  ignore (must_succeed "reopen" (transition ctx goal_id "reopen"));
+  ignore (must_succeed "new request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "new refutation"
+    (verifier_transition config goal_id
+      (Workspace_goals.Proof_refuted { reason = "new work is not proven" })
+      "new work is not proven"));
+  let path = Goal_verification.verifications_path config in
+  let before = Fs_compat.load_file path in
+  let history = goal_events_text config in
+  let repeated = must_succeed "delayed repeated reopen" (transition ctx goal_id "reopen") in
+  check bool "repeated reopen is a noop" true (json_bool repeated [ "noop" ]);
+  check string "the new proof is not erased" before (Fs_compat.load_file path);
+  check string "no redundant history is emitted" history (goal_events_text config)
+;;
+
+let test_reopen_archive_failure_is_recoverable_without_losing_proof () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Retry a reopened proof archive" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "preserve this proof"));
+  let original = ledger_record config goal_id in
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  let history = Fs_compat.load_file path in
+  Fs_compat.invalidate_cached_writer path;
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  let refused = must_fail "archive failure" (transition ctx goal_id "reopen") in
+  check string "archive failure is explicit" "internal_error" (json_state refused [ "error_code" ]);
+  check string "archive failure leaves the original phase" "awaiting_confirmation" (stored_phase config goal_id);
+  check bool "archive failure retains the original active proof" true
+    (original = ledger_record config goal_id);
+  Unix.rmdir path;
+  Fs_compat.save_file path history;
+  ignore (must_succeed "reopen retries its unfinished reset" (transition ctx goal_id "reopen"));
+  ignore (must_succeed "new request after repair" (transition ctx goal_id "request_complete"));
+  check string "repaired reopen does not remain blocked by old proof" "verifying"
+    (stored_phase config goal_id)
+;;
+
+let test_reopen_reset_refuses_an_unreadable_goal_source () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Unreadable goal during reopen" in
+  let path = Goal_store.goals_path config in
+  let executing_snapshot = Fs_compat.load_file path in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "still authoritative"));
+  let original = ledger_record config goal_id in
+  let ledger_path = Goal_verification.verifications_path config in
+  let ledger_bytes = Fs_compat.load_file ledger_path in
+  let history = goal_events_text config in
+  Fs_compat.save_file path "not JSON";
+  Fs_compat.save_file (path ^ ".last-good") executing_snapshot;
+  (match Goal_verification.reopen_goal config ~goal_id ~note:None ~actor:"reopener" with
+   | Error detail -> check bool "read failure retains its explanation" true (String.trim detail <> "")
+   | Ok _ -> fail "a recovery snapshot cannot authorize proof reset");
+  check bool "read failure never becomes an idle proof" true
+    (original = ledger_record config goal_id);
+  check string "ledger bytes are preserved" ledger_bytes (Fs_compat.load_file ledger_path);
+  check string "invalid primary is not rewritten" "not JSON" (Fs_compat.load_file path);
+  check string "no fabricated reopen archive" history (goal_events_text config)
+;;
+
+let test_reopen_reset_refuses_a_recovered_verification_ledger () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Unreadable proof during reopen" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "proof"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "preserve primary authority"));
+  (* Model the persisted phase write before a failed reset, so a recovered
+     proven ledger would otherwise be overwritten with idle. *)
+  (match Goal_store.update_goal_if_phase config ~goal_id
+     ~expected_phase:Goal_phase.Awaiting_confirmation
+     (fun goal -> { goal with phase = Goal_phase.Executing }) with
+   | Ok (Goal_store.Goal_updated _) -> ()
+   | _ -> fail "could not enter the reopen recovery boundary");
+  let path = Goal_verification.verifications_path config in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  let history = goal_events_text config in
+  Fs_compat.save_file path "not JSON";
+  (match Goal_verification.reopen_goal config ~goal_id ~note:None ~actor:"reopener" with
+   | Error _ -> ()
+   | Ok _ -> fail "a recovered ledger cannot authorize proof reset");
+  check string "invalid ledger primary is preserved" "not JSON" (Fs_compat.load_file path);
+  check string "readable ledger mirror is preserved" mirror
+    (Fs_compat.load_file (path ^ ".last-good"));
+  check string "unreadable ledger produces no archive" history (goal_events_text config);
+  Sys.remove path;
+  (match Goal_verification.reopen_goal config ~goal_id ~note:None ~actor:"reopener" with
+   | Error _ -> ()
+   | Ok _ -> fail "a missing primary with a surviving mirror is not a new empty ledger");
+  check bool "missing primary is not recreated from mirror" false (Sys.file_exists path);
+  check string "mirror remains unchanged when primary is missing" mirror
+    (Fs_compat.load_file (path ^ ".last-good"))
+;;
+
+let test_request_complete_enters_verifying_with_proof_pending () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Gated completion" in
+  let entered =
+    must_succeed "request_complete" (transition ctx goal_id "request_complete")
+  in
+  check string "phase moved to verifying" "verifying"
+    (json_state entered [ "goal"; "phase" ]);
+  check string "the request is persisted before the phase" "proof_pending"
+    (json_state entered [ "verification"; "completion"; "state" ]);
+  check string "the store agrees" "verifying" (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "ledger must hold the durable proof request")
+;;
+
+let test_blank_public_criterion_edits_preserve_pending_proof () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Keep pending proof" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let proof_before = proof_identity config goal_id in
+  let primary = Goal_store.goals_path config in
+  let proof_path = Goal_verification.verifications_path config in
+  let ledger = Filename.concat (Filename.dirname primary) "goal_events.jsonl" in
+  let paths = [primary; primary ^ ".last-good"; proof_path;
+    proof_path ^ ".last-good"; ledger] in
+  let snapshots = List.map (fun path -> path, Fs_compat.load_file path) paths in
+  List.iter (fun field ->
+    List.iter (fun blank ->
+      let rejected = must_fail "blank public criterion edit"
+          (dispatch ctx ~name:"masc_goal_upsert"
+            ["id", `String goal_id; field, `String blank]) in
+      check string "typed validation error" "validation_error"
+        (json_state rejected ["error_code"]);
+      List.iter (fun (path, bytes) ->
+        check string ("refusal preserves " ^ Filename.basename path) bytes
+          (Fs_compat.load_file path)) snapshots;
+      check bool "bound request and criterion are unchanged" true
+        (proof_before = proof_identity config goal_id);
+      check string "goal remains verifying" "verifying" (stored_phase config goal_id))
+      [""; " \t\n"])
+    ["title"; "metric"; "target_value"]
+;;
+
+(* (b) Public callers cannot self-verify. Only the typed verifier boundary can
+   complete the goal, with mandatory evidence and fixed authority. *)
+let test_proof_proven_completes_with_authority_and_evidence () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Proof-gated goal" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let public_refusal =
+    must_fail "public record_proof_proven"
+      (transition
+         ctx
+         goal_id
+         ~evidence:"caller-provided evidence"
+         "record_proof_proven")
+  in
+  check string "verifier action is not in the public enum" "validation_error"
+    (json_state public_refusal [ "error_code" ]);
+  let blank =
+    must_fail "typed proof verdict with blank evidence"
+      (verifier_transition config goal_id Workspace_goals.Proof_proven "   ")
+  in
+  check string "typed validation error" "validation_error"
+    (json_state blank [ "error_code" ]);
+  check string "a refused verdict does not move the phase" "verifying"
+    (stored_phase config goal_id);
+  let request_id, criterion = proof_identity config goal_id in
+  let unbound_attempt =
+    must_fail "typed proof verdict with blank run ID"
+      (Workspace_goals.commit_verifier_decision
+         ~tool_name:"goal_verifier_commit"
+         ~start_time:(Tool_timing.start ())
+         config
+         ~goal_id
+         ~verification_run_id:"   "
+         ~request_id
+         ~criterion
+         ~decision:Workspace_goals.Proof_proven
+         ~evidence:"metric observed at target")
+  in
+  check string "blank run ID is a typed validation error" "validation_error"
+    (json_state unbound_attempt [ "error_code" ]);
+  check string "an unbound verdict does not move the phase" "verifying"
+    (stored_phase config goal_id);
+  let completed =
+    must_succeed "typed proof proven"
+      (verifier_transition
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "metric observed at target")
+  in
+  check string "completed via proof" "awaiting_confirmation"
+    (json_state completed [ "goal"; "phase" ]);
+  check string "ledger shows the proven verdict" "proof_proven"
+    (json_state completed [ "verification"; "completion"; "state" ]);
+  check string "the evidence is on the verdict" "metric observed at target"
+    (json_state completed [ "verification"; "completion"; "verdict"; "evidence" ]);
+  check string "the verdict retains its exact verifier attempt"
+    "goal-verifier-test-run"
+    (json_state
+       completed
+       [ "verification"; "completion"; "verdict"; "verification_run_id" ]);
+  check string "the caller cannot impersonate the typed authority" "verifier_exact"
+    (json_state
+       completed
+       [ "verification"; "completion"; "verdict"; "authority"; "actor" ]);
+  check string "authority kind is the system-llm slot" "system_llm_agent"
+    (json_state
+       completed
+       [ "verification"; "completion"; "verdict"; "authority"; "kind" ])
+;;
+
+(* (c) A refuted proof returns the goal to Executing; the reason survives in
+   the ledger and in goal_events.jsonl. *)
+let test_proof_refuted_returns_to_executing_with_reason () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Refutable goal" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let refuted =
+    must_succeed "typed proof refuted"
+      (verifier_transition
+         config
+         goal_id
+         (Workspace_goals.Proof_refuted { reason = "metric moved under the claim" })
+         "coverage run attached")
+  in
+  check string "back to executing" "executing"
+    (json_state refuted [ "goal"; "phase" ]);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_refuted
+       { outcome = Goal_verification.Refuted { reason }; _ } ->
+     check string "the refutation reason is preserved"
+       "metric moved under the claim" reason
+   | _ -> fail "ledger must hold the refuted verdict");
+  let events = goal_events_text config in
+  check bool "the refutation reason reaches goal_events.jsonl" true
+    (String_util.contains_substring events "metric moved under the claim");
+  check bool "the event names the outcome" true
+    (String_util.contains_substring events "refuted");
+  (* Failure keeps its evidence but does not wedge the goal: the next request
+     supersedes the refuted verdict and re-enters the gate. *)
+  let reentered =
+    must_succeed "request_complete again"
+      (transition ctx goal_id "request_complete")
+  in
+  check string "re-request re-enters verifying" "verifying"
+    (json_state reentered [ "goal"; "phase" ]);
+  check string "a fresh proof request supersedes the refutation"
+    "proof_pending"
+    (json_state reentered [ "verification"; "completion"; "state" ])
+;;
+
+(* (d) The P0-2 wedge — phase=Verifying with the ledger at Completion_idle —
+   is re-armed by the repeated request_complete: the FSM answers [Already]
+   and the handler re-writes the durable request before answering. *)
+let test_verifying_repeat_rearms_a_missing_proof_request () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Wedged goal" in
+  (* Simulate the crash window: the phase is Verifying but the ledger never
+     recorded the proof request. *)
+  (match
+     Goal_store.update_goal_if_phase config ~goal_id
+       ~expected_phase:Goal_phase.Executing
+       (fun goal -> { goal with Goal_store.phase = Goal_phase.Verifying })
+   with
+   | Ok (Goal_store.Goal_updated _) -> ()
+   | Ok (Goal_store.Goal_phase_mismatch phase) ->
+     fail ("test setup: goal was not Executing but " ^ Goal_phase.to_string phase)
+   | Error error -> fail (Goal_store.write_error_to_string error));
+  (* Creation writes no ledger row, so the wedge starts with none at all —
+     the same hole the handler re-arms, reached without a row to empty. *)
+  (match Goal_verification.get_record config ~goal_id with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "test setup: the wedge needs no durable request"
+   | Error msg -> fail msg);
+  let answered =
+    must_succeed "repeated request_complete"
+      (transition ctx goal_id "request_complete")
+  in
+  check bool "answered as Already (noop)" true
+    (json_bool answered [ "noop" ]);
+  check string "still verifying" "verifying" (json_state answered [ "phase" ]);
+  check string "the proof request is re-armed" "proof_pending"
+    (json_state answered [ "verification"; "completion"; "state" ]);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "the re-arm must be durable, not just reported");
+  (* And the gate drains from there. *)
+  let completed =
+    must_succeed "typed proof proven"
+      (verifier_transition
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "verified after re-arm")
+  in
+  check string "the re-armed gate completes" "awaiting_confirmation"
+    (json_state completed [ "goal"; "phase" ])
+;;
+
+let test_verifying_repeat_wakes_an_existing_proof_request () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Deferred proof needs an explicit wake" in
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "test setup: the proof request must already be pending");
+  let previous = Atomic.get Workspace_hooks.goal_verification_pending_fn in
+  let wakes = ref [] in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.goal_verification_pending_fn previous)
+    (fun () ->
+       Atomic.set
+         Workspace_hooks.goal_verification_pending_fn
+         (fun _config ~goal_id -> wakes := goal_id :: !wakes);
+       let answered =
+         must_succeed "repeat request_complete"
+           (transition ctx goal_id "request_complete")
+       in
+       check bool "the public transition remains idempotent" true
+         (json_bool answered [ "noop" ]);
+       check (list string) "the pending proof is explicitly woken once"
+         [ goal_id ] (List.rev !wakes);
+       check string "the goal remains verifying" "verifying"
+         (json_state answered [ "phase" ]);
+       check string "the durable request remains pending" "proof_pending"
+         (json_state answered [ "verification"; "completion"; "state" ]))
+;;
+
+let test_verifying_repeat_reconciles_a_committed_proof () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Proof committed before crash" in
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  (match
+     Goal_verification.record_proof_verdict
+       config
+       ~goal_id
+       (let request_id, criterion = proof_identity config goal_id in
+        verdict ~request_id ~criterion ~evidence:"artifact inspected before crash" Goal_verification.Proven)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  check string "phase write is the simulated missing effect" "verifying"
+    (stored_phase config goal_id);
+  let answered =
+    must_succeed "repeated request reconciles proof"
+      (transition ctx goal_id "request_complete")
+  in
+  check bool "response exposes recovery" true
+    (json_bool answered [ "reconciled" ]);
+  check string "the committed proof converges to completed" "awaiting_confirmation"
+    (json_state answered [ "goal"; "phase" ]);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_proven proof ->
+    check string "recovery preserves the original proof run"
+      "goal-verifier-test-run" proof.verification_run_id
+  | _ -> fail "recovery rewrote the committed proof"
+;;
+
+(* (g) A keeper holding a Verifying goal keeps seeing it: the runtime-contract
+   cross-check keeps it, the world observation keeps it, and the prompt names
+   it with the proof-pending annotation (P0-1). *)
+let test_keeper_keeps_and_sees_a_verifying_goal () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Goal under proof" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String "gate-keeper"
+           ; "trace_id", `String "gate-keeper-trace"
+           ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json_fixture: " ^ e)
+  in
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  check
+    (list string)
+    "the world observation keeps the verifying goal"
+    [ goal_id ]
+    (match observation.Keeper_world_observation.active_goals with
+     | Ok ids -> ids
+     | Error unavailable -> fail (Goal_store.unavailable_to_string unavailable));
+  (* The subject here is how a [Verifying] goal renders, not which goals a
+     turn is given: the summary is stated so the annotation is what the check
+     depends on. *)
+  let summaries =
+    [ { Keeper_unified_prompt.summary_goal_id = goal_id
+      ; summary_title = "Goal under proof"
+      ; summary_criterion = None
+      ; summary_review_note = None
+      ; summary_measurement = Ok None
+      ; summary_phase = Some Goal_phase.Verifying
+      ; summary_held_task_link = Keeper_unified_prompt.Not_served_by_held_task
+      }
+    ]
+  in
+  let { Keeper_unified_prompt.world_state; _ } =
+    Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
+      ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Keeper_world_observation_inputs.No_current_task
+      ~active_goal_summaries:(Ok summaries)
+      ~observation
+      ()
+  in
+  check bool "the Active Goals block names the goal" true
+    (String_util.contains_substring world_state goal_id);
+  check bool "with the proof-pending annotation" true
+    (String_util.contains_substring world_state "증명 대기 중")
+;;
+
+(* (h) A corrupt ledger during request_complete is a typed error, never a
+   silent pass — and the phase does not move. *)
+let test_corrupt_ledger_fails_request_complete_loudly () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Goal beside a poisoned ledger" in
+  poison_ledger config;
+  let refused =
+    must_fail "request_complete over a corrupt ledger"
+      (transition ctx goal_id "request_complete")
+  in
+  check bool "the decode failure is named" true
+    (String_util.contains_substring
+       (Yojson.Safe.to_string refused)
+       "did not decode");
+  check string "the phase did not move" "executing"
+    (stored_phase config goal_id)
+;;
+
+let ledger_bytes config =
+  In_channel.with_open_bin (Goal_verification.verifications_path config)
+    In_channel.input_all
+;;
+
+let test_stale_proof_request_cannot_consume_revised_criterion () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "A revised measurement needs its own proof" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let old_request, old_criterion = proof_identity config goal_id in
+  ignore (must_succeed "change target"
+    (dispatch ctx ~name:"masc_goal_upsert"
+      [ "id", `String goal_id; "target_value", `String "300" ]));
+  let criterion = current_criterion config goal_id in
+  (match Goal_verification.mark_proof_pending config ~goal_id ~criterion with
+   | Ok _ -> () | Error detail -> fail detail);
+  let new_request, _ = proof_identity config goal_id in
+  check bool "revision gets a new proof request" false
+    (String.equal old_request new_request);
+  let before = ledger_bytes config in
+  let stale = verdict ~request_id:old_request ~criterion:old_criterion Goal_verification.Proven in
+  (match Goal_verification.record_proof_verdict config ~goal_id stale with
+   | Error _ -> () | Ok _ -> fail "old approval consumed a newer request");
+  check string "rejection preserves all ledger bytes" before (ledger_bytes config);
+  check string "changed criterion returns to execution" "executing" (stored_phase config goal_id)
+;;
+
+(* A criterion edit takes a Verifying goal back to Executing. That move goes
+   into goal_events.jsonl like every other phase move, naming the phase it
+   left and why. *)
+let goal_phase_events config =
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  if not (Sys.file_exists path) then []
+  else
+    In_channel.with_open_bin path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun event ->
+      Yojson.Safe.Util.member "event_type" event = `String "goal_phase")
+;;
+
+let test_criterion_edit_records_its_phase_move () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "A phase move by edit is recorded" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "change target"
+    (dispatch ctx ~name:"masc_goal_upsert"
+      [ "id", `String goal_id; "target_value", `String "300" ]));
+  check string "changed criterion returns to execution" "executing"
+    (stored_phase config goal_id);
+  let edit_moves =
+    List.filter
+      (fun event ->
+        let payload = Yojson.Safe.Util.member "payload" event in
+        Yojson.Safe.Util.member "goal_id" event = `String goal_id
+        && Yojson.Safe.Util.member "cause" payload = `String "criterion_edit")
+      (goal_phase_events config)
+  in
+  match edit_moves with
+  | [ event ] ->
+    let payload = Yojson.Safe.Util.member "payload" event in
+    check string "the phase it moved to" "executing"
+      Yojson.Safe.Util.(payload |> member "phase" |> to_string);
+    check string "the phase it left" "verifying"
+      Yojson.Safe.Util.(payload |> member "previous_phase" |> to_string)
+  | moves -> failf "expected one criterion_edit phase event, got %d" (List.length moves)
+;;
+
+let test_criterion_edit_on_executing_goal_records_no_phase_move () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "An edit that moves nothing records nothing" in
+  ignore (must_succeed "change target"
+    (dispatch ctx ~name:"masc_goal_upsert"
+      [ "id", `String goal_id; "target_value", `String "300" ]));
+  check int "no goal_phase event" 0 (List.length (goal_phase_events config))
+;;
+
+let test_proof_replay_preserves_evidence_and_rejects_different_run () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "An exact proof can be delivered twice" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let request_id, criterion = proof_identity config goal_id in
+  let proof = { (verdict ~request_id ~criterion Goal_verification.Proven) with
+    recorded_at = "2026-09-09T00:00:00Z" } in
+  let commit proof = Goal_verification.record_proof_verdict config ~goal_id proof in
+  (match commit proof with Ok _ -> () | Error detail -> fail detail);
+  let before = ledger_bytes config in
+  (match commit { proof with recorded_at = "2026-09-09T00:01:00Z" } with
+   | Ok { completion = Goal_verification.Proof_proven retained; _ } ->
+     check string "replay retains original commit time" proof.recorded_at retained.recorded_at
+   | Ok _ -> fail "replay lost proven evidence" | Error detail -> fail detail);
+  check string "replay never rewrites ledger bytes" before (ledger_bytes config);
+  (match commit { proof with verification_run_id = "another-review-run" } with
+   | Error _ -> () | Ok _ -> fail "same outcome from another run replaced the proof");
+  check string "conflicting run preserves ledger bytes" before (ledger_bytes config)
+;;
+
+let test_recovered_goal_cannot_authorize_edits_or_deletion () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Primary authority for criterion edits" in
+  let path = Goal_store.goals_path config in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  let refuse_changes () =
+    (match Goal_store.upsert_goal config ~id:goal_id ~target_value:"300" () with
+     | Error _ -> () | Ok _ -> fail "mirror authorized a changed criterion");
+    (match Goal_store.update_goal_if_phase config ~goal_id
+       ~expected_phase:Goal_phase.Executing (fun goal -> { goal with phase = Goal_phase.Dropped }) with
+     | Error _ -> () | Ok _ -> fail "mirror authorized a phase change");
+    (match Goal_store.delete_goal config ~goal_id with
+     | Error _ -> () | Ok _ -> fail "mirror authorized Goal deletion")
+  in
+  Fs_compat.save_file path "broken-primary";
+  refuse_changes ();
+  check string "corrupt primary survives refused mutations" "broken-primary" (Fs_compat.load_file path);
+  Sys.remove path;
+  refuse_changes ();
+  check bool "missing primary is not reconstructed by a mutation" false (Sys.file_exists path);
+  check string "mirror remains untouched" mirror (Fs_compat.load_file (path ^ ".last-good"))
+;;
+
+let test_recovery_proof_cannot_authorize_mutation () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Recovery is evidence, not write authority" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let request_id, criterion = proof_identity config goal_id in
+  let path = Goal_verification.verifications_path config in
+  Out_channel.with_open_bin path (fun ch -> output_string ch "broken-primary");
+  (match Goal_verification.get_record config ~goal_id with
+   | Ok (Some _) -> () | _ -> fail "historical mirror should remain readable");
+  (match Goal_verification.get_record_authoritative config ~goal_id with
+   | Error _ -> () | Ok _ -> fail "mirror authorized a current-state decision");
+  (match Goal_verification.record_proof_verdict config ~goal_id
+      (verdict ~request_id ~criterion Goal_verification.Proven) with
+   | Error _ -> () | Ok _ -> fail "mirror authorized a proof commit");
+  check string "primary failure is not overwritten" "broken-primary" (ledger_bytes config)
+;;
+
+
+(* {1 The caller's step before a passing verdict is written} *)
+
+let verifier_transition_with_step ~before_proof_commit config goal_id decision evidence =
+  let request_id, criterion = proof_identity config goal_id in
+  Workspace_goals.commit_verifier_decision
+    ~before_proof_commit
+    ~tool_name:"goal_verifier_commit"
+    ~start_time:(Tool_timing.start ())
+    config
+    ~goal_id
+    ~verification_run_id:"goal-verifier-test-run"
+    ~request_id
+    ~criterion
+    ~decision
+    ~evidence
+;;
+
+let goal_in_verifying config title =
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx title in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  goal_id
+;;
+
+let test_step_sees_the_passing_verdict_before_it_is_written () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = goal_in_verifying config "Step sees the verdict" in
+  let request_id, _ = proof_identity config goal_id in
+  let seen = ref [] in
+  let step (goal : Goal_store.goal) (verdict : Goal_verification.verdict) =
+    let request_still_pending =
+      match (ledger_record config goal_id).completion with
+      | Goal_verification.Proof_pending _ -> true
+      | Goal_verification.Completion_idle | Goal_verification.Proof_proven _
+      | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _ -> false
+    in
+    seen
+    := ( goal.Goal_store.id
+       , verdict.Goal_verification.request_id
+       , verdict.Goal_verification.outcome
+       , request_still_pending
+       , Goal_phase.to_string goal.Goal_store.phase )
+       :: !seen;
+    Ok ()
+  in
+  let committed =
+    must_succeed
+      "proven"
+      (verifier_transition_with_step
+         ~before_proof_commit:step
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "artifact:proof")
+  in
+  check string "the Goal moved" "awaiting_confirmation" (json_state committed [ "goal"; "phase" ]);
+  match !seen with
+  | [ (id, seen_request, outcome, request_still_pending, phase) ] ->
+    check string "names the Goal" goal_id id;
+    check string "names the pending request" request_id seen_request;
+    check bool "is a passing verdict" true (outcome = Goal_verification.Proven);
+    check bool "the ledger still holds the pending request" true request_still_pending;
+    check string "the Goal is still Verifying" "verifying" phase
+  | calls -> fail (Printf.sprintf "expected one call, got %d" (List.length calls))
+;;
+
+let test_a_refusing_step_leaves_the_proof_pending () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = goal_in_verifying config "Step refuses" in
+  let request_id, _ = proof_identity config goal_id in
+  let refusal =
+    verifier_transition_with_step
+      ~before_proof_commit:(fun _ _ -> Error "candle ledger unavailable")
+      config
+      goal_id
+      Workspace_goals.Proof_proven
+      "artifact:proof"
+  in
+  ignore (must_fail "the step refuses" refusal);
+  check bool "the refusal reaches the caller" true
+    (String_util.contains_substring (Tool_result.message refusal) "candle ledger unavailable");
+  check string "the Goal stays in Verifying" "verifying" (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending pending ->
+     check string "the same request is still pending" request_id pending.request_id
+   | Goal_verification.Completion_idle | Goal_verification.Proof_proven _
+   | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _ ->
+     fail "a refused step must not consume the request");
+  let committed =
+    must_succeed
+      "the same verdict commits once nothing refuses"
+      (verifier_transition config goal_id Workspace_goals.Proof_proven "artifact:proof")
+  in
+  check string "the Goal moved" "awaiting_confirmation" (json_state committed [ "goal"; "phase" ])
+;;
+
+let test_the_step_does_not_run_for_a_refutation () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = goal_in_verifying config "Step skipped for a refutation" in
+  let calls = ref 0 in
+  let refuted =
+    must_succeed
+      "refuted"
+      (verifier_transition_with_step
+         ~before_proof_commit:(fun _ _ -> incr calls; Error "must not run")
+         config
+         goal_id
+         (Workspace_goals.Proof_refuted { reason = "metric moved under the claim" })
+         "coverage run attached")
+  in
+  check int "the step did not run" 0 !calls;
+  check string "back to executing" "executing" (json_state refuted [ "goal"; "phase" ])
+;;
+
+let test_the_step_does_not_run_again_for_a_replayed_verdict () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = goal_in_verifying config "Step skipped for a replay" in
+  let calls = ref 0 in
+  let commit () =
+    must_succeed
+      "proven"
+      (verifier_transition_with_step
+         ~before_proof_commit:(fun _ _ -> incr calls; Ok ())
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "artifact:proof")
+  in
+  ignore (commit ());
+  check int "the first commit ran the step" 1 !calls;
+  ignore (commit ());
+  check int "the replay did not" 1 !calls
+;;
+
+let notification_store config = match Goal_store.load_source config with
+  | Goal_store.Available state -> state
+  | Goal_store.Uninitialized -> fail "Goal store is absent"
+  | Goal_store.Unavailable error -> fail (Goal_store.unavailable_to_string error)
+
+let persist_notification_keeper config name =
+  let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) with
+    | Ok value -> value | Error detail -> fail detail in
+  match Keeper_meta_store.replace_snapshot config meta with
+  | Ok () -> () | Error detail -> fail detail
+
+let notification_rows config keeper request_id =
+  match Keeper_chat_store.load_all_result ~base_dir:config.Workspace.base_path ~keeper_name:keeper with
+  | Error error -> fail (Keeper_chat_store.strict_decode_error_to_string error)
+  | Ok rows -> List.filter (fun (row : Keeper_chat_store.chat_message) ->
+      row.external_message_id = Some request_id) rows
+
+let notification_message_count config request_id =
+  Workspace.get_all_messages_raw config ~since_seq:0
+  |> List.filter (fun (message : Masc_domain.message) -> message.request_id = request_id)
+  |> List.length
+
+let proof_audit_count config goal_id =
+  goal_phase_events config |> List.filter (fun event ->
+    Yojson.Safe.Util.(event |> member "goal_id" |> to_string) = goal_id
+    && Json_util.get_string (Yojson.Safe.Util.member "payload" event) "verification_run_id"
+       = Some "goal-verifier-test-run") |> List.length
+
+let test_proof_effect_delivery_recovers_audit_and_partial_recipients () =
+  List.iter (fun (decision, expected_phase) ->
+    List.iter (fun fail_after_append ->
+      with_workspace @@ fun config ->
+      let ctx = workspace_ctx config in
+      let goal_id = create_goal ctx "Persisted @beta proof title" in
+      ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+      let extra_recipients = ["verifier_exact"; String.make 65 'k'; ".reviewer"] in
+      List.iter (persist_notification_keeper config) (["alpha"; "beta"] @ extra_recipients);
+      (* These persisted recipients have never entered the live registry. *)
+      let host = Server_bootstrap_loops.For_testing.goal_notification_backend in
+      let fail_beta = ref true in
+      let backend : Goal_delivery.backend = {host with project=(fun ~config ~delivery ~recipient ->
+        if recipient = "beta" && !fail_beta && not fail_after_append then Error "fixture transcript unavailable"
+        else match host.project ~config ~delivery ~recipient with
+          | Error _ as error -> error
+          | Ok () when recipient = "beta" && !fail_beta -> Error "fixture lost acknowledgement after append"
+          | Ok () -> Ok ())} in
+      ignore (Goal_delivery.For_testing.replace_backend (Some backend));
+      let fanouts = ref 0 in
+      let old_handler = Workspace_broadcast.For_testing.replace_on_broadcast_mention
+        (fun _ -> incr fanouts; Workspace_broadcast.Passive) in
+      Fun.protect ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention old_handler) (fun () ->
+        let audit = Filename.concat (Workspace.masc_dir config) "goal_events.jsonl" in
+        let saved_audit = audit ^ ".fixture-saved" in
+        Unix.rename audit saved_audit;
+        Unix.mkdir audit 0o700;
+        let calls = ref 0 in
+        let commit () = verifier_transition_with_step
+          ~before_proof_commit:(fun _ _ -> incr calls; Ok ()) config goal_id decision "measured @beta evidence" in
+        let first = must_succeed "proof commits despite unavailable audit/recipient" (commit ()) in
+        check string "phase is committed" expected_phase (stored_phase config goal_id);
+        check string "deferred effects are explicit" "deferred" (json_state first ["effect_delivery";"status"]);
+        let pending = notification_store config in
+        check int "audit intent survives failure" 1 (List.length pending.pending_events);
+        let notice = match pending.pending_notifications with [notice] -> notice | _ -> fail "expected one notice" in
+        (match notice.delivery with
+         | Goal_store.Pending_recipients remaining ->
+             check (list string) "only failed recipient remains" ["beta"] (remaining :> string list)
+         | Awaiting_recipients -> fail "snapshot did not commit");
+        check int "healthy recipient is not blocked by failed audit" 1 (List.length (notification_rows config "alpha" notice.notification_id));
+        check int "failure window has expected durable beta rows" (if fail_after_append then 1 else 0)
+          (List.length (notification_rows config "beta" notice.notification_id));
+        (match notification_rows config "verifier_exact" notice.notification_id with
+         | [row] -> check bool "same spelling cannot turn an external verifier into the recipient Keeper" true
+             (match row.speaker with Some {speaker_authority=Keeper_chat_store.External;_} -> true | _ -> false)
+         | _ -> fail "system verifier name collision dropped a legitimate recipient");
+        List.iter (fun keeper -> check int "every valid persisted Keeper name receives the notice" 1
+          (List.length (notification_rows config keeper notice.notification_id))) extra_recipients;
+        check int "workspace message is committed once" 1 (notification_message_count config notice.notification_id);
+        ignore (must_succeed "exact verdict replay" (commit ()));
+        check int "proof precommit is not rerun on effect retry"
+          (match decision with Workspace_goals.Proof_proven -> 1 | Proof_refuted _ -> 0) !calls;
+        check int "literal mentions never enter synchronous fanout/wake" 0 !fanouts;
+        (* Repair audit and model append-before-ack loss using the exact outbox row. *)
+        Unix.rmdir audit; Unix.rename saved_audit audit;
+        (match Goal_store.append_audit_event config (Goal_store.pending_event_to_yojson (List.hd pending.pending_events)) with
+         | Ok () -> () | Error detail -> fail detail);
+        fail_beta := false;
+        (* A restarted host reads the durable remaining set, not a changed roster. *)
+        ignore (Goal_delivery.For_testing.replace_backend (Some {host with
+          snapshot=(fun ~config:_ -> fail "persisted snapshot must not be recaptured")}));
+        (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+        (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+        check int "audit append before acknowledgement is deduplicated" 1 (proof_audit_count config goal_id);
+        check int "healthy transcript remains exactly once" 1 (List.length (notification_rows config "alpha" notice.notification_id));
+        check int "failed transcript eventually arrives exactly once" 1 (List.length (notification_rows config "beta" notice.notification_id));
+        check int "message remains exactly once" 1 (notification_message_count config notice.notification_id);
+        check int "all notification obligations settled" 0 (List.length (notification_store config).pending_notifications);
+        (* Reintroduce the captured obligation as a crash after delivery but
+           before Goal acknowledgement. The sink's real identity deduplicates. *)
+        let settled = notification_store config in
+        Goal_store.write_state config {settled with pending_notifications=[notice]};
+        (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+        check int "lost acknowledgement does not duplicate transcript" 1
+          (List.length (notification_rows config "beta" notice.notification_id))))
+      [false; true])
+    [Workspace_goals.Proof_proven, "awaiting_confirmation";
+     Workspace_goals.Proof_refuted {reason="target not observed"}, "executing"]
+;;
+
+let test_maintenance_mention_delivery_proceeds_while_goal_delivery_is_locked () =
+  with_workspace @@ fun config ->
+  let module Recovery = Server_maintenance_delivery_recovery in
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Original maintenance proof" in
+  ignore (must_succeed "request proof" (transition ctx goal_id "request_complete"));
+  (* Retain an actual committed proof notification before its host is present. *)
+  ignore (Goal_delivery.For_testing.replace_backend None);
+  ignore (must_succeed "commit proof with deferred delivery"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "original evidence"));
+  let notice = match (notification_store config).pending_notifications with
+    | [notice] -> notice
+    | [] | _ :: _ -> fail "expected original pending proof notification" in
+  ignore (Goal_delivery.For_testing.replace_backend
+    (Some Server_bootstrap_loops.For_testing.goal_notification_backend));
+  List.iter (persist_notification_keeper config) ["alpha";"beta"];
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let oc = open_out (Filename.concat keepers_dir "beta.toml") in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc
+      "[keeper]\ninstructions = \"Maintenance delivery fixture.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
+  let previous_handler = Workspace_broadcast.For_testing.replace_on_broadcast_mention
+    (fun delivery -> match delivery.Workspace_broadcast.mention with
+      | None -> Workspace_broadcast.Passive
+      | Some _ -> Workspace_broadcast.Deferred Handler_unavailable) in
+  Fun.protect ~finally:(fun () ->
+    Workspace_broadcast.set_on_broadcast_mention previous_handler) (fun () ->
+    (* Stage the real authoritative message/outbox while its host is absent;
+       recovery below uses the production recipient delivery implementation. *)
+    let original = match Workspace_broadcast.broadcast ~audience:Fleet_conversation
+        config ~from_agent:"operator" ~content:"@beta retain original maintenance request" with
+      | Ok delivery -> delivery
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    Workspace_broadcast.set_on_broadcast_mention
+      (Server_bootstrap_loops.For_testing.deliver_broadcast_mention
+        ~config ~base_path:config.base_path ~is_running:(fun _ -> false)
+        ~is_registered_keeper:(fun _ -> false)
+        ~wakeup:(fun _ -> fail "stopped recipient must not be woken"));
+    let goal_settled, resolve_goal = Eio.Promise.create () in
+    let mention_settled, resolve_mention = Eio.Promise.create () in
+    let recovery = Recovery.create ~on_settled:(fun ~base_path -> function
+      | Recovery.Goal_settled result -> Eio.Promise.resolve resolve_goal (base_path,result)
+      | Recovery.Broadcast_settled result -> Eio.Promise.resolve resolve_mention (base_path,result)) () in
+    Eio.Switch.run (fun sw ->
+      let goal_delivery_lock = Filename.concat (Workspace.masc_dir config)
+          "goal-notification-delivery" in
+      File_lock_eio.with_lock goal_delivery_lock (fun () ->
+        Recovery.pulse ~sw ~config recovery Goal_effects;
+        Recovery.pulse ~sw ~config recovery Broadcast_mentions;
+        let observed_base, mention_result = Eio.Promise.await mention_settled in
+        check string "mention observer retains original workspace" config.base_path observed_base;
+        (match mention_result with
+         | Error detail -> fail detail
+         | Ok report ->
+           check (list string) "recipient has no predecessor barrier" [] report.blocked_targets;
+           check bool "healthy mention has no global barrier" false report.global_barrier);
+        check bool "Goal delivery still waits for its real lock" false
+          (Eio.Promise.is_resolved goal_settled);
+        check string "proof phase is not delivery progress" "awaiting_confirmation"
+          (stored_phase config goal_id);
+        (match (notification_store config).pending_notifications with
+         | [pending] ->
+           check string "locked original notice survives" notice.notification_id pending.notification_id;
+           check string "locked original Goal survives" goal_id pending.goal_id
+         | [] | _ :: _ -> fail "locked original proof notification changed");
+        (match notification_rows config "beta" original.request_id with
+         | [row] -> check string "original mention content retained" original.content row.content
+         | [] | _ :: _ -> fail "original mention was not delivered exactly once");
+        (match Workspace_broadcast.find_broadcast ~request_id:original.request_id
+            config ~from_agent:original.from_agent ~content:original.content with
+         | Ok (Some delivery) ->
+           check int "recovery retains authoritative sequence" original.seq delivery.seq;
+           (match delivery.mention_delivery with
+            | Workspace_broadcast.Accepted | Already_accepted -> ()
+            | Passive | Pending | Deferred _ | Rejected _ -> fail "original mention not acknowledged")
+         | Ok None -> fail "original committed message disappeared"
+         | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error));
+        (* A repeated pulse while the original worker is blocked must leave
+           that worker owning the reservation, rather than replacing it. *)
+        Recovery.pulse ~sw ~config recovery Goal_effects);
+      let observed_base, goal_result = Eio.Promise.await goal_settled in
+      check string "Goal observer retains original workspace" config.base_path observed_base;
+      match goal_result with
+      | Ok () -> ()
+      | Error detail -> fail detail);
+    check int "Goal outbox acknowledged after original lock release" 0
+      (List.length (notification_store config).pending_notifications);
+    List.iter (fun keeper ->
+      match notification_rows config keeper notice.notification_id with
+      | [row] -> check string "original proof content retained" notice.content row.content
+      | [] | _ :: _ -> fail "original Goal notice did not reach each snapshotted recipient")
+      ["alpha";"beta"];
+    (* New rounds reread durable ACKs using the production drains. *)
+    let retry = Recovery.create () in
+    Eio.Switch.run (fun sw ->
+      Recovery.pulse ~sw ~config retry Goal_effects;
+      Recovery.pulse ~sw ~config retry Broadcast_mentions);
+    check int "fresh mention recovery preserves one original transcript" 1
+      (List.length (notification_rows config "beta" original.request_id));
+    List.iter (fun keeper -> check int "fresh proof recovery preserves one original transcript" 1
+      (List.length (notification_rows config keeper notice.notification_id))) ["alpha";"beta"])
+;;
+
+let test_proof_delivery_survives_reconciliation_and_goal_removal () =
+  List.iter (fun recovery -> with_workspace @@ fun config ->
+    let ctx = workspace_ctx config in
+    let original_title = "Original @beta proof title" in
+    let goal_id = create_goal ctx original_title in
+    ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+    let request_id, criterion = proof_identity config goal_id in
+    let proof = { (verdict ~request_id ~criterion ~evidence:"original measured evidence" Goal_verification.Proven) with
+      authority=Masc_domain.System_llm_agent {agent_run_id=Standalone_lane.to_id Standalone_lane.Verifier} } in
+    (match Goal_verification.record_proof_verdict config ~goal_id proof with Ok _ -> () | Error detail -> fail detail);
+    ignore (Goal_delivery.For_testing.replace_backend None);
+    (match recovery with
+     | `Scan -> (match Workspace_goals.reconcile_committed_proof config ~goal_id with
+         | Ok (Workspace_goals.Reconciled Goal_phase.Awaiting_confirmation) -> ()
+         | _ -> fail "scan did not reconcile the committed proof")
+     | `Repeat -> ignore (must_succeed "explicit repeat" (transition ctx goal_id "request_complete"))
+     | `Commit_retry -> ignore (must_succeed "exact proof-only commit retry"
+         (verifier_transition_with_step ~before_proof_commit:(fun _ _ -> fail "committed proof must not rerun its precommit")
+           config goal_id Workspace_goals.Proof_proven "original measured evidence")));
+    let notice = match (notification_store config).pending_notifications with
+      | [notice] -> notice | _ -> fail "reconciliation did not persist one notice" in
+    check bool "missing backend is not an empty roster" true (notice.delivery = Goal_store.Awaiting_recipients);
+    check int "no publication before snapshot" 0 (notification_message_count config notice.notification_id);
+    ignore (must_succeed "rename after commit" (dispatch ctx ~name:"masc_goal_upsert"
+      ["id", `String goal_id; "title", `String "Changed title"]));
+    (match Goal_store.delete_goal config ~goal_id with
+     | Ok _ -> () | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+    List.iter (persist_notification_keeper config) ["alpha"; "beta"];
+    ignore (Goal_delivery.For_testing.replace_backend (Some Server_bootstrap_loops.For_testing.goal_notification_backend));
+    (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+    check int "deleted Goal still owes original audit" 1 (proof_audit_count config goal_id);
+    List.iter (fun keeper -> match notification_rows config keeper notice.notification_id with
+      | [row] -> check string "original payload survives rename/delete/restart" notice.content row.content
+      | _ -> fail "expected original notification once") ["alpha"; "beta"];
+    check bool "message is not reconstructed from current Goal" true
+      (String_util.contains_substring notice.content original_title);
+    check int "reconciled notification settles" 0 (List.length (notification_store config).pending_notifications))
+    [`Scan; `Repeat; `Commit_retry]
+;;
+
+let test_roster_read_failure_keeps_the_goal_notification_uncaptured () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Roster failure is not an empty fleet" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let root = Workspace.keepers_runtime_dir config in
+  if Sys.file_exists root then Unix.rmdir root;
+  Fs_compat.save_file root "fixture blocked Keeper directory";
+  ignore (must_succeed "proof commits while roster is unreadable"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "target measured"));
+  let notice = match (notification_store config).pending_notifications with
+    | [notice] -> notice | _ -> fail "roster error discarded the obligation" in
+  check bool "failed roster stays uncaptured" true (notice.delivery=Goal_store.Awaiting_recipients);
+  check int "roster failure did not publish a zero-recipient message" 0 (notification_message_count config notice.notification_id);
+  Sys.remove root;
+  persist_notification_keeper config "alpha";
+  (match Goal_delivery.flush config with Ok () -> () | Error detail -> fail detail);
+  check int "persisted recipient gets the repaired notification" 1
+    (List.length (notification_rows config "alpha" notice.notification_id));
+  check int "repaired notification settles" 0 (List.length (notification_store config).pending_notifications)
+;;
+
+(* A proof request takes its phase from [Goal_phase.decide_transition]: an
+   Executing goal enters Verifying and a Verifying one stays, while a goal the
+   machine answers with any other phase gets no pending proof. Completed is
+   the case that matters: the machine says [Already Completed] there, which is
+   not a request for verification. *)
+let test_proof_request_follows_the_phase_machine () =
+  with_workspace
+  @@ fun config ->
+  let goal =
+    match Goal_store.upsert_goal config ~title:"proof" ~metric:"m" ~target_value:"1" () with
+    | Ok (goal, _) -> goal
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  let request () = Workspace_goals.request_current_proof config ~goal_id:goal.id in
+  let phase_after label =
+    match request () with
+    | Ok (goal, _) -> Goal_phase.to_string goal.phase
+    | Error _ -> fail label
+  in
+  check string "an executing goal enters verifying" "verifying"
+    (phase_after "an executing goal refused a proof request");
+  check string "a verifying goal stays verifying" "verifying"
+    (phase_after "a verifying goal refused a repeated proof request");
+  (match
+     Goal_store.transact_goal config ~goal_id:goal.id (fun goal ->
+       Ok ({ goal with phase = Goal_phase.Completed }, ()))
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_store.write_error_to_string error));
+  match request () with
+  | Error (Workspace_goals.Refused _) -> ()
+  | Error (Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
+  | Ok _ -> fail "a completed goal accepted a proof request"
+;;
+
+let () =
+  run
+    "goal_verification_gate"
+    [ ( "durable proof effects"
+      , [ test_case "proof request follows the phase machine" `Quick
+            test_proof_request_follows_the_phase_machine
+        ; test_case "audit and partial recipient failures recover exactly once" `Quick
+            test_proof_effect_delivery_recovers_audit_and_partial_recipients
+        ; test_case "mention recovery proceeds while original Goal delivery is locked" `Quick
+            test_maintenance_mention_delivery_proceeds_while_goal_delivery_is_locked
+        ; test_case "scan and explicit repeat retain effects across rename/delete" `Quick
+            test_proof_delivery_survives_reconciliation_and_goal_removal
+        ; test_case "roster read failure cannot become an empty audience" `Quick
+            test_roster_read_failure_keeps_the_goal_notification_uncaptured ])
+    ; ( "b1 creation requirement"
+      , [ test_case "creation requires a success condition" `Quick
+            test_create_requires_a_success_condition
+        ; test_case "creation with a success condition succeeds" `Quick
+            test_create_with_a_success_condition_succeeds
+        ; test_case "blank public edits preserve pending proof and audit" `Quick
+            test_blank_public_criterion_edits_preserve_pending_proof
+        ; test_case "partial update preserves stored success condition" `Quick
+            test_partial_update_preserves_success_condition
+        ; test_case "undecodable goal store reports corruption, not B1" `Quick
+            test_undecodable_goal_store_reports_corruption_not_b1
+        ] )
+    ; ( "ledger record-only discipline"
+      , [ test_case "proof verdict requires a pending request" `Quick
+            test_proof_verdict_requires_a_pending_request
+        ; test_case "stale proof cannot consume a revised criterion" `Quick
+            test_stale_proof_request_cannot_consume_revised_criterion
+        ; test_case "criterion edit records its phase move" `Quick
+            test_criterion_edit_records_its_phase_move
+        ; test_case "criterion edit on an executing goal records no phase move" `Quick
+            test_criterion_edit_on_executing_goal_records_no_phase_move
+        ; test_case "proof replay retains evidence and rejects another run" `Quick
+            test_proof_replay_preserves_evidence_and_rejects_different_run
+        ; test_case "recovered Goal cannot authorize edits or deletion" `Quick
+            test_recovered_goal_cannot_authorize_edits_or_deletion
+        ; test_case "recovery proof cannot authorize mutation" `Quick
+            test_recovery_proof_cannot_authorize_mutation
+        ] )
+    ; ( "store discipline"
+      , [ test_case "undecodable ledger fails closed and loud" `Quick
+            test_undecodable_ledger_fails_closed_and_loud
+        ; test_case "unknown ledger field is a decode error" `Quick
+            test_unknown_ledger_field_is_a_decode_error
+        ; test_case "human confirmation requires a bound verdict" `Quick
+            test_human_confirmation_requires_bound_verdict
+        ] )
+    ; ( "observability"
+      , [ test_case "goal list joins the ledger" `Quick
+            test_goal_list_joins_the_ledger
+        ; test_case "goal list renders a ledger-error state" `Quick
+            test_goal_list_renders_a_ledger_error_state
+        ; test_case "measurements require current criterion and evidence" `Quick
+            test_measurement_requires_current_criterion_and_evidence
+        ; test_case "measurement receipt preserves lifecycle and criterion" `Quick
+            test_measurement_receipt_preserves_lifecycle_and_criterion
+        ; test_case "measurement evidence is an Evidence Reference" `Quick
+            test_measurement_evidence_is_an_evidence_reference
+        ; test_case "measurement rows follow Goal existence, not phase" `Quick
+            test_measurement_rows_follow_goal_existence_not_phase
+        ; test_case "stored non-reference evidence is unreadable" `Quick
+            test_stored_non_reference_evidence_is_unreadable
+        ] )
+    ; ( "stage 2 gate"
+      , [ test_case "reopen works before any completion request" `Quick
+            test_reopen_without_any_verification_history
+        ; test_case "reopen starts a new verification cycle and preserves history" `Quick
+            test_reopened_goal_enters_a_new_verification_cycle
+        ; test_case "dropped pending proof gets a new request after reopen" `Quick
+            test_dropped_pending_proof_gets_a_new_request_after_reopen
+        ; test_case "goal failures take the class of their code" `Quick
+            test_goal_failures_take_the_class_of_their_code
+        ; test_case "a proof request refusal keeps its code" `Quick
+            test_proof_request_refusal_keeps_its_code
+        ; test_case "verdict after drop from verifying is refused" `Quick
+            test_verdict_after_drop_from_verifying_is_refused
+        ; test_case "reopen from verifying clears the pending request" `Quick
+            test_reopen_from_verifying_clears_the_pending_request
+        ; test_case "repeated reopen preserves a newer refuted proof" `Quick
+            test_repeated_reopen_preserves_a_new_refuted_proof
+        ; test_case "failed reopen archive can be retried without losing proof" `Quick
+            test_reopen_archive_failure_is_recoverable_without_losing_proof
+        ; test_case "unreadable goal cannot reset a proof" `Quick
+            test_reopen_reset_refuses_an_unreadable_goal_source
+        ; test_case "recovered ledger cannot authorize proof reset" `Quick
+            test_reopen_reset_refuses_a_recovered_verification_ledger
+        ; test_case "request_complete enters verifying with proof pending" `Quick
+            test_request_complete_enters_verifying_with_proof_pending
+        ; test_case "proof proven completes with authority and evidence" `Quick
+            test_proof_proven_completes_with_authority_and_evidence
+        ; test_case "proof refuted returns to executing with reason" `Quick
+            test_proof_refuted_returns_to_executing_with_reason
+        ; test_case "verifying repeat re-arms a missing proof request" `Quick
+            test_verifying_repeat_rearms_a_missing_proof_request
+        ; test_case "verifying repeat wakes an existing proof request" `Quick
+            test_verifying_repeat_wakes_an_existing_proof_request
+        ; test_case "verifying repeat reconciles a committed proof" `Quick
+            test_verifying_repeat_reconciles_a_committed_proof
+        ; test_case "keeper keeps and sees a verifying goal" `Quick
+            test_keeper_keeps_and_sees_a_verifying_goal
+        ; test_case "corrupt ledger fails request_complete loudly" `Quick
+            test_corrupt_ledger_fails_request_complete_loudly
+        ] )
+    ; ( "before proof commit"
+      , [ test_case "the step sees the passing verdict before it is written" `Quick
+            test_step_sees_the_passing_verdict_before_it_is_written
+        ; test_case "a refusing step leaves the proof pending" `Quick
+            test_a_refusing_step_leaves_the_proof_pending
+        ; test_case "the step does not run for a refutation" `Quick
+            test_the_step_does_not_run_for_a_refutation
+        ; test_case "the step does not run again for a replayed verdict" `Quick
+            test_the_step_does_not_run_again_for_a_replayed_verdict
+        ] )
+    ]
+;;

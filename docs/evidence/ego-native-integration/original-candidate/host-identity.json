@@ -1,0 +1,41 @@
+{
+  "status": "ok",
+  "build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "repo_version": "0.64.0",
+    "commit": "4219c3074e281940ffec9c0d0b12db6f04a0d296",
+    "commit_source": "embedded",
+    "binary_commit": "4219c3074e281940ffec9c0d0b12db6f04a0d296",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "96a22bb1575692f62d012b73e35f94b7ebe808ea415b8e551f04ab97746021ca",
+    "binary_commit_unix_ts": 1792828017.0,
+    "binary_commit_age_seconds": 854,
+    "repo_head_commit": "4219c3074e2",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1792828017.0,
+    "repo_head_commit_age_seconds": 854,
+    "executable_path": "/private/tmp/masc-ego-runtime-4219c307/masc",
+    "executable_dir": "/private/tmp/masc-ego-runtime-4219c307",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-isolated",
+    "runtime_instance_id": "01a16ced-0175-7000-bf10-5c338fb8f9e9",
+    "started_at": "2026-10-24T08:00:34Z",
+    "uptime_seconds": 37
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-isolated",
+    "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-4219c307",
+    "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-4219c307/.masc",
+    "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-4219c307/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": true,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-4219c307",
+    "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-4219c307",
+    "resolution_source": "explicit_cli"
+  }
+}

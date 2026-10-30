@@ -1,0 +1,20 @@
+{
+  "id": 10908567580,
+  "node_id": "MDg6QXJ0aWZhY3QxMDkwODU2NzU4MA==",
+  "name": "runtime-probe-macos-arm64-c60d967b19a96d01523d830a777df0c39703c7cc-attempt-1",
+  "size_in_bytes": 67160114,
+  "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10908567580",
+  "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10908567580/zip",
+  "expired": false,
+  "digest": "sha256:3092feb82cc88024c6de4ca6d719f4639c5099cbb6ce4b0e32e4b3d325c67d6f",
+  "created_at": "2026-09-26T14:42:54Z",
+  "updated_at": "2026-09-26T14:42:54Z",
+  "expires_at": "2026-10-03T14:42:44Z",
+  "workflow_run": {
+    "id": 36249065961,
+    "repository_id": 1136640865,
+    "head_repository_id": 1136640865,
+    "head_branch": "perf/sanitize-ascii-inline-probe-20260926",
+    "head_sha": "c60d967b19a96d01523d830a777df0c39703c7cc"
+  }
+}

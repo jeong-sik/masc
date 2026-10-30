@@ -1,0 +1,32 @@
+{
+  "arm": "tail_user",
+  "observed_at": "2026-10-24T13:43:48.165777+00:00",
+  "request_sha256": "5ea53efebc5e1f87fab22ae7f2d7fd3161e95a6234de8824015bc747bba5d200",
+  "response_sha256": "93589d5430961ca5938c20e9552d0fcba68aa86ac8a190a37779720ca5b4dbfa",
+  "tools": [
+    {
+      "tool": "keeper_task_create",
+      "arguments": {
+        "contract": {
+          "required_evidence": [
+            "artifact:workspace/acceptance.json"
+          ],
+          "strict": true
+        },
+        "goal_id": "goal-canary-three-results",
+        "priority": 1,
+        "title": "Set alpha to true in acceptance.json while preserving beta and gamma as false"
+      },
+      "required_description_present": false,
+      "matching_goal": true
+    }
+  ],
+  "termination": {
+    "done": true,
+    "done_reason": "stop",
+    "prompt_eval_count": 17226,
+    "eval_count": 693,
+    "total_duration": 7254866333
+  },
+  "returned_tools_executed": false
+}

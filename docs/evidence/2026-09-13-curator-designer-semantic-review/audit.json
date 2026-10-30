@@ -1,0 +1,109 @@
+{
+  "schema": "masc.curator_semantic_review.v1",
+  "observed_at": "2026-09-12T19:37:41.031969+00:00",
+  "scope": "completed designer group only; editor and cross-Keeper synthesis not assessed",
+  "run_context_sha256": "d735324c822f56b7b5c9391ecd957aae1b41376d1c71ed38bc256d7c3bae71e0",
+  "claims": [
+    {
+      "claim_index": 1,
+      "source_ids": [
+        "s1"
+      ],
+      "assessment": "faithful_historical_attribution",
+      "current_truth_verified": false
+    },
+    {
+      "claim_index": 2,
+      "source_ids": [
+        "s2",
+        "s9"
+      ],
+      "assessment": "faithful_historical_attribution",
+      "current_truth_verified": false
+    },
+    {
+      "claim_index": 3,
+      "source_ids": [
+        "s3",
+        "s6"
+      ],
+      "assessment": "partial_unsupported_priority",
+      "current_truth_verified": false
+    },
+    {
+      "claim_index": 4,
+      "source_ids": [
+        "s4",
+        "s7"
+      ],
+      "assessment": "faithful_historical_attribution",
+      "current_truth_verified": false
+    },
+    {
+      "claim_index": 5,
+      "source_ids": [
+        "s5"
+      ],
+      "assessment": "faithful_historical_attribution",
+      "current_truth_verified": false
+    },
+    {
+      "claim_index": 6,
+      "source_ids": [
+        "s10"
+      ],
+      "assessment": "literal_recollection_ambiguity_not_disclosed",
+      "current_truth_verified": false
+    },
+    {
+      "claim_index": 7,
+      "source_ids": [
+        "s11"
+      ],
+      "assessment": "faithful_historical_attribution",
+      "current_truth_verified": false
+    },
+    {
+      "claim_index": 8,
+      "source_ids": [
+        "s8"
+      ],
+      "assessment": "faithful_historical_attribution",
+      "current_truth_verified": false
+    }
+  ],
+  "findings": [
+    {
+      "id": "metadata-exclusion",
+      "source_ids": [
+        "s12",
+        "s11"
+      ],
+      "assessment": "exclusion_reason_contradicted",
+      "detail": "s12 resolves to actual change metadata adding the s11 constraint. Redundancy could justify exclusion, but absence of evidence cannot."
+    },
+    {
+      "id": "verification-priority",
+      "claim_index": 3,
+      "source_ids": [
+        "s3",
+        "s6"
+      ],
+      "assessment": "unsupported_inference",
+      "detail": "s3 describes executed pixel metrics fallback; s6 rejects merely reading a script as image inspection. Records do not establish the added priority rule or resolve every scope overlap."
+    },
+    {
+      "id": "ambiguous-fee",
+      "claim_index": 6,
+      "source_ids": [
+        "s10"
+      ],
+      "assessment": "ambiguity_not_disclosed",
+      "detail": "The damaged fee wording is preserved literally, but its ambiguity is not identified. Do not reinterpret it as a confirmed fee value."
+    }
+  ],
+  "runtime_mutation": false,
+  "automatic_promotion": false,
+  "prompt_fix_model_validation": "not_run; original live execution retains its captured prompt",
+  "python_syntax": "ast.parse passed for modified standalone curator script"
+}

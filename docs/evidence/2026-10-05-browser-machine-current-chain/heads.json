@@ -1,0 +1,79 @@
+[
+  {
+    "baseRefName": "fix/runtime-observation-workspace-20261004",
+    "headRefName": "feat/browser-lane-activity-20261004",
+    "headRefOid": "c149cfc05ad6389a6abb4e3f9f574a326b91cd68",
+    "number": 41185,
+    "prepared_head": "54c471dc73ef2c8670cb7020dc8271afc87566cd"
+  },
+  {
+    "baseRefName": "feat/browser-lane-activity-20261004",
+    "headRefName": "feat/tui-browser-activity-20261004",
+    "headRefOid": "c56aed899f0a93de48c1c7df4011340187011218",
+    "number": 41187,
+    "prepared_head": "a26d328d866dea729d21e06474d2100ace5464cd"
+  },
+  {
+    "baseRefName": "feat/tui-browser-activity-20261004",
+    "headRefName": "feat/web-browser-activity-20261005",
+    "headRefOid": "ad51194900880ad184f2296e276740d8bf3767c5",
+    "number": 41191,
+    "prepared_head": "552dbcf15cf84bb5e2c4ad3790bd822a301a3215"
+  },
+  {
+    "baseRefName": "feat/web-browser-activity-20261005",
+    "headRefName": "fix/settings-runtime-workspace-20261005",
+    "headRefOid": "5b5fc9319d5aca59fbf76d46128e6e96b318afe3",
+    "number": 41194,
+    "prepared_head": "77634a95aa5b7d1f5a0c20bfcbff93a4757275bc"
+  },
+  {
+    "baseRefName": "fix/settings-runtime-workspace-20261005",
+    "headRefName": "feat/machine-lane-activity-20261005",
+    "headRefOid": "817b4572b68f6436762a521298c0c1c48de50e13",
+    "number": 41199,
+    "prepared_head": "d601400064be9b839dbce589ed34d13659ec47ba"
+  },
+  {
+    "baseRefName": "feat/machine-lane-activity-20261005",
+    "headRefName": "feat/tui-machine-activity-20261005",
+    "headRefOid": "477820b3f04bed5bdd95ac2276c3bba65f06d6f1",
+    "number": 41201,
+    "prepared_head": "bab0e235b0b998b334658e0b8fca90ae7b83271f"
+  },
+  {
+    "baseRefName": "feat/tui-machine-activity-20261005",
+    "headRefName": "feat/web-machine-activity-20261005",
+    "headRefOid": "6eabfc9e46c2d2dc84b2da1e635d3716ed1dd9bc",
+    "number": 41203,
+    "prepared_head": "65502501279e90e8d401c61be1225d5ebdb85431"
+  },
+  {
+    "baseRefName": "feat/web-machine-activity-20261005",
+    "headRefName": "fix/browser-activity-toml-reader-20261005",
+    "headRefOid": "163bed368f75253f07ca437bd23113e3c370a7bd",
+    "number": 41204,
+    "prepared_head": "5f81dc700d04f694d04cd15b4949d35a9ece241e"
+  },
+  {
+    "baseRefName": "fix/browser-activity-toml-reader-20261005",
+    "headRefName": "feat/tui-package-discovery-20261005",
+    "headRefOid": "88ee4e48474aea2178fdfeb6f56623fa8e41dafe",
+    "number": 41205,
+    "prepared_head": "46c7f4e4865a0a22c18adae4042b54be7a81b7c9"
+  },
+  {
+    "baseRefName": "feat/tui-package-discovery-20261005",
+    "headRefName": "feat/web-package-installation-20261005",
+    "headRefOid": "c93eaec0e24c7a3f1765f9caf61d3a757dc164f2",
+    "number": 41206,
+    "prepared_head": "307545e3716fc4a913f2a53e1e7870b2416246af"
+  },
+  {
+    "baseRefName": "feat/web-package-installation-20261005",
+    "headRefName": "feat/web-package-activity-20261005",
+    "headRefOid": "5b1bd234c1107a6c787e673aa1ebd298a9c04fa7",
+    "number": 41208,
+    "prepared_head": "d35c75b0e0b6fdda4466bba79617fa94e80a271d"
+  }
+]

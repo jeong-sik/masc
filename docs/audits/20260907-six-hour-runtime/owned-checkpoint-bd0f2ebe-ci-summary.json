@@ -1,0 +1,91 @@
+{
+  "schema": "masc.audit.targeted_ci_summary.v1",
+  "observed_at": "2026-09-07T13:10:46.145557+00:00",
+  "repository": "jeong-sik/masc",
+  "pr_number": 34036,
+  "pr_url": "https://github.com/jeong-sik/masc/pull/34036",
+  "tested_head": "bd0f2ebe5a24f70c966db1b3dfe207deea714d14",
+  "run_id": 34124814314,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34124814314",
+  "run_status": "completed",
+  "run_conclusion": "success",
+  "test_step_conclusion": "success",
+  "suites": [
+    {
+      "suite": "test_keeper_owned_checkpoint",
+      "passed": 10,
+      "failed": 0,
+      "evidence": "Test Successful in 0.608s. 10 tests run."
+    },
+    {
+      "suite": "test_keeper_checkpoint_stale_guard",
+      "passed": 27,
+      "failed": 0,
+      "evidence": "Test Successful in 0.432s. 27 tests run."
+    },
+    {
+      "suite": "test_keeper_checkpoint_purge",
+      "passed": 18,
+      "failed": 0,
+      "evidence": "Test Successful in 0.001s. 18 tests run."
+    }
+  ],
+  "passed_total": 55,
+  "failed_total": 0,
+  "current_pr_head": "3acda568688327fcf6ed2562321f3242d4d05d35",
+  "current_pr_state": "OPEN",
+  "current_is_draft": true,
+  "current_merge_state": "BLOCKED",
+  "current_checks_observed": [
+    {
+      "name": "lint suite",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34124890316/job/101751171810"
+    },
+    {
+      "name": "dune build @check",
+      "status": "IN_PROGRESS",
+      "conclusion": null,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34124890316/job/101751171916"
+    },
+    {
+      "name": "dashboard typecheck",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34124890316/job/101751172034"
+    }
+  ],
+  "reviews": [],
+  "unresolved_review_threads": 0,
+  "review_threads_complete": true,
+  "head_change": {
+    "attribution": "external actor; this agent did not perform main merge",
+    "title": "Merge branch 'main' into fix/owned-exact-checkpoint",
+    "changes_own_production_or_three_test_files": false,
+    "total_changed_files": 63
+  },
+  "previous_evidence": {
+    "head": "58f590cbcec30727bd374163d1eeeadc0a77a1b7",
+    "run_id": 34123162730,
+    "passed_total": 55,
+    "artifact": "owned-checkpoint-58f590-ci-summary.json"
+  },
+  "merge_readiness": "Not yet confirmed: current-head @check was still running; behavioral tests were run on predecessor bd0f2ebe5a.",
+  "limits": [
+    "No merge by this agent.",
+    "No deployment or native/Owner integration.",
+    "No latest-head behavioral result is claimed.",
+    "Ten final owned-checkpoint cases executed; earlier independent source review covered nine."
+  ],
+  "merge": {
+    "merged": true,
+    "merged_at": "2026-09-07T14:04:28Z",
+    "merge_commit_sha": "521773e7e8379404a3461207b2bead36ebc8d6a8"
+  },
+  "final_head_required_checks": {
+    "head_sha": "3acda568688327fcf6ed2562321f3242d4d05d35",
+    "run_id": 34124890316,
+    "conclusion": "success"
+  }
+}

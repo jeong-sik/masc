@@ -1,0 +1,457 @@
+module Lib = Masc
+
+open Alcotest
+
+(* build_timeline integration tests.
+
+   Regression for the agent-timeline global-zero bug: a live keeper's
+   keeper.turn_completed events are persisted with the FULL actor id
+   ("keeper-<handle>-agent"), while the tool is queried by the SHORT handle.
+   These tests drive the real read path end-to-end (Activity_graph.emit ->
+   collect_event_files -> read_all_events -> list_events -> build_timeline
+   summary) so the activity branch of [identity_matches] is exercised exactly
+   as in production, and a turn for the queried keeper surfaces in the summary
+   counts. *)
+
+let test_dir () =
+  let tmp = Filename.temp_file "masc_timeline_build" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o755;
+  tmp
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun name -> rm (Filename.concat path name));
+        Unix.rmdir path
+      end
+      else Sys.remove path
+  in
+  rm dir
+
+let with_config f =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () -> f (Lib.Workspace.default_config dir))
+
+let build config ~agent_name =
+  Lib.Tool_agent_timeline.build_timeline config ~agent_name ~since_hours:24.0
+    ~limit:50 ~include_tasks:true ~include_board:false ~include_tool_calls:true
+
+let summary_int json key =
+  let open Yojson.Safe.Util in
+  json |> member "summary" |> member key |> to_int
+
+(* RFC-0393: a keeper's activity is recorded under its keeper_name, and the
+   timeline queried by that same name surfaces it. *)
+let test_surfaces_turn_completed_for_the_keeper_name () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-1")
+           ~payload:(`Assoc [ ("model_used", `String "test-model") ])
+           ());
+      let json = build config ~agent_name:"testkeeper" in
+      check int "turns_completed counts the keeper's turn" 1
+        (summary_int json "turns_completed");
+      check bool "total_events is non-zero" true
+        (summary_int json "total_events" >= 1))
+
+(* A turn whose actor id belongs to a different keeper must not surface for
+   the queried handle. No identity field in the payload, so exclusion rests
+   on the actor.id mismatch alone. *)
+let test_excludes_other_keeper () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"agent" "otherkeeper")
+           ~payload:(`Assoc [ ("model_used", `String "test-model") ])
+           ());
+      let json = build config ~agent_name:"testkeeper" in
+      check int "other keeper's turn is excluded" 0
+        (summary_int json "turns_completed");
+      check int "no events for the queried handle" 0
+        (summary_int json "total_events"))
+
+(* The summary adds up each turn's usage from the turn itself. A value a turn
+   did not carry adds nothing rather than failing the sum. *)
+let test_sums_turn_usage () =
+  with_config (fun config ->
+      let turn payload =
+        ignore
+          (Activity_graph.emit config ~kind:"keeper.turn_completed"
+             ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
+             ~payload:(`Assoc payload)
+             ())
+      in
+      turn
+        [ ("input_tokens", `Int 10)
+        ; ("output_tokens", `Int 3)
+        ; ("cost_usd", `Float 0.5)
+        ];
+      turn [ ("input_tokens", `Int 5) ];
+      let json = build config ~agent_name:"testkeeper" in
+      check int "both turns counted" 2 (summary_int json "turns_completed");
+      check int "input tokens of both turns" 15
+        (summary_int json "total_input_tokens");
+      check int "output tokens of the turn that carried them" 3
+        (summary_int json "total_output_tokens");
+      check (float 0.0) "cost of the turn that carried it" 0.5
+        Yojson.Safe.Util.(json |> member "summary" |> member "total_cost_usd" |> to_number))
+
+(* Exposes [dir] as well as [config] so a test can drive the chat store,
+   which is keyed by [base_dir] (= dir) rather than by the config. *)
+let with_dir_config f =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () -> f dir (Lib.Workspace.default_config dir))
+
+let events_list json = Yojson.Safe.Util.(json |> member "events" |> to_list)
+let ev_type e = Yojson.Safe.Util.(e |> member "type" |> to_string)
+
+let ev_detail_str e key =
+  Yojson.Safe.Util.(e |> member "detail" |> member key |> to_string)
+
+let ev_detail_int e key =
+  Yojson.Safe.Util.(e |> member "detail" |> member key |> to_int)
+
+let chat_field key json =
+  events_list json
+  |> List.filter (fun e -> String.equal (ev_type e) "chat")
+  |> List.map (fun e -> ev_detail_str e key)
+
+let append_chat dir ~user ~assistant =
+  Lib.Keeper_chat_store.append_turn ~base_dir:dir ~keeper_name:"testkeeper"
+    ~user_content:user ~user_attachments:[] ~assistant_content:assistant ()
+
+let append_chat_for dir ~keeper_name ~user ~assistant =
+  Lib.Keeper_chat_store.append_turn ~base_dir:dir ~keeper_name ~user_content:user
+    ~user_attachments:[] ~assistant_content:assistant ()
+
+(* Build the timeline with the keeper-aware chat reader wired, the way the
+   production dispatch sites do. Exercises the tool -> keeper boundary
+   inversion end to end: [build_timeline] takes only neutral chat lines,
+   [Keeper_chat_timeline_source] supplies them from the chat store. *)
+let build_with_chat dir config ~agent_name =
+  Lib.Tool_agent_timeline.build_timeline
+    ~load_chat:(fun ~agent_name ->
+      Lib.Keeper_chat_timeline_source.lines_for ~base_dir:dir
+        ~keeper_name:agent_name)
+    config ~agent_name ~since_hours:24.0 ~limit:50 ~include_tasks:true
+    ~include_board:false ~include_tool_calls:true
+
+(* A chat turn persisted to .masc/keeper_chat/ must surface as timeline
+   "chat" events — the gap task-1647 identified. One event per user /
+   assistant line, in structural order (user before assistant) even though
+   both share one persisted timestamp. *)
+let test_chat_turn_surfaces () =
+  with_dir_config (fun dir config ->
+      append_chat dir ~user:"ping" ~assistant:"pong";
+      let json = build_with_chat dir config ~agent_name:"testkeeper" in
+      check (list string) "user then assistant, structural order preserved"
+        [ "user"; "assistant" ]
+        (chat_field "role" json);
+      check (list string) "chat contents preserved"
+        [ "ping"; "pong" ]
+        (chat_field "content" json);
+      check int "summary counts both chat lines" 2
+        (summary_int json "chat_messages"))
+
+(* Two turns keep their append order and their intra-turn order; nothing is
+   re-sorted by timestamp in a way that scrambles the trace. *)
+let test_chat_ordering_across_turns () =
+  with_dir_config (fun dir config ->
+      append_chat dir ~user:"Q1" ~assistant:"A1";
+      append_chat dir ~user:"Q2" ~assistant:"A2";
+      let json = build_with_chat dir config ~agent_name:"testkeeper" in
+      check (list string) "turns stay in structural trace order"
+        [ "Q1"; "A1"; "Q2"; "A2" ]
+        (chat_field "content" json))
+
+(* Chat turns merge into the same chronological stream as autonomous
+   keeper.turn_completed turns, and the existing turn source is unaffected. *)
+let test_chat_interleaves_with_autonomous () =
+  with_dir_config (fun dir config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
+           ~payload:(`Assoc [ ("model_used", `String "test-model") ])
+           ());
+      append_chat dir ~user:"hi" ~assistant:"hello";
+      let json = build_with_chat dir config ~agent_name:"testkeeper" in
+      let types =
+        events_list json |> List.map ev_type |> List.sort_uniq String.compare
+      in
+      check bool "chat and autonomous turn both present" true
+        (List.mem "chat" types && List.mem "turn_completed" types);
+      check int "existing turn_completed source intact" 1
+        (summary_int json "turns_completed"))
+
+(* A keeper with no chat store yields zero chat events and leaves the six
+   existing sources unchanged — the new source is purely additive. *)
+let test_no_chat_no_regression () =
+  with_dir_config (fun dir config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
+           ~payload:(`Assoc [ ("model_used", `String "test-model") ])
+           ());
+      let json = build_with_chat dir config ~agent_name:"testkeeper" in
+      check int "no chat store -> zero chat messages" 0
+        (summary_int json "chat_messages");
+      check int "turn_completed still surfaces" 1
+        (summary_int json "turns_completed"))
+
+(* Keeper-runtime dispatch must not let a keeper read another keeper's
+   direct chat by passing a different [agent_name] to masc_agent_timeline.
+   The dashboard/operator paths still use [lines_for] when they deliberately
+   inspect arbitrary keeper history; the scoped reader is for keeper callers. *)
+let test_self_scoped_chat_reader_blocks_cross_keeper () =
+  with_dir_config (fun dir config ->
+      append_chat_for dir ~keeper_name:"testkeeper" ~user:"own-q"
+        ~assistant:"own-a";
+      append_chat_for dir ~keeper_name:"otherkeeper" ~user:"other-q"
+        ~assistant:"other-a";
+      let build_for requested =
+        Lib.Tool_agent_timeline.build_timeline
+          ~load_chat:(fun ~agent_name ->
+            Lib.Keeper_chat_timeline_source.lines_for_self ~base_dir:dir
+              ~caller_keeper_name:"testkeeper" ~agent_name)
+          config ~agent_name:requested ~since_hours:24.0 ~limit:50
+          ~include_tasks:true ~include_board:false ~include_tool_calls:true
+      in
+      check (list string) "own chat remains visible"
+        [ "own-q"; "own-a" ]
+        (chat_field "content" (build_for "testkeeper"));
+      check (list string) "own chat remains visible through agent alias"
+        [ "own-q"; "own-a" ]
+        (chat_field "content" (build_for "testkeeper"));
+      check (list string) "other keeper chat is hidden" []
+        (chat_field "content" (build_for "otherkeeper")))
+
+(* Regression for the per-source truncation bugs (task-1647, task-386).
+   task-1647: each active timeline collector fetched the source's newest window
+   in seq-ascending order (oldest first) and then front-truncated to the
+   per-source cap, which could discard the NEWEST matches. task-386: the
+   per-source cap itself (message/tool/turn = 200) dropped this agent's EARLY
+   events before the merge, so even a final result below the requested limit was
+   missing its oldest events. The per-source truncations are now removed
+   entirely; build_timeline's single tail-keep on the merged list enforces the
+   user's requested limit. These tests emit more than the old cap and assert
+   that BOTH the newest and the oldest event survive when the limit is above
+   the count — i.e. no per-source cap drops early events. *)
+
+(* Old per-source cap pinned in build_timeline (message/tool/turn = 200). *)
+let source_cap = 200
+let overflow = 60
+
+let marker i = Printf.sprintf "marker-%04d" i
+
+(* Naive substring test — the markers are zero-padded so [marker 1] is never a
+   substring of any other marker in the series. *)
+let contains ~needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  if nl = 0 then true
+  else
+    let rec loop i =
+      if i + nl > hl then false
+      else if String.equal (String.sub haystack i nl) needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+(* Emit [source_cap + overflow] events of [kind] for keeper "testkeeper", each
+   tagged via [payload_of] with a per-index marker so the oldest (i = 1) and
+   newest (i = source_cap + overflow) are individually identifiable. *)
+let emit_capacity_series config ~kind ~payload_of =
+  for i = 1 to source_cap + overflow do
+    ignore
+      (Activity_graph.emit config ~kind
+         ~actor:
+           (Activity_graph.entity ~kind:"agent" "testkeeper")
+         ~payload:(payload_of (marker i))
+         ())
+  done
+
+(* Build with a limit above the per-source cap so the merged-list truncation is
+   a no-op: presence/absence then reflects only the source-collector cap, and is
+   independent of ts-collision ordering in build_timeline's final sort. *)
+let build_all config ~agent_name =
+  Lib.Tool_agent_timeline.build_timeline config ~agent_name ~since_hours:24.0
+    ~limit:1000 ~include_tasks:true ~include_board:false ~include_tool_calls:true
+
+let events_blob json =
+  let open Yojson.Safe.Util in
+  json |> member "events" |> Yojson.Safe.to_string
+
+let newest_marker = marker (source_cap + overflow)
+let oldest_marker = marker 1
+
+(* With the per-source truncations removed (task-386), a limit above the
+   event count must surface BOTH the newest and the oldest event — the old
+   per-source cap would have dropped the oldest. *)
+let check_keeps_all ~label config =
+  let blob = events_blob (build_all config ~agent_name:"testkeeper") in
+  check bool (label ^ ": newest event present") true
+    (contains ~needle:newest_marker blob);
+  check bool (label ^ ": oldest event present (no per-source cap)") true
+    (contains ~needle:oldest_marker blob)
+
+let test_tool_call_keeps_all () =
+  with_config (fun config ->
+      emit_capacity_series config ~kind:"tool.called"
+        ~payload_of:(fun s -> `Assoc [ ("tool_name", `String s) ]);
+      check_keeps_all ~label:"tool_call" config)
+
+let test_turn_completed_keeps_all () =
+  with_config (fun config ->
+      emit_capacity_series config ~kind:"keeper.turn_completed"
+        ~payload_of:(fun s -> `Assoc [ ("model_used", `String s) ]);
+      check_keeps_all ~label:"turn_completed" config)
+
+(* keeper.tool_exec producer -> read model (#23540): keeper in-turn tool
+   executions were invisible to the timeline because only the external MCP
+   path emitted [tool.called]; these tests drive the new producer through the
+   same end-to-end read path. *)
+
+let emit_keeper_tool_exec config ~keeper_name ~tool_name ~success =
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+            [ "name", `String keeper_name
+            ; "trace_id", `String ("trace-" ^ keeper_name)
+            ])
+    with
+    | Ok meta -> meta
+    | Error error -> failwith error
+  in
+  Lib.Keeper_tool_activity.emit_tool_exec ~config
+    ~meta
+    ~tool_name
+    ~success
+    ~duration_ms:42
+    ~typed_outcome:(Some Keeper_tool_outcome.Progress)
+    ~provider:"in_process"
+    ~keeper_turn_id:(Some 7)
+    ~agent_core_turn:2
+    ~task_id:(Some "task-1")
+    ()
+
+(* When the activity write fails, emit_tool_exec records a coverage gap. The
+   gap goes under [<base>/.masc], where the readers
+   look, and not beside it under the base path (#42837). A plain file where
+   the activity store's folder belongs makes the write fail. *)
+let test_failed_emit_records_its_gap_under_masc () =
+  with_dir_config (fun dir config ->
+      let masc_root = Lib.Workspace.masc_dir config in
+      Fs_compat.mkdir_p masc_root;
+      Out_channel.with_open_text
+        (Dated_jsonl.Store.dir
+           (Dated_jsonl.Store.at
+              (Lib.Workspace.dated_store_root config)
+              Dated_jsonl.Store.Root.Activity_events))
+        (fun oc -> output_string oc "not a folder");
+      emit_keeper_tool_exec config ~keeper_name:"testkeeper"
+        ~tool_name:"masc_status" ~success:true;
+      check int "one gap under .masc" 1
+        (List.length (Telemetry_coverage_gap.read_recent ~masc_root ~n:5));
+      check bool "nothing beside .masc" false
+        (Sys.file_exists (Filename.concat dir "telemetry-coverage-gaps")))
+
+let tool_call_events_of json =
+  events_list json
+  |> List.filter (fun e -> String.equal (ev_type e) "tool_call")
+
+let test_keeper_tool_exec_surfaces_in_timeline () =
+  with_config (fun config ->
+      emit_keeper_tool_exec config ~keeper_name:"testkeeper"
+        ~tool_name:"masc_status" ~success:true;
+      let json = build config ~agent_name:"testkeeper" in
+      check int "keeper in-turn execution counts as a tool call" 1
+        (summary_int json "tool_calls");
+      match tool_call_events_of json with
+      | [ e ] ->
+        check string "tool name projected" "masc_status"
+          (ev_detail_str e "tool_name");
+        check string "source distinguishes the keeper producer"
+          "keeper_in_turn" (ev_detail_str e "source");
+        check int "absolute Keeper turn is projected" 7
+          (ev_detail_int e "keeper_turn_id");
+        check int "AGENT_CORE model step is projected separately" 2
+          (ev_detail_int e "agent_core_turn");
+        check string "task identity is not used as a turn id" "task-1"
+          (ev_detail_str e "task_id")
+      | events -> failf "expected one tool_call event, got %d" (List.length events))
+
+let test_tool_call_sources_merge () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config
+           ~kind:
+             (Activity_graph.tool_execution_event_kind_to_string
+                Activity_graph.External_tool_called)
+           ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
+           ~subject:(Activity_graph.entity ~kind:"tool" "external_tool")
+           ~payload:(`Assoc [ ("tool_name", `String "external_tool") ])
+           ());
+      emit_keeper_tool_exec config ~keeper_name:"testkeeper"
+        ~tool_name:"masc_status" ~success:true;
+      let json = build config ~agent_name:"testkeeper" in
+      check int "external and keeper tool events both count" 2
+        (summary_int json "tool_calls"))
+
+let test_keeper_tool_exec_excludes_other_keeper () =
+  with_config (fun config ->
+      emit_keeper_tool_exec config ~keeper_name:"otherkeeper"
+        ~tool_name:"masc_status" ~success:true;
+      let json = build config ~agent_name:"testkeeper" in
+      check int "other keeper's execution is excluded" 0
+        (summary_int json "tool_calls"))
+
+let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  run "Tool_agent_timeline build_timeline"
+    [
+      ( "activity-read",
+        [
+          test_case "turn_completed surfaces for short handle" `Quick
+            test_surfaces_turn_completed_for_the_keeper_name;
+          test_case "other keeper excluded" `Quick test_excludes_other_keeper;
+          test_case "summary sums each turn's usage" `Quick test_sums_turn_usage;
+        ] );
+      ( "keeper-chat-source",
+        [
+          test_case "chat turn surfaces" `Quick test_chat_turn_surfaces;
+          test_case "chat ordering across turns" `Quick
+            test_chat_ordering_across_turns;
+          test_case "chat interleaves with autonomous" `Quick
+            test_chat_interleaves_with_autonomous;
+          test_case "no chat store no regression" `Quick
+            test_no_chat_no_regression;
+          test_case "self-scoped reader blocks cross-keeper chat" `Quick
+            test_self_scoped_chat_reader_blocks_cross_keeper;
+        ] );
+      ( "per-source-cap-keeps-all",
+        [
+          test_case "tool_call keeps all (no per-source cap)" `Quick test_tool_call_keeps_all;
+          test_case "turn_completed keeps all (no per-source cap)" `Quick
+            test_turn_completed_keeps_all;
+        ] );
+      ( "keeper-tool-exec-source",
+        [
+          test_case "a failed emit records its gap under .masc" `Quick
+            test_failed_emit_records_its_gap_under_masc;
+          test_case "keeper in-turn execution surfaces" `Quick
+            test_keeper_tool_exec_surfaces_in_timeline;
+          test_case "external and keeper sources merge" `Quick
+            test_tool_call_sources_merge;
+          test_case "other keeper's execution excluded" `Quick
+            test_keeper_tool_exec_excludes_other_keeper;
+        ] );
+    ]

@@ -1,0 +1,565 @@
+(** Keeper_unified_turn_types — pure helpers extracted from
+    Keeper_unified_turn (3020 LoC godfile).
+
+    See keeper_unified_turn_types.mli for rationale and contract.
+    Re-included from Keeper_unified_turn so existing callers continue to
+    use [Keeper_unified_turn.<name>] unchanged. *)
+
+module StringMap = Set_util.StringMap
+
+(** One candidate the runtime walk attempted and that ended in an error,
+    with whether the candidate's provider or client was invoked. Carried on
+    the turn in walk order so a failure report can name the candidate that
+    actually answered; the lane the turn was budgeted under is a different
+    fact. *)
+type runtime_attempt_error =
+  { runtime_id : string
+  ; dispatch : Keeper_attempt_dispatch.t
+  ; error : Agent_core.Error.t
+  }
+
+(** Immutable per-turn accumulator threaded through [run_keeper_cycle] and
+    the retry loop. *)
+type turn_state =
+  { cycle_completed : bool
+  ; manifest_seq : int
+  ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
+  (* The verdict the turn's receipt recorded, carried up from
+     [Keeper_agent_result.turn_settlement] so the decision record reports what
+     the receipt reported instead of deciding again (#37376). Absent until a
+     turn settles, and on a turn that never reached [finalize]. *)
+  ; degraded_retry_settled : Keeper_agent_result.turn_settlement option
+  ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
+  ; failure_reason : Keeper_turn_fsm.failure_reason option
+  ; runtime_attempt_errors : runtime_attempt_error list
+  ; lane_terminal_error : Keeper_turn_driver.lane_terminal_error option
+  }
+
+let require_last_execution_for_finalize ~keeper_name turn_state =
+  match turn_state.last_execution with
+  | Some exec -> Ok exec
+  | None ->
+    let err =
+      Agent_core.Error.Internal
+        (Printf.sprintf "%s: last_execution missing at turn finalize" keeper_name)
+    in
+    Log.Keeper.error "%s" (Agent_core.Error.to_string err);
+    Error err
+;;
+
+type keeper_cycle_failed_runtime =
+  | Dispatched_candidate of string
+  | No_candidate_dispatched
+
+type keeper_cycle_failed_terminal_origin =
+  | Terminal_error_from of
+      { runtime_id : string
+      ; attempt : int
+      }
+  | Terminal_error_not_from_a_candidate
+
+type keeper_cycle_failed_runtime_attribution =
+  { reported_runtime : keeper_cycle_failed_runtime
+  ; lane_runtime_id : string
+  ; deferred_next_runtime_id : string
+  ; terminal_error_origin : keeper_cycle_failed_terminal_origin
+  ; attempts : runtime_attempt_error list
+  }
+
+let keeper_cycle_failed_runtime_attribution
+      ~entry_deferred_runtime_lane
+      ~deferred_runtime_lane
+      ~lane_runtime_id
+      ~(runtime_attempt_errors : runtime_attempt_error list)
+      ~(lane_terminal_error : Keeper_turn_driver.lane_terminal_error option)
+  =
+  let reported_runtime =
+    match
+      List.rev runtime_attempt_errors
+      |> List.find_opt (fun (attempt : runtime_attempt_error) ->
+           match attempt.dispatch with
+           | Keeper_attempt_dispatch.Dispatched -> true
+           | Keeper_attempt_dispatch.Rejected_before_dispatch -> false)
+    with
+    | Some last_dispatched -> Dispatched_candidate last_dispatched.runtime_id
+    | None -> No_candidate_dispatched
+  in
+  let deferred_next_runtime_id =
+    match deferred_runtime_lane with
+    | Some (hint : Keeper_turn_driver.deferred_runtime_lane) -> hint.next_runtime_id
+    | None -> "none"
+  in
+  let terminal_error_origin =
+    match lane_terminal_error with
+    | Some (terminal : Keeper_turn_driver.lane_terminal_error) ->
+      Terminal_error_from
+        { runtime_id = terminal.origin_runtime_id
+        ; attempt = terminal.origin_attempt
+        }
+    | None -> Terminal_error_not_from_a_candidate
+  in
+  (* A cycle that took a deferred suffix runs its execution under the
+     suffix's first runtime; the lane it was budgeted under is the
+     assignment that deferred it. *)
+  let lane_runtime_id =
+    match entry_deferred_runtime_lane with
+    | Some (hint : Keeper_turn_driver.deferred_runtime_lane) -> hint.assignment_id
+    | None -> lane_runtime_id
+  in
+  { reported_runtime
+  ; lane_runtime_id
+  ; deferred_next_runtime_id
+  ; terminal_error_origin
+  ; attempts = runtime_attempt_errors
+  }
+;;
+
+let keeper_cycle_failed_runtime_to_string = function
+  | Dispatched_candidate runtime_id -> runtime_id
+  | No_candidate_dispatched -> "none"
+;;
+
+let keeper_cycle_failed_terminal_origin_to_string = function
+  | Terminal_error_from { runtime_id; attempt } ->
+    Printf.sprintf "%s#%d" runtime_id attempt
+  | Terminal_error_not_from_a_candidate -> "none"
+;;
+
+let runtime_attempt_errors_to_string (attempts : runtime_attempt_error list) =
+  attempts
+  |> List.map (fun (attempt : runtime_attempt_error) ->
+       Printf.sprintf
+         "%s@%s=%s"
+         attempt.runtime_id
+         (Keeper_attempt_dispatch.to_string attempt.dispatch)
+         (Keeper_types_profile.short_preview (Agent_core.Error.to_string attempt.error)))
+  |> String.concat ", "
+  |> Printf.sprintf "[%s]"
+;;
+
+let turn_event_bus_manifest_decision
+      (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
+  =
+  `Assoc
+    [
+      ("correlation_id", Json_util.string_opt_to_json summary.correlation_id);
+      ("run_id", Json_util.string_opt_to_json summary.run_id);
+      ("caused_by", Json_util.string_opt_to_json summary.caused_by);
+      ("event_count", `Int summary.event_count);
+      ("payload_kinds", Json_util.json_string_list summary.payload_kinds);
+    ]
+;;
+
+let runtime_exhaustion_reason_code
+      (reason : Keeper_internal_error.runtime_exhaustion_reason)
+  =
+  match reason with
+  | Keeper_internal_error.Connection_refused -> "runtime_exhausted_connection_refused"
+  | Keeper_internal_error.Dns_failure -> "runtime_exhausted_dns_failure"
+  | Keeper_internal_error.No_providers_available -> "runtime_exhausted_no_providers_available"
+  | Keeper_internal_error.All_providers_failed -> "runtime_exhausted_all_providers_failed"
+  | Keeper_internal_error.Candidates_filtered_after_cycles ->
+    "runtime_exhausted_candidates_filtered"
+  | Keeper_internal_error.Session_conflict -> "runtime_exhausted_session_conflict"
+  | Keeper_internal_error.Other_detail _ -> "runtime_exhausted_provider_failure"
+;;
+
+let registry_reason_of_internal_reason
+    (reason : Keeper_internal_error.runtime_exhaustion_reason)
+  : Keeper_meta_contract.runtime_exhaustion_reason
+  =
+  match reason with
+  | Keeper_internal_error.Connection_refused -> Keeper_meta_contract.Connection_refused
+  | Keeper_internal_error.Dns_failure -> Keeper_meta_contract.Dns_failure
+  | Keeper_internal_error.No_providers_available ->
+    Keeper_meta_contract.No_providers_available
+  | Keeper_internal_error.All_providers_failed ->
+    Keeper_meta_contract.All_providers_failed
+  | Keeper_internal_error.Candidates_filtered_after_cycles ->
+    Keeper_meta_contract.Candidates_filtered_after_cycles
+  | Keeper_internal_error.Session_conflict ->
+    Keeper_meta_contract.Session_conflict
+  | Keeper_internal_error.Other_detail detail ->
+    Keeper_meta_contract.Other_detail detail
+;;
+
+let registry_failure_reason_of_internal_error ~detail = function
+  | Keeper_internal_error.Official_client_recovery_required recovery ->
+    Some (Keeper_registry.Official_client_recovery_required recovery)
+  | Keeper_internal_error.Runtime_exhausted { reason; runtime_id } ->
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = runtime_exhaustion_reason_code reason
+         ; detail
+         ; provider_id = None
+         ; http_status = None
+         ; runtime_id = Some (runtime_id)
+         ; agent_core_timeout = None
+         ; reason = Some (registry_reason_of_internal_reason reason)
+         ; fenced_empty_turn_runtime = None
+         })
+  (* A fenced empty assistant turn keeps its typed cause in the record: the
+     status bridge cannot re-derive "empty turn" from the prose [detail] (a
+     preview written for logs), so the write path marks it while the typed
+     error is still in hand. [detail] stays the log-facing preview; the
+     marker decides the human sentence and [code ^ ": " ^ detail] the
+     signature the row keeps for log search. The sentence says the attempt
+     made no progress and invites a retry, so only an attempt that observed
+     no effect may earn the marker: with [Effect_attempted] or
+     [Observation_unavailable] a tool may have run, and a retry could repeat
+     it. Those, and a fenced failure whose cause is not an empty turn, map to
+     [None] like before and keep the fallback wire reading. *)
+  | (Keeper_internal_error.Provider_attempt_effect_fenced { effect_disposition; cause; _ }
+    | Keeper_internal_error.Tool_correction_lost { effect_disposition; cause; _ }) as err ->
+    (match effect_disposition, Keeper_internal_error.fenced_cause_empty_no_progress cause with
+     | Keeper_provider_attempt_effect_core.No_effect_observed, Some true ->
+       Some
+         (Keeper_registry.Provider_runtime_error
+            { code = Keeper_internal_error.kind_of_masc_internal_error err
+            ; detail
+            ; provider_id = None
+            ; http_status = None
+            ; runtime_id = None
+            ; agent_core_timeout = None
+            ; reason = None
+            ; fenced_empty_turn_runtime =
+                Some (Keeper_internal_error.runtime_id_of_masc_internal_error err)
+            })
+     | ( Keeper_provider_attempt_effect_core.No_effect_observed
+       | Keeper_provider_attempt_effect_core.Effect_attempted
+       | Keeper_provider_attempt_effect_core.Observation_unavailable ),
+       (Some true | Some false | None) -> None)
+  | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Accept_rejected _
+      (* Typed [Internal_*] variants are not runtime-exhaustion reasons; they
+         map to opaque internal-error events upstream. *)
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Runtime_connection_closed _
+      | Keeper_internal_error.Receipt_persistence_failed _
+      | Keeper_internal_error.Gate_replay_repair_required _ ->
+    None
+;;
+
+let registry_failure_reason_of_raw_error ~detail raw_error =
+  Option.bind
+    (Keeper_internal_error.classify_masc_internal_error_of_string raw_error)
+    (registry_failure_reason_of_internal_error ~detail)
+;;
+
+(* Exhaustive match on [Keeper_turn_disposition.t]. [of_failure] emits
+   [Provider_error (Agent_core_error _)] for the agent-core error fallback,
+   so this routing is a variant match with no substring classifier. *)
+let registry_failure_reason_of_terminal_reason
+      ?core_error
+      (terminal_reason : Keeper_turn_terminal.t)
+      ~(raw_error : string)
+  : Keeper_registry.failure_reason option
+  =
+  let detail =
+    match core_error with
+    | Some (Agent_core.Error.Config _) -> "provider configuration failed"
+    | Some
+        (( Agent_core.Error.Api _
+         | Agent_core.Error.Provider _
+         | Agent_core.Error.Agent _
+         | Agent_core.Error.Mcp _
+         | Agent_core.Error.Serialization _
+         | Agent_core.Error.Io _
+         | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
+         | Agent_core.Error.Internal _
+         | Agent_core.Error.Internal_carried _ ) as error) ->
+      (* A fence's raw error is a JSON envelope whose cause comes last, so a
+         prefix preview shows only the repeated fields and cuts the cause. *)
+      (match
+         Option.bind
+           (Keeper_internal_error.classify_masc_internal_error error)
+           Keeper_internal_error.fenced_attempt_summary
+       with
+       | Some summary -> Keeper_types_profile.short_preview summary
+       | None -> Keeper_types_profile.short_preview raw_error)
+    | None -> Keeper_types_profile.short_preview raw_error
+  in
+  let configuration_failure =
+    match core_error with
+    | Some (Agent_core.Error.Config (MissingEnvVar { var_name })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "missing_env_var"
+           ; field = Some var_name
+           ; detail = "required environment variable is missing"
+           })
+    | Some (Agent_core.Error.Config (UnsupportedProvider _)) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "unsupported_provider"
+           ; field = None
+           ; detail = "configured provider is unsupported"
+           })
+    | Some
+        (Agent_core.Error.Config
+           (CredentialUnavailable
+              { provider_id; carrier = Agent_core.Error.UndeclaredCredential })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "credential_undeclared"
+           ; field = Some (Printf.sprintf "providers.%s.credentials" provider_id)
+           ; detail =
+               "provider requires an API key but its runtime row declares no \
+                credential; add a credentials block naming the environment \
+                variable that holds the key"
+           })
+    | Some
+        (Agent_core.Error.Config
+           (CredentialUnavailable
+              { carrier = Agent_core.Error.InlineCredential | Agent_core.Error.FileCredential
+              ; _
+              })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "credential_unavailable"
+           ; field = Some "credentials"
+           ; detail = "declared credential carrier is unavailable"
+           })
+    | Some (Agent_core.Error.Config (SensitiveValueInConfig _)) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "sensitive_value_in_config"
+           ; field = None
+           ; detail = "configuration contains a sensitive inline value"
+           })
+    | Some (Agent_core.Error.Api _) | None | Some (Agent_core.Error.Provider _)
+    | Some (Agent_core.Error.Agent _) | Some (Agent_core.Error.Mcp _)
+    | Some (Agent_core.Error.Config (Agent_core.Error.InvalidConfig _))
+    | Some (Agent_core.Error.Serialization _)
+    | Some (Agent_core.Error.Io _) | Some (Agent_core.Error.Orchestration _ | Agent_core.Error.Media _)
+    | Some (Agent_core.Error.Internal _) | Some (Agent_core.Error.Internal_carried _) -> None
+  in
+  match configuration_failure with
+  | Some _ as reason -> reason
+  | None ->
+  let internal_failure =
+    match core_error with
+    | Some error ->
+      Option.bind
+        (Keeper_internal_error.classify_masc_internal_error error)
+        (registry_failure_reason_of_internal_error ~detail)
+    | None -> registry_failure_reason_of_raw_error ~detail raw_error
+  in
+  match internal_failure with
+  | Some _ as reason -> reason
+  | None ->
+  match terminal_reason.disposition with
+  | Keeper_turn_disposition.Provider_error c ->
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = Keeper_turn_terminal_code.to_wire c
+         ; detail
+         ; provider_id = None
+         ; http_status = None
+         ; runtime_id = None
+           (* The typed observation rides along with the verbatim wire
+              (RFC-0371 §6.1(3)); consumers stop re-parsing the code. *)
+         ; agent_core_timeout =
+             (match c with
+              | Keeper_turn_terminal_code.Agent_core_error { timeout; _ } -> timeout
+              | Keeper_turn_terminal_code.Healthy | Keeper_turn_terminal_code.Fiber_unresolved
+              | Keeper_turn_terminal_code.Operator_interrupt
+              | Keeper_turn_terminal_code.Provider_runtime_error _ -> None)
+         ; reason = None
+           (* No typed error was in hand on this path, so there is nothing
+              to vouch for an empty turn: the marker stays [None] and the
+              row keeps the fallback reading. *)
+         ; fenced_empty_turn_runtime = None
+         })
+  | Keeper_turn_disposition.Runtime_attempts_exhausted ->
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = "runtime_attempts_exhausted"
+         ; detail
+         ; provider_id = None
+         ; http_status = None
+         ; runtime_id = None
+         ; agent_core_timeout = None
+         ; reason = None
+         ; fenced_empty_turn_runtime = None
+         })
+  | Keeper_turn_disposition.Success
+  | Keeper_turn_disposition.Checkpoint
+  | Keeper_turn_disposition.External_cancel
+  | Keeper_turn_disposition.Input_required
+  | Keeper_turn_disposition.Unknown _ -> None
+;;
+
+(** Tracker for matching ToolCalled/ToolCompleted event pairs within a
+    single keeper turn. Pure immutable accumulator: a map from tool name to
+    the FIFO list of pending inputs and the first integrity error observed
+    while matching events. *)
+type turn_tool_event_tracker =
+  { pending_tool_inputs : Yojson.Safe.t list StringMap.t
+  ; tool_completed_count : int
+  ; integrity_error : Agent_core.Error.t option
+  }
+
+let create_turn_tool_event_tracker () =
+  { pending_tool_inputs = StringMap.empty
+  ; tool_completed_count = 0
+  ; integrity_error = None
+  }
+;;
+
+let turn_tool_event_integrity_error tracker = tracker.integrity_error
+let turn_tool_completed_count tracker = tracker.tool_completed_count
+
+let push_turn_tool_input tracker tool_name input =
+  let inputs =
+    match StringMap.find_opt tool_name tracker.pending_tool_inputs with
+    | Some inputs -> inputs @ [ input ]
+    | None -> [ input ]
+  in
+  { tracker with pending_tool_inputs = StringMap.add tool_name inputs tracker.pending_tool_inputs }
+;;
+
+let pop_turn_tool_input tracker tool_name =
+  match StringMap.find_opt tool_name tracker.pending_tool_inputs with
+  | Some (input :: rest) ->
+    let pending =
+      match rest with
+      | [] -> StringMap.remove tool_name tracker.pending_tool_inputs
+      | head :: tail ->
+        StringMap.add tool_name (head :: tail) tracker.pending_tool_inputs
+    in
+    Some input, { tracker with pending_tool_inputs = pending }
+  | Some [] -> None, tracker
+  | None -> None, tracker
+;;
+
+let record_unmatched_tool_completed
+      tracker
+      ~keeper_name
+      ~tool_name
+      ~outcome
+  =
+  let message =
+    Printf.sprintf
+      "%s: keeper turn event-bus integrity error: ToolCompleted(%s) for tool=%s arrived \
+       without matching ToolCalled"
+      keeper_name
+      outcome
+      tool_name
+  in
+  Log.Keeper.error "%s" message;
+  match tracker.integrity_error with
+  | Some _ -> tracker
+  | None ->
+    { tracker with integrity_error = Some (Agent_core.Error.Internal message) }
+;;
+
+let record_turn_tool_events
+      ~(keeper_name : string)
+      (tracker : turn_tool_event_tracker)
+      (events : Agent_core.Event_bus.event list)
+  : turn_tool_event_tracker
+  =
+  List.fold_left
+    (fun tracker (evt : Agent_core.Event_bus.event) ->
+       match evt.payload with
+       | Agent_core.Event_bus.ToolCalled { tool_name; input; _ } ->
+         push_turn_tool_input tracker tool_name input
+       | Agent_core.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
+         let tracker =
+           { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
+         in
+         (match pop_turn_tool_input tracker tool_name with
+          | Some _, tracker -> tracker
+          | None, tracker ->
+            record_unmatched_tool_completed
+              tracker
+              ~keeper_name
+              ~tool_name
+              ~outcome:"ok")
+       | Agent_core.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
+         let tracker =
+           { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
+         in
+         (match pop_turn_tool_input tracker tool_name with
+          | Some _, tracker -> tracker
+          | None, tracker ->
+            record_unmatched_tool_completed
+              tracker
+              ~keeper_name
+              ~tool_name
+              ~outcome:"error")
+       | Agent_core.Event_bus.AgentStarted _ | Agent_core.Event_bus.AgentCompleted _
+       | Agent_core.Event_bus.AgentYielded _ | Agent_core.Event_bus.AgentInputRequired _
+       | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.TurnStarted _
+       | Agent_core.Event_bus.TurnReady _ | Agent_core.Event_bus.TurnCompleted _
+       | Agent_core.Event_bus.HandoffRequested _ | Agent_core.Event_bus.HandoffCompleted _
+       | Agent_core.Event_bus.ElicitationCompleted _ | Agent_core.Event_bus.ToolApprovalCompleted _
+       | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> tracker)
+    tracker
+    events
+;;
+
+type streaming_cancellation_source =
+  | Supervisor_stop
+  | External_cancel
+
+let streaming_cancellation_source_to_code = function
+  | Supervisor_stop -> "supervisor_stop"
+  | External_cancel -> "external_cancel"
+
+let streaming_cancellation_source_to_fsm = function
+  | Supervisor_stop -> Keeper_turn_fsm.Cancelled_supervisor_stop
+  | External_cancel -> Keeper_turn_fsm.Cancelled_external
+
+(** Record the observation for a streaming turn that was cancelled. *)
+let record_streaming_cancelled_observation
+      ~(config : Workspace.config)
+      ~(run_meta : Keeper_meta_contract.keeper_meta)
+      ~(runtime_id : string)
+      ~(keeper_turn_id : int)
+      ()
+  : unit
+  =
+  let fiber_stop_set =
+    match Keeper_registry.get ~base_path:config.base_path run_meta.name with
+    | Some entry -> Atomic.get entry.fiber_stop
+    | None -> false
+  in
+  let cancellation_source =
+    if fiber_stop_set then Supervisor_stop else External_cancel
+  in
+  let terminal_reason_code =
+    streaming_cancellation_source_to_code cancellation_source
+  in
+  if fiber_stop_set
+  then
+    (* FSM: SupervisorRequestsStop — stop signal confirmed while streaming;
+       turn about to cancel cooperatively. *)
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:run_meta.name
+      ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Streaming
+      Keeper_turn_fsm.Streaming;
+  Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+    ~config
+    ~meta:run_meta
+    ~runtime_id
+    ~outcome:`Cancelled
+    ~terminal_reason_code
+    ~activity_kind:"keeper.turn_cancelled"
+    ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+    ~keeper_turn_id
+    ();
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name:run_meta.name
+    ~turn_id:keeper_turn_id
+    ~prev:Keeper_turn_fsm.Streaming
+    (Keeper_turn_fsm.Cancelled
+       (streaming_cancellation_source_to_fsm cancellation_source))
+;;

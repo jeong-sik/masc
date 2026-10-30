@@ -1,0 +1,9 @@
+{
+  "verdict": "FAIL",
+  "error_type": "BehaviorFailure",
+  "detail": "readmitted A actually observes B note before writing A2",
+  "producer_terminal": false,
+  "producer_returncode": null,
+  "owned_pid": 65904,
+  "scope": "No automatic retry, provider switch, resume, cancellation or forced kill."
+}

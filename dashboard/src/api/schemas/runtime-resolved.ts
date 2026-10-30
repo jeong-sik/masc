@@ -1,0 +1,149 @@
+// Resolved runtime schema — schema-at-boundary for `GET /api/v1/runtime/resolved`.
+//
+// Bugs #14/#15/#36: the dashboard previously derived "what runtime/model is
+// applied" from divergent projections (a raw runtime.toml re-parse, the
+// assignments-only /api/v1/dashboard/runtime-defaults listing, and a
+// hand-rolled fallback that faked runtime-provider catalog fields from that
+// listing). This is the single resolved document instead: effective
+// max-context plus the declaration scope or capability provenance that
+// produced it (see lib/runtime/runtime.mli `resolve_max_context_of_runtime`),
+// every configured lane, and the full keeper fleet joined against
+// [runtime.assignments] with the [runtime].default rider made explicit
+// (assignment_source: "explicit" | "default"). No fabricated defaults: an
+// unresolved runtime config surfaces null/[] rather than a synthesized value.
+
+import {
+  array,
+  boolean,
+  literal,
+  nullable,
+  number,
+  object,
+  optional,
+  string,
+  union,
+  type BaseIssue,
+  type InferOutput,
+} from 'valibot'
+import { parseOrThrow, SchemaDriftError } from './drift-error'
+
+const MaxContextSourceSchema = union([
+  literal('override'),
+  literal('capability'),
+  literal('override_clamped_by_capability'),
+  literal('provider_override'),
+  literal('binding_override'),
+  literal('provider_override_clamped_by_capability'),
+  literal('binding_override_clamped_by_capability'),
+])
+
+const RuntimeResolutionSchema = object({
+  id: string(),
+  provider: string(),
+  model: string(),
+  effective_max_context: number(),
+  max_context_source: MaxContextSourceSchema,
+  max_output_tokens: nullable(number()),
+  is_local: boolean(),
+  is_default: boolean(),
+})
+
+const RuntimeLaneSchema = object({
+  id: string(),
+  declared: boolean(),
+  // The lane as declared, head first: the order a fresh cycle walks.
+  runtime_ids: array(string()),
+})
+
+const ResolvedAssignmentTargetSchema = union([
+  object({
+    kind: union([literal('lane'), literal('single_runtime'), literal('missing')]),
+    id: nullable(string()),
+  }),
+  object({
+    kind: literal('unavailable'),
+    id: string(),
+    reason: object({
+      kind: literal('missing_catalog_model'),
+      message: string(),
+      provider_id: string(),
+      provider_label: string(),
+      model_id: string(),
+    }),
+  }),
+])
+
+const RuntimeAssignmentSchema = object({
+  keeper: string(),
+  assignment_source: union([literal('explicit'), literal('default')]),
+  resolved: ResolvedAssignmentTargetSchema,
+})
+
+const ProviderUsageWindowSchema = object({
+  limit_id: nullable(string()),
+  window: union([
+    object({ kind: literal('five_hour') }),
+    object({ kind: literal('seven_day') }),
+    object({ kind: literal('duration_minutes'), minutes: number() }),
+    object({ kind: literal('provider_label'), label: string() }),
+  ]),
+  utilization: union([
+    object({ unit: literal('fraction'), value: number() }),
+    object({ unit: literal('percent'), value: number() }),
+    object({ unit: literal('usd'), value: number(), limit: nullable(number()) }),
+  ]),
+  resets_at: nullable(number()),
+  observed_at: number(),
+  source: string(),
+  role: union([
+    literal('gates_model_calls'),
+    literal('counts_other_use'),
+    literal('unclassified_limit'),
+  ]),
+})
+
+const ProviderUsageProviderSchema = object({
+  id: string(),
+  display_name: string(),
+})
+
+const ProviderUsageScopeSchema = object({
+  scope: string(),
+  providers: array(ProviderUsageProviderSchema),
+  state: union([literal('reported'), literal('reported_no_windows'), literal('not_reported_since_start')]),
+  observed_at: optional(number()),
+  source: optional(string()),
+  windows: array(ProviderUsageWindowSchema),
+})
+
+const RuntimeResolvedResponseSchema = object({
+  generated_at_iso: optional(string()),
+  source: optional(string()),
+  config_path: nullable(string()),
+  default_route: nullable(string()),
+  default_runtime: nullable(RuntimeResolutionSchema),
+  runtimes: array(RuntimeResolutionSchema),
+  lanes: array(RuntimeLaneSchema),
+  assignments: array(RuntimeAssignmentSchema),
+  provider_usage_windows_since: optional(number()),
+  provider_usage_windows: optional(array(ProviderUsageScopeSchema)),
+})
+
+export type MaxContextSource = InferOutput<typeof MaxContextSourceSchema>
+export type RuntimeResolution = InferOutput<typeof RuntimeResolutionSchema>
+export type RuntimeLaneSnapshot = InferOutput<typeof RuntimeLaneSchema>
+export type ResolvedAssignmentTarget = InferOutput<typeof ResolvedAssignmentTargetSchema>
+export type RuntimeAssignment = InferOutput<typeof RuntimeAssignmentSchema>
+export type ProviderUsageScope = InferOutput<typeof ProviderUsageScopeSchema>
+export type ProviderUsageWindow = InferOutput<typeof ProviderUsageWindowSchema>
+export type RuntimeResolvedResponse = InferOutput<typeof RuntimeResolvedResponseSchema>
+
+export class RuntimeResolvedSchemaDriftError extends SchemaDriftError {
+  constructor(issues: readonly BaseIssue<unknown>[]) {
+    super('runtime_resolved', issues)
+  }
+}
+
+export function parseRuntimeResolvedResponse(data: unknown): RuntimeResolvedResponse {
+  return parseOrThrow(RuntimeResolvedSchemaDriftError, RuntimeResolvedResponseSchema, data)
+}

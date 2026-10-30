@@ -1,0 +1,507 @@
+include Dashboard_execution_helpers
+
+(** Keeper lifecycle phase — deterministic from pause, health and activity
+    timestamps. Serialized to string at JSON boundary only. *)
+type keeper_lifecycle =
+  | Lc_offline
+  | Lc_active
+  | Lc_idle
+
+let keeper_lifecycle_to_string = function
+  | Lc_offline -> "offline"
+  | Lc_active -> "active"
+  | Lc_idle -> "idle"
+
+(** What the published keeper status says about progress. Kept separate from
+    {!keeper_lifecycle} because a paused keeper is an operator decision, not a
+    liveness reading, and reporting it as either offline or running is wrong.
+    A failing keeper has its own value for a similar reason: its keepalive
+    runs, so it is not offline, and its turns fail, so the live branch's
+    "정상 동작 중" would be false. *)
+type continuity_liveness =
+  | Cl_offline
+  | Cl_paused
+  | Cl_failing
+  | Cl_live
+
+(** Keeper execution state — derived from lifecycle and turn metrics.
+    Maps 1:1 with [tone] but serialized separately for dashboard consumers. *)
+type keeper_execution_state = Exec_critical | Exec_warning | Exec_healthy
+
+let keeper_execution_state_to_string = function
+  | Exec_critical -> "critical"
+  | Exec_warning -> "warning"
+  | Exec_healthy -> "healthy"
+
+(** Signal-age guardrail thresholds (seconds).
+    SSOT: [Env_config.Dashboard] module (configurable via env vars). *)
+let signal_stale_sec = Env_config.Dashboard.signal_stale_sec
+let signal_quiet_sec = Env_config.Dashboard.signal_quiet_sec
+let signal_live_sec  = Env_config.Dashboard.signal_live_sec
+
+(** Keeper action-age threshold (seconds).
+    SSOT: [Env_config.Dashboard] module. *)
+let keeper_action_stale_sec = Env_config.Dashboard.keeper_action_stale_sec
+
+(* "who did or is doing it", which includes Done — that is
+   [task_performer_of_status], not the ownership helper. This used to be a
+   local re-implementation, which is how the execution payload and the goal
+   tree came to disagree about a completed Task's assignee. *)
+let task_assignee (task : Masc_domain.task) =
+  Masc_domain.task_performer_of_status task.task_status
+
+let last_message_map messages =
+  let table = Hashtbl.create 32 in
+  List.iter
+    (fun (message : Masc_domain.message) ->
+      let key = String.lowercase_ascii (String.trim message.from_agent) in
+      match Masc_domain.parse_iso8601_opt message.timestamp with
+      | None -> ()
+      | Some ts -> (
+          match Hashtbl.find_opt table key with
+          | Some (existing_ts, _) when existing_ts >= ts -> ()
+          | _ -> Hashtbl.replace table key (ts, message)))
+    messages;
+  table
+
+module Agent_name_map = Set_util.StringMap
+
+let active_task_counts ~agents tasks =
+  (* Index only names this render will read. An unlisted assignee must not
+     grow the index, and task ownership is case-sensitive even though the
+     message lookup above normalizes sender names. *)
+  let counts =
+    List.fold_left
+      (fun counts (agent : Masc_domain.agent) ->
+        Agent_name_map.add agent.name 0 counts)
+      Agent_name_map.empty agents
+  in
+  List.fold_left
+    (fun counts (task : Masc_domain.task) ->
+      match task.task_status with
+      | Claimed { assignee; _ } | InProgress { assignee; _ } ->
+        Agent_name_map.update assignee (Option.map Int.succ) counts
+      | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> counts)
+    counts tasks
+
+let worker_state_of_agent
+    ~(now_ts : float)
+    ~(messages_by_agent : (string, float * Masc_domain.message) Hashtbl.t)
+    ~(active_task_count : int)
+    (agent : Masc_domain.agent) : worker_context =
+  let key = String.lowercase_ascii (String.trim agent.name) in
+  let message_opt = Hashtbl.find_opt messages_by_agent key in
+  let last_seen_ts =
+    Dashboard_utils.parse_iso_opt (String_util.trim_nonempty agent.last_seen) |> Option.value ~default:0.0
+  in
+  let last_message_ts =
+    match message_opt with
+    | Some (ts, _) -> ts
+    | None -> 0.0
+  in
+  let last_signal_ts = Float.max last_seen_ts last_message_ts in
+  let last_signal_at =
+    if last_signal_ts <= 0.0 then None
+    else if last_message_ts >= last_seen_ts then
+      match message_opt with
+      | Some (_, message) -> String_util.trim_nonempty message.timestamp
+      | None -> String_util.trim_nonempty agent.last_seen
+    else
+      String_util.trim_nonempty agent.last_seen
+  in
+  let signal_age_s =
+    if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
+    else infinity
+  in
+  let signal_truth =
+    if last_signal_ts <= 0.0 then
+      "absent"
+    else if signal_age_s <= signal_live_sec then
+      "live"
+    else
+      "stale"
+  in
+  let evidence_source =
+    if last_message_ts > 0.0 && last_message_ts >= last_seen_ts then
+      "message"
+    else if last_seen_ts > 0.0 then
+      "presence"
+    else
+      "none"
+  in
+  let recent_output_preview =
+    match message_opt with
+    | Some (_, message) -> String_util.trim_nonempty (compact_text message.content)
+    | None -> None
+  in
+  let has_work =
+    Option.is_some (String_util.trim_nonempty (Option.value ~default:"" agent.current_task))
+    || active_task_count > 0
+  in
+  let status_string = Masc_domain.string_of_agent_status agent.status in
+  let (state, tone, note) =
+    match agent.status with
+    | Masc_domain.Inactive ->
+        ( "offline",
+          Tone_bad,
+          if last_signal_ts > 0.0 then "Offline or inactive" else "No recent presence" )
+    | Masc_domain.Busy | Masc_domain.Active | Masc_domain.Listening ->
+        if signal_age_s > signal_stale_sec then
+          ( "quiet",
+            Tone_bad,
+            if has_work then "Working without a fresh signal" else "No fresh agent signal" )
+        else if has_work then
+          if signal_age_s > signal_quiet_sec then
+            ("quiet", Tone_warn, "Execution looks quiet for too long")
+          else
+            ("working", Tone_ok, "Task and live signal aligned")
+        else if signal_age_s > signal_quiet_sec then
+          ("quiet", Tone_warn, "Quiet but still reachable")
+        else
+          ("watching", Tone_ok, "Standing by for the next task")
+  in
+  let focus =
+    match String_util.trim_nonempty (Option.value ~default:"" agent.current_task) with
+    | Some value -> value
+    | None ->
+        if active_task_count > 0 then
+          Printf.sprintf "%d claimed tasks waiting for explicit current_task"
+            active_task_count
+        else
+          Option.value ~default:"Idle / waiting for assignment" recent_output_preview
+  in
+  let profile = get_agent_profile agent.name in
+  {
+    tone_rank = Dashboard_utils.tone_rank tone;
+    last_signal_ts;
+    json =
+      `Assoc
+        [
+          ("name", `String agent.name);
+          ("keeper_name",
+            match agent.meta with
+            | Some meta -> Json_util.string_opt_to_json meta.keeper_name
+            | None -> `Null);
+          ("keeper_id",
+            match agent.meta with
+            | Some meta -> Json_util.string_opt_to_json meta.keeper_id
+            | None -> `Null);
+          ("status", `String status_string);
+          ("tone", `String (Dashboard_utils.string_of_tone tone));
+          ("state", `String state);
+          ("note", `String note);
+          ("focus", `String focus);
+          ("last_signal_at", Json_util.string_opt_to_json last_signal_at);
+          ("last_signal_age_sec", if Float.is_finite signal_age_s then `Int (int_of_float signal_age_s) else `Null);
+          ("signal_truth", `String signal_truth);
+          ("evidence_source", `String evidence_source);
+          ("active_task_count", `Int active_task_count);
+          ("emoji", `String profile.emoji);
+          ("koreanName", `String profile.korean_name);
+          ("model", `Null);
+          ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
+          ("recent_event", Json_util.string_opt_to_json recent_output_preview);
+        ];
+  }
+
+let continuity_row_of_keeper ~(now_ts : float) keeper
+  : (continuity_context, string) result =
+  let open Result.Syntax in
+  let name = string_field "name" keeper in
+  let status = string_field "status" keeper in
+  let context_ratio =
+    match member_assoc "context_ratio" keeper with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  let context_metrics_unavailable =
+    member_assoc "context_metrics_unavailable" keeper
+  in
+  (* The last action is dated by the tool call log through [tool_audit_at],
+     not by a keeper-meta mirror of it. The meta field this used to read was a
+     lifetime string stamped on autonomous tool turns only, so a keeper acting
+     on a reactive turn read as having never acted. *)
+  let last_action_at =
+    String_util.trim_nonempty (string_field "tool_audit_at" keeper)
+  in
+  let last_heartbeat_at =
+    String_util.trim_nonempty (string_field "updated_at" keeper)
+  in
+  let last_signal_at = latest_iso_timestamp [ last_action_at; last_heartbeat_at ] in
+  let last_action_ts = Dashboard_utils.parse_iso_opt last_action_at |> Option.value ~default:0.0 in
+  let last_signal_ts = Dashboard_utils.parse_iso_opt last_signal_at |> Option.value ~default:0.0 in
+  let last_action_age_s =
+    if last_action_ts > 0.0 then max 0.0 (now_ts -. last_action_ts)
+    else infinity
+  in
+  let effective_activity_age_s =
+    if last_action_ts > 0.0 then last_action_age_s
+    else if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
+    else infinity
+  in
+  let int_field_default key json = Option.value ~default:0 (Json_util.assoc_int_opt key json) in
+  let turn_count = int_field_default "turn_count" keeper in
+  (* Operator observation publishes a pause override in the same [status] field as
+     the surface status, so this classifies the published vocabulary rather than
+     the surface subset. A paused keeper is neither offline nor running: it is
+     not failing, and it is also not going to make progress, so it carries its
+     own liveness rather than borrowing either verdict. *)
+  (* Two readings, read separately. [paused] is a person's decision and health
+     is an observation; a single status word cannot answer both.
+
+     Health is parsed whether or not the keeper is paused, so a health this
+     build cannot read is rejected either way. Validating it only on the
+     unpaused path would grant producer drift a free pass on every paused
+     keeper - the permissive fallback moved one field over. *)
+  let* health =
+    let raw = string_field "health_state" (member_assoc "diagnostic" keeper) in
+    match Keeper_status_runtime.keeper_health_of_string_opt raw with
+    | Some value -> Ok value
+    | None -> Error (Printf.sprintf "unknown health %S" raw)
+  in
+  let* paused =
+    match Json_util.assoc_member_opt "paused" keeper with
+    | None -> Ok false
+    | Some (`Bool value) -> Ok value
+    | Some other ->
+      Error
+        (Printf.sprintf
+           "paused is not a boolean: %s"
+           (Yojson.Safe.to_string other))
+  in
+  let liveness =
+    if paused then Cl_paused
+    else
+      match health with
+      | Keeper_types.KH_offline -> Cl_offline
+      | KH_failing -> Cl_failing
+      | KH_healthy | KH_idle -> Cl_live
+  in
+  let continuity_offline =
+    match liveness with
+    | Cl_offline -> true
+    | Cl_paused | Cl_failing | Cl_live -> false
+  in
+  let lifecycle =
+    if liveness = Cl_paused then Lc_idle
+    else if continuity_offline then Lc_offline
+    else if last_action_ts > 0.0 then Lc_active
+    else Lc_idle
+  in
+  let (state, tone, note) =
+    match liveness with
+    | Cl_offline -> (Exec_critical, Tone_bad, "keeper 오프라인")
+    | Cl_paused -> (Exec_warning, Tone_warn, "운영자 일시정지")
+    (* The word and tone the dashboard already gives the Failing phase
+       (dashboard/src/lib/fleet-tone.ts), so this row and that phase chip say
+       the same thing. *)
+    | Cl_failing -> (Exec_critical, Tone_bad, "오류 발생")
+    | Cl_live ->
+      if effective_activity_age_s >= keeper_action_stale_sec then
+        (Exec_warning, Tone_warn,
+         Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. Masc_time_constants.hour))
+      else
+        (Exec_healthy, Tone_ok, "정상 동작 중")
+  in
+  let continuity = Printf.sprintf "Turns %d" turn_count in
+  let focus =
+    match String_util.trim_nonempty (string_field "current_task_id" keeper) with
+    | Some task_id -> task_id
+    | None -> "현재 작업 없음"
+  in
+  let recent_input_preview =
+    String_util.trim_nonempty (string_field "recent_input_preview" keeper)
+  in
+  let recent_output_preview =
+    String_util.trim_nonempty (string_field "recent_output_preview" keeper)
+    |> option_or_else (fun () -> String_util.trim_nonempty (string_field "last_proactive_preview" keeper))
+  in
+  let recent_tool_names =
+    string_list_of_field "recent_tool_names" keeper |> cap_string_list
+  in
+  let latest_tool_names =
+    string_list_of_field "latest_tool_names" keeper |> cap_string_list
+  in
+  let latest_action_source =
+    String_util.trim_nonempty (string_field "latest_action_source" keeper)
+  in
+  let profile = get_agent_profile name in
+  Ok {
+    tone_rank = Dashboard_utils.tone_rank tone;
+    last_signal_ts;
+    json =
+      `Assoc
+        ([
+           ("name", `String name);
+           ("portrait", member_assoc "portrait" keeper);
+           ("candle_balance_milli", member_assoc "candle_balance_milli" keeper);
+           ("keeper_id", member_assoc "keeper_id" keeper);
+           ("status", `String status);
+           ("tone", `String (Dashboard_utils.string_of_tone tone));
+           ("state", `String (keeper_execution_state_to_string state));
+           ("note", `String note);
+           ("focus", `String focus);
+           ("last_signal_at", Json_util.string_opt_to_json last_signal_at);
+           ("turn_count", member_assoc "turn_count" keeper);
+           ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
+           ("context_metrics_unavailable", context_metrics_unavailable);
+           ("continuity", `String continuity);
+           ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
+           ("recent_input_preview", Json_util.string_opt_to_json recent_input_preview);
+           ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
+           ("recent_tool_names", Json_util.json_string_list recent_tool_names);
+           ("latest_tool_names", Json_util.json_string_list latest_tool_names);
+            ("latest_tool_call_count", member_assoc "latest_tool_call_count" keeper);
+            ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
+            ("tool_audit_source", member_assoc "tool_audit_source" keeper);
+            ("tool_audit_at", member_assoc "tool_audit_at" keeper);
+            ("last_heartbeat_at", Json_util.string_opt_to_json last_heartbeat_at);
+            ("activation_mode", member_assoc "activation_mode" keeper);
+            ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
+            ( "model",
+              Json_util.string_opt_to_json (String_util.trim_nonempty (string_field "active_model" keeper)) );
+            ("emoji", `String profile.emoji);
+            ("koreanName", `String profile.korean_name);
+          ]);
+  }
+
+(* A runtime row this build cannot read still gets its place in the list:
+   the operator sees which Keeper and why, and the rows of the Keepers that
+   can be read are unaffected. Nothing in the row is a guess about the
+   Keeper's state, so it carries no lifecycle, context or tool fields. *)
+let unreadable_continuity_row ~name ~reason : continuity_context =
+  let tone = Tone_bad in
+  { tone_rank = Dashboard_utils.tone_rank tone
+  ; last_signal_ts = 0.0
+  ; json =
+      `Assoc
+        [ "name", `String name
+        ; "tone", `String (Dashboard_utils.string_of_tone tone)
+        ; "state", `String (keeper_execution_state_to_string Exec_critical)
+        ; "note", `String (Printf.sprintf "Keeper 행을 읽을 수 없음: %s" reason)
+        ; "focus", `String "읽을 수 없는 행"
+        ]
+  }
+
+(* Issue #8645: removed dead [operation_severity ~status ~blocker_summary]
+   helper — zero callers in lib/test, not exposed via .mli. The body
+   also carried the #8605 anti-pattern (catch-all to [Tone_ok]). If
+   future code needs status-based severity, re-introduce with a Variant
+   input + exhaustive match instead of a string. *)
+
+let task_operation_status (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Some "active"
+  (* RFC-0323 G-6: awaiting verification is the normal completion lane,
+     not a pause — it is waiting for an out-of-band authority verdict. *)
+  | Masc_domain.AwaitingVerification _ -> Some "active"
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
+
+let task_operation_severity (task : Masc_domain.task) =
+  match task.task_status with
+  (* RFC-0323 G-6: verification pending is not a warning tone. *)
+  | Masc_domain.AwaitingVerification _ -> Tone_ok
+  | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Tone_ok
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> Tone_ok
+
+let task_operation_updated_at (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.Done { completed_at; _ } -> completed_at
+  | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Masc_domain.InProgress { started_at; _ } -> started_at
+  | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Todo -> task.created_at
+
+let task_operation_id (task : Masc_domain.task) =
+  match task.execution_links.operation_id with
+  | Some operation_id -> (
+      match String_util.trim_nonempty operation_id with
+      | Some operation_id -> operation_id
+      | None -> task.id)
+  | None -> task.id
+
+let build_operation_contexts ~(tasks : Masc_domain.task list) =
+  tasks
+  |> List.filter_map (fun (task : Masc_domain.task) ->
+         match task_operation_status task with
+         | None -> None
+         | Some status ->
+           let operation_id = task_operation_id task in
+           let updated_at = task_operation_updated_at task in
+           let severity = task_operation_severity task in
+           let last_seen_ts =
+             Dashboard_utils.parse_iso_opt (Some updated_at) |> Option.value ~default:0.0
+           in
+           Some
+             {
+               operation_id;
+               severity;
+               last_seen_ts;
+               json =
+                 `Assoc
+                   [
+                     ("operation_id", `String operation_id);
+                     ("status", `String status);
+                     ("task_status", `String (Masc_domain.task_status_to_string task.task_status));
+                     ("objective", `String task.title);
+                     ("updated_at", `String updated_at);
+                     ("source", `String "task_execution_links");
+                     ("task_id", `String task.id);
+                     ("severity", `String (Dashboard_utils.string_of_tone severity));
+                     ( "handoff",
+                       handoff_json ~surface:"dashboard_execution"
+                         ?operation_id:(Some operation_id)
+                         ~label:"Open task"
+                         ~target_type:"task"
+                         ~target_id:task.id
+                         ~focus_kind:"task"
+                         () );
+                   ];
+             })
+  |> List.sort (fun left right ->
+         let by_tone = Int.compare (Dashboard_utils.tone_rank right.severity) (Dashboard_utils.tone_rank left.severity) in
+         if by_tone <> 0 then by_tone
+         else Float.compare right.last_seen_ts left.last_seen_ts)
+
+let build_worker_support_briefs ~(now_ts : float) ~(tasks : Masc_domain.task list)
+    ~(agents : Masc_domain.agent list) ~(messages : Masc_domain.message list) :
+    worker_context list =
+  match agents with
+  | [] -> []
+  | _ :: _ ->
+  let messages_by_agent = last_message_map messages in
+  let counts = active_task_counts ~agents tasks in
+  agents
+  |> List.map (fun (agent : Masc_domain.agent) ->
+         let active_task_count = Agent_name_map.find agent.name counts in
+         worker_state_of_agent ~now_ts ~messages_by_agent ~active_task_count agent)
+  |> List.filter (fun (row : worker_context) -> string_field "tone" row.json <> "ok")
+  |> List.sort (fun (left : worker_context) (right : worker_context) ->
+         let by_tone = Int.compare right.tone_rank left.tone_rank in
+         if by_tone <> 0 then by_tone
+         else Float.compare right.last_signal_ts left.last_signal_ts)
+
+(* A declaration row is a Keeper that has never booted: it has no runtime
+   health for [continuity_row_of_keeper] to read, so it has no continuity. The
+   health guard there stays strict for every runtime row: a row it cannot read
+   is listed as unreadable with the reason, never read as a default. *)
+let build_continuity_briefs ~(now_ts : float) keepers : continuity_context list =
+  keepers
+  |> List.filter_map (fun keeper ->
+         let name = string_field "name" keeper in
+         if name = "" then None
+         else
+           match Keeper_declared_roster.row_kind_of_json keeper with
+           | Ok Keeper_declared_roster.Declaration_row -> None
+           | Ok Keeper_declared_roster.Runtime_row ->
+             Some
+               (match continuity_row_of_keeper ~now_ts keeper with
+                | Ok row -> row
+                | Error reason -> unreadable_continuity_row ~name ~reason)
+           | Error reason -> Some (unreadable_continuity_row ~name ~reason))
+  |> List.sort (fun (left : continuity_context) (right : continuity_context) ->
+         let by_tone = Int.compare right.tone_rank left.tone_rank in
+         if by_tone <> 0 then by_tone
+         else Float.compare right.last_signal_ts left.last_signal_ts)

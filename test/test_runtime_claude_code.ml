@@ -1,0 +1,4894 @@
+open Alcotest
+open Masc
+
+let shell_quote value =
+  "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
+;;
+
+let auth_subscription =
+  {|{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"team","apiProvider":"firstParty"}|}
+;;
+
+let assistant =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_OK"}]}}|}
+;;
+
+let empty_assistant =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-empty-1","message":{"role":"assistant","model":"claude-fixture","content":[]}}|}
+;;
+
+let native_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-native-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"native-call-1","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|}
+;;
+
+let native_tool_result =
+  {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"user-native-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"native-call-1","content":"fixture"}]}}|}
+;;
+
+(* Claude 2.1.292 forwards child tool envelopes with their own model/usage,
+   even with forwardSubagentText disabled. No child text is needed here. *)
+let parent_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"parent-assistant","message":{"id":"parent-message","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"parent-agent","name":"Agent","input":{}}],"usage":{"input_tokens":200,"output_tokens":1,"cache_read_input_tokens":5}}}|}
+;;
+
+let child_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-assistant","message":{"id":"child-message","role":"assistant","model":"child-model","content":[{"type":"tool_use","id":"child-read","name":"Read","input":{}}],"usage":{"input_tokens":900,"output_tokens":1,"cache_read_input_tokens":90}}}|}
+;;
+
+let child_tool_result =
+  {|{"type":"user","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"child-read","is_error":false,"content":"child tool output"}]}}|}
+;;
+
+(* A valid complete Child_response carries provider-exposed body separately
+   from root content. This is an accepted-frame authority fixture, not proof
+   that the CLI's default forwardSubagentText setting emits child body. *)
+let child_body_assistant =
+  {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-body","message":{"id":"child-body-message","role":"assistant","model":"child-model","content":[{"type":"redacted_thinking","data":"DO_NOT_EXPOSE_CHILD_REDACTION"},{"type":"text","text":"CHILD_ONLY"},{"type":"thinking","thinking":"CHILD_REASONING"},{"type":"tool_use","id":"child-read","name":"Read","input":{}},{"type":"text","text":""}],"usage":{"input_tokens":900,"output_tokens":1,"cache_read_input_tokens":90}}}|}
+;;
+
+let tool_progress =
+  {|{"type":"tool_progress","session_id":"__SESSION__","uuid":"tool-progress-1","parent_tool_use_id":"native-call-1","tool_use_id":"opaque-progress-id","tool_name":"Bash","elapsed_time_seconds":240}|}
+;;
+
+let result =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-fixture-1","result":"MASC_CLAUDE_OK","api_error_status":null}|}
+;;
+
+let result_with_usage =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage-1","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"input_tokens":123456,"output_tokens":789,"cache_read_input_tokens":42}}|}
+;;
+
+(* Three assistant frames of one turn. The first two share a message id,
+   the shape parallel tool calls produce, so their usage must count once. *)
+let assistant_with_usage_a =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-usage-a1","message":{"id":"msg-usage-a","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}],"usage":{"input_tokens":100,"output_tokens":10}}}|}
+;;
+
+let assistant_with_usage_a_sibling =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-usage-a2","message":{"id":"msg-usage-a","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first again"}],"usage":{"input_tokens":100,"output_tokens":10}}}|}
+;;
+
+let assistant_with_usage_b =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-usage-b1","message":{"id":"msg-usage-b","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
+;;
+
+(* A frame the CLI emits without a message id cannot be matched to a
+   sibling, so it counts on its own. *)
+let assistant_with_usage_no_id =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-usage-c1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"third"}],"usage":{"input_tokens":1,"output_tokens":1}}}|}
+;;
+
+let result_with_partial_usage =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage-2","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"output_tokens":789}}|}
+;;
+
+type fixture_step =
+  | Emit of string
+  | Emit_and_read of string
+  | Emit_and_expect_request_id of string * string
+  | Emit_after_closing_input of string
+  | Bind_input_uuid
+  | Expect_user_message_contains of string
+    (* Assert against the user message the CLI actually received on stdin. The
+       fixture exits 97 when the needle is absent, so a turn that loses a block
+       between the caller and the wire fails the test instead of passing on a
+       reply the fixture would have emitted anyway. *)
+  | Capture_user_message of string
+    (* Copy the user message line the CLI read, without its LF, to a file. *)
+  | Capture_system_prompt_file of string
+    (* Copy the file named by [--system-prompt-file] to a file. *)
+  | Pause of float
+  | Leave_pipe_holder of float
+    (* Start a background child that inherits stdout and stderr and outlives
+       the CLI, the shape an orphaned MCP server leaves behind. *)
+
+let fixture_script
+      ?(auth_json = auth_subscription)
+      ?(before_initialize_response = [])
+      ?(close_before_user = false)
+      steps
+  =
+  let path = Filename.temp_file "masc-claude-code-" ".sh" in
+  let output = open_out_bin path in
+  let write_step = function
+    | Emit line -> output_string output ("emit " ^ shell_quote line ^ "\n")
+    | Emit_and_read line ->
+      output_string output ("emit " ^ shell_quote line ^ "\n");
+      output_string output "IFS= read -r ignored_response\n"
+    | Emit_and_expect_request_id (line, request_id) ->
+      output_string output ("emit " ^ shell_quote line ^ "\n");
+      output_string output "IFS= read -r control_response\n";
+      output_string output
+        (Printf.sprintf
+           "printf '%%s' \"$control_response\" | grep -F '\"request_id\":\"%s\"' >/dev/null || exit 96\n"
+           request_id)
+    | Emit_after_closing_input line ->
+      output_string output "exec 0<&-\n";
+      output_string output ("emit " ^ shell_quote line ^ "\n")
+    | Bind_input_uuid ->
+      (* Parse the actual serialized outer envelope. No prompt echo or
+         fixture-generated replacement UUID can satisfy this assertion. *)
+      let validate =
+        "import json,sys,uuid; x=json.load(sys.stdin); u=x['uuid']; "
+        ^ "assert isinstance(u,str) and str(uuid.UUID(u))==u and uuid.UUID(u).version==7; "
+        ^ "assert x['type']=='user' and x['parent_tool_use_id'] is None; "
+        ^ "assert x['message']['role']=='user' and isinstance(x['message']['content'],list); print(u)" in
+      output_string output
+        ("input_uuid=$(printf '%s' \"$user_message\" | python3 -c " ^ shell_quote validate ^ ")\n")
+    | Expect_user_message_contains needle ->
+      output_string output
+        (Printf.sprintf
+           "printf '%%s' \"$user_message\" | grep -F %s >/dev/null || exit 97\n"
+           (shell_quote needle))
+    | Capture_user_message target ->
+      output_string output
+        (Printf.sprintf "printf '%%s' \"$user_message\" > %s\n" (shell_quote target))
+    | Capture_system_prompt_file target ->
+      output_string output
+        (Printf.sprintf
+           "next=''; for arg in \"$@\"; do if [ \"$next\" = 1 ]; then cp \"$arg\" %s; next=''; fi; [ \"$arg\" != --system-prompt-file ] || next=1; done\n"
+           (shell_quote target))
+    | Pause seconds ->
+      output_string output (Printf.sprintf "sleep %.3f\n" seconds)
+    | Leave_pipe_holder seconds ->
+      output_string output (Printf.sprintf "sleep %.3f &\n" seconds)
+  in
+  output_string output "#!/bin/sh\n";
+  output_string output "set -eu\n";
+  List.iter
+    (fun name ->
+       output_string output
+         (Printf.sprintf "[ \"${%s+x}\" != x ] || exit 90\n" name))
+    [ "ANTHROPIC_API_URL"; "MASC_CLAUDE_SECRET_CANARY" ];
+  output_string output "[ -n \"${HOME-}\" ] || exit 91\n";
+  output_string output "[ -n \"${USER-}\" ] || exit 97\n";
+  output_string output
+    "[ \"${CLAUDE_CODE_ENTRYPOINT-}\" = masc ] || exit 92\n";
+  output_string output
+    "[ \"${CLAUDE_AGENT_SDK_VERSION-}\" = masc-ocaml ] || exit 93\n";
+  (* A Keeper session must not load the auto-memory index of the directory
+     it runs in (the operator's). *)
+  output_string output
+    "[ \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY-}\" = 1 ] || exit 98\n";
+  output_string output "if [ \"${2-}\" = auth ]; then\n";
+  output_string output
+    ("  printf '%s\\n' " ^ shell_quote auth_json ^ "\n");
+  output_string output (if (try Yojson.Safe.Util.member "loggedIn" (Yojson.Safe.from_string auth_json) = `Bool false with _ -> false) then "  exit 1\n" else "  exit 0\n");
+  output_string output "fi\n";
+  output_string output "session=''\n";
+  output_string output "for arg in \"$@\"; do\n";
+  output_string output "  case \"$arg\" in\n";
+  output_string output "    --session-id=*) session=${arg#--session-id=} ;;\n";
+  output_string output "    --resume=*) session=${arg#--resume=} ;;\n";
+  output_string output "  esac\n";
+  output_string output "done\n";
+  output_string output "[ -n \"$session\" ] || exit 94\n";
+  output_string output "emit() { printf '%s\\n' \"$1\" | sed \"s/__SESSION__/$session/g; s/__INPUT_UUID__/${input_uuid-}/g\"; }\n";
+  output_string output "IFS= read -r initialize\n";
+  output_string output
+    "request_id=$(printf '%s' \"$initialize\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
+  output_string output "[ -n \"$request_id\" ] || exit 95\n";
+  List.iter write_step before_initialize_response;
+  if close_before_user then output_string output "exec 0<&-\n";
+  output_string output
+    "printf '{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"%s\",\"response\":{}}}\\n' \"$request_id\"\n";
+  if close_before_user then output_string output "exit 62\n";
+  output_string output "IFS= read -r user_message\n";
+  List.iter write_step steps;
+  output_string output "while IFS= read -r ignored; do :; done\n";
+  close_out output;
+  Unix.chmod path 0o700;
+  path
+;;
+
+let with_fixture ?auth_json ?before_initialize_response ?close_before_user steps f =
+  let path = fixture_script ?auth_json ?before_initialize_response ?close_before_user steps in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
+;;
+
+(* Two kinds of deadline live in this suite and they want opposite things.
+
+   A deadline a test asserts *fires* wants to be short: the fixture pauses
+   past it on purpose and the timeout is the result. 0.05 s is right there.
+
+   A deadline a test needs to *not* fire has to cover starting the fixture as
+   well as the pause it is compared against. Spawning the shell alone measured
+   p50 12 ms with a 409 ms tail under load on this repo's machine, so 0.05 s
+   expired before the script reached its first [read] and the case failed
+   about half the time -- which is not what any of these are asserting.
+
+   Growing the pauses alongside was tried and made it worse: the suite got
+   slower, which lengthened the very spawn tail being worked around, and the
+   failure moved to whichever neighbour happened to be unlucky. So the pauses
+   stay as they are and only the windows that must survive a process start
+   carry this name.
+
+   The default stays 2 s. Raising it was tried and inverted the suite: the
+   default also feeds the cases that assert a deadline *does* fire, and a
+   5 s default swallowed the 0.2 s pause those wait through, so
+   [test_no_deadline_keeps_initialize_bounded] failed 12 times out of 12. The
+   two kinds cannot share one number. *)
+let window_outlasting_process_start_s = 5.0
+
+let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
+    ?(native = Runtime_native_tools.claude_code_default)
+    ?account_home
+    ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
+    ?on_turn_started_delay_s ?on_stream_event ?on_input_observation ?on_prompt_sent ?on_spawned
+    ?on_context_submission ?system_prompt
+    ?(prompt = "Return the fixture marker") ?(images = []) path =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let config =
+      { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+        cli_path = path
+      ; account_home
+      ; native
+      ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
+      ; timeout_s = if no_turn_deadline then None else Some timeout_s
+      ; system_prompt
+      }
+    in
+    let on_session_ready =
+      Option.map
+        (fun delay_s ~session_id:_ ->
+           Eio.Time.sleep clock delay_s;
+           Ok ())
+        on_session_ready_delay_s
+    in
+    let on_turn_started =
+      Option.map
+        (fun delay_s ~session_id:_ ~turn_id:_ ->
+           Eio.Time.sleep clock delay_s;
+           Ok ())
+        on_turn_started_delay_s
+    in
+    Runtime_claude_code.run_turn
+      ~mgr:(Eio.Stdenv.process_mgr env)
+      ~clock
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+      ~dynamic_tools
+      ?session_mode
+      ?on_session_ready
+      ?on_turn_started
+      ?on_stream_event
+      ?on_input_observation
+      ?on_prompt_sent
+      ?on_spawned
+      ?on_context_submission
+      config
+      ~prompt
+      ~images)
+;;
+
+let test_selected_account_home_reaches_claude_child () =
+  with_fixture [ Emit assistant; Emit result ] (fun fixture ->
+    let wrapper = Filename.temp_file "masc-claude-account-" ".sh" in
+    Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+      let output = open_out_bin wrapper in
+      output_string output "#!/bin/sh\nset -eu\n";
+      output_string output "[ \"$CLAUDE_CONFIG_DIR\" = /tmp/claude-account-one ] || exit 71\n";
+      output_string output "[ -z \"${ANTHROPIC_API_KEY:-}\" ] || exit 72\n";
+      output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+      close_out output;
+      Unix.chmod wrapper 0o700;
+      match run_fixture ~account_home:"/tmp/claude-account-one" wrapper with
+      | Ok _ -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)))
+;;
+
+let test_relative_inherited_home_keeps_auth_environment () =
+  Masc_test_deps.with_process_env "CLAUDE_CONFIG_DIR" (Some "relative-claude-account") (fun () ->
+    Masc_test_deps.with_process_env "ANTHROPIC_API_KEY" (Some "fixture-inherited-key") (fun () ->
+      let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
+      check (option string) "selected inherited home is absolute"
+        (Some expected) (Runtime_claude_code.effective_account_home None);
+      let scope = Runtime_quota_window.scope_of_claude_code_home
+          (Runtime_claude_code.effective_account_home None) in
+      check string "quota owns the same selected home"
+        ("official:claude-code:home:" ^ expected)
+        (Runtime_quota_window.scope_to_string scope);
+      with_fixture [ Emit assistant; Emit result ] (fun fixture ->
+        let wrapper = Filename.temp_file "masc-claude-relative-home-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out_bin wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output
+            ("[ \"$CLAUDE_CONFIG_DIR\" = " ^ shell_quote expected ^ " ] || exit 81\n");
+          output_string output
+            "[ \"$ANTHROPIC_API_KEY\" = fixture-inherited-key ] || exit 82\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output;
+          Unix.chmod wrapper 0o700;
+          match run_fixture wrapper with
+          | Ok _ -> ()
+          | Error error -> fail (Runtime_claude_code.error_to_string error)))))
+;;
+
+let test_validation_is_process_free () =
+  let config =
+    { (Runtime_claude_code.default_config ~cwd:"/tmp") with cli_path = "" }
+  in
+  match Runtime_claude_code.validate_turn config ~prompt:"fixture" ~images:[] with
+  | Error (Runtime_claude_code.Invalid_config "cli_path must not be empty") -> ()
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok () -> fail "invalid Claude Code config passed admission"
+;;
+
+let test_subscription_turn_and_env_scrub () =
+  Unix.putenv "MASC_CLAUDE_SECRET_CANARY" "must-not-reach-child";
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match run_fixture path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "text" "MASC_CLAUDE_OK" turn.text;
+      check string "turn" "turn-fixture-1" turn.turn_id;
+      check string "model" "claude-fixture" turn.model;
+      check (option string) "subscription" (Some "team") turn.subscription.subscription_type;
+      check bool "new session" false turn.resumed;
+      check bool "no assistant usage yields none" true
+        (Option.is_none turn.usage.latest_request_input);
+      check bool "no result usage yields none" true (Option.is_none turn.usage.turn_total))
+;;
+
+(* A turn that runs many built-in tools carries hundreds of tool_progress and
+   user frames. The runtime used to stop consuming them after 256 and report
+   the next one as an unsupported message type, turning a healthy long turn
+   into a protocol error. 300 is past that removed cap. *)
+let long_turn_progress_messages = 300
+
+let test_long_turn_with_many_progress_messages_completes () =
+  with_fixture
+    (List.init long_turn_progress_messages (fun _ -> Emit tool_progress)
+     @ [ Emit assistant; Emit result ])
+    (fun path ->
+       match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
+;;
+
+(* Before the control response the runtime used to stop consuming system and
+   rate-limit frames after 32 and report the next one as unexpected. 40 is
+   past that removed cap; the admission deadline is the only bound. *)
+let pre_admission_frames_beyond_the_old_cap = 40
+
+let pre_admission_system_frame =
+  {|{"type":"system","subtype":"init","session_id":"__SESSION__"}|}
+;;
+
+let test_many_informational_frames_before_admission_complete () =
+  with_fixture
+    ~before_initialize_response:
+      (List.init pre_admission_frames_beyond_the_old_cap (fun _ ->
+         Emit pre_admission_system_frame))
+    [ Emit assistant; Emit result ]
+    (fun path ->
+       match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
+;;
+
+(* The stderr drain used to be an ordinary fiber of the process switch, so a
+   served turn waited for a background child to release stderr: unbounded for
+   an orphaned MCP server. The holder starts before the result so the race
+   with the CLI's termination cannot skip it. [turn_return_window_s] bounds
+   the whole measured run, not a fixture deadline like
+   [window_outlasting_process_start_s]; the regression it guards against
+   takes the holder's full 20 s. *)
+let pipe_holder_outliving_the_turn_s = 20.0
+let turn_return_window_s = 5.0
+
+let test_result_returns_before_a_background_child_releases_the_pipes () =
+  with_fixture
+    [ Emit assistant; Leave_pipe_holder pipe_holder_outliving_the_turn_s; Emit result ]
+    (fun path ->
+       let started = Unix.gettimeofday () in
+       match run_fixture path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn ->
+         let elapsed = Unix.gettimeofday () -. started in
+         check string "text" "MASC_CLAUDE_OK" turn.text;
+         check bool
+           (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
+           true
+           (elapsed < turn_return_window_s))
+;;
+
+let test_routed_credentials_reach_probe_and_turn () =
+  let bindings = [ "ANTHROPIC_AUTH_TOKEN", "fixture-token";
+    "ANTHROPIC_BASE_URL", "https://gateway.example.test/anthropic";
+    "MASC_CLAUDE_SECRET_CANARY", "not-cli-auth" ] in
+  let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) bindings in
+  List.iter (fun (key, value) -> Unix.putenv key value) bindings;
+  Fun.protect ~finally:(fun () -> List.iter (fun (key, value) ->
+    Unix.putenv key (Option.value value ~default:"")) previous) (fun () ->
+    with_fixture [ Emit assistant; Emit result ] (fun fixture ->
+      let wrapper = Filename.temp_file "claude-auth-environment-" ".sh" in
+      Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+        let out = open_out wrapper in
+        output_string out "#!/bin/sh\nset -eu\n";
+        output_string out "[ \"$ANTHROPIC_AUTH_TOKEN\" = fixture-token ] || exit 71\n";
+        output_string out "[ \"$ANTHROPIC_BASE_URL\" = https://gateway.example.test/anthropic ] || exit 72\n";
+        (* A routed base URL would otherwise turn the client's tool search
+           off and send every masc schema inline. *)
+        output_string out "[ \"$ENABLE_TOOL_SEARCH\" = true ] || exit 74\n";
+        output_string out "if [ \"${2-}\" = auth ]; then [ \"$1\" = --setting-sources= ] || exit 73; fi\n";
+        output_string out ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+        close_out out; Unix.chmod wrapper 0o700;
+        match run_fixture wrapper with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok turn -> check string "turn completed" "MASC_CLAUDE_OK" turn.text)))
+;;
+
+let test_prompt_transmission_boundary () =
+  let sent = ref 0 in
+  let report () = incr sent in
+  let missing = Filename.temp_file "missing-claude-" ".sh" in
+  Sys.remove missing;
+  check bool "missing client fails" true
+    (Result.is_error (run_fixture ~on_prompt_sent:report missing));
+  check int "spawn failure emits no input" 0 !sent;
+  let input_writes = ref [] in
+  with_fixture ~close_before_user:true [] (fun path ->
+    (match run_fixture ~prompt:(String.make 1_100_000 'x') ~on_prompt_sent:report
+        ~on_input_observation:(fun (o : Runtime_claude_input_attribution.observation) ->
+          input_writes := o.phase :: !input_writes) path with
+     | Error (Runtime_claude_code.Turn_transport_interrupted
+         { stage = "user message write"; _ }) -> ()
+     | Error error -> fail (Runtime_claude_code.error_to_string error)
+     | Ok _ -> fail "incomplete user message completed");
+    check int "incomplete write emits no input" 0 !sent;
+    check bool "incomplete write keeps unknown-delivery evidence" true
+      (List.rev !input_writes = [Runtime_claude_input_attribution.Prepared; Write_unknown]));
+  with_fixture [ Expect_user_message_contains "transmission-marker";
+                 Emit assistant; Emit result ] (fun path ->
+    check bool "complete turn succeeds" true
+      (Result.is_ok (run_fixture ~prompt:"transmission-marker" ~on_prompt_sent:report path));
+    check int "complete write emits once" 1 !sent);
+  let rejection =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"rejected-turn","result":"fixture rejected","errors":["fixture rejected"]}|}
+  in
+  with_fixture [ Emit rejection ] (fun path ->
+    (match run_fixture ~on_prompt_sent:report path with
+     | Error (Runtime_claude_code.Turn_failed_with_observation _) -> ()
+     | Error error -> fail (Runtime_claude_code.error_to_string error)
+     | Ok _ -> fail "provider rejection became success");
+    check int "provider rejection keeps transmitted evidence" 2 !sent);
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~on_prompt_sent:(fun () -> failwith "fixture observer failure") path with
+    | Error (Runtime_claude_code.Protocol_error { stage = "prompt sent callback"; _ }) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "observation failure silently continued")
+;;
+
+let test_progress_resets_stream_idle_timeout () =
+  with_fixture
+    [ Emit assistant; Pause 0.4; Emit assistant; Pause 0.4; Emit result ]
+    (fun path ->
+       match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+       | Ok turn ->
+         check string "progressing turn completes" "MASC_CLAUDE_OK" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+let test_stream_idle_timeout_is_typed () =
+  with_fixture [ Pause 0.2; Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~timeout_s:0.05 path with
+    | Error (Runtime_claude_code.Timeout seconds) ->
+      check (float 0.001) "exact idle timeout" 0.05 seconds
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "silent Claude stream ignored its idle timeout")
+;;
+
+(* #39768: an exception raised where the runtime expects none -- the spawn
+   observer here -- leaves [run_turn] as [Unhandled_exception]. As a protocol
+   error it read as a misread client reply. *)
+let test_unexpected_exception_is_unhandled () =
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match
+      run_fixture ~on_spawned:(fun () -> failwith "fixture spawn observer") path
+    with
+    | Error (Runtime_claude_code.Unhandled_exception detail) ->
+      check bool "names the exception" true
+        (String_util.contains_substring detail "fixture spawn observer")
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an observer exception was admitted as a successful turn")
+;;
+
+(* #39824: the exceptions [Reserved_exn] names belong to the process, not to
+   the runtime to type. Raised where the test above raises its [Failure], they
+   reach the outermost catch-all, which re-raises them. *)
+let test_reserved_exceptions_leave_run_turn () =
+  List.iter
+    (fun exn ->
+       with_fixture [ Emit assistant; Emit result ] (fun path ->
+         check_raises
+           (Printexc.to_string exn ^ " leaves run_turn untyped")
+           exn
+           (fun () ->
+              ignore (run_fixture ~on_spawned:(fun () -> raise exn) path))))
+    [ Out_of_memory; Stack_overflow; Sys.Break ]
+;;
+
+let test_no_deadline_keeps_initialize_bounded () =
+  with_fixture
+    ~before_initialize_response:[ Pause 0.2 ]
+    [ Emit assistant; Emit result ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Error (Runtime_claude_code.Timeout seconds) ->
+         check (float 0.001) "admission timeout" 0.05 seconds
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok _ -> fail "an unbounded turn disabled Claude initialization bounds")
+;;
+
+(* The image has to reach the CLI's stdin, not merely be accepted by the caller.
+   The fixture greps the line it read and exits 97 when the block is absent, so
+   a projection that quietly drops the image fails here instead of returning the
+   reply the fixture would have emitted regardless. *)
+let test_image_reaches_the_cli_user_message () =
+  let image =
+    { Runtime_claude_code.media_type = "image/png"
+    ; base64_data = Base64.encode_string "\x89PNG\r\n\x1a\nfixture"
+    }
+  in
+  with_fixture
+    [ Expect_user_message_contains {|"type":"image"|}
+    ; Expect_user_message_contains {|"media_type":"image/png"|}
+    ; Emit assistant
+    ; Emit_after_closing_input result
+    ]
+    (fun path ->
+      match run_fixture ~images:[ image ] path with
+      | Ok _ -> ()
+      | Error error ->
+        failwith
+          ("image turn failed: " ^ Runtime_claude_code.error_to_string error))
+;;
+
+(* The receipts are of the bytes the CLI read: the system prompt file it was
+   started with, and the user message line, whose text block is the turn's
+   [Turn_text] after the image. *)
+let test_receipts_are_the_bytes_the_cli_read () =
+  let image =
+    { Runtime_claude_code.media_type = "image/png"
+    ; base64_data = Base64.encode_string "\x89PNG\r\n\x1a\nfixture"
+    }
+  in
+  let message_copy = Filename.temp_file "claude-user-message-" ".json" in
+  let prompt_copy = Filename.temp_file "claude-system-prompt-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove message_copy; Sys.remove prompt_copy) (fun () ->
+    let receipts = ref [] and sent = ref 0 in
+    with_fixture
+      [ Capture_user_message message_copy
+      ; Capture_system_prompt_file prompt_copy
+      ; Emit assistant
+      ; Emit result ]
+      (fun path ->
+        match
+          run_fixture ~images:[ image ] ~prompt:"receipt \"marker\"\n"
+            ~system_prompt:"system \"prompt\" bytes"
+            ~on_prompt_sent:(fun () -> incr sent)
+            ~on_context_submission:(fun submission -> receipts := (submission, !sent) :: !receipts)
+            path
+        with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok _ -> ());
+    let read file = In_channel.with_open_bin file In_channel.input_all in
+    let hash text = Agent_core_sha256.(digest_string text |> to_hex) in
+    let line = read message_copy and file = read prompt_copy in
+    let module Write = Runtime_official_client_write in
+    match List.rev !receipts with
+    | [ ({ Runtime_claude_code.frame = System_prompt_file; write = prompt_write }, 0)
+      ; ({ frame = User_message _; write = message_write }, 0) ] ->
+      check int "the file receipt counts the file the CLI read" (String.length file) prompt_write.bytes;
+      check string "the file receipt hashes the file the CLI read" (hash file) prompt_write.sha256;
+      check bool "the file is one whole slot" true
+        (Option.is_some (Write.matching_fragment prompt_write ~slot:Whole_write file));
+      check int "the message receipt counts the line the CLI read" (String.length line) message_write.bytes;
+      check string "the message receipt hashes the line the CLI read" (hash line) message_write.sha256;
+      check bool "the text after the image is turn text 1" true
+        (Option.is_some
+           (Write.matching_fragment message_write ~slot:(Turn_text 1) "receipt \"marker\"\n"));
+      check bool "the image is not a text slot" true
+        (Option.is_none (Write.matching_fragment message_write ~slot:(Turn_text 0) "receipt \"marker\"\n"))
+    | receipts ->
+      failf "expected the file then the message, both before the transmission report; got %d receipts"
+        (List.length receipts))
+;;
+
+(* A media type the block cannot carry is rejected before the CLI is spawned,
+   so the caller learns which image is wrong instead of reading a provider 400
+   attributed to the model several seconds later. *)
+let test_unsupported_image_media_type_is_rejected ?(media_type="image/tiff") ?(base64_data="AAAA") ?(expected="image/tiff") () =
+  let config = Runtime_claude_code.default_config ~cwd:"/tmp" in
+  let image =
+    { Runtime_claude_code.media_type; base64_data }
+  in
+  match Runtime_claude_code.validate_turn config ~prompt:"x" ~images:[ image ] with
+  | Ok () -> failwith "an unsupported media type must not validate"
+  | Error (Runtime_claude_code.Invalid_config detail) ->
+    if not (String_util.contains_substring detail expected)
+    then failwith ("error should name the rejected media type: " ^ detail)
+  | Error other ->
+    failwith
+      ("expected Invalid_config, got " ^ Runtime_claude_code.error_to_string other)
+;;
+
+let test_no_deadline_starts_after_user_message () =
+  with_fixture
+    [ Pause 0.2; Emit assistant; Emit result ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:window_outlasting_process_start_s
+           ~no_turn_deadline:true
+           path
+       with
+       | Ok turn -> check string "unbounded result" "MASC_CLAUDE_OK" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+let test_no_deadline_keeps_turn_started_callback_bounded () =
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match
+      run_fixture
+        ~admission_timeout_s:0.05
+        ~no_turn_deadline:true
+        ~on_turn_started_delay_s:0.2
+        path
+    with
+    | Error (Runtime_claude_code.Timeout seconds) ->
+      check (float 0.001) "host callback timeout" 0.05 seconds
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "no-deadline turn made the host state callback unbounded")
+;;
+
+let test_state_callback_timeout_is_typed () =
+  with_fixture [] (fun path ->
+    match
+      run_fixture
+        ~timeout_s:0.05
+        ~on_session_ready_delay_s:0.2
+        path
+    with
+    | Error (Runtime_claude_code.Timeout seconds) ->
+      check (float 0.001) "exact callback timeout" 0.05 seconds
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "blocking Claude callback ignored its timeout")
+;;
+
+let test_callback_timeout_origin_is_preserved_without_deadline () =
+  with_fixture [] (fun path ->
+    check_raises
+      "callback-origin timeout escapes unchanged"
+      Eio.Time.Timeout
+      (fun () ->
+         Eio_main.run (fun env ->
+           let config =
+             { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+               cli_path = path
+             ; timeout_s = None
+             }
+           in
+           Runtime_claude_code.run_turn
+             ~mgr:(Eio.Stdenv.process_mgr env)
+             ~clock:(Eio.Stdenv.clock env)
+             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+             ~on_session_ready:(fun ~session_id:_ -> raise Eio.Time.Timeout)
+             config
+             ~prompt:"fixture"
+             ~images:[]
+           |> ignore)))
+;;
+
+let test_operator_interrupt_callback_keeps_typed_cause () =
+  with_fixture [] (fun path ->
+    let interrupt = Keeper_registry_types.Operator_interrupt in
+    let backtrace = Printexc.get_callstack 0 in
+    let combined = Eio.Exn.Multiple
+      [ (Eio.Cancel.Cancelled interrupt, backtrace)
+      ; (Stdlib.Fun.Finally_raised (Eio.Cancel.Cancelled interrupt), backtrace) ] in
+    let raised =
+      try
+        Eio_main.run (fun env ->
+          let config = { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+            cli_path = path; timeout_s = None } in
+          Runtime_claude_code.run_turn
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~on_session_ready:(fun ~session_id:_ -> raise combined)
+            config ~prompt:"fixture" ~images:[] |> ignore);
+        None
+      with exn -> Some exn in
+    check bool "combined operator interrupt survives the Claude transport" true
+      (Option.fold ~none:false ~some:Keeper_registry_types.is_operator_interrupt raised))
+;;
+
+(* [dynamic_tool_bytes] measures what the tool declarations add to a request.
+   The request-side check #27427 needs is a comparison against a declared
+   window, and a size that silently ignores part of what it sends is what made
+   the old system_and_user_bytes report 6,971 bytes for a turn the provider
+   refused as full. Each field the request carries has to be in the sum. *)
+let test_dynamic_tool_bytes_counts_every_field () =
+  let tool =
+    { Runtime_claude_code.name = "ab"
+    ; description = "cde"
+    ; input_schema = `Assoc [ "f", `String "g" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None; on_response_sent = None })
+    }
+  in
+  let schema_bytes = String.length (Yojson.Safe.to_string tool.Runtime_claude_code.input_schema) in
+  check int "single tool sums name, description and schema"
+    (2 + 3 + schema_bytes)
+    (Runtime_claude_code.dynamic_tool_bytes [ tool ]);
+  check int "empty list is zero" 0 (Runtime_claude_code.dynamic_tool_bytes []);
+  check int "two tools sum"
+    (2 * (2 + 3 + schema_bytes))
+    (Runtime_claude_code.dynamic_tool_bytes [ tool; tool ])
+;;
+
+(* A tool whose declaration carries [_meta] sends those bytes too, so the
+   surface size has to count them (#39471 review P3). *)
+let test_dynamic_tool_bytes_counts_meta () =
+  let tool loading result_bound =
+    { Runtime_claude_code.name = "ab"
+    ; description = "cde"
+    ; input_schema = `Assoc [ "f", `String "g" ]
+    ; loading
+    ; result_bound
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None; on_response_sent = None })
+    }
+  in
+  let bare = tool Runtime_official_client_tool.On_demand Runtime_official_client_tool.Unbounded in
+  let declared =
+    tool Runtime_official_client_tool.Upfront (Runtime_official_client_tool.Bounded_bytes 32768)
+  in
+  let meta_bytes =
+    String.length
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "anthropic/alwaysLoad", `Bool true
+            ; "anthropic/maxResultSizeChars", `Int 32768
+            ]))
+  in
+  check int "_meta bytes are added to a declared tool"
+    (Runtime_claude_code.dynamic_tool_bytes [ bare ] + meta_bytes)
+    (Runtime_claude_code.dynamic_tool_bytes [ declared ]);
+  let spec_meta =
+    match Runtime_claude_code.dynamic_tool_spec declared with
+    | `Assoc fields -> List.assoc_opt "_meta" fields
+    | _ -> None
+  in
+  check int "counted _meta is the one the declaration sends"
+    meta_bytes
+    (Option.fold ~none:0 ~some:(fun m -> String.length (Yojson.Safe.to_string m)) spec_meta)
+;;
+
+(* A result-only aggregate is the turn's spend. No assistant frame reported
+   usage, so no request's occupancy is known. *)
+let test_result_usage_is_carried () =
+  with_fixture [ Emit assistant; Emit result_with_usage ] (fun path ->
+    match run_fixture path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check bool "no request input without an assistant usage" true
+        (Option.is_none turn.usage.latest_request_input);
+      (match turn.usage.turn_total with
+       | None -> fail "usage block was dropped"
+       | Some usage ->
+         (* turn_usage keeps the CLI's exclusive wire counts as-is; the
+            inclusive normalization happens in the keeper's api_usage
+            mapping. The frame's cache_read 42 must survive the parse and
+            its absent cache_creation reads as 0. *)
+         check int "input tokens" 123456 usage.input_tokens;
+         check int "output tokens" 789 usage.output_tokens;
+         check int "cache read carried" 42 usage.cache_read_input_tokens;
+         check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens))
+;;
+
+let test_latest_request_input_and_result_total_both_travel () =
+  with_fixture
+    [ Emit assistant_with_usage_a
+    ; Emit assistant_with_usage_b
+    ; Emit assistant
+    ; Emit result_with_usage
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+        (match turn.usage.latest_request_input with
+         | Some input ->
+           check int "latest counted input, not sum or result total" 200
+             input.input_tokens;
+           check int "latest cache read" 5 input.cache_read_input_tokens;
+           check int "latest absent cache creation" 0
+             input.cache_creation_input_tokens
+         | None -> fail "a later uncounted assistant erased the latest request");
+        (match turn.usage.turn_total with
+         | Some total ->
+           check int "spend output is the result frame's" 789 total.output_tokens
+         | None -> fail "the counted assistant request replaced the result total"))
+;;
+
+let test_child_tool_preserves_root_metadata () =
+  let events = ref [] in
+  with_fixture
+    [Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result;
+     Emit result_with_usage]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "child model cannot replace the root model" "claude-fixture" turn.model;
+          (match turn.usage.latest_request_input with
+           | Some input ->
+               check int "root request input survives child metadata" 200 input.input_tokens;
+               check int "root cache split survives child metadata" 5 input.cache_read_input_tokens
+           | None -> fail "root request input was dropped");
+          check bool "child native start survives metadata isolation" true
+            (List.exists (function Runtime_claude_code.Native_tool_started
+                {identity=Some (Call_id "child-read"); _} -> true | _ -> false) !events);
+          check bool "child native completion survives metadata isolation" true
+            (List.exists (function Runtime_claude_code.Native_tool_finished
+                {observation={identity=Some (Call_id "child-read"); _}; _} -> true | _ -> false) !events);
+          check bool "turn spend is still reported under the root model" true
+            (List.exists (function Runtime_claude_code.Usage_reported {model; usage; _} ->
+                model="claude-fixture" && usage.output_tokens=789 | _ -> false) !events));
+  let uncounted_root = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with
+          | `Assoc fields -> `Assoc (List.remove_assoc "usage" fields)
+          | _ -> fail "parent fixture has no message object" in
+        Yojson.Safe.to_string (`Assoc (("message", message) :: List.remove_assoc "message" fields))
+    | _ -> fail "parent fixture is not an object" in
+  with_fixture [Emit uncounted_root; Emit child_tool_assistant; Emit child_tool_result; Emit result]
+    (fun path -> match run_fixture path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check bool "child usage cannot manufacture an unreported root occupancy" true
+            (Option.is_none turn.usage.latest_request_input))
+;;
+
+let test_child_body_cannot_supply_root_reply () =
+  List.iter (fun root_text ->
+    List.iter (fun result_member ->
+      let terminal = Yojson.Safe.to_string (`Assoc
+        (["type", `String "result"; "subtype", `String "success";
+          "is_error", `Bool false; "session_id", `String "__SESSION__";
+          "uuid", `String "child-body-terminal"] @ result_member)) in
+      let events = ref [] in
+      let root = if root_text then
+        {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"redacted_thinking","data":"DO_NOT_EXPOSE_ROOT_REDACTION"},{"type":"text","text":"MASC_CLAUDE_OK"}]}}|}
+        else empty_assistant in
+      with_fixture
+        [Emit parent_tool_assistant; Emit root; Emit child_body_assistant;
+         Emit child_tool_result; Emit terminal]
+        (fun path ->
+          let outcome = run_fixture
+            ~on_stream_event:(fun event -> events := event :: !events) path in
+          (match outcome with
+           | Ok _ when not root_text && result_member <> ["result", `String ""] ->
+               fail "missing root result was completed from child content"
+           | Ok turn ->
+               check string "root text excludes child body"
+                 (if root_text then "MASC_CLAUDE_OK" else "") turn.text;
+               check string "root model survives child body" "claude-fixture" turn.model;
+               (match turn.usage.latest_request_input with
+                | Some input -> check int "root input survives child body" 200 input.input_tokens
+                | None -> fail "child body erased root input")
+           | Error (Runtime_claude_code.Protocol_error {stage="result message"; detail; _})
+             when not root_text && result_member <> ["result", `String ""] ->
+               check string "child body cannot satisfy missing root result"
+                 "successful turn has no text" detail
+           | Error error -> fail (Runtime_claude_code.error_to_string error));
+          let child_bodies = List.filter_map (function
+            | Runtime_claude_code.Child_content_observed
+                {invocation=_; observation_id=_; parent_tool_use_id; parent_occurrence; message_id; model; block; channel; text} ->
+                check bool "no parent witness outside Native_full" true (Option.is_none parent_occurrence);
+                check string "reported child model preserved" "child-model" model;
+                Some (parent_tool_use_id, message_id, block, channel, text)
+            | _ -> None) (List.rev !events) in
+          (match child_bodies with
+           | [(parent, message, Runtime_claude_code.Assistant_block {uuid; ordinal=1},
+               Runtime_claude_code.Text_content, text);
+              (thinking_parent, thinking_message,
+               Runtime_claude_code.Assistant_block {uuid=thinking_uuid; ordinal=2},
+               Runtime_claude_code.Thinking_content, thinking);
+              (empty_parent, empty_message,
+               Runtime_claude_code.Assistant_block {uuid=empty_uuid; ordinal=4},
+               Runtime_claude_code.Text_content, "")] ->
+               List.iter (fun parent -> check string "literal child owner" "parent-agent" parent)
+                 [parent; thinking_parent; empty_parent];
+               List.iter (fun message -> check (option string) "literal child message"
+                   (Some "child-body-message") message) [message; thinking_message; empty_message];
+               List.iter (fun uuid -> check string "literal child envelope" "child-body" uuid)
+                 [uuid; thinking_uuid; empty_uuid];
+               check string "supplied child text preserved" "CHILD_ONLY" text;
+               check string "supplied child reasoning preserved" "CHILD_REASONING" thinking
+           | _ -> fail "child body lost its supplied payload or exact occurrence");
+          check bool "no child text leaks through root text event" true
+            (List.for_all (function
+              | Runtime_claude_code.Text_delta
+                  {text; block=Runtime_claude_code.Assistant_block {uuid="assistant-fixture-1"; ordinal=1}; _} ->
+                  text="MASC_CLAUDE_OK"
+              | Runtime_claude_code.Text_delta _ -> false
+              | Runtime_claude_code.Thinking_delta _ -> false
+              | _ -> true) !events);
+          check bool "child native start survives body isolation" true
+            (List.exists (function Runtime_claude_code.Native_tool_started
+              {identity=Some (Runtime_native_tools.Call_id "child-read"); _} -> true
+              | _ -> false) !events);
+          check bool "child native completion survives body isolation" true
+            (List.exists (function Runtime_claude_code.Native_tool_finished
+              {observation={identity=Some (Runtime_native_tools.Call_id "child-read"); _}; _} -> true
+              | _ -> false) !events)))
+      [["result", `String ""]; ["result", `Null]; []]) [false; true]
+;;
+
+let test_assistant_parent_provenance_is_required () =
+  let fields = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields -> List.remove_assoc "parent_tool_use_id" fields
+    | _ -> fail "assistant fixture is not an object" in
+  List.iter (fun parent_fields ->
+    let frame = Yojson.Safe.to_string (`Assoc (parent_fields @ fields)) in
+    with_fixture [Emit frame; Emit result] (fun path ->
+      match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "unattributed or malformed assistant was accepted as root"))
+    [[]; ["parent_tool_use_id", `String ""]; ["parent_tool_use_id", `String " "];
+     ["parent_tool_use_id", `Bool false]; ["parent_tool_use_id", `Int 0];
+     ["parent_tool_use_id", `Assoc []]; ["parent_tool_use_id", `List []];
+     ["parent_tool_use_id", `Null; "parent_tool_use_id", `String "parent-agent"]]
+;;
+
+(* Recorded from Claude Code 2.1.280 on 2026-09-23: one client turn, two
+   provider requests (a Bash round, then the answer). The session id is
+   replaced by the fixture placeholder and the init frame keeps only its
+   identity fields; every other frame is as the CLI wrote it.
+
+   The assistant frames report output 3 and 2: snapshots taken while each
+   response streamed. The result frame reports what the turn spent, 270
+   output tokens. Before this, the turn was recorded with output 2. *)
+let real_two_request_turn_frames () =
+  In_channel.with_open_bin "fixtures/claude_code/cc-2.1.280-two-request-turn.jsonl"
+    In_channel.input_all
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+  |> List.map (fun line -> Emit line)
+;;
+
+let test_real_two_request_turn_separates_spend_from_occupancy () =
+  with_fixture (real_two_request_turn_frames ()) (fun path ->
+    match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "text" "Done." turn.text;
+      (match turn.usage.turn_total with
+       | None -> fail "the result frame's total was dropped"
+       | Some total ->
+         check int "spend output is the result frame's 270, not a snapshot" 270
+           total.output_tokens;
+         check int "spend input" 18 total.input_tokens;
+         check int "spend cache read" 40681 total.cache_read_input_tokens;
+         check int "spend cache creation" 7734 total.cache_creation_input_tokens);
+      (match turn.usage.latest_request_input with
+       | None -> fail "the newest request's input was dropped"
+       | Some input ->
+         check int "occupancy is the second request's input" 8 input.input_tokens;
+         check int "occupancy cache read" 22834 input.cache_read_input_tokens;
+         check int "occupancy cache creation" 2747 input.cache_creation_input_tokens))
+;;
+
+(* A usage block the CLI shapes differently must not fail the turn: the text is
+   the turn's product and the counts are an observation of it. An absent value
+   after this lands means the CLI sent nothing usable, which is the measurement
+   #27427 needs. *)
+let test_partial_result_usage_does_not_fail_the_turn () =
+  with_fixture [ Emit assistant; Emit result_with_partial_usage ] (fun path ->
+    match run_fixture path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "text survives" "MASC_CLAUDE_OK" turn.text;
+      check bool "partial usage yields none" true (Option.is_none turn.usage.turn_total))
+;;
+
+let test_supported_authentication_modes () =
+  List.iter (fun (method_name, provider) ->
+    let auth_json = Yojson.Safe.to_string (`Assoc
+      [ "loggedIn", `Bool true; "authMethod", `String method_name
+      ; "subscriptionType", `Null; "apiProvider", `String provider ]) in
+    with_fixture ~auth_json [ Emit assistant; Emit result ] (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+        check string "actual turn completed" "MASC_CLAUDE_OK" turn.text;
+        check string "authentication" method_name
+          (Runtime_claude_code.authentication_to_string turn.subscription.authentication);
+        check string "provider" provider
+          (Runtime_claude_code.api_provider_to_string turn.subscription.api_provider);
+        check (option string) "optional plan" None turn.subscription.subscription_type))
+    [ "claude.ai", "firstParty"; "api_key", "firstParty"
+    ; "oauth_token", "firstParty"; "third_party", "bedrock"
+    ; "third_party", "vertex"; "third_party", "foundry"; "third_party", "mantle" ];
+  with_fixture ~auth_json:{|{"loggedIn":true,"authMethod":"unknown","apiProvider":"firstParty"}|} []
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "unknown authentication admitted")
+;;
+
+let test_logged_out_status_exit_one () =
+  with_fixture ~auth_json:{|{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}|} []
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Subscription_required _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "logged-out CLI admitted")
+;;
+
+let test_missing_cli_is_not_reported_as_logout () =
+  let outcome =
+    Eio_main.run (fun env ->
+      let config =
+        { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+          cli_path = "/definitely/missing/masc-claude-fixture"
+        }
+      in
+      Runtime_claude_code.probe_subscription
+        ~mgr:(Eio.Stdenv.process_mgr env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+        config)
+  in
+  match outcome with
+  | Error (Runtime_claude_code.Invalid_config _) -> ()
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "missing Claude CLI was reported as a valid login"
+;;
+
+let rate_limit_rejected =
+  {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1786356000,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
+;;
+
+let quota_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-1","result":"not inspected","api_error_status":429,"terminal_reason":"api_error"}|}
+;;
+
+let quota_result_with_success_flag =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-quota-flag-1","result":"must not settle","api_error_status":null}|}
+;;
+
+let prompt_too_long_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
+;;
+
+let generic_400_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-generic","result":"request rejected by the provider","api_error_status":400}|}
+;;
+
+let prompt_too_long_typed_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-413-1","result":"Input is too long for requested model","api_error_status":413,"terminal_reason":"prompt_too_long"}|}
+;;
+
+let non_overflow_reason_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-api-error","result":"request rejected by the provider","api_error_status":400,"terminal_reason":"api_error"}|}
+;;
+
+let statusless_generic_error_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-nostatus-3","result":"stream closed before completion"}|}
+;;
+
+(* The reason a turn failed is carried in the error value, and the log call
+   that ends [run_turn] passed only [error_kind] for every failure that did
+   not stop at a host boundary. A turn that ran 184s before failing and one
+   that failed at once both reached the operator as "kind=turn_failed"
+   (2026-09-12 17:08:06 KST), so this pins the detail to the entry that is
+   actually read rather than to the value that was already correct. *)
+let test_turn_failure_reason_reaches_the_log () =
+  let cursor =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> -1
+  in
+  with_fixture [ Emit generic_400_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed_with_observation _) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an unrelated 400 terminal was reported as completion");
+  let failure_entries =
+    Log.Ring.recent
+      ~since_seq:cursor
+      ~module_filter:"runtime_agent"
+      ~order:`Oldest_first
+      ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+         Astring.String.is_infix
+           ~affix:"Claude Code turn failed"
+           entry.Log.Ring.message)
+  in
+  match failure_entries with
+  | [] -> fail "a failed turn logged no failure entry"
+  | entries ->
+    check
+      bool
+      "the failure reason reaches the log entry"
+      true
+      (List.exists
+         (fun (entry : Log.Ring.entry) ->
+           Astring.String.is_infix
+             ~affix:"request rejected by the provider"
+             entry.Log.Ring.message)
+         entries)
+;;
+
+let test_statusless_generic_error_remains_turn_failed () =
+  with_fixture [ Emit statusless_generic_error_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
+      check
+        bool
+        "generic rejection reason survives"
+        true
+        (Astring.String.is_infix ~affix:"stream closed" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "a statusless generic error was reported as completion")
+;;
+
+(* CLI 2.1.228+ states the loop outcome as [terminal_reason]; a live forced
+   overflow emitted "prompt_too_long" while the sentence and status took the
+   413 shape. *)
+let test_terminal_reason_prompt_too_long_is_typed () =
+  with_fixture [ Emit prompt_too_long_typed_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+          { message; tool_effect_attempted = false; response_emitted = false }) ->
+      check
+        bool
+        "provider sentence survives into the typed failure"
+        true
+        (Astring.String.is_infix ~affix:"Input is too long" message)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "a typed overflow terminal was reported as completion")
+;;
+
+(* Only three terminal_reason values name an overflow. Any other value the
+   CLI states is its verdict too: the turn failed for that reason, and the
+   reason stays on the failure line. *)
+let test_non_overflow_terminal_reason_is_a_turn_failure () =
+  with_fixture [ Emit non_overflow_reason_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
+      check
+        bool
+        "the stated reason stays on the failure line"
+        true
+        (Astring.String.is_infix ~affix:"reason=api_error" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "a failed terminal was reported as completion")
+;;
+
+(* The measured Claude Code 2.1.280 line
+   (test/fixtures/claude-code-2.1.280-rate-limit-event.jsonl) with the fixture
+   session, followed by one whose window cannot be read. The readable one
+   reaches the host as a usage report; the unreadable one is logged, and
+   neither changes how the turn ends. *)
+let rate_limit_with_windows =
+  {|{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1790187000,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.67,"resetsAt":1790187000},"seven_day":{"utilization":0.44,"resetsAt":1790640000}}},"uuid":"30a86046-da90-41bd-a609-ef1641070ebd","session_id":"__SESSION__"}|}
+;;
+
+let rate_limit_with_unreadable_window =
+  {|{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":"67%"}}},"uuid":"limit-bad","session_id":"__SESSION__"}|}
+;;
+
+let test_usage_windows_are_reported_without_changing_the_turn () =
+  let reports = ref [] in
+  let on_stream_event = function
+    | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Provider_retry_observed _ | Conversation_compacted
+    | Usage_reported _ | Turn_finished _ -> ()
+  in
+  with_fixture
+    [ Emit rate_limit_with_windows
+    ; Emit rate_limit_with_unreadable_window
+    ; Emit assistant
+    ; Emit result
+    ]
+    (fun path ->
+       match run_fixture ~on_stream_event path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn ->
+         check string "turn completes" "MASC_CLAUDE_OK" turn.text;
+         (match !reports with
+          | [ { Runtime_provider_usage_window.source = Claude_code_rate_limit_event
+              ; windows =
+                  [ { kind = Five_hour; utilization = Fraction five; resets_at = Some 1790187000; _ }
+                  ; { kind = Seven_day; utilization = Fraction seven; resets_at = Some 1790640000; _ }
+                  ]
+              }
+            ] ->
+            check (float 0.0) "five-hour utilization as reported" 0.67 five;
+            check (float 0.0) "seven-day utilization as reported" 0.44 seven
+          | reports ->
+            failf "expected one readable usage report, got %d" (List.length reports)))
+;;
+
+(* Claude Code 2.1.296 reports the fate of a queued inbound command as a
+   top-level `command_lifecycle` frame (schema: its SDK output types). The
+   turn must end with its own result frame whether the frames arrive before
+   admission or in the middle of the turn. *)
+let command_lifecycle_frame state =
+  Printf.sprintf
+    {|{"type":"command_lifecycle","command_uuid":"cmd-1","state":"%s","uuid":"life-%s","session_id":"__SESSION__"}|}
+    state state
+;;
+
+let test_command_lifecycle_frames_do_not_fail_the_turn () =
+  with_fixture
+    ~before_initialize_response:[ Emit (command_lifecycle_frame "queued") ]
+    [ Emit (command_lifecycle_frame "started")
+    ; Emit assistant
+    ; Emit (command_lifecycle_frame "refused")
+    ; Emit result
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn -> check string "turn completes" "MASC_CLAUDE_OK" turn.text)
+;;
+
+(* A tag no dispatch arm decodes fails closed, before admission and inside the
+   turn, and a tag this client does read but does not accept in that phase is
+   reported under its own name. The details are compared whole: they come from
+   the parsed frame kind, so a wrong round trip of any tag shows here. *)
+let unknown_frame = {|{"type":"brand_new_frame","session_id":"__SESSION__"}|}
+
+let expect_protocol_error ~stage ~detail = function
+  | Error (Runtime_claude_code.Protocol_error { stage = actual_stage; detail = actual; _ }) ->
+    check string "protocol error stage" stage actual_stage;
+    check string "protocol error detail" detail actual
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "the frame was accepted"
+;;
+
+let test_unknown_frame_types_fail_closed_in_both_phases () =
+  with_fixture
+    ~before_initialize_response:[ Emit unknown_frame ]
+    [ Emit assistant; Emit result ]
+    (fun path ->
+       expect_protocol_error
+         ~stage:"initialize"
+         ~detail:
+           (Printf.sprintf "unexpected message type %S before control response" "brand_new_frame")
+         (run_fixture path));
+  with_fixture
+    [ Emit unknown_frame; Emit assistant; Emit result ]
+    (fun path ->
+       expect_protocol_error
+         ~stage:"turn"
+         ~detail:(Printf.sprintf "unsupported stream message type %S" "brand_new_frame")
+         (run_fixture path))
+;;
+
+let test_a_known_frame_out_of_phase_is_named_by_its_own_tag () =
+  with_fixture
+    ~before_initialize_response:[ Emit assistant ]
+    [ Emit assistant; Emit result ]
+    (fun path ->
+       expect_protocol_error
+         ~stage:"initialize"
+         ~detail:(Printf.sprintf "unexpected message type %S before control response" "assistant")
+         (run_fixture path))
+;;
+
+let test_quota_is_structurally_classified () =
+  with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Quota_blocked
+          { api_error_status = Some 429
+          ; rate_limit = Some { status = Runtime_claude_code.Rejected; _ }
+          ; tool_effect_attempted = false
+          ; response_emitted = false
+          }) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "typed quota rejection was reported as completion")
+;;
+
+let test_quota_after_native_tool_records_effect () =
+  with_fixture
+    [ Emit native_tool_assistant
+    ; Emit native_tool_result
+    ; Emit rate_limit_rejected
+    ; Emit quota_result
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error
+          (Runtime_claude_code.Quota_blocked
+            { tool_effect_attempted = true; response_emitted = false; _ }) ->
+        ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "post-native-tool quota rejection was reported as completion")
+;;
+
+(* The quota refusal ends a turn that already ran a tool and paid for the
+   model response that asked for it. The result frame carries that spend,
+   and it is reported before the frame is judged a quota refusal. *)
+let quota_result_with_usage =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-usage-1","result":"not inspected","api_error_status":429,"terminal_reason":"api_error","usage":{"input_tokens":5000,"output_tokens":30,"cache_read_input_tokens":4000}}|}
+;;
+
+let test_quota_refusal_still_reports_the_turns_spend () =
+  let reported = ref [] in
+  let on_stream_event = function
+    | Runtime_claude_code.Usage_reported { turn_id; model; usage; _ } ->
+      reported :=
+        (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
+        :: !reported
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
+    | Provider_retry_observed _ | Conversation_compacted | Turn_finished _ -> ()
+  in
+  with_fixture
+    [ Emit parent_tool_assistant
+    ; Emit child_tool_assistant
+    ; Emit child_tool_result
+    ; Emit rate_limit_rejected
+    ; Emit quota_result_with_usage
+    ]
+    (fun path ->
+      (match run_fixture ~on_stream_event path with
+       | Error (Runtime_claude_code.Quota_blocked {tool_effect_attempted=true; _}) -> ()
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok _ -> fail "quota refusal was reported as completion");
+      match !reported with
+      | [ ("turn-quota-usage-1", "claude-fixture", 5000, 30, 4000) ] -> ()
+      | reports ->
+        failf "expected the result frame's usage reported once, got %d reports"
+          (List.length reports))
+;;
+
+(* A refusal before any model response has no model to attribute a spend
+   to, so nothing is reported (the runtime logs it). *)
+let test_quota_refusal_before_any_response_reports_no_spend () =
+  let reported = ref 0 in
+  let on_stream_event = function
+    | Runtime_claude_code.Usage_reported _ -> incr reported
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
+    | Provider_retry_observed _ | Conversation_compacted | Turn_finished _ -> ()
+  in
+  with_fixture [ Emit rate_limit_rejected; Emit quota_result_with_usage ] (fun path ->
+    (match run_fixture ~on_stream_event path with
+     | Error (Runtime_claude_code.Quota_blocked _) -> ()
+     | Error error -> fail (Runtime_claude_code.error_to_string error)
+     | Ok _ -> fail "quota refusal was reported as completion");
+    check int "no usage report without a model response" 0 !reported)
+;;
+
+(* A result frame naming another session is a protocol error, and what it
+   carries is not this turn's spend: nothing is reported. *)
+let test_result_of_another_session_reports_no_spend () =
+  let reported = ref 0 in
+  let on_stream_event = function
+    | Runtime_claude_code.Usage_reported _ -> incr reported
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
+    | Provider_retry_observed _ | Conversation_compacted | Turn_finished _ -> ()
+  in
+  with_fixture
+    [ Emit native_tool_assistant
+    ; Emit native_tool_result
+    ; Emit
+        {|{"type":"result","subtype":"success","is_error":false,"session_id":"another-session","uuid":"turn-foreign-1","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"input_tokens":700,"output_tokens":9}}|}
+    ]
+    (fun path ->
+      (match run_fixture ~on_stream_event path with
+       | Error (Runtime_claude_code.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok _ -> fail "a foreign result completed the turn");
+      check int "no usage report for another session's frame" 0 !reported)
+;;
+
+let test_rejected_rate_limit_overrides_success_flag () =
+  with_fixture [ Emit rate_limit_rejected; Emit quota_result_with_success_flag ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Quota_blocked
+          { api_error_status = None
+          ; rate_limit = Some { status = Runtime_claude_code.Rejected; _ }
+          ; tool_effect_attempted = false
+          ; response_emitted = false
+          }) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "typed quota rejection was overridden by is_error=false")
+;;
+
+let mcp_initialize =
+  {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
+;;
+
+let mcp_list =
+  {|{"type":"control_request","request_id":"mcp-list-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}}}|}
+;;
+
+let mcp_initialized_notification =
+  {|{"type":"control_request","request_id":"mcp-notify-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}}}|}
+;;
+
+let mcp_list_after_notification =
+  {|{"type":"control_request","request_id":"mcp-list-after-notification","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}}}|}
+;;
+
+let mcp_call =
+  {|{"type":"control_request","request_id":"mcp-call-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-claude"}}}}}|}
+;;
+
+let probe_tool call_count : Runtime_claude_code.dynamic_tool =
+  { name = "masc_probe"
+  ; description = "Return a fixture marker"
+  ; input_schema = `Assoc [ "type", `String "object" ]
+  ; loading = Runtime_official_client_tool.On_demand
+  ; result_bound = Runtime_official_client_tool.Unbounded
+  ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+      (fun ~call_id:_ _ ->
+        incr call_count;
+        { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None; on_response_sent = None })
+  }
+;;
+
+(* Producer contract measured in Claude Code 2.1.263: Yct emits the
+   optional envelope boolean from isApiErrorMessage, outside message. *)
+let api_error_assistant =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-api-error-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"}]}}|}
+;;
+
+let api_error_with_native_tool =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-api-error-native-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"},{"type":"tool_use","id":"native-call-1","name":"Read","input":{}}]}}|}
+;;
+
+let api_error_with_mcp_tool =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-api-error-mcp-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"},{"type":"tool_use","id":"mcp-observation-1","name":"mcp__masc__masc_probe","input":{}}]}}|}
+;;
+
+let check_quota_observation ~tool_effect_attempted ~response_emitted = function
+  | Error
+      (Runtime_claude_code.Quota_blocked
+         { api_error_status = Some 429
+         ; rate_limit = Some { status = Rejected; resets_at = Some 1786356000; _ }
+         ; tool_effect_attempted = actual_effect
+         ; response_emitted = actual_response
+         }) ->
+    check bool "tool effect" tool_effect_attempted actual_effect;
+    check bool "response emitted" response_emitted actual_response
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "quota rejection completed the turn"
+;;
+
+let test_api_diagnostic_quota_keeps_failover_safe () =
+  let events = ref [] in
+  with_fixture
+    [ Emit api_error_assistant; Emit rate_limit_rejected; Emit quota_result ]
+    (fun path ->
+       run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+       |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:false;
+       check int "diagnostic starts no response stream" 0 (List.length !events))
+;;
+
+let test_child_body_is_not_root_response_evidence () =
+  let child =
+    {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-evidence","message":{"role":"assistant","model":"child-model","content":[{"type":"text","text":"CHILD_ONLY"},{"type":"thinking","thinking":"CHILD_REASONING"}]}}|} in
+  let events = ref [] in
+  with_fixture [Emit empty_assistant; Emit child; Emit rate_limit_rejected; Emit quota_result]
+    (fun path ->
+      run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+      |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:false;
+      check int "child bodies retain absent message id" 2
+        (List.length (List.filter (function
+          | Runtime_claude_code.Child_content_observed {message_id=None; _} -> true
+          | _ -> false) !events));
+      check bool "child reasoning/text cannot become root evidence" true
+        (List.for_all (function
+          | Runtime_claude_code.Text_delta _ | Thinking_delta _ -> false
+          | _ -> true) !events))
+;;
+
+(* Partial frames as Claude Code sends them when the client forwards child
+   text: same root session, stamped with the child's parent tool call. *)
+let scoped_partial ~parent event =
+  Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
+    "parent_tool_use_id", parent; "session_id", `String "__SESSION__"; "event", event])
+
+let partial_start message = `Assoc ["type", `String "message_start";
+  "message", `Assoc ["id", `String message; "model", `String "claude-fixture"]]
+let partial_block index kind = `Assoc ["type", `String "content_block_start"; "index", `Int index;
+  "content_block", `Assoc ["type", `String kind; kind, `String ""]]
+let partial_piece index kind text = `Assoc ["type", `String "content_block_delta";
+  "index", `Int index; "delta", `Assoc ["type", `String (kind ^ "_delta"); kind, `String text]]
+let partial_stop index = `Assoc ["type", `String "content_block_stop"; "index", `Int index]
+
+let child_partial_frames =
+  let child = scoped_partial ~parent:(`String "parent-agent") in
+  [child (partial_start "child-partial-message"); child (partial_block 0 "thinking");
+   child (partial_piece 0 "thinking" "CHILD_REASONING"); child (partial_stop 0);
+   child (partial_block 1 "text"); child (partial_piece 1 "text" "CHILD_ONLY");
+   child (partial_stop 1)]
+
+let test_child_partial_frames_are_not_root_response_evidence () =
+  let events = ref [] in
+  with_fixture
+    (List.map (fun frame -> Emit frame) child_partial_frames
+     @ [Emit rate_limit_rejected; Emit quota_result])
+    (fun path ->
+      run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+      |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:false;
+      check bool "child partial body publishes no root stream event" true
+        (List.for_all (function
+          | Runtime_claude_code.Turn_started _ | Text_delta _ | Thinking_delta _
+          | Content_block_stopped _ -> false
+          | _ -> true) !events))
+;;
+
+let test_child_partial_frames_leave_root_stream_intact () =
+  let root = scoped_partial ~parent:`Null in
+  let child_complete =
+    {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-partial-complete","message":{"id":"child-partial-message","role":"assistant","model":"child-model","content":[{"type":"text","text":"CHILD_ONLY"}]}}|} in
+  let root_complete =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"root-partial-complete","message":{"id":"root-partial-message","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_OK"}]}}|} in
+  let events = ref [] in
+  (* The child stream opens between the root block's start and its text. *)
+  let frames = [root (partial_start "root-partial-message"); root (partial_block 0 "text")]
+    @ child_partial_frames
+    @ [root (partial_piece 0 "text" "MASC_CLAUDE_OK"); root (partial_stop 0);
+       child_complete; root_complete; result] in
+  with_fixture (List.map (fun frame -> Emit frame) frames) (fun path ->
+    (match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+     | Ok turn -> check string "root reply is the root text" "MASC_CLAUDE_OK" turn.text
+     | Error error -> fail (Runtime_claude_code.error_to_string error));
+    let events = List.rev !events in
+    check (list string) "root stream carries only root text" ["MASC_CLAUDE_OK"]
+      (List.filter_map (function
+        | Runtime_claude_code.Text_delta {text; _} | Thinking_delta {text; _} -> Some text
+        | _ -> None) events);
+    check (list (pair string string)) "child body is published once, from its complete envelope"
+      ["parent-agent", "CHILD_ONLY"]
+      (List.filter_map (function
+        | Runtime_claude_code.Child_content_observed {parent_tool_use_id; text; _} ->
+            Some (parent_tool_use_id, text)
+        | _ -> None) events))
+;;
+
+let test_partial_frame_parent_must_be_null_or_nonblank () =
+  with_fixture
+    [Emit (scoped_partial ~parent:(`String " ") (partial_start "blank-parent")); Emit result]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error {stage="partial stream event"; _}) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "a blank partial parent was read as root")
+;;
+
+let test_child_diagnostic_body_is_excluded_but_tools_survive () =
+  let child_diagnostic = match Yojson.Safe.from_string child_body_assistant with
+    | `Assoc fields -> Yojson.Safe.to_string
+        (`Assoc (("is_api_error_message", `Bool true) :: fields))
+    | _ -> fail "child fixture is not an object" in
+  let terminal =
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"child-diagnostic-terminal","result":""}|} in
+  let events = ref [] in
+  with_fixture [Emit parent_tool_assistant; Emit child_diagnostic;
+    Emit child_tool_result; Emit terminal]
+    (fun path ->
+      (match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+       | Ok turn -> check string "diagnostic cannot supply root reply" "" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error));
+      check bool "diagnostic body cannot publish child or root content" true
+        (List.for_all (function
+          | Runtime_claude_code.Child_content_observed _ | Text_delta _ | Thinking_delta _ -> false
+          | _ -> true) !events);
+      check bool "child diagnostic native start still observed" true
+        (List.exists (function Runtime_claude_code.Native_tool_started
+          {identity=Some (Runtime_native_tools.Call_id "child-read"); _} -> true
+          | _ -> false) !events);
+      check bool "child diagnostic native completion still observed" true
+        (List.exists (function Runtime_claude_code.Native_tool_finished
+          {observation={identity=Some (Runtime_native_tools.Call_id "child-read"); _}; _} -> true
+          | _ -> false) !events))
+;;
+
+let test_api_diagnostic_preserves_prior_text () =
+  let events = ref [] in
+  with_fixture
+    [ Emit assistant
+    ; Emit api_error_assistant
+    ; Emit rate_limit_rejected
+    ; Emit quota_result
+    ]
+    (fun path ->
+       run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+       |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
+       match List.rev !events with
+       | [ Turn_started { model = "claude-fixture"; _ }
+         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK"; _ }
+         ; Content_block_stopped {channel=Text_content; _}
+         ] ->
+         ()
+       | _ -> fail "diagnostic changed the real response stream")
+;;
+
+let test_api_diagnostic_preserves_native_effects () =
+  List.iter
+    (fun (frames, expected_stream_starts) ->
+       let events = ref [] in
+       with_fixture
+         (frames @ [ Emit rate_limit_rejected; Emit quota_result ])
+         (fun path ->
+            run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+            |> check_quota_observation ~tool_effect_attempted:true ~response_emitted:false;
+            let starts =
+              List.filter
+                (function
+                  | Runtime_claude_code.Turn_started _ -> true
+                  | _ -> false)
+                !events
+            in
+            check
+              int
+              "only real assistant starts stream"
+              expected_stream_starts
+              (List.length starts);
+            let native_events =
+              List.filter
+                (function
+                  | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
+                    true
+                  | Turn_started _ | Usage_windows_reported _ | Provider_retry_observed _ | Conversation_compacted
+                  | Native_tool_progress _ | Native_task_observed _ | Usage_reported _ -> false
+                  | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _
+                  | Dynamic_tool_started _
+                  | Dynamic_tool_finished _
+                  | Turn_finished _ -> fail "native-only turn emitted response content")
+                (List.rev !events)
+            in
+            match native_events with
+            | [ Native_tool_started
+                  { identity = Some (Runtime_native_tools.Call_id "native-call-1"); _ }
+              ; Native_tool_finished
+                  { observation = { identity = Some (Runtime_native_tools.Call_id "native-call-1"); _ }; completion = _ }
+              ] -> ()
+            | _ -> fail "diagnostic lost native tool start or completion"))
+    [ [ Emit native_tool_assistant; Emit native_tool_result; Emit api_error_assistant ], 1
+    ; [ Emit api_error_with_native_tool; Emit native_tool_result ], 0
+    ]
+;;
+
+let test_api_diagnostic_preserves_mcp_effects () =
+  List.iter
+    (fun (diagnostic, expected_wrapper) ->
+       let calls = ref 0 in
+       let events = ref [] in
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_call
+         ; Emit diagnostic
+         ; Emit rate_limit_rejected
+         ; Emit quota_result
+         ]
+         (fun path ->
+            run_fixture
+              ~dynamic_tools:[ probe_tool calls ]
+              ~on_stream_event:(fun event -> events := event :: !events)
+              path
+            |> check_quota_observation ~tool_effect_attempted:true ~response_emitted:false;
+            check int "MCP effect ran exactly once" 1 !calls;
+            match List.rev !events with
+            | [ Dynamic_tool_started _; Dynamic_tool_finished _ ] ->
+              check bool "no wrapper observation expected" false expected_wrapper
+            | [ Dynamic_tool_started _
+              ; Dynamic_tool_finished _
+              ; Native_tool_started { origin = Runtime_native_tools.Mcp_wrapper; _ }
+              ] -> check bool "wrapper observation retained" true expected_wrapper
+            | _ -> fail "diagnostic changed MCP observation or emitted text"))
+    [ api_error_assistant, false; api_error_with_mcp_tool, true ]
+;;
+
+let test_api_diagnostic_overflow_keeps_retry_safe () =
+  let events = ref [] in
+  with_fixture [ Emit api_error_assistant; Emit prompt_too_long_result ] (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+           { message; tool_effect_attempted = false; response_emitted = false }) ->
+      check int "no diagnostic stream to close" 0 (List.length !events);
+      check
+        bool
+        "terminal detail retained"
+        true
+        (String.ends_with
+           ~suffix:"Prompt is too long · the request is ~250000 tokens (limit 200000)"
+           message)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "diagnostic overflow completed")
+;;
+
+let test_api_diagnostic_preserves_terminal_error_detail () =
+  with_fixture [ Emit api_error_assistant; Emit generic_400_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Turn_failed_with_observation
+           { detail; api_error_status = Some 400
+           ; tool_effect_attempted = false; response_emitted = false }) ->
+      check
+        string
+        "terminal detail retained"
+        "terminal subtype=success api_status=400 reason=none: request rejected by \
+         the provider"
+        detail
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "diagnostic generic failure completed")
+;;
+
+let assistant_api_flag flag =
+  match Yojson.Safe.from_string api_error_assistant with
+  | `Assoc fields ->
+    let fields = List.remove_assoc "is_api_error_message" fields in
+    Yojson.Safe.to_string
+      (`Assoc
+          (Option.fold
+             ~none:fields
+             ~some:(fun value -> ("is_api_error_message", value) :: fields)
+             flag))
+  | _ -> fail "invalid assistant fixture"
+;;
+
+let test_real_identical_prose_is_still_response () =
+  List.iter
+    (fun flag ->
+       let events = ref [] in
+       with_fixture
+         [ Emit (assistant_api_flag flag); Emit rate_limit_rejected; Emit quota_result ]
+         (fun path ->
+            run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+            |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
+            match List.rev !events with
+            | [ Turn_started _
+              ; Text_delta { message_id = None; text = "You've hit your limit"; _ }
+              ; Content_block_stopped {channel=Text_content; _}
+              ] -> ()
+            | _ -> fail "ordinary assistant prose was hidden"))
+    [ None; Some (`Bool false) ]
+;;
+
+let test_malformed_api_error_flag_fails_closed () =
+  List.iter
+    (fun value ->
+       let events = ref [] in
+       with_fixture
+         [ Emit (assistant_api_flag (Some value)); Emit result ]
+         (fun path ->
+            match
+              run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+            with
+            | Error
+                (Runtime_claude_code.Protocol_error
+                   { stage = "assistant message"; detail }) ->
+              check
+                string
+                "typed field failure"
+                "field \"is_api_error_message\" must be a boolean"
+                detail;
+              check int "malformed frame emits nothing" 0 (List.length !events)
+            | Error error -> fail (Runtime_claude_code.error_to_string error)
+            | Ok _ -> fail "malformed diagnostic flag admitted"))
+    [ `Null; `String "true"; `Int 1; `Assoc []; `List [] ]
+;;
+
+let test_valid_response_after_api_diagnostic () =
+  let events = ref [] in
+  with_fixture [ Emit api_error_assistant; Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Ok turn ->
+      check string "measured model" "claude-fixture" turn.model;
+      check string "real response" "MASC_CLAUDE_OK" turn.text;
+      (match List.rev !events with
+       | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
+         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK"; _ }
+         ; Content_block_stopped {channel=Text_content; _}
+         ; Turn_finished { text = "MASC_CLAUDE_OK" }
+         ] -> ()
+       | _ -> fail "diagnostic started or polluted response stream")
+    | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+let test_api_diagnostic_does_not_replace_measured_model_or_text () =
+  let empty_result =
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-after-diagnostic","result":""}|}
+  in
+  with_fixture
+    [ Emit assistant; Emit api_error_assistant; Emit empty_result ]
+    (fun path ->
+       match run_fixture path with
+       | Ok turn ->
+         check string "measured model survives diagnostic" "claude-fixture" turn.model;
+         check string "fallback contains only real text" "MASC_CLAUDE_OK" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+let test_tool_call_before_turn_admission_is_rejected () =
+  let call_count = ref 0 in
+  with_fixture
+    ~before_initialize_response:
+      [ Emit_and_read mcp_initialize
+      ; Emit mcp_initialized_notification
+      ; Emit_and_read mcp_call
+      ]
+    []
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ probe_tool call_count ] path with
+      | Error (Runtime_claude_code.Protocol_error { stage = "MCP tools/call"; _ }) ->
+        check int "tool effect count" 0 !call_count
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "tool call ran before durable turn admission")
+;;
+
+let test_post_effect_response_failure_requires_recovery () =
+  let call_count = ref 0 in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit_and_read mcp_initialized_notification
+    ; Emit_after_closing_input mcp_call
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ probe_tool call_count ] path with
+      | Error
+          (Runtime_claude_code.Turn_transport_interrupted
+            { stage = "control success response"
+            ; tool_effect_attempted = true
+            ; _
+            }) -> check int "tool effect count" 1 !call_count
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "post-effect response failure completed the turn")
+;;
+
+let test_context_overflow_after_tool_records_effect () =
+  let call_count = ref 0 in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ; Emit prompt_too_long_result
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ probe_tool call_count ] path with
+      | Error
+          (Runtime_claude_code.Context_window_exceeded
+            { tool_effect_attempted = true; response_emitted = false; _ }) ->
+        check int "tool effect count" 1 !call_count
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "post-effect context overflow completed the turn")
+;;
+
+let test_context_overflow_after_response_records_activity () =
+  with_fixture [ Emit assistant; Emit prompt_too_long_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+          { tool_effect_attempted = false; response_emitted = true; _ }) ->
+      ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "post-response context overflow completed the turn")
+;;
+
+let test_context_overflow_after_empty_assistant_remains_retry_safe () =
+  let events = ref [] in
+  with_fixture [ Emit empty_assistant; Emit prompt_too_long_result ] (fun path ->
+    match
+      run_fixture
+        ~on_stream_event:(fun event -> events := event :: !events)
+        path
+    with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+          { tool_effect_attempted = false; response_emitted = false; _ }) ->
+      (match List.rev !events with
+       | [ Turn_started
+             { turn_id = "assistant-empty-1"; model = "claude-fixture" }
+         ; Turn_finished { text = "" }
+         ] ->
+         ()
+       | _ -> fail "retry-safe overflow left the first stream unbalanced")
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "empty assistant frame made context overflow complete")
+;;
+
+(* #39445, task-1779: [_meta] carries what the Keeper declared and nothing
+   else (code.claude.com/docs/en/mcp). An upfront tool asks to be always
+   loaded; a tool whose result MASC bounds declares that bound as
+   [maxResultSizeChars]; a tool with neither is sent with no [_meta]. *)
+let test_dynamic_tool_meta_follows_declared_loading () =
+  let declare ?(result_bound = Runtime_official_client_tool.Unbounded) loading name
+    : Runtime_claude_code.dynamic_tool
+    =
+    { name
+    ; description = "Return a deterministic fixture marker"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading
+    ; result_bound
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = "unused"; content_blocks = None; abort_turn = None; on_response_sent = None })
+    }
+  in
+  let meta tool =
+    Runtime_claude_code.dynamic_tool_spec tool |> Yojson.Safe.Util.member "_meta"
+  in
+  let upfront = meta (declare Runtime_official_client_tool.Upfront "masc_upfront") in
+  let on_demand = meta (declare Runtime_official_client_tool.On_demand "masc_on_demand") in
+  check
+    bool
+    "an upfront tool asks to be always loaded"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" upfront = `Bool true);
+  check
+    bool
+    "an upfront tool declares no result-size bound"
+    true
+    (Yojson.Safe.Util.member "anthropic/maxResultSizeChars" upfront = `Null);
+  check
+    bool
+    "an on-demand tool is sent without _meta"
+    true
+    (on_demand = `Null);
+  let bounded =
+    meta
+      (declare
+         ~result_bound:(Runtime_official_client_tool.Bounded_bytes 16384)
+         Runtime_official_client_tool.On_demand
+         "masc_bounded")
+  in
+  check
+    bool
+    "a bounded tool declares its bound as maxResultSizeChars"
+    true
+    (Yojson.Safe.Util.member "anthropic/maxResultSizeChars" bounded = `Int 16384);
+  check
+    bool
+    "a bounded on-demand tool does not ask to be always loaded"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" bounded = `Null);
+  let bounded_upfront =
+    meta
+      (declare
+         ~result_bound:(Runtime_official_client_tool.Bounded_bytes 16384)
+         Runtime_official_client_tool.Upfront
+         "masc_bounded_upfront")
+  in
+  check
+    bool
+    "a bounded upfront tool carries both keys"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" bounded_upfront = `Bool true
+     && Yojson.Safe.Util.member "anthropic/maxResultSizeChars" bounded_upfront
+        = `Int 16384)
+;;
+
+let test_tool_result_inline_ceiling_is_lane_specific () =
+  let open Runtime_execution in
+  let claude =
+    Claude_code { cli_path = "claude"; account_home = None; model = None; timeout_s = 1.0 }
+  in
+  let codex =
+    Codex_app_server
+      { cli_path = "codex"; account_home = None; model = None; timeout_s = 1.0 }
+  in
+  let antigravity =
+    Antigravity_cli
+      { cli_path = "agy"
+      ; model = "fixture"
+      ; agent = None
+      ; effort = None
+      ; oauth_source = "fixture"
+      ; timeout_s = 1.0
+      ; add_dirs = []
+      }
+  in
+  check int "Claude Code uses the declared ceiling" claude_code_inline_result_bytes
+    (tool_result_inline_ceiling_bytes claude);
+  check int "Codex keeps the existing ceiling" Common.max_tool_result_wire_bytes
+    (tool_result_inline_ceiling_bytes codex);
+  check int "Antigravity keeps the existing ceiling" Common.max_tool_result_wire_bytes
+    (tool_result_inline_ceiling_bytes antigravity)
+;;
+
+let test_dynamic_tool_abort_stops_the_provider_loop () =
+  let response_writes = ref 0 in
+  let tool : Runtime_claude_code.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Abort a repeated provider loop"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = false
+          ; content = "same deterministic failure"
+          ; content_blocks = None
+          ; on_response_sent = Some (fun () -> incr response_writes)
+          ; abort_turn =
+              Some
+                (Repeated_tool_call
+                   { tool_name = "masc_probe"; repeated_count = 3 })
+          })
+    }
+  in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ tool ] path with
+      | Error
+          (Runtime_claude_code.Stopped_by_host
+            { stop = Repeated_tool_call { tool_name; repeated_count }; _ }) ->
+        check int "host stop follows complete response write" 1 !response_writes;
+        check string "tool" "masc_probe" tool_name;
+        check int "repeat count" 3 repeated_count
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
+;;
+
+(* The result frame never arrives after a host stop, so the turn's spend is
+   not observed. What the stop carries is the input side of the newest counted
+   assistant request, deduplicated by message id: the context it occupied.
+   The newest counted frame is the id-less one; the sibling that repeats
+   msg-usage-a is dropped, so it can never become "newest". *)
+let test_host_stop_carries_the_newest_request_input () =
+  let tool : Runtime_claude_code.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Abort a repeated provider loop"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = false
+          ; content = "same deterministic failure"
+          ; content_blocks = None
+          ; on_response_sent = None
+          ; abort_turn =
+              Some
+                (Repeated_tool_call
+                   { tool_name = "masc_probe"; repeated_count = 3 })
+          })
+    }
+  in
+  with_fixture
+    [ Emit assistant_with_usage_a
+    ; Emit assistant_with_usage_a_sibling
+    ; Emit assistant_with_usage_b
+    ; Emit assistant_with_usage_no_id
+    ; Emit child_tool_assistant
+    ; Emit child_tool_result
+    ; Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ tool ] path with
+      | Error
+          (Runtime_claude_code.Stopped_by_host { latest_request_input = Some input; _ }) ->
+        check int "the newest frame's input, not the turn's sum" 1
+          input.input_tokens;
+        check int "its cache read, not an earlier frame's" 0
+          input.cache_read_input_tokens;
+        check int "absent cache creation is 0" 0 input.cache_creation_input_tokens
+      | Error (Runtime_claude_code.Stopped_by_host { latest_request_input = None; _ }) ->
+        fail "host stop dropped the newest request input"
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
+;;
+
+let test_dynamic_tool_callback ?(content = "MASC_TOOL_RESULT")
+    ?content_blocks ?(expected_writes = 1) ?(observer_raises = false) () =
+  let response_writes = ref 0 in
+  let observed_call_id = ref None in
+  let observed_input = ref `Null in
+  let tool : Runtime_claude_code.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Return a fixture marker"
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
+          ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id input ->
+          observed_call_id := Some call_id;
+          observed_input := input;
+          { success = true; content; content_blocks; abort_turn = None;
+            on_response_sent = Some (fun () ->
+              incr response_writes;
+              if observer_raises then invalid_arg "delivery fixture observer failure") })
+    }
+  in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ; Emit assistant
+    ; Emit result
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ tool ] path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+        check int "only the exact projectable response records its complete write" expected_writes !response_writes;
+        check int "measured calls" 1 turn.dynamic_tool_calls;
+        check (option string) "call id" (Some "call-1") !observed_call_id;
+        check string
+          "arguments"
+          {|{"marker":"from-claude"}|}
+          (Yojson.Safe.to_string !observed_input))
+;;
+
+let test_response_observer_requires_original_projection () =
+  let image = Llm_provider.Types.Image
+    {media_type = "image/tiff"; source = Llm_provider.Types.Base64 "AAAA"} in
+  List.iter (fun (content, content_blocks, expected_writes) ->
+    test_dynamic_tool_callback ~content ~content_blocks ~expected_writes ())
+    ["invalid\255", [Llm_provider.Types.Text "invalid\255"], 0;
+     "unsupported image fallback", [image], 0;
+     "unused fallback\255", [Llm_provider.Types.Text "authoritative original"], 1]
+;;
+
+
+let test_partial_text_streams_before_complete_block () =
+  let partial event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  let events = ref [] in
+  let complete =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"id":"msg-partial","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_ OK"}]}}|} in
+  with_fixture
+    [Emit (partial {|{"type":"message_start","message":{"id":"msg-partial","model":"claude-fixture"}}|});
+     Emit (partial {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"MASC_"}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"CLAUDE_"}}|});
+     Emit (partial {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" "}}|});
+     Emit complete;
+     Emit (partial {|{"type":"content_block_stop","index":0}|});
+     Emit (partial {|{"type":"message_delta","delta":{"stop_reason":"end_turn"}}|});
+     Emit (partial {|{"type":"message_stop"}|}); Emit {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-fixture-1","result":"MASC_CLAUDE_ OK","api_error_status":null}|}]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+        match List.rev !events with
+        | [Turn_started {turn_id="msg-partial"; model="claude-fixture"};
+           Text_delta {message_id=Some "msg-partial"; text="MASC_"; _};
+           Text_delta {message_id=Some "msg-partial"; text="CLAUDE_"; _};
+           Text_delta {message_id=Some "msg-partial"; text=" "; _};
+           Text_delta {message_id=Some "msg-partial"; text="OK"; _};
+           Content_block_stopped {block=Partial_block {message_id="msg-partial"; index=0}; channel=Text_content};
+           Turn_finished {text="MASC_CLAUDE_ OK"}] -> ()
+        | _ -> fail "partial text must arrive as separate deltas without repeating the complete block")
+;;
+
+let test_partial_thinking_preserves_complete_suffix () =
+  let frame event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  let events = ref [] in
+  with_fixture
+    [Emit (frame {|{"type":"message_start","message":{"id":"msg-thinking","model":"claude-fixture"}}|});
+     Emit (frame {|{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Inspect "}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"opaque-signature"}}|});
+     Emit (frame {|{"type":"content_block_stop","index":0}|});
+     Emit {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"thinking-envelope","message":{"id":"msg-thinking","role":"assistant","model":"claude-fixture","content":[{"type":"thinking","thinking":"Inspect the state","signature":"opaque-signature"},{"type":"redacted_thinking","data":"opaque-data"}]}}|};
+     Emit assistant; Emit result]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+          let thinking = List.rev !events |> List.filter_map (function
+            | Runtime_claude_code.Thinking_delta {message_id; text; _} -> Some (message_id, text)
+            | _ -> None) in
+          check (list (pair (option string) string)) "only missing thinking suffix follows the delta"
+            [Some "msg-thinking", "Inspect "; Some "msg-thinking", "the state"] thinking)
+;;
+
+let test_partial_thinking_rejects_text_block () =
+  let frame event =
+    "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  with_fixture
+    [Emit (frame {|{"type":"message_start","message":{"id":"msg-thinking","model":"claude-fixture"}}|});
+     Emit (frame {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}|});
+     Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"wrong channel"}}|});
+     Emit assistant; Emit result]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "thinking was accepted into an assistant text block")
+;;
+
+let test_partial_delta_after_stop_is_rejected () =
+  let frame event = "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
+  with_fixture [
+    Emit (frame {|{"type":"message_start","message":{"id":"closed","model":"claude-fixture"}}|});
+    Emit (frame {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"before"}}|});
+    Emit (frame {|{"type":"content_block_stop","index":0}|});
+    Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"late"}}|});
+    Emit assistant; Emit result]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "a closed partial block accepted a provider delta")
+;;
+
+let test_four_partial_messages_preserve_all_blocks () =
+  let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
+      "session_id", `String "__SESSION__"; "event", event]) in
+  let start message = frame (`Assoc ["type", `String "message_start";
+      "message", `Assoc ["id", `String message; "model", `String "claude-fixture"]]) in
+  let block index = frame (`Assoc ["type", `String "content_block_start";
+      "index", `Int index; "content_block", `Assoc ["type", `String "text"; "text", `String ""]]) in
+  let piece index text = frame (`Assoc ["type", `String "content_block_delta";
+      "index", `Int index; "delta", `Assoc ["type", `String "text_delta"; "text", `String text]]) in
+  let stop index = frame (`Assoc ["type", `String "content_block_stop"; "index", `Int index]) in
+  let complete ~uuid id texts = Yojson.Safe.to_string (`Assoc ["type", `String "assistant"; "parent_tool_use_id", `Null;
+      "session_id", `String "__SESSION__"; "uuid", `String uuid;
+      "message", `Assoc ["id", `String id; "model", `String "claude-fixture";
+        "content", `List (List.map (fun text -> `Assoc ["type", `String "text"; "text", `String text]) texts)]]) in
+  let citation = frame (`Assoc ["type", `String "content_block_delta"; "index", `Int 0;
+      "delta", `Assoc ["type", `String "citations_delta"; "citation",
+        `Assoc ["type", `String "char_location"; "cited_text", `String "A";
+          "document_index", `Int 0; "start_char_index", `Int 0; "end_char_index", `Int 1]]]) in
+  let tool_start = frame (`Assoc ["type", `String "content_block_start";
+      "index", `Int 1; "content_block", `Assoc ["type", `String "tool_use";
+        "id", `String "tool-boundary"; "name", `String "Read"; "input", `Assoc []]]) in
+  let result = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"four-final","result":"CD","api_error_status":null}|} in
+  List.iter (fun aggregate ->
+    let events = ref [] in
+    let n = [start "n"; block 0; piece 0 "A"; citation] in
+    let n = if aggregate then n @ [stop 0; tool_start; complete ~uuid:"n-a" "n" ["A"]]
+      else n @ [complete ~uuid:"n-a" "n" ["A"]; stop 0; tool_start] in
+    let n1 = [start "n+1"; block 0; stop 0; block 1; piece 1 "B";
+      complete ~uuid:"n1-b" "n+1" (if aggregate then [""; "B"] else ["B"]); stop 1] in
+    let n2 = [start "n+2"; block 0; piece 0 "C"; stop 0] in
+    let n3 = [start "n+3"; block 0; piece 0 "C"; stop 0; block 1; piece 1 "D"] in
+    let n3 = if aggregate then n3 @ [stop 1; complete ~uuid:"n3-cd" "n+3" ["C"; "D"]]
+      else (* n+2 arrives late; its prefix is scoped by message identity. *)
+        [complete ~uuid:"n2-c" "n+2" ["C"]] @ n3 @ [complete ~uuid:"n3-c" "n+3" ["C"];
+          complete ~uuid:"n3-d" "n+3" ["D"]; stop 1] in
+    let late = if aggregate then [complete ~uuid:"n2-c" "n+2" ["C"]] else [] in
+    with_fixture (List.map (fun json -> Emit json) (n @ n1 @ n2 @ n3 @ late @ [result]))
+      (fun path ->
+        match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok _ ->
+            let n1_stops = List.rev !events |> List.filter_map (function
+              | Runtime_claude_code.Content_block_stopped
+                  {block=Partial_block {message_id="n+1"; index}; channel=Text_content} -> Some index
+              | _ -> None) in
+            check (list int) "empty envelope cannot consume the next nonempty partial block"
+              [0; 1] n1_stops;
+            let pieces = List.rev !events |> List.filter_map (function
+              | Runtime_claude_code.Text_delta {message_id; text; _} -> Some (message_id, text)
+              | _ -> None) in
+            check (list (pair (option string) string)) "four messages retain each partial block once"
+              [Some "n", "A"; Some "n+1", "B"; Some "n+2", "C";
+               Some "n+3", "C"; Some "n+3", "D"] pieces)) [false; true]
+;;
+
+let test_stream_events_preserve_text_and_tool_identity () =
+  let events = ref [] in
+  let tool : Runtime_claude_code.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Return a fixture marker"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None; on_response_sent = None })
+    }
+  in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit assistant
+    ; Emit_and_read mcp_call
+    ; Emit result
+    ]
+    (fun path ->
+      match
+        run_fixture
+          ~dynamic_tools:[ tool ]
+          ~on_stream_event:(fun event -> events := event :: !events)
+          path
+      with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+        match List.rev !events with
+        | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
+          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK"; _ }
+         ; Content_block_stopped {channel=Text_content; _}
+          ; Dynamic_tool_started
+              { call_id = "call-1"
+              ; tool_name = "masc_probe"
+              ; arguments
+              }
+          ; Dynamic_tool_finished { call_id = "call-1" }
+          ; Turn_finished { text = "MASC_CLAUDE_OK" }
+          ] ->
+          check string
+            "exact tool arguments"
+            {|{"marker":"from-claude"}|}
+            (Yojson.Safe.to_string arguments)
+        | _ -> fail "Claude stream events did not preserve wire order and identity")
+;;
+
+let test_stream_events_preserve_native_tool_origin () =
+  let events = ref [] in
+  with_fixture
+    [ Emit native_tool_assistant; Emit native_tool_result; Emit assistant; Emit result ]
+    (fun path ->
+      match
+        run_fixture
+          ~timeout_s:window_outlasting_process_start_s
+          ~on_stream_event:(fun event -> events := event :: !events)
+          path
+      with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+        check int "no MASC dynamic calls" 0 turn.dynamic_tool_calls;
+        match List.rev !events with
+        | [ Turn_started { turn_id = "assistant-native-1"; model = "claude-fixture" }
+          ; Native_tool_started
+              { identity = Some (Runtime_native_tools.Call_id "native-call-1")
+              ; tool_name = Some "Read"
+              ; origin = Runtime_native_tools.Built_in
+              }
+          ; Native_tool_finished
+              { observation = { identity = Some (Runtime_native_tools.Call_id "native-call-1")
+              ; tool_name = Some "Read"
+              ; origin = Runtime_native_tools.Built_in
+              }; completion = _ }
+          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK"; _ }
+         ; Content_block_stopped {channel=Text_content; _}
+          ; Turn_finished { text = "MASC_CLAUDE_OK" }
+          ] -> ()
+        | _ -> fail "Claude native tool activity was not kept distinct from MASC tools")
+;;
+
+(* This test used to assert the opposite: that an MCP notification draws no
+   control_response, on the reasoning that a JSON-RPC notification carries no id
+   and so needs no reply. That conflates two layers. The reply rule that binds
+   here belongs to the control channel, not to the MCP payload: the client wraps
+   every MCP message in a control_request carrying a [request_id] and blocks
+   until that id comes back.
+
+   The old fixture could not see the difference because it moved on without
+   waiting — a fake client that never blocks cannot observe that the real one
+   does. Measured against Claude Code 2.1.226 with every other variable held:
+   with the notification unanswered the turn stops after
+   notifications/initialized and never reaches a result (90s, 4 events); with it
+   answered the same turn runs tools/list -> init -> result in 5.2s. On the live
+   fleet that stall was every claude_code keeper turn — 458 attempts, 0
+   completions over 8 days (#28060).
+
+   Emit_and_expect_request_id makes the fixture wait and exit 96 unless the
+   response carries the id, so this now fails if the ack is dropped again. *)
+let test_mcp_notification_is_acknowledged_on_the_control_channel () =
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit_and_expect_request_id (mcp_initialized_notification, "mcp-notify-1")
+    ; Emit_and_expect_request_id
+        (mcp_list_after_notification, "mcp-list-after-notification")
+    ; Emit assistant
+    ; Emit result
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
+;;
+
+let test_a_client_reconnect_handshakes_again_on_the_same_session () =
+  let session = Runtime_official_client_mcp.create_session () in
+  let send ~id ~method_name ~params =
+    Runtime_official_client_mcp.handle_message
+      ~session
+      ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+      ~tool_specs:(fun () -> [])
+      ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> None)
+      (`Assoc
+         ([ "jsonrpc", `String "2.0"; "method", `String method_name; "params", params ]
+          @ match id with
+            | Some id -> [ "id", `Int id ]
+            | None -> []))
+  in
+  let initialize id =
+    send
+      ~id:(Some id)
+      ~method_name:"initialize"
+      ~params:
+        (`Assoc
+           [ "protocolVersion", `String "2025-11-25"
+           ; "capabilities", `Assoc []
+           ; ( "clientInfo"
+             , `Assoc [ "name", `String "claude-code"; "version", `String "fixture" ] )
+           ])
+  in
+  let admitted label = function
+    | Ok _ -> ()
+    | Error { Runtime_official_client_mcp.detail; _ } -> failf "%s refused: %s" label detail
+  in
+  let phase () =
+    match (Runtime_official_client_mcp.snapshot_session session).phase with
+    | Runtime_official_client_mcp.Awaiting_initialize -> "awaiting_initialize"
+    | Runtime_official_client_mcp.Awaiting_initialized -> "awaiting_initialized"
+    | Runtime_official_client_mcp.Ready -> "ready"
+  in
+  admitted "first initialize" (initialize 1);
+  admitted
+    "first initialized"
+    (send ~id:None ~method_name:"notifications/initialized" ~params:(`Assoc []));
+  check string "ready after first handshake" "ready" (phase ());
+  admitted "reconnect initialize" (initialize 2);
+  check string "reconnect restarts the handshake" "awaiting_initialized" (phase ());
+  (match send ~id:(Some 3) ~method_name:"tools/list" ~params:(`Assoc []) with
+   | Error { stage; _ } -> check string "stage" "MCP tools/list" stage
+   | Ok _ -> fail "tools/list ran before the reconnect handshake finished");
+  admitted
+    "second initialized"
+    (send ~id:None ~method_name:"notifications/initialized" ~params:(`Assoc []));
+  admitted "tools/list after reconnect" (send ~id:(Some 4) ~method_name:"tools/list" ~params:(`Assoc []))
+;;
+
+let test_shared_mcp_bridge_owns_exact_dispatch () =
+  let tool_specs () =
+    [ `Assoc
+        [ "name", `String "masc_probe"
+        ; "description", `String "fixture"
+        ; "inputSchema", `Assoc [ "type", `String "object" ]
+        ]
+    ]
+  in
+  let call_tool ~name ~call_id:_ ~arguments:_ =
+    if String.equal name "missing"
+    then None
+    else failf "unexpected tool dispatch reached the callback: %s" name
+  in
+  let session = Runtime_official_client_mcp.create_session () in
+  let dispatch json =
+    Runtime_official_client_mcp.handle_message
+      ~session
+      ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+      ~tool_specs
+      ~call_tool
+      json
+    |> Result.get_ok
+  in
+  let callback_count = ref 0 in
+  let guarded_call_tool ~name:_ ~call_id:_ ~arguments:_ =
+    incr callback_count;
+    Some { Runtime_official_client_mcp.success = true; content = "unexpected"; content_blocks = None }
+  in
+  let fresh_session = Runtime_official_client_mcp.create_session () in
+  let rejects_phase label message =
+    match
+      Runtime_official_client_mcp.handle_message
+        ~session:fresh_session
+        ~server_name:"masc"
+        ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+        ~tool_specs
+        ~call_tool:guarded_call_tool
+        message
+    with
+    | Error { stage; _ } when String.starts_with ~prefix:"MCP " stage -> ()
+    | Error _ -> failf "%s had the wrong lifecycle error stage" label
+    | Ok _ -> failf "%s bypassed the MCP lifecycle" label
+  in
+  rejects_phase
+    "list before initialize"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 90
+       ; "method", `String "tools/list"
+       ; "params", `Assoc []
+       ]);
+  rejects_phase
+    "call before initialize"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 91
+       ; "method", `String "tools/call"
+       ; ( "params"
+         , `Assoc
+             [ "name", `String "masc_probe"
+             ; "arguments", `Assoc []
+             ] )
+       ]);
+  check int "pre-initialize callback count" 0 !callback_count;
+  let initialized =
+    Runtime_official_client_mcp.handle_message
+      ~session:fresh_session
+      ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+      ~tool_specs
+      ~call_tool:guarded_call_tool
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "id", `Int 92
+         ; "method", `String "initialize"
+         ; ( "params"
+           , `Assoc
+               [ "protocolVersion", `String "2025-11-25"
+               ; "capabilities", `Assoc []
+               ; ( "clientInfo"
+                 , `Assoc
+                     [ "name", `String "official-client-test"
+                     ; "version", `String "1"
+                     ] )
+               ] )
+         ])
+    |> Result.get_ok
+  in
+  check bool "initialize has response" true (Option.is_some initialized.response);
+  rejects_phase
+    "call before initialized notification"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 93
+       ; "method", `String "tools/call"
+       ; ( "params"
+         , `Assoc
+             [ "name", `String "masc_probe"
+             ; "arguments", `Assoc []
+             ] )
+       ]);
+  check int "pre-ready callback count" 0 !callback_count;
+  let initialize =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "id", `Int 0
+         ; "method", `String "initialize"
+         ; ( "params"
+           , `Assoc
+               [ "protocolVersion", `String "2025-11-25"
+               ; "capabilities", `Assoc []
+               ; ( "clientInfo"
+                 , `Assoc
+                     [ "name", `String "official-client-test"
+                     ; "version", `String "1"
+                     ] )
+               ] )
+         ])
+  in
+  check bool "initialize has response" true (Option.is_some initialize.response);
+  let notification =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "method", `String "notifications/initialized"
+         ; "params", `Assoc []
+         ])
+  in
+  check (option string) "notification has no response" None
+    (Option.map Yojson.Safe.to_string notification.response);
+  let list =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "id", `Int 1
+         ; "method", `String "tools/list"
+         ; "params", `Assoc []
+         ])
+  in
+  check bool "list has response" true (Option.is_some list.response);
+  check bool "list did not call a tool" false list.tool_called;
+  let unknown =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "id", `String "call-unknown"
+         ; "method", `String "tools/call"
+         ; ( "params"
+           , `Assoc
+               [ "name", `String "missing"
+               ; "arguments", `Assoc []
+               ] )
+         ])
+  in
+  check bool "unknown tool did not execute" false unknown.tool_called;
+  let open Yojson.Safe.Util in
+  check int
+    "unknown tool JSON-RPC code"
+    (-32602)
+    (unknown.response |> Option.get |> member "error" |> member "code" |> to_int);
+  (match
+     Runtime_official_client_mcp.handle_message
+       ~session
+       ~server_name:"masc"
+       ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+       ~tool_specs
+       ~call_tool
+       (`Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "id", `Bool true
+          ; "method", `String "tools/list"
+          ])
+   with
+   | Error { stage = "MCP message"; _ } -> ()
+   | Error _ -> fail "invalid request id had the wrong error stage"
+   | Ok _ -> fail "boolean JSON-RPC request id was admitted");
+  let rejects label message =
+    match
+      Runtime_official_client_mcp.handle_message
+        ~session
+        ~server_name:"masc"
+        ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+        ~tool_specs
+        ~call_tool
+        message
+    with
+    | Error { stage = "MCP message"; _ } -> ()
+    | Error _ -> failf "%s had the wrong error stage" label
+    | Ok _ -> failf "%s was admitted" label
+  in
+  let rejects_raw label raw_message =
+    rejects label (Yojson.Safe.from_string raw_message)
+  in
+  rejects
+    "explicit null notification id"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Null
+       ; "method", `String "notifications/initialized"
+       ; "params", `Assoc []
+       ]);
+  rejects
+    "scalar params"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 2
+       ; "method", `String "tools/list"
+       ; "params", `Null
+       ]);
+  rejects_raw
+    "duplicate method"
+    {|{"jsonrpc":"2.0","id":3,"method":"tools/list","method":"tools/call","params":{}}|};
+  rejects_raw
+    "nested duplicate argument"
+    {|{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"missing","arguments":{"score":1,"score":2}}}|};
+  rejects
+    "unknown top-level field"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 5
+       ; "method", `String "tools/list"
+       ; "params", `Assoc []
+       ; "fallback", `Bool true
+       ]);
+  rejects_raw
+    "non-finite nested value"
+    {|{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"missing","arguments":{"score":NaN}}}|}
+;;
+
+let test_shared_mcp_protocol_is_negotiated () =
+  let tool_specs () = [] in
+  let call_tool ~name:_ ~call_id:_ ~arguments:_ = None in
+  let initialize protocol_version =
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", `Int 1
+      ; "method", `String "initialize"
+      ; ( "params"
+        , `Assoc
+            [ "protocolVersion", `String protocol_version
+            ; "capabilities", `Assoc []
+            ; ( "clientInfo"
+              , `Assoc
+                  [ "name", `String "official-client-test"
+                  ; "version", `String "1"
+                  ] )
+            ] )
+      ]
+  in
+  let open Yojson.Safe.Util in
+  let handle message =
+    Runtime_official_client_mcp.handle_message
+      ~session:(Runtime_official_client_mcp.create_session ())
+      ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
+      ~tool_specs
+      ~call_tool
+      message
+  in
+  match
+    handle (initialize "2025-11-25")
+  with
+  | Error error -> fail (error.stage ^ ": " ^ error.detail)
+  | Ok dispatch ->
+    check string
+      "measured Antigravity protocol"
+      "2025-11-25"
+      (dispatch.response
+       |> Option.get
+       |> member "result"
+       |> member "protocolVersion"
+       |> to_string);
+    check string
+      "MCP server version uses the canonical build owner"
+      Runtime_build_version.current
+      (dispatch.response
+       |> Option.get
+       |> member "result"
+       |> member "serverInfo"
+       |> member "version"
+       |> to_string);
+    (match
+       handle (initialize "2099-01-01")
+     with
+     | Error { stage = "MCP initialize"; _ } -> ()
+     | Error _ -> fail "unsupported protocol version had the wrong stage"
+     | Ok _ -> fail "unsupported protocol version was silently normalized");
+    (match
+       handle
+         (`Assoc
+            [ "jsonrpc", `String "2.0"
+            ; "id", `Int 2
+            ; "method", `String "initialize"
+            ; ( "params"
+              , `Assoc
+                  [ "capabilities", `Assoc []
+                  ; ( "clientInfo"
+                    , `Assoc
+                        [ "name", `String "official-client-test"
+                        ; "version", `String "1"
+                        ] )
+                  ] )
+            ])
+     with
+     | Error { stage = "MCP initialize"; _ } -> ()
+     | Error _ -> fail "missing protocol version had the wrong stage"
+     | Ok _ -> fail "missing protocol version inherited a hidden default")
+;;
+
+let test_malformed_json_fails_closed () =
+  with_fixture [ Emit "not-json" ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Protocol_error _) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "malformed stream JSON was admitted")
+;;
+
+let test_duplicate_keys_fail_closed () =
+  let duplicate =
+    {|{"type":"assistant","parent_tool_use_id":null,"type":"result","session_id":"__SESSION__","uuid":"duplicate-1"}|}
+  in
+  List.iter (fun frame ->
+    with_fixture [ Emit frame ] (fun path ->
+      match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "duplicate stream JSON key was admitted"))
+    [ duplicate
+    ; {|{"type":"system","subtype":"task_started","subtype":"init","session_id":"__SESSION__","uuid":"mixed-root"}|}
+    ; {|{"type":"system","type":"result","subtype":"task_started","session_id":"__SESSION__","uuid":"mixed-type"}|}
+    ]
+;;
+
+let test_unsupported_control_request_fails_closed () =
+  let request =
+    {|{"type":"control_request","request_id":"permission-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{}}}|}
+  in
+  with_fixture [ Emit request ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Unsupported_control_request "can_use_tool") -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "unsupported permission request was admitted")
+;;
+
+let test_unknown_stream_type_fails_closed () =
+  let unknown =
+    {|{"type":"future_magic","session_id":"__SESSION__","uuid":"future-1"}|}
+  in
+  with_fixture [ Emit unknown ] (fun path ->
+    match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+    | Error (Runtime_claude_code.Protocol_error _) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "unknown stream type was silently ignored")
+;;
+
+let heartbeat_frame ?(uuid="heartbeat-1") ?(parent="native-call-1") ?(session="__SESSION__") ?(tool_name="Read") ?(seconds=30) () =
+  Yojson.Safe.to_string (`Assoc ["type",`String "tool_progress"; "heartbeat",`Bool true;
+    "session_id",`String session; "uuid",`String uuid; "tool_use_id",`String "opaque-progress-id";
+    "parent_tool_use_id",`String parent; "tool_name",`String tool_name;
+    "elapsed_time_seconds",`Int seconds])
+;;
+
+let test_root_heartbeat_owns_only_current_call () =
+  let heartbeat = heartbeat_frame () in
+  let change key value frame = match Yojson.Safe.from_string frame with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key,value)::List.remove_assoc key fields))
+    | _ -> fail "object fixture expected" in
+  let seen = ref [] in
+  let wrong_parent_result = change "parent_tool_use_id" (`String "child-parent") native_tool_result in
+  let malformed = [change "elapsed_time_seconds" (`Int (-1)) heartbeat;
+    change "parent_tool_use_id" `Null heartbeat;
+    change "heartbeat" (`String "true") heartbeat;
+    change "uuid" (`String "") heartbeat] in
+  let duplicated = List.map (fun (key,value) ->
+    match Yojson.Safe.from_string (heartbeat_frame ~uuid:("duplicate-" ^ key) ()) with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key,value)::fields))
+    | _ -> fail "object fixture expected")
+    ["heartbeat",`Bool false; "parent_tool_use_id",`String "native-call-1";
+     "session_id",`String "__SESSION__"; "uuid",`String "another";
+     "tool_use_id",`String "opaque-progress-id"; "tool_name",`String "Bash";
+     "elapsed_time_seconds",`Int 30] in
+  with_fixture ([Emit (heartbeat_frame ~uuid:"before-start" ()); Emit native_tool_assistant;
+      Emit native_tool_assistant; (* active replay must not repeat observer/trace events *)
+      Emit (heartbeat_frame ~uuid:"before-start" ());
+      Emit (heartbeat_frame ~uuid:"other-session" ~session:"wrong" ());
+      Emit (heartbeat_frame ~uuid:"unknown-parent" ~parent:"missing" ());
+      Emit wrong_parent_result; Emit heartbeat; Emit heartbeat;
+      Emit (heartbeat_frame ~seconds:31 ()); (* same UUID, conflicting payload *)
+      Emit (heartbeat_frame ~uuid:"heartbeat-2" ~seconds:3 ())]
+    @ List.map (fun frame -> Emit frame) (malformed @ duplicated)
+    @ [Emit native_tool_result; Emit (heartbeat_frame ~uuid:"late" ());
+       Emit native_tool_assistant; Emit (heartbeat_frame ~uuid:"replayed-start" ());
+       Emit assistant; Emit result])
+    (fun path -> match run_fixture ~on_stream_event:(fun event -> seen := event :: !seen) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+        let reports = List.rev !seen |> List.filter_map (function
+          | Runtime_claude_code.Native_tool_progress {identity=Call_id id;progress=Heartbeat_reported {elapsed_seconds}} -> Some (id,elapsed_seconds)
+          | _ -> None) in
+        check (list (pair string int)) "UUID replay and scope validation retain only exact root facts"
+          ["native-call-1",30;"native-call-1",3] reports;
+        check int "active and completed replays emit only one native start" 1
+          (List.length (List.filter (function Runtime_claude_code.Native_tool_started _ -> true | _ -> false) !seen));
+        check int "active replay keeps the real completion observable exactly once" 1
+          (List.length (List.filter (function Runtime_claude_code.Native_tool_finished _ -> true | _ -> false) !seen)))
+;;
+
+let test_distinct_native_calls_are_not_replay () =
+  let second = match Yojson.Safe.from_string native_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with
+          | `Assoc message ->
+              let content = match List.assoc "content" message with
+                | `List [`Assoc tool] -> `List [`Assoc (("id", `String "native-call-2") :: List.remove_assoc "id" tool)]
+                | _ -> fail "native fixture content" in
+              `Assoc (("content", content) :: List.remove_assoc "content" message)
+          | _ -> fail "native fixture message" in
+        Yojson.Safe.to_string (`Assoc (("uuid", `String "assistant-native-2") ::
+          ("message", message) :: List.remove_assoc "uuid" (List.remove_assoc "message" fields)))
+    | _ -> fail "native fixture envelope" in
+  let seen = ref [] in
+  with_fixture [Emit native_tool_assistant; Emit native_tool_assistant;
+    Emit second; Emit second; Emit assistant; Emit result]
+    (fun path -> match run_fixture ~on_stream_event:(fun event -> seen := event :: !seen) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+          let calls = List.rev !seen |> List.filter_map (function
+            | Runtime_claude_code.Native_tool_started observation -> Runtime_native_tools.call_id observation
+            | _ -> None) in
+          check (list string) "equal tool/input with distinct occurrence emits both starts"
+            ["native-call-1"; "native-call-2"] calls)
+;;
+
+let test_heartbeat_exception_cannot_relax_auth_json () =
+  with_fixture
+    ~auth_json:{|{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","type":"tool_progress","heartbeat":true,"loggedIn":false}|}
+    [] (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "stream heartbeat exception admitted ambiguous authentication")
+;;
+
+let agent_retry_frame ?(uuid="retry-1") ?(progress_id="opaque-one")
+    ?(parent="parent-agent") ?(session="__SESSION__") ?(agent_type="Explore")
+    ?(agent_id="child-agent") ?(attempt=1) ?(clear=false) () =
+  Yojson.Safe.to_string (`Assoc (["type",`String "tool_progress";
+    "session_id",`String session;"uuid",`String uuid;"tool_use_id",`String progress_id;
+    "parent_tool_use_id",`String parent;"tool_name",`String "Agent";
+    "elapsed_time_seconds",`Int 0;"subagent_type",`String agent_type]
+    @ if clear then [] else ["subagent_retry",`Assoc ["agent_id",`String agent_id;
+      "attempt",`Int attempt;"max_retries",`Int 3;"retry_delay_ms",`Int 1500;
+      "error_status",`Int 529;"error_category",`String "overloaded"]]))
+;;
+
+let test_agent_retry_observation_exception_is_narrow () =
+  let fields = match Yojson.Safe.from_string (agent_retry_frame ()) with
+    | `Assoc fields -> fields | _ -> fail "object expected" in
+  List.iter (fun extra ->
+    let malformed = Yojson.Safe.to_string (`Assoc (extra @ fields)) in
+    with_fixture [Emit malformed;Emit assistant;Emit result] (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "retry exception admitted an unrelated ambiguous envelope"))
+    [["type",`String "tool_progress"];
+     ["heartbeat",`Bool false;"tool_name",`String "Agent"];
+     ["unknown",`Int 1;"unknown",`Int 2]];
+  let auth_json = Yojson.Safe.to_string (`Assoc
+    (("loggedIn",`Bool true)::("loggedIn",`Bool false)::fields)) in
+  with_fixture ~auth_json [] (fun path -> match run_fixture path with
+    | Error (Runtime_claude_code.Protocol_error _) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "retry exception admitted ambiguous authentication")
+;;
+
+let test_agent_retry_identity_clear_and_uuid_interleaving () =
+  let change key value frame = match Yojson.Safe.from_string frame with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key,value)::List.remove_assoc key fields))
+    | _ -> fail "object expected" in
+  let malformed = match Yojson.Safe.from_string (agent_retry_frame ()) with
+    | `Assoc fields ->
+        let note = match List.assoc "subagent_retry" fields with
+          | `Assoc note -> `Assoc (("attempt",`Int 9)::note) | _ -> fail "retry expected" in
+        [Yojson.Safe.to_string (`Assoc (("parent_tool_use_id",`String "other")::fields));
+         Yojson.Safe.to_string (`Assoc (("tool_name",`String "Agent")::fields));
+         Yojson.Safe.to_string (`Assoc (("tool_name",`String "Read")::fields));
+         change "subagent_retry" note (agent_retry_frame ());
+         change "subagent_retry" `Null (agent_retry_frame ());
+         change "elapsed_time_seconds" (`Float 0.5) (agent_retry_frame ())]
+    | _ -> fail "object expected" in
+  let first = agent_retry_frame () in
+  let second = agent_retry_frame ~uuid:"retry-2" ~progress_id:"opaque-two" ~attempt:2 () in
+  let finished = change "message" (`Assoc ["role",`String "user";"content",`List
+      [`Assoc ["type",`String "tool_result";"tool_use_id",`String "parent-agent";
+        "content",`String "done"]]]) native_tool_result in
+  let reports = ref [] in
+  let frames = [agent_retry_frame ~uuid:"before" ();parent_tool_assistant;
+      agent_retry_frame ~uuid:"before" ();agent_retry_frame ~uuid:"clear-before-note" ~clear:true ();
+      agent_retry_frame ~session:"foreign" ();]
+    @ malformed @ [first;first;agent_retry_frame ~attempt:9 ();
+      heartbeat_frame ~uuid:"retry-1" ~parent:"parent-agent" ~tool_name:"Agent" ();
+      heartbeat_frame ~uuid:"heartbeat-shared" ~parent:"parent-agent" ~tool_name:"Agent" ();
+      agent_retry_frame ~uuid:"heartbeat-shared" ();second;
+      agent_retry_frame ~uuid:"wrong-agent" ~agent_id:"other-child" ();
+      agent_retry_frame ~uuid:"late-clear-one" ~clear:true ();
+      agent_retry_frame ~uuid:"wrong-type" ~progress_id:"opaque-two" ~agent_type:"Plan" ~clear:true ();
+      agent_retry_frame ~uuid:"clear-two" ~progress_id:"opaque-two" ~clear:true ();
+      agent_retry_frame ~uuid:"clear-twice" ~progress_id:"opaque-two" ~clear:true ();
+      agent_retry_frame ~uuid:"retry-3" ~progress_id:"opaque-two" ~attempt:3 ();
+      finished;agent_retry_frame ~uuid:"closed-clear" ~progress_id:"opaque-two" ~clear:true ();
+      parent_tool_assistant;agent_retry_frame ~uuid:"closed-replay" ();assistant;result] in
+  with_fixture (List.map (fun frame -> Emit frame) frames) (fun path ->
+    match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(function
+          | Runtime_claude_code.Native_tool_progress {identity=Call_id "parent-agent";progress} ->
+              reports := progress :: !reports
+          | _ -> ()) path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+        check string "malformed retry observations leave the healthy turn intact" "MASC_CLAUDE_OK" turn.text;
+        let labels = List.rev !reports |> List.map (function
+          | Runtime_native_tools.Retry_observed (Retry_reported note) -> Printf.sprintf "retry:%d:%s" note.attempt note.agent.agent_id
+          | Retry_observed (Retry_cleared agent) -> "clear:" ^ agent.agent_id
+          | Heartbeat_reported {elapsed_seconds} -> Printf.sprintf "heartbeat:%d" elapsed_seconds
+          | Output_observed _ | Message_reported _ -> "unexpected") in
+        check (list string) "only current owned retry clear is visible; UUID ownership spans kinds"
+          ["retry:1:child-agent";"heartbeat:30";"retry:2:child-agent";"clear:child-agent";"retry:3:child-agent"] labels)
+;;
+
+let test_agent_retry_requires_root_native_full () =
+  let child = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("parent_tool_use_id",`String "outer")::
+        List.remove_assoc "parent_tool_use_id" fields))
+    | _ -> fail "object expected" in
+  let conflicting = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("uuid",`String "conflicting-owner")::
+        List.remove_assoc "uuid" fields))
+    | _ -> fail "object expected" in
+  List.iter (fun (native,starts,parent) ->
+    let reports = ref [] in
+    with_fixture (List.map (fun start -> Emit start) starts @
+      [Emit (agent_retry_frame ~parent ());Emit (agent_retry_frame ~parent ~uuid:"clear" ~clear:true ());
+       Emit assistant;Emit result]) (fun path ->
+        match run_fixture ~native ~on_stream_event:(function
+          | Runtime_claude_code.Native_tool_progress progress -> reports := progress.progress :: !reports
+          | _ -> ()) path with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok _ -> check bool "unowned Agent retry cannot update observations" true (!reports=[])))
+    [Runtime_native_tools.Native_read,[parent_tool_assistant],"parent-agent";
+     Native_none,[parent_tool_assistant],"parent-agent";
+     Native_full,[child],"parent-agent";
+     Native_full,[native_tool_assistant],"native-call-1";
+     Native_full,[parent_tool_assistant;conflicting],"parent-agent"]
+;;
+
+let test_child_heartbeat_and_unknown_result_scope_are_unowned () =
+  List.iter (fun frames ->
+    let reports = ref [] in
+    with_fixture (frames @ [Emit assistant;Emit result]) (fun path ->
+      match run_fixture ~on_stream_event:(function
+        | Runtime_claude_code.Native_tool_progress report -> reports := report.progress :: !reports
+        | _ -> ()) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> check int "unowned progress neither publishes nor fails the turn" 0 (List.length !reports)))
+    [[Emit child_tool_assistant; Emit (heartbeat_frame ~parent:"child-read" ~tool_name:"Read" ())];
+     [Emit native_tool_assistant;
+      Emit (match Yojson.Safe.from_string native_tool_assistant with
+        | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("uuid",`String "different-owner")::List.remove_assoc "uuid" fields))
+        | _ -> fail "object expected");
+      Emit (heartbeat_frame ())];
+     [Emit native_tool_assistant;
+      Emit (match Yojson.Safe.from_string native_tool_result with `Assoc fields -> Yojson.Safe.to_string (`Assoc (List.remove_assoc "parent_tool_use_id" fields)) | _ -> fail "object expected");
+      Emit (heartbeat_frame ())]]
+;;
+
+let task_wire ?(task_id="task-one") ?(run_id=Some "alpha")
+    ?(call_id=Some "parent-agent") ?(session="__SESSION__") ~uuid subtype payload =
+  Yojson.Safe.to_string (`Assoc (["type",`String "system";"subtype",`String subtype;
+    "session_id",`String session;"uuid",`String uuid;"task_id",`String task_id]
+    @ Option.to_list (Option.map (fun id -> "run_id",`String id) run_id)
+    @ (if subtype="task_updated" then [] else
+        Option.to_list (Option.map (fun id -> "tool_use_id",`String id) call_id))
+    @ payload))
+;;
+
+let task_start_payload = ["description",`String "not root speech";
+  "task_type",`String "local_agent";"spawn_depth",`Int 1;
+  "subagent_type",`String "Explore";"is_backgrounded",`Bool true;
+  "prompt",`String "private child prompt"]
+;;
+
+let task_progress_payload count = ["description",`String "child activity";
+  "usage",`Assoc ["total_tokens",count;"tool_uses",`Float 2.;"duration_ms",`Int 17];
+  "last_tool_name",`String "Read";"summary",`String "not root Thinking"]
+;;
+
+let task_terminal_payload status = ["status",`String status;
+  "summary",`String "not root answer";"output_file",`String "/private/child-output"]
+;;
+
+let replace_wire_field key value frame = match Yojson.Safe.from_string frame with
+  | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key,value)::List.remove_assoc key fields))
+  | _ -> fail "object fixture expected"
+;;
+
+let agent_launch_result call_id = replace_wire_field "message"
+  (`Assoc ["role",`String "user";"content",`List [`Assoc ["type",`String "tool_result";
+    "tool_use_id",`String call_id;"content",`String "background launch";"is_error",`Bool false]]])
+  native_tool_result
+;;
+
+let task_observations events = List.filter_map (function
+  | Runtime_claude_code.Native_task_observed observation -> Some observation | _ -> None) events
+;;
+
+let test_child_parent_witness_uses_original_native_occurrence () =
+  let original_parent = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with
+          | `Assoc message -> message | _ -> fail "parent message" in
+        let content = match List.assoc "content" message with
+          | `List content -> content | _ -> fail "parent content" in
+        replace_wire_field "message" (`Assoc (("content", `List
+          (`Assoc ["type", `String "redacted_thinking"; "data", `String "NOT_BODY"] :: content))
+          :: List.remove_assoc "content" message)) parent_tool_assistant
+    | _ -> fail "parent object" in
+  let child uuid =
+    {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"|}
+    ^ uuid ^ {|","message":{"id":"child-witness-message","role":"assistant","model":"child-model","content":[{"type":"redacted_thinking","data":"NOT_CHILD_BODY"},{"type":"text","text":"CHILD_ONLY"},{"type":"thinking","thinking":"CHILD_REASONING"}]}}|} in
+  let reused_parent = replace_wire_field "uuid" (`String "reused-parent-envelope") original_parent in
+  let bodies = ref [] in
+  let events = ref [] in
+  let on_stream_event event =
+    events := event :: !events;
+    match event with
+    | Runtime_claude_code.Child_content_observed
+        {invocation=_;observation_id=_;parent_tool_use_id;parent_occurrence;message_id;model;block;channel;text} ->
+        bodies := (parent_tool_use_id,message_id,model,block,channel,text,parent_occurrence,
+          List.length (task_observations !events)) :: !bodies
+    | _ -> () in
+  let terminal = replace_wire_field "result" (`String "") result in
+  with_fixture
+    [Emit empty_assistant; Emit (child "unknown-parent");
+     Emit original_parent; Emit (child "before-task");
+     Emit (agent_launch_result "parent-agent"); Emit (child "closed-parent");
+     Emit (task_wire ~uuid:"registered-after-child" "task_started" task_start_payload);
+     Emit reused_parent; Emit (child "ambiguous-parent"); Emit terminal]
+    (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full ~on_stream_event path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "child body still cannot supply root reply" "" turn.text;
+          (* Assert outside the callback: runtime observers deliberately log
+             callback exceptions instead of failing the provider turn. *)
+          let bodies=List.map (fun (literal_parent,message,model,block,channel,text,parent,task_count) ->
+            check string "supplied child parent remains literal" "parent-agent" literal_parent;
+            check (option string) "supplied message remains literal" (Some "child-witness-message") message;
+            check string "reported child model" "child-model" model;
+            match block with
+            | Runtime_claude_code.Assistant_block {uuid;ordinal} ->
+                if uuid="before-task" then
+                  check int "parent witness does not mint a task observation" 0 task_count;
+                (uuid,ordinal,channel,text,parent)
+            | Partial_block _ -> fail "complete child used partial identity") (List.rev !bodies) in
+          check (list string) "every body snapshot preserves its envelope"
+            ["unknown-parent";"unknown-parent";"before-task";"before-task";
+             "closed-parent";"closed-parent";"ambiguous-parent";"ambiguous-parent"]
+            (List.map (fun (uuid,_,_,_,_) -> uuid) bodies);
+          List.iter (fun (uuid,ordinal,channel,text,parent) ->
+            (match channel with
+             | Runtime_claude_code.Text_content ->
+                 check int "original child wire ordinal" 1 ordinal;
+                 check string "child text preserved" "CHILD_ONLY" text
+             | Thinking_content ->
+                 check int "original child thinking ordinal" 2 ordinal;
+                 check string "child thinking preserved" "CHILD_REASONING" text);
+            if uuid="unknown-parent" || uuid="ambiguous-parent" then
+              check bool "unknown or conflicted parent stays unknown" true (Option.is_none parent)
+            else match parent with
+              | None -> fail "known open/returned root Agent lost original occurrence"
+              | Some (parent : Runtime_claude_code.native_agent_parent_witness) ->
+                  check string "witness uses admitted session" turn.session_id parent.invocation.session_id;
+                  check string "witness uses original literal call" "parent-agent" parent.call_id;
+                  check string "old witness survives later ID conflict without mutation"
+                    "parent-assistant" parent.call_envelope_uuid;
+                  check int "original parent wire ordinal, not API index" 1 parent.call_ordinal)
+            bodies;
+          (match task_observations !events with
+           | [observation] ->
+               check string "existing task admission retains exact parent"
+                 "parent-assistant" observation.owner.call_envelope_uuid;
+               check int "existing task shares original ordinal" 1 observation.owner.call_ordinal
+           | _ -> fail "child witness altered independent task registration"))
+;;
+
+let test_child_parent_witness_refuses_unowned_native_parents () =
+  let parent_with_name name = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with
+          | `Assoc message -> message | _ -> fail "parent message" in
+        let content = `List [`Assoc ["type", `String "tool_use"; "id", `String "parent-agent";
+          "name", `String name; "input", `Assoc []]] in
+        replace_wire_field "message" (`Assoc (("content",content)::List.remove_assoc "content" message))
+          parent_tool_assistant
+    | _ -> fail "parent object" in
+  let nested = replace_wire_field "parent_tool_use_id" (`String "outer-agent") parent_tool_assistant in
+  let mcp_agent = {(probe_tool (ref 0)) with name="Agent"} in
+  List.iter (fun (native,dynamic_tools,parent) ->
+    let bodies=ref [] in
+    with_fixture [Emit empty_assistant; Emit parent; Emit child_body_assistant; Emit result]
+      (fun path ->
+        match run_fixture ~native ~dynamic_tools ~on_stream_event:(function
+          | Runtime_claude_code.Child_content_observed {parent_occurrence;_} ->
+              bodies := parent_occurrence :: !bodies
+          | _ -> ()) path with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok _ ->
+            check int "unowned body provenance is retained" 3 (List.length !bodies);
+            check bool "unowned parent cannot mint a private witness" true
+              (List.for_all Option.is_none !bodies)))
+    [Runtime_native_tools.Native_read,[],parent_tool_assistant;
+     Native_none,[],parent_tool_assistant;
+     Native_full,[],nested;
+     Native_full,[],parent_with_name "Read";
+     Native_full,[mcp_agent],parent_with_name "mcp__masc__Agent"]
+;;
+
+let test_tasks_survive_native_return_without_changing_root_response () =
+  let second_call = `Assoc ["type",`String "tool_use";"id",`String "second-agent";
+    "name",`String "Agent";"input",`Assoc []] in
+  let starts = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with `Assoc fields -> fields | _ -> fail "message" in
+        let content = match List.assoc "content" message with `List blocks -> blocks | _ -> fail "content" in
+        let redacted = `Assoc ["type", `String "redacted_thinking";
+          "data", `String "DO_NOT_EXPOSE_NATIVE_REDACTION"] in
+        replace_wire_field "message" (`Assoc (("content",`List (redacted :: (content @ [second_call])))::
+          List.remove_assoc "content" message)) parent_tool_assistant
+    | _ -> fail "assistant" in
+  let events = ref [] in
+  with_fixture [Emit starts; Emit (agent_launch_result "parent-agent");
+    Emit {|{"type":"system","subtype":"background_tasks_changed","uuid":"level-before","session_id":"__SESSION__","tasks":[{"task_id":"task-one","run_id":"alpha","task_type":"local_agent","description":"level membership only"}]}|};
+    (* A legal first registration can arrive after the native return. *)
+    Emit (task_wire ~uuid:"start-one" "task_started" (("awaited",`Bool true)::task_start_payload));
+    Emit (task_wire ~task_id:"task-two" ~call_id:(Some "second-agent") ~uuid:"start-two"
+      "task_started" (("awaited",`Bool false)::("is_backgrounded",`Bool false)::List.remove_assoc "is_backgrounded" task_start_payload));
+    Emit {|{"type":"system","subtype":"background_tasks_changed","uuid":"empty-level","session_id":"__SESSION__","tasks":[]}|};
+    Emit (task_wire ~uuid:"progress-one" "task_progress" (task_progress_payload (`Int 30)));
+    Emit (task_wire ~task_id:"task-two" ~uuid:"background-two" "task_updated"
+      ["patch",`Assoc ["is_backgrounded",`Bool true]]);
+    Emit (agent_launch_result "second-agent");
+    Emit (task_wire ~uuid:"progress-decrease" "task_progress" (task_progress_payload (`Float 3.)));
+    Emit (task_wire ~uuid:"state-one" "task_updated" ["patch",`Assoc
+      ["status",`String "completed";"end_time",`Float 2000.;"total_paused_ms",`Int 9]]);
+    Emit (task_wire ~uuid:"terminal-one" "task_notification" (task_terminal_payload "completed"));
+    Emit (task_wire ~uuid:"terminal-metadata" "task_updated"
+      ["patch",`Assoc ["end_time",`Int 2001;"is_backgrounded",`Bool true]]);
+    Emit (task_wire ~task_id:"task-two" ~call_id:(Some "second-agent") ~uuid:"terminal-two"
+      "task_notification" (task_terminal_payload "stopped" @ ["reason",`String "worker_restart"]));
+    Emit assistant;Emit result_with_usage]
+    (fun path -> match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "task metadata cannot replace root body" "MASC_CLAUDE_OK" turn.text;
+          check string "task counters cannot change measured root model" "claude-fixture" turn.model;
+          check (option int) "task usage never replaces root result usage" (Some 123456)
+            (Option.map (fun (u:Runtime_claude_code.turn_usage) -> u.input_tokens) turn.usage.turn_total);
+          let observations = task_observations (List.rev !events) in
+          check (list bool) "terminal boundary belongs to each task, not its parent call"
+            [false;false;false;false;false;true;true;true;true]
+            (List.map (fun (o:Runtime_claude_code.native_task_observation) ->
+              o.boundary=Task_terminal_observed) observations);
+          check (list string) "exact edge order despite native return and task interleaving"
+            ["start-one";"start-two";"progress-one";"background-two";"progress-decrease";
+             "state-one";"terminal-one";"terminal-metadata";"terminal-two"]
+            (List.map (fun (o:Runtime_claude_code.native_task_observation) -> o.uuid) observations);
+          List.iter (fun (o:Runtime_claude_code.native_task_observation) ->
+            check string "owner is original root envelope" "parent-assistant" o.owner.call_envelope_uuid;
+            check int "parallel Agent calls retain their own ordinal"
+              (if o.owner.call_id="parent-agent" then 1 else 2) o.owner.call_ordinal;
+            check string "observed session is actual runtime session" turn.session_id o.owner.invocation.session_id) observations;
+          let counts = List.filter_map (fun (o:Runtime_claude_code.native_task_observation) ->
+            match o.event with Task_progress_reported {usage;_} -> Some usage.total_tokens | _ -> None) observations in
+          check (list int) "safe numeric floats and decreasing task counts remain observations" [30;3] counts;
+          check int "only the two native results finish native calls" 2
+            (List.length (List.filter (function Runtime_claude_code.Native_tool_finished _ -> true | _ -> false) !events));
+          check int "only the root result ends the turn" 1
+            (List.length (List.filter (function Runtime_claude_code.Turn_finished _ -> true | _ -> false) !events)))
+;;
+
+let test_task_run_order_replays_and_cross_kind_uuid () =
+  let start uuid run = task_wire ~uuid ~run_id:run "task_started" task_start_payload in
+  let progress uuid run = task_wire ~uuid ~run_id:run "task_progress" (task_progress_payload (`Int 1)) in
+  let events = ref [] in
+  with_fixture (List.map (fun x -> Emit x)
+    [parent_tool_assistant;agent_retry_frame ~uuid:"retry-owned" ();
+     heartbeat_frame ~uuid:"heartbeat-owned" ~parent:"parent-agent" ~tool_name:"Agent" ();
+     start "heartbeat-owned" (Some "alpha");
+     start "retry-owned" (Some "alpha");start "start" (Some "alpha");start "start" (Some "alpha");
+     start "duplicate-start-new-uuid" (Some "alpha");
+     agent_retry_frame ~uuid:"start" ();heartbeat_frame ~uuid:"start" ~parent:"parent-agent" ~tool_name:"Agent" ();
+     task_wire ~uuid:"terminal-alpha" "task_notification" (task_terminal_payload "completed");
+     task_wire ~uuid:"cannot-reopen" "task_updated" ["patch",`Assoc ["status",`String "running"]];
+     progress "closed-alpha" (Some "alpha");start "runless" None;start "runless" (Some "omega");
+     start "new-run" (Some "omega");start "late-start" (Some "beta");
+     progress "late-progress" (Some "alpha");progress "live-progress" (Some "omega");
+     task_wire ~uuid:"wrong-call" ~run_id:(Some "omega") ~call_id:(Some "unrelated")
+       "task_notification" (task_terminal_payload "failed");
+     task_wire ~uuid:"terminal-omega" ~run_id:(Some "omega") "task_notification" (task_terminal_payload "failed");
+     task_wire ~uuid:"terminal-again" ~run_id:(Some "omega") "task_notification" (task_terminal_payload "failed");
+     assistant;result]) (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+          check (list (pair string string)) "only registered exact runs and fresh cross-kind UUIDs publish"
+            ["start","alpha";"terminal-alpha","alpha";"new-run","omega";
+             "live-progress","omega";"terminal-omega","omega";"terminal-again","omega"]
+            (task_observations (List.rev !events) |> List.map (fun (o:Runtime_claude_code.native_task_observation) -> o.uuid,o.owner.run_id));
+          check int "task UUID cannot be reused as retry or heartbeat" 2
+            (List.length (List.filter (function Runtime_claude_code.Native_tool_progress _ -> true | _ -> false) !events)))
+;;
+
+let test_task_registration_rejects_unowned_and_malformed_frames () =
+  let start = task_wire ~uuid:"valid" "task_started" task_start_payload in
+  let child = replace_wire_field "parent_tool_use_id" (`String "outer") parent_tool_assistant in
+  let reused = replace_wire_field "uuid" (`String "another-root-occurrence") parent_tool_assistant in
+  let bad_depth = replace_wire_field "spawn_depth" (`Int 2) start in
+  List.iter (fun (native,frames) ->
+    let seen = ref [] in
+    with_fixture (List.map (fun x -> Emit x) (frames @ [assistant;result])) (fun path ->
+      match run_fixture ~native ~on_stream_event:(fun event -> seen := event :: !seen) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> check int "unowned task never acquires a later root call" 0
+          (List.length (task_observations !seen))))
+    [Runtime_native_tools.Native_read,[parent_tool_assistant;start];
+     Native_none,[parent_tool_assistant;start];Native_full,[child;start];
+     Native_full,[parent_tool_assistant;reused;start];
+     Native_full,[parent_tool_assistant;bad_depth];
+     Native_full,[native_tool_assistant;task_wire ~call_id:(Some "native-call-1")
+       ~uuid:"read-is-not-agent" "task_started" task_start_payload];
+     Native_full,[parent_tool_assistant;replace_wire_field "parent_task_id" (`String "child-parent") start];
+     Native_full,[start;parent_tool_assistant;replace_wire_field "uuid" (`String "fresh-unowned-replay") start];
+     Native_full,[task_wire ~uuid:"progress-before-owner" "task_progress" (task_progress_payload (`Int 1));
+       parent_tool_assistant;start]];
+  let malformed = match Yojson.Safe.from_string start with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("task_id",`String "collision")::fields))
+    | _ -> fail "object" in
+  let bad_usage = task_wire ~uuid:"bad-number" "task_progress" (task_progress_payload (`Intlit "9007199254740992")) in
+  let bad_patch = task_wire ~uuid:"bad-patch" "task_updated" ["patch",`Assoc
+    ["status",`String "running";"status",`String "completed"]] in
+  let events = ref [] in
+  with_fixture (List.map (fun x -> Emit x)
+    [parent_tool_assistant;malformed;replace_wire_field "session_id" (`String "foreign") start;start;
+     bad_usage;bad_patch;task_wire ~uuid:"good-number" "task_progress" (task_progress_payload (`Float 1.));
+     assistant;result]) (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "malformed task telemetry cannot terminate a healthy turn" "MASC_CLAUDE_OK" turn.text;
+          check (list string) "malformed/foreign UUIDs do not poison the corrected task"
+            ["valid";"good-number"] (task_observations (List.rev !events)
+              |> List.map (fun (o:Runtime_claude_code.native_task_observation) -> o.uuid)))
+;;
+
+let test_task_telemetry_identity_and_counter_validation () =
+  let start = task_wire ~uuid:"valid-start" "task_started" task_start_payload in
+  let progress = task_wire ~uuid:"valid-progress" "task_progress" (task_progress_payload (`Int 0)) in
+  let duplicate_subtype subtype = match Yojson.Safe.from_string start with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("subtype",`String subtype)::fields))
+    | _ -> fail "object fixture expected" in
+  let blank_identities = List.concat_map (fun key ->
+    List.map (fun blank -> replace_wire_field key (`String blank) start) ["";" \t\n"])
+    ["task_id";"run_id";"uuid";"tool_use_id";"parent_task_id";"session_id"] in
+  let check_frames frames expected =
+    let events = ref [] in
+    with_fixture (List.map (fun frame -> Emit frame) (frames @ [assistant;result])) (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "malformed task does not fail root turn" "MASC_CLAUDE_OK" turn.text;
+          check (list string) "only corrected telemetry publishes" expected
+            (task_observations (List.rev !events) |> List.map
+              (fun (o:Runtime_claude_code.native_task_observation) -> o.uuid))) in
+  List.iter (fun malformed ->
+    check_frames [parent_tool_assistant;malformed] [];
+    check_frames [parent_tool_assistant;malformed;start] ["valid-start"])
+    (duplicate_subtype "task_started" :: duplicate_subtype "task_progress" :: blank_identities);
+  List.iter (fun value ->
+    let malformed = replace_wire_field "awaited" value start in
+    check_frames [parent_tool_assistant;malformed] [];
+    check_frames [parent_tool_assistant;malformed;
+      replace_wire_field "awaited" (`Bool true) start] ["valid-start"])
+    [`Null;`String "true";`Int 1;`Assoc [];`List []];
+  let ended timestamp = task_wire ~uuid:"valid-end" "task_updated"
+    ["patch", `Assoc ["end_time", `Int timestamp]] in
+  check_frames [parent_tool_assistant;start;ended (-1)] ["valid-start"];
+  check_frames [parent_tool_assistant;start;ended (-1);ended 0]
+    ["valid-start";"valid-end"];
+  List.iter (fun key ->
+    let counts = ["total_tokens",`Int 0;"tool_uses",`Int 0;"duration_ms",`Int 0] in
+    let usage = `Assoc ((key,`Int (-1))::List.remove_assoc key counts) in
+    let malformed_progress = replace_wire_field "usage" usage progress in
+    let terminal = task_wire ~uuid:"valid-terminal" "task_notification"
+      (("usage",`Assoc counts)::task_terminal_payload "completed") in
+    let malformed_terminal = replace_wire_field "usage" usage terminal in
+    check_frames [parent_tool_assistant;start;malformed_progress;malformed_terminal]
+      ["valid-start"];
+    check_frames [parent_tool_assistant;start;malformed_progress;progress;
+      malformed_terminal;terminal] ["valid-start";"valid-progress";"valid-terminal"])
+    ["total_tokens";"tool_uses"]
+;;
+
+let test_task_clock_values_and_replay () =
+  let progress task_id uuid value = task_wire ~task_id ~uuid "task_progress"
+    ["description",`String "clock observation";"usage",`Assoc
+      ["total_tokens",`Int 3;"tool_uses",`Int 2;"duration_ms",value]] in
+  let pause task_id uuid value = task_wire ~task_id ~uuid "task_updated"
+    ["patch",`Assoc ["total_paused_ms",value]] in
+  let terminal task_id uuid value = task_wire ~task_id ~uuid "task_notification"
+    (("usage",`Assoc ["total_tokens",`Int 3;"tool_uses",`Int 2;"duration_ms",value])
+      :: task_terminal_payload "completed") in
+  let check_frames frames expected =
+    let events = ref [] in
+    with_fixture (List.map (fun frame -> Emit frame)
+      (parent_tool_assistant :: agent_launch_result "parent-agent" :: frames
+       @ [assistant;result_with_usage])) (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "task clocks preserve root body" "MASC_CLAUDE_OK" turn.text;
+          check string "task clocks preserve root model" "claude-fixture" turn.model;
+          check (option int) "task clocks preserve root usage" (Some 123456)
+            (Option.map (fun (u:Runtime_claude_code.turn_usage) -> u.input_tokens) turn.usage.turn_total);
+          let actual = task_observations (List.rev !events) |> List.map
+            (fun (o:Runtime_claude_code.native_task_observation) ->
+              check string "clock keeps original native owner" "parent-agent" o.owner.call_id;
+              check string "clock keeps original envelope" "parent-assistant" o.owner.call_envelope_uuid;
+              let value = match o.event with
+                | Task_registered _ -> None
+                | Task_patched {total_paused_ms;_} -> total_paused_ms
+                | Task_progress_reported {usage;_}
+                | Task_terminal_reported {usage=Some usage;_} ->
+                    check int "clock does not replace token count" 3 usage.total_tokens;
+                    check int "clock does not replace tool count" 2 usage.tool_uses;
+                    Some usage.duration_ms
+                | Task_terminal_reported {usage=None;_} -> fail "clock usage missing" in
+              o.uuid,(value,o.boundary=Task_terminal_observed)) in
+          check (list (pair string (pair (option int) bool)))
+            "exact signed clock facts, replay and task boundary" expected actual;
+          check int "tasks do not reopen or finish the native call" 1
+            (List.length (List.filter (function Runtime_claude_code.Native_tool_finished _ -> true | _ -> false) !events));
+          check int "only root result finishes the turn" 1
+            (List.length (List.filter (function Runtime_claude_code.Turn_finished _ -> true | _ -> false) !events))) in
+  let cases = [`Int (-1),-1;`Float (-1.),-1;`Int 0,0;`Int 17,17;
+    `Int (-9_007_199_254_740_991),-9_007_199_254_740_991;
+    `Float (-9_007_199_254_740_991.),-9_007_199_254_740_991;
+    `Int 9_007_199_254_740_991,9_007_199_254_740_991] in
+  let frames, expected = List.mapi (fun index (value,clock) ->
+    let task = Printf.sprintf "signed-clock-%d" index in
+    let start = task^"-start" and p = task^"-progress" and u = task^"-pause"
+        and stop = task^"-terminal" in
+    [task_wire ~task_id:task ~uuid:start "task_started" task_start_payload;
+     progress task p value;progress task p value;progress task p (`Int 9);
+     pause task u value;pause task u value;pause task u (`Int 9);
+     terminal task stop value;terminal task stop value;terminal task stop (`Int 9);
+     progress task (task^"-after-terminal") (`Int (-1))],
+    [start,(None,false);p,(Some clock,false);u,(Some clock,false);stop,(Some clock,true)]) cases
+    |> List.split in
+  check_frames (List.concat frames) (List.concat expected);
+  let malformed = [`Int (-9_007_199_254_740_992);`Int 9_007_199_254_740_992;
+    `Float (-0.5);`Float 0.5;`String "-1";`Null] in
+  let frames, expected = List.mapi (fun index invalid ->
+    let task = Printf.sprintf "malformed-clock-%d" index in
+    let start = task^"-start" and p = task^"-progress" and u = task^"-pause"
+        and stop = task^"-terminal" in
+    [task_wire ~task_id:task ~uuid:start "task_started" task_start_payload;
+     progress task p invalid;pause task u invalid;terminal task stop invalid;
+     progress task p (`Int (-1));pause task u (`Int (-1));terminal task stop (`Int (-1))],
+    [start,(None,false);p,(Some (-1),false);u,(Some (-1),false);stop,(Some (-1),true)]) malformed
+    |> List.split in
+  check_frames (List.concat frames) (List.concat expected)
+;;
+
+let test_tool_progress_keeps_stream_open () =
+  with_fixture [ Emit tool_progress; Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
+;;
+
+let test_dynamic_tool_tokenizer_chars_are_validated () =
+  let tool : Runtime_claude_code.dynamic_tool =
+    { name = "bad,tool"
+    ; description = "invalid fixture"
+    ; input_schema = `Assoc []
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = "unused"; content_blocks = None; abort_turn = None; on_response_sent = None })
+    }
+  in
+  let config = Runtime_claude_code.default_config ~cwd:"/tmp" in
+  match
+    Runtime_claude_code.validate_turn
+      ~dynamic_tools:[ tool ]
+      config
+      ~prompt:"fixture"
+      ~images:[]
+  with
+  | Error (Runtime_claude_code.Invalid_config _) -> ()
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok () -> fail "allowedTools delimiter was admitted in a tool name"
+;;
+
+module Input_evidence = Runtime_claude_input_attribution
+
+let input_stamp primary consumed =
+  ["user_message_uuid", `String primary;
+   "user_message_uuids", `List (List.map (fun id -> `String id) consumed)]
+let input_own_stamp = input_stamp "__INPUT_UUID__" ["__INPUT_UUID__"]
+let with_input_fields line fields =
+  match Yojson.Safe.from_string line with
+  | `Assoc original -> Yojson.Safe.to_string (`Assoc (fields @ original))
+  | _ -> fail "fixture envelope must be an object"
+let input_partial ?(uuid=Some "partial-input") event fields =
+  let identity = Option.to_list (Option.map (fun value -> "uuid", `String value) uuid) in
+  Yojson.Safe.to_string (`Assoc (identity @ fields @ ["type",`String "stream_event";
+    "parent_tool_use_id",`Null; "session_id",`String "__SESSION__";
+    "event",Yojson.Safe.from_string event]))
+let input_begin uuid message_id fields =
+  input_partial ~uuid:(Some uuid)
+    (Yojson.Safe.to_string (`Assoc ["type",`String "message_start";
+      "message",`Assoc ["id",`String message_id;"model",`String "claude-fixture"]])) fields
+let input_tick ?uuid fields =
+  input_partial ?uuid {|{"type":"message_delta","delta":{"stop_reason":null},"usage":{"output_tokens":1}}|} fields
+let input_frame_uuid = function
+  | Input_evidence.Partial_start {uuid;_} | Partial_fragment {uuid} | Partial_stop {uuid}
+  | Assistant {uuid;_} | Result {uuid;_} -> uuid
+let input_observed uuid observations =
+  List.find (fun (o : Input_evidence.observation) ->
+    Option.bind o.frame input_frame_uuid=Some uuid) observations
+let run_input_success steps =
+  let observations = ref [] in
+  with_fixture (Bind_input_uuid :: steps) (fun path ->
+    match run_fixture ~on_input_observation:(fun value -> observations := value :: !observations) path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn -> check string "single-shot authored body unchanged" "MASC_CLAUDE_OK" turn.text);
+  let observations = List.rev !observations in
+  (match observations with
+   | prepared :: written :: _ ->
+       check bool "prepared then fully written" true
+         (prepared.phase=Input_evidence.Prepared && written.phase=Input_evidence.Written)
+   | _ -> fail "input write evidence missing");
+  observations
+
+let capture_native_invocation_proof ?(conflicting_parent=false) ~session_id ~task_first () =
+  let inputs=ref [] and parents=ref [] and tasks=ref [] in
+  let child=Emit child_body_assistant in
+  let start=Emit (task_wire ~uuid:"replayed-task-start" "task_started" task_start_payload) in
+  let ordering=if task_first then [start;child] else [child;start] in
+  with_fixture
+    ([Bind_input_uuid; Emit (with_input_fields parent_tool_assistant input_own_stamp);
+      Emit (agent_launch_result "parent-agent")] @ ordering @
+     [Emit (with_input_fields assistant (input_stamp "later-input" ["later-input"]))] @
+     (if conflicting_parent then
+        [Emit (with_input_fields parent_tool_assistant
+          (input_stamp "contradictory-input" ["contradictory-input"]))] else []) @
+     [Emit (task_wire ~uuid:"replayed-task-progress" "task_progress"
+        (task_progress_payload (`Int 7))); Emit result])
+    (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~session_mode:(Runtime_claude_code.Resume {session_id})
+        ~on_input_observation:(fun observation -> inputs:=observation :: !inputs)
+        ~on_stream_event:(function
+          | Runtime_claude_code.Child_content_observed {parent_occurrence=Some parent;_} ->
+              parents:=parent :: !parents
+          | Native_task_observed observation -> tasks:=observation :: !tasks
+          | _ -> ()) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "root body remains authored root result" "MASC_CLAUDE_OK" turn.text);
+  let inputs=List.rev !inputs in
+  let prepared=List.find (fun (o:Input_evidence.observation) ->
+    o.frame=None && o.phase=Input_evidence.Prepared) inputs in
+  let parents=List.rev !parents and tasks=List.rev !tasks in
+  check int "actual child callbacks supply every body witness" 3 (List.length parents);
+  check int "actual task callbacks supply registration and progress" 2 (List.length tasks);
+  List.iter (fun (parent:Runtime_claude_code.native_agent_parent_witness) ->
+    check bool "parent refers to actual Prepared ticket object" true (parent.invocation==prepared.ticket)) parents;
+  List.iter (fun (task:Runtime_claude_code.native_task_observation) ->
+    check bool "task refers to same actual invocation ticket object" true
+      (task.owner.invocation==prepared.ticket)) tasks;
+  prepared,inputs,List.hd parents,List.hd tasks,List.nth tasks 1
+;;
+
+let test_native_invocation_proof_rejects_replayed_foreign_owners () =
+  let module Binding = Keeper_claude_task_binding in
+  let capture ~session_id ~task_first = capture_native_invocation_proof ~session_id ~task_first () in
+  let session_id="11111111-1111-4111-8111-111111111111" in
+  let first,inputs1,parent1,task1,_=capture ~session_id ~task_first:false in
+  let second,inputs2,parent2,task2,progress2=capture ~session_id ~task_first:true in
+  let _,_,_,foreign_session_task,_=capture
+    ~session_id:"22222222-2222-4222-8222-222222222222" ~task_first:false in
+  check string "same resumed provider session" first.ticket.session_id second.ticket.session_id;
+  check bool "fresh actual receiver generation despite replayed SDK IDs" false
+    (first.ticket.receiver_generation=second.ticket.receiver_generation);
+  check bool "fresh actual input UUID despite replayed SDK IDs" false
+    (first.ticket.client_uuid=second.ticket.client_uuid);
+  check bool "provider parent tuple is exactly replayed" true
+    ((parent1.call_id,parent1.call_envelope_uuid,parent1.call_ordinal)=
+     (parent2.call_id,parent2.call_envelope_uuid,parent2.call_ordinal));
+  check bool "private parent proof cannot stand for the later Prepared ticket" false
+    (parent1.invocation.receiver_generation=second.ticket.receiver_generation
+     && parent1.invocation.session_id=second.ticket.session_id
+     && parent1.invocation.client_uuid=second.ticket.client_uuid);
+  check bool "private task tuple is exactly replayed" true
+    ((task1.owner.call_id,task1.owner.call_envelope_uuid,task1.owner.call_ordinal)=
+     (task2.owner.call_id,task2.owner.call_envelope_uuid,task2.owner.call_ordinal));
+  let expect reason = function
+    | Error actual -> check bool "exact refusal reason" true (actual=reason)
+    | Ok _ -> fail "foreign or failed-first owner unexpectedly bound" in
+  let observe binding inputs=List.iter (Binding.observe_input binding) inputs in
+  let expect_own label = function
+    | Error reason -> fail (label ^ ": " ^ Binding.rejection_to_string reason)
+    | Ok (bound:Binding.bound) ->
+        check bool "bound uses actual second Prepared ticket" true (bound.ticket==second.ticket);
+        (match bound.evidence with
+         | Binding.Explicit_group group ->
+             check string "original parent input survives the later input interleave"
+               second.ticket.client_uuid group.primary
+         | Response_inherited _ | Command_inherited _ -> fail "original explicit parent group required") in
+  let current=Binding.create () in
+  observe current inputs2;
+  expect Binding.Foreign_invocation (Binding.bind_task current task1);
+  expect_own "foreign same-session owner does not poison canonical binding" (Binding.bind_task current task2);
+  expect Binding.Foreign_session (Binding.bind_task current foreign_session_task);
+  expect_own "foreign session does not poison canonical progress" (Binding.bind_task current progress2);
+  let early_foreign=Binding.create () in
+  expect Binding.Missing_ticket (Binding.bind_task early_foreign task1);
+  observe early_foreign inputs2;
+  expect Binding.Foreign_invocation (Binding.bind_task early_foreign task1);
+  expect_own "failed first foreign occurrence has an independent invocation cache key"
+    (Binding.bind_task early_foreign task2);
+  let early_same=Binding.create () in
+  expect Binding.Missing_ticket (Binding.bind_task early_same task2);
+  observe early_same inputs2;
+  expect Binding.Missing_ticket (Binding.bind_task early_same task2);
+  let missing_evidence=Binding.create () in
+  Binding.observe_input missing_evidence second;
+  expect Binding.Missing_assistant_evidence (Binding.bind_task missing_evidence task2);
+  observe missing_evidence inputs2;
+  expect Binding.Missing_assistant_evidence (Binding.bind_task missing_evidence task2);
+  let conflicted=Binding.create () in
+  observe conflicted inputs1;
+  let old_bound=match Binding.bind_task conflicted task1 with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  Binding.observe_input conflicted second;
+  expect Binding.Conflicting_invocation (Binding.bind_task conflicted task1);
+  check bool "later invocation conflict cannot mutate delivered original binding" true
+    (old_bound.ticket==first.ticket && old_bound.observation.owner.invocation==first.ticket)
+;;
+
+let test_parent_binding_shares_original_task_evidence () =
+  let module Binding = Keeper_claude_task_binding in
+  let expect reason = function
+    | Error actual -> check bool "shared exact refusal" true (actual=reason)
+    | Ok _ -> fail "failed-first owner unexpectedly bound" in
+  List.iter (fun task_first ->
+    let prepared,inputs,parent,task,progress=capture_native_invocation_proof
+      ~session_id:"33333333-3333-4333-8333-333333333333" ~task_first () in
+    let observe binding inputs=List.iter (Binding.observe_input binding) inputs in
+    let initial=List.filter (fun (o:Input_evidence.observation) ->
+      match o.frame with
+      | None -> true
+      | Some (Input_evidence.Assistant {uuid=Some uuid;_}) -> uuid=parent.call_envelope_uuid
+      | Some _ -> false) inputs in
+    let binding=Binding.create () in
+    observe binding initial;
+    let require_parent () = match Binding.bind_parent binding parent with
+      | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+    let require_task observation = match Binding.bind_task binding observation with
+      | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+    let parent_bound,task_bound=if task_first then
+      let task_bound=require_task task in require_parent (),task_bound
+      else let parent_bound=require_parent () in parent_bound,require_task task in
+    check bool "parent keeps exact captured runtime witness" true (parent_bound.parent==parent);
+    check bool "both APIs bind actual original Prepared ticket" true
+      (parent_bound.ticket==prepared.ticket && task_bound.ticket==prepared.ticket);
+    check bool "both orderings use one original evidence decision" true
+      (parent_bound.evidence=task_bound.evidence);
+    observe binding inputs;
+    let after_parent=require_parent () and after_task=require_task progress in
+    check bool "later input preserves original shared evidence" true
+      (after_parent.evidence=parent_bound.evidence && after_task.evidence=task_bound.evidence);
+    (match after_parent.evidence with
+     | Binding.Explicit_group group ->
+         check string "original Agent input, not later response group" prepared.ticket.client_uuid group.primary
+     | Response_inherited _ | Command_inherited _ -> fail "explicit original Agent input required");
+    let parent_first_failure=Binding.create () in
+    expect Binding.Missing_ticket (Binding.bind_parent parent_first_failure parent);
+    observe parent_first_failure inputs;
+    expect Binding.Missing_ticket (Binding.bind_task parent_first_failure task);
+    let task_first_failure=Binding.create () in
+    Binding.observe_input task_first_failure prepared;
+    expect Binding.Missing_assistant_evidence (Binding.bind_task task_first_failure task);
+    observe task_first_failure inputs;
+    expect Binding.Missing_assistant_evidence (Binding.bind_parent task_first_failure parent))
+    [false;true]
+;;
+
+let test_parent_binding_refuses_foreign_and_conflicting_evidence () =
+  let module Binding = Keeper_claude_task_binding in
+  let session_id="44444444-4444-4444-8444-444444444444" in
+  let _,_,old_parent,old_task,_=capture_native_invocation_proof ~session_id ~task_first:false () in
+  let prepared,inputs,parent,task,progress=capture_native_invocation_proof ~session_id ~task_first:true () in
+  let _,_,foreign_parent,_,_=capture_native_invocation_proof
+    ~session_id:"55555555-5555-4555-8555-555555555555" ~task_first:false () in
+  let expect reason = function
+    | Error actual -> check bool "exact shared refusal" true (actual=reason)
+    | Ok _ -> fail "foreign or contradicted owner unexpectedly bound" in
+  let binding=Binding.create () in
+  List.iter (Binding.observe_input binding) inputs;
+  expect Binding.Foreign_invocation (Binding.bind_parent binding old_parent);
+  let held_task=match Binding.bind_task binding task with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  expect Binding.Foreign_invocation (Binding.bind_task binding old_task);
+  let held_parent=match Binding.bind_parent binding parent with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  expect Binding.Foreign_session (Binding.bind_parent binding foreign_parent);
+  (match Binding.bind_task binding progress with
+   | Ok bound -> check bool "foreign parent does not poison current shared owner" true
+       (bound.ticket==prepared.ticket && bound.evidence=held_parent.evidence)
+   | Error reason -> fail (Binding.rejection_to_string reason));
+  check bool "new bound parent certifies original invocation only" true
+    (held_parent.ticket==prepared.ticket && held_parent.parent==parent
+     && held_parent.evidence=held_task.evidence);
+  let contradictory_prepared,contradictory_inputs,contradictory_parent,contradictory_task,contradictory_progress=
+    capture_native_invocation_proof ~conflicting_parent:true ~session_id ~task_first:true () in
+  let contradiction=List.find (fun (o:Input_evidence.observation) ->
+    match o.attribution with
+    | Input_evidence.Rejected Input_evidence.Conflicting_frame_replay -> true
+    | Unattributed | Explicit _ | Inherited _ | Command_inherited _ | Rejected _ -> false)
+    contradictory_inputs in
+  let rec before_contradiction acc = function
+    | o::_ when o==contradiction -> List.rev acc
+    | o::rest -> before_contradiction (o::acc) rest
+    | [] -> fail "actual private contradiction is absent" in
+  let conflicted=Binding.create () in
+  List.iter (Binding.observe_input conflicted) (before_contradiction [] contradictory_inputs);
+  let original_parent=match Binding.bind_parent conflicted contradictory_parent with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  let original_task=match Binding.bind_task conflicted contradictory_task with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  Binding.observe_input conflicted contradiction;
+  expect Binding.Conflicting_assistant_evidence (Binding.bind_parent conflicted contradictory_parent);
+  expect Binding.Conflicting_assistant_evidence (Binding.bind_task conflicted contradictory_progress);
+  check bool "contradiction leaves already delivered values unchanged" true
+    (original_parent.ticket==contradictory_prepared.ticket
+     && original_task.ticket==contradictory_prepared.ticket
+     && original_parent.evidence=original_task.evidence);
+  Binding.observe_input binding contradictory_prepared;
+  expect Binding.Conflicting_invocation (Binding.bind_parent binding parent);
+  expect Binding.Conflicting_invocation (Binding.bind_task binding progress)
+;;
+
+let test_complete_child_binding_preserves_actual_invocation_provenance () =
+  let module Binding = Keeper_claude_task_binding in
+  let capture ?(session_id="66666666-6666-4666-8666-666666666666") ?(unknown_before_parent=false) ?(message_id=Some "child-body-message") known =
+    let inputs=ref [] and contents=ref [] in
+    let child=match Yojson.Safe.from_string child_body_assistant with
+      | `Assoc fields ->
+          let message=match List.assoc "message" fields with `Assoc fields -> fields
+            | _ -> fail "actual child fixture message object" in
+          let message=List.remove_assoc "id" message @
+            Option.to_list (Option.map (fun value -> "id",`String value) message_id) in
+          replace_wire_field "message" (`Assoc message) child_body_assistant
+      | _ -> fail "actual child fixture object" in
+    let parent=if known then [Emit (with_input_fields parent_tool_assistant input_own_stamp)] else [] in
+    with_fixture ([Bind_input_uuid] @
+      (if unknown_before_parent then [Emit child] else []) @ parent @
+      [Emit child;Emit assistant;Emit result]) (fun path ->
+        match run_fixture ~native:Runtime_native_tools.Native_full
+          ~session_mode:(Runtime_claude_code.Resume
+            {session_id})
+          ~on_input_observation:(fun value -> inputs:=value :: !inputs)
+          ~on_stream_event:(function
+            | Runtime_claude_code.Child_content_observed content -> contents:=content :: !contents
+            | _ -> ()) path with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok turn -> check string "actual child capture leaves root reply intact" "MASC_CLAUDE_OK" turn.text);
+    let inputs=List.rev !inputs and contents=List.rev !contents in
+    let prepared=List.find (fun (o:Input_evidence.observation) ->
+      o.frame=None && o.phase=Input_evidence.Prepared) inputs in
+    check int "complete text/thinking/empty body observations"
+      (if unknown_before_parent then 6 else 3) (List.length contents);
+    List.iter (fun (content:Runtime_claude_code.complete_child_content) ->
+      check bool "all bodies retain actual Prepared ticket" true (content.invocation==prepared.ticket)) contents;
+    let first_id=(List.hd contents).observation_id in
+    check bool "accepted complete frame has actual observation identity" true (String.length first_id>0);
+    List.iter (fun (content:Runtime_claude_code.complete_child_content) ->
+      check string "all original frame blocks share one observation ID" first_id content.observation_id)
+      (List.take 3 contents);
+    if unknown_before_parent then begin
+      let later_id=(List.nth contents 3).observation_id in
+      check bool "same provider replay before/after parent remains distinct observations" false (first_id=later_id);
+      List.iter (fun (content:Runtime_claude_code.complete_child_content) ->
+        check string "later complete frame blocks share its new observation ID" later_id content.observation_id)
+        (List.drop 3 contents)
+    end;
+    inputs,contents in
+  let _,old_contents=capture true in
+  let old_content=List.hd old_contents in
+  let inputs,contents=capture ~unknown_before_parent:true true in
+  let before_parent=List.hd contents in
+  let content=List.nth contents 3 in
+  let unknown_inputs,unknown_contents=capture false in
+  let unknown=List.hd unknown_contents in
+  let _,foreign_contents=capture ~session_id:"77777777-7777-4777-8777-777777777777" true in
+  let binding=Binding.create () in
+  List.iter (Binding.observe_input binding) inputs;
+  (match Binding.bind_child binding old_content with
+   | Error Binding.Foreign_invocation -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "old genuine child bound to another actual invocation");
+  (match Binding.bind_child binding (List.hd foreign_contents) with
+   | Error Binding.Foreign_session -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "genuine child from another session was bound");
+  (match Binding.bind_child binding before_parent with
+   | Error Binding.Unknown_parent -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "body unknown at observation time was retroactively upgraded");
+  (match Binding.bind_child binding content with
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok bound ->
+       check bool "bound preserves exact private child observation" true (bound.content==content);
+       check bool "original parent input is same actual runtime invocation" true
+         (bound.parent_input.ticket==content.invocation);
+       check string "private producer preserves actual child body" "CHILD_ONLY" bound.content.text);
+  let module Child = Keeper_child_content in
+  let source=Keeper_native_task_journal.Autonomous_turn
+    (Ids.Turn_ref.make ~trace_id:"child+&/view" ~absolute_turn:1) in
+  let attempt : Runtime_native_tasks.attempt =
+    {routing_run_id="route+&/scope";runtime_id="claude";lane_attempt_index=2} in
+  let prepare ?(redact_text=fun _ -> "MASK") observation=match Child.prepare ~keeper_name:"fixture-child" ~source ~attempt
+      ~redact_text observation with
+    | Ok publication -> Child.view publication
+    | Error error -> fail (Child.error_to_string error) in
+  let known_decision=Binding.observe_child binding content in
+  let unknown_decision=Binding.observe_child binding before_parent in
+  let known=prepare known_decision and prior_unknown=prepare unknown_decision in
+  check string "publication body is redacted" "MASK" known.text;
+  check string "publication model is redacted" "MASK" known.model;
+  check string "identity is actual accepted observation, not provider spelling" content.observation_id known.observation_id;
+  check string "opaque attempt identity is preserved" attempt.routing_run_id known.origin.attempt.routing_run_id;
+  (match known.attribution,prior_unknown.attribution with
+   | Child.Original_parent_input Child.Explicit_parent_input,
+     Parent_input_refused Binding.Unknown_parent -> ()
+   | _ -> fail "sealed actual decision was changed during publication");
+  check bool "prior unknown observation retains its distinct ID" false (known.observation_id=prior_unknown.observation_id);
+  let reread=Child.redact (fun _ -> "PUBLIC_MASK") prior_unknown in
+  check string "read boundary re-redacts body" "PUBLIC_MASK" reread.text;
+  check string "read boundary re-redacts reported model" "PUBLIC_MASK" reread.model;
+  check bool "read redaction preserves all provenance and refusal" true
+    (reread.origin=prior_unknown.origin && reread.observation_id=prior_unknown.observation_id
+     && reread.envelope_uuid=prior_unknown.envelope_uuid && reread.ordinal=prior_unknown.ordinal
+     && reread.channel=prior_unknown.channel && reread.parent_tool_use_id=prior_unknown.parent_tool_use_id
+     && reread.parent_occurrence=prior_unknown.parent_occurrence && reread.message_id=prior_unknown.message_id
+     && reread.attribution=prior_unknown.attribution);
+  let wire value=Child.to_json value |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
+  List.iter (fun value -> match Child.of_json (wire value) with
+    | Ok decoded -> check bool "actual sealed publication roundtrips as unprivileged public view" true (decoded=value)
+    | Error error -> fail (Child.error_to_string error)) [known;prior_unknown;reread];
+  List.iter (fun message_id ->
+    let captured_inputs,captured_contents=capture ~message_id true in
+    let captured_binding=Binding.create () in
+    List.iter (Binding.observe_input captured_binding) captured_inputs;
+    let captured=List.hd captured_contents in
+    let actual=prepare (Binding.observe_child captured_binding captured) in
+    check (option string) "accepted empty/absent provider correlation is preserved" message_id actual.message_id;
+    match Child.of_json (wire actual) with
+    | Ok decoded -> check (option string) "empty and absent message IDs stay distinct through actual public roundtrip"
+        message_id decoded.message_id
+    | Error error -> fail (Child.error_to_string error)) [Some "";None];
+  List.iter (fun (captured:Runtime_claude_code.complete_child_content) ->
+    let actual=prepare ~redact_text:Fun.id (Binding.observe_child binding captured) in
+    check bool "actual captured Text/Thinking channel is preserved" true (actual.channel=captured.channel);
+    check string "actual complete empty/nonempty snapshot is preserved with identity redactor" captured.text actual.text;
+    match Child.of_json (wire actual) with
+    | Ok decoded -> check bool "actual Thinking/empty body public roundtrip" true (decoded=actual)
+    | Error error -> fail (Child.error_to_string error)) (List.drop 3 contents);
+  let early=Binding.create () in
+  let early_decision=Binding.observe_child early content in
+  List.iter (Binding.observe_input early) inputs;
+  List.iter (fun decision -> match decision with
+    | Binding.Child_rejected {content=retained;reason=Binding.Missing_ticket} ->
+        check bool "sealed failure retains exact actual content" true (retained==content)
+    | Child_rejected _ | Child_bound _ -> fail "shared failed-first decision was changed")
+    [early_decision;Binding.observe_child early content];
+  let early_view=prepare early_decision in
+  (match early_view.attribution with Child.Parent_input_refused Binding.Missing_ticket -> ()
+   | _ -> fail "publication fabricated original input evidence");
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "wire object required" in
+  let remove key = function `Assoc fields -> `Assoc (List.remove_assoc key fields)
+    | _ -> fail "wire object required" in
+  let known_wire=wire known and unknown_wire=wire prior_unknown in
+  let malformed=[
+    replace "schema" (`String "unknown-schema") known_wire;
+    replace "unknown" (`Bool true) known_wire;
+    (match known_wire with `Assoc fields -> `Assoc (("text",`String "duplicate")::fields) | _ -> fail "object");
+    replace "ordinal" (`Int (-1)) known_wire;
+    replace "ordinal" (`Intlit "9007199254740992") known_wire;
+    replace "ordinal" (`Float 1.5) known_wire;
+    replace "observation_id" `Null known_wire;
+    replace "message_id" `Null known_wire;
+    replace "parent_occurrence" `Null unknown_wire;
+    replace "parent_tool_use_id" (`String "foreign-parent") known_wire;
+    replace "attribution" (`Assoc ["kind",`String "parent_input_refused";
+      "reason",`Assoc ["kind",`String "unknown_parent";
+        "input_rejection",`String "invalid_group"]]) unknown_wire;
+    replace "attribution" (`Assoc ["kind",`String "original_parent_input";
+      "evidence",`Assoc ["kind",`String "command_inherited";"stamp_uuid",`Null]]) known_wire;
+    remove "observation_id" known_wire] in
+  List.iter (fun json -> match Child.of_json json with
+    | Error _ -> () | Ok _ -> fail "malformed child transport was accepted") malformed;
+  (match Child.of_json (remove "message_id" known_wire) with
+   | Ok decoded -> check (option string) "absent optional message remains absent" None decoded.message_id
+   | Error error -> fail (Child.error_to_string error));
+  let unknown_binding=Binding.create () in
+  List.iter (Binding.observe_input unknown_binding) unknown_inputs;
+  (match Binding.bind_child unknown_binding unknown with
+   | Error Binding.Unknown_parent -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "unknown child fabricated a parent input");
+  (match Binding.bind_child binding unknown with
+   | Error Binding.Foreign_invocation -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "unknown parent's old private content lost invocation provenance")
+;;
+
+let test_input_uuid_is_serialized_and_fresh_on_resume () =
+  let run () =
+    let observations = ref [] in
+    with_fixture [Bind_input_uuid;Emit (with_input_fields assistant input_own_stamp);
+        Emit (with_input_fields result input_own_stamp)] (fun path ->
+      match run_fixture ~session_mode:(Runtime_claude_code.Resume {session_id="11111111-1111-4111-8111-111111111111"})
+          ~on_input_observation:(fun o -> observations := o :: !observations) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "same prompt body" "MASC_CLAUDE_OK" turn.text);
+    match !observations with
+    | last :: _ ->
+        check bool "matching explicit result settles" true (last.phase=Input_evidence.Settled Provider_success);
+        last.ticket
+    | [] -> fail "ticket missing" in
+  let first=run () in let second=run () in
+  check string "same provider session" first.session_id second.session_id;
+  check bool "fresh process generation" true (first.receiver_generation<>second.receiver_generation);
+  check bool "same prompt does not identify input" true (first.client_uuid<>second.client_uuid)
+
+let test_input_attribution_partial_group_updates_and_absent_result () =
+  let folded = input_stamp "__INPUT_UUID__" ["__INPUT_UUID__";"folded-client"] in
+  let complete =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"complete-input","message":{"id":"input-message","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_OK"}]}}|} in
+  let observations = run_input_success [
+    Emit (input_begin "p1" "input-message" input_own_stamp);
+    Emit (input_begin "p1" "input-message" input_own_stamp);
+    Emit (input_tick ~uuid:(Some "p2") folded);
+    Emit (input_tick ~uuid:(Some "p3") []);
+    Emit complete;Emit result] in
+  check int "identical root stamp replay emits once" 1
+    (List.length (List.filter (fun (o : Input_evidence.observation) -> Option.bind o.frame input_frame_uuid=Some "p1") observations));
+  let inherited = input_observed "p3" observations in
+  (match inherited.attribution with
+   | Input_evidence.Inherited group ->
+       check (list string) "complete consumed group and original primary retained"
+         [inherited.ticket.client_uuid;"folded-client"] group.consumed;
+       check string "primary need not be last" inherited.ticket.client_uuid group.primary
+   | _ -> fail "missing stamp did not inherit exact occurrence");
+  check bool "complete envelope inherits only matching response" true
+    ((input_observed "complete-input" observations).attribution=inherited.attribution);
+  let last=input_observed "turn-fixture-1" observations in
+  check bool "result cannot inherit consumed input" true
+    (last.attribution=Input_evidence.Unattributed && last.phase=Input_evidence.Consumed)
+
+let test_input_optional_malformed_foreign_and_child_metadata () =
+  let malformed = [
+    ["user_message_uuid",`String "__INPUT_UUID__";"user_message_uuids",`Null];
+    input_stamp "__INPUT_UUID__" ["foreign-client"];
+    input_stamp "__INPUT_UUID__" ["__INPUT_UUID__";"__INPUT_UUID__"];
+    ["user_message_uuids",`List [`String "__INPUT_UUID__"]]] in
+  List.iter (fun fields ->
+    let observations=run_input_success [Emit (with_input_fields assistant fields);Emit (with_input_fields result fields)] in
+    let last=input_observed "turn-fixture-1" observations in
+    check bool "malformed optional metadata never consumes or settles" true
+      (last.phase=Input_evidence.Written && match last.attribution with Rejected _ -> true | _ -> false)) malformed;
+  let observations=run_input_success [Emit (with_input_fields child_tool_assistant input_own_stamp);
+    Emit assistant;Emit (with_input_fields result (input_stamp "other-generation-client" ["other-generation-client"]))] in
+  check bool "child envelope never adopts root ticket" false
+    (List.exists (fun (o : Input_evidence.observation) -> Option.bind o.frame input_frame_uuid=Some "child-assistant") observations);
+  check bool "unknown client member never settles current ticket" true
+    ((input_observed "turn-fixture-1" observations).phase=Input_evidence.Written)
+
+let test_input_error_and_batch_membership () =
+  let observations=run_input_success [Emit assistant;
+    Emit (with_input_fields result (input_stamp "other-primary" ["__INPUT_UUID__";"other-primary"]))] in
+  check bool "non-primary member settles on explicit group" true
+    ((input_observed "turn-fixture-1" observations).phase=Input_evidence.Settled Provider_success);
+  List.iter (fun attributed ->
+    let observations=ref [] in
+    let failure={|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"input-error","errors":["fixture failure"]}|} in
+    let failure=with_input_fields failure (if attributed then input_own_stamp else []) in
+    with_fixture [Bind_input_uuid;Emit failure] (fun path ->
+      match run_fixture ~on_input_observation:(fun o -> observations := o :: !observations) path with
+      | Error (Runtime_claude_code.Turn_failed_with_observation _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "provider failure lost");
+    let last=input_observed "input-error" !observations in
+    check bool "error ownership requires explicit membership" true
+      (last.phase=(if attributed then Input_evidence.Settled Provider_error else Written))) [false;true]
+
+let test_input_typed_command_owns_unstamped_agent_tool_round () =
+  let first =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"first-command-assistant","message":{"id":"command-model-1","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"First response stays original."}]}}|} in
+  let second =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"second-command-agent","message":{"id":"command-model-2","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"second-root-agent","name":"Agent","input":{"description":"fixture","prompt":"fixture-only task","subagent_type":"general-purpose"}}]}}|} in
+  let tool_result =
+    {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"second-command-agent-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"second-root-agent","is_error":false,"content":"fixture Agent returned"}]}}|} in
+  List.iter (fun (initial_stamp, owned_command) ->
+    let observations=ref [] in
+    let native_inputs=ref [] in
+    with_fixture [Bind_input_uuid;
+      Emit (input_begin "first-command-partial" "command-model-1" initial_stamp);
+      Emit (with_input_fields first initial_stamp);
+      Emit (input_partial ~uuid:(Some "first-command-stop") {|{"type":"message_stop"}|} []);
+      Emit (input_begin "second-command-partial" "command-model-2" []);
+      Emit second;
+      Emit {|{"type":"assistant","parent_tool_use_id":"second-root-agent","session_id":"__SESSION__","uuid":"command-child-read","message":{"id":"child-request","role":"assistant","model":"child-fixture","content":[{"type":"tool_use","id":"child-read","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|};
+      Emit {|{"type":"user","parent_tool_use_id":"second-root-agent","session_id":"__SESSION__","uuid":"command-child-read-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"child-read","is_error":false,"content":"child fixture"}]}}|};
+      Emit tool_result;
+      Emit (input_partial ~uuid:(Some "second-command-stop") {|{"type":"message_stop"}|} []);
+      Emit assistant;
+      Emit (with_input_fields result input_own_stamp)] (fun path ->
+      let on_stream_event = function
+        | Runtime_claude_code.Native_tool_started {identity=Some (Runtime_native_tools.Call_id "second-root-agent");_} ->
+            (* Assertions run after the callback: runtime observers deliberately
+               isolate ordinary callback exceptions. *)
+            native_inputs := List.find_opt (fun (o : Input_evidence.observation) ->
+              Option.bind o.frame input_frame_uuid=Some "second-command-agent") !observations :: !native_inputs
+        | _ -> () in
+      match run_fixture ~native:Runtime_native_tools.Native_full ~on_stream_event
+          ~on_input_observation:(fun o -> observations := o :: !observations) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "canonical single-shot result preserved" "MASC_CLAUDE_OK" turn.text);
+    let own_link label (o : Input_evidence.observation) =
+      check bool label owned_command
+        (match o.attribution with Input_evidence.Command_inherited witness ->
+          witness.stamp_uuid="first-command-assistant"
+          && witness.group.primary=o.ticket.client_uuid
+          && witness.group.consumed=[o.ticket.client_uuid]
+         | _ -> false);
+      if not owned_command then check bool "unwitnessed/foreign/malformed command stays unknown" true
+        (o.attribution=Input_evidence.Unattributed) in
+    own_link "later model start carries command proof only" (input_observed "second-command-partial" !observations);
+    own_link "unstamped Agent envelope retains typed command" (input_observed "second-command-agent" !observations);
+    own_link "complete-only root keeps command after child tool envelopes" (input_observed "assistant-fixture-1" !observations);
+    check bool "child assistant cannot acquire root input attribution" false
+      (List.exists (fun (o : Input_evidence.observation) -> Option.bind o.frame input_frame_uuid=Some "command-child-read") !observations);
+    (match !native_inputs with
+     | [Some observation] -> own_link "exact input association arrives before native start" observation
+     | _ -> fail "native Agent start did not see its exact assistant envelope observation");
+    check bool "final result settles by its explicit own group" true
+      ((input_observed "turn-fixture-1" !observations).phase=Input_evidence.Settled Provider_success))
+    [input_own_stamp,true;
+     [],false;
+     input_stamp "foreign-primary" ["__INPUT_UUID__";"foreign-primary"],false;
+     ["user_message_uuid",`String "__INPUT_UUID__";"user_message_uuids",`Null],false]
+
+let test_input_command_recovers_after_unowned_partial_start () =
+  List.iter (fun parent ->
+    let unowned_start =
+      match Yojson.Safe.from_string (input_begin "unowned-start" "child-model" input_own_stamp) with
+      | `Assoc fields ->
+          let fields=List.remove_assoc "parent_tool_use_id" fields in
+          let ownership=Option.to_list (Option.map (fun id -> "parent_tool_use_id", `String id) parent) in
+          Yojson.Safe.to_string (`Assoc (ownership @ fields))
+      | _ -> fail "partial fixture must be an object" in
+    List.iter (fun (initial_stamp, witnessed) ->
+      let observations=run_input_success [
+        Emit (input_begin "root-command-witness" "root-before-child" initial_stamp);
+        Emit unowned_start;
+        Emit (input_tick ~uuid:(Some "uncertain-root-fragment") []);
+        Emit (input_begin "fresh-root-start" "root-after-child" []);
+        Emit assistant;
+        Emit (with_input_fields result input_own_stamp)] in
+      check bool "unowned partial is not root input evidence" false
+        (List.exists (fun (o : Input_evidence.observation) ->
+          Option.bind o.frame input_frame_uuid=Some "unowned-start") observations);
+      check bool "root fragment cannot inherit before a fresh root start" true
+        ((input_observed "uncertain-root-fragment" observations).attribution=Input_evidence.Unattributed);
+      List.iter (fun uuid ->
+        let observation=input_observed uuid observations in
+        check bool "fresh root retains only the original witnessed command" witnessed
+          (match observation.attribution with
+           | Input_evidence.Command_inherited witness ->
+               witness.stamp_uuid="root-command-witness"
+               && witness.group.primary=observation.ticket.client_uuid
+               && witness.group.consumed=[observation.ticket.client_uuid]
+           | Unattributed | Explicit _ | Inherited _ | Rejected _ -> false);
+        if not witnessed then check bool "child stamp cannot create root command proof" true
+          (observation.attribution=Input_evidence.Unattributed))
+        ["fresh-root-start";"assistant-fixture-1"])
+      [input_own_stamp,true; [],false;
+       input_stamp "foreign-primary" ["__INPUT_UUID__";"foreign-primary"],false])
+    [Some "parent-agent"; None]
+
+let test_input_command_owns_native_agent_with_reused_model_id () =
+  let first =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-first-native","message":{"id":"reused-native-model","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"reuse-first-read","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|} in
+  let first_result =
+    {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-first-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"reuse-first-read","is_error":false,"content":"fixture Read returned"}]}}|} in
+  let second =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-second-native","message":{"id":"reused-native-model","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"reuse-second-agent","name":"Agent","input":{"description":"fixture","prompt":"fixture-only task","subagent_type":"general-purpose"}}]}}|} in
+  let second_result =
+    {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-second-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"reuse-second-agent","is_error":false,"content":"fixture Agent returned"}]}}|} in
+  List.iter (fun (initial_stamp, has_command) ->
+    let observations=ref [] in
+    let at_native_start=ref [] in
+    (* Both reused-model envelopes are native-only: no partial text index or
+       complete-text reconciliation decides whether the runtime admits them. *)
+    with_fixture [Bind_input_uuid;
+      Emit (input_begin "reuse-first-start" "reused-native-model" initial_stamp);
+      Emit (with_input_fields first initial_stamp);
+      Emit first_result;
+      Emit (input_partial ~uuid:(Some "reuse-first-stop") {|{"type":"message_stop"}|} []);
+      Emit (input_begin "reuse-second-start" "reused-native-model" []);
+      Emit second;
+      Emit second_result;
+      Emit (input_partial ~uuid:(Some "reuse-second-stop") {|{"type":"message_stop"}|} []);
+      Emit assistant;Emit (with_input_fields result input_own_stamp)] (fun path ->
+      let on_stream_event = function
+        | Runtime_claude_code.Native_tool_started {identity=Some (Runtime_native_tools.Call_id "reuse-second-agent");_} ->
+            at_native_start := List.find_opt (fun (o : Input_evidence.observation) ->
+              Option.bind o.frame input_frame_uuid=Some "reuse-second-native") !observations :: !at_native_start
+        | _ -> () in
+      match run_fixture ~native:Runtime_native_tools.Native_full ~on_stream_event
+          ~on_input_observation:(fun o -> observations := o :: !observations) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "native-only model ID reuse preserves result" "MASC_CLAUDE_OK" turn.text);
+    let check_owner (observation : Input_evidence.observation) =
+      if has_command then
+        check bool "fresh Agent envelope uses typed command, not an arbitrary reused response" true
+          (match observation.attribution with Input_evidence.Command_inherited witness ->
+            witness.stamp_uuid="reuse-first-native"
+            && witness.group.primary=observation.ticket.client_uuid
+            && witness.group.consumed=[observation.ticket.client_uuid]
+           | _ -> false)
+      else check bool "reused ID without command proof stays rejected" true
+        (observation.attribution=Input_evidence.Rejected Ambiguous_response) in
+    check_owner (input_observed "reuse-second-native" !observations);
+    match !at_native_start with
+    | [Some observation] -> check_owner observation
+    | _ -> fail "actual native start lacked its exact input observation")
+    [input_own_stamp,true; [],false;
+     input_stamp "foreign-primary" ["__INPUT_UUID__";"foreign-primary"],false]
+
+let test_input_replayed_boundaries_preserve_exact_scope () =
+  let old_start=input_begin "start-A" "response-A" input_own_stamp in
+  let old_stop=input_partial ~uuid:(Some "stop-C") {|{"type":"message_stop"}|} [] in
+  let observations=run_input_success [
+    Emit old_start;
+    Emit (input_begin "start-B" "response-B" (input_stamp "other" ["other"]));
+    Emit old_start;
+    (* Accepted by the real partial parser after it resets message_id to A.
+       The callback must not retain B's different consumed input group. *)
+    Emit (input_tick ~uuid:(Some "after-old-start") []);
+    Emit (input_begin "start-C" "response-C" input_own_stamp);
+    Emit old_stop;
+    Emit (input_begin "start-D" "response-D" (input_stamp "other" ["other"]));
+    Emit old_stop;
+    Emit (input_tick ~uuid:(Some "after-old-stop") []);
+    Emit (input_partial ~uuid:(Some "stop-D") {|{"type":"message_stop"}|} []);
+    Emit (input_tick ~uuid:(Some "after-fresh-stop") []);
+    Emit (input_begin "start-E" "response-E" input_own_stamp);
+    Emit (input_partial ~uuid:None {|{"type":"message_stop"}|} []);
+    Emit (input_tick ~uuid:(Some "after-missing-stop") []);
+    Emit (input_begin "start-F" "response-F" input_own_stamp);
+    Emit (input_partial ~uuid:(Some "start-F") {|{"type":"message_stop"}|} []);
+    Emit (input_tick ~uuid:(Some "after-conflicting-stop") []);
+    Emit (input_partial ~uuid:(Some "unowned-stop") {|{"type":"message_stop"}|} []);
+    Emit (input_tick ~uuid:(Some "after-unowned-stop") []);
+    Emit (input_begin "start-G" "response-G" input_own_stamp);
+    Emit (input_tick ~uuid:(Some "after-fresh-start") []);
+    Emit assistant;Emit result] in
+  List.iter (fun uuid ->
+    let observation=input_observed uuid observations in
+    check bool "unowned boundary cannot retain an input owner" true
+      (observation.attribution=Input_evidence.Unattributed && observation.phase=Input_evidence.Consumed))
+    ["after-old-start";"after-fresh-stop";"after-missing-stop";"after-conflicting-stop";"after-unowned-stop"];
+  check bool "exact historical stop leaves the current D owner intact" true
+    (match (input_observed "after-old-stop" observations).attribution with
+     | Input_evidence.Inherited group -> group.primary="other" && group.consumed=["other"]
+     | _ -> false);
+  check bool "new start restores explicit witnessed scope" true
+    (match (input_observed "after-fresh-start" observations).attribution with Input_evidence.Inherited _ -> true | _ -> false);
+  List.iter (fun uuid -> check int "replayed boundary emits no duplicate observation" 1
+      (List.length (List.filter (fun (o : Input_evidence.observation) -> Option.bind o.frame input_frame_uuid=Some uuid) observations)))
+    ["start-A";"stop-C"]
+
+let test_input_rejected_partial_identity_cannot_keep_old_inheritance () =
+  let observations=run_input_success [
+    Emit (input_begin "first" "message-one" input_own_stamp);
+    Emit empty_assistant;
+    (* Cross-kind reuse of an envelope without a response binding. *)
+    Emit (input_begin "assistant-empty-1" "message-two" []);
+    Emit (input_tick ~uuid:(Some "after-collision") []);
+    Emit (input_begin "third" "message-three" input_own_stamp);
+    Emit (input_tick ~uuid:None (input_stamp "other" ["other"]));
+    Emit (input_tick ~uuid:(Some "after-missing") []);
+    Emit (input_begin "fourth" "message-four" input_own_stamp);
+    Emit {|{"type":"stream_event","uuid":"unscoped-start","session_id":"__SESSION__","event":{"type":"message_start","message":{"id":"unscoped-model","model":"claude-fixture"}}}|};
+    Emit (input_tick ~uuid:(Some "after-unscoped") []);
+    Emit assistant;Emit result] in
+  check bool "rejected start retires prior occurrence" true
+    ((input_observed "after-collision" observations).attribution=Input_evidence.Unattributed);
+  check bool "unidentifiable changed stamp invalidates inherited group" true
+    (match (input_observed "after-missing" observations).attribution with Input_evidence.Rejected _ -> true | _ -> false);
+  check bool "earlier proven consumption stays true" true
+    ((input_observed "after-missing" observations).phase=Input_evidence.Consumed);
+  check bool "unscoped start retires former root inheritance" true
+    ((input_observed "after-unscoped" observations).attribution=Input_evidence.Unattributed)
+
+let test_input_metadata_duplicate_and_foreign_session_stay_protocol_errors () =
+  let duplicate=with_input_fields assistant ["user_message_uuid",`String "__INPUT_UUID__";
+    "user_message_uuid",`String "__INPUT_UUID__"] in
+  let foreign = match Yojson.Safe.from_string assistant with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc
+        (("session_id",`String "foreign-session") :: input_own_stamp @ List.remove_assoc "session_id" fields))
+    | _ -> fail "assistant fixture must be an object" in
+  List.iter (fun line ->
+    with_fixture [Bind_input_uuid;Emit line;Emit result] (fun path ->
+      match run_fixture ~on_input_observation:(fun _ -> ()) path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "global JSON/session admission weakened")) [duplicate;foreign]
+
+let test_resume_preserves_session_identity () =
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match
+      run_fixture
+        ~session_mode:
+          (Runtime_claude_code.Resume { session_id = "fixture-session-resume" })
+        path
+    with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "session" "fixture-session-resume" turn.session_id;
+      check bool "resumed" true turn.resumed)
+;;
+
+let test_live_subscription () =
+  if Sys.getenv_opt "MASC_CLAUDE_CODE_LIVE" <> Some "1"
+  then Alcotest.skip ()
+  else
+    let outcome =
+      Eio_main.run (fun env ->
+        let config =
+          { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = Some 60.0 }
+        in
+        Runtime_claude_code.run_turn
+          ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          config
+          ~prompt:"Reply with exactly MASC_CLAUDE_LIVE_OK"
+          ~images:[])
+    in
+    match outcome with
+    | Ok turn -> check string "live response" "MASC_CLAUDE_LIVE_OK" turn.text
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+;;
+
+
+(* RFC-0390: the argv is the contract with the installed CLI. These pin how
+   [config.native] selects [--tools] and what [--allowedTools] pre-approves. *)
+let flag_value argv flag =
+  let rec walk = function
+    | name :: value :: _ when String.equal name flag -> Some value
+    | _ :: rest -> walk rest
+    | [] -> None
+  in
+  walk argv
+;;
+
+let native_argv ~native ~dynamic_tools =
+  let config =
+    { (Runtime_claude_code.default_config ~cwd:"/tmp") with native }
+  in
+  match
+    Runtime_claude_code.command ~system_prompt_file:None
+      config
+      ~dynamic_tools
+      ~reasoning_effort:None
+      ~session_mode:Runtime_claude_code.Start
+      ~session_id:"11111111-1111-4111-8111-111111111111"
+  with
+  | Ok argv -> argv
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+;;
+
+let stub_dynamic_tool =
+  { Runtime_claude_code.name = "masc_status"
+  ; description = "fixture"
+  ; input_schema = `Assoc []
+  ; loading = Runtime_official_client_tool.On_demand
+  ; result_bound = Runtime_official_client_tool.Unbounded
+  ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+      (fun ~call_id:_ _ ->
+        { Runtime_claude_code.success = true
+        ; content = "{}"
+        ; content_blocks = None; abort_turn = None; on_response_sent = None
+        })
+  }
+;;
+
+(* The CLI loads no settings layer: the argv always carries the bare
+   [--setting-sources=] token. *)
+let test_command_loads_no_settings_layer () =
+  match
+    Runtime_claude_code.command ~system_prompt_file:None
+      (Runtime_claude_code.default_config ~cwd:"/tmp")
+      ~dynamic_tools:[]
+      ~reasoning_effort:None
+      ~session_mode:Runtime_claude_code.Start
+      ~session_id:"11111111-1111-4111-8111-111111111111"
+  with
+  | Ok argv ->
+    check bool "argv carries the bare no-layer token" true
+      (List.mem "--setting-sources=" argv)
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+;;
+
+(* A Resume leaves out carried context the session already holds, which
+   holds only while the session keeps the system prompt it recorded at its
+   first launch; the argv pins that instead of relying on the client default. *)
+let test_system_prompt_snapshot_is_pinned_on () =
+  let argv session_mode =
+    match
+      Runtime_claude_code.command ~system_prompt_file:None
+        (Runtime_claude_code.default_config ~cwd:"/tmp")
+        ~dynamic_tools:[]
+        ~reasoning_effort:None
+        ~session_mode
+        ~session_id:"11111111-1111-4111-8111-111111111111"
+    with
+    | Ok argv -> argv
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+  in
+  let rec pinned = function
+    | "--system-prompt-snapshot" :: value :: _ -> Some value
+    | _ :: rest -> pinned rest
+    | [] -> None
+  in
+  List.iter
+    (fun (label, session_mode) ->
+       check (option string) (label ^ " pins the snapshot on") (Some "on")
+         (pinned (argv session_mode)))
+    [ "a start", Runtime_claude_code.Start
+    ; ( "a resume"
+      , Runtime_claude_code.Resume
+          { session_id = "11111111-1111-4111-8111-111111111111" } )
+    ]
+;;
+
+let test_system_prompt_flag_is_omitted_when_unset () =
+  let argv system_prompt =
+    let config = {(Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt} in
+    match Runtime_claude_code.command
+      ~system_prompt_file:(Option.map (fun _ -> "/tmp/private-system.txt") system_prompt)
+      config ~dynamic_tools:[] ~reasoning_effort:None ~session_mode:Runtime_claude_code.Start
+      ~session_id:"11111111-1111-4111-8111-111111111111" with
+    | Ok argv -> argv
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+  in
+  check (option string) "unset prompt has no replacement file" None
+    (flag_value (argv None) "--system-prompt-file");
+  check (option string) "configured prompt uses its prepared file"
+    (Some "/tmp/private-system.txt")
+    (flag_value (argv (Some "keeper instructions")) "--system-prompt-file")
+;;
+
+let test_system_file_keeps_large_context_off_argv () =
+  let prompt = String.make (256 * 1024) 'x' in
+  let config = {(Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt=Some prompt} in
+  (match Runtime_claude_code.command ~system_prompt_file:None config
+      ~dynamic_tools:[] ~reasoning_effort:None ~session_mode:Start
+      ~session_id:"11111111-1111-4111-8111-111111111111" with
+   | Error (Invalid_config _) -> ()
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "configured context silently fell back to inline argv");
+  match Runtime_claude_code.command ~system_prompt_file:(Some "/tmp/private-system.txt")
+      config ~dynamic_tools:[] ~reasoning_effort:None ~session_mode:Start
+      ~session_id:"11111111-1111-4111-8111-111111111111" with
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok argv ->
+    check (option string) "replacement file flag" (Some "/tmp/private-system.txt")
+      (flag_value argv "--system-prompt-file");
+    check (option string) "prompt bytes are absent from argv" None
+      (flag_value argv "--system-prompt");
+    check bool "no argument contains the large context" false (List.mem prompt argv)
+;;
+
+let test_native_posture_selects_tools_flag () =
+  let argv posture = native_argv ~native:posture ~dynamic_tools:[] in
+  (* Every posture names ToolSearch (#36798): a --tools list without it also
+     turns off the CLI's deferred MCP schema loading. [none] still disables
+     every built-in that touches the machine; the lookup observes nothing. *)
+  check (option string) "none keeps only the schema lookup" (Some "ToolSearch")
+    (flag_value (argv Runtime_native_tools.Native_none) "--tools");
+  check (option string) "read adds the schema lookup to the read set" (Some "Read,Glob,Grep,ToolSearch")
+    (flag_value (argv Runtime_native_tools.Native_read) "--tools");
+  check (option string) "full enables the default set" (Some "default")
+    (flag_value (argv Runtime_native_tools.Native_full) "--tools")
+;;
+
+let test_native_read_preapproves_read_tools () =
+  check (option string)
+    "read with no MCP tools still pre-approves its read set"
+    (Some "Read,Glob,Grep")
+    (flag_value
+       (native_argv ~native:Runtime_native_tools.Native_read ~dynamic_tools:[])
+       "--allowedTools");
+  check (option string)
+    "read merges native names ahead of MCP names"
+    (Some "Read,Glob,Grep,mcp__masc__masc_status")
+    (flag_value
+       (native_argv
+          ~native:Runtime_native_tools.Native_read
+          ~dynamic_tools:[ stub_dynamic_tool ])
+       "--allowedTools");
+  check (option string)
+    "none with no MCP tools passes no allowlist"
+    None
+    (flag_value
+       (native_argv ~native:Runtime_native_tools.Native_none ~dynamic_tools:[])
+       "--allowedTools")
+;;
+
+let test_provider_retry_observes_exact_session_without_changing_reply () =
+  let reports = ref [] in
+  let on_stream_event = function
+    | Runtime_claude_code.Provider_retry_observed retry -> reports := retry :: !reports
+    | _ -> () in
+  let retry session attempt uuid =
+    Yojson.Safe.to_string (`Assoc [
+      "type",`String "system";"subtype",`String "api_retry";
+      "session_id",`String session;"uuid",`String uuid;
+      "attempt",`Int attempt;"max_retries",`Int 10;
+      "retry_delay_ms",`Int 615;"error_status",`Null;
+      "error",`String "PRIVATE_RETRY_DIAGNOSTIC"])
+  in
+  with_fixture [Emit (retry "__SESSION__" 1 "retry-1");
+    Emit (retry "other-session" 2 "foreign-retry");
+    Emit (retry "__SESSION__" (-1) "malformed-retry");
+    Emit assistant;Emit result] (fun path ->
+    match run_fixture ~on_stream_event path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "retry notice does not replace model reply" "MASC_CLAUDE_OK" turn.text;
+      match !reports with
+      | [{Runtime_claude_api_retry.observation_id;attempt;max_retries;retry_delay_ms;error_status}] ->
+          check string "literal observation identity" "retry-1" observation_id;
+          check int "reported attempt" 1 attempt;
+          check int "provider retry policy observation" 10 max_retries;
+          check int "reported delay" 615 retry_delay_ms;
+          check (option int) "unknown HTTP status remains unknown" None error_status
+      | reports -> failf "expected one owned retry, got %d" (List.length reports))
+;;
+
+(* A retry notice with a duplicate field is malformed telemetry, not a turn
+   error: it must reach the tolerant retry decoder and be dropped, while the
+   model reply stays intact. *)
+let test_provider_retry_with_duplicate_field_is_ignored_without_failing_turn () =
+  let reports = ref [] in
+  let on_stream_event = function
+    | Runtime_claude_code.Provider_retry_observed retry -> reports := retry :: !reports
+    | _ -> () in
+  let malformed =
+    Yojson.Safe.to_string (`Assoc [
+      "type",`String "system";"subtype",`String "api_retry";
+      "session_id",`String "__SESSION__";"uuid",`String "dupe-retry";
+      "attempt",`Int 1;"attempt",`Int 1;"max_retries",`Int 10;
+      "retry_delay_ms",`Int 615;"error_status",`Null;
+      "error",`String "PRIVATE_RETRY_DIAGNOSTIC"])
+  in
+  with_fixture [Emit malformed; Emit assistant; Emit result] (fun path ->
+    match run_fixture ~on_stream_event path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "malformed retry notice does not replace model reply" "MASC_CLAUDE_OK" turn.text;
+      check int "malformed retry notice is dropped" 0 (List.length !reports))
+;;
+
+let () =
+  run
+    "runtime_claude_code"
+    [ ( "provider retry",
+        [ test_case "owned retry preserves healthy reply" `Quick
+            test_provider_retry_observes_exact_session_without_changing_reply
+        ; test_case "duplicate-field retry is dropped without failing turn" `Quick
+            test_provider_retry_with_duplicate_field_is_ignored_without_failing_turn ])
+    ; ( "native posture argv (RFC-0390)"
+      , [ test_case
+            "posture selects --tools"
+            `Quick
+            test_native_posture_selects_tools_flag
+        ; Alcotest.test_case
+            "command loads no settings layer"
+            `Quick
+            test_command_loads_no_settings_layer
+        ; test_case "system prompt snapshot is pinned on" `Quick
+            test_system_prompt_snapshot_is_pinned_on
+        ; test_case "large system context uses file argv" `Quick test_system_file_keeps_large_context_off_argv
+        ; test_case
+            "an unset system prompt omits the flag"
+            `Quick
+            test_system_prompt_flag_is_omitted_when_unset
+        ; test_case
+            "read pre-approves its read set"
+            `Quick
+            test_native_read_preapproves_read_tools
+        ] )
+    ; ( "admission"
+      , [ test_case "partial delta after stop rejected" `Quick test_partial_delta_after_stop_is_rejected
+        ; test_case "validation is process-free" `Quick test_validation_is_process_free
+        ; test_case "prompt transmission boundary" `Quick test_prompt_transmission_boundary
+        ; test_case
+            "subscription auth and env scrub"
+            `Quick
+            test_subscription_turn_and_env_scrub
+        ; test_case "selected account home reaches CLI" `Quick
+            test_selected_account_home_reaches_claude_child
+        ; test_case "relative inherited home keeps authentication environment" `Quick
+            test_relative_inherited_home_keeps_auth_environment
+        ; test_case
+            "long turn with many progress messages completes"
+            `Quick
+            test_long_turn_with_many_progress_messages_completes
+        ; test_case
+            "many informational frames before admission complete"
+            `Quick
+            test_many_informational_frames_before_admission_complete
+        ; test_case
+            "result returns before a background child releases the pipes"
+            `Quick
+            test_result_returns_before_a_background_child_releases_the_pipes
+        ; test_case "routed credentials reach probe and turn" `Quick test_routed_credentials_reach_probe_and_turn
+        ; test_case
+            "progress resets stream idle timeout"
+            `Quick
+            test_progress_resets_stream_idle_timeout
+        ; test_case
+            "stream idle timeout is typed"
+            `Quick
+            test_stream_idle_timeout_is_typed
+        ; test_case
+            "an unexpected exception is unhandled, not a protocol error"
+            `Quick
+            test_unexpected_exception_is_unhandled
+        ; test_case
+            "reserved exceptions leave run_turn untyped"
+            `Quick
+            test_reserved_exceptions_leave_run_turn
+        ; test_case
+            "no deadline keeps initialize bounded"
+            `Quick
+            test_no_deadline_keeps_initialize_bounded
+        ; test_case
+            "no deadline starts after user message"
+            `Quick
+            test_no_deadline_starts_after_user_message
+        ; test_case
+            "no deadline keeps turn-started callback bounded"
+            `Quick
+            test_no_deadline_keeps_turn_started_callback_bounded
+        ; test_case
+            "state callback timeout is typed"
+            `Quick
+            test_state_callback_timeout_is_typed
+        ; test_case
+            "callback timeout origin is preserved without deadline"
+            `Quick
+            test_callback_timeout_origin_is_preserved_without_deadline
+        ; test_case "operator interrupt callback keeps typed cause" `Quick
+            test_operator_interrupt_callback_keeps_typed_cause
+        ; test_case
+            "supported CLI authentication modes"
+            `Quick
+            test_supported_authentication_modes
+        ; test_case "logged-out status exit one" `Quick test_logged_out_status_exit_one
+        ; test_case
+            "missing CLI differs from logout"
+            `Quick
+            test_missing_cli_is_not_reported_as_logout
+        ] )
+    ; ( "terminal"
+      , [ test_case
+            "terminal_reason prompt_too_long is typed"
+            `Quick
+            test_terminal_reason_prompt_too_long_is_typed
+        ; test_case
+            "a non-overflow terminal_reason is a turn failure"
+            `Quick
+            test_non_overflow_terminal_reason_is_a_turn_failure
+        ; test_case
+            "turn failure reason reaches the log"
+            `Quick
+            test_turn_failure_reason_reaches_the_log
+        ; test_case
+            "statusless generic error remains turn failed"
+            `Quick
+            test_statusless_generic_error_remains_turn_failed
+        ; test_case
+            "quota is structurally classified"
+            `Quick
+            test_quota_is_structurally_classified
+        ; test_case "quota after native tool records effect" `Quick
+            test_quota_after_native_tool_records_effect
+        ; test_case "quota refusal still reports the turn's spend" `Quick
+            test_quota_refusal_still_reports_the_turns_spend
+        ; test_case "quota refusal before any response reports no spend" `Quick
+            test_quota_refusal_before_any_response_reports_no_spend
+        ; test_case "result of another session reports no spend" `Quick
+            test_result_of_another_session_reports_no_spend
+        ; test_case "usage windows are reported without changing the turn" `Quick
+            test_usage_windows_are_reported_without_changing_the_turn
+        ; test_case "command_lifecycle frames do not fail the turn" `Quick
+            test_command_lifecycle_frames_do_not_fail_the_turn
+        ; test_case "unknown frame types fail closed in both phases" `Quick
+            test_unknown_frame_types_fail_closed_in_both_phases
+        ; test_case "a known frame out of phase is named by its own tag" `Quick
+            test_a_known_frame_out_of_phase_is_named_by_its_own_tag
+        ; test_case
+            "rejected rate limit overrides success flag"
+            `Quick
+            test_rejected_rate_limit_overrides_success_flag
+        ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
+        ; test_case "duplicate keys fail closed" `Quick test_duplicate_keys_fail_closed
+        ; test_case "distinct native starts survive replay suppression" `Quick test_distinct_native_calls_are_not_replay
+        ; test_case "task identities and counters reject malformed telemetry" `Quick
+            test_task_telemetry_identity_and_counter_validation
+        ; test_case "task signed clocks preserve values and UUID replay" `Quick
+            test_task_clock_values_and_replay
+        ; test_case "result usage is carried" `Quick test_result_usage_is_carried
+        ; test_case "latest request input and result total both travel" `Quick
+            test_latest_request_input_and_result_total_both_travel
+        ; test_case "child tool preserves root model and request input" `Quick
+            test_child_tool_preserves_root_metadata
+        ; test_case "child body cannot supply root reply" `Quick
+            test_child_body_cannot_supply_root_reply
+        ; test_case "assistant parent provenance is required" `Quick
+            test_assistant_parent_provenance_is_required
+        ; test_case "real two-request turn separates spend from occupancy" `Quick
+            test_real_two_request_turn_separates_spend_from_occupancy
+        ; test_case
+            "dynamic tool bytes counts every field"
+            `Quick
+            test_dynamic_tool_bytes_counts_every_field
+        ; test_case
+            "dynamic tool bytes counts _meta"
+            `Quick
+            test_dynamic_tool_bytes_counts_meta
+        ; test_case
+            "partial usage does not fail the turn"
+            `Quick
+            test_partial_result_usage_does_not_fail_the_turn
+        ] )
+    ; ( "API diagnostic origin"
+      , [ test_case
+            "quota remains failover safe"
+            `Quick
+            test_api_diagnostic_quota_keeps_failover_safe
+        ; test_case "child body is not root response evidence" `Quick
+            test_child_body_is_not_root_response_evidence
+        ; test_case "child partial frames are not root response evidence" `Quick
+            test_child_partial_frames_are_not_root_response_evidence
+        ; test_case "child partial frames leave the root stream intact" `Quick
+            test_child_partial_frames_leave_root_stream_intact
+        ; test_case "partial frame parent must be null or nonblank" `Quick
+            test_partial_frame_parent_must_be_null_or_nonblank
+        ; test_case "child diagnostic body excluded and native tools retained" `Quick
+            test_child_diagnostic_body_is_excluded_but_tools_survive
+        ; test_case
+            "prior text remains emitted"
+            `Quick
+            test_api_diagnostic_preserves_prior_text
+        ; test_case
+            "prior and mixed native effects survive"
+            `Quick
+            test_api_diagnostic_preserves_native_effects
+        ; test_case
+            "prior and mixed MCP effects survive"
+            `Quick
+            test_api_diagnostic_preserves_mcp_effects
+        ; test_case
+            "overflow remains retry safe"
+            `Quick
+            test_api_diagnostic_overflow_keeps_retry_safe
+        ; test_case
+            "terminal error detail survives"
+            `Quick
+            test_api_diagnostic_preserves_terminal_error_detail
+        ; test_case
+            "identical ordinary prose remains response"
+            `Quick
+            test_real_identical_prose_is_still_response
+        ; test_case
+            "malformed flag fails closed"
+            `Quick
+            test_malformed_api_error_flag_fails_closed
+        ; test_case
+            "valid response follows diagnostic"
+            `Quick
+            test_valid_response_after_api_diagnostic
+        ; test_case
+            "diagnostic preserves measured model and text"
+            `Quick
+            test_api_diagnostic_does_not_replace_measured_model_or_text
+        ] )
+    ; ( "response delivery"
+      , [ test_case "ordinary response writes once" `Quick
+            (fun () -> test_dynamic_tool_callback ())
+        ; test_case "projection substitution is not original delivery" `Quick
+            test_response_observer_requires_original_projection
+        ; test_case "observer failure does not undo a written response" `Quick
+            (fun () -> test_dynamic_tool_callback ~observer_raises:true ())
+        ; test_case "host stop follows response write" `Quick
+            test_dynamic_tool_abort_stops_the_provider_loop
+        ] )
+    ; ( "mcp"
+      , [ test_case "dynamic tool callback" `Quick (fun () -> test_dynamic_tool_callback ())
+        ; test_case
+            "stream preserves text and tool identity"
+            `Quick
+            test_stream_events_preserve_text_and_tool_identity
+        ; test_case "four messages retain partial blocks and citation metadata" `Quick
+            test_four_partial_messages_preserve_all_blocks
+        ; test_case "partial text precedes complete block without duplication" `Quick
+            test_partial_text_streams_before_complete_block
+        ; test_case "partial thinking retains only the complete suffix" `Quick
+            test_partial_thinking_preserves_complete_suffix
+        ; test_case "thinking cannot enter a public text block" `Quick
+            test_partial_thinking_rejects_text_block
+        ; test_case
+            "stream preserves native tool origin"
+            `Quick
+            test_stream_events_preserve_native_tool_origin
+        ; test_case
+            "pre-admission tool call is rejected"
+            `Quick
+            test_tool_call_before_turn_admission_is_rejected
+        ; test_case
+            "post-effect response failure requires recovery"
+            `Quick
+            test_post_effect_response_failure_requires_recovery
+        ; test_case
+            "context overflow after tool records effect"
+            `Quick
+            test_context_overflow_after_tool_records_effect
+        ; test_case
+            "context overflow after response records activity"
+            `Quick
+            test_context_overflow_after_response_records_activity
+        ; test_case
+            "empty assistant keeps context overflow retry safe"
+            `Quick
+            test_context_overflow_after_empty_assistant_remains_retry_safe
+        ; test_case
+            "dynamic tool abort stops provider loop"
+            `Quick
+            test_dynamic_tool_abort_stops_the_provider_loop
+        ; test_case
+            "dynamic tool meta follows declared loading"
+            `Quick
+            test_dynamic_tool_meta_follows_declared_loading
+        ; test_case
+            "tool result ceiling belongs to the execution lane"
+            `Quick
+            test_tool_result_inline_ceiling_is_lane_specific
+        ; test_case "host stop carries the newest request input" `Quick
+            test_host_stop_carries_the_newest_request_input
+        ; test_case
+            "client reconnect handshakes again on the same session"
+            `Quick
+            test_a_client_reconnect_handshakes_again_on_the_same_session
+        ; test_case
+            "shared bridge owns exact dispatch"
+            `Quick
+            test_shared_mcp_bridge_owns_exact_dispatch
+        ; test_case
+            "shared protocol is negotiated"
+            `Quick
+            test_shared_mcp_protocol_is_negotiated
+        ; test_case
+            "notification is acknowledged on the control channel"
+            `Quick
+            test_mcp_notification_is_acknowledged_on_the_control_channel
+        ; test_case
+            "unsupported control request fails closed"
+            `Quick
+            test_unsupported_control_request_fails_closed
+        ; test_case
+            "allowedTools tokenizer chars validated"
+            `Quick
+            test_dynamic_tool_tokenizer_chars_are_validated
+        ] )
+    ; ( "hard-cut"
+      , [ test_case
+            "tool progress keeps stream open"
+            `Quick
+            test_tool_progress_keeps_stream_open
+        ; test_case "heartbeat exception is stream-only" `Quick test_heartbeat_exception_cannot_relax_auth_json
+        ; test_case "root heartbeat scope and UUID ownership" `Quick test_root_heartbeat_owns_only_current_call
+        ; test_case "Agent retry clear and cross-kind UUID ownership" `Quick test_agent_retry_identity_clear_and_uuid_interleaving
+        ; test_case "Agent retry exception stays producer scoped" `Quick test_agent_retry_observation_exception_is_narrow
+        ; test_case "Agent retry requires root native_full" `Quick test_agent_retry_requires_root_native_full
+        ; test_case "parent/task bindings share original input and failed-first decisions" `Quick
+            test_parent_binding_shares_original_task_evidence
+        ; test_case "parent binding rejects foreign or contradictory actual private evidence" `Quick
+            test_parent_binding_refuses_foreign_and_conflicting_evidence
+        ; test_case "private complete child binding keeps actual invocation provenance" `Quick
+            test_complete_child_binding_preserves_actual_invocation_provenance
+        ; test_case "native invocation proof refuses exact foreign SDK replays" `Quick
+            test_native_invocation_proof_rejects_replayed_foreign_owners
+        ; test_case "child witness retains original open/returned native parent" `Quick
+            test_child_parent_witness_uses_original_native_occurrence
+        ; test_case "child witness refuses unowned native parents" `Quick
+            test_child_parent_witness_refuses_unowned_native_parents
+        ; test_case "tasks survive native return with exact root ownership" `Quick test_tasks_survive_native_return_without_changing_root_response
+        ; test_case "task run ordering and cross-kind UUID replay" `Quick test_task_run_order_replays_and_cross_kind_uuid
+        ; test_case "unowned and malformed tasks preserve the healthy turn" `Quick test_task_registration_rejects_unowned_and_malformed_frames
+        ; test_case "child and missing result scope heartbeat ignored" `Quick test_child_heartbeat_and_unknown_result_scope_are_unowned
+        ; test_case
+            "unknown stream type fails closed"
+            `Quick
+            test_unknown_stream_type_fails_closed
+        ] )
+    ; ( "images"
+      , [ test_case "image reaches the CLI user message" `Quick
+            test_image_reaches_the_cli_user_message
+        ; test_case "receipts are the bytes the CLI read" `Quick
+            test_receipts_are_the_bytes_the_cli_read
+        ; test_case "unsupported media type is rejected" `Quick
+            (fun () -> test_unsupported_image_media_type_is_rejected ())
+        ; test_case "malformed Base64 image is rejected before client dispatch" `Quick
+            (fun () -> test_unsupported_image_media_type_is_rejected
+              ~media_type:"image/png" ~base64_data:"%%%" ~expected:"valid Base64" ())
+        ] )
+    ; "input-attribution", [
+        test_case "serialized UUID and fresh resume generation" `Quick test_input_uuid_is_serialized_and_fresh_on_resume;
+        test_case "partial group updates and absent result" `Quick test_input_attribution_partial_group_updates_and_absent_result;
+        test_case "malformed foreign and child metadata" `Quick test_input_optional_malformed_foreign_and_child_metadata;
+        test_case "error and batch membership" `Quick test_input_error_and_batch_membership;
+        test_case "rejected partial identity quarantines inheritance" `Quick test_input_rejected_partial_identity_cannot_keep_old_inheritance;
+        test_case "old start retires scope and historical stop preserves it" `Quick test_input_replayed_boundaries_preserve_exact_scope;
+        test_case "typed command owns unstamped Agent tool round" `Quick test_input_typed_command_owns_unstamped_agent_tool_round;
+        test_case "command recovers after child or unscoped partial start" `Quick test_input_command_recovers_after_unowned_partial_start;
+        test_case "command owns native Agent with reused model ID" `Quick test_input_command_owns_native_agent_with_reused_model_id;
+        test_case "strict duplicate and session boundary" `Quick test_input_metadata_duplicate_and_foreign_session_stay_protocol_errors]
+    ; "session", [ test_case "resume identity" `Quick test_resume_preserves_session_identity ]
+    ; "live", [ test_case "subscription turn" `Slow test_live_subscription ]
+    ]
+;;

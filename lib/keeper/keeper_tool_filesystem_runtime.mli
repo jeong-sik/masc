@@ -1,0 +1,285 @@
+(** Filesystem runtime handlers for descriptor-backed Read/Edit/Write tools. *)
+
+val valid_fs_write_mode_strings : string list
+(** The canonical enum [Tool_shard_types_enum_mirrors.fs_write_mode_enum_strings]
+    hand-copies. Exported so test_enum_mirror_sync can compare the copy against
+    it; the mirror module names this value as the owner. *)
+val resolve_write_attribution
+  :  base_dir:string
+  -> file_path:string
+  -> Agent_observation.file_attribution
+(** RFC-0378 §5.1. The system's only [Code_address] mint, used by
+    the tool-event hook to decide where a keeper write belongs.
+    Exposed for testing so the sandbox/working-tree join invariant
+    can be verified directly.
+
+    Git supplies the actual checkout root and origin, joined against the
+    registered catalog without any clone-directory naming convention.
+    See {!Keeper_write_attribution.resolve} for local-origin, projection and
+    typed failure semantics. Eio cancellation propagates. *)
+
+val resolve_read_file_cwd :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  cwd:string option ->
+  (string, Keeper_alerting_path.path_refusal) result
+(** The directory a Read resolves its path against: the Keeper's read root
+    without [cwd], else [cwd] projected and confined. Whether it exists is
+    asked of the filesystem that holds the tree
+    ({!Keeper_tool_shared_runtime.cwd_existence}); a cwd missing from a
+    shared-mount tree is refused with the checkouts that do exist. *)
+
+val handle_read_file_with_outcome :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
+
+val handle_read_file_with_authority :
+  read_authority:Keeper_sandbox_remote_lane.read_authority ->
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t -> Keeper_tool_execution.t
+(** Read with one captured endpoint for admission, translation and execution. *)
+
+type prepared_read
+
+val prepare_read :
+  sw:Eio.Switch.t -> config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> args:Yojson.Safe.t ->
+  (prepared_read option, string) result
+(** Prepare a regular file in the Keeper's own shared-mount tree. Other Read
+    roots/backends return [None] and keep their ordinary backend. No file bytes
+    are read during preparation. *)
+
+val prepared_read_scopes : prepared_read -> Agent_core.Tool_contract.Resource_scope.t list
+val release_prepared_read : prepared_read -> unit
+
+val handle_prepared_read_file_with_outcome :
+  prepared_read:prepared_read -> config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
+(** Read through the exact prepared owned-directory capabilities after owner,
+    input, backend and confinement revalidation. The file opens at execution,
+    so a preceding Edit is observed. No endpoint/Docker fallback is attempted
+    after accepting a preparation. *)
+
+val read_complete_sandbox_bytes :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  path:string -> ?cwd:string -> unit -> (string, string) result
+(** Complete raw read for a verifier without a turn runtime. Uses the existing
+    resolver/containment and exact endpoint or Docker capture, never host fallback. *)
+
+val read_owned_bytes :
+  ownership_root:string -> path:string -> ?cwd:string -> max_bytes:int -> unit ->
+  (string, string) result
+(** Binary prefix through the same owned Read resolver and regular-file
+    containment. The caller supplies a bounded byte limit. *)
+
+val read_complete_owned_bytes :
+  ownership_root:string -> path:string -> ?cwd:string -> unit ->
+  (string, string) result
+(** Complete immutable read through the same owned resolver and descriptor
+    containment. Used when a binary parser needs the whole source. *)
+
+val handle_owned_read_file_with_outcome :
+  ownership_root:string ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
+(** Read-only boundary for a Workspace producer that has no Keeper runtime
+    metadata. Relative paths are rooted at [ownership_root], and the opened
+    regular file plus every parent component is verified by [Fs_compat]. *)
+
+(** Rebuild the write arguments from a recorded Gate input, including the
+    mode the approval carried. [Error] when the recorded effect is one this
+    module cannot reproduce exactly, so a caller replays nothing instead of
+    downgrading the approved semantics. *)
+val replay_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
+type approved_write =
+  { target : string  (** the resolved path the approval names *)
+  ; mode : Keeper_tool_write_mode.t
+  ; carried : (string * Yojson.Safe.t) list
+        (** the payload fields the approval carried, verbatim *)
+  }
+(** A recorded write approval, decoded. {!replay_args_of_gate_input} is this
+    decode re-encoded for the write handler. *)
+
+val approved_write_of_gate_input : Yojson.Safe.t -> (approved_write, string) result
+(** Strict decode of a stored [filesystem_write] Gate input. An input with no
+    string [requested_target] or with an effect this module cannot reproduce
+    is an error, never a guess. *)
+
+val declared_root_write_gate_input :
+  endpoint:Exec_ssh_endpoint.t ->
+  requested_target:string ->
+  mode:Keeper_tool_write_mode.t ->
+  content_source:Keeper_write_content.t ->
+  content:string ->
+  patch:Keeper_tool_filesystem_remote_write.patch_request option ->
+  Yojson.Safe.t
+(** The [filesystem_write] Gate input for a write to an endpoint path under a
+    declared root (#38593). Its effect names the operation as a host write
+    does, so {!approved_write_of_gate_input} decodes it to the same target and
+    mode, and carries the endpoint's name and its whole configuration as
+    {!Exec_ssh_endpoint.to_toml} writes it. Replay rebuilds the input from the configuration current
+    then, so a changed endpoint yields a different input and the old approval
+    does not apply. *)
+
+val write_call_summary : requested_target:string -> string option
+(** The one line a write approval is about: the path it would write. This is
+    the write tool's declared call summary; the submitting handler states it
+    from the target it resolved, and the replay engine states it from
+    {!approved_write_of_gate_input}. [None] when the target is blank. *)
+
+
+type prepared_edit
+
+type edit_preparation_error =
+  | Edit_path_refused of Keeper_alerting_path.path_refusal
+  | Edit_resource_unavailable of string
+
+val edit_preparation_error_to_execution : edit_preparation_error -> Keeper_tool_execution.t
+
+val prepare_edit :
+  sw:Eio.Switch.t ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t ->
+  (prepared_edit option, edit_preparation_error) result
+(** Prepare translated Shared_mount Patch arguments against existing regular
+    source and parent directories. Unsupported or missing resources retain the
+    ordinary Serial path. This never writes, grants permission or proves replay. *)
+
+val prepared_edit_scopes : prepared_edit -> Agent_core.Tool_contract.Resource_scope.t list
+(** Producer-owned target writes and resolved source reads, with physical
+    directory identities and ancestry. This grants no permission or replay. *)
+val release_prepared_edit : prepared_edit -> unit
+(** Release an untransferred preparation; repeated release is harmless. *)
+
+type prepared_write
+
+val prepare_write :
+  sw:Eio.Switch.t -> config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> args:Yojson.Safe.t ->
+  (prepared_write option, string) result
+(** Prepare Shared_mount Overwrite/Append against existing physical parents.
+    New target files are supported; missing parents and endpoint trees retain
+    ordinary execution. No Gate decision, creation or write is performed. *)
+
+val prepared_write_scopes : prepared_write -> Agent_core.Tool_contract.Resource_scope.t list
+val release_prepared_write : prepared_write -> unit
+
+val handle_file_write_with_outcome :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery:
+    Keeper_publication_recovery_availability.turn_context ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?gate_grant:Keeper_gate.cycle_grant ->
+  ?prepared_edit:prepared_edit ->
+  ?prepared_write:prepared_write ->
+  args:Yojson.Safe.t ->
+  unit ->
+  Keeper_tool_execution.t
+(** Local writes acquire the project-root anchor and selected allowed root with
+    [Eio.Path.open_dir] before Gate evaluation, then keep those directory
+    capabilities through Gate evaluation and the selected effect. Atomic
+    replace/patch reads the live publication-recovery provider only after Gate
+    authorization and keeps the resulting lane access through recovery record,
+    temp-file, and rename work. Append and exclusive create are recovery-store
+    independent and therefore never read that provider. No local write is
+    performed through a validated native path string.
+
+    The project root's parent is the operator-owned capability-acquisition
+    boundary. An explicit allowed root outside the project likewise requires
+    an operator-owned parent; Keeper-writable components must begin below the
+    opened root capability.
+
+    Writes whose selected confined root is exactly this Keeper's playground
+    root proceed after the capability and root-identity checks without an
+    approval Gate. Writes through every other allowed root retain the Gate.
+    A prepared Edit revalidates its original owner, exact arguments and current
+    confinement, then consumes its pinned parents. The source file is opened
+    at execution, after preceding patches; Gate and recovery remain unchanged. *)
+
+val default_owned_target :
+  ownership_root:string -> path:string -> string * string
+(** The [(cwd_abs, target_path)] pair [handle_owned_read_file_with_outcome]
+    uses when the tool call omits [cwd]. Falls back to
+    [(ownership_root, path)] unless the root holds exactly one
+    sub-directory at depth-1 — in that case the helper descends.
+    The descent is monotone: a deeper level is taken only when the
+    level above it is also uniquely named. With a unique
+    [<ownership_root>/<a>/<b>/] layout, a bare repo-relative path
+    (form A, e.g. ["lib/keeper/..."]) resolves under
+    [<ownership_root>/<a>/<b>/], and a path that already names
+    ["a/b/..."] has the leading two segments stripped so the
+    subsequent [Filename.concat cwd_abs target_path] does not
+    overshoot. With a unique [<ownership_root>/<a>/] layout and a
+    path that names ["a/..."], the leading single segment is
+    stripped. Zero, several, or non-matching sub-directories fall
+    back to [(ownership_root, path)], so the helper never guesses.
+    Exposed for testing so [test_owned_read_cwd] can pin the
+    contract directly. *)
+
+module For_testing : sig
+  (** Observe the post-commit, post-snapshot boundary before result manifest I/O. *)
+  val with_before_result_manifest : (unit -> unit) -> (unit -> 'a) -> 'a
+
+  (** Inject a race after write capabilities are pinned and before authorization. *)
+  val with_before_write_authorization : (unit -> unit) -> (unit -> 'a) -> 'a
+
+  (** Run a fiber-local hook immediately before persisting an applied edit snapshot. *)
+  val with_before_edit_snapshot : (unit -> unit) -> (unit -> 'a) -> 'a
+
+  type created_directory_fault_stage =
+    | Before_create_directory
+    | Before_inspect_created_directory
+    | Before_apply_directory_permissions
+
+  type created_directory_fault
+
+  val created_directory_fault
+    :  stage:created_directory_fault_stage
+    -> exception_:exn
+    -> created_directory_fault
+
+  val with_created_directory_fault
+    :  created_directory_fault
+    -> (unit -> 'a)
+    -> 'a
+
+  (** Pure. The Read window cut from a body whose first byte is file line
+      [first_line], projected to the returned content and [next_offset]. *)
+  val slice_read_window
+    :  start_line:int
+    -> max_lines:int option
+    -> first_line:int
+    -> max_bytes:int
+    -> scan_complete:bool
+    -> string
+    -> (string * int option, [ `Offset_beyond_scan ]) result
+end
+
+val read_sandbox_raw_prefix :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  path:string -> ?cwd:string -> max_bytes:int -> unit ->
+  (string, Keeper_sandbox_read_backend.read_error) result
+(** Contained raw binary prefix, bounded before endpoint or Docker capture.
+    Resolves like Read and never falls back to a host read. The bytes are the
+    file's own: unlike Read's line window, nothing rewrites paths in them. A
+    path that does not exist or is not a regular file comes back as
+    [Missing_file] or [Not_a_file] so callers can refuse instead of reporting
+    a runtime fault; [Read_failed] stays a transport or capture fault. A
+    remote Keeper's path under its endpoint's declared roots
+    ({!Keeper_sandbox_remote_lane.declared_endpoint_path_of_args}) is the
+    endpoint's own path: it skips the host containment check and is read as
+    itself, the endpoint account being its boundary as for Execute. *)

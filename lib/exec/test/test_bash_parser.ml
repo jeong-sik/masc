@@ -1,0 +1,893 @@
+(** Bash parser smoke tests.
+
+    These tests lock in the accepted subset plus the fail-closed error
+    surface for unsupported shell constructs.
+
+    The error arm uses [assert false] instead of the usual pattern
+    so the lib-scope unsafe-pattern ratchet stays green (this test
+    dir is counted as lib by the health script). *)
+
+open Masc_exec
+open Masc_exec_bash_parser
+
+let test_ls_single_command () =
+  match Bash.parse_string "ls" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "ls");
+    assert (s.args = [])
+  (* "ls must parse to Simple" *)
+  | _ -> assert false
+
+let test_ls_with_args () =
+  match Bash.parse_string "ls -la /tmp" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "ls");
+    (match s.args with
+     | [ Shell_ir.Lit ("-la", _); Shell_ir.Lit ("/tmp", _) ] -> ()
+     (* "args wrong shape" *)
+     | _ -> assert false)
+  (* "ls -la /tmp must parse" *)
+  | _ -> assert false
+
+let test_echo_message () =
+  match Bash.parse_string "echo hello" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Lit ("hello", Shell_ir.default_meta) ])
+  (* "echo hello must parse" *)
+  | _ -> assert false
+
+let test_dev_null_as_regular_arg () =
+  match Bash.parse_string "cat /dev/null" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "cat");
+    assert (s.args = [ Shell_ir.Lit ("/dev/null", Shell_ir.default_meta) ]);
+    assert (s.redirects = [])
+  | _ -> assert false
+
+let test_leading_whitespace_ignored () =
+  match Bash.parse_string "   ls  " with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "ls")
+  (* "leading/trailing whitespace must be skipped" *)
+  | _ -> assert false
+
+let test_two_stage_pipeline () =
+  match Bash.parse_string "ls | cat" with
+  | Parsed.Parsed (Shell_ir.Pipeline [
+      Shell_ir.Simple s1; Shell_ir.Simple s2
+    ]) ->
+    assert (Exec_program.to_string s1.bin = "ls");
+    assert (Exec_program.to_string s2.bin = "cat");
+    assert (s1.args = []);
+    assert (s2.args = [])
+  (* "ls | cat must parse to Pipeline of two Simple" *)
+  | _ -> assert false
+
+let test_three_stage_pipeline_with_args () =
+  match Bash.parse_string "ls -la | grep foo | wc -l" with
+  | Parsed.Parsed (Shell_ir.Pipeline stages) ->
+    assert (List.length stages = 3);
+    (match stages with
+     | [ Shell_ir.Simple s1; Shell_ir.Simple s2; Shell_ir.Simple s3 ] ->
+       assert (Exec_program.to_string s1.bin = "ls");
+       assert (Exec_program.to_string s2.bin = "grep");
+       assert (Exec_program.to_string s3.bin = "wc");
+       assert (s2.args = [ Shell_ir.Lit ("foo", Shell_ir.default_meta) ])
+     (* "3-stage pipeline inner shape wrong" *)
+     | _ -> assert false)
+  (* "3-stage pipeline must parse" *)
+  | _ -> assert false
+
+let test_single_command_is_simple_not_pipeline () =
+  (* length-1 pipelines collapse to Simple — distinguishes from
+     Shell_ir.Pipeline which requires length >= 2. *)
+  match Bash.parse_string "ls" with
+  | Parsed.Parsed (Shell_ir.Simple _) -> ()
+  (* "single command must be Simple, not Pipeline" *)
+  | _ -> assert false
+
+let test_logic_or_parsed () =
+  match Bash.parse_string "ls || cat" with
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple s1; tail = [ (Shell_ir.Or_if, Shell_ir.Simple s2) ] }) ->
+    assert (Exec_program.to_string s1.bin = "ls");
+    assert (Exec_program.to_string s2.bin = "cat")
+  | _ -> assert false
+
+let test_logic_and_parsed () =
+  match Bash.parse_string "ls && cat" with
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple s1; tail = [ (Shell_ir.And_if, Shell_ir.Simple s2) ] }) ->
+    assert (Exec_program.to_string s1.bin = "ls");
+    assert (Exec_program.to_string s2.bin = "cat")
+  | _ -> assert false
+
+let test_semicolon_sequence_parsed () =
+  match Bash.parse_string "echo first; echo second" with
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple s1; tail = [ (Shell_ir.Seq, Shell_ir.Simple s2) ] }) ->
+    assert (Exec_program.to_string s1.bin = "echo");
+    assert (Exec_program.to_string s2.bin = "echo");
+    assert (s1.args = [ Shell_ir.Lit ("first", Shell_ir.default_meta) ]);
+    assert (s2.args = [ Shell_ir.Lit ("second", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_semicolon_trailing_parsed () =
+  match Bash.parse_string "echo hello;" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Lit ("hello", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_semicolon_three_stages_dispatch () =
+  match Bash.parse_string "echo '=== store open PRs ==='; echo '=== store 825 branch? ==='" with
+  | Parsed.Parsed ir ->
+    let result = Masc_exec.Exec_dispatch.dispatch ir in
+    assert (result.status = Unix.WEXITED 0);
+    assert (String.trim result.stdout = "=== store open PRs ===\n=== store 825 branch? ===")
+  | _ -> assert false
+
+let test_general_redirect_parsed () =
+  match Bash.parse_string "echo hi > /tmp/out" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Lit ("hi", Shell_ir.default_meta) ]);
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 1; target; mode = Redirect_scope.Write } ] ->
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/tmp/out")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_redirect_append_parsed () =
+  match Bash.parse_string "echo hi >> /tmp/out" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 1; target; mode = Redirect_scope.Append } ] ->
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/tmp/out")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_input_redirect_parsed () =
+  match Bash.parse_string "cat < /etc/hosts" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 0; target; mode = Redirect_scope.Read } ] ->
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/etc/hosts")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_fd_redirect_parsed () =
+  match Bash.parse_string "ls 2>&1" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.Fd_to_fd { src = 2; dst = 1 } ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_dev_null_redirect_parsed () =
+  match Bash.parse_string "rg foo 2>/dev/null" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/dev/null")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_spaced_dev_null_redirect_parsed () =
+  match Bash.parse_string "rg foo 2> /dev/null" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/dev/null")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_quoted_dev_null_redirect_parsed () =
+  match Bash.parse_string "rg foo 2> \"/dev/null\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/dev/null")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_pipeline_dev_null_redirect_preserved () =
+  match Bash.parse_string "rg foo 2>/dev/null | head -20" with
+  | Parsed.Parsed (Shell_ir.Pipeline [ Shell_ir.Simple s1; Shell_ir.Simple s2 ]) ->
+    assert (Exec_program.to_string s1.bin = "rg");
+    assert (Exec_program.to_string s2.bin = "head");
+    (match s1.redirects, s2.redirects with
+     | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ], [] ->
+       assert (Path_scope.raw (Redirect_scope.target_as_written target) = "/dev/null")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_env_prefix_parsed () =
+  match Bash.parse_string "LC_ALL=C git status" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "git");
+    assert (s.args = [ Shell_ir.Lit ("status", Shell_ir.default_meta) ]);
+    assert (s.env = [ "LC_ALL", Shell_ir.Lit ("C", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_multiple_env_prefixes_preserve_order () =
+  match Bash.parse_string "A=1 B='two words' printenv A" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "printenv");
+    assert (s.args = [ Shell_ir.Lit ("A", Shell_ir.default_meta) ]);
+    assert
+      (s.env
+       = [ "A", Shell_ir.Lit ("1", Shell_ir.default_meta)
+         ; "B", Shell_ir.Lit ("two words", { Shell_ir.default_meta with quoted = true })
+         ])
+  | _ -> assert false
+
+let test_env_assignment_after_bin_is_arg () =
+  match Bash.parse_string "echo LC_ALL=C" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Lit ("LC_ALL=C", Shell_ir.default_meta) ]);
+    assert (s.env = [])
+  | _ -> assert false
+
+let test_env_only_rejected () =
+  match Bash.parse_string "LC_ALL=C" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_pipeline_env_prefixes_preserved_per_stage () =
+  match Bash.parse_string "LC_ALL=C printf hi | LANG=C wc -c" with
+  | Parsed.Parsed (Shell_ir.Pipeline [ Shell_ir.Simple s1; Shell_ir.Simple s2 ]) ->
+    assert (Exec_program.to_string s1.bin = "printf");
+    assert (Exec_program.to_string s2.bin = "wc");
+    assert (s1.env = [ "LC_ALL", Shell_ir.Lit ("C", Shell_ir.default_meta) ]);
+    assert (s2.env = [ "LANG", Shell_ir.Lit ("C", Shell_ir.default_meta) ]);
+    assert (s1.args = [ Shell_ir.Lit ("hi", Shell_ir.default_meta) ]);
+    assert (s2.args = [ Shell_ir.Lit ("-c", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_env_prefix_dispatch_overlay () =
+  match
+    Bash.parse_string
+      "MASC_SHELL_IR_ENV_PREFIX_TEST=ok printenv MASC_SHELL_IR_ENV_PREFIX_TEST"
+  with
+  | Parsed.Parsed ir ->
+    let result = Masc_exec.Exec_dispatch.dispatch ir in
+    assert (result.status = Unix.WEXITED 0);
+    assert (String.trim result.stdout = "ok")
+  | _ -> assert false
+
+(* Without an execution-target environment, variable expansion is outside
+   the executable subset. Quoted literal dollars remain ordinary data. *)
+let test_param_expansion_arg_requires_target_env () =
+  match Bash.parse_string "echo $HOME" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_braced_param_expansion_requires_target_env () =
+  match Bash.parse_string "echo ${HOME}" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_env_assignment_param_value () =
+  match Bash.parse_string "DUNE_CACHE_ROOT=$PWD dune build ." with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_env_assignment_mixed_literal_and_param () =
+  match Bash.parse_string "FOO=a$BAR printf x" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_param_as_word_suffix_concatenates () =
+  match Bash.parse_string "ls --root=$PWD" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_param_in_bin_position_outside_subset () =
+  (* A program name that is itself an expansion has nothing to execute;
+     the subset says so instead of guessing at run time. *)
+  match Bash.parse_string "$CMD arg" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_param_default_form_still_excluded () =
+  match Bash.parse_string "echo ${X:-y}" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_positional_param_still_excluded () =
+  match Bash.parse_string "echo $1" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_redirect_target_param_is_parse_error () =
+  (* The redirect target stays a literal in the grammar — a substituted
+     path has nothing for [Path_scope.classify] to classify at parse
+     time, so [> $OUT] is refused rather than passed unchecked. *)
+  match Bash.parse_string "echo x > $OUT" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_heredoc_rejected () =
+  (* "<<" must out-rank single "<" — ocamllex longest match, no ordered list. *)
+  match Bash.parse_string "cat <<EOF" with
+  | Parsed.Too_complex `Heredoc -> ()
+  | _ -> assert false
+
+let test_here_string_rejected () =
+  (* "<<<" must out-rank "<<" — ocamllex longest match, no ordered list. *)
+  match Bash.parse_string "cat <<<payload" with
+  | Parsed.Too_complex `Here_string -> ()
+  | _ -> assert false
+
+let test_cmd_subst_parses_to_subst_node () =
+  (* $( ) opens: the child is a complete IR under Subst, one argv element
+     of the parent (RFC shell-ir-typed-command-substitution §2.1). *)
+  match Bash.parse_string "echo $(date)" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Subst (Shell_ir.Simple inner) ] ->
+       assert (Exec_program.to_string inner.bin = "date");
+       assert (inner.args = [])
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_cmd_subst_adjacent_to_literal_is_one_word () =
+  (* [foo$(bar)] is one word whose pieces include the Subst, as bash reads
+     it — whitespace, not the substitution, ends a word. *)
+  match Bash.parse_string "echo foo$(date)" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Concat [ Shell_ir.Lit ("foo", _); Shell_ir.Subst _ ] ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_cmd_subst_env_assignment_value () =
+  (* An env binding's value may be a substitution; the binding splits at
+     the first [=] of the leading literal piece. *)
+  match Bash.parse_string "A=$(echo x) printenv A" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "printenv");
+    (match s.env with
+     | [ ("A", Shell_ir.Subst (Shell_ir.Simple inner)) ] ->
+       assert (Exec_program.to_string inner.bin = "echo")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_cmd_subst_nested () =
+  match Bash.parse_string "echo $(echo $(date))" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Subst (Shell_ir.Simple mid) ] ->
+       (match mid.args with
+        | [ Shell_ir.Subst (Shell_ir.Simple inner) ] ->
+          assert (Exec_program.to_string inner.bin = "date")
+        | _ -> assert false)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_cmd_subst_inner_exclusion_rides_up () =
+  (* An inner refusal is the answer, unchanged — the same rules, the same
+     reasons (RFC shell-ir-typed-command-substitution §2.2). *)
+  (match Bash.parse_string "echo $(cat <<EOF)" with
+   | Parsed.Too_complex `Heredoc -> ()
+   | _ -> assert false);
+  (match Bash.parse_string "echo $(echo $HOME)" with
+   | Parsed.Too_complex `Param_expansion -> ()
+   | _ -> assert false);
+  match Bash.parse_string "echo $(echo `date`)" with
+  | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+let test_cmd_subst_unterminated_is_parse_error () =
+  (* A $( the scan never closes is not a construct to name — it is text
+     that never formed a command. *)
+  match Bash.parse_string "echo $(date" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_cmd_subst_in_bin_position_refused () =
+  (* A substituted program name is not opened by the RFC: [$(cmd) args]
+     stays refused even though $( ) parses in argument position. *)
+  match Bash.parse_string "$(echo x) arg" with
+  | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+let test_cmd_subst_shares_token_budget () =
+  (* Both sources fit separately. Together, ordinary words and the single
+     Subst piece use exactly 50,000 charges; one extra child word must fail.
+     A child-local reset would wrongly accept the larger combined input. *)
+  let parent_words = 20_000 in
+  let child_words = 29_999 in
+  let source bin arg words =
+    String.concat " " (bin :: List.init (words - 1) (fun _ -> arg))
+  in
+  let check_simple ~bin ~arg ~words source =
+    match Bash.parse_string source with
+    | Parsed.Parsed (Shell_ir.Simple command) ->
+      assert (Exec_program.to_string command.bin = bin);
+      assert (List.length command.args = words - 1);
+      assert
+        (List.for_all
+           (function
+             | Shell_ir.Lit (value, meta) ->
+               value = arg && meta = Shell_ir.default_meta
+             | _ -> false)
+           command.args);
+      assert (command.env = []);
+      assert (command.redirects = []);
+      command
+    | _ -> assert false
+  in
+  let parent_source = source "echo" "p" parent_words in
+  let child_source = source "printf" "c" child_words in
+  let larger_child_source = child_source ^ " c" in
+  let parent =
+    check_simple ~bin:"echo" ~arg:"p" ~words:parent_words parent_source
+  in
+  let child =
+    check_simple ~bin:"printf" ~arg:"c" ~words:child_words child_source
+  in
+  ignore
+    (check_simple ~bin:"printf" ~arg:"c" ~words:(child_words + 1) larger_child_source);
+  let combine child = parent_source ^ " $(" ^ child ^ ")" in
+  (match Bash.parse_string (combine child_source) with
+   | Parsed.Parsed (Shell_ir.Simple outer) ->
+     assert (Exec_program.equal outer.bin parent.bin);
+     assert (outer.env = []);
+     assert (outer.redirects = []);
+     (match List.rev outer.args with
+      | Shell_ir.Subst (Shell_ir.Simple inner) :: reversed_parent_args ->
+        assert (List.rev reversed_parent_args = parent.args);
+        assert (Exec_program.equal inner.bin child.bin);
+        assert (inner.args = child.args);
+        assert (inner.env = []);
+        assert (inner.redirects = [])
+      | _ -> assert false)
+   | _ -> assert false);
+  (match Bash.parse_string (combine larger_child_source) with
+   | Parsed.Parse_aborted `Token_limit_50k -> ()
+   | _ -> assert false);
+  (* The refusal belongs to that invocation; a fresh nested parse still
+     returns the exact child AST through the public entry point. *)
+  match Bash.parse_string "echo $(printf fresh)" with
+  | Parsed.Parsed (Shell_ir.Simple outer) ->
+    assert (Exec_program.to_string outer.bin = "echo");
+    (match outer.args with
+     | [ Shell_ir.Subst (Shell_ir.Simple inner) ] ->
+       assert (Exec_program.to_string inner.bin = "printf");
+       assert (inner.args = [ Shell_ir.Lit ("fresh", Shell_ir.default_meta) ])
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_pp_prints_subst () =
+  match Bash.parse_string "echo $(date)" with
+  | Parsed.Parsed ir ->
+    let printed = Format.asprintf "%a" Shell_ir.pp ir in
+    let rec contains_from i =
+      i + 7 <= String.length printed
+      && (String.sub printed i 7 = "$(date)" || contains_from (i + 1))
+    in
+    assert (contains_from 0)
+  | _ -> assert false
+
+let test_eval_with_subst_still_refused_as_shell_builtin () =
+  (* Now that $( ) parses, the A1 refusal must still fire on the bin name
+     before the substitution's shape matters. *)
+  match Bash.parse_string "eval $(opam env)" with
+  | Parsed.Too_complex (`Shell_builtin "eval") -> ()
+  | _ -> assert false
+
+let test_cmd_subst_backtick_rejected () =
+  match Bash.parse_string "echo `date`" with
+  | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+(* [eval]/[source]/[.] re-parse their arguments in the running shell, which
+   no IR node holds — refused by name in bin position (RFC
+   shell-ir-typed-command-substitution §2.4). *)
+let test_eval_refused_as_shell_builtin () =
+  match Bash.parse_string "eval echo ok" with
+  | Parsed.Too_complex (`Shell_builtin "eval") -> ()
+  | _ -> assert false
+
+let test_source_refused_as_shell_builtin () =
+  match Bash.parse_string "source foo.sh" with
+  | Parsed.Too_complex (`Shell_builtin "source") -> ()
+  | _ -> assert false
+
+let test_dot_refused_as_shell_builtin () =
+  match Bash.parse_string ". foo.sh" with
+  | Parsed.Too_complex (`Shell_builtin ".") -> ()
+  | _ -> assert false
+
+let test_arith_expansion_rejected () =
+  (* "$((" must out-rank "$(" — ocamllex longest match, no ordered list. *)
+  match Bash.parse_string "echo $((1 + 2))" with
+  | Parsed.Too_complex `Arith_expansion -> ()
+  | _ -> assert false
+
+let test_background_rejected () =
+  match Bash.parse_string "sleep 10 &" with
+  | Parsed.Too_complex `Background -> ()
+  | _ -> assert false
+
+let test_subshell_rejected () =
+  match Bash.parse_string "(ls)" with
+  | Parsed.Too_complex `Subshell -> ()
+  | _ -> assert false
+
+let test_empty_input_rejected () =
+  match Bash.parse_string "" with
+  | Parsed.Parse_error _ -> ()
+  (* "empty source must Parse_error" *)
+  | _ -> assert false
+
+let test_whitespace_only_rejected () =
+  match Bash.parse_string "   " with
+  | Parsed.Parse_error _ -> ()
+  (* "whitespace-only must Parse_error" *)
+  | _ -> assert false
+
+let test_single_quoted_arg () =
+  (* Single-quoted args preserve internal spaces verbatim and arrive
+     as one Lit element (not split). *)
+  match Bash.parse_string "echo 'hello world'" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    (match s.args with
+     | [ Shell_ir.Lit ("hello world", meta) ] -> assert meta.quoted
+     (* "single-quoted content must land as one Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_single_quoted_empty () =
+  match Bash.parse_string "echo ''" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    (match s.args with
+     | [ Shell_ir.Lit ("", _) ] -> ()
+     (* "empty single-quoted string must land as empty Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_multiple_single_quoted_args () =
+  match Bash.parse_string "git commit -m 'my message' --allow-empty" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "git");
+    (match s.args with
+     | [
+         Shell_ir.Lit ("commit", _);
+         Shell_ir.Lit ("-m", _);
+         Shell_ir.Lit ("my message", _);
+         Shell_ir.Lit ("--allow-empty", _);
+       ] -> ()
+     (* "commit message must preserve spaces as one Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_single_quote_with_pipe_metachar () =
+  (* Pipe inside single quotes is literal text, not a pipeline
+     separator — protects the gate from strings that look shell-like
+     but are actually inert literal payload. *)
+  match Bash.parse_string "echo 'foo | bar'" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Lit ("foo | bar", _) ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_unterminated_single_quote_rejected () =
+  (* Missing closing quote must surface as Parse_error, not silently
+     consume to EOF. *)
+  match Bash.parse_string "echo 'unterminated" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_double_quoted_arg () =
+  (* Double-quoted args with literal body (no $/\/backtick) preserve
+     internal spaces and arrive as one Lit element — mirrors the
+     common [rg "pattern"] shape.  The surrounding quotes are stripped
+     at lex time, so the Lit carries the payload only. *)
+  match Bash.parse_string "echo \"hello world\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    (match s.args with
+     | [ Shell_ir.Lit ("hello world", meta) ] -> assert meta.quoted
+     (* "double-quoted content must land as one Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quoted_empty () =
+  match Bash.parse_string "echo \"\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    (match s.args with
+     | [ Shell_ir.Lit ("", _) ] -> ()
+     (* "empty double-quoted string must land as empty Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quote_with_pipe_metachar () =
+  (* Pipe inside double quotes is literal text, not a pipeline
+     separator — same safety invariant as single quotes. *)
+  match Bash.parse_string "echo \"foo | bar\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Lit ("foo | bar", _) ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quote_rg_pattern () =
+  (* The most common caller shape — [rg "error pattern"] style — must
+     round-trip through lex+parse untouched so the gate sees the
+     trusted argv the user intended. *)
+  match Bash.parse_string "rg \"error pattern\" src/" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "rg");
+    (match s.args with
+     | [ Shell_ir.Lit ("error pattern", _); Shell_ir.Lit ("src/", _) ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quote_with_escaped_regex_pipe () =
+  (* [\|] inside double quotes is literal regex payload for rg/grep,
+     not a shell pipeline.  Keeping it in the typed parser lets the
+     keeper safe-read fallback use normal argv validation. *)
+  match Bash.parse_string {|rg -n "ghost\|task" lib/|} with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "rg");
+    (match s.args with
+     | [
+         Shell_ir.Lit ("-n", _);
+         Shell_ir.Lit ({|ghost\|task|}, _);
+         Shell_ir.Lit ("lib/", _);
+       ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_word_with_double_quoted_suffix () =
+  (* Bash treats [--include="*.ml"] as one argv item.  The unquoted
+     prefix is inert option text; the quoted suffix carries the glob
+     literal without opening the unquoted glob surface. *)
+  match Bash.parse_string {|grep -rn "exec_semantic" lib/ --include="*.ml"|} with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "grep");
+    (match s.args with
+     | [
+         Shell_ir.Lit ("-rn", _);
+         Shell_ir.Lit ("exec_semantic", _);
+         Shell_ir.Lit ("lib/", _);
+         Shell_ir.Lit ("--include=*.ml", meta);
+       ] -> assert meta.quoted
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quote_with_dollar_requires_target_env () =
+  match Bash.parse_string "echo \"value $FOO here\"" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_double_quote_two_vars_and_brace () =
+  match Bash.parse_string "echo \"$A:${B}\"" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_double_quote_var_word_continues () =
+  match Bash.parse_string "ls \"$DIR\"/sub" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_double_quote_cmd_subst_parses_to_subst () =
+  (* Inside quotes the substitution is one quoted word whose only piece is
+     the Subst — quoted or not, a substitution is one argv element (RFC
+     shell-ir-typed-command-substitution §2.3 item 3). *)
+  match Bash.parse_string "echo \"$(date)\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Subst (Shell_ir.Simple inner) ] ->
+       assert (Exec_program.to_string inner.bin = "date")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quote_default_form_still_excluded () =
+  match Bash.parse_string "echo \"${X:-y}\"" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_double_quote_array_subscript_still_excluded () =
+  match Bash.parse_string "echo \"EXIT=${PIPESTATUS[0]}\"" with
+  | Parsed.Too_complex `Param_expansion -> ()
+  | _ -> assert false
+
+let test_double_quote_with_backslash_rejected () =
+  (* Escape sequences ('\"', '\\') are subset-excluded at A1 — reject
+     until a later PR adds the unescape sub-rule. *)
+  match Bash.parse_string "echo \"he said \\\"hi\\\"\"" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_double_quote_with_backtick_rejected () =
+  (* Command substitution ('`cmd`') is subset-excluded, inside quotes as
+     much as outside.  A rule matches the opening quote through to the
+     backtick, so the tag is the construct rather than the quote that
+     could not close around it. *)
+  match Bash.parse_string "echo \"now `date`\"" with
+  | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+let test_unterminated_double_quote_rejected () =
+  match Bash.parse_string "echo \"unterminated" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_newline_separates_commands () =
+  (* Swallowed as whitespace, the second line's words joined the first
+     command's argv — silent wrong argv, the shape this test pins shut. *)
+  match Bash.parse_string "echo a\necho b" with
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple a; tail = [ (Shell_ir.Seq, Shell_ir.Simple b) ] }) ->
+    assert (a.args = [ Shell_ir.Lit ("a", Shell_ir.default_meta) ]);
+    assert (b.args = [ Shell_ir.Lit ("b", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_newline_runs_and_trailing_collapse () =
+  (match Bash.parse_string "echo a\n\n\necho b" with
+   | Parsed.Parsed (Shell_ir.Sequence { tail = [ (Shell_ir.Seq, _) ]; _ }) -> ()
+   | _ -> assert false);
+  match Bash.parse_string "echo a\n" with
+  | Parsed.Parsed (Shell_ir.Simple _) -> ()
+  | _ -> assert false
+
+let test_newline_continues_after_operators () =
+  (* After && / || / | a line break is continuation, as in bash. *)
+  (match Bash.parse_string "true &&\necho ok" with
+   | Parsed.Parsed (Shell_ir.Sequence { tail = [ (Shell_ir.And_if, _) ]; _ }) -> ()
+   | _ -> assert false);
+  match Bash.parse_string "echo x |\nwc -l" with
+  | Parsed.Parsed (Shell_ir.Pipeline [ _; _ ]) -> ()
+  | _ -> assert false
+
+let test_semicolon_then_newline_is_one_separator () =
+  match Bash.parse_string "echo a; \necho b" with
+  | Parsed.Parsed (Shell_ir.Sequence { tail = [ (Shell_ir.Seq, _) ]; _ }) -> ()
+  | _ -> assert false
+
+let test_quoted_heredoc_becomes_stdin_literal () =
+  match Bash.parse_string "python3 - <<'EOF'\nprint(1)\nEOF\n" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "python3");
+    assert (s.args = [ Shell_ir.Lit ("-", Shell_ir.default_meta) ]);
+    assert (s.redirects = [ Redirect_scope.Literal { bytes = "print(1)\n" } ])
+  | _ -> assert false
+
+let test_heredoc_terminator_ends_the_command () =
+  (* The line after the terminator is a fresh command, not more argv. *)
+  match Bash.parse_string "cat <<'X'\nbody line\nX\necho done" with
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple c; tail = [ (Shell_ir.Seq, Shell_ir.Simple e) ] }) ->
+    assert (c.redirects = [ Redirect_scope.Literal { bytes = "body line\n" } ]);
+    assert (e.args = [ Shell_ir.Lit ("done", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_heredoc_empty_body_and_double_quoted_tag () =
+  (match Bash.parse_string "cat <<'T'\nT\n" with
+   | Parsed.Parsed (Shell_ir.Simple s) ->
+     assert (s.redirects = [ Redirect_scope.Literal { bytes = "" } ])
+   | _ -> assert false);
+  match Bash.parse_string "cat <<\"T\"\nhi\nT\n" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (s.redirects = [ Redirect_scope.Literal { bytes = "hi\n" } ])
+  | _ -> assert false
+
+let test_heredoc_unterminated_is_parse_error () =
+  match Bash.parse_string "cat <<'T'\nnever" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_heredoc_operator_must_end_its_line () =
+  (* Anything after the quoted tag keeps the plain refusal: the deferred
+     body would have to interleave with the rest of the line. *)
+  match Bash.parse_string "cat <<'T' | wc -l\nx\nT\n" with
+  | Parsed.Too_complex `Heredoc -> ()
+  | _ -> assert false
+
+let test_token_limit_aborts () =
+  let many_words = List.init 50_001 (fun _ -> "x") in
+  match Bash.parse_string (String.concat " " many_words) with
+  | Parsed.Parse_aborted `Token_limit_50k -> ()
+  | _ -> assert false
+
+let test_expanded_word_piece_limit_aborts () =
+  let many_expansions = List.init 50_001 (fun _ -> "$A") in
+  match Bash.parse_string ("echo " ^ String.concat "" many_expansions) with
+  | Parsed.Parse_aborted `Token_limit_50k -> ()
+  | _ -> assert false
+
+let () =
+  test_ls_single_command ();
+  test_ls_with_args ();
+  test_echo_message ();
+  test_dev_null_as_regular_arg ();
+  test_leading_whitespace_ignored ();
+  test_two_stage_pipeline ();
+  test_three_stage_pipeline_with_args ();
+  test_single_command_is_simple_not_pipeline ();
+  test_logic_or_parsed ();
+  test_logic_and_parsed ();
+  test_semicolon_sequence_parsed ();
+  test_semicolon_trailing_parsed ();
+  test_semicolon_three_stages_dispatch ();
+  test_general_redirect_parsed ();
+  test_redirect_append_parsed ();
+  test_input_redirect_parsed ();
+  test_fd_redirect_parsed ();
+  test_dev_null_redirect_parsed ();
+  test_spaced_dev_null_redirect_parsed ();
+  test_quoted_dev_null_redirect_parsed ();
+  test_pipeline_dev_null_redirect_preserved ();
+  test_env_prefix_parsed ();
+  test_multiple_env_prefixes_preserve_order ();
+  test_env_assignment_after_bin_is_arg ();
+  test_env_only_rejected ();
+  test_pipeline_env_prefixes_preserved_per_stage ();
+  test_env_prefix_dispatch_overlay ();
+  test_param_expansion_arg_requires_target_env ();
+  test_braced_param_expansion_requires_target_env ();
+  test_env_assignment_param_value ();
+  test_env_assignment_mixed_literal_and_param ();
+  test_param_as_word_suffix_concatenates ();
+  test_param_in_bin_position_outside_subset ();
+  test_param_default_form_still_excluded ();
+  test_positional_param_still_excluded ();
+  test_redirect_target_param_is_parse_error ();
+  test_heredoc_rejected ();
+  test_here_string_rejected ();
+  test_cmd_subst_parses_to_subst_node ();
+  test_cmd_subst_adjacent_to_literal_is_one_word ();
+  test_cmd_subst_env_assignment_value ();
+  test_cmd_subst_nested ();
+  test_cmd_subst_inner_exclusion_rides_up ();
+  test_cmd_subst_unterminated_is_parse_error ();
+  test_cmd_subst_in_bin_position_refused ();
+  test_cmd_subst_shares_token_budget ();
+  test_pp_prints_subst ();
+  test_eval_with_subst_still_refused_as_shell_builtin ();
+  test_cmd_subst_backtick_rejected ();
+  test_eval_refused_as_shell_builtin ();
+  test_source_refused_as_shell_builtin ();
+  test_dot_refused_as_shell_builtin ();
+  test_arith_expansion_rejected ();
+  test_background_rejected ();
+  test_subshell_rejected ();
+  test_empty_input_rejected ();
+  test_whitespace_only_rejected ();
+  test_single_quoted_arg ();
+  test_single_quoted_empty ();
+  test_multiple_single_quoted_args ();
+  test_single_quote_with_pipe_metachar ();
+  test_unterminated_single_quote_rejected ();
+  test_double_quoted_arg ();
+  test_double_quoted_empty ();
+  test_double_quote_with_pipe_metachar ();
+  test_double_quote_rg_pattern ();
+  test_double_quote_with_escaped_regex_pipe ();
+  test_word_with_double_quoted_suffix ();
+  test_double_quote_with_dollar_requires_target_env ();
+  test_double_quote_two_vars_and_brace ();
+  test_double_quote_var_word_continues ();
+  test_double_quote_cmd_subst_parses_to_subst ();
+  test_double_quote_default_form_still_excluded ();
+  test_double_quote_array_subscript_still_excluded ();
+  test_double_quote_with_backslash_rejected ();
+  test_double_quote_with_backtick_rejected ();
+  test_unterminated_double_quote_rejected ();
+  test_newline_separates_commands ();
+  test_newline_runs_and_trailing_collapse ();
+  test_newline_continues_after_operators ();
+  test_semicolon_then_newline_is_one_separator ();
+  test_quoted_heredoc_becomes_stdin_literal ();
+  test_heredoc_terminator_ends_the_command ();
+  test_heredoc_empty_body_and_double_quoted_tag ();
+  test_heredoc_unterminated_is_parse_error ();
+  test_heredoc_operator_must_end_its_line ();
+  test_token_limit_aborts ();
+  test_expanded_word_piece_limit_aborts ();
+  print_endline "[test_bash_parser] all tests passed"

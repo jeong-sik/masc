@@ -1,0 +1,29 @@
+{
+  "source_commit": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "source_file_sha256": "f6789150d9568945bde3922ce51ef140293063535b728a7bd8d4d9eb65579c2a",
+  "command": [
+    "ocaml",
+    "-noinit",
+    "-noprompt",
+    "-I",
+    "/Users/dancer/.opam/5.5.1/lib/yojson",
+    "yojson.cma",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/keeper-scale-canonical-subset-v1/probe.ml",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/keeper-scale-canonical-subset-v1/inputs.json"
+  ],
+  "ocaml_version": "5.5.1",
+  "returncode": 0,
+  "rows": 8,
+  "exact_bytes_match": true,
+  "values_sha256": [
+    "0eb8c9fb494b279f6ba1aade6374bcf9e62ca33fa7652b0865995c42ac79040d",
+    "6dc5d17abf6d121451bc78d016a6523d5ff4573341f2ac003da2624bbb53ccb2",
+    "d0f8d30e65949116c574d5acb6cec1e6ab61dd61f5a6e80705a8d40daa5493b4",
+    "d0f8d30e65949116c574d5acb6cec1e6ab61dd61f5a6e80705a8d40daa5493b4",
+    "d30b66e5324f5e56adbb29991b2fb9293cafe3972e20b373b2777636f0425064",
+    "59d8391d419228881aea4892abf49ab5a8e89ea09befe3fdb69ec09cd16543e9",
+    "f8fdfa19c15d2cbc751b9471b874927f42309f867819fcf9ac7b3d630478e82e",
+    "f3a7d7439fd66d4293a62ca826af6f26c4ceb3a7a7144491fcf62c545074c294"
+  ],
+  "scope": "Interpreted exact production canonicalizer and installed Yojson for eight generated ASCII/null/list/object fixture values including merged input; no compilation or general JSON encoding equivalence claim."
+}

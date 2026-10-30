@@ -1,0 +1,159 @@
+# Prompt Map
+
+`config/prompts` 의 파일이 각각 누구에게 읽히고 wire 의 어느 자리에 붙는지. 2026-09-04 기준, main 에서 코드를 따라가 확인했다.
+
+## 원칙
+
+모델에게 나가는 문장은 코드에 박지 않는다. 제목·행 틀·상태 라벨까지 전부 `config/prompts` 에 있고, 운영자가 재정의할 수 있다.
+
+## 프리셋의 기본 프롬프트 기준
+
+프리셋은 override, Keeper 지시문, 런타임 배정을 저장한다. 저장할 때 등록된 기본
+프롬프트 본문과 fragment 슬롯의 SHA-256도 `manifest.json`의 `default_revisions`에
+기록한다. override가 없는 프롬프트도 포함하며 Markdown frontmatter는 해시에서 제외한다.
+기본 Markdown 본문 자체는 프리셋으로 저장하거나 복원하지 않는다.
+
+상세 조회와 복원 결과의 `default_prompts`는 저장 당시와 현재 기본값의 일치 여부와
+변경·추가·누락된 키를 보여 준다. TUI Config의 프리셋 상세와 복원 결과에도 표시한다.
+기준 정보가 없으면 `unknown`으로 표시한다. 이 비교는 관측 정보이며 복원을 막지 않는다.
+
+## 자리는 셋뿐이다
+
+모델 호출 하나는 **system prompt · user message · tool result** 로 나뉜다. `config/prompts` 의 파일 23개(22 `.md` + 1 `.txt`)는 이 셋 중 어디에 붙느냐(또는 비모델 프로토콜 안내인지)로 갈린다.
+
+## Keeper 한 턴
+
+`keeper.md` 하나가 세 자리에 모두 관여한다. 읽는 사람이 하나라서 한 파일이다.
+
+### system 자리 — `keeper_prompt.ml` 의 조립 순서
+
+```
+<system> keeper.md 본문(첫 마커 앞) </system>   ← 이 세계가 돌아가는 방식. keeper 전원이 글자 그대로 공유
+keeper.md ### worldview                         ← <world> 이 세계의 가치관. 운영자가 덮어쓴다
+keeper.md ### constitution                      ← <norms> keeper 가 쓴 규범 (RFC-0442). 조항이 없으면 빠진다
+keeper.md ### identity                          ← "당신은 <이름>이다"
+keeper.md ### workspace                         ← 샌드박스 루트
+<role> keeper TOML 의 instructions </role>
+```
+
+공유 블록이 맨 앞인 것은 의도적이다. keeper 여럿이 같은 접두를 쓰면 provider 의 KV 캐시가 재사용된다. keeper 별로 달라지는 것은 그 뒤에 온다.
+
+본문은 가치관을 담지 않는다. 세계 프리셋이 모두 이 본문 위에 올라가므로, 본문이 무엇을 귀하게 여기라고 말하면 모든 세계에 그 가치가 섞인다. 무엇을 잘한 일로 칠지는 운영자가 `keeper.worldview` 로 정하거나, 정하지 않으면 각 keeper 의 역할(`instructions`)이 정한다. `worldview` 의 배포 기본값이 바로 그 말이다.
+
+### user 자리 — 턴마다 새로 조립되는 세계 상태
+
+```
+keeper.md ### world.frame.frame
+그 아래 층이 Keeper_context_layers.ordered 순서로:
+  active_goals · current_task · approval_authority · connected_surfaces
+  namespace_state · repository_freshness · autonomous_trigger
+  scheduled_automation · completion_authority · task_cancellations
+  pending_mentions · scope_messages · own_board_posts · board_activity
+  own_recent_actions · fleet_messages
+```
+
+각 층이 `keeper.md` 의 슬롯을 골라 쓴다. 층에 내용이 없으면 통째로 빠지고, 예산을 넘으면 뒤에서부터 잘린다.
+
+`world.frame.frame` 이 맨 앞에 있는 이유가 있다. `### Your Recent Board Posts` 만 보면 keeper 가 자기가 조회한 결과로 읽고 "보드를 확인했다"고 보고한다. 런타임이 모아준 것이라고 먼저 말해야 그 구분이 생긴다.
+
+Muse·Claude Code·Codex 처럼 공식 클라이언트 세션을 이어 쓰는 런타임은 보낸 프롬프트를 세션이 전부 기억한다. 그래서 이어 쓸 때는 지난번과 글자까지 같은 층을 다시 보내지 않고, `world.frame.unchanged_sections` 한 줄로 그 층 이름만 알린다. 이번 턴에 도착한 것(트리거, 대기 메시지, 보드 활동 같은 층)은 같아도 늘 다시 보낸다. 새 세션이거나 클라이언트가 대화를 압축했으면 모든 층을 다시 보낸다.
+
+| 슬롯 그룹 | 무엇 |
+|---|---|
+| `world.*` | 목표·과제·보드·메시지·일정의 제목, 행, 상태 문장 |
+| `context.*` | 체크아웃 현황과 승인 권한 |
+| `observation.*` | 이전 턴이 왜 멈췄는지, 현재 과제를 왜 못 봤는지 |
+
+### tool result 자리
+
+| 파일·슬롯 | 언제 |
+|---|---|
+| `tool_failure.md` 5슬롯 | 도구가 실패했을 때 등급별 다음 수 (의존성 없음 / 정책 거부 / 런타임 실패 / 워크플로 거부 / 운영자 취소) |
+| `keeper.md ### gate_replay.*` | 승인된 조작을 호스트가 대신 실행한 뒤 "다시 요청하지 마라" |
+
+## 나머지 프롬프트 파일
+
+각각 다른 모델 호출이거나 프로토콜·도구 안내 본문이다.
+
+| 파일 | 호출하는 곳 | 자리 |
+|---|---|---|
+| `librarian.md` | `keeper_librarian_runtime.ml` — 턴 끝 기억 선별 | user (system 은 빈 문자열) |
+| `workspace_memory_curator.md` | `workspace_curator.ml` — 공유 작업 공간 기억 합성 | system / user |
+| `workspace_memory_briefing.md` | 공유 기억 브리핑 서식 | 조립용 슬롯 |
+| `verification.md` | `task/anti_rationalization.ml` — Task 완료 검증 | system. 계약·증거·조회도구 슬롯이 본문에 끼워짐 |
+| `judge.md ### effect` | `keeper/hitl_summary_worker.ml` — 외부 효과 승인 판정 | system. `effect.output_contract` 가 JSON 계약 |
+| `judge.md ### board` | `keeper/keeper_board_attention_exact_flow.ml` | system |
+| `goal_verification.md` | `goal_verification_agent.ml` — metric 이 target 에 닿았나 | system. `lookup` 이 `proof` 안에 끼워짐 |
+| `fusion.judge.md` | `fusion/fusion_judge.ml` — 1차·재심·메타 3위상 | system. 셋이 같은 `output` 슬롯을 공유 |
+| `candle_appraiser_grade.md`, `candle_appraiser_relation.md`, `candle_appraiser_weights.md` | Candle 기여 평가 레인 | system / user |
+| `exec_policy.md`, `subset_rewrite.md` | Shell IR 정책 판정 및 재작성 | system |
+| `agent_core.md` | agent core 기본 프롬프트 슬롯 | system |
+| `tool_guidance.md`, `tool_help.md`, `mcp.tool_help.md` | 도구 사용 안내 및 도움말 텍스트 | 도구 설명 / 결과 보조 |
+| `keeper.autonomous.wake.txt` | 자율 깨우기 기본 입력 문구 | user |
+| `mcp.md` | `mcp_server_eio_tool_profile.ml` | MCP 프로토콜의 instructions 필드 (모델 호출 아님) |
+| `play.agent_guide.md` | `server/server_routes_http_routes_play_guide.ml` | `GET /play/agent.md` 응답 본문. 초대 링크를 받은 외부 에이전트가 읽는다 (모델 호출 아님) |
+| `lane_cli_probe.md` | `bin/masc_lane_cli_probe.ml` | system+user 픽스처 쌍 |
+| `eval.calibration.few_shot.md` | `eval_calibration.ml` | 다른 프롬프트 안에 끼워짐 |
+
+## 파일 경계의 규칙
+
+- **읽는 사람이 같으면 한 파일.** `keeper.md` 는 자리가 셋으로 나뉘어도 독자가 keeper 하나라 한 파일이다.
+- **호출이 다르면 다른 파일.** `judge.md` 의 board 와 effect 는 성격이 같아 한 파일이지만 서로 다른 호출이고, 서로 다른 슬롯이다.
+- **키 접두사가 파일을 정한다.** 슬롯 키는 `<파일 키>.<마커>` 다. 그래서 `keeper.world.frame.frame` 은 `keeper.md` 의 `world.frame.frame` 마커에 산다. 파일을 합칠 때 마커가 옛 파일 이름을 지면 키가 그대로 남고 소비 코드가 안 바뀐다.
+
+## system 자리에 실제로 실리는 것
+
+`config/prompts` 는 그 일부다. 블록의 목록은 `lib/types/prompt_block_id.ml` 의 `all_known` 이 정한다.
+
+2026-09-03 11:10Z, analyst 한 턴의 실측 배분:
+
+| 조각 | 바이트 | 비중 |
+|---|---|---|
+| 도구 스키마 | 66,271 | 43.4% |
+| 기억 회상 | 40,761 | 26.7% |
+| 세계 상태 | 15,196 | 9.9% |
+| 도구 결과 | 13,367 | 8.7% |
+| keeper 지침 | 10,698 | 7.0% |
+| 나머지 | 6,510 | 4.3% |
+
+프롬프트 파일을 정리해도 모델이 읽는 양의 대부분은 도구 스키마와 기억 회상이다. 창을 줄이려면 그 둘을 봐야 한다.
+
+## 슬롯의 성격
+
+`keeper.md` 슬롯 110개를 본문 모양으로 세면:
+
+| 그룹 | 슬롯 | 문장 | 서식(제목·라벨·행 틀) |
+|---|---|---|---|
+| `world.*` | 82 | 32 | 50 |
+| `context.*` | 13 | 6 | 7 |
+| `observation.*` | 8 | 4 | 4 |
+| `gate_replay.*` | 7 | 7 | 0 |
+
+## 등급의 기준
+
+**운영자가 고쳤을 때 제품 동작이 바뀌면 `primary`, 아니면 조각이다.** 라벨(`CURRENT GOAL:`), 진단 CLI 픽스처, 내부 템플릿은 config 에 남되 목록에는 안 나온다.
+
+| 파일 | 운영자용 키 |
+|---|---|
+| `keeper.md` | `keeper`, `keeper.worldview`, `keeper.identity`, `keeper.workspace` |
+| `librarian.md` | `librarian` |
+| `workspace_memory_curator.md` | `workspace_memory_curator` |
+| `verification.md` | `verification` |
+| `judge.md` | `judge.board`, `judge.effect` |
+| `goal_verification.md` | `goal_verification.proof` |
+| `fusion.judge.md` | `fusion.judge`, `.refine`, `.meta`, `.output` |
+| `mcp.md` | `mcp.full`, `.managed_agent`, `.operator_remote`, `.seat` |
+| `play.agent_guide.md` | `play.agent_guide` |
+| `tool_failure.md` `lane_cli_probe.md` `eval.calibration.few_shot.md` 외 보조 파일 | 없음 |
+
+슬롯은 기본이 조각이고, 운영자가 따로 손대는 것만 마커 끝에 `[primary: 설명]` 을 단다. 설명을 적지 않으면 그룹 파일의 설명을 쓰는데, 그러면 목록의 모든 행이 같은 문장을 말한다. 파일을 읽는 사람 기준으로 접었더니 한 파일 안에 운영자용 프롬프트와 조립용 조각이 같이 살게 됐고, 등급이 파일 단위면 그 둘을 구분할 수 없다.
+
+파일 frontmatter의 `operator_surface`는 `primary` 또는 `fragment`다. 생략하면
+본문은 `primary`로 등록된다. 모르는 값을 쓰면 본문은 목록에 계속 보이지만,
+프롬프트 목록 API의 `authoring_issues`에 `invalid_operator_surface` 진단과
+`field`, 원래 `value`, 실제 읽은 `source_file` 경로가 남는다. 본문이 없는 그룹도
+슬롯 행에 같은 파일 진단을 싣는다. `operator_surface`는 적용된 목록 등급이고,
+`authoring_issues`는 작성 오류이므로 override가 적용돼도 진단은 유지된다.
+해당 파일을 고치고 다시 등록하면 진단이 사라진다.
+
+서식도 config 에 남는다. 운영자가 바꿀 일이 드물 뿐 바꿀 수 있어야 한다. 다만 재정의 목록에서 문장과 서식이 같은 무게로 보이면 목록이 읽히지 않으므로, 표시 등급은 따로 다룬다 (#32890).

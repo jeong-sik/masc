@@ -1,0 +1,145 @@
+{
+  "scope": "local syntax and source checks only; no typecheck, native test, Dune, network, runtime or CI",
+  "checked_at": "2026-09-30T04:15:20.505327+00:00",
+  "local_parent": "fedf36b9bc8246211fc337070843271e83229498",
+  "branch": "fix/token-rotation-authority-20260930",
+  "compiler_version": "5.5.1",
+  "commands": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth_credential_token.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_token.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/server/server_runtime_startup_credentials.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_auth_rotate_shared_tokens_10304.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_auth_token_rotation_transaction.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--include-tests",
+        "--strict",
+        "--target",
+        "lib/auth/auth.mli",
+        "lib/auth/auth_credential_token.mli",
+        "lib/auth/auth_credential_base.ml",
+        "lib/auth/auth_credential_token.ml",
+        "lib/server/server_runtime_startup_credentials.ml",
+        "test/test_auth_rotate_shared_tokens_10304.ml",
+        "test/test_auth_token_rotation_transaction.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/changelog-fragments.py",
+        "check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "source_sha256": {
+    "lib/auth/auth.mli": "c5ac5d41060abb0bc0b127077eff9059878fcff020eb863e3bbd95c89d43cc88",
+    "lib/auth/auth_credential_token.mli": "b5885db5cb8c5705818954e3b9b9e351cf5abfb3514e5d83e8e2f69da2707552",
+    "lib/auth/auth_credential_base.ml": "a3efb5ed424839f2286e277d33da31aed5773b4fc5b84cc299c7bb86818a4773",
+    "lib/auth/auth_credential_token.ml": "c3b2b97b8beba91ac793c2fc3ca4c7b8879de2a300f70cc1ba989aec9eb4dedd",
+    "lib/server/server_runtime_startup_credentials.ml": "8d4948f5cd24e029f135b9b39b161973cc37bd8a82cbc838c088b17d98494f23",
+    "test/test_auth_rotate_shared_tokens_10304.ml": "352b240f495aa617e63fdc54d585d1d7db7015b1069dd3113cbf1a971542b62a",
+    "test/test_auth_token_rotation_transaction.ml": "cc97132d3a6c57982cc809d7af1055cfbb402a5156a077b46fb778f8ff1fbe9b",
+    "test/dune": "d8b6563cbca6ad63ed66924139318a52d346bf635eb641b87421815b30affb72",
+    "test/stanzas/test_auth_token_rotation_transaction.inc": "9f6c38881d5a493d79291bb60bf006a302ab31d3106112b1a05cde679fb90718",
+    "docs/audits/2026-09-30-token-rotation-authority.md": "c8f539441ab4d2fa1e215ba6da6e492833ce712394d5ab8e8bbda4c1306e0484",
+    "changelog.d/40182.md": "51228d50dbfa7e9b8da63d0f3c6e76ea37d71ee46fef624f4ccec1530683d9b8"
+  },
+  "native_tests": "not_run_locally",
+  "feature_suite": "test_auth_token_rotation_transaction",
+  "feature_scenarios": 16,
+  "existing_suite": "test_auth_rotate_shared_tokens_10304",
+  "current_main_composition": "root owns publication and composed native validation",
+  "committed_diff_check": {
+    "checked_commit": "91915492c75a7a81c1a063b3f0b98731a9942e74",
+    "command": [
+      "bash",
+      "scripts/ci/check-determinism-contract.sh",
+      "--base",
+      "fedf36b9bc8246211fc337070843271e83229498",
+      "--head",
+      "HEAD"
+    ],
+    "exit_code": 0,
+    "limit": "only committed rotation diff against local parent; no compilation or native execution"
+  },
+  "published_parent": "b5f401cbf540c1461408bd1d5885fabc5b0b2d85",
+  "pull_request": 40182
+}

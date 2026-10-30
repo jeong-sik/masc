@@ -1,0 +1,211 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/v1/dashboard/nav-event",
+    "status": 503,
+    "request_body": "{\"surface\":\"workspace\",\"section\":\"planning\",\"redirected_from\":null}",
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/health",
+    "status": 503,
+    "request_body": null,
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/dev-token",
+    "status": 404,
+    "request_body": null,
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/runtime-probe",
+    "status": 503,
+    "request_body": null,
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/mcp",
+    "status": 503,
+    "request_body": "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"masc_pause_status\",\"arguments\":{\"_agent_name\":\"dashboard\"},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}},\"id\":\"8a1ee106-65fb-4c50-8127-aa7ace0b8e34\"}",
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/shell",
+    "status": 503,
+    "request_body": null,
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/project-snapshot",
+    "status": 503,
+    "request_body": null,
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/gate",
+    "status": 503,
+    "request_body": null,
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/config",
+    "status": 503,
+    "request_body": null,
+    "response": {
+      "error": "isolated_fixture_endpoint_not_provided"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/planning",
+    "status": 200,
+    "request_body": null,
+    "response": {
+      "goals": [],
+      "tasks": [
+        {
+          "id": "cleanup-target",
+          "title": "Cleanup browser target",
+          "status": "todo",
+          "priority": 3,
+          "description": "Isolated deletion receipt scenario",
+          "created_at": "2026-09-09T01:00:00Z",
+          "updated_at": "2026-09-09T01:00:00Z"
+        }
+      ],
+      "mdal_loops": [],
+      "generated_at": "2026-09-09T01:00:00Z"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/goals",
+    "status": 200,
+    "request_body": null,
+    "response": {
+      "approval_queue_state": {
+        "state": "ready"
+      },
+      "tree": [],
+      "summary": {
+        "total_goals": 0,
+        "active_goals": 0,
+        "phase_counts": {},
+        "total_tasks": 1,
+        "done_tasks": 0,
+        "pending_approvals": 0
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/execution",
+    "status": 200,
+    "request_body": null,
+    "response": {
+      "tasks": [
+        {
+          "id": "cleanup-target",
+          "title": "Cleanup browser target",
+          "status": "todo",
+          "priority": 3,
+          "description": "Isolated deletion receipt scenario",
+          "created_at": "2026-09-09T01:00:00Z",
+          "updated_at": "2026-09-09T01:00:00Z"
+        }
+      ],
+      "agents": [],
+      "keepers": [],
+      "messages": [],
+      "generated_at": "2026-09-09T01:00:00Z",
+      "status": {
+        "project": "isolated-delete-proof"
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/dashboard/tasks/delete",
+    "status": 200,
+    "request_body": "{\"task_id\":\"cleanup-target\"}",
+    "response": {
+      "ok": false,
+      "task_id": "cleanup-target",
+      "task_deleted": true,
+      "status": "cleanup_failed",
+      "errors": [
+        "primary link store unreadable"
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/execution",
+    "status": 200,
+    "request_body": null,
+    "response": {
+      "tasks": [],
+      "agents": [],
+      "keepers": [],
+      "messages": [],
+      "generated_at": "2026-09-09T01:00:00Z",
+      "status": {
+        "project": "isolated-delete-proof"
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/dashboard/tasks/delete",
+    "status": 200,
+    "request_body": "{\"task_id\":\"cleanup-target\"}",
+    "response": {
+      "ok": true,
+      "task_id": "cleanup-target",
+      "task_deleted": true,
+      "status": "already_absent",
+      "errors": []
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboard/execution",
+    "status": 200,
+    "request_body": null,
+    "response": {
+      "tasks": [],
+      "agents": [],
+      "keepers": [],
+      "messages": [],
+      "generated_at": "2026-09-09T01:00:00Z",
+      "status": {
+        "project": "isolated-delete-proof"
+      }
+    }
+  }
+]

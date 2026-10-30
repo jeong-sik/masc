@@ -1,0 +1,27 @@
+{
+  "schema": "masc.goal-playground-bootstrap.local-parse.v1",
+  "source_sha": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "observed_at": "2026-10-25T10:56:55.255114+00:00",
+  "files": [
+    {
+      "file": "lib/workspace/workspace_init.ml",
+      "bytes": 3465,
+      "sha256": "80e8d786de3f45ac5585187142f5d2ba82c33039e793ae08f60c8f8bf3d1d7f1",
+      "parse_exit": 0
+    },
+    {
+      "file": "test/test_workspace_bootstrap.ml",
+      "bytes": 8827,
+      "sha256": "fe16f233efa397113c3c54ac1e156b72acfbec8b2205a3090949ed99fae87737",
+      "parse_exit": 0
+    },
+    {
+      "file": "test/test_goal_verifier_original.ml",
+      "bytes": 18432,
+      "sha256": "05d2183e873d790bdd22ca236e9c613147297a73e5c47cf30354fbdb74c42726",
+      "parse_exit": 0
+    }
+  ],
+  "local_dune_run": false,
+  "typing_or_native_claimed": false
+}

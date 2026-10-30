@@ -1,0 +1,41 @@
+name = "keeper_memory_retract"
+description = """
+Remove one false, obsolete or unsupported current fact by exact memory_id.
+
+Repeated IDs name one fact, not copies; they need no cleanup. Use an ID from \
+memory write or source='current' search and give the concrete reason. The \
+atomic commit also removes unsupported derived facts and journals the reason \
+and support invalidations. This Keeper tool removes one fact; operator batch \
+cleanup is a separate Admin HTTP boundary with snapshot revision+SHA-256 CAS."""
+additional_properties = false
+
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 35 turns needed it across 6317 provider requests, and its
+# 659 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 35 turns and saves the 659 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
+defer_loading = true
+[[params]]
+name = "memory_id"
+type = "string"
+required = true
+description = "Exact sha256 Memory OS identity to retract."
+
+[[params]]
+name = "reason"
+type = "string"
+required = true
+description = "Concrete non-empty reason this fact is no longer current."
+
+[help]
+short_description = "Retract a current keeper memory fact."
+when_to_use = "Use when an ordinary-current fact is false, obsolete, or no longer supported."
+key_constraints = [
+  "Use an exact memory_id from memory write or source='current' search.",
+  "Do not retract to deduplicate an identical memory_id; it identifies the single current fact.",
+  "A source-bound fact is not an ordinary-current fact and cannot be retracted here.",
+  "The reason is durable journal evidence, not transient commentary.",
+]
+details_markdown = "Retracts one exact fact from the current Memory OS snapshot. The response lists every removed memory id and each derived support invalidation with its exact missing premise ids. Invalid input and missing facts do not commit a snapshot or journal entry."
+examples = ["memory_id='sha256:...' reason='The deployment manifest now names a different region.'"]

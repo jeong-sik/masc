@@ -1,0 +1,37 @@
+629: 2026-10-24T13:43:08.6653719Z File "packages/agent_core/test/test_output_token_receipt.ml", line 501, characters 6-19:
+630: 2026-10-24T13:43:08.6654856Z 501 |     [ OpenAI_compat, "/v1/chat/completions", Openai_chat_max_tokens, ["max_tokens"]
+631: 2026-10-24T13:43:08.6655567Z             ^^^^^^^^^^^^^
+632: 2026-10-24T13:43:08.6656073Z Error: Unbound constructor OpenAI_compat
+
+634: 2026-10-24T13:44:27.3980996Z File "test/test_keeper_native_result_retention.ml", line 5, characters 13-25:
+635: 2026-10-24T13:44:27.3981836Z 5 |   { origin = Llm_provider.Types.Conversation; role; content; name=None; tool_call_id=None; metadata=[]}
+636: 2026-10-24T13:44:27.3982464Z                  ^^^^^^^^^^^^
+637: 2026-10-24T13:44:27.3982784Z Error: Unbound module Llm_provider
+
+639: 2026-10-24T13:45:14.3995808Z File "test/test_anti_rationalization_empty_reject.ml", lines 532-578, characters 10-110:
+640: 2026-10-24T13:45:14.3996928Z 532 | ..........(fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:actual_prompt
+641: 2026-10-24T13:45:14.3997583Z 533 |               ?goal_blocks ~report_tool_schema:_ ~lookup:offered_lookup
+642: 2026-10-24T13:45:14.3998270Z 534 |               ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+643: 2026-10-24T13:45:14.3998729Z 535 |             let index = List.length !calls in
+644: 2026-10-24T13:45:14.3999148Z 536 |             calls := !calls @ [evaluator_runtime];
+645: 2026-10-24T13:45:14.3999523Z ...
+646: 2026-10-24T13:45:14.3999837Z 575 |                    { message = "fixture provider body-size refusal"
+647: 2026-10-24T13:45:14.4000455Z 576 |                    ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 } }
+648: 2026-10-24T13:45:14.4001287Z 577 |                  else Agent_core.Retry.ContextOverflow { message = "fixture context overflow"; limit = None }))
+649: 2026-10-24T13:45:14.4002177Z 578 |             end else Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked") })
+650: 2026-10-24T13:45:14.4002815Z Error: This function should have type
+651: 2026-10-24T13:45:14.4003170Z          ?system_prompt:string ->
+652: 2026-10-24T13:45:14.4003522Z          ?goal_blocks:T.content_block list ->
+653: 2026-10-24T13:45:14.4003923Z          report_tool_schema:Types_core.tool_schema ->
+654: 2026-10-24T13:45:14.4004320Z          lookup:AR.lookup_surface ->
+655: 2026-10-24T13:45:14.4004790Z          on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+656: 2026-10-24T13:45:14.4005551Z          attempt_continuation:(dispatch:Runtime_attempt_dispatch.t ->
+657: 2026-10-24T13:45:14.4006048Z                                Agent_core_base.Error.t ->
+658: 2026-10-24T13:45:14.4006492Z                                Runtime_attempt_dispatch.continuation) ->
+659: 2026-10-24T13:45:14.4006946Z          on_runtime_attempt_error:(runtime_id:string ->
+660: 2026-10-24T13:45:14.4007341Z                                    attempt:int ->
+661: 2026-10-24T13:45:14.4038024Z                                    dispatch:Runtime_attempt_dispatch.t ->
+662: 2026-10-24T13:45:14.4038616Z                                    Agent_core_base.Error.t -> unit) ->
+663: 2026-10-24T13:45:14.4039093Z          unit -> (AR.reviewer_reply, Agent_core_base.Error.t) result
+664: 2026-10-24T13:45:14.4039575Z        but its first argument is labeled ?goal_blocks
+665: 2026-10-24T13:45:14.4039955Z        instead of ?system_prompt

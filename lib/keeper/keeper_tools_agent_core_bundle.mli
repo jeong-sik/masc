@@ -1,0 +1,112 @@
+(** Tool bundle assembly for keeper Agent Core execution. *)
+
+(** Build the keeper's full [tool_bundle]: internal tools +
+    alias-registered (public name) tools that translate input to
+    internal payloads. The cleanup thunk releases per-turn sandbox
+    runtimes (Docker case). *)
+val make_tool_bundle_for_capability_surface
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
+  -> ctx_snapshot:Keeper_types.working_context
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:Keeper_gate_causal_context.t
+  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?on_gate_deferred:(string -> unit)
+  -> ?identity_surface:Keeper_tools_agent_core.attached_surface
+  -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
+  -> ?skill_activation_context:Keeper_skill_activation_recorder.t
+  -> ?composition_result_delivery:Keeper_composition_result_delivery.t
+  -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+  -> ?checkpoint_owner:(unit -> Runtime_execution.checkpoint_owner option)
+  -> ?tool_result_inline_ceiling_bytes:(unit -> int)
+  -> capability_surface:Keeper_capability_surface.t
+  -> unit
+  -> Keeper_tools_agent_core.tool_bundle
+(** Build a bundle from the immutable Tool and Skill authority frozen by the
+    turn caller. Named compositions receive its exact descriptor list, so they
+    cannot widen the configured Tool Group surface.
+
+    Exact executable compositions selected by the current Task, and their
+    ordinary node Tools, carry schemas on the first request even when their
+    declaration permits deferred loading. Selection comes from the frozen activation frame and must match
+    the executable surface's full Skill identity and content revision. This
+    records no activation; other deferrable tools retain the normal loader.
+    The public recipe run control is also ready for a selected composition, so
+    an upstream input DAG needs no preliminary schema-loader exchange.
+
+    [checkpoint_owner] is asked on each tool call, not when the bundle is
+    built: the turn resolves its runtime afterwards, and a heterogeneous lane
+    fallback can change the answer between attempts. The result-ceiling
+    callback supplies the selected official client's limit: Claude Code uses
+    {!Runtime_execution.claude_code_inline_result_bytes}; Codex and Antigravity
+    use {!Common.max_tool_result_wire_bytes}. Agent Core uses
+    {!Common.max_agent_core_inline_result_bytes}. Before an attempt is observed,
+    the descriptor's own projection stands. The handler receives the same
+    answer, so a thread read sizes its page by it. *)
+
+module For_testing : sig
+  val make_tool_bundle
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_snapshot:Keeper_types.working_context
+    -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> ?continuation_channel:Keeper_continuation_channel.t
+    -> ?gate_context:Keeper_gate_causal_context.t
+  -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+    -> ?on_gate_deferred:(string -> unit)
+    -> ?capability_surface:Keeper_capability_surface.t
+    -> ?skill_catalog:Keeper_skill_catalog.t
+    -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+    -> unit
+    -> Keeper_tools_agent_core.tool_bundle
+
+  val make_tools
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_snapshot:Keeper_types.working_context
+    -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> ?skill_catalog:Keeper_skill_catalog.t
+    -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+    -> unit
+    -> Agent_core.Tool.t list
+
+  val make_tools_for_descriptors
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_snapshot:Keeper_types.working_context
+    -> descriptors:Keeper_tool_descriptor.t list
+    -> ?skill_catalog:Keeper_skill_catalog.t
+    -> unit
+    -> Agent_core.Tool.t list
+  (** Test seam for a closed per-turn descriptor set. Production obtains the
+*)
+
+  val ordinary_on_failed
+    :  mark_terminal_effect_failed:
+         (Keeper_tools_agent_core.terminal_effect_failure -> unit)
+    -> Keeper_tool_descriptor.runtime_handler
+    -> Keeper_tools_agent_core.terminal_effect_failure
+    -> unit
+  (** The failure callback the bundle hands every ordinary descriptor's
+      handler, applied to that descriptor's runtime handler. It calls
+      [mark_terminal_effect_failed], which fails the provider turn, only when
+      that handler's failure with this effect disposition ends the turn. *)
+
+  val initial_terminal_effect_state :
+    Keeper_tools_agent_core.gate_replay_delivery option ->
+    Keeper_tools_agent_core.terminal_effect_state
+
+  val terminal_externalization_failure :
+    Keeper_tools_agent_core.terminal_effect_state ->
+    Tool_bridge.externalization_error ->
+    Keeper_tools_agent_core.terminal_effect_failure option
+end

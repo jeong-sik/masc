@@ -1,0 +1,1305 @@
+(** Prompt Registry - Versioned template storage and management
+
+    This module provides a registry for storing and managing prompt templates
+    with versioning, variable extraction, and usage metrics tracking.
+
+    Features:
+    - In-memory storage using Hashtbl (fast lookup)
+    - Optional file-based persistence (JSON files in prompts directory)
+    - Thread-safe operations via Mutex
+    - Automatic variable extraction from {{var}} syntax
+    - Usage metrics tracking (count, avg score, last used)
+    - Version support for A/B testing and rollbacks
+
+    Prompts enter the registry from markdown files, not from code: point
+    [set_markdown_dir] at the directory and the pin loads it, parsing each
+    [*.md] frontmatter and its [### marker] slots and registering them. The
+    in-code registration API ([register] / [get] / [render] and the rest of
+    the mutable entry surface) was removed once nothing called it; do not
+    reintroduce it to add a prompt — add the markdown file instead.
+
+    Usage:
+    {[
+      Prompt_registry.set_markdown_dir "prompts";
+
+      (* Effective text for a key, override > file *)
+      let prompt = Prompt_registry.get_prompt "code-review-v2" in
+
+      (* Every source's contribution, side by side *)
+      let resolution = Prompt_registry.resolve_prompt "code-review-v2" in
+      ignore prompt;
+      ignore resolution
+    ]}
+*)
+
+(** {1 Types} *)
+
+module Types = Prompt_registry_types
+
+type prompt_meta = Types.prompt_meta = {
+  description: string;
+  category: string;
+  operator_surface: Types.operator_surface;
+  authoring_issues: Types.authoring_issue list;
+  required_file: bool;
+  template_variables: string list;
+}
+
+type prompt_source = Types.prompt_source =
+  | Override
+  | File
+  | Missing
+
+let prompt_source_to_string = Types.prompt_source_to_string
+
+type prompt_resolution = Types.prompt_resolution = {
+  effective: string;
+  source: prompt_source;
+  file_value: string option;
+  override_value: string option;
+  file_path: string option;
+  file_exists: bool;
+  has_override: bool;
+}
+
+type persisted_mutation_error =
+  | Validation_error of string
+  | Persistence_error of string
+
+(** {1 Frontmatter Parsing} *)
+
+(** Parse YAML-style frontmatter from a markdown file.
+    Expects: --- \n key: value \n --- \n body
+    Returns (assoc list of key-value pairs, body after frontmatter).
+    If no frontmatter found, returns ([], full content). *)
+let parse_frontmatter content =
+  let parsed = Frontmatter.parse content in
+  parsed.Frontmatter.fields, parsed.Frontmatter.body
+;;
+
+let markdown_body content =
+  let _metadata, body = parse_frontmatter content in
+  body
+
+(** {1 Variable Extraction} *)
+
+(** Extract variable names from a template string.
+    Matches {{variable_name}} patterns. *)
+let template_variable_regex = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile
+
+let extract_variables template =
+  let vars = Re.all template_variable_regex template
+    |> List.map (fun g -> Re.Group.get g 1 |> String.trim)
+    |> List.filter (fun name -> name <> "")
+  in
+  (* Remove duplicates and sort alphabetically *)
+  List.sort_uniq String.compare vars
+
+(** {1 In-memory Registry Storage} *)
+
+let store = Prompt_registry_store.default ()
+let version_index = store.version_index
+let override_tbl = store.override_tbl
+let meta_tbl = store.meta_tbl
+
+(* Overrides the operator saved that this process will not apply.
+
+   Restore refuses a persisted override only when it no longer renders under
+   the prompt's current contract: an unknown key, an empty body, or a template
+   variable the prompt no longer declares ([admit]). A changed default body is
+   not a reason; that override stays in force. A refused override is still
+   the operator's text, so it is kept here rather than dropped. If the save
+   path read only the live table, the next write of any key -- a preset
+   restore, an unrelated override -- would rewrite the file without it.
+
+   So the two questions are kept apart. [override_tbl] answers what is in
+   force; this answers what the operator saved. The file is written from
+   both. *)
+let quarantine_tbl
+    : (string, Prompt_override_persistence.entry * string) Hashtbl.t =
+  Hashtbl.create 8
+;;
+
+let with_mutex f = Prompt_registry_store.with_lock store f
+
+(* What the operator saved for a key this process will not apply, with the
+   reason it will not. Read by the catalog so an operator can see that the
+   file holds a prompt the server is not using -- the state that used to be
+   visible only as one ERROR line at boot. *)
+let held_back_overrides () =
+  with_mutex (fun () ->
+      Hashtbl.fold
+        (fun key held acc ->
+          if Hashtbl.mem override_tbl key then acc else held :: acc)
+        quarantine_tbl
+        [])
+
+let quarantined_entries () = List.map fst (held_back_overrides ())
+
+let with_override_mutation_lock f =
+  Prompt_registry_store.with_override_mutation_lock store f
+
+(** {1 Persistence} *)
+
+(** File-based persistence directory *)
+let prompts_dir = store.prompts_dir
+
+(** Markdown prompt source directory for operator-managed prompt text. *)
+let markdown_dir = store.markdown_dir
+
+let is_valid_prompt_key key =
+  key <> ""
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' -> true
+         | _ -> false)
+       key
+
+(** Read a markdown file, stripping YAML frontmatter if present.
+    Returns only the body after the closing [---] delimiter. *)
+let read_file_if_exists path =
+  if Sys.file_exists path && not (Sys.is_directory path) then
+    let content = In_channel.with_open_text path In_channel.input_all in
+    Some (markdown_body content)
+  else None
+
+(* ── Fragment-group slots (#32780, #32814) ─────────────────────────────
+
+   A group file carries several short fragments as [### marker]
+   paragraphs. A marker is a lower-case key segment ([is_slot_marker]),
+   so a markdown heading with spaces, braces or a capital inside a
+   paragraph stays prose — optionally followed by the slot's variables:
+   [### standing.current (vars: target, behind, ahead)]. A
+   slot registers under [<group-key>.<marker>], so every consumer and
+   name constant keeps its old key; the registry, not the callers, knows
+   the file was merged. Prose before the first marker is the group's own
+   body and registers under the group key when there is any.
+
+   Paragraphs are gathered in file order. The first cut walked the lines
+   backwards, handed every slot the paragraph above it and dropped the
+   last one (#32814). *)
+
+let fragment_tbl : (string, string * string) Hashtbl.t = Hashtbl.create 16
+(** [slot key → (group key, marker)] — filled by the directory loader. *)
+
+(* A marker is a lower-case key segment: [a-z0-9._-]+. Lower-case only,
+   so a one-word prose heading such as [### Summary] stays prose; every
+   marker in the tree is lower-case already. *)
+let is_slot_marker marker =
+  marker <> ""
+  && String.for_all
+       (function 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true | _ -> false)
+       marker
+
+(* Marker line shapes: "### name" or "### name (vars: a, b)", where
+   [name] obeys [is_slot_marker]. [None] for every other line, including
+   a markdown heading that is prose. *)
+(* A slot is a fragment of the prompt its group assembles, so that is the
+   default. A slot an operator tunes on its own says so by ending its marker
+   line with [\[primary\]], optionally carrying its own description
+   ([\[primary: what it is\]]). Both have to be per slot: folding files by
+   reader put operator-facing prompts and assembly fragments in one file, and
+   a row whose description is its group's says the same sentence as every
+   other row in the list. *)
+let strip_primary_suffix rest =
+  if String.ends_with ~suffix:"]" rest then (
+    match String.rindex_opt rest '[' with
+    | None -> (rest, None)
+    | Some open_bracket ->
+      let inside =
+        String.sub rest (open_bracket + 1) (String.length rest - open_bracket - 2)
+      in
+      let head, description =
+        match String.index_opt inside ':' with
+        | Some colon ->
+          ( String.trim (String.sub inside 0 colon)
+          , String.trim
+              (String.sub inside (colon + 1) (String.length inside - colon - 1)) )
+        | None -> (String.trim inside, "")
+      in
+      if String.equal head "primary" then
+        ( String.trim (String.sub rest 0 open_bracket)
+        , Some (if String.equal description "" then None else Some description) )
+      else (rest, None))
+  else (rest, None)
+;;
+
+let parse_slot_header line =
+  if String.length line > 4 && String.sub line 0 4 = "### " then (
+    let rest, primary_declaration =
+      strip_primary_suffix (String.trim (String.sub line 4 (String.length line - 4)))
+    in
+    let marker, vars =
+      match String.index_opt rest '(' with
+      | Some open_paren when
+          String.length rest >= open_paren + 8
+          && String.sub rest (open_paren + 1) 6 = "vars: "
+          && String.ends_with ~suffix:")" rest ->
+        ( String.trim (String.sub rest 0 open_paren)
+        , Some
+            (String.sub rest (open_paren + 7) (String.length rest - open_paren - 8)) )
+      | _ -> (rest, None)
+    in
+    if is_slot_marker marker then Some (marker, vars, primary_declaration) else None)
+  else None
+
+type body_split = {
+  preamble : string;  (** trimmed prose before the first marker *)
+  slots : (string * string option * string option option * string) list;
+      (** (marker, declared vars, [Some description] when the slot declared
+          itself operator-facing, paragraph) in file order *)
+}
+
+(* Body → preamble and slots, walking the lines in file order. A
+   paragraph runs from its marker line to the next marker line. *)
+let split_body body : body_split =
+  let close lines = String.trim (String.concat "\n" (List.rev lines)) in
+  let close_pending pending paragraph slots =
+    match pending with
+    | None -> slots
+    | Some (marker, vars, primary_declaration) ->
+      (marker, vars, primary_declaration, close paragraph) :: slots
+  in
+  let rec gather ~preamble ~slots ~pending ~paragraph = function
+    | [] ->
+      { preamble = close preamble
+      ; slots = List.rev (close_pending pending paragraph slots) }
+    | line :: rest -> (
+      match parse_slot_header line with
+      | Some header ->
+        gather ~preamble ~slots:(close_pending pending paragraph slots)
+          ~pending:(Some header) ~paragraph:[] rest
+      | None -> (
+        match pending with
+        | Some _ ->
+          gather ~preamble ~slots ~pending ~paragraph:(line :: paragraph) rest
+        | None ->
+          gather ~preamble:(line :: preamble) ~slots ~pending ~paragraph rest))
+  in
+  gather ~preamble:[] ~slots:[] ~pending:None ~paragraph:[]
+    (String.split_on_char '\n' body)
+
+let slot_paragraph (split : body_split) marker =
+  split.slots
+  |> List.find_opt (fun (m, _, _, _) -> String.equal m marker)
+  |> Option.map (fun (_, _, _, paragraph) -> paragraph)
+
+(* A prompt file's body and its slot split, kept with the file version they
+   were read from. Every resolution reads the file of its key, and a keeper
+   turn resolves dozens of keys whose files change only when someone edits
+   one. Reading and splitting a group file again on every resolution was
+   3.6% of the serving domain's busy samples (2026-09-30). An edit gives the
+   file a new version, so the next resolution reads it again; nothing in
+   this process writes these files.
+
+   A version cannot see an edit that keeps the file's inode and size within
+   one file-time tick, which on Linux is a few milliseconds. A directory
+   scan and [clear] start the reads over, so what a resolution returns after
+   them is the file as the scan read it or newer. *)
+type prompt_file = {
+  body : string;
+  split : body_split;
+}
+
+let prompt_files : prompt_file File_version_cache.t Atomic.t =
+  Atomic.make (File_version_cache.create ())
+;;
+
+let forget_prompt_files () = Atomic.set prompt_files (File_version_cache.create ())
+
+let read_prompt_file path =
+  match
+    File_version_cache.load (Atomic.get prompt_files) path ~decode:(fun () ->
+      match read_file_if_exists path with
+      | Some body -> Ok { body; split = split_body body }
+      | None -> Error ())
+  with
+  | Ok file -> Some file
+  | Error () -> None
+;;
+
+(* ── Directory scan and commit ──────────────────────────────────────
+
+   A directory scan runs outside every lock and yields registrations;
+   the commit writes them into [fragment_tbl] and [meta_tbl] inside one
+   registry-mutex section. Pinning a directory commits the pin and its
+   registrations in that same section, so no reader sees a pinned
+   directory whose slot keys are not in [fragment_tbl] yet: a slot key
+   ([judge.effect] is the [### effect] paragraph of [judge.md], not a
+   file) resolves only through [fragment_tbl]. *)
+
+type registration = {
+  reg_key : string;
+  reg_meta : prompt_meta;
+  reg_slot : (string * string) option;
+      (** [(group key, marker)] for a slot key; [None] for a file's own key *)
+}
+
+let registration ~key ~description ~category ~operator_surface ~authoring_issues
+    ~template_variables ~slot =
+  {
+    reg_key = key;
+    reg_meta =
+      {
+        description;
+        category;
+        operator_surface;
+        authoring_issues;
+        required_file = true;
+        template_variables = List.sort_uniq String.compare template_variables;
+      };
+    reg_slot = slot;
+  }
+
+(* The key a prompt file registers under, when its name can carry one. *)
+let key_of_file file =
+  if not (Filename.check_suffix file ".md") then None
+  else
+    let key = Filename.remove_extension file in
+    if is_valid_prompt_key key then Some key else None
+
+(* Registrations one [*.md] file's content yields under [key], slots first
+   in file order and then the file's own key. Content without frontmatter
+   or without a [description] yields nothing. *)
+let registrations_of_content ~source_file ~key content =
+  let meta_pairs, body = parse_frontmatter content in
+  match List.assoc_opt "description" meta_pairs with
+  | None -> []
+  | Some description ->
+      (* DET-OK: [category] is optional frontmatter with the
+         documented schema default [general]; the default does
+         not depend on time, environment, or iteration order. *)
+      let category =
+        match List.assoc_opt "category" meta_pairs with
+        | Some category -> category
+        | None -> "general"
+      in
+      let operator_surface, authoring_issues =
+        match List.assoc_opt "operator_surface" meta_pairs with
+        | None -> Types.Primary, []
+        | Some value -> (
+            match Types.operator_surface_of_string value with
+            | Some surface -> surface, []
+            | None ->
+                Log.Misc.warn
+                  "prompt file %s has unknown operator_surface=%S; keeping it visible as primary with an authoring issue"
+                  source_file value;
+                Types.Primary,
+                [ Types.Invalid_operator_surface { value; source_file } ])
+      in
+      let template_variables =
+        match List.assoc_opt "template_variables" meta_pairs with
+        | Some v -> Frontmatter.list_value v
+        | None -> []
+      in
+      (* A group file registers each [### marker] paragraph as
+         <key>.<marker>, carrying the group's frontmatter surface
+         (the TUI prompt list hides fragments by default, so a
+         merged operator-facing prompt keeps its primary surface)
+         and the variables declared on the marker line. The prose
+         before the first marker is the group's own body and
+         registers under the group key when there is any; a file
+         without markers registers whole. *)
+      let split = split_body body in
+      (* [slot_paragraph] returns the first paragraph of a marker,
+         so a repeated marker is logged and its later paragraph
+         ignored — the registered variables and the text then come
+         from the same paragraph. A marker with no paragraph is
+         logged and not registered. *)
+      let _seen, slots =
+        List.fold_left
+          (fun (seen, slots)
+               (marker, slot_vars, primary_declaration, paragraph) ->
+            if List.mem marker seen then begin
+              Log.Misc.error
+                "prompt %s declares slot %s twice; the first paragraph stands and the later one is ignored"
+                key marker;
+              (seen, slots)
+            end
+            else if String.equal paragraph "" then begin
+              Log.Misc.error
+                "prompt %s slot %s has no paragraph; it is not registered"
+                key marker;
+              (marker :: seen, slots)
+            end
+            else
+              let slot_key = key ^ "." ^ marker in
+              let template_variables =
+                match slot_vars with
+                | None -> []
+                | Some declared -> Frontmatter.list_value declared
+              in
+              let slot_surface, slot_description =
+                match primary_declaration with
+                | None -> (Types.Fragment, description)
+                | Some None -> (Types.Primary, description)
+                | Some (Some own) -> (Types.Primary, own)
+              in
+              ( marker :: seen,
+                registration ~key:slot_key ~description:slot_description
+                  ~category ~operator_surface:slot_surface ~authoring_issues
+                  ~template_variables
+                  ~slot:(Some (key, marker))
+                :: slots ))
+          ([], []) split.slots
+      in
+      let own =
+        if split.slots = [] || split.preamble <> "" then
+          [
+            registration ~key ~description ~category ~operator_surface
+              ~authoring_issues ~template_variables ~slot:None;
+          ]
+        else []
+      in
+      List.rev_append slots own
+
+(* Registrations one [*.md] file yields; nothing for a file whose name
+   carries no key or that fails to read. *)
+let registrations_of_file ~dir file =
+  match key_of_file file with
+  | None -> []
+  | Some key -> (
+      let path = Filename.concat dir file in
+      try
+        In_channel.with_open_text path In_channel.input_all
+        |> registrations_of_content ~source_file:path ~key
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Misc.error "prompt directory scan: failed to read %s: %s" file
+            (Printexc.to_string exn);
+          [])
+
+(* Every registration under [dir], in [Sys.readdir] order; [] when [dir]
+   is not a directory. Takes no lock. *)
+let scan_prompt_directory dir =
+  if Sys.file_exists dir && Sys.is_directory dir then
+    Sys.readdir dir |> Array.to_list
+    |> List.concat_map (fun file -> registrations_of_file ~dir file)
+  else []
+
+(* Caller holds the registry mutex. *)
+let commit_registrations registrations =
+  forget_prompt_files ();
+  List.iter
+    (fun { reg_key; reg_meta; reg_slot } ->
+      (match reg_slot with
+       | Some slot -> Hashtbl.replace fragment_tbl reg_key slot
+       | None -> ());
+      Hashtbl.replace meta_tbl reg_key reg_meta)
+    registrations
+
+(* Pinning a directory loads it. A pin does not unload what an earlier
+   directory registered; [clear] does. *)
+let set_markdown_dir dir =
+  let registrations = scan_prompt_directory dir in
+  with_override_mutation_lock (fun () ->
+      with_mutex (fun () ->
+          markdown_dir := Some dir;
+          commit_registrations registrations))
+
+(* Re-scans [dir] into the registry; the pin stays as it is. *)
+let load_prompts_from_directory dir =
+  let registrations = scan_prompt_directory dir in
+  with_override_mutation_lock (fun () ->
+      with_mutex (fun () -> commit_registrations registrations))
+
+(* Dune-context fallback for the markdown dir (#24377, #33239). Production
+   always pins the dir through [Prompt_defaults.bootstrap_runtime], and an
+   explicit [set_markdown_dir] always wins. Test executables run inside
+   dune's sandbox where the cwd has no [config/prompts]; DUNE_SOURCEROOT
+   is set by dune for every build/exec/runtest and absent in production
+   processes, so this is a deterministic, environment-scoped branch — not
+   a permissive default: outside dune the behaviour is byte-identical
+   (None). In a process with no pin, the first resolution pins
+   [<root>/config/prompts] and loads it, the same commit
+   [set_markdown_dir] makes for that directory, so slot keys reach
+   [fragment_tbl]. [clear] unpins, and the next resolution pins and loads
+   again — suites call [clear] between cases and then rely on this. Tests
+   that need true prompt absence pin an explicit empty dir, which this
+   never overrides.
+
+   The commit takes the registry mutex only. [validated_override] reaches
+   here through [file_value_of_key] while [set_override],
+   [set_override_persisted] and [restore_overrides] hold the mutation
+   lock, and [Eio.Mutex] does not re-enter, so taking the mutation lock
+   here would stop the first override written in an unpinned process.
+   The pin is re-read under the mutex: a pin that landed between the scan
+   and the commit wins and the scan is dropped. *)
+let dune_sourceroot_markdown_dir =
+  lazy
+    (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | None -> None
+    | Some root ->
+        let dir = Filename.concat (Filename.concat root "config") "prompts" in
+        if Sys.file_exists dir && Sys.is_directory dir then Some dir else None)
+
+let pin_dune_sourceroot_markdown_dir () =
+  match Lazy.force dune_sourceroot_markdown_dir with
+  | None -> None
+  | Some dir ->
+      let registrations = scan_prompt_directory dir in
+      with_mutex (fun () ->
+          match !markdown_dir with
+          | Some _ as pinned -> pinned
+          | None ->
+              markdown_dir := Some dir;
+              commit_registrations registrations;
+              Some dir)
+
+let effective_markdown_dir () =
+  match !markdown_dir with
+  | Some _ as pinned -> pinned
+  | None -> pin_dune_sourceroot_markdown_dir ()
+
+let get_markdown_dir () = effective_markdown_dir ()
+
+let prompt_markdown_path key =
+  if not (is_valid_prompt_key key) then None
+  else
+    Option.map
+      (fun dir -> Filename.concat dir (key ^ ".md"))
+      (effective_markdown_dir ())
+
+(* The file a key resolves against: its own file, or its group's file. *)
+let prompt_source_path key =
+  match Hashtbl.find_opt fragment_tbl key with
+  | Some (group_key, _marker) -> prompt_markdown_path group_key
+  | None -> prompt_markdown_path key
+
+(* The file value for a key: one slot paragraph for a slot key; for any
+   other key its file's body — the preamble alone when the file carries
+   slots, so a group key never returns its slots' text. *)
+let file_value_of_key key =
+  (* Resolve the directory before consulting the slot table: in an unpinned
+     process the first resolution is what pins the dune fallback and loads
+     its slot keys. Asked before that, a slot key such as judge.effect is
+     absent from [fragment_tbl], reads as a whole-file key, and finds no
+     judge.effect.md, so an override on it is refused for a contract body
+     that the pin would have supplied a moment later. *)
+  let (_ : string option) = effective_markdown_dir () in
+  match Hashtbl.find_opt fragment_tbl key with
+  | Some (group_key, marker) -> (
+    match Option.bind (prompt_markdown_path group_key) read_prompt_file with
+    | Some file -> slot_paragraph file.split marker
+    | None -> None)
+  | None ->
+    Option.bind (prompt_markdown_path key) read_prompt_file
+    |> Option.map (fun file ->
+           if file.split.slots = [] then file.body else file.split.preamble)
+
+(** {1 Registration and Lookup} *)
+
+(** Register a prompt entry in the registry.
+    Automatically extracts variables if not provided. *)
+(** {1 Template Rendering} *)
+
+(* Total by construction: [template_variable_regex] wraps group 1 in every
+   match, so [Re.Group.get] cannot raise here, and the list operations are
+   pure. The previous blanket [try] could only fold asynchronous exceptions
+   into a stringly error. *)
+let render_template ?template_variables ~template ~vars () : (string, string) result =
+  let vars = List.map (fun (name, value) -> (String.trim name, value)) vars in
+  let missing =
+    let effective_variables = extract_variables template in
+    let declared_variables =
+      match template_variables with
+      | Some variables ->
+          variables
+          |> List.map String.trim
+          |> List.filter (fun name -> name <> "")
+      | None -> []
+    in
+    List.sort_uniq String.compare
+      (effective_variables @ declared_variables)
+    |> List.filter (fun name -> not (List.mem_assoc name vars))
+  in
+  if missing <> [] then
+    Error
+      (Printf.sprintf "Unresolved variables in template: %s"
+         (String.concat ", " missing))
+  else
+    Ok
+      (Re.replace template_variable_regex template ~f:(fun group ->
+           let name = Re.Group.get group 1 |> String.trim in
+           match List.assoc_opt name vars with
+           | Some value -> value
+           | None -> Re.Group.get group 0))
+
+(** {1 Utility Functions} *)
+
+let clear () : unit =
+  with_override_mutation_lock (fun () ->
+   with_mutex (fun () ->
+    let persisted_dir = !prompts_dir in
+    Hashtbl.clear version_index;
+    Hashtbl.clear override_tbl;
+    Hashtbl.clear quarantine_tbl;
+    Hashtbl.clear meta_tbl;
+    Hashtbl.clear fragment_tbl;
+    forget_prompt_files ();
+    prompts_dir := None;
+    (* Unpins; under dune the next resolution pins the fallback again. *)
+    markdown_dir := None;
+    (* Clear files if persistence enabled *)
+    match persisted_dir with
+    | Some dir when Sys.file_exists dir && Sys.is_directory dir ->
+        let files = Sys.readdir dir in
+        Array.iter (fun file ->
+          if Filename.check_suffix file ".json" then
+            Sys.remove (Filename.concat dir file)
+        ) files
+    | None | Some _ -> ()
+  ))
+
+(** {1 Simple Override API for Hardcoded Prompts} *)
+
+(* Assembly of a [resolved] record from pre-captured values.
+   Invariant: [file_value] must already be read by the caller, and the
+   caller must not hold the registry mutex — [prompt_source_path] resolves
+   the markdown dir, and in an unpinned process that resolution pins and
+   loads the dune fallback under the mutex. Both callers run through
+   [resolved_of_snapshot] after the batch listing paths release the lock,
+   which also keeps disk I/O out of the mutex (#3335). *)
+let build_resolved_from_snapshot ~key ~override_value ~file_value =
+  let file_path = prompt_source_path key in
+  let source, effective =
+    Prompt_registry_types.resolve_source ~override_value ~file_value
+  in
+  {
+    effective;
+    source;
+    file_value;
+    override_value;
+    file_path;
+    file_exists = Option.is_some file_value;
+    has_override = Option.is_some override_value;
+  }
+
+(* Aggregate snapshot for batch listing APIs.  [list_prompts] and
+   [validate_prompt_templates] gather these under [with_mutex] and
+   then resolve (with disk reads) outside the lock. *)
+type prompt_snapshot = {
+  snap_key : string;
+  snap_meta : prompt_meta;
+  snap_override : Prompt_override_persistence.entry option;
+}
+
+(* Resolve a single prompt by doing the filesystem read OUTSIDE the
+   mutex.  Intended for batch [list_prompts]/[validate_prompt_templates]
+   call sites that previously held [with_mutex] across [read_file_if_exists]. *)
+let resolved_of_snapshot (s : prompt_snapshot) =
+  let file_value = file_value_of_key s.snap_key in
+  build_resolved_from_snapshot
+    ~key:s.snap_key
+    ~override_value:
+      (Option.map
+         (fun (entry : Prompt_override_persistence.entry) -> entry.value)
+         s.snap_override)
+    ~file_value
+
+let sorted_variables variables = List.sort_uniq String.compare variables
+
+(* Whether the default has moved since the override was written: the body
+   the operator replaced no longer reads the same, or the prompt declares a
+   different variable set than it did then. Neither stops the override from
+   applying; both are worth a look, since the operator's text was a
+   replacement for something that has since changed. *)
+let override_default_moved (meta : prompt_meta) ~file_value
+    (entry : Prompt_override_persistence.entry) =
+  let body_moved =
+    match file_value with
+    | None -> true
+    | Some body ->
+        not
+          (String.equal entry.authored_against
+             (Prompt_override_persistence.default_revision ~body))
+  in
+  body_moved
+  || sorted_variables meta.template_variables <> entry.template_variables
+
+(* [expected = []] declares no substitution points, including for primary
+   prompts validated through {!render_prompt_template}. Every [{{ident}}]
+   is therefore unexpected: no caller may supply a value for it. Keep the
+   same check for zero-variable and parameterized prompt contracts. *)
+let unexpected_template_variables meta template =
+  let expected = meta.template_variables in
+  extract_variables template
+  |> List.filter (fun variable -> not (List.mem variable expected))
+
+let authoring_issue_json = function
+  | Types.Invalid_operator_surface { value; source_file } ->
+      `Assoc
+        [ "code", `String "invalid_operator_surface"
+        ; "field", `String "operator_surface"
+        ; "value", `String value
+        ; "source_file", `String source_file
+        ]
+
+(* Variant that takes a pre-computed [resolved] record.  Used by the
+   batch listing paths that read files outside the mutex. *)
+let prompt_item_json_of_resolved ~override_default_moved key (meta : prompt_meta)
+    resolved =
+  `Assoc
+    [
+      ("key", `String key);
+      (* True only with an override in force whose default has changed since
+         it was written. The override still applies; this says the text it
+         replaced is not the text it replaced then. *)
+      ("override_default_moved", `Bool override_default_moved);
+      ("category", `String meta.category);
+      ( "operator_surface",
+        `String (Types.operator_surface_to_string meta.operator_surface) );
+      ( "authoring_issues",
+        `List (List.map authoring_issue_json meta.authoring_issues) );
+      ("description", `String meta.description);
+      ("current", `String resolved.effective);
+      ("effective", `String resolved.effective);
+      ( "file_value", Json_util.string_opt_to_json resolved.file_value );
+      ( "override_value", Json_util.string_opt_to_json resolved.override_value );
+      ( "file_path", Json_util.string_opt_to_json resolved.file_path );
+      ("file_exists", `Bool resolved.file_exists);
+      ( "source",
+        `String (Prompt_registry_types.prompt_source_to_string resolved.source) );
+      ("has_override", `Bool resolved.has_override);
+      ("char_count", `Int (String.length resolved.effective));
+      ("required_file", `Bool meta.required_file);
+      ( "template_variables",
+        `List (List.map (fun value -> `String value) meta.template_variables) );
+    ]
+
+let compare_prompt_items a b =
+  let get_key = function
+    | `Assoc fields -> (
+        match List.assoc_opt "key" fields with
+        | Some (`String value) -> value
+        | _ -> "")
+    | _ -> ""
+  in
+  String.compare (get_key a) (get_key b)
+
+(* Template metadata is a live registry observation. Diagnose it while resolving
+   the snapshot, so later rendering/replay never needs an Eio mutex. *)
+let warn_template_metadata_drift key meta effective =
+  match meta with
+  | None -> ()
+  | Some meta ->
+    let metadata_variables = meta.Types.template_variables
+      |> List.map String.trim |> List.filter (fun name -> name <> "")
+      |> List.sort_uniq String.compare in
+    let effective_variables = extract_variables effective in
+    if metadata_variables <> [] && metadata_variables <> effective_variables then
+      Log.Misc.warn
+        "Prompt '%s' metadata template_variables drift from effective template: metadata=[%s] effective=[%s]"
+        key (String.concat ", " metadata_variables) (String.concat ", " effective_variables)
+
+(** Resolve a prompt. Resolution: override > file > missing. *)
+let resolve_prompt key =
+  let file_path = prompt_source_path key in
+  let file_value = file_value_of_key key in
+  let resolved, meta = with_mutex (fun () ->
+    let override_value =
+      Hashtbl.find_opt override_tbl key
+      |> Option.map (fun (entry : Prompt_override_persistence.entry) ->
+             entry.value)
+    in
+    let source, effective =
+      Prompt_registry_types.resolve_source ~override_value ~file_value
+    in
+    {
+      effective; source; file_value; override_value;
+      file_path; file_exists = Option.is_some file_value;
+      has_override = Option.is_some override_value;
+    }, Hashtbl.find_opt meta_tbl key) in
+  warn_template_metadata_drift key meta resolved.effective;
+  resolved
+
+(** Get a prompt value. Resolution: override > file > missing *)
+let get_prompt key = (resolve_prompt key).effective
+
+let render_resolved_prompt_template key resolved vars =
+  if String.trim resolved.effective = "" then
+    Error (Printf.sprintf "Prompt '%s' is missing" key)
+  else
+    render_template ~template_variables:(extract_variables resolved.effective)
+      ~template:resolved.effective ~vars ()
+
+let resolve_and_render_prompt_template key vars =
+  let resolved = resolve_prompt key in
+  Result.map (fun rendered -> resolved, rendered)
+    (render_resolved_prompt_template key resolved vars)
+
+let render_prompt_template key vars =
+  Result.map snd (resolve_and_render_prompt_template key vars)
+
+(** Validate and apply a single override entry (shared logic for
+    [set_override] and [restore_overrides]).  Caller must NOT hold [mu].
+    Returns [Ok ()] on success or [Error msg] describing why the entry
+    was rejected.
+
+    Validation and the override write happen inside a single
+    [with_mutex] block so the [meta_tbl] snapshot we validated
+    against is still in effect when we install the override.  A
+    prior version split the two into separate mutex transactions —
+    a concurrent [unregister] or [register_prompt] landing between
+    them could invalidate the validation decision (e.g. overwrite a
+    key's metadata with a different [template_variables] set after
+    we validated but before we wrote the override). *)
+let admit key value ~bind =
+  let trimmed = String.trim value in
+  let file_value = file_value_of_key key in
+  if not (is_valid_prompt_key key) then Error "Invalid prompt key"
+  else if trimmed = "" then Error "Prompt cannot be empty"
+  else
+    with_mutex (fun () ->
+        match Hashtbl.find_opt meta_tbl key with
+        | None -> Error "Unknown prompt key"
+        | Some meta -> (
+            match file_value with
+            | None -> Error "Prompt contract body is missing"
+            | Some body ->
+                let unexpected = unexpected_template_variables meta trimmed in
+                if unexpected <> [] then
+                  Error
+                    (Printf.sprintf "Unknown template variables: %s"
+                       (String.concat ", " unexpected))
+                else Ok (bind ~meta ~body ~trimmed)))
+
+(* An override the operator is writing now: bound to the default it
+   replaces at this moment, so a later listing can say whether that default
+   has moved. *)
+let validated_override key value =
+  admit key value ~bind:(fun ~(meta : prompt_meta) ~body ~trimmed ->
+      Prompt_override_persistence.
+        {
+          key;
+          value = trimmed;
+          authored_against = default_revision ~body;
+          template_variables = sorted_variables meta.template_variables;
+        })
+
+(* An override the operator saved earlier, coming back from disk or from a
+   preset. It is admitted when it still renders under the prompt's current
+   contract, and its binding is kept as written: those fields record what
+   the default was when the operator wrote the text, and rebinding here
+   would erase the only sign that it has moved since. A default body that
+   changed underneath the override is not a reason to refuse it -- the
+   operator replaced that body on purpose, and a release rewriting it must
+   not switch their prompt off. *)
+let admitted_persisted_entry (entry : Prompt_override_persistence.entry) =
+  admit entry.key entry.value ~bind:(fun ~meta:_ ~body:_ ~trimmed ->
+      { entry with Prompt_override_persistence.value = trimmed })
+
+(* The listing needs the same answer for an entry in force, read outside the
+   mutex because the default body comes from disk. *)
+let override_default_moved_now (entry : Prompt_override_persistence.entry) =
+  let file_value = file_value_of_key entry.key in
+  match with_mutex (fun () -> Hashtbl.find_opt meta_tbl entry.key) with
+  | None -> true
+  | Some meta -> override_default_moved meta ~file_value entry
+
+(** Set an override for a prompt *)
+let set_override key value =
+  with_override_mutation_lock (fun () ->
+      match validated_override key value with
+      | Error _ as error -> error
+      | Ok entry ->
+          with_mutex (fun () -> Hashtbl.replace override_tbl key entry);
+          Ok ())
+
+(** Clear override, reverting to file *)
+let clear_prompt_override key =
+  with_override_mutation_lock (fun () ->
+      with_mutex (fun () -> Hashtbl.remove override_tbl key))
+
+(** Get source of current value *)
+let prompt_source key = (resolve_prompt key).source
+
+(* [validate_prompt_templates] was doing [read_file_if_exists] inside
+   the [with_mutex] fold via [resolve_prompt_unlocked], holding the
+   registry mutex across every markdown file read.  Two-phase:
+   snapshot under the mutex, then read files + build resolved records
+   outside.  Same refactor pattern as [list_prompts] below. *)
+let validate_prompt_templates () =
+  (* Resolving the dir first is what pins and loads the dune fallback in
+     an unpinned process, so the listing covers that directory too. *)
+  let (_ : string option) = effective_markdown_dir () in
+  let snapshots =
+    with_mutex (fun () ->
+      Hashtbl.fold
+        (fun key meta acc ->
+          { snap_key = key;
+            snap_meta = meta;
+            snap_override = Hashtbl.find_opt override_tbl key;
+          } :: acc)
+        meta_tbl [])
+  in
+  List.fold_left
+    (fun acc s ->
+      let resolved = resolved_of_snapshot s in
+      let issues =
+        (* A key nothing resolves and that carries no text has no template
+           to check. Every source is named rather than caught by a wildcard:
+           this arm decides what a new one would mean, and the compiler
+           should ask rather than fold it in with the rest. *)
+        match resolved.source, resolved.effective with
+        | Prompt_registry_types.Missing, "" -> []
+        | ( Prompt_registry_types.Missing
+          | Prompt_registry_types.Override
+          | Prompt_registry_types.File ),
+          _ ->
+            unexpected_template_variables s.snap_meta resolved.effective
+            |> List.map (fun variable -> (s.snap_key, variable))
+      in
+      issues @ acc)
+    [] snapshots
+  |> List.sort compare
+
+(** List all registered prompts with metadata, for API/dashboard.
+
+    Previously held [with_mutex] across every [read_file_if_exists]
+    call (once per registered prompt), blocking all other prompt
+    registry operations for the full disk scan.  Now:
+
+    1. Snapshot (key, meta, override) under [with_mutex].
+    2. Release the lock.
+    3. For each snapshot, read the markdown file and build the
+       [resolved] record outside the lock.
+    4. Sort and return.
+
+    Concurrent callers no longer serialize on disk I/O; the only lock
+    hold is the in-memory Hashtbl fold. *)
+let list_prompts () =
+  (* Same first step as [validate_prompt_templates]: the listing covers
+     the dune fallback directory in an unpinned process. *)
+  let (_ : string option) = effective_markdown_dir () in
+  let snapshots =
+    with_mutex (fun () ->
+      Hashtbl.fold
+        (fun key meta acc ->
+          { snap_key = key;
+            snap_meta = meta;
+            snap_override = Hashtbl.find_opt override_tbl key;
+          } :: acc)
+        meta_tbl [])
+  in
+  snapshots
+  |> List.map (fun s ->
+    let resolved = resolved_of_snapshot s in
+    let override_default_moved =
+      match s.snap_override with
+      | None -> false
+      | Some entry ->
+          override_default_moved s.snap_meta ~file_value:resolved.file_value entry
+    in
+    prompt_item_json_of_resolved ~override_default_moved s.snap_key s.snap_meta
+      resolved)
+  |> List.sort compare_prompt_items
+
+let default_revisions () =
+  let (_ : string option) = effective_markdown_dir () in
+  let keys =
+    with_mutex (fun () -> Hashtbl.fold (fun key _ acc -> key :: acc) meta_tbl [])
+  in
+  keys
+  |> List.filter_map (fun key ->
+       (* Baseline hashes are informational. A registered file can become
+          unreadable after registration; omit only that default, without
+          aborting capture or the restore's pre-autosave comparison. *)
+       let body =
+         try file_value_of_key key with
+         | Sys_error _ | Unix.Unix_error _ -> None
+       in
+       Option.map
+         (fun body -> key, Prompt_override_persistence.default_revision ~body)
+         body)
+  |> List.sort Stdlib.compare
+
+(** JSON export of all prompts for API *)
+let prompts_json () =
+  `Assoc [
+    ("prompts", `List (list_prompts ()));
+    (* Saved, on disk, and not in force, each with the reason. Empty in the
+       ordinary case. *)
+    ( "held_back",
+      `List
+        (List.map
+           (fun ((entry : Prompt_override_persistence.entry), reason) ->
+             `Assoc
+               [ ("key", `String entry.key);
+                 ("bytes", `Int (String.length entry.value));
+                 ("reason", `String reason) ])
+           (held_back_overrides ())) );
+  ]
+
+(** Persist overrides to JSON file *)
+let save_override_entries base_path entries =
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  try
+    Fs_compat.mkdir_p masc_dir;
+    let path = Filename.concat masc_dir "prompt_overrides.json" in
+    Prompt_override_persistence.save ~path entries
+    |> Result.map_error Prompt_override_persistence.error_to_string
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | Sys_error message -> Error message
+  | Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Printf.sprintf "%s(%s): %s" operation argument
+           (Unix.error_message error))
+
+let override_entries () =
+  with_mutex (fun () ->
+      Hashtbl.fold (fun _ entry acc -> entry :: acc) override_tbl [])
+
+(* What the operator has saved, applied or not. This is what the file holds
+   and what a preset captures: an entry this process refuses is still the
+   operator's, and a snapshot taken while it is refused has to carry it or it
+   is not a snapshot of their configuration. *)
+let persisted_entries () =
+  with_mutex (fun () ->
+      let live = Hashtbl.fold (fun _ entry acc -> entry :: acc) override_tbl [] in
+      Hashtbl.fold
+        (fun key (entry, _reason) acc ->
+          if Hashtbl.mem override_tbl key then acc else entry :: acc)
+        quarantine_tbl
+        live)
+
+
+let replace_override_entries entries =
+  with_mutex (fun () ->
+      Hashtbl.clear override_tbl;
+      List.iter
+        (fun (entry : Prompt_override_persistence.entry) ->
+          Hashtbl.replace override_tbl entry.key entry)
+        entries)
+
+let upsert_override_entry
+    (entry : Prompt_override_persistence.entry) entries =
+  entry
+  :: List.filter
+       (fun (current : Prompt_override_persistence.entry) ->
+         not (String.equal current.key entry.key))
+       entries
+
+let persist_overrides base_path =
+  with_override_mutation_lock (fun () ->
+      save_override_entries base_path (persisted_entries ()))
+
+(* Caller holds the override mutation lock. *)
+let commit_persisted_entry ~base_path (entry : Prompt_override_persistence.entry) =
+  let candidate = upsert_override_entry entry (persisted_entries ()) in
+  match save_override_entries base_path candidate with
+  | Error message -> Error (Persistence_error message)
+  | Ok () ->
+      (* Writing a key answers the question its quarantined version was
+         waiting on, so that copy is superseded rather than kept beside the
+         new one. *)
+      with_mutex (fun () -> Hashtbl.remove quarantine_tbl entry.key);
+      replace_override_entries candidate;
+      Ok ()
+
+let set_override_persisted ~base_path key value =
+  with_override_mutation_lock (fun () ->
+      match validated_override key value with
+      | Error message -> Error (Validation_error message)
+      | Ok entry -> commit_persisted_entry ~base_path entry)
+
+let restore_persisted_entry ~base_path entry =
+  with_override_mutation_lock (fun () ->
+      match admitted_persisted_entry entry with
+      | Error message -> Error (Validation_error message)
+      | Ok entry -> commit_persisted_entry ~base_path entry)
+
+(* An explicit clear is an explicit intent, so it reaches the quarantined
+   copy too. Nothing else removes one: a write of some other key must not
+   decide the fate of a prompt the operator never mentioned. *)
+let clear_prompt_override_persisted ~base_path key =
+  with_override_mutation_lock (fun () ->
+      let candidate =
+        persisted_entries ()
+        |> List.filter
+             (fun (entry : Prompt_override_persistence.entry) ->
+               not (String.equal entry.key key))
+      in
+      match save_override_entries base_path candidate with
+      | Error _ as error -> error
+      | Ok () ->
+          with_mutex (fun () -> Hashtbl.remove quarantine_tbl key);
+          replace_override_entries candidate;
+          Ok ())
+
+(** Restore overrides from JSON file, applying the same validation as
+    [set_override] so that stale or manually-edited entries are rejected. *)
+let restore_failure_observer = Atomic.make (fun () -> ())
+
+let set_restore_failure_observer observer =
+  Atomic.set restore_failure_observer observer
+
+let record_override_restore_failure () =
+  (Atomic.get restore_failure_observer) ()
+
+let restore_overrides base_path =
+  let path =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path)
+      "prompt_overrides.json"
+  in
+  let failures, moved_keys =
+    with_override_mutation_lock (fun () ->
+      let candidate, failures, rejected_entries =
+        if not (Sys.file_exists path) then ([], [], [])
+        else
+          match Prompt_override_persistence.load ~path with
+          | Error error ->
+              (* The file itself did not parse, so there are no entries to
+                 hold. Nothing is written back from here, so what is on disk
+                 stays for an operator to look at. *)
+              ( [],
+                [
+                  ( None,
+                    Prompt_override_persistence.error_to_string error );
+                ],
+                [] )
+          | Ok entries ->
+              List.fold_left
+                (fun (accepted, rejected, held)
+                     (entry : Prompt_override_persistence.entry) ->
+                  match admitted_persisted_entry entry with
+                  | Ok admitted -> (admitted :: accepted, rejected, held)
+                  | Error reason ->
+                      ( accepted,
+                        (Some entry.key, reason) :: rejected,
+                        (entry, reason) :: held ))
+                ([], [], []) entries
+      in
+      (* Commit the fully validated candidate before invoking observers.  A
+         faulty observer must not leave a pre-existing stale override live. *)
+      replace_override_entries candidate;
+      with_mutex (fun () ->
+          Hashtbl.clear quarantine_tbl;
+          List.iter
+            (fun (((entry : Prompt_override_persistence.entry), _) as held) ->
+              Hashtbl.replace quarantine_tbl entry.key held)
+            rejected_entries);
+      let moved_keys =
+        List.filter_map
+          (fun (entry : Prompt_override_persistence.entry) ->
+            if override_default_moved_now entry then Some entry.key else None)
+          candidate
+      in
+      (failures, moved_keys))
+  in
+  List.iter
+    (fun (key, reason) ->
+      record_override_restore_failure ();
+      match key with
+      | None ->
+          Log.Misc.error
+            "prompt override restore: rejected persistence file, falling back to file values: %s"
+            reason
+      | Some key ->
+          Log.Misc.error
+            "prompt override restore: %s cannot render under the current contract, falling back to file value: %s"
+            key reason)
+    failures;
+  List.iter
+    (fun key ->
+      Log.Misc.warn
+        "prompt override %s applies over a default that changed since it was written"
+        key)
+    moved_keys
+
+type file_edit_promotion =
+  | Promoted of { key : string }
+  | Override_exists of { key : string }
+  | Not_promotable of { reason : string }
+
+(* A whole-file edit maps to one override key only when both the
+   distribution copy and the edit register exactly that one key and no slot
+   -- the same registrations the directory scan makes -- and the edit left
+   the frontmatter alone, since an override carries body text, never
+   metadata. The entry is built the way [validated_override] builds one,
+   against the distribution body the file is reset to, and checked the way
+   [restore_overrides] will check it. An override already saved with the
+   same text is this edit promoted by an earlier pass whose reset did not
+   happen, so it counts as promoted. *)
+let single_key_registration ~source_file ~key content =
+  match registrations_of_content ~source_file ~key content with
+  | [ { reg_key; reg_meta; reg_slot = None } ] when String.equal reg_key key ->
+      Some reg_meta
+  | [] | [ _ ] | _ :: _ :: _ -> None
+
+let promote_file_edit ~base_path ~file ~embedded ~edited =
+  let not_promotable reason = Not_promotable { reason } in
+  match key_of_file file with
+  | None -> not_promotable "no prompt key reads this file"
+  | Some key -> (
+      let embedded_fields, embedded_body = parse_frontmatter embedded in
+      let edited_fields, edited_body = parse_frontmatter edited in
+      match
+        ( single_key_registration ~source_file:file ~key embedded,
+          single_key_registration ~source_file:file ~key edited )
+      with
+      | None, _ | _, None ->
+          not_promotable
+            "the file does not register exactly one prompt key without ### slots"
+      | Some _, Some _ when embedded_fields <> edited_fields ->
+          not_promotable
+            "the edit changes the frontmatter, which an override cannot carry"
+      | Some meta, Some _ -> (
+          let value = String.trim edited_body in
+          match unexpected_template_variables meta value with
+          | _ :: _ as undeclared ->
+              not_promotable
+                (Printf.sprintf "the edit uses undeclared template variables: %s"
+                   (String.concat ", " undeclared))
+          | [] when String.equal value "" ->
+              not_promotable "the edited body is empty"
+          | [] ->
+              let path =
+                Filename.concat
+                  (Common.masc_dir_from_base_path ~base_path)
+                  "prompt_overrides.json"
+              in
+              with_override_mutation_lock (fun () ->
+                  let saved =
+                    if Sys.file_exists path then
+                      Prompt_override_persistence.load ~path
+                    else Ok []
+                  in
+                  match saved with
+                  | Error error ->
+                      not_promotable
+                        ("prompt_overrides.json does not read: "
+                        ^ Prompt_override_persistence.error_to_string error)
+                  | Ok entries -> (
+                      match
+                        List.find_opt
+                          (fun (entry : Prompt_override_persistence.entry) ->
+                            String.equal entry.key key)
+                          entries
+                      with
+                      | Some entry when String.equal entry.value value ->
+                          Promoted { key }
+                      | Some _ -> Override_exists { key }
+                      | None -> (
+                          let entry =
+                            Prompt_override_persistence.
+                              {
+                                key;
+                                value;
+                                authored_against =
+                                  default_revision ~body:embedded_body;
+                                template_variables =
+                                  sorted_variables meta.template_variables;
+                              }
+                          in
+                          match
+                            save_override_entries base_path (entry :: entries)
+                          with
+                          | Ok () -> Promoted { key }
+                          | Error message ->
+                              not_promotable
+                                ("prompt_overrides.json was not written: "
+                               ^ message))))))

@@ -1,0 +1,3757 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-runtime-observation-workspace-20261004/dashboard
+
+ × src/components/runtime-observation-workspace.test.ts > withdraws A metrics and reads B when workspace changes 5024ms
+   → Unable to find an element with the text: Only-B-metric. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+      [36m>[39m
+        [0m서버 집계 창: [0m
+        [0m60분[0m
+        [0m · 응답 수신 [0m
+        [0m10/4/2026, 10:48:48 PM[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+        [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+      [36m>[39m
+        [0m집계 갱신 상태 미보고[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs"[39m
+      [36m>[39m
+        [0m비용 원장 읽기 상태 미보고[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+        [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+        [33mrole[39m=[32m"region"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+        [36m>[39m
+          [36m<thead[39m
+            [33mclass[39m=[32m"hidden md:table-header-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"border-b border-border"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m런타임[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m기록 결과[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 토큰[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 지연[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m관측 누락[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody[39m
+            [33mclass[39m=[32m"block md:table-row-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                [33mscope[39m=[32m"row"[39m
+              [36m>[39m
+                [0mOnly-A-metric[0m
+              [36m</th>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</span>[39m
+                [0m오류 없음 [0m
+                [0m1[0m
+                [36m<br />[39m
+                [0m오류 [0m
+                [0m0[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</span>[39m
+                [0m입력 [0m
+                [0m123[0m
+                [36m<br />[39m
+                [0m출력 [0m
+                [0m12[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</span>[39m
+                [0mp50 [0m
+                [0m5 ms[0m
+                [36m<br />[39m
+                [0mp95 [0m
+                [0m8 ms[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</span>[39m
+                [0m사용량 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+                [36m<br />[39m
+                [0m텔레메트리 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+              [36m</td>[39m
+            [36m</tr>[39m
+          [36m</tbody>[39m
+        [36m</table>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+      [36m>[39m
+        [0m서버 집계 창: [0m
+        [0m60분[0m
+        [0m · 응답 수신 [0m
+        [0m10/4/2026, 10:48:48 PM[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+        [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+      [36m>[39m
+        [0m집계 갱신 상태 미보고[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs"[39m
+      [36m>[39m
+        [0m비용 원장 읽기 상태 미보고[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+        [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+        [33mrole[39m=[32m"region"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+        [36m>[39m
+          [36m<thead[39m
+            [33mclass[39m=[32m"hidden md:table-header-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"border-b border-border"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m런타임[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m기록 결과[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 토큰[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 지연[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m관측 누락[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody[39m
+            [33mclass[39m=[32m"block md:table-row-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                [33mscope[39m=[32m"row"[39m
+              [36m>[39m
+                [0mOnly-A-metric[0m
+              [36m</th>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</span>[39m
+                [0m오류 없음 [0m
+                [0m1[0m
+                [36m<br />[39m
+                [0m오류 [0m
+                [0m0[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</span>[39m
+                [0m입력 [0m
+                [0m123[0m
+                [36m<br />[39m
+                [0m출력 [0m
+                [0m12[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</span>[39m
+                [0mp50 [0m
+                [0m5 ms[0m
+                [36m<br />[39m
+                [0mp95 [0m
+                [0m8 ms[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</span>[39m
+                [0m사용량 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+                [36m<br />[39m
+                [0m텔레메트리 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+              [36m</td>[39m
+            [36m</tr>[39m
+          [36m</tbody>[39m
+        [36m</table>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ × src/components/runtime-observation-workspace.test.ts > discards delayed A metrics after B becomes current 5012ms
+   → Unable to find an element with the text: Only-B-metric. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+      [36m>[39m
+        [0m서버 집계 창: [0m
+        [0m60분[0m
+        [0m · 응답 수신 [0m
+        [0m10/4/2026, 10:48:53 PM[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+        [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+      [36m>[39m
+        [0m집계 갱신 상태 미보고[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs"[39m
+      [36m>[39m
+        [0m비용 원장 읽기 상태 미보고[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+        [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+        [33mrole[39m=[32m"region"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+        [36m>[39m
+          [36m<thead[39m
+            [33mclass[39m=[32m"hidden md:table-header-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"border-b border-border"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m런타임[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m기록 결과[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 토큰[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 지연[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m관측 누락[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody[39m
+            [33mclass[39m=[32m"block md:table-row-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                [33mscope[39m=[32m"row"[39m
+              [36m>[39m
+                [0mOnly-A-metric[0m
+              [36m</th>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</span>[39m
+                [0m오류 없음 [0m
+                [0m1[0m
+                [36m<br />[39m
+                [0m오류 [0m
+                [0m0[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</span>[39m
+                [0m입력 [0m
+                [0m123[0m
+                [36m<br />[39m
+                [0m출력 [0m
+                [0m12[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</span>[39m
+                [0mp50 [0m
+                [0m5 ms[0m
+                [36m<br />[39m
+                [0mp95 [0m
+                [0m8 ms[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</span>[39m
+                [0m사용량 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+                [36m<br />[39m
+                [0m텔레메트리 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+              [36m</td>[39m
+            [36m</tr>[39m
+          [36m</tbody>[39m
+        [36m</table>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+      [36m>[39m
+        [0m서버 집계 창: [0m
+        [0m60분[0m
+        [0m · 응답 수신 [0m
+        [0m10/4/2026, 10:48:53 PM[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+        [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+      [36m>[39m
+        [0m집계 갱신 상태 미보고[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs"[39m
+      [36m>[39m
+        [0m비용 원장 읽기 상태 미보고[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+        [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+        [33mrole[39m=[32m"region"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+        [36m>[39m
+          [36m<thead[39m
+            [33mclass[39m=[32m"hidden md:table-header-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"border-b border-border"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m런타임[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m기록 결과[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 토큰[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 지연[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m관측 누락[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody[39m
+            [33mclass[39m=[32m"block md:table-row-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                [33mscope[39m=[32m"row"[39m
+              [36m>[39m
+                [0mOnly-A-metric[0m
+              [36m</th>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</span>[39m
+                [0m오류 없음 [0m
+                [0m1[0m
+                [36m<br />[39m
+                [0m오류 [0m
+                [0m0[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</span>[39m
+                [0m입력 [0m
+                [0m123[0m
+                [36m<br />[39m
+                [0m출력 [0m
+                [0m12[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</span>[39m
+                [0mp50 [0m
+                [0m5 ms[0m
+                [36m<br />[39m
+                [0mp95 [0m
+                [0m8 ms[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</span>[39m
+                [0m사용량 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+                [36m<br />[39m
+                [0m텔레메트리 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+              [36m</td>[39m
+            [36m</tr>[39m
+          [36m</tbody>[39m
+        [36m</table>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ × src/components/runtime-observation-workspace.test.ts > does not join a delayed A probe to the B runtime spec 5139ms
+   → Unable to find an element with the text: workspace-B-probe. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section mb-4"[39m
+      [33mdata-section-card[39m=[32m"true"[39m
+      [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+      [33mdata-section-card-class-length[39m=[32m"12"[39m
+      [33mdata-section-card-content-state[39m=[32m"node"[39m
+      [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+      [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+      [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+      [33mdata-section-card-has-right-slot[39m=[32m"false"[39m
+      [33mdata-section-card-has-status[39m=[32m"false"[39m
+      [33mdata-section-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-section-card-has-tone[39m=[32m"false"[39m
+      [33mdata-section-card-label-source[39m=[32m"label"[39m
+      [33mdata-section-card-label-state[39m=[32m"text"[39m
+      [33mdata-section-card-label-text-length[39m=[32m"5"[39m
+      [33mdata-section-card-status[39m=[32m""[39m
+      [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+      [33mdata-section-card-status-length[39m=[32m"0"[39m
+      [33mdata-section-card-tail-source[39m=[32m"none"[39m
+      [33mdata-section-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-section-card-tone-length[39m=[32m"0"[39m
+      [33mdata-section-card-variant[39m=[32m"light"[39m
+      [33mdata-surface-card[39m=[32m"true"[39m
+      [33mdata-surface-card-class-length[39m=[32m"12"[39m
+      [33mdata-surface-card-content-state[39m=[32m"node"[39m
+      [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-surface-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+      [33mdata-surface-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone[39m=[32m""[39m
+      [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+      [33mdata-surface-card-variant[39m=[32m"light"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+        [36m>[39m
+          [0m설정 경로[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] uppercase tracking-[0.05em] border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+              [33mdata-status-chip[39m=[32m"true"[39m
+              [33mdata-status-chip-class-length[39m=[32m"0"[39m
+              [33mdata-status-chip-content-source[39m=[32m"children"[39m
+              [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+              [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+              [33mdata-status-chip-is-semantic-tone[39m=[32m"false"[39m
+              [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+              [33mdata-status-chip-tone[39m=[32m"border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+              [33mdata-status-chip-uppercase[39m=[32m"true"[39m
+            [36m>[39m
+              [0mready[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-xs text-[var(--color-fg-muted)]"[39m
+            [36m>[39m
+              [0mruntime path resolution[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-4"[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] mb-4 px-4 py-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"[39m
+              [36m>[39m
+                [0mlive runtime truth[0m
+              [36m</div>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] uppercase tracking-[0.05em] border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+                [33mdata-status-chip[39m=[32m"true"[39m
+                [33mdata-status-chip-class-length[39m=[32m"0"[39m
+                [33mdata-status-chip-content-source[39m=[32m"children"[39m
+                [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+                [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+                [33mdata-status-chip-is-semantic-tone[39m=[32m"false"[39m
+                [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+                [33mdata-status-chip-tone[39m=[32m"border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+                [33mdata-status-chip-uppercase[39m=[32m"true"[39m
+              [36m>[39m
+                [0mready[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] border-border bg-surface-subtle text-text-tertiary"[39m
+                [33mdata-status-chip[39m=[32m"true"[39m
+                [33mdata-status-chip-class-length[39m=[32m"0"[39m
+                [33mdata-status-chip-content-source[39m=[32m"children"[39m
+                [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+                [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+                [33mdata-status-chip-is-semantic-tone[39m=[32m"true"[39m
+                [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+                [33mdata-status-chip-tone[39m=[32m"neutral"[39m
+                [33mdata-status-chip-uppercase[39m=[32m"false"[39m
+              [36m>[39m
+    ...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section mb-4"[39m
+      [33mdata-section-card[39m=[32m"true"[39m
+      [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+      [33mdata-section-card-class-length[39m=[32m"12"[39m
+      [33mdata-section-card-content-state[39m=[32m"node"[39m
+      [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+      [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+      [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+      [33mdata-section-card-has-right-slot[39m=[32m"false"[39m
+      [33mdata-section-card-has-status[39m=[32m"false"[39m
+      [33mdata-section-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-section-card-has-tone[39m=[32m"false"[39m
+      [33mdata-section-card-label-source[39m=[32m"label"[39m
+      [33mdata-section-card-label-state[39m=[32m"text"[39m
+      [33mdata-section-card-label-text-length[39m=[32m"5"[39m
+      [33mdata-section-card-status[39m=[32m""[39m
+      [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+      [33mdata-section-card-status-length[39m=[32m"0"[39m
+      [33mdata-section-card-tail-source[39m=[32m"none"[39m
+      [33mdata-section-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-section-card-tone-length[39m=[32m"0"[39m
+      [33mdata-section-card-variant[39m=[32m"light"[39m
+      [33mdata-surface-card[39m=[32m"true"[39m
+      [33mdata-surface-card-class-length[39m=[32m"12"[39m
+      [33mdata-surface-card-content-state[39m=[32m"node"[39m
+      [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-surface-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+      [33mdata-surface-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone[39m=[32m""[39m
+      [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+      [33mdata-surface-card-variant[39m=[32m"light"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+        [36m>[39m
+          [0m설정 경로[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] uppercase tracking-[0.05em] border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+              [33mdata-status-chip[39m=[32m"true"[39m
+              [33mdata-status-chip-class-length[39m=[32m"0"[39m
+              [33mdata-status-chip-content-source[39m=[32m"children"[39m
+              [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+              [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+              [33mdata-status-chip-is-semantic-tone[39m=[32m"false"[39m
+              [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+              [33mdata-status-chip-tone[39m=[32m"border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+              [33mdata-status-chip-uppercase[39m=[32m"true"[39m
+            [36m>[39m
+              [0mready[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-xs text-[var(--color-fg-muted)]"[39m
+            [36m>[39m
+              [0mruntime path resolution[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-4"[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] mb-4 px-4 py-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"[39m
+              [36m>[39m
+                [0mlive runtime truth[0m
+              [36m</div>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] uppercase tracking-[0.05em] border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+                [33mdata-status-chip[39m=[32m"true"[39m
+                [33mdata-status-chip-class-length[39m=[32m"0"[39m
+                [33mdata-status-chip-content-source[39m=[32m"children"[39m
+                [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+                [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+                [33mdata-status-chip-is-semantic-tone[39m=[32m"false"[39m
+                [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+                [33mdata-status-chip-tone[39m=[32m"border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+                [33mdata-status-chip-uppercase[39m=[32m"true"[39m
+              [36m>[39m
+                [0mready[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] border-border bg-surface-subtle text-text-tertiary"[39m
+                [33mdata-status-chip[39m=[32m"true"[39m
+                [33mdata-status-chip-class-length[39m=[32m"0"[39m
+                [33mdata-status-chip-content-source[39m=[32m"children"[39m
+                [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+                [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+                [33mdata-status-chip-is-semantic-tone[39m=[32m"true"[39m
+                [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+                [33mdata-status-chip-tone[39m=[32m"neutral"[39m
+                [33mdata-status-chip-uppercase[39m=[32m"false"[39m
+              [36m>[39m
+    ...
+ × src/components/runtime-observation-workspace.test.ts > withdraws readings and sends no observation requests without a confirmed workspace 25ms
+   → expected <th scope="row" …(1)></th> to be null
+ × src/components/runtime-observation-workspace.test.ts > cannot revive an old A metrics response after A to B to A 5003ms
+   → Unable to find an element with the text: Only-B-metric. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog shared[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m런타임 통계를 읽고 있습니다.[0m
+      [36m</p>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog shared[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m런타임 통계를 읽고 있습니다.[0m
+      [36m</p>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ × src/components/runtime-observation-workspace.test.ts > late A errors cannot replace B metrics or probe observations 5011ms
+   → Unable to find an element with the text: Only-B-metric. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m런타임 통계를 읽고 있습니다.[0m
+      [36m</p>[39m
+    [36m</section>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section mb-4"[39m
+      [33mdata-section-card[39m=[32m"true"[39m
+      [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+      [33mdata-section-card-class-length[39m=[32m"12"[39m
+      [33mdata-section-card-content-state[39m=[32m"node"[39m
+      [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+      [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+      [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+      [33mdata-section-card-has-right-slot[39m=[32m"false"[39m
+      [33mdata-section-card-has-status[39m=[32m"false"[39m
+      [33mdata-section-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-section-card-has-tone[39m=[32m"false"[39m
+      [33mdata-section-card-label-source[39m=[32m"label"[39m
+      [33mdata-section-card-label-state[39m=[32m"text"[39m
+      [33mdata-section-card-label-text-length[39m=[32m"5"[39m
+      [33mdata-section-card-status[39m=[32m""[39m
+      [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+      [33mdata-section-card-status-length[39m=[32m"0"[39m
+      [33mdata-section-card-tail-source[39m=[32m"none"[39m
+      [33mdata-section-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-section-card-tone-length[39m=[32m"0"[39m
+      [33mdata-section-card-variant[39m=[32m"light"[39m
+      [33mdata-surface-card[39m=[32m"true"[39m
+      [33mdata-surface-card-class-length[39m=[32m"12"[39m
+      [33mdata-surface-card-content-state[39m=[32m"node"[39m
+      [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-surface-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+      [33mdata-surface-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone[39m=[32m""[39m
+      [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+      [33mdata-surface-card-variant[39m=[32m"light"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+        [36m>[39m
+          [0m설정 경로[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m런타임 통계를 읽고 있습니다.[0m
+      [36m</p>[39m
+    [36m</section>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section mb-4"[39m
+      [33mdata-section-card[39m=[32m"true"[39m
+      [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+      [33mdata-section-card-class-length[39m=[32m"12"[39m
+      [33mdata-section-card-content-state[39m=[32m"node"[39m
+      [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+      [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+      [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+      [33mdata-section-card-has-right-slot[39m=[32m"false"[39m
+      [33mdata-section-card-has-status[39m=[32m"false"[39m
+      [33mdata-section-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-section-card-has-tone[39m=[32m"false"[39m
+      [33mdata-section-card-label-source[39m=[32m"label"[39m
+      [33mdata-section-card-label-state[39m=[32m"text"[39m
+      [33mdata-section-card-label-text-length[39m=[32m"5"[39m
+      [33mdata-section-card-status[39m=[32m""[39m
+      [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+      [33mdata-section-card-status-length[39m=[32m"0"[39m
+      [33mdata-section-card-tail-source[39m=[32m"none"[39m
+      [33mdata-section-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-section-card-tone-length[39m=[32m"0"[39m
+      [33mdata-section-card-variant[39m=[32m"light"[39m
+      [33mdata-surface-card[39m=[32m"true"[39m
+      [33mdata-surface-card-class-length[39m=[32m"12"[39m
+      [33mdata-surface-card-content-state[39m=[32m"node"[39m
+      [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-surface-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+      [33mdata-surface-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone[39m=[32m""[39m
+      [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+      [33mdata-surface-card-variant[39m=[32m"light"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+        [36m>[39m
+          [0m설정 경로[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32...
+ ✓ src/components/runtime-observation-workspace.test.ts > provider usage responses remain owned by their workspace even when provider IDs match 70ms
+ ✓ src/components/runtime-observation-workspace.test.ts > late manual login results never appear on a new workspace account with the same ID 16ms
+ × src/components/runtime-observation-workspace.test.ts > cancels owned observation requests when the panels unmount 7ms
+   → Cannot read properties of undefined (reading 'signal')
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/runtime-observation-workspace.test.ts > withdraws A metrics and reads B when workspace changes
+TestingLibraryElementError: Unable to find an element with the text: Only-B-metric. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+      [36m>[39m
+        [0m서버 집계 창: [0m
+        [0m60분[0m
+        [0m · 응답 수신 [0m
+        [0m10/4/2026, 10:48:48 PM[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+        [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+      [36m>[39m
+        [0m집계 갱신 상태 미보고[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs"[39m
+      [36m>[39m
+        [0m비용 원장 읽기 상태 미보고[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+        [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+        [33mrole[39m=[32m"region"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+        [36m>[39m
+          [36m<thead[39m
+            [33mclass[39m=[32m"hidden md:table-header-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"border-b border-border"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m런타임[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m기록 결과[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 토큰[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 지연[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m관측 누락[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody[39m
+            [33mclass[39m=[32m"block md:table-row-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                [33mscope[39m=[32m"row"[39m
+              [36m>[39m
+                [0mOnly-A-metric[0m
+              [36m</th>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</span>[39m
+                [0m오류 없음 [0m
+                [0m1[0m
+                [36m<br />[39m
+                [0m오류 [0m
+                [0m0[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</span>[39m
+                [0m입력 [0m
+                [0m123[0m
+                [36m<br />[39m
+                [0m출력 [0m
+                [0m12[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</span>[39m
+                [0mp50 [0m
+                [0m5 ms[0m
+                [36m<br />[39m
+                [0mp95 [0m
+                [0m8 ms[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</span>[39m
+                [0m사용량 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+                [36m<br />[39m
+                [0m텔레메트리 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+              [36m</td>[39m
+            [36m</tr>[39m
+          [36m</tbody>[39m
+        [36m</table>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+      [36m>[39m
+        [0m서버 집계 창: [0m
+        [0m60분[0m
+        [0m · 응답 수신 [0m
+        [0m10/4/2026, 10:48:48 PM[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+        [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+      [36m>[39m
+        [0m집계 갱신 상태 미보고[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs"[39m
+      [36m>[39m
+        [0m비용 원장 읽기 상태 미보고[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+        [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+        [33mrole[39m=[32m"region"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+        [36m>[39m
+          [36m<thead[39m
+            [33mclass[39m=[32m"hidden md:table-header-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"border-b border-border"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m런타임[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m기록 결과[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 토큰[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 지연[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m관측 누락[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody[39m
+            [33mclass[39m=[32m"block md:table-row-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                [33mscope[39m=[32m"row"[39m
+              [36m>[39m
+                [0mOnly-A-metric[0m
+              [36m</th>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</span>[39m
+                [0m오류 없음 [0m
+                [0m1[0m
+                [36m<br />[39m
+                [0m오류 [0m
+                [0m0[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</span>[39m
+                [0m입력 [0m
+                [0m123[0m
+                [36m<br />[39m
+                [0m출력 [0m
+                [0m12[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</span>[39m
+                [0mp50 [0m
+                [0m5 ms[0m
+                [36m<br />[39m
+                [0mp95 [0m
+                [0m8 ms[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</span>[39m
+                [0m사용량 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+                [36m<br />[39m
+                [0m텔레메트리 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+              [36m</td>[39m
+            [36m</tr>[39m
+          [36m</tbody>[39m
+        [36m</table>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/runtime-observation-workspace.test.ts:81:14
+     79|   await act(async () => { workspace('B') })
+     80|   await view.findByText('Catalog B')
+     81|   await view.findByText('Only-B-metric')
+       |              ^
+     82|   expect(view.queryByText('Only-A-metric')).toBeNull()
+     83|   expect(api.fetchRuntimeModelMetrics).toHaveBeenCalledTimes(2)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/components/runtime-observation-workspace.test.ts > discards delayed A metrics after B becomes current
+TestingLibraryElementError: Unable to find an element with the text: Only-B-metric. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+      [36m>[39m
+        [0m서버 집계 창: [0m
+        [0m60분[0m
+        [0m · 응답 수신 [0m
+        [0m10/4/2026, 10:48:53 PM[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+        [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+      [36m>[39m
+        [0m집계 갱신 상태 미보고[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs"[39m
+      [36m>[39m
+        [0m비용 원장 읽기 상태 미보고[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+        [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+        [33mrole[39m=[32m"region"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+        [36m>[39m
+          [36m<thead[39m
+            [33mclass[39m=[32m"hidden md:table-header-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"border-b border-border"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m런타임[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m기록 결과[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 토큰[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 지연[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m관측 누락[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody[39m
+            [33mclass[39m=[32m"block md:table-row-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                [33mscope[39m=[32m"row"[39m
+              [36m>[39m
+                [0mOnly-A-metric[0m
+              [36m</th>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</span>[39m
+                [0m오류 없음 [0m
+                [0m1[0m
+                [36m<br />[39m
+                [0m오류 [0m
+                [0m0[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</span>[39m
+                [0m입력 [0m
+                [0m123[0m
+                [36m<br />[39m
+                [0m출력 [0m
+                [0m12[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</span>[39m
+                [0mp50 [0m
+                [0m5 ms[0m
+                [36m<br />[39m
+                [0mp95 [0m
+                [0m8 ms[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</span>[39m
+                [0m사용량 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+                [36m<br />[39m
+                [0m텔레메트리 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+              [36m</td>[39m
+            [36m</tr>[39m
+          [36m</tbody>[39m
+        [36m</table>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+      [36m>[39m
+        [0m서버 집계 창: [0m
+        [0m60분[0m
+        [0m · 응답 수신 [0m
+        [0m10/4/2026, 10:48:53 PM[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm"[39m
+        [33mdata-runtime-cache-state[39m=[32m"unreported"[39m
+      [36m>[39m
+        [0m집계 갱신 상태 미보고[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs"[39m
+      [36m>[39m
+        [0m비용 원장 읽기 상태 미보고[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"런타임별 토큰·지연·결과"[39m
+        [33mclass[39m=[32m"max-w-full overflow-x-auto"[39m
+        [33mrole[39m=[32m"region"[39m
+        [33mtabindex[39m=[32m"0"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"block w-full text-sm md:table"[39m
+        [36m>[39m
+          [36m<thead[39m
+            [33mclass[39m=[32m"hidden md:table-header-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"border-b border-border"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m런타임[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m기록 결과[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 토큰[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m보고된 지연[0m
+              [36m</th>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"p-2 text-left"[39m
+                [33mscope[39m=[32m"col"[39m
+              [36m>[39m
+                [0m관측 누락[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody[39m
+            [33mclass[39m=[32m"block md:table-row-group"[39m
+          [36m>[39m
+            [36m<tr[39m
+              [33mclass[39m=[32m"grid grid-cols-2 gap-x-3 border-b border-border py-3 md:table-row md:py-0 md:align-top"[39m
+            [36m>[39m
+              [36m<th[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 text-left break-all md:table-cell"[39m
+                [33mscope[39m=[32m"row"[39m
+              [36m>[39m
+                [0mOnly-A-metric[0m
+              [36m</th>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m기록 결과[0m
+                [36m</span>[39m
+                [0m오류 없음 [0m
+                [0m1[0m
+                [36m<br />[39m
+                [0m오류 [0m
+                [0m0[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 토큰[0m
+                [36m</span>[39m
+                [0m입력 [0m
+                [0m123[0m
+                [36m<br />[39m
+                [0m출력 [0m
+                [0m12[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"block p-2 whitespace-nowrap md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m보고된 지연[0m
+                [36m</span>[39m
+                [0mp50 [0m
+                [0m5 ms[0m
+                [36m<br />[39m
+                [0mp95 [0m
+                [0m8 ms[0m
+              [36m</td>[39m
+              [36m<td[39m
+                [33mclass[39m=[32m"col-span-2 block p-2 md:table-cell"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"block text-xs text-text-muted md:hidden"[39m
+                [36m>[39m
+                  [0m관측 누락[0m
+                [36m</span>[39m
+                [0m사용량 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+                [36m<br />[39m
+                [0m텔레메트리 보고 [0m
+                [0m1[0m
+                [0m · 누락 [0m
+                [0m0[0m
+              [36m</td>[39m
+            [36m</tr>[39m
+          [36m</tbody>[39m
+        [36m</table>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/runtime-observation-workspace.test.ts:96:14
+     94|   await view.findByText('Catalog B')
+     95|   await act(async () => { finishA(metrics('A')) })
+     96|   await view.findByText('Only-B-metric')
+       |              ^
+     97|   expect(view.queryByText('Only-A-metric')).toBeNull()
+     98|   expect(request.signal.aborted).toBe(true)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/components/runtime-observation-workspace.test.ts > does not join a delayed A probe to the B runtime spec
+TestingLibraryElementError: Unable to find an element with the text: workspace-B-probe. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section mb-4"[39m
+      [33mdata-section-card[39m=[32m"true"[39m
+      [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+      [33mdata-section-card-class-length[39m=[32m"12"[39m
+      [33mdata-section-card-content-state[39m=[32m"node"[39m
+      [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+      [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+      [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+      [33mdata-section-card-has-right-slot[39m=[32m"false"[39m
+      [33mdata-section-card-has-status[39m=[32m"false"[39m
+      [33mdata-section-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-section-card-has-tone[39m=[32m"false"[39m
+      [33mdata-section-card-label-source[39m=[32m"label"[39m
+      [33mdata-section-card-label-state[39m=[32m"text"[39m
+      [33mdata-section-card-label-text-length[39m=[32m"5"[39m
+      [33mdata-section-card-status[39m=[32m""[39m
+      [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+      [33mdata-section-card-status-length[39m=[32m"0"[39m
+      [33mdata-section-card-tail-source[39m=[32m"none"[39m
+      [33mdata-section-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-section-card-tone-length[39m=[32m"0"[39m
+      [33mdata-section-card-variant[39m=[32m"light"[39m
+      [33mdata-surface-card[39m=[32m"true"[39m
+      [33mdata-surface-card-class-length[39m=[32m"12"[39m
+      [33mdata-surface-card-content-state[39m=[32m"node"[39m
+      [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-surface-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+      [33mdata-surface-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone[39m=[32m""[39m
+      [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+      [33mdata-surface-card-variant[39m=[32m"light"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+        [36m>[39m
+          [0m설정 경로[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] uppercase tracking-[0.05em] border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+              [33mdata-status-chip[39m=[32m"true"[39m
+              [33mdata-status-chip-class-length[39m=[32m"0"[39m
+              [33mdata-status-chip-content-source[39m=[32m"children"[39m
+              [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+              [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+              [33mdata-status-chip-is-semantic-tone[39m=[32m"false"[39m
+              [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+              [33mdata-status-chip-tone[39m=[32m"border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+              [33mdata-status-chip-uppercase[39m=[32m"true"[39m
+            [36m>[39m
+              [0mready[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-xs text-[var(--color-fg-muted)]"[39m
+            [36m>[39m
+              [0mruntime path resolution[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-4"[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] mb-4 px-4 py-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"[39m
+              [36m>[39m
+                [0mlive runtime truth[0m
+              [36m</div>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] uppercase tracking-[0.05em] border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+                [33mdata-status-chip[39m=[32m"true"[39m
+                [33mdata-status-chip-class-length[39m=[32m"0"[39m
+                [33mdata-status-chip-content-source[39m=[32m"children"[39m
+                [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+                [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+                [33mdata-status-chip-is-semantic-tone[39m=[32m"false"[39m
+                [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+                [33mdata-status-chip-tone[39m=[32m"border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+                [33mdata-status-chip-uppercase[39m=[32m"true"[39m
+              [36m>[39m
+                [0mready[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] border-border bg-surface-subtle text-text-tertiary"[39m
+                [33mdata-status-chip[39m=[32m"true"[39m
+                [33mdata-status-chip-class-length[39m=[32m"0"[39m
+                [33mdata-status-chip-content-source[39m=[32m"children"[39m
+                [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+                [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+                [33mdata-status-chip-is-semantic-tone[39m=[32m"true"[39m
+                [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+                [33mdata-status-chip-tone[39m=[32m"neutral"[39m
+                [33mdata-status-chip-uppercase[39m=[32m"false"[39m
+              [36m>[39m
+    ...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section mb-4"[39m
+      [33mdata-section-card[39m=[32m"true"[39m
+      [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+      [33mdata-section-card-class-length[39m=[32m"12"[39m
+      [33mdata-section-card-content-state[39m=[32m"node"[39m
+      [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+      [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+      [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+      [33mdata-section-card-has-right-slot[39m=[32m"false"[39m
+      [33mdata-section-card-has-status[39m=[32m"false"[39m
+      [33mdata-section-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-section-card-has-tone[39m=[32m"false"[39m
+      [33mdata-section-card-label-source[39m=[32m"label"[39m
+      [33mdata-section-card-label-state[39m=[32m"text"[39m
+      [33mdata-section-card-label-text-length[39m=[32m"5"[39m
+      [33mdata-section-card-status[39m=[32m""[39m
+      [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+      [33mdata-section-card-status-length[39m=[32m"0"[39m
+      [33mdata-section-card-tail-source[39m=[32m"none"[39m
+      [33mdata-section-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-section-card-tone-length[39m=[32m"0"[39m
+      [33mdata-section-card-variant[39m=[32m"light"[39m
+      [33mdata-surface-card[39m=[32m"true"[39m
+      [33mdata-surface-card-class-length[39m=[32m"12"[39m
+      [33mdata-surface-card-content-state[39m=[32m"node"[39m
+      [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-surface-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+      [33mdata-surface-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone[39m=[32m""[39m
+      [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+      [33mdata-surface-card-variant[39m=[32m"light"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+        [36m>[39m
+          [0m설정 경로[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"p-6 flex flex-col gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] uppercase tracking-[0.05em] border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+              [33mdata-status-chip[39m=[32m"true"[39m
+              [33mdata-status-chip-class-length[39m=[32m"0"[39m
+              [33mdata-status-chip-content-source[39m=[32m"children"[39m
+              [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+              [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+              [33mdata-status-chip-is-semantic-tone[39m=[32m"false"[39m
+              [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+              [33mdata-status-chip-tone[39m=[32m"border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+              [33mdata-status-chip-uppercase[39m=[32m"true"[39m
+            [36m>[39m
+              [0mready[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"text-xs text-[var(--color-fg-muted)]"[39m
+            [36m>[39m
+              [0mruntime path resolution[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-4"[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] mb-4 px-4 py-4"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"[39m
+              [36m>[39m
+                [0mlive runtime truth[0m
+              [36m</div>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] uppercase tracking-[0.05em] border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+                [33mdata-status-chip[39m=[32m"true"[39m
+                [33mdata-status-chip-class-length[39m=[32m"0"[39m
+                [33mdata-status-chip-content-source[39m=[32m"children"[39m
+                [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+                [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+                [33mdata-status-chip-is-semantic-tone[39m=[32m"false"[39m
+                [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+                [33mdata-status-chip-tone[39m=[32m"border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]"[39m
+                [33mdata-status-chip-uppercase[39m=[32m"true"[39m
+              [36m>[39m
+                [0mready[0m
+              [36m</span>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px] border-border bg-surface-subtle text-text-tertiary"[39m
+                [33mdata-status-chip[39m=[32m"true"[39m
+                [33mdata-status-chip-class-length[39m=[32m"0"[39m
+                [33mdata-status-chip-content-source[39m=[32m"children"[39m
+                [33mdata-status-chip-has-custom-class[39m=[32m"false"[39m
+                [33mdata-status-chip-has-test-id[39m=[32m"false"[39m
+                [33mdata-status-chip-is-semantic-tone[39m=[32m"true"[39m
+                [33mdata-status-chip-test-id-length[39m=[32m"0"[39m
+                [33mdata-status-chip-tone[39m=[32m"neutral"[39m
+                [33mdata-status-chip-uppercase[39m=[32m"false"[39m
+              [36m>[39m
+    ...
+ ❯ waitForWrapper ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/runtime-observation-workspace.test.ts:111:14
+    109|   await waitFor(() => expect(runtimeCatalogState.value).toEqual({ stat…
+    110|   await act(async () => { finishA(probe('A')) })
+    111|   await view.findByText('workspace-B-probe')
+       |              ^
+    112|   expect(view.queryByText('workspace-A-probe')).toBeNull()
+    113|   expect(view.queryByText('https://a.example.invalid/models')).toBeNul…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/components/runtime-observation-workspace.test.ts > withdraws readings and sends no observation requests without a confirmed workspace
+AssertionError: expected <th scope="row" …(1)></th> to be null
+
+- Expected:
+null
+
++ Received:
+<th
+  class="col-span-2 block p-2 text-left break-all md:table-cell"
+  scope="row"
+>
+  Only-A-metric
+</th>
+
+ ❯ src/components/runtime-observation-workspace.test.ts:124:45
+    122|   await view.findByText('Only-A-metric'); await view.findByText('works…
+    123|   await act(async () => { workspace(null) })
+    124|   expect(view.queryByText('Only-A-metric')).toBeNull()
+       |                                             ^
+    125|   expect(view.queryByText('workspace-A-probe')).toBeNull()
+    126|   expect(view.getByRole('button', { name: 'refresh probe' }).hasAttrib…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  src/components/runtime-observation-workspace.test.ts > cannot revive an old A metrics response after A to B to A
+TestingLibraryElementError: Unable to find an element with the text: Only-B-metric. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog shared[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m런타임 통계를 읽고 있습니다.[0m
+      [36m</p>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog shared[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m런타임 통계를 읽고 있습니다.[0m
+      [36m</p>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/runtime-observation-workspace.test.ts:141:57
+    139|   const view = render(html`<${OverviewRuntimeStats} />`)
+    140|   await waitFor(() => expect(api.fetchRuntimeModelMetrics).toHaveBeenC…
+    141|   await act(async () => { workspace('B') }); await view.findByText('On…
+       |                                                         ^
+    142|   await act(async () => { workspace('A') }); await view.findByText('On…
+    143|   await act(async () => { finishA(metrics('old-A')) })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  src/components/runtime-observation-workspace.test.ts > late A errors cannot replace B metrics or probe observations
+TestingLibraryElementError: Unable to find an element with the text: Only-B-metric. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m런타임 통계를 읽고 있습니다.[0m
+      [36m</p>[39m
+    [36m</section>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section mb-4"[39m
+      [33mdata-section-card[39m=[32m"true"[39m
+      [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+      [33mdata-section-card-class-length[39m=[32m"12"[39m
+      [33mdata-section-card-content-state[39m=[32m"node"[39m
+      [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+      [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+      [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+      [33mdata-section-card-has-right-slot[39m=[32m"false"[39m
+      [33mdata-section-card-has-status[39m=[32m"false"[39m
+      [33mdata-section-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-section-card-has-tone[39m=[32m"false"[39m
+      [33mdata-section-card-label-source[39m=[32m"label"[39m
+      [33mdata-section-card-label-state[39m=[32m"text"[39m
+      [33mdata-section-card-label-text-length[39m=[32m"5"[39m
+      [33mdata-section-card-status[39m=[32m""[39m
+      [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+      [33mdata-section-card-status-length[39m=[32m"0"[39m
+      [33mdata-section-card-tail-source[39m=[32m"none"[39m
+      [33mdata-section-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-section-card-tone-length[39m=[32m"0"[39m
+      [33mdata-section-card-variant[39m=[32m"light"[39m
+      [33mdata-surface-card[39m=[32m"true"[39m
+      [33mdata-surface-card-class-length[39m=[32m"12"[39m
+      [33mdata-surface-card-content-state[39m=[32m"node"[39m
+      [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-surface-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+      [33mdata-surface-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone[39m=[32m""[39m
+      [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+      [33mdata-surface-card-variant[39m=[32m"light"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+        [36m>[39m
+          [0m설정 경로[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"런타임 사용 통계"[39m
+      [33mclass[39m=[32m"ov-card min-w-0"[39m
+      [33mdata-overview-runtime-stats[39m=[32m"true"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2>[39m
+          [0m런타임 사용 통계[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-3"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m집계 요청 기간 [0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"30"[39m
+              [36m>[39m
+                [0m30분[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"60"[39m
+              [36m>[39m
+                [0m1시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"360"[39m
+              [36m>[39m
+                [0m6시간[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"1440"[39m
+              [36m>[39m
+                [0m24시간[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m통계 새로 읽기[0m
+          [36m</button>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"v2-mobile-operator-target underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"[39m
+            [33mhref[39m=[32m"#monitoring?section=runtime&view=cost"[39m
+          [36m>[39m
+            [0m토큰·지연 상세[0m
+          [36m</a>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-sm text-text-muted"[39m
+      [36m>[39m
+        [0mKeeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.[0m
+      [36m</p>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"공식 Client 계정별 런타임"[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+        [33mdata-testid[39m=[32m"overview-official-client-accounts"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"rounded border border-border px-2 py-1 text-xs"[39m
+          [33mdata-testid[39m=[32m"overview-client-shared"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"font-medium"[39m
+          [36m>[39m
+            [0mCatalog B[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-1 text-text-muted"[39m
+          [36m>[39m
+            [0m([0m
+            [0mshared[0m
+            [0m)[0m
+          [36m</span>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"ml-2"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0m로그인 미측정[0m
+          [36m</span>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ml-2 underline"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m로그인 확인[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mdata-testid[39m=[32m"overview-client-usage-shared"[39m
+          [36m>[39m
+            [0m제공자 사용량 상태 미보고[0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<p[39m
+        [33mclass[39m=[32m"text-xs text-text-muted"[39m
+      [36m>[39m
+        [0m로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.[0m
+      [36m</p>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m런타임 통계를 읽고 있습니다.[0m
+      [36m</p>[39m
+    [36m</section>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section mb-4"[39m
+      [33mdata-section-card[39m=[32m"true"[39m
+      [33mdata-section-card-body-padding[39m=[32m"p-6"[39m
+      [33mdata-section-card-class-length[39m=[32m"12"[39m
+      [33mdata-section-card-content-state[39m=[32m"node"[39m
+      [33mdata-section-card-eyebrow-state[39m=[32m"empty"[39m
+      [33mdata-section-card-eyebrow-text-length[39m=[32m"0"[39m
+      [33mdata-section-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-section-card-has-eyebrow[39m=[32m"false"[39m
+      [33mdata-section-card-has-right-slot[39m=[32m"false"[39m
+      [33mdata-section-card-has-status[39m=[32m"false"[39m
+      [33mdata-section-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-section-card-has-tone[39m=[32m"false"[39m
+      [33mdata-section-card-label-source[39m=[32m"label"[39m
+      [33mdata-section-card-label-state[39m=[32m"text"[39m
+      [33mdata-section-card-label-text-length[39m=[32m"5"[39m
+      [33mdata-section-card-status[39m=[32m""[39m
+      [33mdata-section-card-status-dot-tone[39m=[32m"neutral"[39m
+      [33mdata-section-card-status-length[39m=[32m"0"[39m
+      [33mdata-section-card-tail-source[39m=[32m"none"[39m
+      [33mdata-section-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-section-card-tone-length[39m=[32m"0"[39m
+      [33mdata-section-card-variant[39m=[32m"light"[39m
+      [33mdata-surface-card[39m=[32m"true"[39m
+      [33mdata-surface-card-class-length[39m=[32m"12"[39m
+      [33mdata-surface-card-content-state[39m=[32m"node"[39m
+      [33mdata-surface-card-has-custom-class[39m=[32m"true"[39m
+      [33mdata-surface-card-has-test-id[39m=[32m"false"[39m
+      [33mdata-surface-card-has-tone[39m=[32m"false"[39m
+      [33mdata-surface-card-test-id-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone[39m=[32m""[39m
+      [33mdata-surface-card-tone-length[39m=[32m"0"[39m
+      [33mdata-surface-card-tone-source[39m=[32m"none"[39m
+      [33mdata-surface-card-variant[39m=[32m"light"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); background: var(--color-bg-surface); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"flex-shrink: 0;"[39m
+        [36m>[39m
+          [0m설정 경로[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32...
+ ❯ waitForWrapper ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/runtime-observation-workspace.test.ts:158:14
+    156|   await waitFor(() => expect(api.fetchDashboardRuntimeProbe).toHaveBee…
+    157|   await act(async () => { workspace('B') })
+    158|   await view.findByText('Only-B-metric'); await view.findByText('works…
+       |              ^
+    159|   await act(async () => { failMetrics(new Error('A metrics failure'));…
+    160|   expect(view.getByText('Only-B-metric')).toBeTruthy()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  src/components/runtime-observation-workspace.test.ts > cancels owned observation requests when the panels unmount
+TypeError: Cannot read properties of undefined (reading 'signal')
+ ❯ src/components/runtime-observation-workspace.test.ts:210:72
+    208|   await waitFor(() => expect(api.fetchDashboardRuntimeProbe).toHaveBee…
+    209|   const metricsSignal = api.fetchRuntimeModelMetrics.mock.calls[0]![2]…
+    210|   const probeSignal = api.fetchDashboardRuntimeProbe.mock.calls[0]![1]…
+       |                                                                        ^
+    211|   view.unmount()
+    212|   expect(metricsSignal.aborted).toBe(true); expect(probeSignal.aborted…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 2 passed (9)
+   Start at  22:48:47
+   Duration  26.47s (tests 96%, transform 2%, import 1%, environment 1%, setup 1%)

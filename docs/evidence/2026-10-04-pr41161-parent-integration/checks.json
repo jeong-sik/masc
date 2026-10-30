@@ -1,0 +1,17 @@
+{
+  "parent": "20cc51141851e3c3da45e9d9905a46cbe0ae8a45",
+  "tests": 440,
+  "test_files": 14,
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "browser_assertions": 8,
+  "files": {
+    "README.md": "c5bce2bfe1dff40f5cfd248ee922a27883e77c750f1d32c79555edda6a0aff87",
+    "browser-result.json": "cc9eb5c52eb626c4070e574ce3fe71940155968527af5cb09cc4a48caa0c9549",
+    "browser.log": "7552b8c8c2fb0b6dd67b31a09e7f6d154f0f325588f6a85b11a325088d4f11e2",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tests2.log": "77d850fb3022a767836fb0b9ef876889bbb50887dd0cb2baea0076414c9fb430",
+    "tsc2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

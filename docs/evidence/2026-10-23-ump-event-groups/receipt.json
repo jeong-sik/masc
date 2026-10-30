@@ -1,0 +1,154 @@
+{
+  "scope": "source TUI and actual Worker/save/export; not installed runtime, native device playback or physical timing",
+  "executed_source_head": "31fd7b1111165e9686830dd8cb094d54885aa969",
+  "base": "b4bd81124965c7829df08a3d8e36dec5027865a3",
+  "product_sha256": {
+    "tools/alphatex/tick-units.mjs": "c7fd5081b9329485093a9a03dfe7fb3ddd4801042fd2c898e99fc4bda035b067",
+    "tools/alphatex/ump-editor.mjs": "1cf861948daf2dc7751fa921c1eb106e7aa11265ba220ea605d887cf54d1582f",
+    "tools/alphatex/ump-tui.mjs": "ef196f4c47a6d301a0f7b19adf03ef6980c8a3410e40e4c4a20463b69437d0e1"
+  },
+  "focused_node_suites": [
+    "ump-event-groups",
+    "ump-event-group-workflow",
+    "ump-time",
+    "ump-seconds",
+    "ump-beats",
+    "ump-tui",
+    "selected-stretch",
+    "exact-position"
+  ],
+  "actual_source_tui": {
+    "changed": true,
+    "exports": [
+      {
+        "destination": "undo-export",
+        "ump": null
+      },
+      {
+        "destination": "edited-export",
+        "ump": {
+          "schemaVersion": 1,
+          "midiSha256": "e00f4649a999fea106ecfa902d6df29f3db31241dfe2336a73d1223d00f73127",
+          "notes": [],
+          "timing": [
+            {
+              "packet": 0,
+              "word": 0,
+              "hostTime": "10000000000003503550"
+            },
+            {
+              "packet": 0,
+              "word": 2,
+              "hostTime": "10000000000003503550"
+            },
+            {
+              "packet": 0,
+              "word": 4,
+              "hostTime": "10000000000003503550"
+            },
+            {
+              "packet": 0,
+              "word": 6,
+              "hostTime": "10000000000003503550"
+            },
+            {
+              "packet": 0,
+              "word": 8,
+              "hostTime": "10000000000003503550"
+            },
+            {
+              "packet": 2,
+              "word": 0,
+              "hostTime": "10000000000010703700"
+            },
+            {
+              "packet": 2,
+              "word": 2,
+              "hostTime": "10000000000010703700"
+            },
+            {
+              "packet": 2,
+              "word": 4,
+              "hostTime": "10000000000010703700"
+            },
+            {
+              "packet": 4,
+              "word": 0,
+              "hostTime": "10000000000021503700"
+            },
+            {
+              "packet": 4,
+              "word": 2,
+              "hostTime": "10000000000021503700"
+            },
+            {
+              "packet": 4,
+              "word": 4,
+              "hostTime": "10000000000021503700"
+            },
+            {
+              "packet": 4,
+              "word": 6,
+              "hostTime": "10000000000021503700"
+            }
+          ]
+        }
+      }
+    ],
+    "portable": "portable/song.json",
+    "reopenAllSixFilesEqual": true,
+    "rawWaveUnchanged": true,
+    "undoExportIsOriginal": true,
+    "editedATimes": [
+      "10000000000003503550",
+      "10000000000003503550",
+      "10000000000003503550",
+      "10000000000003503550",
+      "10000000000003503550",
+      "10000000000010703700",
+      "10000000000010703700",
+      "10000000000010703700",
+      "10000000000021503700",
+      "10000000000021503700",
+      "10000000000021503700",
+      "10000000000021503700"
+    ],
+    "nativeAudition": false
+  },
+  "process": {
+    "pid": 26689,
+    "exitCode": 0,
+    "commands": [
+      "select-events 0:0 0:2 0:4 0:6 0:8 2:0 2:2 2:4 4:0 4:2 4:4 4:6",
+      "shift-events-beats 1/3",
+      "undo",
+      "export undo-export",
+      "redo",
+      "stretch-events 3/2",
+      "export edited-export"
+    ],
+    "requestsAndFilesOnly": true
+  },
+  "first_harness_cleanup": {
+    "pid": 21253,
+    "musicalResultPresent": true,
+    "exit": "not natural; harness left its own resumed stdin active after borrowed editor returned",
+    "action": "SIGTERM own harness; rerun adds stdin.pause at harness boundary, no product change"
+  },
+  "limits": [
+    "No Dune/full build or CI",
+    "No installed launcher update",
+    "No physical MIDI/audio device opened",
+    "No native audition launched or audible output measured",
+    "Playback plans verified as files, not receiver-word evidence",
+    "Actual controller and source terminal requests/state tested; no terminal wording/layout assertions",
+    "Private synthetic WAV/capture/music exports and raw terminal logs remain outside Git"
+  ],
+  "focused_node_results": {
+    "tests": 41,
+    "pass": 41,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0
+  }
+}

@@ -1,0 +1,745 @@
+{
+  "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
+  "source_sha256": "513f65a873a10c14e54528c3177bff6bd60210ce13612aa4c5906f42f698751d",
+  "browser_version": "149.0.7827.55",
+  "seat_reads": 25,
+  "frame_reads": 76,
+  "room_reads": 14,
+  "pad_reads": 5,
+  "checks": [
+    "external departure closes chat while MSX is selected",
+    "external reconnect reopens chat without game activity",
+    "activity changes update ownership before the recovery deadline",
+    "terminal write receipt and disconnect do not wait for a stalled seat projection",
+    "stalled room read recovers automatically",
+    "stalled pad read recovers while frames continue",
+    "seat recovers without machine activity",
+    "failed frame is fetched again",
+    "several Keepers share public conversation",
+    "guest sends public message",
+    "one viewport switches DOS and MSX without splitting conversation",
+    "MSX live response renders green pixels before DOS red pixels return",
+    "room layout fits phone and desktop",
+    "same-tab reload reconnects",
+    "pad click sends input",
+    "reopening focused selector discovers idle invite",
+    "pass updates controller and disables input",
+    "eject clears pixels",
+    "disconnect removes tab credential",
+    "atomic session departure precedes credential removal",
+    "departed same-link reopen explicitly reconnects",
+    "partial DOS text retains unpressed suffix without replay",
+    "storage deletion failure retains credential and disables game input",
+    "retry after storage deletion failure completes disconnect",
+    "HTTP origin supports mutation randomness",
+    "confirmed departure closes chat and clears draft before invitation removal"
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dos/type",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dos/pass",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/session",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/session",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/session",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/session",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/play",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dos/type",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/session",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    }
+  ],
+  "errors": []
+}

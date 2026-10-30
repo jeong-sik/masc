@@ -1,0 +1,21 @@
+{
+  "head": "226f5f1a024f450f530b1d7e557d4324c4741bcb",
+  "merge_parent": "06db5c20c90570676de28d885ec04c3f0fac93b5",
+  "web_tests": 427,
+  "web_suites": 6,
+  "tsc_exit": 0,
+  "eslint_exit": 1,
+  "inherited_eslint_errors": 2,
+  "stack_key_present": false,
+  "native_parent_equal": true,
+  "files": {
+    "settings-commit-red.log": "a5fe9f445cd97c833dcfa0789d1bf7c7002f7c462a1745b83c32657942cda0c4",
+    "eslint.log": "79b258ad941dfd66c747cd6768e14e6bd9dff43a1d3730bed24a9fdfc5beacad",
+    "web.log": "6a9a299188c7e194cd0c8872c73691c924644e76c8028d77168bf41620791f65",
+    "README.md": "1288d8038dea67a71b8a7bbe03fd208328ca6c006b46c9be43a803870cd1143d",
+    "manual-retry-red.log": "9938987d67c19694ce94ecd40c4db5182e2a380dd9793713895c902a53bc50bb",
+    "eslint-parent.log": "79b258ad941dfd66c747cd6768e14e6bd9dff43a1d3730bed24a9fdfc5beacad",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "focused-green.log": "8a51af8aab1fdb18ff6f9bb2425a3d911405854c1cd966a44caf9afe166bd6ff"
+  }
+}

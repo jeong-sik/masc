@@ -1,0 +1,11 @@
+--- owned_tui_request_state_v2.py
++++ owned_tui_request_state_v3.py
+@@ -248,7 +248,7 @@
+         except BaseException:self.listener.close();raise
+     def whitelist(self, method, path):
+         parsed=urllib.parse.urlsplit(path);query=urllib.parse.parse_qs(parsed.query)
+-        if method=='GET' and parsed.path=='/health':return query=={'full':['1']}
++        if method=='GET' and parsed.path=='/health':return query in [{}, {'full':['1']}]
+         if method=='GET' and parsed.path=='/api/v1/dashboard/scheduled-automation':
+             return not query or query in [{'payload_target':['keeper:'+name]} for name in self.names]
+         return any(parsed.path in [f'/api/v1/keepers/{name}/chat/operations/{operation}',

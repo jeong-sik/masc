@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "repair_base": "46b60f3352fb0cd009324620bc0b207d582af0b7",
+  "captured_current_main": "4cad4c4ce9cdf8f9c1a1d96a94e4a5a8a54b09e6",
+  "source_file": "test/test_dashboard_labels.ml",
+  "source_before_sha256": "395bb90a7a39cd434bc0b683c5df037a7fe804a581eb35f5d43ae9e0bfd6c8f1",
+  "source_after_sha256": "71f0557dba8c2d6c38891569853285bb071c1787b7bfaa9095d0407d5ff3d2c4",
+  "changed_lines": [
+    36,
+    44,
+    49
+  ],
+  "only_change": "three Lib.Runtime_params qualifiers become canonical Runtime_params",
+  "retained": "module Lib = Masc and all Lib.Runtime_settings handles; all test cases/assertions unchanged",
+  "parser": {
+    "command": "ocamlc -stop-after parsing -impl test/test_dashboard_labels.ml",
+    "compiler": "5.5.1",
+    "exit_code": 0,
+    "scope": "syntax only"
+  },
+  "whitespace": {
+    "command": "git diff --check",
+    "exit_code": 0
+  },
+  "canonical_authority": {
+    "path": "lib/core/runtime_params.mli",
+    "set": "?base_path:string -> ?actor:string -> 'a param -> 'a -> (unit, string) result",
+    "clear": "?base_path:string -> ?actor:string -> 'a param -> unit",
+    "library": "masc_core",
+    "wrapped": false,
+    "library_declaration": "lib/core/dune",
+    "test_dependency": "test/dune:1977 masc_test_deps",
+    "dependency_re_export": "test/deps/dune:53 (re_export masc_core)",
+    "dependency_changes": false
+  },
+  "current_source_scan": {
+    "baseline": "fd75478aa3146c4e3910773ad00336dd0adba472",
+    "method": "Complete baseline qualified scan plus all changed source/fixture/stanza files read at frozen current SHA and verified against exact GitHub blob identities; direct frozen-current critical-file reads confirm the outstanding three stale references. No main chasing.",
+    "current_commit_count_since_baseline": 12,
+    "changed_files": 78,
+    "changed_source_files_read_and_blob_verified": 40,
+    "new_qualified_refs_in_changed_sources": [],
+    "current_critical_direct_reads": [
+      {
+        "path": "test/test_dashboard_labels.ml",
+        "git_blob": "3ea87ec5af43a7ea5107b3223d9ac144276d8baa",
+        "sha256": "395bb90a7a39cd434bc0b683c5df037a7fe804a581eb35f5d43ae9e0bfd6c8f1",
+        "byte_equal_to_captured_candidate_base": true
+      },
+      {
+        "path": "lib/core/dune",
+        "git_blob": "ac88936511e067433420fe91f3c57451a82724e4",
+        "sha256": "72ddd3f50f0b8bfc0265c7ef865eb749ff9aa6bf54c8cb405c920e91902b54cc",
+        "byte_equal_to_captured_candidate_base": true
+      },
+      {
+        "path": "lib/core/runtime_params.mli",
+        "git_blob": "36dc0dac6ff47cf73a939788697278a95106a1ca",
+        "sha256": "ae1b02e48f95a07b1163994870141e5f00392b631dd606942f17af166ab94d36",
+        "byte_equal_to_captured_candidate_base": true
+      },
+      {
+        "path": "test/dune",
+        "git_blob": "3209c5078f131575d3a2645595709ea3bf845773",
+        "sha256": "3a018db45be2fd593f15fc6e56f628b4a9433cbcfca20a1d5d341df4018581bb",
+        "byte_equal_to_captured_candidate_base": true
+      }
+    ]
+  },
+  "limits": [
+    "Parser/source checks are not a compiled type-check or test execution.",
+    "The three qualifications are the only source change; no production API/store/alias, test scenario, assertion, timeout, or dependency stanza changes.",
+    "The next explicitly selected @check must bind its actual checkout SHA before any success claim. No new four-product build was requested for this repair."
+  ]
+}

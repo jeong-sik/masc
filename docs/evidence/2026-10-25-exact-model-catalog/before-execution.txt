@@ -1,0 +1,23 @@
+Actual prior run: https://github.com/jeong-sik/masc/actions/runs/40146575018
+The historical positive prefix-ordering assertions bless the behavior removed here.
+Query spellings such as glm-5v-turbo-x are read from the parent test source.
+
+test suite	Checkout	2026-10-25T00:24:40.6462321Z   ref: 9bbccf5261fa2703f3d31c542c9d972940cced00
+test suite	Checkout	2026-10-25T00:24:40.8497734Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 9bbccf5261fa2703f3d31c542c9d972940cced00
+test suite	Checkout	2026-10-25T00:24:50.1415642Z  * branch              9bbccf5261fa2703f3d31c542c9d972940cced00 -> FETCH_HEAD
+test suite	Checkout	2026-10-25T00:24:50.1423749Z [command]/usr/bin/git rev-parse --verify --quiet 9bbccf5261fa2703f3d31c542c9d972940cced00^{object}
+test suite	Checkout	2026-10-25T00:24:50.1445413Z 9bbccf5261fa2703f3d31c542c9d972940cced00
+test suite	Checkout	2026-10-25T00:24:50.1528004Z [command]/usr/bin/git checkout --progress --force 9bbccf5261fa2703f3d31c542c9d972940cced00
+test suite	Checkout	2026-10-25T00:24:52.1950821Z Note: switching to '9bbccf5261fa2703f3d31c542c9d972940cced00'.
+test suite	Checkout	2026-10-25T00:24:52.2081508Z 9bbccf5261fa2703f3d31c542c9d972940cced00
+test suite	Test	2026-10-25T00:26:42.3182517Z ASSERT prefix ordering: glm-5v-turbo must precede broad glm-5
+test suite	Test	2026-10-25T00:26:42.3183271Z ASSERT prefix ordering: glm-5-code must precede broad glm-5
+test suite	Test	2026-10-25T00:26:42.3183887Z ASSERT prefix ordering: glm-4.6v must precede broad glm-4.6
+test suite	Test	2026-10-25T00:26:42.3184487Z ASSERT prefix ordering: glm-4.5v must precede broad glm-4.5
+test suite	Test	2026-10-25T00:26:42.3185107Z ASSERT prefix ordering: broad glm-4.5 branch must precede glm-4
+test suite	Test	2026-10-25T00:26:42.3185816Z   [OK]          prefix_ordering                    0   shadow pairs all resol...
+test suite	Test	2026-10-25T00:26:42.3187092Z   [OK]          prefix_ordering                    1   a declared effort ladd...
+test suite	Test	2026-10-25T00:26:42.3188725Z   [OK]          prefix_ordering                    2   a non-reasoning row in...
+test suite	Test	2026-10-25T00:26:42.3190111Z   [OK]          prefix_ordering                    3   a bare row outranks th...
+test suite	Test	2026-10-25T00:26:42.3191349Z   [OK]          prefix_ordering                    4   a named provider still...
+test suite	Test	2026-10-25T00:26:42.3207234Z Test Successful in 0.037s. 124 tests run.

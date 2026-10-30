@@ -1,0 +1,291 @@
+{
+  "summary": {
+    "version": "Muse Code 1.4.0 (1.4.0-R4161.1)",
+    "mode": "read-approved-shell",
+    "profile": ":ask-me",
+    "hostile_project_settings": false,
+    "artifact": "<fixture-root>",
+    "steps": 7,
+    "mcp_calls": 1,
+    "inside_writes": [
+      false,
+      false
+    ],
+    "outside_writes": [
+      false,
+      false
+    ],
+    "terminal": "completed",
+    "error": null,
+    "read_succeeded": true,
+    "tool_results": [
+      {
+        "call_id": "call_probe_0",
+        "tool": "read_file",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_1",
+        "tool": "write_file",
+        "status": "failed",
+        "failure_reason": "tool policy denied filesystem write"
+      },
+      {
+        "call_id": "call_probe_2",
+        "tool": "bash",
+        "status": "failed",
+        "failure_reason": "tool policy denied shell execution"
+      },
+      {
+        "call_id": "call_probe_3",
+        "tool": "mcp__masc__ping",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_4",
+        "tool": "write_file",
+        "status": "failed",
+        "failure_reason": "tool policy denied filesystem write"
+      },
+      {
+        "call_id": "call_probe_5",
+        "tool": "bash",
+        "status": "failed",
+        "failure_reason": "tool policy denied shell execution"
+      }
+    ],
+    "passed": true,
+    "fixture_location": "system-temp",
+    "original_msp_sha256": "ea05ba138f86f912203cc103fccf0a622b17152c914413669b3ea6f7478dccad"
+  },
+  "approval_decisions": [
+    {
+      "choiceId": "allow_once"
+    },
+    {
+      "choiceId": "allow_once"
+    },
+    {
+      "choiceId": "allow_once"
+    }
+  ],
+  "selected_msp_events": [
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:43.883657Z",
+        "callId": "call_probe_0",
+        "tool": "read_file",
+        "status": "completed",
+        "visibleOutput": "Read text file `<fixture-root>/outside.txt`.\n1|SYNTHETIC_OUTSIDE_READ"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:44.62311Z",
+        "callId": "call_probe_1",
+        "tool": "write_file",
+        "status": "failed",
+        "failureReason": "tool policy denied filesystem write",
+        "visibleOutput": "tool failed: tool policy denied filesystem write"
+      }
+    },
+    {
+      "method": "approval/request",
+      "toolName": "bash",
+      "subject": {
+        "kind": "shell",
+        "command": "touch <fixture-root>/workspace/shell-should-not-exist",
+        "workspaceRoot": "<fixture-root>/workspace",
+        "stages": [
+          {
+            "requirementId": {
+              "approvalId": "01a0debc-b903-78c0-8334-c48aae691a1a",
+              "sourceIndex": 0
+            },
+            "position": 1,
+            "totalStages": 1,
+            "argv": [
+              "touch",
+              "<fixture-root>/workspace/shell-should-not-exist"
+            ],
+            "argvComplete": true,
+            "resolution": {
+              "kind": "unresolved"
+            },
+            "suggestedPrefix": {
+              "argvPrefix": [
+                "touch"
+              ],
+              "label": "Always allow in this workspace: touch ..."
+            }
+          }
+        ]
+      },
+      "availableChoices": [
+        {
+          "choiceId": "allow_once",
+          "label": "Allow once",
+          "decision": "approved",
+          "scope": "once"
+        },
+        {
+          "choiceId": "allow_local_prefix",
+          "label": "Always allow in this workspace: touch ...",
+          "decision": "approvedPolicyAmendment",
+          "scope": "localPersistent",
+          "rulePreview": "Always allow in this workspace: touch ..."
+        },
+        {
+          "choiceId": "abort",
+          "label": "Reject",
+          "decision": "abort",
+          "scope": "once",
+          "acceptsFeedback": true
+        }
+      ]
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:45.512418Z",
+        "callId": "call_probe_2",
+        "tool": "bash",
+        "status": "failed",
+        "failureReason": "tool policy denied shell execution",
+        "visibleOutput": "tool failed: tool policy denied shell execution"
+      }
+    },
+    {
+      "method": "approval/request",
+      "toolName": "mcp__masc__ping",
+      "subject": {
+        "kind": "tool",
+        "toolName": "mcp__masc__ping"
+      },
+      "availableChoices": [
+        {
+          "choiceId": "allow_once",
+          "label": "Allow once",
+          "decision": "approved",
+          "scope": "once"
+        },
+        {
+          "choiceId": "allow_session",
+          "label": "Allow for this session",
+          "decision": "approvedForSession",
+          "scope": "session",
+          "rulePreview": "tool `mcp__masc__ping`"
+        },
+        {
+          "choiceId": "allow_local_mcp_tool",
+          "label": "Always allow this MCP tool",
+          "decision": "approvedPolicyAmendment",
+          "scope": "localPersistent",
+          "rulePreview": "tool `mcp__masc__ping`"
+        },
+        {
+          "choiceId": "abort",
+          "label": "Reject",
+          "decision": "abort",
+          "scope": "once",
+          "acceptsFeedback": true
+        }
+      ]
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:46.313709Z",
+        "callId": "call_probe_3",
+        "tool": "mcp__masc__ping",
+        "status": "completed",
+        "visibleOutput": "MASC_MCP_PROOF_OK"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:47.005486Z",
+        "callId": "call_probe_4",
+        "tool": "write_file",
+        "status": "failed",
+        "failureReason": "tool policy denied filesystem write",
+        "visibleOutput": "tool failed: tool policy denied filesystem write"
+      }
+    },
+    {
+      "method": "approval/request",
+      "toolName": "bash",
+      "subject": {
+        "kind": "shell",
+        "command": "touch <fixture-root>/outside-shell.txt",
+        "workspaceRoot": "<fixture-root>/workspace",
+        "stages": [
+          {
+            "requirementId": {
+              "approvalId": "01a0debc-c237-7b41-ad2a-56adceec447c",
+              "sourceIndex": 0
+            },
+            "position": 1,
+            "totalStages": 1,
+            "argv": [
+              "touch",
+              "<fixture-root>/outside-shell.txt"
+            ],
+            "argvComplete": true,
+            "resolution": {
+              "kind": "unresolved"
+            },
+            "suggestedPrefix": {
+              "argvPrefix": [
+                "touch"
+              ],
+              "label": "Always allow in this workspace: touch ..."
+            }
+          }
+        ]
+      },
+      "availableChoices": [
+        {
+          "choiceId": "allow_once",
+          "label": "Allow once",
+          "decision": "approved",
+          "scope": "once"
+        },
+        {
+          "choiceId": "allow_local_prefix",
+          "label": "Always allow in this workspace: touch ...",
+          "decision": "approvedPolicyAmendment",
+          "scope": "localPersistent",
+          "rulePreview": "Always allow in this workspace: touch ..."
+        },
+        {
+          "choiceId": "abort",
+          "label": "Reject",
+          "decision": "abort",
+          "scope": "once",
+          "acceptsFeedback": true
+        }
+      ]
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:47.902713Z",
+        "callId": "call_probe_5",
+        "tool": "bash",
+        "status": "failed",
+        "failureReason": "tool policy denied shell execution",
+        "visibleOutput": "tool failed: tool policy denied shell execution"
+      }
+    },
+    {
+      "method": "turn/completed",
+      "terminal": "completed"
+    }
+  ]
+}

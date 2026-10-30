@@ -1,0 +1,876 @@
+TUI_CAPTURE candle-currency disabled ready-overview
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:17:59  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                                                              
+   Health: ok · Candle ready: ?:Candle details                                                                          
+   Work: 0 currently done in the last 24h · details in Work                                                             
+   Candle issued: 18446744073709551614.999                                                                              
+   Candle burned: 9007199254740.993                                                                                     
+   Candle circulating: 18446735066510296874.006                                                                         
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approvals and questions: confirm queue not fully read; held calls not fully read; Gate queue not fully read; ques…  
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 64960
+ Choose a Keeper before writing · i:choose                                                                              
+TUI_CAPTURE candle-currency disabled ready-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        9007199254740.993 Candle                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    reading…                                                                                                            
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency disabled changed-overview
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:18:00  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                                                              
+   Health: ok · Candle disabled: ?:Candle details                                                                       
+   Work: 0 currently done in the last 24h · details in Work                                                             
+   Candle disabled: ledger deliberately unavailable                                                                     
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approvals and questions: held calls not fully read; Gate queue not fully read; questions not fully read             
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 64960
+ Choose a Keeper before writing · i:choose                                                                              
+TUI_CAPTURE candle-currency disabled changed-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        disabled: ledger deliberately unavailable                                  
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    reading…                                                                                                            
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency disabled control-accepted
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        disabled: ledger deliberately unavailable                                  
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    could not read: board quarantines: HTTP 503: fixture endpoint unavailable                                           
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  alpha pause accepted  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency disabled recovered-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        9007199254740.993 Candle                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    could not read: board quarantines: HTTP 503: fixture endpoint unavailable                                           
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency malformed-supply ready-overview
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:18:02  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                                                              
+   Health: ok · Candle ready: ?:Candle details                                                                          
+   Work: 0 currently done in the last 24h · details in Work                                                             
+   Candle issued: 18446744073709551614.999                                                                              
+   Candle burned: 9007199254740.993                                                                                     
+   Candle circulating: 18446735066510296874.006                                                                         
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approvals and questions: confirm queue not fully read; held calls not fully read; Gate queue not fully read; ques…  
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 65196
+ Choose a Keeper before writing · i:choose                                                                              
+TUI_CAPTURE candle-currency malformed-supply ready-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        9007199254740.993 Candle                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    reading…                                                                                                            
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency malformed-supply changed-overview
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:18:03  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                                                              
+   Health: ok · Candle unavailable: ?:Candle details                                                                    
+   Work: 0 currently done in the last 24h · details in Work                                                             
+   Candle unavailable: Candle observation.issued_milli: Candle amount must be a canonical nonnegative decimal string    
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approvals and questions: held calls not fully read; Gate queue not fully read; questions not fully read             
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 65196
+ Choose a Keeper before writing · i:choose                                                                              
+TUI_CAPTURE candle-currency malformed-supply changed-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:                                                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀    unavailable: Candle observation.issued_milli: Candle amount must be a canonical nonnegative     
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀    decimal string                                                                                  
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+                      Task:                  —                                                                          
+                                                                                                                        
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    reading…                                                                                                            
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+  1-30/41                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency malformed-supply control-accepted
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:                                                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀    unavailable: Candle observation.issued_milli: Candle amount must be a canonical nonnegative     
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀    decimal string                                                                                  
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+                      Task:                  —                                                                          
+                                                                                                                        
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    could not read: board quarantines: HTTP 503: fixture endpoint unavailable                                           
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+  1-30/41                                                                                                               
+
+  alpha pause accepted  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency malformed-supply recovered-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        9007199254740.993 Candle                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    could not read: board quarantines: HTTP 503: fixture endpoint unavailable                                           
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency malformed-balance ready-overview
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:18:04  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                                                              
+   Health: ok · Candle ready: ?:Candle details                                                                          
+   Work: 0 currently done in the last 24h · details in Work                                                             
+   Candle issued: 18446744073709551614.999                                                                              
+   Candle burned: 9007199254740.993                                                                                     
+   Candle circulating: 18446735066510296874.006                                                                         
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approvals and questions: confirm queue not fully read; held calls not fully read; Gate queue not fully read; ques…  
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 65389
+ Choose a Keeper before writing · i:choose                                                                              
+TUI_CAPTURE candle-currency malformed-balance ready-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        9007199254740.993 Candle                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    reading…                                                                                                            
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency malformed-balance changed-overview
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:18:05  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                                                              
+   Health: ok · Candle unavailable: ?:Candle details                                                                    
+   Work: 0 currently done in the last 24h · details in Work                                                             
+   Candle unavailable: keepers[0]: Candle amount must be a canonical nonnegative decimal string                         
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approvals and questions: held calls not fully read; Gate queue not fully read; questions not fully read             
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 65389
+ Choose a Keeper before writing · i:choose                                                                              
+TUI_CAPTURE candle-currency malformed-balance changed-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:                                                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀    unavailable: keepers[0]: Candle amount must be a canonical nonnegative decimal string           
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+                                                                                                                        
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    reading…                                                                                                            
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+  1-30/40                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency malformed-balance control-accepted
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:                                                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀    unavailable: keepers[0]: Candle amount must be a canonical nonnegative decimal string           
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+                                                                                                                        
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    could not read: board quarantines: HTTP 503: fixture endpoint unavailable                                           
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+  1-30/40                                                                                                               
+
+  alpha pause accepted  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency malformed-balance recovered-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        9007199254740.993 Candle                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    could not read: board quarantines: HTTP 503: fixture endpoint unavailable                                           
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency off ready-overview
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:18:07  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                                                              
+   Health: ok · Candle ready: ?:Candle details                                                                          
+   Work: 0 currently done in the last 24h · details in Work                                                             
+   Candle issued: 18446744073709551614.999                                                                              
+   Candle burned: 9007199254740.993                                                                                     
+   Candle circulating: 18446735066510296874.006                                                                         
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approvals and questions: confirm queue not fully read; held calls not fully read; Gate queue not fully read; ques…  
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 49208
+ Choose a Keeper before writing · i:choose                                                                              
+TUI_CAPTURE candle-currency off ready-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Candle balance:        9007199254740.993 Candle                                                   
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+                      Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    reading…                                                                                                            
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+  1-30/39                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+TUI_CAPTURE candle-currency off changed-overview
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:18:08  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   p:Approvals / Questions                                                                                              
+   Health: ok                                                                                                           
+   Work: 0 currently done in the last 24h · details in Work                                                             
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approvals and questions: held calls not fully read; Gate queue not fully read; questions not fully read             
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 49208
+ Choose a Keeper before writing · i:choose                                                                              
+TUI_CAPTURE candle-currency off changed-info
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  ▸Info  Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Identity                                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Name:                  alpha                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Paused:                no                                                                         
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Current Work                                                                                      
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Task:                  —                                                                          
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                                                                                    
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  Live Context                                                                                      
+                      Context:               measurement missing                                                        
+                                                                                                                        
+    Current failure                                                                                                     
+    none                                                                                                                
+                                                                                                                        
+    Board attention                                                                                                     
+    reading…                                                                                                            
+                                                                                                                        
+    Gate                                                                                                                
+    Tool calls:            auto · per Gate policy                                                                       
+    Effects (Gate mode):   workspace                                                                                    
+    Lane first:            lane order                                                                                   
+    Gate settings:         unread · keeper Gate settings load failed: HTTP 503: fixture endpoint unavailable            
+                                                                                                                        
+    Runtime Stats                                                                                                       
+    Runtime Target:        default (inherited)                                                                          
+    Total Turns:           0                                                                                            
+    Total Tokens:          0                                                                                            
+    Total Cost:            $0.0000                                                                                      
+    Last Turn:             (never)                                                                                      
+                                                                                                                        
+    Last 24h                                                                                                            
+  1-30/38                                                                                                               
+
+  [ ]:tab  b:requeue board  B:requeue all board  j/k:move  p:pause  w:wake  s:shutdown  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                                                                              
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_candle_currency_pty.py", line 546, in <module>
+    currency_follows_workspace_authority(binary, captures)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_candle_currency_pty.py", line 400, in currency_follows_workspace_authority
+    h.run_terminal_scenario(binary, description="Candle amounts follow current workspace authority",
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        interact=interact, http_fixtures=fixtures, prepare_workspace=prepare,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        refresh=0.5, terminal_cols=160)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_keyboard_input.py", line 2389, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/test/test_tui_candle_currency_pty.py", line 310, in interact
+    assert no_currency(screen(output)) and b"Candle details" not in screen(output)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

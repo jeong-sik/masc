@@ -1,0 +1,44 @@
+{
+  "schema": "masc.dashboard.keeper_waiting_inventory.v4",
+  "source": "server_keeper_waiting_inventory",
+  "generated_at": "2026-10-26T21:12:17Z",
+  "supported_states": [
+    "idle",
+    "busy",
+    "waiting",
+    "deferred"
+  ],
+  "keeper_count_known": true,
+  "keeper_count": 1,
+  "waiting_keeper_count": 0,
+  "row_count": 0,
+  "global_row_count": 0,
+  "total_row_count": 0,
+  "oldest_since": null,
+  "oldest_since_iso": null,
+  "oldest_age_seconds": null,
+  "global_pending_confirm_count_known": true,
+  "global_pending_confirm_count": 0,
+  "pending_approval_state": {
+    "state": "ready"
+  },
+  "source_counts": {},
+  "rows": [],
+  "keepers": [
+    {
+      "keeper_name": "audit-settle-a",
+      "paused": true,
+      "state": "idle",
+      "waiting_on": [],
+      "waiting_count": 0,
+      "sources": {},
+      "since": null,
+      "since_iso": null,
+      "due_at": null,
+      "due_at_iso": null,
+      "source_next_actions": {},
+      "current_execution": null
+    }
+  ],
+  "global_waiting_on": []
+}

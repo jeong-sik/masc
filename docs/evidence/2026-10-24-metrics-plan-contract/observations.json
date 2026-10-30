@@ -1,0 +1,49 @@
+{
+  "before": {
+    "contracts": {
+      "metrics": {
+        "kind": "unsupported_schema_keyword",
+        "path": [
+          "properties",
+          "outcome_basis"
+        ],
+        "keyword": "enum"
+      },
+      "fitness": {
+        "kind": "unsupported_schema_keyword",
+        "path": [
+          "properties",
+          "agents",
+          "items",
+          "properties",
+          "metrics",
+          "properties",
+          "outcome_basis"
+        ],
+        "keyword": "enum"
+      }
+    },
+    "fixture": {
+      "serializer_error": "NaN value not allowed in standard JSON"
+    },
+    "reached_reader": 3,
+    "last_rejection": "collaborator and handoff identities must be nonblank",
+    "nonfinite_and_invalid_rows_rejected": 7,
+    "valid_zero_duration_accepted": true,
+    "actual_producer_shapes_accepted": 2,
+    "malformed_outputs_rejected": 2
+  },
+  "after": {
+    "contracts": {
+      "metrics": "accepted",
+      "fitness": "accepted"
+    },
+    "fixture": "all_rejected_by_source_reader",
+    "reached_reader": 7,
+    "last_rejection": "start time must be finite",
+    "nonfinite_and_invalid_rows_rejected": 7,
+    "valid_zero_duration_accepted": true,
+    "actual_producer_shapes_accepted": 2,
+    "malformed_outputs_rejected": 2
+  }
+}

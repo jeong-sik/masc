@@ -1,0 +1,15 @@
+{"at": 1793319449.1740701, "kind": "inventory_requested", "held": false}
+{"at": 1793319449.174179, "kind": "inventory_returned", "pending_events": 1}
+{"at": 1793319627.1394281, "kind": "fixture_control", "pending_events": 18, "hold_inventory": false}
+{"at": 1793319627.153996, "kind": "inventory_requested", "held": false}
+{"at": 1793319627.1540759, "kind": "inventory_returned", "pending_events": 18}
+{"at": 1793319699.244993, "kind": "fixture_control", "pending_events": 1, "hold_inventory": false}
+{"at": 1793319699.261888, "kind": "inventory_requested", "held": false}
+{"at": 1793319699.262107, "kind": "inventory_returned", "pending_events": 1}
+{"at": 1793319820.4753761, "kind": "fixture_control", "pending_events": 18, "hold_inventory": false}
+{"at": 1793319820.488766, "kind": "inventory_requested", "held": false}
+{"at": 1793319820.488862, "kind": "inventory_returned", "pending_events": 18}
+{"at": 1793319875.643538, "kind": "inventory_requested", "held": false}
+{"at": 1793319875.643866, "kind": "inventory_returned", "pending_events": 18}
+{"at": 1793319891.025747, "kind": "inventory_requested", "held": false}
+{"at": 1793319891.029541, "kind": "inventory_returned", "pending_events": 18}

@@ -1,0 +1,19 @@
+{
+  "README.md": "b0fb51751a0e28b110ba852c077a1df23eadd3a17a3f5e1cb0af4f4878e189ad",
+  "baseline-artifact.json": "7b6d1934bbb726159aceae350498ae5996408e58e34f2f1c9c88c84f859a5866",
+  "baseline-manifest.json": "073dd92a6e971ba93ac711d87a26480b23dad5815ac10b4dcf5d7bf6198aa03f",
+  "candidate-artifact.json": "adf848147c724f095b7511c49139e763552c9c5af038c9495ffdf3f9876e82de",
+  "candidate-manifest.json": "798e38f87ae065baa64c5dbc91c85189f2503a58167b7dc94a7e7226de82f3be",
+  "compare.py": "cb8dc4c62ca53494e835419beb1776cc95b855edfb4e7327484e45459d7636db",
+  "persisted-backlogs.json": "4dffb036c7258ee529a7e887a10e2fbc6b86ca0fd381c740d9f0eab641814b3e",
+  "persisted-backlogs.tar.xz": "bc9c2a529266a4a32bec6f814baaf2f5a1f3bb066aa7273fc74c06c3ace8f518",
+  "plan.json": "2491a8dbc5b2c4a9f3a3fa6c316b8fe68656a6c65e3665e66a6c183fd649ae2d",
+  "receipt-files.json": "07ae9373b3acd5205d2cb9821631aed1c84cfdeb08002efb81bec55d01211804",
+  "receipts.tar.xz": "839a7cf8d6ccd77215c0015a1b368bd5f8e6c2f52dc9e76883b84dfcd84c3e4a",
+  "restore.py": "1f5388873e650e68977f4096ae9ff77d0a4ab1b498025d8139cda079f5d00228",
+  "runtime-fixture.toml": "3cc6877c5057c6148927e24b8951958a0859e7fd5bbf1ed48d5c22a5c056f2ed",
+  "session.py": "3b3f10d420b2c9d26c2c6e09f76b50af8285d6f05618a952b52bb0f74fda123a",
+  "source-scope.json": "fba532173d777621326b9547d41c626fab2277975f7a8242230ece908dd6f404",
+  "summarize.py": "8d48d019ed5cd78d822d9703a8f8c019bca0842fb15fae7300f39d5e74c9ff87",
+  "summary.json": "19866c1d6a1f02541863fbb8920c9a3709150893d10b53a8108fe2bf39b053a1"
+}

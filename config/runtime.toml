@@ -1,0 +1,2959 @@
+# MASC runtime seed.
+#
+# This file is copied into <base-path>/.masc/config/runtime.toml for new
+# workspaces. Existing live config roots are preserved and must be edited
+# explicitly through the dashboard/runtime config path.
+#
+# Local Gemma 4 QAT is a canary runtime, not the fleet default. Keep the
+# default on the cloud runtime and pin only one keeper to local Ollama until
+# sustained turns prove the local box can absorb more load. AGENT_CORE handles Gemma 4
+# thinking through the chat-template control token path, not Ollama think:true.
+
+[memory]
+# Ordinary current working-set targets, including custom categories.
+# Initial rollout: Librarian consolidation guidance and context-status reporting.
+# Existing facts are preserved when targets are exceeded. Counts, not tokens.
+category_cap = 30
+facts_per_category_cap = 30
+
+[wiki_contents]
+# Each Keeper turn carries the wiki table of contents: one line per wiki page
+# (title, file, summary), built from the pages at the start of the turn.
+# false stops listing the wiki and drops the paragraph from every turn.
+enabled = true
+
+[maintenance]
+# Day-file retention for the JSONL stores under .masc, shared by the startup
+# prune and the periodic maintenance prune. Must be a positive integer.
+# Precedence is MASC_JSONL_RETENTION_DAYS, then this key, then 30.
+jsonl_retention_days = 30
+
+[transport]
+# Restart-scoped H2 listener resources. Both H2-only and Auto use these.
+# Stream count is per connection; pending payload bytes are shared by all H2
+# connections of one listener, including streaming queues. These do not limit
+# process RSS, serialization temporaries, cache/source values or protocol frames.
+# Slow consumers within capacity retain whole responses without an idle timeout.
+h2_max_concurrent_streams = 100
+h2_max_pending_response_bytes = 67108864
+
+[skills]
+# The Skill resource read bound is not configured here: it is the shared
+# inline tool-result boundary (Common.max_tool_result_wire_bytes). An older
+# runtime.toml that still sets resource-read-max-bytes logs a WARN and the
+# key is ignored; the next version refuses it (#39284).
+
+# Skill sources are searched in this declared order. The runtime has no hidden
+# source roots; existing workspaces must add the sources they want explicitly.
+[[skills.sources]]
+id = "project-masc"
+anchor = "base-path"
+path = ".masc/skills"
+access = "read-write"
+
+[[skills.sources]]
+id = "project-agents"
+anchor = "base-path"
+path = ".agents/skills"
+access = "read-write"
+
+[[skills.sources]]
+id = "user-masc"
+anchor = "user-home"
+path = ".masc/skills"
+access = "read-write"
+
+[[skills.sources]]
+id = "user-agents"
+anchor = "user-home"
+path = ".agents/skills"
+access = "read-write"
+
+[runtime]
+# Fleet default keeper runtime. Moved deepseek-v4-flash -> glm-5.3-flash on the
+# same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash
+# coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
+default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
+# Vision runtimes (RFC-0414). When no runtime in a keeper's lane can take an
+# image, the eager read and analyze_image read it with these, in order. They
+# never take the keeper's turn. gemma4-31b (Gemma 4,
+# strong OCR/vision) is a cloud runtime fast enough to be usable; a local 27B
+# measured 5+ min per read under load, so it is deliberately not here.
+# gemma4-31b declares image input and an explicit image payload limit below.
+media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
+# Anti-rationalization/completion-authority work uses a typed verdict tool call.
+# Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
+# this explicit smart lane. The judgement call resolves the verifier_exact
+# exact-output lane below (RFC-0361 D7(a)) — [runtime] carries no scalar
+# binding for it.
+
+# TypeSafe AI (System One Jev) Opt-in Integration
+# librarian_preflight = true enables no-change judgment for Memory-only passes;
+# continuity and working-context generation still use the Librarian lane.
+# Calibrated probabilistic decisions for the board_attention_exact lane and
+# the librarian absorb gate (RFC-librarian-absorb-gate).
+# Keys stay in the environment; each destination names the variable holding
+# its own, and a non-blank key in one of them turns the lane on. Everything
+# else about the lane is the [typesafeai] table (sample at the end of this
+# block; absent means the defaults shown there; a misspelt key is a load
+# error): enabled = false turns the lane off even with a key and cannot turn
+# it on without one; destinations lists the System One servers asked in order
+# until one answers (a destination whose variable is empty is left out and
+# reported at boot; every refusal moves on to the next);
+# board_attention is this gate; absorb_gate is the librarian absorb gate
+# (off unless true); excluded_keepers names keepers that neither gate ever
+# asks the vendor about, so their posts, context and memories never leave
+# the machine (a name that is no keeper is reported at boot).
+# When enabled, MASC POSTs each destination's key as an Authorization bearer
+# credential to that destination's endpoint and nowhere else. The JSON body's top-level
+# fields are model, state, and questions. state.signal is only the current
+# signal: kind, post_id, typed comment_id/parent_id, author, title, content,
+# hearth, updated_at, reaction (target_type, target_id, user_id, emoji,
+# reacted) and optional vote (target_kind, target_id, target_author, voter,
+# direction). The persisted post and comment snapshot is not sent.
+# questions.relevance sends type=choice, question text naming the Keeper and
+# its normalized board_interests, and relevant/not_relevant/uncertain criteria
+# descriptions; instructions, record/runtime/task identity, and mention lists
+# are not sent. The current signal must
+# itself address or specifically require the Keeper's role; general topic or
+# capability overlap is not relevant.
+# When on, board attention asks Jev first. A relevant or not-relevant answer
+# whose confidence reaches board_attention_confidence_floor (0 to 1, default
+# 0.3) is kept. A lower-confidence answer, an explicit uncertain answer or a
+# failed call is judged again by the board_attention_exact slots below.
+#
+# [typesafeai]
+# enabled = true
+# destinations = [
+#   { endpoint = "https://api.typesafe.ai/v1/systemone", model = "jev-latest", api_key_env = "TYPESAFEAI_API_KEY" },
+#   # OpenRouter serves the same protocol; listed second it answers when the first does not:
+#   # { endpoint = "https://openrouter.ai/api/v1/systemone", model = "~typesafe/jev-latest", api_key_env = "OPENROUTER_API_KEY" },
+# ]
+# board_attention = true
+# board_attention_confidence_floor = 0.3
+# absorb_gate = false
+# context_review = false       # source Context + proposed summary preservation review
+# skill_applicability = false  # current request + authorized Skill body advice
+# librarian_preflight = false # Memory-only no-change judgment; generates no text
+# workspace_memory_selection_enabled = false
+# Set true separately for host-side shared-memory selection and the explicit
+# keeper_memory_select tool. Selection may send current input/task context,
+# Keeper instructions, shared interpretations, current claims and verified file
+# evidence to the configured destinations. Board/absorb opt-in does not enable
+# this gate. Lane credentials and excluded_keepers still apply.
+# Capacity-driven host-memory retries support Agent Core, Codex and Claude Code.
+# Muse/Antigravity lack that retry path when their memory reader is suppressed.
+# memory_recall = false
+# Set true to send a Keeper's stored facts and the turn's input for the recall
+# judgment. It needs memory_recall_scope: "all" (every Keeper that
+# excluded_keepers does not name) or "listed" with memory_recall_keepers, at
+# least one Keeper name. true without a scope is a load error, so is an empty
+# list, and so is a list next to "all". A name that is no Keeper is reported at
+# boot. With memory_recall = false the scope does nothing but is still checked
+# at load. Lane credentials and excluded_keepers still apply.
+# memory_recall_scope = "listed"
+# memory_recall_keepers = ["keeper-name"]
+# excluded_keepers = []
+
+# max_output_tokens is the output budget a lane's requests send as max_tokens.
+# It is optional: a lane without it sends no max_tokens of its own and the
+# provider's default applies. The model's catalog max_output_tokens is what
+# the model can emit, not a request budget, and is never sent in its place.
+# 8192 tokens bounds a large structured judgment.
+#
+# thinking is optional too: true or false sends that enable_thinking on every
+# HTTP slot of the lane; absent keeps each slot's catalog default (the model's
+# thinking-support). Every slot of the lane must be able to carry the setting,
+# or boot refuses the lane and names the slot. The shipped DeepSeek V4.1
+# Flash binding has a reasoning-effort ladder without none, so thinking = false
+# is not valid for a lane using it. Keep the lane's catalog default unless
+# every slot can carry the requested thinking setting.
+# thinking = false
+[runtime.exact_output_lanes.librarian_exact]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+max_output_tokens = 8192
+
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+max_output_tokens = 8192
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+max_output_tokens = 8192
+
+[runtime.exact_output_lanes.verifier_exact]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+max_output_tokens = 8192
+
+# Answers the Stagehand browser extension's llm.generate
+# (RFC-browser-lane-stagehand §3.7). Stagehand's system_prompt goes to the
+# system slot, so a slot whose model takes no system prompt is refused when
+# the lane is resolved. The lane may also declare cli_slots (subscription
+# official clients); they run as one-shots after the HTTP slots and answer
+# without usage, which Stagehand's protocol leaves optional.
+[runtime.exact_output_lanes.browser_stagehand_exact]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
+max_output_tokens = 8192
+
+# SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
+# docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
+# A keeper opts in with sandbox_profile = "remote_ssh" + remote_endpoint =
+# "<name>" in its keeper TOML; the name must resolve to one of these tables
+# (unknown names are config-load errors, and unknown keys inside a table fail
+# the load — the registry is fail-closed). No live endpoint ships in the seed;
+# provision one with docs/operations/ssh-endpoints-runbook.md, then uncomment.
+#
+# [exec.ssh.endpoints.dev]
+# host = "builder.local"              # required — remote host
+# user = "masc-exec"                  # required — remote unix user
+# remote_root = "/srv/masc/playground"  # required — remote playground root
+# port = 22                           # ssh port (default 22)
+# # Dedicated key — a path *reference*; key material lives at 0600 under
+# # <base>/.masc/ssh/ (config/identity/ conventions). Defaults resolve
+# # base-relative with the endpoint name substituted:
+# #   identity_file    = ".masc/ssh/<name>.key"
+# #   known_hosts_file = ".masc/ssh/known_hosts.d/<name>"  (pinned; public)
+# connect_timeout_sec = 10            # -> ssh ConnectTimeout (default 10)
+# max_concurrent_sessions = 8         # ControlMaster multiplex ceiling;
+#                                     # sshd MaxSessions defaults to 10, so
+#                                     # the ceiling must be explicit (default 8)
+# env_allowlist = []                  # request env names allowed to cross the
+#                                     # wire (default [] — no host secrets cross)
+# capabilities = []                   # reserved Phase 2 markers: "kvm",
+#                                     # "firecracker"; unknown values warn-and-ignore
+# allowed_paths = []                  # extra endpoint roots Execute may name besides
+#                                     # the workdir and /tmp, e.g. ["/app"]; absolute,
+#                                     # normalized, not "/" (default [])
+
+# Every model row bound here carries `reasoning-uncontrolled = true`.
+# ollama.com /v1 turns reasoning on when a request carries no control, so a
+# reasoning-capable row that declares neither an effort nor this key is
+# refused before dispatch (#36412). These rows sent no control before that
+# refusal existed and their answers were the provider's own default; the key
+# says that on purpose rather than picking an effort none of them was probed
+# with. A row that should run at a named depth declares `reasoning-effort`
+# instead -- the two together are refused when runtime.toml is read.
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.com/v1"
+# Budget for the connection, the request and the first response headers, on
+# every call to this provider, streaming or not. Ollama Cloud serving
+# reasoning models (kimi-k2.7-code, minimax-m3) holds the first response
+# header through cold start, admission queueing and long reasoning prefill;
+# a 60 s budget once cut two of the Fusion panel's three models there (only
+# deepseek-v4-pro answered within it). A streaming call runs this phase under
+# the shorter of this budget and the first-event budget, a non-streaming
+# call under the shorter of this budget and its body deadline. There is no
+# default: omit it and no connect budget applies. Key spelling is mirrored by
+# `Runtime_schema.connect_timeout_s_key`.
+connect-timeout-s = 600.0
+# `exact-body-timeout-s` is a positive finite float in seconds: the total
+# HTTP request deadline for Exact-output lanes -- connection, response
+# headers and the full response body. It does not change connect-timeout-s
+# or ordinary Keeper per-call deadlines, and no value is inferred from the
+# connect deadline. Every HTTP provider an Exact-output lane names must
+# declare it: connect-timeout-s ends at the response headers and does not
+# bound the body. Without this key such a slot is left out of its lane at
+# boot and named in the startup report, and a save that adds one is refused,
+# naming lane, slot and provider (#38779).
+# Boot and every save through the server apply it to the AGENT_CORE targets
+# derived from these bindings. The deployment operator owns the value in the
+# resolved runtime.toml's [providers.<id>] table. A save rebuilds the Exact
+# registry with the write, and its response says what happened under
+# application.exact_output_registry: "applied" (rebuilt now), "unpublished"
+# (no registry is running; the next boot publishes one), or "kept" (neither the
+# saved text nor the file it replaced rebuilds one; the old registry keeps
+# serving, and the next boot will not publish one until the file is fixed).
+# Each visited Exact candidate retains its own deadline. Their HTTP wait can
+# accumulate across sequential candidates; this is not a deadline for the
+# whole Librarian pass, its CLI tail, or Memory processing.
+# AGENT_CORE_MODEL_CATALOG replacements keep their own target body_timeout_s;
+# this key does not set an official-client CLI timeout.
+# 1200 s is the operator's chosen value; it matches the glm-coding
+# connect-timeout-s below, which was sized from measured exact-output calls.
+exact-body-timeout-s = 1200.0
+[providers.ollama_cloud.healthcheck]
+path = "/models"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. GET /api/balance
+# (ollama/ollama docs/api/balance.mdx) states a legacy plan's session and
+# weekly windows with their reset times; a credit plan's answer is reported
+# as an error.
+[providers.ollama_cloud.usage-read]
+shape = "ollama-balance"
+url = "https://ollama.com/api/balance"
+refresh-s = 600.0
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+# Setup can point the exact-output lanes at this provider. Without this key
+# such a slot is left out at boot and reported, and a save adding one is
+# refused (#38779).
+# 1200 s is the value ollama_cloud and glm-coding use for their exact slots;
+# see the ollama_cloud comment for what it bounds.
+exact-body-timeout-s = 1200.0
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[providers.glm-coding]
+display-name = "GLM Coding Plan"
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+# Exact-output lanes lead with this provider. connect-timeout-s bounds only
+# the phase before the response headers; a provider that sends headers and
+# then holds the body open is bounded by exact-body-timeout-s below, not by
+# this key -- measured at up to 13.3h on wkbl's curator lane without it
+# (#36979). The value keeps headroom over the slowest healthy exact-output
+# call observed on this endpoint (973s, wkbl 2026-09-13~16); narrow it per
+# deployment.
+connect-timeout-s = 1200.0
+# 1200 s is the operator's chosen value for the whole Exact-output request;
+# it matches the measured connect-timeout-s above. See the ollama_cloud
+# comment for what the key bounds.
+exact-body-timeout-s = 1200.0
+# Judgment requests (verifier, board attention, hitl auto judge) take a freed
+# admission permit ahead of Keeper turns, at most 3 in a row while a Keeper
+# waits. Librarian memory work uses Background: at most 3 combined judgment
+# and Keeper grants pass its oldest waiter. The limit orders the bindings
+# below that declare max-concurrent (RFC
+# judgment-lanes-take-account-admission-before-keeper-turns).
+admission-priority-run-limit = 3
+
+[providers.glm-coding.healthcheck]
+path = "/models"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Undocumented
+# endpoint; Z.AI's own coding plugin calls it.
+[providers.glm-coding.usage-read]
+shape = "zai-quota-limit"
+url = "https://api.z.ai/api/monitor/usage/quota/limit"
+refresh-s = 600.0
+
+[providers.kimi_coding]
+display-name = "Kimi For Coding Subscription"
+protocol = "openai-compatible-http"
+endpoint = "https://api.kimi.com/coding/v1"
+# Setup can point the exact-output lanes at this provider. Without this key
+# such a slot is left out at boot and reported, and a save adding one is
+# refused (#38779).
+# 1200 s is the value ollama_cloud and glm-coding use for their exact slots;
+# see the ollama_cloud comment for what it bounds.
+exact-body-timeout-s = 1200.0
+
+[providers.kimi_coding.credentials]
+type = "env"
+key = "KIMI_API_KEY"
+
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Undocumented
+# endpoint; Kimi's own CLI calls it.
+[providers.kimi_coding.usage-read]
+shape = "kimi-coding-usages"
+url = "https://api.kimi.com/coding/v1/usages"
+refresh-s = 600.0
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+# Setup can point the exact-output lanes at this provider. Without this key
+# such a slot is left out at boot and reported, and a save adding one is
+# refused (#38779).
+# 1200 s is the value ollama_cloud and glm-coding use for their exact slots;
+# see the ollama_cloud comment for what it bounds.
+exact-body-timeout-s = 1200.0
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
+
+# ── Self-hosted OpenAI-compatible servers ───────────────────────────────────
+# llama.cpp, vLLM and MLX all speak /v1/chat/completions, so they need no new
+# protocol — only an honest capability row each, because the three disagree on
+# exactly the features a keeper turn depends on.
+#
+# All three ship commented out, for the same reason the official-client examples
+# below do: none of these servers exists on a fresh install. `enabled = false`
+# is not an option here — the setup wizard walks every declared provider and
+# refuses one whose bindings are all disabled ("has no concrete runtime
+# binding"). Uncomment a stack once its server is up, point `endpoint` at it,
+# and set `api-name` to whatever it reports at /v1/models. The
+# self-hosted-server-templates gate in test_runtime_config_validity uncomments
+# this block on every run, so these rows are parsed even while they sit here.
+#
+# llama.cpp llama-server. Probed 2026-08-29 against build 10180 (Homebrew)
+# serving Qwen3.6-35B-A3B-UD-Q4_K_XL:
+#
+#   tools                        two calls in one turn (Seoul + Tokyo)
+#   tool_choice {name}           honoured
+#   tool_choice "required"       NOT honoured — answered in prose, no call.
+#                                Qwen3.8-27B on the same server does honour it
+#                                (measured 2026-08-30), so this one is the
+#                                model's chat template, not llama.cpp's.
+#   response_format json_schema  honoured exactly: asked for verdict+score,
+#                                got {"verdict":"Excellent","score":5}
+#   reasoning_content            populated under --reasoning-format deepseek
+#   chat_template_kwargs         {"enable_thinking":false} left reasoning empty
+#   seed 7 twice                 same answer both times, with top_k and min_p
+#   image_url                    HTTP 500 "image input is not supported" —
+#                                needs --mmproj, so this row keeps it off
+#
+# --jinja is on by default in this build, so tool calling needs no extra flag.
+# The structured-output result is the interesting one: llama.cpp constrains
+# generation with a real grammar, which ollama.com's cloud wire does not.
+# [providers.llama_server]
+# display-name = "llama.cpp llama-server"
+# protocol = "openai-compatible-http"
+# endpoint = "http://127.0.0.1:8080/v1"
+#
+# [providers.llama_server.healthcheck]
+# path = "/models"
+#
+# vLLM. Declared from the official docs, not probed — vLLM does not run on
+# Apple silicon, so nothing here was measured on this machine.
+#
+#   tool_choice                  auto | none | required | named function.
+#                                "auto" needs --enable-auto-tool-choice and
+#                                --tool-call-parser; "required" and named both
+#                                go through the structured-outputs backend
+#                                (docs.vllm.ai/en/latest/features/tool_calling/)
+#   parallel tool calls          parser- and model-dependent, so this row
+#                                leaves it off rather than claim it
+#   reasoning                    field is `reasoning` — renamed from
+#                                `reasoning_content` — behind --reasoning-parser
+#                                (docs.vllm.ai/.../features/reasoning_outputs/)
+#   thinking control             chat_template_kwargs {"enable_thinking": bool}
+#                                or reasoning_effort low|medium|high|none
+#   structured output            response_format json_schema; the guided_* body
+#                                fields were removed in v0.12.0
+#
+# The overlay's runpod_mtp row serves vLLM too and its reasoning-streaming
+# declaration still names the older field, `reasoning_content`. Check the
+# version actually being served before copying either value.
+# [providers.vllm]
+# display-name = "vLLM OpenAI Server"
+# protocol = "openai-compatible-http"
+# endpoint = "http://127.0.0.1:8000/v1"
+#
+# [providers.vllm.healthcheck]
+# path = "/models"
+#
+# MLX (mlx_lm.server). Declared from the upstream server docs, not probed.
+# Its profile is the narrowest of the three and the reason these cannot share
+# one row: the server accepts tools, seed, top_k, min_p and repetition_penalty,
+# and detects reasoning between the tokenizer's think tokens — but it supports
+# neither `tool_choice` nor response_format JSON-schema validation. Both stay
+# false so the exact-output lanes never pick it as a judge.
+#
+# Upstream default is 127.0.0.1:8080, which collides with llama-server's
+# default; the port here is moved so both templates can be enabled at once.
+# [providers.mlx_server]
+# display-name = "MLX mlx_lm.server"
+# protocol = "openai-compatible-http"
+# endpoint = "http://127.0.0.1:8081/v1"
+#
+# [providers.mlx_server.healthcheck]
+# path = "/models"
+#
+# One row per stack, matching the three disabled providers above. api-name is
+# what the server answers to at /v1/models: llama-server reports its --alias,
+# vLLM and MLX report the model path they were started with. Change it to yours
+# before enabling — a mismatched name reaches the wire verbatim.
+#
+# The build measured 2026-08-29. max-context is what llama-server was started
+# with (-c); it is a launch flag, not a property of the weights, so raise or
+# lower this row to match the server rather than the model card.
+# [models.llama-server-local]
+# api-name = "qwen3.6-35b-a3b"
+# max-context = 262144
+# tools-support = true
+# thinking-support = true
+# streaming = true
+#
+# [models.llama-server-local.capabilities]
+# supports-tool-choice = true
+# supports-named-tool-choice = true
+# Measured false for this model: with tool_choice "required" it answered in
+# prose. Re-measure after changing the served weights — Qwen3.8-27B honours the
+# same request on the same build, so the value belongs to the model.
+# supports-required-tool-choice = false
+# supports-parallel-tool-calls = true
+# thinking-control-format = "chat-template-kwargs"
+# reasoning-streaming-format = "delta:reasoning_content"
+# supports-response-format-json = true
+# supports-structured-output = true
+# Turn these on together with --mmproj on the server, not before.
+# supports-image-input = false
+# supports-multimodal-inputs = false
+# supports-system-prompt = true
+# supports-seed = true
+# supports-top-k = true
+# supports-min-p = true
+#
+# [llama_server.llama-server-local]
+# max-concurrent = 1
+#
+# vLLM serves one model per process, so api-name is the --model it was started
+# with. Parallel tool calls stay off because vLLM's own docs make them parser-
+# and model-dependent rather than a property of the server.
+# [models.vllm-served-model]
+# api-name = "Qwen/Qwen3.6-35B-A3B"
+# max-context = 262144
+# tools-support = true
+# thinking-support = true
+# streaming = true
+#
+# [models.vllm-served-model.capabilities]
+# supports-tool-choice = true
+# supports-named-tool-choice = true
+# supports-required-tool-choice = true
+# supports-parallel-tool-calls = false
+# thinking-control-format = "chat-template-kwargs"
+# Current vLLM renamed this field to `reasoning`; older builds still send
+# `reasoning_content`. Match the version actually being served.
+# reasoning-streaming-format = "delta:reasoning"
+# supports-response-format-json = true
+# supports-structured-output = true
+# supports-image-input = false
+# supports-multimodal-inputs = false
+# supports-system-prompt = true
+# supports-seed = true
+# supports-top-k = true
+# supports-min-p = true
+#
+# [vllm.vllm-served-model]
+# max-concurrent = 1
+#
+# MLX. thinking-support is off because the server has no request-side control
+# over it — it only splits out whatever the tokenizer's think tokens produced —
+# and a runtime that declares thinking makes the seed request enable_thinking,
+# which this wire cannot encode.
+# [models.mlx-served-model]
+# api-name = "mlx-community/Qwen3.8-27B-4bit"
+# max-context = 262144
+# tools-support = true
+# thinking-support = false
+# streaming = true
+#
+# [models.mlx-served-model.capabilities]
+# The server takes no tool_choice, so it cannot be forced onto a tool, and it
+# validates no JSON schema. Both stay false to keep it out of exact-output lanes.
+# supports-tool-choice = false
+# supports-named-tool-choice = false
+# supports-required-tool-choice = false
+# supports-parallel-tool-calls = false
+# thinking-control-format = "none"
+# supports-response-format-json = false
+# supports-structured-output = false
+# supports-image-input = false
+# supports-multimodal-inputs = false
+# supports-system-prompt = true
+# supports-seed = true
+# supports-top-k = true
+# supports-min-p = true
+#
+# [mlx_server.mlx-served-model]
+# max-concurrent = 1
+
+# ── Official client runtimes ──────────────────────────────────────────────────
+# Claude Code, Codex and Antigravity are catalog entries like every provider
+# above. A declaration says what the runtime is; it does not say the CLI is
+# installed or logged in. Whether a keeper or a lane uses one is assignment
+# ([runtime], a keeper's TOML, an exact-output slot list), and whether it can
+# run is what `masc doctor` and a dispatch refusal report. Each CLI owns its
+# stored login or supported API/token environment; MASC preserves declared
+# client authentication and isolates unrelated settings.
+# To use several subscriptions, add one provider per CLI login and bind each
+# provider to any model already declared below. Give each provider a distinct
+# id and display-name. Set account-home to the absolute directory used when
+# signing in with CLAUDE_CONFIG_DIR (Claude) or CODEX_HOME (Codex); omit it for
+# the ordinary CLI login. For Codex, set `cli_auth_credentials_store = "file"`
+# in each account home's config.toml before `CODEX_HOME=<that-home> codex login`
+# so each login persists in its own home. For example, a second Claude login can use:
+#   [providers.claude_second]
+#   display-name = "Claude Code · second account"
+#   protocol = "claude-code"
+#   command = "claude"
+#   is-non-interactive = true
+#   account-home = "/absolute/path/to/claude-second"
+#   [claude_second.claude-code-sonnet]
+# Add as many providers and bindings as needed. Account homes must be distinct
+# for independent logins; the Overview groups them by provider id. To try
+# accounts in order, list their provider.model ids under a runtime lane's
+# `candidates` and assign that lane to a Keeper. Merely declaring an account
+# does not send turns to it.
+#
+# The interactive wizard lists every enabled binding. For scripted --provider
+# selection with multiple models, set wizard-default on the binding to use.
+[providers.claude_code]
+display-name = "Claude Code"
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+
+[models.claude-code-sonnet]
+api-name = "claude-sonnet-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+# Claude Code carries images over the stream-json content-block array, and Codex
+# over its turn/start input list, so a model that reads them says so here. Both
+# halves are required: without this key the turn's images are read by the
+# analyze_image sub-call instead, which costs a provider round-trip and leaves
+# later questions about the same image unanswerable.
+[models.claude-code-sonnet.capabilities]
+supports-image-input = true
+
+# Several claude_code bindings ship, so scripted `--provider claude_code` needs
+# one named as the wizard's pick; the interactive wizard still lists them all.
+[claude_code.claude-code-sonnet]
+wizard-default = true
+
+# Thinking depth on an official client is a model-level `reasoning-effort`, not
+# a capability: the CLI owns the wire, so MASC selects a level rather than
+# encoding a control. One model row per level is the whole mechanism: the rows
+# below bind each model once per level, and a keeper is assigned the level the
+# work deserves. Claude Code rejects "none" and "minimal"; Codex takes both.
+#
+# The Claude Code ladder: Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5 at
+# every level the CLI takes (low..max), and Haiku 4.5.
+# Haiku 4.5 carries no level, so the CLI picks; its window is 200K
+# (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
+# answered `claude -p --model claude-haiku-4-5` the same day.
+[models.claude-code-sonnet-low]
+api-name = "claude-sonnet-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-sonnet-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-low]
+
+[models.claude-code-sonnet-medium]
+api-name = "claude-sonnet-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-sonnet-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-medium]
+
+[models.claude-code-sonnet-high]
+api-name = "claude-sonnet-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-sonnet-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-high]
+
+[models.claude-code-sonnet-xhigh]
+api-name = "claude-sonnet-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-sonnet-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-xhigh]
+
+[models.claude-code-sonnet-max]
+api-name = "claude-sonnet-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-sonnet-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-max]
+
+# Opus 5.5 (released 2026-09-22) serves on the subscription already: it
+# answered `claude-subscription -p --model claude-opus-5-5` on 2026-09-23.
+# Ladder low..max and window 1M (platform model page, checked
+# 2026-09-23). The API refuses forced tool use on this model; MASC never
+# sends it from the Claude Code lane.
+[models.claude-code-opus-5-5-low]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-opus-5-5-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-low]
+
+[models.claude-code-opus-5-5-medium]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-opus-5-5-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-medium]
+
+[models.claude-code-opus-5-5-high]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-opus-5-5-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-high]
+
+[models.claude-code-opus-5-5-xhigh]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-opus-5-5-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-xhigh]
+
+[models.claude-code-opus-5-5-max]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-opus-5-5-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-max]
+
+[models.claude-code-fable-low]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-fable-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-low]
+
+[models.claude-code-fable-medium]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-fable-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-medium]
+
+[models.claude-code-fable-high]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-fable-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-high]
+
+[models.claude-code-fable-xhigh]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-fable-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-xhigh]
+
+[models.claude-code-fable-max]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-fable-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-max]
+
+# Haiku 5.5 (released 2026-10-07) serves on the subscription: Claude Code
+# 2.1.294 answered `claude-subscription -p --model claude-haiku-5-5` on
+# 2026-10-08 at the CLI default and at --effort low, xhigh and max, and
+# reported a 1M context window each time. Ladder low..max as the platform
+# effort page (checked the same day).
+[models.claude-code-haiku-5-5-low]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-haiku-5-5-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-low]
+
+[models.claude-code-haiku-5-5-medium]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-haiku-5-5-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-medium]
+
+[models.claude-code-haiku-5-5-high]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-haiku-5-5-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-high]
+
+[models.claude-code-haiku-5-5-xhigh]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-haiku-5-5-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-xhigh]
+
+[models.claude-code-haiku-5-5-max]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-haiku-5-5-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-max]
+
+[models.claude-code-haiku]
+api-name = "claude-haiku-4-5"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[models.claude-code-haiku.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku]
+
+# Codex reads images from its turn/start input list, so the image capability
+# key means the same thing here as it does above.
+[providers.codex_subscription]
+model-set = "codex"
+display-name = "Codex ChatGPT Subscription"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex-gpt-5-6]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+# One of several codex bindings now, so the wizard's pick is named.
+[codex_subscription.codex-gpt-5-6]
+wizard-default = true
+
+# Codex CLI model cache, fetched 2026-09-30 and refreshed 2026-10-27:
+# the GPT-6.1 family now carries a 500000-token context and text+image
+# input; earlier tiers keep 272000. GPT-6.1 Sol/Terra, GPT-6 Astra/Sol and
+# GPT-5.6 Sol/Terra advertise low..ultra; Luna variants advertise low..max
+# and GPT-5.5 low..xhigh. Each profile is bound below for fresh installations.
+[models.codex-gpt-6-1-sol-low]
+api-name = "gpt-6.1-sol"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+[models.codex-gpt-6-1-sol-low.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-low]
+
+[models.codex-gpt-6-1-sol-medium]
+api-name = "gpt-6.1-sol"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+[models.codex-gpt-6-1-sol-medium.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-medium]
+
+[models.codex-gpt-6-1-sol-high]
+api-name = "gpt-6.1-sol"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+[models.codex-gpt-6-1-sol-high.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-high]
+
+[models.codex-gpt-6-1-sol-xhigh]
+api-name = "gpt-6.1-sol"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+[models.codex-gpt-6-1-sol-xhigh.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-xhigh]
+
+[models.codex-gpt-6-1-sol-max]
+api-name = "gpt-6.1-sol"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+[models.codex-gpt-6-1-sol-max.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-max]
+
+[models.codex-gpt-6-1-sol-ultra]
+api-name = "gpt-6.1-sol"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "ultra"
+[models.codex-gpt-6-1-sol-ultra.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-sol-ultra]
+
+[models.codex-gpt-6-1-terra-low]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+[models.codex-gpt-6-1-terra-low.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-low]
+
+[models.codex-gpt-6-1-terra-medium]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+[models.codex-gpt-6-1-terra-medium.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-medium]
+
+[models.codex-gpt-6-1-terra-high]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+[models.codex-gpt-6-1-terra-high.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-high]
+
+[models.codex-gpt-6-1-terra-xhigh]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+[models.codex-gpt-6-1-terra-xhigh.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-xhigh]
+
+[models.codex-gpt-6-1-terra-max]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+[models.codex-gpt-6-1-terra-max.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-max]
+
+[models.codex-gpt-6-1-terra-ultra]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "ultra"
+[models.codex-gpt-6-1-terra-ultra.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-ultra]
+
+[models.codex-gpt-6-astra-ultra]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "ultra"
+[models.codex-gpt-6-astra-ultra.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-astra-ultra]
+
+[models.codex-gpt-6-sol-ultra]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "ultra"
+[models.codex-gpt-6-sol-ultra.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-sol-ultra]
+
+[models.codex-gpt-5-6-sol-ultra]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "ultra"
+[models.codex-gpt-5-6-sol-ultra.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-5-6-sol-ultra]
+
+[models.codex-gpt-5-6-terra-ultra]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "ultra"
+[models.codex-gpt-5-6-terra-ultra.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-5-6-terra-ultra]
+
+[models.codex-gpt-5-6-sol-medium]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-5-6-sol-medium.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-sol-high]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-5-6-sol-high.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-sol-xhigh]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-5-6-sol-xhigh.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-sol-max]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-5-6-sol-max.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-terra-low]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-5-6-terra-low.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-terra-medium]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-5-6-terra-medium.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-terra-high]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-5-6-terra-high.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-terra-xhigh]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-5-6-terra-xhigh.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-terra-max]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-5-6-terra-max.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-astra-low]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-6-astra-low.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-astra-medium]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-6-astra-medium.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-astra-high]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-6-astra-high.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-astra-xhigh]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-6-astra-xhigh.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-astra-max]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-6-astra-max.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-sol-low]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-6-sol-low.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-sol-medium]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-6-sol-medium.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-sol-high]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-6-sol-high.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-sol-xhigh]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-6-sol-xhigh.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-sol-max]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-6-sol-max.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-luna-low]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-6-luna-low.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-luna-medium]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-6-luna-medium.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-luna-high]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-6-luna-high.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-luna-xhigh]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-6-luna-xhigh.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-6-luna-max]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-6-luna-max.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-luna-low]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-5-6-luna-low.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-luna-medium]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-5-6-luna-medium.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-luna-high]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-5-6-luna-high.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-luna-xhigh]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-5-6-luna-xhigh.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-6-luna-max]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-5-6-luna-max.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-5-low]
+api-name = "gpt-5.5"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-5-5-low.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-5-medium]
+api-name = "gpt-5.5"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-5-5-medium.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-5-high]
+api-name = "gpt-5.5"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-5-5-high.capabilities]
+supports-image-input = true
+
+
+[models.codex-gpt-5-5-xhigh]
+api-name = "gpt-5.5"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-5-5-xhigh.capabilities]
+supports-image-input = true
+
+
+# Antigravity is the one official client that needs a credentials table, and it
+# is a file reference rather than an environment variable: the CLI writes an
+# OAuth token to disk and MASC points at it. `timeout-s` is required on the
+# provider — the CLI gives no progress signal to time a turn against, so the
+# bound has to be declared rather than inferred.
+[providers.antigravity_subscription]
+display-name = "Antigravity Google Subscription"
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 180.0
+
+# A leading "~/" is expanded to the home directory when runtime.toml is read,
+# so this one path serves every workspace on the machine. The CLI writes its
+# token here by default.
+[providers.antigravity_subscription.credentials]
+type = "file"
+path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
+
+# The effort level is part of the model name on this CLI, not a separate knob:
+# `agy --model gemini-3.7-flash-high` is one model to Antigravity. Probed
+# 2026-08-29, all answering in 7-9s: gemini-3.7-flash-high, gemini-3.6-flash-high,
+# gemini-3.1-pro-high, claude-opus-4-6-thinking, claude-sonnet-4-6.
+[models.antigravity-gemini-3-7-flash-high]
+api-name = "gemini-3.7-flash-high"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+# One of several antigravity bindings now, so the wizard's pick is named.
+[antigravity_subscription.antigravity-gemini-3-7-flash-high]
+wizard-default = true
+
+# The rest of `agy models` (2026-09-22); the level is part of each name.
+# Gemini windows are the agent_core catalog's; the two Claude 4.6 models
+# carry Anthropic's published 1M (OpenRouter /models) and gpt-oss-120b 131072.
+# Called that day: claude-sonnet-4-6 and claude-opus-4-6-thinking answered in
+# 8-10s; every gemini model, the one above included, gave no answer in 80s;
+# gpt-oss-120b-medium answered 503 "No capacity available".
+[models.antigravity-gemini-4-argon-high]
+api-name = "gemini-4-argon-high"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-argon-high]
+
+[models.antigravity-gemini-4-argon-medium]
+api-name = "gemini-4-argon-medium"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-argon-medium]
+
+[models.antigravity-gemini-4-argon-low]
+api-name = "gemini-4-argon-low"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-argon-low]
+
+[models.antigravity-gemini-3-8-flash-high]
+api-name = "gemini-3.8-flash-high"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-8-flash-high]
+
+[models.antigravity-gemini-3-8-flash-medium]
+api-name = "gemini-3.8-flash-medium"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-8-flash-medium]
+
+[models.antigravity-gemini-3-8-flash-low]
+api-name = "gemini-3.8-flash-low"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-8-flash-low]
+
+[models.antigravity-gemini-3-7-flash-medium]
+api-name = "gemini-3.7-flash-medium"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-7-flash-medium]
+
+[models.antigravity-gemini-3-7-flash-low]
+api-name = "gemini-3.7-flash-low"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-7-flash-low]
+
+[models.antigravity-gemini-3-6-flash-high]
+api-name = "gemini-3.6-flash-high"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-6-flash-high]
+
+[models.antigravity-gemini-3-6-flash-medium]
+api-name = "gemini-3.6-flash-medium"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-6-flash-medium]
+
+[models.antigravity-gemini-3-6-flash-low]
+api-name = "gemini-3.6-flash-low"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-6-flash-low]
+
+[models.antigravity-gemini-3-1-pro-high]
+api-name = "gemini-3.1-pro-high"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-1-pro-high]
+
+[models.antigravity-gemini-3-1-pro-low]
+api-name = "gemini-3.1-pro-low"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-1-pro-low]
+
+[models.antigravity-claude-opus-5-5-high]
+api-name = "claude-opus-5-5-high"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-opus-5-5-high]
+
+[models.antigravity-claude-opus-5-5-medium]
+api-name = "claude-opus-5-5-medium"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-opus-5-5-medium]
+
+[models.antigravity-claude-opus-5-5-low]
+api-name = "claude-opus-5-5-low"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-opus-5-5-low]
+
+[models.antigravity-claude-sonnet-5-5-high]
+api-name = "claude-sonnet-5-5-high"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-sonnet-5-5-high]
+
+[models.antigravity-claude-sonnet-5-5-medium]
+api-name = "claude-sonnet-5-5-medium"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-sonnet-5-5-medium]
+
+[models.antigravity-claude-sonnet-5-5-low]
+api-name = "claude-sonnet-5-5-low"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-sonnet-5-5-low]
+
+[models.antigravity-claude-sonnet-4-6]
+api-name = "claude-sonnet-4-6"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-sonnet-4-6]
+
+[models.antigravity-claude-opus-4-6-thinking]
+api-name = "claude-opus-4-6-thinking"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-opus-4-6-thinking]
+
+[models.antigravity-gpt-oss-120b-medium]
+api-name = "gpt-oss-120b-medium"
+max-context = 131072
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gpt-oss-120b-medium]
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+# DeepSeek Chat Completions toggles thinking.type; reasoning_effort is a
+# separate effort control (https://api-docs.deepseek.com/guides/thinking_mode/).
+thinking-control-format = "thinking-object"
+
+[models.deepseek-v4-flash]
+reasoning-uncontrolled = true
+# Context comes from each provider's AGENT_CORE catalog binding.
+api-name = "deepseek-v4-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-flash.capabilities]
+max-output-tokens = 384000
+thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[models.gemma4-26b-a4b-qat]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+# AGENT_CORE maps this to Gemma 4's <|think|> chat-template token and omits the
+# generic Ollama top-level think field for this model family.
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[models.gemma4-26b-a4b-qat.capabilities]
+# This runtime rides AGENT_CORE native Ollama /api/chat, which does not serialize
+# tool_choice (agent_core backend_ollama.ml:24). The catalog row for this model
+# names no supports_tool_choice, so the ollama preset's false is what reaches the
+# wire. A supports-tool-choice line in this block would not change that: for a
+# model the catalog names, runtime_adapter reads only thinking-control-format,
+# reasoning-streaming-format and max-output-tokens from here. Re-enabling needs a
+# serializer path + model-side proof, written on the catalog row.
+thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[models.gemma4-e2b-it-qat]
+api-name = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 131072
+tools-support = true
+# AGENT_CORE maps this to Gemma 4's <|think|> chat-template token and omits the
+# generic Ollama top-level think field for this model family.
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[models.gemma4-e2b-it-qat.capabilities]
+# This exact local model reports 131072 context and tools/vision/audio via
+# `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`.
+thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
+supports-image-input = true
+supports-audio-input = true
+supports-multimodal-inputs = true
+
+[models.qwen3-8-27b]
+# Local Ollama model already resident on this machine. Measured 2026-09-12 with
+# `/api/show` and `/api/chat`: 27.3B Q4_K_M, 262144 context, capabilities
+# tools/thinking/vision, 7.2 tok/s generate over a 298-token answer.
+api-name = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.qwen3-8-27b.capabilities]
+# Same transport constraint as the gemma4 rows above: AGENT_CORE native Ollama
+# /api/chat does not serialize tool_choice (agent_core backend_ollama.ml:24), so
+# a forced tool choice would be dropped without an error.
+# Qwen3.8 answers the generic Ollama top-level `think` field rather than a
+# chat-template token. Probed 2026-09-12: `"think": false` suppressed the
+# reasoning block, and a tools request returned get_weather(city="Seoul").
+thinking-control-format = "ollama_think"
+# `/api/show` reports vision, and a 64x64 PNG answered in 9.3s end to end
+# (2026-09-12). Latency on full-size screenshots is NOT measured, which is why
+# this runtime is deliberately left out of [runtime] media_failover.
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama.qwen3-8-27b]
+
+[deepseek.deepseek-v4-pro]
+
+[deepseek.deepseek-v4-flash]
+wizard-default = true
+
+# GLM-5.3 — primary slot of the exact-output judgement lanes (Z.AI 2026-08-14).
+# The api-name is the exact z.ai coding-plan id, confirmed against
+# GET /coding/paas/v4/models on 2026-08-30 (glm-5.3 present; a json_object
+# completion answered on that wire). The window is the AGENT_CORE catalog's.
+[models.glm-5-3]
+api-name = "glm-5.3"
+tools-support = true
+thinking-support = true
+# Non-preserved reasoning by default: AGENT_CORE owns GLM's clear_thinking wire
+# contract, and preserved thinking replays history into every later keeper turn.
+preserve-thinking = false
+streaming = true
+
+[models.glm-5-3.capabilities]
+max-output-tokens = 128000
+
+[glm-coding.glm-5-3]
+max-concurrent = 4
+# One of several glm-coding bindings now, so the wizard's pick is named.
+wizard-default = true
+
+# The rest of the coding plan's text models (GET /coding/paas/v4/models,
+# 2026-09-22). All answered a plain and a tool-call completion that day;
+# windows come from their glm-coding catalog rows. glm-5.3-flashx is listed
+# but refused on this plan (code 1311), so it is not bound.
+[models.glm-5-2]
+api-name = "glm-5.2"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-5-2]
+max-concurrent = 4
+
+[models.glm-5-1]
+api-name = "glm-5.1"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-5-1]
+max-concurrent = 4
+
+[models.glm-5-turbo]
+api-name = "glm-5-turbo"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-5-turbo]
+max-concurrent = 4
+
+[models.glm-5]
+api-name = "glm-5"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-5]
+max-concurrent = 4
+
+[models.glm-4-7]
+api-name = "glm-4.7"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-4-7]
+max-concurrent = 4
+
+[models.glm-4-6]
+api-name = "glm-4.6"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-4-6]
+max-concurrent = 4
+
+[models.glm-4-5]
+api-name = "glm-4.5"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-4-5]
+max-concurrent = 4
+
+[models.glm-4-5-air]
+api-name = "glm-4.5-air"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-4-5-air]
+max-concurrent = 4
+
+# Kimi For Coding — second slot of the exact-output judgement lanes since the
+# 2026-08-28 swap (json_schema+strict probed live; quota independent of
+# ollama.com).
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 262144
+tools-support = true
+streaming = true
+
+[models.kimi-for-coding.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+# One of several kimi_coding bindings now, so the wizard's pick is named.
+[kimi_coding.kimi-for-coding]
+wizard-default = true
+
+# K3 on the same plan, at both windows GET /coding/v1/models lists
+# (1048576 and the 262144 k3-256k, 2026-09-22). Not called that day: the
+# plan's weekly quota was spent.
+[models.kimi-k3]
+api-name = "k3"
+tools-support = true
+streaming = true
+
+[models.kimi-k3.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[kimi_coding.kimi-k3]
+
+[models.kimi-k3-256k]
+api-name = "k3-256k"
+tools-support = true
+streaming = true
+
+[models.kimi-k3-256k.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[kimi_coding.kimi-k3-256k]
+
+# MiniMax M3 (Ollama Cloud) — chat/runtime binding. No wire schema guarantee:
+# the 2026-08-29 probe found ollama.com cloud ignores json_schema on /v1 and
+# `format` on /api/chat alike, so structured output is a prompt+parser
+# contract here, never a runtime capability claim.
+# api-name originally verified 2026-06-18 against
+# https://ollama.com/v1/chat/completions.
+[models.minimax-m3]
+reasoning-uncontrolled = true
+api-name = "minimax-m3"
+# The MiniMax-M3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.minimax-m3.capabilities]
+max-output-tokens = 131072
+thinking-control-format = "none"
+# SSOT = agent-core models.toml. This binding reaches MiniMax over Ollama
+# Cloud's OpenAI-compatible wire ([providers.ollama_cloud] points at
+# https://ollama.com/v1), not MiniMax's own Chat API, and that wire documents
+# response_format as supported and tool_choice as not
+# (docs.ollama.com/api/openai-compatibility, checked 2026-09-21). A capability
+# this binding has therefore comes from the wire as much as from the model, and
+# models.toml carries a row per wire: a bare minimax-m3 row for MiniMax's own
+# API and an ollama_cloud row for this one. That row declares structured output
+# off as well — /v1 accepts json_schema but does not guarantee schema-shaped
+# output, and strict schemas belong on the native /api/chat lane.
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.minimax-m3]
+
+# Ollama Cloud canonical model seeds
+# Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
+# Runtime model keys are TOML-safe slugs; api-name preserves the official Cloud model id.
+
+# DeepSeek V4.1 Flash. /api/show 2026-09-18: caps=[completion,thinking,tools,
+# vision], context_length=1048576. Unlike the other Cloud rows this one states an
+# effort instead of reasoning-uncontrolled, because ollama.com /v1 turns
+# reasoning on whenever the request carries no control value.
+[models.ollama-cloud-deepseek-v4-1-flash]
+api-name = "deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.ollama-cloud-deepseek-v4-1-flash.capabilities]
+thinking-control-format = "reasoning-effort"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+# No wizard-default: this binding is selectable without changing the fleet default.
+[ollama_cloud.ollama-cloud-deepseek-v4-1-flash]
+
+# DeepSeek V4.1 Flash without thinking. Same weights and wire as the row
+# above, but reasoning-effort "none": the endpoint answers with no reasoning
+# block (probed 2026-09-28: reasoning 0 chars and prompt tokens 43 -> 17 on
+# the same prompt that thought at low/minimal). A separate binding, not a
+# change to the low-effort one, so a lane can trial the no-thinking variant
+# while the fleet default stays put. The repeat-cut lane rule keys on
+# api-name, so this binding shares the skip with its thinking sibling on
+# turns the sibling collapsed (keeper_turn_driver.ml).
+[models.ollama-cloud-deepseek-v4-1-flash-none]
+api-name = "deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "none"
+
+[models.ollama-cloud-deepseek-v4-1-flash-none.capabilities]
+thinking-control-format = "reasoning-effort"
+reasoning-streaming-format = "delta:reasoning"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+# No wizard-default: opt-in binding for lanes and trials.
+[ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none]
+[models.ollama-cloud-deepseek-v4-pro]
+reasoning-uncontrolled = true
+api-name = "deepseek-v4-pro"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-deepseek-v4-pro.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-deepseek-v4-pro]
+
+[models.ollama-cloud-gemma4-31b]
+reasoning-uncontrolled = true
+api-name = "gemma4:31b"
+# The Gemma 4 31B model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-gemma4-31b.capabilities]
+thinking-control-format = "none"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-gemma4-31b]
+
+[models.ollama-cloud-glm-5-2]
+reasoning-uncontrolled = true
+api-name = "glm-5.2"
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-5-2.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-glm-5-2]
+
+# Zhipu GLM-5.3 through Ollama Cloud. /api/show 2026-08-29:
+# caps=[completion,thinking,tools], context_length=1048576, arch=glm_dsa_moe.
+# The same model also answers on the Z.AI coding plan; this row is the
+# ollama_cloud wire and carries that wire's control truth (see the "none"
+# note the sibling rows share).
+[models.ollama-cloud-glm-5-3]
+reasoning-uncontrolled = true
+api-name = "glm-5.3"
+# The GLM-5.3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-5-3.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-glm-5-3]
+
+# Zhipu GLM-5.3 Flash. /api/show 2026-08-29:
+# caps=[completion,thinking,tools,vision], context_length=1048576,
+# arch=glm5_next. The vision capability is not registry-only: a 64x64 probe PNG
+# (white 44x20 rectangle on black) came back as "Rectangle ... roughly twice as
+# wide as it is tall" on this wire on 2026-08-29.
+# supports-multimodal-inputs follows every other vision row on this provider,
+# which pairs it with image input. /api/show evidences vision only, so the flag
+# is convention rather than measurement here — it stays a generic document flag
+# with no per-provider file-input contract behind it (#27908).
+[models.ollama-cloud-glm-5-3-flash]
+reasoning-uncontrolled = true
+api-name = "glm-5.3-flash"
+# The GLM-5.3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-5-3-flash.capabilities]
+thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe,
+# 2026-08-29; same contract as the deepseek rows above). thinking-control-format
+# above is the request axis only; without this line the response axis resolves
+# to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-glm-5-3-flash]
+# The wizard preselects this provider, so pressing Enter has to land on the
+# same model [runtime].default already names. It sat on deepseek-v4-flash,
+# and accepting the preselection quietly changed the default.
+wizard-default = true
+
+[models.ollama-cloud-gpt-oss-20b]
+reasoning-uncontrolled = true
+api-name = "gpt-oss:20b"
+# The gpt-oss model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 131072
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-gpt-oss-20b.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-gpt-oss-20b]
+
+[models.ollama-cloud-gpt-oss-120b]
+reasoning-uncontrolled = true
+api-name = "gpt-oss:120b"
+# The gpt-oss model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 131072
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-gpt-oss-120b.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-gpt-oss-120b]
+
+[models.ollama-cloud-kimi-k2-6]
+reasoning-uncontrolled = true
+api-name = "kimi-k2.6"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-kimi-k2-6.capabilities]
+thinking-control-format = "none"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-kimi-k2-6]
+
+# Kimi K2.7 Code. /api/show 2026-09-22: caps=[vision,thinking,completion,tools],
+# context_length=262144; a plain and a tool-call completion answered that day.
+[models.ollama-cloud-kimi-k2-7-code]
+reasoning-uncontrolled = true
+api-name = "kimi-k2.7-code"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-kimi-k2-7-code.capabilities]
+thinking-control-format = "none"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-kimi-k2-7-code]
+
+# Moonshot Kimi K3 through Ollama Cloud. /api/show 2026-08-29:
+# caps=[vision,thinking,completion,tools], context_length=1048576.
+# The name is provider-qualified because kimi_coding also serves a model called
+# kimi-k3 under a separate subscription, and an unqualified row would make the
+# catalog join ambiguous.
+[models.ollama-cloud-kimi-k3]
+reasoning-uncontrolled = true
+api-name = "kimi-k3"
+# The Kimi-K3 model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-kimi-k3.capabilities]
+thinking-control-format = "none"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-kimi-k3]
+
+[models.ollama-cloud-minimax-m2-7]
+reasoning-uncontrolled = true
+api-name = "minimax-m2.7"
+max-context = 196608
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-minimax-m2-7.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-minimax-m2-7]
+
+[models.ollama-cloud-mistral-large-3-675b]
+api-name = "mistral-large-3:675b"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-mistral-large-3-675b.capabilities]
+thinking-control-format = "none"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-mistral-large-3-675b]
+
+[models.ollama-cloud-nemotron-3-nano-30b]
+reasoning-uncontrolled = true
+api-name = "nemotron-3-nano:30b"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-nemotron-3-nano-30b.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-nemotron-3-nano-30b]
+
+[models.ollama-cloud-nemotron-3-super]
+reasoning-uncontrolled = true
+api-name = "nemotron-3-super"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-nemotron-3-super.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-nemotron-3-super]
+
+[models.ollama-cloud-nemotron-3-ultra]
+reasoning-uncontrolled = true
+api-name = "nemotron-3-ultra"
+# The Nemotron 3 Ultra model card recommends temperature 1.0. This host honours
+# temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-nemotron-3-ultra.capabilities]
+thinking-control-format = "none"
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-nemotron-3-ultra]
+
+[ollama.gemma4-26b-a4b-qat]
+wizard-default = true
+max-concurrent = 1
+
+[ollama.gemma4-e2b-it-qat]
+max-concurrent = 1
+
+
+# ── Runtime candidate orders ─────────────────────────────────
+# A lane is an ordered list of runtime candidates under a name you pick. When a
+# keeper is assigned to a lane, the turn attempts candidates in order until one
+# succeeds or the lane is exhausted. Lanes are resolved at config load; unknown
+# candidate ids abort startup. Ordering is the only semantics; a lane table
+# carries only [candidates].
+#
+# The name is yours: it does not have to be a runtime id, and two lanes may
+# start at the same runtime under different names. A lane that no assignment
+# names is never walked.
+[runtime.lanes.coding]
+candidates = [
+  "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+  "deepseek.deepseek-v4-pro",
+]
+
+# Opt-in reviewer route: separate providers let a review continue when one
+# subscription account is quota-blocked. Select this lane explicitly in the
+# live runtime assignments; the public seed never assigns deployment-local
+# keeper names and is not copied over an existing workspace's configuration.
+# A failed attempt with an unknown outward effect remains fenced by the
+# runtime; declaring another candidate does not authorize duplicate execution.
+[runtime.lanes.reviewer-failover]
+candidates = [
+  "codex_subscription.codex-gpt-6-1-sol-high",
+  "glm-coding.glm-5-3",
+  "antigravity_subscription.antigravity-gemini-3-8-flash-high",
+]
+
+# The judge seat of the shipped Fusion presets. A seat names a route and walks
+# its candidates in order (RFC fusion-seat-routes §2.2), so a judge whose first
+# runtime is rate-limited, timing out or refusing the request still answers from
+# the next one instead of failing the whole deliberation. The candidates sit on
+# three different providers on purpose: one provider's outage takes one
+# candidate, not the seat.
+[runtime.lanes.fusion-judge]
+candidates = [
+  "ollama_cloud.minimax-m3",
+  "ollama_cloud.ollama-cloud-deepseek-v4-pro",
+  "deepseek.deepseek-v4-pro",
+]
+
+# ── Keeper assignments ──────────────────────────────────────────────
+# Keepers are assigned to a model by provider.model key. Unassigned
+# keepers fall back to [runtime].default. Per-keeper overrides in the
+# live config (<base>/.masc/config/runtime.toml) take precedence.
+#
+# The public seed ships no keeper assignments: keeper names are
+# deployment-local identities, so per-keeper routing belongs in the live
+# config, not here (enforced by test_runtime_config_validity "public seed
+# has no keeper assignments").
+# Do not assign general keeper lanes to Pro here. Pro is reserved for explicit
+# judge/evaluator lanes ([runtime.exact_output_lanes.verifier_exact] and
+# [fusion].judge).
+#
+# An assignment names a [runtime.lanes] lane or a runtime id
+# (<provider>.<model>). A lane of that name is taken first, so a lane named
+# after a runtime still wins. A name that is neither is rejected at load — which
+# is why a lane with a name of its own is worth more than one that copies a
+# runtime id: delete it and the load fails instead of quietly walking that
+# runtime alone.
+[runtime.assignments]
+# example: pin a test keeper to an explicit runtime
+# canary = "deepseek.deepseek-v4-pro"
+
+# ═══ Repositories ═══════════════════════════════════════════════════
+# 서버가 등록된 GitHub 저장소의 열린 PR 을 60초마다 읽을 때 쓸 토큰의 주인
+# Keeper 다(RFC-0465). 그 Keeper 의 github-cli/hosts.yml 토큰을 읽을 때마다 새로
+# 읽는다. 적지 않으면 PR 을 읽지 않고, /api/v1/repositories/pulls 가 그 이유를
+# 말한다. github_host 와 graphql_url 은 생략하면 github.com 기본값으로 읽고,
+# GitHub Enterprise 를 읽을 때만 두 키를 함께 적는다(호스트만 적으면 무효).
+# 토큰은 그 호스트 이름의 hosts.yml 칸에서 읽는다. 이 표에는 아래 세 키 말고
+# 다른 키를 쓸 수 없다.
+#
+# [repositories]
+# pr_reader = "<keeper>"
+# github_host = "github.example.com"
+# graphql_url = "https://github.example.com/api/graphql"
+
+# ═══ Connectors ══════════════════════════════════════════════════════
+# 어떤 인바운드 메시지가 턴을 시작하는지를 커넥터별로 정한다. 운영자가 적어두는
+# 입장이라 설정 파일에서만 읽는다 — 환경변수 경로는 없다.
+#
+#   mention_or_thread  — 스레드에서 자동 응답, 일반 채널은 멘션 필요 (기본값)
+#   mention_only       — @멘션된 메시지만 응답
+#   all                — 모든 메시지에 응답
+#   user_only:<id>     — 특정 사용자만 (discord=snowflake, slack=member id)
+#
+# 값을 잘못 적으면 게이트웨이가 뜨지 않는다. 오타를 기본값으로 바꿔 읽으면
+# 운영자가 적지 않은 입장으로 봇이 돌기 때문이다 (masc#29078).
+#
+# 이 값은 서버가 부팅할 때 한 번 읽는다. TUI 의 Config → params 화면에서
+# <connector>.trigger_policy 를 고르면 그 선택이 이 파일보다 앞서고, 재시작
+# 없이 다음 메시지부터 적용된다. 그 선택을 지우면 다시 여기로 돌아온다.
+# 우선순위: params 화면 선택 > 이 값 > mention_or_thread
+
+[discord]
+trigger_policy = "mention_or_thread"
+
+[slack]
+trigger_policy = "mention_or_thread"
+
+# Board 글 닫기·다시 열기: 작성자 외에 이 목록의 Keeper도 도구를 쓸 수 있다.
+# 운영자는 별도 Dashboard 관리자 권한으로 처리한다. 빈 배열은 moderator를 끈다.
+[board]
+moderators = ["e-masc-the-leader"]
+
+# ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
+# masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.
+# harness(RFC-0252 §11) 미검증 — 카나리 출력(panel 답 + judge 종합)으로 사후 판단.
+# [fusion] 섹션이 없거나 enabled=false면 masc_fusion 호출은 게이트에서
+# Deny로 즉시 반환되고 모델을 호출하지 않는다.
+#
+# 패널/심판 모델 문자열은 위의 <provider>.<model> 런타임 id를 그대로 쓴다.
+# 패널은 하나 이상의 런타임으로 구성하고, 심판은 패널 답변을 종합한다.
+[fusion]
+enabled = true
+default_preset = "trio"
+# staged_judge_of_judges의 고정 reducer group 크기.
+staged_judge_group_size = 3
+
+# 패널 프리셋. 패널 답변은 free text다. 2026-07-01 사고(ollama.com cloud가 json_schema를
+# 조용히 무시 → 패널 전멸) 이후 패널의 provider-native structured output 요구는 제거됐다
+# (fusion_panel.ml). 따라서 패널 런타임은 supports-structured-output 선언이 필요 없다.
+# 심판도 마찬가지다 — 출력 계약은 wire 가 아닌 프롬프트 asset(fusion.judge.output)과
+# strict parser 가 진다(아래 judge 주석의 2026-08-29 재실측).
+# 프롬프트는 행동을 정의하므로 코드 default가 아니라 여기서 받는다 (누락 시 로드
+# 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
+[fusion.presets.trio]
+panel = [
+  "ollama_cloud.minimax-m3",
+  "ollama_cloud.ollama-cloud-deepseek-v4-pro",
+]
+# The judge output contract is carried by the prompt and the strict parser, not
+# by the wire: fusion_judge.ml strips the response format before dispatch because
+# ollama.com cloud accepts a json_schema and then ignores it. Re-probed
+# 2026-08-29 on /api/chat — deepseek-v4-pro, kimi-k3 and minimax-m3 all returned
+# keys the schema never named, while local Ollama honoured the same request. So
+# a judge runtime does not need supports-structured-output; pick it for answer
+# quality, and keep the judges on different models so the lenses stay independent.
+# The seat names the fusion-judge lane, so one unavailable runtime does not end
+# the run.
+judge = "fusion-judge"
+panel_system_prompt = """
+You are an expert panelist. Answer the user's question directly and concisely \
+with your best independent analysis. Do not defer to other models; give your \
+own view.
+"""
+judge_system_prompt = """
+You are an impartial judge. You are given a panel of model answers to the same \
+question. Synthesize them: identify points of consensus, contradictions, \
+partial coverage, unique insights, and blind spots, then give one resolved \
+answer. Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+# 패널/심판에 MASC web_search/web_fetch 도구를 주입할지 여부.
+web_tools = false
+
+# ── JoJ-capable preset (RFC-0283 judge-of-judges) ───────────────────────────
+# masc_fusion topology="judge_of_judges"는 preset에 1차 심판 >= 2명을 요구한다
+# (fusion_orchestrator.run_judge_of_judges). trio는 단일 judge라 JoJ 호출이 항상
+# "requires >= 2 judges"로 fail-closed된다 → 키퍼가 JoJ topology를 쓸 수 없었다.
+# quorum은 서로 다른 렌즈(evidence/coverage)의 1차 심판 2명을 두고, meta judge(judge=)가
+# 두 종합을 재조정한다. 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
+# No panel or judge runtime below needs a supports-structured-output
+# declaration: the wire carries no schema at all (fusion_judge.ml strips the
+# response format before dispatch), and the output contract lives in the
+# fusion.judge.output prompt asset plus the strict parser (2026-08-29
+# re-probe: ollama.com cloud ignores json_schema on both /v1 and /api/chat).
+# Distinct labels preserve lens identity; keep judges on different models so
+# the lenses stay independent.
+# staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)의 정확한 배수
+# 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
+[fusion.presets.quorum]
+panel = [
+  "ollama_cloud.minimax-m3",
+  "ollama_cloud.ollama-cloud-deepseek-v4-pro",
+]
+panel_system_prompt = """
+You are an expert panelist. Answer the user's question directly and concisely \
+with your best independent analysis. Do not defer to other models; give your \
+own view.
+"""
+# meta judge: 1차 심판들의 종합을 재조정하는 최종 reducer (RFC-0283).
+judge = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+judge_system_prompt = """
+You are the meta-judge. You are given several independent judge syntheses of the \
+same panel of model answers, each produced through a different evaluative lens. \
+Reconcile them: where the judges agree, state the consensus; where they diverge, \
+adjudicate with reasons; surface any blind spot that a single lens missed. Produce \
+one resolved answer. Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+web_tools = false
+
+# 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다 (JoJ requires >= 2; RFC-0283).
+# label이 정체성을 주므로 distinct lens는 distinct identity가 된다 (Duplicate_judge 회피).
+# Panel and judge runtimes need no structured-output declaration — see the
+# preset comment above. Some model families overlap across panel and judge
+# lanes; distinct labels still preserve lens identity for judge-of-judges
+# routing.
+[[fusion.presets.quorum.judges]]
+model = "ollama_cloud.minimax-m3"
+label = "evidence"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through an EVIDENCE lens: weigh each claim by how well it is supported, flag \
+unsupported assertions, and prefer conclusions grounded in verifiable reasoning. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+
+[[fusion.presets.quorum.judges]]
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+label = "coverage"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a COVERAGE lens: map what each answer addresses and omits, surface blind \
+spots and unique insights, and prefer the most complete resolution. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+
+# ── Staged-JoJ-capable preset (RFC-0283 staged_judge_of_judges) ──────────────
+# staged_judge_of_judges는 judge 수가 [fusion].staged_judge_group_size(=3)의
+# 정확한 배수이면서 group_size*2(=6) 이상이어야 한다 (fusion_policy.staged_judge_groups).
+# 지금까지 충족 preset이 0이라 topology가 도구 스키마에 노출되고도 모든 호출이
+# config 에러로 fail-closed되는 죽은 옵션이었다. council은 6개 lens 심판을
+# 3개씩 2 stage로 나눈다: stage 1 = evidence/coverage/risk, stage 2 =
+# feasibility/simplicity/adversarial. 각 stage meta가 그룹 종합을 만들고 최종
+# meta judge(judge=)가 stage 종합들을 재조정한다. label이 정체성을 주므로
+# 같은 모델이 다른 lens로 반복 등장해도 Duplicate_judge가 아니다 (quorum 주석과
+# 동일 계약). 심판 런타임은 supports-structured-output 선언이 필요 없다 — wire 는
+# schema 를 싣지 않고 계약은 프롬프트 asset(fusion.judge.output)과 strict parser 가
+# 진다(2026-08-29 재실측).
+# 비용/지연: LLM 호출 11회(panel 2 + 1차 심판 6 + stage meta 2 + 최종 meta 1).
+# 실행은 4단 순차 파이프라인(panel → 1차 심판 병렬 → stage meta 병렬 → 최종
+# meta, fusion_orchestrator run_staged_judge_of_judges)이며 각 단의 경과 시간은 관측된다.
+# 키퍼 사용: masc_fusion preset="council" topology="staged_judge_of_judges"
+# (judge_of_judges topology도 동일 preset으로 사용 가능 — 6 lens 병렬 후 meta).
+[fusion.presets.council]
+panel = [
+  "ollama_cloud.minimax-m3",
+  "ollama_cloud.ollama-cloud-deepseek-v4-pro",
+]
+panel_system_prompt = """
+You are an expert panelist. Answer the user's question directly and concisely \
+with your best independent analysis. Do not defer to other models; give your \
+own view.
+"""
+judge = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+judge_system_prompt = """
+You are the meta-judge. You are given stage syntheses, each produced by a group \
+of judges evaluating the same panel of model answers through different lenses. \
+Reconcile them: where the stages agree, state the consensus; where they diverge, \
+adjudicate with reasons; surface any blind spot that a single stage missed. \
+Produce one resolved answer. Respond with ONLY the requested JSON object, no \
+prose and no code fences.
+"""
+web_tools = false
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.minimax-m3"
+label = "evidence"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through an EVIDENCE lens: weigh each claim by how well it is supported, flag \
+unsupported assertions, and prefer conclusions grounded in verifiable reasoning. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+label = "coverage"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a COVERAGE lens: map what each answer addresses and omits, surface blind \
+spots and unique insights, and prefer the most complete resolution. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+label = "risk"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a RISK lens: identify failure modes, hidden assumptions, and worst-case \
+consequences each answer implies, and prefer the resolution that degrades most \
+gracefully. Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.minimax-m3"
+label = "feasibility"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a FEASIBILITY lens: judge how implementable each proposal is with the \
+stated constraints and resources, and prefer the most actionable resolution. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+label = "simplicity"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a SIMPLICITY lens: prefer the resolution with the fewest moving parts \
+that still answers the question fully, and flag accidental complexity. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+
+[[fusion.presets.council.judges]]
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+label = "adversarial"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through an ADVERSARIAL lens: actively try to refute each answer's key claims, \
+keep only what survives refutation, and prefer the most defensible resolution. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+
+# ── OpenRouter ───────────────────────────────────────────────────────────────
+# One OpenAI-compatible endpoint in front of many vendors. Per-model
+# capabilities and prices live in the AGENT_CORE catalog as provider-scoped rows
+# (packages/agent_core/models.toml, "OpenRouter Models"), so the model entries
+# below carry only what the runtime layer owns and do not restate them.
+[providers.openrouter]
+display-name = "OpenRouter"
+protocol = "openai-compatible-http"
+endpoint = "https://openrouter.ai/api/v1"
+# Setup can point the exact-output lanes at this provider. Without this key
+# such a slot is left out at boot and reported, and a save adding one is
+# refused (#38779).
+# 1200 s is the value ollama_cloud and glm-coding use for their exact slots;
+# see the ollama_cloud comment for what it bounds.
+exact-body-timeout-s = 1200.0
+
+[providers.openrouter.healthcheck]
+path = "/models"
+
+[providers.openrouter.credentials]
+type = "env"
+key = "OPENROUTER_API_KEY"
+
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Documented at
+# openrouter.ai/docs/api-reference/limits.
+[providers.openrouter.usage-read]
+shape = "openrouter-key"
+url = "https://openrouter.ai/api/v1/key"
+refresh-s = 600.0
+
+# OpenRouter identifies the calling app by these two headers and attributes
+# usage to it. Both were accepted (HTTP 200) on all twelve probed models.
+[providers.openrouter.headers]
+HTTP-Referer = "https://github.com/jeong-sik/masc"
+X-Title = "MASC"
+
+
+# ── OpenRouter models ────────────────────────────────────────────────────────
+# Twelve ids probed live on 2026-09-10; every one answered HTTP 200 on a plain
+# completion and eleven of twelve on tool_choice=required (the exception,
+# qwen3.8-max, is declared in the catalog row, not here). Evidence:
+# docs/evidence/task-openrouter-support/PROBE-SUMMARY.md.
+#
+# Each entry declares reasoning-effort because these rows resolve to the
+# reasoning_effort thinking dialect, whose only wire control *is* the effort
+# value. With the key absent an enable_thinking turn has nothing to encode and
+# is refused as Enable_not_encodable — the same trap the ollama.com rows above
+# avoid by declaring no dialect at all. "high" is the value probed live
+# (probe4-*-effort-only.json: gpt-5.5 returned reasoning.summary +
+# reasoning.encrypted, deepseek-v4-flash returned reasoning.text).
+#
+# The fleet default above is unchanged: these are dispatchable runtimes, not a
+# new house model. One binding does claim wizard-default, because the install
+# wizard refuses a provider with several enabled bindings and no default
+# ("provider openrouter has 12 enabled bindings and no install wizard
+# default") and then reports the provider as unknown - the provider would be
+# uninstallable. A wizard choice also owes a seed overlay [[targets]] row, and
+# an exact-output target wants thinking off so the answer lands in content
+# rather than the reasoning field. That rules out the cheaper glm-5.3-flash:
+# its endpoint refuses reasoning_effort "none" outright (HTTP 400, probe7), so
+# a disable is not encodable there. deepseek-v4-flash takes the disable, and
+# among the ids that do it is the cheapest on both axes ($0.0886/$0.177 per
+# 1M).
+#
+# No entry pins max-context either: the catalog row already carries the
+# window and resolve_max_context_of_runtime reads it when runtime.toml
+# states none, so restating it here would only be a second copy to drift.
+
+[models.openrouter-claude-opus-5]
+api-name = "anthropic/claude-opus-5"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-claude-opus-5]
+
+[models.openrouter-gpt-5-5]
+api-name = "openai/gpt-5.5"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-5-5]
+
+[models.openrouter-gpt-5-6-sol]
+api-name = "openai/gpt-5.6-sol"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-5-6-sol]
+
+[models.openrouter-gemini-3-8-flash]
+api-name = "google/gemini-3.8-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gemini-3-8-flash]
+
+[models.openrouter-grok-4-6]
+api-name = "x-ai/grok-4.6"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-grok-4-6]
+
+[models.openrouter-kimi-k3]
+api-name = "moonshotai/kimi-k3"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-kimi-k3]
+
+[models.openrouter-glm-5-3-flash]
+api-name = "z-ai/glm-5.3-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-glm-5-3-flash]
+
+[models.openrouter-glm-5-3]
+api-name = "z-ai/glm-5.3"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-glm-5-3]
+
+[models.openrouter-deepseek-v4-flash]
+api-name = "deepseek/deepseek-v4-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-deepseek-v4-flash]
+wizard-default = true
+
+[models.openrouter-deepseek-v4-1-flash]
+api-name = "deepseek/deepseek-v4.1-flash-1017"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-deepseek-v4-1-flash]
+
+[models.openrouter-deepseek-v4-pro]
+api-name = "deepseek/deepseek-v4-pro"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-deepseek-v4-pro]
+
+[models.openrouter-qwen3-8-max]
+api-name = "qwen/qwen3.8-max-0902"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-qwen3-8-max]
+
+# More ids probed live on 2026-09-22 in the same shape as the twelve
+# above (evidence/task-openrouter-new-models/SUMMARY.md). Every one answered a
+# plain completion and took reasoning_effort "high"; the catalog rows carry
+# the rest, including which refuse "none" or tool_choice required.
+
+[models.openrouter-claude-fable-5-1]
+api-name = "anthropic/claude-fable-5.1"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-claude-fable-5-1]
+
+[models.openrouter-claude-haiku-4-5]
+api-name = "anthropic/claude-haiku-4.5"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-claude-haiku-4-5]
+
+[models.openrouter-gpt-6-astra]
+api-name = "openai/gpt-6-astra"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-6-astra]
+
+[models.openrouter-gpt-5-6-terra]
+api-name = "openai/gpt-5.6-terra"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-5-6-terra]
+
+[models.openrouter-gpt-5-6-luna]
+api-name = "openai/gpt-5.6-luna"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-5-6-luna]
+
+[models.openrouter-gemini-3-1-pro]
+api-name = "google/gemini-3.1-pro-preview"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gemini-3-1-pro]
+
+[models.openrouter-grok-4-7]
+api-name = "x-ai/grok-4.7"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-grok-4-7]
+
+[models.openrouter-qwen3-8-flash]
+api-name = "qwen/qwen3.8-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-qwen3-8-flash]
+
+[models.openrouter-glm-5-3-flashx]
+api-name = "z-ai/glm-5.3-flashx"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-glm-5-3-flashx]
+
+# ── OpenRouter free models ───────────────────────────────────────────────────
+# Two selected ids passed basic and tool-call probes. See
+# docs/evidence/task-openrouter-free-models/probe-results.json and gen_rows.py.
+# These are available bindings; lane placement remains operator configuration.
+
+[models.openrouter-free-north-mini-code]
+api-name = "cohere/north-mini-code:free"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-free-north-mini-code]
+
+[models.openrouter-free-lfm-2-5-2-6b]
+api-name = "liquid/lfm-2.5-2.6b:free"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-free-lfm-2-5-2-6b]
+
+[models.openrouter-free-nemotron-3-5-super-vl]
+api-name = "nvidia/nemotron-3.5-super-vl:free"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-free-nemotron-3-5-super-vl]
+
+[model_sets.codex]
+models = [
+  "codex-gpt-5-6",
+  "codex-gpt-5-6-sol-medium",
+  "codex-gpt-5-6-sol-high",
+  "codex-gpt-5-6-sol-xhigh",
+  "codex-gpt-5-6-sol-max",
+  "codex-gpt-5-6-terra-low",
+  "codex-gpt-5-6-terra-medium",
+  "codex-gpt-5-6-terra-high",
+  "codex-gpt-5-6-terra-xhigh",
+  "codex-gpt-5-6-terra-max",
+  "codex-gpt-6-astra-low",
+  "codex-gpt-6-astra-medium",
+  "codex-gpt-6-astra-high",
+  "codex-gpt-6-astra-xhigh",
+  "codex-gpt-6-astra-max",
+  "codex-gpt-6-sol-low",
+  "codex-gpt-6-sol-medium",
+  "codex-gpt-6-sol-high",
+  "codex-gpt-6-sol-xhigh",
+  "codex-gpt-6-sol-max",
+  "codex-gpt-6-luna-low",
+  "codex-gpt-6-luna-medium",
+  "codex-gpt-6-luna-high",
+  "codex-gpt-6-luna-xhigh",
+  "codex-gpt-6-luna-max",
+  "codex-gpt-5-6-luna-low",
+  "codex-gpt-5-6-luna-medium",
+  "codex-gpt-5-6-luna-high",
+  "codex-gpt-5-6-luna-xhigh",
+  "codex-gpt-5-6-luna-max",
+  "codex-gpt-5-5-low",
+  "codex-gpt-5-5-medium",
+  "codex-gpt-5-5-high",
+  "codex-gpt-5-5-xhigh",
+  "codex-gpt-6-1-sol-low",
+  "codex-gpt-6-1-sol-medium",
+  "codex-gpt-6-1-sol-high",
+  "codex-gpt-6-1-sol-xhigh",
+  "codex-gpt-6-1-sol-max",
+  "codex-gpt-6-1-sol-ultra",
+  "codex-gpt-6-astra-ultra",
+  "codex-gpt-6-sol-ultra",
+  "codex-gpt-5-6-sol-ultra",
+  "codex-gpt-5-6-terra-ultra",
+]

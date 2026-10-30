@@ -1,0 +1,27 @@
+{
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/39897358407",
+  "exact_head": "57b06a6ee933c7571caa509a4e57876e8b15fc98",
+  "conclusion": "success",
+  "suites": [
+    {
+      "suite": "test_keeper_librarian_addon_owner",
+      "tests": 23,
+      "passed": 23,
+      "suite_seconds": 10.68
+    },
+    {
+      "suite": "test_keeper_librarian_durable_execution",
+      "tests": 11,
+      "passed": 11,
+      "suite_seconds": 3.826
+    }
+  ],
+  "raw_workflow_log_sha256": "d2e4a89f73e4d6cb8fdde2a47fe8f9bc4d78be016c6b7d1ef20a2510588a6ea3",
+  "excerpt_file": "history-wake-repair-completed-excerpt.txt",
+  "meaning": "Actual queued Keeper wakes survive a corrupt unrelated global original inventory; original history integration remains successful on this head.",
+  "limits": [
+    "Fixture launch/cleanup and loopback provider; real Runtime/Python/HTTP authorization/Memory lane/filesystem.",
+    "No real Docker, paid provider, enabled absorption model, installed binary, visible UI or live Keeper continuity.",
+    "Later typed basis-supersession and forward-replacement journal changes are not certified by this completed run."
+  ]
+}

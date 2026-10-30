@@ -1,0 +1,104 @@
+name: Alphatex native harnesses
+
+# tools/alphatex/native holds the macOS audio/MIDI Swift sources. They are
+# compiled by their own Node harnesses, which invoke `xcrun swiftc`; nothing
+# else in CI compiles them, so this macOS job is the only place those sources
+# are built and exercised. It is not a required check for unrelated pull
+# requests: only changes under tools/alphatex/** (or to this workflow itself)
+# trigger it.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "tools/alphatex/**"
+      # Run when this workflow itself changes, so a pull request that adds or
+      # edits it is exercised before merge.
+      - ".github/workflows/alphatex-native.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alphatex-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Compile and run the alphatex native harnesses
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Swift toolchain
+        run: xcrun swiftc --version
+      - name: Install the SoundFont synthesis library
+        run: |
+          brew install fluid-synth
+          python3 - <<'PY'
+          import ctypes
+          import ctypes.util
+          path = ctypes.util.find_library('fluidsynth')
+          if not path:
+              raise RuntimeError('FluidSynth library unavailable to Python')
+          library = ctypes.CDLL(path)
+          library.fluid_version_str.restype = ctypes.c_char_p
+          print('FluidSynth', library.fluid_version_str().decode())
+          PY
+      - name: Install the terminal package dependencies
+        working-directory: tools/alphatex
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Native Swift harnesses
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          harnesses=(tools/alphatex/native/test-*.mjs)
+          if (( ${#harnesses[@]} == 0 )); then
+            echo "::warning::No test-*.mjs harness under tools/alphatex/native on this ref."
+            echo "SKIP native harnesses: none on this ref."
+            echo "The alphatex native Swift transport harnesses are carried by the"
+            echo "#43719 music stack; this step runs them as soon as they are on the ref."
+            exit 0
+          fi
+          run_harness() (
+            if [[ "$1" == tools/alphatex/native/test-wave-export.mjs \
+               || "$1" == tools/alphatex/native/test-soundfont-wave-export.mjs ]]; then
+              wave_export_root="$(mktemp -d)" || return
+              trap 'rm -rf -- "$wave_export_root"' EXIT
+              native=tools/alphatex/native
+              xcrun swiftc -parse-as-library -D MIDI_LIBRARY -O \
+                "$native/WaveArrangement.swift" "$native/WaveLoopClock.swift" \
+                "$native/SourceAudioClock.swift" "$native/CaptureAudioClock.swift" \
+                "$native/PulseAudioClock.swift" "$native/PulseLoopClock.swift" \
+                "$native/MidiTransport.swift" "$native/UmpTransport.swift" \
+                "$native/UmpOutput.swift" "$native/UmpRegions.swift" \
+                "$native/HybridMidiTransport.swift" "$native/UmpLoopTransport.swift" \
+                "$native/UmpState.swift" -o "$wave_export_root/music-arrangement" \
+                -framework AVFoundation -framework CoreAudio -framework CoreMIDI || return
+              node "$1" "$wave_export_root/music-arrangement" "$wave_export_root/results"
+            else
+              node "$1"
+            fi
+          )
+          status=0
+          for harness in "${harnesses[@]}"; do
+            name="$(basename "$harness")"
+            echo "::group::$name"
+            if run_harness "$harness"; then
+              echo "PASS $name"
+            else
+              echo "FAIL $name" >&2
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$status"
+      - name: Alphatex JavaScript suite
+        working-directory: tools/alphatex
+        run: node --test test/*.test.mjs

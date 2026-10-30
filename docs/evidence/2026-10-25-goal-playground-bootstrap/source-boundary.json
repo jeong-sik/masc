@@ -1,0 +1,34 @@
+{
+  "schema": "masc.goal-bootstrap-source-boundary.v1",
+  "implementation_source": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "direct_base": "00af8ebcf387964fc7f0d67801b392e935f7d103",
+  "actual_cohort_source": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "actual_cohort_server_sha256": "c1ec353779d5fff6a9da9ec4290667ab9b5e158c28c34a7094a691d5d08277a4",
+  "changed_product_inputs_from_actual_cohort": [
+    "lib/workspace/workspace_init.ml",
+    "test/test_goal_verifier_original.ml",
+    "test/test_workspace_bootstrap.ml"
+  ],
+  "code_source_review": {
+    "head": "a0523385b9a5475fcb3998795d09307f262daf32",
+    "base": "00af8ebcf387964fc7f0d67801b392e935f7d103",
+    "canonical_complete_diff_sha256": "127c9a25e113a82ed4d9b677588a974387fbb6bf566d94d634548f412f878629",
+    "verdict": "PASS_SOURCE_ONLY"
+  },
+  "native_selection": {
+    "suites": [
+      "test_workspace_bootstrap",
+      "test_goal_verifier_original"
+    ],
+    "run": 40186754980,
+    "source_sha": "a0523385b9a5475fcb3998795d09307f262daf32"
+  },
+  "claims": {
+    "actual_cohort_runs_new_bootstrap_source": false,
+    "current_main_installation_of_candidate": false,
+    "fresh_goal_model_proof_on_new_bootstrap_binary": false,
+    "whole_regression": false,
+    "whole_stack_approved": false,
+    "original_goal_complete": false
+  }
+}

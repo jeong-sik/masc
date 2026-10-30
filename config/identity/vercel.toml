@@ -1,0 +1,21 @@
+# Vercel's remote MCP server.
+#
+# Only the server is named. Its endpoints and the scopes it publishes come
+# from the two well-known documents it serves, so none of that can go stale
+# here.
+#
+# Measured 2026-08-27: its metadata lists only secret-based methods at the token endpoint, and
+# registration answers with a public client all the same -- which is why the
+# metadata is not what decides. An MCP initialize is refused with 401.
+
+id = "vercel"
+label = "Vercel"
+mcp_url = "https://mcp.vercel.com"
+
+access_token_env = "VERCEL_ACCESS_TOKEN"
+expires_at_env = "VERCEL_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.vercel/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

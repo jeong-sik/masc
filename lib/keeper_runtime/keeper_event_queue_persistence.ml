@@ -1,0 +1,2103 @@
+module Owner_lock = Keeper_event_queue_owner_lock
+module State = Keeper_event_queue_state
+module Quarantine = Keeper_event_queue_quarantine
+
+let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let install_state_change_observer observer = Atomic.set state_change_observer observer
+
+let notify_state_change_observer ~keeper_name =
+  try (Atomic.get state_change_observer) () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn
+      "event queue state-change observer failed keeper=%s: %s"
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
+type owner_identity = Owner_lock.t
+type owner_identity_error = Owner_lock.resolve_error
+
+let resolve_owner_identity = Owner_lock.resolve
+let owner_identity_error_to_string = Owner_lock.resolve_error_to_string
+let owner_identity_equal = ( == )
+
+let owner_identity_hash owner =
+  Hashtbl.hash
+    ( Owner_lock.base_path owner
+    , Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string )
+;;
+
+let owner_identity_base_path = Owner_lock.base_path
+
+let owner_identity_keeper_name owner =
+  Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
+;;
+
+type exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
+
+type accepted_cancellation = State.accepted_cancellation =
+  { source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; operator_operation_id : string
+  ; reason : string
+  }
+
+type accepted_transfer = State.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  ; target_trace_id : Keeper_id.Trace_id.t
+  }
+
+type source_terminal_receipt = State.source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
+  | Turn_attempt_terminal of { detail : string }
+
+type accepted_source_terminal = State.accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
+  }
+
+type transition = State.transition =
+  | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
+  | Ack_source_terminal of accepted_source_terminal
+
+type transition_receipt = State.transition_receipt
+type outbox_entry = State.outbox_entry
+
+type transition_result =
+  | Transition_applied of transition_receipt
+  | Transition_already_applied of transition_receipt
+  | Transition_committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
+
+type pending_turn_terminal_result =
+  | Turn_terminal_committed of transition_result
+  | Turn_selection_withdrawn
+
+type pending_cancellation_result =
+  | Cancellation_committed of transition_result
+  | Cancellation_source_withdrawn
+
+type transfer_projection_result = State.transfer_projection_result =
+  | Transfer_projected
+  | Transfer_already_projected
+
+
+(* v19 adds [checkpoint_retentions] to every pending entry: a checkpoint-yield
+   turn's retention of a Connector_attention wake is durable delivery bookkeeping
+   (see [note_checkpoint_retention_result]), so a restart must not reset it and
+   v18 snapshots cannot supply it. The transition WAL carries a full pre-state,
+   so both files hard-cut together; there is no compatibility decoder. *)
+let snapshot_filename = Keeper_event_queue_schema.snapshot_filename
+let transition_wal_filename = Keeper_event_queue_schema.transition_wal_filename
+
+let owner_error_to_string = Owner_lock.resolve_error_to_string
+
+let resolve_owner ~base_path ~keeper_name =
+  match Owner_lock.resolve ~base_path ~keeper_name with
+  | Ok owner -> Ok owner
+  | Error error -> Error (owner_error_to_string error)
+;;
+
+let keeper_name_of_owner owner =
+  Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
+;;
+
+let keeper_runtime_dir_of_owner owner =
+  Filename.concat
+    (Common.keepers_runtime_dir_of_base ~base_path:(Owner_lock.base_path owner))
+    (keeper_name_of_owner owner)
+;;
+
+let snapshot_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) snapshot_filename
+;;
+
+let transition_wal_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) transition_wal_filename
+;;
+
+let inspect_path_kind ?(follow = false) path =
+  try
+    match Fs_compat.exact_path_kind ~follow path with
+    | Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
+    | (Fs_compat.Exact_missing | Fs_compat.Exact_kind _) as kind -> Ok kind
+  with
+  | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
+    Error (Printf.sprintf "could not inspect event queue path %s: %s" path (Printexc.to_string exn))
+;;
+
+let path_exists_exact path =
+  match inspect_path_kind path with
+  | Ok Fs_compat.Exact_missing -> Ok false
+  | Ok (Fs_compat.Exact_kind _) -> Ok true
+  | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
+  | Error _ as error -> error
+;;
+
+let durable_paths_exist snapshot wal =
+  let open Result.Syntax in
+  let* snapshot_exists = path_exists_exact snapshot in
+  let* wal_exists = path_exists_exact wal in
+  let* intent_exists = path_exists_exact (Quarantine.path ~snapshot) in
+  Ok (snapshot_exists || wal_exists || intent_exists)
+;;
+
+let durable_state_exists_unlocked owner =
+  durable_paths_exist (snapshot_path_of_owner owner) (transition_wal_path_of_owner owner)
+;;
+
+(* Whether the Keeper has a durable queue at all. A missing queue loads as the
+   empty queue, so a caller that must not read "no queue" as "nothing queued"
+   asks this first. *)
+let durable_state_exists_result ~base_path ~keeper_name =
+  match Owner_lock.resolve ~base_path ~keeper_name with
+  | Error error -> Error (owner_error_to_string error)
+  | Ok owner -> durable_state_exists_unlocked owner
+;;
+
+let compact_wal_unlocked ~surface ~path owner =
+  match
+    Fs_compat.rewrite_private_file_durable_locked_result path (fun existing ->
+      (if String.equal existing "" then None else Some ""), ())
+  with
+  | Ok () -> Ok ()
+  | Error detail ->
+    Error
+      (Printf.sprintf
+         "failed to compact checkpointed %s keeper=%s path=%s: %s"
+         surface
+         (keeper_name_of_owner owner)
+         path
+         detail)
+;;
+
+let compact_transition_wals_unlocked owner =
+  compact_wal_unlocked
+    ~surface:"transition WAL"
+    ~path:(transition_wal_path_of_owner owner)
+    owner
+;;
+
+(* Encoding holds the owner's lock. The snapshot codec uses its own executor,
+   which cannot be occupied by a recovery job waiting for this same lock. *)
+let save_snapshot_atomic_with ?(before_write = fun () -> ()) ~strict_parent_sync path state =
+  match
+    try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    let content = Keeper_event_queue_snapshot_codec.encode_state state in
+    before_write ();
+    if strict_parent_sync
+    then Fs_compat.save_file_atomic_strict path content
+    else Fs_compat.save_file_atomic path content
+;;
+
+let save_snapshot_atomic_strict path state =
+  save_snapshot_atomic_with ~strict_parent_sync:true path state
+;;
+
+(* The decoded snapshot, against the file it was decoded from.
+
+   The queue snapshot is rewritten whole rather than appended to, so the file
+   identity and its size and mtime together say whether the bytes on disk are
+   the bytes this state came from. Under a durable lock no writer can move
+   them between the stat and the read.
+
+   Measured 2026-09-05: an idle fleet of eighteen keepers re-read and
+   re-parsed all 6.3 MB of these snapshots about 1.5 times a second, 282 MB
+   in thirty seconds, and did the parse holding the owner's lock -- so every
+   other reader of that keeper waited behind a JSON parse of up to a
+   megabyte. The state does not change on most of those passes.
+
+   Keyed by path rather than by owner: the path is what was read, and two
+   owner values naming one file must not disagree about it. *)
+type snapshot_cache_entry =
+  { sce_stat : Unix.stats
+  ; sce_state : State.t
+  }
+
+let snapshot_cache : (string, snapshot_cache_entry) Hashtbl.t = Hashtbl.create 32
+let snapshot_cache_mutex = Stdlib.Mutex.create ()
+let snapshot_cache_hit_counter = Atomic.make 0
+let snapshot_cache_read_counter = Atomic.make 0
+
+let same_snapshot_file (left : Unix.stats) (right : Unix.stats) =
+  left.Unix.st_dev = right.Unix.st_dev
+  && left.Unix.st_ino = right.Unix.st_ino
+  && left.Unix.st_size = right.Unix.st_size
+  && Float.equal left.Unix.st_mtime right.Unix.st_mtime
+  && Float.equal left.Unix.st_ctime right.Unix.st_ctime
+;;
+
+let cached_snapshot path =
+  match Unix.lstat path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> None
+  | stat when stat.Unix.st_kind <> Unix.S_REG -> None
+  | stat ->
+    Stdlib.Mutex.protect snapshot_cache_mutex (fun () ->
+      match Hashtbl.find_opt snapshot_cache path with
+      | Some entry when same_snapshot_file entry.sce_stat stat -> Some entry.sce_state
+      | None | Some _ -> None)
+;;
+
+let remember_snapshot ~stat path state =
+  (* Bind only the identity sampled around the bytes that were decoded.
+     Re-statting here could attach the old state to a concurrent replacement. *)
+  Stdlib.Mutex.protect snapshot_cache_mutex (fun () ->
+    Hashtbl.replace snapshot_cache path { sce_stat = stat; sce_state = state })
+;;
+
+(* What a strict commit left on disk once it crossed the durability barrier
+   and published its pending queue: the revision, and the identities of the
+   snapshot and the transition WAL. They are sampled right after the barrier
+   and the WAL compaction, under the owner lock, and kept only once
+   [after_commit] has returned, so a publication that raised is published by
+   the next replay.
+
+   The maintenance tick delivers answered Asks, finished compositions and
+   owned job results through [enqueue_stimulus_once_result], and its Ask pass
+   replays every answered Ask whose Keeper is not running, on every tick. A
+   replay that finds its source queued changes nothing, but the strict path
+   could not tell bytes this process confirmed from bytes that followed a
+   failed parent fsync. So it rewrote the snapshot with both fsyncs and
+   published the pending queue to the SSE clients and the Librarian once per
+   source per tick: 94 sources of twelve stopped Keepers on 2026-10-16, 940
+   publications and 779 pairs of Librarian warnings in ten minutes (#43350).
+
+   Every write that reaches the snapshot is a rename, so it changes the
+   snapshot's identity, and a transition WAL that gained or lost rows changes
+   its size or mtime. While both still match and the loaded state carries the
+   recorded revision, the snapshot holds the bytes this process confirmed and
+   announced and the WAL has not changed since, so a replay has nothing left
+   to do. A write that reached either file, another writer and a restart all
+   leave a mismatch, and the replay crosses the barrier again as before. A
+   write that failed before its rename left the confirmed snapshot in place.
+   This rests on what [snapshot_cache] rests on: under the owner lock no other
+   writer replaces these files, and a freed inode is not reused with identical
+   [size], [mtime] and [ctime] (ABA).
+
+   Keyed by snapshot path like [snapshot_cache], and cleared alongside it by
+   [forget_snapshot]. *)
+type durable_confirmation =
+  { dc_revision : int64
+  ; dc_snapshot : Unix.stats
+  ; dc_wal : Unix.stats option
+  }
+
+let durable_confirmations : (string, durable_confirmation) Hashtbl.t = Hashtbl.create 32
+let durable_confirmations_mutex = Stdlib.Mutex.create ()
+
+let forget_snapshot path =
+  Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.remove snapshot_cache path);
+  Stdlib.Mutex.protect durable_confirmations_mutex (fun () ->
+    Hashtbl.remove durable_confirmations path)
+;;
+
+(* [Ok None] is an absent file. A path that cannot be inspected, or is not a
+   regular file, says nothing about what was confirmed. *)
+let regular_file_identity path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_REG; _ } as stat -> Ok (Some stat)
+  | { Unix.st_kind =
+        Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    } -> Error ()
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception (Unix.Unix_error _ | Sys_error _) -> Error ()
+;;
+
+let durable_identity owner =
+  match
+    ( regular_file_identity (snapshot_path_of_owner owner)
+    , regular_file_identity (transition_wal_path_of_owner owner) )
+  with
+  | Ok (Some snapshot), Ok wal -> Some (snapshot, wal)
+  | (Ok None | Error ()), (Ok _ | Error ()) | Ok (Some _), Error () -> None
+;;
+
+let same_wal_identity recorded current =
+  match recorded, current with
+  | None, None -> true
+  | Some recorded, Some current -> same_snapshot_file recorded current
+  | None, Some _ | Some _, None -> false
+;;
+
+let sample_durable_confirmation owner state =
+  Option.map
+    (fun (snapshot, wal) ->
+       { dc_revision = State.revision state; dc_snapshot = snapshot; dc_wal = wal })
+    (durable_identity owner)
+;;
+
+(* [None] is a sample that could not be taken: the files just changed, so an
+   earlier record no longer describes them either. *)
+let keep_durable_confirmation owner confirmation =
+  let path = snapshot_path_of_owner owner in
+  Stdlib.Mutex.protect durable_confirmations_mutex (fun () ->
+    match confirmation with
+    | Some confirmation -> Hashtbl.replace durable_confirmations path confirmation
+    | None -> Hashtbl.remove durable_confirmations path)
+;;
+
+let durably_confirmed owner state =
+  match
+    Stdlib.Mutex.protect durable_confirmations_mutex (fun () ->
+      Hashtbl.find_opt durable_confirmations (snapshot_path_of_owner owner))
+  with
+  | None -> false
+  | Some confirmation ->
+    Int64.equal confirmation.dc_revision (State.revision state)
+    &&
+    (match durable_identity owner with
+     | None -> false
+     | Some (snapshot, wal) ->
+       same_snapshot_file confirmation.dc_snapshot snapshot
+       && same_wal_identity confirmation.dc_wal wal)
+;;
+
+let save_state_unlocked_with ~save_snapshot owner state =
+  let keeper_name = keeper_name_of_owner owner in
+  let path = snapshot_path_of_owner owner in
+  match
+    save_snapshot path state
+  with
+  | Ok () ->
+    (* The atomic writer does not return the written descriptor identity.
+       Re-read once before caching; a post-write stat could name a replacement. *)
+    forget_snapshot path;
+    notify_state_change_observer ~keeper_name;
+    Ok ()
+  | Error message ->
+    (* The file may be half-written, gone, or untouched -- unknown is not a
+       state to answer future reads from. *)
+    forget_snapshot path;
+    Error
+      (Printf.sprintf
+         "failed to persist keeper=%s path=%s: %s"
+         keeper_name
+         path
+         message)
+;;
+
+let save_state_unlocked ?(before_write = fun () -> ()) owner state =
+  save_state_unlocked_with
+    ~save_snapshot:(save_snapshot_atomic_with ~before_write ~strict_parent_sync:false)
+    owner
+    state
+;;
+
+type snapshot_read_error_kind =
+  | Invalid_path
+  | Read_failed
+  | Parse_failed
+  | Incoherent_read
+
+type snapshot_read_error =
+  { kind : snapshot_read_error_kind
+  ; path : string option
+  ; message : string
+  }
+
+let snapshot_read_error_kind_to_string = function
+  | Invalid_path -> "invalid_path"
+  | Read_failed -> "read_failed"
+  | Parse_failed -> "parse_failed"
+  | Incoherent_read -> "incoherent_read"
+;;
+
+let undecodable_message ~path ~surface detail =
+  Printf.sprintf "%s at %s cannot be decoded: %s" surface path detail
+;;
+
+type file_failure_cause =
+  | Io_failure
+  | Inspection_failure
+  | Coherence_failure
+  | Invalid_json
+  | Invalid_content
+  | Invalid_entry
+  | Incomplete_wal_tail
+  | Quarantine_incomplete
+
+type read_failure =
+  { cause : file_failure_cause
+  ; detail : string
+  ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
+  }
+
+let read_failure cause detail = { cause; detail; cleanup_failure = None }
+let failure_detail_to_string ~detail ~cleanup_failure =
+  match cleanup_failure with
+  | None -> detail
+  | Some cleanup -> Printf.sprintf "%s; descriptor cleanup failed: %s"
+      detail (Fs_compat.private_jsonl_operation_failure_to_string cleanup)
+;;
+
+let read_failure_to_string (failure : read_failure) =
+  failure_detail_to_string ~detail:failure.detail ~cleanup_failure:failure.cleanup_failure
+;;
+
+let read_json_if_present ~after_read path =
+  try
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | stat when stat.Unix.st_kind <> Unix.S_REG ->
+        Error (read_failure Invalid_entry
+          (Printf.sprintf "event queue snapshot at %s is not a regular file" path))
+    | before ->
+      (match Safe_ops.read_file_safe path with
+       | Error message ->
+         Error (read_failure Io_failure (Printf.sprintf "failed to read %s: %s" path message))
+       | Ok bytes ->
+         (try
+            let json = Yojson.Safe.from_string bytes in
+            after_read ();
+            let after = Unix.lstat path in
+            if after.Unix.st_kind = Unix.S_REG && same_snapshot_file before after
+            then Ok (Some (json, before))
+            else Error (read_failure Coherence_failure
+              (Printf.sprintf "event queue snapshot changed while reading %s" path))
+          with
+          | Yojson.Json_error detail ->
+            Error
+              (read_failure Invalid_json
+                 (Printf.sprintf "event queue snapshot at %s contains invalid JSON: %s"
+                    path detail))))
+  with
+  | (Unix.Unix_error _ | Sys_error _ | Eio.Io _) as exn ->
+    Error (read_failure Inspection_failure
+      (Printf.sprintf "failed to inspect %s: %s" path (Printexc.to_string exn)))
+;;
+
+let schema_field = function
+  | `Assoc fields ->
+    (match List.assoc_opt "schema" fields with
+     | Some (`String schema) ->
+       (* #25867: the payload marker IS the store generation. Read it into
+          the registry type and compare against what this binary writes, so
+          a foreign-generation store fails here with the two generations
+          named — not as a generic shape error rows later, and not as a
+          silent discard of current bytes. *)
+       if String.equal schema Keeper_event_queue_schema.state
+       then Ok ()
+       else
+         Error
+           (Keeper_event_queue_schema.describe_mismatch
+              { store = "snapshot"
+              ; path = "state payload"
+              ; actual = schema
+              ; expected = Keeper_event_queue_schema.state
+              })
+     | Some _ -> Error "snapshot schema must be a string"
+     | None -> Error "snapshot missing required field schema")
+  | _ -> Error "snapshot must be a JSON object"
+;;
+
+type primary_snapshot =
+  | Primary_absent
+  | Primary_current of State.t
+
+let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
+  let path = snapshot_path_of_owner owner in
+  Atomic.incr snapshot_cache_read_counter;
+  match cached_snapshot path with
+  | Some state ->
+    Atomic.incr snapshot_cache_hit_counter;
+    Ok (Primary_current state)
+  | None ->
+  match read_json_if_present ~after_read path with
+  | Error _ as error -> error
+  | Ok None ->
+    forget_snapshot path;
+    Ok Primary_absent
+  | Ok (Some (json, stat)) ->
+    (* A present snapshot remains authoritative even when this binary cannot
+       decode it. Only physical absence permits WAL-only reconstruction.
+       Returning an error prevents any later transform from overwriting its
+       pending sources and disposition evidence with an empty state. *)
+    let decode_error detail =
+      Error (read_failure Invalid_content
+        (Printf.sprintf "event queue snapshot at %s cannot be decoded; \
+                        snapshot and transition WAL retained: %s" path detail))
+    in
+    (match schema_field json with
+     | Error message -> decode_error message
+     | Ok () ->
+       (match State.of_yojson json with
+        | Ok state ->
+          remember_snapshot ~stat path state;
+          Ok (Primary_current state)
+        | Error message -> decode_error message))
+;;
+
+let read_primary_unlocked ?after_read owner =
+  let open Result.Syntax in
+  let* () = Quarantine.guard ~snapshot:(snapshot_path_of_owner owner)
+    |> Result.map_error Quarantine.guard_failure_to_string in
+  read_primary_current_unlocked ?after_read owner
+  |> Result.map_error read_failure_to_string
+;;
+
+let bump_revision state =
+  if Int64.equal (State.revision state) Int64.max_int
+  then Error "event queue revision exhausted"
+  else Ok (State.with_revision (Int64.succ (State.revision state)) state)
+;;
+
+let transition_wal_schema = Keeper_event_queue_schema.transition_wal
+
+type transition_wal_row =
+  { pre_state : State.t
+  ; outbox_entry : State.outbox_entry
+  }
+
+let transition_wal_entry_to_line owner ~pre_state outbox_entry =
+  `Assoc
+    [ "schema", `String transition_wal_schema
+    ; "base_path", `String (Owner_lock.base_path owner)
+    ; "keeper_name", `String (keeper_name_of_owner owner)
+    ; "pre_state", State.to_yojson pre_state
+    ; "outbox_entry", State.outbox_entry_to_yojson outbox_entry
+    ]
+  |> Yojson.Safe.to_string
+  |> fun row -> row ^ "\n"
+;;
+
+let validate_transition_wal_row pre_state outbox_entry =
+  if State.transition_outbox pre_state <> []
+  then Error "transition WAL pre-state already contains an outbox entry"
+  else
+    match State.replay_transition_outbox_entry outbox_entry pre_state with
+    | Ok replayed when State.transition_outbox replayed = [ outbox_entry ] ->
+      Ok { pre_state; outbox_entry }
+    | Ok _ -> Error "transition WAL pre-state does not produce its exact outbox entry"
+    | Error detail -> Error ("transition WAL pre-state is invalid: " ^ detail)
+;;
+
+let transition_wal_entry_of_json owner = function
+  | `Assoc fields ->
+    (match List.assoc_opt "schema" fields with
+     | Some (`String schema) when String.equal schema transition_wal_schema ->
+       (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+        | [ ("base_path", `String base_path)
+          ; ("keeper_name", `String keeper_name)
+          ; ("outbox_entry", entry)
+          ; ("pre_state", pre_state)
+          ; ("schema", `String row_schema)
+          ] ->
+          if not (String.equal row_schema schema)
+          then Error "transition WAL schema field changed during decode"
+          else if
+            not
+              (String.equal base_path (Owner_lock.base_path owner)
+               && String.equal keeper_name (keeper_name_of_owner owner))
+          then Error "transition WAL row owner does not match its Keeper lane"
+          else
+            Result.bind (State.of_yojson pre_state) (fun pre_state ->
+              Result.bind (State.outbox_entry_of_yojson entry) (fun outbox_entry ->
+                validate_transition_wal_row pre_state outbox_entry))
+        | _ -> Error "transition WAL row fields are not exact")
+     | Some (`String schema) ->
+       Error (Printf.sprintf "unsupported transition WAL schema: %s" schema)
+     | Some _ | None -> Error "transition WAL schema must be a string")
+  | _ -> Error "transition WAL row must be a JSON object"
+;;
+
+let replay_transition_wal_bytes ~wal_only owner state bytes =
+  let row_is_already_projected (entry : State.outbox_entry) state =
+    State.transition_outbox state = []
+    && State.transition_receipt_is_projected entry.receipt state
+  in
+  let rec replay ~saw_row ~all_rows_already_projected state = function
+    | [] | [ "" ] -> Ok (state, saw_row && all_rows_already_projected)
+    | "" :: _ -> Error (read_failure Invalid_content "transition WAL contains an empty row")
+    | line :: rest ->
+      (match
+         try Ok (Yojson.Safe.from_string line) with
+         | Yojson.Json_error detail -> Error detail
+       with
+       | Error detail -> Error (read_failure Invalid_json ("invalid transition WAL JSON: " ^ detail))
+       | Ok json ->
+         (match transition_wal_entry_of_json owner json with
+          | Error detail -> Error (read_failure Invalid_content detail)
+          | Ok { pre_state; outbox_entry = entry } ->
+            let state = if wal_only && not saw_row then pre_state else state in
+            let already_projected = row_is_already_projected entry state in
+            let pre_state_matches =
+              already_projected
+              || State.transition_outbox state = [ entry ]
+              || State.to_yojson state = State.to_yojson pre_state
+            in
+            if not pre_state_matches
+            then Error (read_failure Invalid_content
+              "transition WAL pre-state conflicts with its durable snapshot")
+            else (match State.replay_transition_outbox_entry entry state with
+             | Error detail -> Error (read_failure Invalid_content detail)
+             | Ok state ->
+               replay
+                 ~saw_row:true
+                 ~all_rows_already_projected:(all_rows_already_projected && already_projected)
+                 state
+                 rest)))
+  in
+  replay
+    ~saw_row:false
+    ~all_rows_already_projected:true
+    state
+    (String.split_on_char '\n' bytes)
+;;
+
+let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
+  let open Result.Syntax in
+  (* The generic JSONL reader follows paths and treats ENOENT at offset zero
+     as an empty stream. Queue state instead rejects a present indirect or
+     non-regular entry, including a dangling link, before that reader runs. *)
+  let* () =
+    match inspect_path_kind path with
+    | Ok (Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_REG) -> Ok ()
+    | Ok (Fs_compat.Exact_kind
+            (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) ->
+      Error (read_failure Invalid_entry (Printf.sprintf "%s at %s is not a regular file" surface path))
+    | Ok Fs_compat.Exact_unknown ->
+      Error (read_failure Inspection_failure ("could not inspect event queue path: " ^ path))
+    | Error detail -> Error (read_failure Inspection_failure detail)
+  in
+  let replay_slice slice =
+    match slice.Fs_compat.Private_jsonl_slice.bytes with
+    | "" -> Ok (state, false)
+    | bytes ->
+       (match replay_transition_wal_bytes ~wal_only owner state bytes with
+        | Error failure ->
+          Error
+            { failure with detail = undecodable_message ~path ~surface failure.detail }
+        | Ok replayed -> Ok replayed)
+  in
+  let slice_failure ?cleanup_failure error =
+    let cause = match error with
+      | Fs_compat.Private_jsonl_slice.Incomplete_tail _ -> Incomplete_wal_tail
+      | Non_regular_file _ -> Invalid_entry
+      | Io_failed _ -> Io_failure
+      | Negative_offset _ | Missing_file_after_offset _ | Offset_beyond_end _
+      | Offset_not_at_row_boundary _ -> Coherence_failure
+    in
+    let detail = Printf.sprintf "failed to read %s keeper=%s path=%s: %s"
+      surface (keeper_name_of_owner owner) path
+      (Fs_compat.Private_jsonl_slice.error_to_string error) in
+    Error { cause; detail; cleanup_failure }
+  in
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+  | Private_file_failed error -> slice_failure error
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    slice_failure ~cleanup_failure error
+  | Private_file_succeeded slice -> replay_slice slice
+  | Private_file_succeeded_with_cleanup_failure
+      { value = slice; cleanup_failure } ->
+    Log.Keeper.error
+      "%s read succeeded with descriptor cleanup failure keeper=%s path=%s: %s"
+      surface
+      (keeper_name_of_owner owner)
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    replay_slice slice
+    |> Result.map_error (fun failure -> { failure with cleanup_failure = Some cleanup_failure })
+;;
+
+let replay_wal_unlocked ~wal_only ~path ~surface owner state =
+  match read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state with
+  | Error failure -> Error (read_failure_to_string failure)
+  | Ok (replayed, all_rows_already_projected) ->
+    if all_rows_already_projected
+    then
+      (* A projection checkpoint was durable before its WAL retirement.
+         The exact row now proves only the same already-projected transition,
+         so leaving it in place would block the next append (which rightly
+         requires an empty WAL). This is the sole safe read-time compaction:
+         any replay that reconstructs an outbox is still authoritative until
+         [project_transition_outbox_result] records the reaction and retires
+         it. *)
+      compact_wal_unlocked ~surface ~path owner |> Result.map (fun () -> replayed)
+    else Ok replayed
+;;
+
+let replay_wal_read_only_unlocked ~wal_only ~path ~surface owner state =
+  read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state |> Result.map fst
+;;
+
+let replay_transition_wal_unlocked ?(wal_only = false) owner state =
+  replay_wal_unlocked
+    ~wal_only
+    ~path:(transition_wal_path_of_owner owner)
+    ~surface:"transition WAL"
+    owner
+    state
+;;
+
+let replay_transition_wal_read_only_unlocked ?(wal_only = false) owner state =
+  replay_wal_read_only_unlocked
+    ~wal_only
+    ~path:(transition_wal_path_of_owner owner)
+    ~surface:"transition WAL"
+    owner
+    state
+;;
+
+let load_state_unlocked ?after_read owner =
+  match read_primary_unlocked ?after_read owner with
+  | Error _ as error -> error
+  | Ok (Primary_current state) -> replay_transition_wal_unlocked owner state
+  | Ok Primary_absent ->
+      replay_transition_wal_unlocked ~wal_only:true owner State.empty
+;;
+
+let load_state_result ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try Owner_lock.with_durable_lock owner (fun () -> load_state_unlocked owner) with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue state load raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+
+type durable_file =
+  | Snapshot
+  | Transition_wal
+  | Quarantine_intent
+
+type file_failure =
+  { file : durable_file
+  ; path : string
+  ; cause : file_failure_cause
+  ; detail : string
+  ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
+  }
+
+type state_failure =
+  | State_missing of string
+  | File_rejected of file_failure
+
+type read_only_failure =
+  | Owner_unresolved of string
+  | Read_raised of string
+  | State_failed of state_failure
+
+type recovery_decision =
+  | Refuse_recovery
+  | Start_quarantine
+  | Resume_quarantine
+
+let recovery_decision = function
+  | Owner_unresolved _ | Read_raised _ | State_failed (State_missing _) -> Refuse_recovery
+  | State_failed (File_rejected { cleanup_failure = Some _; _ }) -> Refuse_recovery
+  | State_failed (File_rejected { file; cause; cleanup_failure = None; _ }) ->
+    match file, cause with
+    | Quarantine_intent, Quarantine_incomplete -> Resume_quarantine
+    | (Snapshot | Transition_wal),
+        (Invalid_json | Invalid_content | Invalid_entry | Incomplete_wal_tail) -> Start_quarantine
+    | Quarantine_intent,
+        (Io_failure | Inspection_failure | Coherence_failure | Invalid_json
+        | Invalid_content | Invalid_entry | Incomplete_wal_tail)
+    | (Snapshot | Transition_wal),
+        (Io_failure | Inspection_failure | Coherence_failure | Quarantine_incomplete) -> Refuse_recovery
+;;
+
+let state_failure_to_string = function
+  | State_missing detail -> detail
+  | File_rejected { detail; cleanup_failure; _ } ->
+    failure_detail_to_string ~detail ~cleanup_failure
+;;
+
+let read_only_failure_to_string = function
+  | Owner_unresolved detail | Read_raised detail -> detail
+  | State_failed failure -> state_failure_to_string failure
+;;
+
+(* The one read-only read. A failure names its file or incomplete quarantine
+   record, so boot and preflight share the same recovery authority. *)
+let read_state_read_only_classified_unlocked ?after_read ~require_existing owner =
+  let rejected file path (failure : read_failure) =
+    File_rejected { file; path; cause = failure.cause; detail = failure.detail;
+      cleanup_failure = failure.cleanup_failure } in
+  let wal_rejected failure =
+    rejected Transition_wal (transition_wal_path_of_owner owner) failure
+  in
+  let guard_rejected failure =
+    let cause = match failure with
+      | Quarantine.Intent_present _ -> Quarantine_incomplete
+      | Quarantine.Inspection_failed _ -> Inspection_failure in
+    rejected Quarantine_intent (Quarantine.path ~snapshot:(snapshot_path_of_owner owner))
+      (read_failure cause (Quarantine.guard_failure_to_string failure))
+  in
+  let read () =
+    match Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) with
+    | Error failure -> Error (guard_rejected failure)
+    | Ok () ->
+  match read_primary_current_unlocked ?after_read owner with
+    | Error failure -> Error (rejected Snapshot (snapshot_path_of_owner owner) failure)
+    | Ok (Primary_current state) ->
+    replay_transition_wal_read_only_unlocked owner state |> Result.map_error wal_rejected
+    | Ok Primary_absent ->
+    (match path_exists_exact (transition_wal_path_of_owner owner) with
+     | Error detail -> Error (wal_rejected (read_failure Inspection_failure detail))
+     | Ok false when require_existing ->
+       Error
+         (State_missing
+            (Printf.sprintf
+               "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (transition_wal_path_of_owner owner)))
+     | Ok false | Ok true ->
+       replay_transition_wal_read_only_unlocked
+         ~wal_only:true
+         owner
+         State.empty
+       |> Result.map_error wal_rejected)
+  in
+  let result = read () in
+  (* Lock-free observers may overlap a quarantine beginning after the first
+     guard check. Do not publish that sample as ordinary queue authority. *)
+  match result, Quarantine.guard ~snapshot:(snapshot_path_of_owner owner) with
+  | (Ok _ | Error _), Ok () -> result
+  | Ok _, Error failure -> Error (guard_rejected failure)
+  | Error original, Error failure ->
+    (* A journal appearing after an operational/cleanup failure cannot
+       erase that failure and promote this observation to explicit resume. *)
+    (match recovery_decision (State_failed original) with
+     | Refuse_recovery -> Error original
+     | Start_quarantine | Resume_quarantine -> Error (guard_rejected failure))
+;;
+
+let read_state_read_only_unlocked ~require_existing owner =
+  read_state_read_only_classified_unlocked ~require_existing owner
+  |> Result.map_error state_failure_to_string
+;;
+
+let validate_existing_state_read_only_classified_result ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error detail -> Error (Owner_unresolved detail)
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         read_state_read_only_classified_unlocked ~require_existing:true owner
+         |> Result.map_error (fun failure -> State_failed failure))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Read_raised
+            (Printf.sprintf
+               "event queue read-only validation raised keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (Printexc.to_string exn))))
+;;
+
+let validate_existing_state_read_only_result ~base_path ~keeper_name =
+  validate_existing_state_read_only_classified_result ~base_path ~keeper_name
+  |> Result.map_error read_only_failure_to_string
+;;
+
+type read_only_observation_error =
+  | Observation_read_failed of string
+  | Observation_changed of
+      { keeper_name : string
+      ; first_revision : int64
+      ; second_revision : int64
+      }
+
+let read_only_observation_error_to_string = function
+  | Observation_read_failed message -> message
+  | Observation_changed { keeper_name; first_revision; second_revision } ->
+    Printf.sprintf
+      "event queue changed during lock-free observation keeper=%s first_revision=%Ld second_revision=%Ld"
+      keeper_name
+      first_revision
+      second_revision
+;;
+
+let stable_read_only_observation ~keeper_name first second =
+  if State.to_yojson first = State.to_yojson second
+  then Ok second
+  else
+    Error
+      (Observation_changed
+         { keeper_name
+         ; first_revision = State.revision first
+         ; second_revision = State.revision second
+         })
+;;
+
+let observe_state_read_only_typed_with ~between_samples ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error message -> Error (Observation_read_failed message)
+  | Ok owner ->
+    (try
+       Result.bind
+         (read_state_read_only_unlocked ~require_existing:false owner
+          |> Result.map_error (fun message -> Observation_read_failed message))
+         (fun first ->
+            between_samples ();
+            Result.bind
+              (read_state_read_only_unlocked ~require_existing:false owner
+               |> Result.map_error (fun message -> Observation_read_failed message))
+              (stable_read_only_observation ~keeper_name first))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Observation_read_failed
+            (Printf.sprintf
+               "event queue lock-free observation raised keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (Printexc.to_string exn))))
+;;
+
+type moved_aside =
+  { path : string
+  ; rejected_path : string
+  ; moved_with : (string * string) option
+  }
+
+(* The durable intent is the refusal authority across every partial move,
+   including a crash after both originals disappeared. Only explicit quarantine
+   enters this recovery path; ordinary loaders never complete it implicitly. *)
+let move_aside_with ~after_read ~sync_intent ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of =
+  let open Result.Syntax in
+  let* owner = resolve_owner ~base_path ~keeper_name in
+  let snapshot = snapshot_path_of_owner owner in
+  let wal = transition_wal_path_of_owner owner in
+  try
+    Owner_lock.with_durable_lock owner (fun () ->
+      let* intent =
+        match read_state_read_only_classified_unlocked ?after_read ~require_existing:true owner with
+        | Ok (_ : State.t) -> Error "the event queue decodes now; it was left in place"
+        | Error failure ->
+          match recovery_decision (State_failed failure) with
+          | Refuse_recovery -> Error (state_failure_to_string failure)
+          | Resume_quarantine ->
+            let* existing = Quarantine.read ~snapshot ~wal in
+            (match existing with
+             | Some intent -> Ok intent
+             | None -> Error "the event queue quarantine intent disappeared; nothing was moved")
+          | Start_quarantine ->
+            (match failure with
+             | File_rejected {file=Snapshot; _} ->
+               Quarantine.start ~snapshot ~wal ~rejected:Quarantine.Snapshot ~rejected_path_of
+             | File_rejected {file=Transition_wal; _} ->
+               Quarantine.start ~snapshot ~wal ~rejected:Quarantine.Transition_wal ~rejected_path_of
+             | State_missing _ | File_rejected {file=Quarantine_intent; _} ->
+               Error (state_failure_to_string failure))
+      in
+      forget_snapshot snapshot;
+      let* moved = Quarantine.finish ~sync_intent ~rename ~before_clear ~snapshot ~wal intent in
+      Ok {path=moved.path; rejected_path=moved.rejected_path; moved_with=moved.moved_with})
+    |> Result.map_error (fun detail -> Printf.sprintf "event queue quarantine keeper=%s intent=%s: %s"
+      keeper_name (Quarantine.path ~snapshot) detail)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "event queue quarantine failed keeper=%s intent=%s: %s"
+      keeper_name (Quarantine.path ~snapshot) (Printexc.to_string exn))
+;;
+
+let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
+  move_aside_with ~after_read:None ~sync_intent:Fs_compat.sync_file_and_parent_strict
+    ~rename:Fs_compat.rename_noreplace ~before_clear:(fun () -> ())
+    ~base_path ~keeper_name ~rejected_path_of
+;;
+
+let load_with_projection ~projection ~base_path ~keeper_name =
+  load_state_result ~base_path ~keeper_name |> Result.map projection
+;;
+
+(* Every commit runs its [after_commit] under the owner lock, so [f] sees the
+   durable pending queue with no commit between the read and [f]. *)
+let with_pending_locked_result ~base_path ~keeper_name f =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    Owner_lock.with_durable_lock owner (fun () ->
+      let read =
+        try load_state_unlocked owner |> Result.map State.pending with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Error
+            (Printf.sprintf
+               "event queue locked pending read raised keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (Printexc.to_string exn))
+      in
+      Result.map f read)
+;;
+
+let load_result ~base_path ~keeper_name =
+  load_with_projection ~projection:State.pending ~base_path ~keeper_name
+;;
+
+let load_pending_result ~base_path ~keeper_name =
+  load_result ~base_path ~keeper_name
+;;
+
+type 'pending with_read_errors =
+  { pending : 'pending
+  ; read_errors : snapshot_read_error list
+  }
+
+type snapshot_with_errors = Keeper_event_queue.t with_read_errors
+type selections_with_errors = State.pending_selection list with_read_errors
+
+let diagnose_snapshot_read_error ~base_path ~keeper_name message =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error invalid -> [ { kind = Invalid_path; path = None; message = invalid } ]
+  | Ok owner ->
+    let primary = snapshot_path_of_owner owner in
+    let inspect path =
+      try
+        if not (Sys.file_exists path)
+        then None
+        else
+          match Safe_ops.read_json_file_safe path with
+          | Error read_message ->
+            Some { kind = Read_failed; path = Some path; message = read_message }
+          | Ok _ -> Some { kind = Parse_failed; path = Some path; message }
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Some
+          { kind = Read_failed
+          ; path = Some path
+          ; message = Printexc.to_string exn
+          }
+    in
+    (match inspect primary with
+     | Some error -> [ error ]
+     | None -> [ { kind = Parse_failed; path = None; message } ])
+;;
+
+let load_with_read_errors ~projection ~base_path ~keeper_name =
+  match load_state_result ~base_path ~keeper_name with
+  | Ok state -> { pending = projection state; read_errors = [] }
+  | Error message ->
+    { pending = projection State.empty
+    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
+    }
+;;
+
+let load_snapshot_with_errors ~base_path ~keeper_name =
+  load_with_read_errors ~projection:State.pending ~base_path ~keeper_name
+;;
+
+let load_selections_with_errors ~base_path ~keeper_name =
+  load_with_read_errors ~projection:State.pending_selections ~base_path ~keeper_name
+;;
+
+let observe_state_result_with ~between_samples ~base_path ~keeper_name =
+  match
+    observe_state_read_only_typed_with
+      ~between_samples
+      ~base_path
+      ~keeper_name
+  with
+  | Ok state -> Ok state
+  | Error (Observation_read_failed message) ->
+    Error (diagnose_snapshot_read_error ~base_path ~keeper_name message)
+  | Error (Observation_changed _ as error) ->
+    Error
+      [ { kind = Incoherent_read
+        ; path = None
+        ; message = read_only_observation_error_to_string error
+        }
+      ]
+;;
+
+let observe_state_result ~base_path ~keeper_name =
+  observe_state_result_with ~between_samples:(fun () -> ()) ~base_path ~keeper_name
+;;
+
+let observe_snapshot_with_errors_with ~between_samples ~base_path ~keeper_name =
+  match observe_state_result_with ~between_samples ~base_path ~keeper_name with
+  | Ok state -> { pending = State.pending state; read_errors = [] }
+  | Error read_errors -> { pending = Keeper_event_queue.empty; read_errors }
+;;
+
+let observe_snapshot_with_errors ~base_path ~keeper_name =
+  observe_snapshot_with_errors_with
+    ~between_samples:(fun () -> ())
+    ~base_path
+    ~keeper_name
+;;
+
+
+type durable_state_discovery =
+  { keeper_names : string list
+  ; read_error : string option
+  }
+
+let discover_keeper_names_with_durable_state ~base_path =
+  let directory_kind path =
+    match inspect_path_kind path with
+    | Error _ as error -> error
+    | Ok Fs_compat.Exact_missing -> Ok Fs_compat.Missing
+    | Ok (Fs_compat.Exact_kind Unix.S_DIR) -> Ok Fs_compat.Directory
+    | Ok (Fs_compat.Exact_kind Unix.S_LNK) ->
+      (match inspect_path_kind ~follow:true path with
+       | Ok (Fs_compat.Exact_kind Unix.S_DIR) -> Ok Fs_compat.Directory
+       | Ok (Fs_compat.Exact_kind
+               (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) -> Ok Fs_compat.Other
+       | Ok Fs_compat.Exact_missing | Ok Fs_compat.Exact_unknown ->
+         Error ("could not follow event queue directory: " ^ path)
+       | Error _ as error -> error)
+    | Ok (Fs_compat.Exact_kind
+            (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) -> Ok Fs_compat.Other
+    | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue directory: " ^ path)
+  in
+  match Owner_lock.canonical_base_path base_path with
+  | Error error ->
+    { keeper_names = []; read_error = Some (owner_error_to_string error) }
+  | Ok base_path ->
+    let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+    (try
+       match directory_kind keepers_dir with
+       | Error error ->
+         { keeper_names = []; read_error = Some error }
+       | Ok Fs_compat.Missing ->
+         { keeper_names = []; read_error = None }
+       | Ok Fs_compat.Other ->
+         { keeper_names = []
+         ; read_error = Some ("keepers runtime path is not a directory: " ^ keepers_dir)
+         }
+       | Ok Fs_compat.Directory ->
+         let names, errors =
+           Sys.readdir keepers_dir
+           |> Array.fold_left
+                (fun (names, errors) name ->
+                   let keeper_dir = Filename.concat keepers_dir name in
+                   let primary = Filename.concat keeper_dir snapshot_filename in
+                   let wal = Filename.concat keeper_dir transition_wal_filename in
+                   let observed =
+                     Result.bind (directory_kind keeper_dir) (function
+                       | Fs_compat.Missing | Fs_compat.Other -> Ok false
+                       | Fs_compat.Directory -> durable_paths_exist primary wal)
+                   in
+                   match observed with
+                   | Error error -> names, error :: errors
+                   | Ok false -> names, errors
+                   | Ok true ->
+                     match Keeper_id.Keeper_name.of_string name with
+                     | Ok keeper_name ->
+                       Keeper_id.Keeper_name.to_string keeper_name :: names, errors
+                     | Error reason ->
+                       names,
+                       Printf.sprintf
+                         "invalid keeper name with durable event queue state: %s"
+                         reason
+                       :: errors)
+                ([], [])
+         in
+         { keeper_names = List.sort_uniq String.compare names
+         ; read_error =
+             (match List.rev errors with
+              | [] -> None
+              | errors -> Some (String.concat "; " errors))
+         }
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       { keeper_names = []
+       ; read_error =
+           Some
+             (Printf.sprintf
+                "failed to discover durable event queue state under %s: %s"
+                keepers_dir
+                (Printexc.to_string exn))
+       })
+;;
+
+let commit_transform_unlocked
+      ?(before_snapshot_write = fun () -> ())
+      ?(confirm_snapshot = save_snapshot_atomic_strict)
+      ?(strict_snapshot_durability = false)
+      owner
+      ~after_commit
+      transform
+  =
+  match load_state_unlocked owner with
+  | Error _ as error -> error
+  | Ok current ->
+    (match transform current with
+     | Error _ as error -> error
+     | Ok (next, value) when next == current ->
+       if not strict_snapshot_durability || durably_confirmed owner current then Ok value
+       else
+         (* Visible bytes can follow a failed parent fsync, and these are not
+            bytes this process confirmed ([durable_confirmation]). A
+            same-binding retry must cross the durability barrier again before
+            admission. Re-publish the authoritative state without a logical
+            mutation. *)
+         save_state_unlocked_with ~save_snapshot:confirm_snapshot owner current
+         |> Result.map (fun () ->
+           let confirmation = sample_durable_confirmation owner current in
+           after_commit (State.pending current);
+           keep_durable_confirmation owner confirmation;
+           value)
+     | Ok (next, value) ->
+       (match bump_revision next with
+        | Error _ as error -> error
+        | Ok next ->
+          let save_state =
+            if strict_snapshot_durability
+            then save_state_unlocked_with ~save_snapshot:confirm_snapshot
+            else save_state_unlocked ~before_write:before_snapshot_write
+          in
+          (match save_state owner next with
+           | Error _ as error -> error
+           | Ok () ->
+             (* [load_state_unlocked] above replayed the transition WAL, so
+                [next] already carries that transition's pending mutation and
+                its transition outbox, and the snapshot just written persists
+                both (schema v16). Retire the WAL here, paired with the revision
+                bump that absorbed it. Leaving it behind is what latches the
+                owner: the next load replays an already-absorbed row against
+                the advanced revision, [commit_transition] rejects it on
+                [source_incarnation], and no runtime path can clear it because the
+                projector itself starts with [load_state_unlocked] (#26074). *)
+             (match compact_transition_wals_unlocked owner with
+              | Error _ as error -> error
+              | Ok () when strict_snapshot_durability ->
+                let confirmation = sample_durable_confirmation owner next in
+                after_commit (State.pending next);
+                keep_durable_confirmation owner confirmation;
+                Ok value
+              | Ok () ->
+                after_commit (State.pending next);
+                Ok value))))
+;;
+
+let commit_transform
+      ?before_snapshot_write
+      ?confirm_snapshot
+      ?(strict_snapshot_durability = false)
+      ~base_path
+      ~keeper_name
+      ~after_commit
+      transform
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         commit_transform_unlocked
+           ?before_snapshot_write
+           ?confirm_snapshot
+           ~strict_snapshot_durability
+           owner
+           ~after_commit
+           transform)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue transaction raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name f =
+  commit_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _pending -> after_commit ())
+    (fun state ->
+       match f (State.pending state) with
+       | Error _ as error -> error
+       | Ok pending ->
+         State.with_pending_at ~admitted_at:(Unix.gettimeofday ()) pending state
+         |> Result.map (fun state -> state, ()))
+;;
+
+let reprioritize_pending_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ~urgency
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    State.reprioritize_pending ~selection ~urgency state)
+;;
+
+let defer_pending_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    State.defer_pending ~selection state)
+;;
+
+let retain_checkpoint_batch_result
+      ?(after_commit = fun _ -> ())
+      ~base_path ~keeper_name ~selections () =
+  commit_transform ~strict_snapshot_durability:true
+    ~base_path ~keeper_name ~after_commit (fun state ->
+      let state, retained, failures = List.fold_left
+        (fun (current, retained, failures) selection ->
+          match State.note_checkpoint_retention ~selection current with
+          | Ok (updated, (selection, _)) -> updated, selection::retained, failures
+          | Error detail -> current, retained, (selection, detail)::failures)
+        (state, [], []) selections in
+      let failed_channels = List.filter_map (fun (selection, _) ->
+        Keeper_event_queue.connector_attention_channel
+          selection.State.source.Keeper_event_queue.payload) failures in
+      let rotatable = List.rev retained |> List.filter (fun selection ->
+        match Keeper_event_queue.connector_attention_channel
+                selection.State.source.Keeper_event_queue.payload with
+        | None -> true
+        | Some channel ->
+          (* A stale member cannot authorize changing its current incarnation.
+             Keep that entire conversation in place rather than breaking its
+             FIFO by rotating only the healthy admitted prefix/suffix. *)
+          not (List.exists (Keeper_continuation_channel.same_conversation channel) failed_channels)) in
+      match State.defer_pending_batch ~selections:rotatable state with
+      | Error _ as error -> error
+      | Ok (state, _) -> Ok (state, List.rev failures))
+;;
+
+type enqueue_stimulus_result =
+  | Enqueued
+  | Already_present
+
+let state_accounts_for_stimulus state stimulus =
+  let same candidate =
+    Keeper_event_queue.stimulus_identity_equal candidate stimulus
+  in
+  List.exists same (Keeper_event_queue.to_list (State.pending state))
+  || List.exists
+       (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
+       (State.transition_outbox state)
+;;
+
+let enqueue_stimulus_if_absent_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      stimulus
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    if state_accounts_for_stimulus state stimulus then
+      Ok (state, Already_present)
+    else
+      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
+      State.with_pending_at ~admitted_at:(Unix.gettimeofday ()) pending state
+      |> Result.map (fun state -> state, Enqueued))
+;;
+
+let enqueue_stimulus_once_with
+      ?confirm_snapshot
+      ~already_delivered
+      ~after_commit
+      ~base_path
+      ~keeper_name
+      stimulus
+  =
+  commit_transform ?confirm_snapshot ~strict_snapshot_durability:true
+    ~base_path ~keeper_name ~after_commit (fun state ->
+      let sources = Keeper_event_queue.to_list (State.pending state)
+          @ List.concat_map (fun (entry : outbox_entry) -> entry.stimuli)
+              (State.transition_outbox state) in
+      let conflicts candidate =
+        String.equal candidate.Keeper_event_queue.post_id stimulus.Keeper_event_queue.post_id
+        && not (Keeper_event_queue.stimulus_identity_equal candidate stimulus) in
+      if List.exists conflicts sources then
+        Error (Printf.sprintf "conflicting durable stimulus already exists for post_id=%s"
+                 stimulus.post_id)
+      else if state_accounts_for_stimulus state stimulus then
+        Ok (state, Already_present)
+      else match already_delivered () with
+        | Error _ as error -> error
+        | Ok true -> Ok (state, Already_present)
+        | Ok false ->
+          let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
+          State.with_pending_at ~admitted_at:(Unix.gettimeofday ()) pending state
+          |> Result.map (fun state -> state, Enqueued))
+;;
+
+let enqueue_stimulus_once_result
+      ~already_delivered ?(after_commit = fun _ -> ())
+      ~base_path ~keeper_name stimulus =
+  enqueue_stimulus_once_with ~already_delivered ~after_commit
+    ~base_path ~keeper_name stimulus
+;;
+
+type 'authorization_error guarded_transfer_projection_result =
+  | Transfer_projection_result of transfer_projection_result
+  | First_projection_rejected of 'authorization_error
+
+let project_accepted_transfer_guarded_result
+      ~authorize_first_projection
+      ~after_commit
+      ~base_path
+      ~keeper_name
+      ~transfer
+  =
+  if not (String.equal transfer.to_keeper keeper_name)
+  then Error "target transfer projection owner does not match the durable queue owner"
+  else
+    commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+      match State.project_accepted_transfer ~admitted_at:(Unix.gettimeofday ()) transfer state with
+      | Error _ as error -> error
+      | Ok (next, result) when next == state ->
+        after_commit (State.pending state);
+        Ok (state, Transfer_projection_result result)
+      | Ok (next, result) ->
+        (match authorize_first_projection () with
+         | Error error -> Ok (state, First_projection_rejected error)
+         | Ok () -> Ok (next, Transfer_projection_result result)))
+;;
+
+let update_result ?after_commit ~base_path ~keeper_name f =
+  update_checked_result ?after_commit ~base_path ~keeper_name (fun queue -> Ok (f queue))
+;;
+
+let update ~base_path ~keeper_name f =
+  match update_result ~base_path ~keeper_name f with
+  | Ok () -> ()
+  | Error message ->
+    Log.Keeper.error "event_queue_snapshot: update failed keeper=%s: %s" keeper_name message
+;;
+
+let persist ~base_path ~keeper_name queue =
+  update ~base_path ~keeper_name (fun _ -> queue)
+;;
+
+let persist_snapshot ~base_path ~keeper_name snapshot =
+  update ~base_path ~keeper_name (fun _ -> snapshot ())
+;;
+
+let peek_when_result ~base_path ~keeper_name ~now ~ready =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> Ok (State.peek_when ~now ~ready state)
+;;
+
+let select_when_result ~base_path ~keeper_name ~now ~ready =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> Ok (State.select_when ~now ~ready state)
+;;
+
+let pending_frontier_result ~base_path ~keeper_name =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> Ok (State.frontier state, State.pending_selections state)
+;;
+
+let pending_selections_result ~base_path ~keeper_name =
+  Result.map snd (pending_frontier_result ~base_path ~keeper_name)
+;;
+
+let validate_pending_selection_result ~base_path ~keeper_name ~selection =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> State.validate_pending_selection ~selection state
+;;
+
+let admitted_selection_standing_result ~base_path ~keeper_name ~selection =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state -> State.admitted_selection_standing ~selection state
+;;
+
+let ack_pending_with ~before_write
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ()
+  =
+  commit_transform ~before_snapshot_write:before_write ~base_path ~keeper_name ~after_commit (fun state ->
+    match State.ack_pending ~selection state with
+    | Error _ as error -> error
+    | Ok state -> Ok (state, ()))
+;;
+
+let ack_pending_result = ack_pending_with ~before_write:(fun () -> ())
+;;
+
+let note_checkpoint_retention_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    match State.note_checkpoint_retention ~selection state with
+    | Error _ as error -> error
+    | Ok (state, payload) -> Ok (state, payload))
+;;
+
+let bind_pending_repetition_scope_result
+      ?(after_commit = fun _ -> ())
+      ~base_path ~keeper_name ~selections ~scope () =
+  commit_transform ~strict_snapshot_durability:true
+    ~base_path ~keeper_name ~after_commit (fun state ->
+      State.bind_pending_repetition_scope ~selections ~scope state
+      |> Result.map_error State.scope_binding_error_to_string)
+;;
+
+let commit_transition_unlocked_with
+      ?(before_wal_write = fun () -> ())
+      ~save_checkpoint
+      ~compact_wal
+      owner
+      ~after_commit
+      transition
+      current
+  =
+  match transition current with
+  | Error _ as error -> error
+  | Ok (state, State.Transition_already_applied receipt) ->
+    Ok (Transition_already_applied receipt, State.pending state)
+  | Ok (state, State.Transition_applied receipt) ->
+    (match State.transition_outbox state with
+     | [ entry ] when State.transition_receipt_equal receipt entry.receipt ->
+       (match bump_revision state with
+     | Error _ as error -> error
+     | Ok checkpoint ->
+       let suffix = transition_wal_entry_to_line owner ~pre_state:current entry in
+       let path = transition_wal_path_of_owner owner in
+       let continue_after_commit () =
+         let pending = State.pending checkpoint in
+         match save_checkpoint owner checkpoint with
+         | Error detail ->
+           Ok
+             ( Transition_committed_followup_failed
+                 { receipt; stage = `Checkpoint; detail }
+             , pending )
+         | Ok () ->
+           (match compact_wal owner with
+            | Error detail ->
+              Ok
+                ( Transition_committed_followup_failed
+                    { receipt; stage = `Wal_compaction; detail }
+                , pending )
+            | Ok () ->
+              (match
+                 try
+                   after_commit pending;
+                   Ok ()
+                 with
+                 | Eio.Cancel.Cancelled _ as exn ->
+                   Error
+                     ("pending projection cancelled after transition commit: "
+                      ^ Printexc.to_string exn)
+                 | exn -> Error (Printexc.to_string exn)
+               with
+               | Ok () -> Ok (Transition_applied receipt, pending)
+               | Error detail ->
+                 Ok
+                   ( Transition_committed_followup_failed
+                       { receipt; stage = `Projection; detail }
+                   , pending )))
+       in
+       let continue_after_wal_commit () =
+         notify_state_change_observer ~keeper_name:(keeper_name_of_owner owner);
+         continue_after_commit ()
+       in
+       before_wal_write ();
+       (match
+          Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+            path
+            ~expected_end_offset:0
+            suffix
+        with
+        | Private_file_failed error ->
+          Error
+            (Printf.sprintf
+               "transition WAL commit failed keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               path
+               (Fs_compat.private_jsonl_append_error_to_string error))
+        | Private_file_failed_with_cleanup_failure
+            { error; cleanup_failure } ->
+          Error
+            (Printf.sprintf
+               "transition WAL commit failed keeper=%s path=%s: %s; descriptor cleanup failed: %s"
+               (keeper_name_of_owner owner)
+               path
+               (Fs_compat.private_jsonl_append_error_to_string error)
+               (Fs_compat.private_jsonl_operation_failure_to_string
+                  cleanup_failure))
+        | Private_file_succeeded _committed_end_offset ->
+          continue_after_wal_commit ()
+        | Private_file_succeeded_with_cleanup_failure
+            { value = _committed_end_offset; cleanup_failure } ->
+          Log.Keeper.error
+            "transition WAL commit succeeded with descriptor cleanup failure keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            path
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+          continue_after_wal_commit ()))
+     | [] | [ _ ] | _ :: _ :: _ ->
+       Error "transition commit did not produce its canonical outbox entry")
+;;
+
+let commit_transition_unlocked =
+  commit_transition_unlocked_with
+    (* The transition WAL is the commit record. The projector checkpoints the
+       post-transition pending state only after its reaction-ledger append
+       succeeds. *)
+    ~save_checkpoint:(fun _owner _state -> Ok ())
+    ~compact_wal:(fun _owner -> Ok ())
+;;
+
+let cancel_pending_accepted_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~applied_at
+      ~cancellation
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_transition_unlocked
+             owner
+             ~after_commit
+             (State.cancel_pending_accepted
+                ~applied_at
+                ~cancellation)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending accepted cancellation raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let cancel_pending_if_present_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~applied_at
+      ~cancellation
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state when State.pending_cancellation_source_withdrawn ~cancellation state ->
+           Ok Cancellation_source_withdrawn
+         | Ok state ->
+           commit_transition_unlocked
+             owner
+             ~after_commit
+             (State.cancel_pending_accepted
+                ~applied_at
+                ~cancellation)
+             state
+           |> Result.map (fun (result, _pending) -> Cancellation_committed result))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending accepted cancellation raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let transfer_pending_accepted_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~applied_at
+      ~transfer
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_transition_unlocked
+             owner
+             ~after_commit
+             (State.transfer_pending_accepted
+                ~applied_at
+                ~transfer)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending accepted transfer raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let ack_source_terminal_with ~before_write
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~acked_at
+      ~source_terminal
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_transition_unlocked
+             ~before_wal_write:before_write
+             owner
+             ~after_commit
+             (State.ack_pending_source_terminal
+                ~applied_at:acked_at
+                ~source_terminal)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending source-terminal ACK raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let ack_pending_source_terminal_result =
+  ack_source_terminal_with ~before_write:(fun () -> ())
+;;
+
+let terminalize_pending_turn_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ~transition
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state when State.pending_turn_selection_withdrawn ~selection state ->
+           Ok Turn_selection_withdrawn
+         | Ok state ->
+           commit_transition_unlocked
+             owner
+             ~after_commit
+             transition
+             state
+           |> Result.map (fun (result, _pending) -> Turn_terminal_committed result))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending turn terminalization raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let terminalize_pending_turn_attempt_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~applied_at
+      ~selection
+      ~detail
+      ()
+  =
+  terminalize_pending_turn_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~selection
+    ~transition:
+      (State.terminalize_pending_turn_attempt
+         ~applied_at
+         ~selection
+         ~detail)
+    ()
+;;
+
+let terminalize_pending_turn_completed_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~applied_at
+      ~selection
+      ()
+  =
+  terminalize_pending_turn_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~selection
+    ~transition:
+      (State.terminalize_pending_turn_completed
+         ~applied_at
+         ~selection)
+    ()
+;;
+
+let mark_transition_projected_result state ~transition_id ~retain_previous =
+  State.mark_transition_projected ~transition_id ~retain_previous state
+;;
+
+let project_transition_outbox_result
+      ~append_before_retire
+      ~retain_previous
+      ~base_path
+      ~keeper_name
+  =
+  let open Result.Syntax in
+  let* owner = resolve_owner ~base_path ~keeper_name in
+  try
+    Owner_lock.with_durable_lock owner (fun () ->
+      let* state = load_state_unlocked owner in
+      match State.transition_outbox state with
+      | [] -> Ok ()
+      | [ entry ] ->
+        let* () = append_before_retire state entry in
+        let* projected =
+          mark_transition_projected_result
+            state
+            ~transition_id:entry.receipt.transition_id
+            ~retain_previous
+        in
+        let* projected = bump_revision projected in
+        let* () = save_state_unlocked owner projected in
+        compact_transition_wals_unlocked owner
+      | entries ->
+        Error
+          (Printf.sprintf
+             "event queue transition outbox cardinality invalid keeper=%s count=%d"
+             keeper_name
+             (List.length entries)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "event queue transition projection raised keeper=%s: %s"
+         keeper_name
+         (Printexc.to_string exn))
+;;
+
+let remove_post_ids stimuli state =
+  List.fold_left
+    (fun (removed, state) (stimulus : Keeper_event_queue.stimulus) ->
+       let newly_removed, state = State.remove_by_post_id stimulus.post_id state in
+       Keeper_event_queue.uniq_stimuli (removed @ newly_removed), state)
+    ([], state)
+    stimuli
+;;
+
+let ack_consumed ~base_path ~keeper_name stimuli =
+  commit_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       let _removed, state = remove_post_ids stimuli state in
+       Ok (state, ()))
+;;
+
+let drop_by_post_id
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~post_id
+      ()
+  =
+  commit_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit
+    (fun state ->
+       let removed, state = State.remove_by_post_id post_id state in
+       Ok (state, removed))
+;;
+
+type queue_residence_unknown_reason =
+  Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
+  | First_admission_not_recorded
+  | Queue_observation_incomplete
+  | Clock_observation_invalid
+
+type queue_residence =
+  Keeper_event_queue_fleet_projection.queue_residence =
+  | Empty
+  | Observed of { oldest_admitted_at : float; oldest_age_seconds : float }
+  | Unknown of queue_residence_unknown_reason
+
+let queue_residence_to_yojson = Keeper_event_queue_fleet_projection.queue_residence_to_yojson
+let queue_residence_of_yojson = Keeper_event_queue_fleet_projection.queue_residence_of_yojson
+let queue_residence_of_selections = Keeper_event_queue_fleet_projection.queue_residence_of_selections
+
+type owner_lifecycle = Keeper_event_queue_fleet_projection.owner_lifecycle =
+  | Runnable
+  | Recoverable
+  | Retained_disabled
+  | Paused_dead
+  | Shutdown_fenced
+  | Lifecycle_unknown of string
+
+let keeper_summary ~base_path ~owner_lifecycle keeper_name =
+  let owner_lifecycle = owner_lifecycle ~keeper_name in
+  match load_state_result ~base_path ~keeper_name with
+  | Ok state ->
+    Keeper_event_queue_fleet_projection.keeper_summary_of_state
+      ~keeper_name ~owner_lifecycle state
+  | Error message ->
+    let read_errors =
+      diagnose_snapshot_read_error ~base_path ~keeper_name message
+      |> List.map (fun error -> error.message)
+    in
+    Keeper_event_queue_fleet_projection.keeper_summary_unavailable
+      ~keeper_name ~owner_lifecycle ~read_errors
+;;
+
+let fleet_summary_json ~now ~base_path ~owner_lifecycle =
+  let discovery = discover_keeper_names_with_durable_state ~base_path in
+  let summaries =
+    List.map (keeper_summary ~base_path ~owner_lifecycle) discovery.keeper_names
+  in
+  let projection_base_path =
+    match Owner_lock.canonical_base_path base_path with
+    | Ok path -> path
+    | Error _ -> base_path
+  in
+  Keeper_event_queue_fleet_projection.fleet_summary_json
+    ~now ~base_path:projection_base_path ~discovery_error:discovery.read_error summaries
+;;
+
+module For_testing = struct
+  let ack_pending_with_before_write = ack_pending_with
+  let ack_source_terminal_with_before_write = ack_source_terminal_with
+
+  let move_aside_with_sync ~sync_intent ~base_path ~keeper_name ~rejected_path_of =
+    move_aside_with ~after_read:None ~sync_intent ~rename:Fs_compat.rename_noreplace
+      ~before_clear:ignore ~base_path ~keeper_name ~rejected_path_of
+    |> Result.map (fun _ -> ())
+  ;;
+
+  let move_aside_with_rename ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of =
+    move_aside_with ~after_read:None ~sync_intent:Fs_compat.sync_file_and_parent_strict
+      ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of
+    |> Result.map (fun _ -> ())
+  ;;
+
+  let move_aside_with_read_interleave ~after_read ~base_path ~keeper_name ~rejected_path_of =
+    move_aside_with ~after_read:(Some after_read) ~sync_intent:Fs_compat.sync_file_and_parent_strict
+      ~rename:Fs_compat.rename_noreplace ~before_clear:ignore
+      ~base_path ~keeper_name ~rejected_path_of
+    |> Result.map (fun _ -> ())
+  ;;
+
+  let enqueue_stimulus_once_with_confirmation
+        ~confirm_snapshot ~already_delivered ~base_path ~keeper_name stimulus =
+    enqueue_stimulus_once_with ~confirm_snapshot ~already_delivered
+      ~after_commit:ignore ~base_path ~keeper_name stimulus
+    |> Result.map (fun _ -> ())
+  ;;
+
+  let load_state_with_read_interleave ~after_read ~base_path ~keeper_name =
+    match resolve_owner ~base_path ~keeper_name with
+    | Error _ as error -> error
+    | Ok owner -> Owner_lock.with_durable_lock owner (fun () ->
+        load_state_unlocked ~after_read owner)
+  ;;
+
+  let observe_state_result_with_interleave = observe_state_result_with
+  ;;
+
+  let observe_snapshot_with_errors_with_interleave =
+    observe_snapshot_with_errors_with
+  ;;
+
+  let snapshot_cache_reads () = Atomic.get snapshot_cache_read_counter
+  let snapshot_cache_hits () = Atomic.get snapshot_cache_hit_counter
+
+  let reset_snapshot_cache_for_testing () =
+    (* A reset re-reads the file; it does not start a new process. The durable
+       confirmations this process recorded stay, so a cold reload cannot make
+       an already confirmed binding look unconfirmed and re-publish it. The
+       unconfirmed path is exercised by a failed parent fsync, not by this
+       hook. *)
+    Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
+    Atomic.set snapshot_cache_read_counter 0;
+    Atomic.set snapshot_cache_hit_counter 0
+  ;;
+  let bind_pending_repetition_scope_with_confirmation
+        ~confirm_snapshot ~base_path ~keeper_name ~selections ~scope () =
+    commit_transform ~confirm_snapshot ~strict_snapshot_durability:true
+      (* See the production wrapper: this fixture observes durability, not mutation delivery. *)
+      ~base_path ~keeper_name ~after_commit:ignore (fun state ->
+        State.bind_pending_repetition_scope ~selections ~scope state
+        |> Result.map_error State.scope_binding_error_to_string)
+  ;;
+end

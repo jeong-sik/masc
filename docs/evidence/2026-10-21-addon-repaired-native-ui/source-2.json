@@ -1,0 +1,17 @@
+{
+  "source_id": "vst-phrase",
+  "incarnation": "repaired-native-source",
+  "cursor": "2",
+  "complete": true,
+  "detail": "Synthetic input for repaired native lifecycle; no audio",
+  "observations": [
+    {
+      "id": "repaired-input-2",
+      "kind": "vst_phrase",
+      "observed_at": 1792586236.674119,
+      "fields": {
+        "state": "pause_requested"
+      }
+    }
+  ]
+}

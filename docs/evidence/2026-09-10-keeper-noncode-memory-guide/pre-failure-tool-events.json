@@ -1,0 +1,157 @@
+{
+  "operation_id": "kmsg-33f4c994e9afd0fe78c40c8dcbce1be2",
+  "full_event_count": 6139,
+  "event_type_counts": {
+    "run_started": 1,
+    "text_message_start": 1,
+    "agent_core_runtime_attempt_started": 1,
+    "agent_core_stream_connected": 1,
+    "agent_core_content_block_start": 5,
+    "agent_core_thinking_delta": 5579,
+    "text_delta": 255,
+    "tool_call_start": 3,
+    "tool_call_args": 278,
+    "agent_core_content_block_stop": 5,
+    "tool_call_end": 3,
+    "agent_core_stream_message_delta": 1,
+    "agent_core_stream_message_stop": 1,
+    "tool_result_ready": 3,
+    "text_message_end": 1,
+    "event_error": 1
+  },
+  "private_capture_sha256": "0ecc96e9d366fce04a3e05ace3e53a629703c168d1357558a6f09510ad08880b",
+  "selected_events": [
+    {
+      "v": 1,
+      "seq": 5841,
+      "ts": 1788982728.147797,
+      "event": {
+        "type": "tool_call_start",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 2
+        },
+        "tool_call_name": "masc_board_search",
+        "tool_call_id": "call_73813f9c3df946e886f86ef1"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 5864,
+      "ts": 1788982728.155235,
+      "event": {
+        "type": "tool_call_start",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 3
+        },
+        "tool_call_name": "Execute",
+        "tool_call_id": "call_b340fca1f9554ab3af451889"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 6092,
+      "ts": 1788982730.364284,
+      "event": {
+        "type": "tool_call_start",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 4
+        },
+        "tool_call_name": "keeper_skill",
+        "tool_call_id": "call_2569f72f865e4744bc288a24"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 6127,
+      "ts": 1788982730.386373,
+      "event": {
+        "type": "tool_call_end",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 2
+        },
+        "tool_call_id": "call_73813f9c3df946e886f86ef1"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 6129,
+      "ts": 1788982730.38696,
+      "event": {
+        "type": "tool_call_end",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 3
+        },
+        "tool_call_id": "call_b340fca1f9554ab3af451889"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 6131,
+      "ts": 1788982730.387337,
+      "event": {
+        "type": "tool_call_end",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 4
+        },
+        "tool_call_id": "call_2569f72f865e4744bc288a24"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 6134,
+      "ts": 1788982730.429963,
+      "event": {
+        "type": "tool_result_ready",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 2
+        },
+        "execution_id": "exec-1788982730429-06b1",
+        "tool_call_id": "call_73813f9c3df946e886f86ef1"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 6135,
+      "ts": 1788982731.135026,
+      "event": {
+        "type": "tool_result_ready",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 3
+        },
+        "execution_id": "exec-1788982731134-06b2",
+        "tool_call_id": "call_b340fca1f9554ab3af451889"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 6136,
+      "ts": 1788982731.145135,
+      "event": {
+        "type": "tool_result_ready",
+        "occurrence": {
+          "stream_scope": 0,
+          "block_index": 4
+        },
+        "execution_id": "exec-1788982731143-06b3",
+        "tool_call_id": "call_2569f72f865e4744bc288a24"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 6138,
+      "ts": 1788982732.011062,
+      "event": {
+        "type": "event_error",
+        "message": "Rate limited: Rate limit reached for requests"
+      }
+    }
+  ]
+}

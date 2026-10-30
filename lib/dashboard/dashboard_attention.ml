@@ -1,0 +1,182 @@
+(** Dashboard Attention — Collect actionable items that require operator intervention.
+
+    Pure functions. Scans workspace snapshots to produce a sorted list
+    of items the operator should act on. Each item includes a suggested MCP tool. *)
+
+(* ===== Masc_domain ===== *)
+
+type severity = Critical | Warning | Info
+
+type attention_item = {
+  severity : severity;
+  summary : string;
+  suggested_tool : string;
+}
+
+let severity_icon = function
+  | Critical -> "[!]"
+  | Warning -> "[~]"
+  | Info -> "[i]"
+
+let severity_order = function Critical -> 0 | Warning -> 1 | Info -> 2
+
+(* ===== Detection Rules ===== *)
+
+(** Detect stuck agents: Active/Busy but last_seen > threshold *)
+let detect_stuck_agents ~(now : float)
+    (snapshots : Dashboard_labels.workspace_snapshot list) : attention_item list =
+  let all_agents =
+    List.concat_map (fun (s : Dashboard_labels.workspace_snapshot) -> s.agents) snapshots
+  in
+  all_agents
+  |> List.filter_map (fun (agent : Masc_domain.agent) ->
+         (* Enumerate every [Dashboard_labels.agent_group] variant so
+            the compiler flags any new group added. Only [Stuck] yields
+            an attention item; [Working], [Idle], [Offline] do not. A
+            future group (e.g. [Recovering]) would silently inherit
+            "no attention" under the previous [_ -> None] catch-all.
+            Same FSM Sparse Match anti-pattern as PRs #14716, #14790,
+            #14806, #14810, #14816. *)
+         match Dashboard_labels.classify_agent ~now agent with
+         | Dashboard_labels.Stuck ->
+             let task_info =
+               match agent.current_task with
+               | Some t -> Printf.sprintf ", task: %s" t
+               | None -> ""
+             in
+             let elapsed =
+               match Dashboard_labels.parse_iso_timestamp agent.last_seen with
+               | Some ts -> Printf.sprintf "%.0fm" ((now -. ts) /. 60.0)
+               | None -> "?m"
+             in
+             Some
+               {
+                 severity = Critical;
+                 summary =
+                   Printf.sprintf "Agent stuck: %s (%s%s)" agent.name elapsed
+                     task_info;
+                 suggested_tool = "masc_agent_timeline";
+               }
+         | Dashboard_labels.Working
+         | Dashboard_labels.Idle
+         | Dashboard_labels.Offline -> None)
+
+(** Detect idle agents when pending tasks exist *)
+let detect_idle_with_pending ~(now : float)
+    (snapshots : Dashboard_labels.workspace_snapshot list) : attention_item list =
+  let all_agents =
+    List.concat_map (fun (s : Dashboard_labels.workspace_snapshot) -> s.agents) snapshots
+  in
+  let all_tasks =
+    List.concat_map (fun (s : Dashboard_labels.workspace_snapshot) -> s.tasks) snapshots
+  in
+  let idle_count =
+    List.length
+      (List.filter
+         (fun a ->
+           (* Same exhaustive-enumeration reasoning as
+              [detect_stuck_agents] above. *)
+           match Dashboard_labels.classify_agent ~now a with
+           | Dashboard_labels.Idle -> true
+           | Dashboard_labels.Working
+           | Dashboard_labels.Stuck
+           | Dashboard_labels.Offline -> false)
+         all_agents)
+  in
+  let pending_count =
+    List.length
+      (List.filter
+         (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
+         all_tasks)
+  in
+  if idle_count > 0 && pending_count > 0 then
+    [
+      {
+        severity = Info;
+        summary =
+          Printf.sprintf "%d idle agent%s with %d pending task%s" idle_count
+            (if idle_count > 1 then "s" else "")
+            pending_count
+            (if pending_count > 1 then "s" else "");
+        suggested_tool = "masc_add_task";
+      };
+    ]
+  else []
+
+(** Tasks whose only exit belongs to the operator, as
+    {!Operator_task_attention} projected them. Not detected here: answering
+    "can anyone still move this" needs the Keeper registry and the meta store,
+    which this module cannot read and which the projection resolves the same
+    way the rejection delivery does. Asking a second way here would let the
+    dashboard and the delivery disagree about the same agent.
+
+    Severity by who is blocked and on what. Work held by nobody is the
+    operator's to end, so it is [Critical]; a Keeper record that does not decode is a repair, and the task moves again
+    once it does, so it is [Warning]. *)
+let detect_operator_tasks (items : Operator_task_attention.item list)
+    : attention_item list =
+  List.map
+    (fun item ->
+       let severity =
+         match item with
+         | Operator_task_attention.Held_without_actor _ -> Critical
+         | Operator_task_attention.Producer_record_unreadable _ -> Warning
+       in
+       { severity
+       ; summary = Operator_task_attention.summary item
+       ; suggested_tool = Operator_task_attention.next_step item
+       })
+    items
+
+(* ===== Main Collection ===== *)
+
+(** Collect all attention items, sorted by severity (critical first). *)
+let collect ~(now : float) ~(operator_tasks : Operator_task_attention.item list)
+    (snapshots : Dashboard_labels.workspace_snapshot list)
+    : attention_item list =
+  let items =
+    detect_stuck_agents ~now snapshots
+    @ detect_idle_with_pending ~now snapshots
+    @ detect_operator_tasks operator_tasks
+  in
+  List.sort
+    (fun a b -> compare (severity_order a.severity) (severity_order b.severity))
+    items
+
+(** Format attention items as content lines for a dashboard section. *)
+let format_items (items : attention_item list) : string list =
+  List.concat_map
+    (fun item ->
+      [
+        Printf.sprintf "%s %s" (severity_icon item.severity) item.summary;
+        Printf.sprintf "    -> %s" item.suggested_tool;
+      ])
+    items
+
+(** One-line summary for compact mode. *)
+let compact_summary (items : attention_item list) : string =
+  let critical =
+    List.length
+      (List.filter (fun i -> i.severity = Critical) items)
+  in
+  let warning =
+    List.length
+      (List.filter (fun i -> i.severity = Warning) items)
+  in
+  let total = List.length items in
+  if total = 0 then "No action needed"
+  else
+    let parts = [] in
+    let parts =
+      if critical > 0 then
+        parts @ [ Printf.sprintf "%d critical" critical ]
+      else parts
+    in
+    let parts =
+      if warning > 0 then
+        parts @ [ Printf.sprintf "%d warning" warning ]
+      else parts
+    in
+    Printf.sprintf "%d item%s (%s)" total
+      (if total > 1 then "s" else "")
+      (String.concat ", " parts)

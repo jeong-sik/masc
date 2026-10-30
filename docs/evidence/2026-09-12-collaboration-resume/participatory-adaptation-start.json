@@ -1,0 +1,78 @@
+{
+  "observed_at": "2026-09-12T12:57:36.033089+00:00",
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "goal": {
+    "id": "memory-garden-participatory-adaptation",
+    "criterion_revision": "c466e96b12a87324d43182604b89182e",
+    "title": "기억의 정원: 관객의 선택을 남기는 발표와 영상 체험",
+    "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/evidence.json 및 decision.md, experience.pptx, experience.mp4, review.md와 여기서 참조하는 실제 검수 파일을 열어 다음 네 기준을 검사한다. 1. adaptation/decision.md에 기존 serial/story.md의 실제 장면과 독자 조건을 근거로 서로 다른 체험 방식 3가지를 비교한다. 빠른 설명과 독자 선택권, 시청각 접근성과 표현의 밀도 사이의 상충을 분석하고 선택한 방식·버린 대안·불확실성을 기록한다. 서로 독립적인 두 관점의 구체적 반론과 응답을 실제 실행 또는 동료 대화 식별자로 연결한다. 2. adaptation/experience.pptx는 실제로 열 수 있는 4~8슬라이드 발표 파일이며 한국어 이야기·선택 질문·질문 후 결과 또는 성찰·허구 고지를 포함한다. 슬라이드에는 관객이 생각할 수 있는 구간과 진행자 노트가 있고, 기존 세 편의 인물 관계와 선택의 인과를 뒤집지 않는다. 실제 렌더 또는 열람으로 글리프 누락·겹침·잘림을 확인한다. 3. adaptation/experience.mp4는 같은 체험을 전달하는 실제 디코딩 가능한 60~180초 영상이다. 서로 다른 장면, 읽을 수 있는 한국어 제목·선택 질문·허구 고지가 있으며 무음으로 보아도 핵심 사건과 질문을 이해할 수 있다. 음향을 쓰면 자체 제작 또는 사용 근거를 기록한다. 코덱·화면 크기·길이·대표 장면의 실제 디코딩 검증과 PPTX 내용 대조를 수행한다. 4. adaptation/evidence.json과 adaptation/review.md에 실제 PPTX/MP4 및 검수 이미지의 파일명·바이트·SHA256, 실행한 열람/디코딩·동료 검토의 결과와 한계를 기록한다. 긴 글 읽기가 어려운 독자와 소리를 듣지 못하는 상황의 두 시나리오를 검토하고, 관객의 선택권이나 이해를 개선한 실제 수정 전후를 한 건 이상 남긴다. 실제 사용자 조사를 하지 않았다면 사용자 검증으로 주장하지 않는다. 기존 전시와 연작 원본·Goal 증거는 보존한다.",
+    "target_value": "4개 기준 모두 충족",
+    "due_date": null,
+    "priority": 3,
+    "phase": "executing",
+    "last_review_note": null,
+    "last_review_at": null,
+    "created_at": "2026-09-12T12:55:48Z",
+    "updated_at": "2026-09-12T12:55:48Z"
+  },
+  "task": {
+    "id": "task-004",
+    "title": "연작의 선택과 반론을 관객 참여형 PPTX·MP4로 옮기기",
+    "description": "완성된 세 편의 연작 소설을 초등 고학년과 보호자가 함께 보는 짧은 도서관 체험으로 확장한다. 관객에게 줄거리를 빠르게 알려주는 것과 각 인물의 선택을 관객 자신의 판단으로 남기는 것은 충돌할 수 있다. 고정된 영상의 속도와 진행자가 조절할 수 있는 발표도 서로 다르다. 팀이 기존 작품과 독자 관점에서 중요한 표현 방식을 결정하고 반론을 다룬 뒤 PPTX와 MP4 두 실물을 만든다. 최종 파일은 exhibit-editor의 adaptation/에 모으고, 분담과 창작 방식은 팀이 정한다. 외부 사람에게 연락하거나 공개 게시하지 않고 허구의 준비용 시제품으로 다룬다. 이전 두 Goal의 사람 확인 대기는 이번 조사·제작의 착수 조건이 아니다.",
+    "priority": 3,
+    "files": [],
+    "created_at": "2026-09-12T12:56:05Z",
+    "created_by": "admin",
+    "contract": {
+      "strict": true,
+      "completion_contract": [
+        "adaptation/decision.md에 기존 serial/story.md의 실제 장면과 독자 조건을 근거로 서로 다른 체험 방식 3가지를 비교한다. 빠른 설명과 독자 선택권, 시청각 접근성과 표현의 밀도 사이의 상충을 분석하고 선택한 방식·버린 대안·불확실성을 기록한다. 서로 독립적인 두 관점의 구체적 반론과 응답을 실제 실행 또는 동료 대화 식별자로 연결한다.",
+        "adaptation/experience.pptx는 실제로 열 수 있는 4~8슬라이드 발표 파일이며 한국어 이야기·선택 질문·질문 후 결과 또는 성찰·허구 고지를 포함한다. 슬라이드에는 관객이 생각할 수 있는 구간과 진행자 노트가 있고, 기존 세 편의 인물 관계와 선택의 인과를 뒤집지 않는다. 실제 렌더 또는 열람으로 글리프 누락·겹침·잘림을 확인한다.",
+        "adaptation/experience.mp4는 같은 체험을 전달하는 실제 디코딩 가능한 60~180초 영상이다. 서로 다른 장면, 읽을 수 있는 한국어 제목·선택 질문·허구 고지가 있으며 무음으로 보아도 핵심 사건과 질문을 이해할 수 있다. 음향을 쓰면 자체 제작 또는 사용 근거를 기록한다. 코덱·화면 크기·길이·대표 장면의 실제 디코딩 검증과 PPTX 내용 대조를 수행한다.",
+        "adaptation/evidence.json과 adaptation/review.md에 실제 PPTX/MP4 및 검수 이미지의 파일명·바이트·SHA256, 실행한 열람/디코딩·동료 검토의 결과와 한계를 기록한다. 긴 글 읽기가 어려운 독자와 소리를 듣지 못하는 상황의 두 시나리오를 검토하고, 관객의 선택권이나 이해를 개선한 실제 수정 전후를 한 건 이상 남긴다. 실제 사용자 조사를 하지 않았다면 사용자 검증으로 주장하지 않는다. 기존 전시와 연작 원본·Goal 증거는 보존한다."
+      ],
+      "required_evidence": [
+        "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/decision.md",
+        "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/experience.pptx",
+        "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/experience.mp4",
+        "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/review.md",
+        "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/evidence.json"
+      ]
+    },
+    "execution_links": {
+      "operation_id": "trace-1789042595401-00001",
+      "session_id": "trace-1789042595401-00001"
+    },
+    "status": "in_progress",
+    "assignee": "exhibit-editor",
+    "started_at": "2026-09-12T12:56:58Z"
+  },
+  "goal_task_links": {
+    "version": 1,
+    "last_updated": "2026-09-12T12:56:05Z",
+    "links": [
+      {
+        "goal_id": "exhibition-publication-baseline",
+        "task_ids": [
+          "task-001"
+        ]
+      },
+      {
+        "goal_id": "memory-garden-participatory-adaptation",
+        "task_ids": [
+          "task-004"
+        ]
+      },
+      {
+        "goal_id": "memory-garden-serial-fiction",
+        "task_ids": [
+          "task-003"
+        ]
+      }
+    ]
+  },
+  "operator_direct_kickoff": false,
+  "tool_specific_kickoff": false,
+  "fusion_tool_prescribed_in_task": false,
+  "scope": "Goal/Task created with original four criteria. Discovery, claim, spontaneous Fusion selection, artifacts and verification remain unproven."
+}

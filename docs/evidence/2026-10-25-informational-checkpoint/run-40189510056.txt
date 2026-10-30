@@ -1,0 +1,16 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40189510056
+Head: 4c947b3f97874478641f4ebfa21ab46ca17a0820
+Full log SHA256: 6b17fbd43fff2c93c6e00371eab1dd845bc510b021b4494ab902624e7191cdc9
+Excerpt (trailing whitespace normalized):
+test suite	Checkout	2026-10-25T11:37:03.5804118Z   ref: 4c947b3f97874478641f4ebfa21ab46ca17a0820
+test suite	Checkout	2026-10-25T11:37:12.3698013Z [command]/usr/bin/git rev-parse --verify --quiet 4c947b3f97874478641f4ebfa21ab46ca17a0820^{object}
+test suite	Test	2026-10-25T11:42:32.3307778Z [2026-10-25 11:42:32] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_assistant_collected turn_count=1 start_s=1792928552.326498 end_s=1792928552.330499 duration_ms=4.001 canonical_bytes=92109 outcome=saved
+test suite	Test	2026-10-25T11:42:32.3588499Z [2026-10-25 11:42:32] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_tool_results_appended turn_count=1 start_s=1792928552.353001 end_s=1792928552.358562 duration_ms=5.560 canonical_bytes=94288 outcome=saved
+test suite	Test	2026-10-25T11:42:32.3618879Z [2026-10-25 11:42:32] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_context_injection turn_count=1 start_s=1792928552.358620 end_s=1792928552.361624 duration_ms=3.003 canonical_bytes=94543 outcome=saved
+test suite	Test	2026-10-25T11:42:32.4033312Z [2026-10-25 11:42:32] [INFO] [Keeper] informational-checkpoint-probe: keeper cycle checkpoint runtime_lane=runtime tokens=12 latency=132ms mode=tool_use stop=yielded_to_operation_queued(1)
+test suite	Test	2026-10-25T11:42:32.4215515Z {"phase":"actual-checkpoint","provider_rounds":1,"informational_acks":3,"later_work_retained":true}
+test suite	Test	2026-10-25T11:42:32.5138147Z [2026-10-25 11:42:32] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=later-work-26165 urgency=low class=bootstrap (keeper=informational-checkpoint-probe)
+test suite	Test	2026-10-25T11:42:32.5148905Z {"phase":"new-process-reopen","pid":30701,"redelivered_completions":0,"later_work_admitted":true}
+test suite	Test	2026-10-25T11:42:32.5276670Z   [OK]          production cycle          0   completion input checkpoints, A...
+test suite	Test	2026-10-25T11:42:32.5277503Z Test Successful in 0.316s. 1 test run.
+test suite	Test	2026-10-25T11:42:32.5348364Z [targeted] test/test_keeper_informational_checkpoint_ack: OK in 0s

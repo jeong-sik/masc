@@ -1,0 +1,43 @@
+{
+  "at": "2026-10-25T00:44:50.211201+00:00",
+  "prior_task": {
+    "id": "task-2620",
+    "title": "승인된 Task의 ID 조회와 Goal 측정·남은 작업 이어가기를 실측 수리한다",
+    "description": "Goal goal-outcome-driven-work-20261024의 남은 G3. 실제3bad Gemma/Qwen 승인전달후실패 보존. 명시TaskIDs조회에서Done기본누락을닫힌typedfilter로수정하고명시필터·cursor·revision경계를유지한다. 독립소스검토·최소native·정확빌드·새실제Keeper승인후측정/남은작업으로검증한다. 관리자정리로취소된task2595의후속이며취소를성공으로세지않는다.",
+    "priority": 1,
+    "files": [],
+    "created_at": "2026-10-24T15:02:12Z",
+    "created_by": "codex-goal-outcomes-20261024",
+    "predecessor_task_id": "task-2595",
+    "contract": {
+      "completion_contract": [
+        "명시 Task ID 조회가 기본값에서 완료/취소된 해당 Task를 반환하고 명시 필터를 존중한다",
+        "기존 두 실제 모델 실패를 보존하고 새 정확 후보에서 승인 뒤 추가 메시지 없이 실제 Goal 측정과 남은 작업을 확인한다"
+      ],
+      "required_evidence": [
+        "현재 후보 SHA, 독립 source review, 선택 native 결과, 실제 wire/Goal measurement/artifact 및 승인 전 개입 기록"
+      ]
+    },
+    "status": "in_progress",
+    "assignee": "codex-goal-outcomes-20261024",
+    "started_at": "2026-10-24T15:02:28Z"
+  },
+  "arguments": {
+    "task_id": "task-2620",
+    "action": "submit_for_verification",
+    "expected_workspace": {
+      "base_path": "/Users/dancer/me",
+      "masc_root": "/Users/dancer/me/.masc"
+    },
+    "notes": "명시 Task ID 기본 조회의 Done/Cancelled 포함과 명시 필터·cursor는 source54의 native27+TOML2 검사로 확인했습니다. source328의 checked exact server에서 GLM-5.3이 승인된 Task001을 실제 ID 조회로 Done 확인하고 추가 Keeper 지시/Goal 링크 개입 없이 Read→1/3 측정→beta/gamma Edit/Read→3/3 측정→Task2 검증 제출→Goal 검증 요청과 정확한 proof/human 대기 보고를 수행했습니다. 원래 Gemma/Qwen 실패와 모든 후속 실패·통제 개입 기록을 보존했습니다. 실제328 native는 six245PASS/Claude3FAIL+timeout이며 전체성공으로 부르지 않습니다. 후속47d resubmission 수리는 독립 sourcePASS이고 validation18의5suite CI40147287888은 진행 중입니다. 메인Goal은 별도11/11 reported measurement ff5d3c4d17dd26b6393a97b4d942e201을 기록했으며 Goal proof/사람확인은 이 제출의 성공으로 간주하지 않습니다. 고정11 사례는 각 source/runtime scope가 다르고 운영설치/전체회귀/전체Stack승인을 주장하지 않습니다.",
+    "handoff_context": {
+      "summary": "Task ID 조회와 실제 승인 후 Goal 측정·남은 작업을 exact328 GLM cohort에서 확인했습니다. 과거 실패와 범위 제한을 보존하고 독립 검증에 제출합니다.",
+      "evidence_refs": [
+        "note:https://raw.githubusercontent.com/jeong-sik/masc/be9a9d9da9d426c8babb691a9ebc4620ca4a517c/docs/evidence/2026-10-25-goal-continuation-glm/acceptance-11of11-snapshot.json",
+        "note:https://raw.githubusercontent.com/jeong-sik/masc/be9a9d9da9d426c8babb691a9ebc4620ca4a517c/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/diagnosis.json",
+        "note:https://raw.githubusercontent.com/jeong-sik/masc/be9a9d9da9d426c8babb691a9ebc4620ca4a517c/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json",
+        "note:https://raw.githubusercontent.com/jeong-sik/masc/be9a9d9da9d426c8babb691a9ebc4620ca4a517c/docs/audits/2026-10-25-agentic-verification-adversarial-audit.md"
+      ]
+    }
+  }
+}

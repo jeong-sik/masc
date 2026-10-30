@@ -1,0 +1,1570 @@
+(* MSX HTTP control routes (RFC-0439 §3.7, RFC #38695).
+   Tests tick, press, checkpoint, carts and load HTTP route endpoints
+   and responses under a real loaded machine. Machine spectating is
+   handled via GET /api/v1/lane-addons/live. *)
+
+open Alcotest
+module Lane = Msx_lane
+module Route = Server_routes_http_routes_msx
+module Tick = Masc_tui_msx_tick
+
+(* What the terminal's tick client concludes from a 409 body. *)
+let terminal_reads_409 body =
+  Tick.fetch (Tick.create ()) ~host:"localhost" ~port:1 ~headers:[]
+    ~request:(fun ~body:_ -> Ok (409, body))
+
+let unwatched_config =
+  lazy (Masc.Workspace.default_config (Filename.temp_dir "msx-press-route-" ""))
+;;
+
+let member name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
+let with_tick_machine f =
+  let dir = Filename.temp_dir "msx-tick-route-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
+      (match Lane.eject () with
+       | Ok () | Error Lane.No_machine -> ()
+       | Error e -> fail (Lane.error_to_string e));
+      Array.iter
+        (fun name -> Sys.remove (Filename.concat dir name))
+        (Sys.readdir dir);
+      Unix.rmdir dir)
+    (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      (match
+         Lane.For_testing.load_bare_machine
+           ~ledger_dir:dir
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Lane.error_to_string e));
+      f ())
+;;
+
+let with_attached_worker f =
+  let base_path = Filename.temp_dir "msx-worker-routes-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    Eio_main.run (fun env ->
+      let previous_runtime = Runtime.For_testing.snapshot () in
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:(fun () ->
+        Runtime.For_testing.restore previous_runtime;
+        Fs_compat.clear_fs ()) (fun () ->
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              let runtime_path = Filename.concat base_path "runtime.toml" in
+              Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+              (match Runtime.init_default ~config_path:runtime_path with
+               | Ok () -> () | Error detail -> fail detail);
+              Masc.Lane_addon_runtime.For_testing.reset ();
+              Machine_worker_fixture.with_msx ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+                (fun ~invoke:_ ~detach ->
+                  let value = f ~config:(Masc.Workspace.default_config base_path) ~env ~sw in
+                  detach (); value)))))))
+;;
+
+let require_ok = function
+  | Ok value -> value
+  | Error e -> fail (Lane.error_to_string e)
+;;
+
+let current_frame_number () =
+  match Lane.frame () with
+  | Some f -> f.number
+  | None -> fail "missing current frame"
+;;
+
+let frame_number json =
+  match member "number" json with
+  | Some (`Int n) -> n
+  | _ -> fail "missing frame number"
+;;
+
+let pixels_object json =
+  match member "pixels" json with
+  | Some (`Assoc fields) -> fields
+  | _ -> fail "missing pixels"
+;;
+
+let retained_request ?(frames = 1) json =
+  let fields = pixels_object json in
+  let reference =
+    List.map
+      (fun name -> name, List.assoc name fields)
+      [ "revision"; "width"; "height" ]
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "frames", `Int frames
+       ; "pixel_response", `String "retained"
+       ; "known_pixels", `Assoc reference
+       ])
+;;
+
+let assert_pixels_kind expected json =
+  check
+    (option string)
+    "pixel representation"
+    (Some expected)
+    (match List.assoc_opt "kind" (pixels_object json) with
+     | Some (`String s) -> Some s
+     | _ -> None)
+;;
+
+let test_retained_tick () =
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env ~sw ->
+        let pool =
+          Eio.Executor_pool.create
+            ~sw
+            ~domain_count:1
+            (Eio.Stdenv.domain_mgr env)
+        in
+        Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          let first_status, first =
+Route.tick_response ~config:config ~body:{|{"frames":1,"pixel_response":"retained"}|}
+          in
+          check bool "first tick succeeds" true (first_status = `OK);
+          (match
+             ( Lane.current_publication ()
+             , member "change_count" first
+             , member "incarnation" first )
+           with
+           | ( Lane.Stable mark
+             , Some (`Int count)
+             , Some (`String incarnation) ) ->
+             check int "tick includes its machine change count" mark.count count;
+             check
+               string
+               "tick includes its machine incarnation"
+               mark.incarnation
+               incarnation
+           | _ -> fail "tick omitted its change mark");
+          assert_pixels_kind "inline" first;
+          let before = frame_number first in
+          let status, next =
+Route.tick_response ~config:config ~body:(retained_request first)
+          in
+          check bool "retained tick succeeds" true (status = `OK);
+          assert_pixels_kind "retained" next;
+          check
+            int
+            "retention still advances exactly once"
+            (before + 1)
+            (frame_number next);
+          check
+            bool
+            "retained response carries no encoded pixels"
+            false
+            (List.mem_assoc "rgb_base64" (pixels_object next));
+          (match Lane.step_frame ~frames:1 with
+           | Error error -> fail (Lane.error_to_string error)
+           | Ok (snapshot, ledger, _) ->
+             ignore (Lane.step ~frames:1);
+             check
+               int
+               "captured frame remains at its own atomic step"
+               (before + 2)
+               snapshot.number;
+             check bool "captured ledger is immutable" true (ledger = []));
+          ignore
+            (Lane.press
+               ~who:"bob"
+               ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
+               ~hold_frames:1
+               ~step_frames:1
+               ~sequence:false);
+          let _, after_press =
+Route.tick_response ~config:config ~body:(retained_request next)
+          in
+          assert_pixels_kind "retained" after_press;
+          check
+            bool
+            "fresh players survive retained pixels"
+            true
+            (match member "players" after_press with
+             | Some (`List players) ->
+               List.exists
+                 (fun json -> member "who" json = Some (`String "bob"))
+                 players
+             | _ -> false);
+          ignore (Lane.eject ());
+          let status, empty =
+Route.tick_response ~config:config ~body:(retained_request next)
+          in
+          check
+            bool
+            "missing machine remains a successful empty observation"
+            true
+            (status = `OK && member "loaded" empty = Some (`Bool false));
+          check
+            bool
+            "empty machine never advertises stale pixels"
+            true
+            (member "pixels" empty = None))))
+;;
+
+let test_tick_validation_precedes_mutation () =
+  with_tick_machine (fun () ->
+    let before = current_frame_number () in
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      List.iter
+        (fun body ->
+          let status, response = Route.tick_response ~config:(Lazy.force unwatched_config) ~body in
+          check bool "invalid tick is a bad request" true (status = `Bad_request);
+          check
+            bool
+            "invalid tick carries failure"
+            true
+            (member "ok" response = Some (`Bool false));
+          check
+            int
+            "invalid tick never advances the loaded machine"
+            before
+            (current_frame_number ()))
+        [ ""
+        ; "{"
+        ; "null"
+        ; "[]"
+        ; "18"
+        ; {|{"frames":"18"}|}
+        ; {|{"frames":1.5}|}
+        ; {|{"frames":true}|}
+        ; {|{"frames":null}|}
+        ; {|{"frames":1,"frames":2}|}
+        ; {|{"frames":1,"unexpected":true}|}
+        ; {|{"unexpected":18}|}
+        ; {|{"pixel_response":"unknown"}|}
+        ; {|{"pixel_response":null}|}
+        ; {|{"known_pixels":{}}|}
+        ; {|{"pixel_response":"retained","known_pixels":{}}|}
+        ; {|{"pixel_response":"retained","pixel_response":"retained"}|}
+        ; {|{"pixel_response":"retained","known_pixels":{"revision":"bad","width":1,"height":1}}|}
+        ];
+      let status, body = Route.tick_response ~config:(Lazy.force unwatched_config) ~body:"{}" in
+      check
+        bool
+        "missing attached worker cannot fall back to host mutation"
+        true
+        (status = `Service_unavailable);
+      check bool "and says no worker took the call" true
+        (match Msx_wire.decode body with
+         | Ok {Msx_wire.code = Some Msx_wire.Worker_unavailable; _} -> true
+         | Ok _ | Error _ -> false);
+      check bool "the inventory read says the same when no worker is attached" true
+        (match Route.carts_response ~config:(Lazy.force unwatched_config) with
+         | `Service_unavailable, body ->
+             (match Msx_wire.decode body with
+              | Ok {Msx_wire.code = Some Msx_wire.Worker_unavailable; _} -> true
+              | Ok _ | Error _ -> false)
+         | _ -> false);
+      check
+        int
+        "missing attached worker preserves the local machine"
+        before
+        (current_frame_number ())))
+;;
+
+(* Two worker failures share HTTP 503 and differ in what they allow: nothing
+   was dispatched, or the call was dispatched and its result was lost. The
+   terminal tells them apart by code alone. *)
+let test_503_codes_separate_unavailable_from_outcome_unknown () =
+  let answer error =
+    let status, body = Route.call_error_answer error in
+    status, Result.get_ok (Msx_wire.decode body), body in
+  List.iter (fun (label, error, expected) ->
+    let status, refusal, _ = answer error in
+    check bool (label ^ " is 503") true (status = `Service_unavailable);
+    check bool (label ^ " is told apart by code") true (refusal.Msx_wire.code = Some expected))
+    ["no attached worker", Masc.Lane_addon_runtime.Unavailable "No attached shared Add-on provides masc_msx_step",
+       Msx_wire.Worker_unavailable;
+     "control port unavailable",
+       Masc.Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable "control port closed"),
+       Msx_wire.Worker_unavailable;
+     "result lost after dispatch", Masc.Lane_addon_runtime.Outcome_unknown "transport closed",
+       Msx_wire.Outcome_unknown];
+  (* What the terminal concludes from each real body. *)
+  let reads error =
+    let _, _, body = answer error in
+    Tick.fetch (Tick.create ()) ~host:"localhost" ~port:1 ~headers:[]
+      ~request:(fun ~body:_ -> Ok (503, body)) in
+  check bool "the terminal keeps polling past an unavailable worker" true
+    (match reads (Masc.Lane_addon_runtime.Unavailable "no worker") with
+     | Ok (Tick.Worker_unavailable (Some _)) -> true
+     | Ok _ | Error _ -> false);
+  check bool "the terminal stops on a lost result" true
+    (Result.is_error (reads (Masc.Lane_addon_runtime.Outcome_unknown "transport closed")))
+
+let test_tick_worker_advances_and_returns_frame () =
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env ~sw ->
+        let pool =
+          Eio.Executor_pool.create
+            ~sw
+            ~domain_count:1
+            (Eio.Stdenv.domain_mgr env)
+        in
+        Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          List.iter
+            (fun (body, frames) ->
+              let before = current_frame_number () in
+              let status, response = Route.tick_response ~config ~body in
+              check
+                bool
+                "accepted tick succeeds through attached worker"
+                true
+                (status = `OK);
+              check
+                int
+                "response includes exactly the accepted advance"
+                frames
+                (frame_number response - before);
+              check
+                int
+                "returned frame matches current machine"
+                (frame_number response)
+                (current_frame_number ()))
+            [ "{}", Route.msx_tick_default_frames
+            ; {|{"frames":0}|}, 1
+            ; {|{"frames":999999}|}, Lane.max_frames_per_call
+            ])))
+;;
+
+let test_checkpoint_receipt_lifecycle () =
+  let module Receipt = Server_msx_checkpoint_receipt in
+  let directory = Filename.temp_dir "msx-receipt-" "" in
+  let path = Filename.concat directory "operations.sqlite3" in
+  let get = function Ok value -> value | Error error -> fail (Receipt.error_to_string error) in
+  let id = match Keeper_operation_id.of_string "checkpoint-test-1" with
+    | Ok value -> value | Error detail -> fail detail in
+  let binding : Receipt.binding = {operation_id=id;action=Save;slot="quick"} in
+  Fun.protect ~finally:(fun () ->
+    Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
+    Unix.rmdir directory) (fun () ->
+    check bool "missing does not create a store" true (get (Receipt.inspect ~path binding) = None);
+    check bool "missing remains missing" false (Sys.file_exists path);
+    check bool "first registration accepted" true
+      (get (Receipt.admit ~path ~epoch:"server-a" binding) = Receipt.Accepted);
+    let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      check bool "pending binding cannot be rewritten" false
+        (Sqlite3.Rc.is_success (Sqlite3.exec db "UPDATE receipts SET slot='other' WHERE operation_id='checkpoint-test-1'")));
+    check bool "repeated registration does not replay" true
+      (match get (Receipt.admit ~path ~epoch:"server-a" binding) with
+       | Existing {state=Pending;epoch="server-a";_} -> true | _ -> false);
+    check bool "different slot cannot reuse identity" true
+      (Receipt.admit ~path ~epoch:"server-a" {binding with slot="other"} = Error Receipt.Binding_conflict);
+    check bool "replacement process cannot settle prior request" true
+      (Result.is_error (Receipt.settle ~path ~epoch:"server-b" binding (Refused "not ours")));
+    check bool "prior pending remains unknown after restart" true
+      (match get (Receipt.inspect ~path binding) with Some {state=Pending;epoch="server-a";_} -> true | _ -> false);
+    let completed : Receipt.completion = {
+      mark={count=3;incarnation="installed-history"};
+      checkpoint_sha256=String.make 64 'a'} in
+    get (Receipt.settle ~path ~epoch:"server-a" binding (Committed completed));
+    check bool "closed and reopened read retains completion evidence" true
+      (match get (Receipt.inspect ~path binding) with
+       | Some {state=Committed observed;_} -> observed=completed | _ -> false);
+    check bool "terminal cannot be rewritten" true
+      (Result.is_error (Receipt.settle ~path ~epoch:"server-a" binding (Unknown "late error")));
+    check bool "terminal replay returns existing receipt" true
+      (match get (Receipt.admit ~path ~epoch:"server-b" binding) with
+       | Existing {state=Committed observed;epoch="server-a";_} -> observed=completed | _ -> false))
+;;
+
+let test_checkpoint_terminal_store_failure_can_be_recovered () =
+  let module Receipt = Server_msx_checkpoint_receipt in
+  let directory = Filename.temp_dir "msx-receipt-recovery-" "" in
+  let path = Filename.concat directory "operations.sqlite3" in
+  let get = function Ok value -> value | Error error -> fail (Receipt.error_to_string error) in
+  let operation_id = match Keeper_operation_id.of_string "checkpoint-recovery-1" with
+    | Ok value -> value | Error detail -> fail detail in
+  let binding : Receipt.binding = {operation_id; action=Restore; slot="quick"} in
+  Fun.protect ~finally:(fun () ->
+    Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
+    Unix.rmdir directory) (fun () ->
+    ignore (get (Receipt.admit ~path ~epoch:"server-a" binding));
+    let completed : Receipt.completion =
+      {mark={count=7;incarnation="restored-machine"}; checkpoint_sha256=String.make 64 'b'} in
+    let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+    Fun.protect ~finally:(fun () ->
+      ignore (Sqlite3.exec db "ROLLBACK"); ignore (Sqlite3.db_close db)) (fun () ->
+      check bool "another writer holds the receipt database" true
+        (Sqlite3.Rc.is_success (Sqlite3.exec db "BEGIN IMMEDIATE"));
+      check bool "completed effect cannot yet persist its receipt" true
+        (Result.is_error (Receipt.settle ~path ~epoch:"server-a" binding (Committed completed))));
+    check bool "disk still has the admitted pending record" true
+      (match get (Receipt.inspect ~path binding) with Some {state=Pending;_} -> true | _ -> false);
+    get (Receipt.retry_settlement ~path ~epoch:"server-a" binding);
+    check bool "receipt-only recovery commits the exact completed observation" true
+      (match get (Receipt.inspect ~path binding) with
+       | Some {state=Committed actual;_} -> actual=completed | _ -> false);
+    get (Receipt.retry_settlement ~path ~epoch:"server-a" binding);
+    check bool "a duplicate still cannot dispatch a second machine effect" true
+      (match get (Receipt.admit ~path ~epoch:"server-a" binding) with
+       | Existing {state=Committed actual;_} -> actual=completed | _ -> false))
+;;
+
+let test_checkpoint_settlement_notifies_possible_restore () =
+  let module Receipt = Server_msx_checkpoint_receipt in
+  let committed = Receipt.Committed {
+    mark={count=1;incarnation="restored-machine"}; checkpoint_sha256=String.make 64 'a'} in
+  List.iter (fun (label, restore, state, expected_notification) ->
+    List.iter (fun persisted ->
+      let calls = ref [] in
+      let result = Route.settle_checkpoint_effect ~restore
+        ~persist:(fun actual ->
+          check bool (label ^ " persists exact effect evidence") true (actual=state);
+          calls := "persist" :: !calls; persisted)
+        ~notify:(fun () -> calls := "notify" :: !calls) state in
+      check bool (label ^ " retains persistence result") true (result=persisted);
+      check (list string) (label ^ " effect notification is independent of persistence")
+        (if expected_notification then ["persist";"notify"] else ["persist"])
+        (List.rev !calls)) [Ok (); Error "receipt store locked"])
+    ["committed restore",true,committed,true;
+     "possibly applied restore",true,Receipt.Unknown "worker raised after dispatch",true;
+     "proven refused restore",true,Receipt.Refused "no machine",false;
+     "committed save",false,committed,false;
+     "unknown save",false,Receipt.Unknown "save worker failed",false];
+  let original = ref None in
+  let notification_result = Route.settle_checkpoint_effect ~restore:true
+    ~persist:(fun state -> original:=Some state; Error "receipt store locked")
+    ~notify:(fun () -> raise (Failure "observer unavailable")) committed in
+  check bool "notification failure never replaces recorded effect evidence" true (!original=Some committed);
+  check (result unit string) "both independent failures remain visible"
+    (Error "receipt store locked; MSX restore observer notification failed: Failure(\"observer unavailable\")") notification_result
+;;
+
+let test_correlated_checkpoint_route () =
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env ~sw ->
+      Fs_compat.mkdir_p (Masc.Workspace.masc_dir config);
+      let expected = `Assoc ["base_path",`String (Unix.realpath config.base_path);
+        "masc_root",`String (Unix.realpath (Masc.Workspace.masc_dir config))] in
+      let fields id = ["operation_id",`String id;"slot",`String "quick";"expected_workspace",expected] in
+      let body fields = Yojson.Safe.to_string (`Assoc fields) in
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let read id action = Route.checkpoint_status_response ~config
+          ~body:(body (("checkpoint",`String action)::fields id)) in
+        let _, missing = read "never-seen" "save" in
+        check bool "missing is unknown, never pre-effect proof" true (member "status" missing=Some (`String "unknown"));
+        let _, saved = Route.checkpoint_response ~config ~restore:false ~body:(body (fields "save-1")) in
+        check bool "save produces a committed receipt" true (member "status" saved=Some (`String "committed"));
+        let slot_path = Filename.concat config.base_path ".masc/msx/saves/quick.json" in
+        let info () = match Lane.checkpoint_info ~path:slot_path with Ok info -> info | Error error -> fail (Lane.error_to_string error) in
+        let saved_digest = (info ()).sha256 in
+        let receipt_db = Sqlite3.db_open ~mode:`NO_CREATE
+          (Filename.concat config.base_path ".masc/msx/checkpoint-operations.sqlite3") in
+        Fun.protect ~finally:(fun () ->
+          ignore (Sqlite3.exec receipt_db "ROLLBACK"); ignore (Sqlite3.db_close receipt_db)) (fun () ->
+          check bool "fixture holds receipt writer" true
+            (Sqlite3.Rc.is_success (Sqlite3.exec receipt_db "BEGIN IMMEDIATE"));
+          let _, unavailable = Route.checkpoint_response ~config ~restore:false ~body:(body (fields "save-1")) in
+          check bool "unavailable duplicate lookup cannot invent refusal" true
+            (member "status" unavailable=Some (`String "unknown")));
+        ignore (Lane.step ~frames:1);
+        let _, replay = Route.checkpoint_response ~config ~restore:false ~body:(body (fields "save-1")) in
+        check bool "duplicate returns original committed receipt" true (member "status" replay=Some (`String "committed"));
+        check string "duplicate never overwrites the slot" saved_digest (info ()).sha256;
+        let _, restored = Route.checkpoint_response ~config ~restore:true ~body:(body (fields "restore-1")) in
+        check bool "restore committed" true (member "status" restored=Some (`String "committed"));
+        ignore (Lane.step ~frames:1);
+        let _, current = read "restore-1" "restore" in
+        check bool "later snapshot explicitly follows completion" true
+          (member "live_relation" current=Some (`String "observed_after_completion"));
+        check bool "receipt and frame share request workspace" true (member "workspace" current=Some expected);
+        check bool "current frame accompanies known completion" true (Option.is_some (member "live" current));
+        let _, wrong = Route.checkpoint_status_response ~config
+          ~body:(body ["checkpoint",`String "restore";"operation_id",`String "restore-1";"slot",`String "quick"]) in
+        check bool "unbound inspection cannot provide pixels" true (member "live" wrong=None))))
+;;
+
+(* A checkpoint the worker refuses before it takes effect settles as a proven
+   refusal, so the terminal retires its retained intent and the next write is
+   admitted. Settled as unknown, the same refusal would leave the intent in
+   place and block every machine write until an offline acknowledgement. Each
+   case runs the real worker; the receipt is then read the way the terminal
+   reads it. *)
+let test_pre_effect_checkpoint_refusal_settles_refused () =
+  let module Pending = Masc_tui_msx_checkpoint_pending in
+  let module Tui = Masc.Tui_decode in
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env ~sw ->
+      Fs_compat.mkdir_p (Masc.Workspace.masc_dir config);
+      let masc_root = Unix.realpath (Masc.Workspace.masc_dir config) in
+      let base_path = Unix.realpath config.base_path in
+      let expected = `Assoc ["base_path",`String base_path;"masc_root",`String masc_root] in
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let post ~restore id =
+          let body = Yojson.Safe.to_string (`Assoc ["operation_id",`String id;
+            "slot",`String "quick";"expected_workspace",expected]) in
+          snd (Route.checkpoint_response ~config ~restore ~body) in
+        let intent ~restore id : Pending.binding =
+          {operation_id=(match Keeper_operation_id.of_string id with Ok v -> v | Error m -> fail m);
+           restore; slot="quick"; base_path; masc_root} in
+        let gate_is_open label =
+          match Pending.load ~masc_root with
+          | Ok [] -> ()
+          | Ok _ -> fail (label ^ ": an intent still gates machine writes")
+          | Error detail -> fail (label ^ ": " ^ detail) in
+        let refuses label ~restore id =
+          let binding = intent ~restore id in
+          (match Pending.remember ~masc_root binding with
+           | Ok () -> () | Error detail -> fail detail);
+          let receipt = post ~restore id in
+          check (option string) (label ^ " settles as refused") (Some "refused")
+            (match member "status" receipt with Some (`String s) -> Some s | _ -> None);
+          check (option string) (label ^ " carries the pre-effect proof") (Some "proven_pre_effect")
+            (match member "effect_disposition" receipt with Some (`String s) -> Some s | _ -> None);
+          (match Tui.decode_msx_checkpoint_receipt ~operation_id:id ~restore ~slot:"quick"
+                   ~base_path ~masc_root receipt with
+           | Ok (Tui.Checkpoint_refused detail) ->
+               check bool (label ^ " names the reason") true (String.trim detail <> "")
+           | Ok _ -> fail (label ^ ": the terminal does not read this as a refusal")
+           | Error detail -> fail (label ^ ": " ^ detail));
+          (* The terminal retires an intent on [Checkpoint_refused]. *)
+          (match Pending.forget ~masc_root binding with
+           | Ok () -> () | Error detail -> fail detail);
+          gate_is_open label in
+        refuses "restore of a slot never saved" ~restore:true "restore-missing-slot";
+        ignore (require_ok (Lane.eject ()));
+        refuses "save with no machine" ~restore:false "save-without-machine";
+        (* The server needs no offline acknowledgement afterwards. *)
+        ignore (require_ok (Lane.For_testing.load_bare_machine
+          ~ledger_dir:(Filename.concat config.base_path "ledger")));
+        check (option string) "a later save is admitted" (Some "committed")
+          (match member "status" (post ~restore:false "save-after-refusals") with
+           | Some (`String s) -> Some s | _ -> None))))
+;;
+
+(* The other half of the settlement rule. A failure the worker cannot place
+   before the effect is unknown, and an unknown receipt keeps the terminal's
+   intent in force: the operator may not act again until the outcome is
+   known. Here the lane's activity check, which restore runs first, raises
+   something the lane never declares. The worker's boundary reports that as a
+   runtime failure of unknown effect, and the receipt must settle as unknown,
+   not refused. *)
+let test_unexpected_worker_exception_settles_checkpoint_unknown () =
+  let module Pending = Masc_tui_msx_checkpoint_pending in
+  let module Tui = Masc.Tui_decode in
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env ~sw ->
+      Fs_compat.mkdir_p (Masc.Workspace.masc_dir config);
+      let masc_root = Unix.realpath (Masc.Workspace.masc_dir config) in
+      let base_path = Unix.realpath config.base_path in
+      let expected = `Assoc ["base_path",`String base_path;"masc_root",`String masc_root] in
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let id = "restore-through-a-defect" in
+        let body = Yojson.Safe.to_string (`Assoc ["operation_id",`String id;
+          "slot",`String "quick";"expected_workspace",expected]) in
+        let binding : Pending.binding =
+          {operation_id=(match Keeper_operation_id.of_string id with Ok v -> v | Error m -> fail m);
+           restore=true; slot="quick"; base_path; masc_root} in
+        (match Pending.remember ~masc_root binding with
+         | Ok () -> () | Error detail -> fail detail);
+        Fun.protect
+          ~finally:(fun () ->
+            Msx_lane.install_activity_observer
+              (Some (fun () -> Machine_configuration.Enabled)))
+          (fun () ->
+            Msx_lane.install_activity_observer
+              (Some (fun () -> failwith "activity observer defect"));
+            let receipt = snd (Route.checkpoint_response ~config ~restore:true ~body) in
+            check (option string) "a failure of unknown effect settles as unknown"
+              (Some "unknown")
+              (match member "status" receipt with Some (`String s) -> Some s | _ -> None);
+            check bool "and claims no pre-effect proof" true
+              (member "effect_disposition" receipt = None);
+            (match Tui.decode_msx_checkpoint_receipt ~operation_id:id ~restore:true
+                     ~slot:"quick" ~base_path ~masc_root receipt with
+             | Ok (Tui.Checkpoint_unknown detail) ->
+                 check bool "the terminal reads it as unknown with a reason" true
+                   (String.trim detail <> "")
+             | Ok _ -> fail "the terminal does not read this as unknown"
+             | Error detail -> fail detail);
+            (* An unknown receipt frees nothing: the intent still gates writes. *)
+            (match Pending.load ~masc_root with
+             | Ok [_] -> ()
+             | Ok _ -> fail "the intent should stay in force"
+             | Error detail -> fail detail)))))
+;;
+
+let test_checkpoint_route () =
+  with_tick_machine (fun () ->
+    let config = Lazy.force unwatched_config in
+    let before = current_frame_number () in
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      List.iter
+        (fun body ->
+          let status, _ =
+            Route.checkpoint_response ~config ~restore:false ~body
+          in
+          check
+            bool
+            "checkpoint validates before requesting worker"
+            true
+            (status = `Bad_request))
+        [ "[]"
+        ; {|{"slot":3}|}
+        ; {|{"slot":"x","slot":"y"}|}
+        ; {|{"extra":true}|}
+        ];
+      let status, _ = Route.checkpoint_response ~config ~restore:false ~body:"{}" in
+      check
+        bool
+        "checkpoint never runs inline without a worker"
+        true
+        (status = `Service_unavailable));
+    with_attached_worker (fun ~config ~env ~sw ->
+        let base_path = config.Masc.Workspace.base_path in
+        let pool =
+          Eio.Executor_pool.create
+            ~sw
+            ~domain_count:1
+            (Eio.Stdenv.domain_mgr env)
+        in
+        Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          let invalid_status, _ = Route.checkpoint_response ~config ~restore:false
+            ~body:{|{"slot":"../escape"}|} in
+          check bool "worker refuses a checkpoint path outside named slots" true
+            (invalid_status = `Bad_request);
+          check int "invalid slot leaves the machine unchanged" before (current_frame_number ());
+          let status, _ =
+            Route.checkpoint_response ~config ~restore:false ~body:"{}"
+          in
+          check bool "save through attached worker succeeds" true (status = `OK);
+          ignore (Lane.step ~frames:12 : (Lane.observation, Lane.error) result);
+          let stepped = current_frame_number () in
+          let status, _ =
+            Route.checkpoint_response ~config ~restore:true ~body:"{}"
+          in
+          check bool "restore naming no slot is a bad request" true (status = `Bad_request);
+          check int "restore naming no slot restores nothing" stepped (current_frame_number ());
+          (* A key the tool layer drops before the worker sees the arguments
+             must not turn a restore into a listing. *)
+          let status, _ =
+            Route.checkpoint_response ~config ~restore:true ~body:{|{"_x":1}|}
+          in
+          check bool "restore naming only an internal key is a bad request" true
+            (status = `Bad_request);
+          check int "that restore restores nothing either" stepped (current_frame_number ());
+          let status, _ =
+            Route.checkpoint_response ~config ~restore:true ~body:{|{"slot":"quick"}|}
+          in
+          check bool "restore through attached worker succeeds" true (status = `OK);
+          check int "saved clock restored" before (current_frame_number ());
+          let destination =
+            Filename.concat base_path ".masc/msx/saves/quick.json"
+          in
+          Sys.remove destination;
+          Sys.mkdir destination 0o700;
+          let status, response =
+            Route.checkpoint_response ~config ~restore:false ~body:"{}"
+          in
+          check
+            bool
+            "storage failure is server error"
+            true
+            (status = `Internal_server_error);
+          check
+            bool
+            "storage error carries failure"
+            true
+            (member "ok" response = Some (`Bool false));
+          check
+            int
+            "storage failure preserves machine"
+            before
+            (current_frame_number ()))))
+;;
+
+let ledger_whos () = List.map (fun (e : Lane.entry) -> e.who) (Lane.ledger ())
+
+let test_press_rejects_wrong_types () =
+  with_tick_machine (fun () ->
+    let before = current_frame_number () in
+    List.iter
+      (fun (body, expected) ->
+        let status, response =
+          Route.press_response
+            ~config:(Lazy.force unwatched_config)
+            ~who:"unit-presser"
+            ~body
+        in
+        check
+          bool
+          ("wrong type is a bad request: " ^ body)
+          true
+          (status = `Bad_request);
+        check bool ("the refusal names the invalid field: " ^ body) true
+          (match member "message" response with
+           | Some (`String message) ->
+               let length = String.length expected in
+               let rec contains offset =
+                 offset + length <= String.length message
+                 && (String.sub message offset length = expected || contains (offset + 1)) in
+               contains 0
+           | _ -> false);
+        check
+          int
+          ("nothing is pressed: " ^ body)
+          before
+          (current_frame_number ());
+        check bool ("nothing reaches the ledger: " ^ body) true (ledger_whos () = []))
+      [ {|{"keys":["space"],"hold_frames":"5"}|}, "hold_frames"
+      ; {|{"keys":["space"],"hold_frames":0}|}, "hold_frames"
+      ; {|{"keys":["space"],"frames":1.5}|}, "frames"
+      ; {|{"keys":["space"],"frames":null}|}, "frames"
+      ; {|{"keys":["space"],"sequence":1}|}, "sequence"
+      ; {|{"keys":["space"],"sequence":"true"}|}, "sequence"
+      ; {|{"keys":["space",1]}|}, "keys"
+      ; {|{"keys":"space"}|}, "keys"
+      ; {|{}|}, "keys"
+      ; {|{"keys":[]}|}, "keys"
+      ])
+;;
+
+(* A change names the workspace the terminal read. Another workspace on the
+   same port is refused with 409 before any effect, a malformed precondition is
+   a 400, and the matching one is accepted and stripped before the strict
+   per-route decoders. *)
+let test_changes_are_bound_to_the_expected_workspace () =
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+    let base_path = config.Masc.Workspace.base_path in
+    let masc_root = Masc.Workspace.masc_dir config in
+    let expected ~base ~root =
+      Printf.sprintf {|"expected_workspace":{"base_path":%S,"masc_root":%S}|} base root
+    in
+    let here = expected ~base:(Unix.realpath base_path) ~root:(Unix.realpath masc_root) in
+    let elsewhere =
+      let other = Filename.temp_dir "msx-other-workspace-" "" in
+      expected ~base:(Unix.realpath other) ~root:(Unix.realpath other)
+    in
+    let relative = expected ~base:"relative/path" ~root:"relative/root" in
+    let before = current_frame_number () in
+    (* The routes answer with different status sets, so each is reduced to the
+       two refusal statuses this test distinguishes before it is compared. *)
+    let refusal = function
+      | `Conflict -> `Conflict
+      | `Bad_request -> `Bad_request
+      | `OK | `Internal_server_error | `Service_unavailable -> `Other
+    in
+    let check_refused label status_expected (status, response) =
+      check bool (label ^ ": status") true (refusal status = status_expected);
+      check
+        (option bool)
+        (label ^ ": ok is false")
+        (Some false)
+        (match member "ok" response with Some (`Bool b) -> Some b | _ -> None)
+    in
+    List.iter
+      (fun (label, precondition, status_expected) ->
+        check_refused
+          ("press " ^ label)
+          status_expected
+          (Route.press_response ~config ~who:"unit-presser"
+             ~body:(Printf.sprintf {|{%s,"keys":["space"]}|} precondition));
+        check_refused
+          ("load " ^ label)
+          status_expected
+          (Route.load_response ~config ~agent_name:"unit-presser"
+             ~body:(Printf.sprintf {|{%s,"cart":"game.rom"}|} precondition));
+        check_refused
+          ("save " ^ label)
+          status_expected
+          (Route.checkpoint_response ~config ~restore:false
+             ~body:(Printf.sprintf {|{%s,"slot":"quick"}|} precondition));
+        check_refused
+          ("restore " ^ label)
+          status_expected
+          (Route.checkpoint_response ~config ~restore:true
+             ~body:(Printf.sprintf {|{%s,"slot":"quick"}|} precondition)))
+      [ "another workspace", elsewhere, `Conflict
+      ; "a relative precondition", relative, `Bad_request
+      ];
+    check int "a refused change presses nothing" before (current_frame_number ());
+    check bool "a refused change reaches no ledger" true (ledger_whos () = []);
+    let status, _ =
+      Route.press_response ~config ~who:"unit-presser"
+        ~body:(Printf.sprintf {|{%s,"keys":["space"]}|} here)
+    in
+    check bool "the matching workspace is accepted" true (status = `OK);
+    check bool "the accepted press advanced the machine" true (current_frame_number () > before)))
+;;
+
+(* The picture read after a change names the workspace it read. A server swapped
+   onto the same port answers 409 instead of serving its picture. *)
+let test_live_read_is_bound_to_the_expected_workspace () =
+  let base_path = Filename.temp_dir "msx-live-bound-" "" in
+  let config = Masc.Workspace.default_config base_path in
+  let masc_root = Masc.Workspace.masc_dir config in
+  (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let other = Filename.temp_dir "msx-live-other-" "" in
+  let precondition = Server_routes_http_routes_lane_addons.live_workspace_precondition ~config in
+  let fields = [ "source_kind", "msx_capture"; "since", "3" ] in
+  let here =
+    [ "expected_base_path", Unix.realpath base_path
+    ; "expected_masc_root", Unix.realpath masc_root ] in
+  let status = function
+    | Ok _ -> `Served
+    | Error (`Conflict, _) -> `Conflict
+    | Error (`Bad_request, _) -> `Bad_request
+  in
+  check bool "no precondition leaves the query alone" true (precondition fields = Ok fields);
+  check bool "this workspace is served with the fields removed" true
+    (precondition (here @ fields) = Ok fields);
+  check bool "another workspace is a conflict" true
+    (status (precondition ([ "expected_base_path", Unix.realpath other
+                           ; "expected_masc_root", Unix.realpath other ] @ fields))
+     = `Conflict);
+  check bool "one field alone is a bad request" true
+    (status (precondition (("expected_base_path", Unix.realpath base_path) :: fields))
+     = `Bad_request);
+  check bool "a relative path is a bad request" true
+    (status (precondition ([ "expected_base_path", "relative"; "expected_masc_root", "relative" ] @ fields))
+     = `Bad_request)
+;;
+
+(* A tick names the workspace the terminal confirmed. Another workspace on the
+   same port is refused with 409 and no code before the machine steps, a
+   malformed precondition is a 400, and the matching one reaches the tick
+   worker with the field removed before the strict tick decoder. *)
+let test_tick_is_bound_to_the_expected_workspace () =
+  with_tick_machine (fun () ->
+    Eio_main.run @@ fun _env ->
+    let base_path = Filename.temp_dir "msx-tick-bound-" "" in
+    let config = Masc.Workspace.default_config base_path in
+    let masc_root = Masc.Workspace.masc_dir config in
+    (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    let expected ~base ~root =
+      Printf.sprintf {|"expected_workspace":{"base_path":%S,"masc_root":%S}|} base root
+    in
+    let here = expected ~base:(Unix.realpath base_path) ~root:(Unix.realpath masc_root) in
+    let other = Filename.temp_dir "msx-tick-other-" "" in
+    let elsewhere = expected ~base:(Unix.realpath other) ~root:(Unix.realpath other) in
+    let relative = expected ~base:"relative/path" ~root:"relative/root" in
+    let before = current_frame_number () in
+    let tick precondition =
+      Route.tick_response ~config
+        ~body:(Printf.sprintf {|{%s,"frames":3}|} precondition)
+    in
+    let status_of precondition = fst (tick precondition) in
+    check bool "another workspace is a conflict" true (status_of elsewhere = `Conflict);
+    check
+      (option string)
+      "the conflict names the workspace precondition, not an activity code"
+      (Some "workspace_precondition_failed")
+      (match member "code" (snd (tick elsewhere)) with Some (`String c) -> Some c | _ -> None);
+    check bool "a relative precondition is a bad request" true (status_of relative = `Bad_request);
+    check int "a refused tick steps nothing" before (current_frame_number ());
+    (* This test has no executor pool, so an admitted tick ends at the worker
+       refusal. Reaching it proves the binding and the strict decoder both
+       accepted the body; the stepping itself is covered by the tick suite. *)
+    check bool "the matching workspace passes the binding and the decoder" true
+      (match status_of here with
+       | `Conflict | `Bad_request -> false
+       | `OK | `Service_unavailable | `Internal_server_error -> true))
+;;
+
+let test_press_defaults_and_identity () =
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+    let before = current_frame_number () in
+    let status, response =
+      Route.press_response
+        ~config
+        ~who:"unit-presser"
+        ~body:{|{"keys":["space"]}|}
+    in
+    check bool "a well-typed press succeeds" true (status = `OK);
+    check
+      (option bool)
+      "ok is true"
+      (Some true)
+      (match member "ok" response with
+       | Some (`Bool b) -> Some b
+       | _ -> None);
+    check
+      int
+      "absent frames means the named default"
+      Route.press_default_step_frames
+      (current_frame_number () - before);
+    check
+      bool
+      "the edge is recorded under the caller's who"
+      true
+      (List.mem "unit-presser" (ledger_whos ()));
+    let before = current_frame_number () in
+    let status, _ =
+      Route.press_response
+        ~config
+        ~who:"unit-presser"
+        ~body:
+          {|{"keys":["space","space"],"sequence":true,"hold_frames":1,"frames":2}|}
+    in
+    check bool "a typed sequence press succeeds" true (status = `OK);
+    check
+      int
+      "a sequence advances frames per key"
+      4
+      (current_frame_number () - before);
+    let status, _ =
+      Route.press_response
+        ~config
+        ~who:"unit-presser"
+        ~body:{|{"keys":["space"],"hold_frames":20}|}
+    in
+    check bool "the lane's own bounds still answer 400" true (status = `Bad_request)))
+;;
+
+let remove_tree path =
+  let rec go path =
+    if (Unix.lstat path).Unix.st_kind = Unix.S_DIR then begin
+      Array.iter (fun name -> go (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+  in
+  go path
+;;
+
+let loopback_request_authority () =
+  match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+  | Ok authority -> authority
+  | Error `Malformed -> fail "failed to construct loopback request authority"
+;;
+
+let dispatch_request ~method_ ~path ~state ~authorization ~body =
+  Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
+    let router = Route.add_routes (Masc.Http_server_eio.Router.create ()) in
+    Server_auth.publish_server_state state;
+    let response_buf = Buffer.create 1024 in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+    in
+    let request_str =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n\
+         Host: 127.0.0.1:8935\r\n\
+         Origin: http://127.0.0.1:8935\r\n\
+         %sContent-Type: application/json\r\n\
+         Content-Length: %d\r\n\
+         \r\n\
+         %s"
+        method_ path
+        (match authorization with
+         | Some token -> Printf.sprintf "Authorization: Bearer %s\r\n" token
+         | None -> "")
+        (String.length body)
+        body
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str
+    in
+    ignore
+      (Httpun.Server_connection.read_eof
+         conn
+         bytes
+         ~off:0
+         ~len:(Bigstringaf.length bytes));
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+               Buffer.add_string
+                 response_buf
+                 (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+               total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    Server_auth.clear_server_state ();
+    Buffer.contents response_buf)
+;;
+
+let dispatch_press ~state ~authorization ~body =
+  dispatch_request ~method_:"POST" ~path:"/api/v1/msx/press" ~state ~authorization ~body
+
+let status_of_response response =
+  match String.split_on_char ' ' response with
+  | _ :: status :: _ -> int_of_string status
+  | _ -> failf "could not parse response status: %S" response
+;;
+
+let test_activity_read_and_route_refusals () =
+  let unavailable = Runtime.For_testing.snapshot () in
+  check bool "fixture begins without published host activity" true
+    (Runtime.machine_configuration () = None);
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+      let enabled = Runtime.For_testing.snapshot () in
+      let runtime_path = Filename.concat config.Masc.Workspace.base_path "runtime.toml" in
+      let original = In_channel.with_open_bin runtime_path In_channel.input_all in
+      Out_channel.with_open_bin runtime_path (fun channel ->
+        output_string channel (original ^ "\n[machines.msx]\nenabled = false\n"));
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> () | Error detail -> fail detail);
+      let disabled = Runtime.For_testing.snapshot () in
+      let before = current_frame_number () in
+      List.iter (fun (snapshot, wire, code) ->
+        Runtime.For_testing.restore snapshot;
+        check (option string) "read reports host activity independently of the loaded frame" (Some wire)
+          (match member "activity" (Route.activity_json ~config) with Some (`String value) -> Some value | _ -> None);
+        let status,body = Route.tick_response ~config ~body:"{}" in
+        check bool "known activity refusal is HTTP 409" true (status=`Conflict);
+        check bool "closed refusal code" true
+          (member "ok" body = Some (`Bool false) && member "code" body = Some (`String code));
+        (* The body the route really sent, read by the decoder the terminal
+           really runs. *)
+        check bool "the terminal reads the route's 409 as a known refusal" true
+          (terminal_reads_409 body
+           = Ok (Tick.Not_started (if code = "activity_disabled" then Tick.Off
+                                   else Tick.Activity_unobserved)));
+        let press_status,press_body = Route.press_response ~config ~who:"unit-presser"
+          ~body:{|{"keys":["space"]}|} in
+        check bool "press answers the same activity refusal as tick" true
+          (press_status = `Conflict && member "ok" press_body = Some (`Bool false)
+           && member "code" press_body = Some (`String code));
+        check int "refusal never advances" before (current_frame_number ());
+        check (list string) "refusal sends no input" [] (ledger_whos ()))
+        [disabled,"off","activity_disabled"; unavailable,"unobserved","activity_unobserved"];
+      Runtime.For_testing.restore enabled;
+      let status,body = Route.tick_response ~config ~body:{|{"frames":1}|} in
+      check bool "reactivation admits a new tick on the same worker" true (status=`OK);
+      check int "new tick advances exactly once" (before+1) (frame_number body)))
+
+let test_activity_route_read_authority () =
+  with_tick_machine (fun () ->
+    let previous = Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" in
+    Fun.protect ~finally:(fun () ->
+      Masc.Server_startup_state.reset ();
+      Server_auth.clear_server_state ();
+      match previous with Some value -> Unix.putenv "MASC_HTTP_AUTH_STRICT" value
+        | None -> Unix.unsetenv "MASC_HTTP_AUTH_STRICT") (fun () ->
+      Unix.putenv "MASC_HTTP_AUTH_STRICT" "true";
+      with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+        let base_path = config.Masc.Workspace.base_path in
+        let runtime_path = Filename.concat base_path "runtime.toml" in
+        let original = In_channel.with_open_bin runtime_path In_channel.input_all in
+        Out_channel.with_open_bin runtime_path (fun channel ->
+          output_string channel (original ^ "\n[machines.msx]\nenabled = false\n"));
+        (match Runtime.init_default ~config_path:runtime_path with
+         | Ok () -> () | Error detail -> fail detail);
+        Auth.save_auth_config base_path {Masc_domain.default_auth_config with enabled=true;require_token=true};
+        let token = match Auth.create_token base_path ~agent_name:"machine-reader" ~role:Masc_domain.Worker with
+          | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+        Masc.Server_startup_state.mark_state_ready () |> Result.get_ok;
+        let before = current_frame_number () in
+        let get authorization = dispatch_request ~method_:"GET" ~path:"/api/v1/msx/activity" ~state ~authorization ~body:"" in
+        check int "strict read requires credentials" 401 (status_of_response (get None));
+        let response = get (Some token) in
+        check int "reader can observe off activity" 200 (status_of_response response);
+        let body = match Astring.String.cut ~sep:"\r\n\r\n" response with
+          | Some (_, body) -> Yojson.Safe.from_string body
+          | None -> fail "HTTP response omitted body" in
+        check bool "authorized read returns host Off configuration" true
+          (member "activity" body = Some (`String "off"));
+        check int "activity GET does not advance machine" before (current_frame_number ());
+        check int "activity endpoint has no write handler" 405
+          (status_of_response (dispatch_request ~method_:"POST" ~path:"/api/v1/msx/activity" ~state ~authorization:(Some token) ~body:"{}")))))
+
+let test_press_route_names_the_resolved_actor () =
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+      let base_path = config.Masc.Workspace.base_path in
+        Auth.save_auth_config
+          base_path
+          { Masc_domain.default_auth_config with enabled = true; require_token = true };
+        let token =
+          match
+            Auth.create_token
+              base_path
+              ~agent_name:"tui-presser"
+              ~role:Masc_domain.Admin
+          with
+          | Ok (token, _) -> token
+          | Error err ->
+            failf "create_token failed: %s" (Masc_domain.masc_error_to_string err)
+        in
+        let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+          let before = current_frame_number () in
+          let refused =
+            dispatch_press
+              ~state
+              ~authorization:None
+              ~body:{|{"keys":["space"]}|}
+          in
+          check int "no credential is refused" 401 (status_of_response refused);
+          check bool "a refused press reaches no ledger" true (ledger_whos () = []);
+          check
+            int
+            "a refused press advances nothing"
+            before
+            (current_frame_number ());
+          let accepted =
+            dispatch_press
+              ~state
+              ~authorization:(Some token)
+              ~body:{|{"keys":["space"]}|}
+          in
+          check
+            int
+            "a bearer press without x-masc-agent succeeds"
+            200
+            (status_of_response accepted);
+          check
+            bool
+            "the ledger names the token's agent, not a literal"
+            true
+            (List.mem "tui-presser" (ledger_whos ()));
+          check
+            bool
+            "no edge is attributed to \"operator\""
+            false
+            (List.mem "operator" (ledger_whos ()))))
+;;
+
+let test_msx_routes_bind_workspace_before_effects () =
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env ~sw ->
+      let base_b = config.Masc.Workspace.base_path in
+      let base_a = Filename.temp_dir "msx-origin-a" "" in
+      Fun.protect ~finally:(fun () -> remove_tree base_a) (fun () ->
+        let config_a = Masc.Workspace.default_config base_a in
+        Fs_compat.mkdir_p (Masc.Workspace.masc_dir config_a);
+        Auth.save_auth_config base_b
+          { Masc_domain.default_auth_config with enabled = true; require_token = true };
+        let token = match Auth.create_token base_b ~agent_name:"bound-tui" ~role:Masc_domain.Admin with
+          | Ok (token, _) -> token
+          | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let state = Masc.Mcp_server.For_testing.create_state ~base_path:base_b in
+        let config_b = Masc.Mcp_server.workspace_config state in
+        let expected config = `Assoc
+          ["base_path", `String (Unix.realpath config.Masc.Workspace.base_path);
+           "masc_root", `String (Unix.realpath (Masc.Workspace.masc_dir config))] in
+        let mutations =
+          ["press", ["keys", `List [`String "space"]];
+           "load", ["cart", `String "game.rom"];
+           "save", ["slot", `String "quick"];
+           "restore", ["slot", `String "quick"];
+           "disk", ["disk", `String "game.dsk"];
+           "tick", ["frames", `Int 1; "pixel_response", `String "retained"]] in
+        let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+        Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          let before_frame = current_frame_number () in
+          let before_ledger = Lane.ledger () in
+          let before_publication = Lane.current_publication () in
+          let assert_no_effect () =
+            check int "refusal never advances B machine" before_frame (current_frame_number ());
+            check bool "refusal never writes key ledger" true (Lane.ledger () = before_ledger);
+            check bool "refusal preserves machine publication" true (Lane.current_publication () = before_publication);
+            check bool "refusal creates no B MSX storage" false
+              (Sys.file_exists (Filename.concat (Masc.Workspace.masc_dir config_b) "msx")) in
+          List.iter (fun (route, fields) ->
+            let post bindings = dispatch_request ~method_:"POST" ~path:("/api/v1/msx/" ^ route)
+              ~state ~authorization:(Some token)
+              ~body:(Yojson.Safe.to_string (`Assoc (bindings @ fields))) in
+            (* The client observed A, but the request is handled by B. *)
+            check int (route ^ " rejects captured A workspace") 409
+              (status_of_response (post ["expected_workspace", expected config_a]));
+            assert_no_effect ();
+            let wrong_root = `Assoc ["base_path", `String (Unix.realpath base_b);
+              "masc_root", `String (Unix.realpath (Masc.Workspace.masc_dir config_a))] in
+            check int (route ^ " binds both workspace coordinates") 409
+              (status_of_response (post ["expected_workspace", wrong_root]));
+            assert_no_effect ();
+            check int (route ^ " rejects malformed binding") 400
+              (status_of_response (post ["expected_workspace", `Null]));
+            check int (route ^ " rejects duplicate binding") 400
+              (status_of_response (post ["expected_workspace", expected config_b;
+                "expected_workspace", expected config_b]));
+            assert_no_effect ()) mutations;
+          (* The terminal tells a changed workspace from an activity refusal by
+             this body; a malformed binding is a 400 that names no code. *)
+          let bound_tick expected_workspace = Route.tick_response ~config:config_b
+            ~body:(Yojson.Safe.to_string (`Assoc ["expected_workspace", expected_workspace])) in
+          let refusal_of (status, body) =
+            status, Result.get_ok (Msx_wire.decode body) in
+          check bool "a failed precondition names its code beside the message" true
+            (refusal_of (bound_tick (expected config_a))
+             = (`Conflict, {Msx_wire.code = Some Msx_wire.Workspace_precondition_failed;
+                  message = Some "workspace precondition failed"}));
+          check bool "the terminal reads the failed precondition as a changed workspace" true
+            (terminal_reads_409 (snd (bound_tick (expected config_a)))
+             = Ok (Tick.Not_started Tick.Workspace_changed));
+          check bool "a malformed binding names no code" true
+            (refusal_of (bound_tick `Null)
+             = (`Bad_request, {Msx_wire.code = None;
+                  message = Some "invalid expected_workspace precondition"}));
+          assert_no_effect ();
+          let accepted = dispatch_press ~state ~authorization:(Some token)
+            ~body:(Yojson.Safe.to_string (`Assoc
+              ["expected_workspace", expected config_b; "keys", `List [`String "space"]])) in
+          check int "matching binding admits actor press" 200 (status_of_response accepted);
+          check bool "matching write names admitted actor" true (List.mem "bound-tui" (ledger_whos ()));
+          let before_tick = current_frame_number () in
+          let status, response = Route.tick_response ~config:config_b
+            ~body:(Yojson.Safe.to_string (`Assoc
+              ["expected_workspace", expected config_b; "frames", `Int 1;
+               "pixel_response", `String "retained"])) in
+          check bool "validated envelope is removed before strict tick decoder" true (status = `OK);
+          check int "matching bound tick advances once" (before_tick + 1) (frame_number response)))))
+;;
+let test_encoded_pixel_snapshot () =
+  let base_path = Filename.temp_dir "msx-encoded-frame-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
+      ignore (Lane.eject () : (unit, Lane.error) result);
+      remove_tree base_path)
+    (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      let ledger_dir = Filename.concat base_path "ledger" in
+      let require = function
+        | Ok value -> value
+        | Error e -> fail (Lane.error_to_string e)
+      in
+      let pixels json =
+        match member "rgb_base64" json with
+        | Some (`String encoded) -> encoded
+        | _ -> fail "missing encoded pixels"
+      in
+      (* Original synthetic firmware jumps into an original 16 KiB cartridge.
+         The guest enables text display and changes R7 between palette colors 2
+         and 3 once per VBlank. Thus advancing one frame changes actual pixels,
+         rather than merely allocating another all-black buffer. *)
+      let roms_dir = Filename.concat base_path "pixel-bios" in
+      Sys.mkdir roms_dir 0o755;
+      let write_code bytes offset code =
+        List.iteri (fun i n -> Bytes.set bytes (offset + i) (Char.chr n)) code
+      in
+      let bios = Bytes.make 32768 '\000' in
+      write_code bios 0 [ 0xc3; 0x10; 0x40 ]; (* JP 4010; cartridge page is slot 2 *)
+      Out_channel.with_open_bin
+        (Filename.concat roms_dir "cbios_main_msx2.rom")
+        (fun oc -> output_bytes oc bios);
+      List.iter
+        (fun name ->
+          Out_channel.with_open_bin
+            (Filename.concat roms_dir name)
+            (fun oc -> output_bytes oc (Bytes.make 16384 '\000')))
+        [ "cbios_logo_msx2.rom"; "cbios_sub.rom" ];
+      let cart = Bytes.make 16384 '\000' in
+      write_code cart 0 [ 0x41; 0x42; 0x10; 0x40 ];
+      write_code
+        cart
+        0x10
+        [ 0xf3; 0x06; 0x02 (* DI; LD B,2 *)
+        ; 0x3e; 0x50; 0xd3; 0x99 (* text mode, display enabled *)
+        ; 0x3e; 0x81; 0xd3; 0x99 (* write VDP register 1 *)
+        ; 0xdb; 0x99; 0xe6; 0x80; 0x28; 0xfa (* 401B: wait for VBlank *)
+        ; 0x78; 0xee; 0x01; 0x47 (* toggle color 2 / 3 *)
+        ; 0xd3; 0x99; 0x3e; 0x87; 0xd3; 0x99 (* write VDP register 7 *)
+        ; 0xc3; 0x1b; 0x40
+        ];
+      let cart_path = Filename.concat base_path "pixel-toggle.rom" in
+      Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
+      ignore
+        (require
+           (Result.bind (Msx_lane.read_bios ~dir:roms_dir) (fun triple ->
+              Msx_lane.load
+                ~ledger_dir
+                ~bios:(Msx_lane.Present triple)
+                ~image:(Msx_lane.Cartridge_file cart_path))));
+      let save_path = Filename.concat base_path "before.json" in
+      ignore (require (Lane.save ~path:save_path));
+      ignore (require (Lane.save ~path:save_path));
+      let first_number = current_frame_number () in
+      with_attached_worker (fun ~config ~env ~sw ->
+          let pool =
+            Eio.Executor_pool.create
+              ~sw
+              ~domain_count:1
+              (Eio.Stdenv.domain_mgr env)
+          in
+          Executor_pool_ref.For_testing.with_pool pool (fun () ->
+            let status, first_tick =
+              Route.tick_response ~config
+                ~body:{|{"frames":2,"pixel_response":"retained"}|}
+            in
+            check bool "real guest tick succeeds" true (status = `OK);
+            assert_pixels_kind "inline" first_tick;
+            let _, same_pixels =
+              Route.tick_response ~config ~body:(retained_request ~frames:2 first_tick)
+            in
+            assert_pixels_kind "retained" same_pixels;
+            let _, changed_pixels =
+              Route.tick_response ~config ~body:(retained_request same_pixels)
+            in
+            assert_pixels_kind "inline" changed_pixels;
+            let pixel_fields = pixels_object changed_pixels in
+            let rgb =
+              match List.assoc "rgb_base64" pixel_fields with
+              | `String encoded -> Base64.decode_exn encoded
+              | _ -> fail "missing inline bytes"
+            in
+            (match Lane.frame () with
+             | Some actual ->
+               check string "changed tick pixels match guest" actual.rgb rgb
+             | None -> fail "guest disappeared");
+            check
+              bool
+              "changed pixels have exact SHA256"
+              true
+              (List.assoc "revision" pixel_fields
+              = `String Agent_core_sha256.(to_hex (digest_string rgb)));
+            let status, full_tick = Route.tick_response ~config ~body:"{}" in
+            check bool "full frame tick succeeds" true (status = `OK);
+            (match Lane.frame () with
+             | Some frame ->
+               check
+                 string
+                 "encoding agrees with current RGB"
+                 frame.rgb
+                 (Base64.decode_exn (pixels full_tick))
+             | None -> fail "machine disappeared")));
+      ignore (require (Lane.restore ~path:save_path ~ledger_dir));
+      ignore (require (Lane.step ~frames:1));
+      check int "clock remains live" (first_number + 1) (current_frame_number ());
+      ignore (require (Lane.restore ~path:save_path ~ledger_dir));
+      check int "restored clock" first_number (current_frame_number ());
+      ignore (require (Lane.eject ()));
+      check bool "eject leaves machine empty" true (Lane.frame () = None);
+      ignore
+        (require
+           (Lane.For_testing.load_bare_machine
+              ~ledger_dir));
+      check bool "replacement machine loaded" true (Lane.frame () <> None))
+;;
+
+let () =
+  run
+    "msx routes"
+    [ ( "checkpoint"
+      , [ test_case "correlated checkpoint route" `Quick test_correlated_checkpoint_route
+        ; test_case "checkpoint settlement notifies possible restore" `Quick test_checkpoint_settlement_notifies_possible_restore
+        ; test_case "checkpoint terminal store failure recovers without replay" `Quick test_checkpoint_terminal_store_failure_can_be_recovered
+        ; test_case "checkpoint receipt durable lifecycle" `Quick test_checkpoint_receipt_lifecycle
+        ; test_case "pre-effect refusal settles refused" `Quick test_pre_effect_checkpoint_refusal_settles_refused
+        ; test_case "unexpected worker exception settles unknown" `Quick
+            test_unexpected_worker_exception_settles_checkpoint_unknown
+        ; test_case
+            "validation, worker, restore and storage failure"
+            `Quick
+            test_checkpoint_route
+        ] )
+    ; ( "worker_failures"
+      , [ test_case "503 codes separate unavailable from outcome unknown" `Quick
+            test_503_codes_separate_unavailable_from_outcome_unknown ] )
+    ; ( "press_json"
+      , [ test_case "press result carries ok and the new frame" `Quick (fun () ->
+            with_tick_machine (fun () ->
+            (match
+               Lane.press
+                 ~who:"operator"
+                 ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
+                 ~hold_frames:2
+                 ~step_frames:6
+                 ~sequence:false
+             with
+             | Ok obs ->
+               let j = Route.press_result_json ~ok:true
+                 (Some (`Assoc (Msx_machine_tools.observation_fields obs))) in
+               check
+                 (option bool)
+                 "ok true"
+                 (Some true)
+                 (match member "ok" j with
+                  | Some (`Bool b) -> Some b
+                  | _ -> None);
+               check
+                 bool
+                 "frame advanced past boot"
+                 true
+                 (match member "frame" j with
+                  | Some (`Int n) -> n > Lane.boot_frames
+                  | _ -> false);
+               check
+                 bool
+                 "operator edge recorded"
+                 true
+                 (List.exists
+                    (fun (e : Lane.entry) -> e.who = "operator")
+                    (Lane.ledger ()))
+             | Error e -> fail (Lane.error_to_string e));
+            let j = Route.press_result_json ~ok:false ~message:"nope" None in
+            check
+              (option bool)
+              "failure is ok:false"
+              (Some false)
+              (match member "ok" j with
+               | Some (`Bool b) -> Some b
+               | _ -> None);
+            check
+              (option string)
+              "failure carries the message"
+              (Some "nope")
+              (match member "message" j with
+               | Some (`String m) -> Some m
+               | _ -> None)))
+        ] )
+    ; ( "carts_json"
+      , [ test_case
+            "the inventory lists the cartridges under carts/"
+            `Quick
+            (fun () ->
+              ignore (Lane.eject () : (unit, Lane.error) result);
+              with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+              let base = config.Masc.Workspace.base_path in
+              let mk d = if not (Sys.file_exists d) then Sys.mkdir d 0o755 in
+              let masc = Filename.concat base ".masc" in
+              let msx = Filename.concat masc "msx" in
+              let carts = Filename.concat msx "carts" in
+              mk masc;
+              mk msx;
+              mk carts;
+              let touch name =
+                Out_channel.with_open_bin
+                  (Filename.concat carts name)
+                  (fun oc -> output_string oc "\xff")
+              in
+              touch "dig-dug.rom";
+              touch "pac-man.rom";
+              let status, j = Route.carts_response ~config in
+              check bool "attached worker provides inventory" true (status = `OK);
+              let names =
+                match member "carts" j with
+                | Some (`List items) ->
+                  List.filter_map
+                    (function
+                      | `String s -> Some s
+                      | _ -> None)
+                    items
+                | _ -> []
+              in
+              check
+                bool
+                "both cartridges are listed"
+                true
+                (List.mem "dig-dug.rom" names && List.mem "pac-man.rom" names);
+              check
+                (option bool)
+                "nothing is loaded yet"
+                (Some false)
+                (match member "loaded" j with
+                 | Some (`Bool b) -> Some b
+                 | _ -> None)))
+        ] )
+    ; ( "load_result_json"
+      , [ test_case
+            "ok and refusal carry the shape the TUI reads"
+            `Quick
+            (fun () ->
+              let ok =
+                Route.load_result_json ~ok:true ~message:"loaded xspelunker"
+              in
+              check
+                (option bool)
+                "ok is true"
+                (Some true)
+                (match member "ok" ok with
+                 | Some (`Bool b) -> Some b
+                 | _ -> None);
+              let bad =
+                Route.load_result_json ~ok:false ~message:"unknown cartridge"
+              in
+              check
+                (option bool)
+                "a refusal is ok:false"
+                (Some false)
+                (match member "ok" bad with
+                 | Some (`Bool b) -> Some b
+                 | _ -> None);
+              check
+                (option string)
+                "and carries the message"
+                (Some "unknown cartridge")
+                (match member "message" bad with
+                 | Some (`String m) -> Some m
+                 | _ -> None))
+        ] )
+    ; ( "press_response"
+      , [ test_case
+            "a field of the wrong type is a 400 naming the field"
+            `Quick
+            test_press_rejects_wrong_types
+        ; test_case
+            "changes are refused unless they name this workspace"
+            `Quick
+            test_changes_are_bound_to_the_expected_workspace
+        ; test_case
+            "the picture read after a change is refused for another workspace"
+            `Quick
+            test_live_read_is_bound_to_the_expected_workspace
+        ; test_case
+            "a tick is refused unless it names this workspace"
+            `Quick
+            test_tick_is_bound_to_the_expected_workspace
+        ; test_case
+            "absent fields default and the who is the caller's"
+            `Quick
+            test_press_defaults_and_identity
+        ] )
+    ; ( "press_route"
+      , [ test_case "every MSX route refuses foreign workspace with zero effects" `Quick
+            test_msx_routes_bind_workspace_before_effects
+        ; test_case
+            "the ledger names the actor the resolver returned"
+            `Quick
+            test_press_route_names_the_resolved_actor
+        ] )
+    ; ( "tick"
+      , [ test_case "activity reads and typed refusals preserve the machine" `Quick test_activity_read_and_route_refusals
+        ; test_case "activity route follows read authority without execution" `Quick test_activity_route_read_authority
+        ; test_case
+            "retained pixels keep atomic advancement and fresh metadata"
+            `Quick
+            test_retained_tick
+        ; test_case
+            "invalid ticks never mutate and missing workers refuse"
+            `Quick
+            test_tick_validation_precedes_mutation
+        ; test_case
+            "accepted ticks advance once on the worker and return pixels"
+            `Quick
+            test_tick_worker_advances_and_returns_frame
+        ; test_case
+            "synthetic guest tick and pixel snapshots"
+            `Quick
+            test_encoded_pixel_snapshot
+        ] )
+    ]
+;;

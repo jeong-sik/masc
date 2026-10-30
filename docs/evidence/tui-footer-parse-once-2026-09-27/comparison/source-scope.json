@@ -1,0 +1,31 @@
+{
+  "baseline": "c7bdc04f78e3b6c09abae94e28852b37f8274da7",
+  "candidate": "0278eac5a67d8ec9da06337cae781d96ad702b68",
+  "PR_source_head": "c7d67a745f40d1669413e6a5c50349bc2e61f5d4",
+  "changed_paths": [
+    "bin/masc_tui_footer.ml",
+    "changelog.d/39371.md",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/README.md",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/files.json",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/frame-timing.txt",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/identity.json",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/native-sample.txt.gz",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/observation.json.gz",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/profile-scenario.py",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/profile.json",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/redaction.json",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/run-profile.py",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/sample-command.log",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/scenario.stderr.txt",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/scenario.stdout.txt.gz",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/source-observation.json",
+    "test/test_tui_footer_status_items.ml",
+    "test/test_tui_identity_tab.ml"
+  ],
+  "candidate_and_PR_sha256": {
+    "bin/masc_tui_footer.ml": "1cf9e24f4cd4350bee6d090685a8b9afe1c17f362fe025345dd2bdfc5ec382c6",
+    "test/test_tui_footer_status_items.ml": "4502e4429dddbd1582cfe7e65fcec9393ba2fd41308d24a42b162c5f9da501f0",
+    "test/test_tui_identity_tab.ml": "051a97cdefcb3528d361cb8bf3eb3d2ee3d05e177e7937d059171c748d15369a"
+  },
+  "scope": "Only the footer product file differs; probe source and both adjusted test files match the PR. Product trees otherwise differ between PR base and probe base; isolated comparison does not prove latency on current main."
+}

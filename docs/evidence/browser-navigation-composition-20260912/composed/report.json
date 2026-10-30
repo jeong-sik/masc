@@ -1,0 +1,218 @@
+{
+  "scope": "isolated three-channel website; existing MASC callable composition joins navigation with regions; persistent native TUI showing content",
+  "steps": [
+    {
+      "label": "01-open",
+      "status": 200,
+      "elapsed_ms": 5997.24,
+      "request": {
+        "action": "open",
+        "headless": true
+      }
+    },
+    {
+      "label": "02-goto",
+      "status": 200,
+      "elapsed_ms": 358.72,
+      "request": {
+        "url": "http://127.0.0.1:56380/index.html"
+      }
+    },
+    {
+      "label": "03-page",
+      "status": 200,
+      "elapsed_ms": 135.53,
+      "request": {
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "04-regions",
+      "status": 200,
+      "elapsed_ms": 59.49,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "regions"
+      }
+    },
+    {
+      "label": "05-selected-region",
+      "status": 200,
+      "elapsed_ms": 53.47,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "content",
+        "scope": {
+          "documentId": "2591bde12a0b50e7215db7a2141ee5cc",
+          "nodeId": "n1"
+        }
+      }
+    },
+    {
+      "label": "06-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 137.83,
+      "request": {
+        "lane": "automation",
+        "tabId": 1
+      }
+    },
+    {
+      "label": "14-final-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 127.75,
+      "request": {
+        "lane": "automation",
+        "tabId": 1
+      }
+    },
+    {
+      "label": "06-close",
+      "status": 200,
+      "elapsed_ms": 1216.41,
+      "request": {
+        "action": "close"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "keeper_shutdown_admission": {
+        "accepted": true,
+        "schema_version": 8,
+        "revision": 0,
+        "operation_id": "shutdown-18bf8862-b7bd-47e5-9da5-7c9843c4afdf",
+        "keeper_name": "browser-handoff-proof-67388000",
+        "lane_ownership": {
+          "kind": "registered_lane",
+          "lane_id": "lane-60ce1f4b-1e7d-4d27-b23e-22257062f335"
+        },
+        "trace_id": "trace-1789222468127-00000",
+        "actor": "browser-handoff-proof",
+        "cleanup_intent": {
+          "reason": {
+            "kind": "operator_stop_retain_meta"
+          },
+          "remove_session": false
+        },
+        "turn_disposition": {
+          "kind": "no_inflight_turn"
+        },
+        "expected_backlog_version": 1,
+        "owned_task_ids": [],
+        "join_evidence": null,
+        "phase": {
+          "kind": "prepared"
+        },
+        "created_at": "2026-09-12T14:15:24Z",
+        "updated_at": "2026-09-12T14:15:24Z"
+      }
+    },
+    {
+      "keeper_shutdown_finalized": true
+    },
+    "owned browser session closed",
+    {
+      "name": "server",
+      "pid": 39453,
+      "exit": 0
+    },
+    {
+      "name": "driver",
+      "pid": 39422,
+      "exit": 0
+    }
+  ],
+  "composition_file_sha256": "4172cebfce4b6ba704ab5e2f3fd7aaca350a77ce58db8219dac0eafa8d6f8352",
+  "instruction_sha256": "dff25891c9c85f49cc37caf3f0e9ac7732f4056cf43e1fde172172827f3467ef",
+  "runtime_id": "codex_subscription.gpt-5.6-luna",
+  "build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "cd7f637eca4ce164552fafc47051fb70579c91dd",
+    "commit_source": "embedded",
+    "binary_commit": "cd7f637eca4ce164552fafc47051fb70579c91dd",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "08f3ce42a9ebbf2c5dc2f14e50dd390e45c8c0cdf0c59f4218168ef591525e7d",
+    "binary_commit_unix_ts": 1789221166.0,
+    "binary_commit_age_seconds": 1289,
+    "executable_path": "/private/tmp/browser-composition-native-cd7/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-composition-native-cd7/runtime",
+    "runtime_instance_id": "01a095f8-0187-7000-8b45-c1e8c5c95002",
+    "started_at": "2026-09-12T14:14:13Z",
+    "uptime_seconds": 2
+  },
+  "binary_sha256": "08f3ce42a9ebbf2c5dc2f14e50dd390e45c8c0cdf0c59f4218168ef591525e7d",
+  "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+  "api_port": 56249,
+  "driver_port": 56248,
+  "assertions": {
+    "selected_region_retained": true,
+    "channel_navigation_present": true,
+    "sidebar_excluded": true
+  },
+  "observed_content": "Channels Alpha Beta Gamma",
+  "clipboard": {
+    "tui_sha256": "821a88fe8299a0e367496adff2e65ddaafd3af6f6de9be4c0c5712e9a5a6d781",
+    "clipboard_bytes": 526,
+    "clipboard_sha256": "07a479b7b868be844e9e1d226871819914dc87b5f7d3575735a4322ea168d331",
+    "columns": 130,
+    "rows": 35,
+    "selected_region_index": 0,
+    "lifetime": {
+      "columns": 130,
+      "rows": 35,
+      "input_events": [
+        {
+          "monotonic": 965916.007945041,
+          "keys_hex": "3a676f2042726f77736572204c616e650d"
+        },
+        {
+          "monotonic": 965916.039790916,
+          "keys_hex": "61"
+        },
+        {
+          "monotonic": 965916.252575083,
+          "keys_hex": "76"
+        },
+        {
+          "monotonic": 965916.54184425,
+          "keys_hex": "79"
+        },
+        {
+          "monotonic": 965916.543832875,
+          "keys_hex": "73"
+        },
+        {
+          "monotonic": 965916.773248541,
+          "keys_hex": "73"
+        }
+      ],
+      "refresh_interval": "unmodified product default",
+      "pid": 42118,
+      "started_monotonic": 965915.351109166,
+      "binary_sha256": "821a88fe8299a0e367496adff2e65ddaafd3af6f6de9be4c0c5712e9a5a6d781",
+      "copied_monotonic": 965916.543806,
+      "copy_offset": 20809,
+      "alive_at_copy": true,
+      "display_selected_monotonic": 965916.815025708,
+      "display_intent": "unscoped content selected before Keeper starts",
+      "keeper_observation_finished_monotonic": 965975.963146625,
+      "alive_after_keeper_observation": true,
+      "exit": 0,
+      "stopped_monotonic": 965976.034006458,
+      "capture_errors": []
+    }
+  },
+  "keeper": "browser-handoff-proof-67388000",
+  "turn_started_monotonic": 965919.528398041,
+  "operation_id": "kmsg-98ba877dbad3262d9e4126b8abee44ef",
+  "operation_state": "Succeeded",
+  "turn_observed_elapsed_seconds": 55.832,
+  "model_tool_calls": [],
+  "composition_invocations": 0,
+  "result": "operation_completed_pending_evidence_audit"
+}

@@ -1,0 +1,53 @@
+{
+  "schema": "masc.independent-source-preparation-verdict.v1",
+  "reviewer": "/root/concurrent_probe_review",
+  "source_authority": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "verdict": "SOURCE_PREPARATION_CHANGES_REQUESTED",
+  "native_or_workload_pass": false,
+  "formal_github_approval": false,
+  "counts": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 2
+  },
+  "findings": [
+    {
+      "id": "P2-1",
+      "title": "Original base deleted before semantic validation and on failed backup",
+      "source": "scripts/harness/perf/keeper_scale_session.py",
+      "lines": [
+        773,
+        786,
+        793,
+        842,
+        867,
+        869
+      ],
+      "required_before_measurement": true
+    },
+    {
+      "id": "P2-2",
+      "title": "Canonical source and original admission input/digests are not compared",
+      "source": "scripts/harness/perf/keeper_scale_session.py",
+      "lines": [
+        37,
+        119,
+        146,
+        650,
+        697
+      ],
+      "related_reader": "scripts/harness/perf/keeper_scale_packet_audit.py:89-124",
+      "required_before_claiming_original_input_fidelity": true
+    }
+  ],
+  "limitations": [
+    "no harness/native/helper execution",
+    "no local build",
+    "no CI or network query",
+    "no target source edits",
+    "not a runtime performance or 2/30/300 success verdict",
+    "does not carry business30 prototype findings"
+  ],
+  "report": "README.md",
+  "manifest": "source-manifest.json"
+}

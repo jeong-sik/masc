@@ -1,0 +1,547 @@
+(** Voice_bridge core — config, helpers, audio path utils, local playback. *)
+
+(** MASC Voice Bridge - Eio-native Implementation
+
+    Enables multi-agent voice collaboration via turn-based speaking.
+    Core constraint: "병렬 수집 → 순차 출력" (parallel collection → sequential output)
+
+    TTS Strategy (priority order):
+    1. ElevenLabs API direct (ELEVENLABS_API_KEY)
+    2. Railway proxy (ELEVENLABS_PROXY_URL)
+    3. Voice MCP session endpoint (HTTP /mcp)
+    4. text_fallback (silent)
+*)
+
+(** ============================================
+    Configuration (JSON SSOT)
+    ============================================ *)
+
+let default_timeout_seconds = 5.0
+
+let playback_dedup_window_sec = 30.0
+
+(** Distributed playback lock. Uses an OS-level flock on a file in the host
+    runtime directory so multiple MASC processes on the same host serialize
+    audible output, not just fibers inside one process. *)
+let playback_lock_path () =
+  let host = Host_config.host () in
+  Filename.concat host.run_dir "masc_voice_playback.lock"
+
+(* [dedup_until] rather than the instant playback finished: the window was
+   measured by subtracting the wall clock from the stored instant, so an NTP
+   step either replayed a message or swallowed a fresh one.
+
+   [message] is the spoken text itself, not its [Hashtbl.hash]. The hash is
+   30 bits, so two different lines can share it ("voice line 20165" and
+   "voice line 66786" do), and comparing hashes alone reported the second as
+   a [`Dedup_hit] and swallowed it. Only one playback is remembered, so
+   keeping the text costs one string and makes the comparison exact. *)
+type last_playback =
+  { agent_id : string
+  ; message : string
+  ; dedup_until : Monotonic_deadline.t
+  }
+let last_playback_ref : last_playback option Atomic.t = Atomic.make None
+
+let is_dedup_hit ~agent_id ~message =
+  match Atomic.get last_playback_ref with
+  | Some prev ->
+    String.equal prev.agent_id agent_id
+    && String.equal prev.message message
+    && not (Monotonic_deadline.passed prev.dedup_until)
+  | None -> false
+
+let record_playback ~agent_id ~message =
+  Atomic.set last_playback_ref
+    (Some
+       { agent_id
+       ; message
+       ; dedup_until =
+           Monotonic_deadline.after ~seconds:playback_dedup_window_sec
+       })
+
+(** Default agent voices from the voice runtime overlay. *)
+let default_agent_voices () = Voice_runtime_overlay.default_agent_voices ()
+
+let request_timeout_seconds () = default_timeout_seconds
+
+(* [Voice_config.load_detailed] separates "voice was never set up" from "a
+   config exists and is broken", and its own interface says the second must
+   reach the operator instead of being answered with defaults. The readers
+   below matched [Error _], so a broken config was indistinguishable from an
+   absent one and every caller got a plausible substitute.
+
+   Measured: [runtime.toml [voice]] carried [max_retries] on both endpoint
+   lists, which the field whitelist does not accept. Voice had been failing to
+   load since 2026-08-28 — when voice_config.ml introduced that whitelist —
+   and nothing said so. The only surface that reported it was
+   [GET /api/v1/voice/config], which returns 500 and is not called on a
+   normal turn.
+
+   [Not_configured] stays silent: an environment without voice is not a
+   fault. [Invalid] is logged once per read. *)
+let config_or_report ~what = function
+  | Ok config -> Some config
+  | Error Voice_config.Not_configured -> None
+  | Error (Voice_config.Invalid message) ->
+    Log.Voice.error
+      "[VoiceBridge] %s falling back: voice config is present but unusable: %s"
+      what
+      message;
+    None
+;;
+
+(* A config without a [tts] section answers these the same way no config
+   does: voice output is not set up, so there are no per-agent voices and no
+   tuning to speak of. *)
+let agent_voices () =
+  match config_or_report ~what:"agent_voices" (Voice_config.load_detailed ()) with
+  | Some { Voice_config.tts = Some tts; _ } -> tts.Voice_config.agent_voices
+  | Some { Voice_config.tts = None; _ } | None -> default_agent_voices ()
+
+let tuning_for_agent agent_id =
+  match config_or_report ~what:"tuning_for_agent" (Voice_config.load_detailed ()) with
+  | Some { Voice_config.tts = Some tts; _ } -> Voice_config.tuning_for_agent tts agent_id
+  | Some { Voice_config.tts = None; _ } | None ->
+      { Voice_config.stability = 0.5; similarity_boost = 0.75; style = 0.0 }
+
+let local_playback_enabled_for_agent agent_id =
+  match
+    config_or_report
+      ~what:"local_playback_enabled_for_agent"
+      (Voice_config.load_detailed ())
+  with
+  | Some config -> Voice_config.local_playback_enabled_for_agent config agent_id
+  | None -> false
+
+let default_voice_uri path =
+  Uri.of_string (Voice_runtime_overlay.default_session_url ~path)
+
+let voice_mcp_uri () =
+  match Voice_config.load_detailed () with
+  | Ok config -> (
+      match Voice_runtime_overlay.session_endpoint_result config with
+      | Ok endpoint -> (
+          match Voice_runtime_overlay.session_mcp_url_of_endpoint endpoint with
+          | Ok url -> Uri.of_string url
+          | Error _ -> default_voice_uri "/mcp" )
+      | Error _ -> default_voice_uri "/mcp")
+  | Error _ -> default_voice_uri "/mcp"
+
+(** ============================================
+    Structured Logging
+    ============================================ *)
+
+let log_prefix = "[VoiceBridge]"
+
+let log_info msg =
+  Log.Voice.info "%s %s" log_prefix msg
+
+let log_error msg =
+  Log.Voice.error "%s %s" log_prefix msg
+
+let log_debug msg =
+  Log.Voice.debug "%s %s" log_prefix msg
+
+let with_voice_output_turn ~agent_id:_ f =
+  File_lock_eio.with_lock (playback_lock_path ()) f
+
+let split_path_env value =
+  String.split_on_char ':' value
+  |> List.filter (fun entry -> String.trim entry <> "")
+
+let find_executable_in_path ?path_value executable =
+  let path_value =
+    match path_value with
+    | Some value -> value
+    | None -> Option.value (Sys.getenv_opt "PATH") ~default:""
+  in
+  let candidates =
+    split_path_env path_value
+    |> List.map (fun dir -> Filename.concat dir executable)
+  in
+  List.find_opt (fun path -> Sys.file_exists path && not (Sys.is_directory path)) candidates
+
+(* `open` is intentionally last and reported as `Opened`, not `Played`: it hands
+   the file to a GUI app and returns immediately. It still matters on macOS
+   sessions where command-line CoreAudio backends cannot see a default output
+   device but Finder/QuickTime can. *)
+let local_playback_argvs ?path_value ~audio_file () =
+  let commands =
+    [
+      ("afplay", []);
+      ("ffplay", [ "-nodisp"; "-autoexit"; "-loglevel"; "error" ]);
+      ("mpg123", [ "-q" ]);
+      ("play", [ "-q" ]);
+      ("open", []);
+    ]
+  in
+  commands
+  |> List.filter_map (fun (executable, args) ->
+    match find_executable_in_path ?path_value executable with
+    | Some path -> Some (path :: args @ [ audio_file ])
+    | None -> None)
+
+(* Playback subprocess timeout. A fixed 60s budget used to kill any player
+   mid-play on audio longer than a minute; Process_eio reports the kill as
+   WEXITED 124 and the candidate loop then replayed the SAME file from 0:00
+   through the fallback player — the audible-repeat amplifier in the
+   2026-06-10 voice incident. Derive the budget from the probed audio
+   duration instead. *)
+let playback_timeout_margin_sec = 30.0
+let unknown_duration_playback_timeout_sec = 300.0
+let duration_probe_timeout_sec = 10.0
+
+let parse_afinfo_duration output =
+  (* afinfo prints e.g. "estimated duration: 12.345 sec" among other lines. *)
+  let prefix = "estimated duration:" in
+  String.split_on_char '\n' output
+  |> List.find_map (fun line ->
+    let line = String.trim line in
+    if String.length line > String.length prefix
+       && String.equal
+            (String.lowercase_ascii (String.sub line 0 (String.length prefix)))
+            prefix
+    then (
+      let rest =
+        String.sub line (String.length prefix)
+          (String.length line - String.length prefix)
+        |> String.trim
+      in
+      let number =
+        match String.index_opt rest ' ' with
+        | Some i -> String.sub rest 0 i
+        | None -> rest
+      in
+      float_of_string_opt number)
+    else None)
+
+let parse_ffprobe_duration output = float_of_string_opt (String.trim output)
+
+let playback_timeout_sec_for ~duration_sec =
+  match duration_sec with
+  | Some duration -> duration +. playback_timeout_margin_sec
+  | None -> unknown_duration_playback_timeout_sec
+
+let audio_duration_seconds ~audio_file =
+  let probe argv parse =
+    match
+      Process_eio.run_argv_with_status
+        ~timeout_sec:duration_probe_timeout_sec
+        argv
+    with
+    | Unix.WEXITED 0, output -> parse output
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn ->
+      log_debug
+        (Printf.sprintf "audio duration probe failed: %s" (Printexc.to_string exn));
+      None
+  in
+  let probes =
+    [ ("afinfo", [], parse_afinfo_duration)
+    ; ( "ffprobe"
+      , [ "-v"
+        ; "error"
+        ; "-show_entries"
+        ; "format=duration"
+        ; "-of"
+        ; "default=noprint_wrappers=1:nokey=1"
+        ]
+      , parse_ffprobe_duration )
+    ]
+  in
+  List.find_map
+    (fun (executable, args, parse) ->
+      match find_executable_in_path executable with
+      | None -> None
+      | Some path -> probe ((path :: args) @ [ audio_file ]) parse)
+    probes
+
+(** Runs local playback with mutex-protected dedup check.
+    Returns:
+    - [`Dedup_hit] if another fiber already played this same message recently
+      (check happens INSIDE the mutex to close the check-then-act race where two
+      fibers both pass the outer [is_dedup_hit] before either records).
+    - [`Skipped reason] if playback was intentionally skipped.
+    - [`Failed reason] if playback was requested but unavailable or failed.
+    - [`Opened dur] if playback was handed off to macOS [open(1)].
+    - [`Played dur] if playback succeeded with the given duration. *)
+let run_local_playback ~sw:_ ~agent_id ~message ~audio_file () =
+  match Voice_config.load_detailed () with
+  | Error e ->
+    let message = Voice_config.load_error_to_string e in
+    Log.Misc.warn "voice config load failed, skipping playback for %s: %s" agent_id message;
+    `Failed ("voice config load failed: " ^ message)
+  | Ok config ->
+    if not (Voice_config.local_playback_enabled_for_agent config agent_id) then
+      `Skipped "local playback disabled for agent"
+    else
+      match local_playback_argvs ~audio_file () with
+      | [] ->
+        let reason =
+          "no afplay/ffplay/mpg123/play/open executable found"
+        in
+        log_error
+          (Printf.sprintf "local voice playback unavailable: %s" reason);
+        `Failed reason
+      | candidates ->
+        (* Probe BEFORE taking the playback mutex so a slow probe never
+           extends the global playback serialization window. *)
+        let playback_timeout_sec =
+          playback_timeout_sec_for
+            ~duration_sec:(audio_duration_seconds ~audio_file)
+        in
+        File_lock_eio.with_lock (playback_lock_path ()) (fun () ->
+          let dedup_hit = is_dedup_hit ~agent_id ~message in
+          if dedup_hit then begin
+            log_info (Printf.sprintf
+              "voice dedup skip inside mutex: agent=%s (same message within %.0fs window)"
+              agent_id playback_dedup_window_sec);
+            `Dedup_hit
+          end
+          else begin
+            (* Record BEFORE playing so concurrent callers waiting on this mutex
+               will observe the in-flight playback when they acquire it. *)
+            record_playback ~agent_id ~message;
+            let rec try_candidates failures = function
+              | [] ->
+                let reason =
+                  match List.rev failures with
+                  | [] -> "all local playback candidates failed"
+                  | failures -> String.concat " | " failures
+                in
+                `Failed reason
+              | argv :: rest ->
+                let t0 = Unix.gettimeofday () in
+                let executable =
+                  match argv with h :: _ -> h | [] -> "unknown"
+                in
+                try
+                  match
+                    Process_eio.run_argv_with_status
+                      ~timeout_sec:playback_timeout_sec
+                      argv
+                  with
+                  | Unix.WEXITED 0, _ ->
+                    let dur = Unix.gettimeofday () -. t0 in
+                    if String.equal (Filename.basename executable) "open" then begin
+                      log_info
+                        (Printf.sprintf
+                           "local voice playback handed off: agent=%s file=%s via=%s \
+                            duration=%.1fs"
+                           agent_id audio_file executable dur);
+                      `Opened dur
+                    end else begin
+                      log_info
+                        (Printf.sprintf
+                           "local voice playback finished: agent=%s file=%s via=%s \
+                            duration=%.1fs"
+                           agent_id audio_file executable dur);
+                      `Played dur
+                    end
+                  | status', _
+                    when Process_eio.exit_reason_of_status status'
+                         = Process_eio.Timed_out ->
+                    (* Process_eio classifies the timeout kill: the player ran
+                       past the probed duration
+                       + margin, so partial audio has almost certainly been
+                       heard. Terminal on purpose — falling through to the
+                       next candidate would replay the SAME file from 0:00. *)
+                    let reason =
+                      Printf.sprintf
+                        "%s killed by playback timeout after %.0fs; partial \
+                         audio may have played, not retrying with fallback \
+                         player"
+                        executable playback_timeout_sec
+                    in
+                    log_error
+                      (Printf.sprintf
+                         "local voice playback timed out (terminal): agent=%s \
+                          file=%s via=%s timeout=%.0fs"
+                         agent_id audio_file executable playback_timeout_sec);
+                    `Failed reason
+                  | Unix.WEXITED code, output ->
+                    let failure =
+                      Printf.sprintf "%s exited %d%s" executable code
+                        (if String.trim output = "" then ""
+                         else ": " ^ String.trim output)
+                    in
+                    log_error
+                      (Printf.sprintf
+                         "local voice playback candidate failed (exit=%d): %s%s"
+                         code (String.concat " " argv)
+                         (if String.trim output = "" then ""
+                          else " :: " ^ String.trim output));
+                    try_candidates (failure :: failures) rest
+                  | Unix.WSTOPPED signal, output ->
+                    let failure =
+                      Printf.sprintf "%s stopped by signal %d%s" executable signal
+                        (if String.trim output = "" then ""
+                         else ": " ^ String.trim output)
+                    in
+                    log_error
+                      (Printf.sprintf
+                         "local voice playback candidate stopped (sig=%d): %s%s"
+                         signal (String.concat " " argv)
+                         (if String.trim output = "" then ""
+                          else " :: " ^ String.trim output));
+                    try_candidates (failure :: failures) rest
+                  | Unix.WSIGNALED signal, output ->
+                    let failure =
+                      Printf.sprintf "%s signaled %d%s" executable signal
+                        (if String.trim output = "" then ""
+                         else ": " ^ String.trim output)
+                    in
+                    log_error
+                      (Printf.sprintf
+                         "local voice playback candidate signaled (sig=%d): %s%s"
+                         signal (String.concat " " argv)
+                         (if String.trim output = "" then ""
+                          else " :: " ^ String.trim output));
+                    try_candidates (failure :: failures) rest
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  let failure =
+                    Printf.sprintf "%s exception: %s" executable
+                      (Printexc.to_string exn)
+                  in
+                  log_error
+                    (Printf.sprintf "voice playback candidate exception: %s"
+                       (Printexc.to_string exn));
+                  try_candidates (failure :: failures) rest
+            in
+            try_candidates [] candidates
+          end)
+
+
+(** Voice used when [Voice_config.load_detailed ()] itself fails. This is the
+    only remaining hardcoded fallback; the normal "agent not listed"
+    path now reads [config.tts.default_voice] via {!default_voice}. *)
+let last_resort_voice = "Sarah"
+
+let default_voice () =
+  match config_or_report ~what:"default_voice" (Voice_config.load_detailed ()) with
+  | Some { Voice_config.tts = Some tts; _ } -> tts.Voice_config.default_voice
+  | Some { Voice_config.tts = None; _ } | None -> last_resort_voice
+
+(** Pick the voice for [agent_id]: the explicit per-agent mapping in
+    [config.tts.agent_voices] when present, otherwise
+    [config.tts.default_voice], otherwise [last_resort_voice]. *)
+let get_voice_for_agent agent_id =
+  let voices = agent_voices () in
+  match List.assoc_opt agent_id voices with
+  | Some voice -> voice
+  | None -> default_voice ()
+
+(** ============================================
+    TTS Adapters
+    ============================================ *)
+
+(* ElevenLabs direct TTS URLs require voice IDs. [Voice_config.load_detailed]
+   supplies configured per-agent values; Voice_runtime_overlay keeps a small
+   premade-name compatibility map and rejects arbitrary names before the
+   network call. *)
+
+(** Ensure .masc/audio/ directory exists *)
+let resolved_base_path_opt () =
+  match Workspace_root.resolve_current ~flag:None with
+  | Ok { root; _ } -> Some root
+  | Error _ -> None
+
+let masc_base_dir () =
+  match resolved_base_path_opt () with
+  | Some base_path -> Common.masc_dir_from_base_path ~base_path
+  | None ->
+    invalid_arg
+      "MASC workspace is unresolved; pass --base-path or set MASC_BASE_PATH"
+
+let ensure_audio_dir () =
+  let dir = Filename.concat (masc_base_dir ()) "audio" in
+  if not (Sys.file_exists dir) then
+    Sys.mkdir dir 0o755
+  else if not (Sys.is_directory dir) then
+    log_error "voice audio path exists but is not a directory"
+
+(* The container a synthesized clip is written in.
+
+   A clip's filename is <token><extension>, and that extension is a claim
+   about the bytes rather than a decoration: the writer picks a format from
+   it. Measured 2026-09-13 on macOS 26 -- [say -o clip.mp3] exits 0 and
+   writes a 16-byte empty MP3 tag frame. No audio, no error, no log line,
+   and the browser plays silence. [say -o clip.wav] without a format flag
+   fails loudly instead ("Opening output file failed: fmt?", exit 1), so
+   the two failures do not even agree on how to fail.
+
+   Naming the format is what keeps that silence out of reach: every writer
+   says which container it produces, and every reader resolves a token by
+   asking which of these is on disk. *)
+type clip_format =
+  | Mp3
+  | Wav
+
+(* Every format a clip can be stored in, so that a reader resolving a token
+   covers all of them. Ordered as the cheapest guess first: HTTP providers
+   answer MP3 and are the common case. *)
+let clip_formats = [ Mp3; Wav ]
+
+let clip_extension = function
+  | Mp3 -> ".mp3"
+  | Wav -> ".wav"
+
+let clip_content_type = function
+  | Mp3 -> "audio/mpeg"
+  | Wav -> "audio/wav"
+
+let audio_dir () = Filename.concat (masc_base_dir ()) "audio"
+
+(* The clip a token names, and the format it turned out to be stored in.
+
+   The token alone does not say which container was used -- the endpoint
+   that spoke did -- so this looks for each one rather than assuming. *)
+let find_clip ~dir ~token =
+  let exists path =
+    try Sys.file_exists path with
+    (* An unreadable audio dir reads as "no clip", the same as a reaped one:
+       callers answer 404 either way, and raising here would take down a
+       history render over one directory. *)
+    | Sys_error _ | Unix.Unix_error _ -> false
+  in
+  List.find_map
+    (fun format ->
+      let path = Filename.concat dir (token ^ clip_extension format) in
+      if exists path then Some (path, format) else None)
+    clip_formats
+
+(* The reverse of [find_clip]: the speak path has written a file and needs both
+   halves of what it wrote -- the token, to build the URL the dashboard fetches
+   it by, and the format, to say what the bytes are.
+
+   They come back together because determining one determines the other, and a
+   caller holding only the token has to guess the rest. One did: the keeper's
+   spoken reply announced [audio/mpeg] for every clip, so a say reply -- WAV,
+   which is what a fresh mac has -- was announced as MP3. *)
+let clip_of_path path =
+  let name = Filename.basename path in
+  List.find_map
+    (fun format ->
+      match Filename.chop_suffix_opt ~suffix:(clip_extension format) name with
+      | Some token when token <> "" -> Some (token, format)
+      | Some _ | None -> None)
+    clip_formats
+
+let provider_metadata_keys =
+  [ "provider_name"; "provider_kind"; "provider_family"; "provider_auth"; "endpoint_id"; "endpoint_url" ]
+
+let strip_provider_metadata = function
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> List.filter (fun (key, _) -> not (List.mem key provider_metadata_keys)))
+  | other -> other
+
+let append_provider_metadata json _endpoint =
+  (* Public voice APIs stay vendor-neutral. Keep provider details in internal
+     config and logs, but do not expose them through tool/API payloads. *)
+  strip_provider_metadata json

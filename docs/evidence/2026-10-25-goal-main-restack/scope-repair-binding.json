@@ -1,0 +1,49 @@
+{
+  "scope_repair_exact_source": true,
+  "files": [
+    {
+      "path": "changelog.d/45775.md",
+      "executed_sha256": "6a69481c6c3155fd53ae3e215d685598c7a492eff37aadbc2aa0c1de4d6fa8bb",
+      "current_sha256": "6a69481c6c3155fd53ae3e215d685598c7a492eff37aadbc2aa0c1de4d6fa8bb",
+      "identical": true
+    },
+    {
+      "path": "lib/completion_authority_agent.ml",
+      "executed_sha256": "2a35665d16a30f5c3a8c2182e78c59744b1ff05ba2161be8ed2c58d695afa092",
+      "current_sha256": "2a35665d16a30f5c3a8c2182e78c59744b1ff05ba2161be8ed2c58d695afa092",
+      "identical": true
+    },
+    {
+      "path": "lib/keeper/verifier_review_owner.ml",
+      "executed_sha256": "af69f40b40288005b1eedd18888926ae757e8ae9601677c687002bd390f88256",
+      "current_sha256": "af69f40b40288005b1eedd18888926ae757e8ae9601677c687002bd390f88256",
+      "identical": true
+    },
+    {
+      "path": "lib/keeper/verifier_review_owner.mli",
+      "executed_sha256": "914428d72fec428fa4eaa6d8e6028a1e8064249ab1bf99321804473b1d690750",
+      "current_sha256": "914428d72fec428fa4eaa6d8e6028a1e8064249ab1bf99321804473b1d690750",
+      "identical": true
+    },
+    {
+      "path": "test/test_completion_trust_harness.ml",
+      "executed_sha256": "0ed10588a30c2b2eb8824c9ab95ddb858deec5a967bacbdd68c67b9105c08cf0",
+      "current_sha256": "0ed10588a30c2b2eb8824c9ab95ddb858deec5a967bacbdd68c67b9105c08cf0",
+      "identical": true
+    },
+    {
+      "path": "test/test_verifier_review_owner.ml",
+      "executed_sha256": "2800f79b96af7c864f468834fab7f110664f51cc594331be0ae188e14a3cc7fa",
+      "current_sha256": "2800f79b96af7c864f468834fab7f110664f51cc594331be0ae188e14a3cc7fa",
+      "identical": true
+    },
+    {
+      "path": "test/test_verifier_review_worker.ml",
+      "executed_sha256": "c8a38ea903c6f3e6f796edc3aa3e1692a333a867f3e3b784d1d94d9bcc6631c3",
+      "current_sha256": "c8a38ea903c6f3e6f796edc3aa3e1692a333a867f3e3b784d1d94d9bcc6631c3",
+      "identical": true
+    }
+  ],
+  "candidate_head": "3bbdd51fedca544df12b21d2995f67f15adcd0a0",
+  "limit": "Rebinding independent perf execution inputs; no full Host/native build or live proof"
+}

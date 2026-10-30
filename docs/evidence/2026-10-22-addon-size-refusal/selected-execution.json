@@ -1,0 +1,31 @@
+{
+  "run": 39676761394,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39676761394",
+  "head": "80525774a4d2bff89b157b2c36a2fa350c4ea44e",
+  "status": "completed",
+  "conclusion": "failure",
+  "compile": "completed, selected test binaries executed",
+  "failures": [
+    {
+      "suite": "test_lane_addon_exact_runner",
+      "cases": [
+        "expired evidence is not a terminal input refusal",
+        "future evidence is not a terminal input refusal"
+      ],
+      "expected": [
+        "/v1/messages/count_tokens"
+      ],
+      "actual": [],
+      "correction": "Expired/future serving evidence refuses before token measurement; assert no HTTP request."
+    },
+    {
+      "suite": "test_candle_appraiser_transport",
+      "case": "output limit preserves the failed original appraisal evidence",
+      "error": "Yojson member result of null; list_runs is a summary projection",
+      "correction": "Use Runs.get by the original run ID before reading the retained output."
+    }
+  ],
+  "repair_head": "c18a1f8c5ab3ed20b459c1b06fd8059276daf45d",
+  "repair_execution": "not yet observed",
+  "limits": "Failed run does not certify corrected fixtures, newer successor source, production wiring, live provider, installed UI."
+}

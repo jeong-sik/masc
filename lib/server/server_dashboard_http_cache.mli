@@ -1,0 +1,158 @@
+(** Server_dashboard_http_cache — cached_surface type and dashboard
+    cache lifecycle helpers.
+
+    A {!cached_surface} atomically publishes an immutable snapshot and its
+    derived payload. Readers retain a consistent observation while later
+    updates replace the cell. Rendering takes an explicit observation time;
+    the HTTP accessors sample the clock at their boundary.
+
+    The module also provides
+    {!cached_surface_or_first_success_json} — a "compute on first
+    miss, return cached afterwards" wrapper around
+    {!Dashboard_cache.get_or_compute_with_timeout}.  This pairs the
+    cache-key/TTL machinery with the per-surface attempt/success/
+    error tracking. *)
+
+type surface_snapshot = {
+  json : Yojson.Safe.t;
+  last_success_unix : float option;
+  last_attempt_unix : float option;
+  last_error : string option;
+  last_error_unix : float option;
+}
+(** One consistent view of a surface. Unix timestamps are the source of truth;
+    the wire projection derives ISO strings from them. *)
+
+type cached_surface_payload = {
+  json : Yojson.Safe.t;
+  raw_json : string;
+  etag : string;
+}
+(** Pre-rendered JSON AST, pre-serialized raw JSON string, and weak ETag for a surface. *)
+
+type cached_surface
+(** An atomic publication cell. The snapshot is authoritative; serialized JSON
+    and ETag are memoized only for that exact snapshot. *)
+
+val update_cached_surface :
+  cached_surface -> (surface_snapshot -> surface_snapshot) -> unit
+(** Atomically replace the snapshot and invalidate its derived payload.
+    The transform must be pure: contention may cause it to run again.
+    Sample clocks and perform effects before calling this function. *)
+
+val surface_snapshot_json : now:float -> surface_snapshot -> Yojson.Safe.t
+(** Pure diagnostic projection of one snapshot at an explicit observation time. *)
+
+val snapshot : cached_surface -> surface_snapshot
+(** [snapshot s] reads the current view. Bind it once and read fields off the
+    result rather than re-reading [s] per field. *)
+
+val create_cached_surface : Yojson.Safe.t -> cached_surface
+(** [create_cached_surface json] returns a fresh surface seeded
+    with [json] and all three timestamps set to [None].  Callers
+    typically seed with a synthetic "initializing" envelope so
+    {!cached_surface_json} can render a cache_state of
+    ["initializing"] before the first attempt completes. *)
+
+val mark_cached_surface_attempt : cached_surface -> unit
+(** [mark_cached_surface_attempt s] stamps [last_attempt_unix] with
+    the current wall-clock time. Called at the start of a
+    compute cycle. *)
+
+val mark_cached_surface_success : cached_surface -> Yojson.Safe.t -> unit
+(** [mark_cached_surface_success s json] stamps [last_success_unix]
+    with the current time, replaces [s.json] with [json], and
+    {b clears} the prior error and its timestamp. The error clear is
+    deliberate — a successful refresh resolves the previous
+    failure.  A future "let's keep the last error around for
+    debugging" change must touch this contract. *)
+
+val mark_cached_surface_error : cached_surface -> exn -> unit
+(** [mark_cached_surface_error s exn] stamps [last_error] and [last_error_unix] with
+    [Printexc.to_string exn] and the current time.  Does NOT
+    touch [last_success_*] or [s.json] — the previous successful
+    snapshot remains served until the next success refreshes it. *)
+
+val mark_cached_surface_error_message : cached_surface -> string -> unit
+(** Store an already-rendered boundary failure without recreating an exception
+    solely to transport its text. *)
+
+val invalidate_cached_surface : ?json:Yojson.Safe.t -> cached_surface -> unit
+(** [invalidate_cached_surface s] clears all three timestamps but
+    preserves the JSON unless a replacement [json] is supplied. Both changes
+    publish together, so an invalidation cannot expose the retired payload as
+    a new initializing observation. *)
+
+val cached_surface_has_success : cached_surface -> bool
+(** [cached_surface_has_success s] returns [true] iff
+    [s.last_success_unix] is [Some _] (at least one successful
+    refresh has occurred). *)
+
+val cached_surface_json : cached_surface -> Yojson.Safe.t
+(** [cached_surface_json s] returns [s.json] augmented with a
+    [projection_diagnostics] sub-object carrying the cache state.
+
+    {2 cache_state values}
+
+    | Condition | [cache_state] | [stale_age_ms] |
+    |---|---|---|
+    | [last_success_unix = None] | [["initializing"]] | [`Null] |
+    | [error_ts > success_ts] | [["stale"]] | success age |
+    | otherwise | [["fresh"]] | [`Null] |
+
+    [stale_reason] mirrors [last_error] when stale,
+    [`Null] otherwise.  This is the operator-visible cache-health
+    surface — dashboard CSS keys off the literal [["initializing"]]
+    / [["stale"]] / [["fresh"]] strings. *)
+
+
+val cached_surface_payload : cached_surface -> cached_surface_payload
+(** [cached_surface_payload s] returns the {!cached_surface_payload} for [s],
+    memoizing the serialized JSON and ETag across requests until the surface
+    transitions state. *)
+
+val cached_surface_or_first_success_json :
+  cached_surface ->
+  cache_key:string ->
+  ttl:float ->
+  clock:_ Eio.Time.clock ->
+  timeout_sec:float ->
+  Yojson.Safe.t Pool_work.t ->
+  Yojson.Safe.t
+(** [cached_surface_or_first_success_json s ~cache_key ~ttl ~clock
+    ~timeout_sec work] returns the cached JSON when the surface
+    has at least one successful refresh, otherwise drives
+    [work] through {!Dashboard_cache.get_or_compute_with_timeout}
+    with the surface's attempt/success/error tracking bound around
+    the call.
+
+    [Eio.Cancel.Cancelled] is re-raised verbatim (no error
+    tracking) so a fiber cancellation does not pollute the surface
+    with a synthetic error. *)
+
+(** {1 Assoc-list helper}
+
+    Exposed because sister dashboard surface modules
+    ({!Server_dashboard_http_execution_surfaces}) layer fields onto
+    [`Assoc] payloads via this helper and the canonical
+    cache-state augmentation pipeline. *)
+
+val upsert_assoc_field :
+  string ->
+  Yojson.Safe.t ->
+  (string * Yojson.Safe.t) list ->
+  (string * Yojson.Safe.t) list
+(** [upsert_assoc_field key value fields] returns [fields] with
+    [(key, value)] prepended and any prior occurrence of [key]
+    removed.  Last-write-wins on duplicate keys. *)
+
+(** {1 Projection-diagnostics builders} *)
+
+val extend_projection_diagnostics :
+  Yojson.Safe.t -> (string * Yojson.Safe.t) list -> Yojson.Safe.t
+(** [extend_projection_diagnostics json extra_fields] merges
+    [extra_fields] into the existing [projection_diagnostics] sub-
+    object (or creates one when absent).  Existing keys are
+    overwritten by [extra_fields] (last-write-wins).  Used by
+    {!cached_surface_json} to layer cache-state fields onto an
+    existing diagnostic block. *)

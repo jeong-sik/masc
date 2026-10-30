@@ -1,0 +1,216 @@
+(** Workspace helpers: input validators, JSON I/O (local + root-scoped),
+    distributed/file locking with full-jitter backoff, and event
+    logging. *)
+
+open Masc_domain
+open Workspace_utils_backend_setup
+
+
+(** {1 Validators (string-error)} *)
+
+val validate_agent_name : string -> (string, string) result
+val validate_task_id : string -> (string, string) result
+val validate_file_path : string -> (string, string) result
+
+(** {1 Sanitizers} *)
+
+(** Map characters outside [a-z0-9._-] to [_HH] hex escapes;
+    safe for filesystem path use. *)
+val safe_filename : string -> string
+
+(** {1 Validators (masc_error)} *)
+
+val validate_agent_name_r : string -> (string, masc_error) result
+val validate_task_id_r : string -> (string, masc_error) result
+
+(** {1 Initialization gates} *)
+
+(** Raised by [ensure_initialized] when the config is not initialized.
+    Replaces the previous [Invalid_argument "MASC not initialized..."]
+    that downstream sites recovered via [Printexc.to_string +
+    substring match] (RFC-0088 §"String/Substring 분류기" cross-module
+    form). The [Printexc] printer is registered so existing log paths
+    that format the exception keep the same human-readable message. *)
+exception Not_initialized
+
+val ensure_initialized : config -> unit
+
+(** {1 Filesystem helpers} *)
+
+val mkdir_p : string -> unit
+
+(** {1 JSON I/O — local filesystem} *)
+
+(** Result-returning variant that surfaces the raw error message. *)
+val read_json_local_result : string -> (Yojson.Safe.t, string) result
+
+(** Atomic pretty-print write; creates parent dirs as needed. *)
+val write_json_local :
+  string -> Yojson.Safe.t -> (unit, string) result
+
+(** {1 JSON I/O — backend-routed} *)
+
+(** Read a JSON value via the active backend (or local FS when
+    the backend has no key for this path). *)
+val read_json : config -> string -> Yojson.Safe.t
+
+(** Why a present document yielded no JSON value. *)
+type json_doc_error =
+  | Json_doc_unreadable of string
+  | Json_doc_unparsable of string
+  | Json_doc_blank
+
+val json_doc_error_to_string : json_doc_error -> string
+
+(** Read one JSON document via the active backend (or local FS when the
+    backend has no key for this path). [Ok None] means the key or file does
+    not exist, and only that; a blank, unreadable or unparsable document is an
+    [Error]. The caller decides what absence means for its store. *)
+val read_json_doc :
+  config -> string -> (Yojson.Safe.t option, json_doc_error) result
+
+(** Read a UTF-8 text file via the active backend; falls back to
+    local FS when the backend has no key for this path. *)
+val read_text : config -> string -> string
+
+(** [true] iff the authoritative backend should also mirror writes to the
+    local filesystem. *)
+val should_dual_write_local : config -> bool
+
+(** Backend-routed JSON write; respects [should_dual_write_local]. *)
+val write_json : config -> string -> Yojson.Safe.t -> unit
+
+(** Result-returning variant that reports backend and local mirror failures. *)
+val write_json_result : config -> string -> Yojson.Safe.t -> (unit, string) result
+
+(** A document encoded for {!write_encoded_json_result}: UTF-8 repaired JSON
+    text. Encoding is most of the work of writing a large document, so a caller
+    that writes one document to two paths, or wants the encoding off its fiber,
+    encodes it once itself. *)
+type encoded_json = private string
+
+val encode_json_pretty : Yojson.Safe.t -> encoded_json
+(** The same UTF-8 sanitization and pretty encoding as {!write_json_result},
+    retained for writing one document to more than one path. Formatting keeps
+    Yojson's Unicode scalar widths and default line breaks; ASCII prefixes do
+    not need UTF-8 decoding. Each encoding owns its formatter. *)
+
+val encode_json_compact : Yojson.Safe.t -> (encoded_json, string) result
+(** Compact encoding. [Error] when the document holds a float compact JSON has
+    no spelling for (NaN, an infinity); the pretty writer behind
+    {!write_json_result} spells those, this one refuses them. *)
+
+(** {!write_json_result} for a document already encoded: the same backend
+    routing and local mirror. *)
+val write_encoded_json_result : config -> string -> encoded_json -> (unit, string) result
+
+type write_json_commit = { mirror_error : string option }
+
+val write_encoded_json_commit_result :
+  config -> string -> encoded_json -> (write_json_commit, string) result
+(** {!write_json_commit_result} for an already encoded document. Encoding does
+    not commit anything; this call preserves the backend and mirror boundary. *)
+
+(** Commit-aware write result. [Error] means the authoritative backend/local
+    write did not commit. For the Memory backend, a failed filesystem mirror
+    is returned as [Ok { mirror_error = Some _ }] because the backend mutation
+    is already committed. *)
+val write_json_commit_result :
+  config -> string -> Yojson.Safe.t -> (write_json_commit, string) result
+
+val write_text : config -> string -> string -> unit
+val delete_path : config -> string -> unit
+val path_exists : config -> string -> bool
+
+(** Read JSON if present; [None] for absent files (no WARN log). *)
+val read_json_opt : config -> string -> Yojson.Safe.t option
+
+(** {1 Agent JSON} *)
+
+val is_fd_pressure_exn : exn -> bool
+(** [true] for typed OS/resource-pressure exceptions that mean an agent file
+    could not be opened, not that it is malformed. *)
+
+type read_agent_error =
+  | Agent_fd_pressure of exn
+  | Agent_read_error of string
+
+val read_agent_result :
+  config -> string -> (agent, read_agent_error) result
+
+(** Decode an agent JSON file with the generated [agent_of_yojson]. A file
+    that does not decode (for example a numeric or missing [last_seen]) is
+    an [Error]; the file on disk is never rewritten. *)
+val read_agent :
+  config -> string -> (agent, string) result
+
+(** {1 Locking} *)
+
+(** Full-jitter backoff: returns a sleep duration uniformly
+    distributed in [[0, delay]]. *)
+val backoff_with_jitter : float -> float
+
+(** Acquire a distributed lock via the backend, retrying with
+    full-jitter backoff. Raises [Invalid_argument] when the
+    50-attempt budget is exhausted; bumps the
+    [Workspace_hooks.distributed_lock_acquire_failed_fn] counter. *)
+val with_distributed_lock :
+  ?clock:_ Eio.Time.clock ->
+  config ->
+  string ->
+  (unit -> 'a) ->
+  'a
+
+(** Cooperative file lock (Eio mutex for in-process, distributed
+    lock for FileSystem backend); uses [Eio_context.get_clock_opt]. *)
+val with_file_lock : config -> string -> (unit -> 'a) -> 'a
+
+val with_file_lock_r :
+  config -> string -> (unit -> 'a) -> ('a, masc_error) result
+
+(** Why a publication under a held lease did not run.
+
+    Each distributed-lock acquisition owns its lease under a token of its
+    own ([node_id], pid and a process-wide sequence), not under the shared
+    [node_id]. The acquiring Eio fiber keeps that lease bound, together with
+    the backend's physical root ({!Backend.FileSystem.physical_root}), for the
+    body of
+    {!with_distributed_lock}/{!with_file_lock}. *)
+type lease_commit_refusal =
+  | Lease_lost of { key : string; holder : string option }
+      (** Inside the lease fence the record named another owner ([holder]),
+          or no record existed ([None]). Publishing could overwrite a newer
+          holder's commit. *)
+  | Lease_unverifiable of { key : string; detail : string }
+      (** The record, the fence, or the backend's physical root could not be
+          read; nothing was published. *)
+
+val lease_commit_refusal_to_string : lease_commit_refusal -> string
+
+(** [commit_under_held_lease config path publish] runs [publish] as the
+    protected step of this fiber's lease on the lock guarding [path]: inside
+    that key's fence ({!Backend.FileSystem.commit_under_lease}) the owner is
+    checked, the lease renewed, and [publish] run before the fence is
+    released, so no competing acquisition can take the lease between the
+    check and the publication.
+
+    Runs [publish] directly, without a fence, when the path has no
+    lease-backed lock (Memory backend, unkeyed path) or when this fiber
+    holds no lease on it (a caller outside the lock, or a raw systhread,
+    which binds none and never waits on the domain pool).
+
+    A held lease matches when its key and its backend's physical root are
+    the same, so a config that reaches the workspace through another
+    spelling of its directory still finds the lease. When this fiber holds a
+    lease with the same key and the physical root cannot be resolved, the
+    result is [Lease_unverifiable] and nothing is published. *)
+val commit_under_held_lease :
+  config -> string -> (unit -> 'a) -> ('a, lease_commit_refusal) result
+
+(** {1 Event logging} *)
+
+(** Append [event_json], serialized via [Yojson.Safe.to_string], to the
+    YYYY-MM/DD.jsonl event log under [.masc/events/]. PR #11507 migrated
+    the implementation and every caller to typed JSON; the .mli must
+    track. *)
+val log_event : config -> Yojson.Safe.t -> unit

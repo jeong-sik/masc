@@ -1,0 +1,237 @@
+{
+  "head_sha": "44b6daee827adb9ef700c29f8d221220c2024df9",
+  "suite": "test/test_verifier_review_worker",
+  "alcotest_case_index": 17,
+  "alcotest_case_name": "missing actual observer facts refuse before domain mutation",
+  "enclosing_case": {
+    "line": 1247,
+    "status": "OK",
+    "case": "execution         17   missing actual observer facts refuse b..."
+  },
+  "runner_log_range": {
+    "start": 1154,
+    "end": 1247
+  },
+  "raw_excerpt_file": "missing-observer-case.log",
+  "phase_mapping": {
+    "source_file": "test/test_verifier_review_worker.ml",
+    "source_lines": [
+      777,
+      862
+    ],
+    "ordered_phases": [
+      "Judged",
+      "Committing",
+      "Commit_unknown"
+    ],
+    "scenario_order_per_phase": [
+      "missing registration negative",
+      "actual observed positive"
+    ],
+    "provenance": "Frozen source List.iter lines861-862 plus six completed assertion blocks and one enclosing case OK; log does not separately print phase names."
+  },
+  "assertions": [
+    {
+      "label": "fixture actually ran its original reviewer",
+      "occurrences": 6,
+      "runner_log_lines": [
+        1158,
+        1174,
+        1189,
+        1205,
+        1220,
+        1236
+      ],
+      "expected_from_frozen_source": 1,
+      "scope": "Each isolated scenario runs its fixture reviewer once before recovery."
+    },
+    {
+      "label": "strict retained intent binds the actual host notes",
+      "occurrences": 6,
+      "runner_log_lines": [
+        1159,
+        1175,
+        1190,
+        1206,
+        1221,
+        1237
+      ],
+      "expected_from_frozen_source": null,
+      "scope": "Same real before/judgment/notes validated before each scenario."
+    },
+    {
+      "label": "strict retained intent binds the actual review",
+      "occurrences": 6,
+      "runner_log_lines": [
+        1160,
+        1176,
+        1191,
+        1207,
+        1222,
+        1238
+      ],
+      "expected_from_frozen_source": true,
+      "scope": "Exact typed retained review equality."
+    },
+    {
+      "label": "actual host read confirms this valid intent could apply",
+      "occurrences": 6,
+      "runner_log_lines": [
+        1161,
+        1177,
+        1192,
+        1208,
+        1223,
+        1239
+      ],
+      "expected_from_frozen_source": true,
+      "scope": "Actual host observe validates the prepared intent before instrumentation."
+    },
+    {
+      "label": "exact missing observations cause the refusal",
+      "occurrences": 6,
+      "runner_log_lines": [
+        1162,
+        1165,
+        1193,
+        1196,
+        1224,
+        1227
+      ],
+      "expected_from_frozen_source": "original execution observations were not retained; recovery cannot reconstruct tools or elapsed time",
+      "scope": "One direct guarded commit and one production process refusal per negative scenario."
+    },
+    {
+      "label": "missing observations refuse before actual host observation",
+      "occurrences": 3,
+      "runner_log_lines": [
+        1163,
+        1194,
+        1225
+      ],
+      "expected_from_frozen_source": 0,
+      "scope": "Scoped counter increments then delegates the actual host observe function."
+    },
+    {
+      "label": "missing observations refuse before actual domain apply call",
+      "occurrences": 3,
+      "runner_log_lines": [
+        1164,
+        1195,
+        1226
+      ],
+      "expected_from_frozen_source": 0,
+      "scope": "Scoped counter increments then delegates the actual host apply function."
+    },
+    {
+      "label": "unprovable recovery preserves the raw actual Task",
+      "occurrences": 3,
+      "runner_log_lines": [
+        1166,
+        1197,
+        1228
+      ],
+      "expected_from_frozen_source": null,
+      "scope": "Exact persisted Task bytes after direct commit refusal and production process refusal."
+    },
+    {
+      "label": "unprovable recovery preserves the exact owner phase and events",
+      "occurrences": 3,
+      "runner_log_lines": [
+        1167,
+        1198,
+        1229
+      ],
+      "expected_from_frozen_source": true,
+      "scope": "Exact Owner event list comparison."
+    },
+    {
+      "label": "unprovable recovery publishes no competing registry row",
+      "occurrences": 3,
+      "runner_log_lines": [
+        1168,
+        1199,
+        1230
+      ],
+      "expected_from_frozen_source": null,
+      "scope": "Exact optional raw registry bytes; absent remains None."
+    },
+    {
+      "label": "observed sibling executes exactly one real domain apply",
+      "occurrences": 3,
+      "runner_log_lines": [
+        1180,
+        1211,
+        1242
+      ],
+      "expected_from_frozen_source": 1,
+      "scope": "Measured immediately after actual guarded commit."
+    },
+    {
+      "label": "observed sibling reads before and confirms after",
+      "occurrences": 3,
+      "runner_log_lines": [
+        1181,
+        1212,
+        1243
+      ],
+      "expected_from_frozen_source": 2,
+      "scope": "Measured immediately after actual guarded commit."
+    },
+    {
+      "label": "acknowledged original leaves pending discovery",
+      "occurrences": 3,
+      "runner_log_lines": [
+        1183,
+        1214,
+        1245
+      ],
+      "expected_from_frozen_source": 0,
+      "scope": "assert_terminal_ack first matches durable Owner completion Acknowledged then pending discovery count0."
+    },
+    {
+      "label": "recovery never adds another reviewer call",
+      "occurrences": 6,
+      "runner_log_lines": [
+        1169,
+        1184,
+        1200,
+        1215,
+        1231,
+        1246
+      ],
+      "expected_from_frozen_source": 1,
+      "scope": "Total fixture reviewer calls remains1 after recovery: recovery delta0."
+    }
+  ],
+  "positive_silent_guards": [
+    {
+      "source_lines": [
+        833,
+        834
+      ],
+      "assertion": "Actual persisted Task status must match Done; otherwise Alcotest.fail."
+    },
+    {
+      "source_lines": [
+        835,
+        840
+      ],
+      "assertion": "Production process_original_once succeeds, assert_terminal_ack passes, replayed disk registry row is Completed Approved(reason=checked); otherwise Alcotest.fail."
+    },
+    {
+      "source_lines": [
+        483,
+        489
+      ],
+      "assertion": "assert_terminal_ack loads retained Owner and matches completion Acknowledged, then prints pending discovery count0 ASSERT."
+    }
+  ],
+  "limits": [
+    "The six subscenarios belong to one Alcotest case; they are not six additional cases.",
+    "Alcotest verbose output prints ASSERT labels rather than numeric operands. Expected values and branch meaning are bound to exact compiled source; enclosing case OK establishes these assertions passed.",
+    "apply0/observe0 counters directly measure the scoped guarded commit. Production process_original_once separately has exact refusal and state-preservation assertions; its callback counts are not independently instrumented.",
+    "Reviewer is the scoped fixture reviewer, not an external provider; actual host/Workspace/Owner/registry file effects run in temporary fixture workspaces.",
+    "Positive Task Done and replayed Approved/Owner ACK pattern matches do not print dedicated success lines; exact source and enclosing case OK are their evidence."
+  ]
+}

@@ -1,0 +1,37 @@
+(include_subdirs no)
+
+;; Goal domain — pure goal logic (store / phase / verification). Decoupled
+;; from the masc mega-library: persistence goes through
+;; the already-separate masc_workspace library (Workspace_utils), never the
+;; mega-lib Workspace facade. Dependency direction is one-way: consumers
+;; (workspace_goals adapter, dashboards) depend on masc_goal; masc_goal depends
+;; only on neutral libraries below.
+
+(library
+ (name masc_goal)
+ (public_name masc.masc_goal)
+ (wrapped false)
+ (private_modules goal_document)
+ (libraries
+  masc_types
+  masc_core
+  ; The delivery outbox uses the same Keeper-name grammar as its recipients.
+  masc.keeper_registry
+  ; Explicit dependency: transitive module visibility is disabled.
+  masc_process
+  masc.masc_random_id
+  masc_log
+  masc_backend
+  masc_workspace
+  ; RFC-0444 PR-2: Goal_unavailable_envelope spells the error code through
+  ; Tool_args.error_code and wraps the envelope in a Tool_result.
+  masc.tool_types
+  time_compat
+  fs_compat
+  ; Goal_due reads a due date into a Ptime instant.
+  ptime
+  yojson
+  eio
+  unix)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

@@ -1,0 +1,53 @@
+{
+  "identities": {
+    "first": {
+      "schedule_id": "audit-real-model-da9b9de3218d410aa2452489e75ed1ff",
+      "schedule_instance_id": "01a178b0-777b-7000-b707-3b76a4acafa5",
+      "stimulus_id": "88858a6ca56a6d07da579d5dc6636c3eb33af83db2fa6988b43594eec0cf2848",
+      "post_id": "88858a6ca56a6d07da579d5dc6636c3eb33af83db2fa6988b43594eec0cf2848",
+      "due_at": 1793026195.274979,
+      "payload_digest": "c4e11934539fc6179f5233b172ad36d4332eba9a6f4d7812a2160e1e69bb693a"
+    },
+    "second": {
+      "schedule_id": "audit-real-model-da9b9de3218d410aa2452489e75ed1ff-second",
+      "schedule_instance_id": "01a178b0-839e-7000-85e1-b44d96673c04",
+      "stimulus_id": "1bd909b846d77b0c0e0c8a8a27005b4c95a81d38d9a956476b831a0973dfd4c7",
+      "post_id": "1bd909b846d77b0c0e0c8a8a27005b4c95a81d38d9a956476b831a0973dfd4c7",
+      "due_at": 1793026198.382574,
+      "payload_digest": "2ba2d00c947bafe9b4120f3f78da7e54b89fd2793253318a72a5563906dd5f32"
+    }
+  },
+  "notes": [
+    {
+      "note_id": "10",
+      "schedule_id": "audit-real-model-da9b9de3218d410aa2452489e75ed1ff-second",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793026203.477594,
+      "body": "SCHEDULE_EFFECT_38eb04fe1a4340ada02a4a918ad35373_SECOND"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-da9b9de3218d410aa2452489e75ed1ff",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793026212.25444,
+      "body": "SCHEDULE_EFFECT_38eb04fe1a4340ada02a4a918ad35373"
+    }
+  ],
+  "observed_history_generated_at": {
+    "first": "2026-10-26T14:50:18Z",
+    "second": "2026-10-26T14:50:18Z"
+  },
+  "queue_pending_count": 0,
+  "queue_outbox_count": 0,
+  "live_turn": null,
+  "shutdown_observation": {
+    "stop_reason": "same producer reread idle after two exact Completed sources and two unique effects; observer failed its sampled overlap precondition",
+    "pid": 77704,
+    "signal": "SIGTERM",
+    "exit_code": null,
+    "observer_exit_code": 1,
+    "note": "Parent observer had exited; process exit code unavailable, no clean shutdown claim."
+  }
+}

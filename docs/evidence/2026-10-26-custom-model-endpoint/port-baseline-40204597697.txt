@@ -1,0 +1,52 @@
+run: 40204597697
+head: d4c032e9db854ff515a78940717f7135c8c9142a
+raw_sha256: 02dfa3c23e2246c1aa1ba88bac50e6b3242324c8691f48823b3451af48f4a05b
+raw_bytes: 116203
+
+test suite	Checkout	2026-10-25T14:57:05.5907760Z HEAD is now at d4c032e9 test(runtime): preserve explicit custom endpoint port authority
+test suite	Test	2026-10-25T14:59:25.4508722Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:59:25.4509096Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T14:59:25.4509729Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:59:25.4510005Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T14:59:25.4518821Z   [OK]          provider authority          0   identity.
+test suite	Test	2026-10-25T14:59:25.4519359Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:59:25.4519778Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T14:59:25.4520185Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:59:25.4520575Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T14:59:25.4520950Z   [OK]          provider authority          1   context.
+test suite	Test	2026-10-25T14:59:25.4521365Z ASSERT A rejects forcing despite the bare row allowing it
+test suite	Test	2026-10-25T14:59:25.4521765Z ASSERT B retains its separate forcing declaration
+test suite	Test	2026-10-25T14:59:25.4522166Z ASSERT endpoint override preserves selected provider
+test suite	Test	2026-10-25T14:59:25.4522548Z ASSERT endpoint override cannot borrow B's policy
+test suite	Test	2026-10-25T14:59:25.4522925Z ASSERT A rejects required choice before dispatch
+test suite	Test	2026-10-25T14:59:25.4523288Z ASSERT B admits required choice
+test suite	Test	2026-10-25T14:59:25.4523579Z ASSERT B forcing reaches final Chat body
+test suite	Test	2026-10-25T14:59:25.4523934Z   [OK]          provider authority          2   policy and wire.
+test suite	Test	2026-10-25T14:59:25.4524345Z ASSERT custom label cannot borrow discovery endpoint
+test suite	Test	2026-10-25T14:59:25.4524730Z   [OK]          custom endpoint             0   missing.
+test suite	Test	2026-10-25T14:59:25.4525103Z ASSERT custom label cannot borrow environment endpoint
+test suite	Test	2026-10-25T14:59:25.4525472Z   [OK]          custom endpoint             1   ambient.
+test suite	Test	2026-10-25T14:59:25.4525892Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:59:25.4526446Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:59:25.4527210Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:59:25.4527771Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:59:25.4528445Z   [OK]          custom endpoint             2   invalid.
+test suite	Test	2026-10-25T14:59:25.4528902Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T14:59:25.4529366Z   [FAIL]        custom endpoint             3   malformed.
+test suite	Test	2026-10-25T14:59:25.4529825Z ASSERT invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T14:59:25.4530267Z   [FAIL]        custom endpoint             4   ports.
+test suite	Test	2026-10-25T14:59:25.4530688Z ASSERT custom classification retains explicit model
+test suite	Test	2026-10-25T14:59:25.4531136Z ASSERT custom classification retains explicit endpoint
+test suite	Test	2026-10-25T14:59:25.4531530Z ASSERT custom config retains explicit endpoint
+test suite	Test	2026-10-25T14:59:25.4531885Z ASSERT custom wire retains explicitly selected model
+test suite	Test	2026-10-25T14:59:25.4532155Z   [OK]          custom endpoint             5   explicit.
+test suite	Test	2026-10-25T14:59:25.4533186Z │ [FAIL]        custom endpoint             3   malformed.                     │
+test suite	Test	2026-10-25T14:59:25.4534535Z FAIL custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T14:59:25.4534926Z    Expected: `true'
+test suite	Test	2026-10-25T14:59:25.4535170Z    Received: `false'
+test suite	Test	2026-10-25T14:59:25.4539249Z │ [FAIL]        custom endpoint             4   ports.                         │
+test suite	Test	2026-10-25T14:59:25.4540197Z FAIL invalid explicit port cannot become the default port
+test suite	Test	2026-10-25T14:59:25.4540460Z    Expected: `true'
+test suite	Test	2026-10-25T14:59:25.4540631Z    Received: `false'
+test suite	Test	2026-10-25T14:59:25.4544063Z 2 failures! in 0.022s. 9 tests run.
+test suite	Test	2026-10-25T14:59:25.4560070Z [targeted] test/test_runtime_model_label_binding: FAIL exit 1 in 0s

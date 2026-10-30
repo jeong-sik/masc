@@ -1,0 +1,27 @@
+{
+  "head": "c6677251ad98639c7cbc4390eecef7c690390caa",
+  "probe_run": "36680543354",
+  "provenance": "CI probe binary, isolated synthetic fixture PTY; not installed or production",
+  "build_commit_output": "c6677251ad98639c7cbc4390eecef7c690390caa",
+  "binary_sha256": "065f0387a21f5baf5676bc07812546fb2ce6ce4a868ca54547b9de422525be7a",
+  "all_four_manifest_hashes_verified": true,
+  "captures": [
+    {
+      "file": "workspace-activity-ci-list.png",
+      "columns": 100,
+      "rows": 30,
+      "sha256": "9a4328059e1eb9974a19befca18f8a45bd45ed4babd710ca0cfe654a861118f7"
+    },
+    {
+      "file": "workspace-activity-ci-context.png",
+      "columns": 100,
+      "rows": 30,
+      "sha256": "0867249b931100b5438c7c663bcbe2bc5369b37b973cbd852be4e048cdcb2e49"
+    }
+  ],
+  "limits": [
+    "100x30 color only",
+    "Context screenshot first23 of25 physical rows, not full page-navigation proof",
+    "No installation or production proof"
+  ]
+}

@@ -1,0 +1,51 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC — TEMPERED TONE (v5)
+   Not a new identity. The v2 skin with three edits: hierarchy widened,
+   accents rationed, Korean typeset properly. Bone ink, Cinzel display,
+   and brass warmth all stay. Loaded LAST. html[data-tone="tempered"].
+   ══════════════════════════════════════════════════════════════ */
+
+[data-skin="v2"][data-tone="tempered"] {
+  /* Ink — same bone-parchment family, wider value steps so hierarchy
+     reads at a glance instead of everything sitting mid-tone. */
+  --text-bright: #f4ead4; --text-primary: #d8c9ad; --text-mid: #9d8f77;
+  --text-dim: #6f6350; --text-faint: #4e4639;
+
+  /* Brass keeps its warmth; the glow is halved, not deleted. */
+  --volt-glow: rgba(224,176,87,0.10); --volt-wash: rgba(224,176,87,0.055);
+  --accent-glow: rgba(224,176,87,0.10);
+
+  /* Status muted per the guide — no neon, colour used sparingly. */
+  --status-ok: #6a9c62; --status-warn: #c2a04a; --status-bad: #a8503c;
+
+  /* Chip grounds off: colour survives as text and a pip. */
+  --pill-bg-neutral: transparent; --pill-bg-ok: transparent; --pill-bg-warn: transparent;
+  --pill-bg-bad: transparent; --pill-bg-volt: transparent; --pill-bg-info: transparent;
+}
+
+/* ── Type: Cinzel engraved for chrome, Noto Sans KR for prose ── */
+[data-tone="tempered"] .v2-app { font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+[data-tone="tempered"] .chat-id h2 { font-family: 'Cinzel', var(--font-display); font-size: 19px; font-weight: 400; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-bright); }
+[data-tone="tempered"] .roster-title h3,
+[data-tone="tempered"] .v2-top .crumb { font-family: 'Cinzel', var(--font-display); letter-spacing: 0.2em; text-transform: uppercase; font-weight: 400; }
+[data-tone="tempered"] .v2-wordmark b { font-family: 'Cinzel', var(--font-display); letter-spacing: 0.2em; font-weight: 400; }
+[data-tone="tempered"] .kp-name,
+[data-tone="tempered"] .msg-hd .who { font-family: 'Noto Sans KR', var(--font-ui); font-weight: 500; letter-spacing: -0.005em; }
+
+/* ── Korean typesetting in the reading column ── */
+[data-tone="tempered"] .bubble { font-family: 'Noto Sans KR', var(--font-body); font-size: 15px; line-height: 1.8; letter-spacing: -0.005em; word-break: keep-all; overflow-wrap: anywhere; }
+[data-tone="tempered"] .composer textarea { font-family: 'Noto Sans KR', var(--font-ui); line-height: 1.7; letter-spacing: -0.005em; }
+[data-tone="tempered"] .bubble.user { color: var(--text-bright); }
+
+/* ── Accent discipline: filled status grounds become outline + pip.
+      Brass stays the only thing that ever fills. ── */
+[data-tone="tempered"] .v2-statchip.attn,
+[data-tone="tempered"] .v2-statchip.attn.warn,
+[data-tone="tempered"] .v2-statchip.attn.bad,
+[data-tone="tempered"] .v2-statchip.appr,
+[data-tone="tempered"] .kp-att,
+[data-tone="tempered"] .nav-badge,
+[data-tone="tempered"] .fl-hpill.bad,
+[data-tone="tempered"] .fl-att { background: transparent; }
+[data-tone="tempered"] .fl-chip { --chip-bg: transparent; }
+[data-tone="tempered"] .kpi, [data-tone="tempered"] .ov-card { box-shadow: none; }

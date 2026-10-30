@@ -1,0 +1,386 @@
+module D = Masc.Keeper_turn_disposition
+module Code = Masc.Keeper_turn_terminal_code
+module Legacy = Masc.Keeper_turn_terminal
+module Registry = Masc.Keeper_registry
+module Unified_types = Masc.Keeper_unified_turn_types
+module Status_blocker = Masc.Keeper_status_bridge_blocker
+
+(* ===== Round-trip ============================================== *)
+
+(* Round-trip is asymmetric:
+   - [to_wire] is total (every disposition produces a string).
+   - [of_wire] is best-effort. Recognised app strings round-trip.
+     Recognised runtime wires (RFC-0042) round-trip via projection.
+     Parametrised runtime payloads (Provider_runtime_error of string,
+     Agent_core_error of string) and
+     unrecognised legacy wires deserialise to [Unknown { raw_error }];
+     no round-trip is possible without a wire-prefix scheme that
+     RFC-0042 explicitly defers (§3.1 "intentionally flat"). *)
+let round_trippable : (string * D.t) list =
+  [ "Success", D.Success
+  ; "Checkpoint", D.Checkpoint
+  ; "Input_required", D.Input_required
+  ; "External_cancel", D.External_cancel
+  ; "Unknown empty", D.Unknown { raw_error = "" }
+  ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
+  ; (* Runtime wires that Code.of_wire_exact recognises losslessly (no payload
+     or payload-loss is acceptable per RFC-0042 §5.2). *)
+    "Provider_error/Fiber", D.Provider_error Code.Fiber_unresolved
+  ]
+;;
+
+let test_round_trip_recognised () =
+  List.iter
+    (fun (label, t) ->
+       let wire = D.to_wire t in
+       let parsed = D.of_wire wire in
+       Alcotest.(check bool)
+         (label ^ " round-trip via to_wire/of_wire")
+         true
+         (D.equal t parsed))
+    round_trippable
+;;
+
+(* Documented asymmetric cases: parametrised payloads survive serialisation
+   but deserialise to [Unknown { raw_error = wire }] because the wire
+   loses the constructor identity. *)
+let test_round_trip_lossy_payloads () =
+  let cases =
+    [ ( "Provider_error/Provider_runtime payload"
+      , D.Provider_error (Code.Provider_runtime_error "p_500")
+      , "p_500" )
+    ; ( "Provider_error/Sdk payload"
+      , D.Provider_error (Code.of_core_error_wire "api_error_overloaded")
+      , "api_error_overloaded" )
+    ]
+  in
+  List.iter
+    (fun (label, t, expected_raw) ->
+       let wire = D.to_wire t in
+       Alcotest.(check string) (label ^ " to_wire") expected_raw wire;
+       match D.of_wire wire with
+       | D.Unknown { raw_error } ->
+         Alcotest.(check string)
+           (label ^ " of_wire → Unknown raw_error")
+           expected_raw
+           raw_error
+       | other -> Alcotest.failf "%s expected Unknown, got %a" label D.pp other)
+    cases
+;;
+
+(* ===== Projection (of_termination_code) ======================= *)
+
+let runtime_codes_to_projection : (string * Code.t * D.t) list =
+  [ "Healthy", Code.Healthy, D.Success
+
+  ; ( "Provider_runtime"
+    , Code.Provider_runtime_error "p"
+    , D.Provider_error (Code.Provider_runtime_error "p") )
+  ; "Fiber", Code.Fiber_unresolved, D.Provider_error Code.Fiber_unresolved
+  ; ( "Sdk"
+    , Code.of_core_error_wire "api_error_server:502"
+    , D.Provider_error (Code.of_core_error_wire "api_error_server:502") )
+  ]
+;;
+
+let test_projection () =
+  List.iter
+    (fun (label, code, expected) ->
+       let actual = D.of_termination_code code in
+       Alcotest.(check bool) (label ^ " projection") true (D.equal expected actual))
+    runtime_codes_to_projection
+;;
+
+let test_lossy_terminal_wire_never_manufactures_typed_cause () =
+  [ "turn_wall_clock_timeout"; "stale_turn_timeout"; "exception" ]
+  |> List.iter (fun wire ->
+    match Code.of_wire_exact wire with
+    | Some _ -> Alcotest.failf "%s unexpectedly decoded as a typed cause" wire
+    | None ->
+      Alcotest.(check bool)
+        (wire ^ " remains generic unknown")
+        true
+        (D.equal
+           (D.Unknown { raw_error = wire })
+           (D.of_wire wire)))
+;;
+
+let check_runtime_failure_reason raw_error expected_code =
+  let terminal = Legacy.of_code raw_error in
+  match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
+  | Some (Registry.Provider_runtime_error { code; detail }) ->
+    Alcotest.(check string) "provider runtime code" expected_code code;
+    Alcotest.(check bool)
+      "detail preserves structured source"
+      true
+      (String.contains detail '{')
+  | Some other ->
+    Alcotest.failf
+      "expected Provider_runtime_error, got %s"
+      (Registry.failure_reason_to_string other)
+  | None -> Alcotest.fail "expected structured runtime failure reason"
+;;
+
+let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
+  let raw_error =
+    "Internal error: [masc_agent_core_error] \
+     {\"kind\":\"runtime_exhausted\",\"runtime_id\":\"runtime.strict_tool_candidates\",\
+     \"reason\":\"no_providers_available\"}"
+  in
+  check_runtime_failure_reason
+    raw_error
+    "runtime_exhausted_no_providers_available"
+;;
+
+let test_registry_failure_reason_does_not_classify_free_form_detail () =
+  let raw_error =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.opaque_detail"
+         ; reason =
+             Keeper_internal_error.Other_detail
+               "connection refused; HTTP 429; wall-clock timeout"
+         })
+    |> Agent_core.Error.to_string
+  in
+  check_runtime_failure_reason raw_error "runtime_exhausted_provider_failure"
+;;
+
+let test_registry_failure_reason_preserves_typed_configuration_error () =
+  let classify core_error =
+    let raw_error = Agent_core.Error.to_string core_error in
+    let terminal = Legacy.of_failure ~raw_error core_error in
+    Unified_types.registry_failure_reason_of_terminal_reason
+      ~core_error
+      terminal
+      ~raw_error
+  in
+  let missing_env =
+    Agent_core.Error.Config
+      (Agent_core.Error.MissingEnvVar { var_name = "OLLAMA_CLOUD_API_KEY" })
+  in
+  (match classify missing_env with
+  | Some (Registry.Turn_configuration_error { code; field; detail }) ->
+    Alcotest.(check string) "configuration code" "missing_env_var" code;
+    Alcotest.(check (option string))
+      "configuration field"
+      (Some "OLLAMA_CLOUD_API_KEY")
+      field;
+    Alcotest.(check string)
+      "configuration detail"
+      "required environment variable is missing"
+      detail
+  | Some other ->
+    Alcotest.failf
+      "expected Turn_configuration_error, got %s"
+      (Registry.failure_reason_to_string other)
+  | None -> Alcotest.fail "expected typed configuration failure reason");
+  let secret = "must-not-reach-health" in
+  let sensitive =
+    Agent_core.Error.Config
+      (Agent_core.Error.SensitiveValueInConfig { detail = secret })
+  in
+  (match classify sensitive with
+   | Some (Registry.Turn_configuration_error { code; detail; _ }) ->
+     Alcotest.(check string)
+       "sensitive configuration code"
+       "sensitive_value_in_config"
+       code;
+     Alcotest.(check string)
+       "sensitive detail is redacted"
+       "configuration contains a sensitive inline value"
+       detail;
+     Alcotest.(check bool)
+       "raw sensitive detail is absent"
+       false
+       (String_util.contains_substring detail secret)
+   | Some other ->
+     Alcotest.failf
+       "expected sensitive Turn_configuration_error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected sensitive configuration failure reason");
+  let unsupported =
+    Agent_core.Error.Config
+      (Agent_core.Error.UnsupportedProvider { detail = secret })
+  in
+  (match classify unsupported with
+   | Some (Registry.Turn_configuration_error { code; detail; _ }) ->
+     Alcotest.(check string)
+       "unsupported provider code"
+       "unsupported_provider"
+       code;
+     Alcotest.(check string)
+       "unsupported provider detail is redacted"
+       "configured provider is unsupported"
+       detail
+   | Some other ->
+     Alcotest.failf
+       "expected unsupported-provider Turn_configuration_error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected unsupported-provider failure reason");
+  let unavailable =
+    Runtime_instance.dispatch_credential_error_to_core_error
+      (Runtime_instance.Declared_credential_unavailable
+         { provider_id = "file-provider"
+         ; carrier = Agent_core.Error.FileCredential
+         })
+  in
+  (match classify unavailable with
+   | Some (Registry.Turn_configuration_error { code; field; detail }) ->
+     Alcotest.(check string)
+       "credential unavailable code"
+       "credential_unavailable"
+       code;
+     Alcotest.(check (option string))
+       "credential unavailable field"
+       (Some "credentials")
+       field;
+     Alcotest.(check string)
+       "credential unavailable safe detail"
+       "declared credential carrier is unavailable"
+       detail
+   | Some other ->
+     Alcotest.failf
+       "expected credential-unavailable Turn_configuration_error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected credential-unavailable failure reason");
+  let undeclared =
+    Runtime_instance.dispatch_credential_error_to_core_error
+      (Runtime_instance.Undeclared_credential { provider_id = "keyed-provider" })
+  in
+  (match classify undeclared with
+   | Some (Registry.Turn_configuration_error { code; field; detail }) ->
+     Alcotest.(check string)
+       "undeclared credential code"
+       "credential_undeclared"
+       code;
+     Alcotest.(check (option string))
+       "undeclared credential field names the block to add"
+       (Some "providers.keyed-provider.credentials")
+       field;
+     Alcotest.(check string)
+       "undeclared credential safe detail"
+       "provider requires an API key but its runtime row declares no credential; \
+        add a credentials block naming the environment variable that holds the key"
+       detail
+   | Some other ->
+     Alcotest.failf
+       "expected undeclared-credential Turn_configuration_error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected undeclared-credential failure reason");
+  let secret = "invalid-config-must-not-reach-operator" in
+  let marker_shaped_detail =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Resumable_cli_session
+         { runtime_id = "runtime.marker-injection"
+         ; detail = secret
+         ; exit_code = None
+         })
+    |> Agent_core.Error.to_string
+  in
+  let broad_invalid =
+    Agent_core.Error.Config
+      (Agent_core.Error.InvalidConfig
+         { field = "user_blocks"; detail = marker_shaped_detail })
+  in
+  match classify broad_invalid with
+  | Some (Registry.Turn_configuration_error _) ->
+    Alcotest.fail "broad InvalidConfig was misclassified as terminal configuration"
+  | Some (Registry.Provider_runtime_error { detail; _ } as reason) ->
+    Alcotest.(check string)
+      "broad InvalidConfig detail is redacted"
+      "provider configuration failed"
+      detail;
+    let surface =
+      (Status_blocker.runtime_blocker_surface_of_failure_reason
+          ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason
+      |> Option.get
+    in
+    Alcotest.(check bool)
+      "operator summary excludes raw InvalidConfig detail"
+      false
+      (String_util.contains_substring (Lazy.force surface.summary) secret)
+  | Some other ->
+    Alcotest.failf
+      "expected redacted Provider_runtime_error, got %s"
+      (Registry.failure_reason_to_string other)
+  | None -> Alcotest.fail "expected redacted generic failure reason"
+;;
+
+let empty_turn_state : Unified_types.turn_state =
+  { cycle_completed = false
+  ; manifest_seq = 0
+  ; last_execution = None
+  ; degraded_retry_settled = None
+  ; failure_reason = None
+    (* [empty_turn_state] is the pre-execution state: no runtime has failed, so
+       there is no deferred failover lane to carry. *)
+  ; deferred_runtime_lane = None
+  ; runtime_attempt_errors = []
+  ; lane_terminal_error = None
+  }
+;;
+
+let test_missing_last_execution_is_typed_error () =
+  match
+    Unified_types.require_last_execution_for_finalize
+      ~keeper_name:"keeper_under_test"
+      empty_turn_state
+  with
+  | Ok _ -> Alcotest.fail "expected missing last_execution to return a typed error"
+  | Error (Agent_core.Error.Internal message) ->
+    Alcotest.(check string)
+      "internal error message"
+      "keeper_under_test: last_execution missing at turn finalize"
+      message
+  | Error err ->
+    Alcotest.failf
+      "expected Internal error, got %s"
+      (Agent_core.Error.to_string err)
+;;
+
+let () =
+  Alcotest.run
+    "keeper_turn_disposition"
+    [ ( "round-trip"
+      , [ Alcotest.test_case
+            "recognised wires round-trip exactly"
+            `Quick
+            test_round_trip_recognised
+        ; Alcotest.test_case
+            "parametrised payloads land in Unknown (asymmetric)"
+            `Quick
+            test_round_trip_lossy_payloads
+        ] )
+    ; ( "of_termination_code projection"
+      , [ Alcotest.test_case
+            "every runtime variant projects deterministically"
+            `Quick
+            test_projection
+        ; Alcotest.test_case
+            "lossy wire does not manufacture typed cause"
+            `Quick
+            test_lossy_terminal_wire_never_manufactures_typed_cause
+        ] )
+    ; ( "registry failure reason"
+      , [ Alcotest.test_case
+            "structured runtime no-provider reason is preserved"
+            `Quick
+            test_registry_failure_reason_preserves_no_provider_runtime_reason
+        ; Alcotest.test_case
+            "free-form runtime detail stays generic"
+            `Quick
+            test_registry_failure_reason_does_not_classify_free_form_detail
+        ; Alcotest.test_case
+            "typed configuration error stays typed"
+            `Quick
+            test_registry_failure_reason_preserves_typed_configuration_error
+        ] )
+    ; ( "turn finalization"
+      , [ Alcotest.test_case
+            "missing last_execution returns typed Internal"
+            `Quick
+            test_missing_last_execution_is_typed_error
+        ] )
+    ]
+;;

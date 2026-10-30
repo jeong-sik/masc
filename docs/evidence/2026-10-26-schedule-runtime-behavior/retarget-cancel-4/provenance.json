@@ -1,0 +1,32 @@
+{
+  "requested_source": "94a3c859679c48080ffb1bdb390b8cce1eae6430",
+  "executable_sha256": "833298c99525205f929bab74ee6d45a53601c340bd1b084a2473e183c7663a57",
+  "binary": "/Users/dancer/.local/bin/masc",
+  "model_provider": "isolated dead loopback endpoint, autonomous disabled",
+  "not_proven": [
+    "real model execution",
+    "destination delivery",
+    "TUI execution",
+    "fault recovery"
+  ],
+  "existing_image_reference": "masc-sandbox:general",
+  "observed_build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "commit": "bc3038a22374705db648bebd7f556223b3e84727",
+    "commit_source": "embedded",
+    "binary_commit": "bc3038a22374705db648bebd7f556223b3e84727",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "833298c99525205f929bab74ee6d45a53601c340bd1b084a2473e183c7663a57",
+    "binary_commit_unix_ts": 1793012997.0,
+    "binary_commit_age_seconds": 2955,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "runtime_instance_id": "01a17814-321e-7000-a9f3-5a5482a4b8f9",
+    "started_at": "2026-10-26T11:59:11Z",
+    "uptime_seconds": 0
+  },
+  "observed_base": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-api-ufcnlci6",
+  "runtime_instance_id": "01a17814-321e-7000-a9f3-5a5482a4b8f9"
+}

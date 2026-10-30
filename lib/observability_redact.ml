@@ -1,0 +1,212 @@
+(** Observability_redact — redact sensitive data for observability fields.
+
+    Truncation plus structural secret redaction. Every tool call remains
+    observable; tool names never decide whether evidence exists.
+
+    The pattern layer (secret-shaped prefixes, PEM blocks, sensitive JSON
+    keys) lives in [Secret_patterns] — a leaf library shared with the
+    [masc_log] sink — and is delegated to below so the pattern list has a
+    single source of truth. *)
+
+let default_max_len = 200
+
+let is_sensitive_key = Secret_patterns.is_sensitive_key
+let key_suggests_secret = Secret_patterns.key_suggests_secret
+
+let redact_patterns = Secret_patterns.redact_text
+
+let redact_text (s : string) : string =
+  redact_patterns s
+
+(* [max_len] is a byte budget, but the strings that reach here are UTF-8 and
+   [String.sub s 0 max_len] lands inside a multibyte character whenever one
+   straddles the boundary, leaving a lead byte with no continuation. The damage
+   is not local to the field: a consumer that decodes the whole payload fails on
+   all of it. The dashboard's exact-lane panel rendered nothing for this reason
+   — one Korean board comment crossing the 1024-byte preview boundary made
+   [response.json()] throw, and 68 runs went unshown.
+
+   [String_util.utf8_prefix] is the existing answer to this; only the cut index
+   moves, so the byte budget and the suffix behave exactly as before. *)
+let truncate ?(max_len = default_max_len) (s : string) : string =
+  let s = String.trim s in
+  if String.length s <= max_len then s
+  else String_util.utf8_prefix ~max_bytes:max_len s ^ "...(truncated)"
+
+(* Blob markers (see [Tool_output.encode_for_agent_core]) carry structural fields
+   (sha256/bytes/mime) the dashboard needs to render the marker as a "Stored
+   blob" preview. Decode, redact only the user-visible preview body, then
+   re-encode so those fields survive intact. The prefix matchers do not match a
+   64-hex sha256, but scoping redaction to the preview body keeps the marker
+   structure correct regardless of which patterns run. *)
+let map_marker_preview transform s =
+  if Tool_output.is_marker s then
+    match Tool_output.decode_from_agent_core s with
+    | Tool_output.Decoded artifact_ref ->
+        let preview =
+          transform artifact_ref.Tool_output.preview
+        in
+        Tool_output.encode_for_agent_core
+          (Tool_output.Stored (Tool_output.with_preview artifact_ref preview))
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+        transform s
+  else transform s
+
+let redact_preview ?(max_len = default_max_len) (s : string) : string =
+  map_marker_preview (fun text -> text |> truncate ~max_len |> redact_patterns) s
+
+let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
+    : Yojson.Safe.t =
+  match json with
+  | `String s -> `String (redact_preview ~max_len s)
+  | `Assoc fields ->
+      `Assoc
+        (List.map (fun (k, v) -> (k, preview_json_strings ~max_len v)) fields)
+  | `List items -> `List (List.map (preview_json_strings ~max_len) items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as j -> j
+
+let redact_json_strings = Secret_patterns.redact_json_strings
+
+(* Same sensitive-parent rule as [Secret_patterns] for the fragment fallback:
+   under a fragment-matching key every string in the subtree is masked, so a
+   composite like [{"client_secret_v2":{"value":"opaque"}}] cannot smuggle
+   its leaves past the key-name match. Object names are strings too: an opaque
+   credential used as a map key is masked without dropping its member. *)
+let rec mask_fragment_subtree = function
+  | `String _ -> `String "[REDACTED]"
+  | `Assoc fields ->
+      `Assoc (List.map (fun (_, value) -> "[REDACTED]", mask_fragment_subtree value) fields)
+  | `List items -> `List (List.map mask_fragment_subtree items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
+
+let rec redact_json_value = function
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             let visible_key = redact_patterns key in
+             if is_sensitive_key key
+             then (visible_key, `String "[REDACTED]")
+             else if key_suggests_secret key
+             then (visible_key, mask_fragment_subtree value)
+             else (visible_key, redact_json_value value))
+           fields)
+  | `List items -> `List (List.map redact_json_value items)
+  | `String text -> `String (map_marker_preview redact_patterns text)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json ->
+      json
+
+let preview_of_json ?(max_len = default_max_len) (json : Yojson.Safe.t) =
+  Yojson.Safe.to_string (redact_json_value json) |> redact_preview ~max_len
+
+let redact_tool_input ~tool_name:_ (input : Yojson.Safe.t) : string option =
+  Some (preview_of_json input)
+
+let redact_tool_output ~tool_name:_ (output : string) : string option =
+  Some (redact_preview output)
+
+let redacted_tool_input_json ~tool_name:_ input =
+  Some (input |> redact_json_value |> preview_json_strings)
+
+let redacted_tool_output_json ~tool_name:_ output =
+  let redacted =
+    try Yojson.Safe.from_string output |> redact_json_value |> preview_json_strings
+    with
+    | Yojson.Json_error _ -> `String (redact_preview output)
+  in
+  Some redacted
+
+(* The marker a shrunk object carries as its last member, and a shrunk array
+   as its last element. The budget must leave room for its serialized length,
+   so that length is measured rather than guessed. *)
+let truncated_key = "_truncated"
+
+let truncated_marker = (truncated_key, `Bool true)
+
+let truncated_element = `Assoc [ truncated_marker ]
+
+let marker_len = String.length (Yojson.Safe.to_string truncated_element)
+
+(* A serialized string is wrapped in two quote characters, so a string cut to
+   [budget] bytes must leave room for them. *)
+let string_quote_len = 2
+
+(* A member or element that shrinks to nothing still costs its own syntax, so
+   a budget below this floor cannot make progress; the recursion stops there. *)
+let min_budget = 8
+
+(* A tool output that is a JSON document must not be cut at a byte boundary:
+   the stored string stops parsing, so the TUI falls back to raw bytes instead
+   of the structure (issue #37804). Shrink the document itself — drop trailing
+   members/elements and mark the cut — so the stored value stays valid JSON.
+   [budget] is a byte budget for the serialized form. *)
+let rec shrink_json_to_budget (budget : int) (json : Yojson.Safe.t) : Yojson.Safe.t =
+  if String.length (Yojson.Safe.to_string json) <= budget then json
+  else
+    match json with
+    | `Assoc fields ->
+      let rec keep acc budget = function
+        | [] -> List.rev acc
+        | (key, value) :: rest ->
+          let value' = shrink_json_to_budget (max min_budget (budget / 2)) value in
+          let acc' = (key, value') :: acc in
+          if String.length (Yojson.Safe.to_string (`Assoc (List.rev acc'))) <= budget
+          then keep acc' budget rest
+          else List.rev acc
+      in
+      (* A member already named [_truncated] would appear twice once the
+         marker is appended, so it gives way to the marker. *)
+      let fields = List.filter (fun (key, _) -> key <> truncated_key) fields in
+      `Assoc
+        (keep [] (max min_budget (budget - marker_len)) fields @ [ truncated_marker ])
+    | `List items ->
+      let rec keep acc budget = function
+        | [] -> List.rev acc
+        | value :: rest ->
+          let value' = shrink_json_to_budget (max min_budget (budget / 2)) value in
+          let acc' = value' :: acc in
+          if String.length (Yojson.Safe.to_string (`List (List.rev acc'))) <= budget
+          then keep acc' budget rest
+          else List.rev acc
+      in
+      `List
+        (keep [] (max min_budget (budget - marker_len)) items
+        @ [ truncated_element ])
+    | `String s ->
+      let cut =
+        String_util.utf8_char_boundary s
+          (min (String.length s) (max 0 (budget - string_quote_len)))
+      in
+      `String (String.sub s 0 cut)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as scalar -> scalar
+;;
+
+(* A JSON document is redacted leaf by leaf ([redact_json_strings]): each
+   string value and each key is scanned on its own, and sensitive keys are
+   masked. The stored value is always the redacted tree serialized again,
+   never the input text: Yojson accepts [//] and [/* */] comments and drops
+   them, so a comment holding a credential never reaches the tree, and the
+   input text would carry it into the log. The serialized document is never
+   scanned as one text either. [url_credential] runs
+   from [://] to the next [@], and a serialized document has no spaces, so on
+   the whole text it spans from one member's URL to another member's e-mail
+   address and replaces the quotes and commas between them — the stored value
+   stops parsing and the members in between are lost. *)
+let truncate_json_document ?(max_len = default_max_len) (s : string) : string =
+  match Yojson.Safe.from_string s with
+  | exception Yojson.Json_error _ -> redact_preview ~max_len s
+  | json ->
+    let redacted = redact_json_strings json in
+    (* [shrink_json_to_budget] returns a document that already fits as it is,
+       so a small one is only serialized again. It bounds the document it
+       returns, but the serialized form can still grow past that bound: a
+       string leaf spends two characters per escaped byte. Measure the result
+       and shrink again on a smaller budget until it fits — halving reaches a
+       string, which always fits. *)
+    let rec fit budget =
+      let out = shrink_json_to_budget budget redacted |> Yojson.Safe.to_string in
+      if String.length out <= max_len || budget <= 1 then out
+      else fit (budget / 2)
+    in
+    fit max_len
+;;

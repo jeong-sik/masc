@@ -1,0 +1,21 @@
+{
+  "README.md": "01f7031661d59dde542b50a436b5c33820aaa05f74765c23cdbf85db8b28375e",
+  "accepted-fusion-obligation.json": "6a02cbf0844ff6d5bf024b1f80c08fc0da8ecfe35f7402327a0f2154bd8dcd8d",
+  "actual-tool-ledger.json": "9bb495a927fb243e3ae1d79999671adad3765cf886d3aacd7defceeaecfd0d06",
+  "browser-receipt.json": "27c84e38c6aa5c537083fae0bf7b421b48d6f11ed60a7bdafcadd848968f4e4a",
+  "ci-artifact.json": "603c1eb34b68e93dfd4c30502169e45fb73522da2080ab446d72b2253ae802ef",
+  "ci-run.json": "b69165565266db60f72af5f838d2a09774fd94aff0041d246191c1c3a7e36327",
+  "followup-session-reconciliation.json": "01c1aa86a2ad2b25e2ca8e64ee1ba7b545ae5f5ac6abe3bd0fd01b94f0827ba4",
+  "goal-arguments.json": "ab7569f0628fcf6e6f6358778010809c514a6a9388817469587fcc19c9ac7053",
+  "keeper-arguments.json": "e15b41ccd1dffa5827a463e53aa901c8a5f2403de89307ab09e36d9aa219497f",
+  "message-arguments.json": "72a909bacc0c2d7d5f0038a39622cde5265148b3adb15e8caf46c77b96fede4b",
+  "operation-observation.json": "e53f1aba7ab0f53b9028fee335a0839c691a71af72ae87180321dfc9bb2acc70",
+  "provider-tool-presence.json": "d1a5953e6a6e4f9ef5065106ae7391c27eb5cfc78d08333e10698e87172d0442",
+  "runtime-manifest.json": "1316f2ca852bbb162d3837b957c56832f3c0cd9f1b25f3142573fa6629219fad",
+  "scenario-input.json": "8ca4ae4d6a4826f9205cfb2eb25b70fa6e7126bc2be84180cc7fbdb31ee0794d",
+  "selected-server.log": "dcf158474e5ba26759643b708b6a82273f6f6642b2023ca3b8144ff97895752d",
+  "structured-followup-arguments.json": "43a226f79f3b3f2548f47af45e4f7dac5fbdd0b2a2107b3ba5bc41bc0b377e7f",
+  "task-arguments.json": "e65b5fd5a924aaa22ba8e8462698e09d7596fddaa5fdfb86b2dd9c6f9021b040",
+  "task-decision-desktop.png": "751e206509b84c62545e2df096f57ce895fafc0497414c86eaa625e94ff07c4e",
+  "task-decision-mobile.png": "dda0f85e043c64b9322a3a29a680f78f547bec01eb5ca990b2b03a272a4a3b1c"
+}

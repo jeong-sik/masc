@@ -1,0 +1,40 @@
+{
+  "source_commit": "cc757326f8ebb1d4d3d4ac08486bb507352be35f",
+  "source_parents": [
+    "ff170b018c79385816fa47a450b2ca97c1c4f96f",
+    "836328586ab91d272cfd5a7c4e07735b3df9d522"
+  ],
+  "native_run": 34708736553,
+  "checkout": "/private/tmp/masc-browser-delivery-candidate",
+  "tracked_sha256": {
+    "skills/browser-navigate-content/SKILL.md": "a1c3189c8cf1178ad2daaa9b81aefd45d70048cf3f11e5f564964a960d462514",
+    "skills/browser-lanes/SKILL.md": "6e3ea26f00a79eee164488476ecd4bcdb3e348fcd903a3bfe191e747e66576df",
+    "skills/browser-lanes/references/composition.md": "f117eec3f25845a7276280c92676a17795268866640acbb00fedb59b16d3c292",
+    "test/test_tui_browser_history.py": "ac9d314c58761b8d4df8bb4ceaf67e3449d2b6c23b12fa7658fc415d5e7f7f23",
+    "bin/masc_tui_types.ml": "4589cb1675a5d06c5bd3b5a8aa44a968a8facf908bdf50b2687557f5c92b462f",
+    "bin/masc_tui.ml": "8fa6e24681be0002e0e59cde12e15dc1ffb5646a312d5f2fe3f843db41f29077"
+  },
+  "validation_status": "native_build_passed_and_unpacked_checksums_verified",
+  "scripts": {
+    "export_bundle": "/tmp/export-browser-proof-bundle.py",
+    "three_channel_probe": "/tmp/browser-bundled-content-tui-probe.py",
+    "history_probe": "/tmp/run-bundled-browser-history-proof.py",
+    "history_capture": "/tmp/capture-bundled-browser-history.py",
+    "exact_observation_audit": "/tmp/audit-bundled-browser-observations.py"
+  },
+  "native_runtime_fixture_checkout": "/private/tmp/masc-browser-observation-tui",
+  "native_runtime_fixture_note": "Use the revised Python fixture with new reply/lane markers; production code matches candidate ff170b018c parent.",
+  "runtime": "/tmp/browser-delivery-native-cc757/runtime",
+  "bundle": "/tmp/browser-delivery-native-cc757/bundle",
+  "binary_sha256": {
+    "server": "1eabba751f89669b9e3e4162a1cc5bedd525454a398a4ca4ab38f12b5a24daa6",
+    "tui": "1a3c7336784c9958ebe0a28046e6a044bba5d65f0e1fa89bcf166ca0f7fe222b",
+    "host": "b8f3e4fc0d9f6737620429416128148a2588cf2b1fc943f78ef723a8620edb09"
+  },
+  "result": "producer_and_native_history_verified",
+  "fixture_sha256": {
+    "native-history-fixture.py": "c05503274d411c75a146da85b44265b101bf1ac1684b5b4452bb71d070b0c715",
+    "native-history-harness.py": "3090ecdb5ae622c078d6c614075dd0fca6bc1ad426a6977d6c2552acb7a722e7",
+    "native-history-fixture.txt": "21deadec6971db9606380392dbd3d84ca605db08d8e604ac867894a72497e7ca"
+  }
+}

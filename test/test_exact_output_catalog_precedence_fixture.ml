@@ -1,0 +1,635 @@
+module Exact_output = Agent_core.Exact_output
+module Registry = struct
+  include Runtime_exact_output_registry
+  include Runtime_exact_output_registry.For_testing
+end
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+;;
+
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+;;
+
+let deployment_target = "deployment-only-target"
+let replacement_target = "replacement-only-target"
+let replacement_runtime_target = "replacement_provider.replacement"
+let replacement_secondary_runtime_target = "replacement_provider.secondary"
+let replacement_secondary_target = "replacement-secondary-target"
+let unbound_target = "unbound-target"
+
+let catalog_toml
+      ?(requires_api_key = false)
+      ?(additional_target_ids = [])
+      ~provider_id
+      ~model_id
+      ~target_id
+      ()
+  =
+  let primary =
+    Printf.sprintf
+      {|[[providers]]
+id = %S
+kind = "openai_compat"
+base_url = "http://127.0.0.1:1"
+request_path = "/v1/chat/completions"
+auth = %S
+capabilities_base = "openai_chat_extended"
+
+[[models]]
+model_id = %S
+provider_name = %S
+max_context_tokens = 8192
+max_output_tokens = 1024
+supports_response_format_json = true
+supports_structured_output = false
+input_per_million = 1.0
+
+[[targets]]
+id = %S
+provider_ref = %S
+model_id = %S
+|}
+    provider_id
+    (if requires_api_key then "api-key" else "none")
+    model_id
+    provider_id
+    target_id
+    provider_id
+    model_id
+  in
+  let additional =
+    List.map
+      (fun target_id ->
+         Printf.sprintf
+           {|[[targets]]
+id = %S
+provider_ref = %S
+model_id = %S
+|}
+           target_id
+           provider_id
+           model_id)
+      additional_target_ids
+  in
+  String.concat "\n" (primary :: additional)
+;;
+
+let deployment_catalog =
+  catalog_toml
+    ~provider_id:"deployment_provider"
+    ~model_id:"deployment-model"
+    ~target_id:deployment_target
+    ()
+;;
+
+let replacement_catalog =
+  catalog_toml
+    ~additional_target_ids:
+      [ replacement_runtime_target
+      ; replacement_secondary_runtime_target
+      ; replacement_secondary_target
+      ]
+    ~provider_id:"replacement_provider"
+    ~model_id:"replacement-model"
+    ~target_id:replacement_target
+    ()
+;;
+
+let replacement_catalog_with_unbound_target =
+  replacement_catalog
+  ^ Printf.sprintf
+      "\n[[targets]]\nid = %S\nprovider_ref = \"replacement_provider\"\nmodel_id = \"missing-model\"\n"
+      unbound_target
+;;
+
+let runtime_toml
+      ?hitl_slots
+      ?auxiliary_slots
+      ?runtime_lane_candidates
+      ?(include_board_attention = true)
+      ?(include_hitl_auto_judge = true)
+      lane_target
+  =
+  (* The lane declaration alone is what this fixture exercises; no [runtime]
+     scalar key points at it. *)
+  let runtime_lane =
+    match runtime_lane_candidates with
+    | None -> ""
+    | Some candidates ->
+      Printf.sprintf
+        "\n[runtime.lanes.verifiers]\ncandidates = [%s]\n"
+        (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ")
+  in
+  let board_attention_lane =
+    if include_board_attention
+    then
+      Printf.sprintf
+        "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S]\nmax_output_tokens = 4096\n"
+        lane_target
+    else ""
+  in
+  let hitl_auto_judge_lane =
+    if include_hitl_auto_judge
+    then
+      let slot_ids = Option.value ~default:[ lane_target ] hitl_slots in
+      Printf.sprintf
+        "\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [%s]\nmax_output_tokens = 4096\n"
+        (slot_ids |> List.map (Printf.sprintf "%S") |> String.concat ", ")
+    else ""
+  in
+  let base =
+    let auxiliary_slots = Option.value ~default:[ lane_target ] auxiliary_slots in
+    (Printf.sprintf
+       {|[providers.replacement_provider]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+# Lanes below may name this provider's runtimes as slots; without a body
+# deadline such a slot is left out under the embedded catalog (#38779).
+exact-body-timeout-s = 120.0
+
+[models.replacement]
+api-name = "replacement-model"
+max-context = 8192
+
+[models.replacement.capabilities]
+supports-response-format-json = true
+supports-structured-output = true
+
+[models.secondary]
+api-name = "replacement-model"
+max-context = 8192
+
+[models.secondary.capabilities]
+supports-response-format-json = true
+supports-structured-output = true
+
+[replacement_provider.replacement]
+
+[replacement_provider.secondary]
+
+[runtime]
+default = "replacement_provider.replacement"
+
+[runtime.exact_output_lanes.librarian_exact]
+slots = [%s]
+max_output_tokens = 4096
+|}
+       (auxiliary_slots |> List.map (Printf.sprintf "%S") |> String.concat ", "))
+    ^ board_attention_lane
+    ^ runtime_lane
+    ^ hitl_auto_judge_lane
+  in
+  base
+;;
+
+let failed_runtime_toml =
+  {|[providers.replacement_provider]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[models.alternate]
+api-name = "replacement-model"
+max-context = 8192
+
+[replacement_provider.alternate]
+
+[runtime]
+default = "replacement_provider.alternate"
+|}
+;;
+
+let load_snapshot catalog =
+
+  match Exact_output.load_resolver_snapshot ~catalog () with
+  | Ok snapshot -> snapshot
+  | Error _ -> Alcotest.fail "AGENT_CORE control snapshot must load"
+;;
+
+let load_control_snapshot catalog = load_snapshot catalog
+
+let require_admitted snapshot target_id =
+  match Exact_output.admit_target_ref snapshot target_id with
+  | Ok _ -> ()
+  | Error _ -> Alcotest.failf "AGENT_CORE control target %S must be admitted" target_id
+;;
+
+let require_not_admitted snapshot target_id =
+  match Exact_output.admit_target_ref snapshot target_id with
+  | Error (Exact_output.Target_not_in_catalog actual) ->
+    Alcotest.(check string) "excluded target identity" target_id actual
+  | Error _ -> Alcotest.failf "target %S returned the wrong exclusion" target_id
+  | Ok _ -> Alcotest.failf "target %S survived full replacement" target_id
+;;
+
+let require_registry_unpublished label =
+  match Registry.current () with
+  | Error Registry.Registry_not_published -> ()
+  | Error error ->
+    Alcotest.failf
+      "%s returned the wrong unpublished failure: %s"
+      label
+      (Registry.publication_error_to_string error)
+  | Ok _ -> Alcotest.failf "%s must leave the registry unpublished" label
+;;
+
+let require_publication_busy label = function
+  | Error Registry.Publication_busy -> ()
+  | Error error ->
+    Alcotest.failf
+      "%s returned the wrong failure: %s"
+      label
+      (Registry.publication_error_to_string error)
+  | Ok _ -> Alcotest.failf "%s crossed the active reservation" label
+;;
+
+let require_reservation_inactive label = function
+  | Error Registry.Reservation_inactive -> ()
+  | Ok () -> Alcotest.failf "%s accepted an inactive reservation" label
+;;
+
+let require_replacement_base_changed label = function
+  | Error Registry.Replacement_base_changed -> ignore label
+  | Error error ->
+    Alcotest.failf
+      "%s returned the wrong failure: %s"
+      label
+      (Registry.publication_error_to_string error)
+  | Ok _ -> Alcotest.failf "%s accepted a stale prepared replacement" label
+;;
+
+let transaction_lanes lane_id : Runtime_schema.exact_output_lane_decl list =
+  [ { owner = Option.get (Runtime_schema.exact_lane_owner_of_key (lane_id))
+    ; enabled = true
+    ; slot_ids = [ replacement_target ]
+    ; cli_slot_ids = []
+    ; max_output_tokens = Some 4_096; thinking = None
+    }
+  ]
+;;
+
+let require_transaction_lane label ~lane_id registry =
+  match Registry.resolve_lane registry ~lane_id with
+  | Error error ->
+    Alcotest.failf
+      "%s: %s"
+      label
+      (Registry.lane_resolution_error_to_string error)
+  | Ok { selected_slots } ->
+    Alcotest.(check (list string))
+      label
+      [ replacement_target ]
+      (List.map
+         (fun (slot : Registry.selected_slot) -> slot.slot_id)
+         selected_slots)
+;;
+
+let transaction_runtime_toml ~runtime_name ~lane_id =
+  Printf.sprintf
+    {|[providers.replacement_provider]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[models.%s]
+api-name = "replacement-model"
+max-context = 8192
+
+[replacement_provider.%s]
+
+[runtime]
+default = %S
+
+[runtime.exact_output_lanes.%s]
+slots = [%S]
+max_output_tokens = 4096
+|}
+    runtime_name
+    runtime_name
+    ("replacement_provider." ^ runtime_name)
+    lane_id
+    replacement_target
+;;
+
+(* A config commit rebuilds the exact-output resolver snapshot from what the
+   process reads: the full replacement [AGENT_CORE_MODEL_CATALOG] names, or
+   the bindings in the committed text. A registry a case publishes by hand
+   from [replacement_catalog] therefore needs that catalog on disk and named,
+   or the commit rebuilds against a catalog the case never meant. *)
+let with_replacement_catalog_file root f =
+  let path = Filename.concat root "replacement-models.toml" in
+  write_file path replacement_catalog;
+  Masc_test_deps.with_process_env Runtime.agent_core_model_catalog_env_var_name (Some path) f
+;;
+
+let current_registry label =
+  match Registry.current () with
+  | Ok registry -> registry
+  | Error error ->
+    Alcotest.failf
+      "%s: %s"
+      label
+      (Registry.publication_error_to_string error)
+;;
+
+let test_closed_registry_transaction () =
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "<fixture:replacement-catalog>"; contents = replacement_catalog })
+  in
+  let baseline =
+    match Registry.publish ~lanes:(transaction_lanes "librarian_exact") snapshot with
+    | Ok registry -> registry
+    | Error error ->
+      Alcotest.failf
+        "baseline publication failed: %s"
+        (Registry.publication_error_to_string error)
+  in
+  let prepare lane_id =
+    match
+      Registry.prepare_replacement ~runtime_observations:[]
+        ~lanes:(transaction_lanes lane_id)
+        ~excused_lane_ids:[]
+        ~load_resolver_snapshot:(fun () -> Ok snapshot)
+    with
+    | Ok prepared -> prepared
+    | Error error ->
+      Alcotest.failf
+        "transaction preparation failed: %s"
+        (Registry.publication_error_to_string error)
+  in
+  (match
+     Registry.transact_replacement
+       (prepare "board_attention_exact")
+       ~apply_write:(fun () ->
+         Registry.current ()
+         |> require_publication_busy "transaction callback acquisition";
+         Registry.Not_committed ())
+   with
+   | Ok (Registry.Not_committed ()) -> ()
+   | Ok (Registry.Committed _) -> Alcotest.fail "not-committed write published"
+   | Error error ->
+     Alcotest.failf
+       "not-committed transaction failed: %s"
+       (Registry.publication_error_to_string error));
+  let unchanged = current_registry "transaction fence leaked after abort" in
+  Alcotest.(check bool)
+    "abort preserves the published registry"
+    true
+    (baseline == unchanged);
+  require_transaction_lane
+    "abort preserves lane"
+    ~lane_id:"librarian_exact"
+    unchanged;
+  (match
+     Registry.transact_replacement
+       (prepare "board_attention_exact")
+       ~apply_write:(fun () -> Registry.Committed ())
+   with
+   | Ok (Registry.Committed ()) -> ()
+   | Ok (Registry.Not_committed _) -> Alcotest.fail "committed write was aborted"
+   | Error error ->
+     Alcotest.failf
+       "committed transaction failed: %s"
+       (Registry.publication_error_to_string error));
+  let committed = current_registry "transaction fence leaked after commit" in
+  Alcotest.(check bool)
+    "commit replaces the published registry"
+    true
+    (not (baseline == committed));
+  require_transaction_lane
+    "commit publishes final lane"
+    ~lane_id:"board_attention_exact"
+    committed
+;;
+
+exception Injected_parent_sync_failure
+
+let test_registry_availability_wakes () =
+  let snapshot = load_control_snapshot
+    (Exact_output.Full_replacement { source = "availability"; contents = replacement_catalog }) in
+  let accept result = match result with Ok value -> value
+    | Error error -> Alcotest.fail (Registry.publication_error_to_string error) in
+  let publish () = accept (Registry.publish ~lanes:(transaction_lanes "librarian_exact") snapshot) in
+  let wakes = ref 0 in
+  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:"librarian_exact" (fun () -> incr wakes) in
+  Fun.protect ~finally:unsubscribe (fun () ->
+    let expect label count = Alcotest.(check int) label count !wakes in
+    ignore (publish ());
+    expect "first publication declares the lane" 1;
+    (* Admission failures do not mutate the registry or wake anyone. *)
+    (match Registry.publish ~required_lane_ids:["absent"] ~lanes:[] snapshot with
+     | Error (Registry.Required_lane_unavailable _) -> ()
+     | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+     | Ok _ -> Alcotest.fail "invalid publication accepted");
+    expect "a refused publication wakes nobody" 1;
+    let retained () = match Registry.prepare_retention () with
+      | Some prepared -> prepared | None -> Alcotest.fail "published registry missing" in
+    ignore (accept (Registry.transact_replacement (retained ()) ~apply_write:(fun () ->
+      Registry.current () |> require_publication_busy "retained fence";
+      expect "nothing wakes while the fence stands" 1;
+      Registry.Not_committed ())));
+    expect "a failed write that turned a reader away wakes it" 2;
+    let raised = try
+      ignore (accept (Registry.transact_replacement (retained ())
+        ~apply_write:(fun () ->
+          Registry.current () |> require_publication_busy "raising fence";
+          raise Injected_parent_sync_failure))); false
+      with Injected_parent_sync_failure -> true in
+    Alcotest.(check bool) "original exception survives wake" true raised;
+    expect "a raised write that turned a reader away wakes it" 3;
+    ignore (accept (Registry.transact_replacement (retained ())
+      ~apply_write:(fun () -> Registry.Committed ())));
+    expect "an unchanged commit that turned no reader away wakes nobody" 3;
+    ignore (accept (Registry.transact_replacement (retained ())
+      ~apply_write:(fun () -> Registry.Not_committed ())));
+    expect "a failed write that turned no reader away wakes nobody" 3;
+    let stale = retained () in
+    ignore (publish ());
+    expect "an unchanged republication wakes nobody" 3;
+    (match Registry.transact_replacement stale ~apply_write:(fun () -> Alcotest.fail "stale write ran") with
+     | Error Registry.Replacement_base_changed -> ()
+     | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+     | Ok _ -> Alcotest.fail "stale base admitted");
+    expect "a stale reservation wakes nobody" 3)
+;;
+
+let test_offline_runtime_save_converges_by_write_stage () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_temp_dir "exact-output-offline-runtime-save" @@ fun root ->
+       let path = Filename.concat root "runtime.toml" in
+       let config_a =
+         transaction_runtime_toml
+           ~runtime_name:"replacement"
+           ~lane_id:"librarian_exact"
+       in
+       let config_b =
+         transaction_runtime_toml
+           ~runtime_name:"alternate"
+           ~lane_id:"browser_stagehand_exact"
+       in
+       require_registry_unpublished "offline baseline";
+       (match Runtime.save_config_text ~runtime_config_path:path config_a with
+        | Ok _receipt -> ()
+        | Error error -> Alcotest.failf "offline durable save failed: %s" error);
+       Alcotest.(check string)
+         "offline durable file converges to A"
+         config_a
+         (Fs_compat.load_file path);
+       Alcotest.(check string)
+         "offline durable cache converges to A"
+         "replacement_provider.replacement"
+         (Runtime.get_default_runtime_id ());
+       require_registry_unpublished "offline durable save";
+       let parent_sync_observed_unpublished = ref false in
+       (match
+          Runtime.For_testing.save_config_text_with_sync_parent
+            ~runtime_config_path:path
+            ~sync_parent:(fun _ ->
+              parent_sync_observed_unpublished
+              := (match Registry.current () with
+                  | Error Registry.Registry_not_published -> true
+                  | Error _ | Ok _ -> false);
+              raise Injected_parent_sync_failure)
+            config_b
+        with
+        | Ok { durability = Runtime.Durability_unconfirmed _; _ } -> ()
+        | Ok { durability = Runtime.Durable; _ } ->
+          Alcotest.fail "offline injected parent sync reported durable"
+        | Error error ->
+          Alcotest.failf
+            "offline visible replacement was reported as uncommitted: %s"
+            error);
+       Alcotest.(check bool)
+         "offline parent sync observes unpublished registry"
+         true
+         !parent_sync_observed_unpublished;
+       Alcotest.(check string)
+         "offline after-rename file converges to B"
+         config_b
+         (Fs_compat.load_file path);
+       Alcotest.(check string)
+         "offline after-rename cache converges to B"
+         "replacement_provider.alternate"
+         (Runtime.get_default_runtime_id ());
+       require_registry_unpublished "offline after-rename save";
+       let failed_path = Filename.concat root "before-rename-directory" in
+       Unix.mkdir failed_path 0o755;
+       (match Runtime.save_config_text ~runtime_config_path:failed_path config_a with
+        | Error _ -> ()
+        | Ok _receipt -> Alcotest.fail "offline before-rename failure returned success");
+       Alcotest.(check string)
+         "offline before-rename preserves cache B"
+         "replacement_provider.alternate"
+         (Runtime.get_default_runtime_id ());
+       require_registry_unpublished "offline before-rename failure")
+;;
+
+let test_runtime_after_rename_converges_state () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_temp_dir "exact-output-runtime-after-rename" @@ fun root ->
+       with_replacement_catalog_file root @@ fun () ->
+       let path = Filename.concat root "runtime.toml" in
+       let snapshot =
+         load_control_snapshot
+           (Exact_output.Full_replacement
+              { source = "<fixture:replacement-catalog>"
+              ; contents = replacement_catalog
+              })
+       in
+       let config_a =
+         transaction_runtime_toml
+           ~runtime_name:"replacement"
+           ~lane_id:"librarian_exact"
+       in
+       let config_b =
+         transaction_runtime_toml
+           ~runtime_name:"alternate"
+           ~lane_id:"browser_stagehand_exact"
+       in
+       (match Registry.publish ~lanes:(transaction_lanes "librarian_exact") snapshot with
+        | Ok _ -> ()
+        | Error error ->
+          Alcotest.failf
+            "runtime baseline publication failed: %s"
+            (Registry.publication_error_to_string error));
+       (match Runtime.save_config_text ~runtime_config_path:path config_a with
+        | Ok _receipt -> ()
+        | Error error -> Alcotest.failf "runtime baseline save failed: %s" error);
+       let baseline = current_registry "runtime baseline registry unavailable" in
+       Alcotest.(check string)
+         "runtime baseline cache"
+         "replacement_provider.replacement"
+         (Runtime.get_default_runtime_id ());
+       let parent_sync_observed_registry_fence = ref false in
+       (match
+          Runtime.For_testing.save_config_text_with_sync_parent
+            ~runtime_config_path:path
+            ~sync_parent:(fun _ ->
+              parent_sync_observed_registry_fence
+              := (match Registry.current () with
+                  | Error Registry.Publication_busy -> true
+                  | Error _ | Ok _ -> false);
+              raise Injected_parent_sync_failure)
+            config_b
+        with
+        | Ok { durability = Runtime.Durability_unconfirmed _; _ } -> ()
+        | Ok { durability = Runtime.Durable; _ } ->
+          Alcotest.fail "injected parent sync failure reported durable"
+        | Error error ->
+          Alcotest.failf
+            "visible replacement was reported as uncommitted: %s"
+            error);
+       Alcotest.(check bool)
+         "parent sync observes the private registry fence"
+         true
+         !parent_sync_observed_registry_fence;
+       Alcotest.(check string)
+         "after-rename file converges to B"
+         config_b
+         (Fs_compat.load_file path);
+       Alcotest.(check string)
+         "after-rename runtime cache converges to B"
+         "replacement_provider.alternate"
+         (Runtime.get_default_runtime_id ());
+       let converged = current_registry "after-rename transaction fence leaked" in
+       Alcotest.(check bool)
+         "after-rename registry replaces the published one"
+         true
+         (not (baseline == converged));
+       require_transaction_lane
+         "after-rename registry converges to B"
+         ~lane_id:"browser_stagehand_exact"
+         converged)
+;;

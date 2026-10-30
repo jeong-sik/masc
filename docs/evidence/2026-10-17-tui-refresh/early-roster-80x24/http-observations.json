@@ -1,0 +1,632 @@
+[
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2754.0304160211235,
+    "finished_ms": 2768.539541051723,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/asks",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2788.943666033447,
+    "finished_ms": 2790.2841250179335,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/operator",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2788.7383749475703,
+    "finished_ms": 2791.1273749778047,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/briefing",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2787.0634580031037,
+    "finished_ms": 2793.3475830359384,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2793.9043749356642,
+    "finished_ms": 2795.281665981747,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2839.872083044611,
+    "finished_ms": 2852.66304097604,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/gate/keepers",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2841.569458018057,
+    "finished_ms": 2871.1837909650058,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2871.720750001259,
+    "finished_ms": 2873.9270409569144,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/turns",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2994.023791048676,
+    "finished_ms": 2996.8535830266774,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2994.457458029501,
+    "finished_ms": 2996.942291036248,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2994.955457979813,
+    "finished_ms": 2997.0152500318363,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2994.6379580069333,
+    "finished_ms": 2997.1612909575924,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/scheduled-automation",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2994.2052910337225,
+    "finished_ms": 2997.436207951978,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2996.0319160018116,
+    "finished_ms": 2998.04012500681,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/mcp",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2995.410874951631,
+    "finished_ms": 2999.9858749797568,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/briefing",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2998.6538329394534,
+    "finished_ms": 3002.010624972172,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/operator",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2998.7592910183594,
+    "finished_ms": 3003.372124978341,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3000.0685829436406,
+    "finished_ms": 3005.2196249598637,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/tool-approvals",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3000.2364999381825,
+    "finished_ms": 3005.3335829870775,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/asks",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2999.057332985103,
+    "finished_ms": 3005.44166599866,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/gate",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2999.4605409447104,
+    "finished_ms": 3005.510375020094,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/gate/keepers",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2999.1890829987824,
+    "finished_ms": 3006.2214579666033,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/operator",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 2999.53937495593,
+    "finished_ms": 3006.4892909722403,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3006.7942909663543,
+    "finished_ms": 3010.8153329929337,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3009.8412910010666,
+    "finished_ms": 3015.655874973163,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3009.969291044399,
+    "finished_ms": 3018.3254160219803,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3010.2927499683574,
+    "finished_ms": 3018.529291031882,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3010.1272909669206,
+    "finished_ms": 3019.464583019726,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3022.4750409834087,
+    "finished_ms": 3026.674499968067,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3044.7192499414086,
+    "finished_ms": 3083.0574160208926,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3045.024457969703,
+    "finished_ms": 3083.821624983102,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/tool-approvals",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3086.3300829660147,
+    "finished_ms": 3092.6122500095516,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/gate",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3086.735040997155,
+    "finished_ms": 3092.853790964,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3097.066333051771,
+    "finished_ms": 3101.454082992859,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 3097.6690830430016,
+    "finished_ms": 3102.3451250512153,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9027.369000017643,
+    "finished_ms": 9029.437416000292,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9027.687583002262,
+    "finished_ms": 9029.630000004545,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/verification/requests",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9030.446958029643,
+    "finished_ms": 9031.563499942422,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/planning",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9030.842749984004,
+    "finished_ms": 9031.676957965828,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/goals",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9030.91933298856,
+    "finished_ms": 9056.207790970802,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9068.465500022285,
+    "finished_ms": 9070.149290957488,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9079.658000031486,
+    "finished_ms": 9089.409625041299,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9124.837124953046,
+    "finished_ms": 9129.722082987428,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9130.98587503191,
+    "finished_ms": 9133.15920799505,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9136.138665955514,
+    "finished_ms": 9138.01350002177,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9143.681832938455,
+    "finished_ms": 9145.13983298093,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/tool-approval-mode",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9166.233749943785,
+    "finished_ms": 9167.886457988061,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/gate/keeper-settings",
+    "warm": false,
+    "delayed": false,
+    "started_ms": 9170.090583036654,
+    "finished_ms": 9171.23154096771,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10526.315415976569,
+    "finished_ms": 10531.311208033003,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/turns",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10526.415499974973,
+    "finished_ms": 10533.420666004531,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10525.537290959619,
+    "finished_ms": 10533.773625036702,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/scheduled-automation",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10528.690541046672,
+    "finished_ms": 10534.977750037797,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10525.809625047259,
+    "finished_ms": 10535.320332972333,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/gate",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10537.466707988642,
+    "finished_ms": 10540.258583030663,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/tool-approvals",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10539.845374994911,
+    "finished_ms": 10542.74195805192,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10540.320790954866,
+    "finished_ms": 10542.955041048117,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10542.813958018087,
+    "finished_ms": 10547.157790977508,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10545.110875042155,
+    "finished_ms": 10562.28558300063,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10566.201083012857,
+    "finished_ms": 10573.793540941551,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/asks",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10540.808915975504,
+    "finished_ms": 10573.97058303468,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10577.76058302261,
+    "finished_ms": 10580.155291012488,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/gate/keepers",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 10541.226082947105,
+    "finished_ms": 10580.705625005066,
+    "status": 200,
+    "rewritten_fixture_rows": 2
+  },
+  {
+    "path": "/api/v1/dashboard/briefing",
+    "warm": true,
+    "delayed": true,
+    "started_ms": 10540.551124955527,
+    "finished_ms": 12565.653332974762,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/operator",
+    "warm": true,
+    "delayed": true,
+    "started_ms": 10540.63604096882,
+    "finished_ms": 12566.426582983695,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 12580.74020803906,
+    "finished_ms": 12582.090124953538,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/keepers/tool-approval-mode",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 12629.406707943417,
+    "finished_ms": 12634.22929099761,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 12629.19237499591,
+    "finished_ms": 12634.362624958158,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/gate/keeper-settings",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 12636.522375047207,
+    "finished_ms": 12639.798040967435,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/api/v1/dashboard/gate",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 12639.293291023932,
+    "finished_ms": 12641.299166018143,
+    "status": 304,
+    "rewritten_fixture_rows": 0
+  },
+  {
+    "path": "/health",
+    "warm": true,
+    "delayed": false,
+    "started_ms": 12642.512833001092,
+    "finished_ms": 12644.94270796422,
+    "status": 200,
+    "rewritten_fixture_rows": 0
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "upstream": "https://api.kimi.com/coding/v1/chat/completions",
+  "request_sha256": "7a550a0df7304222b6914ca016ba4de027a0af196c03ac33caaa3238ab347a34",
+  "status": 200,
+  "content_type": "application/json; charset=utf-8",
+  "raw": "{\"id\":\"chatcmpl-RryVA30SEJ5odWZ1tpNduniT\",\"object\":\"chat.completion\",\"created\":1788999632,\"model\":\"kimi-for-coding\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"\",\"tool_calls\":[{\"index\":0,\"id\":\"tool_RCAHZO8wdmlJTAQU4vGHy9lF\",\"type\":\"function\",\"function\":{\"name\":\"tool_search_files\",\"arguments\":\"{\\\"path\\\":\\\".\\\",\\\"pattern\\\":\\\"x^\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":14210,\"completion_tokens\":69,\"total_tokens\":14279,\"cached_tokens\":13824,\"completion_tokens_details\":{\"reasoning_tokens\":1},\"prompt_tokens_details\":{\"cached_tokens\":13824}}}"
+}

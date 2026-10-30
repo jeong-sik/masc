@@ -1,0 +1,169 @@
+type pass_end =
+  | Off
+  | Lane_unconfigured
+  | Drained
+  | Yielded_to_waiting_unit
+  | Not_committed
+  | Pending
+      (** An unfinished durable commit suspends the remaining phases of this
+          wake. This is neither failure nor an invitation to retry inline. *)
+  | Stopped of Keeper_librarian_durable_consumer.error
+  | Raised of string
+
+type measurement =
+  { measured_at : float
+  ; last_pass : pass_end
+  ; unread : Keeper_librarian_durable_consumer.unread option
+  }
+
+val last_measurement : config:Workspace.config -> keeper_name:string -> measurement option
+(** Latest completed durable drain observation in this process, scoped to the
+    runtime Keeper directory. [None] means no observation; this is never used
+    for admission or scheduling. An unread count unavailable at that pass is
+    [None], not the prior pass's count. *)
+
+val forget_measurement : config:Workspace.config -> keeper_name:string -> unit
+(** Clear after the purge has quiesced the lane and while submissions remain
+    excluded, so a deleted keeper's observations, including measured CLI input
+    capacity, cannot outlive its identity. *)
+
+val install : unit -> unit
+(** Install after the detached memory executor. Queue producers never wait for
+    this extraction; source selection happens when the latest unit runs. *)
+
+val submit_durable : base_path:string -> keeper_name:string -> unit
+(** Submit disk-selected catch-up for this Keeper on the server-owned
+    Librarian lane. Pending explicit candidates are recovered and judged
+    independently of current Memory limits before conversation catch-up.
+    Completed-history work uses its configured Addon and immutable host owner.
+    Retained unfinished work resumes before a fresh source selection; detached
+    work stays unread until the Addon is reattached. Actual completion signals
+    this same serialized Memory lane.
+    Each stored progress advance continues to the next unread
+    range while no other unit waits. A waiting unit, empty backlog, failure,
+    or disabled/invalid setting ends this wake. An unfinished durable commit
+    also ends the wake, without continuity or Memory cleanup. An original that
+    cannot be strictly restored remains a reported error and suspends those
+    following effects until its publication authority can be recovered. A launch submits its own
+    Keeper's catch-up;
+    {!submit_durable_for_unlaunched} submits it at boot for the Keepers that
+    did not launch. After catch-up it reviews an over-limit current Memory
+    working set even if there were no unread turns. A successful decision
+    on unchanged input is remembered until the input changes or the process
+    restarts. Saved cleanup progress that leaves excess requests another unit
+    on the same lane; neither category nor item excess may worsen. A retained
+    excess or failed pass waits for a later external wake. *)
+
+val with_purge_then_catch_up
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> ('a, Keeper_memory_lane.purge_cancel_error) result
+(** {!Keeper_memory_lane.with_librarian_purge}, then {!submit_durable} for the
+    same Keeper once the purge's exclusion is released. The submission
+    follows every exit but cancellation: a purge that ran, one refused (for
+    example for unread atoms), a lane-level error, and a raise. The purge
+    cancelled the catch-up that was running and discarded the wakes that
+    arrived meanwhile; without this the backlog waits for the Keeper's next
+    turn, and a purge retry is refused again.
+
+    On [Error Purge_already_in_progress] the submission is always discarded,
+    because the other purge still holds the exclusion; that purge submits
+    its own catch-up when it ends.
+
+    Call from the lane's owner domain ([Eio_context.run_on_owner_domain]),
+    as {!Keeper_memory_lane.with_librarian_purge} and
+    {!Keeper_memory_lane.submit} require. This function does not cross
+    domains itself. *)
+
+val unlaunched_keeper_names
+  :  persisted:string list
+  -> launched:string list
+  -> string list
+(** The [persisted] names, in their order, that are not in [launched]. *)
+
+val submit_durable_for_unlaunched
+  :  base_path:string
+  -> persisted:string list
+  -> launched:string list
+  -> string list
+(** The boot scan (RFC librarian-lifecycle section 8, stage 4, item 2).
+    Called once by the autoboot subsystem after
+    [Runtime_startup_state.await_available]: for every persisted Keeper that
+    autoboot did not launch (excluded, fenced by a durable shutdown, failed to
+    boot, or autoboot disabled) it submits the same durable catch-up a launch
+    would have, and returns the names it submitted for. A Keeper that boots
+    later on retry submits its own; the lane runs the two in order and the
+    second finds nothing unread. *)
+(** Pending candidate files also contribute names to the scan. The combined
+    names are deduplicated and sorted. A queue without metadata is retained;
+    discovery does not create a Keeper. Enumeration errors are logged. *)
+
+module For_testing : sig
+  val limited_width :
+    config:Workspace.config -> keeper_name:string -> trace_id:string -> int option
+  (** The width a later continuity pass will read at, if a refusal left one
+      for this trace. *)
+
+  val last_input_capacity :
+    config:Workspace.config -> keeper_name:string
+    -> Keeper_lane_cli_oneshot.input_capacity option
+  (** The CLI limit the next continuity pass fits its range to, if one is
+      remembered for this Keeper. *)
+
+  val merge_not_committed :
+    Keeper_librarian_runtime.not_committed option
+    -> Keeper_librarian_runtime.not_committed
+    -> Keeper_librarian_runtime.not_committed
+  (** How one pass folds the reports it received: the size verdict of any
+      report stands, and the latest detail is kept. *)
+
+  val run_continuity : ?cli_runner:Keeper_lane_cli_oneshot.runner ->
+    ?has_waiting:(unit -> bool) ->
+    base_path:string -> keeper_name:string -> unit -> unit
+  (** [has_waiting] replaces the lane's "a unit waits" read (RFC-0467). *)
+  val run_with_readers
+    :  durable:(unit -> pass_end)
+    -> continuity:(unit -> unit)
+    -> cleanup:(unit -> unit)
+    -> base_path:string
+    -> keeper_name:string
+    -> unit
+  (** Production phase dispatch with controlled durable, continuity and cleanup
+      edges. [Pending] skips continuity, queue context and cleanup in this wake.
+      Queue-context capture and owner/configuration checks remain unchanged. *)
+
+  val run_durable_with_commit
+    :  config:Workspace.config
+    -> keeper_name:string
+    -> commit:
+         (Keeper_librarian_durable_capture.t
+          -> Keeper_librarian_durable_consumer.commit_result)
+    -> pass_end
+  (** The production durable reader with a controlled Memory commit edge.
+      Returns its actual phase result; measurements remain observation only. *)
+
+  val queue_input
+    :  config:Workspace.config
+    -> keeper_id:Keeper_identity.Keeper_id.t
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> working_context:Keeper_librarian_context.input
+    -> Keeper_librarian.input
+  (** The input the queue pass hands the Librarian. Reads the Goal store and
+      goal-task links for [meta.current_task_id] through the IO pool. *)
+
+  val context_pass_needed
+    :  keepers_dir:string
+    -> keeper_name:string
+    -> Keeper_librarian_context.input
+    -> bool
+  (** Whether the queue pass calls the model for this capture. *)
+
+  val remember_context_pass
+    :  keepers_dir:string
+    -> keeper_name:string
+    -> Keeper_librarian_context.input
+    -> Keeper_librarian_context.version
+    -> unit
+  (** Record that a queue pass shown this capture wrote that version. *)
+end

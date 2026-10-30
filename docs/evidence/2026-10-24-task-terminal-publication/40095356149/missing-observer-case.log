@@ -1,0 +1,94 @@
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-002c07 (no git root found)
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-002c07 (MASC_BASE_PATH)
+[2026-10-24 12:51:45] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-7fe6cc7b176a10437cb3fcdaf5db826f seq=1 bytes=12
+[2026-10-24 12:51:45] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+ASSERT exact missing observations cause the refusal
+ASSERT missing observations refuse before actual host observation
+ASSERT missing observations refuse before actual domain apply call
+ASSERT exact missing observations cause the refusal
+ASSERT unprovable recovery preserves the raw actual Task
+ASSERT unprovable recovery preserves the exact owner phase and events
+ASSERT unprovable recovery publishes no competing registry row
+ASSERT recovery never adds another reviewer call
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1842cb (no git root found)
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1842cb (MASC_BASE_PATH)
+[2026-10-24 12:51:45] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-f75e63cdaca2f569ba3979dba0a90bed seq=1 bytes=12
+[2026-10-24 12:51:45] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+[2026-10-24 12:51:45] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 12:51:45] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+ASSERT observed sibling executes exactly one real domain apply
+ASSERT observed sibling reads before and confirms after
+[2026-10-24 12:51:45] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT acknowledged original leaves pending discovery
+ASSERT recovery never adds another reviewer call
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-c7db13 (no git root found)
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-c7db13 (MASC_BASE_PATH)
+[2026-10-24 12:51:45] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-fae54ba0a8260577e903faaec318034d seq=1 bytes=12
+[2026-10-24 12:51:45] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+ASSERT exact missing observations cause the refusal
+ASSERT missing observations refuse before actual host observation
+ASSERT missing observations refuse before actual domain apply call
+ASSERT exact missing observations cause the refusal
+ASSERT unprovable recovery preserves the raw actual Task
+ASSERT unprovable recovery preserves the exact owner phase and events
+ASSERT unprovable recovery publishes no competing registry row
+ASSERT recovery never adds another reviewer call
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d37afa (no git root found)
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-d37afa (MASC_BASE_PATH)
+[2026-10-24 12:51:45] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-30a01a1883a9180f5a846dec3213f0d8 seq=1 bytes=12
+[2026-10-24 12:51:45] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+[2026-10-24 12:51:45] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 12:51:45] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+ASSERT observed sibling executes exactly one real domain apply
+ASSERT observed sibling reads before and confirms after
+[2026-10-24 12:51:45] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT acknowledged original leaves pending discovery
+ASSERT recovery never adds another reviewer call
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-2d9450 (no git root found)
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-2d9450 (MASC_BASE_PATH)
+[2026-10-24 12:51:45] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-f0ae458bb96ec7f14dd55d059a5d0a72 seq=1 bytes=12
+[2026-10-24 12:51:45] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+ASSERT exact missing observations cause the refusal
+ASSERT missing observations refuse before actual host observation
+ASSERT missing observations refuse before actual domain apply call
+ASSERT exact missing observations cause the refusal
+ASSERT unprovable recovery preserves the raw actual Task
+ASSERT unprovable recovery preserves the exact owner phase and events
+ASSERT unprovable recovery publishes no competing registry row
+ASSERT recovery never adds another reviewer call
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1466b4 (no git root found)
+[2026-10-24 12:51:45] [INFO] [Workspace] MASC base: /tmp/verifier-worker-1466b4 (MASC_BASE_PATH)
+[2026-10-24 12:51:45] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-a602ef1458d58dbcb7d37458d47c57c2 seq=1 bytes=12
+[2026-10-24 12:51:45] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=fixture-reviewer reason=checked
+ASSERT fixture actually ran its original reviewer
+ASSERT strict retained intent binds the actual host notes
+ASSERT strict retained intent binds the actual review
+ASSERT actual host read confirms this valid intent could apply
+[2026-10-24 12:51:45] [WARN] [Misc] verification verdict notification hook is not installed task_id=task-001 verification_id=vrf-retained-review authority_kind=system_llm_agent authority_actor=verifier_exact decision=approve
+[2026-10-24 12:51:45] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=retained
+ASSERT observed sibling executes exactly one real domain apply
+ASSERT observed sibling reads before and confirms after
+[2026-10-24 12:51:45] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-retained-review authority=verifier_exact verdict=APPROVE
+ASSERT acknowledged original leaves pending discovery
+ASSERT recovery never adds another reviewer call
+  [OK]          execution         17   missing actual observer facts refuse b...

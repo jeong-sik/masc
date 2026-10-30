@@ -1,0 +1,182 @@
+(** Console_sink — isolate console I/O from log producers after start.
+
+    Contract under test (issue #20684):
+    - synchronous before enqueue mode: channel I/O failures are isolated,
+      while other writer exceptions propagate after observer notification
+    - enqueue mode: write returns without touching the fd writer
+    - bounded queue: overflow drops incoming mirror lines and counts them
+    - drain writes queued lines in order and reports drops once
+    - a written line holds no terminal control and no broken UTF-8 *)
+
+open Alcotest
+
+let with_clean_sink f =
+  Console_sink.For_testing.reset ();
+  Fun.protect ~finally:Console_sink.For_testing.reset f
+;;
+
+let test_synchronous_before_start () =
+  with_clean_sink (fun () ->
+    let written = ref [] in
+    Console_sink.For_testing.set_writer (Some (fun l -> written := l :: !written));
+    Console_sink.write "direct line";
+    check (list string) "written immediately, nothing queued" [ "direct line" ]
+      !written;
+    check int "queue untouched" 0 (Console_sink.For_testing.queued_count ()))
+;;
+
+let test_after_write_observer_lifecycle () =
+  with_clean_sink (fun () ->
+    let events = ref [] in
+    Console_sink.For_testing.set_writer
+      (Some (fun line -> events := ("write:" ^ line) :: !events));
+    Console_sink.set_after_write_observer
+      (Some (fun () -> events := "observer" :: !events));
+    Console_sink.write "first";
+    check (list string) "observer runs after the writer attempt"
+      [ "write:first"; "observer" ]
+      (List.rev !events);
+    Console_sink.set_after_write_observer None;
+    Console_sink.write "second";
+    check (list string) "clearing removes the observer"
+      [ "write:first"; "observer"; "write:second" ]
+      (List.rev !events);
+    let observed_after_reset = ref 0 in
+    Console_sink.set_after_write_observer
+      (Some (fun () -> incr observed_after_reset));
+    Console_sink.For_testing.reset ();
+    Console_sink.For_testing.set_writer (Some (fun _ -> ()));
+    Console_sink.write "after reset";
+    check int "test reset removes the observer" 0 !observed_after_reset)
+;;
+
+let test_enqueue_mode_defers_fd_write () =
+  with_clean_sink (fun () ->
+    let written = ref [] in
+    Console_sink.For_testing.set_writer (Some (fun l -> written := l :: !written));
+    Console_sink.For_testing.set_enqueue_active true;
+    Console_sink.write "queued line";
+    check (list string) "fd writer not called by producer" [] !written;
+    check int "line queued" 1 (Console_sink.For_testing.queued_count ());
+    let n = Console_sink.For_testing.drain_now () in
+    check int "drain wrote the line" 1 n;
+    check (list string) "drained to writer" [ "queued line" ] !written)
+;;
+
+let test_overflow_drops_and_counts () =
+  with_clean_sink (fun () ->
+    let written = ref [] in
+    let observed = ref 0 in
+    Console_sink.For_testing.set_writer
+      (Some (fun line -> written := line :: !written));
+    Console_sink.set_after_write_observer (Some (fun () -> incr observed));
+    Console_sink.For_testing.set_enqueue_active true;
+    (* Fill past capacity (8192): a blocked writer must not block writers,
+       only shed mirror lines. *)
+    for i = 1 to 9000 do
+      Console_sink.write (Printf.sprintf "line %d" i)
+    done;
+    check int "queue capped at capacity" 8192
+      (Console_sink.For_testing.queued_count ());
+    check int "overflow counted as drops" 808 (Console_sink.dropped_count ());
+    let (n, last_reported_drops) =
+      Console_sink.For_testing.drain_now_since 0
+    in
+    check int "drain writes the capped batch" 8192 n;
+    check int "drop report advances to the observed total" 808
+      last_reported_drops;
+    check int "queued lines plus one drop marker reach the writer" 8193
+      (List.length !written);
+    check int "drop marker invokes the observer" 8193 !observed;
+    check string "drop marker reports the exact delta"
+      "[console-sink] dropped 808 console line(s) while the console writer was blocked (file sink unaffected)"
+      (List.hd !written);
+    let (_n, last_reported_drops) =
+      Console_sink.For_testing.drain_now_since last_reported_drops
+    in
+    check int "the same drop total is reported only once" 8193
+      (List.length !written);
+    check int "an omitted duplicate marker cannot notify" 8193 !observed;
+    check int "reported total stays stable" 808 last_reported_drops)
+;;
+
+let test_writer_and_observer_failure_isolation () =
+  with_clean_sink (fun () ->
+    let observed = ref 0 in
+    Console_sink.set_after_write_observer (Some (fun () -> incr observed));
+    Console_sink.For_testing.set_writer (Some (fun _ -> raise (Sys_error "fd broken")));
+    Console_sink.For_testing.set_enqueue_active true;
+    Console_sink.write "line a";
+    Console_sink.write "line b";
+    let n = Console_sink.For_testing.drain_now () in
+    check int "drain survives a throwing writer" 2 n;
+    check int "every attempted queued write notifies healthy observers" 2
+      !observed;
+    Console_sink.For_testing.set_enqueue_active false;
+    let synchronous_observed = ref 0 in
+    Console_sink.set_after_write_observer
+      (Some (fun () -> incr synchronous_observed));
+    Console_sink.write "line c";
+    check int "failed synchronous attempt still notifies" 1
+      !synchronous_observed;
+    Log.emit Log.Warn ~module_name:"ConsoleSinkFailureTest"
+      "record survives a failing console mirror";
+    (match Log.Ring.recent ~limit:5 ~module_filter:"ConsoleSinkFailureTest" () with
+     | entry :: _ ->
+       check string "ring records survive a failing console mirror"
+         "record survives a failing console mirror" entry.Log.Ring.message
+     | [] -> fail "log record was lost with a failing console mirror");
+    Console_sink.For_testing.set_writer (Some (fun _ -> ()));
+    Console_sink.set_after_write_observer
+      (Some (fun () -> failwith "observer broken"));
+    Console_sink.write "line d")
+;;
+
+let test_synchronous_control_exception_propagates () =
+  with_clean_sink (fun () ->
+    let observed = ref 0 in
+    Console_sink.set_after_write_observer (Some (fun () -> incr observed));
+    Console_sink.For_testing.set_writer (Some (fun _ -> raise Sys.Break));
+    check_raises "synchronous interruption reaches the caller" Sys.Break
+      (fun () -> Console_sink.write "interrupted line");
+    check int "interrupted attempt still notifies the observer" 1 !observed;
+    check int "interrupted synchronous write is not queued" 0
+      (Console_sink.For_testing.queued_count ()))
+;;
+
+(* A line is text from anywhere, a Firefox's error among it: what reaches the
+   console and the file behind it holds no terminal control. *)
+let test_a_line_holds_no_terminal_control () =
+  with_clean_sink (fun () ->
+    let written = ref [] in
+    Console_sink.For_testing.set_writer (Some (fun l -> written := l :: !written));
+    Console_sink.write "said \027[31mno\000 \255\254 \194\155 \127 \r";
+    Console_sink.write "Raised at f\n\tcalled from g \237\149\156\234\184\128 \226\130";
+    Console_sink.For_testing.set_enqueue_active true;
+    Console_sink.write "queued \027]0;title\007";
+    ignore (Console_sink.For_testing.drain_now () : int);
+    check (list string) "controls and broken UTF-8 are their escapes"
+      [ {|said \x1B[31mno\x00 \xFF\xFE \u009B \x7F \x0D|}
+      ; "Raised at f\\x0A\\x09called from g \237\149\156\234\184\128 \\xE2\\x82"
+      ; {|queued \x1B]0;title\x07|} ]
+      (List.rev !written))
+;;
+
+let () =
+  run "console_sink"
+    [ ( "mirror_contract"
+      , [ test_case "synchronous before start" `Quick test_synchronous_before_start
+        ; test_case "after-write observer lifecycle" `Quick
+            test_after_write_observer_lifecycle
+        ; test_case "enqueue mode defers fd write" `Quick
+            test_enqueue_mode_defers_fd_write
+        ; test_case "overflow drops and counts" `Quick test_overflow_drops_and_counts
+        ; test_case "writer failure isolation" `Quick
+            test_writer_and_observer_failure_isolation
+        ; test_case "synchronous control exception propagates" `Quick
+            test_synchronous_control_exception_propagates
+        ; test_case "a line holds no terminal control" `Quick
+            test_a_line_holds_no_terminal_control
+        ] )
+    ]
+;;

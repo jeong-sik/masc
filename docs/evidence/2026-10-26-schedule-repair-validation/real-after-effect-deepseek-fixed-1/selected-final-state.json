@@ -1,0 +1,51 @@
+{
+  "identities": {
+    "first": {
+      "schedule_id": "audit-real-model-6de1a07ccb7a48e49a6b19c8a23bb5af",
+      "schedule_instance_id": "01a178b3-509d-7000-acfd-43789db4b6f5",
+      "stimulus_id": "dcb679d80ccd2d8608813828c7156ef12764fcfa39d7d6dc743cda417546a930",
+      "post_id": "dcb679d80ccd2d8608813828c7156ef12764fcfa39d7d6dc743cda417546a930",
+      "due_at": 1793026381.933486,
+      "payload_digest": "e1e895e38f933ffe028388e6050adaf0e4b06672a2e47584650d32cb11280414"
+    },
+    "second": {
+      "schedule_id": "audit-real-model-6de1a07ccb7a48e49a6b19c8a23bb5af-second",
+      "schedule_instance_id": "01a178b3-e42f-7000-80eb-be1d2e74631a",
+      "stimulus_id": "3a9b0bca911ae3f580eb6eda0023a96af7edccd0673951f63c095d148bb4082a",
+      "post_id": "3a9b0bca911ae3f580eb6eda0023a96af7edccd0673951f63c095d148bb4082a",
+      "due_at": 1793026419.711328,
+      "payload_digest": "ef6f6e7c315fe33ca8fe3b2af0e905294a758cd079c4d1d844236b95838df629"
+    }
+  },
+  "notes": [
+    {
+      "note_id": "6",
+      "schedule_id": "audit-real-model-6de1a07ccb7a48e49a6b19c8a23bb5af",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793026417.467048,
+      "body": "SCHEDULE_EFFECT_464ff5b7d8b24806b0b81519270ae0a0"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-6de1a07ccb7a48e49a6b19c8a23bb5af-second",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793026424.535058,
+      "body": "SCHEDULE_EFFECT_464ff5b7d8b24806b0b81519270ae0a0_SECOND"
+    }
+  ],
+  "observed_history_generated_at": {
+    "first": "2026-10-26T14:53:48Z",
+    "second": "2026-10-26T14:53:48Z"
+  },
+  "queue_pending_count": 0,
+  "queue_outbox_count": 0,
+  "live_turn": null,
+  "shutdown_observation": {
+    "stop_reason": "two required effects and exact durable completions observed",
+    "pid": 82926,
+    "returncode": 0,
+    "stopped_at_unix": 1793026428.971414
+  }
+}

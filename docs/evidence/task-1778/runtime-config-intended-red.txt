@@ -1,0 +1,6 @@
+# local_run_id: 13077efe-965c-4b7e-aa6f-154eff08f3dc
+# recorded_at: 2026-09-27T18:52Z
+# helper_commit: 3e659c9520dceb299573f25a08e01fd077a94ef9
+# command: copied scripts/check-runtime-deployment-preflight.sh with the runtime-config check_runtime_config call removed; ran the same --runtime-config-only command against the identical 65536 fixture with MASC_CONFIG_DIR and MASC_CONFIG_BOOTSTRAP unset.
+[runtime-deployment-preflight] OK: base_path=<bad> runtime_config_only=1 helper_commit=3e659c9520dceb299573f25a08e01fd077a94ef9
+intended_red_exit=0

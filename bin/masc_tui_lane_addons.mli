@@ -1,0 +1,299 @@
+module Row = Masc.Lane_addon_types
+module Document = Masc_tui_lane_declaration
+module Action = Masc.Lane_addon_action
+module Application = Masc_tui_lane_application
+type runtime_presence = Live_entry | Retained_binding | Presence_unknown
+type host_wait =
+  | Host_wait_exact of Masc.Lane_addon_exact.not_final
+  | Host_wait_operator
+  | Host_wait_source of string
+type host_issue =
+  | Host_listing_failed of string
+  | Host_listing_refused of string
+  | Host_relisted_delivered_request of string
+  | Host_result_delivery_failed of { request_id : string; detail : string }
+  | Host_exact_record_failed of { request_id : string; detail : string }
+  | Host_ask_record_failed of { request_id : string; detail : string }
+  | Host_no_exact_runner
+  | Host_no_web_search_runner
+type host_requests = {
+  hr_cycles : int;
+  hr_waiting : (string * host_wait) list;
+  hr_issue : host_issue option;
+}
+(** The live instance's last host request cycle: how many passes it ran,
+    the requests left waiting and why, and what stopped it. A projection;
+    nothing here decides. *)
+type instance = {
+  id : string; run_id : string; addon_id : string; title : string;
+  revision : string; phase : Row.phase; runtime_presence : runtime_presence;
+  observation_seq : int; rows_count : int;
+  installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
+  skills_directory : string option;
+  ui_category : Masc.Lane_addon_category.t option;
+      (** The worker package's category as of its start; never rewritten. *)
+  incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
+  host_requests : (host_requests, string) result option;
+      (** [None]: the Inspect row carries none (a retained run). An unreadable
+          value is [Error] for this field alone, so the rest still shows. *)
+}
+type declaration_origin = Parsed_declaration | Issue_only
+type declaration = {
+  source_path : string; installation_id : string option;
+  ui_category : Masc.Lane_addon_category.t option;
+      (** The current declaration's category from Inspect; [None] is unclassified. *)
+  enabled : bool option; desired : string option;
+  applied : string option; instance_id : string option; issues : string list;
+  origin : declaration_origin;
+  application : Application.observation option;
+}
+type configuration = { directory : string; complete : bool; declarations : declaration list }
+type snapshot = { instances : instance list; output : Row.output; complete : bool option;
+  configuration : configuration option }
+type connection_workers = {
+  installation_workers : instance list;
+  other_path_owners : instance list;
+}
+val connection_workers : snapshot -> instance -> connection_workers
+(** Observed workers sharing the selected installation ID, and separately other
+    installation IDs at its exact TOML path. Manual attachments match only the
+    original instance/incarnation. These read-only relations grant no actions,
+    infer no time order, and do not join by title, run or package. *)
+type action_request = { instance_id : string; incarnation : string; request_id : string; action : Yojson.Safe.t }
+type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
+  | Slice of (string * string) list | Evidence of Yojson.Safe.t
+  | Act of action_request | Action_status of action_request
+  | Subscriptions of Yojson.Safe.t
+type action_menu = {
+  target_id : string; target_incarnation : string; target_title : string; request_id : string;
+  schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+  form : Masc_tui_schema_form.t option;
+}
+type focus = Timeline | Connections | Configurations | Instances | Rows
+type presentation = Summary | Technical | Flow
+type screen = Overview | Detail of string * string
+type overview_mode = Current_installations | Retained_runs
+type overview_anchor = Worker_anchor of string * string | Declaration_anchor of string * string option
+(** Declaration anchors keep the exact source path and installation ID, so
+    replacement at the same path requires explicit reselection. *)
+type overview_selection = Unvisited | No_selection | Selection of overview_anchor
+type diagnostic =
+  | Detail_read_failure of string
+  | Request_failure of string
+  | Input_failure of string
+type evidence_prompt = {
+  evidence : Yojson.Safe.t; owner_title : string; row_count : int;
+  keepers : string list; choice : int; broadcast_request_id : string;
+}
+(** Marked rows about to be frozen under [owner_title]. [choice] 0 preserves
+    only; [choice] n sends the reference to the n-th Keeper of [keepers]. *)
+type t = {
+  installer : Masc_tui_lane_installer.t option;
+  package_directory : string option;
+  subscription_panel : Masc_tui_lane_subscriptions.t option;
+  evidence_prompt : evidence_prompt option;
+  pending_broadcasts : (Yojson.Safe.t * string) list;
+  presentation : presentation; screen : screen; overview_mode : overview_mode; help_open : bool;
+  current_selection : overview_selection; history_selection : overview_selection;
+  action_menu : action_menu option;
+  snapshot : snapshot option; loading : bool; error : diagnostic option;
+  application_reading : configuration Application.reading;
+  snapshot_read_error : string option;
+      (** The last failed inventory read. Input and request diagnostics do
+          not erase it; a successful inventory read does. *)
+  detail_read_error : (string * string * string) option;
+      (** Failed results read: original instance, incarnation, and failure.
+          [None] means no retained detail-read failure. Input diagnostics and
+          a retry in progress do not make previous results current. *)
+  receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
+  row_cursor : int; selected : string list; scroll : int; focus : focus;
+  draft : string option; naming : bool; configuration_cursor : int;
+  documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
+}
+type reading_freshness = Current | Stale of string
+type installation_reading =
+  | Not_read
+  | Observed of {
+      declared : int;
+      active : int;
+      failed_workers : int;
+      configuration_issues : int;
+      complete : bool;
+      freshness : reading_freshness;
+    }
+(** What the last Add-on inventory actually observed. A declaration is not an
+    active worker: image inspection or reconciliation can fail while the TOML
+    remains. [Not_read] also covers a snapshot without a configuration read. *)
+
+val installation_reading : t -> installation_reading
+
+val initial : t
+
+val text_entry_open : t -> bool
+(** Whether a typed character is text here: a draft line, an action form, or
+    the installer's fields. The command screens -- the lists, the evidence
+    prompt, the subscription panel, a formless action menu -- answer
+    [false]. The main loop asks this before reading a Hangul character back
+    as the Latin key an input method replaced, so those three screens keep
+    the text the operator is typing. *)
+
+val parse_request : string -> (request, string) result
+val decode : Yojson.Safe.t -> (snapshot, string) result
+type read_target =
+  | Read_screen  (** Applies to whatever screen the view shows. *)
+  | Read_detail of string * string
+      (** Opened for this instance's detail; void once the screen leaves it. *)
+  | Read_installation_results of string
+      (** Started by a jump to this installation's Results. The jump is
+          carried by the read that serves it, so it ends with that read. *)
+
+type read_scope_error =
+  | Detail_owner_unavailable
+  | Slice_run_required
+  | Slice_run_blank
+  | Slice_run_ambiguous
+  | Slice_run_mismatch of { expected : string; requested : string }
+  | Slice_target_mismatch
+
+val request_read_target :
+  ?target:read_target -> t -> request -> (read_target, read_scope_error) result
+(** Inventory and history reads belong to the detail's original instance and
+    incarnation, including when a live worker becomes retained during the read.
+    Detail Slice requests require a single explicit run matching that owner;
+    omitted, blank, duplicate or other-run selections are refused. Explicit
+    targets pass the same check. Overview keeps arbitrary/global Slice reads.
+    Other requests keep their receipts independently of detail navigation.
+    Explicit installation-result jumps use their own target instead. *)
+
+val refuse_read_scope : t -> read_scope_error -> t
+(** Record an input refusal without starting a request or altering the original
+    rows, detail failure, receipt, draft, loading or generation. *)
+
+val read_still_wanted : t -> showing:bool -> read_target -> bool
+(** Whether a read's answer still applies to the view. [showing] is whether
+    the Add-ons screen is open: a jump answered after the operator left, or
+    after they opened something else, is not taken. *)
+
+val installation_results : t -> installation_id:string -> t
+(** On a snapshot read for the jump: opens the Results of the installation's
+    live worker with its first result selected. A retained run is not where
+    the reveal appears, so without a live worker the view stays and says so. *)
+
+val decode_configuration : Yojson.Safe.t -> (configuration, string) result
+val begin_application_read : t -> (t * Application.ticket) option
+val finish_application_read : t -> Application.ticket -> (configuration, string) result -> t
+val receive_application_inventory : t -> (configuration, string) result -> t
+(** Independent observation ownership. These functions preserve editor, receipt,
+    explicit-action diagnostics, selected rows and any frozen Slice. *)
+val decode_slice : snapshot:snapshot -> Yojson.Safe.t -> (snapshot, string) result
+val selected_declaration : t -> declaration option
+val selected_document : t -> Document.session option
+val put_document : t -> Document.session -> t
+val selected_instance : t -> instance option
+val set_presentation : t -> presentation -> t
+(** Switch the overview projection by its exact selected worker/declaration
+    identity. A filtered-out or absent original leaves no selection; a numeric
+    cursor never transfers selection to another worker. Detail stays pinned. *)
+val toggle_flow : t -> t
+(** Toggle Flow and Summary, keeping overview navigation on visible instances. *)
+val select_initial_result : t -> t
+(** Choose the declared reading, or first record, for the pinned detail after
+    its first scoped read. Refreshes preserve the existing row identity. *)
+val open_selected_instance : t -> t
+val open_declaration : t -> string -> t
+(** The view an inventory declaration opens to, with the configuration cursor
+    on that declaration so actions target it; [-1] when the snapshot does not
+    list it. *)
+(** Enter the selected worker or unresolved installation. A worker pins its
+    incarnation; an installation opens its existing TOML detail section. *)
+val overview_count : ?mode:overview_mode -> snapshot -> int
+type current_category = Classified of Masc.Lane_addon_category.t | Unclassified | Unverified
+(** [Classified]/[Unclassified] require the exact installation id and source
+    path to match one parsed, issue-free declaration in a complete reading.
+    [Unverified] is any weaker match: id-only, path-only, duplicated claims,
+    an incomplete inventory or an issue on the declaration itself. This is
+    navigation grouping only; it grants nothing. *)
+val current_category : snapshot ->
+  [`Instance of instance | `Declaration of int * declaration] -> current_category
+(** Selectable current workers/declarations, or retained runs in history mode. *)
+val toggle_history : t -> t
+(** Explicitly switch the overview list. Detail keeps its pinned incarnation. *)
+val move_instance : t -> int -> t
+(** Move among visible entries in the current overview mode and presentation. *)
+val move_record : t -> int -> t
+(** Move only among records belonging to the pinned detail incarnation. *)
+val selected_source_path : t -> string option
+val selected_row : t -> Row.row option
+val reconcile_snapshot : t -> snapshot -> t
+(** Preserve exact selected identities. A removed row, worker incarnation or
+    declaration requires explicit reselection before acting on a replacement. *)
+val reconcile_read_snapshot :
+  t -> target:read_target -> diagnostic:diagnostic option -> snapshot -> t
+(** Apply a received inventory and its detail-read outcome after the caller's
+    request/workspace admission. On a failed pinned detail read, keep only that
+    unchanged worker's previous rows alongside fresh inventory metadata and
+    coverage; completeness becomes unknown. Never retain another owner's rows
+    or execution authority. A successful empty read replaces previous results.
+    Inventory-only effect replies preserve the same failed detail and its rows,
+    while accepting fresh metadata. A removed or changed owner clears them.
+    The detail failure remains observable independently of input diagnostics. *)
+val move_lane : t -> int -> t
+type value_row = { depth : int; key : string option; bullet : bool; text : string }
+val value_rows : depth:int -> Yojson.Safe.t -> value_row list
+(** A result value as an outline: an object field is a key, a list item is a
+    bullet, a string is its own text, and a nested value sits one level
+    deeper. A written line break starts a row. *)
+val result_readings :
+  instance -> Row.row -> (Masc.Lane_addon_presentation.reading * (Yojson.Safe.t, string) result) list
+(** The row's value for each reading declared on the row's exact Lane. *)
+val result_window : rows:int -> focus:int -> count:int -> int * int
+(** [(first, shown)]: the list rows the Results list draws when [count] rows
+    meet a window of [rows] that must keep row [focus] in view. *)
+val lines : ?height:int -> ?failed_note:string -> width:int -> t -> string list
+(** Printable rows wrapped to the actual frame width. Rendering and scrolling
+    must use the same width so every field and receipt remains reachable. *)
+
+val instance_standing : off_requested:bool -> instance -> Masc_tui_lane_standing.t
+(** How a worker entry stands. [off_requested] is a declaration of the same
+    installation switched off while the worker is still attached. An attached
+    worker that is not a live entry of this server is [Unobserved]. *)
+val declaration_entry_standing : t -> declaration -> Masc_tui_lane_standing.t
+(** How a declaration with no current worker stands: [Failing] with an issue,
+    otherwise what its application line under the entry says. *)
+
+val action_json : action_request -> Yojson.Safe.t
+val action_receipt : action_request -> Yojson.Safe.t -> (Action.receipt, string) result
+
+val open_actions : request_id:string -> t -> (t, string) result
+val move_action : t -> int -> t
+val submit_action : t -> (action_request, string) result
+val pending_action : t -> action_request option
+
+val paste_action : text:string -> t -> t
+val edit_action : key:string -> t -> (t * action_request option, string) result
+val can_observe : instance -> bool
+val removal_block_reason : t -> instance -> string option
+val overview_hints : t -> string
+val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
+val move_observation : t -> int -> t
+val evidence_request : t -> (request, string) result
+val open_evidence : request_id:string -> keepers:string list -> t -> (t, string) result
+(** Open the export choice for the marked rows. Fails like [evidence_request]
+    when the rows span owners or left the view. *)
+val move_evidence : t -> int -> t
+val acknowledge_broadcast : t -> Yojson.Safe.t -> t
+(** A committed response ends this send. Unanswered requests retain their ID
+    across reopening the same selected evidence; a later acknowledged send gets
+    a new ID from [open_evidence]. *)
+val submit_evidence : t -> (t * request, string) result
+(** Close the choice and build the exact request: the frozen bundle alone, or
+    with [keeper_name] for one Keeper or [broadcast=true] for workspace sharing. *)
+val evidence_receipt_lines : Yojson.Safe.t -> string list
+(** What an evidence receipt says in one or two readable lines: rows frozen
+    and, separately, whether optional Keeper delivery or Broadcast committed. Empty for
+    receipts of other operations. *)
+
+val status_text : t -> string
+(** What the Add-ons status row says about the reading or interaction in
+    flight, what the view holds, and the source of the last diagnostic. A
+    view that holds nothing has no previous reading to keep visible. *)

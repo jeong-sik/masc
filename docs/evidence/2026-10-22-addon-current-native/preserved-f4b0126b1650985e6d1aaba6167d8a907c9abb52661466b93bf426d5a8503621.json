@@ -1,0 +1,17 @@
+{
+  "source_id": "vst-phrase",
+  "incarnation": "current-native-synthetic-source",
+  "cursor": "1",
+  "complete": true,
+  "detail": "Synthetic source for corrected native lifecycle; no model/audio",
+  "observations": [
+    {
+      "id": "current-input-1",
+      "kind": "vst_phrase",
+      "observed_at": 1792597232.2662039,
+      "fields": {
+        "state": "pause_requested"
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "masc.selected-evidence-files.v1",
+  "files": {
+    "README.md": "92f0d09c4db6f957b0c9b900081488db7a440f6a79ee61a59a6ff7d1b3b475d0",
+    "current-locations.json": "ac876df614037e09f5cfe4337d683640e4eb55f6a705395c205d7fe536bc7fa1",
+    "interpreter.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "measurements.jsonl": "6da5e20ac0735c63deb848f7454c9eda530d20fe84377bd8a05ac9bbd1d42792",
+    "plan.json": "ac80d26bffae24f1088cad5e6d30fb2f86f3741ba37c1ac4ac58a3595a010659",
+    "probe.ocaml.txt": "9bee5fd28e92c46b9faa6d2ad03bf22eb0ee4bc56f9fd621c9f6cbc25c45529d",
+    "provenance.json": "4cf907b557afac6e2a1d049ea0f671e79dc008a3bb173a7ce98770212c275cbb",
+    "reproduce.py": "34e6baf69c0fd2d42f85c9ca10aca21bb3e66180477890711bd11f7337a578f3",
+    "summary.json": "c31e5f678378d34a3ec4c91f3c3722b06d26953eb35d25c5b5a616dab581baf5",
+    "syntax-receipt.json": "169a77fc9e68ee72ec1efab3e28fdad03561bcacbe43d4c555acd07204b578fa"
+  }
+}

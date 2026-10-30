@@ -1,0 +1,26 @@
+{
+  "scope": "read-only local Ollama metadata and loaded model observation",
+  "endpoint": "http://127.0.0.1:11434",
+  "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+  "loaded_digest": "c66cf836b05b503a80e2c488e800dd4f1c1ad2497cb93c212cd41582373b8dda",
+  "advertised_capabilities": [
+    "tools",
+    "thinking",
+    "completion",
+    "vision"
+  ],
+  "loaded_context_length": 262144,
+  "reported_model_details": {
+    "parent_model": "",
+    "format": "gguf",
+    "family": "qwen35",
+    "families": [
+      "qwen35"
+    ],
+    "parameter_size": "27.3B",
+    "quantization_level": "Q4_K_M"
+  },
+  "model_generation": "not_requested",
+  "masc_exact_lane_admission": "not_measured",
+  "runtime_configuration": "unchanged"
+}

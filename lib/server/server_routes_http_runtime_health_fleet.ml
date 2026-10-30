@@ -1,0 +1,730 @@
+(* Server_routes_http_runtime_health_fleet — fleet-level health field helpers.
+   Extracted from server_routes_http_runtime.ml during godfile decomposition.
+   Contains keeper reaction ledger, FD accountant, fleet resolution,
+   runtime truth, and contract-verification health JSON renderers. *)
+
+open Server_routes_http_common
+open Server_routes_http_runtime_fleet_scan
+
+let keeper_census_result config =
+  try
+    Keeper_meta_store.keeper_names_result config
+    |> Result.map sorted_unique_strings
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+(* Keep each projection's unavailable shape, but distinguish an unread
+   authoritative census from an empty one. No row count measures the fleet
+   when its names could not be enumerated. *)
+let unread_keeper_census_json detail = function
+  | `Assoc fields ->
+    let failure_fields =
+      [ "status", `String "unavailable"
+      ; "operator_action_required", `Bool true
+      ; "status_reasons", `List [ `String "keeper_names_unreadable" ]
+      ; "keeper_count", `Null
+      ; ( "keepers_listing"
+        , Keeper_snapshot_unread.listing_to_json
+            (Keeper_snapshot_unread.Unreadable detail) )
+      ]
+    in
+    `Assoc
+      (failure_fields
+       @ List.filter (fun (key, _) -> not (List.mem_assoc key failure_fields)) fields)
+  | _ -> invalid_arg "Keeper fleet health unavailable projection is not an object"
+;;
+
+let keeper_reaction_ledger_health_json () =
+  match current_server_state_opt () with
+  | None -> Keeper_reaction_ledger.unavailable_fleet_summary_json ()
+  | Some state ->
+    let config = (Mcp_server.workspace_config state) in
+    match keeper_census_result config with
+    | Error detail ->
+      unread_keeper_census_json detail
+        (Keeper_reaction_ledger.unavailable_fleet_summary_json ())
+    | Ok keeper_names ->
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path:config.base_path
+      ~keeper_names
+      ~limit_per_keeper:20
+;;
+
+let unavailable_keeper_owner_json () =
+    `Assoc
+      [ "schema", `String "masc.keeper_owner.v1"
+      ; "status", `String "unavailable"
+      ; "operator_action_required", `Bool false
+      ; "status_reasons", `List []
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "in_flight_keeper_count", `Int 0
+      ; "shutdown_keeper_count", `Int 0
+      ; "queued_operation_count", `Int 0
+      ; "running_operation_count", `Int 0
+      ; "terminal_operation_count", `Int 0
+      ; "interrupted_operation_count", `Int 0
+      ; "keepers", `List []
+      ]
+;;
+
+let keeper_owner_health_json () =
+  match current_server_state_opt () with
+  | None -> unavailable_keeper_owner_json ()
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    match keeper_census_result config with
+    | Error detail ->
+      unread_keeper_census_json detail (unavailable_keeper_owner_json ())
+    | Ok keeper_names ->
+    let lane_to_string = Keeper_owner.turn_lane_to_string in
+    let row keeper_name =
+      match
+        Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
+      with
+      | Error error ->
+        ( `Assoc
+            [ "keeper_name", `String keeper_name
+            ; "status", `String "unavailable"
+            ; ( "detail"
+              , `String (Keeper_owner_registry.lookup_error_to_string error) )
+            ]
+        , 0, 0, 0, 0, 0, 0, 1 )
+      | Ok owner ->
+        let turn = Keeper_owner.turn_in_flight owner in
+        let shutdown = Keeper_owner.shutdown_operation_id owner in
+        let operations = Keeper_owner.operation_projection owner in
+        let running_count =
+          Option.fold ~none:0 ~some:(fun _ -> 1) operations.running_operation_id
+        in
+        let turn_json =
+          match turn with
+          | None -> `Null
+          | Some turn ->
+            `Assoc
+              [ "lane", `String (lane_to_string turn.lane)
+              ; "started_at_unix", `Float turn.started_at
+              ]
+        in
+        ( `Assoc
+            [ "keeper_name", `String keeper_name
+            ; ( "status"
+              , `String
+                  (if operations.store_unavailable then "unavailable" else "ok") )
+            ; "turn", turn_json
+            ; ( "shutdown_operation_id"
+              , match shutdown with
+                | None -> `Null
+                | Some operation_id ->
+                  `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
+            ; "queued_operation_count", `Int operations.queued_count
+            ; "running_operation_count", `Int running_count
+            ; "terminal_operation_count", `Int operations.terminal_count
+            ; "interrupted_operation_count", `Int operations.interrupted_count
+            ; "operation_store_unavailable", `Bool operations.store_unavailable
+            ]
+        , Option.fold ~none:0 ~some:(fun _ -> 1) turn
+        , Option.fold ~none:0 ~some:(fun _ -> 1) shutdown
+        , operations.queued_count
+        , running_count
+        , operations.terminal_count
+        , operations.interrupted_count
+        , if operations.store_unavailable then 1 else 0 )
+    in
+    let rows = List.map row keeper_names in
+    let sum select = List.fold_left (fun total row -> total + select row) 0 rows in
+    let unavailable_count = sum (fun (_, _, _, _, _, _, _, count) -> count) in
+    `Assoc
+      [ "schema", `String "masc.keeper_owner.v1"
+      ; "status", `String (if unavailable_count = 0 then "ok" else "degraded")
+      ; "operator_action_required", `Bool (unavailable_count > 0)
+      ; ( "status_reasons"
+        , if unavailable_count = 0
+          then `List []
+          else `List [ `String "operation_store_unavailable" ] )
+      ; "keeper_count", `Int (List.length keeper_names)
+      ; "keeper_names", `List (List.map (fun name -> `String name) keeper_names)
+      ; ( "in_flight_keeper_count"
+        , `Int (sum (fun (_, count, _, _, _, _, _, _) -> count)) )
+      ; ( "shutdown_keeper_count"
+        , `Int (sum (fun (_, _, count, _, _, _, _, _) -> count)) )
+      ; ( "queued_operation_count"
+        , `Int (sum (fun (_, _, _, count, _, _, _, _) -> count)) )
+      ; ( "running_operation_count"
+        , `Int (sum (fun (_, _, _, _, count, _, _, _) -> count)) )
+      ; ( "terminal_operation_count"
+        , `Int (sum (fun (_, _, _, _, _, count, _, _) -> count)) )
+      ; ( "interrupted_operation_count"
+        , `Int (sum (fun (_, _, _, _, _, _, count, _) -> count)) )
+      ; "keepers", `List (List.map (fun (json, _, _, _, _, _, _, _) -> json) rows)
+      ]
+;;
+
+let unavailable_keeper_board_event_collection_json () =
+    `Assoc
+      [ "schema", `String "masc.keeper_board_event_collection.v1"
+      ; "status", `String "unavailable"
+      ; "operator_action_required", `Bool false
+      ; "status_reasons", `List []
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "failure_count", `Int 0
+      ; "failures", `List []
+      ]
+;;
+
+let keeper_board_event_collection_health_json () =
+  match current_server_state_opt () with
+  | None -> unavailable_keeper_board_event_collection_json ()
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    match keeper_census_result config with
+    | Error detail ->
+      unread_keeper_census_json detail (unavailable_keeper_board_event_collection_json ())
+    | Ok keeper_names ->
+    Keeper_heartbeat_loop_board_events.fleet_health_json
+      ~base_path:config.base_path
+      ~keeper_names
+;;
+
+(* The keeper_hitl_gate section (task-1665, design D1): live waits from the
+   tool-approval registry — the same source GET /api/v1/keepers/tool-approvals
+   serves — over the durable ask counts from the asking workspace's queue.
+   Every computation failure is a distinct projection rather than a zero:
+   [Keeper_hitl_gate_health.no_workspace_json] keeps the live side when there
+   is no server state, and [queue_unreadable_json] goes unavailable instead
+   of letting an unread authority read as "nothing pending". Timeout
+   counters (design D3) come from the registry's process-lifetime totals. *)
+let keeper_hitl_gate_health_snapshot () =
+  let registry = Keeper_tool_approval_registry.shared () in
+  let waits = Keeper_tool_approval_registry.pending registry in
+  let { Keeper_tool_approval_registry.answered_total
+      ; timed_out_total } =
+    Keeper_tool_approval_registry.outcome_totals registry
+  in
+  let now = Unix.gettimeofday () in
+  match current_server_state_opt () with
+  | None ->
+    (* No workspace to scope the journal with: the process-wide count is
+       the only one there is, and the durable side reports itself unread. *)
+    Keeper_hitl_gate_health.no_workspace_json ~now ~waits ~answered_total
+      ~timed_out_total
+      ~late_uncertain:
+        (Keeper_late_approval.journal_uncertain (Keeper_late_approval.shared ()))
+      ()
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    (match
+       Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
+         ~base_path:config.base_path
+     with
+     | Error error ->
+       Keeper_hitl_gate_health.queue_unreadable_json
+         ~error:(Keeper_approval_queue_result.storage_error_to_string error)
+     | Ok (entries, read_errors) ->
+       (match
+          Keeper_late_approval.uncertain_attempts
+            (Keeper_late_approval.shared ())
+            ~base_path:config.base_path
+        with
+        | Error (Keeper_late_approval.Corrupt_journal error)
+        | Error (Keeper_late_approval.Journal_unavailable error) ->
+          Keeper_hitl_gate_health.late_journal_unavailable_json ~error
+        | Ok uncertain ->
+          Keeper_hitl_gate_health.aggregate
+            ~now
+            ~is_live:Keeper_gate.auto_judge_entry_claimed
+            ~waits
+            ~entries
+            ~unread_entries:(List.length read_errors)
+            ~answered_total
+            ~timed_out_total
+            ~late_uncertain:(List.length uncertain)
+            ~journal_stats:(Keeper_late_approval.journal_stats (Keeper_late_approval.shared ()))
+            ()))
+;;
+
+let keeper_hitl_gate_health_json () =
+  match Keeper_late_approval.journal_error (Keeper_late_approval.shared ()) with
+  | None -> keeper_hitl_gate_health_snapshot ()
+  | Some (Keeper_late_approval.Corrupt_journal error)
+  | Some (Keeper_late_approval.Journal_unavailable error) ->
+    Keeper_hitl_gate_health.late_journal_unavailable_json ~error
+;;
+
+let paused_keeper_count = function
+  | `Assoc fields ->
+      (match List.assoc_opt "count" fields with
+       | Some (`Int count) -> count
+       | _ -> 0)
+  | _ -> 0
+;;
+
+(* Scope keeper counts to the active workspace's base_path so a running
+   keeper from another workspace cannot mask a local outage in fleet
+   safety. `bootable_keeper_count` is already derived from
+   `(Mcp_server.workspace_config state)`, so the running count must use the same scope. *)
+let runtime_base_path_opt () =
+  match current_server_state_opt () with
+  | Some state -> Some (Mcp_server.workspace_config state).base_path
+  | None -> None
+
+let queue_assoc_int name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> value
+  | _ -> 0
+;;
+
+let queue_assoc_float_opt name fields =
+  match List.assoc_opt name fields with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
+  | _ -> None
+;;
+
+let queue_assoc_bool name ~default fields =
+  match List.assoc_opt name fields with
+  | Some (`Bool value) -> value
+  | _ -> default
+;;
+
+let keeper_event_queue_health_dimensions ~source_unavailable = function
+  | `Assoc fields ->
+    let counts_complete = queue_assoc_bool "counts_complete" ~default:false fields in
+    let read_error_count = queue_assoc_int "read_error_count" fields in
+    let transition_outbox_count = queue_assoc_int "transition_outbox_count" fields in
+    let runnable_backlog_count = queue_assoc_int "runnable_backlog_count" fields in
+    let recoverable_backlog_count =
+      queue_assoc_int "recoverable_backlog_count" fields
+    in
+    let retained_disabled_backlog_count =
+      queue_assoc_int "retained_disabled_backlog_count" fields
+    in
+    let paused_dead_backlog_count =
+      queue_assoc_int "paused_dead_backlog_count" fields
+    in
+    let shutdown_fenced_backlog_count =
+      queue_assoc_int "shutdown_fenced_backlog_count" fields
+    in
+    (* Entries whose keeper's owner lifecycle could not be read. Not a state
+       the operator chose -- the classifier did not get an answer -- so it
+       belongs with [recoverable], not with the deliberate pauses below.
+       [counts_complete] only reports whether the queue file was read, so a
+       keeper whose meta loads but whose lifecycle answers Unknown left this
+       count standing while every predicate read zero and the section reported
+       ok with work in it (#34753). *)
+    let unclassified_backlog_count = queue_assoc_int "unclassified_count" fields in
+    (* Only part of the non-runnable backlog is something an operator can act
+       on.  [recoverable] clears once the owner fiber is restored,
+       [shutdown_fenced] clears once the shutdown completes, and
+       [unclassified] clears once the lifecycle reads again, so all three
+       warrant a prompt.  [retained_disabled] and [paused_dead] are the operator's own
+       standing decision -- a keeper deliberately paused, or autoboot /
+       proactive turned off.  Counting those as actionable pinned
+       [operator_action_required] to true for as long as the decision held, so
+       one deliberately paused keeper produced a permanent alarm that buried
+       the ones that do need an answer.  Both counts still travel in
+       [status_reasons], so the backlog stays visible without demanding
+       action. *)
+    let actionable_backlog_count =
+      recoverable_backlog_count
+      + shutdown_fenced_backlog_count
+      + unclassified_backlog_count
+    in
+    (* [backlog_clean] answers a different question than [work_action_required]:
+       it reports whether the queue holds anything at all, so an operator-paused
+       entry does count against it. Keep the total separate from the actionable
+       subset. *)
+    let non_runnable_backlog_count =
+      actionable_backlog_count
+      + retained_disabled_backlog_count
+      + paused_dead_backlog_count
+    in
+    let runnable_oldest_source_age_seconds =
+      queue_assoc_float_opt "runnable_oldest_source_age_seconds" fields
+    in
+    let storage_degraded =
+      (not source_unavailable)
+      && ((not counts_complete) || read_error_count > 0 || transition_outbox_count > 0)
+    in
+    let storage_status =
+      if source_unavailable then "unavailable"
+      else if storage_degraded then "degraded"
+      else "ok"
+    in
+    (* Carry the canonical observation; residence is diagnostic, not a health
+       verdict or a source-age-derived stall threshold. *)
+    let queue_residence = Keeper_event_queue_persistence.(
+      let residence =
+        if source_unavailable || not counts_complete then Unknown Queue_observation_incomplete
+        else match List.assoc_opt "queue_residence" fields with
+          | None -> Unknown First_admission_not_recorded
+          | Some json -> (match queue_residence_of_yojson json with
+              | Some residence -> residence
+              | None -> Unknown Queue_observation_incomplete)
+      in queue_residence_to_yojson residence) in
+    let work_status, work_state =
+      if source_unavailable || not counts_complete
+      then "unavailable", "unknown"
+      else if runnable_backlog_count > 0
+      then "warning", "backlogged"
+      else if actionable_backlog_count > 0
+      then "warning", "blocked"
+      else "ok", "idle"
+    in
+    let work_action_required =
+      actionable_backlog_count > 0
+    in
+    let operator_action_required = storage_degraded || work_action_required in
+    let status = Health_status.max_string storage_status work_status in
+    (* A backlog reason carries how deep the backlog is. Without it every size
+       reads the same on screen: thirty paused keepers holding 560 stimuli look
+       exactly like one keeper holding one. The dashboard joins these strings as
+       they arrive and already shows key=value entries beside them
+       (status=…, operator_action_required=…), so the count travels without a
+       schema change. *)
+    let backlog_reason name count reasons =
+      if count > 0 then Printf.sprintf "%s=%d" name count :: reasons else reasons
+    in
+    let storage_reasons =
+      []
+      |> (fun reasons ->
+        if not counts_complete then "storage_counts_incomplete" :: reasons else reasons)
+      |> (fun reasons ->
+        if read_error_count > 0 then "storage_read_error" :: reasons else reasons)
+      |> (fun reasons ->
+        if transition_outbox_count > 0
+        then "transition_projection_pending" :: reasons
+        else reasons)
+    in
+    let status_reasons =
+      storage_reasons
+      |> backlog_reason "runnable_backlog" runnable_backlog_count
+      |> backlog_reason "recoverable_backlog" recoverable_backlog_count
+      |> backlog_reason "retained_disabled_backlog" retained_disabled_backlog_count
+      |> backlog_reason "paused_dead_backlog" paused_dead_backlog_count
+      |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
+      |> backlog_reason "unclassified_backlog" unclassified_backlog_count
+      |> List.rev
+    in
+    (* The subset an operator has to answer, which is not the same list as what
+       is happening. [operator_action_required] above is already the union of
+       the storage predicates and [actionable_backlog_count]; these are the
+       reasons behind exactly that, built from the same combinators.
+       [runnable_backlog] is work in flight, and [retained_disabled] and
+       [paused_dead] are the operator's own standing decision -- #34781 stopped
+       them opening the alarm, and they kept arriving in the operator list
+       anyway, because the health rollup hoisted every [status_reasons] entry
+       of a section whose gate had opened for another reason (#34894). They
+       still travel in [status_reasons], so the backlog stays on screen. *)
+    let operator_action_reasons =
+      storage_reasons
+      |> backlog_reason "recoverable_backlog" recoverable_backlog_count
+      |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
+      |> backlog_reason "unclassified_backlog" unclassified_backlog_count
+      |> List.rev
+    in
+    let without name fields = List.remove_assoc name fields in
+    let fields =
+      fields
+      |> without "schema"
+      |> without "queue_residence"
+      |> without "status_reasons"
+      |> without "operator_action_reasons"
+      |> without "storage_integrity"
+      |> without "work_liveness"
+      |> without "backlog_clean"
+    in
+    `Assoc
+      ([ "schema", `String Keeper_event_queue_schema.fleet_health_summary
+       ; "queue_residence", queue_residence
+       ; "status", `String status
+       ; "operator_action_required", `Bool operator_action_required
+       ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
+       ; ( "operator_action_reasons"
+         , `List (List.map (fun reason -> `String reason) operator_action_reasons) )
+       ; ( "backlog_clean"
+         , `Bool
+             (counts_complete
+              && (not source_unavailable)
+              && read_error_count = 0
+              && transition_outbox_count = 0
+              && runnable_backlog_count = 0
+              && non_runnable_backlog_count = 0) )
+       ; ( "storage_integrity"
+         , `Assoc
+             [ "schema", `String "masc.keeper_event_queue.storage_integrity.v1"
+             ; "status", `String storage_status
+             ; "counts_complete", `Bool counts_complete
+             ; "read_error_count", `Int read_error_count
+             ; "transition_outbox_count", `Int transition_outbox_count
+             ; "operator_action_required", `Bool storage_degraded
+             ] )
+       ; ( "work_liveness"
+         , `Assoc
+             [ "schema", `String "masc.keeper_event_queue.work_liveness.v2"
+             ; "status", `String work_status
+             ; "state", `String work_state
+             ; "runnable_backlog_count", `Int runnable_backlog_count
+             ; ( "runnable_oldest_source_age_seconds"
+               , Option.fold
+                   ~none:`Null
+                   ~some:(fun value -> `Float value)
+                   runnable_oldest_source_age_seconds )
+             ; "queue_residence", queue_residence
+             ; "operator_action_required", `Bool work_action_required
+             ] )
+       ]
+       @ fields)
+  | json -> json
+;;
+
+let keeper_event_queue_health_json ~execution_snapshot () =
+  match current_server_state_opt () with
+  | None ->
+    keeper_event_queue_health_dimensions
+      ~source_unavailable:true
+      (`Assoc
+      [ "schema", `String Keeper_event_queue_schema.fleet_summary
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "pending_count", `Int 0
+      ; "total_count", `Int 0
+      ; "transition_outbox_count", `Int 0
+      ; "counts_complete", `Bool false
+      ; "oldest_source_arrived_at_unix", `Null
+      ; "oldest_source_age_seconds", `Null
+      ; "runnable_backlog_count", `Int 0
+      ; "runnable_oldest_source_arrived_at_unix", `Null
+      ; "runnable_oldest_source_age_seconds", `Null
+      ; "runnable_by_keeper", `List []
+      ; "recoverable_backlog_count", `Int 0
+      ; "recoverable_oldest_source_arrived_at_unix", `Null
+      ; "recoverable_oldest_source_age_seconds", `Null
+      ; "recoverable_by_keeper", `List []
+      ; "retained_disabled_backlog_count", `Int 0
+      ; "retained_disabled_oldest_source_arrived_at_unix", `Null
+      ; "retained_disabled_oldest_source_age_seconds", `Null
+      ; "retained_disabled_by_keeper", `List []
+      ; "paused_dead_backlog_count", `Int 0
+      ; "paused_dead_oldest_source_arrived_at_unix", `Null
+      ; "paused_dead_oldest_source_age_seconds", `Null
+      ; "paused_dead_by_keeper", `List []
+      ; "shutdown_fenced_backlog_count", `Int 0
+      ; "shutdown_fenced_oldest_source_arrived_at_unix", `Null
+      ; "shutdown_fenced_oldest_source_age_seconds", `Null
+      ; "shutdown_fenced_by_keeper", `List []
+      ; "unclassified_count", `Int 0
+      ; "unclassified_oldest_source_arrived_at_unix", `Null
+      ; "unclassified_oldest_source_age_seconds", `Null
+      ; "unclassified_by_keeper", `List []
+      ; "pending_by_keeper", `List []
+      ; "read_error_count", `Int 0
+      ; "read_errors", `List []
+      ; "keepers", `List []
+      ])
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
+    let now =
+      Unix.gettimeofday ()
+      (* NDT-OK: full health samples wall-clock at the HTTP boundary to report
+         durable queue ages; queue parsing below stays deterministic. *)
+    in
+    let owner_lifecycle ~keeper_name =
+      match
+        owner_execution_truth execution_snapshot ~keeper_name
+      with
+      | Keeper_activation_readiness.Executable ->
+        Keeper_event_queue_persistence.Runnable
+      | Keeper_activation_readiness.Recoverable ->
+        Keeper_event_queue_persistence.Recoverable
+      | Keeper_activation_readiness.Retained_disabled _
+        -> Keeper_event_queue_persistence.Retained_disabled
+      | Keeper_activation_readiness.Paused_dead _ ->
+        Keeper_event_queue_persistence.Paused_dead
+      | Keeper_activation_readiness.Shutdown_fenced _ ->
+        Keeper_event_queue_persistence.Shutdown_fenced
+      | Keeper_activation_readiness.Unknown detail ->
+        Keeper_event_queue_persistence.Lifecycle_unknown detail
+    in
+    Keeper_event_queue_persistence.fleet_summary_json
+      ~now
+      ~base_path
+      ~owner_lifecycle
+    |> keeper_event_queue_health_dimensions ~source_unavailable:false
+
+(* [fleet_reading] pairs the reading with the meta scan taken from it. It is
+   [None] exactly when there is no workspace state: no Keeper is paused on
+   disk, bootable, or an autoboot target. *)
+let keeper_fleet_runtime_resolution_base_fields
+    ~phase_snapshot
+    ~fleet_reading
+    ?(include_reaction_ledger = true)
+    () =
+  let base_path = runtime_base_path_opt () in
+  let meta_reading = Option.map fst fleet_reading in
+  let execution_snapshot =
+    match meta_reading with
+    | Some reading -> keeper_execution_snapshot reading
+    | None -> empty_keeper_execution_snapshot
+  in
+  let phase_counts = phase_snapshot.counts in
+  let keeper_fibers = phase_counts.running in
+  let paused_scan, bootable_names, autoboot_scan =
+    match fleet_reading with
+    | Some (_, scan) -> scan.paused_scan, scan.bootable_names, scan.autoboot_scan
+    | None -> empty_paused_keeper_scan, [], empty_autoboot_keeper_scan
+  in
+  let paused_keepers_json =
+    paused_keepers_health_json_of_scan
+      ~registry_paused_names:(registry_paused_keeper_names ())
+      paused_scan
+  in
+  let fleet_safety =
+    keeper_fleet_safety_health_json
+      ~meta_reading
+      ~bootable_names
+      ~autoboot_scan
+      ~phase_snapshot
+      ~execution_snapshot
+      ?base_path
+      ~phase_counts
+      ~paused_keepers_json
+      ()
+  in
+  let disk_observation =
+    match base_path with
+    | Some base_path ->
+      Keeper_disk_pressure.snapshot_json
+        ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+        ()
+    | None -> `Null
+  in
+  let fields =
+    [ "keeper_fibers", `Int keeper_fibers
+    ; "paused_keepers", `Int (paused_keeper_count paused_keepers_json)
+    ; "paused_keepers_health", paused_keepers_json
+    ; ( "fd_observation"
+      , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
+          () )
+    ; "disk_observation", disk_observation
+    ; "keeper_fleet_safety", fleet_safety
+    ; "keeper_owner", keeper_owner_health_json ()
+    ; "keeper_board_event_collection", keeper_board_event_collection_health_json ()
+    ]
+  in
+  if include_reaction_ledger
+  then fields @ [ "keeper_reaction_ledger", keeper_reaction_ledger_health_json () ]
+  else fields
+;;
+
+let fd_accountant_snapshot_json () =
+  let snapshot = Fd_accountant.fd_snapshot () in
+  let observed_int = function
+    | Some value -> `Int value
+    | None -> `Null
+  in
+  let per_kind =
+    snapshot.per_kind
+    |> List.map (fun (kind, active_operations) ->
+      let kind_name = Fd_accountant.kind_to_string kind in
+      `Assoc
+        [ "kind", `String kind_name
+        ; "active_operations", `Int active_operations
+        ])
+  in
+  let resource_errors =
+    snapshot.resource_errors
+    |> List.map (fun (kind, error, count) ->
+      `Assoc
+        [ "kind", `String (Fd_accountant.kind_to_string kind)
+        ; "error", `String (Fd_accountant.resource_error_to_string error)
+        ; "count", `Int count
+        ])
+  in
+  `Assoc
+    [ "fd_open", observed_int snapshot.fd_open
+    ; "fd_limit", observed_int snapshot.fd_limit
+    ; "per_kind", `List per_kind
+    ; "resource_errors", `List resource_errors
+    ]
+;;
+
+let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
+  `Assoc
+    [ "schema", `String "masc.runtime_truth.v1"
+    ; "source", `String "running_process"
+    ; "effective_base_path", `String path_diagnostics.Server_base_path_diagnostics.effective_base_path
+    ; "effective_masc_root", `String path_diagnostics.effective_masc_root
+    ; "process_cwd", `String path_diagnostics.process_cwd
+    ; ( "input_base_path"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value) path_diagnostics.input_base_path
+      )
+    ; ( "env_masc_base_path"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value) path_diagnostics.env_masc_base_path
+      )
+    ; "runtime_repo_root", Option.fold ~none:`Null ~some:(fun value -> `String value) build.Build_identity.repo_root
+    ; "executable_path", `String build.executable_path
+    ; "executable_dir", `String build.executable_dir
+    ; "runtime_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.commit
+    ; "runtime_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.commit_source
+    ; "binary_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.binary_commit
+    ; "binary_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.binary_commit_source
+    ; "source_fingerprint", Option.fold ~none:`Null ~some:(fun value -> `String value) build.source_fingerprint
+    ; "executable_sha256", Option.fold ~none:`Null ~some:(fun value -> `String value) build.executable_sha256
+    ; "executable_provenance_path", Option.fold ~none:`Null ~some:(fun value -> `String value) build.executable_provenance_path
+    ; "executable_provenance_sha256", Option.fold ~none:`Null ~some:(fun value -> `String value) build.executable_provenance_sha256
+    ; "repo_head_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit
+    ; "repo_head_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit_source
+    ; "keeper_fibers", `Int keeper_fibers
+    ; "fd_open", (match Json_util.assoc_member_opt "fd_open" fd_accountant with Some v -> v | None -> `Null)
+    ; "fd_limit", (match Json_util.assoc_member_opt "fd_limit" fd_accountant with Some v -> v | None -> `Null)
+    ]
+;;
+
+(* Both projections take the phase snapshot before the reading, so the
+   owner set the execution snapshot classifies is read after the phases. *)
+let keeper_fleet_runtime_resolution_fields () =
+  let phase_snapshot = keeper_phase_snapshot ?base_path:(runtime_base_path_opt ()) () in
+  (* The full projection keeps the boot path's meaning of bootable
+     ([Keeper_runtime.bootable_keeper_names]); paused and autoboot come from
+     the same meta scan the light projection and /health use. *)
+  let fleet_reading =
+    Option.map
+      (fun state ->
+        let reading = read_keeper_metas (Mcp_server.workspace_config state) in
+        ( reading
+        , { (keeper_fleet_meta_scan reading) with
+            bootable_names = boot_path_bootable_names reading } ))
+      (current_server_state_opt ())
+  in
+  keeper_fleet_runtime_resolution_base_fields ~phase_snapshot ~fleet_reading ()
+  @ [ "fd_accountant", fd_accountant_snapshot_json () ]
+;;
+
+let keeper_fleet_runtime_resolution_light_fields ?profile_snapshot () =
+  let phase_snapshot = keeper_phase_snapshot ?base_path:(runtime_base_path_opt ()) () in
+  let fleet_reading =
+    match current_server_state_opt () with
+    | Some state ->
+      let config = Mcp_server.workspace_config state in
+      let profile_snapshot =
+        match profile_snapshot with
+        | Some snapshot -> snapshot
+        | None ->
+          Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.base_path
+      in
+      let reading = read_keeper_metas ~profile_snapshot config in
+      Some (reading, keeper_fleet_meta_scan ~include_paused_details:false reading)
+    | None -> None
+  in
+  keeper_fleet_runtime_resolution_base_fields
+    ~phase_snapshot
+    ~fleet_reading
+    ~include_reaction_ledger:false
+    ()
+  @ [ "fd_accountant", fd_accountant_snapshot_json () ]
+;;

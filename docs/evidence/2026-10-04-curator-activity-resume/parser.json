@@ -1,0 +1,48 @@
+{
+  "compiler": "5.5.1",
+  "scope": "Syntax only; no Dune, full typecheck, linking or execution",
+  "files": [
+    {
+      "path": "lib/runtime/runtime_exact_output_registry.ml",
+      "sha256": "731c3eec18a0a32d08d517c3cb00775552d728eeb6a9945605e72fe646d03d76",
+      "returncode": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/runtime/runtime_exact_output_registry.mli",
+      "sha256": "8ae8d803cfc0e7e0668639a6466badfd9d41f3f6c388c5f4720d91cd53b53a1e",
+      "returncode": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server/server_workspace_memory_curator.ml",
+      "sha256": "2718efc63340f9af476b92e7234522ae1dfebfcef4cf5b8a520e62ad53ab1a9c",
+      "returncode": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/server/server_workspace_memory_curator.mli",
+      "sha256": "e8c42c4a75c2b6a44e49481d2e70e6545bccdc63719b0807f149a17c88ce8657",
+      "returncode": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_exact_output_catalog_precedence.ml",
+      "sha256": "eaf82b64d1ca097632e51d8fd028155d0156013cac2f4958c8e2142ccf3a00db",
+      "returncode": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_exact_output_catalog_precedence_fixture.ml",
+      "sha256": "7bc60a91d30f8084ebe174ef9e107a0bbac6c651dc116c64190fcd11eb1b33cd",
+      "returncode": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_workspace_memory_curator_lane.ml",
+      "sha256": "e5ebff45d9e8a6a20b23217f28489120f562588919ba6ec8fd43d6e3f3354997",
+      "returncode": 0,
+      "output": ""
+    }
+  ]
+}

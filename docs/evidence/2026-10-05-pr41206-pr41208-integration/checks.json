@@ -1,0 +1,67 @@
+{
+  "parent_41205": "000697850f49ce9366fc17f3533fbb6bc6ba4a93",
+  "intermediate_41206": "c1feb86e5a1dfe9b403c42da37a64d6bf2649e36",
+  "leaf_original": "ebf7e16b4f7651dc32b76ca7d1165c79c284b3cd",
+  "qualification_scope": "Combined41208 integrated working tree; original41206 and41208 historical outputs not relabeled",
+  "web": {
+    "files": 7,
+    "cases": 125,
+    "passed": 125
+  },
+  "tsc_errors": 0,
+  "eslint_errors": 0,
+  "browser": {
+    "installation": {
+      "passed": true,
+      "scenarios": 7,
+      "reads": 9,
+      "writes": 1,
+      "handle": 65136,
+      "exit": 0
+    },
+    "activity": {
+      "passed": true,
+      "scenarios": 8,
+      "reads": 14,
+      "writes": 4,
+      "handle": 49956,
+      "exit": 0
+    }
+  },
+  "source_sha256": {
+    "dashboard/src/api/lane-package-catalog.ts": "e95efbab3ae5df757ff9ff850bda4f07f427f9b5c2f5525cbd58cfbe28c5dcb8",
+    "dashboard/src/components/lane-addons-panel.ts": "bdab6708f48ec0fee5280e595fa0558c823568ef68baa8fac902ee8118d0692c",
+    "dashboard/src/components/lane-binding-form.ts": "cb398165c692dd8fe09cf14365a944247c7b93edb68f54887f07af0c32eeddf4",
+    "dashboard/src/components/lane-declaration-editor.ts": "0e4e9c674bf08e5251ddb0bfb486ed41de21a159637a1e264f4017eb77032616",
+    "dashboard/src/components/lane-package-activity-panel.test.ts": "ab0dbb984e82712a687f23e6a28e990da2cd409d5e60c06a64e4898aa522f780",
+    "dashboard/src/components/lane-package-activity-panel.ts": "ca0b123aad14a49d2b4fae2930c6d1d467c683e5f742d608462ce502bac75285",
+    "dashboard/src/components/lane-package-installer.test.ts": "3dfb0209f145149a405ab0f4a7f2679f58dfc83112e8a6ae9220be6cdd6839ed",
+    "dashboard/src/components/lane-package-installer.ts": "26d73a0138e56b0b3ea10ffa33b58f41636eb6ffae8dc60231de7c2ffd29d6eb",
+    "dashboard/src/lib/lane-binding-form.test.ts": "0acade02a8c6b8e00d1ca2ec8c49cc4bb09cb929c1a80c0e11d041f88931cd55",
+    "dashboard/src/lib/lane-binding-form.ts": "4c0d1a071d597c38f76881d2be67aa19dd854ff7e5bf4811ee64159e15d745d3",
+    "dashboard/src/lib/lane-declaration-sessions.ts": "f4acc20f6194daf7e9b8e8c94407ce5679b3d1426636a8e0b89f946ad103cff8",
+    "dashboard/src/lib/lane-package-activity-session.ts": "181d86674ebb3e440b03ee5bc00c924eb3dd9d9d0589f5e5c10f960412483480",
+    "dashboard/src/lib/lane-package-activity.test.ts": "7b5ba9a3332446096cc95296c5504fe196bcf0cb9a300876dbd54d39ce056536",
+    "dashboard/src/lib/lane-package-activity.ts": "e48beccfe028747f9aef38b99a6087d42dd0671fbbf078b0772c6a1b356c5511",
+    "dashboard/src/lib/lane-package-installation-session.ts": "080589474ce8f18a55b58475aebacfb8b694d180ad882e00c041b5c6dcaaa853"
+  },
+  "raw_sha256": {
+    "pr41206-41208-integrated-eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41206-41208-integrated-web.log": "14dccd7bf3ac271f1821f327a4c79359dcfb71b9144b6e3bb2e4062b03486ced",
+    "pr41206-integrated-browser.log": "68ec5278896337b28cd0b8385c84dff16dc9cd08429b57d6292aba94e38b2b40",
+    "pr41206-41208-integrated-tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41208-integrated-browser.log": "6f436b1faa3adbaeedffbec6f83c315d66c911aa15f663f98fd73fa78ce8c0c7"
+  },
+  "browser_artifacts_sha256": {
+    "dashboard/evidence/2026-10-05-pr41206-integrated-browser/form-mobile.png": "96b5e72a1795cd98c17ba40eb5f109884719c5412774744077e79f24c212e8ba",
+    "dashboard/evidence/2026-10-05-pr41206-integrated-browser/form-desktop.png": "e1601e494191b5e4c44d2d8ae32358908c106a4f312bf9002e7e13421f41bdc5",
+    "dashboard/evidence/2026-10-05-pr41206-integrated-browser/browser.mjs": "c84ce152b5a8368a44eb4cbd2ef56b48fefaf91250a982abec786549efdc3e10",
+    "dashboard/evidence/2026-10-05-pr41206-integrated-browser/draft-saved-desktop.png": "a6bb4bee183e12dfdb644b8e879af8c29791136c55a1f952a899acb037388bff",
+    "dashboard/evidence/2026-10-05-pr41206-integrated-browser/browser-result.json": "3b38b7b40a026605dd3ea45b17b4c7765840a72e103fb2d05e40807007387008",
+    "dashboard/evidence/2026-10-05-pr41208-integrated-browser/activity-mobile.png": "6ab0925c8f165ee94d748b93db210d00c7ccbd6d107a688b97f0109cd5e74472",
+    "dashboard/evidence/2026-10-05-pr41208-integrated-browser/browser.mjs": "9d65460d8eab27b4e097f7ede8c2b9d654718eb529f32e9b9732aa2efa479d96",
+    "dashboard/evidence/2026-10-05-pr41208-integrated-browser/off-desktop.png": "e00601f5a6e62342446ef259b002a454ab7a954899a02fb4f03adb4501ab1a42",
+    "dashboard/evidence/2026-10-05-pr41208-integrated-browser/browser-result.json": "6a8a58240edc5c0fa73c4fc49cd280756af8ddd054fc32f20a60ca58d5e956bb"
+  },
+  "native_scope": "bin/lib/test/packages/Dune bytes identical to qualified41205 parent; no native execution here"
+}

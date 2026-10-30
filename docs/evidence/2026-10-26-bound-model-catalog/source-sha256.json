@@ -1,0 +1,14 @@
+{
+  "packages/agent_core/lib/llm_provider/capabilities.ml": "3c2360180651b63ea0de3a3e66334600950d76ad992c4141bd93fe6769cc0715",
+  "packages/agent_core/lib/llm_provider/capabilities.mli": "5fbf4f0f5678889e4c5951d94ce7c5370a6beee435ceef53f44bac244fb9901e",
+  "packages/agent_core/lib/llm_provider/model_catalog.ml": "5eca5254efaf710a9e96c5a88e899ee5e680049d28baa09f6d58435087d17232",
+  "packages/agent_core/lib/llm_provider/model_catalog.mli": "4d2d01848161c852423a951b6290e87d68950b93cb0c432e47f53b2282452927",
+  "packages/agent_core/lib/llm_provider/provider_config.ml": "ac934d846c89d12e26f944aff2f2e2649b3ef455f361e23f268e7be75b07a0b2",
+  "packages/agent_core/lib/llm_provider/provider_config.mli": "9c7b30c87b55287814b0ecd5ced3402a29a3f8721b65aa8410e219dc229d7ebb",
+  "packages/agent_core/lib/llm_provider/provider_declarations.ml": "5ba4af9ce03de8b8bf67fa7f7cce2405ad57695be0ec3dc6bb750dc70932a3c4",
+  "packages/agent_core/lib/llm_provider/provider_declarations.mli": "17e22cea60a4b5f7ff901f9443a8db6c508010bac1a2630012904c4abe4c38b2",
+  "packages/agent_core/lib/provider_runtime_binding.ml": "febe3e4e001fecf4367aa18c8d729e7ef29be4bc8e016a70370c08991cb46f88",
+  "packages/agent_core/lib/provider_runtime_binding.mli": "2d805178110af8138e17b60a43d3dd8961b87fc3f010ad769665b080a005b581",
+  "packages/agent_core/test/test_provider_runtime_binding.ml": "8b44637d90d2228f11ff3c59e57ae212cc8839e9b36b075b98b379a3c1b36f3b",
+  "test/test_runtime_binding_auth_available.ml": "46e7ce64760264dcbdd47261e0af5f95dc422df84e72c496e1d69672bcd62857"
+}

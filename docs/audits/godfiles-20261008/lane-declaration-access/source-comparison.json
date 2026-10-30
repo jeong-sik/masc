@@ -1,0 +1,11 @@
+{
+  "parent": "d3d148e5ae41ecfab1d7191bd2eaa1d491147537",
+  "runtime_equals_parent_after_declared_transformations": true,
+  "transformations": [
+    "delete ignored caller_access helper",
+    "delete declaration read/save optional caller labels",
+    "use same typed Unauthenticated default at read/save/dispatch optional argument boundary",
+    "delete three local default resolution bindings"
+  ],
+  "limits": "Exact source comparison only; effect/default semantics and direct consumers require source review and executed checks."
+}

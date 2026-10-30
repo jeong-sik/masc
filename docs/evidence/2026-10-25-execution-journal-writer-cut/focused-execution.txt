@@ -1,0 +1,17 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40114881637
+Head: a7a7dbc396f5bcc55df3d957bc380f1c1d90a203
+Conclusion: success
+Retained actual suite execution summaries; compiler/ASSERT lines omitted.
+
+test suite	UNKNOWN STEP	2026-10-24T17:11:17.3073557Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: start 2026-10-24T17:11:17Z (dune alias)
+test suite	UNKNOWN STEP	2026-10-24T17:11:55.3684783Z ^[[32mTest Successful^[[0m in 0.606s. 68 tests run.
+test suite	UNKNOWN STEP	2026-10-24T17:11:55.3952255Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: OK in 38s
+test suite	UNKNOWN STEP	2026-10-24T17:11:55.3977619Z [targeted] @@packages/agent_core/test/runtest-test_tool_execution: start 2026-10-24T17:11:55Z (dune alias)
+test suite	UNKNOWN STEP	2026-10-24T17:11:57.0621682Z ^[[32mTest Successful^[[0m in 0.115s. 28 tests run.
+test suite	UNKNOWN STEP	2026-10-24T17:11:57.0816148Z [targeted] @@packages/agent_core/test/runtest-test_tool_execution: OK in 2s
+test suite	UNKNOWN STEP	2026-10-24T17:11:57.0841965Z [targeted] @@packages/agent_core/test/runtest-test_execution_lane_writer: start 2026-10-24T17:11:57Z (dune alias)
+test suite	UNKNOWN STEP	2026-10-24T17:12:02.5916801Z ^[[32mTest Successful^[[0m in 3.984s. 22 tests run.
+test suite	UNKNOWN STEP	2026-10-24T17:12:02.6132028Z [targeted] @@packages/agent_core/test/runtest-test_execution_lane_writer: OK in 5s
+test suite	UNKNOWN STEP	2026-10-24T17:12:04.1467074Z [targeted] packages/agent_core/test/test_telemetry_pipeline: start 2026-10-24T17:12:04Z
+test suite	UNKNOWN STEP	2026-10-24T17:12:04.1915265Z Test Successful in 0.034s. 9 tests run.
+test suite	UNKNOWN STEP	2026-10-24T17:12:04.1940986Z [targeted] packages/agent_core/test/test_telemetry_pipeline: OK in 0s

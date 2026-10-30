@@ -1,0 +1,409 @@
+(** Decision record append for unified keeper cycle, extracted from
+    keeper_unified_metrics.ml.
+
+    Largest cluster in this godfile — writes the per-turn decision
+    record JSONL (event bus + Otel_metric_store + receipt). *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_context_runtime
+
+include Keeper_unified_metrics_support
+include Keeper_unified_metrics_json_support
+
+type execution_path =
+  | Direct_turn
+  | Autonomous_cycle
+
+let execution_path_to_string = function
+  | Direct_turn -> "direct_turn"
+  | Autonomous_cycle -> "autonomous_cycle"
+;;
+
+let append_decision_record
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+    ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
+    ~(observation : Keeper_world_observation.world_observation)
+    ~(latency_ms : int)
+    ~(outcome : Keeper_decision_outcome.t)
+    ?channel
+    ~(execution_path : execution_path)
+    ~(degraded_retry_applied : Keeper_error_classify.degraded_retry option)
+    ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
+    ?turn_mode
+    ?(result : Keeper_agent_run.run_result option = None)
+    ?(usage_resolution : Keeper_usage_resolution.t option = None)
+    ?error
+    ?terminal_reason
+    ?executed_runtime_id
+    () : unit =
+  let now_ts = Time_compat.now () in
+  let channel =
+    Option.value
+      ~default:(decision_channel_of_observation observation)
+      channel
+  in
+  let claimable_task_count = Keeper_world_observation.claimable_task_count observation in
+  let trigger_signals = observed_triggers_of_observation observation in
+  let affordances = observed_affordances_of_observation observation in
+  let response_preview =
+    match result with
+    | Some r
+      when String.trim r.response_text <> ""
+           && Keeper_turn_outcome.equal
+                r.turn_outcome
+                Keeper_turn_outcome.Visible_reply ->
+        Some (short_preview r.response_text)
+    | _ -> None
+  in
+  let ( _turn_lane
+      , _turn_tool_choice
+      , turn_thinking_enabled
+      , _turn_prompt_fingerprint
+      , _turn_trace_id
+      , _turn_session_id
+      , _turn_number
+      , turn_id_opt
+      , task_id_opt
+      , _sandbox_profile
+      , _network_mode ) =
+    Keeper_tool_call_log.get_turn_context ~cell:turn_ctx_cell ()
+  in
+  let turn_id =
+    Option.value ~default:meta.runtime.usage.total_turns turn_id_opt
+  in
+  let task_id =
+    match task_id_opt with
+    | Some _ as value -> value
+    | None -> Keeper_runtime_contract.current_task_id_opt meta
+  in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_observability_contract_json ~config meta
+  in
+  let approval_queue_state, pending_approval_count =
+    match
+      Keeper_approval_queue.pending_count_for_keeper_in_workspace
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+    with
+    | Ok count ->
+      Keeper_approval_queue_result.approval_queue_ready_state_json, `Int count
+    | Error error ->
+      ( Keeper_approval_queue_result.approval_queue_unavailable_state_json error
+      , `Null )
+  in
+  let turn_mode =
+    match turn_mode, result with
+    | Some mode, _ -> Some mode
+    | None, Some r -> Some (turn_mode_of_result r)
+    | None, None -> None
+  in
+  let turn_mode_label = Option.map turn_mode_to_string turn_mode in
+  let suffix_seed =
+    match response_preview, error with
+    | Some preview, _ -> preview
+    | None, Some err -> err
+    | None, None ->
+      Option.value ~default:(Keeper_decision_outcome.to_string outcome) turn_mode_label
+  in
+  let terminal_reason =
+    match terminal_reason with
+    | Some reason -> reason
+    | None -> (
+        match outcome, error with
+        | Keeper_decision_outcome.Success, _ -> Keeper_turn_terminal.success ()
+        | Keeper_decision_outcome.(Checkpoint | Input_required | Failed), Some _ ->
+          Keeper_turn_terminal.of_code ~source:"decision_error" "unknown_error"
+        | Keeper_decision_outcome.(Checkpoint | Input_required | Failed), None ->
+          Keeper_turn_terminal.of_code "unknown_error")
+  in
+  let terminal_reason_code = Keeper_turn_terminal.code terminal_reason in
+  let json =
+    `Assoc
+      ([
+        ("id", `String (decision_id ~meta ~ts:now_ts ~suffix_seed));
+        ("event", `String "turn");
+        ("ts", `String (now_iso ()));
+        ("ts_unix", `Float now_ts);
+        ("audience", `String "internal_human_only");
+        ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+        ("turn_id", `Int turn_id);
+        ("keeper_name", `String meta.name);
+        ("task_id", Json_util.string_opt_to_json task_id);
+        ("runtime_contract", runtime_contract);
+        ("terminal_reason", Keeper_turn_terminal.to_json terminal_reason);
+        ("terminal_reason_code", `String terminal_reason_code);
+        ( "terminal_reason_severity",
+          `String
+            (Keeper_turn_terminal.severity_to_string
+               terminal_reason.Keeper_turn_terminal.severity) );
+        ("terminal_reason_source", `String terminal_reason.source);
+        ("provider_context", provider_context_json ~meta ?executed_runtime_id result);
+        ("tool_surface", tool_surface_json result);
+        ( "tool_call_count",
+          match result with
+          | Some result -> `Int (Keeper_agent_result.tool_call_count result)
+          | None -> `Null );
+        ( "tools_used",
+          match result with
+          | Some result ->
+              `List
+                (List.map
+                   (fun name -> `String name)
+                   (Keeper_agent_result.tool_names result))
+          | None -> `Null );
+        ("approval_queue_state", approval_queue_state);
+        ("pending_approval_count", pending_approval_count);
+        ( "channel",
+          `String
+            (Keeper_world_observation.channel_to_string
+               channel) );
+        ("outcome", `String (Keeper_decision_outcome.to_string outcome));
+        (* Which path wrote the row. Without it the two are indistinguishable
+           once [fallback_reason] is gone, and a cross-path disagreement cannot
+           be measured from the log at all. *)
+        ("execution_path", `String (execution_path_to_string execution_path));
+        (* One object per lane, the same shape the receipt writes. Three flat
+           fields with an optional bool defaulting to false is what let the two
+           surfaces disagree about the same turn (#37376). *)
+        ( "degraded_retry_applied",
+          Keeper_execution_receipt.degraded_retry_json degraded_retry_applied );
+        ( "degraded_retry_deferred",
+          Keeper_execution_receipt.degraded_retry_json degraded_retry_deferred );
+        ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
+        ("latency_ms", `Int latency_ms);
+        ("duration_ms", `Int latency_ms);
+        ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
+        ("observed_affordances", `List (List.map (fun s -> `String s) affordances));
+        ( "observation",
+          `Assoc
+            [
+              ( "pending_mentions"
+              , `Int
+                  (List.length
+                     (Keeper_world_observation_message_scope.pairs_of_kind
+                        Keeper_world_observation_message_scope.Mention
+                        observation.pending_messages)) );
+              ("pending_board_events", `Int (List.length observation.pending_board_events));
+              ( "pending_scope_messages"
+              , `Int
+                  (List.length
+                     (Keeper_world_observation_message_scope.pairs_of_kind
+                        Keeper_world_observation_message_scope.Scope
+                        observation.pending_messages)) );
+              ("active_goals", (match observation.active_goals with
+                | Ok ids -> `Int (List.length ids)
+                | Error _ -> `Null));
+              (* RFC-0444 §2.3 row 6: the unavailable source carries the
+                 same members as the goal_store_unavailable envelope, so the
+                 decision record names reason, field, file, mirror and reset
+                 step instead of one rendered line. *)
+              ("active_goals_source", (match observation.active_goals with
+                | Ok _ -> `Assoc [ "status", `String "available" ]
+                | Error unavailable -> `Assoc
+                    ([ "status", `String "unavailable"
+                     ; "error_code"
+                     , `String
+                         (Tool_args.error_code_to_string
+                            Goal_unavailable_envelope.error_code) ]
+                     @ Goal_unavailable_envelope.fields unavailable)));
+              ("idle_seconds", `Int observation.idle_seconds);
+              ("unclaimed_task_count", `Int observation.unclaimed_task_count);
+              ("claimable_task_count", `Int claimable_task_count);
+              ( "claim_blocked_task_count",
+                `Int
+                  (max 0
+                     (observation.unclaimed_task_count
+                      - claimable_task_count)) );
+              ("failed_task_count", `Int observation.failed_task_count);
+              ( "scheduled_automation_active_count",
+                `Int observation.scheduled_automation.active_count );
+              ( "scheduled_automation_due_ready_count",
+                `Int observation.scheduled_automation.due_ready_count );
+              ("running_keeper_fiber_count", `Int observation.running_keeper_fiber_count);
+            ] );
+        ( "response_preview", Json_util.string_opt_to_json response_preview );
+        ( "response_preview_2000",
+          match result with
+          | Some r when String.trim r.response_text <> "" ->
+              `String (short_preview ~max_len:2000 r.response_text)
+          | _ -> `Null );
+        ( "error", Json_util.string_opt_to_json error );
+        ( "trace_ref",
+          match result with
+          | Some { trace_ref = Some trace_ref; _ } ->
+              Agent_core.Raw_trace.run_ref_to_yojson trace_ref
+          | _ -> `Null );
+        ( "run_validation",
+          match result with
+          | Some { run_validation = Some validation; _ } ->
+              Agent_core.Raw_trace.run_validation_to_yojson validation
+          | _ -> `Null );
+        ( "telemetry",
+          match result with
+          | Some r ->
+              let telemetry_reported = telemetry_reported_of_result r in
+              let coverage_reason = coverage_reason_of_result r in
+              let coverage_stage = coverage_stage_of_result r in
+              let usage_trust =
+                classify_usage_trust
+                  ~usage_reported:r.usage_reported
+                  ~usage:r.usage
+              in
+              let thinking_enabled_field =
+                match turn_thinking_enabled with
+                | Some b -> [("thinking_enabled", `Bool b)]
+                | None -> []
+              in
+              let runtime_fields =
+                match r.runtime_observation with
+                | Some co ->
+                    let streaming_fields =
+                      [
+                        ("streaming_ttfrc_ms", Json_util.float_opt_to_json co.streaming_ttfrc_ms);
+                        ("streaming_inter_chunk_count", `Int co.streaming_inter_chunk_count);
+                        ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json co.streaming_inter_chunk_avg_ms);
+                      ]
+                    in
+                    ("selected_model", `Null) :: streaming_fields
+                | None -> []
+              in
+              let tool_surface_fields =
+                [
+                  ( "turn_lane"
+                  , Keeper_agent_tool_surface.turn_lane_to_yojson
+                      r.tool_surface.turn_lane );
+                  ("config_root", `String r.tool_surface.config_root);
+                  ( "runtime_config_path",
+                    Json_util.string_opt_to_json r.tool_surface.runtime_config_path );
+                ]
+              in
+                let stop_reason_str =
+                  Keeper_execution_receipt.stop_reason_to_string r.stop_reason
+                in
+              let inference_fields =
+                match r.inference_telemetry with
+                | Some t ->
+                    let timings_fields =
+                      match t.timings with
+                      | Some ti ->
+                          (* Provider-native predicted throughput is the hardware
+                             decode rate, distinct from wall-clock
+                             [tokens_per_second] below. *)
+                          [
+                            ("prompt_ms", Json_util.float_opt_to_json ti.prompt_ms);
+                            ("predicted_ms", Json_util.float_opt_to_json ti.predicted_ms);
+                            ("hw_decode_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
+                            ("prompt_per_second", Json_util.float_opt_to_json ti.prompt_per_second);
+                            ("cache_n", Json_util.int_opt_to_json ti.cache_n);
+                          ]
+                      | None -> []
+                    in
+                    [
+                      ("system_fingerprint", Json_util.string_opt_to_json t.system_fingerprint);
+                      ("reasoning_tokens", Json_util.int_opt_to_json t.reasoning_tokens);
+                      ("request_latency_ms", Json_util.int_opt_to_json t.request_latency_ms);
+                    ] @ timings_fields
+                | None -> []
+              in
+              let usage_fields =
+                match usage_resolution with
+                | Some ({ delta = Some delta; _ } as resolution) ->
+                  [
+                    ( "usage_scope"
+                    , `String (Runtime_usage_scope.to_string r.usage_scope) );
+                    ("input_tokens", `Int delta.input_tokens);
+                    ("output_tokens", `Int delta.output_tokens);
+                    ("cache_creation_tokens", `Int delta.cache_creation_input_tokens);
+                    ("cache_read_tokens", `Int delta.cache_read_input_tokens);
+                    ("cost_usd", Json_util.float_opt_to_json delta.cost_usd);
+                    ("usage_resolution", Keeper_usage_resolution.to_json resolution);
+                    ( "tokens_per_second",
+                      if
+                        delta.output_tokens >= 0
+                        && latency_ms > 0
+                      then
+                        `Float
+                          (float_of_int delta.output_tokens
+                           /. (float_of_int latency_ms /. 1000.0))
+                      else `Null );
+                  ]
+                  @ usage_trust_json_fields usage_trust
+                | Some resolution ->
+                  [
+                    ( "usage_scope"
+                    , `String (Runtime_usage_scope.to_string r.usage_scope) );
+                    ("input_tokens", `Null);
+                    ("output_tokens", `Null);
+                    ("cache_creation_tokens", `Null);
+                    ("cache_read_tokens", `Null);
+                    ("cost_usd", `Null);
+                    ("tokens_per_second", `Null);
+                    ("usage_resolution", Keeper_usage_resolution.to_json resolution);
+                  ]
+                  @ usage_trust_json_fields usage_trust
+                | None ->
+                  [
+                    ( "usage_scope"
+                    , `String (Runtime_usage_scope.to_string r.usage_scope) );
+                    ("input_tokens", `Null);
+                    ("output_tokens", `Null);
+                    ("cache_creation_tokens", `Null);
+                    ("cache_read_tokens", `Null);
+                    ("cost_usd", `Null);
+                    ("tokens_per_second", `Null);
+                    ("usage_resolution", `Null);
+                  ]
+                  @ usage_trust_json_fields usage_trust
+              in
+              `Assoc ([
+                ("model_used", `Null);
+                ("resolved_model_id", `Null);
+                ("outcome", `String Keeper_decision_outcome.(to_string Success));
+                ("turn_count", `Int r.turn_count);
+                ("agent_core_turn_ordinal",
+                 match r.final_agent_core_turn_ordinal with
+                 | Some ordinal -> `Int ordinal
+                 | None -> `Null);
+                ("stop_reason", `String stop_reason_str);
+                ("usage_reported", `Bool r.usage_reported);
+                ("telemetry_reported", `Bool telemetry_reported);
+                ( "coverage_stage", Json_util.string_opt_to_json coverage_stage );
+                ( "coverage_reason", Json_util.string_opt_to_json coverage_reason );
+              ] @ usage_fields @ thinking_enabled_field @ inference_fields @ runtime_fields @ tool_surface_fields)
+          | None ->
+              (* Partial telemetry for turns without a run_result: record
+                 the turn's own outcome instead of reporting it as a success. *)
+              `Assoc [
+                (* The terminal reason is the typed failure projection built at
+                   the dispatch boundary. Persist its canonical code directly;
+                   free-form provider/error prose is diagnostic data, never a
+                   classification input. *)
+                ("error_category", `String terminal_reason_code);
+                ("outcome", `String (Keeper_decision_outcome.to_string outcome));
+                ("usage_reported", `Bool false);
+                ("telemetry_reported", `Bool false);
+                ("coverage_stage", `String "unknown");
+                ( "coverage_reason",
+                  `String (coverage_reason_of_no_result_outcome outcome) );
+              ] );
+      ])
+  in
+  try
+    Keeper_types_support.append_jsonl_line
+      (Keeper_types_support.keeper_decision_log_path config meta.name)
+      json
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string DecisionAuditFlushFailures)
+        ~labels:[("keeper", meta.name)]
+        ();
+      Log.Keeper.warn "append decision record failed for %s: %s"
+        meta.name (Printexc.to_string exn)
+
+(** Observe tool call history from run_result to update keeper metrics.
+    No action_taken type — we observe what the agent did, not classify it. *)

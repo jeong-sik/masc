@@ -1,0 +1,514 @@
+{
+  "scene": [
+    {
+      "ok": true,
+      "data": {
+        "tabId": 1,
+        "chars": 38,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "014ba7056511d39943a694114ab59eb5",
+        "nodes": [
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n1",
+            "rects": [
+              {
+                "height": 300,
+                "width": 200,
+                "x": 8,
+                "y": 8
+              }
+            ],
+            "role": "nav",
+            "sourceContext": null,
+            "tag": "nav",
+            "text": "Channels",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n2",
+            "rects": [
+              {
+                "height": 300,
+                "width": 600,
+                "x": 208,
+                "y": 8
+              }
+            ],
+            "role": "main",
+            "sourceContext": null,
+            "tag": "main",
+            "text": "Channel messages",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n3",
+            "rects": [
+              {
+                "height": 150,
+                "width": 600,
+                "x": 208,
+                "y": 29
+              }
+            ],
+            "role": "article",
+            "sourceContext": null,
+            "tag": "article",
+            "text": "article",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 129,
+                "width": 600,
+                "x": 208,
+                "y": 179
+              }
+            ],
+            "role": "article",
+            "sourceContext": null,
+            "tag": "article",
+            "text": "article",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": null,
+        "title": "Browser Lane channel fixture",
+        "truncated": false,
+        "url": "http://127.0.0.1:56260/",
+        "view": "regions",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 15.238667
+      }
+    },
+    {
+      "ok": true,
+      "data": {
+        "tabId": 1,
+        "chars": 55,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "014ba7056511d39943a694114ab59eb5",
+        "nodes": [
+          {
+            "clickable": true,
+            "color": "rgb(0, 0, 238)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "control",
+            "nodeId": "n5",
+            "rects": [
+              {
+                "height": 21,
+                "width": 111.13333129882812,
+                "x": 208,
+                "y": 8
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Open thread",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n3",
+            "rects": [
+              {
+                "height": 21,
+                "width": 221.1499938964844,
+                "x": 208,
+                "y": 29
+              }
+            ],
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Frontend release context",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 21,
+                "width": 192.28334045410156,
+                "x": 208,
+                "y": 179
+              }
+            ],
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Deployment follow-up",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": {
+          "documentId": "014ba7056511d39943a694114ab59eb5",
+          "nodeId": "n2"
+        },
+        "title": "Browser Lane channel fixture",
+        "truncated": false,
+        "url": "http://127.0.0.1:56260/",
+        "view": "content",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 8.749792
+      }
+    },
+    {
+      "ok": true,
+      "data": {
+        "tabId": 1,
+        "chars": 67,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "014ba7056511d39943a694114ab59eb5",
+        "nodes": [
+          {
+            "clickable": true,
+            "color": "rgb(0, 0, 238)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "control",
+            "nodeId": "n6",
+            "rects": [
+              {
+                "height": 21,
+                "width": 112.25,
+                "x": 8,
+                "y": 8
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "dev-frontend",
+            "whiteSpace": "normal"
+          },
+          {
+            "clickable": true,
+            "color": "rgb(0, 0, 238)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "control",
+            "nodeId": "n5",
+            "rects": [
+              {
+                "height": 21,
+                "width": 111.13333129882812,
+                "x": 208,
+                "y": 8
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Open thread",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n3",
+            "rects": [
+              {
+                "height": 21,
+                "width": 221.1499938964844,
+                "x": 208,
+                "y": 29
+              }
+            ],
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Frontend release context",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 21,
+                "width": 192.28334045410156,
+                "x": 208,
+                "y": 179
+              }
+            ],
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Deployment follow-up",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": null,
+        "title": "Browser Lane channel fixture",
+        "truncated": false,
+        "url": "http://127.0.0.1:56260/#thread",
+        "view": "content",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 10.742917
+      }
+    },
+    {
+      "ok": true,
+      "data": {
+        "tabId": 1,
+        "chars": 55,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "014ba7056511d39943a694114ab59eb5",
+        "nodes": [
+          {
+            "clickable": true,
+            "color": "rgb(0, 0, 238)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "control",
+            "nodeId": "n5",
+            "rects": [
+              {
+                "height": 21,
+                "width": 111.13333129882812,
+                "x": 208,
+                "y": 8
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Open thread",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n3",
+            "rects": [
+              {
+                "height": 21,
+                "width": 221.1499938964844,
+                "x": 208,
+                "y": 29
+              }
+            ],
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Frontend release context",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 21,
+                "width": 192.28334045410156,
+                "x": 208,
+                "y": 179
+              }
+            ],
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Deployment follow-up",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": {
+          "documentId": "014ba7056511d39943a694114ab59eb5",
+          "nodeId": "n2"
+        },
+        "title": "Browser Lane channel fixture",
+        "truncated": false,
+        "url": "http://127.0.0.1:56260/#thread",
+        "view": "content",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 10.669459
+      }
+    },
+    {
+      "ok": true,
+      "data": {
+        "tabId": 1,
+        "chars": 36,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "014ba7056511d39943a694114ab59eb5",
+        "nodes": [
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 21,
+                "width": 192.28334045410156,
+                "x": 208,
+                "y": 19
+              }
+            ],
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Deployment follow-up",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(0, 0, 0)",
+            "fontSize": 20,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n7",
+            "rects": [
+              {
+                "height": 21,
+                "width": 147.81666564941406,
+                "x": 208,
+                "y": 169
+              }
+            ],
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Older discussion",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": {
+          "documentId": "014ba7056511d39943a694114ab59eb5",
+          "nodeId": "n2"
+        },
+        "title": "Browser Lane channel fixture",
+        "truncated": false,
+        "url": "http://127.0.0.1:56260/#thread",
+        "view": "content",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 31.95025
+      }
+    }
+  ],
+  "interact": [
+    {
+      "ok": true,
+      "data": {
+        "tabId": 1,
+        "action": "click",
+        "scrollX": 0,
+        "scrollY": 0,
+        "title": "Browser Lane channel fixture",
+        "url": "http://127.0.0.1:56260/",
+        "urlBefore": "http://127.0.0.1:56260/"
+      }
+    },
+    {
+      "ok": true,
+      "data": {
+        "tabId": 1,
+        "urlBefore": "http://127.0.0.1:56260/#thread",
+        "action": "scroll_at",
+        "scrollX": 0,
+        "scrollY": 0,
+        "title": "Browser Lane channel fixture",
+        "url": "http://127.0.0.1:56260/#thread"
+      }
+    }
+  ],
+  "screenshot": [
+    {
+      "ok": true,
+      "data": {
+        "source": "automation",
+        "clientId": null,
+        "tabId": 1,
+        "title": "Browser Lane channel fixture",
+        "url": "http://127.0.0.1:56260/#thread",
+        "mimeType": "image/png",
+        "viewport": {
+          "documentId": "014ba7056511d39943a694114ab59eb5",
+          "width": 1366.0,
+          "height": 683.0,
+          "scrollX": 0.0,
+          "scrollY": 0.0
+        },
+        "elapsed_ms": 64.07575
+      }
+    }
+  ]
+}

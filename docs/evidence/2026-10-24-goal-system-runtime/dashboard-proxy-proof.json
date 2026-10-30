@@ -1,0 +1,8 @@
+{
+  "pid": 22001,
+  "port": 62127,
+  "backend_port": 61867,
+  "frontend_root": "/tmp/masc-goal-integration-20261024",
+  "source_sha": "d3a242837194e94c435a228228ac0eaab10724aa",
+  "scope": "development preview, same-origin checked MCP Origin translation, actual backend data, no production installation"
+}

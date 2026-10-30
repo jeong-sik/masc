@@ -1,0 +1,13 @@
+test suite	Checkout	2026-10-25T04:15:54.6844457Z   ref: 115078e0d6d24b72fa596255ed6fdd27e3bf5171
+test suite	Checkout	2026-10-25T04:15:54.9188989Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 115078e0d6d24b72fa596255ed6fdd27e3bf5171
+test suite	Checkout	2026-10-25T04:16:03.9873145Z  * branch              115078e0d6d24b72fa596255ed6fdd27e3bf5171 -> FETCH_HEAD
+test suite	Checkout	2026-10-25T04:16:03.9883099Z [command]/usr/bin/git rev-parse --verify --quiet 115078e0d6d24b72fa596255ed6fdd27e3bf5171^{object}
+test suite	Checkout	2026-10-25T04:16:03.9909020Z 115078e0d6d24b72fa596255ed6fdd27e3bf5171
+test suite	Checkout	2026-10-25T04:16:04.0005848Z [command]/usr/bin/git checkout --progress --force 115078e0d6d24b72fa596255ed6fdd27e3bf5171
+test suite	Checkout	2026-10-25T04:16:06.5094586Z Note: switching to '115078e0d6d24b72fa596255ed6fdd27e3bf5171'.
+test suite	Checkout	2026-10-25T04:16:06.5231848Z [command]/usr/bin/git log -1 --format=%H
+test suite	Checkout	2026-10-25T04:16:06.5261596Z 115078e0d6d24b72fa596255ed6fdd27e3bf5171
+test suite	Test	2026-10-25T04:20:35.1759295Z File "test/test_server_auxiliary_startup.ml", line 284, characters 16-65:
+test suite	Test	2026-10-25T04:20:35.1760246Z 284 |     let probe = Server_routes_http_runtime.make_health_probe_json
+test suite	Test	2026-10-25T04:20:35.1761813Z Error: Unbound value Server_routes_http_runtime.make_health_probe_json
+test suite	Test	2026-10-25T04:20:39.8537187Z ##[error]Process completed with exit code 1.

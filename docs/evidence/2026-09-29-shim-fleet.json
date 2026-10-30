@@ -1,0 +1,205 @@
+{
+  "source_run": 36494056394,
+  "source_job": 109169387016,
+  "source_commit": "3964c99b94dd4d3f462086b434fd92d8bff1b2c7",
+  "release": "0.46.0",
+  "published_release_at_install": false,
+  "sha256": "018254c8ce38a191c70a4c97aa0f530780faec8c7467ff47ef5d995d9c2fdb6b",
+  "fleet": [
+    {
+      "keeper": "simplifyer",
+      "container": "masc-keeper-vm-simplifyer-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/simplifyer",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "wkbl-front",
+      "container": "masc-keeper-vm-wkbl-front-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/wkbl-front",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "lane-smith",
+      "container": "masc-keeper-vm-lane-smith-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/lane-smith",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "ocaml-agent-ic",
+      "container": "masc-keeper-vm-ocaml-agent-ic-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/ocaml-agent-ic",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "tui-developer",
+      "container": "masc-keeper-vm-tui-developer-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/tui-developer",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "jazz-developer",
+      "container": "masc-keeper-vm-jazz-developer-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/jazz-developer",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "wkbl-data",
+      "container": "masc-keeper-vm-wkbl-data-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/wkbl-data",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "rust-hwp-guy",
+      "container": "masc-keeper-vm-rust-hwp-guy-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/rust-hwp-guy",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "context-reviewer",
+      "container": "masc-keeper-vm-context-reviewer-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/context-reviewer",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "container": "masc-keeper-vm-wkbl-web-leader-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/wkbl-web-leader",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "e-masc-the-leader",
+      "container": "masc-keeper-vm-e-masc-the-leader-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/e-masc-the-leader",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "hole-finder",
+      "container": "masc-keeper-vm-hole-finder-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/hole-finder",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "indie-geek-blue",
+      "container": "masc-keeper-vm-indie-geek-blue-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/indie-geek-blue",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "code-reviewer",
+      "container": "masc-keeper-vm-code-reviewer-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/code-reviewer",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "glossary-maniac",
+      "container": "masc-keeper-vm-glossary-maniac-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/glossary-maniac",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "goo-yang-bong",
+      "container": "masc-keeper-vm-goo-yang-bong-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/goo-yang-bong",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "rondo",
+      "container": "masc-keeper-vm-rondo-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/rondo",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "masc-pro-builder",
+      "container": "masc-keeper-vm-masc-pro-builder-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/masc-pro-builder",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "geek-scout",
+      "container": "masc-keeper-vm-geek-scout-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/geek-scout",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "won-chik",
+      "container": "masc-keeper-vm-won-chik-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/won-chik",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    },
+    {
+      "keeper": "pr-updater",
+      "container": "masc-keeper-vm-pr-updater-inherit-faea17a4",
+      "version_exit": 0,
+      "probe": "{\"name\":\"masc-exec-shim\",\"version\":\"3.0.0\",\"capabilities\":[\"observe\",\"user_notif\"],\"release\":\"0.46.0\"}",
+      "execute_exit": 0,
+      "stdout": "/masc-work/pr-updater",
+      "stderr": "{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"effect\",\"plan\":\"unrestricted\",\"boundary\":\"sandbox_applied\"}}}"
+    }
+  ],
+  "rondo_observe_read": {
+    "exit": 0,
+    "stdout": "(** Content-addressed durable store for input images.\n    RFC-keeper-vision-delegation-tool §2.5.\n\n    Image bytes are written to a content-addressed file unde",
+    "stderr": "\u001e{\"masc_exec_result\":{\"v\":3,\"exit\":0,\"signal\":null,\"timed_out\":false,\"shim_error\":null,\"execution_receipt\":{\"mode\":\"observe\",\"plan\":\"filesystem_and_network_box\",\"boundary\":\"sandbox_applied\"}}}\u001e"
+  },
+  "scope": "Installed RC shim baseline verification; not execution evidence for the subsequent source diagnostics change."
+}

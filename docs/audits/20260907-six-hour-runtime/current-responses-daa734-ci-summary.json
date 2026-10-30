@@ -1,0 +1,32 @@
+{
+  "observed_at": "2026-09-07T14:59:52.001486+00:00",
+  "pr_number": 34093,
+  "head_sha": "daa73469a71e605b499cae17cf1ffc3c94fba213",
+  "base_sha": "02306a416a5b6952dac622e2d50115e8f21bbfad",
+  "base_ref": "main",
+  "run_id": 34135259999,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34135259999",
+  "conclusion": "success",
+  "passed_total": 104,
+  "failed_total": 0,
+  "suites": [
+    {
+      "suite": "runtime_provider_auth_headers",
+      "passed": 58
+    },
+    {
+      "suite": "backend_openai_codec",
+      "passed": 46
+    }
+  ],
+  "new_local_http_combinations": 4,
+  "production_files_changed": 0,
+  "required_checks": {
+    "run_id": 34135718899,
+    "status": "in progress"
+  },
+  "limits": [
+    "Local HTTP parsing/serialization only; no OpenAI account access or live acceptance proof.",
+    "Historical0d7 catalog changes are not in this revision. Current main models and provider declarations are unchanged."
+  ]
+}

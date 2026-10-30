@@ -1,0 +1,43 @@
+{
+  "schema": "masc.remote_ssh_keeper_files.v1",
+  "result": "PASS",
+  "keeper": "native-bootstrap-keeper",
+  "expected_binary_commit": "a7685562be55678229ce29668c624d222cd76d67",
+  "binary_sha256": "3c5304609b04f85ba6747407a631a8e14730b7da7dd8d79c0be321a23d367f1a",
+  "model": "scripted loopback fixture",
+  "claims": [
+    "actual Keeper Execute/Write/Read/Edit/Grep over SSH",
+    "endpoint bytes match tool results",
+    "canonical final checkpoint",
+    "endpoint bytes survive server shutdown",
+    "same manual Keeper explicitly started and resumed after server restart",
+    "canonical ledger records completed SSH tools",
+    "declared preexisting regular-file hashes survive workflow, shutdown and restart"
+  ],
+  "identity_sha256": "f296e524ceaa7a66c6da1853fdde526f9f34e2e8af54ceb3e145c3ac0ef805a5",
+  "known_hosts_sha256": "4a85ee952e826c7e715caeca878de6e3efacff9a3545658c47411363f252068f",
+  "not_measured": [
+    "model quality",
+    "sustained continuity",
+    "GitHub authentication",
+    "bootstrap CLI",
+    "redirects and long jobs",
+    "candidate source unless commit matches",
+    "shim sandbox application receipt when peer omits it"
+  ],
+  "binary_commit": "a7685562be55678229ce29668c624d222cd76d67",
+  "model_requests": 11,
+  "tool_calls": 9,
+  "runtime_instances": [
+    "01a17388-7331-7000-9aa2-06873990c579",
+    "01a17388-b17e-7000-8bf5-459ded6bc462"
+  ],
+  "checkpoint_relative_path": ".masc/traces/trace-1792939687301-00000/trace-1792939687301-00000.json",
+  "actual_remote_cwd": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+  "model_projected_cwd": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+  "preserved_file_sha256": {
+    "retained file.bin": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21"
+  },
+  "successful_tools": 9,
+  "expected_refusals": 0
+}

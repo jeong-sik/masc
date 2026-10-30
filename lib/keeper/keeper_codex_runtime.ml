@@ -1,0 +1,2054 @@
+open Result.Syntax
+
+let config_error = Keeper_official_client_host.config_error
+let internal_error = Keeper_official_client_host.internal_error
+
+module Host = Keeper_official_client_host
+
+type scheduling_turn =
+  | Autonomous_schedule
+  | Direct_schedule of Keeper_chat_operation.Operation_id.t
+
+type successful_tool_completion =
+  | No_successful_tool_completion
+  | Successful_tool_completion
+
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  ; successful_tool_completion : successful_tool_completion
+  }
+
+let runtime_label = "Codex"
+
+let finish_raw_error ~keeper_name raw_trace_run error =
+  match raw_trace_run with
+  | None -> ()
+  | Some active ->
+    ignore
+      (Host.observe_raw_trace ~keeper_name ~stage:Host.Run_finish (fun () ->
+         Agent_core.Raw_trace.finish_run
+           active
+           ~final_text:None
+           ~stop_reason:None
+           ~error:(Some (Agent_core.Error.to_string error))))
+;;
+
+let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_result) =
+  match raw_trace_run with
+  | None -> result
+  | Some active ->
+    let all_blocks_recorded = ref true in
+    result.response.content
+    |> List.iteri (fun block_index block ->
+      if
+        Option.is_none
+          (Host.observe_raw_trace
+             ~keeper_name
+             ~stage:Host.Assistant_block
+             (fun () ->
+                Agent_core.Raw_trace.record_assistant_block active ~block_index block))
+      then all_blocks_recorded := false);
+    let finished =
+      Host.observe_raw_trace ~keeper_name ~stage:Host.Run_finish (fun () ->
+         Agent_core.Raw_trace.finish_run
+           active
+           ~final_text:
+             (Agent_core.Types.text_of_response result.response
+              |> String_util.trim_nonempty)
+           ~stop_reason:
+             (Some
+                (Agent_core.Types.stop_reason_to_string
+                   result.response.stop_reason))
+           ~error:None)
+    in
+    (match !all_blocks_recorded, finished with
+     | true, Some trace_ref -> { result with trace_ref = Some trace_ref }
+     | false, _ | _, None -> result)
+;;
+
+(* Codex admits explicit effort against the selected account's model/list
+   inside the app-server connection. The shared catalog clamp is for clients
+   without that discovery contract. *)
+
+let project_messages ~assembly messages =
+  let rec loop developer history = function
+    | [] -> Ok (List.rev developer, List.rev history)
+    | (message : Agent_core.Types.message) :: rest ->
+      (match message.role with
+       | Agent_core.Types.System ->
+         let projection=Keeper_context_submission_link.encoded_carrier ~assembly ~selected_blocks:None message in
+         loop (projection :: developer) history rest
+       | Agent_core.Types.User ->
+         let text = Host.encode_history_message message in
+         loop developer
+           ({ Runtime_codex_app_server.role = User; text } :: history)
+           rest
+       | Agent_core.Types.Assistant ->
+         let text = Host.encode_history_message message in
+         loop developer
+           ({ Runtime_codex_app_server.role = Assistant; text } :: history)
+           rest
+       | Agent_core.Types.Tool ->
+         let text = Host.encode_history_message message in
+         loop developer
+           ({ Runtime_codex_app_server.role = User; text } :: history)
+           rest)
+  in
+  loop [] [] messages
+;;
+
+let unbounded_model_input_capacity_bytes = max_int
+
+(* A Start seeds a new thread with history ([thread/inject_items]); a Resume
+   sends none of it, since the thread holds the conversation. A Start carries
+   the same range the Claude Code and Antigravity lanes send
+   ([carried_model_input_projection]), so the history a new thread receives is
+   bounded before anything is written (window RFC §4.1). The byte capacity
+   starts unbounded; the range is the only cut until the provider names a
+   typed overflow and the shrink ladder narrows it. *)
+
+let measure_model_input_message_bytes (message : Agent_core.Types.message) =
+  String.length (Host.encode_history_message message)
+;;
+
+(* The next structural retry boundary, computed from the bounded history
+   before source projections append synthetic evidence (for example Gate
+   replay). Using the bounded view also means the oracle reaches [None] at the
+   newest-atom floor instead of authorizing an identical provider retry from
+   the original unwindowed history. *)
+let record_next_shrink_capacity
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~observed_next_shrink_capacity_bytes
+    windowed =
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+    let full_bytes =
+      List.fold_left
+        (fun total message ->
+           total + measure_message_bytes message)
+        0
+        windowed
+    in
+    let target_capacity_bytes =
+      if capacity_bytes = unbounded_model_input_capacity_bytes
+      then
+        Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+          ~capacity:full_bytes
+      else
+        Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+          ~capacity:capacity_bytes
+    in
+    observed_next_shrink_capacity_bytes :=
+      Runtime_model_input_tail_window.next_shrink_capacity_bytes
+        ~allow_empty_history:true
+        ~measure_message_bytes
+        ~target_capacity_bytes
+        windowed)
+;;
+
+(* The history a Start carries: the range the other official-client lanes
+   carry ([Host.carried_start_range]), not the whole checkpoint history. A
+   Resume still runs this projection, since the per-turn context it sends in
+   front of the goal is placed by it, but writes none of the history; the
+   caller gives it no observers, and [thread_mode] keeps the range it did
+   not send from narrowing the fresh thread that retries it. The
+   provider-bound copy is cut; the durable conversation is not rewritten.
+   Only history is measured: what the attempt sends besides it is not
+   charged against the capacity.
+
+   The range starts where the last answered request's range did (the
+   seed), at the Librarian's absorbed point when that is later, and
+   otherwise at the end of the last completed turn, exactly as on the
+   Claude Code and Antigravity lanes. After a typed overflow the shrink
+   ladder's capacity cuts inside the range and names a front of its own; the
+   later front wins, so the ladder keeps narrowing instead of being widened
+   back by the seed. *)
+let carried_model_input_projection ~input_source
+    ?argument_projection
+    ~thread_mode
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~observed_next_shrink_capacity_bytes
+    ?on_model_input_window_observation
+    ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
+    ~turn_start
+    ~keeper_name
+    ~runtime_id
+    source_projection
+    messages =
+  let* frozen = match input_source with
+    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front messages in
+  let finish sent =
+    (match thread_mode with
+     | Runtime_codex_app_server.Start ->
+       record_next_shrink_capacity
+         ~measure_message_bytes
+         ~capacity_bytes
+         ~observed_next_shrink_capacity_bytes
+         sent
+     | Runtime_codex_app_server.Resume _ ->
+       (* A Resume sent none of this range, so its overflow says nothing
+          about the range's size: the thread it resumed is what was full.
+          Sizing the retry from the range would open the fresh thread that
+          retries it smaller than it needs to be. The retry gets the
+          ladder's own step from the attempt's capacity instead; the first
+          step still carries the whole range, and the
+          fresh thread's own overflow, if any, narrows from what it sent. *)
+       observed_next_shrink_capacity_bytes :=
+         Some
+           (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+              ~capacity:capacity_bytes));
+    Host.project_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent
+  in
+  let* sent =
+    Host.start_range_projection
+      ~input_source
+      ?argument_projection
+      ~measure_message_bytes
+      ~capacity_bytes
+      ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+      ~reserved_bytes:0
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ~librarian_front:(fun _ -> Ok frozen)
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      messages
+  in
+  finish sent
+;;
+
+let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_completion
+    (tool : Host.dynamic_tool) :
+    Runtime_codex_app_server.dynamic_tool =
+  { tool with
+    call =
+      (fun ~call_id input ->
+        (* Close the outer same-turn retry boundary before entering user/tool
+           code. The handler may commit and then raise or be cancelled, so
+           observing only its returned value would reopen a duplicate-effect
+           window. *)
+        (match tool.call_effect input with
+         | Agent_core.Tool.Read_only -> ()
+         | Agent_core.Tool.Effect_possible -> observe_effect_attempted ());
+        let result = tool.call ~call_id input in
+        (* This is evidence that the handler returned a successful tool result,
+           which is sufficient to accept a tool-only provider terminal. It is
+           not durable-effect truth and grants no retry authority. *)
+        if result.success then observe_successful_tool_completion ();
+        result)
+  }
+;;
+
+(* A late report stays with the CLI home selected for this turn, even if the
+   provider row is rebound while the app-server is running. *)
+let record_usage_windows ~quota_scope report =
+  Runtime_provider_usage_window.record
+    ~scope:quota_scope ~observed_at:(Time_compat.now ()) report
+;;
+
+(* A turn refused for spent usage carries no reset time
+   ([turn_failure_to_provider_error]), and the router stops picking the
+   account, so no later turn will report its windows either. The account
+   can still say when it resets without a turn, so ask it once. The read
+   outlives this turn ({!Runtime_provider_usage_read.read_codex_after_spent_usage_refusal}),
+   and the refused turn returns without waiting on it. *)
+let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config =
+  match Runtime_provider_usage_read.read_codex_after_spent_usage_refusal
+          ~clock ~cwd ~scope:quota_scope config with
+  | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
+  | Runtime_provider_usage_read.No_root_switch ->
+    Log.Keeper.warn
+      ~keeper_name
+      "Codex usage not read after a quota refusal: no server root switch"
+  | Runtime_provider_usage_read.Scheduling_failed ->
+    Log.Keeper.warn
+      ~keeper_name
+      "Codex usage not read after a quota refusal: background scheduling failed"
+;;
+
+(* The newest request: the context it occupied, in the inclusive convention
+   [Runtime_observation.request_context] uses (OpenAI's input count already
+   includes the cached prefix), and its output, final once the frame for
+   that response arrives. A compaction estimate is the whole new history:
+   its size is the occupancy, and it has no cache split and no response
+   behind it. *)
+let request_context_of_last_usage : Runtime_codex_app_server.last_usage -> Runtime_observation.request_context =
+  function
+  | Runtime_codex_app_server.Request_usage usage ->
+    { input_tokens = usage.input_tokens
+    ; cache =
+        Some
+          { Runtime_observation.cache_creation_input_tokens = usage.cache_write_input_tokens
+          ; cache_read_input_tokens = usage.cached_input_tokens
+          }
+    ; output_tokens = Some usage.output_tokens
+    }
+  | Runtime_codex_app_server.Context_estimate { estimated_tokens } ->
+    { input_tokens = estimated_tokens; cache = None; output_tokens = None }
+;;
+
+(* OpenAI counting, as Backend_openai_parse reads the API wire: the input
+   count already includes the cached prefix and the output count already
+   includes reasoning, so both copy across and the cache fields fill the
+   canonical record's cache slots. *)
+let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
+  : Agent_core.Types.api_usage
+  =
+  { input_tokens = usage.input_tokens
+  ; output_tokens = usage.output_tokens
+  ; cache_creation_input_tokens = usage.cache_write_input_tokens
+  ; cache_read_input_tokens = usage.cached_input_tokens
+  ; cost_usd = None
+  }
+;;
+
+(* Always installed so usage-window reports and the thread's usage counts are
+   recorded. A turn nobody streams, traces or observes gets only those; its
+   other events are ignored as before. *)
+let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+    ~on_usage_report ~position on_event =
+  (* The thread's running count, reported under the app-server turn id (the
+     identity the completion hook also writes for a Codex turn) and the
+     thread it counts. The app-server's own total is kept beside it; for a
+     context-window fill it is the window Codex wrote in place of the count. *)
+  let report_usage ~thread_id ~turn_id ~model (frame : Runtime_codex_app_server.frame_usage) =
+    let count, vendor_total_tokens =
+      match frame with
+      | Runtime_codex_app_server.Counted { thread_total; last = _ } ->
+        ( Keeper_client_usage_report.Running_count (api_usage_of_token_usage thread_total)
+        , thread_total.total_tokens )
+      | Runtime_codex_app_server.Context_window_filled { context_window } ->
+        Keeper_client_usage_report.Count_replaced, context_window
+    in
+    Option.iter
+      (fun report ->
+         report
+           { Keeper_client_usage_report.official_turn = turn_count
+           ; response_id = turn_id
+           ; model
+           ; conversation_id = thread_id
+           ; position
+           ; usage_scope = Runtime_usage_scope.Conversation_cumulative
+           ; count
+           ; vendor_total_tokens = Some vendor_total_tokens
+           })
+      on_usage_report
+  in
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress with
+  | None, None, None, None, None, None ->
+    Some
+      (function
+        | Runtime_codex_app_server.Usage_windows_reported report ->
+          record_usage_windows ~quota_scope report
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
+          report_usage ~thread_id ~turn_id ~model frame
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
+        | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
+        | Compaction_observed | Turn_finished _ -> ())
+  | _ ->
+    let emit event = Option.iter (fun callback -> callback event) on_event in
+    let next_tool_index = ref 1 in
+    let thinking_indexes = Hashtbl.create 8 in
+    let text_indexes = Hashtbl.create 8 in
+    let closed_content = Hashtbl.create 8 in
+    let first_text = ref true in
+    let current_text = ref None in
+    let last_text_index = ref None in
+    let fresh_text_index () =
+      if !first_text then (first_text := false; 0)
+      else let index = !next_tool_index in incr next_tool_index; index
+    in
+    let text_index item_id =
+      let key = match item_id with Some _ -> item_id | None -> !current_text in
+      let index = match Hashtbl.find_opt text_indexes key with
+        | Some index -> index
+        | None ->
+            let index = match key, Hashtbl.find_opt text_indexes None with
+              | Some _, Some index when not (Hashtbl.mem closed_content index) ->
+                  Hashtbl.remove text_indexes None; index
+              | _ -> fresh_text_index () in
+            Hashtbl.replace text_indexes key index; index in
+      current_text := key;
+      last_text_index := Some index;
+      index
+    in
+    let stop_content index =
+      if not (Hashtbl.mem closed_content index) then begin
+        Hashtbl.add closed_content index ();
+        emit (Agent_core.Types.ContentBlockStop {index})
+      end
+    in
+    let tool_indexes = Hashtbl.create 8 in
+    let native_tool_indexes = Hashtbl.create 8 in
+    (* Each agentMessage item is one assistant message; a commentary item and
+       the final answer after it are two. *)
+    let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
+    let emit_text ~index text =
+      emit (Agent_core.Types.ContentBlockDelta
+        { index; delta = Agent_core.Types.TextDelta text })
+    in
+    Some
+      (function
+        | Runtime_codex_app_server.Turn_started { turn_id; model } ->
+          emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
+        | Runtime_codex_app_server.Text_delta { item_id; delta } ->
+          emit_text ~index:(text_index item_id)
+            (Keeper_official_client_text_stream.forward text_stream ~message:item_id delta)
+        | Runtime_codex_app_server.Thinking_delta { item_id; part; delta } ->
+          let key = item_id, part in
+          let index = match Hashtbl.find_opt thinking_indexes key with
+            | Some index -> index
+            | None ->
+                let index = !next_tool_index in
+                incr next_tool_index;
+                Hashtbl.add thinking_indexes key index;
+                index in
+          emit (Agent_core.Types.ContentBlockDelta
+            { index; delta = Agent_core.Types.ThinkingDelta delta })
+        | Runtime_codex_app_server.Text_completed {item_id; source} ->
+          let key = match item_id with Some _ -> item_id | None -> !current_text in
+          let index = match Hashtbl.find_opt text_indexes key with
+            | Some _ as found -> found
+            | None when source = Runtime_codex_app_server.Adopted_anonymous_content ->
+                let found = Hashtbl.find_opt text_indexes None in
+                Option.iter (fun index ->
+                  Hashtbl.remove text_indexes None;
+                  Hashtbl.replace text_indexes key index) found;
+                found
+            | None -> None in
+          Option.iter stop_content index;
+          if key = !current_text then current_text := None;
+          if key = None then Hashtbl.remove text_indexes None
+        | Runtime_codex_app_server.Thinking_completed {item_id; part} ->
+          Option.iter stop_content (Hashtbl.find_opt thinking_indexes (item_id, part))
+        | Runtime_codex_app_server.Dynamic_tool_started
+            { call_id; tool_name; arguments } ->
+          Keeper_official_client_text_stream.tool_row text_stream;
+          let index = !next_tool_index in
+          incr next_tool_index;
+          Option.iter
+            (fun receipts -> Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
+            receipts;
+          Hashtbl.replace tool_indexes call_id index;
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = "tool_use"
+               ; tool_id = Some call_id
+               ; tool_name = Some tool_name
+               });
+          emit
+            (Agent_core.Types.ContentBlockDelta
+               { index
+               ; delta =
+                   Agent_core.Types.InputJsonSnapshot
+                     (Yojson.Safe.to_string arguments)
+               })
+        | Runtime_codex_app_server.Tool_delivery_closed {pending_tool_calls} ->
+          Option.iter (fun active ->
+            ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Tool_finish (fun () ->
+              Agent_core.Raw_trace.record_hook_invoked active
+                ~hook_name:"codex_tool_delivery_closed" ~hook_decision:"retain_for_next_turn"
+                ~hook_detail:(string_of_int pending_tool_calls) ()))) raw_trace_run
+        | Runtime_codex_app_server.Dynamic_tool_finished { call_id } ->
+          Option.iter (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id) receipts;
+          Option.iter
+            (fun index ->
+               Hashtbl.remove tool_indexes call_id;
+               emit (Agent_core.Types.ContentBlockStop { index }))
+            (Hashtbl.find_opt tool_indexes call_id)
+        | Runtime_codex_app_server.Native_tool_started observation ->
+          Option.iter
+            (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
+            on_native_action;
+          Host.record_raw_native_tool
+            ~keeper_name
+            ~raw_trace_run
+            ~phase:`Started
+            observation;
+          let index =
+            match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+            | Some index -> index
+            | None ->
+                let index = !next_tool_index in
+                incr next_tool_index;
+                Option.iter
+                  (fun identity -> Hashtbl.add native_tool_indexes identity index)
+                  observation.identity;
+                index
+          in
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = Runtime_native_tools.stream_content_type
+               ; tool_id = Runtime_native_tools.call_id observation
+               ; tool_name = observation.tool_name
+               })
+        | Runtime_codex_app_server.Native_tool_progress {item_id; progress} ->
+          Option.iter (fun index ->
+            Option.iter (fun observe -> observe ~block_index:index ~tool_call_id:(Some item_id) progress)
+              on_native_tool_progress)
+            (Hashtbl.find_opt native_tool_indexes (Runtime_native_tools.Call_id item_id))
+        | Runtime_codex_app_server.Native_tool_finished {observation; completion} ->
+          Host.record_raw_native_tool
+            ~keeper_name
+            ~raw_trace_run
+            ~phase:`Finished
+            observation;
+          Option.iter
+            (fun identity ->
+               Option.iter
+                 (fun index ->
+                    Option.iter (fun finish -> finish ~block_index:index
+                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                      on_native_tool_completion;
+                    Hashtbl.remove native_tool_indexes identity;
+                    emit (Agent_core.Types.ContentBlockStop { index }))
+                 (Hashtbl.find_opt native_tool_indexes identity))
+            observation.identity
+        | Runtime_codex_app_server.Elicitation_cancelled
+            { server_name; mode = _; reason = Runtime_codex_app_server.Host_input_unavailable } ->
+          Log.Keeper.info ~keeper_name
+            "Codex MCP request cancelled: host input unavailable (server=%s); the user did not decline it"
+            server_name
+        | Runtime_codex_app_server.Usage_windows_reported report ->
+          record_usage_windows ~quota_scope report
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
+          report_usage ~thread_id ~turn_id ~model frame
+        | Runtime_codex_app_server.Compaction_observed ->
+          Log.Keeper.info ~keeper_name "Codex context compaction completed"
+        | Runtime_codex_app_server.Turn_finished { text } ->
+          Option.iter (fun remainder ->
+            let index = match !last_text_index with
+              | Some index when not (Hashtbl.mem closed_content index) -> index
+              | Some _ | None -> fresh_text_index () in
+            emit_text ~index remainder;
+            stop_content index)
+            (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
+          emit
+            (Agent_core.Types.MessageDelta
+               { stop_reason = Some Agent_core.Types.EndTurn; usage = None });
+          emit Agent_core.Types.MessageStop)
+;;
+
+(* The failed turn's [codexErrorInfo] is the provider's own classification,
+   so it picks the provider error the failure route reads. A usage or session
+   budget refusal is the hard quota the Claude Code runtime reports as
+   [Quota_blocked]; without this, a Codex head out of weekly usage rotated as
+   a generic provider failure every cycle and left no quota evidence.
+   Which failures spend the account is [Runtime_codex_app_server.refused_for_spent_usage],
+   the rule the one-shot CLI path reads too.
+   [retry_after] stays [None]: the turn error carries no reset time. *)
+let turn_failure_to_provider_error error ~detail codex_error_info =
+  let provider = "codex_app_server" in
+  let network kind =
+    Llm_provider.Error.NetworkError
+      { provider; kind; timeout_phase = None; detail }
+  in
+  if Runtime_codex_app_server.refused_for_spent_usage error
+  then Llm_provider.Error.HardQuota { provider; retry_after = None; detail }
+  else
+  match codex_error_info with
+  | Some Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded ->
+    Llm_provider.Error.RateLimit { provider; retry_after = None; detail }
+  (* An overloaded server is the provider's capacity, the class a 529 and a
+     capacity refusal read as (#38290), not an outage. Both walk to the next
+     candidate; the class names why in the candidate evidence. *)
+  | Some Runtime_codex_app_server.Codex_error_info.Server_overloaded ->
+    Llm_provider.Error.CapacityExhausted
+      { scope = Llm_provider.Error.CapacityProvider
+      ; affected = [ provider ]
+      ; retry_after = None
+      ; detail
+      }
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Internal_server_error
+      | Runtime_codex_app_server.Codex_error_info.Response_too_many_failed_attempts _ )
+    ->
+    Llm_provider.Error.ProviderUnavailable { provider; detail }
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Http_connection_failed _
+      | Runtime_codex_app_server.Codex_error_info.Response_stream_connection_failed _ )
+    ->
+    network Llm_provider.Http_client.Unknown
+  | Some (Runtime_codex_app_server.Codex_error_info.Response_stream_disconnected _) ->
+    network Llm_provider.Http_client.End_of_file
+  | Some Runtime_codex_app_server.Codex_error_info.Unauthorized ->
+    Llm_provider.Error.AuthError { provider; detail }
+  (* Answered above: these two are the spent-usage refusal. *)
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+      | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded )
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Bad_request
+      | Runtime_codex_app_server.Codex_error_info.Cyber_policy
+      | Runtime_codex_app_server.Codex_error_info.Misalignment_policy_violation
+      | Runtime_codex_app_server.Codex_error_info.Thread_rollback_failed
+      | Runtime_codex_app_server.Codex_error_info.Sandbox_error
+      | Runtime_codex_app_server.Codex_error_info.Other
+      | Runtime_codex_app_server.Codex_error_info.Active_turn_not_steerable _
+      | Runtime_codex_app_server.Codex_error_info.Unrecognized _ )
+  | None ->
+    Llm_provider.Error.ProviderReportedError
+      { provider; error_type = Some "turn_failed"; detail }
+;;
+
+let codex_error_to_core_error = function
+  | Runtime_codex_app_server.Invalid_config detail ->
+    config_error ~field:"codex_app_server" detail
+  | Runtime_codex_app_server.Subscription_required detail ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError { provider = "codex_app_server"; detail })
+  | Runtime_codex_app_server.Context_window_exceeded
+      { message; tool_effect_attempted = false } ->
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow { message; limit = None })
+  | Runtime_codex_app_server.Context_window_exceeded _ as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "codex_app_server"
+         ; error_type = Some "context_window_exceeded_after_tool_effect"
+         ; detail = Runtime_codex_app_server.error_to_string error
+         })
+  (* Provider- and transport-side failures carry typed constructors so the
+     lane rotation chain ([core_error_to_runtime_outcome] returns [None] for
+     [Internal _], which short-circuits [lane_should_retry]) can judge them.
+     Mirrors [claude_error_to_core_error] / [runtime_error_to_core_error]
+     (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
+     must decide its rotation class at compile time. *)
+  | Runtime_codex_app_server.Spawn_failed detail ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "codex_app_server"; detail })
+  (* RFC-0454 P2. The client died or its stdout reached EOF. This shared the
+     [ProviderUnavailable] above until the chat pane had to tell the two
+     apart and could only do it by reading the rendered sentence back
+     ("Provider 'codex_app_server' unavailable: stdout closed"). The typed
+     value says it instead; [Keeper_runtime_attempt.core_error_to_runtime_outcome]
+     rebuilds the same provider error so rotation is unchanged. *)
+  | Runtime_codex_app_server.Process_exited { detail; turn_accepted } ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_connection_closed
+         { runtime_id = "codex_app_server"; detail; turn_accepted })
+  | (Runtime_codex_app_server.Turn_input_write_failed _
+    | Runtime_codex_app_server.Reasoning_effort_admission_failed _) as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "codex_app_server"
+         ; detail = Runtime_codex_app_server.error_to_string error })
+  | Runtime_codex_app_server.Protocol_error { stage; detail } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ParseError
+         { detail = Printf.sprintf "%s: %s" stage detail })
+  | Runtime_codex_app_server.Rpc_error { method_; code; message; _ } as error ->
+    (* The app-server refuses a turn/start whose input text exceeds its own
+       character limit with invalid_params (-32602) and typed data
+       (input_error_code = "input_too_large"), before any tool runs
+       (turn_processor.rs, input_too_large_error). Lower it to the typed size
+       refusal so the shrink ladder narrows the carried front and retries on
+       the same candidate; [InputCapacity] would rotate to a candidate that
+       refuses the same input. The status is the canonical payload-too-large
+       signal this type names; the app-server's own code is a generic
+       invalid-params, and the size fact is the typed data the parser already
+       witnessed. *)
+    (match Runtime_codex_app_server.input_capacity_refusal error with
+     | Some _ ->
+       Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
+            { message = Runtime_codex_app_server.error_to_string error
+            ; reason =
+                Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
+            })
+     | None ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderReportedError
+            { provider = "codex_app_server"
+            ; error_type = Some "rpc_error"
+            ; detail =
+                Printf.sprintf
+                  "%s%s: %s"
+                  method_
+                  (Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code)
+                  message
+            }))
+  | Runtime_codex_app_server.Unsupported_server_request method_ ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.UnknownVariant
+         { type_name = "codex_app_server.server_request"; value = method_ })
+  (* Effectful failed turns are fenced out of same-turn retry by
+     [Keeper_provider_attempt_effect] at the driver level, so this mapping
+     stays purely descriptive of what the provider reported. *)
+  | Runtime_codex_app_server.Turn_failed { detail; codex_error_info } as error ->
+    Agent_core.Error.Provider (turn_failure_to_provider_error error ~detail codex_error_info)
+  | Runtime_codex_app_server.Timeout { seconds; turn_accepted = false } ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
+         { message =
+             Printf.sprintf
+               "Codex app-server stream was idle for %.3fs before turn/start"
+               seconds
+         ; phase = None
+         })
+  (* Keep timeout evidence available to candidate backpressure for the next
+     turn. [observe_failed_dispatch] records the ambiguous dispatch separately,
+     so the driver's effect fence still forbids replay within this turn. *)
+  | Runtime_codex_app_server.Timeout { seconds; turn_accepted = true } ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
+         { message =
+             Printf.sprintf
+               "Codex app-server stream was idle for %.3fs after turn/start was \
+                accepted; completion is unconfirmed"
+               seconds
+         ; phase = Some Llm_provider.Http_client.Cli_stdout_idle
+         })
+  (* Server-reported "interrupted" turn status and host graceful shutdown:
+     not a provider fault, so rotation to another runtime would re-run a turn
+     that was intentionally stopped. Both stay off the rotation chain — the
+     carrier is still an agent-core internal error, which
+     [core_error_to_runtime_outcome] reads as [None] — and RFC-0454 P2 turned
+     the sentence into the value, because the chat pane was searching the
+     sentence to decide what to draw. *)
+  | Runtime_codex_app_server.Turn_interrupted ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Host_stopped_turn
+         { runtime_id = "codex_app_server"
+         ; stop = Keeper_internal_error.Runtime_reported_interrupt
+         })
+  | Runtime_codex_app_server.Runtime_shutting_down ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Host_stopped_turn
+         { runtime_id = "codex_app_server"
+         ; stop = Keeper_internal_error.Host_graceful_shutdown
+         })
+  | Runtime_codex_app_server.Stopped_by_host _ ->
+    Agent_core.Error.Internal
+      "Codex host stop escaped the typed checkpoint boundary"
+;;
+
+let recovery_failure_of_client_error = function
+  | Runtime_codex_app_server.Reasoning_effort_admission_failed _ ->
+    Keeper_official_client_session_store.Pre_dispatch_failed
+  | Runtime_codex_app_server.Spawn_failed _ ->
+    Keeper_official_client_session_store.Transient_spawn_failed
+  | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Runtime_shutting_down
+  | Runtime_codex_app_server.Process_exited _
+  | Runtime_codex_app_server.Turn_input_write_failed _
+  | Runtime_codex_app_server.Timeout _ ->
+    Keeper_official_client_session_store.Transport_interrupted
+  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Protocol_error _
+  | Runtime_codex_app_server.Rpc_error _
+  | Runtime_codex_app_server.Unsupported_server_request _ ->
+    Keeper_official_client_session_store.Protocol_failed
+  | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Turn_failed _ ->
+    Keeper_official_client_session_store.Provider_rejected
+  | Runtime_codex_app_server.Context_window_exceeded
+      { tool_effect_attempted; _ } ->
+    (* Same admission rule as the Claude Code runtime: an input the provider
+       proved over capacity must not be auto-replayed next cycle. The Codex
+       error carries only the tool-effect axis, so an observed tool effect
+       fences and everything else is a floor-exhausted rejection. *)
+    Keeper_official_client_session_store.Input_rejected
+      (if tool_effect_attempted
+       then Keeper_official_client_session_store.Effect_fenced
+       else Keeper_official_client_session_store.Bootstrap_floor_exceeded)
+  | Runtime_codex_app_server.Stopped_by_host _ ->
+    Keeper_official_client_session_store.Protocol_failed
+;;
+
+(* A Gate continuation may only resume the thread it was captured in. When
+   that thread refuses the resume as a context overflow, the thread itself is
+   full: a Resume sends none of the conversation, so its input is the same at
+   every capacity, and no fresh start may carry the continuation. It is
+   recorded [Vendor_session_full], as in the Claude Code lane: the Gate
+   operation fails for good, whether a tool effect came first stays in the
+   record, and the next ordinary turn starts fresh. *)
+let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
+  match thread_mode, gate_continuation, error with
+  | ( Runtime_codex_app_server.Resume _
+    , true
+    , Runtime_codex_app_server.Context_window_exceeded { tool_effect_attempted; _ } ) ->
+    Keeper_official_client_session_store.Vendor_session_full
+      (if tool_effect_attempted
+       then Keeper_official_client_session_store.Activity_observed
+       else Keeper_official_client_session_store.No_activity_observed)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Invalid_config _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Spawn_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Reasoning_effort_admission_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_input_write_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Protocol_error _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Rpc_error _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Subscription_required _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Unsupported_server_request _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Context_window_exceeded _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Stopped_by_host _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_interrupted)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Runtime_shutting_down)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Process_exited _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Timeout _) ->
+    recovery_failure_of_client_error error
+;;
+
+(* Codex ships its own file tools and neither it nor MASC can switch them
+   off -- [permissions_profile_of_posture] says as much. Under [Native_read]
+   they run in a read-only sandbox, so the model holds a working [Write] and a
+   refused [apply_patch] at the same time and cannot tell them apart until one
+   of them fails. The refusal it meets first is the one it reports: a keeper
+   with an open write path stopped for six hours saying the workspace was
+   read-only.
+
+   This states which of the two the session refused. It is a projection of the
+   configuration MASC already chose, not an instruction -- what the keeper does
+   about it stays the keeper's.
+
+   Checked against codex-cli 0.149.1 on 2026-08-25, profile ids re-read from
+   0.153.2 on 2026-09-04. MASC reaches the read-only posture through the named
+   permissions profile [:read-only] ([thread/start]'s [permissions]), not
+   through [sandbox] and its [SandboxMode] vocabulary, which this client never
+   sends. Such a session refuses a built-in patch with the wording this note
+   contradicts: "patch rejected: writing is blocked by read-only sandbox"
+   (openai/codex#30712, #24806).
+
+   The MASC tools go on working because Codex does not apply the sandbox to
+   MCP-provided tools. That is reported as a hole rather than a promise --
+   openai/codex#4152, closed without an answer -- so it is the assumption to
+   check first if writes start failing. If Codex closes it, [Native_read]
+   leaves a keeper with no write path at all, and the posture is what has to
+   change; a note about which tool to reach for would then be wrong. *)
+let native_posture_note = function
+  | Runtime_native_tools.Native_read ->
+    [ "Your built-in file edits run under a read-only sandbox in this session, \
+       so apply_patch and every other built-in write is refused. File changes \
+       go through the Write and Edit tools, which are not sandboxed that way. \
+       A refused built-in write does not mean the workspace is read-only."
+    ]
+  | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
+;;
+
+(* A dispatched turn may have effects even if no tool/text notification made
+   it back to MASC. Preserve that uncertainty before mapping its failure into
+   provider evidence. Setup failures submitted no turn and remain rotatable. *)
+let observe_failed_dispatch ~observe_transport_uncertain = function
+  | Runtime_codex_app_server.Turn_input_write_failed _
+  | Runtime_codex_app_server.Timeout { turn_accepted = true; _ }
+  | Runtime_codex_app_server.Process_exited { turn_accepted = true; _ } ->
+    observe_transport_uncertain ()
+  | Runtime_codex_app_server.Timeout { turn_accepted = false; _ }
+  | Runtime_codex_app_server.Process_exited { turn_accepted = false; _ }
+  | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Protocol_error _
+  | Runtime_codex_app_server.Rpc_error _
+  | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Unsupported_server_request _
+  | Runtime_codex_app_server.Context_window_exceeded _
+  | Runtime_codex_app_server.Turn_failed _
+  | Runtime_codex_app_server.Stopped_by_host _
+  | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Runtime_shutting_down -> ()
+;;
+
+let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
+    ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+    ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
+    ~on_transmitted_model_input ~hooks
+    ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
+    ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
+    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
+    ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
+  on_results_ready None;
+  match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
+  | None, _ ->
+    Error
+      (config_error
+         ~field:"eio_env"
+         "Codex app-server runtime requires the initialized Eio standard environment")
+  | _, None ->
+    Error
+      (config_error
+         ~field:"eio_clock"
+         "Codex app-server runtime requires the initialized Eio clock")
+  | Some env, Some clock ->
+    let receipts =
+      Option.map (fun notify -> Keeper_official_client_tool_receipts.create ~delivery:Keeper_official_client_tool_receipts.Immediate ~notify) on_tool_execution
+    in
+    let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
+      | None -> hooks
+    in
+    let owner_epoch = Keeper_official_client_session_store.process_epoch () in
+    let* stored_session =
+      match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+      | Ok session -> Ok session
+      | Error detail ->
+        Error (internal_error ("Codex session binding load failed: " ^ Keeper_official_client_session_store.read_error_to_string detail))
+    in
+    let* stored_session =
+      match stored_session with
+      | Some
+          ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
+        (match
+           Keeper_official_client_session_store.reconcile_process_restart
+             ~base_path
+             ~keeper_name
+             ~expected
+             ~current_owner_epoch:owner_epoch
+             ~required_at:(Time_compat.now ())
+         with
+         | Ok reconciled -> Ok (Some reconciled)
+         | Error detail ->
+           Error
+             (config_error
+                ~field:"official_client_session.phase"
+                detail))
+      | None | Some { phase = (Ready | Recovery_required _ | Settled _); _ } ->
+        Ok stored_session
+    in
+    let* claim_plan =
+      match
+        Keeper_official_client_session_store.plan_claim
+          ~expected:stored_session
+          ~client_kind:Codex
+          ~runtime_id
+      with
+      | Ok plan -> Ok plan
+      | Error error -> Error (Keeper_official_client_session_store.core_error_of_claim_error error)
+    in
+    (* Before the plan is read. A moved surface has to change thread_mode and
+       the ordinal too, not just what the store writes, or the adapter asks the
+       provider to resume a thread the store has already replaced.
+       [Host.prepare_turn] returns the same list it was given -- it only
+       validates forced tool choice -- so hashing the input here is the digest
+       that reaches [claim]. *)
+    let* native_posture =
+      Host.resolve_native_posture
+        ~posture_source:
+          (Runtime_native_tools.posture_source_of_required required_native_posture)
+        ~base_path
+        ~keeper_name
+        ~client_label:"Codex"
+        ~default:Runtime_native_tools.codex_default
+        ~none_supported:(Runtime_execution.supports_native_none (Codex_app_server config))
+    in
+    let tool_surface_sha256 =
+      Keeper_official_client_session_store.tool_surface_sha256
+        ?account_home:(Runtime_codex_app_server.effective_account_home config.account_home)
+        ~native_posture
+        tools
+    in
+    let* () = match official_client_continuation with
+      | None -> Ok ()
+      | Some checkpoint ->
+        Keeper_official_client_session_store.validate_continuation ~checkpoint
+          ~expected:stored_session ~client_kind:Codex ~runtime_id ~tool_surface_sha256
+        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
+    let claim_plan =
+      Keeper_official_client_session_store.reconcile_tool_surface
+        claim_plan
+        ~tool_surface_sha256
+    in
+    let thread_mode =
+      match claim_plan.previous_settlement with
+      | None -> Runtime_codex_app_server.Start
+      | Some { session_id; _ } ->
+        Runtime_codex_app_server.Resume { thread_id = session_id }
+    in
+    let turn_count = claim_plan.turn_count in
+    let* historical_task_message = match official_task_reference with
+      | None -> Ok None
+      | Some reference -> Keeper_official_task_reference.message
+          ~current:official_client_continuation reference
+        |> Result.map Option.some
+        |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+    let initial_messages = Option.to_list historical_task_message @ initial_messages in
+    let* prepared =
+      Host.prepare_turn
+        ~composed_context
+        ~configured_reasoning_effort:
+          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~runtime_label
+        ~keeper_name
+        ~turn_count
+        ~system_prompt
+        ~tools
+        ~initial_messages
+        ~model_input_projection:
+          (Some (project_history ~thread_mode
+                   ~history_prefix:(Option.to_list historical_task_message)))
+        ~hooks:(Some hooks)
+    in
+    let* prompt, images =
+      match goal_blocks with
+      | None -> Ok (goal, [])
+      | Some blocks ->
+        let* text, images =
+          Host.text_and_images_of_blocks
+            ~media_store ~runtime_label ~field:"goal_blocks" blocks
+        in
+        Ok
+          ( text
+          , List.map
+              (fun (image : Host.image_block) ->
+                { Runtime_codex_app_server.media_type = image.Host.media_type
+                ; base64_data = image.Host.base64_data
+                })
+              images )
+    in
+    let posture_notes = native_posture_note native_posture in
+    let composed_context = prepared.composed_context in
+    let compose_developer_instructions developer_messages =
+      (List.map Keeper_context_submission_link.literal (prepared.system_prompt :: posture_notes)) @ developer_messages
+      |> List.filter (fun piece -> String.trim (Keeper_context_submission_link.text piece) <> "")
+      |> Keeper_context_submission_link.concat ~separator:"\n\n"
+      |> Keeper_context_submission_link.trim
+    in
+    let* () = Keeper_official_task_reference.require_preserved
+      ~reference:historical_task_message prepared.messages
+      |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+    (* Preserve the declaration until the selected account admits it. The raw
+       run start records this request; the admission hook records the wire
+       effort after live negotiation, including on every resumed turn. *)
+    let requested_reasoning_effort = prepared.reasoning_effort in
+    (* A Resume sends none of the conversation: the thread holds it and
+       compacts it itself. What changes per turn or per operation -- the
+       context carrier, the Librarian working state and the historical task
+       reference ({!Host.is_carried_on_resume}) -- goes in front of the goal,
+       as the Claude Code lane sends it. Codex applies the [developerInstructions]
+       a [thread/resume] names only when it next compacts the thread (codex-cli
+       0.156.1, 2026-09-25: a resumed thread's requests carried none of them
+       until its compaction wrote them into the replacement history), so the
+       carried messages stay out of them and the compacted thread never holds a
+       stale copy of what the prompt carries.
+
+       History can contain large tool results. Projecting and encoding it for
+       a new session is CPU work over immutable messages; keeping it on the
+       owner domain stalls HTTP, SSE and every other Keeper sharing that
+       scheduler. Vendor-session frontier provenance needs only its message
+       count, not an encoding or digest of the canonical conversation. *)
+    let* history, context_frontier, composed_developer_instructions =
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        let* developer_messages, history =
+          project_messages ~assembly:composed_context
+            (match thread_mode with
+             | Runtime_codex_app_server.Start -> prepared.messages
+             | Runtime_codex_app_server.Resume _ ->
+               (* Runtime_codex_app_server drops history on Resume. Only
+                  non-carried System messages can enter developerInstructions;
+                  formatting the held conversation here would allocate it again. *)
+               List.filter
+                 (fun (message : Agent_core.Types.message) ->
+                    not (Host.is_carried_on_resume message)
+                    && match message.role with
+                       | Agent_core.Types.System -> true
+                       | Agent_core.Types.User | Agent_core.Types.Assistant
+                       | Agent_core.Types.Tool -> false)
+                 prepared.messages)
+        in
+        let snapshot_messages =
+          List.filter (fun message -> not (Host.is_composed_system_context message))
+            prepared.messages in
+        let context_frontier : Keeper_official_client_session_store.context_frontier =
+          { message_count = List.length snapshot_messages;
+            delivery = (match thread_mode with
+              | Runtime_codex_app_server.Start -> Prepared_start_context
+              | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
+            acknowledged_turn = None; held_context = [] } in
+        (* [None] here means "send no developerInstructions": [optional_field]
+           omits the member and the app-server runs the thread on Codex's own
+           default instructions. The probe and fusion callers build [None] on
+           purpose and do not pass through here. This composition always carries
+           [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
+           so the joined text is never empty. A check on the joined text could
+           not see a blank keeper prompt behind the posture note this lane
+           appends (#33165). *)
+        let composed_developer_instructions =
+          compose_developer_instructions developer_messages
+        in
+        Ok (history, context_frontier, composed_developer_instructions))
+    in
+    let prompt, held_context, prompt_projection =
+      match thread_mode with
+      | Runtime_codex_app_server.Start ->
+        let projection = Host.start_prompt prepared prompt in
+        Keeper_context_submission_link.text projection,
+        Host.start_held_context ?composed_context prepared.messages, projection
+      | Runtime_codex_app_server.Resume _ ->
+        let delivery = Host.resume_prompt ~goal:prompt ?composed_context
+          ~held:(Keeper_official_client_session_store.held_context_for_resume
+            claim_plan ~expected:stored_session) prepared.messages in
+        delivery.prompt, delivery.held_context, delivery.context_projection
+    in
+    let context_frontier = { context_frontier with held_context } in
+    let settled_held_context = ref held_context in
+    let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
+    (* Completion Authority is current-turn User context on Start and Resume;
+       it never enters the vendor's persistent developerInstructions. Other
+       Start System context keeps its existing instruction surface. *)
+    (* Ordinary context keeps its existing placement. Receipts that outlived
+       a cancelled vendor cell enter both Start and Resume as acknowledged
+       developer items, independently of the previous session's survival. *)
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> Result.map_error internal_error in
+    let developer_context = Keeper_client_tool_outbox.developer_context tool_outbox in
+    let terminal_error = ref None in
+    (* Reported only after the complete turn/start write. A Resume sent none of
+       the conversation; the thread holds it. *)
+    let report_transmitted_input () =
+      match
+        on_transmitted_model_input
+          (match thread_mode with
+           | Runtime_codex_app_server.Start -> Host.Whole_input_transmitted prepared.messages
+           | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session)
+      with
+      | () -> ()
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        (* This callback is entered only after a complete turn/start write.
+           Losing its observation cannot restore pre-dispatch retry safety. *)
+        observe_transport_uncertain ();
+        Printexc.raise_with_backtrace exn backtrace
+    in
+    let client_config =
+      { Runtime_codex_app_server.cli_path = config.cli_path
+      ; account_home = config.account_home
+      ; isolated_home = None
+      ; model = config.model
+      ; context_window
+      ; native = native_posture
+      ; developer_instructions
+      ; admission_timeout_s = config.timeout_s
+      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
+      (* A keeper turn is a conversation, not a schema contract: nothing
+         downstream parses its text against a domain schema. *)
+      ; output_schema = None
+      }
+    in
+    let* (host_dynamic_tools, _) =
+      Host.dynamic_tools
+        ~result_scope:None
+        ~content_transport:Runtime_official_client_tool.Codex
+        ~accepts_image_input
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
+        ~runtime_label
+        ~keeper_name
+        ~turn_count
+        ~tools:prepared.tools
+        ~loading_plan
+        ~hooks
+        ~event_bus
+        ~context_injector
+        ~context
+        ~terminal_effect_state
+        ~terminal_error
+        ~pre_tool_rejects
+        ~raw_trace_run:None
+        ?on_tool_boundary:on_official_client_tool_boundary
+        ~on_result_handoff:on_official_client_result_handoff
+        ()
+    in
+    let dynamic_tools =
+      List.map
+        (codex_dynamic_tool
+           ~observe_effect_attempted
+           ~observe_successful_tool_completion)
+        host_dynamic_tools
+    in
+    (* The only size this tree reports for a turn is
+       [keeper_unified_turn.ml]'s [system_and_user_bytes], which sums
+       [system_prompt + world_state + user_message] and nothing else. The
+       history and the tool declarations reach the provider through
+       [thread/inject_items] and [thread/start]'s [dynamicTools], so a live
+       keeper can report 6,971 bytes used of a 128,000 budget while the server
+       answers that the context window is full (#28071). A [Start] also injects
+       the whole history into the new thread, so "fresh" does not mean "empty
+       context" — the mode is recorded because the injection only happens on
+       that branch. Sizes are the bytes this process holds, not provider
+       tokens; they bound the request, they do not price it. *)
+    Log.Keeper.info
+      ~keeper_name
+      "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d developer_context_bytes=%d \
+       history_messages=%d history_bytes=%d tools=%d tool_surface_bytes=%d"
+      runtime_label
+      (match thread_mode with
+       | Runtime_codex_app_server.Start -> "start"
+       | Runtime_codex_app_server.Resume _ -> "resume")
+      (String.length prompt)
+      (Option.fold ~none:0 ~some:String.length client_config.developer_instructions)
+      (List.fold_left (fun bytes text -> bytes + String.length text) 0 developer_context)
+      (List.length history)
+      (Runtime_codex_app_server.history_bytes history)
+      (List.length dynamic_tools)
+      (Runtime_codex_app_server.dynamic_tool_bytes dynamic_tools);
+    let* () =
+      match
+        Runtime_codex_app_server.validate_turn
+          ~dynamic_tools
+          ~thread_mode
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+          client_config
+          ~prompt
+          ~images
+      with
+      | Ok () -> Ok ()
+      | Error error -> Error (codex_error_to_core_error error)
+    in
+    let raw_trace_run =
+      match raw_trace with
+      | None -> None
+      | Some sink ->
+        Host.observe_raw_trace ~keeper_name ~stage:Host.Run_start (fun () ->
+          Agent_core.Raw_trace.start_run
+            sink
+            ~agent_name:keeper_name
+            ~prompt
+            ?model:config.model
+            ?reasoning_effort:
+              (Option.map
+                 Llm_provider.Reasoning_effort.to_string
+                 requested_reasoning_effort)
+            ())
+    in
+    let* (host_dynamic_tools, result_producer) =
+      Host.dynamic_tools
+        ~result_scope:(Some result_scope)
+        ~base_path
+        ~content_transport:Runtime_official_client_tool.Codex
+        ~accepts_image_input
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
+        ~runtime_label
+        ~keeper_name
+        ~turn_count
+        ~tools:prepared.tools
+        ~loading_plan
+        ~hooks
+        ~event_bus
+        ~context_injector
+        ~context
+        ~terminal_effect_state
+        ~terminal_error
+        ~pre_tool_rejects
+        ~raw_trace_run
+        ?on_tool_boundary:on_official_client_tool_boundary
+        ~on_result_handoff:on_official_client_result_handoff
+        ()
+    in
+    let produced_results = ref None in
+    let confirmed_tool_calls = ref [] in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map (fun producer ->
+          Keeper_client_tool_outbox.close_delivery_frontier producer
+          |> fun snapshot -> Keeper_client_tool_outbox.retain_confirmed_calls snapshot
+              ~call_ids:!confirmed_tool_calls) result_producer
+    in
+    let dynamic_tools =
+      List.map
+        (codex_dynamic_tool
+           ~observe_effect_attempted
+           ~observe_successful_tool_completion)
+        host_dynamic_tools
+    in
+    let* claimed_session =
+      match
+        Keeper_official_client_session_store.claim_with_context_frontier
+          ~context_frontier:(Some context_frontier)
+          ~base_path
+          ~keeper_name
+          ~expected:stored_session
+          ~client_kind:Codex
+          ~owner_epoch
+          ~runtime_id
+          ~tool_surface_sha256
+          ~updated_at:(Time_compat.now ())
+      with
+      | Ok session -> Ok session
+      | Error detail ->
+        let error = internal_error ("Codex session claim failed: " ^ detail) in
+        finish_raw_error ~keeper_name raw_trace_run error;
+        Error error
+    in
+    let session_state = ref claimed_session in
+    let recovery_failure =
+      ref Keeper_official_client_session_store.Transport_interrupted
+    in
+    let update_session label transition =
+      match transition !session_state with
+      | Ok next ->
+        session_state := next;
+        Ok ()
+      | Error detail ->
+        recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
+        Error (Printf.sprintf "Codex session %s failed: %s" label detail)
+    in
+    let require_recovery detail =
+      match !session_state with
+      | { Keeper_official_client_session_store.phase =
+            (Ready | Settled _ | Recovery_required _)
+        ; _
+        } ->
+        Ok ()
+      | ({ Keeper_official_client_session_store.phase =
+             (Start _ | Active _ | Turn_inflight _)
+         ; _
+         } as expected) ->
+        (match
+           Keeper_official_client_session_store.require_recovery
+             ~base_path
+             ~keeper_name
+             ~expected
+             ~failure:!recovery_failure
+             ~detail
+             ~required_at:(Time_compat.now ())
+         with
+         | Ok recovery ->
+           session_state := recovery;
+           Ok ()
+         | Error detail -> Error detail)
+    in
+    let settle_failed_claim detail =
+      match
+        Keeper_official_client_session_store.failure_disposition
+          !recovery_failure
+      with
+      | Transient ->
+        (match !session_state with
+         | { phase = (Ready | Settled _ | Recovery_required _); _ } -> Ok ()
+         | ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
+           (match
+              Keeper_official_client_session_store.release_transient
+                ~base_path
+                ~keeper_name
+                ~expected
+                ~failure:!recovery_failure
+                ~released_at:(Time_compat.now ())
+            with
+            | Ok released ->
+              session_state := released;
+              Ok ()
+            | Error detail -> Error detail))
+      | Ambiguous | Fatal -> require_recovery detail
+    in
+    let started_at = Time_compat.now () in
+    let settle_host_stop stop =
+      match (!session_state).Keeper_official_client_session_store.phase with
+      | Turn_inflight { session_id; turn_id = Some turn_id; _ } ->
+        let projected =
+          Host.host_stop_result
+            ~runtime_id
+            ~model:(Option.value client_config.model ~default:runtime_id)
+            ~session_id
+            ~turn_id
+            ~provider_turn_ordinal:turn_count
+            ~turns_used:turn_count
+            ~latency_ms:
+              (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
+              (* A host stop ends the turn from inside a tool call, before
+                 the app-server's thread/tokenUsage/updated for the response
+                 that asked for it arrives. Frames of earlier responses in
+                 the turn were already reported on the stream. *)
+            ~request_context:None
+            stop
+        in
+        let* () =
+          match projected with
+          | Error _ -> Ok ()
+          | Ok result ->
+            Host.invoke_turn_completion_hooks
+              ~runtime_label
+              ~keeper_name
+              ~turn_count
+              ~hooks
+              result.response
+        in
+        recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
+        (match
+           (* A tool boundary does not report whether Codex compacted the
+              thread. Re-send context on the next Resume rather than treating
+              an unobserved copy as held. *)
+           Keeper_official_client_session_store.settle_holding
+             ~held_context:[]
+             ~base_path
+             ~keeper_name
+             ~expected:!session_state
+             ~session_id
+             ~turn_id
+             ~updated_at:(Time_compat.now ())
+         with
+         | Error detail ->
+           Error (internal_error ("Codex host-stop settlement failed: " ^ detail))
+         | Ok settled ->
+           session_state := settled;
+           on_session_settled settled;
+           let* result = projected in
+           on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption [tool_outbox]));
+           Ok result)
+      | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
+      | Recovery_required _ | Settled _ ->
+        Error
+          (internal_error
+             "Codex host stop arrived without an acknowledged provider turn")
+    in
+    let settle_cancellation exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      recovery_failure
+        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
+              Keeper_official_client_session_store.Owner_stopped_turn
+            else Keeper_official_client_session_store.Transport_interrupted);
+      let detail = "Codex turn cancelled: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Codex cancellation recovery persistence failed: %s"
+           recovery_detail);
+      (match
+         Eio.Cancel.protect (fun () ->
+           finish_raw_error ~keeper_name raw_trace_run (internal_error detail))
+       with
+       | () -> ());
+      Printexc.raise_with_backtrace exn backtrace
+    in
+    let turn_result =
+      try
+        let observe_stream =
+          codex_stream_callback ?receipts ?on_native_tool_completion ?on_native_tool_progress
+          ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+          ~on_usage_report
+          ~position:
+            (match thread_mode with
+             | Runtime_codex_app_server.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_codex_app_server.Resume _ -> Keeper_usage_resolution.Resumed)
+          on_event
+        in
+        let on_stream_event event =
+          (* Native actions do not carry a MASC tool producer's read-only
+             contract. Keep their effects fenced, including a completed item
+             whose start was not observed. *)
+          (match event with
+           | Runtime_codex_app_server.Native_tool_started _
+           | Native_tool_finished _ -> observe_effect_attempted ()
+           | Tool_delivery_closed _ -> close_delivery_frontier ()
+           | Compaction_observed -> settled_held_context := []
+           | Usage_reported { frame; _ } ->
+             (* The final usage keeps only the newest request. A compaction
+                earlier in this turn still invalidates its context receipts. *)
+             (match frame with
+              | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
+              | Context_window_filled _ -> settled_held_context := []
+              | Counted { last = Request_usage _; _ } -> ())
+           | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
+           | Dynamic_tool_finished _ | Elicitation_cancelled _
+           | Usage_windows_reported _ | Turn_finished _ -> ());
+          Option.iter (fun observe -> observe event) observe_stream
+        in
+        let scheduling_turn =
+           match Keeper_owner_registry.get ~base_path ~keeper_name with
+           | Error _ -> None
+           | Ok owner ->
+             (match Keeper_owner.turn_in_flight owner with
+              | Some { lane = Keeper_owner.Autonomous; _ } ->
+                Some (owner, Autonomous_schedule)
+              | Some { lane = Keeper_owner.Chat_operation; _ } ->
+                Option.map (fun operation_id -> owner, Direct_schedule operation_id)
+                  (Keeper_owner.operation_projection owner).running_operation_id
+              | Some { lane = Keeper_owner.Maintenance; _ } | None -> None)
+        in
+        let await_handoff = Option.map (fun (owner, turn) ->
+          match turn with
+          | Autonomous_schedule ->
+            (fun () -> Keeper_owner.await_claimable_operation owner)
+          | Direct_schedule operation_id ->
+            (fun () -> Keeper_owner.await_queued_handoff_recipient owner ~operation_id)) scheduling_turn in
+        (match
+       Runtime_codex_app_server.run_turn
+         ?await_handoff
+         ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+           ~grace_seconds:Process_eio.child_exit_grace_seconds)
+         ~clock
+         ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+         ~dynamic_tools
+         ?reasoning_effort:requested_reasoning_effort
+         ~on_reasoning_effort_resolved:(fun ~model ~requested ~effective ->
+           let wire effort = match effort with
+             | None -> `Null
+             | Some value -> `String (Llm_provider.Reasoning_effort.to_string value) in
+           (match requested, effective with
+            | Some asked, Some admitted when Llm_provider.Reasoning_effort.compare asked admitted <> 0 ->
+              Log.Keeper.info ~keeper_name
+                "Codex reasoning effort clamped to account metadata: model=%s asked=%s effective=%s"
+                model (Llm_provider.Reasoning_effort.to_string asked)
+                (Llm_provider.Reasoning_effort.to_string admitted)
+            | _ -> ());
+           Option.iter (fun active ->
+             (* See Host.observe_raw_trace: it already logs trace errors without changing admission. *)
+             ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Reasoning_effort (fun () ->
+               Agent_core.Raw_trace.record_hook_invoked active
+                 ~hook_name:"codex_reasoning_effort" ~hook_decision:"admitted"
+                 ~hook_detail:(Yojson.Safe.to_string (`Assoc [
+                   "model", `String model; "requested", wire requested; "effective", wire effective])) ()))) raw_trace_run)
+         ~thread_mode
+         ~history
+         ~developer_context
+         ~on_undelivered_tool_result:
+           (fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
+             let receipt : Keeper_client_tool_outbox.receipt =
+               {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
+                tool_name=receipt.tool_name;arguments=receipt.arguments;response=receipt.response} in
+             let* () = Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt in
+             (* The receipt is committed even if notification cannot commit.
+                Startup and the existing maintenance pulse rediscover it. *)
+             (match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
+              | Ok () -> ()
+              | Error detail -> Log.Keeper.warn ~keeper_name
+                  "retained tool result notification deferred: %s" detail
+              | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+              | exception exn -> Log.Keeper.warn ~keeper_name
+                  "retained tool result notification raised: %s" (Printexc.to_string exn));
+             Ok ())
+         ~on_tool_response_confirmed:(fun ~call_id ->
+           confirmed_tool_calls := call_id :: !confirmed_tool_calls)
+         ~on_stream_event
+         ~on_thread_ready:(fun ~thread_id ->
+           update_session "active transition" (fun expected ->
+             Keeper_official_client_session_store.mark_active
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~session_id:thread_id
+               ~updated_at:(Time_compat.now ())))
+         ~on_context_submission:(fun observation ->
+           let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+             match observation.Runtime_codex_app_server.method_ with
+             | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json
+                 ~slot:Developer_instructions composed_developer_instructions observation.write
+             | Turn_start -> Keeper_context_submission_link.binding_to_json
+                 ~slot:(Turn_text (List.length images)) prompt_projection observation.write
+             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_history"]
+             | Turn_steer -> `Assoc ["status", `String "out_of_scope_host_notice"]
+             | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
+           Host.record_context_submission ~keeper_name ~raw_trace_run
+             ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
+             ~submission:(Runtime_codex_app_server.context_submission_to_json observation)
+             ~logical_context_bindings ())
+         ~on_prompt_sent:report_transmitted_input
+         ~on_turn_starting:(fun ~thread_id ->
+           update_session "turn-starting transition" (fun expected ->
+             Keeper_official_client_session_store.mark_turn_starting
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~session_id:thread_id
+               ~updated_at:(Time_compat.now ())))
+         ~on_turn_started:(fun ~thread_id ~turn_id ->
+           update_session "turn-started transition" (fun expected ->
+             Keeper_official_client_session_store.mark_turn_started
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~session_id:thread_id
+               ~turn_id
+               ~turn_count
+               ~updated_at:(Time_compat.now ())))
+         client_config
+         ~prompt
+         ~images
+     with
+     | Error (Runtime_codex_app_server.Stopped_by_host stop) ->
+       recovery_failure := Keeper_official_client_session_store.Host_hook_failed;
+       (match stop, !terminal_error with
+        | Host.Terminal_tool_boundary _, _
+          when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
+        | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+          , Some detail ) -> Error (internal_error detail)
+        | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+          , None ) -> settle_host_stop stop)
+     | Error
+         (( Runtime_codex_app_server.Invalid_config _
+          | Runtime_codex_app_server.Spawn_failed _
+          | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+          | Runtime_codex_app_server.Turn_input_write_failed _
+          | Runtime_codex_app_server.Protocol_error _
+          | Runtime_codex_app_server.Rpc_error _
+          | Runtime_codex_app_server.Subscription_required _
+          | Runtime_codex_app_server.Unsupported_server_request _
+          | Runtime_codex_app_server.Context_window_exceeded _
+          | Runtime_codex_app_server.Turn_failed _
+          | Runtime_codex_app_server.Turn_interrupted
+          | Runtime_codex_app_server.Runtime_shutting_down
+          | Runtime_codex_app_server.Process_exited _
+          | Runtime_codex_app_server.Timeout _ ) as error) ->
+       observe_failed_dispatch ~observe_transport_uncertain error;
+       if Runtime_codex_app_server.refused_for_spent_usage error
+       then
+         read_usage_after_quota_refusal
+           ~keeper_name ~quota_scope ~clock
+           ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+           config;
+       recovery_failure :=
+         recovery_failure_of_attempt ~thread_mode
+           ~gate_continuation:(Option.is_some official_client_continuation) error;
+       Error (codex_error_to_core_error error)
+     | Ok turn ->
+       (* A zero-pending terminal does not emit Tool_delivery_closed. Freeze
+          its confirmed writes here; an earlier in-flight terminal has already
+          frozen its own frontier, excluding later results. *)
+       close_delivery_frontier ();
+       recovery_failure := Keeper_official_client_session_store.Protocol_failed;
+       let expected_resumed =
+         match thread_mode with
+         | Runtime_codex_app_server.Start -> false
+         | Runtime_codex_app_server.Resume _ -> true
+       in
+       let* () =
+         if Bool.equal expected_resumed turn.resumed
+         then Ok ()
+         else
+           Error
+             (internal_error
+                "Codex app-server reported a thread mode different from the requested session plan")
+       in
+       recovery_failure := Keeper_official_client_session_store.Host_hook_failed;
+       let* () =
+         match !terminal_error with
+         | None -> Ok ()
+         | Some detail -> Error (internal_error detail)
+       in
+       let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
+       (* The spend is the thread's running count, resolved against the
+          previous count of the same thread; a repeated frame adds nothing.
+          The newest request's [last] rides apart as the context it
+          occupied, the way the Claude Code lane keeps its request context.
+          A turn whose count a context-window fill replaced has no one count
+          that measures it, so it reports no spend rather than the count
+          that restarted from zero. *)
+       let spend, request_context =
+         match turn.usage with
+         | Some (Runtime_codex_app_server.Thread_count { last; thread_total }) ->
+           Some (api_usage_of_token_usage thread_total), Some (request_context_of_last_usage last)
+         | Some Runtime_codex_app_server.Thread_count_replaced | None -> None, None
+       in
+       let response =
+         { Agent_core.Types.id = turn.turn_id
+         ; model = turn.model
+         ; stop_reason = EndTurn
+         ; content = [ Text turn.text ]
+         ; usage = spend
+         ; telemetry =
+             Some
+               { Agent_core.Types.default_inference_telemetry with
+                 request_latency_ms = Some latency_ms
+               ; canonical_model_id = Some turn.model
+               }
+         }
+       in
+       let* () =
+         Host.invoke_turn_completion_hooks
+           ~runtime_label
+           ~keeper_name
+           ~turn_count
+           ~hooks
+           response
+       in
+       recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
+       let* () =
+         match
+           Keeper_official_client_session_store.settle_holding
+             ~held_context:!settled_held_context
+             ~base_path
+             ~keeper_name
+             ~expected:!session_state
+             ~session_id:turn.thread_id
+             ~turn_id:turn.turn_id
+             ~updated_at:(Time_compat.now ())
+         with
+         | Ok settled ->
+           session_state := settled;
+           on_session_settled settled;
+           Ok ()
+         | Error detail ->
+           Error (internal_error ("Codex session settlement failed: " ^ detail))
+       in
+       (* Natural vendor completion may only settle a scheduling handoff.
+          Preserve the original receipts until the consumer itself completes. *)
+       let stop_reason : Runtime_agent.stop_reason =
+         match scheduling_turn, turn.scheduling_handoff with
+         | Some (_, Direct_schedule _),
+             (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
+           Yielded_to_operation_queued { turns_used = turn_count; provider_turn_ordinal = turn_count }
+         | (Some (_, Autonomous_schedule) | None), _
+         | Some (_, Direct_schedule _),
+             (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count }
+       in
+       on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption
+         (tool_outbox :: Option.to_list !produced_results)));
+       let capture, _metrics =
+         Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
+       in
+       Runtime_observation.record_attempt_terminal
+         capture
+         ~model_id:turn.model
+         ~latency_ms:(Some latency_ms)
+         ~error:None;
+       let runtime_observation =
+         Runtime_observation.runtime_observation_with_metrics
+           ~selected_model:(Some turn.model)
+           ~capture
+           ~attempt_details_source:"codex_app_server"
+           ~agent_core_internal_runtime_allowed:false
+           ~usage_scope:
+             (match spend with
+              | Some _ -> Runtime_usage_scope.Conversation_cumulative
+              | None -> Runtime_usage_scope.Usage_scope_unavailable)
+           ?request_context
+           ?reported_context_window:turn.model_context_window
+           ()
+       in
+       Ok
+         { Runtime_agent.response
+         ; checkpoint = None
+         ; session_id = turn.thread_id
+         ; session_resumed = Some turn.resumed
+         ; turns = turn_count
+         ; trace_ref = None
+         ; run_validation = None
+         ; runtime_observation = Some runtime_observation
+         ; cooperative_boundary = None
+         ; stop_reason
+         })
+      with
+      (* A stop the owner raised is not an ambiguity: it knows the turn did
+         not finish and why. Only an unexplained cancellation needs an
+         operator to adjudicate what the transport left behind (#28012). *)
+      | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
+      | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+        settle_cancellation exn
+    in
+    let turn_result =
+      match turn_result with
+      | Ok result -> Ok (finish_raw_success ~keeper_name raw_trace_run result)
+      | Error error ->
+        finish_raw_error ~keeper_name raw_trace_run error;
+        Error error
+    in
+    (match turn_result with
+     | Ok _ -> turn_result
+     | Error original_error ->
+       let original_detail = Agent_core.Error.to_string original_error in
+       (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
+        | Ok () -> turn_result
+      | Error recovery_detail ->
+        Error
+            (internal_error
+               (Printf.sprintf
+                  "Codex turn failed and recovery state persistence also failed: original=%s recovery=%s"
+               original_detail
+               recovery_detail))))
+;;
+
+
+(* RFC claude-code-context-overflow-bounded-restart §6.3, same rule as the
+   Claude Code runtime: the same-run shrink retry is the one re-entry an
+   input rejection admits. [on_shrink_retry] fires only after the sequence
+   verified the typed observation-free overflow and the strictly smaller
+   next capacity, so consuming the just-written
+   [Input_rejected] recovery with the applicable explicit resolution
+   cannot bypass the fence. A failed resolution is not retried here; the next
+   attempt's claim surfaces the refusal instead. A Gate continuation never
+   gets here ([same_run_retry_authorized] in [run]), so the retry is always a
+   fresh start. *)
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
+  ()
+  =
+  match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok
+      ( Some
+          ( { Keeper_official_client_session_store.phase = Recovery_required
+                            { failure = Input_rejected Bootstrap_floor_exceeded
+                            ; recovery_id
+                            ; _
+                            }
+            ; runtime_id = stored_runtime_id
+            ; _
+            } as expected ) )
+    when String.equal stored_runtime_id runtime_id ->
+    (match
+       Keeper_official_client_session_store.resolve_recovery
+         ~base_path
+         ~keeper_name
+         ~expected
+         ~recovery_id
+         ~resolution:Keeper_official_client_session_store.Restart_fresh
+         ~resolved_by:"context-overflow-shrink-retry"
+         ~resolved_at:(Time_compat.now ())
+     with
+     | Ok _ -> ()
+     | Error _ -> ())
+  | Ok None
+  | Ok
+      (Some
+        { Keeper_official_client_session_store.phase =
+            ( Ready | Start _ | Active _ | Turn_inflight _ | Settled _ )
+        ; _
+        })
+  | Ok
+      (Some
+        { Keeper_official_client_session_store.phase =
+            Recovery_required
+              { failure =
+                  ( Pre_dispatch_failed
+                  | Transient_spawn_failed
+                  | Owner_stopped_turn
+                  | Retryable_turn_failed
+                  | Transport_interrupted
+                  | Protocol_failed
+                  | Provider_rejected
+                  | Input_rejected (Bootstrap_floor_exceeded | Effect_fenced)
+                  | Host_hook_failed
+                  | State_persistence_failed
+                  | Process_restarted
+                  | Vendor_session_full _ )
+              ; _
+              }
+        ; _
+        }) -> ()
+;;
+(* Uncertainty cannot erase stronger evidence from an earlier attempt. The
+   compare-and-set also preserves an effect observed concurrently. *)
+let note_transport_uncertainty effect_disposition =
+  match Atomic.compare_and_set effect_disposition
+          Keeper_provider_attempt_effect.No_effect_observed
+          Keeper_provider_attempt_effect.Observation_unavailable with
+  | true | false -> ()
+;;
+
+let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+    ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks
+    ~context_injector ~context
+    ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+    ?on_model_input_window_observation
+    ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
+    ~turn_start
+    ?on_official_client_tool_boundary
+    ?on_tool_execution
+    ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_progress
+    ?on_native_tool_completion
+    ?on_native_action
+    ?on_usage_report
+    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
+  let quota_scope =
+    Runtime_quota_window.scope_of_codex_home
+      (Runtime_codex_app_server.effective_account_home config.account_home)
+  in
+  let settled_session = Atomic.make None in
+  let pending_result_receipts = Atomic.make None in
+  let on_results_ready value = Atomic.set pending_result_receipts value in
+  let on_session_settled value = Atomic.set settled_session (Some value) in
+  let effect_disposition =
+    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
+  in
+  let observe_effect_attempted () =
+    Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
+  in
+  let observe_transport_uncertain () =
+    note_transport_uncertainty effect_disposition
+  in
+  let successful_tool_completion = Atomic.make No_successful_tool_completion in
+  let observe_successful_tool_completion () =
+    Atomic.set successful_tool_completion Successful_tool_completion
+  in
+  let observed_next_shrink_capacity_bytes = ref None in
+  let measure_message_bytes = measure_model_input_message_bytes in
+  let result =
+    Eio.Switch.run (fun result_scope ->
+    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+      Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+        ?on_memory_capacity_refusal
+        ~on_memory_retry:(fun () ->
+          resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
+      ~starting_capacity:unbounded_model_input_capacity_bytes
+      (* A continuation always resumes its original thread, and a Resume's
+         input is the same at every capacity; the retry would be a fresh
+         start, which a continuation forbids. Its overflow ends the turn on the
+         typed error instead ([recovery_failure_of_attempt]). *)
+      ~same_run_retry_authorized:(fun () ->
+        (match input_source with
+         | Keeper_request_source.Completion_review -> false
+         | Keeper_request_source.Keeper_history _ -> true)
+        && Option.is_none official_client_continuation
+        && Keeper_provider_attempt_effect.allows_same_turn_retry
+             (Atomic.get effect_disposition))
+      ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
+        Option.value
+          !observed_next_shrink_capacity_bytes
+          ~default:capacity)
+      (* This runtime shrinks to the size the provider itself named
+         ([observed_next_shrink_capacity_bytes]), not to a fraction of a
+         request-body cap. There is no
+         local account that could rule the next size out, so the provider's
+         own target stands. *)
+      ~shrink_admits_history:(fun ~capacity:_ -> true)
+      ~on_shrink_retry:
+        (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
+          resolve_input_rejected_for_shrink_retry
+            ~base_path
+            ~keeper_name
+            ~runtime_id
+            ();
+          Log.Keeper.warn
+            ~keeper_name
+            "Codex typed context overflow or input refusal; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+            shrink_attempt
+            previous_capacity_bytes
+            capacity_bytes)
+      ~attempt:(fun ~capacity:capacity_bytes ->
+        (* A read in an abandoned attempt cannot certify a tool-only answer
+           from the next one. Effect evidence remains cumulative. *)
+        Atomic.set successful_tool_completion No_successful_tool_completion;
+        run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation ~context_window
+          ~required_native_posture
+          ~runtime_id
+          ~quota_scope
+          ~keeper_name
+    ~pre_tool_rejects
+          ~base_path
+          ~goal
+          ~goal_blocks
+          ~system_prompt
+          ~tools
+          ~loading_plan
+          ~initial_messages
+          ~capacity_bytes
+          (* A Resume still projects: the per-turn context it sends in front
+             of the goal is placed by this projection. It reports no window
+             and no carried front, though -- the range it measures is not
+             what a Resume sends, and both records are only for a range the
+             lane sent. As on the Claude Code lane. *)
+          ~project_history:(fun ~thread_mode ~history_prefix ~tools ->
+            let argument_projection = match thread_mode with
+              | Runtime_codex_app_server.Start ->
+                Option.bind argument_source (fun source ->
+                  Host.argument_projection source ~tools ~history_prefix)
+              | Runtime_codex_app_server.Resume _ -> None in
+            let observed callback =
+              match thread_mode with
+              | Runtime_codex_app_server.Start -> callback
+              | Runtime_codex_app_server.Resume _ -> None
+            in
+            carried_model_input_projection ~input_source
+              ?argument_projection
+              ~thread_mode
+              ~measure_message_bytes
+              ~capacity_bytes
+              ~observed_next_shrink_capacity_bytes
+              ?on_model_input_window_observation:
+                (observed on_model_input_window_observation)
+              ?carried_front_seed
+              ?librarian_front
+              ?on_carried_front:(observed on_carried_front)
+              ~turn_start
+              ~keeper_name
+              ~runtime_id
+              model_input_projection)
+          (* Reported inside the attempt rather than from the projection. The
+             attempt knows [thread_mode], and that is what decides whether the
+             projection is injected into the thread or dropped. A lane that
+             reports nothing wrote every Codex turn's input attribution as
+             zero (masc#32995); a lane that reports the projection on a resume
+             attributes history the thread already holds. *)
+          ~on_transmitted_model_input
+          ~hooks
+          ~context_injector
+          ~context
+          ~terminal_effect_state
+        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
+          ~on_usage_report
+          ~event_bus
+          ~raw_trace
+          ~on_event
+          ~observe_effect_attempted
+          ~observe_successful_tool_completion
+        ~observe_transport_uncertain
+          ~config)
+      ()))
+  in
+  { result
+  ; settled_session = Atomic.get settled_session
+  ; pending_result_receipts = (match result with
+      | Ok _ -> Atomic.get pending_result_receipts
+      | Error _ -> None)
+  ; effect_disposition = Atomic.get effect_disposition
+  ; successful_tool_completion = Atomic.get successful_tool_completion
+  }
+;;
+
+module For_testing = struct
+  let note_transport_uncertainty = note_transport_uncertainty
+  let observe_failed_dispatch = observe_failed_dispatch
+  let observe_stream_native_action ~turn_count ~observe event =
+    match
+      codex_stream_callback
+        ~keeper_name:"test"
+        ~quota_scope:(Runtime_quota_window.scope_of_codex_home None)
+        ~raw_trace_run:None
+        ~turn_count
+        ~on_native_action:(Some observe)
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
+        None
+    with
+    | Some callback -> callback event
+    | None -> invalid_arg "native observer did not install Codex stream callback"
+  ;;
+  let native_posture_note = native_posture_note
+  let codex_error_to_core_error = codex_error_to_core_error
+  let recovery_failure_of_client_error = recovery_failure_of_client_error
+  let recovery_failure_of_attempt = recovery_failure_of_attempt
+  let carried_projection ~input_source ~capacity_bytes ?carried_front_seed ?librarian_front
+        ?on_carried_front ~turn_start ?on_model_input_window_observation
+        ~keeper_name ~runtime_id messages =
+    carried_model_input_projection ~input_source
+      ~thread_mode:Runtime_codex_app_server.Start
+      ~measure_message_bytes:measure_model_input_message_bytes
+      ~capacity_bytes
+      ~observed_next_shrink_capacity_bytes:(ref None)
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      None
+      messages
+  ;;
+
+  let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
+end

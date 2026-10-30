@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>masc TUI chat pane anatomy</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --color-page: #0a0a0a;
+        --color-paper: #141414;
+        --color-bar: #1b1b1b;
+        --color-border: #2b2b2b;
+        --color-ink: #f5f5f5;
+        --color-muted: #9a9a9a;
+        --color-soft: #5c5c5c;
+        --color-accent: #ff5a36;
+        --color-accent-tint: rgba(255, 90, 54, 0.12);
+        --font-mono: "Geist Mono", ui-monospace, monospace;
+      }
+      body {
+        font-family: var(--font-mono);
+        background: var(--color-page);
+        min-height: 100vh;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 3rem 2rem;
+      }
+      .terminal {
+        width: 100%;
+        max-width: 1200px;
+        background: var(--color-paper);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .titlebar {
+        display: flex; align-items: center; gap: 8px;
+        padding: 12px 16px;
+        background: var(--color-bar);
+        border-bottom: 1px solid var(--color-border);
+      }
+      .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-soft); }
+      .dot.accent { background: var(--color-accent); }
+      .titlebar-name {
+        flex: 1; text-align: center; color: var(--color-muted);
+        font-size: 0.7rem; font-weight: 500; letter-spacing: 0.04em; margin-right: 46px;
+      }
+      .frame { padding: 2.25rem 2.5rem 2.5rem; overflow-x: auto; }
+      .prompt { display: flex; gap: 0.6em; margin-bottom: 0.9rem; color: var(--color-muted); font-size: 0.8rem; font-weight: 500; }
+      .prompt .sign { color: var(--color-accent); }
+      h1 {
+        font-size: clamp(1.5rem, 2.2vw + 0.8rem, 2.05rem); font-weight: 700;
+        letter-spacing: -0.01em; line-height: 1.2; color: var(--color-ink); margin-bottom: 1.5rem;
+      }
+      h1::before { content: "# "; color: var(--color-soft); }
+      svg { width: 100%; min-width: 900px; display: block; }
+      h2 { font-size: 0.95rem; font-weight: 600; color: var(--color-ink); margin: 2rem 0 0.75rem; }
+      h2::before { content: "## "; color: var(--color-soft); }
+      table { border-collapse: collapse; width: 100%; min-width: 900px; font-size: 12px; color: var(--color-ink); }
+      th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--color-border); }
+      th { color: var(--color-muted); font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; font-size: 10px; }
+      td:first-child { color: var(--color-ink); font-weight: 600; white-space: nowrap; }
+      td .code { color: var(--color-muted); }
+      td .rail { color: var(--color-accent); }
+      p.note { color: var(--color-muted); font-size: 12px; line-height: 1.6; margin-top: 1rem; max-width: 80ch; }
+    </style>
+  </head>
+  <body>
+    <div class="terminal">
+      <div class="titlebar">
+        <div class="dot accent"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="titlebar-name">masc tui — keepers ▸ chat</div>
+      </div>
+      <main class="frame">
+        <p class="prompt">
+          <span class="sign">$</span> masc tui --view keepers/chat
+        </p>
+        <h1>The chat pane, top to bottom</h1>
+
+        <svg viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="chat-pane-anatomy-title chat-pane-anatomy-desc">
+          <title id="chat-pane-anatomy-title">masc TUI chat pane anatomy</title>
+          <desc id="chat-pane-anatomy-desc">Layer stack of the chat pane's five screen regions from top to bottom — header, transcript, status band, composer and key footer — naming the function that draws each, with the transcript as the focal layer.</desc>
+          <defs></defs>
+
+          <rect width="100%" height="100%" fill="#141414" />
+
+          <!-- Direction column (left margin): screen rows, top to bottom -->
+          <text x="40" y="70" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.18em">TOP</text>
+          <line x1="80" y1="88" x2="80" y2="456" stroke="rgba(245,245,245,0.30)" stroke-width="1"/>
+          <polygon points="76,456 84,456 80,464" fill="#9a9a9a"/>
+          <text x="40" y="484" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.18em">BOTTOM</text>
+
+          <!-- Stack container hairlines -->
+          <line x1="120" y1="80" x2="960" y2="80" stroke="rgba(245,245,245,0.12)" stroke-width="1"/>
+          <line x1="120" y1="464" x2="960" y2="464" stroke="rgba(245,245,245,0.12)" stroke-width="1"/>
+
+          <!-- 1 — Header -->
+          <rect x="120" y="80" width="840" height="64" fill="#1b1b1b"/>
+          <line x1="120" y1="144" x2="960" y2="144" stroke="rgba(245,245,245,0.12)" stroke-width="1"/>
+          <text x="140" y="116" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">01</text>
+          <text x="220" y="118" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Header</text>
+          <text x="940" y="110" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Keepers ▸ name ▸ chat · metadata:full</text>
+          <text x="940" y="128" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">chat_visibility_summary · keeper status row</text>
+
+          <!-- 2 — Transcript (FOCAL) -->
+          <rect x="120" y="144" width="840" height="128" fill="rgba(255,90,54,0.10)"/>
+          <rect x="120" y="144" width="840" height="128" fill="none" stroke="#ff5a36" stroke-width="1"/>
+          <text x="140" y="180" fill="#ff5a36" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em" font-weight="600">02</text>
+          <text x="220" y="182" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Transcript</text>
+          <text x="220" y="204" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" letter-spacing="0.04em">hour rail · origin heading · body rows · turn rail down the left</text>
+          <text x="220" y="222" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" letter-spacing="0.04em">rows from three sources: history rows, a held log, the live stream</text>
+          <text x="940" y="176" fill="#ff5a36" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">render_keeper_message → chat_rows_for</text>
+          <text x="940" y="194" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">timeline_break_row · origin_heading · origin_gutter</text>
+          <text x="940" y="212" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">held_projection ~committed · live_block · turn_rail_glyph</text>
+          <text x="940" y="230" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Masc_tui_message_layout.visible_rows</text>
+          <text x="220" y="256" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.06em">Ctrl-F origin · Ctrl-R reasoning · Ctrl-D tools · Ctrl-N journal change what this layer draws, nothing else</text>
+
+          <!-- 3 — Status band -->
+          <rect x="120" y="272" width="840" height="64" fill="#141414"/>
+          <line x1="120" y1="336" x2="960" y2="336" stroke="rgba(245,245,245,0.12)" stroke-width="1"/>
+          <text x="140" y="308" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">03</text>
+          <text x="220" y="310" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Status band</text>
+          <text x="940" y="302" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">the running turn · your queued line · the interrupt</text>
+          <text x="940" y="320" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">keeper_message_activity_rows · keeper_observed_interrupt_rows · progress row</text>
+
+          <!-- 4 — Composer -->
+          <rect x="120" y="336" width="840" height="64" fill="#1b1b1b"/>
+          <line x1="120" y1="400" x2="960" y2="400" stroke="rgba(245,245,245,0.12)" stroke-width="1"/>
+          <text x="140" y="372" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">04</text>
+          <text x="220" y="374" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Composer</text>
+          <text x="940" y="366" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">&gt; draft · Enter sends, Ctrl-J breaks a line</text>
+          <text x="940" y="384" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Masc_tui_composer · msg_input · a queued line is drawn in 02 as a tail entry</text>
+
+          <!-- 5 — Key footer -->
+          <rect x="120" y="400" width="840" height="64" fill="#141414"/>
+          <text x="140" y="436" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">05</text>
+          <text x="220" y="438" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Key footer</text>
+          <text x="940" y="430" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Enter:send · Esc:stop current turn · …?</text>
+          <text x="940" y="448" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Masc_tui_keys.for_surface · version mismatch warning</text>
+
+          <!-- Caption -->
+          <text x="120" y="516" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.18em">FOCAL LAYER</text>
+          <text x="240" y="516" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace">The transcript is the only layer whose rows have three sources; the table below says what each source draws.</text>
+        </svg>
+
+        <h2>What the transcript draws, by where a turn's rows come from</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>turn</th>
+              <th>rows come from</th>
+              <th>heading span clock</th>
+              <th>body</th>
+              <th>rail</th>
+              <th>status band (03)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>live<br/><span class="code">this pane's request</span></td>
+              <td>the POST's SSE stream, folded into the request's log<br/><span class="code">post_keeper_chat_watching → turn_log_add</span></td>
+              <td><span class="rail">14:13→</span> open span</td>
+              <td>each stretch as it streams; only closed blocks are cached<br/><span class="code">Markdown_growing</span></td>
+              <td><span class="rail">╭ │ ├</span> opens, never closes while streaming</td>
+              <td><span class="rail">◐ IN PROGRESS · 41s</span> · Enter queues your line</td>
+            </tr>
+            <tr>
+              <td>observed<br/><span class="code">a turn this pane did not open</span></td>
+              <td>the operation's journal, read on every history load and on every stream frame of the turn<br/><span class="code">launch_keeper_chat_journal_loads · journal_follow_for_frame · observed_logs_for_keeper</span></td>
+              <td><span class="rail">14:13→</span> open span, from the journal head's time</td>
+              <td>the same stretches, one read behind the token<br/><span class="code">held_projection ~committed:false</span></td>
+              <td><span class="rail">╭ │ ├</span> open until the journal says the turn ended</td>
+              <td><span class="rail">◐ 14m43s</span> · receiving response · last tool Read<br/><span class="code">no "Latest output": the pane draws that text</span></td>
+            </tr>
+            <tr>
+              <td>settled<br/><span class="code">a log that stands for its turn</span></td>
+              <td>the held log, once its stream or journal carried the end<br/><span class="code">turn_log_holds_the_turn · held_projection ~committed:true</span></td>
+              <td><span class="rail">14:13→14:27</span></td>
+              <td>the recorded reply stands where the last stretch was<br/><span class="code">Drawn_reply</span></td>
+              <td><span class="rail">╰</span> closes · <span class="rail">╶</span> a turn of one row</td>
+              <td>nothing</td>
+            </tr>
+            <tr>
+              <td>committed only<br/><span class="code">no log for this turn</span></td>
+              <td>the transcript page, row by row<br/><span class="code">GET chat/history → msg_loaded</span></td>
+              <td>clock only</td>
+              <td>the row's text; reasoning arrives content-withheld</td>
+              <td><span class="rail">┤</span> a journal commit or an arrival joins from the left; else none</td>
+              <td>nothing</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="note">A turn's rows are drawn from one source at a time. When a log comes to stand for its turn, the committed rows it draws itself leave the timeline (rows_the_logs_do_not_draw); a Working log that can no longer end — journal unavailable, or a reply or failure on record — leaves the observed set and the committed rows stand for the turn. Ctrl-F moves the origin between its own row (this diagram's heading), the inline gutter with a short clock, and the bare gutter.</p>
+      </main>
+    </div>
+  </body>
+</html>

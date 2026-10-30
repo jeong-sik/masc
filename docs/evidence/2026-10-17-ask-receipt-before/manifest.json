@@ -1,0 +1,61 @@
+{
+  "scope": "manual isolated native enclosing-refresh comparison",
+  "base": "/private/tmp/masc-tui-ask-readability-evidence-20261017/native-answer-80x24-attempt-1/workspace",
+  "viewport": [
+    80,
+    24
+  ],
+  "observer_sha256": "9150ac335730c6785e25f4213a8d8ff9f5ce23f71690b6e8efbbef4aa459dfb0",
+  "frame_renderer_sha256": "0bf219522ddcae4ce30e565a41e2987644f8f385bde8c0fb2bab9c99ba19a2da",
+  "health_delay_seconds": 0.0,
+  "sibling_delay_seconds": 0.0,
+  "final_health_intervention": "same",
+  "intervention_scope": "proxy response only after warm original Ask response; backend/workspace remain unchanged",
+  "capture_status_scope": "captured means collection finished, not a workspace-admission or UI PASS",
+  "native_answer_submission_requested": true,
+  "wake_store_fault_snapshot": null,
+  "keeper_action_observed": false,
+  "input_scope": "one real backend and canonical workspace; synthetic persisted question appended before warm refresh, reset between arms",
+  "frame_scope": "native PTY cell state rendered with pyte/fonts; no physical paint clock or UI assertions",
+  "latency_distribution": null,
+  "real_model_speedup": null,
+  "expected_arms": [
+    "candidate"
+  ],
+  "environment_keys": [
+    "COLORTERM",
+    "HOME",
+    "LANG",
+    "MASC_BASE_PATH",
+    "PATH",
+    "TERM",
+    "TMPDIR",
+    "XDG_CONFIG_HOME"
+  ],
+  "binaries": {
+    "server": {
+      "path": "/private/tmp/masc-asks-workspace-evidence-20261017/native-offline-owner-candidate/masc-macos-arm64",
+      "sha256": "f7c9f606ac897d08734a4cbafb40a11766a3ca7baaa7529b0fc12fd5f45ad4ba",
+      "source": "1b5479e708100b482295681b40cd31435ae89ce6",
+      "returncode": 0,
+      "stderr": "[2026-10-17 04:32:26] [INFO] [MCP] Tag registry initialized: 178 tools registered\n"
+    },
+    "baseline": {
+      "path": "/private/tmp/masc-asks-workspace-evidence-20261017/native-offline-owner-candidate/masc-tui-macos-arm64",
+      "sha256": "2eeb68be4424476702598c8797895e5246003b13dbaa78b9bccecd670ccfacb2",
+      "source": "1b5479e708100b482295681b40cd31435ae89ce6",
+      "returncode": 0,
+      "stderr": ""
+    },
+    "candidate": {
+      "path": "/private/tmp/masc-tui-ask-readability-evidence-20261017/native-candidate/masc-tui-macos-arm64",
+      "sha256": "d43c2a8004a7c5385ecc3ab6f69099f8a8d5419e50341f624117d3f1461c572a",
+      "source": "3a8dff0fe1e7ec1c744168fc923ba6dd05856d62",
+      "returncode": 0,
+      "stderr": ""
+    }
+  },
+  "fixture_sha256": "29aac8efa06ca7740ecab9a38540546edeb14d6d2c305863b18e9fc7d056aa11",
+  "profile_sha256": "ef27d88c48297231353ee9d6585613ec72e7a2b4d688de6b4449a924e5a0eaa7",
+  "meta_fixture_sha256": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909"
+}

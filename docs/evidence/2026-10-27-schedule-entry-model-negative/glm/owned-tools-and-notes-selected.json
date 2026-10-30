@@ -1,0 +1,323 @@
+{
+  "schema": "masc.schedule-entry-negative.tools-selection.v1",
+  "scope": "All owned tool rows in original durable file; selected exact input/identity; outputs only for three synthetic note writes and B-turn synthetic note reads. Discovery/Get/artifact-read output contents omitted.",
+  "all_owned_count": 10,
+  "note_add_attempt_count": 3,
+  "notes": [
+    {
+      "note_id": "6",
+      "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+      "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "author_kind": "automated_actor",
+      "created_at": 1793065546.610177,
+      "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second",
+      "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "author_kind": "automated_actor",
+      "created_at": 1793065561.562057,
+      "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_SECOND"
+    },
+    {
+      "note_id": "12",
+      "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+      "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "author_kind": "automated_actor",
+      "created_at": 1793065577.287021,
+      "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_AFTER_B"
+    }
+  ],
+  "rows": [
+    {
+      "tool": "keeper_tool_search",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-75ee7e74ff84bef282eb7d346c7401ad",
+      "tool_use_id": "call_d5a053c112dd4ce0a92faec8",
+      "ts": 1793065495.108809,
+      "wire_outcome": "ok",
+      "disposition": null,
+      "input": {
+        "names": [
+          "masc_schedule_note_add",
+          "masc_schedule_notes_list",
+          "masc_schedule_get"
+        ]
+      },
+      "original_line": 1,
+      "original_line_sha256_without_newline": "e9734f9a6a02d6e118d492f8826604cd1fa4d838c5e12f76523666cf103ec8d2",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#1",
+      "output_json_binding": {
+        "bytes": 317,
+        "sha256": "dbe148e29626fdbd2b95a95700aafec2923f1dd1f815842b87d44aec90546bca",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_get",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-5d3630791844238436a01fef1d6daba5",
+      "tool_use_id": "call_ea15bb7cf72d47ceb2c38d91",
+      "ts": 1793065517.948908,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8"
+      },
+      "original_line": 2,
+      "original_line_sha256_without_newline": "6c139c63466faf77bc93f208a5b9d644a07a8bb73ab02d0289753804c0047a44",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#1",
+      "output_json_binding": {
+        "bytes": 3802,
+        "sha256": "74a6672570b1446ed0ef2860c7588731a1221a8363cab2c429b6530330b01882",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-756c4057b12dbe4caffe111b851e46c0",
+      "tool_use_id": "call_a9ce4b803cea45a799d80ba3",
+      "ts": 1793065540.256748,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8"
+      },
+      "original_line": 3,
+      "original_line_sha256_without_newline": "e1a208736f63e5cb3c9d2449adf922b7e8c4a231c0faafd8d9e597beb16d5cef",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#1",
+      "output_json_binding": {
+        "bytes": 117,
+        "sha256": "5dbbbfdfe119a307da12ac96d6237be823ed7bfca81441383d26ac631259a62d",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-74180b5ce578712cd679861734e99e54",
+      "tool_use_id": "call_62d80af3914c4a84ad797d86",
+      "ts": 1793065546.621941,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210",
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8"
+      },
+      "original_line": 4,
+      "original_line_sha256_without_newline": "c7dec48dc21c0bf4d4639dfa17bc9ee913dc7696482354835160c7bbb281d0b3",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#1",
+      "output": {
+        "status": "ok",
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+          "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+          "author_kind": "automated_actor",
+          "created_at": 1793065546.610177,
+          "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210"
+        },
+        "note_count": 1
+      },
+      "primary_note_exact_match": true
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 1,
+      "execution_id": "execution-node-e9b3bdea9cc467d438d386df1f35b08f",
+      "tool_use_id": "call_4417075b34a740b2b8552120",
+      "ts": 1793065553.541017,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second"
+      },
+      "original_line": 5,
+      "original_line_sha256_without_newline": "36e891e26b414fe0cf7bf433b464ddc9a0ff3fc02425ec14168156d8d303d96c",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#1",
+      "output_json_binding": {
+        "bytes": 124,
+        "sha256": "bd3ee973862c74c2fd2a0c259388fd771a62ede70c87b725aa2159daa0ad7f47",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 2,
+      "execution_id": "execution-node-0c7812bcb52c5aebf5cc7f85bdc9eb14",
+      "tool_use_id": "call_b0d8153c2993449388ddfc8d",
+      "ts": 1793065561.575495,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_SECOND",
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second"
+      },
+      "original_line": 6,
+      "original_line_sha256_without_newline": "7c214e0b6624aa8f1012479906717a37f1e18c43d36f05f686ac34cb75aadb6c",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#2",
+      "output": {
+        "status": "ok",
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second",
+          "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+          "author_kind": "automated_actor",
+          "created_at": 1793065561.562057,
+          "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_SECOND"
+        },
+        "note_count": 1
+      },
+      "primary_note_exact_match": true
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 2,
+      "execution_id": "execution-node-f73eaf27fe0f5d8d0856203262af8f93",
+      "tool_use_id": "call_779ee6a6947a4bf4a760c3c2",
+      "ts": 1793065566.444161,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second"
+      },
+      "original_line": 7,
+      "original_line_sha256_without_newline": "950cc01bacc2a8418128634f68a152c13a1a609ba8af822e0007911d43184408",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#2",
+      "output": {
+        "status": "ok",
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second",
+        "limit": 50,
+        "notes": [
+          {
+            "note_id": "11",
+            "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8-second",
+            "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+            "author_kind": "automated_actor",
+            "created_at": 1793065561.562057,
+            "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_SECOND"
+          }
+        ]
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 2,
+      "execution_id": "execution-node-9f77b52dd6058c7e54bbd098b89c7436",
+      "tool_use_id": "call_23ba11b4583c4803b76b7876",
+      "ts": 1793065577.293428,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_AFTER_B",
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8"
+      },
+      "original_line": 8,
+      "original_line_sha256_without_newline": "f3995f106ddebb7c1d5f0cf1647bc7815f12e3e2928f6fb9d4db52087bf687f6",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#2",
+      "output": {
+        "status": "ok",
+        "note": {
+          "note_id": "12",
+          "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+          "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+          "author_kind": "automated_actor",
+          "created_at": 1793065577.287021,
+          "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_AFTER_B"
+        },
+        "note_count": 2
+      },
+      "primary_note_exact_match": true
+    },
+    {
+      "tool": "masc_schedule_notes_list",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 2,
+      "execution_id": "execution-node-a448a54c5a1cb33c718f8a1be62f2ad9",
+      "tool_use_id": "call_565f73f1ab564ed99dc855a6",
+      "ts": 1793065589.314407,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8"
+      },
+      "original_line": 9,
+      "original_line_sha256_without_newline": "390ddffa6a6dabaf5580949faa5d9ff185abb7b567df6a2fdb2f9ae84635a079",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#2",
+      "output": {
+        "status": "ok",
+        "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+        "limit": 50,
+        "notes": [
+          {
+            "note_id": "6",
+            "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+            "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+            "author_kind": "automated_actor",
+            "created_at": 1793065546.610177,
+            "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210"
+          },
+          {
+            "note_id": "12",
+            "schedule_id": "audit-real-model-347317a33bdf4f51b60817f2a36c10c8",
+            "author_id": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+            "author_kind": "automated_actor",
+            "created_at": 1793065577.287021,
+            "body": "SCHEDULE_EFFECT_8bea47e56731436e8cc76ddbdf972210_AFTER_B"
+          }
+        ]
+      }
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "keeper": "audit-c3-glm-e7dfb163cd4b4135af9dbbd984e9e6d2",
+      "trace_id": "trace-1793065478075-00000",
+      "keeper_turn_id": 3,
+      "execution_id": "execution-node-4a3b94f68dfeeb4f1ba8869c5e941a44",
+      "tool_use_id": "call_9245274a6ba3406ea9743ecf",
+      "ts": 1793065608.617008,
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "input": {
+        "sha256": "d6daca8ba5c0a73efbee3ac64804297c305b8b6d335c474567d3a43743e03527"
+      },
+      "original_line": 10,
+      "original_line_sha256_without_newline": "1fd39fcf9acd3fddca7f6c26cf88b7caed4f63544b0876c49379da02767ac397",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "tool_observation_turn_ref": "trace-1793065478075-00000#3",
+      "output_json_binding": {
+        "bytes": 1006,
+        "sha256": "f1ab8cd3e177bbafa227c24c46da10daaa2d2c269a86ac7f8a2175a352172c5d",
+        "encoding": "UTF-8 canonical JSON value; not raw output bytes"
+      }
+    }
+  ]
+}

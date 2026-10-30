@@ -1,0 +1,15 @@
+{
+  "is_derivative": true,
+  "source_version": 5,
+  "notes": [],
+  "total_scenario_notes": 0,
+  "selection": "Every note on either exact synthetic schedule ID, including unrequested/correction notes. No marker-only filtering.",
+  "schedules": [
+    {
+      "schedule_id": "audit-real-model-30fa0db345e24e7790b4f5e0f7c36103",
+      "schedule_instance_id": "01a179c8-b3b5-7000-b855-e9c27ee9099b",
+      "status": "succeeded",
+      "due_at": 1793044559.773274
+    }
+  ]
+}

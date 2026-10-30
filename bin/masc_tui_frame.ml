@@ -1,0 +1,9 @@
+let margin_cells = 1
+let border_cells = 1
+let border_padding_cells = margin_cells - border_cells
+let content_column = margin_cells
+let chrome_rows = 5
+let rule_width ~cols = max 0 (cols - (2 * border_cells))
+let inner_width ~cols = max 0 (cols - (2 * margin_cells))
+let outer_width ~inner = max 0 inner + (2 * margin_cells)
+let content_height ~rows = max 1 (rows - chrome_rows)

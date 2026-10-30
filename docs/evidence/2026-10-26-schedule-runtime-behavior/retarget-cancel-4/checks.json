@@ -1,0 +1,488 @@
+[
+  {
+    "name": "isolated effective base path",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "installed executable identity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "manual Keeper registered audit-retarget-a",
+    "passed": true,
+    "detail": {
+      "runtime_class": "keeper",
+      "name": "audit-retarget-a",
+      "agent_name": "audit-retarget-a",
+      "trace_id": "trace-1793015952487-00000",
+      "instructions": "Manual isolated schedule cancellation probe. Do not start.",
+      "activation_mode": "manual",
+      "input_policy": "small",
+      "max_context_override": null,
+      "sandbox_profile": "microvm",
+      "network_mode": "none",
+      "agent_core_env": {}
+    }
+  },
+  {
+    "name": "explicit pause committed audit-retarget-a",
+    "passed": true,
+    "detail": {
+      "ok": true,
+      "action": "pause",
+      "name": "audit-retarget-a"
+    }
+  },
+  {
+    "name": "authoritative paused owner audit-retarget-a",
+    "passed": true,
+    "detail": [
+      {
+        "keeper_name": "audit-retarget-a",
+        "paused": true,
+        "state": "idle",
+        "waiting_on": [],
+        "waiting_count": 0,
+        "sources": {},
+        "since": null,
+        "since_iso": null,
+        "due_at": null,
+        "due_at_iso": null,
+        "source_next_actions": {},
+        "current_execution": null
+      }
+    ]
+  },
+  {
+    "name": "manual Keeper registered audit-retarget-b",
+    "passed": true,
+    "detail": {
+      "runtime_class": "keeper",
+      "name": "audit-retarget-b",
+      "agent_name": "audit-retarget-b",
+      "trace_id": "trace-1793015952546-00001",
+      "instructions": "Manual isolated schedule cancellation probe. Do not start.",
+      "activation_mode": "manual",
+      "input_policy": "small",
+      "max_context_override": null,
+      "sandbox_profile": "microvm",
+      "network_mode": "none",
+      "agent_core_env": {}
+    }
+  },
+  {
+    "name": "explicit pause committed audit-retarget-b",
+    "passed": true,
+    "detail": {
+      "ok": true,
+      "action": "pause",
+      "name": "audit-retarget-b"
+    }
+  },
+  {
+    "name": "authoritative paused owner audit-retarget-b",
+    "passed": true,
+    "detail": [
+      {
+        "keeper_name": "audit-retarget-b",
+        "paused": true,
+        "state": "idle",
+        "waiting_on": [],
+        "waiting_count": 0,
+        "sources": {},
+        "since": null,
+        "since_iso": null,
+        "due_at": null,
+        "due_at_iso": null,
+        "source_next_actions": {},
+        "current_execution": null
+      }
+    ]
+  },
+  {
+    "name": "recurring declaration created",
+    "passed": true,
+    "detail": {
+      "schedule_instance_id": "01a17814-34d5-7000-94ca-69fa05561225",
+      "schedule_id": "audit-retarget-cancel",
+      "requested_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "scheduled_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "requested_at": 1793015952.597585,
+      "due_at": 1793015953.597585,
+      "expires_at": null,
+      "payload": {
+        "kind": "masc.keeper_wake",
+        "body": {
+          "result_delivery": {
+            "policy": "none"
+          },
+          "keeper_name": "audit-retarget-a",
+          "message": "Isolated cancelled recurring wake; do not execute."
+        }
+      },
+      "status": "scheduled",
+      "source": "operator_request",
+      "recurrence": {
+        "kind": "interval",
+        "interval_sec": 3600
+      },
+      "cancellation": null,
+      "due_at_iso": "2026-10-26T11:59:13Z",
+      "next_due_at": 1793015953.597585,
+      "next_due_at_iso": "2026-10-26T11:59:13Z",
+      "requested_at_iso": "2026-10-26T11:59:12Z",
+      "recurrence_kind": "interval",
+      "recurrence_summary": "every 3600s",
+      "payload_digest": "18479fc9800a3102ae905fc6ec5a0c99e92176a6acaf3f9f44a5aca1dfd147ac",
+      "payload_kind": "masc.keeper_wake",
+      "payload_support": "supported",
+      "payload_dispatch_tool": "masc.keeper_wake",
+      "payload_target": "keeper:audit-retarget-a",
+      "payload_summary": "Isolated cancelled recurring wake; do not execute.",
+      "last_wake": null
+    }
+  },
+  {
+    "name": "original exact occurrence is pending at A",
+    "passed": true,
+    "detail": [
+      {
+        "keeper_name": "audit-retarget-a",
+        "source": "event_queue_pending",
+        "waiting_on": "schedule_due",
+        "what": "\uc608\uc57d \uc2e4\ud589 \uc2dc\uac01 \ub3c4\ub798 \u00b7 audit-retarget-cancel",
+        "wake_producer": "schedule_runner",
+        "since": 1793015967.42757,
+        "since_iso": "2026-10-26T11:59:27Z",
+        "due_at": null,
+        "due_at_iso": null,
+        "next_action": "keeper_drain_event_queue",
+        "detail": {
+          "queue_index": 0,
+          "post_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+          "source_ref": "44d5efa0c4966a7b5210dcc91dca827ce18f268c3936c54f3c2c41fd00bf9a04",
+          "source_incarnation": "0",
+          "urgency": "normal",
+          "arrived_at_unix": 1793015967.42757,
+          "payload_kind": "schedule_due"
+        }
+      }
+    ]
+  },
+  {
+    "name": "dispatch succeeded before retarget",
+    "passed": true,
+    "detail": {
+      "schedule_instance_id": "01a17814-34d5-7000-94ca-69fa05561225",
+      "schedule_id": "audit-retarget-cancel",
+      "requested_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "scheduled_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "requested_at": 1793015952.597585,
+      "due_at": 1793019553.597585,
+      "expires_at": null,
+      "payload": {
+        "kind": "masc.keeper_wake",
+        "body": {
+          "result_delivery": {
+            "policy": "none"
+          },
+          "keeper_name": "audit-retarget-a",
+          "message": "Isolated cancelled recurring wake; do not execute."
+        }
+      },
+      "status": "scheduled",
+      "source": "operator_request",
+      "recurrence": {
+        "kind": "interval",
+        "interval_sec": 3600
+      },
+      "cancellation": null,
+      "due_at_iso": "2026-10-26T12:59:13Z",
+      "next_due_at": 1793019553.597585,
+      "next_due_at_iso": "2026-10-26T12:59:13Z",
+      "requested_at_iso": "2026-10-26T11:59:12Z",
+      "recurrence_kind": "interval",
+      "recurrence_summary": "every 3600s",
+      "payload_digest": "18479fc9800a3102ae905fc6ec5a0c99e92176a6acaf3f9f44a5aca1dfd147ac",
+      "payload_kind": "masc.keeper_wake",
+      "payload_support": "supported",
+      "payload_dispatch_tool": "masc.keeper_wake",
+      "payload_target": "keeper:audit-retarget-a",
+      "payload_summary": "Isolated cancelled recurring wake; do not execute.",
+      "last_wake": {
+        "schedule_instance_id": "01a17814-34d5-7000-94ca-69fa05561225",
+        "schedule_id": "audit-retarget-cancel",
+        "started_at": 1793015967.439568,
+        "finished_at": 1793015967.448133,
+        "due_at": 1793015953.597585,
+        "payload_digest": "18479fc9800a3102ae905fc6ec5a0c99e92176a6acaf3f9f44a5aca1dfd147ac",
+        "status": "succeeded",
+        "detail": {
+          "kind": "masc.keeper_wake.enqueued",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "stimulus_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+          "keeper_name": "audit-retarget-a",
+          "schedule_instance_id": "01a17814-34d5-7000-94ca-69fa05561225",
+          "schedule_id": "audit-retarget-cancel",
+          "urgency": "normal",
+          "post_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+          "result_delivery_policy": "none",
+          "occurrence_status": "awaiting_ack",
+          "activation_status": "deferred",
+          "activation_reason": "lifecycle_denied",
+          "activation_detail": "paused",
+          "reaction_ledger_status": "recorded",
+          "reaction_ledger_error": null
+        },
+        "error": null
+      }
+    }
+  },
+  {
+    "name": "creator retarget accepted",
+    "passed": true,
+    "detail": {
+      "schedule_instance_id": "01a17814-700e-7000-bd47-6b5077b0149c",
+      "schedule_id": "audit-retarget-cancel",
+      "requested_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "scheduled_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "requested_at": 1793015967.757929,
+      "due_at": 1793019553.597585,
+      "expires_at": null,
+      "payload": {
+        "kind": "masc.keeper_wake",
+        "body": {
+          "result_delivery": {
+            "policy": "none"
+          },
+          "keeper_name": "audit-retarget-b",
+          "message": "Retargeted isolated wake; do not execute."
+        }
+      },
+      "status": "scheduled",
+      "source": "operator_request",
+      "recurrence": {
+        "kind": "interval",
+        "interval_sec": 3600
+      },
+      "cancellation": null,
+      "due_at_iso": "2026-10-26T12:59:13Z",
+      "next_due_at": 1793019553.597585,
+      "next_due_at_iso": "2026-10-26T12:59:13Z",
+      "requested_at_iso": "2026-10-26T11:59:27Z",
+      "recurrence_kind": "interval",
+      "recurrence_summary": "every 3600s",
+      "payload_digest": "19b783ccde41fe5d95ccbf9a6cacf83ca0ad761b1e1fd33be20013b9f8386efa",
+      "payload_kind": "masc.keeper_wake",
+      "payload_support": "supported",
+      "payload_dispatch_tool": "masc.keeper_wake",
+      "payload_target": "keeper:audit-retarget-b",
+      "payload_summary": "Retargeted isolated wake; do not execute.",
+      "last_wake": null
+    }
+  },
+  {
+    "name": "retarget replaces instance and changes target",
+    "passed": true,
+    "detail": {
+      "schedule_instance_id": "01a17814-700e-7000-bd47-6b5077b0149c",
+      "schedule_id": "audit-retarget-cancel",
+      "requested_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "scheduled_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "requested_at": 1793015967.757929,
+      "due_at": 1793019553.597585,
+      "expires_at": null,
+      "payload": {
+        "kind": "masc.keeper_wake",
+        "body": {
+          "result_delivery": {
+            "policy": "none"
+          },
+          "keeper_name": "audit-retarget-b",
+          "message": "Retargeted isolated wake; do not execute."
+        }
+      },
+      "status": "scheduled",
+      "source": "operator_request",
+      "recurrence": {
+        "kind": "interval",
+        "interval_sec": 3600
+      },
+      "cancellation": null,
+      "due_at_iso": "2026-10-26T12:59:13Z",
+      "next_due_at": 1793019553.597585,
+      "next_due_at_iso": "2026-10-26T12:59:13Z",
+      "requested_at_iso": "2026-10-26T11:59:27Z",
+      "recurrence_kind": "interval",
+      "recurrence_summary": "every 3600s",
+      "payload_digest": "19b783ccde41fe5d95ccbf9a6cacf83ca0ad761b1e1fd33be20013b9f8386efa",
+      "payload_kind": "masc.keeper_wake",
+      "payload_support": "supported",
+      "payload_dispatch_tool": "masc.keeper_wake",
+      "payload_target": "keeper:audit-retarget-b",
+      "payload_summary": "Retargeted isolated wake; do not execute.",
+      "last_wake": null
+    }
+  },
+  {
+    "name": "retargeted declaration cancelled successfully",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "schedule": {
+        "schedule_instance_id": "01a17814-700e-7000-bd47-6b5077b0149c",
+        "schedule_id": "audit-retarget-cancel",
+        "requested_by": {
+          "id": "schedule-audit-admin",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "scheduled_by": {
+          "id": "schedule-audit-admin",
+          "kind": "automated_actor",
+          "display_name": null
+        },
+        "requested_at": 1793015967.757929,
+        "due_at": 1793019553.597585,
+        "expires_at": null,
+        "payload": {
+          "kind": "masc.keeper_wake",
+          "body": {
+            "result_delivery": {
+              "policy": "none"
+            },
+            "keeper_name": "audit-retarget-b",
+            "message": "Retargeted isolated wake; do not execute."
+          }
+        },
+        "status": "cancelled",
+        "source": "operator_request",
+        "recurrence": {
+          "kind": "interval",
+          "interval_sec": 3600
+        },
+        "cancellation": {
+          "cancelled_by": {
+            "id": "schedule-audit-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "reason": "Cancel all future work for this isolated request."
+        },
+        "due_at_iso": "2026-10-26T12:59:13Z",
+        "next_due_at": null,
+        "next_due_at_iso": null,
+        "requested_at_iso": "2026-10-26T11:59:27Z",
+        "recurrence_kind": "interval",
+        "recurrence_summary": "every 3600s",
+        "payload_digest": "19b783ccde41fe5d95ccbf9a6cacf83ca0ad761b1e1fd33be20013b9f8386efa",
+        "payload_kind": "masc.keeper_wake",
+        "payload_support": "supported",
+        "payload_dispatch_tool": "masc.keeper_wake",
+        "payload_target": "keeper:audit-retarget-b",
+        "payload_summary": "Retargeted isolated wake; do not execute.",
+        "last_wake": null
+      },
+      "cancelled_by": {
+        "id": "schedule-audit-admin",
+        "kind": "automated_actor"
+      },
+      "reason": "Cancel all future work for this isolated request."
+    }
+  },
+  {
+    "name": "authoritative post-cancel inventory read audit-retarget-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "authoritative post-cancel inventory read audit-retarget-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "A remains explicitly paused after cancellation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "cancellation withdraws original A occurrence",
+    "passed": false,
+    "detail": {
+      "finding": "F1",
+      "exact_occurrence_retained_after_successful_cancel": true,
+      "owner_explicitly_paused_before_schedule": true,
+      "source_before": {
+        "queue_index": 0,
+        "post_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+        "source_ref": "44d5efa0c4966a7b5210dcc91dca827ce18f268c3936c54f3c2c41fd00bf9a04",
+        "source_incarnation": "0",
+        "urgency": "normal",
+        "arrived_at_unix": 1793015967.42757,
+        "payload_kind": "schedule_due"
+      },
+      "retained_rows": [
+        {
+          "keeper_name": "audit-retarget-a",
+          "source": "event_queue_pending",
+          "waiting_on": "schedule_due",
+          "what": "\uc608\uc57d \uc2e4\ud589 \uc2dc\uac01 \ub3c4\ub798 \u00b7 audit-retarget-cancel",
+          "wake_producer": "schedule_runner",
+          "since": 1793015967.42757,
+          "since_iso": "2026-10-26T11:59:27Z",
+          "due_at": null,
+          "due_at_iso": null,
+          "next_action": "keeper_drain_event_queue",
+          "detail": {
+            "queue_index": 0,
+            "post_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+            "source_ref": "44d5efa0c4966a7b5210dcc91dca827ce18f268c3936c54f3c2c41fd00bf9a04",
+            "source_incarnation": "0",
+            "urgency": "normal",
+            "arrived_at_unix": 1793015967.42757,
+            "payload_kind": "schedule_due"
+          }
+        }
+      ],
+      "original_instance": "01a17814-34d5-7000-94ca-69fa05561225",
+      "cancelled_instance": "01a17814-700e-7000-bd47-6b5077b0149c",
+      "replay_or_resume_performed": false,
+      "external_effect_performed": false
+    }
+  }
+]

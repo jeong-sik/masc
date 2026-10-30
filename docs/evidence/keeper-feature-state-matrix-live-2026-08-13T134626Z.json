@@ -1,0 +1,73 @@
+{
+  "schema": "masc.keeper_feature_state_snapshot.v1",
+  "captured_at": "2026-08-13T13:46:26Z",
+  "source": {
+    "upstream_main": "f473c0e8bf7d582b6d990ffbd25e24c68584c9bb",
+    "runtime_checkout_head": "f83f655904d82b0bdb5b0fda76e4c59f7a99e668",
+    "health_route": "http://127.0.0.1:8935/health?full=1",
+    "feature_proof_route": "http://127.0.0.1:8935/api/v1/dashboard/keeper-feature-proof"
+  },
+  "health": {
+    "status": "ok",
+    "overall_status": "degraded",
+    "runtime_commit": "f83f655904",
+    "runtime_commit_source": "runtime_repo_head",
+    "binary_commit": null,
+    "started_at": "2026-08-13T13:19:03Z",
+    "uptime_seconds": 1643,
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "keeper_fibers": 10,
+    "bootable_keepers": 10,
+    "running_keepers": 10,
+    "executable_keepers": 7,
+    "reaction_capacity_shortfall": 3,
+    "queue_pending_stimuli": 0,
+    "durable_queue_pending": 0,
+    "schedule_ticks": 107,
+    "schedule_successes": 107,
+    "schedule_failures": 0,
+    "schedule_crashes": 0,
+    "schedule_last_emitted": 0,
+    "dashboard_surface": "stale"
+  },
+  "feature_proof": {
+    "generated_at": "2026-08-13T13:46:27Z",
+    "status": "warn",
+    "feature_count": 5,
+    "pass_count": 2,
+    "warn_count": 3,
+    "keeper_count": 13,
+    "runtime_liveness": "13/13",
+    "persistent_24h": "1/13",
+    "autonomous_tool_use": "9/13",
+    "board_reactive": "8/13",
+    "scheduled_proactive": "13/13"
+  },
+  "pull_requests": {
+    "28470": {
+      "head": "2da9e2ad7afa40870940c8a1b6ed319b9193fc8e",
+      "mergeable": true,
+      "build_and_test": "IN_PROGRESS",
+      "run_url": "https://github.com/jeong-sik/masc/actions/runs/31706236991"
+    },
+    "28488": {
+      "head": "7b1b921c534585f35e4a42ce29061abe7f08f259",
+      "mergeable": true,
+      "build_and_test": "IN_PROGRESS",
+      "run_url": "https://github.com/jeong-sik/masc/actions/runs/31706272133"
+    },
+    "28596": {
+      "head": "e9a300ed0c73569adbeadf12b651772a3707a816",
+      "mergeable": true,
+      "build_and_test": "IN_PROGRESS",
+      "dashboard": "IN_PROGRESS",
+      "run_url": "https://github.com/jeong-sik/masc/actions/runs/31706263766"
+    }
+  },
+  "interpretation": {
+    "deployment_parity": "Not proven. Upstream main, runtime checkout, and binary identity are three distinct states.",
+    "queue": "Idle snapshot only; no enqueue-drain-restart item receipt was captured.",
+    "scheduler": "Healthy idle ticks only; emitted remained zero."
+  }
+}

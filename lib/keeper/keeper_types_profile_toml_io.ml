@@ -1,0 +1,237 @@
+include Keeper_types_profile_toml_parser
+
+(* [Declaration_not_found] carries the keeper name that was asked for and
+   [Unknown_deny_tool] the deny entries no descriptor offers the model. Both
+   used to be silent: a missing declaration loaded as empty defaults and an
+   unnamed deny entry logged a WARN row at turn setup while denying nothing
+   (audit F386, F087). *)
+type keeper_toml_error_kind =
+  | Read_error
+  | Parse_error
+  | Profile_error
+  | Invalid_name
+  | Declaration_not_found of string
+  | Unknown_deny_tool of string list
+
+type keeper_toml_load_error =
+  { keeper_path : string
+  ; failing_path : string
+  ; kind : keeper_toml_error_kind
+  ; detail : string
+  }
+
+let keeper_toml_error_kind_to_string = function
+  | Read_error -> "read_error"
+  | Parse_error -> "parse_error"
+  | Profile_error -> "profile_error"
+  | Invalid_name -> "invalid_name"
+  | Declaration_not_found _ -> "declaration_not_found"
+  | Unknown_deny_tool _ -> "unknown_deny_tool"
+;;
+
+let keeper_toml_load_error_to_string error =
+  if String.equal error.keeper_path error.failing_path
+  then Printf.sprintf "%s: %s" error.failing_path error.detail
+  else
+    Printf.sprintf
+      "%s: profile dependency %s failed: %s"
+      error.keeper_path
+      error.failing_path
+      error.detail
+;;
+
+(* The deny axis is by model-visible name, so the only names a deny entry can
+   mean are the ones the descriptor spine projects to the model. Skipped when
+   the profile denies nothing: the model-visible walk revalidates every
+   descriptor's schema shape and is not free. *)
+let unknown_deny_tools = function
+  | [] -> []
+  | tool_deny ->
+    let model_visible_tool_names =
+      Keeper_tool_descriptor.model_visible_descriptors ()
+      |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+    in
+    List.filter
+      (fun name -> match Keeper_tool_deny.parse name with
+        | Lane_addon _ -> false
+        | Builtin name -> not (List.mem name model_visible_tool_names))
+      tool_deny
+;;
+
+let load_profile_doc_content ~path content =
+  let error kind detail =
+    Error { keeper_path = path; failing_path = path; kind; detail }
+  in
+  match Keeper_toml_loader.parse_toml content with
+  | Error detail -> error Parse_error detail
+  | Ok doc ->
+    (match profile_defaults_of_toml doc with
+     | Error detail -> error Profile_error detail
+     | Ok defaults ->
+       (match unknown_deny_tools defaults.tool_deny with
+        | [] -> Ok (doc, defaults)
+        | unknown ->
+          error
+            (Unknown_deny_tool unknown)
+            (Printf.sprintf
+               "keeper.tools.deny names tools no descriptor offers the model: %s"
+               (String.concat ", " unknown))))
+;;
+
+let parse_keeper_toml_content ~(path : string) content
+    : (string * keeper_profile_defaults, keeper_toml_load_error) result =
+  match load_profile_doc_content ~path content with
+  | Error _ as error -> error
+  | Ok (doc, defaults) ->
+    let name =
+      match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
+      | Some n when n <> "" -> n
+      | _ ->
+        Filename.basename path
+        |> Filename.remove_extension
+    in
+    if not (validate_name name) then
+      Error
+        { keeper_path = path
+        ; failing_path = path
+        ; kind = Invalid_name
+        ; detail = Keeper_config_text.invalid_name_error name
+        }
+    else
+      let id = Ids.Keeper_id.generate ~name ~path in
+      Ok (name,
+          { defaults with manifest_path = Some path
+                        ; id = Some id })
+
+let read_keeper_toml_content (path : string) =
+  match Safe_ops.read_file_safe path with
+  | Error detail ->
+    Error
+      { keeper_path = path
+      ; failing_path = path
+      ; kind = Read_error
+      ; detail
+      }
+  | Ok content -> Ok content
+
+type parsed_toml_cache_entry =
+  { content : string
+  ; parsed : string * keeper_profile_defaults
+  }
+
+let parsed_toml_cache_max_entries = 1024
+let parsed_toml_cache : (string, parsed_toml_cache_entry) Hashtbl.t =
+  Hashtbl.create 64
+let parsed_toml_mu = Stdlib.Mutex.create ()
+
+let invalidate_parsed_toml_cache () =
+  Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+    Hashtbl.reset parsed_toml_cache)
+;;
+
+let inspect_keeper_toml_content ~(path : string) content =
+  let cached =
+    Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+      match Hashtbl.find_opt parsed_toml_cache path with
+      | Some entry when String.equal entry.content content ->
+        Some entry.parsed
+      | Some _ | None -> None)
+  in
+  (match cached with
+   | Some parsed -> Ok parsed
+   | None ->
+     (match parse_keeper_toml_content ~path content with
+      | Error _ as error -> error
+      | Ok parsed ->
+        Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+          if Hashtbl.length parsed_toml_cache >= parsed_toml_cache_max_entries
+          then Hashtbl.reset parsed_toml_cache;
+          Hashtbl.replace parsed_toml_cache path { content; parsed });
+        Ok parsed))
+
+let inspect_keeper_toml (path : string) =
+  Result.bind (read_keeper_toml_content path) (inspect_keeper_toml_content ~path)
+
+let load_keeper_toml = inspect_keeper_toml
+
+type keeper_toml_discovery =
+  | Loaded of
+      { keeper_name : string
+      ; defaults : keeper_profile_defaults
+      }
+  | Invalid of
+      { keeper_name : string
+      ; error : keeper_toml_load_error
+      }
+
+let keeper_toml_discovery_name = function
+  | Loaded { keeper_name; _ }
+  | Invalid { keeper_name; _ } -> keeper_name
+
+let logged_toml_discovery_error : (string * string, unit) Hashtbl.t = Hashtbl.create 8
+
+let log_toml_discovery_error_once ~file ~error =
+  let key = (file, error) in
+  if Hashtbl.mem logged_toml_discovery_error key then false
+  else begin
+    Hashtbl.add logged_toml_discovery_error key ();
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ProfileLoadFailures)
+      ~labels:
+        [ ( "site"
+          , Keeper_profile_load_failure_site.(to_label Toml_discovery_error) )
+        ]
+      ();
+    Log.Keeper.warn "toml_loader: invalid discovery retained for %s: %s" file error;
+    true
+  end
+
+let logged_missing_keepers_dir : (string, unit) Hashtbl.t = Hashtbl.create 4
+
+let keeper_toml_paths (dir : string) : string list =
+  if not (Fs_compat.file_exists dir && Sys.is_directory dir)
+  then (
+    (* A missing keepers directory is a misconfiguration, not an empty
+       roster: say so once per process instead of returning silence that
+       downstream reports as zero keepers and missing declarations. *)
+    if not (Hashtbl.mem logged_missing_keepers_dir dir)
+    then (
+      Hashtbl.add logged_missing_keepers_dir dir ();
+      Log.Keeper.warn
+        "toml_loader: keepers directory %s is missing or not a directory: \
+         fleet scan finds zero keepers"
+        dir);
+    [])
+  else
+    dir
+    |> Sys.readdir
+    |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".toml")
+    |> List.sort String.compare
+    |> List.map (Filename.concat dir)
+
+let discover_keeper_toml_read ~(path : string) contents : keeper_toml_discovery =
+  let file = Filename.basename path in
+  match Result.bind contents (inspect_keeper_toml_content ~path) with
+  | Ok (keeper_name, defaults) -> Loaded { keeper_name; defaults }
+  | Error e ->
+    let _emitted =
+      log_toml_discovery_error_once
+        ~file
+        ~error:(keeper_toml_load_error_to_string e)
+    in
+    Invalid
+      { keeper_name = Filename.remove_extension file
+      ; error = e
+      }
+
+let discover_keeper_toml_path path =
+  discover_keeper_toml_read ~path (read_keeper_toml_content path)
+
+let discover_keepers_toml_with_paths (dir : string)
+    : (string * keeper_toml_discovery) list =
+  keeper_toml_paths dir
+  |> List.map (fun path -> path, discover_keeper_toml_path path)
+
+let discover_keepers_toml dir =
+  discover_keepers_toml_with_paths dir |> List.map snd

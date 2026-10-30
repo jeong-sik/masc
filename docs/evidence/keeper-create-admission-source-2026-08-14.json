@@ -1,0 +1,79 @@
+{
+  "captured_at": "2026-08-14T03:20:00+09:00",
+  "evidence_kind": "source_and_ci_state",
+  "upstream_main": "427b00defac63503ddcabc0d24b9efb47c209c1b",
+  "pull_request": {
+    "number": 28647,
+    "url": "https://github.com/jeong-sik/masc/pull/28647",
+    "head": "b57f824f4f09c34d6a23523364b471cd5374c7fa",
+    "base": "427b00defac63503ddcabc0d24b9efb47c209c1b",
+    "draft": true,
+    "mergeable": "MERGEABLE",
+    "label": "status:do-not-merge",
+    "ci": "running"
+  },
+  "root_cause": "Keeper creation mutated session, checkpoint, runtime assignment, declarative config, and prompt state before create_meta acquired the same-name shutdown intake fence.",
+  "source_boundary": {
+    "existing_gate_reused": "Keeper_shutdown_intake_fence.run_durable_intake_if_open",
+    "covered_effects": [
+      "session directory",
+      "sandbox bundle",
+      "checkpoint",
+      "runtime assignment",
+      "keeper TOML",
+      "AGENT.md",
+      "Owner metadata",
+      "registry and lane launch handoff"
+    ],
+    "new_timeout": false,
+    "new_budget": false,
+    "new_environment_variable": false,
+    "string_state_classifier": false
+  },
+  "feature_tests": [
+    {
+      "name": "shutdown rejection precedes session config runtime and owner writes",
+      "entrypoint": "Keeper_turn_up.handle_keeper_up",
+      "asserts": [
+        "no new trace or checkpoint directory",
+        "no keeper TOML or AGENT.md",
+        "no runtime assignment or runtime.toml change",
+        "no Owner metadata or live registry entry",
+        "shutdown reservation remains owned"
+      ]
+    },
+    {
+      "name": "production create keeps create-wins intake admission through lane fork",
+      "entrypoint": "Keeper_turn_up.handle_keeper_up",
+      "interleaving": "create holds durable intake and reaches config persistence while lifecycle key is held; shutdown intake reservation is installed before the key is released",
+      "asserts": [
+        "production create succeeds through start_keepalive",
+        "exact registry lane exists",
+        "later shutdown reservation is not erased"
+      ]
+    }
+  ],
+  "independent_source_review": {
+    "p0": 0,
+    "p1": 0,
+    "p2": 0,
+    "note": "The production overlap test would fail if the optional intake token were removed from start_keepalive."
+  },
+  "local_validation": [
+    "ocamlc -stop-after parsing on every changed .ml file",
+    "ocamlformat --check on changed OCaml files",
+    "git diff --check",
+    "bash -n scripts/ci-run-focused-tests.sh",
+    "bash scripts/audit-ci-test-targets.sh: 306 CI targets declared; 558 unwired baseline unchanged"
+  ],
+  "not_run_locally": [
+    "dune build",
+    "dune test"
+  ],
+  "remaining_limits": [
+    "exact-head GitHub CI must complete",
+    "the PR must be merged before deployment or live claims",
+    "same-name create/shutdown overlap still needs live post-deploy evidence",
+    "errors after admission can still leave partial creation effects; this change guarantees preexisting shutdown rejection occurs before mutation, not general rollback of every later failure"
+  ]
+}

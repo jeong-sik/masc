@@ -1,0 +1,23 @@
+{
+  "observed_at": "2026-09-09T18:56:04.827421+00:00",
+  "scope": "Isolated CI binary over copied operator memory snapshots; not production deployment",
+  "ci_run": 34389200895,
+  "ci_artifact": 10119371436,
+  "binary_commit": "d8d279905959a307be469076392cc800dcd1df24",
+  "executable_sha256": "419488e8937808483c1bea7943311f036ca4f731b2dae3c43f14c0171d1fe10a",
+  "snapshot_capture_at": "2026-09-09T18:51:45.096691+00:00",
+  "copied_store_files": 23,
+  "copied_store_bytes": 1184861,
+  "api_schema": "workspace.memory.context.v1",
+  "api_keepers": 18,
+  "api_available_stores": 23,
+  "api_unavailable_stores": 0,
+  "context_bytes": 1073202,
+  "context_sha256": "8ec4495727fa9533096ee6732668a43c658537a163014be6edf0ed5235ea6409",
+  "curator_sources": 1710,
+  "curator_serialized_source_bytes": 1440028,
+  "local_model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+  "declared_context_tokens": 262144,
+  "model_inference_on_this_capture": false,
+  "private_memory_content_published": false
+}

@@ -1,0 +1,28 @@
+import { describe, expect, it } from 'vitest'
+
+import { normalizeKeeperBrief } from './mission-normalizers-entities'
+
+describe('normalizeKeeperBrief', () => {
+  it('keeps observed audit fields', () => {
+    const brief = normalizeKeeperBrief({
+      name: 'sangsu',
+      status: 'active',
+      latest_tool_names: ['observed_tool'],
+      latest_tool_call_count: 3,
+      tool_audit_source: 'heartbeat_result',
+      tool_audit_at: '2026-04-02T09:30:00Z',
+    })
+
+    expect(brief).toEqual({
+      name: 'sangsu',
+      status: 'active',
+      context_ratio: null,
+      last_turn_ago_s: null,
+      current_work: null,
+      latest_tool_names: ['observed_tool'],
+      latest_tool_call_count: 3,
+      tool_audit_source: 'heartbeat_result',
+      tool_audit_at: '2026-04-02T09:30:00Z',
+    })
+  })
+})

@@ -1,0 +1,12 @@
+{
+  "README.md": "63aa10deb04c72a6a5889f5459e48fb17a6dab1160c86b1d16d5aab5a861d49c",
+  "comparison/README.md": "6028b6bd97e9f1268ffa1e66ac1bbb2c1abb3cd0b732fd6580d41dc643aed66d",
+  "comparison/artifact.json": "5788585a5897d51b17405976079eda988ea21a830ca746f11c852403c97bd8bc",
+  "comparison/independent-audit.json": "118208e9cbc4e612ab15bdd776f0c8b9ee6cf199acd02b47cb2ccd36dbde034e",
+  "comparison/plan.json": "4df9ed1168e7f455d02000f48aa7bebee861c4af4278136303d5bb0e36595710",
+  "comparison/raw-files.json": "c0ab5c48122dac28ca0efd1d9e4e75106774d12ec7328c662a39882db2bbb712",
+  "comparison/raw.tar.gz": "cea189a8e6ce615e7d5cd63ae7a9d244891a991ba74837c5243b00ee0e478f04",
+  "comparison/redaction.json": "35023c66bbf642362ce15b6f2b4cbd641f70933cd86d674ef38a7bbf4a13105f",
+  "comparison/source-scope.json": "79eb17283d280659703b9d75c6824e236c4af6fe454bd94c8656babf03dd1943",
+  "comparison/summary.json": "a2a42a3afb636cee06e1b512117109580e273a3c20e80d288e7d7eb41fb89fce"
+}

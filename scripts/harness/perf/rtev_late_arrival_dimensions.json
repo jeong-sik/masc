@@ -1,0 +1,157 @@
+{
+  "schema": "masc.rtev-late-arrival-synthetic-dimensions.v1",
+  "source_summary_sha256": "8b166a3481097b6e9caf0b9082c179555e56623fe667beab1ed94b7319d4803b",
+  "source_scope": "Observed completed stw_handler and stw_api_barrier spans per domain. Completed handler counts size synthetic begin lists; actual begin events may include unfinished spans and were not retained. All timestamps are generated, not captured.",
+  "rows": [
+    {
+      "domain": 0,
+      "completed_handler_spans": 79,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 1,
+      "completed_handler_spans": 772,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 2,
+      "completed_handler_spans": 767,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 3,
+      "completed_handler_spans": 767,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 4,
+      "completed_handler_spans": 773,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 5,
+      "completed_handler_spans": 767,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 6,
+      "completed_handler_spans": 769,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 7,
+      "completed_handler_spans": 765,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 8,
+      "completed_handler_spans": 770,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 9,
+      "completed_handler_spans": 771,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 10,
+      "completed_handler_spans": 767,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 11,
+      "completed_handler_spans": 765,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 12,
+      "completed_handler_spans": 769,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 13,
+      "completed_handler_spans": 772,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 14,
+      "completed_handler_spans": 770,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 15,
+      "completed_handler_spans": 766,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 16,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 17,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 18,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 19,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 20,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 21,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 22,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 23,
+      "completed_handler_spans": 773,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 24,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 25,
+      "completed_handler_spans": 772,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 26,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 27,
+      "completed_handler_spans": 773,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 28,
+      "completed_handler_spans": 774,
+      "completed_api_barrier_spans": 767
+    },
+    {
+      "domain": 29,
+      "completed_handler_spans": 772,
+      "completed_api_barrier_spans": 767
+    }
+  ]
+}

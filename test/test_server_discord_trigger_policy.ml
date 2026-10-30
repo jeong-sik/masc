@@ -1,0 +1,554 @@
+(* F941 / masc#25123 — the server's trigger-policy loading is typed and
+   fail-closed, mirroring the Slack sibling: a missing runtime.toml or a
+   missing key is "unset" (default applies); unreadable/malformed TOML, a
+   wrong field type or an invalid policy value is an explicit load error — the
+   gateway must not boot on a policy the operator did not write.
+   [discord.trigger_policy] in runtime.toml is the only configured plane. *)
+
+open Alcotest
+open Masc
+module G = Server_discord_in_process_gateway
+module State = Channel_gate_discord_state
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> unsetenv key)
+    (fun () ->
+      Unix.putenv key value;
+      f ())
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+;;
+
+let with_temp_dir f =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-discord-preworker-%d-%d" (Unix.getpid ())
+         (Random.bits ()))
+  in
+  Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+;;
+
+let ps p = Discord_gateway_state.trigger_policy_to_string p
+let default_str = ps G.default_trigger_policy
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+;;
+
+(* -- load_trigger_policy_from_toml: the TOML plane in isolation -- *)
+
+let test_toml_missing_file_is_unset () =
+  with_temp_dir @@ fun dir ->
+  match
+    G.load_trigger_policy_from_toml
+      ~path:(Filename.concat dir "runtime.toml")
+  with
+  | Ok G.Runtime_toml_missing -> ()
+  | Ok _ -> fail "expected Runtime_toml_missing"
+  | Error e -> failf "expected missing, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_toml_missing_key_is_unset () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\nother = \"x\"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Ok G.Trigger_policy_missing -> ()
+  | Ok _ -> fail "expected Trigger_policy_missing"
+  | Error e -> failf "expected missing key, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_toml_empty_value_is_unset () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\ntrigger_policy = \"  \"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Ok G.Trigger_policy_missing -> ()
+  | Ok _ -> fail "expected Trigger_policy_missing for blank value"
+  | Error e -> failf "expected unset, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_toml_valid_value_loads () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\ntrigger_policy = \"mention_only\"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Ok (G.Trigger_policy_loaded p) ->
+    check string "loaded policy" "mention_only" (ps p)
+  | Ok _ -> fail "expected loaded policy"
+  | Error e -> failf "expected policy, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_toml_malformed_is_load_error () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord\ntrigger_policy = \"mention_only\"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Error (G.Runtime_toml_invalid _) -> ()
+  | Error e -> failf "expected Runtime_toml_invalid, got: %s"
+                 (G.trigger_policy_load_error_to_string e)
+  | Ok _ -> fail "malformed TOML must not load"
+
+let test_toml_wrong_type_is_load_error () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\ntrigger_policy = 7\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Error (G.Trigger_policy_invalid _) -> ()
+  | Error e -> failf "expected Trigger_policy_invalid, got: %s"
+                 (G.trigger_policy_load_error_to_string e)
+  | Ok _ -> fail "a non-string trigger_policy must not load"
+
+let test_toml_invalid_policy_is_load_error () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\ntrigger_policy = \"mention_ony\"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Error (G.Trigger_policy_invalid _) -> ()
+  | Error e -> failf "expected Trigger_policy_invalid, got: %s"
+                 (G.trigger_policy_load_error_to_string e)
+  | Ok _ -> fail "a typo policy must not load"
+
+(* -- resolved_trigger_policy: runtime.toml > default -- *)
+
+(* Point the config resolver at a temp config root so the TOML plane is
+   under test control. MASC_CONFIG_DIR is the documented override the
+   sandbox suites already use. *)
+let with_config_root dir f =
+  with_env "MASC_CONFIG_DIR" dir @@ fun () ->
+  with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" "1" @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:Config_dir_resolver.reset f
+
+let test_configured_value_resolves () =
+  with_temp_dir @@ fun dir ->
+  write_file (Filename.concat dir "runtime.toml")
+    "[discord]\ntrigger_policy = \"all\"\n";
+  with_config_root dir @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "the configured value resolves" "all" (ps p)
+  | Error e -> failf "expected the configured policy, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_invalid_value_is_load_error () =
+  with_temp_dir @@ fun dir ->
+  write_file (Filename.concat dir "runtime.toml")
+    "[discord]\ntrigger_policy = \"mention_ony\"\n";
+  with_config_root dir @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Error (G.Trigger_policy_invalid _) -> ()
+  | Error e -> failf "expected policy_invalid, got: %s"
+                 (G.trigger_policy_load_error_to_string e)
+  | Ok p -> failf "invalid value must not resolve, got %s" (ps p)
+
+let test_all_unset_is_default () =
+  with_temp_dir @@ fun dir ->
+  with_config_root dir @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "default when nothing configured" default_str (ps p)
+  | Error e -> failf "expected default, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_channel_directory_reads_named_channel () =
+  match
+    G.For_testing.discord_channel_directory_entry
+      (`Assoc [ "id", `String "10"; "name", `String "general" ])
+  with
+  | Ok entry ->
+    check (pair string string) "named channel projection"
+      ("10", "general") entry
+  | Error detail -> fail detail
+
+let test_message_people_directory_prefers_global_names () =
+  match
+    G.For_testing.discord_message_people_entries
+      (`List
+        [ `Assoc
+            [ "author",
+              `Assoc
+                [ "id", `String "20"
+                ; "global_name", `String "Alice"
+                ; "username", `String "alice_1"
+                ]
+            ]
+        ; `Assoc
+            [ "author",
+              `Assoc
+                [ "id", `String "20"
+                ; "global_name", `String "Old Alice"
+                ; "username", `String "alice_old"
+                ]
+            ]
+        ; `Assoc
+            [ "author",
+              `Assoc
+                [ "id", `String "21"
+                ; "global_name", `Null
+                ; "username", `String "bob_2"
+                ]
+            ]
+        ])
+  with
+  | Ok entries ->
+    check (list (pair string string)) "person projection"
+      [ "20", "Alice"; "21", "bob_2" ] entries
+  | Error detail -> fail detail
+
+let test_full_directory_pages_keep_channels_and_global_people () =
+  let channels =
+    G.For_testing.discord_channel_directory_entries
+      (`List
+        [ `Assoc [ "id", `String "30"; "name", `String "general" ]
+        ; `Assoc [ "id", `String "31"; "name", `String "ops" ]
+        ])
+  in
+  let members =
+    G.For_testing.discord_member_directory_page
+      (`List
+        [ `Assoc
+            [ "nick", `String "Guild Nick"
+            ; "user",
+              `Assoc
+                [ "id", `String "40"
+                ; "global_name", `String "Global Name"
+                ; "username", `String "account_name"
+                ]
+            ]
+        ])
+  in
+  (match channels with
+   | Ok entries ->
+     check (list (pair string string)) "all visible channels"
+       [ "30", "general"; "31", "ops" ] entries
+   | Error detail -> fail detail);
+  match members with
+  | Ok (entries, after, count) ->
+    check (list (pair string string)) "global identity, not guild nickname"
+      [ "40", "Global Name" ] entries;
+    check (option string) "member cursor" (Some "40") after;
+    check int "member count" 1 count
+  | Error detail -> fail detail
+
+let discord_message ~message_id =
+  Discord_gateway_client.Message_create
+    { channel_id = "C123"
+    ; guild_id = Some "G123"
+    ; message_id
+    ; author_id = "U123"
+    ; author_name = Some "operator"
+    ; content = "wake the keeper"
+    ; attachments = []
+    ; raw_content = "wake the keeper"
+    ; resolved_mentions = []
+    ; mention_user_ids = []
+    ; mentions_bot = true
+    ; explicit_mentions_bot = true
+    ; author_is_bot = false
+    ; message_reference_channel_id = None
+    ; message_reference_message_id = None
+    ; referenced_message_author_id = None
+    }
+;;
+
+let test_durable_accept_precedes_delivery_handoff () =
+  with_temp_dir @@ fun base_dir ->
+  with_env Env_config_core.base_path_env_key base_dir @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_STORE_PATH"
+    (Filename.concat base_dir "bindings.json")
+  @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_AUDIT_PATH"
+    (Filename.concat base_dir "audit.jsonl")
+  @@ fun () ->
+  (match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+   | Error detail -> fail detail
+   | Ok _ -> ());
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let observed, resolve_observed = Eio.Promise.create () in
+  let ingress =
+    Connector_ingress_lane.create ~sw
+      ~on_failure:(fun failure -> Eio.Promise.resolve resolve_observed failure)
+      ()
+  in
+  let accepted_before_delivery = ref false in
+  let observed_delivery = ref None in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+      ~content:_ =
+    accepted_before_delivery := true;
+    Gate_protocol.Reply
+      { content = "queued"
+      ; structured = None
+      ; stats = None
+      ; message_request = None
+      }
+  in
+  let dispatch_for_delivery delivery =
+    observed_delivery := Some delivery;
+    dispatch
+  in
+  G.For_testing.submit_triggered_event
+    ~deliver:(fun () ->
+      if not !accepted_before_delivery then
+        failwith "delivery ran before durable accept";
+      failwith "observe Discord ingress identity")
+    ingress ~dispatch_for_delivery ~base_dir
+    (discord_message ~message_id:"discord-exact-123");
+  check bool "accept completed before handoff" true !accepted_before_delivery;
+  (match !observed_delivery with
+   | Some
+       { continuation_channel =
+           Keeper_continuation_channel.Discord
+             { guild_id = continuation_guild_id
+             ; channel_id
+             ; parent_channel_id = continuation_parent_channel_id
+             ; thread_id = continuation_thread_id
+             ; reply_to_message_id
+             ; user_id
+             }
+       ; surface =
+           Surface_ref.Discord
+             { guild_id; channel_id = surface_channel_id; parent_channel_id
+             ; thread_id }
+       ; conversation_id
+       ; external_message_id
+       ; workspace_id
+       } ->
+     check string "Discord delivery channel" "C123" channel_id;
+     check string "Discord delivery actor" "U123" user_id;
+     check (option string) "Discord continuation guild"
+       (Some "G123") continuation_guild_id;
+     check (option string) "Discord continuation parent"
+       None continuation_parent_channel_id;
+     check (option string) "Discord continuation thread"
+       None continuation_thread_id;
+     check (option string) "Discord continuation reply target"
+       (Some "discord-exact-123") reply_to_message_id;
+     check string "Discord surface channel" "C123" surface_channel_id;
+     check (option string) "Discord surface guild" (Some "G123") guild_id;
+     check (option string) "Discord surface parent" None parent_channel_id;
+     check (option string) "Discord surface thread" None thread_id;
+     check (option string) "Discord conversation identity"
+       (Some "discord:G123:channel:C123") conversation_id;
+     check (option string) "Discord external event identity"
+       (Some "discord-exact-123") external_message_id;
+     check (option string) "Discord delivery workspace identity"
+       (Some "G123") workspace_id
+   | Some _ -> fail "Discord leaf emitted another connector projection"
+   | None -> fail "Discord leaf did not emit a delivery projection");
+  let failure = Eio.Promise.await observed in
+  check string "exact Discord message id" "discord-exact-123"
+    failure.Connector_ingress_lane.event_id.opaque_id;
+  check string "typed source" "discord_triggered" failure.event_id.source;
+  let (Connector_ingress_lane.Keeper_lane keeper_name) = failure.lane in
+  check string "resolved Keeper lane" "luna" keeper_name
+;;
+
+module Gw = Discord_gateway_state
+
+(* -- the params plane above env and TOML -------------------------- *)
+
+(* The gateway publishes what it resolved from env and runtime.toml, and the
+   param answers with that until an operator overrides it from the params
+   surface. This is the layer that lets a policy change take effect without a
+   restart, so what it must hold is: an override wins, and clearing one returns
+   to the configured answer rather than to the hardcoded baseline. *)
+
+let installed_policy () = ps (Runtime_params.get Connector_trigger_params.discord)
+
+let set_override policy =
+  match Runtime_params.set Connector_trigger_params.discord policy with
+  | Ok () -> ()
+  | Error detail -> fail ("override rejected: " ^ detail)
+;;
+
+let with_clean_override f =
+  Fun.protect
+    ~finally:(fun () -> Runtime_params.clear Connector_trigger_params.discord)
+    f
+;;
+
+let test_start_without_token_publishes_configured_policy () =
+  with_temp_dir @@ fun base_path ->
+  write_file (Filename.concat base_path "runtime.toml")
+    "[discord]\ntrigger_policy = \"all\"\n";
+  with_config_root base_path @@ fun () ->
+  with_env Env_config_core.base_path_env_key base_path @@ fun () ->
+  with_env "DISCORD_BOT_TOKEN" "" @@ fun () ->
+  with_clean_override @@ fun () ->
+  Fun.protect
+    ~finally:(fun () ->
+      Connector_trigger_params.set_discord_configured Gw.Mention_or_thread)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let state = Mcp_server.For_testing.create_state ~base_path in
+      List.iter (fun override ->
+        Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
+        Runtime_params.clear Connector_trigger_params.discord;
+        Option.iter set_override override;
+        G.start ~sw ~env ~clock:(Eio.Stdenv.clock env) ~state;
+        let expected = Option.value ~default:Gw.All override in
+        List.iter (fun json ->
+          check string "start without a token reports the effective policy"
+            (ps expected)
+            Yojson.Safe.Util.(json |> member "trigger_policy" |> to_string))
+          [State.status_json (); State.connector_json ()];
+        check bool "transport remains disconnected" false (State.connected ());
+        Runtime_params.clear Connector_trigger_params.discord;
+        check string "clearing exposes the configuration published by start"
+          (ps Gw.All) (installed_policy ()))
+        [None; Some Gw.Mention_only])
+;;
+
+let test_configured_answers_without_override () =
+  with_clean_override (fun () ->
+    Runtime_params.clear Connector_trigger_params.discord;
+    Connector_trigger_params.set_discord_configured Gw.All;
+    check string "the configured policy answers when nothing overrides it"
+      (ps Gw.All) (installed_policy ()))
+;;
+
+let test_override_wins_over_configured () =
+  with_clean_override (fun () ->
+    Connector_trigger_params.set_discord_configured Gw.All;
+    set_override Gw.Mention_only;
+    check string "an operator override outranks env and TOML"
+      (ps Gw.Mention_only) (installed_policy ()))
+;;
+
+let test_clear_returns_to_configured () =
+  with_clean_override (fun () ->
+    Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
+    set_override Gw.All;
+    Runtime_params.clear Connector_trigger_params.discord;
+    check string "clearing returns to what env and TOML said, not the baseline"
+      (ps Gw.Mention_or_thread) (installed_policy ()))
+;;
+
+(* The parameterized form is not offered by the picker but must still round
+   trip, or an operator who types it loses it on the next read. *)
+let test_user_only_round_trips_through_the_param () =
+  with_clean_override (fun () ->
+    set_override (Gw.User_only "123456789");
+    check string "user_only survives serialize and deserialize"
+      (ps (Gw.User_only "123456789")) (installed_policy ()))
+;;
+
+(* The runtime parameter commits before persistence/audit. Status must follow
+   the committed policy even when the subsequent audit append fails, and
+   clearing an override must expose the configured policy again. *)
+let test_status_follows_param_set_clear_and_failed_audit () =
+  with_temp_dir @@ fun base_path ->
+  with_env Env_config_core.base_path_env_key base_path (fun () ->
+    with_clean_override (fun () ->
+      Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
+      let key = Runtime_params.key Connector_trigger_params.discord in
+      let mutate f =
+        match
+          Server_routes_http_routes_activity.mutate_runtime_param_with_effects
+            ~base_path ~param_key:key f
+        with
+        | Ok ((_ : Runtime_params.json_change), (_ : (string * Yojson.Safe.t) list)) -> ()
+        | Error detail -> fail ("param mutation rejected: " ^ detail)
+      in
+      let check_surfaces expected =
+        check string "dispatch reads the committed policy" (ps expected)
+          (installed_policy ());
+        List.iter
+          (fun json ->
+            check string "connector status reads the committed policy" (ps expected)
+              Yojson.Safe.Util.(json |> member "trigger_policy" |> to_string))
+          [ State.status_json (); State.connector_json () ]
+      in
+      mutate (fun () -> Runtime_params.set_by_key_with_change ~base_path key (`String "all"));
+      check_surfaces Gw.All;
+      let retained_status = State.status_json () in
+      mutate (fun () -> Runtime_params.clear_by_key_with_change ~base_path key);
+      check_surfaces Gw.Mention_or_thread;
+      check string "retained status is an immutable observation" "all"
+        Yojson.Safe.Util.(retained_status |> member "trigger_policy" |> to_string);
+      (* A fresh audit destination avoids any previously opened append handle.
+         The parameter file remains writable; only the audit append fails. *)
+      let failing_base = Filename.concat base_path "audit-failure" in
+      let audit_path = Filename.concat
+          (Common.masc_dir_from_base_path ~base_path:failing_base) "param_audit.jsonl" in
+      Fs_compat.mkdir_p audit_path;
+      let audit_failed =
+        try
+          mutate (fun () ->
+            Runtime_params.set_by_key_with_change ~base_path:failing_base key
+              (`String "mention_only"));
+          false
+        with
+        | Sys_error _ | Unix.Unix_error _ | Eio.Io _ -> true
+      in
+      check bool "the post-commit audit append failed" true audit_failed;
+      check_surfaces Gw.Mention_only))
+;;
+
+let () =
+  run "server_discord_trigger_policy"
+    [ ( "toml_loader"
+      , [ test_case "missing file => unset" `Quick test_toml_missing_file_is_unset
+        ; test_case "missing key => unset" `Quick test_toml_missing_key_is_unset
+        ; test_case "blank value => unset" `Quick test_toml_empty_value_is_unset
+        ; test_case "valid value loads" `Quick test_toml_valid_value_loads
+        ; test_case "malformed TOML => load error" `Quick
+            test_toml_malformed_is_load_error
+        ; test_case "wrong type => load error" `Quick
+            test_toml_wrong_type_is_load_error
+        ; test_case "invalid policy => load error" `Quick
+            test_toml_invalid_policy_is_load_error
+        ] )
+    ; ( "resolved_precedence"
+      , [ test_case "the configured value resolves" `Quick
+            test_configured_value_resolves
+        ; test_case "invalid value => load error (no silent default)" `Quick
+            test_invalid_value_is_load_error
+        ; test_case "all unset => default" `Quick test_all_unset_is_default
+        ] )
+    ; ( "ingress handoff"
+      , [ test_case "durable accept precedes Discord delivery" `Quick
+            test_durable_accept_precedes_delivery_handoff
+        ] )
+    ; ( "directory projection"
+      , [ test_case "named channels" `Quick
+            test_channel_directory_reads_named_channel
+        ; test_case "recent participant names" `Quick
+            test_message_people_directory_prefers_global_names
+        ; test_case "full channel and member pages" `Quick
+            test_full_directory_pages_keep_channels_and_global_people
+        ] )
+    ; ( "params_plane"
+      , [ test_case "start without token publishes configuration and keeps overrides" `Quick
+            test_start_without_token_publishes_configured_policy
+        ; test_case "configured answers without an override" `Quick
+            test_configured_answers_without_override
+        ; test_case "override wins over configured" `Quick
+            test_override_wins_over_configured
+        ; test_case "clear returns to configured" `Quick
+            test_clear_returns_to_configured
+        ; test_case "user_only round trips" `Quick
+            test_user_only_round_trips_through_the_param
+        ; test_case "status follows set, clear and post-commit audit failure" `Quick
+            test_status_follows_param_set_clear_and_failed_audit
+        ] )
+    ]

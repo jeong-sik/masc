@@ -1,0 +1,13 @@
+/private/tmp/masc-38059-outbox-20261023-3jbuxifj/review-repair-validation/masc-rejection-validation-o0uxmlzp/codec_fixture.exe --color=never
+Testing `canonical rejection relation codec'.
+This run has ID `DWGFL5P3'.
+
+  [OK]          actual codec          0   test_backlog_completion_rejection_r...
+  [OK]          actual codec          1   test_backlog_optional_rejection_obs...
+  [OK]          actual codec          2   test_backlog_rejects_conflicting_re...
+  [OK]          actual codec          3   test_backlog_rejects_malformed_deli...
+
+Full test results in `/private/tmp/masc-38059-outbox-20261023-3jbuxifj/review-repair-validation/masc-rejection-validation-o0uxmlzp/_build/_tests/canonical rejection relation codec'.
+Test Successful in 0.000s. 4 tests run.
+
+exit=0

@@ -1,0 +1,1759 @@
+
+open Server_utils
+open Server_auth
+open Server_routes_http_common
+open Server_routes_http_runtime
+
+module Http = Http_server_eio
+module Mcp_eio = Mcp_server_eio
+module Server_activity_http = Server_activity_http
+module Common = Server_routes_http_common
+module Pages = Server_routes_http_pages
+module Runtime = Server_routes_http_runtime
+module Keeper_api_types = Server_dashboard_http_keeper_api_types
+
+(* Runtime prompt assets intentionally stay outside [Prompt_registry]: they
+   have no frontmatter contract, so the prompt editor cannot override them.
+   The autonomous wake prompt takes its override from
+   runtime.toml instead.  The prompt sync
+   owns the runtime directory, so enumerate the binary's [*.txt] inventory
+   and then read the runtime projection.  A missing file stays visible rather
+   than being silently omitted; that is the useful signal after a failed sync.
+*)
+let validate_write_workspace ~config args =
+  match Workspace.validate_expected_workspace ~config args with
+  | Ok args -> Ok args
+  | Error Workspace.Invalid_workspace_precondition -> Error "invalid expected_workspace precondition"
+  | Error Workspace.Workspace_precondition_failed -> Error "workspace precondition failed"
+
+(* A Goal transition from the terminal names the workspace the operator saw.
+   A board write may omit it; a Goal transition may not, so a server swapped
+   on the same port after the terminal read the Goal refuses the transition
+   instead of applying it to another workspace's Goal. *)
+let validate_goal_workspace ~config = function
+  | `Assoc fields as args when List.mem_assoc "expected_workspace" fields ->
+      validate_write_workspace ~config args
+  | _ -> Error "expected_workspace precondition is required"
+
+let runtime_prompt_assets_json ~prompts_dir ~embedded_files =
+  let prefix = "prompts/" in
+  let prefix_length = String.length prefix in
+  embedded_files
+  |> List.filter_map (fun embedded_path ->
+    if String.starts_with ~prefix embedded_path
+       && Filename.check_suffix embedded_path ".txt"
+    then
+      let relative =
+        String.sub embedded_path prefix_length
+          (String.length embedded_path - prefix_length)
+      in
+      let file_path = Filename.concat prompts_dir relative in
+      let value = Fs_compat.load_file_opt file_path in
+      let char_count =
+        match value with
+        | Some text -> String.length text
+        | None -> 0
+      in
+      Some
+        (`Assoc
+           [ ("path", `String relative)
+           ; ("file_path", `String file_path)
+           ; ("value", `String (Option.value ~default:"" value))
+           ; ("file_exists", `Bool (Option.is_some value))
+           ; ("char_count", `Int char_count)
+           ])
+    else None)
+  |> List.sort (fun left right ->
+    let path = function
+      | `Assoc fields ->
+        (match List.assoc_opt "path" fields with Some (`String value) -> value | _ -> "")
+      | _ -> ""
+    in
+    String.compare (path left) (path right))
+;;
+
+let prompt_catalog_json () =
+  let runtime_assets =
+    runtime_prompt_assets_json
+      ~prompts_dir:(Config_dir_resolver.prompts_dir ())
+      ~embedded_files:Embedded_config.file_list
+  in
+  match Prompt_registry.prompts_json () with
+  | `Assoc fields -> `Assoc (("runtime_assets", `List runtime_assets) :: fields)
+  | json -> json
+;;
+
+let activity_result_json ~ok ~message =
+  `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
+;;
+
+let activity_result_json_with_data ~ok ~message ~data =
+  `Assoc
+    [ ("ok", `Bool ok)
+    ; ("message", `String message)
+    ; ("data", data)
+    ]
+;;
+
+type schedule_write_tool =
+  | Schedule_create
+  | Schedule_update
+
+type schedule_write_schema_error =
+  | Schedule_schema_not_registered of schedule_write_tool
+
+let schedule_write_tool_name = function
+  | Schedule_create -> "masc_schedule_create"
+  | Schedule_update -> "masc_schedule_update"
+;;
+
+let schedule_write_schema_error_message = function
+  | Schedule_schema_not_registered tool ->
+    "schedule_schema_not_registered:" ^ schedule_write_tool_name tool
+;;
+
+let schedule_write_schema tool =
+  let tool_name = schedule_write_tool_name tool in
+  match Tool_schemas_schedule.find_definition tool_name with
+  | Some definition -> Ok definition.Tool_schemas_schedule.schema.input_schema
+  | None -> Error (Schedule_schema_not_registered tool)
+;;
+
+(* Who a schedule route is acting for. [with_tool_actor_auth] admits a
+   request and names it, but a same-origin request with no bearer and a
+   keeper holding the internal token are admitted too, and neither is the
+   operator. Only an operator credential makes the operator. *)
+(* Route errors share [Server_auth.request_error] with the lane routes. *)
+let schedule_caller ~state ~agent_name request
+  : (Tool_schedule.caller, Server_auth.request_error) result =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match Server_auth.request_credential_standing ~base_path request with
+  | Server_auth.Operator_credential -> Ok (Tool_schedule.Operator_caller agent_name)
+  | Server_auth.Agent_credential -> Ok (Tool_schedule.Named_caller agent_name)
+  (* The schedule tools need CanReadState or CanBroadcast, which a Player
+     does not hold, so [with_tool_actor_auth] refuses it before this runs.
+     Were one admitted, it is a named caller who is not the operator. *)
+  | Server_auth.Player_credential -> Ok (Tool_schedule.Named_caller agent_name)
+  | Server_auth.No_credential -> Ok Tool_schedule.Unnamed_caller
+  (* The request passed admission on an earlier read, so the role lookup
+     failed after it. Recording the write under a guessed caller would
+     misattribute a mutation; the handler answers 503 so the client
+     retries. *)
+  | Server_auth.Unreadable_credential -> Error Credential_store_unreadable
+;;
+
+let handle_schedule_write_request
+      ~update
+      ~state
+      ~agent_name
+      ~request
+      reqd
+      body_str
+  =
+  try
+    let ( let* ) r f =
+      match r with
+      | Ok value -> f value
+      | Error (Bad_request_detail message) ->
+        respond_json_value_with_cors ~status:`Bad_request request reqd
+          (activity_result_json ~ok:false ~message)
+      | Error Credential_store_unreadable ->
+        respond_json_value_with_cors ~status:`Service_unavailable request reqd
+          (activity_result_json ~ok:false
+             ~message:"credential store is unavailable; retry")
+    in
+    let* args =
+      try Ok (Yojson.Safe.from_string body_str) with
+      | Yojson.Json_error message ->
+        Error (Bad_request_detail ("Invalid JSON: " ^ message))
+    in
+    let schedule_tool = if update then Schedule_update else Schedule_create in
+    let tool_name = schedule_write_tool_name schedule_tool in
+    let* schema =
+      schedule_write_schema schedule_tool
+      |> Result.map_error (fun error ->
+        Bad_request_detail (schedule_write_schema_error_message error))
+    in
+    let* args =
+      Tool_input_validation.validate_args
+        ~schema
+        ~name:tool_name
+        ~args
+        ()
+      |> Result.map_error (fun error ->
+        Bad_request_detail (Tool_result.message error))
+    in
+    let* caller = schedule_caller ~state ~agent_name request in
+    let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+    let context : Tool_schedule.context =
+      { config
+      ; caller
+      ; stamp_keeper_wake_result_delivery =
+          (fun ~payload ->
+             Schedule_payload_projection.set_keeper_wake_result_delivery
+               ~payload ~channel:None)
+      ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+      ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+      }
+    in
+    let start_time = Tool_timing.start () in
+    let result =
+      if update
+      then
+        Tool_schedule.handle_update
+          ~tool_name ~start_time context args
+      else
+        Tool_schedule.handle_create
+          ~tool_name ~start_time context args
+    in
+    let ok = Tool_result.is_success result in
+    let message = Tool_result.message result in
+    let status =
+      if ok
+      then if update then `OK else `Created
+      else `Bad_request
+    in
+    respond_json_value_with_cors ~status request reqd
+      (activity_result_json ~ok ~message)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+;;
+
+type keeper_cadence_wakeup_summary =
+  { requested : int
+  ; signaled : int
+  ; deferred_missing : int
+  ; deferred_replaced : int
+  ; deferred_in_flight : int
+  ; deferred_awake : int
+  ; deferred_inactive : int
+  ; deferred_lifecycle : int
+  ; deferred_lifecycle_reserved : int
+  }
+
+let empty_keeper_cadence_wakeup_summary =
+  { requested = 0
+  ; signaled = 0
+  ; deferred_missing = 0
+  ; deferred_replaced = 0
+  ; deferred_in_flight = 0
+  ; deferred_awake = 0
+  ; deferred_inactive = 0
+  ; deferred_lifecycle = 0
+  ; deferred_lifecycle_reserved = 0
+  }
+;;
+
+let keeper_cadence_effect_mu = Eio.Mutex.create ()
+
+(* Which side effect a mutated param owes. The keys come from
+   [Runtime_params.key] so no literal is spelled twice. *)
+type param_effect =
+  | Keeper_cadence
+  | No_effect
+
+let effect_of_param_key param_key =
+  let is p = String.equal param_key (Runtime_params.key p) in
+  if is Runtime_settings.keeper_keepalive_interval_sec then Keeper_cadence
+  else No_effect
+;;
+
+let is_keeper_cadence_param param_key =
+  match effect_of_param_key param_key with
+  | Keeper_cadence -> true
+  | No_effect -> false
+;;
+
+let wake_keepers_after_runtime_param_change
+      ~base_path
+      ~param_key
+      ~previous_interval_s
+      ~new_interval_s
+  =
+  if
+    not (is_keeper_cadence_param param_key)
+  then None
+  else
+    let change, wake_required =
+      if new_interval_s < previous_interval_s
+      then "shortened", true
+      else if new_interval_s > previous_interval_s
+      then "lengthened", false
+      else "unchanged", false
+    in
+    let entries =
+      if wake_required then Keeper_registry.all ~base_path () else []
+    in
+    let summary =
+      List.fold_left
+        (fun summary (entry : Keeper_registry.registry_entry) ->
+           let summary = { summary with requested = summary.requested + 1 } in
+           match Keeper_registry.wakeup_cadence_sleeper_exact entry with
+           | Keeper_registry.Cadence_sleeper_signaled ->
+             { summary with signaled = summary.signaled + 1 }
+           | Keeper_registry.Cadence_sleeper_missing ->
+             { summary with deferred_missing = summary.deferred_missing + 1 }
+           | Keeper_registry.Cadence_sleeper_replaced ->
+             { summary with deferred_replaced = summary.deferred_replaced + 1 }
+           | Keeper_registry.Cadence_sleeper_in_flight ->
+             { summary with
+               deferred_in_flight = summary.deferred_in_flight + 1
+             }
+           | Keeper_registry.Cadence_sleeper_awake ->
+             { summary with deferred_awake = summary.deferred_awake + 1 }
+           | Keeper_registry.Cadence_sleeper_inactive _ ->
+             { summary with deferred_inactive = summary.deferred_inactive + 1 }
+           | Keeper_registry.Cadence_sleeper_lifecycle_denied _ ->
+             { summary with
+               deferred_lifecycle = summary.deferred_lifecycle + 1
+             }
+           | Keeper_registry.Cadence_sleeper_lifecycle_reserved _ ->
+             { summary with
+               deferred_lifecycle_reserved =
+                 summary.deferred_lifecycle_reserved + 1
+             })
+        empty_keeper_cadence_wakeup_summary
+        entries
+    in
+    let deferred = summary.requested - summary.signaled in
+    if deferred > 0
+    then
+      Log.Keeper.warn
+        "keeper cadence shortened: signaled=%d requested=%d deferred_missing=%d \
+         deferred_replaced=%d deferred_in_flight=%d deferred_awake=%d \
+         deferred_inactive=%d \
+         deferred_lifecycle=%d deferred_lifecycle_reserved=%d"
+        summary.signaled
+        summary.requested
+        summary.deferred_missing
+        summary.deferred_replaced
+        summary.deferred_in_flight
+        summary.deferred_awake
+        summary.deferred_inactive
+        summary.deferred_lifecycle
+        summary.deferred_lifecycle_reserved;
+    Some
+      (`Assoc
+         [ "change", `String change
+         ; "previous_interval_s", `Int previous_interval_s
+         ; "new_interval_s", `Int new_interval_s
+         ; "wake_required", `Bool wake_required
+         ; "requested", `Int summary.requested
+         ; "signaled", `Int summary.signaled
+         ; "deferred_missing", `Int summary.deferred_missing
+         ; "deferred_replaced", `Int summary.deferred_replaced
+         ; "deferred_in_flight", `Int summary.deferred_in_flight
+         ; "deferred_awake", `Int summary.deferred_awake
+         ; "deferred_inactive", `Int summary.deferred_inactive
+         ; "deferred_lifecycle", `Int summary.deferred_lifecycle
+         ; ( "deferred_lifecycle_reserved"
+           , `Int summary.deferred_lifecycle_reserved )
+         ; "fully_signaled", `Bool (deferred = 0)
+         ])
+;;
+
+let runtime_param_effect_fields
+      ~base_path
+      ~param_key
+      (change : Runtime_params.json_change)
+  =
+  match effect_of_param_key param_key with
+  | No_effect -> []
+  | Keeper_cadence ->
+    (match change.old_value, change.new_value with
+    | `Int previous_interval_s, `Int new_interval_s ->
+      (match
+         wake_keepers_after_runtime_param_change
+           ~base_path
+           ~param_key
+           ~previous_interval_s
+           ~new_interval_s
+       with
+       | None -> []
+       | Some summary -> [ "keeper_cadence_wakeup", summary ])
+    | old_value, new_value ->
+      Log.Keeper.error
+        "keeper cadence mutation returned non-integer snapshots old=%s new=%s"
+        (Yojson.Safe.to_string old_value)
+        (Yojson.Safe.to_string new_value);
+      [])
+;;
+
+let mutate_runtime_param_with_effects ~base_path ~param_key mutate =
+  let mutate_and_apply_effects () =
+    match mutate () with
+    | Error _ as error -> error
+    | Ok change ->
+      Ok
+        ( change
+        , runtime_param_effect_fields ~base_path ~param_key change )
+  in
+  if is_keeper_cadence_param param_key
+  then
+    Eio.Mutex.use_rw
+      ~protect:true
+      keeper_cadence_effect_mu
+      mutate_and_apply_effects
+  else mutate_and_apply_effects ()
+;;
+
+let respond_board_reaction_result request reqd = function
+  | Ok json -> respond_json_value_with_cors request reqd json
+  | Error error ->
+    respond_json_value_with_cors
+      ~status:(Server_board_reaction_http.error_status error :> Httpun.Status.t)
+      request
+      reqd
+      (Server_board_reaction_http.error_json error)
+;;
+
+let with_optional_board_reaction_actor ~base_path request reqd f =
+  match
+    authorize_optional_token_bound_permission_request
+      ~base_path
+      ~permission:Masc_domain.CanReadState
+      request
+  with
+  | Ok actor -> f (Option.map String.trim actor)
+  | Error err -> respond_auth_error request reqd err
+
+let activity_http_deps : Server_activity_http.deps = { query_param; int_query_param }
+
+let activity_events_http_json ~state request =
+  Server_activity_http.events_http_json ~deps:activity_http_deps ~state request
+
+let activity_graph_http_json ~state request =
+  Server_activity_http.graph_http_json ~deps:activity_http_deps ~state request
+
+let json_upsert_string_field name value = function
+  | `Assoc fields ->
+      let fields = List.filter (fun (k, _) -> k <> name) fields in
+      Ok (`Assoc ((name, `String value) :: fields))
+  | _non_object ->
+      Error (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
+
+let json_reject_duplicate_meta = function
+  | `Assoc fields as args ->
+      (match List.filter (fun (key, _) -> String.equal key "meta") fields with
+       | _ :: _ :: _ -> Error "duplicate meta fields are not accepted"
+       | _ -> Ok args)
+  | args -> Ok args
+
+let json_ensure_meta_source source = function
+  | `Assoc fields ->
+      let meta_json =
+        match List.assoc_opt "meta" fields with
+        | Some (`Assoc meta_fields as existing_meta) -> (
+            match List.assoc_opt "source" meta_fields with
+            | Some (`String current) when String.trim current <> "" -> existing_meta
+            | _ -> `Assoc (("source", `String source) :: List.filter (fun (k, _) -> k <> "source") meta_fields))
+        | _ -> `Assoc [ ("source", `String source) ]
+      in
+      let fields = ("meta", meta_json) :: List.filter (fun (k, _) -> k <> "meta") fields in
+      Ok (`Assoc fields)
+  | _non_object ->
+      Error "json_ensure_meta_source: expected JSON object"
+
+let sub_board_owner_matches ~owner (sb : Board.sub_board) =
+  String.equal (Board.Agent_id.to_string sb.Board.owner) owner
+
+let sub_board_owner_error ~owner ~sub_board_id (sb : Board.sub_board) =
+  `Assoc
+    [ ( "error"
+      , `String
+          (Printf.sprintf
+             "agent %s cannot mutate sub-board %s owned by %s"
+             owner
+             sub_board_id
+             (Board.Agent_id.to_string sb.Board.owner)) )
+    ]
+
+let board_curation_json () =
+  match Board_dispatch.latest_curation_snapshot () with
+  | None -> `Assoc [ ("snapshot", `Null) ]
+  | Some snap -> `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
+
+let board_sub_boards_json () =
+  let sub_boards = Board_dispatch.list_sub_boards () in
+  `Assoc
+    [
+      ( "sub_boards",
+        `List (List.map Board.sub_board_to_yojson sub_boards) );
+    ]
+
+let board_karma_ledger_json req =
+  let agent = query_param req "agent" in
+  let limit = int_query_param req "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000 in
+  let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+  let totals =
+    Board_dispatch.get_all_karma ()
+    |> List.sort (fun (_, a) (_, b) -> compare b a)
+  in
+  `Assoc
+    [
+      ("events", `List (List.map Board.karma_event_to_yojson events));
+      ("count", `Int (List.length events));
+      ("scoring_rule", `String "up=+1,down=0");
+      ( "totals",
+        `List
+          (List.map
+             (fun (agent_name, k) ->
+               `Assoc [ ("agent", `String agent_name); ("karma", `Int k) ])
+             totals) );
+    ]
+
+type board_context_inference_target_source =
+  | Explicit_target
+  | Post_author
+
+let board_context_inference_target_source_to_string = function
+  | Explicit_target -> "explicit_target"
+  | Post_author -> "post_author"
+
+type board_context_inference_request =
+  { post_id : string
+  ; target_keeper : string option
+  }
+
+let json_assoc_member key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let trimmed_json_string_member ~field json =
+  match json_assoc_member field json with
+  | None | Some `Null -> Ok None
+  | Some (`String value) ->
+      let value = String.trim value in
+      Ok (if value = "" then None else Some value)
+  | Some _ -> Error (Printf.sprintf "%s must be a string" field)
+
+let required_trimmed_json_string_member ~field json =
+  match trimmed_json_string_member ~field json with
+  | Ok (Some value) -> Ok value
+  | Ok None -> Error (Printf.sprintf "%s is required" field)
+  | Error _ as err -> err
+
+let parse_board_context_inference_request = function
+  | `Assoc _ as json -> (
+      match required_trimmed_json_string_member ~field:"post_id" json with
+      | Error msg -> Error msg
+      | Ok post_id -> (
+          match trimmed_json_string_member ~field:"target_keeper" json with
+          | Error msg -> Error msg
+          | Ok target_keeper -> Ok { post_id; target_keeper }))
+  | _ -> Error "request body must be a JSON object"
+
+let board_context_string_option_json = function
+  | Some value -> `String value
+  | None -> `Null
+
+let board_context_field key value =
+  `Assoc [ ("k", `String key); ("v", value) ]
+
+let board_context_comment_json (comment : Board.comment) =
+  `Assoc
+    [
+      ("id", `String (Board.Comment_id.to_string comment.id));
+      ("post_id", `String (Board.Post_id.to_string comment.post_id));
+      ( "parent_id",
+        board_context_string_option_json
+          (Option.map Board.Comment_id.to_string comment.parent_id) );
+      ("author", `String (Board.Agent_id.to_string comment.author));
+      ("content", `String comment.content);
+      ("created_at", `Float comment.created_at);
+    ]
+
+let board_context_inference_surface_context (post : Board.post) comments =
+  let post_id = Board.Post_id.to_string post.id in
+  let author = Board.Agent_id.to_string post.author in
+  `Assoc
+    [
+      ("label", `String "Board post context inference");
+      ("route", `String (Printf.sprintf "#board?post=%s" post_id));
+      ("scene", `String "board_post_context");
+      ( "fields",
+        `List
+          [
+            board_context_field "board_post_id" (`String post_id);
+            board_context_field "author" (`String author);
+            board_context_field "title" (`String post.title);
+            board_context_field "body" (`String post.body);
+            board_context_field "post_kind" (`String (Board.post_kind_to_string post.post_kind));
+            board_context_field "visibility" (`String (Board.visibility_to_string post.visibility));
+            board_context_field "hearth" (board_context_string_option_json post.hearth);
+            board_context_field "thread_id" (board_context_string_option_json post.thread_id);
+            board_context_field "reply_count" (`Int post.reply_count);
+            board_context_field "comment_count" (`Int (List.length comments));
+            board_context_field "comments" (`List (List.map board_context_comment_json comments));
+          ] );
+    ]
+
+let board_context_inference_message (post : Board.post) =
+  Printf.sprintf
+    "Infer the context of board post %s. Use the supplied board surface \
+     context and MASC tools as needed. Identify related work, missing context, \
+     and whether a follow-up action or board comment is warranted. Do not \
+     invent facts that are not present in board context, memory, or tools."
+    (Board.Post_id.to_string post.id)
+
+let resolve_board_context_inference_target ~config (post : Board.post) target_keeper =
+  let resolve source requested =
+    match Keeper_meta_store.read_meta_resolved config requested with
+    | Ok (Some (resolved_name, _meta)) -> Ok (resolved_name, source)
+    | Ok None ->
+        Error
+          (`Bad_request
+             (Printf.sprintf
+                "target_keeper %S is not a registered keeper"
+                requested))
+    | Error msg ->
+        Error
+          (`Internal_server_error
+             (Printf.sprintf
+                "failed to read keeper metadata for %S: %s"
+                requested
+                msg))
+  in
+  match target_keeper with
+  | Some requested -> resolve Explicit_target requested
+  | None ->
+      let author = Board.Agent_id.to_string post.author in
+      (match Keeper_meta_store.read_meta_resolved config author with
+       | Ok (Some (resolved_name, _meta)) -> Ok (resolved_name, Post_author)
+       | Ok None ->
+           Error
+             (`Bad_request
+                (Printf.sprintf
+                   "target_keeper is required because board post author %S is not a registered keeper"
+                   author))
+       | Error msg ->
+           Error
+             (`Internal_server_error
+                (Printf.sprintf
+                   "failed to read keeper metadata for board author %S: %s"
+                   author
+                   msg)))
+
+let board_context_inference_submission_json
+      ~post_id
+      ~keeper_name
+      ~target_source
+      (acceptance : Keeper_owner.operation_acceptance)
+  =
+  `Assoc
+    [ "ok", `Bool true
+    ; "operation_id",
+      `String
+        (Keeper_chat_operation.Operation_id.to_string
+           acceptance.operation.operation_id)
+    ; "keeper_name", `String keeper_name
+    ; "post_id", `String post_id
+    ; "state", `String (Keeper_chat_operation.state_to_string acceptance.operation.state)
+    ; "target_source",
+      `String (board_context_inference_target_source_to_string target_source)
+    ]
+
+let dispatch_board_context_inference ~state ~sw ~clock ~submitted_by ~target_keeper
+    ~target_source ~(post : Board.post) ~comments =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let config = workspace_scope.config in
+  let keeper_ctx : _ Keeper_tool_surface.context =
+    {
+      config;
+      agent_name = submitted_by;
+      sw;
+      clock;
+      proc_mgr = state.Mcp_server.proc_mgr;
+      net = state.Mcp_server.net;
+      publication_recovery_provider =
+        Mcp_server.publication_recovery_availability_provider state;
+    }
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  match
+    Keeper_invocation_contract.direct_message
+      ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.Workspace.base_path)
+      ~keeper_name:target_keeper
+      ~prompt:(board_context_inference_message post)
+      ~direct_reply:true
+      ~surface_context:(board_context_inference_surface_context post comments)
+      ~channel:""
+      ~user_blocks:[]
+      ~attachments:[]
+      ()
+  with
+  | Error error ->
+    Error
+      (`Bad_request
+         (Keeper_invocation_contract.request_error_to_string error))
+  | Ok message ->
+    (match
+      Keeper_tool_surface.submit_keeper_msg
+        ~submitted_by
+        keeper_ctx
+        ~message
+    with
+    | Ok (keeper_name, acceptance) ->
+      Ok
+        (board_context_inference_submission_json
+           ~post_id
+           ~keeper_name
+           ~target_source
+           acceptance)
+    | Error error -> Error (`Bad_request (Tool_result.message error)))
+
+let respond_board_context_inference_error request reqd ~status ~message =
+  respond_json_value_with_cors ~status request reqd
+    (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
+
+let handle_board_context_inference_request
+      ~state
+      ~sw
+      ~clock
+      ~submitted_by
+      ~request
+      reqd
+      body
+  =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error msg ->
+      respond_board_context_inference_error request reqd ~status:`Bad_request
+        ~message:("Invalid JSON: " ^ msg)
+  | parsed -> (
+      match parse_board_context_inference_request parsed with
+      | Error message ->
+          respond_board_context_inference_error request reqd ~status:`Bad_request
+            ~message
+      | Ok { post_id; target_keeper } -> (
+          match Board_dispatch.get_post_and_comments ~post_id with
+          | Error err ->
+              respond_board_context_inference_error request reqd
+                ~status:`Bad_request
+                ~message:(Board_tool.board_error_to_string err)
+          | Ok (post, comments) -> (
+              let config = Mcp_server.workspace_config state in
+              match
+                resolve_board_context_inference_target ~config post target_keeper
+              with
+              | Error (`Bad_request message) ->
+                  respond_board_context_inference_error request reqd
+                    ~status:`Bad_request
+                    ~message
+              | Error (`Internal_server_error message) ->
+                  respond_board_context_inference_error request reqd
+                    ~status:`Internal_server_error
+                    ~message
+              | Ok (target_keeper, target_source) -> (
+                  match
+                    dispatch_board_context_inference ~state ~sw ~clock
+                      ~submitted_by ~target_keeper ~target_source ~post ~comments
+                  with
+                  | Ok json ->
+                      respond_json_value_with_cors ~status:`Accepted request reqd
+                        json
+                  | Error (`Bad_request message) ->
+                      respond_board_context_inference_error request reqd
+                        ~status:`Bad_request ~message
+                  | Error (`Internal_server_error message) ->
+                      respond_board_context_inference_error request reqd
+                        ~status:`Internal_server_error ~message))))
+
+let respond_board_json reqd json =
+  Http.Response.json_value json reqd
+
+let add_routes ~sw ~clock router =
+  router
+  |> Server_route.get Server_route.Public_read "/api/v1/activity/events" (fun state req reqd ->
+         let json = activity_events_http_json ~state req in
+         Http.Response.json_value json reqd
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/activity/graph" (fun state req reqd ->
+         let json = activity_graph_http_json ~state req in
+         Http.Response.json_value json reqd
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/activity/swimlane" (fun state req reqd ->
+         let json =
+           Server_activity_http.swimlane_http_json
+             ~deps:activity_http_deps ~state req
+         in
+         Http.Response.json_value json reqd
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/runtime/params" (fun _state _req reqd ->
+         let params = Runtime_params.registry () in
+         let meta_to_json = function
+           | None -> `Null
+           | Some (m : Runtime_params.param_meta) ->
+               `Assoc ([
+                 ("description", `String m.description);
+                 ("value_type", `String m.value_type);
+               ]
+               @ (match m.min_value with Some v -> [("min_value", v)] | None -> [])
+               @ (match m.max_value with Some v -> [("max_value", v)] | None -> [])
+               (* Absent rather than empty when the value is not drawn from a
+                  closed set, matching how the bounds above go missing. *)
+               @ (match m.choices with
+                  | [] -> []
+                  | choices ->
+                      [("choices", `List (List.map (fun c -> `String c) choices))]))
+         in
+         let items =
+           List.map
+             (fun (key, current, default, has_override, meta) ->
+               `Assoc
+                 [
+                   ("key", `String key);
+                   ("current", current);
+                   ("default", default);
+                   ("has_override", `Bool has_override);
+                   ("meta", meta_to_json meta);
+                 ])
+             params
+         in
+         let surfaces = Runtime_settings.surfaces_json () in
+         let json =
+           `Assoc
+             [
+               ("parameters", `List items);
+               ("surfaces", surfaces);
+             ]
+         in
+         Http.Response.json_value json reqd
+       )
+
+  |> Server_route.get Server_route.Public_read "/api/v1/runtime/params/audit" (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+         let entries = Runtime_params.recent_audit ~base_path limit in
+         let json = `Assoc [
+           ("entries", `List entries);
+           ("count", `Int (List.length entries));
+         ] in
+         Http.Response.json_value json reqd
+       )
+
+  |> Server_route.get Server_route.Public_read "/api/v1/audit" (fun state req reqd ->
+         let config = (Mcp_server.workspace_config state) in
+         let limit  = int_query_param req "limit"  ~default:100 |> clamp ~min_v:1 ~max_v:500 in
+         let actor_filter    = query_param req "actor" in
+         let kind_filter     = query_param req "kind" in
+         let severity_filter = query_param req "severity" in
+         let since_filter =
+           query_param req "since"
+           |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
+         in
+         let until_filter =
+           query_param req "until"
+           |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
+         in
+         (* The filters decide the read, so [limit] counts entries the
+            caller asked for. Reading a multiple and filtering afterwards
+            only moved the write rate at which the answer came back short:
+            the store holds every agent's actions. *)
+         let matches =
+           Audit_log.audit_entry_matches ?actor:actor_filter ?kind:kind_filter
+             ?severity:severity_filter ?since:since_filter ?until:until_filter
+         in
+         let all_entries =
+           Audit_log.read_entries_matching
+             ~n:limit
+             ?since:since_filter
+             ?until:until_filter
+             ~keep:matches
+             config
+         in
+         let json =
+           Audit_log.audit_events_response_json ~limit all_entries
+         in
+         Http.Response.json_value ~compress:true ~request:req
+           json reqd
+       )
+
+  |> Server_route.get Server_route.Public_read "/api/v1/board" (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
+         with_optional_board_reaction_actor
+           ~base_path:config.base_path
+           req
+           reqd
+           (fun reaction_actor ->
+              let payload =
+                Server_board_list_http.payload ~config ~reaction_actor req
+              in
+              let status =
+                if Dashboard_cache.is_timeout_envelope payload.json
+                then `Gateway_timeout else `OK
+              in
+              Http.Response.json_lazy ~status ~request:req ~etag:payload.etag
+                (fun () -> payload.raw_json) reqd)
+       )
+
+  |> Server_route.get Server_route.Public_read "/api/v1/board/reactions/catalog" (fun _state _request reqd ->
+            Http.Response.json_value
+              (Server_board_reaction_http.catalog_json ())
+              reqd)
+
+  (* Registered before the single-target read so the longer path is matched
+     first. One page of the board asks about its rows here instead of once per
+     row. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/board/reactions/batch" (fun _state actor req reqd ->
+            let request = req in let actor = String.trim actor in
+            let result =
+              Server_board_reaction_http.targets_of_strings
+                ~target_type:(query_param req "target_type")
+                ~target_ids:(query_param req "target_ids")
+              |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
+            in
+            respond_board_reaction_result request reqd result)
+
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/board/reactions" (fun _state actor req reqd ->
+            let request = req in let actor = String.trim actor in
+            let result =
+              Result.bind
+                (Server_board_reaction_http.target_of_strings
+                   ~target_type:(query_param req "target_type")
+                   ~target_id:(query_param req "target_id"))
+                (Server_board_reaction_http.list_json ~actor)
+            in
+            respond_board_reaction_result request reqd result)
+
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanVote) "/api/v1/board/reactions" (fun _state actor request reqd ->
+            let actor = String.trim actor in
+            Http.Request.read_body_async reqd (fun body ->
+              let parsed =
+                match Yojson.Safe.from_string body with
+                | json -> Server_board_reaction_http.toggle_request_of_json json
+                | exception Yojson.Json_error message ->
+                  Error (Server_board_reaction_http.malformed_json message)
+              in
+              let result =
+                Result.bind
+                  parsed
+                  (Server_board_reaction_http.toggle_json ~actor)
+              in
+              respond_board_reaction_result request reqd result))
+
+  |> Server_route.get Server_route.Public_read "/api/v1/board/hearths" (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let exclude_system = bool_query_param req "exclude_system" ~default:false in
+         let exclude_automation =
+           bool_query_param req "exclude_automation" ~default:false
+         in
+         let cache_key =
+           Printf.sprintf "board:hearths:%s:exclude-system=%b:exclude-automation=%b"
+             (Keeper_api_types.cache_key_string_segment config.base_path)
+             exclude_system
+             exclude_automation
+         in
+         let payload =
+           Dashboard_cache.get_or_compute_payload
+             cache_key
+             ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
+             (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                let hearths =
+                  Board_dispatch.list_hearths
+                    ~exclude_system ~exclude_automation ()
+                in
+                `Assoc [
+                  ("hearths", `List (List.map (fun (name, count) ->
+                    `Assoc [("name", `String name); ("count", `Int count)]
+                  ) hearths));
+                ]))
+         in
+         Server_cached_read_http.respond ~request:req reqd payload
+       )
+
+  |> Server_route.get Server_route.Public_read "/api/v1/board/curation" (fun _state _req reqd ->
+         respond_board_json reqd (board_curation_json ())
+       )
+
+  |> Server_route.get Server_route.Always_public "/api/v1/board/flairs" (fun _request reqd ->
+       let flairs = List.map Board.flair_to_yojson Board.available_flairs in
+       let json = `Assoc [("flairs", `List flairs)] in
+       Http.Response.json_value json reqd)
+
+  |> Server_route.get Server_route.Public_read "/api/v1/board/sub-boards" (fun _state _req reqd ->
+         respond_board_json reqd (board_sub_boards_json ())
+       )
+
+  |> Server_route.post (Server_route.Tool_actor { tool_name = Keeper_tool_name.(to_string Keeper_delegate) }) "/api/v1/board/context-inference" (fun state submitted_by request reqd ->
+         Http.Request.read_body_async reqd
+           (handle_board_context_inference_request ~state ~sw ~clock
+              ~submitted_by ~request reqd))
+
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_sub_board_create" }) "/api/v1/board/sub-boards" (fun _state agent_name _req reqd ->
+         Http.Request.read_body_async reqd (fun body ->
+           try
+             let args = Yojson.Safe.from_string body in
+             let slug =
+               Safe_ops.json_string_opt "slug" args |> Option.value ~default:""
+             in
+             let name =
+               Safe_ops.json_string_opt "name" args |> Option.value ~default:""
+             in
+             let description =
+               Safe_ops.json_string_opt "description" args |> Option.value ~default:""
+             in
+             let members = Safe_ops.json_string_list "members" args in
+             let owner = String.trim agent_name in
+             (match
+                Result.bind (Board.sub_board_access_field_of_yojson args)
+                  (fun access ->
+                    Board_dispatch.create_sub_board ~slug ~name ~description
+                      ~owner ~members ?access ())
+              with
+              | Ok sb ->
+                  Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
+              | Error e ->
+                  Http.Response.json_value ~status:`Bad_request
+                    (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                    reqd)
+           with Yojson.Json_error msg ->
+             Http.Response.json_value ~status:`Bad_request
+               (`Assoc [("error", `String ("invalid JSON: " ^ msg))])
+               reqd))
+
+  |> Server_route.prefix_get Server_route.Public_read board_sub_board_detail_prefix (fun _state request reqd ->
+         let status, json =
+           board_sub_board_detail_json ~path:(Http.Request.path request)
+         in
+         Http.Response.json_value ~status json reqd
+       )
+
+  |> Server_route.prefix_delete (Server_route.Tool_actor { tool_name = "masc_board_sub_board_delete" }) "/api/v1/board/sub-boards/" (fun _state agent_name request reqd ->
+         let path = Http.Request.path request in
+         (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+          | None ->
+              Http.Response.json_value ~status:`Bad_request
+                (`Assoc [("error", `String "sub_board_id is required")])
+                reqd
+         | Some sub_board_id ->
+              let owner = String.trim agent_name in
+              (match Board_dispatch.get_sub_board ~sub_board_id with
+               | Error e ->
+                   Http.Response.json_value ~status:`Not_found
+                     (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                     reqd
+               | Ok sb when not (sub_board_owner_matches ~owner sb) ->
+                   Http.Response.json_value ~status:`Forbidden
+                     (sub_board_owner_error ~owner ~sub_board_id sb)
+                     reqd
+               | Ok _ ->
+              (match Board_dispatch.delete_sub_board ~sub_board_id with
+               | Ok () ->
+                   Http.Response.json_value (`Assoc [("deleted", `Bool true)]) reqd
+               | Error e ->
+                   Http.Response.json_value ~status:`Not_found
+                     (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                     reqd)))
+         )
+
+  |> Server_route.prefix_put (Server_route.Tool_actor { tool_name = "masc_board_sub_board_update" }) "/api/v1/board/sub-boards/" (fun _state agent_name request reqd ->
+         Http.Request.read_body_async reqd (fun body ->
+           try
+             let args = Yojson.Safe.from_string body in
+             let name = Safe_ops.json_string_opt "name" args in
+             let description = Safe_ops.json_string_opt "description" args in
+             let members = Safe_ops.json_string_list "members" args in
+             let members_arg = if members = [] then None else Some members in
+             let path = Http.Request.path request in
+             (match Board.sub_board_access_field_of_yojson args with
+              | Error e ->
+                  Http.Response.json_value ~status:`Bad_request
+                    (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                    reqd
+              | Ok access ->
+             match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+              | None ->
+                  Http.Response.json_value ~status:`Bad_request
+                    (`Assoc [("error", `String "sub_board_id is required")])
+                    reqd
+              | Some sub_board_id ->
+                  let owner = String.trim agent_name in
+                  (match Board_dispatch.get_sub_board ~sub_board_id with
+                   | Error e ->
+                       Http.Response.json_value ~status:`Not_found
+                         (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                         reqd
+                   | Ok sb when not (sub_board_owner_matches ~owner sb) ->
+                       Http.Response.json_value ~status:`Forbidden
+                         (sub_board_owner_error ~owner ~sub_board_id sb)
+                         reqd
+                   | Ok _ ->
+                  (match Board_dispatch.update_sub_board ~sub_board_id ?name ?description ?members:members_arg ?access () with
+                   | Ok sb ->
+                       Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
+                   | Error e ->
+                       Http.Response.json_value ~status:`Bad_request
+                         (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                         reqd)))
+           with Yojson.Json_error msg ->
+             Http.Response.json_value ~status:`Bad_request
+               (`Assoc [("error", `String ("invalid JSON: " ^ msg))])
+               reqd))
+
+  |> Server_route.prefix_get Server_route.Public_read "/api/v1/board/" (fun state req reqd ->
+         let request = req in let path = Http.Request.path request in
+         (match extract_path_param ~prefix:"/api/v1/board/" path with
+          | None ->
+              Http.Response.json_value
+                (`Assoc [("error", `String "post_id is required")])
+                ~status:`Bad_request reqd
+          | Some "curation" ->
+              respond_board_json reqd (board_curation_json ())
+          | Some "sub-boards" ->
+              respond_board_json reqd (board_sub_boards_json ())
+          | Some "karma/ledger" ->
+              respond_board_json reqd (board_karma_ledger_json req)
+          | Some post_id ->
+              let config = Mcp_server.workspace_config state in
+              with_optional_board_reaction_actor
+                ~base_path:config.base_path
+                req
+                reqd
+                (fun reaction_actor ->
+                   match
+                     Server_board_post_response_format.of_query
+                       (query_param req "format")
+                   with
+                   | Error error ->
+                     respond_json_value_with_cors
+                       ~status:`Bad_request
+                       request
+                       reqd
+                       (Server_board_post_response_format.error_json error)
+                   | Ok response_format ->
+                     (match
+                        board_comment_request_of_query
+                          ~offset:(query_param req "comment_offset")
+                          ~limit:(query_param req "comment_limit")
+                      with
+                      | Error error ->
+                        respond_json_value_with_cors ~status:`Bad_request
+                          request reqd error
+                      | Ok comment_request ->
+                        let voter = board_voter_query req in
+                        let status, body =
+                          board_post_detail_json ~comment_request
+                            ?focused_comment:(query_param req "comment_focus")
+                            ~voter ~reaction_actor ~config:(Some config)
+                            ~response_format ~post_id ()
+                        in
+                        respond_json_with_cors ~status request reqd body)))
+       )
+
+  (* The four Board post/comment/vote routes below consume the auth resolver's
+     actor. An ordinary bearer credential resolves to its owner; an admitted
+     token-less same-origin request keeps its supplied local attribution.
+     These routes do not re-read the identity headers. *)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_vote" }) "/api/v1/tools/masc_board_vote" (fun state agent_name request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
+             let voter = String.trim agent_name in
+             let* args = json_upsert_string_field "voter" voter args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_vote" args in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json ~ok ~message:msg)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       )
+
+  |> Server_route.post (Server_route.Tool_actor { tool_name = (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) }) "/api/v1/tools/masc_board_post" (fun state agent_name request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
+             let* args = json_reject_duplicate_meta args in
+             let author = String.trim agent_name in
+             let* args = json_upsert_string_field "author" author args in
+             let* args = json_ensure_meta_source "dashboard_board_post" args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client
+                 (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) args in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `Created else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json ~ok ~message:msg)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       )
+
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_comment" }) "/api/v1/tools/masc_board_comment" (fun state agent_name request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
+             let author = String.trim agent_name in
+             let* args = json_upsert_string_field "author" author args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment" args in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `Created else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json ~ok ~message:msg)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       )
+
+  (* Comment vote — mirrors masc_board_vote. [voter] comes from the auth
+     resolver: the ordinary bearer credential's owner, or the attribution
+     supplied by an admitted token-less same-origin request. *)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_comment_vote" }) "/api/v1/tools/masc_board_comment_vote" (fun state agent_name request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
+             let voter = String.trim agent_name in
+             let* args = json_upsert_string_field "voter" voter args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment_vote" args in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json ~ok ~message:msg)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       )
+
+  (* Goal lifecycle from the terminal (#29684). The workspace tool already owns
+     the transition rules ([Goal_phase.decide_transition] inside
+     [handle_goal_transition]); this route supplies the authorized actor
+     as the tool context. An invalid phase transition remains the tool's
+     rejection to make, not the route's. *)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_goal_transition" }) "/api/v1/tools/masc_goal_transition" (fun state agent_name request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let* args = validate_goal_workspace ~config args in
+             let ctx = { Workspace_types.config; agent_name } in
+             let start_time = Tool_timing.start () in
+             let result =
+               Workspace_goals.handle_goal_transition
+                 ~tool_name:"masc_goal_transition" ~start_time ctx args
+             in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json ~ok ~message:msg)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       )
+  (* Schedule create/modify from the terminal. Their schemas share the same
+     editable definition; update additionally requires the stable id. Actor
+     auth resolves the caller; the tool records that caller as the actor and
+     refuses a form field that names someone else. *)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_create" }) "/api/v1/tools/masc_schedule_create" (fun state agent_name request reqd ->
+            Http.Request.read_body_async reqd
+              (handle_schedule_write_request ~update:false ~state ~agent_name
+                 ~request reqd))
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_update" }) "/api/v1/tools/masc_schedule_update" (fun state agent_name request reqd ->
+            Http.Request.read_body_async reqd
+              (handle_schedule_write_request ~update:true ~state ~agent_name
+                 ~request reqd))
+  (* Schedule cancel from the terminal (#29684). The workspace tool owns the
+     argument contract ([Tool_schedule.handle_cancel]: schedule_id, reason)
+     and the store transition. The HTTP trust boundary owns the canceller:
+     [schedule_caller] decides from the credential whether the caller is the
+     operator, who may cancel any schedule. *)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_cancel" }) "/api/v1/tools/masc_schedule_cancel" (fun state agent_name request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error (Bad_request_detail msg) ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+               | Error Credential_store_unreadable ->
+                   respond_json_value_with_cors ~status:`Service_unavailable request reqd
+                     (activity_result_json ~ok:false
+                        ~message:"credential store is unavailable; retry")
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg ->
+                 Error (Bad_request_detail ("Invalid JSON: " ^ msg))
+             in
+             let* caller = schedule_caller ~state ~agent_name request in
+             let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let context : Tool_schedule.context =
+               { config
+               ; caller
+               ; stamp_keeper_wake_result_delivery =
+                   (fun ~payload ->
+                      Schedule_payload_projection.set_keeper_wake_result_delivery
+                        ~payload ~channel:None)
+               ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+               ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+               }
+             in
+             let start_time = Tool_timing.start () in
+             let result =
+               Tool_schedule.handle_cancel
+                 ~tool_name:"masc_schedule_cancel" ~start_time context args
+             in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json_with_data ~ok ~message:msg
+                  ~data:(Tool_result.data result))
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       )
+
+  |> Server_route.get Server_route.Public_read "/api/v1/karma" (fun _state _req reqd ->
+         let karma_list = Board_dispatch.get_all_karma () in
+         let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+         let json = `Assoc [
+           ("karma", `List (List.map (fun (agent, k) ->
+             `Assoc [("agent", `String agent); ("karma", `Int k)]
+           ) sorted));
+         ] in
+         Http.Response.json_value json reqd
+       )
+
+  |> Server_route.get Server_route.Public_read "/api/v1/board/karma/ledger" (fun _state req reqd ->
+         respond_board_json reqd (board_karma_ledger_json req)
+       )
+
+  (* Prompt Registry API *)
+  |> Server_route.get Server_route.Public_read "/api/v1/prompts" (fun _state _req reqd ->
+         let json = prompt_catalog_json () in
+         Http.Response.json_value json reqd
+       )
+
+  (* Skill catalog API: projection only. Bootstrap and runtime-config apply
+     publish the workspace snapshot; this read never scans the filesystem or
+     recomputes a competing catalog. *)
+  |> Server_route.get Server_route.Public_read "/api/v1/skills" (fun state _req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let json =
+           match Server_skill_snapshot_runtime.lookup ~base_path:config.Workspace.base_path with
+           | Error _error ->
+             `Assoc
+               [ ("schema", `String "masc.skill-snapshot/v1")
+               ; ("state", `String "invalid_workspace")
+               ; ("reason", `Assoc [ ("code", `String "invalid_workspace") ])
+               ]
+           | Ok Not_registered ->
+             `Assoc
+               [ ("schema", `String "masc.skill-snapshot/v1")
+               ; ("state", `String "not_registered")
+               ]
+           | Ok Uninitialized ->
+             `Assoc
+               [ ("schema", `String "masc.skill-snapshot/v1")
+               ; ("state", `String "uninitialized")
+               ]
+           | Ok (Ready { snapshot; config_path = _ }) ->
+             let catalog, diagnostics =
+               Keeper_skill_catalog.all_entries_of_snapshot snapshot
+             in
+             let usage_ledgers, usage_unavailable =
+               match Keeper_meta_store.keeper_names_result config with
+               | Error _ -> [], [ "keeper catalog: unavailable" ]
+               | Ok keeper_names ->
+                 List.fold_left
+                   (fun (loaded, unavailable) keeper_name ->
+                      match Keeper_meta_store.read_meta config keeper_name with
+                      | Error _ ->
+                        loaded, (keeper_name ^ ": metadata unavailable") :: unavailable
+                      | Ok None -> loaded, unavailable
+                      | Ok (Some meta) ->
+                        (match
+                           Keeper_skill_activation_ledger.load
+                             ~config
+                             ~trace_id:meta.runtime.trace_id
+                         with
+                         | Ok ledger -> (keeper_name, ledger) :: loaded, unavailable
+                         | Error error ->
+                           ( loaded
+                           , (keeper_name
+                              ^ ": "
+                              ^ Keeper_skill_activation_ledger.store_error_code
+                                  error)
+                             :: unavailable )))
+                   ([], [])
+                   keeper_names
+             in
+             let usage_for_reference reference =
+               usage_ledgers
+               |> List.filter_map (fun (keeper_name, ledger) ->
+                 let matching =
+                   Keeper_skill_activation_ledger.activations ledger
+                   |> List.filter
+                        (fun (activation : Keeper_skill_activation_ledger.activation) ->
+                     let observed =
+                       Skill_reference.make
+                         ~identity:activation.identity
+                         ~content_revision:activation.content_revision
+                     in
+                     Skill_reference.equal reference observed)
+                 in
+                 match matching with
+                 | [] -> None
+                 | activations ->
+                   let delivered =
+                     List.fold_left
+                       (fun count
+                            (activation : Keeper_skill_activation_ledger.activation) ->
+                          if Option.is_some activation.delivery then count + 1 else count)
+                       0
+                       activations
+                   in
+                   let actions =
+                     List.fold_left
+                       (fun count
+                            (activation : Keeper_skill_activation_ledger.activation) ->
+                          count + List.length activation.actions)
+                       0
+                       activations
+                   in
+                   let last_used_at =
+                     List.fold_left
+                       (fun latest
+                            (activation : Keeper_skill_activation_ledger.activation) ->
+                          max latest activation.activated_at)
+                       ""
+                       activations
+                   in
+                   Some
+                     (`Assoc
+                        [ "keeper", `String keeper_name
+                        ; "invocations", `Int (List.length activations)
+                        ; "deliveries", `Int delivered
+                        ; "actions", `Int actions
+                        ; "last_used_at", `String last_used_at
+                        ]))
+             in
+             let surface_profile_json reference skill =
+               match
+                 Keeper_skill_observability.of_skill_with_reference reference skill
+                 |> Keeper_skill_observability.to_yojson
+               with
+               | `Assoc fields ->
+                 `Assoc
+                   (List.filter
+                      (fun (name, _) ->
+                         not (String.equal name "reference" || String.equal name "kind"))
+                      fields)
+               | _ -> assert false
+             in
+             let diagnostic_messages identity =
+               diagnostics
+               |> List.filter_map
+                    (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+                       if Skill_reference.equal_identity identity diagnostic.identity
+                       then
+                         Some
+                           (Keeper_skill_catalog.error_to_string diagnostic.error)
+                       else None)
+             in
+             let diagnostic_fields identity =
+               match diagnostic_messages identity with
+               | [] -> []
+               | messages ->
+                 [ ("diagnostics", `List (List.map (fun text -> `String text) messages)) ]
+             in
+             let surface_of_skill (skill : Keeper_skill_catalog.skill) =
+               match skill.reference with
+               | None -> None
+               | Some reference ->
+                 let base =
+                   [ ("reference", Skill_reference.to_yojson reference) ]
+                   @ [ ( "profile"
+                       , surface_profile_json reference skill )
+                     ; "usage", `List (usage_for_reference reference)
+                     ]
+                   @ diagnostic_fields reference.identity
+                 in
+                 Some
+                   (match skill.surface with
+                    | Keeper_skill_catalog.Instruction ->
+                      `Assoc (base @ [ ("kind", `String "instruction") ])
+                    | Keeper_skill_catalog.Composition _ ->
+                      `Assoc (base @ [ ("kind", `String "composition") ]))
+             in
+             let projected_references =
+               Keeper_skill_catalog.skills catalog
+               |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+                    skill.reference)
+             in
+             let unavailable_surfaces =
+               diagnostics
+               |> List.filter_map
+                    (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+                       if
+                         List.exists
+                           (fun reference ->
+                              Skill_reference.equal_identity
+                                reference.Skill_reference.identity
+                                diagnostic.identity)
+                           projected_references
+                       then None
+                       else
+                         Skill_catalog_snapshot.find_exact snapshot diagnostic.identity
+                         |> Option.map (fun entry ->
+                              `Assoc
+                                [ ( "reference"
+                                  , Skill_reference.to_yojson
+                                      (Skill_catalog_snapshot.entry_reference entry) )
+                                ; ("kind", `String "unavailable")
+                                ; ( "error"
+                                  , `String
+                                      (Keeper_skill_catalog.error_to_string
+                                         diagnostic.error) )
+                                ]))
+             in
+             let surfaces =
+               (Keeper_skill_catalog.skills catalog
+                |> List.filter_map surface_of_skill)
+               @ unavailable_surfaces
+             in
+             `Assoc
+               [ ("schema", `String "masc.skill-snapshot/v1")
+               ; ("state", `String "ready")
+               ; ("snapshot", Skill_catalog_snapshot.to_public_yojson snapshot)
+               ; ("surfaces", `List surfaces)
+               ; ( "usage_coverage"
+                 , `Assoc
+                     [ "ledgers_loaded", `Int (List.length usage_ledgers)
+                     ; ( "unavailable"
+                       , `List
+                           (List.map
+                              (fun detail -> `String detail)
+                              (List.rev usage_unavailable)) )
+                     ] )
+               ]
+         in
+         Http.Response.json_value json reqd
+       )
+
+  |> Server_route.post (Server_route.Tool { tool_name = "masc_prompt_override" }) "/api/v1/prompts" (fun state request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           match Server_prompt_override_request.decode body_str with
+           | Error error ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [
+                    ("ok", `Bool false);
+                    ( "error"
+                    , `String (Server_prompt_override_request.error_message error) );
+                  ])
+           | Ok override_request ->
+             let key = Server_prompt_override_request.key override_request in
+             let result = Server_prompt_override_mutation.apply
+               ~base_path:(Mcp_server.workspace_config state).base_path override_request in
+             (match result with
+              | Ok applied ->
+                respond_json_value_with_cors request reqd
+                  (`Assoc
+                     [
+                       ("ok", `Bool true);
+                       ("message", `String applied.message);
+                       ("curator_refresh", Server_prompt_override_mutation.refresh_json applied.curator_refresh);
+                       ("key", `String key);
+                       ( "source",
+                         `String
+                           (Prompt_registry.prompt_source_to_string
+                              (Prompt_registry.prompt_source key)) );
+                       ("effective", `String (Prompt_registry.get_prompt key));
+                     ])
+              | Error (Server_prompt_override_mutation.Validation message) ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
+              | Error (Server_prompt_override_mutation.Persistence message) ->
+                Log.Pages.error "prompt override persist failed: %s" message;
+                respond_json_value_with_cors ~status:`Internal_server_error
+                  request
+                  reqd
+                  (`Assoc
+                     [
+                       ("ok", `Bool false);
+                       ("error", `String "prompt override persistence failed");
+                     ]))
+         )
+       )
+
+  (* Runtime Params: set / clear *)
+  |> Server_route.post (Server_route.Tool { tool_name = "masc_set_param" }) "/api/v1/runtime/params/set" (fun state request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           match Server_runtime_param_request.decode_set body_str with
+           | Error error ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [ ("ok", `Bool false)
+                  ; ( "error"
+                    , `String
+                        (Server_runtime_param_request.error_message error) )
+                  ])
+           | Ok runtime_param_request ->
+             let base_path = (Mcp_server.workspace_config state).base_path in
+             let actor =
+               sanitized_dashboard_actor_for_request ~base_path request
+               |> Option.value ~default:"dashboard"
+             in
+             let param_key =
+               Server_runtime_param_request.set_param_key runtime_param_request
+             in
+             let value =
+               Server_runtime_param_request.set_value runtime_param_request
+             in
+             (match
+                mutate_runtime_param_with_effects
+                  ~base_path
+                  ~param_key
+                  (fun () ->
+                    Runtime_params.set_by_key_with_change
+                      param_key
+                      value
+                      ~actor)
+              with
+              | Error msg ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ "ok", `Bool false; "error", `String msg ])
+              | Ok (change, effect_fields) ->
+                Sse.broadcast
+                  (`Assoc
+                     ([ "type", `String "runtime_param_changed"
+                      ; "param_key", `String param_key
+                      ; "old_value", change.old_value
+                      ; "new_value", change.new_value
+                      ; "actor", `String actor
+                      ]
+                      @ effect_fields));
+                respond_json_value_with_cors request reqd
+                  (`Assoc
+                     ([ "ok", `Bool true
+                      ; ( "message"
+                        , `String
+                            (Printf.sprintf
+                               "Set %s = %s"
+                               param_key
+                               (Yojson.Safe.to_string change.new_value)) )
+                      ]
+                      @ effect_fields)))
+         )
+       )
+
+  |> Server_route.post (Server_route.Tool { tool_name = "masc_set_param" }) "/api/v1/runtime/params/clear" (fun state request reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           match Server_runtime_param_request.decode_clear body_str with
+           | Error error ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [ ("ok", `Bool false)
+                  ; ( "error"
+                    , `String
+                        (Server_runtime_param_request.error_message error) )
+                  ])
+           | Ok runtime_param_request ->
+             let param_key =
+               Server_runtime_param_request.clear_param_key runtime_param_request
+             in
+             let base_path = (Mcp_server.workspace_config state).base_path in
+             let actor =
+               sanitized_dashboard_actor_for_request ~base_path request
+               |> Option.value ~default:"dashboard"
+             in
+             (match
+                mutate_runtime_param_with_effects
+                  ~base_path
+                  ~param_key
+                  (fun () ->
+                    Runtime_params.clear_by_key_with_change param_key ~actor)
+              with
+              | Error msg ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ "ok", `Bool false; "error", `String msg ])
+              | Ok (change, effect_fields) ->
+                Sse.broadcast
+                  (`Assoc
+                     ([ "type", `String "runtime_param_changed"
+                      ; "param_key", `String param_key
+                      ; "old_value", change.old_value
+                      ; "new_value", change.new_value
+                      ; "actor", `String actor
+                      ]
+                      @ effect_fields));
+                respond_json_value_with_cors request reqd
+                  (`Assoc
+                     ([ "ok", `Bool true
+                      ; ( "message"
+                        , `String
+                            (Printf.sprintf "Cleared %s to default" param_key) )
+                      ]
+                      @ effect_fields)))
+         )
+       )

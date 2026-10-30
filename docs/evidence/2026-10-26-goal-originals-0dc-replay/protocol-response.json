@@ -1,0 +1,50 @@
+{
+  "schema": "masc.goal.originals0dc.protocol-response.v1",
+  "freeze": "FINAL FROZEN",
+  "reviewed_at_utc": "2026-10-25T20:08:32.829094+00:00",
+  "verdict": "AGREE_SCOPED_PROTOCOL_PASS_ACTUAL_REJECT_PRESERVED",
+  "review_input": {
+    "path": "masc-goal-originals-0dc-protocol-review-20261026-v1/review.json",
+    "bytes": 11029,
+    "sha256": "30100f8f7008a79ccaa897887a6df3892528427addc8d8d007f0520d3b6cea49",
+    "read_in_full": true
+  },
+  "findings": {
+    "new_protocol_P0": [],
+    "new_protocol_P1": [],
+    "new_protocol_P2": [],
+    "semantic_verdict_quality": "NOT_ADJUDICATED"
+  },
+  "evidence_root_label": "masc-goal-originals-0dc-3e0d-20261026",
+  "review_scope": "Accepted the full reviewer154-leaf audit; did not repeat it. Independently checked eight selected leaf length/SHA bindings: structured-verdict response, following ACK request, retained Original, four native/store files and prepared plan. Read safe projections and compared persisted outcome directly with all three frozen store rows.",
+  "manifest": {
+    "path": "terminal-originals-private/manifest.json",
+    "bytes": 32204,
+    "sha256": "64bc1ecaf8fe34214aea02aab7696a6e7175f5b4d7459e05d18b7929fdacad41"
+  },
+  "selected_confirmations": [
+    "wire/request-000012.response calls report_review_verdict REJECT. wire/request-000013.request carries the same callid and exact plaintext ACK plus unmodified reason. Reason SHA256 ec314464fa772304ed414c796ba5a4e5b46dbbe36e79080e37a56e1416e971a5; ACK SHA256 24eddc7392c714d869ddcf2a4afdb31f7b7446f994ce9539dd37ad28a12c8932.",
+    "Selected final provider System/User bytes equal the retained Original. Full twelve-request equality and forty returned-page slice checks remain findings of the complete protocol review, not a repeated independent full audit here.",
+    "Native register/reviewed/committed rows retain the exact reason and typed rejected decision. Both completion rows contain41 tools. Stored evidence/reason, Goal phase and measurement/request/run/revision joins agree.",
+    "safe-results/persisted-outcome.json equals the three frozen store rows; actual final isolated state is proof_refuted/executing, not a positive proof."
+  ],
+  "binding": {
+    "run_id": "01a174a1-e0fb-7000-8c82-614a62d90870",
+    "request_id": "44a299a96b28b6ff2d9bd2081ce0cfbc",
+    "measurement_id": "9c3a71e210ca7cf762e87f1563afdd12",
+    "fixture_revision": "b39a4c8dc8d4af965c4d87ef802c17db",
+    "primary_revision": "306708facbfb9379a9e51b8f7c815678",
+    "candidate_source_head": "9099a54530edc0a6ecee98117ea1ebab02cebe2e",
+    "candidate_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "execution_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "boundary": "Same Goal name does not identify primary state. This fresh isolated fixture has its own revision/request/run/measurement. Local9099 prompt source is distinct from frozen3e executable and managed75c; two normal persisted API overrides are not a native9099 build or primary installation."
+  },
+  "adjudication": "Agree protocolPASS establishes faithful input/result transport and persistent acceptance of this actual REJECT. It neither endorses the reason nor proves the original eleven behaviors. The reason, including its treatment of historical evidence and fixture revision, remains for separate semantic judgment.",
+  "limits": [
+    "Reported12POST/41tools/40 nonempty pages in one Goal run are not independent samples, whole-file coverage, a proof-count gate, general reliability or causal A/B.",
+    "The retained76 historical inputs are copies, not new execution of eleven behaviors. Prior428e159 FAIL and0dc109 finite controls remain separate.",
+    "Readiness and cleanup stay within saved observations: fourteen read-only refusals then success, and bounded owned-PID identity/absence receipts. No fresh process or current-state observation was made here.",
+    "No primary3067 proof/update, original Goal completion, human confirmation, install/operations, current-head native build/fullCI, formal approval, whole-stack admission or merge is established."
+  ],
+  "effects": "Read-only selected originals and offline hash/decode/equality checks. No API/Git/model/test/build/CI/process/source/store mutation, new agent or external message. Only this new response is written."
+}

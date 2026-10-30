@@ -1,0 +1,11 @@
+name = "masc_dos_eject"
+description = """
+Turn off the shared DOS machine.
+
+The running machine is dropped, along with any files it wrote that nobody \
+read back through masc_dos_load's mounted names. Its last autosave stays: \
+masc_dos_restore slot=autosave brings it back, but a worker restart does \
+not. The next masc_dos_load starts a new machine and a new input ledger."""
+additional_properties = false
+
+defer_loading = true

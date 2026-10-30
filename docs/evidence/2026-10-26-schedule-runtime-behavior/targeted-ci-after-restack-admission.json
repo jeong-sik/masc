@@ -1,0 +1,20 @@
+{
+  "id": 40325758202,
+  "name": "Test",
+  "head_sha": "ae6cabc219bccb6eb57726d81c3f8cc99ba3e04e",
+  "head_branch": "audit/scheduled-job-runtime-20261026",
+  "event": "workflow_dispatch",
+  "status": "in_progress",
+  "conclusion": null,
+  "html_url": "https://github.com/jeong-sik/masc/actions/runs/40325758202",
+  "created_at": "2026-10-26T12:51:25Z",
+  "updated_at": "2026-10-26T12:51:30Z",
+  "TARGET_SUITES": [
+    "test_schedule_tool_wiring",
+    "test_schedule_store",
+    "test_schedule_runner",
+    "test_schedule_consumer_dispatch",
+    "test_lane_addon_scheduled_act"
+  ],
+  "minimal": true
+}

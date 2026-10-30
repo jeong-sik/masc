@@ -1,0 +1,41 @@
+{
+  "schema": "masc.native-digest-curation-verification.v1",
+  "original_selected_inputs_unchanged": {
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-observations-v1.json": "3da31448dbb21d1176b3cc92b2b98a12c15881fa1c2ae0647c834c634c20d56c",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-root-v1/comparison-summary.json": "9f52245be41f9394f3794c2ac9463da0a02b34298973d7cbcf3975579d89c6bc",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/receipt.json": "d291d4156ec47da2591da3f982f6820a4fba6e7606636b9e461a31f5add438b3",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/summary.json": "fa16036d12d608ee09339f26f749fdb9fc738fff2c921661e78d755813ba10f0",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/receipt.json": "6401c99a60589b706675a002e13679c6a74e9d6171493e0819bf0d8a5ea368f2",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-owner-map-8e61fa43/qualification/summary.json": "e824426b24974b08f65b3307be4b6321606f1b14086dfba36966b6f9c3ff3ed6",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/plan.json": "9a550effd9a218fb27430df13ebe48edbbad8b189cf69e75e278ba6829e6a41a",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/execution-qualification.json": "14c304cd3fa4c3635bc6792219a26ba133fa545ca7485a40080635bf40585f73",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/run_native.py": "c7f2de2efba3c687a1444a37e624a48f8cecda68534e3de77dc5bf12d158475f",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/derive_observations.py": "15dd208f7dc1a96a066c06d550e2a854ec9dc6db595afefa5b8a033ef3e141ce",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-preparation-v1/validator_execution.py": "6b669783616575cbf31becb7950947a932b92c5d0a7dbcb1cc2c3206a4ccf029",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/native-digest-6df61978/qualification/production-build-config.diff": "b871dadc3ee37dd200f62c6fe3d42fa67735eb56d26551d980589f2aefcd968d",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-raw-evidence-review-v1/README.md": "830dcbaf4a4fab313693679f03d6d6c2782a6781c2bbfd48b759300a54c32a04",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-descriptor-review-v1/README.md": "1ad10442ca0bc230e58e60e6c7da3ab589bf38ce0248556af9188f77ae54ce87",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-source-review-v1/README.md": "401eafe2b8d4b94ac43c7630470c6f1a790c2023d46c239721466dbe015015bd",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-root-v1/admission.json": "dba7f8682b043ed0d7bb4c0eac9c24ad12a1e716296db38193b249e97ca7127f",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-1-native.json": "c6a8fbd8d2d96eb1a9b9ff0063bdfe548d900565fbc662dcd4f186f25d4e3a7d",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-1-validator.json": "742f75f7817271cba08264ea6121e70df18afbf50eb1b1cdb1376d6ff60e1d0f",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-2-native.json": "e9f5d140dcb2eb7d5bcefed7bf9b7d2bf7cd3b07df41a915ec38d0f25d42a1b8",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-2-validator.json": "70b3ea7a5a6ed1180b21313dd41633a5b283ea1afceccaa49ce15ed17566035d",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-3-native.json": "c111dfb7fe261da8af69e652a469b30a0909171bae61a5d51dba699563a4c555",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-3-validator.json": "8f7fba05809db0f7ce4edb052a76043d3f5379f836dec742b82ab8ff5ba3685b",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-4-native.json": "90b38d6e2c843438dfc2f19113ef1f4267d1ce0a6639a44f1fff2fb86b5b2d8c",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-4-validator.json": "51691724d15f6e2e1c0a0e60bdb81ba567e57f98ac0dcccfe11e7a8c41280932",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-5-native.json": "b33914024f74dd2dc22b72d28798c39f8b10bc57c1d30604e8191af255135865",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-5-validator.json": "b0b83fc1201b47fc12c6aa3b04751fd1eb5e7c9a413d603442d27a609218f78a",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-6-native.json": "5fc3cd1ff4eac82362378c1fd8c5cba167c4009c0bdd500d84ddc976c821ad6a",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/digest-native-comparison-tool-returns-v1/cell-6-validator.json": "1f320823824bc8eee1e20c596eec734f9a45905d044fcfc3d19340c87d2422bf"
+  },
+  "decoded_observations_all_equal": true,
+  "comparison_arithmetic_recomputed": {
+    "control_mean_bytes": "50754778832",
+    "candidate_mean_bytes": "51052786308",
+    "candidate_percent_change": "0.5871515606174043666651357815929572131053"
+  },
+  "actual_native_and_helper_receipts_selected": 12,
+  "no_new_workload_or_SQL_or_aggregate": true
+}

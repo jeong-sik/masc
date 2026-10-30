@@ -1,0 +1,876 @@
+(** Shared helpers, constants, and content-block serialization for API modules.
+
+    Extracted from agent_core for shared use by consumers.
+    All types are from {!Llm_provider.Types}. *)
+
+open Types
+
+let default_base_url = "https://api.anthropic.com"
+let api_version = "2023-06-01"
+
+(** Maximum HTTP response body size (10 MB).
+    Used for LLM API responses, MCP HTTP, and agent registry. *)
+let max_response_body = 10 * 1024 * 1024
+
+(** Maximum stdio process buffer size (16 MB).
+    Larger than HTTP because stdio carries full JSON-RPC frames. *)
+let max_stdio_buffer = 16 * 1024 * 1024
+
+(** Process-scoped entropy for AGENT_CORE-allocated tool-use identities.
+
+    The identity must not depend on model-generated names or arguments: those
+    values are incomplete at streaming block start and repeated calls may have
+    identical payloads.  [Random.State.make_self_init] obtains an independent
+    system-seeded state, while the atomic sequence makes allocation unique
+    within this process even when several OCaml 5 domains open streams at the
+    same time.  The process id prevents a post-[fork] child from sharing the
+    parent's namespace. *)
+let tool_use_id_process_scope =
+  let state = Random.State.make_self_init () in
+  Printf.sprintf "%016Lx%016Lx" (Random.State.bits64 state) (Random.State.bits64 state)
+;;
+
+let tool_use_id_sequence = Atomic.make 0
+
+let fresh_tool_use_id () =
+  let sequence = Atomic.fetch_and_add tool_use_id_sequence 1 in
+  Printf.sprintf "call_agent_core_%s_%x_%x" tool_use_id_process_scope (Unix.getpid ()) sequence
+;;
+
+let string_is_blank s = String.trim s = ""
+
+let text_blocks_to_string blocks =
+  blocks
+  |> List.filter_map (function
+    | Text s -> Some (Utf8_sanitize.sanitize s)
+    | Thinking { content = s; _ } -> Some (Utf8_sanitize.sanitize s)
+    | ReasoningDetails _ -> None
+    | RedactedThinking _ -> None
+    | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> None)
+  |> String.concat "\n"
+;;
+
+let json_of_string_or_raw s =
+  try Yojson.Safe.from_string s with
+  | Yojson.Json_error _ -> `Assoc [ "raw", `String s ]
+;;
+
+(* Provider error bodies come in two JSON shapes: a flat [{"error": "..."}]
+   (Ollama, llama.cpp) and a nested [{"error": {"message": "..."}}] (OpenAI,
+   Anthropic, ZAI). [None] is a body that names no cause: not JSON, JSON
+   without an [error] key, or an [error] whose message is not a string or is
+   blank: [{"error":""}] names nothing. The match is exhaustive over
+   [Yojson.Safe.t] so a new constructor is a compile error here rather than a
+   body silently read as "no message". *)
+let error_message_of_body (body : string) : string option =
+  let named message = if string_is_blank message then None else Some message in
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> None
+  | `Assoc fields ->
+    (match List.assoc_opt "error" fields with
+     | Some (`String message) -> named message
+     | Some (`Assoc error_fields) ->
+       (match List.assoc_opt "message" error_fields with
+        | Some (`String message) -> named message
+        | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+        | None -> None)
+     | Some (`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None -> None)
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let unsupported_media_source ~backend ~block source =
+  invalid_arg
+    (Printf.sprintf
+       "%s does not support %s media source kind %s"
+       backend
+       block
+       (Types.media_source_wire_tag source))
+;;
+
+let base64_media_data_url ~backend ~block ~media_type = function
+  | Base64 data -> Printf.sprintf "data:%s;base64,%s" media_type data
+  | (Url _ | File_id _) as source -> unsupported_media_source ~backend ~block source
+;;
+
+let base64_media_payload ~backend ~block = function
+  | Base64 data -> data
+  | (Url _ | File_id _) as source -> unsupported_media_source ~backend ~block source
+;;
+
+(* ── Document admission (agent-core boundary) ───────────────────────────────────────
+
+   A [Document] block used to be re-labelled as an [image_url] part on the
+   OpenAI-compatible Chat Completions wire. Serializing the same typed block
+   differently per wire is the legitimate serialization boundary; changing
+   *which modality it is* is not — the model received a picture where the
+   caller sent a file, and nothing reported it.
+
+   The two facts that decide whether a document may go out are now separate and
+   both typed: [document_wire_form] says which native part the wire has (there
+   is no wildcard: a wire with no document part says so), and
+   [Capabilities.supports_document_input] says whether the resolved model row
+   accepts one. Admission runs before serialization, so each serializer arm has
+   exactly one native form and never needs a fallback. *)
+
+type document_wire_form =
+  | Document_source_block (** Anthropic Messages: [{"type":"document","source":{…}}]. *)
+  | Document_inline_data (** Gemini: [inlineData] carrying the document MIME. *)
+  | Document_input_file_part
+  (** OpenAI Responses: [{"type":"input_file","file_data":…}]. *)
+  | Document_chat_file_part
+  (** OpenAI Chat Completions: [{"type":"file","file":{"file_data":…}}]. *)
+  | Document_unrepresentable
+  (** The wire has no document part. Ollama's native [/api/chat] carries only
+        a scalar [content] plus an [images] array; a document placed in
+        [images] is an image as far as the server is concerned. *)
+
+let document_wire_form_to_string = function
+  | Document_source_block -> "an Anthropic document source block"
+  | Document_inline_data -> "a Gemini inlineData part"
+  | Document_input_file_part -> "an OpenAI Responses input_file part"
+  | Document_chat_file_part -> "an OpenAI Chat Completions file part"
+  | Document_unrepresentable -> "no document part"
+;;
+
+type document_admission_error =
+  | Document_wire_has_no_representation of
+      { wire_form : document_wire_form
+      ; media_type : string
+      }
+  | Document_input_not_declared of
+      { model_id : string
+      ; media_type : string
+      }
+
+let document_admission_error_to_string = function
+  | Document_wire_has_no_representation { wire_form; media_type } ->
+    Printf.sprintf
+      "document block (media_type %S) cannot be placed on this wire: it has %s"
+      media_type
+      (document_wire_form_to_string wire_form)
+  | Document_input_not_declared { model_id; media_type } ->
+    Printf.sprintf
+      "document block (media_type %S) rejected: model %S does not declare \
+       supports_document_input"
+      media_type
+      model_id
+;;
+
+let admit_document_blocks ~wire_form ~model_id ~supports_document_input blocks =
+  let rec loop = function
+    | [] -> Ok ()
+    | Document { media_type; _ } :: rest ->
+      (match wire_form with
+       | Document_unrepresentable ->
+         Error (Document_wire_has_no_representation { wire_form; media_type })
+       | Document_source_block
+       | Document_inline_data
+       | Document_input_file_part
+       | Document_chat_file_part ->
+         if supports_document_input
+         then loop rest
+         else Error (Document_input_not_declared { model_id; media_type }))
+    | ( Text _
+      | Thinking _
+      | ReasoningDetails _
+      | RedactedThinking _
+      | ToolUse _
+      | ToolResult _
+      | Image _
+      | Audio _ )
+      :: rest -> loop rest
+  in
+  loop blocks
+;;
+
+(* agent-core boundary — degrade, not reject.
+   [admit_document_*] answers "may this document reach the wire"; when it may
+   not, the earlier design raised [Invalid_argument], which
+   [Complete.complete]'s wrapper turned into a rejected turn. That is right for
+   a document the caller is introducing now, but the same functions walk the
+   ENTIRE message history every turn, so a document resident in an
+   already-answered turn permanently sank every later turn of that conversation
+   against a model without the capability — retroactively, for state written
+   before this behaviour existed.
+
+   The wire still must not carry a document as some other modality (the audit's
+   actual defect: a PDF relabelled [image_url]). So instead of relabelling or
+   rejecting, an unrepresentable document is replaced with a visible text block
+   that names what was dropped. This is not silent: the model — and through it
+   the user — sees that a document was omitted and why, which is the honest
+   degraded outcome for a conversation whose model cannot read documents. A
+   model that CAN carry the document (capability declared, wire has a document
+   part) keeps its native block untouched. *)
+let document_omitted_note ~media_type =
+  Printf.sprintf
+    "[document omitted: this model does not accept document input (media_type %s)]"
+    media_type
+;;
+
+let document_omitted_placeholder ~media_type =
+  Text (document_omitted_note ~media_type)
+;;
+
+(* Shared walker for the document and audio degraders: [rewrite_block]
+   returns [Some (note, placeholder)] for a block whose declared capability
+   is missing and [None] when the block stays. ToolResult [content_blocks]
+   are walked too — [Tool_result_projection.media_parts] projects from there,
+   which is what lets an unrepresentable block ride the follow-up turn — and
+   omissions are named on the canonical tool content, mirroring
+   [degrade_image_messages], so no wire carries the rewrite silently.
+   Returns the rewritten history and the number of blocks degraded. *)
+let degrade_blocks_messages rewrite_block messages =
+  let degraded = ref 0 in
+  let rewrite (message : Types.message) =
+    let content =
+      List.map
+        (fun block ->
+           match rewrite_block block with
+           | Some (_note, placeholder) ->
+             incr degraded;
+             placeholder
+           | None ->
+             (match block with
+              | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
+                let notes = ref [] in
+                let blocks =
+                  List.map
+                    (fun inner ->
+                       match rewrite_block inner with
+                       | Some (note, placeholder) ->
+                         incr degraded;
+                         notes := note :: !notes;
+                         placeholder
+                       | None -> inner)
+                    blocks
+                in
+                if !notes = [] then block
+                else begin
+                  let notes = String.concat "\n" (List.rev !notes) in
+                  let content =
+                    if result.content = "" then notes
+                    else result.content ^ "\n" ^ notes
+                  in
+                  ToolResult { result with content; content_blocks = Some blocks }
+                end
+              | (ToolResult { content_blocks = None;_} | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block -> block))
+        message.content
+    in
+    { message with content }
+  in
+  let messages = List.map rewrite messages in
+  messages, !degraded
+;;
+
+(* Replace every unrepresentable document across the whole history with the
+   placeholder, leaving all other blocks (and representable documents) intact.
+   Returns the rewritten messages and the count of documents degraded, so a
+   caller may log or surface the degradation without re-walking. *)
+let degrade_document_messages ~wire_form ~supports_document_input messages =
+  degrade_blocks_messages
+    (fun block ->
+       match block with
+       | Document { media_type; _ } ->
+         let representable =
+           match wire_form with
+           | Document_unrepresentable -> false
+           | Document_source_block
+           | Document_inline_data
+           | Document_input_file_part
+           | Document_chat_file_part -> supports_document_input
+         in
+         if representable then None
+         else
+           Some
+             ( document_omitted_note ~media_type
+             , document_omitted_placeholder ~media_type )
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Image _ | Audio _ -> None)
+    messages
+;;
+
+(* Same boundary, image side. [Tool_result_projection.with_image_followups]
+   projects every tool-result image onto the wire (image_url for OpenAI-
+   compatible, inlineData for Gemini) regardless of the model's declared
+   input capability, so a text-only row would either get the request
+   rejected by the endpoint or the image silently dropped by it. Rejecting
+   at serialization time instead would sink every later turn of a history
+   that already holds the image — the retroactive failure the document
+   degrader above exists to prevent — so an image a model without
+   [supports_image_input] cannot carry is replaced with a visible text
+   block naming what was dropped. Images nested in ToolResult
+   [content_blocks] are rewritten too, because that is where the projection
+   reads them from; a model that declares the capability keeps its native
+   bytes untouched. *)
+let image_omitted_note ~media_type =
+  Printf.sprintf
+    "[image omitted: this model does not accept image input (media_type %s)]"
+    media_type
+;;
+
+let image_omitted_placeholder ~media_type =
+  Text (image_omitted_note ~media_type)
+;;
+
+(* Same boundary, audio side. Tool-result audio blocks are projected by
+   [Tool_result_projection.media_parts] the same way images are, so a model
+   without [supports_audio_input] would receive an [input_audio] part it
+   rejects — the B-1 residual behind this repair. Audio nested in ToolResult
+   [content_blocks] is rewritten too, and the omission is named on the
+   canonical tool content. *)
+let audio_omitted_note ~media_type =
+  Printf.sprintf
+    "[audio omitted: this model does not accept audio input (media_type %s)]"
+    media_type
+;;
+
+let audio_omitted_placeholder ~media_type =
+  Text (audio_omitted_note ~media_type)
+;;
+
+let degrade_audio_messages ~supports_audio_input messages =
+  degrade_blocks_messages
+    (fun block ->
+       match block with
+       | Audio { media_type; _ } when not supports_audio_input ->
+         Some
+           ( audio_omitted_note ~media_type
+           , audio_omitted_placeholder ~media_type )
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Image _ | Document _ | Audio _ -> None)
+    messages
+;;
+
+let degrade_image_messages ~supports_image_input messages =
+  degrade_blocks_messages
+    (fun block ->
+       match block with
+       | Image { media_type; _ } when not supports_image_input ->
+         Some
+           ( image_omitted_note ~media_type
+           , image_omitted_placeholder ~media_type )
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Document _ | Audio _ | Image _ -> None)
+    messages
+;;
+
+type tool_result_content_style =
+  | Tool_result_content_string
+  | Tool_result_content_text_blocks
+
+(** Content block <-> JSON *)
+let rec content_block_to_json_with
+          ~(tool_result_content_style : tool_result_content_style)
+  = function
+  | Text s ->
+    `Assoc [ "type", `String "text"; "text", `String (Utf8_sanitize.sanitize s) ]
+  | Thinking { content; signature } ->
+    (* Anthropic verifies [signature] against the exact thinking text, so a
+       signed block is serialized byte-exact (no sanitize); unsigned provider
+       reasoning is sanitized defensively. A block without a signature omits the
+       field rather than emitting a fabricated one. *)
+    let thinking_text =
+      match signature with
+      | Some _ -> content
+      | None -> Utf8_sanitize.sanitize content
+    in
+    let fields =
+      match signature with
+      | Some s ->
+        [ "type", `String "thinking"
+        ; "signature", `String s
+        ; "thinking", `String thinking_text
+        ]
+      | None -> [ "type", `String "thinking"; "thinking", `String thinking_text ]
+    in
+    `Assoc fields
+  | ReasoningDetails { reasoning_content; details } ->
+    let fields =
+      [ ( "details"
+        , `List (List.map (fun (detail : reasoning_detail) -> detail.raw) details) )
+      ]
+    in
+    let fields =
+      match reasoning_content with
+      | Some content ->
+        ("reasoning_content", `String (Utf8_sanitize.sanitize content)) :: fields
+      | None -> fields
+    in
+    `Assoc (("type", `String "reasoning_details") :: fields)
+  | RedactedThinking data ->
+    `Assoc [ "type", `String "redacted_thinking"; "data", `String data ]
+  | ToolUse { id; name; input } ->
+    `Assoc
+      [ "type", `String "tool_use"
+      ; "id", `String id
+      ; "name", `String name
+      ; "input", input
+      ]
+  | ToolResult { tool_use_id; content; outcome; content_blocks; _ } ->
+    `Assoc
+      (tool_result_wire_fields_with
+         ~tool_result_content_style
+         ~tool_use_id
+         ~content
+         ~outcome
+         content_blocks)
+  | Image { media_type; source } ->
+    `Assoc
+      [ "type", `String "image"
+      ; ( "source"
+        , `Assoc
+            [ "type", `String (media_source_wire_tag source)
+            ; "media_type", `String media_type
+            ; "data", `String (media_source_payload source)
+            ] )
+      ]
+  | Document { media_type; source } ->
+    `Assoc
+      [ "type", `String "document"
+      ; ( "source"
+        , `Assoc
+            [ "type", `String (media_source_wire_tag source)
+            ; "media_type", `String media_type
+            ; "data", `String (media_source_payload source)
+            ] )
+      ]
+  | Audio { media_type; source } ->
+    `Assoc
+      [ "type", `String "audio"
+      ; ( "source"
+        , `Assoc
+            [ "type", `String (media_source_wire_tag source)
+            ; "media_type", `String media_type
+            ; "data", `String (media_source_payload source)
+            ] )
+      ]
+
+and tool_result_wire_fields_with
+      ~tool_result_content_style
+      ~tool_use_id
+      ~content
+      ~outcome
+      content_blocks
+  =
+  let content_json =
+    match content_blocks with
+    | Some blocks ->
+      (* Structured result: emit the blocks (text/image/...) as the
+         tool_result content array. *)
+      `List (List.map (content_block_to_json_with ~tool_result_content_style) blocks)
+    | None ->
+      (match tool_result_content_style with
+       | Tool_result_content_string -> `String (Utf8_sanitize.sanitize content)
+       | Tool_result_content_text_blocks ->
+         `List
+           [ `Assoc
+               [ "type", `String "text"
+               ; "text", `String (Utf8_sanitize.sanitize content)
+               ]
+           ])
+  in
+  [ "type", `String "tool_result"
+  ; "tool_use_id", `String tool_use_id
+  ; "content", content_json
+  ; "is_error", `Bool (tool_result_outcome_is_error outcome)
+  ]
+;;
+
+let content_block_to_json =
+  content_block_to_json_with ~tool_result_content_style:Tool_result_content_string
+;;
+
+let tool_result_wire_fields ~tool_use_id ~content ~outcome =
+  tool_result_wire_fields_with
+    ~tool_result_content_style:Tool_result_content_string
+    ~tool_use_id
+    ~content
+    ~outcome
+    None
+;;
+
+type content_block_decode_error =
+  | Missing_content_block_type
+  | Unsupported_content_block_type of string
+  | Missing_content_block_field of
+      { block_type : string
+      ; field : string
+      }
+  | Unsupported_media_source_kind of
+      { block_type : string
+      ; source_type : string
+      }
+
+let content_block_decode_error_to_string = function
+  | Missing_content_block_type -> "missing_content_block_type"
+  | Unsupported_content_block_type block_type ->
+    "unsupported_content_block_type:" ^ block_type
+  | Missing_content_block_field { block_type; field } ->
+    Printf.sprintf "missing_content_block_field:%s:%s" block_type field
+  | Unsupported_media_source_kind { block_type; source_type } ->
+    Printf.sprintf "unsupported_media_source_kind:%s:%s" block_type source_type
+;;
+
+let required_string_field ~block_type ~field json =
+  let open Yojson.Safe.Util in
+  match json |> member field |> to_string_option with
+  | Some value -> Ok value
+  | None -> Error (Missing_content_block_field { block_type; field })
+;;
+
+(* An identifier that is present but blank is not an identifier. Downstream
+   writers each invent their own stand-in for it -- the transcript synthesises
+   [tc-<position>] while the event payload omits the field -- so the two
+   describe one execution under two identities and nothing joins them. Blank
+   is rejected here, where the shape is still a parse result. Free-text fields
+   keep using {!required_string_field}: an empty [text] block is a legitimate
+   thing for a provider to send. *)
+let required_identifier_field ~block_type ~field json =
+  let open Yojson.Safe.Util in
+  match json |> member field |> to_string_option with
+  | Some value when not (string_is_blank value) -> Ok value
+  | Some _ | None -> Error (Missing_content_block_field { block_type; field })
+;;
+
+let reasoning_detail_of_json json =
+  let open Yojson.Safe.Util in
+  match json with
+  | `Assoc _ ->
+    let text =
+      match json |> member "text" |> to_string_option with
+      | Some text when not (string_is_blank text) -> Some text
+      | Some _ | None -> None
+    in
+    Ok { raw = json; text }
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+    Error
+      (Missing_content_block_field
+         { block_type = "reasoning_details"; field = "details[]" })
+;;
+
+let parse_media_block ~block_type ~make json =
+  let open Yojson.Safe.Util in
+  let source = json |> member "source" in
+  match source |> member "type" |> to_string_option with
+  | None -> Error (Missing_content_block_field { block_type; field = "source.type" })
+  | Some raw_source_type ->
+    (match media_source_of_wire_tag raw_source_type with
+     | None ->
+       Error (Unsupported_media_source_kind { block_type; source_type = raw_source_type })
+     | Some source_of_payload ->
+       let open Result.Syntax in
+       let* media_type = required_string_field ~block_type ~field:"media_type" source in
+       let* data = required_string_field ~block_type ~field:"data" source in
+       Ok (make ~media_type ~source:(source_of_payload data)))
+;;
+
+let rec content_block_of_json_result ?(parse_tool_result_json = true) json =
+  let open Yojson.Safe.Util in
+  match json |> member "type" |> to_string_option with
+  | Some "text" ->
+    Result.map
+      (fun text -> Text text)
+      (required_string_field ~block_type:"text" ~field:"text" json)
+  | Some "thinking" ->
+    let signature = json |> member "signature" |> to_string_option in
+    Result.map
+      (fun content -> Thinking { content; signature })
+      (required_string_field ~block_type:"thinking" ~field:"thinking" json)
+  | Some "reasoning_details" ->
+    let open Result.Syntax in
+    let details_json = json |> member "details" in
+    let* details =
+      match details_json with
+      | `List details -> Ok details
+      | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+        Error
+          (Missing_content_block_field
+             { block_type = "reasoning_details"; field = "details" })
+    in
+    let* details = result_all (List.map reasoning_detail_of_json details) in
+    let reasoning_content =
+      match json |> member "reasoning_content" |> to_string_option with
+      | Some content when not (string_is_blank content) -> Some content
+      | Some _ | None -> None
+    in
+    Ok (ReasoningDetails { reasoning_content; details })
+  | Some "redacted_thinking" ->
+    Result.map
+      (fun data -> RedactedThinking data)
+      (required_string_field ~block_type:"redacted_thinking" ~field:"data" json)
+  | Some "tool_use" ->
+    let open Result.Syntax in
+    let* id = required_identifier_field ~block_type:"tool_use" ~field:"id" json in
+    let* name = required_identifier_field ~block_type:"tool_use" ~field:"name" json in
+    let input = json |> member "input" in
+    Ok (ToolUse { id; name; input })
+  | Some "tool_result" ->
+    let open Result.Syntax in
+    let* tool_use_id =
+      required_identifier_field ~block_type:"tool_result" ~field:"tool_use_id" json
+    in
+    let content_json = json |> member "content" in
+    let* content, content_blocks =
+      match content_json with
+      | `String content -> Ok (content, None)
+      | `List blocks ->
+        let* blocks =
+          content_blocks_of_json_result ~parse_tool_result_json blocks
+        in
+        Ok (text_blocks_to_string blocks, Some blocks)
+      | other -> Ok (Yojson.Safe.to_string other, None)
+    in
+    let outcome =
+      if Cli_common_json.member_bool "is_error" json
+      then Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+      else Tool_succeeded
+    in
+    let json =
+      if parse_tool_result_json then Types.try_parse_json content else None
+    in
+    Ok (ToolResult { tool_use_id; content; outcome; json; content_blocks })
+  | Some "image" ->
+    parse_media_block
+      ~block_type:"image"
+      ~make:(fun ~media_type ~source -> Image { media_type; source })
+      json
+  | Some "document" ->
+    parse_media_block
+      ~block_type:"document"
+      ~make:(fun ~media_type ~source -> Document { media_type; source })
+      json
+  | Some "audio" ->
+    parse_media_block
+      ~block_type:"audio"
+      ~make:(fun ~media_type ~source -> Audio { media_type; source })
+      json
+  | Some other -> Error (Unsupported_content_block_type other)
+  | None -> Error Missing_content_block_type
+
+and content_blocks_of_json_result ?(parse_tool_result_json = true) blocks =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | block :: rest ->
+      (match content_block_of_json_result ~parse_tool_result_json block with
+       | Ok parsed -> loop (parsed :: acc) rest
+       | Error _ as error -> error)
+  in
+  loop [] blocks
+;;
+
+let content_block_of_json ?parse_tool_result_json json =
+  match content_block_of_json_result ?parse_tool_result_json json with
+  | Ok block -> Some block
+  | Error _ -> None
+;;
+
+let message_has_tool_result (msg : message) =
+  List.exists
+    (function
+      | ToolResult _ -> true
+      | Text _
+      | Thinking _
+      | ReasoningDetails _
+      | RedactedThinking _
+      | ToolUse _
+      | Image _
+      | Document _
+      | Audio _ -> false)
+    msg.content
+;;
+
+let merge_tool_result_followup_user_messages_with_source_indices messages =
+  let mergeable_followup (msg : message) =
+    msg.role = User
+    && (match msg.origin with
+        | Recovery_instruction | Tool_result_followup -> true
+        | Conversation | System_context | Historical_system_context | Agent_instruction -> false)
+    && msg.name = None
+    && msg.tool_call_id = None
+    && Conversation_metadata.is_mergeable_followup msg.metadata
+  in
+  let rec aux acc = function
+    | (({ role = Tool; _ } as tool_msg), tool_indices) :: ((followup : message), followup_indices) :: rest
+      when message_has_tool_result tool_msg && mergeable_followup followup ->
+      let merged =
+        { tool_msg with
+          content = tool_msg.content @ followup.content
+        ; metadata = tool_msg.metadata @ followup.metadata
+        }
+      in
+      aux ((merged, tool_indices @ followup_indices) :: acc) rest
+    | (({ role = System | User | Assistant | Tool; _ } as msg), indices) :: rest ->
+      aux ((msg, indices) :: acc) rest
+    | [] -> List.rev acc
+  in
+  aux [] (List.mapi (fun index message -> message, [index]) messages)
+;;
+
+let merge_tool_result_followup_user_messages messages =
+  List.map fst (merge_tool_result_followup_user_messages_with_source_indices messages)
+;;
+
+let message_to_json (msg : message) =
+  let role_str =
+    match msg.role with
+    | User | System | Tool -> "user"
+    | Assistant -> "assistant"
+  in
+  `Assoc
+    [ "role", `String role_str
+    ; "content", `List (List.map content_block_to_json msg.content)
+    ]
+;;
+
+let kimi_message_to_json (msg : message) =
+  let role_str =
+    match msg.role with
+    | User | System | Tool -> "user"
+    | Assistant -> "assistant"
+  in
+  `Assoc
+    [ "role", `String role_str
+    ; ( "content"
+      , `List
+          (List.map
+             (content_block_to_json_with
+                ~tool_result_content_style:Tool_result_content_text_blocks)
+             msg.content) )
+    ]
+;;
+
+(** Create HTTPS upgrade function using tls-eio *)
+type https_init_error =
+  | Ca_certs_unavailable of string
+  | Tls_config_unavailable of string
+
+let https_init_error_to_string = function
+  | Ca_certs_unavailable msg -> "CA certificates unavailable: " ^ msg
+  | Tls_config_unavailable msg -> "TLS client configuration unavailable: " ^ msg
+;;
+
+(* Process-wide cache for the TLS client configuration.
+
+   [Ca_certs.authenticator ()] loads the system trust store on every call:
+   on macOS it spawns one [security find-certificate] subprocess per
+   keychain and parses the multi-hundred-KB PEM dump (X509 decode +
+   fingerprints for the whole anchor set). Rebuilding it per connection
+   dominated a consuming server's main event loop under sustained LLM
+   traffic (~73% of the loop thread across two 10s `sample` profiles,
+   2026-07-17).
+
+   The authenticator validates certificate time with a clock closure
+   evaluated at each handshake, so a process-lifetime cache does not
+   freeze time-based validation.
+
+   Errors are deliberately not cached: a transient failure (e.g. fork
+   EAGAIN under load) must not wedge TLS for the process lifetime.
+   Concurrent first calls may compute the config more than once; the
+   results are equivalent and the last write wins. *)
+let tls_client_config_cache : Tls.Config.client option Atomic.t = Atomic.make None
+
+(* The TLS handshake draws from Mirage_crypto_rng's process-global default
+   generator, which some entrypoint must install. Leaving that to each
+   binary's main() made it forgettable: a CLI that skipped it had every
+   HTTPS request die in ~10ms as No_default_generator, swallowed downstream
+   into "unclassified transport exception" (keeper_capability_probe_cli,
+   2026-08-16 — five cloud providers read as rejected while local http
+   runtimes passed). Installing it at this gate — the single entrypoint
+   every LLM-provider HTTPS path crosses (other subsystems with their own
+   TLS configs guard themselves: discord_wss_connection, eio_context,
+   otel) — removes the class for this package. Concurrent first calls may
+   each run [use_default], which unconditionally installs a fresh
+   generator; last write wins and every candidate is an independent
+   secure generator, so the guarded final state is safe even though the
+   install itself is not idempotent. This mirrors the masc-side
+   Crypto_rng.ensure_default, re-implemented here because agent_core
+   cannot depend on masc libraries (the package boundary points the
+   other way). *)
+let ensure_rng_default () =
+  match Mirage_crypto_rng.default_generator () with
+  | _ -> ()
+  | exception Mirage_crypto_rng.No_default_generator ->
+    Mirage_crypto_rng_unix.use_default ()
+;;
+
+let%test "the https gate leaves the RNG default installed" =
+  ensure_rng_default ();
+  match Mirage_crypto_rng.default_generator () with
+  | _ -> true
+  | exception Mirage_crypto_rng.No_default_generator -> false
+;;
+
+let tls_client_config () : (Tls.Config.client, https_init_error) result =
+  ensure_rng_default ();
+  match Atomic.get tls_client_config_cache with
+  | Some config -> Ok config
+  | None ->
+    (match Ca_certs.authenticator () with
+     | Error (`Msg msg) -> Error (Ca_certs_unavailable msg)
+     | Ok authenticator ->
+       (match Tls.Config.client ~authenticator () with
+        | Error (`Msg msg) -> Error (Tls_config_unavailable msg)
+        | Ok config ->
+          Atomic.set tls_client_config_cache (Some config);
+          Ok config))
+;;
+
+type tls_peer =
+  | Peer_host of [ `host ] Domain_name.t
+  | Peer_ip of Ipaddr.t
+
+(* The name the peer's certificate is checked against is decided before a
+   socket exists, and there is no third answer: a URL host is an address,
+   checked against the certificate's iPAddress names, or a host name, sent
+   as SNI and checked against its dNSName names. [Domain_name.of_string]
+   accepts "127.0.0.1" (numeric labels are syntactically a domain name), so
+   the address reading comes first. A host that is neither is a URL this
+   client cannot validate a certificate for, and it says so instead of
+   handing x509 no name at all, which would make it check the chain and skip
+   the name. *)
+let tls_peer_of_host host =
+  match Ipaddr.of_string host with
+  | Ok ip -> Ok (Peer_ip ip)
+  | Error (`Msg _) ->
+    (match Domain_name.of_string host with
+     | Error (`Msg reason) -> Error reason
+     | Ok domain ->
+       (match Domain_name.host domain with
+        | Ok name -> Ok (Peer_host name)
+        | Error (`Msg reason) -> Error reason))
+;;
+
+let%test "tls peer: an IPv4 literal is an address" =
+  match tls_peer_of_host "127.0.0.1" with
+  | Ok (Peer_ip ip) -> String.equal (Ipaddr.to_string ip) "127.0.0.1"
+  | Ok (Peer_host _) | Error _ -> false
+;;
+
+let%test "tls peer: an IPv6 literal is an address" =
+  match tls_peer_of_host "::1" with
+  | Ok (Peer_ip _) -> true
+  | Ok (Peer_host _) | Error _ -> false
+;;
+
+let%test "tls peer: a host name is a name" =
+  match tls_peer_of_host "api.example.com" with
+  | Ok (Peer_host name) -> String.equal (Domain_name.to_string name) "api.example.com"
+  | Ok (Peer_ip _) | Error _ -> false
+;;
+
+let%test "tls peer: neither is an error, not a nameless handshake" =
+  match tls_peer_of_host "1.2.3.4.5" with
+  | Error _ -> true
+  | Ok _ -> false
+;;
+
+let make_https_result () : (tls_peer -> _ -> _, https_init_error) result =
+  match tls_client_config () with
+  | Error _ as e -> e
+  | Ok tls_config ->
+    Ok
+      (fun peer flow ->
+        match peer with
+        | Peer_host host -> Tls_eio.client_of_flow tls_config ~host flow
+        | Peer_ip ip -> Tls_eio.client_of_flow tls_config ~ip flow)
+;;

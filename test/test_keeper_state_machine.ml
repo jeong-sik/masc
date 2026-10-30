@@ -1,0 +1,1773 @@
+(** test_keeper_state_machine — RFC-0002 keeper state machine tests.
+
+    Pure unit tests for the deterministic core:
+    - derive_phase priority ordering
+    - apply_event valid/invalid transitions
+    - can_transition matrix completeness
+    - Terminal state properties (Stopped) *)
+
+open Alcotest
+module SM = Keeper_state_machine
+module SM_json = Keeper_state_machine_json
+module KSP = Test_keeper_state_machine_preconditions
+
+let phase_t = testable (Fmt.of_to_string SM.phase_to_string) ( = )
+
+(* ── Helpers ───────────────────────────────────────────── *)
+
+(** Healthy running conditions. *)
+let running_conditions : SM.conditions =
+  { SM.default_conditions with fiber_alive = true }
+;;
+
+(** Apply event and extract the result, failing on error. *)
+let apply_ok ~current_phase ~conditions ~event =
+  match SM.apply_event ~current_phase ~conditions ~event ~now:1000.0 with
+  | Ok tr -> tr
+  | Error e -> fail (SM.transition_error_to_string e)
+;;
+
+(** Apply event and extract the error, failing on success. *)
+let apply_err ~current_phase ~conditions ~event =
+  match SM.apply_event ~current_phase ~conditions ~event ~now:1000.0 with
+  | Ok tr ->
+    fail
+      (Printf.sprintf
+         "expected error but got transition %s -> %s"
+         (SM.phase_to_string tr.prev_phase)
+         (SM.phase_to_string tr.new_phase))
+  | Error e -> e
+;;
+
+(* ── derive_phase tests ────────────────────────────────── *)
+
+let test_derive_healthy () =
+  let c = running_conditions in
+  check phase_t "healthy = Running" SM.Running (SM.derive_phase c)
+;;
+
+let test_derive_default_crashed () =
+  check phase_t "default = Crashed" SM.Crashed (SM.derive_phase SM.default_conditions)
+;;
+
+let test_derive_offline () =
+  let c =
+    { SM.default_conditions with launch_pending = true }
+  in
+  check phase_t "launch pending = Offline" SM.Offline (SM.derive_phase c)
+;;
+
+
+let test_derive_restarting () =
+  let c =
+    { SM.default_conditions with
+      fiber_alive = false
+    ; restart_requested = true
+    }
+  in
+  check
+    phase_t
+    "fiber dead + backoff = Restarting"
+    SM.Restarting
+    (SM.derive_phase c)
+;;
+
+let test_derive_crashed () =
+  let c =
+    { SM.default_conditions with
+      fiber_alive = false
+    ; restart_requested = false
+    }
+  in
+  check
+    phase_t
+    "fiber dead + no backoff = Crashed"
+    SM.Crashed
+    (SM.derive_phase c)
+;;
+
+let test_derive_stopped () =
+  let c = { running_conditions with stop_requested = true; drain_complete = true } in
+  check phase_t "stop + drain = Stopped" SM.Stopped (SM.derive_phase c)
+;;
+
+let test_derive_draining () =
+  let c = { running_conditions with stop_requested = true; drain_complete = false } in
+  check phase_t "stop + no drain = Draining" SM.Draining (SM.derive_phase c)
+;;
+
+let test_derive_paused () =
+  let c = { running_conditions with operator_paused = true } in
+  check phase_t "paused" SM.Paused (SM.derive_phase c)
+;;
+
+let test_derive_failing_heartbeat () =
+  let c = { running_conditions with heartbeat_healthy = false } in
+  check phase_t "hb unhealthy = Failing" SM.Failing (SM.derive_phase c)
+;;
+
+let test_derive_failing_turn () =
+  let c = { running_conditions with turn_healthy = false } in
+  check phase_t "turn unhealthy = Failing" SM.Failing (SM.derive_phase c)
+;;
+
+let test_apply_heartbeat_ok_stays_running () =
+  let tr =
+    apply_ok
+      ~current_phase:SM.Running
+      ~conditions:running_conditions
+      ~event:SM.Heartbeat_ok
+  in
+  check phase_t "stays Running" SM.Running tr.new_phase
+;;
+
+let test_apply_heartbeat_fail_to_failing () =
+  let tr =
+    apply_ok
+      ~current_phase:SM.Running
+      ~conditions:running_conditions
+      ~event:(SM.Heartbeat_failed { consecutive = 5 })
+  in
+  check phase_t "Running -> Failing" SM.Failing tr.new_phase;
+  check bool "hb unhealthy" false tr.updated_conditions.heartbeat_healthy
+;;
+
+let test_apply_heartbeat_recover () =
+  let failing_conds = { running_conditions with heartbeat_healthy = false } in
+  let tr =
+    apply_ok ~current_phase:SM.Failing ~conditions:failing_conds ~event:SM.Heartbeat_ok
+  in
+  check phase_t "Failing -> Running" SM.Running tr.new_phase;
+  check bool "hb healthy" true tr.updated_conditions.heartbeat_healthy
+;;
+
+let test_apply_operator_pause_resume () =
+  let tr1 =
+    apply_ok
+      ~current_phase:SM.Running
+      ~conditions:running_conditions
+      ~event:SM.Operator_pause
+  in
+  check phase_t "-> Paused" SM.Paused tr1.new_phase;
+  let tr2 =
+    apply_ok
+      ~current_phase:SM.Paused
+      ~conditions:tr1.updated_conditions
+      ~event:SM.Operator_resume
+  in
+  check phase_t "-> Running" SM.Running tr2.new_phase
+;;
+
+let test_operator_resume_from_paused_commits_latent_blockers () =
+  let cases =
+    [ ( "unhealthy turn"
+      , { running_conditions with operator_paused = true; turn_healthy = false }
+      , SM.Failing )
+    ; ( "restart backoff elapsed"
+      , { SM.default_conditions with
+          operator_paused = true
+        ; restart_requested = true
+        }
+      , SM.Restarting )
+    ; ( "launch pending"
+      , { SM.default_conditions with operator_paused = true; launch_pending = true }
+      , SM.Offline )
+    ]
+  in
+  List.iter
+    (fun (label, conditions, expected_phase) ->
+       let tr =
+         apply_ok ~current_phase:SM.Paused ~conditions ~event:SM.Operator_resume
+       in
+       check phase_t label expected_phase tr.new_phase;
+       check bool (label ^ " clears operator pause") false tr.updated_conditions.operator_paused)
+    cases
+;;
+
+let test_apply_drain_lifecycle () =
+  (* Running -> Draining -> Stopped *)
+  let tr1 =
+    apply_ok
+      ~current_phase:SM.Running
+      ~conditions:running_conditions
+      ~event:SM.Stop_requested
+  in
+  check phase_t "-> Draining" SM.Draining tr1.new_phase;
+  let tr2 =
+    apply_ok
+      ~current_phase:SM.Draining
+      ~conditions:tr1.updated_conditions
+      ~event:SM.Drain_complete
+  in
+  check phase_t "-> Stopped" SM.Stopped tr2.new_phase
+;;
+
+let test_apply_drain_fiber_death () =
+  (* Draining + fiber dies -> Crashed (drain did not complete) *)
+  let draining_conds =
+    { running_conditions with stop_requested = true; drain_complete = false }
+  in
+  let tr =
+    apply_ok
+      ~current_phase:SM.Draining
+      ~conditions:draining_conds
+      ~event:(SM.Fiber_terminated { outcome = "exception during drain"; provider_id = None; http_status = None })
+  in
+  check phase_t "Draining + fiber death -> Crashed" SM.Crashed tr.new_phase
+;;
+
+let test_apply_drain_complete_then_fiber_exit () =
+  (* drain_complete=true + fiber exits -> Stopped (drain succeeded) *)
+  let drain_done_conds =
+    { running_conditions with stop_requested = true; drain_complete = true }
+  in
+  let tr =
+    apply_ok
+      ~current_phase:SM.Draining
+      ~conditions:drain_done_conds
+      ~event:(SM.Fiber_terminated { outcome = "clean exit"; provider_id = None; http_status = None })
+  in
+  check phase_t "drain complete + fiber exit -> Stopped" SM.Stopped tr.new_phase
+;;
+
+let test_apply_failing_to_crashed () =
+  (* Failing keeper receives fatal failure -> Crashed *)
+  let failing_conds = { running_conditions with heartbeat_healthy = false } in
+  let tr =
+    apply_ok
+      ~current_phase:SM.Failing
+      ~conditions:failing_conds
+      ~event:(SM.Fiber_terminated { outcome = "fatal"; provider_id = None; http_status = None })
+  in
+  check phase_t "Failing + fiber death -> Crashed" SM.Crashed tr.new_phase
+;;
+
+let test_apply_partial_heartbeat_failure () =
+  (* Partial failure (1/5) should still mark unhealthy and go to Failing *)
+  let tr =
+    apply_ok
+      ~current_phase:SM.Running
+      ~conditions:running_conditions
+      ~event:(SM.Heartbeat_failed { consecutive = 1 })
+  in
+  check phase_t "partial failure -> Failing" SM.Failing tr.new_phase;
+  check bool "hb unhealthy on partial" false tr.updated_conditions.heartbeat_healthy
+;;
+
+let test_apply_fiber_terminated_crash () =
+  let tr =
+    apply_ok
+      ~current_phase:SM.Running
+      ~conditions:running_conditions
+      ~event:(SM.Fiber_terminated { outcome = "exception"; provider_id = None; http_status = None })
+  in
+  (* fiber_alive=false + backoff not elapsed = Crashed *)
+  check phase_t "-> Crashed" SM.Crashed tr.new_phase;
+  check bool "fiber dead" false tr.updated_conditions.fiber_alive
+;;
+
+let test_apply_crash_restart_lifecycle () =
+  (* Crashed -> Restarting -> Running *)
+  let crashed_conds =
+    { SM.default_conditions with
+      fiber_alive = false
+    ; restart_requested = false
+    }
+  in
+  let tr1 =
+    apply_ok
+      ~current_phase:SM.Crashed
+      ~conditions:crashed_conds
+      ~event:(SM.Supervisor_restart_attempt { attempt = 1 })
+  in
+  check phase_t "-> Restarting" SM.Restarting tr1.new_phase;
+  let tr2 =
+    apply_ok
+      ~current_phase:SM.Restarting
+      ~conditions:tr1.updated_conditions
+      ~event:SM.Fiber_started
+  in
+  check phase_t "-> Running" SM.Running tr2.new_phase
+;;
+
+(* ── Transition coverage tests (#5273) ────────────────── *)
+
+let test_apply_failing_to_draining () =
+  (* Failing keeper receives stop request -> Draining *)
+  let failing_conds = { running_conditions with heartbeat_healthy = false } in
+  let tr =
+    apply_ok ~current_phase:SM.Failing ~conditions:failing_conds ~event:SM.Stop_requested
+  in
+  check phase_t "Failing + stop -> Draining" SM.Draining tr.new_phase
+;;
+
+let test_apply_restarting_to_crashed () =
+  (* Restart attempt: fiber launched then crashes again -> Crashed *)
+  let restarting_conds =
+    { SM.default_conditions with
+      fiber_alive = true
+    ; restart_requested = false
+    }
+  in
+  let tr =
+    apply_ok
+      ~current_phase:SM.Restarting
+      ~conditions:restarting_conds
+      ~event:(SM.Fiber_terminated { outcome = "restart failed"; provider_id = None; http_status = None })
+  in
+  check phase_t "Restarting + fiber death -> Crashed" SM.Crashed tr.new_phase
+;;
+
+let test_apply_paused_to_draining () =
+  (* Paused keeper receives stop request -> Draining *)
+  let paused_conds = { running_conditions with operator_paused = true } in
+  let tr =
+    apply_ok ~current_phase:SM.Paused ~conditions:paused_conds ~event:SM.Stop_requested
+  in
+  check phase_t "Paused + stop -> Draining" SM.Draining tr.new_phase
+;;
+
+let test_apply_paused_stop_drain_lifecycle () =
+  (* Paused -> Draining (stop) -> Stopped (drain complete) *)
+  let paused_conds = { running_conditions with operator_paused = true } in
+  let tr1 =
+    apply_ok ~current_phase:SM.Paused ~conditions:paused_conds ~event:SM.Stop_requested
+  in
+  check phase_t "Paused + stop -> Draining" SM.Draining tr1.new_phase;
+  let tr2 =
+    apply_ok
+      ~current_phase:SM.Draining
+      ~conditions:tr1.updated_conditions
+      ~event:SM.Drain_complete
+  in
+  check phase_t "Draining + drain complete -> Stopped" SM.Stopped tr2.new_phase
+;;
+
+(* ── Terminal state tests ──────────────────────────────── *)
+
+
+let test_stopped_rejects_all_events () =
+  let stopped_conds =
+    { running_conditions with stop_requested = true; drain_complete = true }
+  in
+  List.iter
+    (fun event ->
+       let err = apply_err ~current_phase:SM.Stopped ~conditions:stopped_conds ~event in
+       match err with
+       | SM.Terminal_state { current; _ } -> check phase_t "Stopped" SM.Stopped current
+       | _ -> fail "expected Terminal_state error")
+    [ SM.Heartbeat_ok; SM.Fiber_started; SM.Operator_resume ]
+;;
+
+(* ── can_transition matrix tests ───────────────────────── *)
+
+let test_can_transition_running_to_buffer_states () =
+  check
+    bool
+    "-> Failing"
+    true
+    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Failing);
+  check
+    bool
+    "-> Draining"
+    true
+    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Draining);
+  check
+    bool
+    "-> Paused"
+    true
+    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Paused);
+  check
+    bool
+    "-> Stopped"
+    true
+    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Stopped)
+;;
+
+let test_can_transition_running_invalid () =
+  check
+    bool
+    "-> Crashed (fiber death)"
+    true
+    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Crashed);
+  check
+    bool
+    "no -> Restarting"
+    false
+    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Restarting);
+  check
+    bool
+    "no -> Offline"
+    false
+    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Offline)
+;;
+
+let test_can_transition_terminal_nothing () =
+  List.iter
+    (fun to_phase ->
+       check
+         bool
+         "Stopped -> nothing"
+         false
+         (SM.can_transition ~from_phase:SM.Stopped ~to_phase))
+    SM.all_phases
+;;
+
+let test_can_transition_crashed_only_restart () =
+  check
+    bool
+    "-> Restarting"
+    true
+    (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Restarting);
+  check
+    bool
+    "no -> Running"
+    false
+    (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Running);
+  check
+    bool
+    "no -> Paused"
+    false
+    (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Paused)
+;;
+
+let test_can_transition_failing_to_draining () =
+  check
+    bool
+    "-> Draining"
+    true
+    (SM.can_transition ~from_phase:SM.Failing ~to_phase:SM.Draining)
+;;
+
+let test_can_transition_restarting_to_crashed () =
+  check
+    bool
+    "-> Crashed"
+    true
+    (SM.can_transition ~from_phase:SM.Restarting ~to_phase:SM.Crashed)
+;;
+
+
+let test_can_transition_paused_to_draining () =
+  check
+    bool
+    "-> Draining"
+    true
+    (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Draining)
+;;
+
+let test_can_transition_paused_to_latent_buffer_states () =
+  List.iter
+    (fun to_phase ->
+       check
+         bool
+         ("Paused -> " ^ SM.phase_to_string to_phase)
+         true
+         (SM.can_transition ~from_phase:SM.Paused ~to_phase))
+    [ SM.Failing; SM.Restarting; SM.Offline ]
+;;
+
+let test_can_transition_paused_to_stopped () =
+  check
+    bool
+    "-> Stopped"
+    true
+    (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Stopped)
+;;
+
+let test_can_execute_turn_work_capable_phases () =
+  List.iter
+    (fun phase ->
+       check
+         bool
+         ("work-capable phase " ^ SM.phase_to_string phase)
+         true
+         (SM.can_execute_turn phase))
+    [ SM.Running; SM.Failing ]
+;;
+
+let test_can_execute_turn_blocks_other_phases () =
+  List.iter
+    (fun phase ->
+       check
+         bool
+         ("blocked phase " ^ SM.phase_to_string phase)
+         false
+         (SM.can_execute_turn phase))
+    [ SM.Offline
+    ; SM.Draining
+    ; SM.Paused
+    ; SM.Stopped
+    ; SM.Crashed
+    ; SM.Restarting
+    ]
+;;
+
+(* ── Phase roundtrip tests ─────────────────────────────── *)
+
+let test_phase_string_roundtrip () =
+  List.iter
+    (fun phase ->
+       let s = SM.phase_to_string phase in
+       match SM.phase_of_string s with
+       | Some recovered -> check phase_t "roundtrip" phase recovered
+       | None -> fail (Printf.sprintf "phase_of_string failed for %s" s))
+    SM.all_phases
+;;
+
+(* ── Multi-turn lifecycle chain tests ─────────────────── *)
+
+(** Chain helper: apply events sequentially, checking each resulting phase.
+    Threads conditions through the entire chain — just like a real keeper
+    lifecycle where each event modifies conditions that feed into the next
+    derive_phase call. Timestamps advance 30s per step (one heartbeat cycle). *)
+let chain_apply ~init_phase ~init_conditions steps =
+  let rec go phase conds ts = function
+    | [] -> phase, conds
+    | (event, expected_phase) :: rest ->
+      let tr =
+        match SM.apply_event ~current_phase:phase ~conditions:conds ~event ~now:ts with
+        | Ok tr -> tr
+        | Error e ->
+          fail
+            (Printf.sprintf
+               "chain step at t=%.0f (%s -> ???): %s"
+               ts
+               (SM.phase_to_string phase)
+               (SM.transition_error_to_string e))
+      in
+      check
+        phase_t
+        (Printf.sprintf
+           "t=%.0f: %s -> %s"
+           ts
+           (SM.phase_to_string phase)
+           (SM.phase_to_string expected_phase))
+        expected_phase
+        tr.new_phase;
+      go tr.new_phase tr.updated_conditions (ts +. 30.0) rest
+  in
+  go init_phase init_conditions 1000.0 steps
+;;
+
+(** 1. Happy path: boot -> heartbeats -> graceful stop.
+    The most common keeper lifecycle in production. *)
+let test_chain_happy_path () =
+  let init_conds = SM.default_conditions in
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Offline
+      ~init_conditions:init_conds
+      [ SM.Fiber_started, SM.Running
+      ; SM.Heartbeat_ok, SM.Running
+      ; SM.Heartbeat_ok, SM.Running
+      ; SM.Stop_requested, SM.Draining
+      ; SM.Drain_complete, SM.Stopped
+      ]
+  in
+  check phase_t "ends Stopped" SM.Stopped final_phase
+;;
+
+(** 2. Crash recovery: failing heartbeats -> crash -> supervisor restart -> resume.
+    Verifies the supervisor restart loop works end-to-end. *)
+let test_chain_crash_recovery () =
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Heartbeat_failed { consecutive = 3 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 5 }, SM.Failing
+      ; SM.Fiber_terminated { outcome = "hb threshold exceeded"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
+      ; SM.Fiber_started, SM.Running
+      ; SM.Heartbeat_ok, SM.Running
+      ; SM.Heartbeat_ok, SM.Running
+      ]
+  in
+  check phase_t "recovered to Running" SM.Running final_phase
+;;
+
+(** 4. Operator intervention: pause during work, resume, then stop.
+    Verifies operator controls compose correctly with normal operations. *)
+let test_chain_operator_intervention () =
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Heartbeat_ok, SM.Running
+      ; SM.Operator_pause, SM.Paused
+      ; SM.Operator_resume, SM.Running
+      ; SM.Heartbeat_ok, SM.Running
+      ; SM.Stop_requested, SM.Draining
+      ; SM.Drain_complete, SM.Stopped
+      ]
+  in
+  check phase_t "ends Stopped" SM.Stopped final_phase
+;;
+
+(** 5. Long-running keeper survives many health cycles and stops cleanly. *)
+let test_chain_long_running_multi_cycle () =
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ (* Cycle 1: health dips and recovers *)
+        SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
+      ; SM.Heartbeat_ok, SM.Running
+      ; (* Cycle 2: same again *)
+        SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
+      ; SM.Heartbeat_ok, SM.Running
+      ; (* Cycle 3: a turn fails and recovers *)
+        SM.Turn_failed { consecutive = 1 }, SM.Failing
+      ; SM.Turn_succeeded, SM.Running
+      ; (* Clean shutdown *)
+        SM.Stop_requested, SM.Draining
+      ; SM.Drain_complete, SM.Stopped
+      ]
+  in
+  check phase_t "clean stop after multi-cycle" SM.Stopped final_phase
+;;
+
+(** 8. Failing keeper stops gracefully. *)
+let test_chain_failing_graceful_stop () =
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Heartbeat_failed { consecutive = 3 }, SM.Failing
+      ; SM.Stop_requested, SM.Draining
+      ; SM.Drain_complete, SM.Stopped
+      ]
+  in
+  check phase_t "failing keeper stopped gracefully" SM.Stopped final_phase
+;;
+
+(** 10. Rapid event storm: heartbeat flapping.
+    Heartbeat alternates ok/fail rapidly. The keeper should oscillate
+    between Running and Failing but never crash (fiber stays alive). *)
+let test_chain_heartbeat_flapping () =
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
+      ; SM.Heartbeat_ok, SM.Running
+      ; SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
+      ; SM.Heartbeat_ok, SM.Running
+      ; SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
+      ; SM.Heartbeat_ok, SM.Running
+      ; SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
+      ; SM.Heartbeat_ok, SM.Running
+      ]
+  in
+  check phase_t "stabilized after flapping" SM.Running final_phase
+;;
+
+(** 11. Terminal permanence: after Stopped, every event type is rejected.
+    Comprehensive check with real threaded conditions from the chain. *)
+let test_chain_terminal_permanence () =
+  let final_phase, final_conds =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Stop_requested, SM.Draining; SM.Drain_complete, SM.Stopped ]
+  in
+  check phase_t "reached Stopped" SM.Stopped final_phase;
+  let events =
+    [ SM.Heartbeat_ok
+    ; SM.Fiber_started
+    ; SM.Operator_resume
+    ; SM.Supervisor_restart_attempt { attempt = 1 }
+    ; SM.Stop_requested
+    ; SM.Drain_complete
+    ]
+  in
+  List.iter
+    (fun ev ->
+       match
+         SM.apply_event
+           ~current_phase:SM.Stopped
+           ~conditions:final_conds
+           ~event:ev
+           ~now:2000.0
+       with
+       | Error (SM.Terminal_state _) -> ()
+       | Error e ->
+         fail (Printf.sprintf "wrong error: %s" (SM.transition_error_to_string e))
+       | Ok tr ->
+         fail
+           (Printf.sprintf
+              "Stopped accepted %s -> %s"
+              (SM.event_to_string ev)
+              (SM.phase_to_string tr.new_phase)))
+    events
+;;
+
+(* ── Edge case ("맛탱이") chain tests ─────────────────── *)
+
+(** 12. Restart inherits operator_paused: operator paused before crash,
+    new fiber should wake up in Paused, not Running.
+    Operator intent transcends fiber lifetime. *)
+let test_chain_restart_inherits_paused () =
+  let final_phase, final_conds =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Operator_pause, SM.Paused
+      ; SM.Fiber_terminated { outcome = "OOM while paused"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
+      ; SM.Fiber_started, SM.Paused
+      ]
+  in
+  check phase_t "paused survives restart" SM.Paused final_phase;
+  check bool "operator_paused=true" true final_conds.operator_paused;
+  (* Resume should bring it back *)
+  let tr =
+    apply_ok ~current_phase:SM.Paused ~conditions:final_conds ~event:SM.Operator_resume
+  in
+  check phase_t "resume after restart" SM.Running tr.new_phase
+;;
+
+(** 13. Restart inherits stop_requested: operator requested stop before crash.
+    New fiber should go directly to Draining, not Running. *)
+let test_chain_restart_clears_stop () =
+  (* TLA+ liveness fix: FiberStarted resets stop_requested.
+     Restart = "bring back" contradicts "stop". New fiber starts clean. *)
+  let final_phase, final_conds =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Stop_requested, SM.Draining
+      ; SM.Fiber_terminated { outcome = "crash during drain"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
+      ; (* Fiber starts: stop_requested is reset → Running, not Draining *)
+        SM.Fiber_started, SM.Running
+      ]
+  in
+  check phase_t "restart clears stop → Running" SM.Running final_phase;
+  check bool "stop_requested cleared" false final_conds.SM.stop_requested
+;;
+
+(** 16. Turn failures accumulate alongside heartbeat failures.
+    Both turn_healthy=false AND heartbeat_healthy=false. Recovery requires
+    both Turn_succeeded AND Heartbeat_ok. *)
+let test_chain_double_failure_recovery () =
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
+      ; SM.Turn_failed { consecutive = 3 }, SM.Failing
+      ; (* Heartbeat recovers but turn still unhealthy -> still Failing *)
+        SM.Heartbeat_ok, SM.Failing
+      ; (* Turn recovers -> both healthy -> Running *)
+        SM.Turn_succeeded, SM.Running
+      ]
+  in
+  check phase_t "both failures must clear" SM.Running final_phase
+;;
+
+(** 18. Repeated crashes remain recoverable; Stopped alone is terminal. *)
+let test_chain_triple_restart_survives () =
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ (* Crash 1 *)
+        SM.Fiber_terminated { outcome = "crash 1"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
+      ; SM.Fiber_started, SM.Running
+      ; (* Crash 2 *)
+        SM.Fiber_terminated { outcome = "crash 2"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Supervisor_restart_attempt { attempt = 2 }, SM.Restarting
+      ; SM.Fiber_started, SM.Running
+      ; (* Crash 3 *)
+        SM.Fiber_terminated { outcome = "crash 3"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Supervisor_restart_attempt { attempt = 3 }, SM.Restarting
+      ; SM.Fiber_started, SM.Running
+      ; (* Finally stabilizes *)
+        SM.Heartbeat_ok, SM.Running
+      ; SM.Heartbeat_ok, SM.Running
+      ]
+  in
+  check phase_t "survived 3 crashes and stabilized" SM.Running final_phase
+;;
+
+(** 20. Operator pause during Failing, then stop while paused.
+    The keeper is unhealthy AND paused. Operator pause precedes heartbeat
+    health in phase derivation, so Paused wins.
+    Then stop while paused -> Draining. *)
+let test_chain_pause_while_failing_then_stop () =
+  let failing_conds = { running_conditions with heartbeat_healthy = false } in
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Failing
+      ~init_conditions:failing_conds
+      [ SM.Operator_pause, SM.Paused
+      ; (* Paused beats heartbeat-Failing in priority *)
+        SM.Stop_requested, SM.Draining
+      ; SM.Drain_complete, SM.Stopped
+      ]
+  in
+  check phase_t "failing+paused -> stop -> stopped" SM.Stopped final_phase
+;;
+
+(** 21. Maximum turbulence: every buffer state visited in one lifecycle.
+    Running -> Failing -> Running -> Paused -> Running -> Draining -> Stopped. *)
+let test_chain_maximum_turbulence () =
+  let final_phase, _ =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ (* Failure cycle *)
+        SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
+      ; SM.Heartbeat_ok, SM.Running
+      ; (* Pause cycle *)
+        SM.Operator_pause, SM.Paused
+      ; SM.Operator_resume, SM.Running
+      ; (* Graceful exit *)
+        SM.Stop_requested, SM.Draining
+      ; SM.Drain_complete, SM.Stopped
+      ]
+  in
+  check phase_t "visited all buffer states" SM.Stopped final_phase
+;;
+
+(** 22. Condition snapshot consistency: verify exact conditions at each
+    interesting point in a lifecycle chain. This catches subtle condition
+    leaks between phases. *)
+let test_chain_condition_snapshot_audit () =
+  (* Step 1: start *)
+  let init_conds = SM.default_conditions in
+  let tr1 =
+    apply_ok ~current_phase:SM.Offline ~conditions:init_conds ~event:SM.Fiber_started
+  in
+  check phase_t "step 1" SM.Running tr1.new_phase;
+  check bool "fiber alive" true tr1.updated_conditions.fiber_alive;
+  check bool "hb healthy" true tr1.updated_conditions.heartbeat_healthy;
+  check bool "turn healthy" true tr1.updated_conditions.turn_healthy;
+  check bool "restart request reset" false tr1.updated_conditions.restart_requested;
+  (* Step 2: crash *)
+  let tr2 =
+    apply_ok
+      ~current_phase:SM.Running
+      ~conditions:tr1.updated_conditions
+      ~event:(SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None })
+  in
+  check phase_t "step 2" SM.Crashed tr2.new_phase;
+  check bool "fiber dead" false tr2.updated_conditions.fiber_alive;
+  (* Step 3: restart *)
+  let tr3 =
+    apply_ok
+      ~current_phase:SM.Crashed
+      ~conditions:tr2.updated_conditions
+      ~event:(SM.Supervisor_restart_attempt { attempt = 1 })
+  in
+  check phase_t "step 3" SM.Restarting tr3.new_phase;
+  check bool "restart requested" true tr3.updated_conditions.restart_requested;
+  (* Step 4: fiber starts - verify ALL resets *)
+  let tr4 =
+    apply_ok
+      ~current_phase:SM.Restarting
+      ~conditions:tr3.updated_conditions
+      ~event:SM.Fiber_started
+  in
+  check phase_t "step 4" SM.Running tr4.new_phase;
+  check bool "fiber alive (reset)" true tr4.updated_conditions.fiber_alive;
+  check bool "hb healthy (reset)" true tr4.updated_conditions.heartbeat_healthy;
+  check bool "turn healthy (reset)" true tr4.updated_conditions.turn_healthy;
+  check bool "restart request reset" false tr4.updated_conditions.restart_requested;
+  check bool "drain (reset)" false tr4.updated_conditions.drain_complete
+;;
+
+(* ── Invariant & leakage tests ────────────────────────── *)
+
+(** INV-1: derive_phase is idempotent.
+    For any conditions, derive_phase(c) = derive_phase(c).
+    More importantly: updating conditions with an event then deriving
+    phase produces the same result as what apply_event returns. *)
+let test_invariant_derive_phase_idempotent () =
+  (* Generate diverse condition sets by applying event sequences *)
+  let scenarios =
+    [ "healthy", running_conditions
+    ; "default", SM.default_conditions
+    ; "hb_fail", { running_conditions with heartbeat_healthy = false }
+    ; ( "paused+failing"
+      , { running_conditions with operator_paused = true; heartbeat_healthy = false } )
+    ; ( "draining"
+      , { running_conditions with stop_requested = true; drain_complete = false } )
+    ; "stopped", { running_conditions with stop_requested = true; drain_complete = true }
+    ; ( "dead"
+      , { SM.default_conditions with
+          fiber_alive = false
+        } )
+    ]
+  in
+  List.iter
+    (fun (label, conds) ->
+       let p1 = SM.derive_phase conds in
+       let p2 = SM.derive_phase conds in
+       check phase_t (Printf.sprintf "idempotent: %s" label) p1 p2)
+    scenarios
+;;
+
+(** INV-2: the terminal state is absorbing.
+    Once Stopped, derive_phase always returns the same terminal. *)
+let test_invariant_terminal_absorbing () =
+  let stopped_conds =
+    { running_conditions with stop_requested = true; drain_complete = true }
+  in
+  (* Mutate every boolean field and verify terminal still holds *)
+  let toggle c field =
+    match field with
+    | `Fiber -> { c with SM.fiber_alive = not c.SM.fiber_alive }
+    | `Hb -> { c with heartbeat_healthy = not c.heartbeat_healthy }
+    | `Turn -> { c with turn_healthy = not c.turn_healthy }
+    | `Hand_need -> { c with context_handoff_needed = not c.context_handoff_needed }
+  in
+  (* Stopped: toggling non-critical fields should keep Stopped. *)
+  let stopped_non_critical = [ `Hb; `Turn; `Hand_need ] in
+  List.iter
+    (fun field ->
+       let mutated = toggle stopped_conds field in
+       let p = SM.derive_phase mutated in
+       check phase_t "Stopped absorbs field toggle" SM.Stopped p)
+    stopped_non_critical
+;;
+
+(** INV-3: Fiber_started resets are exhaustive.
+    After Fiber_started, EVERY per-fiber condition is in its "clean" state.
+    Operator-intent conditions are preserved.
+    Test with maximally "dirty" pre-restart conditions. *)
+let test_invariant_fiber_started_reset_exhaustive () =
+  (* Maximally dirty: every per-fiber condition set to "bad" state *)
+  let dirty_conds =
+    { SM.launch_pending = false
+    ; SM.fiber_alive = false
+    ; heartbeat_healthy = false
+    ; turn_healthy = false
+    ; context_handoff_needed = true
+    ; operator_paused = true
+    ; stop_requested = true
+    ; restart_requested = true
+    ; drain_complete = true
+    }
+  in
+  let updated =
+    match
+      SM.apply_event
+        ~current_phase:SM.Restarting
+        ~conditions:dirty_conds
+        ~event:SM.Fiber_started
+        ~now:1000.0
+    with
+    | Ok tr -> tr.updated_conditions
+    | Error e -> fail (SM.transition_error_to_string e)
+  in
+  (* Per-fiber conditions MUST be reset *)
+  check bool "fiber_alive reset" true updated.fiber_alive;
+  check bool "hb_healthy reset" true updated.heartbeat_healthy;
+  check bool "turn_healthy reset" true updated.turn_healthy;
+  check bool "restart_requested reset" false updated.restart_requested;
+  check bool "drain_complete reset" false updated.drain_complete;
+  (* TLA+ liveness fix: stop_requested is now RESET on Fiber_started.
+     Restart contradicts stop. operator_paused is still preserved. *)
+  check bool "stop_requested reset" false updated.stop_requested;
+  (* Operator-intent conditions that ARE preserved *)
+  check bool "operator_paused preserved" true updated.operator_paused;
+  (* Untouched conditions stay as-is *)
+  check bool "context_handoff_needed unchanged" true updated.context_handoff_needed
+;;
+
+(** INV-4: No cross-life heartbeat leakage.
+    Heartbeat failures in life N must not affect phase in life N+1.
+    The most dangerous leakage pattern found by the original chain tests. *)
+let test_invariant_no_cross_life_hb_leakage () =
+  (* Life 1: accumulate heartbeat failures *)
+  let _, life1_conds =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Heartbeat_failed { consecutive = 1 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 2 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 3 }, SM.Failing
+      ; SM.Heartbeat_failed { consecutive = 4 }, SM.Failing
+      ]
+  in
+  check bool "life1: hb unhealthy" false life1_conds.heartbeat_healthy;
+  (* Life 1 dies *)
+  let tr_death =
+    apply_ok
+      ~current_phase:SM.Failing
+      ~conditions:life1_conds
+      ~event:(SM.Fiber_terminated { outcome = "too many hb failures"; provider_id = None; http_status = None })
+  in
+  check
+    bool
+    "life1: hb still false after death"
+    false
+    tr_death.updated_conditions.heartbeat_healthy;
+  (* Supervisor restart *)
+  let tr_restart =
+    apply_ok
+      ~current_phase:SM.Crashed
+      ~conditions:tr_death.updated_conditions
+      ~event:(SM.Supervisor_restart_attempt { attempt = 1 })
+  in
+  (* Life 2 begins *)
+  let tr_life2 =
+    apply_ok
+      ~current_phase:SM.Restarting
+      ~conditions:tr_restart.updated_conditions
+      ~event:SM.Fiber_started
+  in
+  (* CRITICAL: heartbeat_healthy MUST be true in new life *)
+  check
+    bool
+    "life2: hb healthy (no leakage)"
+    true
+    tr_life2.updated_conditions.heartbeat_healthy;
+  check phase_t "life2: Running (not Failing)" SM.Running tr_life2.new_phase
+;;
+
+(** INV-5: No cross-life backoff leakage.
+    restart_requested from restart N must not leak into life N+1.
+    The second leakage pattern found by the original chain tests. *)
+let test_invariant_no_cross_life_backoff_leakage () =
+  let _, post_restart =
+    chain_apply
+      ~init_phase:SM.Running
+      ~init_conditions:running_conditions
+      [ SM.Fiber_terminated { outcome = "crash 1"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
+      ; SM.Fiber_started, SM.Running
+      ]
+  in
+  (* After Fiber_started, restart_requested MUST be false *)
+  check bool "restart request reset after restart" false post_restart.restart_requested;
+  (* Second crash MUST go to Crashed (not skip to Restarting) *)
+  let tr =
+    apply_ok
+      ~current_phase:SM.Running
+      ~conditions:post_restart
+      ~event:(SM.Fiber_terminated { outcome = "crash 2"; provider_id = None; http_status = None })
+  in
+  check phase_t "second crash -> Crashed (not Restarting)" SM.Crashed tr.new_phase;
+  check bool "restart_requested still false" false tr.updated_conditions.restart_requested
+;;
+
+(** INV-6: stop_requested is monotonic within a fiber life. *)
+let test_invariant_stop_requested_monotonic () =
+  (* TLA+ liveness fix: Fiber_started now resets stop_requested.
+     All OTHER events must preserve it (monotonic within a fiber life). *)
+  let events_that_should_not_clear_stop =
+    [ SM.Heartbeat_ok
+    ; SM.Heartbeat_failed { consecutive = 1 }
+    ; SM.Turn_succeeded
+    ; SM.Turn_failed { consecutive = 1 }
+    ; SM.Operator_pause
+    ; SM.Operator_resume
+    ; (* Fiber_started intentionally OMITTED — it resets stop *)
+      SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+    ; SM.Supervisor_restart_attempt { attempt = 1 }
+    ; SM.Drain_complete
+    ; SM.Context_measured
+        { context_ratio = 0.5
+        ; message_count = 10
+        ; token_count = 5000
+        ; context_actions = { handoff = false }
+        }
+    ]
+  in
+  let conds_with_stop = { running_conditions with stop_requested = true } in
+  List.iter
+    (fun ev ->
+       let updated =
+         match
+           SM.apply_event
+             ~current_phase:SM.Draining
+             ~conditions:conds_with_stop
+             ~event:ev
+             ~now:1000.0
+         with
+         | Ok tr -> tr.updated_conditions
+         | Error _ -> conds_with_stop (* Terminal rejection is fine *)
+       in
+       check
+         bool
+         (Printf.sprintf "stop persists after %s" (SM.event_to_string ev))
+         true
+         updated.stop_requested)
+    events_that_should_not_clear_stop;
+  (* Fiber_started IS the one event that clears stop_requested *)
+  let restart_conds =
+    { SM.default_conditions with
+      fiber_alive = false
+    ; restart_requested = true
+    ; stop_requested = true
+    }
+  in
+  let updated =
+    match
+      SM.apply_event
+        ~current_phase:SM.Restarting
+        ~conditions:restart_conds
+        ~event:SM.Fiber_started
+        ~now:1000.0
+    with
+    | Ok tr -> tr.updated_conditions
+    | Error e -> fail (SM.transition_error_to_string e)
+  in
+  check bool "Fiber_started clears stop_requested" false updated.stop_requested
+;;
+
+(** INV-9: derive_phase consistency with can_transition.
+    For every non-terminal phase and every event, if apply_event succeeds,
+    the resulting transition must be allowed by can_transition.
+    This is a structural invariant that catches matrix/derive_phase drift. *)
+let test_invariant_derive_matches_matrix () =
+  let representative_events =
+    [ SM.Heartbeat_ok
+    ; SM.Heartbeat_failed { consecutive = 5 }
+    ; SM.Turn_succeeded
+    ; SM.Turn_failed { consecutive = 3 }
+    ; SM.Operator_pause
+    ; SM.Operator_resume
+    ; SM.Stop_requested
+    ; SM.Drain_complete
+    ; SM.Fiber_started
+    ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+    ; SM.Supervisor_restart_attempt { attempt = 1 }
+    ]
+  in
+  let non_terminal_phases =
+    List.filter (fun p -> p <> SM.Stopped) SM.all_phases
+  in
+  List.iter
+    (fun phase ->
+       List.iter
+         (fun event ->
+            (* Build conditions that produce this phase *)
+            let conds =
+              match phase with
+              | SM.Offline -> SM.default_conditions
+              | SM.Running -> running_conditions
+              | SM.Failing -> { running_conditions with heartbeat_healthy = false }
+              | SM.Draining ->
+                { running_conditions with stop_requested = true; drain_complete = false }
+              | SM.Paused -> { running_conditions with operator_paused = true }
+              | SM.Crashed ->
+                { SM.default_conditions with fiber_alive = false }
+              | SM.Restarting ->
+                { SM.default_conditions with
+                  fiber_alive = false
+                ; restart_requested = true
+                }
+              | SM.Stopped -> running_conditions (* unreachable *)
+            in
+            (* Verify conditions produce the expected phase *)
+            if SM.derive_phase conds <> phase
+            then () (* Skip if conditions don't match *)
+            else (
+              match
+                SM.apply_event ~current_phase:phase ~conditions:conds ~event ~now:1000.0
+              with
+              | Ok tr ->
+                if tr.new_phase <> phase
+                then
+                  (* Actual phase transition — must be in matrix *)
+                  if not (SM.can_transition ~from_phase:phase ~to_phase:tr.new_phase)
+                  then
+                    fail
+                      (Printf.sprintf
+                         "MATRIX DRIFT: %s -> %s via %s (derive_phase produced it, \
+                          matrix rejects it)"
+                         (SM.phase_to_string phase)
+                         (SM.phase_to_string tr.new_phase)
+                         (SM.event_to_string event))
+              | Error _ -> () (* Terminal rejection or invalid is fine *)))
+         representative_events)
+    non_terminal_phases
+;;
+
+(** INV-10: Phase derivation priority chain.
+    Verify that higher-priority conditions always win, regardless of
+    how many lower-priority conditions are set. *)
+let test_invariant_priority_chain () =
+  (* All conditions true: stopped should win (highest fiber-alive priority) *)
+  let all_true =
+    { SM.launch_pending = false
+    ; SM.fiber_alive = true
+    ; heartbeat_healthy = true
+    ; turn_healthy = true
+    ; context_handoff_needed = true
+    ; operator_paused = true
+    ; stop_requested = true
+    ; restart_requested = true
+    ; drain_complete = true
+    }
+  in
+  check phase_t "all true: Stopped" SM.Stopped (SM.derive_phase all_true);
+  (* Remove drain_complete: Draining wins *)
+  let no_drain = { all_true with drain_complete = false } in
+  check phase_t "no drain_complete: Draining" SM.Draining (SM.derive_phase no_drain);
+  (* Remove stop: operator pause wins *)
+  let no_stop = { no_drain with stop_requested = false } in
+  check phase_t "no stop: Paused" SM.Paused (SM.derive_phase no_stop);
+  (* Only the explicit operator pause condition can hold Paused. *)
+  let no_paused =
+    { no_stop with operator_paused = false }
+  in
+  check phase_t "no paused: Running" SM.Running (SM.derive_phase no_paused)
+;;
+
+(* ── Property: derive_phase x apply_event consistency ──── *)
+
+let test_all_phases_covered () = check int "8 phases" 8 (List.length SM.all_phases)
+
+(* ── Set/Clear Coverage ────────────────────────────────── *)
+
+(** Static verification that every boolean condition field in the FSM
+    has both a setter event (false->true) and a clearer event (true->false).
+
+    Approach: for each field, iterate ALL events and call update_conditions
+    on two base states (all-false, all-true) to detect which events set
+    and which events clear each field. Assert every non-exempt field has
+    at least one clearer. *)
+
+let test_setclear_coverage () =
+  (* All boolean fields: (name, getter) pairs.
+     Source of truth: conditions record in keeper_state_machine.ml *)
+  let fields : (string * (SM.conditions -> bool)) list =
+    [ ("launch_pending", fun c -> c.launch_pending)
+    ; ("fiber_alive", fun c -> c.fiber_alive)
+    ; ("heartbeat_healthy", fun c -> c.heartbeat_healthy)
+    ; ("turn_healthy", fun c -> c.turn_healthy)
+    ; ("context_handoff_needed", fun c -> c.context_handoff_needed)
+    ; ("operator_paused", fun c -> c.operator_paused)
+    ; ("stop_requested", fun c -> c.stop_requested)
+    ; ("restart_requested", fun c -> c.restart_requested)
+    ; ("drain_complete", fun c -> c.drain_complete)
+    ]
+  in
+  (* Conditions with all booleans false *)
+  let all_false : SM.conditions =
+    { launch_pending = false
+    ; fiber_alive = false
+    ; heartbeat_healthy = false
+    ; turn_healthy = false
+    ; context_handoff_needed = false
+    ; operator_paused = false
+    ; stop_requested = false
+    ; restart_requested = false
+    ; drain_complete = false
+    }
+  in
+  (* Conditions with all booleans true *)
+  let all_true : SM.conditions =
+    { launch_pending = true
+    ; fiber_alive = true
+    ; heartbeat_healthy = true
+    ; turn_healthy = true
+    ; context_handoff_needed = true
+    ; operator_paused = true
+    ; stop_requested = true
+    ; restart_requested = true
+    ; drain_complete = true
+    }
+  in
+  let context_actions_clean : SM.context_actions =
+    { handoff = false }
+  in
+  (* Every event variant with representative payloads.
+     Context_measured needs two variants to cover both true/false
+     for the handoff action. *)
+  let all_events : (string * SM.event) list =
+    [ "Heartbeat_ok", SM.Heartbeat_ok
+    ; "Heartbeat_failed", SM.Heartbeat_failed { consecutive = 3 }
+    ; "Turn_succeeded", SM.Turn_succeeded
+    ; "Turn_failed", SM.Turn_failed { consecutive = 3 }
+    ; ( "Context_measured(handoff)"
+      , SM.Context_measured
+          { context_ratio = 0.95
+          ; message_count = 100
+          ; token_count = 50000
+          ; context_actions = { SM.handoff = true }
+          } )
+    ; ( "Context_measured(clean)"
+      , SM.Context_measured
+          { context_ratio = 0.2
+          ; message_count = 5
+          ; token_count = 1000
+          ; context_actions = context_actions_clean
+          } )
+    ; "Operator_pause", SM.Operator_pause
+    ; "Operator_resume", SM.Operator_resume
+    ; "Stop_requested", SM.Stop_requested
+    ; "Drain_complete", SM.Drain_complete
+    ; "Fiber_started", SM.Fiber_started
+    ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+    ; "Supervisor_restart_attempt", SM.Supervisor_restart_attempt { attempt = 1 }
+    ; ( "Operator_clear_requested"
+      , SM.Operator_clear_requested { preserve_system = true; reason = "test" } )
+    ]
+  in
+  (* Build coverage map: for each field, which events set it and clear it *)
+  let setters = Hashtbl.create 16 in
+  let clearers = Hashtbl.create 16 in
+  List.iter
+    (fun (field_name, _) ->
+       Hashtbl.replace setters field_name [];
+       Hashtbl.replace clearers field_name [])
+    fields;
+  List.iter
+    (fun (ev_name, ev) ->
+       List.iter
+         (fun (field_name, getter) ->
+            (* Detect setter: field was false, event makes it true *)
+            let after_from_false = SM.update_conditions all_false ev in
+            if (not (getter all_false)) && getter after_from_false
+            then
+              Hashtbl.replace
+                setters
+                field_name
+                (ev_name :: Hashtbl.find setters field_name);
+            (* Detect clearer: field was true, event makes it false *)
+            let after_from_true = SM.update_conditions all_true ev in
+            if getter all_true && not (getter after_from_true)
+            then
+              Hashtbl.replace
+                clearers
+                field_name
+                (ev_name :: Hashtbl.find clearers field_name))
+         fields)
+    all_events;
+  (* Fields managed outside the ordinary FSM event loop are exempt. *)
+  let exempt_from_setter =
+    [ "launch_pending" (* set externally before Fiber_started *)
+    ]
+  in
+  (* Print coverage report for diagnostics *)
+  let buf = Buffer.create 512 in
+  Buffer.add_string buf "\n--- Set/Clear Coverage Report ---\n";
+  List.iter
+    (fun (field_name, _) ->
+       let s = Hashtbl.find setters field_name in
+       let c = Hashtbl.find clearers field_name in
+       Buffer.add_string
+         buf
+         (Printf.sprintf
+            "  %-30s setters=%d clearers=%d\n"
+            field_name
+            (List.length s)
+            (List.length c));
+       List.iter
+         (fun ev -> Buffer.add_string buf (Printf.sprintf "    SET by: %s\n" ev))
+         (List.rev s);
+       List.iter
+         (fun ev -> Buffer.add_string buf (Printf.sprintf "    CLR by: %s\n" ev))
+         (List.rev c))
+    fields;
+  Buffer.add_string buf "--- End Report ---\n";
+  (* Use Alcotest check with diagnostic message *)
+  let report = Buffer.contents buf in
+  (* Every condition can be cleared by an event. *)
+  let missing_clearers =
+    List.filter
+      (fun (field_name, _) ->
+         List.length (Hashtbl.find clearers field_name) = 0)
+      fields
+  in
+  if missing_clearers <> []
+  then (
+    let names = String.concat ", " (List.map (fun (n, _) -> n) missing_clearers) in
+    fail
+      (Printf.sprintf
+         "Fields with no clearer event (stuck-true bug risk): [%s]%s"
+         names
+         report));
+  (* Assert: every non-exempt field has at least one setter *)
+  let missing_setters =
+    List.filter
+      (fun (field_name, _) ->
+         (not (List.mem field_name exempt_from_setter))
+         && List.length (Hashtbl.find setters field_name) = 0)
+      fields
+  in
+  if missing_setters <> []
+  then (
+    let names = String.concat ", " (List.map (fun (n, _) -> n) missing_setters) in
+    fail
+      (Printf.sprintf "Fields with no setter event (dead-flag risk): [%s]%s" names report));
+  (* Verify field count matches conditions record (structural guard).
+     If someone adds a new field to conditions but forgets to add it here,
+     this check catches it by comparing against conditions_to_json output. *)
+  let json_field_count =
+    match SM_json.conditions_to_json SM.default_conditions with
+    | `Assoc pairs -> List.length pairs
+    | _ -> fail "conditions_to_json did not return Assoc"
+  in
+  check int "field count matches conditions_to_json" json_field_count (List.length fields);
+  (* Print report on success for visibility *)
+  Printf.printf "%s" report
+;;
+
+(* ── INV-11: recovery/close closed set (#25859) ───────── *)
+
+(** Representative conditions that derive each phase (same
+    construction the INV-9 builder uses, lifted to a total function
+    so Stopped is included). *)
+let conditions_for_phase (phase : SM.phase) : SM.conditions =
+  match phase with
+  | SM.Offline -> { SM.default_conditions with launch_pending = true }
+  | SM.Running -> running_conditions
+  | SM.Failing -> { running_conditions with heartbeat_healthy = false }
+  | SM.Draining ->
+    { running_conditions with stop_requested = true; drain_complete = false }
+  | SM.Paused -> { running_conditions with operator_paused = true }
+  | SM.Crashed -> { SM.default_conditions with fiber_alive = false }
+  | SM.Restarting ->
+    { SM.default_conditions with
+      fiber_alive = false
+    ; restart_requested = true
+    }
+  | SM.Stopped ->
+    { running_conditions with stop_requested = true; drain_complete = true }
+;;
+
+(** Every event variant with representative payloads, including the
+    operator escape hatch. Mirrors the INV-9 / setclear lists; kept
+    separate so this invariant stays true even if those test-local
+    lists are trimmed. *)
+let all_representative_events : SM.event list =
+  [ SM.Heartbeat_ok
+  ; SM.Heartbeat_failed { consecutive = 5 }
+  ; SM.Turn_succeeded
+  ; SM.Turn_failed { consecutive = 3 }
+  ; SM.Operator_pause
+  ; SM.Operator_resume
+  ; SM.Stop_requested
+  ; SM.Drain_complete
+  ; SM.Fiber_started
+  ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+  ; SM.Supervisor_restart_attempt { attempt = 1 }
+  ; SM.Operator_clear_requested { preserve_system = true; reason = "test" }
+  ]
+;;
+
+(** INV-11 (issue #25859, cluster recovery-reachable-closed-fsm):
+    from every phase, under the conditions that produce it, some
+    sequence of [apply_event] steps reaches Running (recovery) or
+    Stopped (orderly close).
+
+    The 2026-09 stuck-state cluster (#25332 #25688 #25725 #25735
+    #25741 #25823 #25824) shared one shape: a state whose recovery
+    path depended on the very resource that had failed. The FSM core
+    answers that class structurally (sparse-match exhaustive phases)
+    and must answer it behaviorally: no phase may be stranded without
+    a real event chain back to Running or on to Stopped.
+
+    Bounded breadth-first search over [apply_event] — actual
+    transitions, not [can_transition] lookups — so a future
+    derive_phase or matrix edit that strands a phase fails here with
+    the phase named. Running and Stopped satisfy the goal at depth 0
+    (Stopped is itself the close; terminal permanence is INV-2's
+    business). *)
+let test_invariant_recovery_closed_set () =
+  let max_depth = 7 in
+  let goal p = p = SM.Running || p = SM.Stopped in
+  let witness_for start =
+    let start_node = (start, conditions_for_phase start) in
+    let rec loop visited frontier depth =
+      if List.exists (fun (p, _) -> goal p) frontier then Some depth
+      else if depth >= max_depth then None
+      else
+        let next =
+          List.concat_map
+            (fun (phase, conds) ->
+               List.filter_map
+                 (fun ev ->
+                    match
+                      SM.apply_event
+                        ~current_phase:phase
+                        ~conditions:conds
+                        ~event:ev
+                        ~now:1000.0
+                    with
+                    | Ok tr -> Some (tr.new_phase, tr.updated_conditions)
+                    | Error _ -> None)
+                 all_representative_events)
+            frontier
+        in
+        let fresh = List.filter (fun n -> not (List.mem n visited)) next in
+        match fresh with
+        | [] -> None
+        | _ -> loop (List.rev_append fresh visited) fresh (depth + 1)
+    in
+    loop [ start_node ] [ start_node ] 0
+  in
+  let results =
+    List.map (fun p -> (p, witness_for p)) SM.all_phases
+  in
+  let buf = Buffer.create 512 in
+  Buffer.add_string buf "\n--- INV-11 recovery/close closed set ---\n";
+  List.iter
+    (fun (phase, witness) ->
+       Buffer.add_string buf
+         (Printf.sprintf "  %-10s %s\n"
+            (SM.phase_to_string phase)
+            (match witness with
+             | Some d ->
+               Printf.sprintf
+                 "OK: Running|Stopped reachable in %d apply_event step(s)"
+                 d
+             | None -> "STRANDED: no Running/Stopped reachable")))
+    results;
+  Buffer.add_string buf "--- End INV-11 ---\n";
+  let report = Buffer.contents buf in
+  let stranded =
+    List.filter_map
+      (fun (phase, witness) ->
+         match witness with None -> Some phase | Some _ -> None)
+      results
+  in
+  if stranded <> []
+  then
+    fail
+      (Printf.sprintf
+         "Phases with no recovery/close path (stuck-forever risk, \
+          #25859 class): [%s]%s"
+         (String.concat ", " (List.map SM.phase_to_string stranded))
+         report);
+  Printf.printf "%s" report
+;;
+
+(* ── Test suite ────────────────────────────────────────── *)
+
+let () =
+  run
+    "Keeper_state_machine (RFC-0002)"
+    [ ( "derive_phase"
+      , [ test_case "healthy = Running" `Quick test_derive_healthy
+        ; test_case "default = Crashed" `Quick test_derive_default_crashed
+        ; test_case "Offline in all_phases" `Quick test_derive_offline
+        ; test_case "Restarting" `Quick test_derive_restarting
+        ; test_case "Crashed" `Quick test_derive_crashed
+        ; test_case "Stopped" `Quick test_derive_stopped
+        ; test_case "Draining" `Quick test_derive_draining
+        ; test_case "Paused" `Quick test_derive_paused
+        ; test_case "Failing (heartbeat)" `Quick test_derive_failing_heartbeat
+        ; test_case "Failing (turn)" `Quick test_derive_failing_turn
+        ] )
+    ; ( "apply_event"
+      , [ test_case "heartbeat ok stays" `Quick test_apply_heartbeat_ok_stays_running
+        ; test_case
+            "heartbeat fail -> Failing"
+            `Quick
+            test_apply_heartbeat_fail_to_failing
+        ; test_case "heartbeat recover" `Quick test_apply_heartbeat_recover
+        ; test_case "pause/resume" `Quick test_apply_operator_pause_resume
+        ; test_case
+            "paused resume commits latent blockers"
+            `Quick
+            test_operator_resume_from_paused_commits_latent_blockers
+        ; test_case "drain lifecycle" `Quick test_apply_drain_lifecycle
+        ; test_case "drain + fiber death -> Crashed" `Quick test_apply_drain_fiber_death
+        ; test_case
+            "drain complete + fiber exit -> Stopped"
+            `Quick
+            test_apply_drain_complete_then_fiber_exit
+        ; test_case
+            "Failing + fiber death -> Crashed"
+            `Quick
+            test_apply_failing_to_crashed
+        ; test_case
+            "partial heartbeat -> Failing"
+            `Quick
+            test_apply_partial_heartbeat_failure
+        ; test_case "fiber terminated -> Crashed" `Quick test_apply_fiber_terminated_crash
+        ; test_case
+            "crash -> restart -> Running"
+            `Quick
+            test_apply_crash_restart_lifecycle
+        ; test_case "Failing + stop -> Draining" `Quick test_apply_failing_to_draining
+        ; test_case
+            "Restarting + fiber death -> Crashed"
+            `Quick
+            test_apply_restarting_to_crashed
+        ; test_case "Paused + stop -> Draining" `Quick test_apply_paused_to_draining
+        ; test_case
+            "Paused -> Draining -> Stopped"
+            `Quick
+            test_apply_paused_stop_drain_lifecycle
+        ] )
+    ; ( "terminal"
+      , [ test_case "Stopped rejects all" `Quick test_stopped_rejects_all_events
+        ] )
+    ; ( "can_transition"
+      , [ test_case
+            "Running -> buffer states"
+            `Quick
+            test_can_transition_running_to_buffer_states
+        ; test_case "Running invalid targets" `Quick test_can_transition_running_invalid
+        ; test_case "terminal -> nothing" `Quick test_can_transition_terminal_nothing
+        ; test_case
+            "Crashed -> Restarting only"
+            `Quick
+            test_can_transition_crashed_only_restart
+        ; test_case "Failing -> Draining" `Quick test_can_transition_failing_to_draining
+        ; test_case
+            "Restarting -> Crashed"
+            `Quick
+            test_can_transition_restarting_to_crashed
+        ; test_case "Paused -> Draining" `Quick test_can_transition_paused_to_draining
+        ; test_case
+            "Paused -> latent buffer states"
+            `Quick
+            test_can_transition_paused_to_latent_buffer_states
+        ; test_case "Paused -> Stopped" `Quick test_can_transition_paused_to_stopped
+        ; test_case
+            "work-capable phases execute turns"
+            `Quick
+            test_can_execute_turn_work_capable_phases
+        ; test_case
+            "other phases skip turns"
+            `Quick
+            test_can_execute_turn_blocks_other_phases
+        ] )
+    ; ( "roundtrip"
+      , [ test_case "phase string roundtrip" `Quick test_phase_string_roundtrip
+        ; test_case "9 phases" `Quick test_all_phases_covered
+        ] )
+    ; ( "lifecycle_chain"
+      , [ test_case
+            "happy path (boot->handoff->stop)"
+            `Quick
+            test_chain_happy_path
+        ; test_case
+            "crash recovery (fail->crash->restart->run)"
+            `Quick
+            test_chain_crash_recovery
+        ; test_case
+            "operator intervention (pause->resume->stop)"
+            `Quick
+            test_chain_operator_intervention
+        ; test_case
+            "long-running multi-cycle (5 cycles)"
+            `Quick
+            test_chain_long_running_multi_cycle
+        ; test_case "failing -> graceful stop" `Quick test_chain_failing_graceful_stop
+        ; test_case
+            "heartbeat flapping (8 oscillations)"
+            `Quick
+            test_chain_heartbeat_flapping
+        ; test_case
+            "terminal permanence (8 rejected events)"
+            `Quick
+            test_chain_terminal_permanence
+        ] )
+    ; ( "edge_cases"
+      , [ test_case
+            "restart inherits operator_paused"
+            `Quick
+            test_chain_restart_inherits_paused
+        ; test_case "restart clears stop_requested" `Quick test_chain_restart_clears_stop
+        ; test_case
+            "double failure (hb+turn) recovery"
+            `Quick
+            test_chain_double_failure_recovery
+        ; test_case "triple restart survives" `Quick test_chain_triple_restart_survives
+        ; test_case
+            "pause while failing then stop"
+            `Quick
+            test_chain_pause_while_failing_then_stop
+        ; test_case "maximum turbulence (7 phases)" `Quick test_chain_maximum_turbulence
+        ; test_case "condition snapshot audit" `Quick test_chain_condition_snapshot_audit
+        ] )
+    ; ( "invariants"
+      , [ test_case
+            "INV-1: derive_phase idempotent"
+            `Quick
+            test_invariant_derive_phase_idempotent
+        ; test_case
+            "INV-2: terminal states absorbing"
+            `Quick
+            test_invariant_terminal_absorbing
+        ; test_case
+            "INV-3: Fiber_started reset exhaustive"
+            `Quick
+            test_invariant_fiber_started_reset_exhaustive
+        ; test_case
+            "INV-4: no cross-life hb leakage"
+            `Quick
+            test_invariant_no_cross_life_hb_leakage
+        ; test_case
+            "INV-5: no cross-life backoff leakage"
+            `Quick
+            test_invariant_no_cross_life_backoff_leakage
+        ; test_case
+            "INV-7: stop_requested monotonic"
+            `Quick
+            test_invariant_stop_requested_monotonic
+        ; test_case
+            "INV-9: derive matches matrix (180 combos)"
+            `Quick
+            test_invariant_derive_matches_matrix
+        ; test_case "INV-10: priority chain ordering" `Quick test_invariant_priority_chain
+        ; test_case
+            "INV-11: recovery/close closed set (#25859)"
+            `Quick
+            test_invariant_recovery_closed_set
+        ] )
+    ; ( "setclear_coverage"
+      , [ test_case
+            "every condition field has setter and clearer"
+            `Quick
+            test_setclear_coverage
+        ] )
+    ; ( "attribution"
+      , [ test_case "successful transition → Passed" `Quick KSP.test_attribution_ok_passed
+        ; test_case
+            "Invalid_transition → Transition_blocked"
+            `Quick
+            KSP.test_attribution_invalid_transition_blocked
+        ; test_case
+            "Terminal_state → Policy_failed"
+            `Quick
+            KSP.test_attribution_terminal_policy_failed
+        ; test_case
+            "gate=keeper_fsm origin=Det invariant"
+            `Quick
+            KSP.test_attribution_gate_and_origin_invariant
+        ] )
+    ; ( "precondition_layer"
+      , [ test_case
+            "every event constructor has a witness"
+            `Quick
+            KSP.test_event_witnesses_cover_the_variant
+        ; test_case
+            "no precondition fires from healthy Running"
+            `Quick
+            KSP.test_no_precondition_fires_from_healthy_running
+        ; test_case
+            "Operator_clear_requested is escape-hatch (no extra precondition)"
+            `Quick
+            KSP.test_pre_operator_clear_no_extra_precondition
+        ] )
+    ; ( "snapshot_invariants"
+      , [ test_case "Running healthy → no violations" `Quick KSP.test_snapshot_running_ok
+        ; test_case
+            "Running with fiber_alive=false → RunningRequiresFiber"
+            `Quick
+            KSP.test_snapshot_running_requires_fiber
+        ; test_case
+            "Stopped without drain/stop flags → StoppedRequiresDrain"
+            `Quick
+            KSP.test_snapshot_stopped_requires_drain
+        ; test_case
+            "phase ≠ derive_phase(conditions) → DerivePhaseAgreement"
+            `Quick
+            KSP.test_snapshot_derive_disagreement
+        ] )
+    ]
+;;

@@ -1,0 +1,667 @@
+(** See .mli for contract.
+
+    The current Docker invocation mirrors the hardened-Execute sandbox in
+    [keeper_tool_command_runtime.ml] (read-only rootfs, no caps, no network) with the
+    playground mounted read-only and the default read program reduced to a
+    single [cat]. The argv assembly is duplicated rather than shared so a
+    future surgical change to either path does not need to wade through the
+    other's flags. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
+
+let host_playground_root ~config ~(meta : keeper_meta) =
+  Keeper_sandbox.host_root_abs_of_meta ~config meta
+  |> Keeper_alerting_path.normalize_path_for_check
+  |> strip_trailing_slashes
+
+let container_root ~(meta : keeper_meta) =
+  Keeper_sandbox.container_root meta.name
+
+let container_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(meta : keeper_meta) ~host_path
+    : (string, string) result =
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Endpoint_owned ->
+    let open Result.Syntax in
+    let* remote_workspace_root =
+      (match read_authority with
+       | None -> Keeper_sandbox_remote_lane.workspace_root ~config ~meta
+       | Some authority -> Keeper_sandbox_remote_lane.with_read_authority_endpoint authority ~config ~meta
+           (fun endpoint -> Ok (Keeper_sandbox_remote.workspace_root endpoint)))
+    in
+    (match
+       Keeper_remote_path.host_to_remote ~base_path:config.base_path
+         ~remote_workspace_root ~keeper:meta.name host_path
+     with
+     | Ok _ as in_keeper_tree -> in_keeper_tree
+     | Error refusal ->
+       (* Only what the keeper's own tree refused may be a path under the
+          endpoint's declared roots (#38593): the endpoint's own name, read as
+          itself. A name in the tree always translates, however a declared
+          root is spelled. *)
+       let* declared =
+         (match read_authority with
+          | None -> Keeper_sandbox_remote_lane.declared_endpoint_path ~config ~meta host_path
+          | Some authority -> Ok (Keeper_sandbox_remote_lane.read_authority_declared_path authority host_path))
+       in
+       (match declared with
+        | Some endpoint_path -> Ok endpoint_path
+        | None -> Error refusal))
+  | Shared_mount ->
+    let host_root = host_playground_root ~config ~meta in
+    let host_norm =
+      Keeper_alerting_path.normalize_path_for_check host_path
+      |> strip_trailing_slashes
+    in
+    let croot = container_root ~meta in
+    if host_norm = host_root then Ok croot
+    else if String.starts_with ~prefix:(host_root ^ "/") host_norm then
+      let suffix =
+        String.sub host_norm
+          (String.length host_root + 1)
+          (String.length host_norm - String.length host_root - 1)
+      in
+      Ok (Filename.concat croot suffix)
+    else
+      Error
+        (Printf.sprintf
+           "container_path_of_host: %s is not inside playground %s"
+           host_norm host_root)
+
+let container_path_of_host ~config ~meta ~host_path =
+  container_path_of_host_impl ~read_authority:None ~config ~meta ~host_path
+
+let container_path_of_host_with_authority ~read_authority ~config ~meta ~host_path =
+  container_path_of_host_impl ~read_authority:(Some read_authority) ~config ~meta ~host_path
+
+(* Argv prefix kept private — distinct from keeper_tool_command_runtime's bash
+   argv to avoid coupling the two surfaces. The trailing
+   [program ; arg1 ; ... ] is appended by the caller via
+   [build_docker_argv ~command_argv]. *)
+let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
+    ~uid ~gid ~seccomp_args ~secret_args ~command_argv =
+  Keeper_sandbox_runtime.docker_command_argv ()
+  @ [
+      "run";
+      "--rm";
+      "--name";
+      container_name;
+      "-i";
+      "--user";
+      Printf.sprintf "%d:%d" uid gid;
+    ]
+  @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
+  @ Keeper_sandbox_runtime.docker_sandbox_env_args
+      ~base_path
+      ~container_root:croot
+  @ Keeper_sandbox_runtime.docker_nofile_args ()
+  @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
+  @ [ "--tmpfs"
+    ; Env_config_sandbox.Hardening.tmpfs_mount ()
+    ; "--cap-drop=ALL"
+    ; "--security-opt"
+    ; "no-new-privileges"
+  ]
+  @ seccomp_args
+  @ [
+    "--pids-limit";
+    string_of_int (Env_config_sandbox.Hardening.pids_limit ());
+    "--memory"; Env_config_sandbox.Hardening.memory ();
+    "-v"; host_root ^ ":" ^ croot ^ ":ro";
+    "--workdir"; croot;
+    "--network"; "none";
+  ]
+  @ Keeper_sandbox_runtime.docker_config_mount_args
+      ~base_path
+      ~container_root:croot
+  @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
+      ~base_path
+      ~container_root:croot
+  @ secret_args
+  @ [
+    "--entrypoint"; "";
+    image;
+  ]
+  @ command_argv
+
+let container_name_of meta =
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Docker_read
+       { keeper_name = meta.name
+         (* DET-OK: pid and wall-clock ms make a one-shot name unique per run. *)
+       ; pid = Unix.getpid ()
+       ; started_ms = int_of_float (Unix.gettimeofday () *. 1000.0)
+       })
+
+(* One runner, two ways of getting the endpoint. A turn hands in the lane's
+   [endpoint], which may start the guest it owns; a caller with no turn hands
+   in [attached_guest_endpoint], which cannot. Path translation and status
+   handling are the same either way, so they live here once. *)
+(* The read backend's translation of a [run_outcome] into a read result.
+   [Transport_failed] is always an error -- this is what stops a down lane
+   from reading as an empty [Ok] on the Grep lane, whose [ok_exit_codes]
+   accepts exit 1. Pure and exported so the distinction is tested directly
+   (test_keeper_sandbox_read_backend, the differential test). *)
+let classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
+  match (outcome : Masc_exec.Sandbox_target.run_outcome) with
+  | Transport_failed { reason; stderr; _ } ->
+    Error
+      (Printf.sprintf
+         "%s_read_transport_failed: endpoint=%s reason=%s stderr=%s"
+         lane endpoint_name reason (Exec_policy.truncate_for_log stderr))
+  | Ran { status; stdout; stderr; output_files = _ } ->
+    (match status with
+     | Unix.WEXITED code
+       when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
+       let output =
+         match max_bytes with
+         | Some limit when String.length stdout > limit -> String.sub stdout 0 limit
+         | Some _ | None -> stdout
+       in
+       Ok (status, output)
+     | Unix.WEXITED code ->
+       Error
+         (Printf.sprintf
+            "%s_read_failed: endpoint=%s exit=%d stderr=%s"
+            lane endpoint_name code (Exec_policy.truncate_for_log stderr))
+     | Unix.WSIGNALED signal ->
+       Error
+         (Printf.sprintf
+            "%s_read_signaled: endpoint=%s signal=%d stderr=%s"
+            lane endpoint_name signal (Exec_policy.truncate_for_log stderr))
+     | Unix.WSTOPPED signal ->
+       Error
+         (Printf.sprintf
+            "%s_read_stopped: endpoint=%s signal=%d"
+            lane endpoint_name signal))
+;;
+
+let classify_read_outcome ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
+  classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_bytes:(Some max_bytes) outcome
+;;
+
+let run_endpoint_command_with_status
+    ~acquire_endpoint
+    ?(ok_exit_codes = [ 0 ])
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+    ~command_argv
+    ~max_bytes
+    ~timeout_sec
+    ()
+  =
+  let open Result.Syntax in
+  let host_root = host_playground_root ~config ~meta in
+  let* endpoint = acquire_endpoint ~cwd:host_root in
+  let* cwd =
+    Keeper_remote_path.host_to_remote ~base_path:config.base_path
+      ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
+      ~keeper:meta.name
+      host_root
+  in
+  let stdout_mode = match max_bytes with None -> Keeper_sandbox_remote.Binary_bytes | Some _ -> Keeper_sandbox_remote.Text_paths in
+  let runner = Keeper_sandbox_remote.runner ~stdout_mode ~timeout_sec endpoint in
+  let outcome =
+    runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv:command_argv ~env:[||] ~cwd:(Some cwd)
+  in
+  let lane =
+    Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport endpoint)
+  in
+  let endpoint_name = Keeper_sandbox_remote.name endpoint in
+  classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome
+;;
+
+type read_dispatch =
+  | Turn_runtime of Keeper_sandbox_factory.runtime_binding
+  | Remote_dispatch
+  | Attached_guest
+      (** The guest reached without a turn: named by the keeper and the base
+          path, never started by this read. *)
+  | Docker_fallback
+
+let binding_profile (binding : Keeper_sandbox_factory.runtime_binding) =
+  match binding.guest_profile with
+  | Docker_guest -> Docker
+  | Micro_vm_guest -> Micro_vm
+;;
+
+let profile_contract_mismatch ~expected ~actual =
+  Printf.sprintf
+    "sandbox profile contract mismatch: caller expected %s but the turn factory froze %s"
+    (sandbox_profile_to_string expected)
+    (sandbox_profile_to_string actual)
+;;
+
+(* TEL-OK: pure fail-closed route selection. The selected backend performs and
+   reports the read effect in [run_command_with_status] below. *)
+let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
+  let contract_holds actual =
+    if actual = meta.sandbox_profile
+    then Ok ()
+    else Error (profile_contract_mismatch ~expected:meta.sandbox_profile ~actual)
+  in
+  let resolved = Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd in
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  (* The tree is on the endpoint: whatever runtime the factory holds is the
+     way to reach it (a guest), never a place to read from directly. *)
+  | Endpoint_owned ->
+    (match resolved with
+     | Runtime binding ->
+       Result.map (fun () -> Remote_dispatch) (contract_holds (binding_profile binding))
+     | Remote_ssh_profile ->
+       Result.map (fun () -> Remote_dispatch) (contract_holds Remote_ssh)
+     (* Holding no factory means holding no lifecycle authority over the
+        guest, and reaching a running guest needs none: its name comes from
+        the keeper and the base path, and it outlives the turn that booted
+        it. Refusing here reported a reachable tree as unreachable. *)
+     | No_factory ->
+       (match meta.sandbox_profile with
+        | Remote_ssh -> Ok Remote_dispatch
+        | Micro_vm -> Ok Attached_guest
+        | Docker ->
+          Error "docker_has_no_remote_lane: a docker keeper's tree is a shared mount"))
+  | Shared_mount ->
+    (match resolved with
+     | Runtime binding ->
+       Result.map (fun () -> Turn_runtime binding) (contract_holds (binding_profile binding))
+     | Remote_ssh_profile ->
+       Error (profile_contract_mismatch ~expected:meta.sandbox_profile ~actual:Remote_ssh)
+     | No_factory ->
+       (match meta.sandbox_profile with
+        | Docker -> Ok Docker_fallback
+        (* Unreachable while [tree_location_of_profile Micro_vm] is
+           [Endpoint_owned]; kept so a profile whose tree moves to a shared
+           mount has to state its own answer rather than inherit Docker's. *)
+        | Micro_vm ->
+          Error
+            "microvm_read_refuses_docker_substitution: a microVM keeper's tree is not reachable through a Docker container"
+        | Remote_ssh -> Ok Remote_dispatch))
+;;
+
+let run_command_with_capture ?read_authority ?turn_sandbox_factory
+    ?(ok_exit_codes = [ 0 ])
+    ~config ~(meta : keeper_meta)
+    ~(command_argv : string list) ~(max_bytes : int option)
+    ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
+  if command_argv = [] then
+    Error "run_command_with_status: command_argv is empty"
+  else match read_authority with
+  | Some authority ->
+    Keeper_sandbox_remote_lane.with_read_authority_endpoint ~timeout_sec authority ~config ~meta (fun endpoint ->
+      run_endpoint_command_with_status
+        ~acquire_endpoint:(fun ~cwd:_ -> Ok endpoint)
+        ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ())
+  | None ->
+    let cwd = host_playground_root ~config ~meta in
+    match resolve_read_dispatch ~turn_sandbox_factory ~meta ~cwd with
+    | Error _ as error -> error
+    | Ok Remote_dispatch ->
+      run_endpoint_command_with_status
+        ~acquire_endpoint:(fun ~cwd ->
+          Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd ())
+        ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+    | Ok Attached_guest ->
+      (* Apple endpoint admission observes guest ownership and state before
+         returning; other backends rely on exec. After an error, a separate
+         absence observation can replace it with a confirmed fact. *)
+      (match
+         run_endpoint_command_with_status
+           ~acquire_endpoint:(fun ~cwd:_ ->
+             Keeper_sandbox_remote_lane.attached_guest_endpoint ~timeout_sec ~config ~meta ())
+           ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+       with
+       | Ok _ as ok -> ok
+       | Error message ->
+         (match
+            Keeper_turn_sandbox_runtime.microvm_guest_absence_reason
+              ~timeout_sec ~config ~meta ()
+          with
+          | Some reason -> Error reason
+          | None -> Error message))
+    | Ok (Turn_runtime { runtime; _ }) ->
+      (match max_bytes with
+       | Some max_bytes -> Keeper_turn_sandbox_runtime.run_command_with_status
+           ~ok_exit_codes runtime ~timeout_sec ~cwd ~command_argv ~max_bytes ()
+       | None ->
+         let capture_dir = Keeper_execute_output_files.capture_directory ~base_path:config.base_path in
+         (match Keeper_turn_sandbox_runtime.run_exec_with_output_files
+             ~capture_dir ~timeout_sec runtime ~cwd ~command_argv with
+          | Error detail -> Error detail
+          | Ok (status, _, _, Some files) ->
+            (match status, files.stdout with
+             | Unix.WEXITED code, _
+               when code <> 0 && List.exists (fun ok -> ok = code) ok_exit_codes ->
+               (* A caller-declared non-zero exit (e.g. a read sentinel) is a
+                  classified outcome, not a capture fault; it carries no
+                  payload. *)
+               Ok (status, "")
+             | Unix.WEXITED 0, Process_output_capture.Complete_file {path; byte_length} ->
+               (match Fs_compat.load_owned_regular_file ~ownership_root:capture_dir path with
+                | Ok (Some bytes) when String.length bytes = byte_length -> Ok (status, bytes)
+                | Ok _ | Error _ -> Error "Frozen runtime binary capture is missing or changed")
+             | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Process_output_capture.Complete_file _)
+             | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Process_output_capture.Incomplete_file _)
+             | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Process_output_capture.Capture_failed _) ->
+               Error "Frozen runtime binary command failed or did not produce complete stdout")
+          | Ok (_, _, _, None) -> Error "Frozen runtime has no authoritative binary output capture"))
+    | Ok Docker_fallback ->
+      match
+        Keeper_sandbox_image_resolver.for_keeper ~base_path:config.Workspace.base_path meta
+      with
+      | Error error -> Error (Keeper_turn_sandbox_runtime.image_unresolved_message error)
+      | Ok pinned ->
+        let image = pinned.Keeper_sandbox_image_catalog.reference in
+        let head_program =
+          match command_argv with prog :: _ -> prog | [] -> "?"
+        in
+        match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
+        | Error err ->
+          Error
+            (Printf.sprintf "docker_%s_failed: image_not_found: %s" head_program err)
+        | Ok () ->
+        match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
+        | Error err -> Error err
+        | Ok seccomp_args ->
+          let host_root = host_playground_root ~config ~meta in
+          let croot = container_root ~meta in
+          let container_name =
+            Keeper_sandbox_container_name.to_string (container_name_of meta)
+          in
+          let uid = Unix.getuid () in
+          let gid = Unix.getgid () in
+          match
+            Keeper_secret_projection.docker_args_for_keeper
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
+              ~container_name
+              ()
+          with
+          | Error err -> Error ("docker_read_failed: secret_projection: " ^ err)
+          | Ok secret_projection ->
+          let argv =
+            build_docker_argv
+              ~image
+              ~container_name
+              ~base_path:config.base_path
+              ~host_root
+              ~croot
+              ~uid
+              ~gid
+              ~seccomp_args
+              ~secret_args:secret_projection.docker_args
+              ~command_argv
+          in
+          let captured =
+            Eio_guard.protect
+              ~finally:secret_projection.cleanup
+              (fun () ->
+                 Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+                   match max_bytes with
+                   | Some _ -> Ok (Process_eio.run_argv_with_status
+                       ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                       ~cwd:(Config_dir_resolver.current_working_dir ()) ~timeout_sec argv)
+                   | None ->
+                     let capture_dir = Keeper_execute_output_files.capture_directory ~base_path:config.base_path in
+                     let ((status, _, _), files) = Process_output_capture.with_capture ~capture_dir
+                         (fun output_capture -> Process_eio.run_argv_with_status_split_streaming
+                           ~output_capture ~on_stdout_chunk:(fun _ -> ()) ~on_stderr_chunk:(fun _ -> ())
+                           ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                           ~cwd:(Config_dir_resolver.current_working_dir ()) ~timeout_sec argv) in
+                     match files.stdout with
+                     | Process_output_capture.Complete_file {path; byte_length} ->
+                       (match Fs_compat.load_owned_regular_file ~ownership_root:capture_dir path with
+                        | Ok (Some bytes) when String.length bytes = byte_length ->
+                          Unix.unlink path;
+                          (match files.stderr with
+                           | Process_output_capture.Complete_file {path; _} -> Unix.unlink path
+                           | Process_output_capture.Incomplete_file _ | Process_output_capture.Capture_failed _ -> ());
+                          Ok (status, bytes)
+                        | Ok _ -> Error "Complete binary capture changed or disappeared"
+                        | Error _ -> Error "Complete binary capture could not be read with ownership")
+                     | Process_output_capture.Incomplete_file _ -> Error "Binary stdout did not reach authoritative EOF"
+                     | Process_output_capture.Capture_failed {message; _} -> Error message))
+          in
+          let open Result.Syntax in
+          let* st, out = captured in
+          (match st with
+           | Unix.WEXITED code
+             when List.exists (fun ok_code -> ok_code = code) ok_exit_codes ->
+             let body =
+               match max_bytes with
+               | Some limit when String.length out > limit -> String.sub out 0 limit
+               | Some _ | None -> out
+             in
+             Ok (st, body)
+           | Unix.WEXITED code ->
+             Error
+               (Printf.sprintf
+                  "docker_%s_failed: exit=%d output=%s"
+                  head_program code
+                  (match max_bytes with
+                   | Some _ -> Exec_policy.truncate_for_log out
+                   | None -> Printf.sprintf "binary_bytes=%d sha256=%s"
+                       (String.length out) Agent_core_sha256.(digest_string out |> to_hex)))
+           | Unix.WSIGNALED n ->
+             Error
+               (Printf.sprintf "docker_%s_signaled: signal=%d" head_program n)
+           | Unix.WSTOPPED n ->
+             Error
+               (Printf.sprintf "docker_%s_stopped: signal=%d" head_program n))
+
+let run_command_with_status ?read_authority ?turn_sandbox_factory ?(ok_exit_codes=[0])
+    ~config ~meta ~command_argv ~max_bytes ~timeout_sec () =
+  run_command_with_capture ?read_authority ?turn_sandbox_factory ~ok_exit_codes ~config ~meta
+    ~command_argv ~max_bytes:(Some max_bytes) ~timeout_sec ()
+
+let run_command ?read_authority ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
+    ~command_argv ~max_bytes ~timeout_sec () =
+  match
+    run_command_with_status ?read_authority ?turn_sandbox_factory
+      ~ok_exit_codes ~config ~meta
+      ~command_argv ~max_bytes ~timeout_sec ()
+  with
+  | Error _ as err -> err
+  | Ok (_st, out) -> Ok out
+
+type read_error =
+  | Missing_file of string
+  | Not_a_file of string
+  | Read_failed of string
+  | Read_refused of string
+
+let read_error_to_string = function
+  | Missing_file detail
+  | Not_a_file detail
+  | Read_failed detail
+  | Read_refused detail -> detail
+
+(* A window that starts past line 1 streams from that line, so the byte bound
+   applies to the window and not to the file's prefix. Bounding the prefix
+   left every line after the first [max_bytes] unreachable to Read.
+
+   The script runs where the file is, so it is the one place that can say
+   whether the path the caller named exists and is a file. It says so with
+   exit codes it chooses; the reader classifies by them, never by stderr.
+   The path and numbers are positional arguments of [sh], never spliced into
+   the script. [exec <] opens the file before the pipeline, whose status is
+   its last command's, so an unreadable file still exits non-zero. *)
+let read_window_missing_exit = 3
+let read_window_not_a_file_exit = 4
+
+let read_window_argv ~start_line ~max_bytes ~path =
+  [ "sh"
+  ; "-c"
+  ; Printf.sprintf
+      {|if [ ! -e "$2" ]; then exit %d; fi; if [ ! -f "$2" ]; then exit %d; fi; exec < "$2" || exit 1; if [ "$1" -le 1 ]; then head -c "$3"; else tail -n +"$1" | head -c "$3"; fi|}
+      read_window_missing_exit
+      read_window_not_a_file_exit
+  ; "sh"
+  ; string_of_int start_line
+  ; path
+  ; string_of_int (max 0 max_bytes)
+  ]
+
+let read_file ?read_authority ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_meta)
+    ~host_path ~(max_bytes : int) ~(timeout_sec : float) () : (string, read_error) result =
+  match container_path_of_host_impl ~read_authority ~config ~meta ~host_path with
+  | Error detail -> Error (Read_failed detail)
+  | Ok backend_path ->
+    let profile_label =
+      Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
+    in
+    let read () =
+      (* [max_bytes] used to be spent on [cat]'s finished output: the child
+         wrote the whole file and the drainer read every byte to EOF, and only
+         then was the first [max_bytes] kept. Reads ask for 16 KiB
+         ([Common.max_tool_result_wire_bytes]), so a Read of a large file paid
+         a whole read and a whole pipe transfer to answer with a few pages.
+         Retention was already capped -- Process_eio keeps head 8 MiB plus
+         tail 256 KiB -- so what moves here is the production and the
+         transfer, not the heap.
+
+         [head -c] puts the limit on the producer. It also closes a trap that
+         no caller has reached yet: asked for more than that head cap, the old
+         path returned head, then "(truncated N bytes)", then tail, cut to
+         [max_bytes] -- which is not a prefix of anything.
+
+         Same shape, and same reason, as the bounded [od -N] chunk read in
+         Keeper_browser_upload. *)
+      match
+        run_command_with_status ?read_authority ?turn_sandbox_factory
+          ~ok_exit_codes:[ 0; read_window_missing_exit; read_window_not_a_file_exit ]
+          ~config ~meta
+          ~command_argv:(read_window_argv ~start_line ~max_bytes ~path:backend_path)
+          ~max_bytes ~timeout_sec ()
+      with
+      | Error detail -> Error (Read_failed detail)
+      | Ok (Unix.WEXITED 0, body) -> Ok body
+      | Ok (Unix.WEXITED code, _) when code = read_window_missing_exit ->
+        Error
+          (Missing_file
+             (Printf.sprintf
+                "%s_read_failed: path_not_found: %s (no file there; verify the path \
+                 before calling Read)"
+                profile_label host_path))
+      | Ok (Unix.WEXITED code, _) when code = read_window_not_a_file_exit ->
+        Error
+          (Not_a_file
+             (Printf.sprintf
+                "%s_read_failed: path_is_not_a_file: %s (Read requires a regular \
+                 file; to list a directory use Execute with ls, e.g. \
+                 argv=['ls','-la','%s'])"
+                profile_label host_path host_path))
+      (* [ok_exit_codes] admits only the codes above. *)
+      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+        Error
+          (Read_failed
+             (Printf.sprintf "%s_read_failed: unexpected status for %s"
+                profile_label host_path))
+    in
+    if
+      Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
+      = Keeper_types_profile_sandbox.Endpoint_owned
+    then read ()
+    else
+      (* A shared tree is also on this host, so a missing path is refused
+         before a sandbox process is spent on it. *)
+      match Unix.stat host_path with
+      | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Error
+          (Not_a_file
+             (Printf.sprintf
+                "%s_read_failed: path_is_directory: %s (Read requires a file; to \
+                 list a directory use Execute with ls, e.g. argv=['ls','-la','%s'])"
+                profile_label host_path host_path))
+      | { Unix.st_kind =
+            ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+            | Unix.S_SOCK )
+        ; _
+        } -> read ()
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+        Error
+          (Missing_file
+             (Printf.sprintf
+                "%s_read_failed: path_not_found: %s (host path does not exist; \
+                 verify the relative path under your playground before calling Read)"
+                profile_label host_path))
+      | exception Unix.Unix_error (error, operation, argument) ->
+        Error
+          (Read_failed
+             (Printf.sprintf "%s_read_failed: %s(%s): %s" profile_label
+                operation argument (Unix.error_message error)))
+
+let read_complete_file ?read_authority ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
+  let open Result.Syntax in
+  let* path = container_path_of_host_impl ~read_authority ~config ~meta ~host_path in
+  let* _, bytes = run_command_with_capture ?read_authority ?turn_sandbox_factory ~config ~meta
+      ~command_argv:["cat"; path] ~max_bytes:None ~timeout_sec () in
+  Ok bytes
+
+let read_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~(meta : keeper_meta)
+    ~host_path ~max_bytes ~timeout_sec () =
+  if max_bytes <= 0 then
+    Error (Read_failed "Raw prefix byte limit must be positive")
+  else
+  (* Binary capture must retain exact bytes; limiting its text projection would
+     corrupt media. Bound the producing command instead ([head -c] below) and
+     capture with [max_bytes:None] so remote stays on [Binary_bytes] and the
+     runtimes stay on their output-file capture. [read_file] classifies a
+     missing path with sentinel exit codes from the read script; the raw
+     prefix is the same classification without the line window. There is no
+     host [Unix.stat] pre-check: a docker host path may not exist on this
+     host, and a directory already maps to [Not_a_file] via [! -f], so the
+     sentinels are the single classifier on every profile.
+
+     The frozen Turn_runtime binary capture honours [ok_exit_codes], so the
+     sentinel exits classify as [Missing_file] / [Not_a_file] there too. *)
+  match container_path_of_host_impl ~read_authority ~config ~meta ~host_path with
+  | Error detail -> Error (Read_failed detail)
+  | Ok backend_path ->
+    let profile_label =
+      Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
+    in
+    let read_with_sentinels () =
+      let missing_exit = read_window_missing_exit
+      and not_a_file_exit = read_window_not_a_file_exit in
+      match
+        run_command_with_capture ?read_authority ?turn_sandbox_factory ~config ~meta
+          ~ok_exit_codes:[ 0; missing_exit; not_a_file_exit ]
+          ~command_argv:
+            [ "sh"
+            ; "-c"
+            ; Printf.sprintf
+                {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; exec < "$1" || exit 1; head -c "$2"|}
+                missing_exit not_a_file_exit
+            ; "sh"
+            ; backend_path
+            ; string_of_int (max 0 max_bytes)
+            ]
+          ~max_bytes:None ~timeout_sec ()
+      with
+      | Error detail -> Error (Read_failed detail)
+      | Ok (Unix.WEXITED 0, bytes) -> Ok bytes
+      | Ok (Unix.WEXITED code, _) when code = missing_exit ->
+        Error
+          (Missing_file
+             (Printf.sprintf "%s_read_failed: path_not_found: %s" profile_label
+                host_path))
+      | Ok (Unix.WEXITED code, _) when code = not_a_file_exit ->
+        Error
+          (Not_a_file
+             (Printf.sprintf
+                "%s_read_failed: path_is_not_a_file: %s (Read requires a regular \
+                 file; to list a directory use Execute with ls, e.g. \
+                 argv=['ls','-la','%s'])"
+                profile_label host_path host_path))
+      (* [ok_exit_codes] admits only the codes above. *)
+      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+        Error
+          (Read_failed
+             (Printf.sprintf "%s_read_failed: unexpected status for %s"
+                profile_label host_path))
+    in
+    read_with_sentinels ()

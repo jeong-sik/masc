@@ -1,0 +1,4 @@
+src/api/dashboard-runtime-context.test.ts(23,12): error TS18048: 'row' is possibly 'undefined'.
+src/api/dashboard-runtime-context.test.ts(24,12): error TS18048: 'row' is possibly 'undefined'.
+src/api/dashboard-runtime-context.test.ts(25,39): error TS2345: Argument of type 'DashboardRuntimeProviderSnapshot | undefined' is not assignable to parameter of type 'DashboardRuntimeProviderSnapshot'.
+  Type 'undefined' is not assignable to type 'DashboardRuntimeProviderSnapshot'.

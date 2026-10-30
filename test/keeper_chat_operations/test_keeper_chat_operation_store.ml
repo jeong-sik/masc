@@ -1,0 +1,699 @@
+open Alcotest
+
+module Operation = Keeper_chat_operation
+module Store = Keeper_chat_operation_store
+module Id = Operation.Operation_id
+
+let store_ok = function
+  | Ok value -> value
+  | Error error -> fail (Store.error_to_string error)
+;;
+
+let id value =
+  match Id.of_string value with
+  | Ok value -> value
+  | Error detail -> fail detail
+;;
+
+let source identity =
+  `Assoc [ "kind", `String "dashboard"; "identity", `String identity ]
+;;
+
+let input text = `Assoc [ "text", `String text ]
+
+let test_direct_message_digest_matches_proof_collector () =
+  let input =
+    `Assoc
+      [ "schema", `String "masc.keeper_chat_operation.input.v1"
+      ; "message", `String "자연스럽게 조사해 주세요.\n"
+      ; "user_blocks", `List []
+      ; "turn_instructions", `Null
+      ; "surface_context", `Null
+      ; "attachments", `List []
+      ]
+  in
+  match Operation.execution_digest input with
+  | Error detail -> fail detail
+  | Ok digest ->
+    check
+      string
+      "Python and OCaml canonical direct-message digest"
+      "594b51dec1da445b2d33f746e66b75b914104f1c102d1eaa9e70fd8c007eceb4"
+      digest
+;;
+
+let with_store name f =
+  let directory = Filename.temp_dir ("keeper-chat-operations-" ^ name) "" in
+  let path = Filename.concat directory Store.For_testing.database_file in
+  let store = store_ok (Store.open_or_create ~path) in
+  Fun.protect
+    ~finally:(fun () -> ignore (Store.close store : (unit, Store.error) result))
+    (fun () -> f path store)
+;;
+
+let accepted = function
+  | Store.Accepted operation -> operation
+  | Store.Existing _ -> fail "first submission unexpectedly replayed"
+;;
+
+let get_exn store operation_id =
+  match store_ok (Store.get store operation_id) with
+  | Some operation -> operation
+  | None -> fail "operation disappeared"
+;;
+
+let state operation = Operation.state_to_string operation.Operation.state
+
+let finalize_statement stmt =
+  let rc = Sqlite3.finalize stmt in
+  ignore (Sys.opaque_identity stmt);
+  rc
+;;
+
+let close_database db =
+  let closed = Sqlite3.db_close db in
+  ignore (Sys.opaque_identity db);
+  closed
+;;
+
+let test_schema_identity_and_budget () =
+  with_store "schema" @@ fun path store ->
+  check string "database file" "chat-operations.sqlite3" (Filename.basename path);
+  check
+    (list (pair string int))
+    "strict tables"
+    [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 5; "input_checkpoints", 3; "input_history", 2 ]
+    Store.For_testing.table_column_counts;
+  store_ok (Store.close store);
+  let db = Sqlite3.db_open ~mode:`READONLY path in
+  Fun.protect
+    ~finally:(fun () -> ignore (close_database db : bool))
+    (fun () ->
+       let text sql =
+         let stmt = Sqlite3.prepare db sql in
+         Fun.protect
+           ~finally:(fun () -> ignore (finalize_statement stmt : Sqlite3.Rc.t))
+           (fun () ->
+              check bool "schema row" true (Sqlite3.step stmt = Sqlite3.Rc.ROW);
+              Sqlite3.column_text stmt 0)
+       in
+       check
+         string
+         "schema identity"
+         "masc.keeper_chat_operations.v3"
+         (text "SELECT schema FROM metadata WHERE singleton = 1");
+       check
+         int64
+         "application id"
+         Store.For_testing.database_application_id
+         (Int64.of_string (text "SELECT application_id FROM pragma_application_id")))
+;;
+
+let test_exact_idempotency_and_terminal_dedupe () =
+  with_store "idempotency" @@ fun _path store ->
+  let operation_id = id "kmsg-idempotency" in
+  let original_source = source "operator" in
+  let original_input = input "hello" in
+  let first =
+    Store.submit
+      store
+      ~now:1.0
+      ~operation_id
+      ~source:original_source
+      ~input:original_input
+    |> store_ok
+    |> accepted
+  in
+  check
+    string
+    "wire projection keeps execution identity"
+    first.execution_digest
+    Yojson.Safe.Util.(Operation.to_json first |> member "execution_digest" |> to_string);
+  (match
+     store_ok
+       (Store.submit
+          store
+          ~now:2.0
+          ~operation_id
+          ~source:original_source
+          ~input:original_input)
+   with
+   | Store.Existing replayed ->
+     check string "same identity" (Id.to_string first.operation_id) (Id.to_string replayed.operation_id)
+   | Store.Accepted _ -> fail "same request was inserted twice");
+  (match
+     Store.submit
+       store
+       ~now:3.0
+       ~operation_id
+       ~source:original_source
+       ~input:(input "different")
+   with
+   | Error (Store.Idempotency_conflict observed) ->
+     check string "conflicting id" (Id.to_string operation_id) (Id.to_string observed)
+   | Error error -> fail ("wrong conflict: " ^ Store.error_to_string error)
+   | Ok _ -> fail "different request reused an operation id");
+  (match
+     Store.submit
+       store
+       ~now:3.5
+       ~operation_id
+       ~source:(source "different-actor")
+       ~input:original_input
+   with
+   | Error (Store.Idempotency_conflict observed) ->
+     check string "changed-source conflict" (Id.to_string operation_id) (Id.to_string observed)
+   | Error error -> fail ("wrong source conflict: " ^ Store.error_to_string error)
+   | Ok _ -> fail "different authorized actor reused an operation id");
+  ignore (store_ok (Store.claim_next store ~now:4.0));
+  let terminal =
+    store_ok
+      (Store.succeed_running
+         store
+         ~now:5.0
+         ~operation_id
+         ~outcome_ref:"transcript:terminal")
+  in
+  check string "succeeded" "succeeded" (state terminal);
+  check bool "terminal input scrubbed" true (Option.is_none terminal.input);
+  (match
+     store_ok
+       (Store.submit
+          store
+          ~now:6.0
+          ~operation_id
+          ~source:original_source
+          ~input:original_input)
+   with
+   | Store.Existing replayed ->
+     check string "terminal replay" "succeeded" (state replayed);
+     check bool "replay stays scrubbed" true (Option.is_none replayed.input)
+   | Store.Accepted _ -> fail "terminal operation dedupe expired")
+;;
+
+let test_fifo_edit_move_cancel () =
+  with_store "fifo" @@ fun _path store ->
+  let submit ordinal =
+    let operation_id = id (Printf.sprintf "kmsg-fifo-%d" ordinal) in
+    let operation =
+      Store.submit
+        store
+        ~now:(float_of_int ordinal)
+        ~operation_id
+        ~source:(source "operator")
+        ~input:(input (Printf.sprintf "message-%d" ordinal))
+      |> store_ok
+      |> accepted
+    in
+    operation_id, operation
+  in
+  let first_id, first = submit 1 in
+  let second_id, second = submit 2 in
+  let third_id, _third = submit 3 in
+  let edited =
+    store_ok (Store.edit_queued store ~operation_id:second_id ~input:(input "edited"))
+  in
+  check bool "admission digest stable after edit" true
+    (String.equal second.admission_digest edited.admission_digest);
+  check bool "execution digest changes after edit" false
+    (String.equal second.execution_digest edited.execution_digest);
+  let moved = store_ok (Store.move_queued_to_end store ~operation_id:first_id) in
+  check bool "move allocates a later sequence" true
+    (Int64.compare moved.sequence first.sequence > 0);
+  let cancelled = store_ok (Store.cancel_queued store ~now:4.0 ~operation_id:third_id) in
+  check string "cancelled" "cancelled" (state cancelled);
+  check bool "cancel scrubbed input" true (Option.is_none cancelled.input);
+  let queued = store_ok (Store.list_queued store ~after_sequence:None ~limit:10) in
+  check
+    (list string)
+    "FIFO except explicit move"
+    [ Id.to_string second_id; Id.to_string first_id ]
+    (List.map (fun operation -> Id.to_string operation.Operation.operation_id) queued);
+  let inventory = store_ok (Store.inventory store) in
+  check int "queued projection" 2 inventory.queued_count;
+  check int "terminal projection" 1 inventory.terminal_count;
+  check bool "no running projection" true (Option.is_none inventory.running_operation_id);
+  let running = Option.get (store_ok (Store.claim_next store ~now:5.0)) in
+  check string "edited operation runs first" (Id.to_string second_id) (Id.to_string running.operation_id);
+  let inventory = store_ok (Store.inventory store) in
+  check int "queued after claim" 1 inventory.queued_count;
+  check bool "running projection" true
+    (Option.exists (Id.equal second_id) inventory.running_operation_id);
+  (match Store.edit_queued store ~operation_id:second_id ~input:(input "late") with
+   | Error (Store.Not_queued _) -> ()
+   | Error error -> fail ("wrong edit race result: " ^ Store.error_to_string error)
+   | Ok _ -> fail "running operation was edited")
+;;
+
+let test_restart_interrupts_running_once_and_preserves_queued () =
+  with_store "restart" @@ fun path store ->
+  let running_id = id "kmsg-restart-running" in
+  let queued_id = id "kmsg-restart-queued" in
+  let submit operation_id text now =
+    Store.submit store ~now ~operation_id ~source:(source "operator") ~input:(input text)
+    |> store_ok
+    |> ignore
+  in
+  submit running_id "running" 1.0;
+  submit queued_id "queued" 2.0;
+  ignore (store_ok (Store.claim_next store ~now:3.0));
+  store_ok (Store.close store);
+  let reopened = store_ok (Store.open_or_create ~path) in
+  Fun.protect
+    ~finally:(fun () -> ignore (Store.close reopened : (unit, Store.error) result))
+    (fun () ->
+       (match store_ok (Store.settle_running_after_restart reopened ~now:4.0) with
+        | [ interrupted ] ->
+          check bool "the interrupted operation is returned by identity" true
+            (Operation.Operation_id.equal interrupted.Operation.operation_id running_id)
+        | interrupted ->
+          failf "expected one running operation interrupted, got %d" (List.length interrupted));
+       check int "settlement is idempotent" 0
+         (List.length (store_ok (Store.settle_running_after_restart reopened ~now:5.0)));
+       let interrupted = get_exn reopened running_id in
+       (match interrupted.state with
+        | Operation.Failed
+            { failure = { kind = Operation.Interrupted_by_restart; _ }; _ } -> ()
+        | _ -> fail "running operation was not interrupted");
+       check bool "interrupted input scrubbed" true (Option.is_none interrupted.input);
+       let queued = get_exn reopened queued_id in
+       check string "queued survives restart" "queued" (state queued);
+       check bool "queued body survives" true (Option.is_some queued.input))
+;;
+
+let test_strict_json_rejects_duplicate_fields () =
+  with_store "strict-json" @@ fun _path store ->
+  let duplicate = `Assoc [ "text", `String "one"; "text", `String "two" ] in
+  match
+    Store.submit
+      store
+      ~now:1.0
+      ~operation_id:(id "kmsg-duplicate")
+      ~source:(source "operator")
+      ~input:duplicate
+  with
+  | Error (Store.Invalid_input _) -> ()
+  | Error error -> fail ("wrong strict JSON error: " ^ Store.error_to_string error)
+  | Ok _ -> fail "duplicate JSON fields were accepted"
+;;
+
+let test_commit_failure_and_uncertain_readback () =
+  with_store "commit-fault" @@ fun _path store ->
+  let rejected_id = id "kmsg-before-commit" in
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
+  (match
+     Store.submit
+       store
+       ~now:1.0
+       ~operation_id:rejected_id
+       ~source:(source "operator")
+       ~input:(input "not committed")
+   with
+   | Error (Store.Store_unavailable _) -> ()
+   | Error error -> fail ("wrong pre-commit error: " ^ Store.error_to_string error)
+   | Ok _ -> fail "pre-commit failure was acknowledged");
+  check bool "pre-commit state unchanged" true
+    (Option.is_none (store_ok (Store.get store rejected_id)));
+  let uncertain_id = id "kmsg-after-commit" in
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+  let accepted =
+    Store.submit
+      store
+      ~now:2.0
+      ~operation_id:uncertain_id
+      ~source:(source "operator")
+      ~input:(input "committed")
+    |> store_ok
+    |> accepted
+  in
+  check string "uncertain submit read-back" "queued" (state accepted);
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+  let running = Option.get (store_ok (Store.claim_next store ~now:3.0)) in
+  check string "uncertain running read-back" "running" (state running);
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+  let terminal =
+    store_ok
+      (Store.succeed_running
+         store
+         ~now:4.0
+         ~operation_id:uncertain_id
+         ~outcome_ref:"transcript:uncertain")
+  in
+  check string "uncertain terminal read-back" "succeeded" (state terminal)
+;;
+
+let test_terminal_row_is_sql_immutable () =
+  with_store "terminal-immutable" @@ fun path store ->
+  let operation_id = id "kmsg-terminal-immutable" in
+  ignore
+    (store_ok
+       (Store.submit
+          store
+          ~now:1.0
+          ~operation_id
+          ~source:(source "operator")
+          ~input:(input "terminal")));
+  ignore (store_ok (Store.claim_next store ~now:2.0));
+  ignore
+    (store_ok
+       (Store.succeed_running
+          store
+          ~now:3.0
+          ~operation_id
+          ~outcome_ref:"transcript:immutable"));
+  store_ok (Store.close store);
+  let db = Sqlite3.db_open path in
+  Fun.protect
+    ~finally:(fun () -> ignore (close_database db : bool))
+    (fun () ->
+       let rc =
+         Sqlite3.exec
+           db
+           "UPDATE operations SET outcome_ref = 'rewritten' WHERE operation_id = 'kmsg-terminal-immutable'"
+       in
+       check bool "terminal update rejected" false (Sqlite3.Rc.is_success rc))
+;;
+
+
+(* [closed] is an [Atomic] so that the test-and-set in [close] is one step and
+   exactly one caller reaches [Sqlite3.db_close]. Two things have to hold and
+   neither was covered: a second close is a no-op that still reports success,
+   and every operation after a close is refused rather than reaching the freed
+   handle. *)
+let test_close_is_idempotent_and_refuses_later_operations () =
+  let directory = Filename.temp_dir "keeper-chat-operations-close" "" in
+  let path = Filename.concat directory Store.For_testing.database_file in
+  let store = store_ok (Store.open_or_create ~path) in
+  store_ok (Store.close store);
+  store_ok (Store.close store);
+  let operation_id =
+    match Operation.Operation_id.of_string "op-after-close" with
+    | Ok id -> id
+    | Error detail -> fail ("operation id fixture rejected: " ^ detail)
+  in
+  (match Store.get store operation_id with
+   | Ok _ -> fail "get after close must be refused"
+   | Error _ -> ());
+  match Store.close store with
+  | Ok () -> ()
+  | Error _ -> fail "a repeated close must stay successful"
+;;
+
+let test_statement_finalize_survives_gc_pressure () =
+  with_store "finalize-gc-pressure" @@ fun _path store ->
+  let churn = ref [] in
+  for i = 1 to 2_000 do
+    ignore (store_ok (Store.inventory store));
+    churn := String.make 256 'x' :: (if i mod 16 = 0 then [] else !churn);
+    if i mod 64 = 0 then Gc.minor ()
+  done;
+  ignore (Sys.opaque_identity !churn);
+  (* [check bool msg true] is a partial application: it is [bool -> unit], so
+     this case had the type [unit -> bool -> unit] and never ran an assertion.
+     The observable it was reaching for is that the store still answers after
+     the churn — a statement finalized out from under it surfaces as a failing
+     inventory, not as a silent one, so the read has to be taken and checked. *)
+  check
+    bool
+    "inventory still answers after GC pressure"
+    true
+    (Result.is_ok (Store.inventory store))
+;;
+
+let test_read_only_inspection_preserves_absence_and_refuses_uninitialized_store () =
+  let directory = Filename.temp_dir "keeper-chat-operations-inspect" "" in
+  let path = Filename.concat directory Store.database_file in
+  (match store_ok (Store.inspect_outstanding ~path) with
+   | Store.Missing_store -> ()
+   | _ -> fail "missing store must be explicit");
+  check bool "inspection never creates the database" false (Sys.file_exists path);
+  Out_channel.with_open_bin path (fun _ -> ());
+  (match Store.inspect_outstanding ~path with
+   | Error _ -> () | Ok _ -> fail "empty uninitialized database accepted");
+  check int "empty file remains uninitialized" 0 (Unix.stat path).st_size;
+  Unix.unlink path;
+  Out_channel.with_open_bin (path ^ "-journal") (fun channel -> output_string channel "orphaned journal");
+  (match Store.inspect_outstanding ~path with
+   | Error (Store.Integrity_error _) -> ()
+   | _ -> fail "orphaned journal treated as absent evidence");
+  check bool "orphaned journal preserved" true (Sys.file_exists (path ^ "-journal"));
+  Unix.unlink (path ^ "-journal");
+  Unix.symlink (Filename.concat directory "missing-target") path;
+  (match Store.inspect_outstanding ~path with
+   | Error (Store.Integrity_error _) -> ()
+   | _ -> fail "dangling database link treated as absence")
+;;
+
+let test_priority_keeps_other_producers_and_survives_reopen () =
+  with_store "priority" @@ fun path store ->
+  let submitted = List.mapi (fun n producer ->
+    Store.submit store ~now:(float_of_int n) ~operation_id:(id ("priority-" ^ producer))
+      ~source:(source producer) ~input:(input producer) |> store_ok |> accepted)
+    ["keeper-a"; "operator"; "keeper-b"; "operator-later"] in
+  let target = List.nth submitted 1 in
+  ignore (store_ok (Store.move_queued_to_front store ~now:5. ~operation_id:target.operation_id));
+  let rows () = store_ok (Store.list_queued store ~after_sequence:None ~limit:10) in
+  let check_order () = check (list string) "only requested operation moves ahead"
+    ["priority-operator";"priority-keeper-a";"priority-keeper-b";"priority-operator-later"]
+    (List.map (fun (o:Operation.t) -> Id.to_string o.operation_id) (rows ())) in
+  check_order ();
+  let before = List.map (fun (o:Operation.t) -> o.sequence) (rows ()) in
+  ignore (store_ok (Store.move_queued_to_front store ~now:5. ~operation_id:target.operation_id));
+  check bool "repeated promotion is idempotent" true
+    (before = List.map (fun (o:Operation.t) -> o.sequence) (rows ()));
+  List.iter (fun (original:Operation.t) ->
+    let current = get_exn store original.operation_id in
+    check bool "producer, input and execution identity are preserved" true
+      (current.source = original.source && current.input = original.input &&
+       current.admission_digest = original.admission_digest && current.execution_digest = original.execution_digest)) submitted;
+  store_ok (Store.close store);
+  let reopened = store_ok (Store.open_or_create ~path) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close reopened)) (fun () ->
+    let claimed = Option.get (store_ok (Store.claim_next reopened ~now:10.)) in
+    check bool "priority survives restart and is actually claimed first" true (Id.equal target.operation_id claimed.operation_id);
+    (match Store.move_queued_to_front reopened ~now:11. ~operation_id:target.operation_id with
+     | Error (Store.Not_queued _) -> () | _ -> fail "already running operation was promoted"))
+;;
+
+let test_automatic_priority_keeps_accepted_cohort_fifo () =
+  with_store "auto-priority-fifo" @@ fun path store ->
+  let submit store name actor =
+    ignore (store_ok (Store.submit store ~now:1. ~operation_id:(id name)
+      ~source:(source actor) ~input:(input name))) in
+  submit store "running" "other";
+  let running = Option.get (store_ok (Store.claim_next store ~now:2.)) in
+  check string "one turn holds queue consumption" "running"
+    (Id.to_string running.operation_id);
+  List.iter (fun name -> submit store name (if name = "outsider" then "other" else "operator"))
+    ["outsider"; "auto-a"; "auto-b"; "auto-c"];
+  let move store name predecessors =
+    ignore (store_ok (Store.move_queued_priority_cohort_to_front store ~now:3.
+      ~operation_id:(id name) ~predecessors:(List.map id predecessors))) in
+  let queued store =
+    store_ok (Store.list_queued store ~after_sequence:None ~limit:10)
+    |> List.map (fun (row : Operation.t) -> Id.to_string row.operation_id) in
+  move store "auto-a" [];
+  check (list string) "first automatic promotion" ["auto-a"; "outsider"; "auto-b"; "auto-c"]
+    (queued store);
+  move store "auto-b" ["auto-a"];
+  check (list string) "second automatic promotion keeps A first"
+    ["auto-a"; "auto-b"; "outsider"; "auto-c"] (queued store);
+  move store "auto-c" ["auto-a"; "auto-b"];
+  check (list string) "third automatic promotion keeps A B C in accepted order"
+    ["auto-a"; "auto-b"; "auto-c"; "outsider"] (queued store);
+  store_ok (Store.close store);
+  let reopened = store_ok (Store.open_or_create ~path) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close reopened)) (fun () ->
+    check (list string) "the queued order survives reopen"
+      ["auto-a"; "auto-b"; "auto-c"; "outsider"] (queued reopened);
+    ignore (store_ok (Store.move_queued_to_front reopened ~now:4.
+      ~operation_id:(id "outsider")));
+    check (list string) "explicit run-next still moves to absolute front"
+      ["outsider"; "auto-a"; "auto-b"; "auto-c"] (queued reopened);
+    ignore (store_ok (Store.cancel_queued reopened ~now:5.
+      ~operation_id:(id "auto-c")));
+    submit reopened "auto-d" "operator";
+    move reopened "auto-d" ["auto-a"; "auto-b"; "auto-c"];
+    check (list string) "cancelled predecessor is skipped in the next cohort"
+      ["auto-a"; "auto-b"; "auto-d"; "outsider"] (queued reopened))
+;;
+
+let test_automatic_priority_repairs_unknown_predecessor_result () =
+  with_store "auto-priority-repair" @@ fun _path store ->
+  let submit name actor = ignore (store_ok (Store.submit store ~now:1.
+    ~operation_id:(id name) ~source:(source actor) ~input:(input name))) in
+  List.iter (fun (name, actor) -> submit name actor)
+    ["outsider", "other"; "auto-a", "operator"; "auto-b", "operator"];
+  let queued () =
+    store_ok (Store.list_queued store ~after_sequence:None ~limit:10)
+    |> List.map (fun (row : Operation.t) -> Id.to_string row.operation_id) in
+  (match Store.move_queued_priority_cohort_to_front store ~now:2.
+     ~operation_id:(id "auto-b") ~predecessors:[id "outsider"] with
+   | Error (Store.Invalid_input _) -> ()
+   | _ -> fail "another source was accepted as a priority predecessor");
+  check (list string) "rejected predecessor changes no durable order"
+    ["outsider"; "auto-a"; "auto-b"] (queued ());
+  (* A's HTTP result may have been lost after the server accepted it, or the
+     server may have refused it. B's request repairs either state atomically. *)
+  ignore (store_ok (Store.move_queued_priority_cohort_to_front store ~now:3.
+    ~operation_id:(id "auto-b") ~predecessors:[id "auto-a"]));
+  check (list string) "later priority lifts the whole accepted cohort"
+    ["auto-a"; "auto-b"; "outsider"] (queued ())
+;;
+
+let test_batch_claim_freezes_inputs_and_settles_members () =
+  with_store "batch" @@ fun _path store ->
+  let first = id "batch-first" and second = id "batch-second" and third = id "batch-later" in
+  List.iteri (fun index operation_id -> ignore (store_ok (Store.submit store
+    ~now:(float_of_int index) ~operation_id ~source:(source "same-person")
+    ~input:(input (Id.to_string operation_id))))) [first; second; third];
+  ignore (store_ok (Store.edit_queued store ~operation_id:second ~input:(input "edited before dispatch")));
+  let skip_middle _ _ =
+    Ok (Some { Store.members = [first; third]; input = input "invalid batch" }) in
+  (match Store.claim_next ~batch:skip_middle store ~now:3. with
+   | Error (Store.Invalid_input _) -> ()
+   | Error error -> fail (Store.error_to_string error)
+   | Ok _ -> fail "batch skipped an earlier queued message");
+  let batch head candidates =
+    check string "head" (Id.to_string first) (Id.to_string head.Operation.operation_id);
+    check int "all ready inputs available" 3 (List.length candidates);
+    let second_input = (List.nth candidates 1).Operation.input in
+    check bool "claim sees edit" true (second_input = Some (input "edited before dispatch"));
+    Ok (Some { Store.members = [first; second]; input = input "combined" }) in
+  let running = Option.get (store_ok (Store.claim_next ~batch store ~now:4.)) in
+  check bool "frozen shared input" true (running.input = Some (input "combined"));
+  check bool "execution identity retained" true (Option.map (fun (member : Operation.batch_membership) -> member.execution_id) running.batch_membership = Some first);
+  let member = get_exn store second in
+  check string "member reports actual shared execution state" "running" (state member);
+  check bool "member original input retained" true (member.input = Some (input "edited before dispatch"));
+  check int "only unbound input remains queued" 1 (store_ok (Store.inventory store)).queued_count;
+  check int "ordered member lookup" 2 (List.length (store_ok (Store.batch_operations store ~operation_id:second)));
+  (match Store.move_queued_to_front store ~now:5. ~operation_id:second with
+   | Error (Store.Not_queued owner) -> check bool "active member resolves to its exact owner" true (Id.equal owner first)
+   | _ -> fail "active batch follower was prioritized or replayed");
+  (match Store.cancel_queued store ~now:5. ~operation_id:second with
+   | Error _ -> () | Ok _ -> fail "a member was withdrawn from an executing shared input");
+  ignore (store_ok (Store.succeed_running store ~now:6. ~operation_id:first ~outcome_ref:"turn:shared"));
+  List.iter (fun operation_id -> let operation = get_exn store operation_id in
+    check string "shared terminal" "succeeded" (state operation);
+    check bool "terminal input removed" true (operation.input = None)) [first; second];
+  (match Store.move_queued_to_front store ~now:7. ~operation_id:second with
+   | Error (Store.Not_queued owner) -> check bool "settled member remains bound to terminal owner" true (Id.equal owner first)
+   | _ -> fail "settled batch follower was replayed by priority");
+  let next = Option.get (store_ok (Store.claim_next store ~now:7.)) in
+  check bool "follower cannot execute again" true (Id.equal next.operation_id third)
+;;
+
+let test_batch_restart_and_commit_failure () =
+  with_store "batch-restart" @@ fun path store ->
+  let first = id "restart-batch-first" and second = id "restart-batch-second" in
+  List.iter (fun operation_id -> ignore (store_ok (Store.submit store ~now:1. ~operation_id
+    ~source:(source "same") ~input:(input "original")))) [first; second];
+  let batch _ _ = Ok (Some { Store.members = [first; second]; input = input "combined" }) in
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
+  (match Store.claim_next ~batch store ~now:2. with Error _ -> () | Ok _ -> fail "precommit failure claimed batch");
+  check bool "failed commit has no membership" true ((get_exn store second).batch_membership = None);
+  check int "failed commit leaves both queued" 2 (store_ok (Store.inventory store)).queued_count;
+  ignore (store_ok (Store.claim_next ~batch store ~now:3.));
+  store_ok (Store.close store);
+  let reopened = store_ok (Store.open_or_create ~path) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close reopened)) (fun () ->
+    ignore (store_ok (Store.settle_running_after_restart reopened ~now:4.));
+    List.iter (fun operation_id -> check string "restart settles each identity" "failed"
+      (state (get_exn reopened operation_id))) [first; second];
+    check int "restart does not replay follower" 0 (store_ok (Store.inventory reopened)).queued_count)
+;;
+
+let test_interactive_admission_prioritizes_cohort_atomically () =
+  with_store "interactive-cohort" @@ fun _path store ->
+  let submit ?priority name actor = store_ok (Store.submit ?priority store ~now:1.
+    ~operation_id:(id name) ~source:(source actor) ~input:(input name)) in
+  ignore (submit "other-first" "other");
+  ignore (submit "older-message" "actor");
+  ignore (submit "other-last" "other");
+  let calls = ref 0 in
+  let select (incoming : Operation.t) candidates =
+    incr calls;
+    let members = List.filter (fun (row : Operation.t) -> row.source = incoming.source) candidates in
+    Ok (Some {Store.members = List.map (fun (row : Operation.t) -> row.operation_id) members; input = input "unused until claim"}) in
+  ignore (submit ~priority:select "new-message" "actor");
+  ignore (submit ~priority:(fun _ _ -> fail "idempotent replay reprioritized queue") "new-message" "actor");
+  check int "selector ran for first admission only" 1 !calls;
+  let queued = store_ok (Store.list_queued store ~after_sequence:None ~limit:10) in
+  check (list string) "old-to-new messages move together ahead of other channels"
+    ["older-message"; "new-message"; "other-first"; "other-last"]
+    (List.map (fun (row : Operation.t) -> Id.to_string row.operation_id) queued);
+  (match Store.submit ~priority:(fun _ _ -> Error "cohort rejected") store ~now:2.
+      ~operation_id:(id "rejected-message") ~source:(source "actor") ~input:(input "reject") with
+   | Error (Store.Invalid_input _) -> () | _ -> fail "invalid cohort was admitted");
+  check bool "cohort rejection rolls back insertion" true
+    (store_ok (Store.get store (id "rejected-message")) = None)
+;;
+
+(* A sibling writer holding the database must be waited out (busy_timeout),
+   not answered with SQLITE_BUSY whose commit failure fences the Owner's chat
+   for the rest of the process (first-turn install smoke, 2026-09-14). The
+   child takes the EXCLUSIVE lock for one second; the store's write waits it
+   out and commits instead of erroring at first contention. *)
+let test_concurrent_writer_is_waited_out_not_fenced () =
+  let directory = Filename.temp_dir "keeper-chat-operations-busy-wait" "" in
+  let path = Filename.concat directory Store.For_testing.database_file in
+  let store = store_ok (Store.open_or_create ~path) in
+  Fun.protect
+    ~finally:(fun () -> ignore (Store.close store : (unit, Store.error) result))
+    (fun () ->
+      let child = Unix.fork () in
+      if child = 0 then begin
+        (try
+           let db = Sqlite3.db_open path in
+           let rc = Sqlite3.exec db "BEGIN EXCLUSIVE" in
+           if Sqlite3.Rc.is_success rc then Unix.sleep 1 else ()
+         with Sqlite3.Error _ -> ());
+        exit 0
+      end else begin
+        ignore (Unix.select [] [] [] 0.2);
+        match Store.settle_running_after_restart store ~now:1.0 with
+        | Ok settled ->
+          ignore (Unix.waitpid [] child);
+          check int "waited-out writer lets the commit through" 0 (List.length settled)
+        | Error error ->
+          ignore (Unix.waitpid [] child);
+          fail (Store.error_to_string error)
+      end)
+;;
+
+let () =
+  run
+    "keeper-chat-operation-store"
+    [ ( "store"
+      , [ test_case "interactive admission preserves cohort order atomically" `Quick test_interactive_admission_prioritizes_cohort_atomically
+        ; test_case "batch atomic dispatch and identity settlement" `Quick test_batch_claim_freezes_inputs_and_settles_members
+        ; test_case "batch restart and failed commit" `Quick test_batch_restart_and_commit_failure
+        ; test_case "priority preserves other producers, replay and running boundary" `Quick
+          test_priority_keeps_other_producers_and_survives_reopen
+        ; test_case "automatic priority preserves accepted FIFO while a turn runs" `Quick
+          test_automatic_priority_keeps_accepted_cohort_fifo
+        ; test_case "automatic priority repairs an unknown prior result" `Quick
+          test_automatic_priority_repairs_unknown_predecessor_result
+        ; test_case "read-only inspection preserves absence and refuses uninitialized evidence" `Quick
+            test_read_only_inspection_preserves_absence_and_refuses_uninitialized_store
+        ; test_case "schema identity and budget" `Quick test_schema_identity_and_budget
+        ; test_case "direct message digest matches proof collector" `Quick
+            test_direct_message_digest_matches_proof_collector
+        ; test_case "close is idempotent and refuses later operations" `Quick
+            test_close_is_idempotent_and_refuses_later_operations
+        ; test_case "exact idempotency and terminal dedupe" `Quick
+            test_exact_idempotency_and_terminal_dedupe
+        ; test_case "FIFO edit move cancel" `Quick test_fifo_edit_move_cancel
+        ; test_case "restart interruption" `Quick
+            test_restart_interrupts_running_once_and_preserves_queued
+        ; test_case "strict JSON" `Quick test_strict_json_rejects_duplicate_fields
+        ; test_case "commit failure and uncertain read-back" `Quick
+            test_commit_failure_and_uncertain_readback
+        ; test_case "terminal SQL immutability" `Quick test_terminal_row_is_sql_immutable
+        ; test_case "statement finalize survives GC pressure" `Quick
+            test_statement_finalize_survives_gc_pressure
+        ; test_case "concurrent writer is waited out, not fenced" `Quick
+            test_concurrent_writer_is_waited_out_not_fenced
+        ] )
+    ]

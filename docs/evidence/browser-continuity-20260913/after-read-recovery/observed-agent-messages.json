@@ -1,0 +1,13 @@
+{
+  "model": "runtime",
+  "messages": [],
+  "usage": {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cache_creation_input_tokens": 0,
+    "total_cache_read_input_tokens": 0,
+    "api_calls": 0,
+    "estimated_cost_usd": 0.0,
+    "pricing_gap": null
+  }
+}

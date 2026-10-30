@@ -1,0 +1,11 @@
+
+ RUN  v5.0.2 <isolated-checkout>/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  94 passed (94)
+   Start at  08:32:00
+   Duration  3.59s (tests 36%, import 21%, transform 20%, environment 13%, setup 10%)
+
+    Isolate  3 workers spawned · ~247ms startup each (spawn + environment, per file)
+             at least ~494ms faster with isolate: false — reuses workers across files instead of one per file

@@ -1,0 +1,289 @@
+name: Leader-selected CI
+run-name: Leader-selected CI on ${{ inputs.candidate }} by ${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact combined candidate SHA; dispatch this workflow on main
+        required: true
+        type: string
+      selection:
+        description: JSON receipt from prepare-approved-batch.py
+        required: true
+        type: string
+      compile:
+        description: Bottom Core runtime library build
+        type: boolean
+        default: false
+      tests:
+        description: Explicit minimal behavior suites (required when selected)
+        type: boolean
+        default: false
+      suites:
+        description: Comma-separated suites for the behavior test runner
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  # test.yml (called for the tests scope) declares issues: write at the top
+  # level for its scheduled-failure filing path. A calling workflow must grant
+  # every permission the callee declares, or the run fails before any job
+  # starts (startup_failure with zero jobs). leader-ci never reaches that
+  # issue-filing step itself; this grant exists only to satisfy the callee.
+  pull-requests: read
+  issues: write
+  statuses: write
+
+concurrency:
+  group: leader-ci-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  selection:
+    name: Recheck approved selection
+    runs-on: ubuntu-24.04
+    steps:
+      # Source authority is read using the integrated main implementation,
+      # not a script supplied by an unverified candidate.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify candidate and selected scopes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTION: ${{ inputs.selection }}
+          SCOPES: ${{ toJSON(inputs) }}
+          REPOSITORY: ${{ github.repository }}
+          CANDIDATE: ${{ inputs.candidate }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          scopes = json.loads(os.environ['SCOPES'])
+          if os.environ['GITHUB_REF'] != 'refs/heads/main':
+              raise SystemExit('Dispatch leader CI on main')
+          if not any(scopes.get(name) is True for name in ('compile', 'tests')):
+              raise SystemExit('Select at least one CI scope')
+          if scopes.get('tests', False) and not scopes.get('suites', '').strip():
+              raise SystemExit('Ordinary behavior verification requires explicit suites')
+          if scopes.get('suites', '') and not scopes.get('tests', False):
+              raise SystemExit('Suites require the tests scope')
+          Path('selection.json').write_text(os.environ['SELECTION'])
+          # Design contract: pin every member head pending BEFORE any
+          # verification runs, so a failing verification still leaves the
+          # guard holding until the always()-settle resolves it. This runs
+          # only after the local scope/suites validation above has passed:
+          # an invalid dispatch (empty scope, suites without the tests scope)
+          # must never pin, or the pending would outlive the failing run with
+          # no verified artifact for the settle to read.
+          receipt = json.loads(os.environ['SELECTION'])
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          run_url = os.environ['RUN_URL']
+          for member in receipt['members']:
+              head = member['head']
+              body = json.dumps({
+                  'state': 'pending', 'context': 'leader-selected-ci',
+                  'description': 'Leader-selected CI is running',
+                  'target_url': run_url,
+              }).encode()
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/{repo}/statuses/{head}',
+                  data=body, method='POST',
+                  headers={'Authorization': f'Bearer {token}',
+                           'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request) as response:
+                  if response.status != 201:
+                      raise SystemExit(f'status pin failed for {head}: {response.status}')
+                  print(f'pinned {member["pr"]}@{head[:12]}')
+          PY
+          set -o pipefail
+          python3 scripts/review/verify-approved-selection.py \
+            --selection selection.json --repo "$REPOSITORY" \
+            --candidate "$CANDIDATE" --git-dir . |
+            tee verified-selection.json
+          # tee keeps the refusal JSON in the job log AND in the artifact file
+          # (exit 2 results are refusals, not crashes — the caller still needs
+          # to see why). pipefail turns a verify failure into a step failure.
+      - if: failure()
+        name: Surface the refusal when verification failed
+        run: |
+          if [ -f verified-selection.json ]; then
+            echo '--- verify-approved-selection refusal ---'
+            cat verified-selection.json
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: approved-selection-${{ inputs.candidate }}-${{ github.run_attempt }}
+          path: verified-selection.json
+          if-no-files-found: error
+      - name: Pin selected member heads with a pending leader-selected-ci status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          members = json.loads(Path('verified-selection.json').read_text())['members']
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          url = os.environ['RUN_URL'] + '?pr='
+          for member in members:
+              head = member['head']
+              target = os.environ['RUN_URL']
+              body = json.dumps({
+                  'state': 'pending',
+                  'context': 'leader-selected-ci',
+                  'target_url': url,
+                  'description': 'leader-selected CI in progress (run ' +
+                                 os.environ['GITHUB_RUN_ID'] + ')'}).encode()
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/{repo}/commits/{head}/statuses',
+                  data=body, method='POST',
+                  headers={'Authorization': f'token {token}',
+                           'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request) as response:
+                  if response.status != 201:
+                      raise SystemExit(f'status answer failed for {head}: {response.status}')
+                  print(f'pinned {member["pr"]}@{head[:12]}')
+          PY
+
+  compile:
+    needs: selection
+    if: inputs.compile
+    uses: ./.github/workflows/ci.yml
+    with:
+      candidate_verification: true
+      candidate_sha: ${{ inputs.candidate }}
+
+  tests:
+    needs: selection
+    if: inputs.tests
+    uses: ./.github/workflows/test.yml
+    with:
+      candidate_verification: true
+      candidate_sha: ${{ inputs.candidate }}
+      suite: ${{ inputs.suites }}
+      minimal: true
+
+  evidence:
+    name: Record selected CI results
+    needs: [selection, compile, tests]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download verified selection
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: approved-selection-${{ inputs.candidate }}-${{ github.run_attempt }}
+          path: selection-evidence
+        continue-on-error: true
+      - name: Record scope and results
+        env:
+          SCOPES: ${{ toJSON(inputs) }}
+          RESULTS: ${{ toJSON(needs) }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          scopes = json.loads(os.environ['SCOPES'])
+          needs = json.loads(os.environ['RESULTS'])
+          keys = {'compile': 'compile', 'tests': 'tests'}
+          chosen = {job: needs[job]['result'] for option, job in keys.items() if scopes[option] is True}
+          passed = bool(chosen) and needs['selection']['result'] == 'success' and all(v == 'success' for v in chosen.values())
+          receipt = {'schema_version': 1, 'candidate': os.environ['CANDIDATE'],
+                     'actor': os.environ['GITHUB_ACTOR'], 'selection': json.loads(scopes.get('selection', '')),
+                     'suites': scopes.get('suites', ''), 'results': chosen, 'checks_passed': passed,
+                     'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+                     'merge_authorized': False}
+          Path('leader-ci-results.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('Candidate: `' + receipt['candidate'] + '`\n\n')
+              for job, result in chosen.items():
+                  out.write('- ' + job + ': ' + result + '\n')
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: leader-ci-results-${{ inputs.candidate }}-${{ github.run_attempt }}
+          path: leader-ci-results.json
+          if-no-files-found: error
+      - name: Require selected checks to pass
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raise SystemExit(0 if json.loads(Path('leader-ci-results.json').read_text())['checks_passed'] else 1)
+          PY
+      - name: Settle the leader-selected-ci statuses on member heads
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RAW_SELECTION: ${{ inputs.selection }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          # The run has finished by definition here (this job runs with
+          # if: always()), so the pending pin is resolved either way: a
+          # failed or cancelled run must not leave a pending status that
+          # would block merging forever.
+          #
+          # The raw dispatch receipt already names every head the selection
+          # step pins, and it survives even when verification refused and the
+          # verified artifact was never uploaded. Union it with the verified
+          # artifact (which may resolve heads the raw receipt does not carry)
+          # so a pending pin can never outlive the run.
+          members = []
+          seen = set()
+
+          def collect(text):
+              for member in json.loads(text)['members']:
+                  head = member['head']
+                  if head not in seen:
+                      seen.add(head)
+                      members.append(member)
+
+          members_path = Path('selection-evidence') / 'verified-selection.json'
+          if members_path.exists():
+              collect(members_path.read_text())
+          raw = os.environ.get('RAW_SELECTION', '').strip()
+          if raw:
+              collect(raw)
+          if not members:
+              raise SystemExit('no member heads recoverable; statuses not settled')
+          receipt_path = Path('leader-ci-results.json')
+          if receipt_path.exists():
+              checks_passed = json.loads(receipt_path.read_text())['checks_passed']
+          else:
+              checks_passed = False
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          state = 'success' if checks_passed else 'failure'
+          for member in members:
+              head = member['head']
+              body = json.dumps({
+                  'state': state,
+                  'context': 'leader-selected-ci',
+                  'target_url': os.environ['RUN_URL'],
+                  'description': 'leader-selected CI ' + state + ' (run ' +
+                                 os.environ['GITHUB_RUN_ID'] + ')'}).encode()
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/{repo}/commits/{head}/statuses',
+                  data=body, method='POST',
+                  headers={'Authorization': f'token {token}',
+                           'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request) as response:
+                  if response.status != 201:
+                      raise SystemExit(f'status settle failed for {head}: {response.status}')
+                  print(f'settled {member["pr"]}@{head[:12]} -> {state}')
+          PY

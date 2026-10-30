@@ -1,0 +1,262 @@
+{
+  "scope": "one before/after pair on a synthetic semantic page, real Firefox, same declared model, fresh manual Keeper per trial; observed comparison, not causal performance benchmark",
+  "limitations": [
+    "TUI-shaped input constructed from actual scene, not a clipboard capture",
+    "No real target-channel collection",
+    "Installed server embeds d568ba7ffc; instruction supplied from the isolated worktree package",
+    "One pair only; no general latency or call-count guarantee"
+  ],
+  "trials": [
+    {
+      "label": "before",
+      "runtime_id": "glm-coding.glm-5.3-flash",
+      "keeper": "browser-handoff-proof-87648000",
+      "trace_id": "trace-1789209616365-00000",
+      "operation_id": "kmsg-d8a6efaec954c231a92ab73a135ef2e3",
+      "operation_state": "Succeeded",
+      "started_at": null,
+      "completed_at": 1789209709.988961,
+      "server_commit": "d568ba7ffcb35555cba5d07c4a87c3871ac67db8",
+      "server_sha256": "850b207b7f77813e8953fe741eb04ef259575f561c212b6834e269c5b51b1939",
+      "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+      "instruction_file_sha256": "5ef12ed797fb4cf277ecd4339ddc98b21746f914c17315e1e2339af5e7463f25",
+      "input": {
+        "message": "선택한 영역의 본문을 읽고 담당자와 결정 사항을 간단히 알려줘. 현재 Browser Lane 관측은 아래와 같아.\n{\"context\": \"Browser element observation\", \"lane\": \"automation\", \"clientId\": null, \"tabId\": 1, \"url\": \"http://127.0.0.1:56101/index.html\", \"documentId\": \"91a790a7bac71e78544a13bb3a888624\", \"nodeId\": \"n3\", \"view\": \"regions\", \"scope\": null, \"viewport\": {\"height\": 683, \"scrollX\": 0, \"scrollY\": 0, \"width\": 1366}, \"truncated\": false, \"tag\": \"article\", \"text\": \"Alpha release\", \"source\": null}",
+        "observation_origin": "constructed TUI payload from real observed region; not a clipboard capture"
+      },
+      "calls": [
+        {
+          "id": "call_9d18a8e5bef24775ae031c93",
+          "tool": "keeper_skill",
+          "input": {
+            "identity": {
+              "source_id": "project-masc",
+              "package_id": "browser-lanes",
+              "name": "browser-lanes"
+            }
+          },
+          "is_error": true,
+          "output_bytes": 477,
+          "output_sha256": "658e8f7365b46b05d415c54cb2c08246771cca9e6500c4715c0d705116037e77",
+          "output": "{\"message\":\"Skill content does not fit the provider inline tool-result boundary: observed_bytes=16908 max_bytes=16384\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"skill_content_error\":{\"kind\":\"provider_inline_too_large\",\"observed_bytes\":16908,\"max_bytes\":16384}}}"
+        },
+        {
+          "id": "call_4ab64450bcf34551917997ad",
+          "tool": "BrowserRead",
+          "input": {
+            "lane": "automation",
+            "mode": "regions",
+            "scope": {
+              "documentId": "91a790a7bac71e78544a13bb3a888624",
+              "nodeId": "n3"
+            },
+            "tabId": 1
+          },
+          "is_error": false,
+          "output_bytes": 801,
+          "output_sha256": "31779806e23d38ea44af6dae952074c0ca42165fc24312699076d56ccb93a561",
+          "output": "{\"tabId\":1,\"chars\":13,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"91a790a7bac71e78544a13bb3a888624\",\"nodes\":[{\"color\":\"rgb(0, 0, 0)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n3\",\"rects\":[{\"height\":106.41667175292967,\"width\":1054,\"x\":271,\"y\":107.83332824707033}],\"role\":\"article\",\"sourceContext\":null,\"tag\":\"article\",\"text\":\"Alpha release\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":{\"documentId\":\"91a790a7bac71e78544a13bb3a888624\",\"nodeId\":\"n3\"},\"title\":\"Browser handoff fixture\",\"truncated\":false,\"url\":\"http://127.0.0.1:56101/index.html\",\"view\":\"regions\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":12.793667}"
+        },
+        {
+          "id": "call_36800da377b3435f93c9c9b8",
+          "tool": "BrowserRead",
+          "input": {
+            "lane": "automation",
+            "mode": "text",
+            "tabId": 1
+          },
+          "is_error": false,
+          "output_bytes": 404,
+          "output_sha256": "a258b474663598435d570899b59c35bc88ea0a1eca5fc499da1f51c4bf459d69",
+          "output": "{\"clientId\":null,\"chars\":255,\"text\":\"Projects\\nAlpha\\nBeta\\n\\nNavigation-only note\\n\\nProject updates\\nAlpha release\\n\\nOwner: Mina. Decision: ship Tuesday after accessibility review.\\n\\nNext project\\nBeta release\\n\\nOwner: Joon. Decision: postpone Friday until migration completes.\\n\\nUnrelated sidebar note\",\"title\":\"Browser handoff fixture\",\"truncated\":false,\"url\":\"http://127.0.0.1:56101/index.html\"}"
+        },
+        {
+          "id": "call_e57f6a97baf84efabd97bac2",
+          "tool": "BrowserRead",
+          "input": {
+            "lane": "automation",
+            "mode": "elements",
+            "scope": {
+              "documentId": "91a790a7bac71e78544a13bb3a888624",
+              "nodeId": "n3"
+            },
+            "tabId": 1
+          },
+          "is_error": true,
+          "output_bytes": 251,
+          "output_sha256": "5a2749d43855bb0d9b70440395da400cbf884dae2be81406ae31c6b8fd77fdcc",
+          "output": "scope supports top-document scene or regions only\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes."
+        },
+        {
+          "id": "call_4888635099834acab46e3ce1",
+          "tool": "BrowserRead",
+          "input": {
+            "lane": "automation",
+            "mode": "elements",
+            "tabId": 1
+          },
+          "is_error": false,
+          "output_bytes": 840,
+          "output_sha256": "c4fc964cdaeb947b74fece2e90fbb04611e18e97b9a0a01af17ba7b141f511b2",
+          "output": "{\"clientId\":null,\"tabId\":1,\"elements\":[{\"disabled\":false,\"href\":\"http://127.0.0.1:56101/index.html#alpha\",\"name\":\"\",\"role\":null,\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > nav:nth-of-type(1) > a:nth-of-type(1)\",\"tag\":\"a\",\"text\":\"Alpha\",\"type\":null},{\"disabled\":false,\"href\":\"http://127.0.0.1:56101/index.html#beta\",\"name\":\"\",\"role\":null,\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > nav:nth-of-type(1) > a:nth-of-type(2)\",\"tag\":\"a\",\"text\":\"Beta\",\"type\":null},{\"disabled\":false,\"href\":\"http://127.0.0.1:56101/index.html#beta\",\"name\":\"\",\"role\":null,\"selector\":\"html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > article:nth-of-type(1) > a:nth-of-type(1)\",\"tag\":\"a\",\"text\":\"Next project\",\"type\":null}],\"title\":\"Browser handoff fixture\",\"total\":3,\"truncated\":false,\"url\":\"http://127.0.0.1:56101/index.html\"}"
+        },
+        {
+          "id": "call_45251e97444349ea9375cc6f",
+          "tool": "BrowserRead",
+          "input": {
+            "lane": "automation",
+            "mode": "scene",
+            "scope": {
+              "documentId": "91a790a7bac71e78544a13bb3a888624",
+              "nodeId": "n3"
+            },
+            "tabId": 1
+          },
+          "is_error": false,
+          "output_bytes": 1407,
+          "output_sha256": "31b8b26e9198799d7328b9c7584ffd9df65e3875b4acf865fd6292187052e206",
+          "output": "{\"tabId\":1,\"chars\":88,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"91a790a7bac71e78544a13bb3a888624\",\"nodes\":[{\"color\":\"rgb(0, 0, 0)\",\"fontSize\":27,\"fontWeight\":\"700\",\"kind\":\"text\",\"nodeId\":\"n6\",\"rects\":[{\"height\":28,\"width\":175.60000610351562,\"x\":271,\"y\":107.83332824707033}],\"sourceContext\":null,\"tag\":\"h2\",\"text\":\"Alpha release\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(0, 0, 0)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n7\",\"rects\":[{\"height\":19,\"width\":500.683349609375,\"x\":271,\"y\":158.25}],\"sourceContext\":null,\"tag\":\"p\",\"text\":\"Owner: Mina. Decision: ship Tuesday after accessibility review.\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(0, 0, 238)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:56101/index.html#beta\",\"kind\":\"control\",\"nodeId\":\"n8\",\"rects\":[{\"height\":19,\"width\":96.06666564941406,\"x\":271,\"y\":195.25}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Next project\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":{\"documentId\":\"91a790a7bac71e78544a13bb3a888624\",\"nodeId\":\"n3\"},\"title\":\"Browser handoff fixture\",\"truncated\":false,\"url\":\"http://127.0.0.1:56101/index.html\",\"view\":\"content\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":10.757792}"
+        }
+      ],
+      "answer": "확인했습니다. 선택한 영역(article n3) 안은 h2, 본문 문단, 링크 세 노드로 구성되어 있고, 담당자와 결정 사항은 그 문단(n7)에 있습니다.\n\n- **영역 제목**: Alpha release\n- **담당자**: Mina\n- **결정 사항**: 접근성 검토(accessibility review)를 마친 뒤 화요일에 출시한다\n\n영역 안의 \"Next project\" 링크(#beta)는 이동 요소일 뿐 본문 내용은 아닙니다. 참고로 이 문서에는 뒤이은 Beta 영역(담당자 Joon, \"마이그레이션 완료까지 금요일 일정 연기\")이 있지만, 선택 범위 밖이라 위 답변에는 포함하지 않았습니다.",
+      "usage": {
+        "total_input_tokens": 116849,
+        "total_output_tokens": 3108,
+        "total_cache_creation_input_tokens": 0,
+        "total_cache_read_input_tokens": 95168,
+        "api_calls": 7,
+        "estimated_cost_usd": 0.050660199999999996,
+        "pricing_gap": null
+      },
+      "browser_read_count": 5,
+      "shutdown_evidence": "Admission captured; terminal record was observed by operator but not preserved before the next startup pruned it."
+    },
+    {
+      "label": "after",
+      "runtime_id": "glm-coding.glm-5.3-flash",
+      "keeper": "browser-handoff-proof-79206000",
+      "trace_id": "trace-1789209821109-00000",
+      "operation_id": "kmsg-9c849a37aedf2b7809dec242432c27ae",
+      "operation_state": "Succeeded",
+      "started_at": null,
+      "completed_at": 1789209851.308364,
+      "server_commit": "d568ba7ffcb35555cba5d07c4a87c3871ac67db8",
+      "server_sha256": "850b207b7f77813e8953fe741eb04ef259575f561c212b6834e269c5b51b1939",
+      "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+      "instruction_file_sha256": "674cb89593b3ffeacd1e4439f336d1d3aba7de9c4f2e79c3791bdb60cc799731",
+      "input": {
+        "message": "선택한 영역의 본문을 읽고 담당자와 결정 사항을 간단히 알려줘. 현재 Browser Lane 관측은 아래와 같아.\n{\"context\": \"Browser element observation\", \"lane\": \"automation\", \"clientId\": null, \"tabId\": 1, \"url\": \"http://127.0.0.1:58103/index.html\", \"documentId\": \"e8a7bd38ed0ab1d3926908a8c54bd563\", \"nodeId\": \"n3\", \"view\": \"regions\", \"scope\": null, \"viewport\": {\"height\": 683, \"scrollX\": 0, \"scrollY\": 0, \"width\": 1366}, \"truncated\": false, \"tag\": \"article\", \"text\": \"Alpha release\", \"source\": null}",
+        "observation_origin": "constructed TUI payload from real observed region; not a clipboard capture"
+      },
+      "calls": [
+        {
+          "id": "call_eb578aa349474d53b9cec106",
+          "tool": "keeper_skill",
+          "input": {
+            "identity": {
+              "name": "browser-lanes",
+              "package_id": "browser-lanes",
+              "source_id": "project-masc"
+            }
+          },
+          "is_error": false,
+          "output_bytes": 11698,
+          "output_sha256": "77fcb0fd9168e6da2bbec247f44626f64d9232de2799087cda9ad160221e411b"
+        },
+        {
+          "id": "call_e80153027e304aeba6566119",
+          "tool": "BrowserRead",
+          "input": {
+            "expectedUrl": "http://127.0.0.1:58103/index.html",
+            "lane": "automation",
+            "mode": "scene",
+            "scope": {
+              "documentId": "e8a7bd38ed0ab1d3926908a8c54bd563",
+              "nodeId": "n3"
+            },
+            "tabId": 1
+          },
+          "is_error": false,
+          "output_bytes": 1407,
+          "output_sha256": "96cd8e82e5e3e59ed3007a1fab203c7944a319afe186a50007cc202bc79c4683",
+          "output": "{\"tabId\":1,\"chars\":88,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"e8a7bd38ed0ab1d3926908a8c54bd563\",\"nodes\":[{\"color\":\"rgb(0, 0, 0)\",\"fontSize\":27,\"fontWeight\":\"700\",\"kind\":\"text\",\"nodeId\":\"n6\",\"rects\":[{\"height\":28,\"width\":175.60000610351562,\"x\":271,\"y\":107.83332824707033}],\"sourceContext\":null,\"tag\":\"h2\",\"text\":\"Alpha release\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(0, 0, 0)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n7\",\"rects\":[{\"height\":19,\"width\":500.683349609375,\"x\":271,\"y\":158.25}],\"sourceContext\":null,\"tag\":\"p\",\"text\":\"Owner: Mina. Decision: ship Tuesday after accessibility review.\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(0, 0, 238)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:58103/index.html#beta\",\"kind\":\"control\",\"nodeId\":\"n8\",\"rects\":[{\"height\":19,\"width\":96.06666564941406,\"x\":271,\"y\":195.25}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Next project\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":{\"documentId\":\"e8a7bd38ed0ab1d3926908a8c54bd563\",\"nodeId\":\"n3\"},\"title\":\"Browser handoff fixture\",\"truncated\":false,\"url\":\"http://127.0.0.1:58103/index.html\",\"view\":\"content\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":16.233083}"
+        }
+      ],
+      "answer": "읽었습니다. URL·문서 참조가 유효했고(`truncated=false`) 선택 영역 전체 본문은 아래 세 항목이었습니다.\n\n- **제목**: Alpha release (h2)\n- **본문**: \"Owner: Mina. Decision: ship Tuesday after accessibility review.\"\n- 링크 \"Next project\" (`#beta`)\n\n**요약**\n- 담당자: **Mina**\n- 결정 사항: **접근성(accessibility) 검토를 마친 뒤 화요일에 출시**",
+      "usage": {
+        "total_input_tokens": 55778,
+        "total_output_tokens": 1015,
+        "total_cache_creation_input_tokens": 0,
+        "total_cache_read_input_tokens": 47296,
+        "api_calls": 3,
+        "estimated_cost_usd": 0.021189200000000002,
+        "pricing_gap": null
+      },
+      "browser_read_count": 1,
+      "skill_activation": {
+        "identity": {
+          "source_id": "project-masc",
+          "package_id": "browser-lanes",
+          "name": "browser-lanes"
+        },
+        "content_revision": "e20f8ce4cf59f4bdc7e6d7fc5f01a88e4b4447a1ebe8409f67cddbbd879864a5",
+        "snapshot_revision": "1b633db2957889903074762fa225d017c66b1f7ccf0f45f23ffd3c4f7993fd65",
+        "turn_ref": "trace-1789209821109-00000#1",
+        "runtime_id": "glm-coding.glm-5.3-flash",
+        "skill_tool_use_id": "call_eb578aa349474d53b9cec106",
+        "agent_core_turn": 0,
+        "invocation": {
+          "kind": "instruction",
+          "origin": {
+            "kind": "session_instruction"
+          },
+          "served_content": {
+            "kind": "skill_body",
+            "bytes": 11698,
+            "sha256": "77fcb0fd9168e6da2bbec247f44626f64d9232de2799087cda9ad160221e411b"
+          }
+        },
+        "delivery": {
+          "boundary": {
+            "kind": "model_response",
+            "agent_core_turn": 1
+          },
+          "runtime_id": "glm-coding.glm-5.3-flash",
+          "delivered_at": "2026-09-12T10:44:01Z",
+          "content_bytes": 11698,
+          "content_sha256": "77fcb0fd9168e6da2bbec247f44626f64d9232de2799087cda9ad160221e411b"
+        },
+        "actions": [
+          {
+            "identity": {
+              "kind": "call_id",
+              "call_id": "call_e80153027e304aeba6566119"
+            },
+            "tool_name": "BrowserRead",
+            "runtime_id": "glm-coding.glm-5.3-flash",
+            "agent_core_turn": 1,
+            "observed_at": "2026-09-12T10:44:01Z"
+          }
+        ],
+        "activated_at": "2026-09-12T10:43:52Z"
+      },
+      "shutdown_phase": {
+        "kind": "finalized",
+        "evidence": {
+          "cleanup": {
+            "settled_task_ids": [],
+            "pending_confirms_removed": 0,
+            "meta_snapshot_digest": "6ee0d19ece8bf603603a456001114ee7626b3cdc91082ca3c248e97280d4c9a8"
+          },
+          "meta_removed": false,
+          "session_removed": false,
+          "registry_unregistered": true,
+          "accumulator_dropped": true,
+          "completion": {
+            "kind": "not_requested"
+          }
+        }
+      }
+    }
+  ]
+}

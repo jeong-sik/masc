@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "scope": "Selected research-to-feature delivery plus whole-stack propagation of the reviewed retained-recovery amendment; not product-wide completion uplift.",
+  "attachment_sha256": "4b219e97e0b2df206b2d12cfae39316d01e9d6e709f300757237b0eb0a4ab619",
+  "input_observation": {
+    "observed_at": "2026-10-26T06:56:26.395949+00:00",
+    "head": "3f16ed48bba5a85337c57633ea4c363ba3fbb5e5",
+    "branches": {
+      "feat/completion-feature-plan-20261025": "2b4c002379c210393cd0b71b1725231689eea216",
+      "test/goal-original-body-isolation-20261025": "774141773f76244ba7ce7adb677960d839ad5f8e",
+      "fix/goal-original-body-isolation-20261025": "3a65b0756ab418649f9b942f1220737f6ed92dd0",
+      "test/goal-body-restart-evidence-20261025": "79b317e67f6147ccfce20a6175d70f5cb0e5b791",
+      "test/goal-daemon-progress-20261025": "c2d6dfaa57371e886001f1f863550acd94bbaa02",
+      "fix/goal-daemon-progress-20261025": "315aea3325156d51a1151ccf32a46ab481ca0310",
+      "fix/goal-original-failure-diagnostics-20261025": "3f16ed48bba5a85337c57633ea4c363ba3fbb5e5"
+    },
+    "all_direct_parents_are_ancestors": true,
+    "sha256": {
+      "lib/goal_verification_agent.ml": "b85124187a86e3bfe41efe399d392091725f41a005c3b87ce720ebbe4454391c",
+      "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+      ".github/workflows/test.yml": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191",
+      "test/test_goal_verification_agent.ml": "2e31d7ceccf5437c749639beefa90e59f93a1843d5487a81e743e4d4ba7e99e4",
+      "test/test_goal_verifier_worker.ml": "fd30be1fed532b28dd5eb8cacf52416ec57c034d803722ba40fafecdba1f530d"
+    }
+  },
+  "native_receipt": {
+    "workflow_name": "Test",
+    "workflow_path": ".github/workflows/test.yml",
+    "run_id": 40282764729,
+    "job_id": 121439494566,
+    "head_sha": "3f16ed48bba5a85337c57633ea4c363ba3fbb5e5",
+    "ref": "fix/goal-original-failure-diagnostics-20261025",
+    "event": "workflow_dispatch",
+    "run_attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-10-26T06:56:26Z",
+    "updated_at": "2026-10-26T07:03:10Z",
+    "url": "https://github.com/jeong-sik/masc/actions/runs/40282764729",
+    "selection": "test_goal_verification_agent,test_goal_verifier_worker",
+    "minimal": true,
+    "suites": [
+      {
+        "name": "test_goal_verification_agent",
+        "passed": 42,
+        "failed": 0,
+        "execution_seconds": 105.498
+      },
+      {
+        "name": "test_goal_verifier_worker",
+        "passed": 20,
+        "failed": 0,
+        "execution_seconds": 2.178
+      }
+    ],
+    "saved_decoded_log_sha256": "3f7fc8a6ae123870c618a85869810adb0c8153a05c8611d0d76240fa8fef6195",
+    "saved_decoded_log_bytes": 225588,
+    "excerpts": [
+      "2026-10-26T06:57:37.9049404Z   TARGET_SUITES: test_goal_verification_agent,test_goal_verifier_worker",
+      "2026-10-26T06:57:37.9269442Z   TARGET_SUITES: test_goal_verification_agent,test_goal_verifier_worker",
+      "2026-10-26T07:01:18.7092587Z [targeted] test/test_goal_verification_agent: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false",
+      "2026-10-26T07:01:18.7117964Z [targeted] test/test_goal_verification_agent: start 2026-10-26T07:01:18Z",
+      "2026-10-26T07:01:29.1437224Z   [OK]          drain                               0   daemon drains healthy...",
+      "2026-10-26T07:03:04.3030098Z Test Successful in 105.498s. 42 tests run.",
+      "2026-10-26T07:03:04.3119536Z [targeted] test/test_goal_verification_agent: OK in 106s",
+      "2026-10-26T07:03:04.3688029Z [targeted] test/test_goal_verifier_worker: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false",
+      "2026-10-26T07:03:04.3714909Z [targeted] test/test_goal_verifier_worker: start 2026-10-26T07:03:04Z",
+      "2026-10-26T07:03:04.9180053Z   [OK]          execution          6   actual pending Goal survives foreign o...",
+      "2026-10-26T07:03:05.0191344Z   [OK]          execution          7   actual boot publication survives forei...",
+      "2026-10-26T07:03:05.2126187Z   [OK]          execution          8   actual process restart survives foreig...",
+      "2026-10-26T07:03:05.2387348Z   [OK]          execution          9   actual host refuses its own original b...",
+      "2026-10-26T07:03:05.9925141Z   [OK]          execution         15   actual proof partial write and phase-m...",
+      "2026-10-26T07:03:06.6281029Z Test Successful in 2.178s. 20 tests run.",
+      "2026-10-26T07:03:06.6349469Z [targeted] test/test_goal_verifier_worker: OK in 2s"
+    ]
+  },
+  "source_review": {
+    "reviewer": "completion_stack_audit",
+    "head": "3f16ed48bba5a85337c57633ea4c363ba3fbb5e5",
+    "base": "315aea3325156d51a1151ccf32a46ab481ca0310",
+    "direct_diff_sha256": "0ceaafcd15c54bbb8aabd4039cfcbeafa52e2a8c57ddbbd575edd8b57f8cc4d3",
+    "amendment_base": "94621a7840a1f53ea3f9904e95d4bbfb2a4c74c4",
+    "amendment_diff_sha256": "71ba28077eb485b7877749281b9b4e565c4e859cb61f1acccb9d52c70c739343",
+    "verdict": "PASS",
+    "scope": "Current direct PR source and combined amendment; restacked upper layers preserve lower repair; historical receipts independently matched; not native execution or formal GitHub approval.",
+    "restacked_layers": [
+      {
+        "pr": 45964,
+        "head": "79b317e67f6147ccfce20a6175d70f5cb0e5b791",
+        "base": "3a65b0756ab418649f9b942f1220737f6ed92dd0",
+        "diff": "2123e2af0e6d404ee984098c41087128de993e6fb42cb18e6b1785debb2e8549"
+      },
+      {
+        "pr": 45976,
+        "head": "c2d6dfaa57371e886001f1f863550acd94bbaa02",
+        "base": "79b317e67f6147ccfce20a6175d70f5cb0e5b791",
+        "diff": "bf927c9c1acbcb260bac2ad00aacd5431c0b1dd076a8794b131c7c10fe51c960"
+      },
+      {
+        "pr": 45977,
+        "head": "315aea3325156d51a1151ccf32a46ab481ca0310",
+        "base": "c2d6dfaa57371e886001f1f863550acd94bbaa02",
+        "diff": "366141b8bb2d758bc99593419de082e29ca62b380c1b63f88e445805f6d70821"
+      }
+    ]
+  },
+  "task_status_observation": {
+    "date": "2026-10-26",
+    "task-2662": "done",
+    "task-2666": "done",
+    "task-2672": "done",
+    "task-2663": "done; separate owner, not re-executed by this audit",
+    "task-2184": "todo",
+    "task-2664": "todo",
+    "task-2665": "in_progress; sangsu",
+    "task-2696": "integration and delivery audit; final handoff in issue45975"
+  },
+  "limitations": [
+    "Controlled reviewers, not a real-model completion-rate experiment.",
+    "The phase-moved Goal own-body corruption branch is source-reviewed, not separately fault-injected by these existing suites.",
+    "Retained recovery discovery does not arm an automatic retry or add historical-request Board/current-state diagnostics.",
+    "Full regression, installed UI, merge, installation and production rollout were not executed.",
+    "Formal GitHub approvals on earlier heads are not current-head approvals."
+  ]
+}

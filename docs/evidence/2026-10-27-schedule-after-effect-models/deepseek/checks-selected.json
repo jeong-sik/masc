@@ -1,0 +1,88 @@
+{
+  "is_derivative": true,
+  "checks": [
+    {
+      "name": "owned workspace and pinned native source are actually served",
+      "passed": true
+    },
+    {
+      "name": "owned workspace gate accepts setting",
+      "passed": true
+    },
+    {
+      "name": "owned Keeper tool approval accepts setting",
+      "passed": true
+    },
+    {
+      "name": "first actual A1 publication has exactly one Keeper-authored note",
+      "passed": true
+    },
+    {
+      "name": "A1 B A2 each exist exactly once with the actual Keeper author",
+      "passed": true
+    },
+    {
+      "name": "A1 precedes B arrival, actual A checkpoint and B source entry",
+      "passed": true
+    },
+    {
+      "name": "original A has no premature ACK and is readmitted after B ACK",
+      "passed": true
+    },
+    {
+      "name": "A retention and final ACK refer to the exact original incarnation",
+      "passed": true
+    },
+    {
+      "name": "successful tool result names its exact stored note 6",
+      "passed": true
+    },
+    {
+      "name": "successful tool result names its exact stored note 11",
+      "passed": true
+    },
+    {
+      "name": "successful tool result names its exact stored note 12",
+      "passed": true
+    },
+    {
+      "name": "B actual effect belongs to B admitted source before its ACK",
+      "passed": true
+    },
+    {
+      "name": "exact execution lookup confirms execution-node-97395b91d401fd4313b29c3a64936143",
+      "passed": true
+    },
+    {
+      "name": "exact execution lookup confirms execution-node-71fa1d4234c523d5ab8329d4d0a51dbd",
+      "passed": true
+    },
+    {
+      "name": "exact execution lookup confirms execution-node-95f7aedce92dadf8948df8f2f75fc325",
+      "passed": true
+    },
+    {
+      "name": "A2 executes only after exact A readmission, separately from the B Keeper turn",
+      "passed": true
+    },
+    {
+      "name": "readmitted A actually observes B note before writing A2",
+      "passed": true
+    },
+    {
+      "name": "persisted continuation lineage retains A1 and B tool results before A2",
+      "passed": true
+    },
+    {
+      "name": "both exact sources are completed and the target is actually idle",
+      "passed": true
+    },
+    {
+      "name": "owned producer exits normally without forced kill",
+      "passed": true
+    }
+  ],
+  "passed": 20,
+  "failed": 0,
+  "scope": "Original observer checks only; neither semantic approval nor all-effects accounting."
+}

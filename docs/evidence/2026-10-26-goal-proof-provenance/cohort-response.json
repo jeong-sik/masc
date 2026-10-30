@@ -1,0 +1,150 @@
+{
+  "schema": "masc.goal.provenance.actual-controls.review-response.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T17:07:26.973958+00:00",
+  "main_task_id": "task-2676",
+  "verdict": "AGREES_BOUNDED_THREE_ACTUAL_CONTROLS_NO_NEW_P0_P1_P2_IN_COHORT",
+  "review_read_in_full": true,
+  "identity": {
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "candidate_prompt_file_bytes": 7530,
+    "candidate_prompt_file_sha256": "35b6535650e99ec19a39a13a669e19f3a89067173d9a9dd30deab4dfb459b340",
+    "configured_slot": "glm-coding.glm-5.3-flash",
+    "all_eleven_requested_and_reported_models": "glm-5.3-flash",
+    "unknown_reported_model_POSTs": 0
+  },
+  "adjudication": {
+    "assessment": "The three controls support the intended distinction within this fixture: inspect the declared recorded output when the metric requires that output, and inspect the reported value when the metric instead measures the report itself. No extra execution requirement was imposed on the reported-value control.",
+    "controls": [
+      {
+        "control": "N",
+        "goal_id": "goal-proof-provenance-conflicting-report-20261026",
+        "criterion_revision": "2e4239d2c07383978a107eb5c42ddf18",
+        "request_id": "918cc1385336cc6c062623f8c3b7afe1",
+        "run_id": "01a173f6-1407-7000-817c-a3d570b92e36",
+        "measured_subject": "recorded stdout",
+        "used_value": 10,
+        "target": "정확히 20",
+        "verdict": "REJECT",
+        "completion": "proof_refuted",
+        "phase": "executing",
+        "raw_record_reads": 1,
+        "provider_POSTs": 4
+      },
+      {
+        "control": "P",
+        "goal_id": "goal-proof-provenance-matching-raw-20261026",
+        "criterion_revision": "fc7f471ed57694e196104d2bc38c92bd",
+        "request_id": "196d98a01bf5ddf38f2f9deacb1f664e",
+        "run_id": "01a173f6-13b5-7000-8565-d9c9363d4b92",
+        "measured_subject": "recorded stdout",
+        "used_value": 10,
+        "target": "정확히 10",
+        "verdict": "APPROVE",
+        "completion": "proof_proven",
+        "phase": "awaiting_confirmation",
+        "raw_record_reads": 1,
+        "provider_POSTs": 4
+      },
+      {
+        "control": "R",
+        "goal_id": "goal-proof-provenance-reported-value-20261026",
+        "criterion_revision": "22689babdb052c9b214a637e8ecc960b",
+        "request_id": "6fae721bbab8362ed87f3f76a36172d6",
+        "run_id": "01a173f6-1434-7000-ae29-afcf0ef18015",
+        "measured_subject": "reported_value itself",
+        "used_value": 20,
+        "target": "정확히 20",
+        "verdict": "APPROVE",
+        "completion": "proof_proven",
+        "phase": "awaiting_confirmation",
+        "raw_record_reads": 0,
+        "provider_POSTs": 3
+      }
+    ],
+    "counts": "One unblinded operator-controlled cohort, three Goal runs, eleven provider POSTs4/4/3 and eight unique tools. POSTs are tool-loop rounds, not independent experiment samples. Reviewed and committed are stages of each same run; commit observation retry does not add model executions.",
+    "fixture": "One recorded controlled command print(sum(range(5))) produced exit0/stdout10. N and P read the same frozen record; neither executed the command. The separate producer report intentionally says20/measured_pass and is disclosed as controlled_fixture data. R legitimately measures that reported20 under its own explicit criterion."
+  },
+  "prompt_application": {
+    "actual_mechanism": "Two authenticated persisted isolated-runtime overrides, not successful file-only loading.",
+    "proof_effective_sha256": "c753437dc9cae1373e8ccd909d1b33fb86dc5a8be02076e828b5c7225e5b1997",
+    "lookup_effective_sha256": "079d9e9dfe87ba362a0da10130764bc2a4a930e3cbf78a2ac24b358efbe98fde",
+    "direct_checks": "Before/after effective prompt snapshots change only goal_verification.proof and goal_verification.lookup. Their request values equal the effective override values and exact candidate sections. All managed file_value fields remain unchanged. Per-control actual first System/User messages equal the retained system_instructions/prompt exactly.",
+    "scope": "Existing3e binary plus these runtime overrides. The full candidate file hash does not turn the binary into a build of the later prompt-source branch or PR head."
+  },
+  "independent_selected_original_checks": [
+    "The three retained Original bodies bind the actual criterion/metric/target/request and prompt digest to each control.",
+    "All eleven request/response pairs were parsed for requested/reported model and protocol tool calls. Their model identifiers match. The actual structured verdict reasons match the frozen reason digests.",
+    "Eight response tool-call IDs join subsequent actual Tool messages; repeated history carries equal content. Their byte lengths/SHA256 match the frozen review, including the common stdout-record Tool body for N/P.",
+    "The25 selected Original and wire files were checked against their manifest entries. Additional prompt application and frozen Goal/verification snapshots were checked against the manifest. This is not a second full98-file inventory audit.",
+    "Frozen Goal/verification snapshots independently match each control criterion, request/run, phase, completion state and full verdict-evidence digest.",
+    "The safe result/tool/persisted/stop projections and separate correction were hash checked. No private reasoning, authentication header or raw private host path is exported here."
+  ],
+  "harness_and_wording_limits": {
+    "initial_file_only_failure": "The actual effective template remained baseline until normal overrides were applied. The failed preflight is not a model REJECT or an extra experiment. Its original assertion traceback was not independently retained; the source guard, before/after snapshots and application-plan receipt support the limited account.",
+    "driver_history": "Not all prior driver source bodies are in the98-original manifest. The final dispatch source digest and prepared numeric targets/outcomes are recorded; the exact-equality clarification was made before dispatch. Do not claim complete replayability of every intermediate harness version.",
+    "P3_correction": "The unchanged original result contains an ambiguous twelve phrase in a sentence denying sample independence. The separate760B correction accurately states three Goal runs/eleven POSTs, not independent samples. It changes no counts, outcome or oracle and is outside the original98-file freeze.",
+    "original_result_sha256": "a8d25dd6117dc94292a86647b968f98d171ec400a9c9db5995dc51089fd7c530",
+    "separate_correction_sha256": "ba205da20a50f1ddd8508daadad68392569de98a3e8ef6638f53ea4cbfeee3c6"
+  },
+  "remaining_scope": [
+    "The arithmetic/report fixture is not a rerun or sufficient proof of the original eleven linked behavior cases. The original main Goal is not completed and no human final confirmation is established.",
+    "Earlier primary25ba failures and candidate3e plus overrides differ in source/context. This cohort has no matched baseline A/B and cannot establish a source-only causal fix or a general reliability rate.",
+    "Equal configured/requested/reported model names do not establish independent model judgment or fixed weight identity.",
+    "Producer-label resistance under these three explicit metrics is not deterministic prompt-injection defense. Contract/injection separation remains a model judgment.",
+    "Prior CI-overall-status and A3-run-attribution P2 reason errors were not exercised here. Their empirical resolution is not demonstrated by these controls.",
+    "No new-head native build, production installation, all-stack approval, formal GitHub approval or merge follows. Future publication byte equality is a separate check; this response does not approve the entire Native Stack or PR46001.",
+    "Cleanup evidence is limited to the two tracked proxy/server PIDs and saved exact-identity/SIGTERM/absence receipts. No new live process check or descendant/fleet/global absence claim is made."
+  ],
+  "current_scoped_outcome_or_integrity_P0_P1_P2_blockers": [],
+  "carried_integrity_review": {
+    "manifest_sha256": "aaf27de7d9673e791db224656b9ae4c33ed891cf10fce2c3e6ab3edb3c20d7d7",
+    "original_files": 98,
+    "full98_audit_attributed_to_frozen_review": true,
+    "full98_audit_repeated_in_response": false
+  },
+  "input_bindings": [
+    {
+      "path": "../masc-goal-proof-provenance-controls-review-20261026/review.json",
+      "bytes": 23777,
+      "sha256": "d6d15e9b54a9ca4ff2039ab1a1214d146593bd8bb36aeb6e779ac36e5baf3803"
+    },
+    {
+      "path": "../masc-goal-proof-provenance-controls-3e0d-20261026/safe-results/result.json",
+      "bytes": 7362,
+      "sha256": "a8d25dd6117dc94292a86647b968f98d171ec400a9c9db5995dc51089fd7c530"
+    },
+    {
+      "path": "../masc-goal-proof-provenance-controls-3e0d-20261026/safe-results/actual-tool-sequence.json",
+      "bytes": 13928,
+      "sha256": "c65e7c6f5fece2672817fd24f7d4488e70637e7ffd4a06032921d007482c92cc"
+    },
+    {
+      "path": "../masc-goal-proof-provenance-controls-3e0d-20261026/safe-results/persisted-outcomes.json",
+      "bytes": 10390,
+      "sha256": "89dc534e575f24644f1bdff76687356be8e889ceb65ab7fdd2d16ed874f6aaa1"
+    },
+    {
+      "path": "../masc-goal-proof-provenance-controls-3e0d-20261026/safe-results/owned-stop.json",
+      "bytes": 273,
+      "sha256": "930efa2758ed1c651a1fd45e922cbc1e63d0918a107309cdb0b359877c4965a3"
+    },
+    {
+      "path": "../masc-goal-proof-provenance-controls-3e0d-20261026/terminal-originals-private/manifest.json",
+      "bytes": 17732,
+      "sha256": "aaf27de7d9673e791db224656b9ae4c33ed891cf10fce2c3e6ab3edb3c20d7d7"
+    },
+    {
+      "path": "../masc-goal-proof-source-provenance-20261026/docs/evidence/2026-10-26-goal-proof-provenance/result-wording-correction.json",
+      "bytes": 760,
+      "sha256": "ba205da20a50f1ddd8508daadad68392569de98a3e8ef6638f53ea4cbfeee3c6"
+    }
+  ],
+  "effects": {
+    "API_model_provider_native_build_CI_Docker_calls": 0,
+    "source_store_Board_Goal_Task_runtime_Git_or_existing_artifact_mutations": 0,
+    "agents_spawned": 0,
+    "only_new_output": "response.json"
+  }
+}

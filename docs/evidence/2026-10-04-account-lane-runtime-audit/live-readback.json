@@ -1,0 +1,15 @@
+{
+  "observed_at": "2026-10-04T05:29:10.242345+00:00",
+  "effective_base_path": "<workspace>",
+  "effective_masc_root": "<workspace>/.masc",
+  "runtimes": 89,
+  "codex_runtimes": 6,
+  "codex_account_homes": 2,
+  "codex_live_quota_scopes": 2,
+  "source_sha256": "b49afbdff77255f05f590b30abe938f12574eaaa26abbc35d8fb3f6767a89b5a",
+  "unchanged_after_repair": false,
+  "subsequent_changed_keys": [
+    "tui.last_chat_keeper"
+  ],
+  "note": "Only tui.last_chat_keeper changed after the repair; the runtime configuration remains repaired."
+}

@@ -1,0 +1,75 @@
+{
+  "actual_publication_parent": {
+    "head": "6e3dca5f7303a84c7dc8e81f6c6ad13ba42a7a11",
+    "tree": "935008e5925cc9d90120ed71a219a40830ca7524"
+  },
+  "historical_external_revision_fix": "5be8d8fc35164915a3507898ce6fde117f379bb6",
+  "local_import_base": "4dfd75249f85173ebc0bd6cdf07b92166545a4c9",
+  "local_source_commit": "292a406d98e127818af5f5e24bb1acd329692032",
+  "local_source_tree": "54d9e0d3b3c8c782ebaaa97132011d379bac0c4c",
+  "publication_rule": "Overlay only reviewed own paths on the full actual6e tree; preserve historical external5be evidence. Local import base is a partial source composition and is not equal to the full actual parent.",
+  "actual_6e_imports": [
+    {
+      "path": "dashboard/src/lib/candle-observation.ts",
+      "blob_sha": "2530e9bb081ff833c728f1ab774b54b848712255",
+      "sha256": "ca052547c38578cc656438be5c49611185d126e0e36994638ac564677d64cab6"
+    },
+    {
+      "path": "dashboard/src/lib/keeper-portrait.ts",
+      "blob_sha": "1f4022c67f266f3d3257a353d44ec7678daf76c6",
+      "sha256": "9046421b2ca2afebb50637cf93be5e22214c436affb81ab5d1712c84f68eac6b"
+    },
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.ts",
+      "blob_sha": "b9fe6614e6881d2b7fab8b28b40c5f092a93c184",
+      "sha256": "71e7cacb74e1b813947a3fb6f682f5a45ed1bd702fe9701f725f3b24e768621d"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.ts",
+      "blob_sha": "3a1cf66d533cfb8965c3ef19d66570a11291bbb5",
+      "sha256": "6dca63c89d6a232b4bd5e8c8eaafe3a3cc901f0c9f244cf8503715756536fdd6"
+    },
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.test.ts",
+      "blob_sha": "b1f3a3b1ff245607d07b05306c60a1a4ac680354",
+      "sha256": "9de24ee06dff61c208d36d948ac195e9d9474b1a4e3d5f0dbe6ed1032f9ca576"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-portrait.test.ts",
+      "blob_sha": "4ed429dc6382834c0d9b503730fe0f3b61bad26c",
+      "sha256": "db6e6738a5898ba764690eaa8d4004e781007e10c3ab51b9b0488af18f8cdb43"
+    },
+    {
+      "path": "dashboard/src/api/schemas/gate-keepers.test.ts",
+      "blob_sha": "eed303e2ca0fe75ced0c36d0183275aa92e4c544",
+      "sha256": "02750d4c3350c43a5b709798d6b7268e31ffa0097fc21877ff43545069843f0e"
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-items.ts",
+      "blob_sha": "19516b8d76f20e60ab23b4cac439991d83c97ea6",
+      "sha256": "0058652902ff3579bad0099b5f6ea289c11957c2111d1e3f5d5df9c4c0de1937"
+    }
+  ],
+  "own_source_paths": [
+    "dashboard/src/api/schemas/candle-observation.test.ts",
+    "dashboard/src/api/schemas/candle-observation.ts",
+    "dashboard/src/api/schemas/gate-keepers.test.ts",
+    "dashboard/src/api/schemas/keeper-portrait.test.ts",
+    "dashboard/src/api/schemas/keeper-portrait.ts",
+    "dashboard/src/lib/candle-observation.ts",
+    "dashboard/src/lib/keeper-portrait.ts"
+  ],
+  "unchanged_actual_gate_blob": "bc4eb76ac15a9c26f505488f80ca1d62bcbe53d6",
+  "test_selectors": [
+    "src/dashboard-bundle-preload.test.ts",
+    "src/api/schemas/candle-observation.test.ts",
+    "src/api/schemas/keeper-portrait.test.ts",
+    "src/api/schemas/gate-keepers.test.ts",
+    "src/api/gate-keepers.test.ts",
+    "src/keeper-store-normalize.test.ts",
+    "src/components/candle-economy.test.ts",
+    "src/components/keeper-portrait.test.ts",
+    "src/components/keeper-items-panel.test.ts"
+  ],
+  "validation_executed": "Seven Node syntax checks and static source/diff checks only. Native CI, typecheck, Vitest, bundle and browser proof remain external finishing gates."
+}

@@ -1,0 +1,131 @@
+{
+  "scope": "CI preview Item component in a controlled workspace fixture; synthetic account responses, not production",
+  "source_sha": "d688917369e608765472b63f6a2c307b42a66b90",
+  "fixture_url": "http://127.0.0.1:5173/dashboard/dev-fixtures/keeper-items-fixture.html",
+  "browser_version": "149.0.7827.55",
+  "fixed": {
+    "keeper": "rondo",
+    "balance_milli": "800",
+    "head": "crown",
+    "project": "keeper-items-fixture"
+  },
+  "transitions": [
+    {
+      "root": "/fixture/keeper-items-b",
+      "request_count_before": 2
+    },
+    {
+      "root": "/fixture/keeper-items",
+      "request_count_before": 3
+    },
+    {
+      "root": null,
+      "request_count_before": 4
+    }
+  ],
+  "requests": [
+    {
+      "index": 1,
+      "root": "A",
+      "owned_items": [
+        "crown"
+      ],
+      "crown_price_milli": "200",
+      "outcome": "fulfill-returned",
+      "transport_error": null
+    },
+    {
+      "index": 2,
+      "root": "A-held",
+      "owned_items": [
+        "crown",
+        "beanie",
+        "book"
+      ],
+      "crown_price_milli": "900",
+      "outcome": "fulfill-returned",
+      "transport_error": null
+    },
+    {
+      "index": 3,
+      "root": "B",
+      "owned_items": [
+        "crown",
+        "beanie"
+      ],
+      "crown_price_milli": "300",
+      "outcome": "fulfill-returned",
+      "transport_error": null
+    },
+    {
+      "index": 4,
+      "root": "A-current",
+      "owned_items": [
+        "crown",
+        "beanie",
+        "book",
+        "mug"
+      ],
+      "crown_price_milli": "400",
+      "outcome": "fulfill-returned",
+      "transport_error": null
+    }
+  ],
+  "failures": [
+    {
+      "url": "http://127.0.0.1:5173/api/v1/keepers/rondo/items",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "captures": [
+    {
+      "name": "a-desktop",
+      "width": 1280,
+      "height": 900,
+      "sha256": "679ede7a9558d2b022ac6648c78a0bd84d4ed65f1c2f7edfb696befe9edca999"
+    },
+    {
+      "name": "a-mobile",
+      "width": 360,
+      "height": 844,
+      "sha256": "8565ebb4f7b514f67b7d705c91f604eed37301306c9e7c0752b933128d72c71d"
+    },
+    {
+      "name": "b-desktop",
+      "width": 1280,
+      "height": 900,
+      "sha256": "155f537237cafc9eaa4636dda0852c397e6fc027277ccc09363f13c247bff89d"
+    },
+    {
+      "name": "b-mobile",
+      "width": 360,
+      "height": 844,
+      "sha256": "bd93524112a20f0bcd4dc9dd4ce163c857bc12f3fc1a5b04aa02ca46a6a962a0"
+    },
+    {
+      "name": "a-return-loading",
+      "width": 1280,
+      "height": 900,
+      "sha256": "73302faff478d84c924a391b032a9c9dc33aea022672be90a852279775d02eb2"
+    },
+    {
+      "name": "a-current-desktop",
+      "width": 1280,
+      "height": 900,
+      "sha256": "d03e66c2305d51ac39c4aea6b1b02d5ad9c48b86b5cb79e84604a9626bf37c4d"
+    },
+    {
+      "name": "a-current-mobile",
+      "width": 360,
+      "height": 844,
+      "sha256": "52138d745d80b05c5c6ae33fe677b20be6a0d7a581c3570d7bc1e6cd325e0bd3"
+    },
+    {
+      "name": "unknown-mobile",
+      "width": 360,
+      "height": 844,
+      "sha256": "632aae2861665cdaa38f84a0b54feae25e2b0f08db51e16906157f0bdabfd66f"
+    }
+  ],
+  "errors": []
+}

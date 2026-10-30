@@ -1,0 +1,1662 @@
+(* Completion-authority descriptor, validation, dispatch, and containment
+   contracts. *)
+
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Descriptor = Masc.Keeper_tool_descriptor
+module VAT = Masc.Verification_authority_tools
+module AR = Masc.Task.Anti_rationalization
+
+(* Existing text assertions inspect the typed disposition explicitly. *)
+let dispatch_text surface ~name ~args =
+  let result = VAT.dispatch surface ~name ~args in
+  match result with
+  | Tool_result.Completed _ -> Ok (Tool_result.message result)
+  | Tool_result.Failed _ -> Error (Tool_result.message result)
+  | Tool_result.Deferred _ -> Alcotest.fail "read-only lookup unexpectedly deferred"
+;;
+
+(* Prompts moved from code into config/prompts; load them so verification.lookup
+   templates render instead of reporting missing. Matches the other
+   prompt-rendering tests. *)
+let () =
+  let prompt_dir =
+    Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+       | Some root -> root
+       | None -> Sys.getcwd ())
+      "config/prompts"
+  in
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+
+let producer = "test-producer"
+
+let temp_dir () =
+  let path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-vat-%d-%d" (Unix.getpid ()) (Random.bits ()))
+  in
+  Unix.mkdir path 0o700;
+  path
+;;
+
+let rec rm_rf path =
+  match Unix.lstat path with
+  | { st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+    (try Unix.rmdir path with Unix.Unix_error _ -> ())
+  | _ -> (try Unix.unlink path with Unix.Unix_error _ -> ())
+  | exception Unix.Unix_error _ -> ()
+;;
+
+(* [agent_name] is deliberately omitted: [meta_of_json_fixture] fills in the
+   canonical [Keeper_identity.keeper_agent_name], so this fixture cannot drift
+   from the identity rule the meta parser enforces. *)
+let ensure_producer config name =
+  match
+    Result.bind
+      (Masc_test_deps.meta_of_json_fixture
+         (`Assoc [ "name", `String name; "always_allow", `Bool true ]))
+      (Keeper_meta_store.replace_snapshot config)
+  with
+  | Ok _ -> ()
+  | Error err -> Alcotest.failf "write keeper meta failed: %s" err
+;;
+
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+;;
+
+(* The endpoint name the remote_ssh fixture registers and the producer's TOML
+   points at. One literal, two writers. *)
+let ssh_fixture_endpoint = "fixture"
+
+(* The shim answers a framed request on stdin with the body on stdout and a
+   result trailer on stderr. The trailer is rendered by the function the real
+   shim renders it with, so a wire change updates this fixture or fails to
+   compile -- the same contract test_keeper_sandbox_read_backend keeps. *)
+let ssh_fixture_body = "remote-file-content"
+
+let ssh_script_for ~layout_body =
+  Printf.sprintf
+    {|#!/usr/bin/env python3
+import sys, json, base64
+prefix = sys.stdin.buffer.read(8)
+length = int.from_bytes(prefix, "big")
+frame = prefix + sys.stdin.buffer.read(length)
+request, _ = json.JSONDecoder().raw_decode(frame[8:].decode())
+argv = [base64.b64decode(arg).decode() for arg in request['argv']]
+body = %s if argv[-1] == 'layout' else %s
+sys.stdout.write(body)
+sys.stderr.write(%s)
+|}
+    (Yojson.Safe.to_string (`String layout_body))
+    (Yojson.Safe.to_string (`String ssh_fixture_body))
+    (Yojson.Safe.to_string (`String
+       (Exec_ssh_protocol.render_trailer
+         { v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
+         ; timed_out = false; shim_error = None; observed_syscalls = [] })))
+;;
+
+let fake_ssh_script =
+  ssh_script_for ~layout_body:{|{"entries":[],"checkouts":[],"limit":null}|}
+;;
+
+let write_runtime_toml ~base_path =
+  let path = Filename.concat base_path ".masc/config/runtime.toml" in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_text path (fun channel ->
+    output_string
+      channel
+      (Exec_ssh_endpoint.to_toml
+         Exec_ssh_endpoint.
+           { name = ssh_fixture_endpoint
+           ; host = "fixture.invalid"
+           ; user = "masc"
+           ; port = default_port
+           ; identity_file = default_identity_file ~name:ssh_fixture_endpoint
+           ; known_hosts_file = default_known_hosts_file ~name:ssh_fixture_endpoint
+           ; remote_root = "/srv/masc/playground"
+           ; connect_timeout_sec = 1
+           ; max_concurrent_sessions = 2
+           ; env_allowlist = []
+           ; capabilities = []
+           ; private_home = false
+           ; allowed_paths = []
+           }))
+;;
+
+let with_fake_ssh ?(script = fake_ssh_script) f =
+  let dir = temp_dir () in
+  let ssh_path = Filename.concat dir "ssh" in
+  Out_channel.with_open_text ssh_path (fun channel ->
+    output_string channel script);
+  Unix.chmod ssh_path 0o755;
+  Masc.Keeper_sandbox_ssh.For_testing.set_ssh_bin_override (Some ssh_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_sandbox_ssh.For_testing.set_ssh_bin_override None;
+      rm_rf dir)
+    f
+;;
+
+(* A workspace holding one producer keeper, and the surface bound to it.
+
+   [remote_ssh] is the default because it is the one hardened profile a test
+   can stand up on any host: the endpoint is a runtime.toml row and the
+   transport is a shim this file installs. Docker needs a daemon and the
+   masc-keeper-sandbox image, which the release evidence job does not build,
+   so a read routed through it fails there for a reason that is not about the
+   verifier. Micro_vm needs Apple's container CLI, so it cannot run on Linux
+   at all. Tests that are about the Docker route ask for it by name. *)
+let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let remote = String.equal sandbox_profile "remote_ssh" in
+  let profile_path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path:config.base_path
+      ~agent_name:producer
+  in
+  Fs_compat.mkdir_p (Filename.dirname profile_path);
+  Out_channel.with_open_text profile_path (fun channel ->
+    Printf.fprintf
+      channel
+      "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n%s"
+      sandbox_profile
+      (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"base\"\n");
+    if remote
+    then Printf.fprintf channel "remote_endpoint = %S\n" ssh_fixture_endpoint);
+  if remote then write_runtime_toml ~base_path:config.base_path;
+  ensure_producer config producer;
+  let run () =
+    match VAT.create ~submitted_evidence:[] ~config ~producer with
+    | Error reason -> Alcotest.failf "surface creation failed: %s" reason
+    | Ok surface -> f config surface
+  in
+  (* The SSH runner spawns through [Process_eio], which answers "initialized
+     Eio runtime required" until it holds this run's process manager. The
+     checkout probes spawn git through it as well, so every profile holds this
+     run's manager, and none leaves it behind for the next test. *)
+  let clock = Eio.Stdenv.clock env in
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock;
+  Fun.protect
+    ~finally:Process_eio.reset_for_testing
+    (fun () ->
+      if remote
+      then (
+        Eio_context.set_clock clock;
+        Eio_context.set_switch sw;
+        (* The bootstrap preflight ends in [gh auth status], which a fixture
+           endpoint cannot answer; the read path under test never needed it. *)
+        with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
+          with_fake_ssh ?script:ssh_script run))
+      else run ())
+;;
+
+let require_root = function
+  | Ok root -> root
+  | Error detail -> Alcotest.failf "root layout unavailable: %s" detail
+;;
+
+let require_layout result =
+  match require_root result with
+  | AR.Producer_namespace _ -> Alcotest.fail "inventory returned an unobserved namespace"
+  | AR.Producer_tree layout -> layout
+  | AR.Producer_root_absent { root } ->
+    Alcotest.failf "expected a producer tree, got an absent root: %s" root
+;;
+
+(* Create the producer playground used to resolve relative tool paths. *)
+let producer_playground (config : Workspace_core.config) producer_name =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer_name
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path;
+  path
+;;
+
+(* A workspace agent declares no sandbox profile, so its root is the
+   playground itself -- the same arm [VAT.create] takes for a producer with no
+   keeper meta. Writing here and then reading through the surface is what
+   proves the two agree on the root; a path this file invented on its own
+   would pass while the product looked somewhere else. *)
+let workspace_producer_playground (config : Workspace_core.config) producer_name =
+  let path =
+    Filename.concat
+      (Workspace_verification_store.project_root_of_base_path config.base_path)
+      (Playground_paths.bundle_root producer_name)
+  in
+  Fs_compat.mkdir_p path;
+  path
+;;
+
+(* The judge and producer share the descriptor-owned model surface. *)
+let test_schemas_are_the_descriptor_schemas () =
+  with_surface (fun _config surface ->
+    let offered = VAT.schemas surface in
+    let names =
+      List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) offered
+    in
+    Alcotest.(check (list string))
+      "the surface is read-only"
+      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
+      names;
+    List.iter
+      (fun (schema : Masc_domain.tool_schema) ->
+         match Descriptor.descriptors_for_internal schema.name with
+         | [ descriptor ] ->
+           (* The lookup surface alone reads images as visual input, so its
+              read_file description carries the descriptor's text plus that
+              one sanctioned sentence. *)
+           let expected =
+             match schema.name with
+             | "tool_read_file" ->
+                 descriptor.Descriptor.description
+                 ^ " " ^ VAT.image_delivery_note
+             | "masc_board_post_get" | "masc_fusion_status" ->
+                 (* These descriptors supply input validation; standalone
+                    reviewer descriptions state their narrower authority. *)
+                 schema.description
+             | _ -> descriptor.Descriptor.description
+           in
+           Alcotest.(check string)
+             (schema.name ^ " description is the descriptor's")
+             expected
+             schema.description;
+           (match schema.name with
+            | "masc_fusion_status" ->
+              (* The Keeper schema leaves run_id optional because an empty call
+                 lists runs; the verifier reads one exact run and has no
+                 listing. It requires that id and names no other parameter. *)
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string))
+                "masc_fusion_status requires the exact run_id"
+                [ "run_id" ]
+                (schema.input_schema |> member "required" |> to_list |> List.map to_string);
+              Alcotest.(check (list string))
+                "masc_fusion_status adds source continuation to exact lookup"
+                ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
+                (schema.input_schema |> member "properties" |> keys)
+            | "masc_board_post_get" ->
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string)) "Board adds source continuation"
+                ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
+                (schema.input_schema |> member "properties" |> keys)
+            | _ ->
+              Alcotest.(check bool)
+                (schema.name ^ " input schema is the descriptor's")
+                true
+                (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema))
+         | found ->
+           Alcotest.failf
+             "%s resolves to %d descriptors; the surface needs exactly one"
+             schema.name
+             (List.length found))
+      offered)
+;;
+
+(* A successful read proves descriptor translation reaches the runtime handler;
+   a missing required argument must be rejected at the same boundary. *)
+let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () =
+  with_surface (fun config surface ->
+    let playground = producer_playground config producer in
+    let name = "advertised-argument-probe.txt" in
+    let contents = "written by the probe" in
+    (try
+       Out_channel.with_open_text (Filename.concat playground name) (fun oc ->
+         output_string oc contents)
+     with
+     | Sys_error err -> Alcotest.failf "probe file could not be written: %s" err);
+    let read key =
+      dispatch_text surface ~name:"tool_read_file" ~args:(`Assoc [ key, `String name ])
+    in
+    let required =
+      match
+        List.find_opt
+          (fun (schema : Masc_domain.tool_schema) ->
+             String.equal schema.name "tool_read_file")
+          (VAT.schemas surface)
+      with
+      | Some { input_schema = `Assoc fields; _ } ->
+        (match List.assoc_opt "required" fields with
+         | Some (`List (`String field :: _)) -> field
+         | _ -> Alcotest.fail "tool_read_file advertises no required argument")
+      | _ -> Alcotest.fail "tool_read_file is not offered"
+    in
+    (match read required with
+     | Error detail ->
+       Alcotest.failf
+         "the advertised required argument %S did not reach the handler: %s"
+         required
+         detail
+     | Ok output ->
+       (* The producer's tree is on the endpoint, so the bytes come back from
+          the shim, not from the host copy written above. This asserts the
+          argument reached the backend and a read resolved; that the host path
+          is translated to the endpoint's is pinned separately, by
+          test_keeper_sandbox_read_backend. *)
+       Alcotest.(check bool)
+         (Printf.sprintf "%S returns what the endpoint served" required)
+         true
+         (Astring.String.is_infix ~affix:ssh_fixture_body output));
+    match dispatch_text surface ~name:"tool_read_file" ~args:(`Assoc []) with
+    | Ok output ->
+      Alcotest.failf
+        "a read with no %S resolved instead of being refused, so an unopened \
+         file reads as an answer: %s"
+        required
+        output
+    | Error detail ->
+      Alcotest.(check bool)
+        "the refusal names the missing argument"
+        true
+        (Astring.String.is_infix ~affix:required detail))
+;;
+
+(* The persisted runtime snapshot deliberately omits TOML-owned policy fields.
+   The verifier must reapply the current profile before choosing the producer
+   root, or a Docker keeper's evidence is looked up in the local playground. *)
+let test_keeper_surface_uses_the_effective_sandbox_root () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let playground = producer_playground config producer in
+    let name = "docker-evidence.json" in
+    Out_channel.with_open_text (Filename.concat playground name) (fun channel ->
+      output_string channel "{\"lane\":\"docker\"}\n");
+    match VAT.root_layout surface with
+    | Error detail ->
+      Alcotest.failf "Docker producer root was not inspected: %s" detail
+    | Ok (AR.Producer_root_absent { root }) ->
+      Alcotest.failf "Docker producer root was reported absent: %s" root
+    | Ok (AR.Producer_namespace _) -> Alcotest.fail "inventory returned an unobserved namespace"
+    | Ok (AR.Producer_tree layout) ->
+      Alcotest.(check bool)
+        "inspects the Docker-scoped producer root"
+        true
+        (List.exists
+           (Astring.String.is_infix ~affix:name)
+           layout))
+;;
+
+(* A search requires an explicit non-empty pattern. *)
+let test_search_refuses_a_call_without_its_required_pattern () =
+  with_surface (fun config surface ->
+    ignore (producer_playground config producer);
+    (match
+       dispatch_text surface ~name:"tool_search_files" ~args:(`Assoc [])
+     with
+     | Ok output ->
+       Alcotest.failf
+         "a search with no pattern resolved instead of being refused: %s"
+         output
+     | Error detail ->
+       Alcotest.(check bool)
+         "the refusal names the missing argument"
+         true
+         (Astring.String.is_infix ~affix:"pattern" detail));
+    match
+      dispatch_text
+        surface
+        ~name:"tool_search_files"
+        ~args:(`Assoc [ "pattern", `String "advertised" ])
+    with
+    | Ok _ -> ()
+    | Error detail ->
+      Alcotest.failf "a search carrying its pattern was refused: %s" detail)
+;;
+
+(* A judge that calls a name this surface does not offer must be told so. A
+   dropped call would read to the model as a tool that returned nothing. *)
+let test_unknown_tool_name_is_an_error () =
+  with_surface (fun _config surface ->
+    match dispatch_text surface ~name:"tool_write_file" ~args:(`Assoc []) with
+    | Ok output -> Alcotest.failf "unknown tool should not succeed; got %s" output
+    | Error detail ->
+      Alcotest.(check bool)
+        "names the offered tools"
+        true
+        (Astring.String.is_infix ~affix:"tool_search_files" detail))
+;;
+
+(* Workspace agents are valid verification producers even though they have no
+   Keeper runtime metadata. Their surface is rooted directly at the producer
+   playground and exposes only the owned regular-file reader. *)
+let test_workspace_producer_gets_owned_read_surface () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "workspace-producer" in
+  let playground = workspace_producer_playground config producer_name in
+  let path = Filename.concat playground "evidence.txt" in
+  Out_channel.with_open_text path (fun channel ->
+    output_string channel "first line\nsecond line\n");
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
+  | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
+  | Ok surface ->
+    Alcotest.(check (list string))
+      "workspace producer surface"
+      [ "tool_read_file"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
+      (VAT.schemas surface
+       |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
+    (match
+       dispatch_text
+         surface
+         ~name:"tool_read_file"
+         ~args:
+           (`Assoc
+               [ "file_path", `String "evidence.txt"
+               ; "offset", `Int 2
+               ; "limit", `Int 1
+               ])
+     with
+     | Error detail -> Alcotest.failf "owned read failed: %s" detail
+     | Ok payload ->
+       let json = Yojson.Safe.from_string payload in
+       Alcotest.(check string)
+         "reads the requested line"
+         "second line\n"
+         Yojson.Safe.Util.(json |> member "content" |> to_string));
+    (match dispatch_text surface ~name:"tool_search_files" ~args:(`Assoc []) with
+     | Ok output -> Alcotest.failf "workspace search unexpectedly ran: %s" output
+     | Error detail ->
+       Alcotest.(check bool)
+         "error lists only the exact offered surface"
+         false
+         (Astring.String.is_infix ~affix:"this review offers tool_search_files" detail))
+;;
+
+(* Nothing creates a workspace producer's playground: no boot, no sandbox.
+   Its absence is a fact about the producer, not an unavailable surface, and
+   deferring on it left every Task submitted over MCP awaiting a verdict that
+   never came (nine Tasks, 131 sweep lines on 2026-09-11). The judge gets the
+   fact as its own lookup section and rules on the evidence that is there. *)
+let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "mcp-client" in
+  let bundle =
+    Filename.concat Playground_paths.all_playgrounds_prefix producer_name
+  in
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
+  | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
+  | Ok surface ->
+    (match VAT.root_layout surface |> require_root with
+     | AR.Producer_namespace _ -> Alcotest.fail "inventory returned an unobserved namespace"
+     | AR.Producer_tree layout ->
+       Alcotest.failf
+         "a missing workspace root was listed as a tree: %s"
+         (String.concat ", " layout)
+     | AR.Producer_root_absent { root } ->
+       Alcotest.(check bool)
+         "the absence names the missing root"
+         true
+         (Astring.String.is_infix ~affix:bundle root));
+    Alcotest.(check bool)
+      "the playground is not created as a side effect of the review"
+      false
+      (Sys.file_exists
+         (Filename.concat
+            (Workspace_verification_store.project_root_of_base_path config.base_path)
+            bundle))
+;;
+
+(* Unsupported binary lookups must retain their encoding failure through the
+   descriptor/owned-file path, observation persistence and API projection used
+   by the completion reviewer. No model verdict is simulated. *)
+let test_binary_lookup_failures_survive_observation_replay () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "binary-evidence-producer" in
+  let playground = workspace_producer_playground config producer_name in
+  let surface =
+    match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
+    | Ok surface -> surface
+    | Error detail -> Alcotest.fail detail
+  in
+  let module Registry = Masc.Verification_run_registry in
+  let journal = Filename.concat dir "binary-review.jsonl" in
+  let registry = Registry.create ~path:journal () in
+  let verification_id = "vrf-binary-lookups" in
+  Registry.register_running registry ~verification_id ~task_id:"task-binary"
+    ~producer:producer_name ~authority_kind:"system_llm_agent"
+    ~authority_actor:"verifier_exact" ~started_at:1.0;
+  let fixtures =
+    [ "unsupported.bin", "\000\255\147\140" ]
+  in
+  let tools = List.map (fun (name, bytes) ->
+    Out_channel.with_open_bin (Filename.concat playground name)
+      (fun channel -> output_string channel bytes);
+    let input = `Assoc [ "file_path", `String name; "limit", `Int 5 ] in
+    let detail = match dispatch_text surface ~name:"tool_read_file" ~args:input with
+      | Ok _ -> Alcotest.fail "binary text lookup must not succeed"
+      | Error detail -> detail
+    in
+    Alcotest.(check bool) "error is UTF-8" true (String_util.is_valid_utf8 detail);
+    let json = Yojson.Safe.from_string detail in
+    Alcotest.(check string) "explicit encoding failure"
+      "lookup_output_invalid_utf8"
+      Yojson.Safe.Util.(json |> member "code" |> to_string);
+    Alcotest.(check bool) "failure retains output size" true
+      (Yojson.Safe.Util.(json |> member "output_bytes" |> to_int) > 0);
+    Alcotest.(check int) "failure retains output digest" 64
+      (String.length Yojson.Safe.Util.(json |> member "output_sha256" |> to_string));
+    Registry.observe_tool_result ~input ~finished_at:2.0
+      (Tool_result.error ~failure_class:Tool_result.Runtime_failure
+         ~tool_name:"tool_read_file" ~start_time:(Tool_timing.start ()) detail)
+  ) fixtures in
+  Registry.mark_completed registry ~verification_id
+    ~outcome:(Registry.Rejected { reason = "lookup text unavailable" })
+    ~tools ~elapsed_s:1.0 ();
+  let persisted = In_channel.with_open_bin journal In_channel.input_all in
+  Alcotest.(check bool) "journal is UTF-8" true (String_util.is_valid_utf8 persisted);
+  let replayed = Registry.replay journal in
+  let run = match Registry.get replayed ~verification_id with
+    | Some run -> run
+    | None -> Alcotest.fail "review must survive replay"
+  in
+  let api_json = Registry.run_to_yojson run in
+  Alcotest.(check bool) "API projection is UTF-8" true
+    (String_util.is_valid_utf8 (Yojson.Safe.to_string api_json));
+  match run.status with
+  | Registry.Completed { tools; _ } ->
+    Alcotest.(check int) "binary failure retained" 1 (List.length tools);
+    List.iter (fun (tool : Registry.tool_observation) ->
+      match tool.disposition with
+      | Tool_result.Failed () -> ()
+      | _ -> Alcotest.fail "binary lookup was falsely recorded as successful") tools
+  | Registry.Running -> Alcotest.fail "completion lost on replay"
+;;
+
+let make_checkout root relative =
+  let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
+  let rec mkdir_p path =
+    let parent = Filename.dirname path in
+    if parent <> path && not (Sys.file_exists parent) then mkdir_p parent;
+    mkdir path
+  in
+  let checkout = Filename.concat root relative in
+  mkdir_p checkout;
+  mkdir (Filename.concat checkout ".git")
+;;
+
+let test_endpoint_layout_ignores_host_bookkeeping () =
+  let body = {|{"entries":["repo"],"checkouts":[{"relative_path":"repo","name":"repo","git_link":"directory"}],"limit":null}|} in
+  with_surface ~ssh_script:(ssh_script_for ~layout_body:body) (fun config surface ->
+    let host_root = producer_playground config producer in
+    (* The host has a stale checkout the endpoint never reported. *)
+    make_checkout host_root "stale-host-only";
+    let layout = VAT.root_layout surface |> require_layout in
+    Alcotest.(check bool) "endpoint checkout is advertised" true
+      (List.exists (Astring.String.is_infix ~affix:"repo/") layout);
+    Alcotest.(check bool) "host bookkeeping is not advertised" false
+      (List.exists (Astring.String.is_infix ~affix:"stale-host-only") layout);
+    match dispatch_text surface ~name:"tool_read_file"
+      ~args:(`Assoc ["file_path", `String "repo/evidence/log.txt"]) with
+    | Ok body -> Alcotest.(check bool) "Read uses the same endpoint" true
+        (Astring.String.is_infix ~affix:ssh_fixture_body body)
+    | Error detail -> Alcotest.fail detail)
+;;
+
+let test_endpoint_layout_fails_closed () =
+  List.iter (fun body ->
+    with_surface ~ssh_script:(ssh_script_for ~layout_body:body) (fun config surface ->
+      ignore (producer_playground config producer);
+      match VAT.root_layout surface with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "unavailable endpoint layout became a usable tree"))
+    [ "not-json"
+    ; {|{"entries":[],"checkouts":[],"limit":{"kind":"directory_unreadable","relative_path":"repo","detail":"permission denied"}}|}
+    ; {|{"entries":[],"checkouts":[]}|}
+    ]
+;;
+
+let test_root_layout_fails_closed_when_discovery_is_unavailable () =
+  with_surface ~sandbox_profile:"docker" (fun _config surface ->
+    match VAT.root_layout surface with
+    | Ok (AR.Producer_namespace _) -> Alcotest.fail "inventory returned an unobserved namespace"
+    | Ok (AR.Producer_tree layout) ->
+      Alcotest.failf
+        "missing producer root was presented as a usable layout: %s"
+        (String.concat ", " layout)
+    | Ok (AR.Producer_root_absent { root }) ->
+      Alcotest.failf "a Keeper's missing root was presented as absence: %s" root
+    | Error detail ->
+      Alcotest.(check bool)
+        "unavailable discovery remains an error"
+        true
+        (Astring.String.is_infix ~affix:"workspace root" detail
+         || Astring.String.is_infix ~affix:"verification root" detail))
+;;
+
+let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do
+      make_checkout root (Printf.sprintf "checkout-%02d" index)
+    done;
+    match VAT.root_layout surface with
+    | Ok (AR.Producer_namespace _) -> Alcotest.fail "inventory returned an unobserved namespace"
+    | Ok (AR.Producer_tree layout) ->
+      Alcotest.failf
+        "partial checkout discovery was presented as complete: %s"
+        (String.concat ", " layout)
+    | Ok (AR.Producer_root_absent { root }) ->
+      Alcotest.failf "partial checkout discovery was presented as absence: %s" root
+    | Error detail ->
+      Alcotest.(check bool)
+        "partial discovery names its limit"
+        true
+        (Astring.String.is_infix ~affix:"checkout discovery is partial" detail))
+;;
+
+let test_task_review_does_not_require_inventory () =
+  let check config expected_root =
+    let request : Workspace_verification_store.request_header =
+      {id="vrf-namespace";task_id="task-001";worker=producer;created_at=1.} in
+    match VAT.create_task_review ~config ~verification_id:request.id
+      ~task_id:request.task_id ~producer
+      ~evidence_access:(Workspace_verification_store.Evidence_available {request;items=[]}) with
+    | Error detail -> Alcotest.failf "inventory vetoed Task admission: %s" detail
+    | Ok review ->
+      (match VAT.task_review_root review with
+       | AR.Producer_namespace {root} ->
+         Alcotest.(check string) "captured namespace" expected_root root
+       | Producer_tree _ | Producer_root_absent _ ->
+         Alcotest.fail "Task admission asserted an inventory observation");
+      (match VAT.validate_task_review review with
+       | Ok () -> () | Error detail -> Alcotest.fail detail)
+  in
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    (* Missing roots and more checkouts than the inventory cap both used to
+       stop before the submitted evidence reached a judge. *)
+    (* The review captures its root without trailing slashes
+       ([Verification_authority_tools.create]); a docker-profile host root is
+       spelt with one, so compare the same normalised spelling. *)
+    let root =
+      Env_config_core.strip_trailing_slashes
+        (Masc.Keeper_sandbox.host_root_abs_of_meta ~config
+           (match Keeper_meta_store.read_effective_meta config producer with
+            | Ok (Some meta) -> meta | _ -> Alcotest.fail "fixture meta missing"))
+    in
+    check config root;
+    let playground = producer_playground config producer in
+    for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do
+      make_checkout playground (Printf.sprintf "checkout-%02d" index)
+    done;
+    (match VAT.root_layout surface with
+     | Error _ -> () | Ok _ -> Alcotest.fail "fixture inventory should remain partial");
+    check config root)
+;;
+
+let test_root_layout_reports_entries_and_discovered_checkouts () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
+    make_checkout root "repos/masc";
+    (* A checkout the conventional prefix would miss entirely. *)
+    make_checkout root "scratch-tree";
+    mkdir (Filename.concat root "artifacts");
+    let layout = VAT.root_layout surface |> require_layout in
+    let holds affix =
+      List.exists (fun entry -> Astring.String.is_infix ~affix entry) layout
+    in
+    Alcotest.(check bool)
+      "reports a checkout under the keeper's own repos/ convention"
+      true
+      (holds "repos/masc");
+    Alcotest.(check bool)
+      "reports a checkout that convention would have missed"
+      true
+      (holds "scratch-tree");
+    Alcotest.(check bool)
+      "a checkout is marked as one, so a path prefix is identifiable"
+      true
+      (holds "git checkout");
+    Alcotest.(check bool)
+      "still names the root's own entries, which need no prefix"
+      true
+      (holds "artifacts"))
+;;
+
+let run_git_lines ~cwd args =
+  match Repo_git.run_git ~cwd args with
+  | Ok lines -> lines
+  | Error error ->
+    Alcotest.failf "git %s failed: %s" (String.concat " " args) error
+;;
+
+(* The commit hooks and signing a developer's global git config installs would
+   block or prompt inside a throwaway repository. *)
+let git_commit ~cwd message =
+  ignore
+    (run_git_lines ~cwd
+       [ "-c"; "core.hooksPath=/dev/null"
+       ; "-c"; "commit.gpgsign=false"
+       ; "commit"; "--allow-empty"; "-m"; message
+       ])
+;;
+
+let git_head ~cwd =
+  match run_git_lines ~cwd [ "rev-parse"; "HEAD" ] with
+  | [ sha ] -> sha
+  | lines -> Alcotest.failf "unexpected rev-parse output: %s" (String.concat "|" lines)
+;;
+
+let init_git_checkout checkout =
+  Fs_compat.mkdir_p checkout;
+  ignore (run_git_lines ~cwd:checkout [ "init"; "-b"; "main" ]);
+  ignore (run_git_lines ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_lines ~cwd:checkout [ "config"; "user.name"; "Test" ])
+;;
+
+let layout_line layout ~affix =
+  match
+    List.find_opt (fun entry -> Astring.String.is_infix ~affix entry) layout
+  with
+  | Some line -> line
+  | None ->
+    Alcotest.failf "no layout line names %s: %s" affix (String.concat " / " layout)
+;;
+
+(* The judge reads this line to decide whether a file missing from a checkout
+   is missing from main. A tree the catalog cannot compare with main must say
+   so, and it must carry the commit it holds. *)
+let test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/unregistered" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/unregistered/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "names the HEAD commit" true (holds ("head=" ^ head));
+    Alcotest.(check bool) "names the branch" true (holds "branch=main");
+    Alcotest.(check bool)
+      "says no comparison with main was made"
+      true
+      (holds "no comparison with main");
+    Alcotest.(check bool)
+      "does not describe the tree as equal to main"
+      false
+      (holds "HEAD equals"))
+;;
+
+(* The observed incident: a tree behind main, read as main, rejected merged work. *)
+let test_root_layout_reports_a_checkout_behind_its_tracking_ref () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/masc" in
+    init_git_checkout checkout;
+    ignore
+      (run_git_lines ~cwd:checkout
+         [ "remote"; "add"; "origin"; "https://example.invalid/masc.git" ]);
+    git_commit ~cwd:checkout "first";
+    let behind_head = git_head ~cwd:checkout in
+    git_commit ~cwd:checkout "second";
+    let upstream_head = git_head ~cwd:checkout in
+    ignore
+      (run_git_lines ~cwd:checkout [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ]);
+    ignore (run_git_lines ~cwd:checkout [ "reset"; "-q"; "--hard"; behind_head ]);
+    let repository : Repo_manager_types.repository =
+      { id = "masc"
+      ; name = "masc"
+      ; url = "https://example.invalid/masc.git"
+      ; local_path = checkout
+      ; aliases = []
+      ; default_branch = "main"
+      ; keepers = []
+      ; status = Repo_manager_types.Active
+      ; auto_sync = false
+      ; sync_interval = 0
+      ; created_at = Int64.zero
+      ; updated_at = Int64.zero
+      }
+    in
+    (match Repo_store.save_all ~base_path:config.base_path [ repository ] with
+     | Ok () -> ()
+     | Error error -> Alcotest.failf "failed to seed repository catalog: %s" error);
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/masc/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "names the HEAD it holds" true (holds ("head=" ^ behind_head));
+    Alcotest.(check bool)
+      "names the tracking ref commit it is behind"
+      true
+      (holds ("(" ^ upstream_head ^ ")"));
+    Alcotest.(check bool)
+      "states how far behind the tracking ref it is"
+      true
+      (holds "1 commit(s) behind local origin/main");
+    Alcotest.(check bool)
+      "does not describe the tree as equal to main"
+      false
+      (holds "HEAD equals"))
+;;
+
+(* A detached HEAD answers the literal [HEAD]; the line says so instead of
+   presenting it as a branch name. *)
+let test_root_layout_marks_a_detached_head () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/detached" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    ignore (run_git_lines ~cwd:checkout [ "checkout"; "-q"; "--detach"; head ]);
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/detached/"
+    in
+    Alcotest.(check bool)
+      "a detached HEAD is named as such"
+      true
+      (Astring.String.is_infix ~affix:"branch=HEAD (detached)" line))
+;;
+
+(* [git -C <path>] walks up to the enclosing repository when [<path>] holds a
+   [.git] entry that is not a valid repository. The line must not vouch for the
+   enclosing repository's commit as this checkout's. *)
+let test_root_layout_does_not_report_the_enclosing_repository_for_a_broken_checkout () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    (* Above the producer root, so checkout discovery (which scans downward
+       from the root) does not take the enclosing repository for a checkout. *)
+    let enclosing = Filename.dirname root in
+    init_git_checkout enclosing;
+    git_commit ~cwd:enclosing "enclosing";
+    let enclosing_head = git_head ~cwd:enclosing in
+    make_checkout root "repos/broken";
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/broken/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool)
+      "says the path is not its own repository"
+      true
+      (holds "not the top of its own git repository");
+    Alcotest.(check bool)
+      "does not name the enclosing repository's commit"
+      false
+      (holds enclosing_head))
+;;
+
+(* The identity probe reads refs and objects. A producer controls the config of
+   its own checkout, so a configured fsmonitor must not run on the host. *)
+let test_root_layout_does_not_run_a_checkouts_configured_fsmonitor () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/hooked" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let marker = Filename.concat root "fsmonitor-ran" in
+    let script = Filename.concat root "fsmonitor.sh" in
+    Out_channel.with_open_text script (fun channel ->
+      Printf.fprintf channel "#!/bin/sh\ntouch %s\n" (Filename.quote marker));
+    Unix.chmod script 0o755;
+    ignore (run_git_lines ~cwd:checkout [ "config"; "core.fsmonitor"; script ]);
+    ignore (VAT.root_layout surface |> require_layout);
+    Alcotest.(check bool)
+      "the configured fsmonitor command did not run"
+      false
+      (Sys.file_exists marker))
+;;
+
+(* A producer whose tree is on its endpoint has no checkout on this host to
+   describe: the line must not name a commit read from the host directory. *)
+let test_root_layout_does_not_probe_a_tree_on_the_producers_endpoint () =
+  let body = {|{"entries":["repos"],"checkouts":[{"relative_path":"repos/remote","name":"remote","git_link":"directory"}],"limit":null}|} in
+  with_surface ~ssh_script:(ssh_script_for ~layout_body:body) (fun config surface ->
+    let root = producer_playground config producer in
+    let checkout = Filename.concat root "repos/remote" in
+    init_git_checkout checkout;
+    git_commit ~cwd:checkout "first";
+    let head = git_head ~cwd:checkout in
+    let line =
+      layout_line (VAT.root_layout surface |> require_layout) ~affix:"repos/remote/"
+    in
+    let holds affix = Astring.String.is_infix ~affix line in
+    Alcotest.(check bool) "says the identity was not probed" true (holds "identity not probed");
+    Alcotest.(check bool) "does not name a host commit" false (holds head);
+    Alcotest.(check bool) "still marks the checkout" true (holds "git checkout"))
+;;
+
+let test_prompt_states_the_root_and_not_a_repository () =
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
+    let root = producer_playground config producer in
+    make_checkout root "repos/masc";
+    let request : AR.review_request =
+      { agent_name = producer
+      ; task_title = "t"
+      ; task_description = "d"
+      ; completion_notes = "n"
+      ; task_id = "task-403"
+      ; evidence_refs = []
+      ; evidence_images = []
+      }
+    in
+    let text =
+      match
+        AR.build_prompt
+          ~question:
+            { AR.completion_contract = None
+            ; required_evidence = []
+            ; evidence_posture = AR.Note_only
+            ; few_shot_block = ""
+            }
+          ~lookup:{ AR.schemas = VAT.schemas surface; dispatch = VAT.dispatch surface }
+          ~lookup_root:(VAT.root_layout surface |> require_root)
+          request
+      with
+      | Ok text -> text
+      | Error detail -> Alcotest.failf "prompt render failed: %s" detail
+    in
+    Alcotest.(check bool)
+      "the prompt shows the checkout prefix the evaluator would otherwise guess"
+      true
+      (Astring.String.is_infix ~affix:"repos/masc" text);
+    (* Anchored on the fragment's tag, not on a sentence inside it (#32663):
+       the English sentences this once pinned stopped existing when the
+       prompts were translated (#32133), and the check had been asserting
+       prose no template could produce. What the section says -- a missing
+       path answers about the path, not about the work -- is reviewed in
+       config/prompts/verification.md, slot lookup.producer_tree. *)
+    Alcotest.(check bool)
+      "the live lookup section reaches the prompt"
+      true
+      (Astring.String.is_infix ~affix:"<live_lookup>" text))
+;;
+
+let render_review_prompt surface =
+  let request : AR.review_request =
+    { agent_name = producer
+    ; task_title = "t"
+    ; task_description = "d"
+    ; completion_notes = "n"
+    ; task_id = "task-001"
+    ; evidence_refs = []
+    ; evidence_images = []
+    }
+  in
+  let question =
+    { AR.completion_contract = None
+    ; required_evidence = []
+    ; evidence_posture = AR.Note_only
+    ; few_shot_block = ""
+    }
+  in
+  match
+    AR.build_prompt
+      ~question
+      ~lookup:{ AR.schemas = VAT.schemas surface; dispatch = VAT.dispatch surface }
+      ~lookup_root:(VAT.root_layout surface |> require_root)
+      request
+  with
+  | Ok text -> text
+  | Error detail -> Alcotest.failf "prompt render failed: %s" detail
+;;
+
+(* The lookup status block names the slot that rendered; it is data inside
+   the section, so a check on it pins which slot the root chose without
+   pinning any sentence around it. *)
+let lookup_status slot =
+  Printf.sprintf {|{"lookup_surface":"%s","evidence_lookup_succeeded":false}|} slot
+;;
+
+let test_prompt_states_the_available_surface () =
+  with_surface (fun config surface ->
+    ignore (producer_playground config producer);
+    let text = render_review_prompt surface in
+    Alcotest.(check bool)
+      "a producer tree renders the producer_tree slot"
+      true
+      (Astring.String.is_infix ~affix:(lookup_status "producer_tree") text);
+    Alcotest.(check bool)
+      "a producer tree does not render the absent-root slot"
+      false
+      (Astring.String.is_infix ~affix:(lookup_status "producer_root_absent") text);
+    Alcotest.(check bool)
+      "tool prompt names the tools"
+      true
+      (Astring.String.is_infix ~affix:"tool_search_files" text);
+    (* The read-only boundary is a sentence inside the live-lookup fragment
+       (config/prompts/verification.md, slot lookup.producer_tree); the prompt is
+       checked for carrying that fragment, and the sentence is reviewed there. *)
+    Alcotest.(check bool)
+      "tool prompt carries the live lookup section"
+      true
+      (Astring.String.is_infix ~affix:"<live_lookup>" text))
+;;
+
+(* A workspace producer with no playground holds a different tool set (no
+   search tool) and no tree. Its prompt renders the absent-root slot, names
+   the tools that surface really holds and the missing root, and carries none
+   of the producer-tree section. *)
+let test_absent_root_renders_its_own_lookup_section () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "mcp-client" in
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
+  | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
+  | Ok surface ->
+    let text = render_review_prompt surface in
+    let holds affix = Astring.String.is_infix ~affix text in
+    Alcotest.(check bool)
+      "the absent-root slot renders"
+      true
+      (holds (lookup_status "producer_root_absent"));
+    Alcotest.(check bool)
+      "the producer_tree slot does not render"
+      false
+      (holds (lookup_status "producer_tree"));
+    Alcotest.(check bool)
+      "the missing root is named"
+      true
+      (holds (Filename.concat Playground_paths.all_playgrounds_prefix producer_name));
+    List.iter
+      (fun (schema : Masc_domain.tool_schema) ->
+         Alcotest.(check bool)
+           ("the section names the held tool " ^ schema.name)
+           true
+           (holds schema.name))
+      (VAT.schemas surface);
+    Alcotest.(check bool)
+      "the section names no tool this surface lacks"
+      false
+      (holds "tool_search_files")
+;;
+
+(* masc#28989: a URL left in note evidence must be inspectable by the judge
+   itself. The fetch boundary is stubbed; what is pinned here is the surface —
+   the tool is offered on both producer scopes, a valid call dispatches through
+   the shared guards, and the typed envelope reaches the judge. *)
+let test_web_fetch_is_offered_and_dispatches () =
+  with_surface (fun _config surface ->
+    Alcotest.(check bool)
+      "keeper producer offers tool_web_fetch"
+      true
+      (List.exists
+         (fun (schema : Masc_domain.tool_schema) ->
+           String.equal schema.name "masc_web_fetch")
+         (VAT.schemas surface));
+    Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+      (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+        Ok
+          { Masc.Tool_misc_web_fetch.http_status = Some 200
+          ; final_url = url
+          ; redirect_count = 0
+          ; content_type = Some "text/plain"
+          ; downloaded_bytes = Some 20
+          ; body = "diff --git a/x b/x\n"
+          })
+      (fun () ->
+        match
+          dispatch_text
+            surface
+            ~name:"masc_web_fetch"
+            ~args:
+              (`Assoc
+                [ "url", `String "https://github.com/jeong-sik/masc/pull/28988"
+                ])
+        with
+        | Error reason -> Alcotest.failf "web fetch dispatch failed: %s" reason
+        | Ok output ->
+          Alcotest.(check bool)
+            "envelope carries the fetched text"
+            true
+            (Astring.String.is_infix ~affix:"diff --git" output)))
+;;
+
+let test_web_fetch_refuses_a_private_target () =
+  with_surface (fun _config surface ->
+    match
+      dispatch_text
+        surface
+        ~name:"masc_web_fetch"
+        ~args:(`Assoc [ "url", `String "http://127.0.0.1:8935/health" ])
+    with
+    | Ok output ->
+      Alcotest.failf "private-network fetch must be refused, got: %s" output
+    | Error _ -> ())
+;;
+
+let test_remote_surface_keeps_its_captured_destination () =
+  let log_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> rm_rf log_dir) (fun () ->
+    let log_path = Filename.concat log_dir "requests.jsonl" in
+    let trailer = Exec_ssh_protocol.render_trailer
+      { v=Exec_ssh_protocol.newest; exit=Some 0; signal=None; timed_out=false;
+        shim_error=None; observed_syscalls=[] } in
+    let script = Printf.sprintf {|#!/usr/bin/env python3
+import sys, json, base64
+prefix = sys.stdin.buffer.read(8)
+length = int.from_bytes(prefix, "big")
+request, _ = json.JSONDecoder().raw_decode(sys.stdin.buffer.read(length).decode())
+argv = [base64.b64decode(arg).decode() for arg in request['argv']]
+with open(%s, 'a') as log:
+    log.write(json.dumps({'ssh': sys.argv[1:], 'argv': argv, 'cwd': base64.b64decode(request['cwd']).decode()}) + '\n')
+sys.stdout.write('{"entries":[],"checkouts":[],"limit":null}' if argv[-1] == 'layout' else 'original endpoint content')
+sys.stderr.write(%s)
+|} (Yojson.Safe.to_string (`String log_path)) (Yojson.Safe.to_string (`String trailer)) in
+    with_surface ~ssh_script:script (fun config surface ->
+      let get = function Ok value -> value | Error reason -> Alcotest.fail reason in
+      let original_endpoint = Masc.Keeper_sandbox_ssh.resolve_endpoint
+        ~base_path:config.base_path ~keeper_name:producer |> get in
+      let changed = {original_endpoint with Exec_ssh_endpoint.host="replacement.invalid";
+        remote_root="/replacement-root"; allowed_paths=["/widened-root"]} in
+      Out_channel.with_open_text (Filename.concat config.base_path ".masc/config/runtime.toml")
+        (fun output -> output_string output (Exec_ssh_endpoint.to_toml changed));
+      let replacement = VAT.create ~config ~producer ~submitted_evidence:[] |> get in
+      ignore (VAT.root_layout surface |> require_root);
+      ignore (dispatch_text surface ~name:"tool_read_file"
+        ~args:(`Assoc ["file_path",`String "evidence.txt"]) |> get);
+      ignore (dispatch_text surface ~name:"tool_search_files"
+        ~args:(`Assoc ["pattern",`String "content"]) |> get);
+      let read_log () = In_channel.with_open_text log_path (fun input ->
+        let rec read acc = match input_line input with
+          | line -> read (Yojson.Safe.from_string line :: acc)
+          | exception End_of_file -> List.rev acc in read []) in
+      let calls = read_log () in
+      Alcotest.(check bool) "actual endpoint commands were dispatched" true (calls <> []);
+      List.iter (fun call ->
+        let open Yojson.Safe.Util in
+        let ssh = member "ssh" call |> to_list |> List.map to_string in
+        Alcotest.(check bool) "original surface keeps its exact SSH destination" true
+          (List.mem (original_endpoint.user ^ "@" ^ original_endpoint.host) ssh);
+        Alcotest.(check string) "layout, binary probe, Read and Grep keep the original workspace"
+          (Filename.concat original_endpoint.remote_root producer) (member "cwd" call |> to_string)) calls;
+      (match dispatch_text surface ~name:"tool_read_file"
+          ~args:(`Assoc ["file_path",`String "/widened-root/secret.txt"]) with
+       | Error _ -> () | Ok _ -> Alcotest.fail "old surface accepted new endpoint's declared root");
+      Alcotest.(check int) "new declared paths never reach the old endpoint"
+        (List.length calls) (List.length (read_log ()));
+      ignore (dispatch_text replacement ~name:"tool_read_file"
+        ~args:(`Assoc ["file_path",`String "evidence.txt"]) |> get);
+      let replacement_calls = List.drop (List.length calls) (read_log ()) in
+      Alcotest.(check bool) "new surface reaches its own endpoint" true (replacement_calls <> []);
+      List.iter (fun call ->
+        let open Yojson.Safe.Util in
+        let ssh = member "ssh" call |> to_list |> List.map to_string in
+        Alcotest.(check bool) "replacement uses the replacement destination" true
+          (List.mem (changed.user ^ "@" ^ changed.host) ssh);
+        Alcotest.(check string) "replacement uses its own workspace"
+          (Filename.concat changed.remote_root producer) (member "cwd" call |> to_string)) replacement_calls))
+;;
+
+let test_keeper_endpoint_read_preserves_png_bytes () =
+  let fixture = Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ())
+      "test/fixtures/verifier-image-lookup.png" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let trailer = Exec_ssh_protocol.render_trailer
+      { v=Exec_ssh_protocol.newest; exit=Some 0; signal=None; timed_out=false; shim_error=None
+      ; observed_syscalls = [] } in
+  let ssh_script = Printf.sprintf
+      "#!/bin/sh\ncat >/dev/null 2>/dev/null &\ncat %s\nprintf '%%s' %s >&2\nexit 0\n"
+      (Filename.quote fixture) (Filename.quote trailer) in
+  with_surface ~ssh_script (fun config surface ->
+    ignore (producer_playground config producer);
+    let result = VAT.dispatch surface ~name:"tool_read_file"
+        ~args:(`Assoc [ "file_path", `String "endpoint-only.png" ]) in
+    match result with
+    | Tool_result.Completed { content_blocks=Some blocks; data; _ } ->
+      Alcotest.(check bool) "remote complete byte count" true
+        (Yojson.Safe.Util.member "bytes" data = `Int (String.length bytes));
+      Alcotest.(check bool) "remote raw PNG reaches model unchanged" true
+        (List.exists (function
+          | Llm_provider.Types.Image { source = Llm_provider.Types.Base64 data; _ } ->
+            Base64.decode_exn data = bytes
+          | _ -> false) blocks)
+    | _ -> Alcotest.fail (Tool_result.message result))
+;;
+
+let test_goal_and_task_read_deliver_full_png () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "visual-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ())
+      "test/fixtures/verifier-image-lookup.png" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  Alcotest.(check bool) "fixture exceeds text Read default" true (String.length bytes > 200000);
+  let image_path = Filename.concat root "proof.png" in
+  Out_channel.with_open_bin image_path (fun out -> output_string out bytes);
+  let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
+  let encoded = Base64.encode_exn bytes in
+  let task_surface = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal_surface = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
+  List.iter (fun (surface, path) ->
+    let args = `Assoc [ "file_path", `String path ] in
+    let result = VAT.dispatch surface ~name:"tool_read_file" ~args in
+    (match result with
+     | Tool_result.Completed output ->
+       Alcotest.(check bool) "SHA receipt" true
+         (Yojson.Safe.Util.member "sha256" output.data = `String sha);
+       Alcotest.(check bool) "full byte receipt" true
+         (Yojson.Safe.Util.member "bytes" output.data = `Int (String.length bytes))
+     | Tool_result.Failed _ | Tool_result.Deferred _ -> Alcotest.fail (Tool_result.message result));
+    let observation = Tool_result.to_json result |> Yojson.Safe.to_string in
+    Alcotest.(check bool) "observation valid UTF-8" true (String_util.is_valid_utf8 observation);
+    Alcotest.(check bool) "observation excludes image body" false
+      (Astring.String.is_infix ~affix:encoded observation);
+    let output = Masc.Tool_bridge.to_agent_core_typed_result result |> Result.get_ok in
+    let actual_blocks = match output.content_blocks with
+      | Some blocks -> blocks | None -> Alcotest.fail "bridge erased image blocks" in
+    Alcotest.(check bool) "bridge preserves complete PNG" true
+      (List.exists (function
+         | Llm_provider.Types.Image { media_type="image/png"; source = Llm_provider.Types.Base64 data } -> data = encoded
+         | _ -> false) actual_blocks);
+    let message role content : Llm_provider.Types.message =
+      { origin = Llm_provider.Types.Conversation;  role; content; name=None; tool_call_id=None; metadata=[] } in
+    let messages =
+      [ message User [ Text "Inspect the artifact visually" ]
+      ; message Assistant [ ToolUse { id="read-visual"; name="Read"; input=args } ]
+      ; message Tool [ ToolResult { tool_use_id="read-visual"; content=output.content
+                                 ; content_blocks=output.content_blocks; json=None; outcome=Tool_succeeded } ] ] in
+    let provider = Llm_provider.Provider_config.make ~kind:Anthropic
+      ~model_id:"visual-fixture" ~base_url:"https://api.anthropic.com" ~max_tokens:1024 () in
+    let request = Llm_provider.Backend_anthropic.build_request ~config:provider ~messages ()
+      |> Yojson.Safe.from_string in
+    let rec has_image = function
+      | `Assoc fields ->
+        (match List.assoc_opt "type" fields, List.assoc_opt "source" fields with
+         | Some (`String "image"), Some (`Assoc source) -> List.assoc_opt "data" source = Some (`String encoded)
+         | _ -> List.exists (fun (_, value) -> has_image value) fields)
+      | `List items -> List.exists has_image items
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> false in
+    Alcotest.(check bool) "next request receives image bytes" true (has_image request))
+    [ task_surface, "proof.png"; goal_surface, producer_name ^ "/proof.png" ];
+  let outside = Filename.concat dir "outside.png" in
+  Out_channel.with_open_bin outside (fun out -> output_string out bytes);
+  Unix.symlink outside (Filename.concat root "escape.png");
+  let rejected path =
+    let result = VAT.dispatch goal_surface ~name:"tool_read_file"
+      ~args:(`Assoc [ "file_path", `String path ]) in
+    Alcotest.(check bool) "out-of-root read rejected" true (Tool_result.is_failed result)
+  in
+  rejected outside;
+  rejected (producer_name ^ "/escape.png");
+  with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "1024" (fun () ->
+    let result = VAT.dispatch goal_surface ~name:"tool_read_file"
+      ~args:(`Assoc [ "file_path", `String (producer_name ^ "/proof.png") ]) in
+    Alcotest.(check bool) "existing image cap enforced" true
+      (Tool_result.failure_class result = Some Tool_result.Policy_rejection));
+  Alcotest.(check string) "read left exact file unchanged" bytes
+    (In_channel.with_open_bin image_path In_channel.input_all)
+;;
+
+let test_goal_and_task_inspect_real_pdf () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Masc_test_deps.init_eio_clock ~sw env;
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / dir)
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "pdf-test"));
+  let producer_name = "pdf-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat (Masc_test_deps.find_project_root ())
+    "docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
+  let source = Filename.concat root "booklet.pdf" in
+  Out_channel.with_open_bin source (fun out -> output_string out bytes);
+  Out_channel.with_open_bin (Filename.concat root "broken.pdf")
+    (fun out -> output_string out "%PDF-1.7\nnot a PDF document\n");
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
+  let read surface path = VAT.dispatch surface ~name:"tool_read_file"
+    ~args:(`Assoc ["file_path",`String path]) in
+  List.iter (fun (surface,prefix) ->
+    let result = read surface (prefix ^ "booklet.pdf") in
+    (match result with
+     | Tool_result.Completed {data;content_blocks=Some blocks;_} ->
+       let open Yojson.Safe.Util in
+       Alcotest.(check int) "exact original PDF byte count" (String.length bytes)
+         (member "bytes" data |> to_int);
+       Alcotest.(check string) "exact original PDF SHA-256" sha
+         (member "sha256" data |> to_string);
+       Alcotest.(check int) "Poppler parsed three pages" 3 (member "page_count" data |> to_int);
+       let pages = member "pages" data |> to_list in
+       Alcotest.(check int) "all page metadata delivered" 3 (List.length pages);
+       let images = List.filter_map (function
+         | Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 data} ->
+           Some (Base64.decode_exn data)
+         | _ -> None) blocks in
+       Alcotest.(check int) "all three parsed pages actually rendered" 3 (List.length images);
+       List.iteri (fun i (page,png) ->
+         Alcotest.(check int) "page identity" (i+1) (member "page" page |> to_int);
+         Alcotest.(check string) "rendered bytes tied to metadata"
+           Agent_core_sha256.(digest_string png |> to_hex)
+           (member "rendered_sha256" page |> to_string);
+         Alcotest.(check bool) "A4 width from parsed PDF geometry" true
+           (abs_float ((member "width_points" page |> to_float) -. 595.2756) < 0.001);
+         Alcotest.(check bool) "A4 height from parsed PDF geometry" true
+           (abs_float ((member "height_points" page |> to_float) -. 841.8898) < 0.001))
+         (List.combine pages images);
+       Alcotest.(check bool) "Korean text was extracted from original PDF" true
+         (List.exists (fun page -> String_util.contains_substring
+           (member "text" page |> to_string) "기억의 정원") pages)
+     | _ -> Alcotest.fail (Tool_result.message result));
+    Alcotest.(check bool) "malformed PDF never becomes successful metadata" true
+      (Tool_result.is_failed (read surface (prefix ^ "broken.pdf")));
+    let partial = VAT.dispatch surface ~name:"tool_read_file"
+      ~args:(`Assoc ["file_path",`String (prefix ^ "booklet.pdf");"limit",`Int 1]) in
+    Alcotest.(check bool) "line windows do not masquerade as complete PDF" true
+      (Tool_result.failure_class partial = Some Tool_result.Workflow_rejection))
+    [task,"";goal,producer_name ^ "/"];
+  let outside = Filename.concat dir "outside.pdf" in
+  Out_channel.with_open_bin outside (fun out -> output_string out bytes);
+  Unix.symlink outside (Filename.concat root "escape.pdf");
+  List.iter (fun (surface,path) ->
+    Alcotest.(check bool) "PDF access keeps the same owned root" true
+      (Tool_result.is_failed (read surface path)))
+    [task,outside;goal,outside;task,"escape.pdf";goal,producer_name ^ "/escape.pdf"];
+  with_env "PATH" (Filename.concat dir "no-poppler") (fun () ->
+    let result = read task "booklet.pdf" in
+    Alcotest.(check bool) "missing parser is an explicit infrastructure failure" true
+      (Tool_result.is_failed result && String_util.contains_substring
+        (Tool_result.message result) "pdf_dependency_unavailable"));
+  Alcotest.(check string) "read-only inspection preserves original PDF" bytes
+    (In_channel.with_open_bin source In_channel.input_all)
+;;
+
+let test_goal_and_task_inspect_real_mp4 () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Masc_test_deps.init_eio_clock ~sw env;
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / dir)
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "video-test"));
+  let producer_name = "video-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat (Masc_test_deps.find_project_root ())
+    "test/fixtures/verifier-video.mp4" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
+  let source = Filename.concat root "clip.mp4" in
+  Out_channel.with_open_bin source (fun out -> output_string out bytes);
+  Out_channel.with_open_bin (Filename.concat root "broken.mp4")
+    (fun out -> output_string out (String.sub bytes 0 (String.length bytes / 2)));
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
+  let read surface path = VAT.dispatch surface ~name:"tool_read_file"
+    ~args:(`Assoc ["file_path",`String path]) in
+  List.iter (fun (surface,prefix) ->
+    let result = read surface (prefix ^ "clip.mp4") in
+    (match result with
+     | Tool_result.Completed {data;_} ->
+       let open Yojson.Safe.Util in
+       let data = member "inspection" data in
+       Alcotest.(check int) "exact video bytes" (String.length bytes) (member "bytes" data |> to_int);
+       Alcotest.(check string) "exact video SHA" sha (member "sha256" data |> to_string);
+       Alcotest.(check bool) "video and audio independently observed" true
+         (member "video_present" data = `Bool true && member "audio_present" data = `Bool true);
+       Alcotest.(check bool) "all audio/video streams decoded" true
+         (member "decoded_stream_indices" data = `List [`Int 0;`Int 1]);
+       Alcotest.(check bool) "no visual inspection invented" true
+         (member "visual_input" data = `Bool false);
+       Alcotest.(check int) "direct decoder exit" 0
+         (member "full_decode" data |> member "exit_code" |> to_int);
+       Alcotest.(check (float 0.001)) "observed duration" 1.
+         (member "duration_seconds" data |> to_float);
+       let video = member "streams" data |> to_list |> List.hd in
+       Alcotest.(check int) "decoded video width" 64 (member "width" video |> to_int);
+       Alcotest.(check int) "decoded video height" 48 (member "height" video |> to_int)
+     | _ -> Alcotest.fail (Tool_result.message result));
+    Alcotest.(check bool) "truncated video is not a complete successful decode" true
+      (Tool_result.is_failed (read surface (prefix ^ "broken.mp4")));
+    let partial = VAT.dispatch surface ~name:"tool_read_file"
+      ~args:(`Assoc ["file_path",`String (prefix ^ "clip.mp4");"limit",`Int 1]) in
+    Alcotest.(check bool) "line window refused" true
+      (Tool_result.failure_class partial = Some Tool_result.Workflow_rejection))
+    [task,"";goal,producer_name ^ "/"];
+  let outside = Filename.concat dir "outside.mp4" in
+  Out_channel.with_open_bin outside (fun out -> output_string out bytes);
+  Unix.symlink outside (Filename.concat root "escape.mp4");
+  List.iter (fun (surface,path) ->
+    Alcotest.(check bool) "video keeps producer containment" true
+      (Tool_result.is_failed (read surface path)))
+    [task,outside;goal,outside;task,"escape.mp4";goal,producer_name ^ "/escape.mp4"];
+  with_env "PATH" (Filename.concat dir "no-ffmpeg") (fun () ->
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "missing decoder keeps dependency classification" true
+        (Tool_result.failure_class result = Some Tool_result.Dependency_unavailable);
+      Alcotest.(check bool) "missing decoder is stated" true
+        (String_util.contains_substring (Tool_result.message result) "video_dependency_unavailable"))
+      [task,"clip.mp4";goal,producer_name ^ "/clip.mp4"]);
+  (* The process runner's deadline result must not reject the producer's
+     evidence as a policy violation. Exercise the public dispatch projection. *)
+  let fake_bin = Filename.concat dir "timeout-bin" in
+  Unix.mkdir fake_bin 0o700;
+  List.iter (fun program ->
+    let executable = Filename.concat fake_bin program in
+    Out_channel.with_open_bin executable (fun out -> output_string out "#!/bin/sh\nexit 124\n");
+    Unix.chmod executable 0o700) ["ffmpeg"; "ffprobe"];
+  with_env "PATH" fake_bin (fun () ->
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "command deadline is a runtime failure" true
+        (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+      Alcotest.(check bool) "timeout diagnostic explicit" true
+        (String_util.contains_substring (Tool_result.message result) "video_inspection_timeout"))
+      [task,"clip.mp4";goal,producer_name ^ "/clip.mp4"]);
+  let oversized = Filename.concat root "oversized.mp4" in
+  Out_channel.with_open_bin oversized (fun out ->
+    seek_out out (64 * 1024 * 1024);
+    output_char out '\000');
+  with_env "PATH" (Filename.concat dir "no-ffmpeg") (fun () ->
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "oversized source rejected before decoder lookup" true
+        (Tool_result.failure_class result = Some Tool_result.Policy_rejection
+         && String_util.contains_substring (Tool_result.message result) "media_source_too_large"))
+      [task,"oversized.mp4";goal,producer_name ^ "/oversized.mp4"]);
+  Alcotest.(check string) "inspection preserves source" bytes
+    (In_channel.with_open_bin source In_channel.input_all)
+;;
+
+(* A capture saved without its extension used to fall through to the ordinary
+   text Read, which projects container bytes as characters. The ISO file type
+   box is what names the format, so the same file must reach the same
+   inspection under either name. *)
+let test_a_capture_without_the_mp4_extension_is_still_inspected () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Masc_test_deps.init_eio_clock ~sw env;
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / dir)
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "video-signature-test"));
+  let producer_name = "video-signature-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat (Masc_test_deps.find_project_root ())
+    "test/fixtures/verifier-video.mp4" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let sha = Agent_core_sha256.(digest_string bytes |> to_hex) in
+  List.iter (fun filename ->
+  Out_channel.with_open_bin (Filename.concat root filename)
+    (fun out -> output_string out bytes);
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let result = VAT.dispatch task ~name:"tool_read_file"
+    ~args:(`Assoc ["file_path",`String filename]) in
+  (match result with
+   | Tool_result.Completed {data;_} ->
+     let open Yojson.Safe.Util in
+     let data = member "inspection" data in
+     Alcotest.(check int) "exact video bytes" (String.length bytes)
+       (member "bytes" data |> to_int);
+     Alcotest.(check string) "exact video SHA" sha (member "sha256" data |> to_string);
+     Alcotest.(check bool) "no visual inspection invented" true
+       (member "visual_input" data = `Bool false)
+   | _ -> Alcotest.fail (Tool_result.message result))) ["capture"; "capture.m4v"]
+;;
+
+let () =
+  Random.self_init ();
+  Alcotest.run
+    "verification authority tools"
+    [ ( "surface"
+      , [ Alcotest.test_case "schemas are the descriptor schemas" `Quick
+            test_schemas_are_the_descriptor_schemas
+        ; Alcotest.test_case
+            "read translates the advertised argument and refuses a malformed one"
+            `Quick
+            test_read_translates_the_advertised_argument_and_refuses_a_malformed_one
+        ; Alcotest.test_case "search refuses a call without its required pattern"
+            `Quick test_search_refuses_a_call_without_its_required_pattern
+        ; Alcotest.test_case "workspace producer gets owned read surface" `Quick
+            test_workspace_producer_gets_owned_read_surface
+        ; Alcotest.test_case "binary lookup failure persists as valid UTF-8" `Quick
+            test_binary_lookup_failures_survive_observation_replay
+        ; Alcotest.test_case "keeper surface uses effective sandbox root" `Quick
+            test_keeper_surface_uses_the_effective_sandbox_root
+        ] )
+    ; ( "dispatch"
+      , [ Alcotest.test_case "Goal and Task inspect original MP4 metadata and all audio/video streams" `Quick
+            test_goal_and_task_inspect_real_mp4
+        ; Alcotest.test_case
+            "a capture without the .mp4 extension is still inspected as video" `Quick
+            test_a_capture_without_the_mp4_extension_is_still_inspected
+        ; Alcotest.test_case "Goal and Task inspect actual PDF pages, bytes and text" `Quick
+            test_goal_and_task_inspect_real_pdf
+        ; Alcotest.test_case "Goal and Task receive complete visual PNG" `Quick
+            test_goal_and_task_read_deliver_full_png
+        ; Alcotest.test_case "Keeper endpoint read keeps exact PNG bytes" `Quick
+            test_keeper_endpoint_read_preserves_png_bytes
+        ; Alcotest.test_case "captured endpoint survives configuration replacement" `Quick
+            test_remote_surface_keeps_its_captured_destination
+        ; Alcotest.test_case "unknown tool name is an error" `Quick
+            test_unknown_tool_name_is_an_error
+        ; Alcotest.test_case "web fetch is offered and dispatches" `Quick
+            test_web_fetch_is_offered_and_dispatches
+        ; Alcotest.test_case "web fetch refuses a private target" `Quick
+            test_web_fetch_refuses_a_private_target
+        ] )
+    ; ( "prompt"
+      , [ Alcotest.test_case "prompt states the available surface" `Quick
+            test_prompt_states_the_available_surface
+        ; Alcotest.test_case "an absent root renders its own lookup section" `Quick
+            test_absent_root_renders_its_own_lookup_section
+        ; Alcotest.test_case "endpoint layout ignores stale host bookkeeping" `Quick
+            test_endpoint_layout_ignores_host_bookkeeping
+        ; Alcotest.test_case "endpoint layout fails closed on unreadable or malformed results" `Quick
+            test_endpoint_layout_fails_closed
+        ; Alcotest.test_case
+            "root_layout reports entries and discovered checkouts"
+            `Quick
+            test_root_layout_reports_entries_and_discovered_checkouts
+        ; Alcotest.test_case
+            "root layout names HEAD and refuses to call an uncompared tree current"
+            `Quick
+            test_root_layout_names_head_and_refuses_to_call_an_uncompared_tree_current
+        ; Alcotest.test_case
+            "root layout reports a checkout behind its tracking ref"
+            `Quick
+            test_root_layout_reports_a_checkout_behind_its_tracking_ref
+        ; Alcotest.test_case
+            "root layout marks a detached HEAD"
+            `Quick
+            test_root_layout_marks_a_detached_head
+        ; Alcotest.test_case
+            "root layout does not report the enclosing repository for a broken checkout"
+            `Quick
+            test_root_layout_does_not_report_the_enclosing_repository_for_a_broken_checkout
+        ; Alcotest.test_case
+            "root layout does not run a checkout's configured fsmonitor"
+            `Quick
+            test_root_layout_does_not_run_a_checkouts_configured_fsmonitor
+        ; Alcotest.test_case
+            "root layout does not probe a tree on the producer's endpoint"
+            `Quick
+            test_root_layout_does_not_probe_a_tree_on_the_producers_endpoint
+        ; Alcotest.test_case
+            "root_layout fails closed when discovery is unavailable"
+            `Quick
+            test_root_layout_fails_closed_when_discovery_is_unavailable
+        ; Alcotest.test_case
+            "root_layout fails closed when checkout discovery is partial"
+            `Quick
+            test_root_layout_fails_closed_when_checkout_discovery_is_partial
+        ; Alcotest.test_case "Task review does not require a complete inventory"
+            `Quick test_task_review_does_not_require_inventory
+        ; Alcotest.test_case
+            "a workspace producer without a playground gets a stated absence"
+            `Quick
+            test_workspace_producer_without_a_playground_gets_a_stated_absence
+        ; Alcotest.test_case
+            "prompt states the root instead of implying a repository"
+            `Quick
+            test_prompt_states_the_root_and_not_a_repository
+        ] )
+    ]
+;;

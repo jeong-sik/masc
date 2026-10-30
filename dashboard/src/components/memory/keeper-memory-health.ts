@@ -1,0 +1,386 @@
+// KeeperMemoryHealth — per-keeper current-memory snapshot observability.
+//
+// Read-only diagnostic surface for Lab > 키퍼 메모리 상태.
+// Shows ordinary and source-bound current snapshots, exact latest delta, read
+// failures, and how far behind each keeper's Librarian is standing (RFC
+// librarian-lifecycle §4.9). There is no legacy event/fact-store or GC view.
+
+import { html } from 'htm/preact'
+import { useEffect, useState } from 'preact/hooks'
+import {
+  fetchKeeperMemoryHealth,
+  type KeeperMemoryHealthAlert,
+  type KeeperMemoryHealthAlertTarget,
+  type KeeperMemoryHealthKeeperEntry,
+  type KeeperMemoryHealthLibrarianStallCause,
+  type KeeperMemoryHealthLibrarianStalled,
+  type KeeperMemoryHealthResponse,
+} from '../../api/dashboard'
+import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+
+const SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'snapshot_read_error'
+const SOURCE_SNAPSHOT_READ_ERROR_TARGET: KeeperMemoryHealthAlertTarget = 'source_snapshot_read_error'
+const LIBRARIAN_STOPPED_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_stopped'
+const LIBRARIAN_FAILURES_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_failures'
+const LIBRARIAN_STARVATION_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_starvation'
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+function entryAlerts(entry: KeeperMemoryHealthKeeperEntry): KeeperMemoryHealthAlert[] {
+  return entry.alerts
+}
+
+function hasTargetAlert(alerts: KeeperMemoryHealthAlert[], target: KeeperMemoryHealthAlertTarget): boolean {
+  return alerts.some(alert => alert.target === target)
+}
+
+function hasErrorAlert(alerts: KeeperMemoryHealthAlert[]): boolean {
+  return alerts.some(alert => alert.severity === 'error')
+}
+
+function alertBadgeClass(alert: KeeperMemoryHealthAlert): string {
+  return alert.severity === 'error' ? 'kmh-badge kmh-badge--error' : 'kmh-badge kmh-badge--warn'
+}
+
+// RFC librarian-lifecycle §4.10: a gap of one atom is named as that atom;
+// a file the gap is read from that did not read is its own badge, never
+// the absence of one.
+const LIBRARIAN_STALL_CAUSE_WORDS: Record<KeeperMemoryHealthLibrarianStallCause, string> = {
+  meta_unreadable: 'Keeper meta',
+  turn_records_unreadable: '턴 기록',
+  turn_boundary_refused: '턴 경계',
+  snapshot_unreadable: '연속성 스냅숏',
+  read_position_unreadable: '읽은 위치',
+}
+
+function librarianStalledBadge(stalled: KeeperMemoryHealthLibrarianStalled | null) {
+  if (stalled === null) return ''
+  if (stalled.kind === 'unmeasured') {
+    return html`<div><span class="kmh-badge kmh-badge--warn" title=${stalled.detail}
+      >밀림 측정 못 함 · ${LIBRARIAN_STALL_CAUSE_WORDS[stalled.cause]} 읽기 실패</span></div>`
+  }
+  const last = stalled.gap_end_atom - 1
+  const atoms = last === stalled.gap_start_atom
+    ? `atom ${stalled.gap_start_atom}`
+    : `atom ${stalled.gap_start_atom}–${last}`
+  return html`<div><span class="kmh-badge kmh-badge--warn"
+    title="요청에도 기억에도 아직 없는 구간이에요">밀림 ${atoms}</span></div>`
+}
+
+function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
+  const alerts = entryAlerts(entry)
+  const error = hasErrorAlert(alerts)
+  const warn = alerts.length > 0
+  const readErrorWarn = hasTargetAlert(alerts, SNAPSHOT_READ_ERROR_TARGET)
+  const sourceReadErrorWarn = hasTargetAlert(alerts, SOURCE_SNAPSHOT_READ_ERROR_TARGET)
+  const librarianStopped = hasTargetAlert(alerts, LIBRARIAN_STOPPED_TARGET)
+  const unread = entry.librarian.unread_atom_turns === null
+    || entry.librarian.unread_official_turns === null
+    ? null
+    : entry.librarian.unread_atom_turns + entry.librarian.unread_official_turns
+  const starving = hasTargetAlert(alerts, LIBRARIAN_STARVATION_TARGET)
+  const librarianFailing = starving || hasTargetAlert(alerts, LIBRARIAN_FAILURES_TARGET)
+  const visionReasons = entry.vision_ingest_error_reasons
+    .map(reason => `${reason.reason} ×${reason.count}`)
+    .join(', ')
+
+  return html`
+    <tr class=${error ? 'kmh-row--error' : warn ? 'kmh-row--warn' : ''}>
+      <td>${entry.keeper_id}</td>
+      <td>${entry.revision}</td>
+      <td>${entry.facts.toLocaleString()}</td>
+      <td>${entry.observed_facts.toLocaleString()} / ${entry.derived_facts.toLocaleString()}</td>
+      <td>
+        ${entry.support_invalidations > 0
+          ? html`<span class="kmh-badge kmh-badge--muted">${entry.support_invalidations}</span>`
+          : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+      </td>
+      <td>${formatBytes(entry.snapshot_bytes)}</td>
+      <td><span class="kmh-badge kmh-badge--ok">+${entry.added}</span></td>
+      <td><span class="kmh-badge kmh-badge--ok">−${entry.removed}</span></td>
+      <td title=${entry.librarian.detail ?? entry.librarian.state ?? '아직 측정 전'}>
+        ${unread === null
+          ? html`<span class="kmh-badge kmh-badge--muted">?</span>`
+          : librarianStopped || unread > 0
+            ? html`<span class="kmh-badge kmh-badge--warn">${unread}</span>`
+            : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+        <div><small>${entry.librarian.state ?? '아직 측정 전'}</small></div>
+        <div><small>${entry.librarian.measured_at === null ? '측정 시각 없음'
+          : `마지막 측정 ${new Date(entry.librarian.measured_at * 1000).toLocaleString()}`}</small></div>
+        ${librarianStalledBadge(entry.librarian.stalled)}
+        ${(['snapshot', 'memory'] as const).map(source => {
+          const reading = entry.context_cycle.unread[source]
+          const label = source === 'snapshot' ? '스냅숏의 누락 기록' : 'Memory 누적 누락 기록'
+          if (reading.kind === 'unavailable') return html`<div class="kmh-badge kmh-badge--warn">${label} · 조회 불가</div>`
+          if (reading.messages.length === 0) return html`<div><small>${label} · 0</small></div>`
+          return html`<details><summary class="kmh-badge kmh-badge--warn">${label} · ${reading.messages.length}</summary>
+            <p>읽지 않은 원문과 크기 거절 원인입니다. 스냅숏과 누적 기록은 겹칠 수 있습니다.</p>
+            <pre>${JSON.stringify(reading.messages, null, 2)}</pre></details>`
+        })}
+      </td>
+      <td>
+        ${starving
+          ? html`<span class="kmh-badge kmh-badge--error">${entry.librarian_failures}</span>`
+          : librarianFailing
+            ? html`<span class="kmh-badge kmh-badge--warn">${entry.librarian_failures}</span>`
+            : html`<span class="kmh-badge kmh-badge--ok">${entry.librarian_failures}</span>`}
+      </td>
+      <td>
+        ${readErrorWarn
+          ? html`<span class="kmh-badge kmh-badge--warn" title=${entry.read_error ?? ''}>오류</span>`
+          : entry.snapshot_present
+            ? html`<span class="kmh-badge kmh-badge--ok">정상</span>`
+            : starving
+              ? html`<span class="kmh-badge kmh-badge--error">없음</span>`
+              : html`<span class="kmh-badge kmh-badge--muted">없음</span>`}
+      </td>
+      <td>
+        ${sourceReadErrorWarn
+          ? html`<span class="kmh-badge kmh-badge--warn" title=${entry.source_read_error ?? ''}>오류</span>`
+          : entry.source_snapshot_present
+            ? html`<span class="kmh-badge kmh-badge--ok" title=${formatBytes(entry.source_snapshot_bytes)}>
+                r${entry.source_revision} · ${entry.source_facts} / 무효 ${entry.source_invalidations}
+              </span>`
+            : html`<span class="kmh-badge kmh-badge--muted">없음</span>`}
+      </td>
+      <td>
+        ${entry.vision_ingest_errors > 0
+          ? html`<span class="kmh-badge kmh-badge--warn" title=${visionReasons}>
+              ${entry.vision_ingest_errors}
+            </span>`
+          : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+      </td>
+      <td>
+        ${alerts.length > 0
+          ? alerts.map(alert => html`
+            <span class=${alertBadgeClass(alert)} title=${alert.message}>${alert.label}</span>
+          `)
+          : html`<span class="kmh-badge kmh-badge--ok">정상</span>`}
+      </td>
+    </tr>
+  `
+}
+
+export function KeeperMemoryHealth() {
+  const [data, setData] = useState<KeeperMemoryHealthResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // useEffect is appropriate here: this is external-system synchronization
+    // (periodic HTTP fetch from the MASC API), not derived state or event response.
+    const controller = new AbortController()
+
+    const refresh = async () => {
+      try {
+        const result = await fetchKeeperMemoryHealth()
+        if (controller.signal.aborted) return
+        setData(result)
+        setError(null)
+      } catch (err) {
+        if (controller.signal.aborted) return
+        setError(err instanceof Error ? err.message : 'keeper-memory-health fetch failed')
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+
+    setLoading(true)
+    void refresh()
+    const cleanup = setupVisibleAutoRefresh(() => { void refresh() }, DEFAULT_PANEL_REFRESH_MS)
+
+    return () => {
+      controller.abort()
+      cleanup()
+    }
+  }, [])
+
+  if (loading && data === null) {
+    return html`
+      <div class="kmh-panel">
+        <p class="kmh-empty">로딩중...</p>
+      </div>
+    `
+  }
+
+  if (error !== null && data === null) {
+    return html`
+      <div class="kmh-panel">
+        <p class="kmh-empty">데이터 로드 실패: ${error}</p>
+      </div>
+    `
+  }
+
+  if (data === null) {
+    return html`
+      <div class="kmh-panel">
+        <p class="kmh-empty">데이터 없음.</p>
+      </div>
+    `
+  }
+
+  const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
+  const totalAlerts = data.alert_summary.total_alerts
+  const errorAlerts = data.alert_summary.error_alerts
+  const readErrorWarn = data.alert_summary.snapshot_read_error_keepers > 0
+  const sourceReadErrorWarn = data.alert_summary.source_snapshot_read_error_keepers > 0
+  const librarianStoppedKeepers = data.alert_summary.librarian_stopped_keepers
+  const starvingKeepers = data.alert_summary.librarian_starving_keepers
+  const librarianFailureClass = starvingKeepers > 0
+    ? ' kmh-stat-value--error'
+    : data.totals.librarian_failures > 0
+      ? ' kmh-stat-value--warn'
+      : ''
+  const alertClass = errorAlerts > 0
+    ? ' kmh-stat-value--error'
+    : totalAlerts > 0
+      ? ' kmh-stat-value--warn'
+      : ''
+
+  return html`
+    <div class="kmh-panel">
+      <div class="kmh-header">
+        <div class="kmh-title">키퍼 메모리 상태</div>
+        <div class="kmh-totals-strip">
+          <div class="kmh-stat" data-stat-key="facts">
+            <span class="kmh-stat-label">전체 사실</span>
+            <span class="kmh-stat-value">${data.totals.facts.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="observed-facts">
+            <span class="kmh-stat-label">관측 사실</span>
+            <span class="kmh-stat-value">${data.totals.observed_facts.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="derived-facts">
+            <span class="kmh-stat-label">파생 사실</span>
+            <span class="kmh-stat-value">${data.totals.derived_facts.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="support-invalidations">
+            <span class="kmh-stat-label">지지 무효화</span>
+            <span class="kmh-stat-value">
+              ${data.totals.support_invalidations.toLocaleString()}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="snapshot-bytes">
+            <span class="kmh-stat-label">스냅샷 크기</span>
+            <span class="kmh-stat-value">${formatBytes(data.totals.snapshot_bytes)}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="added">
+            <span class="kmh-stat-label">최근 추가</span>
+            <span class="kmh-stat-value">+${data.totals.added}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="removed">
+            <span class="kmh-stat-label">최근 제거</span>
+            <span class="kmh-stat-value">−${data.totals.removed}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="source-facts">
+            <span class="kmh-stat-label">소스 사실</span>
+            <span class="kmh-stat-value">${data.totals.source_facts.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="source-invalidations">
+            <span class="kmh-stat-label">소스 무효화</span>
+            <span class="kmh-stat-value">${data.totals.source_invalidations.toLocaleString()}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="source-snapshot-bytes">
+            <span class="kmh-stat-label">소스 크기</span>
+            <span class="kmh-stat-value">${formatBytes(data.totals.source_snapshot_bytes)}</span>
+          </div>
+          <div class="kmh-stat" data-stat-key="read-errors">
+            <span class="kmh-stat-label">읽기 오류</span>
+            <span class=${`kmh-stat-value${readErrorWarn ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.read_errors}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="source-read-errors">
+            <span class="kmh-stat-label">소스 읽기 오류</span>
+            <span class=${`kmh-stat-value${sourceReadErrorWarn ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.source_read_errors}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="vision-ingest-errors">
+            <span class="kmh-stat-label">Vision ingest 오류</span>
+            <span class=${`kmh-stat-value${data.totals.vision_ingest_errors > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.vision_ingest_errors}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="librarian-unread-turns">
+            <span class="kmh-stat-label">안 읽은 턴</span>
+            <span class=${`kmh-stat-value${data.totals.librarian_unread_turns !== null && data.totals.librarian_unread_turns > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.librarian_unread_turns ?? '?'}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="librarian-continuity-behind">
+            <span class="kmh-stat-label">연속성 밀림 (atom)</span>
+            <span class=${`kmh-stat-value${data.totals.librarian_continuity_unread_atoms > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.librarian_continuity_unread_atoms}${data.totals.librarian_continuity_unmeasured > 0 ? ` (${data.totals.librarian_continuity_unmeasured} 못 잼)` : ''}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="librarian-stopped-keepers">
+            <span class="kmh-stat-label">멈춘 Librarian</span>
+            <span class=${`kmh-stat-value${librarianStoppedKeepers > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${librarianStoppedKeepers}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="librarian-failures">
+            <span class="kmh-stat-label">Librarian 실패</span>
+            <span class=${`kmh-stat-value${librarianFailureClass}`}>
+              ${data.totals.librarian_failures}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="starving-keepers">
+            <span class="kmh-stat-label">일반 기억 없는 키퍼</span>
+            <span class=${`kmh-stat-value${starvingKeepers > 0 ? ' kmh-stat-value--error' : ''}`}>
+              ${starvingKeepers}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="alerts">
+            <span class="kmh-stat-label">경보</span>
+            <span class=${`kmh-stat-value${alertClass}`}>
+              ${totalAlerts}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="keeper-count">
+            <span class="kmh-stat-label">키퍼 수</span>
+            <span class="kmh-stat-value">${data.keepers.length}</span>
+          </div>
+        </div>
+        <div class="kmh-refresh-label">
+          ${formatAutoRefreshLabel(DEFAULT_PANEL_REFRESH_MS)} — 기준 ${generatedAt}
+        </div>
+      </div>
+
+      ${data.keepers.length === 0
+        ? html`<p class="kmh-empty">등록된 current-memory snapshot 또는 Keeper 없음.</p>`
+        : html`
+          <div class="kmh-table-wrap">
+            <table class="kmh-table">
+              <thead>
+                <tr>
+                  <th>키퍼</th>
+                  <th>revision</th>
+                  <th>사실</th>
+                  <th>관측 / 파생</th>
+                  <th>지지 무효화</th>
+                  <th>bytes</th>
+                  <th>추가</th>
+                  <th>제거</th>
+                  <th>안 읽은 턴</th>
+                  <th>실패</th>
+                  <th>snapshot</th>
+                  <th>source snapshot</th>
+                  <th>Vision 오류</th>
+                  <th>경보</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${data.keepers.map(entry => html`<${KeeperRow} key=${entry.keeper_id} entry=${entry} />`)}
+              </tbody>
+            </table>
+          </div>
+        `}
+    </div>
+  `
+}

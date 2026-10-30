@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+                                                                                                        │[Recent] Changes · 0 keepers
+  MASC Dashboard  [masc-addon-repaired-ui-20261021-fx3087s5]  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────
+  p:Approvals / Questions
+ ┌─ Needs your decision ──────────────────────────┐  ┌─ Status ───────────────────────────────────────┐
+ │ No decision is waiting on you.                 │  │ Health: ok                                     │
+ └────────────────────────────────────────────────┘  │ Work: 0 currently done in the last 24h ·       │
+                                                     │ details in Work                                │
+ ┌─ Continue ─────────────────────────────────────┐  │                                                │
+ │ Create a Keeper  · choose who will take the    │  │                                                │
+ │ work                                           │  │                                                │
+ └────────────────────────────────────────────────┘  └────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Left:Keepers  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  s:music  r:refresh  q:quit  …?
+ Choose a Keeper before writing · i:choose

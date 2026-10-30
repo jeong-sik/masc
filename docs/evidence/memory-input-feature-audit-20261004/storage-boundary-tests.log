@@ -1,0 +1,9 @@
+Testing `Memory input storage boundary'.
+This run has ID `ALQKAALA'.
+
+  [OK]          recorded input          0   corrupt latest cannot become olde...
+  [OK]          recorded input          1   storage failure is not empty.
+  [OK]          recorded input          2   valid store reaches input summary.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-memory-store-test-hrxpakb0/_build/_tests/Memory input storage boundary'.
+Test Successful in 0.002s. 3 tests run.

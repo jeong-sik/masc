@@ -1,0 +1,54 @@
+[
+  {
+    "source_commit": "4219c3074e281940ffec9c0d0b12db6f04a0d296",
+    "tool_name": "BrowserInteract",
+    "tool_input": {
+      "action": "workflow",
+      "clientId": "59acf69d-4a16-41b6-b0bf-17cd913b6d71",
+      "expectedUrl": "http://127.0.0.1:9438/confirmation",
+      "lane": "live",
+      "snapshotScope": "viewport",
+      "steps": [
+        {
+          "method": "waitForURL",
+          "url": "http://127.0.0.1:9438/confirmation"
+        },
+        {
+          "method": "waitForSelector",
+          "selector": "text=배송 신청 완료",
+          "state": "visible"
+        }
+      ],
+      "tabId": 2
+    },
+    "tool_result": "{\"message\":\"Browser command failed; inspect its original receipt before further input. {\\\"reply\\\":\\\"issue\\\",\\\"answer\\\":{\\\"status\\\":\\\"answered\\\",\\\"payload\\\":{\\\"ok\\\":false,\\\"error\\\":\\\"page.snapshot scope must be one of full_page, only_within_viewport, subtree. Expected: await page.snapshot({ scope?, root?, includeActionMarks?, includeStableLocator? }); read the same tab before continuing; never replay the workflow\\\",\\\"effectPhase\\\":\\\"not_started\\\"}},\\\"browserSelection\\\":{\\\"lane\\\":\\\"live\\\",\\\"clientId\\\":\\\"59acf69d-4a16-41b6-b0bf-17cd913b6d71\\\",\\\"reason\\\":\\\"explicit_browser\\\"},\\\"browserConnection\\\":{\\\"clientId\\\":\\\"59acf69d-4a16-41b6-b0bf-17cd913b6d71\\\",\\\"transport\\\":\\\"ego_task_space\\\"}}\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_move\":\"The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.\",\"data\":{\"_meta\":{\"io.github.jeong-sik/masc.lane.failure\":{\"class\":\"workflow_rejection\",\"effect\":\"proven_pre_effect\"}},\"structuredContent\":{\"reply\":\"issue\",\"answer\":{\"status\":\"answered\",\"payload\":{\"ok\":false,\"error\":\"page.snapshot scope must be one of full_page, only_within_viewport, subtree. Expected: await page.snapshot({ scope?, root?, includeActionMarks?, includeStableLocator? }); read the same tab before continuing; never replay the workflow\",\"effectPhase\":\"not_started\"}},\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"59acf69d-4a16-41b6-b0bf-17cd913b6d71\",\"reason\":\"explicit_browser\"},\"browserConnection\":{\"clientId\":\"59acf69d-4a16-41b6-b0bf-17cd913b6d71\",\"transport\":\"ego_task_space\"}},\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"{\\\"reply\\\":\\\"issue\\\",\\\"answer\\\":{\\\"status\\\":\\\"answered\\\",\\\"payload\\\":{\\\"ok\\\":false,\\\"error\\\":\\\"page.snapshot scope must be one of full_page, only_within_viewport, subtree. Expected: await page.snapshot({ scope?, root?, includeActionMarks?, includeStableLocator? }); read the same tab before continuing; never replay the workflow\\\",\\\"effectPhase\\\":\\\"not_started\\\"}},\\\"browserSelection\\\":{\\\"lane\\\":\\\"live\\\",\\\"clientId\\\":\\\"59acf69d-4a16-41b6-b0bf-17cd913b6d71\\\",\\\"reason\\\":\\\"explicit_browser\\\"},\\\"browserConnection\\\":{\\\"clientId\\\":\\\"59acf69d-4a16-41b6-b0bf-17cd913b6d71\\\",\\\"transport\\\":\\\"ego_task_space\\\"}}\"}]},\"masc.payload\":{\"io.github.jeong-sik/masc.lane.failure\":{\"class\":\"workflow_rejection\",\"effect\":\"proven_pre_effect\"}}}",
+    "tool_error": true,
+    "ts": 1792829597.502288
+  },
+  {
+    "source_commit": "4219c3074e281940ffec9c0d0b12db6f04a0d296",
+    "tool_name": "BrowserInteract",
+    "tool_input": {
+      "action": "workflow",
+      "clientId": "59acf69d-4a16-41b6-b0bf-17cd913b6d71",
+      "expectedUrl": "http://127.0.0.1:9438/confirmation",
+      "lane": "live",
+      "snapshotScope": "full_page",
+      "steps": [
+        {
+          "method": "waitForURL",
+          "url": "http://127.0.0.1:9438/confirmation"
+        },
+        {
+          "method": "waitForSelector",
+          "selector": "text=배송 신청 완료",
+          "state": "visible"
+        }
+      ],
+      "tabId": 2
+    },
+    "tool_result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"59acf69d-4a16-41b6-b0bf-17cd913b6d71\",\"reason\":\"explicit_browser\"},\"clientId\":\"59acf69d-4a16-41b6-b0bf-17cd913b6d71\",\"transport\":\"ego_task_space\",\"tabId\":2,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"waitForURL\",\"receipt\":null},{\"index\":1,\"method\":\"waitForSelector\",\"receipt\":null}],\"effectStarted\":false,\"completedEffect\":false,\"failure\":null,\"urlBefore\":\"http://127.0.0.1:9438/confirmation\",\"url\":\"http://127.0.0.1:9438/confirmation\",\"title\":\"배송 신청 완료\",\"snapshot\":\"[p2 \\\"배송 신청 완료\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(9): 2 managed, 0 untracked — p1 \\\"새 탭\\\", p2* \\\"배송 신청 완료\\\"]\\nroot\\n  heading\\n    text \\\"배송 신청 완료\\\"\\n  status\\n    text \\\"신청 번호 EGO-001\\\"\\n\",\"truncated\":false,\"chars\":178}",
+    "tool_error": false,
+    "ts": 1792829607.224252
+  }
+]

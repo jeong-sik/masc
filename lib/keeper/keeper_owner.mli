@@ -1,0 +1,670 @@
+(** Single-fiber metadata owner for one Keeper.
+
+    Producers communicate through a bounded mailbox.  [apply_meta],
+    and [exact_projection] apply backpressure when the mailbox is full;
+    commands are never dropped or coalesced. Once enqueued, a request settles
+    before caller cancellation can release its surrounding authority scope.
+    Routine reads use {!projection} and do not enter the mailbox. *)
+
+val mailbox_capacity : int
+
+val install_state_change_observer : (unit -> unit) -> unit
+(** Install the process-wide non-yielding observer invoked after a
+    health-visible operation, turn, or shutdown projection changes. Observer
+    failures are logged and never change the accepted Owner result. *)
+
+type store =
+  { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result
+  ; remove : Keeper_meta_contract.keeper_meta -> (unit, string) result
+  }
+
+module Chat_operation = Keeper_chat_operation
+
+type runtime_retry_revalidation =
+  | Keep_retry_wait
+  | Update_retry_wait of
+      { replacement : Keeper_semantic_execution.runtime_retry
+      ; next_wait : runtime_retry_wait
+      }
+and runtime_retry_wait = now:float -> observed:Keeper_semantic_execution.runtime_retry ->
+  (runtime_retry_revalidation, string) result
+(** Non-yielding live dependency observation, evaluated only while the exact
+    durable retry is still current. [next_wait] becomes authoritative only
+    after the replacement commits. Process restart discards these witnesses
+    and preserves the persisted retry deadline. *)
+
+type operation_projection =
+  { queued_count : int
+  ; has_claimable_queued : bool
+      (** Original queued executions eligible for claim at the last Owner
+          mutation or retry wake. Approval waits and cooling retries are
+          excluded. Reading this projection performs no store I/O. *)
+  ; next_runtime_retry_wake : float option
+      (** Next cooling retry deadline, sampled at the same instant as readiness.
+          The Owner arms this deadline even if it has passed since sampling. *)
+  ; running_operation_id : Chat_operation.Operation_id.t option
+  ; terminal_count : int
+  ; interrupted_count : int
+  ; store_unavailable : bool
+  }
+
+type operation_interrupt_result =
+  | Operation_interrupt_signalled
+  | Operation_not_current of
+      { running_operation_id : Chat_operation.Operation_id.t option }
+  | Operation_settling
+  | Operation_maintenance_running
+  | Operation_slot_held_by_autonomous_turn
+  | Operation_interrupt_failed of string
+(** Result of a mailbox-linearized compare-and-interrupt. A stale caller can
+    never signal a newer operation: the expected name is compared against the
+    slot the Owner holds before its exact child cancel capability is invoked.
+    [Operation_settling] means the named execution has already returned and
+    only its durable settle is pending: nothing is left to cancel, and the slot
+    is released when that settle completes (a settle hook that blocks keeps it
+    held with no cancel handle). [Operation_maintenance_running] means the slot
+    is held by a maintenance run, an internal transaction whose caller expects
+    a value or a typed error; a chat stop names it and cancels nothing.
+    [Operation_slot_held_by_autonomous_turn] means the named operation id still
+    reads as running but the slot is held by an autonomous cycle, which that id
+    does not name: nothing is cancelled and the row is not settled, so a
+    Running row whose child already ended stays Running until its settle
+    succeeds. This result only protects the autonomous cycle. *)
+
+type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
+
+type interrupt_target =
+  | Observed_turn of { interrupt_token : Keeper_interrupt_token.t }
+  | Direct_operation of Chat_operation.Operation_id.t
+(** The two names a client can give the execution it wants stopped: the token
+    the Owner published with the turn slot ({!turn_in_flight}), or the id of
+    the chat operation the child is running. Both are compared against Owner
+    state only. The inner agent switch a turn registers in {!Keeper_registry}
+    ends before the child does and is not a stop handle. *)
+
+type run_next_result =
+  | Run_next_paused
+  | Run_next_applied of { signalled : bool; interrupt_error : string option }
+
+type interactive_outcome = Applied | Stale_control | Paused | Replayed
+type interactive_receipt =
+  { outcome : interactive_outcome; chat_control_token : string
+  ; signalled : bool; resumed : bool; interrupt_error : string option }
+type interactive_intent = { control_token : string; target : interrupt_target option }
+
+type turn_lane =
+  | Autonomous
+  | Chat_operation
+  | Maintenance
+
+type turn_in_flight =
+  { lane : turn_lane
+  ; started_at : float
+  ; interrupt_token : Keeper_interrupt_token.t
+        (** Minted with the slot and dropped with it: the name
+            {!interrupt_turn} compares. A running turn never lacks one. *)
+  }
+(** At most one turn runs per Keeper, across all three lanes. The Owner holds
+    that slot; {!Keeper_turn_dispatch_authority} states the same boundary from
+    the other side ("Keeper Owner owns scheduling and single-running
+    admission") and carries no per-Keeper mutex of its own.
+
+    What the slot protects is a single-writer invariant. A turn drives the
+    per-Keeper turn FSM through [Keeper_registry.set_turn_phase], which
+    resolves every transition against the current phase and raises
+    [Turn_phase_transition_violation] for a forbidden one. Two turns on one
+    Keeper would each transition from whatever the other left behind, so
+    concurrency here does not corrupt state quietly — it raises, and the
+    violation counter [masc_fsm_guard_violation_total] records it. Measured
+    over 2026-08-10..12 on the live fleet: 162,813 turn-phase transitions and
+    0 violations.
+
+    The exclusion is an invariant; the *order* in which contending lanes get
+    the freed slot is not specified here and is not fair today — a queued chat
+    operation is offered the slot synchronously when a turn ends, while the
+    autonomous lane discovers it only on its next keepalive poll. RFC-0373
+    measures the resulting starvation and is where an admission policy belongs.
+    Any such policy must keep the invariant above, not merely the counter. *)
+
+(** Wire spelling of a {!turn_lane} ("autonomous" / "chat_operation" /
+    "maintenance"). Every projection that serializes a lane reads this one
+    mapping; consumers must not re-spell the variants locally. *)
+val turn_lane_to_string : turn_lane -> string
+
+type autonomous_block =
+  | Turn_busy of turn_in_flight option
+  | Admission_paused
+  | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
+
+type shutdown_reservation =
+  { operation_id : Keeper_shutdown_types.Operation_id.t
+  ; in_flight : turn_in_flight option
+  }
+
+type begin_shutdown_result =
+  | Shutdown_reserved of shutdown_reservation
+  | Shutdown_already_reserved of shutdown_reservation
+
+type rollback_shutdown_result =
+  | Shutdown_rolled_back
+  | Shutdown_not_reserved
+  | Shutdown_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
+type restore_shutdown_result =
+  | Shutdown_restored
+  | Shutdown_already_restored
+  | Shutdown_restore_conflict of Keeper_shutdown_types.Operation_id.t
+
+type transition_shutdown_result =
+  | Shutdown_transition_applied
+  | Shutdown_transition_already_applied
+  | Shutdown_transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
+type operation_acceptance =
+  { operation : Chat_operation.t
+  ; existing : bool
+  ; queued_count : int
+  }
+
+type operation_error_kind =
+  | Invalid_operation_input
+  | Unknown_operation
+  | Operation_not_queued
+  | Operation_idempotency_conflict
+  | Operation_native_call_unsettled
+  | Operation_store_unavailable
+
+type error =
+  | Reducer_rejected of Keeper_owner_reducer.error
+  | Operation_rejected of Keeper_chat_operation_store.error
+  | Store_unavailable of string
+  | Owner_stopping
+  | Owner_closed
+
+type operation_execution =
+  | Operation_deferred
+  | Operation_succeeded of { outcome_ref : string }
+  | Operation_failed of
+      { kind : Chat_operation.failure_kind
+      ; detail : string
+      ; outcome_ref : string option
+          (** An existing producer reference is retained. When absent, Owner
+              preserves the unambiguous original turn observed by this actual
+              invocation, including exception/cancellation settlement. *)
+      }
+
+type operation_executor =
+  sw:Eio.Switch.t ->
+  keeper_name:string ->
+  claim:(unit -> (Chat_operation.t option, error) result) ->
+  operation_execution
+(** One Owner-owned child execution. The executor must not cache an operation
+    body before [claim]: [claim] is the mailbox-linearized Queued-to-Running
+    boundary and returns the latest edited input. *)
+
+type operation_runner =
+  { ready : keeper_name:string -> bool
+  ; execute : operation_executor
+  ; on_execution_settled :
+      keeper_name:string ->
+      claimed_operation_id:Chat_operation.Operation_id.t option ->
+      operations:Chat_operation.t list ->
+      execution:operation_execution ->
+      unit
+  }
+(** Typed admission for the durable operation drain. [ready] must be a
+    non-yielding in-memory read. When it returns [false], the FIFO head remains
+    Queued and no child is started. The producer that makes the dependency
+    ready must call {!wake_operation_drain}. Cooling runtime continuations alone
+    recheck their live dependency witness at the Keeper observation interval.
+
+    [on_execution_settled] runs after the child's effects have ended and the
+    Owner has committed its accepted settlement. [operations] is the complete,
+    ordered batch read directly from this Owner's store, including immutable
+    terminal facts and each member's original input digest (the execution
+    owner's aggregate digest remains on the claimed operation). The callback
+    must not re-enter this Owner or look up a new
+    admission capability. It projects retained facts idempotently; its failure
+    cannot undo them. Failed operations are available through
+    {!failed_operations_at_start} for restart projection recovery. Deferred
+    executions may have no terminal and must not be projected as completed. *)
+
+type t
+
+val start
+  :  sw:Eio.Switch.t
+  -> store:store
+  -> operation_store_path:string
+  -> session_root:string
+  -> now:(unit -> float)
+  -> operation_runner:operation_runner option
+  -> on_turn_slot_released:(unit -> unit) option
+  -> keeper_name:string
+  -> initial_meta:Keeper_meta_contract.keeper_meta option
+  -> (t, error) result
+(** [session_root] is the workspace's session root
+    ({!Keeper_fs.session_store_path}). After each store commit the Owner
+    removes, under it, the retained checkpoints that commit released
+    ({!Keeper_chat_operation_store.take_released_checkpoints}).
+
+    [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
+    after queued chat has been offered it (unless an exact scheduled handoff
+    reserves that admission), and the autonomous lane has been refused the
+    slot or requested that handoff since the last notification. The
+    signal therefore means "the lane that lost the slot can start now", not "a
+    turn ended".
+
+    All three conditions are load-bearing. Dropping the third one is what
+    {!Keeper_registry.Turn_slot_released} did on 2026-08-12: a keeper woken by
+    the release starts its next turn at once, so every turn end scheduled the
+    next turn and the keepalive cadence stopped governing. Measured on the live
+    fleet across the restart that carried it: turn starts went from 114.9/hour
+    to 1523.5/hour, and the median interval between keepalive cycles fell from
+    313s to 10s — the turn duration, not the configured cadence.
+
+    It exists because the two lanes learn about a free slot by opposite means.
+    A chat producer notifies the Owner through {!wake_operation_drain} — "the
+    Owner never polls", as the {!operation_runner} contract says — while the
+    autonomous lane has no such channel and rediscovers the slot only on its
+    next keepalive cadence. RFC-0373 measured what that costs: over 2026-08-12
+    all 50 autonomous deferrals named a chat holder, one held the slot 16.3
+    minutes across 5 consecutive cycles, and the keeper carrying the most chat
+    traffic lost 18.6% of its autonomous cycles.
+
+    The callback runs on the Owner fiber. It must not block, and an exception
+    it raises is contained rather than propagated — a lost wake degrades to the
+    listener's own cadence. This does not change admission order: the chat lane
+    receives the freed slot first while it has claimable work. The autonomous
+    lane retains its release notification until no chat claims the slot. *)
+
+val projection : t -> Keeper_owner_reducer.projection
+(** Lock-free immutable snapshot. *)
+
+val operation_projection : t -> operation_projection
+(** Lock-free immutable operation inventory. *)
+
+val await_claimable_operation : t -> bool
+(** Wait for a durable claimable queued operation without consuming it. Returns
+    false when the owner closes. Cancellation unregisters the condition waiter. *)
+
+val wake_operation_drain : t -> (unit, error) result
+(** Reconsider existing Queued rows after the operation runner's dependency
+    becomes ready. This command never changes sequence or state itself.
+
+    An idle Owner whose operation store became unavailable first closes and
+    reopens the existing database and continues from its durable queued and
+    terminal rows. Metadata and integrity faults stay fenced. A Running row
+    with no live child fences the Owner until the next restart settles it;
+    this call never replays a failed mutation. *)
+
+val turn_in_flight : t -> turn_in_flight option
+(** Lock-free immutable projection of the single Owner-owned child turn. *)
+
+val shutdown_operation_id : t -> Keeper_shutdown_types.Operation_id.t option
+(** Lock-free immutable projection of the lifecycle shutdown reservation. *)
+
+val autonomous_block_kind : autonomous_block -> string
+val autonomous_block_to_string : autonomous_block -> string
+val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
+
+type scheduled_turn_consumer
+type scheduled_turn_handoff
+val begin_scheduled_turn_consumer : t -> (scheduled_turn_consumer, error) result
+(** Begin this heartbeat consumer's lifetime. A replacement retires an older
+    consumer and its slot preferences; durable sources remain pending. *)
+val end_scheduled_turn_consumer : t -> consumer:scheduled_turn_consumer -> (unit, error) result
+(** Disable registration and release every preference of exactly this ending
+    consumer atomically with reconsidering chat. A stale ending epoch cannot
+    affect its replacement. *)
+val observe_scheduled_turn : t -> Keeper_event_queue_state.pending_selection list ->
+  (scheduled_turn_handoff option, error) result
+(** Reserve a freshly observed pending cohort behind a busy Direct child. The
+    command does not interrupt the child and returns its scoped handoff before
+    caller cancellation. *)
+val scheduled_turn_handoff : t -> (scheduled_turn_handoff option, error) result
+val release_scheduled_turn : t -> handoff:scheduled_turn_handoff -> (unit, error) result
+(** Release only this captured child's exact source selections and reconsider
+    queued chat input. A late release cannot erase a later child's handoff or
+    additional selections registered after the snapshot. *)
+
+val run_scheduled_if_idle :
+  t -> handoff:scheduled_turn_handoff option ->
+  sources:(Keeper_event_queue_state.pending_selection list, string) result ->
+  (Keeper_event_queue_state.pending_selection list -> 'a) ->
+  ([ `Ran of 'a | `Busy of autonomous_block | `Interrupted ], error) result
+(** Revalidate a handoff against a newly read exact pending cohort, and admit
+    its surviving members ahead of queued chat once. The callback receives only
+    surviving exact selections; intake revalidates again before dispatch.
+    An empty/stale cohort releases the handoff and restores normal chat order. *)
+
+val run_autonomous_if_idle
+  :  t
+  -> (unit -> 'a)
+  -> ([ `Ran of 'a | `Busy of autonomous_block | `Interrupted ], error) result
+(** Mailbox-linearized autonomous admission. The callback runs in the Owner's
+    child switch, while the actor remains responsive. An already-started child
+    returns [`Busy] without consuming turn input. A Queued chat whose runner is
+    not ready does not block autonomous admission. A scheduled handoff remains
+    reserved for {!run_scheduled_if_idle}; this generic observation cannot
+    clear it or take its slot. Owner-directed cancellation
+    returns [Error Owner_stopping]; its private child-stop signal never escapes
+    this boundary. An operator interrupt of the running turn
+    ({!interrupt_turn}) returns [`Interrupted]: the child switch was failed
+    with that exception, so the callback's own return value is not available. *)
+
+val run_maintenance_if_idle
+  :  ?defer_to_chat:bool
+  -> t
+  -> (unit -> 'a)
+  -> ([ `Ran of 'a | `Busy of autonomous_block ], error) result
+(** Mailbox-linearized exclusive maintenance attempt. [defer_to_chat] fences
+    background work behind queued/running chat and unavailable operation stores. *)
+
+val begin_shutdown
+  :  t
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (begin_shutdown_result, error) result
+
+val rollback_shutdown
+  :  t
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (rollback_shutdown_result, error) result
+
+val restore_shutdown
+  :  t
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (restore_shutdown_result, error) result
+
+val transition_shutdown
+  :  t
+  -> from_operation_id:Keeper_shutdown_types.Operation_id.t
+  -> to_operation_id:Keeper_shutdown_types.Operation_id.t option
+  -> (transition_shutdown_result, error) result
+
+val await_idle_after_shutdown : t -> (unit, error) result
+(** Return after the Owner child that preceded the shutdown reservation has
+    completed. The actor remains responsive while the caller waits. *)
+
+val exact_projection
+  :  t
+  -> (Keeper_owner_reducer.projection, error) result
+(** Mailbox-linearized projection for mutation and exact-operation paths. *)
+
+val apply_meta
+  :  t
+  -> Keeper_owner_reducer.meta_command
+  -> (Keeper_meta_contract.keeper_meta option, error) result
+
+val create_from_input_birth : t -> Keeper_meta_contract.keeper_meta ->
+  Keeper_input_birth.seed -> (Keeper_meta_contract.keeper_meta option, error) result
+(** Empty-actor creation only. Validates the exact live creation seed, registers
+    its retained input predecessor without changing the prior-history floor,
+    then publishes metadata before allowing a child to start. A registration
+    followed by metadata failure remains durable evidence, never success or
+    dispatch. Uncertain store outcomes are returned without replay. *)
+
+val exact_operation
+  :  t
+  -> Chat_operation.Operation_id.t
+  -> (Chat_operation.t option, error) result
+
+val has_queued_handoff_recipient
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> (bool, error) result
+
+val await_queued_handoff_recipient
+  : t -> operation_id:Chat_operation.Operation_id.t -> bool
+(** Wait until the actual claimable head is later original input while the named
+    direct operation is running. A continuation or frozen batch at the head
+    keeps this waiter asleep; fresh input behind it cannot accept a handoff.
+    This observes the current queue, without reserving or reordering it.
+    Returns false if the operation
+    stops running, the store cannot be read or the owner closes. Cancellation
+    unregisters the condition waiter; no timer or polling loop is installed. *)
+
+(** Durable [Failed] records, including batch members
+    and earlier starts. The registry retries their idempotent journal and
+    transcript projections; the owner has no transcript of its own. *)
+val failed_operations_at_start : t -> Chat_operation.t list
+
+(** Durable cooperative checkpoint continuation, independent of provider retry. *)
+val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
+val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
+
+type current_input_checkpoint =
+  { trace_id : Keeper_id.Trace_id.t
+  ; session_root : string
+  ; observation : Keeper_chat_operation_store.input_checkpoint_observation }
+val current_input_checkpoint : t -> (current_input_checkpoint, error) result
+(** Capture this Owner's current trace, original workspace root and durable
+    input relation in one mailbox read. This immutable observation is not
+    response, continuation or filesystem mutation authority. Missing metadata
+    and store failure remain errors; canonical files are not a fallback. *)
+
+type history_clear_writer
+val begin_history_clear : t -> (history_clear_writer, error) result
+(** Capture a fresh clear authority in the current inherited Maintenance child,
+    under the journal's sticky operation fence and full unsettled-state guard.
+    Admission refuses stopping/shutdown. This alone performs no clear effect. *)
+val history_clear_authority : history_clear_writer -> Keeper_history_clear.authority
+val commit_history_clear : t -> writer:history_clear_writer ->
+  receipt:Keeper_history_clear.receipt -> (unit, error) result
+(** Record an already confirmed filesystem clear through that same original
+    maintenance child, including while the Owner drains. Recheck trace, opaque
+    authority identity, unsettled state and exact input CAS. An uncertain result
+    remains Error; never blindly retry its witness or append a restart marker. *)
+
+type input_checkpoint_writer
+(** Opaque witness for this Owner's current non-maintenance child and the
+    exact input predecessor it observed before dispatch. Capture/publication
+    require the caller's inherited Owner child binding. It grants checkpoint
+    publication only, not host input response or continuation admission. *)
+val begin_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
+  (input_checkpoint_writer, error) result
+val input_checkpoint_reference : input_checkpoint_writer -> Keeper_checkpoint_ref.t option
+(** None means this trace has no recorded input observation. Some may name a
+    payload with pending_input=None; consumed evidence is never unobserved. *)
+val input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
+  (Keeper_chat_operation_store.input_checkpoint_observation, error) result
+val advance_autonomous_input_checkpoint : ?allow_turn_reset:bool -> t ->
+  writer:input_checkpoint_writer ->
+  checkpoint:Keeper_checkpoint_ref.t -> (input_checkpoint_writer, error) result
+val advance_direct_input_checkpoint : ?allow_turn_reset:bool -> t ->
+  writer:input_checkpoint_writer ->
+  operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t ->
+  (input_checkpoint_writer, error) result
+(** Revalidate current trace, original child token and lane in the mailbox,
+    then compare the predecessor inside the journal transaction. Direct input
+    and native checkpoint advance atomically. A cancelled child can still
+    record its receipt while Owner stops; a new writer cannot be admitted.
+    Stale witnesses refuse, uncertain commits remain Error, and callers must
+    reconcile both durable relations before any further publication. *)
+val bind_retired_input_cut : t -> writer:input_checkpoint_writer ->
+  operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t ->
+  cut:Keeper_input_history_cut.binding -> (input_checkpoint_writer, error) result
+(** Admit a new call and the exact retired-response cut together. This requires
+    the current direct child and refuses stopping/shutdown admission. *)
+(** Admit a native call for dispatch: a fresh one, a replacement for a retired
+    one, or the same call again when its scope resumes. A stopping Owner refuses
+    it with [Owner_stopping]. Checkpoint and terminal receipts are still
+    accepted while it stops. *)
+val bind_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (unit, error) result
+val checkpoint_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t -> (unit, error) result
+val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
+val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
+type input_response_error =
+  | Response_owner_error of error
+  | Response_installation_error of Keeper_input_wait_response.installation_error
+  | Response_intent_error of
+      { prepared_intent : Keeper_semantic_execution.input_response_intent
+      ; cause : error
+      }
+  | Response_commit_unconfirmed of
+      { installed_checkpoint : Keeper_checkpoint_ref.t
+      ; cause : error
+      }
+(** Preserve the original typed failure. Owner lifecycle failure does not prove
+    physical effects were absent. Installation outcomes retain their original
+    evidence. Intent journal uncertainty occurs before canonical mutation and
+    retains the exact prepared W/S/C response fact. A commit failure after a
+    sealed installation receipt also retains
+    its exact consumed checkpoint, whether the journal committed or not. *)
+val input_response_error_to_string : input_response_error -> string
+val respond_direct_input_wait : t -> net:Eio_context.eio_net ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.input_wait ->
+  response:Agent_core.Hooks.elicitation_response ->
+  ([ `Accepted | `Busy of autonomous_block ], input_response_error) result
+(** Explicit response under an exclusive original Owner maintenance child. Busy
+    means no response effects began. Acceptance consumes the exact wait/input
+    witness and enables only the original operation continuation. Partial file
+    installation or uncertain journal acknowledgement remains Error. *)
+val direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_wait option, error) result
+val defer_direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->
+  request:Agent_core.Agent_input_request.t ->
+  (Chat_operation.t, error) result
+(** Only the original executing chat child may defer its operation. The Owner
+    derives the complete pending request from its exact retained input payload,
+    checks the original trace, invocation and repetition scope, then
+    compares every field of the visible [request] against that canonical
+    request before committing native retirement and waiting together. A mismatch
+    leaves the operation, native receipt and input relation unchanged. The caller
+    cannot supply the stored question or use canonical/history fallback;
+    an uncertain result grants no retry authority.
+    Reads/receipt publication can reach the existing draining Owner. *)
+val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.gate_checkpoint -> (unit, error) result
+
+val direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.runtime_retry option, error) result
+val defer_direct_runtime_retry : ?retry_wait:runtime_retry_wait -> t -> operation_id:Chat_operation.Operation_id.t ->
+  execution_digest:string -> continuation:Keeper_semantic_execution.runtime_retry ->
+  (Chat_operation.t, error) result
+(** A cooling retry can advance the Owner's pending observation wake. A later
+    retry does not postpone an earlier wake. This schedules observation only;
+    the durable retry deadline and exact dependency witness still authorize
+    eligibility. *)
+val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
+
+val pause_and_interrupt : ?expected_control_token:string -> t -> interrupt_target -> (pause_result * string, error) result
+val interrupt_turn : ?expected_control_token:string -> t -> interrupt_target -> (pause_result * string, error) result
+(** Stop an exact current execution or invalidate a pending admission without
+    pausing the Keeper. Admission remains open for queued and future operations
+    unless explicitly paused by an operator latch. *)
+val chat_control_token : t -> string
+val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> intent:interactive_intent -> (operation_acceptance * interactive_receipt, error) result
+(** Admit in durable FIFO queue order, then apply the supplied exact control
+    intent within the same mailbox command. Interactive admission itself does
+    not reorder queued work; explicit queue-priority operations can do so.
+    Replayed admissions and stale control tokens perform no control effects. *)
+val run_next_operation : ?priority_predecessors:Chat_operation.Operation_id.t list ->
+  t -> operation_id:Chat_operation.Operation_id.t ->
+  observed:interrupt_target option -> (run_next_result, error) result
+(** Prioritize a queued operation. [priority_predecessors] keeps automatic
+    priority after the latest still-queued earlier request. Omission retains
+    explicit run-next's absolute-front behavior. An operator pause can refuse
+    the request; invalid or unavailable queued operations return an error. *)
+
+val interrupt_running_operation
+  :  t
+  -> Chat_operation.Operation_id.t
+  -> (operation_interrupt_result, error) result
+(** Signal only when this exact operation still owns the running child: the
+    slot holder must be on the chat-operation lane and the durable running id
+    must equal the requested one. *)
+
+val submit_operation
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> source:Yojson.Safe.t
+  -> input:Yojson.Safe.t
+  -> (operation_acceptance, error) result
+
+val list_queued_operations
+  :  t
+  -> after_sequence:int64 option
+  -> limit:int
+  -> (Chat_operation.t list, error) result
+
+val edit_queued_operation
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> input:Yojson.Safe.t
+  -> (Chat_operation.t, error) result
+
+val move_queued_operation_to_front : t -> Chat_operation.Operation_id.t ->
+  (Chat_operation.t, error) result
+
+val move_queued_operation_to_end
+  :  t
+  -> Chat_operation.Operation_id.t
+  -> (Chat_operation.t, error) result
+
+val cancel_queued_operation
+  :  t
+  -> Chat_operation.Operation_id.t
+  -> (Chat_operation.t, error) result
+
+val batch_operations : t -> Chat_operation.Operation_id.t -> (Chat_operation.t list, error) result
+val claim_next_operation : t -> (Chat_operation.t option, error) result
+
+val succeed_running_operation
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> outcome_ref:string
+  -> (Chat_operation.t, error) result
+
+val begin_stopping : t -> (unit, error) result
+(** Reject new mutation and submit commands, cancel an active child turn, and
+    return only after its terminal operation transition has been attempted. *)
+(** Reject future external commands. *)
+
+val error_to_string : error -> string
+val operation_error_kind : Keeper_chat_operation_store.error -> operation_error_kind
+
+module For_testing : sig
+  val observe_state_changes : sw:Eio.Switch.t -> (unit -> unit) -> unit
+  (** Compose a non-yielding test observer with the installed observer until
+      switch release. For serial test scopes; preserves the prior observer. *)
+
+  val mailbox_depth : t -> int
+
+  (** The race {!request} runs to hand a command to the mailbox: [`Enqueued]
+      once the mailbox has taken it, even when [closed] resolved in the same
+      scheduler pass; [`Closed] only when it had not. *)
+  val enqueue_unless_closed :
+    'a Eio.Stream.t -> 'a -> closed:unit Eio.Promise.t -> [ `Enqueued | `Closed ]
+end
+
+val direct_gate_state : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_wait_state option, error) result
+val direct_gate_obligations : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_obligation list, error) result
+val defer_direct_gate : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  waiting:Keeper_semantic_execution.gate_wait -> (Chat_operation.t, error) result
+val resolve_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  resolution:Keeper_semantic_execution.gate_resolution -> (Chat_operation.t, error) result
+val resume_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  waiting:Keeper_semantic_execution.gate_wait -> resolution:Keeper_semantic_execution.gate_resolution -> (unit, error) result
+
+val direct_gate_waits : t -> ((Chat_operation.Operation_id.t * Keeper_semantic_execution.gate_wait_state) list, error) result
+val discharge_direct_gate : t -> operation_id:Chat_operation.Operation_id.t ->
+  obligation:Keeper_semantic_execution.gate_obligation -> (unit, error) result
+
+val defer_direct_gate_reconciliation : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  binding:Keeper_semantic_execution.gate_binding -> diagnostic:string -> (Chat_operation.t, error) result
+
+val direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_binding option, error) result
+
+val direct_gate_bindings : t -> ((Chat_operation.Operation_id.t * Keeper_semantic_execution.gate_binding) list, error) result
+val reconcile_direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
+  binding:Keeper_semantic_execution.gate_binding -> waiting:Keeper_semantic_execution.gate_wait -> (unit, error) result

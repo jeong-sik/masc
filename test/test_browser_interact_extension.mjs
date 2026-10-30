@@ -1,0 +1,422 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
+const background = readFileSync(new URL('../connectors/browser/extension/background.js', import.meta.url), 'utf8');
+const ocaml = readFileSync(new URL('../lib/browser_interaction.ml', import.meta.url), 'utf8');
+const extensionFunction = background.slice(background.indexOf('function interactInPage'), background.indexOf('async function pageInteract')).trim();
+const driverFunction = ocaml.split('let script = {js|')[1].split('\nreturn interactInPage(arguments[0]);')[0].trim();
+assert.equal(extensionFunction, driverFunction, 'live and WebDriver use the same closed DOM implementation');
+let clicked = 0, events = [], replies = [], executions = 0, closed = false;
+class Input {
+  constructor(type = 'text') { this.type = type; this.stored = 'before'; this.readOnly = false; this.disabled = false; }
+  get value() { return this.stored; }
+  set value(value) { this.stored = this.type === 'number' && value !== '' && !Number.isFinite(Number(value)) ? '' : value; }
+  getClientRects() { return [{}]; }
+  matches(selector) { assert.equal(selector, ':disabled'); return this.disabled; }
+  dispatchEvent(event) { events.push(event.type); }
+}
+class Textarea extends Input {}
+const note = new Textarea(), count = new Input('number');
+count.stored = '12';
+class Select {
+  constructor(values, multiple = false) {
+    this.multiple = multiple; this.isConnected = true;
+    this.options = values.map((value, index) => ({value, index, selected: index === 0, disabled: value === 'off', matches(selector) { assert.equal(selector, ':disabled'); return this.disabled; }}));
+  }
+  get selectedIndex() { return this.options.findIndex(option => option.selected); }
+  set selectedIndex(index) { this.options.forEach(option => { option.selected = option.index === index; }); }
+  get value() { return this.options[this.selectedIndex]?.value ?? ''; }
+  getClientRects() { return [{}]; }
+  matches(selector) { assert.equal(selector, ':disabled'); return false; }
+  dispatchEvent(event) { events.push(event.type); }
+}
+class Editable {
+  constructor() { this.isContentEditable = true; this.textContent = ''; this.focused = 0; }
+  getClientRects() { return [{}]; }
+  matches(selector) { assert.equal(selector, ':disabled'); return false; }
+  focus() { this.focused++; }
+  dispatchEvent(event) { events.push(event.type); }
+}
+const editable = new Editable(); let editMode = 'accept';
+const choice = new Select(['a', 'b', 'dup', 'dup', 'off', '']), several = new Select(['a', 'b', 'c', 'off', 'dup', 'dup'], true);
+const extra = {'#choice': [choice], '#several': [several], '#editable': [editable]};
+const button = {getClientRects: () => [{}], matches: () => false, click: () => clicked++};
+const page = vm.createContext({HTMLInputElement: Input, HTMLTextAreaElement: Textarea, HTMLSelectElement: Select,
+  location: {href: 'https://example.org/form'},
+  document: {title: 'Public fixture',
+    createRange: () => ({selectNodeContents(node) { assert.equal(node, editable); }}),
+    execCommand: (name, _ui, text) => {
+      if (editMode === 'reject') return false;
+      editable.textContent = name === 'delete' ? '' : editMode === 'mutate' ? text + '!' : text;
+      return true;
+    },
+    querySelectorAll: selector => {
+    if (selector === '[') throw new Error('syntax');
+    return selector === '#note' ? [note] : selector === '#count' ? [count] : selector === '#button' ? [button]
+      : selector === '.ambiguous' ? [button, button] : extra[selector] ?? [];
+  }},
+  getComputedStyle: () => ({display: 'block', visibility: 'visible'}),
+  Event: class {constructor(type, options) {this.type = type; this.bubbles = options.bubbles;}},
+  window: {scrollX: 0, scrollY: 0, getSelection: () => ({removeAllRanges() {}, addRange() {}}), scrollBy(options) {
+    assert.equal(options.behavior, 'instant'); this.scrollX += options.left; this.scrollY += options.top;
+  }},
+});
+const event = () => ({addListener() {}, removeListener() {}});
+const browser = {webNavigation:{getFrame:async () => ({documentId:'native-source',url:page.location.href}),onCommitted:event(),onReferenceFragmentUpdated:event()},runtime: {connectNative: () => ({onMessage: {addListener() {}}, onDisconnect: {addListener() {}}, postMessage: value => replies.push(value)})},
+  tabs: {onRemoved:event(),get:async id=>{assert.equal(id,7);if(closed)throw new Error('tab_closed');return {id,url:page.location.href};},executeScript: async (id, {code}) => {executions++; assert.equal(id, 7); if (closed) throw new Error('tab_closed'); return [vm.runInContext(code, page)];}}};
+const context = vm.createContext({browser, TextEncoder, AbortController, setTimeout, clearTimeout});
+vm.runInContext(background, context);
+async function command(args) { context.command = {id: 'interaction-fixture', verb: 'page.interact', deadlineMs:Date.now()+20000, args}; await vm.runInContext('onHostMessage(command)', context); return replies.at(-1); }
+assert.equal((await command({action: 'click', selector: '#button'})).error, 'tab_id_required');
+assert.equal(executions, 0);
+assert.equal((await command({tabId: 7, action: 'click', selector: '.ambiguous'})).error, 'selector_is_ambiguous');
+assert.equal((await command({tabId: 7, action: 'click', selector: '#missing'})).error, 'element_not_found');
+assert.equal((await command({tabId: 7, action: 'click', selector: '['})).error, 'invalid_css_selector');
+assert.equal(clicked, 0);
+assert.equal((await command({tabId: 7, action: 'click', selector: '#button', expectedUrl: 'https://example.org/other'})).error, 'page_url_changed');
+assert.equal(clicked, 0);
+assert.equal((await command({tabId: 7, action: 'click', selector: '#button'})).ok, true);
+assert.equal(clicked, 1);
+const text = 'first\n");submit();//';
+const fill = await command({tabId: 7, action: 'fill', selector: '#note', text});
+assert.equal(fill.ok, true); assert.equal(note.value, text); assert.deepEqual(events, ['input', 'change']);
+assert.equal(JSON.stringify(fill).includes(text), false, 'input contents never enter result');
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#count', text: 'bad number'})).error, 'input_rejected_value');
+assert.equal(count.value, '12'); assert.equal(events.length, 2);
+note.readOnly = true;
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#note', text: 'blocked'})).error, 'element_read_only');
+events.length = 0;
+const typed = await command({tabId: 7, action: 'fill', selector: '#editable', text: 'a  b\u00a0'});
+assert.equal(typed.ok, true); assert.equal(editable.textContent, 'a  b\u00a0'); assert.equal(editable.focused, 1);
+assert.equal(JSON.stringify(typed).includes('a  b'), false, 'editor contents never enter result');
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#editable', text: ''})).ok, true); assert.equal(editable.textContent, '');
+const focusedBefore = editable.focused;
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#editable', text: ''})).ok, true, 'clearing an empty editor is a no-op');
+assert.equal(editable.focused, focusedBefore, 'a no-op clear does not touch the editor');
+editMode = 'reject';
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#editable', text: 'x'})).error, 'editable_rejected_text');
+editMode = 'mutate';
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#editable', text: 'x'})).error, 'editable_changed_text');
+editMode = 'accept'; editable.textContent = '';
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#button', text: 'x'})).error, 'element_is_not_a_text_input');
+events.length = 0;
+const picked = await command({tabId: 7, action: 'select_option', selector: '#choice', value: 'b'});
+assert.equal(picked.ok, true); assert.equal(choice.value, 'b'); assert.deepEqual(events, ['input', 'change']);
+assert.equal((await command({tabId: 7, action: 'select_option', selector: '#choice', value: ''})).ok, true, 'an option whose value is empty can be chosen');
+assert.equal(choice.selectedIndex, 5);
+choice.selectedIndex = 1; events.length = 0;
+for (const [label, args, error] of [
+  ['a value no option has', {selector: '#choice', value: 'zzz'}, 'option_not_found'],
+  ['a value two options share', {selector: '#choice', value: 'dup'}, 'option_is_ambiguous'],
+  ['a disabled option', {selector: '#choice', value: 'off'}, 'option_disabled'],
+  ['a multiple select needs values', {selector: '#several', value: 'a'}, 'multiple_select_requires_values'],
+  ['an element that is not a select', {selector: '#button', value: 'a'}, 'element_is_not_a_select'],
+  ['a missing value', {selector: '#choice'}, 'option_value_required']]) {
+  const refused = await command({tabId: 7, action: 'select_option', ...args});
+  assert.equal(refused.error, error, label);
+}
+assert.equal(choice.selectedIndex, 1, 'a refused choice leaves the selection as it was');
+assert.deepEqual(events, [], 'a refused choice sends no event');
+const selection = () => several.options.filter(option => option.selected).map(option => option.value);
+events.length = 0;
+const many = await command({tabId:7,action:'select_option',selector:'#several',values:['c','a']});
+assert.equal(many.ok, true);
+assert.deepEqual(selection(), ['a','c'], 'selection replaces the whole set in DOM order');
+assert.deepEqual(Array.from(many.data.selectedValues), ['a','c']);
+assert.deepEqual(events, ['input','change'], 'one input/change pair for the complete selection');
+events.length = 0;
+for (const [values,error] of [
+  [['b','missing'],'option_not_found'], [['b','off'],'option_disabled'],
+  [['b','dup'],'option_is_ambiguous'], [['b','b'],'option_values_are_not_distinct'],
+  [['b',1],'option_value_required']]) {
+  const result = await command({tabId:7,action:'select_option',selector:'#several',values});
+  assert.equal(result.error,error);
+  assert.deepEqual(selection(), ['a','c'], 'validate every option before changing any option');
+  assert.deepEqual(events, [], 'invalid multi selection dispatches no input/change');
+}
+assert.equal((await command({tabId:7,action:'select_option',selector:'#choice',values:['a']})).error,'element_is_not_a_multiple_select');
+assert.equal((await command({tabId:7,action:'select_option',selector:'#several',value:'a',values:[]})).error,'option_selection_conflict');
+const cleared = await command({tabId:7,action:'select_option',selector:'#several',values:[]});
+assert.equal(cleared.ok,true); assert.deepEqual(selection(),[]); assert.deepEqual(Array.from(cleared.data.selectedValues),[]);
+const dispatchBefore = several.dispatchEvent;
+several.dispatchEvent = function(event) { events.push(event.type); if(event.type === 'change') this.options[0].selected = true; };
+const changed = await command({tabId:7,action:'select_option',selector:'#several',values:['b']});
+assert.equal(changed.ok,false); assert.equal(changed.error,'select_changed_during_events');
+assert.deepEqual(selection(),['a','b'],'a handler effect is preserved rather than rolled back or replayed');
+several.dispatchEvent = dispatchBefore;
+several.dispatchEvent = function(event) { events.push(event.type); if(event.type === 'change') this.options[1].value = 'rewritten'; };
+const rewritten = await command({tabId:7,action:'select_option',selector:'#several',values:['b']});
+assert.equal(rewritten.ok,false); assert.equal(rewritten.error,'select_changed_during_events');
+assert.deepEqual(selection(),['rewritten'],'a handler value rewrite is a partial effect, not success or rollback');
+several.options[1].value = 'b'; several.dispatchEvent = dispatchBefore;
+events.length = 0;
+const scroll = await command({tabId: 7, action: 'scroll', x: 0, y: 300});
+assert.equal(scroll.ok, true); assert.equal(scroll.data.scrollY, 300);
+closed = true;
+assert.equal((await command({tabId: 7, action: 'click', selector: '#button'})).ok, false);
+assert.equal(clicked, 1, 'closed tab cannot redirect action to another page');
+console.log('PASS: shared script, explicit tab, unique selector, URL precondition, literal fill, no Enter/submit, rejected number, readonly, scroll, closed tab');
+
+closed = false;
+Object.assign(page,{crypto:webcrypto,innerWidth:800,innerHeight:600,scrollX:0,scrollY:0});
+page.window.getComputedStyle = node => page.getComputedStyle(node);
+page.document.documentElement = {};
+page.document.elementFromPoint = (x,y) => {assert.equal(x,200);assert.equal(y,300);return button;};
+// Obtain the same lightweight viewport identity used by capture, inside this page.
+vm.runInContext(background.slice(0,background.indexOf('async function pageScene')), page);
+const viewport = vm.runInContext("browserScene({mode:'viewport'})",page);
+const point = {x:0.25,y:0.5}, observed = {tabId:7,expectedUrl:page.location.href,viewport,point};
+assert.equal((await command({...observed,action:'click_at'})).ok,true);
+assert.equal(clicked,2);
+assert.equal((await command({...observed,action:'click_at',viewport:{...viewport,height:700}})).error,'observed_viewport_changed');
+// The server refuses trusted pointer work on an extension connection before it
+// queues a command (Browser_lane.live_transport_serves). Here those actions are
+// simply outside the extension's vocabulary, and neither reaches the page.
+for (const trusted of [{...observed,action:'drag',from:point,to:point},{...observed,action:'hover_at'}]) {
+  const beforeExecutions = executions;
+  const refused = await command(trusted);
+  assert.equal(refused.ok,false);
+  assert.equal(refused.error,'unknown_interaction_action');
+  assert.equal(refused.effectPhase,'not_started');
+  assert.equal(executions,beforeExecutions,`${trusted.action} never injects page input`);
+  assert.equal(clicked,2,`${trusted.action} refusal does not click`);
+}
+// A framed request must not fall through to the top document.
+{
+  const beforeExecutions = executions, beforeClicks = clicked;
+  const refused = await command({tabId:7,expectedUrl:page.location.href,action:'click',selector:'#go',framePath:['iframe']});
+  assert.equal(refused.ok,false);
+  assert.equal(refused.error,'frame_path_is_not_supported_by_the_extension_yet');
+  assert.equal(refused.effectPhase,'not_started');
+  assert.equal(executions,beforeExecutions,'a framed request never injects page input');
+  assert.equal(clicked,beforeClicks,'a framed request does not click');
+}
+const pane = {scrollTop:0,scrollLeft:0,scrollHeight:1000,clientHeight:200,scrollWidth:100,clientWidth:100,
+  parentElement:null,getRootNode:()=>({}),scrollBy({top}) {this.scrollTop=Math.max(-800,Math.min(0,this.scrollTop+top));}};
+button.parentElement=pane;
+page.getComputedStyle = el => ({display:'block',visibility:'visible',overflowY:el===pane?'auto':'visible',overflowX:'visible'});
+const nested = await command({...observed,action:'scroll_at',x:0,y:-120});
+assert.equal(nested.ok,true);assert.equal(pane.scrollTop,-120);
+console.log('PASS: extension dispatches screenshot point click, rejects stale viewport, keeps drag and hover out of the page, scrolls reverse-flow pane');
+
+const innerHost = {shadowRoot: {elementFromPoint: () => button}};
+const outerHost = {shadowRoot: {elementFromPoint: () => innerHost}};
+page.document.elementFromPoint = () => outerHost;
+pane.scrollTop = 0;
+const shadowScroll = await command({...observed,action:'scroll_at',x:0,y:-120});
+assert.equal(shadowScroll.ok,true);
+assert.equal(pane.scrollTop,-120,'nested open shadow roots reach the internal scroll pane');
+console.log('PASS: nested open shadow roots target the internal scroll pane');
+
+// Following an observed href never runs an application click handler/new window.
+class Anchor {
+  constructor(target = '', href = 'https://example.org/destination') {this.localName='a';this.target=target;this.href=href;}
+  hasAttribute(name) {return name === 'href';}
+  getAttribute(name) {return name === 'target' ? this.target : null;}
+  getClientRects() {return [{}];}
+  click() {throw new Error('follow must not run window.open handlers');}
+}
+let followed, assigned = [];
+// Styles are per node so an ancestor can withdraw the anchor the way a page
+// does, which is what the scene's `rendered` walk already accounts for.
+const followStyles = new Map();
+const followPage = vm.createContext({HTMLAnchorElement:Anchor, URL, window:{},
+  browserScene: () => followed,
+  location:{href:'https://example.org/source',assign:url=>assigned.push(url)},
+  document:{title:'Still source',querySelector:()=>null},scrollX:0,scrollY:0,
+  getComputedStyle:node =>
+    followStyles.get(node) ?? {display:'block',visibility:'visible',opacity:'1'}});
+followPage.window.top=followPage.window;
+vm.runInContext(driverFunction,followPage);
+const follow = () => vm.runInContext("interactInPage({action:'follow_link',documentId:'doc',nodeId:'link',expectedUrl:'https://example.org/source'})",followPage);
+followed=new Anchor('_blank');
+assert.equal(follow().interactionFailure.message,'follow_link_requires_same_tab');
+assert.equal(assigned.length,0,'new-tab target rejects before navigation');
+followed=new Anchor('', 'javascript:window.open("other")');
+assert.equal(follow().interactionFailure.message,'follow_link_requires_http_url');
+assert.equal(assigned.length,0);
+followed=new Anchor();
+const receipt=follow();
+assert.equal(receipt.destinationUrl,'https://example.org/destination');
+assert.equal(receipt.url,'https://example.org/source','delayed navigation receipt remains source observation');
+assert.deepEqual(assigned,['https://example.org/destination']);
+
+// A page can withdraw the observed link between the read and the follow. The
+// scene stops admitting it -- `rendered` walks ancestors for display and
+// opacity -- so the follow has to stop too, or it navigates to a link the
+// operator can no longer see.
+{
+  const wrapper = {};
+  followed = new Anchor();
+  followed.parentElement = wrapper;
+  followStyles.set(wrapper, {display:'block',visibility:'visible',opacity:'0'});
+  const before = assigned.length;
+  assert.equal(follow().interactionFailure.message,'element_not_visible',
+    'an ancestor with opacity 0 withdraws the link');
+  assert.equal(assigned.length,before,'a withdrawn link never navigates');
+  followStyles.set(wrapper, {display:'none',visibility:'visible',opacity:'1'});
+  assert.equal(follow().interactionFailure.message,'element_not_visible',
+    'an ancestor with display none withdraws the link');
+  followStyles.set(wrapper, {display:'block',visibility:'visible',opacity:'1'});
+  assert.equal(follow().destinationUrl,'https://example.org/destination',
+    'a rendered ancestor still follows');
+  followStyles.delete(wrapper);
+  followed.parentElement = undefined;
+}
+console.log('PASS: a link withdrawn by an ancestor is not followed');
+
+// Exercise the actual native message dispatch and injected scene resolver.
+page.HTMLAnchorElement=Anchor;page.URL=URL;
+page.getComputedStyle=()=>({display:'block',visibility:'visible'});
+page.document.querySelector=()=>null;
+page.location.assign=url=>assigned.push(url);
+page.followAnchor=new Anchor('_blank');
+page.followAnchor.isConnected=true;page.followAnchor.ownerDocument=page.document;
+vm.runInContext("window[Symbol.for('masc.browser.scene.refs.v4')].nodes.set('follow-link',new WeakRef(followAnchor));window[Symbol.for('masc.browser.scene.refs.v4')].links.set('follow-link',followAnchor.href)",page);
+const dispatchedFollow={tabId:7,action:'follow_link',documentId:viewport.documentId,nodeId:'follow-link',expectedUrl:page.location.href};
+assert.equal((await command(dispatchedFollow)).error,'follow_link_requires_same_tab');
+page.followAnchor.target='_self';
+const dispatchedReceipt=await command(dispatchedFollow);
+assert.equal(dispatchedReceipt.ok,true,JSON.stringify(dispatchedReceipt));
+assert.equal(dispatchedReceipt.data.tabId,7);
+assert.equal(dispatchedReceipt.data.destinationUrl,'https://example.org/destination');
+assert.equal(dispatchedReceipt.data.action,'follow_link');
+assert.equal(dispatchedReceipt.data.navigationSource.documentId,viewport.documentId);
+assert.equal(dispatchedReceipt.data.navigationSource.url,page.location.href);
+console.log('PASS: native host message dispatch follows an observed same-tab anchor and exposes destinationUrl');
+const beforeRecycledFollow=assigned.length;
+page.followAnchor.href='https://example.org/recycled-channel';
+const recycledFollow=await command(dispatchedFollow);
+assert.equal(recycledFollow.error,'scene_link_destination_changed');
+assert.equal(recycledFollow.effectPhase,'not_started');
+assert.equal(assigned.length,beforeRecycledFollow,'recycled anchors cannot navigate to an unobserved destination');
+page.followAnchor.href='https://example.org/destination';
+
+
+const stale=await command({...dispatchedFollow,expectedUrl:'https://example.org/stale'});
+assert.equal(stale.effectPhase,'not_started','stale URL rejection is explicitly pre-effect through native dispatch');
+const detached=await command({...dispatchedFollow,nodeId:'detached'});
+assert.equal(detached.effectPhase,'not_started','detached reference is pre-effect');
+page.followAnchor.target='_self';
+page.location.assign=()=>{throw new Error('navigation result lost');};
+const uncertain=await command(dispatchedFollow);
+assert.equal(uncertain.ok,false);
+assert.equal(uncertain.effectPhase,undefined,'failure after navigation starts must remain unknown');
+console.log('PASS: native dispatch preserves pre-effect rejection and unknown post-effect failure');
+
+const originalGet=browser.tabs.get,originalExecute=browser.tabs.executeScript;
+const beforePreflight=executions;
+closed=true;
+assert.equal((await command({tabId:7,action:'click',selector:'#button'})).effectPhase,'not_started');
+closed=false;
+browser.tabs.get=async()=>({id:7,url:'https://example.org/changed'});
+assert.equal((await command({tabId:7,action:'click',selector:'#button',expectedUrl:'https://example.org/old'})).effectPhase,'not_started');
+assert.equal(executions,beforePreflight,'preflight rejection never calls injection');
+browser.tabs.get=originalGet;
+browser.tabs.executeScript=async(...args)=>{await originalExecute(...args);throw new Error('injection result lost');};
+const clicksBeforeLostReply=clicked;
+const lostReply=await command({tabId:7,action:'click',selector:'#button'});
+assert.equal(clicked,clicksBeforeLostReply+1,'page effect occurred before API rejection');
+assert.equal(lostReply.ok,false);
+assert.equal(lostReply.effectPhase,undefined,'API rejection alone cannot prove pre-effect');
+browser.tabs.executeScript=originalExecute;
+console.log('PASS: preflight rejection is pre-effect; applied script with lost API result remains unknown');
+
+for (const target of ['_top','_parent']) {
+  followed=new Anchor(target);const count=assigned.length;
+  assert.equal(follow().destinationUrl,followed.href);assert.equal(assigned.length,count+1);
+}
+for (const policy of ['rel','referrerpolicy']) {
+  followed=new Anchor();const count=assigned.length;
+  followed.getAttribute=name=>name===policy ? (policy==='rel'?'noopener NoReferrer':'no-referrer') : null;
+  followed.hasAttribute=name=>name==='href'||name===policy;
+  assert.equal(follow().interactionFailure.message,'follow_link_referrer_policy_unsupported');
+  assert.equal(follow().interactionFailure.effectStarted,false);assert.equal(assigned.length,count);
+}
+console.log('PASS: top-document parent/top targets accepted and link-specific referrer policies reject pre-effect');
+
+const updates=[];
+let activeTab={id:7,url:'https://example.org/channel',title:'Channel',active:false};
+browser.tabs.get=async id=>{assert.equal(id,7);return {...activeTab};};
+browser.tabs.update=async(id,changes)=>{assert.equal(id,7);assert.deepEqual(JSON.parse(JSON.stringify(changes)),{active:true});updates.push(changes);activeTab.active=true;return {...activeTab};};
+assert.equal((await command({tabId:7,action:'activate_tab'})).error,'activate_tab_requires_expected_url');
+assert.equal((await command({tabId:7,action:'activate_tab',expectedUrl:'https://example.org/wrong'})).error,'page_url_changed');
+assert.equal(updates.length,0);
+const priorExecutions=executions;
+const activation=await command({tabId:7,action:'activate_tab',expectedUrl:activeTab.url});
+assert.equal(activation.ok,true,JSON.stringify(activation));
+assert.equal(activation.data.active,true);assert.equal(activation.data.tabId,7);
+assert.equal(activation.data.url,activeTab.url);assert.equal(updates.length,1);
+assert.equal(executions,priorExecutions,'activation does not inject or navigate the page');
+console.log('PASS: activation checks explicit tab URL then updates only active and verifies receipt');
+
+const activationArgs={tabId:7,action:'activate_tab',expectedUrl:activeTab.url};
+assert.equal((await command({...activationArgs,expectedUrl:'https://example.org/stale'})).effectPhase,'not_started');
+assert.equal((await command({...activationArgs,tabId:-1})).effectPhase,'not_started');
+assert.equal((await command({tabId:7,action:'activate_tab'})).effectPhase,'not_started');
+const getTab=browser.tabs.get,updateTab=browser.tabs.update;
+browser.tabs.get=async()=>{throw new Error('closed before activation');};
+assert.equal((await command(activationArgs)).effectPhase,'not_started');
+browser.tabs.get=getTab;
+browser.tabs.update=async()=>{throw new Error('activation transport outcome unknown');};
+assert.equal((await command(activationArgs)).effectPhase,undefined,'dispatch failure must not authorize effect replay');
+browser.tabs.update=async(...args)=>{const result=await updateTab(...args);browser.tabs.get=async()=>{throw new Error('closed after activation');};return result;};
+assert.equal((await command(activationArgs)).effectPhase,undefined,'post-activation verification failure is not pre-effect');
+browser.tabs.get=getTab;browser.tabs.update=updateTab;
+console.log('PASS: native dispatch distinguishes activation pre-effect failures from unknown effect outcomes');
+
+// Exercise the actual native-host dispatcher with browser zoom APIs, not page
+// JavaScript, active-tab selection or a CSS/viewport scaling approximation.
+let actualZoom=1, requestedZoom=[], zoomReads=0;
+const zoomArgs={tabId:7,action:'set_zoom',expectedUrl:activeTab.url,factor:1.35};
+browser.tabs.getZoom=async id=>{assert.equal(id,7);zoomReads++;return actualZoom;};
+browser.tabs.getZoomSettings=async id=>{assert.equal(id,7);return {mode:'automatic',scope:'per-origin',defaultZoomFactor:1};};
+browser.tabs.setZoom=async(id,factor)=>{assert.equal(id,7);requestedZoom.push(factor);actualZoom=4/3;};
+const beforeZoomExecutions=executions;
+const zoomed=await command(zoomArgs);
+assert.equal(zoomed.ok,true,JSON.stringify(zoomed));
+assert.equal(zoomed.data.tabId,7);assert.equal(zoomed.data.url,zoomArgs.expectedUrl);
+assert.equal(zoomed.data.requestedFactor,1.35);assert.equal(zoomed.data.zoomFactor,4/3,'receipt reports measured browser zoom, not the requested factor');
+assert.equal(zoomed.data.zoomBefore,1);assert.equal(zoomed.data.zoomScope,'per-origin');
+assert.equal(zoomed.data.zoomMode,'automatic');assert.equal(zoomReads,2);
+assert.deepEqual(requestedZoom,[1.35]);assert.equal(executions,beforeZoomExecutions,'browser zoom never injects a page script');
+for (const factor of [0,0.29,5.01,-1,Infinity,NaN,'1.5',undefined]) {
+  const reply=await command({...zoomArgs,factor});
+  assert.equal(reply.error,'zoom_factor_out_of_range');assert.equal(reply.effectPhase,'not_started');
+}
+assert.equal((await command({...zoomArgs,tabId:undefined})).effectPhase,'not_started');
+assert.equal((await command({...zoomArgs,expectedUrl:undefined})).effectPhase,'not_started');
+assert.equal((await command({...zoomArgs,expectedUrl:'https://example.org/stale'})).effectPhase,'not_started');
+assert.equal(requestedZoom.length,1,'invalid geometry or missing identity never reaches setZoom');
+let readsBeforeInput=0;
+browser.tabs.get=async id=>{assert.equal(id,7);readsBeforeInput++;return {...activeTab,url:readsBeforeInput===2?'https://example.org/new':activeTab.url};};
+assert.equal((await command(zoomArgs)).effectPhase,'not_started','navigation during zoom preflight cannot change the new page');
+assert.equal(requestedZoom.length,1);
+browser.tabs.get=getTab;
+const zoomSettings=browser.tabs.getZoomSettings;
+browser.tabs.getZoomSettings=async()=>({mode:'manual',scope:'per-tab'});
+assert.equal((await command(zoomArgs)).error,'automatic_browser_zoom_required');
+assert.equal(requestedZoom.length,1,'manual extension zoom is not browser page zoom');
+browser.tabs.getZoomSettings=zoomSettings;
+const setZoom=browser.tabs.setZoom,getZoom=browser.tabs.getZoom;
+browser.tabs.getZoom=async()=>{throw new Error('unreadable zoom before dispatch');};
+assert.equal((await command(zoomArgs)).effectPhase,'not_started');
+browser.tabs.getZoom=getZoom;
+browser.tabs.setZoom=async(id,factor)=>{await setZoom(id,factor);throw new Error('zoom applied but reply lost');};
+assert.equal((await command(zoomArgs)).effectPhase,undefined,'applied zoom with lost response stays unknown');
+assert.equal(requestedZoom.length,2,'unknown zoom is dispatched once and never replayed');
+browser.tabs.setZoom=async(id,factor)=>{await setZoom(id,factor);browser.tabs.getZoom=async()=>{throw new Error('post-zoom read failed');};};
+assert.equal((await command(zoomArgs)).effectPhase,undefined,'post-dispatch measurement failure stays unknown');
+assert.equal(requestedZoom.length,3);browser.tabs.getZoom=getZoom;
+browser.tabs.setZoom=async(id,factor)=>{await setZoom(id,factor);browser.tabs.get=async()=>({...activeTab,url:'https://example.org/navigated'});};
+assert.equal((await command(zoomArgs)).effectPhase,undefined,'navigation after zoom is not a pre-effect rejection');
+assert.equal(requestedZoom.length,4);browser.tabs.get=getTab;browser.tabs.setZoom=setZoom;
+// Cancellation while a native API settles cannot undo it or authorize a retry.
+const abortZoom=new AbortController();
+browser.tabs.setZoom=async(id,factor)=>{await setZoom(id,factor);abortZoom.abort();};
+context.zoomArgs=zoomArgs;context.zoomSignal=abortZoom.signal;
+await assert.rejects(vm.runInContext('pageZoom(zoomArgs,zoomSignal)',context),error=>error.effectStarted===true);
+assert.equal(requestedZoom.length,5);
+browser.tabs.setZoom=setZoom;
+console.log('PASS: actual extension dispatcher uses exact-tab browser zoom, measures scale/scope, guards navigation, and never replays unknown zoom');

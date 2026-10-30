@@ -1,0 +1,36 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System                                                             
+                                                                                                                        
+   MASC Keepers (3)                                                                                   HTTP [connected]  
+                                                                                                                        
+    fleet ok   running 0/0   turn capacity 0/0                                                                          
+     KEEPER                           HEALTH     Mode S   TURN TASK                                                     
+     imp                              - unread   - -      — not observed                                                
+     probe-one                        × offline  M D      — —                                                           
+     probe-two                        × offline  M D      — —                                                           
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+  j/k:move  p:boot  w:wake  s:shutdown  x:delete  e:settings  a:new  l:logs  t:calls  g:yolo  u:runtime  q:quit  …?     
+ › to imp   (i to write)                                                                                                

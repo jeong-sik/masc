@@ -1,0 +1,889 @@
+(** Workspace_utils Module Coverage Tests
+
+    Tests for Workspace utility functions:
+    - storage_backend type: Memory, FileSystem
+    - config record type
+    - parse_gitdir_to_main_root: gitdir line parsing for worktrees
+    - env_opt: environment variable helper
+    - backend_config_for: filesystem backend config
+*)
+
+open Alcotest
+
+module Workspace_utils = Workspace_utils
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
+let with_envs bindings f =
+  List.fold_right (fun (name, value) acc -> fun () -> with_env name value acc) bindings f ()
+
+(* ============================================================
+   parse_gitdir_to_main_root Tests
+   ============================================================ *)
+
+let test_parse_gitdir_worktree () =
+  let line = "gitdir: /home/user/project/.git/worktrees/feature-branch" in
+  match Workspace_utils.parse_gitdir_to_main_root line with
+  | Some path -> check string "main root" "/home/user/project" path
+  | None -> fail "expected Some path"
+
+let test_parse_gitdir_no_worktree () =
+  let line = "gitdir: /home/user/project/.git" in
+  match Workspace_utils.parse_gitdir_to_main_root line with
+  | Some _ -> fail "expected None for non-worktree"
+  | None -> ()
+
+let test_parse_gitdir_invalid_format () =
+  let line = "invalid line without colon" in
+  match Workspace_utils.parse_gitdir_to_main_root line with
+  | Some _ -> fail "expected None for invalid"
+  | None -> ()
+
+let test_parse_gitdir_empty () =
+  match Workspace_utils.parse_gitdir_to_main_root "" with
+  | Some _ -> fail "expected None for empty"
+  | None -> ()
+
+let test_parse_gitdir_nested_worktree () =
+  let line = "gitdir: /a/b/c/.git/worktrees/my-branch" in
+  match Workspace_utils.parse_gitdir_to_main_root line with
+  | Some path -> check string "nested" "/a/b/c" path
+  | None -> fail "expected Some"
+
+let test_parse_gitdir_with_spaces () =
+  let line = "gitdir:   /home/user/project/.git/worktrees/branch  " in
+  match Workspace_utils.parse_gitdir_to_main_root line with
+  | Some path -> check string "trimmed" "/home/user/project" path
+  | None -> fail "expected Some"
+
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc contents)
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let inherited_env_base suffix =
+  Filename.concat (Filename.get_temp_dir_name ()) ("workspace-utils-" ^ suffix)
+
+(* capture_stderr removed — legacy warning tests removed in workspace flat-path cleanup *)
+
+let test_resolve_masc_base_path_ignores_inherited_env_in_test_by_default () =
+  let scratch = Filename.temp_dir "workspace-utils-worktree" "" in
+  let repo_root = Filename.concat scratch "repo" in
+  let repo_git = Filename.concat repo_root ".git" in
+  let repo_worktrees = Filename.concat repo_git "worktrees" in
+  let branch_gitdir = Filename.concat repo_worktrees "branch" in
+  let worktree_path = Filename.concat scratch "wt" in
+  Unix.mkdir repo_root 0o755;
+  Unix.mkdir repo_git 0o755;
+  Unix.mkdir repo_worktrees 0o755;
+  Unix.mkdir branch_gitdir 0o755;
+  Unix.mkdir worktree_path 0o755;
+  write_file (Filename.concat worktree_path ".git")
+    (Printf.sprintf "gitdir: %s\n" branch_gitdir);
+  with_envs
+    [ ("MASC_BASE_PATH", Some (inherited_env_base "inherited-worktree")) ]
+    (fun () ->
+      check string "requested git root wins in tests" repo_root
+        (Workspace_utils.resolve_masc_base_path worktree_path))
+
+let test_resolve_masc_base_path_prefers_requested_path_in_test () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-requested"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", Some (inherited_env_base "inherited-requested")) ]
+    (fun () ->
+      check string "requested path wins in tests" requested
+        (Workspace_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_relative_request_ignores_inherited_env () =
+  let scratch = Filename.temp_dir "workspace-utils-relative-request" "" in
+  let previous_cwd = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.chdir previous_cwd;
+      rm_rf scratch)
+    (fun () ->
+      Sys.chdir scratch;
+      let requested = "tmp-fixture" in
+      (* The resolver anchors a relative request to [Sys.getcwd ()], the
+         symlink-canonical cwd (macOS temp [/var/…] → [/private/var/…]).
+         Canonicalize [scratch] so the expected matches the real anchor. *)
+      let expected = Filename.concat (Unix.realpath scratch) requested in
+      with_envs
+        [ ("MASC_BASE_PATH", Some (inherited_env_base "inherited-relative")) ]
+        (fun () ->
+          check string "relative requested path anchors to cwd in tests"
+            expected
+            (Workspace_utils.resolve_masc_base_path requested)))
+
+let test_resolve_masc_base_path_keeps_matching_explicit_env () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-matching"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", Some requested) ]
+    (fun () ->
+      check string "matching explicit env preserved" requested
+        (Workspace_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_collapses_requested_masc_dir () =
+  let requested =
+    Filename.concat
+      (Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-collapse")
+      Common.masc_dirname
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", None) ]
+    (fun () ->
+      check string "requested .masc input collapses to parent"
+        (Filename.dirname requested)
+        (Workspace_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_collapses_explicit_env_masc_dir () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-explicit"
+  in
+  let explicit = Filename.concat requested Common.masc_dirname in
+  with_envs
+    [ ("MASC_BASE_PATH", Some explicit) ]
+    (fun () ->
+      check string "explicit .masc env collapses to parent" requested
+        (Workspace_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_ignores_base_path_override_without_opt_in () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-opt-in"
+  in
+  let explicit = inherited_env_base "inherited-opt-in" in
+  with_envs
+    [ ("MASC_BASE_PATH", Some explicit) ]
+    (fun () ->
+      check string "base path override ignored without opt-in" requested
+        (Workspace_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_ignores_base_path_override_with_local_masc_dir ()
+    =
+  let scratch = Filename.temp_dir "workspace-utils-local-masc" "" in
+  let requested = Filename.concat scratch "repo" in
+  let explicit = Filename.concat scratch "parent-root" in
+  Unix.mkdir requested 0o755;
+  Unix.mkdir explicit 0o755;
+  Unix.mkdir (Filename.concat requested Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat explicit Common.masc_dirname) 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      with_envs
+        [ ("MASC_BASE_PATH", Some explicit) ]
+        (fun () ->
+          check string "local .masc still ignores base path override in tests"
+            requested
+            (Workspace_utils.resolve_masc_base_path requested)))
+
+let test_resolve_masc_base_path_ignores_ancestor_base_path_override_without_opt_in ()
+    =
+  let scratch = Filename.temp_dir "workspace-utils-ancestor" "" in
+  let explicit = scratch in
+  let sub_repo = Filename.concat scratch "workspace/sub-repo" in
+  let rec mkdirs path =
+    if not (Sys.file_exists path) then begin
+      mkdirs (Filename.dirname path);
+      Unix.mkdir path 0o755
+    end
+  in
+  mkdirs sub_repo;
+  Unix.mkdir (Filename.concat explicit Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat sub_repo Common.masc_dirname) 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      with_envs
+        [ ("MASC_BASE_PATH", Some explicit) ]
+        (fun () ->
+          check string "requested sub-repo wins without base path override opt-in"
+            sub_repo
+            (Workspace_utils.resolve_masc_base_path sub_repo)))
+
+let test_default_config_syncs_test_base_path_env () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-sync-env"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", None) ]
+    (fun () ->
+      ignore (Workspace_utils.default_config requested);
+      check (option string) "env synced to requested path" (Some requested)
+        (Sys.getenv_opt "MASC_BASE_PATH"))
+
+let test_auto_synced_test_base_path_does_not_override_later_requests () =
+  let first =
+    Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-sync-first"
+  in
+  let second =
+    Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-sync-second"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", None) ]
+    (fun () ->
+      ignore (Workspace_utils.default_config first);
+      check string "later requested path wins over auto-synced env" second
+        (Workspace_utils.resolve_masc_base_path second))
+
+(* ============================================================
+   task-351 quarantine escape guard Tests
+   ============================================================ *)
+
+let test_is_temp_scratch_dir () =
+  let tmp = Filename.get_temp_dir_name () in
+  check bool "OS temp dir is scratch" true
+    (Workspace_utils.is_temp_scratch_dir tmp);
+  check bool "path under OS temp is scratch" true
+    (Workspace_utils.is_temp_scratch_dir
+       (Filename.concat tmp "masc_test_scratch_123"));
+  check bool "/tmp is scratch" true
+    (Workspace_utils.is_temp_scratch_dir "/tmp");
+  check bool "path under /tmp is scratch" true
+    (Workspace_utils.is_temp_scratch_dir "/tmp/foo/bar");
+  check bool "production-like path is not scratch" false
+    (Workspace_utils.is_temp_scratch_dir "/Users/worker/ws")
+
+let test_resolved_base_escapes_temp_request () =
+  let tmp = Filename.get_temp_dir_name () in
+  let scratch = Filename.concat tmp "masc_test_escape_123" in
+  check bool "temp request resolving to temp does not escape" false
+    (Workspace_utils.resolved_base_escapes_temp_request scratch scratch);
+  check bool "temp request resolving to another temp does not escape" false
+    (Workspace_utils.resolved_base_escapes_temp_request scratch
+       (Filename.concat tmp "other"));
+  check bool "temp request resolving to production escapes" true
+    (Workspace_utils.resolved_base_escapes_temp_request scratch
+       "/Users/worker/ws");
+  check bool "non-temp request is never an escape" false
+    (Workspace_utils.resolved_base_escapes_temp_request "/Users/worker/ws"
+       "/Users/worker/ws")
+
+(* ============================================================
+   env_opt Tests
+   ============================================================ *)
+
+let test_env_opt_nonexistent () =
+  match Workspace_utils.env_opt "MASC_NONEXISTENT_VAR_12345" with
+  | Some _ -> fail "expected None"
+  | None -> ()
+
+let test_env_opt_home () =
+  (* HOME should exist on most systems *)
+  match Workspace_utils.env_opt "HOME" with
+  | Some path -> check bool "nonempty" true (String.length path > 0)
+  | None -> ()  (* Some systems might not have HOME *)
+
+(* ============================================================
+   strip_prefix Tests
+   ============================================================ *)
+
+let test_strip_prefix_basic () =
+  let result = Workspace_utils.strip_prefix "prefix:" "prefix:value" in
+  check string "stripped" "value" result
+
+let test_strip_prefix_no_match () =
+  (* Note: strip_prefix doesn't validate the prefix - it just removes N chars *)
+  let result = Workspace_utils.strip_prefix "other:" "prefix:value" in
+  check string "removes first N chars" ":value" result
+
+let test_strip_prefix_empty_string () =
+  let result = Workspace_utils.strip_prefix "pre" "" in
+  check string "empty unchanged" "" result
+
+let test_strip_prefix_empty_prefix () =
+  let result = Workspace_utils.strip_prefix "" "value" in
+  check string "no prefix" "value" result
+
+let test_strip_prefix_exact_match () =
+  let result = Workspace_utils.strip_prefix "exact" "exact" in
+  check string "empty result" "" result
+
+let test_strip_prefix_longer_prefix () =
+  let result = Workspace_utils.strip_prefix "verylongprefix" "short" in
+  check string "unchanged short" "short" result
+
+(* ============================================================
+   contains_substring Tests
+   ============================================================ *)
+
+let test_contains_substring_true () =
+  check bool "contains" true (String_util.contains_substring "hello world" "world")
+
+let test_contains_substring_false () =
+  check bool "not contains" false (String_util.contains_substring "hello world" "xyz")
+
+let test_contains_substring_empty_needle () =
+  (* Empty string is substring of any string (String.sub s 0 0 = "" always) *)
+  check bool "empty needle" true (String_util.contains_substring "hello" "")
+
+let test_contains_substring_empty_haystack () =
+  check bool "empty haystack" false (String_util.contains_substring "" "hello")
+
+let test_contains_substring_both_empty () =
+  (* Empty string contains empty string (String.sub "" 0 0 = "") *)
+  check bool "both empty" true (String_util.contains_substring "" "")
+
+let test_contains_substring_needle_longer () =
+  check bool "needle longer" false (String_util.contains_substring "ab" "abcdef")
+
+let test_contains_substring_exact () =
+  check bool "exact match" true (String_util.contains_substring "test" "test")
+
+let test_contains_substring_start () =
+  check bool "at start" true (String_util.contains_substring "hello world" "hello")
+
+let test_contains_substring_end () =
+  check bool "at end" true (String_util.contains_substring "hello world" "world")
+
+let test_contains_substring_middle () =
+  check bool "in middle" true (String_util.contains_substring "the quick fox" "quick")
+
+let test_contains_substring_special_chars () =
+  check bool "special chars" true (String_util.contains_substring "a<b>c" "<b>")
+
+(* ============================================================
+   safe_filename Tests
+   ============================================================ *)
+
+let test_safe_filename_normal () =
+  check string "normal" "hello_world" (Workspace_utils.safe_filename "hello_world")
+
+let test_safe_filename_alphanumeric () =
+  check string "alphanumeric" "test123" (Workspace_utils.safe_filename "test123")
+
+let test_safe_filename_with_dots () =
+  check string "dots preserved" "file.json" (Workspace_utils.safe_filename "file.json")
+
+let test_safe_filename_with_dash () =
+  check string "dash preserved" "my-file" (Workspace_utils.safe_filename "my-file")
+
+let test_safe_filename_with_underscore () =
+  check string "underscore preserved" "my_file" (Workspace_utils.safe_filename "my_file")
+
+let test_safe_filename_special_chars () =
+  (* Special chars get hex-encoded: @ -> _40 (0x40 = 64 = '@') *)
+  let result = Workspace_utils.safe_filename "user@domain" in
+  check bool "contains _40" true (String.length result > 0 && result <> "user@domain")
+
+let test_safe_filename_spaces () =
+  (* Space (0x20) -> _20 *)
+  let result = Workspace_utils.safe_filename "hello world" in
+  check bool "space encoded" true (not (String.contains result ' '))
+
+let test_safe_filename_slash () =
+  (* Slash (0x2f) -> _2f *)
+  let result = Workspace_utils.safe_filename "path/to/file" in
+  check bool "slash encoded" true (not (String.contains result '/'))
+
+let test_safe_filename_empty () =
+  check string "empty" "" (Workspace_utils.safe_filename "")
+
+let test_safe_filename_unicode () =
+  (* Korean chars get hex-encoded *)
+  let result = Workspace_utils.safe_filename "안녕" in
+  check bool "unicode encoded" true (String.length result > String.length "안녕")
+
+(* ============================================================
+   project_prefix Tests
+   ============================================================ *)
+
+(* project_prefix requires a config, which requires backend setup.
+   We test it indirectly via the key generation behavior *)
+
+(* ============================================================
+   validate_file_path Tests
+   ============================================================ *)
+
+let test_validate_file_path_normal () =
+  match Workspace_utils.validate_file_path "agents/claude.json" with
+  | Ok _ -> ()
+  | Error e -> fail ("expected Ok, got: " ^ e)
+
+let test_validate_file_path_too_long () =
+  let long_path = String.make 501 'x' in
+  match Workspace_utils.validate_file_path long_path with
+  | Error e -> check bool "error mentions long" true (String.length e > 0)
+  | Ok _ -> fail "expected Error for long path"
+
+let test_validate_file_path_angle_bracket_lt () =
+  match Workspace_utils.validate_file_path "path<script>" with
+  | Error e -> check bool "security error" true (String.length e > 0)
+  | Ok _ -> fail "expected Error for <"
+
+let test_validate_file_path_angle_bracket_gt () =
+  match Workspace_utils.validate_file_path "path>output" with
+  | Error e -> check bool "security error" true (String.length e > 0)
+  | Ok _ -> fail "expected Error for >"
+
+(* ============================================================
+   Path Helper Tests
+   ============================================================ *)
+
+let make_test_config ~base_path : Workspace_utils.config =
+  let backend_config : Backend_types.config = {
+    base_path;
+    node_id = "test-node";
+    pubsub_max_messages = 1000;
+  } in
+  let memory_backend = Backend.Memory.create () in
+  {
+    Workspace_utils.base_path;
+    workspace_path = base_path;
+    lock_expiry_minutes = 30;
+    backend_config;
+    backend = Workspace_utils.Memory memory_backend;
+  }
+
+(* ============================================================
+   storage_backend / config Tests
+
+   These replaced four cases that bound a literal and returned unit
+   ([let _ : string = "Memory" in ()]). They named the type in a comment
+   and never referenced it, so they passed whatever Workspace_utils did.
+   ============================================================ *)
+
+(* Exhaustive on purpose: a third storage_backend breaks this file, which
+   is the part a value-based case cannot cover -- FileSystem needs an Eio
+   fs capability, so only its arm is pinned here. *)
+let storage_backend_tag : Workspace_utils.storage_backend -> string = function
+  | Workspace_utils.Memory _ -> "memory"
+  | Workspace_utils.FileSystem _ -> "filesystem"
+
+let test_storage_backend_memory_is_tagged () =
+  let backend = Workspace_utils.Memory (Backend.Memory.create ()) in
+  check string "memory backend" "memory" (storage_backend_tag backend)
+
+let test_config_carries_its_fields () =
+  let cfg = make_test_config ~base_path:"/tmp/cfg" in
+  check string "base_path" "/tmp/cfg" cfg.Workspace_utils.base_path;
+  check string "workspace_path" "/tmp/cfg" cfg.Workspace_utils.workspace_path;
+  check int "lock_expiry_minutes" 30 cfg.Workspace_utils.lock_expiry_minutes;
+  check string "backend" "memory" (storage_backend_tag cfg.Workspace_utils.backend)
+
+let test_masc_dir_is_dot_masc_under_base () =
+  let cfg = make_test_config ~base_path:"/home/user/project" in
+  let result = Workspace_utils.masc_dir cfg in
+  check string "root under the base path" "/home/user/project/.masc" result
+
+(* An absent document, a blank one and a broken one send an operator to three
+   different places, so the read keeps them apart instead of answering all
+   three with an empty object (#29562). *)
+let test_filesystem_read_json_doc_keeps_absence_apart () =
+  Eio_main.run @@ fun env ->
+  let scratch = Filename.temp_dir "workspace-utils-read-json-doc" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let root = Filename.concat scratch Common.masc_dirname in
+      Unix.mkdir root 0o700;
+      let backend_config : Backend_types.config =
+        { base_path = root
+        ; node_id = "test-node"
+        ; pubsub_max_messages = 1000
+        }
+      in
+      let cfg : Workspace_utils.config =
+        { base_path = scratch
+        ; workspace_path = scratch
+        ; lock_expiry_minutes = 30
+        ; backend_config
+        ; backend =
+            Workspace_utils.FileSystem
+              (Backend.FileSystem.create ~fs:(Eio.Stdenv.fs env) backend_config)
+        }
+      in
+      let path = Filename.concat (Workspace_utils.masc_dir cfg) "doc.json" in
+      let read () = Workspace_utils.read_json_doc cfg path in
+      (match read () with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "an absent file read as a document"
+       | Error error ->
+         failf "an absent file read as a failure: %s"
+           (Workspace_utils.json_doc_error_to_string error));
+      write_file path "  \n";
+      (match read () with
+       | Error Workspace_utils.Json_doc_blank -> ()
+       | Ok None -> fail "a blank file read as absent"
+       | Ok (Some _) -> fail "a blank file read as a document"
+       | Error (Workspace_utils.Json_doc_unreadable _ | Workspace_utils.Json_doc_unparsable _) ->
+         fail "a blank file read as a broken one");
+      write_file path "{\"tasks\": [";
+      (match read () with
+       | Error (Workspace_utils.Json_doc_unparsable _) -> ()
+       | Ok None -> fail "a broken file read as absent"
+       | Ok (Some _) -> fail "a broken file read as a document"
+       | Error (Workspace_utils.Json_doc_unreadable _ | Workspace_utils.Json_doc_blank) ->
+         fail "a broken file was not reported as unparsable");
+      write_file path "{\"version\": 2}";
+      check bool "a present document reads as itself" true
+        (read () = Ok (Some (`Assoc [ ("version", `Int 2) ]))))
+
+let test_list_dir_prefers_backend_for_memory_keys () =
+  let scratch = Filename.temp_dir "workspace-utils-list-dir-memory" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch in
+      let workers_dir = Filename.concat (Workspace_utils.masc_dir cfg) "workers" in
+      Workspace_utils.write_json cfg
+        (Filename.concat workers_dir "backend.json")
+        (`Assoc [ ("ok", `Bool true) ]);
+      write_file (Filename.concat workers_dir "rogue.json") "{}";
+      let listed = Workspace_utils.list_dir cfg workers_dir |> List.sort String.compare in
+      check (list string) "memory backend ignores local-only stale files"
+        [ "backend.json" ] listed)
+
+let test_memory_commit_distinguishes_local_mirror_failure () =
+  let scratch = Filename.temp_dir "workspace-utils-commit-result" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch in
+      let masc_dir = Workspace_utils.masc_dir cfg in
+      Unix.mkdir masc_dir 0o700;
+      let tasks_path = Filename.concat masc_dir "tasks" in
+      write_file tasks_path "blocks local mirror directory creation";
+      let path = Filename.concat tasks_path "backlog.json" in
+      let json = `Assoc [ "version", `Int 2 ] in
+      (match Workspace_utils.write_json_commit_result cfg path json with
+       | Error message ->
+         failf "memory backend commit was misreported as failed: %s" message
+       | Ok { mirror_error = None } ->
+         fail "blocked local mirror did not surface an explicit mirror error"
+       | Ok { mirror_error = Some _ } -> ());
+      check
+        string
+        "authoritative memory backend contains the committed value"
+        (Yojson.Safe.to_string json)
+        (match Workspace_utils.read_json_doc cfg path with
+         | Ok (Some committed) -> Yojson.Safe.to_string committed
+         | Ok None -> fail "authoritative memory backend lost the committed value"
+         | Error error -> fail (Workspace_utils.json_doc_error_to_string error));
+      match Workspace_utils.write_json_result cfg path json with
+      | Ok () -> fail "aggregate result hid the local mirror failure"
+      | Error _ -> ())
+
+let test_pretty_json_persistence_preserves_bytes () =
+  let scratch = Filename.temp_dir "workspace-utils-pretty-json" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch in
+      let root = Workspace_utils.masc_dir cfg in
+      let primary = Filename.concat root "tasks/backlog.json" in
+      let recovery = Filename.concat root "tasks/backlog.recovery.json" in
+      let read_bytes path =
+        let channel = open_in_bin path in
+        Fun.protect ~finally:(fun () -> close_in channel)
+          (fun () -> really_input_string channel (in_channel_length channel))
+      in
+      let write path encoded =
+        match Workspace_utils.write_encoded_json_result cfg path encoded with
+        | Ok () -> ()
+        | Error message -> fail message
+      in
+      (* Exercise line wrapping on either side of the default margin, quoted
+         escapes, UTF-8 scalar lengths, and repairs before persistence. *)
+      let texts =
+        [ ""; "ASCII task"; "\"quoted\"\\path\n\t\000\127"
+        ; "한글 café 🙂 e\204\129"; "prefix 한글 suffix"
+        ; "broken\255\192\175\237\160\128end"; "truncated\240\159"
+        ]
+        @ List.init 90 (fun width -> String.make width 'x')
+        @ List.init 90 (fun width -> String.make width 'x' ^ "한🙂")
+      in
+      List.iteri
+        (fun index text ->
+          let json =
+            `Assoc
+              [ "revision", `Int index
+              ; "tasks", `List
+                  [ `Assoc
+                      [ "id", `String "task-001"
+                      ; "title", `String text
+                      ; "status", `String "todo"
+                      ; "details", `List
+                          [ `Null; `Bool true; `Int (-42); `Float 1.25
+                          ; `Intlit "123456789012345678901234567890"
+                          ; `Assoc [ text, `String text ]; `List []; `Assoc []
+                          ]
+                      ]
+                  ]
+              ]
+          in
+          let sanitized = Safe_ops.sanitize_json_utf8 json in
+          let expected = Yojson.Safe.pretty_to_string sanitized in
+          let encoded = Workspace_utils.encode_json_pretty json in
+          check string "encoding keeps the reference bytes" expected
+            (encoded :> string);
+          write primary encoded;
+          write recovery encoded;
+          check string "primary keeps pretty bytes" expected (read_bytes primary);
+          check string "recovery keeps the same bytes" expected (read_bytes recovery);
+          match Workspace_utils.read_json_doc cfg primary with
+          | Ok (Some actual) ->
+              check bool "authoritative document round-trips" true
+                (Yojson.Safe.equal sanitized actual)
+          | Ok None -> fail "encoded document disappeared"
+          | Error error -> fail (Workspace_utils.json_doc_error_to_string error))
+        texts;
+      List.iter
+        (fun value ->
+          let json = `Assoc [ "value", `Float value ] in
+          check string "non-finite pretty spelling is unchanged"
+            (Yojson.Safe.pretty_to_string json)
+            (Workspace_utils.encode_json_pretty json :> string))
+        [ Float.nan; Float.infinity; Float.neg_infinity ])
+
+let test_default_config_memory_fallback_isolated_by_base_path () =
+  let first = Filename.temp_dir "workspace-utils-memory-first" "" in
+  let second = Filename.temp_dir "workspace-utils-memory-second" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Workspace_utils.reset_default_config_cache ();
+      rm_rf first;
+      rm_rf second)
+    (fun () ->
+      Workspace_utils.reset_default_config_cache ();
+      let cfg_first = Workspace_utils.default_config first in
+      let cfg_second = Workspace_utils.default_config second in
+      let first_workers =
+        Filename.concat (Workspace_utils.masc_dir cfg_first) "workers"
+      in
+      let second_workers =
+        Filename.concat (Workspace_utils.masc_dir cfg_second) "workers"
+      in
+      Workspace_utils.write_json cfg_first
+        (Filename.concat first_workers "only-first.json")
+        (`Assoc [ ("base", `String "first") ]);
+      check (list string) "first backend sees its write"
+        [ "only-first.json" ]
+        (Workspace_utils.list_dir cfg_first first_workers);
+      check (list string) "second backend is isolated"
+        []
+        (Workspace_utils.list_dir cfg_second second_workers))
+
+let test_memory_backend_fallback_keys_by_backend_base_path () =
+  let first = Filename.temp_dir "workspace-utils-memory-fallback-first" "" in
+  let second = Filename.temp_dir "workspace-utils-memory-fallback-second" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf first;
+      rm_rf second)
+    (fun () ->
+      let first_backend =
+        Workspace_utils.memory_backend_fallback
+          (Workspace_utils.backend_config_for first)
+      in
+      let second_backend =
+        Workspace_utils.memory_backend_fallback
+          (Workspace_utils.backend_config_for second)
+      in
+      match first_backend, second_backend with
+      | Workspace_utils.Memory first_memory, Workspace_utils.Memory second_memory ->
+          let key = "raw-shared-key" in
+          (match Backend.Memory.set first_memory key "first" with
+           | Ok () -> ()
+           | Error err ->
+               fail
+                 ("first memory set failed: " ^ Backend_types.show_error err));
+          (match Backend.Memory.get second_memory key with
+           | Error (Backend_types.NotFound _) -> ()
+           | Ok value ->
+               fail
+                 ("second fallback backend leaked raw key with value: " ^ value)
+           | Error err ->
+               fail
+                 ("second memory get failed: " ^ Backend_types.show_error err))
+      | FileSystem _, _ | _, FileSystem _ ->
+          fail "memory_backend_fallback returned filesystem backend")
+
+(* ============================================================
+   Test Runners
+   ============================================================ *)
+
+(* The previous fold replaced every unsafe character with '-', so "a.b",
+   "a/b" and "a b" all landed on "a-b" and two keepers wrote one file
+   (#24342); nothing bounded the length either, so a name past the
+   filesystem's component limit produced a path the OS rejects (#24343). *)
+let segment = Workspace_utils_backend_setup.sanitize_namespace_segment
+
+let test_namespace_segment_separates_representative_names () =
+  let names =
+    [ "alpha.beta"; "alpha/beta"; "alpha beta"; "alpha-beta"
+    ; "ALPHA"; "alpha"; "a:b"; "a*b"; ""; " "; String.make 300 'a'
+    ; String.make 300 'a' ^ "x"
+    ]
+  in
+  let table = Hashtbl.create 16 in
+  List.iter
+    (fun name ->
+      let seg = segment name in
+      match Hashtbl.find_opt table seg with
+      | Some other when not (String.equal other name) ->
+        Alcotest.failf "%S and %S share the segment %S" other name seg
+      | Some _ | None -> Hashtbl.replace table seg name)
+    names
+;;
+
+let test_namespace_segment_is_bounded () =
+  let bound = Workspace_utils_backend_setup.namespace_segment_max_length + 17 in
+  List.iter
+    (fun name ->
+      let seg = segment name in
+      Alcotest.(check bool)
+        (Printf.sprintf "a %d-char name yields %d chars" (String.length name)
+           (String.length seg))
+        true
+        (String.length seg <= bound && String.length seg > 0))
+    [ ""; "a"; String.make 300 'a'; String.make 300 '/'; String.make 1000 'z' ]
+;;
+
+let test_canonical_names_are_unchanged () =
+  (* Every name in this workspace is already canonical, so no path moves. *)
+  List.iter
+    (fun name -> Alcotest.(check string) name name (segment name))
+    [ "alpha"; "keeper-1"; "a_b-c"; "orbiter"; "rw-e0-r9-20260820-coord" ]
+;;
+
+let () =
+  run "Workspace_utils Coverage" [
+    "parse_gitdir_to_main_root", [
+      test_case "worktree" `Quick test_parse_gitdir_worktree;
+      test_case "no worktree" `Quick test_parse_gitdir_no_worktree;
+      test_case "invalid format" `Quick test_parse_gitdir_invalid_format;
+      test_case "empty" `Quick test_parse_gitdir_empty;
+      test_case "nested" `Quick test_parse_gitdir_nested_worktree;
+      test_case "with spaces" `Quick test_parse_gitdir_with_spaces;
+      test_case "ignores inherited env in tests by default" `Quick
+        test_resolve_masc_base_path_ignores_inherited_env_in_test_by_default;
+      test_case "prefers requested path in tests" `Quick
+        test_resolve_masc_base_path_prefers_requested_path_in_test;
+      test_case "relative requested path ignores inherited env in tests" `Quick
+        test_resolve_masc_base_path_relative_request_ignores_inherited_env;
+      test_case "keeps matching explicit env" `Quick
+        test_resolve_masc_base_path_keeps_matching_explicit_env;
+      test_case "collapses requested .masc path" `Quick
+        test_resolve_masc_base_path_collapses_requested_masc_dir;
+      test_case "collapses explicit .masc env" `Quick
+        test_resolve_masc_base_path_collapses_explicit_env_masc_dir;
+      test_case "ignores base path override without opt-in" `Quick
+        test_resolve_masc_base_path_ignores_base_path_override_without_opt_in;
+      test_case "ignores base path override when requested path has local .masc"
+        `Quick
+        test_resolve_masc_base_path_ignores_base_path_override_with_local_masc_dir;
+      test_case "ignores ancestor base path override without opt-in" `Quick
+        test_resolve_masc_base_path_ignores_ancestor_base_path_override_without_opt_in;
+      test_case "default config syncs test base env" `Quick
+        test_default_config_syncs_test_base_path_env;
+      test_case "auto-synced test base env does not override later requests" `Quick
+        test_auto_synced_test_base_path_does_not_override_later_requests;
+      test_case "is_temp_scratch_dir" `Quick test_is_temp_scratch_dir;
+      test_case "resolved_base_escapes_temp_request" `Quick
+        test_resolved_base_escapes_temp_request;
+    ];
+    "env_opt", [
+      test_case "nonexistent" `Quick test_env_opt_nonexistent;
+      test_case "home" `Quick test_env_opt_home;
+    ];
+    "storage_backend", [
+      test_case "memory is tagged" `Quick test_storage_backend_memory_is_tagged;
+    ];
+    "config", [
+      test_case "carries its fields" `Quick test_config_carries_its_fields;
+    ];
+    "strip_prefix", [
+      test_case "basic" `Quick test_strip_prefix_basic;
+      test_case "no match" `Quick test_strip_prefix_no_match;
+      test_case "empty string" `Quick test_strip_prefix_empty_string;
+      test_case "empty prefix" `Quick test_strip_prefix_empty_prefix;
+      test_case "exact match" `Quick test_strip_prefix_exact_match;
+      test_case "longer prefix" `Quick test_strip_prefix_longer_prefix;
+    ];
+    "contains_substring", [
+      test_case "true" `Quick test_contains_substring_true;
+      test_case "false" `Quick test_contains_substring_false;
+      test_case "empty needle" `Quick test_contains_substring_empty_needle;
+      test_case "empty haystack" `Quick test_contains_substring_empty_haystack;
+      test_case "both empty" `Quick test_contains_substring_both_empty;
+      test_case "needle longer" `Quick test_contains_substring_needle_longer;
+      test_case "exact" `Quick test_contains_substring_exact;
+      test_case "at start" `Quick test_contains_substring_start;
+      test_case "at end" `Quick test_contains_substring_end;
+      test_case "in middle" `Quick test_contains_substring_middle;
+      test_case "special chars" `Quick test_contains_substring_special_chars;
+    ];
+    "sanitize_html", [
+    ];
+    "sanitize_agent_name", [
+    ];
+    "sanitize_message", [
+    ];
+    "safe_filename", [
+      test_case "normal" `Quick test_safe_filename_normal;
+      test_case "alphanumeric" `Quick test_safe_filename_alphanumeric;
+      test_case "with dots" `Quick test_safe_filename_with_dots;
+      test_case "with dash" `Quick test_safe_filename_with_dash;
+      test_case "with underscore" `Quick test_safe_filename_with_underscore;
+      test_case "special chars" `Quick test_safe_filename_special_chars;
+      test_case "spaces" `Quick test_safe_filename_spaces;
+      test_case "slash" `Quick test_safe_filename_slash;
+      test_case "empty" `Quick test_safe_filename_empty;
+      test_case "unicode" `Quick test_safe_filename_unicode;
+    ];
+    "validate_file_path", [
+      test_case "normal" `Quick test_validate_file_path_normal;
+      test_case "too long" `Quick test_validate_file_path_too_long;
+      test_case "angle bracket <" `Quick test_validate_file_path_angle_bracket_lt;
+      test_case "angle bracket >" `Quick test_validate_file_path_angle_bracket_gt;
+    ];
+    "path_helpers", [
+      test_case "masc_dir is .masc under the base path" `Quick
+        test_masc_dir_is_dot_masc_under_base;
+      test_case "read_json_doc keeps absence apart" `Quick
+        test_filesystem_read_json_doc_keeps_absence_apart;
+      test_case "list_dir prefers backend for memory keys" `Quick
+        test_list_dir_prefers_backend_for_memory_keys;
+      test_case "memory commit distinguishes local mirror failure" `Quick
+        test_memory_commit_distinguishes_local_mirror_failure;
+      test_case "pretty JSON persistence preserves exact bytes" `Quick
+        test_pretty_json_persistence_preserves_bytes;
+      test_case "memory fallback isolated by base path" `Quick
+        test_default_config_memory_fallback_isolated_by_base_path;
+      test_case "memory fallback keys by backend base path" `Quick
+        test_memory_backend_fallback_keys_by_backend_base_path;
+    ];
+    "namespace_segment", [
+      test_case "representative names get distinct segments" `Quick
+        test_namespace_segment_separates_representative_names;
+      test_case "segments stay inside a path component" `Quick
+        test_namespace_segment_is_bounded;
+      test_case "canonical names are unchanged" `Quick
+        test_canonical_names_are_unchanged;
+    ];
+  ]

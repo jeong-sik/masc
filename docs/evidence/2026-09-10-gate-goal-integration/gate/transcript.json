@@ -1,0 +1,201 @@
+[
+  {
+    "id": "msg-1788997657879601-0",
+    "role": "user",
+    "content": "Synthetic Gate probe: request the supplied one-time file effect, wait for its durable approval, then finish this exact original request.",
+    "ts": 1788997657.879601,
+    "surface": {
+      "kind": "agent"
+    },
+    "speaker_authority": "owner",
+    "delivery_key": {
+      "kind": "operation",
+      "operation_id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb"
+    },
+    "transcript_slot": {
+      "kind": "accepted_user"
+    }
+  },
+  {
+    "id": "msg-1788997658145541-1",
+    "role": "system",
+    "content": "",
+    "ts": 1788997658.145541,
+    "approval_lifecycle": {
+      "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8",
+      "phase": "requested",
+      "tool_name": "tool_execute",
+      "call_summary": "python3 -c 'from pathlib import Path; p=Path('\\''gate-effect.txt'\\''); p.open('\\''a'\\'').write('\\''one real gate effect\\n'\\''); print('\\''gate-effect-written'\\'', str(p.resolve()))'"
+    },
+    "delivery_key": {
+      "kind": "approval_lifecycle",
+      "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8"
+    },
+    "transcript_slot": {
+      "kind": "approval_request"
+    }
+  },
+  {
+    "id": "msg-1788997658204273-2",
+    "role": "tool",
+    "content": "{\"file_path\": \"pre-gate-effect.txt\", \"content\": \"completed before Gate approval\\n\"}",
+    "ts": 1788997658.204273,
+    "tool_call_id": "completed-before-gate",
+    "execution_id": "exec-1788997657947-0001",
+    "tool_call_name": "Write",
+    "surface": {
+      "kind": "agent"
+    },
+    "turn_ref": "trace-1788997657847-00000#1",
+    "delivery_key": {
+      "kind": "operation",
+      "operation_id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb"
+    },
+    "transcript_slot": {
+      "kind": "tool_call",
+      "execution_id": "exec-1788997657947-0001",
+      "ordinal": 0
+    }
+  },
+  {
+    "id": "msg-1788997658204273-3",
+    "role": "tool",
+    "content": "{\"argv\": [\"python3\", \"-c\", \"from pathlib import Path; p=Path('gate-effect.txt'); p.open('a').write('one real gate effect\\\\n'); print('gate-effect-written', str(p.resolve()))\"], \"intent\": \"request_effect\"}",
+    "ts": 1788997658.204273,
+    "tool_call_id": "gate-effect-once",
+    "execution_id": "exec-1788997658150-0002",
+    "tool_call_name": "Execute",
+    "surface": {
+      "kind": "agent"
+    },
+    "turn_ref": "trace-1788997657847-00000#1",
+    "delivery_key": {
+      "kind": "operation",
+      "operation_id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb"
+    },
+    "transcript_slot": {
+      "kind": "tool_call",
+      "execution_id": "exec-1788997658150-0002",
+      "ordinal": 1
+    }
+  },
+  {
+    "id": "msg-1788997658305587-4",
+    "role": "system",
+    "content": "",
+    "ts": 1788997658.305587,
+    "approval_lifecycle": {
+      "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8",
+      "phase": "resolved_approved",
+      "tool_name": "tool_execute",
+      "call_summary": "python3 -c 'from pathlib import Path; p=Path('\\''gate-effect.txt'\\''); p.open('\\''a'\\'').write('\\''one real gate effect\\n'\\''); print('\\''gate-effect-written'\\'', str(p.resolve()))'"
+    },
+    "delivery_key": {
+      "kind": "approval_lifecycle",
+      "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8"
+    },
+    "transcript_slot": {
+      "kind": "approval_resolution"
+    }
+  },
+  {
+    "id": "msg-1788997659130331-6",
+    "role": "system",
+    "content": "",
+    "ts": 1788997659.130331,
+    "approval_lifecycle": {
+      "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8",
+      "phase": "replay_applied",
+      "tool_name": "tool_execute",
+      "call_summary": "python3 -c 'from pathlib import Path; p=Path('\\''gate-effect.txt'\\''); p.open('\\''a'\\'').write('\\''one real gate effect\\n'\\''); print('\\''gate-effect-written'\\'', str(p.resolve()))'",
+      "artifact_ref": {
+        "_blob": {
+          "sha256": "a343f905ded2e0c991335e70c5106cb6a505827a5c55ad48bd13d157d47e8f62",
+          "bytes": 655,
+          "mime": "text/plain",
+          "preview": ""
+        }
+      }
+    },
+    "delivery_key": {
+      "kind": "approval_lifecycle",
+      "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8"
+    },
+    "transcript_slot": {
+      "kind": "approval_replay"
+    }
+  },
+  {
+    "id": "msg-1788997659250628-7",
+    "role": "system",
+    "content": "",
+    "ts": 1788997659.250628,
+    "approval_lifecycle": {
+      "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8",
+      "phase": "continuation_recorded",
+      "tool_name": "tool_execute",
+      "call_summary": "python3 -c 'from pathlib import Path; p=Path('\\''gate-effect.txt'\\''); p.open('\\''a'\\'').write('\\''one real gate effect\\n'\\''); print('\\''gate-effect-written'\\'', str(p.resolve()))'"
+    },
+    "delivery_key": {
+      "kind": "approval_lifecycle",
+      "approval_id": "appr_01a08891-e61c-7000-9ee0-6e104f1c6aa8"
+    },
+    "transcript_slot": {
+      "kind": "approval_continuation"
+    }
+  },
+  {
+    "id": "msg-1788997659256274-8",
+    "role": "tool",
+    "content": "{\"sha256\": \"a343f905ded2e0c991335e70c5106cb6a505827a5c55ad48bd13d157d47e8f62\", \"offset\": 0}",
+    "ts": 1788997659.256274,
+    "tool_call_id": "read-approved-result",
+    "execution_id": "exec-1788997659184-0003",
+    "tool_call_name": "keeper_artifact_read",
+    "surface": {
+      "kind": "agent"
+    },
+    "turn_ref": "trace-1788997657847-00000#1",
+    "delivery_key": {
+      "kind": "operation_checkpoint",
+      "operation_id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb",
+      "trace_id": "trace-1788997657847-00000",
+      "turn_count": 1,
+      "sha256": "67605a482bac6d17965ddeb6557ef56f98113a5bc118868ba68d394d22710414"
+    },
+    "transcript_slot": {
+      "kind": "tool_call",
+      "execution_id": "exec-1788997659184-0003",
+      "ordinal": 0
+    }
+  },
+  {
+    "id": "msg-1788997659256834-9",
+    "role": "assistant",
+    "content": "Synthetic Gate continuation completed from its approved effect receipt.",
+    "ts": 1788997659.256834,
+    "surface": {
+      "kind": "agent"
+    },
+    "blocks": [
+      {
+        "t": "p",
+        "html": "Synthetic Gate continuation completed from its approved effect receipt."
+      }
+    ],
+    "turn_ref": "trace-1788997657847-00000#1",
+    "stream_lifecycle": [
+      "RUN_STARTED",
+      "TEXT_MESSAGE_START",
+      "TEXT_MESSAGE_END",
+      "RUN_FINISHED"
+    ],
+    "delivery_key": {
+      "kind": "operation",
+      "operation_id": "kmsg-2f90af6a07ecc5c8c89720041aa924fb"
+    },
+    "transcript_slot": {
+      "kind": "terminal_assistant"
+    }
+  }
+]

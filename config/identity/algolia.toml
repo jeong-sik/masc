@@ -1,0 +1,20 @@
+# Algolia's remote MCP server.
+#
+# Only the server is named. Its endpoints, the scopes it publishes and whether
+# a client has to be registered by hand come from the two well-known documents
+# it serves, so none of that can go stale here.
+#
+# Measured 2026-09-05: the protected-resource document answers at the path
+# RFC 9728 computes, the authorization server it names (https://dashboard.algolia.com)
+# offers S256 PKCE and dynamic client registration (HTTP 201), and an MCP initialize
+# is refused with 401. It publishes the 'public' scope.
+
+id = "algolia"
+label = "Algolia"
+mcp_url = "https://mcp.algolia.com/mcp"
+
+access_token_env = "ALGOLIA_ACCESS_TOKEN"
+expires_at_env = "ALGOLIA_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.algolia/refresh_token"
+
+renew_before_sec = 600

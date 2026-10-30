@@ -1,0 +1,10 @@
+{
+  "run": 34696911670,
+  "head": "c45f51353e18c92820120cd0369163e549aa4363",
+  "conclusion": "success",
+  "suite_cases": {
+    "test_fusion_decision": 4,
+    "test_fusion_wake": 17
+  },
+  "log_sha256": "7876bd18daf3836a9d065c23d084f33a9a521f59f722dd5c600a4935c010bc91"
+}

@@ -1,0 +1,41 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41124-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-declaration-editor.test.ts -t 'withdraws frozen'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41124-parent-sync-20261004/dashboard
+
+ ❯ src/components/lane-declaration-editor.test.ts (33 tests | 1 failed | 32 skipped) 41ms
+   ❯ Lane declaration editing through the status surface (33)
+     × withdraws frozen slice and selection before accepting another workspace with reused row IDs 40ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > withdraws frozen slice and selection before accepting another workspace with reused row IDs
+AssertionError: expected <strong></strong> to be null
+
+- Expected:
+null
+
++ Received:
+<strong>
+  Only A evidence
+</strong>
+
+ ❯ src/components/lane-declaration-editor.test.ts:107:51
+    105|     lane.fetchLaneAddons.mockReturnValueOnce(new Promise(resolve => { …
+    106|     act(() => observeWorkspace('/workspace-b'))
+    107|     expect(screen.queryByText('Only A evidence')).toBeNull()
+       |                                                   ^
+    108|     expect(screen.queryByRole('region', { name: 'Selected Lane event' …
+    109|     await act(async () => { finish({ ...snapshot, instances: [worker],…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 32 skipped (33)
+   Start at  02:39:54
+   Duration  1.27s (transform 40%, import 35%, environment 12%, setup 9%, tests 3%)
+
+ ELIFECYCLE  Test failed. See above for more details.

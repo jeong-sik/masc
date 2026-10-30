@@ -1,0 +1,10 @@
+# Default owner for this repository.
+# Add team/user owners as collaborators grow.
+* @jeong-sik
+
+# Documentation and scenario contracts
+docs/** @jeong-sik
+
+# CI and automation
+.github/workflows/** @jeong-sik
+scripts/** @jeong-sik

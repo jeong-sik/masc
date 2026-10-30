@@ -1,0 +1,44 @@
+measured_at 2026-10-23T00:36:25Z
+commit 8d62947eaf3679da5ed6d153ee78533931a00d36
+ego_browser ego-browser 0.6.0.16
+fixture served by python3 -m http.server on 127.0.0.1:18765 from this folder
+client ego_lite ego_task_space 0.6.0.16 154.0.8037.44
+tabs.list                0.14s {"ok":true,"data":[{"id":1,"index":0,"url":"chrome://newtab/","title":"새 탭","active":true}]}
+open_tab fixture         0.25s {"ok":true,"data":{"tabId":2,"action":"open_tab","created":true,"url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","active":true}}
+viewport {"documentId":"ce38f0bc69d301cf5ccc222027acd2b4","width":1611.0,"height":917.0,"scrollX":0.0,"scrollY":0.0}
+click #send              0.30s {"ok":true,"data":{"tabId":2,"action":"click","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+click_at #ctx secondary  0.17s {"ok":true,"data":{"tabId":2,"action":"click_at","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+double_click #dbl        0.28s {"ok":true,"data":{"tabId":2,"action":"double_click","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+hover #hov               0.97s {"ok":true,"data":{"tabId":2,"action":"hover","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+fill #name               0.12s {"ok":true,"data":{"tabId":2,"action":"fill","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+click #name (focus)      0.95s {"ok":true,"data":{"tabId":2,"action":"click","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+type_text                0.13s {"ok":true,"data":{"tabId":2,"action":"type_text","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+press_key Enter          0.17s {"ok":true,"data":{"tabId":2,"action":"press_key","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+select_option #month 10  0.11s {"ok":true,"data":{"tabId":2,"action":"select_option","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+scroll_at #pane 0,120    0.58s {"ok":true,"data":{"tabId":2,"action":"scroll_at","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","title":"ego input fixture","scrollX":0,"scrollY":0}}
+click #missing           0.12s {"ok":false,"error":"element_not_found","effectPhase":"not_started"}
+click_at stale document  0.12s {"ok":false,"error":"observed_viewport_changed","effectPhase":"not_started"}
+drag (not served)        0.00s refused by the lane table before reaching ego
+page event log (14 lines):
+  click send 80,40 trusted=true
+  contextmenu ctx 261,41
+  dblclick dbl trusted=true
+  mouseenter hov trusted=true
+  keydown   trusted=true
+  keydown w trusted=true
+  keydown o trusted=true
+  keydown r trusted=true
+  keydown l trusted=true
+  keydown d trusted=true
+  keydown Enter trusted=true
+  submit name=héllo world
+  change month=10
+  scroll pane top=120
+follow_link (scene node) 0.12s {"ok":true,"data":{"tabId":2,"action":"follow_link","urlBefore":"http://127.0.0.1:18765/fixture.html","url":"http://127.0.0.1:18765/fixture.html","destinationUrl":"http://127.0.0.1:18765/next.html","navigationSource":{"url":"http://127.0.0.1:18765/fixture.html","documentId":"ce38f0bc69d301cf5ccc2220...
+page.read after the link 0.11s {"ok":true,"data":{"tabId":2,"url":"http://127.0.0.1:18765/next.html","title":"ego input fixture next","text":"arrived by the link","chars":19,"truncated":false}}
+close_tab                0.16s {"ok":true,"data":{"tabId":2,"action":"close_tab","closed":true}}
+retire receipt
+clients left 0
+run returned
+spaces left with this name: 0
+

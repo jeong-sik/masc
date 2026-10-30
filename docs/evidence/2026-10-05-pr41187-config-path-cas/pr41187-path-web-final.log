@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41187-config-path-cas-20261005/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  406 passed (406)
+   Start at  06:51:19
+   Duration  5.77s (tests 56%, import 16%, transform 12%, environment 9%, setup 7%)
+
+    Isolate  4 workers spawned · ~210ms startup each (spawn + environment, per file)
+             at least ~630ms faster with isolate: false — reuses workers across files instead of one per file
+

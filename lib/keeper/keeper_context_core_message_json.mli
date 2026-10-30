@@ -1,0 +1,28 @@
+val role_to_string : Agent_core.Types.role -> string
+val role_of_string_opt : string -> Agent_core.Types.role option
+
+val content_blocks_to_json :
+  Agent_core.Types.content_block list -> Yojson.Safe.t
+
+val content_blocks_of_json :
+  Yojson.Safe.t -> Agent_core.Types.content_block list option
+
+val string_field_opt : string -> string option -> (string * Yojson.Safe.t) list
+(** Missing metadata is empty. Present metadata must be an object; malformed
+    metadata raises [Invalid_argument] instead of erasing source provenance. *)
+val metadata_of_json : Yojson.Safe.t -> (string * Yojson.Safe.t) list
+val message_to_json : Agent_core.Types.message -> Yojson.Safe.t
+
+(** Decode a persisted keeper message. Only canonical [content_blocks] are
+    accepted; flat legacy [content] rows raise [Invalid_argument]. Metadata is
+    restored exactly, including typed reasoning-source provenance. *)
+val message_of_json : Yojson.Safe.t -> Agent_core.Types.message
+
+val text_of_history_jsonl_json : Yojson.Safe.t -> string
+
+val message_measurer : unit -> (Agent_core.Types.message -> int)
+(** A measurer of how many bytes {!message_to_json} serializes a message to,
+    as [Yojson.Safe.to_string] would count them, without building the string.
+    Each call returns a measurer owning one buffer it reuses, so it belongs to
+    one walk over a history and is not shared between fibers. Measuring a
+    single message wants one too: the buffer costs more than one string. *)

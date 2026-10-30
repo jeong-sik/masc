@@ -1,0 +1,29 @@
+{
+  "checks": [
+    "baseline misses radio label and ARIA menu",
+    "hidden radio is exposed through its associated label",
+    "observed label activates the correct hidden radio",
+    "textarea inside ordinary label remains editable",
+    "onclick container retains independently editable input",
+    "onclick container retains nested button once",
+    "combobox retains nested editable input",
+    "nested input can be filled through its observed reference",
+    "unassociated label remains text",
+    "ARIA radio and mixed checkbox are observed controls",
+    "ARIA radio click updates the observed selection",
+    "Locked card is visibly disabled",
+    "Locked card rejects before activation",
+    "Locked action is visibly disabled",
+    "Locked action rejects before activation",
+    "Locked external label is visibly disabled",
+    "Locked external label rejects before activation",
+    "disabled controls do not run handlers",
+    "declared menuitem activates from its observed reference",
+    "explicit inline handler is an observed control",
+    "native summary activates its details",
+    "elements exposes selected native label and ARIA state"
+  ],
+  "scope": "Chromium fixture executes worktree shared DOM scripts; not deployed MASC or live finance page",
+  "browser_version": "147.0.7727.15",
+  "source_base": "c112b2030652a5a25360f5d5322f8dc6da99c598"
+}

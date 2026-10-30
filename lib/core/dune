@@ -1,0 +1,62 @@
+(include_subdirs no)
+
+(library
+ (name masc_core)
+ (public_name masc.masc_core)
+ (wrapped false)
+ ; Closed variants must remain exhaustive; unused declarations are build errors.
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (modules
+  atomic_util
+  json_util
+  safe_ops
+  common
+  runtime_params
+  frontmatter
+  exec_buffer
+  validation
+  failure_observation
+  cross_context_mutex
+  eio_guard
+  pool_lane
+  pool_wait
+  minor_heap
+  executor_pool_submission
+  executor_pool_ref
+  domain_budget
+  domain_pool
+  domain_pool_ref
+  pool_work
+  systhread_host
+  scheduler_lag
+  masc_runtime_events
+  system_error_class
+  executable_path
+  safe_identifier
+  keeper_runtime_root_entry
+  list_util
+  set_util
+  read_drop_reason
+  eval_tool_selector
+  heap_roots
+  alloc_profile
+  file_version_cache
+  high_water_marks)
+ (libraries
+  (re_export masc_string_util)
+  shared_types
+  yojson
+  unix
+  re
+  re.pcre
+  eio
+  eio.unix
+  eio_main
+  mtime
+  mtime.clock
+  time_compat
+  fs_compat
+  masc_log
+  otel_metric_store
+  runtime_events))

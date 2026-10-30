@@ -1,0 +1,1881 @@
+(** Keeper task outcome and response-finalization regression tests. *)
+
+open Alcotest
+
+module Task = Masc.Keeper_tool_task_runtime
+module Response_text = Masc.Keeper_agent_run_response_text
+module U = Yojson.Safe.Util
+(* Tool_result lives in the leaf [masc_tool_types] lib (wrapped false), so
+   it is referenced bare — not under [Masc.] — matching existing tests. *)
+(* Keeper_tool_outcome lives in the [keeper_metrics] lib (wrapped false), so it
+   is referenced bare — not under [Masc.] — matching the bare [Tool_result]. *)
+module Outcome = Keeper_tool_outcome
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_task_create_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let keeper_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "task-create-test"
+        ; "trace_id", `String "trace-task-create-test"
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
+
+let test_task_create_without_goal_id_is_unscoped () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       let payload =
+         Task.handle_keeper_task_tool
+           ~config
+           ~meta
+           ~name:"keeper_task_create"
+           ~args:
+             (`Assoc
+               [ "title", `String "Unscoped task"
+               ; "description", `String "Should not require a disambiguating goal_id"
+               ; "priority", `Int 3
+               ])
+       in
+       let json = Yojson.Safe.from_string payload in
+       check bool "task create succeeds" true (json |> U.member "ok" |> U.to_bool);
+       check bool "task create returns null goal_id" true
+         (json |> U.member "goal_id" = `Null);
+       match Masc.Workspace.get_tasks_raw config with
+       | [ _task ] -> ()
+       | tasks ->
+           failf "expected exactly one persisted task, got %d" (List.length tasks))
+
+let test_keeper_broadcast_forwards_typed_cache_signal () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name:meta.name
+            ~capabilities:[ "test" ]
+            ());
+       let subject = Masc.Workspace.resolve_agent_name config meta.name in
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Terminal cache fixture"
+            ~priority:1
+            ~description:"");
+       ignore (Masc.Workspace.claim_task config ~agent_name:subject ~task_id:"task-001");
+       let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+       let terminal_backlog =
+         { backlog with
+           tasks =
+             List.map
+               (fun (task : Masc_domain.task) ->
+                  if String.equal task.id "task-001"
+                  then
+                    { task with
+                      task_status =
+                        Masc_domain.Done
+                          { assignee = subject
+                          ; completed_at = "2026-08-22T00:00:00Z"
+                          ; notes = Some "keeper broadcast cache fixture"
+                          }
+                    }
+                  else task)
+               backlog.tasks
+         }
+       in
+       Workspace_backlog.write_backlog config terminal_backlog;
+       let agent_file =
+         Filename.concat
+           (Masc.Workspace.agents_dir config)
+           (Masc.Workspace.safe_filename subject ^ ".json")
+       in
+       let stale_agent =
+         match
+           Masc.Workspace.read_json config agent_file
+           |> Masc_domain.agent_of_yojson
+         with
+         | Ok agent ->
+           { agent with
+             status = Masc_domain.Busy
+           ; current_task = Some "task-001"
+           }
+         | Error detail -> fail ("fixture agent decode failed: " ^ detail)
+       in
+       Masc.Workspace.write_json
+         config
+         agent_file
+         (Masc_domain.agent_to_yojson stale_agent);
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_broadcast"
+           ~args:
+             (`Assoc
+               [ "content", `String "typed stale cache observation"
+               ; "task_cache_subject_agent", `String subject
+               ; "task_cache_task_id", `String "task-001"
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () -> fail "keeper broadcast was deferred"
+        | Tool_result.Failed _ ->
+          fail ("keeper broadcast failed: " ^ execution.raw_output));
+       check bool
+         "keeper surface persists canonical cache invalidation"
+         true
+         (String_util.contains_substring
+            execution.raw_output
+            "[cache_invalidated]");
+       let current_task =
+         Option.bind
+           (Masc.Workspace.get_agents_raw config
+            |> List.find_opt (fun (agent : Masc_domain.agent) ->
+              String.equal agent.name subject))
+           (fun agent -> agent.current_task)
+       in
+       check (option string) "keeper surface clears exact stale cache" None current_task)
+
+let test_keeper_broadcast_rejects_partial_typed_cache_signal () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta:(keeper_meta ())
+           ~name:"keeper_broadcast"
+           ~args:
+             (`Assoc
+               [ "content", `String "partial typed signal"
+               ; "task_cache_subject_agent", `String "subject"
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Failed Tool_result.Policy_rejection -> ()
+        | Tool_result.Failed _ -> fail "partial pair used the wrong failure class"
+        | Tool_result.Completed () | Tool_result.Deferred () ->
+          fail "partial typed cache pair was accepted");
+       check bool
+         "partial pair error names both fields"
+         true
+         (String_util.contains_substring
+            execution.raw_output
+            "task_cache_subject_agent and task_cache_task_id"))
+
+(* A page is not the backlog. The sort keys on priority alone and is stable, so
+   within one priority the newest task sits last and falls off [limit] first.
+   Eight tasks registered at priority 2 and 3 stayed invisible across nineteen
+   todo listings because the response gave no sign it had cut anything (#29101). *)
+let test_tasks_list_completed_census_omits_receipts () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore (Masc.Workspace.add_task config ~title:"completed census"
+                 ~priority:3 ~description:"body");
+       let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+       let seed = List.hd backlog.tasks in
+       let notes = String.make 4096 'x' in
+       let tasks = List.init 101 (fun index ->
+         { seed with id = Printf.sprintf "task-%03d" index;
+           task_status = Masc_domain.Done
+             { assignee = "worker"; completed_at = "2026-10-01T18:00:00Z";
+               notes = Some notes } }) in
+       Workspace_backlog.write_backlog config { backlog with tasks };
+       let page fields =
+         Task.handle_keeper_task_tool_with_outcome ~config ~meta:(keeper_meta ())
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc ([ "status", `String "done"; "limit", `Int 100 ] @ fields))
+         |> fun execution -> Option.get execution.data
+       in
+       let first = page [] in
+       let second = page [ "cursor", U.(first |> member "next_cursor") ] in
+       let rows = U.(first |> member "snapshot" |> to_list)
+                  @ U.(second |> member "snapshot" |> to_list) in
+       check int "all completed tasks can be counted" 101 (List.length rows);
+       List.iter (fun row ->
+         check bool "receipt body is absent" false (List.mem "notes" (U.keys row));
+         check string "completion timestamp is retained" "2026-10-01T18:00:00Z"
+           U.(row |> member "completed_at" |> to_string)) rows;
+       let full = page [ "projection", `String "full" ] in
+       let first_full = List.hd U.(full |> member "snapshot" |> to_list) in
+       check string "full projection preserves the receipt" notes
+         U.(first_full |> member "notes" |> to_string);
+       Printf.printf "completed census: compact=%d bytes, full first page=%d bytes\n%!"
+         (String.length (Yojson.Safe.to_string first)
+          + String.length (Yojson.Safe.to_string second))
+         (String.length (Yojson.Safe.to_string full)))
+;;
+
+let test_tasks_list_reports_truncation () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       for index = 1 to 4 do
+         ignore
+           (Task.handle_keeper_task_tool
+              ~config
+              ~meta
+              ~name:"keeper_task_create"
+              ~args:
+                (`Assoc
+                  [ "title", `String (Printf.sprintf "task %d" index)
+                  ; "description", `String "truncation fixture"
+                  ; "priority", `Int 3
+                  ]))
+       done;
+       let list_with_limit limit =
+         let execution =
+           Task.handle_keeper_task_tool_with_outcome
+             ~config
+             ~meta
+             ~name:"keeper_tasks_list"
+             ~args:(`Assoc [ "limit", `Int limit ])
+         in
+         match execution.data with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let cut = list_with_limit 2 in
+       check int "matching count is the whole backlog" 4 U.(cut |> member "matching_count" |> to_int);
+       check int "returned count is the page" 2 U.(cut |> member "returned_count" |> to_int);
+       check bool "cut page says so" true U.(cut |> member "truncated" |> to_bool);
+       check int "page holds the limit" 2 U.(cut |> member "snapshot" |> to_list |> List.length);
+       let whole = list_with_limit 50 in
+       check int "whole backlog matches" 4 U.(whole |> member "matching_count" |> to_int);
+       check bool "whole backlog is not truncated" false U.(whole |> member "truncated" |> to_bool);
+       (* Re-issuing the truncated page's revision must answer [unchanged]
+          without the row statistics: a response that carries zero rows and
+          still said `truncated:true, returned_count:2` contradicted itself,
+          and models resolved the contradiction by repeating the identical
+          call (211 back-to-back identical pairs on 2026-09-01). *)
+       let unchanged_execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:
+             (`Assoc
+               [ "limit", `Int 2
+               ; "if_revision", `String U.(cut |> member "revision" |> to_string)
+               ])
+       in
+       let unchanged_cut =
+         match unchanged_execution.data with
+         | Some data -> data
+         | None -> fail "expected producer-owned unchanged response"
+       in
+       check string
+         "truncated page revision answers unchanged"
+         "unchanged"
+         U.(unchanged_cut |> member "kind" |> to_string);
+       List.iter
+         (fun field ->
+            check
+              bool
+              (Printf.sprintf "unchanged carries no %s" field)
+              false
+              (List.mem field (U.keys unchanged_cut)))
+         [ "matching_count"; "returned_count"; "truncated"; "next_cursor" ];
+       (* Backlog movement beyond the page must break the revision. The new
+          task sorts behind the two-row page (higher priority number), so the
+          page bytes are identical — before matching_count joined the hash,
+          this re-issue answered [unchanged] and a polling caller never
+          learned the backlog had grown. *)
+       ignore
+         (Task.handle_keeper_task_tool
+            ~config
+            ~meta
+            ~name:"keeper_task_create"
+            ~args:
+              (`Assoc
+                [ "title", `String "beyond the page"
+                ; "description", `String "truncation fixture"
+                ; "priority", `Int 9
+                ]));
+       let grown =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args:
+                (`Assoc
+                  [ "limit", `Int 2
+                  ; "if_revision", `String U.(cut |> member "revision" |> to_string)
+                  ]))
+             .data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot after backlog growth"
+       in
+       check string
+         "backlog growth beyond the page breaks the revision"
+         "snapshot"
+         U.(grown |> member "kind" |> to_string);
+       check int
+         "fresh snapshot reports the grown backlog"
+         5
+         U.(grown |> member "matching_count" |> to_int);
+       check int
+         "page rows are unchanged in content"
+         2
+         U.(grown |> member "snapshot" |> to_list |> List.length))
+;;
+
+(* #29101: the page is claim order -- oldest-first within a priority -- so the
+   newest task falls off [limit] first. The response must name it anyway, or a
+   caller reading the first page never learns the task exists. *)
+let test_tasks_list_names_the_newest_tasks () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       for index = 1 to 4 do
+         ignore
+           (Task.handle_keeper_task_tool
+              ~config
+              ~meta
+              ~name:"keeper_task_create"
+              ~args:
+                (`Assoc
+                  [ "title", `String (Printf.sprintf "task %d" index)
+                  ; "description", `String "newest fixture"
+                  ; "priority", `Int 3
+                  ]))
+       done;
+       let data =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args:(`Assoc [ "limit", `Int 2 ]))
+             .data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let ids_of field =
+         U.(data |> member field |> to_list
+            |> List.map (fun row -> U.(row |> member "id" |> to_string)))
+       in
+       let page = ids_of "snapshot" in
+       let newest = ids_of "new_tasks" in
+       check int "the page holds the limit" 2 (List.length page);
+       (* The page is the two oldest; the newest window names only the two
+          rows the page does not carry, so no row travels twice. *)
+       check int "the newest window names the off-page tasks" 2 (List.length newest);
+       check int "new_tasks_count agrees" 2 U.(data |> member "new_tasks_count" |> to_int);
+       check bool
+         "no newest row repeats a page row"
+         false
+         (List.exists (fun id -> List.mem id page) newest);
+       (* Together the two windows describe all four tasks. *)
+       check int
+         "both windows describe the same backlog"
+         4
+         (List.length (List.sort_uniq String.compare (page @ newest))))
+;;
+
+(* Paging walks the whole backlog in a fixed order without a row repeating or
+   vanishing between pages, the last page says so by carrying no cursor, and a
+   cursor is refused -- never silently reset to page one -- when it is not one
+   this tool issued or was issued under another filter. *)
+let test_tasks_list_pages_with_cursor () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       List.iter
+         (fun (title, priority) ->
+            ignore
+              (Task.handle_keeper_task_tool
+                 ~config
+                 ~meta
+                 ~name:"keeper_task_create"
+                 ~args:
+                   (`Assoc
+                     [ "title", `String title
+                     ; "description", `String "cursor fixture"
+                     ; "priority", `Int priority
+                     ])))
+         [ "a", 3; "b", 2; "c", 3; "d", 1; "e", 2 ];
+       let list_exec ?cursor ?status limit =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:
+             (`Assoc
+               ([ "limit", `Int limit ]
+                @ (match cursor with Some c -> [ "cursor", `String c ] | None -> [])
+                @ (match status with Some st -> [ "status", `String st ] | None -> [])))
+       in
+       let page ?cursor limit =
+         match (list_exec ?cursor limit).data with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let ids data =
+         U.(data |> member "snapshot" |> to_list |> List.map (fun row -> member "id" row |> to_string))
+       in
+       let cut data = U.(data |> member "truncated" |> to_bool) in
+       let next data = U.(data |> member "next_cursor" |> to_string) in
+       let page1 = page 2 in
+       check bool "page 1 is cut" true (cut page1);
+       let page2 = page ~cursor:(next page1) 2 in
+       check bool "page 2 is cut" true (cut page2);
+       let page3 = page ~cursor:(next page2) 2 in
+       List.iter
+         (fun data ->
+           check int "continuations do not replay the discovery window" 0
+             U.(data |> member "new_tasks_count" |> to_int);
+           check int "continuations carry no extra task rows" 0
+             U.(data |> member "new_tasks" |> to_list |> List.length))
+         [ page2; page3 ];
+       check bool "the last page is not cut" false (cut page3);
+       check bool "the last page carries no cursor" false
+         (List.mem "next_cursor" (U.keys page3));
+       check int "the last page holds the remainder" 1 (List.length (ids page3));
+       let walked = ids page1 @ ids page2 @ ids page3 in
+       check int "every row exactly once" 5 (List.length (List.sort_uniq compare walked));
+       check int "matching_count is the whole backlog on every page" 5
+         U.(page2 |> member "matching_count" |> to_int);
+       check bool "a later page has its own revision" false
+         (String.equal U.(page1 |> member "revision" |> to_string)
+            U.(page2 |> member "revision" |> to_string));
+       (* The order is priority first: d (1), then b and e (2), then a and c
+          (3); within a priority created_at then id decide. *)
+       let titles =
+         U.(page1 |> member "snapshot" |> to_list |> List.map (fun row -> member "title" row |> to_string))
+       in
+       check (list string) "page 1 is the two highest priorities" [ "d"; "b" ] titles;
+       let rejected label execution expected_kind =
+         (match execution.Masc.Keeper_tool_execution.disposition with
+          | Tool_result.Failed Tool_result.Policy_rejection -> ()
+          | Tool_result.Failed other ->
+            fail (label ^ ": wrong class " ^ Tool_result.tool_failure_class_to_string other)
+          | Tool_result.Completed () | Tool_result.Deferred () ->
+            fail (label ^ ": a bad cursor must not return a page"));
+         let payload =
+           Yojson.Safe.from_string execution.Masc.Keeper_tool_execution.raw_output
+         in
+         check string (label ^ " names the field") "cursor" U.(payload |> member "field" |> to_string);
+         check string (label ^ " names the kind") expected_kind
+           U.(payload |> member "error_kind" |> to_string)
+       in
+       rejected "another filter" (list_exec ~cursor:(next page1) ~status:"todo" 2)
+         "cursor_filter_mismatch";
+       rejected "a string this tool never issued" (list_exec ~cursor:"not-a-cursor" 2)
+         "cursor_unparseable";
+       rejected "a non-string cursor"
+         (Task.handle_keeper_task_tool_with_outcome
+            ~config ~meta ~name:"keeper_tasks_list"
+            ~args:(`Assoc [ "limit", `Int 2; "cursor", `Int 7 ]))
+         "cursor_unparseable")
+;;
+
+(* keeper_tasks_list reads status once. A value outside the six, the empty
+   string and a non-string are refused with the accepted list; none of them
+   comes back as an empty page. A cursor whose filter names a status no
+   constructor spells is one this server never issued, so it is unparseable
+   rather than a cursor from another filter. *)
+let test_tasks_list_refuses_a_status_it_does_not_know () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       List.iter
+         (fun title ->
+            ignore
+              (Task.handle_keeper_task_tool
+                 ~config
+                 ~meta
+                 ~name:"keeper_task_create"
+                 ~args:
+                   (`Assoc
+                     [ "title", `String title
+                     ; "description", `String "status fixture"
+                     ; "priority", `Int 2
+                     ])))
+         [ "a"; "b"; "c" ];
+       let list_exec args =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc args)
+       in
+       let refused label execution =
+         (match execution.Masc.Keeper_tool_execution.disposition with
+          | Tool_result.Failed Tool_result.Policy_rejection -> ()
+          | Tool_result.Failed other ->
+            fail (label ^ ": wrong class " ^ Tool_result.tool_failure_class_to_string other)
+          | Tool_result.Completed () | Tool_result.Deferred () ->
+            fail (label ^ ": must not return a page"));
+         Yojson.Safe.from_string execution.Masc.Keeper_tool_execution.raw_output
+       in
+       let error_of label execution =
+         U.(refused label execution |> member "error" |> to_string)
+       in
+       let accepted =
+         "todo, claimed, in_progress, awaiting_verification, done, cancelled"
+       in
+       check string "a misspelled status"
+         (Printf.sprintf "status must be one of %s, got \"in-progress\"" accepted)
+         (error_of "a misspelled status" (list_exec [ "status", `String "in-progress" ]));
+       check string "the empty string"
+         (Printf.sprintf "status must be one of %s, got \"\"" accepted)
+         (error_of "the empty string" (list_exec [ "status", `String "" ]));
+       check string "a non-string"
+         "status must be a string"
+         (error_of "a non-string" (list_exec [ "status", `Int 1 ]));
+       let call cursor =
+         list_exec [ "status", `String "todo"; "limit", `Int 1; "cursor", `String cursor ]
+       in
+       let issued =
+         match (list_exec [ "status", `String "todo"; "limit", `Int 1 ]).data with
+         | Some data -> U.(data |> member "next_cursor" |> to_string)
+         | None -> fail "expected a first page"
+       in
+       (match (call issued).Masc.Keeper_tool_execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Failed _ | Tool_result.Deferred () ->
+          fail "the issued cursor must read back");
+       let replace key value = function
+         | `Assoc fields ->
+           `Assoc (List.map (fun (k, v) -> if String.equal k key then k, value else k, v) fields)
+         | _ -> fail ("no object around " ^ key)
+       in
+       let forged =
+         match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet issued with
+         | Error (`Msg message) -> fail message
+         | Ok text ->
+           let json = Yojson.Safe.from_string text in
+           let filter = replace "lifecycle"
+               (`Assoc ["kind", `String "status"; "status", `String "in-progress"])
+               (U.member "filter" json) in
+           Base64.encode_string
+             ~pad:false
+             ~alphabet:Base64.uri_safe_alphabet
+             (Yojson.Safe.to_string (replace "filter" filter json))
+       in
+       let payload = refused "a cursor naming an unknown status" (call forged) in
+       check string "the cursor is the field" "cursor"
+         U.(payload |> member "field" |> to_string);
+       check string "an unknown status is unparseable" "cursor_unparseable"
+         U.(payload |> member "error_kind" |> to_string);
+       let old_shape = match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet issued with
+         | Error (`Msg message) -> fail message
+         | Ok text ->
+           let json = Yojson.Safe.from_string text in
+           let filter = U.member "filter" json in
+           let old_filter = `Assoc ["status", `Null; "include_done", `Bool false;
+             "projection", U.member "projection" filter; "selection", U.member "selection" filter] in
+           Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+             (Yojson.Safe.to_string (replace "filter" old_filter json)) in
+       check string "an old opaque filter is refused rather than reinterpreted" "cursor_unparseable"
+         U.(refused "an old cursor shape" (call old_shape) |> member "error_kind" |> to_string))
+;;
+
+let test_tasks_list_targeted_queries () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore (Masc.Workspace.add_task config ~title:"seed" ~priority:3 ~description:"");
+       let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+       let seed = List.hd backlog.tasks in
+       let working assignee = Masc_domain.InProgress
+         { assignee; started_at = "2026-10-01T18:00:00Z" } in
+       let tasks =
+         [ { seed with id = "a"; title = "Release CI"; task_status = working "alice" }
+         ; { seed with id = "b"; title = "Other"; description = "release contract";
+             task_status = working "alice" }
+         ; { seed with id = "c"; title = "Release docs"; task_status = working "bob" }
+         ; { seed with id = "d"; title = "Release done";
+             task_status = Masc_domain.Done { assignee = "alice";
+               completed_at = "2026-10-01T19:00:00Z"; notes = Some "receipt" } }
+         ; { seed with id = "e"; title = "Cancelled work";
+             task_status = Masc_domain.Cancelled { cancelled_by = "alice";
+               cancelled_at = "2026-10-01T19:00:00Z"; reason = Some "withdrawn" } }
+         ; { seed with id = "f"; title = "Unclaimed work"; task_status = Masc_domain.Todo }
+         ; { seed with id = "g"; title = "Claimed work";
+             task_status = Masc_domain.Claimed { assignee = "alice";
+               claimed_at = "2026-10-01T18:00:00Z" } }
+         ; { seed with id = "h"; title = "Submitted work";
+             task_status = Masc_domain.AwaitingVerification { assignee = "alice";
+               started_at = "2026-10-01T18:00:00Z"; submitted_at = "2026-10-01T18:30:00Z";
+               verification_id = "verification-h" } }
+         ] in
+       Workspace_backlog.write_backlog config { backlog with tasks };
+       Workspace_goal_index.write_goal_task_links config [ "goal-a", [ "a"; "b"; "d" ] ];
+       let execute fields = Task.handle_keeper_task_tool_with_outcome
+         ~config ~meta:(keeper_meta ()) ~name:"keeper_tasks_list" ~args:(`Assoc fields) in
+       let page fields =
+         let execution = execute fields in
+         (match execution.disposition with
+          | Tool_result.Completed () -> ()
+          | Tool_result.Deferred () | Tool_result.Failed _ -> fail execution.raw_output);
+         Option.get execution.data
+       in
+       let ids data = U.(data |> member "snapshot" |> to_list
+         |> List.map (fun row -> row |> member "id" |> to_string)) in
+       let filters = [ "assignee", `String "alice"; "goal_id", `String "goal-a";
+                       "query", `String "RELEASE"; "limit", `Int 1 ] in
+       let first = page filters in
+       check (list string) "AND filters select the first matching task" [ "a" ] (ids first);
+       check int "matching count reflects all filters" 2
+         U.(first |> member "matching_count" |> to_int);
+       let newest_ids = U.(first |> member "new_tasks" |> to_list
+         |> List.map (fun row -> row |> member "id" |> to_string)) in
+       check (list string) "discovery uses the same filters" [ "b" ] newest_ids;
+       let cursor = U.(first |> member "next_cursor") in
+       let second = page (("cursor", cursor) :: filters) in
+       check (list string) "cursor reaches description match" [ "b" ] (ids second);
+       let selected = page [ "task_ids", `List [ `String "d"; `String "a" ];
+                             "include_done", `Bool true; "projection", `String "full" ] in
+       check (list string) "known IDs batch full contracts including completion" [ "a"; "d" ] (ids selected);
+       let exact = ["task_ids", `List (List.map (fun id -> `String id) ["a";"d";"e";"f";"g";"h"]);
+                    "projection", `String "full"] in
+       let all = page exact in
+       check (list string) "exact IDs survive every lifecycle transition by default"
+         ["a";"d";"e";"f";"g";"h"] (ids all);
+       check (list string) "known Task lookup reads all six persisted states"
+         ["in_progress";"done";"cancelled";"todo";"claimed";"awaiting_verification"]
+         U.(all |> member "snapshot" |> to_list
+            |> List.map (fun row -> row |> member "status" |> to_string));
+       check (list string) "general discovery remains active-only" ["a";"b";"c";"f";"g";"h"]
+         (ids (page []));
+       check (list string) "explicit false still excludes done and cancelled" ["a";"f";"g";"h"]
+         (ids (page (("include_done", `Bool false) :: exact)));
+       check (list string) "explicit true includes done and excludes cancelled" ["a";"d";"f";"g";"h"]
+         (ids (page (("include_done", `Bool true) :: exact)));
+       check (list string) "explicit null status keeps the active default" ["a";"f";"g";"h"]
+         (ids (page (("status", `Null) :: exact)));
+       List.iter (fun (status,id) -> check (list string) "an explicit state overrides the flag"
+           [id] (ids (page (["status", `String status; "include_done", `Bool false] @ exact))))
+         ["in_progress","a";"done","d";"cancelled","e";"todo","f";
+          "claimed","g";"awaiting_verification","h"];
+       let exact_revision = U.(all |> member "revision") in
+       check string "repeated exact lookup can acknowledge the same revision" "unchanged"
+         U.(page (("if_revision", exact_revision) :: exact) |> member "kind" |> to_string);
+       check string "a different resolved lifecycle cannot inherit that revision" "snapshot"
+         U.(page (["if_revision", exact_revision; "include_done", `Bool true] @ exact)
+            |> member "kind" |> to_string);
+       let first_exact = page (("limit", `Int 1) :: exact) in
+       let exact_cursor = U.(first_exact |> member "next_cursor") in
+       let done_page = page (["limit", `Int 1; "cursor", exact_cursor] @ exact) in
+       check (list string) "exact lookup cursor reaches the completed Task" ["d"] (ids done_page);
+       check (list string) "the following exact page retains the cancelled Task" ["e"]
+         (ids (page (["limit", `Int 1; "cursor", U.member "next_cursor" done_page] @ exact)));
+       List.iter (fun include_done ->
+         match (execute (["limit", `Int 1; "cursor", exact_cursor;
+                           "include_done", `Bool include_done] @ exact)).disposition with
+         | Tool_result.Failed Tool_result.Policy_rejection -> ()
+         | _ -> fail "cursor crossed into another resolved lifecycle") [true;false];
+       let changed = execute [ "cursor", cursor; "query", `String "RELEASE" ] in
+       (match changed.disposition with
+        | Tool_result.Failed Tool_result.Policy_rejection -> ()
+        | _ -> fail "changed cursor selection was not rejected");
+       let revision = U.(first |> member "revision") in
+       let same = page (("if_revision", revision) :: filters) in
+       check string "same filtered result is unchanged" "unchanged"
+         U.(same |> member "kind" |> to_string);
+       let different_selection = page [ "task_ids", `List [ `String "a" ];
+                                        "limit", `Int 1; "if_revision", revision ] in
+       check string "another selection cannot inherit the revision" "snapshot"
+         U.(different_selection |> member "kind" |> to_string);
+       List.iter (fun field ->
+         match (execute [ field ]).disposition with
+         | Tool_result.Failed Tool_result.Policy_rejection -> ()
+         | _ -> fail "invalid selection was silently ignored")
+         [ "task_ids", `List []; "task_ids", `List [ `Int 1 ];
+           "assignee", `Int 1; "goal_id", `String " "; "query", `String "";
+           "include_done", `Null; "include_done", `String "true"; "include_done", `Int 1 ];
+       check (list string) "unlinked Goal has no matches" []
+         (ids (page [ "goal_id", `String "unknown" ]));
+       let path = Workspace_goal_index.goal_task_links_path config in
+       let channel = open_out path in
+       output_string channel "corrupt registry";
+       close_out channel;
+       (match (execute [ "goal_id", `String "goal-a" ]).disposition with
+        | Tool_result.Failed Tool_result.Runtime_failure -> ()
+        | _ -> fail "unreadable Goal registry was presented as an empty selection"))
+;;
+
+let test_tasks_list_returns_snapshot_and_unchanged () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc [])
+       in
+       let snapshot =
+         match execution.data with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       check string "snapshot kind" "snapshot" U.(snapshot |> member "kind" |> to_string);
+       let revision = U.(snapshot |> member "revision" |> to_string) in
+       check int
+         "empty typed task list"
+         0
+         U.(snapshot |> member "snapshot" |> to_list |> List.length);
+       check string
+         "raw rendering derives from snapshot"
+         (Yojson.Safe.to_string snapshot)
+         execution.raw_output;
+       let unchanged =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc [ "if_revision", `String revision ])
+       in
+       let unchanged_data =
+         match unchanged.data with
+         | Some data -> data
+         | None -> fail "expected producer-owned unchanged response"
+       in
+       check string
+         "unchanged kind"
+         "unchanged"
+         U.(unchanged_data |> member "kind" |> to_string);
+       check string
+         "unchanged revision"
+         revision
+         U.(unchanged_data |> member "revision" |> to_string);
+       check string
+         "raw rendering derives from unchanged response"
+         (Yojson.Safe.to_string unchanged_data)
+         unchanged.raw_output;
+       (* Exact key sets, not member-null probes: the snapshot keeps the row
+          statistics, the unchanged variant must not carry them (it has no
+          rows for them to describe). *)
+       let sorted_keys json = List.sort String.compare (U.keys json) in
+       check
+         (list string)
+         "snapshot key set"
+         [ "backlog_authority"
+         ; "degraded"
+         ; "kind"
+         ; "matching_count"
+         ; "new_tasks"
+         ; "new_tasks_count"
+         ; "projection"
+         ; "returned_count"
+         ; "revision"
+         ; "snapshot"
+         ; "truncated"
+         ]
+         (sorted_keys snapshot);
+       check
+         (list string)
+         "unchanged key set"
+         [ "backlog_authority"; "degraded"; "kind"; "projection"; "revision" ]
+         (sorted_keys unchanged_data);
+       check string
+         "unchanged backlog authority stays primary"
+         "primary"
+         U.(unchanged_data |> member "backlog_authority" |> to_string);
+       check bool
+         "unchanged is not degraded"
+         false
+         U.(unchanged_data |> member "degraded" |> to_bool))
+
+let test_tasks_list_projection_compact_by_default_full_on_request () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       ignore
+         (Task.handle_keeper_task_tool
+            ~config
+            ~meta
+            ~name:"keeper_task_create"
+            ~args:
+              (`Assoc
+                [ "title", `String "Projection fixture"
+                ; "description", `String "a body the compact row must not carry"
+                ; "priority", `Int 2
+                ]));
+       let list args =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args)
+             .data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let only_row data =
+         match U.(data |> member "snapshot" |> to_list) with
+         | [ row ] -> row
+         | rows -> failf "expected one row, got %d" (List.length rows)
+       in
+       let compact = list (`Assoc []) in
+       check string "default projection is compact" "compact"
+         U.(compact |> member "projection" |> to_string);
+       let compact_row = only_row compact in
+       check string "compact row keeps the title" "Projection fixture"
+         U.(compact_row |> member "title" |> to_string);
+       check string "compact row keeps the status" "todo"
+         U.(compact_row |> member "status" |> to_string);
+       check int "compact row keeps the priority" 2
+         U.(compact_row |> member "priority" |> to_int);
+       List.iter
+         (fun field ->
+            check bool (field ^ " is absent from the compact row") true
+              (U.member field compact_row = `Null))
+         [ "description"; "files"; "contract"; "handoff_context"; "execution_links" ];
+       let full = list (`Assoc [ "projection", `String "full" ]) in
+       check string "requested projection is echoed" "full"
+         U.(full |> member "projection" |> to_string);
+       let full_row = only_row full in
+       check string "full row carries the description"
+         "a body the compact row must not carry"
+         U.(full_row |> member "description" |> to_string);
+       check bool "full row carries files" true
+         (U.member "files" full_row <> `Null);
+       check bool "the two projections have distinct revisions" true
+         (U.(compact |> member "revision" |> to_string)
+          <> U.(full |> member "revision" |> to_string));
+       let rejected =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc [ "projection", `String "summary" ])
+       in
+       check bool "unknown projection is rejected, not defaulted" true
+         (rejected.data = None);
+       check bool "rejection names the accepted values" true
+         (let message = rejected.raw_output in
+          let contains needle =
+            let n = String.length needle and h = String.length message in
+            let rec go i = i + n <= h && (String.sub message i n = needle || go (i + 1)) in
+            go 0
+          in
+          contains "compact" && contains "full" && contains "summary"))
+;;
+
+let test_tasks_list_recovery_is_degraded_and_never_unchanged () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Recovery-only task snapshot"
+            ~priority:2
+            ~description:"");
+       Out_channel.with_open_text (Masc.Workspace.backlog_path config) (fun oc ->
+         output_string oc "{not valid json");
+       let meta = keeper_meta () in
+       let execute args =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args
+       in
+       let first_data = Option.get (execute (`Assoc [])).data in
+       check string
+         "recovery authority is explicit"
+         "recovery_non_authoritative"
+         U.(first_data |> member "backlog_authority" |> to_string);
+       check bool
+         "recovery snapshot is degraded"
+         true
+         U.(first_data |> member "degraded" |> to_bool);
+       let revision = U.(first_data |> member "revision" |> to_string) in
+       let repeated_data =
+         Option.get (execute (`Assoc [ "if_revision", `String revision ])).data
+       in
+       check string
+         "recovery cannot collapse to unchanged"
+         "snapshot"
+         U.(repeated_data |> member "kind" |> to_string))
+
+let test_tasks_list_revision_covers_projected_contents () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"First workspace task"
+            ~priority:1
+            ~description:"");
+       let meta = keeper_meta () in
+       let snapshot () =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args:(`Assoc [])).data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let first = snapshot () in
+       (* [.backlog] is the lock path ([Workspace_backlog.backlog_lock_path]),
+          not the store. Reading it as JSON never had a chance to work. *)
+       let backlog_path = Masc.Workspace.backlog_path config in
+       let rewrite_title = function
+         | `Assoc fields ->
+           `Assoc
+             (List.map
+                (function
+                  | "tasks", `List [ `Assoc task_fields ] ->
+                    ( "tasks"
+                    , `List
+                        [ `Assoc
+                            (List.map
+                               (function
+                                 | "title", _ -> "title", `String "Second workspace task"
+                                 | field -> field)
+                               task_fields)
+                        ] )
+                  | field -> field)
+                fields)
+         | other -> failf "unexpected backlog shape: %s" (Yojson.Safe.to_string other)
+       in
+       let original_backlog = Yojson.Safe.from_file backlog_path in
+       let rewritten_backlog = rewrite_title original_backlog in
+       Fs_compat.save_file backlog_path (Yojson.Safe.to_string rewritten_backlog);
+       let second = snapshot () in
+       check int
+         "fixture keeps the exact backlog revision"
+         U.(original_backlog |> member "version" |> to_int)
+         U.(rewritten_backlog |> member "version" |> to_int);
+       check string
+         "fixture changes only visible task content"
+         "Second workspace task"
+         U.(second |> member "snapshot" |> index 0 |> member "title" |> to_string);
+       check bool
+         "same counter with different visible task content changes revision"
+         true
+         (not
+            (String.equal
+               U.(first |> member "revision" |> to_string)
+               U.(second |> member "revision" |> to_string))))
+
+let test_response_finalization_keeps_visible_reply_only () =
+  let finalized =
+    Response_text.finalize
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
+      ~raw_response_text:"Completed with typed tool evidence."
+      ()
+  in
+  check string
+    "visible assistant reply is preserved"
+    "Completed with typed tool evidence."
+    finalized.response_text;
+  let suppressed =
+    Response_text.finalize
+      ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
+      ~raw_response_text:"Internal completion text"
+      ~suppress_response_text:true
+      ()
+  in
+  check string "suppression preserves the observed response"
+    "Internal completion text" suppressed.response_text;
+  check bool "suppression belongs to the replay decision" true suppressed.withheld_from_replay
+;;
+
+(* A rejected [keeper_task_done] carries producer-owned typed outcome data.
+   Consumers may decode this typed payload at an explicit schema boundary;
+   model-facing output text is not an authority for reconstructing it. *)
+let rejected_done_typed_outcome ~base_path:_ config meta args =
+  let payload =
+    Task.handle_keeper_task_tool ~config ~meta ~name:"keeper_task_done" ~args
+  in
+  let json = Yojson.Safe.from_string payload in
+  check bool "rejected done is not ok" false (json |> U.member "ok" |> U.to_bool);
+  Outcome.of_json (json |> U.member "typed_outcome")
+
+let test_done_missing_task_id_emits_typed_error () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       (* task_id omitted -> early workflow_rejection path. *)
+       match
+         rejected_done_typed_outcome ~base_path config meta
+           (`Assoc [ "result", `String "done" ])
+       with
+       | Some (Outcome.Error _) -> ()
+       | other ->
+         failf "expected typed_outcome = Error, got %s"
+           (match other with
+            | None -> "None"
+            | Some Outcome.Progress -> "Progress"
+            | Some (Outcome.No_progress _) -> "No_progress"
+            | Some (Outcome.Error _) -> "Error"))
+
+let test_done_missing_evidence_refs_emits_typed_error () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       match
+         rejected_done_typed_outcome ~base_path config meta
+           (`Assoc
+             [ "task_id", `String "task-001"
+             ; "result", `String "implemented and opened PR#123"
+             ])
+       with
+       | Some (Outcome.Error _) -> ()
+       | other ->
+         failf "expected typed_outcome = Error, got %s"
+           (match other with
+            | None -> "None"
+            | Some Outcome.Progress -> "Progress"
+            | Some (Outcome.No_progress _) -> "No_progress"
+            | Some (Outcome.Error _) -> "Error"))
+
+let test_done_failed_transition_emits_typed_error () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       (* A done on a task that does not exist fails the transition -> the
+          [else] branch must emit a typed [Error], not [None]. *)
+       match
+         rejected_done_typed_outcome ~base_path config meta
+           (`Assoc
+             [ "task_id", `String "task-does-not-exist"
+             ; "result", `String "completed"
+             ; "evidence_refs", `List [ `String "PR#404" ]
+             ])
+       with
+       | Some (Outcome.Error _) -> ()
+       | other ->
+         failf "expected typed_outcome = Error, got %s"
+           (match other with
+            | None -> "None"
+            | Some Outcome.Progress -> "Progress"
+            | Some (Outcome.No_progress _) -> "No_progress"
+            | Some (Outcome.Error _) -> "Error"))
+
+let strict_contract : Masc_domain.task_contract =
+  { strict = true
+  ; completion_contract = [ "peer verification required" ]
+  ; required_evidence = []
+  ; inspect_gate_evidence = []
+  ; verify_gate_evidence = []
+  }
+
+(* [verification_submit_request_fn] defaults to an error and is filled at boot
+   by the server (`Verification_run_registry.install_global`). These two cases
+   exercise the outcome the task tool returns, not the storage boundary behind
+   it, so they stand in a persisting hook for the duration. Restored after, so
+   a case that should see the absent-hook error still does. *)
+let with_verification_persistence f =
+  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  Atomic.set
+    Workspace_hooks.verification_submit_request_fn
+    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ -> Ok ());
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.verification_submit_request_fn previous)
+    f
+;;
+
+let test_strict_done_submits_for_verification () =
+  with_verification_persistence @@ fun () ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "task-create-test" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~contract:strict_contract
+            ~title:"Evidence-bearing completion"
+            ~priority:1
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name
+            ~capabilities:[]
+            ());
+       (match
+          Masc.Workspace.claim_task_r
+            config
+            ~agent_name
+            ~task_id:"task-001"
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail
+            ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = keeper_meta () in
+       ignore
+         (Task.handle_keeper_task_tool
+            ~config
+            ~meta
+            ~name:"keeper_task_done"
+            ~args:
+              (`Assoc
+                [ "task_id", `String "task-001"
+                ; "result", `String "implementation complete"
+                ; "evidence_refs", `List [ `String "note:commit abc123" ]
+                ]));
+       match Masc.Workspace.get_tasks_raw config with
+       | [ { task_status = Masc_domain.AwaitingVerification _;
+             handoff_context = Some handoff; _ } ] ->
+         check string "result preserved as summary"
+           "implementation complete" handoff.summary;
+         check (list string) "evidence preserved"
+           [ "note:commit abc123" ] handoff.evidence_refs
+       | [ _ ] -> fail "completion did not enter awaiting_verification"
+       | tasks ->
+         failf "expected exactly one persisted task, got %d" (List.length tasks))
+
+let test_done_receipt_is_bound_to_the_captured_request () =
+  let base_path = temp_dir () in
+  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  let notify_previous = Atomic.get Workspace_hooks.verification_notify_submit_fn in
+  Fun.protect ~finally:(fun () ->
+    Atomic.set Workspace_hooks.verification_submit_request_fn previous;
+    Atomic.set Workspace_hooks.verification_notify_submit_fn notify_previous;
+    cleanup_dir base_path) (fun () ->
+    let config = Masc.Workspace.default_config base_path in
+    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+    ignore (Masc.Workspace.add_task config ~title:"captured evidence" ~priority:1 ~description:"");
+    let meta = keeper_meta () in
+    let agent_name = "task-create-test" in
+    ignore (Masc.Workspace.bind_session config ~agent_name ~capabilities:[] ());
+    (match Masc.Workspace.claim_task_r config ~agent_name ~task_id:"task-001" () with
+     | Ok _ -> () | Error err -> fail (Masc_domain.masc_error_to_string err));
+    let prepared = ref [] in
+    Atomic.set Workspace_hooks.verification_submit_request_fn
+      (fun config ~(task : Masc_domain.task) ~assignee ~verification_id ~claim:_ ->
+        let open Workspace_verification_store in
+        let items = [Evidence_artifact { reference = "artifact:repo/present";
+            content = "private artifact body"; bytes = 21; truncated = false };
+          Evidence_artifact_unreadable { reference = "artifact:evidence/missing";
+            reason = Evidence_read_error ("No such file: " ^ verification_id) }] in
+        match Masc.Verification.create_request ~base_path:config.base_path
+          ~task_id:task.id ~request_id:verification_id ~worker:assignee ~criteria:[]
+          ~output:(`Assoc ["submitted_evidence", `List
+            (List.map submitted_evidence_item_to_yojson items)]) () with
+        | Error detail -> Error detail
+        | Ok _ -> prepared := verification_id :: !prepared; Ok ());
+    (* Notification removes the saved request. The receipt must already have
+       captured this request's metadata, independent of subsequent state. *)
+    Atomic.set Workspace_hooks.verification_notify_submit_fn
+      (fun _ ~task:_ ~assignee:_ ~verification_id ~claim:_ ->
+        ignore (Masc.Verification.delete_request base_path verification_id));
+    let submit () =
+      Task.handle_keeper_task_tool ~config ~meta ~name:"keeper_task_done"
+        ~args:(`Assoc ["task_id", `String "task-001";
+          "result", `String "ready for review";
+          "evidence_refs", `List [`String "artifact:evidence/missing"]])
+      |> Yojson.Safe.from_string in
+    let first = submit () in
+    let second = submit () in
+    let ids = List.map (fun receipt ->
+      check string "submission remains completed" "completed"
+        U.(receipt |> member "disposition" |> to_string);
+      let capture = U.member "evidence_capture" receipt in
+      let id = U.(capture |> member "verification_id" |> to_string) in
+      let diagnostics = U.(capture |> member "diagnostics" |> to_list) in
+      check int "only failed evidence metadata is returned" 1 (List.length diagnostics);
+      check string "saved detail belongs to this exact request"
+        ("No such file: " ^ id)
+        U.(List.hd diagnostics |> member "reason" |> member "detail" |> to_string);
+      check bool "artifact body never enters receipt" false
+        (Astring.String.is_infix ~affix:"private artifact body" (Yojson.Safe.to_string capture));
+      id) [first; second] in
+    check (list string) "each resubmission returns its own captured id"
+      (List.rev !prepared) ids;
+    check bool "resubmission creates a different request" true
+      (List.nth ids 0 <> List.nth ids 1))
+
+let test_default_done_is_terminal () =
+  with_verification_persistence @@ fun () ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "task-create-test" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Advisory completion"
+            ~priority:1
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name
+            ~capabilities:[]
+            ());
+       (match
+          Masc.Workspace.claim_task_r
+            config
+            ~agent_name
+            ~task_id:"task-001"
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail
+            ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = keeper_meta () in
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_task_done"
+           ~args:
+             (`Assoc
+               [ "task_id", `String "task-001"
+               ; "result", `String "implementation complete"
+               ; "evidence_refs", `List [ `String "note:commit abc123" ]
+               ])
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () -> fail "default completion was deferred"
+        | Tool_result.Failed _ ->
+          fail ("default completion failed: " ^ execution.raw_output));
+       (* [keeper_task_done] submits evidence; it does not end the Task. The
+          handler picks [submit_for_verification] unconditionally
+          (keeper_tool_task_runtime.ml), with no strict/advisory branch, and
+          [Workspace_task_lifecycle] refuses to resolve an
+          [AwaitingVerification] obligation from any agent action. This case
+          used to assert the default path was terminal, which stopped being
+          true when the completion authority took over the verdict. *)
+       match Masc.Workspace.get_tasks_raw config with
+       | [ { task_status =
+               Masc_domain.AwaitingVerification { verification_id; _ }
+           ; handoff_context = Some handoff
+           ; _
+           } ] ->
+         check string "result preserved as summary"
+           "implementation complete" handoff.summary;
+         check (list string) "evidence preserved"
+           [ "note:commit abc123" ] handoff.evidence_refs;
+         (match
+            Masc.Workspace.commit_verdict_r
+              config
+              ~authority:
+                (Masc_domain.Human_operator { operator_id = "operator" })
+              ~verdict:Masc_domain.Verdict_approved
+              ~task_id:"task-001"
+              ~verification_id
+              ()
+          with
+          | Ok _ -> ()
+          | Error error ->
+            fail ("verdict failed: " ^ Masc_domain.masc_error_to_string error));
+         (match Masc.Workspace.get_tasks_raw config with
+          | [ { task_status = Masc_domain.Done _; _ } ] -> ()
+          | [ t ] ->
+            failf
+              "an approved obligation did not become Done: %s"
+              (Masc_domain.show_task_status t.task_status)
+          | tasks ->
+            failf "expected exactly one persisted task, got %d"
+              (List.length tasks))
+       | [ t ] ->
+         failf
+           "keeper_task_done did not submit for verification: %s"
+           (Masc_domain.show_task_status t.task_status)
+       | tasks ->
+         failf "expected exactly one persisted task, got %d" (List.length tasks))
+
+(* task-1426: the keeper_task_done schema declares a [notes] parameter, but
+   the handler used to drop it and inject [result] into the transition's
+   notes field instead, so the submitter's handoff notes vanished from every
+   record (live case: a 767B and an 876B notes payload both disappeared).
+   The declared parameter must reach the transition record — the audit entry
+   for the submission carries it in details — while handoff_context.summary
+   keeps the result summary. *)
+let check_done_notes ~notes_fields ~expected_notes () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       (* The submission audit entry (task_submit_for_verification) is written
+          by the workspace metric hooks; this file does not install them
+          globally, so enable them here for the transition-record assertion. *)
+       Masc.Workspace_metric_hooks.install ();
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "task-create-test" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Notes parameter passthrough"
+            ~priority:2
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session config ~agent_name ~capabilities:[] ());
+       (match
+          Masc.Workspace.claim_task_r config ~agent_name ~task_id:"task-001" ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = keeper_meta () in
+       let execution =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_task_done"
+           ~args:
+             (`Assoc
+               ([ "task_id", `String "task-001"
+               ; "result", `String "implementation complete"
+
+               ; "evidence_refs", `List [ `String "note:commit abc123" ]
+               ] @ notes_fields))
+       in
+       (match execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () ->
+          fail "notes passthrough completion was deferred"
+        | Tool_result.Failed _ ->
+          fail ("notes passthrough completion failed: " ^ execution.raw_output));
+       (match Masc.Workspace.get_tasks_raw config with
+        | [ { task_status = Masc_domain.AwaitingVerification _;
+              handoff_context = Some handoff;
+              _ } ] ->
+          check string "result still preserved as summary"
+            "implementation complete" handoff.summary
+        | [ t ] ->
+          failf
+            "keeper_task_done did not submit for verification: %s"
+            (Masc_domain.show_task_status t.task_status)
+        | tasks ->
+          failf "expected exactly one persisted task, got %d"
+            (List.length tasks));
+       let audit_entries = Masc.Audit_log.read_entries ~n:50 config in
+       let submission =
+         List.find_opt
+           (fun (entry : Masc.Audit_log.audit_entry) ->
+              match entry.action with
+              | Masc.Audit_log.Custom "task_submit_for_verification" -> true
+              | _ -> false)
+           audit_entries
+       in
+       match submission with
+       | None -> fail "no task submission audit entry"
+       | Some entry ->
+         (match entry.details with
+          | `Assoc fields ->
+            let expected = if expected_notes = "" then None else Some (`String expected_notes) in
+            check bool "audit retains authored notes without inventing empty content" true
+              (List.assoc_opt "notes" fields = expected)
+          | _ -> fail "submission details must be an object"))
+
+
+let test_done_passes_declared_notes_to_transition () =
+  List.iter (fun text ->
+    check_done_notes ~notes_fields:[ "notes", `String text ] ~expected_notes:text ())
+    [ "handoff notes for the next keeper"; ""; "  preserved spacing\nsecond line  " ]
+
+let test_done_without_notes_stays_absent () =
+  check_done_notes ~notes_fields:[] ~expected_notes:"" ()
+
+let test_done_rejects_malformed_notes () =
+  List.iter (fun notes ->
+    let base_path = temp_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let meta = keeper_meta () in
+      let before = Sys.readdir base_path |> Array.to_list |> List.sort String.compare in
+      let outcome = Task.handle_keeper_task_tool_with_outcome ~config ~meta
+        ~name:"keeper_task_done"
+        ~args:(`Assoc [ "task_id", `String "task-001"; "result", `String "completed work"
+                     ; "notes", notes; "evidence_refs", `List [ `String "note:evidence" ] ]) in
+      match outcome.disposition with
+      | Tool_result.Failed _ ->
+        let reason = Yojson.Safe.from_string outcome.raw_output
+          |> U.member "typed_outcome" |> U.member "reason" |> U.to_string in
+        let expected_shape = match notes with
+          | `Null -> "null" | `Int _ -> "int" | `Bool _ -> "bool"
+          | `List _ -> "list" | _ -> fail "unexpected test input" in
+        check string "rejected by the notes boundary"
+          ("notes must be string, got " ^ expected_shape) reason;
+        check (list string) "rejection adds no workspace entry" before
+          (Sys.readdir base_path |> Array.to_list |> List.sort String.compare)
+      | Tool_result.Completed () | Tool_result.Deferred () -> fail "malformed note was accepted"))
+    [ `Null; `Int 7; `Bool false; `List [] ]
+
+(* Three complete rendered pages remain artifact evidence through real task_done
+   submission. The configured provider owns request admission, not a separate
+   aggregate submitter gate that encourages dropping image bytes into notes. *)
+let test_done_submits_three_rendered_pages () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       (* This scenario inspects real snapshots, so install the production
+          submission persistence hooks rather than the outcome-only stub. *)
+       Masc.Workspace_metric_hooks.install ();
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "task-create-test" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Three rendered pages"
+            ~priority:2
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name
+            ~capabilities:[]
+            ());
+       (match
+          Masc.Workspace.claim_task_r
+            config
+            ~agent_name
+            ~task_id:"task-001"
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = keeper_meta () in
+       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+       Fs_compat.mkdir_p keepers_dir;
+       Out_channel.with_open_text (Filename.concat keepers_dir (agent_name ^ ".toml"))
+         (fun channel -> output_string channel "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
+       let producer_root =
+         Keeper_sandbox_config.host_root_abs_of_agent
+           ~base_path:
+             (Workspace_verification_store.project_root_of_base_path
+                config.base_path)
+           ~agent_name
+       in
+       let rec mkdir_p dir =
+         if not (Sys.file_exists dir)
+         then (
+           mkdir_p (Filename.dirname dir);
+           try Unix.mkdir dir 0o755
+           with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+       in
+       mkdir_p producer_root;
+       let run_done evidence =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_task_done"
+           ~args:
+             (`Assoc
+               [ "task_id", `String "task-001"
+               ; "result", `String "implementation complete"
+               ; "evidence_refs", `List evidence
+               ])
+       in
+       let png = Fs_compat.load_file "fixtures/verifier-images/page.png" in
+       let names = ["page1.png"; "page2.png"; "page3.png"] in
+       List.iter (fun name -> Fs_compat.save_file (Filename.concat producer_root name) png) names;
+       let refs = List.map (fun name -> `String ("artifact:" ^ name)) names in
+       let result = run_done refs in
+       (match result.Masc.Keeper_tool_execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Deferred () | Tool_result.Failed _ ->
+          fail ("three rendered pages were not submitted: " ^ result.raw_output));
+       let verification_id = match Masc.Workspace.get_tasks_raw config with
+         | [{ task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ }] -> verification_id
+         | _ -> fail "submission must await an independent verifier" in
+       let evidence = Workspace_verification_store.inspect_submitted_evidence_for_authority
+           ~base_path ~request_id:verification_id ~task_id:"task-001" ~task_worker:agent_name
+           ~authority:(Masc_domain.Human_operator { operator_id = "fixture" }) in
+       match evidence with
+       | Workspace_verification_store.Evidence_available { items; _ } ->
+         let images = List.filter_map (function
+           | Workspace_verification_store.Evidence_artifact_binary image -> Some image.reference
+           | _ -> None) items in
+         check (list string) "all three remain binary artifacts"
+           (List.map (fun name -> "artifact:" ^ name) names) images
+       | _ -> fail "submitted evidence unavailable")
+
+;;
+
+(* Without an Eio fs context the workspace backend falls back to Memory
+   (workspace_utils_backend_setup.ml), and three cases here reach past that
+   backend: two write a corrupt backlog file directly to drive the recovery
+   path, and one reads the persisted task back. Under the fallback the writes
+   land nowhere the reader looks, so recovery reported [primary] and the done
+   transition read as non-terminal. Bind the real filesystem once, here, so
+   every case sees the store it writes to. *)
+
+let contains ~needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  let rec go i = i + nl <= hl && (String.sub haystack i nl = needle || go (i + 1)) in
+  nl = 0 || go 0
+
+(* Keeper task payloads are not one shape. A claim reports refusal through
+   [typed_outcome] and carries no "ok" at all -- a claimed task deliberately
+   omits the field -- while the release path reports through "ok". Read
+   refusal as "the payload says Error", which both express, so these tests do
+   not pin a field one of the two tools never had. *)
+let refused json =
+  (match json |> U.member "ok" with
+   | `Bool false -> true
+   | _ -> false)
+  || (match Outcome.of_json (json |> U.member "typed_outcome") with
+      | Some (Outcome.Error _) -> true
+      | Some Outcome.Progress | Some (Outcome.No_progress _) | None -> false)
+
+let accepted json = not (refused json)
+
+let release_test_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "release-test"
+        ; "trace_id", `String "trace-release-test"
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
+
+let with_release_fixture f =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = release_test_meta () in
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name:meta.name
+            ~capabilities:[ "test" ]
+            ());
+       ignore
+         (Masc.Workspace.add_task config ~title:"Held work" ~priority:1 ~description:"");
+       ignore
+         (Masc.Workspace.add_task config ~title:"Other work" ~priority:1 ~description:"");
+       let call name args =
+         Yojson.Safe.from_string (Task.handle_keeper_task_tool ~config ~meta ~name ~args)
+       in
+       f call)
+
+(* keeper_task_release exists so a Keeper holding work it cannot finish can go
+   take different work. "release returned ok" on its own does not show that:
+   the claim refusal reads backlog ownership, so the proof is the second claim
+   failing before the release and succeeding after it. Before this tool that
+   second claim stayed refused for the life of the Keeper. *)
+let test_release_frees_the_keeper_to_claim_again () =
+  with_release_fixture (fun call ->
+    let claim task_id = call "keeper_task_claim" (`Assoc [ "task_id", `String task_id ]) in
+    check bool "first claim succeeds" true (accepted (claim "task-001"));
+    let second = claim "task-002" in
+    check bool "a second claim is refused while the first is held" true (refused second);
+    (* The refusal has to name something the reader can call. It used to name
+       only masc_transition, which the Keeper surface projects away behind
+       keeper_task_claim. *)
+    check
+      bool
+      "the refusal names keeper_task_release"
+      true
+      (contains ~needle:"keeper_task_release" (Yojson.Safe.to_string second));
+    let released =
+      call
+        "keeper_task_release"
+        (`Assoc
+          [ "task_id", `String "task-001"
+          ; "summary", `String "blocked on a checkout this Keeper does not have"
+          ])
+    in
+    check bool "release succeeds" true (accepted released);
+    check
+      bool
+      "the Keeper can claim different work once it has handed the task back"
+      true
+      (accepted (claim "task-002")))
+
+(* The next owner reads the summary and nothing else about where the work
+   stands, so an empty one is refused at the tool rather than stored. *)
+let test_release_without_summary_is_refused () =
+  with_release_fixture (fun call ->
+    check
+      bool
+      "claim succeeds"
+      true
+      (accepted (call "keeper_task_claim" (`Assoc [ "task_id", `String "task-001" ])));
+    let rejection = call "keeper_task_release" (`Assoc [ "task_id", `String "task-001" ]) in
+    check bool "release without a summary is refused" true (refused rejection);
+    (* Pin the Keeper-vocabulary rejection, not the transition layer's. The
+       transition also refuses an empty handoff_context.summary, so a test
+       that only asked "was it refused" stayed green with this tool's own
+       check deleted -- and the Keeper would then read a message naming
+       handoff_context.summary, a field it never sent. Same reason
+       keeper_task_done enforces its schema locally. *)
+    check
+      bool
+      "the refusal names the parameter the Keeper actually sent"
+      true
+      (contains
+         ~needle:"keeper_task_release rejected: summary required"
+         (Yojson.Safe.to_string rejection));
+    (* A refused release must not hand the task back anyway. Re-claiming
+       task-001 is a bad probe -- an owner re-claiming what it holds can
+       succeed -- so ask whether different work is still barred. *)
+    check
+      bool
+      "different work is still barred after the refused release"
+      true
+      (refused (call "keeper_task_claim" (`Assoc [ "task_id", `String "task-002" ]))))
+
+let test_release_sources_reach_the_next_owner () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let owner = release_test_meta () in
+       let successor =
+         match Masc_test_deps.meta_of_json_fixture
+           (`Assoc [ "name", `String "handoff-successor";
+                     "trace_id", `String "trace-handoff-successor" ]) with
+         | Ok meta -> meta
+         | Error error -> fail error
+       in
+       List.iter
+         (fun name ->
+            ignore (Masc.Workspace.bind_session config ~agent_name:name
+              ~capabilities:[ "test" ] ()))
+         [ owner.name; successor.name ];
+       ignore (Masc.Workspace.add_task config ~title:"Finish the handoff report"
+         ~priority:1 ~description:"Retain the outgoing owner's sources");
+       let call meta name args =
+         Yojson.Safe.from_string (Task.handle_keeper_task_tool ~config ~meta ~name ~args)
+       in
+       let task () = match Masc.Workspace.get_tasks_raw config with
+         | [ task ] -> task
+         | _ -> fail "expected one handoff task"
+       in
+       check bool "outgoing owner claims" true
+         (accepted (call owner "keeper_task_claim" (`Assoc [ "task_id", `String "task-001" ])));
+       let release refs = call owner "keeper_task_release"
+           (`Assoc [ "task_id", `String "task-001";
+                     "summary", `String "draft complete; review remains";
+                     "next_step", `String "read the draft and request independent review";
+                     "evidence_refs", refs ])
+       in
+       List.iter
+         (fun refs ->
+            let before = task () in
+            check bool "invalid supplied sources are refused" true (refused (release refs));
+            let after = task () in
+            check bool "refusal does not release ownership" true
+              (before.task_status = after.task_status);
+            check bool "refusal does not change the handoff" true
+              (before.handoff_context = after.handoff_context))
+         [ `Null; `List [ `String "" ]; `List [ `String "/host/draft.md" ]; `String "note:draft" ];
+       let refs = [ "artifact:reports/draft.md"; "note:source bundle observed before handoff" ] in
+       check bool "valid handoff is accepted" true
+         (accepted (release (`List (List.map (fun value -> `String value) refs))));
+       let prior = match (task ()).handoff_context with
+         | Some handoff -> handoff
+         | None -> fail "release must persist its handoff"
+       in
+       check (list string) "release stores the exact sources" refs prior.evidence_refs;
+       check (option string) "outgoing author is recorded" (Some owner.name) prior.updated_by;
+       check bool "successor claims the same task" true
+         (accepted (call successor "keeper_task_claim" (`Assoc [ "task_id", `String "task-001" ])));
+       check bool "successor starts the same task" true
+         (match (task ()).task_status with
+          | Masc_domain.InProgress { assignee; _ } -> assignee = successor.name
+          | _ -> false);
+       let after = match (task ()).handoff_context with
+         | Some handoff -> handoff
+         | None -> fail "claim and auto-start must preserve the handoff"
+       in
+       check bool "same handoff survives ownership and auto-start" true (prior = after);
+       let listing = call successor "keeper_tasks_list"
+           (`Assoc [ "task_ids", `List [ `String "task-001" ]; "projection", `String "full" ]) in
+       let visible = listing |> U.member "snapshot" |> U.to_list |> List.hd
+                     |> U.member "handoff_context" in
+       check (list string) "successor reads sources through the real task tool" refs
+         (visible |> U.member "evidence_refs" |> U.to_list |> List.map U.to_string);
+       check string "successor reads the original author's attribution" owner.name
+         (visible |> U.member "updated_by" |> U.to_string))
+
+let () =
+  Eio_main.run
+  @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  run "keeper task outcomes"
+    [ ( "outcomes"
+      , [ test_case
+            "keeper_task_create without goal_id remains unscoped"
+            `Quick
+            test_task_create_without_goal_id_is_unscoped
+        ; test_case
+            "keeper_tasks_list reports a truncated page"
+            `Quick
+            test_tasks_list_reports_truncation
+        ; test_case
+            "keeper_tasks_list names the newest tasks"
+            `Quick
+            test_tasks_list_names_the_newest_tasks
+        ; test_case
+            "keeper_tasks_list pages with a cursor"
+            `Quick
+            test_tasks_list_pages_with_cursor
+        ; test_case
+            "keeper_tasks_list refuses a status it does not know"
+            `Quick
+            test_tasks_list_refuses_a_status_it_does_not_know
+        ; test_case "keeper_broadcast forwards typed cache signal" `Quick
+            test_keeper_broadcast_forwards_typed_cache_signal
+        ; test_case "keeper_broadcast rejects partial typed cache signal" `Quick
+            test_keeper_broadcast_rejects_partial_typed_cache_signal
+        ; test_case
+            "keeper_tasks_list returns snapshot and unchanged"
+            `Quick
+            test_tasks_list_returns_snapshot_and_unchanged
+        ; test_case
+            "keeper_tasks_list revision covers projected task contents"
+            `Quick
+            test_tasks_list_revision_covers_projected_contents
+        ; test_case
+            "keeper_tasks_list recovery is degraded and never unchanged"
+            `Quick
+            test_tasks_list_recovery_is_degraded_and_never_unchanged
+        ; test_case
+            "keeper_tasks_list is compact by default and full on request"
+            `Quick
+            test_tasks_list_projection_compact_by_default_full_on_request
+        ; test_case "completed census omits receipts" `Quick
+            test_tasks_list_completed_census_omits_receipts
+        ; test_case "targeted task queries preserve pagination and failures" `Quick
+            test_tasks_list_targeted_queries
+        ; test_case "response finalization keeps visible reply only" `Quick
+            test_response_finalization_keeps_visible_reply_only
+        ; test_case "rejected done (missing task_id) emits typed Error (D1)"
+            `Quick test_done_missing_task_id_emits_typed_error
+        ; test_case "rejected done (missing evidence_refs) emits typed Error (D1)"
+            `Quick test_done_missing_evidence_refs_emits_typed_error
+        ; test_case "rejected done (failed transition) emits typed Error (D1)"
+            `Quick test_done_failed_transition_emits_typed_error
+        ; test_case "submission receipt stays bound across notifications and resubmissions" `Quick
+            test_done_receipt_is_bound_to_the_captured_request
+        ; test_case "strict done submits for verification"
+            `Quick test_strict_done_submits_for_verification
+        ; test_case "default done submits for verification"
+            `Quick test_default_done_is_terminal
+        ; test_case
+            "done submits three rendered pages"
+            `Quick test_done_submits_three_rendered_pages
+        ; test_case
+            "release frees the Keeper to claim different work"
+            `Quick test_release_frees_the_keeper_to_claim_again
+        ; test_case
+            "release without a summary is refused and keeps the task held"
+            `Quick test_release_without_summary_is_refused
+        ; test_case "release sources reach the next owner" `Quick
+            test_release_sources_reach_the_next_owner
+        ; test_case
+            "done passes the declared notes parameter to the transition (task-1426)"
+            `Quick test_done_passes_declared_notes_to_transition
+        ; test_case
+            "done without notes does not invent handoff notes"
+            `Quick test_done_without_notes_stays_absent
+        ; test_case "malformed notes fail before workspace mutation" `Quick
+            test_done_rejects_malformed_notes
+        ] )
+    ]

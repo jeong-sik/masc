@@ -1,0 +1,34 @@
+{
+  "schema": "masc.keeper_chat_operation.v1",
+  "operation_id": "ego-native-proof-14c9-marker-2",
+  "sequence": "1",
+  "created_at": 1792856538.712196,
+  "admission_digest": "9893b5527a40776bc7cd7ecf3bdcabc37bd9d546d68281083147e81740a8d93c",
+  "execution_digest": "2aeb82884e4a9a6b1202deb490a541c4d29376ba8aa5b836eafc28ac9bd27a1b",
+  "source": {
+    "channel": "",
+    "channel_user_id": "",
+    "channel_user_name": "",
+    "channel_workspace_id": "",
+    "continuation_channel": {
+      "kind": "dashboard",
+      "thread_id": "keeper:ego-native-proof"
+    },
+    "conversation_id": null,
+    "external_message_id": null,
+    "extra_mentions": [],
+    "schema": "masc.keeper_chat_operation.source.v2",
+    "sender_keeper": null,
+    "submitted_by": "local-admin",
+    "surface": {
+      "kind": "dashboard"
+    },
+    "thread_id": "keeper:ego-native-proof",
+    "user_row_origin": "needs_append",
+    "workspace_id": null
+  },
+  "input": null,
+  "state": "Succeeded",
+  "completed_at": 1792856734.545164,
+  "outcome_ref": "trace-1792856032676-00000#2"
+}

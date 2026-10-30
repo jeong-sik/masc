@@ -1,0 +1,741 @@
+{
+  "schema": "masc.schedule-f5-c2-trial2-independent-review.v1",
+  "is_derivative": true,
+  "reviewed_at_utc": "2026-10-26T21:21:56.386541+00:00",
+  "verdict": "BOUNDED_RUNTIME_EVIDENCE_PASS",
+  "p0_p2_findings": [],
+  "scope": "One actual owned C2 same-process queue-publication failure plus primary ledger settlement failure, process-local Retry replay, repair ordering and next-cadence fresh exact occurrence admission. No whole-feature/runtime-release approval.",
+  "identity": {
+    "source": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+    "source_file_bindings_verified": 25,
+    "controller_sha256": "1a513560e8d48580cdeb02c20f8a5c0a2403cb6730894ad7d0994cf9e5776577",
+    "helper_sha256": "6799826b1d8843e93993a283f98059efd9f9c93787bfae29d823bdcc557b608f",
+    "binary_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+    "binary_bytes": 111121488,
+    "native": {
+      "schema": "masc.schedule-c2-native-binding.v1",
+      "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "workflow_name": "Minimal manual checks",
+      "workflow_run": 40396800146,
+      "workflow_sha": "9377c7f3025d68e3856d2afd3762468dabc77813",
+      "workflow_ref": "main",
+      "artifact_id": 12687003191,
+      "server_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "archive_sha256": "a9e1eff4b3ddc6b43c14fa2fc48b7f468634d902ff487d9337b57bc4f5cb5927",
+      "artifact_receipt": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/receipt.json",
+        "bytes": 1622,
+        "sha256": "db9d24e84c3364d6c87120381121ab70254400db1e036bff3c98dafd2c8b42b1"
+      },
+      "archive": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact.zip",
+        "bytes": 74909557,
+        "sha256": "a9e1eff4b3ddc6b43c14fa2fc48b7f468634d902ff487d9337b57bc4f5cb5927"
+      },
+      "download_verification": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/identity-verification.json",
+        "bytes": 2035,
+        "sha256": "770efa19e25e10e3c52516e624b637ed107b51d23e4409836e95377348abfdce"
+      }
+    },
+    "workflow_fields_basis": "Retained receipt, archive and download-verification hashes checked; no new GitHub/CI query. Workflow execution main9377 remains distinct from source input a395."
+  },
+  "independent_checks": {
+    "all_701_raw_event_payloads_hash_and_bytes_match": true,
+    "selected_4_phase_health_json_equals_raw_http_response": true,
+    "actual_queue_publication_permission_error": true,
+    "actual_primary_ledger_finish_directory_error_not_mirror_only": true,
+    "genuine_running_before_and_after_kernel_stop_bytes_equal": true,
+    "queue_only_repair_next_completed_tick_has_no_fresh_dispatch": true,
+    "ledger_repair_next_tick_settles_only_original_retry": true,
+    "following_tick_fresh_uuid_single_exact_source": true,
+    "same_runtime_id_and_owned_pid": true,
+    "old_retry_record_preserved_exactly_after_fresh_acceptance": true,
+    "paused_manual_zero_model_turns_initial_and_final_both_owners": true,
+    "normal_owned_exit0_no_forced_kill_no_restart": true,
+    "trial1_setup_incomplete_kept_separate": true
+  },
+  "cause_evidence": {
+    "server_log_dispatch_line_number": 184,
+    "queue_publication_cause": "event-queue-v19.json atomic temporary .atomic_a19800.tmp creation failed: Permission denied",
+    "primary_settlement_cause": "backend_set schedules.json failed opening schedules.json.tmp-atomic: Is a directory",
+    "source_interpretation": "schedule_store.ml:528 propagates primary commit error; local/recovery mirror warnings are separate at :534/:541. Exact primary raw Running ledger remains unchanged during both failures.",
+    "first_failure_log_is_exact_prefix_of_final_server_log": true,
+    "server_log_pending_lines": [
+      185,
+      194
+    ],
+    "unrelated_environment_warnings": "Keeper volumes absent and dashboard heavy refresh warnings appear; no overall health-clean claim."
+  },
+  "genuine_running_and_barrier": {
+    "owned_pid": 92852,
+    "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+    "kernel_stop": {
+      "pid": 92852,
+      "waitpid_status": 4479,
+      "at": 1793049167.24276
+    },
+    "resumed": {
+      "pid": 92852,
+      "at": 1793049167.246707
+    },
+    "frozen_primary": {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-ledger.json",
+      "bytes": 2920,
+      "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+    },
+    "original_running_attempt": {
+      "attempt_id": "01a17a0f-0588-7000-8736-0fd8f0e2fd87",
+      "schedule_instance_id": "01a17a0e-909b-7000-b2db-ed614d9e5466",
+      "schedule_id": "audit-settle-original",
+      "started_at": 1793049167.238468,
+      "finished_at": null,
+      "due_at": 1793049152.307249,
+      "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+      "status": "running",
+      "detail": null,
+      "error": null
+    },
+    "wal_barrier": {
+      "device": 16777234,
+      "inode": 4409574681,
+      "held_until_after_faults": true,
+      "opened_wal_once": true,
+      "at": 1793049167.2448761
+    },
+    "wal_preflight": {
+      "blocked_exit": 73,
+      "released_exit": 0,
+      "api": "fcntl.lockf whole-file record lock, not BSD flock"
+    },
+    "frozen_queue_equals_publicly_cancelled_setup": true,
+    "frozen_wal_bytes": 0,
+    "lease_absence_boundary": "Controller source requires actual candidate Running and schedules lease absence before SIGSTOP; there is no separate retained raw lease-directory listing. Independent evidence supports kernel stop and genuine committed Running, not a freshly re-observed lease state."
+  },
+  "repairs": {
+    "faults_installed": {
+      "pid": 92852,
+      "at": 1793049167.2463129,
+      "queue_mode": "0o555",
+      "ledger_staging_directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/schedules.json.tmp-atomic",
+      "no_domain_bytes_authored": true
+    },
+    "effective_queue_write_refusal": {
+      "errno": 13,
+      "original_mode": "0o755",
+      "fault_mode": "0o555",
+      "at": 1793049167.2456079
+    },
+    "queue_only_repair": {
+      "at": 1793049167.470464,
+      "restored_mode": "0o755",
+      "pid": 92852
+    },
+    "ledger_repair": {
+      "at": 1793049182.393496,
+      "pid": 92852
+    }
+  },
+  "phase_facts": [
+    {
+      "phase": "first-failure",
+      "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+      "status": {
+        "status": "degraded",
+        "tick_count": 4,
+        "tick_in_flight": false,
+        "last_tick_started_at": 1793049167.228963,
+        "last_tick_finished_at": 1793049167.255665,
+        "last_success_at": 1793049167.255665,
+        "last_counts": {
+          "due_changed": 1,
+          "emitted": 1,
+          "rescheduled": 0,
+          "dispatch_succeeded": 0,
+          "dispatch_failed": 1,
+          "dispatch_unsupported": 0,
+          "dispatch_start_rejected": 0,
+          "wake_enqueued": 0,
+          "wake_skipped_no_keeper": 0,
+          "wake_skipped_missing_schedule": 0,
+          "wake_skipped_non_keeper_actor": 0,
+          "wake_skipped_unregistered_keeper": 0,
+          "wake_failed": 0
+        },
+        "totals": {
+          "due_changed": 2,
+          "emitted": 2,
+          "rescheduled": 0,
+          "dispatch_succeeded": 1,
+          "dispatch_failed": 1,
+          "dispatch_unsupported": 0,
+          "dispatch_start_rejected": 0,
+          "wake_enqueued": 1,
+          "wake_skipped_no_keeper": 0,
+          "wake_skipped_missing_schedule": 0,
+          "wake_skipped_non_keeper_actor": 0,
+          "wake_skipped_unregistered_keeper": 0,
+          "wake_failed": 0
+        },
+        "pending_settlement_count": 1,
+        "settlement_errors": [
+          "schedule_id=audit-settle-original occurrence=bb77335c632c98c38ff40dbb5fa2aedb73358af14ba9617d75aceff2b4b0c33d: schedule persistence failed: backend_set failed for schedules.json: (Backend_types.IOError\n   \"Eio.Io Unix_error (Is a directory, \\\"openat\\\", \\\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/schedules.json.tmp-atomic\\\"),\\n  opening <fs:/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/schedules.json.tmp-atomic>\")"
+        ]
+      },
+      "original_schedule_status": "running",
+      "attempts": [
+        {
+          "attempt_id": "01a17a0f-0588-7000-8736-0fd8f0e2fd87",
+          "status": "running",
+          "settlement_kind": null,
+          "started_at": 1793049167.238468,
+          "finished_at": null,
+          "due_at": 1793049152.307249,
+          "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+          "error": null
+        }
+      ],
+      "queue_pending_count": 0,
+      "raw_captures": [
+        {
+          "kind": "http",
+          "stage": "first-failure",
+          "method": "GET",
+          "path": "/health?full=1",
+          "origin": "http://127.0.0.1:61467",
+          "request_body": null,
+          "observed_at": 1793049167.4615018,
+          "duration_ms": 2.325625,
+          "status": 200,
+          "error": null,
+          "body_path": "00064-response.bin",
+          "body_bytes": 33150,
+          "body_sha256": "ba688ad56e0fdb6292bf432a26a236e839870948f8429751577bc9968bb386f6"
+        },
+        {
+          "kind": "canonical-ledger-observation",
+          "stage": "first-failure",
+          "observed_at": 1793049167.465734,
+          "body_path": "00065-response.bin",
+          "body_bytes": 2920,
+          "body_sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+        },
+        {
+          "kind": "canonical-queue-observation",
+          "stage": "first-failure",
+          "observed_at": 1793049167.466985,
+          "body_path": "00066-response.bin",
+          "body_bytes": 1402,
+          "body_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+        }
+      ]
+    },
+    {
+      "phase": "queue-repaired-ledger-fault",
+      "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+      "status": {
+        "status": "degraded",
+        "tick_count": 5,
+        "tick_in_flight": false,
+        "last_tick_started_at": 1793049182.25702,
+        "last_tick_finished_at": 1793049182.260459,
+        "last_success_at": 1793049182.260459,
+        "last_counts": {
+          "due_changed": 0,
+          "emitted": 0,
+          "rescheduled": 0,
+          "dispatch_succeeded": 0,
+          "dispatch_failed": 0,
+          "dispatch_unsupported": 0,
+          "dispatch_start_rejected": 0,
+          "wake_enqueued": 0,
+          "wake_skipped_no_keeper": 0,
+          "wake_skipped_missing_schedule": 0,
+          "wake_skipped_non_keeper_actor": 0,
+          "wake_skipped_unregistered_keeper": 0,
+          "wake_failed": 0
+        },
+        "totals": {
+          "due_changed": 2,
+          "emitted": 2,
+          "rescheduled": 0,
+          "dispatch_succeeded": 1,
+          "dispatch_failed": 1,
+          "dispatch_unsupported": 0,
+          "dispatch_start_rejected": 0,
+          "wake_enqueued": 1,
+          "wake_skipped_no_keeper": 0,
+          "wake_skipped_missing_schedule": 0,
+          "wake_skipped_non_keeper_actor": 0,
+          "wake_skipped_unregistered_keeper": 0,
+          "wake_failed": 0
+        },
+        "pending_settlement_count": 1,
+        "settlement_errors": [
+          "schedule_id=audit-settle-original occurrence=bb77335c632c98c38ff40dbb5fa2aedb73358af14ba9617d75aceff2b4b0c33d: schedule persistence failed: backend_set failed for schedules.json: (Backend_types.IOError\n   \"Eio.Io Unix_error (Is a directory, \\\"openat\\\", \\\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/schedules.json.tmp-atomic\\\"),\\n  opening <fs:/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/schedules.json.tmp-atomic>\")"
+        ]
+      },
+      "original_schedule_status": "running",
+      "attempts": [
+        {
+          "attempt_id": "01a17a0f-0588-7000-8736-0fd8f0e2fd87",
+          "status": "running",
+          "settlement_kind": null,
+          "started_at": 1793049167.238468,
+          "finished_at": null,
+          "due_at": 1793049152.307249,
+          "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+          "error": null
+        }
+      ],
+      "queue_pending_count": 0,
+      "raw_captures": [
+        {
+          "kind": "http",
+          "stage": "queue-repaired-ledger-fault",
+          "method": "GET",
+          "path": "/health?full=1",
+          "origin": "http://127.0.0.1:61467",
+          "request_body": null,
+          "observed_at": 1793049182.385511,
+          "duration_ms": 3.445958,
+          "status": 200,
+          "error": null,
+          "body_path": "00274-response.bin",
+          "body_bytes": 33157,
+          "body_sha256": "bcf442a9d024bf1c7539e69bf52901c29335cb23aa8f0d8cf2e7e5753fe5ab87"
+        },
+        {
+          "kind": "canonical-ledger-observation",
+          "stage": "queue-repaired-ledger-fault",
+          "observed_at": 1793049182.390799,
+          "body_path": "00275-response.bin",
+          "body_bytes": 2920,
+          "body_sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+        },
+        {
+          "kind": "canonical-queue-observation",
+          "stage": "queue-repaired-ledger-fault",
+          "observed_at": 1793049182.3913972,
+          "body_path": "00276-response.bin",
+          "body_bytes": 1402,
+          "body_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+        }
+      ]
+    },
+    {
+      "phase": "retry-settled-only",
+      "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+      "status": {
+        "status": "ok",
+        "tick_count": 6,
+        "tick_in_flight": false,
+        "last_tick_started_at": 1793049197.261544,
+        "last_tick_finished_at": 1793049197.270199,
+        "last_success_at": 1793049197.270199,
+        "last_counts": {
+          "due_changed": 0,
+          "emitted": 0,
+          "rescheduled": 0,
+          "dispatch_succeeded": 0,
+          "dispatch_failed": 0,
+          "dispatch_unsupported": 0,
+          "dispatch_start_rejected": 0,
+          "wake_enqueued": 0,
+          "wake_skipped_no_keeper": 0,
+          "wake_skipped_missing_schedule": 0,
+          "wake_skipped_non_keeper_actor": 0,
+          "wake_skipped_unregistered_keeper": 0,
+          "wake_failed": 0
+        },
+        "totals": {
+          "due_changed": 2,
+          "emitted": 2,
+          "rescheduled": 0,
+          "dispatch_succeeded": 1,
+          "dispatch_failed": 1,
+          "dispatch_unsupported": 0,
+          "dispatch_start_rejected": 0,
+          "wake_enqueued": 1,
+          "wake_skipped_no_keeper": 0,
+          "wake_skipped_missing_schedule": 0,
+          "wake_skipped_non_keeper_actor": 0,
+          "wake_skipped_unregistered_keeper": 0,
+          "wake_failed": 0
+        },
+        "pending_settlement_count": 0,
+        "settlement_errors": []
+      },
+      "original_schedule_status": "due",
+      "attempts": [
+        {
+          "attempt_id": "01a17a0f-0588-7000-8736-0fd8f0e2fd87",
+          "status": "failed",
+          "settlement_kind": "retryable_failure",
+          "started_at": 1793049167.238468,
+          "finished_at": 1793049167.253119,
+          "due_at": 1793049152.307249,
+          "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+          "error": "retryable schedule dispatch failure: scheduled keeper wake durable enqueue failed: failed to persist keeper=audit-settle-a path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/event-queue-v19.json: save_file_atomic /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/event-queue-v19.json: Sys_error(\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/.atomic_a19800.tmp: Permission denied\")"
+        }
+      ],
+      "queue_pending_count": 0,
+      "raw_captures": [
+        {
+          "kind": "http",
+          "stage": "retry-settled-only",
+          "method": "GET",
+          "path": "/health?full=1",
+          "origin": "http://127.0.0.1:61467",
+          "request_body": null,
+          "observed_at": 1793049197.444913,
+          "duration_ms": 2.351417,
+          "status": 200,
+          "error": null,
+          "body_path": "00481-response.bin",
+          "body_bytes": 32605,
+          "body_sha256": "bae23ea13c288b690c3835f3c0f1cfde593f3b5739a0f911867b16e814279b2b"
+        },
+        {
+          "kind": "canonical-ledger-observation",
+          "stage": "retry-settled-only",
+          "observed_at": 1793049197.449495,
+          "body_path": "00482-response.bin",
+          "body_bytes": 3561,
+          "body_sha256": "8aeb0b6a019c052565a8ab88d1efb2f76f3b0350eb2415d1dceff432fabf8bed"
+        },
+        {
+          "kind": "canonical-queue-observation",
+          "stage": "retry-settled-only",
+          "observed_at": 1793049197.450183,
+          "body_path": "00483-response.bin",
+          "body_bytes": 1402,
+          "body_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+        }
+      ]
+    },
+    {
+      "phase": "fresh-admission",
+      "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+      "status": {
+        "status": "ok",
+        "tick_count": 7,
+        "tick_in_flight": false,
+        "last_tick_started_at": 1793049212.271732,
+        "last_tick_finished_at": 1793049212.345113,
+        "last_success_at": 1793049212.345113,
+        "last_counts": {
+          "due_changed": 0,
+          "emitted": 0,
+          "rescheduled": 0,
+          "dispatch_succeeded": 1,
+          "dispatch_failed": 0,
+          "dispatch_unsupported": 0,
+          "dispatch_start_rejected": 0,
+          "wake_enqueued": 1,
+          "wake_skipped_no_keeper": 0,
+          "wake_skipped_missing_schedule": 0,
+          "wake_skipped_non_keeper_actor": 0,
+          "wake_skipped_unregistered_keeper": 0,
+          "wake_failed": 0
+        },
+        "totals": {
+          "due_changed": 2,
+          "emitted": 2,
+          "rescheduled": 0,
+          "dispatch_succeeded": 2,
+          "dispatch_failed": 1,
+          "dispatch_unsupported": 0,
+          "dispatch_start_rejected": 0,
+          "wake_enqueued": 2,
+          "wake_skipped_no_keeper": 0,
+          "wake_skipped_missing_schedule": 0,
+          "wake_skipped_non_keeper_actor": 0,
+          "wake_skipped_unregistered_keeper": 0,
+          "wake_failed": 0
+        },
+        "pending_settlement_count": 0,
+        "settlement_errors": []
+      },
+      "original_schedule_status": "succeeded",
+      "attempts": [
+        {
+          "attempt_id": "01a17a0f-b577-7000-a7de-be3619a4b5c7",
+          "status": "succeeded",
+          "settlement_kind": "accepted",
+          "started_at": 1793049212.277778,
+          "finished_at": 1793049212.286643,
+          "due_at": 1793049152.307249,
+          "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+          "error": null
+        },
+        {
+          "attempt_id": "01a17a0f-0588-7000-8736-0fd8f0e2fd87",
+          "status": "failed",
+          "settlement_kind": "retryable_failure",
+          "started_at": 1793049167.238468,
+          "finished_at": 1793049167.253119,
+          "due_at": 1793049152.307249,
+          "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+          "error": "retryable schedule dispatch failure: scheduled keeper wake durable enqueue failed: failed to persist keeper=audit-settle-a path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/event-queue-v19.json: save_file_atomic /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/event-queue-v19.json: Sys_error(\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/.atomic_a19800.tmp: Permission denied\")"
+        }
+      ],
+      "queue_pending_count": 1,
+      "raw_captures": [
+        {
+          "kind": "http",
+          "stage": "fresh-admission",
+          "method": "GET",
+          "path": "/health?full=1",
+          "origin": "http://127.0.0.1:61467",
+          "request_body": null,
+          "observed_at": 1793049212.4572558,
+          "duration_ms": 2.574375,
+          "status": 200,
+          "error": null,
+          "body_path": "00694-response.bin",
+          "body_bytes": 34458,
+          "body_sha256": "e3dd10e8db29949048df4b52bd59ad172b6b9b57cdcf3dbdf79901c5eef07c3f"
+        },
+        {
+          "kind": "canonical-ledger-observation",
+          "stage": "fresh-admission",
+          "observed_at": 1793049212.46145,
+          "body_path": "00695-response.bin",
+          "body_bytes": 4598,
+          "body_sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c"
+        },
+        {
+          "kind": "canonical-queue-observation",
+          "stage": "fresh-admission",
+          "observed_at": 1793049212.462467,
+          "body_path": "00696-response.bin",
+          "body_bytes": 2066,
+          "body_sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70"
+        }
+      ]
+    }
+  ],
+  "finish_stamp_boundary": {
+    "settled_original_finished_at": 1793049167.253119,
+    "within_original_failed_tick": [
+      1793049167.228963,
+      1793049167.255665
+    ],
+    "before_queue_and_ledger_repairs": true,
+    "exact_same_old_record_retained_after_new_acceptance": true,
+    "opaque_original_intent_finish_bit_equality_proven": false
+  },
+  "fresh_exact_source": {
+    "source_ref": "94b1fca77be84d01b053e393aa357fdf9ccd343541b0f4d23df73f62bee4d907",
+    "source_lexical_bytes": 567,
+    "source_incarnation": 2,
+    "occurrence_id": "bb77335c632c98c38ff40dbb5fa2aedb73358af14ba9617d75aceff2b4b0c33d",
+    "payload_schedule_id": "audit-settle-original",
+    "payload_instance": "01a17a0e-909b-7000-b2db-ed614d9e5466",
+    "payload_due_at": 1793049152.307249,
+    "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+    "public_inventory_raw_capture": {
+      "kind": "http",
+      "stage": "final-exact-inventory",
+      "method": "GET",
+      "path": "/api/v1/keepers/audit-settle-a/waiting-inventory",
+      "origin": "http://127.0.0.1:61467",
+      "request_body": null,
+      "observed_at": 1793049212.483089,
+      "duration_ms": 2.2495,
+      "status": 200,
+      "error": null,
+      "body_path": "00697-response.bin",
+      "body_bytes": 2194,
+      "body_sha256": "cd6b319d07207f1b33f82ce9704031f63708bb20ac2d9d9d3d5c490898aa8274"
+    },
+    "public_inventory_exact_ref_incarnation_equal": true
+  },
+  "terminal": {
+    "summary_outcome": "bounded_checks_passed_requires_two_fault_cause_review",
+    "automatic_check_count": 266,
+    "automatic_checks_are_not_independent_verdict": true,
+    "exit_codes": {
+      "A": 0
+    },
+    "cleanup_errors": [],
+    "forced_kills": [],
+    "restart_count": 0,
+    "server_log_shutdown_complete": "[2026-10-27 06:13:32] [INFO] [Server] MASC MCP: Shutdown complete."
+  },
+  "trial1": {
+    "scope": "Separate v3 setup-only INCOMPLETE, original settlement schedule absent; not counted as F5 success or product failure. Failed cancellation snapshot was not retained, so its exact last-transition bytes cannot be retroactively reconstructed.",
+    "summary": {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/summary.json",
+      "bytes": 2719,
+      "sha256": "466ef9253fb8dd85cb8543e71e54e56ccc01c54f9697c773353adfb07290a10f"
+    },
+    "incomplete": {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/incomplete.json",
+      "bytes": 135,
+      "sha256": "c8606f25896964d3fa0df5fafc7ba6ed6449b185b1983864382aa4db47dce27c"
+    },
+    "shutdown_ledger": {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/after-owned-shutdown-ledger.json",
+      "bytes": 1928,
+      "sha256": "d11ac63794072b51dbe578b170cc25b4a3f2d723fb5b1bb90d7ba3e52b03ced7"
+    },
+    "outcome": "incomplete",
+    "exit_codes": {
+      "A": 0
+    }
+  },
+  "raw_bindings": [
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/server-A.log",
+      "bytes": 30865,
+      "sha256": "0bab884b51a9df492eb3149afb295328064a7b543b5f8d342f8b45fb90f1700b"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/server-at-first-failure.log",
+      "bytes": 24243,
+      "sha256": "663da87e20bc2cffdd6aded0b29c9c5538d432ee220cc199e0eb49339ed31a38"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/before-stop-ledger.json",
+      "bytes": 2920,
+      "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-ledger.json",
+      "bytes": 2920,
+      "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-queue.json",
+      "bytes": 1402,
+      "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-wal.jsonl",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/after-owned-shutdown-ledger.json",
+      "bytes": 4598,
+      "sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/final-source-address-queue.json",
+      "bytes": 2066,
+      "sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-accepted-queue.json",
+      "bytes": 841,
+      "sha256": "368159f049435883e2f79c745447c939cf734a8715872f7c75132e30c72c81d4"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-cancelled-queue.json",
+      "bytes": 1402,
+      "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-after-cancel-wal.jsonl",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/events.jsonl",
+      "bytes": 204981,
+      "sha256": "b1949d000c1e7a510134bdf834b8d7914faf7afc0e4b5233cbc3f1e16101daad"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/summary.json",
+      "bytes": 26981,
+      "sha256": "fa9899443c01585678c156797cd757e902088bdadc0865e8a7251620b4396e5b"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/provenance.json",
+      "bytes": 4515,
+      "sha256": "1f52b974ea1a7d72e1f74cb4742b1825850e31b0fbdd24e9d888fc3e0cc549a1"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/process-A.json",
+      "bytes": 143,
+      "sha256": "996d9bd4f56e1eb81009522192e51130d4777b6ff5e57792f77f14779833e635"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/posix-lock-preflight.json",
+      "bytes": 109,
+      "sha256": "698c90d7dccfe80fe142626df5110b1b4c04cbe1aa51a34d2c4164169b544b8a"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/wal-barrier.json",
+      "bytes": 138,
+      "sha256": "833d35ad200d1a888e57067ae229dc0c7e6e1ddbf87498764ef47a9d9191dcca"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/stopped-process.json",
+      "bytes": 71,
+      "sha256": "5eff394bb36d59d1703a39d190ce0f3b395ffc166af8efecb61cdf8959065f3f"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/resumed-process.json",
+      "bytes": 46,
+      "sha256": "efd9b0dfe436daf618a36620e225b67f533784bef45284af2eb0cd39695393d3"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/faults-installed.json",
+      "bytes": 262,
+      "sha256": "5a4b03263b91551e9f68951c4e49408faae65b7d329d5bfcaba72a4ff672327d"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-effective-write-refusal.json",
+      "bytes": 99,
+      "sha256": "5f22fcc732c4d3d0b352127fca598a6256979140d0efa71891028d9067c8d0cd"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-repaired.json",
+      "bytes": 74,
+      "sha256": "d6244f93bcc45939013aa9e2033e16f52ce208a6dfca93257b9b8149ff7a0fe7"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/ledger-repaired.json",
+      "bytes": 46,
+      "sha256": "f0cfaf58ad72d3228ceaeca1f02aabba1139565d97d30303b1428d8e5a81f6f2"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/final-source-address-proof.json",
+      "bytes": 508,
+      "sha256": "d11453ae3cedba45764959b2b7303e467df15686248f477ec818c529a0009f75"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/original-retry-settled.json",
+      "bytes": 1049,
+      "sha256": "a6ee240a508673a672d290b9f64585d12e767d549aeae247c6a876cae0ec3354"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-cancellation-receipt-link.json",
+      "bytes": 2020,
+      "sha256": "7dc556119c45081c4f8af4ddbe097564b36291a63e52386988ee03d93d1b734b"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/probe_pending_settlement_actual_c2_v5.py",
+      "bytes": 49028,
+      "sha256": "1a513560e8d48580cdeb02c20f8a5c0a2403cb6730894ad7d0994cf9e5776577"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/native40396800146/c2-native-binding.json",
+      "bytes": 1383,
+      "sha256": "89599a1c52c93d774eff7675f216b65d0b208a913c428506dbee2ebf097f3c17"
+    }
+  ],
+  "limits": [
+    "One controlled serial local-file-system trial with two paused manual owners; not concurrent fleet/multiuser/model behavior proof.",
+    "Pending Retry intent is process-local. No process death/restart/power-loss preservation of it is established; startup-recovery evidence is separate.",
+    "No raw intent serialization exists for independent exact finish-clock bit comparison; only original failed-tick bounds and later retained record equality are proved.",
+    "Health/ledger/queue are consecutive observations, not one cross-store atomic snapshot. Phase order and unchanged raw snapshots support the bounded causal interpretation.",
+    "POSIX/kqueue preflight and controller source support the barrier; the retained lease-absence premise is controller-observed rather than a separately captured filesystem listing.",
+    "No actual model turn, provider switch, cancellation/transfer during this fault, arbitrary external-effect exactly-once guarantee, primary replacement, installation or whole feature PASS is claimed.",
+    "No new controller, native process, CI action or HTTP query was executed by this reviewer. Only this derivative review report was written."
+  ],
+  "privacy": "Synthetic owned scenario data and hashes only; no credentials, auth headers, private user prompt or model thinking is copied."
+}

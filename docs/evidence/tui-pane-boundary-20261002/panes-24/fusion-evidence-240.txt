@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+┌────────────────────────────────┐                                                                                                                                                      │[Recent] Changes · 2 keepers · feed closed: observer st
+│  Fusion (1)                    │   MASC Fusion  pane-audit  HTTP [connected]                                                                                                          │                   state     tool        calls  new tok
+├────────────────────────────────┤ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+│  ▸ [done] 2… @alpha pane-audit │    Reason                                                                                                                                            │· beta             no events
+│                                │      Pane audit synthesis                                                                                                                            │───────────────────────────────────────────────────────
+│                                │                                                                                                                                                      │alpha · no events on this feed yet
+│                                │    ●○  ─▶  first ×2  ─▶  meta ×1  ·  judge-of-judges
+│                                │    First 1 [synthesized] ollama_cloud.minimax-m3  (30 in / 40 out)
+│                                │    First 1 ollama_cloud.minimax-m3
+│                                │      first-evidence-resolved-501
+│                                │    First 2 [failed] ollama_cloud.deepseek-v4-pro  [timeout]  (timed out)
+│                                │      first judge body timed out
+│                                │
+│                                │    4  TOOL EXECUTIONS
+│                                │    Coverage: complete across 0 AGENT_CORE actor(s)
+│                                │    Observed actors: (none)
+│                                │    No Tool calls were observed for instrumented actors
+│                                │
+│                                │    5  EVIDENCE RECORDED
+│                                │    Board link: masc://board/post-pane-audit
+└────────────────────────────────┘
+  j/k:scroll  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Y:copy  Esc:back  r:refresh  Tab:next  q:quit  30-46/46  | Port: 64197
+ › to alpha   (i to write)

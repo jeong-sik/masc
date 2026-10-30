@@ -1,0 +1,188 @@
+{
+  "source": "12c001e55e27c7a9340ae27f956e112fd5360c76",
+  "scope": "private candidate raw tool execution only; no provider reasoning copied",
+  "records": [
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 14,
+      "tool_use_id": "call_b1357a19657e45319e16a370",
+      "tool_name": "keeper_skill",
+      "finished_at": 1792860875.562869,
+      "tool_error": false,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 11,
+      "started_at": 1792860875.554748,
+      "elapsed_seconds": 0.008121013641357422,
+      "result_bytes": 16023,
+      "result_sha256": "234f1f449ee125197b936d62e6c7b3facc9725777d501f79fdb3759ba9c4bdf1"
+    },
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 16,
+      "tool_use_id": "call_896a3a4140c14a89af0848f5",
+      "tool_name": "BrowserTabs",
+      "finished_at": 1792860875.579995,
+      "tool_error": false,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 12,
+      "started_at": 1792860875.555993,
+      "elapsed_seconds": 0.0240018367767334,
+      "result_bytes": 25522,
+      "result_sha256": "b63c1a1a12adbec53467eab4c37b49793d4f2f3630aa999cfe935e7714d214ab",
+      "input": {},
+      "result": "{\"browserCapabilities\":{\"scope\":\"implemented public tools for this browser; not readiness, effect success or dispatch authority\",\"operations\":[{\"operation\":\"list_tabs\",\"status\":\"available\",\"tool\":\"masc_browser_tabs\"},{\"operation\":\"open_tab\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"open_tab\",\"constraints\":[\"Requires the exact observed clientId. Opens a page in the connection's ego task space; it shares the cookies of the operator's ego profile.\",\"Creation can succeed even if navigation fails. Inspect the returned tabId before another create.\"]},{\"operation\":\"close_tab\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"close_tab\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"activate_tab\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"list_windows\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"create_window\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"close_window\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"navigate\",\"status\":\"conditional\",\"tool\":\"masc_browser_goto\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires the exact observed clientId and the tabId of a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\",\"Waits for the page to load. A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.\"]},{\"operation\":\"follow_link\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"follow_link\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use one freshly observed selector or documentId/nodeId; the target must be visible and unobstructed.\",\"Requires expectedUrl and an observed same-tab HTTP(S) anchor; rejects downloads, new-window targets and unsupported referrer semantics.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"back\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"back\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Moves one entry in the tab's own history and is refused before any effect when there is none.\",\"A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"forward\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"forward\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Moves one entry in the tab's own history and is refused before any effect when there is none.\",\"A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"reload\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"reload\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"session_lifecycle\",\"status\":\"unsupported\",\"reason\":\"Connected operator browsers do not expose an owned session lifecycle.\"},{\"operation\":\"read_text\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"text\",\"constraints\":[\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"read_html\",\"status\":\"unsupported\",\"reason\":\"Document-source adapters exist, but BrowserRead exposes no HTML/source mode.\"},{\"operation\":\"read_elements\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"elements\",\"constraints\":[\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"read_scene\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"scene\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId; viewport scene may be truncated. Geometry is not an occlusion guarantee.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"read_regions\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"regions\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId; copy observed region references for scoped reads.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"read_snapshot\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"snapshot\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId; ego's own accessibility tree, each actionable node with a ref (ref=12). snapshotScope is viewport (default), full_page, or subtree with root, a ref an earlier snapshot of the same page printed.\",\"A ref names the page as it was read; read again after an effect or a page change.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"screenshot\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"screenshot\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires an owning Keeper and explicit tabId; captures the viewport, not the whole document.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"native_workflow\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"workflow\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\",\"Known native Page calls run serially with SDK waits and one final snapshot. expectedUrl checks the starting page; navigation can change it afterward. No cumulative command window; SDK defaults or explicit per-step timeoutMs own waits. Failures retain completed steps; never replay the sequence.\"]},{\"operation\":\"click_snapshot_target\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.\",\"The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.\",\"The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"fill_snapshot_target\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"fill\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.\",\"The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.\",\"The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"hover_snapshot_target\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"hover\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.\",\"The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.\",\"The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"double_click_snapshot_target\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"double_click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.\",\"The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.\",\"The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"click\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Selector uses Ego SDK locators and native click, including iframe/shadow traversal and auto-scrolling. Scene references retain MASC identity and coordinate guards.\",\"The URL read before SDK entry is reported; it is not an atomic navigation guard.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"double_click\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"double_click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Selector uses native Ego double click and SDK actionability. Scene references retain MASC identity and coordinate guards; observe the application result.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"right_click\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click_at\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use the current documentId and viewport geometry; stale URL/document/viewport is refused.\",\"Pass button \\\"secondary\\\" (right) or \\\"middle\\\". Only click_at takes a button; selector and node targets do not.\",\"ego's native mouse input at the observed point; a context menu or application behavior must be observed afterward.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"middle_click\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click_at\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use the current documentId and viewport geometry; stale URL/document/viewport is refused.\",\"Pass button \\\"secondary\\\" (right) or \\\"middle\\\". Only click_at takes a button; selector and node targets do not.\",\"ego's native mouse input at the observed point; a context menu or application behavior must be observed afterward.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"pointer_down\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"pointer_up\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"hover\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"hover\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Selector uses native Ego hover and auto-scrolling. Scene references retain MASC identity and coordinate guards.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"pointer_drag\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"drag_to\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use one freshly observed selector or documentId/nodeId; the target must be visible and unobstructed.\",\"Use the current documentId and viewport geometry; stale URL/document/viewport is refused.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\",\"Uses ego's native mouse API with observed waypoints; durationMs must be zero. Input receipt does not establish application drop acceptance.\"]},{\"operation\":\"html5_drop\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"scroll_page\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"scroll\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Scrolls the page; use scroll_at for a nested pane.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"scroll_at\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"scroll_at\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Use the current documentId and viewport geometry; stale URL/document/viewport is refused.\",\"Scrolls the pane at the observed viewport point.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"fill\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"fill\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Selector uses native Ego fill, locator resolution and auto-scrolling. Scene references retain the MASC DOM adapter. Fill does not press Enter or submit.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"type_text\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"type_text\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires current documentId and expectedUrl; stale document/URL is refused.\",\"Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused, use press_key for Tab/Enter.\",\"ego types with its native keyboard input.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"press_key\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"press_key\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires current documentId and expectedUrl; stale document/URL is refused.\",\"Targets current enabled focus (or body); accepts named keys or one printable ASCII character with Control/Meta/Alt/Shift modifiers. Type other text with type_text.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"key_chord\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"press_key\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires current documentId and expectedUrl; stale document/URL is refused.\",\"Targets current enabled focus (or body); accepts named keys or one printable ASCII character with Control/Meta/Alt/Shift modifiers. Type other text with type_text.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"select_option\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"select_option\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Pass value or distinct values ([] clears). Ego receives exact {value} objects and returns its native selected values. Disabled options are programmatically selectable. Native method failures are uncertain and are never replayed.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"read_frames\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"snapshot\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId and no framePath: the viewport snapshot holds each iframe's content, a cross-origin one included, with refs; snapshotScope subtree with root set to the iframe's ref reads that frame alone.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"frame_interaction\",\"status\":\"conditional\",\"tool\":\"masc_browser_interact\",\"action\":\"click\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"click and fill with target and no framePath: a ref from the frame's snapshot acts inside that frame, and a role or text target is found inside frames, a cross-origin one included, when the top document has none. expectedUrl is the top page's URL.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"read_dialog\",\"status\":\"conditional\",\"tool\":\"masc_browser_tabs\",\"constraints\":[\"Each list_tabs row of a page blocked on a dialog carries dialog: type (alert, confirm, prompt or beforeunload), message and, for a prompt, defaultValue, as ego reads the page now.\",\"An input that opens a dialog answers with it in the receipt; while it is open, reads, moves and input on that page are refused before any effect.\",\"The message is whatever the page wrote, and a page can write anything.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"accept_dialog\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"accept_dialog\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Optional text applies only to a prompt. The receipt names the dialog that was answered; with none open it is refused before any effect.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"dismiss_dialog\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"dismiss_dialog\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"The receipt names the dialog that was dismissed; with none open it is refused before any effect.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"hand_off\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"hand_off\",\"constraints\":[\"Requires the exact observed clientId. Hands the whole ego task space, tabs the operator opened there included, to the operator for a step only a person can take, such as a sign-in or a captcha; tell them what to do.\",\"While the operator holds the space, every step on it is refused before any effect, until take_over.\"]},{\"operation\":\"take_over\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"take_over\",\"constraints\":[\"Requires the exact observed clientId. Only after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them.\",\"Refused before any effect when the agent already holds the space. The receipt carries the tab that was active, unless it is a tab the operator opened; list the tabs before the next step.\"]},{\"operation\":\"upload_file\",\"status\":\"conditional\",\"tool\":\"masc_browser_act\",\"action\":\"upload\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Requires an owning Keeper, an explicit ego browser, a native Ego file-input locator or snapshot ref and sandbox-authorized file paths; 16 MiB per file.\",\"The receipt's chosen lists staged files handed to the SDK, not observed input.files; the page reads them later, so this connection keeps the copies until its space ends.\",\"For a page that makes its file input only on a click, give opener instead of selector: one native Ego control locator. The SDK owns the chooser wait; the click is the effect, ego hands its file chooser the copies, and the receipt's chosen lists them.\",\"Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.\"]},{\"operation\":\"list_downloads\",\"status\":\"conditional\",\"tool\":\"masc_browser_read\",\"mode\":\"downloads\",\"constraints\":[\"Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome.\",\"Explicit tabId and an explicit ego browser. Lists the downloads the page started from the first step this connection took on it, opening it included, as pending, completed or interrupted. watchingSince says from when: a stopped command restarts ego's process, and with it the list.\",\"A completed file is saved in the worker's own folder and returned as an artifact. ego's browser touches the operator's download folder while a download runs and leaves nothing there.\",\"Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read.\"]},{\"operation\":\"page_zoom\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"resize_viewport\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"touch\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"read_clipboard\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"write_clipboard\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"},{\"operation\":\"read_network\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"intercept_network\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"read_console\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"read_storage\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"write_storage\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"emulate_environment\",\"status\":\"unsupported\",\"reason\":\"This public operation is implemented only by the owned Gecko adapter.\"},{\"operation\":\"sentence_action\",\"status\":\"unsupported\",\"reason\":\"No public browser tool implements this operation.\"}]},\"requiredActions\":[],\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"reason\":\"existing_login\"},\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"transport\":\"ego_task_space\",\"tabs\":[{\"id\":1,\"index\":0,\"url\":\"chrome://newtab/\",\"title\":\"새 탭\",\"active\":true}]}"
+    },
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 27,
+      "tool_use_id": "call_10f8f04fea3749d0b129f902",
+      "tool_name": "keeper_tool_search",
+      "finished_at": 1792860895.020356,
+      "tool_error": false,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 25,
+      "started_at": 1792860895.016144,
+      "elapsed_seconds": 0.004211902618408203,
+      "result_bytes": 302,
+      "result_sha256": "c59027907ef6ced1d613406b4d51f04f06267f8419e0f0fac453a613d5f8a99f"
+    },
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 31,
+      "tool_use_id": "call_5ae888bba2854b5c8e5bf0cb",
+      "tool_name": "BrowserGoto",
+      "finished_at": 1792860895.208346,
+      "tool_error": false,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 29,
+      "started_at": 1792860895.027409,
+      "elapsed_seconds": 0.1809368133544922,
+      "result_bytes": 317,
+      "result_sha256": "0c0f6c9669c5c93b5089734a31f9c61f737ac6b5860e060778fbc2b31cbb580d",
+      "input": {
+        "clientId": "fdc0b51b-520d-48ec-9e84-49a2498890b5",
+        "lane": "live",
+        "tabId": 1,
+        "url": "http://127.0.0.1:9457/"
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"reason\":\"explicit_browser\"},\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"goto\",\"url\":\"http://127.0.0.1:9457/\",\"title\":\"Ego native transport check\"}"
+    },
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 41,
+      "tool_use_id": "call_f771c56797c943fcb279b5ca",
+      "tool_name": "BrowserAct",
+      "finished_at": 1792860902.07277,
+      "tool_error": false,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 39,
+      "started_at": 1792860901.995056,
+      "elapsed_seconds": 0.07771420478820801,
+      "result_bytes": 319,
+      "result_sha256": "e3236d2b7ac9e8acbc8dcc895c1c150b7e7366100b2cc6b3e088a2a02ce72837",
+      "input": {
+        "action": "reload",
+        "clientId": "fdc0b51b-520d-48ec-9e84-49a2498890b5",
+        "lane": "live",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"reason\":\"explicit_browser\"},\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"reload\",\"url\":\"http://127.0.0.1:9457/\",\"title\":\"Ego native transport check\"}"
+    },
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 53,
+      "tool_use_id": "call_d881406ff23049c290d0b954",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792860907.118046,
+      "tool_error": true,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 49,
+      "started_at": 1792860907.113499,
+      "elapsed_seconds": 0.004547119140625,
+      "result_bytes": 635,
+      "result_sha256": "7f45509b6563db8859de5751ac5f862cc949d0eae0e6ec835e76089debc40978",
+      "input": {
+        "mode": "snapshot",
+        "tabId": 1
+      },
+      "result": "{\"message\":\"Invalid browser arguments: This tab or document belongs to a browser. Repeat its observed lane and clientId.. Correct the arguments using the tool schema and exact observed identities; no browser command was dispatched.\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"policy_rejection\",\"next_move\":\"Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.\",\"data\":{\"kind\":\"invalid_input\",\"detail\":\"This tab or document belongs to a browser. Repeat its observed lane and clientId.\"}}"
+    },
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 63,
+      "tool_use_id": "call_9cdceef7e6404eceb3dc3ac3",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792860912.925406,
+      "tool_error": false,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 61,
+      "started_at": 1792860912.905665,
+      "elapsed_seconds": 0.019741058349609375,
+      "result_bytes": 623,
+      "result_sha256": "fd6fb6e6a4aa58c9a9f0ca0b7d41597d39f0f0793437d396c90014dc47429fbb",
+      "input": {
+        "clientId": "fdc0b51b-520d-48ec-9e84-49a2498890b5",
+        "lane": "live",
+        "mode": "snapshot",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"reason\":\"explicit_browser\"},\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:9457/\",\"title\":\"Ego native transport check\",\"scope\":\"viewport\",\"snapshot\":\"[p1 \\\"Ego native transport check\\\" | space \\\"masc-ego-client-policy-20261025\\\"(30): 1 managed, 0 untracked — p1* \\\"Ego native transport check\\\"]\\nroot\\n  heading\\n    text \\\"Ego native transport check\\\"\\n  button [ref=1]\\n    text \\\"연결 검증 확인\\\"\\n\",\"truncated\":false,\"chars\":229}"
+    },
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 73,
+      "tool_use_id": "call_0fbb3f33ecee42d3aadfcb6d",
+      "tool_name": "BrowserInteract",
+      "finished_at": 1792860919.93137,
+      "tool_error": false,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 71,
+      "started_at": 1792860919.836447,
+      "elapsed_seconds": 0.09492301940917969,
+      "result_bytes": 381,
+      "result_sha256": "d36709d5a348b087c9e526dd5cef6251dd96c599ad522bd5bda69bf54d63e7a5",
+      "input": {
+        "action": "click",
+        "clientId": "fdc0b51b-520d-48ec-9e84-49a2498890b5",
+        "expectedUrl": "http://127.0.0.1:9457/",
+        "lane": "live",
+        "tabId": 1,
+        "target": {
+          "ref": 1
+        }
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"reason\":\"explicit_browser\"},\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"click\",\"target\":{\"ref\":1},\"urlBefore\":\"http://127.0.0.1:9457/\",\"url\":\"http://127.0.0.1:9457/\",\"title\":\"네이티브 연결 검증 완료\"}"
+    },
+    {
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 83,
+      "tool_use_id": "call_2fd914484c4042f88160a549",
+      "tool_name": "BrowserRead",
+      "finished_at": 1792860926.127126,
+      "tool_error": false,
+      "start_file": "turn-1792860859690-a94b-000000.jsonl",
+      "start_line": 81,
+      "started_at": 1792860926.109682,
+      "elapsed_seconds": 0.01744389533996582,
+      "result_bytes": 703,
+      "result_sha256": "11df2e0c9e84cdfedfad2b19b4036a49b59005b8e6aa87071a3748334e2acccc",
+      "input": {
+        "clientId": "fdc0b51b-520d-48ec-9e84-49a2498890b5",
+        "lane": "live",
+        "mode": "snapshot",
+        "tabId": 1
+      },
+      "result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"reason\":\"explicit_browser\"},\"clientId\":\"fdc0b51b-520d-48ec-9e84-49a2498890b5\",\"transport\":\"ego_task_space\",\"tabId\":1,\"url\":\"http://127.0.0.1:9457/\",\"title\":\"네이티브 연결 검증 완료\",\"scope\":\"viewport\",\"snapshot\":\"[p1 \\\"네이티브 연결 검증 완료\\\" | space \\\"masc-ego-client-policy-20261025\\\"(30): 1 managed, 0 untracked — p1* \\\"네이티브 연결 검증 완료\\\"]\\nroot\\n  heading\\n    text \\\"Ego native transport check\\\"\\n  button [ref=1]\\n    text \\\"연결 검증 확인\\\"\\n  heading\\n    text \\\"네이티브 연결 검증 완료\\\"\\n\",\"truncated\":false,\"chars\":238}"
+    }
+  ],
+  "unfinished": []
+}

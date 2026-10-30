@@ -1,0 +1,24 @@
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+
+   MASC Usage  15:26:23  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Plan    Trend    Keepers    v:next view
+
+   Plan usage
+  ┌ Audit provider · 10b5205e                                                                                        ┐
+  │ 5h                   ▕█████████▌              ▏ Used 40%                                                         │
+  │ Model call limit                                                                                                 │
+  │ Reset — · heard 41d06h ago                                                                                       │
+  └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+  j/k:scroll  p:Usage / Telemetry  v:Plan / Trend / Keepers  w:1d / 7d / 14d  Esc:Dashboard  r:refresh  Tab:next  q:quit
+ › to alpha   (i to write)

@@ -1,0 +1,19 @@
+{
+  "schema": "masc.read-program.source-boundary.v1",
+  "direct_base": "45592d21f7f1c11226e75c857d1983f7b0eef9d5",
+  "product_change_source": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+  "current_native_source": "cdeb9e5af15677c22fc4be8b0cc0f82d42e5b351",
+  "repair_delta": {
+    "file": "test/test_keeper_sandbox_read_backend.ml",
+    "scope": "Single API argument label repair; ML/MLI product files unchanged."
+  },
+  "measured_docker_scope": "Direct CLI counterfactual on the installed pinned image, not a new MASC binary or provider episode.",
+  "native_selection": [
+    "test_keeper_sandbox_read_backend"
+  ],
+  "actual_prior_model_failure_source": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "new_provider_episode_run": false,
+  "production_installed_by_this_work": false,
+  "original_goal_complete": false,
+  "whole_regression": "not_run"
+}

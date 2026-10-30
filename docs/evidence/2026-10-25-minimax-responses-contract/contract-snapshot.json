@@ -1,0 +1,141 @@
+{
+  "observed_at": "2026-10-25T11:56:10.067787+00:00",
+  "source_head": "8d872e10305f4ce1fc7e14c47379d462c184da20",
+  "official_sources": [
+    {
+      "url": "https://platform.minimax.io/docs/api-reference/text/api/openapi-responses.json",
+      "sha256": "a8c51922e4530595537030fd5c0ab16a6faaf263e662bf753c588fe61169e5ea",
+      "bytes": 79832,
+      "license": {
+        "name": "MIT"
+      }
+    },
+    {
+      "url": "https://platform.minimax.io/docs/api-reference/text/api/openapi-chat-openai.json",
+      "sha256": "0a51cdac775b071b9c0cae381c990964823ab257298dffa400792d4ddadc3bcc",
+      "bytes": 70206,
+      "license": {
+        "name": "MIT"
+      }
+    }
+  ],
+  "responses": {
+    "request_tool_choice": {
+      "type": "string",
+      "enum": [
+        "auto"
+      ],
+      "description": "Tool selection strategy: `auto` lets the model decide whether to call tools"
+    },
+    "input_item_type": {
+      "type": "string",
+      "enum": [
+        "message",
+        "function_call",
+        "function_call_output",
+        "reasoning"
+      ],
+      "default": "message",
+      "description": "Item type"
+    },
+    "input_reasoning_summary": {
+      "type": "array",
+      "description": "Reasoning segment array (only when `type` is `reasoning`)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "summary_text"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "description": "Reasoning text"
+          }
+        }
+      }
+    },
+    "output_reasoning": {
+      "title": "Reasoning",
+      "type": "object",
+      "description": "Reasoning output (only returned when reasoning is enabled)",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "`<id>_rs` format"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "reasoning"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed"
+          ]
+        },
+        "summary": {
+          "type": "array",
+          "description": "Reasoning summary"
+        },
+        "content": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reasoning_text"
+                ]
+              },
+              "text": {
+                "type": "string",
+                "description": "Reasoning text"
+              }
+            }
+          }
+        }
+      }
+    },
+    "request_has_previous_response_id": false,
+    "example_response_has_previous_response_id": null,
+    "request_has_store": false,
+    "request_reasoning": {
+      "type": "object",
+      "description": "Reasoning control. The default depends on the model, so no schema-level default is declared.\n- `MiniMax-M3.1-Flash`: reasoning is always on, including when `reasoning` is omitted. `effort` accepts `low`, `medium`, `high`, `xhigh` or `max`, and does tune reasoning depth. When omitted, it defaults to `max`. `effort: \"none\"` returns HTTP 400.\n- `MiniMax-M3`: reasoning is off unless `effort` is set to a non-`none` value, which turns reasoning on but does not tune its depth.\n- M2.x models: reasoning cannot be disabled; `effort: \"none\"` is accepted but ignored.",
+      "properties": {
+        "effort": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "none"
+          ]
+        }
+      },
+      "required": []
+    }
+  },
+  "chat": {
+    "request_has_tool_choice": false
+  },
+  "source_files": [
+    {
+      "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.ml",
+      "sha256": "cbb1ce411ebc61674e96a03ab70db0925451ae41c1f9ab152d324eee915a53b4"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/streaming.ml",
+      "sha256": "2c7d801d5162f8a9a1f330d99c35f6f16fafd819e4354a5a635be8c92cbdf9cc"
+    }
+  ]
+}

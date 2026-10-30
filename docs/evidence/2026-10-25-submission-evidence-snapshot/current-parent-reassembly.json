@@ -1,0 +1,100 @@
+{
+  "recorded_at": "2026-10-25T00:20:31.065320+00:00",
+  "current_parent": "ab763974086124c723a7c8d84a8f205f93cb39c1",
+  "original_parent": "2bc6ae8fa1904d8232c8ea0738e0b14bab824945",
+  "pre_restack_own_head": "00d47bf8dd06b143ece0d313ce0ce92c6db5effd",
+  "assembly": "Other session restacked original16 layers. gh stack rebase --upstack attempted to replay old ancestor commits and was aborted. Only own implementation and evidence commits were replayed onto exact current remote parent; no lower branch was pushed or rewritten. Original own head remains on backup branch.",
+  "assembled_own_commits": [
+    "d74ae4b23f18269f2ba6c29d7733aa1234c336f4",
+    "00d47bf8dd06b143ece0d313ce0ce92c6db5effd"
+  ],
+  "reviewed_followup_delta": "Scheduling hook now receives the same transitioned Task. Existing native fixture checks capture/scheduling/commit equality. Corrected rejection-correlation handoff comment. Parent imports new reviewer callback parameters in2 test stubs.",
+  "source_files": [
+    {
+      "path": "lib/task/tool_task_completion_review.ml",
+      "current_sha256": "d9f940fe5898ec6aef33c99259637e6ac168fe0b39ad88167203bb94b4a5d6c2",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/task/tool_task_completion_review.mli",
+      "current_sha256": "17848ac47c9ebb79b514b826b3739d4b0f83de8bcc653cb8e92ea7872da42ab3",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/types/types_core.mli",
+      "current_sha256": "8fa008eeebea9c2f19e243041a692e3af5aede047ab8c0cc50fab08d9685291e",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "current_sha256": "ac5e8ac491e1b8985aa9dbb9e14b03ed88615bba4bd183716842246af59c316c",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/verification_protocol.mli",
+      "current_sha256": "65c5ff70322dae63aef7956ed41e7f6a0b345608ca11dc6ab66ae41229fdd159",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/workspace/workspace_hooks.mli",
+      "current_sha256": "556ad3e4d1964d7d4964621691ae72a393bd3b9e353ddaae400fcc5f0b907dfc",
+      "same_as_author": false
+    },
+    {
+      "path": "lib/workspace/workspace_task.ml",
+      "current_sha256": "704302e7f31064cc2260c25d7c00f6871bdf4fb66a80168b4b942e75ce107ae5",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.ml",
+      "current_sha256": "be41c69eed480e5fb49b180325129d4f89bc9a5fd67c57a429a146d8f0f0fb87",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.mli",
+      "current_sha256": "a299bd6988eb5cce73f20a5de9e6df2ec35cf5250e99c0de676f594cfdae794a",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "current_sha256": "4f66ec9447b4d5aacebe01281d5e6cf01a6d7962bd0b7988cedaacead210ddaa",
+      "same_as_author": false
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.ml",
+      "current_sha256": "6e1b4ba489590b24a1cdd7ad3e82c455563aa380c23a1626aa25af21a33906a6",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.mli",
+      "current_sha256": "a2166a2071d83fa8bba94736d57406a3e19cf4caece3e5edcbb30bd049c424e3",
+      "same_as_author": true
+    },
+    {
+      "path": "test/test_completion_repair_delivery.ml",
+      "current_sha256": "d54353f9ab7e8bc912feca468291d5386df1cdd801cffd704ac89a518ed96aad",
+      "same_as_author": false
+    },
+    {
+      "path": "test/test_verification.ml",
+      "current_sha256": "08e7d7d05680d6cd6b07d3cc3e1086a9dc15615e2904af7d159b75f8d05ad704",
+      "same_as_author": false
+    },
+    {
+      "path": "test/test_workspace_handoff_boundary.ml",
+      "current_sha256": "b2d38e77ae61ad986e532e20ea160e31ce7d28f61d7d9da21be23931c6e5e701",
+      "same_as_author": true
+    },
+    {
+      "path": "test/test_workspace_task_verification_phase_e.ml",
+      "current_sha256": "1ab83b7f4c8bc48e160fadf900aef7f77042ce99dbae74020722d0d62ec895b3",
+      "same_as_author": true
+    },
+    {
+      "path": "lib/completion_authority_wakeup.mli",
+      "current_sha256": "cf46d862d1ef72deb50227052b163f25e4ccb92b9943378c9ce9a93a90687c2c",
+      "same_as_author": false
+    }
+  ],
+  "scope": "Exact file identity and current-parent actual-source14/19 probe; does not prove native execution or current-head runtime. Historical author review remains bound to62e4/328; current-parent review is separately required."
+}

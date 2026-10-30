@@ -1,0 +1,112 @@
+name: Lane Add-on native candidate
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: lane-addon-native-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    name: Release qualification ref
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require a release branch or tag
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/release/v*|refs/tags/v*) ;;
+            *) echo "Native qualification belongs to a Release/Tag candidate" >&2; exit 1 ;;
+          esac
+  macos:
+    needs: validate
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: System libraries
+        run: |
+          brew install flock gmp libpq openssl@3 zstd ripgrep
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig"
+            echo "CPATH=$openssl_prefix/include"
+            echo "LIBRARY_PATH=$openssl_prefix/lib"
+            echo "CPPFLAGS=-I$openssl_prefix/include"
+            echo "LDFLAGS=-L$openssl_prefix/lib"
+          } >> "$GITHUB_ENV"
+      - uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+      - name: Dependencies
+        run: opam install ./masc.opam --deps-only --locked --with-test --yes
+      - name: Build and test native integration
+        run: |
+          set -euo pipefail
+          mkdir -p proof dist
+          git rev-parse HEAD > proof/SOURCE_COMMIT
+          # Build native candidates and stage the shipped package resources.
+          opam exec -- dune build --profile release \
+            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/deployment_preflight_helper.exe bin/masc_exec_ssh_bootstrap.exe test/test_lane_addon.exe \
+            test/test_lane_addon_worker.exe test/test_lane_addon_sources.exe \
+            test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe \
+            test/test_lane_addon_resource_events.exe \
+            test/test_lane_addon_config.exe test/test_lane_addon_reconcile.exe \
+            test/test_lane_addon_declaration.exe test/test_keeper_tool_surface_schema.exe \
+            test/test_lane_addon_skills.exe test/test_lane_addon_composition.exe \
+            test/test_lane_addon_actions.exe test/test_lane_addon_subscription.exe \
+            addons/msx-observer/lane.toml \
+            addons/msx-observer/skills/msx-observation-rows/SKILL.md \
+            addons/msx-observer/skills/msx-observation-rows/scripts/summarize.py \
+            addons/msx-observer/skills/msx-observation-rows/references/observations.md \
+            addons/protocol.py addons/output-statistics/server.py \
+            addons/msx-observer/server.py addons/tests/test_packages.py \
+            test/test_tui_palette_matching.exe test/test_tui_lane_addons.exe \
+            test/test_tui_lane_subscriptions.exe 2>&1 | tee proof/build.log
+          failed_tests=()
+          run_proof_test() {
+            local name="$1"
+            shift
+            if "$@" 2>&1 | tee "proof/$name.log"; then
+              return 0
+            fi
+            failed_tests+=("$name")
+          }
+          # Direct executables read checked-in fixtures through DUNE_SOURCEROOT;
+          # building an .exe alone does not stage its (test) stanza's file deps.
+          for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_lane_addon_resource_events test_lane_addon_config test_lane_addon_reconcile test_lane_addon_declaration test_keeper_tool_surface_schema test_lane_addon_skills test_lane_addon_composition test_lane_addon_actions test_lane_addon_subscription test_tui_palette_matching test_tui_lane_addons test_tui_lane_subscriptions; do
+            run_proof_test "$test" env DUNE_SOURCEROOT="$GITHUB_WORKSPACE" "_build/default/test/$test.exe"
+          done
+          run_proof_test lane-skill-resources python3 -m unittest discover -s addons/tests -p test_skill_resources.py -v
+          run_proof_test output-statistics python3 -m unittest discover -s addons/tests -p test_output_statistics.py -v
+          if (( ${#failed_tests[@]} > 0 )); then
+            printf 'Failed qualification test: %s\n' "${failed_tests[@]}"
+            exit 1
+          fi
+      - name: Package using the release runtime bundler
+        run: |
+          set -euo pipefail
+          cp _build/default/bin/main_eio.exe dist/masc-macos-arm64
+          cp _build/default/bin/masc_tui.exe dist/masc-tui-macos-arm64
+          cp _build/default/bin/masc_browser_host.exe dist/masc-browser-host-macos-arm64
+          cp _build/default/bin/deployment_preflight_helper.exe dist/masc-deployment-preflight-helper-macos-arm64
+          cp _build/default/bin/masc_exec_ssh_bootstrap.exe dist/masc-exec-ssh-bootstrap-macos-arm64
+          cp scripts/check-runtime-deployment-preflight.sh dist/masc-check-runtime-deployment-preflight-macos-arm64
+          python3 scripts/package-macos-runtime.py --dist dist \
+            --stage "$RUNNER_TEMP/masc-lane-runtime" --platform macos-arm64 \
+            --source-commit "$(git rev-parse HEAD)"
+          shasum -a 256 dist/* > proof/SHA256SUMS
+          tar -czf proof/masc-lane-addon-macos-arm64.tar.gz -C dist .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: lane-addon-native-macos-arm64-${{ github.sha }}
+          path: proof/
+          if-no-files-found: error

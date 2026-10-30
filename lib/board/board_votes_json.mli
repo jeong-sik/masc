@@ -1,0 +1,53 @@
+(** JSON row decoders and persisted row loaders for {!Board_votes}. *)
+
+include module type of struct
+  include Board_core
+end
+
+val visibility_of_string : string -> visibility option
+val post_of_yojson : Yojson.Safe.t -> post option
+(** Accepts only the exact current {!post_to_yojson} wire shape. *)
+
+val comment_of_yojson : Yojson.Safe.t -> comment option
+(** Accepts only the exact current {!comment_to_yojson} wire shape. *)
+
+val load_source_rows :
+  string ->
+  decode:(Yojson.Safe.t -> 'a option) ->
+  accept:('a -> unit) ->
+  (unit, string * exn) result
+(** Read every nonempty JSONL line, retaining the first invalid JSON or schema
+    error with its line number instead of silently dropping that row. When
+    more than one row is rejected the detail also carries the reject count. *)
+
+val record_load_result :
+  ((unit, string) result -> unit) ->
+  ('a, string * exn) result ->
+  ('a, string * exn) result
+(** Store the last full-load outcome while returning the caller's count. *)
+
+val log_loaded :
+  noun:string ->
+  loaded:int ->
+  path:string ->
+  elapsed:float ->
+  (unit, string * exn) result ->
+  unit
+(** One owner for every "loaded N <noun>" line. The [Error] arm logs a
+    warn naming the partial load: accepted rows stay in the store while
+    the outcome is [Error]. *)
+
+val load_persisted_posts : store -> (int, string * exn) result
+(** Load posts from disk into [store].  Returns [Ok loaded_count] on success
+    (including when the persistence file is absent: [Ok 0]).  Returns
+    [Error (path, cause)] when the file existed but could not be parsed or
+    read, or any nonempty line has invalid JSON/current row schema. Valid rows
+    still load for ordinary Board use; [store.posts_load_result] retains the
+    failed outcome for strict evidence readers until a successful reload.
+    Valid expired rows do not count as malformed. Caller decides how to surface the failure — earlier behaviour
+    swallowed the exception inside this function, leaving a partially loaded
+    store undistinguishable from a clean one.  [Eio.Cancel.Cancelled] is
+    propagated unchanged. *)
+
+val load_persisted_comments : store -> (int, string * exn) result
+(** See {!load_persisted_posts}. *)

@@ -1,0 +1,58 @@
+(** [masc_web_search] and [masc_web_fetch] declarations, moved to
+    [config/tools/masc_web_*.toml] (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2).
+
+    Decoded once at module initialization; a missing or undecodable file
+    refuses the boot. [Tool_schemas_misc] is the only consumer. *)
+
+val web_search : Masc_domain.tool_schema
+val web_fetch : Masc_domain.tool_schema
+val browser_tabs : Masc_domain.tool_schema
+val browser_read : Masc_domain.tool_schema
+val browser_session : Masc_domain.tool_schema
+val browser_goto : Masc_domain.tool_schema
+val browser_act : Masc_domain.tool_schema
+val browser_interact : Masc_domain.tool_schema
+val browser_instruct : Masc_domain.tool_schema
+
+
+(** An MSX lane tool's schema (RFC-0439 §3.5), read from
+    config/tools/masc_msx_*.toml. Every {!Msx_tool.t} is read when the module
+    initializes, so a missing definition refuses the boot. *)
+val msx_schema : Msx_tool.t -> Masc_domain.tool_schema
+val portrait_read : Masc_domain.tool_schema
+val candle_balance : Masc_domain.tool_schema
+val candle_catalog : Masc_domain.tool_schema
+val candle_purchase : Masc_domain.tool_schema
+val candle_equip : Masc_domain.tool_schema
+val candle_gift : Masc_domain.tool_schema
+
+val dos_load : Masc_domain.tool_schema
+val dos_meta : Masc_domain.tool_schema
+val dos_inventory : Masc_domain.tool_schema
+val dos_eject : Masc_domain.tool_schema
+val dos_screen : Masc_domain.tool_schema
+val dos_step : Masc_domain.tool_schema
+val dos_press : Masc_domain.tool_schema
+val dos_click : Masc_domain.tool_schema
+val dos_type : Masc_domain.tool_schema
+val dos_peek : Masc_domain.tool_schema
+val play_room : Masc_domain.tool_schema
+val dos_pass : Masc_domain.tool_schema
+val dos_save : Masc_domain.tool_schema
+val dos_restore : Masc_domain.tool_schema
+
+(** Optional Lane Add-on observation and lifecycle tools. *)
+val lane_attach : Masc_domain.tool_schema
+val lane_declaration_read : Masc_domain.tool_schema
+val lane_declaration_save : Masc_domain.tool_schema
+val lane_inspect : Masc_domain.tool_schema
+val lane_observe : Masc_domain.tool_schema
+val lane_slice : Masc_domain.tool_schema
+val lane_detach : Masc_domain.tool_schema
+val lane_evidence : Masc_domain.tool_schema
+
+val lane_act : Masc_domain.tool_schema
+val lane_action_status : Masc_domain.tool_schema
+
+val lane_updates : Masc_domain.tool_schema

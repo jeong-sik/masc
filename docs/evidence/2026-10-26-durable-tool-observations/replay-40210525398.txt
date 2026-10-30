@@ -1,0 +1,24 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40210525398
+Complete raw log SHA256: 84866d2d5517565ae99f1e1880043aa999f49621814688881c03f7363f19d72a
+Complete raw log bytes: 229236
+Selected checkout, changed assertions, failures and summaries only; omitted assertions are not claimed by this excerpt.
+
+test suite	Checkout	2026-10-25T16:12:15.5420315Z HEAD is now at 09dedd57 test(agent): verify tool observation retry and reopened cursor catch-up
+test suite	Test	2026-10-25T16:13:57.2838694Z ASSERT same occurrence identities and sequence after observer failure
+test suite	Test	2026-10-25T16:13:57.4347394Z ASSERT called observation arrives before effect
+test suite	Test	2026-10-25T16:13:57.4348077Z ASSERT partial delivery retries only the unacknowledged occurrence
+test suite	Test	2026-10-25T16:13:57.4348838Z ASSERT one canonical called and completed identity
+test suite	Test	2026-10-25T16:13:57.4368939Z ASSERT bus occurrence uses canonical sequence
+test suite	Test	2026-10-25T16:13:57.4369694Z ASSERT bus occurrence uses canonical event id
+test suite	Test	2026-10-25T16:13:57.4370645Z ASSERT bus occurrence uses canonical run id
+test suite	Test	2026-10-25T16:13:57.4371278Z ASSERT bus occurrence uses canonical correlation id
+test suite	Test	2026-10-25T16:13:57.4371973Z ASSERT canonical parent event is preserved
+test suite	Test	2026-10-25T16:13:57.4372704Z ASSERT no synthetic lifecycle causation replaces source facts
+test suite	Test	2026-10-25T16:13:57.4377177Z ASSERT filtered empty pages still advance source cursor
+test suite	Test	2026-10-25T16:13:57.4377900Z ASSERT public cursor catch-up matches live canonical observations
+test suite	Test	2026-10-25T16:13:57.4390083Z ASSERT reopened cursor retries the identical undelivered event
+test suite	Test	2026-10-25T16:13:57.4390942Z ASSERT acknowledged catch-up has no repeat
+test suite	Test	2026-10-25T16:13:57.7162134Z Test Successful in 1.218s. 74 tests run.
+test suite	Test	2026-10-25T16:13:59.5036247Z Test Successful in 0.299s. 6 tests run.
+test suite	Test	2026-10-25T16:14:01.3129582Z Test Successful in 0.320s. 20 tests run.
+test suite	Test	2026-10-25T16:14:07.6193246Z Test Successful in 4.792s. 22 tests run.

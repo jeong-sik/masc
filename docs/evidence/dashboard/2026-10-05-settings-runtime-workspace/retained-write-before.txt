@@ -1,0 +1,63 @@
+RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-settings-runtime-workspace-20261005/dashboard
+
+ ❯ src/components/settings-surface.test.ts (70 tests | 2 failed | 66 skipped) 5071ms
+   ❯ SettingsSurface (59)
+     × retains a pending write across remount and keeps its later uncertain failure locked until a new file read 19ms
+     × retains an offscreen uncertain write and withdraws the raw basis until remount reads the current file 5010ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/settings-surface.test.ts > SettingsSurface > retains a pending write across remount and keeps its later uncertain failure locked until a new file read
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/components/settings-surface.test.ts:732:32
+    730|     const routing = () => container.querySelector('[data-testid="runti…
+    731|     await waitFor(() => expect(apiMock.fetchRuntimeResolved).toHaveBee…
+    732|     expect(routing().disabled).toBe(true)
+       |                                ^
+    733|     expect(container.querySelector('[data-testid="runtime-routing-savi…
+    734|     const reads = apiMock.fetchRuntimeTomlConfig.mock.calls.length
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/settings-surface.test.ts > SettingsSurface > retains an offscreen uncertain write and withdraws the raw basis until remount reads the current file
+AssertionError: expected false to be true // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/components/settings-surface.test.ts:759:60
+    757|     render(null, container)
+    758|     response.reject(new Error('write outcome unknown'))
+    759|     await waitFor(() => expect(raw.state.peek().needsRead).toBe(true))
+       |                                                            ^
+    760|     expect(raw.state.peek().draft).toBe(draft)
+    761|     expect(raw.ready(authority)).toBe(false)
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed | 66 skipped (70)
+   Start at  01:41:01
+   Duration  7.58s (tests 68%, transform 15%, import 11%, environment 3%, setup 3%)

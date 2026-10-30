@@ -1,0 +1,231 @@
+type deferred_kind =
+  | Generic_deferred
+  | External_effect_deferred of { approval_id : string option }
+  | Owned_job_result_wait of Keeper_owned_job_store.Job_id.t
+  | Composition_result_wait of Keeper_composition_dependency.composition
+
+let deferred_kind_to_string = function
+  | Generic_deferred -> "generic_deferred"
+  | External_effect_deferred _ -> "external_effect_deferred"
+  | Owned_job_result_wait _ -> "owned_job_result_wait"
+  | Composition_result_wait _ -> "composition_result_wait"
+;;
+
+type terminal_effect_receipt =
+  | Surface_post_completed of Keeper_surface_post.post_target
+
+type t =
+  { retained_artifacts : Tool_output.artifact_ref list
+  ; raw_output : string
+  ; data : Yojson.Safe.t option
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; metadata : Yojson.Safe.t option
+  ; failure_effect_disposition : Tool_result.failure_effect_disposition
+  ; disposition :
+      (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
+  ; deferred_kind : deferred_kind option
+  ; terminal_effect_receipt : terminal_effect_receipt option
+  ; file_change_evidence : Keeper_file_change_evidence.t option
+  }
+
+(* Every payload that leaves here can land in a keeper transcript, where the
+   checkpoint encoder refuses an object that binds a key twice -- and it does
+   so after the tool has already run, which is how one keeper lost 12
+   consecutive turns to a schedule result on 2026-08-29 (#31701). The inbound
+   argument boundary resolves the same ambiguity through the same rule, so a
+   repeat is answered identically in both directions. *)
+let resolve_repeated_keys data =
+  fst (Llm_provider.Json_object_keys.deduplicate data)
+;;
+
+let success raw_output =
+  { retained_artifacts = []
+  ; raw_output
+  ; data = None
+  ; content_blocks = None
+  ; metadata = None
+  ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
+  ; disposition = Tool_result.Completed ()
+  ; deferred_kind = None
+  ; terminal_effect_receipt = None
+  ; file_change_evidence = None
+  }
+;;
+
+let success_data ?metadata data =
+  let data = resolve_repeated_keys data in
+  { retained_artifacts = []
+  ; raw_output = Yojson.Safe.to_string data
+  ; data = Some data
+  ; content_blocks = None
+  ; metadata
+  ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
+  ; disposition = Tool_result.Completed ()
+  ; deferred_kind = None
+  ; terminal_effect_receipt = None
+  ; file_change_evidence = None
+  }
+;;
+
+let deferred_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
+  let data = resolve_repeated_keys data in
+  { retained_artifacts = []
+  ; raw_output = Yojson.Safe.to_string data
+  ; data = Some data
+  ; content_blocks = None
+  ; metadata
+  ; failure_effect_disposition = effect_disposition
+  ; disposition = Tool_result.Deferred ()
+  ; deferred_kind = Some Generic_deferred
+  ; terminal_effect_receipt = None
+  ; file_change_evidence = None
+  }
+;;
+
+let deferred_composition_result ~binding data =
+  { (deferred_data ~effect_disposition:Tool_result.Proven_pre_effect data) with
+    deferred_kind = Some (Composition_result_wait binding) }
+
+let deferred_external_effect_data ?approval_id ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
+  let data = resolve_repeated_keys data in
+  { retained_artifacts = []
+  ; raw_output = Yojson.Safe.to_string data
+  ; data = Some data
+  ; content_blocks = None
+  ; metadata
+  ; failure_effect_disposition = effect_disposition
+  ; disposition = Tool_result.Deferred ()
+  ; deferred_kind = Some (External_effect_deferred {approval_id})
+  ; terminal_effect_receipt = None
+  ; file_change_evidence = None
+  }
+;;
+
+let deferred_owned_job_result ~job_id data =
+  { (deferred_data ~effect_disposition:Tool_result.Proven_pre_effect data) with
+    deferred_kind = Some (Owned_job_result_wait job_id) }
+;;
+
+let failure
+      ~class_
+      ?(effect_disposition = Tool_result.Effect_outcome_unknown)
+      raw_output
+  =
+  { retained_artifacts = []
+  ; raw_output
+  ; data = None
+  ; content_blocks = None
+  ; metadata = None
+  ; failure_effect_disposition = effect_disposition
+  ; disposition = Tool_result.Failed class_
+  ; deferred_kind = None
+  ; terminal_effect_receipt = None
+  ; file_change_evidence = None
+  }
+;;
+
+let failure_data
+      ~class_
+      ?(effect_disposition = Tool_result.Effect_outcome_unknown)
+      ?metadata
+      ~message
+      data
+  =
+  let data = resolve_repeated_keys data in
+  { retained_artifacts = []
+  ; raw_output = message
+  ; data = Some data
+  ; content_blocks = None
+  ; metadata
+  ; failure_effect_disposition = effect_disposition
+  ; disposition = Tool_result.Failed class_
+  ; deferred_kind = None
+  ; terminal_effect_receipt = None
+  ; file_change_evidence = None
+  }
+;;
+
+let with_gate_authorization authorization result =
+  match result.disposition with
+  | Tool_result.Completed () | Tool_result.Deferred () ->
+    { result with
+      metadata =
+        Some
+          (Keeper_gate.authorization_metadata
+             ?producer_metadata:result.metadata
+             authorization)
+    }
+  | Tool_result.Failed _ ->
+    Keeper_gate.observe_authorization_of_failed_result authorization;
+    result
+;;
+
+let with_surface_post_receipt target result =
+  match result.disposition with
+  | Tool_result.Completed () ->
+    { result with
+      terminal_effect_receipt = Some (Surface_post_completed target)
+    }
+  | Tool_result.Deferred () | Tool_result.Failed _ -> result
+;;
+
+let with_file_change_evidence evidence result =
+  match result.disposition with
+  | Tool_result.Completed () ->
+    { result with file_change_evidence = Some evidence }
+  | Tool_result.Deferred () | Tool_result.Failed _ -> result
+;;
+
+let with_retained_artifacts retained_artifacts result =
+  { result with retained_artifacts }
+;;
+
+let of_tool_result
+      ?failure_effect_disposition
+      (result : Tool_result.result)
+  =
+  let failure_effect_disposition = match failure_effect_disposition with
+    | Some disposition -> disposition
+    | None -> (match result with
+        | Tool_result.Failed failure -> failure.effect_disposition
+        | Tool_result.Completed _ | Tool_result.Deferred _ -> Tool_result.Effect_outcome_unknown) in
+  let raw_output = Tool_result.message result in
+  let data = Some (Tool_result.data result) in
+  match result with
+  | Tool_result.Completed { metadata; content_blocks; _ } ->
+    { retained_artifacts = Tool_result.retained_artifacts result
+    ; raw_output
+    ; data
+    ; content_blocks
+    ; metadata
+    ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
+    ; disposition = Tool_result.Completed ()
+    ; deferred_kind = None
+    ; terminal_effect_receipt = None
+    ; file_change_evidence = None
+    }
+  | Tool_result.Deferred { metadata; content_blocks; _ } ->
+    { retained_artifacts = Tool_result.retained_artifacts result
+    ; raw_output
+    ; data
+    ; content_blocks
+    ; metadata
+    ; failure_effect_disposition
+    ; disposition = Tool_result.Deferred ()
+    ; deferred_kind = Some Generic_deferred
+    ; terminal_effect_receipt = None
+    ; file_change_evidence = None
+    }
+  | Tool_result.Failed { class_; _ } ->
+    { retained_artifacts = Tool_result.retained_artifacts result
+    ; raw_output
+    ; data
+    ; content_blocks = None
+    ; metadata = Tool_result.metadata result
+    ; failure_effect_disposition
+    ; disposition = Tool_result.Failed class_
+    ; deferred_kind = None
+    ; terminal_effect_receipt = None
+    ; file_change_evidence = None
+    }
+;;

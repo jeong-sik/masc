@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│?:help  Esc:back  Tab:section  j/k:move  D:raw                                                                                                                │
+│native-ui-proof · Native MIDI phrase playback · detached                                                                                                      │
+│[1 Results]  2 Links  3 Installation  4 Records                                                                                                               │
+│                                                                                                                                                              │
+│Latest native phrase render and local player process state                                                                                                    │
+│phrase (1)                                           │ SoundFont: stop_requested                                                                              │
+│> SoundFont: stop_requested                          │ phrase · 2026-10-21 12:37:16.674 UTC                                                                   │
+│                                                     │                                                                                                        │
+│                                                     │ State  stop_requested                                                                                  │
+│                                                     │ Instrument  unavailable · field unavailable                                                            │
+│                                                     │ Preset  unavailable · field unavailable                                                                │
+│                                                     │ MIDI SHA-256  unavailable · field unavailable                                                          │
+│                                                     │ Rendered audio  unavailable · field unavailable                                                        │
+│                                                     │ Failure  unavailable · field unavailable                                                               │
+│                                                                                                                                                              │
+│Activity timeline                                                                                                                                             │
+│Wall time 1792586236.674 → 1792586236.674 · o event · v value · * relation                                                                                    │
+│>phrase            · d76c5e1c |---------------------------------------------------------------v--------------------------------------------------------------|│
+│                                                                                                                                                              │
+│Received snapshot coverage · all Add-ons                                                                                                                      │
+│vst-phrase · complete · cursor 2 · Synthetic input for repaired native lifecycle; no audio                                                                    │
+│retained:01a15ea2-34fe-7000-807a-f3b83ebd94a8 · complete · cursor scanned:1/of:1 · window [unbounded, unbounded]; rows and source coverage inspected through 1│
+│/of:1; no matching row records omitted; all inspected source coverage returned; retained observations readable                                                │
+│vst-phrase · complete · cursor 1 · Synthetic input for repaired native lifecycle; no audio                                                                    │
+│retained:01a15e9c-7fad-7000-937e-b01fd76c5e1c · complete · cursor scanned:1/of:1 · window [unbounded, unbounded]; rows and source coverage inspected through 1│
+│/of:1; no matching row records omitted; all inspected source coverage returned; retained observations readable                                                │
+│01a15ea2-34fe-7000-807a-f3b83ebd94a8 · complete · cursor 1 · detached; retained range only                                                                    │
+│01a15e9c-7fad-7000-937e-b01fd76c5e1c · complete · cursor 1 · detached; retained range only                                                                    │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  retained history · D:details  D:raw  J/K:scroll  r:refresh
+ Choose a Keeper before writing · i:choose

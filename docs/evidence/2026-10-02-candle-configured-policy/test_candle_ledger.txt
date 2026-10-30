@@ -1,0 +1,20 @@
+Testing `candle_ledger'.
+This run has ID `TTACIX56'.
+
+  [OK]          read            0   Item HTTP seed replays current payout and...
+  [OK]          read            1   Item acceptance seeds satisfy current Can...
+  [OK]          read            2   a missing file is an empty ledger.
+  [OK]          read            3   stored credits survive changed rounding; ...
+  [OK]          read            4   malformed Paid receipts fail the whole le...
+  [OK]          read            5   a row that does not read fails the read.
+  [OK]          read            6   only recovery cuts a torn tail.
+  [OK]          update          0   rows are appended in order.
+  [OK]          update          1   decide sees what is already there.
+  [OK]          update          2   no events writes nothing.
+  [OK]          update          3   a refusal writes nothing.
+  [OK]          update          4   a writer that lost the race reads again.
+  [OK]          update          5   a lock another process holds is reported,...
+  [OK]          update          6   a lock taken between the read and the app...
+
+Full test results in `<worktree>/_build/default/test/_build/_tests/candle_ledger'.
+Test Successful in 0.076s. 14 tests run.

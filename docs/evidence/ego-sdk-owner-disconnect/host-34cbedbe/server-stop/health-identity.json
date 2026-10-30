@@ -1,0 +1,41 @@
+{
+  "build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "repo_version": "0.64.0",
+    "commit": "34cbedbe5746855db9033921f4b0c9365f1fbbb6",
+    "commit_source": "embedded",
+    "binary_commit": "34cbedbe5746855db9033921f4b0c9365f1fbbb6",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "0fee4735c087d3bcb423dcc59544ece0f57f71c4c2f184cec2093a0bcc7c83a0",
+    "binary_commit_unix_ts": 1792858560.0,
+    "binary_commit_age_seconds": 1657,
+    "repo_head_commit": "12c001e55e2",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1792860089.0,
+    "repo_head_commit_age_seconds": 128,
+    "executable_path": "/private/tmp/masc-ego-runtime-34cbedbe/masc",
+    "executable_dir": "/private/tmp/masc-ego-runtime-34cbedbe",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-sdk-waits-20261024",
+    "runtime_instance_id": "01a16ecb-c8ca-7000-bbcf-7353e6799064",
+    "started_at": "2026-10-24T16:43:31Z",
+    "uptime_seconds": 5
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-sdk-waits-20261024",
+    "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-owner-loss-proof-20261025-phase2",
+    "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-owner-loss-proof-20261025-phase2/.masc",
+    "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-owner-loss-proof-20261025-phase2/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": true,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-owner-loss-proof-20261025-phase2",
+    "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-owner-loss-proof-20261025-phase2",
+    "resolution_source": "explicit_cli"
+  },
+  "status": "ok"
+}

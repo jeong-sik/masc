@@ -1,0 +1,83 @@
+
+(** Tool_misc — miscellaneous MASC tool handlers.
+
+    Dispatches: transport_status, websocket_discovery,
+    dashboard, verify_handoff, gc, tool_help, config introspection,
+    and web helpers. *)
+
+type tool_result = Tool_result.result
+(** Re-exported from {!Tool_result}.  RFC-0062 Phase 4c-2:
+    handlers return structured [Tool_result.result] records. *)
+
+type context = {
+  config : Workspace.config;
+  agent_name : string;
+  help_schemas : Masc_domain.tool_schema list;
+}
+
+val parse_searxng_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_brave_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_brave_llm_context_json : string -> ((string * string * string list) list, Tool_misc_web_search.provider_error) result
+val parse_ollama_search_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_tavily_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_exa_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val parse_bing_search_json : string -> ((string * string * string) list, Tool_misc_web_search.provider_error) result
+val redact_transport_error_detail : string -> string
+val web_search_provider_error_to_string : Tool_misc_web_search.provider_error -> string
+val web_search_provider_plan : unit -> string list
+(* The outcome type is referenced by name, never restated inline, so a
+   variant added to the named type can never leave a stale copy here. *)
+val web_search_simulate_for_test :
+  query:string ->
+  limit:int ->
+  (string * Tool_misc_web_search.simulated_provider_outcome) list ->
+  Tool_result.result
+
+val with_web_search_simulation_for_test :
+  outcomes:(string * Tool_misc_web_search.simulated_provider_outcome) list ->
+  (unit -> 'a) ->
+  'a
+
+val with_web_fetch_http_get_for_test :
+  (timeout_sec:int ->
+   headers:(string * string) list ->
+   max_response_bytes:int ->
+   string ->
+   (int option * string, Tool_local_runtime_http.transport_failure) result) ->
+  (unit -> 'a) ->
+  'a
+
+(** The context carries the exact schema projection visible to the caller. *)
+val dispatch :
+  ?ask_source_turn_ref:Ids.Turn_ref.t ->
+  ?dos_admission:((unit -> Tool_result.result) -> Tool_result.result) ->
+  ?lane_access:Lane_addon_sources.access ->
+  ?browser_principal:Lane_addon_call_context.principal -> context -> name:string ->
+  args:Yojson.Safe.t -> Tool_result.result option
+(** [lane_access] is host-verified authority for Lane operations. An omitted
+    value is unauthenticated. Keeper access supplies the canonical Lane caller;
+    [context.agent_name] remains attribution for unrelated tools.
+    [dos_admission] wraps only prepared load/restore effects; callers enforcing
+    participation must pass their final credential admission through it.
+    [ask_source_turn_ref] is frozen host provenance, never a Tool argument;
+    omission records an unobserved source. It grants no effect authority.
+    [browser_principal] is verified by the caller; omission is anonymous and
+    cannot execute a browser Add-on command.
+    Successful Lane Evidence results attach the complete typed-result artifact
+    manifest through the existing I/O executor after the Runtime returns,
+    retaining the original evidence and
+    delivery data. The explicit bounded inline projection includes that durable
+    root; larger results use its marker. A manifest error retains the same data
+    in a typed [Effect_outcome_unknown] failure without repeating Runtime or
+    inferring delivery completion from evidence publication. *)
+
+val tool_inventory_json :
+  context -> include_hidden:bool -> Yojson.Safe.t
+
+val register_dashboard_handler :
+  (tool_name:string ->
+   start_time:Tool_timing.started ->
+   context ->
+   Yojson.Safe.t ->
+   Tool_result.result) ->
+  unit

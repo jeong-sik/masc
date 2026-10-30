@@ -1,0 +1,396 @@
+open Masc
+
+let with_temp_config f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let dir = Filename.temp_file "workspace_task_delete_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  let config = Workspace.default_config dir in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () -> f config)
+;;
+
+let write_string path content =
+  Out_channel.with_open_bin path (fun channel -> output_string channel content)
+;;
+
+let test_delete_uses_canonical_locked_store () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let _ =
+      Workspace.add_task
+        config
+        ~title:"locked task"
+        ~priority:3
+        ~description:"workspace delete test"
+    in
+    let backlog = Workspace.read_backlog config in
+    let task_id =
+      match backlog.tasks with
+      | [ task ] -> task.Masc_domain.id
+      | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)
+    in
+    (match Workspace.delete_task_r config ~task_id with
+     | Ok Workspace.Task_deleted -> ()
+     | Error error -> Alcotest.fail (Masc_domain.show_masc_error error)
+     | Ok _ -> Alcotest.fail "unexpected deletion outcome");
+    let deleted = Workspace.read_backlog config in
+    Alcotest.(check int) "deletion and cleanup acknowledgement commits" (backlog.version + 2) deleted.version;
+    Alcotest.(check int) "task deleted" 0 (List.length deleted.tasks))
+;;
+
+let test_delete_returns_typed_error_when_backlog_unreadable () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let backlog_path = Filename.concat (Workspace.tasks_dir config) "backlog.json" in
+    write_string backlog_path "{not-json";
+    write_string (backlog_path ^ ".last-good") "{not-json";
+    (match Workspace.delete_task_r config ~task_id:"missing" with
+     | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) -> ()
+     | Ok _ -> Alcotest.fail "delete unexpectedly succeeded"
+     | Error error ->
+       Alcotest.failf "unexpected error: %s" (Masc_domain.show_masc_error error));
+    Alcotest.(check string)
+      "primary backlog remains byte-identical"
+      "{not-json"
+      (Fs_compat.load_file backlog_path))
+;;
+
+let make_task config title =
+  match Workspace.add_task_with_result config ~title ~priority:3 ~description:"" with
+  | Ok task -> task.task_id
+  | Error error -> Alcotest.fail (Workspace.add_task_error_to_string error)
+;;
+
+let link config goal_id task_id =
+  match Workspace_goal_index.link_task_to_goal_result config ~goal_id ~task_id with
+  | Ok () -> () | Error message -> Alcotest.fail message
+;;
+
+let pending_rejection task_id verification_id : Masc_domain.pending_completion_rejection =
+  { task_id; verification_id; producer = "keeper:delete-producer"
+  ; reason = "repair the rejected work"
+  ; authority = Masc_domain.Human_operator { operator_id = "delete-operator" }
+  ; committed_at = "2026-09-09T00:00:00Z"
+  }
+;;
+
+let test_delete_retires_only_its_pending_rejections () =
+  List.iter (fun already_absent -> with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "target" in
+    let other = make_task config "other" in
+    let own = pending_rejection target "verify-target" in
+    let retained = pending_rejection other "verify-other" in
+    let backlog = Workspace.read_backlog config in
+    let tasks = if already_absent then
+        List.filter (fun (task : Masc_domain.task) -> task.id <> target) backlog.tasks
+      else backlog.tasks in
+    let approval (pending : Masc_domain.pending_completion_rejection) : Masc_domain.pending_completion_approval =
+      { task_id = pending.task_id; verification_id = pending.verification_id;
+        producer = pending.producer; authority = pending.authority; committed_at = pending.committed_at } in
+    Workspace.write_backlog config
+      {backlog with tasks; pending_completion_rejections = [own; retained];
+        pending_completion_approvals = [approval own; approval retained]};
+    let revision = (Workspace.read_backlog config).version in
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_deleted when not already_absent -> ()
+     | Ok Workspace.Task_already_absent when already_absent -> ()
+     | _ -> Alcotest.fail "deletion must retire pending repair request");
+    (* This is the authoritative input consumed by restart reconciliation. *)
+    Alcotest.(check bool) "recovery sees only the other Task obligation" true
+      (Workspace_task_rejection_outbox.pending config = Ok [retained]);
+    Alcotest.(check bool) "approval recovery also retains only the other Task"
+      true (Workspace_task_approval_outbox.pending config = Ok [approval retained]);
+    let after = Workspace.read_backlog config in
+    Alcotest.(check int) "deletion and acknowledgement" (revision + 2) after.version;
+    Alcotest.(check (list string)) "other Task retained" [other]
+      (List.map (fun (task : Masc_domain.task) -> task.id) after.tasks);
+    ignore (Workspace.delete_task_r config ~task_id:target);
+    Alcotest.(check int) "settled retry has no new revision" after.version
+      (Workspace.read_backlog config).version)) [false; true]
+;;
+
+let test_delete_failure_keeps_rejection_until_primary_commit () =
+  List.iter (fun fail_before_commit -> with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "target" in
+    let pending = pending_rejection target "verify-target" in
+    let backlog = Workspace.read_backlog config in
+    Workspace.write_backlog config
+      {backlog with pending_completion_rejections = [pending]
+      ; version = if fail_before_commit then max_int - 1 else backlog.version};
+    if not fail_before_commit then
+      write_string (Workspace_goal_index.goal_task_links_path config) "{broken";
+    let result = Workspace.delete_task_r config ~task_id:target in
+    if fail_before_commit then (
+      (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected precommit failure");
+      Alcotest.(check bool) "uncommitted deletion preserves repair obligation" true
+        (Workspace_task_rejection_outbox.pending config = Ok [pending]);
+      Alcotest.(check int) "uncommitted deletion preserves Task" 1
+        (List.length (Workspace.read_backlog config).tasks))
+    else (
+      (match result with Ok (Workspace.Task_delete_cleanup_failed (_ :: _)) -> ()
+       | _ -> Alcotest.fail "expected committed deletion with link cleanup failure");
+      Alcotest.(check bool) "committed deletion retires repair despite link failure" true
+        (Workspace_task_rejection_outbox.pending config = Ok []);
+      Alcotest.(check int) "Task was deleted" 0
+        (List.length (Workspace.read_backlog config).tasks)))) [false; true]
+;;
+
+let test_deletion_prunes_only_its_references () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "target" in
+    let other = make_task config "other" in
+    link config "goal-a" target; link config "goal-a" other;
+    link config "goal-b" target; link config "goal-c" other;
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_deleted -> () | _ -> Alcotest.fail "delete failed");
+    Alcotest.(check (list (pair string (list string)))) "other links preserved"
+      ["goal-a",[other]; "goal-c",[other]]
+      (Workspace_goal_index.read_goal_task_links config))
+;;
+
+let test_cleanup_failure_and_idempotent_retry () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "target" in
+    link config "goal-a" target;
+    let path = Workspace_goal_index.goal_task_links_path config in
+    let original = Fs_compat.load_file path in
+    write_string path "{broken";
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok (Workspace.Task_delete_cleanup_failed (_::_)) -> ()
+     | _ -> Alcotest.fail "must report committed Task deletion with failed cleanup");
+    let backlog = Workspace.read_backlog config in
+    Alcotest.(check int) "Task is absent despite cleanup failure" 0 (List.length backlog.tasks);
+    Alcotest.(check string) "bad primary not rewritten from mirror" "{broken" (Fs_compat.load_file path);
+    write_string path original;
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_already_absent -> () | _ -> Alcotest.fail "retry did not settle");
+    Alcotest.(check int) "retry acknowledges completed cleanup" (backlog.version + 1) (Workspace.read_backlog config).version;
+    Alcotest.(check (list (pair string (list string)))) "retry removed remaining links" []
+      (Workspace_goal_index.read_goal_task_links config))
+;;
+
+let test_backlog_failure_does_not_touch_links () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "target" in
+    link config "goal-a" target;
+    let links = Workspace_goal_index.goal_task_links_path config in
+    let original = Fs_compat.load_file links in
+    let backlog = Workspace.read_backlog config in
+    (* Revision exhaustion is a deterministic precommit write failure. *)
+    Workspace.write_backlog config {backlog with version=max_int-1};
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) -> ()
+     | _ -> Alcotest.fail "write failure must not claim deletion");
+    Alcotest.(check int) "Task remains" 1 (List.length (Workspace.read_backlog config).tasks);
+    Alcotest.(check string) "links untouched" original (Fs_compat.load_file links))
+;;
+
+let test_retry_repairs_failed_recovery_copy () =
+  List.iter (fun damage_links -> with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "target" in
+    link config "goal-a" target;
+    let primary = if damage_links then Workspace_goal_index.goal_task_links_path config
+      else Workspace.backlog_path config in
+    let recovery = primary ^ ".last-good" in
+    Sys.remove recovery;
+    Unix.mkdir recovery 0o755;
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok (Workspace.Task_delete_cleanup_failed (_::_)) -> ()
+     | _ -> Alcotest.fail "failed postcommit recovery write must be visible");
+    let revision = (Workspace.read_backlog config).version in
+    let receipt = match Workspace.deletion_receipts_r (Workspace.default_config config.base_path) with
+      | Ok {receipts=[receipt]; copies} ->
+        if not damage_links then (
+          Alcotest.(check bool) "domain acknowledgement survived failed recovery write" true
+            (receipt.phase = Masc_domain.Cleanup_verified);
+          match copies with Workspace_backlog.Copies_unavailable (_::_) -> ()
+          | _ -> Alcotest.fail "failed recovery must not appear fully settled");
+        receipt
+      | _ -> Alcotest.fail "partial deletion lost durable receipt" in
+    Unix.rmdir recovery;
+    (match Workspace.retry_task_deletion_r (Workspace.default_config config.base_path)
+      ~deletion_id:receipt.deletion_id with
+     | Ok Workspace.Task_already_absent -> ()
+     | _ -> Alcotest.fail "restored recovery target must settle on exact retry");
+    Alcotest.(check string) "recovery matches committed primary after retry"
+      (Fs_compat.load_file primary) (Fs_compat.load_file recovery);
+    Alcotest.(check int) "only domain cleanup acknowledgement changes revision" (revision + if damage_links then 1 else 0) (Workspace.read_backlog config).version))
+    [false; true]
+;;
+
+let test_cache_failure_is_partial_and_retryable () =
+  List.iter (fun fail_write -> with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "cached-agent"));
+    let target = make_task config "target" in
+    let agent = match Workspace.get_agents_raw config with
+      | [agent] -> agent | _ -> Alcotest.fail "expected fixture agent" in
+    let path = Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent.name ^ ".json") in
+    Workspace.write_json config path
+      (Masc_domain.agent_to_yojson {agent with current_task=Some target; status=Masc_domain.Busy});
+    let original = Fs_compat.load_file path in
+    let delete () = Workspace.delete_task_r config ~task_id:target in
+    let result = if fail_write then
+      Task_cache_invariant.For_testing.with_before_cache_write
+        (fun actual ->
+          Alcotest.(check string) "fault at matching agent write" path actual;
+          Sys.rename path (path ^ ".saved"); Unix.mkdir path 0o755)
+        delete
+      else (write_string path "{broken"; delete ()) in
+    (match result with
+     | Ok (Workspace.Task_delete_cleanup_failed (_::_)) -> ()
+     | _ -> Alcotest.fail "cache failure must not claim settled deletion");
+    Alcotest.(check int) "deletion committed" 0 (List.length (Workspace.read_backlog config).tasks);
+    if fail_write then (Unix.rmdir path; Sys.rename (path ^ ".saved") path)
+    else write_string path original;
+    let revision = (Workspace.read_backlog config).version in
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_already_absent -> () | _ -> Alcotest.fail "cache retry failed");
+    (match Workspace.read_json config path |> Masc_domain.agent_of_yojson with
+     | Ok cleared -> Alcotest.(check (option string)) "cache actually cleared" None cleared.current_task
+     | Error message -> Alcotest.fail message);
+    Alcotest.(check int) "cache retry acknowledges cleanup" (revision + 1) (Workspace.read_backlog config).version))
+    [false; true]
+;;
+
+let test_memory_cache_mirror_failure_retries_without_rewriting_primary () =
+  with_temp_config (fun original_config ->
+    let config = {original_config with backend=Workspace_utils.Memory (Backend.Memory.create ())} in
+    ignore (Workspace.init config ~agent_name:(Some "memory-cached-agent"));
+    let target = make_task config "target" in
+    let other = make_task config "other" in
+    let agent = match Workspace.get_agents_raw config with
+      | [agent] -> agent | _ -> Alcotest.fail "expected memory agent" in
+    let path = Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent.name ^ ".json") in
+    Workspace.write_json config path
+      (Masc_domain.agent_to_yojson {agent with current_task=Some target; status=Masc_domain.Busy});
+    let result = Task_cache_invariant.For_testing.with_before_cache_write
+      (fun actual -> Sys.rename actual (actual ^ ".saved"); Unix.mkdir actual 0o755)
+      (fun () -> Workspace.delete_task_r config ~task_id:target) in
+    (match result with
+     | Ok (Workspace.Task_delete_cleanup_failed (_::_)) -> ()
+     | _ -> Alcotest.fail "Memory mirror failure must remain partial");
+    let primary = match Workspace.read_json_doc config path with
+      | Ok (Some json) -> json
+      | Ok None -> Alcotest.fail "primary agent record is absent"
+      | Error error -> Alcotest.fail (Workspace.json_doc_error_to_string error) in
+    (match Masc_domain.agent_of_yojson primary with
+     | Ok agent -> Alcotest.(check (option string)) "primary already cleared" None agent.current_task
+     | Error message -> Alcotest.fail message);
+    (* A new assignment can arrive before the cleanup retry. Its primary
+       identity must survive repair of the old local mirror. *)
+    let primary = Masc_domain.agent_to_yojson {agent with current_task=Some other; status=Masc_domain.Busy} in
+    (match Workspace.write_json_commit_result config path primary with
+     | Ok {mirror_error=Some _} -> ()
+     | _ -> Alcotest.fail "expected blocked local mirror for new primary assignment");
+    Unix.rmdir path; Sys.rename (path ^ ".saved") path;
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_already_absent -> () | _ -> Alcotest.fail "mirror retry failed");
+    Alcotest.(check bool) "retry leaves primary identical" true (Workspace.read_json_doc config path = Ok (Some primary));
+    Alcotest.(check bool) "mirror now matches current primary" true
+      (Yojson.Safe.from_file path = primary))
+;;
+
+let test_deletion_receipt_survives_reload () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "durable cleanup" in
+    link config "goal" target;
+    let links = Workspace_goal_index.goal_task_links_path config in
+    let original = Fs_compat.load_file links in
+    write_string links "{broken";
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok (Workspace.Task_delete_cleanup_failed _) -> ()
+     | _ -> Alcotest.fail "expected pending cleanup");
+    let fresh = Workspace.default_config config.base_path in
+    let receipt = match Workspace.deletion_receipts_r fresh with
+      | Ok {receipts=[receipt]; _} -> receipt
+      | _ -> Alcotest.fail "durable deletion receipt missing on reload" in
+    (match receipt.phase with
+     | Masc_domain.Cleanup_required (_::_) -> ()
+     | _ -> Alcotest.fail "failed cleanup must retain its cause");
+    write_string links original;
+    (match Workspace.retry_task_deletion_r fresh ~deletion_id:receipt.deletion_id with
+     | Ok Workspace.Task_already_absent -> ()
+     | _ -> Alcotest.fail "exact deletion retry failed");
+    (match Workspace.deletion_receipts_r (Workspace.default_config config.base_path) with
+     | Ok {receipts=[stored]; copies=Workspace_backlog.Copies_consistent} ->
+       Alcotest.(check string) "same durable identity" receipt.deletion_id stored.deletion_id;
+       Alcotest.(check bool) "cleanup verified on reload" true (stored.phase=Cleanup_verified)
+     | _ -> Alcotest.fail "settled deletion not observable after reload"))
+;;
+
+let test_contradictory_receipt_preserves_source () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let path = Workspace.backlog_path config in
+    let json = Workspace.read_backlog config |> Masc_domain.backlog_to_yojson in
+    let bad = `Assoc ["deletion_id", `String "delete-test"; "task_id", `String "task-1";
+      "requested_at", `String "2026-09-09T00:00:00Z";
+      "phase", `String "cleanup_verified"; "cleanup_errors", `List [`String "still failed"]] in
+    let fields = match json with `Assoc fields -> fields | _ -> Alcotest.fail "backlog object" in
+    let raw = Yojson.Safe.to_string (`Assoc (("task_deletion_receipts", `List [bad]) ::
+      List.remove_assoc "task_deletion_receipts" fields)) in
+    write_string path raw;
+    (match Workspace.deletion_receipts_r config with Error _ -> ()
+     | Ok _ -> Alcotest.fail "contradictory receipt accepted");
+    Alcotest.(check string) "invalid primary is not repaired by observation" raw (Fs_compat.load_file path))
+;;
+
+let test_old_deletion_cannot_remove_reused_task_identity () =
+  with_temp_config (fun config ->
+    ignore (Workspace.init config ~agent_name:(Some "tester"));
+    let target = make_task config "original" in
+    let original = List.hd (Workspace.read_backlog config).tasks in
+    (match Workspace.delete_task_r config ~task_id:target with
+     | Ok Workspace.Task_deleted -> () | _ -> Alcotest.fail "delete failed");
+    let receipt = match Workspace.deletion_receipts_r config with
+      | Ok {receipts=[receipt]; _} -> receipt | _ -> Alcotest.fail "missing identity" in
+    let backlog = Workspace.read_backlog config in
+    Workspace.write_backlog config {backlog with tasks=[{original with title="new identity owner"}]};
+    link config "new-goal" target;
+    let primary = Fs_compat.load_file (Workspace.backlog_path config) in
+    let links = Fs_compat.load_file (Workspace_goal_index.goal_task_links_path config) in
+    (match Workspace.retry_task_deletion_r config ~deletion_id:receipt.deletion_id with
+     | Error (Workspace.Task_identity_reused id) -> Alcotest.(check string) "collision identity" target id
+     | _ -> Alcotest.fail "old deletion acted on a new Task");
+    (match Workspace.retry_task_deletion_r config ~deletion_id:"unknown-deletion" with
+     | Error (Workspace.Unknown_deletion _) -> ()
+     | _ -> Alcotest.fail "unknown deletion accepted");
+    Alcotest.(check string) "new Task primary preserved" primary (Fs_compat.load_file (Workspace.backlog_path config));
+    Alcotest.(check string) "new Task links preserved" links (Fs_compat.load_file (Workspace_goal_index.goal_task_links_path config)))
+;;
+
+let () =
+  Alcotest.run
+    "Workspace task delete"
+    [ ( "delete"
+      , [ Alcotest.test_case "old deletion identity cannot remove a new Task" `Quick test_old_deletion_cannot_remove_reused_task_identity
+        ; Alcotest.test_case "deletion receipt survives a fresh store read" `Quick test_deletion_receipt_survives_reload
+        ; Alcotest.test_case "contradictory receipt is rejected without rewriting" `Quick test_contradictory_receipt_preserves_source
+        ; Alcotest.test_case "deletion retires only its pending repair obligations" `Quick test_delete_retires_only_its_pending_rejections
+        ; Alcotest.test_case "repair retirement follows deletion commit" `Quick test_delete_failure_keeps_rejection_until_primary_commit
+        ; Alcotest.test_case "Memory cache mirror retry preserves primary" `Quick test_memory_cache_mirror_failure_retries_without_rewriting_primary
+        ; Alcotest.test_case "cache read and write failures remain retryable" `Quick test_cache_failure_is_partial_and_retryable
+        ; Alcotest.test_case "retry repairs both stores' failed recovery writes" `Quick test_retry_repairs_failed_recovery_copy
+        ; Alcotest.test_case "only deleted Task references removed" `Quick test_deletion_prunes_only_its_references
+        ; Alcotest.test_case "failed cleanup remains retryable after deletion" `Quick test_cleanup_failure_and_idempotent_retry
+        ; Alcotest.test_case "uncommitted backlog failure preserves links" `Quick test_backlog_failure_does_not_touch_links
+        ; Alcotest.test_case
+            "uses canonical locked store"
+            `Quick
+            test_delete_uses_canonical_locked_store
+        ; Alcotest.test_case
+            "fails typed on unreadable backlog"
+            `Quick
+            test_delete_returns_typed_error_when_backlog_unreadable
+        ] )
+    ]
+;;

@@ -1,0 +1,85 @@
+(** Single source of truth for OpenAI-compatible wire finish-reason ->
+    {!Types.stop_reason} mapping, and the invariant that a tool-use stop must
+    carry at least one tool block.
+
+    Before this module the mapping was duplicated across the non-streaming parser
+    ([Backend_openai_parse]) and the streaming chunk handler ([Streaming]) with
+    divergent guards: the streaming path emitted [StopToolUse] for
+    [finish_reason = "tool_calls"] WITHOUT checking that any tool block was
+    actually assembled. A reasoning-only / dropped-partial-tool stream therefore
+    reached the agent driver as a tool-use turn carrying zero tools, which the
+    pipeline re-issued forever (the "infinite Thinking turn" defect).
+
+    The OpenAI streaming finish chunk does not carry tool information (tool
+    arguments arrive as deltas in earlier chunks), so the guard cannot be applied
+    at the chunk boundary. The chunk records a provisional reason
+    ({!provisional_of_string}); the accumulator applies the invariant once the
+    full block set is known ({!reconcile}). *)
+
+type wire_finish =
+  | Tool_calls
+  | Length
+  | Stop
+  | Refusal
+  | Content_filter
+  | Repetition_truncation
+  | Context_window_exceeded
+  | Other of string
+
+(** Case-insensitive OpenAI-compatible vocabulary. OpenAI-specific
+    ["tool_calls"] and ["stop"] are handled here because the canonical
+    {!Types.stop_reason_of_string} spellings are ["tool_use"] and ["end_turn"].
+    All other canonical and provider-dialect tokens are owned by that decoder
+    and translated from its typed result. Thus an overflow token reaches
+    [Context_window_exceeded] without duplicating its wire spellings here. *)
+val wire_finish_of_string : string -> wire_finish
+
+(** [true] for the finish reason an OpenAI-compatible provider ends a choice
+    with when the provider failed after its response was committed: OpenRouter
+    normalizes every model's [finish_reason] to [tool_calls], [stop], [length],
+    [content_filter] or [error] (openrouter.ai/docs/api-reference/overview).
+    [error] says how the provider failed, not how the model stopped, so a
+    parser reads the chunk or response that carries it as a provider error and
+    never hands it to {!wire_finish_of_string}. Case-insensitive, like that
+    decoder. *)
+val is_provider_error_finish : string -> bool
+
+(** Decode the nullable refusal field of a Chat message or delta. A string is
+    an explicit refusal signal; its private text is not projected into content.
+    Other JSON shapes are malformed and must not become a successful answer. *)
+val refusal_of_json : Yojson.Safe.t -> (bool, unit) result
+
+(** A provider-declared refusal is terminal even when text or tool calls are
+    also present. Without that declaration, retain the exact existing reason. *)
+val with_refusal : has_refusal:bool -> Types.stop_reason -> Types.stop_reason
+
+(** Canonical parse-time mapping for backends that know the assembled tool-block
+    set at parse time (the non-streaming OpenAI parser). [Tool_calls] without a
+    tool block fails closed to [UnmatchedToolCalls]. [Other] re-decodes through
+    {!Types.stop_reason_of_string}: canonical tokens outside this module's
+    vocabulary keep their typed value and unrecognized tokens stay [Unknown].
+    No token reaching [Other] maps to executable [StopToolUse]. [Stop]
+    (finish_reason=stop/end_turn) with a tool block present upgrades to
+    [StopToolUse] — a provider that emits complete tool_calls but labels the
+    turn as normal completion is mislabeling a tool-request turn, and the
+    tool-block presence is authoritative. [Length] stays [MaxTokens] even with a
+    tool block, since a length-truncated tool call may be incomplete. *)
+val of_finish : wire_finish -> has_tool_blocks:bool -> Types.stop_reason
+
+(** Faithful wire claim for the streaming chunk boundary, where the accumulated
+    tool-block set is NOT yet known. The result MUST be passed through
+    {!reconcile} once accumulation completes; see
+    [Complete_stream_acc.finalize_stream_acc]. *)
+val provisional_of_string : string -> Types.stop_reason
+
+(** Enforce parse-time parity after streaming accumulation. Maps [StopToolUse]
+    with [has_tool_blocks = false] to [UnmatchedToolCalls] and maps [EndTurn]
+    with [has_tool_blocks = true] to [StopToolUse] (a finish_reason=stop
+    alongside complete tool blocks is a provider mislabel of a tool-request
+    turn) so these labels follow {!of_finish}. [Unknown], [MaxTokens], and the
+    other terminal reasons are left unchanged even with tool blocks — an
+    unrecognized, truncated, or terminally-flagged turn must not auto-execute a
+    possibly-incomplete tool call. Total over {!Types.stop_reason}: no catch-all,
+    so a new [stop_reason] constructor forces a compile error here. *)
+val reconcile : Types.stop_reason -> has_tool_blocks:bool -> Types.stop_reason
+

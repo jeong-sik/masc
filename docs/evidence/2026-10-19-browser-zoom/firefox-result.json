@@ -1,0 +1,54 @@
+{
+  "ok": true,
+  "before": {
+    "zoom": 1,
+    "viewport": {
+      "width": 1366,
+      "ratio": 1,
+      "box": 200
+    }
+  },
+  "raised": {
+    "tabId": 2,
+    "action": "set_zoom",
+    "urlBefore": "http://127.0.0.1:53904/fixture.html",
+    "url": "http://127.0.0.1:53904/fixture.html",
+    "title": "Owned browser zoom fixture",
+    "requestedFactor": 1.5,
+    "zoomBefore": 1,
+    "zoomFactor": 1.5,
+    "zoomScope": "per-origin",
+    "zoomMode": "automatic"
+  },
+  "raisedViewport": {
+    "width": 911,
+    "ratio": 1.5,
+    "box": 200
+  },
+  "lowered": {
+    "tabId": 2,
+    "action": "set_zoom",
+    "urlBefore": "http://127.0.0.1:53904/fixture.html",
+    "url": "http://127.0.0.1:53904/fixture.html",
+    "title": "Owned browser zoom fixture",
+    "requestedFactor": 0.75,
+    "zoomBefore": 1.5,
+    "zoomFactor": 0.75,
+    "zoomScope": "per-origin",
+    "zoomMode": "automatic"
+  },
+  "loweredViewport": {
+    "width": 1821,
+    "ratio": 0.75,
+    "box": 200
+  },
+  "refused": {
+    "message": "page_url_changed",
+    "effectStarted": false
+  },
+  "unchanged": 0.75,
+  "sourceSha256": "d2efdcad4a14effb857fcd87948ac1514ec8d49956f1f9a1c75957032e9f449c",
+  "candidateFunctionSha256": "557c883ba2553de808d6d2e0881af2574f6068699b5564ef7f603556a955b027",
+  "browserVersion": "158.0",
+  "evidenceScope": "Exact candidate pageZoom function, real tabs APIs in temporary addon, owned fresh Firefox profile; not full server/host integration"
+}

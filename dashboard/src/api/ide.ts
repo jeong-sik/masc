@@ -1,0 +1,196 @@
+import { get, type GetOptions } from './core'
+import { isRecord } from '../lib/type-guards'
+
+export interface IdeApiOptions extends GetOptions {
+  readonly keeper?: string
+  readonly scope?: IdeScope | null
+  /** RFC-0378 §5.3b: the one wire key — the canonical codebase slug the
+   *  server minted (repositories API `codebase` field). Display names and
+   *  catalog ids are projection labels, not addresses. */
+  readonly codebase?: string | null
+}
+
+export type IdeScope = { readonly kind: 'codebase'; readonly codebase: string }
+
+export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'codebase'>
+
+export type IdeEventKind = 'tool'
+
+export interface IdeEventsOptions extends IdeApiOptions {
+  readonly kind?: IdeEventKind | 'all'
+  readonly keeperId?: string
+  readonly limit?: number
+  readonly offset?: number
+}
+
+interface IdeBridgeEventBase {
+  readonly type: IdeEventKind
+  readonly keeper_id: string
+  readonly turn_id: string
+  readonly timestamp_ms: number
+  /** Canonical identity minted for this actual tool execution. */
+  readonly event_id: string
+}
+
+export interface IdeToolEvent extends IdeBridgeEventBase {
+  readonly type: 'tool'
+  readonly tool_name: string
+  readonly outcome: string
+  readonly typed_outcome: string
+  readonly latency_ms: number
+  /** Leading bytes of the tool's output; null when the tool produced none. */
+  readonly summary: string | null
+  readonly file_path: string | null
+}
+
+export type IdeBridgeEvent = IdeToolEvent
+
+function trimmedNonEmpty(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+export function ideScopeFromCodebase(codebase: string | null | undefined): IdeScope | null {
+  const trimmed = trimmedNonEmpty(codebase)
+  return trimmed ? { kind: 'codebase', codebase: trimmed } : null
+}
+
+function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
+  const candidates: IdeScope[] = []
+  if (opts.scope) candidates.push(opts.scope)
+  const codebaseScope = ideScopeFromCodebase(opts.codebase)
+  if (codebaseScope) candidates.push(codebaseScope)
+  if (candidates.length > 1) {
+    throw new Error('IDE scope must resolve to exactly one codebase')
+  }
+  return candidates[0] ?? null
+}
+
+export function appendIdeScopeParams(params: URLSearchParams, opts: IdeScopeOptions): void {
+  const scope = resolveIdeScope(opts)
+  if (!scope) return
+  params.set('codebase', scope.codebase)
+}
+
+function appendWorkspaceParams(
+  params: URLSearchParams,
+  opts: IdeApiOptions,
+): void {
+  if (opts.keeper) params.set('keeper', opts.keeper)
+  appendIdeScopeParams(params, opts)
+}
+
+function ideEnvelopeData(raw: unknown, operation: string): unknown {
+  if (!isRecord(raw)) throw new Error(`${operation} returned a malformed response envelope`)
+  if (raw.ok !== true) {
+    const message = typeof raw.error === 'string' && raw.error.trim() !== ''
+      ? raw.error.trim()
+      : `${operation} failed`
+    throw new Error(message)
+  }
+  return raw.data
+}
+
+function ideEnvelopeRecord(raw: unknown, operation: string): Record<string, unknown> {
+  const data = ideEnvelopeData(raw, operation)
+  if (!isRecord(data)) throw new Error(`${operation} returned malformed data`)
+  return data
+}
+
+export async function fetchIdePresence(
+  opts: IdeApiOptions = {},
+): Promise<unknown> {
+  const params = new URLSearchParams()
+  appendWorkspaceParams(params, opts)
+  const raw = await get<unknown>(`/api/v1/ide/presence?${params.toString()}`, opts)
+  if (!isRecord(raw) || raw.ok !== true) return null
+  return raw.data
+}
+
+export async function fetchIdeEvents(
+  opts: IdeEventsOptions = {},
+): Promise<ReadonlyArray<IdeBridgeEvent>> {
+  const params = new URLSearchParams()
+  appendWorkspaceParams(params, opts)
+  if (opts.kind && opts.kind !== 'all') params.set('kind', opts.kind)
+  if (opts.keeperId) params.set('keeper_id', opts.keeperId)
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit))
+  if (opts.offset !== undefined) params.set('offset', String(opts.offset))
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  const raw = await get<unknown>(`/api/v1/ide/events${query}`, opts)
+  const data = ideEnvelopeRecord(raw, 'fetchIdeEvents')
+  const events = data.events
+  if (!Array.isArray(events)) throw new Error('fetchIdeEvents returned malformed events')
+  const parsed = events.map(parseIdeBridgeEvent)
+  const invalidIndex = parsed.findIndex(event => event === null)
+  if (invalidIndex >= 0) {
+    throw new Error(`fetchIdeEvents returned malformed event at index ${invalidIndex}`)
+  }
+  const valid = parsed.filter(isIdeBridgeEvent)
+  if (new Set(valid.map(event => event.event_id)).size !== valid.length) {
+    throw new Error('fetchIdeEvents returned duplicate execution identities')
+  }
+  return valid
+}
+
+function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
+  if (!isRecord(raw)) return null
+  const type = stringField(raw, 'type')
+  const keeperId = stringField(raw, 'keeper_id')
+  const turnId = stringField(raw, 'turn_id')
+  const timestampMs = numberField(raw, 'timestamp_ms')
+  if (!isIdeEventKind(type) || !keeperId || !turnId || timestampMs === null) return null
+  const eventId = raw.event_id
+  if (typeof eventId !== 'string' || eventId.trim() === '' || eventId.trim() !== eventId) return null
+
+  if (type === 'tool') {
+    const toolName = stringField(raw, 'tool_name')
+    const outcome = stringField(raw, 'outcome')
+    const typedOutcome = stringField(raw, 'typed_outcome')
+    const latencyMs = numberField(raw, 'latency_ms')
+    // The server writes the tool's output head verbatim, so a tool that
+    // printed nothing arrives as "". That is a fact about the call, not a
+    // malformed row; only a missing or non-string field is.
+    if (typeof raw.summary !== 'string') return null
+    const summary = stringField(raw, 'summary')
+    if (!toolName || !outcome || !typedOutcome || latencyMs === null) return null
+    return {
+      type,
+      keeper_id: keeperId,
+      turn_id: turnId,
+      timestamp_ms: timestampMs,
+      event_id: eventId,
+      tool_name: toolName,
+      outcome,
+      typed_outcome: typedOutcome,
+      latency_ms: latencyMs,
+      summary,
+      file_path: stringField(raw, 'file_path'),
+    }
+  }
+
+  return null
+}
+
+function isIdeBridgeEvent(value: IdeBridgeEvent | null): value is IdeBridgeEvent {
+  return value !== null
+}
+
+function isIdeEventKind(value: string | null): value is IdeEventKind {
+  return value === 'tool'
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key]
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key]
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}

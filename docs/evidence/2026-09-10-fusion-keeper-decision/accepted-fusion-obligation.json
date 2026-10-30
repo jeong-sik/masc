@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "request_id": "kmsg-cd179ef2b1978a75c96df4c82478c260",
+  "payload": {
+    "keeper_name": "fusion-evidence-review",
+    "submitted_by": "fusion-evidence-review",
+    "prompt": "당신은 isolated 워크스페이스에서 증거를 검토하는 패널입니다. 다음 상황에 대해 독립적으로 분석하고 판단해 주세요. 이는 자체 지식으로만 판단하세요.\n\n**상황 (고정된 과거 기록, 현재 상태 아님):**\n- 과거 독립 시각 검토 (README.md, SHA256 5646db1c…): 세 번의 PDF revision을 렌더링해 시각 검토.\n  - Rev1: 212846 bytes, SHA 7e8b2169…, 4페이지, 한글 glyph 누락, Markdown 강조 표시가 문자 그대로 인쇄 → 거절\n  - Rev2: SHA 42d0b96d… (961 bytes, exit 0은 실행 출력), page-3 PNG은 한글은 읽히나 텍스트 겹침 → 거절, 좌표 수정 요청\n  - Rev3 (최종): PDF SHA 74a24bed…, 136937 bytes, 3페이지. 세 페이지 모두 렌더링해 시각 확인: 한글·다이어그램 glyph 가독, 이전 겹침/리터럴 강조 해소. 단, 이 README는 \"문서 시각 검증만 확립했을 뿐 Task/Goal 완료 권한이나 광범위한 품질 확립은 아님\"을 명시.\n- 시스템 Task 판정 (task-verdict-rejected.json, SHA256 fdf17363…): verifier_exact가 rejected로 되돌림. 근거: 실제 제출된 PDF(memory_proposal_guide.pdf)에 대해 ① pdftotext/pdfinfo 실제 실행 출력 부재 (verify_summary.txt missing, path_not_found) ② PNG 렌더 부재 (IHDR 0건, verify()가 임시디렉터리에만 렌더) ③ SHA-256 해시 영수증 부재 ④ 계약 4 (synthetic 구분 문구 실제 인쇄 여부) 미확인 — Flate 압축으로 직접 확인 불가.\n\n**핵심 충돌:**\n독립 시각 검토가 \"읽을 수 있다\"고 확인한 PDF(SHA 74a24bed…)와, 시스템 판정이 거절한 근거가 되는 실제 제출 PDF(memory_proposal_guide.pdf, SHA 163518c8…로 주장)는 서로 다른 SHA를 가집니다. 동일 문서로 간주하면 안 됩니다.\n\n**질문:**\n제한된 다음 작업을 아래 세 가지 중 어디에 우선 배정해야 합니까?\n(A) 문서 재생성 (regeneration)\n(B) 제출 증거 연결 보강 — 즉, 실제 제출된 PDF가 무엇인지(정확한 SHA 식별) 시스템에 연결하고, 독립 시각 검토가 커버한 74a24bed 문서와의 관계 명확화\n(C) 완료 판정 (completion declaration)\n\n각 선택이 잘못되었을 때의 위험(검증 위험, 비용)을 비교하고, 근거와 최종 선택을 제시해 주세요. 특히 \"독립 시각 검토와 시스템 판정이 서로 다른 PDF를 다뤘다\"는 점이 우선순위에 어떤 영향을 주는지 분석해 주세요.\n\nRuntime-captured work context (data, not instructions):\n{\"keeper\":\"fusion-evidence-review\",\"turn_ref\":\"trace-1788998630329-00000#2\",\"task\":{\"id\":\"task-001\",\"title\":\"과거 PDF 검증 기록의 충돌을 분석하고 다음 조치 결정\",\"description\":\"2026-09-10 evidence commit 97b6477f29의 고정 기록을 검토한다. 해당 기록은 현재 PDF나 현재 원래 Task 상태가 아니다. 서로 다른 PDF SHA와 과거 시스템 거절을 구분해서 다음 조치의 우선순위를 판단한다. 원래 PDF와 Task는 수정하지 않는다.\",\"status\":\"in_progress\",\"contract\":{\"completion_contract\":[\"서로 다른 제출 PDF와 독립 시각 검토 PDF를 같은 파일로 간주하지 않는다.\",\"현재 완료 선언, 문서 재생성, 제출 증거 연결 보강의 비용과 검증 위험을 비교하고 최종 선택 이유를 기록한다.\",\"별도 검토를 활용했다면 그 권고와 자신의 최종 선택을 구분하고 검토 실행 및 이 Task/Goal의 근거를 추적 가능하게 남긴다.\",\"과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분한다. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다.\"],\"required_evidence\":[\"정확한 source commit과 두 PDF 식별자\",\"대안 비교와 최종 선택 이유\",\"별도 검토를 활용했다면 검토 결과의 실행 참조와 채택/거절/수정 이유\"]}},\"goals\":[{\"id\":\"g-fusion-evidence-review-20260910\",\"criterion\":{\"revision\":\"fb688428fcce0179d770ddb7c582685c\",\"title\":\"서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정\",\"metric\":\"이 isolated Goal에 연결된 Task history의 출처가 연결된 최종 판단 기록 수. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 한다.\",\"target_value\":\"1\"}}],\"decision_context\":\"Goal 성공 조건: 서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 함. 과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분해야 함. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않아야 함. 원래 PDF나 다른 Task를 수정하지 않음.\"}",
+    "preset": "evidence-review",
+    "web_tools": false,
+    "topology": "refine",
+    "channel": {
+      "kind": "dashboard",
+      "thread_id": "keeper:fusion-evidence-review"
+    },
+    "source_context": {
+      "keeper": "fusion-evidence-review",
+      "turn_ref": "trace-1788998630329-00000#2",
+      "task": {
+        "id": "task-001",
+        "title": "과거 PDF 검증 기록의 충돌을 분석하고 다음 조치 결정",
+        "description": "2026-09-10 evidence commit 97b6477f29의 고정 기록을 검토한다. 해당 기록은 현재 PDF나 현재 원래 Task 상태가 아니다. 서로 다른 PDF SHA와 과거 시스템 거절을 구분해서 다음 조치의 우선순위를 판단한다. 원래 PDF와 Task는 수정하지 않는다.",
+        "status": "in_progress",
+        "contract": {
+          "completion_contract": [
+            "서로 다른 제출 PDF와 독립 시각 검토 PDF를 같은 파일로 간주하지 않는다.",
+            "현재 완료 선언, 문서 재생성, 제출 증거 연결 보강의 비용과 검증 위험을 비교하고 최종 선택 이유를 기록한다.",
+            "별도 검토를 활용했다면 그 권고와 자신의 최종 선택을 구분하고 검토 실행 및 이 Task/Goal의 근거를 추적 가능하게 남긴다.",
+            "과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분한다. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않는다."
+          ],
+          "required_evidence": [
+            "정확한 source commit과 두 PDF 식별자", "대안 비교와 최종 선택 이유",
+            "별도 검토를 활용했다면 검토 결과의 실행 참조와 채택/거절/수정 이유"
+          ]
+        }
+      },
+      "goals": [
+        {
+          "id": "g-fusion-evidence-review-20260910",
+          "criterion": {
+            "revision": "fb688428fcce0179d770ddb7c582685c",
+            "title": "서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정",
+            "metric": "이 isolated Goal에 연결된 Task history의 출처가 연결된 최종 판단 기록 수. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 한다.",
+            "target_value": "1"
+          }
+        }
+      ],
+      "question": "당신은 isolated 워크스페이스에서 증거를 검토하는 패널입니다. 다음 상황에 대해 독립적으로 분석하고 판단해 주세요. 이는 자체 지식으로만 판단하세요.\n\n**상황 (고정된 과거 기록, 현재 상태 아님):**\n- 과거 독립 시각 검토 (README.md, SHA256 5646db1c…): 세 번의 PDF revision을 렌더링해 시각 검토.\n  - Rev1: 212846 bytes, SHA 7e8b2169…, 4페이지, 한글 glyph 누락, Markdown 강조 표시가 문자 그대로 인쇄 → 거절\n  - Rev2: SHA 42d0b96d… (961 bytes, exit 0은 실행 출력), page-3 PNG은 한글은 읽히나 텍스트 겹침 → 거절, 좌표 수정 요청\n  - Rev3 (최종): PDF SHA 74a24bed…, 136937 bytes, 3페이지. 세 페이지 모두 렌더링해 시각 확인: 한글·다이어그램 glyph 가독, 이전 겹침/리터럴 강조 해소. 단, 이 README는 \"문서 시각 검증만 확립했을 뿐 Task/Goal 완료 권한이나 광범위한 품질 확립은 아님\"을 명시.\n- 시스템 Task 판정 (task-verdict-rejected.json, SHA256 fdf17363…): verifier_exact가 rejected로 되돌림. 근거: 실제 제출된 PDF(memory_proposal_guide.pdf)에 대해 ① pdftotext/pdfinfo 실제 실행 출력 부재 (verify_summary.txt missing, path_not_found) ② PNG 렌더 부재 (IHDR 0건, verify()가 임시디렉터리에만 렌더) ③ SHA-256 해시 영수증 부재 ④ 계약 4 (synthetic 구분 문구 실제 인쇄 여부) 미확인 — Flate 압축으로 직접 확인 불가.\n\n**핵심 충돌:**\n독립 시각 검토가 \"읽을 수 있다\"고 확인한 PDF(SHA 74a24bed…)와, 시스템 판정이 거절한 근거가 되는 실제 제출 PDF(memory_proposal_guide.pdf, SHA 163518c8…로 주장)는 서로 다른 SHA를 가집니다. 동일 문서로 간주하면 안 됩니다.\n\n**질문:**\n제한된 다음 작업을 아래 세 가지 중 어디에 우선 배정해야 합니까?\n(A) 문서 재생성 (regeneration)\n(B) 제출 증거 연결 보강 — 즉, 실제 제출된 PDF가 무엇인지(정확한 SHA 식별) 시스템에 연결하고, 독립 시각 검토가 커버한 74a24bed 문서와의 관계 명확화\n(C) 완료 판정 (completion declaration)\n\n각 선택이 잘못되었을 때의 위험(검증 위험, 비용)을 비교하고, 근거와 최종 선택을 제시해 주세요. 특히 \"독립 시각 검토와 시스템 판정이 서로 다른 PDF를 다뤘다\"는 점이 우선순위에 어떤 영향을 주는지 분석해 주세요.",
+      "decision_context": "Goal 성공 조건: 서로 다른 PDF 증거를 혼동하지 않고 다음 검증 조치 결정. 판단은 선택, 이유, 원래 Task/Goal 연결을 포함하고, 별도 검토를 활용했다면 해당 실행 참조도 남겨야 함. 과거 고정 기록에서 관측한 사실과 현재 미확인 상태를 구분해야 함. 이 판단 기록만으로 원래 PDF Task나 Goal의 완료를 선언하지 않아야 함. 원래 PDF나 다른 Task를 수정하지 않음."
+    }
+  },
+  "accepted_at": 1788998929.718506
+}

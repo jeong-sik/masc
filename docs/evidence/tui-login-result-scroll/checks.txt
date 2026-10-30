@@ -1,0 +1,7 @@
+tui account login: PASS (11 scenarios)
+32 OCaml login workflow tests: PASS
+Focused login test + TUI build: PASS
+Ruff: PASS
+Pyright: 0 errors
+BROWSER_PTY_FRAME_MATCH=PASS login-result-top
+BROWSER_PTY_FRAME_MATCH=PASS login-result-bottom

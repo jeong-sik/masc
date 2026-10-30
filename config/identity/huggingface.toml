@@ -1,0 +1,22 @@
+# Hugging Face's remote MCP server.
+#
+# Only the server is named. Its endpoints and the scopes it publishes come
+# from the two well-known documents it serves, so none of that can go stale
+# here.
+#
+# Measured 2026-08-27: registration answers with a public client despite the metadata listing
+# only secret-based methods. Unlike the others here, an unauthenticated
+# initialize succeeds -- the endpoint serves what is public without a token
+# and more with one.
+
+id = "huggingface"
+label = "Hugging Face"
+mcp_url = "https://huggingface.co/mcp"
+
+access_token_env = "HUGGINGFACE_ACCESS_TOKEN"
+expires_at_env = "HUGGINGFACE_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.huggingface/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

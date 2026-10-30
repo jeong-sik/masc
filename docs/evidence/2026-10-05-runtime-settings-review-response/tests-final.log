@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard-runtime-raw-save.test.ts src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41160-runtime-draft-races-20261004/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  165 passed (165)
+   Start at  03:03:10
+   Duration  5.30s (tests 49%, transform 19%, import 17%, environment 8%, setup 6%)
+
+    Isolate  3 workers spawned · ~234ms startup each (spawn + environment, per file)
+             at least ~468ms faster with isolate: false — reuses workers across files instead of one per file
+

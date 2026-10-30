@@ -1,0 +1,18 @@
+test_authority_and_invalid_result_do_not_create_or_finish_an_intent (test_candle_appraiser.CandleWorker.test_authority_and_invalid_result_do_not_create_or_finish_an_intent) ... ok
+test_corrupt_record_refuses_reads_and_listing_instead_of_redispatch (test_candle_appraiser.CandleWorker.test_corrupt_record_refuses_reads_and_listing_instead_of_redispatch) ... ok
+test_equal_relation_titles_keep_distinct_task_intents_out_of_model_evidence (test_candle_appraiser.CandleWorker.test_equal_relation_titles_keep_distinct_task_intents_out_of_model_evidence) ... ok
+test_excessive_json_nesting_refuses_input_without_killing_the_worker (test_candle_appraiser.CandleWorker.test_excessive_json_nesting_refuses_input_without_killing_the_worker) ... ok
+test_excessive_nesting_in_retained_state_is_an_error_not_a_worker_exit (test_candle_appraiser.CandleWorker.test_excessive_nesting_in_retained_state_is_an_error_not_a_worker_exit) ... ok
+test_first_store_creation_syncs_its_installation_parent_before_admission (test_candle_appraiser.CandleWorker.test_first_store_creation_syncs_its_installation_parent_before_admission) ... ok
+test_frame_capacity_defers_new_admission_without_hiding_existing_work (test_candle_appraiser.CandleWorker.test_frame_capacity_defers_new_admission_without_hiding_existing_work) ... ok
+test_id_reuse_cannot_overwrite_input_or_terminal_evidence (test_candle_appraiser.CandleWorker.test_id_reuse_cannot_overwrite_input_or_terminal_evidence) ... ok
+test_missing_store_is_an_error_instead_of_absent_or_an_empty_listing (test_candle_appraiser.CandleWorker.test_missing_store_is_an_error_instead_of_absent_or_an_empty_listing) ... ok
+test_pending_and_original_result_survive_new_worker_incarnations (test_candle_appraiser.CandleWorker.test_pending_and_original_result_survive_new_worker_incarnations) ... ok
+test_persistence_uncertainty_cannot_publish_a_finished_result (test_candle_appraiser.CandleWorker.test_persistence_uncertainty_cannot_publish_a_finished_result) ... ok
+test_replaced_store_cannot_authorize_new_work_for_old_ids (test_candle_appraiser.CandleWorker.test_replaced_store_cannot_authorize_new_work_for_old_ids) ... ok
+test_unknown_outcome_is_terminal_and_never_relisted_after_restart (test_candle_appraiser.CandleWorker.test_unknown_outcome_is_terminal_and_never_relisted_after_restart) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 3.547s
+
+OK

@@ -1,0 +1,30 @@
+[
+  {
+    "path": "lib/core/common.ml",
+    "sha256": "8a896bd42039eca13aff99e5e554abca4f16ff4d9f35e07249592f4fb43154fb"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  },
+  {
+    "path": "lib/tool_blob_store/tool_output.ml",
+    "sha256": "7fb9199383eb8744586ecc0bf4d7d6dec6e188d6b1fb0ec6dff2dfff8a1b5d07"
+  },
+  {
+    "path": "lib/tool_bridge.ml",
+    "sha256": "62de844c216f56c185f03d850060a3ae085a0a42e14dda624906a420b6803e2e"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_shard_limits.ml",
+    "sha256": "207bcc2173ebf586b5b59dee0dd509a763413b7a194c0ab61b23f2689da93a2c"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "sha256": "df4627969e180764cbaceb334398c9cc4aec0c1b3d8ac8e876f43662c4df9d63"
+  }
+]

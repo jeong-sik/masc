@@ -1,0 +1,16 @@
+Testing `Exact activity draft and save'.
+This run has ID `907AI7MP'.
+
+  [OK]          operator flow          0   explicit save preserves candidates...
+  [OK]          operator flow          1   conflict reapplies activity only.
+  [OK]          operator flow          2   fresh read retains and discard res...
+  [OK]          operator flow          3   Required and empty candidate refusal.
+  [OK]          operator flow          4   unavailable and malformed input.
+  [OK]          operator flow          5   workspace roundtrip ignores old ca...
+  [OK]          operator flow          6   unconfirmed write and preview refu...
+  [OK]          operator flow          7   changed file path needs discard.
+  [OK]          operator flow          8   quoted and multiline table shapes.
+  [OK]          operator flow          9   stored setting does not hide appli...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41166-help-modal-20261005/_build/_tests/Exact activity draft and save'.
+Test Successful in 0.003s. 10 tests run.

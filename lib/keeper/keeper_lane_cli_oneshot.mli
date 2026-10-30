@@ -1,0 +1,206 @@
+(** Run one declared [cli_slots] lane slot as an official-client one-shot.
+
+    RFC cli-runtimes-as-lane-slots: an exact-output lane may declare
+    official-client runtime ids that it walks after every catalog (HTTP) slot
+    is exhausted. This module is the per-slot executor for that walk. It
+    mirrors the HTTP contract deliberately:
+
+    - the prompt carries the lane schema in the exact Agent Core sentence
+      ({!Agent_core.Exact_output.schema_instruction_text}), so the model gets
+      the same words on both transports, except where the client does not
+      accept a written value (see {!prompt_with_schema});
+    - the answer is parsed with a strict [Yojson.Safe.from_string] — no fence
+      stripping, no repair — because that is precisely what Agent Core does to
+      a [Json_syntax_only] HTTP body. An unparseable answer is the CLI's
+      [Invalid_json_output] and the walk advances, exactly like an HTTP slot.
+
+    Domain validation stays with the lane consumer, as it does on the HTTP
+    path. *)
+
+type failure =
+  | Unknown_runtime of { runtime_id : string }
+      (** No configured runtime holds this id
+          ([Runtime.get_runtime_by_id] answered [None]). Every declared
+          exact-output lane's [cli_slots] is reference-checked against
+          [runtime.toml]'s runtime list at load
+          ([Runtime.exact_lane_cli_slot_references]), so this should be
+          unreachable through a lane a config file declared; it stays a
+          distinct case from {!Not_an_official_client} for a caller that
+          dispatches a [runtime_id] the loader never validated. *)
+  | Not_an_official_client of { runtime_id : string }
+      (** The id resolves to a configured runtime this module may not run: a
+          provider-dispatched (HTTP / [Agent_core]) runtime rather than an
+          official client. Every declared lane's [cli_slots] is checked for
+          this at load too
+          ([Runtime.validate_exact_lane_cli_slot_official_clients]), so this
+          should likewise be unreachable through a loaded config. *)
+  | Execution_failed of
+      { runtime_id : string
+      ; cause : Fusion_official_client.failure
+      }
+      (** The client failed to produce an answer: admission, spawn, timeout,
+          bridge, or an empty response. *)
+  | Invalid_json_output of
+      { runtime_id : string
+      ; detail : string
+      }
+      (** The client answered, but the text is not one JSON value. *)
+  | Invalid_domain_output of
+      { runtime_id : string
+      ; detail : string
+      }
+      (** JSON parsed, but the consumer rejected its domain value. *)
+
+val failure_to_string : failure -> string
+
+val refused_for_binding_rest : failure -> bool
+(** [true] only when the client refused for its account's standing, read from
+    its typed failure: Claude [Quota_blocked], or a Codex turn tagged
+    [Usage_limit_exceeded], [Rate_limit_exceeded] or [Server_overloaded]. Such
+    a refusal says nothing about the prompt, so the same prompt can be served
+    once the account frees. Every other failure, including an Antigravity
+    refusal (its quota arrives only as turn text), is [false]. *)
+
+val refused_for_input_size : failure -> bool
+(** [true] only when the client refused because the prompt exceeded the model's
+    context window, read from its typed failure: Claude
+    [Context_window_exceeded] or Codex [Context_window_exceeded]. *)
+
+type input_size_refusal =
+  | Input_over_limit of
+      { estimated_tokens : int
+      ; limit_tokens : int
+      }
+
+val check_input_size
+  :  estimated_tokens:int
+  -> overflow:Runtime.overflow_behavior
+  -> (unit, input_size_refusal) result
+(** Guard caller-bounded runtimes before calling a provider that truncates
+    silently on overflow. Returns [Error (Input_over_limit _)] when
+    [overflow] is [Runtime.Caller_bounded { max_input_tokens }] and
+    [estimated_tokens > max_input_tokens]. *)
+
+type refused_slot =
+  { slot : string
+  ; refusal : Runtime.refusal
+  }
+
+type admitted_cli_slots =
+  { cli_slots : string list
+  ; refused_cli_slots : refused_slot list
+  }
+
+val partition_cli_slots
+  :  lane:Runtime.lane_requirement
+  -> ?capability_of:(string -> Runtime.runtime_capability option)
+  -> string list
+  -> admitted_cli_slots
+(** Partition declared [cli_slots] through {!Runtime.admits}, preserving both
+    admitted [cli_slots] and [refused_cli_slots] with their typed
+    {!Runtime.refusal} reason in declaration order. *)
+
+val output_schema_for_api_format
+  :  Runtime_schema.api_format
+  -> Yojson.Safe.t
+  -> Yojson.Safe.t option
+(** Return [Some output_schema] when the transport has an output-schema channel
+    ([Holds_output_schema]) and [None] when it carries structured output via
+    prompt instructions alone ([No_output_schema_channel], e.g. [Muse_serve]). *)
+
+val output_schema_for_runtime
+  :  Runtime_instance.t
+  -> Yojson.Safe.t
+  -> Yojson.Safe.t option
+
+(** Emitted only after runtime admission, just before the runner and just after
+    its raw response. Observers retain failed syntax/semantic evidence without
+    changing slot progression or output validation. *)
+type attempt_observation =
+  | Dispatching of { runtime_id : string }
+  | Raw_response of { runtime_id : string; text : string }
+
+type runner =
+  runtime:Runtime_instance.t
+  -> system_prompt:string
+  -> output_schema:Yojson.Safe.t
+  -> prompt:string
+  -> (string, Fusion_official_client.failure) result
+(** The effectful edge, injectable for tests. [runtime] is the exact object
+    admitted by [run], retained across observer callbacks and catalog reloads.
+    The default wraps
+    {!Fusion_official_client.run_with_images} and preserves its typed failures.
+
+    [output_schema] is the caller's own domain schema, handed to whatever
+    channel the transport has so the client holds its own answer to the shape
+    instead of only being asked for it in prose. Claude, Antigravity and
+    Codex have one, by three different routes: [--json-schema] on Claude and
+    Antigravity, [outputSchema] on the Codex v2 [turn/start] request. Muse
+    Code has none ([No_output_schema_channel]), so the default runner omits
+    [?output_schema] on Muse Code and relies on the prompt schema instruction
+    plus strict JSON parsing when admitted for a [Json_syntax] lane. *)
+
+val run
+  :  ?runner:runner
+  -> ?observe:(attempt_observation -> unit)
+  -> base_dir:string
+  -> runtime_id:string
+  -> system_prompt:string
+  -> requirement:Agent_core.Exact_output.output_requirement
+  -> prompt:string
+  -> unit
+  -> (Yojson.Safe.t, failure) result
+(** Execute [prompt] (suffixed with the lane schema instruction) once on
+    [runtime_id] and parse the answer as a single JSON value. *)
+
+val order_slots : string list -> string list
+(** Stable quota and candidate rate-rest ordering for declared CLI candidates.
+    Both observations come from one resolved runtime per declared entry; an
+    unknown entry is preserved for [run] to report. Reapply
+    before dispatch and after a failed candidate; exhausted scopes move to the
+    tail, but every declared candidate remains eligible. Shared with the HITL
+    walker, whose release/bind transitions must precede each dispatch. *)
+
+val walk
+  :  ?runner:runner
+  -> ?observe:(attempt_observation -> unit)
+  -> base_dir:string
+  -> cli_slots:string list
+  -> system_prompt:string
+  -> requirement:Agent_core.Exact_output.output_requirement
+  -> prompt:string
+  -> validate:(Yojson.Safe.t -> ('a, string) result)
+  -> on_failure:(failure -> unit)
+  -> unit
+  -> (string * 'a, failure list) result
+(** Walk [cli_slots] with stable quota ordering and return the first slot whose
+    answer parses and passes the consumer-owned [validate] function, as
+    [(runtime_id, accepted_value)]. Domain rejection advances to the remaining
+    candidates and is retained as [Invalid_domain_output]. [validate] must be
+    side-effect-free. [on_failure] observes each refusal once before advancing,
+    including refusals before a later success, so accepted fallbacks do not
+    erase their preceding failure evidence. [Error failures] carries every
+    slot's failure in walk order when all of them failed; an empty
+    [cli_slots] is [Error []] — the caller distinguishes "nothing declared"
+    from "declared and exhausted" by the list it passed in.
+
+    An accepted CLI answer carries no token usage: [runner] returns the
+    answer text alone. Usage of an exact call is the [usage] field of
+    {!Agent_core.Exact_output.success}, which only an API slot's exact
+    execution produces. *)
+
+val prompt_with_schema :
+  requirement:Agent_core.Exact_output.output_requirement -> prompt:string -> string
+(** The exact text [run] submits to a client that returns what the model
+    writes (Claude Code, Codex, Muse Code), including its schema instructions.
+    An Antigravity slot gets {!Runtime_antigravity.structured_output_instruction}
+    in place of the Agent Core sentence, because that client takes a
+    schema-bound answer through its [finish] tool. *)
+
+type input_capacity =
+  { runtime_id : string
+  ; capacity : Runtime_codex_app_server.input_capacity
+  }
+val input_capacity : failure -> input_capacity option
+(** Server-reported capacity for the failed official-client slot, never inferred
+    from diagnostic prose or generic invalid parameters. *)

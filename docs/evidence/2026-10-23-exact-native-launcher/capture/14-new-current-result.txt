@@ -1,0 +1,56 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Plugins                                                                                                                                                 │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│?:help  Esc:back  Tab:section  j/k:move  D:raw                                                                                                                │
+│result-statistics · Latest completed output statistics · attached                                                                                             │
+│[1 Results]  2 Links  3 Installation  4 Records                                                                                                               │
+│                                                                                                                                                              │
+│outputs/phrase-source/statistics (1)                 │ Supplied output row statistics                                                                         │
+│> Supplied output row statistics                     │ outputs/phrase-source/statistics · 2026-10-23 10:28:38.674 UTC                                         │
+│                                                     │                                                                                                        │
+│                                                     │ source_id  phrase-input                                                                                │
+│                                                     │ incarnation  01a1684c-8c30-7000-9443-b69f977e36d8                                                      │
+│                                                     │ source_event_id  01a1684c-8c30-7000-9443-b69f977e36d8/output/2                                         │
+│                                                     │ scope  supplied_latest_completed_output                                                                │
+│                                                     │ observed_row_count  2                                                                                  │
+│                                                     │ observed_by_kind  event 0 · value 2 · relation 0                                                       │
+│                                                     │ input_complete  true                                                                                   │
+│                                                     │ producer                                                                                               │
+│                                                     │   installation_id  phrase-source                                                                       │
+│                                                     │   instance_id  01a1684c-8c30-7000-9443-b69f977e36d8                                                    │
+│                                                     │   run_id  exact-launcher-review                                                                        │
+│                                                     │   configuration_revision  66b81849b23e07c0b5eca3aea49252688a9bb54934fc7e10b18a22b420e22f55             │
+│                                                     │   package_revision  0.1.0                                                                              │
+│                                                     │   observation_seq  2                                                                                   │
+│                                                     │   output_id  phrase                                                                                    │
+│                                                     │   output_selection                                                                                     │
+│                                                     │     lanes                                                                                              │
+│                                                     │       · phrase                                                                                         │
+│                                                     │   coverage_scope  whole_producer                                                                       │
+│                                                     │ producer_status  source_id 01a1684c-8c30-7000-9443-b69f977e36d8 · incarnation 01a1684c-8c30-7000-9443-b│
+│                                                     │                  69f977e36d8 · cursor 2 · complete true · detail —                                     │
+│                                                     │ upstream_coverage                                                                                      │
+│                                                     │   · source_id  vst-phrase                                                                              │
+│                                                     │     incarnation  declared-exact-launcher-fixture                                                       │
+│                                                     │     cursor  2                                                                                          │
+│                                                     │     complete  true                                                                                     │
+│                                                     │     detail  Explicit local input fixture v2: two observations; no audio or playback                    │
+│                                                     │ upstream_rows                                                                                          │
+│                                                     │   · id  01a1684c-8c30-7000-9443-b69f977e36d8/2/2dd50728ba5027a50de337e80c1b00f6a5ee95b3a9ed44e1c5dd4d34│
+│                                                     │         7c0b5710                                                                                       │
+│                                                     │     lane_id  01a1684c-8c30-7000-9443-b69f977e36d8/phrase                                               │
+│                                                     │     kind  value                                                                                        │
+│                                                     │     subject_id  exact-launcher-fixture:2:1                                                             │
+│                                                     │     observed_at  1792751303.093246                                                                     │
+│                                                     │     clock  —                                                                                           │
+│                                                     │     actor  —                                                                                           │
+│                                                     │     evidence                                                                                           │
+│                                                     │       · uri  lane-evidence:72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b            │
+│                                                     │         sha256  72004f62c97b3a7fb19fd36c7a0d4e56322553687de6d667614bdc3ff5a70c0b                       │
+│                                                     │   · id  01a1684c-8c30-7000-9443-b69f977e36d8/2/70ee1464493e639cc78722a2338259c35519f71de10b47ceded7df7d│
+│                                                     │         e77ef273                                                                                       │
+│                                                     │     lane_id  01a1684c-8c30-7000-9443-b69f977e36d8/phrase                                               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  o:observe  d:remove TOML + worker  D:raw  J/K:scroll  r:refresh
+ › to imp   (i to write)

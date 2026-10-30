@@ -1,0 +1,19 @@
+Testing `browser_stagehand_executor'.
+This run has ID `W8S44KM8'.
+
+  [OK]          tabs                  0   pages become tabs with ids that stay.
+  [OK]          tabs                  1   ids are not given again in a later ...
+  [OK]          goto                  0   navigates a listed or the active tab.
+  [OK]          goto                  1   a failure after the navigation is n...
+  [OK]          capture               0   a capture passes the surface's checks.
+  [OK]          capture               1   a page that moved during capture is...
+  [OK]          sentences             0   each sentence verb sends one Stageh...
+  [OK]          sentences             1   an act Stagehand did not carry out ...
+  [OK]          reads                 0   reads run the page scripts.
+  [OK]          interactions          0   scripts and native pointer input.
+  [OK]          refusals              0   an unserved verb sends nothing.
+  [OK]          evaluate              0   the expression calls its body.
+  [OK]          evaluate              1   a page script's throw keeps its rea...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/browser_stagehand_executor'.
+Test Successful in 0.004s. 13 tests run.

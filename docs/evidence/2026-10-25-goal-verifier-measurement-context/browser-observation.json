@@ -1,0 +1,39 @@
+{
+  "schema": "masc.goal-measurement-browser-observation.v1",
+  "captured_at": "2026-10-25T09:54:28.932391+00:00",
+  "source_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "actual_checkout_head": "ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38",
+  "dashboard_tracked_source_equals_candidate": true,
+  "dashboard_lock_sha256": "d87d18a4946ef924cbee665f47637eda59cc3f26e21fffbb178ea2b071e06d53",
+  "backend_binary_sha256": "c1ec353779d5fff6a9da9ec4290667ab9b5e158c28c34a7094a691d5d08277a4",
+  "backend_embedded_source": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "scope": "Real candidate Vite development dashboard against isolated candidate backend, current persisted measurement and proof shown. Packaged dashboard assets were missing; this is not installed production dashboard proof.",
+  "browser_task_space": 46,
+  "task_space_finished": true,
+  "human_confirmation_performed": false,
+  "screenshots": [
+    {
+      "control": "N",
+      "screenshot": "goal-negative-measurement.png",
+      "bytes": 300213,
+      "sha256": "4a0ffe611403f9c23863a849575aa41c8283bfe696264476cc31355fdb445c3c",
+      "dom_observation_source_sha256": "2320808ce1de0cf9623fc4fe78197dd79c40f28226f88f7b34dccaed6396bf4c",
+      "selected_goal_id": "goal-measurement-47ae0aba9d2841dc992cc49b7df0f07c-n",
+      "observed_value": "999",
+      "measurement_display": "현재 기준의 측정기준 개정 1c87c3c11eef45081efbae9a57534903기록된 관측값999선언된 목표값999증거 참조 · note:https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.jsonmeasurement-canary-operator · 2026-10-25T09:46:36Z관측 기록이며 목표 달성 판정은 별도 검증 결과를 따릅니다.",
+      "proof_display": "검증 · 반증됨evidence가 가리키는 공개 JSON fixture(https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json)를 직접 조회했고, 원문의 정수 actual_value는 1입니다. 보고된 observed_value 999와 다르며, target 999에 도달하지 않았으므로 REJECT입니다.검증 실행 01a17274-736e-7000-b87f-626141f3f77b · 기준 1c87c3c11eef45081efbae9a57534903"
+    },
+    {
+      "control": "P",
+      "screenshot": "goal-positive-measurement-full.png",
+      "bytes": 328998,
+      "sha256": "d8ed971e92a4b670dbeec89c73d95a9b19bfd2b7c0948ec0c5761cc4463d754f",
+      "dom_observation_source_sha256": "d5eb67d58e9e7b8d7a2f070542001984c34373ef22f372721f79261c14a914f3",
+      "selected_goal_id": "goal-measurement-47ae0aba9d2841dc992cc49b7df0f07c-p",
+      "observed_value": "1",
+      "measurement_display": "현재 기준의 측정기준 개정 851a3578ebd5be695354597d962f76ce기록된 관측값1선언된 목표값1증거 참조 · note:https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.jsonmeasurement-canary-operator · 2026-10-25T09:43:03Z관측 기록이며 목표 달성 판정은 별도 검증 결과를 따릅니다.",
+      "proof_display": "검증 · 증명됨 · 최종 확인 대기"
+    }
+  ],
+  "privacy_review": "Root visually inspected both original captures before copying. No image modification."
+}

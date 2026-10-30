@@ -1,0 +1,49 @@
+# captured 2026-10-29T07:06:48Z from the server at ~/me/.masc (binary_commit 575e4665d63 since 2026-10-29T06:06:01Z; the log is cumulative, earlier deliveries came from earlier binaries)
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --keeper code-reviewer --schedule-latency day --since 2026-10-24 --until 2026-10-29T02:54:34Z
+8. Due schedule latency per UTC day of due_at (due window 2026-10-24T00:00:00Z .. 2026-10-29T02:54:34Z)
+seconds from due_at to the first 'scheduled wake delivered' line of the same occurrence
+bucket            n    p50_s    p90_s    p99_s    max_s   deliv/occ  again%
+2026-10-24       96       25     1772    22252    22252        1.04    4.2%
+2026-10-25      122       33     1042     7186    29809        1.03    3.3%
+2026-10-26      153       37      887    13511    14981        1.08    3.3%
+2026-10-27      184       40      324    11384    11632        1.02    1.6%
+2026-10-28      165       14      313     5812    24800        1.63   16.4%
+2026-10-29        3      422     1504     1504     1504        6.33   33.3%
+all             723       29      632    11384    29809        1.20    6.1%
+
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --keeper context-reviewer --schedule-latency day --since 2026-10-24 --until 2026-10-29T02:54:34Z
+8. Due schedule latency per UTC day of due_at (due window 2026-10-24T00:00:00Z .. 2026-10-29T02:54:34Z)
+seconds from due_at to the first 'scheduled wake delivered' line of the same occurrence
+bucket            n    p50_s    p90_s    p99_s    max_s   deliv/occ  again%
+2026-10-24       25      168     5505    21096    21096        1.00    0.0%
+2026-10-25       71       29      254      787      787        1.08    7.0%
+2026-10-26      207       19       88      241      275        1.24   15.0%
+2026-10-27      254       23      116      412     5040        1.01    0.8%
+2026-10-28      189       14      159      383     1067        1.19   11.1%
+2026-10-29       10       18      112      112      112        1.50   20.0%
+all             756       19      156      787    21096        1.13    8.1%
+
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --keeper ocaml-agent-ic --schedule-latency day --since 2026-10-24 --until 2026-10-29T02:54:34Z
+8. Due schedule latency per UTC day of due_at (due window 2026-10-24T00:00:00Z .. 2026-10-29T02:54:34Z)
+seconds from due_at to the first 'scheduled wake delivered' line of the same occurrence
+bucket            n    p50_s    p90_s    p99_s    max_s   deliv/occ  again%
+2026-10-24      176       64      612    21213    21402        1.08    4.5%
+2026-10-25      266       25      390     2171    29566        1.02    1.9%
+2026-10-26      369       20      356     1009    19770        1.12    5.7%
+2026-10-27      340      229     1054     3936     6992        1.06    5.0%
+2026-10-28      213      326      574     2771    59969        1.47    5.2%
+2026-10-29       16      356      603     1147     1147        1.06    6.2%
+all            1380      108      562     6270    59969        1.14    4.6%
+
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --keeper pr-updater --schedule-latency day --since 2026-10-24 --until 2026-10-29T02:54:34Z
+8. Due schedule latency per UTC day of due_at (due window 2026-10-24T00:00:00Z .. 2026-10-29T02:54:34Z)
+seconds from due_at to the first 'scheduled wake delivered' line of the same occurrence
+bucket            n    p50_s    p90_s    p99_s    max_s   deliv/occ  again%
+2026-10-24       17      164     5437    12092    12092        1.24    5.9%
+2026-10-25        2     1184     1184     1184     1184        1.00    0.0%
+2026-10-26      259       12       26      250     6605        1.01    0.8%
+2026-10-27      261       12       37      615     5258        1.03    2.7%
+2026-10-28      256       13       52      203      331        1.20   19.5%
+2026-10-29       31       10       56      818      818        1.26   25.8%
+all             826       12       55      818    12092        1.09    8.2%
+

@@ -1,0 +1,88 @@
+{
+  "source_head": "cd54792ad1f3448b42e8e6098465438fba08d952",
+  "sha256": {
+    "lib/keeper/keeper_event_bridge.ml": "5b9fbc5ddb98c10a22efdf51226234756655398ee8941844cccd1e95e7262ad2",
+    "lib/keeper/keeper_execution_join.ml": "b21f7acba0c0ea9b9556dfd927407df2521fcc138f69a27bdbe6855da8ee37ac",
+    "lib/keeper/keeper_execution_join.mli": "768fc2bcb97c99fbca6e9342e0e4f21969a1a3091a6f65170f0c14c352a5727f",
+    "lib/keeper_tool_call_log.ml": "e823ecc9c36e7fb2226a02544929bd6e0f27ad41177509d98681579cd90018dd",
+    "lib/keeper_tool_call_log.mli": "b66747fca78070d8d9990bc85d87be8b9e73cb8d476c2adcc78df67e86ddd78e",
+    "lib/types/ids.mli": "520a407d8580f6f8d7b26959537887a983aa5ceb5d7e9acfc702ac030359681e",
+    "packages/agent_core/lib/agent/agent.ml": "00db74855f8a5912fc687662ffa056538a6c6e8ee1fa42499c7b819c41fcdea8",
+    "packages/agent_core/lib/agent/agent_execution_projection.ml": "4451e7e7023af83edb20b5ae7285ef73d491a3ee05076a6dbc89484d39f2f89a",
+    "packages/agent_core/lib/agent/agent_execution_projection_intf.mli": "c47e4f919c5d81b4820860008739f861791e589c141a14c43b74c1caea85fee6",
+    "packages/agent_core/lib/agent/agent_execution_runner.ml": "2c811ad33d0cfdca83265bf186408085639e72011b00be550dee33f337aef51c",
+    "packages/agent_core/lib/agent/agent_execution_runner.mli": "ba385fccdbc53203e9bd1c69259fc703da131261d6c11ee0f5c5c93c932889dd",
+    "packages/agent_core/lib/agent/agent_tool_observer.ml": "9bd4628c4e152c722a4b63c660730683b2df9c44118c0edebb7790e9832a992e",
+    "packages/agent_core/lib/agent/agent_tool_observer.mli": "52c64441d6671a846acb04fc4a2577b86096bd05ec489b0d6b029279187f4e16",
+    "packages/agent_core/lib/agent/agent_tools.ml": "6e1f08cb2edf702c25dd9649bf5d2f8e84f9a94bbc91c9387d34d1d457c3f96a",
+    "packages/agent_core/lib/base/tool_contract.ml": "85e005de7f15734108e16287a8bf204f07e56a84afef9cb05027bce2d9d15670",
+    "packages/agent_core/lib/base/tool_contract.mli": "e4bc75a7783ed16c32cbb3497e7c98e908a924658c436c3bb8663a452d16b5bc",
+    "packages/agent_core/lib/dune": "d3f46321d8553f7b278c4df0fb65fa170a539a1b9e32975ab799e610c1b52a86",
+    "packages/agent_core/lib/execution_agent_scope.ml": "675be9b7031881a7cc2a85b86f9ff661969a8085dcea780a696e5c713b1f5261",
+    "packages/agent_core/lib/execution_agent_scope.mli": "2209d08fe8dcfffb4bbb3c3920829908c8b7685fa2e0e06644e7fe2f5ce4f332",
+    "packages/agent_core/lib/execution_context.ml": "a20ab51e74e34e2fb56280b984ddc8b78a13ed53225fc542150e97f2f8c29938",
+    "packages/agent_core/lib/execution_context.mli": "95af5f3dd77ac3607e2e6bf175e4f12ed936a277153a5d98dedfac42c0ed4daa",
+    "packages/agent_core/lib/execution_journal.ml": "fd615427833c19b5b580eb89932c52a6312275faf4b35d5fa1dcc22bc40d824d",
+    "packages/agent_core/lib/execution_journal.mli": "4a1e7a5a62c198bfc9754501a3fba2f66e5e0926249879336a6538b1e47c7fc6",
+    "packages/agent_core/lib/execution_lane_writer.ml": "c37e9d0d75006e1e3e0c5ca16f70990acb5097e3089485aa44180933a2652b18",
+    "packages/agent_core/lib/execution_lane_writer.mli": "68b60290fd3f691f5c19476b75b48411e9950a4597835380843b11537f39046d",
+    "packages/agent_core/lib/execution_tool_observation.ml": "9c6aa207f45f00f3861993a8ef5eba72f2f76aac587c212a69e6aef2a21a0a2f",
+    "packages/agent_core/lib/execution_tool_observation.mli": "310ba671eff8aba8a1eb639c5f47aae8dfd12c671119dd6e4265f69a2907f72c",
+    "packages/agent_core/lib/execution_tool_settlement.ml": "dcb2e7660352ee7522b80c868f418b4bc97ca86d38d620f936381843b1089b44",
+    "packages/agent_core/test/test_pipeline.ml": "52775303d503e77191e964b65ff2341903a6a612e66b214b415006cb5132a510",
+    "test/test_keeper_execution_join.ml": "848277d3368aeaa8c185b33d30fe75f6370d8a9ae869e9adad85715ac01bcb45"
+  },
+  "logs": [
+    {
+      "run": 40209856538,
+      "raw_sha256": "daf778baf7f2cd4d03ff2379f5622c3fe773abbf2a6dd21fc05483bcec7a8f0f",
+      "raw_bytes": 167989,
+      "selected_lines": 9,
+      "file": "baseline-40209856538.txt"
+    },
+    {
+      "run": 40210199786,
+      "raw_sha256": "499356a11897fd5cb02b0d2b3bc76712e104f83959000e7620c0bdc04cc04f68",
+      "raw_bytes": 139909,
+      "selected_lines": 3,
+      "file": "initial-40210199786.txt"
+    },
+    {
+      "run": 40210525398,
+      "raw_sha256": "84866d2d5517565ae99f1e1880043aa999f49621814688881c03f7363f19d72a",
+      "raw_bytes": 229236,
+      "selected_lines": 19,
+      "file": "replay-40210525398.txt"
+    },
+    {
+      "run": 40210824598,
+      "raw_sha256": "b63ad439202424fbc9ab8c8368c46ce3377b9293f2c90f264f206b6eadfb6dea",
+      "raw_bytes": 173225,
+      "selected_lines": 7,
+      "file": "audiences-40210824598.txt"
+    },
+    {
+      "run": 40211727747,
+      "raw_sha256": "efa4f65d8281880ea105f86c20a09df466cbfa5549548bda77206f32520a1a46",
+      "raw_bytes": 203224,
+      "selected_lines": 27,
+      "file": "consumer-baseline-40211727747.txt"
+    },
+    {
+      "run": 40212409214,
+      "raw_sha256": "2b336313e2bbd6e71fd3fac20f26a9e66cc33fa7f6d209408b32f92a5a03819a",
+      "raw_bytes": 264763,
+      "selected_lines": 21,
+      "file": "canonical-40212409214.txt"
+    },
+    {
+      "run": 40212994708,
+      "raw_sha256": "6ce09e22b2e0eeadbe57445708ad591520f465efa84d84e61eb33b9906deaaf9",
+      "raw_bytes": 212910,
+      "selected_lines": 30,
+      "file": "final-40212994708.txt"
+    }
+  ],
+  "comment_delta": "Keeper_event_bridge admission comment clarified after tested cd54792ad1f3448b42e8e6098465438fba08d952; executable behavior unchanged.",
+  "tested_source": "cd54792ad1f3448b42e8e6098465438fba08d952"
+}

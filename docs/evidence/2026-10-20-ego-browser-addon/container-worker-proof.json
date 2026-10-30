@@ -1,0 +1,299 @@
+{
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--interactive",
+    "--network",
+    "none",
+    "--read-only",
+    "--cpus",
+    "0.5",
+    "--memory",
+    "134217728",
+    "--memory-swap",
+    "134217728",
+    "--pids-limit",
+    "16",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges",
+    "masc-lane-ego-browser:0.1.0"
+  ],
+  "image_id": "sha256:927e54bd59c5223ee2ddc39504b6cb50b8f66c5d16f39ac8691a9b84ba106b9b",
+  "repo_digests": [
+    "masc-lane-ego-browser@sha256:927e54bd59c5223ee2ddc39504b6cb50b8f66c5d16f39ac8691a9b84ba106b9b"
+  ],
+  "exit_code": 0,
+  "responses": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+          "tools": {}
+        },
+        "serverInfo": {
+          "name": "masc-ego-browser",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": [
+          {
+            "name": "lane_observe",
+            "description": "Read supplied source snapshots and derive Lane rows; no external actions.",
+            "inputSchema": {
+              "type": "object",
+              "required": [
+                "binding",
+                "sources"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "binding": {
+                  "type": "object"
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "outputSchema": {
+              "type": "object",
+              "required": [
+                "rows",
+                "coverage"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "lane_id",
+                      "kind",
+                      "title",
+                      "observed_at",
+                      "subject_id",
+                      "clock",
+                      "actor",
+                      "fields",
+                      "evidence",
+                      "related_ids"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "lane_id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "subject_id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "event",
+                          "value",
+                          "relation"
+                        ]
+                      },
+                      "observed_at": {
+                        "type": "number"
+                      },
+                      "actor": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "fields": {
+                        "type": "object"
+                      },
+                      "clock": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "domain": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "domain",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "evidence": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "uri",
+                            "sha256"
+                          ],
+                          "properties": {
+                            "uri": {
+                              "type": "string"
+                            },
+                            "sha256": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "related_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "coverage": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "source_id",
+                      "incarnation",
+                      "cursor",
+                      "complete",
+                      "detail"
+                    ],
+                    "properties": {
+                      "source_id": {
+                        "type": "string"
+                      },
+                      "incarnation": {
+                        "type": "string"
+                      },
+                      "cursor": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "complete": {
+                        "type": "boolean"
+                      },
+                      "detail": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true,
+              "destructiveHint": false,
+              "idempotentHint": true,
+              "openWorldHint": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"rows\": [{\"id\": \"b6082bbe992bee9508f4468472c4c33d5ea18d08b8e2e17bee771364b6539e92\", \"lane_id\": \"browser/session\", \"kind\": \"value\", \"title\": \"ego: outcome_unknown\", \"observed_at\": 1792496304.783205, \"subject_id\": \"00794417-5f10-4fc4-8587-ef1c1b4ee73e\", \"clock\": null, \"actor\": null, \"fields\": {\"source_id\": \"ego-browser\", \"incarnation\": \"00794417-5f10-4fc4-8587-ef1c1b4ee73e\", \"source_event_id\": \"final-plugin-cross-drag-1-validated\", \"screenshot\": null, \"request_id\": \"final-plugin-cross-drag-1-validated\", \"error\": {\"code\": null, \"message\": \"page.waitForSelector timed out after 10000ms: text=\\\"Completed: cross-drag\\\"\"}, \"status\": \"outcome_unknown\", \"session\": {\"name\": \"MASC ego add-on proof 20261020\", \"epoch\": \"00794417-5f10-4fc4-8587-ef1c1b4ee73e\", \"owner_identity\": \"0b5269c5-7af8-461b-831a-3171a4e5df26\", \"native_name\": \"MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]\", \"space_id\": 3, \"page\": \"p1\"}, \"failed_step\": null, \"completed_steps\": 2, \"snapshot\": \"[p1 \\\"Browser interaction pilot\\\" | space \\\"MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]\\\"(3): 1 managed, 0 untracked \u2014 p1* \\\"Browser interaction pilot\\\"]\\nroot\\n  container \\\"Done\\\"\\n    heading\\n      text \\\"Done\\\"\\n  output [ref=28]\\n    text \\\"Not completed\\\"\\n\", \"url\": \"http://127.0.0.1:52390/?task=cross-drag&run=final-plugin-cross-drag-1-validated\", \"operation\": \"batch\", \"title\": \"Browser interaction pilot\", \"scope\": \"latest_native_ego_observation\", \"task_completion_verified\": false}, \"evidence\": [], \"related_ids\": []}], \"coverage\": [{\"source_id\": \"ego-browser\", \"incarnation\": \"00794417-5f10-4fc4-8587-ef1c1b4ee73e\", \"cursor\": \"final-plugin-cross-drag-1-validated\", \"complete\": false, \"detail\": \"page.waitForSelector timed out after 10000ms: text=\\\"Completed: cross-drag\\\"\"}]}"
+          }
+        ],
+        "structuredContent": {
+          "rows": [
+            {
+              "id": "b6082bbe992bee9508f4468472c4c33d5ea18d08b8e2e17bee771364b6539e92",
+              "lane_id": "browser/session",
+              "kind": "value",
+              "title": "ego: outcome_unknown",
+              "observed_at": 1792496304.783205,
+              "subject_id": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+              "clock": null,
+              "actor": null,
+              "fields": {
+                "source_id": "ego-browser",
+                "incarnation": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+                "source_event_id": "final-plugin-cross-drag-1-validated",
+                "screenshot": null,
+                "request_id": "final-plugin-cross-drag-1-validated",
+                "error": {
+                  "code": null,
+                  "message": "page.waitForSelector timed out after 10000ms: text=\"Completed: cross-drag\""
+                },
+                "status": "outcome_unknown",
+                "session": {
+                  "name": "MASC ego add-on proof 20261020",
+                  "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+                  "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+                  "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]",
+                  "space_id": 3,
+                  "page": "p1"
+                },
+                "failed_step": null,
+                "completed_steps": 2,
+                "snapshot": "[p1 \"Browser interaction pilot\" | space \"MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]\"(3): 1 managed, 0 untracked \u2014 p1* \"Browser interaction pilot\"]\nroot\n  container \"Done\"\n    heading\n      text \"Done\"\n  output [ref=28]\n    text \"Not completed\"\n",
+                "url": "http://127.0.0.1:52390/?task=cross-drag&run=final-plugin-cross-drag-1-validated",
+                "operation": "batch",
+                "title": "Browser interaction pilot",
+                "scope": "latest_native_ego_observation",
+                "task_completion_verified": false
+              },
+              "evidence": [],
+              "related_ids": []
+            }
+          ],
+          "coverage": [
+            {
+              "source_id": "ego-browser",
+              "incarnation": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+              "cursor": "final-plugin-cross-drag-1-validated",
+              "complete": false,
+              "detail": "page.waitForSelector timed out after 10000ms: text=\"Completed: cross-drag\""
+            }
+          ]
+        },
+        "isError": false
+      }
+    }
+  ]
+}

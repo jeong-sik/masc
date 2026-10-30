@@ -1,0 +1,695 @@
+(** Runtime dispatch for descriptor-backed agent tools. *)
+
+open Keeper_tool_descriptor
+
+(* RFC-0182 Phase 5 PR-A (RFC §12): optional Eio resource fields.
+   When set, descriptor handlers like masc_keeper_msg / masc_keeper_up /
+   masc_operator_* can call into Eio-bound
+   primitives (start_keepalive, Owner operation submission, LLM-call fibers,
+   Operator_control.context) without re-introducing dispatch-ref
+   plumbing.  Default = [None]; callers without Eio context (AGENT_CORE handler,
+   tests) leave them unset and the Eio-bound descriptor handlers return
+   a typed "Eio context not provided" failure instead of crashing. *)
+type capability_authority =
+  | Frozen_surface of Keeper_capability_surface.t
+  | Compatibility_meta
+
+type context =
+  { config : Workspace.config
+  ; meta : Keeper_meta_contract.keeper_meta
+  ; publication_recovery :
+      Keeper_publication_recovery_availability.turn_context
+  ; ctx_work : Keeper_types.working_context
+  ; turn_sandbox_factory : Keeper_sandbox_factory.t option
+  ; artifact_draft_scope : Keeper_artifact_draft_scope.t option
+  ; sw : Eio.Switch.t option
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t option
+  ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
+  ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
+  ; mcp_session_id : string option
+  ; continuation_channel : Keeper_continuation_channel.t option
+    (* RFC-0320: the connector conversation the current turn started from,
+       so async tools (masc_fusion) can route their completion wake back to
+       the originating channel. [None] on non-connector turns and on callers
+       without turn context (AGENT_CORE handler defaults, tests). *)
+  ; gate_context : (unit -> Keeper_gate.causal_context) option
+    (* Exact outer-turn evidence for contextual Gate judgment. Runtime handlers
+       pass it through without inspecting the snapshot. *)
+  ; turn_ref : Ids.Turn_ref.t option
+    (* The outer Keeper turn this call belongs to, for tools that record
+       per-turn evidence. [None] on callers without turn context (tests,
+       direct dispatch). *)
+  ; gate_grant : Keeper_gate.cycle_grant option
+    (* Exact human decision delivered to this Keeper lane. External-effect
+       handlers may consume it only after matching their normalized request. *)
+  ; tool_use_id : string option
+    (* #35456: the parent agent-core invocation's tool_use_id, carried so
+       in-process sub-calls (vision candidate attempts) can join their
+       start/termination rows to this call. [None] on callers without
+       invocation context (tests, direct dispatch). *)
+  ; trace_id : string option
+  ; source_context : Keeper_tool_call_log_context.turn_context option
+    (** Immutable context captured for this invocation. None means unavailable;
+        job ownership never substitutes the Keeper current task. *)
+  ; owned_job_replay : Keeper_owned_job_invocation.replay option
+  ; result_projection : Tool_output.model_projection option
+    (* The projection this call's result crosses on its way to the model,
+       resolved for the lane running the call. [None] when the caller did not
+       resolve a lane (composition sub-calls, tests); see
+       [result_projection_for]. *)
+  ; capability_authority : capability_authority
+  }
+
+(* A caller that resolved the lane says which projection applies. Without it
+   the descriptor's own projection stands, which is the narrower of the two a
+   lane can widen it to. *)
+let result_projection_for ctx (descriptor : Keeper_tool_descriptor.t) =
+  match ctx.result_projection with
+  | Some projection -> projection
+  | None -> descriptor.model_output_projection
+;;
+
+let descriptor_for_internal internal_name =
+  match Keeper_tool_descriptor.descriptors_for_internal internal_name with
+  | descriptor :: _ -> Some descriptor
+  | [] -> None
+;;
+
+let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descriptor args =
+  match descriptor.Keeper_tool_descriptor.runtime_handler with
+  | Tool_read_file ->
+    Some (match prepared_read with
+      | Some prepared_read ->
+        Keeper_tool_filesystem_runtime.handle_prepared_read_file_with_outcome
+          ~prepared_read ~config:ctx.config ~meta:ctx.meta ~args
+      | None ->
+        Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+          ~turn_sandbox_factory:ctx.turn_sandbox_factory
+          ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_edit_file | Tool_write_file ->
+    Some
+      (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+         ~turn_sandbox_factory:ctx.turn_sandbox_factory
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~publication_recovery:ctx.publication_recovery
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ?prepared_edit ?prepared_write
+         ~args
+         ())
+  | Tool_ide_annotate ->
+    Some
+      (Keeper_tool_ide_runtime.handle_ide_annotate_with_outcome
+         ~turn_sandbox_factory:ctx.turn_sandbox_factory
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~publication_recovery:ctx.publication_recovery
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
+  | Tool_execute
+  | Tool_search_files
+  | Tool_lane_status
+  | Tool_tools_list
+  | Tool_capability_search
+  | Tool_context_status
+  | Tool_peer_artifact
+  | Tool_artifact_read
+  | Tool_skill_validate
+  | Tool_artifact_draft | Tool_artifact_publish | Tool_skill_publish
+  | Tool_workspace_memory_read
+  | Tool_memory_search
+  | Tool_memory_select
+  | Tool_memory_retract
+  | Tool_memory_write
+  | Tool_constitution_write
+  | Tool_constitution_read
+  | Tool_constitution_remove
+  | Tool_wiki_search
+  | Tool_wiki_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Tool_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_workspace_dispatch
+  | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
+  | Tool_browser_act
+  | Tool_browser_instruct
+  | Tool_browser_interact
+  | Tool_masc_control_dispatch
+  | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
+  | Tool_keeper_spawn_dispatch
+  | Tool_keeper_job_dispatch
+  | Tool_keeper_composition_result_dispatch
+  | Tool_keeper_code_query_dispatch
+  | Tool_keeper_webmcp_dispatch
+  | Tool_masc_keeper_dispatch
+  | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
+  | Tool_masc_file_dispatch
+  | Tool_masc_wiki_dispatch
+  | Tool_masc_local_runtime_dispatch
+  | Tool_lane_addon _
+  | Tool_analyze_image | Tool_read_image -> None
+;;
+
+(* Shell IR mechanics live under the Execute owner; Grep workspace operations
+   live under their own owner. Descriptor routing selects those owners here. *)
+let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descriptor
+    args =
+  match descriptor.Keeper_tool_descriptor.runtime_handler with
+  | Tool_execute ->
+      Some
+        (Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+           ~turn_sandbox_factory:ctx.turn_sandbox_factory
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~shell_ir_rewrite:
+           (Keeper_shell_tool_command.rewrite
+              ~lookup:descriptor_for_internal
+              ~dispatch)
+         ~result_projection:(result_projection_for ctx descriptor)
+         ~args
+         ())
+  | Tool_search_files ->
+    Some
+      (Keeper_workspace_ops.handle_tool_search_files_with_outcome
+         ~turn_sandbox_factory:ctx.turn_sandbox_factory
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_lane_status
+  | Tool_tools_list
+  | Tool_capability_search
+  | Tool_context_status
+  | Tool_peer_artifact
+  | Tool_artifact_read
+  | Tool_skill_validate
+  | Tool_artifact_draft | Tool_artifact_publish | Tool_skill_publish
+  | Tool_workspace_memory_read
+  | Tool_memory_search
+  | Tool_memory_select
+  | Tool_memory_retract
+  | Tool_memory_write
+  | Tool_constitution_write
+  | Tool_constitution_read
+  | Tool_constitution_remove
+  | Tool_wiki_search
+  | Tool_wiki_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
+  | Tool_ide_annotate
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Tool_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_workspace_dispatch
+  | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
+  | Tool_browser_act
+  | Tool_browser_instruct
+  | Tool_browser_interact
+  | Tool_masc_control_dispatch
+  | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
+  | Tool_keeper_spawn_dispatch
+  | Tool_keeper_job_dispatch
+  | Tool_keeper_composition_result_dispatch
+  | Tool_keeper_code_query_dispatch
+  | Tool_keeper_webmcp_dispatch
+  | Tool_masc_keeper_dispatch
+  | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
+  | Tool_masc_file_dispatch
+  | Tool_masc_wiki_dispatch
+  | Tool_masc_local_runtime_dispatch
+  | Tool_lane_addon _
+  | Tool_analyze_image | Tool_read_image -> None
+;;
+
+let handle_in_process ctx descriptor args =
+  let name = descriptor.Keeper_tool_descriptor.internal_name in
+  match descriptor.Keeper_tool_descriptor.runtime_handler with
+  | Tool_lane_addon export ->
+    Some (match ctx.capability_authority with
+      | Frozen_surface surface when Keeper_capability_surface.admits surface descriptor ->
+          let continuation=Lane_addon_companion_origin.source ~keeper_name:ctx.meta.name
+            ~turn_ref:ctx.turn_ref ~tool_use_id:ctx.tool_use_id ~trace_id:ctx.trace_id
+            ~source_context:ctx.source_context ~channel:ctx.continuation_channel in
+          Keeper_lane_addon_runtime.call ~continuation:(Some continuation)
+            ~config:ctx.config ~keeper_name:ctx.meta.name ~export ~arguments:args
+      | Frozen_surface _ | Compatibility_meta ->
+          Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            "Lane Add-on invocation requires frozen installation authority")
+  | Tool_lane_status ->
+    Some
+      (Keeper_tool_execution.success_data
+         (Keeper_tool_lane_status.handle ~config:ctx.config ~meta:ctx.meta ~args))
+  | Tool_tools_list ->
+    Some
+      (match ctx.capability_authority with
+       | Frozen_surface capability_surface ->
+         Keeper_tool_in_process_runtime.handle_tools_list
+           ~capability_surface
+           ~args
+           ()
+       | Compatibility_meta ->
+         Keeper_tool_in_process_runtime.handle_tools_list_from_meta
+           ~meta:ctx.meta
+           ~args
+           ())
+  | Tool_capability_search ->
+    Some
+      (match ctx.capability_authority with
+       | Frozen_surface capability_surface ->
+         Keeper_tool_in_process_runtime.handle_capability_search
+           ~capability_surface
+           ~args
+           ()
+       | Compatibility_meta ->
+         Keeper_tool_in_process_runtime.handle_capability_search_from_meta
+           ~args
+           ())
+  | Tool_context_status ->
+    Some
+      (Keeper_tool_execution.success
+         (Keeper_tool_in_process_runtime.handle_context_status
+            ~config:ctx.config
+            ~meta:ctx.meta
+            ~ctx_work:ctx.ctx_work
+            ~args))
+  | Tool_peer_artifact ->
+    Some (Keeper_peer_artifact.handle ~config:ctx.config ~meta:ctx.meta
+      ~turn_sandbox_factory:ctx.turn_sandbox_factory ~args
+      ~write:(fun args -> Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+        ~turn_sandbox_factory:ctx.turn_sandbox_factory ~config:ctx.config ~meta:ctx.meta
+        ~publication_recovery:ctx.publication_recovery
+        ?continuation_channel:ctx.continuation_channel ?gate_context:ctx.gate_context
+        ?gate_grant:ctx.gate_grant ~args ()))
+  | Tool_artifact_read ->
+    Some
+      (Keeper_artifact_read.handle
+         ~base_path:ctx.config.base_path
+         ~args)
+  | Tool_skill_validate ->
+    Some
+      (match ctx.capability_authority with
+       | Frozen_surface surface ->
+           Keeper_skill_validate.handle
+             ~descriptors:(Keeper_capability_surface.descriptors surface)
+             ~draft_context:(Some (surface, ctx.meta.name)) ~config:ctx.config ~args
+       | Compatibility_meta ->
+           Keeper_skill_validate.handle
+             ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
+             ~draft_context:None ~config:ctx.config ~args)
+  | Tool_artifact_draft ->
+    Some (match ctx.artifact_draft_scope, ctx.turn_ref with
+      | Some scope, Some turn_ref -> Keeper_artifact_draft.handle ~scope ~base_path:ctx.config.base_path
+          ~keeper:ctx.meta.name ~turn_ref ~args ()
+      | _ -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
+          ~effect_disposition:Tool_result.Proven_pre_effect "Shared draft editing requires its owning Keeper turn.")
+  | Tool_artifact_publish ->
+    Some (Keeper_artifact_publish.handle ~base_path:ctx.config.base_path
+      ~author:ctx.meta.name ~args)
+  | Tool_skill_publish ->
+    Some
+      (Keeper_skill_publish.handle
+         ~capability_surface:(match ctx.capability_authority with Frozen_surface surface -> Some surface | Compatibility_meta -> None)
+         ~descriptors:(match ctx.capability_authority with
+           | Frozen_surface surface -> Keeper_capability_surface.descriptors surface
+           | Compatibility_meta -> Keeper_tool_descriptor.all_descriptors ())
+         ~config:ctx.config
+         ~keeper_name:ctx.meta.name
+         ~args)
+  | Tool_workspace_memory_read ->
+    Some (Keeper_workspace_memory_read.handle ~base_path:ctx.config.base_path ~args)
+  | Tool_memory_select ->
+    Some (Keeper_memory_select.handle ?turn_ref:ctx.turn_ref ~clock:ctx.clock
+      ~config:ctx.config ~meta:ctx.meta ~args ())
+  | Tool_memory_search ->
+    Some
+      (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome
+         ?turn_ref:ctx.turn_ref
+         ?clock:ctx.clock
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~ctx_work:ctx.ctx_work
+         ~args
+         ())
+  | Tool_memory_retract ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_memory_retract_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_memory_write ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_memory_write_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_constitution_write ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_constitution_write_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_constitution_read ->
+    Some (Keeper_tool_constitution_runtime.read_with_outcome ~config:ctx.config)
+  | Tool_constitution_remove ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_constitution_remove_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_wiki_search ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_wiki_search_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_wiki_read ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_wiki_read_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_surface_read ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_surface_read_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_surface_post ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_surface_post_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?turn_ref:ctx.turn_ref
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
+  | Tool_person_note_set ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_person_note_set_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
+  | Tool_voice_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_voice_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~name
+         ~args
+         ())
+  | Tool_task_dispatch ->
+    Some
+      (Keeper_tool_task_runtime.handle_keeper_task_tool_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_board_dispatch ->
+    Some
+      (Keeper_tool_board_runtime.handle_board_tool_with_outcome
+         ~meta:ctx.meta
+         ~result_projection:(result_projection_for ctx descriptor)
+         ~name
+         ~args)
+  | Tool_masc_task_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_task_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_masc_plan_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_plan_with_outcome
+         ~config:ctx.config
+         ~name
+         ~args)
+  | Tool_masc_run_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_run_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_masc_agent_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_agent_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_masc_workspace_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_workspace_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_masc_misc_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
+         ~source_context:ctx.source_context
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_web_search ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_web_search_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
+  | Tool_web_fetch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_web_fetch_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
+  | Tool_browser_tabs ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_tabs_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_browser_read ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_browser_session ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_session_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_browser_goto ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_goto_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_browser_act ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_act_with_outcome
+      ~turn_sandbox_factory:ctx.turn_sandbox_factory ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_browser_interact ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_browser_instruct ->
+    Some (Keeper_tool_in_process_runtime.handle_browser_instruct_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_masc_control_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_control_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_masc_agent_timeline_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_agent_timeline_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_keeper_job_dispatch ->
+    Some (Keeper_owned_job_runtime.handle ~config:ctx.config ~meta:ctx.meta
+      ~continuation_channel:ctx.continuation_channel
+      ~owned_job_replay:ctx.owned_job_replay
+      ~source_context:ctx.source_context ~tool_use_id:ctx.tool_use_id
+      ~turn_ref:ctx.turn_ref ~trace_id:ctx.trace_id ~name ~args)
+  | Tool_keeper_spawn_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_keeper_spawn_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~turn_sandbox_factory:ctx.turn_sandbox_factory
+         ~name
+         ~args)
+  | Tool_keeper_composition_result_dispatch ->
+    Some (Keeper_composition_dependency_result.handle ~config:ctx.config ~meta:ctx.meta ~args)
+  | Tool_keeper_code_query_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_keeper_code_query_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_keeper_webmcp_dispatch ->
+    Some (Keeper_tool_in_process_runtime.handle_keeper_webmcp_with_outcome ~name ~args)
+  | Tool_masc_schedule_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_schedule_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ~name
+         ~args
+         ())
+  | Tool_masc_keeper_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
+         ~publication_recovery_provider:ctx.publication_recovery.provider
+         ?sw:ctx.sw
+         ?clock:ctx.clock
+         ?proc_mgr:ctx.proc_mgr
+         ?net:ctx.net
+         ?mcp_session_id:ctx.mcp_session_id
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args
+         ())
+  | Tool_masc_fusion_dispatch ->
+    (* sw/net는 핸들러가 Eio_context(서버 root switch + net)에서 직접 해석한다 —
+       턴 스코프 ctx.sw를 쓰면 out-of-band 심의가 턴 종료 시 취소된다. *)
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_fusion_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?gate_context:ctx.gate_context
+         ?continuation_channel:ctx.continuation_channel
+         ~args
+         ())
+  | Tool_masc_fusion_decision ->
+    let result =
+      let open Result.Syntax in
+      let* proposal = Fusion_decision.parse args |> Result.map_error (fun detail -> Fusion_decision.Rejected detail) in
+      let* turn_ref = match ctx.turn_ref with
+        | Some turn_ref -> Ok turn_ref
+        | None -> Error (Fusion_decision.Rejected "decision requires exact current turn context") in
+      Fusion_decision.record ~config:ctx.config ~keeper:ctx.meta.name ~turn_ref proposal in
+    Some (match result with
+      | Ok recorded -> Keeper_tool_execution.success_data (`Assoc ["ok", `Bool true; "decision", recorded.event;
+          "cleanup_warning", (match recorded.cleanup_warning with Some detail -> `String detail | None -> `Null)])
+      | Error error -> Keeper_tool_execution.failure ~class_:(Fusion_decision.failure_class error) (Fusion_decision.error_to_string error))
+  | Tool_masc_fusion_status ->
+    (* read-only: reads the in-memory run registry, no server context needed. *)
+    Some
+      (Keeper_tool_execution.success
+         (Keeper_tool_in_process_runtime.handle_masc_fusion_status
+            ~config:ctx.config
+            ~meta:ctx.meta
+            ~args
+            ()))
+  | Tool_masc_file_dispatch ->
+    (* sw/net는 핸들러가 Eio_context(서버 root switch + net)에서 직접 해석한다
+       — fusion과 같은 이유로 업로드가 턴 스코프에 묶이면 안 된다. *)
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_file_with_outcome
+         ~name
+         ~args
+         ())
+  | Tool_masc_wiki_dispatch ->
+    Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
+      ~config:ctx.config
+      ~keeper_name:ctx.meta.name
+      ~name
+      ~args
+  | Tool_masc_local_runtime_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_local_runtime_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~name
+         ~args
+         ())
+  | Tool_read_image ->
+    Some (Keeper_image_read.handle
+      ?turn_sandbox_factory:ctx.turn_sandbox_factory
+      ~config:ctx.config ~meta:ctx.meta ~args ())
+  | Tool_analyze_image ->
+    (* read-only vision sub-call; needs [net] (like masc_fusion), threaded from
+       the turn-scoped dispatch context. The parent invocation identity rides
+       along so candidate rows join this call (#35456). *)
+    Some
+      (Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
+         ~config:ctx.config
+         ?turn_sandbox_factory:ctx.turn_sandbox_factory
+         ?tool_use_id:ctx.tool_use_id
+         ?trace_id:ctx.trace_id
+         ?sw:ctx.sw
+         ?clock:ctx.clock
+         ?net:ctx.net
+         ~meta:ctx.meta
+         ~args
+         ())
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_ide_annotate -> None
+;;
+
+(* [handle] hands itself to the shell-ir owner as a value: a masc stage
+   found inside a shell line dispatches through the same routing as a
+   direct call, without a forward reference or a module cycle. *)
+let rec handle ?prepared_read ?prepared_edit ?prepared_write ctx ~descriptor ~args =
+  match descriptor.Keeper_tool_descriptor.executor with
+  | Filesystem -> handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descriptor args
+  | Shell_ir -> handle_shell_ir ctx ~dispatch:(handle ctx) descriptor args
+  | In_process -> handle_in_process ctx descriptor args
+;;

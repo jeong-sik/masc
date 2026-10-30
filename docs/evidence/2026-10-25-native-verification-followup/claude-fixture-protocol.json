@@ -1,0 +1,86 @@
+{
+  "base_sha": "be9a9d9da9d426c8babb691a9ebc4620ca4a517c",
+  "scope": "Actual OCaml fixture generator compilation and emitted shell/stdin/stdout protocol plus test source parse; not native Host/hooks execution, MASC typing, vendor or model-success proof",
+  "results": [
+    {
+      "variant": "before",
+      "source_sha256": "d4f007816c8d21a9910350c412a8112cd35824f46e7c9abb2266a6b19883d81e",
+      "case_fixture_expression": "repeated_read_frames @ [Emit (result ~turn_id:\"turn-hook-complete\" \"READS_COMPLETE\")]",
+      "generator_source_sha256": "10d9a485bd4dcd33d6ae0a99ce6d8b305a5fdb938defdfa97fb633f96e2b0523",
+      "generated_script_sha256": "78123794861c9c91a03862bf0086d93dd2535af6fadcf17b894147a557ba05de",
+      "compile_exit": 0,
+      "compile_stderr": "",
+      "protocol_exit": 0,
+      "actual_tool_call_ids": [
+        "call-repeat-1",
+        "call-repeat-2",
+        "call-repeat-3"
+      ],
+      "actual_assistant_frames": [],
+      "actual_terminal_frames": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "session_id": "fixture-session",
+          "uuid": "turn-hook-complete",
+          "result": "READS_COMPLETE",
+          "api_error_status": null
+        }
+      ]
+    },
+    {
+      "variant": "after",
+      "source_sha256": "f0e2ca817ecf6fe92afbd219dd3ca08dd818813447a9a4dc1c9016dada63d0c8",
+      "case_fixture_expression": "repeated_read_frames\n          @ [Emit (assistant ~turn_id:\"turn-hook-complete\" \"READS_COMPLETE\");\n             Emit (result ~turn_id:\"turn-hook-complete\" \"READS_COMPLETE\")]",
+      "generator_source_sha256": "9082fdf1d620b7fc36b81ece0a015d5e342557c8b6aba15823ad249684860c70",
+      "generated_script_sha256": "8ad3aafb97ccef30ac42613a3a894a64ec846bb583399eef11457dab57105e23",
+      "compile_exit": 0,
+      "compile_stderr": "",
+      "protocol_exit": 0,
+      "actual_tool_call_ids": [
+        "call-repeat-1",
+        "call-repeat-2",
+        "call-repeat-3"
+      ],
+      "actual_assistant_frames": [
+        {
+          "type": "assistant",
+          "parent_tool_use_id": null,
+          "session_id": "fixture-session",
+          "uuid": "assistant-turn-hook-complete",
+          "message": {
+            "role": "assistant",
+            "model": "claude-fixture",
+            "content": [
+              {
+                "type": "text",
+                "text": "READS_COMPLETE"
+              }
+            ]
+          }
+        }
+      ],
+      "actual_terminal_frames": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "session_id": "fixture-session",
+          "uuid": "turn-hook-complete",
+          "result": "READS_COMPLETE",
+          "api_error_status": null
+        }
+      ]
+    }
+  ],
+  "test_source_parse": {
+    "exit": 0,
+    "output": ""
+  },
+  "diff_check": {
+    "exit": 0,
+    "output": ""
+  },
+  "result": "PASS"
+}

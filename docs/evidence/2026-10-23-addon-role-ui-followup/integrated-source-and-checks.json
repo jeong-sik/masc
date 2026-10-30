@@ -1,0 +1,163 @@
+{
+  "base": "a502bcf98878eb0916095a94d87fa3040ac0d93a",
+  "source_changed_by_main_integration": [
+    "test/dune"
+  ],
+  "files": [
+    {
+      "path": "bin/masc_tui.ml",
+      "sha256": "3dde5e309f49adc01a8507c6cfe6398c372841543ef9112b481b58a5a9f5f63f"
+    },
+    {
+      "path": "bin/masc_tui_keys.ml",
+      "sha256": "3ddb8cd25d52e5b90e5769c2993426b1a5043899521b33b754de9758624be6cb"
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.ml",
+      "sha256": "2ebe77ddcd69dc0df51fa88428c10617eed5b50c3976981e051a8e50b18497f0"
+    },
+    {
+      "path": "bin/masc_tui_lane_addons.mli",
+      "sha256": "14beb1dc1c990e33f0f33524a3abd32f780acb6e85b6cb512f1bb8755afc1f73"
+    },
+    {
+      "path": "bin/masc_tui_lane_installer.ml",
+      "sha256": "26bc5b6e1a46978d1c54260cbbea21337240ea24e3dfa4aa9c50bcfee65e1984"
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.ml",
+      "sha256": "b8022baf79cfec543a5982f1f061603218839322f7edc20ed5621359cad13f9d"
+    },
+    {
+      "path": "bin/masc_tui_lane_inventory.mli",
+      "sha256": "a314eadd76bd3a01b7d12a073ae7448d846c72c1093b89209761ed0e2534177e"
+    },
+    {
+      "path": "bin/masc_tui_palette.ml",
+      "sha256": "454c332d1f1677582b33e3a56b754b24cfde8f8ab5e13513920e8a9cddf1c991"
+    },
+    {
+      "path": "bin/masc_tui_render_lanes.ml",
+      "sha256": "ebe826e0038aed0f9b4d3ceee2c007041f8c9dffc140b0b9ff0677abe6553f76"
+    },
+    {
+      "path": "bin/masc_tui_render_overlays.ml",
+      "sha256": "c0793227d38f6cd31a34e66f9f97ea76c820723df5c305ad5279638abc4cd429"
+    },
+    {
+      "path": "bin/masc_tui_render_runtime.ml",
+      "sha256": "ffe028de182a3bdca5f4b092f351c1792386cc173d3a3990061bda3008755d60"
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "sha256": "fe3aef0fc552832b99b60bcfe1ff27b615e7291c9904143d4ec819dc2c2cd638"
+    },
+    {
+      "path": "dashboard/src/api/fixtures/lane-inventory.json",
+      "sha256": "cb44a69ae132a1d42ee0120a13b5c4934246950540a70d546434cdc2956fbde5"
+    },
+    {
+      "path": "dashboard/src/api/lane-inventory.ts",
+      "sha256": "e0062b0df6e2ce950cf7002a21d0a78c130f865f018b9735a619e1185ada54c2"
+    },
+    {
+      "path": "dashboard/src/lib/lane-addon-category.test.ts",
+      "sha256": "2a04dfb7159010b85a16fa2ea84fbcb4432da57e0bc6f2003b8a714847c2e3bd"
+    },
+    {
+      "path": "dashboard/src/lib/lane-addon-category.ts",
+      "sha256": "213a7b7b1f2a7a438322fadf97eba3bcfeea52751f02e64d01b2c1d7f4adb97c"
+    },
+    {
+      "path": "docs/guides/TUI-KEYS.md",
+      "sha256": "763fe42684ccad39c8f36cb6cacf9f9565bacf4dbd9ef2fe6ba71b1cc91ca185"
+    },
+    {
+      "path": "docs/guides/lane-inventory.md",
+      "sha256": "7586d8e8386e2be382a3f85d028cc6c2188c322cd8d9e7b98b0e492475b050f3"
+    },
+    {
+      "path": "lib/server/server_lane_inventory.ml",
+      "sha256": "7ddbf9ffd3fed0d5a0494baa7febc2d5d30fe7f5b79cf70d595b761ea7134579"
+    },
+    {
+      "path": "lib/server/server_lane_inventory.mli",
+      "sha256": "cc8a9d156adb328430ef35e345a0fd7307ac3cb64d18226324877503499fafa1"
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.ml",
+      "sha256": "348d01bb580de332c7cbf250ec90d3f979bc0e33c5df722070d0a8ff5c1d29e2"
+    },
+    {
+      "path": "lib/tui_decode_lane_inventory.mli",
+      "sha256": "053f8dd5071389e994d32b6e0d142b2428e5f48510c40b00d94628f90fcc8d39"
+    },
+    {
+      "path": "test/dune",
+      "sha256": "387e8d2ac7c320c98251a0d0c791e80796e9c5713dafe4c76637b2069a16acb8"
+    },
+    {
+      "path": "test/test_server_lane_inventory.ml",
+      "sha256": "9266a2ec56e977db0b58049a3008aaafeb7b888634c33a5ff5e1dbbd64a2db25"
+    },
+    {
+      "path": "test/test_tui_keys.ml",
+      "sha256": "fe94bea061e292f3f4b18aeb2f47fae3b8214d325f3ed63c78a245a936472d86"
+    },
+    {
+      "path": "test/test_tui_lane_addon_reading.ml",
+      "sha256": "bc37bf1e8079c7205deeeb14fdb6c9c78d7db7eed608c10423bfb100a411c863"
+    },
+    {
+      "path": "test/test_tui_lane_addons.ml",
+      "sha256": "e943047f6d8dbc4a9b2f7542d96b19584e139f79b6365619cc1e905b0b4efaf2"
+    },
+    {
+      "path": "test/test_tui_lane_inventory.ml",
+      "sha256": "fb4c3998e19b0cc42a34403b6644901b7549096d1a532eb39e1389720625efcc"
+    },
+    {
+      "path": "test/test_tui_palette_matching.ml",
+      "sha256": "fbd3a73ca0f0988def0a45f8b2556639244bb540c6b4786bd19fa8fb051d2a91"
+    }
+  ],
+  "source_candidate_head": "d769a6c2ce4861abc8f7d113a2d7e7127ebc76f9",
+  "observed_at": "2026-10-23T06:31:27.864134+00:00",
+  "checks": {
+    "dashboard": {
+      "status": "PASS",
+      "suites": [
+        "src/api/lane-inventory.test.ts",
+        "src/lib/lane-addon-category.test.ts",
+        "src/components/lane-inventory-panel.test.ts",
+        "src/lib/lane-navigation.test.ts",
+        "src/components/lane-navigation-flow.test.ts"
+      ],
+      "tests_passed": 64,
+      "start_local": "2026-10-23 15:29:56 Asia/Seoul",
+      "duration_s": 6.45,
+      "output_chunk": "3478dc",
+      "command": "pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 <the five suites>"
+    },
+    "typescript": {
+      "status": "PASS",
+      "command": "pnpm exec tsc --noEmit",
+      "exit_code": 0,
+      "output_chunk": "29e3e5"
+    },
+    "ocaml_parser": {
+      "status": "PASS",
+      "files": 22,
+      "scope": "all 22 feature ML/MLI files have identical hashes across the documented main restack; parser-only check ran on these bytes"
+    },
+    "ocaml_execution": "NOT_RUN_LOCALLY",
+    "binary_build": "NOT_RUN_LOCALLY",
+    "visible_installed_tui": "NOT_OBSERVED"
+  },
+  "limits": [
+    "Selected and overlapping Dashboard runs are not summed",
+    "Prior 73 TUI tests cover the earlier merged grouping head, not these followups",
+    "Pending CI dispatch is not a successful run",
+    "This does not complete all 54 Addon conversion criteria"
+  ]
+}

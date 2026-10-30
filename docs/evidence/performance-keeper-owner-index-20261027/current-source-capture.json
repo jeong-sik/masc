@@ -1,0 +1,64 @@
+{
+  "schema": "masc.owner-projection-map-source-capture.v1",
+  "recorded_at_utc": "2026-10-26T19:56:53.044738+00:00",
+  "purpose": "Describe the source after the inherited checkpoint-resume fixture repair; preserve older captures at their recorded revisions.",
+  "head_at_capture": "e6cd5474de4add4593d50d590bcdafa1a21c900c",
+  "working_tree_test_repair_not_yet_committed": true,
+  "current_source_files": {
+    "test/test_keeper_owner.ml": "e9b3b09aa540e40266c27a95f8ad30be22e3c19657b0051b27558ce342a0e371",
+    "lib/keeper/keeper_owner_projection.ml": "f625a542b4aaced6974093660b85976f8d9fdd7f32effa30ce9291777572b445",
+    "lib/keeper/keeper_owner_projection.mli": "745a51f1ea694b3e7089e7afecaf94809b3b108fbf3ada83b85683b7633872ab"
+  },
+  "failed_owner_ci": {
+    "workflow": "Test",
+    "run_id": 40387064153,
+    "head": "e6cd5474de4add4593d50d590bcdafa1a21c900c",
+    "conclusion": "failure",
+    "cases_run": 108,
+    "cases_failed": 3,
+    "failed_group": "scheduled source handoff",
+    "failed_case_indexes": [
+      1,
+      2,
+      7
+    ],
+    "passed_new_projection_case_indexes": [
+      82,
+      83
+    ],
+    "passed_new_projection_cases": [
+      "projection replacement preserves identity and root isolation",
+      "projection concurrent writers preserve other keys"
+    ],
+    "raw_log_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-e6-failure-v1/failed-log.txt",
+    "raw_log_sha256": "b058d98398aa2999b065de2385cf1df2c95ea43db067174703fa289c2f328d65"
+  },
+  "fixture_response": {
+    "before_test_sha256": "e0e23d49aeba3110aa9ba07cd19085005d17308e60b8035601c9e06d3c07544d",
+    "after_test_sha256": "e9b3b09aa540e40266c27a95f8ad30be22e3c19657b0051b27558ce342a0e371",
+    "response_diff_sha256": "027924621dcf61c0cd40c5ff28d8f9b078fead74c60bb098f1c7de98d8f83390",
+    "change": "Resumed fake executor reads its retained checkpoint and consumes it through Owner.resume_direct_checkpoint before returning success.",
+    "assertions_order_and_timeouts_preserved": true,
+    "new_projection_tests_unchanged": true,
+    "product_sources_unchanged": true,
+    "verification_capture_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-runtime-response-v1/verification.json",
+    "verification_retained_path": "ci-runtime-response-checks.json",
+    "verification_sha256": "c8d7106212ccab0752ed5b9f6a578a85218454e0db4121ab329285adcffb4a93",
+    "local_readme_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-runtime-response-v1/README.md",
+    "local_readme_sha256": "ba0375a4e238d43c05e36566248e93458fcc1f40876cb9c65f6e600c5c80a328",
+    "validation": "Parsing-only and whitespace checks passed; no fresh typecheck, project test or runtime pass is claimed."
+  },
+  "historical_capture_scope": {
+    "provenance.json": "The original 4d2/f5f1 helper and concurrency-response metadata remains unchanged and historical.",
+    "test-response-checks.json": "The corrected concurrency-fixture parsing receipt remains bound to f5f1.",
+    "ci-response-checks.json": "The earlier annotation-only parsing receipt remains bound to e0e23d49; e6 committed that file.",
+    "capture-locations.json": "Exact bytes of the former custom-schema location file and its original nine capture records."
+  },
+  "boundaries": {
+    "fresh_Owner_test_run": false,
+    "native_runtime_or_HTTP": false,
+    "Dune": false,
+    "CI_request_or_watch": false,
+    "commit_or_push": false
+  }
+}

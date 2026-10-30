@@ -1,0 +1,39 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40111688477
+Head: 08563e81e95089d5dd9739a9390341c9935327a8
+Conclusion: success
+Scope: test_telegram_native_gateway,test_telegram_poll_custody,test_telegram_rest_client
+Retained execution summary (compiler and ASSERT lines omitted):
+
+test suite	Test	2026-10-24T16:32:53.9344639Z [targeted] test/test_telegram_native_gateway: start 2026-10-24T16:32:53Z
+test suite	Test	2026-10-24T16:32:54.0103478Z   [OK]          continuity          0   strict route and topic separation.
+test suite	Test	2026-10-24T16:32:54.0110097Z   [OK]          continuity          1   producer exact source and original re...
+test suite	Test	2026-10-24T16:32:54.0111975Z   [OK]          continuity          2   unreadable binding stays owed.
+test suite	Test	2026-10-24T16:32:54.0115316Z   [OK]          continuity          3   sender identity topics and partial re...
+test suite	Test	2026-10-24T16:32:54.0116768Z   [OK]          continuity          4   direct topic and UTF-8 preservation.
+test suite	Test	2026-10-24T16:32:54.0124341Z   [OK]          continuity          5   terminal and delivery evidence.
+test suite	Test	2026-10-24T16:32:54.0237399Z   [OK]          continuity          6   committed rich blocks and HTML bounda...
+test suite	Test	2026-10-24T16:32:54.0267828Z   [OK]          continuity          7   configured binding read write and aud...
+test suite	Test	2026-10-24T16:32:54.0268739Z Test Successful in 0.017s. 8 tests run.
+test suite	Test	2026-10-24T16:32:54.0333841Z [targeted] test/test_telegram_native_gateway: OK in 1s
+test suite	Test	2026-10-24T16:32:54.0897391Z [targeted] test/test_telegram_poll_custody: start 2026-10-24T16:32:54Z
+test suite	Test	2026-10-24T16:32:54.1065552Z   [OK]          ownership          0   durable refusal frontier restart and t...
+test suite	Test	2026-10-24T16:32:54.1166512Z   [OK]          ownership          1   unconfirmed wrong receipts stay pending.
+test suite	Test	2026-10-24T16:32:54.1191638Z   [OK]          ownership          2   wrong bot corrupt state stops before H...
+test suite	Test	2026-10-24T16:32:54.1245914Z   [OK]          ownership          3   stale concurrent page does not resubmit.
+test suite	Test	2026-10-24T16:32:54.1290612Z   [OK]          ownership          4   failed storage does not acknowledge.
+test suite	Test	2026-10-24T16:32:54.1333461Z   [OK]          ownership          5   failed first commit then idle reset.
+test suite	Test	2026-10-24T16:32:54.1357141Z   [OK]          ownership          6   after rename sync recovery.
+test suite	Test	2026-10-24T16:32:54.1397251Z   [OK]          ownership          7   explicit ignore and successor overflow.
+test suite	Test	2026-10-24T16:32:54.1448753Z   [OK]          ownership          8   long idle randomized and reused ids.
+test suite	Test	2026-10-24T16:32:54.1483926Z   [OK]          ownership          9   clock refusal before acknowledgment.
+test suite	Test	2026-10-24T16:32:54.1484700Z Test Successful in 0.048s. 10 tests run.
+test suite	Test	2026-10-24T16:32:54.1525149Z [targeted] test/test_telegram_poll_custody: OK in 0s
+test suite	Test	2026-10-24T16:32:54.2084675Z [targeted] test/test_telegram_rest_client: start 2026-10-24T16:32:54Z
+test suite	Test	2026-10-24T16:32:54.2193063Z   [OK]          protocol          0   poll coordinates before effects.
+test suite	Test	2026-10-24T16:32:54.2194338Z   [OK]          protocol          1   credential path identity.
+test suite	Test	2026-10-24T16:32:54.2196343Z   [OK]          protocol          2   lossless update coordinates.
+test suite	Test	2026-10-24T16:32:54.2196980Z   [OK]          protocol          3   reject whole malformed pages.
+test suite	Test	2026-10-24T16:32:54.2211519Z   [OK]          protocol          4   native reply and edit.
+test suite	Test	2026-10-24T16:32:54.2213388Z   [OK]          protocol          5   typed failure directives.
+test suite	Test	2026-10-24T16:32:54.2213749Z Test Successful in 0.000s. 6 tests run.
+test suite	Test	2026-10-24T16:32:54.2230930Z [targeted] test/test_telegram_rest_client: OK in 0s

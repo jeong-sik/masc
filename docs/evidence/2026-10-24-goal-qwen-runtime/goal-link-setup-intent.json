@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-24T14:52:47.625625+00:00",
+  "purpose": "Controlled pre-approval G3 fixture setup; Qwen omitted Goal link on Task creation. Not a G2 success or autonomous linkage claim. No post-approval Keeper message allowed.",
+  "before_task": {
+    "id": "task-001",
+    "title": "Set alpha to true in acceptance.json",
+    "description": "Update the alpha field in workspace/acceptance.json to true while keeping beta and gamma as false until approval.",
+    "priority": 3,
+    "files": [],
+    "created_at": "2026-10-24T14:49:08Z",
+    "created_by": "goal-canary",
+    "contract": {
+      "completion_contract": [
+        "artifact:workspace/acceptance.json contains alpha=true, beta=false, gamma=false"
+      ],
+      "required_evidence": [
+        "artifact:workspace/acceptance.json"
+      ]
+    },
+    "handoff_context": {
+      "summary": "Updated alpha to true in acceptance.json",
+      "evidence_refs": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "updated_at": "2026-10-24T14:50:29Z",
+      "updated_by": "goal-canary"
+    },
+    "status": "awaiting_verification",
+    "assignee": "goal-canary",
+    "started_at": "2026-10-24T14:49:23Z",
+    "submitted_at": "2026-10-24T14:50:29Z",
+    "verification_id": "vrf-eb69d5addcb70d86364abbb773b563e1"
+  },
+  "arguments": {
+    "task_id": "task-001",
+    "goal_id": "goal-canary-three-results"
+  }
+}

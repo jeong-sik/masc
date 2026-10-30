@@ -1,0 +1,2989 @@
+(* This standalone fixture explicitly enables new Browser work. *)
+(* History in these fixtures holds media by reference; every agent, runtime
+   config and projector here reads the bytes back from this store. *)
+let test_media_store = Agent_core.History.Memory_store.create ()
+
+let stored_source ~media_type raw =
+  match test_media_store.put ~media_type ~raw with
+  | Ok stored -> Agent_core.Types.Stored stored
+  | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
+let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
+
+(* Keeper_vision_tool pure-core tests — RFC-keeper-vision-delegation-tool §2.6.
+
+   Locks the two contract-critical pure pieces:
+   - stop_reason -> truncated mapping (the 2026-06-25 gemma4 finding: MaxTokens
+     means the reply truncated, distinct from an empty/refusal reply);
+   - the one-shot message build (image bytes MUST be base64-encoded for the wire
+     serializer, which emits data:<media_type>;base64,<data>).
+
+   The I/O orchestration (handle: load + runtime select + provider sub-call) is
+   exercised by the env-gated live smoke, not here — it needs global Runtime
+   state, an Eio net, and a populated store dir. The early no-Eio branches are
+   covered below. *)
+
+module Vt = Masc.Keeper_vision_tool
+module Vi = Masc.Keeper_vision_ingest
+module Va = Multimodal.Vision_analyze
+module Store = Multimodal.Vision_artifact_store
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> unsetenv key)
+    (fun () ->
+      Unix.putenv key value;
+      f ())
+
+let json_of_output raw =
+  try Yojson.Safe.from_string raw with
+  | Yojson.Json_error msg -> failwith ("invalid json output: " ^ msg ^ ": " ^ raw)
+
+let assoc_string key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String s) -> s
+     | Some other ->
+       failwith
+         (Printf.sprintf
+            "field %s was not a string: %s"
+            key
+            (Yojson.Safe.to_string other))
+     | None -> failwith ("missing field: " ^ key))
+  | other -> failwith ("expected object: " ^ Yojson.Safe.to_string other)
+
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
+  let json = `Assoc [ "name", `String name ] in
+match Masc_test_deps.meta_of_json_fixture json with
+| Ok meta -> meta
+| Error e -> failwith e
+
+let substring_index s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then None
+    else if String.sub s i n_len = needle then Some i
+    else loop (i + 1)
+  in
+  if n_len = 0 then Some 0 else loop 0
+
+let artifact_handle_of_placeholder text =
+  let marker = "artifact:" in
+  match substring_index text marker with
+  | None -> failwith ("missing artifact marker: " ^ text)
+  | Some marker_pos ->
+    let start = marker_pos + String.length marker in
+    let rec stop i =
+      if i >= String.length text || text.[i] = ' ' || text.[i] = ']'
+      then i
+      else stop (i + 1)
+    in
+    String.sub text start (stop start - start)
+
+let ok_response text : Agent_core.Types.api_response =
+  let text_json =
+    Yojson.Safe.to_string (`Assoc [ "text", `String text ])
+  in
+  { id = "vision-test"
+  ; model = "vision-test-model"
+  ; stop_reason = Agent_core.Types.EndTurn
+  ; content = [ Llm_provider.Types.Text text_json ]
+  ; usage = None
+  ; telemetry = None
+  }
+
+let text_response text : Agent_core.Types.api_response =
+  { id = "vision-test"
+  ; model = "vision-test-model"
+  ; stop_reason = Agent_core.Types.EndTurn
+  ; content = [ Llm_provider.Types.Text text ]
+  ; usage = None
+  ; telemetry = None
+  }
+
+let with_temp_base f =
+  let path = Filename.temp_file "masc-vision-tool-test-" "" in
+  Unix.unlink path;
+  Unix.mkdir path 0o755;
+  Unix.putenv "MASC_BASE_PATH" path;
+  Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      unsetenv "MASC_BASE_PATH";
+      Config_dir_resolver.reset ();
+      let rec rm p =
+        match Unix.lstat p with
+        | { Unix.st_kind = Unix.S_DIR; _ } ->
+          Array.iter
+            (fun name -> rm (Filename.concat p name))
+            (Sys.readdir p);
+          Unix.rmdir p
+        | _ -> Unix.unlink p
+        | exception Unix.Unix_error _ -> ()
+      in
+      rm path)
+    (fun () -> f path)
+
+let store_image meta bytes =
+  let store_dir =
+    Vt.vision_store_dir ~keeper_name:meta.Masc.Keeper_meta_contract.name ()
+  in
+  match Store.store ~auto_prune:false ~dir:store_dir bytes with
+  | Ok handle -> Store.to_string handle
+  | Error msg -> failwith msg
+
+let artifact_args ?media_type artifact =
+  let fields =
+    [ "artifact", `String artifact; "query", `String "describe" ]
+    @
+    match media_type with
+    | None -> []
+    | Some value -> [ "media_type", value ]
+  in
+  `Assoc fields
+
+let complete_should_not_run
+    ~sw:_
+    ~net:_
+    ~clock:_
+    ~config:_
+    ~messages:_
+    ?tools:_
+    () =
+  failwith "vision provider complete should not run"
+
+let metric_value metric ~labels =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string metric)
+    ~labels
+    ()
+;;
+
+let assert_metric_increment label before after =
+  let delta = after -. before in
+  if abs_float (delta -. 1.0) > 0.0001
+  then
+    failwith
+      (Printf.sprintf
+         "expected metric %s to increment by 1.0, before=%f after=%f"
+         label
+         before
+         after)
+;;
+
+let test_structured_response_states_never_accept_valid_vision_json () =
+  List.iter
+    (fun (stop_reason, expected_class) ->
+       let response = { (ok_response "must not be accepted") with stop_reason } in
+       match Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test"
+               response with
+       | Vt.Vo_provider { failure_class; _ } ->
+         Alcotest.(check bool) "terminal response state retains failure class"
+           true (failure_class = expected_class)
+       | Vt.Vo_ok _ | Vt.Vo_invalid_request _ | Vt.Vo_no_runtime _ | Vt.Vo_timeout
+       | Vt.Vo_invalid_structured_response _ | Vt.Vo_official_failure _
+       | Vt.Vo_empty | Vt.Vo_truncated ->
+         Alcotest.fail "response state became successful JSON or parse/budget failure")
+    [ Agent_core.Types.Refusal, Tool_result.Policy_rejection
+    ; ContentFilter, Policy_rejection
+    ; RepetitionTruncation, Runtime_failure
+    ; ContextWindowExceeded, Runtime_failure
+    ; PauseTurn, Runtime_failure
+    ; Compaction, Runtime_failure
+    ; UnmatchedToolCalls, Runtime_failure
+    ; StopToolUse, Runtime_failure
+    ; Unknown "private-stop-description", Runtime_failure
+    ]
+
+(* One User message [text query; image]; image data is base64 of the raw bytes
+   (NOT the raw bytes), media_type preserved, source_type "base64". The JSON
+   response contract is explicit prompt prose because the provider request has
+   [response_format = Off]. *)
+let test_message_of_request () =
+  let bytes = "\x89PNG\r\n\x1a\n\x00raw\xffbytes" in
+  match
+    Va.make_request ~query:"what color?" ~image_media_type:"image/png"
+      ~image_bytes:bytes
+  with
+  | Error e -> failwith e
+  | Ok req ->
+    let msg = Vt.message_of_request req in
+    assert (msg.Llm_provider.Types.role = Agent_core.Types.User);
+    (match msg.Llm_provider.Types.content with
+     | [ Llm_provider.Types.Text q; Llm_provider.Types.Image img ] ->
+       assert (String_util.contains_substring q "what color?");
+       assert (String_util.contains_substring q "Return only a JSON object");
+       assert (String_util.contains_substring q "field named text");
+       assert (String.equal img.media_type "image/png");
+       assert (
+         String.equal
+           (Agent_core.Types.media_source_wire_tag img.source)
+           "base64");
+       let data = Agent_core.Types.media_source_payload img.source in
+       assert (String.equal data (Base64.encode_string bytes));
+       assert (not (String.equal data bytes))
+     | _ -> assert false)
+
+(* first_vision_runtime_id returns a typed result either way (no exception). With
+   no runtime cache loaded in this unit context it is Error; the value is what
+   matters (never raises). *)
+let test_first_vision_runtime_id_total () =
+  match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
+  | Ok _ | Error _ -> ()
+
+let test_provider_for_vision_preserves_configured_max_tokens () =
+  let base =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"vision-model"
+      ~base_url:"http://example.invalid"
+      ()
+  in
+  let configured =
+    Vt.provider_for_vision { base with max_tokens = Some 4096 }
+  in
+  assert (configured.max_tokens = Some 4096);
+  let fallback =
+    Vt.provider_for_vision { base with max_tokens = None }
+  in
+  assert (fallback.max_tokens = Some (Vt.vision_default_max_tokens ()));
+  (match configured.response_format with
+   | Agent_core.Types.Off -> ()
+   | Agent_core.Types.JsonMode
+   | Agent_core.Types.JsonSchema _ -> failwith "vision provider must not request a wire format")
+
+(* The 2026-08 fix: vision must NOT force enable_thinking=false. The
+   media_failover fleet is entirely /v1 "none" thinking-control lanes —
+   reasoning-capable models with no wire field to disable thinking — where a
+   disable request is fail-closed by the agent_core guard (Disable_not_encodable),
+   which broke every image analysis. Leaving enable_thinking=None lets the guard
+   admit the call (complete_common: None -> admitted); the reply is still kept
+   clean by preserve_thinking=false + clear_thinking=true, which strip any
+   reasoning the model emits without requesting an impossible disable. *)
+let test_provider_for_vision_leaves_thinking_uncontrolled () =
+  let base =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"vision-model"
+      ~base_url:"http://example.invalid"
+      ()
+  in
+  let configured = Vt.provider_for_vision base in
+  assert (configured.enable_thinking = None);
+  assert (configured.preserve_thinking = Some false);
+  assert (configured.clear_thinking = Some true)
+
+let test_max_image_bytes_reads_env_config () =
+  with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->
+    assert (Vt.max_image_bytes () = 128))
+
+let assert_float_eq label expected actual =
+  if abs_float (expected -. actual) > 0.000001
+  then
+    failwith
+      (Printf.sprintf "%s: expected %f, got %f" label expected actual)
+;;
+
+let test_vision_env_knobs_are_bounded () =
+  with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "999999999" (fun () ->
+    assert (Vt.max_image_bytes () = 10 * 1024 * 1024));
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "999999999" (fun () ->
+    assert (Vt.vision_default_max_tokens () = 128 * 1024));
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "1" (fun () ->
+    assert (Vt.vision_default_max_tokens () = 4096));
+  with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "999" (fun () ->
+    assert_float_eq
+      "base backoff ceiling"
+      5.0
+      (Env_config_keeper.KeeperVision.candidate_backoff_base_sec ()));
+  with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC" "999" (fun () ->
+    assert_float_eq
+      "max backoff ceiling"
+      30.0
+      (Env_config_keeper.KeeperVision.candidate_backoff_max_sec ()));
+  with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "2.0" (fun () ->
+    with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC" "1.0" (fun () ->
+      assert_float_eq
+        "max backoff is at least base"
+        2.0
+        (Env_config_keeper.KeeperVision.candidate_backoff_max_sec ())))
+
+let test_missing_eio_context_is_runtime_failure () =
+  let raw =
+    Vt.handle
+      ~meta:(make_meta "vision-missing-eio")
+      ~args:
+        (`Assoc
+          [ "artifact", `String (String.make 64 'a')
+          ; "query", `String "describe"
+          ])
+      ()
+  in
+  let json = json_of_output raw in
+  assert (String.equal (assoc_string "error" json) "eio_context_unavailable");
+  assert (String.equal (assoc_string "failure_class" json) "runtime_failure")
+
+let test_invalid_media_type_is_policy_rejection () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-media-type" in
+    let bytes = "\x89PNG\r\n\x1a\nraw" in
+    let handle = store_image meta bytes in
+    let metric_labels =
+      [ "result", "error"; "reason", "invalid_media_type" ]
+    in
+    let before =
+      metric_value Keeper_metrics.VisionAnalyze ~labels:metric_labels
+    in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args ~media_type:(`String "text/plain") handle)
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "invalid_media_type");
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection");
+    assert_metric_increment
+      "vision_analyze invalid_media_type"
+      before
+      (metric_value Keeper_metrics.VisionAnalyze ~labels:metric_labels))
+
+let test_missing_clock_is_runtime_failure_without_provider_call () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-missing-clock" in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args (String.make 64 'a'))
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "eio_context_unavailable");
+    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
+
+let test_non_string_media_type_is_policy_rejection () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-media-type-non-string" in
+    let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args ~media_type:(`Int 123) handle)
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "invalid_media_type");
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+
+let test_unknown_magic_bytes_are_policy_rejection () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-unknown-magic" in
+    let handle = store_image meta "definitely not an image" in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args handle)
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "invalid_media_type");
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+
+let test_oversize_image_is_runtime_failure_before_provider_call () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-oversize" in
+    let handle = store_image meta (String.make (Vt.max_image_bytes () + 1) '\000') in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args handle)
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "image_too_large");
+    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let no_image_runtime_toml =
+  {|
+[runtime]
+default = "p0.text"
+media_failover = ["p0.text"]
+
+[providers.p0]
+protocol = "openai-compatible-http"
+endpoint = "https://p0.example/v1"
+
+[models.text]
+api-name = "text"
+max-context = 4096
+
+[models.text.capabilities]
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[p0.text]
+|}
+
+let init_runtime_or_fail path =
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error msg -> failwith ("Runtime.init_default failed: " ^ msg)
+;;
+
+let reset_runtime_to_no_image_fixture () =
+  let path = Filename.temp_file "masc-vision-runtime-reset-" ".toml" in
+  write_file path no_image_runtime_toml;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | _ -> ())
+    (fun () -> init_runtime_or_fail path)
+;;
+
+let runtime_config_stack = ref []
+
+let with_temp_runtime_toml content f =
+  let path = Filename.temp_file "masc-vision-runtime-" ".toml" in
+  write_file path content;
+  let previous_stack = !runtime_config_stack in
+  runtime_config_stack := path :: previous_stack;
+  Fun.protect
+    ~finally:(fun () ->
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove path with
+          | _ -> ())
+        (fun () ->
+          runtime_config_stack := previous_stack;
+          match previous_stack with
+          | previous_path :: _ -> init_runtime_or_fail previous_path
+          | [] -> reset_runtime_to_no_image_fixture ()))
+    (fun () ->
+      init_runtime_or_fail path;
+      f ())
+
+let vision_failover_runtime_toml =
+  {|
+[runtime]
+default = "p1.vision-a"
+media_failover = ["p1.vision-a", "p2.vision-b"]
+
+[providers.p1]
+protocol = "ollama-http"
+endpoint = "https://p1.example/v1"
+
+[providers.p2]
+protocol = "ollama-http"
+endpoint = "https://p2.example/v1"
+
+[models.vision-a]
+api-name = "vision-a"
+max-context = 4096
+
+[models.vision-a.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[models.vision-b]
+api-name = "vision-b"
+max-context = 4096
+
+[models.vision-b.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[p1.vision-a]
+
+[p2.vision-b]
+|}
+
+
+let single_vision_runtime_toml =
+  {|
+[runtime]
+default = "p3.vision-c"
+media_failover = ["p3.vision-c"]
+
+[providers.p3]
+protocol = "ollama-http"
+endpoint = "https://p3.example/v1"
+
+[models.vision-c]
+api-name = "vision-c"
+max-context = 4096
+temperature = 1.0
+
+[models.vision-c.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[p3.vision-c]
+|}
+
+(* Vision falls back to every image-capable runtime after explicit
+   media_failover ordering. The uncapped fallback is therefore genuinely
+   reachable even though neither [runtime].default nor media_failover names it. *)
+(* [p4.vision-a] is the image-capable runtime this case wants reached, and it
+   is named in [media_failover] because that is what declares a runtime as an
+   image candidate for a keeper that does not route to it. It used to be
+   reachable by being declared at all, which is the tail #34823 removed: that
+   tail was the set boot does not validate dispatch caps for. The capped
+   [p0.text] stays ahead of it, which is the point -- the vision path must not
+   inherit that cap. *)
+let uncapped_vision_fallback_runtime_toml =
+  {|
+[runtime]
+default = "p0.text"
+media_failover = ["p0.text", "p4.vision-a"]
+
+[providers.p0]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.p4]
+protocol = "ollama-http"
+endpoint = "http://127.0.0.1:2/v1"
+
+[models.text]
+api-name = "text"
+max-context = 4096
+
+[models.text.capabilities]
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[models.vision-a]
+api-name = "vision-a"
+max-context = 4096
+
+[models.vision-a.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[p0.text]
+
+[p4.vision-a]
+|}
+
+let test_provider_for_vision_uses_runtime_temperature () =
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
+    | Error msg -> failwith ("expected configured vision runtime: " ^ msg)
+    | Ok runtime_id ->
+      (match Runtime.get_runtime_by_id runtime_id with
+       | None -> failwith "selected vision runtime should resolve"
+       | Some runtime ->
+         (match runtime.Runtime_instance.execution with
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Antigravity_cli _
+          | Runtime_execution.Muse_serve _ ->
+            failwith "selected vision runtime should be agent_core"
+          | Runtime_execution.Agent_core provider_config ->
+            let configured = Vt.provider_for_vision provider_config in
+            assert (configured.temperature = Some 1.0))))
+
+let test_uncapped_vision_fallback_reaches_provider () =
+  with_temp_runtime_toml uncapped_vision_fallback_runtime_toml (fun () ->
+    let provider_calls = ref 0 in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+      incr provider_calls;
+      Ok (ok_response "uncapped vision reached provider")
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision
+            ~complete
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~query:"describe"
+            ~media_type:"image/png"
+            ~bytes:"\x89PNG\r\n\x1a\nraw"
+            ()))
+    in
+    assert (!provider_calls = 1);
+    match outcome with
+    | Vt.Vo_ok { text = "uncapped vision reached provider"; _ } -> ()
+    | _ -> failwith "uncapped vision fallback should reach provider")
+
+let image_capable_vision_runtime_toml =
+  {|
+[runtime]
+default = "local.vision"
+media_failover = ["local.vision"]
+
+[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.vision]
+api-name = "vision"
+max-context = 4096
+
+[models.vision.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[local.vision]
+|}
+
+let test_temp_runtime_toml_restores_runtime_cache () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    let before = Runtime.get_runtime_ids () in
+    with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+      assert (Runtime.get_runtime_ids () = [ "p3.vision-c" ]));
+    assert (Runtime.get_runtime_ids () = before));
+  assert (Vt.vision_runtime_ids ~now:(Unix.gettimeofday ()) = [])
+
+let test_image_capable_vision_runtime_is_admitted_without_schema_capability () =
+  with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
+    assert (Vt.vision_runtime_ids ~now:(Unix.gettimeofday ()) = [ "local.vision" ]);
+    (match Vt.first_vision_runtime_id ~now:(Unix.gettimeofday ()) with
+     | Ok "local.vision" -> ()
+     | Ok runtime_id -> failwith ("unexpected vision runtime admitted: " ^ runtime_id)
+     | Error msg -> failwith ("image-capable runtime was rejected: " ^ msg)))
+
+let test_invalid_structured_vision_response_is_runtime_failure () =
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-invalid-structured-response" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        Ok (text_response "not-json")
+      in
+      let outcome =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle_with_outcome
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      assert (outcome.failure_effect_disposition = Tool_result.Proven_pre_effect);
+      let raw = outcome.raw_output in
+      let json = json_of_output raw in
+      assert
+        (String.equal
+           (assoc_string "error" json)
+           "invalid_structured_response");
+      assert (String.equal (assoc_string "failure_class" json) "runtime_failure");
+      assert (String_util.contains_substring (assoc_string "detail" json) "Structured output parse error")))
+
+let test_run_vision_invalid_structured_response_is_typed () =
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      Ok (text_response "not-json")
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision
+            ~complete
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~query:"describe"
+            ~media_type:"image/png"
+            ~bytes:"\x89PNG\r\n\x1a\nraw"
+            ()))
+    in
+    match outcome with
+    | Vt.Vo_invalid_structured_response detail ->
+      assert (String_util.contains_substring detail "Structured output parse error")
+    | _ -> failwith "expected Vo_invalid_structured_response")
+
+let test_failed_vision_candidates_keep_private_response_evidence () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun base_path ->
+      let replies = ["~private-first-response~"; {|{"text":42,"private":"~second-response~"}|}] in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        let raw = List.nth replies !calls in
+        incr calls;
+        Ok (text_response raw)
+      in
+      let outcome = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        Vt.run_vision ~base_path ~complete ~tool_use_id:"original-image-call"
+          ~trace_id:"original-image-trace" ~sw ~clock:env#clock ~net:env#net
+          ~query:"describe" ~media_type:"image/png"
+          ~bytes:"\x89PNG\r\n\x1a\nraw" ())) in
+      let detail = match outcome with
+        | Vt.Vo_invalid_structured_response detail -> detail
+        | _ -> failwith "both invalid candidate responses must remain failures" in
+      assert (!calls=2);
+      assert (not (String.contains detail '~'));
+      let directory = Masc.Structured_response_evidence.record_path ~base_path
+          (Masc.Structured_response_evidence.invocation_id ()) |> Filename.dirname in
+      let rows = Sys.readdir directory |> Array.to_list
+        |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+        |> List.map (fun name -> Fs_compat.load_file (Filename.concat directory name)
+          |> Yojson.Safe.from_string) in
+      assert (List.length rows=2);
+      let rows = List.sort (fun a b ->
+        Int.compare Yojson.Safe.Util.(member "attempt_index" a |> to_int)
+          Yojson.Safe.Util.(member "attempt_index" b |> to_int)) rows in
+      let first_invocation = assoc_string "invocation_id" (List.hd rows) in
+      List.iteri (fun index row ->
+        assert (assoc_string "raw_preview" row = List.nth replies index);
+        assert (assoc_string "invocation_id" row = first_invocation);
+        assert (assoc_string "runtime_id" row = List.nth ["p1.vision-a";"p2.vision-b"] index);
+        assert (assoc_string "tool_use_id" row = "original-image-call");
+        assert (assoc_string "trace_id" row = "original-image-trace")) rows;
+      assert (String_util.contains_substring detail
+        (assoc_string "evidence_id" (List.nth rows 1)))))
+;;
+
+let test_explicit_vision_runtime_selection () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-selected" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let run selected response =
+          let calls = ref [] in
+          let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+            calls := config.Llm_provider.Provider_config.model_id :: !calls;
+            response
+          in
+          let args = match artifact_args handle with
+            | `Assoc fields -> `Assoc (("runtime_id", selected) :: fields)
+            | _ -> failwith "artifact fixture must be an object"
+          in
+          let raw = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~meta ~args () in
+          json_of_output raw, List.rev !calls
+        in
+        let json, calls = run (`String "p2.vision-b") (Ok (ok_response "selected reader")) in
+        assert (calls = ["vision-b"]);
+        assert (assoc_string "runtime_id" json = "p2.vision-b");
+        assert (assoc_string "text" json = "selected reader");
+        let json, calls = run (`String "p2.vision-b")
+          (Error (Llm_provider.Http_client.HttpError
+            { code = 500; body = Llm_provider.Http_client.Received "selected unavailable"; retry_after_header = None })) in
+        assert (calls = ["vision-b"]);
+        assert (assoc_string "error" json = "provider_error");
+        List.iter (fun (selected, code) ->
+          let json, calls = run selected (Ok (ok_response "must not run")) in
+          assert (calls = []);
+          assert (assoc_string "error" json = code))
+          [`String "missing.vision", "invalid_request";
+           `String "", "invalid_args"; `Int 1, "invalid_args"; `Null, "invalid_args"]))))
+
+let test_retryable_provider_error_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let transient_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "transient_provider_error"
+        ]
+      in
+      let ok_labels =
+        [ "runtime_id", "p2.vision-b"
+        ; "result", "ok"
+        ; "reason", "provider_response"
+        ]
+      in
+      let before_transient =
+        metric_value Keeper_metrics.VisionCandidateAttempts
+          ~labels:transient_labels
+      in
+      let before_ok =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels
+      in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        incr calls;
+        models := config.Llm_provider.Provider_config.model_id :: !models;
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
+        else Ok (ok_response "second runtime answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
+      assert_metric_increment
+        "vision_candidate transient_provider_error"
+        before_transient
+        (metric_value Keeper_metrics.VisionCandidateAttempts
+           ~labels:transient_labels);
+      assert_metric_increment
+        "vision_candidate provider_response"
+        before_ok
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
+
+(* 2026-09-12, msx-retro-mania: one candidate answered malformed JSON under
+   json_object (unescaped quotes inside the string value) and the walk
+   returned that reply as its final verdict -- the terminal composition
+   above it killed the whole turn. A broken structured reply is as
+   candidate-local as a length stop: which backends break JSON escaping
+   differs per model, and the walk exists to move on. *)
+let test_invalid_structured_response_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-invalid-json-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let invalid_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "invalid_structured_output"
+        ]
+      in
+      let ok_labels =
+        [ "runtime_id", "p2.vision-b"
+        ; "result", "ok"
+        ; "reason", "provider_response"
+        ]
+      in
+      let before_invalid =
+        metric_value Keeper_metrics.VisionCandidateAttempts
+          ~labels:invalid_labels
+      in
+      let before_ok =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels
+      in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        if !calls = 1 then Ok (text_response "not-json")
+        else Ok (ok_response "second runtime answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert_metric_increment
+        "vision_candidate invalid_structured_output"
+        before_invalid
+        (metric_value Keeper_metrics.VisionCandidateAttempts
+           ~labels:invalid_labels);
+      assert_metric_increment
+        "vision_candidate provider_response"
+        before_ok
+        (metric_value Keeper_metrics.VisionCandidateAttempts
+           ~labels:ok_labels)))
+
+(* 2026-09-07: glm-coding.glm-4.6v answered HTTP 400 (max_tokens out of its
+   range) and the walk stopped there, never reaching the local runtime behind
+   it that takes the same pixels. A 400 is one binding's verdict, so the walk
+   must advance -- and without the transient backoff, which is for outages. *)
+let test_candidate_policy_error_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let policy_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "candidate_policy_error"
+        ]
+      in
+      let ok_labels =
+        [ "runtime_id", "p2.vision-b"
+        ; "result", "ok"
+        ; "reason", "provider_response"
+        ]
+      in
+      let before_policy =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels
+      in
+      let before_ok =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels
+      in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        incr calls;
+        models := config.Llm_provider.Provider_config.model_id :: !models;
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 400
+               ; body = Llm_provider.Http_client.Received "{\"error\":{\"code\":\"1210\",\"message\":\"max_tokens illegal\"}}"
+               ; retry_after_header = None
+               })
+        else Ok (ok_response "second runtime answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
+      assert_metric_increment
+        "vision_candidate candidate_policy_error"
+        before_policy
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels);
+      assert_metric_increment
+        "vision_candidate provider_response"
+        before_ok
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
+
+(* RFC-0440 §3: a candidate whose account answered a hard quota rejection moves
+   behind the live ones; a success on that account clears the observation. *)
+let test_vision_candidates_follow_quota_window () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let now = Unix.gettimeofday () in
+      let scope id =
+        match Runtime.get_runtime_by_id id with
+        | Some rt -> Runtime_instance.quota_scope_of_runtime rt
+        | None -> failwith ("missing runtime " ^ id)
+      in
+      assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ]);
+      Runtime_quota_window.note_observed_exhausted ~scope:(scope "p1.vision-a");
+      assert (Vt.vision_runtime_ids ~now = [ "p2.vision-b"; "p1.vision-a" ]);
+      Runtime_quota_window.note_succeeded ~scope:(scope "p1.vision-a");
+      assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ])))
+
+(* RFC-0440 §3: a 402 from the read walk is recorded on that account, the walk
+   moves on at once, and the answering account is recorded as live. *)
+let vision_standing_runtime id =
+  match Runtime.get_runtime_by_id id with
+  | Some runtime -> runtime
+  | None -> Alcotest.fail ("missing vision runtime " ^ id)
+
+let vision_has_rate (runtime : Runtime_instance.t) =
+  match Runtime_candidate_backpressure.candidate_backpressure
+    ~now:(Time_compat.now ()) ~candidate:runtime.candidate_backpressure with
+  | Some {rate_limit=Some _; _} -> true
+  | Some {rate_limit=None; _} | None -> false
+
+let with_vision_standing ?(runtime_text=vision_failover_runtime_toml) f =
+  with_temp_runtime_toml runtime_text (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    let a = vision_standing_runtime "p1.vision-a" in
+    let b = vision_standing_runtime "p2.vision-b" in
+    List.iter (fun (rt : Runtime_instance.t) ->
+      Runtime_candidate_backpressure.note_candidate_success ~candidate:rt.candidate_backpressure) [a;b];
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let run ?runtime_id complete =
+          Vt.run_vision ?runtime_id ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+            ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" () in
+        f ~a ~b ~run))))
+
+let vision_rate_error = Llm_provider.Http_client.HttpError
+  {code=429; body=Received {|{"error":{"retry_after":180}}|}; retry_after_header=Some 360.0}
+
+let test_vision_dispatch_reads_existing_candidate_rate () =
+  with_vision_standing (fun ~a ~b:_ ~run ->
+    Runtime_candidate_backpressure.note_rate_limit ~candidate:a.candidate_backpressure
+      ~retry_after:(Some 180.0);
+    let calls = ref [] in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+      calls := config.Llm_provider.Provider_config.model_id :: !calls;
+      Ok (ok_response "available candidate answered") in
+    ignore (run complete);
+    Alcotest.(check (list string)) "actual dispatch skips the rate-limited head"
+      ["vision-b"] (List.rev !calls);
+    Alcotest.(check bool) "a different candidate's answer preserves head evidence" true (vision_has_rate a))
+
+let test_vision_rate_survives_other_answers_and_clears_before_validation () =
+  List.iter (fun valid_json ->
+    with_vision_standing (fun ~a ~b:_ ~run ->
+      let calls = ref [] in
+      let first ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        let model = config.Llm_provider.Provider_config.model_id in
+        calls := model :: !calls;
+        if String.equal model "vision-a" then Error vision_rate_error
+        else Ok (ok_response "fallback answered") in
+      ignore (run first);
+      Alcotest.(check (list string)) "first invocation reaches fallback" ["vision-a";"vision-b"] (List.rev !calls);
+      let answer ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        calls := config.Llm_provider.Provider_config.model_id :: !calls;
+        Ok (ok_response "candidate answered") in
+      calls := []; ignore (run answer);
+      Alcotest.(check (list string)) "separate invocation begins with live sibling" ["vision-b"] (List.rev !calls);
+      Alcotest.(check bool) "sibling answer does not clear original refusal" true (vision_has_rate a);
+      (match Runtime_candidate_backpressure.candidate_backpressure
+         ~now:(Time_compat.now ()) ~candidate:a.candidate_backpressure with
+       | Some {rate_limit=Some (Unknown_scope_rate_limit {retry_after;_});_} ->
+         Alcotest.(check (option (float 0.0))) "body retry hint wins over header" (Some 180.0) retry_after
+       | Some {rate_limit=None;_} | None -> Alcotest.fail "missing actual 429 observation");
+      let scope = Runtime_instance.quota_scope_of_runtime a in
+      Runtime_quota_window.note_observed_exhausted ~scope;
+      Runtime_candidate_backpressure.note_failed_attempt ~candidate:a.candidate_backpressure
+        ~failure:Server_error ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"vision-owner");
+      let actual_answer ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        Ok (if valid_json then ok_response "head answered" else text_response "not JSON") in
+      let outcome = run ~runtime_id:a.id actual_answer in
+      Alcotest.(check bool) "transport answer has expected semantic result" valid_json
+        (match outcome with
+         | Vt.Vo_ok _ -> true
+         | Vt.Vo_invalid_request _ | Vt.Vo_no_runtime _ | Vt.Vo_timeout
+         | Vt.Vo_invalid_structured_response _ | Vt.Vo_official_failure _
+         | Vt.Vo_empty | Vt.Vo_truncated | Vt.Vo_provider _ -> false);
+      Alcotest.(check bool) "answer clears rate and Fleet failure even if JSON is invalid" true
+        (Option.is_none (Runtime_candidate_backpressure.candidate_backpressure
+          ~now:(Time_compat.now ()) ~candidate:a.candidate_backpressure));
+      Alcotest.(check bool) "answer clears undated account observation" false
+        (Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()));
+      calls := []; ignore (run answer);
+      Alcotest.(check (list string)) "actual dispatch returns to original head" ["vision-a"] (List.rev !calls)))
+    [true;false]
+
+let test_vision_typed_quota_and_candidate_rate_have_distinct_scope () =
+  let credentials = {|
+[providers.p1.credentials]
+type = "env"
+key = "VISION_SHARED_TEST_KEY"
+[providers.p2.credentials]
+type = "env"
+key = "VISION_SHARED_TEST_KEY"
+|} in
+  with_env "VISION_SHARED_TEST_KEY" "synthetic-no-network" (fun () ->
+    with_vision_standing ~runtime_text:(vision_failover_runtime_toml ^ credentials)
+      (fun ~a ~b ~run ->
+        let scope = Runtime_instance.quota_scope_of_runtime a in
+        Alcotest.(check bool) "fixture siblings share the quota owner" true
+          (Runtime_quota_window.scope_equal scope (Runtime_instance.quota_scope_of_runtime b));
+        let refusal error ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () = Error error in
+        ignore (run ~runtime_id:a.id (refusal vision_rate_error));
+        Alcotest.(check bool) "coarse 429 leaves shared account quota available" false
+          (Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()));
+        Alcotest.(check bool) "coarse 429 affects only attempted candidate" false (vision_has_rate b);
+        List.iter (fun retry_after ->
+          Runtime_quota_window.reset_for_testing ();
+          let before = Time_compat.now () in
+          ignore (run ~runtime_id:a.id (refusal (Llm_provider.Http_client.ProviderFailure
+            {kind=Hard_quota {retry_after}; message="typed provider account refusal"})));
+          let after = Time_compat.now () in
+          Alcotest.(check bool) "typed quota reaches shared account" true
+            (Runtime_quota_window.is_exhausted ~scope:(Runtime_instance.quota_scope_of_runtime b) ~now:after);
+          match retry_after, Runtime_quota_window.active_until ~scope ~now:after with
+          | None,None -> ()
+          | Some seconds,Some reset ->
+            Alcotest.(check bool) "typed provider duration is preserved as an absolute reset" true
+              (reset >= before +. seconds && reset <= after +. seconds)
+          | None,Some _ | Some _,None -> Alcotest.fail "typed quota reset was invented or lost")
+          [None;Some 180.0]))
+
+let test_vision_inflight_rate_stays_on_frozen_candidate () =
+  with_vision_standing (fun ~a ~b:_ ~run ->
+    let rebound = ref None in
+    let calls = ref [] in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+      let model = config.Llm_provider.Provider_config.model_id in
+      calls := model :: !calls;
+      if String.equal model "vision-a" then (
+        let path = match !runtime_config_stack with
+          | path::_ -> path | [] -> Alcotest.fail "missing fixture config" in
+        let updated = String.concat "https://rebound.example/v1"
+          (Str.split_delim (Str.regexp_string "https://p1.example/v1") vision_failover_runtime_toml) in
+        (match Runtime.save_config_text ~runtime_config_path:path updated with
+         | Ok _ -> () | Error detail -> Alcotest.fail detail);
+        rebound := Some (vision_standing_runtime a.id);
+        Error vision_rate_error)
+      else Ok (ok_response "fallback answered old request") in
+    ignore (run complete);
+    Alcotest.(check (list string)) "frozen walk completes through its fallback" ["vision-a";"vision-b"] (List.rev !calls);
+    let replacement = match !rebound with Some rt -> rt | None -> Alcotest.fail "catalog was not rebound" in
+    Alcotest.(check bool) "rebound runtime owns a new candidate" false
+      (a.candidate_backpressure == replacement.candidate_backpressure);
+    Alcotest.(check bool) "old response records the actual old candidate" true (vision_has_rate a);
+    Alcotest.(check bool) "old response does not mark replacement candidate" false (vision_has_rate replacement))
+
+let test_vision_402_marks_the_account_exhausted_and_moves_on () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      Runtime_quota_window.reset_for_testing ();
+      Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+        let meta = make_meta "vision-402-failover" in
+        let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+        let scope id =
+          match Runtime.get_runtime_by_id id with
+          | Some rt -> Runtime_instance.quota_scope_of_runtime rt
+          | None -> failwith ("missing runtime " ^ id)
+        in
+        let calls = ref 0 in
+        let models = ref [] in
+        let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+          incr calls;
+          models := config.Llm_provider.Provider_config.model_id :: !models;
+          if !calls = 1 then
+            Error
+              (Llm_provider.Http_client.HttpError
+                 { code = 402
+                 ; body = Llm_provider.Http_client.Received "{\"error\":{\"message\":\"Insufficient Balance\"}}"
+                 ; retry_after_header = None
+                 })
+          else Ok (ok_response "second account answered")
+        in
+        let raw =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.handle
+                ~complete
+                ~sw
+                ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env)
+                ~meta
+                ~args:(artifact_args handle)
+                ()))
+        in
+        let json = json_of_output raw in
+        assert (!calls = 2);
+        assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+        assert (String.equal (assoc_string "text" json) "second account answered");
+        let now = Unix.gettimeofday () in
+        assert (Runtime_quota_window.is_exhausted ~scope:(scope "p1.vision-a") ~now);
+        assert (not (Runtime_quota_window.is_exhausted ~scope:(scope "p2.vision-b") ~now));
+        assert (Vt.vision_runtime_ids ~now = [ "p2.vision-b"; "p1.vision-a" ]))))
+
+(* When every candidate answers 400 the walk still ends as a policy rejection
+   carrying the last verdict, so a keeper learns the field, not "no runtime". *)
+let test_policy_error_on_every_candidate_is_reported () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-exhausted" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        Error
+          (Llm_provider.Http_client.HttpError
+             { code = 400; body = Llm_provider.Http_client.Received "field refused"; retry_after_header = None })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "policy_rejection");
+      assert (String_util.contains_substring (assoc_string "detail" json) "field refused")))
+
+(* Mixed order: a 400 the walk moved past, then a 500 on the last candidate.
+   The outcome is the last candidate's -- what ended the walk -- and the 400
+   verdict lives on the candidate counter, not in the tool result. *)
+let test_policy_error_then_transient_reports_the_last_candidate () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-policy-then-transient" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 400; body = Llm_provider.Http_client.Received "field refused"; retry_after_header = None })
+        else
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "dependency_unavailable");
+      assert (String_util.contains_substring (assoc_string "detail" json) "down")))
+
+let test_capacity_failover_preserves_image () =
+  let errors =
+    [ Llm_provider.Http_client.ProviderFailure
+        { kind = Llm_provider.Http_client.Context_overflow { limit = Some 4096 }
+        ; message = "image context exceeds this candidate"
+        }
+    ; Llm_provider.Http_client.HttpError
+        { code = 413; body = Llm_provider.Http_client.Received "payload refused"; retry_after_header = None }
+    ]
+  in
+  List.iter
+    (fun error ->
+      with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+        let calls = ref [] in
+        let first_messages = ref None in
+        let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages ?tools:_ () =
+          calls := config.Llm_provider.Provider_config.model_id :: !calls;
+          match !first_messages with
+          | None ->
+            first_messages := Some messages;
+            Error error
+          | Some original ->
+            assert (messages = original);
+            assert
+              (List.exists
+                 (fun (message : Llm_provider.Types.message) ->
+                   List.exists
+                     (function Llm_provider.Types.Image _ -> true | _ -> false)
+                     message.content)
+                 messages);
+            Ok (ok_response "image read on the next runtime")
+        in
+        let outcome =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.run_vision ~complete ~sw
+                ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+                ~query:"read the screenshot" ~media_type:"image/png"
+                ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+        in
+        assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
+        (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "image read on the next runtime");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading")))
+    errors
+
+let test_capacity_exhaustion_retains_size_failure () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    let calls = ref 0 in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      incr calls;
+      Error
+        (Llm_provider.Http_client.HttpError
+           { code = 413; body = Llm_provider.Http_client.Received "payload refused"; retry_after_header = None })
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision ~complete ~sw
+            ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~query:"read the screenshot" ~media_type:"image/png"
+            ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+    in
+    assert (!calls = 2);
+    match outcome with
+    | Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; detail } ->
+      assert (String_util.contains_substring detail "413")
+    | _ -> failwith "exhausted image capacity must remain a visible runtime failure")
+
+let test_candidate_failover_is_not_cut_off_by_local_deadline () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-deadline-provider-error" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        incr calls;
+        models := config.Llm_provider.Provider_config.model_id :: !models;
+        Error
+          (Llm_provider.Http_client.HttpError
+             { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "dependency_unavailable")))
+
+(* A 401 is one binding's key being refused; the next candidate carries its
+   own key. It used to end the walk after one call. *)
+let test_credential_error_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-credential-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let policy_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "candidate_policy_error"
+        ]
+      in
+      let before_policy =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels
+      in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        incr calls;
+        models := config.Llm_provider.Provider_config.model_id :: !models;
+        if !calls = 1 then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 401; body = Llm_provider.Http_client.Received "bad credentials"; retry_after_header = None })
+        else Ok (ok_response "second runtime answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert (assoc_string "requested_model" json = "vision-b");
+      assert (assoc_string "response_model" json = "vision-test-model");
+      assert_metric_increment
+        "vision_candidate candidate_policy_error (401)"
+        before_policy
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:policy_labels)))
+
+let test_accept_rejected_is_policy_rejection_without_failover () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-accept-rejected" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        incr calls;
+        models := config.Llm_provider.Provider_config.model_id :: !models;
+        Error
+          (Llm_provider.Http_client.AcceptRejected
+             { reason = "provider rejected the image" })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 1);
+      assert (List.rev !models = [ "vision-a" ]);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "policy_rejection")))
+
+let test_eager_eviction_reason_preserves_typed_outcome () =
+  let reason = Vi.eager_read_eviction_reason_of_outcome in
+  assert (reason (Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test" (ok_response "text")) = None);
+  assert (reason Vt.Vo_empty = Some "eager_empty");
+  assert (reason Vt.Vo_truncated = Some "eager_truncated");
+  assert (reason Vt.Vo_timeout = Some "eager_timeout");
+  assert (reason (Vt.Vo_no_runtime "missing") = Some "eager_no_runtime");
+  assert (reason (Vt.Vo_invalid_request "bad") = Some "eager_invalid_request");
+  assert
+    (reason (Vt.Vo_invalid_structured_response "bad json")
+     = Some "eager_invalid_structured_response");
+  assert
+    (reason
+       (Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; detail = "boom" })
+     = Some "eager_provider_error")
+
+let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-ingest-delegate" in
+    let bytes = "\x89PNG\r\n\x1a\ninline-image" in
+    let metric_labels =
+      [ "mode", "eager"; "result", "ok"; "reason", "stored_unread" ]
+    in
+    let before =
+      metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
+    in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let stored =
+      match media_store.put ~media_type:"image/png" ~raw:bytes with
+      | Ok stored -> stored
+      | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+    in
+    let blocks =
+      [ Agent_core.Types.Text "before"
+      ; Agent_core.Types.Image
+          { media_type = "image/png"; source = Agent_core.Types.Stored stored }
+      ; Agent_core.Types.Text "after"
+      ]
+    in
+    match
+      Vi.evict_blocks ~media_store
+        ~mode:Vi.Eager
+        ~delegate:true
+        ~keeper_name
+        blocks
+    with
+    | [ Agent_core.Types.Text "before"
+      ; Agent_core.Types.Text placeholder
+      ; Agent_core.Types.Text "after"
+      ] ->
+      assert (String_util.contains_substring placeholder "[image artifact:");
+      assert (String_util.contains_substring placeholder "media_type:image/png");
+      assert (String_util.contains_substring placeholder "not yet read");
+      assert
+        (String_util.contains_substring placeholder
+           "call keeper_analyze_image to read it");
+      let handle = artifact_handle_of_placeholder placeholder in
+      (match
+         Store.load
+           ~dir:(Vt.vision_store_dir ~keeper_name ())
+           (Store.of_string handle)
+       with
+       | Ok stored -> assert (String.equal stored bytes)
+       | Error msg -> failwith (Store.load_error_to_string msg));
+      assert_metric_increment
+        "vision_ingest stored_unread"
+        before
+        (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
+    | _ -> failwith "delegate eviction should replace the image with text")
+
+let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-fallback-projection" in
+    let bytes = "\x89PNG\r\n\x1a\noriginal-image" in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let image =
+      match media_store.put ~media_type:"image/png" ~raw:bytes with
+      | Ok stored ->
+        Agent_core.Types.Image { media_type = "image/png"; source = Agent_core.Types.Stored stored }
+      | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+    in
+    let nested =
+      Agent_core.Types.ToolResult
+        { tool_use_id = "read-screen"; content = "screenshot"
+        ; outcome = Agent_core.Types.Tool_succeeded; json = None
+        ; content_blocks = Some [ image ] }
+    in
+    let original = [ Agent_core.Types.Text "inspect"; image; nested ] in
+    let canonical_before = original in
+    let project = Vi.fallback_projector ~media_store ~keeper_name () in
+    let labels = [ "mode", "eager"; "result", "ok"; "reason", "stored_unread" ] in
+    let before = metric_value Keeper_metrics.VisionIngestEvictions ~labels in
+    let projected = project ~mode:Vi.Eager original in
+    assert (projected.delegated_images = 2);
+    assert (project ~mode:Vi.Eager original = projected);
+    assert_metric_increment "repeated and nested image reads cached" before
+      (metric_value Keeper_metrics.VisionIngestEvictions ~labels);
+    let assert_stored = function
+      | Agent_core.Types.Text placeholder ->
+        let handle = artifact_handle_of_placeholder placeholder |> Store.of_string in
+        (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name ()) handle with
+         | Ok stored -> assert (stored = bytes)
+         | Error error -> failwith (Store.load_error_to_string error))
+      | _ -> failwith "fallback image must carry its durable artifact"
+    in
+    (match projected.blocks with
+     | [ Agent_core.Types.Text "inspect"; direct
+       ; Agent_core.Types.ToolResult
+           { content_blocks = Some [ nested ]; content = "screenshot"; _ } ] ->
+       assert_stored direct;
+       assert (direct = nested)
+     | _ -> failwith "fallback must preserve nested tool result structure");
+    let labels = [ "mode", "store_only"; "result", "ok"; "reason", "stored" ] in
+    let before = metric_value Keeper_metrics.VisionIngestEvictions ~labels in
+    let historical = project ~mode:Vi.Store_only [ image; nested ] in
+    assert (project ~mode:Vi.Store_only [ image; nested ] = historical);
+    assert_metric_increment "historical duplicate image stored once" before
+      (metric_value Keeper_metrics.VisionIngestEvictions ~labels);
+    (match historical.blocks with
+     | direct :: _ -> assert_stored direct
+     | [] -> failwith "historical image lost");
+    assert (original = canonical_before);
+    assert
+      (Runtime_agent.For_testing.required_modalities_of_content_blocks original
+       = [ "image" ]))
+
+(* The projector is built once per lane walk and carries that walk's spent
+   accounts. A projector that dropped them would send the delegation back to
+   the runtimes the walk just tried (#34829). One eager read per turn is the
+   budget ([max_eager_reads_per_turn]), so the boundary is observed once. *)
+let test_fallback_read_receives_the_walks_excluded_runtimes () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-fallback-exclusion" in
+    let bytes = "\x89PNG\r\n\x1a\nexclusion-fixture" in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let image =
+      match media_store.put ~media_type:"image/png" ~raw:bytes with
+      | Ok stored ->
+        Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Stored stored)
+      | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+    in
+    let seen = ref [] in
+    let read ~exclude_runtime_ids ~media_type:_ ~bytes:_ =
+      seen := exclude_runtime_ids :: !seen;
+      Some (Ok "reading")
+    in
+    let project =
+      Vi.For_testing.fallback_projector ~media_store
+        ~exclude_runtime_ids:[ "glm-coding.glm-5.3"; "deepseek.deepseek-v4-flash" ]
+        ~read ~keeper_name ()
+    in
+    ignore (project ~mode:Vi.Eager [ image ]);
+    match !seen with
+    | [ ids ] ->
+      assert (ids = [ "glm-coding.glm-5.3"; "deepseek.deepseek-v4-flash" ])
+    | other ->
+      failwith
+        (Printf.sprintf "expected one delegated read, got %d" (List.length other)))
+
+let test_fallback_semantic_read_is_cached_after_completion () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-fallback-read" in
+    let bytes = "\x89PNG\r\n\x1a\nsemantic-reading-fixture" in
+    let image = Agent_core.Types.image_block ~media_type:"image/png"
+        ~source:((stored_source ~media_type:"image/png" bytes)) in
+    let calls = ref 0 in
+    let read ~exclude_runtime_ids:_ ~media_type ~bytes:received =
+      incr calls;
+      assert (media_type = "image/png" && received = bytes);
+      Some (Ok "The screenshot says deployment failed, code 413.")
+    in
+    let project = Vi.For_testing.fallback_projector ~media_store:test_media_store ~read ~keeper_name () in
+    let first = project ~mode:Vi.Eager [ image; image ] in
+    assert (!calls = 1 && first.delegated_images = 2);
+    assert (project ~mode:Vi.Eager [ image; image ] = first);
+    assert (!calls = 1);
+    (match first.blocks with
+     | [ Agent_core.Types.Text reading; repeated ] ->
+       assert (repeated = Agent_core.Types.Text reading);
+       assert (String_util.contains_substring reading "deployment failed, code 413");
+       let handle = artifact_handle_of_placeholder reading |> Store.of_string in
+       (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name ()) handle with
+        | Ok original -> assert (original = bytes)
+        | Error detail -> failwith (Store.load_error_to_string detail))
+     | _ -> failwith "semantic fallback lost its reading or artifact");
+    let history = project ~mode:Vi.Store_only [ image ] in
+    assert (!calls = 1);
+    (match history.blocks with
+     | [ Agent_core.Types.Text reference ] ->
+       assert (String_util.contains_substring reference "artifact:");
+       assert (not (String_util.contains_substring reference "image read:"))
+     | _ -> failwith "checkpoint projection must preserve an unread artifact"))
+
+let test_cancelled_fallback_read_can_retry_without_cached_failure () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-fallback-cancellation" in
+    let image = Agent_core.Types.image_block ~media_type:"image/png"
+        ~source:((stored_source ~media_type:"image/png" "\x89PNG\r\n\x1a\nretry-fixture")) in
+    let cancelled = Eio.Cancel.Cancelled (Failure "cancel image reading") in
+    let calls = ref 0 in
+    let read ~exclude_runtime_ids:_ ~media_type:_ ~bytes:_ =
+      incr calls;
+      if !calls = 1 then raise cancelled;
+      Some (Ok "The retried image contains a green checkmark.")
+    in
+    let project = Vi.For_testing.fallback_projector ~media_store:test_media_store ~read ~keeper_name () in
+    (try
+       ignore (project ~mode:Vi.Eager [ image ]);
+       failwith "cancelled reading unexpectedly produced a projection"
+     with
+     | Eio.Cancel.Cancelled _ as observed -> assert (observed == cancelled));
+    let retried = project ~mode:Vi.Eager [ image ] in
+    assert (!calls = 2);
+    (match retried.blocks with
+     | [ Agent_core.Types.Text reading ] ->
+       assert (String_util.contains_substring reading "green checkmark")
+     | _ -> failwith "retry did not complete the semantic reading");
+    assert (project ~mode:Vi.Eager [ image ] = retried);
+    assert (!calls = 2))
+
+let test_vision_candidate_cancellation_does_not_failover () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    let calls = ref 0 in
+    let cancelled = Eio.Cancel.Cancelled (Failure "cancel vision candidate") in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      incr calls;
+      raise cancelled
+    in
+    (try
+       Eio_main.run (fun env ->
+         Eio.Switch.run (fun sw ->
+           ignore (Vt.run_vision ~complete ~sw ~clock:env#clock ~net:env#net
+                     ~query:"inspect" ~media_type:"image/png"
+                     ~bytes:"\x89PNG\r\n\x1a\nprovider-cancel" ())));
+       failwith "provider cancellation was swallowed"
+     with
+     | Eio.Cancel.Cancelled _ as observed -> assert (observed == cancelled));
+    assert (!calls = 1))
+
+(* Verdict vrf-5378dc2e (2026-09-14): the join must be readable from the
+   ledger itself, not from the caller's narrative. Every candidate arm opens
+   with a start row and closes with its attempt row, both carrying the
+   parent call's tool_use_id/trace_id. *)
+let vision_candidate_rows () =
+  match Masc.Keeper_tool_call_log.read_recent ~keeper_name:"system" ~n:50 () with
+  | Ok rows ->
+    List.filter_map
+      (fun row ->
+        match Yojson.Safe.Util.member "tool" row with
+        | `String "vision_candidate" -> Some row
+        | _ -> None)
+      rows
+  | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) ->
+    failwith ("tool call index unavailable: " ^ detail)
+
+let row_input_fields row =
+  match Yojson.Safe.Util.member "input" row with
+  | `Assoc fields -> fields
+  | other ->
+    failwith ("vision_candidate input is not an object: " ^ Yojson.Safe.to_string other)
+
+let row_string_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`String s) -> s
+  | _ -> failwith ("vision_candidate input missing string field: " ^ key)
+
+let row_int_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`Int i) -> i
+  | _ -> failwith ("vision_candidate input missing int field: " ^ key)
+
+let row_top_string row key =
+  match Yojson.Safe.Util.member key row with
+  | `String s -> s
+  | _ -> failwith ("vision_candidate row missing " ^ key)
+
+let with_candidate_row_ledger f =
+  with_temp_base (fun base ->
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Masc.Keeper_tool_call_log.init ~base_path:base ();
+    Fun.protect
+      ~finally:(fun () -> Masc.Keeper_tool_call_log.reset_for_testing ())
+      f)
+
+let test_candidate_rows_join_parent_tool_call () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_candidate_row_ledger (fun () ->
+      with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "0" (fun () ->
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+          incr calls;
+          if !calls = 1 then
+            Error
+              (Llm_provider.Http_client.HttpError
+                 { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
+          else Ok (ok_response "second runtime answered")
+        in
+        let outcome =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env) ~tool_use_id:"call-vision-join"
+                ~trace_id:"trace-vision-join" ~query:"read the screenshot"
+                ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+        in
+        (match outcome with
+         | Vt.Vo_ok reading -> assert (reading.runtime_id = "p2.vision-b")
+         | _ -> failwith "expected the walk to reach the second candidate");
+        let rows = vision_candidate_rows () in
+        assert (List.length rows = 4);
+        let events =
+          List.map
+            (fun row -> row_input_fields row |> row_string_field "result")
+            rows
+        in
+        assert (events = [ "started"; "error"; "started"; "ok" ]);
+        List.iter
+          (fun row ->
+            assert (row_top_string row "tool_use_id" = "call-vision-join");
+            assert (row_top_string row "trace_id" = "trace-vision-join"))
+          rows;
+        match rows with
+        | [ start_a; error_a; start_b; ok_b ] ->
+          assert (row_top_string start_a "record_kind" = "lifecycle_event");
+          assert (row_top_string error_a "record_kind" = "lifecycle_event");
+          assert (row_top_string error_a "wire_outcome" = "error");
+          assert (row_top_string start_b "record_kind" = "lifecycle_event");
+          assert (row_top_string ok_b "record_kind" = "lifecycle_event");
+          assert (row_top_string ok_b "wire_outcome" = "ok");
+          assert
+            (row_string_field "runtime_id" (row_input_fields start_a)
+             = "p1.vision-a");
+          assert (row_int_field "attempt_index" (row_input_fields start_a) = 0);
+          assert
+            (row_int_field "candidate_count" (row_input_fields start_a) = 2);
+          assert
+            (row_string_field "reason" (row_input_fields error_a)
+             = "transient_provider_error");
+          assert
+            (row_string_field "runtime_id" (row_input_fields start_b)
+             = "p2.vision-b");
+          assert (row_int_field "attempt_index" (row_input_fields start_b) = 1);
+          assert
+            (row_string_field "runtime_id" (row_input_fields ok_b)
+             = "p2.vision-b")
+        | _ -> failwith "unexpected vision_candidate row shape")))
+
+(* The repro's exact shape: the parent cancels the in-flight provider call.
+   Before this the walk re-raised with no row at all; now the arm leaves the
+   start row and a cancelled row, both joined to the parent call. *)
+let test_cancelled_candidate_leaves_start_and_cancelled_rows () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_candidate_row_ledger (fun () ->
+      let calls = ref 0 in
+      (* A real cancellation, not a [Cancelled] value raised by hand:
+         [complete] cancels the context the walk runs in, so the cancelled
+         row is written from a fiber whose context is cancelled. The append
+         guard yields before each ledger write, standing in for the store's
+         mutex held by another writer -- the one place that write suspends.
+         Written without protection, the row is lost at that yield. *)
+      (try
+         Eio_main.run (fun env ->
+           Dated_jsonl.set_append_guard (fun append ->
+             Eio.Fiber.yield ();
+             append ());
+           Fun.protect
+             ~finally:(fun () -> Dated_jsonl.set_append_guard (fun append -> append ()))
+             (fun () ->
+               Eio.Switch.run (fun sw ->
+                 Eio.Cancel.sub (fun walk ->
+                   let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+                     incr calls;
+                     Eio.Cancel.cancel walk (Failure "cancel vision candidate");
+                     Eio.Fiber.check ();
+                     failwith "a cancelled context did not raise at its check"
+                   in
+                   ignore (Vt.run_vision ~complete ~sw ~clock:env#clock ~net:env#net
+                             ~tool_use_id:"call-vision-cancel"
+                             ~query:"inspect" ~media_type:"image/png"
+                             ~bytes:"\x89PNG\r\n\x1a\nprovider-cancel" ())))));
+         failwith "provider cancellation was swallowed"
+       with
+       | Eio.Cancel.Cancelled _ -> ());
+      assert (!calls = 1);
+      let rows = vision_candidate_rows () in
+      assert (List.length rows = 2);
+      let events =
+        List.map
+          (fun row -> row_input_fields row |> row_string_field "result")
+          rows
+      in
+      assert (events = [ "started"; "cancelled" ]);
+      assert (row_top_string (List.hd rows) "record_kind" = "lifecycle_event");
+      let cancelled_row = List.nth rows 1 in
+      assert (row_top_string cancelled_row "record_kind" = "lifecycle_event");
+      assert (row_top_string cancelled_row "wire_outcome" = "error");
+      let fields = row_input_fields cancelled_row in
+      assert (row_string_field "runtime_id" fields = "p1.vision-a");
+      assert (row_string_field "reason" fields = "parent_cancelled");
+      assert (row_top_string cancelled_row "tool_use_id" = "call-vision-cancel")))
+
+let test_fallback_reference_projection_is_explicitly_unread () =
+  let image source = Agent_core.Types.Image { source; media_type = "image/png" } in
+  let original =
+    [ image (Agent_core.Types.Url "https://example.invalid/screenshot.png")
+    ; image (Agent_core.Types.File_id "file-screen-123") ]
+  in
+  let project = Vi.fallback_projector ~media_store:test_media_store ~keeper_name:"vision-reference-projection" () in
+  let projected = project ~mode:Vi.Eager original in
+  assert (projected.delegated_images = 2);
+  (match projected.blocks with
+   | [ Agent_core.Types.Text url; Agent_core.Types.Text file ] ->
+     assert (String_util.contains_substring url "unread image URL:");
+     assert (String_util.contains_substring url "https://example.invalid/screenshot.png");
+     assert (String_util.contains_substring file "unread image file ID:");
+     assert (String_util.contains_substring file "file-screen-123");
+     assert (not (String_util.contains_substring url "artifact:"));
+     assert (not (String_util.contains_substring file "artifact:"))
+   | _ -> failwith "reference fallback must retain an honest unread reference");
+  assert (Runtime_agent.For_testing.required_modalities_of_content_blocks original = [ "image" ])
+
+let test_delegate_eviction_rejects_invalid_media_type_before_store () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-ingest-invalid-media" in
+    let bytes = "\x89PNG\r\n\x1a\ninline-image" in
+    let metric_labels =
+      [ "mode", "store_only"; "result", "error"; "reason", "invalid_media_type" ]
+    in
+    let before =
+      metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
+    in
+    match
+      Vi.evict_blocks ~media_store:test_media_store
+        ~mode:Vi.Store_only
+        ~delegate:true
+        ~keeper_name
+        [ Agent_core.Types.Image
+            { media_type = "text/plain"
+            ; source = (stored_source ~media_type:"text/plain" bytes)
+            }
+        ]
+    with
+    | [ Agent_core.Types.Text placeholder ] ->
+      assert (String_util.contains_substring placeholder "unsupported image media type");
+      assert_metric_increment
+        "vision_ingest invalid_media_type"
+        before
+        (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
+    | _ -> failwith "invalid media type must surface as a text placeholder")
+
+let test_delegate_eviction_rejects_oversize_before_store () =
+  with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "8" (fun () ->
+    with_temp_base (fun _ ->
+      let keeper_name = "vision-ingest-oversize" in
+      let bytes = "\x89PNG\r\n\x1a\ninline-image" in
+      match
+        Vi.evict_blocks ~media_store:test_media_store
+          ~mode:Vi.Store_only
+          ~delegate:true
+          ~keeper_name
+          [ Agent_core.Types.Image
+              { media_type = "image/png"
+              ; source = (stored_source ~media_type:"image/png" bytes)
+              }
+          ]
+      with
+      | [ Agent_core.Types.Text placeholder ] ->
+        assert (String_util.contains_substring placeholder "image too large")
+      | _ -> failwith "oversize image must surface as a text placeholder"))
+
+(* RFC-0430 / #33682: a URL or Files-API id is a reference, not a payload. The
+   serializers put both on the wire natively (#33669), so eviction — which
+   exists to trade heavy inline pixels for a local artifact handle — must hand
+   the block through unchanged instead of swapping it for a store-failure
+   placeholder the reader cannot act on. *)
+let test_delegate_eviction_passes_reference_source_through () =
+  List.iter
+    (fun source ->
+      let source_name =
+        match source with
+        | Agent_core.Types.Url _ -> "url"
+        | Agent_core.Types.File_id _ -> "file_id"
+        | Agent_core.Types.Stored _ -> "stored"
+      in
+      let metric_labels =
+        [ "mode", "store_only"; "result", "ok"; "reason", "reference_passthrough" ]
+      in
+      let before =
+        metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
+      in
+      match
+        Vi.evict_blocks ~media_store:test_media_store
+          ~mode:Vi.Store_only
+          ~delegate:true
+          ~keeper_name:("vision-ingest-source-" ^ source_name)
+          [ Agent_core.Types.Image { media_type = "image/png"; source } ]
+      with
+      | [ Agent_core.Types.Image img ] ->
+        assert (img.source = source);
+        assert (String.equal img.media_type "image/png");
+        assert_metric_increment
+          ("vision_ingest reference_passthrough " ^ source_name)
+          before
+          (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
+      | _ -> failwith "a reference-carrying image block must pass through unchanged")
+    [ Agent_core.Types.Url "https://example.invalid/image.png"
+    ; Agent_core.Types.File_id "https://example.invalid/image.png" ]
+
+let test_non_delegate_eviction_preserves_inline_image () =
+  let bytes = "raw-image" in
+  let blocks =
+    [ Agent_core.Types.Image
+        { media_type = "image/png"
+        ; source = (stored_source ~media_type:"image/png" bytes)
+        }
+    ]
+  in
+  match
+    Vi.evict_blocks ~media_store:test_media_store
+      ~mode:Vi.Eager
+      ~delegate:false
+      ~keeper_name:"vision-ingest-native"
+      blocks
+  with
+  | [ Agent_core.Types.Image img ] ->
+    assert (img.source = Agent_core.Types.Stored (Agent_core.History.stored_of_raw bytes))
+  | _ -> failwith "a runtime that takes images itself should keep the image block"
+
+let test_delegates_media_follows_lane_capability () =
+  with_temp_runtime_toml no_image_runtime_toml (fun () ->
+    if not (Vi.delegates_media ~runtime_id:"p0.text")
+    then failwith "a lane whose every candidate is text-only must delegate";
+    if not (Vi.delegates_media ~runtime_id:"p9.absent")
+    then failwith "an id naming no lane must delegate rather than drop");
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    if Vi.delegates_media ~runtime_id:"p3.vision-c"
+    then
+      failwith
+        "a candidate that takes images itself must keep them for the RFC-0265 \
+         reroute")
+
+let test_delegates_media_matches_antigravity_transport () =
+  with_temp_base (fun base_path ->
+    let oauth_source = Filename.concat base_path "vision-oauth.json" in
+    write_file oauth_source (Masc_test_deps.antigravity_oauth_fixture "vision-fixture");
+    let config =
+      Printf.sprintf
+        {|[runtime]
+default = "gravity.vision"
+[providers.gravity]
+protocol = "antigravity-cli"
+command = "antigravity"
+is-non-interactive = true
+timeout-s = 30.0
+[providers.gravity.credentials]
+type = "file"
+path = %S
+[models.vision]
+api-name = "vision"
+max-context = 4096
+[models.vision.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+[gravity.vision]
+|}
+        oauth_source
+    in
+    with_temp_runtime_toml config (fun () ->
+      assert (Vi.delegates_media ~runtime_id:"gravity.vision");
+      let runtime =
+        match Runtime.get_runtime_by_id "gravity.vision" with
+        | Some runtime -> runtime
+        | None -> failwith "Antigravity runtime did not materialize"
+      in
+      assert
+        (not
+           (Runtime_agent.caps_admit_required_modalities
+              (Runtime_agent.input_capabilities_of_runtime runtime) [ "image" ]))))
+
+let test_evicted_history_has_no_image_modality () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-ingest-modality" in
+    let bytes = "\x89PNG\r\n\x1a\nmodality-test" in
+    let msg =
+      Agent_core.Types.make_message
+        ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text "look at this"
+        ; Agent_core.Types.Image
+            { media_type = "image/png"
+            ; source = (stored_source ~media_type:"image/png" bytes)
+            }
+        ]
+    in
+    let modalities ms =
+      Runtime_agent.For_testing.required_modalities_of_messages ms
+    in
+    assert (List.mem "image" (modalities [ msg ]));
+    let evicted =
+      Vi.evict_message ~media_store:test_media_store
+        ~mode:Vi.Store_only
+        ~delegate:true
+        ~keeper_name
+        msg
+    in
+    assert (not (List.mem "image" (modalities [ evicted ])));
+    let evicted2 =
+      Vi.evict_message ~media_store:test_media_store
+        ~mode:Vi.Store_only
+        ~delegate:true
+        ~keeper_name
+        evicted
+    in
+    assert (evicted2 = evicted))
+
+let truncated_json_response ~stop_reason : Agent_core.Types.api_response =
+  (* A reply cut off mid-JSON: the closing quote and brace never arrive, so the
+     structured parse fails. This is what a MaxTokens budget cut produces. *)
+  { id = "vision-test"
+  ; model = "vision-test-model"
+  ; stop_reason
+  ; content = [ Llm_provider.Types.Text {|{"text":"a red circle on a white backg|} ]
+  ; usage = None
+  ; telemetry = None
+  }
+
+let vision_output_limit_runtime_toml =
+  {|
+[runtime]
+default = "p1.vision-a"
+media_failover = ["p1.vision-a", "p1.vision-a", "p2.vision-b"]
+[providers.p1]
+protocol = "openai-compatible-http"
+endpoint = "https://p1.example/v1"
+[providers.p2]
+protocol = "openai-compatible-http"
+endpoint = "https://p2.example/v1"
+[models.vision-a]
+api-name = "vision-a"
+max-context = 131072
+[models.vision-a.capabilities]
+max-output-tokens = 32768
+supports-image-input = true
+supports-multimodal-inputs = true
+[models.vision-b]
+api-name = "vision-b"
+max-context = 131072
+[models.vision-b.capabilities]
+max-output-tokens = 49152
+supports-image-input = true
+supports-multimodal-inputs = true
+[p1.vision-a]
+max-tokens = 65536
+[p2.vision-b]
+max-tokens = 60000
+|}
+
+let test_max_tokens_failover_preserves_image_and_candidate_wire_limits () =
+  let well_formed_cut =
+    { (ok_response "partial answer") with stop_reason = Agent_core.Types.MaxTokens }
+  in
+  List.iter
+    (fun cut ->
+      with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+        let calls = ref [] in
+        let first_messages = ref None in
+        let limit_labels =
+          [ "runtime_id", "p1.vision-a"; "result", "error"; "reason", "output_token_limit" ]
+        in
+        let before_limit =
+          metric_value Keeper_metrics.VisionCandidateAttempts ~labels:limit_labels
+        in
+        let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages ?tools:_ () =
+          let requested, ceiling =
+            match config.Llm_provider.Provider_config.model_id with
+            | "vision-a" -> 65536, 32768
+            | "vision-b" -> 60000, 49152
+            | _ -> failwith "unexpected vision candidate"
+          in
+          assert (config.max_tokens = Some requested);
+          let wire =
+            Llm_provider.Backend_openai.build_request_assoc ~config ~messages ()
+          in
+          assert (Yojson.Safe.Util.member "max_tokens" wire = `Int ceiling);
+          calls := config.model_id :: !calls;
+          match !first_messages with
+          | None -> first_messages := Some messages; Ok cut
+          | Some original ->
+            assert (messages = original);
+            assert
+              (List.exists
+                 (fun (message : Llm_provider.Types.message) ->
+                   List.exists
+                     (function Llm_provider.Types.Image _ -> true | _ -> false)
+                     message.content)
+                 messages);
+            Ok (ok_response "complete screenshot reading")
+        in
+        let outcome =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+                ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+        in
+        assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
+        assert_metric_increment "one output limit despite duplicate configured candidate"
+          before_limit
+          (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:limit_labels);
+        (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "complete screenshot reading");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading")))
+    [ truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens; well_formed_cut ]
+
+let test_max_tokens_exhaustion_remains_visible_tool_failure () =
+  with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-output-exhausted" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref [] in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+        calls := config.Llm_provider.Provider_config.model_id :: !calls;
+        Ok (truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens)
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env) ~meta ~args:(artifact_args handle) ()))
+      in
+      let json = json_of_output raw in
+      assert (List.rev !calls = [ "vision-a"; "vision-b" ]);
+      assert (assoc_string "error" json = "truncated_extraction");
+      assert (assoc_string "failure_class" json = "runtime_failure")))
+
+let test_non_length_response_does_not_trigger_vision_failover () =
+  (* A Refusal or ContentFilter stop is the model answering "no"; re-rolling
+     the same pixels on the next candidate cannot change that verdict. *)
+  List.iter
+    (fun stop_reason ->
+      with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+          incr calls;
+          Ok { (ok_response "must not be accepted after refusal") with stop_reason }
+        in
+        let outcome =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+                ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+        in
+        assert (!calls = 1);
+        match outcome with
+        | Vt.Vo_provider { failure_class = Tool_result.Policy_rejection; _ } -> ()
+        | _ -> failwith "provider refusal must retain its terminal policy classification"))
+    [ Agent_core.Types.Refusal; Agent_core.Types.ContentFilter ]
+
+(* A finished reply (EndTurn) whose JSON broke mid-string is the json_object
+   flake, not a verdict: the walk advances, and when every candidate breaks
+   the same way the exhausted walk still reports the typed failure. *)
+let test_end_turn_broken_json_walks_and_exhaustion_reports_typed_failure () =
+  with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+    let calls = ref 0 in
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      incr calls;
+      Ok (truncated_json_response ~stop_reason:Agent_core.Types.EndTurn)
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+            ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+    in
+    assert (!calls = 2);
+    match outcome with
+    | Vt.Vo_invalid_structured_response detail ->
+      (* the exhausted walk reports the LAST candidate that answered *)
+      assert (String_util.contains_substring detail "p2.vision-b")
+    | _ -> failwith "exhausted broken-json walk must report the typed failure")
+
+let test_length_failover_preserves_candidate_http_recovery () =
+  List.iter
+    (fun code ->
+      with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+        with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "0" (fun () ->
+          let calls = ref 0 in
+          let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+            incr calls;
+            if !calls = 1 then
+              Error (Llm_provider.Http_client.HttpError
+                { code
+                ; body = Llm_provider.Http_client.Received "max_tokens request rejected"
+                ; retry_after_header = None
+                })
+            else Ok (ok_response "candidate HTTP fallback")
+          in
+          let outcome =
+            Eio_main.run (fun env ->
+              Eio.Switch.run (fun sw ->
+                Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+                  ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+                  ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+          in
+          assert (!calls = 2);
+          (match outcome with
+           | Vt.Vo_ok reading ->
+             assert (reading.text = "candidate HTTP fallback");
+             assert (reading.runtime_id = "p2.vision-b");
+             assert (reading.requested_model = "vision-b");
+             assert (reading.response_model = "vision-test-model")
+           | _ -> failwith "expected successful fallback reading"))))
+    [ 400; 422; 429 ]
+
+let test_vision_output_tokens_default_and_env () =
+  (* Reasoning models count thinking as output tokens; a 4096 cap let the
+     reasoning phase truncate the answer (2026-08-27 MiniMax M3 live probe).
+     The default is now generous (65536, above the ~25000 reasoning-plus-output
+     reserve) so reasoning has room for the answer, and operators can retune it
+     through the env knob. *)
+  assert (Vt.vision_default_max_tokens () = 65536);
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "50000" (fun () ->
+    assert (Vt.vision_default_max_tokens () = 50000))
+
+let test_truncated_structured_response_reads_as_truncation () =
+  (* mid-JSON parse failure + MaxTokens stop = the budget cut the reply short,
+     not a malformed model. Report the real cause so the remedy (a larger
+     budget) is legible instead of a misleading parser fault. *)
+  (match
+     Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test"
+       (truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens)
+   with
+   | Vt.Vo_truncated -> ()
+   | _ -> failwith "MaxTokens-cut mid-JSON must classify as Vo_truncated");
+  (* The same broken text with a clean stop is a genuine structured failure. *)
+  (match
+     Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test"
+       (truncated_json_response ~stop_reason:Agent_core.Types.EndTurn)
+   with
+   | Vt.Vo_invalid_structured_response _ -> ()
+   | _ ->
+     failwith
+       "mid-JSON parse failure with a clean stop must stay \
+        Vo_invalid_structured_response");
+  (* A well-formed reply is unaffected by the reclassification. *)
+  match Vt.outcome_of_response ~runtime_id:"test.vision" ~requested_model:"vision-test" (ok_response "a red circle") with
+  | Vt.Vo_ok reading -> assert (reading.text = "a red circle")
+  | _ -> failwith "valid structured JSON must classify as Vo_ok"
+
+let test_browser_screenshot_reaches_vision_reader () =
+  with_env "MASC_CONFIG_DIR" "" (fun () ->
+  with_temp_base (fun ambient_base ->
+    let base_path = Filename.concat ambient_base "served-workspace" in
+    Unix.mkdir base_path 0o700;
+    let config = Masc.Workspace.default_config base_path in
+    (* The scripted native worker owns an Automation allocation but never
+       launches its driver or browser. Make an accidental launch fail locally,
+       and declare that exact source rather than borrowing installed settings. *)
+    let unused_browser=Filename.concat base_path "unexpected-browser" in
+    write_file unused_browser "#!/bin/sh\nexit 1\n";
+    Unix.chmod unused_browser 0o700;
+    let runtime = single_vision_runtime_toml ^ Printf.sprintf
+      "\n[browser.automation]\ngeckodriver = %S\nbinary = %S\n" unused_browser unused_browser in
+    with_temp_runtime_toml runtime (fun () ->
+      let meta = make_meta "browser-screenshot" in
+      let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let image_bytes = Base64.decode_exn encoded in
+      let viewport = `Assoc ["documentId", `String "captured-document";
+        "width", `Float 800.; "height", `Float 600.;
+        "scrollX", `Float 0.; "scrollY", `Float 120.] in
+      let verify_pointer_receipt source data =
+        let field key = Yojson.Safe.Util.member key data in
+        assert (assoc_string "source" data = source);
+        assert (field "viewport" = viewport);
+        let route = match field "clientId" with `String _ as id -> ["clientId", id] | _ -> [] in
+        let request = Masc.Browser_interaction.parse (`Assoc (route @ [
+          "lane", field "source"; "tabId", field "tabId";
+          "expectedUrl", field "url"; "viewport", field "viewport";
+          "action", `String "click_at";
+          "point", `Assoc ["x", `Float 0.5; "y", `Float 0.25]])) in
+        match request with
+        | Ok {action = Browser_lane.Click_at {viewport = observed; _}; _} ->
+          assert (observed.document_id = "captured-document");
+          assert (observed.scroll_y = 120.)
+        | _ -> failwith "persisted screenshot cannot address its observed viewport" in
+      let seen_image = ref false in
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages ?tools:_ () =
+        seen_image := List.exists (fun (message : Llm_provider.Types.message) ->
+          List.exists (function
+            | Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 data} -> data=encoded
+            | _ -> false) message.content) messages;
+        Ok (ok_response "stored browser pixels reached vision") in
+      Eio_main.run (fun env ->
+        Time_compat.set_clock (Eio.Stdenv.clock env);
+        Eio.Switch.run (fun sw ->
+          let client suffix browser =
+            let raw="30000000-0000-4000-8000-" ^ suffix in
+            {Browser_lane.client_id=Result.get_ok (Browser_lane.client_id_of_string raw);
+              browser;version="fixture";transport=Browser_lane.Web_extension;engine_version="155.0.1";space=None} in
+          let first=client "000000000001" Browser_lane.Firefox in
+          let second=client "000000000002" Browser_lane.Zen in
+          let live_calls=ref [] in
+          let respond ~route verb =
+            (match route with
+             | Browser_lane.Live_route (Some id) -> live_calls:=id::!live_calls;
+                 assert (id=first.client_id)
+             | Automation_route -> ()
+             | Live_route None|Stagehand_route -> failwith "unexpected screenshot route");
+            let data=match verb with
+              | Browser_lane.Page_capture {tab_id=73;options=None} -> `Assoc ["tabId",`Int 73;
+                  "url",`String "https://example.org/form";"title",`String "Form";
+                  "mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]
+              | Page_elements {tab_id=Some 73;_} -> `Assoc ["tabId",`Int 73;"elements",`List []]
+              | _ -> failwith "unexpected screenshot command" in
+            Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data]) in
+          Browser_addon_fixture.with_workers ~env ~config
+            ~workers:[{serves=Browser_lane.Backend.Automation;clients=[];exports=true};
+              {serves=External_host;clients=[first;second];exports=true}]
+            ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
+          let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
+            ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
+          assert (result.disposition = Tool_result.Completed ());
+          let data = match result.data with Some data -> data | None -> failwith "no screenshot metadata" in
+          assert (not (String_util.contains_substring result.raw_output encoded));
+          verify_pointer_receipt "automation" data;
+          assert (Yojson.Safe.Util.member "clientId" data = `Null);
+          assert (Yojson.Safe.Util.member "transport" data = `Null);
+          (* A caller with no Keeper workspace gets the observation as text and
+             the checked PNG as an image block, and the observation without
+             the bytes. *)
+          (match Masc.Browser_addon_tools.handle ~config ~access:Masc.Lane_addon_sources.Operator_configuration
+              ~principal:Lane_addon_call_context.Operator ~reserved:[] ~keeper_name:None
+              ~tool:Masc.Browser_capabilities.Read ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
+              (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) with
+           | Tool_result.Completed {content_blocks=Some [Llm_provider.Types.Text text;
+               Llm_provider.Types.Image {media_type="image/png";source=Base64 image}];data=observed;_} ->
+               assert (image=encoded);
+               assert (Yojson.Safe.from_string text=observed);
+               assert (Yojson.Safe.Util.member "data" observed=`Null);
+               assert (Yojson.Safe.Util.member "viewport" observed=viewport);
+               assert (Yojson.Safe.Util.(observed |> member "browserSelection" |> member "lane")=`String "automation");
+               assert (assoc_string "url" observed="https://example.org/form")
+           | Tool_result.Completed _|Deferred _|Failed _ -> failwith "a screenshot without a Keeper did not return its image block");
+          let handle = assoc_string "artifact" data in
+          let root_dir = Vt.vision_store_dir ~base_path ~keeper_name:meta.name () in
+          let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
+          (* The test executable points MASC_BASE_PATH at the last workspace
+             it opened, which after the attach is the served one, so the
+             ambient store is named by its base, not read from the env. *)
+          let ambient_dir = Vt.vision_store_dir ~base_path:ambient_base ~keeper_name:meta.name () in
+          assert (root_dir <> ambient_dir);
+          let frame_path = Filename.concat frames_dir handle in
+          let kept_path = Filename.concat root_dir handle in
+          assert (Sys.file_exists frame_path);
+          assert (not (Sys.file_exists kept_path));
+          assert (not (Sys.file_exists (Filename.concat (Store.frames_dir ~dir:ambient_dir) handle)));
+          let wrong_config = Masc.Workspace.default_config ambient_base in
+          let wrong = Masc.Keeper_image_read.handle ~config:wrong_config ~meta
+            ~args:(`Assoc ["artifact",`String handle]) () in
+          assert (wrong.disposition <> Tool_result.Completed ());
+          (* A native image read failure keeps its code in the typed data;
+             the raw output is the store's sentence. *)
+          let wrong_data = match wrong.data with
+            | Some data -> data
+            | None -> failwith "native read failure did not retain its typed data" in
+          assert (assoc_string "error" wrong_data = "artifact_not_found");
+          let wrong_reader = Vt.handle ~base_path:ambient_base ~complete ~sw
+            ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~meta ~args:(artifact_args handle) () |> json_of_output in
+          assert (assoc_string "error" wrong_reader = "artifact_not_found");
+          assert (not !seen_image);
+          let reader = Vt.handle ~base_path ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~meta ~args:(artifact_args handle) () |> json_of_output in
+          assert (!seen_image);
+          assert (assoc_string "text" reader = "stored browser pixels reached vision");
+          assert (Sys.file_exists kept_path);
+          assert (not (Sys.file_exists (Filename.concat ambient_dir handle)));
+          let native = Masc.Keeper_image_read.handle ~config ~meta
+            ~args:(`Assoc ["artifact",`String handle]) () in
+          assert (native.disposition = Tool_result.Completed ());
+          (match native.content_blocks with
+           | Some [Llm_provider.Types.Text _; Llm_provider.Types.Image {source=Base64 data;_}] ->
+               assert (Base64.decode_exn data = image_bytes)
+           | _ -> failwith "workspace-bound screenshot did not reach native image reader");
+          let module Context = Masc.Keeper_context_core in
+          let checkpoint_keeper = "browser-checkpoint" in
+          let checkpoint_base = Filename.concat base_path "sessions" in
+          let checkpoint_trace = "browser-image-scope" in
+          let session = Context.create_session ~session_id:checkpoint_trace ~base_dir:checkpoint_base in
+          let context = Context.create ~eio:true ~system_prompt:"scoped image checkpoint"
+            |> fun ctx -> Context.append ctx (Agent_core.Types.make_message ~role:User
+                 [Agent_core.Types.Image {media_type="image/png";source=
+                   (match (Tool_blob_media_store.of_base_path ~base_path).put
+                            ~media_type:"image/png" ~raw:image_bytes with
+                    | Ok stored -> Agent_core.Types.Stored stored
+                    | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error)))}]) in
+          (match Context.save_agent_core_checkpoint ~base_path ~runtime_id:"unconfigured-text-only-fixture"
+             ~keeper_name:checkpoint_keeper ~session ~agent_name:checkpoint_keeper ~ctx:context with
+           | Ok _ -> ()
+           | Error error -> failwith (Context.checkpoint_write_error_to_string
+               ~persistence_error_to_string:Fun.id error));
+          let checkpoint = match Context.load_context_from_checkpoint ~trace_id:checkpoint_trace ~base_dir:checkpoint_base with
+            | _,Some ctx -> ctx | _,None -> failwith "scoped image checkpoint disappeared" in
+          let checkpoint_handle = match Context.messages_of_context checkpoint with
+            | [{content=[Agent_core.Types.Text placeholder];_}] -> artifact_handle_of_placeholder placeholder
+            | _ -> failwith "checkpoint did not evict inline pixels" in
+          assert (Store.load ~dir:(Vt.vision_store_dir ~base_path ~keeper_name:checkpoint_keeper ())
+            (Store.of_string checkpoint_handle) = Ok image_bytes);
+          assert (not (Sys.file_exists (Filename.concat
+            (Vt.vision_store_dir ~keeper_name:checkpoint_keeper ()) checkpoint_handle)));
+          Unix.utimes frame_path 10.0 10.0;
+          ignore (Result.get_ok (Store.store ~auto_prune:false ~dir:frames_dir "newer frame"));
+          ignore (Result.get_ok (Store.prune ~max_entries:1 ~dir:frames_dir ()));
+          assert (not (Sys.file_exists frame_path));
+          assert (Store.load ~dir:root_dir (Store.of_string handle) = Ok image_bytes);
+          let client_id = Browser_lane.client_id_to_string first.client_id in
+          List.iter (fun mode ->
+            let result=Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~config ~meta
+              ~args:(`Assoc ["lane",`String "live";"clientId",`String client_id;
+                "mode",`String mode;"tabId",`Int 73]) in
+            assert (List.length !live_calls=(if mode="elements" then 1 else 2));
+            assert (not (List.mem second.client_id !live_calls));
+            assert (result.disposition = Tool_result.Completed ());
+            let data = match result.data with Some data -> data | None -> failwith "missing client receipt" in
+            assert (assoc_string "clientId" data = client_id);
+            (* The stored screenshot is rebuilt from checked fields; the
+               connection's transport is one of them. *)
+            assert (assoc_string "transport" data = "web_extension");
+            if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))))
+
+let test_native_browser_screenshot_artifact_scope () =
+  with_env "MASC_CONFIG_DIR" "" (fun () ->
+  with_temp_base (fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
+    let meta = make_meta "native-browser-screenshot" in
+    let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let space : Browser_lane.ego_space = {id=51;name="SDK Space"} in
+    let client_id = Result.get_ok (Browser_lane.client_id_of_string "30000000-0000-4000-8000-000000000051") in
+    let client : Browser_lane.client_info = {client_id;browser=Ego_lite;version="fixture";
+      transport=Ego_task_space;engine_version="155.0.1";space=Some space} in
+    let expected = ref (Result.get_ok (Browser_lane.Capture.of_json (`Assoc []))) in
+    let echo = ref None and extra = ref [] in
+    let respond ~route verb =
+      assert (route=Browser_lane.Live_route (Some client_id));
+      match verb with
+      | Browser_lane.Page_capture {tab_id=73;options=Some options} ->
+        assert (options = !expected);
+        let echoed = match !echo with None -> Browser_lane.Capture.to_json options | Some value -> value in
+        Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc ([
+          "tabId",`Int 73;"url",`String "https://example.org/form";"title",`String "Form";
+          "mimeType",`String "image/png";"captureOptions",echoed;
+          "data",`String encoded] @ !extra)])
+      | _ -> failwith "native screenshot request lost its options or target" in
+    Eio_main.run (fun env ->
+      Time_compat.set_clock (Eio.Stdenv.clock env);
+      Browser_addon_fixture.with_workers ~env ~config
+        ~workers:[{serves=Browser_lane.Backend.External_host;clients=[client];exports=true}]
+        ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
+        let capture options = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
+          ~config ~meta ~args:(`Assoc ["lane",`String "live";
+            "clientId",`String (Browser_lane.client_id_to_string client_id);
+            "tabId",`Int 73;"mode",`String "screenshot";"screenshotOptions",options]) in
+        List.iter (fun options ->
+          expected := Result.get_ok (Browser_lane.Capture.of_json options);
+          let result = capture options in
+          assert (result.disposition = Tool_result.Completed ());
+          let data = match result.data with Some data -> data | None -> failwith "no native image metadata" in
+          assert (assoc_string "scope" data = "page");
+          assert (Yojson.Safe.Util.member "captureOptions" data = Browser_lane.Capture.to_json !expected);
+          (match data with `Assoc fields -> assert (not (List.mem_assoc "viewport" fields))
+           | _ -> failwith "native image metadata must be an object");
+          assert (Yojson.Safe.Util.member "browserSpace" data = Browser_lane.ego_space_to_json space);
+          assert (assoc_string "clientId" data = Browser_lane.client_id_to_string client_id);
+          assert (assoc_string "transport" data = "ego_task_space");
+          assert (Yojson.Safe.Util.member "width" data = `Int 1);
+          assert (Yojson.Safe.Util.member "height" data = `Int 1);
+          assert (not (String_util.contains_substring result.raw_output encoded));
+          let handle = assoc_string "artifact" data in
+          let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
+          assert (Store.load ~dir:frames_dir (Store.of_string handle) = Ok (Base64.decode_exn encoded));
+          let native = Masc.Keeper_image_read.handle ~config ~meta
+            ~args:(`Assoc ["artifact",`String handle]) () in
+          assert (native.disposition = Tool_result.Completed ());
+          (match native.content_blocks with
+           | Some [Llm_provider.Types.Text _;Llm_provider.Types.Image {source=Base64 data;media_type="image/png"}] ->
+             assert (data=encoded)
+           | _ -> failwith "native capture artifact did not reach the image reader"))
+          [`Assoc [];`Assoc ["fullPage",`Bool true;"scale",`String "css";"raw",`Bool true]];
+        let options = Browser_lane.Capture.to_json !expected in
+        let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
+        let stored = Sys.readdir frames_dir |> Array.to_list |> List.sort String.compare in
+        echo := Some (`Assoc []);
+        assert ((capture options).disposition <> Tool_result.Completed ());
+        echo := None;
+        extra := ["viewport",`Assoc ["documentId",`String "forged-pointer-frame";
+          "width",`Float 800.;"height",`Float 600.;"scrollX",`Float 0.;"scrollY",`Float 0.]];
+        assert ((capture options).disposition <> Tool_result.Completed ());
+        assert ((Sys.readdir frames_dir |> Array.to_list |> List.sort String.compare) = stored)))))
+
+let test_browser_screenshot_preserves_space () =
+  with_temp_base (fun base_path ->
+    let space : Browser_lane.ego_space = {id=51;name="SDK Space"} in
+    let encoded="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let client_id="30000000-0000-4000-8000-000000000001" in
+    let result=Masc.Browser_screenshot.persist ~base_path ~keeper_name:"space-screenshot"
+      (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";"title",`String "Page";
+        "data",`String encoded;"clientId",`String client_id;"transport",`String "ego_task_space";
+        "browserSpace",Browser_lane.ego_space_to_json space]) in
+    match result with
+    | Error detail -> failwith detail
+    | Ok json ->
+      assert (Yojson.Safe.Util.member "browserSpace" json=Browser_lane.ego_space_to_json space);
+      assert (assoc_string "clientId" json=client_id);
+      assert (assoc_string "transport" json="ego_task_space");
+      assert (Yojson.Safe.Util.member "artifact" json<>`Null))
+
+let test_browser_screenshot_rejects_bad_pixels () =
+  with_temp_base (fun _ ->
+    List.iter (fun encoded ->
+      let result = Masc.Browser_screenshot.persist ~base_path:(Config_dir_resolver.base_path_or_cwd ()) ~keeper_name:"bad-browser-pixels"
+        (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";
+          "title",`String "Page";"data",`String encoded]) in
+      assert (Result.is_error result)) ["not base64!";Base64.encode_string "not a PNG"])
+
+let test_browser_screenshot_rejects_invalid_client () =
+  let live_id = `String "30000000-0000-4000-8000-000000000001" in
+  List.iter (fun (connection, expected) ->
+    let result = Masc.Browser_screenshot.persist ~base_path:(Config_dir_resolver.base_path_or_cwd ()) ~keeper_name:"invalid-browser-client"
+      (`Assoc (["tabId",`Int 73;"url",`String "https://example.org";
+        "title",`String "Page";"data",`String ""] @ connection)) in
+    match result with
+    | Error detail when String.equal detail expected -> ()
+    | _ -> failwith "malformed routing identity must fail before pixel persistence")
+    [["clientId",`String "not-a-client"], "invalid_client_id";
+     ["clientId",`Int 73], "invalid_connection_fields";
+     ["clientId",live_id], "client_without_transport";
+     ["clientId",live_id;"transport",`String "carrier_pigeon"], "unsupported_browser_transport";
+     ["transport",`String "web_extension"], "invalid_connection_fields";
+     ["clientId",live_id;"transport",`String "ego_task_space"], "ego_connection_without_space";
+     ["clientId",live_id;"transport",`String "webdriver_bidi";
+       "browserSpace",`Assoc ["id",`Int 51;"name",`String "SDK Space"]], "space_requires_ego_connection"]
+
+let test_browser_screenshot_rejects_invalid_observation () =
+  with_temp_base (fun _ ->
+    let pixels = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    List.iter (fun metadata ->
+      let result = Masc.Browser_screenshot.persist ~base_path:(Config_dir_resolver.base_path_or_cwd ()) ~keeper_name:"invalid-observation"
+        (`Assoc (metadata @ ["tabId", `Int 73; "url", `String "https://example.org";
+          "title", `String "Page"; "data", `String pixels])) in
+      assert (Result.is_error result))
+      [["source", `String "unknown"];
+       ["viewport", `Null];
+       ["viewport", `Assoc ["documentId", `String "doc"; "width", `Int 0;
+          "height", `Int 600; "scrollX", `Int 0; "scrollY", `Int 0]]])
+
+let test_artifact_failures_are_classified () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-artifact-errors" in
+    let dir = Vt.vision_store_dir ~keeper_name:meta.name () in
+    let corrupt = store_image meta "original image" in
+    Out_channel.with_open_bin (Filename.concat dir corrupt)
+      (fun oc -> output_string oc "tampered image");
+    let unreadable = String.make 64 'b' in
+    Unix.mkdir (Filename.concat dir unreadable) 0o700;
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      failwith "artifact errors must not invoke a vision provider" in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      List.iter (fun (artifact, expected_code, expected_class) ->
+        let raw = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+          ~net:(Eio.Stdenv.net env) ~meta ~args:(artifact_args artifact) () in
+        let json = json_of_output raw in
+        assert (assoc_string "error" json = expected_code);
+        assert (assoc_string "failure_class" json = expected_class))
+        [ "bad-reference", "invalid_artifact", "policy_rejection"
+        ; String.make 64 'a', "artifact_not_found", "workflow_rejection"
+        ; corrupt, "artifact_load_failed", "runtime_failure"
+        ; unreadable, "artifact_load_failed", "runtime_failure" ])))
+
+(* Real PNG bytes through the production sandbox runner and store, with a fake
+   Docker transport and provider spy. This proves byte admission/transport, not
+   an actual container execution or semantic image understanding. *)
+let test_generated_sandbox_image_reaches_vision () =
+  with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
+    with_temp_base (fun base ->
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ "base", "alpine:test" ];
+      let meta = { (make_meta "generated-image") with
+        sandbox_profile = Keeper_types_profile_sandbox.Docker;
+        sandbox_image = Some "base" } in
+      let config = Masc.Workspace.default_config base in
+      let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+      let rec mkdir path =
+        if not (Sys.file_exists path) then (mkdir (Filename.dirname path); Unix.mkdir path 0o755)
+      in
+      mkdir root;
+      let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let source = Filename.concat root "generated.png" in
+      write_file source bytes;
+      let docker = Filename.concat base "docker" in
+      let script = Printf.sprintf
+        "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:test' ]; do shift; done\nshift\nif [ \"$1\" = sh ] && [ \"$2\" = -c ] && [ \"$4\" = sh ] && [ \"$5\" = %s ] && [ \"$#\" = 6 ]; then exec /bin/sh -c \"$3\" sh %s \"$6\"; fi\n[ \"$1\" = head ] || exit 93\n[ \"$2\" = -c ] || exit 99\n[ \"$4\" = %s ] || exit 94\nexec /usr/bin/head -c \"$3\" %s\n"
+        (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "generated.png"))
+        (Filename.quote source)
+        (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "generated.png"))
+        (Filename.quote source) in
+      write_file docker script; Unix.chmod docker 0o755;
+      with_env "PATH" (base ^ ":" ^ Sys.getenv "PATH") (fun () ->
+      with_env "MASC_TEST_FAKE_DOCKER_PATH" docker (fun () ->
+      with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        (* The server spawns sandbox processes through an initialised
+           Process_eio; the image read's binary capture needs its pipe EOF. *)
+        Process_eio.init
+          ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env);
+        Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages ?tools:_ () =
+          incr calls;
+          let expected = Vt.message_of_request
+              { Va.query = "read generated image"; image_media_type = "image/png"; image_bytes = bytes } in
+          assert (messages = [expected]);
+          Ok (ok_response "generated image read") in
+        let invoke args = Masc.Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
+            ~complete ~config ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
+            ~meta ~args () in
+        let native args = Masc.Keeper_image_read.handle ~config ~meta ~args () in
+        let native_result = native (`Assoc ["path", `String "generated.png"]) in
+        assert (native_result.disposition = Tool_result.Completed ());
+        (match native_result.content_blocks with
+         | Some [Llm_provider.Types.Text _; Llm_provider.Types.Image {source = Base64 data; _}] ->
+           assert (Base64.decode_exn data = bytes)
+         | _ -> failwith "sandbox image pixels did not reach the native reader");
+        assert (!calls = 0);
+        assert ((native (`Assoc ["path", `String "/etc/passwd"])).disposition
+          <> Tool_result.Completed ());
+        let result = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+        if result.disposition <> Tool_result.Completed ()
+        then failwith ("analyze_image did not complete: " ^ result.raw_output);
+        let output = json_of_output result.raw_output in
+        let handle = assoc_string "artifact" output in
+        assert (assoc_string "text" output = "generated image read");
+        assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name ()) (Store.of_string handle) = Ok bytes);
+        let again = invoke (`Assoc ["artifact", `String handle; "query", `String "read generated image"]) in
+        assert (again.disposition = Tool_result.Completed ());
+        assert (!calls = 2);
+        let bad_query = invoke (`Assoc ["path", `String "generated.png"; "query", `Int 7]) in
+        assert (assoc_string "error" (json_of_output bad_query.raw_output) = "invalid_args");
+        let bad_mime = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"; "media_type", `String "text/plain"]) in
+        assert (assoc_string "error" (json_of_output bad_mime.raw_output) = "invalid_media_type");
+        let invalid = invoke (`Assoc ["artifact", `String handle; "path", `String source; "query", `String "read generated image"]) in
+        assert (assoc_string "error" (json_of_output invalid.raw_output) = "invalid_args");
+        let escaped = invoke (`Assoc ["path", `String "/etc/passwd"; "query", `String "read generated image"]) in
+        assert (escaped.disposition <> Tool_result.Completed ());
+        assert (!calls = 2);
+        Unix.symlink "/etc/passwd" (Filename.concat root "outside.png");
+        let symlink = invoke (`Assoc ["path", `String "outside.png"; "query", `String "read generated image"]) in
+        assert (symlink.disposition <> Tool_result.Completed ());
+        assert ((native (`Assoc ["path", `String "outside.png"])).disposition
+          <> Tool_result.Completed ());
+        write_file source "not an image";
+        let non_image = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+        assert (assoc_string "error" (json_of_output non_image.raw_output) = "invalid_media_type");
+        with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "32" (fun () ->
+          write_file source bytes;
+          let oversized = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
+          assert (assoc_string "error" (json_of_output oversized.raw_output) = "image_too_large"));
+        assert (!calls = 2)
+      ))))))))
+
+let test_native_image_read_artifact_and_authority () =
+  (* No Eio net, provider callback or runtime configuration is available here:
+     successful reading consists only of loading and delivering original bytes. *)
+  with_temp_base (fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
+    let meta = make_meta "native-image-owner" in
+    let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let bytes = Base64.decode_exn encoded in
+    let handle = Result.get_ok (Vt.store_frame ~keeper_name:meta.name bytes)
+      |> Store.to_string in
+    let invoke meta args = Masc.Keeper_image_read.handle ~config ~meta ~args () in
+    let args = `Assoc ["artifact", `String handle] in
+    let result = invoke meta args in
+    assert (result.disposition = Tool_result.Completed ());
+    (match result.content_blocks with
+     | Some [Llm_provider.Types.Text _;
+         Llm_provider.Types.Image {media_type="image/png"; source = Base64 data}] ->
+       assert (data = encoded)
+     | _ -> failwith "native read must deliver the original PNG pixels");
+    let output = json_of_output result.raw_output in
+    assert (Yojson.Safe.Util.member "visual_input" output = `Bool true);
+    assert (Yojson.Safe.Util.member "width" output = `Int 1);
+    assert (Yojson.Safe.Util.member "height" output = `Int 1);
+    (* Successful reads pin rotating frames in the stable owned image store. *)
+    Unix.unlink (Filename.concat (Vt.frames_dir ~keeper_name:meta.name ()) handle);
+    assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name ())
+      (Store.of_string handle) = Ok bytes);
+    assert ((invoke meta args).content_blocks = result.content_blocks);
+    let expect_error meta args code =
+      let rejected = invoke meta args in
+      assert (rejected.disposition <> Tool_result.Completed ());
+      assert (rejected.content_blocks = None);
+      let data = match rejected.data with
+        | Some data -> data
+        | None -> failwith "native read failure did not retain its typed data" in
+      assert (assoc_string "error" data = code)
+    in
+    expect_error (make_meta "other-image-owner") args "artifact_not_found";
+    expect_error meta (`Assoc ["artifact", `String "bad-reference"]) "invalid_artifact";
+    expect_error meta (`Assoc []) "invalid_args";
+    expect_error meta (`Assoc ["artifact", `String handle; "path", `String "image.png"]) "invalid_args";
+    expect_error meta (`Assoc ["artifact", `String handle; "artifact", `String handle]) "invalid_args";
+    expect_error meta (`Assoc ["path", `Int 7]) "invalid_args";
+    expect_error meta (`Assoc ["path", `String " "]) "invalid_args";
+    with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "32" (fun () ->
+      expect_error meta args "image_too_large");
+    let non_image = store_image meta "not an image" in
+    expect_error meta (`Assoc ["artifact", `String non_image]) "invalid_media_type";
+    (* WebP is supported by the MIME reader while dimensions are intentionally
+       unavailable. Metadata must not prevent delivery of supported pixels. *)
+    let webp = Base64.decode_exn "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA" in
+    let webp_handle = store_image meta webp in
+    let webp_result = invoke meta (`Assoc ["artifact", `String webp_handle]) in
+    assert (webp_result.disposition = Tool_result.Completed ());
+    (match webp_result.content_blocks with
+     | Some [Llm_provider.Types.Text _; Llm_provider.Types.Image {media_type="image/webp";source=Base64 data}] ->
+       assert (Base64.decode_exn data = webp)
+     | _ -> failwith "supported WebP bytes must remain readable");
+    write_file (Filename.concat (Vt.vision_store_dir ~keeper_name:meta.name ()) handle) "tampered pixels";
+    expect_error meta args "artifact_load_failed")
+
+let test_native_image_admission () =
+  let invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"native-image-test" ~turn:1
+      ~schedule:{planned_index=0; batch_index=0; batch_size=1; execution_mode=Serial}
+      ~completion:Continue_after_success in
+  let event tool_name = Agent_core.Hooks.PreToolUse
+      {invocation; tool_name; input=`Assoc ["artifact", `String "opaque"];
+       usage=None} in
+  let admitted = Masc.Keeper_image_read.admission_hook ~accepts_image_input:true in
+  let rejected = Masc.Keeper_image_read.admission_hook ~accepts_image_input:false in
+  assert (admitted (event "keeper_image_read") = Agent_core.Hooks.Continue);
+  (match rejected (event "keeper_image_read") with
+   | Agent_core.Hooks.Block detail -> assert (String.length detail > 0)
+   | _ -> failwith "a text-only runtime must reject native pixels before execution");
+  assert (rejected (event "keeper_analyze_image") = Agent_core.Hooks.Continue)
+
+let test_native_image_admission_continues_turn () =
+  let module Core = Agent_core in
+  List.iter (fun accepts_image_input ->
+    with_temp_base (fun base_path ->
+      let config = Masc.Workspace.default_config base_path in
+      let meta = make_meta "native-image-loop" in
+      let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let handle = store_image meta (Base64.decode_exn encoded) in
+      let reads = ref 0 and analyses = ref 0 and requests = ref 0 in
+      let native = Core.Tool.create ~name:"keeper_image_read" ~description:"Read pixels" ~parameters:[]
+          (fun _ ->
+            incr reads;
+            let result = Masc.Keeper_image_read.handle ~config ~meta
+                ~args:(`Assoc ["artifact", `String handle]) () in
+            assert (result.disposition = Tool_result.Completed ());
+            Ok {Core.Types.content=result.raw_output; content_blocks=result.content_blocks; _meta=None}) in
+      let analysis = Core.Tool.create ~name:"keeper_analyze_image" ~description:"Delegated reading" ~parameters:[]
+          (fun _ -> incr analyses;
+            Ok {Core.Types.content="delegated reading";content_blocks=None;_meta=None}) in
+      let next () =
+        incr requests;
+        match !requests with
+        | 1 -> { (text_response "") with stop_reason=Core.Types.StopToolUse;
+            content=[Llm_provider.Types.ToolUse {id="read-image";name="keeper_image_read";input=`Assoc []}] }
+        | 2 when not accepts_image_input ->
+          { (text_response "") with stop_reason=Core.Types.StopToolUse;
+            content=[Llm_provider.Types.ToolUse {id="analyse-image";name="keeper_analyze_image";input=`Assoc []}] }
+        | _ -> text_response "inspection completed"
+      in
+      let transport : Llm_provider.Llm_transport.t =
+        Llm_provider.Llm_transport.custom ({ complete_sync=(fun _ -> {response=Ok (next ());latency_ms=None})
+        ; complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) }) in
+      let provider_config = Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"test"
+          ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"
+          ~model_id:"mock-model" () in
+      let hooks = {Core.Hooks.empty with pre_tool_use=Some
+          (Masc.Keeper_image_read.admission_hook ~accepts_image_input)} in
+      let options = {Core.Agent.default_options with hooks;
+          provider_config=Some provider_config;transport=Some transport} in
+      Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        let agent = Core.Agent.create ~media_store:test_media_store ~net:(Eio.Stdenv.net env)
+            ~config:(Core.Types.default_config ~model:"mock-model") ~options ~tools:[native;analysis] () in
+        Fun.protect ~finally:(fun () -> Core.Agent.close agent) (fun () ->
+          (match Core.Agent.run ~sw agent "inspect the screenshot" with
+           | Ok _ -> ()
+           | Error error -> failwith (Core.Error.to_string error));
+          assert (!reads = if accepts_image_input then 1 else 0);
+          assert (!analyses = if accepts_image_input then 0 else 1);
+          let checkpoint = Core.Agent.checkpoint ~session_id:"native-read" agent in
+          let blocks = List.concat_map (fun (message : Core.Types.message) -> message.content)
+              checkpoint.messages in
+          let saw_pixels = List.exists (function
+            | Core.Types.ToolResult {tool_use_id="read-image";content_blocks=Some nested;_} ->
+              List.exists (function
+                | Core.Types.Image {media_type="image/png";source=Core.Types.Stored stored} ->
+                  stored = Agent_core.History.stored_of_raw (Base64.decode_exn encoded)
+                | _ -> false) nested
+            | _ -> false) blocks in
+          assert (saw_pixels = accepts_image_input)))))) [true; false]
+
+let run_candidate_standing () =
+  test_vision_dispatch_reads_existing_candidate_rate ();
+  test_vision_rate_survives_other_answers_and_clears_before_validation ();
+  test_vision_typed_quota_and_candidate_rate_have_distinct_scope ();
+  test_vision_inflight_rate_stays_on_frozen_candidate ()
+
+let run_all () =
+  test_native_image_admission_continues_turn ();
+  test_native_image_read_artifact_and_authority ();
+  test_native_image_admission ();
+  test_structured_response_states_never_accept_valid_vision_json ();
+  test_generated_sandbox_image_reaches_vision ();
+  test_artifact_failures_are_classified ();
+  test_browser_screenshot_rejects_invalid_client ();
+  test_browser_screenshot_rejects_invalid_observation ();
+  test_browser_screenshot_reaches_vision_reader ();
+  test_browser_screenshot_rejects_bad_pixels ();
+  test_browser_screenshot_preserves_space ();
+  test_native_browser_screenshot_artifact_scope ();
+  test_vision_output_tokens_default_and_env ();
+  test_truncated_structured_response_reads_as_truncation ();
+  test_max_tokens_failover_preserves_image_and_candidate_wire_limits ();
+  test_max_tokens_exhaustion_remains_visible_tool_failure ();
+  test_non_length_response_does_not_trigger_vision_failover ();
+  test_length_failover_preserves_candidate_http_recovery ();
+  test_message_of_request ();
+  test_first_vision_runtime_id_total ();
+  test_provider_for_vision_preserves_configured_max_tokens ();
+  test_provider_for_vision_leaves_thinking_uncontrolled ();
+  test_max_image_bytes_reads_env_config ();
+  test_vision_env_knobs_are_bounded ();
+  test_missing_eio_context_is_runtime_failure ();
+  test_invalid_media_type_is_policy_rejection ();
+  test_missing_clock_is_runtime_failure_without_provider_call ();
+  test_non_string_media_type_is_policy_rejection ();
+  test_unknown_magic_bytes_are_policy_rejection ();
+  test_oversize_image_is_runtime_failure_before_provider_call ();
+  test_temp_runtime_toml_restores_runtime_cache ();
+  test_image_capable_vision_runtime_is_admitted_without_schema_capability ();
+  test_provider_for_vision_uses_runtime_temperature ();
+  test_uncapped_vision_fallback_reaches_provider ();
+  test_invalid_structured_vision_response_is_runtime_failure ();
+  test_run_vision_invalid_structured_response_is_typed ();
+  test_failed_vision_candidates_keep_private_response_evidence ();
+  test_explicit_vision_runtime_selection ();
+  test_retryable_provider_error_tries_next_runtime ();
+  test_invalid_structured_response_tries_next_runtime ();
+  test_end_turn_broken_json_walks_and_exhaustion_reports_typed_failure ();
+  test_candidate_policy_error_tries_next_runtime ();
+  test_policy_error_on_every_candidate_is_reported ();
+  test_policy_error_then_transient_reports_the_last_candidate ();
+  test_capacity_failover_preserves_image ();
+  test_capacity_exhaustion_retains_size_failure ();
+  test_candidate_failover_is_not_cut_off_by_local_deadline ();
+  test_credential_error_tries_next_runtime ();
+  test_accept_rejected_is_policy_rejection_without_failover ();
+  test_eager_eviction_reason_preserves_typed_outcome ();
+  test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
+  test_fallback_projection_preserves_artifacts_and_caches_each_mode ();
+  test_fallback_reference_projection_is_explicitly_unread ();
+  test_fallback_semantic_read_is_cached_after_completion ();
+  test_fallback_read_receives_the_walks_excluded_runtimes ();
+  test_cancelled_fallback_read_can_retry_without_cached_failure ();
+  test_vision_candidate_cancellation_does_not_failover ();
+  test_candidate_rows_join_parent_tool_call ();
+  test_cancelled_candidate_leaves_start_and_cancelled_rows ();
+  test_delegate_eviction_rejects_invalid_media_type_before_store ();
+  test_delegate_eviction_rejects_oversize_before_store ();
+  test_delegate_eviction_passes_reference_source_through ();
+  test_non_delegate_eviction_preserves_inline_image ();
+  test_evicted_history_has_no_image_modality ();
+  test_delegates_media_follows_lane_capability ();
+  test_delegates_media_matches_antigravity_transport ();
+  test_vision_candidates_follow_quota_window ();
+  test_vision_402_marks_the_account_exhausted_and_moves_on ();
+  run_candidate_standing ();
+  print_endline "test_keeper_vision_tool: all assertions passed"
+
+let () =
+  match Array.to_list Sys.argv with
+  | [_] -> run_all ()
+  | [_; "--browser-screenshot"] ->
+      test_browser_screenshot_reaches_vision_reader ();
+      test_browser_screenshot_preserves_space ();
+      test_native_browser_screenshot_artifact_scope ();
+      print_endline "test_keeper_vision_tool: browser screenshot scenario passed"
+  | [_; "--candidate-standing"] ->
+      run_candidate_standing ();
+      print_endline "test_keeper_vision_tool: candidate standing scenarios passed"
+  | _ -> invalid_arg "usage: test_keeper_vision_tool.exe [--browser-screenshot|--candidate-standing]"

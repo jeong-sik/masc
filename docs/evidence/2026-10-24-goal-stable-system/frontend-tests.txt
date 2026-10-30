@@ -1,0 +1,9 @@
+
+ RUN  v5.0.2 /private/tmp/masc-goal-stable-system-20261024/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  25 passed (25)
+   Start at  23:01:51
+   Duration  641ms (environment 38%, setup 32%, transform 19%, tests 5%, import 4%, worker 1%)
+

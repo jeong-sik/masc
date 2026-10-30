@@ -1,0 +1,1386 @@
+open Alcotest
+
+module Inventory = Masc.Keeper_skill_inventory
+module Snapshot = Skill_catalog_snapshot
+module Tool_descriptor = Masc.Keeper_tool_descriptor
+
+let config_text sources =
+  "[skills]\nresource-read-max-bytes = 16384\n"
+  ^ sources
+;;
+
+let source_row ~id ~path =
+  Printf.sprintf
+    "[[skills.sources]]\nid = %S\nanchor = \"base-path\"\npath = %S\naccess = \"read-write\"\n"
+    id
+    path
+;;
+
+let parse_config text =
+  match Skill_source_config.parse_text text with
+  | Ok config -> config
+  | Error diagnostics ->
+    fail
+      (String.concat
+         "; "
+         (List.map Skill_source_config.diagnostic_to_string diagnostics))
+;;
+
+let scans ?(base_path = "/workspace") config candidates_by_source =
+  List.map2
+    (fun source candidates ->
+       let resolved =
+         Skill_source_config.resolve ~base_path ~user_home:None source
+       in
+       let resolved_path =
+         match resolved.Skill_source_config.resolution with
+         | Resolved path -> path
+         | Anchor_unavailable _ | Anchor_invalid _ | Path_rejected _ ->
+           fail "fixture Skill source did not resolve"
+       in
+       { Snapshot.source = resolved
+       ; observation = Source_ready { resolved_path; candidates = List.length candidates }
+       ; candidates
+       })
+    config.Skill_source_config.sources
+    candidates_by_source
+;;
+
+let snapshot ?base_path config candidates_by_source =
+  match Snapshot.configured ~config (scans ?base_path config candidates_by_source) with
+  | Ok snapshot -> snapshot
+  | Error _ -> fail "fixture Skill snapshot was rejected"
+;;
+
+let candidate ~directory source_text =
+  Snapshot.Candidate_document { directory; source_text }
+;;
+
+let unreadable_candidate ~directory ~path ~detail =
+  Snapshot.Candidate_unreadable { directory; path; detail }
+;;
+
+let instruction_document =
+  {|---
+name: release-checklist
+description: Check the release before shipping.
+---
+
+# Release checklist
+
+Read the diff.
+|}
+;;
+
+let composition_document =
+  {|---
+name: lane-plan
+description: Read the lane status through a named plan.
+---
+
+```toml composition
+[[compositions]]
+name = "lane-plan"
+description = "Read the lane status through a named plan."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "lane"
+tool = "keeper_lane_status"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|}
+;;
+
+let valid_items inventory =
+  Inventory.items inventory
+  |> List.filter_map (function
+       | Inventory.Valid valid -> Some valid
+       | Invalid _ -> None)
+;;
+
+let invalid_items inventory =
+  Inventory.items inventory
+  |> List.filter_map (function
+       | Inventory.Invalid invalid -> Some invalid
+       | Valid _ -> None)
+;;
+
+let valid_named name inventory =
+  valid_items inventory
+  |> List.find_opt (fun (valid : Inventory.valid_skill) ->
+    String.equal valid.reference.identity.name name)
+  |> function
+  | Some valid -> valid
+  | None -> failf "valid Skill %S missing from inventory" name
+;;
+
+let capability_surface
+      ?(lane_addon_exports = [])
+      ?(tool_deny = [])
+      ?(sandbox_profile = Masc.Keeper_types_profile.Docker)
+      ?(skill_names = None)
+      frozen
+  =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let tool_descriptors = Tool_descriptor.all_descriptors ()
+    @ List.map Masc.Keeper_lane_addon_descriptor.create lane_addon_exports in
+  let global_skill_catalog, diagnostics =
+    Masc.Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors frozen
+  in
+  check int "catalog diagnostics" 0 (List.length diagnostics);
+  Masc.Keeper_capability_surface.create_with_descriptors
+    ~tool_descriptors
+    ~tool_deny
+    ~sandbox_profile
+    ~skill_names
+    ~global_skill_catalog
+    ~skill_inventory:(Inventory.of_snapshot ~descriptors:tool_descriptors frozen)
+    ~task_skills:[]
+;;
+
+let exact_capability_by_reference surface reference =
+  Masc.Keeper_capability_surface.skill_capabilities surface
+  |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.skill_capability) ->
+    match capability.identity with
+    | Exact_skill (Inventory.Valid valid) ->
+      Skill_reference.equal valid.reference reference
+    | Exact_skill (Inventory.Invalid invalid) ->
+      Option.exists (Skill_reference.equal reference) invalid.reference
+    | Missing_configured_skill_name _ -> false)
+  |> function
+  | Some capability -> capability
+  | None -> fail "exact Skill capability is absent"
+;;
+
+let search_candidates surface query =
+  let documents =
+    Masc.Keeper_capability_surface.candidates surface
+    |> List.map (fun candidate ->
+      Masc.Keeper_capability_search.
+        { payload = candidate
+        ; name = Masc.Keeper_capability_surface.candidate_name candidate
+        ; description =
+            Masc.Keeper_capability_surface.candidate_description candidate
+        ; invocation_name =
+            Masc.Keeper_capability_surface.candidate_invocation_name candidate
+        })
+  in
+  match Masc.Keeper_capability_search.search ~query:(Masc.Keeper_capability_search.Fts5 query) documents with
+  | Ok hits -> hits
+  | Error error ->
+    fail
+      (Yojson.Safe.to_string
+         (Masc.Keeper_capability_search.error_to_yojson error))
+;;
+
+let test_literal_and_expression_search () =
+  let module Search = Masc.Keeper_capability_search in
+  let document name = Search.{payload=name;name;description="";invocation_name=None} in
+  let documents = List.map document ["preparation-stdout";"OR";"한글 \"인용\""] in
+  let found query = match Search.search ~query documents with
+    | Ok hits -> List.map (fun hit -> hit.Search.document.payload) hits |> List.sort String.compare
+    | Error error -> fail (Yojson.Safe.to_string (Search.error_to_yojson error)) in
+  List.iter (fun text -> check (list string) "literal names survive query punctuation and operators"
+      [text] (found (Search.Literal text))) ["preparation-stdout";"OR";"한글 \"인용\""];
+  check (list string) "literal text does not expand boolean operators" []
+    (found (Search.Literal "preparation-stdout OR 한글"));
+  check (list string) "explicit expressions retain boolean search"
+    ["OR";"preparation-stdout"] (found (Search.Fts5 "\"preparation-stdout\" OR \"OR\""));
+  (match Search.search ~query:(Search.Fts5 "preparation-stdout") documents with
+   | Error (Search.Invalid_query _) -> ()
+   | Ok _ | Error (Search.Empty_query | Search.Frozen_surface_required | Search.Index_unavailable _) ->
+     fail "invalid explicit FTS must not silently become literal search");
+  match Search.search ~query:(Search.Literal " \n\t") documents with
+  | Error Search.Empty_query -> ()
+  | Ok _ | Error (Search.Frozen_surface_required | Search.Invalid_query _ | Search.Index_unavailable _) ->
+    fail "empty literal query was not rejected"
+;;
+
+let tool_capability_with_availability surface availability =
+  Masc.Keeper_capability_surface.tool_capabilities surface
+  |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+    capability.availability = availability)
+  |> function
+  | Some capability -> capability
+  | None -> fail "Tool capability with requested availability is absent"
+;;
+
+let test_valid_instruction_and_exact_reference () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+  in
+  let inventory = Inventory.of_snapshot frozen in
+  let valid = valid_named "release-checklist" inventory in
+  (match valid.kind with
+   | Inventory.Instruction -> ()
+   | Composition _ -> fail "instruction Skill was classified as a composition");
+  (match valid.catalog_status with
+   | Inventory.Effective -> ()
+   | Shadowed -> fail "effective instruction Skill was marked shadowed");
+  let entry =
+    match Snapshot.entries frozen with
+    | [ entry ] -> entry
+    | entries -> failf "expected one snapshot entry, got %d" (List.length entries)
+  in
+  check bool
+    "exact snapshot reference"
+    true
+    (Skill_reference.equal valid.reference (Snapshot.entry_reference entry));
+  check
+    string
+    "exact source digest"
+    (Skill_reference.content_revision_of_source_text instruction_document
+     |> Skill_reference.content_revision_to_string)
+    (valid.reference.content_revision |> Skill_reference.content_revision_to_string);
+  check
+    string
+    "inventory names its frozen snapshot"
+    (Snapshot.snapshot_revision frozen |> Snapshot.snapshot_revision_to_string)
+    (Inventory.snapshot_revision inventory |> Snapshot.snapshot_revision_to_string)
+;;
+
+let test_valid_composition () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let inventory =
+    snapshot config [ [ candidate ~directory:"lane-plan" composition_document ] ]
+    |> Inventory.of_snapshot
+  in
+  let valid = valid_named "lane-plan" inventory in
+  match valid.kind with
+  | Inventory.Instruction -> fail "composition Skill was classified as instruction"
+  | Composition entry ->
+    check
+      string
+      "named composition tool"
+      "keeper_compose_lane-plan"
+      (Masc.Keeper_tool_composition_catalog.tool_name entry)
+;;
+
+let test_invalid_sibling_isolated_with_digest () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let cases =
+    [ ( "missing-name"
+      , "---\ndescription: Missing name.\n---\nbody\n"
+      , function
+        | Agent_core.Skill_document.Missing_name -> true
+        | _ -> false )
+    ; ( "mismatch"
+      , "---\nname: declared-name\ndescription: Mismatched name.\n---\nbody\n"
+      , function
+        | Agent_core.Skill_document.Name_mismatch
+            { declared = "declared-name"; directory = "mismatch" } -> true
+        | _ -> false )
+    ; ( "description-limit"
+      , Printf.sprintf
+          "---\nname: description-limit\ndescription: %s\n---\nbody\n"
+          (String.make 1025 'x')
+      , function
+        | Agent_core.Skill_document.Description_too_long { length = 1025 } -> true
+        | _ -> false )
+    ; ( "unknown-field"
+      , "---\nname: unknown-field\ndescription: Unknown field.\ncustom: value\n---\nbody\n"
+      , function
+        | Agent_core.Skill_document.Unexpected_frontmatter_field "custom" -> true
+        | _ -> false )
+    ]
+  in
+  List.iter
+    (fun (directory, malformed, has_expected_diagnostic) ->
+       let inventory =
+         snapshot
+           config
+           [ [ candidate ~directory malformed
+             ; candidate ~directory:"release-checklist" instruction_document
+             ] ]
+         |> Inventory.of_snapshot
+       in
+       ignore (valid_named "release-checklist" inventory);
+       match invalid_items inventory with
+       | [ invalid ] ->
+         check string "invalid directory" directory invalid.directory;
+         check bool
+           "snapshot rejection has no fabricated reference"
+           true
+           (Option.is_none invalid.reference);
+         (match invalid.error with
+          | Inventory.Snapshot_rejection (Snapshot.Document_rejected diagnostics) ->
+            check bool
+              "typed parser diagnostic retained"
+              true
+              (List.exists has_expected_diagnostic diagnostics)
+          | Snapshot_rejection _ ->
+            fail "invalid document has the wrong snapshot reason"
+          | Catalog_rejection _ ->
+            fail "invalid document bypassed snapshot rejection");
+         (match invalid.content_revision with
+          | None -> fail "readable invalid document lost its source digest"
+          | Some revision ->
+            check
+              string
+              "invalid source digest"
+              (Skill_reference.content_revision_of_source_text malformed
+               |> Skill_reference.content_revision_to_string)
+              (Skill_reference.content_revision_to_string revision))
+       | invalid -> failf "expected one invalid item, got %d" (List.length invalid))
+    cases
+;;
+
+let test_catalog_status_tracks_source_precedence () =
+  let config =
+    parse_config
+      (config_text
+         (source_row ~id:"first" ~path:"first-skills"
+          ^ source_row ~id:"second" ~path:"second-skills"))
+  in
+  let first =
+    "---\nname: review\ndescription: First source.\n---\nfirst body\n"
+  in
+  let second =
+    "---\nname: review\ndescription: Second source.\n---\nsecond body\n"
+  in
+  let inventory =
+    snapshot
+      config
+      [ [ candidate ~directory:"review" first ]
+      ; [ candidate ~directory:"review" second ]
+      ]
+    |> Inventory.of_snapshot
+  in
+  match valid_items inventory with
+  | [ first; second ] ->
+    check string "winner" "First source." first.description;
+    check string "shadow" "Second source." second.description;
+    (match first.catalog_status, second.catalog_status with
+     | Inventory.Effective, Inventory.Shadowed -> ()
+     | _ -> fail "inventory lost the typed source-precedence result");
+    check bool
+      "shadow keeps a different exact reference"
+      false
+      (Skill_reference.equal first.reference second.reference)
+  | valid -> failf "expected two exact valid items, got %d" (List.length valid)
+;;
+
+(* With no deny and a sandbox that runs every Tool, each inventoried Tool is
+   either callable this turn or not something the model can call at all. A
+   deny or a sandbox refusal is the only way a model-visible Tool reads
+   otherwise; the tests below cover those. *)
+let test_unrestricted_inventory_is_active_or_not_model_invocable () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen = snapshot config [ [] ] in
+  let surface = capability_surface frozen in
+  let capabilities = Masc.Keeper_capability_surface.tool_capabilities surface in
+  check bool "the surface has active Tools at all" true
+    (List.exists
+       (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+          capability.availability = Masc.Keeper_capability_surface.Active)
+       capabilities);
+  List.iter
+    (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+       match capability.availability with
+       | Masc.Keeper_capability_surface.Active
+       | Masc.Keeper_capability_surface.Not_model_invocable -> ()
+       | other ->
+         failf
+           "%s is %s, which no Tool can be"
+           capability.descriptor.internal_name
+           (Masc.Keeper_capability_surface.capability_availability_to_string other))
+    capabilities
+;;
+
+let tool_capability_by_internal_name surface internal_name =
+  Masc.Keeper_capability_surface.tool_capabilities surface
+  |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+    String.equal capability.descriptor.internal_name internal_name)
+  |> function
+  | Some capability -> capability
+  | None -> failf "Tool capability %S is absent" internal_name
+;;
+
+let descriptor_ids descriptors =
+  List.map (fun (descriptor : Tool_descriptor.t) -> descriptor.id) descriptors
+;;
+
+let active_capability_descriptor_ids surface =
+  Masc.Keeper_capability_surface.tool_capabilities surface
+  |> List.filter_map (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+    match capability.availability with
+    | Masc.Keeper_capability_surface.Active -> Some capability.descriptor.id
+    | Outside_skill_surface
+    | Not_model_invocable
+    | Denied_by_profile
+    | Refused_by_sandbox _
+    | Node_tools_outside_surface _
+    | Invalid_definition
+    | Missing_configured_skill -> None)
+;;
+
+
+let test_lane_addon_surface_binds_incarnation_and_deny () =
+  let module Surface = Masc.Keeper_capability_surface in
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen = snapshot config [ [] ] in
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+      "name", `String "machine_screen"; "description", `String "Read machine screen";
+      "inputSchema", `Assoc ["type", `String "object"; "properties", `Assoc []]]) with
+    | Ok tool -> tool | Error detail -> fail detail in
+  let export instance_id = Masc.Lane_addon_tool_export.create
+      ~owner:(Masc.Lane_addon_tool_export.create_owner ~instance_id) ~tool in
+  let first = export "first" in
+  let surface = capability_surface ~lane_addon_exports:[first] frozen in
+  let descriptor = match Surface.find_descriptor_by_name surface "machine_screen" with
+    | Some descriptor -> descriptor | None -> fail "attached export missing" in
+  check bool "exact descriptor is admitted" true (Surface.admits surface descriptor);
+  let forged = { descriptor with description = "forged" } in
+  check bool "same identity does not admit a forged descriptor" false (Surface.admits surface forged);
+  let denied = capability_surface ~lane_addon_exports:[first] ~tool_deny:["addon:machine_screen"] frozen in
+  check bool "denied export is not callable" true
+    (Surface.find_descriptor_by_name denied "machine_screen" = None);
+  check bool "denied export retains reason" true
+    (Surface.tool_row_availability_for_name denied "machine_screen" = Some Surface.Denied_by_profile);
+  let replacement = capability_surface ~lane_addon_exports:[export "replacement"] frozen in
+  check bool "replacement changes frozen surface digest" false
+    (String.equal (Surface.digest surface) (Surface.digest replacement));
+  check bool "replacement rejects previous descriptor" false (Surface.admits replacement descriptor);
+  check bool "no attachment leaves no callable name" true
+    (Surface.find_descriptor_by_name (capability_surface frozen) "machine_screen" = None)
+;;
+
+let test_composition_tracks_frozen_addon_authority () =
+  let module Catalog = Masc.Keeper_skill_catalog in
+  let module Surface = Masc.Keeper_capability_surface in
+  let module Selection = Masc.Keeper_task_skill_turn in
+  let module Plan = Masc.Keeper_tool_plan in
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let document = {|---
+name: machine-plan
+description: Read the attached machine.
+---
+```toml composition
+[[compositions]]
+name = "machine-plan"
+execution = "inline"
+[[compositions.nodes]]
+id = "screen"
+tool = "machine_screen"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|} in
+  let frozen = snapshot config [[candidate ~directory:"machine-plan" document]] in
+  let entry = List.hd (Snapshot.entries frozen) in
+  let reference = Snapshot.entry_reference entry in
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+    "name",`String "machine_screen"; "inputSchema",`Assoc ["type",`String "object"]]) with
+    | Ok tool -> tool | Error detail -> fail detail in
+  let descriptors instance = Tool_descriptor.all_descriptors () @
+    List.map (fun instance_id -> Masc.Keeper_lane_addon_descriptor.create
+      (Masc.Lane_addon_tool_export.create
+        ~owner:(Masc.Lane_addon_tool_export.create_owner ~instance_id) ~tool)) instance in
+  let unwrap = function Ok value -> value | Error error -> fail (Selection.error_to_string error) in
+  let selected = unwrap (Selection.resolve_for_task ~snapshot:frozen ~task_id:"task-1" [reference]) in
+  let project tool_descriptors tool_deny =
+    let selection,preparation = unwrap (Selection.bind_surface ~descriptors:tool_descriptors ~snapshot:frozen selected) in
+    let surface = Surface.create_with_descriptors ~tool_descriptors ~tool_deny
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names:None
+      ~global_skill_catalog:preparation.catalog ~skill_inventory:preparation.inventory
+      ~task_skills:(Selection.skills selection) in
+    selection,surface in
+  let composition surface = match Catalog.composition_entries (Surface.skill_catalog surface) with
+    | [entry] -> entry | _ -> fail "attached composition missing" in
+  let no_tools = descriptors [] in
+  let _,absent = project no_tools [] in
+  check int "unattached composition is not executable" 0
+    (List.length (Catalog.composition_entries (Surface.skill_catalog absent)));
+  let first_descriptors = descriptors ["first"] in
+  let selection,first = project first_descriptors [] in
+  let first_plan = (composition first).plan in
+  let node = List.hd (Plan.nodes first_plan) in
+  let first_descriptor = match Plan.descriptor first_plan node.id with
+    | Some value -> value | None -> fail "plan lost its descriptor" in
+  check bool "composition uses admitted descriptor object" true (Surface.admits first first_descriptor);
+  check (list string) "exact Task provenance survives reprojection" ["task-1"]
+    (Selection.task_ids_for_reference selection reference);
+  let cached,_ = Catalog.of_snapshot ~descriptors:first_descriptors frozen in
+  let repeated = List.hd (Catalog.composition_entries cached) in
+  check bool "same frozen authority reuses its cached plan" true (repeated.plan == first_plan);
+  let module Export = Masc.Lane_addon_tool_export in
+  let module Observation = Masc.Keeper_skill_preparation_observation in
+  let owner = Export.create_owner ~instance_id:"first" in
+  let owned_descriptors () = Tool_descriptor.all_descriptors () @
+      [Masc.Keeper_lane_addon_descriptor.create (Export.create ~owner ~tool)] in
+  Eio_main.run (fun _ ->
+  let reports = ref [] in
+  let prepare task_id = Observation.capture_result
+      ~on_report:(fun report -> reports := report :: !reports) (fun () ->
+    let tool_descriptors = owned_descriptors () in
+    let selection = unwrap (Selection.resolve_for_task ~snapshot:frozen ~descriptors:tool_descriptors
+      ~task_id [reference]) in
+    Selection.bind_surface ~snapshot:frozen ~descriptors:tool_descriptors selection) in
+  let before,prepared = match prepare "owned-a" with Ok value -> value | Error _ -> fail "owned preparation failed" in
+  ignore (project (descriptors ["interleaved"]) []);
+  let after,reused = match prepare "owned-b" with Ok value -> value | Error _ -> fail "owned preparation reuse failed" in
+  check bool "owned dynamic export keeps the full preparation across observations" true (prepared == reused);
+  check (list string) "first Task keeps its original provenance" ["owned-a"]
+    (Selection.task_ids_for_reference before reference);
+  check (list string) "new Task does not borrow earlier Task provenance" ["owned-b"]
+    (Selection.task_ids_for_reference after reference);
+  check bool "same public id cannot retain a different worker generation's descriptor" false
+    (List.hd (List.rev (owned_descriptors ())) == first_descriptor);
+  (match !reports with
+   | [warm;cold] ->
+     let has decision report = List.exists (fun (sample : Observation.sample) ->
+       sample.component = Observation.Projection && sample.decision = Some decision) report.Observation.samples in
+     check bool "first owned generation actually constructs its projection" true (has Observation.Constructed cold);
+     check bool "second observation actually reuses its projection" true (has Observation.Reused warm);
+     List.iter (fun report ->
+       match List.filter (fun (sample : Observation.sample) ->
+         sample.component=Observation.Retained_turn_surface) report.Observation.samples with
+       | [sample] -> check bool "paired successful binding preserves one completed retained-surface observation" true
+           (sample.decision=Some Observation.Reused && sample.outcome=Observation.Returned)
+       | _ -> fail "successful paired binding lost or duplicated its retained-surface observation") [cold;warm]
+   | _ -> fail "expected cold and warm preparation observations"));
+  let _,denied = project first_descriptors ["addon:machine_screen"] in
+  check int "denied node withholds composition" 0
+    (List.length (Catalog.composition_entries (Surface.skill_catalog denied)));
+  let _,detached = project no_tools [] in
+  check int "same skill snapshot cannot retain detached composition" 0
+    (List.length (Catalog.composition_entries (Surface.skill_catalog detached)));
+  let _,replacement = project (descriptors ["replacement"]) [] in
+  let replacement_plan = (composition replacement).plan in
+  check bool "replacement plan cannot retain old descriptor" false
+    (Surface.admits replacement first_descriptor);
+  check bool "replacement has a new plan" false (replacement_plan == first_plan);
+  let _,first_again = project first_descriptors [] in
+  check bool "older frozen turn retains its original authority" true
+    (Surface.admits first_again first_descriptor)
+;;
+
+let test_operator_only_tool_is_in_inventory_and_search () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let operator_only = tool_capability_by_internal_name surface "masc_keeper_up" in
+  check bool "operator-only Tool is explicitly non-model-invocable" true
+    (operator_only.availability
+     = Masc.Keeper_capability_surface.Not_model_invocable);
+  check (list string) "operator-only Tool has no Keeper model name" []
+    (Tool_descriptor.keeper_model_names operator_only.descriptor);
+  let found =
+    search_candidates surface "masc_keeper_up"
+    |> List.exists (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Ordinary_tool capability ->
+        String.equal capability.descriptor.id operator_only.descriptor.id
+        && capability.availability
+           = Masc.Keeper_capability_surface.Not_model_invocable
+      | Skill _ -> false)
+  in
+  check bool "operator-only Tool remains searchable without becoming executable" true found
+;;
+
+let test_complete_inventory_preserves_agent_core_surface () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen = snapshot config [ [] ] in
+  let unrestricted = capability_surface frozen in
+  let unrestricted_descriptor_ids =
+    descriptor_ids (Masc.Keeper_capability_surface.descriptors unrestricted)
+  in
+  check (list string) "unrestricted descriptors stay canonical model projection"
+    (descriptor_ids (Tool_descriptor.model_visible_descriptors ()))
+    unrestricted_descriptor_ids;
+  check (list string) "unrestricted active descriptors stay Agent Core projection"
+    unrestricted_descriptor_ids
+    (active_capability_descriptor_ids unrestricted);
+  check int "inventory covers every canonical descriptor"
+    (List.length (Tool_descriptor.all_descriptors ()))
+    (List.length (Masc.Keeper_capability_surface.tool_capabilities unrestricted));
+  let restricted = capability_surface frozen in
+  let restricted_descriptor_ids =
+    descriptor_ids (Masc.Keeper_capability_surface.descriptors restricted)
+  in
+  let expected_restricted =
+    Tool_descriptor.model_visible_descriptors () |> descriptor_ids
+  in
+  check (list string) "restricted descriptors stay canonical model projection"
+    expected_restricted
+    restricted_descriptor_ids;
+  check (list string) "restricted active descriptors stay Agent Core projection"
+    restricted_descriptor_ids
+    (active_capability_descriptor_ids restricted);
+  let read = tool_capability_by_internal_name restricted "tool_read_file" in
+  check string "a model-visible Tool is active in every surface"
+    "active"
+    (Masc.Keeper_capability_surface.capability_availability_to_string
+       read.availability)
+;;
+
+let test_empty_selection_makes_valid_skill_operator_only () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+  in
+  let reference =
+    match Snapshot.entries frozen with
+    | [ entry ] -> Snapshot.entry_reference entry
+    | _ -> fail "fixture entry count changed"
+  in
+  let capability =
+    capability_surface ~skill_names:(Some []) frozen
+    |> fun surface -> exact_capability_by_reference surface reference
+  in
+  check bool "empty selection is outside Skill surface" true
+    (capability.availability = Masc.Keeper_capability_surface.Outside_skill_surface);
+  check bool "outside Skill is operator-only" true
+    (capability.exposure = Masc.Keeper_capability_surface.Operator_only)
+;;
+
+let test_shadowed_and_invalid_skills_keep_typed_availability () =
+  let config =
+    parse_config
+      (config_text
+         (source_row ~id:"first" ~path:"first-skills"
+          ^ source_row ~id:"second" ~path:"second-skills"))
+  in
+  let first = "---\nname: review\ndescription: First source.\n---\nfirst body\n" in
+  let second = "---\nname: review\ndescription: Second source.\n---\nsecond body\n" in
+  let malformed = "---\nname: broken\n---\nbody\n" in
+  let frozen =
+    snapshot
+      config
+      [ [ candidate ~directory:"review" first; candidate ~directory:"broken" malformed ]
+      ; [ candidate ~directory:"review" second ]
+      ]
+  in
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let descriptors = Tool_descriptor.all_descriptors () in
+  let preparation = Masc.Keeper_skill_catalog.prepare_snapshot ~descriptors frozen in
+  let other = snapshot config [ []; [] ] in
+  ignore (Masc.Keeper_skill_catalog.of_snapshot ~descriptors other);
+  let inventory = Inventory.of_prepared preparation in
+  let catalog, diagnostics = Masc.Keeper_skill_catalog.prepared_catalog preparation in
+  check int "the retained catalog still has its effective Skill" 1
+    (List.length (Masc.Keeper_skill_catalog.skills catalog));
+  check int "valid catalog projection keeps no fabricated diagnostic" 0 (List.length diagnostics);
+  check int "retained inventory keeps both exact source entries" 2 (List.length (valid_items inventory));
+  (match invalid_items inventory with
+   | [invalid] ->
+     check string "rejected sibling remains in the original inventory" "broken" invalid.directory;
+     check bool "rejected sibling keeps its original source digest" true
+       (invalid.content_revision = Some (Skill_reference.content_revision_of_source_text malformed))
+   | _ -> fail "retained inventory lost its rejected sibling");
+  let surface ?(skill_names = None) () =
+    Masc.Keeper_capability_surface.create_with_descriptors
+      ~tool_descriptors:descriptors ~tool_deny:[]
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names
+      ~global_skill_catalog:catalog ~skill_inventory:inventory ~task_skills:[] in
+  let shadow =
+    match
+      valid_items inventory
+      |> List.find_opt (fun (valid : Inventory.valid_skill) ->
+        valid.catalog_status = Inventory.Shadowed)
+    with
+    | Some shadow -> shadow
+    | None -> fail "shadowed Skill is absent"
+  in
+  let shadow_capability =
+    surface ()
+    |> fun surface -> exact_capability_by_reference surface shadow.reference
+  in
+  check bool "shadow is not model invocable" true
+    (shadow_capability.availability
+     = Masc.Keeper_capability_surface.Not_model_invocable);
+  let broken_capabilities =
+    Masc.Keeper_capability_surface.skill_capabilities
+      (surface ~skill_names:(Some [ "broken" ]) ())
+  in
+  let invalid_capabilities =
+    broken_capabilities
+    |> List.filter (fun capability ->
+      capability.Masc.Keeper_capability_surface.availability
+      = Masc.Keeper_capability_surface.Invalid_definition)
+  in
+  check int "configured broken Skill has one invalid row" 1
+    (List.length invalid_capabilities);
+  let invalid_capability =
+    match invalid_capabilities with
+    | [ capability ] -> capability
+    | _ -> fail "invalid Skill capability count changed after assertion"
+  in
+  check bool "invalid definition stays typed" true
+    (invalid_capability.availability
+     = Masc.Keeper_capability_surface.Invalid_definition);
+  let missing_count =
+    broken_capabilities
+    |> List.filter (fun capability ->
+      capability.Masc.Keeper_capability_surface.availability
+      = Masc.Keeper_capability_surface.Missing_configured_skill)
+    |> List.length
+  in
+  check int "invalid configured Skill is not double-reported missing" 0 missing_count
+;;
+
+let test_search_keeps_duplicate_exact_skill_references () =
+  let config =
+    parse_config
+      (config_text
+         (source_row ~id:"first" ~path:"first-skills"
+          ^ source_row ~id:"second" ~path:"second-skills"))
+  in
+  let first = "---\nname: review\ndescription: Review first.\n---\nbody\n" in
+  let second = "---\nname: review\ndescription: Review second.\n---\nbody\n" in
+  let surface =
+    snapshot
+      config
+      [ [ candidate ~directory:"review" first ]
+      ; [ candidate ~directory:"review" second ]
+      ]
+    |> capability_surface
+  in
+  let references =
+    search_candidates surface "review"
+    |> List.filter_map (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Skill
+          { identity = Exact_skill (Inventory.Valid valid); _ } ->
+        Some valid.reference
+      | Ordinary_tool _
+      | Skill
+          { identity = (Exact_skill (Inventory.Invalid _)
+                       | Missing_configured_skill_name _)
+          ; _
+          } -> None)
+  in
+  check int "both same-name Skills survive" 2 (List.length references);
+  match references with
+  | [ first; second ] ->
+    check bool "same-name hits retain different exact refs" false
+      (Skill_reference.equal first second)
+  | _ -> fail "expected two exact Skill references"
+;;
+
+let test_search_includes_outside_tool_and_skill () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+  in
+  let surface =
+    capability_surface ~skill_names:(Some []) frozen
+  in
+  let read_tool =
+    search_candidates surface "tool_read_file"
+    |> List.exists (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Ordinary_tool capability ->
+        capability.availability = Masc.Keeper_capability_surface.Active
+      | Skill _ -> false)
+  in
+  check bool "an active Tool is searchable" true read_tool;
+  let outside_skill =
+    search_candidates surface "\"release-checklist\""
+    |> List.exists (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Skill capability ->
+        capability.availability
+        = Masc.Keeper_capability_surface.Outside_skill_surface
+      | Ordinary_tool _ -> false)
+  in
+  check bool "outside Skill is searchable" true outside_skill
+;;
+
+let test_invalid_skill_search_is_isolated () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot
+      config
+      [ [ candidate ~directory:"release-checklist" instruction_document
+        ; candidate ~directory:"broken" "---\nname: broken\n---\nbody\n"
+        ] ]
+  in
+  (* The search covers Tools and Skills together, so another Tool whose
+     description happens to use the word (masc_wiki_lint's broken_link kind)
+     is a legitimate hit. This test is about Skills: only the invalid one may
+     match, and the valid Skill must not. *)
+  let skill_hits =
+    search_candidates (capability_surface frozen) "broken"
+    |> List.filter_map (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Skill capability -> Some capability
+      | Ordinary_tool _ -> None)
+  in
+  check int "only invalid Skill matches" 1 (List.length skill_hits);
+  match skill_hits with
+  | [ capability ] ->
+    check bool "invalid availability retained" true
+      (capability.availability = Masc.Keeper_capability_surface.Invalid_definition)
+  | _ -> fail "invalid Skill search count changed after assertion"
+;;
+
+let test_search_returns_every_fts_hit_without_cutoff () =
+  let documents =
+    List.init 32 (fun index ->
+      Masc.Keeper_capability_search.
+        { payload = index
+        ; name = Printf.sprintf "candidate-%d" index
+        ; description = "sharedneedle"
+        ; invocation_name = None
+        })
+  in
+  match Masc.Keeper_capability_search.search ~query:(Masc.Keeper_capability_search.Literal "sharedneedle") documents with
+  | Ok hits -> check int "no top-N cutoff" 32 (List.length hits)
+  | Error error ->
+    fail
+      (Yojson.Safe.to_string
+         (Masc.Keeper_capability_search.error_to_yojson error))
+;;
+
+let test_surface_digest_binds_exact_tool_input_schema () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let descriptor =
+    Masc.Keeper_capability_surface.tool_capabilities surface
+    |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+      String.equal capability.descriptor.internal_name "tool_read_file")
+    |> function
+    | Some capability -> capability.descriptor
+    | None -> fail "Read capability is absent from digest fixture"
+  in
+  let material = Masc.Keeper_capability_surface.digest_material_to_yojson surface in
+  let row =
+    Yojson.Safe.Util.(material |> member "candidates" |> to_list)
+    |> List.find_opt (fun row ->
+      String.equal
+        "tool_read_file"
+        Yojson.Safe.Util.(
+          row
+          |> member "candidate"
+          |> member "capability"
+          |> member "internal_name"
+          |> to_string))
+    |> function
+    | Some row -> row
+    | None -> fail "Read digest material is absent"
+  in
+  check string "digest material retains exact input schema"
+    (Yojson.Safe.to_string (Yojson.Safe.sort descriptor.input_schema))
+    Yojson.Safe.Util.(row |> member "input_schema" |> Yojson.Safe.sort |> Yojson.Safe.to_string);
+  let altered_material =
+    match material with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "candidates"
+              then
+                ( name
+                , match value with
+                  | `List rows ->
+                    `List
+                      (List.map
+                         (fun row ->
+                            let is_read =
+                              match
+                                Yojson.Safe.Util.(
+                                  row
+                                  |> member "candidate"
+                                  |> member "capability"
+                                  |> member "internal_name")
+                              with
+                              | `String name -> String.equal name "tool_read_file"
+                              | _ -> false
+                            in
+                            if not is_read
+                            then row
+                            else
+                              match row with
+                              | `Assoc fields ->
+                                `Assoc
+                                  (List.map
+                                     (fun (field, value) ->
+                                        if String.equal field "input_schema"
+                                        then field, `Assoc []
+                                        else field, value)
+                                     fields)
+                              | other -> other)
+                         rows)
+                  | other -> other )
+              else name, value)
+           fields)
+    | other -> other
+  in
+  let altered_digest =
+    altered_material
+    |> Yojson.Safe.sort
+    |> Yojson.Safe.to_string
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
+  in
+  check bool "input schema change changes digest" false
+    (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)
+;;
+
+let test_tool_deny_removes_descriptors_from_surface () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen = snapshot config [ [] ] in
+  let full = capability_surface frozen in
+  let denied =
+    capability_surface ~tool_deny:[ "keeper_spawn"; "masc_keeper_delegate" ] frozen
+  in
+  let model_names surface =
+    Masc.Keeper_capability_surface.descriptors surface
+    |> List.concat_map Masc.Keeper_tool_descriptor.keeper_model_names
+  in
+  check bool "spawn is model-visible without a deny" true
+    (List.mem "keeper_spawn" (model_names full));
+  check bool "delegate is model-visible without a deny" true
+    (List.mem "masc_keeper_delegate" (model_names full));
+  check bool "denied spawn leaves the surface" false
+    (List.mem "keeper_spawn" (model_names denied));
+  check bool "denied delegate leaves the surface" false
+    (List.mem "masc_keeper_delegate" (model_names denied));
+  check int "exactly the two named descriptors left"
+    (List.length (model_names full) - 2)
+    (List.length (model_names denied));
+  let spawn_row =
+    Masc.Keeper_capability_surface.tool_capabilities denied
+    |> List.find_opt
+         (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+           List.mem "keeper_spawn"
+             (Masc.Keeper_tool_descriptor.keeper_model_names capability.descriptor))
+    |> function
+    | Some capability -> capability
+    | None -> fail "denied spawn has no inventory row"
+  in
+  check bool "denied spawn keeps an inventory row that names the deny" true
+    (spawn_row.availability = Masc.Keeper_capability_surface.Denied_by_profile);
+  check (option string) "a denied row names no invocation" None
+    (Masc.Keeper_capability_surface.candidate_invocation_name
+       (Masc.Keeper_capability_surface.Ordinary_tool spawn_row));
+  check int "inventory keeps every canonical descriptor under a deny"
+    (List.length (Tool_descriptor.all_descriptors ()))
+    (List.length (Masc.Keeper_capability_surface.tool_capabilities denied));
+  check bool "deny changes the surface digest" false
+    (String.equal
+       (Masc.Keeper_capability_surface.digest full)
+       (Masc.Keeper_capability_surface.digest denied));
+  let noop = capability_surface ~tool_deny:[ "no_such_tool" ] frozen in
+  check string "a deny entry naming nothing changes nothing"
+    (Masc.Keeper_capability_surface.digest full)
+    (Masc.Keeper_capability_surface.digest noop)
+;;
+
+let test_composition_follows_node_tool_admission () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"lane-plan" composition_document ] ]
+  in
+  let valid = valid_named "lane-plan" (Inventory.of_snapshot frozen) in
+  let composition_tools surface =
+    Masc.Keeper_capability_surface.skill_catalog surface
+    |> Masc.Keeper_skill_catalog.composition_entries
+    |> List.map Masc.Keeper_tool_composition_catalog.tool_name
+  in
+  let admitted = capability_surface frozen in
+  check (list string) "composition is offered while its node tool is admitted"
+    [ "keeper_compose_lane-plan" ] (composition_tools admitted);
+  check bool "admitted composition is active" true
+    ((exact_capability_by_reference admitted valid.reference).availability
+     = Masc.Keeper_capability_surface.Active);
+  let withheld = capability_surface ~tool_deny:[ "keeper_lane_status" ] frozen in
+  check (list string) "composition leaves the executable catalog with its node tool"
+    [] (composition_tools withheld);
+  let capability = exact_capability_by_reference withheld valid.reference in
+  check bool "withheld composition names the node tool outside the surface" true
+    (capability.availability
+     = Masc.Keeper_capability_surface.Node_tools_outside_surface
+         { tools = [ "keeper_lane_status" ] });
+  check bool "withheld composition is operator only" true
+    (capability.exposure = Masc.Keeper_capability_surface.Operator_only);
+  check (option string) "withheld composition names no invocation" None
+    (Masc.Keeper_capability_surface.candidate_invocation_name
+       (Masc.Keeper_capability_surface.Skill capability));
+  let projection = Masc.Keeper_capability_surface.skill_projection withheld in
+  check int "withholding is configured state, not a turn projection error" 0
+    (List.length projection.Masc.Keeper_skill_catalog.unavailable);
+  let row = Masc.Keeper_capability_surface.skill_capability_to_yojson capability in
+  check (list string) "operator row carries the node tools"
+    [ "keeper_lane_status" ]
+    Yojson.Safe.Util.(row |> member "outside_node_tools" |> to_list |> filter_string)
+;;
+
+let spawn_composition_document =
+  {|---
+name: spawn-plan
+description: Start one command beside the turn.
+---
+
+```toml composition
+[[compositions]]
+name = "spawn-plan"
+description = "Start one command beside the turn."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "start"
+tool = "keeper_spawn"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "argv"
+[compositions.nodes.input.fields.value]
+kind = "array"
+[[compositions.nodes.input.fields.value.items]]
+kind = "literal"
+value = "true"
+```
+|}
+;;
+
+let test_spawn_start_follows_sandbox_profile () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen =
+    snapshot config [ [ candidate ~directory:"spawn-plan" spawn_composition_document ] ]
+  in
+  let valid = valid_named "spawn-plan" (Inventory.of_snapshot frozen) in
+  let model_names surface =
+    Masc.Keeper_capability_surface.descriptors surface
+    |> List.concat_map Masc.Keeper_tool_descriptor.keeper_model_names
+  in
+  let composition_tools surface =
+    Masc.Keeper_capability_surface.skill_catalog surface
+    |> Masc.Keeper_skill_catalog.composition_entries
+    |> List.map Masc.Keeper_tool_composition_catalog.tool_name
+  in
+  let docker = capability_surface frozen in
+  check bool "a Docker keeper is offered keeper_spawn" true
+    (List.mem "keeper_spawn" (model_names docker));
+  check (list string) "a Docker keeper is offered the spawn composition"
+    [ "keeper_compose_spawn-plan" ] (composition_tools docker);
+  List.iter
+    (fun (label, sandbox_profile) ->
+       let refused = capability_surface ~sandbox_profile frozen in
+       let spawn_tools =
+         [ "keeper_spawn"; "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ]
+       in
+       List.iter
+         (fun name ->
+            check bool ("a Docker keeper is offered " ^ name) true
+              (List.mem name (model_names docker));
+            check bool (label ^ " keeper is not offered " ^ name) false
+              (List.mem name (model_names refused)))
+         spawn_tools;
+       check (list string) (label ^ " keeper is not offered the spawn composition")
+         [] (composition_tools refused);
+       check bool (label ^ " operator row names keeper_spawn") true
+         ((exact_capability_by_reference refused valid.reference).availability
+          = Masc.Keeper_capability_surface.Node_tools_outside_surface
+              { tools = [ "keeper_spawn" ] });
+       let expected_refusal =
+         match Masc.Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
+         | Masc.Keeper_spawn_boundary.Refuses_start { detail } -> detail
+         | Masc.Keeper_spawn_boundary.Starts_in_container ->
+           fail (label ^ " profile was expected to refuse a start")
+       in
+       List.iter
+         (fun name ->
+            match
+              Masc.Keeper_capability_surface.tool_capabilities refused
+              |> List.find_opt
+                   (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+                     List.mem name
+                       (Masc.Keeper_tool_descriptor.keeper_model_names
+                          capability.descriptor))
+            with
+            | None -> fail (label ^ " keeper has no inventory row for " ^ name)
+            | Some row ->
+              check bool (label ^ " " ^ name ^ " row carries the start refusal") true
+                (row.availability
+                 = Masc.Keeper_capability_surface.Refused_by_sandbox
+                     { detail = expected_refusal });
+              check (option string) (label ^ " " ^ name ^ " row names no invocation") None
+                (Masc.Keeper_capability_surface.candidate_invocation_name
+                   (Masc.Keeper_capability_surface.Ordinary_tool row));
+              check (option string) (label ^ " " ^ name ^ " row prints the refusal")
+                (Some expected_refusal)
+                Yojson.Safe.Util.(
+                  Masc.Keeper_capability_surface.candidate_to_yojson
+                    (Masc.Keeper_capability_surface.Ordinary_tool row)
+                  |> member "capability"
+                  |> member "sandbox_refusal"
+                  |> to_string_option))
+         spawn_tools;
+       let denied_and_refused =
+         capability_surface ~tool_deny:[ "keeper_spawn" ] ~sandbox_profile frozen
+       in
+       check bool (label ^ " a deny names the reason ahead of the sandbox") true
+         (List.exists
+            (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+               List.mem "keeper_spawn"
+                 (Masc.Keeper_tool_descriptor.keeper_model_names capability.descriptor)
+               && capability.availability
+                  = Masc.Keeper_capability_surface.Denied_by_profile)
+            (Masc.Keeper_capability_surface.tool_capabilities denied_and_refused)))
+    [ "microvm", Masc.Keeper_types_profile.Micro_vm
+    ; "remote_ssh", Masc.Keeper_types_profile.Remote_ssh
+    ]
+;;
+
+let test_surface_digest_binds_exact_tool_reference () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let surface = capability_surface (snapshot config [ [] ]) in
+  let material = Masc.Keeper_capability_surface.digest_material_to_yojson surface in
+  let rewrite_reference = function
+    | `Assoc candidate_fields ->
+      let is_tool =
+        match List.assoc_opt "candidate_kind" candidate_fields with
+        | Some (`String "ordinary_tool") -> true
+        | _ -> false
+      in
+      if not is_tool
+      then `Assoc candidate_fields
+      else
+        `Assoc
+          (List.map
+             (fun (field, value) ->
+                if not (String.equal field "reference")
+                then field, value
+                else
+                  ( field
+                  , match value with
+                    | `Assoc reference_fields ->
+                      `Assoc
+                        (List.map
+                           (fun (reference_field, reference_value) ->
+                              if String.equal reference_field "capability_id"
+                              then reference_field, `String "tampered-capability"
+                              else reference_field, reference_value)
+                           reference_fields)
+                    | other -> other ))
+             candidate_fields)
+    | other -> other
+  in
+  let altered_material =
+    match material with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if not (String.equal field "candidates")
+              then field, value
+              else
+                ( field
+                , match value with
+                  | `List (row :: rest) ->
+                    let changed_row =
+                      match row with
+                      | `Assoc row_fields ->
+                        `Assoc
+                          (List.map
+                             (fun (row_field, row_value) ->
+                                if String.equal row_field "candidate"
+                                then row_field, rewrite_reference row_value
+                                else row_field, row_value)
+                             row_fields)
+                      | other -> other
+                    in
+                    `List (changed_row :: rest)
+                  | other -> other ))
+           fields)
+    | other -> other
+  in
+  let altered_digest =
+    altered_material
+    |> Yojson.Safe.sort
+    |> Yojson.Safe.to_string
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
+  in
+  check bool "exact Tool reference change changes surface digest" false
+    (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)
+;;
+
+let test_surface_digest_is_path_independent () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let left =
+    snapshot ~base_path:"/private/host-a" config
+      [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+    |> capability_surface
+  in
+  let right =
+    snapshot ~base_path:"/different/host-b" config
+      [ [ candidate ~directory:"release-checklist" instruction_document ] ]
+    |> capability_surface
+  in
+  check bool "snapshot revisions retain host-specific scan identity" false
+    (Snapshot.equal_snapshot_revision
+       (Masc.Keeper_capability_surface.skill_snapshot_revision left)
+       (Masc.Keeper_capability_surface.skill_snapshot_revision right));
+  check string "logical capability digest ignores host base path"
+    (Masc.Keeper_capability_surface.digest left)
+    (Masc.Keeper_capability_surface.digest right)
+;;
+
+let test_unreadable_public_diagnostics_do_not_enter_digest () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let make_surface ~base_path ~path ~detail =
+    snapshot ~base_path config
+      [ [ unreadable_candidate ~directory:"broken" ~path ~detail ] ]
+    |> capability_surface
+  in
+  let left =
+    make_surface
+      ~base_path:"/private/host-a"
+      ~path:"/private/host-a/skills/broken/SKILL.md"
+      ~detail:"permission denied on host a"
+  in
+  let right =
+    make_surface
+      ~base_path:"/different/host-b"
+      ~path:"/different/host-b/skills/broken/SKILL.md"
+      ~detail:"operation not permitted on host b"
+  in
+  let public_error surface =
+    match Masc.Keeper_capability_surface.skill_capabilities surface with
+    | [ capability ] ->
+      Yojson.Safe.Util.(
+        Masc.Keeper_capability_surface.skill_capability_to_yojson capability
+        |> member "error"
+        |> member "reason")
+    | capabilities ->
+      failf "expected one invalid capability, got %d" (List.length capabilities)
+  in
+  let check_public ~path ~detail surface =
+    let error = public_error surface in
+    check string "public unreadable path retained" path
+      Yojson.Safe.Util.(error |> member "path" |> to_string);
+    check string "public unreadable detail retained" detail
+      Yojson.Safe.Util.(error |> member "detail" |> to_string)
+  in
+  check_public
+    ~path:"/private/host-a/skills/broken/SKILL.md"
+    ~detail:"permission denied on host a"
+    left;
+  check_public
+    ~path:"/different/host-b/skills/broken/SKILL.md"
+    ~detail:"operation not permitted on host b"
+    right;
+  check string "unreadable host diagnostics do not affect digest"
+    (Masc.Keeper_capability_surface.digest left)
+    (Masc.Keeper_capability_surface.digest right)
+;;
+
+let test_duplicate_public_diagnostic_retains_first_directory () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let changed =
+    "---\nname: release-checklist\ndescription: Changed.\n---\nchanged body\n"
+  in
+  let surface =
+    snapshot config
+      [ [ candidate ~directory:"release-checklist" instruction_document
+        ; candidate ~directory:"release-checklist" changed
+        ] ]
+    |> capability_surface
+  in
+  let duplicate =
+    Masc.Keeper_capability_surface.skill_capabilities surface
+    |> List.find_opt (fun capability ->
+      capability.Masc.Keeper_capability_surface.availability
+      = Masc.Keeper_capability_surface.Invalid_definition)
+    |> function
+    | Some capability -> capability
+    | None -> fail "duplicate invalid capability is absent"
+  in
+  check string "public duplicate keeps first_directory"
+    "release-checklist"
+    Yojson.Safe.Util.(
+      Masc.Keeper_capability_surface.skill_capability_to_yojson duplicate
+      |> member "error"
+      |> member "reason"
+      |> member "first_directory"
+      |> to_string)
+;;
+
+let test_surface_digest_changes_with_skill_content_revision () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let changed_document =
+    String.concat "\n"
+      [ "---"
+      ; "name: release-checklist"
+      ; "description: Check the release before shipping."
+      ; "---"
+      ; ""
+      ; "# Release checklist"
+      ; ""
+      ; "Read the exact release artifacts."
+      ]
+  in
+  let surface source_text =
+    snapshot config [ [ candidate ~directory:"release-checklist" source_text ] ]
+    |> capability_surface
+  in
+  check bool "exact Skill content revision changes surface digest" false
+    (String.equal
+       (Masc.Keeper_capability_surface.digest (surface instruction_document))
+       (Masc.Keeper_capability_surface.digest (surface changed_document)))
+;;
+
+let () =
+  run
+    "keeper_skill_inventory"
+    [ ( "inventory"
+      , [ test_case "valid instruction and exact reference" `Quick
+            test_valid_instruction_and_exact_reference
+        ; test_case "valid composition" `Quick test_valid_composition
+        ; test_case "invalid sibling isolation" `Quick
+            test_invalid_sibling_isolated_with_digest
+        ; test_case "catalog source precedence" `Quick
+            test_catalog_status_tracks_source_precedence
+        ; test_case "unrestricted inventory is active or not model invocable" `Quick
+            test_unrestricted_inventory_is_active_or_not_model_invocable
+        ; test_case "operator-only Tool inventory and search" `Quick
+            test_operator_only_tool_is_in_inventory_and_search
+        ; test_case "complete inventory preserves Agent Core surface" `Quick
+            test_complete_inventory_preserves_agent_core_surface
+        ; test_case "empty Skill selection" `Quick
+            test_empty_selection_makes_valid_skill_operator_only
+        ; test_case "shadowed and invalid Skill availability" `Quick
+            test_shadowed_and_invalid_skills_keep_typed_availability
+        ; test_case "duplicate-name search keeps exact refs" `Quick
+            test_search_keeps_duplicate_exact_skill_references
+        ; test_case "literal names and explicit search expressions" `Quick
+            test_literal_and_expression_search
+        ; test_case "outside Tool and Skill search" `Quick
+            test_search_includes_outside_tool_and_skill
+        ; test_case "invalid Skill search isolation" `Quick
+            test_invalid_skill_search_is_isolated
+        ; test_case "search has no cutoff" `Quick
+            test_search_returns_every_fts_hit_without_cutoff
+        ; test_case "surface digest binds exact Tool schema" `Quick
+            test_surface_digest_binds_exact_tool_input_schema
+        ; test_case "surface digest binds exact Tool reference" `Quick
+            test_surface_digest_binds_exact_tool_reference
+        ; test_case "Lane Add-on surface binds installation and deny" `Quick
+            test_lane_addon_surface_binds_incarnation_and_deny
+        ; test_case "composition follows frozen Add-on authority" `Quick
+            test_composition_tracks_frozen_addon_authority
+        ; test_case "tool deny removes descriptors from surface" `Quick
+            test_tool_deny_removes_descriptors_from_surface
+        ; test_case "composition follows node tool admission" `Quick
+            test_composition_follows_node_tool_admission
+        ; test_case "spawn start follows sandbox profile" `Quick
+            test_spawn_start_follows_sandbox_profile
+        ; test_case "surface digest is path independent" `Quick
+            test_surface_digest_is_path_independent
+        ; test_case "unreadable diagnostics stay public only" `Quick
+            test_unreadable_public_diagnostics_do_not_enter_digest
+        ; test_case "duplicate diagnostic keeps first directory" `Quick
+            test_duplicate_public_diagnostic_retains_first_directory
+        ; test_case "Skill content revision changes surface digest" `Quick
+            test_surface_digest_changes_with_skill_content_revision
+        ] )
+    ]
+;;

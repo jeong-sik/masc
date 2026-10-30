@@ -1,0 +1,3 @@
+raw_kind_directory=true
+channel_transfer=Unix.Unix_error(Unix.EINVAL, "in_channel_of_descr", "")
+raw_fd_still_open=true

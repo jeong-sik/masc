@@ -1,0 +1,167 @@
+{
+  "source_sha": "45c065b875c550e7109e59d86d3d2c31de9422da",
+  "test_run_id": 36654334047,
+  "test_run_url": "https://github.com/jeong-sik/masc/actions/runs/36654334047",
+  "test_suite": "test_tui_home_viewports_pty",
+  "test_pass_line": "Home viewport PTY: PASS (4 scenarios, 12 frames)",
+  "log_sha256": "a4d2e8eb3dad2e6981191a5874c4395d5298bb6279245c11462e423c019764b1",
+  "evidence_kind": "Chromium/xterm replay of raw CI fixture PTY frames; no local TUI binary run",
+  "frames": [
+    {
+      "name": "unread",
+      "columns": 80,
+      "rows": 24,
+      "no_color": false,
+      "encoding": "base64",
+      "stem": "01-unread-80x24-color",
+      "observed_terminal": {
+        "columns": 80,
+        "rows": 24
+      },
+      "raw_sha256": "3a943d6c51bf187eb2a74bb12fa44457ef741ab86d05ed6b290de878b86d8fa9"
+    },
+    {
+      "name": "unread",
+      "columns": 120,
+      "rows": 32,
+      "no_color": false,
+      "encoding": "base64",
+      "stem": "02-unread-120x32-color",
+      "observed_terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "raw_sha256": "aa8ee8577bdcac8df53933f8ddcade4dfa8a6d519cd1a134b35a1dc8ea97829a"
+    },
+    {
+      "name": "unread",
+      "columns": 160,
+      "rows": 48,
+      "no_color": false,
+      "encoding": "base64",
+      "stem": "03-unread-160x48-color",
+      "observed_terminal": {
+        "columns": 160,
+        "rows": 48
+      },
+      "raw_sha256": "481657b938c2bd601b9e2a603c21b7ed51a47720f39891423701a709d1606794"
+    },
+    {
+      "name": "unread",
+      "columns": 80,
+      "rows": 24,
+      "no_color": true,
+      "encoding": "base64",
+      "stem": "04-unread-80x24-no-color",
+      "observed_terminal": {
+        "columns": 80,
+        "rows": 24
+      },
+      "raw_sha256": "a5261ae92335aaf930815468253035d97695ae96fb7ac2dfd01ecba28b99561d"
+    },
+    {
+      "name": "unread",
+      "columns": 120,
+      "rows": 32,
+      "no_color": true,
+      "encoding": "base64",
+      "stem": "05-unread-120x32-no-color",
+      "observed_terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "raw_sha256": "5fc57b973a0fd8498c323c8210001d02d648c025c07f6467196cab3f3921e717"
+    },
+    {
+      "name": "unread",
+      "columns": 160,
+      "rows": 48,
+      "no_color": true,
+      "encoding": "base64",
+      "stem": "06-unread-160x48-no-color",
+      "observed_terminal": {
+        "columns": 160,
+        "rows": 48
+      },
+      "raw_sha256": "bc5ac007c51df38a2053c78028eb5a8f6bcb96369c01ce305eae035b1c4c3900"
+    },
+    {
+      "name": "requests",
+      "columns": 80,
+      "rows": 24,
+      "no_color": false,
+      "encoding": "base64",
+      "stem": "07-requests-80x24-color",
+      "observed_terminal": {
+        "columns": 80,
+        "rows": 24
+      },
+      "raw_sha256": "3db91e002079a754091e3410c774abceb1f55defb7e60c2499917b6131d8ef47"
+    },
+    {
+      "name": "requests",
+      "columns": 120,
+      "rows": 32,
+      "no_color": false,
+      "encoding": "base64",
+      "stem": "08-requests-120x32-color",
+      "observed_terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "raw_sha256": "07c261efc291edb075f25af38b713271007c8df7130842bcee924240fc27d234"
+    },
+    {
+      "name": "requests",
+      "columns": 160,
+      "rows": 48,
+      "no_color": false,
+      "encoding": "base64",
+      "stem": "09-requests-160x48-color",
+      "observed_terminal": {
+        "columns": 160,
+        "rows": 48
+      },
+      "raw_sha256": "16b50fc4e0035d2fb681c380eee4356b4d1fdf7fc95294d582a666b40eb57e7e"
+    },
+    {
+      "name": "requests",
+      "columns": 80,
+      "rows": 24,
+      "no_color": true,
+      "encoding": "base64",
+      "stem": "10-requests-80x24-no-color",
+      "observed_terminal": {
+        "columns": 80,
+        "rows": 24
+      },
+      "raw_sha256": "43a85468e7de5be7d044ef98f1049aea652ffdd456117c3afb8138cee7826de7"
+    },
+    {
+      "name": "requests",
+      "columns": 120,
+      "rows": 32,
+      "no_color": true,
+      "encoding": "base64",
+      "stem": "11-requests-120x32-no-color",
+      "observed_terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "raw_sha256": "c5096200760f5dae0c06325a63897db66f2136040dcab17277e504158d382ed7"
+    },
+    {
+      "name": "requests",
+      "columns": 160,
+      "rows": 48,
+      "no_color": true,
+      "encoding": "base64",
+      "stem": "12-requests-160x48-no-color",
+      "observed_terminal": {
+        "columns": 160,
+        "rows": 48
+      },
+      "raw_sha256": "faa7a3412134bce4391f4e455ae979eed290e02aad11a63d657165ceb4d48c23"
+    }
+  ]
+}

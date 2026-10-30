@@ -1,0 +1,93 @@
+[
+  {
+    "request_id": "final-plugin-hover-1-validated",
+    "operation": "batch",
+    "expected_url": "http://127.0.0.1:52390/?task=cross-drag&run=final-plugin-cross-drag-1",
+    "steps": [
+      {
+        "action": "goto",
+        "url": "http://127.0.0.1:52390/?task=hover&run=final-plugin-hover-1-validated"
+      },
+      {
+        "action": "hover",
+        "selector": "#reports"
+      },
+      {
+        "action": "wait_for_selector",
+        "selector": "#export-csv",
+        "state": "visible"
+      },
+      {
+        "action": "click",
+        "selector": "#export-csv"
+      }
+    ],
+    "expect": {
+      "selector": "text=\"Completed: hover\"",
+      "state": "visible"
+    },
+    "screenshot": true
+  },
+  {
+    "request_id": "final-plugin-scroll-1-validated",
+    "operation": "batch",
+    "expected_url": "http://127.0.0.1:52390/?task=hover&run=final-plugin-hover-1-validated",
+    "steps": [
+      {
+        "action": "goto",
+        "url": "http://127.0.0.1:52390/?task=scroll&run=final-plugin-scroll-1-validated"
+      },
+      {
+        "action": "click",
+        "selector": "#archive-report"
+      }
+    ],
+    "expect": {
+      "selector": "text=\"Completed: scroll\"",
+      "state": "visible"
+    },
+    "screenshot": false
+  },
+  {
+    "request_id": "final-plugin-drag-1-validated",
+    "operation": "batch",
+    "expected_url": "http://127.0.0.1:52390/?task=scroll&run=final-plugin-scroll-1-validated",
+    "steps": [
+      {
+        "action": "goto",
+        "url": "http://127.0.0.1:52390/?task=drag&run=final-plugin-drag-1-validated"
+      },
+      {
+        "action": "drag",
+        "source": "#card",
+        "destination": "#done"
+      }
+    ],
+    "expect": {
+      "selector": "text=\"Completed: drag\"",
+      "state": "visible"
+    },
+    "screenshot": true
+  },
+  {
+    "request_id": "final-plugin-cross-drag-1-validated",
+    "operation": "batch",
+    "expected_url": "http://127.0.0.1:52390/?task=drag&run=final-plugin-drag-1-validated",
+    "steps": [
+      {
+        "action": "goto",
+        "url": "http://127.0.0.1:52390/?task=cross-drag&run=final-plugin-cross-drag-1-validated"
+      },
+      {
+        "action": "drag",
+        "source": "#card",
+        "destination": "#cross-done"
+      }
+    ],
+    "expect": {
+      "selector": "text=\"Completed: cross-drag\"",
+      "state": "visible"
+    },
+    "screenshot": false
+  }
+]

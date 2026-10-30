@@ -1,0 +1,1293 @@
+{
+ "first_requests_after_boot": 189,
+ "with_unfinished_atoms": 143,
+ "rows": [
+  {
+   "ts": "01:33:41",
+   "keeper": "sangsu",
+   "boundary": 2077,
+   "newest_atom": 4476,
+   "unfinished_atoms": 2399,
+   "first_atom": 2077,
+   "transmitted_bytes": 3477779
+  },
+  {
+   "ts": "00:17:25",
+   "keeper": "sangsu",
+   "boundary": 2077,
+   "newest_atom": 4463,
+   "unfinished_atoms": 2386,
+   "first_atom": 2077,
+   "transmitted_bytes": 3407998
+  },
+  {
+   "ts": "00:17:32",
+   "keeper": "masc-pro-builder",
+   "boundary": 2496,
+   "newest_atom": 2835,
+   "unfinished_atoms": 339,
+   "first_atom": 2496,
+   "transmitted_bytes": 789732
+  },
+  {
+   "ts": "09:00:29",
+   "keeper": "you-never-change",
+   "boundary": 3887,
+   "newest_atom": 4161,
+   "unfinished_atoms": 274,
+   "first_atom": 3887,
+   "transmitted_bytes": 971140
+  },
+  {
+   "ts": "07:54:31",
+   "keeper": "you-never-change",
+   "boundary": 3887,
+   "newest_atom": 4043,
+   "unfinished_atoms": 156,
+   "first_atom": 3887,
+   "transmitted_bytes": 556564
+  },
+  {
+   "ts": "07:23:20",
+   "keeper": "tui-developer",
+   "boundary": 2318,
+   "newest_atom": 2428,
+   "unfinished_atoms": 110,
+   "first_atom": 2318,
+   "transmitted_bytes": 238689
+  },
+  {
+   "ts": "10:03:27",
+   "keeper": "you-never-change",
+   "boundary": 4238,
+   "newest_atom": 4347,
+   "unfinished_atoms": 109,
+   "first_atom": 4238,
+   "transmitted_bytes": 455512
+  },
+  {
+   "ts": "05:15:06",
+   "keeper": "polisher",
+   "boundary": 12606,
+   "newest_atom": 12713,
+   "unfinished_atoms": 107,
+   "first_atom": 12597,
+   "transmitted_bytes": 261296
+  },
+  {
+   "ts": "10:03:34",
+   "keeper": "tui-developer",
+   "boundary": 2435,
+   "newest_atom": 2540,
+   "unfinished_atoms": 105,
+   "first_atom": 2435,
+   "transmitted_bytes": 416974
+  },
+  {
+   "ts": "06:48:12",
+   "keeper": "tui-developer",
+   "boundary": 2318,
+   "newest_atom": 2413,
+   "unfinished_atoms": 95,
+   "first_atom": 2318,
+   "transmitted_bytes": 205804
+  },
+  {
+   "ts": "07:54:45",
+   "keeper": "masc-pro-builder",
+   "boundary": 3094,
+   "newest_atom": 3187,
+   "unfinished_atoms": 93,
+   "first_atom": 3094,
+   "transmitted_bytes": 330786
+  },
+  {
+   "ts": "05:14:56",
+   "keeper": "you-never-change",
+   "boundary": 3795,
+   "newest_atom": 3884,
+   "unfinished_atoms": 89,
+   "first_atom": 3795,
+   "transmitted_bytes": 389255
+  },
+  {
+   "ts": "07:54:45",
+   "keeper": "wkbl-front",
+   "boundary": 3288,
+   "newest_atom": 3377,
+   "unfinished_atoms": 89,
+   "first_atom": 3288,
+   "transmitted_bytes": 260981
+  },
+  {
+   "ts": "04:43:27",
+   "keeper": "polisher",
+   "boundary": 12606,
+   "newest_atom": 12694,
+   "unfinished_atoms": 88,
+   "first_atom": 12597,
+   "transmitted_bytes": 237231
+  },
+  {
+   "ts": "07:23:13",
+   "keeper": "you-never-change",
+   "boundary": 3887,
+   "newest_atom": 3975,
+   "unfinished_atoms": 88,
+   "first_atom": 3887,
+   "transmitted_bytes": 324562
+  },
+  {
+   "ts": "11:48:24",
+   "keeper": "masc-pro-builder",
+   "boundary": 3219,
+   "newest_atom": 3307,
+   "unfinished_atoms": 88,
+   "first_atom": 3219,
+   "transmitted_bytes": 250036
+  },
+  {
+   "ts": "09:00:36",
+   "keeper": "jazz-developer",
+   "boundary": 12399,
+   "newest_atom": 12483,
+   "unfinished_atoms": 84,
+   "first_atom": 12399,
+   "transmitted_bytes": 409426
+  },
+  {
+   "ts": "07:54:39",
+   "keeper": "rondo",
+   "boundary": 7049,
+   "newest_atom": 7130,
+   "unfinished_atoms": 81,
+   "first_atom": 7049,
+   "transmitted_bytes": 361149
+  },
+  {
+   "ts": "04:43:17",
+   "keeper": "you-never-change",
+   "boundary": 3795,
+   "newest_atom": 3874,
+   "unfinished_atoms": 79,
+   "first_atom": 3795,
+   "transmitted_bytes": 356860
+  },
+  {
+   "ts": "07:23:23",
+   "keeper": "masc-pro-builder",
+   "boundary": 3094,
+   "newest_atom": 3171,
+   "unfinished_atoms": 77,
+   "first_atom": 3094,
+   "transmitted_bytes": 304637
+  },
+  {
+   "ts": "10:03:35",
+   "keeper": "masc-pro-builder",
+   "boundary": 3219,
+   "newest_atom": 3295,
+   "unfinished_atoms": 76,
+   "first_atom": 3219,
+   "transmitted_bytes": 222347
+  },
+  {
+   "ts": "07:23:21",
+   "keeper": "wkbl-front",
+   "boundary": 3288,
+   "newest_atom": 3360,
+   "unfinished_atoms": 72,
+   "first_atom": 3288,
+   "transmitted_bytes": 211996
+  },
+  {
+   "ts": "07:23:15",
+   "keeper": "code-reviewer",
+   "boundary": 3052,
+   "newest_atom": 3122,
+   "unfinished_atoms": 70,
+   "first_atom": 3052,
+   "transmitted_bytes": 312080
+  },
+  {
+   "ts": "07:54:56",
+   "keeper": "polisher",
+   "boundary": 12736,
+   "newest_atom": 12806,
+   "unfinished_atoms": 70,
+   "first_atom": 12736,
+   "transmitted_bytes": 265057
+  },
+  {
+   "ts": "04:43:26",
+   "keeper": "indie-geek-blue",
+   "boundary": 6006,
+   "newest_atom": 6075,
+   "unfinished_atoms": 69,
+   "first_atom": 6006,
+   "transmitted_bytes": 312116
+  },
+  {
+   "ts": "07:23:19",
+   "keeper": "rondo",
+   "boundary": 7049,
+   "newest_atom": 7118,
+   "unfinished_atoms": 69,
+   "first_atom": 7049,
+   "transmitted_bytes": 322062
+  },
+  {
+   "ts": "12:24:52",
+   "keeper": "polisher",
+   "boundary": 12841,
+   "newest_atom": 12906,
+   "unfinished_atoms": 65,
+   "first_atom": 12841,
+   "transmitted_bytes": 246677
+  },
+  {
+   "ts": "09:00:37",
+   "keeper": "tui-developer",
+   "boundary": 2435,
+   "newest_atom": 2497,
+   "unfinished_atoms": 62,
+   "first_atom": 2435,
+   "transmitted_bytes": 313222
+  },
+  {
+   "ts": "06:48:12",
+   "keeper": "masc-pro-builder",
+   "boundary": 3094,
+   "newest_atom": 3155,
+   "unfinished_atoms": 61,
+   "first_atom": 3094,
+   "transmitted_bytes": 256765
+  },
+  {
+   "ts": "05:15:03",
+   "keeper": "masc-pro-builder",
+   "boundary": 2968,
+   "newest_atom": 3027,
+   "unfinished_atoms": 59,
+   "first_atom": 2856,
+   "transmitted_bytes": 385138
+  },
+  {
+   "ts": "00:17:35",
+   "keeper": "polisher",
+   "boundary": 12524,
+   "newest_atom": 12579,
+   "unfinished_atoms": 55,
+   "first_atom": 12524,
+   "transmitted_bytes": 162635
+  },
+  {
+   "ts": "06:48:09",
+   "keeper": "rondo",
+   "boundary": 7049,
+   "newest_atom": 7104,
+   "unfinished_atoms": 55,
+   "first_atom": 7049,
+   "transmitted_bytes": 266308
+  },
+  {
+   "ts": "10:03:38",
+   "keeper": "polisher",
+   "boundary": 12841,
+   "newest_atom": 12896,
+   "unfinished_atoms": 55,
+   "first_atom": 12841,
+   "transmitted_bytes": 221458
+  },
+  {
+   "ts": "07:23:27",
+   "keeper": "polisher",
+   "boundary": 12736,
+   "newest_atom": 12790,
+   "unfinished_atoms": 54,
+   "first_atom": 12736,
+   "transmitted_bytes": 198225
+  },
+  {
+   "ts": "06:48:13",
+   "keeper": "wkbl-front",
+   "boundary": 3288,
+   "newest_atom": 3341,
+   "unfinished_atoms": 53,
+   "first_atom": 3288,
+   "transmitted_bytes": 162313
+  },
+  {
+   "ts": "05:14:57",
+   "keeper": "code-reviewer",
+   "boundary": 2991,
+   "newest_atom": 3043,
+   "unfinished_atoms": 52,
+   "first_atom": 2991,
+   "transmitted_bytes": 308909
+  },
+  {
+   "ts": "05:15:03",
+   "keeper": "tui-developer",
+   "boundary": 2257,
+   "newest_atom": 2307,
+   "unfinished_atoms": 50,
+   "first_atom": 2139,
+   "transmitted_bytes": 350736
+  },
+  {
+   "ts": "04:43:20",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9266,
+   "newest_atom": 9315,
+   "unfinished_atoms": 49,
+   "first_atom": 9187,
+   "transmitted_bytes": 404799
+  },
+  {
+   "ts": "07:23:42",
+   "keeper": "glossary-maniac",
+   "boundary": 8172,
+   "newest_atom": 8221,
+   "unfinished_atoms": 49,
+   "first_atom": 8172,
+   "transmitted_bytes": 227218
+  },
+  {
+   "ts": "07:54:26",
+   "keeper": "context-reviewer",
+   "boundary": 1619,
+   "newest_atom": 1666,
+   "unfinished_atoms": 47,
+   "first_atom": 1619,
+   "transmitted_bytes": 329729
+  },
+  {
+   "ts": "06:48:03",
+   "keeper": "you-never-change",
+   "boundary": 3887,
+   "newest_atom": 3931,
+   "unfinished_atoms": 44,
+   "first_atom": 3887,
+   "transmitted_bytes": 194286
+  },
+  {
+   "ts": "04:43:17",
+   "keeper": "code-reviewer",
+   "boundary": 2991,
+   "newest_atom": 3032,
+   "unfinished_atoms": 41,
+   "first_atom": 2966,
+   "transmitted_bytes": 308001
+  },
+  {
+   "ts": "06:48:05",
+   "keeper": "code-reviewer",
+   "boundary": 3052,
+   "newest_atom": 3091,
+   "unfinished_atoms": 39,
+   "first_atom": 3052,
+   "transmitted_bytes": 202494
+  },
+  {
+   "ts": "06:48:15",
+   "keeper": "polisher",
+   "boundary": 12736,
+   "newest_atom": 12775,
+   "unfinished_atoms": 39,
+   "first_atom": 12736,
+   "transmitted_bytes": 165082
+  },
+  {
+   "ts": "09:00:35",
+   "keeper": "rondo",
+   "boundary": 7148,
+   "newest_atom": 7186,
+   "unfinished_atoms": 38,
+   "first_atom": 7148,
+   "transmitted_bytes": 125193
+  },
+  {
+   "ts": "10:03:34",
+   "keeper": "goo-yang-bong",
+   "boundary": 17322,
+   "newest_atom": 17360,
+   "unfinished_atoms": 38,
+   "first_atom": 17322,
+   "transmitted_bytes": 180289
+  },
+  {
+   "ts": "13:21:24",
+   "keeper": "glossary-maniac",
+   "boundary": 8592,
+   "newest_atom": 8630,
+   "unfinished_atoms": 38,
+   "first_atom": 8592,
+   "transmitted_bytes": 176390
+  },
+  {
+   "ts": "04:43:24",
+   "keeper": "masc-pro-builder",
+   "boundary": 2968,
+   "newest_atom": 3005,
+   "unfinished_atoms": 37,
+   "first_atom": 2856,
+   "transmitted_bytes": 327121
+  },
+  {
+   "ts": "13:21:04",
+   "keeper": "indie-geek-blue",
+   "boundary": 6764,
+   "newest_atom": 6801,
+   "unfinished_atoms": 37,
+   "first_atom": 6764,
+   "transmitted_bytes": 147486
+  },
+  {
+   "ts": "07:23:24",
+   "keeper": "indie-geek-blue",
+   "boundary": 6132,
+   "newest_atom": 6168,
+   "unfinished_atoms": 36,
+   "first_atom": 6132,
+   "transmitted_bytes": 186132
+  },
+  {
+   "ts": "07:54:46",
+   "keeper": "jazz-developer",
+   "boundary": 12399,
+   "newest_atom": 12435,
+   "unfinished_atoms": 36,
+   "first_atom": 12399,
+   "transmitted_bytes": 191231
+  },
+  {
+   "ts": "09:00:34",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9488,
+   "newest_atom": 9523,
+   "unfinished_atoms": 35,
+   "first_atom": 9488,
+   "transmitted_bytes": 194649
+  },
+  {
+   "ts": "07:23:08",
+   "keeper": "context-reviewer",
+   "boundary": 1619,
+   "newest_atom": 1653,
+   "unfinished_atoms": 34,
+   "first_atom": 1619,
+   "transmitted_bytes": 250702
+  },
+  {
+   "ts": "07:54:41",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9437,
+   "newest_atom": 9471,
+   "unfinished_atoms": 34,
+   "first_atom": 9437,
+   "transmitted_bytes": 207803
+  },
+  {
+   "ts": "13:20:51",
+   "keeper": "judas-priest",
+   "boundary": 1022,
+   "newest_atom": 1054,
+   "unfinished_atoms": 32,
+   "first_atom": 1022,
+   "transmitted_bytes": 230591
+  },
+  {
+   "ts": "10:29:19",
+   "keeper": "code-reviewer",
+   "boundary": 3585,
+   "newest_atom": 3616,
+   "unfinished_atoms": 31,
+   "first_atom": 3585,
+   "transmitted_bytes": 185900
+  },
+  {
+   "ts": "05:15:05",
+   "keeper": "wkbl-front",
+   "boundary": 3156,
+   "newest_atom": 3186,
+   "unfinished_atoms": 30,
+   "first_atom": 3030,
+   "transmitted_bytes": 318566
+  },
+  {
+   "ts": "09:00:38",
+   "keeper": "masc-pro-builder",
+   "boundary": 3219,
+   "newest_atom": 3247,
+   "unfinished_atoms": 28,
+   "first_atom": 3219,
+   "transmitted_bytes": 107457
+  },
+  {
+   "ts": "13:20:53",
+   "keeper": "code-reviewer",
+   "boundary": 3741,
+   "newest_atom": 3769,
+   "unfinished_atoms": 28,
+   "first_atom": 3741,
+   "transmitted_bytes": 106690
+  },
+  {
+   "ts": "10:38:50",
+   "keeper": "jazz-developer",
+   "boundary": 12504,
+   "newest_atom": 12531,
+   "unfinished_atoms": 27,
+   "first_atom": 12504,
+   "transmitted_bytes": 192746
+  },
+  {
+   "ts": "07:54:27",
+   "keeper": "judas-priest",
+   "boundary": 924,
+   "newest_atom": 950,
+   "unfinished_atoms": 26,
+   "first_atom": 924,
+   "transmitted_bytes": 226187
+  },
+  {
+   "ts": "09:00:25",
+   "keeper": "judas-priest",
+   "boundary": 967,
+   "newest_atom": 992,
+   "unfinished_atoms": 25,
+   "first_atom": 967,
+   "transmitted_bytes": 184211
+  },
+  {
+   "ts": "04:43:24",
+   "keeper": "tui-developer",
+   "boundary": 2257,
+   "newest_atom": 2281,
+   "unfinished_atoms": 24,
+   "first_atom": 2139,
+   "transmitted_bytes": 294232
+  },
+  {
+   "ts": "05:15:26",
+   "keeper": "glossary-maniac",
+   "boundary": 8116,
+   "newest_atom": 8139,
+   "unfinished_atoms": 23,
+   "first_atom": 8064,
+   "transmitted_bytes": 290101
+  },
+  {
+   "ts": "07:23:21",
+   "keeper": "jazz-developer",
+   "boundary": 12399,
+   "newest_atom": 12422,
+   "unfinished_atoms": 23,
+   "first_atom": 12399,
+   "transmitted_bytes": 135181
+  },
+  {
+   "ts": "06:47:58",
+   "keeper": "context-reviewer",
+   "boundary": 1619,
+   "newest_atom": 1641,
+   "unfinished_atoms": 22,
+   "first_atom": 1619,
+   "transmitted_bytes": 178588
+  },
+  {
+   "ts": "07:23:17",
+   "keeper": "won-chik",
+   "boundary": 3014,
+   "newest_atom": 3036,
+   "unfinished_atoms": 22,
+   "first_atom": 3014,
+   "transmitted_bytes": 207460
+  },
+  {
+   "ts": "10:29:19",
+   "keeper": "judas-priest",
+   "boundary": 1022,
+   "newest_atom": 1044,
+   "unfinished_atoms": 22,
+   "first_atom": 1022,
+   "transmitted_bytes": 182326
+  },
+  {
+   "ts": "04:43:19",
+   "keeper": "sangsu",
+   "boundary": 4612,
+   "newest_atom": 4633,
+   "unfinished_atoms": 21,
+   "first_atom": 2077,
+   "transmitted_bytes": 3466405
+  },
+  {
+   "ts": "07:23:20",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9437,
+   "newest_atom": 9457,
+   "unfinished_atoms": 20,
+   "first_atom": 9437,
+   "transmitted_bytes": 133664
+  },
+  {
+   "ts": "10:03:30",
+   "keeper": "sangsu",
+   "boundary": 4857,
+   "newest_atom": 4877,
+   "unfinished_atoms": 20,
+   "first_atom": 4857,
+   "transmitted_bytes": 147376
+  },
+  {
+   "ts": "13:21:03",
+   "keeper": "rondo",
+   "boundary": 7228,
+   "newest_atom": 7248,
+   "unfinished_atoms": 20,
+   "first_atom": 7228,
+   "transmitted_bytes": 116309
+  },
+  {
+   "ts": "13:21:03",
+   "keeper": "tui-developer",
+   "boundary": 2553,
+   "newest_atom": 2573,
+   "unfinished_atoms": 20,
+   "first_atom": 2553,
+   "transmitted_bytes": 119274
+  },
+  {
+   "ts": "07:54:45",
+   "keeper": "indie-geek-blue",
+   "boundary": 6195,
+   "newest_atom": 6214,
+   "unfinished_atoms": 19,
+   "first_atom": 6195,
+   "transmitted_bytes": 160745
+  },
+  {
+   "ts": "00:17:33",
+   "keeper": "indie-geek-blue",
+   "boundary": 6006,
+   "newest_atom": 6023,
+   "unfinished_atoms": 17,
+   "first_atom": 6006,
+   "transmitted_bytes": 150509
+  },
+  {
+   "ts": "01:33:47",
+   "keeper": "indie-geek-blue",
+   "boundary": 6006,
+   "newest_atom": 6023,
+   "unfinished_atoms": 17,
+   "first_atom": 6006,
+   "transmitted_bytes": 154710
+  },
+  {
+   "ts": "10:03:33",
+   "keeper": "jazz-developer",
+   "boundary": 12504,
+   "newest_atom": 12520,
+   "unfinished_atoms": 16,
+   "first_atom": 12504,
+   "transmitted_bytes": 110428
+  },
+  {
+   "ts": "04:43:20",
+   "keeper": "won-chik",
+   "boundary": 2943,
+   "newest_atom": 2958,
+   "unfinished_atoms": 15,
+   "first_atom": 2904,
+   "transmitted_bytes": 200824
+  },
+  {
+   "ts": "05:15:20",
+   "keeper": "gayo-yoga-leader",
+   "boundary": 394,
+   "newest_atom": 409,
+   "unfinished_atoms": 15,
+   "first_atom": 379,
+   "transmitted_bytes": 135209
+  },
+  {
+   "ts": "09:00:24",
+   "keeper": "context-reviewer",
+   "boundary": 1683,
+   "newest_atom": 1698,
+   "unfinished_atoms": 15,
+   "first_atom": 1683,
+   "transmitted_bytes": 177066
+  },
+  {
+   "ts": "10:34:04",
+   "keeper": "glossary-maniac",
+   "boundary": 8592,
+   "newest_atom": 8607,
+   "unfinished_atoms": 15,
+   "first_atom": 8592,
+   "transmitted_bytes": 86685
+  },
+  {
+   "ts": "00:17:27",
+   "keeper": "won-chik",
+   "boundary": 2880,
+   "newest_atom": 2894,
+   "unfinished_atoms": 14,
+   "first_atom": 2880,
+   "transmitted_bytes": 221240
+  },
+  {
+   "ts": "04:43:22",
+   "keeper": "rondo",
+   "boundary": 6928,
+   "newest_atom": 6942,
+   "unfinished_atoms": 14,
+   "first_atom": 6794,
+   "transmitted_bytes": 344800
+  },
+  {
+   "ts": "00:17:22",
+   "keeper": "you-never-change",
+   "boundary": 3795,
+   "newest_atom": 3808,
+   "unfinished_atoms": 13,
+   "first_atom": 3795,
+   "transmitted_bytes": 103715
+  },
+  {
+   "ts": "01:33:37",
+   "keeper": "you-never-change",
+   "boundary": 3795,
+   "newest_atom": 3808,
+   "unfinished_atoms": 13,
+   "first_atom": 3795,
+   "transmitted_bytes": 107957
+  },
+  {
+   "ts": "04:43:46",
+   "keeper": "glossary-maniac",
+   "boundary": 8116,
+   "newest_atom": 8129,
+   "unfinished_atoms": 13,
+   "first_atom": 8064,
+   "transmitted_bytes": 247106
+  },
+  {
+   "ts": "00:17:34",
+   "keeper": "wkbl-growth",
+   "boundary": 2073,
+   "newest_atom": 2085,
+   "unfinished_atoms": 12,
+   "first_atom": 2073,
+   "transmitted_bytes": 98815
+  },
+  {
+   "ts": "07:23:22",
+   "keeper": "goo-yang-bong",
+   "boundary": 17288,
+   "newest_atom": 17300,
+   "unfinished_atoms": 12,
+   "first_atom": 17288,
+   "transmitted_bytes": 127537
+  },
+  {
+   "ts": "10:03:36",
+   "keeper": "indie-geek-blue",
+   "boundary": 6572,
+   "newest_atom": 6584,
+   "unfinished_atoms": 12,
+   "first_atom": 6572,
+   "transmitted_bytes": 66977
+  },
+  {
+   "ts": "01:33:46",
+   "keeper": "masc-pro-builder",
+   "boundary": 2856,
+   "newest_atom": 2867,
+   "unfinished_atoms": 11,
+   "first_atom": 2856,
+   "transmitted_bytes": 203724
+  },
+  {
+   "ts": "05:15:00",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9332,
+   "newest_atom": 9343,
+   "unfinished_atoms": 11,
+   "first_atom": 9187,
+   "transmitted_bytes": 419375
+  },
+  {
+   "ts": "09:00:41",
+   "keeper": "polisher",
+   "boundary": 12841,
+   "newest_atom": 12852,
+   "unfinished_atoms": 11,
+   "first_atom": 12841,
+   "transmitted_bytes": 86915
+  },
+  {
+   "ts": "10:03:23",
+   "keeper": "judas-priest",
+   "boundary": 1022,
+   "newest_atom": 1033,
+   "unfinished_atoms": 11,
+   "first_atom": 1022,
+   "transmitted_bytes": 97995
+  },
+  {
+   "ts": "10:03:36",
+   "keeper": "wkbl-front",
+   "boundary": 3454,
+   "newest_atom": 3465,
+   "unfinished_atoms": 11,
+   "first_atom": 3454,
+   "transmitted_bytes": 82759
+  },
+  {
+   "ts": "10:29:19",
+   "keeper": "context-reviewer",
+   "boundary": 1735,
+   "newest_atom": 1746,
+   "unfinished_atoms": 11,
+   "first_atom": 1735,
+   "transmitted_bytes": 153646
+  },
+  {
+   "ts": "01:33:40",
+   "keeper": "won-chik",
+   "boundary": 2899,
+   "newest_atom": 2909,
+   "unfinished_atoms": 10,
+   "first_atom": 2899,
+   "transmitted_bytes": 109578
+  },
+  {
+   "ts": "09:00:31",
+   "keeper": "code-reviewer",
+   "boundary": 3289,
+   "newest_atom": 3299,
+   "unfinished_atoms": 10,
+   "first_atom": 3289,
+   "transmitted_bytes": 82676
+  },
+  {
+   "ts": "09:00:32",
+   "keeper": "won-chik",
+   "boundary": 3094,
+   "newest_atom": 3104,
+   "unfinished_atoms": 10,
+   "first_atom": 3094,
+   "transmitted_bytes": 172035
+  },
+  {
+   "ts": "13:03:17",
+   "keeper": "rondo",
+   "boundary": 7228,
+   "newest_atom": 7238,
+   "unfinished_atoms": 10,
+   "first_atom": 7228,
+   "transmitted_bytes": 82677
+  },
+  {
+   "ts": "04:43:26",
+   "keeper": "pr-updater",
+   "boundary": 16809,
+   "newest_atom": 16818,
+   "unfinished_atoms": 9,
+   "first_atom": 16688,
+   "transmitted_bytes": 256933
+  },
+  {
+   "ts": "05:15:01",
+   "keeper": "jazz-developer",
+   "boundary": 12385,
+   "newest_atom": 12394,
+   "unfinished_atoms": 9,
+   "first_atom": 12303,
+   "transmitted_bytes": 229936
+  },
+  {
+   "ts": "07:23:09",
+   "keeper": "judas-priest",
+   "boundary": 924,
+   "newest_atom": 933,
+   "unfinished_atoms": 9,
+   "first_atom": 924,
+   "transmitted_bytes": 106017
+  },
+  {
+   "ts": "13:20:47",
+   "keeper": "context-reviewer",
+   "boundary": 1755,
+   "newest_atom": 1764,
+   "unfinished_atoms": 9,
+   "first_atom": 1755,
+   "transmitted_bytes": 122419
+  },
+  {
+   "ts": "13:21:01",
+   "keeper": "won-chik",
+   "boundary": 3176,
+   "newest_atom": 3185,
+   "unfinished_atoms": 9,
+   "first_atom": 3176,
+   "transmitted_bytes": 175396
+  },
+  {
+   "ts": "04:43:21",
+   "keeper": "jazz-developer",
+   "boundary": 12359,
+   "newest_atom": 12366,
+   "unfinished_atoms": 7,
+   "first_atom": 12303,
+   "transmitted_bytes": 154163
+  },
+  {
+   "ts": "01:33:42",
+   "keeper": "rondo",
+   "boundary": 6838,
+   "newest_atom": 6844,
+   "unfinished_atoms": 6,
+   "first_atom": 6794,
+   "transmitted_bytes": 159578
+  },
+  {
+   "ts": "05:14:50",
+   "keeper": "context-reviewer",
+   "boundary": 1562,
+   "newest_atom": 1568,
+   "unfinished_atoms": 6,
+   "first_atom": 1422,
+   "transmitted_bytes": 407431
+  },
+  {
+   "ts": "05:14:59",
+   "keeper": "won-chik",
+   "boundary": 2962,
+   "newest_atom": 2968,
+   "unfinished_atoms": 6,
+   "first_atom": 2904,
+   "transmitted_bytes": 235701
+  },
+  {
+   "ts": "00:17:21",
+   "keeper": "ocaml-refactor-woman",
+   "boundary": 515,
+   "newest_atom": 520,
+   "unfinished_atoms": 5,
+   "first_atom": 515,
+   "transmitted_bytes": 79219
+  },
+  {
+   "ts": "01:33:33",
+   "keeper": "judas-priest",
+   "boundary": 672,
+   "newest_atom": 677,
+   "unfinished_atoms": 5,
+   "first_atom": 637,
+   "transmitted_bytes": 158655
+  },
+  {
+   "ts": "01:33:36",
+   "keeper": "e-masc-the-leader",
+   "boundary": 2990,
+   "newest_atom": 2995,
+   "unfinished_atoms": 5,
+   "first_atom": 2990,
+   "transmitted_bytes": 72157
+  },
+  {
+   "ts": "01:33:46",
+   "keeper": "pr-updater",
+   "boundary": 16688,
+   "newest_atom": 16693,
+   "unfinished_atoms": 5,
+   "first_atom": 16688,
+   "transmitted_bytes": 45893
+  },
+  {
+   "ts": "04:43:42",
+   "keeper": "gayo-yoga-leader",
+   "boundary": 394,
+   "newest_atom": 399,
+   "unfinished_atoms": 5,
+   "first_atom": 364,
+   "transmitted_bytes": 123412
+  },
+  {
+   "ts": "05:15:01",
+   "keeper": "rondo",
+   "boundary": 6964,
+   "newest_atom": 6969,
+   "unfinished_atoms": 5,
+   "first_atom": 6794,
+   "transmitted_bytes": 364265
+  },
+  {
+   "ts": "05:15:02",
+   "keeper": "goo-yang-bong",
+   "boundary": 17260,
+   "newest_atom": 17265,
+   "unfinished_atoms": 5,
+   "first_atom": 17178,
+   "transmitted_bytes": 334607
+  },
+  {
+   "ts": "06:48:09",
+   "keeper": "jazz-developer",
+   "boundary": 12399,
+   "newest_atom": 12404,
+   "unfinished_atoms": 5,
+   "first_atom": 12399,
+   "transmitted_bytes": 59755
+  },
+  {
+   "ts": "07:54:34",
+   "keeper": "code-reviewer",
+   "boundary": 3181,
+   "newest_atom": 3186,
+   "unfinished_atoms": 5,
+   "first_atom": 3181,
+   "transmitted_bytes": 68762
+  },
+  {
+   "ts": "10:03:28",
+   "keeper": "code-reviewer",
+   "boundary": 3504,
+   "newest_atom": 3509,
+   "unfinished_atoms": 5,
+   "first_atom": 3504,
+   "transmitted_bytes": 49000
+  },
+  {
+   "ts": "10:30:17",
+   "keeper": "indie-geek-blue",
+   "boundary": 6675,
+   "newest_atom": 6680,
+   "unfinished_atoms": 5,
+   "first_atom": 6675,
+   "transmitted_bytes": 77653
+  },
+  {
+   "ts": "13:21:03",
+   "keeper": "masc-pro-builder",
+   "boundary": 3307,
+   "newest_atom": 3312,
+   "unfinished_atoms": 5,
+   "first_atom": 3307,
+   "transmitted_bytes": 115049
+  },
+  {
+   "ts": "00:17:18",
+   "keeper": "judas-priest",
+   "boundary": 637,
+   "newest_atom": 641,
+   "unfinished_atoms": 4,
+   "first_atom": 637,
+   "transmitted_bytes": 97233
+  },
+  {
+   "ts": "06:47:59",
+   "keeper": "judas-priest",
+   "boundary": 911,
+   "newest_atom": 915,
+   "unfinished_atoms": 4,
+   "first_atom": 824,
+   "transmitted_bytes": 195266
+  },
+  {
+   "ts": "06:48:08",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9437,
+   "newest_atom": 9441,
+   "unfinished_atoms": 4,
+   "first_atom": 9437,
+   "transmitted_bytes": 61527
+  },
+  {
+   "ts": "07:54:36",
+   "keeper": "sangsu",
+   "boundary": 4805,
+   "newest_atom": 4809,
+   "unfinished_atoms": 4,
+   "first_atom": 4805,
+   "transmitted_bytes": 57437
+  },
+  {
+   "ts": "00:17:27",
+   "keeper": "rondo",
+   "boundary": 6794,
+   "newest_atom": 6797,
+   "unfinished_atoms": 3,
+   "first_atom": 6794,
+   "transmitted_bytes": 63409
+  },
+  {
+   "ts": "05:15:05",
+   "keeper": "indie-geek-blue",
+   "boundary": 6083,
+   "newest_atom": 6086,
+   "unfinished_atoms": 3,
+   "first_atom": 6006,
+   "transmitted_bytes": 180035
+  },
+  {
+   "ts": "06:48:07",
+   "keeper": "won-chik",
+   "boundary": 2995,
+   "newest_atom": 2998,
+   "unfinished_atoms": 3,
+   "first_atom": 2995,
+   "transmitted_bytes": 51748
+  },
+  {
+   "ts": "06:48:31",
+   "keeper": "gayo-yoga-leader",
+   "boundary": 432,
+   "newest_atom": 435,
+   "unfinished_atoms": 3,
+   "first_atom": 432,
+   "transmitted_bytes": 47125
+  },
+  {
+   "ts": "06:48:34",
+   "keeper": "glossary-maniac",
+   "boundary": 8172,
+   "newest_atom": 8175,
+   "unfinished_atoms": 3,
+   "first_atom": 8149,
+   "transmitted_bytes": 89793
+  },
+  {
+   "ts": "09:00:39",
+   "keeper": "wkbl-front",
+   "boundary": 3423,
+   "newest_atom": 3426,
+   "unfinished_atoms": 3,
+   "first_atom": 3423,
+   "transmitted_bytes": 45538
+  },
+  {
+   "ts": "10:03:32",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9555,
+   "newest_atom": 9558,
+   "unfinished_atoms": 3,
+   "first_atom": 9555,
+   "transmitted_bytes": 59967
+  },
+  {
+   "ts": "01:33:42",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9187,
+   "newest_atom": 9189,
+   "unfinished_atoms": 2,
+   "first_atom": 9187,
+   "transmitted_bytes": 34922
+  },
+  {
+   "ts": "05:14:51",
+   "keeper": "judas-priest",
+   "boundary": 822,
+   "newest_atom": 824,
+   "unfinished_atoms": 2,
+   "first_atom": 637,
+   "transmitted_bytes": 440982
+  },
+  {
+   "ts": "05:15:05",
+   "keeper": "pr-updater",
+   "boundary": 16835,
+   "newest_atom": 16837,
+   "unfinished_atoms": 2,
+   "first_atom": 16688,
+   "transmitted_bytes": 293707
+  },
+  {
+   "ts": "06:48:10",
+   "keeper": "goo-yang-bong",
+   "boundary": 17288,
+   "newest_atom": 17290,
+   "unfinished_atoms": 2,
+   "first_atom": 17285,
+   "transmitted_bytes": 56620
+  },
+  {
+   "ts": "07:23:16",
+   "keeper": "sangsu",
+   "boundary": 4791,
+   "newest_atom": 4793,
+   "unfinished_atoms": 2,
+   "first_atom": 4791,
+   "transmitted_bytes": 37031
+  },
+  {
+   "ts": "07:54:44",
+   "keeper": "tui-developer",
+   "boundary": 2435,
+   "newest_atom": 2437,
+   "unfinished_atoms": 2,
+   "first_atom": 2435,
+   "transmitted_bytes": 33991
+  },
+  {
+   "ts": "09:00:32",
+   "keeper": "sangsu",
+   "boundary": 4839,
+   "newest_atom": 4841,
+   "unfinished_atoms": 2,
+   "first_atom": 4839,
+   "transmitted_bytes": 44125
+  },
+  {
+   "ts": "09:00:37",
+   "keeper": "goo-yang-bong",
+   "boundary": 17322,
+   "newest_atom": 17324,
+   "unfinished_atoms": 2,
+   "first_atom": 17322,
+   "transmitted_bytes": 26451
+  },
+  {
+   "ts": "10:03:30",
+   "keeper": "won-chik",
+   "boundary": 3144,
+   "newest_atom": 3146,
+   "unfinished_atoms": 2,
+   "first_atom": 3144,
+   "transmitted_bytes": 82427
+  },
+  {
+   "ts": "10:34:05",
+   "keeper": "tui-developer",
+   "boundary": 2549,
+   "newest_atom": 2551,
+   "unfinished_atoms": 2,
+   "first_atom": 2549,
+   "transmitted_bytes": 42642
+  },
+  {
+   "ts": "11:48:49",
+   "keeper": "sangsu",
+   "boundary": 4885,
+   "newest_atom": 4887,
+   "unfinished_atoms": 2,
+   "first_atom": 4885,
+   "transmitted_bytes": 47560
+  },
+  {
+   "ts": "13:21:03",
+   "keeper": "ocaml-agent-ic",
+   "boundary": 9568,
+   "newest_atom": 9570,
+   "unfinished_atoms": 2,
+   "first_atom": 9568,
+   "transmitted_bytes": 72512
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+{
+  "live_sha256": "669508ef120954da200565c13e8bdf64ae44c1610e5adca375cbb7da1ba5a352",
+  "prepared_sha256": "1aeb658bc5d410b9e946bcbe986745e6596a821f777b25439f2cd5b702bbdec0",
+  "existing_configuration_preserved": true,
+  "runtime_mutation": false,
+  "prepared_config_file": "/tmp/masc-curator-native-config-preflight-20260913/workspace/.masc/config/runtime.toml"
+}

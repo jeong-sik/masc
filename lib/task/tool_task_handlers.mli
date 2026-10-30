@@ -1,0 +1,74 @@
+(** Core task-tool handlers extracted from [Tool_task]. *)
+
+type context =
+  { config : Workspace_core.config
+  ; agent_name : string
+  ; sw : Eio.Switch.t option
+  }
+
+type task_owner_hooks =
+  { is_keeper_agent_identity :
+      Workspace_core.config -> agent_name:string -> bool
+  ; sync_current_task_binding : Workspace_core.config -> agent_name:string -> unit
+  }
+
+val push_event_to_sessions_fn : (Yojson.Safe.t -> unit) Atomic.t
+
+val set_task_owner_hooks : task_owner_hooks -> unit
+(** Formats [fmt] and emits it on [Log.Task] at warn level, prefixed with
+    [task_id=<task_id> ]. *)
+val task_log_warn : task_id:string -> ('a, unit, string, unit) format4 -> 'a
+
+(** Formats [fmt] and emits it on [Log.Task] at error level, prefixed with
+    [task_id=<task_id> ]. *)
+
+include module type of Tool_task_payloads
+include module type of Tool_task_args
+include module type of Tool_task_completion_review
+
+val strict_release_requires_handoff : Masc_domain.task option -> bool
+
+val completion_state_error :
+  task_id:string ->
+  agent_name:string ->
+  task_opt:Masc_domain.task option ->
+  Masc_domain.masc_error option
+
+val result_to_response :
+  tool_name:string ->
+  start_time:Tool_timing.started ->
+  (string, Masc_domain.masc_error) result ->
+  Tool_result.result
+
+val log_task_transition_failed :
+  agent_name:string -> Masc_domain.masc_error -> unit
+
+val sync_planning_current_task_with_owned_task : context -> unit
+val sync_owner_current_task_binding : context -> unit
+val handle_add_task :
+  ?created_by:string ->
+  tool_name:string ->
+  start_time:Tool_timing.started ->
+  context ->
+  Yojson.Safe.t ->
+  Tool_result.result
+
+(** RFC-0267 Phase 2: [masc_task_set_goal] — assign an existing goalless task to
+    a goal. Thin adapter over {!Task_goal_assignment.set_task_goal}. *)
+val handle_set_goal :
+  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
+
+val handle_batch_add_tasks :
+  ?created_by:string ->
+  tool_name:string ->
+  start_time:Tool_timing.started ->
+  context ->
+  Yojson.Safe.t ->
+  Tool_result.result
+
+val handle_claim :
+  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
+
+val handle_claim_next :
+  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
+

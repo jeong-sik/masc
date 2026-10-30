@@ -1,0 +1,18 @@
+{
+  "workflow": "Test",
+  "workflow_file": "test.yml",
+  "head": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "ref": "fix/schedule-pending-settlement-20261027",
+  "suites": [
+    "test_schedule_runner",
+    "test_schedule_consumer_dispatch",
+    "test_schedule_tool_wiring",
+    "test_lane_addon_scheduled_act"
+  ],
+  "minimal": true,
+  "requested_at": "2026-10-26T18:02:31.821065+00:00",
+  "returncode": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/40374192059\n",
+  "stderr": "",
+  "conclusion": "not_observed"
+}

@@ -1,0 +1,4631 @@
+# Model identities are exact and ASCII case-insensitive. Prefix-shaped IDs do
+# not authorize suffix, quantization, release or provider-qualified variants.
+# suggested_clients is presentation metadata, separate from HTTP ownership.
+# Unified Model Catalog Configuration
+#
+# This file is the only place a provider or model fact is written. A row says
+# what a model IS -- its window, which controls its wire encodes, what it can
+# read. A deployment's runtime.toml says which rows it uses, under what local
+# name, with which endpoint and credential; it does not restate what a row
+# says.
+#
+# A row is scoped to a provider with provider_name when the same model differs
+# by endpoint: many model ids here appear under more than one provider, because
+# the same weights reached through a different wire have a different window or
+# a different way of being told to think.
+#
+# Serving a model this file has no row for: add the row. A deployment does not
+# restate a row that exists here. A partial second copy is a second thing to
+# keep in step and nothing reads both, so the two drift: the last one to exist
+# disagreed with this file on tool support, on replay policy, and on one
+# window by a factor of five, and every disagreement went to whichever side
+# the resolver happened to reach.
+#
+# One endpoint cannot be given a row here. The install wizard builds its
+# provider id from a hash of the operator's answers, so no row can ever name it,
+# and the model behind it is the operator's own. That deployment declares the
+# model's capabilities in its own runtime.toml and names the endpoint's dialect
+# with [providers.<id>] kind. Neither declaration can meet a row in this file,
+# so neither is a second copy; a provider this file does have a row for is
+# refused outright if it states the same facts.
+#
+# AGENT_CORE_MODEL_CATALOG replaces this file wholesale for a deployment that
+# must not edit it, and then owns every row. That is a substitution, not a
+# second copy: exactly one catalog answers either way, and the deployment
+# that substitutes carries the cost of staying current knowingly. No
+# deployment sets this variable today; the installer forwards it when an
+# operator does.
+
+# Anthropic Models
+# Assistant-prefill exclusions verified 2026-10-09 against primary guides:
+# Fable 5 and Mythos 5/Preview: https://platform.claude.com/docs/en/models/fable-5/migration-guide
+# Fable 5.1: https://platform.claude.com/docs/en/models/fable-5-1/migration-guide
+# Opus 5/5.5: https://platform.claude.com/docs/en/models/opus-5-5/migration-guide
+# Sonnet 5/5.5: https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide
+# These are explicit catalog facts; unknown models keep the base default.
+# Current Claude model limits and thinking modes are sourced from the official
+# Claude Platform model overview / adaptive-thinking docs (checked 2026-07-10).
+# Static pricing rows use standard rates; time-limited promotional pricing is
+# intentionally not encoded as a model capability or runtime control.
+# A row that names temperature, top_p and top_k as ignored does so because the
+# API answers 400 to a non-default value of any of them on that model
+# ("`temperature` is deprecated for this model."; sent to the API 2026-10-08).
+# None of the three is sent and top_k is not offered.
+
+[[models]]
+model_id = "claude-fable-5"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# Fable 5.1 reads cached tokens at 0.025x the base input price, not the 0.1x
+# every other Claude model uses (pricing table footnote, checked 2026-09-09).
+# The exact 5.1 declaration has its own cache rate; it does not inherit the
+# 5 row. Forced tool use returns an error on 5.1 ("tool_choice: type "tool"
+# and "any" are not supported for this model."; sent to the API 2026-10-08)
+# while fable-5 still takes it, so required and named tool_choice are refused
+# here. Everything else matches the 5 row.
+[[models]]
+model_id = "claude-fable-5-1"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+input_per_million = 10.0
+output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.025
+
+# 2026-09-06 RFC-0430 Phase 1: the same two direct models served over
+# DeepSeek's Anthropic-compatible surface. Probed live 2026-09-06: x-api-key
+# auth, deepseek model ids pass through unmapped (claude-* names map
+# server-side), usage carries the anthropic cache_creation/cache_read fields.
+# thinking rides the anthropic `thinking` param (budget_tokens ignored) with
+# effort high|max (https://api-docs.deepseek.com/guides/anthropic_api).
+# tool_choice stays auto-only: the direct surface rejects required/named
+# under thinking mode (measured), and this surface adds no such support.
+[[models]]
+model_id = "deepseek-v4-pro"
+base = "anthropic"
+provider_name = "deepseek-anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+# Adversarial F2: without these the anthropic preset inherits true and lets a
+# forced required/named tool_choice through — the surface stays auto-only.
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_native_streaming = true
+input_per_million = 1.32
+output_per_million = 3.96
+# Adversarial F3: the anthropic wire reports cache_creation/cache_read tokens;
+# without multipliers every cached request loses its cost estimate.
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+[[models]]
+model_id = "deepseek-v4-flash"
+base = "anthropic"
+provider_name = "deepseek-anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_native_streaming = true
+input_per_million = 0.44
+output_per_million = 1.32
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+# 2026-09-06 RFC-0430 Phase 2: the same two models over the native
+# Responses API. The provider's /responses request_path selects the
+# Openai_responses codec, whose reasoning rides reasoning.effort
+# (none|low|high|max per the guide; accepted here are the model's
+# high|max). Stateless — previous_response_id/store are ignored by the
+# endpoint. Probed live 2026-09-06.
+[[models]]
+model_id = "deepseek-v4-pro"
+base = "openai_chat_extended"
+provider_name = "deepseek-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["high", "max"]
+supports_reasoning = true
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_native_streaming = true
+input_per_million = 1.32
+output_per_million = 3.96
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+[[models]]
+model_id = "deepseek-v4-flash"
+base = "openai_chat_extended"
+provider_name = "deepseek-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["high", "max"]
+supports_reasoning = true
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_native_streaming = true
+input_per_million = 0.44
+output_per_million = 1.32
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+[[models]]
+model_id = "claude-mythos-5"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+supports_assistant_prefill = false
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+
+[[models]]
+model_id = "claude-mythos-preview"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+supports_assistant_prefill = false
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+
+# Claude Opus 5.5 (released 2026-09-22). Specs from the platform model page
+# and pricing table (checked 2026-09-23): 1M/128K, $4/$20, 5m cache write $5
+# = 1.25x, cache read $0.20 = 0.05x.
+# Thinking cannot be disabled ("Adaptive (always on)" is a launch breaking
+# change), hence always_adaptive as on the Fable rows. Forced tool use returns
+# an error (second breaking change), so required and named tool_choice are
+# refused here.
+[[models]]
+model_id = "claude-opus-5-5"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.05
+
+# Claude Sonnet 5.5 (released 2026-09-28). Specs from the platform model page,
+# effort page and pricing table (checked 2026-09-29): 1M/128K, $2/$10, 5m cache
+# write $2.50 = 1.25x. Cache read is $0.10 = 0.05x: the pricing table's
+# footnote prices cache hits on Opus 5.5 and Sonnet 5.5 at 0.05x (checked
+# 2026-10-08), and $0.20 is Sonnet 5's rate. Adaptive thinking stays the
+# default; the lowest mode is between_tools, not disabled (low..high only).
+# https://platform.claude.com/docs/en/build-with-claude/effort
+# Forced tool
+# use returns an error (a listed breaking change), so required and named
+# tool_choice are refused here while sonnet-5 still takes them. It needs a row of
+# its own: an exact model declaration never inherits the flags of sonnet-5.
+[[models]]
+model_id = "claude-sonnet-5-5"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
+anthropic_thinking_control = "adaptive_between_tools"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.05
+
+[[models]]
+model_id = "claude-sonnet-5"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
+anthropic_thinking_control = "adaptive_default"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+# $2/$10 was announced as introductory pricing through 2026-08-31; the
+# scheduled rise to $3/$15 was cancelled and $2/$10 is now the standard rate
+# (pricing page note, checked 2026-09-09). This row carried the cancelled
+# $3/$15 -- Sonnet 4.6's rate.
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# Claude Haiku 5.5 (released 2026-10-07). Specs from the platform model page,
+# effort page, migration guide and pricing table (checked 2026-10-08): 1M/128K
+# and all five effort levels.
+# https://platform.claude.com/docs/en/models/haiku-5-5/overview
+# Sent to the API through this row on 2026-10-08 with
+# packages/agent_core/test/anthropic_live_proof.ml: every effort, thinking off,
+# caller-set sampling parameters and a tool turn replaying a signed thinking
+# block all came back.
+# Thinking is adaptive and `disabled` is accepted at high effort or below, so
+# the control is adaptive_disabled_through_high: disabling thinking sends
+# `disabled` with omitted effort or explicit low/medium/high. xhigh and max
+# require adaptive thinking and are refused locally when thinking is disabled.
+# Forced tool_choice is accepted, so the tool-choice flags keep the base values.
+# The API rejects any top_k, and any temperature or top_p other than its
+# default, so none of the three is sent and top_k is not offered.
+# No price is stated. Haiku 5.5 is priced by prompt length -- $0.10/$0.50 up to
+# 100K prompt tokens and $0.50/$2.50 above, with cache writes and reads
+# following the same split -- and a row holds one rate, so either pair would
+# misprice every request on the other side of the 100K line. Its cost stays
+# unknown until the pricer reads a prompt-length tier.
+[[models]]
+model_id = "claude-haiku-5-5"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
+# Even thinking=disabled rejects a final assistant continuation (migration guide).
+supports_assistant_prefill = false
+anthropic_thinking_control = "adaptive_disabled_through_high"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+
+[[models]]
+model_id = "claude_code"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_default"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "cc:"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_default"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+input_per_million = 3.0
+output_per_million = 15.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# OpenAI Models
+# OpenAI Responses API reasoning.effort reference, checked 2026-06-29:
+# gpt-5.1+ rows may declare none/minimal/low/medium/high/xhigh; the bare
+# gpt-5 row predates gpt-5.1 and therefore omits none/xhigh here.
+[[models]]
+# Exact gpt-5.6 declaration; runtime effort/slot aliases are not model IDs.
+# Earlier prefix inheritance reached gpt-5, whose accepted_reasoning_efforts
+# omitted both "none" and "xhigh". Values mirror the
+# declared gpt-5.5 sibling; no per-token rate is published for subscription
+# serving, so pricing is omitted as on gpt-5.3-codex-spark.
+model_id = "gpt-5.6"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+
+[[models]]
+model_id = "gpt-5.4-mini"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 0.75
+output_per_million = 4.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+# 2026-09-07: codex 구독의 5.6 행들. 운영자가 runtime.toml 바인딩을 먼저
+# 추가했는데 카탈로그 행이 없어 부트가 "degraded catalog mode"(uncatalogued
+# runtime 2개)로 강등됐다 — 강등 모드에서는 케퍼빌리티 조회 경로 전체가 달라져
+# 다른 모델(openai-responses 라인)의 effort 계약 조회까지 비어 나왔다(#34033).
+# 가격은 developers.openai.com 2026-09-07: sol $4/$20, terra $2/$12, luna 는
+# #34066 의 openai-responses 행에 이미 있다(구독 레인은 이 행과 api-name 을
+# 공유한다).
+# Codex CLI cache (2026-09-30) now advertises ultra for Sol and Terra.
+# The provider-scoped openai-responses rows keep their own probed ladders.
+# codex 레인은 이 bare 행 목록으로
+# effort 를 깎으므로(keeper_official_client_host.ml
+# clamp_reasoning_effort_to_catalog) max 가 없으면 max 바인딩이 xhigh 로 나간다.
+[[models]]
+model_id = "gpt-5.6-sol"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-5.6-terra"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# Codex model/list snapshot, 2026-09-29: GPT-6.1 Sol advertises low..ultra
+# and a 272000-token default context. Keep its own ladder so the official
+# client host preserves ultra instead of snapping it to an older model.
+# https://learn.chatgpt.com/docs/config-file/config-reference#configtoml
+[[models]]
+model_id = "gpt-6.1-sol"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 272000
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+
+# Codex cache, 2026-09-30: Astra shares the six-level ladder and default
+# context of 6.1 Sol. A bare row keeps it from falling to generic gpt.
+[[models]]
+model_id = "gpt-6-astra"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 272000
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+
+# 2026-09-23: GPT-6 Sol and Luna (announced 2026-09-22) joined the codex CLI
+# cache that day. This project's OpenAI key has no model access for either id,
+# but /v1/responses still answered the reasoning.effort parameter check:
+# "'minimal' is not supported with the 'gpt-6-sol' model. Supported values
+# are: 'none', 'low', 'medium', 'high', 'xhigh', and 'max'" -- the same text
+# for luna. So both take none and refuse minimal, like the 5.6 rows above and
+# unlike gpt-6-astra, whose row omits none. Prices and cache rates are the
+# OpenRouter listing of the same ids (openrouter.ai /models, 2026-09-23):
+# sol $2/$10, luna $0.1/$0.5, cache write 1.25x / read 0.1x on both.
+[[models]]
+model_id = "gpt-6-sol"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+# Codex cache 2026-09-30 adds ultra; the direct Responses observations
+# above establish the earlier values, not direct API support for ultra.
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max", "ultra"]
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-6-luna"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+input_per_million = 0.1
+output_per_million = 0.5
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# gpt-5.5 had no row and fell to "gpt-5", whose ladder stops at high, so a
+# codex binding at xhigh went out as high. The codex CLI lists low..xhigh for
+# it (~/.codex/models_cache.json, 2026-09-22); window, ceiling and price as the
+# openrouter openai/gpt-5.5 row.
+[[models]]
+model_id = "gpt-5.5"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh"]
+input_per_million = 5.0
+output_per_million = 30.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-5.4"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 2.5
+output_per_million = 15.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-5.3-codex"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+input_per_million = 1.75
+output_per_million = 14.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-5"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+input_per_million = 5.0
+output_per_million = 30.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-5.2"
+suggested_clients = ["codex"]
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 32000
+input_per_million = 1.75
+output_per_million = 14.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-4.1"
+suggested_clients = ["codex"]
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 32000
+input_per_million = 2.0
+output_per_million = 8.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gpt-mini"
+suggested_clients = ["codex"]
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 0.15
+output_per_million = 0.6
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gpt-4o-mini"
+suggested_clients = ["codex"]
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 0.15
+output_per_million = 0.6
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gpt-4o"
+suggested_clients = ["codex"]
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 2.5
+output_per_million = 10.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gpt-4"
+suggested_clients = ["codex"]
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 2.5
+output_per_million = 10.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gpt"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+input_per_million = 2.5
+output_per_million = 10.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+# DeepSeek Models
+# DeepSeek V4 (pro/flash) rejects forced tool_choice in thinking mode — the
+# default for these rows (thinking_control_format = thinking_object). Both
+# tool_choice="required" and a named function tool_choice return HTTP 400.
+# Ref checked 2026-06-30: api-docs.deepseek.com/guides/function_calling and
+# deepseek-ai/DeepSeek-V3 issue #1376. supports_required_tool_choice=false and
+# supports_named_tool_choice=false make AGENT_CORE reject forced tool_choice (typed
+# Unsupported_required_tool_choice / Unsupported_named_tool_choice) instead of
+# serializing a request the model 400s on. Plain auto still works, so
+# supports_tool_choice stays true (mirrors the Kimi/GLM profiles).
+[[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay is this API's own rule: the docs require
+# re-sending every prior turn's reasoning_content on tools requests and
+# return 400 otherwise, and ignore it without tools
+# (api-docs.deepseek.com/guides/thinking_mode/, re-read 2026-09-18).
+# The ollama_cloud rows for the same weights deliberately differ: that
+# endpoint states no such requirement, so they replay the active tool-call
+# sequence only.
+model_id = "deepseek-v4-pro"
+base = "openai_chat"
+provider_name = "deepseek"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+accepted_reasoning_efforts = ["high", "max"]
+thinking_control_format = "thinking_object"
+reasoning_replay = "preserve_with_request_tools"
+supports_response_format_json = true
+supports_structured_output = false
+supports_native_streaming = true
+supports_prompt_caching = false
+input_per_million = 1.32
+output_per_million = 3.96
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+[[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay is this API's own rule: the docs require
+# re-sending every prior turn's reasoning_content on tools requests and
+# return 400 otherwise, and ignore it without tools
+# (api-docs.deepseek.com/guides/thinking_mode/, re-read 2026-09-18).
+# The ollama_cloud rows for the same weights deliberately differ: that
+# endpoint states no such requirement, so they replay the active tool-call
+# sequence only.
+model_id = "deepseek-ai/deepseek-v4-pro"
+base = "openai_chat"
+provider_name = "deepseek"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+accepted_reasoning_efforts = ["high", "max"]
+thinking_control_format = "thinking_object"
+reasoning_replay = "preserve_with_request_tools"
+supports_response_format_json = true
+supports_structured_output = false
+supports_native_streaming = true
+supports_prompt_caching = false
+input_per_million = 1.32
+output_per_million = 3.96
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+[[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay is this API's own rule: the docs require
+# re-sending every prior turn's reasoning_content on tools requests and
+# return 400 otherwise, and ignore it without tools
+# (api-docs.deepseek.com/guides/thinking_mode/, re-read 2026-09-18).
+# The ollama_cloud rows for the same weights deliberately differ: that
+# endpoint states no such requirement, so they replay the active tool-call
+# sequence only.
+model_id = "deepseek-v4-flash"
+base = "openai_chat"
+provider_name = "deepseek"
+# https://api-docs.deepseek.com/quick_start/agent_integrations/codex/
+# Provider-published model catalog: context_window = 1048576 (2026-09-08).
+max_context_tokens = 1048576
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+accepted_reasoning_efforts = ["high", "max"]
+thinking_control_format = "thinking_object"
+reasoning_replay = "preserve_with_request_tools"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+supports_prompt_caching = false
+input_per_million = 0.44
+output_per_million = 1.32
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+[[models]]
+# 2026-09-06 RFC-0430 Phase 0: 2026-08-16 peak pricing (off-peak 50%).
+# Cache-hit input bills at ~1/30 of the miss price (docs: kv_cache,
+# pricing). reasoning_replay is this API's own rule: the docs require
+# re-sending every prior turn's reasoning_content on tools requests and
+# return 400 otherwise, and ignore it without tools
+# (api-docs.deepseek.com/guides/thinking_mode/, re-read 2026-09-18).
+# The ollama_cloud rows for the same weights deliberately differ: that
+# endpoint states no such requirement, so they replay the active tool-call
+# sequence only.
+model_id = "deepseek-ai/deepseek-v4-flash"
+base = "openai_chat"
+provider_name = "deepseek"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+accepted_reasoning_efforts = ["high", "max"]
+thinking_control_format = "thinking_object"
+reasoning_replay = "preserve_with_request_tools"
+supports_response_format_json = true
+supports_structured_output = false
+supports_native_streaming = true
+supports_prompt_caching = false
+input_per_million = 0.44
+output_per_million = 1.32
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+# 2026-09-06 RFC-0430 Phase 1: experimental vision model (news260821).
+# Text abilities equal v4-flash; adds image input. Images are billed as
+# input tokens after a dimension-based conversion capped at 384 tokens per
+# image, at flash prices. Only user-role image parts are accepted (system/
+# assistant image parts 400) and image inputs ride the same
+# /chat/completions endpoint — base64 data URL, external https URL, or a
+# Files API file_id part. Source: https://api-docs.deepseek.com/guides/vision
+# and /news/news260821, read 2026-09-06.
+[[models]]
+model_id = "deepseek-v4-flash-vision-exp"
+base = "openai_chat"
+provider_name = "deepseek"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+accepted_reasoning_efforts = ["high", "max"]
+thinking_control_format = "thinking_object"
+reasoning_replay = "preserve_with_request_tools"
+supports_response_format_json = true
+supports_structured_output = false
+supports_native_streaming = true
+supports_prompt_caching = false
+supports_multimodal_inputs = true
+supports_image_input = true
+input_per_million = 0.44
+output_per_million = 1.32
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.0333
+
+# MiniMax Models
+# Source: official MiniMax docs checked 2026-06-30:
+# - https://platform.minimaxi.com/docs/api-reference/text-chat-openai.md
+# - https://platform.minimaxi.com/docs/guides/text-m3-function-call.md
+# minimax-m3 is the memory-os librarian runtime (runtime.toml [runtime].librarian).
+# Without this entry it resolved to provider_default (OpenAI_compat) whose
+# thinking_control_format = No_thinking_control, so the librarian's
+# enable_thinking = false was silently dropped at the wire and the reasoning model
+# polluted/emptied the JSON-mode body (librarian "empty response" / "invalid episode
+# JSON"). This entry supersedes the inert MASC runtime.toml [models.minimax-m3.capabilities]
+# block (#21521), which AGENT_CORE for_model_id never reads.
+# MiniMax-M3 Chat uses thinking.type adaptive|disabled plus reasoning_split=true
+# to expose thinking outside visible content. The Chat schema documents tools but
+# no tool_choice or response_format field, and its interleaved-thinking guide
+# requires replaying the complete assistant message including reasoning_details
+# or embedded <think> content.
+# Pricing intentionally omitted (float option): minimax-m3 rates not yet confirmed.
+[[models]]
+model_id = "minimax-m3"
+base = "openai_chat"
+max_context_tokens = 524288
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object_adaptive"
+reasoning_output_format = "split_reasoning_fields"
+# This model answers on two channels at once: part of its reasoning arrives in
+# the reasoning field, and part inside the reply text wrapped in <think> tags,
+# which the note above already records. Nothing separated the second kind, so
+# it reached the chat pane as speech. Measured 2026-09-03 on the live fleet:
+# 58 thinking blocks arrived on the field and were fine, while 46 of 85 text
+# blocks opened with reasoning; removing it left a real answer of 338
+# characters at the median. template_parser keeps reading the field and splits
+# the tagged reasoning out of the content channel.
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Native MiniMax Chat replay. Checked 2026-10-25 against:
+# https://platform.minimax.io/docs/api-reference/text-openai-api
+# https://platform.minimax.io/docs/guides/text-m3-function-call
+# Scoped lookup is exact. The full assistant content (including inline think
+# tags), independent reasoning and tool calls must survive later turns. These
+# rows belong to MiniMax's own endpoint; Ollama rows retain their own wire.
+# M2 windows/prices are not established here. Tool-choice/schema acceptance is
+# still unverified; retain the existing native M3 declaration's conservative
+# field policy rather than infer acceptance from OpenAI wire compatibility.
+
+[[models]]
+model_id = "minimax-m2"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.1"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.1-highspeed"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.5"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.5-highspeed"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.7"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.7-highspeed"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m3"
+provider_name = "minimax"
+base = "openai_chat"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object_adaptive"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m3.1-flash"
+provider_name = "minimax"
+base = "openai_chat"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Native Chat depth control; thinking cannot be disabled.
+# https://platform.minimax.io/docs/api-reference/text-openai-api (2026-10-25)
+thinking_control_format = "reasoning_effort_default_on"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Native MiniMax Responses: explicit protocol identity and replay declaration.
+# https://platform.minimax.io/docs/api-reference/text/api/openapi-responses.json
+# The schema directly names M3 and M3.1. It describes M2.x reasoning but does
+# not identify exact M2 Responses models, so their availability remains open.
+# M3 non-none effort enables reasoning without tuning depth; M3.1 tunes depth.
+# Tool choice permits auto only; forced selection is not declared. None_ uses
+# the ordinary local tool-free projection without an undocumented none value.
+
+[[models]]
+model_id = "minimax-m3"
+provider_name = "minimax_responses"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+preserve_thinking_control_format = "always_preserved"
+reasoning_replay = "preserve_responses_text"
+accepted_reasoning_efforts = ["none","minimal","low","medium","high","xhigh","max"]
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m3.1-flash"
+provider_name = "minimax_responses"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Always on; omitted effort leaves the vendor default depth intact.
+thinking_control_format = "reasoning_effort_default_on"
+preserve_thinking_control_format = "always_preserved"
+reasoning_replay = "preserve_responses_text"
+accepted_reasoning_efforts = ["low","medium","high","xhigh","max"]
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+# Ollama Cloud Models (canonical 2026-06 seed)
+# Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
+# Provider-scoped entries preserve Ollama Cloud wire behavior when a model id
+# overlaps another provider; provider_name and model_id remain separate data.
+# The official structured-output documentation currently says that Ollama Cloud
+# does not support structured outputs. JSON mode remains a separate capability;
+# keep every Ollama Cloud row schema-disabled until the official provider
+# contract changes. Source: https://docs.ollama.com/capabilities/structured-outputs,
+# checked 2026-07-10.
+
+[[models]]
+model_id = "deepseek-v4-pro"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+# /api/show model_info["deepseek4.context_length"] = 1048576 (2026-09-08).
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# ollama.com's /v1 wire returns reasoning in a typed "reasoning" field: a live
+# probe of this row on 2026-08-04 returned message keys
+# ['role','content','reasoning'].
+reasoning_streaming_format = "delta:reasoning"
+# DeepSeek's thinking-mode rule asks for the reasoning of one tool-call
+# sequence to be passed back (api-docs.deepseek.com/guides/thinking_mode).
+# Its own API extends that to every prior turn and refuses a tools request
+# with 400 otherwise; ollama.com states no such requirement, and carrying all
+# of history cost a live keeper 4.7 MB of a 7.83 MB request on 2026-09-18.
+# So the active sequence, not every prior turn.
+reasoning_replay = "latest_user_turn_tool_calls"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+supports_response_format_json = false
+# OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
+supports_structured_output = false
+
+[[models]]
+model_id = "gemma4:31b-cloud"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# Authenticated 2026-07-27 /api/show and /v1/chat/completions probes:
+# thinking is inherent on the OpenAI-compatible wire, not an /api/chat think toggle.
+supports_response_format_json = true
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+
+[[models]]
+model_id = "gemma4:31b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# 2026-08-29 probe (ollama.com /v1, response_format json_object, temperature 0,
+# 2 runs): content came back as ```json\n{"test":1}\n``` both times. JSON mode
+# is what [structured_output_support] projects to [Json_object_only], and a
+# consumer of that tier parses the content as JSON -- a fenced block fails.
+# Declared false until the served tag stops fencing.
+supports_response_format_json = false
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5.2"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+# /api/show model_info["glm5.2.context_length"] = 1048576 (2026-09-08).
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# GLM over ollama.com's /v1 wire can return its reasoning as <think>...</think>
+# inside message.content instead of a typed field. Without this flag the
+# tagged reasoning reaches the visible answer; the split is inert when no tag
+# appears.
+content_inline_reasoning = "think_tags"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "gpt-oss:20b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "gpt-oss:120b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "kimi-k2.6"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# This row once declared Ollama's native think toggle, which the /v1 wire
+# cannot encode (2026-08-15, closes #28749). A live probe of this row on
+# 2026-08-04 returned message keys ['role','content','reasoning'].
+reasoning_streaming_format = "delta:reasoning"
+# Kimi K2 docs ask for reasoning content to be replayed: required on tool
+# turns, recommended on all turns. That is Moonshot's own API rule. This row
+# rides Ollama's /v1 wire, where the boundary is the one the deepseek-v4-pro
+# row above states: the active tool-call sequence, not every prior turn. This
+# value keeps the reasoning of the latest user turn's tool calls, so the model
+# still sees what it just called inside a turn (#31424), and drops the
+# thinking of completed turns. The kimi-k3 row on this provider does the same.
+reasoning_replay = "latest_user_turn_tool_calls"
+supports_response_format_json = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+# OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
+supports_structured_output = false
+
+[[models]]
+model_id = "kimi-k2.7-code"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# Same correction as kimi-k2.6 above; confirmed by a live probe of the
+# kimi-k2.7-code row on 2026-08-04, same field shape.
+reasoning_streaming_format = "delta:reasoning"
+# Kimi K2.7-code docs: Preserved Thinking is always-on (keep reasoning_content of
+# every historical assistant message) and thinking cannot be disabled.
+reasoning_replay = "preserve_always"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+# OpenAI-compatible /v1 transport does not guarantee schema-shaped output.
+supports_structured_output = false
+
+[[models]]
+model_id = "minimax-m2.7"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 196608
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+# response_format is in Ollama's OpenAI-compatibility field list, so a model
+# reached over the /v1 wire can be asked for JSON even though the native
+# ollama_cloud preset leaves the flag off for the /api/chat wire
+# (docs.ollama.com/api/openai-compatibility, checked 2026-09-19). The same
+# list has no tool_choice, which is why no row here claims one for this
+# provider.
+[[models]]
+model_id = "minimax-m3"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+# /api/show model_info["minimax-m3.context_length"] = 512000 (2026-09-08).
+max_context_tokens = 512000
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# This row once declared Ollama's native think toggle, which the /v1 wire
+# cannot encode (2026-08-15, closes #28749); a live probe of this row
+# confirmed the typed "reasoning" field.
+# reasoning_streaming_format was already correct here — only the control-wire
+# axis and the coupled budget flag were wrong.
+reasoning_streaming_format = "delta:reasoning"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+# OpenAI-compatible /v1 transport accepts json_schema but does not guarantee
+# schema-shaped output; use the native /api/chat lane for strict schemas.
+supports_structured_output = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "mistral-large-3:675b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+# Live grouped SO check 2026-06-29 already recorded the fencing, but only
+# lowered the schema flag. Fencing breaks JSON mode too: [Json_object_only] is
+# the tier whose consumer parses the content, and ```json ... ``` does not
+# parse. 2026-08-29 re-probe (ollama.com /v1, json_object, 2 runs) still opened
+# with "Here is the JSON you requested:" before the fence.
+supports_response_format_json = false
+supports_structured_output = false
+
+[[models]]
+model_id = "nemotron-3-nano:30b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "nemotron-3-super"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "nemotron-3-ultra"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "deepseek-v3.1:671b"
+base = "ollama_cloud"
+max_context_tokens = 163840
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+# R1-era deepseek reasoning can arrive as <think>...</think> inside
+# message.content; the split is inert when no tag appears.
+content_inline_reasoning = "think_tags"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "deepseek-v3.2"
+base = "ollama_cloud"
+max_context_tokens = 163840
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+# R1-era deepseek reasoning can arrive as <think>...</think> inside
+# message.content; the split is inert when no tag appears.
+content_inline_reasoning = "think_tags"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "devstral-2:123b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
+
+[[models]]
+model_id = "devstral-small-2:24b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
+
+[[models]]
+model_id = "gemma3:4b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+
+[[models]]
+model_id = "gemma3:12b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+
+[[models]]
+model_id = "gemma3:27b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+
+[[models]]
+model_id = "gemma4:31b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5.2"
+base = "glm"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "gpt-oss:20b"
+suggested_clients = ["codex"]
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+# gpt-oss-120b-medium, served through the Antigravity Google subscription. The
+# existing rows use the Ollama tag form ("gpt-oss:120b"), which does not prefix
+# the hyphenated subscription id, so that id resolves to no row at all.
+model_id = "gpt-oss-120b"
+suggested_clients = ["codex"]
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "gpt-oss:120b"
+suggested_clients = ["codex"]
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.1"
+base = "ollama_cloud"
+max_context_tokens = 204800
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.5"
+base = "ollama_cloud"
+max_context_tokens = 196608
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.7"
+base = "ollama_cloud"
+max_context_tokens = 196608
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "ministral-3:3b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
+
+[[models]]
+model_id = "ministral-3:8b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
+
+[[models]]
+model_id = "ministral-3:14b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
+
+[[models]]
+model_id = "mistral-large-3:675b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_response_format_json = true
+supports_structured_output = false
+
+[[models]]
+model_id = "nemotron-3-nano:30b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "nemotron-3-super"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "nemotron-3-ultra"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen3-coder:480b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen3-coder-next"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen3.5:397b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# This row once declared Ollama's native think toggle, which the /v1 wire
+# cannot encode (2026-08-15, #28748). ollama.com sends the reasoning delta as
+# "reasoning" (measured 2026-08-25; F111, 2026-09-14).
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+
+# Gemini Models
+[[models]]
+# gemini-4-argon-{high,medium,low}, served through the Antigravity Google
+# subscription (`agy models` on agy 1.3.2). Official page
+# ai.google.dev/gemini-api/docs/whats-new-gemini-4-argon and OpenRouter
+# GET /api/v1/models (`google/gemini-4-argon`), checked 2026-10-14:
+# 1,048,576 in / 65,536 default out, thinkingLevel low|medium|high (medium
+# default), temperature/top_p/top_k ignored, $2/$10 introductory pricing with
+# 0.05x implicit cache reads.
+model_id = "gemini-4-argon"
+base = "gemini"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+accepted_reasoning_efforts = ["low", "medium", "high"]
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.05
+
+[[models]]
+# gemini-3.8-flash-{high,...}, served through the Antigravity Google
+# subscription; masc runs the -high runtime slot. This exact model row owns
+# the thinking contract; runtime slot names do not create model declarations.
+#
+# Probed against the Gemini API on 2026-09-07 rather than read off a page:
+#
+#   thinkingLevel=minimal  400  "Thinking level MINIMAL is not supported for
+#                                this model. Please retry with other thinking
+#                                level."
+#   thinkingLevel=low|medium|high  200
+#   1,048,576 in / 65,536 out     (models.list)
+#
+# thinkingBudget=1024 also answers 200, as it does on 3.6 and 3.7. masc sends
+# thinkingLevel regardless; what the endpoint would also accept is not what
+# picks the wire.
+model_id = "gemini-3.8-flash"
+base = "gemini"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+accepted_reasoning_efforts = ["low", "medium", "high"]
+
+[[models]]
+# gemini-3.7-flash-{high,medium,low}, served through the Antigravity Google
+# subscription (agy 1.1.17 `agy models` lists the three). Official page
+# ai.google.dev/gemini-api/docs/models/gemini-3.7-flash, read 2026-08-22:
+# 1,048,576 in / 65,536 out, thinking low|medium|high — "minimal is not
+# supported and returns an error", so it is not admitted here.
+model_id = "gemini-3.7-flash"
+base = "gemini"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+accepted_reasoning_efforts = ["low", "medium", "high"]
+
+[[models]]
+# gemini-3.6-flash-{high,medium,low}, served through the Antigravity Google
+# subscription. The exact model row declares its own accepted reasoning efforts.
+# Runtime effort/slot aliases are not additional model IDs. Values mirror the declared gemini-3.5-flash sibling.
+model_id = "gemini-3.6-flash"
+base = "gemini"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+
+[[models]]
+model_id = "gemini-3.5-flash"
+base = "gemini"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+
+[[models]]
+model_id = "gemini-3-flash-preview"
+base = "gemini"
+max_context_tokens = 1000000
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+input_per_million = 0.50
+output_per_million = 3.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gemini-3.1-pro-preview"
+base = "gemini"
+max_context_tokens = 1000000
+accepted_reasoning_efforts = ["low", "medium", "high"]
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gemini-3.1-pro"
+base = "gemini"
+max_context_tokens = 1000000
+accepted_reasoning_efforts = ["low", "medium", "high"]
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gemini-3.1-flash-lite-preview"
+base = "gemini"
+max_context_tokens = 1000000
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+input_per_million = 0.25
+output_per_million = 1.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gemini-3.1-flash-lite"
+base = "gemini"
+max_context_tokens = 1000000
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
+input_per_million = 0.25
+output_per_million = 1.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "gemini-3"
+base = "gemini"
+max_context_tokens = 1000000
+input_per_million = 0.50
+output_per_million = 3.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+# GLM Models
+[[models]]
+model_id = "glm-5.1"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
+
+[[models]]
+model_id = "glm-5-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+# GLM thinking with tool calls keeps the intermediate reasoning inside the
+# current user turn's tool-call rounds and drops it when a new user turn
+# starts (bigmodel.cn official request-flow diagram, checked 2026-08-24).
+# Undeclared, the row fell back to No_replay and the model re-derived its
+# plan on every tool round. #30015 keeps the synthetic extra-context
+# carrier out of the latest-user boundary, so this policy is effective on
+# keeper turns.
+reasoning_replay = "latest_user_turn_tool_calls"
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+model_id = "glm-5v-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+model_id = "glm-ocr"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 16384
+supports_tools = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+input_per_million = 0.0
+output_per_million = 0.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "glm-4.7-flashx"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.07
+output_per_million = 0.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.14285714285714285
+
+[[models]]
+model_id = "glm-4.7-flash"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.0
+output_per_million = 0.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "glm-4.5-x"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 2.2
+output_per_million = 8.9
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.20454545454545455
+
+[[models]]
+model_id = "glm-4.5-airx"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.1
+output_per_million = 4.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+model_id = "glm-4.5-air"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.2
+output_per_million = 1.1
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.15
+
+[[models]]
+model_id = "glm-4.5-flash"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.0
+output_per_million = 0.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 1.0
+
+[[models]]
+model_id = "glm-5-code"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+model_id = "glm-5"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+model_id = "glm-4.6"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+model_id = "glm-4.7"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+model_id = "glm-4.5"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+model_id = "glm-4-flash"
+provider_name = "glm"
+# Z.AI chat completions carries the thinking toggle in a top-level [thinking]
+# object and only replays prior reasoning under clear_thinking = false. These
+# rows declare no capability [base], so the wire fact has to be stated here.
+# The thinking-mode doc names none of these legacy GLM-4 chat models, so
+# supports_reasoning is stated false: a declared glm provider would otherwise
+# lend its base's true.
+preserve_thinking_control_format = "thinking_object_clear_thinking"
+supports_reasoning = false
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4v"
+provider_name = "glm"
+# Z.AI chat completions carries the thinking toggle in a top-level [thinking]
+# object and only replays prior reasoning under clear_thinking = false. These
+# rows declare no capability [base], so the wire fact has to be stated here.
+# The thinking-mode doc names none of these legacy GLM-4 chat models, so
+# supports_reasoning is stated false: a declared glm provider would otherwise
+# lend its base's true.
+preserve_thinking_control_format = "thinking_object_clear_thinking"
+supports_reasoning = false
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4"
+provider_name = "glm"
+# Z.AI chat completions carries the thinking toggle in a top-level [thinking]
+# object and only replays prior reasoning under clear_thinking = false. These
+# rows declare no capability [base], so the wire fact has to be stated here.
+# The thinking-mode doc names none of these legacy GLM-4 chat models, so
+# supports_reasoning is stated false: a declared glm provider would otherwise
+# lend its base's true.
+preserve_thinking_control_format = "thinking_object_clear_thinking"
+supports_reasoning = false
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_tool_choice = false
+supports_native_streaming = true
+
+# Kimi Models
+#
+# kimi-for-coding is the Kimi Code *coding plan* alias (api.kimi.com/coding),
+# not the pay-per-token platform API: the key comes from the Kimi Code console,
+# the two credentials are not interchangeable, and the gateway picks the served
+# version (Thinking on = K2.7 Code, off = K2.6 — kimi.com/code docs, checked
+# 2026-07-03). Pricing 0.0 means subscription-included, not free-tier.
+# Structured output is path-dependent on this gateway: the OpenAI-compatible
+# /v1/chat/completions path honors response_format json_schema (measured 10/10,
+# 2026-07-03) while the Anthropic-compatible /v1/messages path — the one the
+# builtin "kimi" provider uses — silently ignores output_format. The row
+# inherits supports_structured_output=false from base="kimi"; override
+# per-entry only for a deployment that routes through the OpenAI path.
+[[models]]
+model_id = "kimi-for-coding"
+base = "kimi"
+max_context_tokens = 256000
+# Kimi API parameter docs checked 2026-07-04: K2.7/K2.6/K2.5 use fixed
+# temperature/top_p values and reject non-default overrides. AGENT_CORE omits caller
+# values instead of sending invalid request fields.
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "kimi-k2.6"
+base = "kimi"
+max_context_tokens = 256000
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+thinking_control_format = "thinking_object_only"
+preserve_thinking_control_format = "thinking_object_keep_all"
+reasoning_replay = "default"
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "kimi-k2.5"
+base = "kimi"
+max_context_tokens = 256000
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+thinking_control_format = "thinking_object_only"
+preserve_thinking_control_format = "none"
+reasoning_replay = "default"
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "kimi-k2"
+base = "kimi"
+max_context_tokens = 256000
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "kimi-k2.7-code"
+base = "kimi"
+max_context_tokens = 256000
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+ignored_sampling_parameters = ["temperature", "top_p"]
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Bare kimi-k2.* rows are native Kimi. Ollama Cloud's overlapping Kimi rows
+# carry provider_name = "ollama_cloud" separately, so a native route does not
+# inherit Ollama Cloud wire semantics.
+[[models]]
+model_id = "kimi-k2.5:cloud"
+base = "kimi"
+max_context_tokens = 256000
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "kimi-k2.6:cloud"
+base = "kimi"
+max_context_tokens = 256000
+input_per_million = 0.0
+output_per_million = 0.0
+
+# xAI Grok Models
+# xAI documents the effort ladder per model, not per provider: grok-4.3 accepts
+# "none" (reasoning can be turned off) while grok-4.5 and later cannot, and
+# grok-4.7 accepts "xhigh" where grok-4.5 maps it to "high". So each row
+# declares its own accepted set rather than inheriting one from the base.
+# Sources (checked 2026-09-22):
+#   https://docs.x.ai/developers/models/grok-4.3  -> none, low, medium, high, xhigh (default low)
+#   https://docs.x.ai/developers/models/grok-4.7  -> low, medium, high, xhigh (default high)
+[[models]]
+model_id = "xai/grok-4.3"
+base = "openai_chat_extended"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh"]
+provider_name = "xai"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "grok-4.3"
+base = "openai_chat_extended"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh"]
+provider_name = "xai"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "grok-latest"
+base = "openai_chat_extended"
+# No accepted_reasoning_efforts: xAI's model data documents no "grok-latest"
+# alias (it lists grok-4.3-latest, grok-4.5-latest, grok-build-latest), so an
+# effort-carrying request is refused before it is sent and a wrong value never
+# goes out silently.
+provider_name = "xai"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Mistral Models
+[[models]]
+model_id = "mistral-large"
+base = "openai_chat"
+provider_name = "mistral"
+max_context_tokens = 260000
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+# Mistral documents "none" and "high" for mistral-small-latest
+# (https://docs.mistral.ai/studio/conversations/reasoning). Declare ["none"]
+# only until the openai_chat_extended response parser is verified against
+# Mistral's list-shaped ThinkChunk/TextChunk message.content (#38564).
+[[models]]
+model_id = "mistral-small"
+base = "openai_chat_extended"
+accepted_reasoning_efforts = ["none"]
+provider_name = "mistral"
+max_context_tokens = 256000
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+# Cohere Command Models
+[[models]]
+model_id = "command-r-plus"
+base = "cohere"
+provider_name = "cohere"
+max_context_tokens = 256000
+max_output_tokens = 32000
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+# Qwen Models
+[[models]]
+model_id = "qwen3"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+# Chat-template serving without a reasoning parser embeds reasoning as
+# <think>...</think> inside content; this row declares no typed reasoning
+# field, so the tagged channel must be split out of the visible answer.
+content_inline_reasoning = "think_tags"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+
+
+# Official Qwen3.6 template requires a single initial System and distinguishes
+# caller queries from tool_response media. This declaration covers only qwen3.6;
+# local or quantized names require their own exact declaration.
+[[models]]
+model_id = "qwen3.6"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "initial_system_latest_user_turn_tool_calls"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+
+[[models]]
+model_id = "qwen-3"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+# Same inline <think> contract as the qwen3 row above.
+content_inline_reasoning = "think_tags"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+
+[[models]]
+model_id = "qwen/qwen3.6"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "initial_system_latest_user_turn_tool_calls"
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+supports_top_k = true
+supports_min_p = true
+
+# Serving-contract namespace (Agent Core contract §2 rule 1): the capability set below
+# (MTP, chat_template_kwargs thinking, tools, reasoning) is a function of the
+# serving runtime x model, NOT of where the endpoint is rented. The namespace is
+# named for that contract ("vllm-qwen3-mtp"), not for a hosting provider. A
+# consumer selects it with the explicit pair provider_name = "vllm-qwen3-mtp"
+# and the bare runtime model id. Capability provenance is never inferred from
+# a host such as *.proxy.runpod.net. (Renamed from "runpod_mtp"; RunPod is an
+# opaque transport alias AGENT_CORE does not classify on.)
+[[models]]
+model_id = "qwen36-35b-a3b-mtp"
+base = "openai_chat"
+provider_name = "vllm-qwen3-mtp"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "initial_system_latest_user_turn_tool_calls"
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen36-35b-a3b-mtp"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "initial_system_latest_user_turn_tool_calls"
+supports_native_streaming = true
+
+# Llama Models
+[[models]]
+model_id = "llama-4"
+base = "openai_chat"
+max_context_tokens = 1000000
+supports_tools = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "llama4"
+base = "openai_chat"
+max_context_tokens = 1000000
+supports_tools = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# Provider connection and exact endpoint-identity declarations. Provider/model
+# identity is catalog data; runtime code does not branch on vendor host strings.
+[[models]]
+model_id = "gpt-image-2"
+provider_name = "openai-image"
+task = "image_generation"
+
+[[models]]
+model_id = "glm-image"
+provider_name = "zai-image"
+task = "image_generation"
+
+[[models]]
+model_id = "cogview-4-250304"
+provider_name = "zai-image"
+task = "image_generation"
+
+[[models]]
+model_id = "gemini-3.1-flash-image"
+provider_name = "gemini-image"
+task = "image_generation"
+
+[[models]]
+model_id = "gemini-3.1-flash-lite-image"
+provider_name = "gemini-image"
+task = "image_generation"
+
+[[models]]
+model_id = "gemini-3-pro-image"
+provider_name = "gemini-image"
+task = "image_generation"
+
+[[models]]
+model_id = "gpt-4o-mini-tts"
+provider_name = "openai-speech"
+task = "speech"
+
+[[models]]
+model_id = "tts-1"
+provider_name = "openai-speech"
+task = "speech"
+
+[[models]]
+model_id = "gemini-3.1-flash-tts-preview"
+provider_name = "gemini-speech"
+task = "speech"
+
+# Native OpenAI-compatible identity only. The Anthropic surface has a distinct
+# wire contract and is not inferred from the shared host.
+[[providers]]
+id = "minimax"
+kind = "openai_compat"
+base_url = "https://api.minimax.io"
+request_path = "/v1/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "minimax_responses"
+kind = "openai_compat"
+base_url = "https://api.minimax.io"
+request_path = "/v1/responses"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "nous"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:8085"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat_extended"
+
+[[providers]]
+id = "claude"
+# 2026-09-19: documented request suppression, independent of model capability.
+# https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use
+supports_parallel_tool_suppression = true
+# Anthropic's own API: the claude-* bare rows above describe exactly the models
+# it serves, so this provider enumerates their exact identities. No row is
+# scoped to "claude", and before this every such config fell to the Anthropic
+# preset and was refused any reasoning effort (#37849). deepseek-anthropic
+# below takes the same wire but answers claude-* ids with its own models, so it
+# does not declare this.
+serves_bare_models = ["claude-fable-5", "claude-fable-5-1", "claude-mythos-5", "claude-mythos-preview", "claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-haiku-5-5"]
+kind = "anthropic"
+base_url = "https://api.anthropic.com"
+request_path = "/v1/messages"
+auth = "api-key"
+capabilities_base = "anthropic"
+
+# 2026-09-06 RFC-0430 Phase 1: DeepSeek's Anthropic-compatible surface
+# (https://api-docs.deepseek.com/guides/anthropic_api, probed live
+# 2026-09-06): x-api-key fully supported, deepseek model ids pass through
+# unmapped (claude-* names map server-side to flash/pro). Same auth env as
+# the direct provider.
+[[providers]]
+id = "deepseek-anthropic"
+kind = "anthropic"
+base_url = "https://api.deepseek.com/anthropic"
+request_path = "/v1/messages"
+auth = "api-key"
+capabilities_base = "anthropic"
+
+# 2026-09-06 RFC-0430 Phase 2: DeepSeek's native Responses API
+# (https://api-docs.deepseek.com/guides/responses_api, probed live
+# 2026-09-06 — status "completed", reasoning output items). The request_path
+# selects the Openai_responses codec (provider_http_codec), so this rides the
+# existing responses backend: stateless, terminal events instead of [DONE].
+[[providers]]
+id = "deepseek-responses"
+kind = "openai_compat"
+base_url = "https://api.deepseek.com"
+request_path = "/responses"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "openai-responses"
+# 2026-09-19: documented request suppression, independent of model capability.
+# https://developers.openai.com/api/docs/guides/function-calling#parallel-function-calling
+supports_parallel_tool_suppression = true
+kind = "openai_compat"
+base_url = "https://api.openai.com"
+request_path = "/v1/responses"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+
+# 2026-09-07 라이브 실측: 이 키의 호출 가능 모델은 gpt-5.6-luna($0.20/$1.20,
+# deepseek-flash 출력가보다 싸다), gpt-6-astra($10/$50), gpt-5.4. sol/terra 는
+# /v1/models 에 나오지만 프로젝트 게이트로 호출 거부. gpt-5.5 는 이 날 접근이
+# 사라졌다. 모델들이 chat/completions 에서 function tools+reasoning_effort 를
+# 함께 거부하므로(라이브 400) 두 행 모두 responses 표면으로.
+# 2026-09-07 probe on /v1/responses, this key, once access opened. All three
+# gpt-5.6 rows and gpt-6-astra answer the same way:
+#
+#   effort minimal            400  "'minimal' is not supported with the
+#                                   '<model>' model" -- the message names it
+#   effort none               200 on gpt-5.6-*, 400 on gpt-6-astra
+#   effort low|medium|high|xhigh|max   200
+#   ~950K-token input         200; larger answers 429 on the org's
+#                             tokens-per-minute limit, not on length
+#
+# So the ladder is measured, and the ceiling is the published 1.05M with this
+# account meeting its rate limit first. 272000 and low|medium|high were the
+# conservative values these rows started at.
+[[models]]
+model_id = "gpt-5.6-luna"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+# 2026-09-07 라이브 실측(15:11Z): "Unsupported parameter: 'temperature' is not
+# supported with this model" — reasoning 모델이 sampling 필드를 거부한다.
+# deepseek 계열 행과 같은 방어.
+ignored_sampling_parameters = ["temperature", "top_p"]
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 0.2
+output_per_million = 1.2
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# gpt-5.6-sol and -terra, callable on this key since 2026-09-07 (both answer
+# 200 on /v1/responses; the same probe as the luna row above gives all three
+# the same effort ladder). Prices from developers.openai.com/api/docs/pricing,
+# read the same day: sol $4/$20, terra $2/$12. Cached-input rates are a tenth
+# of input on both, which is what the multipliers below already say.
+[[models]]
+model_id = "gpt-5.6-sol"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-5.6-terra"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 2.0
+output_per_million = 12.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# Responses supports none through max for GPT-6 Sol. Keep this endpoint's
+# ladder separate from the bare Codex row, which advertises ultra.
+# https://developers.openai.com/api/docs/models/gpt-6-sol
+[[models]]
+model_id = "gpt-6-sol"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+model_id = "gpt-6-astra"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+# 2026-09-07 라이브 실측(15:11Z): "Unsupported parameter: 'temperature' is not
+# supported with this model" — reasoning 모델이 sampling 필드를 거부한다.
+# deepseek 계열 행과 같은 방어.
+ignored_sampling_parameters = ["temperature", "top_p"]
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 10.0
+output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+
+[[providers]]
+id = "gemini"
+# These provider-independent model rows describe this native endpoint. The
+# declaration applies only to catalog rows, not capability-manifest overrides.
+serves_bare_models = ["gemini-4-argon", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite", "gemini-3"]
+kind = "gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+request_path = ""
+auth = "api-key"
+capabilities_base = "gemini"
+
+[[providers]]
+id = "glm-coding"
+kind = "glm"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "glm"
+
+[[providers]]
+id = "openrouter"
+kind = "openai_compat"
+base_url = "https://openrouter.ai/api/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+# The router declares one effort contract for everything it serves, so the
+# accepted set belongs to this row rather than to a model row per served
+# model. See Capabilities.openrouter_capabilities for the source and for why
+# the off value is not in it.
+capabilities_base = "openrouter"
+
+[[providers]]
+id = "groq"
+kind = "openai_compat"
+base_url = "https://api.groq.com/openai/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "siliconflow"
+kind = "openai_compat"
+base_url = "https://api.siliconflow.cn/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "ollama"
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+request_path = "/api/chat"
+auth = "none"
+# Bound the complete /api/tags metadata read, not model generation.
+discovery_timeout_s = 5.0
+capabilities_base = "ollama"
+
+[[providers]]
+id = "deepseek"
+kind = "openai_compat"
+base_url = "https://api.deepseek.com"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "kimi"
+# Native Kimi model facts are declared in the provider-independent rows above.
+serves_bare_models = ["kimi-for-coding", "kimi-k2.6", "kimi-k2.5", "kimi-k2", "kimi-k2.7-code", "kimi-k2.5:cloud", "kimi-k2.6:cloud"]
+kind = "kimi"
+identity_kinds = ["kimi", "openai_compat"]
+base_url = "https://api.kimi.com/coding"
+request_path = "/v1/messages"
+auth = "api-key"
+capabilities_base = "kimi"
+
+[[providers]]
+id = "ollama_cloud"
+kind = "ollama"
+identity_kinds = ["ollama", "openai_compat"]
+capabilities_base_by_identity_kind = { openai_compat = "ollama_cloud_v1" }
+base_url = "https://ollama.com"
+request_path = "/api/chat"
+auth = "api-key"
+# Match the deployment's explicit 600-second Cloud cold-start budget for the
+# complete /api/tags response, independently of generation and Exact-output.
+discovery_timeout_s = 600.0
+capabilities_base = "ollama_cloud"
+
+# Kimi's coding-plan endpoint. Separate row from [id = "kimi"]: a different
+# base URL, a different key, and an OpenAI-compatible wire rather than Kimi's
+# own.
+[[providers]]
+id = "kimi_coding"
+kind = "openai_compat"
+base_url = "https://api.kimi.com/coding/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat_extended"
+
+[[providers]]
+id = "glm"
+kind = "glm"
+identity_kinds = ["glm", "openai_compat"]
+base_url = "https://api.z.ai/api/paas/v4"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "glm"
+
+# Image models use the explicit provider identity "zai-image".
+[[providers]]
+id = "zai-image"
+kind = "glm"
+base_url = "https://api.z.ai/api/paas/v4"
+request_path = "/images/generations"
+auth = "api-key"
+capabilities_base = "glm"
+default_model = "glm-image"
+
+[[providers]]
+id = "openai-image"
+kind = "openai_compat"
+base_url = "https://api.openai.com/v1"
+request_path = "/images/generations"
+auth = "api-key"
+capabilities_base = "openai_chat_extended"
+default_model = "gpt-image-2"
+
+# Image models use the explicit provider identity "gemini-image".
+[[providers]]
+id = "gemini-image"
+kind = "gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+request_path = "/interactions"
+auth = "api-key"
+capabilities_base = "gemini"
+default_model = "gemini-3.1-flash-image"
+
+[[providers]]
+id = "openai-speech"
+kind = "openai_compat"
+base_url = "https://api.openai.com/v1"
+request_path = "/audio/speech"
+auth = "api-key"
+capabilities_base = "openai_chat_extended"
+default_model = "gpt-4o-mini-tts"
+
+# Explicit Chat binding. Keep this after image/speech so adding Chat does not
+# change the existing base-URL-only identity winner; endpoint-aware consumers
+# and explicit provider_id select this row by its own request path. Host or
+# model text alone never grants these capabilities to an anonymous proxy.
+[[providers]]
+id = "openai"
+kind = "openai_compat"
+base_url = "https://api.openai.com/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+# No provider-wide capability preset: an unknown model must not inherit
+# structured output from GPT-4o, or reasoning controls from GPT-5.5.
+
+# Chat-specific exact identities, verified against the official model pages
+# and Chat/Structured Outputs references on 2026-10-16:
+# https://developers.openai.com/api/docs/models/gpt-5.5
+# https://developers.openai.com/api/docs/models/gpt-5.4
+# https://developers.openai.com/api/docs/models/gpt-4o
+# https://developers.openai.com/api/docs/models/gpt-4o-mini
+# https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
+# https://developers.openai.com/api/docs/guides/structured-outputs
+# These rows do not import Responses or subscription model families. Snapshot
+# ids require their own declaration; no model-name prefix inheritance applies.
+[[models]]
+model_id = "gpt-5.5"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+chat_output_budget_field = "max_completion_tokens"
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh"]
+
+[[models]]
+model_id = "gpt-5.4"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+chat_output_budget_field = "max_completion_tokens"
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh"]
+
+[[models]]
+model_id = "gpt-4o"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+
+[[models]]
+model_id = "gpt-4o-mini"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 128000
+max_output_tokens = 16384
+
+[[providers]]
+id = "gemini-speech"
+kind = "gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+request_path = "/interactions"
+auth = "api-key"
+capabilities_base = "gemini"
+default_model = "gemini-3.1-flash-tts-preview"
+
+[[providers]]
+id = "xai"
+kind = "openai_compat"
+base_url = "https://api.x.ai/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+# The effort ladder is declared per grok row, not here: xAI documents it per
+# model (grok-4.3 accepts "none", grok-4.5 and later do not).
+capabilities_base = "xai"
+
+[[providers]]
+id = "mistral"
+kind = "openai_compat"
+base_url = "https://api.mistral.ai/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "mistral"
+
+[[providers]]
+id = "cohere"
+kind = "openai_compat"
+base_url = "https://api.cohere.com/compatibility/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "cohere"
+
+# Xiaomi MiMo V2.5 capability specs.
+# Token Plan and the regular API expose the same vendor model capabilities for
+# these rows, but they are different products operationally: Token Plan is a
+# coding-tool subscription with regional gateways and tp-* keys; the regular API
+# is pay-per-token billing on api.xiaomimimo.com. The /anthropic Token Plan
+# gateway is a different wire protocol and is not represented by these
+# openai_chat rows.
+[[providers]]
+id = "mimo"
+kind = "openai_compat"
+base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+default_model = "mimo-v2.5-pro"
+capabilities_base = "mimo"
+
+[[models]]
+model_id = "mimo-v2.5-pro"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_reasoning = true
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_response_format_json = true
+# Xiaomi documents structured output as JSON mode (`json_object`) and directs
+# clients to validate schema conformance locally. Do not advertise native
+# json_schema structured output from the chat-completions catalog row.
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_audio_input = false
+supports_video_input = false
+supports_native_streaming = true
+
+# MiMo-V2.6 (Xiaomi). Specs from the vendor release page
+# (mimo.mi.com/docs/en-US/news/latest/v2-6) and the HF model card
+# (XiaomiMiMo/MiMo-V2.6-Pro-RL), checked 2026-09-23: 1.02T total / 42B active
+# MoE, MIT, 1M context; AA Intelligence Index 46 (independently matched). It
+# rides the same openai_chat wire and thinking_object_only control as
+# mimo-v2.5-pro, so the row mirrors that sibling. No price is declared: the
+# vendor's "1/20~1/60" figure has no independent source. Multimodal stays off
+# like the sibling row -- the vendor advertises visual coding, but no probe
+# here sent an image.
+[[models]]
+model_id = "mimo-v2.6"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_reasoning = true
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_response_format_json = true
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_audio_input = false
+supports_video_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "mimo-v2.5"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_reasoning = true
+# Live MiMo V2.5 OpenAI-compatible smoke, checked 2026-06-29: responses carry
+# reasoning in the `reasoning_content` side-channel, accept tool calls, stream
+# reasoning/tool deltas separately, and accept response_format/json_schema.
+# MiMo's Deep Thinking docs require assistant tool-call messages to pass back
+# `reasoning_content` in later rounds; plain-answer reasoning still stays out
+# of replay to avoid context growth.
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_response_format_json = true
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+supports_video_input = true
+supports_native_streaming = true
+
+# Nvidia Models
+[[models]]
+model_id = "nvidia/nvidia-vl"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "nvidia-vl"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "nvidia/nvidia"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+
+[[models]]
+model_id = "nvidia"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+
+# Gemma Models
+[[models]]
+model_id = "google/gemma-4"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "google/gemma-4-e2b"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "google/gemma-4-e4b"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "google/gemma-4-12b"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "gemma4-coder-fable5-q4km"
+base = "openai_chat"
+provider_name = "runpod_rtxa6000"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_top_k = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "gemma4-coder-fable5-q4km"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_top_k = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "hf.co/google/gemma-4"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "hf.co/unsloth/gemma-4"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Local Ollama exact Gemma 4 E2B QAT row. Verified with:
+# `ollama show hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL`
+# on 2026-07-06: context 131072; capabilities tools, completion, vision, audio.
+[[models]]
+model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "ollama/hf.co/unsloth/gemma-4-E2B-it-qat-GGUF"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Generic/Ollama/Other Fallbacks
+[[models]]
+model_id = "ollama"
+base = "ollama"
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+model_id = "nous"
+base = "openai_chat"
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Extra Aliased and Specific Model Rules
+[[models]]
+model_id = "gpt-5.3-codex-spark"
+suggested_clients = ["codex"]
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+
+[[models]]
+model_id = "glm-coding-plan:glm-5-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+model_id = "glm-coding-plan:glm-5.1"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
+
+[[models]]
+model_id = "glm-coding-plan:glm-5"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+model_id = "google/gemma-4-26b-a4b"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "google/gemma-4-31b"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "glm-4.6v"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+
+# Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
+# names its provider, and a provider-scoped lookup never reads a bare row, so
+# the bare row was unreachable from every runtime: the lookup fell through to
+# the provider's capabilities_base (glm, max_output_tokens 40960) and the vision
+# tool's 65536 request was clamped to 40960, which Z.AI refuses for this model:
+#   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
+#   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
+# The bare row stays for callers that resolve by model id alone.
+# Z.AI states one accepted value for tool_choice: "The default value is auto,
+# and only auto is supported" (docs.z.ai/api-reference/llm/chat-completion,
+# checked 2026-09-19). What the endpoint does with another value is not
+# documented -- neither an error nor a fallback is specified -- so this row
+# claims only what the reference states, like every other glm row.
+[[models]]
+model_id = "glm-5.3"
+provider_name = "glm-coding"
+base = "glm"
+thinking_control_format = "none"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+# The rest of the Z.AI coding plan's text models. A glm-coding binding's
+# capability lookup never reads a bare row (the glm-4.6v twin below has the
+# full account), so without these every one resolved to the glm
+# capabilities_base: a 200000 window and a 40960 output ceiling for all of
+# them, glm-4.5 and glm-4.5-air included, whose bare rows say 128000.
+# All eight are listed by GET /coding/paas/v4/models and answered a plain and
+# a tool-call completion on 2026-09-22, reasoning on message.reasoning_content.
+# Windows: glm-5.2's 1M is docs.z.ai/guides/llm/glm-5.2; the others are their
+# bare rows' values, since docs.z.ai no longer has a page for them.
+# Output: each endpoint named "[1,131072]" when it refused an oversized
+# max_tokens the same day (code 1210). That is the parameter's range, not room
+# in the window, so glm-4.5 and glm-4.5-air keep their bare rows' 96000 inside
+# a 128000 window; an exact-output call sends this value as max_tokens.
+# Prices: pricing, unlike the capability lookup, falls back to a bare row when
+# no scoped row exists, so these rows restate the bare rows' prices and a turn
+# on them is estimated exactly as before. glm-5.2's bare row has no price.
+[[models]]
+model_id = "glm-5.2"
+provider_name = "glm-coding"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5.1"
+provider_name = "glm-coding"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5-turbo"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5"
+provider_name = "glm-coding"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.7"
+provider_name = "glm-coding"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.6"
+provider_name = "glm-coding"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.5"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.5-air"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+input_per_million = 0.2
+output_per_million = 1.1
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.15
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.6v"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+
+# Provider-scoped twin of the bare glm-4.6v row above. A runtime config always
+# names its provider, and a provider-scoped lookup never reads a bare row, so
+# the bare row was unreachable from every runtime: the lookup fell through to
+# the provider's capabilities_base (glm, max_output_tokens 40960) and the vision
+# tool's 65536 request was clamped to 40960, which Z.AI refuses for this model:
+#   HTTP 400 code 1210 "The max_tokens parameter is illegal. [1,32768]"
+#   (keeper_analyze_image on glm-coding.glm-4.6v, 2026-09-07T15:24:58Z).
+# The bare row stays for callers that resolve by model id alone.
+[[models]]
+model_id = "glm-4.6v"
+provider_name = "glm"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+
+[[models]]
+model_id = "glm-4.5v"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 16384
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenRouter Models
+#
+# OpenRouter is a gateway: one OpenAI-compatible endpoint in front of many
+# vendors. Rows are provider-scoped (provider_name = "openrouter") because the
+# gateway's ids carry a vendor segment ("anthropic/claude-opus-5") and its wire
+# behavior is the gateway's, not the vendor's direct API. Provider-scoped
+# lookup is an exact id match, so each id needs its own row.
+#
+# Every value below came from one of two sources on 2026-09-10, and the
+# per-row comments say which:
+#   - OpenRouter's own GET /api/v1/models metadata (context, output ceiling,
+#     price, accepted parameters) — evidence/task-openrouter-support/
+#     models-raw.json, summarized in models-curated.txt
+#   - a live request against /chat/completions — the probe artifacts and
+#     PROBE-SUMMARY.md in the same directory
+#
+# The effort ladder is per-endpoint and was measured rung by rung, 12 models
+# x 7 rungs (probe7-*): every model took minimal/low/medium/high/xhigh/max,
+# and five refused "none" with HTTP 400 "Reasoning is mandatory for this
+# endpoint and cannot be disabled". Declaring the ladder is not optional here:
+# with accepted_reasoning_efforts absent, sending any effort on this wire
+# raises Undeclared_reasoning_effort_capability rather than degrading.
+#
+# Reasoning axes, measured across all 12 models:
+#   - The gateway normalizes readable reasoning to message.reasoning and
+#     mirrors it into message.reasoning_details[]. No model answered on
+#     reasoning_content, the DeepSeek-direct spelling.
+#   - Streaming puts the text in delta.reasoning and the typed item in
+#     delta.reasoning_details. gpt-5.5 sends delta.reasoning = null with the
+#     real item (reasoning.encrypted, format openai-responses-v1) only in
+#     delta.reasoning_details, so a plain "delta:reasoning" row would read the
+#     null and drop the item. Hence delta_details:reasoning on every row.
+#   - Replaying a prior turn's reasoning_details is accepted (HTTP 200,
+#     probe5-t2-with-encrypted-replay.json) and is not required — stripping it
+#     also answers (probe5-t2-stripped.json). Declaring the tool-call replay
+#     keeps an encrypted chain intact instead of silently restarting it.
+#
+# Two rules govern what a row restates. Parameter support follows the
+# gateway's own supported_parameters list in both directions, since that list
+# is what the endpoint will and will not forward. Input modalities only ever
+# go down: a row lowers a base claim the gateway contradicts (the text-only
+# ids below) and never raises one, so audio, video and document input stay off
+# even where the gateway advertises them, because no probe here sent one.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[models]]
+model_id = "anthropic/claude-opus-5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 5.0
+output_per_million = 25.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "anthropic/claude-sonnet-5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 2.0
+output_per_million = 10.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "openai/gpt-5.5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 5.0
+output_per_million = 30.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "openai/gpt-5.6-sol"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 2.0
+output_per_million = 10.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "google/gemini-3.8-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+input_per_million = 0.75
+output_per_million = 3.75
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "x-ai/grok-4.6"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 500000
+max_output_tokens = 450000
+input_per_million = 2.0
+output_per_million = 6.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "moonshotai/kimi-k3"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 943718
+input_per_million = 3.0
+output_per_million = 15.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "z-ai/glm-5.3-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1310720
+max_output_tokens = 131072
+input_per_million = 0.075
+output_per_million = 0.25
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "z-ai/glm-5.3"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1310720
+max_output_tokens = 943718
+input_per_million = 1.4
+output_per_million = 4.4
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+# Gateway input modalities are text only for this id.
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_parallel_tool_calls = true
+
+# DeepSeek v4.1 Flash 1017, probed 2026-10-28
+# (evidence/2026-10-28-openrouter-bindings/). Window 1048576, output ceiling
+# 393216 and image input come from the gateway listing. The list price is
+# $0.30/$1.20 against $0.0886/$0.177 for deepseek-v4-flash; the gateway lowers
+# it to $0.15/$0.60 on weekends and on weekdays outside UTC 01:00-04:00 and
+# 06:00-10:00, but the row declares the top-level price like every other row.
+# The disable rung is real: reasoning_effort "none" answered 200 with 0
+# reasoning tokens, and basic and tool_choice required (get_weather) answered 200.
+[[models]]
+model_id = "deepseek/deepseek-v4.1-flash-1017"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 393216
+input_per_million = 0.3
+output_per_million = 1.2
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+
+[[models]]
+model_id = "deepseek/deepseek-v4-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 384000
+input_per_million = 0.088606
+output_per_million = 0.177212
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+# Gateway input modalities are text only for this id.
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+model_id = "deepseek/deepseek-v4-pro"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 384000
+input_per_million = 0.95526
+output_per_million = 1.91052
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+# Gateway input modalities are text only for this id.
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+model_id = "qwen/qwen3.8-max-0902"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+input_per_million = 2.0
+output_per_million = 6.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_min_p = false
+supports_parallel_tool_calls = false
+# Alibaba refuses tool_choice required/object while thinking is on:
+# HTTP 400 invalid_parameter_error "The tool_choice parameter does not
+# support being set to required or object in thinking mode" (measured,
+# probe2-qwen38-max-toolcall.json). The base preset claims both; left
+# unchanged a required-tool turn fails the request instead of degrading.
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+
+# More OpenRouter ids, probed 2026-09-22 in the same shape as the rows
+# above: basic, stream, tool_choice required, reasoning shape,
+# reasoning_split, the seven-rung ladder, and the listed output ceiling sent
+# as max_tokens (evidence/task-openrouter-new-models/SUMMARY.md). Window,
+# ceiling, price and parameter support are the gateway's GET /api/v1/models
+# the same day; every id reads image input there, so none lowers a modality.
+# Each answered a plain completion, took reasoning_split, and streamed its
+# usage on the last chunk.
+
+# Anthropic refused tool_choice required and named, with no reasoning field
+# on the request: "tool_choice: type \"tool\" and \"any\" are not supported
+# for this model". Its thinking is always on, which is also why "none" is
+# refused below.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+# max_output_tokens is the gateway's listed ceiling. Sending it as max_tokens
+# answered 402 "requires more credits, or fewer max_tokens": the gateway
+# reserves max_tokens x price against the key's balance ($1.9 that day), so
+# the ceiling itself was not exercised.
+[[models]]
+model_id = "anthropic/claude-fable-5.1"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+
+# At max_tokens 200 and 400 every rung billed 0 reasoning tokens. At 4000,
+# "high" billed 3628 with reasoning.text and "none" billed 0
+# (probe-claude-haiku45-reasoning-budget-*.json), so the disable rung is real;
+# a small max_tokens leaves this model no room to reason. tool_choice required
+# at "high" and max_tokens 4000 answered get_weather with 0 reasoning tokens
+# (probe-claude-haiku45-toolcall-thinking.json): the gateway serves a forced
+# call without thinking, as it did for opus-5 and sonnet-5 the same day.
+[[models]]
+model_id = "anthropic/claude-haiku-4.5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 200000
+max_output_tokens = 64000
+input_per_million = 1.0
+output_per_million = 5.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+# max_output_tokens is the gateway's listed ceiling. Sending it as max_tokens
+# answered 402 "requires more credits, or fewer max_tokens": the gateway
+# reserves max_tokens x price against the key's balance ($1.9 that day), so
+# the ceiling itself was not exercised.
+[[models]]
+model_id = "openai/gpt-6-astra"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# All seven rungs answered 200. Every rung billed 0 reasoning tokens on the
+# ladder prompt, as gpt-5.6-sol did on 2026-09-10; the "think it through"
+# prompt at "high" billed 17 with reasoning.encrypted and reasoning.summary.
+[[models]]
+model_id = "openai/gpt-5.6-terra"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 2.0
+output_per_million = 12.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# All seven rungs answered 200 and "none" billed 0 reasoning tokens.
+[[models]]
+model_id = "openai/gpt-5.6-luna"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 0.2
+output_per_million = 1.2
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# The stream carried its reasoning only as a delta.reasoning_details item,
+# never as delta.reasoning text, which is what delta_details:reasoning reads.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+model_id = "google/gemini-3.1-pro-preview"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+input_per_million = 2.0
+output_per_million = 12.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+model_id = "x-ai/grok-4.7"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 500000
+max_output_tokens = 450000
+input_per_million = 1.6
+output_per_million = 4.8
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# Same Alibaba refusal as qwen3.8-max: HTTP 400 invalid_parameter_error "The
+# tool_choice parameter does not support being set to required or object in
+# thinking mode". Unlike qwen3.8-max, "none" answered 200 with 0 reasoning
+# tokens, so this ladder keeps the disable rung.
+[[models]]
+model_id = "qwen/qwen3.8-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+input_per_million = 0.15
+output_per_million = 0.47
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_min_p = false
+supports_parallel_tool_calls = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+
+# The Z.AI coding plan refuses this id (code 1311,
+# zai-coding-plan-glm53-flashx.json); the gateway serves it. The gateway lists
+# response_format for it but not structured_outputs, so the row lowers the
+# base claim.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+model_id = "z-ai/glm-5.3-flashx"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+input_per_million = 0.37
+output_per_million = 1.25
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_min_p = false
+supports_parallel_tool_calls = false
+supports_structured_output = false
+
+# OpenRouter free ids admitted by the synthetic provider probes in
+# evidence/task-openrouter-free-models/probe-results.json. Catalog limits and
+# flags come from the gateway snapshot through gen_rows.py. Only successful
+# basic and tool-call cases receive rows unless the endpoint is retiring;
+# none is enabled only when explicitly reported reasoning_tokens=0.
+# Lane placement remains operator configuration.
+
+[[models]]
+model_id = "cohere/north-mini-code:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 256000
+max_output_tokens = 64000
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+model_id = "liquid/lfm-2.5-2.6b:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 65536
+max_output_tokens = 8192
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+# Probed 2026-10-28 (evidence/2026-10-28-openrouter-bindings/): basic and
+# get_weather answered 200, and effort "none" billed 0 reasoning tokens. The
+# gateway lists image input and no parallel_tool_calls, top_k or min_p, so the
+# row lowers those and keeps the image claim.
+[[models]]
+model_id = "nvidia/nemotron-3.5-super-vl:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_top_k = false
+supports_min_p = false
+
+# Z.AI coding plan. Window 1M (docs.z.ai). The 131072 output ceiling is the
+# value the endpoint named when it refused an out-of-range max_tokens with
+# code 1210. Reads images (probe PNG confirmed).
+[[models]]
+model_id = "glm-5.3-flash"
+provider_name = "glm-coding"
+base = "glm"
+thinking_control_format = "none"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "latest_user_turn_tool_calls"
+
+# ollama.com's glm-5.3-flash. /api/show context_length 1048576. Declares the
+# window only; the rest of the capabilities, the replay contract included, come
+# from the ollama_cloud bases.
+[[models]]
+model_id = "glm-5.3-flash"
+provider_name = "ollama_cloud"
+max_context_tokens = 1048576
+
+# Ollama GET /v1/models listed deepseek-v4.1-flash on 2026-09-26.
+# ollama.com serves this model under both the bare name and a ":cloud" suffix.
+# Earlier comment here claimed "a prefix match covers the pair from one row" --
+# false for the provider-scoped path a runtime binding actually resolves
+# through: Exact_output_catalog_binding.resolve_exact and
+# Model_catalog.lookup_for_provider both compare model_id with exact
+# (case-folded) equality, never a prefix test, so a deployment whose runtime
+# binding names the ":cloud" spelling resolved to no catalog row and was
+# excluded from librarian_exact/hitl_auto_judge/board_attention_exact (#37074,
+# 2026-09-19 live deployment). A separate provider_name-agnostic path
+# (Model_catalog.lookup/lookup_entries in model_catalog.ml) also uses exact
+# equality and filters to rows
+# declaring no provider_name at all -- both deepseek-v4.1-flash rows below set
+# provider_name = "ollama_cloud", so that path never sees either of them. One
+# row per exact spelling, not a shared prefix.
+[[models]]
+model_id = "deepseek-v4.1-flash"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning"
+# Same boundary as the deepseek-v4-pro row above: this endpoint's rule covers
+# the active sequence, not every prior turn. Measured 2026-09-18 on a live
+# lane: with the all-history contract, 4.7 MB of a 7.83 MB request was thinking
+# the target had disabled and never produced.
+reasoning_replay = "latest_user_turn_tool_calls"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_response_format_json = true
+supports_structured_output = false
+
+# Same backend as the bare "deepseek-v4.1-flash" row above under ollama.com's
+# ":cloud" alias spelling (#37074). Every capability field is duplicated
+# verbatim rather than left to inherit, so the two spellings cannot drift.
+# model_id is compared with exact equality by every provider-scoped
+# exact-output consumer, so each spelling a deployment can bind needs its own
+# row.
+[[models]]
+model_id = "deepseek-v4.1-flash:cloud"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning"
+reasoning_replay = "latest_user_turn_tool_calls"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_response_format_json = true
+supports_structured_output = false
+
+# Thinking control and the effort ladder come from the ollama_cloud base
+# (ollama_cloud_v1).
+[[models]]
+model_id = "kimi-k3"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning"
+# Replay thinking inside the active user turn's tool loop and drop the
+# historical thinking of completed turns.
+reasoning_replay = "latest_user_turn_tool_calls"
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+# api.kimi.com takes temperature 0.6 only at effort=none and 1.0 otherwise,
+# so AGENT_CORE leaves temperature out and the endpoint picks it.
+# Only the none/not-none difference (reasoning_content present or absent) is
+# verified. The stream carries reasoning text on delta.reasoning_content
+# (raw chunk 2026-09-16T14:53Z: `"delta":{"reasoning_content":"Let"}`). Left
+# undeclared, the reasoning_effort dialect default "reasoning" is read instead,
+# the first chunk fails the stream, and history replays under that name too.
+[[models]]
+model_id = "k3"
+provider_name = "kimi_coding"
+base = "openai_chat"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+reasoning_streaming_format = "delta:reasoning_content"
+accepted_reasoning_efforts = ["none"]
+supports_image_input = true
+supports_multimodal_inputs = true
+supports_native_streaming = true
+ignored_sampling_parameters = ["temperature"]
+
+# The 256K variant of k3. GET /coding/v1/models on 2026-09-22 lists it with
+# context_length 262144 and otherwise the same metadata as k3 (reasoning,
+# image and video input, dynamic tools, efforts low/high/max). Provider-scoped
+# lookup is an exact id match, so k3's row does not answer for it. Not called
+# that day: the plan's weekly quota was spent. The controls copy k3's row,
+# which claims only the none/not-none difference it has verified, not the
+# listed ladder.
+[[models]]
+model_id = "k3-256k"
+provider_name = "kimi_coding"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+reasoning_streaming_format = "delta:reasoning_content"
+accepted_reasoning_efforts = ["none"]
+supports_image_input = true
+supports_multimodal_inputs = true
+supports_native_streaming = true
+ignored_sampling_parameters = ["temperature"]
+
+# api.kimi.com/coding's kimi-for-coding. The alias follows whatever model the
+# plan currently serves: GET /coding/v1/models on 2026-09-22 names it
+# "K2.8 Preview" with context_length 1048576, up from the 262144 this row
+# carried for K2.7 Code. Output ceiling from the endpoint; no tool_choice on
+# this wire. The keeper default temperature 0.4 answered 400 "invalid
+# temperature: only 1 is allowed for this model" (Terminal-Bench trial
+# 2026-09-23T19:15Z), so AGENT_CORE leaves temperature out. top_p is left
+# out on the unscoped row's evidence (the 2026-07-04 K2.x docs); it has not
+# been sent to the K2.8 alias.
+[[models]]
+model_id = "kimi-for-coding"
+provider_name = "kimi_coding"
+base = "openai_chat"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+ignored_sampling_parameters = ["temperature", "top_p"]
+
+# Local Ollama Gemma 4 QAT build, probed 2026-06-12. Reads images and audio.
+[[models]]
+model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+provider_name = "ollama"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_audio_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# vllm-qwen3-mtp serving contract. The Qwen3.6 initial-system and selective
+# current-query tool-reasoning contract also applies to this transport alias.
+[[models]]
+model_id = "qwen36-35b-a3b-mtp"
+provider_name = "runpod_mtp"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_parallel_tool_calls = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "initial_system_latest_user_turn_tool_calls"
+supports_native_streaming = true
+
+# Local Ollama Gemma 4 26B-A4B QAT build, probed 2026-06-12. No
+# supports_tool_choice here: the ollama preset says false because native
+# /api/chat does not serialize the field, so a row claiming true would have a
+# forced choice dropped with no error.
+[[models]]
+model_id = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+provider_name = "ollama"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Harness fixture rows. The verification harnesses under scripts/ and
+# test/test_setup_cli.py stand up a local HTTP stub on an ephemeral port and
+# point a runtime binding at it; these rows are what make the binding's model
+# resolvable so the startup capability gate admits it. The endpoint is the
+# binding's, so no [[providers]] row is owed here.
+
+[[models]]
+model_id = "resume-fixture"
+provider_name = "primary"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 1024
+supports_tools = true
+supports_native_streaming = false
+
+[[models]]
+model_id = "resume-fixture"
+provider_name = "alternate"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 1024
+supports_tools = true
+supports_native_streaming = false
+
+[[models]]
+model_id = "goal-fixture"
+provider_name = "goal_fixture"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 1024
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "search-fixture"
+provider_name = "search_fixture"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 1024
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "image-producer"
+provider_name = "image_fixture"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 4096
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_native_streaming = true
+supports_image_input = false
+
+[[models]]
+model_id = "image-verifier"
+provider_name = "image_fixture"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 4096
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = true
+supports_native_streaming = true
+supports_image_input = true
+
+[[models]]
+model_id = "setup-fixture-owned-model"
+provider_name = "setup_fixture"
+base = "openai_chat"
+max_context_tokens = 32768
+supports_tools = true
+supports_native_streaming = true
+
+# Local Ollama Qwen3.8 27B build, probed 2026-09-12.
+[[models]]
+model_id = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
+provider_name = "ollama"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+# Native /api/chat does not serialize tool_choice, so a forced choice would be
+# dropped with no error. Declared false rather than inherited.
+supports_tool_choice = false
+supports_reasoning = true
+# Answers the native /api/chat top-level "think" field, not a template token.
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+supports_seed = true
+supports_top_k = true
+input_per_million = 0.0
+output_per_million = 0.0
+
+# ollama.com's glm-5.3. Its /v1 wire streams reasoning under delta.reasoning;
+# the glm-coding row for the same model spells it reasoning_content, because
+# Z.AI's wire does.
+[[models]]
+model_id = "glm-5.3"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+# No thinking_control_format here on purpose: ollama_cloud spans the native
+# /api/chat and the OpenAI-compatible /v1 wire, so a row that names one is
+# guessing. capabilities_base_by_identity_kind answers at resolution time.
+reasoning_streaming_format = "delta:reasoning"
+# The replay contract belongs to the model, not the wire: GLM keeps reasoning
+# across the tool-call rounds of one user turn and drops it at the next.
+reasoning_replay = "latest_user_turn_tool_calls"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+# Z.AI Chat endpoint thinking contracts, verified 2026-10-17 against
+# https://docs.z.ai/guides/capabilities/thinking-mode and the Chat API reference.
+# Exact runtime bindings need scoped rows: they never fall back to bare rows.
+# These documented hybrid models accept thinking.type; 5.3 and 5.3-flash use
+# forced thinking. Preserve-history clear_thinking is an independent axis and
+# cannot make a forced or undeclared model accept a thinking disable.
+[[models]]
+model_id = "glm-4.6"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+model_id = "glm-4.7"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+model_id = "glm-5"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+model_id = "glm-5.1"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
+
+[[models]]
+model_id = "glm-5.2"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5.3"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "none"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5.3-flash"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "none"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "latest_user_turn_tool_calls"

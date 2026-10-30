@@ -1,0 +1,37 @@
+{
+  "source_sha": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+  "native_test_run": 34710740227,
+  "native_test_status": "completed success",
+  "target_suites": 15,
+  "target_cases": 228,
+  "operator_cli_cases": 6,
+  "native_cli_skips": 0,
+  "arm_release_job": 103598999598,
+  "arm_release_status": "completed success",
+  "release_run": 34710741534,
+  "release_status_at_review": "in_progress",
+  "artifact": {
+    "id": 10303696005,
+    "bytes": 134143716
+  },
+  "coverage": [
+    "real native CLI PDF/PPTX rendered-image content bytes and metadata hashes",
+    "real native CLI MP4 complete A/V stream decode",
+    "Task and Goal PPTX original parsing and all-slide rendering, images retained by typed model bridge",
+    "explicit missing dependency and malformed input failures",
+    "macOS artifact installer smoke with Homebrew paths denied",
+    "source-matched Dashboard and companion checksum installation checks"
+  ],
+  "not_proven": [
+    "local downloaded artifact content validation by this reviewer",
+    "local installed CLI on scenario original media",
+    "LLM visual judgement or semantic artifact acceptance",
+    "all Release platforms",
+    "actual installed IDE/LSP and browser chat behavior after upgrade",
+    "long-running autonomy or semantic memory continuity"
+  ],
+  "logs": {
+    "/tmp/masc-851-test-34710740227.log": "f2ac5f6333ec3cb893294c21c2322188ffc8c2133b6bf39cd9cad86d70aadae7",
+    "/tmp/masc-851-macos-103598999598-review.log": "1526ff215324ba731171e0e69417c94211f78d44605c5b6ec69a934395992866"
+  }
+}

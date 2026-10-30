@@ -1,0 +1,52 @@
+{
+  "head": "ebe561e53aaa922b10c0041db785b6bc66d3bcba",
+  "parent": "ac57271cbab3533766530473be47697c43f73bad",
+  "stack_key_present": false,
+  "stack_membership": "unknown",
+  "web": {
+    "handle": 87958,
+    "exit_code": 0,
+    "tests_passed": 210,
+    "suites": [
+      "src/components/runtime-observation-workspace.test.ts",
+      "src/components/overview/runtime-stats.test.ts",
+      "src/components/tools/config-resolution-panel.test.ts",
+      "src/lib/runtime-catalog-resource.test.ts",
+      "src/lib/runtime-workspace-resource.test.ts",
+      "src/components/runtime-toml-editor.test.ts",
+      "src/components/settings-surface.test.ts"
+    ],
+    "command": "pnpm test src/components/runtime-observation-workspace.test.ts src/components/overview/runtime-stats.test.ts src/components/tools/config-resolution-panel.test.ts src/lib/runtime-catalog-resource.test.ts src/lib/runtime-workspace-resource.test.ts src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts"
+  },
+  "checkers": {
+    "handle": 21894,
+    "exit_code": 0,
+    "commands": [
+      "pnpm exec tsc --noEmit --pretty false",
+      "pnpm exec eslint src/components/runtime-observation-workspace.test.ts src/components/overview/runtime-stats.test.ts src/components/overview/runtime-stats.ts src/components/tools/config-resolution-panel.ts"
+    ]
+  },
+  "logs": {
+    "install.log": {
+      "source": "/tmp/pr41182-install.log",
+      "sha256": "2f38e653da67dd25f0c9f3551b23152483ccf9ba8d0a6a695df0a91d027d992a",
+      "byte_identical": true
+    },
+    "web.log": {
+      "source": "/tmp/pr41182-web.log",
+      "sha256": "b335d2267d48758a0c3bf8901d687c2f316176c19a918aaaf100381dc4a43f88",
+      "byte_identical": true
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41182-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "byte_identical": true
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41182-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "byte_identical": true
+    }
+  },
+  "native_parent_byte_identical": true
+}

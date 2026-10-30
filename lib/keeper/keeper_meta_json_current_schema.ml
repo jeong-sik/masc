@@ -1,0 +1,190 @@
+(** Exact Keeper meta current-schema contract. *)
+
+type validation_error = Invalid_current of string
+
+let validation_error_detail (Invalid_current detail) = detail
+
+let invalid_currentf format =
+  Printf.ksprintf
+    (fun detail ->
+       Invalid_current
+         (Printf.sprintf
+            "invalid current keeper meta: %s; runtime reset required"
+            detail))
+    format
+;;
+
+type field =
+  | Schema
+  | Name
+  | Instructions
+  | Trace_id
+  | Created_at
+  | Updated_at
+  | Total_turns
+  | Total_input_tokens
+  | Total_output_tokens
+  | Total_tokens
+  | Total_cost_usd
+  | Last_turn_ts
+  | Last_input_tokens
+  | Last_output_tokens
+  | Last_total_tokens
+  | Usage_cursor
+  | Last_usage_resolution
+  | Last_latency_ms
+  | Proactive_count_total
+  | Last_proactive_ts
+  | Proactive_visible_count_total
+  | Last_visible_proactive_ts
+  | Last_proactive_outcome
+  | Last_proactive_reason
+  | Last_proactive_preview
+  | Message_scope_ack_id
+  | Last_runtime_attempt
+  | Paused
+  | Latched_reason
+  | Current_task_id
+  | Keeper_id
+  | Agent_core_env
+
+let all_fields =
+  [ Schema
+  ; Name
+  ; Instructions
+  ; Trace_id
+  ; Created_at
+  ; Updated_at
+  ; Total_turns
+  ; Total_input_tokens
+  ; Total_output_tokens
+  ; Total_tokens
+  ; Total_cost_usd
+  ; Last_turn_ts
+  ; Last_input_tokens
+  ; Last_output_tokens
+  ; Last_total_tokens
+  ; Usage_cursor
+  ; Last_usage_resolution
+  ; Last_latency_ms
+  ; Proactive_count_total
+  ; Last_proactive_ts
+  ; Proactive_visible_count_total
+  ; Last_visible_proactive_ts
+  ; Last_proactive_outcome
+  ; Last_proactive_reason
+  ; Last_proactive_preview
+  ; Message_scope_ack_id
+  ; Last_runtime_attempt
+  ; Paused
+  ; Latched_reason
+  ; Current_task_id
+  ; Keeper_id
+  ; Agent_core_env
+  ]
+
+let field_name = function
+  | Schema -> "schema"
+  | Name -> "name"
+  | Instructions -> "instructions"
+  | Trace_id -> "trace_id"
+  | Created_at -> "created_at"
+  | Updated_at -> "updated_at"
+  | Total_turns -> "total_turns"
+  | Total_input_tokens -> "total_input_tokens"
+  | Total_output_tokens -> "total_output_tokens"
+  | Total_tokens -> "total_tokens"
+  | Total_cost_usd -> "total_cost_usd"
+  | Last_turn_ts -> "last_turn_ts"
+  | Last_input_tokens -> "last_input_tokens"
+  | Last_output_tokens -> "last_output_tokens"
+  | Last_total_tokens -> "last_total_tokens"
+  | Usage_cursor -> "usage_cursor"
+  | Last_usage_resolution -> "last_usage_resolution"
+  | Last_latency_ms -> "last_latency_ms"
+  | Proactive_count_total -> "proactive_count_total"
+  | Last_proactive_ts -> "last_proactive_ts"
+  | Proactive_visible_count_total -> "proactive_visible_count_total"
+  | Last_visible_proactive_ts -> "last_visible_proactive_ts"
+  | Last_proactive_outcome -> "last_proactive_outcome"
+  | Last_proactive_reason -> "last_proactive_reason"
+  | Last_proactive_preview -> "last_proactive_preview"
+  | Message_scope_ack_id -> "message_scope_ack_id"
+  | Last_runtime_attempt -> "last_runtime_attempt"
+  | Paused -> "paused"
+  | Latched_reason -> "latched_reason"
+  | Current_task_id -> "current_task_id"
+  | Keeper_id -> "keeper_id"
+  | Agent_core_env -> "agent_core_env"
+;;
+
+let current_field_names = List.map field_name all_fields
+
+module Field_names = Set.Make (String)
+
+let current_field_set = Field_names.of_list current_field_names
+
+let object_of_field_values field_values =
+  let supplied = List.map fst field_values in
+  if supplied <> all_fields
+  then
+    invalid_arg
+      "Keeper_meta_json_current_schema.object_of_field_values: field sequence \
+       differs from the closed current schema"
+  else
+    `Assoc
+      (List.map
+         (fun (field, value) -> field_name field, value)
+         field_values)
+;;
+
+let find_duplicate fields =
+  let rec loop seen = function
+    | [] -> None
+    | (key, _) :: rest ->
+      if List.mem key seen then Some key else loop (key :: seen) rest
+  in
+  loop [] fields
+;;
+
+let validate_current_object (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    (* Duplicate priority and diagnostic order belong to the reader contract.
+       Retain outside names until the scan has ruled out every duplicate.
+       Start with the immutable schema and remove each observed key. Set.remove
+       returns the same physical set for an absent key (the stdlib contract),
+       so a valid key needs one traversal and no growing seen-key index. *)
+    let rec scan remaining outside_seen outside_rev = function
+      | (key, _) :: rest ->
+        let next = Field_names.remove key remaining in
+        if next != remaining then
+          scan next outside_seen outside_rev rest
+        else if Field_names.mem key current_field_set
+                || Field_names.mem key outside_seen then
+          Error (invalid_currentf "duplicate field %s" key)
+        else
+          scan remaining (Field_names.add key outside_seen) (key :: outside_rev) rest
+      | [] ->
+        if outside_rev <> [] then
+          Error
+            (invalid_currentf "fields outside the current schema: %s"
+               (String.concat ", " (List.rev outside_rev)))
+        else if Field_names.is_empty remaining then Ok fields
+        else
+          let missing =
+            List.filter
+              (fun key -> Field_names.mem key remaining)
+              current_field_names
+          in
+          Error
+            (invalid_currentf "missing required fields: %s"
+               (String.concat ", " missing))
+    in
+    scan current_field_set Field_names.empty [] fields
+  | other ->
+    Error
+      (invalid_currentf
+         "expected an object, got %s"
+         (Json_util.kind_name other))
+;;

@@ -1,0 +1,516 @@
+(** Tool input validation — strict deterministic schema checking.
+
+    Validates tool call arguments against declared parameter schemas.
+    @since 0.100.0 *)
+
+type actual =
+  | Missing
+  | Received of string
+
+(* The violated constraint, kept structured until rendering. Collapsing it to
+   a string at creation time is what produced the unfixable message
+   `wrong type — expected: string, got: string("summary")` for enum
+   violations: the allowed values were discarded before the renderer ran. *)
+type expected =
+  | Expected_types of string list
+  | Expected_enum of
+      { types : string list
+      ; allowed : Yojson.Safe.t list
+      }
+  | Expected_const of Yojson.Safe.t
+  | Expected_required
+
+type field_error =
+  { path : string
+  ; expected : expected
+  ; actual : actual
+  }
+
+type validation_result =
+  | Valid of Yojson.Safe.t
+  | Invalid of field_error list
+
+(* ── Type description ────────────────────────────────────── *)
+
+(* A string value in a validation message is cut to this many bytes. *)
+let value_preview_max_bytes = 20
+
+let describe_json_value = function
+  | `Null -> "null"
+  | `Bool b -> Printf.sprintf "boolean(%b)" b
+  | `Int i -> Printf.sprintf "integer(%d)" i
+  | `Float f -> Printf.sprintf "number(%g)" f
+  | `String s ->
+    Printf.sprintf "string(\"%s\")" (Util.clip s value_preview_max_bytes)
+  | `List _ -> "array"
+  | `Assoc _ -> "object"
+  | `Intlit s -> Printf.sprintf "integer(%s)" s
+;;
+
+let string_of_param_type = Types.param_type_to_string
+
+(* ── Type checking ───────────────────────────────────────── *)
+
+(* Check if a JSON value matches the expected param_type.
+   @since 0.120.0 *)
+let matches_type (expected : Types.param_type) (value : Yojson.Safe.t) : bool =
+  match expected, value with
+  | Types.String, `String _ -> true
+  | Types.Integer, `Int _ -> true
+  | Types.Integer, `Intlit _ -> true
+  | Types.Number, `Float _ -> true
+  | Types.Number, `Int _ -> true (* int is a valid number *)
+  | Types.Number, `Intlit _ -> true
+  | Types.Boolean, `Bool _ -> true
+  | Types.Array, `List _ -> true
+  | Types.Object, `Assoc _ -> true
+  | (Types.Object, (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+  | (Types.Array, (`Assoc _ | (`Null | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+  | (Types.Boolean, (`Assoc _ | (`Null | (`List _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+  | (Types.Number, (`Assoc _ | (`Null | (`List _ | (`Bool _ | `String _)))))
+  | (Types.Integer, (`Assoc _ | (`Null | (`List _ | (`Bool _ | (`Float _ | `String _))))))
+  | (Types.String, (`Assoc _ | (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | `Intlit _))))))) -> false
+;;
+
+let matches_json_schema_type type_name = function
+  | `Null -> String.equal type_name "null"
+  | `String _ -> String.equal type_name "string"
+  | `Int _ | `Intlit _ ->
+    String.equal type_name "integer" || String.equal type_name "number"
+  | `Float value ->
+    String.equal type_name "number"
+    || (String.equal type_name "integer"
+        && Float.is_finite value
+        && Float.is_integer value)
+  | `Bool _ -> String.equal type_name "boolean"
+  | `List _ -> String.equal type_name "array"
+  | `Assoc _ -> String.equal type_name "object"
+;;
+
+let property_type_names = function
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String type_name) -> Some [ type_name ]
+     | Some (`List values) ->
+       Some
+         (List.filter_map
+            (function
+              | `String value -> Some value
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+                None)
+            values)
+     | None | Some _ -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
+type canonical_number =
+  { negative : bool
+  ; significand : string
+  ; exponent : int
+  }
+
+let canonical_decimal value =
+  let decimal_digits value =
+    (not (String.equal value ""))
+    && String.for_all (fun char -> char >= '0' && char <= '9') value
+  in
+  let decimal_exponent value =
+    let digits =
+      if String.length value > 0 && (Char.equal value.[0] '+' || Char.equal value.[0] '-')
+      then String.sub value 1 (String.length value - 1)
+      else value
+    in
+    if decimal_digits digits then int_of_string_opt value else None
+  in
+  let length = String.length value in
+  let negative, unsigned =
+    if length > 0 && Char.equal value.[0] '-'
+    then true, String.sub value 1 (length - 1)
+    else false, value
+  in
+  let exponent_index =
+    match String.index_opt unsigned 'e', String.index_opt unsigned 'E' with
+    | None, None -> Some None
+    | Some index, None | None, Some index -> Some (Some index)
+    | Some _, Some _ -> None
+  in
+  match exponent_index with
+  | None -> None
+  | Some exponent_index ->
+    let mantissa, exponent =
+      match exponent_index with
+      | None -> Some unsigned, Some 0
+      | Some index ->
+        let mantissa = String.sub unsigned 0 index in
+        let raw_exponent =
+          String.sub unsigned (index + 1) (String.length unsigned - index - 1)
+        in
+        Some mantissa, decimal_exponent raw_exponent
+    in
+    (match mantissa, exponent with
+     | Some mantissa, Some exponent ->
+       let whole, fraction, has_decimal_point =
+         match String.index_opt mantissa '.' with
+         | None -> Some mantissa, Some "", false
+         | Some index ->
+           let whole = String.sub mantissa 0 index in
+           let fraction =
+             String.sub mantissa (index + 1) (String.length mantissa - index - 1)
+           in
+           if String.contains fraction '.'
+           then None, None, true
+           else Some whole, Some fraction, true
+       in
+       (match whole, fraction with
+        | Some whole, Some fraction
+          when (not (String.equal whole ""))
+               && ((not has_decimal_point) || not (String.equal fraction ""))
+               && decimal_digits whole
+               && (String.equal fraction "" || decimal_digits fraction)
+               && (String.length whole = 1 || not (Char.equal whole.[0] '0')) ->
+          let digits = whole ^ fraction in
+          let rec first_nonzero index =
+            if index = String.length digits
+            then None
+            else if Char.equal digits.[index] '0'
+            then first_nonzero (index + 1)
+            else Some index
+          in
+          (match first_nonzero 0 with
+           | None -> Some { negative = false; significand = "0"; exponent = 0 }
+           | Some first ->
+             let rec last_nonzero index =
+               if Char.equal digits.[index] '0' then last_nonzero (index - 1) else index
+             in
+             let last = last_nonzero (String.length digits - 1) in
+             let trailing_zeroes = String.length digits - last - 1 in
+             Some
+               { negative
+               ; significand = String.sub digits first (last - first + 1)
+               ; exponent = exponent - String.length fraction + trailing_zeroes
+               })
+        | Some _, Some _ | None, None | None, Some _ | Some _, None -> None)
+     | None, None | None, Some _ | Some _, None -> None)
+;;
+
+let canonical_number = function
+  | `Int value -> canonical_decimal (string_of_int value)
+  | `Intlit value -> canonical_decimal value
+  | `Float value when Float.is_finite value ->
+    canonical_decimal (Yojson.Safe.to_string (`Float value))
+  | `Float _ | `Null | `Bool _ | `String _ | `Assoc _ | `List _ -> None
+;;
+
+let numeric_equal left right =
+  match canonical_number left, canonical_number right with
+  | Some left, Some right ->
+    Bool.equal left.negative right.negative
+    && String.equal left.significand right.significand
+    && Int.equal left.exponent right.exponent
+  | None, None | None, Some _ | Some _, None -> false
+;;
+
+let rec json_semantic_equal left right =
+  match left, right with
+  | (`Int _ | `Intlit _ | `Float _), (`Int _ | `Intlit _ | `Float _) ->
+    numeric_equal left right
+  | `Null, `Null -> true
+  | `Bool left, `Bool right -> Bool.equal left right
+  | `String left, `String right -> String.equal left right
+  | `List left, `List right -> List.equal json_semantic_equal left right
+  | `Assoc left, `Assoc right ->
+    List.length left = List.length right
+    && List.for_all
+         (fun (name, left_value) ->
+            match List.assoc_opt name right with
+            | Some right_value -> json_semantic_equal left_value right_value
+            | None -> false)
+         left
+  | ( (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _)
+    , (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) )
+    -> false
+;;
+
+let property_matches property value =
+  match property with
+  | `Bool allowed -> allowed
+  | `Assoc fields ->
+    let type_matches =
+      match property_type_names property with
+      | None -> true
+      | Some type_names ->
+        List.exists (fun type_name -> matches_json_schema_type type_name value) type_names
+    in
+    let const_matches =
+      match List.assoc_opt "const" fields with
+      | None -> true
+      | Some expected -> json_semantic_equal expected value
+    in
+    let enum_matches =
+      match List.assoc_opt "enum" fields with
+      | None -> true
+      | Some (`List values) -> List.exists (json_semantic_equal value) values
+      | Some _ -> false
+    in
+    type_matches && const_matches && enum_matches
+  | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true
+;;
+
+(* Reports the constraint the value actually failed, not the loudest declared
+   one. A value can be a member of the declared enum and still violate a
+   sibling const, so declaration priority alone would reject a value while
+   naming an allowed list that contains it. With no value at hand (a missing
+   field), declaration order — enum, const, type — is the honest report. A
+   malformed enum declaration (non-list) falls back to the type report rather
+   than advertising an allowed set that was never declared. *)
+let expected_of_property ?against property =
+  let types = Option.value ~default:[] (property_type_names property) in
+  match property with
+  | `Assoc fields ->
+    let violated declared holds =
+      match declared with
+      | None -> None
+      | Some payload ->
+        (match against with
+         | None -> Some payload
+         | Some value -> if holds payload value then None else Some payload)
+    in
+    let enum_members =
+      match List.assoc_opt "enum" fields with
+      | Some (`List allowed) -> Some allowed
+      | Some
+          (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _)
+      | None -> None
+    in
+    (match
+       violated enum_members (fun allowed value ->
+         List.exists (json_semantic_equal value) allowed)
+     with
+     | Some allowed -> Expected_enum { types; allowed }
+     | None ->
+       (match violated (List.assoc_opt "const" fields) json_semantic_equal with
+        | Some value -> Expected_const value
+        | None -> Expected_types types))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Expected_types types
+;;
+
+let describe_expected = function
+  | Expected_types [] -> "declared schema"
+  | Expected_types type_names -> String.concat " or " type_names
+  | Expected_enum { allowed = []; _ } ->
+    (* [enum: []] admits no value at all; reporting the type instead would
+       reject a well-typed value while telling the caller its type was
+       wrong. Say what the schema actually does. *)
+    "an empty enum (the schema accepts no value)"
+  | Expected_enum { allowed; _ } ->
+    "one of: " ^ String.concat ", " (List.map Yojson.Safe.to_string allowed)
+  | Expected_const value -> "exactly " ^ Yojson.Safe.to_string value
+  | Expected_required -> "required"
+;;
+
+let authoritative_schema_parts = function
+  | `Assoc fields ->
+    let required =
+      match List.assoc_opt "required" fields with
+      | Some (`List values) ->
+        List.filter_map
+          (function
+            | `String value -> Some value
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None)
+          values
+      | None | Some _ -> []
+    in
+    let properties =
+      match List.assoc_opt "properties" fields with
+      | Some (`Assoc values) -> values
+      | None | Some _ -> []
+    in
+    required, properties
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> [], []
+;;
+
+(* Nested objects and array items are held to the same required/type/enum/const
+   rule as the root, and every violation is reported in one result. Stopping
+   at the root let a nested shape error reach the tool handler, which names
+   only its first problem, so a caller fixed one field per round trip. *)
+let rec object_errors ~prefix schema fields =
+  let required, properties = authoritative_schema_parts schema in
+  let names =
+    List.map fst properties
+    @ List.filter (fun name -> not (List.mem_assoc name properties)) required
+  in
+  List.concat_map
+    (fun name ->
+       let path = prefix ^ "/" ^ name in
+       let property = List.assoc_opt name properties in
+       match List.assoc_opt name fields, property with
+       | None, _ when List.mem name required ->
+         [ { path
+           ; expected =
+               Option.fold
+                 ~none:Expected_required
+                 ~some:(fun property -> expected_of_property property)
+                 property
+           ; actual = Missing
+           }
+         ]
+       | None, _ -> []
+       | Some value, Some property -> value_errors ~path property value
+       | Some _, None -> [])
+    names
+
+and value_errors ~path property value =
+  if not (property_matches property value)
+  then
+    [ { path
+      ; expected = expected_of_property ~against:value property
+      ; actual = Received (describe_json_value value)
+      }
+    ]
+  else (
+    match property, value with
+    | `Assoc _, `Assoc fields -> object_errors ~prefix:path property fields
+    | `Assoc schema, `List items ->
+      (match List.assoc_opt "items" schema with
+       | Some item_schema ->
+         List.concat
+           (List.mapi
+              (fun index item ->
+                 value_errors ~path:(path ^ "/" ^ string_of_int index) item_schema item)
+              items)
+       | None -> [])
+    | `Assoc _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _), _ -> [])
+;;
+
+let validate_authoritative input_schema input =
+  match input with
+  | `Assoc fields ->
+    let errors = object_errors ~prefix:"" input_schema fields in
+    if errors = [] then Valid input else Invalid errors
+  | other ->
+    Invalid
+      [ { path = "/"
+        ; expected = Expected_types [ "object" ]
+        ; actual = Received (describe_json_value other)
+        }
+      ]
+;;
+
+(* ── Validation ──────────────────────────────────────────── *)
+
+let validate (schema : Types.tool_schema) (input : Yojson.Safe.t) : validation_result =
+  match schema.input_schema with
+  | Some input_schema -> validate_authoritative input_schema input
+  | None ->
+    let params = schema.parameters in
+    (match input with
+     | `Assoc fields ->
+       let errors =
+         List.filter_map
+           (fun (p : Types.tool_param) ->
+              let path = "/" ^ p.name in
+              match List.assoc_opt p.name fields with
+              | None when p.required ->
+                Some
+                  { path
+                  ; expected = Expected_types [ string_of_param_type p.param_type ]
+                  ; actual = Missing
+                  }
+              | None -> None
+              | Some value when matches_type p.param_type value -> None
+              | Some value ->
+                Some
+                  { path
+                  ; expected = Expected_types [ string_of_param_type p.param_type ]
+                  ; actual = Received (describe_json_value value)
+                  })
+           params
+       in
+       if errors = [] then Valid input else Invalid errors
+     | other ->
+       Invalid
+         [ { path = "/"
+           ; expected = Expected_types [ "object" ]
+           ; actual = Received (describe_json_value other)
+           }
+         ])
+;;
+
+(* ── Error formatting ────────────────────────────────────── *)
+
+let format_errors ~tool_name errors =
+  let lines =
+    List.map
+      (fun e ->
+         let actual =
+           match e.actual with
+           | Missing -> "missing"
+           | Received description -> description
+         in
+         Printf.sprintf
+           "- %s: expected %s, got %s"
+           e.path
+           (describe_expected e.expected)
+           actual)
+      errors
+  in
+  Printf.sprintf
+    "Tool '%s' parameter errors:\n%s\nFix the parameters and try again."
+    tool_name
+    (String.concat "\n" lines)
+;;
+
+(** Samchon-style inline error feedback: show the LLM's own JSON
+    with error annotations, so the retry prompt gives surgical guidance.
+
+    Output example:
+    {[
+      Your call to "read_file":
+      {"op": "find", "pattern": "*.ml"}
+
+      Errors (fix these and call again):
+        "name": MISSING (required: string)
+        "op": wrong type — expected: integer, got: string("find")
+    ]}
+*)
+let format_errors_inline ~tool_name ~(args : Yojson.Safe.t) errors =
+  let json_str = Yojson.Safe.to_string args in
+  let error_lines =
+    List.map
+      (fun e ->
+         let field_name =
+           match String.index_opt e.path '/' with
+           | Some i -> String.sub e.path (i + 1) (String.length e.path - i - 1)
+           | None -> e.path
+         in
+         match e.actual with
+         | Missing ->
+           Printf.sprintf
+             "  \"%s\": MISSING (required: %s)"
+             field_name
+             (describe_expected e.expected)
+         | Received description ->
+           (* An enum/const violation is not a type mismatch: the value's
+              JSON type is usually right, so labelling it "wrong type" told
+              the model nothing it could correct. *)
+           let label =
+             match e.expected with
+             | Expected_enum _ | Expected_const _ -> "invalid value"
+             | Expected_types _ | Expected_required -> "wrong type"
+           in
+           Printf.sprintf
+             "  \"%s\": %s — expected: %s, got: %s"
+             field_name
+             label
+             (describe_expected e.expected)
+             description)
+      errors
+  in
+  Printf.sprintf
+    "Your call to \"%s\":\n%s\n\nErrors (fix these and call again):\n%s"
+    tool_name
+    json_str
+    (String.concat "\n" error_lines)
+;;

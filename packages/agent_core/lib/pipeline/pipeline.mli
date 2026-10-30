@@ -1,0 +1,71 @@
+(** Turn pipeline: 6-stage decomposition of agent turn execution.
+
+    [Input] -> [Parse] -> [Route] -> [Collect] -> [Output]
+    (Execute runs inside Output on StopToolUse.)
+
+    Each stage is a well-defined function.  The pipeline coordinates
+    them, threading agent state through mutable updates.  This module
+    replaces the monolithic [run_turn_core] in agent.ml.
+
+    @stability Evolving
+    @since 0.93.1 *)
+
+type api_strategy =
+  | Sync
+  | Stream of
+      { on_event : Types.sse_event -> unit
+      ; on_telemetry : (Llm_provider.Telemetry_event.t -> unit) option
+      }
+
+type turn_outcome =
+  | Complete of Types.api_response
+  | ToolsExecuted of Agent_types.checkpoint_stage
+  | TerminalToolCompleted of Terminal_tool_receipt.t
+
+(** Persist [state] using the same pre-commit checkpoint transaction as turn
+    collection. The live agent state is not changed by this function. *)
+val persist_turn_checkpoint_for_state
+  :  Agent_types.t
+  -> Agent_types.checkpoint_stage
+  -> Types.agent_state
+  -> (unit, Error.t) result
+
+(** {1 Provider turn identity} *)
+
+(** The provider turn about to run, resolved once at the resume-or-fresh
+    boundary: a fresh turn, a durable turn resumed after a restart, or an
+    already-settled turn boundary replayed. Carries the one zero-based ordinal
+    every producer for that turn reads: the [agent_turn] span the caller opens,
+    the stage spans, hooks, events, tool invocations and the turn log line. *)
+type turn_frontier
+
+(** Resolve the next turn's identity. Consumes the one-shot resume flag [Agent]
+    binds for a resumed run, so it is called exactly once per turn, before any
+    span or record names that turn. Fails closed on inconsistent restored
+    topology. *)
+val resolve_turn_frontier : Agent_types.t -> (turn_frontier, Error.t) result
+
+val turn_frontier_ordinal : turn_frontier -> int
+
+(** Run a single agent turn through the 6-stage pipeline under the identity
+    [frontier] from {!resolve_turn_frontier}.
+
+    [before_tool_execution], when present, runs exactly once for a non-empty
+    tool batch after assistant collection has committed successfully and before
+    the first tool hook or implementation starts.  Exceptions propagate and
+    prevent tool execution.
+
+    A private fiber-local execution scope, when bound by [Agent], owns the turn
+    and exact selected provider attempt before provider I/O. The caller owns
+    root settlement; this function closes its successful turn descendants,
+    while an error leaves them open for the caller's atomic abort. *)
+val run_turn
+  :  sw:Eio.Switch.t
+  -> ?clock:_ Eio.Time.clock
+  -> api_strategy:api_strategy
+  -> ?raw_trace_run:Raw_trace.active_run
+  -> ?on_provider_failure:(Provider_failure_attribution.t option -> unit)
+  -> ?before_tool_execution:(unit -> unit)
+  -> frontier:turn_frontier
+  -> Agent_types.t
+  -> (turn_outcome, Error.t) result

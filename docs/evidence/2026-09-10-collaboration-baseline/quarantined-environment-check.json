@@ -1,0 +1,46 @@
+{
+  "id": "appr_01a08b40-f1fb-7000-87eb-8bd6b04b2fec",
+  "keeper_name": "exhibit-editor",
+  "tool_name": "tool_execute",
+  "input_hash": "c20546312354b315bff3fec89b8a935d1bd6cb609520576724059c8e321eb4a2",
+  "sequence": 1,
+  "requested_at": 1789042684.411257,
+  "waiting_s": 164.58367204666138,
+  "turn_id": 1,
+  "task_id": null,
+  "goal_id": null,
+  "input": {
+    "schema": "masc.keeper_gate.request.v1",
+    "input": {
+      "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+      "argv": [
+        "sh",
+        "-c",
+        "which python3 pdflatex pandoc libreoffice weasyprint chromium wkhtmltopdf 2>/dev/null; python3 -c 'import reportlab; print(\"reportlab ok\")' 2>/dev/null; python3 -c 'import PIL; print(\"PIL ok\")' 2>/dev/null; fc-list | grep -i -E 'nanum|noto.*cjk|malgun' | head -5"
+      ]
+    },
+    "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+    "sandbox_profile": "docker",
+    "sandbox_target": "docker:masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64"
+  },
+  "input_preview": "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.\",\"argv\":[\"sh\",\"-c\",\"which python3 pdflat...(truncated)",
+  "summary_status": {
+    "status": "failed",
+    "reason": "Auto Judge exact attempt quarantined: domain_invalid_output"
+  },
+  "exact_attempt": {
+    "state": "bound",
+    "approval_id": "appr_01a08b40-f1fb-7000-87eb-8bd6b04b2fec",
+    "input_hash": "c20546312354b315bff3fec89b8a935d1bd6cb609520576724059c8e321eb4a2",
+    "sequence": 1,
+    "slot_id": "kimi_coding.kimi-for-coding",
+    "call_id": "cb27c856237181fe297b769453474dc6",
+    "plan_fingerprint": "31ba966e776a37576291953e6502e3a8f3209a54c02181ebb45fce81be92a820",
+    "request_body_sha256": "8f7189efed2ada88ee64a238799be41f11d6ffc9cf5ec040d7a4511ddc7157e2",
+    "status": "quarantined",
+    "quarantine_cause": "domain_invalid_output"
+  },
+  "summary_attempt_disposition": {
+    "code": "settled"
+  }
+}

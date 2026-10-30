@@ -1,0 +1,63 @@
+import { describe, it, expect } from 'vitest'
+import { isObservedStall } from './fsm-hub-lane-analysis'
+
+// ================================================================
+// isObservedStall
+// ================================================================
+
+// Wire format is lowercase + snake_case (phase_to_string in
+// keeper_state_machine.ml:21-35). Prior fixtures asserted PascalCase
+// that never reached the function in production — mock↔mock loophole.
+describe('isObservedStall', () => {
+  // --- phase lane ---
+
+  it('detects failing stall at 90s', () => {
+    expect(isObservedStall('phase', 'failing', 90)).toBe(true)
+  })
+
+  it('does not detect failing stall below 90s', () => {
+    expect(isObservedStall('phase', 'failing', 89)).toBe(false)
+  })
+
+  it('detects draining stall at 60s', () => {
+    expect(isObservedStall('phase', 'draining', 60)).toBe(true)
+  })
+
+  it('detects draining stall at 60s', () => {
+    expect(isObservedStall('phase', 'draining', 60)).toBe(true)
+  })
+
+  it('does not detect running stall', () => {
+    expect(isObservedStall('phase', 'running', 120)).toBe(false)
+  })
+
+  // --- turn lane ---
+
+  it('detects prompting stall at 45s', () => {
+    expect(isObservedStall('turn', 'prompting', 45)).toBe(true)
+  })
+
+  it('detects executing stall at 45s', () => {
+    expect(isObservedStall('turn', 'executing', 45)).toBe(true)
+  })
+
+  it('detects finalizing stall at 30s', () => {
+    expect(isObservedStall('turn', 'finalizing', 30)).toBe(true)
+  })
+
+  it('does not detect turn stall below threshold', () => {
+    expect(isObservedStall('turn', 'prompting', 44)).toBe(false)
+  })
+
+  // The runtime lane is computed from the turn phase, so the turn lane's
+  // stall is its stall: judging both would count one stuck turn twice.
+  it('does not judge the runtime lane on its own', () => {
+    expect(isObservedStall('runtime', 'executing', 600)).toBe(false)
+  })
+
+  // --- unknown lane ---
+
+  it('returns false for unknown lane key', () => {
+    expect(isObservedStall('unknown' as any, 'anything', 100)).toBe(false)
+  })
+})

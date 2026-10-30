@@ -1,0 +1,14 @@
+{
+  "acceptInsecureCerts": false,
+  "browserName": "firefox",
+  "browserVersion": "158.0.1",
+  "platformName": "mac",
+  "setWindowRect": true,
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:158.0) Gecko/20100101 Firefox/158.0",
+  "moz:buildID": "20261019185856",
+  "moz:headless": true,
+  "moz:platformVersion": "25.6.0",
+  "moz:processID": 386,
+  "moz:profile": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-multi-select-firefox-7flWfo",
+  "moz:shutdownTimeout": 60000
+}

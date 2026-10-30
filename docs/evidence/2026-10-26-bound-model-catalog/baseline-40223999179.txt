@@ -1,0 +1,26 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40223999179
+Exact head: 13862dbd41ae7569bda8cfa2ae4dd7cf1be72753
+Raw log SHA256: 245cb978714d3989404c612cc8e2acc034c276ccaf384649e3ba120c5f71dcad
+
+test suite	Checkout	2026-10-25T19:01:15.7035608Z   ref: 13862dbd41ae7569bda8cfa2ae4dd7cf1be72753
+test suite	Checkout	2026-10-25T19:01:16.1709067Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 13862dbd41ae7569bda8cfa2ae4dd7cf1be72753
+test suite	Checkout	2026-10-25T19:01:25.6168181Z  * branch              13862dbd41ae7569bda8cfa2ae4dd7cf1be72753 -> FETCH_HEAD
+test suite	Checkout	2026-10-25T19:01:25.6175031Z [command]/usr/bin/git rev-parse --verify --quiet 13862dbd41ae7569bda8cfa2ae4dd7cf1be72753^{object}
+test suite	Checkout	2026-10-25T19:01:25.6199023Z 13862dbd41ae7569bda8cfa2ae4dd7cf1be72753
+test suite	Checkout	2026-10-25T19:01:25.6276927Z [command]/usr/bin/git checkout --progress --force 13862dbd41ae7569bda8cfa2ae4dd7cf1be72753
+test suite	Checkout	2026-10-25T19:01:27.7100441Z Note: switching to '13862dbd41ae7569bda8cfa2ae4dd7cf1be72753'.
+test suite	Checkout	2026-10-25T19:01:27.7240922Z 13862dbd41ae7569bda8cfa2ae4dd7cf1be72753
+test suite	Test	2026-10-25T19:03:10.8978711Z   ^[[31m[FAIL]^[[0m        ^[[36mselection capture^[[0m          0   model replacement before const...
+test suite	Test	2026-10-25T19:03:10.8979858Z   ^[[31m[FAIL]^[[0m        ^[[36mselection capture^[[0m          1   model replacement after constr...
+test suite	Test	2026-10-25T19:03:10.8982334Z   ^[[31m[FAIL]^[[0m        ^[[36mselection capture^[[0m          2   overlay removes seed bare auth...
+test suite	Test	2026-10-25T19:03:10.9517488Z ^[[2m│ ^[[0m^[[31m[FAIL]^[[0m        ^[[36mselection capture^[[0m          0   model replacement before co...^[[2m  │^[[0m
+test suite	Test	2026-10-25T19:03:10.9519432Z    Expected: `^[[32mfalse^[[0m'
+test suite	Test	2026-10-25T19:03:10.9519687Z    Received: `^[[31mtrue^[[0m'
+test suite	Test	2026-10-25T19:03:10.9524329Z ^[[2m│ ^[[0m^[[31m[FAIL]^[[0m        ^[[36mselection capture^[[0m          1   model replacement after con...^[[2m  │^[[0m
+test suite	Test	2026-10-25T19:03:10.9526354Z    Expected: `^[[32mfalse^[[0m'
+test suite	Test	2026-10-25T19:03:10.9526625Z    Received: `^[[31mtrue^[[0m'
+test suite	Test	2026-10-25T19:03:10.9532847Z ^[[2m│ ^[[0m^[[31m[FAIL]^[[0m        ^[[36mselection capture^[[0m          2   overlay removes seed bare a...^[[2m  │^[[0m
+test suite	Test	2026-10-25T19:03:10.9534522Z    Expected: `^[[32mfalse^[[0m'
+test suite	Test	2026-10-25T19:03:10.9534780Z    Received: `^[[31mtrue^[[0m'
+test suite	Test	2026-10-25T19:03:10.9537470Z ^[[31m3 failures!^[[0m in 0.053s. 31 tests run.
+test suite	Test	2026-10-25T19:03:10.9744656Z [targeted] @@packages/agent_core/test/runtest-test_provider_runtime_binding: FAIL exit 1 in 29s

@@ -1,0 +1,42 @@
+{
+  "name": "Test",
+  "id": 40330717541,
+  "html_url": "https://github.com/jeong-sik/masc/actions/runs/40330717541",
+  "head_sha": "ed79abfd0500cec731168ab2517969ef30db490a",
+  "head_branch": "fix/schedule-mutation-authority-20261026",
+  "status": "completed",
+  "conclusion": "success",
+  "created_at": "2026-10-26T13:27:24Z",
+  "updated_at": "2026-10-26T13:33:53Z",
+  "event": "workflow_dispatch",
+  "suites": [
+    {
+      "name": "test_schedule_tool_wiring",
+      "cases": 55,
+      "conclusion": "success"
+    },
+    {
+      "name": "test_schedule_store",
+      "cases": 58,
+      "conclusion": "success"
+    },
+    {
+      "name": "test_schedule_interval_runner_tick",
+      "cases": 9,
+      "conclusion": "success"
+    },
+    {
+      "name": "test_server_dashboard_http_schedule_actions",
+      "cases": 2,
+      "conclusion": "success"
+    }
+  ],
+  "total_cases": 124,
+  "artifact": {
+    "id": 12653624114,
+    "name": "suite-runner-log",
+    "digest": "sha256:a1fc449017b048f9ee0a6bbf46f1657fcfd72565108b93d686973ccd3ebeba41",
+    "log_sha256": "4e9c82fffb21428c4e334ba486c7a6a3a694a43d7264905f7655dc907bdbddd5"
+  },
+  "scope": "Four targeted production-module suites; F3 regressions executed, not installed-runtime or public cancel interleaving proof."
+}

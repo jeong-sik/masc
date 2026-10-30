@@ -1,0 +1,11 @@
+{
+  "pid": 18474,
+  "command": "node node_modules/vite/bin/vite.js --config /tmp/masc-authority-ui-preview-20261025/vite.config.mts",
+  "cwd": "/private/tmp/masc-authority-round-integration-20261025/dashboard",
+  "cwd_matches_owned_frontend": true,
+  "signal": "SIGTERM",
+  "sent_at": "2026-10-24T17:51:37.772905+00:00",
+  "other_processes_signalled": [],
+  "not_running_after_signal": true,
+  "observed_at": "2026-10-24T17:51:45.734329+00:00"
+}

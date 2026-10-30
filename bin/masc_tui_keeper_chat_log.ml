@@ -1,0 +1,687 @@
+module Live = Masc_tui_keeper_chat_live
+module E = Masc.Keeper_chat_events
+module Journal = Masc.Keeper_chat_event_log
+
+type journal_source = Operation of string | Autonomous_turn of Ids.Turn_ref.t
+
+let source_key = function
+  | Operation operation_id -> operation_id
+  | Autonomous_turn turn_ref -> Ids.Turn_ref.to_string turn_ref
+
+type entry =
+  { seq : int option
+  ; at : float option
+  ; attempt : int
+  ; delta : Live.delta
+  }
+
+type terminal_replay = Replay_pending | Replayed_after_terminal
+
+type t =
+  { keeper_name : string
+  ; request_id : string
+  ; source : journal_source
+  ; started_at : float
+  ; mutable reversed_entries : entry list
+  ; mutable first_acceptance : entry option
+  ; mutable latest_acceptance : entry option
+  ; mutable priority_unavailable : bool
+  ; mutable run_started : bool
+        (* Whether an entry holds [Run_started]: asked for every held log on
+           every frame, so it is kept rather than found by walking the
+           entries. *)
+  ; held_seqs : (int, unit) Hashtbl.t
+  ; mutable resume_position : Journal.replay_position
+        (* After the highest seq held; the whole turn while none is. *)
+  ; mutable attempt : int
+  ; mutable committed : bool
+  ; mutable revision : int
+  ; mutable operation_state : Keeper_chat_operation.state option
+  ; mutable terminal_replay : terminal_replay
+  }
+
+let create_for_source ~keeper_name ~source ~started_at =
+  { keeper_name
+  ; request_id = source_key source
+  ; source
+  ; started_at
+  ; reversed_entries = []
+  ; first_acceptance = None
+  ; latest_acceptance = None
+  ; priority_unavailable = false
+  ; run_started = false
+  ; held_seqs = Hashtbl.create 64
+  ; resume_position = Journal.Whole_turn
+  ; attempt = 0
+  ; committed = false
+  ; revision = 0
+  ; operation_state = None
+  ; terminal_replay = Replay_pending
+  }
+
+let create ~keeper_name ~request_id ~started_at =
+  create_for_source ~keeper_name ~source:(Operation request_id) ~started_at
+
+let source t = t.source
+let keeper_name t = t.keeper_name
+let request_id t = t.request_id
+let started_at t = t.started_at
+let entries t = List.rev t.reversed_entries
+let first_acceptance t = t.first_acceptance
+let latest_acceptance t = t.latest_acceptance
+let priority_unavailable t = t.priority_unavailable
+let has_entries t = match t.reversed_entries with [] -> false | _ :: _ -> true
+let run_started t = t.run_started
+let resume_position t = t.resume_position
+let attempt t = t.attempt
+let committed t = t.committed
+let revision t = t.revision
+
+let bump t = t.revision <- t.revision + 1
+
+let operation_state t = t.operation_state
+let terminal_replay t = t.terminal_replay
+let observe_terminal_replay t replay =
+  match replay, t.terminal_replay with
+  | Replayed_after_terminal, Replay_pending
+    when Option.exists Keeper_chat_operation.is_terminal t.operation_state ->
+      t.terminal_replay <- Replayed_after_terminal;
+      bump t
+  | (Replayed_after_terminal, Replayed_after_terminal) | (Replay_pending, _)
+  | (Replayed_after_terminal, Replay_pending) -> ()
+
+
+let observe_operation_state t state =
+  match t.source, t.operation_state with
+  | Autonomous_turn _, _ -> ()
+  | Operation _, Some previous when Keeper_chat_operation.is_terminal previous -> ()
+  | Operation _, _ ->
+      if t.operation_state <> state then begin
+        t.operation_state <- state;
+        bump t
+      end
+;;
+
+let decode_operation_state ~operation_id (json : Yojson.Safe.t) =
+  let open Result.Syntax in
+  let open Keeper_chat_operation in
+  match json with
+  | `Assoc fields ->
+      let string key = match List.assoc_opt key fields with
+        | Some (`String value) -> validate_nonblank ~field:key value
+        | _ -> Error ("operation has no " ^ key) in
+      let timestamp key =
+        let* value = match List.assoc_opt key fields with
+          | Some (`Float value) -> Ok value
+          | Some (`Int value) -> Ok (float_of_int value)
+          | _ -> Error ("operation has no " ^ key) in
+        let* () = validate_timestamp ~field:key value in
+        Ok value in
+      let optional_string key = match List.assoc_opt key fields with
+        | None | Some `Null -> Ok None
+        | Some (`String value) -> Result.map Option.some (validate_nonblank ~field:key value)
+        | _ -> Error ("operation has invalid " ^ key) in
+      let* schema = string "schema" in
+      let* id = string "operation_id" in
+      if schema <> "masc.keeper_chat_operation.v1" then Error "unknown operation schema"
+      else if id <> operation_id then Error "operation identity does not match the requested source"
+      else begin
+        let* state = string "state" in
+        match state with
+        | "Queued" -> Ok Queued
+        | "Running" -> let* started_at = timestamp "started_at" in Ok (Running { started_at })
+        | "Succeeded" ->
+            let* completed_at = timestamp "completed_at" in
+            let* outcome_ref = string "outcome_ref" in
+            Ok (Succeeded { completed_at; outcome_ref })
+        | "Failed" ->
+            let* completed_at = timestamp "completed_at" in
+            let* kind = string "failure_kind" in
+            let* kind = failure_kind_of_string kind in
+            let* detail = string "failure_detail" in
+            let* outcome_ref = optional_string "outcome_ref" in
+            Ok (Failed { completed_at; failure = { kind; detail; outcome_ref } })
+        | "Cancelled" -> let* completed_at = timestamp "completed_at" in Ok (Cancelled { completed_at })
+        | _ -> Error ("unknown operation state: " ^ state)
+      end
+  | _ -> Error "operation is not an object"
+;;
+
+let note_priority_unavailable t =
+  if not t.priority_unavailable then begin
+    t.priority_unavailable <- true;
+    bump t
+  end
+
+let add ?at t ~seq (delta : Live.delta) =
+  match delta with
+  | Live.Accepted _ ->
+      let entry = { seq = None; at; attempt = 0; delta } in
+      if t.first_acceptance = None then t.first_acceptance <- Some entry;
+      t.latest_acceptance <- Some entry;
+      bump t;
+      true
+  | Live.Run_started | Live.Checkpoint | Live.External_effect_completed | Live.Run_finished
+  | Live.Batch_bound _ | Live.Runtime_attempt_started _ | Live.Provider_retry_observed _
+  | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
+  | Live.Stream_details _ | Live.Text _ | Live.Media _ | (Live.Thinking _ | Live.Thinking_snapshot _) | Live.Native_tool_started _
+  | Live.Native_tool_progress _ | Live.Native_tool_ended _ | Live.Tool_started _ | Live.Tool_admitted _ | Live.Tool_args _
+  | Live.Tool_ended _ | Live.Tool_result _ | Live.Stream_protocol_error _
+  | Live.Approval_requested _ | Live.Approval_settled _ | Live.Reply_details _ | Live.Run_failed _
+  | Live.Undecodable _ -> let duplicate =
+    match seq with
+    | Some seq -> Hashtbl.mem t.held_seqs seq
+    | None -> false
+  in
+  if duplicate
+  then false
+  else begin
+    (match delta with
+     | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
+     | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Media _ | (Live.Thinking _ | Live.Thinking_snapshot _) | Live.Stream_model_started _
+     | Live.Provider_retry_observed _ | Live.Model_content_activity _
+     | Live.Stream_details _ | Live.Stream_model_stopped _
+     | Live.Native_tool_started _ | Live.Native_tool_ended _ | Live.Native_tool_progress _
+     | Live.Tool_started _ | Live.Tool_admitted _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
+     | Live.Stream_protocol_error _ | Live.Approval_requested _
+     | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
+     | Live.External_effect_completed | Live.Reply_details _ | Live.Run_failed _
+     | Live.Run_finished | Live.Undecodable _ -> ());
+    (match seq with
+     | Some seq ->
+       Hashtbl.replace t.held_seqs seq ();
+       t.resume_position <- Journal.replay_position_advance t.resume_position seq
+     | None -> ());
+    t.reversed_entries <- { seq; at; attempt = t.attempt; delta } :: t.reversed_entries;
+    (match delta with
+      | Live.Run_started -> t.run_started <- true
+      | Live.Batch_bound _ | Runtime_attempt_started _ | Provider_retry_observed _
+      | Stream_model_started _ | Model_content_activity _ | Stream_model_stopped _
+      | Stream_details _ | Text _ | Media _ | Thinking _ | Thinking_snapshot _ | Native_tool_started _ | Native_tool_progress _
+      | Native_tool_ended _ | Tool_started _ | Tool_admitted _ | Tool_args _ | Tool_ended _ | Tool_result _
+      | Stream_protocol_error _ | Approval_requested _ | Approval_settled _ | Accepted _
+      | Checkpoint | External_effect_completed | Reply_details _ | Run_failed _ | Run_finished
+      | Undecodable _ -> ());
+    bump t;
+    true
+  end
+;;
+
+let commit t =
+  if not t.committed
+  then begin
+    t.committed <- true;
+    bump t
+  end
+;;
+
+(* The server-side occurrence carries no tool_call_id of its own; the event
+   that owns the occurrence does, and the wire sends both on the same frame. *)
+let occurrence (occurrence : E.tool_stream_occurrence) ~tool_call_id : Live.tool_occurrence =
+  { stream_scope = occurrence.stream_scope
+  ; block_index = occurrence.block_index
+  ; provider_message_id = occurrence.provider_message_id
+  ; tool_call_id
+  }
+;;
+
+(* Same composition as the live decoder's KEEPER_STREAM_PROTOCOL_ERROR arm:
+   "<kind>: <reason>" when a nonblank reason was sent, else the kind alone. *)
+let protocol_error_detail (error : E.stream_protocol_error) =
+  let kind = E.stream_protocol_error_kind_to_string error.kind in
+  match error.reason with
+  | Some reason when String.trim reason <> "" -> kind ^ ": " ^ reason
+  | Some _ | None -> kind
+;;
+
+(* The journal's bytes are the public projection: the server applies
+   [public_content] inside [on_publish] before appending
+   (server_routes_http_keeper_stream.ml), so a reloaded turn reads the same
+   safe copy a watched turn streamed. Applying it here again is idempotent,
+   and the published copy replaces a terminal diagnostic without removing
+   the frame that carries it, so ending/holding semantics keyed on the
+   frame's shape are unchanged. *)
+let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
+  let event = E.public_content ~redact_text:Fun.id event in
+  match event with
+  | E.Batch_bound {operation_id; execution_id} -> Some (Live.Batch_bound
+      {operation_id = Keeper_chat_operation.Operation_id.to_string operation_id;
+       execution_id = Keeper_chat_operation.Operation_id.to_string execution_id})
+  | E.Run_started _ -> Some Live.Run_started
+  | E.Text_message_start _ | E.Text_message_end -> None
+  | E.Text_delta {text; response} -> Some (Live.Text {text; response})
+  | E.External_effect_completed _ -> Some Live.External_effect_completed
+  | E.Run_finished _ -> Some Live.Run_finished
+  | E.Event_error { message } -> Some (Live.Run_failed { message })
+  | E.Reply_details { reply; turn_outcome; turn_ref; terminal_stream_scope } ->
+    Some
+      (Live.Reply_details
+         { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope })
+  | E.Continuation_checkpoint _ -> Some Live.Checkpoint
+  | E.Agent_core_stream_connected -> None
+  | E.Provider_retry_observed { attempt; retry } ->
+    Some (Live.Provider_retry_observed { attempt; retry })
+  | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
+    Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
+  | E.Agent_core_stream_message_start { content_generation; provider_message_id; model; usage; stream_scope } ->
+    Some (Live.Stream_model_started
+      { generation=content_generation; message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
+      ; usage = Option.bind usage (fun usage ->
+          Live.stream_usage_of_usage_json (E.api_usage_to_json usage)) })
+  | E.Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
+    (* Through the same readers as the live arm, over the same bytes the
+       producer writes ([E.delta_usage_to_json], [E.stop_reason_to_string]), so
+       a reloaded turn and a watched one report this identically. A delta that
+       carried neither fact is not a row. *)
+    let usage =
+      Option.bind usage (fun usage ->
+        Live.stream_usage_of_usage_json (E.delta_usage_to_json usage))
+    in
+    (* The live arm drops a blank reason rather than drawing [stopped: ] with
+       nothing after it, so this arm drops it too: a reason that is only
+       whitespace is not a reason, and the two entrances have to agree about
+       that as much as about the bytes. [Unknown ""] reaches here from a
+       provider that failed without a message. *)
+    let stop_reason =
+      Option.bind stop_reason (fun reason ->
+        match String.trim (E.stop_reason_to_string reason) with
+        | "" -> None
+        | _ -> Some reason)
+    in
+    if content_generation = None && usage = None && stop_reason = None
+    then None
+    else Some (Live.Stream_details { generation=content_generation; usage; stop_reason; stream_scope = Some stream_scope })
+  | E.Model_content_activity activity -> Some (Live.Model_content_activity activity)
+  | E.Agent_core_stream_message_stop owner -> Some (Live.Stream_model_stopped owner)
+  | E.Agent_core_stream_ping
+  | E.Agent_core_content_block_start _
+  | E.Agent_core_content_block_stop _ -> None
+  | E.Agent_core_thinking_snapshot {snapshot;index;response} -> Some(Live.Thinking_snapshot{text=snapshot;index;response})
+  | E.Agent_core_thinking_delta { delta; index; response } -> Some (Live.Thinking {text=delta;index;response})
+  | E.Agent_core_media_delta media -> Some (Live.Media media)
+  | E.Agent_core_thinking_signature_delta _ -> None
+  | E.Agent_core_stream_protocol_error error ->
+    Some
+      (Live.Stream_protocol_error
+         { quarantined_occurrence =
+             Option.map
+               (fun quarantined -> occurrence quarantined ~tool_call_id:None)
+               error.quarantined_occurrence
+         ; detail = protocol_error_detail error
+         })
+  | E.Native_tool_start native ->
+    Some (Live.Native_tool_started
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id
+      ; tool_name = native.tool_call_name })
+  | E.Native_tool_progress (native, progress) ->
+    Some (Live.Native_tool_progress
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id; progress })
+  | E.Native_tool_end (native, completion) ->
+    Some (Live.Native_tool_ended
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id; completion })
+  | E.Tool_call_start { occurrence = o; tool_call_id; tool_call_name } ->
+    Some
+      (Live.Tool_started
+         { occurrence = occurrence o ~tool_call_id; tool_name = tool_call_name })
+  | E.Tool_call_admitted { occurrence = o; tool_call_id; provider_tool_name; tool_call_name } ->
+    Some (Live.Tool_admitted
+      { occurrence = occurrence o ~tool_call_id; provider_tool_name; tool_name = tool_call_name })
+  | E.Tool_call_args { occurrence = o; tool_call_id; delta } ->
+    Some
+      (Live.Tool_args
+         { occurrence = occurrence o ~tool_call_id; fragment = Live.Args_delta delta })
+  | E.Tool_call_args_snapshot { occurrence = o; tool_call_id; snapshot } ->
+    Some
+      (Live.Tool_args
+         { occurrence = occurrence o ~tool_call_id
+         ; fragment = Live.Args_snapshot snapshot
+         })
+  | E.Tool_call_end { occurrence = o; tool_call_id } ->
+    Some (Live.Tool_ended { occurrence = occurrence o ~tool_call_id })
+  | E.Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
+    Some
+      (Live.Approval_requested
+         { call_id = tool_call_id; tool_name = tool_call_name; args; question; because })
+  | E.Tool_approval_settled { tool_call_id; outcome } ->
+    Some (Live.Approval_settled { call_id = tool_call_id; outcome })
+  | E.Tool_result_ready { occurrence = o; tool_call_id; execution_id } ->
+    Some
+      (Live.Tool_result
+         { occurrence = occurrence o ~tool_call_id
+         ; execution_id = Ids.Execution_id.to_string execution_id
+         })
+  | E.Tool_transcript_committed _ -> None
+  | E.Link_block _ | E.Image_block _ | E.Status_block _ | E.Audio_block _
+  | E.Tool_context_block _ -> None
+;;
+
+(* Nothing to draw, so no entry and no revision bump; the position is still
+   held so a later live frame with this seq is a duplicate and a resume asks
+   past it. *)
+let hold_seq t seq =
+  if not (Hashtbl.mem t.held_seqs seq)
+  then begin
+    Hashtbl.replace t.held_seqs seq ();
+    t.resume_position <- Journal.replay_position_advance t.resume_position seq
+  end
+;;
+
+(* The one fold of a journal page into a log. What it returns is what the
+   caller's projection has to follow: the lines whose delta the log took, in
+   journal order, so a transcript kept as the fold of the log can apply
+   exactly those, each at its line's own time. A line already held by seq,
+   and a line that draws nothing, are not in it. *)
+let add_journaled t (lines : Journal.journaled_event list) =
+  List.fold_left
+    (fun taken (line : Journal.journaled_event) ->
+       match delta_of_journaled line.event with
+       | None ->
+         hold_seq t line.seq;
+         taken
+       | Some delta ->
+         if add ~at:line.ts t ~seq:(Some line.seq) delta then (line, delta) :: taken else taken)
+    []
+    lines
+  |> List.rev
+;;
+
+type events_page =
+  { source : journal_source
+  ; events : Journal.journaled_event list
+  ; has_more : bool
+  ; next_since_seq : Journal.replay_position
+  ; next_since_offset : Journal.page_start
+  }
+
+let events_schema = "masc.keeper_chat_events.v2"
+
+let decode_events_page (json : Yojson.Safe.t) =
+  let open Result.Syntax in
+  match json with
+  | `Assoc fields ->
+    let* source =
+      match List.assoc_opt "schema" fields with
+      | Some (`String schema) when String.equal schema events_schema ->
+          (match List.assoc_opt "operation_id" fields with
+           | Some (`String value) when String.trim value <> "" -> Ok (Operation value)
+           | Some _ | None -> Error "events body has no operation_id")
+      | Some (`String "masc.keeper_turn_events.v1") ->
+          (match List.assoc_opt "turn_ref" fields with
+           | Some (`String value) ->
+               (match Ids.Turn_ref.of_string value with
+                | Some turn_ref -> Ok (Autonomous_turn turn_ref)
+                | None -> Error "events body has invalid turn_ref")
+           | Some _ | None -> Error "events body has no turn_ref")
+      | Some (`String schema) -> Error ("unexpected events schema: " ^ schema)
+      | Some _ | None -> Error "events body has no schema"
+    in
+    let* has_more =
+      match List.assoc_opt "has_more" fields with
+      | Some (`Bool value) -> Ok value
+      | Some _ | None -> Error "events body has no boolean has_more"
+    in
+    let* next_since_seq =
+      (* The response spelling of a position: null for the whole journal, an
+         integer >= 0 for the seq to read after. *)
+      match List.assoc_opt "next_since_seq" fields with
+      | Some json ->
+        (match Journal.replay_position_of_yojson json with
+         | Some position -> Ok position
+         | None -> Error "events body's next_since_seq is neither null nor an integer >= 0")
+      | None -> Error "events body has no next_since_seq"
+    in
+    let* next_since_offset =
+      (* The byte offset past the last event served, handed back beside the
+         seq so the next page starts reading there. *)
+      match List.assoc_opt "next_since_offset" fields with
+      | Some (`Int offset) ->
+        (match Journal.page_start_of_wire (Some offset) with
+         | Some start -> Ok start
+         | None -> Error "events body's next_since_offset is not an integer >= 0")
+      | Some _ -> Error "events body's next_since_offset is not an integer >= 0"
+      | None -> Error "events body has no next_since_offset"
+    in
+    let* raw_events =
+      match List.assoc_opt "events" fields with
+      | Some (`List events) -> Ok events
+      | Some _ | None -> Error "events body has no events list"
+    in
+    let* events =
+      List.fold_left
+        (fun acc raw ->
+           let* acc = acc in
+           let* event = Journal.journaled_event_of_json raw
+             |> Result.map_error Journal.decode_failure_to_string in
+           Ok (event :: acc))
+        (Ok [])
+        raw_events
+      |> Result.map List.rev
+    in
+    Ok { source; events; has_more; next_since_seq; next_since_offset }
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error "events body is not an object"
+;;
+
+(* The events query a page is asked with. It lives here, beside the decoder,
+   because the executable's HTTP module cannot be linked by a test: a cursor
+   dropped or misspelled on the way out would still read correctly, one whole
+   prefix decoded per page, with nothing to fail. [encode_value] is the
+   caller's query-value encoder. *)
+let events_query ~encode_value ~operation_id ~since_seq ~since_offset ~limit =
+  let field name value = Printf.sprintf "&%s=%d" name value in
+  let since_seq_query =
+    match Journal.replay_position_to_wire since_seq with
+    | None -> ""
+    | Some seq -> field "since_seq" seq
+  in
+  let since_offset_query =
+    match Journal.page_start_to_wire since_offset with
+    | None -> ""
+    | Some offset -> field "since_offset" offset
+  in
+  Printf.sprintf
+    "operation_id=%s%s%s&limit=%d"
+    (encode_value operation_id)
+    since_seq_query
+    since_offset_query
+    limit
+;;
+
+let journal_path ~encode_value ~keeper_name ~source ~since_seq ~since_offset ~limit =
+  match source with
+  | Operation operation_id ->
+      Printf.sprintf "/api/v1/keepers/%s/chat/events?%s" (encode_value keeper_name)
+        (events_query ~encode_value ~operation_id ~since_seq ~since_offset ~limit)
+  | Autonomous_turn turn_ref ->
+      let cursor name = function None -> "" | Some value -> Printf.sprintf "&%s=%d" name value in
+      Printf.sprintf "/api/v1/keepers/%s/turns/%s/events?limit=%d%s%s"
+        (encode_value keeper_name) (encode_value (Ids.Turn_ref.to_string turn_ref)) limit
+        (cursor "since_seq" (Journal.replay_position_to_wire since_seq))
+        (cursor "since_offset" (Journal.page_start_to_wire since_offset))
+;;
+
+type events_error =
+  | Unknown_operation
+  | Journal_pruned
+  | Journal_missing
+  | Journal_unsupported_version of string
+  | Journal_unavailable of string
+  | Cursor_refused of
+      { refusal : Journal.cursor_refusal
+      ; message : string
+      }
+  | Events_refused of string
+  | Events_denied of string
+  | Events_undecodable of string
+  | Events_transport of string
+
+let cursor_refusal_to_string = function
+  | Journal.Offset_past_rows -> "the byte cursor lies past the journal"
+  | Journal.Offset_inside_row -> "the byte cursor does not start a row"
+  | Journal.Cursor_pair_mismatch -> "the seq and byte cursors are not a pair"
+;;
+
+let events_error_to_string = function
+  | Unknown_operation -> "unknown operation"
+  | Journal_pruned -> "journal pruned"
+  | Journal_missing -> "journal not recorded"
+  | Journal_unsupported_version detail -> "unsupported journal version: " ^ detail
+  | Journal_unavailable detail -> "journal unavailable: " ^ detail
+  | Cursor_refused { refusal; message } ->
+    Printf.sprintf
+      "journal moved under the read: %s (%s)"
+      (cursor_refusal_to_string refusal)
+      message
+  | Events_refused detail -> "events request refused: " ^ detail
+  | Events_denied detail -> "events request denied: " ^ detail
+  | Events_undecodable detail -> "events body unreadable: " ^ detail
+  | Events_transport detail -> "events request failed: " ^ detail
+;;
+
+(* The error envelope is [masc.keeper_chat_operation.error.v1]:
+   [{schema; error = <code>; message}]. The code is the typed fact; the
+   message is what the server said, kept only where the code alone does not
+   tell the pane what to do. A 401/403 that names an auth code is about this
+   client's credential, not about the journal, and is said the way every other
+   refused request is; one without a code is the handler's own answer and
+   goes on to be read like any other. *)
+let decode_events_error ~status ~credential_sent body =
+  let rejected detail = Events_undecodable (Printf.sprintf "%d %s" status detail) in
+  let credential_refusal =
+    if status = 401 || status = 403
+    then Masc_tui_credential.server_reason_of_body body
+    else None
+  in
+  match credential_refusal with
+  | Some reason ->
+    Events_refused (Masc_tui_credential.refusal ~credential_sent reason)
+  | None when status = 401 || status = 403 ->
+    (* The handler refused this read and said why. It is not a body this
+       build cannot read, and not the credential: the server's own sentence
+       is what the operator needs. *)
+    let said =
+      match Yojson.Safe.from_string body with
+      | `Assoc fields -> (
+        match List.assoc_opt "message" fields, List.assoc_opt "error" fields with
+        | Some (`String message), _ | None, Some (`String message) -> message
+        | (Some _ | None), _ -> body)
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> body
+      | exception Yojson.Json_error _ -> body
+    in
+    Events_denied (Printf.sprintf "%d %s" status said)
+  | None ->
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+    let message =
+      match List.assoc_opt "message" fields with
+      | Some (`String message) -> message
+      | Some _ | None -> body
+    in
+    (match List.assoc_opt "error" fields with
+     | Some (`String "unknown_operation") -> Unknown_operation
+     | Some (`String "journal_pruned") -> Journal_pruned
+     | Some (`String "journal_missing") -> Journal_missing
+     | Some (`String "journal_unsupported_version") -> Journal_unsupported_version message
+     | Some (`String ("journal_unreadable" | "journal_corrupt")) ->
+       Journal_unavailable message
+     | Some (`String code) ->
+       (* The three cursor codes are the journal's own spelling
+          ([Journal.cursor_refusal_of_wire]), read once here; any other code
+          is a body this build does not know. *)
+       (match Journal.cursor_refusal_of_wire code with
+        | Some refusal -> Cursor_refused { refusal; message }
+        | None -> rejected message)
+     | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+     | None -> rejected message)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    rejected body
+  | exception Yojson.Json_error _ -> rejected body
+;;
+
+(* Whether a page's cursor lies past the position it was asked from. The
+   whole journal is behind every seq and never past anything. *)
+let position_advanced ~from (next : Journal.replay_position) =
+  match next with
+  | Journal.Whole_turn -> false
+  | Journal.After_seq next -> Journal.seq_is_after from next
+;;
+
+(* A whole journal, page by page, through the caller's fetch. [since_seq] is
+   where to start (the whole journal, or a held log's {!resume_position} to
+   read only what it lacks). The first page reads from the journal's first
+   row; every later page starts at the byte offset the page before handed
+   back, so the server decodes each row once over the whole read. The loop
+   follows [has_more] while both cursors advance: [next_since_seq] past the
+   seq asked from and [next_since_offset] past the offset asked from. A page
+   that claims more without advancing would be read forever, and the lines
+   read so far are not the journal: such a read is an error naming both
+   positions, not a shorter [Ok]. *)
+let read_whole_journal ~fetch ~since_seq =
+  let rec page since_seq since_offset acc =
+    match fetch ~since_seq ~since_offset with
+    | Error error -> Error error
+    | Ok { events; has_more; next_since_seq; next_since_offset; _ } ->
+      let advancing = position_advanced ~from:since_seq next_since_seq
+        && Journal.page_start_offset next_since_offset > Journal.page_start_offset since_offset in
+      let held_sequence_scan = match since_seq, since_offset with
+        | Journal.After_seq _, Journal.From_first_row -> true
+        | Journal.After_seq _, Journal.From_offset offset -> offset = 0
+        | Journal.Whole_turn, (Journal.From_first_row | Journal.From_offset _) -> false in
+      let rec event_frontier position = function
+        | [] -> Some position
+        | (event : Journal.journaled_event) :: rest ->
+          if Journal.seq_is_after position event.seq
+          then event_frontier (Journal.After_seq event.seq) rest
+          else None in
+      if has_more && not advancing then
+        Error
+          (Events_undecodable
+             (Printf.sprintf
+                "page after since_seq=%s since_offset=%d claims more but did not \
+                 advance (next_since_seq=%s next_since_offset=%d)"
+                (Journal.replay_position_to_string since_seq)
+                (Journal.page_start_offset since_offset)
+                (Journal.replay_position_to_string next_since_seq)
+                (Journal.page_start_offset next_since_offset)))
+      else if event_frontier since_seq events <> Some next_since_seq
+        || Journal.page_start_offset next_since_offset < Journal.page_start_offset since_offset
+        || (events = [] && not held_sequence_scan
+            && Journal.page_start_offset next_since_offset > Journal.page_start_offset since_offset)
+        || (events <> [] && not advancing)
+      then Error (Events_undecodable "journal page events and continuation cursor disagree")
+      else
+        let acc = List.rev_append events acc in
+        if has_more then page next_since_seq next_since_offset acc
+        else Ok (List.rev acc)
+  in
+  page since_seq Journal.first_row []
+;;
+
+let read_with_operation_state ~read_operation ~read_journal =
+  let completion operation journal =
+    match operation, journal with
+    | Ok (Some state), Ok _ when Keeper_chat_operation.is_terminal state ->
+        Replayed_after_terminal
+    | (Ok (Some _) | Ok None | Error _), (Ok _ | Error _) -> Replay_pending in
+  let operation = read_operation () in
+  let journal = read_journal () in
+  let reread refreshed =
+    let latest = read_journal () in
+    let replay = completion refreshed latest in
+    let retained = match latest, journal with
+      | Ok _ as latest, _ -> latest
+      | Error _, (Ok _ as first) -> first
+      | (Error _ as latest), Error _ -> latest in
+    refreshed, retained, replay in
+  match operation with
+  | Ok (Some (Keeper_chat_operation.Queued | Running _)) ->
+      let refreshed = read_operation () in
+      (match operation, refreshed with
+       | _, Ok (Some (Keeper_chat_operation.Succeeded _ | Failed _ | Cancelled _)) ->
+           reread refreshed
+       | Ok (Some Queued), Ok (Some (Running _)) -> reread refreshed
+       | _, Ok (Some (Queued | Running _)) -> refreshed, journal, Replay_pending
+       | _, (Ok None | Error _) -> operation, journal, Replay_pending)
+  | Ok (Some (Succeeded _ | Failed _ | Cancelled _)) | Ok None | Error _ ->
+      operation, journal, completion operation journal
+;;

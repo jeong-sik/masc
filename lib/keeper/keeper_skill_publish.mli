@@ -1,0 +1,23 @@
+(** Keeper-authored Skill publication (RFC keeper-self-authored-skills).
+
+    Parses [package_id], exactly one of [source_text]/[draft_sha256] and a
+    non-empty [evidence] list. Draft mode requires [capability_surface], the
+    exact preparing owner/package and its frozen Tool/Skill contracts; it
+    publishes the frozen source bytes. Then it
+    validates against the caller-authorized [descriptors] before it
+    asks {!Workspace_hooks.keeper_skill_publish_fn} to create the package in
+    the [project-agents] source. The Keeper cannot pick the source. The
+    editor's typed outcome is projected to JSON as is:
+    [Created_and_published] carries the reference and snapshot revision,
+    [Created_but_shadowed] completes too and adds the [winner] identity that
+    turns listing Skills by name see instead, [Created_but_unpublished] the
+    reason, and a refusal its [error] code and message. If an audit was
+    attempted, [audit_status] reports [audit_call_returned] or [unconfirmed];
+    neither is a durable transaction with Skill publication. *)
+val handle :
+  descriptors:Keeper_tool_descriptor.t list ->
+  capability_surface:Keeper_capability_surface.t option ->
+  config:Workspace.config ->
+  keeper_name:string ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t

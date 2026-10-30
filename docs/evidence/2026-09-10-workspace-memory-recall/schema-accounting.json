@@ -1,0 +1,14 @@
+{
+  "observed_ci_run": 34401018154,
+  "observed_head": "b33c497efb690106a1482d5a118b6eab2f97e296",
+  "observed_total_schema_bytes": 98808,
+  "observed_tool_count": 112,
+  "added_tool": "keeper_workspace_memory_read",
+  "added_tool_bytes": 776,
+  "delta_method": "Source-derived compact UTF-8 JSON matching Tool_definition_toml optional-only schema; next CI also prints production per-tool size",
+  "inferred_parent_schema_bytes": 98032,
+  "prior_ceiling_bytes": 98164,
+  "new_ceiling_bytes": 98940,
+  "preserved_headroom_bytes": 132,
+  "runtime_budget_gate": false
+}

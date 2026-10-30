@@ -1,0 +1,331 @@
+(** Core types for the Agent module.
+
+    [Agent_types.t] exposes record fields for library-internal code.
+    External consumers should use the abstract [Agent.t] and its
+    accessor functions instead.
+
+    @stability Internal
+    @since 0.93.1 *)
+
+(** {1 Configuration} *)
+
+type periodic_callback =
+  { interval_sec : float
+  ; callback : unit -> unit
+  }
+
+type checkpoint_stage = Checkpoint_snapshot.stage =
+  | After_input_wait_changed
+  (** The exact input wait was installed or consumed. This boundary precedes
+      lifecycle publication and any subsequent provider/parameter stage. *)
+  | After_assistant_collected
+  | After_tool_results_appended
+  | After_context_injection
+  | After_rejected_response_dropped
+  (** Written by the caller, not the pipeline: the checkpoint that stood after
+      the assistant's response was collected, with that response removed
+      because accept refused it. Same turn count as the one it replaces. *)
+
+val checkpoint_stage_to_string : checkpoint_stage -> string
+
+type checkpoint_snapshot =
+  { stage : checkpoint_stage
+  ; turn : int
+  ; checkpoint : Checkpoint.t
+  ; timestamp : float
+  }
+
+type checkpoint_sink = checkpoint_snapshot -> (unit, string) result
+
+type input_response_error =
+  | Input_not_current of Agent_input_request.settlement_error
+  | Input_checkpoint_failed of Error.t
+
+type context_fit_admission =
+  | Body_only
+  | Require_exact_fit
+
+(** Caller-owned provider-message projection. [Error e] aborts the turn before
+    request measurement or dispatch; canonical Agent state is unchanged. The
+    error is the caller's own typed fact, not a rendered string: a projection
+    that refuses because this candidate's declared ceiling cannot carry the
+    turn says so with [Error.Api (ContextOverflow _)], which the lane loop
+    already rotates on. The projection turns history into the provider
+    request, so it also resolves the request's media through the agent's
+    media store; an agent without a projection converts the whole history
+    with {!History.to_wire_message}. *)
+type model_input_projection =
+  Types.message list -> (Llm_provider.Types.message list, Error.t) result
+
+type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
+
+(** Runs the serialisation of an admitted provider body, the walk over every
+    message in the request. The closure reads immutable request values and
+    returns a value. A caller whose scheduler must stay responsive supplies
+    one that runs it on another domain; [None] runs it inline. *)
+type serialization_executor = { run : 'a. (unit -> 'a) -> 'a }
+
+type options =
+  { provider_config : Llm_provider.Provider_config.t option
+  ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
+    (** Defaults to [Reject_incompatible]. [Exclude_unselected] admits a
+        provider/model change without deleting canonical reasoning. Resume is
+        provisional; dispatch requires each foreign artifact to be outside the
+        target's replay selection. Active mandatory reasoning stays protected. *)
+  ; stream_idle_timeout_s : float option
+    (** Inter-line idle deadline applied to streaming HTTP responses.
+        Threaded through {!Pipeline.stage_route} into
+        {!Llm_provider.Complete.complete_stream}, which forwards it to
+        {!Llm_provider.Http_client.read_ndjson} (Ollama native NDJSON)
+        and {!Llm_provider.Http_client.read_sse} (Anthropic / Openai-
+        compatible / Gemini / Glm). The deadline resets after each
+        successful line, so this caps inter-chunk silence — not total
+        stream duration. A stalled endpoint surfaces as
+        [TimeoutError { phase = Stream_idle state; _ }], preserving
+        whether the stream was waiting for answer/thinking/tool-call
+        progress. CLI transports honour the parallel
+        [stdout_idle_timeout_s] knob via the transport's own config.
+        @since 0.176.0 *)
+  ; first_event_timeout_s : float option
+    (** Agent Core contract: dedicated bound for the time-to-first-event
+        (TTFT / prefill) wait, distinct from [stream_idle_timeout_s].
+        This is one window from the request to the first token-bearing
+        event, connection and response headers included; the phase before
+        the headers runs under it (or under a narrower connect budget) and
+        the reader arms what it leaves; [stream_idle_timeout_s] arms only after it
+        (inter-token idle). A provider's opening frame, such as Responses
+        [response.created] or Anthropic [message_start], neither ends the
+        window nor extends it. A silent prefill on a large context is a
+        slow-but-alive stream, not a hang, so it must not be cut by the
+        short inter-token idle value. When [None] the first-event wait falls
+        back to [body_timeout_s], then to [stream_idle_timeout_s], and stays
+        unarmed only when none of the three is set; inter-token idle still
+        guards once the stream produces, and [connect_timeout_s] still guards
+        connection setup. On the exact-fit path, when this is declared, the
+        count-tokens round trip is provider silence before the first token
+        too: it spends from this window first and the stream arms what it
+        left. The round trip runs under one window, the shorter of this
+        budget and what [admission_timeout_s] has left after the permit
+        wait, and ends as the phase of the budget that ended it
+        ([TimeoutError { phase = First_token }], or [Queue] after a late
+        permit); when the two end together it is [First_token]. The
+        fallbacks above do not reach the round trip, whose only other bound
+        is [body_timeout_s]. @since 0.218.0 *)
+  ; body_timeout_s : float option
+    (** Per-call total deadline applied to non-streaming HTTP response body
+        consumption. Threaded through {!Pipeline.stage_route} into both the
+        provider-native input-count preflight, when enabled, and
+        {!Llm_provider.Complete.complete}. Each round-trip owns a separate
+        deadline; the value is not a combined turn deadline.
+        Requires [clock] to be supplied; without a clock the wrapper is
+        skipped. A timeout surfaces as
+        [TimeoutError] and is returned unchanged after that provider attempt.
+        On the streaming path this field is the fallback bound for the
+        first-event (TTFT/prefill) wait when [first_event_timeout_s] is
+        [None] — inter-token liveness after the first token-bearing event is
+        still governed by [stream_idle_timeout_s], and only the optional
+        non-streaming count
+        preflight uses this deadline directly.
+        @since 0.181.0 *)
+  ; call_timeout_s : float option
+    (** Per-call bound on a non-streaming completion as a whole: the wait for
+        a provider admission permit and the round trip after it. A call still
+        waiting for its permit when it runs out ends as
+        [TimeoutError { phase = Queue }] without being sent; one in its round
+        trip ends as [TimeoutError { phase = Non_streaming_body }] with what
+        the wait left. [body_timeout_s] still arms inside it, so the narrower
+        bound fires and names its own knob. Threaded through
+        {!Pipeline.stage_route} into {!Llm_provider.Complete.complete_serialized}
+        as its [call_timeout_s]. On the exact-fit path it is opened once as a
+        window: the count-tokens request, its permit wait and its round trip,
+        spends from it first, and {!Llm_provider.Complete.complete_admitted}
+        spends the rest from the same deadline. The streaming path does not
+        read it, a stream's duration being its own. Requires [clock].
+        @since 0.231.15 *)
+  ; admission_timeout_s : float option
+    (** Bound on the wait for a provider admission permit before a streaming
+        completion, the one part of a stream call that is not the stream. A
+        call still queued when it runs out ends as
+        [TimeoutError { phase = Queue }] with nothing sent; a granted stream
+        runs under its own budgets. Threaded through {!Pipeline.stage_route}
+        into {!Llm_provider.Complete.complete_stream_serialized}. On the
+        exact-fit path it is one window from the call over both permit waits,
+        the count-tokens request's and the stream's, and over the count round
+        trip between them, which a late permit leaves only what the window
+        has left; {!Llm_provider.Complete.complete_stream_admitted} is handed
+        that window. The non-streaming path's whole-call bound is
+        [call_timeout_s]. Requires [clock].
+        @since 0.231.15 *)
+  ; permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option
+    (** The caller's cell a bounded wait for a provider admission permit
+        writes as it begins and ends, on every route ({!Pipeline.stage_route}
+        hands it to each completion and to the count-tokens measurement).
+        Only a wait with a deadline of its own ([call_timeout_s] or
+        [admission_timeout_s]) writes; a permit granted at once is no wait.
+        A caller with a no-progress watchdog stands it down while
+        [Waiting_for_permit], knowing the wait it sees is bounded, and counts
+        again from [Wait_settled_at]. *)
+  ; hooks : Hooks.hooks
+  ; guardrails_async : Guardrails_async.t
+  ; tracer : Tracing.t
+  ; trace_link : (string * string) option
+  ; raw_trace : Raw_trace.t option
+  ; context_injector : Hooks.context_injector option
+  ; mcp_clients : Mcp.managed list
+  ; event_bus : Event_bus.t option
+  ; skill_registry : Skill_registry.t option
+    (** Discovery/metadata path only.  Surfaced via {!Agent.card} for
+          A2A negotiation.  Does not affect runtime prompt composition. *)
+  ; elicitation : Hooks.elicitation_callback option
+  ; tool_approval : Hooks.tool_approval_callback option
+    (** Closed synchronous exact-tool approval callback. *)
+  ; description : string option
+  ; periodic_callbacks : periodic_callback list
+  ; on_run_complete : (bool -> unit) option
+    (** Optional callback invoked when a run finishes.  Receives [true]
+        on success, [false] on error.  Runs before lifecycle state is
+        updated.  Intended for emitting eval metrics, flushing OTel
+        spans, or other end-of-run side effects.
+        @since 0.110.0 *)
+  ; transport : Llm_provider.Llm_transport.t option
+    (** Optional non-HTTP transport override.  Required for CLI provider
+        kinds ([Claude_code], [Codex], [Gemini], [Kimi])
+        which cannot be reached over HTTP.  When [Some t], {!Pipeline.stage_route}
+        dispatches via {!Llm_provider.Complete.complete} with this
+        transport; when [None], the HTTP path is used.
+        @since 0.156.0 *)
+  }
+
+(** {1 Lifecycle re-exports} *)
+
+type lifecycle_status = Agent_lifecycle.lifecycle_status =
+  | Accepted
+  | Ready
+  | Running
+  | Completed
+  | Failed
+[@@deriving show]
+
+type lifecycle_snapshot = Agent_lifecycle.lifecycle_snapshot =
+  { current_run_id : string option
+  ; agent_name : string
+  ; worker_id : string option
+  ; runtime_actor : string option
+  ; status : lifecycle_status
+  ; requested_provider : string option
+  ; requested_model : string option
+  ; resolved_provider : string option
+  ; resolved_model : string option
+  ; last_error : string option
+  ; accepted_at : float option
+  ; ready_at : float option
+  ; first_progress_at : float option
+  ; started_at : float option
+  ; last_progress_at : float option
+  ; finished_at : float option
+  }
+
+(** {1 Agent state} *)
+
+(** Mutable agent record — library-internal only.
+    External code must use [Agent.t] (abstract) and its accessors.
+
+    All mutable fields are protected by [mu].  Use [set_state],
+    [update_state], [set_lifecycle], etc. rather than direct assignment
+    to prevent lost-update races from parallel tool-execution fibers or
+    periodic callbacks. *)
+type t =
+  { mu : Eio.Mutex.t
+  ; mutable state : Types.agent_state
+  ; mutable lifecycle : lifecycle_snapshot option
+  ; mutable pending_input : Agent_input_request.pending option
+  ; mutable tools : Tool_set.t
+      (** Widened during a turn by {!extend_tools} and never narrowed. *)
+  ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  ; context : Context.t
+  ; options : options
+  ; media_store : History.media_store
+    (** Holds the bytes of every media block in [state.messages]. *)
+  ; context_fit_admission : context_fit_admission
+  ; model_input_projection : model_input_projection option
+  ; pre_dispatch_serialization_observer : pre_dispatch_serialization_observer option
+  ; serialization_executor : serialization_executor option
+  ; checkpoint_sink : checkpoint_sink option
+  }
+
+(** {1 Defaults} *)
+
+val default_options : options
+
+(** {1 Accessors} *)
+
+val state : t -> Types.agent_state
+val lifecycle : t -> lifecycle_snapshot option
+val pending_input : t -> Agent_input_request.pending option
+val tools : t -> Tool_set.t
+
+val extend_tools : ?order:string list -> t -> Tool.t list -> unit
+(** Widen the callable tool set mid-turn, under the same mutex as [state].
+    Widening only, and a name already held is ignored — see [Agent.extend_tools]
+    for why neither is a restriction that can be relaxed, and for [order]. *)
+val context : t -> Context.t
+val options : t -> options
+val provider_config : t -> Llm_provider.Provider_config.t option
+val media_store : t -> History.media_store
+val net : t -> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+val set_state : t -> Types.agent_state -> unit
+val update_state : t -> (Types.agent_state -> Types.agent_state) -> unit
+val description : t -> string option
+
+(** {1 Agent-core version} *)
+
+val agent_core_version : string
+
+(** {1 Construction} *)
+
+val create
+  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> media_store:History.media_store
+  -> config:Types.agent_config
+  -> ?tools:Tool.t list
+  -> ?context:Context.t
+  -> ?options:options
+  -> ?context_fit_admission:context_fit_admission
+  -> ?model_input_projection:model_input_projection
+  -> ?pre_dispatch_serialization_observer:pre_dispatch_serialization_observer
+  -> ?serialization_executor:serialization_executor
+  -> ?checkpoint_sink:checkpoint_sink
+  -> unit
+  -> t
+
+val clone : ?copy_context:bool -> t -> t
+
+(** {1 Agent card} *)
+
+val card
+  :  supported_interfaces:Agent_card.supported_interfaces
+  -> t
+  -> Agent_card.agent_card
+
+(** {1 Lifecycle management} *)
+
+val set_lifecycle
+  :  t
+  -> ?current_run_id:string
+  -> ?worker_id:string
+  -> ?runtime_actor:string
+  -> ?last_error:string
+  -> ?accepted_at:float
+  -> ?ready_at:float
+  -> ?first_progress_at:float
+  -> ?started_at:float
+  -> ?last_progress_at:float
+  -> ?finished_at:float
+  -> Agent_lifecycle.lifecycle_status
+  -> unit
+
+(** {1 Trace / Checkpoint} *)
+
+val last_raw_trace_run : t -> Raw_trace.run_ref option
+val lifecycle_snapshot : t -> lifecycle_snapshot option
+val close : t -> unit

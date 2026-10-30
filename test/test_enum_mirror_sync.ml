@@ -1,0 +1,808 @@
+(** The sync guard [Tool_shard_types_enum_mirrors] says it already has.
+
+    That module hand-copies four enum string lists that downstream keeper and
+    board modules own, and its header states the copies are "protected by a sync
+    regression test in [test/test_types.ml]" and that "the test suite then forces
+    a sync edit here". No such module exists — twenty-five sites under [lib/]
+    cite it. Until this file, nothing compared the copies against their owners,
+    so a fifth enum value added to an owner would have shipped a schema that
+    never offered it, and the tool would have rejected the value its own
+    documentation advertised.
+
+    The mirror module is private to [masc_tool_surface], so the comparison runs
+    against the observable end of the copy: the [enum] arrays that reach the
+    tool schemas an LLM is handed. That is the contract that actually matters —
+    if a mirror drifts, no emitted enum matches its owner's [valid_*_strings]
+    any more. *)
+
+open Alcotest
+
+(* Every schema the tool surface publishes, flattened. keeper_board_schema is
+   keyed by board name rather than listed, so walk the board vocabulary too. *)
+let all_schemas () =
+  let board_schemas =
+    Tool_name.Board_name.all
+    |> List.filter_map Tool_shard_types.keeper_board_schema
+  in
+  Tool_shard_types.base_tools
+  @ Tool_shard_types.filesystem_tools
+  @ Tool_shard_types.search_files_tools
+  @ Tool_shard_types.typed_execute_tools
+  @ Tool_shard_types.voice_tools
+  @ [ Tool_shard_types.tool_execute_schema ]
+  @ board_schemas
+  (* The Schedule tools publish from their own library rather than the keeper
+     shard. Include them so the typed contract's schema projection is observed
+     by the same boundary test. *)
+  @ Tool_schemas_schedule.schemas
+  (* [board_schemas] above is the eight curated Keeper projections. The other
+     thirteen Board tools reach a Keeper through the canonical registry, which
+     was outside this walk, and so were the Task schemas. *)
+  @ Board_tool_registry.tools
+  @ Masc.Task.Schemas.schemas
+;;
+
+(* Every value a schema advertises has to be one the handler takes -- the
+   failure this file's header describes, "the tool would have rejected the value
+   its own documentation advertised". Unlike [check_mirror_in_sync] this needs
+   no enumeration on the owner's side, which is what the two owners below do not
+   export.
+
+   It catches the harmful direction only. A domain value missing from the schema
+   is invisible here; seeing that needs an [all_*] list, and adding one purely so
+   a test could reach it is the surface the dead-export ratchet refuses. *)
+let check_every_advertised_value_decodes ~label ~decodes ~advertised =
+  check bool
+    (Printf.sprintf "%s is advertised somewhere" label)
+    true
+    (advertised <> []);
+  match List.filter (fun value -> not (decodes value)) advertised with
+  | [] -> ()
+  | rejected ->
+    failf
+      "%s: the schema advertises %s, which the handler refuses.\n\
+       Advertised: %s"
+      label
+      (String.concat ", " rejected)
+      (String.concat ", " advertised)
+;;
+
+(* The enum declared for one property name, across every schema that declares
+   it, so a second copy of the same property is compared too. *)
+let advertised_values_for_schemas schemas ~property =
+  let rec walk (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields ->
+      List.concat_map
+        (fun (key, value) ->
+          match value with
+          | `Assoc inner when String.equal key property ->
+            (match List.assoc_opt "enum" inner with
+             | Some (`List items) ->
+               List.filter_map (function `String v -> Some v | _ -> None) items
+             | _ -> walk value)
+          | _ -> walk value)
+        fields
+    | `List items -> List.concat_map walk items
+    | _ -> []
+  in
+  schemas
+  |> List.concat_map (fun (t : Masc_domain.tool_schema) -> walk t.input_schema)
+  |> List.sort_uniq String.compare
+;;
+
+let advertised_values_for ~property =
+  advertised_values_for_schemas (all_schemas ()) ~property
+;;
+
+(* Collect every string list that appears under an "enum" key anywhere in a
+   schema, at any nesting depth. *)
+let rec enum_arrays (json : Yojson.Safe.t) : string list list =
+  match json with
+  | `Assoc fields ->
+    List.concat_map
+      (fun (key, value) ->
+        match key, value with
+        | "enum", `List items ->
+          let strings =
+            List.filter_map
+              (function `String s -> Some s | _ -> None)
+              items
+          in
+          if strings = [] then [] else [ strings ]
+        | _ -> enum_arrays value)
+      fields
+  | `List items -> List.concat_map enum_arrays items
+  | _ -> []
+;;
+
+let published_enums () =
+  all_schemas ()
+  |> List.concat_map (fun (t : Masc_domain.tool_schema) -> enum_arrays t.input_schema)
+;;
+
+let check_mirror_in_sync ?(copy_lives_in = "Tool_shard_types_enum_mirrors") ~label ~owner () =
+  let published = published_enums () in
+  let matched = List.exists (fun e -> e = owner) published in
+  if not matched
+  then
+    failf
+      "%s: no published schema enum equals its owner's list %s.\n\
+       The published enum contract in %s has drifted.\n\
+       Published enums seen: %s"
+      label
+      (String.concat "|" owner)
+      copy_lives_in
+      (String.concat "  /  " (List.map (String.concat "|") published))
+;;
+
+(* The typed schedule contract projects each tool-facing vocabulary into named
+   properties on the Schedule schemas. Check each property directly so one
+   matching enum elsewhere cannot hide a drifted Schedule field. *)
+let test_schedule_contract_mirrors () =
+  List.iter
+    (fun (property, owner) ->
+      check (list string)
+        (Printf.sprintf "Schedule property %s matches its typed owner" property)
+        (List.sort_uniq String.compare owner)
+        (advertised_values_for_schemas Tool_schemas_schedule.schemas ~property))
+    [ "status", Schedule_contract_values.status_selector_strings
+    ; "source", Schedule_contract_values.schedule_source_strings
+    ; "recurrence_kind", Schedule_contract_values.recurrence_kind_strings
+    ; "owner", Schedule_contract_values.owner_kind_strings
+    ]
+;;
+
+(* A refusal's [error_kind] is output, so no schema enum carries it; the
+   descriptions name the kinds a caller should expect in prose instead
+   ("refused with error_kind due_already_past"). Every kind a description
+   names has to be one [Schedule_contract_values.refusal_kind] decodes, or
+   the description promises a value the tool never sends. *)
+let test_schedule_refusal_kinds_named_in_descriptions_decode () =
+  let named_after_error_kind description =
+    let words =
+      String.split_on_char ' ' (String.map (function '\n' -> ' ' | c -> c) description)
+      |> List.filter (fun word -> not (String.equal word ""))
+    in
+    let trim_punctuation word =
+      let is_word_char = function
+        | 'a' .. 'z' | '_' -> true
+        | _ -> false
+      in
+      String.to_seq word |> Seq.filter is_word_char |> String.of_seq
+    in
+    let rec walk acc = function
+      | "error_kind" :: next :: rest -> walk (trim_punctuation next :: acc) rest
+      | _ :: rest -> walk acc rest
+      | [] -> List.rev acc
+    in
+    walk [] words
+  in
+  let rec parameter_descriptions (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields ->
+      List.concat_map
+        (fun (key, value) ->
+          match key, value with
+          | "description", `String text -> [ text ]
+          | _, value -> parameter_descriptions value)
+        fields
+    | `List items -> List.concat_map parameter_descriptions items
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> []
+  in
+  let advertised =
+    Tool_schemas_schedule.schemas
+    |> List.concat_map (fun (schema : Masc_domain.tool_schema) ->
+      schema.description :: parameter_descriptions schema.input_schema)
+    |> List.concat_map named_after_error_kind
+    |> List.sort_uniq String.compare
+  in
+  check_every_advertised_value_decodes
+    ~label:"Schedule error_kind named in descriptions"
+    ~decodes:(fun value ->
+      Result.is_ok (Schedule_contract_values.refusal_kind_of_string value))
+    ~advertised
+;;
+(* The three Goal tool schemas moved into config/tools/masc_goal_*.toml, where
+   the enum arrays are literals: nothing in TOML can read an OCaml variant. The
+   variants stay the owners, so check each property directly rather than
+   accepting any matching enum elsewhere — a constructor added to either one
+   without editing its file would otherwise ship a schema that never offers the
+   value, and the tool would reject what its own documentation advertised. *)
+(* masc_wiki_create's [source] vocabulary. [Masc.Tool_wiki] owns it,
+   deriving the strings from its variant; the schema wrote the same four by
+   hand and now writes them in config/tools/masc_wiki_create.toml, where
+   nothing can read an OCaml value. Nothing compared the two until this: a
+   fifth source added to the variant would have shipped a schema that never
+   offered it. *)
+let test_wiki_source_mirrors_its_owner () =
+  check
+    (list string)
+    "masc_wiki_create source matches Tool_wiki.valid_source_strings"
+    (List.sort_uniq String.compare Masc.Tool_wiki.valid_source_strings)
+    (advertised_values_for_schemas Tool_schemas_wiki.schemas ~property:"source")
+;;
+
+(* The keeper sandbox and status vocabularies. Their owners are
+   [Keeper_types_profile_sandbox], [Keeper_sandbox_control_contract] and
+   [Masc.Keeper_status_options_defaults]; the schemas write the strings in
+   config/tools/masc_keeper_*.toml, where nothing reads an OCaml value. *)
+let test_keeper_tool_enum_mirrors () =
+  List.iter
+    (fun (property, owner) ->
+      check (list string)
+        (Printf.sprintf "Keeper property %s matches its typed owner" property)
+        (List.sort_uniq String.compare owner)
+        (advertised_values_for_schemas Masc.Keeper_schema.schemas ~property))
+    [ "network_mode", Keeper_types_profile_sandbox.valid_network_mode_strings
+    ; "container_kind", Masc.Keeper_sandbox_control_contract.stop_scope_strings
+    ; "tail_order", Masc.Keeper_status_options_defaults.valid_tail_order_strings
+    ]
+;;
+
+(* masc_keeper_status states its bounds twice -- once as minimum/maximum and
+   once inside the sentence a model reads -- and both were built from
+   [Masc.Keeper_status_options_defaults] by Printf. In TOML they are literals, so
+   check the numbers rather than trusting them to agree. *)
+let test_keeper_status_bounds_match_their_owner () =
+  let status =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_keeper_status")
+        Masc.Keeper_schema.schemas
+    with
+    | Some s -> s
+    | None -> failf "masc_keeper_status is absent"
+  in
+  let bound property key =
+    match status.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt property props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt key p with
+             | Some (`Int v) -> v
+             | _ -> failf "%s.%s is absent or not an integer" property key)
+          | _ -> failf "property %s is absent" property)
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  let open Masc.Keeper_status_options_defaults in
+  List.iter
+    (fun (property, lo, hi) ->
+      check int (property ^ " minimum") lo (bound property "minimum");
+      check int (property ^ " maximum") hi (bound property "maximum"))
+    [ Argument.tail_turns, min_tail_turns, max_tail_turns
+    ; Argument.tail_messages, min_tail_messages, max_tail_messages
+    ; Argument.tail_bytes, min_tail_bytes, max_tail_bytes
+    ]
+;;
+
+(* keeper_artifact_read states its max_bytes bounds and default, and
+   keeper_analyze_image its media-type vocabulary. [Keeper_artifact_read] and
+   [Keeper_vision_tool] own them; in config/tools/*.toml they are literals. *)
+let test_runtime_tool_owners_match () =
+  check
+    (list string)
+    "keeper_analyze_image media types match Keeper_vision_tool"
+    (List.sort_uniq String.compare Masc.Keeper_vision_tool.supported_image_media_types)
+    (advertised_values_for_schemas
+       Masc.Keeper_runtime_schemas_toml.schemas
+       ~property:"media_type");
+  let artifact =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_artifact_read")
+        Masc.Keeper_runtime_schemas_toml.schemas
+    with
+    | Some s -> s
+    | None -> failf "keeper_artifact_read is absent"
+  in
+  let field key =
+    match artifact.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "max_bytes" props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt key p with
+             | Some (`Int v) -> v
+             | _ -> failf "max_bytes.%s is absent or not an integer" key)
+          | _ -> failf "max_bytes is absent")
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  check int "max_bytes minimum" Masc.Keeper_artifact_read.minimum_max_bytes (field "minimum");
+  check int "max_bytes maximum" Masc.Keeper_artifact_read.maximum_max_bytes (field "maximum");
+  check int "max_bytes default" Masc.Keeper_artifact_read.default_max_bytes (field "default")
+;;
+
+(* keeper_surface_post caps two arrays, and [Keeper_surface_post] owns both
+   numbers. The descriptor used to build the mentions cap from the constant;
+   that copy is gone, so the file states it and this compares the two. The
+   block cap already had a check in the registry-integrity suite. *)
+let test_surface_post_caps_match_their_owner () =
+  let post =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "keeper_surface_post")
+        Tool_shard_types.surface_tools
+    with
+    | Some s -> s
+    | None -> failf "keeper_surface_post is absent"
+  in
+  let cap property =
+    match post.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt property props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt "maxItems" p with
+             | Some (`Int v) -> v
+             | _ -> failf "%s has no maxItems" property)
+          | _ -> failf "property %s is absent" property)
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  check int "mention_user_ids cap" Masc.Keeper_surface_post.max_user_mentions
+    (cap "mention_user_ids");
+  check int "blocks cap" Masc.Keeper_surface_post.max_rich_blocks (cap "blocks")
+;;
+
+(* tool_read_file states its default byte ceiling inside the sentence a client
+   reads. [Tool_shard_limits] owns the number; the declaration used to render
+   it through a pre-made string, and in TOML it is a literal. Nothing else
+   compares the two. *)
+let test_read_file_default_appears_in_its_description () =
+  let read_file =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "tool_read_file")
+        Tool_shard_types.filesystem_tools
+    with
+    | Some s -> s
+    | None -> failf "tool_read_file is absent"
+  in
+  let description =
+    match read_file.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "max_bytes" props with
+          | Some (`Assoc p) ->
+            (match List.assoc_opt "description" p with
+             | Some (`String d) -> d
+             | _ -> failf "max_bytes has no description")
+          | _ -> failf "max_bytes is absent")
+       | _ -> failf "no properties")
+    | _ -> failf "input_schema is not an object"
+  in
+  let needle = string_of_int Tool_shard_limits.read_file_default_max_bytes in
+  let n = String.length needle
+  and h = String.length description in
+  let rec probe i =
+    i + n <= h && (String.equal (String.sub description i n) needle || probe (i + 1))
+  in
+  check bool
+    (Printf.sprintf "max_bytes description names %s" needle)
+    true
+    (probe 0)
+;;
+
+let test_goal_tool_enum_mirrors () =
+  List.iter
+    (fun (property, owner) ->
+      check (list string)
+        (Printf.sprintf "Goal property %s matches its variant" property)
+        (List.sort_uniq String.compare owner)
+        (advertised_values_for_schemas Tool_schemas_workspace_extra.schemas ~property))
+    [ "phase", List.map Goal_phase.Kind.to_string Goal_phase.Kind.all
+    ; ( "action"
+      , List.map Goal_phase.Public_action.to_string Goal_phase.Public_action.all )
+    ]
+;;
+
+(* masc_operator_snapshot, masc_operator_digest and masc_operator_action moved
+   to config/tools/masc_operator_*.toml, where the enum arrays are literals:
+   nothing in TOML can read an OCaml value. The owners are
+   [Operator_control_snapshot], [Masc.Operator_action_constants] and
+   [Masc.Operator_action_catalog]. Each property is checked on its own tool's
+   schema -- digest and action both declare [target_type] with different
+   vocabularies, so a combined walk could let one hide the other's drift. *)
+let test_operator_tool_enum_mirrors () =
+  let schema name =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+        Operator_tool.schemas
+    with
+    | Some s -> s
+    | None -> failf "%s is absent from Operator_tool.schemas" name
+  in
+  List.iter
+    (fun (tool, property, owner) ->
+       check
+         (list string)
+         (Printf.sprintf "%s %s matches its typed owner" tool property)
+         (List.sort_uniq String.compare owner)
+         (advertised_values_for_schemas [ schema tool ] ~property))
+    [ ( "masc_operator_snapshot"
+      , "view"
+      , Operator_control_snapshot.valid_snapshot_view_strings )
+    ; ( "masc_operator_digest"
+      , "target_type"
+      , [ Masc.Operator_action_constants.workspace_target_type ] )
+    ; ( "masc_operator_action"
+      , "target_type"
+      , Masc.Operator_action_constants.valid_target_type_strings )
+    ; "masc_operator_action", "action_type", Masc.Operator_action_catalog.strings
+    ]
+;;
+
+(* [masc_browser_read]'s [mode]. The handler reads it once with
+   [Tool_misc_browser_lane.read_mode_of_args], which takes exactly the
+   spellings of [all_of_read_mode]; the schema writes the enum by hand. *)
+let test_browser_read_mode_mirror () =
+  check
+    (list string)
+    "masc_browser_read mode matches its typed owner"
+    (List.sort_uniq String.compare
+       (List.map Masc.Tool_misc_browser_lane.read_mode_to_string
+          Masc.Tool_misc_browser_lane.all_of_read_mode))
+    (advertised_values_for_schemas
+       [ Tool_schemas_misc.browser_read_schema ]
+       ~property:"mode")
+;;
+
+(* The capability table names a tool and an [action] or [mode] for every
+   operation it calls available. [Browser_capabilities.support] writes those
+   strings by hand, and a stale one tells a keeper to call a value the tool
+   schema rejects. The table once pointed Pointer_down, Pointer_up, the
+   clipboard and network interception at BrowserRead modes through a pattern
+   that shared an arm, and nothing noticed. *)
+let test_capability_table_names_advertised_values () =
+  let module Cap = Masc.Browser_capabilities in
+  let module Schemas = Tool_schemas_misc in
+  let schema_of = function
+    | Cap.Tabs -> Schemas.browser_tabs_schema
+    | Cap.Read -> Schemas.browser_read_schema
+    | Cap.Interact -> Schemas.browser_interact_schema
+    | Cap.Act -> Schemas.browser_act_schema
+    | Cap.Session -> Schemas.browser_session_schema
+    | Cap.Goto -> Schemas.browser_goto_schema
+    | Cap.Instruct -> Schemas.browser_instruct_schema
+  in
+  let tool_label = function
+    | Cap.Tabs -> "BrowserTabs" | Cap.Read -> "BrowserRead" | Cap.Interact -> "BrowserInteract"
+    | Cap.Act -> "BrowserAct" | Cap.Session -> "BrowserSession" | Cap.Goto -> "BrowserGoto"
+    | Cap.Instruct -> "BrowserInstruct"
+  in
+  let backends =
+    [ Cap.Connected Browser_lane.Web_extension
+    ; Cap.Connected Browser_lane.Webdriver_bidi
+    ; Cap.Connected Browser_lane.Ego_task_space
+    ; Cap.Owned_gecko
+    ; Cap.Owned_chromium
+    ; Cap.Safari_unavailable
+    ]
+  in
+  let invocation = function
+    | Cap.Available invocation | Cap.Conditional { invocation; _ } -> Some invocation
+    | Cap.Unsupported _ -> None
+  in
+  List.iter
+    (fun backend ->
+       List.iter
+         (fun (entry : Cap.entry) ->
+            match invocation entry.support with
+            | None -> ()
+            | Some (inv : Cap.invocation) ->
+              let advertised property =
+                advertised_values_for_schemas [ schema_of inv.tool ] ~property
+              in
+              let check_field property = function
+                | None -> ()
+                | Some value ->
+                  check
+                    bool
+                    (Printf.sprintf "%s on %s: %s %S is advertised by %s"
+                       (Cap.operation_name entry.operation)
+                       (match backend with
+                        | Cap.Connected Browser_lane.Web_extension -> "extension"
+                        | Cap.Connected Browser_lane.Webdriver_bidi -> "live BiDi"
+                        | Cap.Connected Browser_lane.Ego_task_space -> "ego"
+                        | Cap.Owned_gecko -> "owned Gecko"
+                        | Cap.Owned_chromium -> "Stagehand"
+                        | Cap.Safari_unavailable -> "Safari")
+                       property value (tool_label inv.tool))
+                    true
+                    (List.mem value (advertised property))
+              in
+              check_field "action" inv.action;
+              check_field "mode" inv.mode)
+         (Cap.catalog backend))
+    backends
+;;
+
+(* [Browser_interaction.parse] and the Add-on wire parser read one list of argument
+   names, and the tool schema writes the same names by hand. A name the schema
+   offers and the parser refuses (or the reverse) is a call that fails after the
+   keeper was told it was legal. *)
+let test_interact_arguments_match_the_schema () =
+  let properties =
+    match Tool_schemas_misc.browser_interact_schema.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc named) -> List.map fst named
+       | _ -> fail "masc_browser_interact has no properties object")
+    | _ -> fail "masc_browser_interact input schema is not an object"
+  in
+  check
+    (list string)
+    "masc_browser_interact arguments match the names the parser accepts"
+    (List.sort_uniq String.compare
+       (Masc.Browser_interaction.route_names
+        @ Masc.Browser_interaction.wire_fields
+        @ [ "steps"; "snapshotScope"; "maxChars" ]))
+    (List.sort_uniq String.compare properties)
+;;
+
+(* Two operations may name the same tool call only when one call really does
+   both jobs. A pattern that lists several operations before one arm, with the
+   arm's body written for only the last of them, makes every listed operation
+   claim that call: the table once reported Pointer_down and Pointer_up as
+   console reads, and the clipboard and network interception as cookie reads.
+   Each legitimate sharing is listed here by name; a new one is a decision. *)
+let test_capability_table_sharing_is_listed () =
+  let module Cap = Masc.Browser_capabilities in
+  let allowed =
+    [ [ "list_tabs"; "list_windows"; "read_dialog" ] (* BrowserTabs list_tabs rows carry windowId and dialog *)
+    ; [ "list_tabs"; "read_dialog" ] (* ego list_tabs rows carry the dialog and no windowId *)
+    ; [ "middle_click"; "right_click" ] (* click_at with a button *)
+    ; [ "key_chord"; "press_key" ] (* press_key with modifiers *)
+    ; [ "html5_drop"; "pointer_drag" ] (* drag_to on Stagehand *)
+    ; [ "click"; "frame_interaction" ] (* click with framePath *)
+    ; [ "click"; "click_snapshot_target" ] (* click with target on an ego connection *)
+    ; [ "click"; "click_snapshot_target"; "frame_interaction" ] (* click with target on an ego connection, inside frames too *)
+    ; [ "read_frames"; "read_snapshot" ] (* an ego connection reads frames through its snapshot *)
+    ; [ "fill"; "fill_snapshot_target" ] (* fill with target on an ego connection *)
+    ; [ "hover"; "hover_snapshot_target" ] (* hover with target on an ego connection *)
+    ; [ "double_click"; "double_click_snapshot_target" ] (* double-click with target on an ego connection *)
+    ]
+  in
+  let invocation = function
+    | Cap.Available invocation | Cap.Conditional { invocation; _ } -> Some invocation
+    | Cap.Unsupported _ -> None
+  in
+  List.iter
+    (fun backend ->
+       let by_call = Hashtbl.create 64 in
+       List.iter
+         (fun (entry : Cap.entry) ->
+            match invocation entry.support with
+            | None -> ()
+            | Some inv ->
+              let key = inv.Cap.tool, inv.Cap.action, inv.Cap.mode in
+              let known = Option.value (Hashtbl.find_opt by_call key) ~default:[] in
+              Hashtbl.replace by_call key (Cap.operation_name entry.operation :: known))
+         (Cap.catalog backend);
+       Hashtbl.iter
+         (fun _ operations ->
+            match operations with
+            | [] | [ _ ] -> ()
+            | _ :: _ :: _ ->
+              let sorted = List.sort String.compare operations in
+              check
+                bool
+                (Printf.sprintf "operations sharing one tool call are a listed pair: %s"
+                   (String.concat ", " sorted))
+                true
+                (List.mem sorted allowed))
+         by_call)
+    [ Cap.Connected Browser_lane.Web_extension
+    ; Cap.Connected Browser_lane.Webdriver_bidi
+    ; Cap.Connected Browser_lane.Ego_task_space
+    ; Cap.Owned_gecko
+    ; Cap.Owned_chromium
+    ; Cap.Safari_unavailable
+    ]
+;;
+
+(* Board sub-board access. [Masc.Board] owns the vocabulary through
+   [sub_board_access_of_string_opt]; the schema writes the three strings by
+   hand, in two places. *)
+let test_sub_board_access_advertised_values_decode () =
+  check_every_advertised_value_decodes
+    ~label:"sub_board access"
+    ~decodes:(fun v ->
+      Option.is_some (Masc.Board.sub_board_access_of_string_opt v))
+    ~advertised:(advertised_values_for ~property:"access")
+;;
+
+(* Task reclaim policy. Same shape: [Masc_domain.task_reclaim_policy_of_string]
+   owns it and the schema writes the two strings by hand. *)
+let test_reclaim_policy_advertised_values_decode () =
+  check_every_advertised_value_decodes
+    ~label:"task reclaim_policy"
+    ~decodes:(fun v -> Result.is_ok (Masc_domain.task_reclaim_policy_of_string v))
+    ~advertised:(advertised_values_for ~property:"reclaim_policy")
+;;
+
+let test_memory_search_source_mirror () =
+  check_mirror_in_sync
+    ~label:"memory_search_source_enum_strings"
+    ~owner:Masc.Keeper_tool_memory_runtime.valid_memory_search_source_strings
+    ()
+;;
+
+let test_fs_write_mode_mirror () =
+  check_mirror_in_sync
+    ~label:"fs_write_mode_enum_strings"
+    ~owner:Masc.Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings
+    ()
+;;
+
+let test_sort_order_mirror () =
+  check_mirror_in_sync
+    ~label:"sort_order_enum_strings"
+    ~owner:Masc.Board_dispatch.valid_sort_order_strings
+    ()
+;;
+
+let test_vote_direction_mirror () =
+  check_mirror_in_sync
+    ~label:"vote_direction_enum_strings"
+    ~owner:Masc.Board_votes.valid_vote_direction_strings
+    ()
+;;
+
+(* The [pattern] declared for one property name across every schema that
+   declares it, mirroring [advertised_values_for_schemas] for enums. *)
+let declared_patterns_for_schemas schemas ~property =
+  let rec walk (json : Yojson.Safe.t) =
+    match json with
+    | `Assoc fields ->
+      List.concat_map
+        (fun (key, value) ->
+          match value with
+          | `Assoc inner when String.equal key property ->
+            (match List.assoc_opt "pattern" inner with
+             | Some (`String pattern) -> [ pattern ]
+             | _ -> walk value)
+          | _ -> walk value)
+        fields
+    | `List items -> List.concat_map walk items
+    | _ -> []
+  in
+  schemas
+  |> List.concat_map (fun (t : Masc_domain.tool_schema) -> walk t.input_schema)
+  |> List.sort_uniq String.compare
+;;
+
+(* Board comment id. [Masc.Board.Comment_id] owns the shape; the canonical
+   comment_vote / comment schemas read it directly and the Keeper projection of
+   masc_board_comment hand-copies it as [comment_id_pattern]; masc_board_post_get
+   declares it for [after_comment_id]. Every property name carries a comment
+   id, so each is compared on its own. *)
+let test_comment_id_pattern_mirror () =
+  List.iter
+    (fun property ->
+      check (list string)
+        (Printf.sprintf "%s pattern matches Board.Comment_id" property)
+        [ Masc.Board.Comment_id.json_schema_pattern ]
+        (declared_patterns_for_schemas (all_schemas ()) ~property))
+    [ "comment_id"; "parent_id"; "after_comment_id" ]
+;;
+
+(* Constitution article id. [World_constitution_types.Article_id] derives the
+   pattern from its own prefix and length; keeper_constitution_remove.toml
+   hand-copies it. Without this, changing random_bytes leaves the tool schema
+   advertising a shape every mint then fails, with nothing red at build time. *)
+let test_article_id_pattern_mirror () =
+  check (list string)
+    "article_id pattern matches Article_id"
+    [ Masc.World_constitution_types.Article_id.json_schema_pattern ]
+    (declared_patterns_for_schemas (all_schemas ()) ~property:"article_id")
+;;
+
+(* Board post id. [Masc.Board.Post_id] owns the shape; every board tool that
+   takes a post_id declares it. The parser accepts [a-zA-Z0-9_-]{1,64}, not
+   only the ["p-"] prefix [generate] mints, so the pattern mirrors the parser
+   and never rejects an id the parser accepts (#39448). *)
+let test_post_id_pattern_mirror () =
+  check (list string)
+    "post_id pattern matches Board.Post_id"
+    [ Masc.Board.Post_id.json_schema_pattern ]
+    (declared_patterns_for_schemas (all_schemas ()) ~property:"post_id")
+;;
+
+(* The pattern and the parser are one shape: an id the parser accepts must
+   match the pattern, and one it refuses must not. Without this, a change to
+   [of_string]'s bound or character class leaves the schema advertising a
+   shape the parser no longer has (#39448). *)
+let test_post_id_pattern_agrees_with_the_parser () =
+  let pattern = Re.Pcre.re Masc.Board.Post_id.json_schema_pattern |> Re.compile in
+  let agrees id =
+    let parsed = Result.is_ok (Masc.Board.Post_id.of_string id) in
+    let matched = Re.execp pattern (String.trim id) in
+    check bool
+      (Printf.sprintf "post_id %S: parser=%b pattern=%b" id parsed matched)
+      parsed matched
+  in
+  List.iter agrees
+    [ "p-0123456789abcdef0123456789abcdef"
+    ; "p-1"
+    ; "keeper-ask:ask-1"
+    ; "has space"
+    ; ""
+    ; String.make 64 'a'
+    ; String.make 65 'a'
+    ; "bad!char"
+    ]
+;;
+
+(* A guard that passes when the thing it guards is empty is not a guard. *)
+let test_owners_are_non_empty () =
+  List.iter
+    (fun (label, owner) ->
+      check bool (label ^ " is non-empty") true (owner <> []))
+    [ "memory_search_source", Masc.Keeper_tool_memory_runtime.valid_memory_search_source_strings
+    ; "fs_write_mode", Masc.Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings
+    ; "sort_order", Masc.Board_dispatch.valid_sort_order_strings
+    ; "vote_direction", Masc.Board_votes.valid_vote_direction_strings
+    ]
+;;
+
+let test_schema_set_is_non_empty () =
+  check bool "some schema publishes an enum" true (published_enums () <> [])
+;;
+
+let () =
+  Alcotest.run
+    "Enum mirror sync"
+    [ ( "mirrors"
+      , [ test_case "memory search source" `Quick test_memory_search_source_mirror
+        ; test_case "fs write mode" `Quick test_fs_write_mode_mirror
+        ; test_case "board sort order" `Quick test_sort_order_mirror
+        ; test_case "board vote direction" `Quick test_vote_direction_mirror
+        ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
+        ; test_case "board post id pattern" `Quick test_post_id_pattern_mirror
+        ; test_case "board post id pattern agrees with the parser" `Quick
+            test_post_id_pattern_agrees_with_the_parser
+        ; test_case "constitution article id pattern" `Quick
+            test_article_id_pattern_mirror
+        ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
+        ; test_case "schedule refusal kinds named in descriptions" `Quick
+            test_schedule_refusal_kinds_named_in_descriptions_decode
+        ; test_case "wiki source enum" `Quick test_wiki_source_mirrors_its_owner
+        ; test_case "runtime tool owners" `Quick test_runtime_tool_owners_match
+        ; test_case "keeper tool enums" `Quick test_keeper_tool_enum_mirrors
+        ; test_case
+            "keeper status bounds"
+            `Quick
+            test_keeper_status_bounds_match_their_owner
+        ; test_case
+            "surface post caps"
+            `Quick
+            test_surface_post_caps_match_their_owner
+        ; test_case
+            "read_file default in its description"
+            `Quick
+            test_read_file_default_appears_in_its_description
+        ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
+        ; test_case "operator tool enums" `Quick test_operator_tool_enum_mirrors
+        ; test_case "browser read mode" `Quick test_browser_read_mode_mirror
+        ; test_case "capability table names advertised values" `Quick test_capability_table_names_advertised_values
+        ; test_case "capability table sharing is listed" `Quick test_capability_table_sharing_is_listed
+        ; test_case "interact arguments match the schema" `Quick test_interact_arguments_match_the_schema
+        ; test_case "sub_board access values decode" `Quick
+            test_sub_board_access_advertised_values_decode
+        ; test_case "reclaim_policy values decode" `Quick
+            test_reclaim_policy_advertised_values_decode
+        ; test_case "owner lists are non-empty" `Quick test_owners_are_non_empty
+        ; test_case "schemas publish enums" `Quick test_schema_set_is_non_empty
+        ] )
+    ]
+;;

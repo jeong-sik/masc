@@ -1,0 +1,420 @@
+open Alcotest
+module R = Masc.Keeper_sandbox_remote_checkouts
+module C = Masc.Keeper_playground_checkouts
+
+let test_parse_probe_json_complete () =
+  let json =
+    {|{
+      "checkouts": [
+        {
+          "relative_path": "repos/masc",
+          "name": "masc",
+          "git_link": "directory",
+          "origin": "https://github.com/jeong-sik/masc.git",
+          "origin_state": "present",
+          "branch": "main",
+          "head": "abcdef123456",
+          "dirty": false,
+          "changed_files": 0,
+          "target_ref": "origin/main",
+          "upstream_head": "abcdef123456",
+          "target_ref_last_observed_at_unix": 1600000000,
+          "ahead": 0,
+          "behind": 0
+        },
+        {
+          "relative_path": "repos/wt-fix",
+          "name": "wt-fix",
+          "git_link": "pointer_file",
+          "origin": "https://github.com/jeong-sik/masc.git",
+          "origin_state": "present",
+          "branch": "fix/remote",
+          "head": "123456abcdef",
+          "dirty": true,
+          "changed_files": 3,
+          "target_ref": "origin/main",
+          "upstream_head": "abcdef123456",
+          "target_ref_last_observed_at_unix": 1600000001,
+          "ahead": 2,
+          "behind": 1
+        }
+      ],
+      "scanned": 150,
+      "limit": null
+    }|}
+  in
+  match R.parse_probe_json ~root:"/endpoint/root" json with
+  | Error err -> failf "parse failed: %s" err
+  | Ok (discovery_res, inspections) ->
+    (match discovery_res with
+     | Error err -> failf "discovery error: %s" (C.scan_error_to_string err)
+     | Ok (C.Complete checkouts) ->
+       check int "checkout count" 2 (List.length checkouts);
+       check int "inspection count" 2 (List.length inspections);
+       let c1 = List.nth inspections 0 in
+       check string "c1 rel path" "repos/masc" c1.checkout.relative_path;
+       check string "c1 abs path" "/endpoint/root/repos/masc" c1.checkout.absolute_path;
+       check string "c1 name" "masc" c1.checkout.name;
+       (match c1.checkout.git_link with
+        | C.Git_directory -> ()
+        | C.Git_pointer_file -> fail "expected Git_directory");
+       (match c1.origin with
+        | R.Origin_url url -> check string "c1 origin" "https://github.com/jeong-sik/masc.git" url
+        | R.Origin_not_configured | R.Origin_unread -> fail "expected c1 origin url");
+       check (result string string) "c1 branch" (Ok "main") c1.branch;
+       check (result string string) "c1 head" (Ok "abcdef123456") c1.head;
+       check (result (pair bool int) string) "c1 dirty" (Ok (false, 0)) c1.dirty;
+       check (option string) "c1 target_ref" (Some "origin/main") c1.target_ref;
+       check (option string) "c1 upstream_head" (Some "abcdef123456") c1.upstream_head;
+       check (option int) "c1 last moved" (Some 1600000000)
+         c1.target_ref_last_observed_at_unix;
+       check (option int) "c1 ahead" (Some 0) c1.ahead;
+       check (option int) "c1 behind" (Some 0) c1.behind;
+
+       let c2 = List.nth inspections 1 in
+       check string "c2 rel path" "repos/wt-fix" c2.checkout.relative_path;
+       (match c2.checkout.git_link with
+        | C.Git_pointer_file -> ()
+        | C.Git_directory -> fail "expected Git_pointer_file");
+       check (result (pair bool int) string) "c2 dirty" (Ok (true, 3)) c2.dirty;
+       check (option int) "c2 last moved" (Some 1600000001)
+         c2.target_ref_last_observed_at_unix;
+       check (option int) "c2 ahead" (Some 2) c2.ahead;
+       check (option int) "c2 behind" (Some 1) c2.behind
+     | Ok (C.Partial _) -> fail "expected complete discovery")
+;;
+
+let test_parse_probe_json_limit_checkout_budget () =
+  let json =
+    {|{
+      "checkouts": [
+        {
+          "relative_path": "c1",
+          "name": "c1",
+          "git_link": "directory",
+          "origin": null,
+          "origin_state": "unavailable",
+          "branch": null,
+          "head": null,
+          "dirty": null,
+          "changed_files": null,
+          "target_ref": null,
+          "upstream_head": null,
+          "ahead": null,
+          "behind": null
+        }
+      ],
+      "scanned": 50,
+      "limit": {"kind": "checkout_budget_exhausted", "budget": 12}
+    }|}
+  in
+  match R.parse_probe_json ~root:"/root" json with
+  | Error err -> failf "parse failed: %s" err
+  | Ok (Ok (C.Partial { found; limit }), inspections) ->
+    check int "found count" 1 (List.length found);
+    check int "inspections count" 1 (List.length inspections);
+    (match limit with
+     | C.Checkout_budget_exhausted { budget } -> check int "budget" 12 budget
+     | _ -> fail "expected Checkout_budget_exhausted")
+  | _ -> fail "expected partial discovery"
+;;
+
+let test_parse_probe_json_limit_entry_budget () =
+  let json =
+    {|{
+      "checkouts": [],
+      "scanned": 8192,
+      "limit": {"kind": "entry_budget_exhausted", "scanned": 8192, "budget": 8192}
+    }|}
+  in
+  match R.parse_probe_json ~root:"/root" json with
+  | Error err -> failf "parse failed: %s" err
+  | Ok (Ok (C.Partial { found; limit }), inspections) ->
+    check int "found count" 0 (List.length found);
+    check int "inspections count" 0 (List.length inspections);
+    (match limit with
+     | C.Entry_budget_exhausted { scanned; budget } ->
+       check int "scanned" 8192 scanned;
+       check int "budget" 8192 budget
+     | _ -> fail "expected Entry_budget_exhausted")
+  | _ -> fail "expected partial discovery"
+;;
+
+let test_parse_probe_json_invalid () =
+  match R.parse_probe_json ~root:"/root" "{not valid json" with
+  | Error _ -> ()
+  | Ok _ -> fail "expected json parse error"
+;;
+
+(* A row the probe did not print as promised is an error naming the field,
+   not an exception and not a default. *)
+let expect_error what expected raw =
+  match R.parse_probe_json ~root:"/root" raw with
+  | Error detail -> check string what expected detail
+  | Ok _ -> failf "%s: decoded" what
+;;
+
+let row_with fields =
+  Printf.sprintf
+    {|{"checkouts": [{"relative_path": "c1", "name": "c1", %s
+       "origin": null, "origin_state": "unavailable", "branch": null, "head": null, "dirty": null,
+       "changed_files": null, "target_ref": null, "upstream_head": null,
+       "ahead": null, "behind": null}], "scanned": 1, "limit": null}|}
+    fields
+;;
+
+let test_an_unknown_git_link_is_an_error () =
+  expect_error
+    "git_link"
+    {|checkouts[0]: git_link: unknown value "symlink"|}
+    (row_with {|"git_link": "symlink",|})
+;;
+
+let test_a_missing_field_is_an_error_not_an_exception () =
+  expect_error
+    "git_link absent"
+    "checkouts[0]: git_link: expected a string, got null"
+    (row_with "");
+  expect_error
+    "relative_path wrong shape"
+    "checkouts[0]: relative_path: expected a string, got an integer"
+    {|{"checkouts": [{"relative_path": 3}], "scanned": 1, "limit": null}|}
+;;
+
+let test_half_a_status_is_an_error () =
+  expect_error
+    "dirty without changed_files"
+    "checkouts[0]: dirty and changed_files come from one status read; only one is present"
+    {|{"checkouts": [{"relative_path": "c1", "name": "c1", "git_link": "directory",
+       "origin": null, "origin_state": "unavailable", "branch": null, "head": null, "dirty": true,
+       "changed_files": null, "target_ref": null, "upstream_head": null,
+       "ahead": null, "behind": null}], "scanned": 1, "limit": null}|}
+;;
+
+let test_an_unknown_limit_is_an_error () =
+  expect_error
+    "unknown kind"
+    {|limit: unknown kind "time_budget_exhausted"|}
+    {|{"checkouts": [], "scanned": 1, "limit": {"kind": "time_budget_exhausted"}}|};
+  expect_error
+    "budget absent"
+    "budget: expected an integer, got null"
+    {|{"checkouts": [], "scanned": 1, "limit": {"kind": "checkout_budget_exhausted"}}|}
+;;
+
+let origin_row ~state ~origin =
+  Printf.sprintf
+    {|{"checkouts": [{"relative_path": "c1", "name": "c1", "git_link": "directory",
+       "origin": %s, "origin_state": %S, "branch": null, "head": null, "dirty": null,
+       "changed_files": null, "target_ref": null, "upstream_head": null,
+       "ahead": null, "behind": null}], "scanned": 1, "limit": null}|}
+    origin
+    state
+;;
+
+let test_origin_state_is_decoded_or_refused () =
+  (match R.parse_probe_json ~root:"/root" (origin_row ~state:"missing" ~origin:"null") with
+   | Ok (_, [ { origin = R.Origin_not_configured; _ } ]) -> ()
+   | Ok _ -> fail "missing must decode as Origin_not_configured"
+   | Error detail -> failf "missing: %s" detail);
+  (match R.parse_probe_json ~root:"/root" (origin_row ~state:"unavailable" ~origin:"null") with
+   | Ok (_, [ { origin = R.Origin_unread; _ } ]) -> ()
+   | Ok _ -> fail "unavailable must decode as Origin_unread"
+   | Error detail -> failf "unavailable: %s" detail);
+  expect_error
+    "unknown state"
+    {|checkouts[0]: origin_state: unknown value "gone"|}
+    (origin_row ~state:"gone" ~origin:"null");
+  List.iter
+    (fun (state, origin) ->
+      expect_error
+        (state ^ " disagreeing with origin")
+        (Printf.sprintf {|checkouts[0]: origin_state %S disagrees with origin|} state)
+        (origin_row ~state ~origin))
+    [ "present", "null"; "missing", {|"https://x/y.git"|}; "unavailable", {|"https://x/y.git"|} ]
+;;
+
+(* The probe itself, on a real tree: a checkout without an origin remote says
+   so instead of reading as an origin that could not be looked up. Git runs
+   without the host's global and system config, so a user's own settings
+   cannot add a remote. *)
+let test_probe_tells_a_missing_origin_from_a_configured_one () =
+  let isolated = "env -u GIT_DIR -u GIT_WORK_TREE GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 " in
+  let root = Filename.temp_dir "masc-probe-" "" in
+  let out = Filename.concat root "probe.json" in
+  let tree = Filename.concat root "tree" in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
+    (fun () ->
+      let run cmd = if Sys.command (isolated ^ cmd) <> 0 then failf "command failed: %s" cmd in
+      let init name =
+        let dir = Filename.concat tree name in
+        run (Printf.sprintf "sh -c %s" (Filename.quote ("mkdir -p " ^ Filename.quote dir ^ " && git -C " ^ Filename.quote dir ^ " init -q")));
+        dir
+      in
+      let with_origin = init "with-origin" in
+      ignore (init "no-origin");
+      run
+        (Printf.sprintf
+           "git -C %s remote add origin https://github.com/jeong-sik/masc.git"
+           (Filename.quote with_origin));
+      run
+        (Printf.sprintf
+           "git -C %s -c user.name=Test -c user.email=test@example.com commit -q --allow-empty -m base"
+           (Filename.quote with_origin));
+      run
+        (Printf.sprintf
+           "git -C %s update-ref refs/remotes/origin/main HEAD"
+           (Filename.quote with_origin));
+      let probe () =
+        run
+          (Printf.sprintf
+             "sh -c %s"
+             (Filename.quote
+                (Printf.sprintf
+                   "cd %s && python3 -c %s %s 32 8192 %d inspect > %s"
+                   (Filename.quote tree)
+                   (Filename.quote R.For_testing.probe_script)
+                   (Filename.quote {|[{"url":"https://github.com/jeong-sik/masc.git","default_branch":"main"}]|})
+                   R.target_ref_stale_after_s
+                   (Filename.quote out))));
+        let raw = In_channel.with_open_bin out In_channel.input_all in
+        match R.parse_probe_json ~root:tree raw with
+        | Error detail -> failf "probe output did not decode: %s" detail
+        | Ok (_, inspections) -> inspections
+      in
+      let inspections = probe () in
+        let origin_of (ic : R.inspected_checkout) =
+          ( ic.checkout.relative_path
+          , match ic.origin with
+            | R.Origin_url url -> "url " ^ url
+            | R.Origin_not_configured -> "not configured"
+            | R.Origin_unread -> "unread" )
+        in
+        check
+          (list (pair string string))
+          "origins"
+          [ "no-origin", "not configured"; "with-origin", "url https://github.com/jeong-sik/masc.git" ]
+          (List.sort compare (List.map origin_of inspections));
+        let with_origin_row =
+          List.find
+            (fun (ic : R.inspected_checkout) -> ic.checkout.relative_path = "with-origin")
+            inspections in
+        (match with_origin_row.target_ref_last_observed_at_unix with
+         | Some timestamp -> check bool "reflog timestamp read" true (timestamp > 0)
+         | None -> fail "target ref timestamp missing");
+        let oid =
+          match Repo_git.run_git ~cwd:with_origin [ "rev-parse"; "HEAD" ] with
+          | Ok [ oid ] -> oid
+          | _ -> fail "guest fixture HEAD unavailable"
+        in
+        let reflog = Filename.concat with_origin ".git/logs/refs/remotes/origin/main" in
+        Sys.remove reflog;
+        let fetch_head = Filename.concat with_origin ".git/FETCH_HEAD" in
+        let output = open_out fetch_head in
+        Fun.protect ~finally:(fun () -> close_out_noerr output)
+          (fun () ->
+             output_string output
+               (oid ^ "\t\tbranch 'main' of https://github.com/jeong-sik/masc.git\n"));
+        let observed inspections =
+          let row = List.find
+            (fun (ic : R.inspected_checkout) -> ic.checkout.relative_path = "with-origin")
+            inspections in
+          row.target_ref_last_observed_at_unix
+        in
+        check (option int) "fresh FETCH_HEAD mtime is not a receipt" None
+          (observed (probe ()));
+        let common_dir = Filename.concat with_origin ".git" in
+        (match Repo_fetch_observation.write ~common_dir
+                 { common_dir
+                 ; origin_url = "https://github.com/jeong-sik/masc.git"
+                 ; target_ref = "origin/main"
+                 ; oid
+                 ; observed_at_unix = int_of_float (Unix.gettimeofday ())
+                 } with
+         | Ok () -> ()
+         | Error message -> fail message);
+        (match observed (probe ()) with
+         | Some timestamp ->
+           check bool "guest reads managed no-op fetch receipt" true
+             (timestamp > 1600000000)
+         | None -> fail "guest did not read matching receipt"))
+;;
+
+let test_the_wrong_top_level_shapes_are_errors () =
+  expect_error "not an object" "probe output: expected an object, got a list" "[]";
+  expect_error
+    "checkouts not a list"
+    "checkouts: expected a list, got an object"
+    {|{"checkouts": {}, "scanned": 1, "limit": null}|}
+;;
+
+let test_layout_probe_observes_paths_without_git () =
+  let root = Filename.temp_dir "masc-layout-" "" in
+  let tree = Filename.concat root "tree" in
+  let output = Filename.concat root "layout.json" in
+  let marker = Filename.concat root "git-was-run" in
+  let git = Filename.concat root "git" in
+  let rec mkdir path =
+    if not (Sys.file_exists path) then (mkdir (Filename.dirname path); Unix.mkdir path 0o700) in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
+    (fun () ->
+      mkdir (Filename.concat tree "repo/.git");
+      mkdir (Filename.concat tree "elsewhere/deep/worktree");
+      Out_channel.with_open_text (Filename.concat tree "elsewhere/deep/worktree/.git")
+        (fun ch -> output_string ch "gitdir: /uninspected/pointer\n");
+      mkdir (Filename.concat root "outside/.git");
+      Unix.symlink (Filename.concat root "outside") (Filename.concat tree "linked");
+      Out_channel.with_open_text git (fun ch ->
+        Printf.fprintf ch "#!/bin/sh\ntouch %s\nexit 1\n" (Filename.quote marker));
+      Unix.chmod git 0o755;
+      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d layout > %s"
+        (Filename.quote tree) (Filename.quote root)
+        (Filename.quote R.For_testing.probe_script)
+        C.max_reported_checkouts C.max_scanned_entries
+        R.target_ref_stale_after_s (Filename.quote output) in
+      check int "layout probe completes" 0 (Sys.command command);
+      check bool "layout does not execute producer git configuration" false
+        (Sys.file_exists marker);
+      let raw = In_channel.with_open_bin output In_channel.input_all in
+      match R.parse_layout_json ~root:tree raw with
+      | Error detail -> fail detail
+      | Ok { discovery = C.Partial _; _ } -> fail "unexpected partial layout"
+      | Ok { entries; discovery = C.Complete checkouts } ->
+        check (list string) "root entries include the endpoint's repository" ["elsewhere"; "linked"; "repo"] entries;
+        check (list string) "arbitrary nesting and pointer files; no symlink traversal"
+          ["elsewhere/deep/worktree"; "repo"]
+          (List.map (fun (checkout : C.checkout) -> checkout.relative_path) checkouts))
+;;
+
+let () =
+  run
+    "Keeper_sandbox_remote_checkouts"
+    [ ( "layout", [ test_case "endpoint layout avoids git and preserves traversal boundaries" `Quick
+        test_layout_probe_observes_paths_without_git ] )
+    ; ( "parse_probe_json"
+      , [ test_case "complete discovery" `Quick test_parse_probe_json_complete
+        ; test_case "checkout budget limit" `Quick test_parse_probe_json_limit_checkout_budget
+        ; test_case "entry budget limit" `Quick test_parse_probe_json_limit_entry_budget
+        ; test_case "invalid json" `Quick test_parse_probe_json_invalid
+        ] )
+    ; ( "a row that does not decode is an error"
+      , [ test_case "unknown git_link" `Quick test_an_unknown_git_link_is_an_error
+        ; test_case
+            "missing or wrongly shaped field"
+            `Quick
+            test_a_missing_field_is_an_error_not_an_exception
+        ; test_case "half a status" `Quick test_half_a_status_is_an_error
+        ; test_case "unknown limit" `Quick test_an_unknown_limit_is_an_error
+        ; test_case "wrong top-level shapes" `Quick test_the_wrong_top_level_shapes_are_errors
+        ] )
+    ; ( "origin"
+      , [ test_case "origin_state is decoded or refused" `Quick test_origin_state_is_decoded_or_refused
+        ; test_case
+            "the probe tells a missing origin from a configured one"
+            `Quick
+            test_probe_tells_a_missing_origin_from_a_configured_one
+        ] )
+    ]
+;;

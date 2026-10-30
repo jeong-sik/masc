@@ -1,0 +1,1088 @@
+(** LLM task-completion review.
+
+    Every completion verdict comes from the configured evaluator. The complete
+    task description, completion notes, contract, and evidence references are
+    passed to that evaluator without a local semantic classifier. Evaluator
+    failure, missing tool calls, and malformed output are explicit unavailable
+    outcomes. Only an actual structured model verdict may approve or reject.
+
+    @since v2.145.0 *)
+
+open Printf
+
+(* ================================================================ *)
+(* Types                                                            *)
+(* ================================================================ *)
+
+(* RFC-0436 §4.3: a binary image artifact the judge receives as an attached
+   image block. The body is a base64 copy read from the snapshot's filed body
+   at assembly time; the hash and size recorded in the snapshot stay the
+   authority the prompt text cites, so a vision evaluator can see the image
+   while a text-only one still judges from the reference line. *)
+type evidence_image =
+  { image_reference : string
+  ; image_sha256 : string
+  ; image_bytes : int
+  ; image_media_type : string
+  ; image_body_base64 : string
+  }
+
+type review_request =
+  { task_title : string
+  ; task_description : string
+  ; completion_notes : string
+  ; agent_name : string
+  ; task_id : string
+  ; evidence_refs : string list
+  ; evidence_images : evidence_image list
+  }
+
+type lookup_surface =
+  { schemas : Types_core.tool_schema list
+  ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
+  }
+
+type lookup_root =
+  | Producer_namespace of { root : string }
+  | Producer_tree of string list
+  | Producer_root_absent of { root : string }
+
+(* Both outcomes carry the reviewer's stated reason. [Approve] used to be
+   nullary, and the parser below read [reason] and then dropped it, so an
+   approval reached the ledger as a bare token while a rejection arrived with
+   its argument. [Goal_verification_agent] had to re-read the reason out of the
+   tool call through a ref to commit a goal proof at all; carrying it here is
+   what that workaround was standing in for. The string may be empty — the
+   schema asks for one on both outcomes but only [Reject] refuses without it,
+   and turning an approval into a failure is a gate this does not add. *)
+type verdict =
+  | Approve of string
+  | Reject of string
+
+type reviewer_reply =
+  { selected_runtime_id : string
+  ; verdict : verdict option
+  ; evaluator_execution : Runtime_response_identity.t option
+  }
+
+type execution_owner =
+  { keeper_name : string
+  ; session_root : string
+  ; on_execution_ready : runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result
+  }
+
+let outcome_observer_fn
+  : (outcome:string -> runtime:string -> unit) Atomic.t
+  = Atomic.make (fun ~outcome:_ ~runtime:_ -> ())
+
+let run_llm_reviewer_fn
+  : (base_path:string ->
+     ?sw:Eio.Switch.t ->
+     ?execution_owner:execution_owner ->
+     evaluator_runtime:string ->
+     candidate_kind:Types_core.verifier_slot_kind ->
+     prompt:string ->
+     ?system_prompt:string ->
+     ?goal_blocks:Agent_core.Types.content_block list ->
+     report_tool_schema:Types_core.tool_schema ->
+     lookup:lookup_surface ->
+     on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+     attempt_continuation:(dispatch:Runtime_attempt_dispatch.t -> Agent_core.Error.t -> Runtime_attempt_dispatch.continuation) ->
+     on_runtime_attempt_error:
+       (runtime_id:string
+        -> attempt:int
+        -> dispatch:Runtime_attempt_dispatch.t
+        -> Agent_core.Error.t
+        -> unit) ->
+     unit -> (reviewer_reply, Agent_core.Error.t) result) Atomic.t
+  = Atomic.make (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
+
+(** Issue #8436: the verdict vocabulary is owned by this variant. Witness
+    function below ensures every variant maps to a name in
+    [valid_verdict_strings]. Adding a 3rd constructor will fail compilation
+    in [verdict_constructor_name]. The [report_review_verdict] tool schema in
+    [config/tools/report_review_verdict.toml] declares the same enum as a
+    literal, and [test_anti_rationalization_empty_reject] mirrors the two. *)
+let verdict_constructor_name = function
+  | Approve _ -> "APPROVE"
+  | Reject _ -> "REJECT"
+;;
+
+let valid_verdict_strings = [ "APPROVE"; "REJECT" ]
+
+type gate =
+  | Structured_tool
+  | Invalid_verdict
+  | Evaluator_unavailable
+
+let gate_to_string = function
+  | Structured_tool -> "structured_tool"
+  | Invalid_verdict -> "invalid_verdict"
+  | Evaluator_unavailable -> "evaluator_unavailable"
+;;
+
+type review_result =
+  { verdict : verdict option
+  ; evaluator_runtime : string
+  ; generator_runtime : string option
+  ; evaluator_execution : Runtime_response_identity.t option
+  ; gate : gate
+  ; fallback_reason : string option
+  ; retryable_runtimes : string list
+        (** Actual candidates whose typed failure passes with time, in attempt
+            order: a transient error, or a provider rest whose end is known.
+            The final diagnostic runtime does not own their retry time. *)
+  ; model_absent_runtimes : string list
+        (** Actual candidates whose typed refusal was model-absence
+            ({!Keeper_runtime_failure_route.core_error_is_model_absent}: a
+            typed [NotFound]), in attempt order. A retired or unknown model is
+            a permanent failure for the unchanged request: these candidates
+            are kept out of [retryable_runtimes] and named here so the
+            deferral records per-candidate outcomes, not only the last
+            candidate's error (2026-10-07 audit F-02). *)
+  }
+
+(* ================================================================ *)
+(* LLM verification prompt                                          *)
+(* ================================================================ *)
+
+(* Review prose lives in [config/prompts/verification.md] and its slots. This module picks
+   the template and supplies the data it renders — a tool-name list, a root
+   listing, a numbered item list — and holds no review instructions of its own.
+   Two things go wrong when the prose sits here instead: a code change that
+   alters what the evaluator can do leaves the sentence describing it stale
+   (the required-evidence checklist kept saying artifacts were the only
+   readable thing for as long as the lookup surface existed), and an operator
+   cannot correct a sentence without a rebuild. *)
+
+let numbered items =
+  items |> List.mapi (fun index item -> sprintf "%d. %s" (index + 1) item)
+        |> String.concat "\n"
+;;
+
+let render key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> Ok ("\n" ^ String.trim text ^ "\n")
+  | Error detail -> Error (sprintf "prompt %s: %s" key detail)
+;;
+
+(* The question the completion authority is asked, and the material it needs. *)
+
+(* The evidence posture of a completion submission, as the judge will see it.
+   [Note_only]: zero artifacts it can open — every snapshot item is a
+   narration or an unusable reference. [Usable_artifacts n]: n readable,
+   untruncated artifacts. The count arithmetic is the judge prompt's rules 3
+   and 4 made typed, so the prose cannot drift from what the snapshot holds. *)
+type evidence_posture =
+  | Note_only
+  | Usable_artifacts of int
+
+type verdict_question =
+  { completion_contract : string list option
+  ; required_evidence : string list
+  ; evidence_posture : evidence_posture
+        (** Computed at the review site from the fixed snapshot. The question
+            picker reads no store. *)
+  ; few_shot_block : string
+        (** Operator disagreements returned to the judge as examples, filled
+            at the review site where the calibration ledger is read. *)
+  }
+
+let contract_section = function
+  | None | Some [] -> Ok ""
+  | Some items ->
+    render Prompt_names.verification_contract [ "contract_items", numbered items ]
+;;
+
+(* required_evidence items are requirements from the task contract, not
+   evidence this reviewer fetched. Order-preserving dedup keeps an item listed
+   twice from appearing twice. *)
+let evidence_section ~required_evidence =
+  let items =
+    List.fold_left
+      (fun acc raw ->
+         let item = String.trim raw in
+         if item = "" || List.mem item acc then acc else acc @ [ item ])
+      []
+      required_evidence
+  in
+  match items with
+  | [] -> Ok ""
+  | items ->
+    render
+      Prompt_names.verification_required_evidence
+      [ "evidence_items", numbered items ]
+;;
+
+(* The one section that is never empty. A note-only submission faces its own
+   disposition in the question's body, so "no artifacts" is a sentence the
+   judge reads rather than a silence it fills with the notes' own confidence
+   (task-785). *)
+let posture_section = function
+  | Note_only ->
+    render Prompt_names.verification_evidence_posture_note_only []
+  | Usable_artifacts count ->
+    render
+      Prompt_names.verification_evidence_posture_usable
+      [ "usable_artifact_count", string_of_int count ]
+;;
+
+(* Unavailable or partial roots are rejected while constructing the lookup
+   surface. Reaching this renderer with no entries therefore means the
+   authority measured a readable, empty root. The empty-marker sentence lives
+   in verification.md ([lookup.root_layout_empty]); the two-space indent is
+   layout, not prose. *)
+let root_layout_lines = function
+  | [] ->
+    (match
+       Prompt_registry.render_prompt_template
+         Prompt_names.verification_lookup_root_layout_empty
+         []
+     with
+     | Ok text -> Ok ("  " ^ String.trim text)
+     | Error detail ->
+       Error
+         (sprintf
+            "prompt %s: %s"
+            Prompt_names.verification_lookup_root_layout_empty
+            detail))
+  | entries -> Ok (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
+;;
+
+let tool_names schemas =
+  schemas
+  |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
+  |> String.concat ", "
+;;
+
+(* The lookup surface as the judge is told about it: checkable evidence lives
+   in the submitted snapshot, and a build claim needs an execution receipt.
+   The tools are the same whichever slot renders; the root decides the slot,
+   because a producer with no tree must not be told it has one. *)
+let lookup_section ~(lookup : lookup_surface) ~lookup_root =
+  match lookup_root with
+  | Producer_namespace { root } ->
+    render
+      Prompt_names.verification_lookup_producer_namespace
+      [ "lookup_tools", tool_names lookup.schemas; "root", root ]
+  | Producer_tree root_layout ->
+    let open Result.Syntax in
+    let* lookup_root_layout = root_layout_lines root_layout in
+    render
+      Prompt_names.verification_lookup_producer_tree
+      [ "lookup_tools", tool_names lookup.schemas
+      ; "lookup_root_layout", lookup_root_layout
+      ]
+  | Producer_root_absent { root } ->
+    render
+      Prompt_names.verification_lookup_producer_root_absent
+      [ "lookup_tools", tool_names lookup.schemas; "root", root ]
+;;
+
+(* A successful lookup is typed by [Tool_result.Completed]. Preserve that
+   authority while making the observation visible in the model-facing data.
+   The prompt tells the judge that every review starts with no successful
+   lookup; this envelope is the only transition to [true]. Failed and deferred
+   results stay unchanged, so neither can be mistaken for checked evidence.
+   Nothing in MASC parses this projection back or overrides the judge's
+   structured verdict. *)
+let lookup_with_evidence_observation { schemas; dispatch } =
+  let dispatch ~name ~args =
+    match dispatch ~name ~args with
+    | Tool_result.Completed payload ->
+      let success_observation =
+        `Assoc [ "evidence_lookup_succeeded", `Bool true ]
+      in
+      Tool_result.Completed
+        { payload with
+          data =
+            `Assoc
+              [ "evidence_lookup_succeeded", `Bool true
+              ; "lookup_result", payload.data
+              ]
+        ; content_blocks =
+            Option.map
+              (fun blocks ->
+                 Llm_provider.Types.Text
+                   (Yojson.Safe.to_string success_observation)
+                 :: blocks)
+              payload.content_blocks
+        }
+    | (Tool_result.Deferred _ | Tool_result.Failed _) as result -> result
+  in
+  { schemas; dispatch }
+;;
+
+(* The image-evidence section: data lines (reference, hash, size, media
+   type) assembled here under the template's header prose. An empty list
+   renders an empty section, so a review without image artifacts reads
+   exactly as before this existed. The lines survive on text-only evaluators
+   — media degrade strips the attached blocks, not the prompt text — which is
+   the RFC-0436 §4.4 reference-plus-hash degradation. *)
+let image_evidence_section (req : review_request) =
+  match req.evidence_images with
+  | [] -> Ok ""
+  | images ->
+    let lines =
+      images
+      |> List.map (fun img ->
+             sprintf
+               "- %s (sha256=%s, bytes=%d, media_type=%s)"
+               img.image_reference
+               img.image_sha256
+               img.image_bytes
+               img.image_media_type)
+      |> String.concat "\n"
+    in
+    render
+      Prompt_names.verification_image_evidence
+      [ "image_evidence_lines", lines ]
+;;
+
+let build_prompt
+      ~(question : verdict_question)
+      ~(lookup : lookup_surface)
+      ~(lookup_root : lookup_root)
+      (req : review_request) : (string, string) result =
+  let open Result.Syntax in
+  let* lookup_section = lookup_section ~lookup ~lookup_root in
+  let { completion_contract; required_evidence; evidence_posture; few_shot_block } =
+    question
+  in
+  let calibration_section =
+    if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
+  in
+  let* verification_contract_section = contract_section completion_contract in
+  let* required_evidence_section = evidence_section ~required_evidence in
+  let* evidence_posture_section = posture_section evidence_posture in
+  let* image_evidence_section = image_evidence_section req in
+  let evidence_refs_json =
+    req.evidence_refs
+    |> List.map (fun reference -> `String reference)
+    |> fun values -> Yojson.Safe.to_string (`List values)
+  in
+  Prompt_registry.render_prompt_template
+    Prompt_names.verification
+    [ "task_title", req.task_title
+    ; "task_description", req.task_description
+    ; "agent_name", req.agent_name
+    ; "completion_notes", req.completion_notes
+    ; "verification_contract_section", verification_contract_section
+    ; "evidence_section", required_evidence_section
+    ; "evidence_posture_section", evidence_posture_section
+    ; "image_evidence_section", image_evidence_section
+    ; "evidence_refs", evidence_refs_json
+    ; "lookup_section", lookup_section
+    ; "calibration_section", calibration_section
+    ]
+;;
+
+(* ================================================================ *)
+(* Structured Review Verdict: Tool Schema + JSON Parsing (ADR D3)   *)
+(* ================================================================ *)
+
+(** JSON schema for the report_review_verdict tool, read from
+    [config/tools/report_review_verdict.toml] (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2). Forces the LLM to call
+    a tool with typed parameters; verdict is constrained to APPROVE/REJECT by
+    the TOML enum literal, which the mirror test in
+    [test_anti_rationalization_empty_reject] pins to [valid_verdict_strings]
+    (the variant SSOT). Decoded once at module initialization; a missing or
+    undecodable file refuses the boot. *)
+let schema_of_name name : Masc_domain.tool_schema =
+  let rel = "tools/" ^ name ^ ".toml" in
+  match Embedded_config.read rel with
+  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
+  | Some contents ->
+    (match Tool_definition_toml.load ~name ~contents with
+     | Ok { Tool_definition_toml.schema; _ } -> schema
+     | Error message -> failwith message)
+;;
+
+(* What to say on each verdict lives in config/prompts/verification.md, not
+   in the schema — model-facing prose belongs in the prompt files (RFC
+   prompts-and-tool-definitions-outside-ocaml), and the ratchet on this file
+   enforces that. *)
+let report_review_verdict_schema : Masc_domain.tool_schema =
+  schema_of_name "report_review_verdict"
+;;
+
+(** Parse review verdict from tool call JSON arguments (deterministic). *)
+type verdict_refusal =
+  | Reject_without_reason
+  | Unreadable_verdict
+
+(* The verdict and, when it is refused, which decision the refused call named:
+   one reading of the tool call serves both the error text and the resend rule
+   below, so they cannot disagree about what was refused. *)
+let classify_review_verdict_json (args : Yojson.Safe.t)
+  : (verdict, verdict_refusal * string) result =
+  try
+    let verdict_str =
+      match Json_util.assoc_member_opt "verdict" args with
+      | Some (`String value) -> value
+      | _ -> ""
+    in
+    let reason =
+      try (match Json_util.assoc_member_opt "reason" args with Some (`String s) -> s | _ -> "") with
+      | Yojson.Safe.Util.Type_error _ -> ""
+    in
+    match verdict_str with
+    | "APPROVE" -> Ok (Approve reason)
+    | "REJECT" ->
+      (* A tool result the reviewer LLM reads back, so the sentence is a
+         managed prompt; the pure parse errors below stay inline (RFC §6
+         mechanically-derived validation). *)
+      if String.equal (String.trim reason) ""
+      then
+        Error
+          ( Reject_without_reason
+          , Tool_guidance.to_string Tool_guidance.Reject_verdict_requires_reason )
+      else Ok (Reject reason)
+    | other -> Error (Unreadable_verdict, sprintf "unexpected review verdict value: %s" other)
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+    Error (Unreadable_verdict, sprintf "review verdict JSON type error: %s" msg)
+  (* RFC-0106 — cancellation MUST propagate; the file's other parsers
+     (see line ~244) already do this, so the catch-all here was an
+     N-of-M omission within the same module. *)
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Unreadable_verdict, sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
+;;
+
+let parse_review_verdict_from_json args =
+  Result.map_error snd (classify_review_verdict_json args)
+;;
+
+(* One [report_review_verdict] call against what the review already holds.
+   The verifier may resend a verdict after a parse refusal, and that resend is
+   the verdict only when it carries the decision the refused call named: the
+   one refusal whose decision is known is a REJECT without a reason, so only a
+   REJECT that now carries one is kept. A resend that changes the decision, or
+   follows a refusal whose decision cannot be read, keeps the violation: the
+   evaluator reversed or never stated itself, and the completion gate must not
+   open on that. Only the latest refusal counts: it is the one the resend
+   answers. A second call after a recorded verdict is always a violation. *)
+type verdict_call =
+  { recorded : verdict option
+  ; refusal : verdict_refusal option
+  ; violation : string option
+  }
+
+type verdict_answer =
+  | Verdict_recorded of verdict
+  | Verdict_already_recorded of { detail : string }
+  | Verdict_refused of { detail : string }
+
+let empty_verdict_call = { recorded = None; refusal = None; violation = None }
+
+let resend_keeps_refused_decision refusal verdict =
+  match refusal, verdict with
+  | Reject_without_reason, Reject _ -> true
+  | Reject_without_reason, Approve _ | Unreadable_verdict, (Approve _ | Reject _) -> false
+;;
+
+let step_verdict_call call args =
+  match call.recorded with
+  | Some verdict ->
+    let detail =
+      sprintf
+        "Task completion verdict already recorded (%s); report_review_verdict must be called exactly once"
+        (verdict_constructor_name verdict)
+    in
+    { call with violation = Some detail }, Verdict_already_recorded { detail }
+  | None ->
+    (match classify_review_verdict_json args with
+     | Ok verdict ->
+       let violation =
+         match call.refusal with
+         | None -> call.violation
+         | Some refusal when resend_keeps_refused_decision refusal verdict -> None
+         | Some _ -> call.violation
+       in
+       { call with recorded = Some verdict; violation }, Verdict_recorded verdict
+     | Error (refusal, detail) ->
+       ( { call with refusal = Some refusal; violation = Some detail }
+       , Verdict_refused { detail } ))
+;;
+
+(** Ordered evaluator slot list for one review. An explicit
+    [~evaluator_runtime] override is a single-slot lane (tests,
+    [--evaluator-runtime]); without one the published [verifier_exact] lane
+    supplies the frozen declaration order. The verdict channel is the
+    [report_review_verdict] tool call, so every slot needs a tool-calling
+    model — no wire response format is requested
+    ([Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config]). *)
+let resolve_evaluator_slots = function
+  | Some runtime when String.trim runtime <> "" -> Ok [ runtime, Types_core.Explicit_runtime ]
+  | Some _ -> Error "task completion evaluator runtime is empty"
+  | None ->
+    (try
+       match (Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn) () with
+       | Ok [] ->
+         Error "verifier_exact exact-output lane resolved to no admitted slots"
+       | Ok slots -> Ok slots
+       | Error detail -> Error detail
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "verifier_exact exact-output lane resolution failed: %s"
+            (Printexc.to_string exn)))
+;;
+
+(* ================================================================ *)
+(* Core: review                                                     *)
+(* ================================================================ *)
+
+let unresolved_evaluator_runtime = "unresolved"
+
+(* The caller reads the walk's stores; this library sits below the walk. *)
+type provider_rest =
+  | Rests_until_stated_end
+  | No_stated_rest
+
+(* What one candidate's failure says about reviewing the same submission
+   again with nothing changed by a producer or an operator.
+
+   [Reviews_again]: the failure passes with time. Either the call itself can
+   be repeated as it is ([Agent_core.Error.is_retryable]: a dropped
+   transport, a 5xx, a deadline, a throttle), or the provider has stated when
+   the candidate's path serves again and that time is still ahead. The walk
+   records that statement when the provider refuses: the reset a hard quota
+   states, or the reset of a spent usage window it reads after a 403 or after
+   a 429 that named no wait. [provider_rest] reads it back from the same
+   stores [Verification_retry.delay] dates the retry from, so the error
+   class or status that carried the refusal does not decide.
+   [Agent_core.Error.is_retryable] cannot answer the second question: it
+   drives the retry loop inside one call, where repeating a spent quota at
+   once is pointless, so it answers [false] for every [HardQuota] and every
+   403 (task-2402, 2026-10-20: a 429 hard quota with a 2,025-second reset
+   stopped the review for good).
+
+   Reading the recorded rest is not a gate on past evidence. The window is
+   the provider's own current statement about when this path serves again,
+   read when the failure is reported after the walk records it. The failure's
+   eligibility to be reviewed again survives a later candidate outliving that
+   window; the current rest still dates the next dispatch. This classification
+   only requests another review, never gates whether one may run.
+
+   [Model_absent]: a retired or unknown model, permanent for the unchanged
+   request.
+
+   [Producer_must_act]: nothing that time alone changes -- a credential, a
+   configuration, a refused request body, an account refusal or a quota with
+   no stated end. The same input meets the same refusal, so a timer would
+   only repeat the whole run. *)
+type candidate_failure =
+  | Reviews_again
+  | Model_absent
+  | Producer_must_act
+
+let candidate_failure ~provider_rest ~runtime_id error =
+  if Keeper_runtime_failure_route.core_error_is_model_absent error
+  then Model_absent
+  else if Agent_core.Error.is_retryable error
+  then Reviews_again
+  else (
+    match provider_rest runtime_id with
+    | Rests_until_stated_end -> Reviews_again
+    | No_stated_rest -> Producer_must_act)
+;;
+
+let append_unique left right =
+  List.fold_left (fun ids id -> if List.mem id ids then ids else ids @ [ id ]) left right
+;;
+
+type failure_certainty = Before_dispatch | Definite_refusal | Outcome_unknown
+
+type execution_observation =
+  | Admission_refused
+  | Attempt_failed of { runtime_id:string; certainty:failure_certainty; error:Agent_core.Error.t }
+  | Reply_received of { runtime_id:string }
+
+let failure_certainty ~dispatch error =
+  match dispatch with
+  | Runtime_attempt_dispatch.Rejected_before_dispatch -> Before_dispatch
+  | Runtime_attempt_dispatch.Dispatched ->
+    match error with
+    | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _ | Timeout _) -> Outcome_unknown
+    | Agent_core.Error.Api (RateLimited _ | Overloaded _ | ServerError _ | AuthError _
+        | AuthorizationError _ | PaymentRequired _ | NotFound _ | ContextOverflow _
+        | InputCapacity _ | InvalidRequest _) -> Definite_refusal
+    | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _ | HardQuota _
+        | CapacityExhausted _ | AuthError _ | AuthorizationError _ | ServerError _
+        | NotFound _ | InvalidRequest _ | EmptyCompletion _) -> Definite_refusal
+    | Agent_core.Error.Provider (MissingApiKey _ | InvalidConfig _ | ParseError _
+        | UnknownVariant _ | ProviderUnavailable _ | NetworkError _ | Timeout _
+        | ProviderTerminal _ | ProviderReportedError _ | ProviderWireError _)
+    | Agent_core.Error.Agent _ | Mcp _ | Config _ | Serialization _ | Io _
+    | Orchestration _ | Media _ | Internal _ | Internal_carried _ -> Outcome_unknown
+
+type execution_policy = Ordinary_review | Retained_original
+
+let run_with_execution_policy ~execution_policy
+      ?execution_owner
+      ?evaluator_runtime
+      ?generator_runtime
+      ?(on_verdict : review_result -> unit = fun _ -> ())
+      ?(on_tool_result : input:Yojson.Safe.t -> Tool_result.result -> unit = fun ~input:_ _ -> ())
+      ?(sw : Eio.Switch.t option = None)
+      ?system_prompt
+      ?(on_execution = fun _ -> ())
+      ~(log_info : string -> unit)
+      ~(log_warn : string -> unit)
+      ~(render_prompt : unit -> (string, string) result)
+      (* RFC-0436 §4.3: attached media blocks for the review turn. When
+         present, the reviewer runs on these blocks with the rendered prompt
+         as the leading [Text] block; when absent, the prompt string stays
+         the whole goal, as before. *)
+      ?goal_blocks
+      ~(lookup : lookup_surface)
+      ~(provider_rest : string -> provider_rest)
+      ~base_path
+      ()
+  : review_result
+  =
+  let emit result =
+    on_verdict result;
+    result
+  in
+  let emit_admission result = on_execution Admission_refused; emit result in
+  let task_info fmt = Stdlib.Format.ksprintf log_info fmt in
+  let task_warn fmt = Stdlib.Format.ksprintf log_warn fmt in
+  match resolve_evaluator_slots evaluator_runtime with
+  | Error reason ->
+    (Atomic.get outcome_observer_fn)
+      ~outcome:"unavailable"
+      ~runtime:unresolved_evaluator_runtime;
+    task_warn "%s; no verdict committed" reason;
+    emit_admission
+      { verdict = None
+      ; evaluator_runtime = unresolved_evaluator_runtime
+      ; generator_runtime
+      ; evaluator_execution = None
+      ; gate = Evaluator_unavailable
+      ; fallback_reason = Some reason
+      ; retryable_runtimes = []
+      ; model_absent_runtimes = []
+      }
+  | Ok [] ->
+    (* [resolve_evaluator_slots] never yields an empty list; this arm keeps the
+       match total without inventing a runtime. *)
+    (Atomic.get outcome_observer_fn)
+      ~outcome:"unavailable"
+      ~runtime:unresolved_evaluator_runtime;
+    let reason = "verifier_exact exact-output lane resolved to no admitted slots" in
+    task_warn "%s; no verdict committed" reason;
+    emit_admission
+      { verdict = None
+      ; evaluator_runtime = unresolved_evaluator_runtime
+      ; generator_runtime
+      ; evaluator_execution = None
+      ; gate = Evaluator_unavailable
+      ; fallback_reason = Some reason
+      ; retryable_runtimes = []
+      ; model_absent_runtimes = []
+      }
+  | Ok (((first_slot, _) as first_candidate) :: rest_slots) ->
+    (match render_prompt () with
+     | Error detail ->
+       (Atomic.get outcome_observer_fn)
+         ~outcome:"unavailable"
+         ~runtime:first_slot;
+       task_warn
+         "prompt unavailable runtime=%s: %s"
+         first_slot
+         detail;
+       emit_admission
+         { verdict = None
+         ; evaluator_runtime = first_slot
+         ; generator_runtime
+         ; evaluator_execution = None
+         ; gate = Evaluator_unavailable
+         ; fallback_reason = Some detail
+         ; retryable_runtimes = []
+         ; model_absent_runtimes = []
+         }
+     | Ok prompt ->
+       (* The rendered prompt and attached evidence are immutable inputs for
+          every slot. Candidate admission must preserve the attachments; later
+          slots additionally receive the actual earlier lookup observations. *)
+       let goal_blocks =
+         Option.map
+           (fun blocks -> Agent_core.Types.text_block prompt :: blocks)
+           goal_blocks
+       in
+       (match generator_runtime with
+        | Some generator when List.exists (fun (slot, _) -> String.equal generator slot) (first_candidate :: rest_slots) ->
+          task_warn
+            "generator runtime %s is one of the verifier_exact lane slots"
+            generator
+        | None | Some _ -> ());
+       (* Frozen-order slot failover, the same contract as the other exact
+          lanes: each slot is tried at most once, in declaration
+          order, and a slot that produces no usable verdict — provider error or
+          a reply without exactly one valid verdict tool call — yields to the
+          next slot. The terminal runtime/reason describes the last attempt,
+          while retryability aggregates every typed evaluator error: one
+          slot whose failure passes with time must not be masked by a later
+          statically unavailable fallback. The same aggregation includes typed
+          failures from the runtime candidates inside each slot, while the
+          slot's terminal error remains the operator-facing reason. A
+          single-slot lane still reports exactly what the pre-lane path
+          reported. Each failure is classified by [candidate_failure] from its
+          typed error and the candidate's recorded provider rest, never by
+          message text: a retired or unknown model is permanent for the
+          unchanged request, so it names the deferral's permanent set and can
+          never arm its retry. *)
+       (* Capture the actual model-facing bridge view once, at lookup return.
+          This preserves failure envelopes and artifact-manifest refusals as
+          well as the inline ceiling. Later slots do not reformat raw results
+          under a possibly changed prompt policy or expose host-only metadata. *)
+       let lookup_observations = ref [] in
+       let capture_lookup evaluator_slot name arguments result =
+         let refusal = ref None in
+         let projected = Tool_projection.to_agent_core_typed_result
+           ~base_path
+           ~model_projection:(Tool_output.Inline_up_to
+             { maximum_bytes = Tool_shard_limits.verification_evidence_max_bytes })
+           ~on_externalization_error:(fun error -> refusal := Some error)
+           result in
+         let fields, media = match !refusal with
+           | Some { Tool_projection.kind = Inline_budget_exceeded; message } ->
+             [ "projection_refusal", `Assoc
+                 [ "kind", `String "inline_budget_exceeded"
+                 ; "message", `String message ] ], []
+           | Some { Tool_projection.kind = Artifact_storage_failure; message } ->
+             [ "projection_refusal", `Assoc
+                 [ "kind", `String "artifact_storage_failure"
+                 ; "message", `String message ] ], []
+           | None ->
+             (match projected with
+              | Ok output ->
+                [ "result", `Assoc
+                    [ "content", `String output.Agent_core.Types.content
+                    ; "is_error", `Bool false ] ],
+                Option.value output.content_blocks ~default:[]
+              | Error error ->
+                [ "result", `Assoc
+                    [ "content", `String error.Agent_core.Types.message
+                    ; "is_error", `Bool true
+                    ; "recoverable", `Bool error.recoverable
+                    ; "error_class", (match error.error_class with
+                        | None -> `Null
+                        | Some class_ -> Agent_core.Types.tool_error_class_to_yojson class_) ] ], [])
+         in
+         (* The evidence joins the reviewer's input, which is history: its
+            media go to the store first. *)
+         let fields, media =
+           match
+             Agent_core.History.of_wire_blocks
+               (Tool_blob_media_store.of_base_path ~base_path) media
+           with
+           | Ok media -> fields, media
+           | Error error ->
+             ( fields
+               @ [ "media_unavailable", `String (Agent_core.Error.to_string (Agent_core.Error.Media error)) ]
+             , [] )
+         in
+         let data = `Assoc
+           [ "prior_review_lookup", `Assoc
+               ([ "evaluator_slot", `String evaluator_slot
+                ; "tool_name", `String name
+                ; "arguments", arguments
+                ; "disposition", `String (Tool_result.string_of_disposition result) ] @ fields) ] in
+         Agent_core.Types.Text (Yojson.Safe.to_string data) :: media
+       in
+       let unknown_dispatch = ref false in
+       let must_preserve_original () = execution_policy=Retained_original && !unknown_dispatch in
+       let observe_failure ~runtime_id ~dispatch error =
+         let certainty = failure_certainty ~dispatch error in
+         (match certainty with Outcome_unknown -> unknown_dispatch := true
+          | Before_dispatch | Definite_refusal -> ());
+         on_execution (Attempt_failed {runtime_id;certainty;error})
+       in
+       let run_attempt (slot, candidate_kind) =
+         let prior_evidence = List.concat (List.rev !lookup_observations) in
+         let goal_blocks = match prior_evidence, goal_blocks with
+           | [], original -> original
+           | _ :: _, None -> Some (Agent_core.Types.Text prompt :: prior_evidence)
+           | _ :: _, Some original -> Some (original @ prior_evidence)
+         in
+         let lookup = { lookup with dispatch = (fun ~name ~args ->
+           let result = lookup.dispatch ~name ~args in
+           lookup_observations := capture_lookup slot name args result :: !lookup_observations;
+           result) } in
+         let attempt_failures = ref [] in
+         let result =
+           try
+             (Atomic.get run_llm_reviewer_fn)
+               ~base_path
+               ?sw
+               ?execution_owner
+               ~evaluator_runtime:slot
+               ~candidate_kind
+               ~prompt
+               ?system_prompt
+               ?goal_blocks
+               ~report_tool_schema:report_review_verdict_schema
+               ~lookup
+               ~on_tool_result
+               ~attempt_continuation:(fun ~dispatch error ->
+                 match execution_policy,failure_certainty ~dispatch error with
+                 | Retained_original,Outcome_unknown -> Runtime_attempt_dispatch.Original_must_resolve
+                 | Ordinary_review,(Before_dispatch | Definite_refusal | Outcome_unknown)
+                 | Retained_original,(Before_dispatch | Definite_refusal) -> Runtime_attempt_dispatch.Next_may_dispatch)
+               ~on_runtime_attempt_error:
+                 (fun ~runtime_id ~attempt:_ ~dispatch error ->
+                    observe_failure ~runtime_id ~dispatch error;
+                    let failure = candidate_failure ~provider_rest ~runtime_id error in
+                    attempt_failures := !attempt_failures @ [ runtime_id, failure ])
+               ()
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+             Error
+               (Agent_core.Error.Internal
+                  (Printf.sprintf
+                     "review evaluator raised unexpectedly: %s"
+                     (Printexc.to_string exn)))
+         in
+         (match result with
+          | Ok {selected_runtime_id;verdict=_;evaluator_execution=_} -> on_execution (Reply_received {runtime_id=selected_runtime_id})
+          | Error _ -> ());
+         (* The walk reports after recording the refusal's rest. Retain that
+            classification here: another candidate in this slot can outlive
+            the stated reset and prune it before the slot answers. *)
+         let retryable_runtimes, model_absent_runtimes =
+           List.fold_left
+             (fun (retryable, model_absent) (runtime_id, failure) ->
+                match failure with
+                | Reviews_again -> append_unique retryable [ runtime_id ], model_absent
+                | Model_absent -> retryable, append_unique model_absent [ runtime_id ]
+                | Producer_must_act -> retryable, model_absent)
+             ([], [])
+             !attempt_failures
+         in
+         result, retryable_runtimes, model_absent_runtimes, !attempt_failures <> []
+       in
+       let rec attempt ~retryable_runtimes ~model_absent_runtimes ((slot, _) as candidate) remaining =
+         match run_attempt candidate with
+         | Ok {verdict=Some verdict;selected_runtime_id=slot;evaluator_execution}, _nested_retryable_runtimes, _, _ ->
+           (match verdict with
+            | Approve reason ->
+              task_info
+                "LLM approved runtime=%s reason=%s"
+                slot
+                reason
+            | Reject reason ->
+              task_info
+                "LLM rejected runtime=%s reason=%s"
+                slot
+                reason);
+           emit
+             { verdict = Some verdict
+             ; evaluator_runtime = slot
+             ; generator_runtime
+             ; evaluator_execution
+             ; gate = Structured_tool
+             ; fallback_reason = None
+             ; retryable_runtimes = []
+             ; model_absent_runtimes = []
+             }
+         | Ok {verdict=None;selected_runtime_id=slot;evaluator_execution=_}, nested_retryable_runtimes, nested_model_absent, _ ->
+           let retryable_runtimes = append_unique retryable_runtimes nested_retryable_runtimes in
+           let model_absent_runtimes = append_unique model_absent_runtimes nested_model_absent in
+           let detail =
+             "evaluator did not call report_review_verdict exactly once"
+           in
+           (Atomic.get outcome_observer_fn)
+             ~outcome:"invalid_verdict"
+             ~runtime:slot;
+           (match remaining with
+            | next :: rest ->
+              task_warn
+                "%s runtime=%s; failing over to next verifier_exact slot %s"
+                detail
+                slot
+                (fst next);
+              attempt ~retryable_runtimes ~model_absent_runtimes next rest
+            | [] ->
+              task_warn "%s" detail;
+              emit
+                { verdict = None
+                ; evaluator_runtime = slot
+                ; generator_runtime
+                ; evaluator_execution = None
+                ; gate = Invalid_verdict
+                ; fallback_reason = Some detail
+                ; retryable_runtimes
+                ; model_absent_runtimes
+                })
+         | Error error, nested_retryable_runtimes, nested_model_absent, attempt_observed ->
+           if not attempt_observed then (
+             let dispatch = match error with
+               | Agent_core.Error.Config _ -> Runtime_attempt_dispatch.Rejected_before_dispatch
+               | Agent_core.Error.Api _ | Provider _ | Agent _ | Mcp _ | Serialization _
+               | Io _ | Orchestration _ | Media _ | Internal _ | Internal_carried _ -> Runtime_attempt_dispatch.Dispatched in
+             observe_failure ~runtime_id:slot ~dispatch error);
+           let remaining = if must_preserve_original () then [] else remaining in
+           let nested_retryable_runtimes = if must_preserve_original () then [] else nested_retryable_runtimes in
+           let detail = Agent_core.Error.to_string error in
+           let slot_failure = candidate_failure ~provider_rest ~runtime_id:slot error in
+           let slot_model_absent =
+             match slot_failure with
+             | Model_absent -> [ slot ]
+             | Reviews_again | Producer_must_act -> []
+           in
+           (* Once the walk reported its own candidates, they own the retry:
+              the slot's terminal error describes the lane, not a path that
+              can be dated. *)
+           let slot_retries =
+             match slot_failure, (attempt_observed || must_preserve_original ()) with
+             | Reviews_again, false -> [ slot ]
+             | Reviews_again, true | (Model_absent | Producer_must_act), _ -> []
+           in
+           let candidate_retries = append_unique nested_retryable_runtimes slot_retries in
+           let retryable = candidate_retries <> [] in
+           let retryable_runtimes = if must_preserve_original () then []
+             else append_unique retryable_runtimes candidate_retries in
+           let model_absent_runtimes =
+             append_unique model_absent_runtimes (append_unique nested_model_absent slot_model_absent)
+           in
+           (Atomic.get outcome_observer_fn)
+             ~outcome:"unavailable"
+             ~runtime:slot;
+           (match remaining with
+            | next :: rest ->
+              task_warn
+                "evaluator unavailable runtime=%s retryable=%b; failing over to next verifier_exact slot %s: %s"
+                slot
+                retryable
+                (fst next)
+                detail;
+              attempt
+                ~retryable_runtimes
+                ~model_absent_runtimes
+                next
+                rest
+            | [] ->
+              let exhausted_retryable = retryable_runtimes <> [] in
+              task_warn
+                "evaluator unavailable runtime=%s retryable=%b; no verdict committed: %s"
+                slot
+                exhausted_retryable
+                detail;
+              emit
+                { verdict = None
+                ; evaluator_runtime = slot
+                ; generator_runtime
+                ; evaluator_execution = None
+                ; gate = Evaluator_unavailable
+                ; fallback_reason = Some detail
+                ; retryable_runtimes
+                ; model_absent_runtimes
+                })
+       in
+       attempt ~retryable_runtimes:[] ~model_absent_runtimes:[] first_candidate rest_slots)
+;;
+
+let run ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result ?sw
+    ?system_prompt ?on_execution ~log_info ~log_warn ~render_prompt ?goal_blocks
+    ~lookup ~provider_rest ~base_path () =
+  run_with_execution_policy ~execution_policy:Ordinary_review
+    ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result ?sw
+    ?system_prompt ?on_execution ~log_info ~log_warn ~render_prompt ?goal_blocks
+    ~lookup ~provider_rest ~base_path ()
+;;
+
+(* The Task lane: its own prompt variables, its own log subject. Everything
+   after the prompt string is the shared {!run}. *)
+let run_review
+      ?execution_owner
+      ?(execution_policy=Ordinary_review)
+      ?system_prompt
+      ?on_execution
+      ?evaluator_runtime
+      ?generator_runtime
+      ?on_verdict
+      ?on_tool_result
+
+      ?(sw : Eio.Switch.t option = None)
+      ~render_prompt
+      ~(lookup : lookup_surface)
+      ~provider_rest
+      ~base_path
+      (req : review_request)
+  : review_result
+  =
+  (* RFC-0436 §4.3: each recorded image becomes an attached block. The base64
+     body was read at assembly time, so a missing or unreadable body never
+     reaches this list — the artifact stays in the prompt as its reference and
+     hash line only, which is the §4.4 posture for it. *)
+  let media_store = Tool_blob_media_store.of_base_path ~base_path in
+  let image_blocks =
+    req.evidence_images
+    |> List.filter_map (fun img ->
+           (* A body the store cannot keep stays out, like one that could not
+              be read: the prompt still carries its reference and hash line. *)
+           match
+             Agent_core.History.of_wire_block media_store
+               (Llm_provider.Types.image_block
+                  ~media_type:img.image_media_type
+                  ~source:(Llm_provider.Types.Base64 img.image_body_base64))
+           with
+           | Ok block -> Some block
+           | Error error ->
+             Log.Task.warn "task_id=%s [task-completion-review] image evidence %s kept as reference only: %s" req.task_id
+               img.image_media_type
+               (Agent_core.Error.to_string (Agent_core.Error.Media error));
+             None)
+  in
+  let lookup_for_judge = lookup_with_evidence_observation lookup in
+  run_with_execution_policy ~execution_policy
+    ?execution_owner
+    ?evaluator_runtime
+    ?generator_runtime
+    ?on_verdict
+    ?on_tool_result
+    ~sw
+    ?system_prompt
+    ?on_execution
+    ?goal_blocks:(if image_blocks = [] then None else Some image_blocks)
+    ~log_info:(fun message ->
+      Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
+    ~log_warn:(fun message ->
+      Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
+    ~render_prompt
+    ~lookup:lookup_for_judge
+    ~provider_rest
+    ~base_path
+    ()
+;;
+
+let review ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result
+    ?sw ~question ~lookup ~lookup_root ~provider_rest ~base_path req =
+  run_review ?evaluator_runtime ?generator_runtime ?on_verdict ?on_tool_result
+    ?sw ~render_prompt:(fun () -> build_prompt ~question ~lookup ~lookup_root req)
+    ~lookup ~provider_rest ~base_path req
+;;
+
+let review_rendered ~generator_runtime ~system_prompt ?execution_owner ?on_execution ?on_verdict ?on_tool_result ?sw ~prompt ~lookup
+    ~provider_rest ~base_path req =
+  run_review ?execution_owner ?generator_runtime ~execution_policy:Retained_original ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw ~render_prompt:(fun () -> Ok prompt)
+    ~lookup ~provider_rest ~base_path req
+;;
+
+let run_retained ~system_prompt ~prompt ?on_execution ?on_verdict ?on_tool_result ?sw
+    ~log_info ~log_warn ~lookup ~provider_rest ~base_path () =
+  run_with_execution_policy ~execution_policy:Retained_original
+    ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw
+    ~log_info ~log_warn ~render_prompt:(fun () -> Ok prompt)
+    ~lookup:(lookup_with_evidence_observation lookup) ~provider_rest ~base_path ()
+;;

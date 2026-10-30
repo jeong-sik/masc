@@ -1,0 +1,117 @@
+(** Producer-owned Keeper execution result.
+
+    [deferred_kind] distinguishes a generic deferred tool transition from a
+    deferred external effect. It is producer-owned and must never be recovered
+    by parsing the opaque provider-facing tool body. *)
+type deferred_kind =
+  | Generic_deferred
+  | External_effect_deferred of { approval_id : string option }
+  | Owned_job_result_wait of Keeper_owned_job_store.Job_id.t
+  | Composition_result_wait of Keeper_composition_dependency.composition
+
+val deferred_kind_to_string : deferred_kind -> string
+(** Stable producer-owned wire label for deferred settlement evidence. *)
+
+type terminal_effect_receipt =
+  | Surface_post_completed of Keeper_surface_post.post_target
+(** Producer-owned proof of the concrete terminal effect that completed. *)
+
+(** [disposition] uses the canonical {!Tool_result.disposition}; this module
+    deliberately defines no parallel outcome enum.  [raw_output] is opaque
+    text. [data] and [metadata] exist only when the producer supplied them. *)
+
+type t = private
+  { retained_artifacts : Tool_output.artifact_ref list
+  ; raw_output : string
+  ; data : Yojson.Safe.t option
+  ; content_blocks : Llm_provider.Types.content_block list option
+      (** Producer-owned multimodal content, preserved independently of JSON data
+          through the Keeper handler into the model-facing tool bridge. *)
+  ; metadata : Yojson.Safe.t option
+  ; failure_effect_disposition : Tool_result.failure_effect_disposition
+      (** Meaningful only for [Failed]. Generic producers default to
+          [Effect_outcome_unknown]; terminal-effect producers must state the
+          strongest phase they can prove. *)
+  ; disposition :
+      (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
+  ; deferred_kind : deferred_kind option
+  ; terminal_effect_receipt : terminal_effect_receipt option
+  ; file_change_evidence : Keeper_file_change_evidence.t option
+      (** Producer-recorded line evidence for a completed filesystem change.
+          This is independent of the opaque [raw_output] projection. *)
+  }
+
+val success : string -> t
+
+(** Typed completion. [raw_output] is the deterministic JSON rendering used by
+    text-only consumers; typed consumers use [data] directly. *)
+val success_data : ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
+
+(** Typed deferral. [metadata] is an opaque one-way AGENT_CORE projection, never a
+    source from which MASC recovers the disposition. *)
+val deferred_data :
+  ?effect_disposition:Tool_result.failure_effect_disposition ->
+  ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
+
+(** A read of an existing owned job has no effect. The producer supplies the
+    exact private job identity independently of the provider-facing body.
+    This permits only another result read, never a launch/status/cancel replay. *)
+val deferred_owned_job_result :
+  job_id:Keeper_owned_job_store.Job_id.t -> Yojson.Safe.t -> t
+
+val deferred_composition_result :
+  binding:Keeper_composition_dependency.composition -> Yojson.Safe.t -> t
+(** Read the same original request again after its canonical result is ready;
+    this does not authorize submission, cancellation or a replacement child. *)
+
+(** Typed deferral for an external effect whose durable resolution resumes the
+    Keeper later. *)
+val deferred_external_effect_data :
+  ?approval_id:string ->
+  ?effect_disposition:Tool_result.failure_effect_disposition ->
+  ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
+
+(** A failed call. [class_] has no default: the producer is the one place
+    that knows whether the caller can correct the call, so it names the class
+    rather than inheriting [Runtime_failure] (#27742). *)
+val failure
+  :  class_:Tool_result.tool_failure_class
+  -> ?effect_disposition:Tool_result.failure_effect_disposition
+  -> string
+  -> t
+
+(** Typed failure with a separate opaque human-readable [message]. *)
+val failure_data
+  :  class_:Tool_result.tool_failure_class
+  -> ?effect_disposition:Tool_result.failure_effect_disposition
+  -> ?metadata:Yojson.Safe.t
+  -> message:string
+  -> Yojson.Safe.t
+  -> t
+
+(** Attach the already committed Gate authorization and its audit receipts to
+    a completed or deferred result's metadata. A failed result keeps only its
+    producer metadata, because that metadata is rendered into the model's
+    failure text; the authorization is logged instead
+    ({!Keeper_gate.observe_authorization_of_failed_result}). *)
+val with_gate_authorization : Keeper_gate.authorization -> t -> t
+
+val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
+(** Attach the resolved post target only to a completed execution. *)
+
+val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
+(** Attach producer-recorded line evidence only to a completed execution. *)
+
+val with_retained_artifacts : Tool_output.artifact_ref list -> t -> t
+(** Preserve producer-validated artifact roots in the execution carrier,
+    including failed results whose Tool_result payload has no retention field.
+    This changes no result data, disposition or effect evidence. *)
+
+(** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
+    handler. [failure_effect_disposition] lets a producer preserve a phase it
+    can prove; generic producers default to [Effect_outcome_unknown]. A
+    [`String] payload stays opaque and is never interpreted as JSON. *)
+val of_tool_result
+  :  ?failure_effect_disposition:Tool_result.failure_effect_disposition
+  -> Tool_result.result
+  -> t

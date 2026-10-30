@@ -1,0 +1,12 @@
+Testing `test_tui_fork_guard'.
+This run has ID `DN3QJQM5'.
+
+  [OK]          finished switch          0   runs the failure move.
+  [OK]          open switch              0   makes no failure move.
+
+Full test results in `/masc-work/polisher/masc-1591/_build/_tests/test_tui_fork_guard'.
+Test Successful in 0.001s. 2 tests run.
+HEAD=bdbd33c0c93f364b0549aa755c5834e01b9bcaac
+UTC=2026-09-16T22:15:49Z
+mode=dune build test/test_tui_fork_guard.exe (scoped, exit 0) then direct execution of the built binary
+guard_tests_exit=0

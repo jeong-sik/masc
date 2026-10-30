@@ -1,0 +1,16 @@
+HEAD=4e1631a58f762978d1d4e46dbfda683ee2661583
+UTC=2026-09-16T20:07:27Z
+## branch tree @runtest (this session):
+runtest_exit=137 ; tail: OK / Killed
+## baseline (git stash -u, untouched origin/main 4e1631a5 tree) rerun:
+baseline_exit=137 ; tail: OK / Killed
+## verdict: the kill is pre-existing in this guest (full-suite memory ceiling),
+## identical before and after the fix; targeted verification is green.
+## baseline log tail:
+
+OK
+Killed
+## branch log tail:
+
+OK
+Killed

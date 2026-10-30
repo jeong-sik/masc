@@ -1,0 +1,266 @@
+(** Closed grammar for immutable Keeper tool-composition plans. Declared
+    inside SKILL.md composition fences ({!Keeper_skill_catalog}).
+
+    The document grammar is closed and explicit. Input templates use tagged
+    [literal], [output], [object], and [array] nodes; strings are never scanned
+    for placeholders or inferred as references. Plan creation resolves tool
+    authority only through the process-owned descriptor registry. *)
+
+type expected_value =
+  | String_value
+  | String_array_value
+  | Table_value
+  | Table_array_value
+  | Array_value
+  | Bool_value
+
+(** Why an [enum] member cannot be offered to a model. A provider that
+    cannot carry [enum] gets the members written unquoted into the parameter's
+    description ([Agent_core.Types.enum_vocabulary_text]). There an empty
+    member shows as nothing, surrounding whitespace is lost, a line break
+    splits the text, and a member containing
+    [Agent_core.Types.enum_member_separator] cannot be told apart from two
+    members, while the call is still checked against the exact member. The
+    faults are checked in the order listed, and the first one found is
+    reported. *)
+type enum_value_fault =
+  | Empty_value
+  | Padded_value
+  | Line_break_in_value
+  | Separator_in_value
+
+type error =
+  | Toml_syntax of string
+  | Empty_catalog
+  | Unknown_field of
+      { path : string list
+      ; field : string
+      }
+  | Duplicate_field of
+      { path : string list
+      ; field : string
+      }
+  | Missing_field of
+      { path : string list
+      ; field : string
+      }
+  | Wrong_value_kind of
+      { path : string list
+      ; field : string
+      ; expected : expected_value
+      }
+  | Empty_name of { path : string list }
+  | Composition_name_too_long of
+      { name : string
+      ; maximum_bytes : int
+      }
+  | Invalid_composition_name_character of
+      { name : string
+      ; character : char
+      }
+  | Duplicate_composition_name of string
+  | Invalid_execution_mode of
+      { path : string list
+      ; mode : string
+      }
+  | Invalid_branch_failure_policy of { path : string list; policy : string }
+  | Conflicting_plan_field of { path : string list; field : string }
+  | Plan_json_syntax of { name : string; detail : string }
+  | Plan_json_rejected of { name : string; error : Keeper_tool_plan_request.error }
+  | Async_leaf_not_admitted of
+      { name : string
+      ; node_id : Keeper_tool_plan.Node_id.t
+      ; tool_name : string
+      }
+  | Invalid_template_kind of
+      { path : string list
+      ; kind : string
+      }
+  | Invalid_node_id of
+      { path : string list
+      ; error : Keeper_tool_plan.Node_id.error
+      }
+  | Invalid_json_pointer of
+      { path : string list
+      ; error : Keeper_tool_plan.Json_pointer.syntax_error
+      }
+  | Duplicate_template_object_field of
+      { path : string list
+      ; field : string
+      }
+  | Invalid_param_type of
+      { path : string list
+      ; type_name : string
+      }
+  | Param_enum_requires_string_type of
+      { path : string list
+      ; type_name : string
+      }
+  | Empty_param_enum of { path : string list }
+  | Unsendable_param_enum_value of
+      { path : string list
+      ; value : string
+      ; fault : enum_value_fault
+      }
+  | Duplicate_param_enum_value of
+      { path : string list
+      ; value : string
+      }
+  | Duplicate_param_name of
+      { name : string
+      ; param : string
+      }
+  | Unknown_param_reference of
+      { name : string
+      ; param : string
+      }
+  | Unused_param of
+      { name : string
+      ; param : string
+      }
+  | Plan_rejected of
+      { name : string
+      ; error : Keeper_tool_plan.error
+      }
+
+type execution_mode =
+  | Inline
+  | Async
+
+(** Parameter types a composition can declare. The generated input schema
+    mirrors them, and Agent-Core checks every call against that schema before
+    the composition tool's handler runs, as it does for any other tool.
+
+    [Enum_param members] is a closed set of strings, written in the document
+    as [type = "string"] with [enum = [...]]. The list is non-empty and free of
+    repeats, and every member can be sent back exactly
+    ({!enum_value_fault}); each violation is a load error. *)
+type param_type =
+  | String_param
+  | Integer_param
+  | Number_param
+  | Boolean_param
+  | Enum_param of string list
+
+type param = private
+  { param_name : string
+  ; param_type : param_type
+  ; param_description : string
+  }
+
+type entry = private
+  { name : string
+  ; description : string option
+  ; execution : execution_mode
+  ; params : param list
+        (** Declared invocation parameters, [[compositions.params]] in the
+            document. Every declared name is referenced by some node input
+            ([kind = "param"]) and vice versa — both directions are load
+            errors. All params are required. Async entries bind params at
+            submission and retain that exact bound plan in the original
+            immutable source used by continuation. *)
+  ; plan : Keeper_tool_plan.t
+  ; loading : Tool_definition_toml.loading
+        (** [defer_loading = true] in the composition block: the tool is held
+            back from an Agent Core request until [keeper_tool_search] names
+            it, as a tool file's declaration does. Absent or [false] is
+            [Always_loaded]; any other value is a load error. *)
+  }
+
+type t
+
+val parse : ?descriptors:Keeper_tool_descriptor.t list -> string -> (t, error) result
+(** Parse one complete TOML document and validate every composition against the
+    current canonical Keeper descriptor registry. Unknown fields and malformed
+    tagged templates fail closed. [exports] is a table array of [name], [node]
+    and RFC 6901 [pointer]. Optional [branch_failure_policy] is [fail_fast] or
+    [continue_independent], and is retained when parameters are bound. *)
+(* [plan_json] carries a parameter-free canonical structured plan instead of
+   [nodes]/[params]/[exports]/[branch_failure_policy]. The two forms cannot be
+   mixed; a string [plan_json] rejects the presence of any of those fields
+   before their values are parsed. The ordinary TOML form retains its parameter
+   validation before plan validation. Both forms use the same Plan authority. *)
+
+val entries : t -> entry list
+val find : t -> string -> entry option
+val tool_name : entry -> string
+
+val skill_name_of_tool_name : string -> string option
+(** The skill a composition tool is named after, or [None] for a name that is
+    not a composition tool. The tool is named from the skill, so a reader
+    that has only the name can say which skill ran. *)
+
+val skill_source_of_tool_name : string -> string option
+(** The SKILL.md a composition tool name came from, relative to the masc
+    directory (["skills/<name>/SKILL.md"]), or [None] for a name that is not a
+    composition tool. Composed rather than looked up: the tool exists only
+    because that file was read, so the path is a fact about how it got here,
+    not a guess that it is there. *)
+(** Stable model-visible name for this materialized composition. *)
+
+val execution_mode_to_string : execution_mode -> string
+
+(** Execution-semantics kind (RFC-0386) declared by the entry's execution
+    mode: [Inline] entries are [Composition_tool], [Async] entries are
+    [Async_composition_tool]. *)
+val tool_kind : entry -> Keeper_tool_descriptor.tool_kind
+
+(** The shared async request controls operate on async composition runs, so
+    both are [Keeper_tool_descriptor.Async_composition_tool]. *)
+val status_tool_kind : Keeper_tool_descriptor.tool_kind
+val cancel_tool_kind : Keeper_tool_descriptor.tool_kind
+
+(** Whether a surface materializing [entries] carries the shared status and
+    cancel controls: exactly when one of them is [Async]. The controls address
+    the durable request id an async composition hands back, and nothing else
+    on a Keeper surface mints one, so on a surface without an async entry they
+    are schemas with nothing to act on. Where they are built, their own
+    [config/tools/<name>.toml] still decides whether they are deferred. *)
+val requires_async_controls : entry list -> bool
+
+(** The ad-hoc plan tool's name. It lives here beside the catalog's own tool
+    names because the approval policy needs to recognise it and must not
+    depend on the surface that materialises it. Unlike a [keeper_compose_*]
+    entry it carries no catalog plan: its nodes arrive in the tool input. *)
+
+val status_tool_name : string
+val cancel_tool_name : string
+val prepare_tool_name : string
+val run_tool_name : string
+
+val skill_tool_name : string
+(** The tool that serves one instruction skill body by name. *)
+
+val error_to_string : error -> string
+
+val input_schema_of_params : param list -> Yojson.Safe.t
+(** The model-visible input schema for an entry: an object with one required,
+    described property per declared param, closed to extras. An
+    [Enum_param] property is a string with its members under [enum]. The
+    empty list yields the zero-param object schema. *)
+
+val output_schema_of_params : param list -> Yojson.Safe.t
+(** Composable type projection of the declared arguments. Enum membership and
+    descriptions remain in [input_schema_of_params] for input validation. *)
+
+type instantiation_error = Keeper_tool_plan.parameter_binding_error =
+  | Missing_argument of string
+  | Instantiated_plan_rejected of Keeper_tool_plan.error
+
+val instantiation_error_to_string : instantiation_error -> string
+val instantiation_error_to_json : instantiation_error -> Yojson.Safe.t
+
+val instantiate
+  :  descriptors:Keeper_tool_descriptor.t list
+  -> args:Yojson.Safe.t
+  -> entry
+  -> (Keeper_tool_plan.t, instantiation_error) result
+(** Bind one invocation's validated arguments into the entry's plan: every
+    [Param] leaf becomes the caller's value and the param-free copy is
+    revalidated by {!Keeper_tool_plan.create}. A zero-param entry returns its
+    declared plan unchanged.
+
+    The arguments are the ones Agent-Core already checked against
+    {!input_schema_of_params} before the composition handler ran, so a value
+    outside an [Enum_param]'s members never reaches binding. Binding does not
+    check them again. *)

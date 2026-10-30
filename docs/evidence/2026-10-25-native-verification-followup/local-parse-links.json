@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-25T01:12:12.921502+00:00",
+  "code_head": "17583b006eaf0823587ba07a27ad50889ef8d498",
+  "code_base": "b31260ebda2134c3c4b2527ee5f9455ddfd600f1",
+  "scope": "OCaml parse, whitespace and changed-document local link checks only; no local Dune or native claim.",
+  "checks": [
+    {
+      "file": "test/test_verification.ml",
+      "sha256": "dfed0a0d74211ab60e656cb6d810837843f7439c0a3538c325781c08bce2cd05",
+      "parse_exit": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_completion_repair_delivery.ml",
+      "sha256": "03d80af432b056d930c8c3bd809e30265d09f14f2aca08b3a295041b96a9d998",
+      "parse_exit": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_keeper_claude_code_runtime.ml",
+      "sha256": "6463671e833d18edef756baa909e47dee8c6e9566fc240f4d6588c4f27b134ba",
+      "parse_exit": 0,
+      "output": ""
+    }
+  ],
+  "local_links_checked": 50,
+  "git_diff_check_exit": 0
+}

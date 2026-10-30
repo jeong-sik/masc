@@ -1,0 +1,2366 @@
+type skill_tone =
+  | Skill_live
+  | Skill_settled
+  | Skill_attention
+  | Skill_failure
+
+type thinking_origin =
+  | Thinking_own
+  | Thinking_arrived
+
+type style =
+  | User
+  | Inbound
+  | Keeper
+  | Status
+  | Local
+  | Journal
+  | Error
+  | Tool
+  | Skill of skill_tone
+  | Thinking of thinking_origin
+
+(* Every style there is, beside the type rather than in the test that walks it.
+   The distinctness check reads this list, and a list kept a thousand lines
+   away in a test file is one a new variant slips past -- [Local] did, and the
+   check passed without ever looking at its mark. Adjacency is the whole
+   mechanism here; nothing in the language forces a variant to be listed. *)
+let all_styles =
+  [ User
+  ; Inbound
+  ; Keeper
+  ; Status
+  ; Local
+  ; Journal
+  ; Error
+  ; Tool
+  ; Thinking Thinking_own
+  ; Thinking Thinking_arrived
+  ; Skill Skill_live
+  ; Skill Skill_settled
+  ; Skill Skill_attention
+  ; Skill Skill_failure
+  ]
+;;
+
+(* What arrived from outside this conversation and landed between its turns.
+
+   Only what the types already know. A line this pane wrote in answer to
+   something typed at it ([Message_local]) is not an arrival, and drawing it
+   on a siding would read as though someone else had sent it. Neither is
+   [Sent_by_operator] from another surface: that one is an arrival in fact,
+   but the surface lives in the label's text and not in the constructor, and
+   a distinction cut out of a string is the type pretending to know. *)
+type siding =
+  | Siding_journal  (** A Memory OS journal commit. *)
+  | Siding_arrival  (** Another agent's broadcast, a connector, a second operator. *)
+
+type turn_rail =
+  | Rail_opens
+  | Rail_says
+  | Rail_does
+  | Rail_stands
+  | Rail_closes
+  | Rail_joins of siding
+      (** Belongs to no turn and arrived while one was running. It joins the
+          conversation's line from the left rather than breaking it: the turn
+          it landed inside did not produce it and did not read it. *)
+  | Rail_none
+
+(* What a press on this row opens. One case today -- a Gate argument held
+   behind a fold -- and a variant rather than a bool because the pane must not
+   recover the answer from the glyphs it drew: text that changes would kill
+   the click silently, and a press has no error to report. *)
+type row_action =
+  | Action_none
+  | Action_unfold_argument
+
+type markdown_source =
+  | Markdown_stable of {
+      keeper_name : string;
+      request_id : string;
+      observed_at : float;
+      entry_index : int;
+    }
+  | Markdown_growing of {
+      keeper_name : string;
+      request_id : string;
+      entry_index : int;
+    }
+  | Markdown_streaming
+
+type timeline_bucket = {
+  tb_year : int;
+  tb_month : int;
+  tb_day : int;
+  tb_hour : int;
+  tb_is_dst : bool;
+}
+
+type journal_sign = Journal_added | Journal_removed
+
+type journal_tone =
+  | Tone_code_change
+  | Tone_learning
+  | Tone_intent
+  | Tone_blocker
+  | Tone_fact
+
+type journal_line =
+  | Journal_fact of
+      { sign : journal_sign; category : string; tone : journal_tone; claim : string }
+  | Journal_drop of { memory_id : string; reason : string }
+
+type memory_pass =
+  | Pass_committed
+  | Pass_failed of { kind : string }
+  | No_pass
+
+type heading_boundary = Inherit_heading | Start_heading
+
+type projected_body = Projected_summary | Projected_results | Projected_full
+(** Which projection of typed producer data wrote a body: a tool block's
+    calls, a turn's skill activity, a Gate step's folded argument, or a Memory
+    row's summary. One view stance writes one text; another stance writes a
+    different text from the same data. *)
+
+type body_presentation = Source_body | Thinking_summary | Projected_body of projected_body
+(** Source content, the generated folded-thinking label, and each projected
+    body have distinct semantic identities even when their visible words
+    happen to coincide. A byte offset names a position only within the
+    presentation that wrote it. *)
+
+type entry = {
+  style : style;
+  heading_boundary : heading_boundary;
+  body_presentation : body_presentation;
+  timestamp : string;
+  timeline_bucket : timeline_bucket option;
+  speaker : string;
+      (** The label {!role_label} was aligned from, whole. The gutter cuts a
+          long name to its column; the origin heading under {!Origin_row}
+          has the pane's width and draws this instead. *)
+  delivery_state : string option;
+      (** [Some state] only on an operator input still pending delivery; see
+          the .mli. *)
+  role_label : string;
+  role_label_mark_cells : int;
+  diagnostics : string list;
+      (** Explicitly expanded technical metadata, wrapped and measured separately
+          from the original speech body. Empty in the default chat view. *)
+  request_label : string;
+  body : string;
+  journal : journal_line list;
+  markdown_source : markdown_source;
+  turn_rail : turn_rail;
+  action : row_action;
+      (** What a press on this entry's first row opens. Carried on the entry
+          because the entry is where the folding was decided; the rows below
+          it are continuations of one decision, not decisions of their own. *)
+}
+
+type metadata =
+  | Timeline_break of timeline_bucket
+  | Origin of {
+      clock : string option;
+      speaker : string;
+      role_label : string;
+    }
+  | Diagnostic
+  | Continued_at of { clock : string }
+  | Sender
+      (** One wrapped piece of an inbound sender's name above its body in the
+          {!Origin_bare} view. The row's [text] is that piece and its [gutter]
+          is the body's, so the renderer draws the piece once, like a body
+          row, instead of building a heading from the whole name. *)
+
+type row_kind =
+  | Metadata of metadata
+  | Body
+  | Spacing
+  | Viewport_gap of { hidden_rows : int }
+
+type origin_display =
+  | Origin_row
+  | Origin_inline
+  | Origin_bare
+
+type shade =
+  | Shade_none
+  | Shade_quoted
+
+type row = {
+  style : style;
+  kind : row_kind;
+  shade : shade;
+  text : string;
+  gutter_rail_cells : int;
+  gutter_clock_cells : int;
+  gutter_label_at : int;
+  gutter : string;
+  action : row_action;
+}
+
+(* A byte below 0x80 is a whole UTF-8 scalar. *)
+include Masc_tui_grapheme_segmentation
+
+(* The pieces of each non-ASCII text laid out in this frame or the one before
+   it. Most of a frame is text the previous frame drew, and splitting
+   non-ASCII text into grapheme clusters is most of what laying it out costs:
+   on 2026-09-30 a TUI with no input spent 14% of its busy samples in the
+   segmenter while it redrew every 150 ms for a running turn. Pieces depend on
+   the text alone, so a text drawn again takes the pieces it had last time.
+
+   An ASCII text, escapes included, is split again each time. Its printable
+   runs skip the segmenter, and keeping it costs more than splitting it: on
+   2026-09-30 [take_cells] of a 9-byte row took 0.10 us split and 0.14 us
+   kept. The pieces of a kept text stay until [begin_frame] has run twice
+   without a layout of it; 1,000 texts of 40 Hangul syllables kept 1.6 MB.
+   The frame cache is domain-local. Pure document preparation uses a private
+   scope so it neither races the UI's tables nor retains task text across jobs.
+   The separate [row_counts_memo] below is still owned by the UI fiber. *)
+(* A sizing hint for one frame's texts, not a bound. *)
+let texts_per_frame = 1024
+type pieces_cache =
+  { mutable pieces_current : (string,display_piece list) Hashtbl.t
+  ; mutable pieces_previous : (string,display_piece list) Hashtbl.t }
+let create_pieces_cache () =
+  {pieces_current=Hashtbl.create texts_per_frame;pieces_previous=Hashtbl.create texts_per_frame}
+let pieces_cache_key = Domain.DLS.new_key (fun () -> None)
+let current_pieces_cache () = match Domain.DLS.get pieces_cache_key with
+  | Some cache -> cache
+  | None ->
+    let cache=create_pieces_cache () in
+    Domain.DLS.set pieces_cache_key (Some cache);cache
+let with_isolated_pieces_cache run =
+  let previous=Domain.DLS.get pieces_cache_key in
+  Domain.DLS.set pieces_cache_key (Some (create_pieces_cache ()));
+  Fun.protect ~finally:(fun () -> Domain.DLS.set pieces_cache_key previous) run
+
+let begin_frame () =
+  let cache=current_pieces_cache () in
+  let finished=cache.pieces_current in
+  cache.pieces_current <- cache.pieces_previous;
+  Hashtbl.clear cache.pieces_current;
+  cache.pieces_previous <- finished
+
+(* Top level, so the scan allocates no closure on each layout. *)
+let rec ascii_from text offset =
+  offset >= String.length text
+  || (ascii_byte text.[offset] && ascii_from text (offset + 1))
+
+let ascii_text text = ascii_from text 0
+
+let display_pieces text =
+  if ascii_text text then segment_display_pieces text
+  else
+    let cache=current_pieces_cache () in
+    match Hashtbl.find_opt cache.pieces_current text with
+    | Some pieces -> pieces
+    | None ->
+        let pieces =
+          match Hashtbl.find_opt cache.pieces_previous text with
+          | Some pieces -> pieces
+          | None -> segment_display_pieces text
+        in
+        Hashtbl.replace cache.pieces_current text pieces;
+        pieces
+
+let pieces_width pieces =
+  List.fold_left (fun width piece -> width + piece.cell_width) 0 pieces
+
+(* Segmenting the text is what these cost, so the callers below that need both
+   a measurement and a cut take the pieces once and pass them along. Measuring
+   through [display_width] and then cutting through [cell_prefix] segmented
+   every rendered line twice. *)
+let cell_prefix_of_pieces text pieces max_cells =
+  let buffer = Buffer.create (String.length text) in
+  let rec loop used_cells saw_ansi = function
+    | [] -> Buffer.contents buffer, used_cells, saw_ansi
+    | piece :: rest when piece.ansi ->
+        Buffer.add_substring buffer text piece.start_offset
+          (piece.end_offset - piece.start_offset);
+        loop used_cells true rest
+    | piece :: rest when used_cells + piece.cell_width <= max_cells ->
+        Buffer.add_substring buffer text piece.start_offset
+          (piece.end_offset - piece.start_offset);
+        loop (used_cells + piece.cell_width) saw_ansi rest
+    | _ -> Buffer.contents buffer, used_cells, saw_ansi
+  in
+  loop 0 false pieces
+
+let cell_suffix_of_pieces text pieces max_cells =
+  let rec start_offset used current_start = function
+    | [] -> current_start
+    | piece :: rest when used + piece.cell_width <= max_cells ->
+        start_offset (used + piece.cell_width) piece.start_offset rest
+    | _ -> current_start
+  in
+  let start =
+    start_offset 0 (String.length text) (List.rev pieces)
+  in
+  let rec drop_detached_zero_width = function
+    | [] -> String.length text
+    | piece :: rest when piece.end_offset <= start ->
+        drop_detached_zero_width rest
+    | piece :: rest when piece.ansi || piece.cell_width = 0 ->
+        drop_detached_zero_width rest
+    | piece :: _ -> piece.start_offset
+  in
+  let start = drop_detached_zero_width pieces in
+  String.sub text start (String.length text - start)
+
+let display_width text =
+  match ascii_display_width text with
+  | Some cells -> cells
+  | None -> pieces_width (display_pieces text)
+
+let grapheme_count text =
+  List.fold_left
+    (fun count (piece : display_piece) -> if piece.ansi then count else count + 1)
+    0
+    (display_pieces text)
+;;
+
+let cell_prefix text max_cells =
+  cell_prefix_of_pieces text (display_pieces text) max_cells
+
+(* Drop the first [cells] display cells, keeping every ANSI sequence crossed
+   so the remainder opens under the styles the cut passed through. A wide
+   grapheme straddling the boundary is dropped whole and its remaining cells
+   are padded with spaces, so the columns to the right stay aligned. *)
+let drop_cells text cells =
+  if cells <= 0 then text
+  else
+    let pieces = display_pieces text in
+    let buffer = Buffer.create (String.length text) in
+    let rec loop dropped = function
+      | [] -> ()
+      | piece :: rest when piece.ansi ->
+          Buffer.add_substring buffer text piece.start_offset
+            (piece.end_offset - piece.start_offset);
+          loop dropped rest
+      | piece :: rest when dropped + piece.cell_width <= cells ->
+          loop (dropped + piece.cell_width) rest
+      | piece :: rest when dropped < cells ->
+          Buffer.add_string buffer
+            (String.make (dropped + piece.cell_width - cells) ' ');
+          loop cells rest
+      | piece :: rest ->
+          Buffer.add_substring buffer text piece.start_offset
+            (piece.end_offset - piece.start_offset);
+          loop dropped rest
+    in
+    loop 0 pieces;
+    Buffer.contents buffer
+
+(* Keep the first [cells] display cells: the counterpart to [drop_cells], so a
+   caller cutting a row in two gets back exactly the cells it started with. A
+   wide grapheme straddling the boundary is dropped whole here and padded with
+   spaces there, so the two halves still add up to the whole.
+
+   [split_cells] is not this function. It wraps, and a wrapper has to move
+   forward or it never ends: it takes one piece even when [max_cells] is zero.
+   Read as a prefix that invents a cell, which is how a row with no mark to
+   colour drew its first character twice. *)
+let take_cells text cells =
+  let prefix, _, _ = cell_prefix text (Int.max 0 cells) in
+  prefix
+
+(* The longest prefix that fits in [cells] without cutting a grapheme, and
+   what is left of the text. Where {!take_cells} cuts by cells and gives up a
+   wide grapheme that straddles the boundary -- padding its cells so the
+   columns to the right stay put -- this one moves that grapheme to the tail
+   and keeps every character. One is for a fixed column, the other for
+   wrapping, where nothing may be lost.
+
+   Escapes are carried into the prefix: they set a style, cost no cells, and
+   the text after them opens under it. A prefix can therefore come back empty
+   of visible cells and non-empty of bytes; the caller reads the tail to know
+   whether it moved. *)
+let split_at_cells text cells =
+  if cells <= 0 then ("", text)
+  else
+    let rec walk used cut = function
+      | [] -> cut
+      | piece :: rest ->
+          if piece.ansi then walk used piece.end_offset rest
+          else if used + piece.cell_width <= cells then
+            walk (used + piece.cell_width) piece.end_offset rest
+          else cut
+    in
+    let cut = walk 0 0 (display_pieces text) in
+    (String.sub text 0 cut, String.sub text cut (String.length text - cut))
+
+(* What a cut leaves behind in place of the text it dropped.
+
+   One mark for every cut -- the tail, the middle, and the composer's head in
+   this module, and the roster marquee in {!Masc_tui_roster_pane}, which is the
+   fourth and the only one that spends two at once.
+   The middle cut spelled it "…" and the other two "~", and a single frame
+   drew both: a roster name cut to [some…-name] sat beside a notice cut to
+   [http://127.0.0.1:~], so the reader had to learn two spellings of one fact.
+
+   "~" is the worse of the two to keep. It is a legal byte in a path and in a
+   URL, so a cut address reads as an address that ends in a tilde -- and the
+   port it was cut at is the token the operator came for. The glyph is spoken
+   for elsewhere besides: {!Masc_tui_markdown} reserves a single "~" for a home
+   directory, the Changes column wears it for an edited file, and the Acting
+   pane for a record that has not settled. A cut is the one meaning it does
+   not need to carry.
+
+   The cell cost is derived rather than written as 1, so each budget subtracts
+   what the mark actually spends. That is one cell today, the same number the
+   literals said. A wider mark would not be safe by derivation alone: where a
+   column is narrower than the mark, each of the four floors its budget at zero
+   and draws the mark anyway rather than cutting it, so the mark would overrun.
+   The marquee would overrun first, since it spends two. A two-cell mark needs
+   those four sites decided, not just this value changed. *)
+(* A count and the noun it counts, in the number the count asks for. Four
+   modules each wrote this as a local [plural], and thirty-odd rows wrote
+   "%d lines" with no plural at all, so a single draft line read "1 lines". *)
+let count_noun ?plural count singular =
+  let noun =
+    if count = 1 then singular
+    else match plural with Some word -> word | None -> singular ^ "s"
+  in
+  Printf.sprintf "%d %s" count noun
+
+(* A token figure a reader reads at a glance rather than counts digit by
+   digit. Thousands keep a tenth so nearby readings such as 73.9k and 73.2k
+   remain distinct. *)
+let thousand = 1_000
+let million = 1_000_000
+
+(* Up to 99,994,999,999 the figure fits the six-character "\xe2\x89\x88%6s tok"
+   column. A figure changes rung as soon as the previous format would round
+   it to a seventh character: 999,950 reads "1.00M" rather than "1000.0k",
+   99,995,000 reads "100.0M" rather than "100.00M", and 999,950,000 reads
+   "1.00B" rather than "1000.0M".
+
+   The boundaries match the precision each column reserves, so two views of
+   the same token count do not disagree near a rounding threshold. *)
+let rung_billion = 999_950_000
+let rung_hundred_million = 99_995_000
+let rung_million = 999_950
+
+let compact_count n =
+  if n >= rung_billion then
+    Printf.sprintf "%.2fB" (float_of_int n /. 1_000_000_000.)
+  else if n >= rung_hundred_million then
+    Printf.sprintf "%.1fM" (float_of_int n /. float_of_int million)
+  else if n >= rung_million then
+    Printf.sprintf "%.2fM" (float_of_int n /. float_of_int million)
+  else if n >= thousand then
+    Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
+  else string_of_int n
+
+let cut_mark = "…"
+let cut_mark_cells = display_width cut_mark
+
+let fitted_source_bytes text width =
+  if width <= 0 then 0
+  else if display_width text <= width then String.length text
+  else String.length (take_cells text (Int.max 0 (width - cut_mark_cells)))
+
+let fit_width text width =
+  if width <= 0 then ""
+  else
+    match ascii_display_width text with
+    | Some cells when cells <= width -> text ^ String.make (width - cells) ' '
+    | Some cells when cells = String.length text ->
+        (* The whole row is printable ASCII with no CSI, so byte offsets and
+           display cells agree even at the cut. Styled or Unicode rows still
+           need grapheme pieces and the style reset below. *)
+        let room = Int.max 0 (width - cut_mark_cells) in
+        String_util.utf8_prefix ~max_bytes:room text ^ cut_mark
+    | Some _ | None ->
+        let pieces = display_pieces text in
+        let cells = pieces_width pieces in
+        if cells > width then
+          let room = Int.max 0 (width - cut_mark_cells) in
+          let prefix, prefix_cells, saw_ansi =
+            cell_prefix_of_pieces text pieces room
+          in
+          let reset = if saw_ansi then "\x1B[0m" else "" in
+          prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
+        else text ^ String.make (width - cells) ' '
+
+(* [fit_width]'s other end: the padding goes in front, so a column of figures
+   -- or of ages beside them -- lines up on its right edge.
+
+   Printf's "%*s" does this too, but it counts bytes. A cell holding the
+   no-value mark, three bytes and one column, came out four cells wide in a
+   six-cell field and pulled the column after it two cells left. *)
+let pad_left text width =
+  let cells = display_width text in
+  if cells >= width then fit_width text width
+  else String.make (width - cells) ' ' ^ text
+
+(* Where a bare URL begins and where it stops. Two readers ask -- the one that
+   underlines them and the one that names what they point at -- and they get
+   one answer, since a URL ending in one place for the underline and another
+   for the name would underline text the name had not read. *)
+let url_ends_at ch =
+  match ch with
+  | ' ' | '\t' | '\x1b' | '"' | '\'' | ')' | ']' | '>' | '<' -> true
+  | _ -> Char.code ch < 0x20
+
+(* Does [prefix] sit at [index]? Answered by comparing bytes where they are.
+   Cutting the substring to compare it allocated one for every character of
+   every message body -- two, since two prefixes are tried -- so a pane of
+   half a megabyte of transcript produced a million short-lived strings on
+   every frame, and the collector spent the frame on them. *)
+let prefix_at text index prefix =
+  let plen = String.length prefix in
+  index + plen <= String.length text
+  &&
+  let rec same offset =
+    offset >= plen
+    || (Char.equal text.[index + offset] prefix.[offset] && same (offset + 1))
+  in
+  same 0
+
+let url_begins_at text index =
+  (* Both schemes start with the same letter, and almost no character in a
+     transcript does, so this decides the common case in one comparison. *)
+  index < String.length text
+  && Char.equal text.[index] 'h'
+  && (prefix_at text index "http://" || prefix_at text index "https://")
+
+let url_end text index =
+  let length = String.length text in
+  let rec go i = if i < length && not (url_ends_at text.[i]) then go (i + 1) else i in
+  go index
+
+let bare_urls text =
+  let length = String.length text in
+  let rec loop index found =
+    if index >= length then List.rev found
+    else if url_begins_at text index then
+      let stop = url_end text index in
+      loop stop (String.sub text index (stop - index) :: found)
+    else loop (index + 1) found
+  in
+  loop 0 []
+
+let dress_bare_links ~open_style ~close_style text =
+  (* [url_begins_at] needs an 'h'. Without one the scan below would copy the
+     row byte for byte into a fresh string, so hand the row back untouched.
+     Rows with a link still walk the whole scan. *)
+  if not (String.contains text 'h') then text
+  else begin
+    let length = String.length text in
+    let buffer = Buffer.create (length + 16) in
+    let rec loop index =
+      if index >= length then ()
+      else if url_begins_at text index then begin
+        let stop = url_end text index in
+        Buffer.add_string buffer open_style;
+        Buffer.add_string buffer (String.sub text index (stop - index));
+        Buffer.add_string buffer close_style;
+        loop stop
+      end
+      else begin
+        Buffer.add_char buffer text.[index];
+        loop (index + 1)
+      end
+    in
+    loop 0;
+    Buffer.contents buffer
+  end
+
+let composer_max_rows = 5
+
+let composer_lines ~max_rows input =
+  let max_rows = Int.max 1 max_rows in
+  let lines = String.split_on_char '\n' input in
+  let drop = Int.max 0 (List.length lines - max_rows) in
+  List.filteri (fun index _ -> index >= drop) lines
+
+let input_viewport ~max_cells input =
+  let max_cells = Int.max 0 max_cells in
+  let pieces = display_pieces input in
+  if pieces_width pieces <= max_cells then input
+  else if max_cells = 0 then ""
+  else
+    cut_mark
+    ^ cell_suffix_of_pieces input pieces (Int.max 0 (max_cells - cut_mark_cells))
+
+let input_window ~max_cells ~cursor input =
+  let max_cells = max 0 max_cells in
+  let cursor = max 0 (min cursor (String.length input)) in
+  let before = String.sub input 0 cursor in
+  (* Keep a cell for the caret even when it sits just after the final glyph. *)
+  let visible_before = input_viewport ~max_cells:(max 0 (max_cells - 1)) before in
+  let cursor_cells = display_width visible_before in
+  let after = String.sub input cursor (String.length input - cursor) in
+  let visible_after, _, _ = cell_prefix after (max 0 (max_cells - cursor_cells)) in
+  visible_before ^ visible_after, cursor_cells
+
+let input_boundaries input =
+  0 :: List.map (fun piece -> piece.end_offset) (display_pieces input)
+
+type composer_window = { lines : string list; cursor_row : int; cursor_cells : int }
+
+let composer_window ~max_rows ~max_cells ~cursor input =
+  let cursor = max 0 (min cursor (String.length input)) in
+  let before = String.sub input 0 cursor |> String.split_on_char '\n' in
+  let row = List.length before - 1 in
+  let column = match List.rev before with [] -> 0 | last :: _ -> String.length last in
+  let all_lines = String.split_on_char '\n' input in
+  let height = min (max 1 max_rows) (List.length all_lines) in
+  let first = min row (max 0 (List.length all_lines - height)) in
+  let cursor_cells = ref 0 in
+  let lines = all_lines |> List.drop first |> List.take height
+    |> List.mapi (fun index line ->
+      if first + index = row then begin
+        let visible, cells = input_window ~max_cells ~cursor:column line in
+        cursor_cells := cells;
+        visible
+      end else input_viewport ~max_cells line)
+  in
+  { lines; cursor_row = row - first; cursor_cells = !cursor_cells }
+
+(* The chat pane draws the composer's first line with this prefix and wraps
+   continuation lines to the same width, so the caret column is measured from
+   the prefix the pane actually renders — not from a hand-copied constant that
+   drifts the moment the prefix changes. *)
+let chat_input_prompt_prefix = "  > "
+
+let chat_input_prompt_cells = display_width chat_input_prompt_prefix
+
+(* The pane draws its rows inside the frame, which spends its margin before
+   any content starts. *)
+let chat_input_box_cells = Masc_tui_frame.content_column
+
+(* One authority for the rows that never belong to message history: box top,
+   navigation header, operational identity header, header divider, input
+   divider, composer, box bottom, and footer. Rendering and PgUp/PgDn must
+   subtract the same number or a page skips one transcript row. *)
+(** Rows outside chat history. Shared by rendering, viewport admission, and
+    PgUp/PgDn so a page is exactly the history height that is visible. *)
+let message_fixed_chrome_rows = 8
+
+let message_history_height ~terminal_rows ~status_rows =
+  Int.max 0 (terminal_rows - message_fixed_chrome_rows - Int.max 0 status_rows)
+
+let chat_title_row ~inner_cells ~title ~mode_suffix =
+  let inner_cells = Int.max 0 inner_cells in
+  let mode_cells = display_width mode_suffix in
+  if mode_cells >= inner_cells then fit_width mode_suffix inner_cells
+  else fit_width title (inner_cells - mode_cells) ^ mode_suffix
+
+(* At the newest row the arrows answer the composer's history. Once PgUp has
+   moved into the transcript they adjust it one row at a time, so the hint can
+   name them without risking a draft replacement. *)
+let scroll_hint ~scrolled_back ~older_exist:_ =
+  if scrolled_back <= 0 then "PgUp:scroll back"
+  else "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest"
+
+(* Where the pane stands, which is not a key and cannot be looked up: it
+   travels to the row as [Masc_tui_footer.line]'s [?position], not on the end
+   of the key hints, because the fitter reads those as items and gives up the
+   last one first. Spelled among the keys it was never drawn -- measured on
+   the live fleet at eighty columns, where the row kept Ctrl-R and Ctrl-D and
+   dropped this.
+
+   [None] at the newest row: there is no distance to say, and the hint beside
+   it already names the key that starts one.
+
+   The marker answers the other half of the question. How far back is one
+   number; whether pressing up keeps finding history is the other. At the
+   oldest row with nothing more to fetch, that it is the start is the more
+   useful fact than the distance -- an operator pressing up against a pane
+   that will not move should know it is the beginning of the conversation
+   rather than a stuck key -- and there the distance says what "start"
+   already says. *)
+let scroll_position ~scrolled_back ~older_exist =
+  if scrolled_back <= 0 then None
+  else if older_exist then
+    Some (Printf.sprintf "(%d back \xc2\xb7 more\xe2\x86\x91)" scrolled_back)
+  else Some "(start)"
+
+let input_cursor_column ~terminal_cols ~input_cells =
+  let last_column = Int.max 1 (terminal_cols - Masc_tui_frame.margin_cells) in
+  (* Three things sit left of the caret: the box, the prompt, and what was
+     typed -- and the caret goes one cell past the last of them. Deriving this
+     from the prompt alone put it on the prompt's own ">" instead of after the
+     text, because the constant it replaced was all three added up rather than
+     the prompt's width. *)
+  Int.min last_column
+    (chat_input_box_cells + chat_input_prompt_cells + input_cells + 1)
+
+(* Metadata rows read down the pane as a column: [timestamp] From [origin]
+   request. Origins vary in width, so every label is padded to one badge and
+   the request column stays put down the pane.
+
+   The badge used to be 16 cells whatever the terminal was, so a
+   [codex-mcp-client] read as [codex-mcp-clien…] on a 200-column screen with
+   the room to spell it. The width is a fixed pane-derived budget, never below
+   10 so the built-in activity labels remain legible, and never past the
+   budget below: the built-in activity labels still read whole beside their
+   marks, while an opaque long speaker name yields its middle instead of
+   reserving empty cells on every body row.
+
+   A sixth of the pane, capped. At a tenth capped at 14 a 130-cell pane --
+   the roster split on a wide terminal -- gave the badge 13 cells, and every
+   keeper of this workspace longer than eleven characters was cut to its
+   ends ("e-m…-leader", "tui…veloper") on every row it spoke. A sixth gives
+   that pane the cap, which spells an eighteen-character name whole beside
+   its mark; an 80-cell pane pays three more cells than before. *)
+let chat_role_label_column = 10
+
+let chat_role_label_share = 6
+
+(* A budget, not a measurement of what happens to be loaded.
+   Measuring the widest label on the pane tied body width to the message
+   list: [rows_of_entry] takes the body's width from what the badge leaves,
+   so a differently-named speaker posting re-wrapped every body already on
+   screen, changed how many rows the history occupies, and moved
+   [msg_scroll] -- which counts rows back from the newest -- to a different
+   part of the conversation. Labels on one live pane ran from 13 cells
+   ("admin · agent") to 57
+   ("keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent"), so the
+   badge took a quarter of the pane and gave it back one message later.
+   Fixed, the body keeps its width and only a resize re-wraps. *)
+let chat_role_label_budget = 20
+
+let chat_role_label_width ~pane_cells =
+  Int.max chat_role_label_column
+    (Int.min chat_role_label_budget (pane_cells / chat_role_label_share))
+
+(* Keep both ends of [label] in [column] cells, dropping the middle.
+
+   [fit_width] keeps the head and a tail-only cut keeps the tail; an
+   identifier needs both. Keeper names share long prefixes and differ in
+   their tail, but a name cut to its tail alone no longer says which family
+   it came from. Cutting "rw-e0-r9-20260820-revision-audit" to
+   "rw-e0-r9-20260820-revi…" loses exactly the part that distinguishes it,
+   and to "…0820-revision-audit" loses exactly the part that groups it.
+
+   The tail gets two thirds of the budget because it is the deciding end. As
+   [column] shrinks the head's third reaches zero and this degrades into
+   a tail-only cut, which is the right thing to lose last. *)
+let truncate_middle column label =
+  if column <= 0 then ""
+  else
+    let pieces = display_pieces label in
+    let cells = pieces_width pieces in
+    if cells <= column then label
+    else if column <= cut_mark_cells then cut_mark
+    else
+      let usable = column - cut_mark_cells in
+      let head_cells = usable / 3 in
+      let tail_cells = usable - head_cells in
+      let head, _, saw_ansi =
+        cell_prefix_of_pieces label pieces head_cells
+      in
+      let tail = cell_suffix_of_pieces label pieces tail_cells in
+      let reset = if saw_ansi then "\x1B[0m" else "" in
+      head ^ reset ^ cut_mark ^ tail
+
+(* Left-aligned and padded to [column], so this is a drop-in where
+   [fit_width] was cutting identifiers. *)
+let fit_middle column label =
+  if column <= 0 then ""
+  else
+    let truncated = truncate_middle column label in
+    let used = display_width truncated in
+    truncated ^ String.make (Int.max 0 (column - used)) ' '
+
+(* One glyph per speaker, from the vocabulary the Keepers roster and Acting
+   already use. Colour carries this distinction better, and NO_COLOR takes
+   colour away, so the mark is what still answers "who said this" on a pane
+   with no colour at all. *)
+let speaker_mark : style -> string = function
+  | User -> "\xe2\x96\xb6"      (* the operator sends *)
+  | Inbound -> "\xe2\x97\x80"   (* someone else sent this here *)
+  | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
+  (* The Keeper's own mark, unfilled: this row is the pane's note about a
+     turn rather than the Keeper speaking in it. It used to be a question
+     mark, which is the one thing in this alphabet that is not a shape -- and
+     it stayed a question on a row that had already settled, so a gate that
+     finished still read as one nobody had answered. *)
+  | Status -> "\xe2\x97\x8b"
+  (* The same mark the composer prompt draws, because that is where this row
+     came from: the pane answering what was typed at it. *)
+  | Local -> "\xe2\x80\xba"
+  | Journal -> "\xe2\x97\x88"   (* the parallel Memory journal lane *)
+  | Error -> "\xe2\x9c\x97"
+  | Tool -> "\xe2\x96\xa0"
+  | Skill Skill_live -> "\xe2\x97\x87"
+  | Skill Skill_settled -> "\xe2\x97\x86"
+  | Skill Skill_attention -> "\xe2\x96\xb3"
+  | Skill Skill_failure -> "\xe2\x9c\x97"
+  | Thinking _ -> "\xc2\xb7"
+
+(* Speech or work -- the one question the rail's ordinary pieces answer.
+
+   Reasoning, tool calls and skills are what a turn did to arrive at what it
+   said. Drawn at the same depth as the reply they read as its siblings, so
+   the rail hangs them off the trunk instead.
+
+   Which of the two a row is does not depend on how many rows came with it,
+   which is why both the running turn and the turn of a single row decide it
+   here. The callers differ only in what a speech row gets: inside a running
+   turn the trunk continues, and a lone utterance has no trunk to draw. *)
+let rail_for_style ~work ~speech : style -> turn_rail = function
+  | Tool | Skill _ | Thinking _ -> work
+  | User | Inbound | Keeper | Status | Local | Journal | Error -> speech
+
+(* The bracket a turn draws down the left margin. One cell of box drawing plus
+   the space that keeps it off the clock.
+
+   Separate from {!speaker_mark} on purpose: that alphabet answers "who is
+   talking" and this one answers "which turn is this row part of". Folding the
+   second question into the first was the shape that failed -- a mark that
+   means two things stops meaning either.
+
+   [Rail_none] is a blank rather than a fifth glyph, and it is what a lone
+   utterance draws: one thing said is not a hierarchy, and marking it would
+   put the rail on nearly every row of an ordinary conversation, which is
+   where a reader stops seeing it. A lone row of work is not that case --
+   {!rail_for_style} still calls it work. *)
+let turn_rail_glyph : turn_rail -> string = function
+  | Rail_opens -> "\xe2\x95\xad"   (* the turn starts here *)
+  | Rail_says -> "\xe2\x94\x82"    (* the turn itself, still going *)
+  | Rail_does -> "\xe2\x94\x9c"    (* work hanging off the turn *)
+  | Rail_stands -> "\xe2\x95\xb6"  (* work that is the whole turn *)
+  | Rail_closes -> "\xe2\x95\xb0"  (* the turn ended on this row *)
+  | Rail_joins _ -> "\xe2\x94\xa4"  (* something from outside meets the line *)
+  | Rail_none -> " "
+
+(* The run a siding takes to reach the conversation's line.
+
+   The kind is in the texture rather than a mark: the journal is this
+   workspace's own auxiliary lane and draws dashed, while a line someone else
+   put here draws solid. A mark would be the third time the row says who it
+   is -- the label names it and {!speaker_mark} stamps it already. *)
+let siding_lead : siding -> string = function
+  | Siding_journal -> "\xe2\x95\x8c\xe2\x95\x8c\xe2\x95\x8c"
+  | Siding_arrival -> "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+
+let siding_lead_cells = 3
+
+(* Charged to every row, drawn or not. The margin's width is what the body's
+   width is taken from, so a rail column that appeared and vanished with the
+   rows would re-wrap the conversation under a scroll position taken before
+   it. Five cells out of a sixty-cell pane, spent once: three for a siding to
+   run in, one for the glyph, one to keep it off the clock. A turn-only row
+   pays the three as blanks, which is what keeps the line in one column
+   whether or not anything arrived beside it. *)
+let turn_rail_cells = siding_lead_cells + 2
+
+(* The whole margin for one row, siding run included. Callers concatenate
+   this rather than the glyph: a row that drew the glyph and padded the rest
+   itself would put the line in a different column on the rows that have a
+   siding. *)
+let turn_rail_gutter (piece : turn_rail) =
+  let lead =
+    match piece with
+    | Rail_joins siding -> siding_lead siding
+    | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes
+    | Rail_none ->
+        String.make siding_lead_cells ' '
+  in
+  let drawn = lead ^ turn_rail_glyph piece in
+  (* Pad to the budget rather than trusting the parts to add up to it. The
+     margin is charged {!turn_rail_cells} whether or not the glyph fills it,
+     so a gutter one cell short does not shrink the margin — it slides the
+     clock and the label one cell left, and the row that follows lands in a
+     different column than the one the layout reserved. *)
+  drawn ^ String.make (Int.max 0 (turn_rail_cells - display_width drawn)) ' '
+
+(* Cells the speaker mark and its separator occupy at the head of a label, or
+   zero when the column was too narrow to keep the mark at all. One reader, so
+   the renderer that styles the mark and the layout that lays it out cannot
+   disagree about where it ends. *)
+let role_label_mark_cells ?(column = chat_role_label_column) ~style () =
+  let column = Int.max 1 column in
+  let cells = display_width (speaker_mark style) + 1 in
+  if column - cells < 1 then 0 else cells
+
+(* The widest mark any speaker draws, so a fit that must leave room for one
+   does not have to know which. Conservative by construction: reserving the
+   widest costs a row its surface one cell early and can never take a cell the
+   mark needed. Reads {!all_styles}, so a wider mark is accounted for the day
+   one arrives. *)
+let widest_speaker_mark_cells =
+  List.fold_left
+    (fun widest style -> Int.max widest (display_width (speaker_mark style)))
+    0 all_styles
+
+(* The speaker column names the speaker. Where the row also carries the surface
+   it came in by and the pair fits, it says both; where it does not, the
+   surface goes.
+
+   Joined and cut as one string the row kept the wrong half: {!fit_middle}
+   favours the tail, and the tail of "<who> · <where>" is the where. One live
+   pane had twelve broadcast rows from an agent named [codex-mcp-client], each
+   drawn as "…p-…roadcast". An arrival draws its siding either way, so the row
+   still says it came from outside; who came through is what it cannot spare. *)
+let fit_speaker ?(column = chat_role_label_column) ~speaker ~surface () =
+  match surface with
+  | None -> speaker
+  | Some surface ->
+      let inner = Int.max 1 (column - widest_speaker_mark_cells - 1) in
+      let joined = speaker ^ " \xc2\xb7 " ^ surface in
+      if display_width joined <= inner then joined else speaker
+
+let align_role_label ?(column = chat_role_label_column) ~style label =
+  let column = Int.max 1 column in
+  let mark = speaker_mark style in
+  (* The mark is paid for out of the badge, not added beside it: the body's
+     width is taken from what the badge leaves, so charging it to the label
+     keeps every body exactly as wide as it was.
+
+     It is also kept outside the truncation. A label that overruns is cut by
+     {!fit_middle}, which spends the ellipsis inside the name; with the mark
+     inside the budget the longest names would be the ones that lost the
+     glyph, and those are the names a reader most needs help telling apart. *)
+  let mark_cells = display_width mark + 1 in
+  let inner = column - mark_cells in
+  (* Kept in step with [role_label_mark_cells]: both decide on [inner < 1]. *)
+  if inner < 1 then
+    (* A pane too narrow to hold both keeps the name. Losing track of who is
+       talking costs more than losing the shorthand for it. *)
+    fit_middle column label
+  else mark ^ " " ^ fit_middle inner label
+
+(* The default bare conversation pays only the frame margins, the body
+   indent (2, in [body_cells_after_gutter]) and its speaker mark. Reserve
+   twenty body cells for prose. Inline metadata and pending delivery labels
+   spend their actual row budgets; they do not reserve a role column and
+   turn rail for every bare conversation. *)
+let chat_readable_body_cells = 20
+
+let chat_min_terminal_cols =
+  Masc_tui_frame.outer_width
+    ~inner:
+      (2 + display_width (speaker_mark Keeper) + chat_readable_body_cells)
+
+let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
+  (* The fixed chrome costs eight rows. The title and operational identity use
+     separate rows so a provider id cannot cut the title or context reading.
+     Three history rows are the minimum that
+     can show an oversized entry's identity/opening, an omission marker, and
+     its latest output instead of silently dropping one of those facts. *)
+  terminal_cols >= chat_min_terminal_cols
+  && message_history_height ~terminal_rows ~status_rows >= 3
+
+let take_last count values =
+  let drop = Int.max 0 (List.length values - Int.max 0 count) in
+  values |> List.filteri (fun index _ -> index >= drop)
+
+let split_cells ~max_cells text =
+  if String.equal text "" then [ "" ]
+  else
+    let rec loop chunk_start chunk_end used_cells rows = function
+      | [] ->
+          let chunk = String.sub text chunk_start (chunk_end - chunk_start) in
+          List.rev (chunk :: rows)
+      | piece :: rest
+        when piece.ansi || used_cells = 0
+             || used_cells + piece.cell_width <= max_cells ->
+          loop chunk_start piece.end_offset
+            (used_cells + piece.cell_width) rows rest
+      | piece :: rest ->
+          let chunk = String.sub text chunk_start (chunk_end - chunk_start) in
+          loop piece.start_offset piece.end_offset piece.cell_width
+            (chunk :: rows) rest
+    in
+    loop 0 0 0 [] (display_pieces text)
+
+let split_styled_cells ~max_cells text =
+  (* Replaying the preceding SGR commands restores the exact style at a
+     continuation. Each physical row resets it before other chrome draws.
+     Cell splitting preserves padding, meter blanks and grapheme boundaries. *)
+  let rec wrap start stop cells last_space rows = function
+    | [] -> List.rev (String.sub text start (stop - start) :: rows)
+    | piece :: rest
+        when piece.ansi || cells = 0 || cells + piece.cell_width <= max_cells ->
+        let last_space =
+          if not piece.ansi && piece.end_offset = piece.start_offset + 1
+             && Char.equal text.[piece.start_offset] ' '
+          then Some (piece.end_offset, rest) else last_space in
+        wrap start piece.end_offset (cells + piece.cell_width) last_space rows rest
+    | piece :: rest ->
+        (match last_space with
+         | Some (boundary, following) ->
+             (* Only the word after the last space is revisited, rather than
+                tokenizing and allocating the entire remaining suffix. *)
+             wrap boundary boundary 0 None
+               (String.sub text start (boundary - start) :: rows) following
+         | None ->
+             wrap piece.start_offset piece.end_offset piece.cell_width None
+               (String.sub text start (stop - start) :: rows) rest) in
+  let styles = ref [] in
+  wrap 0 0 0 None [] (display_pieces text) |> List.map (fun chunk ->
+    let inherited = String.concat "" (List.rev !styles) in
+    List.iter (fun piece ->
+      if piece.ansi && Char.equal chunk.[piece.end_offset - 1] 'm' then (
+        let command = String.sub chunk piece.start_offset (piece.end_offset - piece.start_offset) in
+        if String.equal command "\027[0m" || String.equal command "\027[m"
+        then styles := [] else styles := command :: !styles)) (display_pieces chunk);
+    inherited ^ chunk ^ (if String.equal inherited "" && not (String.contains chunk '\027')
+      then "" else "\027[0m"))
+
+(* A row is built by adding each word's own width to the row so far. That
+   holds while no escape is left open across the join: an escape missing its
+   final byte swallows the space after it, so the row and its parts disagree
+   (pinned in the layout tests). A row carrying an escape therefore measures
+   itself whole, the way this used to for every word of every row -- which
+   made a row cost grow with the square of the words in it. *)
+let wrap_words_internal ?on_row ~max_cells text =
+  let max_cells = Int.max 1 max_cells in
+  let current = Buffer.create 128 in
+  let current_cells = ref 0 in
+  let current_holds_escape = ref false in
+  let source_byte=ref 0 and ranges=ref [] in
+  let record start length = if length>0 then Option.iter (fun _ -> ranges:=(start,start+length):: !ranges) on_row in
+  let holds_escape word = String.contains word '\x1B' in
+  let take_row () =
+    let row = Buffer.contents current in
+    Option.iter (fun emit -> emit row (List.rev !ranges)) on_row;
+    ranges:=[];
+    Buffer.clear current;
+    current_cells := 0;
+    current_holds_escape := false;
+    row
+  in
+  let rec loop rows = function
+    | [] ->
+        let rows =
+          if Buffer.length current = 0 then rows else take_row () :: rows
+        in
+        List.rev rows
+    | word :: rest as words ->
+        let addition = if Buffer.length current = 0 then word else " " ^ word in
+        let candidate_cells =
+          if !current_holds_escape then
+            display_width (Buffer.contents current ^ addition)
+          else !current_cells + display_width addition
+        in
+        if candidate_cells <= max_cells then begin
+          if Buffer.length current>0 then record (!source_byte-1) 1;
+          record !source_byte (String.length word);
+          source_byte:= !source_byte + String.length word + 1;
+          Buffer.add_string current addition;
+          current_cells := candidate_cells;
+          if holds_escape word then current_holds_escape := true;
+          loop rows rest
+        end
+        else if Buffer.length current > 0 then loop (take_row () :: rows) words
+        else
+          let chunks = split_cells ~max_cells word in
+          (match List.rev chunks with
+           | [] -> source_byte:= !source_byte + String.length word + 1; loop rows rest
+           | last :: reversed_completed ->
+               let completed = List.rev reversed_completed in
+               let rows =
+                 List.fold_left (fun rows chunk ->
+                   let ending= !source_byte+String.length chunk in
+                   Option.iter (fun emit -> emit chunk [!source_byte,ending]) on_row;
+                   source_byte:=ending;
+                   chunk :: rows) rows completed
+               in
+               record !source_byte (String.length last);
+               source_byte:= !source_byte + String.length last + 1;
+               Buffer.add_string current last;
+               current_cells := display_width last;
+               current_holds_escape := holds_escape last;
+               loop rows rest)
+  in
+  loop [] (String.split_on_char ' ' text)
+
+let wrap_words ~max_cells text = wrap_words_internal ~max_cells text
+
+(* The rows a box body spends on [content] at inner width [inner]: one row per
+   server line, plus the rows a line longer than the body wraps to. The box
+   draws each row with a two-cell indent, so a line wraps at [inner - 2]. Both
+   the drawing ([Masc_tui_ansi.box_lines_styled]) and every row budget that
+   reserves space for it count with this one function, so the frame and the
+   footer cannot disagree about how many rows the body took. *)
+let boxed_rows ~inner content =
+  let max_cells = Int.max 1 (inner - 2) in
+  List.concat_map
+    (fun line -> wrap_words ~max_cells line)
+    (String.split_on_char '\n' content)
+
+let wrap_styled_words ~max_cells text =
+  let _, rows =
+    List.fold_left (fun (style, rows) row ->
+      let next_style =
+        List.fold_left (fun style piece ->
+          if piece.ansi && row.[piece.end_offset - 1] = 'm' then
+            let sgr = String.sub row piece.start_offset
+                (piece.end_offset - piece.start_offset) in
+            if sgr = "\027[0m" || sgr = "\027[m" then "" else style ^ sgr
+          else style) style (display_pieces row)
+      in
+      let reset = if String.equal next_style "" then "" else "\027[0m" in
+      next_style, (style ^ row ^ reset) :: rows)
+      ("", []) (wrap_words ~max_cells text)
+  in
+  List.rev rows
+
+let clause_separator = " \xc2\xb7 "
+
+(* A header row of this shape is a list of clauses joined by [clause_separator],
+   and a clause is the unit that means something: "0 failures since server
+   start" says the count restarts with the server, and the same row ending at
+   "0 failures" says a running total. So a row ends where a clause ends. Only a
+   clause that cannot fit a row on its own falls back to {!wrap_words}, because
+   at that point every break is inside a clause and a space is the least bad
+   one. Nothing is dropped and nothing is cut: the caller draws the rows it is
+   given. The caller hands over the clauses themselves rather than the joined
+   row: a clause whose own text holds the separator stays one clause. *)
+let pack_clauses ~max_cells (clauses : string list) =
+  let room = Int.max 1 max_cells in
+  let rows = ref [] in
+  let current = ref "" in
+  let emit () =
+    if !current <> "" then begin
+      rows := !current :: !rows;
+      current := ""
+    end
+  in
+  List.iter
+    (fun clause ->
+      if display_width clause <= room then
+        if !current = "" then current := clause
+        else
+          let candidate = !current ^ clause_separator ^ clause in
+          if display_width candidate <= room then current := candidate
+          else begin
+            emit ();
+            current := clause
+          end
+      else begin
+        emit ();
+        let rec keep_last = function
+          | [] -> ()
+          | [ last ] -> current := last
+          | row :: rest ->
+              rows := row :: !rows;
+              keep_last rest
+        in
+        keep_last (wrap_words ~max_cells:room clause)
+      end)
+    clauses;
+  emit ();
+  match List.rev !rows with [] -> [ "" ] | rows -> rows
+
+type journal_piece =
+  | Journal_piece_sign of journal_sign
+  | Journal_piece_category of journal_tone
+  | Journal_piece_claim
+  | Journal_piece_drop
+  | Journal_piece_space
+
+(* Between the category column and the claim: one cell would let a short
+   category read as the claim's first word. *)
+let journal_column_gap = 2
+
+(* A drop has no category; this stands in the category column. *)
+let journal_drop_label = "drop"
+
+let journal_sign_text = function
+  | Journal_added -> "+"
+  | Journal_removed -> "\xe2\x88\x92"
+
+(* A revision's lines in two columns: the sign and category at the left,
+   padded to the widest category among them, and the claim wrapped under
+   itself. A blank row between lines, since each one is a paragraph read on
+   its own. Where the claim's column would be narrower than the lead beside
+   it, the claim wraps at the full width under its lead instead. *)
+type journal_field =
+  | Journal_sign_field | Journal_category_field | Journal_claim_field
+  | Journal_drop_label_field | Journal_memory_id_field | Journal_reason_field
+
+type journal_source_span = {
+  line_index : int;
+  field : journal_field;
+  value : string;
+  row : int;
+  source_ranges : (int * int) list;
+}
+
+type journal_render = {
+  journal_rows : (string * journal_piece) list list;
+  journal_fields : journal_source_span list;
+}
+
+let journal_rows_internal ?on_field ~width lines =
+  let width = Int.max 1 width in
+  let label = function
+    | Journal_fact { category; _ } -> category
+    | Journal_drop _ -> journal_drop_label
+  in
+  let sign_cells = display_width (journal_sign_text Journal_removed) in
+  let label_cells =
+    List.fold_left (fun widest line -> Int.max widest (display_width (label line))) 0 lines
+  in
+  let lead_cells = sign_cells + 1 + label_cells + journal_column_gap in
+  let claim_cells = width - lead_cells in
+  let hangs = claim_cells >= lead_cells in
+  let first_row=ref 0 in
+  let rows_of_line line_index line =
+    let sign, label_piece, text, text_piece =
+      match line with
+      | Journal_fact { sign; tone; claim; category = _ } ->
+          ( (journal_sign_text sign, Journal_piece_sign sign)
+          , Journal_piece_category tone
+          , claim
+          , Journal_piece_claim )
+      | Journal_drop { memory_id; reason } ->
+          ( (String.make sign_cells ' ', Journal_piece_space)
+          , Journal_piece_drop
+          , memory_id ^ " \xe2\x80\x94 " ^ reason
+          , Journal_piece_drop )
+    in
+    let label_text = label line in
+    let pad =
+      String.make (label_cells - display_width label_text + journal_column_gap) ' '
+    in
+    let lead =
+      [ sign; (" ", Journal_piece_space); (label_text, label_piece);
+        (pad, Journal_piece_space) ]
+    in
+    let text_fields, lead_fields = match line with
+      | Journal_fact {sign; category; claim; _} ->
+          [Journal_claim_field,claim,0],
+          [Journal_sign_field,journal_sign_text sign; Journal_category_field,category]
+      | Journal_drop {memory_id; reason} ->
+          [Journal_memory_id_field,memory_id,0; Journal_reason_field,reason,String.length memory_id+String.length " \xe2\x80\x94 "],
+          [Journal_drop_label_field,journal_drop_label] in
+    Option.iter (fun emit -> List.iter (fun (field,value) ->
+      emit {line_index;field;value;row= !first_row;source_ranges=[0,String.length value]}) lead_fields) on_field;
+    let body_row=ref (!first_row + if hangs then 0 else 1) in
+    let on_row=Option.map (fun emit _ ranges ->
+      List.iter (fun (field,value,start) ->
+        let ending=start+String.length value in
+        let source_ranges=List.filter_map (fun (first,last) ->
+          let a=max first start and b=min last ending in
+          if a<b then Some(a-start,b-start) else None) ranges in
+        if source_ranges<>[] then emit {line_index;field;value;row= !body_row;source_ranges}) text_fields;
+      incr body_row) on_field in
+    let rows = if hangs then
+      let indent = (String.make lead_cells ' ', Journal_piece_space) in
+      match wrap_words_internal ?on_row ~max_cells:claim_cells text with
+      | [] -> [ lead ]
+      | first :: rest ->
+          (lead @ [ (first, text_piece) ])
+          :: List.map (fun chunk -> [ indent; (chunk, text_piece) ]) rest
+    else
+      lead :: List.map (fun chunk -> [ (chunk, text_piece) ]) (wrap_words_internal ?on_row ~max_cells:width text)
+    in
+    first_row:= !first_row + List.length rows + 1;
+    rows
+  in
+  let rec join = function
+    | [] -> []
+    | [ rows ] -> rows
+    | rows :: rest -> rows @ ([] :: join rest)
+  in
+  join (List.mapi rows_of_line lines)
+
+let journal_rows ~width lines = journal_rows_internal ~width lines
+
+let journal_rows_with_spans ~width lines =
+  let fields=ref [] in
+  let journal_rows=journal_rows_internal ~on_field:(fun field -> fields:=field :: !fields) ~width lines in
+  {journal_rows; journal_fields=List.rev !fields}
+
+(* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
+   width on a row of their own; in a margin they are paid for once per message.
+   Text that is not a clock of that shape is left as it is rather than cut
+   blind. *)
+let short_clock timestamp =
+  if
+    String.length timestamp = 8
+    && Char.equal timestamp.[2] ':'
+    && Char.equal timestamp.[5] ':'
+  then String.sub timestamp 0 5
+  else timestamp
+
+(* Consecutive messages from one speaker share a heading. Repeating
+   "[time] speaker request" on each of them spent a row per message saying who
+   was talking, and a keeper answering in four parts said it four times.
+
+   What a continuation keeps depends on what changed. A different moment is
+   worth a row -- it says the pause between two things the same keeper said --
+   but repeating an empty origin badge would look like an unnamed source, so
+   that continuation carries only its timestamp. Two messages stamped the
+   same second have nothing left to say, so they get no heading and read as
+   the one message they look like. *)
+let continues_previous ~(previous : entry option) (entry : entry) =
+  (* An explicit boundary opens its own heading in every origin layout, not
+     only Origin_row: two stretches of one response that sit side by side
+     once reasoning is hidden stay two sections. *)
+  match entry.heading_boundary, previous with
+  | Start_heading, _ | Inherit_heading, None -> false
+  | Inherit_heading, Some previous ->
+      Option.is_none previous.delivery_state
+      && Option.is_none entry.delivery_state
+      && previous.style = entry.style
+      (* [role_label] is [speaker] cut to the gutter column, so two long names
+         can share it. Only the whole name says it is the same speaker. *)
+      && String.equal previous.speaker entry.speaker
+      && String.equal previous.role_label entry.role_label
+      && String.equal previous.request_label entry.request_label
+      && (if String.equal entry.request_label "" then
+            String.equal previous.timestamp entry.timestamp
+          else true)
+
+
+(* The heading's clock is the entry's timestamp where the entry has a
+   trustworthy time, and absent where it does not: [timeline_bucket] is
+   [None] exactly on those rows, and the placeholder they carry as
+   [timestamp] is display text, not a time. A heading without a clock draws
+   nothing in the clock's place; a continuation that cannot say when it
+   moved has no row to draw. *)
+(* Who a row speaks for inside one request. A keeper's reply and the work it
+   did to get there -- reasoning, tool calls, skills -- are one voice, the
+   turn's. Everyone else in the request speaks for themselves: the operator
+   who asked, a keeper writing in, the server's status, the pane's own
+   notes. *)
+let speaks_for_turn = function
+  | Keeper | Tool | Skill _ | Thinking Thinking_own -> true
+  | User | Inbound | Status | Local | Journal | Error | Thinking Thinking_arrived -> false
+
+(* Under [Origin_row] a heading opens a turn, not a block. A turn that thought,
+   called a tool and answered, eight rounds over, drew a heading above each of
+   its twenty-three blocks -- the same request, the same clock, the same name
+   -- and the blocks it separated were already told apart by how they draw:
+   reasoning dim, tool calls on their rail, the reply in plain text. *)
+let continues_turn ~(previous : entry) (entry : entry) =
+  (not (String.equal entry.request_label ""))
+  && String.equal previous.request_label entry.request_label
+  && speaks_for_turn previous.style
+  && speaks_for_turn entry.style
+
+let metadata_row ~(previous : entry option) ~inner_width ~indent (entry : entry) =
+  let clock =
+    match entry.timeline_bucket with
+    | Some _ -> Some entry.timestamp
+    | None -> None
+  in
+  let within_turn =
+    match previous with
+    | Some previous -> continues_turn ~previous entry
+    | None -> false
+  in
+  let starts_heading = match entry.heading_boundary with
+    | Inherit_heading -> false
+    | Start_heading -> true in
+  let metadata =
+    if starts_heading || not (within_turn || continues_previous ~previous entry) then
+      Some
+        ( Origin
+            { clock; speaker = entry.speaker; role_label = entry.role_label }
+        , Printf.sprintf "[%s] From [%s]" entry.timestamp entry.role_label )
+    else
+      match clock, previous with
+      | None, _ -> None
+      (* Inside a turn the clock is the minute, the unit the inline margin
+         already counts in: seconds between a call and the reasoning after it
+         are the turn working, not a pause worth a row. *)
+      | Some _, Some previous
+        when within_turn
+             && String.equal (short_clock previous.timestamp)
+                  (short_clock entry.timestamp) ->
+          None
+      | Some _, Some previous
+        when String.equal previous.timestamp entry.timestamp ->
+          None
+      | Some clock, (Some _ | None) ->
+          Some (Continued_at { clock }, Printf.sprintf "[%s]" clock)
+  in
+  match metadata with
+  | None -> None
+  | Some (metadata, text) ->
+    let fitted, _, _ = cell_prefix text inner_width in
+    Some
+      { style =
+          (* The heading stands for the whole turn, so it draws as the keeper
+             speaking whichever block the turn happened to open with. *)
+          (if speaks_for_turn entry.style then Keeper else entry.style)
+      ; kind = Metadata metadata
+      ; shade = Shade_none
+      ; text = fitted
+      (* A heading in the arrival's column starts after the same blank run
+         its body does; [inner_width] is already that column's. *)
+      ; gutter_rail_cells = indent
+      ; gutter_clock_cells = 0
+      ; gutter_label_at = indent
+      ; gutter = String.make indent ' '
+      ; action = Action_none
+      }
+
+let same_timeline_bucket left right =
+  Int.equal left.tb_year right.tb_year
+  && Int.equal left.tb_month right.tb_month
+  && Int.equal left.tb_day right.tb_day
+  && Int.equal left.tb_hour right.tb_hour
+  && Bool.equal left.tb_is_dst right.tb_is_dst
+
+let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
+  match entry.timeline_bucket with
+  | None -> None
+  | Some bucket
+    when Option.exists
+           (fun (previous : entry) ->
+             Option.exists (same_timeline_bucket bucket)
+               previous.timeline_bucket)
+           previous ->
+      None
+  | Some bucket ->
+      let label =
+        Printf.sprintf "%04d-%02d-%02d \xc2\xb7 %02d:00" bucket.tb_year
+          bucket.tb_month bucket.tb_day bucket.tb_hour
+        ^ (if bucket.tb_is_dst then " DST" else "")
+      in
+      (* Triple-dash (U+2504), not the solid line: the origin heading under
+         [Origin_row] now ends in a solid rule to its clock, and two solid
+         rules a row apart read as one kind of break. This pane already
+         tells kinds apart by texture -- the journal siding is dashed, an
+         arrival's is solid -- so the hour keeps the dashed one: the time
+         moved, not the speaker. *)
+      let dash = "\xe2\x94\x84" in
+      let lead = dash ^ dash ^ " " ^ label ^ " " in
+      let rule_cells = Int.max 0 (inner_width - display_width lead) in
+      let rule = String.concat "" (List.init rule_cells (fun _ -> dash)) in
+      let text, _, _ = cell_prefix (lead ^ rule) inner_width in
+      Some
+        { style = entry.style
+        ; kind = Metadata (Timeline_break bucket)
+        ; shade = Shade_none
+        ; text
+        ; gutter_rail_cells = 0
+        ; gutter_clock_cells = 0
+        ; gutter_label_at = 0
+        ; gutter = ""
+        ; action = Action_none
+        }
+
+(* A body is a document, not a row. [sanitize] is applied to each line rather
+   than to the whole, because escaping a newline the way a terminal escape is
+   escaped turns the document into one unbroken run with the escape printed
+   where each break belonged. Per line the escape still covers what it is there
+   for -- a line cannot carry a control sequence into the terminal -- and the
+   breaks the author wrote survive. A line that wraps to nothing is a blank
+   line: a paragraph break, not an absence. The caller supplies [sanitize] so
+   this module keeps no terminal vocabulary of its own. *)
+let wrap_body ?markdown ~max_cells ~sanitize text =
+  let safe_lines = text |> String.split_on_char '\n' |> List.map sanitize in
+  match markdown with
+  | Some render ->
+    (* Rendering happens after the escaping, not before: markdown is written in
+       printable ASCII, so escaping a control byte first takes nothing the
+       renderer reads, and the renderer never sees a byte that could reach the
+       terminal as a sequence. It owns the wrapping from there -- fenced code
+       keeps its own breaks, which a word wrap would ruin. *)
+    render ~width:max_cells (String.concat "\n" safe_lines)
+  | None ->
+    List.concat_map
+      (fun line ->
+         match wrap_words ~max_cells line with [] -> [ "" ] | rows -> rows)
+      safe_lines
+
+(* Defensive body floor for unsupported viewports. Supported inline metadata
+   moves to a heading before it consumes the readable body budget. *)
+let min_body_cells = 4
+
+(* Every row's clock takes the same cells. A settled row says "23:38" and the
+   streaming turn says "live", and the gutter's width is what the body's width
+   is taken from, so one cell of difference wrapped the live body differently
+   from the rows it was about to join. *)
+let chat_clock_column = 5
+
+let pad_clock text =
+  let cells = display_width text in
+  if cells >= chat_clock_column then text
+  else String.make (chat_clock_column - cells) ' ' ^ text
+
+let inline_clock_cells entry =
+  Int.max chat_clock_column (display_width (short_clock entry.timestamp)) + 1
+
+(* [Origin_row] leaves the origin on a row of its own. The other two fold it
+   into the body's left margin, which buys back a row per message -- eight
+   speakers taking turns spent eight of a forty-row pane saying who was
+   talking.
+
+   Every row of the pane keeps the same margin width: the label arrives padded
+   to one column, so a continuation indents to where the first row started and
+   the body still reads as a block. [Origin_bare] drops the clock and keeps
+   the speaker, never the other way round -- losing track of who is talking
+   costs more than losing track of when. *)
+(* A continuation draws a quiet vertical rail ("│") for conversational prose
+   and tool blocks to visually connect subsequent speech rows to the speaker above it,
+   rather than leaving a lone disconnected bullet over a wide empty gutter.
+   Reasoning keeps its dot ("·"), and high-salience alert marks (Error, Journal,
+   Skill, Status) retain their distinct glyphs. *)
+let continued_mark : style -> string = function
+  | User | Inbound | Keeper | Tool -> "\xe2\x94\x82"
+  | Thinking _ -> "\xc2\xb7"
+  | (Status | Local | Journal | Error | Skill _) as style -> speaker_mark style
+
+
+
+(* A tool's output and a recalled memory arrive as text the Keeper did not
+   write, so they are quoted rather than said. Everything else the pane draws
+   is either the Keeper talking or the operator talking, and that is prose.
+
+   Reasoning is the Keeper's own, not a quotation, however folded it is. *)
+let shade_of_style : style -> shade = function
+  | Tool | Skill _ | Status | Local | Journal -> Shade_quoted
+  | User | Inbound | Keeper | Error | Thinking _ -> Shade_none
+
+let origin_gutter ~origin ~previous entry =
+  match origin with
+  | Origin_row -> None
+  | Origin_bare ->
+      let mark =
+        if continues_previous ~previous entry then
+          (match entry.style with
+           | User | Inbound | Keeper | Tool -> " "
+           | Error | Status | Journal | Local | Skill _ | Thinking _ -> continued_mark entry.style)
+        else match entry.style with
+          | Tool -> " "
+          | User -> "›"
+          (* Only a pending input carries [delivery_state]. With several
+             inputs in different states, the mark alone cannot say which one
+             is still unsent, so the state stays beside the body. Other local
+             rows (/help, /find answers) keep the bare mark. *)
+          | Local ->
+              (match entry.delivery_state with
+               | Some state -> speaker_mark Local ^ " " ^ state
+               | None -> speaker_mark Local)
+          | (Inbound | Keeper | Status | Journal | Error | Skill _ | Thinking _) as style -> speaker_mark style
+      in
+      Some (mark, 0, display_width mark, 0)
+  | Origin_inline ->
+      (* Drawn when it moved. A clock's job is to say when a thing happened,
+         and a value identical to the one on the row above says nothing while
+         taking the cells the eye lands on first -- two speakers a second
+         apart both read 10:52. The column is held either way, so nothing
+         shifts when a minute repeats, and a continuation whose clock did move
+         still shows the new time: that gap is what a reader checks here. *)
+      let now = short_clock entry.timestamp in
+      let unchanged =
+        match previous with
+        | None -> false
+        | Some previous -> String.equal (short_clock previous.timestamp) now
+      in
+      let clock_cells = inline_clock_cells entry in
+      let clock =
+        if unchanged then String.make clock_cells ' ' else pad_clock now ^ " "
+      in
+      (* Responsive placement below only keeps inline metadata when this
+         complete margin and the readable body fit together. Names and clocks
+         no longer compete for the few cells left by an already narrow body. *)
+      let rail_cells = turn_rail_cells in
+      let filled = clock ^ entry.role_label in
+      let mark_cells =
+        Int.min (display_width entry.role_label)
+          (Int.max 0 entry.role_label_mark_cells)
+      in
+      let label_at = rail_cells + clock_cells + mark_cells in
+
+      if continues_previous ~previous entry then
+        (* Padded rather than repeated: a second row from the same speaker in
+           the same second has nothing new to say, and [fit_width] measures the
+           cells a label actually occupies where [String.make] would count its
+           bytes. *)
+        (* The clock stays, on the same terms as everywhere else: it is
+           drawn when it moved. A continuation says the same speaker is still
+           talking, not that time stopped, and the gap between two things one
+           Keeper said is exactly what a reader checks here -- blanking the
+           whole margin took that away along with the name.
+
+           The name is what goes, since repeating it says nothing, and the mark
+           drops to the quietest glyph so a row that continues reads as lower
+           than the row that started. What is left is the speaker column doing
+           the telling -- a name appears only where the speaker changes. *)
+        (* No label to hold back on a row that draws no name. *)
+        let continued = clock ^ continued_mark entry.style ^ " " in
+        (* The rail keeps its own span even here. Past it the row is all
+           receded: a continuation draws no name, so there is no boundary left
+           between a mark and a label to colour differently -- and none to
+           export. The clock falls inside the receded span, so it recedes with
+           the rest without a boundary of its own. *)
+        Some
+          (fit_width continued (display_width filled), rail_cells, rail_cells, 0)
+      else Some (filled, rail_cells, label_at, clock_cells)
+
+(* A line someone else wrote steps in from the conversation, and the renderer
+   draws a bar in its sender's colour down its left edge (RFC
+   chat-turn-rail-and-side-lanes §4.6). Two cells set it apart without making
+   a long arrival wrap narrower than the rows around it. *)
+let inbound_indent_cells = 2
+
+let inbound_indent (entry : entry) =
+  match entry.style with
+  | Inbound -> inbound_indent_cells
+  | User | Keeper | Status | Local | Journal | Error | Tool | Skill _ | Thinking _ -> 0
+
+(* The body column rows_of_entry draws in. Measuring an entry
+   (entry_body_cells) and drawing it read this one function, so search and
+   source pins map bytes through the width the rows were actually wrapped at. *)
+let body_cells_after_gutter ~origin ~inner_width gutter =
+  let gutter_width = match gutter with
+    | None -> 0
+    | Some (text, rail_cells, _, _) -> rail_cells + display_width text in
+  let body_width = Int.max min_body_cells (inner_width - 2 - gutter_width) in
+  (* A reading column, in terminal cells. Wide panes keep breathing room
+     instead of stretching prose across the whole display. *)
+  if origin = Origin_bare then min 100 body_width else body_width
+
+(* Placement is derived from the complete inline margin before any body is
+   measured or rendered. The configured mode stays inline, so a wider pane
+   restores it without changing state. Continuations keep their opening
+   entry's margin budget even when the repeated label or clock is blank. *)
+let entry_origin ~origin ~inner_width entry =
+  match origin with
+  | Origin_inline ->
+      let margin_cells =
+        turn_rail_cells + inline_clock_cells entry + display_width entry.role_label
+      in
+      let body_cells = inner_width - inbound_indent entry - 2 - margin_cells in
+      if body_cells >= chat_readable_body_cells then Origin_inline else Origin_row
+  | Origin_row | Origin_bare -> origin
+
+(* Bare origin draws inbound rows flush with the pane. *)
+let entry_indent ~origin entry = if origin = Origin_bare then 0 else inbound_indent entry
+
+let entry_body_cells ~origin ~inner_width entry =
+  let origin = entry_origin ~origin ~inner_width entry in
+  let inner_width = inner_width - entry_indent ~origin entry in
+  let gutter = origin_gutter ~origin ~previous:None entry in
+  body_cells_after_gutter ~origin ~inner_width gutter
+
+let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
+  let configured_origin = origin in
+  let origin = entry_origin ~origin ~inner_width entry in
+  (* Everything after the indent is laid out in the column that is left, so
+     the origin, the heading and the body fit the column rather than the
+     pane. *)
+  let indent = entry_indent ~origin entry in
+  let pane_width = inner_width in
+  let inner_width = pane_width - indent in
+  let gutter = origin_gutter ~origin ~previous entry in
+  let body_width = body_cells_after_gutter ~origin ~inner_width gutter in
+  (* Keepers write markdown. Rendering it is the caller's to supply, so this
+     module keeps no terminal vocabulary; without it the body is wrapped as the
+     plain text it always was. *)
+  let body_chunks =
+    match markdown with
+    | Some render -> render ~entry ~width:body_width
+    | None ->
+        let journal =
+          match entry.journal with
+          | [] -> []
+          | lines ->
+              "" :: List.map
+                (fun pieces -> String.concat "" (List.map fst pieces))
+                (journal_rows ~width:body_width lines)
+        in
+        (entry.body |> String.split_on_char '\n'
+         |> List.concat_map (split_cells ~max_cells:body_width))
+        @ journal
+  in
+  let body_chunks =
+    let rec drop_empty = function
+      | chunk :: rest when String.trim chunk = "" -> drop_empty rest
+      | reversed -> List.rev reversed
+    in
+    match drop_empty (List.rev body_chunks) with
+    | [] -> [ "" ]
+    | chunks -> chunks
+  in
+  let sender_chunks = match origin, entry.style with
+    | Origin_bare, (Inbound | Thinking Thinking_arrived) when not (continues_previous ~previous entry) ->
+        wrap_words ~max_cells:body_width entry.speaker
+    | (Origin_bare, Thinking (Thinking_own))
+    | (Origin_bare, (User | (Keeper | (Status | (Local | (Journal | (Error | (Tool | Skill _))))))))
+    | ((Origin_row | Origin_inline), _) | (Origin_bare, Thinking Thinking_arrived)
+    | (Origin_bare, Inbound) -> [] in
+  let sender_rows = List.length sender_chunks in
+  let body_chunks = sender_chunks @ body_chunks in
+  let body_rows =
+    let margin, rail_cells, label_at, clock_cells =
+      Option.value gutter ~default:("", 0, 0, 0)
+    in
+    let blank = fit_width "" (display_width margin) in
+    let last = List.length body_chunks - 1 in
+    (* The bracket runs the height of the entry, so a wrapped body keeps the
+       line its first row started. Broken at every wrap it would read as one
+       turn per screen line, which is the opposite of what it is for.
+
+       The corners go where they mean something: the opening one on the row the
+       entry starts, the closing one on the row it ends. A [Rail_closes] entry
+       whose reply wraps ten rows would otherwise end the turn at the top of
+       its own last paragraph. *)
+    let rail_at index =
+      if rail_cells = 0 then ""
+      else
+        let piece =
+          match entry.turn_rail with
+          | Rail_none -> Rail_none
+          | Rail_says -> Rail_says
+          | Rail_opens -> if index = 0 then Rail_opens else Rail_says
+          | Rail_does -> if index = 0 then Rail_does else Rail_says
+          (* A wrapped body still belongs to the one row that is the turn, so
+             the rows under it continue the line the stub started rather than
+             each standing alone. *)
+          | Rail_stands ->
+              if index = 0 then
+                (if entry.diagnostics = [] then Rail_stands else Rail_opens)
+              else Rail_says
+          (* Diagnostics follow the body, so the corner moves down to the
+             last of them. *)
+          | Rail_closes -> if index = last && entry.diagnostics = [] then Rail_closes else Rail_says
+          (* Only the first row joins. A wrapped arrival keeps its body under
+             the join without drawing a second one, and it never picks up the
+             turn's own line: the turn it landed inside did not produce it. *)
+          | Rail_joins siding -> if index = 0 then Rail_joins siding else Rail_none
+        in
+        turn_rail_gutter piece
+    in
+    body_chunks
+    |> List.mapi (fun index chunk ->
+      { style = entry.style
+      ; kind = (if index < sender_rows then Metadata Sender else Body)
+      ; shade = shade_of_style entry.style
+      ; text = "  " ^ chunk
+      (* The indent sits after the rail: the rail's join belongs on the
+         conversation's line, and the blank run after it is what moves the
+         rest into the arrival's column. *)
+      ; gutter_rail_cells = rail_cells + indent
+      (* A wrapped row's gutter is blanks held at the first row's width: no
+         clock column of its own, so no boundary to hand the renderer. *)
+      ; gutter_clock_cells = (if index = 0 then clock_cells else 0)
+      ; gutter_label_at = (if index = 0 then label_at else rail_cells) + indent
+      ; gutter =
+          rail_at index ^ String.make indent ' '
+          ^ (if index = 0 then margin else blank)
+      (* The fold marker sits at the end of the first row, so that is the
+         row a press lands on. A continuation carries the same text and none
+         of the affordance. *)
+      ; action = (if index = 0 then entry.action else Action_none)
+      })
+  in
+  let diagnostic_rows =
+    let chunks = entry.diagnostics
+      |> List.concat_map (fun text ->
+           text |> String.split_on_char '\n'
+           |> List.concat_map (split_cells ~max_cells:body_width)) in
+    let margin, rail_cells, _, _ = Option.value gutter ~default:("", 0, 0, 0) in
+    let blank = fit_width "" (display_width margin) in
+    List.mapi (fun index text ->
+      let rail = match entry.turn_rail with
+        | Rail_none | Rail_joins _ -> Rail_none
+        | (Rail_closes | Rail_stands) when index = List.length chunks - 1 -> Rail_closes
+        | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes -> Rail_says in
+      (* The entry's own style and layer: the renderer draws the bar of the
+         entry's body rows in the two cells before the text. *)
+      { style = entry.style; kind = Metadata Diagnostic;
+        shade = shade_of_style entry.style;
+        text = "  " ^ text;
+        gutter = (if rail_cells = 0 then "" else turn_rail_gutter rail)
+          ^ String.make indent ' ' ^ blank;
+        gutter_rail_cells = rail_cells + indent; gutter_clock_cells = 0;
+        gutter_label_at = rail_cells + indent; action = Action_none }) chunks
+  in
+  (* After the whole body: a row of metadata between two rows of one message
+     reads as the message ending there. *)
+  let body_with_diagnostics = body_rows @ diagnostic_rows in
+  let message_rows = (
+    match origin with
+    | Origin_inline | Origin_bare -> body_with_diagnostics
+    | Origin_row -> (
+        (* An inline predecessor did not open a separate heading. Do not
+           inherit one merely because both entries belong to the same turn. *)
+        let previous =
+          Option.bind previous (fun previous ->
+            if entry_origin ~origin:configured_origin ~inner_width:pane_width
+                 previous = Origin_row
+            then Some previous else None)
+        in
+        match metadata_row ~previous ~inner_width ~indent entry with
+        | None -> body_with_diagnostics
+        | Some metadata -> metadata :: body_with_diagnostics))
+  in
+  match origin with
+  | Origin_bare ->
+      (* A separator belongs between entries, never after the transcript.
+         Counting and scrolling therefore see exactly the same final row. *)
+      (match previous, message_rows with
+       | Some {style = (User | Inbound | Keeper | Local); _}, _ :: _ ->
+           { kind = Spacing; text = ""; gutter = ""; shade = Shade_none;
+             style = Status; gutter_rail_cells = 0; gutter_clock_cells = 0;
+             gutter_label_at = 0; action = Action_none } :: message_rows
+       | (Some { style = (User | Inbound | Keeper | Local);_}, [])
+       | (Some { style = (Status | (Journal | (Error | (Tool | (Skill _ | Thinking _)))));_}, _)
+       | (None, _) -> message_rows)
+  | Origin_inline | Origin_row ->
+      (match timeline_break_row ~previous ~inner_width:pane_width entry with
+       | None -> message_rows
+       | Some timeline_break -> timeline_break :: message_rows)
+
+let viewport_gap_text ~inner_width hidden_rows =
+  let candidates =
+    [ Printf.sprintf
+        "  \xe2\x8b\xaf %d chat rows hidden \xc2\xb7 PgUp to reveal"
+        hidden_rows
+    ; Printf.sprintf "  \xe2\x8b\xaf %d hidden \xc2\xb7 PgUp" hidden_rows
+    ; Printf.sprintf "  \xe2\x8b\xaf %d hidden" hidden_rows
+    ; Printf.sprintf "\xe2\x8b\xaf%d" hidden_rows
+    ; "\xe2\x8b\xaf"
+    ]
+  in
+  Option.value
+    (List.find_opt (fun text -> display_width text <= inner_width) candidates)
+    ~default:""
+
+let repeated_rows_gap_text ~inner_width repeated_rows =
+  let candidates =
+    [ Printf.sprintf "  ↻ previous row repeated %d×" repeated_rows
+    ; Printf.sprintf "  ↻ repeated %d×" repeated_rows
+    ; Printf.sprintf "↻%d×" repeated_rows
+    ; "↻"
+    ]
+  in
+  Option.value
+    (List.find_opt (fun text -> display_width text <= inner_width) candidates)
+    ~default:""
+
+let same_repeatable_body_row left right =
+  match left.kind, right.kind with
+  | Body, Body ->
+    left.style = right.style
+    && left.shade = right.shade
+    && String.equal left.text right.text
+    && String.equal left.gutter right.gutter
+  | (Metadata _ | Spacing | Viewport_gap _), _
+  | Body, (Metadata _ | Spacing | Viewport_gap _) ->
+    false
+;;
+
+let collapse_repeated_body_rows ~inner_width rows =
+  let gap row repeated_rows =
+    (* The gap keeps the repeated row's margin, so its text budget is what
+       the margin leaves -- fitting to the whole [inner_width] drew the row
+       margin plus a full-width text and spilled past the border, exactly the
+       spill responsive origin placement prevents. *)
+    { style = Status
+    ; kind = Viewport_gap { hidden_rows = repeated_rows }
+    ; shade = Shade_none
+    ; text =
+        repeated_rows_gap_text
+          ~inner_width:(inner_width - display_width row.gutter)
+          repeated_rows
+    ; gutter_rail_cells = row.gutter_rail_cells
+    ; gutter_clock_cells = 0
+    ; gutter_label_at = 0
+    ; gutter = row.gutter
+    ; action = Action_none
+    }
+  in
+  let emit_run reversed row count =
+    if count <= 1 then row :: reversed
+    else gap row (count - 1) :: row :: reversed
+  in
+  let rec loop reversed current count = function
+    | [] ->
+      (match current with
+       | None -> List.rev reversed
+       | Some row -> List.rev (emit_run reversed row count))
+    | row :: rest ->
+      (match current with
+       | Some current when same_repeatable_body_row current row ->
+         loop reversed (Some current) (count + 1) rest
+       | None -> loop reversed (Some row) 1 rest
+       | Some current ->
+         loop (emit_run reversed current count) (Some row) 1 rest)
+  in
+  loop [] None 0 rows
+;;
+
+(* The rows before an entry's first [Body] row, and that row with the rest. *)
+let split_before_first_body rows =
+  let rec loop prefix = function
+    | ({ kind = Body; _ } as opening) :: rest -> List.rev prefix, Some (opening, rest)
+    | ({ kind = Metadata _ | Spacing | Viewport_gap _; _ } as row) :: rest ->
+      loop (row :: prefix) rest
+    | [] -> List.rev prefix, None
+  in
+  loop [] rows
+;;
+
+(* At the live edge, keep enough of an oversized newest entry to identify it,
+   see its opening when space permits, and see its latest output. The typed gap
+   makes the missing middle explicit; without it, inline mode looked like one
+   continuous message even though rows had disappeared. *)
+let newest_entry_window ~inner_width ~height rows =
+  (* The separator above an oversized entry must not replace its opening.
+     It remains an ordinary physical row when scrolling through the history. *)
+  let rows = List.drop_while (fun row -> row.kind = Spacing) rows in
+  if List.length rows <= height then rows
+  else
+  (* A civil-hour rail is context, while the origin and latest body are the
+     message. If all of them do not fit at the live edge, lay out the message
+     first and count the rail among the explicitly hidden physical rows. The
+     transcript itself is unchanged, so ordinary scrollback reaches the rail. *)
+  let hidden_timeline_rows, rows =
+    match rows with
+    | { kind = Metadata (Timeline_break _); _ } :: rest
+      when List.length rows > height ->
+        1, rest
+    | { kind = Metadata (Diagnostic | (Sender | (Origin _ | Continued_at _)));_}::_
+    | { kind = (Body | (Spacing | Viewport_gap _));_}::_ | []
+    | {kind=Metadata (Timeline_break _); _ }::_ -> 0, rows
+  in
+  (* Diagnostics trail the body, and scrolling back slices physical rows from
+     the bottom up, so a diagnostic dropped at the live edge could never be
+     reached. They stay, below the latest output, and take their rows from
+     the opening and from older output. *)
+  let is_diagnostic row =
+    match row.kind with
+    | Metadata Diagnostic -> true
+    | Metadata (Timeline_break _ | Origin _ | Continued_at _ | Sender) | Body | Spacing | Viewport_gap _ -> false
+  in
+  match height, rows with
+  | 0, _ | _, [] -> []
+  | 1, first :: _ -> [ first ]
+  | 2, first :: rest -> (
+      match List.rev (List.filter (fun row -> not (is_diagnostic row)) rest) with
+      | [] -> [ first ]
+      | latest :: _ -> [ first; latest ])
+  | _, first :: rest ->
+      let diagnostics, output = List.partition is_diagnostic rest in
+      (* The first row, the gap and one row of the latest output come before
+         any diagnostic: a pane too short for all of them keeps the last. *)
+      let diagnostics = take_last (Int.max 1 (height - 3)) diagnostics in
+      let budget = height - 1 - List.length diagnostics in
+      let start, output =
+        match first.kind, output with
+        | _, _ when height = 3 && diagnostics <> [] -> [], first :: output
+        | Metadata _, _ when budget >= 3 -> (
+            (* A long sender name wraps to several metadata rows, so the
+               opening is the first [Body] row after the whole prefix, not the
+               row after [first]. The prefix stays when it fits beside the
+               opening and one row of the latest output; otherwise its
+               continuation rows join the hidden count. *)
+            match split_before_first_body output with
+            | prefix, Some (opening, output) ->
+                let whole = (first :: prefix) @ [ opening ] in
+                if List.length whole < budget then whole, output
+                else [ first; opening ], output
+            | _, None -> [ first ], output)
+        | (Metadata _ | Body | Spacing | Viewport_gap _), _ -> [ first ], output
+      in
+      let physical_tail = take_last (budget - List.length start) output in
+      let tail = collapse_repeated_body_rows ~inner_width physical_tail @ diagnostics in
+      let hidden_rows =
+        List.length rows - List.length start - List.length physical_tail
+        - List.length diagnostics + hidden_timeline_rows
+      in
+      let gap =
+        { style = Status
+        ; kind = Viewport_gap { hidden_rows }
+        ; shade = Shade_none
+        ; text = viewport_gap_text ~inner_width hidden_rows
+        ; gutter_rail_cells = 0
+        ; gutter_clock_cells = 0
+        ; gutter_label_at = 0
+        ; gutter = ""
+        ; action = Action_none
+        }
+      in
+      start @ (gap :: tail)
+
+type body_row_position = {
+  entry_index : int;
+  body_row : int;
+  rows_below : int;
+}
+
+(* Positions belong to the actual immutable rows selected by this producer.
+   Generated gaps and rows synthesized by repeat collapse have no original
+   row owner and cannot acquire a body position by matching their text. *)
+let visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =
+  let inner_width = Int.max 1 inner_width in
+  let height = Int.max 0 height in
+  let rec collect entry_index remaining selected positions = function
+    | [] -> selected, positions
+    | _ when remaining = 0 -> selected, positions
+    | entry :: older ->
+        let rows = rows_of_entry ?markdown ?origin ~inner_width
+          ~previous:(List.nth_opt older 0) entry in
+        let chosen =
+          if List.length rows <= remaining then rows
+          else if selected = [] then newest_entry_window ~inner_width ~height:remaining rows
+          else take_last remaining rows in
+        let _, owners = List.fold_left (fun (body_row, owners) row ->
+          match row.kind with
+          | Body -> body_row+1, (row,body_row)::owners
+          | Metadata _ | Spacing | Viewport_gap _ -> body_row,owners) (0,[]) rows in
+        let below = List.length selected in
+        let count = List.length chosen in
+        let owned = List.mapi (fun index row ->
+          Option.map (fun body_row -> {entry_index;body_row;
+            rows_below=below+count-index-1}) (List.assq_opt row owners)) chosen
+          |> List.filter_map Fun.id in
+        collect (entry_index-1) (remaining-count) (chosen @ selected) (owned @ positions) older
+  in
+  collect (List.length entries-1) height [] [] (List.rev entries)
+
+let visible_rows ?markdown ?origin ~inner_width ~height entries =
+  fst (visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries)
+
+let total_rows ?markdown ?origin ?previous ~inner_width entries =
+  let inner_width = Int.max 1 inner_width in
+  List.fold_left
+    (fun (previous, total) entry ->
+       ( Some entry
+       , total
+         + List.length (rows_of_entry ?markdown ?origin ~inner_width ~previous entry) ))
+    (previous, 0) entries
+  |> snd
+
+let max_scroll ?markdown ?origin ~inner_width ~height entries =
+  Int.max 0 (total_rows ?markdown ?origin ~inner_width entries - Int.max 1 height)
+
+(* Nothing older than the newest [from_bottom + height] rows can reach the
+   window, so the walk stops once it holds them. Laying out the whole
+   transcript to slice a screenful out of the end made every scrolled frame
+   cost what the conversation had accumulated. *)
+let scrolled_rows ?markdown ?origin ~inner_width ~height ~from_bottom entries =
+  if from_bottom <= 0 then visible_rows ?markdown ?origin ~inner_width ~height entries
+  else begin
+    let inner_width = Int.max 1 inner_width in
+    let height = Int.max 0 height in
+    let wanted = from_bottom + height in
+    let rec collect gathered gathered_count = function
+      | [] -> gathered, gathered_count
+      | _ when gathered_count >= wanted -> gathered, gathered_count
+      | entry :: older ->
+          let rows =
+            rows_of_entry ?markdown ?origin ~inner_width
+              ~previous:(List.nth_opt older 0) entry
+          in
+          collect (rows @ gathered) (gathered_count + List.length rows) older
+    in
+    let newest, newest_count = collect [] 0 (List.rev entries) in
+    let bottom = Int.max 0 (newest_count - from_bottom) in
+    let first = Int.max 0 (bottom - height) in
+    List.filteri (fun index _ -> index >= first && index < bottom) newest
+  end
+
+(* A clamp needs the row count only up to where the answer stops moving: once
+   [requested + height] rows exist the limit is at least [requested], and what
+   lies further back cannot change the result. Reaching that through
+   {!max_scroll} counted the whole transcript on every frame, including the
+   frames where nobody had scrolled at all. *)
+let clamp_scroll ?markdown ?origin ~inner_width ~height requested entries =
+  if requested <= 0 then requested
+  else begin
+    let inner_width = Int.max 1 inner_width in
+    (* {!max_scroll} measures against at least one row, and this has to answer
+       the same as it does. *)
+    let height = Int.max 1 height in
+    let enough = requested + height in
+    let rec count total = function
+      | [] -> total
+      | _ when total >= enough -> total
+      | entry :: older ->
+          count
+            (total
+             + List.length
+                 (rows_of_entry ?markdown ?origin ~inner_width
+                    ~previous:(List.nth_opt older 0) entry))
+            older
+    in
+    Int.min requested (Int.max 0 (count 0 (List.rev entries) - height))
+  end
+
+(* How many rows each entry takes, newest first, for one list of entries at
+   one width.
+
+   Reading back through a conversation asks the same question of the same
+   entries on every frame: a wheel notch moves the window three rows and the
+   frame lays out the whole distance again to find where the window now
+   starts. The distance is what a deep scroll makes long, so that walk cost
+   what the reader had scrolled past rather than what they were looking at.
+
+   A row count does not change while the entry, the width, and the origin
+   shape stay as they were, so the counts are kept and the next frame extends
+   them only as far as it newly reaches. Rendering the rows themselves stays
+   where it was: the frame does it for the entries its window touches. *)
+type row_counts = {
+  rc_entries : entry list;
+  rc_inner_width : int;
+  rc_origin : origin_display;
+  rc_newest_first : entry array;
+  rc_counts : int array;
+  mutable rc_filled : int;
+      (** Entries from the newest whose count is known, so a frame that
+          scrolled further extends this rather than starting again. *)
+}
+
+let row_counts_memo : row_counts option ref = ref None
+
+let row_counts_for entries ~inner_width ~origin =
+  match !row_counts_memo with
+  | Some held
+    when held.rc_entries == entries
+         && held.rc_inner_width = inner_width
+         && held.rc_origin = origin ->
+      held
+  | Some _ | None ->
+      let newest_first = Array.of_list (List.rev entries) in
+      let held =
+        { rc_entries = entries;
+          rc_inner_width = inner_width;
+          rc_origin = origin;
+          rc_newest_first = newest_first;
+          rc_counts = Array.make (Array.length newest_first) 0;
+          rc_filled = 0;
+        }
+      in
+      row_counts_memo := Some held;
+      held
+
+let entry_rows_at held ?markdown index =
+  let count = Array.length held.rc_newest_first in
+  let previous =
+    if index + 1 < count then Some held.rc_newest_first.(index + 1) else None
+  in
+  rows_of_entry ?markdown ~origin:held.rc_origin ~inner_width:held.rc_inner_width
+    ~previous held.rc_newest_first.(index)
+
+(* Extend the known counts from the newest until they cover [wanted] rows, or
+   until the conversation runs out. Answers how many rows and how many entries
+   that took, which is the walk the window is then cut out of. *)
+let count_rows_until held ?markdown ~wanted () =
+  let entry_count = Array.length held.rc_newest_first in
+  let rec walk index total =
+    if total >= wanted || index >= entry_count then (index, total)
+    else begin
+      if index >= held.rc_filled
+      then begin
+        held.rc_counts.(index) <-
+          List.length (entry_rows_at held ?markdown index);
+        held.rc_filled <- index + 1
+      end;
+      walk (index + 1) (total + held.rc_counts.(index))
+    end
+  in
+  walk 0 0
+
+(* The window, and the scroll it had to be clamped to.
+
+   Rows are numbered from the oldest of the entries the walk visited, which is
+   the numbering the window is expressed in. Entry [index] -- counting from
+   the newest -- holds the rows [total - before - count] up to
+   [total - before], where [before] is what the entries newer than it take. *)
+
+type scroll_window = {
+  scroll : int;
+  rows : row list;
+  body_positions : body_row_position list;
+}
+
+let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entries =
+  if requested <= 0 then
+    let rows, body_positions = visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries in
+    { scroll = requested; rows; body_positions }
+  else begin
+    let inner_width = Int.max 1 inner_width in
+    let origin = Option.value origin ~default:Origin_row in
+    let window_height = Int.max 0 height in
+    let bound_height = Int.max 1 height in
+    let held = row_counts_for entries ~inner_width ~origin in
+    let visited, total =
+      count_rows_until held ?markdown ~wanted:(requested + bound_height) ()
+    in
+    let from_bottom = Int.min requested (Int.max 0 (total - bound_height)) in
+    let bottom = Int.max 0 (total - from_bottom) in
+    let first = Int.max 0 (bottom - window_height) in
+    let rec gather index before (selected, positions) =
+      if index >= visited then selected, positions
+      else begin
+        let count = held.rc_counts.(index) in
+        let low = total - before - count in
+        let high = total - before in
+        let selected, positions =
+          if high <= first || low >= bottom then selected, positions
+          else begin
+            let rows = entry_rows_at held ?markdown index in
+            let take_from = Int.max first low and take_to = Int.min bottom high in
+            let _, _, chosen, chosen_positions =
+              List.fold_left
+                (fun (offset, body_row, chosen, positions) row ->
+                  let position = low + offset in
+                  let is_body = match row.kind with Body -> true | Metadata _ | Spacing | Viewport_gap _ -> false in
+                  let chosen, positions =
+                    if position < take_from || position >= take_to then chosen, positions
+                    else row :: chosen,
+                      (if is_body then
+                         { entry_index = Array.length held.rc_newest_first - index - 1;
+                           body_row; rows_below = bottom - position - 1 } :: positions
+                       else positions)
+                  in
+                  offset + 1, (if is_body then body_row + 1 else body_row), chosen, positions)
+                (0, 0, [], []) rows
+            in
+            List.rev_append chosen selected, List.rev_append chosen_positions positions
+          end
+        in
+        gather (index + 1) (before + count) (selected, positions)
+      end
+    in
+    let rows, body_positions = gather 0 0 ([], []) in
+    { scroll = from_bottom; rows; body_positions }
+  end
+
+(* Resolve a physical body row against this exact layout, measuring only its
+   newer suffix. This is shared by search and by the next frame's origin pin. *)
+let scroll_for_body_row ?markdown ?(origin = Origin_row) ~inner_width
+    ~entry_index ~body_row entries =
+  let held = row_counts_for entries ~inner_width:(Int.max 1 inner_width) ~origin in
+  let index = Array.length held.rc_newest_first - entry_index - 1 in
+  if index < 0 || index >= Array.length held.rc_newest_first || body_row < 0 then None
+  else
+    let rec newer at total =
+      if at = index then total
+      else begin
+        if at >= held.rc_filled then begin
+          held.rc_counts.(at) <- List.length (entry_rows_at held ?markdown at);
+          held.rc_filled <- at + 1
+        end;
+        newer (at + 1) (total + held.rc_counts.(at))
+      end
+    in
+    let suffix = newer 0 0 in
+    let rows = entry_rows_at held ?markdown index in
+    let rec locate offset ordinal = function
+      | [] -> None
+      | row :: rest ->
+          match row.kind with
+          | Body when ordinal = body_row -> Some (suffix + List.length rows - offset - 1)
+          | Body -> locate (offset + 1) (ordinal + 1) rest
+          | Metadata _ | Spacing | Viewport_gap _ -> locate (offset + 1) ordinal rest
+    in
+    locate 0 0 rows
+
+let last_page_start ~height row_costs =
+  let costs = Array.of_list row_costs in
+  let count = Array.length costs in
+  if count = 0 then 0
+  else begin
+    let height = Int.max 1 height in
+    let rec walk index used =
+      if index < 0 then 0
+      else
+        (* A row is the least an item can cost; a zero would let the walk
+           claim the whole list fits in any height. *)
+        let cost = Int.max 1 costs.(index) in
+        if used + cost > height then index + 1 else walk (index - 1) (used + cost)
+    in
+    Int.min (count - 1) (walk (count - 1) 0)
+  end
+
+(* One span, in the largest unit that still carries a remainder. Every reading
+   is at most six cells wide, so a column sized for the longest span holds
+   every shorter one.
+
+   From a hundred days the remainder goes. Days and hours ran to seven cells
+   there ("100d00h"), one past the six-cell columns that hold an age -- Board,
+   the Keeper roster -- and a table cell too narrow keeps a reading's first
+   character and its tail, so the days were what got cut: a Board post with
+   no timestamp, aged from the epoch, drew [2…d10h]. Beside a third digit of
+   days the hours say nothing a reader would act on.
+
+   The tiers stopped at minutes here, and the Fusion table drew its ages
+   through this: all 28 rows read [12045m~], five figures of minutes cut by
+   the column. A day-old run and a nine-day-old run were the same shape. The
+   comment beside the Gate row that prompted the hour tier says what applies
+   just as well here -- an operator weighs the number, and five figures is
+   arithmetic homework, not a weight.
+
+   Two callers spell a span this way and they used to hold separate ladders
+   with separate ceilings: this one stopped at minutes, [duration_text]
+   stopped at hours. They differ in what a span from the future means, which
+   is theirs to decide, not in how a span reads. *)
+let span_text seconds =
+  let whole = int_of_float (Float.max 0. seconds) in
+  if whole < 60 then Printf.sprintf "%ds" whole
+  else if whole < 3600 then Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60)
+  else if whole < 86_400 then
+    Printf.sprintf "%dh%02dm" (whole / 3600) (whole mod 3600 / 60)
+  else if whole < 100 * 86_400 then
+    Printf.sprintf "%dd%02dh" (whole / 86_400) (whole mod 86_400 / 3600)
+  else Printf.sprintf "%dd" (whole / 86_400)
+
+(* How long something took, rather than how long ago it was. Below a minute
+   the reading is the point -- a call that took 16.2s and one that took 25.5s
+   are being compared -- so the tenths stay; from a minute up the tenths are
+   noise and the ladder is {!span_text}'s, so a seven-minute p50 reads "6m55s"
+   instead of "415.9s" and an hour-long run reads "1h02m" instead of "62m03s".
+
+   Five draws spelled a duration as raw seconds with no ladder at all: the
+   Standalone lanes table's P50 cell and the p50 line under it, a lane run's
+   elapsed and the same run's detail, and an approval request's age. The lanes
+   screen drew "415.9s" in the table while its own detail block said "2m11s".
+
+   Each rung reads the value already rounded to that rung's precision, so
+   0.9999s is "1.0s" rather than "1000ms", and a span the tenths round up to
+   a minute is handed on rounded -- 59.96s is "1m00s", not the "59s" that
+   {!span_text}'s truncation would draw right after "59.9s".
+
+   A negative duration is a clock that disagreed with itself, not a call that
+   took no time: drawing it "0ms" would say the call was instant. A NaN, an
+   infinite or an absurdly long one is not a duration at all, and
+   [int_of_float] of such a value is not defined. All of them read as nothing,
+   as a backwards {!age_text} does, and the caller draws the placeholder its
+   own cell uses for a missing value. *)
+let milliseconds_in_a_second = 1000.
+let tenths_in_a_second = 10.
+let tenths_in_a_minute = 600.
+
+(* [int_of_float] is defined only below 2^62, about 4.6e18, and the ladder
+   reads a span as whole seconds. Far below that, past this many seconds
+   (thirty million years), a value is a malformed stamp or duration, not a span. *)
+let longest_readable_span_seconds = 1e15
+
+(* Whether a difference of two clocks, or a duration someone handed over, is a
+   span a reader can use. NaN fails both comparisons and an infinity fails the
+   second. *)
+let is_readable_span seconds =
+  seconds >= 0. && seconds <= longest_readable_span_seconds
+
+(* [Float.max] turns [-0.] into [+0.], which would otherwise print "-0ms". *)
+let elapsed_ladder seconds =
+  let seconds = Float.max 0. seconds in
+  let milliseconds = Float.round (seconds *. milliseconds_in_a_second) in
+  if milliseconds < milliseconds_in_a_second then
+    Printf.sprintf "%.0fms" milliseconds
+  else
+    let tenths = Float.round (seconds *. tenths_in_a_second) in
+    if tenths < tenths_in_a_minute then
+      Printf.sprintf "%.1fs" (tenths /. tenths_in_a_second)
+    else span_text (tenths /. tenths_in_a_second)
+
+let elapsed_text seconds =
+  if is_readable_span seconds then Some (elapsed_ladder seconds) else None
+
+let age_text ~now ~since =
+  let seconds = now -. since in
+  (* A clock that moved backwards, or a stamp that is not a number, says
+     nothing rather than an age. The row that shows this has no way to draw
+     "-4s" a reader could use. *)
+  if is_readable_span seconds then Some (span_text seconds) else None

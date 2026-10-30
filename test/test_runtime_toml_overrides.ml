@@ -1,0 +1,1480 @@
+(** Tests for [Keeper_runtime_config] — per-base-path keeper runtime
+    tuning loaded from [<resolved config root>/runtime.toml].
+
+    Uses [resolve_overrides] with injected env_lookup to avoid global
+    process env dependence. The load_and_apply integration path records
+    values in the process-local boot override store. *)
+
+open Alcotest
+open Masc
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let with_base_path f =
+  let dir = Filename.temp_file "keeper-runtime-toml" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Unix.mkdir (Filename.concat dir Common.masc_dirname) 0o755;
+  Unix.mkdir (Filename.concat dir ".masc/config") 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let toml_path base_path =
+  Filename.concat (Filename.concat base_path ".masc/config")
+    Config_dir_resolver.runtime_toml_filename
+
+let write_toml base_path content =
+  let path = toml_path base_path in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc
+
+(* Fake env: always returns None (env is "empty"). *)
+let empty_env _name = None
+
+(* Fake env with specific vars set. *)
+let env_with vars name = List.assoc_opt name vars
+
+(* Parse TOML content into a doc, or fail the test. *)
+let parse_or_fail content =
+  match Keeper_toml_loader.parse_toml content with
+  | Ok doc -> doc
+  | Error msg -> failf "TOML parse failed: %s" msg
+
+let with_clean_boot_overrides f =
+  Config_boot_overrides.reset_for_tests ();
+  Keeper_runtime_resolved.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      Config_boot_overrides.reset_for_tests ();
+      Keeper_runtime_resolved.reset_for_tests ())
+    f
+
+(* --- Tests using resolve_overrides (pure, no env side effects) --- *)
+
+let test_missing_file_returns_zero () =
+  with_base_path @@ fun base_path ->
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok 0 -> ()
+  | Ok n -> failf "expected 0 overrides, got %d" n
+  | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+
+
+let test_applies_sleep_and_batch_overrides () =
+  let doc = parse_or_fail
+    "[heartbeat]\n\
+     sleep_chunk_sec = 1.5\n\
+     [turn]\n\
+     batch_limit = 9\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied sleep/batch overrides" 2 count;
+  check (option string) "sleep chunk"
+    (Some "1.5")
+    (List.assoc_opt "MASC_KEEPER_SLEEP_CHUNK_SEC" overrides);
+  check (option string) "batch limit"
+    (Some "9")
+    (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides)
+
+let test_applies_turn_execution_overrides () =
+  let doc = parse_or_fail
+    "[turn]\n\
+     temperature = 0.65\n\
+     stream_idle_timeout_sec = 90\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied 2" 2 count;
+  check (option string) "temperature"
+    (Some "0.65")
+    (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);
+  check (option string) "stream idle timeout"
+    (Some "90")
+    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
+
+(* The whole [wire_capture] table resolves, not just its switch. [enabled] was
+   [Toml_and_env] while [retention_days] and [max_bytes] were [Env_only], and
+   because [wire_capture] is an owned namespace an unmapped sibling is rejected
+   rather than ignored — so writing the obvious three keys together took the
+   server down at boot. This fails if either sibling is returned to [Env_only].
+   Live evidence: the keys sat commented out in runtime.toml with the FATAL
+   recorded above them. *)
+let test_applies_wire_capture_overrides () =
+  let doc =
+    parse_or_fail
+      "[wire_capture]\n\
+       enabled = true\n\
+       retention_days = 7\n\
+       max_bytes = 536870912\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "all three wire-capture keys apply" 3 count;
+  check (option string) "enabled"
+    (Some "true")
+    (List.assoc_opt "MASC_KEEPER_WIRE_CAPTURE" overrides);
+  check (option string) "retention days"
+    (Some "7")
+    (List.assoc_opt "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" overrides);
+  check (option string) "max bytes"
+    (Some "536870912")
+    (List.assoc_opt "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" overrides)
+
+(* Spontaneous activation has one global setting; requested reactive work
+   retains its independent switch. *)
+let test_applies_lifecycle_enabled_overrides () =
+  let doc = parse_or_fail
+    "[reactive]\nenabled = false\n[autonomous]\nenabled = true\n" in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc in
+  check int "two distinct lifecycle settings" 2 count;
+  check (option string) "reactive setting" (Some "false")
+    (List.assoc_opt "MASC_KEEPER_REACTIVE_ENABLED" overrides);
+  check (option string) "single autonomy setting" (Some "true")
+    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_ENABLED" overrides)
+
+(* RFC keepers-see-the-wiki-table-of-contents: the operator turns the wiki
+   paragraph off in runtime.toml. A wiki that lists a page before the switch
+   lists nothing after it, and the turn carries no paragraph. *)
+let test_wiki_contents_switch_turns_the_wiki_paragraph_off () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let ctx = { Tool_wiki.base_path; agent_name = "wiki-fixture" } in
+  ignore
+    (Tool_wiki.dispatch ctx ~name:"masc_wiki_create"
+       ~args:
+         (`Assoc
+           [ "page", `String "pm-setlist"; "title", `String "Setlist"
+           ; "summary", `String "Usual song order"; "source", `String "research"
+           ; "body", `String "page body" ]));
+  (match Keeper_wiki_contents.observe ~base_path with
+   | Keeper_wiki_contents.Listed (_ :: _) -> ()
+   | Listed [] | Unlisted _ | Off -> fail "the fixture wiki lists its page while the switch is on");
+  write_toml base_path "[wiki_contents]\nenabled = false\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok _ -> ()
+   | Error failure ->
+     failf "load failed: %s" (Keeper_runtime_config.load_failure_to_string failure));
+  (match Keeper_wiki_contents.observe ~base_path with
+   | Keeper_wiki_contents.Off -> ()
+   | Listed _ | Unlisted _ -> fail "wiki_contents.enabled = false still lists the wiki");
+  check (option string) "switched off, the turn carries no wiki paragraph" None
+    (Keeper_unified_prompt.format_wiki_observation (Keeper_wiki_contents.observe ~base_path))
+
+let test_parse_error_returns_error () =
+  with_base_path @@ fun base_path ->
+  write_toml base_path "this is not valid TOML [[[\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> fail "expected parse error"
+  | Error _ -> ()
+
+let test_current_schema_unknown_keeper_key_is_rejected () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail "[keeper_settings]\nschema_version = 1\n[turn]\ntemperatur = 0.4\n")
+  in
+  check bool "current-schema typo is invalid" false
+    (Keeper_runtime_config.validation_report_is_valid report);
+  match report.issues with
+  | [ issue ] ->
+    check string "unknown key retained" "turn.temperatur" issue.key;
+    check bool "classified unknown" true
+      (issue.kind = Keeper_runtime_config.Unknown_key);
+    check bool "current schema rejects" true
+      (issue.severity = Keeper_runtime_config.Error)
+  | issues -> failf "expected one issue, got %d" (List.length issues)
+
+(* A key whose row left the registry (turn.capacity_limit, removed with its
+   consumer) is an unknown key under an owned namespace: rejected on the
+   current schema like any other typo, with no tombstone to name it. *)
+let test_removed_keeper_key_is_unknown () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail "[turn]\ncapacity_limit = 3\n")
+  in
+  check bool "removed key is invalid" false
+    (Keeper_runtime_config.validation_report_is_valid report);
+  match report.issues with
+  | [ issue ] ->
+    check bool "classified unknown" true
+      (issue.kind = Keeper_runtime_config.Unknown_key);
+    check bool "removed key rejects" true
+      (issue.severity = Keeper_runtime_config.Error)
+  | issues -> failf "expected one issue, got %d" (List.length issues)
+
+let test_future_schema_unknown_keeper_key_is_warning () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail "[keeper_settings]\nschema_version = 2\n[turn]\nfuture_budget = 7\n")
+  in
+  check bool "future schema remains saveable" true
+    (Keeper_runtime_config.validation_report_is_valid report);
+  check bool "forward schema is explicit" true report.forward_schema;
+  match report.issues with
+  | [ issue ] ->
+    check bool "future key remains unknown" true
+      (issue.kind = Keeper_runtime_config.Unknown_key);
+    check bool "future key warns" true
+      (issue.severity = Keeper_runtime_config.Warning)
+  | issues -> failf "expected one warning, got %d" (List.length issues)
+
+let test_unrelated_runtime_namespaces_are_not_claimed () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail
+         "[runtime]\ndefault = \"provider.model\"\n[models.sample]\napi-name = \"sample\"\n")
+  in
+  check bool "other loader namespaces remain valid" true
+    (Keeper_runtime_config.validation_report_is_valid report);
+  check int "no Keeper issues" 0 (List.length report.issues)
+
+let test_runtime_provider_binding_under_keeper_namespace_is_not_claimed () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail
+         "[turn.some-model]\nbase-url = \"https://example.invalid/v1\"\n")
+  in
+  check bool "runtime provider subtable remains valid" true
+    (Keeper_runtime_config.validation_report_is_valid report);
+  check int "provider binding has no Keeper issues" 0 (List.length report.issues)
+
+let test_load_and_apply_records_boot_override () =
+  (* The shell exports another value; the file's is the one stored and used. *)
+  Masc_test_deps.with_process_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "7") @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 42\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+  | Ok n ->
+    check int "applied count" 1 n;
+    check (option string) "boot override stored"
+      (Some "42")
+      (Config_boot_overrides.get_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC");
+    Keeper_runtime_resolved.reset_for_tests ();
+    check (float 0.0001) "runtime resolver sees boot override"
+      42.0
+      (Keeper_runtime_resolved.stream_idle_timeout_sec ())
+
+
+
+(* [Unix] has no unsetenv, and an empty value is not an absent one: the
+   timeout readers reject "" as a malformed setting, as they should. The test
+   stub removes the variable, so a case that set it leaves the process as it
+   found it instead of leaving "" behind for every later case. *)
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let with_env name value f =
+  let prev = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> unsetenv name);
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv name v
+      | None -> unsetenv name)
+    f
+
+let test_explicit_config_dir_wins_over_base_path () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  with_base_path @@ fun override_root ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 42\n";
+  write_toml override_root "[turn]\nstream_idle_timeout_sec = 99\n";
+  let override_config_dir = Filename.concat override_root ".masc/config" in
+  with_env "MASC_CONFIG_DIR" (Some override_config_dir) @@ fun () ->
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+  | Ok n ->
+    check int "applied count" 1 n;
+    check (option string) "explicit config dir stored"
+      (Some "99")
+      (Config_boot_overrides.get_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC")
+
+let test_float_value_round_trip () =
+  let doc = parse_or_fail
+    "[turn]\nstream_idle_timeout_sec = 120.5\n"
+  in
+  let _, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check (option string) "float preserved"
+    (Some "120.5")
+    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
+
+let test_float_application_status_uses_the_numeric_value () =
+  let open Yojson.Safe.Util in
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let original = "[heartbeat]\nsleep_chunk_sec = 0.1234567\n[web_search]\ncache_ttl_sec = 2.0\n" in
+  write_toml base_path original;
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok _ -> ()
+   | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+  let row doc env =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail doc)
+    |> to_list |> List.find (fun item -> item |> member "env" |> to_string = env) in
+  let sleep doc = row doc "MASC_KEEPER_SLEEP_CHUNK_SEC" in
+  check string "unchanged value is applied" "applied"
+    (sleep original |> member "application_status" |> to_string);
+  check string "configured display retains the value" "0.1234567"
+    (sleep original |> member "configured_value" |> to_string);
+  check string "effective display retains the value" "0.1234567"
+    (sleep original |> member "effective_value" |> to_string);
+  let changed = "[heartbeat]\nsleep_chunk_sec = 0.1234568\n[web_search]\ncache_ttl_sec = 2\n" in
+  check string "different values await restart" "pending_restart"
+    (sleep changed |> member "application_status" |> to_string);
+  check string "changed configured display is distinct" "0.1234568"
+    (sleep changed |> member "configured_value" |> to_string);
+  check string "effective display still shows the boot value" "0.1234567"
+    (sleep changed |> member "effective_value" |> to_string);
+  check string "same numeric float and integer remain applied" "applied"
+    (row changed "MASC_WEB_SEARCH_CACHE_TTL_SEC" |> member "application_status" |> to_string);
+  Config_boot_overrides.reset_for_tests ();
+  let simple = "[heartbeat]\nsleep_chunk_sec = 0.65\n" in
+  write_toml base_path simple;
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok _ -> ()
+   | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+  check string "simple configured display is unchanged" "0.65"
+    (sleep simple |> member "configured_value" |> to_string);
+  check string "simple effective display is unchanged" "0.65"
+    (sleep simple |> member "effective_value" |> to_string)
+
+(* Before exact boot serialization, both nearby values were rounded to the
+   same six-digit string. A now-visible ordering violation must be refused by
+   the existing runtime freeze rule, even though per-row TOML validation passes. *)
+let test_close_timeout_values_still_obey_the_freeze_rule () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  List.iter (fun budget_key ->
+    with_clean_boot_overrides @@ fun () ->
+    with_base_path @@ fun base_path ->
+    let doc ~deadline ~budget = Printf.sprintf
+        "[turn]\nprovider_call_deadline_sec = %s\n%s = %s\n" deadline budget_key budget in
+    let invalid = doc ~deadline:"100.1234561" ~budget:"100.1234562" in
+    check bool "each value is in its declared range" true
+      (Keeper_runtime_config.validation_report_is_valid
+         (Keeper_runtime_config.validate_doc (parse_or_fail invalid)));
+    write_toml base_path invalid;
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    let message =
+      match Keeper_runtime_resolved.init () with
+      | () -> failf "%s beyond the exact deadline was accepted" budget_key
+      | exception Env_config_core.Config_error message -> message
+    in
+    check string "refusal gives exact values, sources and usable lower bound"
+      (Printf.sprintf
+         "turn.provider_call_deadline_sec (100.1234561, toml) is shorter than \
+          turn.%s (100.1234562, toml): the no-progress threshold would end a silence \
+          that budget still allows; declare turn.provider_call_deadline_sec >= 100.1234562"
+         budget_key)
+      message;
+    let lower_bound_start = String.rindex message ' ' + 1 in
+    let recommended = String.sub message lower_bound_start (String.length message - lower_bound_start) in
+    Config_boot_overrides.reset_for_tests ();
+    Keeper_runtime_resolved.reset_for_tests ();
+    write_toml base_path (doc ~deadline:recommended ~budget:"100.1234562");
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    Keeper_runtime_resolved.init ();
+    check bool "the reported lower bound is accepted" true
+      (Float.equal 100.1234562 (Keeper_runtime_resolved.provider_call_deadline_sec ())))
+    [ "first_event_timeout_sec"; "stream_idle_timeout_sec" ]
+
+let test_timeout_recommendation_covers_both_declared_budgets () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  List.iter (fun (first, idle, lower_bound) ->
+    with_clean_boot_overrides @@ fun () ->
+    with_base_path @@ fun base_path ->
+    let doc deadline = Printf.sprintf
+        "[turn]\nprovider_call_deadline_sec = %s\nfirst_event_timeout_sec = %s\nstream_idle_timeout_sec = %s\n"
+        deadline first idle in
+    write_toml base_path (doc "100.1234561");
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    let message =
+      match Keeper_runtime_resolved.init () with
+      | () -> fail "deadline shorter than both budgets was accepted"
+      | exception Env_config_core.Config_error message -> message
+    in
+    check string "refusal covers the higher declared budget"
+      (Printf.sprintf
+         "turn.provider_call_deadline_sec (100.1234561, toml) is shorter than \
+          turn.first_event_timeout_sec (%s, toml): the no-progress threshold would end a silence \
+          that budget still allows; declare turn.provider_call_deadline_sec >= %s"
+         first lower_bound)
+      message;
+    let lower_bound_start = String.rindex message ' ' + 1 in
+    let recommended = String.sub message lower_bound_start (String.length message - lower_bound_start) in
+    Config_boot_overrides.reset_for_tests ();
+    Keeper_runtime_resolved.reset_for_tests ();
+    write_toml base_path (doc recommended);
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    Keeper_runtime_resolved.init ();
+    check string "the actual recommendation covers both budgets" lower_bound recommended)
+    [ "100.1234562", "110.1234567", "110.1234567"
+    ; "110.1234567", "100.1234562", "110.1234567" ]
+
+let test_resolved_runtime_freezes_toml_values_after_init () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path
+    "[turn]\n\
+     stream_idle_timeout_sec = 50\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  Config_boot_overrides.set "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" "90";
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "stream idle timeout frozen from toml"
+    50.0 runtime.stream_idle_timeout_sec.value;
+  check string "stream idle timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
+
+let test_resolved_stream_idle_timeout_defaults_to_failsafe_floor () =
+  (* RFC-0345 / #25128: with no explicit env/toml value the resolver substitutes
+     the fail-safe liveness floor (not [None]) so AGENT_CORE enforces a bound and a hung
+     stream cannot freeze the lane forever. Reverting the floor (back to [None])
+     makes this fail. *)
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "stream idle timeout defaults to fail-safe floor"
+    Keeper_runtime_resolved.stream_idle_failsafe_floor_sec
+    runtime.stream_idle_timeout_sec.value;
+  check (float 0.0001) "accessor returns the floor when unset"
+    Keeper_runtime_resolved.stream_idle_failsafe_floor_sec
+    (Keeper_runtime_resolved.stream_idle_timeout_sec ());
+  check string "stream idle timeout floor source"
+    "failsafe_floor"
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
+
+let test_resolved_first_event_timeout_defaults_to_failsafe_floor () =
+  (* RFC-AC-037: with no explicit env/toml value the resolver substitutes the
+     silent-prefill liveness ceiling (not [None]). Without it AGENT_CORE's
+     first-event resolver falls through to the much shorter inter-line idle
+     value and any provider that prefills silently past it dies at
+     awaiting_first_event (canary-multiturn-localmlx, 9/9 on 2026-08-16). *)
+  with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "first-event timeout defaults to fail-safe floor"
+    Keeper_runtime_resolved.first_event_failsafe_floor_sec
+    runtime.first_event_timeout_sec.value;
+  check (float 0.0001) "accessor returns the floor when unset"
+    Keeper_runtime_resolved.first_event_failsafe_floor_sec
+    (Keeper_runtime_resolved.first_event_timeout_sec ());
+  check string "first-event timeout floor source"
+    "failsafe_floor"
+    (Keeper_runtime_resolved.source_to_string runtime.first_event_timeout_sec.source)
+
+(* With no explicit env/toml value the resolver substitutes the no-progress
+   floor (not [None]): a default install runs the attempt watchdog and a
+   tool's provider sub-call is bounded. Reverting the floor (back to [None])
+   makes this fail; the two units that consume the value
+   ([Keeper_turn_driver_try_provider] and [Keeper_provider_subcall]) treat
+   [None] as "no bound". *)
+let test_resolved_provider_call_deadline_defaults_to_failsafe_floor () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "provider-call threshold defaults to fail-safe floor"
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec
+    runtime.provider_call_deadline_sec.value;
+  check (float 0.0001) "accessor returns the floor when unset"
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec
+    (Keeper_runtime_resolved.provider_call_deadline_sec ());
+  check string "provider-call threshold floor source"
+    "failsafe_floor"
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source);
+  check bool "the floor sits above the first-event floor, so a silent prefill is the reader's call"
+    true
+    (Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec
+     > Keeper_runtime_resolved.first_event_failsafe_floor_sec)
+
+(* The no-progress threshold must cover a declared stream budget. An
+   operator who allows a longer silent prefill than the threshold has
+   written a budget that can never be reached: the watchdog would rotate the
+   lane first. The pair is refused where the configuration is frozen, naming
+   both values and their sources. A floored budget is a ceiling, not an
+   allowance, so an explicit threshold shorter than one stands. *)
+let test_a_stream_budget_longer_than_the_threshold_is_refused () =
+  with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let longer_than_the_floor =
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec +. 600.0
+  in
+  write_toml
+    base_path
+    (Printf.sprintf "[turn]\nfirst_event_timeout_sec = %g\n" longer_than_the_floor);
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.reset_for_tests ();
+  match Keeper_runtime_resolved.provider_call_deadline_sec () with
+  | _ -> fail "a first-event budget above the floored threshold was frozen"
+  | exception Env_config_core.Config_error message ->
+    let names needle = String.length needle > 0 && Astring.String.is_infix ~affix:needle message in
+    check bool "the refusal names the threshold and its floor source" true
+      (names "turn.provider_call_deadline_sec" && names "failsafe_floor");
+    check bool "the refusal names the budget and its toml source" true
+      (names "turn.first_event_timeout_sec" && names "toml");
+    check bool "the refusal says what to declare" true
+      (names (Printf.sprintf ">= %g" longer_than_the_floor))
+
+let test_a_threshold_covering_the_stream_budgets_is_frozen () =
+  with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let allowance =
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec +. 600.0
+  in
+  write_toml
+    base_path
+    (Printf.sprintf
+       "[turn]\nfirst_event_timeout_sec = %g\nprovider_call_deadline_sec = %g\n"
+       allowance
+       allowance);
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.reset_for_tests ();
+  check (float 0.0001) "an equal threshold covers the budget"
+    allowance
+    (Keeper_runtime_resolved.provider_call_deadline_sec ());
+  check (float 0.0001) "the budget is frozen as declared"
+    allowance
+    (Keeper_runtime_resolved.first_event_timeout_sec ());
+  check (float 0.0001) "the other budget stays at its floor under the same threshold"
+    Keeper_runtime_resolved.stream_idle_failsafe_floor_sec
+    (Keeper_runtime_resolved.stream_idle_timeout_sec ())
+
+(* A budget no threshold can cover is refused where it is read, naming the
+   ceiling, instead of at every boot by the freeze rule with advice the
+   threshold's own range would then reject. *)
+let test_a_stream_budget_no_threshold_can_cover_is_refused_where_it_is_read () =
+  with_clean_boot_overrides @@ fun () ->
+  let beyond_any_threshold =
+    Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec +. 1.0
+  in
+  List.iter
+    (fun (env_key, read) ->
+       with_env env_key (Some (Printf.sprintf "%g" beyond_any_threshold)) @@ fun () ->
+       match read () with
+       | _ -> failf "%s beyond the longest threshold was read" env_key
+       | exception Env_config_core.Config_error message ->
+         check bool (env_key ^ " refusal names the ceiling") true
+           (Astring.String.is_infix
+              ~affix:(Printf.sprintf "at most %g" Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec)
+              message))
+    [ ( Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key
+      , Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec )
+    ; ( Env_config_keeper.KeeperKeepalive.first_event_timeout_env_key
+      , Env_config_keeper.KeeperKeepalive.first_event_timeout_sec )
+    ]
+
+let test_an_explicit_threshold_under_the_floored_budgets_stands () =
+  with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let earlier_cut = Keeper_runtime_resolved.first_event_failsafe_floor_sec /. 2.0 in
+  write_toml
+    base_path
+    (Printf.sprintf "[turn]\nprovider_call_deadline_sec = %g\n" earlier_cut);
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.reset_for_tests ();
+  check (float 0.0001) "the operator's earlier cut is frozen as declared"
+    earlier_cut
+    (Keeper_runtime_resolved.provider_call_deadline_sec ());
+  check (float 0.0001) "the floored first-event budget is left as the ceiling it is"
+    Keeper_runtime_resolved.first_event_failsafe_floor_sec
+    (Keeper_runtime_resolved.first_event_timeout_sec ())
+
+let test_resolved_first_event_timeout_uses_toml () =
+  (* End-to-end pin for the registry-driven mapping: runtime.toml
+     [turn.first_event_timeout_sec] must reach the resolver as
+     MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC. *)
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nfirst_event_timeout_sec = 480\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "first-event timeout from toml"
+    480.0 runtime.first_event_timeout_sec.value;
+  check string "first-event timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.first_event_timeout_sec.source)
+
+let test_resolved_stream_idle_timeout_uses_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 75\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "stream idle timeout from toml"
+    75.0 runtime.stream_idle_timeout_sec.value;
+  check string "stream idle timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
+
+let test_resolved_runtime_ignores_env_for_a_file_owned_setting () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 50\n";
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "55") @@ fun () ->
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "the file's stream idle timeout is used, not the shell's"
+    50.0 runtime.stream_idle_timeout_sec.value;
+  check string "the source is the file"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
+
+(* #27416: the provider-call deadline knob must survive a restart that
+   forgets the env var — TOML is the durable channel, env the override. *)
+let test_applies_provider_call_deadline_override () =
+  let doc = parse_or_fail "[turn]\nprovider_call_deadline_sec = 900\n" in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied 1" 1 count;
+  check (option string) "provider call deadline"
+    (Some "900")
+    (List.assoc_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" overrides)
+
+let test_provider_call_deadline_invalid_toml_returns_error () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nprovider_call_deadline_sec = 0\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> fail "expected non-positive provider call deadline to be rejected"
+  | Error failure ->
+    check bool "classified as a validate failure" true
+      (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
+    check bool "diagnostic names the TOML key and declared range" true
+      (String.ends_with
+         ~suffix:
+           "turn.provider_call_deadline_sec: value is outside the declared range [30, 3600]"
+         (Keeper_runtime_config.load_failure_to_string failure))
+
+let test_resolved_provider_call_deadline_uses_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nprovider_call_deadline_sec = 900\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "provider call deadline from toml"
+    900.0 runtime.provider_call_deadline_sec.value;
+  check string "provider call deadline source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
+
+let test_resolved_provider_call_deadline_ignores_env () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nprovider_call_deadline_sec = 900\n";
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Some "1200") @@ fun () ->
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "the file's provider call deadline is used, not the shell's"
+    900.0 runtime.provider_call_deadline_sec.value;
+  check string "the source is the file"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
+
+let test_resolved_stream_idle_timeout_does_not_clamp () =
+  with_clean_boot_overrides @@ fun () ->
+  (* The longest gap a threshold can cover, declared as such: the case is
+     about the value not being clamped, not about the pair. *)
+  let longest = Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec in
+  let declared = Printf.sprintf "%g" longest in
+  Masc_test_deps.with_file_owned_values
+    [ "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC", declared
+    ; "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC", declared
+    ]
+  @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  check (float 0.0001) "explicit value is preserved"
+    longest
+    (Keeper_runtime_resolved.stream_idle_timeout_sec ())
+
+let test_resolved_stream_idle_timeout_below_floor_preserved () =
+  (* An explicit value BELOW the floor is honoured verbatim. The resolver
+     substitutes the floor only for [None]; it does not clamp an operator
+     value up to the floor. A [max value floor] mutation fails this. *)
+  with_clean_boot_overrides @@ fun () ->
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC", "30" ] @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  check (float 0.0001) "explicit sub-floor value preserved (no clamp-up)"
+    30.0
+    (Keeper_runtime_resolved.stream_idle_timeout_sec ())
+
+let expect_stream_idle_timeout_config_error raw =
+  with_clean_boot_overrides @@ fun () ->
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC", raw ] @@ fun () ->
+  match Keeper_runtime_resolved.init () with
+  | () -> fail "expected invalid stream idle timeout to fail"
+  | exception Env_config_core.Config_error message ->
+    check string "diagnostic names the invalid stream idle setting"
+      (Printf.sprintf
+         "invalid MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC=%S (expected a finite, positive number of seconds)"
+         raw)
+      message
+
+let test_resolved_stream_idle_timeout_invalid_value_fails_loud () =
+  expect_stream_idle_timeout_config_error "not-a-timeout"
+
+let test_resolved_stream_idle_timeout_empty_value_fails_loud () =
+  expect_stream_idle_timeout_config_error ""
+
+let test_resolved_stream_idle_timeout_whitespace_value_fails_loud () =
+  expect_stream_idle_timeout_config_error "   "
+
+let test_stream_idle_timeout_invalid_toml_returns_error () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 0\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> fail "expected non-positive stream idle timeout to be rejected"
+  | Error failure ->
+    check bool "classified as a validate failure" true
+      (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
+    (* The row now carries the ceiling too, so the diagnostic reads the
+       declared range the way provider_call_deadline_sec's does. *)
+    check bool "diagnostic names the TOML key and the declared range" true
+      (String.ends_with
+         ~suffix:
+           "turn.stream_idle_timeout_sec: value is outside the declared range (0, 3600]"
+         (Keeper_runtime_config.load_failure_to_string failure))
+
+let test_stream_idle_timeout_toml_wrong_type_returns_error () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = \"120\"\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> fail "expected string stream idle timeout to be rejected"
+  | Error failure ->
+    check bool "classified as a validate failure" true
+      (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
+    check bool "diagnostic requires a numeric TOML value" true
+      (String.ends_with
+         ~suffix:
+           "turn.stream_idle_timeout_sec: expected a numeric TOML value"
+         (Keeper_runtime_config.load_failure_to_string failure))
+
+(* The bootstrap counter labels itself from load_failure_kind. Its help text
+   enumerates the labels, so a constructor added without a label — or a label
+   added without a constructor — has to break here rather than at whatever
+   dashboard reads the metric. *)
+let test_every_failure_kind_has_a_label () =
+  check (list string) "labels cover the constructors"
+    [ "read_error"; "parse_error"; "validate_error" ]
+    Keeper_runtime_config.load_failure_kind_labels;
+  check int "one label per constructor"
+    (List.length Keeper_runtime_config.all_load_failure_kinds)
+    (List.length Keeper_runtime_config.load_failure_kind_labels)
+;;
+
+let test_rendering_keeps_the_verb_prefix () =
+  List.iter
+    (fun (kind, verb) ->
+      let rendered =
+        Keeper_runtime_config.load_failure_to_string
+          { Keeper_runtime_config.kind; message = "x: y" }
+      in
+      check bool
+        (verb ^ " prefix preserved")
+        true
+        (String.starts_with ~prefix:(verb ^ " ") rendered))
+    [ Keeper_runtime_config.Read, "read"
+    ; Keeper_runtime_config.Parse, "parse"
+    ; Keeper_runtime_config.Validate, "validate"
+    ]
+;;
+
+let test_removed_toml_overlay_is_pending_restart () =
+  with_clean_boot_overrides @@ fun () ->
+  Config_boot_overrides.set "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" "42";
+  let empty_doc = parse_or_fail "" in
+  let open Yojson.Safe.Util in
+  let setting =
+    Keeper_runtime_config.settings_projection_to_yojson empty_doc
+    |> to_list
+    |> List.find (fun row ->
+      String.equal
+        (row |> member "env" |> to_string)
+        "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC")
+  in
+  check string
+    "removed TOML value remains pending until restart"
+    "pending_restart"
+    (setting |> member "application_status" |> to_string);
+  let overlay = Keeper_runtime_config.overlay_application_to_yojson empty_doc in
+  check bool
+    "removed boot overlay requires restart"
+    true
+    (overlay |> member "requires_restart" |> to_bool);
+  check bool
+    "removed key is included in pending overlay summary"
+    true
+    (overlay
+     |> member "pending_keys"
+     |> to_list
+     |> List.exists (function
+       | `String "turn.stream_idle_timeout_sec" -> true
+       | _ -> false))
+;;
+
+let test_settings_projection_uses_typed_effective_values () =
+  let open Yojson.Safe.Util in
+  let rows =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+  in
+  let find env_name =
+    List.find (fun row -> String.equal (row |> member "env" |> to_string) env_name) rows
+  in
+  let snapshot = find "MASC_KEEPER_SNAPSHOT_SEC" in
+  check string "snapshot projection uses clamped runtime value"
+    (string_of_int (Env_config_keeper.KeeperRuntime.snapshot_sec ()))
+    (snapshot |> member "effective_value" |> to_string);
+  check bool "snapshot projection has no normalization error" true
+    (snapshot |> member "effective_error" = `Null);
+  let deadline = find "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" in
+  let expected_deadline =
+    Printf.sprintf "%g"
+      (match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+       | Some value -> value
+       | None -> Env_config_keeper.KeeperKeepalive.provider_call_deadline_failsafe_floor_sec)
+  in
+  check string "deadline projection shows the value in effect, floor included" expected_deadline
+    (deadline |> member "effective_value" |> to_string)
+;;
+
+(* The keeper.turn rows read the same boot store the [Keeper_config] runtime
+   params fall back to. An unset thinking request is not "false": no request
+   is sent and the provider default stays in place, and the panel says so. *)
+let test_turn_rows_project_the_boot_store_layer () =
+  with_env "MASC_KEEPER_ENABLE_THINKING" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_BATCH_LIMIT", "5" ] @@ fun () ->
+  let open Yojson.Safe.Util in
+  let rows =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+  in
+  let effective env_name =
+    List.find (fun row -> String.equal (row |> member "env" |> to_string) env_name) rows
+    |> member "effective_value"
+    |> to_string
+  in
+  check (option bool) "unset thinking is no request" None
+    (Env_config_keeper.KeeperTurn.enable_thinking ());
+  check string "unset thinking shows the provider default"
+    Keeper_runtime_setting_registry.provider_default_display
+    (effective "MASC_KEEPER_ENABLE_THINKING");
+  check string "batch limit shows the clamped owner value"
+    (string_of_int Env_config_keeper.KeeperTurn.batch_limit_min)
+    (effective "MASC_KEEPER_BATCH_LIMIT")
+;;
+
+(* Every registry row carries the accessor its runtime consumer reads. A
+   reader that rejects the resolved default reaches the operator panel with a
+   null value and an error string; every registered row must read cleanly. *)
+let test_every_registered_setting_reads_in_the_projection () =
+  let open Yojson.Safe.Util in
+  let unreadable =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+    |> List.filter_map (fun row ->
+      match row |> member "effective_error" with
+      | `Null -> None
+      | error ->
+        Some
+          (Printf.sprintf
+             "%s: %s"
+             (row |> member "env" |> to_string)
+             (Yojson.Safe.to_string error)))
+  in
+  check (list string) "every registered setting has a typed effective value" [] unreadable
+;;
+
+(* The provider-call threshold is the keeper's only bound on a sub-call
+   made from inside a tool and the attempt watchdog's threshold. A value that
+   is not a finite positive number of seconds must not read as unset (which
+   would switch both off) or pass as NaN (which every comparison against it
+   answers false, so the watchdog would never fire and every sub-call would be
+   refused). It is a configuration error, as it already is for the two
+   streaming timeouts. *)
+let test_a_malformed_provider_call_deadline_is_a_configuration_error () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  List.iter
+    (fun raw ->
+      Config_boot_overrides.set "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" raw;
+      (match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+       | exception Env_config_core.Config_error message ->
+         check bool
+           (Printf.sprintf "%S names the setting" raw)
+           true
+           (Astring.String.is_infix ~affix:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" message)
+       | Some seconds -> failf "%S read as %g seconds" raw seconds
+       | None -> failf "%S read as unset" raw);
+      Config_boot_overrides.reset_for_tests ())
+    [ "nan"; "inf"; "9OO"; "0"; "-30" ]
+;;
+
+(* A declared value outside the setting's range is refused where it is
+   read, as the runtime.toml validator refuses it, instead of being moved to
+   the nearest bound: an operator who wrote 20 must not run under 30 and
+   read 30 in a later message as if they had written it. *)
+let test_an_out_of_range_provider_call_deadline_is_a_configuration_error () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  let below = Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec -. 10.0 in
+  let above = Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec +. 1.0 in
+  List.iter
+    (fun seconds ->
+      Config_boot_overrides.set "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Printf.sprintf "%g" seconds);
+      (match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+       | exception Env_config_core.Config_error message ->
+         check bool
+           (Printf.sprintf "%g names the setting and the range" seconds)
+           true
+           (Astring.String.is_infix ~affix:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" message
+            && Astring.String.is_infix ~affix:"within [30, 3600]" message)
+       | Some read -> failf "%g read as %g seconds instead of being refused" seconds read
+       | None -> failf "%g read as unset" seconds);
+      Config_boot_overrides.reset_for_tests ())
+    [ below; above ];
+  List.iter
+    (fun (label, bound) ->
+      Config_boot_overrides.set "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Printf.sprintf "%g" bound);
+      check (option (float 0.0001))
+        (label ^ " itself is a declared value")
+        (Some bound)
+        (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ());
+      Config_boot_overrides.reset_for_tests ())
+    [ "the lower bound", Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
+    ; "the upper bound", Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
+    ]
+;;
+
+(* The refusal quotes what the operator wrote. Rendering the parsed number
+   instead made "29.9999999" read as "invalid ...=30 (expected a value within
+   [30, 3600] seconds)", a sentence that contradicts itself. *)
+let test_a_range_refusal_quotes_the_text_the_operator_wrote () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  let written = "29.9999999" in
+  Config_boot_overrides.set "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" written;
+  match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+  | exception Env_config_core.Config_error message ->
+    check string
+      "the message is the text, the setting and the range"
+      (Printf.sprintf
+         "invalid MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC=%S (expected a value within [30, 3600] seconds)"
+         written)
+      message
+  | Some read -> failf "%s read as %g seconds instead of being refused" written read
+  | None -> failf "%s read as unset" written
+;;
+
+(* The body deadline has the same range rule as the provider-call deadline,
+   under its own bounds. *)
+let test_an_out_of_range_body_deadline_is_a_configuration_error () =
+  with_env "MASC_KEEPER_BODY_TIMEOUT_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  let min_sec = Env_config_keeper.KeeperKeepalive.body_timeout_min_sec in
+  let max_sec = Env_config_keeper.KeeperKeepalive.body_timeout_max_sec in
+  List.iter
+    (fun seconds ->
+      Config_boot_overrides.set "MASC_KEEPER_BODY_TIMEOUT_SEC" (Printf.sprintf "%g" seconds);
+      (match Env_config_keeper.KeeperKeepalive.body_timeout_sec_override () with
+       | exception Env_config_core.Config_error message ->
+         check bool
+           (Printf.sprintf "%g names the setting and the range" seconds)
+           true
+           (Astring.String.is_infix ~affix:"MASC_KEEPER_BODY_TIMEOUT_SEC" message
+            && Astring.String.is_infix
+                 ~affix:(Printf.sprintf "within [%g, %g]" min_sec max_sec)
+                 message)
+       | Some read -> failf "%g read as %g seconds instead of being refused" seconds read
+       | None -> failf "%g read as unset" seconds);
+      Config_boot_overrides.reset_for_tests ())
+    [ min_sec -. 1.0; max_sec +. 1.0 ];
+  List.iter
+    (fun (label, bound) ->
+      Config_boot_overrides.set "MASC_KEEPER_BODY_TIMEOUT_SEC" (Printf.sprintf "%g" bound);
+      check (option (float 0.0001))
+        (label ^ " itself is a declared value")
+        (Some bound)
+        (Env_config_keeper.KeeperKeepalive.body_timeout_sec_override ());
+      Config_boot_overrides.reset_for_tests ())
+    [ "the lower bound", min_sec; "the upper bound", max_sec ]
+;;
+
+let test_the_provider_call_deadline_applied_from_toml_is_read_live () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nprovider_call_deadline_sec = 45\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  check (option (float 0.0001))
+    "the reader sees the value applied at boot"
+    (Some 45.0)
+    (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "and the frozen snapshot carries it"
+    45.0 runtime.provider_call_deadline_sec.value;
+  check string "sourced from toml"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source);
+  (* The operator panel projects the same live reader, not a copy taken at
+     module load: the row shows the value applied at boot. *)
+  let open Yojson.Safe.Util in
+  let row =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+    |> List.find (fun row ->
+      String.equal (row |> member "env" |> to_string) "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC")
+  in
+  check string "the settings projection shows the applied value"
+    "45"
+    (row |> member "effective_value" |> to_string)
+;;
+
+(* #28413. The wake prompt row is present and readable, and the panel reports
+   the same string the prompt builder resolves. *)
+let test_wake_prompt_is_readable_in_the_settings_projection () =
+  let open Yojson.Safe.Util in
+  let rows =
+    Keeper_runtime_config.settings_projection_to_yojson
+      (parse_or_fail "[autonomous]\nwake_prompt = \"what changed since your last turn?\"\n")
+    |> to_list
+  in
+  match
+    List.find_opt
+      (fun row ->
+         String.equal
+           (row |> member "env" |> to_string)
+           "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT")
+      rows
+  with
+  | None -> fail "the wake prompt is absent from the operator settings projection"
+  | Some row ->
+    check string "the panel exposes the TOML key operators edit"
+      "autonomous.wake_prompt"
+      (row |> member "key" |> to_string);
+    check bool "the projection carries no error" true
+      (row |> member "effective_error" = `Null);
+    check string "the configured value is echoed back"
+      "what changed since your last turn?"
+      (row |> member "configured_value" |> to_string);
+    check string "the effective value is the one the prompt builder resolves"
+      (Env_config_keeper.KeeperAutonomous.wake_prompt ())
+      (row |> member "effective_value" |> to_string);
+    check bool "the consumer is named" true
+      (row
+       |> member "consumers"
+       |> to_list
+       |> List.exists (fun c -> to_string c = "Keeper_unified_prompt"))
+;;
+
+(* PR #28225 review (comment 3761300276): the raw-config preview computed
+   can_save from the keeper schema alone, but the raw-save path also runs the
+   runtime parser (Runtime.save_config_text). A config that parses and passes
+   the keeper schema but names an unknown [runtime] default therefore advertised
+   can_save=true while save was guaranteed to reject it. Runtime.validate_config_text
+   now runs that runtime precondition and shares it with the writer, so preview
+   and save cannot disagree. *)
+let test_preview_precondition_matches_save () =
+  let schema_ok_runtime_bad = "[runtime]\ndefault = \"ghost-runtime\"\n" in
+  (match Keeper_runtime_config.validate_source_text schema_ok_runtime_bad with
+   | Error msg -> failf "keeper schema unexpectedly rejected the text: %s" msg
+   | Ok report ->
+     check
+       bool
+       "keeper schema alone reports the text as valid (the old can_save source)"
+       true
+       (Keeper_runtime_config.validation_report_is_valid report));
+  with_base_path (fun base_path ->
+    let runtime_config_path =
+      Filename.concat
+        (Filename.concat base_path ".masc/config")
+        Config_dir_resolver.runtime_toml_filename
+    in
+    let validate =
+      Runtime.validate_config_text ~runtime_config_path schema_ok_runtime_bad
+    in
+    let save =
+      Runtime.save_config_text ~runtime_config_path schema_ok_runtime_bad
+    in
+    check
+      bool
+      "runtime precondition rejects the unknown [runtime] default"
+      true
+      (Result.is_error validate);
+    check
+      bool
+      "preview validation and save agree on the same input"
+      true
+      (Result.is_error validate = Result.is_error save))
+;;
+
+let test_supervisor_and_rotation_bounds_reach_boot () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  List.iter (fun toml ->
+    write_toml base_path toml;
+    match Keeper_runtime_config.load_and_apply ~base_path with
+    | Error {kind=Keeper_runtime_config.Validate;_} -> ()
+    | Error error -> fail (Keeper_runtime_config.load_failure_to_string error)
+    | Ok _ -> fail "out-of-range setting was accepted at boot")
+    ["[supervisor]\nsweep_sec = 0.0\n";
+     "[supervisor]\nsweep_sec = 121.0\n";
+     "[metrics]\nmax_rotated = -1\n"];
+  (* The loads above failed, so none of them left a value or a declaration. Each
+     case below is the boot state a file with that value would have left. *)
+  List.iter (fun (raw, expected) ->
+    Masc_test_deps.with_file_owned_values
+      [ "MASC_KEEPER_SUPERVISOR_SWEEP_SEC", raw ]
+    @@ fun () ->
+    check (float 0.) "boot value respects scheduler bounds" expected
+      (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec))
+    ["0", 10.; "121", 120.; "nan", 30.; "infinity", 30.];
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_METRICS_MAX_ROTATED", "0" ]
+  @@ fun () ->
+  check int "a boot value of zero requests no backups" 0
+    (Env_config_keeper.KeeperMetrics.max_rotated_files ())
+;;
+
+let test_strict_reader_validation_happens_at_boot () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_PARSE_WARN" (Some "true") @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let load_with_toml has_toml =
+    let path = toml_path base_path in
+    if has_toml then write_toml base_path "[metrics]\nmax_bytes = 17\n"
+    else if Sys.file_exists path then Sys.remove path;
+    Keeper_runtime_config.load_and_apply ~base_path
+  in
+  (* A setting that still reads the environment is validated before it can
+     fail a Keeper cycle. *)
+  List.iter (fun key ->
+    with_env key (Some "malformed") @@ fun () ->
+    List.iter (fun has_toml ->
+      match load_with_toml has_toml with
+      | Error {kind=Keeper_runtime_config.Validate;_} -> ()
+      | Error error -> fail (Keeper_runtime_config.load_failure_to_string error)
+      | Ok _ -> fail (key ^ " bypassed strict startup validation")) [false; true])
+    ["MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"];
+  (* A file-owned setting never reads the environment, so a malformed value
+     there is not an input to reject. *)
+  List.iter (fun key ->
+    with_env key (Some "malformed") @@ fun () ->
+    List.iter (fun has_toml ->
+      match load_with_toml has_toml with
+      | Ok _ -> ()
+      | Error error ->
+        fail (key ^ " was validated though the file alone feeds it: "
+              ^ Keeper_runtime_config.load_failure_to_string error)) [false; true])
+    ["MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED";
+     "MASC_KEEPER_SNAPSHOT_SEC"; "MASC_KEEPER_WORK_AS_HEARTBEAT";
+     "MASC_KEEPER_SLEEP_CHUNK_SEC"; "MASC_KEEPER_SUPERVISOR_SWEEP_SEC";
+     "MASC_KEEPER_DEBUG"]
+;;
+
+let test_boot_settings_reach_consumers_and_projection () =
+  let keys =
+    [ "MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED"
+    ; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"; "MASC_KEEPER_SNAPSHOT_SEC"
+    ; "MASC_KEEPER_WORK_AS_HEARTBEAT"; "MASC_KEEPER_SLEEP_CHUNK_SEC"
+    ; "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"; "MASC_KEEPER_DEBUG"; "MASC_CONFIG_DIR"
+    ] in
+  let rec without_env keys f = match keys with
+    | [] -> f ()
+    | key :: rest -> with_env key None (fun () -> without_env rest f) in
+  without_env keys @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let toml =
+    "[metrics]\nmax_bytes = 17\nmax_rotated = 2\n\
+     [heartbeat]\ninterval_sec = 23\nsnapshot_sec = 45\n\
+     work_as_heartbeat = false\nsleep_chunk_sec = 1.5\n\
+     [supervisor]\nsweep_sec = 11.0\n[debug]\nenabled = true\n" in
+  check int "consumer reads the default before boot" 300
+    (Keeper_heartbeat_snapshot.keepalive_interval_sec ());
+  check bool "debug reads the default before boot" false
+    (Env_config.KeeperRuntime.debug ());
+  write_toml base_path toml;
+  (* The process has already initialized every module before boot reads TOML. *)
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "all eight TOML settings applied" 8 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let rows = Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail toml) in
+  let open Yojson.Safe.Util in
+  List.iter (fun (env, expected) ->
+    let row = rows |> to_list |> List.find (fun row -> row |> member "env" |> to_string = env) in
+    check string (env ^ " is applied") "applied" (row |> member "application_status" |> to_string);
+    check string (env ^ " effective value matches TOML") expected (row |> member "effective_value" |> to_string))
+    [ "MASC_KEEPER_METRICS_MAX_BYTES", "17"; "MASC_KEEPER_METRICS_MAX_ROTATED", "2"
+    ; "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC", "23"; "MASC_KEEPER_SNAPSHOT_SEC", "45"
+    ; "MASC_KEEPER_WORK_AS_HEARTBEAT", "false"; "MASC_KEEPER_SLEEP_CHUNK_SEC", "1.5"
+    ; "MASC_KEEPER_SUPERVISOR_SWEEP_SEC", "11"; "MASC_KEEPER_DEBUG", "true" ];
+  check int "heartbeat runtime parameter reads the boot setting" 23
+    (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec);
+  check int "snapshot runtime parameter reads the boot setting" 45
+    (Runtime_params.get Runtime_settings.keeper_snapshot_sec);
+  check bool "work heartbeat runtime parameter reads the boot setting" false
+    (Runtime_params.get Runtime_settings.keeper_work_as_hb_enabled);
+  check (float 0.) "supervisor runtime parameter reads the boot setting" 11.
+    (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec);
+  check bool "debug reads boot configuration" true (Env_config.KeeperRuntime.debug ());
+  check (float 0.0001) "sleep chunk reads boot configuration" 1.5
+    (Env_config.KeeperKeepalive.sleep_chunk_sec ());
+  let path = Filename.concat base_path "metrics.jsonl" in
+  let write contents =
+    let out = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out out) (fun () -> output_string out contents) in
+  let first = String.make 18 'a' and second = String.make 18 'b' in
+  write first;
+  let row = `Assoc ["boot", `Bool true] in
+  Keeper_types_support.append_jsonl_line path row;
+  check string "17-byte threshold rotates the appended file" first
+    (Fs_compat.load_file (path ^ ".1"));
+  check string "new row is written to the fresh file" "{\"boot\":true}\n"
+    (Fs_compat.load_file path);
+  write second;
+  Keeper_types_support.maybe_rotate_file path;
+  check string "second rotation retains first content in the configured second backup"
+    first (Fs_compat.load_file (path ^ ".2"));
+  write_toml base_path "[metrics]\nmax_bytes = 99\n";
+  let changed = Keeper_runtime_config.settings_projection_to_yojson
+    (parse_or_fail "[metrics]\nmax_bytes = 99\n") in
+  let changed = changed |> to_list |> List.find (fun row ->
+    row |> member "env" |> to_string = "MASC_KEEPER_METRICS_MAX_BYTES") in
+  check string "file edit awaits restart" "pending_restart"
+    (changed |> member "application_status" |> to_string);
+  check string "file edit preserves the applied threshold" "17"
+    (changed |> member "effective_value" |> to_string);
+  write_toml base_path toml;
+  (* Environment precedence is a separate boot, not a reload of the snapshot. *)
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" (Some "11") @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_BYTES" (Some "100") @@ fun () ->
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "the environment preempts one setting at boot" 7 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let env_rows = Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail toml) in
+  List.iter (fun (env, status, expected) ->
+    let row = env_rows |> to_list |> List.find (fun row -> row |> member "env" |> to_string = env) in
+    check string (env ^ " status") status
+      (row |> member "application_status" |> to_string);
+    check string (env ^ " effective value") expected
+      (row |> member "effective_value" |> to_string))
+    [ "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC", "preempted_by_env", "11"
+    ; "MASC_KEEPER_METRICS_MAX_BYTES", "applied", "17" ];
+  check int "heartbeat consumer preserves environment precedence" 11
+    (Keeper_heartbeat_snapshot.keepalive_interval_sec ());
+  write first;
+  Keeper_types_support.append_jsonl_line path row;
+  check string "the file's threshold rotates though the environment says 100"
+    first (Fs_compat.load_file (path ^ ".1"));
+  check string "the appended row starts the fresh file"
+    "{\"boot\":true}\n" (Fs_compat.load_file path)
+;;
+
+let test_zero_retention_toml_reaches_legacy_jsonl_rotation () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_BYTES" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let toml = "[metrics]\nmax_bytes = 17\nmax_rotated = 0\n" in
+  write_toml base_path toml;
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "both metrics overrides applied" 2 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let open Yojson.Safe.Util in
+  let row = Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail toml)
+    |> to_list |> List.find (fun row -> row |> member "env" |> to_string = "MASC_KEEPER_METRICS_MAX_ROTATED") in
+  check string "zero is applied" "applied" (row |> member "application_status" |> to_string);
+  check string "zero is the effective retention" "0" (row |> member "effective_value" |> to_string);
+  let path = Filename.concat base_path "metrics.jsonl" in
+  Fs_compat.save_file path (String.make 17 'x');
+  Fs_compat.save_file (path ^ ".1") "previous";
+  Keeper_types_support.append_jsonl_line path (`Null);
+  check bool "no backup survives the zero retention rotation" false (Sys.file_exists (path ^ ".1"));
+  check string "new metric survives" "null\n" (Fs_compat.load_file path)
+;;
+
+let test_dated_metrics_toml_reaches_shared_writer () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_KEEPER_METRICS_STORE_MAX_BYTES" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let row i = `Assoc ["i", `Int i] in
+  let row_bytes = String.length (Yojson.Safe.to_string (row 1)) + 1 in
+  write_toml base_path (Printf.sprintf "[metrics]\nstore_max_bytes=%d\n" (2 * row_bytes));
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok count -> check int "dated-store override applied" 1 count
+   | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
+  let previous = Fs_compat.get_fs_opt () in
+  Fun.protect ~finally:(fun () ->
+    match previous with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
+    (fun () -> Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Workspace_core.default_config base_path in
+      List.iter (fun i -> Keeper_types_support.append_keeper_metrics config "metrics-toml" (row i))
+        [1; 2; 3; 4];
+      let store = Keeper_types_support.keeper_metrics_store config "metrics-toml" in
+      let values = Dated_jsonl.read_recent store 10
+        |> List.map (fun json -> Yojson.Safe.Util.(json |> member "i" |> to_int)) in
+      check (list int) "shared public reader sees retained metrics" [3; 4] values)
+;;
+
+let () =
+  run "runtime_toml_overrides"
+    [ ( "resolve_overrides"
+      , [ test_case "dated metrics TOML reaches the shared writer" `Quick
+            test_dated_metrics_toml_reaches_shared_writer
+        ; test_case "zero-retention TOML reaches legacy JSONL rotation" `Quick
+            test_zero_retention_toml_reaches_legacy_jsonl_rotation
+        ; test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
+        ; test_case "applies sleep/batch overrides" `Quick test_applies_sleep_and_batch_overrides
+        ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
+        ; test_case "applies the whole wire_capture table" `Quick
+            test_applies_wire_capture_overrides
+        ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
+        ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
+        ; test_case "current schema rejects unknown Keeper key" `Quick
+            test_current_schema_unknown_keeper_key_is_rejected
+        ; test_case "removed Keeper key is unknown" `Quick
+            test_removed_keeper_key_is_unknown
+        ; test_case "future schema preserves unknown key as warning" `Quick
+            test_future_schema_unknown_keeper_key_is_warning
+        ; test_case "unrelated namespaces remain separately owned" `Quick
+            test_unrelated_runtime_namespaces_are_not_claimed
+        ; test_case "provider binding under Keeper namespace remains separately owned" `Quick
+            test_runtime_provider_binding_under_keeper_namespace_is_not_claimed
+        ; test_case "boot enforces supervisor and rotation bounds" `Quick test_supervisor_and_rotation_bounds_reach_boot
+        ; test_case "strict readers fail during boot with or without TOML" `Quick test_strict_reader_validation_happens_at_boot
+        ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
+        ; test_case "boot settings reach consumers and projection" `Quick
+            test_boot_settings_reach_consumers_and_projection
+        ; test_case "every failure kind has a label" `Quick
+            test_every_failure_kind_has_a_label
+        ; test_case "rendering keeps the verb prefix" `Quick
+            test_rendering_keeps_the_verb_prefix
+        ; test_case "removed TOML overlay is pending restart" `Quick
+            test_removed_toml_overlay_is_pending_restart
+        ; test_case "settings projection uses typed effective values" `Quick
+            test_settings_projection_uses_typed_effective_values
+        ; test_case "turn rows project the boot store layer" `Quick
+            test_turn_rows_project_the_boot_store_layer
+        ; test_case "every registered setting reads in the projection" `Quick
+            test_every_registered_setting_reads_in_the_projection
+        ; test_case "a malformed provider call deadline is a configuration error" `Quick
+            test_a_malformed_provider_call_deadline_is_a_configuration_error
+        ; test_case "an out-of-range provider call deadline is a configuration error" `Quick
+            test_an_out_of_range_provider_call_deadline_is_a_configuration_error
+        ; test_case "a range refusal quotes the text the operator wrote" `Quick
+            test_a_range_refusal_quotes_the_text_the_operator_wrote
+        ; test_case "an out-of-range body deadline is a configuration error" `Quick
+            test_an_out_of_range_body_deadline_is_a_configuration_error
+        ; test_case "the provider call deadline applied from toml is read live" `Quick
+            test_the_provider_call_deadline_applied_from_toml_is_read_live
+        ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
+        ; test_case "float value round trip" `Quick test_float_value_round_trip
+        ; test_case "float application status uses numeric equality" `Quick
+            test_float_application_status_uses_the_numeric_value
+        ; test_case "close timeout values still obey freeze validation" `Quick
+            test_close_timeout_values_still_obey_the_freeze_rule
+        ; test_case "timeout recommendation covers both declared budgets" `Quick
+            test_timeout_recommendation_covers_both_declared_budgets
+        ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
+        ; test_case "resolved stream idle timeout defaults to fail-safe floor" `Quick test_resolved_stream_idle_timeout_defaults_to_failsafe_floor
+        ; test_case "resolved first-event timeout defaults to fail-safe floor" `Quick test_resolved_first_event_timeout_defaults_to_failsafe_floor
+        ; test_case "resolved provider-call threshold defaults to fail-safe floor" `Quick test_resolved_provider_call_deadline_defaults_to_failsafe_floor
+        ; test_case "a stream budget longer than the threshold is refused" `Quick test_a_stream_budget_longer_than_the_threshold_is_refused
+        ; test_case "a stream budget no threshold can cover is refused where it is read" `Quick test_a_stream_budget_no_threshold_can_cover_is_refused_where_it_is_read
+        ; test_case "a threshold covering the stream budgets is frozen" `Quick test_a_threshold_covering_the_stream_budgets_is_frozen
+        ; test_case "an explicit threshold under the floored budgets stands" `Quick test_an_explicit_threshold_under_the_floored_budgets_stands
+        ; test_case "resolved first-event timeout uses toml" `Quick test_resolved_first_event_timeout_uses_toml
+        ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
+        ; test_case "invalid stream idle TOML returns Error" `Quick test_stream_idle_timeout_invalid_toml_returns_error
+        ; test_case "wrong-type stream idle TOML returns Error" `Quick test_stream_idle_timeout_toml_wrong_type_returns_error
+        ; test_case "applies provider call deadline override (#27416)" `Quick
+            test_applies_provider_call_deadline_override
+        ; test_case "invalid provider call deadline TOML returns Error" `Quick
+            test_provider_call_deadline_invalid_toml_returns_error
+        ; test_case "resolved provider call deadline uses toml" `Quick
+            test_resolved_provider_call_deadline_uses_toml
+        ; test_case "resolved provider call deadline ignores env" `Quick
+            test_resolved_provider_call_deadline_ignores_env
+        ; test_case "resolved runtime ignores env for a file-owned setting" `Quick
+            test_resolved_runtime_ignores_env_for_a_file_owned_setting
+        ; test_case "resolved stream idle timeout does not clamp" `Quick test_resolved_stream_idle_timeout_does_not_clamp
+        ; test_case "resolved stream idle timeout below floor preserved" `Quick test_resolved_stream_idle_timeout_below_floor_preserved
+        ; test_case "invalid stream idle value fails loud" `Quick test_resolved_stream_idle_timeout_invalid_value_fails_loud
+        ; test_case "empty stream idle value fails loud" `Quick test_resolved_stream_idle_timeout_empty_value_fails_loud
+        ; test_case "whitespace stream idle value fails loud" `Quick test_resolved_stream_idle_timeout_whitespace_value_fails_loud
+        ; test_case "preview precondition matches save (#28225)" `Quick
+            test_preview_precondition_matches_save
+        ; test_case "wake prompt is readable in the settings panel (#28413)" `Quick
+            test_wake_prompt_is_readable_in_the_settings_projection
+        ; test_case "wiki contents switch turns the wiki paragraph off" `Quick
+            test_wiki_contents_switch_turns_the_wiki_paragraph_off
+        ] )
+    ]

@@ -1,0 +1,30 @@
+{
+  "binarySourceCommit": "5e2483c8857a18c0e7e8391a8fa5f7b77b1bf748",
+  "binarySha256": "94683d3e0b52b2e17d7ceee390d0d80f3aa60751ec3ed4e51e45f0a753a685ea",
+  "sourceTree": "97cccd0bc422104605663ba6fbd930c0f429bd37",
+  "nativeBuildRun": 39193931417,
+  "compiledTestsHead": "7782a9702726a92091efd7fd767a416b8a2abb23",
+  "compiledTestsRun": 39194397496,
+  "compiledSuites": {
+    "test_published_artifact": 7,
+    "test_keeper_runtime_schemas_toml_parity": 3,
+    "test_keeper_tool_descriptor_registry_integrity": 59
+  },
+  "dashboardBuildIdentity": {
+    "schema": "masc.dashboard-build.v1",
+    "source_commit": "5e2483c8857a18c0e7e8391a8fa5f7b77b1bf748"
+  },
+  "dashboardHealthStatus": "ok",
+  "createPid": 69736,
+  "stoppedProcess": {
+    "pid": 69736,
+    "signal": "SIGTERM",
+    "requestedAt": "2026-10-19T03:31:15.768227+00:00",
+    "exitCode": 0,
+    "exitedAt": "2026-10-19T03:31:22.080764+00:00"
+  },
+  "resumePid": 70999,
+  "harnessSha256": "c26b9d265d8e05a5e3c23f53396afee3b0637e2631c2a5d8454479f2c02b27bf",
+  "browserScenario": "real HTTP and production dashboard; no HTTP mocks or model calls",
+  "productionDeployed": false
+}

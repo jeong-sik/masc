@@ -1,0 +1,14 @@
+{
+  "runtime_source_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+  "runtime_artifact_run": 40103050048,
+  "runtime_artifact_id": 12564165545,
+  "artifact_digest": "sha256:990f723c21e3400141d9c17f11a1ae6bb9493d2256da3dad3eb0165f0be625e3",
+  "runtime_binary_sha256": "d27fb1565ca8eb220cd751edb83ab193cb43932d8b9ec50fa9ae25067b38a669",
+  "consumer_test_run": 40103048786,
+  "harness_sha256": "52ecdd8c3cf670f4b3d95aeae7eff67b1dc4b82f8390ed6897bfc7aa35d0898c",
+  "helper_sha256": "7f38f121a33cc6e2d8828f94b56706ad9b4cc38c2ffde1cc4ca7d15e0ff3c870",
+  "shim_sha256": "ad79352d398d00eb48eebdf0bc29faacd3b4de633349e377ed81d560dc379183",
+  "shim_provenance": "preexisting ARM64 artifact; candidate source build unverified",
+  "release_verified": false,
+  "production_installed": false
+}

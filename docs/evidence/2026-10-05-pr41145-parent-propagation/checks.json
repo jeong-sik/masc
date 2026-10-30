@@ -1,0 +1,14 @@
+{
+  "head": "1270dc3d2de2705db4388705d4c130ea0a0100f4",
+  "parent": "026a52a548665de62a00d98aa0a47050a2db77d6",
+  "tests": 7,
+  "web_exit": 0,
+  "tsc_exit": 0,
+  "files": {
+    "web2.log": "fc55927305f528b1ce41ed3887e6bb566db46b488f6944bddd28239f9f5db98b",
+    "web.log": "adf32bb28ccc842944b3205e59ea8424097c69301b4716c4495433dc1b37a953",
+    "README.md": "73319ebe99d7bcdcd37f03e56ded7e7699b807163b7d77152922df10419a8831",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "install.log": "10e61a99c90c5b4a1ed3b5b3729d1136379116ab74a0960ea007fed1ec81d095"
+  }
+}

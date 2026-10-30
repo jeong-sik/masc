@@ -1,0 +1,17 @@
+# MCP executor profile membership
+
+Scope: #25930 and absorbed #22179's existing profile contract, base main `3cce9a517b25863c00b48cfb3dd79b994ebc1044`.
+
+The upper MCP protocol checks `tool_allowed_in_profile` before handling built-in tools. The inner executor previously used this predicate for choosing restricted identity authority but did not reject a denied profile: a denied Operator/Seat call fell back to catalog policy and could execute a direct-callable tool. gRPC's actual production callback enters the executor directly with its existing Full default, bypassing the upper protocol's full inventory/visibility check.
+
+The executor now captures the existing profile decision once, retains caller resolution/non-public audit, and rejects with Policy_rejection/Proven_pre_effect before tool authorization, dispatch hooks or tool effects. It neither selects a new gRPC profile nor grants identity. Existing HTTP/WS early admission remains for its method-not-found wire envelope. The internal-runtime flag requires bearer proof for identity and does not bypass membership; stale contrary interface prose is corrected.
+
+The defined feature case calls the actual executor with a real admin token. Operator_remote and Seat refuse the actual help tool; Full refuses an unregistered name. Each refusal is tested with the internal-runtime flag false and true and must never enter a real dispatch pre-hook. The same Full help call executes its actual handler and reaches that hook once. The fixture uses the existing auth-disabled state helper; the token alone is not proof of role-auth enforcement. It does not exercise actual gRPC network ToolCall, bearer/session propagation, an inactive registered Full tool, live installed code, or GitHub command policy. Those are separate unresolved acceptance.
+
+Three changed OCaml interface/source files parse and whitespace passes; hashes are in source-checks.json. No local Dune/typecheck/new execution. Selected suites are existing tool dispatch and seat profile suites. Full regression is unrun. No before-fix test execution or live exploit is claimed. This is an existing declared permission enforcement repair, not a new credential, role or destructive-command policy. #25930 stays open; original #22179's undecided gRPC profile/auth choices and #23306's broader GitHub issues are not resolved here.
+
+## Initial selected run and fixture type repair
+
+[Run40162337813](https://github.com/jeong-sik/masc/actions/runs/40162337813) checked out `62fb1c616785a4fe723bf02f5ca4c54371861bff`. Existing Seat profile suite actually passed12 cases, including authenticated Player/tool behavior. The overall run FAILED before the new tool-dispatch cases ran: the public Mcp_server_eio facade exposes its own tool_profile type, while the predicate uses shared Mcp_server_eio_types.tool_profile. The new fixture mixed those types. It now calls the actual common Mcp_server_eio_execute entry, whose public signature accepts that shared type. No production type/export/behavior was changed. Prior SOURCE COMMENT5641515257 missed the fixture blocker and is superseded for compilability. Actual successful Seat summaries and compiler diagnostic are retained here.
+
+Follow-up requests only the failed tool_dispatch suite. The unchanged Seat test and unchanged production sources retain their old-head12-case evidence; this is not a claim that all selected suites ran on the repaired head. Repaired-head execution remains unobserved.

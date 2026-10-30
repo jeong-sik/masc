@@ -1,0 +1,20 @@
+{
+  "schema": "masc.task-source.native-failure.v1",
+  "source": "a2bfd30359b0e06d31c6e88cdc6f4501dc950e03",
+  "run": 40194054307,
+  "job": 121170992501,
+  "result": "COMPILE_FAILURE",
+  "tests_executed": 0,
+  "diagnostic": {
+    "file": "test/test_verification_collaboration_evidence.ml",
+    "line": 204,
+    "kind": "warning10_non_unit_statement_as_error",
+    "detail": "Fs_compat.save_file_atomic returns Result; the negative fixture ignored it."
+  },
+  "repair": "Require the Result success before the damaged-primary recovery control.",
+  "raw": {
+    "bytes": 151072,
+    "sha256": "46b1e5e384461aaedb0eeae8a357eb8798b4f841e971bc4cb639e388cbdcdca0"
+  },
+  "full_regression": "not_run"
+}

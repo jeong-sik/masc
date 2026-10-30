@@ -1,0 +1,233 @@
+module Endpoint = Ws_direct_core.Endpoint
+module Message = Ws_direct_core.Connection.Message
+open Result.Syntax
+exception Stop
+let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
+let string key json = match field key json with
+  | Some (`String value) when value <> "" -> Ok value
+  | _ -> Error ("BiDi missing string: " ^ key)
+
+(* The request a network event says an intercept holds. Every intercept on this
+   session comes from [block], so every held request is one to fail. Its
+   intercept id is not checked: the addIntercept reply can arrive after the
+   first request that intercept holds. *)
+let held_request params =
+  match field "isBlocked" params, Option.bind (field "request" params) (field "request") with
+  | Some (`Bool true), Some (`String request) when request <> "" -> Some request
+  | _ -> None
+
+let verify_file ~root path =
+  try
+    let root = Unix.realpath root in
+    let stat = Unix.lstat path in
+    let canonical = Unix.realpath path in
+    if stat.Unix.st_kind <> Unix.S_REG then Error "download is not a regular file"
+    else if not (String.starts_with ~prefix:(root ^ Filename.dir_sep) canonical)
+    then Error "download path is outside session staging"
+    else Ok (canonical, stat.Unix.st_size)
+  with
+  | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
+  | Sys_error detail -> Error detail
+
+let not_a_loopback_endpoint = "Firefox must return a loopback ws URL with an explicit port"
+
+let endpoint_uri url =
+  (* [Uri.of_string] is meant to take any string. uri 4.4.0 raises [Failure]
+     on a dotted host with a number too large for an int
+     ("ws://127.0.0.99999999999999999999:9222/"). Such a string is no address. *)
+  match Uri.of_string url with
+  | exception Failure _ -> Error not_a_loopback_endpoint
+  | uri ->
+    (match Uri.scheme uri, Uri.host uri, Uri.port uri, Uri.userinfo uri, Uri.fragment uri with
+     (* Firefox reports whatever it bound. The three literals this used to list
+        are narrower than the error below claims and narrower than
+        [is_loopback_host], which is the one place that decides this (#27576). *)
+     | Some "ws", Some host, Some port, None, None
+       when Masc_network_defaults.is_loopback_host host
+            && port > 0 && port <= 65535 ->
+       let resource = Uri.path_and_query uri in
+       if resource = "" || resource.[0] <> '/' then Error "invalid BiDi WebSocket path"
+       else Ok (uri, (host, port, resource))
+     | _ -> Error not_a_loopback_endpoint)
+
+let endpoint url = Result.map snd (endpoint_uri url)
+
+(* Network deadlines bound individual protocol requests, never download
+   lifetime. A pending download survives caller polling and becomes interrupted
+   only when its evidence stream closes. *)
+let command_timeout = 20.
+
+(* A reply that arrived as the deadline passed is the reply: the session is
+   interrupted only for a command that got none. *)
+let reply_within ~clock ~timeout_s reply =
+  Watched_work.run
+    ~watcher:(fun () -> Eio.Time.sleep clock timeout_s; Error `Timeout)
+    (fun () -> Ok (Eio.Promise.await reply))
+let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
+  let* host, port, resource = endpoint websocket_url in
+  let ready, ready_u = Eio.Promise.create () in
+  let stopped, stopped_u = Eio.Promise.create () in
+  let model = Browser_downloads.create () in
+  let console = Browser_console.create () in
+  let network = Browser_network.create () in
+  let failure = ref None in
+  let pending = Hashtbl.create 4 in
+  let disconnect reason =
+    if !failure = None then (
+      failure := Some reason;
+      Browser_downloads.interrupt model reason;
+      Hashtbl.iter (fun _ resolver -> Eio.Promise.resolve resolver (Error reason)) pending;
+      Hashtbl.clear pending);
+    if Eio.Promise.peek stopped = None then Eio.Promise.resolve stopped_u () in
+  let publish result = if Eio.Promise.peek ready = None then Eio.Promise.resolve ready_u result in
+  Eio.Fiber.fork ~sw (fun () ->
+    try Eio.Switch.run (fun session_sw ->
+      Eio.Switch.on_release session_sw (fun () ->
+        disconnect "Firefox BiDi session closed";
+        publish (Error "Firefox BiDi setup was interrupted"));
+      let setup () =
+        Crypto_rng.ensure_default ();
+        let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
+        let addr = match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
+          | addr :: _ -> addr | [] -> failwith "BiDi loopback address unavailable" in
+        (* A socket connected as the deadline passed is the socket: the setup
+           goes on with it instead of failing the download session for a
+           connection it already has. *)
+        let flow =
+          match
+            Watched_work.run
+              ~watcher:(fun () -> Eio.Time.sleep clock command_timeout; Error `Timeout)
+              (fun () -> Ok (Eio.Net.connect ~sw:session_sw net addr))
+          with
+          | Ok flow -> flow
+          | Error `Timeout -> raise Eio.Time.Timeout in
+        (* Failing a held request is a command whose reply this message loop
+           reads, so the loop only queues it and the fiber below sends it. *)
+        let held = Eio.Stream.create max_int in
+        let on_message (message : Message.t) =
+          if !failure <> None then () else
+          let result = match message.kind with
+            | Message.Binary -> Error "BiDi sent a binary message"
+            | Message.Text ->
+              (match Yojson.Safe.from_string (Bigstringaf.to_string message.payload) with
+               | exception Yojson.Json_error detail -> Error ("invalid BiDi JSON: " ^ detail)
+               | json ->
+                 match field "type" json with
+                 | Some (`String "event") ->
+                   let* method_ = string "method" json in
+                   (match field "params" json with
+                    | Some params when method_ = Browser_console.subscribed_method -> Ok (Browser_console.event console params)
+                    | Some params when List.mem method_ Browser_network.subscribed_methods ->
+                      Option.iter (Eio.Stream.add held) (held_request params);
+                      Ok (Browser_network.event network ~method_ params)
+                    | Some params -> Browser_downloads.event model ~method_ params
+                    | None -> Error "BiDi event lacks params")
+                 | Some (`String ("success" | "error" as kind)) ->
+                   (match field "id" json with
+                    | Some (`Int id) ->
+                      (match Hashtbl.find_opt pending id with
+                       | None -> Ok ()
+                       | Some resolver ->
+                         Hashtbl.remove pending id;
+                         let result = if kind = "success" then
+                           (match field "result" json with Some result -> Ok result | None -> Error "BiDi response lacks result")
+                         else let* code = string "error" json in
+                           let detail = match field "message" json with Some (`String s) -> s | _ -> "" in
+                           Error (code ^ ": " ^ detail) in
+                         Eio.Promise.resolve resolver result; Ok ())
+                    | _ -> Error "BiDi response lacks integer id")
+                 | _ -> Error "BiDi response has unknown type") in
+          match result with Ok () -> () | Error reason -> disconnect reason in
+        let builder _ = Endpoint.handlers ~on_message
+          ~on_close:(fun ~code:_ ~reason -> disconnect ("Firefox BiDi closed: " ^ reason))
+          ~on_error:disconnect ~on_eof:(fun () -> disconnect "Firefox BiDi EOF") () in
+        let authority = (if host = "::1" then "[::1]" else host) ^ ":" ^ string_of_int port in
+        let wsd = Ws_direct_eio.Client.connect ~sw:session_sw ~clock
+            ~host:authority ~resource ~max_message:(1024 * 1024) flow builder in
+        let next = ref 0 in
+        let command method_ params =
+          match !failure with
+          | Some reason -> Error reason
+          | None ->
+            incr next;
+            let id = !next in
+            let reply, resolver = Eio.Promise.create () in
+            Hashtbl.add pending id resolver;
+            Endpoint.Wsd.send_text wsd (Yojson.Safe.to_string
+              (`Assoc ["id",`Int id;"method",`String method_;"params",params]));
+            (match reply_within ~clock ~timeout_s:command_timeout reply with
+             | Ok reply -> reply
+             | Error `Timeout ->
+               disconnect ("BiDi command timed out: " ^ method_); Error ("BiDi command timed out: " ^ method_)) in
+        Eio.Fiber.fork ~sw:session_sw (fun () ->
+          let rec fail_held () =
+            let request = Eio.Stream.take held in
+            (* BiDi's only error for failing a request held before it was sent
+               is "no such request": it already ended, so nothing is left to
+               fail. A lost connection disconnects the session in [command]. *)
+            ignore (command "network.failRequest" (`Assoc ["request",`String request]) : (Yojson.Safe.t, string) result);
+            fail_held () in
+          fail_held ());
+        let block ~context ~hosts =
+          let* added = command "network.addIntercept" (`Assoc ["phases",`List [`String "beforeRequestSent"];
+            "contexts",`List [`String context];
+            "urlPatterns",`List (List.map (fun host -> `Assoc ["type",`String "pattern";"hostname",`String host]) hosts)]) in
+          string "intercept" added in
+        let unblock ~intercept =
+          Result.map ignore (command "network.removeIntercept" (`Assoc ["intercept",`String intercept])) in
+        let* _ = command "session.subscribe" (`Assoc ["events",`List (List.map (fun name -> `String name)
+          ((Browser_console.subscribed_method :: Browser_network.subscribed_methods)
+           @ List.map snd Browser_downloads.subscribed_methods))]) in
+        let* tree = command "browsingContext.getTree" (`Assoc []) in
+        let* () = Browser_downloads.add_tree model tree in
+        let directory = Eio_unix.run_in_systhread (fun () ->
+          Fs_compat.mkdir_p root;
+          (* Session IDs are opaque remote data, never pathname components. *)
+          let path = Filename.concat root (Digest.to_hex (Digest.string session_id)) in
+          Unix.mkdir path 0o700;
+          Unix.realpath path) in
+        let* _ = command "browser.setDownloadBehavior" (`Assoc ["downloadBehavior",`Assoc
+          ["type",`String "allowed";"destinationFolder",`String directory]]) in
+        let check () = match !failure with None -> Ok () | Some reason -> Error reason in
+        let artifacts = Hashtbl.create 16 in
+        let read ~context =
+          let rows = Browser_downloads.for_context model context in
+          let verify path = Eio_unix.run_in_systhread (fun () -> verify_file ~root:directory path) in
+          let records = List.map
+            (Browser_downloads.published_json ~verify ~publish:publish_artifact ~published:artifacts) rows in
+          let state = !failure in
+          Ok (`Assoc ["sessionId",`String session_id;"downloads",`List records;
+            "observation",`String (if state = None then "connected" else "interrupted");
+            "reason",(match state with None -> `Null | Some reason -> `String reason)]) in
+        (* Like [read], this stays readable after the stream is interrupted, and says so. *)
+        let with_observation json =
+          let state = !failure in
+          match json with
+          | `Assoc fields ->
+            Ok (`Assoc (fields @ ["observation",`String (if state = None then "connected" else "interrupted");
+              "reason",(match state with None -> `Null | Some reason -> `String reason)]))
+          | other -> Ok other in
+        let read_console ~context = with_observation (Browser_console.to_json console ~context) in
+        let read_network ~context = with_observation (Browser_network.to_json network ~context) in
+        Ok Browser_downloads.{read;console=read_console;network=read_network;check;command;block;unblock;close=(fun () -> disconnect "Firefox session closed")} in
+      let result =
+        try setup () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        (* A peer can accept TCP and close before sending its HTTP upgrade
+           response. ws-direct's handshake reader raises EOF directly. *)
+        | End_of_file -> Error "EOF during Firefox BiDi setup"
+        | Eio.Io _ as exn -> Error (Printexc.to_string exn)
+        | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
+        | Sys_error detail | Failure detail -> Error detail
+        | Eio.Time.Timeout -> Error "BiDi connection timed out" in
+      publish result;
+      (match result with Ok _ -> Eio.Promise.await stopped | Error _ -> ());
+      raise Stop)
+    with Stop -> ());
+  try Eio.Promise.await ready with
+  | Eio.Cancel.Cancelled _ as exn -> disconnect "BiDi setup caller canceled"; raise exn
+
+module For_testing = struct
+  let reply_within = reply_within
+  let held_request = held_request
+end

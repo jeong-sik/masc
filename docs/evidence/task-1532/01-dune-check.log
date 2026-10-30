@@ -1,0 +1,6 @@
+# receipt: test_media_document_admission (task-1532)
+branch=polish/task-1532-audio-expectation head=8c8b9ee02802f727a36d2cc931722cd0288efab5
+utc=2026-09-11T19:25:29Z
+
+% dune build @check
+exit=0

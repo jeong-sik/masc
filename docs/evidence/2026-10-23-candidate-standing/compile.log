@@ -1,0 +1,3 @@
+opam exec -- ocamlopt -I +unix -w +4+32+69 -warn-error +a unix.cmxa check.ml -o check.exe
+
+exit=0

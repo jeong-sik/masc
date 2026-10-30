@@ -1,0 +1,323 @@
+name: Merge compile
+
+run-name: Merge compile on ${{ inputs.sha }} for PR #${{ inputs.pr }} [${{ github.ref_name }}] by ${{ github.actor }}
+
+# Third-party actions float on major tags house-wide (every workflow does);
+# pinning four of them here while the rest of the repo floats would attest
+# nothing. The gate's decisive inputs are pinned instead: the head tree by
+# SHA, the executing toolchain byte-identical to main (see below), and the
+# OCaml dependency graph by masc.opam.locked. No os-packages input is
+# passed, so no apt install runs in this workflow at all.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact merge-head SHA to compile (top head for stacks)
+        required: true
+        type: string
+      pr:
+        description: PR number the head belongs to; 0 means a bare reachable SHA with no PR (live-proof dispatch)
+        required: true
+        type: string
+      trust-head-toolchain:
+        description: Skip the toolchain-identity check (toolchain PRs only; recorded in the settled status and receipt)
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    # Cold compiler/dependency installation can take much longer than a warm
+    # build. This is a stalled-job backstop, not the expected build duration.
+    timeout-minutes: 90
+    outputs:
+      proof_only: ${{ steps.validate.outputs.proof_only }}
+    env:
+      DUNE_JOBS: '4'
+      # Keep user-written rules (including generated build identity) live.
+      DUNE_CACHE: enabled-except-user-rules
+    steps:
+      - name: Validate dispatch and pin pending status
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ inputs.sha }}
+          PR: ${{ inputs.pr }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          # Only the workflow file on main may write merge-compile statuses:
+          # a branch-ref run proves the mechanics (checkout, toolchain
+          # identity, build) and reports in-run, but writes no status, so a
+          # forged workflow file can never mint a record the guard reads.
+          proof_only = os.environ['GITHUB_REF'] != 'refs/heads/main'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'proof_only={str(proof_only).lower()}\n')
+          sha = os.environ['SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', sha):
+              raise SystemExit('sha must be an exact 40-hex head')
+          if not re.fullmatch(r'(0|[1-9][0-9]*)', os.environ['PR']):
+              raise SystemExit('pr must be a PR number or 0 for a bare-SHA proof')
+          if proof_only:
+              print(f"proof run from {os.environ['GITHUB_REF']}: no status will be written")
+              raise SystemExit(0)
+          # Pin pending BEFORE building, so a failing build still leaves the
+          # guard holding until the always()-settle resolves it. An invalid
+          # dispatch never pins: no status is written for a bogus SHA.
+          body = json.dumps({
+              'state': 'pending', 'context': 'merge-compile',
+              'description': 'Merge compile is running',
+              'target_url': os.environ['RUN_URL'],
+          }).encode()
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/{os.environ["REPOSITORY"]}/commits/{sha}/statuses',
+              data=body, method='POST',
+              headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                       'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              if response.status != 201:
+                  raise SystemExit(f'status pin failed for {sha}: {response.status}')
+              print(f'pinned merge-compile pending on {sha[:12]}')
+          PY
+
+      # Pull refs exist on origin for same-repo and fork PRs alike, unlike a
+      # raw SHA fetch, so this is the fork-safe way to reach the head. The
+      # next step binds the tree to the dispatched SHA so a head that moved
+      # between dispatch and checkout is re-dispatched, not mis-certified.
+      # pr=0 is the bare-SHA live proof (main tip, no PR): reachable SHAs
+      # fetch directly.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.pr != '0'
+        with:
+          ref: refs/pull/${{ inputs.pr }}/head
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.pr == '0'
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+
+      - name: Bind the tree to the exact head
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          [ "$head" = "$SHA" ] || { echo "checked-out $head is not the dispatched $SHA; re-dispatch on the current head" >&2; exit 1; }
+
+      # The composite actions and their scripts below execute from THIS
+      # checkout. Byte-compare every executed path against main's tip so a
+      # head can never ship the toolchain that certifies it: .github/actions
+      # (all three composite actions plus install.sh) and the two scripts
+      # they invoke. Build inputs (*.opam, dune-project, sources) stay the
+      # head's on purpose — the toolchain cache key already folds their
+      # hashes in. A toolchain PR fails here by design; it re-dispatches
+      # with trust-head-toolchain=true, which the settle step records.
+      - name: Prove the toolchain matches main
+        if: inputs.trust-head-toolchain != true
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          if ! git diff --quiet origin/main HEAD -- .github/actions scripts/opam-pin-external-deps.sh scripts/ci/opam-cache-freshness.sh; then
+            echo 'toolchain differs from main:' >&2
+            git diff --name-only origin/main HEAD -- .github/actions scripts/opam-pin-external-deps.sh scripts/ci/opam-cache-freshness.sh >&2
+            echo 'land the toolchain change first, or re-dispatch with trust-head-toolchain=true (recorded override)' >&2
+            exit 1
+          fi
+
+      - name: Identify build inputs
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Identical to main-minimal-build: conservatively include every
+          # tracked file except documentation and changelog. The receipt key
+          # shares that workflow's namespace on purpose, so a main build
+          # warms merge checks and vice versa: identical inputs mean an
+          # identical compile result, whichever SHA was actually built.
+          # This digest is computed early so a receipt hit can skip the
+          # toolchain entirely; the pristine-tree assertion after setup
+          # proves the tree the build reads is still the digest's tree.
+          digest=$(python3 - <<'PY'
+          import hashlib, subprocess
+          entries = subprocess.check_output(['git', 'ls-tree', '-r', '-z', 'HEAD']).split(b'\0')
+          inputs = []
+          for entry in entries:
+              if not entry:
+                  continue
+              path = entry.split(b'\t', 1)[1]
+              if path.startswith((b'docs/', b'docs-site/', b'changelog.d/')) or path == b'CHANGELOG.md':
+                  continue
+              inputs.append(entry + b'\0')
+          print(hashlib.sha256(b''.join(inputs)).hexdigest())
+          PY
+          )
+          echo "receipt=main-build-receipt-v1-${ImageOS}-${ImageVersion}-${digest}" >> "$GITHUB_OUTPUT"
+          echo "dune=main-dune-v1-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+          echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache" >> "$GITHUB_ENV"
+
+      # The receipt lives outside the tree on purpose: the pristine-tree
+      # assertion below requires a completely clean workspace, and the
+      # cache key (identical to main-minimal-build's namespace) is what
+      # makes receipts interchangeable, not the file path.
+      - name: Look for a successful build of these inputs
+        id: receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/.ci-main-build-receipt
+          key: ${{ steps.inputs.outputs.receipt }}
+
+      - uses: ./.github/actions/setup-ocaml-toolchain
+        if: steps.receipt.outputs.cache-hit != 'true'
+      - uses: ./.github/actions/pin-ocaml-deps
+        if: steps.receipt.outputs.cache-hit != 'true'
+      - uses: ./.github/actions/install-ocaml-deps
+        if: steps.receipt.outputs.cache-hit != 'true'
+
+      - name: Reuse Dune build artifacts
+        if: steps.receipt.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/masc-dune-cache
+          key: ${{ steps.inputs.outputs.dune }}-${{ inputs.sha }}
+          restore-keys: |
+            ${{ steps.inputs.outputs.dune }}-
+
+      # The toolchain above is byte-identical to main's (proven two steps
+      # up, unless the recorded override was passed), but it still runs
+      # before the build it is about to certify. The receipt lives outside
+      # the tree, so legitimately nothing in the workspace is new or
+      # modified; refuse rather than certify a tree the setup steps
+      # mutated. On a receipt hit nothing runs here, so this passes
+      # trivially and costs nothing.
+      - name: Prove the tree still matches the head
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$SHA" ] || { echo 'HEAD moved during setup' >&2; exit 1; }
+          [ -z "$(git status --porcelain)" ] || { echo 'workspace modified during setup:' >&2; git status --porcelain >&2; exit 1; }
+
+      - name: Build the operator executables
+        if: steps.receipt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          opam exec -- dune build --root . \
+            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/deployment_preflight_helper.exe
+          # Record the SHA that was actually built: GITHUB_SHA is main's
+          # (the dispatch ref), not the checked-out head.
+          printf '%s\n' "${{ inputs.sha }}" > "${{ runner.temp }}/.ci-main-build-receipt"
+
+      # Only a completed successful build creates a receipt. A failed build
+      # settles the head red; the author repairs the head and dispatches again.
+      # The save races a parallel run with identical inputs; losing that race
+      # must not fail an otherwise green compile, so report but ignore it.
+      - name: Remember successful build inputs
+        if: success() && steps.receipt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/.ci-main-build-receipt
+          key: ${{ steps.inputs.outputs.receipt }}
+
+      - name: Record checked scope
+        if: always()
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          BUILD_STATUS: ${{ job.status }}
+          TOOLCHAIN_OVERRIDE: ${{ inputs.trust-head-toolchain }}
+        run: |
+          {
+            echo "Checked merge-head SHA: ${{ inputs.sha }} (PR #${{ inputs.pr }})"
+            [ "$TOOLCHAIN_OVERRIDE" = true ] && echo 'Toolchain: HEAD SUPPLIED (operator override trust-head-toolchain=true)' || echo 'Toolchain: byte-identical to main'
+            if [ "$RECEIPT_HIT" = true ]; then
+              echo 'Build skipped: non-documentation inputs already built successfully.'
+              echo "Previously built SHA: $(cat "${{ runner.temp }}/.ci-main-build-receipt")"
+              echo 'Identical inputs mean an identical compile result, so this skip IS compilation evidence for the checked SHA.'
+            else
+              echo "Build job status: $BUILD_STATUS"
+              echo 'Scope: server, TUI, browser host, deployment preflight; no tests.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  settle:
+    name: Settle the merge-compile status
+    needs: [compile]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Write verdict and settle the head status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ inputs.sha }}
+          PR: ${{ inputs.pr }}
+          COMPILE_RESULT: ${{ needs.compile.result }}
+          TOOLCHAIN_OVERRIDE: ${{ inputs.trust-head-toolchain }}
+          PROOF_ONLY: ${{ needs.compile.outputs.proof_only }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          from pathlib import Path
+          sha = os.environ['SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', sha):
+              raise SystemExit('refusing to settle a malformed SHA')
+          # Fail closed: anything but a successful compile job settles red,
+          # including cancellation and infra failure. Re-dispatch replaces it.
+          passed = os.environ['COMPILE_RESULT'] == 'success'
+          override = os.environ['TOOLCHAIN_OVERRIDE'] == 'true'
+          proof_only = os.environ['PROOF_ONLY'] == 'true'
+          receipt = {'schema_version': 1, 'sha': sha, 'pr': os.environ['PR'],
+                     'actor': os.environ['GITHUB_ACTOR'], 'compile': os.environ['COMPILE_RESULT'],
+                     'checks_passed': passed, 'run_id': os.environ['GITHUB_RUN_ID'],
+                     'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+                     'toolchain_override': override, 'proof_only': proof_only,
+                     'workflow_ref': os.environ['GITHUB_REF']}
+          Path('merge-compile-results.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          state = 'success' if passed else 'failure'
+          if passed and override:
+              description = 'Four executables built (head toolchain override)'
+          else:
+              description = 'Four executables built' if passed else 'Merge compile failed'
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(f'merge-compile {sha[:12]} (PR #{os.environ["PR"]}): {state}\n')
+          if proof_only:
+              print(f'proof run from {os.environ["GITHUB_REF"]}: verdict {state}, no status written')
+              raise SystemExit(0)
+          body = json.dumps({
+              'state': state, 'context': 'merge-compile',
+              'description': description,
+              'target_url': os.environ['RUN_URL'],
+          }).encode()
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/{os.environ["REPOSITORY"]}/commits/{sha}/statuses',
+              data=body, method='POST',
+              headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                       'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              if response.status != 201:
+                  raise SystemExit(f'status settle failed for {sha}: {response.status}')
+              print(f'settled merge-compile on {sha[:12]} -> {state}')
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: merge-compile-results-${{ inputs.sha }}-${{ github.run_attempt }}
+          path: merge-compile-results.json
+          if-no-files-found: error
+      - name: Require the compile to pass
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raise SystemExit(0 if json.loads(Path('merge-compile-results.json').read_text())['checks_passed'] else 1)
+          PY

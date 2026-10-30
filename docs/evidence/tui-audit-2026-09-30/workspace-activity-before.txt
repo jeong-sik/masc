@@ -1,0 +1,38 @@
+Binary: frozen copy /tmp/tui-workspace-activity-baseline/masc-tui from installed binary
+Build commit: 86751f610442e4d82992ebc54bf9eb8ba45ef6d2
+Binary SHA256 (same before/after): 96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b
+Fixture source head: c6677251ad98639c7cbc4390eecef7c690390caa
+Raw log SHA256: 36716fadc7057572e57d357f6133a5c3c4be1b09237f79484f6df0bb8e08a59d
+Provenance: isolated temporary fixture PTY, 100x30 color. Not active user session or production data.
+Result: original path-tail loss reproduced after durable Task-ready barrier and 3 loaded records/0 read failures/0 malformed. No repaired head or full matrix proof.
+
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace / Activity · masc                                                                 
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Last 24h · 3 recorded changes · 2 successful · 0 Keeper reads failed · 0 unparsed calls         
+    Changes by Keeper: alpha 3                                                                      
+    Recorded clone writes from loaded Keepers · Enter opens file; H history, m notes in Code        
+    DATE              KEEPER             TASK             FILE                                      
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    2026-08-25 04:36 alpha              task-linked      lib/long-한글-long-한글-long-한글-long- …  
+    2026-08-25 04:35 alpha              task-9           lib/second.ml                              
+    2026-08-25 04:33 alpha              task-1           lib/example.ml                             
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    lib/long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글-long-한글…  
+
+  j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories  | Port: 61836
+ › to alpha   (i to write)                                                                          

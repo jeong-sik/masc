@@ -1,0 +1,233 @@
+(** Regression coverage for #10358 task lifecycle telemetry attrition. *)
+
+open Masc
+
+(* The [done] transition runs the configured-LLM completion review (#24332),
+   which renders the [verification] registry prompt. This executable
+   exercises the real tool-dispatch path,. Loading them into the registry is
+   what [Prompt_defaults.init] does below; the registry locates
+   config/prompts itself under Dune. *)
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.putenv name "");
+      f ())
+
+let with_isolated_runtime_env f =
+  with_env "MASC_BASE_PATH" None f
+
+let with_default_runtime_id_hook f =
+  let previous = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+  let previous_lane_slots =
+    Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.get_default_runtime_id_fn previous;
+      Atomic.set
+        Workspace_hooks.get_verifier_exact_lane_slots_fn
+        previous_lane_slots)
+    (fun () ->
+      Atomic.set Workspace_hooks.get_default_runtime_id_fn
+        (fun () -> "test-evaluator-runtime");
+      (* RFC-0361 D7(a): completion review resolves only the verifier_exact
+         lane, so the review-driving tests below must supply its slots. *)
+      Atomic.set
+        Workspace_hooks.get_verifier_exact_lane_slots_fn
+        (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-evaluator-runtime" ]));
+      f ())
+
+let make_ctx base_path =
+  let config = Workspace.default_config base_path in
+  let agent_name = "telemetry-agent" in
+  ignore (Workspace.init config ~agent_name:(Some agent_name));
+  { Task.Tool.config; agent_name; sw = None }
+
+(* [evidence_refs] are transported to the LLM completion reviewer. This test
+   covers the telemetry lifecycle, so it supplies representative reviewer
+   context without asserting a local evidence-classification rule. *)
+let run_transition ctx ~task_id ~action ?(notes = "") ?(evidence_refs = []) () =
+  let base_args =
+    [
+      ("task_id", `String task_id);
+      ("action", `String action);
+      ("notes", `String notes);
+    ]
+  in
+  let args =
+    match evidence_refs with
+    | [] -> `Assoc base_args
+    | refs ->
+      `Assoc
+        (base_args
+         @ [
+             ( "handoff_context",
+               `Assoc
+                 [
+                   ("summary", `String notes);
+                   ("evidence_refs", `List (List.map (fun r -> `String r) refs));
+                 ] );
+           ])
+  in
+  match Task.Tool.dispatch ctx ~name:"masc_transition" ~args with
+  | Some result ->
+      if not (Tool_result.is_success result) then Alcotest.fail ((Tool_result.message result))
+  | None -> Alcotest.fail "masc_transition dispatch returned None"
+
+(* verification_submit_request_fn defaults to an error and the server fills it
+   at boot (Verification_run_registry.install_global). This test is about the
+   telemetry a lifecycle raises, not about the storage boundary behind the
+   submission, so it stands in a persisting hook and puts the default back. *)
+let with_verification_persistence f =
+  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  Atomic.set
+    Workspace_hooks.verification_submit_request_fn
+    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ -> Ok ());
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.verification_submit_request_fn previous)
+    f
+;;
+
+let approve_task ctx ~task_id =
+  let config = ctx.Task.Tool.config in
+  let verification_id =
+    match
+      Workspace.get_tasks_raw config
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+           String.equal task.id task_id)
+    with
+    | Some { task_status = Masc_domain.AwaitingVerification { verification_id; _ }; _ } ->
+      verification_id
+    | Some _ -> Alcotest.failf "task %s is not awaiting verification" task_id
+    | None -> Alcotest.failf "task %s not found" task_id
+  in
+  match
+    Workspace.commit_verdict_r config
+      ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+      ~verdict:Masc_domain.Verdict_approved ~task_id ~verification_id
+      ~notes:"telemetry lifecycle regression proof verified" ()
+  with
+  | Ok _ -> ()
+  | Error e -> Alcotest.failf "verdict refused: %s" (Masc_error.to_string e)
+;;
+
+let event_exists predicate config =
+  Telemetry_eio.read_all_events config
+  |> List.exists (fun (record : Telemetry_eio.event_record) ->
+    predicate record.event)
+
+let test_masc_transition_claim_done_emits_task_lifecycle () =
+  with_verification_persistence @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let previous_default_runtime =
+    Atomic.get Workspace_hooks.get_default_runtime_id_fn
+  in
+  let previous_lane_slots =
+    Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn
+  in
+  let previous_observe_task_transition =
+    Atomic.get Workspace_hooks.observe_task_transition_fn
+  in
+  let previous_reviewer =
+    Atomic.get Task.Anti_rationalization.run_llm_reviewer_fn
+  in
+  (* The completion verdict comes from the configured LLM reviewer; stub it to a
+     structured APPROVE so the [done] transition reaches its terminal state and
+     emits the lifecycle telemetry under test. *)
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
+    (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      Ok {Task.Anti_rationalization.selected_runtime_id="test-evaluator-runtime";evaluator_execution=None;verdict=Some (Task.Anti_rationalization.Approve "")});
+  Atomic.set Workspace_hooks.get_default_runtime_id_fn
+    (fun () -> "test-evaluator-runtime");
+  Atomic.set
+    Workspace_hooks.get_verifier_exact_lane_slots_fn
+    (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-evaluator-runtime" ]));
+  Atomic.set Workspace_hooks.observe_task_transition_fn
+    (fun config ~agent_name ~task_id ~transition ~details:_ ->
+      match transition with
+      | Masc_domain.Claim | Masc_domain.Start ->
+        Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
+      | Masc_domain.Done_action ->
+        Telemetry_eio.track_task_completed config ~task_id ~duration_ms:0 ~terminal:Task_outcome_measurement.Approved
+      | Masc_domain.Cancel ->
+        Telemetry_eio.track_task_completed config ~task_id ~duration_ms:0 ~terminal:Task_outcome_measurement.Cancelled
+      | Masc_domain.Release | Masc_domain.Submit_for_verification -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_default_runtime;
+      Atomic.set
+        Workspace_hooks.get_verifier_exact_lane_slots_fn
+        previous_lane_slots;
+      Atomic.set Workspace_hooks.observe_task_transition_fn
+        previous_observe_task_transition;
+      Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer)
+    (fun () ->
+  with_isolated_runtime_env (fun () ->
+    let base_path =
+      Filename.concat
+        (Filename.get_temp_dir_name ())
+        (Printf.sprintf
+           "masc-telemetry-transition-10358-%d"
+           (int_of_float (Unix.gettimeofday () *. 1000.0)))
+    in
+    Unix.mkdir base_path 0o755;
+    let ctx = make_ctx base_path in
+    let result =
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("title", `String "Telemetry task") ])
+    in
+    if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
+    run_transition ctx ~task_id:"task-001" ~action:"claim" ();
+    run_transition ctx ~task_id:"task-001" ~action:"start" ();
+    (* done is not a transition a Keeper makes any more: submission moves the
+       task to awaiting_verification and a completion authority's verdict is
+       what finishes it. The telemetry this test reads is raised on that
+       verdict, so the test has to walk the same path a Keeper walks.
+
+       The reference is a note rather than a bare path: the verification store
+       cannot read a bare path, the reviewer sees missing evidence, and the
+       submission is refused before any of this is raised. *)
+    run_transition ctx ~task_id:"task-001" ~action:"submit_for_verification"
+      ~notes:"Telemetry lifecycle regression proof completed."
+      ~evidence_refs:[ "note:telemetry lifecycle regression proof" ] ();
+    approve_task ctx ~task_id:"task-001";
+    let started =
+      event_exists
+        (function
+          | Telemetry_eio.Task_started { task_id = "task-001"; agent_id } ->
+            String.equal agent_id ctx.agent_name
+          | _ -> false)
+        ctx.config
+    in
+    let completed =
+      event_exists
+        (function
+          | Telemetry_eio.Task_completed { task_id = "task-001"; success = true; _ } ->
+            true
+          | _ -> false)
+        ctx.config
+    in
+    Alcotest.(check bool) "claim emits Task_started" true started;
+    Alcotest.(check bool) "done emits Task_completed" true completed))
+
+let () =
+  Alcotest.run "Telemetry_task_transition_10358"
+    [
+      ( "telemetry",
+        [
+          Alcotest.test_case
+            "masc_transition claim->start->done emits task lifecycle telemetry"
+            `Quick
+            test_masc_transition_claim_done_emits_task_lifecycle;
+        ] );
+    ]

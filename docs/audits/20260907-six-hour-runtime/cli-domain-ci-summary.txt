@@ -1,0 +1,8 @@
+test suite	Test	2026-09-07T06:11:30.3537842Z Testing `keeper_lane_cli_oneshot'.
+test suite	Test	2026-09-07T06:11:30.4743653Z Test Successful in 0.121s. 11 tests run.
+test suite	Test	2026-09-07T06:11:30.5258120Z Testing `keeper_librarian_cli_lane'.
+test suite	Test	2026-09-07T06:11:30.6184263Z Test Successful in 0.092s. 3 tests run.
+test suite	Test	2026-09-07T06:11:30.6852985Z Testing `Keeper Board-attention exact flow'.
+test suite	Test	2026-09-07T06:11:31.1719376Z Test Successful in 0.487s. 9 tests run.
+test suite	Test	2026-09-07T06:11:31.2387583Z Testing `keeper_board_attention_worker'.
+test suite	Test	2026-09-07T06:11:31.9741820Z Test Successful in 0.735s. 40 tests run.

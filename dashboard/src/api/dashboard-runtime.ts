@@ -1,0 +1,2638 @@
+// MASC Dashboard — Runtime providers / model metrics / runtime.toml config.
+// Extracted from dashboard.ts (domain split). Public symbols re-exported
+// from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
+
+import { batch } from '@preact/signals'
+import { ApiRequestError, get, post, type AbortableRequestOptions } from './core'
+import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
+import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asString, asStringArray } from '../components/common/normalize'
+import { ensureDevToken } from './dev-token'
+import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
+import type { RuntimeResolvedResponse } from './schemas/runtime-resolved'
+import type { KeeperRuntimeAssignmentRevision } from '../types'
+
+export interface DashboardRuntimeParameterPolicy {
+  reasoning_toggle_wire?: string | null
+  reasoning_replay_policy?: string | null
+  requires_reasoning_replay_on_tool_call?: boolean
+  ignored_sampling_params: string[]
+  always_ignored_sampling_params: string[]
+}
+
+export interface DashboardRuntimeToolChoice {
+  kind?: string | null
+  name?: string | null
+}
+
+export interface DashboardRuntimeResponseFormat {
+  kind?: string | null
+  has_schema?: boolean
+}
+
+export interface DashboardRuntimeRequestConfig {
+  source?: string | null
+  provider_kind?: string | null
+  request_path?: string | null
+  request_path_targets_responses_api?: boolean
+  max_tokens?: number | null
+  max_context?: number | null
+  temperature?: number | null
+  top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
+  has_system_prompt?: boolean
+  enable_thinking?: boolean | null
+  preserve_thinking?: boolean | null
+  clear_thinking?: boolean | null
+  resolved_reasoning_effort?: string | null
+  glm_clear_thinking?: boolean
+  glm_replay_reasoning?: boolean
+  tool_stream?: boolean
+  tool_choice?: DashboardRuntimeToolChoice | null
+  disable_parallel_tool_use?: boolean
+  response_format?: DashboardRuntimeResponseFormat | null
+  has_output_schema?: boolean
+  cache_system_prompt?: boolean
+  has_model_capabilities_override?: boolean
+  keep_alive?: string | null
+  internal_model_rotation_count?: number | null
+  num_ctx?: number | null
+  seed?: number | null
+  has_previous_response_id?: boolean
+  connect_timeout_s?: number | null
+}
+
+export interface DashboardRuntimeProviderBehaviorCapabilities {
+  supports_inline_tools?: boolean
+  argv_prompt_preflight?: boolean
+  uses_anthropic_caching?: boolean
+}
+
+export interface DashboardRuntimeDeclaredProviderSpec {
+  max_context?: number | null
+  id?: string | null
+  display_name?: string | null
+  protocol?: string | null
+  api_format?: string | null
+  transport?: string | null
+  auth_kind?: string | null
+  is_non_interactive?: boolean
+  has_capabilities?: boolean
+  behavior_capabilities?: DashboardRuntimeProviderBehaviorCapabilities | null
+  custom_header_count?: number | null
+  connect_timeout_s?: number | null
+  /** Total Exact request timeout, including response headers. */
+  exact_body_timeout_s?: number | null
+}
+
+export interface DashboardRuntimeDeclaredModelCapabilities {
+  source?: string | null
+  max_output_tokens?: number | null
+  supports_tool_choice?: boolean
+  supports_required_tool_choice?: boolean
+  supports_named_tool_choice?: boolean
+  supports_parallel_tool_calls?: boolean
+  thinking_control_format?: string | null
+  supports_image_input?: boolean
+  supports_audio_input?: boolean
+  supports_video_input?: boolean
+  supports_multimodal_inputs?: boolean
+  supports_response_format_json?: boolean
+  supports_structured_output?: boolean
+  supports_system_prompt?: boolean
+  supports_assistant_prefill?: boolean
+  supports_prompt_caching?: boolean
+  supports_top_k?: boolean
+  supports_min_p?: boolean
+  supports_seed?: boolean
+  emits_usage_tokens?: boolean
+}
+
+export interface DashboardRuntimeDeclaredModelSpec {
+  id?: string | null
+  api_name?: string | null
+  tools_support?: boolean
+  max_context?: number | null
+  thinking_support?: boolean
+  preserve_thinking?: boolean | null
+  streaming?: boolean
+  temperature?: number | null
+  top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
+  capabilities?: DashboardRuntimeDeclaredModelCapabilities | null
+}
+
+export interface DashboardRuntimeDeclaredBindingSpec {
+  max_context?: number | null
+  provider_id?: string | null
+  model_id?: string | null
+  is_default?: boolean
+  max_concurrent?: number | null
+  price_input?: number | null
+  price_output?: number | null
+  keep_alive?: string | null
+  num_ctx?: number | null
+}
+
+export interface DashboardRuntimeDeclaredSpec {
+  source?: string | null
+  provider?: DashboardRuntimeDeclaredProviderSpec | null
+  model?: DashboardRuntimeDeclaredModelSpec | null
+  binding?: DashboardRuntimeDeclaredBindingSpec | null
+}
+
+export interface DashboardRuntimeReasoningStreamingFormat {
+  kind?: string | null
+  field?: string | null
+}
+
+export interface DashboardRuntimeEffectiveCapabilities {
+  source?: string | null
+  max_context_tokens?: number | null
+  max_output_tokens?: number | null
+  supports_tools?: boolean
+  supports_tool_choice?: boolean
+  supports_required_tool_choice?: boolean
+  supports_named_tool_choice?: boolean
+  supports_parallel_tool_calls?: boolean
+  supports_runtime_mcp_tools?: boolean
+  supports_runtime_tool_events?: boolean
+  assistant_tool_content_format?: string | null
+  supports_reasoning?: boolean
+  accepted_reasoning_efforts: string[] | null
+  thinking_control_format?: string | null
+  preserve_thinking_control_format?: string | null
+  reasoning_output_format?: string | null
+  reasoning_streaming_format?: DashboardRuntimeReasoningStreamingFormat | null
+  reasoning_replay_override?: string | null
+  supports_response_format_json?: boolean
+  supports_structured_output?: boolean
+  supports_multimodal_inputs?: boolean
+  supports_image_input?: boolean
+  supports_audio_input?: boolean
+  supports_video_input?: boolean
+  modality_priority?: string | null
+  task?: string | null
+  supports_native_streaming?: boolean
+  supports_system_prompt?: boolean
+  supports_assistant_prefill?: boolean
+  supports_prompt_caching?: boolean
+  supports_top_k?: boolean
+  supports_min_p?: boolean
+  supports_seed?: boolean
+  ignored_sampling_parameters: string[]
+  emits_usage_tokens?: boolean
+  supported_models: string[] | null
+}
+
+export interface DashboardRuntimeProviderSnapshot {
+  provider: string
+  runtime_id?: string | null
+  provider_id?: string | null
+  provider_display_name?: string | null
+  model_id?: string | null
+  model_api_name?: string | null
+  protocol?: string | null
+  usage_read_configured?: boolean
+  transport?: string | null
+  kind?: string | null
+  runtime_kind?: string | null
+  auth_kind?: string | null
+  status?: string | null
+  available?: boolean
+  is_default_runtime?: boolean
+  max_context?: number | null
+  tools_support?: boolean
+  thinking_support?: boolean
+  streaming?: boolean
+  /** Per-model sampling temperature override ([models.<id>].temperature);
+   *  null when unset (runtime keeps the fleet fallback). */
+  temperature?: number | null
+  /** Per-model sampling overrides from [models.<id>]; null when unset. */
+  top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
+  capabilities_declared?: boolean
+  max_output_tokens?: number | null
+  supports_tool_choice?: boolean
+  supports_required_tool_choice?: boolean
+  supports_named_tool_choice?: boolean
+  supports_parallel_tool_calls?: boolean
+  supports_multimodal_inputs?: boolean
+  supports_image_input?: boolean
+  supports_audio_input?: boolean
+  supports_video_input?: boolean
+  thinking_control_format?: string | null
+  supports_response_format_json?: boolean
+  supports_structured_output?: boolean
+  supports_system_prompt?: boolean
+  supports_assistant_prefill?: boolean
+  supports_prompt_caching?: boolean
+  supports_top_k?: boolean
+  supports_min_p?: boolean
+  supports_seed?: boolean
+  emits_usage_tokens?: boolean
+  effective_capabilities?: DashboardRuntimeEffectiveCapabilities | null
+  parameter_policy?: DashboardRuntimeParameterPolicy | null
+  request_config?: DashboardRuntimeRequestConfig | null
+  declared_spec?: DashboardRuntimeDeclaredSpec | null
+  model_count?: number | null
+  models: string[]
+  source?: string | null
+  endpoint_url?: string | null
+  note?: string | null
+}
+
+export interface DashboardRuntimeAssignment {
+  keeper: string
+  runtime_id: string
+  matches_default?: boolean
+}
+
+export interface DashboardRuntimeAssignmentStatus {
+  schema?: string | null
+  source?: string | null
+  status?: string | null
+  degraded: boolean
+  operator_action_required: boolean
+  blast_radius?: string | null
+  assignment_count: number
+  assigned_runtime_count: number
+  default_assignment_count: number
+  default_runtime_id?: string | null
+  warnings: string[]
+  assigned_runtimes: string[]
+  assignments: DashboardRuntimeAssignment[]
+}
+
+export interface DashboardRuntimeStartupMissingCatalogModel {
+  runtime_id: string
+  provider_id?: string | null
+  provider_label?: string | null
+  model_id?: string | null
+}
+
+export interface DashboardRuntimeStartupUnavailableAssignment {
+  keeper_name: string
+  runtime_id: string
+}
+
+// One exact-output slot left out because its provider declares no
+// exact-body-timeout-s (runtime startup report, #38779).
+export interface DashboardRuntimeStartupExactSlotGap {
+  lane_id: string
+  slot_id: string
+  provider_id: string
+  message: string | null
+}
+
+// The exact-output registry a config commit kept: it keeps serving, but the
+// file on disk publishes none at the next boot.
+export interface DashboardRuntimeStartupExactRegistryStale {
+  reason: string
+  kept_since_commit: string
+  message: string | null
+}
+
+export interface DashboardRuntimeStartupDegradation {
+  schema?: string | null
+  status?: string | null
+  degraded: boolean
+  operator_action_required: boolean
+  terminal_reason?: string | null
+  message?: string | null
+  config_path?: string | null
+  configured_default_runtime_id?: string | null
+  missing_catalog_model_count: number
+  missing_catalog_models: DashboardRuntimeStartupMissingCatalogModel[]
+  disabled_runtime_ids: string[]
+  unavailable_assignments: DashboardRuntimeStartupUnavailableAssignment[]
+  status_reasons?: string[]
+  exact_slot_body_deadline_gaps?: DashboardRuntimeStartupExactSlotGap[]
+  exact_lanes_emptied_by_body_deadline_gaps?: string[]
+  exact_output_registry_stale?: DashboardRuntimeStartupExactRegistryStale | null
+  next_action?: string | null
+}
+
+export interface DashboardRuntimeProvidersResponse {
+  updated_at?: string
+  summary?: {
+    providers?: number
+    runtimes?: number
+    local_models?: number
+    cloud_models?: number
+    cli_models?: number
+    default_runtime_id?: string | null
+  } | null
+  providers: DashboardRuntimeProviderSnapshot[]
+  assignment_status?: DashboardRuntimeAssignmentStatus | null
+  startup_degradation?: DashboardRuntimeStartupDegradation | null
+  // Resolved filesystem path of the runtime.toml the server actually loaded
+  // (Runtime.config_path); answers "which config is live" in the monitor.
+  config_path?: string | null
+}
+
+export interface BucketMetric {
+  ts_start: number
+  entry_count: number
+  success_count: number
+  error_count: number
+  p50_latency_ms: number | null
+  p95_latency_ms: number | null
+  error_rate: number
+  total_cost_usd: number | null
+  cache_hit_ratio: number | null
+}
+
+export interface DashboardRuntimeModelMetric {
+  model_id: string
+  entry_count?: number | null
+  avg_tok_per_sec?: number | null
+  p50_tok_per_sec?: number | null
+  p95_tok_per_sec?: number | null
+  prompt_avg_tok_per_sec?: number | null
+  prompt_p50_tok_per_sec?: number | null
+  prompt_p95_tok_per_sec?: number | null
+  /**
+   * Hardware decode rate (eval_count / eval_duration from Ollama) aggregated
+   * across the telemetry window. Distinct from `avg_tok_per_sec` which is
+   * wall-clock (includes queue wait + prefill + thinking in the denominator).
+   * Null when no entry in the window carried timings (non-Ollama providers or
+   * legacy rows before Agent Core started emitting inference_timings).
+   */
+  hw_decode_avg_tok_per_sec?: number | null
+  hw_decode_p50_tok_per_sec?: number | null
+  hw_decode_p95_tok_per_sec?: number | null
+  max_peak_memory_gb?: number | null
+  /**
+   * Fraction [0.0, 1.0] of turns in the window where the model received
+   * think=true. Null when no entry in the window reported thinking_enabled
+   * (older rows or providers that don't expose the field).
+   */
+  thinking_fraction?: number | null
+  avg_latency_ms?: number | null
+  p50_latency_ms?: number | null
+  p95_latency_ms?: number | null
+  total_input_tokens?: number | null
+  total_output_tokens?: number | null
+  total_cache_read_tokens?: number | null
+  cached_input?: { input_tokens: number; cache_read_tokens: number; sample_count: number } | null
+  total_cache_creation_tokens?: number | null
+  total_reasoning_tokens?: number | null
+  usage_sample_count?: number | null
+  telemetry_sample_count?: number | null
+  usage_missing_count?: number | null
+  telemetry_missing_count?: number | null
+  coverage_status?: 'full' | 'partial' | 'none' | 'error_only' | null
+  primary_coverage_stage?: string | null
+  primary_coverage_reason?: string | null
+  coverage_reason_counts?: Array<{ reason: string; count: number }> | null
+  success_count?: number | null
+  error_count?: number | null
+  total_cost_usd?: number | null
+  avg_tool_calls_per_turn?: number | null
+  total_tool_calls?: number | null
+  top_tools?: Array<{ tool: string; count: number }> | null
+  recent_entries?: Array<{
+    ts_unix: number
+    outcome?: string | null
+    stop_reason?: string | null
+    turn_lane?: string | null
+    input_tokens: number | null
+    output_tokens: number | null
+    cache_read_tokens: number | null
+    cache_creation_tokens: number | null
+    latency_ms: number | null
+    prompt_tok_per_sec?: number | null
+    peak_memory_gb?: number | null
+    cost_usd: number | null
+    tools_count: number
+    usage_reported?: boolean | null
+    telemetry_reported?: boolean | null
+    usage_trust?: string | null
+    usage_anomaly_reasons?: string[] | null
+    coverage_reason?: string | null
+    coverage_stage?: string | null
+    streaming_ttfrc_ms?: number | null
+    streaming_inter_chunk_count?: number | null
+    streaming_inter_chunk_avg_ms?: number | null
+  }> | null
+  buckets?: BucketMetric[] | null
+}
+
+export interface LatencyBucket {
+  lo_ms: number
+  hi_ms: number | null
+  count: number
+}
+
+export type RuntimeCostLedgerRead =
+  | { state: 'pending' }
+  | { state: 'available'; malformed_rows: number | null; schema_violation_rows: number | null; identity_conflict_rows: number | null }
+  | { state: 'unavailable'; detail: string | null }
+
+export interface DashboardRuntimeModelMetricsResponse {
+  cache?: {
+    state: 'fresh' | 'stale_refreshing' | 'warming'
+    age_s: number | null
+    last_error: string | null
+  } | null
+  cost_ledger_read?: RuntimeCostLedgerRead | null
+  window_minutes?: number
+  bucket_minutes?: number
+  total_entries?: number
+  total_error_entries?: number
+  latency_buckets?: LatencyBucket[] | null
+  models: DashboardRuntimeModelMetric[]
+}
+
+function decodeRuntimeParameterPolicy(raw: unknown): DashboardRuntimeParameterPolicy | null {
+  if (!isRecord(raw)) return null
+  return {
+    reasoning_toggle_wire: asNullableString(raw.reasoning_toggle_wire),
+    reasoning_replay_policy: asNullableString(raw.reasoning_replay_policy),
+    requires_reasoning_replay_on_tool_call: asBoolean(raw.requires_reasoning_replay_on_tool_call),
+    ignored_sampling_params: asStringArray(raw.ignored_sampling_params),
+    always_ignored_sampling_params: asStringArray(raw.always_ignored_sampling_params),
+  }
+}
+
+function decodeRuntimeToolChoice(raw: unknown): DashboardRuntimeToolChoice | null {
+  if (!isRecord(raw)) return null
+  return {
+    kind: asNullableString(raw.kind),
+    name: asNullableString(raw.name),
+  }
+}
+
+function decodeRuntimeResponseFormat(raw: unknown): DashboardRuntimeResponseFormat | null {
+  if (!isRecord(raw)) return null
+  return {
+    kind: asNullableString(raw.kind),
+    has_schema: asBoolean(raw.has_schema),
+  }
+}
+
+function decodeRuntimeRequestConfig(raw: unknown): DashboardRuntimeRequestConfig | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asNullableString(raw.source),
+    provider_kind: asNullableString(raw.provider_kind),
+    request_path: asNullableString(raw.request_path),
+    request_path_targets_responses_api: asBoolean(raw.request_path_targets_responses_api),
+    max_tokens: asNumber(raw.max_tokens) ?? null,
+    max_context: asNumber(raw.max_context) ?? null,
+    temperature: asNumber(raw.temperature) ?? null,
+    top_p: asNumber(raw.top_p) ?? null,
+    top_k: asNumber(raw.top_k) ?? null,
+    min_p: asNumber(raw.min_p) ?? null,
+    has_system_prompt: asBoolean(raw.has_system_prompt),
+    enable_thinking: asBoolean(raw.enable_thinking) ?? null,
+    preserve_thinking: asBoolean(raw.preserve_thinking) ?? null,
+    clear_thinking: asBoolean(raw.clear_thinking) ?? null,
+    resolved_reasoning_effort: asNullableString(raw.resolved_reasoning_effort),
+    glm_clear_thinking: asBoolean(raw.glm_clear_thinking),
+    glm_replay_reasoning: asBoolean(raw.glm_replay_reasoning),
+    tool_stream: asBoolean(raw.tool_stream),
+    tool_choice: decodeRuntimeToolChoice(raw.tool_choice),
+    disable_parallel_tool_use: asBoolean(raw.disable_parallel_tool_use),
+    response_format: decodeRuntimeResponseFormat(raw.response_format),
+    has_output_schema: asBoolean(raw.has_output_schema),
+    cache_system_prompt: asBoolean(raw.cache_system_prompt),
+    has_model_capabilities_override: asBoolean(raw.has_model_capabilities_override),
+    keep_alive: asNullableString(raw.keep_alive),
+    internal_model_rotation_count: asNumber(raw.internal_model_rotation_count) ?? null,
+    num_ctx: asNumber(raw.num_ctx) ?? null,
+    seed: asNumber(raw.seed) ?? null,
+    has_previous_response_id: asBoolean(raw.has_previous_response_id),
+    connect_timeout_s: asNumber(raw.connect_timeout_s) ?? null,
+  }
+}
+
+function decodeRuntimeProviderBehaviorCapabilities(
+  raw: unknown,
+): DashboardRuntimeProviderBehaviorCapabilities | null {
+  if (!isRecord(raw)) return null
+  return {
+    supports_inline_tools: asBoolean(raw.supports_inline_tools),
+    argv_prompt_preflight: asBoolean(raw.argv_prompt_preflight),
+    uses_anthropic_caching: asBoolean(raw.uses_anthropic_caching),
+  }
+}
+
+function decodeRuntimeDeclaredProviderSpec(raw: unknown): DashboardRuntimeDeclaredProviderSpec | null {
+  if (!isRecord(raw)) return null
+  return {
+    max_context: asNumber(raw.max_context) ?? null,
+    id: asNullableString(raw.id),
+    display_name: asNullableString(raw.display_name),
+    protocol: asNullableString(raw.protocol),
+    api_format: asNullableString(raw.api_format),
+    transport: asNullableString(raw.transport),
+    auth_kind: asNullableString(raw.auth_kind),
+    is_non_interactive: asBoolean(raw.is_non_interactive),
+    has_capabilities: asBoolean(raw.has_capabilities),
+    behavior_capabilities: decodeRuntimeProviderBehaviorCapabilities(raw.behavior_capabilities),
+    custom_header_count: asNumber(raw.custom_header_count) ?? null,
+    connect_timeout_s: asNumber(raw.connect_timeout_s) ?? null,
+    exact_body_timeout_s: asNumber(raw.exact_body_timeout_s) ?? null,
+  }
+}
+
+function decodeRuntimeDeclaredModelCapabilities(
+  raw: unknown,
+): DashboardRuntimeDeclaredModelCapabilities | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asNullableString(raw.source),
+    max_output_tokens: asNumber(raw.max_output_tokens) ?? null,
+    supports_tool_choice: asBoolean(raw.supports_tool_choice),
+    supports_required_tool_choice: asBoolean(raw.supports_required_tool_choice),
+    supports_named_tool_choice: asBoolean(raw.supports_named_tool_choice),
+    supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
+    thinking_control_format: asNullableString(raw.thinking_control_format),
+    supports_image_input: asBoolean(raw.supports_image_input),
+    supports_audio_input: asBoolean(raw.supports_audio_input),
+    supports_video_input: asBoolean(raw.supports_video_input),
+    supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
+    supports_response_format_json: asBoolean(raw.supports_response_format_json),
+    supports_structured_output: asBoolean(raw.supports_structured_output),
+    supports_system_prompt: asBoolean(raw.supports_system_prompt),
+    supports_assistant_prefill: asBoolean(raw.supports_assistant_prefill),
+    supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
+    supports_top_k: asBoolean(raw.supports_top_k),
+    supports_min_p: asBoolean(raw.supports_min_p),
+    supports_seed: asBoolean(raw.supports_seed),
+    emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
+  }
+}
+
+function decodeRuntimeDeclaredModelSpec(raw: unknown): DashboardRuntimeDeclaredModelSpec | null {
+  if (!isRecord(raw)) return null
+  return {
+    id: asNullableString(raw.id),
+    api_name: asNullableString(raw.api_name),
+    tools_support: asBoolean(raw.tools_support),
+    max_context: asNumber(raw.max_context) ?? null,
+    thinking_support: asBoolean(raw.thinking_support),
+    preserve_thinking: asBoolean(raw.preserve_thinking) ?? null,
+    streaming: asBoolean(raw.streaming),
+    temperature: asNumber(raw.temperature) ?? null,
+    top_p: asNumber(raw.top_p) ?? null,
+    top_k: asNumber(raw.top_k) ?? null,
+    min_p: asNumber(raw.min_p) ?? null,
+    capabilities: decodeRuntimeDeclaredModelCapabilities(raw.capabilities),
+  }
+}
+
+function decodeRuntimeDeclaredBindingSpec(raw: unknown): DashboardRuntimeDeclaredBindingSpec | null {
+  if (!isRecord(raw)) return null
+  return {
+    max_context: asNumber(raw.max_context) ?? null,
+    provider_id: asNullableString(raw.provider_id),
+    model_id: asNullableString(raw.model_id),
+    is_default: asBoolean(raw.is_default),
+    max_concurrent: asNumber(raw.max_concurrent) ?? null,
+    price_input: asNumber(raw.price_input) ?? null,
+    price_output: asNumber(raw.price_output) ?? null,
+    keep_alive: asNullableString(raw.keep_alive),
+    num_ctx: asNumber(raw.num_ctx) ?? null,
+  }
+}
+
+function decodeRuntimeDeclaredSpec(raw: unknown): DashboardRuntimeDeclaredSpec | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asNullableString(raw.source),
+    provider: decodeRuntimeDeclaredProviderSpec(raw.provider),
+    model: decodeRuntimeDeclaredModelSpec(raw.model),
+    binding: decodeRuntimeDeclaredBindingSpec(raw.binding),
+  }
+}
+
+function decodeNullableStringArray(raw: unknown): string[] | null {
+  return Array.isArray(raw) ? asStringArray(raw) : null
+}
+
+function decodeRuntimeReasoningStreamingFormat(
+  raw: unknown,
+): DashboardRuntimeReasoningStreamingFormat | null {
+  if (!isRecord(raw)) return null
+  return {
+    kind: asNullableString(raw.kind),
+    field: asNullableString(raw.field),
+  }
+}
+
+function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffectiveCapabilities | null {
+  if (!isRecord(raw)) return null
+  return {
+    source: asNullableString(raw.source),
+    max_context_tokens: asNumber(raw.max_context_tokens) ?? null,
+    max_output_tokens: asNumber(raw.max_output_tokens) ?? null,
+    supports_tools: asBoolean(raw.supports_tools),
+    supports_tool_choice: asBoolean(raw.supports_tool_choice),
+    supports_required_tool_choice: asBoolean(raw.supports_required_tool_choice),
+    supports_named_tool_choice: asBoolean(raw.supports_named_tool_choice),
+    supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
+    supports_runtime_mcp_tools: asBoolean(raw.supports_runtime_mcp_tools),
+    supports_runtime_tool_events: asBoolean(raw.supports_runtime_tool_events),
+    assistant_tool_content_format: asNullableString(raw.assistant_tool_content_format),
+    supports_reasoning: asBoolean(raw.supports_reasoning),
+    accepted_reasoning_efforts: decodeNullableStringArray(raw.accepted_reasoning_efforts),
+    // Keep the server-projected wire opaque. The OCaml/Agent Core capability enum is
+    // the SSOT; duplicating its variants here would drift on the next catalog
+    // release and turn a received value into a false "missing" state.
+    thinking_control_format: asNullableString(raw.thinking_control_format),
+    preserve_thinking_control_format: asNullableString(raw.preserve_thinking_control_format),
+    reasoning_output_format: asNullableString(raw.reasoning_output_format),
+    reasoning_streaming_format: decodeRuntimeReasoningStreamingFormat(raw.reasoning_streaming_format),
+    reasoning_replay_override: asNullableString(raw.reasoning_replay_override),
+    supports_response_format_json: asBoolean(raw.supports_response_format_json),
+    supports_structured_output: asBoolean(raw.supports_structured_output),
+    supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
+    supports_image_input: asBoolean(raw.supports_image_input),
+    supports_audio_input: asBoolean(raw.supports_audio_input),
+    supports_video_input: asBoolean(raw.supports_video_input),
+    modality_priority: asNullableString(raw.modality_priority),
+    task: asNullableString(raw.task),
+    supports_native_streaming: asBoolean(raw.supports_native_streaming),
+    supports_system_prompt: asBoolean(raw.supports_system_prompt),
+    supports_assistant_prefill: asBoolean(raw.supports_assistant_prefill),
+    supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
+    supports_top_k: asBoolean(raw.supports_top_k),
+    supports_min_p: asBoolean(raw.supports_min_p),
+    supports_seed: asBoolean(raw.supports_seed),
+    ignored_sampling_parameters: asStringArray(raw.ignored_sampling_parameters),
+    emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
+    supported_models: decodeNullableStringArray(raw.supported_models),
+  }
+}
+
+function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSnapshot | null {
+  if (!isRecord(raw)) return null
+  const provider = asString(raw.provider)
+  if (!provider) return null
+  return {
+    provider,
+    runtime_id: asNullableString(raw.runtime_id),
+    provider_id: asNullableString(raw.provider_id),
+    provider_display_name: asNullableString(raw.provider_display_name),
+    model_id: asNullableString(raw.model_id),
+    model_api_name: asNullableString(raw.model_api_name),
+    protocol: asNullableString(raw.protocol),
+    usage_read_configured: asBoolean(raw.usage_read_configured),
+    transport: asNullableString(raw.transport),
+    kind: asNullableString(raw.kind),
+    runtime_kind: asNullableString(raw.runtime_kind),
+    auth_kind: asNullableString(raw.auth_kind),
+    status: asNullableString(raw.status),
+    available: asBoolean(raw.available),
+    is_default_runtime: asBoolean(raw.is_default_runtime),
+    max_context: asNumber(raw.max_context) ?? null,
+    tools_support: asBoolean(raw.tools_support),
+    thinking_support: asBoolean(raw.thinking_support),
+    streaming: asBoolean(raw.streaming),
+    temperature: asNumber(raw.temperature) ?? null,
+    top_p: asNumber(raw.top_p) ?? null,
+    top_k: asNumber(raw.top_k) ?? null,
+    min_p: asNumber(raw.min_p) ?? null,
+    capabilities_declared: asBoolean(raw.capabilities_declared),
+    max_output_tokens: asNumber(raw.max_output_tokens) ?? null,
+    supports_tool_choice: asBoolean(raw.supports_tool_choice),
+    supports_required_tool_choice: asBoolean(raw.supports_required_tool_choice),
+    supports_named_tool_choice: asBoolean(raw.supports_named_tool_choice),
+    supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
+    supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
+    supports_image_input: asBoolean(raw.supports_image_input),
+    supports_audio_input: asBoolean(raw.supports_audio_input),
+    supports_video_input: asBoolean(raw.supports_video_input),
+    thinking_control_format: asNullableString(raw.thinking_control_format),
+    supports_response_format_json: asBoolean(raw.supports_response_format_json),
+    supports_structured_output: asBoolean(raw.supports_structured_output),
+    supports_system_prompt: asBoolean(raw.supports_system_prompt),
+    supports_assistant_prefill: asBoolean(raw.supports_assistant_prefill),
+    supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
+    supports_top_k: asBoolean(raw.supports_top_k),
+    supports_min_p: asBoolean(raw.supports_min_p),
+    supports_seed: asBoolean(raw.supports_seed),
+    emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
+    effective_capabilities: decodeRuntimeEffectiveCapabilities(raw.effective_capabilities),
+    parameter_policy: decodeRuntimeParameterPolicy(raw.parameter_policy),
+    request_config: decodeRuntimeRequestConfig(raw.request_config),
+    declared_spec: decodeRuntimeDeclaredSpec(raw.declared_spec),
+    model_count: asNumber(raw.model_count) ?? null,
+    models: asStringArray(raw.models),
+    source: asNullableString(raw.source),
+    endpoint_url: asNullableString(raw.endpoint_url),
+    note: asNullableString(raw.note),
+  }
+}
+
+function decodeRuntimeAssignment(raw: unknown): DashboardRuntimeAssignment | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const runtimeId = asString(raw.runtime_id)
+  if (!keeper || !runtimeId) return null
+  return {
+    keeper,
+    runtime_id: runtimeId,
+    matches_default: asBoolean(raw.matches_default),
+  }
+}
+
+function decodeRuntimeAssignmentStatus(raw: unknown): DashboardRuntimeAssignmentStatus | null {
+  if (!isRecord(raw)) return null
+  return {
+    schema: asNullableString(raw.schema),
+    source: asNullableString(raw.source),
+    status: asNullableString(raw.status),
+    degraded: asBoolean(raw.degraded) ?? false,
+    operator_action_required: asBoolean(raw.operator_action_required) ?? false,
+    blast_radius: asNullableString(raw.blast_radius),
+    assignment_count: asNumber(raw.assignment_count) ?? 0,
+    assigned_runtime_count: asNumber(raw.assigned_runtime_count) ?? 0,
+    default_assignment_count: asNumber(raw.default_assignment_count) ?? 0,
+    default_runtime_id: asNullableString(raw.default_runtime_id),
+    warnings: asStringArray(raw.warnings),
+    assigned_runtimes: asStringArray(raw.assigned_runtimes),
+    assignments: asRecordArray(raw.assignments)
+      .map(decodeRuntimeAssignment)
+      .filter((item): item is DashboardRuntimeAssignment => item !== null),
+  }
+}
+
+function decodeRuntimeStartupMissingCatalogModel(raw: unknown): DashboardRuntimeStartupMissingCatalogModel | null {
+  if (!isRecord(raw)) return null
+  const runtimeId = asString(raw.runtime_id)
+  if (!runtimeId) return null
+  return {
+    runtime_id: runtimeId,
+    provider_id: asNullableString(raw.provider_id),
+    provider_label: asNullableString(raw.provider_label),
+    model_id: asNullableString(raw.model_id),
+  }
+}
+
+function decodeRuntimeStartupUnavailableAssignment(raw: unknown): DashboardRuntimeStartupUnavailableAssignment | null {
+  if (!isRecord(raw)) return null
+  const keeperName = asString(raw.keeper_name)
+  const runtimeId = asString(raw.runtime_id)
+  if (!keeperName || !runtimeId) return null
+  return {
+    keeper_name: keeperName,
+    runtime_id: runtimeId,
+  }
+}
+
+function decodeRuntimeStartupExactSlotGap(raw: unknown): DashboardRuntimeStartupExactSlotGap | null {
+  if (!isRecord(raw)) return null
+  const laneId = asString(raw.lane_id)
+  const slotId = asString(raw.slot_id)
+  const providerId = asString(raw.provider_id)
+  if (!laneId || !slotId || !providerId) return null
+  return {
+    lane_id: laneId,
+    slot_id: slotId,
+    provider_id: providerId,
+    message: asNullableString(raw.message),
+  }
+}
+
+function decodeRuntimeStartupExactRegistryStale(
+  raw: unknown,
+): DashboardRuntimeStartupExactRegistryStale | null {
+  if (!isRecord(raw)) return null
+  const reason = asString(raw.reason)
+  const keptSinceCommit = asString(raw.kept_since_commit)
+  if (!reason || !keptSinceCommit) return null
+  return { reason, kept_since_commit: keptSinceCommit, message: asNullableString(raw.message) }
+}
+
+function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupDegradation | null {
+  if (!isRecord(raw)) return null
+  return {
+    schema: asNullableString(raw.schema),
+    status: asNullableString(raw.status),
+    degraded: asBoolean(raw.degraded) ?? false,
+    operator_action_required: asBoolean(raw.operator_action_required) ?? false,
+    terminal_reason: asNullableString(raw.terminal_reason),
+    message: asNullableString(raw.message),
+    config_path: asNullableString(raw.config_path),
+    configured_default_runtime_id: asNullableString(raw.configured_default_runtime_id),
+    missing_catalog_model_count: asNumber(raw.missing_catalog_model_count) ?? 0,
+    missing_catalog_models: asRecordArray(raw.missing_catalog_models)
+      .map(decodeRuntimeStartupMissingCatalogModel)
+      .filter((item): item is DashboardRuntimeStartupMissingCatalogModel => item !== null),
+    disabled_runtime_ids: asStringArray(raw.disabled_runtime_ids),
+    unavailable_assignments: asRecordArray(raw.unavailable_assignments)
+      .map(decodeRuntimeStartupUnavailableAssignment)
+      .filter((item): item is DashboardRuntimeStartupUnavailableAssignment => item !== null),
+    status_reasons: asStringArray(raw.status_reasons),
+    exact_slot_body_deadline_gaps: asRecordArray(raw.exact_slot_body_deadline_gaps)
+      .map(decodeRuntimeStartupExactSlotGap)
+      .filter((item): item is DashboardRuntimeStartupExactSlotGap => item !== null),
+    exact_lanes_emptied_by_body_deadline_gaps: asStringArray(
+      raw.exact_lanes_emptied_by_body_deadline_gaps,
+    ),
+    exact_output_registry_stale: decodeRuntimeStartupExactRegistryStale(
+      raw.exact_output_registry_stale,
+    ),
+    next_action: asNullableString(raw.next_action),
+  }
+}
+
+function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProvidersResponse | null {
+  if (!isRecord(raw)) return null
+  const summary = isRecord(raw.summary) ? raw.summary : null
+  return {
+    updated_at: asString(raw.updated_at),
+    summary: summary
+      ? {
+          providers: asNumber(summary.providers),
+          runtimes: asNumber(summary.runtimes),
+          local_models: asNumber(summary.local_models),
+          cloud_models: asNumber(summary.cloud_models),
+          cli_models: asNumber(summary.cli_models),
+          default_runtime_id: asNullableString(summary.default_runtime_id),
+        }
+      : null,
+    providers: asRecordArray(raw.providers)
+      .map(decodeRuntimeProviderSnapshot)
+      .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
+    assignment_status: decodeRuntimeAssignmentStatus(raw.assignment_status),
+    startup_degradation: decodeRuntimeStartupDegradation(raw.startup_degradation),
+    config_path: asNullableString(raw.config_path),
+  }
+}
+
+function decodeCachedInput(raw: unknown): DashboardRuntimeModelMetric['cached_input'] {
+  if (!isRecord(raw)) return null
+  const input = asNumber(raw.input_tokens)
+  const cached = asNumber(raw.cache_read_tokens)
+  const count = asNumber(raw.sample_count)
+  if (input == null || cached == null || count == null
+    || !Number.isSafeInteger(input) || !Number.isSafeInteger(cached) || !Number.isSafeInteger(count)
+    || input <= 0 || cached < 0 || cached > input || count <= 0) return null
+  return { input_tokens: input, cache_read_tokens: cached, sample_count: count }
+}
+
+function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | null {
+  if (!isRecord(raw)) return null
+  const modelId = asString(raw.model_id)
+  if (!modelId) return null
+  return {
+    model_id: modelId,
+    entry_count: asNumber(raw.entry_count) ?? null,
+    avg_tok_per_sec: asNumber(raw.avg_tok_per_sec) ?? null,
+    p50_tok_per_sec: asNumber(raw.p50_tok_per_sec) ?? null,
+    p95_tok_per_sec: asNumber(raw.p95_tok_per_sec) ?? null,
+    prompt_avg_tok_per_sec: asNumber(raw.prompt_avg_tok_per_sec) ?? null,
+    prompt_p50_tok_per_sec: asNumber(raw.prompt_p50_tok_per_sec) ?? null,
+    prompt_p95_tok_per_sec: asNumber(raw.prompt_p95_tok_per_sec) ?? null,
+    hw_decode_avg_tok_per_sec: asNumber(raw.hw_decode_avg_tok_per_sec) ?? null,
+    hw_decode_p50_tok_per_sec: asNumber(raw.hw_decode_p50_tok_per_sec) ?? null,
+    hw_decode_p95_tok_per_sec: asNumber(raw.hw_decode_p95_tok_per_sec) ?? null,
+    max_peak_memory_gb: asNumber(raw.max_peak_memory_gb) ?? null,
+    thinking_fraction: asNumber(raw.thinking_fraction) ?? null,
+    avg_latency_ms: asNumber(raw.avg_latency_ms) ?? null,
+    p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
+    p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
+    total_input_tokens: asNumber(raw.total_input_tokens) ?? null,
+    total_output_tokens: asNumber(raw.total_output_tokens) ?? null,
+    total_cache_read_tokens: asNumber(raw.total_cache_read_tokens) ?? null,
+    cached_input: decodeCachedInput(raw.cached_input),
+    total_cache_creation_tokens: asNumber(raw.total_cache_creation_tokens) ?? null,
+    total_reasoning_tokens: asNumber(raw.total_reasoning_tokens) ?? null,
+    usage_sample_count: asNumber(raw.usage_sample_count) ?? null,
+    telemetry_sample_count: asNumber(raw.telemetry_sample_count) ?? null,
+    usage_missing_count: asNumber(raw.usage_missing_count) ?? null,
+    telemetry_missing_count: asNumber(raw.telemetry_missing_count) ?? null,
+    coverage_status: asNullableString(raw.coverage_status) as DashboardRuntimeModelMetric['coverage_status'],
+    primary_coverage_stage: asNullableString(raw.primary_coverage_stage),
+    primary_coverage_reason: asNullableString(raw.primary_coverage_reason),
+    coverage_reason_counts: Array.isArray(raw.coverage_reason_counts)
+      ? (raw.coverage_reason_counts as unknown[])
+          .filter(isRecord)
+          .map(item => ({ reason: asString(item.reason) ?? '', count: asNumber(item.count) ?? 0 }))
+          .filter(item => item.reason.length > 0)
+      : null,
+    success_count: asNumber(raw.success_count) ?? null,
+    error_count: asNumber(raw.error_count) ?? null,
+    total_cost_usd: asNumber(raw.total_cost_usd) ?? null,
+    avg_tool_calls_per_turn: asNumber(raw.avg_tool_calls_per_turn) ?? null,
+    total_tool_calls: asNumber(raw.total_tool_calls) ?? null,
+    top_tools: Array.isArray(raw.top_tools)
+      ? (raw.top_tools as unknown[])
+          .filter(isRecord)
+          .map(t => ({ tool: asString(t.tool) ?? '', count: asNumber(t.count) ?? 0 }))
+          .filter(t => t.tool.length > 0)
+      : null,
+    recent_entries: Array.isArray(raw.recent_entries)
+      ? (raw.recent_entries as unknown[])
+          .filter(isRecord)
+          .map(r => ({
+            ts_unix: asNumber(r.ts_unix) ?? 0,
+            outcome: asNullableString(r.outcome),
+            stop_reason: asNullableString(r.stop_reason),
+            turn_lane: asNullableString(r.turn_lane),
+            input_tokens: asNumber(r.input_tokens) ?? null,
+            output_tokens: asNumber(r.output_tokens) ?? null,
+            cache_read_tokens: asNumber(r.cache_read_tokens) ?? null,
+            cache_creation_tokens: asNumber(r.cache_creation_tokens) ?? null,
+            latency_ms: asNumber(r.latency_ms) ?? null,
+            prompt_tok_per_sec: asNumber(r.prompt_tok_per_sec) ?? null,
+            peak_memory_gb: asNumber(r.peak_memory_gb) ?? null,
+            cost_usd: asNumber(r.cost_usd) ?? null,
+            tools_count: asNumber(r.tools_count) ?? 0,
+            usage_reported: asBoolean(r.usage_reported),
+            telemetry_reported: asBoolean(r.telemetry_reported),
+            usage_trust: asNullableString(r.usage_trust),
+            usage_anomaly_reasons: Array.isArray(r.usage_anomaly_reasons)
+              ? (r.usage_anomaly_reasons as unknown[])
+                  .map(item => asString(item) ?? '')
+                  .filter(item => item.length > 0)
+              : null,
+            coverage_reason: asNullableString(r.coverage_reason),
+            coverage_stage: asNullableString(r.coverage_stage),
+            streaming_ttfrc_ms: asNumber(r.streaming_ttfrc_ms) ?? null,
+            streaming_inter_chunk_count: asNumber(r.streaming_inter_chunk_count) ?? null,
+            streaming_inter_chunk_avg_ms: asNumber(r.streaming_inter_chunk_avg_ms) ?? null,
+          }))
+      : null,
+    buckets: Array.isArray(raw.buckets)
+      ? (raw.buckets as unknown[])
+          .filter(isRecord)
+          .map(b => ({
+            ts_start: asNumber(b.ts_start) ?? 0,
+            entry_count: asNumber(b.entry_count) ?? 0,
+            success_count: asNumber(b.success_count) ?? 0,
+            error_count: asNumber(b.error_count) ?? 0,
+            p50_latency_ms: asNumber(b.p50_latency_ms) ?? null,
+            p95_latency_ms: asNumber(b.p95_latency_ms) ?? null,
+            error_rate: asNumber(b.error_rate) ?? 0,
+            total_cost_usd: asNumber(b.total_cost_usd) ?? null,
+            cache_hit_ratio: asNumber(b.cache_hit_ratio) ?? null,
+          }))
+      : null,
+  }
+}
+
+function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelMetricsResponse | null {
+  if (!isRecord(raw) || !Array.isArray(raw.models)) return null
+  const models = raw.models.map(decodeRuntimeModelMetric)
+  if (models.some(model => model === null)) return null
+  const ledger = isRecord(raw.cost_ledger_read) ? raw.cost_ledger_read : null
+  const cache = isRecord(raw.cache) ? raw.cache : null
+  const cacheState = cache?.state
+  const age = asNumber(cache?.age_s)
+  const cacheAge = age != null && age >= 0 ? age : null
+  const cacheRead: DashboardRuntimeModelMetricsResponse['cache'] =
+    cacheState === 'fresh' || cacheState === 'stale_refreshing' || cacheState === 'warming'
+      ? { state: cacheState, age_s: cacheAge,
+          last_error: asNullableString(cache?.last_error) }
+      : null
+  const costLedgerRows = (field: 'malformed_rows' | 'schema_violation_rows' | 'identity_conflict_rows'): number | null =>
+    asNumber(ledger?.[field]) ?? null
+  const costLedgerDetail = asNullableString(ledger?.detail)
+  let costLedgerRead: RuntimeCostLedgerRead | null = null
+  if (ledger?.state === 'available') {
+    costLedgerRead = { state: 'available', malformed_rows: costLedgerRows('malformed_rows'),
+      schema_violation_rows: costLedgerRows('schema_violation_rows'),
+      identity_conflict_rows: costLedgerRows('identity_conflict_rows') }
+  } else if (ledger?.state === 'unavailable') {
+    costLedgerRead = { state: 'unavailable', detail: costLedgerDetail }
+  } else if (ledger?.state === 'pending') {
+    costLedgerRead = { state: 'pending' }
+  }
+  return {
+    cache: cacheRead,
+    cost_ledger_read: costLedgerRead,
+    window_minutes: asNumber(raw.window_minutes),
+    bucket_minutes: asNumber(raw.bucket_minutes),
+    total_entries: asNumber(raw.total_entries),
+    total_error_entries: asNumber(raw.total_error_entries),
+    latency_buckets: Array.isArray(raw.latency_buckets)
+      ? (raw.latency_buckets as unknown[])
+          .filter(isRecord)
+          .map(b => ({
+            lo_ms: asNumber(b.lo) ?? 0,
+            hi_ms: b.hi == null ? null : (asNumber(b.hi) ?? null),
+            count: asNumber(b.n) ?? 0,
+          }))
+      : null,
+    models: models.filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),
+  }
+}
+
+export async function fetchRuntimeProviders(opts?: AbortableRequestOptions): Promise<DashboardRuntimeProvidersResponse> {
+  const raw = await get<Record<string, unknown>>('/api/v1/providers', { signal: opts?.signal })
+  const decoded = decodeRuntimeProvidersResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 runtime lanes payload')
+  return decoded
+}
+
+export async function fetchRuntimeModelMetrics(
+  windowMinutes = 30,
+  bucketMinutes = 5,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardRuntimeModelMetricsResponse> {
+  const bParam = bucketMinutes > 0 ? `&bucket_min=${bucketMinutes}` : ''
+  const raw = await get<Record<string, unknown>>(`/api/v1/models/metrics?window=${windowMinutes}${bParam}`, { signal: opts?.signal })
+  const decoded = decodeRuntimeModelMetricsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 runtime model metrics payload')
+  return decoded
+}
+
+// --- Runtime config (raw runtime.toml editor) ---
+
+export interface RuntimeTomlConfig {
+  ok: boolean
+  path: string | null
+  file_name: string
+  source_text: string
+  source_revision: string
+  provider_protocols: RuntimeTomlEditorProtocol[]
+  // Names no provider may take: each is a top-level table another reader
+  // owns (lib/runtime/runtime_toml.ml reserved_provider_ids).
+  reserved_provider_ids: string[]
+  application?: RuntimeConfigApplication
+  validation?: RuntimeConfigValidation
+  keeper_setting_schema?: unknown
+  keeper_settings?: RuntimeKeeperSetting[]
+  message?: string | null
+  reason?: string | null
+  issues?: unknown
+  state?: 'committed'
+  commit?: RuntimeConfigCommit
+}
+
+export type RuntimeConfigCommit = {
+  source_revision: string
+  order: string
+  warnings: Array<{ code: string; detail: string }>
+} & (
+  | { durability: 'durable'; durability_detail: null }
+  | { durability: 'unconfirmed'; durability_detail: string }
+)
+
+function decodeKeeperRuntimeAssignmentRevision(
+  raw: unknown,
+): KeeperRuntimeAssignmentRevision | undefined {
+  if (hasExactKeys(raw, ['state']) && raw.state === 'runtime_config_missing') {
+    return { state: 'runtime_config_missing' }
+  }
+  if (!hasExactKeys(raw, ['state', 'source_revision', 'assignment'])
+    || raw.state !== 'runtime_config_present') return undefined
+  const sourceRevision = asString(raw.source_revision)
+  if (!sourceRevision || !/^[0-9a-f]{64}$/.test(sourceRevision)) return undefined
+  const assignment = raw.assignment
+  if (hasExactKeys(assignment, ['state']) && assignment.state === 'missing') {
+    return {
+      state: 'runtime_config_present',
+      source_revision: sourceRevision,
+      assignment: { state: 'missing' },
+    }
+  }
+  if (hasExactKeys(assignment, ['state', 'runtime_id']) && assignment.state === 'assigned') {
+    const runtimeId = asString(assignment.runtime_id)
+    if (!runtimeId || runtimeId.trim() === '') return undefined
+    return {
+      source_revision: sourceRevision,
+      state: 'runtime_config_present',
+      assignment: { state: 'assigned', runtime_id: runtimeId },
+    }
+  }
+  return undefined
+}
+
+export type RuntimeSkillApplication =
+  | { state: 'invalid_workspace' }
+  | { state: 'workspace_retired'; input_source_revision: string | null }
+  | { state: 'superseded'; commit_order: string; applied_order: string }
+  | {
+      state: 'published' | 'unchanged'
+      input_source_revision: string
+      snapshot_revision: string
+      catalog_revision: string
+      config_state: 'configured' | 'rejected' | 'unreadable'
+    }
+
+export type CommittedRuntimeSkillApplication =
+  | { state: 'invalid_workspace' }
+  | { state: 'workspace_retired'; input_source_revision: string }
+  | { state: 'superseded'; commit_order: string; applied_order: string }
+  | {
+      state: 'published' | 'unchanged'
+      input_source_revision: string
+      snapshot_revision: string
+      catalog_revision: string
+      config_state: 'configured' | 'rejected' | 'unreadable'
+    }
+
+export interface RuntimeConfigApplicationLane {
+  status: string
+  requires_restart: boolean
+  applied_at: string | number | null
+}
+
+export type RuntimeConfigRoutingStatus = 'active' | 'applied'
+export type RuntimeConfigKeeperOverlayStatus =
+  | 'not_configured'
+  | 'pending_restart'
+  | 'applied'
+  | 'preempted_by_env'
+  | 'mixed'
+
+export interface CommittedRuntimeConfigApplicationLane
+  extends RuntimeConfigApplicationLane {
+  status: RuntimeConfigRoutingStatus
+}
+
+export interface CommittedRuntimeConfigKeeperOverlayApplication
+  extends RuntimeConfigKeeperOverlayApplication {
+  status: RuntimeConfigKeeperOverlayStatus
+}
+
+// What the commit did to the exact-output registry.
+// - `applied`: rebuilt from the committed text. `targets` says where the
+//   targets came from; under `replacement_catalog` binding fields such as
+//   exact-body-timeout-s do not reach them.
+// - `unpublished`: none was published, so exact lanes wait for a restart.
+// - `kept`: neither the committed text nor the file it replaced rebuilds the
+//   registry, so the published one stays; `reason` says why, and
+//   `next_boot_publishes: false` says the file on disk publishes none at the
+//   next boot.
+export type CommittedRuntimeExactOutputRegistryApplication =
+  | {
+      status: 'applied'
+      requires_restart: false
+      targets: 'runtime_bindings' | 'replacement_catalog'
+    }
+  | { status: 'unpublished'; requires_restart: true }
+  | { status: 'kept'; requires_restart: false; next_boot_publishes: false; reason: string }
+
+export interface CommittedRuntimeConfigApplication extends RuntimeConfigApplication {
+  operation: string
+  routing: CommittedRuntimeConfigApplicationLane
+  keeper_overlay: CommittedRuntimeConfigKeeperOverlayApplication
+  skills: CommittedRuntimeSkillApplication
+  exact_output_registry: CommittedRuntimeExactOutputRegistryApplication
+}
+
+export interface RuntimeConfigKeeperOverlayApplication extends RuntimeConfigApplicationLane {
+  configured_count: number
+  pending_keys: string[]
+  applied_keys: string[]
+  preempted_keys: string[]
+}
+
+export interface RuntimeConfigApplication {
+  operation: string
+  routing: RuntimeConfigApplicationLane
+  keeper_overlay: RuntimeConfigKeeperOverlayApplication
+  skills?: RuntimeSkillApplication
+}
+
+export interface CommittedRuntimeTomlConfig extends RuntimeTomlConfig {
+  ok: true
+  path: string
+  state: 'committed'
+  commit: RuntimeConfigCommit
+  application: CommittedRuntimeConfigApplication
+}
+
+export interface RuntimeConfigValidationIssue {
+  key: string
+  kind: string
+  severity: 'error' | 'warning'
+  detail: string
+}
+
+export interface RuntimeConfigValidation {
+  valid: boolean
+  schema_version: number
+  current_schema_version: number
+  forward_schema: boolean
+  issues: RuntimeConfigValidationIssue[]
+}
+
+export interface RuntimeKeeperSetting {
+  key: string | null
+  env: string
+  configured_value: string | null
+  source: string
+  effective_value: string | null
+  effective_error: string | null
+  applied_at: number | null
+  reload_class: string
+  requires_restart: boolean
+  application_status: string
+  consumers: string[]
+}
+
+export interface RuntimeConfigPreview {
+  ok: boolean
+  can_save: boolean
+  validation: RuntimeConfigValidation
+  keeper_setting_schema?: unknown
+}
+
+export type RuntimeTomlEditorTransport = 'endpoint' | 'command'
+export type RuntimeTomlEditorSemantics = 'http_provider' | 'official_client'
+export type RuntimeTomlEditorCredentialPolicy = 'optional' | 'forbidden' | 'file_required'
+
+export interface RuntimeTomlEditorProtocol {
+  protocol: string
+  transport: RuntimeTomlEditorTransport
+  semantics: RuntimeTomlEditorSemantics
+  credential_policy: RuntimeTomlEditorCredentialPolicy
+  requires_non_interactive: boolean
+  provider_fields: string[]
+  required_provider_fields: string[]
+}
+
+const RUNTIME_TOML_EDITOR_PROTOCOL_KEYS = [
+  'credential_policy',
+  'protocol',
+  'provider_fields',
+  'required_provider_fields',
+  'requires_non_interactive',
+  'semantics',
+  'transport',
+] as const
+
+// Strict like the protocol inventory: the server always sends this list and
+// it is never empty (the variant alone names sixteen tables). A missing or
+// empty list means a server this dashboard does not match, and an empty
+// fallback would let the forms accept names the server refuses. That
+// mismatch fails this config read with an error the editor shows; an older
+// dashboard ignores the extra field.
+function parseReservedProviderIds(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('유효하지 않은 runtime reserved provider id 목록')
+  }
+  const ids = raw.map((id) => {
+    if (typeof id !== 'string' || id === '') {
+      throw new Error('유효하지 않은 runtime reserved provider id')
+    }
+    return id
+  })
+  if (new Set(ids).size !== ids.length) {
+    throw new Error('runtime reserved provider id가 중복됩니다')
+  }
+  return ids
+}
+
+function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtocol[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('유효하지 않은 runtime provider protocol inventory')
+  }
+  const seen = new Set<string>()
+  return raw.map((entry) => {
+    if (!isRecord(entry)) throw new Error('유효하지 않은 runtime provider protocol entry')
+    const keys = Object.keys(entry).sort()
+    if (
+      keys.length !== RUNTIME_TOML_EDITOR_PROTOCOL_KEYS.length
+      || keys.some((key, index) => key !== RUNTIME_TOML_EDITOR_PROTOCOL_KEYS[index])
+    ) {
+      throw new Error('유효하지 않은 runtime provider protocol fields')
+    }
+    const protocol = entry.protocol
+    const transport = entry.transport
+    const semantics = entry.semantics
+    const credentialPolicy = entry.credential_policy
+    const requiresNonInteractive = entry.requires_non_interactive
+    const providerFields = entry.provider_fields
+    const requiredProviderFields = entry.required_provider_fields
+    if (
+      typeof protocol !== 'string'
+      || protocol === ''
+      || protocol.trim() !== protocol
+      || (transport !== 'endpoint' && transport !== 'command')
+      || (semantics !== 'http_provider' && semantics !== 'official_client')
+      || (credentialPolicy !== 'optional'
+        && credentialPolicy !== 'forbidden'
+        && credentialPolicy !== 'file_required')
+      || typeof requiresNonInteractive !== 'boolean'
+      || !Array.isArray(providerFields)
+      || providerFields.some(field => typeof field !== 'string' || field === '')
+      || !Array.isArray(requiredProviderFields)
+      || requiredProviderFields.some(field => typeof field !== 'string' || !providerFields.includes(field))
+      || seen.has(protocol)
+    ) {
+      throw new Error('유효하지 않은 runtime provider protocol contract')
+    }
+    if (
+      (semantics === 'official_client'
+        && (transport !== 'command' || credentialPolicy === 'optional' || !requiresNonInteractive))
+      || (semantics === 'http_provider'
+        && (transport !== 'endpoint'
+          || credentialPolicy !== 'optional'
+          || requiresNonInteractive
+          || providerFields.length > 0))
+    ) {
+      throw new Error('일관되지 않은 runtime provider protocol contract')
+    }
+    seen.add(protocol)
+    return {
+      protocol,
+      transport,
+      semantics,
+      credential_policy: credentialPolicy,
+      requires_non_interactive: requiresNonInteractive,
+      provider_fields: [...providerFields],
+      required_provider_fields: [...requiredProviderFields],
+    }
+  })
+}
+
+export type DashboardOfficialClientRecoveryFailure =
+  | 'owner_stopped_turn'
+  | 'input_rejected_bootstrap_floor_exceeded'
+  | 'input_rejected_effect_fenced'
+  | 'pre_dispatch_failed'
+  | 'transient_spawn_failed'
+  | 'transport_interrupted'
+  | 'protocol_failed'
+  | 'provider_rejected'
+  | 'retryable_turn_failed'
+  | 'host_hook_failed'
+  | 'state_persistence_failed'
+  | 'process_restarted'
+  | 'vendor_session_full_no_activity'
+  | 'vendor_session_full_after_activity'
+
+export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity' | 'muse'
+
+export interface DashboardOfficialClientSettlement {
+  session_id: string
+  turn_id: string
+}
+
+export type DashboardOfficialClientSessionPhase =
+  | { kind: 'ready' }
+  | {
+      kind: 'start'
+      owner_epoch: string
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'active'
+      owner_epoch: string
+      session_id: string
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'turn_inflight'
+      owner_epoch: string
+      session_id: string
+      turn_id: string | null
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'recovery_required'
+      recovery_id: string
+      failure: DashboardOfficialClientRecoveryFailure
+      detail: string
+      required_at: number
+      owner_epoch: string
+      observed_session_id: string | null
+      observed_turn_id: string | null
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'settled'
+      session_id: string
+      turn_id: string
+    }
+
+export interface DashboardOfficialClientRecoveryResolutionRecord {
+  recovery_id: string
+  failure: DashboardOfficialClientRecoveryFailure
+  resolution: { kind: 'retry_previous' | 'restart_fresh' }
+  resolved_by: string
+  resolved_at: number
+}
+
+export interface DashboardOfficialClientTransientReleaseRecord {
+  failure: 'pre_dispatch_failed' | 'transient_spawn_failed' | 'owner_stopped_turn' | 'retryable_turn_failed'
+  owner_epoch: string
+  released_at: number
+}
+
+export interface DashboardOfficialClientSession {
+  client_kind: DashboardOfficialClientKind
+  runtime_id: string
+  phase: DashboardOfficialClientSessionPhase
+  turn_count: number
+  session_binding_sha256: string
+  last_recovery_resolution: DashboardOfficialClientRecoveryResolutionRecord | null
+  last_transient_release: DashboardOfficialClientTransientReleaseRecord | null
+  updated_at: number
+}
+
+export interface DashboardOfficialClientSessionResponse {
+  schema: 'masc.dashboard.official-client-session.v2'
+  ok: true
+  keeper_name: string
+  session: DashboardOfficialClientSession | null
+}
+
+export type DashboardOfficialClientRecoveryApplication = 'applied' | 'replayed'
+
+export type DashboardOfficialClientAuditReceipt =
+  | { recorded: true }
+  | { recorded: false; error: string }
+
+export interface DashboardOfficialClientRecoveryResponse
+  extends DashboardOfficialClientSessionResponse {
+  resolution_application: DashboardOfficialClientRecoveryApplication
+  audit: DashboardOfficialClientAuditReceipt
+}
+
+export type DashboardOfficialClientRecoveryDecision =
+  | { resolution: 'retry_previous' }
+  | { resolution: 'restart_fresh' }
+
+export type DashboardOfficialClientLoginStatus =
+  | 'ready'
+  | 'configured'
+  | 'invalid_config'
+  | 'cli_unavailable'
+  | 'login_required'
+  | 'timeout'
+  | 'protocol_error'
+  | 'probe_contract_error'
+
+export interface DashboardOfficialClientProbeResponse {
+  schema: 'masc.dashboard.official-client-probe.v1'
+  ok: true
+  runtime_id: string
+  client_kind: 'codex' | 'claude_code'
+  configured_model: string | null
+  measured_at: number
+  login: {
+    status: DashboardOfficialClientLoginStatus
+    authenticated: boolean
+    evidence_source: 'configured_executable_self_report'
+    identity_verified: false
+    auth_method: string | null
+    subscription_type: string | null
+    api_provider: string | null
+    detail: string | null
+  }
+  client: {
+    user_agent: string | null
+  }
+  execution: {
+    status: 'not_measured'
+    reason: 'login_probe_does_not_submit_model_turn'
+  }
+}
+
+const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecoveryFailure>([
+  'owner_stopped_turn',
+  'input_rejected_bootstrap_floor_exceeded',
+  'input_rejected_effect_fenced',
+  'pre_dispatch_failed',
+  'transient_spawn_failed',
+  'transport_interrupted',
+  'protocol_failed',
+  'provider_rejected',
+  'retryable_turn_failed',
+  'host_hook_failed',
+  'state_persistence_failed',
+  'process_restarted',
+  'vendor_session_full_no_activity',
+  'vendor_session_full_after_activity',
+])
+
+const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([
+  'codex',
+  'claude_code',
+  'antigravity',
+  'muse',
+])
+
+const OFFICIAL_CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const OFFICIAL_CLIENT_SHA256 = /^[0-9a-f]{64}$/
+
+function hasExactKeys(raw: unknown, allowed: readonly string[]): raw is Record<string, unknown> {
+  if (!isRecord(raw)) return false
+  const keys = Object.keys(raw)
+  return keys.length === allowed.length && keys.every(key => allowed.includes(key))
+}
+
+function decodeOfficialClientUuid(raw: unknown): string | null {
+  return typeof raw === 'string' && OFFICIAL_CLIENT_UUID.test(raw) ? raw : null
+}
+
+function decodeOfficialClientNonEmptyString(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() !== '' ? raw : null
+}
+
+function decodeOfficialClientNullableString(raw: unknown): string | null | undefined {
+  if (raw === null) return null
+  return decodeOfficialClientNonEmptyString(raw) ?? undefined
+}
+
+const OFFICIAL_CLIENT_LOGIN_STATUSES = new Set<DashboardOfficialClientLoginStatus>([
+  'ready',
+  'configured',
+  'invalid_config',
+  'cli_unavailable',
+  'login_required',
+  'timeout',
+  'protocol_error',
+  'probe_contract_error',
+])
+
+function decodeOfficialClientSettlement(raw: unknown): DashboardOfficialClientSettlement | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['session_id', 'turn_id'])) return null
+  const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+  const turn_id = decodeOfficialClientNonEmptyString(raw.turn_id)
+  return session_id && turn_id ? { session_id, turn_id } : null
+}
+
+function decodeOfficialClientNullableSettlement(
+  raw: unknown,
+): DashboardOfficialClientSettlement | null | undefined {
+  if (raw === null) return null
+  return decodeOfficialClientSettlement(raw) ?? undefined
+}
+
+function decodeOfficialClientFailure(raw: unknown): DashboardOfficialClientRecoveryFailure | null {
+  return typeof raw === 'string' && OFFICIAL_CLIENT_RECOVERY_FAILURES.has(raw as DashboardOfficialClientRecoveryFailure)
+    ? raw as DashboardOfficialClientRecoveryFailure
+    : null
+}
+
+function decodeOfficialClientPhase(raw: unknown): DashboardOfficialClientSessionPhase | null {
+  if (!isRecord(raw)) return null
+  switch (raw.kind) {
+    case 'ready':
+      return hasExactKeys(raw, ['kind']) ? { kind: 'ready' } : null
+    case 'start': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && previous_settlement !== undefined
+        ? { kind: 'start', owner_epoch, previous_settlement }
+        : null
+    }
+    case 'active': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'session_id', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && session_id && previous_settlement !== undefined
+        ? { kind: 'active', owner_epoch, session_id, previous_settlement }
+        : null
+    }
+    case 'turn_inflight': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'session_id', 'turn_id', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const turn_id = decodeOfficialClientNullableString(raw.turn_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && session_id && turn_id !== undefined && previous_settlement !== undefined
+        ? { kind: 'turn_inflight', owner_epoch, session_id, turn_id, previous_settlement }
+        : null
+    }
+    case 'recovery_required': {
+      if (!hasExactKeys(raw, [
+        'kind',
+        'recovery_id',
+        'failure',
+        'detail',
+        'required_at',
+        'owner_epoch',
+        'observed_session_id',
+        'observed_turn_id',
+        'previous_settlement',
+      ])) return null
+      const recovery_id = decodeOfficialClientUuid(raw.recovery_id)
+      const failure = decodeOfficialClientFailure(raw.failure)
+      const detail = decodeOfficialClientNonEmptyString(raw.detail)
+      const required_at = asNumber(raw.required_at)
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const observed_session_id = decodeOfficialClientNullableString(raw.observed_session_id)
+      const observed_turn_id = decodeOfficialClientNullableString(raw.observed_turn_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      if (
+        !recovery_id
+        || !failure
+        || !detail
+        || required_at == null
+        || !owner_epoch
+        || observed_session_id === undefined
+        || observed_turn_id === undefined
+        || previous_settlement === undefined
+        || (observed_turn_id !== null && observed_session_id === null)
+      ) return null
+      return {
+        kind: 'recovery_required',
+        recovery_id,
+        failure,
+        detail,
+        required_at,
+        owner_epoch,
+        observed_session_id,
+        observed_turn_id,
+        previous_settlement,
+      }
+    }
+    case 'settled': {
+      if (!hasExactKeys(raw, ['kind', 'session_id', 'turn_id'])) return null
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const turn_id = decodeOfficialClientNonEmptyString(raw.turn_id)
+      return session_id && turn_id ? { kind: 'settled', session_id, turn_id } : null
+    }
+    default:
+      return null
+  }
+}
+
+function decodeOfficialClientTransientRelease(raw: unknown): DashboardOfficialClientTransientReleaseRecord | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['failure', 'owner_epoch', 'released_at'])) return null
+  const failure = typeof raw.failure === 'string' ? raw.failure : null
+  const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+  const released_at = asNumber(raw.released_at)
+  if ((failure !== 'pre_dispatch_failed' && failure !== 'transient_spawn_failed' && failure !== 'owner_stopped_turn' && failure !== 'retryable_turn_failed') || !owner_epoch || released_at == null) return null
+  return { failure, owner_epoch, released_at }
+}
+
+function decodeOfficialClientResolutionRecord(raw: unknown): DashboardOfficialClientRecoveryResolutionRecord | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, ['failure', 'recovery_id', 'resolution', 'resolved_at', 'resolved_by'])
+    || !isRecord(raw.resolution)
+    || !hasExactKeys(raw.resolution, ['kind'])
+  ) return null
+  const recovery_id = decodeOfficialClientUuid(raw.recovery_id)
+  const failure = decodeOfficialClientFailure(raw.failure)
+  const resolved_by = decodeOfficialClientNonEmptyString(raw.resolved_by)
+  const resolved_at = asNumber(raw.resolved_at)
+  const kind = typeof raw.resolution.kind === 'string' ? raw.resolution.kind : null
+  if (!recovery_id || !failure || !resolved_by || resolved_at == null) return null
+  const resolution = kind === 'retry_previous' || kind === 'restart_fresh'
+    ? { kind } as const
+    : null
+  if (!resolution) return null
+  return {
+    recovery_id,
+    failure,
+    resolution,
+    resolved_by,
+    resolved_at,
+  }
+}
+
+function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialClientSessionResponse | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, ['schema', 'ok', 'keeper_name', 'session'])
+    || raw.schema !== 'masc.dashboard.official-client-session.v2'
+    || raw.ok !== true
+  ) return null
+  const keeper_name = decodeOfficialClientNonEmptyString(raw.keeper_name)
+  if (!keeper_name) return null
+  if (raw.session === null) {
+    return { schema: 'masc.dashboard.official-client-session.v2', ok: true, keeper_name, session: null }
+  }
+  if (
+    !isRecord(raw.session)
+    || !hasExactKeys(raw.session, [
+      'client_kind',
+      'runtime_id',
+      'phase',
+      'turn_count',
+      'session_binding_sha256',
+      'last_recovery_resolution',
+      'last_transient_release',
+      'updated_at',
+    ])
+  ) return null
+  const client_kind = typeof raw.session.client_kind === 'string'
+    ? raw.session.client_kind
+    : null
+  const runtime_id = decodeOfficialClientNonEmptyString(raw.session.runtime_id)
+  const phase = decodeOfficialClientPhase(raw.session.phase)
+  const turn_count = asNumber(raw.session.turn_count)
+  const session_binding_sha256 = typeof raw.session.session_binding_sha256 === 'string'
+    ? raw.session.session_binding_sha256
+    : null
+  const updated_at = asNumber(raw.session.updated_at)
+  const last_recovery_resolution = raw.session.last_recovery_resolution === null
+    ? null
+    : decodeOfficialClientResolutionRecord(raw.session.last_recovery_resolution)
+  const last_transient_release = raw.session.last_transient_release === null
+    ? null
+    : decodeOfficialClientTransientRelease(raw.session.last_transient_release)
+  if (
+    !client_kind
+    || !OFFICIAL_CLIENT_KINDS.has(client_kind as DashboardOfficialClientKind)
+    || !runtime_id
+    || !phase
+    || turn_count == null
+    || !Number.isInteger(turn_count)
+    || turn_count < 0
+    || (turn_count === 0 && phase.kind !== 'ready')
+    || !session_binding_sha256
+    || !OFFICIAL_CLIENT_SHA256.test(session_binding_sha256)
+    || updated_at == null
+  ) return null
+  if (raw.session.last_recovery_resolution !== null && !last_recovery_resolution) return null
+  if (raw.session.last_transient_release !== null && !last_transient_release) return null
+  return {
+    schema: 'masc.dashboard.official-client-session.v2',
+    ok: true,
+    keeper_name,
+    session: {
+      client_kind: client_kind as DashboardOfficialClientKind,
+      runtime_id,
+      phase,
+      turn_count,
+      session_binding_sha256,
+      last_recovery_resolution,
+      last_transient_release,
+      updated_at,
+    },
+  }
+}
+
+function decodeOfficialClientAuditReceipt(raw: unknown): DashboardOfficialClientAuditReceipt | null {
+  if (!isRecord(raw) || typeof raw.recorded !== 'boolean') return null
+  if (raw.recorded) {
+    return hasExactKeys(raw, ['recorded']) ? { recorded: true } : null
+  }
+  if (!hasExactKeys(raw, ['recorded', 'error'])) return null
+  const error = decodeOfficialClientNonEmptyString(raw.error)
+  return error ? { recorded: false, error } : null
+}
+
+function decodeOfficialClientRecoveryResponse(raw: unknown): DashboardOfficialClientRecoveryResponse | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, [
+      'schema',
+      'ok',
+      'keeper_name',
+      'session',
+      'resolution_application',
+      'audit',
+    ])
+  ) return null
+  const session = decodeOfficialClientSessionResponse({
+    schema: raw.schema,
+    ok: raw.ok,
+    keeper_name: raw.keeper_name,
+    session: raw.session,
+  })
+  const resolution_application = raw.resolution_application === 'applied'
+    || raw.resolution_application === 'replayed'
+    ? raw.resolution_application
+    : null
+  const audit = decodeOfficialClientAuditReceipt(raw.audit)
+  return session && resolution_application && audit
+    ? { ...session, resolution_application, audit }
+    : null
+}
+
+function decodeOfficialClientProbeResponse(raw: unknown): DashboardOfficialClientProbeResponse | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, [
+      'schema',
+      'ok',
+      'runtime_id',
+      'client_kind',
+      'configured_model',
+      'measured_at',
+      'login',
+      'client',
+      'execution',
+    ])
+    || raw.schema !== 'masc.dashboard.official-client-probe.v1'
+    || raw.ok !== true
+  ) return null
+  if (!isRecord(raw.login) || !isRecord(raw.client) || !isRecord(raw.execution)) return null
+  const runtime_id = asString(raw.runtime_id)
+  const client_kind = asString(raw.client_kind)
+  if (raw.configured_model !== null && !asString(raw.configured_model)) return null
+  const configured_model = asNullableString(raw.configured_model)
+  const measured_at = asNumber(raw.measured_at)
+  const status = asString(raw.login.status)
+  const authenticated = asBoolean(raw.login.authenticated)
+  const evidenceSource = asString(raw.login.evidence_source)
+  const identityVerified = asBoolean(raw.login.identity_verified)
+  if (!hasExactKeys(raw.client, ['user_agent'])) return null
+  if (raw.client.user_agent !== null && !asString(raw.client.user_agent)) return null
+  const user_agent = asNullableString(raw.client.user_agent)
+  if (!runtime_id || (client_kind !== 'codex' && client_kind !== 'claude_code')) return null
+  if (
+    measured_at == null
+    || measured_at < 0
+    || measured_at > 8_640_000_000_000
+    || authenticated == null
+    || evidenceSource !== 'configured_executable_self_report'
+    || identityVerified !== false
+  ) return null
+  if (!status || !OFFICIAL_CLIENT_LOGIN_STATUSES.has(status as DashboardOfficialClientLoginStatus)) return null
+  if ((status === 'ready') !== authenticated) return null
+  const hasAuthenticationMetadata = status === 'ready' || status === 'configured'
+  const loginKeys = hasAuthenticationMetadata
+    ? ['status', 'authenticated', 'evidence_source', 'identity_verified', 'auth_method', 'subscription_type', 'api_provider']
+    : ['status', 'authenticated', 'evidence_source', 'identity_verified', 'detail']
+  if (!hasExactKeys(raw.login, loginKeys)) return null
+  const detail = hasAuthenticationMetadata ? null : asString(raw.login.detail) ?? null
+  if (!hasAuthenticationMetadata && !detail) return null
+  if (hasAuthenticationMetadata) {
+    if (!asString(raw.login.auth_method)) return null
+    if (raw.login.subscription_type !== null && !asString(raw.login.subscription_type)) return null
+    if (status === 'configured' && raw.login.auth_method !== 'provider_managed') return null
+    if (raw.login.api_provider !== null && !asString(raw.login.api_provider)) return null
+  }
+  if (
+    !hasExactKeys(raw.execution, ['status', 'reason'])
+    ||
+    raw.execution.status !== 'not_measured'
+    || raw.execution.reason !== 'login_probe_does_not_submit_model_turn'
+  ) return null
+  return {
+    schema: 'masc.dashboard.official-client-probe.v1',
+    ok: true,
+    runtime_id,
+    client_kind,
+    configured_model,
+    measured_at,
+    login: {
+      status: status as DashboardOfficialClientLoginStatus,
+      authenticated,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
+      auth_method: asNullableString(raw.login.auth_method),
+      subscription_type: asNullableString(raw.login.subscription_type),
+      api_provider: asNullableString(raw.login.api_provider),
+      detail,
+    },
+    client: { user_agent },
+    execution: {
+      status: 'not_measured',
+      reason: 'login_probe_does_not_submit_model_turn',
+    },
+  }
+}
+
+function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
+  const record = isRecord(raw) ? raw : {}
+  const sourceRevision = asString(record.source_revision)
+  if (!sourceRevision || !/^[0-9a-f]{64}$/.test(sourceRevision)) {
+    throw new Error('runtime.toml source_revision이 없습니다')
+  }
+  return {
+    ok: asBoolean(record.ok) ?? true,
+    path: asNullableString(record.path),
+    file_name: asString(record.file_name) ?? 'runtime.toml',
+    source_text: asString(record.source_text, ''),
+    source_revision: sourceRevision,
+    provider_protocols: parseRuntimeTomlEditorProtocols(record.provider_protocols),
+    reserved_provider_ids: parseReservedProviderIds(record.reserved_provider_ids),
+    application: normalizeRuntimeConfigApplication(record.application),
+    validation: normalizeRuntimeConfigValidation(record.validation),
+    keeper_setting_schema: record.keeper_setting_schema,
+    keeper_settings: normalizeRuntimeKeeperSettings(record.keeper_settings),
+    message: asNullableString(record.message),
+    reason: asNullableString(record.reason),
+    issues: record.issues,
+  }
+}
+
+function decodeRuntimeConfigCommit(raw: unknown): RuntimeConfigCommit | undefined {
+  if (!hasExactKeys(raw, ['source_revision', 'order', 'durability', 'durability_detail', 'warnings'])) return undefined
+  const sourceRevision = asString(raw.source_revision)
+  const order = asString(raw.order)
+  if (!sourceRevision || !order || !Array.isArray(raw.warnings)) return undefined
+  const warnings: RuntimeConfigCommit['warnings'] = []
+  for (const warning of raw.warnings) {
+    if (!hasExactKeys(warning, ['code', 'detail'])) return undefined
+    const code = asString(warning.code)
+    const detail = asString(warning.detail)
+    if (!code?.trim() || !detail?.trim()) return undefined
+    warnings.push({ code, detail })
+  }
+  const identity = { source_revision: sourceRevision, order, warnings }
+  if (raw.durability === 'durable' && raw.durability_detail === null) {
+    return { ...identity, durability: 'durable', durability_detail: null }
+  }
+  if (raw.durability === 'unconfirmed' && typeof raw.durability_detail === 'string'
+    && raw.durability_detail.trim() !== '') {
+    return { ...identity, durability: 'unconfirmed', durability_detail: raw.durability_detail }
+  }
+  return undefined
+}
+
+function decodeRuntimeSkillApplication(raw: unknown): RuntimeSkillApplication | undefined {
+  if (!isRecord(raw)) return undefined
+  const state = asString(raw.state)
+  if (state === 'invalid_workspace') return { state }
+  if (state === 'workspace_retired') {
+    if (!Object.hasOwn(raw, 'input_source_revision')) return undefined
+    const inputSourceRevision = raw.input_source_revision
+    if (inputSourceRevision !== null && typeof inputSourceRevision !== 'string') return undefined
+    return { state, input_source_revision: inputSourceRevision }
+  }
+  if (state === 'superseded') {
+    const commitOrder = asString(raw.commit_order)
+    const appliedOrder = asString(raw.applied_order)
+    return commitOrder && appliedOrder
+      ? { state, commit_order: commitOrder, applied_order: appliedOrder }
+      : undefined
+  }
+  if (state !== 'published' && state !== 'unchanged') return undefined
+  const inputSourceRevision = asString(raw.input_source_revision)
+  const snapshotRevision = asString(raw.snapshot_revision)
+  const catalogRevision = asString(raw.catalog_revision)
+  const configState = asString(raw.config_state)
+  if (
+    !inputSourceRevision
+    || !snapshotRevision
+    || !catalogRevision
+    || (configState !== 'configured' && configState !== 'rejected' && configState !== 'unreadable')
+  ) return undefined
+  return {
+    state,
+    input_source_revision: inputSourceRevision,
+    snapshot_revision: snapshotRevision,
+    catalog_revision: catalogRevision,
+    config_state: configState,
+  }
+}
+
+function decodeCommittedRuntimeSkillApplication(
+  raw: unknown,
+  commit: RuntimeConfigCommit,
+): CommittedRuntimeSkillApplication | undefined {
+  if (!isRecord(raw)) return undefined
+  const state = asString(raw.state)
+  if (state === 'invalid_workspace') {
+    return hasExactKeys(raw, ['state']) ? { state } : undefined
+  }
+  if (state === 'workspace_retired') {
+    if (!hasExactKeys(raw, ['state', 'input_source_revision'])) return undefined
+    const inputSourceRevision = asString(raw.input_source_revision)
+    return inputSourceRevision === commit.source_revision
+      ? { state, input_source_revision: inputSourceRevision }
+      : undefined
+  }
+  if (state === 'superseded') {
+    if (!hasExactKeys(raw, ['state', 'commit_order', 'applied_order'])) return undefined
+    const commitOrder = asString(raw.commit_order)
+    const appliedOrder = asString(raw.applied_order)
+    return commitOrder === commit.order && appliedOrder
+      ? { state, commit_order: commitOrder, applied_order: appliedOrder }
+      : undefined
+  }
+  if (state !== 'published' && state !== 'unchanged') return undefined
+  if (!hasExactKeys(raw, [
+    'state',
+    'input_source_revision',
+    'snapshot_revision',
+    'catalog_revision',
+    'config_state',
+  ])) return undefined
+  const inputSourceRevision = asString(raw.input_source_revision)
+  const snapshotRevision = asString(raw.snapshot_revision)
+  const catalogRevision = asString(raw.catalog_revision)
+  const configState = asString(raw.config_state)
+  if (
+    inputSourceRevision !== commit.source_revision
+    || !snapshotRevision
+    || !catalogRevision
+    || (configState !== 'configured' && configState !== 'rejected' && configState !== 'unreadable')
+  ) return undefined
+  return {
+    state,
+    input_source_revision: inputSourceRevision,
+    snapshot_revision: snapshotRevision,
+    catalog_revision: catalogRevision,
+    config_state: configState,
+  }
+}
+
+function strictStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw) || raw.some(value => typeof value !== 'string')) return undefined
+  return [...raw]
+}
+
+function strictAppliedAt(raw: unknown): string | number | null | undefined {
+  if (raw === null || (typeof raw === 'string' && raw !== '')) return raw
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+}
+
+function decodeCommittedRuntimeApplicationLane(
+  raw: unknown,
+): CommittedRuntimeConfigApplicationLane | undefined {
+  if (!hasExactKeys(raw, ['status', 'requires_restart', 'applied_at'])) return undefined
+  const status = asString(raw.status)
+  const requiresRestart = raw.requires_restart
+  const appliedAt = strictAppliedAt(raw.applied_at)
+  if (
+    (status !== 'active' && status !== 'applied')
+    || typeof requiresRestart !== 'boolean'
+    || appliedAt === undefined
+  ) return undefined
+  return { status, requires_restart: requiresRestart, applied_at: appliedAt }
+}
+
+function decodeCommittedRuntimeKeeperOverlay(
+  raw: unknown,
+): CommittedRuntimeConfigKeeperOverlayApplication | undefined {
+  if (!hasExactKeys(raw, [
+    'status',
+    'configured_count',
+    'requires_restart',
+    'pending_keys',
+    'applied_keys',
+    'preempted_keys',
+    'applied_at',
+  ])) return undefined
+  const status = asString(raw.status)
+  const requiresRestart = raw.requires_restart
+  const appliedAt = strictAppliedAt(raw.applied_at)
+  const configuredCount = raw.configured_count
+  const pendingKeys = strictStringArray(raw.pending_keys)
+  const appliedKeys = strictStringArray(raw.applied_keys)
+  const preemptedKeys = strictStringArray(raw.preempted_keys)
+  if (
+    (status !== 'not_configured'
+      && status !== 'pending_restart'
+      && status !== 'applied'
+      && status !== 'preempted_by_env'
+      && status !== 'mixed')
+    || typeof requiresRestart !== 'boolean'
+    || appliedAt === undefined
+    || typeof configuredCount !== 'number'
+    || !Number.isInteger(configuredCount)
+    || configuredCount < 0
+    || !pendingKeys
+    || !appliedKeys
+    || !preemptedKeys
+  ) return undefined
+  return {
+    status,
+    requires_restart: requiresRestart,
+    applied_at: appliedAt,
+    configured_count: configuredCount,
+    pending_keys: pendingKeys,
+    applied_keys: appliedKeys,
+    preempted_keys: preemptedKeys,
+  }
+}
+
+function decodeCommittedRuntimeExactOutputRegistry(
+  raw: unknown,
+): CommittedRuntimeExactOutputRegistryApplication | undefined {
+  if (
+    hasExactKeys(raw, ['status', 'requires_restart', 'targets'])
+    && raw.status === 'applied'
+    && raw.requires_restart === false
+    && (raw.targets === 'runtime_bindings' || raw.targets === 'replacement_catalog')
+  ) {
+    return { status: 'applied', requires_restart: false, targets: raw.targets }
+  }
+  if (
+    hasExactKeys(raw, ['status', 'requires_restart'])
+    && raw.status === 'unpublished'
+    && raw.requires_restart === true
+  ) {
+    return { status: 'unpublished', requires_restart: true }
+  }
+  if (
+    hasExactKeys(raw, ['status', 'requires_restart', 'next_boot_publishes', 'reason'])
+    && raw.status === 'kept'
+    && raw.requires_restart === false
+    && raw.next_boot_publishes === false
+  ) {
+    const reason = asString(raw.reason)
+    return reason
+      ? { status: 'kept', requires_restart: false, next_boot_publishes: false, reason }
+      : undefined
+  }
+  return undefined
+}
+
+function decodeCommittedRuntimeConfigApplication(
+  raw: unknown,
+  commit: RuntimeConfigCommit,
+): CommittedRuntimeConfigApplication | undefined {
+  if (!hasExactKeys(raw, [
+    'operation',
+    'routing',
+    'keeper_overlay',
+    'skills',
+    'exact_output_registry',
+  ])) return undefined
+  const operation = asString(raw.operation)
+  const routing = decodeCommittedRuntimeApplicationLane(raw.routing)
+  const keeperOverlay = decodeCommittedRuntimeKeeperOverlay(raw.keeper_overlay)
+  const skills = decodeCommittedRuntimeSkillApplication(raw.skills, commit)
+  const exactOutputRegistry = decodeCommittedRuntimeExactOutputRegistry(raw.exact_output_registry)
+  if (!operation || !routing || !keeperOverlay || !skills || !exactOutputRegistry) return undefined
+  return {
+    operation,
+    routing,
+    keeper_overlay: keeperOverlay,
+    skills,
+    exact_output_registry: exactOutputRegistry,
+  }
+}
+
+function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {
+  if (
+    !isRecord(raw)
+    || raw.state !== 'committed'
+    || raw.ok !== true
+    || typeof raw.path !== 'string'
+    || typeof raw.source_text !== 'string'
+  ) {
+    throw new Error('runtime.toml 커밋 영수증이 없습니다')
+  }
+  const commit = decodeRuntimeConfigCommit(raw.commit)
+  const normalized = normalizeRuntimeTomlConfig(raw)
+  const application = commit
+    ? decodeCommittedRuntimeConfigApplication(raw.application, commit)
+    : undefined
+  if (!commit || !application) {
+    throw new Error('유효하지 않은 runtime.toml 적용 영수증')
+  }
+  return {
+    ...normalized,
+    ok: true,
+    path: raw.path,
+    state: 'committed',
+    commit,
+    application,
+  }
+}
+
+/** Decodes a runtime.toml write's commit receipt and tells every screen the
+ * file changed. The receipt proves the write whether or not the screen that
+ * sent it still waits for the answer, so the request announces it, not the
+ * screen. `onCommitted` runs in the same batch, before any screen hears it,
+ * so a writer that adopts its own receipt can take the new generation. */
+export function receiveRuntimeTomlCommit(raw: unknown, options: RuntimeTomlRequestOptions = {}): CommittedRuntimeTomlConfig {
+  return announceRuntimeTomlCommit(decodeCommittedRuntimeTomlConfig(raw), options)
+}
+
+/** The announcement half of receiveRuntimeTomlCommit. Only a write function,
+ * or a test double standing in for one, calls it; a screen never does. */
+export function announceRuntimeTomlCommit<T>(receipt: T, options: RuntimeTomlRequestOptions = {}): T {
+  batch(() => { announceRuntimeTomlWritten(); options.onCommitted?.() })
+  return receipt
+}
+
+function appliedAt(raw: unknown): string | number | null {
+  return asString(raw) ?? asNumber(raw) ?? null
+}
+
+function normalizeApplicationLane(raw: unknown): RuntimeConfigApplicationLane {
+  const record = isRecord(raw) ? raw : {}
+  return {
+    status: asString(record.status) ?? 'unknown',
+    requires_restart: asBoolean(record.requires_restart) ?? false,
+    applied_at: appliedAt(record.applied_at),
+  }
+}
+
+function normalizeRuntimeConfigApplication(raw: unknown): RuntimeConfigApplication | undefined {
+  if (!isRecord(raw)) return undefined
+  const keeperOverlay = isRecord(raw.keeper_overlay) ? raw.keeper_overlay : {}
+  return {
+    operation: asString(raw.operation) ?? 'unknown',
+    routing: normalizeApplicationLane(raw.routing),
+    keeper_overlay: {
+      ...normalizeApplicationLane(keeperOverlay),
+      configured_count: asNumber(keeperOverlay.configured_count) ?? 0,
+      pending_keys: asStringArray(keeperOverlay.pending_keys) ?? [],
+      applied_keys: asStringArray(keeperOverlay.applied_keys) ?? [],
+      preempted_keys: asStringArray(keeperOverlay.preempted_keys) ?? [],
+    },
+    skills: decodeRuntimeSkillApplication(raw.skills),
+  }
+}
+
+function normalizeRuntimeConfigValidation(raw: unknown): RuntimeConfigValidation | undefined {
+  if (!isRecord(raw)) return undefined
+  const issues = Array.isArray(raw.issues)
+    ? raw.issues.flatMap((issue): RuntimeConfigValidationIssue[] => {
+      if (!isRecord(issue)) return []
+      const severity = asString(issue.severity)
+      if (severity !== 'error' && severity !== 'warning') return []
+      return [{
+        key: asString(issue.key) ?? '',
+        kind: asString(issue.kind) ?? 'unknown',
+        severity,
+        detail: asString(issue.detail) ?? '',
+      }]
+    })
+    : []
+  return {
+    valid: asBoolean(raw.valid) ?? false,
+    schema_version: asNumber(raw.schema_version) ?? 0,
+    current_schema_version: asNumber(raw.current_schema_version) ?? 0,
+    forward_schema: asBoolean(raw.forward_schema) ?? false,
+    issues,
+  }
+}
+
+function normalizeRuntimeKeeperSettings(raw: unknown): RuntimeKeeperSetting[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  return raw.flatMap((value): RuntimeKeeperSetting[] => {
+    if (!isRecord(value)) return []
+    return [{
+      key: asNullableString(value.key),
+      env: asString(value.env) ?? '',
+      configured_value: asNullableString(value.configured_value),
+      source: asString(value.source) ?? 'unknown',
+      effective_value: asNullableString(value.effective_value),
+      effective_error: asNullableString(value.effective_error),
+      applied_at: asNumber(value.applied_at) ?? null,
+      reload_class: asString(value.reload_class) ?? 'unknown',
+      requires_restart: asBoolean(value.requires_restart) ?? false,
+      application_status: asString(value.application_status) ?? 'unknown',
+      consumers: asStringArray(value.consumers) ?? [],
+    }]
+  })
+}
+
+export type RuntimeTomlRequestOptions = { beforeDispatch?: () => void; onCommitted?: () => void }
+
+export async function fetchRuntimeTomlConfig(options: RuntimeTomlRequestOptions = {}): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
+  options.beforeDispatch?.()
+  return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
+}
+
+export async function fetchOfficialClientSession(
+  keeperName: string,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardOfficialClientSessionResponse> {
+  await ensureDevToken()
+  const query = new URLSearchParams({ keeper_name: keeperName })
+  const raw = await get<unknown>(`/api/v1/runtime/sessions/official-client?${query}`, { signal: opts?.signal })
+  const decoded = decodeOfficialClientSessionResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 official-client session payload')
+  return decoded
+}
+
+export async function resolveOfficialClientSession(
+  keeperName: string,
+  recoveryId: string,
+  decision: DashboardOfficialClientRecoveryDecision,
+): Promise<DashboardOfficialClientRecoveryResponse> {
+  await ensureDevToken()
+  const raw = await post<unknown>('/api/v1/runtime/sessions/official-client/resolve', {
+    keeper_name: keeperName,
+    recovery_id: recoveryId,
+    ...decision,
+  })
+  const decoded = decodeOfficialClientRecoveryResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 official-client recovery payload')
+  return decoded
+}
+
+export async function probeOfficialClientLogin(
+  runtimeId: string,
+): Promise<DashboardOfficialClientProbeResponse> {
+  await ensureDevToken()
+  const raw = await post<unknown>('/api/v1/runtime/official-client/probe', {
+    runtime_id: runtimeId,
+  })
+  const decoded = decodeOfficialClientProbeResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 official-client probe payload')
+  return decoded
+}
+
+// Structured, already-resolved runtime defaults / model routing (runtime.toml
+// SSOT). Public read — no credentials, no raw TOML; the Settings surface
+// consumes this instead of re-parsing TOML on the client.
+export async function fetchRuntimeDefaults(
+  opts?: AbortableRequestOptions,
+): Promise<RuntimeDefaultsResponse> {
+  const raw = await get<unknown>('/api/v1/dashboard/runtime-defaults', { signal: opts?.signal })
+  const { parseRuntimeDefaultsResponse } = await import('./schemas/runtime-defaults')
+  return parseRuntimeDefaultsResponse(raw)
+}
+
+// Single resolved-runtime document (bugs #14/#15/#36): effective max-context
+// + source per runtime, configured lanes, and the full keeper fleet joined
+// against [runtime.assignments] with the [runtime].default rider made
+// explicit. Public read, same posture as fetchRuntimeDefaults.
+export async function fetchRuntimeResolved(
+  opts?: AbortableRequestOptions,
+): Promise<RuntimeResolvedResponse> {
+  const raw = await get<unknown>('/api/v1/runtime/resolved', { signal: opts?.signal })
+  const { parseRuntimeResolvedResponse } = await import('./schemas/runtime-resolved')
+  return parseRuntimeResolvedResponse(raw)
+}
+
+export interface RuntimeTomlCurrentSource {
+  source_path: string
+  source_text: string
+  source_revision: string
+}
+
+export class RuntimeTomlRevisionConflict extends Error {
+  constructor(message: string, readonly current: RuntimeTomlCurrentSource) {
+    super(message)
+    this.name = 'RuntimeTomlRevisionConflict'
+  }
+}
+
+/** Structured raw-route validation and authorization rejections occur before
+ * replacement; after-rename durability failures return a committed receipt. */
+export class RuntimeTomlSaveRejected extends Error {
+  constructor(message: string) { super(message); this.name = 'RuntimeTomlSaveRejected' }
+}
+
+export async function saveRuntimeTomlConfig(
+  sourceText: string,
+  expectedSourceRevision: string,
+  options: RuntimeTomlRequestOptions & { expectedSourcePath: string },
+): Promise<CommittedRuntimeTomlConfig> {
+  if (!/^[0-9a-f]{64}$/.test(expectedSourceRevision)) {
+    throw new Error('runtime.toml 저장 기준 revision이 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
+  }
+  if (typeof options.expectedSourcePath !== 'string' || options.expectedSourcePath === '' || options.expectedSourcePath.includes('\0')) {
+    throw new Error('runtime.toml 저장 기준 path가 유효하지 않습니다. 현재 파일을 다시 읽으세요.')
+  }
+  await ensureDevToken()
+  options.beforeDispatch?.()
+  try {
+    const raw = await post<unknown>('/api/v1/runtime/config/raw', {
+      source_text: sourceText,
+      expected_source_revision: expectedSourceRevision,
+      expected_source_path: options.expectedSourcePath,
+    })
+    return receiveRuntimeTomlCommit(raw, options)
+  } catch (error: unknown) {
+    if (error instanceof ApiRequestError && error.method === 'POST'
+      && error.path === '/api/v1/runtime/config/raw'
+      && (error.status === 400 || error.status === 401 || error.status === 403)
+      && !error.timeout && error.configApplied !== true
+      && error.configApplicationState !== 'indeterminate' && !error.authoritativeReloadRequired
+      && error.runtimeSync === undefined) {
+      const failure = error.responseData
+      if (isRecord(failure) && typeof failure.error === 'string' && failure.error.trim() !== ''
+        && (failure.ok === undefined || failure.ok === false)
+        && (error.status === 400 || typeof failure.auth_error_code === 'string' && failure.auth_error_code.trim() !== '')) {
+        throw new RuntimeTomlSaveRejected(error.message)
+      }
+    }
+    if (error instanceof ApiRequestError && error.status === 409) {
+      const failure = error.responseData
+      if (isRecord(failure) && failure.code === 'revision_conflict'
+        && typeof failure.error === 'string' && isRecord(failure.current)) {
+        const current = failure.current
+        if (typeof current.source_path === 'string' && current.source_path !== ''
+          && typeof current.source_text === 'string'
+          && typeof current.source_revision === 'string'
+          && /^[0-9a-f]{64}$/.test(current.source_revision)) {
+          throw new RuntimeTomlRevisionConflict(failure.error, {
+            source_path: current.source_path,
+            source_text: current.source_text,
+            source_revision: current.source_revision,
+          })
+        }
+      }
+    }
+    throw error
+  }
+}
+
+export async function previewRuntimeTomlConfig(sourceText: string, options: RuntimeTomlRequestOptions = {}): Promise<RuntimeConfigPreview> {
+  await ensureDevToken()
+  options.beforeDispatch?.()
+  const raw = await post<unknown>('/api/v1/runtime/config/raw/preview', {
+    source_text: sourceText,
+  })
+  if (!isRecord(raw)) throw new Error('유효하지 않은 runtime config preview payload')
+  const validation = normalizeRuntimeConfigValidation(raw.validation)
+  if (!validation) throw new Error('유효하지 않은 runtime config validation payload')
+  return {
+    ok: asBoolean(raw.ok) ?? false,
+    can_save: asBoolean(raw.can_save) ?? false,
+    validation,
+    keeper_setting_schema: raw.keeper_setting_schema,
+  }
+}
+
+export type RuntimeRoutingLane =
+  | 'default'
+
+export async function patchRuntimeRouting(
+  lane: RuntimeRoutingLane,
+  routeId: string | null,
+  options: RuntimeTomlRequestOptions = {},
+): Promise<CommittedRuntimeTomlConfig> {
+  await ensureDevToken()
+  options.beforeDispatch?.()
+  return post<unknown>('/api/v1/runtime/config/routing', {
+    lane,
+    runtime_id: routeId,
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
+}
+
+export async function patchRuntimeMediaFailover(
+  runtimeIds: readonly string[],
+  options: RuntimeTomlRequestOptions = {},
+): Promise<CommittedRuntimeTomlConfig> {
+  await ensureDevToken()
+  options.beforeDispatch?.()
+  return post<unknown>('/api/v1/runtime/config/routing', {
+    lane: 'media_failover',
+    runtime_ids: [...runtimeIds],
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
+}
+
+// A declared [runtime.lanes."<id>"] candidate chain. The server resolves the
+// lane name before it writes, so `set` refuses a name nothing resolves (a typo
+// cannot become a lane) and `create` refuses a name the file already declares.
+// `set` sends the whole order: the endpoint's contract is the lane's order,
+// not a delta, and an empty order is refused (removing the lane is `remove`).
+export type RuntimeLaneEdit =
+  | { action: 'set'; runtimeIds: readonly string[]; expectedSourceRevision: string }
+  | { action: 'create'; runtimeIds: readonly string[] }
+  | { action: 'remove' }
+  | { action: 'rename'; to: string }
+
+function runtimeLaneEditBody(
+  lane: string,
+  edit: RuntimeLaneEdit,
+): Record<string, unknown> {
+  switch (edit.action) {
+    case 'set':
+      return {
+        lane, action: 'set', runtime_ids: [...edit.runtimeIds],
+        expected_source_revision: edit.expectedSourceRevision,
+      }
+    case 'create':
+      return { lane, action: edit.action, runtime_ids: [...edit.runtimeIds] }
+    case 'remove':
+      return { lane, action: 'remove' }
+    case 'rename':
+      return { lane, action: 'rename', to: edit.to }
+  }
+}
+
+export async function patchRuntimeLane(
+  lane: string,
+  edit: RuntimeLaneEdit,
+  options: RuntimeTomlRequestOptions = {},
+): Promise<CommittedRuntimeTomlConfig> {
+  await ensureDevToken()
+  options.beforeDispatch?.()
+  return post<unknown>('/api/v1/runtime/config/routing', runtimeLaneEditBody(lane, edit))
+    .then(raw => receiveRuntimeTomlCommit(raw, options))
+}
+
+export type RuntimeExactSlotAction = 'append' | 'drop' | 'move'
+export type RuntimeExactSlotDirection = 'up' | 'down'
+
+export async function patchRuntimeExactSlot(
+  laneId: string,
+  action: RuntimeExactSlotAction,
+  runtimeId: string,
+  direction?: RuntimeExactSlotDirection,
+  options: RuntimeTomlRequestOptions = {},
+): Promise<CommittedRuntimeTomlConfig> {
+  await ensureDevToken()
+  options.beforeDispatch?.()
+  return post<unknown>('/api/v1/runtime/config/routing', {
+    lane: `exact/${laneId}`,
+    action,
+    runtime_id: runtimeId,
+    ...(direction === undefined ? {} : { direction }),
+  }).then(raw => receiveRuntimeTomlCommit(raw, options))
+}
+
+export async function patchRuntimeAssignment(
+  keeperName: string,
+  runtimeId: string | null,
+  expectedAssignmentRevision: KeeperRuntimeAssignmentRevision,
+  options: RuntimeTomlRequestOptions = {},
+): Promise<CommittedRuntimeTomlConfig | {
+  ok: true
+  applied: false
+  assignment_revision: KeeperRuntimeAssignmentRevision
+}> {
+  await ensureDevToken()
+  options.beforeDispatch?.()
+  const raw = await post<unknown>('/api/v1/runtime/config/assignment', {
+    keeper_name: keeperName,
+    runtime_id: runtimeId,
+    expected_assignment_revision: expectedAssignmentRevision,
+  })
+  if (isRecord(raw) && raw.ok === true && raw.applied === false) {
+    const assignmentRevision = decodeKeeperRuntimeAssignmentRevision(raw.assignment_revision)
+    if (!assignmentRevision) {
+      throw new Error('runtime assignment no-op revision이 없습니다')
+    }
+    return {
+      ok: true,
+      applied: false,
+      assignment_revision: assignmentRevision,
+    }
+  }
+  return receiveRuntimeTomlCommit(raw, options)
+}
+
+/**
+ * The Runtime_params registry: every knob this build registered, what it is
+ * set to now, and what it would be with nobody overriding it.
+ *
+ * Distinct from {@link DashboardRuntimeParameterPolicy}, which is a provider's
+ * sampling-parameter policy. Same word, different subject -- this one is the
+ * workspace's own settings store, written to .masc/runtime_params.json.
+ */
+export interface RuntimeParamMeta {
+  description: string
+  value_type: string
+  min_value?: number
+  max_value?: number
+}
+
+export interface RuntimeParam {
+  key: string
+  /** What the workspace runs on right now. */
+  current: unknown
+  /** What it would be with no override -- the env-backed default. */
+  default: unknown
+  has_override: boolean
+  meta: RuntimeParamMeta | null
+}
+
+function runtimeParamsDrift(detail: string): never {
+  throw new ApiRequestError({
+    method: 'GET',
+    path: '/api/v1/runtime/params',
+    detail: `invalid runtime params response: ${detail}`,
+    errorCode: 'protocol_drift',
+  })
+}
+
+function decodeRuntimeParamMeta(raw: unknown): RuntimeParamMeta | null {
+  if (raw === null || raw === undefined) return null
+  if (!isRecord(raw)) return runtimeParamsDrift('meta is not an object')
+  if (typeof raw.description !== 'string' || typeof raw.value_type !== 'string') {
+    return runtimeParamsDrift('meta is missing description or value_type')
+  }
+  return {
+    description: raw.description,
+    value_type: raw.value_type,
+    ...(typeof raw.min_value === 'number' ? { min_value: raw.min_value } : {}),
+    ...(typeof raw.max_value === 'number' ? { max_value: raw.max_value } : {}),
+  }
+}
+
+function decodeRuntimeParam(raw: unknown): RuntimeParam {
+  if (!isRecord(raw)) return runtimeParamsDrift('parameter is not an object')
+  if (typeof raw.key !== 'string' || raw.key.trim() === '') {
+    return runtimeParamsDrift('parameter has no key')
+  }
+  if (typeof raw.has_override !== 'boolean') {
+    return runtimeParamsDrift(`${raw.key} has no has_override`)
+  }
+  // current and default stay unknown: the registry holds ints, floats, bools
+  // and strings, and narrowing here would decide for the renderer which of
+  // them it is allowed to show.
+  return {
+    key: raw.key,
+    current: raw.current,
+    default: raw.default,
+    has_override: raw.has_override,
+    meta: decodeRuntimeParamMeta(raw.meta),
+  }
+}
+
+export async function fetchRuntimeParams(): Promise<RuntimeParam[]> {
+  const raw = await get<unknown>('/api/v1/runtime/params')
+  if (!isRecord(raw)) return runtimeParamsDrift('expected an object')
+  if (!Array.isArray(raw.parameters)) return runtimeParamsDrift('parameters must be an array')
+  return raw.parameters.map(decodeRuntimeParam)
+}
+
+/** Override one knob. The server validates against the registered bounds.
+ * The body field is `param_key` — `Server_runtime_param_request` rejects a
+ * body without it as `Missing_param_key`, so `{ key }` never saved anything. */
+export async function setRuntimeParam(key: string, value: unknown): Promise<void> {
+  await post<unknown>('/api/v1/runtime/params/set', { param_key: key, value })
+}
+
+/** Drop the override, so the knob goes back to its env-backed default. */
+export async function clearRuntimeParam(key: string): Promise<void> {
+  await post<unknown>('/api/v1/runtime/params/clear', { param_key: key })
+}

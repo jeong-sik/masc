@@ -1,0 +1,106 @@
+{
+  "target": {
+    "lane": "live",
+    "clientId": "74b54fd3-5882-4aba-afb7-3c6ddaeb9f4e",
+    "tabId": 9,
+    "expectedUrl": "http://127.0.0.1:49189/"
+  },
+  "browser": "Zen 1.22b",
+  "server_build": {
+    "binary_commit": "15220a5d748b142302a164067c592dac16278cb2",
+    "executable_sha256": "9f9d4076b2474de49ba10993007b321c804879cd3730144b2d61e03c64c14405",
+    "runtime_instance_id": "01a07f44-bd1a-7000-a8b8-fbeb3518ab5f",
+    "started_at": "2026-09-08T04:26:46Z"
+  },
+  "path": "production live native extension; MCP scroll then HTTP screenshot; not changed TUI input loop",
+  "steps": [
+    {
+      "file": "top.png",
+      "sha256": "cd7e52720ff60e824a5f5566019bdf85643f7f47808cf2d00410ef95030953c2",
+      "bytes": 397248,
+      "elapsed_ms": 109.99933397397399
+    },
+    {
+      "action": "scroll",
+      "y": 120,
+      "elapsed_ms": 17.392124980688095,
+      "result": {
+        "clientId": "74b54fd3-5882-4aba-afb7-3c6ddaeb9f4e",
+        "tabId": 9,
+        "action": "scroll",
+        "urlBefore": "http://127.0.0.1:49189/",
+        "url": "http://127.0.0.1:49189/",
+        "title": "MASC \u00b7 Zen terminal canvas",
+        "scrollX": 0,
+        "scrollY": 120
+      }
+    },
+    {
+      "file": "scroll-1.png",
+      "sha256": "782f3862dd51b093ecd9bfb5be9e05afade19e7fb107309a08ad696866e24649",
+      "bytes": 410046,
+      "elapsed_ms": 107.535041985102
+    },
+    {
+      "action": "scroll",
+      "y": 120,
+      "elapsed_ms": 6.427208078093827,
+      "result": {
+        "clientId": "74b54fd3-5882-4aba-afb7-3c6ddaeb9f4e",
+        "tabId": 9,
+        "action": "scroll",
+        "urlBefore": "http://127.0.0.1:49189/",
+        "url": "http://127.0.0.1:49189/",
+        "title": "MASC \u00b7 Zen terminal canvas",
+        "scrollX": 0,
+        "scrollY": 240
+      }
+    },
+    {
+      "file": "scroll-2.png",
+      "sha256": "9763a3c9a62ef1e84630d984a8e3db4377782b6897057274b3ddc608172762ed",
+      "bytes": 379945,
+      "elapsed_ms": 111.7993330117315
+    },
+    {
+      "action": "scroll",
+      "y": 120,
+      "elapsed_ms": 7.899874937720597,
+      "result": {
+        "clientId": "74b54fd3-5882-4aba-afb7-3c6ddaeb9f4e",
+        "tabId": 9,
+        "action": "scroll",
+        "urlBefore": "http://127.0.0.1:49189/",
+        "url": "http://127.0.0.1:49189/",
+        "title": "MASC \u00b7 Zen terminal canvas",
+        "scrollX": 0,
+        "scrollY": 360
+      }
+    },
+    {
+      "file": "scroll-3.png",
+      "sha256": "7c16744f18d2f2ea559e4663d421e97ab87b9139b61425513c4a95ca15e93a0f",
+      "bytes": 374164,
+      "elapsed_ms": 102.93541708961129
+    },
+    {
+      "action": "restore-top",
+      "result": {
+        "clientId": "74b54fd3-5882-4aba-afb7-3c6ddaeb9f4e",
+        "tabId": 9,
+        "action": "scroll",
+        "urlBefore": "http://127.0.0.1:49189/",
+        "url": "http://127.0.0.1:49189/",
+        "title": "MASC \u00b7 Zen terminal canvas",
+        "scrollX": 0,
+        "scrollY": 0
+      }
+    },
+    {
+      "file": "restored.png",
+      "sha256": "9303faec980222d6b0acf00f4a3662de3fa691a156bfe6a692c2df4ceee12c4b",
+      "bytes": 397411,
+      "elapsed_ms": 112.05445800442249
+    }
+  ]
+}

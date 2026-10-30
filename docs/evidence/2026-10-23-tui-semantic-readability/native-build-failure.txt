@@ -1,0 +1,6 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/39900708827
+Source: 365b78c22cea4141ae3413c88d21bdfee0bd2da8
+Job: 120241393553 (native-tui / macos-tui)
+2026-10-23T04:38:22.8195020Z File "bin/masc_tui_render_chat.ml", line 633, characters 50-57:
+2026-10-23T04:38:22.8195560Z 633 |         else if context.ambient_background && not is_tool then
+2026-10-23T04:38:22.8196360Z Error: Unbound value is_tool

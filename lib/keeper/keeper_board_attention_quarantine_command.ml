@@ -1,0 +1,923 @@
+module Candidate = Keeper_board_attention_candidate
+module Partition = Keeper_board_attention_partition
+module Quarantine_pair = Keeper_board_attention_quarantine_pair
+module Wake = Keeper_board_attention_worker_wake
+
+let request_schema = "keeper.board_attention.quarantine.recovery.request.v1"
+let result_schema = "keeper.board_attention.quarantine.recovery.result.v1"
+
+type decision = Acknowledge_and_requeue
+
+type request =
+  { candidate_id : string
+  ; expected_quarantine_id : string
+  ; decision : decision
+  }
+
+type t =
+  { keeper_name : string
+  ; partition_id : string
+  ; request : request
+  ; requested_by : string
+  }
+
+type input_error =
+  | Object_required
+  | Duplicate_fields of string list
+  | Unsupported_fields of string list
+  | Missing_fields of string list
+  | Invalid_field of string
+  | Unsupported_schema of string
+  | Unsupported_decision of string
+  | Invalid_keeper_name of string
+  | Invalid_requester
+
+type execution_error =
+  | Candidate_state_conflict of string
+  | Partition_state_conflict of string
+  | Durability_unconfirmed of string
+  | Wake_request_failed of string
+
+type report =
+  { candidate : Candidate.candidate
+  ; partition : Partition.t
+  ; failure_category : Candidate.quarantine_failure_category
+  ; wake : Wake.wake_result
+  }
+
+open Result.Syntax
+
+let sorted_unique values =
+  values |> List.sort_uniq String.compare
+;;
+
+let validate_exact_object ~expected = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    let duplicates =
+      keys
+      |> List.filter (fun key ->
+        List.length (List.filter (String.equal key) keys) > 1)
+      |> sorted_unique
+    in
+    if duplicates <> []
+    then Error (Duplicate_fields duplicates)
+    else
+      let unsupported =
+        keys
+        |> List.filter (fun key -> not (List.mem key expected))
+        |> sorted_unique
+      in
+      if unsupported <> []
+      then Error (Unsupported_fields unsupported)
+      else
+        let missing =
+          expected
+          |> List.filter (fun key -> not (List.mem_assoc key fields))
+        in
+        if missing <> [] then Error (Missing_fields missing) else Ok fields
+  | _ -> Error Object_required
+;;
+
+let nonblank field = function
+  | `String value when not (String.equal (String.trim value) "") -> Ok value
+  | _ -> Error (Invalid_field field)
+;;
+
+let schema expected fields =
+  match List.assoc "schema" fields with
+  | `String observed when String.equal observed expected -> Ok ()
+  | `String observed -> Error (Unsupported_schema observed)
+  | _ -> Error (Invalid_field "schema")
+;;
+
+let parse_decision = function
+  | `String "acknowledge_and_requeue" -> Ok Acknowledge_and_requeue
+  | `String value -> Error (Unsupported_decision value)
+  | _ -> Error (Invalid_field "decision")
+;;
+
+let request_of_fields fields =
+  let* candidate_id = nonblank "candidate_id" (List.assoc "candidate_id" fields) in
+  let* expected_quarantine_id =
+    nonblank
+      "expected_quarantine_id"
+      (List.assoc "expected_quarantine_id" fields)
+  in
+  let* decision = parse_decision (List.assoc "decision" fields) in
+  Ok { candidate_id; expected_quarantine_id; decision }
+;;
+
+let parse_request json =
+  let* fields =
+    validate_exact_object
+      ~expected:
+        [ "schema"
+        ; "candidate_id"
+        ; "expected_quarantine_id"
+        ; "decision"
+        ]
+      json
+  in
+  let* () = schema request_schema fields in
+  request_of_fields fields
+;;
+
+let make ~keeper_name ~raw_partition_id ~requested_by request =
+  if not (Keeper_config.validate_name keeper_name)
+  then Error (Invalid_keeper_name keeper_name)
+  else if String.equal (String.trim raw_partition_id) ""
+  then Error (Invalid_field "partition_id")
+  else if String.equal (String.trim requested_by) ""
+  then Error Invalid_requester
+  else Ok { keeper_name; partition_id = raw_partition_id; request; requested_by }
+;;
+
+let parse_tool_command ~requested_by json =
+  let* fields =
+    validate_exact_object
+      ~expected:
+        [ "keeper_name"
+        ; "partition_id"
+        ; "candidate_id"
+        ; "expected_quarantine_id"
+        ; "decision"
+        ]
+      json
+  in
+  let* keeper_name = nonblank "keeper_name" (List.assoc "keeper_name" fields) in
+  let* partition_id = nonblank "partition_id" (List.assoc "partition_id" fields) in
+  let* request = request_of_fields fields in
+  make ~keeper_name ~raw_partition_id:partition_id ~requested_by request
+;;
+
+let input_error_to_string = function
+  | Object_required -> "request must be an object"
+  | Duplicate_fields fields ->
+    "duplicate fields: " ^ String.concat ", " fields
+  | Unsupported_fields fields ->
+    "unsupported fields: " ^ String.concat ", " fields
+  | Missing_fields fields ->
+    "missing fields: " ^ String.concat ", " fields
+  | Invalid_field field -> "invalid field: " ^ field
+  | Unsupported_schema schema -> "unsupported schema: " ^ schema
+  | Unsupported_decision decision -> "unsupported decision: " ^ decision
+  | Invalid_keeper_name name -> "invalid keeper name: " ^ name
+  | Invalid_requester -> "the authenticated requester is empty"
+;;
+
+let input_error_to_json error =
+  `Assoc
+    [ "kind", `String "invalid_input"
+    ; ( "detail"
+      , `String
+          (Observability_redact.redact_text (input_error_to_string error)) )
+    ]
+;;
+
+let execution_error_label = function
+  | Candidate_state_conflict _ -> "candidate_state_conflict"
+  | Partition_state_conflict _ -> "partition_state_conflict"
+  | Durability_unconfirmed _ -> "durability_unconfirmed"
+  | Wake_request_failed _ -> "wake_request_failed"
+;;
+
+let execution_error_message = function
+  | Candidate_state_conflict _ ->
+    "The candidate no longer matches the observed quarantine generation."
+  | Partition_state_conflict _ ->
+    "The partition is not in a state allowed by this recovery generation."
+  | Durability_unconfirmed _ ->
+    "The exact partition transition could not be fsync-confirmed."
+  | Wake_request_failed _ ->
+    "The durable recovery committed, but its process-local wake could not be requested."
+;;
+
+let execution_error_to_json error =
+  `Assoc
+    [ "kind", `String (execution_error_label error)
+    ; "message", `String (execution_error_message error)
+    ]
+;;
+
+let find_candidate ~base_path command =
+  match
+    Candidate.load_candidates
+      ~base_path
+      ~keeper_name:command.keeper_name
+  with
+  | Error detail -> Error (Candidate_state_conflict detail)
+  | Ok candidates ->
+    (match
+       List.find_opt
+         (fun candidate ->
+            String.equal
+              candidate.Candidate.candidate_id
+              command.request.candidate_id)
+         candidates
+     with
+     | Some candidate -> Ok candidate
+     | None ->
+       Error
+         (Candidate_state_conflict
+            ("candidate not found: " ^ command.request.candidate_id)))
+;;
+
+let find_partition ~base_path command =
+  match Partition.load ~base_path ~keeper_name:command.keeper_name with
+  | Error detail -> Error (Partition_state_conflict detail)
+  | Ok partitions ->
+    (match
+       List.find_opt
+         (fun partition ->
+            String.equal partition.Partition.partition_id command.partition_id)
+         partitions
+     with
+     | Some partition
+       when String.equal
+              partition.candidate_id
+              command.request.candidate_id ->
+       Ok partition
+     | Some _ ->
+       Error
+         (Partition_state_conflict
+            "partition candidate identity differs from the command")
+     | None ->
+       Error
+         (Partition_state_conflict
+            ("partition not found: " ^ command.partition_id)))
+;;
+
+let matching_quarantine command candidate =
+  match Candidate.status_view candidate.Candidate.status with
+  | (Candidate.Suspended_quarantine state
+    | Candidate.Requeued_resumable { quarantine = state; _ })
+    when String.equal state.quarantine.partition_id command.partition_id
+         && String.equal
+              state.quarantine.quarantine_id
+              command.request.expected_quarantine_id ->
+    Ok state
+  | Candidate.Direct_resumable _
+  | Candidate.Suspended_quarantine _
+  | Candidate.Requeued_resumable _ ->
+    Error
+      (Candidate_state_conflict
+         "candidate quarantine generation differs from the command")
+;;
+
+let matching_partition_generation quarantine partition =
+  if
+    Partition.Generation.equal
+      quarantine.Candidate.partition_generation
+      partition.Partition.generation
+  then Ok ()
+  else
+    Error
+      (Partition_state_conflict
+         "candidate quarantine targets a different partition generation")
+;;
+
+let confirm_requeue ~base_path transition =
+  match transition.Partition.write_outcome with
+  | Partition.Fsync_completed -> Ok transition.partition
+  | Partition.Visible_sync_unconfirmed _ ->
+    (match
+       Partition.confirm_ready
+         ~base_path
+         ~partition:transition.partition
+     with
+     | Error detail -> Error (Durability_unconfirmed detail)
+     | Ok confirmed ->
+       (match confirmed.write_outcome with
+        | Partition.Fsync_completed -> Ok confirmed.partition
+        | Partition.Visible_sync_unconfirmed detail ->
+          Error (Durability_unconfirmed detail)))
+;;
+
+let confirm_ready_partition ~base_path partition =
+  match Partition.confirm_ready ~base_path ~partition with
+  | Error detail -> Error (Durability_unconfirmed detail)
+  | Ok confirmed ->
+    (match confirmed.write_outcome with
+     | Partition.Fsync_completed -> Ok confirmed.partition
+     | Partition.Visible_sync_unconfirmed detail ->
+       Error (Durability_unconfirmed detail))
+;;
+
+let request_wake ~base_path ~failure_category command candidate partition =
+  match Wake.request ~base_path ~keeper_name:command.keeper_name with
+  | Ok wake -> Ok { candidate; partition; failure_category; wake }
+  | Error detail -> Error (Wake_request_failed detail)
+;;
+
+let requeue_cursor_retry_limit = 2
+
+let rec reload_same_generation_ready
+    ?(remaining_cursor_retries = requeue_cursor_retry_limit)
+    ~base_path
+    ~expected_blocked
+    command
+  =
+  let* candidate = find_candidate ~base_path command in
+  let* observed = matching_quarantine command candidate in
+  let* () =
+    matching_partition_generation observed.quarantine expected_blocked
+  in
+  match observed.phase with
+  | Candidate.Requeued _ ->
+    let* partition = find_partition ~base_path command in
+    (match partition.Partition.state with
+     | Partition.Ready
+       when Partition.Generation.is_direct_successor
+              ~previous:expected_blocked.Partition.generation
+              partition.generation ->
+       confirm_ready_partition ~base_path partition
+     | Partition.Blocked _
+       when remaining_cursor_retries > 0 && partition = expected_blocked ->
+       (match Partition.requeue_blocked ~base_path ~partition with
+        | Error detail -> Error (Partition_state_conflict detail)
+        | Ok (Partition.Requeued transition) ->
+          confirm_requeue ~base_path transition
+        | Ok (Partition.Cursor_conflict _) ->
+          reload_same_generation_ready
+            ~remaining_cursor_retries:(remaining_cursor_retries - 1)
+            ~base_path
+            ~expected_blocked
+            command
+        | Ok (Partition.Generation_conflict detail) ->
+          Error (Partition_state_conflict detail))
+     | Partition.Ready
+     | Partition.Blocked _
+     | Partition.Running _
+     | Partition.Completed _
+     | Partition.Settled _
+     | Partition.Abandoned _ ->
+       Error
+         (Partition_state_conflict
+            "the partition did not converge to Ready for this quarantine generation"))
+  | Candidate.Quarantined | Candidate.Requeue_requested _ ->
+    Error
+      (Candidate_state_conflict
+         "the candidate did not converge to Requeued for this quarantine generation")
+;;
+
+let commit_partition_ready ~base_path command partition =
+  match partition.Partition.state with
+  | Partition.Blocked _ ->
+    (match Partition.requeue_blocked ~base_path ~partition with
+     | Error detail -> Error (Partition_state_conflict detail)
+     (* Both conflicts say the same thing — the partition moved under this
+        command between the read and the write. A cursor conflict re-read and
+        decided; a generation conflict did not, so an identical concurrent
+        command whose winner already produced the exact Ready this one wanted
+        was reported as a failure. [reload_same_generation_ready] is what
+        makes that judgement: it converges only on Ready at the direct
+        successor of the observed Blocked generation, and still errors when
+        the partition really did advance to Running, Completed, or Settled. *)
+     | Ok (Partition.Cursor_conflict _)
+     | Ok (Partition.Generation_conflict _) ->
+       reload_same_generation_ready
+         ~base_path
+         ~expected_blocked:partition
+         command
+     | Ok (Partition.Requeued transition) ->
+       confirm_requeue ~base_path transition)
+  | Partition.Ready -> confirm_ready_partition ~base_path partition
+  | Partition.Running _ | Partition.Completed _ | Partition.Settled _
+  | Partition.Abandoned _ ->
+    Error
+      (Partition_state_conflict
+         "partition advanced before candidate requeue authorization")
+;;
+
+let execute_with_hooks
+    ~before_root_restore
+    ~before_partition_commit
+    ~now
+    ~base_path
+    command
+  =
+  let* candidate = find_candidate ~base_path command in
+  let* observed = matching_quarantine command candidate in
+  before_root_restore ();
+  let* (_ : int) =
+    Partition.ensure_current_roots
+      ~base_path
+      ~keeper_name:command.keeper_name
+      [ candidate ]
+    |> Result.map_error (fun detail -> Partition_state_conflict detail)
+  in
+  let* partition = find_partition ~base_path command in
+  match Quarantine_pair.classify partition observed with
+  | Quarantine_pair.Blocked_requeued ->
+    before_partition_commit partition;
+    let* ready = commit_partition_ready ~base_path command partition in
+    request_wake
+      ~base_path
+      ~failure_category:observed.quarantine.failure_category
+      command
+      candidate
+      ready
+  | Quarantine_pair.Ready_requeued ->
+    let* ready = confirm_ready_partition ~base_path partition in
+    request_wake
+      ~base_path
+      ~failure_category:observed.quarantine.failure_category
+      command
+      candidate
+      ready
+  | Quarantine_pair.Blocked_awaiting_request
+  | Quarantine_pair.Blocked_requeue_requested ->
+    let* requested =
+      match
+        Candidate.request_quarantine_requeue
+          ~base_path
+          ~candidate
+          ~partition_id:command.partition_id
+          ~expected_quarantine_id:command.request.expected_quarantine_id
+          ~requested_at:now
+          ~requested_by:command.requested_by
+      with
+      | Ok candidate -> Ok candidate
+      | Error detail -> Error (Candidate_state_conflict detail)
+    in
+    let* authorized =
+      match
+        Candidate.finish_quarantine_requeue
+          ~base_path
+          ~candidate:requested
+          ~partition_id:command.partition_id
+          ~expected_quarantine_id:command.request.expected_quarantine_id
+          ~requeued_at:now
+      with
+      | Ok candidate -> Ok candidate
+      | Error detail -> Error (Candidate_state_conflict detail)
+    in
+    before_partition_commit partition;
+    let* ready = commit_partition_ready ~base_path command partition in
+    request_wake
+      ~base_path
+      ~failure_category:observed.quarantine.failure_category
+      command
+      authorized
+      ready
+  | Quarantine_pair.Blocked_unrecorded ->
+    Error
+      (Partition_state_conflict
+         "candidate quarantine targets a different Blocked generation")
+  | Quarantine_pair.Inconsistent inconsistency ->
+    Error
+      (Partition_state_conflict
+         (Quarantine_pair.inconsistency_to_string inconsistency))
+  | Quarantine_pair.Advanced_requeued ->
+    Error
+      (Partition_state_conflict
+         "partition advanced beyond the authorized Ready boundary")
+  | Quarantine_pair.Advanced_without_requeue ->
+    Error
+      (Partition_state_conflict
+         "partition became claimable before candidate requeue authorization")
+  | Quarantine_pair.Other_partition ->
+    Error
+      (Candidate_state_conflict
+         "candidate quarantine names a different partition")
+;;
+
+let execute_with_before_partition_commit =
+  execute_with_hooks ~before_root_restore:(fun () -> ())
+;;
+
+let execute =
+  execute_with_before_partition_commit
+    ~before_partition_commit:(fun (_partition : Partition.t) -> ())
+;;
+
+module For_testing = struct
+  let execute_with_before_root_restore =
+    execute_with_hooks ~before_partition_commit:(fun _ -> ())
+  ;;
+
+  let execute_with_before_partition_commit =
+    execute_with_before_partition_commit
+  ;;
+end
+
+let audit config command ~outcome =
+  try
+    Audit_log.log_action
+      config
+      ~agent_id:command.requested_by
+      ~action:(Audit_log.Custom "keeper_board_attention_quarantine_requeue")
+      ~details:
+        (`Assoc
+          [ "keeper_name", `String command.keeper_name
+          ; "partition_id", `String command.partition_id
+          ; "candidate_id", `String command.request.candidate_id
+          ; ( "expected_quarantine_id"
+            , `String command.request.expected_quarantine_id )
+          ; "decision", `String "acknowledge_and_requeue"
+          ])
+      ~outcome
+      ();
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let audit_json = Audit_log.write_result_to_json
+
+let wake_to_string = function
+  | Wake.Signaled -> "signaled"
+  | Wake.Coalesced -> "coalesced"
+  | Wake.Not_registered -> "not_registered"
+;;
+
+let success_json ~audit command report =
+  let failure_category =
+    Candidate.quarantine_failure_category_to_string report.failure_category
+  in
+  `Assoc
+    [ "schema", `String result_schema
+    ; "ok", `Bool true
+    ; "keeper_name", `String command.keeper_name
+    ; "partition_id", `String report.partition.partition_id
+    ; "candidate_id", `String report.candidate.candidate_id
+    ; ( "quarantine_id"
+      , `String command.request.expected_quarantine_id )
+    ; "failure_category", `String failure_category
+    ; "decision", `String "acknowledge_and_requeue"
+    ; "wake", `String (wake_to_string report.wake)
+    ; "audit", audit
+    ]
+;;
+
+let failure_json ~audit error =
+  `Assoc
+    [ "schema", `String result_schema
+    ; "ok", `Bool false
+    ; "error", execution_error_to_json error
+    ; "audit", audit
+    ]
+;;
+
+
+(* What the operator can do with a quarantined candidate, read from the
+   candidate ledger and, once a requeue is recorded, from the partition ledger
+   too. A recorded requeue is only half of the transition: the partition
+   leaves [Blocked] in a second write, and a process that ends between the two
+   leaves a [Requeued] candidate beside a [Blocked] partition that
+   [execute] finishes. So the candidate's phase alone cannot say "requeued". *)
+type inventory_phase =
+  | Inventory_quarantined
+  | Inventory_requeue_requested
+  | Inventory_requeue_unfinished
+  | Inventory_requeued
+  | Inventory_requeue_unreconciled
+[@@deriving enumerate]
+
+type inventory_item =
+  { keeper_name : string
+  ; partition_id : string
+  ; candidate_id : string
+  ; quarantine_id : string
+  ; phase : inventory_phase
+  ; failure_category : Candidate.quarantine_failure_category
+  ; attempt_provenance : Candidate.attempt_provenance option
+  ; quarantined_at : float
+  ; requested_at : float option
+  ; requeued_at : float option
+  ; requested_by : string option
+  }
+
+type inventory_error_kind =
+  | Inventory_candidate_ledger_unavailable
+  | Inventory_partition_ledger_unavailable
+[@@deriving enumerate]
+
+type inventory_error =
+  { keeper_name : string
+  ; kind : inventory_error_kind
+  }
+
+type inventory =
+  { items : inventory_item list
+  ; errors : inventory_error list
+  }
+
+(* [Quarantine_pair.classify] is the one reading of a candidate/partition pair
+   that the worker's start-up reconciliation and the operator command share.
+   For a candidate whose requeue is recorded it answers with one of five:
+   [Blocked_requeued], [Blocked_unrecorded], [Ready_requeued], [Inconsistent]
+   and [Advanced_requeued]. The arms that cannot occur for a [Requeued] phase
+   are listed rather than hidden behind a wildcard, and they read as "not
+   explained". *)
+let requeued_phase_of_pair = function
+  | Quarantine_pair.Blocked_requeued -> Inventory_requeue_unfinished
+  | Quarantine_pair.Ready_requeued | Quarantine_pair.Advanced_requeued ->
+    Inventory_requeued
+  | Quarantine_pair.Blocked_unrecorded
+  | Quarantine_pair.Other_partition
+  | Quarantine_pair.Inconsistent _
+  | Quarantine_pair.Blocked_awaiting_request
+  | Quarantine_pair.Blocked_requeue_requested
+  | Quarantine_pair.Advanced_without_requeue -> Inventory_requeue_unreconciled
+;;
+
+(* [partitions] reads the keeper's partition ledger the first time a recorded
+   requeue needs it, so a keeper with nothing requeued adds no read and no new
+   way to fail. A partition row that is absent is not "finished": [execute]
+   restores the quarantined generation's [Blocked] root from the candidate
+   ([Partition.ensure_current_roots]) and then finishes the requeue, as does
+   the worker on its next pass, so the requeue is unfinished. A row of the
+   same partition that names another candidate is refused by [execute]. An
+   unreadable ledger explains nothing, and [execute] fails on it too. *)
+let requeued_phase ~partitions ~candidate_id (state : Candidate.quarantine_state) =
+  match partitions () with
+  | Error _ -> Inventory_requeue_unreconciled
+  | Ok partitions ->
+    (match
+       List.find_opt
+         (fun (partition : Partition.t) ->
+            String.equal partition.partition_id state.quarantine.partition_id)
+         partitions
+     with
+     | None -> Inventory_requeue_unfinished
+     | Some partition when not (String.equal partition.candidate_id candidate_id) ->
+       Inventory_requeue_unreconciled
+     | Some partition -> requeued_phase_of_pair (Quarantine_pair.classify partition state))
+;;
+
+let inventory_item_of_candidate ~keeper_name ~partitions (candidate : Candidate.candidate) =
+  match candidate.status with
+  | Candidate.Pending _ | Candidate.Judged _ | Candidate.Consumed _ -> None
+  | Candidate.Quarantine ({ quarantine; phase } as state) ->
+    let phase, requested_at, requeued_at, requested_by =
+      match phase with
+      | Candidate.Quarantined -> Inventory_quarantined, None, None, None
+      | Candidate.Requeue_requested { requested_at; requested_by } ->
+        Inventory_requeue_requested, Some requested_at, None, Some requested_by
+      | Candidate.Requeued { requeued_at; requested_by } ->
+        ( requeued_phase ~partitions ~candidate_id:candidate.candidate_id state
+        , None
+        , Some requeued_at
+        , Some requested_by )
+    in
+    Some
+      { keeper_name
+      ; partition_id = quarantine.partition_id
+      ; candidate_id = candidate.candidate_id
+      ; quarantine_id = quarantine.quarantine_id
+      ; phase
+      ; failure_category = quarantine.failure_category
+      ; attempt_provenance = quarantine.attempt_provenance
+      ; quarantined_at = quarantine.quarantined_at
+      ; requested_at
+      ; requeued_at
+      ; requested_by
+      }
+;;
+
+let compare_inventory_item (left : inventory_item) (right : inventory_item) =
+  Stdlib.compare
+    (left.keeper_name, left.partition_id, left.candidate_id, left.quarantine_id)
+    (right.keeper_name, right.partition_id, right.candidate_id, right.quarantine_id)
+;;
+
+let inventory ~base_path ~keeper_names =
+  let items, errors =
+    keeper_names
+    |> List.sort_uniq String.compare
+    |> List.fold_left
+         (fun (items, errors) keeper_name ->
+           match Candidate.load_candidates ~base_path ~keeper_name with
+           | Error _ ->
+             ( items
+             , ({ keeper_name; kind = Inventory_candidate_ledger_unavailable }
+                : inventory_error)
+               :: errors )
+           | Ok candidates ->
+             let loaded = ref None in
+             let partitions () =
+               match !loaded with
+               | Some result -> result
+               | None ->
+                 let result = Partition.load ~base_path ~keeper_name in
+                 loaded := Some result;
+                 result
+             in
+             let keeper_items =
+               List.filter_map
+                 (inventory_item_of_candidate ~keeper_name ~partitions)
+                 candidates
+             in
+             let errors =
+               match !loaded with
+               | Some (Error _) ->
+                 ({ keeper_name; kind = Inventory_partition_ledger_unavailable }
+                  : inventory_error)
+                 :: errors
+               | Some (Ok _) | None -> errors
+             in
+             List.rev_append keeper_items items, errors)
+         ([], [])
+  in
+  { items = List.sort compare_inventory_item items
+  ; errors = List.rev errors
+  }
+;;
+
+let inventory_phase_to_string = function
+  | Inventory_quarantined -> "quarantined"
+  | Inventory_requeue_requested -> "requeue_requested"
+  | Inventory_requeue_unfinished -> "requeue_unfinished"
+  | Inventory_requeued -> "requeued"
+  | Inventory_requeue_unreconciled -> "requeue_unreconciled"
+;;
+
+let inventory_error_kind_to_string = function
+  | Inventory_candidate_ledger_unavailable -> "candidate_ledger_unavailable"
+  | Inventory_partition_ledger_unavailable -> "partition_ledger_unavailable"
+;;
+
+
+let attempt_provenance_to_json = function
+  | None -> `Null
+  | Some (attempt : Candidate.attempt_provenance) ->
+    `Assoc
+      [ "slot_id", `String attempt.slot_id
+      ; "call_id", `String attempt.call_id
+      ; "plan_fingerprint", `String attempt.plan_fingerprint
+      ; "request_body_sha256", `String attempt.request_body_sha256
+      ]
+;;
+
+let inventory_item_to_json (item : inventory_item) =
+  `Assoc
+    [ "keeper_name", `String item.keeper_name
+    ; "partition_id", `String item.partition_id
+    ; "candidate_id", `String item.candidate_id
+    ; "quarantine_id", `String item.quarantine_id
+    ; "phase", `String (inventory_phase_to_string item.phase)
+    ; ( "failure_category"
+      , `String
+          (Candidate.quarantine_failure_category_to_string item.failure_category) )
+    ; "attempt_provenance", attempt_provenance_to_json item.attempt_provenance
+    ; "quarantined_at", `Float item.quarantined_at
+    ; "requested_at", Json_util.float_opt_to_json item.requested_at
+    ; "requeued_at", Json_util.float_opt_to_json item.requeued_at
+    ; "requested_by", Json_util.string_opt_to_json item.requested_by
+    ]
+;;
+
+let inventory_to_json inventory =
+  `Assoc
+    [ "count", `Int (List.length inventory.items)
+    ; "items", `List (List.map inventory_item_to_json inventory.items)
+    ; ( "errors"
+      , `List
+          (List.map
+             (fun (error : inventory_error) ->
+               `Assoc
+                 [ "keeper_name", `String error.keeper_name
+                 ; "kind", `String (inventory_error_kind_to_string error.kind)
+                 ])
+             inventory.errors) )
+    ]
+;;
+
+let inventory_json ~base_path ~keeper_names =
+  inventory ~base_path ~keeper_names |> inventory_to_json
+;;
+
+(* The body [parse_request] accepts, built from the same fields. A client that
+   spelled the schema and the decision itself would be a second copy of them. *)
+let request_to_json (request : request) =
+  `Assoc
+    [ "schema", `String request_schema
+    ; "candidate_id", `String request.candidate_id
+    ; "expected_quarantine_id", `String request.expected_quarantine_id
+    ; ( "decision"
+      , `String
+          (match request.decision with
+           | Acknowledge_and_requeue -> "acknowledge_and_requeue") )
+    ]
+;;
+
+(* Readers of [inventory_item_to_json] and the error rows beside it. They sit
+   next to the writers so the two cannot drift: a field renamed on one side is
+   a failing round trip in this module's own suite. *)
+let inventory_phase_of_string s = List.find_opt (fun v -> String.equal (inventory_phase_to_string v) s) all_of_inventory_phase
+;;
+
+let inventory_error_kind_of_string s = List.find_opt (fun v -> String.equal (inventory_error_kind_to_string v) s) all_of_inventory_error_kind
+;;
+
+let json_field fields name =
+  match List.assoc_opt name fields with
+  | Some value -> Ok value
+  | None -> Error ("missing field " ^ name)
+;;
+
+let json_string fields name =
+  let* value = json_field fields name in
+  match value with
+  | `String text -> Ok text
+  | _ -> Error (name ^ " must be a string")
+;;
+
+let json_number = function
+  | `Float value -> Some value
+  | `Int value -> Some (Float.of_int value)
+  | _ -> None
+;;
+
+let json_float fields name =
+  let* value = json_field fields name in
+  match json_number value with
+  | Some number -> Ok number
+  | None -> Error (name ^ " must be a number")
+;;
+
+let json_float_opt fields name =
+  let* value = json_field fields name in
+  match value with
+  | `Null -> Ok None
+  | other ->
+    (match json_number other with
+     | Some number -> Ok (Some number)
+     | None -> Error (name ^ " must be a number or null"))
+;;
+
+let json_string_opt fields name =
+  let* value = json_field fields name in
+  match value with
+  | `Null -> Ok None
+  | `String text -> Ok (Some text)
+  | _ -> Error (name ^ " must be a string or null")
+;;
+
+let attempt_provenance_of_json = function
+  | `Null -> Ok None
+  | `Assoc fields ->
+    let* slot_id = json_string fields "slot_id" in
+    let* call_id = json_string fields "call_id" in
+    let* plan_fingerprint = json_string fields "plan_fingerprint" in
+    let* request_body_sha256 = json_string fields "request_body_sha256" in
+    Ok
+      (Some
+         ({ slot_id; call_id; plan_fingerprint; request_body_sha256 }
+          : Candidate.attempt_provenance))
+  | _ -> Error "attempt_provenance must be an object or null"
+;;
+
+let inventory_item_of_json = function
+  | `Assoc fields ->
+    let* keeper_name = json_string fields "keeper_name" in
+    let* partition_id = json_string fields "partition_id" in
+    let* candidate_id = json_string fields "candidate_id" in
+    let* quarantine_id = json_string fields "quarantine_id" in
+    let* phase_raw = json_string fields "phase" in
+    let* phase =
+      match inventory_phase_of_string phase_raw with
+      | Some phase -> Ok phase
+      | None -> Error ("unknown phase " ^ phase_raw)
+    in
+    let* category_raw = json_string fields "failure_category" in
+    let* failure_category =
+      match Candidate.quarantine_failure_category_of_string category_raw with
+      | Some category -> Ok category
+      | None -> Error ("unknown failure_category " ^ category_raw)
+    in
+    let* provenance_json = json_field fields "attempt_provenance" in
+    let* attempt_provenance = attempt_provenance_of_json provenance_json in
+    let* quarantined_at = json_float fields "quarantined_at" in
+    let* requested_at = json_float_opt fields "requested_at" in
+    let* requested_by = json_string_opt fields "requested_by" in
+    let* requeued_at = json_float_opt fields "requeued_at" in
+    Ok
+      ({ keeper_name
+       ; partition_id
+       ; candidate_id
+       ; quarantine_id
+       ; phase
+       ; failure_category
+       ; attempt_provenance
+       ; quarantined_at
+       ; requested_at
+       ; requested_by
+       ; requeued_at
+       }
+       : inventory_item)
+  | _ -> Error "inventory item must be an object"
+;;
+
+let inventory_error_of_json = function
+  | `Assoc fields ->
+    let* keeper_name = json_string fields "keeper_name" in
+    let* kind_raw = json_string fields "kind" in
+    (match inventory_error_kind_of_string kind_raw with
+     | Some kind -> Ok ({ keeper_name; kind } : inventory_error)
+     | None -> Error ("unknown inventory error kind " ^ kind_raw))
+  | _ -> Error "inventory error must be an object"
+;;

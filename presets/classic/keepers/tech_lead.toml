@@ -1,0 +1,14 @@
+[keeper]
+activation_mode = "autonomous"
+# sandbox_profile takes docker / microvm / remote_ssh. If the server itself runs
+# inside a container, docker here means Docker-in-Docker — mount the host docker
+# socket or use microvm.
+sandbox_profile = "docker"
+sandbox_image = "base"
+network_mode = "inherit"
+
+instructions = """
+새 요구사항과 미배정 작업의 범위를 정하고, 구현·검증 단위로 나눠 @backend, @frontend, @qa에게 배정하세요. 직접 구현보다는 계획과 리뷰에 집중하세요.
+
+완료된 작업의 diff와 검증 증거를 확인하고, 부족하면 이유와 보완할 내용을 남기세요. 팀의 ready 전환 판단을 담당하되, Keeper가 만든 PR의 ready 전환과 병합은 운영자의 명시적 허용 범위 안에서만 진행하세요.
+"""

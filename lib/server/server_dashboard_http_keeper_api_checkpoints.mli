@@ -1,0 +1,107 @@
+(** Checkpoint inventory JSON helpers for keeper dashboard API. *)
+
+val stat_json_of_path : string -> Yojson.Safe.t
+
+val agent_core_checkpoint_summary_json :
+  source_kind:string ->
+  snapshot_id:string ->
+  path:string ->
+  is_current:bool ->
+  string Keeper_checkpoint_store.checkpoint_summary ->
+  Yojson.Safe.t
+
+(** Total dashboard projection of a typed checkpoint load failure. [Not_found]
+    is a normal missing asset; every other constructor is an unavailable asset
+    with its original categorical kind and detail preserved. *)
+val checkpoint_load_error_json :
+  Keeper_checkpoint_store.checkpoint_load_error -> Yojson.Safe.t
+
+(** Additive checkpoint inventory projection. [current] remains a summary or
+    null and [history] remains a summary list. [current_status],
+    [current_error], and [history_errors] expose missing or unavailable assets
+    without mixing diagnostic rows into the summary fields.
+
+    [input_wait_observation] uses the current Owner trace/root/input relation
+    and its exact retained payload, independently of the canonical inventory.
+    It reports owned_pending, owned_none, unobserved or unavailable. Missing
+    Owner, unavailable prior history, trace mismatch or unreadable retained
+    input never falls back to canonical/history. This is an observation, not
+    response or continuation admission. See Keeper_input_wait_observation. *)
+val inventory_json : Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
+
+type purge_report =
+  { messages_before : int
+  ; messages_after : int
+  ; bytes_before : int
+  ; bytes_after : int
+  ; reasoning_blocks_stripped : int
+  ; tool_results_cleared : int
+  ; messages_dropped_at_structural_break : int
+        (** Messages the purge removes because the transcript's tool cycles
+            are broken. [messages_before] minus [messages_after] equals this
+            count: the other counters count blocks inside messages that stay.
+            The cut starts at the first broken tool cycle, or earlier, at a
+            turn end the Librarian position already counts, when a position
+            moves ({!Keeper_checkpoint_purge.report}). *)
+  }
+
+type purge_result =
+  { keeper : string
+  ; trace_id : string
+  ; apply_allowed : bool
+  ; applied : bool
+  ; backup_path : string option
+  ; report : purge_report
+  ; warnings : string list
+  }
+
+type purge_error =
+  | Purge_invalid_keeper_name of string
+  | Purge_keeper_not_found of string
+  | Purge_keeper_active of string
+  | Purge_checkpoint_unavailable of string
+  | Purge_checkpoint_invalid of string
+  | Purge_librarian_position_unreadable of string
+      (** The Librarian progress file exists and cannot be read. Never taken
+          as "no position": that would let a rewrite pass over what it
+          holds. *)
+  | Purge_boundaries_unreadable of string
+      (** The turn-boundary log cannot be read, so which messages its lines
+          name, and so must stay byte-exact, is unknown. *)
+  | Purge_continuity_unreadable of string
+      (** The saved Librarian working state cannot be read, so whether it
+          fits the history and which prefix it holds is unknown. *)
+  | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
+  | Purge_librarian_cancel_failed of string
+      (** The server-owned lane could not be closed to new units and
+          cancelled before either file was replaced. *)
+  | Purge_librarian_position_not_written of string
+      (** The checkpoint was installed and the position write after it
+          failed. *)
+  | Purge_backup_failed of string
+  | Purge_source_changed
+  | Purge_install_failed of string
+
+val purge_error_to_string : purge_error -> string
+
+(** Deterministically preview or apply the fixed checkpoint purge policy.
+    Preview is read-only and reports whether apply is currently allowed.
+    Apply requires the Keeper to be fully absent from the runtime registry and
+    serializes that check with same-Keeper boot registration. A rewrite is
+    refused while the Librarian has atoms left to read
+    ({!Keeper_checkpoint_purge.librarian_rebase}). Otherwise apply keeps the
+    server-owned Librarian lane closed to new units and cancels and awaits
+    running ones for the whole apply, reads the turn-boundary log and the
+    saved working state that say which messages stay byte-exact, backs the
+    checkpoint up, installs it, writes the rebased position after it, and
+    logs what it did. The canonical checkpoint is installed only if its exact
+    source reference is unchanged. *)
+val purge_current :
+  Workspace.config ->
+  keeper_name:string ->
+  apply:bool ->
+  (purge_result, purge_error) result
+
+val purge_result_json : action:string -> purge_result -> Yojson.Safe.t
+
+val linked_artifact_json : kind:string -> string -> Yojson.Safe.t

@@ -1,0 +1,460 @@
+{
+  "scope": "Search-selected historical sample; not incidence or all-provider certification. Runtime data read-only. No new model calls.",
+  "minimax_glm": {
+    "summary": {
+      "candidates": 15,
+      "minimax": 14,
+      "glm": 1,
+      "direct_public_metacognitive_narration": 7,
+      "ordinary_report_or_benign_reference": 8,
+      "journals_present": 6,
+      "journals_missing": 9,
+      "separate_native_thinking_present_cases": 2,
+      "separate_native_thinking_events": 548,
+      "input_snapshots_found": 15,
+      "stream_requested": 15,
+      "confirmed_provider_channel_leaks": 0,
+      "provider_channel_leak_unknown": 15,
+      "tool_post_and_different_canonical_reply_cases": 2
+    },
+    "cases": [
+      {
+        "keeper": "msx-retro-mania",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788882319100-00000#73",
+        "chat_line": 236,
+        "content_sha256": "59a2660e3d537cccdccfd2a38a3a83f9764e3585199b60ff0393e7fef6d7a2bf",
+        "classification": "ordinary_report_or_benign_reference",
+        "journal_present": true,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "msx-retro-mania",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788882319100-00000#83",
+        "chat_line": 256,
+        "content_sha256": "e30e3a8d194448a7079f2ba4249ea65863839fd34705785f44e106addb4dcabd",
+        "classification": "ordinary_report_or_benign_reference",
+        "journal_present": true,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "msx-retro-mania",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788882319100-00000#89",
+        "chat_line": 261,
+        "content_sha256": "a5729a2b6f3609eb7d33c72410e5078880755ea52b0882207de018ad4488f917",
+        "classification": "ordinary_report_or_benign_reference",
+        "journal_present": true,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "msx-retro-mania",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788882319100-00000#100",
+        "chat_line": 278,
+        "content_sha256": "61f6e8e718fec193f9414d7d52d13cd7e52d2e7b5e867cad0c9001d85f030b05",
+        "classification": "ordinary_report_or_benign_reference",
+        "journal_present": true,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "pr-updater",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788332832541-00001#879",
+        "chat_line": 1578,
+        "content_sha256": "40842b3b108714e40992169b75cf38e5ac713058d530408500cea12c0f0c5e94",
+        "classification": "ordinary_report_or_benign_reference",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "pr-updater",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788332832541-00001#895",
+        "chat_line": 1615,
+        "content_sha256": "0b96668c328184446557a8676498e27eff8ef22a395d5bec4a58a8e6d71eb3ad",
+        "classification": "direct_public_metacognitive_narration",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "pr-updater",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788332832541-00001#900",
+        "chat_line": 1625,
+        "content_sha256": "846aaf9dc24c798bf12bf2a505bcd00808a15502aba9b25a4f52fe7989d84939",
+        "classification": "direct_public_metacognitive_narration",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "pr-updater",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788332832541-00001#911",
+        "chat_line": 1654,
+        "content_sha256": "e87df3641dc2ae97d646cdb8cb5c432f7cf5b2a61071c4b9edeea58ab248ba8d",
+        "classification": "ordinary_report_or_benign_reference",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "pr-updater",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788332832541-00001#913",
+        "chat_line": 1669,
+        "content_sha256": "194478b8510c7f48e83abb39e7542dd3f290ffcae723a880d38a34476fff9446",
+        "classification": "ordinary_report_or_benign_reference",
+        "journal_present": true,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "pr-updater",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788332832541-00001#1062",
+        "chat_line": 1940,
+        "content_sha256": "d76f9b782ca35ac3439db6e644824f0e7716409228fc24bea34c0fd91b730faf",
+        "classification": "direct_public_metacognitive_narration",
+        "journal_present": true,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "jazz-developer",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788427841647-00000#68",
+        "chat_line": 177,
+        "content_sha256": "d653530252d75f885a4914ace8fa2348146f66482a07efd84dd93064022173f7",
+        "classification": "direct_public_metacognitive_narration",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "jazz-developer",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788427841647-00000#72",
+        "chat_line": 194,
+        "content_sha256": "8372f4352085ec6ffd9f047b14e8f95e001d683e05658ae6bd8f224a628b82cf",
+        "classification": "direct_public_metacognitive_narration",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "jazz-developer",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788427841647-00000#87",
+        "chat_line": 243,
+        "content_sha256": "ebf2b4a6d9dffb77e04e74d4e6574fea76dd43b48fda17a3e6df6cde3bbf8c33",
+        "classification": "direct_public_metacognitive_narration",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "jazz-developer",
+        "runtime": "ollama_cloud.minimax-m3",
+        "turn_ref": "trace-1788427841647-00000#95",
+        "chat_line": 257,
+        "content_sha256": "fb8aa44fbcd27044f3143f35f00fa6e6d923aa6ce0d9325bc28df4876e40a407",
+        "classification": "direct_public_metacognitive_narration",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      },
+      {
+        "keeper": "sangsu",
+        "runtime": "glm-coding.glm-5.3",
+        "turn_ref": "trace-1788310783624-00004#745",
+        "chat_line": 663,
+        "content_sha256": "b06aac4eb4ed17aa8295dff25f5d6363220f84fbee715b1903b1dcc57bd61d63",
+        "classification": "ordinary_report_or_benign_reference",
+        "journal_present": false,
+        "provider_channel_leak": "unknown_raw_response_not_retained"
+      }
+    ]
+  },
+  "deepseek": {
+    "candidates": [
+      {
+        "keeper": "polisher",
+        "line": 2256,
+        "turn_ref": "trace-1788310783225-00003#816",
+        "runtime": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+        "selected_model": "deepseek-v4-flash:0731",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/polisher.jsonl",
+          "sha256": "eef1fd44cf4e539bbf33db5a1fabd5f99227a15acdcab9355c133a2bf7e10e1a",
+          "chars": 654,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": false,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "polisher",
+        "line": 2263,
+        "turn_ref": "trace-1788310783225-00003#821",
+        "runtime": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+        "selected_model": "deepseek-v4-flash:0731",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/polisher.jsonl",
+          "sha256": "a1d368071d5de976661db0afdc445bb4fadd3bba78e509aac398ac4abb2d95c6",
+          "chars": 244,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": false,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "polisher",
+        "line": 2284,
+        "turn_ref": "trace-1788310783225-00003#833",
+        "runtime": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+        "selected_model": "deepseek-v4-flash:0731",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/polisher.jsonl",
+          "sha256": "0684aa4b76f3b53bb3b7e636a4a335058520bec9a2af28394e2399be393dc22d",
+          "chars": 1184,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": false,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "critic",
+        "line": 4,
+        "turn_ref": "trace-1788609342544-00000#18",
+        "runtime": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+        "selected_model": "deepseek-v4-flash:0731",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/critic.jsonl",
+          "sha256": "6809c76e218807215b66dab279d0f7b02058870eac0d623a4aaded3c3126f277",
+          "chars": 381,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": true,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": [
+          {
+            "message": 95,
+            "block": 0,
+            "role": "assistant",
+            "type": "text",
+            "field": "text"
+          }
+        ]
+      },
+      {
+        "keeper": "pr-updater",
+        "line": 156,
+        "turn_ref": "trace-1788332832541-00001#122",
+        "runtime": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+        "selected_model": "deepseek-v4-flash:0731",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/pr-updater.jsonl",
+          "sha256": "6e559c343b1d96dc362098df2e5f2c80f6d19081cb543c79c477542f41df1aab",
+          "chars": 340,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": false,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "taskmaster",
+        "line": 533,
+        "turn_ref": "trace-1787552849360-00009#380",
+        "runtime": null,
+        "selected_model": null,
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/taskmaster.jsonl",
+          "sha256": "45722e5334b9ed88b884f799744f3312ea71f4f542c311808ee338d08f411458",
+          "chars": 227832,
+          "open_tags": 0,
+          "close_tags": 1,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": false,
+        "raw_exists": null,
+        "attribution": {
+          "model": "deepseek-v4-flash:0731",
+          "basis": "exact trace_id + keeper_turn_id 380 cost joins (three rows), independent of checkpoint model",
+          "runtime_id": "unknown: cost provider is runtime; checkpoint agent name only session evidence"
+        },
+        "checkpoint_exact_matches": [
+          {
+            "message": 5100,
+            "block": 1,
+            "role": "assistant",
+            "type": "text",
+            "field": "text"
+          }
+        ]
+      },
+      {
+        "keeper": "sangsu",
+        "line": 952,
+        "turn_ref": "trace-1788310783624-00004#973",
+        "runtime": "ollama_cloud.deepseek-v4-pro",
+        "selected_model": "deepseek-v4-pro",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/sangsu.jsonl",
+          "sha256": "c8216eb319952fad1cbaf334fa87fd7ea2a811fb94d8b027e36b6784bac246c4",
+          "chars": 112,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": true,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "sangsu",
+        "line": 1206,
+        "turn_ref": "trace-1788310783624-00004#1111",
+        "runtime": "ollama_cloud.deepseek-v4-pro",
+        "selected_model": "deepseek-v4-pro",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/sangsu.jsonl",
+          "sha256": "127a5ea04004c5586e630b4348bef8b06e2c3b930f6ec743ba455da00fc83cdb",
+          "chars": 216,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": true,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "sangsu",
+        "line": 1218,
+        "turn_ref": "trace-1788310783624-00004#1115",
+        "runtime": "ollama_cloud.deepseek-v4-pro",
+        "selected_model": "deepseek-v4-pro",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/sangsu.jsonl",
+          "sha256": "e0362717f65c603e648f2779db474321312a41638dbd191f4f76a51ea95d4ed9",
+          "chars": 258,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": true,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "sangsu",
+        "line": 1252,
+        "turn_ref": "trace-1788310783624-00004#1123",
+        "runtime": "ollama_cloud.deepseek-v4-pro",
+        "selected_model": "deepseek-v4-pro",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/sangsu.jsonl",
+          "sha256": "16ae1944fe1be76e7b04c41ae825dc161a1c1d3b07154fa720e9bcf0b6ac0dc8",
+          "chars": 269,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": true,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "sangsu",
+        "line": 1256,
+        "turn_ref": "trace-1788310783624-00004#1124",
+        "runtime": "ollama_cloud.deepseek-v4-pro",
+        "selected_model": "deepseek-v4-pro",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/sangsu.jsonl",
+          "sha256": "a6b9ee5e494c111951f0a2698444ba141e62e0f89f8d6bf07b58e0438cf2c798",
+          "chars": 124,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": true,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "sangsu",
+        "line": 1614,
+        "turn_ref": "trace-1788310783624-00004#1346",
+        "runtime": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+        "selected_model": "deepseek-v4-flash:0731",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/sangsu.jsonl",
+          "sha256": "a330a8ae8f36b9a1ff3a4b2b2c086d92059a3345455a9660ed46c5aceba6481d",
+          "chars": 478,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": true,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": []
+      },
+      {
+        "keeper": "analyst",
+        "line": 1008,
+        "turn_ref": "trace-1788001446689-00000#134",
+        "runtime": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+        "selected_model": "deepseek-v4-flash:0731",
+        "chat": {
+          "path": "/Users/dancer/me/.masc/keeper_chat/analyst.jsonl",
+          "sha256": "bfb00c8c007102f0da549e87ceaf6dd916ca27e989f7f58b55ebc772d03cce39",
+          "chars": 639,
+          "open_tags": 0,
+          "close_tags": 0,
+          "digest_matches_candidate": true
+        },
+        "journal_exists": false,
+        "raw_exists": false,
+        "attribution": null,
+        "checkpoint_exact_matches": [
+          {
+            "message": 782,
+            "block": 1,
+            "role": "assistant",
+            "type": "text",
+            "field": "text"
+          }
+        ]
+      }
+    ]
+  },
+  "kimi": {
+    "linked_public_rows": 1,
+    "observed_reply": "One ordinary image-description answer; no confirmed leak in this limited retained sample. Not proof of absence. Calls paused per operator."
+  },
+  "source_audit_sha256": {
+    "minimax-glm-audit.json": "78ce355e8e4dc92a006cac9ca35481e591fbfc335d6c9b87c59e2c84445c4a23",
+    "deepseek-channel-audit.json": "caa50535c3851f35937ca5d32c705ac4a62336c5370969dc4a00c3fe0e17fe95"
+  }
+}

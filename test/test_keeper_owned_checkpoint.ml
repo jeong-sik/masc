@@ -1,0 +1,412 @@
+open Alcotest
+open Masc
+module Store = Keeper_checkpoint_store
+
+(* What the operator's window currently says. The store takes the window as an
+   argument -- it is reachable from a raw Domain, where reading a setting
+   raises -- so every caller names it. These cases are not about the window and
+   pass what production passes. *)
+let history_retained () =
+  Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
+
+let () = Server_startup_state.mark_state_ready () |> Result.get_ok
+
+let make_checkpoint ~session_id ~turn_count ~marker =
+  let messages = [
+    Agent_core.Types.{ origin = Llm_provider.Types.Conversation;  role = User; content = [Text "hello"]; name = None;
+                      tool_call_id = None; metadata = [] };
+    Agent_core.Types.{ origin = Llm_provider.Types.Conversation;  role = Assistant; content = [Text marker]; name = None;
+                      tool_call_id = None; metadata = [] };
+  ] in
+  Agent_core.Checkpoint.{ provider_binding = None;
+    version = checkpoint_version;
+    session_id;
+    agent_name = "test-agent";
+    model = "test-model";
+    system_prompt = None;
+    messages;
+    usage = Agent_core.Types.empty_usage;
+    turn_count;
+    created_at = 1000.0;
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    reasoning_effort = None;
+    enable_thinking = None;
+    preserve_thinking = None;
+    response_format = Agent_core.Types.Off;
+    cache_system_prompt = false;
+
+    context = Agent_core.Context.create_sync ();
+    pending_input = None; mcp_sessions = [];
+    working_context = None;
+  }
+
+let with_session f =
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let root = Filename.temp_file "keeper-owned-checkpoint" "" in
+    Unix.unlink root;
+    Unix.mkdir root 0o700;
+    let session_dir = Filename.concat root "session" in
+    Unix.mkdir session_dir 0o700;
+    let rec remove path = match Unix.lstat path with
+      | { Unix.st_kind = Unix.S_DIR; _ } ->
+          Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+          Unix.rmdir path
+      | _ -> Unix.unlink path
+    in
+    Fun.protect ~finally:(fun () -> remove root) (fun () -> f session_dir))
+
+let accepted marker =
+  let checkpoint = make_checkpoint ~session_id:"session" ~turn_count:1 ~marker in
+  let trace_id = Keeper_id.Trace_id.of_string "session" |> Result.get_ok in
+  match Store.exact_snapshot_of_value ~expected_session_id:trace_id checkpoint with
+  | Ok snapshot -> checkpoint, snapshot
+  | Error _ -> fail "fixture checkpoint was refused"
+
+let require_installed = function
+  | Store.Installed {auxiliary=[]; _} -> ()
+  | Store.Installed _ -> fail "unexpected installation uncertainty"
+  | Store.Not_installed _ -> fail "checkpoint retention failed"
+let load session_dir reference =
+  match Store.load_retained_exact_snapshot ~session_dir ~reference with
+  | Ok snapshot -> snapshot | Error _ -> fail "retained checkpoint unavailable"
+let assert_snapshot label expected actual =
+  check string (label ^ " exact checkpoint")
+    (Agent_core.Checkpoint.to_string (Store.exact_snapshot_checkpoint expected))
+    (Agent_core.Checkpoint.to_string (Store.exact_snapshot_checkpoint actual));
+  check bool (label ^ " exact reference") true
+    (Keeper_checkpoint_ref.equal (Store.exact_snapshot_reference expected)
+       (Store.exact_snapshot_reference actual))
+let artifact_path session_dir snapshot =
+  Filename.concat (Filename.concat session_dir "accepted-checkpoints")
+    ((Store.exact_snapshot_reference snapshot).sha256 ^ ".json")
+let write path bytes = Out_channel.with_open_bin path (fun ch -> output_string ch bytes)
+let read path = In_channel.with_open_bin path In_channel.input_all
+
+let test_large_canonical_read_keeps_exact_source () = with_session (fun session_dir ->
+  let marker = String.make (1024 * 1024 + 17) 'x' ^ "한글\n\"tail" in
+  let checkpoint, expected = accepted marker in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:(Store.agent_core_checkpoint_path ~session_dir ~session_id:"session") checkpoint
+     : string);
+  match Store.load_agent_core_exact_snapshot ~session_dir ~session_id:"session" with
+  | Ok actual -> assert_snapshot "large canonical checkpoint" expected actual
+  | Error _ -> fail "the large canonical checkpoint was unavailable")
+
+let test_survives_canonical_and_history () = with_session (fun session_dir ->
+  let a, snapshot = accepted "A retained" in
+  Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
+  for turn_count = 2 to 21 do
+    let b = {a with Agent_core.Checkpoint.turn_count; created_at=float_of_int turn_count;
+                    messages=(make_checkpoint ~session_id:"session" ~turn_count ~marker:"B active").messages} in
+    (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+      ~history_retained:(history_retained ()) ~session_dir b with Ok _ -> () | Error e -> fail e)
+  done;
+  check int "rolling archive actually pruned" 3
+    (List.length (Store.list_agent_core_history_files ~session_dir));
+  assert_snapshot "A after twenty B saves" snapshot
+    (load session_dir (Store.exact_snapshot_reference snapshot));
+  match Store.load_agent_core ~session_dir ~session_id:"session" with
+  | Ok latest -> check int "B remains current" 21 latest.turn_count
+  | Error _ -> fail "B canonical unavailable")
+
+let test_same_reference_retry () = with_session (fun session_dir ->
+  let _a, snapshot = accepted "immutable A" in
+  Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
+  Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
+  check int "same address has one artifact" 1
+    (Array.length (Sys.readdir (Filename.dirname (artifact_path session_dir snapshot))));
+  assert_snapshot "retry" snapshot (load session_dir (Store.exact_snapshot_reference snapshot)))
+
+let test_missing_never_uses_canonical () = with_session (fun session_dir ->
+  let a, snapshot = accepted "canonical only" in
+  (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+    ~history_retained:(history_retained ()) ~session_dir a with Ok _ -> () | Error e -> fail e);
+  match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference snapshot) with
+  | Error (Store.Source_unavailable Store.Ref_not_found) -> ()
+  | _ -> fail "missing retained artifact fell back to canonical")
+
+let test_corruption_is_never_repaired () =
+  List.iter (fun corrupt -> with_session (fun session_dir ->
+    let a, snapshot = accepted "A" in
+    let other, _ = accepted "different valid checkpoint" in
+    Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
+    let path = artifact_path session_dir snapshot in
+    let bytes =
+      if corrupt then (write path "{broken checkpoint"; "{broken checkpoint")
+      else Masc_test_deps.write_checkpoint_head ~session_dir ~path other in
+    (match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference snapshot) with
+     | Error _ -> () | Ok _ -> fail "corrupt addressed content accepted");
+    (match Store.retain_exact_snapshot ~session_dir snapshot with
+     | Store.Not_installed _ -> () | Store.Installed _ -> fail "corrupt evidence was silently repaired");
+    check string "corrupt bytes retained" bytes (read path);
+    (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+      ~history_retained:(history_retained ()) ~session_dir {a with turn_count=2} with Ok _ -> () | Error e -> fail e);
+    match Store.load_agent_core ~session_dir ~session_id:"session" with
+    | Ok b -> check int "unrelated canonical remains usable" 2 b.turn_count
+    | Error _ -> fail "corruption poisoned unrelated canonical")) [false;true]
+
+let test_reference_checks_all_fields () = with_session (fun session_dir ->
+  let _a, snapshot = accepted "A" in
+  Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
+  let original = Store.exact_snapshot_reference snapshot in
+  let other_trace = Keeper_id.Trace_id.of_string "another-session" |> Result.get_ok in
+  List.iter (fun (trace_id, turn_count) ->
+    let reference = Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count ~sha256:original.sha256 |> Result.get_ok in
+    match Store.load_retained_exact_snapshot ~session_dir ~reference with
+    | Error _ -> () | Ok _ -> fail "reference trace or turn mismatch accepted")
+    [original.trace_id, original.turn_count+1; other_trace,original.turn_count])
+
+let fault_writer stage ~on_durable_commit ~ownership_root ~path ~bytes =
+  Keeper_fs.For_testing.save_bytes_durable_atomic_observed
+    ~on_durable_commit ~ownership_root
+    ~before_stage:(fun actual -> if actual=stage then raise (Sys_error "injected checkpoint I/O failure")) path bytes
+
+let test_write_failure_preserves_previous () = with_session (fun session_dir ->
+  let _a, a = accepted "A" in let _b, b = accepted "B" in
+  Store.retain_exact_snapshot ~session_dir a |> require_installed;
+  List.iter (fun snapshot ->
+    match Store.For_testing.retain_exact_snapshot_with_writer
+       ~write_checkpoint_bytes:(fault_writer Keeper_fs.Payload_write) ~session_dir snapshot with
+    | Store.Not_installed {cause=Store.Commit_not_installed {renamed=false; _}; _} -> ()
+    | _ -> fail "prepublication write failure misclassified") [a;b];
+  assert_snapshot "A after B write failure" a (load session_dir (Store.exact_snapshot_reference a));
+  match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference b) with
+  | Error (Store.Source_unavailable Store.Ref_not_found) -> () | _ -> fail "failed B was published")
+
+let test_uncertain_publication_reload_and_reconfirm () = with_session (fun session_dir ->
+  let _a, snapshot = accepted "A" in
+  (match Store.For_testing.retain_exact_snapshot_with_writer
+     ~write_checkpoint_bytes:(fault_writer Keeper_fs.Parent_directory_fsync_after_rename) ~session_dir snapshot with
+   | Store.Installed {auxiliary=[Store.Commit_durability_unknown {renamed=true; _}]; _} -> ()
+   | _ -> fail "visible uncertain publication lost its exact installed fact");
+  let restored = load session_dir (Store.exact_snapshot_reference snapshot) in
+  assert_snapshot "uncertain reload" snapshot restored;
+  Store.retain_exact_snapshot ~session_dir restored |> require_installed;
+  assert_snapshot "durability reconfirmed" snapshot (load session_dir (Store.exact_snapshot_reference snapshot)))
+
+let test_prepublication_cancellation_propagates () = with_session (fun session_dir ->
+  let _a, snapshot = accepted "A" in
+  let writer ~on_durable_commit:_ ~ownership_root:_ ~path:_ ~bytes:_ =
+    raise (Eio.Cancel.Cancelled Exit) in
+  (match Store.For_testing.retain_exact_snapshot_with_writer ~write_checkpoint_bytes:writer ~session_dir snapshot with
+   | exception Eio.Cancel.Cancelled _ -> ()
+   | _ -> fail "prepublication cancellation was swallowed");
+  match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference snapshot) with
+  | Error (Store.Source_unavailable Store.Ref_not_found) -> ()
+  | _ -> fail "cancelled publication invented an artifact")
+
+let test_post_commit_cancellation_keeps_installation () = with_session (fun session_dir ->
+  let _a, snapshot = accepted "A" in
+  let writer ~on_durable_commit ~ownership_root ~path ~bytes =
+    match Keeper_fs.save_bytes_durable_atomic_observed ~on_durable_commit ~ownership_root path bytes with
+    | Ok Keeper_fs.Committed -> raise (Eio.Cancel.Cancelled Exit)
+    | (Ok (Keeper_fs.Committed_but_observer_failed _) | Error _) as result -> result in
+  (match Store.For_testing.retain_exact_snapshot_with_writer ~write_checkpoint_bytes:writer ~session_dir snapshot with
+   | Store.Installed {auxiliary=[Store.Post_commit_unwind_interrupted (Eio.Cancel.Cancelled _, _)]; _} -> ()
+   | _ -> fail "post-commit cancellation erased durable publication");
+  assert_snapshot "post-cancel" snapshot (load session_dir (Store.exact_snapshot_reference snapshot)))
+
+let test_confirmation_propagates_committed_cancellation ~in_observer () =
+  let was_recording = Printexc.backtrace_status () in
+  Fun.protect ~finally:(fun () -> Printexc.record_backtrace was_recording) @@ fun () ->
+  Printexc.record_backtrace true;
+  with_session (fun session_dir ->
+    let _, snapshot = accepted "committed cancellation" in
+    let cancellation = Eio.Cancel.Cancelled Exit in
+    let writer ~on_durable_commit ~ownership_root ~path ~bytes =
+      if in_observer then
+        Keeper_fs.save_bytes_durable_atomic_observed
+          ~on_durable_commit:(fun () -> on_durable_commit (); raise cancellation)
+          ~ownership_root path bytes
+      else
+        match Keeper_fs.save_bytes_durable_atomic_observed ~on_durable_commit ~ownership_root path bytes with
+        | Ok Keeper_fs.Committed -> raise cancellation
+        | (Ok (Keeper_fs.Committed_but_observer_failed _) | Error _) as result -> result in
+    let outcome = Store.For_testing.retain_exact_snapshot_with_writer
+        ~write_checkpoint_bytes:writer ~session_dir snapshot in
+    let backtrace = match outcome with
+      (* Keeper_fs propagates real observer cancellation. Store records it as
+         an interrupted unwind, just like cancellation after the writer returns. *)
+      | Store.Installed {auxiliary=[Store.Post_commit_unwind_interrupted (cause, backtrace)]; _}
+          when cause == cancellation -> backtrace
+      | Store.Installed _ | Store.Not_installed _ -> fail "actual commit omitted its original cancellation evidence" in
+    let original = Printexc.raw_backtrace_entries backtrace in
+    check bool "actual cancellation retained its nonempty original backtrace" true (Array.length original > 0);
+    (match Store.require_confirmed_installation outcome with
+     | exception (Eio.Cancel.Cancelled _ as cause) ->
+       let reraised = Printexc.raw_backtrace_entries (Printexc.get_raw_backtrace ()) in
+       check bool "same original exception is reraised" true (cause == cancellation);
+       check bool "original raw backtrace remains the origin" true
+         (Array.length reraised >= Array.length original
+          && Array.for_all Fun.id (Array.mapi (fun i entry -> entry = reraised.(i)) original))
+     | Ok _ | Error _ -> fail "committed cancellation became a normal storage result");
+    assert_snapshot "cancelled confirmation keeps installed bytes" snapshot
+      (load session_dir (Store.exact_snapshot_reference snapshot)))
+
+let test_confirmation_preserves_observer_failure () = with_session (fun session_dir ->
+  let _, snapshot = accepted "observer failed after actual commit" in
+  let observer_error = Sys_error "observer failure" in
+  let writer ~on_durable_commit ~ownership_root ~path ~bytes =
+    Keeper_fs.save_bytes_durable_atomic_observed
+      ~on_durable_commit:(fun () -> on_durable_commit (); raise observer_error)
+      ~ownership_root path bytes in
+  let outcome = Store.For_testing.retain_exact_snapshot_with_writer
+      ~write_checkpoint_bytes:writer ~session_dir snapshot in
+  (match outcome with
+   | Store.Installed {auxiliary=[Store.Commit_observer_failed (cause, _)]; _}
+       when cause == observer_error -> ()
+   | Store.Installed _ | Store.Not_installed _ -> fail "actual observer failure lost its installed evidence");
+  (match Store.require_confirmed_installation outcome with
+   | Error evidence -> check bool "observer failure remains the same unconfirmed result" true (evidence == outcome)
+   | Ok _ -> fail "observer failure became confirmation");
+  assert_snapshot "observer failure keeps installed bytes" snapshot
+    (load session_dir (Store.exact_snapshot_reference snapshot)))
+
+let test_confirmation_preserves_unconfirmed_evidence () = with_session (fun session_dir ->
+  List.iter (fun (stage, label) ->
+    let _, snapshot = accepted label in
+    let outcome = Store.For_testing.retain_exact_snapshot_with_writer
+        ~write_checkpoint_bytes:(fault_writer stage) ~session_dir snapshot in
+    (match Store.require_confirmed_installation outcome with
+     | Error evidence -> check bool "original structured evidence is returned unchanged" true (evidence == outcome)
+     | Ok _ -> fail "uncertain installation became confirmation");
+    match outcome with
+    | Store.Installed _ -> assert_snapshot "uncertain bytes remain evidence" snapshot
+        (load session_dir (Store.exact_snapshot_reference snapshot))
+    | Store.Not_installed _ ->
+      (match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference snapshot) with
+       | Error (Store.Source_unavailable Store.Ref_not_found) -> ()
+       | Ok _ | Error _ -> fail "precommit failure invented an artifact"))
+    [Keeper_fs.Payload_write, "not installed";
+     Keeper_fs.Parent_directory_fsync_after_rename, "durability unknown"];
+  let _, snapshot = accepted "confirmed exact reference" in
+  let outcome = Store.retain_exact_snapshot ~session_dir snapshot in
+  match Store.require_confirmed_installation outcome with
+  | Ok reference -> check bool "confirmed reference is the actual installed one" true
+      (Keeper_checkpoint_ref.equal reference (Store.exact_snapshot_reference snapshot))
+  | Error _ -> fail "actual durable installation was not confirmed")
+
+let test_owned_paths_and_history_deletion () = with_session (fun session_dir ->
+  let _a, snapshot = accepted "A" in
+  Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
+  let reference = Store.exact_snapshot_reference snapshot in
+  let names = ["accepted-checkpoints"; "accepted-checkpoints/" ^ reference.sha256 ^ ".json";
+               "../accepted-checkpoints/" ^ reference.sha256 ^ ".json"] in
+  let results = Store.delete_agent_core_history_files ~session_dir ~snapshot_ids:names in
+  check bool
+    "all invalid history targets refused"
+    true
+    (List.for_all
+       (function
+         | Store.History_refused _ -> true
+         | Store.History_deleted _
+         | Store.History_missing _
+         | Store.History_removal_failed _ -> false)
+       results);
+  assert_snapshot "after history deletion attempt" snapshot (load session_dir reference);
+  let path = artifact_path session_dir snapshot in
+  Unix.unlink path;
+  Unix.symlink (Filename.concat session_dir "missing-outside-target") path;
+  (match Store.load_retained_exact_snapshot ~session_dir ~reference with Error _ -> () | Ok _ -> fail "symlink accepted");
+  (match Store.retain_exact_snapshot ~session_dir snapshot with Store.Not_installed _ -> () | _ -> fail "symlink replaced");
+  check bool "dangling symlink evidence retained" true ((Unix.lstat path).Unix.st_kind=Unix.S_LNK))
+
+(* Only a store commit hands out a released checkpoint, so the test makes one:
+   a native call whose checkpoint moves from [dropped] to [next] releases
+   [dropped]. *)
+let released_by_store ~(seed : Keeper_checkpoint_ref.t) ~(dropped : Keeper_checkpoint_ref.t)
+    ~(next : Keeper_checkpoint_ref.t) =
+  let module Ops = Keeper_chat_operation_store in
+  let ok = function Ok value -> value | Error error -> fail (Ops.error_to_string error) in
+  let value = function Ok value -> value | Error detail -> fail detail in
+  let directory = Filename.temp_dir "owned-checkpoint-release" "" in
+  let store = Ops.open_or_create ~path:(Filename.concat directory Ops.For_testing.database_file) |> ok in
+  Fun.protect ~finally:(fun () -> ignore (Ops.close store : (unit, Ops.error) result)) (fun () ->
+    let operation_id = Keeper_chat_operation.Operation_id.of_string "owned-release" |> value in
+    ignore (Ops.submit store ~now:1. ~operation_id ~source:(`Assoc ["kind", `String "fixture"])
+              ~input:(`Assoc ["text", `String "release"]) |> ok);
+    let operation = match Ops.claim_next store ~now:2. |> ok with
+      | Some operation -> operation | None -> fail "no operation claimed" in
+    let call_id = "019a0010-1000-7000-8000-0000000000c1" in
+    let locator = Agent_core.Agent.execution_locator_of_yojson
+        (`Assoc ["version", `Int 1; "run_id", `String "execution-run-owned-release"]) |> value in
+    let call = Keeper_native_call.create ~call_id ~runtime_id:"native.primary"
+        ~operation_digest:operation.Keeper_chat_operation.execution_digest
+        ~api:(Keeper_native_call.New_input {seed_message_count=0}) ~seed_checkpoint:seed ~locator
+      |> value in
+    let commit change = Ops.update_direct_native_call store ~now:3. ~operation_id
+        ~execution_digest:operation.execution_digest change |> ok in
+    commit (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call});
+    commit (Keeper_native_call.Checkpoint {call_id; observed=seed; checkpoint=dropped});
+    commit (Keeper_native_call.Checkpoint {call_id; observed=dropped; checkpoint=next});
+    match Ops.take_released_checkpoints store with
+    | [released] -> released
+    | _ -> fail "the commit did not release exactly the superseded checkpoint")
+
+let release_ok label session_root released =
+  match Store.release_retained ~session_root released with
+  | Ok () -> ()
+  | Error Store.Lock_held_elsewhere -> fail (label ^ ": the session lock was held")
+  | Error (Store.Release_failed detail) -> fail (label ^ ": " ^ detail)
+
+let test_release_removes_only_the_released_artifact () = with_session (fun session_dir ->
+  let session_root = Filename.dirname session_dir in
+  let _s, seed = accepted "S seed" in
+  let _a, dropped = accepted "A released" in
+  let _b, kept = accepted "B kept" in
+  let released = released_by_store ~seed:(Store.exact_snapshot_reference seed)
+      ~dropped:(Store.exact_snapshot_reference dropped) ~next:(Store.exact_snapshot_reference kept) in
+  release_ok "absent retained directory" session_root released;
+  Store.retain_exact_snapshot ~session_dir dropped |> require_installed;
+  Store.retain_exact_snapshot ~session_dir kept |> require_installed;
+  release_ok "release" session_root released;
+  check bool "the released artifact is gone" false (Sys.file_exists (artifact_path session_dir dropped));
+  assert_snapshot "the other artifact" kept (load session_dir (Store.exact_snapshot_reference kept));
+  release_ok "a second release" session_root released;
+  let path = artifact_path session_dir dropped in
+  Unix.symlink (Filename.concat session_dir "outside-target") path;
+  (match Store.release_retained ~session_root released with
+   | Error (Store.Release_failed _) -> ()
+   | Error Store.Lock_held_elsewhere -> fail "the session lock was held"
+   | Ok () -> fail "a symlink was released");
+  check bool "the symlink is left in place" true ((Unix.lstat path).Unix.st_kind = Unix.S_LNK);
+  Unix.unlink path;
+  Store.retain_exact_snapshot ~session_dir dropped |> require_installed;
+  (* A holder of the session lock makes the release leave the file. *)
+  (match Store.with_session_lock ~session_dir (fun _ -> Store.release_retained ~session_root released) with
+   | Ok (Error Store.Lock_held_elsewhere) -> ()
+   | Ok (Error (Store.Release_failed detail)) -> fail ("release under a held lock failed: " ^ detail)
+   | Ok (Ok ()) -> fail "the release waited for or ignored the held lock"
+   | Error detail -> fail ("session lock: " ^ detail));
+  check bool "a release under a held lock leaves the file" true
+    (Sys.file_exists (artifact_path session_dir dropped)))
+
+let () = run "keeper owned exact checkpoints" ["retention", [
+  test_case "confirmation reraises actual post-commit unwind cancellation" `Quick
+    (test_confirmation_propagates_committed_cancellation ~in_observer:false);
+  test_case "confirmation reraises actual commit-observer cancellation" `Quick
+    (test_confirmation_propagates_committed_cancellation ~in_observer:true);
+  test_case "confirmation preserves actual non-cancellation observer failure" `Quick
+    test_confirmation_preserves_observer_failure;
+  test_case "confirmation preserves installed and unconfirmed evidence" `Quick
+    test_confirmation_preserves_unconfirmed_evidence;
+  test_case "large canonical read keeps exact source bytes" `Quick test_large_canonical_read_keeps_exact_source;
+  test_case "A survives B canonical and rolling history" `Quick test_survives_canonical_and_history;
+  test_case "same reference retry keeps exact bytes" `Quick test_same_reference_retry;
+  test_case "missing retained checkpoint never uses latest" `Quick test_missing_never_uses_canonical;
+  test_case "malformed and mismatched bytes remain evidence" `Quick test_corruption_is_never_repaired;
+  test_case "all reference fields are verified" `Quick test_reference_checks_all_fields;
+  test_case "failed B publication preserves A" `Quick test_write_failure_preserves_previous;
+  test_case "uncertain publication requires exact reload and sync" `Quick test_uncertain_publication_reload_and_reconfirm;
+  test_case "prepublication cancellation propagates" `Quick test_prepublication_cancellation_propagates;
+  test_case "post-commit cancellation retains installation" `Quick test_post_commit_cancellation_keeps_installation;
+  test_case "owned path and history deletion boundaries" `Quick test_owned_paths_and_history_deletion;
+  test_case "release removes only the released artifact" `Quick test_release_removes_only_the_released_artifact ]]

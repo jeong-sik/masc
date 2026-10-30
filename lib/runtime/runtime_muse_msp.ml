@@ -1,0 +1,1305 @@
+type error =
+  { stage : string
+  ; detail : string
+  }
+
+let error_to_string { stage; detail } = Printf.sprintf "MSP %s: %s" stage detail
+open Result.Syntax
+let fail stage detail = Error { stage; detail }
+
+module Json = Runtime_official_client_json.Make (struct
+  type t = error
+
+  let protocol ~stage ~detail = { stage; detail }
+end)
+
+open Json
+
+(* Present and a string; empty is allowed. For text MASC carries through
+   rather than keys on: a reply, a delta, a tool's output. *)
+let required_text stage name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> fail stage (Printf.sprintf "field %S must be a string" name)
+  | None -> fail stage (Printf.sprintf "missing field %S" name)
+;;
+
+let optional_text stage name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> fail stage (Printf.sprintf "field %S must be a string" name)
+;;
+
+let required_int stage name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Ok value
+  | Some _ -> fail stage (Printf.sprintf "field %S must be an integer" name)
+  | None -> fail stage (Printf.sprintf "missing field %S" name)
+;;
+
+let required_count stage name fields =
+  let* value = required_int stage name fields in
+  if value < 0
+  then fail stage (Printf.sprintf "field %S must not be negative" name)
+  else Ok value
+;;
+
+let optional_count stage name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) when value >= 0 -> Ok (Some value)
+  | Some (`Int _) -> fail stage (Printf.sprintf "field %S must not be negative" name)
+  | Some _ -> fail stage (Printf.sprintf "field %S must be an integer" name)
+;;
+
+let optional_assoc stage name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some json ->
+    let* assoc = assoc_at stage json in
+    Ok (Some assoc)
+;;
+
+let rec map_result f = function
+  | [] -> Ok []
+  | x :: rest ->
+    let* y = f x in
+    let* ys = map_result f rest in
+    Ok (y :: ys)
+;;
+
+(* ── Frames ─────────────────────────────────────────────────────────── *)
+
+type request_id =
+  | Int_id of int
+  | String_id of string
+
+let request_id_to_json = function
+  | Int_id id -> `Int id
+  | String_id id -> `String id
+;;
+
+type wire_message =
+  | Response of
+      { id : request_id
+      ; result : Yojson.Safe.t
+      }
+  | Response_error of
+      { id : request_id option
+      ; code : int
+      ; message : string
+      ; data : Yojson.Safe.t option
+      }
+  | Notification of
+      { method_ : string
+      ; params : Yojson.Safe.t
+      }
+  | Server_request of
+      { id : request_id
+      ; method_ : string
+      ; params : Yojson.Safe.t
+      }
+
+let request_id_of_json stage = function
+  | `Int id -> Ok (Int_id id)
+  | `String id -> Ok (String_id id)
+  | _ -> fail stage "id must be an integer or a string"
+;;
+
+let parse_rpc_error id fields =
+  let stage = "JSON-RPC error" in
+  let* error_json = required_member stage "error" fields in
+  let* error_fields = assoc_at stage error_json in
+  let* message = required_text stage "message" error_fields in
+  let* code = required_int stage "code" error_fields in
+  let data =
+    match List.assoc_opt "data" error_fields with
+    | None | Some `Null -> None
+    | Some data -> Some data
+  in
+  Ok (Response_error { id; code; message; data })
+;;
+
+let params_of fields =
+  match List.assoc_opt "params" fields with
+  | None -> `Assoc []
+  | Some params -> params
+;;
+
+let parse_wire_line line =
+  let stage = "JSON-RPC message" in
+  let* json =
+    match Yojson.Safe.from_string line with
+    | json -> Ok json
+    | exception Yojson.Json_error detail -> fail stage ("invalid JSON: " ^ detail)
+  in
+  let* () = validate_unique_object_keys ~stage ~path:"$" json in
+  let* fields = assoc_at stage json in
+  match List.assoc_opt "id" fields, List.assoc_opt "method" fields with
+  | Some id, Some (`String method_) ->
+    let* id = request_id_of_json stage id in
+    Ok (Server_request { id; method_; params = params_of fields })
+  | Some `Null, None ->
+    (match List.assoc_opt "error" fields with
+     | Some _ -> parse_rpc_error None fields
+     | None -> fail stage "only an error response may carry a null id")
+  | Some id, None ->
+    let* id = request_id_of_json stage id in
+    (match List.assoc_opt "error" fields with
+     | Some _ -> parse_rpc_error (Some id) fields
+     | None ->
+       let* result = required_member stage "result" fields in
+       Ok (Response { id; result }))
+  | None, Some (`String method_) ->
+    Ok (Notification { method_; params = params_of fields })
+  | _, Some _ -> fail stage "method must be a string"
+  | None, None -> fail stage "message has neither id nor method"
+;;
+
+let request ~id ~method_ params =
+  `Assoc
+    [ "jsonrpc", `String "2.0"
+    ; "id", `Int id
+    ; "method", `String method_
+    ; "params", `Assoc params
+    ]
+;;
+
+(* ── Client to server ───────────────────────────────────────────────── *)
+
+type client_info =
+  { name : string
+  ; version : string
+  }
+
+type capability =
+  | Session_mcp
+  | User_shell
+  | Session_list_stream
+  | Unrecognized_capability of string
+
+let capability_to_string = function
+  | Session_mcp -> "sessionMcp"
+  | User_shell -> "userShell"
+  | Session_list_stream -> "sessionListStream"
+  | Unrecognized_capability name -> name
+;;
+
+let capability_of_string = function
+  | "sessionMcp" -> Session_mcp
+  | "userShell" -> User_shell
+  | "sessionListStream" -> Session_list_stream
+  | name -> Unrecognized_capability name
+;;
+
+let initialize_request ~id { name; version } ~requested_capabilities ~user_input_dialogs =
+  request
+    ~id
+    ~method_:"initialize"
+    [ "clientInfo", `Assoc [ "name", `String name; "version", `String version ]
+    ; ( "capabilities"
+      , `Assoc
+          (( "requestedCapabilities"
+           , `List
+               (List.map
+                  (fun capability -> `String (capability_to_string capability))
+                  requested_capabilities) )
+           :: (if user_input_dialogs then [] else [ "userInputDialogs", `Bool false ])) )
+    ]
+;;
+
+let initialized_notification =
+  `Assoc [ "jsonrpc", `String "2.0"; "method", `String "initialized" ]
+;;
+
+type approval_mode =
+  | Allow_all
+  | Prompt_unmatched
+  | On_request
+  | Deny_unmatched
+
+let approval_mode_to_string = function
+  | Allow_all -> "allowAll"
+  | Prompt_unmatched -> "promptUnmatched"
+  | On_request -> "onRequest"
+  | Deny_unmatched -> "denyUnmatched"
+;;
+
+type reasoning_effort =
+  | Effort_none
+  | Effort_minimal
+  | Effort_low
+  | Effort_medium
+  | Effort_high
+  | Effort_xhigh
+  | Effort_max
+  | Effort_ultra
+[@@deriving enumerate]
+
+let reasoning_effort_to_string = function
+  | Effort_none -> "none"
+  | Effort_minimal -> "minimal"
+  | Effort_low -> "low"
+  | Effort_medium -> "medium"
+  | Effort_high -> "high"
+  | Effort_xhigh -> "xhigh"
+  | Effort_max -> "max"
+  | Effort_ultra -> "ultra"
+;;
+
+let reasoning_effort_of_string s = List.find_opt (fun v -> String.equal (reasoning_effort_to_string v) s) all_of_reasoning_effort
+;;
+
+type model_catalog_source =
+  | Provider_catalog
+  | Fake_catalog
+  | Unresolved_catalog
+  | Bundled_catalog
+  | Config_catalog
+  | Unknown_catalog_source of string
+
+let model_catalog_source_to_string = function
+  | Provider_catalog -> "providerCatalog"
+  | Fake_catalog -> "fakeCatalog"
+  | Unresolved_catalog -> "unresolvedCatalog"
+  | Bundled_catalog -> "bundledCatalog"
+  | Config_catalog -> "configCatalog"
+  | Unknown_catalog_source source -> source
+;;
+
+let model_catalog_source_of_string = function
+  | "providerCatalog" -> Provider_catalog
+  | "fakeCatalog" -> Fake_catalog
+  | "unresolvedCatalog" -> Unresolved_catalog
+  | "bundledCatalog" -> Bundled_catalog
+  | "configCatalog" -> Config_catalog
+  | source -> Unknown_catalog_source source
+;;
+
+type model_effort_variants =
+  | Unknown_efforts
+  | Known_efforts of reasoning_effort list
+
+type model_catalog_entry =
+  { model_id : string
+  ; display_label : string
+  ; provider_id : string
+  ; profile_id : string option
+  ; context_limit : int option
+  ; output_limit : int option
+  ; is_default : bool
+  ; variants : model_effort_variants
+  }
+
+type model_catalog =
+  { source : model_catalog_source
+  ; provider_id : string
+  ; profile_id : string option
+  ; models : model_catalog_entry list
+  }
+
+let model_list_request ~id = request ~id ~method_:"model/list" []
+
+(* These nullable members are required by MSP. Missing is not an unreported
+   limit: it is a malformed response. The protocol carries integer values
+   verbatim; setup admission separately requires a positive context. *)
+let nullable_model_field stage key parse fields =
+  let* value = required_member stage key fields in
+  match value with
+  | `Null -> Ok None
+  | value -> Result.map Option.some (parse value)
+;;
+
+let model_nullable_text stage key fields =
+  nullable_model_field stage key (function
+    | `String text -> Ok text
+    | _ -> fail stage (Printf.sprintf "field %S must be a string or null" key)) fields
+;;
+
+let model_nullable_int stage key fields =
+  nullable_model_field stage key (function
+    | `Int value -> Ok value
+    | _ -> fail stage (Printf.sprintf "field %S must be an integer or null" key)) fields
+;;
+
+let parse_model_variants stage fields =
+  match List.assoc_opt "variants" fields with
+  | None | Some (`String "unknown") -> Ok Unknown_efforts
+  | Some (`List values) ->
+    let* efforts = map_result (function
+      | `String value ->
+        (match reasoning_effort_of_string value with
+         | Some effort -> Ok effort
+         | None -> fail stage "unknown model reasoning effort")
+      | _ -> fail stage "model reasoning effort must be a string") values in
+    Ok (Known_efforts efforts)
+  | Some _ -> fail stage "model variants must be an effort array or unknown"
+;;
+
+let parse_model_catalog_entry stage json =
+  let* fields = assoc_at stage json in
+  let* model_id = required_string stage "modelId" fields in
+  let* display_label = required_text stage "displayLabel" fields in
+  let* provider_id = required_string stage "providerId" fields in
+  let* profile_id = model_nullable_text stage "profileId" fields in
+  let* context_limit = model_nullable_int stage "contextLimit" fields in
+  let* output_limit = model_nullable_int stage "outputLimit" fields in
+  let* is_default = required_bool stage "isDefault" fields in
+  let* variants = parse_model_variants stage fields in
+  Ok { model_id; display_label; provider_id; profile_id; context_limit;
+       output_limit; is_default; variants }
+;;
+
+let parse_model_list_result json =
+  let stage = "model/list" in
+  let* fields = assoc_at stage json in
+  let* source = required_string stage "source" fields in
+  let source = model_catalog_source_of_string source in
+  let* provider_id = required_string stage "providerId" fields in
+  let* profile_id = model_nullable_text stage "profileId" fields in
+  let* models = required_member stage "models" fields in
+  let* models = match models with
+    | `List rows -> map_result (parse_model_catalog_entry stage) rows
+    | _ -> fail stage "models must be an array" in
+  Ok { source; provider_id; profile_id; models }
+;;
+
+type mcp_server =
+  | Streamable_http of
+      { url : string
+      ; headers : (string * string) list
+      ; required : bool
+      }
+
+type session_config = { mcp_servers : (string * mcp_server) list }
+
+let mcp_server_json = function
+  | Streamable_http { url; headers; required } ->
+    `Assoc
+      [ "transport", `String "streamableHttp"
+      ; "url", `String url
+      ; "headers", `Assoc (List.map (fun (k, v) -> k, `String v) headers)
+      ; "mode", `String (if required then "required" else "optional")
+      ]
+;;
+
+(* An empty server map is left off rather than sent as [{}], so a session
+   with no MASC tools asks the host for nothing. *)
+let config_fields { mcp_servers } =
+  match mcp_servers with
+  | [] -> []
+  | servers ->
+    [ ( "config"
+      , `Assoc
+          [ ( "mcpServers"
+            , `Assoc (List.map (fun (name, server) -> name, mcp_server_json server) servers)
+            )
+          ] )
+    ]
+;;
+
+let session_start_request ~id ~command_id ~workspace_root ~model_id ~approval_mode ~config
+  =
+  let optional name to_json = function
+    | None -> []
+    | Some value -> [ name, to_json value ]
+  in
+  request
+    ~id
+    ~method_:"session/start"
+    ([ "commandId", `String command_id; "workspaceRoot", `String workspace_root ]
+     @ optional "modelId" (fun m -> `String m) model_id
+     @ optional
+         "approvalMode"
+         (fun mode -> `String (approval_mode_to_string mode))
+         approval_mode
+     @ config_fields config)
+;;
+
+let session_resume_request ~id ~command_id ~session_id ~config =
+  request
+    ~id
+    ~method_:"session/resume"
+    ([ "commandId", `String command_id
+     ; "sessionId", `String session_id
+     ; "excludeItems", `Bool true
+     ]
+     @ config_fields config)
+;;
+
+type input_part =
+  | Text of string
+  | Image of
+      { media_type : string
+      ; base64_data : string
+      }
+
+let input_part_json = function
+  | Text text -> `Assoc [ "type", `String "text"; "text", `String text ]
+  | Image { media_type; base64_data } ->
+    `Assoc
+      [ "type", `String "image"
+      ; "base64Data", `String base64_data
+      ; "mediaType", `String media_type
+      ]
+;;
+
+let session_set_approval_mode_request ~id ~command_id ~session_id mode =
+  request
+    ~id
+    ~method_:"session/setApprovalMode"
+    [ "commandId", `String command_id
+    ; "sessionId", `String session_id
+    ; "mode", `String (approval_mode_to_string mode)
+    ]
+;;
+
+let session_set_model_request ~id ~command_id ~session_id ~model_id =
+  request
+    ~id
+    ~method_:"session/setModel"
+    [ "commandId", `String command_id
+    ; "sessionId", `String session_id
+    ; "model", `Assoc [ "modelId", `String model_id ]
+    ]
+;;
+
+let turn_start_request ~id ~session_id ~command_id ~input ~reasoning_effort =
+  request
+    ~id
+    ~method_:"turn/start"
+    ([ "sessionId", `String session_id
+     ; "commandId", `String command_id
+     ; "input", `List (List.map input_part_json input)
+     ]
+     @ (match reasoning_effort with
+        | None -> []
+        | Some effort -> [ "reasoningEffort", `String (reasoning_effort_to_string effort) ]))
+;;
+
+let turn_interrupt_request ~id ~session_id ~command_id ~turn_id =
+  request
+    ~id
+    ~method_:"turn/interrupt"
+    [ "sessionId", `String session_id
+    ; "commandId", `String command_id
+    ; "turnId", `String turn_id
+    ]
+;;
+
+let usage_read_request ~id = request ~id ~method_:"usage/read" []
+
+let method_not_found = -32601
+
+let server_request_error id ~code ~message =
+  `Assoc
+    [ "jsonrpc", `String "2.0"
+    ; "id", request_id_to_json id
+    ; "error", `Assoc [ "code", `Int code; "message", `String message ]
+    ]
+;;
+
+let server_request_ack id =
+  `Assoc
+    [ "jsonrpc", `String "2.0"; "id", request_id_to_json id; "result", `Assoc [] ]
+;;
+
+(* ── Server to client ───────────────────────────────────────────────── *)
+
+type session_durability = Durable | Ephemeral
+
+type initialize_result =
+  { server_version : string
+  ; user_agent : string
+  ; muse_home : string
+  ; session_durability : session_durability
+  ; schema_fingerprint : string
+  ; granted_capabilities : capability list
+  }
+
+let parse_initialize_result json =
+  let stage = "initialize" in
+  let* fields = assoc_at stage json in
+  let* server_info = required_member stage "serverInfo" fields in
+  let* server_info = assoc_at stage server_info in
+  let* server_version = required_string stage "version" server_info in
+  let* user_agent = required_string stage "userAgent" fields in
+  let* muse_home = required_string stage "museHome" fields in
+  let* session_durability =
+    match List.assoc_opt "sessionDurability" fields with
+    (* MSP v1's InitializeResult explicitly defines absent as durable: no
+       host that omits this additive field supports ephemeral storage. *)
+    | None | Some (`String "durable") -> Ok Durable
+    | Some (`String "ephemeral") -> Ok Ephemeral
+    | Some (`String _) -> fail stage "unrecognized sessionDurability"
+    | Some _ -> fail stage "field \"sessionDurability\" must be a string"
+  in
+  let* schema = required_member stage "schema" fields in
+  let* schema = assoc_at stage schema in
+  let* schema_version = required_int stage "version" schema in
+  let* () =
+    if schema_version = 1
+    then Ok ()
+    else fail stage (Printf.sprintf "MSP schema version %d is not v1" schema_version)
+  in
+  let* schema_fingerprint = required_string stage "fingerprint" schema in
+  let* granted_capabilities =
+    match List.assoc_opt "grantedCapabilities" fields with
+    | Some (`List names) ->
+      map_result
+        (function
+          | `String name -> Ok (capability_of_string name)
+          | _ -> fail stage "grantedCapabilities must hold strings")
+        names
+    | Some _ -> fail stage "field \"grantedCapabilities\" must be an array"
+    | None -> fail stage "missing field \"grantedCapabilities\""
+  in
+  Ok { server_version; user_agent; muse_home; session_durability; schema_fingerprint; granted_capabilities }
+;;
+
+let corpus_schema_fingerprint =
+  "sha256:f282ad16e21520d0cda68cb190149b86e2b062eef1dd282749360c05aa3d1082"
+;;
+
+type session =
+  { session_id : string
+  ; turn_count : int
+  ; model_id : string option
+  ; workspace_root : string option
+  ; approval_mode : approval_mode option
+  }
+
+let parse_effective_approval_mode ~stage json =
+  let* fields = assoc_at stage json in
+  let* mode = required_string stage "mode" fields in
+  match mode with
+  | "allowAll" -> Ok Allow_all
+  | "promptUnmatched" -> Ok Prompt_unmatched
+  | "onRequest" -> Ok On_request
+  | "denyUnmatched" -> Ok Deny_unmatched
+  | _ -> fail stage "unrecognized approval mode"
+;;
+
+let parse_session_result ~stage json =
+  let* fields = assoc_at stage json in
+  let* session = required_member stage "session" fields in
+  let* session = assoc_at stage session in
+  let* session_id = required_string stage "sessionId" session in
+  let* turn_count = required_count stage "turnCount" session in
+  let* model_id = optional_string stage "modelId" session in
+  let* workspace_root = optional_string stage "workspaceRoot" session in
+  let* approval_mode = match List.assoc_opt "approvalMode" session with
+    | None -> Ok None
+    | Some value ->
+      let* mode = parse_effective_approval_mode ~stage value in
+      Ok (Some mode) in
+  Ok ({ session_id; turn_count; model_id; workspace_root; approval_mode } : session)
+;;
+
+let parse_set_approval_mode_result json =
+  let stage = "session/setApprovalMode" in
+  let* fields = assoc_at stage json in
+  let* status = required_string stage "status" fields in
+  let* () = match status with
+    | "accepted" -> Ok ()
+    | _ -> fail stage "approval mode change was not accepted" in
+  let* effective = required_member stage "effectiveMode" fields in
+  parse_effective_approval_mode ~stage effective
+;;
+
+let parse_set_model_result json =
+  let stage = "session/setModel" in
+  let* fields = assoc_at stage json in
+  let* status = required_string stage "status" fields in
+  match status with
+  | "accepted" -> Ok ()
+  | _ -> fail stage "model selection was not accepted"
+;;
+
+type turn_disposition =
+  | Started
+  | Queued
+  | Steered
+  | Unrecognized_disposition of string
+
+type turn_start_ack =
+  { turn_id : string
+  ; disposition : turn_disposition
+  }
+
+let turn_disposition_of_string = function
+  | "started" -> Started
+  | "queued" -> Queued
+  | "steered" -> Steered
+  | other -> Unrecognized_disposition other
+;;
+
+let parse_turn_start_result json =
+  let stage = "turn/start" in
+  let* fields = assoc_at stage json in
+  let* turn_id = required_string stage "turnId" fields in
+  let* disposition = required_string stage "disposition" fields in
+  Ok ({ turn_id; disposition = turn_disposition_of_string disposition } : turn_start_ack)
+;;
+
+type token_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; cached_tokens : int
+  ; reasoning_tokens : int
+  ; prompt_tokens : int option
+  ; cache_read_tokens : int option
+  ; cache_write_tokens : int option
+  }
+
+let parse_token_usage stage fields =
+  let* input_tokens = required_count stage "inputTokens" fields in
+  let* output_tokens = required_count stage "outputTokens" fields in
+  let* cached_tokens = required_count stage "cachedTokens" fields in
+  let* reasoning_tokens = required_count stage "reasoningTokens" fields in
+  let* cache_read_tokens = optional_count stage "cacheReadTokens" fields in
+  let* cache_write_tokens = optional_count stage "cacheWriteTokens" fields in
+  Ok { input_tokens; output_tokens; cached_tokens; reasoning_tokens;
+       prompt_tokens = None; cache_read_tokens; cache_write_tokens }
+;;
+
+type turn_error_kind =
+  | Step_limit
+  | Config_error
+  | Projection_error
+  | Log_error
+  | Workflow_launch_error
+  | Environment_error
+  | Model_error
+  | Launch_error
+  | Auth_required
+  | Unrecognized_error_kind of string
+
+type turn_error =
+  { kind : turn_error_kind
+  ; message : string
+  ; retryable : bool
+  }
+
+type terminal =
+  | Terminal_completed
+  | Terminal_failed of turn_error
+  | Terminal_host_died of { reason : string }
+  | Terminal_cancelled
+  | Unrecognized_terminal of string
+
+let turn_error_kind_of_string = function
+  | "stepLimit" -> Step_limit
+  | "configError" -> Config_error
+  | "projectionError" -> Projection_error
+  | "logError" -> Log_error
+  | "workflowLaunchError" -> Workflow_launch_error
+  | "environmentError" -> Environment_error
+  | "modelError" -> Model_error
+  | "launchError" -> Launch_error
+  | "authRequired" -> Auth_required
+  | other -> Unrecognized_error_kind other
+;;
+
+let turn_error_kind_to_string = function
+  | Step_limit -> "stepLimit"
+  | Config_error -> "configError"
+  | Projection_error -> "projectionError"
+  | Log_error -> "logError"
+  | Workflow_launch_error -> "workflowLaunchError"
+  | Environment_error -> "environmentError"
+  | Model_error -> "modelError"
+  | Launch_error -> "launchError"
+  | Auth_required -> "authRequired"
+  | Unrecognized_error_kind other -> other
+;;
+
+let parse_turn_error stage fields =
+  let* kind = required_string stage "kind" fields in
+  let* message = required_text stage "message" fields in
+  let* retryable = required_bool stage "retryable" fields in
+  Ok ({ kind = turn_error_kind_of_string kind; message; retryable } : turn_error)
+;;
+
+(* A "failed" terminal carries [error] (tdd SS4.5.1), except the one the host
+   synthesizes when it died mid-turn: that one carries [reason] instead
+   (ADR 36635 D2; the schema names `crash`, `crash_inferred` and
+   `incomplete`). [reason] is kept verbatim and never branched on, so the
+   terminal is told apart by which field is present. A "failed" terminal with
+   neither is a host that broke its own contract, so it is refused rather
+   than filled in. The schema keeps [error] optional on the other terminals,
+   so an [error] beside "completed" or "cancelled" is not read: the terminal
+   decides the outcome. *)
+let parse_terminal stage fields =
+  let* terminal = required_string stage "terminal" fields in
+  let* error = optional_assoc stage "error" fields in
+  match terminal, error with
+  | "completed", _ -> Ok Terminal_completed
+  | "cancelled", _ -> Ok Terminal_cancelled
+  | "failed", Some error ->
+    let* error = parse_turn_error stage error in
+    Ok (Terminal_failed error)
+  | "failed", None ->
+    let* reason = optional_text stage "reason" fields in
+    (match reason with
+     | Some reason -> Ok (Terminal_host_died { reason })
+     | None -> fail stage "failed terminal carries neither error nor reason")
+  | other, _ -> Ok (Unrecognized_terminal other)
+;;
+
+type item_kind =
+  | User_message
+  | Agent_message
+  | Reasoning
+  | Tool_call
+  | User_shell
+  | Subagent
+  | Workflow
+  | Reminder_child
+  | Compaction
+  | Unrecognized_item_kind of string
+
+let item_kind_of_string = function
+  | "userMessage" -> User_message
+  | "agentMessage" -> Agent_message
+  | "reasoning" -> Reasoning
+  | "toolCall" -> Tool_call
+  | "userShell" -> User_shell
+  | "subagent" -> Subagent
+  | "workflow" -> Workflow
+  | "reminderChild" -> Reminder_child
+  | "compaction" -> Compaction
+  | other -> Unrecognized_item_kind other
+;;
+
+type item_status =
+  | In_progress
+  | Item_completed_status
+  | Item_failed
+  | Item_cancelled
+  | Item_rejected
+  | Item_timed_out
+  | Unrecognized_item_status of string
+
+let item_status_of_string = function
+  | "inProgress" -> In_progress
+  | "completed" -> Item_completed_status
+  | "failed" -> Item_failed
+  | "cancelled" -> Item_cancelled
+  | "rejected" -> Item_rejected
+  | "timedOut" -> Item_timed_out
+  | other -> Unrecognized_item_status other
+;;
+
+type compaction_trigger =
+  | Compaction_manual
+  | Compaction_auto
+  | Unrecognized_compaction_trigger of string
+
+let compaction_trigger_of_string = function
+  | "manual" -> Compaction_manual
+  | "auto" -> Compaction_auto
+  | other -> Unrecognized_compaction_trigger other
+;;
+
+let compaction_trigger_to_string = function
+  | Compaction_manual -> "manual"
+  | Compaction_auto -> "auto"
+  | Unrecognized_compaction_trigger other -> other
+;;
+
+type compaction_outcome =
+  | Compaction_compacted
+  | Compaction_noop
+  | Compaction_failed
+  | Compaction_cancelled
+  | Unrecognized_compaction_outcome of string
+
+let compaction_outcome_of_string = function
+  | "compacted" -> Compaction_compacted
+  | "noop" -> Compaction_noop
+  | "failed" -> Compaction_failed
+  | "cancelled" -> Compaction_cancelled
+  | other -> Unrecognized_compaction_outcome other
+;;
+
+let compaction_outcome_to_string = function
+  | Compaction_compacted -> "compacted"
+  | Compaction_noop -> "noop"
+  | Compaction_failed -> "failed"
+  | Compaction_cancelled -> "cancelled"
+  | Unrecognized_compaction_outcome other -> other
+;;
+
+type compaction =
+  { trigger : compaction_trigger option
+  ; outcome : compaction_outcome option
+  ; strategy_id : string option
+  ; tokens_before : int option
+  ; tokens_after : int option
+  ; reason : string option
+  }
+
+let parse_compaction stage fields =
+  let* trigger = optional_string stage "trigger" fields in
+  let* outcome = optional_string stage "outcome" fields in
+  let* strategy_id = optional_string stage "strategyId" fields in
+  let* tokens_before = optional_count stage "tokensBefore" fields in
+  let* tokens_after = optional_count stage "tokensAfter" fields in
+  let* reason = optional_text stage "reason" fields in
+  Ok
+    { trigger = Option.map compaction_trigger_of_string trigger
+    ; outcome = Option.map compaction_outcome_of_string outcome
+    ; strategy_id
+    ; tokens_before
+    ; tokens_after
+    ; reason
+    }
+;;
+
+type message_phase =
+  | Commentary
+  | Final_answer
+  | Unrecognized_message_phase of string
+
+let message_phase_of_string = function
+  | "commentary" -> Commentary
+  | "finalAnswer" -> Final_answer
+  | other -> Unrecognized_message_phase other
+;;
+
+type item =
+  { item_id : string
+  ; kind : item_kind
+  ; status : item_status
+  ; revision : int
+  ; turn_id : string option
+  ; text : string option
+  ; message_phase : message_phase option
+  ; tool : string option
+  ; call_id : string option
+  ; args : string option
+  ; visible_output : string option
+  ; compaction : compaction option
+  }
+
+let parse_item stage json =
+  let* fields = assoc_at stage json in
+  let* item_id = required_string stage "itemId" fields in
+  let* kind = required_string stage "kind" fields in
+  let* status = required_string stage "status" fields in
+  let* revision = required_int stage "revision" fields in
+  let* turn_id = optional_string stage "turnId" fields in
+  let* text = optional_text stage "text" fields in
+  let* tool = optional_string stage "tool" fields in
+  let* call_id = optional_string stage "callId" fields in
+  let* args = optional_text stage "args" fields in
+  let* visible_output = optional_text stage "visibleOutput" fields in
+  let kind = item_kind_of_string kind in
+  let* compaction =
+    match kind with
+    | Compaction ->
+      let* compaction = parse_compaction stage fields in
+      Ok (Some compaction)
+    | User_message
+    | Agent_message
+    | Reasoning
+    | Tool_call
+    | User_shell
+    | Subagent
+    | Workflow
+    | Reminder_child
+    | Unrecognized_item_kind _ -> Ok None
+  in
+  let* message_phase =
+    match kind with
+    | Agent_message ->
+      let* phase = optional_string stage "messagePhase" fields in
+      Ok (Option.map message_phase_of_string phase)
+    | User_message
+    | Reasoning
+    | Tool_call
+    | User_shell
+    | Subagent
+    | Workflow
+    | Reminder_child
+    | Compaction
+    | Unrecognized_item_kind _ -> Ok None
+  in
+  Ok
+    ({ item_id
+    ; kind
+    ; status = item_status_of_string status
+    ; revision
+    ; turn_id
+    ; text
+    ; message_phase
+    ; tool
+    ; call_id
+    ; args
+    ; visible_output
+    ; compaction
+    }
+      : item)
+;;
+
+type delta_field =
+  | Delta_text
+  | Delta_output
+  | Delta_summary of int
+  | Unrecognized_delta_field of string
+
+(* "summary.n" addresses part n of a reasoning summary; the index is the only
+   part of a field path that carries a value. *)
+let delta_field_of_string = function
+  | "text" -> Delta_text
+  | "output" -> Delta_output
+  | path ->
+    (match String.split_on_char '.' path with
+     | [ "summary"; index ] ->
+       (match int_of_string_opt index with
+        | Some n when n >= 0 -> Delta_summary n
+        | Some _ | None -> Unrecognized_delta_field path)
+     | _ -> Unrecognized_delta_field path)
+;;
+
+type usage_window =
+  { used_percent : int
+  ; resets_at_ms : int
+  ; window_duration_mins : int
+  }
+
+type usage_weekly =
+  { weekly_used_percent : int
+  ; weekly_resets_at_ms : int
+  }
+
+type subscription_usage =
+  { observed_at_ms : int
+  ; tier : string
+  ; window : usage_window
+  ; weekly : usage_weekly
+  }
+
+let parse_subscription_usage stage fields =
+  let* observed_at_ms = required_count stage "observedAtMs" fields in
+  let* tier = required_string stage "tier" fields in
+  let* window = required_member stage "window" fields in
+  let* window = assoc_at stage window in
+  let* used_percent = required_count stage "usedPercent" window in
+  let* resets_at_ms = required_count stage "resetsAtMs" window in
+  let* window_duration_mins = required_count stage "windowDurationMins" window in
+  let* () =
+    if window_duration_mins > 0
+    then Ok ()
+    else fail stage "field \"windowDurationMins\" must be positive"
+  in
+  let* weekly = required_member stage "weekly" fields in
+  let* weekly = assoc_at stage weekly in
+  let* weekly_used_percent = required_count stage "usedPercent" weekly in
+  let* weekly_resets_at_ms = required_count stage "resetsAtMs" weekly in
+  Ok
+    { observed_at_ms
+    ; tier
+    ; window = { used_percent; resets_at_ms; window_duration_mins }
+    ; weekly = { weekly_used_percent; weekly_resets_at_ms }
+    }
+;;
+
+let exhausted_subscription_reset_ms usage =
+  (* Provider percentage semantics, not a MASC spending budget. *)
+  let exhausted percent reset = percent >= 100 && reset > usage.observed_at_ms in
+  match exhausted usage.window.used_percent usage.window.resets_at_ms,
+        exhausted usage.weekly.weekly_used_percent usage.weekly.weekly_resets_at_ms with
+  | false, false -> None
+  | true, false -> Some usage.window.resets_at_ms
+  | false, true -> Some usage.weekly.weekly_resets_at_ms
+  | true, true -> Some (max usage.window.resets_at_ms usage.weekly.weekly_resets_at_ms)
+;;
+
+type notification =
+  | Turn_started of
+      { session_id : string
+      ; turn_id : string
+      }
+  | Turn_completed of
+      { session_id : string
+      ; turn_id : string
+      ; terminal : terminal
+      ; usage : token_usage option
+      ; reason : string option
+      }
+  | Item_started of
+      { session_id : string
+      ; item : item
+      }
+  | Item_updated of
+      { session_id : string
+      ; item : item
+      }
+  | Item_completed of
+      { session_id : string
+      ; item : item
+      }
+  | Item_delta of
+      { session_id : string
+      ; item_id : string
+      ; field : delta_field
+      ; delta : string
+      }
+  | Usage_changed of subscription_usage
+  | View_gap of
+      { session_id : string option
+      ; after : string
+      ; next : string
+      }
+  | Model_usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model_id : string option
+      ; view_cursor : string
+      ; usage : token_usage
+      }
+  | Unhandled_notification of { method_ : string }
+
+let item_notification ~stage fields =
+  let* session_id = required_string stage "sessionId" fields in
+  let* item = required_member stage "item" fields in
+  let* item = parse_item stage item in
+  Ok (session_id, item)
+;;
+
+let parse_notification ~method_ params =
+  let stage = method_ in
+  let* fields = assoc_at stage params in
+  match method_ with
+  | "turn/started" ->
+    let* session_id = required_string stage "sessionId" fields in
+    let* turn_id = required_string stage "turnId" fields in
+    Ok (Turn_started { session_id; turn_id })
+  | "turn/completed" ->
+    let* session_id = required_string stage "sessionId" fields in
+    let* turn_id = required_string stage "turnId" fields in
+    let* terminal = parse_terminal stage fields in
+    let* usage = optional_assoc stage "usage" fields in
+    let* usage =
+      match usage with
+      | None -> Ok None
+      | Some usage ->
+        let* usage = parse_token_usage stage usage in
+        Ok (Some usage)
+    in
+    let* reason = optional_text stage "reason" fields in
+    Ok (Turn_completed { session_id; turn_id; terminal; usage; reason })
+  | "item/started" ->
+    let* session_id, item = item_notification ~stage fields in
+    Ok (Item_started { session_id; item })
+  | "item/updated" ->
+    let* session_id, item = item_notification ~stage fields in
+    Ok (Item_updated { session_id; item })
+  | "item/completed" ->
+    let* session_id, item = item_notification ~stage fields in
+    Ok (Item_completed { session_id; item })
+  | "item/delta" ->
+    let* session_id = required_string stage "sessionId" fields in
+    let* item_id = required_string stage "itemId" fields in
+    let* field = optional_string stage "field" fields in
+    let* delta = required_text stage "delta" fields in
+    let field =
+      match field with
+      | None -> Delta_text
+      | Some path -> delta_field_of_string path
+    in
+    Ok (Item_delta { session_id; item_id; field; delta })
+  | "usage/changed" ->
+    let* usage = parse_subscription_usage stage fields in
+    Ok (Usage_changed usage)
+  | "view/gap" ->
+    let* session_id = optional_string stage "sessionId" fields in
+    let* after = required_string stage "after" fields in
+    let* next = required_string stage "next" fields in
+    Ok (View_gap { session_id; after; next })
+  | "session/tokenUsage" ->
+    let* session_id = required_string stage "sessionId" fields in
+    let* turn_id = required_string stage "turnId" fields in
+    let* model_id = optional_string stage "modelId" fields in
+    let* view_cursor = required_string stage "viewCursor" fields in
+    let* prompt_tokens = required_count stage "promptTokens" fields in
+    let* usage_json = required_member stage "usage" fields in
+    let* usage_fields = assoc_at stage usage_json in
+    let* usage = parse_token_usage stage usage_fields in
+    Ok (Model_usage_reported { session_id; turn_id; model_id; view_cursor;
+                              usage = { usage with prompt_tokens = Some prompt_tokens } })
+  | _ -> Ok (Unhandled_notification { method_ })
+;;
+
+type approval_decision =
+  | Approved
+  | Approved_for_session
+  | Approved_policy_amendment
+  | Denied
+  | Denied_policy_amendment
+  | Timed_out
+  | Abort
+  | Unrecognized_decision of string
+
+let approval_decision_of_string = function
+  | "approved" -> Approved
+  | "approvedForSession" -> Approved_for_session
+  | "approvedPolicyAmendment" -> Approved_policy_amendment
+  | "denied" -> Denied
+  | "deniedPolicyAmendment" -> Denied_policy_amendment
+  | "timedOut" -> Timed_out
+  | "abort" -> Abort
+  | other -> Unrecognized_decision other
+;;
+
+type approval_subject_kind =
+  | Subject_shell
+  | Subject_file_access
+  | Subject_network
+  | Subject_unix_socket
+  | Subject_process
+  | Subject_tool
+  | Unrecognized_subject of string
+
+let approval_subject_kind_of_string = function
+  | "shell" -> Subject_shell
+  | "fileAccess" -> Subject_file_access
+  | "network" -> Subject_network
+  | "unixSocket" -> Subject_unix_socket
+  | "process" -> Subject_process
+  | "tool" -> Subject_tool
+  | other -> Unrecognized_subject other
+;;
+
+type approval_choice_scope =
+  | Once
+  | Session
+  | Local_persistent
+  | Unrecognized_scope of string
+
+type approval_choice =
+  { choice_id : string
+  ; decision : approval_decision
+  ; scope : approval_choice_scope
+  }
+
+type approval_requirement =
+  { requirement_approval_id : string
+  ; source_index : int
+  }
+
+type approval_request =
+  { session_id : string
+  ; approval_id : string
+  ; requirement : approval_requirement
+  ; turn_id : string
+  ; tool_name : string
+  ; subject_kind : approval_subject_kind
+  ; subject_tool_name : string option
+  ; choices : approval_choice list
+  }
+
+type server_request =
+  | Approval_request of approval_request
+  | User_input_request of
+      { session_id : string
+      ; user_input_id : string
+      ; turn_id : string
+      }
+  | Unhandled_server_request of { method_ : string }
+
+let parse_approval_choice stage json =
+  let* fields = assoc_at stage json in
+  let* choice_id = required_string stage "choiceId" fields in
+  let* decision = required_string stage "decision" fields in
+  let* scope = required_string stage "scope" fields in
+  let scope = match scope with
+    | "once" -> Once
+    | "session" -> Session
+    | "localPersistent" -> Local_persistent
+    | other -> Unrecognized_scope other
+  in
+  Ok ({ choice_id; decision = approval_decision_of_string decision; scope } : approval_choice)
+;;
+
+let parse_approval_request stage fields =
+  let* session_id = required_string stage "sessionId" fields in
+  let* approval_id = required_string stage "approvalId" fields in
+  let* requirement = required_member stage "currentRequirementId" fields in
+  let* requirement = assoc_at stage requirement in
+  let* requirement_approval_id = required_string stage "approvalId" requirement in
+  let* source_index = required_count stage "sourceIndex" requirement in
+  let* turn_id = required_string stage "turnId" fields in
+  let* tool_name = required_string stage "toolName" fields in
+  let* subject = required_member stage "subject" fields in
+  let* subject = assoc_at stage subject in
+  let* subject_kind = required_string stage "kind" subject in
+  let* subject_tool_name = optional_string stage "toolName" subject in
+  let* choices =
+    match List.assoc_opt "availableChoices" fields with
+    | Some (`List choices) -> map_result (parse_approval_choice stage) choices
+    | Some _ -> fail stage "field \"availableChoices\" must be an array"
+    | None -> fail stage "missing field \"availableChoices\""
+  in
+  Ok
+    ({ session_id
+    ; approval_id
+    ; requirement = { requirement_approval_id; source_index }
+    ; turn_id
+    ; tool_name
+    ; subject_kind = approval_subject_kind_of_string subject_kind
+    ; subject_tool_name
+    ; choices
+    }
+      : approval_request)
+;;
+
+let parse_server_request ~method_ params =
+  let stage = method_ in
+  let* fields = assoc_at stage params in
+  match method_ with
+  | "approval/request" ->
+    let* request = parse_approval_request stage fields in
+    Ok (Approval_request request)
+  | "userInput/request" ->
+    let* session_id = required_string stage "sessionId" fields in
+    let* user_input_id = required_string stage "userInputId" fields in
+    let* turn_id = required_string stage "turnId" fields in
+    Ok (User_input_request { session_id; user_input_id; turn_id })
+  | _ -> Ok (Unhandled_server_request { method_ })
+;;
+
+let approval_decide_request
+      ~id
+      ~command_id
+      (approval : approval_request)
+      (choice : approval_choice)
+  =
+  request
+    ~id
+    ~method_:"approval/decide"
+    [ "sessionId", `String approval.session_id
+    ; "commandId", `String command_id
+    ; "approvalId", `String approval.approval_id
+    ; ( "requirementId"
+      , `Assoc
+          [ "approvalId", `String approval.requirement.requirement_approval_id
+          ; "sourceIndex", `Int approval.requirement.source_index
+          ] )
+    ; "choiceId", `String choice.choice_id
+    ]
+;;
+
+let parse_usage_read_result json =
+  let stage = "usage/read" in
+  let* fields = assoc_at stage json in
+  let* usage = optional_assoc stage "usage" fields in
+  match usage with
+  | None -> Ok None
+  | Some usage ->
+    let* usage = parse_subscription_usage stage usage in
+    Ok (Some usage)
+;;

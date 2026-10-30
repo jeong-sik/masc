@@ -1,0 +1,28 @@
+{
+  "name": "proof",
+  "host": "127.0.0.1",
+  "user": "masc",
+  "port": 56243,
+  "remote_root": "/srv/masc/playground",
+  "observation": {
+    "lane": "remote_ssh",
+    "endpoint": "proof",
+    "probe": {
+      "state": "answered",
+      "protocol_major": 3,
+      "capabilities": [
+        "observe"
+      ],
+      "shim_release": null,
+      "server_release": "0.64.0",
+      "observed_at_unix": 1792855611.955317
+    },
+    "last_dispatch": {
+      "outcome": "lane_failed",
+      "at_unix": 1792855621.031213,
+      "failure": "transport_failed",
+      "detail": "remote_ssh_transport_error: endpoint proof: no result trailer delimiter"
+    },
+    "operator_action": "The lane could not read the shim's answer. If the detail names remote_ssh_version_error, the server and the endpoint's shim disagree on the protocol and an operator has to replace the shim. Otherwise the endpoint or its transport is down, also the operator's. Retrying changes neither."
+  }
+}

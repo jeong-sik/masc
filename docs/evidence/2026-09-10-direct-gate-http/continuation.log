@@ -1,0 +1,7 @@
+[2026-09-10 07:46:31] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a08859-f509-7000-99f3-7075364ff068 sequence=1 keeper=direct-gate-http-proof tool=tool_execute
+[2026-09-10 07:46:31] [INFO] [Keeper] keeper_stream: request terminal keeper=direct-gate-http-proof request_id=kmsg-660934bce13fa46302aebee6ac88059f status=done
+[2026-09-10 07:46:32] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a08859-f509-7000-99f3-7075364ff068 keeper=direct-gate-http-proof tool=tool_execute decision=approve
+[2026-09-10 07:46:32] [INFO] [Keeper] gate replay approval=appr_01a08859-f509-7000-99f3-7075364ff068 applied operation=tool_execute journal=recorded output_bytes=655 output_sha256=6f34f0708ec573067607e726237299e900200cf6f83592e3d1aaae0d4c0a62dc
+[2026-09-10 07:46:32] [INFO] [Keeper] keeper_stream: request terminal keeper=direct-gate-http-proof request_id=kmsg-660934bce13fa46302aebee6ac88059f status=done
+[2026-09-10 07:46:33] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=hitl-approval:appr_01a08859-f509-7000-99f3-7075364ff068 urgency=immediate class=hitl_resolved (keeper=direct-gate-http-proof)
+[2026-09-10 07:46:33] [INFO] [Keeper] gate replay approval=appr_01a08859-f509-7000-99f3-7075364ff068 applied operation=tool_execute journal=already_recorded output_bytes=655 output_sha256=6f34f0708ec573067607e726237299e900200cf6f83592e3d1aaae0d4c0a62dc

@@ -1,0 +1,66 @@
+type phase =
+  Keeper_state_machine_phase.phase =
+    Offline
+  | Running
+  | Failing
+  | Draining
+  | Paused
+  | Stopped
+  | Crashed
+  | Restarting
+val phase_to_string : Keeper_state_machine_phase.phase -> string
+val phase_of_string :
+  string -> Keeper_state_machine_phase.phase option
+val all_phases : Keeper_state_machine_phase.phase list
+type conditions = {
+  launch_pending : bool;
+  fiber_alive : bool;
+  heartbeat_healthy : bool;
+  turn_healthy : bool;
+  context_handoff_needed : bool;
+  operator_paused : bool;
+  stop_requested : bool;
+  restart_requested : bool;
+  drain_complete : bool;
+}
+val default_conditions : conditions
+type context_actions = {
+  handoff : bool;
+}
+type event =
+    Heartbeat_ok
+  | Heartbeat_failed of { consecutive : int; }
+  | Turn_succeeded
+  | Turn_failed of { consecutive : int; }
+  | Context_measured of { context_ratio : float; message_count : int;
+      token_count : int; context_actions : context_actions;
+    }
+  | Operator_pause
+  | Operator_resume
+  | Stop_requested
+  | Drain_complete
+  | Fiber_started
+  | Fiber_terminated of { outcome : string; provider_id : string option;
+      http_status : int option;
+    }
+  | Supervisor_restart_attempt of { attempt : int; }
+  | Operator_clear_requested of { preserve_system : bool; reason : string; }
+val event_to_string : event -> string
+type entry_action =
+    Log_lifecycle of { event_name : string; detail : string; }
+type transition_result = {
+  prev_phase : phase;
+  new_phase : phase;
+  updated_conditions : conditions;
+  entry_actions : entry_action list;
+  timestamp : float;
+}
+type transition_error =
+    Terminal_state of { current : phase; attempted_event : string; }
+  | Invalid_transition of { from_phase : phase; to_phase : phase;
+      reason : string;
+    }
+  | Precondition_violation of { event : string; reason : string; }
+val transition_error_to_string : transition_error -> string
+val can_transition : from_phase:phase -> to_phase:phase -> bool
+val can_execute_turn : phase -> bool

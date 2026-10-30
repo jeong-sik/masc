@@ -1,0 +1,59 @@
+{
+  "policy": "Only diagnostic temporary-directory and artifact prefixes are replaced with stable placeholders. Local original hashes and published decoded hashes remain separate. Measurement observations are not changed.",
+  "files": {
+    "identity.json": {
+      "original_sha256": "76b3be266183e7b436da4eab7be88486040bd40c2d86cedd1d0a1eaa7748871c",
+      "published_decoded_sha256": "b6f06c35c5f178ecdba6aaf0d62547e656005264c1906fd9c66bbf41a076bb21",
+      "host_path_redacted": true,
+      "encoding": "verbatim"
+    },
+    "profile.json": {
+      "original_sha256": "354400f5d7369d626bea114679f811b442bbd048d04411c7fb510072465ee4c6",
+      "published_decoded_sha256": "354400f5d7369d626bea114679f811b442bbd048d04411c7fb510072465ee4c6",
+      "host_path_redacted": false,
+      "encoding": "verbatim"
+    },
+    "profile-scenario.py": {
+      "original_sha256": "edbff282f963c645e808982ca11fab4e7841b4b45cf6b3208c25f2df6b84dcc8",
+      "published_decoded_sha256": "edbff282f963c645e808982ca11fab4e7841b4b45cf6b3208c25f2df6b84dcc8",
+      "host_path_redacted": false,
+      "encoding": "verbatim"
+    },
+    "native-sample.txt.gz": {
+      "original_sha256": "e932e99636b6ba341f125e5e9deac643c1d41a90a639a9038b4a1f66751fab72",
+      "published_decoded_sha256": "c7c5d22f96864a79055aac6a77f12e55ca1440a4cafe3b01a4e164be23e799df",
+      "host_path_redacted": true,
+      "encoding": "gzip"
+    },
+    "sample-command.log": {
+      "original_sha256": "40966d2097b0db99b1035d15a824fd6ba43b1c81608ac6df2c27c9846f4db1c6",
+      "published_decoded_sha256": "94b67ce2c54f83fb1b4c184c413f28545ccc7821bb73f5bf99bcef49cefb8db3",
+      "host_path_redacted": true,
+      "encoding": "verbatim"
+    },
+    "frame-timing.txt": {
+      "original_sha256": "72d21334a758ec5067acc218d1f82dbc541f1dbadf61b4beb209687b9a8d9002",
+      "published_decoded_sha256": "72d21334a758ec5067acc218d1f82dbc541f1dbadf61b4beb209687b9a8d9002",
+      "host_path_redacted": false,
+      "encoding": "verbatim"
+    },
+    "scenario.stdout.txt.gz": {
+      "original_sha256": "0bc6d66ad3ef8590be7e6ac081e164501b71550dd99f8b5ccaf4ea95732cc2ca",
+      "published_decoded_sha256": "0bc6d66ad3ef8590be7e6ac081e164501b71550dd99f8b5ccaf4ea95732cc2ca",
+      "host_path_redacted": false,
+      "encoding": "gzip"
+    },
+    "scenario.stderr.txt": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_decoded_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "host_path_redacted": false,
+      "encoding": "verbatim"
+    },
+    "observation.json.gz": {
+      "original_sha256": "e1f13e76d5800879b41fc7f6f58eabf4c82d0e4a41b7111fa9a8d57e3a1e99f6",
+      "published_decoded_sha256": "e1f13e76d5800879b41fc7f6f58eabf4c82d0e4a41b7111fa9a8d57e3a1e99f6",
+      "host_path_redacted": false,
+      "encoding": "gzip"
+    }
+  }
+}

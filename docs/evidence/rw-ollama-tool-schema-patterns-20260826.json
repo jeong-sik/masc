@@ -1,0 +1,86 @@
+{
+  "schema": "masc.real_world_ollama_tool_schema_patterns.v1",
+  "observed_at": "2026-08-26T15:01:05+09:00",
+  "issue": "https://github.com/jeong-sik/masc/issues/30808",
+  "runtime": {
+    "runtime_id": "ollama.qwen3-8-27b",
+    "provider": "ollama",
+    "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+    "endpoint": "http://127.0.0.1:11434/api/chat",
+    "base_path": "/private/tmp/masc-compose-async-status.l0cf33"
+  },
+  "before": {
+    "masc_commit": "3db2efb02625c39f04883a9ecfc2e844edccfced",
+    "operation_id": "kmsg-f19d8fdee1463709638397892e6039f7",
+    "state": "Failed",
+    "failure_kind": "Turn_exception",
+    "provider_status": 400,
+    "provider_error": "JSON schema conversion failed: Pattern must start with '^' and end with '$'",
+    "provider_error_count": 15,
+    "elapsed_seconds": 0.096,
+    "tool_call_observed": false
+  },
+  "after": {
+    "masc_commit": "2581e50264d2ab1a9dc4d9d1af5e57c85eced17e",
+    "http_port": 8948,
+    "health_status": "ok",
+    "startup_phase": "ready",
+    "binary_commit": "2581e50264d2ab1a9dc4d9d1af5e57c85eced17e",
+    "repo_head_commit": "2581e50264",
+    "operation_id": "tui-ollama-pattern-fixed-20260826",
+    "operation_status": "done",
+    "turn_ref": "trace-1787721767862-00000#1",
+    "provider_outcome": "success",
+    "provider_elapsed_seconds": 166.849,
+    "tool_call": {
+      "name": "keeper_compose_background-snapshot",
+      "tool_use_id": "DkoSQJ6IzlHc4grvrr7xrYIBawaKRvHw",
+      "arguments": {},
+      "success": true
+    },
+    "composition_request": {
+      "request_id": "kmsg-a89d27e891cf9f5f779d71639c36c58c",
+      "status": "done",
+      "ok": true,
+      "child_count": 2,
+      "children": [
+        "keeper_time_now",
+        "masc_board_stats"
+      ]
+    },
+    "visible_reply": "request_id: kmsg-a89d27e891cf9f5f779d71639c36c58c"
+  },
+  "change": {
+    "absolute_path_pattern_before": "^/",
+    "absolute_path_pattern_after": "^/.*$",
+    "nonblank_pattern_before": "\\S",
+    "nonblank_pattern_after": "^.*\\S.*$",
+    "loader_invariant": "every tool-definition pattern starts with ^ and ends with $"
+  },
+  "verification": [
+    {
+      "command": "scripts/dune-local.sh build test/test_tool_definition_toml.exe test/test_tool_input_validation.exe bin/main_eio.exe",
+      "result": "passed"
+    },
+    {
+      "executable": "test_tool_definition_toml.exe",
+      "run_id": "22ZKVQ7V",
+      "result": "26 passed"
+    },
+    {
+      "executable": "test_tool_input_validation.exe",
+      "run_id": "DBJM7X51",
+      "result": "90 passed"
+    }
+  ],
+  "safeguards": {
+    "keeper_bootstrap_enabled": false,
+    "keeper_reactive_enabled": false,
+    "keeper_proactive_enabled": false,
+    "keeper_autonomous_enabled": false,
+    "discord_token_unset": true,
+    "slack_tokens_unset": true,
+    "shared_port_8935_touched": false
+  },
+  "claim_boundary": "This record proves native Ollama accepted the exact post-fix Keeper tool bundle and completed one async composition. It does not claim every Ollama model or every provider accepts the bundle."
+}

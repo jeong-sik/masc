@@ -1,0 +1,9 @@
+{
+  "verdict": "INCOMPLETE",
+  "error_type": "KeyboardInterrupt",
+  "detail": "",
+  "producer_terminal": false,
+  "producer_returncode": null,
+  "owned_pid": 62029,
+  "scope": "No automatic retry, provider switch, resume, cancellation or forced kill."
+}

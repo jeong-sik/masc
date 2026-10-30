@@ -1,0 +1,524 @@
+(** RFC-0267 Phase 2 — [Task.Goal_assignment.set_task_goal].
+
+    Pins the single validated backend shared by the MCP tool
+    [masc_task_set_goal] and the dashboard assign-goal HTTP route:
+    - an unknown task or unknown goal is a typed error (never a silent no-op),
+    - a goalless task links cleanly to an existing goal,
+    - a task that already carries a link is rejected (reassignment is a
+      deliberate Non-Goal, RFC-0267 §4),
+    - a finished task ([Done] or [Cancelled]) is rejected, because a link
+      carries no timestamp and a task finished before it is linked could not
+      be told apart from work done for the goal. *)
+
+open Alcotest
+open Masc_domain
+open Masc
+
+module Goal_assignment = Masc.Task.Goal_assignment
+
+let with_test_env f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let tmp_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_set_task_goal_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir tmp_dir 0o755;
+  let config = Workspace.default_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
+  try
+    f config;
+    let _ = Workspace.reset config in
+    Unix.rmdir tmp_dir
+  with
+  | e ->
+    let _ = Workspace.reset config in
+    Unix.rmdir tmp_dir;
+    raise e
+;;
+
+let make_goal config ~id =
+  match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id)
+          ~metric:"m" ~target_value:"1" () with
+  | Ok _ -> ()
+  | Error error -> failf "upsert_goal %s failed: %s" id (Goal_store.write_error_to_string error)
+;;
+
+(* Create a single goalless task and return its minted id. A fresh workspace
+   mints sequential ids, so the just-added task is the only backlog entry. *)
+let make_unassigned_task config ~title =
+  let _ = Workspace.add_task config ~title ~priority:3 ~description:"" in
+  match Workspace.get_tasks_safe config with
+  | (t : task) :: _ -> t.id
+  | [] -> fail "task was not created"
+;;
+
+let make_primary_goal_task_links_path_unwritable config =
+  let path = Workspace_goal_index.goal_task_links_path config in
+  if Sys.file_exists path && not (Sys.is_directory path) then Sys.remove path;
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+;;
+
+(* The writer always emits {"links": [...]}, so a file that is valid JSON but
+   not that shape is damaged. Folding it to [] made a corrupt registry read as
+   "this goal has no linked tasks", which is the same answer a healthy empty
+   registry gives (#29355). *)
+let test_corrupt_links_file_is_not_read_as_empty () =
+  with_test_env (fun config ->
+    let path = Workspace_goal_index.goal_task_links_path config in
+    let oc = open_out path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc {|{"links":{"goal-a":[]}}|});
+    match Workspace_goal_index.read_goal_task_links_r config with
+    | Ok links ->
+      failf "a corrupt links file read as %d link(s)" (List.length links)
+    | Error msg ->
+      check bool
+        ("the error names the field: " ^ msg)
+        true
+        (let needle = "links" in
+         let n = String.length needle and h = String.length msg in
+         let rec scan i = i + n <= h && (String.sub msg i n = needle || scan (i + 1)) in
+         scan 0))
+;;
+
+let err_to_string = Goal_assignment.set_task_goal_error_to_string
+
+let test_unknown_task () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    match
+      Goal_assignment.set_task_goal config ~task_id:"task-nope" ~goal_id:"goal-a"
+    with
+    | Error (Goal_assignment.Unknown_task t) ->
+      check string "names the missing task" "task-nope" t
+    | Ok () -> fail "expected Unknown_task, got Ok"
+    | Error other -> failf "expected Unknown_task, got %s" (err_to_string other))
+;;
+
+let test_unknown_goal () =
+  with_test_env (fun config ->
+    let task_id = make_unassigned_task config ~title:"t" in
+    match
+      Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-nope"
+    with
+    | Error (Goal_assignment.Unknown_goal g) ->
+      check string "names the missing goal" "goal-nope" g
+    | Ok () -> fail "expected Unknown_goal, got Ok"
+    | Error other -> failf "expected Unknown_goal, got %s" (err_to_string other))
+;;
+
+let test_links_goalless_task () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"t" in
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+     | Ok () -> ()
+     | Error e -> failf "expected Ok, got %s" (err_to_string e));
+    let links = Workspace_goal_index.read_goal_task_links config in
+    check
+      bool
+      "registry records goal-a -> task link"
+      true
+      (List.exists
+         (fun (gid, task_ids) ->
+            String.equal gid "goal-a" && List.mem task_id task_ids)
+         links))
+;;
+
+let test_rejects_reassignment () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    make_goal config ~id:"goal-b";
+    let task_id = make_unassigned_task config ~title:"t" in
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+     | Ok () -> ()
+     | Error e -> failf "first assign should succeed: %s" (err_to_string e));
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-b" with
+    | Error (Goal_assignment.Already_assigned { task_id = t; existing_goal_ids }) ->
+      check string "error names the task" task_id t;
+      check (list string) "reports the existing link" [ "goal-a" ] existing_goal_ids
+    | Ok () -> fail "expected Already_assigned, got Ok (reassignment must be rejected)"
+    | Error other -> failf "expected Already_assigned, got %s" (err_to_string other))
+;;
+
+(* Move a backlog task to [status] directly, the way the keeper task outcome
+   tests do: the claim and verification paths are not what these cases are
+   about. *)
+let set_task_status config ~task_id status =
+  let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
+  Workspace_backlog.write_backlog
+    config
+    { backlog with
+      tasks =
+        List.map
+          (fun (t : task) ->
+             if String.equal t.id task_id then { t with task_status = status } else t)
+          backlog.tasks
+    }
+;;
+
+let goal_has_task links ~goal_id ~task_id =
+  List.exists
+    (fun (gid, task_ids) -> String.equal gid goal_id && List.mem task_id task_ids)
+    links
+;;
+
+let finished_statuses =
+  [ ( "done"
+    , Done { assignee = "claude"; completed_at = "2026-09-01T00:00:00Z"; notes = None } )
+  ; ( "cancelled"
+    , Cancelled
+        { cancelled_by = "claude"; cancelled_at = "2026-09-01T00:00:00Z"; reason = Some "test" } )
+  ]
+;;
+
+let test_rejects_finished_task () =
+  List.iter
+    (fun (label, status) ->
+       with_test_env (fun config ->
+         make_goal config ~id:"goal-a";
+         let task_id = make_unassigned_task config ~title:"t" in
+         set_task_status config ~task_id status;
+         (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+          | Error (Goal_assignment.Task_finished { task_id = t; status = s }) ->
+            check string (label ^ ": names the task") task_id t;
+            check string (label ^ ": names the status") label (task_status_to_string s)
+          | Ok () -> failf "a %s task was linked to a goal" label
+          | Error other -> failf "expected Task_finished, got %s" (err_to_string other));
+         check
+           bool
+           (label ^ ": no link was written")
+           false
+           (goal_has_task
+              (Workspace_goal_index.read_goal_task_links config)
+              ~goal_id:"goal-a"
+              ~task_id)))
+    finished_statuses
+;;
+
+(* The status check runs before the link is read, so a finished task that
+   already has a link is refused as finished. *)
+let test_finished_task_with_a_link_is_refused_as_finished () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    make_goal config ~id:"goal-b";
+    let task_id = make_unassigned_task config ~title:"t" in
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+     | Ok () -> ()
+     | Error e -> failf "first assign should succeed: %s" (err_to_string e));
+    set_task_status config ~task_id (List.assoc "done" finished_statuses);
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-b" with
+    | Error (Goal_assignment.Task_finished { task_id = t; _ }) ->
+      check string "names the task" task_id t
+    | Ok () -> fail "a finished task was linked to a second goal"
+    | Error other -> failf "expected Task_finished, got %s" (err_to_string other))
+;;
+
+let test_links_an_unfinished_task_in_every_open_status () =
+  let started_at = "2026-09-01T00:00:00Z" in
+  let open_statuses =
+    [ "claimed", Claimed { assignee = "claude"; claimed_at = started_at }
+    ; "in_progress", InProgress { assignee = "claude"; started_at }
+    ; ( "awaiting_verification"
+      , AwaitingVerification
+          { assignee = "claude"
+          ; started_at
+          ; submitted_at = "2026-09-01T01:00:00Z"
+          ; verification_id = "verification-1"
+          } )
+    ]
+  in
+  List.iter
+    (fun (label, status) ->
+       with_test_env (fun config ->
+         make_goal config ~id:"goal-a";
+         let task_id = make_unassigned_task config ~title:"t" in
+         set_task_status config ~task_id status;
+         match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+         | Ok () -> ()
+         | Error e -> failf "a %s task should link: %s" label (err_to_string e)))
+    open_statuses
+;;
+
+let contains ~affix s =
+  let n = String.length affix
+  and h = String.length s in
+  let rec scan i = i + n <= h && (String.equal (String.sub s i n) affix || scan (i + 1)) in
+  scan 0
+;;
+
+(* What a keeper sees: the tool answers a workflow rejection that names the
+   task and why, and nothing is linked. *)
+let test_set_goal_tool_rejects_a_finished_task () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"t" in
+    set_task_status
+      config
+      ~task_id
+      (Done { assignee = "claude"; completed_at = "2026-09-01T00:00:00Z"; notes = None });
+    let ctx = { Task.Tool.config; agent_name = "claude"; sw = None } in
+    (match
+       Task.Tool.dispatch
+         ctx
+         ~name:"masc_task_set_goal"
+         ~args:(`Assoc [ "task_id", `String task_id; "goal_id", `String "goal-a" ])
+     with
+     | Some (Tool_result.Failed { class_ = Tool_result.Workflow_rejection; message; _ }) ->
+       check bool "the message names the task" true (contains ~affix:task_id message);
+       check bool "the message names the status" true (contains ~affix:"done" message)
+     | Some (Tool_result.Failed { class_; message; _ }) ->
+       failf
+         "expected Workflow_rejection, got %s: %s"
+         (Tool_result.tool_failure_class_to_string class_)
+         message
+     | Some (Tool_result.Completed _ | Tool_result.Deferred _) ->
+       fail "the tool linked a finished task"
+     | None -> fail "masc_task_set_goal was not dispatched");
+    check
+      bool
+      "no link was written"
+      false
+      (goal_has_task
+         (Workspace_goal_index.read_goal_task_links config)
+         ~goal_id:"goal-a"
+         ~task_id))
+;;
+
+let test_assignment_reports_goal_link_write_failure () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"t" in
+    make_primary_goal_task_links_path_unwritable config;
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+    | Error (Goal_assignment.Link_write_failed msg) ->
+      check bool "failure message is populated" true (String.length msg > 0)
+    | Ok () -> fail "expected Link_write_failed, got Ok"
+    | Error other -> failf "expected Link_write_failed, got %s" (err_to_string other))
+;;
+
+let test_assignment_rejects_recovered_task_snapshot () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"t" in
+    Out_channel.with_open_text (Workspace.backlog_path config) (fun oc ->
+      output_string oc "{\"tasks\":[],\"last_updated\":\"now\",\"version\":0}");
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+    | Error (Goal_assignment.Backlog_read_failed _) -> ()
+    | Ok () -> fail "recovered task snapshot authorized a goal-link mutation"
+    | Error other -> failf "expected Backlog_read_failed, got %s" (err_to_string other))
+;;
+
+let file_bytes path =
+  if Sys.file_exists path then Some (In_channel.with_open_bin path In_channel.input_all)
+  else None
+;;
+
+let corrupt path = Out_channel.with_open_text path (fun oc -> output_string oc "{broken")
+
+let test_goal_source_failure_blocks_all_bindings () =
+  List.iter (fun corrupt_mirror ->
+    with_test_env (fun config ->
+      make_goal config ~id:"goal-a";
+      let task_id = make_unassigned_task config ~title:"existing" in
+      let primary = Goal_store.goals_path config in
+      let recovery = primary ^ ".last-good" in
+      let links_path = Workspace_goal_index.goal_task_links_path config in
+      let backlog_path = Workspace.backlog_path config in
+      let before_links = file_bytes links_path in
+      let before_backlog = file_bytes backlog_path in
+      check bool "valid recovery exists before corruption" true (Sys.file_exists recovery);
+      corrupt primary;
+      if corrupt_mirror then corrupt recovery
+      else (
+        (* RFC-0444: a mirror that still decodes is reported as evidence of
+           the drift and is never served as the Goal. *)
+        match Goal_store.find_goal config ~goal_id:"goal-a" with
+        | Goal_store.Store_unavailable
+            { mirror = Goal_store.Mirror_decodes { goal_count = 1; _ }; _ } -> ()
+        | Goal_store.Store_unavailable u ->
+          fail ("valid mirror was not reported as decoding: " ^ Goal_store.unavailable_to_string u)
+        | Goal_store.Goal_found _ -> fail "a corrupt primary served the mirror as the Goal"
+        | Goal_store.Goal_absent -> fail "a corrupt primary read as an absent Goal");
+      (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+       | Error (Goal_assignment.Goal_source_unavailable _) -> ()
+       | Error e -> fail (err_to_string e)
+       | Ok () -> fail "damaged primary authorized assignment");
+      (match Goal_assignment.add_task_with_result ~goal_id:"goal-a" config
+         ~title:"new" ~priority:3 ~description:"bound" with
+       | Error (Workspace_task.Goal_source_unavailable _) -> ()
+       | Error e -> fail (Workspace_task.add_task_error_to_string e)
+       | Ok _ -> fail "damaged primary authorized task creation");
+      (match Goal_assignment.batch_add_tasks_with_contracts_result config
+         ["goalless",3,"",None,None; "bound",3,"",None,Some "goal-a"] with
+       | Error (Workspace_task.Batch_goal_source_unavailable _) -> ()
+       | Error e -> fail (Workspace_task.batch_add_tasks_error_to_string e)
+       | Ok _ -> fail "damaged primary authorized partial batch");
+      check (option string) "backlog bytes unchanged" before_backlog (file_bytes backlog_path);
+      check (option string) "link bytes unchanged" before_links (file_bytes links_path);
+      (match Goal_assignment.add_task_with_result config
+         ~title:"independent" ~priority:3 ~description:"goalless" with
+       | Ok _ -> ()
+       | Error e -> fail (Workspace_task.add_task_error_to_string e));
+      (match Goal_assignment.batch_add_tasks_with_contracts_result config
+         ["independent batch",3,"",None,None] with
+       | Ok _ -> ()
+       | Error e -> fail (Workspace_task.batch_add_tasks_error_to_string e))))
+    [false; true]
+;;
+
+(* RFC-0444 PR-2: [masc_add_task] with a goal_id on a store this build cannot
+   read answers the same envelope as the goal tools, as structured data and
+   as the message, with class [Dependency_unavailable]; nothing is written. *)
+let test_add_task_tool_projects_unavailable_envelope () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let primary = Goal_store.goals_path config in
+    let backlog_path = Workspace.backlog_path config in
+    let links_path = Workspace_goal_index.goal_task_links_path config in
+    let before_backlog = file_bytes backlog_path in
+    let before_links = file_bytes links_path in
+    corrupt primary;
+    let ctx = { Task.Tool.config; agent_name = "claude"; sw = None } in
+    let result = Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
+        (`Assoc [ "title", `String "bound"; "goal_id", `String "goal-a" ]) in
+    (match result with
+     | (Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; message; _ } as failure) ->
+       let data = Tool_result.data failure in
+       let open Yojson.Safe.Util in
+       check bool "ok is false" false (member "ok" data |> to_bool);
+       check string "error_code" "goal_store_unavailable" (member "error_code" data |> to_string);
+       check string "reason" "not_json" (member "reason" data |> to_string);
+       check string "field" "null" (Yojson.Safe.to_string (member "field" data));
+       check string "file" primary (member "file" data |> to_string);
+       check string "mirror.status" "mirror_decodes"
+         (member "mirror" data |> member "status" |> to_string);
+       check int "mirror.goal_count" 1 (member "mirror" data |> member "goal_count" |> to_int);
+       check string "reset_step" "reset_goal_store" (member "reset_step" data |> to_string);
+       check string "message is the serialized envelope" (Yojson.Safe.to_string data) message
+     | Tool_result.Failed { class_; message; _ } ->
+       failf "expected Dependency_unavailable, got %s: %s"
+         (Tool_result.tool_failure_class_to_string class_) message
+     | Tool_result.Completed _ | Tool_result.Deferred _ ->
+       fail "damaged primary authorized task creation");
+    check (option string) "backlog bytes unchanged" before_backlog (file_bytes backlog_path);
+    check (option string) "link bytes unchanged" before_links (file_bytes links_path))
+;;
+
+let test_unknown_goal_batch_has_no_partial_write () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let before = file_bytes (Workspace.backlog_path config) in
+    let links = file_bytes (Workspace_goal_index.goal_task_links_path config) in
+    (match Goal_assignment.batch_add_tasks_with_contracts_result config
+      ["valid",3,"",None,Some "goal-a"; "missing",3,"",None,Some "missing"] with
+     | Error (Workspace_task.Batch_unknown_goal "missing") -> ()
+     | Error e -> fail (Workspace_task.batch_add_tasks_error_to_string e)
+     | Ok _ -> fail "batch linked a missing Goal");
+    check (option string) "no partial backlog" before (file_bytes (Workspace.backlog_path config));
+    check (option string) "no partial links" links (file_bytes (Workspace_goal_index.goal_task_links_path config)))
+;;
+
+(* Exercise the authority primitive with a real dependent backlog/link write.
+   The delete is submitted while membership is held; its completion must follow
+   the dependent commit. Promises determine order without sleep-based races. *)
+let test_delete_and_binding_share_membership_lock () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let events = ref [] in
+    let submitted, submit = Eio.Promise.create () in
+    let deletion, deleted = Eio.Promise.create () in
+    Eio.Switch.run (fun sw ->
+      let result = Goal_store.with_existing_goals config ~goal_ids:["goal-a"] (fun () ->
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve submit ();
+          let result = Goal_store.delete_goal config ~goal_id:"goal-a" in
+          events := !events @ ["deleted"];
+          Eio.Promise.resolve deleted result);
+        Eio.Promise.await submitted;
+        Eio.Fiber.yield ();
+        let created = Workspace_task.add_task_with_result ~goal_id:"goal-a" config
+          ~title:"bound before deletion" ~priority:3 ~description:"" in
+        events := !events @ ["bound"];
+        created) in
+      (match result with
+       | Ok (Ok _) -> ()
+       | _ -> fail "binding failed while holding Goal membership");
+      (match Eio.Promise.await deletion with
+       | Ok Goal_store.Deleted -> ()
+       | _ -> fail "Goal deletion did not complete cleanly"));
+    check (list string) "commit precedes deletion" ["bound";"deleted"] !events;
+    check (list (pair string (list string))) "deleted Goal has no links" []
+      (Workspace_goal_index.read_goal_task_links config);
+    (match Goal_assignment.add_task_with_result ~goal_id:"goal-a" config
+      ~title:"after deletion" ~priority:3 ~description:"" with
+     | Error (Workspace_task.Unknown_goal "goal-a") -> ()
+     | _ -> fail "binding after deletion must reject the missing Goal"))
+;;
+
+let test_whitespace_padded_ids_are_trimmed_before_lookup () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"trimmed assignment" in
+    (match
+       Goal_assignment.set_task_goal config
+         ~task_id:("  " ^ task_id ^ "  ")
+         ~goal_id:"  goal-a  "
+     with
+     | Ok () -> ()
+     | Error err -> failf "expected trimmed IDs to link cleanly, got %s" (err_to_string err));
+    check (option (list string)) "canonical goal id resolves linked task"
+      (Some [ task_id ])
+      (List.assoc_opt "goal-a" (Workspace_goal_index.read_goal_task_links config)))
+;;
+
+let () =
+  run
+    "goal_task_assignment"
+    [ ( "RFC-0267 Phase 2 — set_task_goal"
+      , [ test_case "Goal source failure prevents every binding" `Quick test_goal_source_failure_blocks_all_bindings
+        ; test_case "masc_add_task projects the Unavailable envelope" `Quick test_add_task_tool_projects_unavailable_envelope
+        ; test_case "batch unknown Goal has no partial write" `Quick test_unknown_goal_batch_has_no_partial_write
+        ; test_case "delete and binding share membership lock" `Quick test_delete_and_binding_share_membership_lock
+        ; test_case "unknown task is rejected" `Quick test_unknown_task
+        ; test_case "unknown goal is rejected" `Quick test_unknown_goal
+        ; test_case "goalless task links to goal" `Quick test_links_goalless_task
+        ; test_case "whitespace-padded ids are trimmed before lookup" `Quick
+            test_whitespace_padded_ids_are_trimmed_before_lookup
+        ; test_case "reassignment is rejected" `Quick test_rejects_reassignment
+        ; test_case "a finished task is rejected" `Quick test_rejects_finished_task
+        ; test_case
+            "a finished task that has a link is refused as finished"
+            `Quick
+            test_finished_task_with_a_link_is_refused_as_finished
+        ; test_case
+            "an unfinished task links in every open status"
+            `Quick
+            test_links_an_unfinished_task_in_every_open_status
+        ; test_case
+            "the tool rejects a finished task with a workflow rejection"
+            `Quick
+            test_set_goal_tool_rejects_a_finished_task
+        ; test_case
+            "link write failure is reported"
+            `Quick
+            test_assignment_reports_goal_link_write_failure
+        ; test_case
+            "recovered task snapshot cannot authorize a link"
+            `Quick
+            test_assignment_rejects_recovered_task_snapshot
+        ; test_case
+            "a corrupt links file is not read as empty"
+            `Quick
+            test_corrupt_links_file_is_not_read_as_empty
+        ] )
+    ]
+;;

@@ -1,0 +1,267 @@
+{
+  "schema": "masc-independent-source-review-v1",
+  "status": "FINAL_FROZEN",
+  "created_at_utc": "2026-10-25T11:51:22.851496+00:00",
+  "reviewer": "repair_eval_metrics",
+  "head": "cdeb9e5af15677c22fc4be8b0cc0f82d42e5b351",
+  "base": "45592d21f7f1c11226e75c857d1983f7b0eef9d5",
+  "direct_parent": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+  "canonical_complete_diff_sha256": "35414e0bb72acc8fe325c04ce45b2fda1fc227387ba84c0603326cd8a81218cd",
+  "canonical_algorithm": "scripts/review/review-diff.py raw_identity; SHA256(masc-reviewed-git-diff-v1 NUL + sorted complete raw Git headers/paths)",
+  "full_patch_sha256": "c0c3cde00cb7872d1d088841ec92ae81f89185b32fdce557ca733d119912e21e",
+  "raw_diff_sha256": "39899c45d6e2b53c81a561d579d77b91d08999fce6a180c8953c839a2ee463b1",
+  "repair_delta_sha256": "7bd91d66d53001c18ed68e4d4bd01a799868162eed39ba48a121d15e33964b0e",
+  "scope": {
+    "changed_files": [
+      "lib/keeper/keeper_sandbox_read_backend.ml",
+      "lib/keeper/keeper_sandbox_read_backend.mli",
+      "test/test_keeper_sandbox_read_backend.ml"
+    ],
+    "files": 3,
+    "insertions": 61,
+    "deletions": 1,
+    "reviewed_full_committed_diff_again": true,
+    "repair_delta": "One test call removes ~meta label; production ML/MLI byte-identical to old head.",
+    "verdict_is_whole_stack_approval": false
+  },
+  "verdict": "PASS_SOURCE_ONLY",
+  "p0_p2_findings": [],
+  "closed_previous_defect": {
+    "severity": "P2",
+    "location": "test/test_keeper_sandbox_read_backend.ml:2132",
+    "old_head": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+    "description": "Fixture incorrectly passed ~meta to host_root_abs_of_meta, whose second argument is positional. Native compilation failed before tests ran. Prior independent source review missed this label mismatch.",
+    "repair": "Keeper_sandbox.host_root_abs_of_meta ~config meta",
+    "source_validation": "keeper_sandbox.mli:108-113 declares config:Workspace.config -> keeper_meta -> string; keeper_sandbox.ml:103-105 defines positional meta. Corrected expression matches those definitions and existing calls in this suite. No OCaml compiler/typechecker was executed in this review."
+  },
+  "source_findings": [
+    {
+      "id": "ARGV",
+      "location": "lib/keeper/keeper_sandbox_read_backend.ml:125",
+      "finding": "Blank --entrypoint is a distinct argv token before image. Caller command_argv follows image unchanged. Process_eio passes the list into process spawning without a shell/string round trip. The empty token is retained.",
+      "direct_consumers": [
+        "Keeper_sandbox_read_runner.Docker_backend",
+        "Keeper_workspace_read_ops.run_readonly_in_sandbox"
+      ]
+    },
+    {
+      "id": "OUTCOME",
+      "location": "lib/keeper/keeper_workspace_read_ops.ml:198",
+      "finding": "Grep accepts backend exits 0/1/2, but classifies only 0/1 as Completed. Exit127 is not admitted by backend, becomes an Error, then Keeper_tool_execution.failure Runtime_failure. Exit1 remains Completed with structured ok=true and empty matches when stdout empty."
+    },
+    {
+      "id": "VISIBILITY",
+      "location": "lib/keeper/keeper_tools_agent_core_handler_exec.ml:212",
+      "finding": "Actual tool dispatch preserves Failed class through Tool_result.make_err, observer/registry failure handling and returned dispatch_result. Tool_result serialization retains failure_class/disposition/message. No successful empty-search coercion occurs in this traced failure branch. This is source evidence, not an executed model-wire assertion."
+    },
+    {
+      "id": "FIXTURE",
+      "location": "test/test_keeper_sandbox_read_backend.ml:2102",
+      "finding": "The two registered tests enter real Keeper_workspace_read_ops.try_handle_with_outcome with Docker-profile metadata, catalogued image and existing sandbox root. Only Docker executable is replaced by the existing fixture. Modeled image entrypoint intercept returns1 unless exact separate empty override is present; then returns declared program exit127 or1. On old product code the missing-program case is classified Completed and its assertion fails; fixed code returns typed Runtime_failure. Positive test protects real no-match acceptance."
+    },
+    {
+      "id": "ASSERTIONS",
+      "location": "test/test_keeper_sandbox_read_backend.ml:2139",
+      "finding": "Assertions inspect returned execution after handler completion. Existing Fun.protect fixture restoration/cleanup does not swallow callback assertion failures. New tests reuse an already-used public module and are registered in the existing native suite listed by test/dune."
+    },
+    {
+      "id": "PRESERVATION",
+      "location": "lib/keeper/keeper_sandbox_read_backend.ml:85",
+      "finding": "The product change is one argv insertion. Mount/read-only/network-none/user/capability/seccomp/secret handling and Remote/Attached/Turn_runtime branches are unchanged. Clearing a setup entrypoint intentionally enforces the existing documented caller-program contract. No new authority, root, timeout or exit-code policy is introduced."
+    },
+    {
+      "id": "MLI",
+      "location": "lib/keeper/keeper_sandbox_read_backend.mli:100",
+      "finding": "Documentation describes executable ownership and default-entrypoint clearing. No public function signature or typed result API changes."
+    },
+    {
+      "id": "FIXTURE_TYPING_BOUNDARY",
+      "location": "test/test_keeper_sandbox_read_backend.ml:2132",
+      "finding": "Corrected call now uses labelled config and positional meta. Actual try_handle_with_outcome signature preserves labels for meta/config/op/raw_path/args and returns Keeper_tool_execution.t option. Its private record fields data/disposition are readable by the callback. Setup retains Docker metadata, catalogue image and existing root; only the incorrect argument label changed."
+    }
+  ],
+  "prior_native_counterevidence": {
+    "run_id": 40189920561,
+    "source_head": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+    "result": "COMPILE_FAILURE",
+    "tests_executed": 0,
+    "raw_log_bytes": 134143,
+    "raw_log_sha256": "c8a7bce51399bad91cb3f3e8b924650ff942e534bcb525b80064fb92ebf70602",
+    "compiler_location": "test/test_keeper_sandbox_read_backend.ml:2132",
+    "error": "This argument cannot be applied with label ~meta",
+    "review_method": "Read already retained raw log only. No CI/API query or execution.",
+    "excerpt_artifact": "prior-native-error-cdeb9e5a.txt"
+  },
+  "previous_review": {
+    "path": "review.json",
+    "sha256": "08f1a40f6a8da6a023fb8531136f860169a0a620aa243796243008c41778a293",
+    "preserved_unmodified": true,
+    "qualification": "Historical source-only review missed a fixture compile blocker and must not be treated as compilation/runtime proof. This new report binds only the repaired current source."
+  },
+  "validation": [
+    {
+      "kind": "source_read",
+      "result": "PASS",
+      "description": "Entire current committed three-file diff reread; one-line delta and exact declaration/implementation/direct handler callback signatures checked."
+    },
+    {
+      "kind": "git_diff_check",
+      "result": "PASS",
+      "exit_code": 0,
+      "stdout_bytes": 0,
+      "stderr_bytes": 0
+    },
+    {
+      "kind": "production_identity",
+      "result": "PASS",
+      "description": "Both changed production files byte-identical to prior reviewed source; correction is test-only."
+    },
+    {
+      "kind": "identity",
+      "result": "PASS",
+      "description": "Current HEAD, direct parent, full review base and complete raw canonical diff verified from immutable committed objects."
+    }
+  ],
+  "limitations": [
+    "No OCaml compiler, native test, Docker, provider, API or CI request was executed for this review. Current candidate compilation/test success is unverified in this report.",
+    "Reading the retained old CI raw log is counterevidence, not a new CI execution or status query. Old candidate executed zero tests.",
+    "New fixtures still use fake Docker; they check actual read-handler result classifications but do not execute rg or real container entrypoint behavior.",
+    "Source tracing of Tool_result failure visibility is not executed provider-wire evidence.",
+    "No product or fixture edits, publication approval, runtime mutation or deployment occurred. Uncommitted author documentation is excluded from the immutable committed diff."
+  ],
+  "source_files": [
+    {
+      "path": "lib/keeper/keeper_sandbox_read_backend.ml",
+      "role": "changed",
+      "git_blob": "1367c04819bf7af1e570ad3cc1b2d122b9de2077",
+      "sha256": "94e8c5f1682d4ffca9ca6423f260e66f5f15306164f7f24c22e73aac4c1eb3b6",
+      "bytes": 30262
+    },
+    {
+      "path": "lib/keeper/keeper_sandbox_read_backend.mli",
+      "role": "changed",
+      "git_blob": "6af1cd5b0dd1eb231848f6dc273c0967e5191e8c",
+      "sha256": "13b7f3aa8cacd52230211bc5aab7dad8240d316a9d0e15ff199b476af674c1de",
+      "bytes": 8930
+    },
+    {
+      "path": "test/test_keeper_sandbox_read_backend.ml",
+      "role": "changed",
+      "git_blob": "8ffb719764d4756db0471e60c127dba9c8ee9391",
+      "sha256": "6573183ce71fb027e55a970e68a271ac49d8b597c28701c3e6d08f7e95cc8d23",
+      "bytes": 138419
+    },
+    {
+      "path": "docs/constitution.xml",
+      "role": "read_context",
+      "git_blob": "7d2ff0b1e8121da7156f6c34df9445740475a3c7",
+      "sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682",
+      "bytes": 40861
+    },
+    {
+      "path": "lib/keeper/keeper_sandbox_read_runner.ml",
+      "role": "read_context",
+      "git_blob": "335940cb2b3d9b90915bc5b2b0f18c4ae95d10d5",
+      "sha256": "95488911943bde29c0b9020d3c6a02083a4b8c26f6b89286eef8e907ad0e5730",
+      "bytes": 4199
+    },
+    {
+      "path": "lib/keeper/keeper_workspace_read_ops.ml",
+      "role": "read_context",
+      "git_blob": "95675a00e4728a46a8414361686d2d816a8d1510",
+      "sha256": "548bac12ae8573cb7636099c11d4ab87230d1d84b0c506b1b0bc7f2b566f9c88",
+      "bytes": 11702
+    },
+    {
+      "path": "lib/keeper/keeper_tool_execution.ml",
+      "role": "read_context",
+      "git_blob": "8a980c736a2682333ee6c01173f3b50b04a96488",
+      "sha256": "5d3c3a8d038b39acc9c7d4854ccfb773edef967c5155f2b7a7881cae2132f6fe",
+      "bytes": 7479
+    },
+    {
+      "path": "lib/keeper/keeper_workspace_ops.ml",
+      "role": "read_context",
+      "git_blob": "5cd11a805c109ffa29ec5c383bace5239ab796e0",
+      "sha256": "f962e86336d2af15d06124fd99f85ca57a482fad46d33ddb298aa5cab0455bf9",
+      "bytes": 3394
+    },
+    {
+      "path": "lib/keeper/keeper_tools_agent_core_handler_exec.ml",
+      "role": "read_context",
+      "git_blob": "07920fa8346b8a504f269f948f6fa3fd5359d2a2",
+      "sha256": "4b4df333913881645b6a2063d37df3f3db3f82e5f507ab1cc2f6fea743f8814a",
+      "bytes": 18156
+    },
+    {
+      "path": "lib/keeper/keeper_tools_agent_core_handler.ml",
+      "role": "read_context",
+      "git_blob": "5b23d6f9a697b3ca1a1ed6d348fb77415963d886",
+      "sha256": "a1b82739f81f41aeffb5a6e9376b245948b669df2376001ebdea94ea5dbd8278",
+      "bytes": 12944
+    },
+    {
+      "path": "lib/process/process_eio.ml",
+      "role": "read_context",
+      "git_blob": "19120b61b0b202b3b6044c525458b8a0849a408f",
+      "sha256": "aaed0df532e9c2c9d46812065702bdebe43df186a00b98662ae777eb93f3a4b6",
+      "bytes": 73832
+    },
+    {
+      "path": "lib/tool_types/tool_result.ml",
+      "role": "read_context",
+      "git_blob": "b903bc6d647e3cb4b4dcd34d6e655f70621f85fa",
+      "sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b",
+      "bytes": 13661
+    },
+    {
+      "path": "lib/dune",
+      "role": "read_context",
+      "git_blob": "b5f5725386c3d3d35371e3d6fdf2094ab90fa10e",
+      "sha256": "58de602aa17a901b96c1206fd1a37e7aa54aa1118903c864ee1f25960b40f681",
+      "bytes": 6820
+    },
+    {
+      "path": "test/dune",
+      "role": "read_context",
+      "git_blob": "d089edd81e00abfc47e18cb2b631d29730f38392",
+      "sha256": "935e9021d93c7a7d2b2417447d7d83bc7ff09ecdbb5b57df99c752e8125ca081",
+      "bytes": 211244
+    },
+    {
+      "path": "scripts/review/review-diff.py",
+      "role": "read_context",
+      "git_blob": "e5f2113e7fb160b2d3edc5c28a0b896a9cd57cfa",
+      "sha256": "0a43322e6402cbe68a7df096d5fff7e75ae46137cf01312cc3e002febe9c52ed",
+      "bytes": 5822
+    },
+    {
+      "path": "lib/keeper/keeper_sandbox.mli",
+      "role": "typing_context_read",
+      "git_blob": "b8118c573195c2913bb0acc85fbc7f9ccfccfff1",
+      "sha256": "c3d401773e2d26da033255afba4516665c76391fc820802e5bf03b2df670e2fd",
+      "bytes": 8354
+    },
+    {
+      "path": "lib/keeper/keeper_sandbox.ml",
+      "role": "typing_context_read",
+      "git_blob": "403247dc2cacf1f8c18b9f692ed5619a9e56b3f9",
+      "sha256": "558dcb61280f26cc26dac4cc3e72cd084c3891a2fe6a90647863ae6250fd2abf",
+      "bytes": 10932
+    },
+    {
+      "path": "lib/keeper/keeper_workspace_read_ops.mli",
+      "role": "typing_context_read",
+      "git_blob": "6d0f98b26429335ecec0baf24d589b985ad5b8b0",
+      "sha256": "a428da18c67ad19d5ec7f80f038af11560302f53b36a182e1b1ff8466450cc58",
+      "bytes": 645
+    },
+    {
+      "path": "lib/keeper/keeper_tool_execution.mli",
+      "role": "typing_context_read",
+      "git_blob": "0534b05a824ae359de18aab54690df1801acdb04",
+      "sha256": "9a1af9583c29bc3da9a627a251c67841cad9f5116321a7a679c3380d9218bdee",
+      "bytes": 5512
+    }
+  ]
+}

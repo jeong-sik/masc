@@ -1,0 +1,121 @@
+{
+  "schema": "masc.keeper_feature_matrix.live_refresh.v1",
+  "captured_at": "2026-08-14T01:35:07Z",
+  "source_truth": {
+    "upstream_main": "f4fdc6796185004513c68cdb333dc171ebee0bb8",
+    "recent_merge": {
+      "28673": "f4fdc67961"
+    },
+    "pull_requests": {
+      "28658": {
+        "head": "d3e76deb7aa8c724d06c6d1d7c4bb43ce97af0b3",
+        "base": "7de373d3a0ad78a3593e58e4102ba9a450e9095c",
+        "state": "open_draft_clean_exact_ci_pass"
+      },
+      "28605": {
+        "head": "40c1373f74f60221695784319b5c49b9fdb76c50",
+        "base": "8f06c57c6162338e6e1f704ad946bc6221c4565e",
+        "state": "open_ready_combined_stack_exact_ci_running"
+      },
+      "28606": {
+        "head": "b3b744f7afec48a68bd26505facae76ad9a1cf0d",
+        "base": "d134545534dbf72b213c2f110ca6666b6628cd4d",
+        "state": "merged_into_pr_28605_branch_not_main"
+      },
+      "28687": {
+        "head": "848030ff4a7f9e9e8a941b69e072032a51d132a0",
+        "base": "8f06c57c6162338e6e1f704ad946bc6221c4565e",
+        "state": "open_draft_clean_exact_ci_pass"
+      },
+      "28672": {
+        "head": "51050040556385e5a8e3c40aa8dd74989e15b457",
+        "base": "823420b21934eda7a9a53350cd261dcfee07827d",
+        "state": "open_draft_clean_prior_exact_ci_pass_stale_base"
+      },
+      "28694": {
+        "head": "a107ec1d3112c7e0682e0284d5922066152616bd",
+        "base": "f4fdc6796185004513c68cdb333dc171ebee0bb8",
+        "state": "open_draft_exact_ci_running"
+      }
+    }
+  },
+  "live": {
+    "status": "ok",
+    "version": "0.22.0",
+    "reported_commit": "8f06c57c61",
+    "commit_source": "runtime_repo_head",
+    "embedded_binary_commit_known": false,
+    "started_at": "2026-08-14T01:14:54Z",
+    "uptime_seconds_at_capture": 652,
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "fleet": {
+      "status": "ok",
+      "bootable": 8,
+      "running": 8,
+      "executable": 8,
+      "target_reaction_capacity": 8,
+      "failing": 0,
+      "recovering": 0,
+      "operator_action_required": false
+    },
+    "queue": {
+      "status": "warning",
+      "status_reasons": ["runnable_backlog"],
+      "pending": 1,
+      "runnable": 1,
+      "runnable_keeper": "sangsu",
+      "oldest_age_seconds": 307.51360607147217,
+      "stale_after_seconds": 600.0,
+      "read_error_count": 0,
+      "operator_action_required": false
+    }
+  },
+  "browser": {
+    "source_url": "http://127.0.0.1:8935/dashboard",
+    "interaction": "Overview to exact visible Monitor button to Keeper Fleet",
+    "deployed_label": "v0.22.0 · 8f06c57c61",
+    "overview": {
+      "top_status_running": 8,
+      "running_keeper": "8 / 26"
+    },
+    "monitor": {
+      "normal_band_rows_labeled_runtime_available": 7,
+      "attention_rows": 1,
+      "attention_keeper": "taskmaster",
+      "attention_keeper_running": true
+    },
+    "console_errors": [],
+    "page_errors": [],
+    "failed_requests": [],
+    "verdict": {
+      "navigation": "pass",
+      "transport": "pass",
+      "retained_disabled_count_fix": "pass",
+      "count_label_truth": "fail",
+      "repair_pr": 28694
+    },
+    "screenshots": [
+      {
+        "surface": "overview",
+        "path": "/Users/dancer/me/reports/masc-live-dashboard-overview-20260814-1028.png",
+        "sha256": "2906c04584879624f4b0798cd81b07711ca9698c40d454a91cb22e4a5dca6440",
+        "pixel_width": 1440,
+        "pixel_height": 1000
+      },
+      {
+        "surface": "monitor",
+        "path": "/Users/dancer/me/reports/masc-live-dashboard-monitor-20260814-1028.png",
+        "sha256": "b1aaf2b58bbe99604faf4ad59a56d4d1194bb5e9c0c205dd3fa80404c1a1e334",
+        "pixel_width": 1440,
+        "pixel_height": 1000
+      }
+    ]
+  },
+  "limits": [
+    "The live commit is runtime_repo_head metadata, not an embedded binary build SHA.",
+    "PR 28606 was merged into the PR 28605 branch; it is not present on upstream main.",
+    "The queue sample is an instantaneous observation below its stale threshold, not a duration verdict.",
+    "PR source and CI status may move after capture."
+  ]
+}

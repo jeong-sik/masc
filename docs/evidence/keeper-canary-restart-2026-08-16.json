@@ -1,0 +1,138 @@
+{
+  "schema": "masc.keeper_canary_run.v1",
+  "captured_at": "2026-08-16T07:28:30Z",
+  "harness": { "git_commit": "583eb69d77fd3347c3702bc4a17cd3d2889d9a11" },
+  "run_id": "canary-restart-smoke-20260816-t2",
+  "keeper": {
+    "name": "canary-admission-20260814-0803",
+    "runtime": null,
+    "base_path": "/Users/dancer/me"
+  },
+  "transport": {
+    "endpoint": "http://127.0.0.1:8935/api/v1/keepers/chat/stream",
+    "turn_interval_s": 0.0,
+    "wall_clock_target_s": null
+  },
+  "facts_established": [
+    {
+      "category": "project_codename",
+      "statement": "The project codename is Codename-d1af6ce50638.",
+      "value": "Codename-d1af6ce50638"
+    },
+    {
+      "category": "lead_reviewer",
+      "statement": "The lead reviewer is Reviewer-c47551a63e53.",
+      "value": "Reviewer-c47551a63e53"
+    },
+    {
+      "category": "deadline",
+      "statement": "The deadline is 2026-09-20.",
+      "value": "2026-09-20"
+    }
+  ],
+  "turns": [
+    {
+      "index": 1,
+      "category": "project_codename",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-286ddd546c53f8ec"
+      },
+      "turn_ref": "trace-1786694644088-00003#28",
+      "sent_at": "2026-08-16T07:28:13Z",
+      "round_trip_s": 1.8806860446929932,
+      "reply_digest": "448b582cc6e754a83435aa38b818828e5c685d5f898d91b6e67cd1bbf4b01f8a"
+    },
+    {
+      "index": 2,
+      "category": "lead_reviewer",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-523aae4b712bcb31"
+      },
+      "turn_ref": "trace-1786694644088-00003#29",
+      "sent_at": "2026-08-16T07:28:14Z",
+      "round_trip_s": 1.8113830089569092,
+      "reply_digest": "752e490d303d954e8d5d1f588d44adfbb50a07b58926029f0b1fd98ed3db025e"
+    },
+    {
+      "index": 3,
+      "category": "deadline",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-3a1b5820bed89f93"
+      },
+      "turn_ref": "trace-1786694644088-00003#30",
+      "sent_at": "2026-08-16T07:28:16Z",
+      "round_trip_s": 8.743568897247314,
+      "reply_digest": "6bd3bec25e55ada38aeeccdaf5b28008e92ee397432092df5a0e03f8cf9f171c"
+    },
+    {
+      "index": 4,
+      "category": null,
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-39691073d14d490d"
+      },
+      "turn_ref": "trace-1786694644088-00003#31",
+      "sent_at": "2026-08-16T07:28:25Z",
+      "round_trip_s": 4.4936888217926025,
+      "reply_digest": "690698d8017edd8a35788b4e46e7b70dfffe857a568dd3330a75247b40fee8ba"
+    }
+  ],
+  "recall": {
+    "turn_index": 4,
+    "request_id": "canary-39691073d14d490d",
+    "prompt": "Without looking anything up, please list every fact I told you to remember earlier in this conversation, in the order I gave them to you.",
+    "reply": "Here are all the facts you gave me, in the order you provided them:\n\n1. The project codename is **Codename-744827e60663**.\n2. The lead reviewer is **Reviewer-15178d0a67bd**.\n3. The deadline is **2026-02-21**.\n4. The blocked dependency is **dep-d8e850d02d93**.\n5. The fallback runtime is **runtime-e08e6f009575**.\n6. The incident number is **6380**.\n7. The reviewer timezone is **America/New_York**.\n8. The artifact name is **artifact-bde64dd56a5d.json**.\n9. The rollback switch is called **rollback-a293944386fe**.\n10. The project codename is **Codename-54cf6ea1d7dc**.\n11. The project codename is **Codename-0ff6f1033e2e**.\n12. The lead reviewer is **Reviewer-28753b7a6c8f**.\n13. The deadline is **2026-08-15**.\n14. The blocked dependency is **dep-770ddf22045a**.\n15. The fallback runtime is **runtime-2823a589f2d7**.\n16. The incident number is **7490**.\n17. The reviewer timezone is **Europe/London**.\n18. The artifact name is **artifact-41a555918441.json**.\n19. The rollback switch is called **rollback-3a181e1340c5**.\n20. The project codename is **Codename-0a7732a591d7**.\n21. The project codename is **Codename-84183fc16793**.\n22. The lead reviewer is **Reviewer-41a7d6177571**.\n23. The project codename is **Codename-d1af6ce50638**.\n24. The lead reviewer is **Reviewer-c47551a63e53**.\n25. The deadline is **2026-09-20**."
+  },
+  "timing": {
+    "min_s": 1.8113830089569092,
+    "median_s": 3.187187433242798,
+    "max_s": 8.743568897247314
+  },
+  "deterministic_signal": {
+    "facts_total": 3,
+    "facts_recalled": 3,
+    "order_matches": true,
+    "recalled_categories": [
+      "project_codename", "lead_reviewer", "deadline"
+    ],
+    "missing_categories": [],
+    "per_fact": [
+      {
+        "category": "project_codename",
+        "value": "Codename-d1af6ce50638",
+        "recalled": true,
+        "first_index": 1214
+      },
+      {
+        "category": "lead_reviewer",
+        "value": "Reviewer-c47551a63e53",
+        "recalled": true,
+        "first_index": 1266
+      },
+      {
+        "category": "deadline",
+        "value": "2026-09-20",
+        "recalled": true,
+        "first_index": 1313
+      }
+    ]
+  },
+  "judgment": null,
+  "injections": [
+    {
+      "kind": "restart",
+      "after_turn": 2,
+      "started_at": "2026-08-16T07:28:16Z",
+      "duration_s": 0.0496830940246582,
+      "trace_id_before": "trace-1786694644088-00003",
+      "trace_id_after": "trace-1786694644088-00003",
+      "generation_before": 1,
+      "generation_after": 1,
+      "continuation": true
+    }
+  ],
+  "notes": []
+}

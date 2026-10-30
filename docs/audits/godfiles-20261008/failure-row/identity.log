@@ -1,0 +1,14 @@
+Testing `[1mkeeper chat delivery identity[0m'.
+[2mThis run has ID `JXY0CAGJ'.
+
+[0m  [32m[OK][0m          [36midentity[0m          0   operation roundtrip.
+  [32m[OK][0m          [36midentity[0m          1   native operation roundtrip.
+  [32m[OK][0m          [36midentity[0m          2   Fusion run roundtrip.
+  [32m[OK][0m          [36midentity[0m          3   approval lifecycle roundtrip.
+  [32m[OK][0m          [36midentity[0m          4   transcript slots roundtrip.
+  [32m[OK][0m          [36midentity[0m          5   schema drift fails closed.
+  [32m[OK][0m          [36midentity[0m          6   delivery-only slot rejects execution id...
+  [32m[OK][0m          [36midentity[0m          7   provenance pair is all or nothing.
+
+Full test results in `[36m~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper chat delivery identity[0m'.
+[32mTest Successful[0m in 0.036s. 8 tests run.

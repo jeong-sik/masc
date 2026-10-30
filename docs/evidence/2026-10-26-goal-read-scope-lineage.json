@@ -1,0 +1,21 @@
+{
+  "old_product_commit": "9099a54530edc0a6ecee98117ea1ebab02cebe2e",
+  "old_parent": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+  "new_product_commit": "4234f00a976e50ec1cab01819dbd19154a8b5dc5",
+  "new_parent": "c927baa31c09ffbdd5422921e9a71788635b4da1",
+  "same_one_file_twelve_added_line_patch": true,
+  "patch_sha256": "dfd1552dd3743145d0ade28ae269560faf6d47cef7005f774311181e51d5c982",
+  "prompt_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+  "lower25_heads_externally_restacked": true,
+  "own_top_only_replayed": true,
+  "native_no_trunk_attempt": "No branches to rebase; unchanged",
+  "native_normal_attempt": "Replayed old lower ancestry and conflicted; aborted normally, old owned9099 restored",
+  "bounded_reconciliation": "Explicit --onto newparent oldparent on only the one owned top commit in independent Git metadata. No lower ref or other checkout mutation.",
+  "schema": "masc.goal.read-scope.source-lineage.v1",
+  "pr": 46021,
+  "native_stack": 45750,
+  "candidate_measured_before_restack": "9099a54530edc0a6ecee98117ea1ebab02cebe2e",
+  "measured_prompt_bytes": 9182,
+  "actual_execution_binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "scope": "Product patch and prompt bytes are identical after rebasing the owned top layer onto the externally restacked lower25. Historical cohort source labels remain unchanged. Neither rebase nor documentation publication is a new behavioral run, native build, installation or current-head approval."
+}

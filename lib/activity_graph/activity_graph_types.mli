@@ -1,0 +1,137 @@
+(** Activity_graph_types — type definitions and JSON serde for activity graph. *)
+
+(** {1 Node status}
+
+    Type-safe variant replacing stringly-typed status. The [node kind]
+    field already carries the category, so this is a flat variant
+    spanning agent / task / board.
+
+    @since 7182 *)
+type node_status =
+  (* Agent lifecycle *)
+  | Active
+  (* Task lifecycle *)
+  | Todo | Claimed | In_progress | Done | Cancelled
+  (* Board *)
+  | Posted | Discussed
+  (* Generic / fallback *)
+  | Observed | Workspace | Unset
+
+(** {1 Span status}
+
+    Separate lifecycle from {!node_status}.
+
+    @since 7182 *)
+type span_status =
+  | Span_open | Span_completed | Span_released | Span_cancelled
+  | Span_ended
+
+val span_status_to_string : span_status -> string
+
+(** Strict parser: returns [None] on unknown wire so callers can react
+    explicitly (drop / fallback / route). See #8605. *)
+val span_status_of_string_opt : string -> span_status option
+
+(** Closed activity kinds whose payload describes one executed tool. Producers,
+    reducers, and timeline readers share this type rather than maintaining
+    independent string lists. *)
+type tool_execution_event_kind =
+  | External_tool_called
+  | Keeper_in_turn_tool_executed
+
+val tool_execution_event_kind_to_string : tool_execution_event_kind -> string
+val tool_execution_event_kind_of_string : string -> tool_execution_event_kind option
+val all_tool_execution_event_kinds : tool_execution_event_kind list
+
+(** The event kinds the graph reducer and the span builder act on, decoded
+    once from an event's [kind]. The task, message and board families are
+    {!Event_kind}'s. *)
+type drawn_event_kind =
+  | Tool_execution_event of tool_execution_event_kind
+  | Task_event of Event_kind.Task.t
+  | Message_event of Event_kind.Message.t
+  | Board_event of Event_kind.Board.t
+
+(** [None] for a kind neither reader acts on. Such an event is still stored
+    and listed. *)
+val drawn_event_kind_of_string : string -> drawn_event_kind option
+
+(** {1 Graph entities} *)
+
+type entity_ref = {
+  kind : string;
+  id : string;
+}
+
+type event = {
+  seq : int;
+  ts_ms : int;
+  ts_iso : string;
+  kind : string;
+  actor : entity_ref option;
+  subject : entity_ref option;
+  payload : Yojson.Safe.t;
+  tags : string list;
+}
+
+type graph_node = {
+  id : string;
+  kind : string;
+  label : string;
+  status : node_status;
+  weight : int;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
+}
+
+type graph_edge = {
+  id : string;
+  source : string;
+  target : string;
+  kind : string;
+  weight : int;
+  active : bool;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
+}
+
+type agent_span_kind = Task_span
+
+(** The span's [kind] on the wire. *)
+val agent_span_kind_to_string : agent_span_kind -> string
+
+type agent_span = {
+  agent : string;
+  start_ms : int;
+  end_ms : int;
+  span_kind : agent_span_kind;
+  label : string;
+  span_status : span_status;
+}
+
+(** {1 Constructors and defaults} *)
+
+val entity : kind:string -> string -> entity_ref
+
+(** [`Assoc []] — a JSON object with no members. *)
+val default_meta : Yojson.Safe.t
+
+(** {1 JSON serde}
+
+    [_to_yojson] always succeeds; [_of_yojson] returns [None] on any
+    missing required field. *)
+
+val event_to_yojson : event -> Yojson.Safe.t
+
+val event_of_yojson : Yojson.Safe.t -> event option
+
+val graph_node_to_yojson : graph_node -> Yojson.Safe.t
+
+val graph_edge_to_yojson : graph_edge -> Yojson.Safe.t
+
+val agent_span_to_yojson : agent_span -> Yojson.Safe.t
+
+(** {1 Utilities} *)
+
+(** Current wall-clock time in milliseconds (via [Time_compat.now]). *)
+val now_ts_ms : unit -> int

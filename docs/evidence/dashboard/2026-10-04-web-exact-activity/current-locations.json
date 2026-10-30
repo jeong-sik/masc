@@ -1,0 +1,132 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Current location lookup for an immutable historical capture manifest; recorded digests do not certify current edited source or documents.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "source-hashes.json",
+    "sha256": "18719f1c4077adc45454b9164602040311fb42e2f429a710a7e4d8d447108442"
+  },
+  "files": {
+    "dashboard/src/api/dashboard-runtime.ts": {
+      "recorded_path": "dashboard/src/api/dashboard-runtime.ts",
+      "recorded_sha256": "c859d5c3ba6bc64683bea4d24a77aa5e9146954f28c5fc12aea2b4c658dc9ab4",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/api/dashboard.test.ts": {
+      "recorded_path": "dashboard/src/api/dashboard.test.ts",
+      "recorded_sha256": "9cb0950fcd6221faba76e1a8eeadc103b795b5e4690304895821bab14947bf46",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/components/lane-inventory-panel.ts": {
+      "recorded_path": "dashboard/src/components/lane-inventory-panel.ts",
+      "recorded_sha256": "f2b04f6377124a2a0a96e8d4f41e5b9d9425f45027395e51a274add4a9d1d008",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/components/runtime-exact-lane-editor.ts": {
+      "recorded_path": "dashboard/src/components/runtime-exact-lane-editor.ts",
+      "recorded_sha256": "e386ce19d7dc1699827a46b802e4fc22f0c7d3806d8b4ca25b44cc261b3392e0",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/components/exact-lane-activity-panel.ts": {
+      "recorded_path": "dashboard/src/components/exact-lane-activity-panel.ts",
+      "recorded_sha256": "75057b2211dde7f7029d3dd1d357d3dc5b12716579fe953978ec91bf83f0b391",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": {
+      "recorded_path": "dashboard/src/components/exact-lane-activity-panel.test.ts",
+      "recorded_sha256": "5df5f710f86ac42540dbefa9554bdf9cfb875fbb7efff21fcbf0d6b01dcdd4af",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/exact-lane-activity.ts": {
+      "recorded_path": "dashboard/src/lib/exact-lane-activity.ts",
+      "recorded_sha256": "0c03eab86bc5e38249b7ef19ed703297186e417059d9e49b6378167521a3b84a",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/exact-lane-activity-session.ts": {
+      "recorded_path": "dashboard/src/lib/exact-lane-activity-session.ts",
+      "recorded_sha256": "fa34f181afbd5ed31220f73392119a58b429b6811e390ba01342e797f347329d",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/runtime-toml-session.ts": {
+      "recorded_path": "dashboard/src/lib/runtime-toml-session.ts",
+      "recorded_sha256": "9fa9b55c176e59d07fa26ef25e78bd1f30fe49af00ad880031286a04c57169a4",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/runtime-toml-config.ts": {
+      "recorded_path": "dashboard/src/lib/runtime-toml-config.ts",
+      "recorded_sha256": "f598cf1497a9c87617aaea1e1778bc9bb1fb206769f4422dfd7fa8323a773ad9",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/runtime-config-receipt.ts": {
+      "recorded_path": "dashboard/src/lib/runtime-config-receipt.ts",
+      "recorded_sha256": "ba7dfec2c7109fe093966faf0574e223bdbecf494aa52f80f9c565c4def2ca30",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/runtime-config-receipt.test-fixture.ts": {
+      "recorded_path": "dashboard/src/lib/runtime-config-receipt.test-fixture.ts",
+      "recorded_sha256": "7ade4336a8762f3c94b41069855e103d5b8fead3e0e3417587a2dc9a50fb3c67",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/runtime-config-refresh.ts": {
+      "recorded_path": "dashboard/src/lib/runtime-config-refresh.ts",
+      "recorded_sha256": "35b29d1e2de390cb6cc55b6c0a3f2fe5f93e219ba882a2afee69bf5ae4d72121",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/runtime-toml-source-generation.ts": {
+      "recorded_path": "dashboard/src/lib/runtime-toml-source-generation.ts",
+      "recorded_sha256": "e63c361ccbb572ec21d292bb91823555e2a2b06533507fed9219bea24187ee90",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/lib/model-setup-resume.ts": {
+      "recorded_path": "dashboard/src/lib/model-setup-resume.ts",
+      "recorded_sha256": "577c736241028b61128d1e90e6e7ec6ed61816fb94b2554c77d9d273930c97a6",
+      "content_kind": "editable_source"
+    },
+    "dashboard/package.json": {
+      "recorded_path": "dashboard/package.json",
+      "recorded_sha256": "2c820c3d81db9d2c81263f91b15232d532dbad22302d84ec660fb0cba4d0f101",
+      "content_kind": "editable_source"
+    },
+    "dashboard/pnpm-lock.yaml": {
+      "recorded_path": "dashboard/pnpm-lock.yaml",
+      "recorded_sha256": "1a85e066a8baf940cf65df3cf18e76224684fcff6b47254b9c37d6647fd607a0",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/main.ts": {
+      "recorded_path": "dashboard/src/main.ts",
+      "recorded_sha256": "fd52b9fca46e2f167db0abbe270dfcfe0b4c3ef92abc09d09f702cda677b64af",
+      "content_kind": "editable_source"
+    },
+    "dashboard/vite.config.ts": {
+      "recorded_path": "dashboard/vite.config.ts",
+      "recorded_sha256": "ee6d1c8814df4fc5d114e04ab3f82fd3546bda238cb68ce23651d931ca65e350",
+      "content_kind": "editable_source"
+    },
+    "dashboard/fixtures/2026-10-04-web-exact-activity/fixture.ts": {
+      "recorded_path": "dashboard/evidence/2026-10-04-web-exact-activity/fixture.ts",
+      "recorded_sha256": "329317b057f74742b4cea117d31da05d13e6ea17ce3b0d62ba580fee39d7a0da",
+      "content_kind": "editable_reproduction_source"
+    },
+    "dashboard/fixtures/2026-10-04-web-exact-activity/fixture.html": {
+      "recorded_path": "dashboard/evidence/2026-10-04-web-exact-activity/fixture.html",
+      "recorded_sha256": "5df54038169b6e0b9f96edc2d08ea673037cd7593cf64b23574e310c7795f5f3",
+      "content_kind": "editable_reproduction_source"
+    },
+    "dashboard/fixtures/2026-10-04-web-exact-activity/browser-fixture.mjs": {
+      "recorded_path": "dashboard/evidence/2026-10-04-web-exact-activity/browser-fixture.mjs",
+      "recorded_sha256": "b3c4e0e4684dc89032696f2a240c57fbed35ba87404eec13fdc67cd2a7f96192",
+      "content_kind": "editable_reproduction_source"
+    },
+    "dashboard/src/lib/exact-lane-observation.ts": {
+      "recorded_path": "dashboard/src/lib/exact-lane-observation.ts",
+      "recorded_sha256": "7be35d0e834b49344527d6f5e21ed73f0371879baff6305e06a70d5172248104",
+      "content_kind": "editable_source"
+    },
+    "dashboard/src/components/runtime-toml-editor.ts": {
+      "recorded_path": "dashboard/src/components/runtime-toml-editor.ts",
+      "recorded_sha256": "90312941e55906ed15d5976ffc28e57e0eedd658c328f4305b3bbdf1691f18dd",
+      "content_kind": "editable_source"
+    }
+  },
+  "historical_records": []
+}

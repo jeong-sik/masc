@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      rc_run_id:
+        description: Completed full RC run for the exact version-tag commit
+        required: true
+        type: string
+      publish:
+        description: Publish the verified RC distribution on the selected existing version tag
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-publication-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require an existing version tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          test "$REF_TYPE" = tag
+          case "$REF_NAME" in v*) ;; *) exit 1 ;; esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check version truth
+        env:
+          TAG: ${{ github.ref_name }}
+        run: scripts/check-version-truth.sh --tag "$TAG"
+      - name: Stage the successful RC distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RC_RUN: ${{ inputs.rc_run_id }}
+          COMMIT: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 scripts/ci/prepare-release-publication.py \
+            --repo "$REPO" --run "$RC_RUN" --commit "$COMMIT" --tag "$TAG" \
+            --output "$RUNNER_TEMP/release-publication"
+      - name: Publish the verified assets
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 scripts/ci/prepare-release-publication.py \
+            --recheck --output "$RUNNER_TEMP/release-publication"
+          gh release create "$TAG" --repo "$REPO" --verify-tag \
+            --title "$TAG" --notes-file "$RUNNER_TEMP/release-publication/release-body.md" \
+            "$RUNNER_TEMP/release-publication/assets/"*
+      - name: Record publication result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          receipt = json.loads((Path(os.environ['RUNNER_TEMP']) / 'release-publication/receipt/candidate-verification.json').read_text())
+          scope = receipt['behavior_scope']
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Verified behavior profile: `' + scope['profile'] + '`\n')
+              summary.write('Manifest SHA-256: `' + scope['manifest_sha256'] + '`\n')
+              summary.write('Selected suites: ' + ', '.join(scope['suites']) + '\n')
+              summary.write('This artifact publication does not certify full regression or production readiness.\n\n')
+          PYCODE
+          if [ "$PUBLISH" = true ]; then
+            gh release view "$TAG" --repo "$REPO" --json url,tagName,isDraft,assets > "$RUNNER_TEMP/published-release.json"
+            cat "$RUNNER_TEMP/published-release.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Verified artifacts staged; publication was not requested.' >> "$GITHUB_STEP_SUMMARY"
+          fi

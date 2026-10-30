@@ -1,0 +1,165 @@
+(** The skill line in the current-task block, and its absence.
+
+    The absence is the load-bearing half. This change adds a field to every
+    task in the backlog, and the claim that earns it is that a task naming no
+    skill is prompted exactly as it was before the field existed. Asserting
+    "no skill line appears" would pass on a block that gained a blank line or
+    a header with nothing under it, so the two renderings are compared
+    directly: the only difference between a task with one skill and the same
+    task without may be that one line. *)
+
+open Alcotest
+module Domain = Masc_domain
+module KUP = Masc.Keeper_unified_prompt
+
+let skill_reference name revision_character =
+  let source_id =
+    match Skill_source_config.source_id_of_string "project-masc" with
+    | Ok source_id -> source_id
+    | Error detail -> fail detail
+  in
+  let package_id =
+    match Skill_reference.package_id_of_directory name with
+    | Ok package_id -> package_id
+    | Error _ -> fail "invalid Skill package fixture"
+  in
+  let content_revision =
+    match
+      Skill_reference.content_revision_of_string
+        (String.make 64 revision_character)
+    with
+    | Ok revision -> revision
+    | Error _ -> fail "invalid Skill revision fixture"
+  in
+  Skill_reference.make
+    ~identity:(Skill_reference.make_identity ~source_id ~package_id ~name)
+    ~content_revision
+;;
+
+let task ~skills : Domain.task =
+  { id = "task-001"
+  ; title = "probe"
+  ; description = "probe"
+  ; task_status = Domain.InProgress { assignee = "kappa"; started_at = "2026-08-25T00:00:00Z" }
+  ; priority = 3
+  ; files = []
+  ; created_at = "2026-08-25T00:00:00Z"
+  ; created_by = Some "operator"
+  ; predecessor_task_id = None
+  ; contract = None
+  ; execution_links = Domain.no_execution_links
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  ; skills
+  }
+;;
+
+let contains ~needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
+  nl = 0 || scan 0
+;;
+
+let lines s = String.split_on_char '\n' s
+
+let rec project_root directory =
+  if Sys.file_exists (Filename.concat directory "dune-project")
+  then directory
+  else
+    let parent = Filename.dirname directory in
+    if String.equal parent directory
+    then fail "could not locate repository root"
+    else project_root parent
+;;
+
+let configure_prompt_registry () =
+  let prompt_dir = Filename.concat (project_root (Sys.getcwd ())) "config/prompts" in
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+;;
+
+let test_one_skill_is_named_with_its_path () =
+  let reference = skill_reference "humanize-korean" 'a' in
+  let rendered =
+    KUP.format_current_task
+      (task ~skills:[ reference ])
+  in
+  check bool "the skill is named" true (contains ~needle:"humanize-korean" rendered);
+  (* The reference is what the block carries: the body itself is served by
+     the row's own tool when the Keeper calls for it. *)
+  check
+    bool
+    "no filesystem path is handed to the model"
+    false
+    (contains ~needle:".masc/skills" rendered);
+  (* The reference the caller passed, spelled the way the row spells it. The
+     assertion here used to be the whole sentence, byte for byte, with the
+     tool name written into it. Both moved: config/prompts/keeper.md now
+     tells the model to call an `instruction` row's own `tool_name`, and a
+     task rendered without resolved surfaces carries `unavailable` rows,
+     which name no tool because they are not callable. What this suite is
+     about is that the exact reference reaches the block, so that is what is
+     read, from the value the fixture built. *)
+  check
+    bool
+    "the exact reference is carried"
+    true
+    (contains
+       ~needle:(Yojson.Safe.to_string (Skill_reference.to_yojson reference))
+       rendered)
+;;
+
+let test_several_skills_are_listed () =
+  let rendered =
+    KUP.format_current_task
+      (task
+         ~skills:
+           [ skill_reference "first-skill" 'a'
+           ; skill_reference "second-skill" 'b'
+           ])
+  in
+  check bool "first" true (contains ~needle:"first-skill" rendered);
+  check bool "second" true (contains ~needle:"second-skill" rendered)
+;;
+
+let test_the_only_difference_is_that_one_line () =
+  (* The claim the new field has to earn. Every task in the backlog now carries
+     [skills]; a task that names none must render as it did before the field
+     existed, and "one added line" says that in a way a missing assertion
+     cannot fake. *)
+  let without = lines (KUP.format_current_task (task ~skills:[])) in
+  let with_one =
+    lines
+      (KUP.format_current_task
+         (task ~skills:[ skill_reference "humanize-korean" 'a' ]))
+  in
+  check int "exactly one line added" (List.length without + 1) (List.length with_one);
+  let added = List.filter (fun l -> not (List.mem l without)) with_one in
+  check int "and it is a single distinct line" 1 (List.length added);
+  check
+    bool
+    "which is the skill line"
+    true
+    (contains ~needle:"humanize-korean" (List.hd added))
+;;
+
+let () =
+  configure_prompt_registry ();
+  run
+    "keeper_task_skill_block"
+    [ ( "current task block"
+      , [ test_case
+            "a named skill comes with its path"
+            `Quick
+            test_one_skill_is_named_with_its_path
+        ; test_case "several skills are all listed" `Quick test_several_skills_are_listed
+        ; test_case
+            "naming a skill adds exactly one line"
+            `Quick
+            test_the_only_difference_is_that_one_line
+        ] )
+    ]
+;;

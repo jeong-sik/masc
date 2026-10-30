@@ -1,0 +1,2099 @@
+
+open Masc_domain
+open Server_auth
+open Server_dashboard_http
+open Server_h2_gateway_helpers
+open Server_routes_http
+
+let h2_request_authority_bad_request ~error_code ~message h2_reqd =
+  h2_respond_json_value
+    h2_reqd
+    (`Assoc [ "error_code", `String error_code; "error", `String message ])
+    ~status:`Bad_request
+;;
+
+let make_error_handler () =
+  (* HTTP/2 error handler *)
+  let h2_error_handler _client_addr ?request:_ error respond =
+    let message = match error with
+      | `Exn exn -> Printexc.to_string exn
+      | `Bad_request -> "Bad request"
+      | `Internal_server_error -> "Internal server error"
+    in
+    Log.Http.error "Error: %s" message;
+    let headers = H2.Headers.of_list [("content-type", "text/plain")] in
+    let body = respond headers in
+    (match Server_h2_response_resources.current () with
+     | Some context ->
+       (match Server_h2_response_resources.reserve context ~bytes:(String.length message) with
+        | Error (Capacity_exhausted | Request_closed) -> ()
+        | Ok lease -> Server_h2_response_resources.write_reserved lease body message)
+     | None ->
+       (* Parser failures have no admitted application scope. Their fixed
+          diagnostic is bounded separately from application payloads. *)
+       H2.Body.Writer.write_string body (match error with
+         | `Bad_request -> "Bad request"
+         | `Internal_server_error | `Exn _ -> "Internal server error"));
+    h2_close_after_flush body
+  in
+
+
+  h2_error_handler
+
+let make_request_handler ~trust_policy ~routes ~sw ~clock ~server_start_time:_ =
+  let embedded_resources = Server_h2_response_resources.create
+    ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
+  let mcp_eio_profile_of_transport_profile = function
+    | Server_mcp_transport_http.Full -> Mcp_eio.Full
+    | Server_mcp_transport_http.Managed_agent -> Mcp_eio.Managed_agent
+    | Server_mcp_transport_http.Operator_remote -> Mcp_eio.Operator_remote
+    | Server_mcp_transport_http.Seat -> Mcp_eio.Seat
+  in
+  (* ═══════════════════════════════════════════════════════════════════════
+     Route-local query helpers
+     ═══════════════════════════════════════════════════════════════════════ *)
+
+  let trimmed_query_param req key =
+    match Server_utils.query_param req key |> Option.map String.trim with
+    | Some value when value <> "" -> Some value
+    | _ -> None
+  in
+
+  let agent_core_telemetry_limit_param req =
+    Server_utils.int_query_param req "limit" ~default:50
+    |> Server_utils.clamp ~min_v:1 ~max_v:200
+  in
+
+  let agent_core_telemetry_provider_param req =
+    trimmed_query_param req "provider"
+  in
+
+  (* ═══════════════════════════════════════════════════════════════════════
+     HTTP/2 Request Handler - Full implementation
+     ═══════════════════════════════════════════════════════════════════════ *)
+  (* subscriptions/listen over h2c. Publisher callbacks only reserve and enqueue
+   immutable frames. A separate request fiber drains them with flow control;
+   exhausted payload capacity resets this stream without holding the shared
+   publisher lock. Peer reset and transport closure release the request scope.
+
+   The acknowledgement, the honoured filter, and the closure result come from
+   [Mcp_subscriptions] rather than being rebuilt -- the two transports wrote
+   their own header-mismatch body once and drifted. *)
+let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
+  match Server_mcp_transport_http.body_jsonrpc_id body_str with
+  | None | Some `Null ->
+    h2_respond_json h2_reqd
+      (Mcp_error_code.jsonrpc_error_body Mcp_error_code.Invalid_request
+         ~message:"subscriptions/listen requires a non-null request id")
+      ~status:`Bad_request ~extra_headers:cors
+  | Some subscription_id ->
+    let headers =
+      H2.Headers.of_list
+        ([ ("content-type", "text/event-stream")
+         ; ("cache-control", "no-cache")
+         ; ("x-accel-buffering", "no")
+         ]
+         @ cors)
+    in
+    let writer =
+      H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd
+        (H2.Response.create ~headers `OK)
+    in
+    let stream = Server_h2_response_resources.stream writer in
+    let write_frame = Server_h2_response_resources.offer stream in
+    let send json =
+      write_frame (Printf.sprintf "data: %s\n\n" (Yojson.Safe.to_string json))
+    in
+    let filter =
+      Mcp_subscriptions.honoured_filter
+        (Mcp_transport_protocol.subscription_filter_of_params
+           (Server_mcp_transport_http.body_jsonrpc_params body_str))
+    in
+    (match
+       Mcp_subscriptions.register_after_ack ~subscription_id ~filter ~send
+         ~acknowledge:(fun () ->
+           send (Mcp_subscriptions.acknowledgement ~subscription_id filter))
+     with
+     | Some token ->
+      Eio.Switch.on_release sw (fun () -> Mcp_subscriptions.unregister token);
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        let rec beat () =
+          if not (Server_h2_response_resources.is_closed stream) then (
+            Eio.Time.sleep clock 15.0;
+            if write_frame ": keepalive\n\n" then beat ())
+        in
+        beat (); `Stop_daemon);
+      (* This drain runs outside [Mcp_subscriptions]' shared publisher lock.
+         Overflow interrupts a flush blocked by flow control and raises to the
+         request boundary, producing a reset instead of a successful short SSE. *)
+      (try Server_h2_response_resources.run stream with
+       | Server_h2_response_resources.Response_writer_closed -> ())
+     | None -> raise Server_h2_response_resources.Response_capacity_exhausted);
+    (* Cancellation travels as an exception in Eio, so a wildcard that ate it
+       here would report a clean exit from a fiber the switch had cancelled. *)
+    (try h2_close_after_flush writer with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> ())
+  in
+
+  (* The route match below admits exactly five MCP paths; classifying them
+     here again must therefore never invent a profile for anything else. An
+     unrouted path reaching this classifier is route-table drift, and a loud
+     failure beats silently granting the widest (Full) surface (#8605
+     family: unknown input never maps to a permissive default). *)
+  let profile_for_mcp_path path =
+    match path with
+    | "/mcp/managed" -> Server_mcp_transport_http.Managed_agent
+    | "/mcp/operator" -> Server_mcp_transport_http.Operator_remote
+    | "/mcp/play" -> Server_mcp_transport_http.Seat
+    | "/mcp" | "/" -> Server_mcp_transport_http.Full
+    | unrouted ->
+      invalid_arg ("mcp profile requested for unrouted path: " ^ unrouted)
+  in
+
+  let h2_request_handler ~request_sw client_addr h2_reqd =
+    let within_request work = match Server_h2_response_resources.current () with
+      | Some context -> Server_h2_response_resources.with_current context work
+      | None -> Server_h2_response_resources.with_request embedded_resources
+          ~sw:request_sw work in
+    within_request (fun () ->
+    let h2_req = H2.Reqd.request h2_reqd in
+    let h2_headers = h2_req.headers in
+    (* Convert H2.Request to Httpun.Request for compatibility with existing code *)
+    let httpun_headers = Httpun.Headers.of_list (H2.Headers.to_list h2_headers) in
+    let httpun_meth = match h2_req.meth with
+      | `GET -> `GET | `POST -> `POST | `DELETE -> `DELETE
+      | `OPTIONS -> `OPTIONS | `PUT -> `PUT | `HEAD -> `HEAD
+      | `CONNECT -> `CONNECT | `TRACE -> `TRACE | `Other s -> `Other s
+    in
+    let httpun_request = Httpun.Request.create ~headers:httpun_headers httpun_meth h2_req.target in
+    let handle_admitted_request request_authority =
+    (* Body callbacks are delivered later by the connection reader, outside
+       this fiber binding. Carry the parsed authority into the deferred work. *)
+    let h2_read_body reqd callback =
+      Server_h2_gateway_helpers.h2_read_body ~sw:request_sw reqd (fun body ->
+        Server_request_authority.with_current request_authority (fun () ->
+          callback body))
+    in
+    let path = Http.Request.path httpun_request in
+    let origin = get_origin httpun_request in
+    let reflected_cors_origin =
+      public_read_cors_origin_opt ~request_authority httpun_request
+    in
+    let cors =
+      match reflected_cors_origin with
+      | Some origin -> cors_headers origin
+      | None -> [ "vary", "Origin" ]
+    in
+    (* [with_server_state] (#9793): HTTP-layer wrapper around
+       [get_server_state_result]. Returns a controlled 503 JSON response when
+       server state is not initialized, instead of crashing the request
+       fiber. Mirrors the pattern [handle_post_graphql] already uses. *)
+    let with_server_state h2_reqd f =
+      match get_server_state_result () with
+      | Ok state -> f state
+      | Error message ->
+          h2_respond_json h2_reqd
+            (server_state_error_json message)
+            ~status:(not_initialized_status :> H2.Status.t)
+            ~extra_headers:(not_initialized_headers @ cors)
+    in
+    let h2_respond_auth_error h2_reqd err =
+      let status, body =
+        Server_auth.auth_refusal_response ~protocol:"h2"
+          ~path:(Http.Request.path httpun_request) err
+      in
+      h2_respond_json
+        h2_reqd
+        body
+        ~status:(status :> H2.Status.t)
+        (* One policy for both protocols (#28166). Same result as the [cors]
+           computed above for this request; naming it here keeps H1 and H2
+           reading the same function. *)
+        ~extra_headers:
+          (auth_error_headers
+             ~status
+             ~cors:(auth_error_cors_headers httpun_request))
+    in
+    let mcp_auth_error_body failure =
+      Server_mcp_transport_http_respond.error_body
+        ?data:(Server_mcp_transport_http_protocol.auth_failure_data failure)
+        ~code:Mcp_error_code.Auth_error
+        failure.message
+      |> Yojson.Safe.to_string
+    in
+    let h2_respond_oauth_error error =
+      Log.Misc.warn
+        "oauth_http: request rejected error=%s"
+        (Auth_oauth.protocol_error_code error);
+      h2_respond_json_value
+        h2_reqd
+        (Server_oauth_service.oauth_error_json error)
+        ~status:(Server_oauth_service.oauth_error_status error :> H2.Status.t)
+        ~extra_headers:[ "cache-control", "no-store"; "pragma", "no-cache" ]
+    in
+    let with_h2_oauth f =
+      if Server_oauth_metadata.loopback_authority request_authority
+      then f ()
+      else h2_respond_text h2_reqd "Not Found" ~status:`Not_found
+    in
+    let with_h2_oauth_base_path f =
+      with_h2_oauth (fun () ->
+        match get_server_state_result () with
+        | Ok state -> f (Mcp_server.workspace_config state).base_path
+        | Error _ -> h2_respond_oauth_error Auth_oauth.Temporarily_unavailable)
+    in
+    let with_h2_oauth_authorize_context f =
+      with_h2_oauth (fun () ->
+        match get_server_state_result () with
+        | Ok state ->
+          f
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            ~fetch_client_metadata:(Server_oauth_client_metadata_fetch.of_server_state state)
+        | Error _ -> h2_respond_oauth_error Auth_oauth.Temporarily_unavailable)
+    in
+    let h2_respond_oauth_form ?(status = `OK) ?error authorization_request =
+      h2_respond_html
+        h2_reqd
+        (Server_oauth_service.render_authorization_form ?error authorization_request)
+        ~status
+        ~extra_headers:(Server_oauth_service.authorization_form_headers authorization_request)
+    in
+    let h2_respond_oauth_redirect location =
+      h2_respond_empty
+        h2_reqd
+        ~status:`Found
+        ~extra_headers:
+          [ "location", location; "cache-control", "no-store" ]
+    in
+    let h2_read_oauth_body callback =
+      let with_authority work =
+        Server_request_authority.with_current request_authority work
+      in
+      Server_h2_gateway_helpers.h2_read_body_with_limit ~sw:request_sw
+        ~max_bytes:Server_oauth_service.max_request_body_bytes
+        ~on_too_large:(fun () -> with_authority (fun () ->
+          h2_respond_oauth_error
+            (Auth_oauth.Invalid_request "request body is too large")))
+        ~on_bad_request:(fun () -> with_authority (fun () ->
+          h2_respond_oauth_error
+            (Auth_oauth.Invalid_request "malformed request body length")))
+        h2_reqd (fun body -> with_authority (fun () -> callback body))
+    in
+    let h2_respond_agent_rate_limited h2_reqd ~rl_key =
+      h2_respond_json h2_reqd
+        (Rate_limit.too_many_agent_requests_body ())
+        ~status:`Too_many_requests
+        ~extra_headers:(Rate_limit.headers_agent_global ~key:rl_key @ cors);
+      Transport_metrics.record_http_rate_limit_response
+        ~acceptance:Transport_metrics.Accepted_by_writer
+        ~protocol:Transport_metrics.H2
+        ~scope:Transport_metrics.Agent
+    in
+    (* No default, for the reason [Server_auth.check_agent_rate_limit] has
+       none: the token-permission wrapper below took it and metered the H2
+       twin of a GET its H1 wrapper exempts. *)
+    let h2_check_agent_rate_limit ~quota h2_reqd =
+      match quota, agent_rl_key_of_request httpun_request with
+      | Exempt_observation, _ -> Ok ()
+      | Metered_operation, None -> Ok ()
+      | Metered_operation, Some rl_key ->
+          if Rate_limit.check_agent_global ~key:rl_key then Ok ()
+          else (
+            h2_respond_agent_rate_limited h2_reqd ~rl_key;
+            Error ())
+    in
+    let with_h2_public_read h2_reqd f =
+      let with_initialized_state f =
+        match ready_server_state () with
+        | Some state -> f state
+        | None ->
+            h2_respond_json h2_reqd
+              (not_initialized_response path)
+              ~status:(not_initialized_status :> H2.Status.t)
+              ~extra_headers:(not_initialized_headers @ cors)
+      in
+      if http_auth_strict_enabled () && not (is_public_read_path path)
+      then
+        with_initialized_state (fun state ->
+          match
+            authorize_read_request
+              ~base_path:(Mcp_server.workspace_config state).base_path
+              httpun_request
+          with
+          | Ok () ->
+              (match h2_check_agent_rate_limit
+                       ~quota:(read_request_quota httpun_request.Httpun.Request.meth)
+                       h2_reqd with
+               | Ok () -> f state
+               | Error () -> ())
+          | Error err -> h2_respond_auth_error h2_reqd err)
+      else with_initialized_state f
+    in
+    let with_h2_token_permission_auth h2_reqd ~permission f =
+      with_server_state h2_reqd (fun state ->
+        match
+          authorize_token_bound_permission_request
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            ~permission
+            httpun_request
+        with
+        | Ok agent_name ->
+            (match h2_check_agent_rate_limit
+                     ~quota:(read_request_quota httpun_request.Httpun.Request.meth)
+                     h2_reqd with
+             | Ok () -> f state agent_name
+             | Error () -> ())
+        | Error err -> h2_respond_auth_error h2_reqd err)
+    in
+    (* H2 counterpart of [Server_auth.with_read_auth]: authorize on every
+       request, with no [http_auth_strict_enabled] / [is_public_read_path]
+       precondition. [with_h2_public_read] applies those preconditions and is
+       therefore NOT interchangeable — a route the H1 side guards with
+       [with_read_auth] must use this one, or the same path enforces different
+       authorization depending on which transport the client negotiated. *)
+    let with_h2_read_auth h2_reqd f =
+      with_server_state h2_reqd (fun state ->
+        match
+          authorize_read_request
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            httpun_request
+        with
+        | Ok () ->
+            (match h2_check_agent_rate_limit
+                     ~quota:(read_request_quota httpun_request.Httpun.Request.meth)
+                     h2_reqd with
+             | Ok () -> f state
+             | Error () -> ())
+        | Error err -> h2_respond_auth_error h2_reqd err)
+    in
+    (* The kind of this request, as the HTTP/1 router recorded it when the route
+       was registered. An arm does not name a kind: it runs the gate that goes
+       with the one the table holds, so HTTP/1 and HTTP/2 cannot give a path two
+       kinds. [with_h2_public_read], [with_h2_read_auth] and
+       [with_h2_token_permission_auth] are called by the gates below and by the
+       arms under a [Subpath_dispatch] prefix, whose sub-routes have no kind in
+       the table. The table is read at the first gate, so a request that runs
+       none (a preflight, the 404 fallback) does not look the path up. *)
+    let route_access =
+      lazy
+        (Server_h2_route_gate.access_of_resolution
+           (Http_server_eio.Router.resolve routes httpun_request))
+    in
+    let h2_respond_gate_refusal h2_reqd refusal =
+      match refusal with
+      | Server_h2_route_gate.No_route ->
+          h2_respond_text h2_reqd (Printf.sprintf "404 Not Found: %s" path)
+            ~status:`Not_found ~extra_headers:cors
+      | Server_h2_route_gate.Wrong_method ->
+          h2_respond_text h2_reqd "405 Method Not Allowed"
+            ~status:`Method_not_allowed ~extra_headers:cors
+      | Server_h2_route_gate.Kind_not_served _ | Server_h2_route_gate.Actor_not_provided _ ->
+          Log.Http.error "h2 route gate refused %s: %s" path
+            (Server_h2_route_gate.refusal_to_string refusal);
+          h2_respond_text h2_reqd
+            "500 Internal Server Error: the route table and this HTTP/2 route disagree about who may call it"
+            ~status:`Internal_server_error ~extra_headers:cors
+    in
+    (* For an arm that needs nothing from its gate. *)
+    let h2_gate_unit h2_reqd f =
+      match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
+      | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+      | Ok Server_h2_route_gate.Open -> f ()
+      | Ok Server_h2_route_gate.Public_read -> with_h2_public_read h2_reqd (fun _state -> f ())
+      | Ok Server_h2_route_gate.Read_auth -> with_h2_read_auth h2_reqd (fun _state -> f ())
+      | Ok (Server_h2_route_gate.Token_permission permission) ->
+          with_h2_token_permission_auth h2_reqd ~permission (fun _state _actor -> f ())
+    in
+    (* For an arm that takes the server state. *)
+    let h2_gate_state h2_reqd f =
+      match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
+      | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+      | Ok Server_h2_route_gate.Open -> with_server_state h2_reqd f
+      | Ok Server_h2_route_gate.Public_read -> with_h2_public_read h2_reqd f
+      | Ok Server_h2_route_gate.Read_auth -> with_h2_read_auth h2_reqd f
+      | Ok (Server_h2_route_gate.Token_permission permission) ->
+          with_h2_token_permission_auth h2_reqd ~permission (fun state _actor -> f state)
+    in
+    (* For an arm that takes the authenticated actor: only a kind bound to a
+       token provides one. *)
+    let h2_gate_actor h2_reqd f =
+      match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan_actor with
+      | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+      | Ok permission -> with_h2_token_permission_auth h2_reqd ~permission f
+    in
+    (* H1's token and public wrappers also bind optional GET workspace query
+       preconditions. The global ingress guard only checks request headers. *)
+    let with_artifact_read_workspace state f =
+      match validate_read_workspace_precondition
+              ~config:(Mcp_server.workspace_config state) httpun_request with
+      | Ok Workspace_read_unbound -> f []
+      | Ok Workspace_read_matched -> f [Workspace.read_precondition_admission_header]
+      | Error error ->
+        let json, status = read_workspace_precondition_error_response error in
+        h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+          ~extra_headers:cors
+    in
+    (* The artifact module names the permission each of its routes needs. The
+       gateway does not take that as a kind: it runs the gate that goes with the
+       kind the HTTP/1 router recorded for the path. A route on which the two
+       disagree is refused, so the module cannot give a path a second kind. *)
+    let h2_artifact_kind_disagrees h2_reqd =
+      Log.Http.error "h2 artifact route and route table disagree about %s" path;
+      h2_respond_text h2_reqd
+        "500 Internal Server Error: the route table and this HTTP/2 route disagree about who may call it"
+        ~status:`Internal_server_error ~extra_headers:cors
+    in
+    let artifact_admission : Server_h2_artifact_routes.admission =
+      { with_token = (fun ~permission f ->
+          match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan_actor with
+          | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+          | Ok table_permission when table_permission <> permission ->
+            h2_artifact_kind_disagrees h2_reqd
+          | Ok _ ->
+            with_h2_token_permission_auth h2_reqd ~permission (fun state actor ->
+              with_artifact_read_workspace state (fun headers -> f state actor headers)))
+      ; with_public = (fun f ->
+          match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
+          | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+          | Ok Server_h2_route_gate.Public_read ->
+            with_h2_public_read h2_reqd (fun state ->
+              with_artifact_read_workspace state (fun headers ->
+                match authorize_optional_token_bound_permission_request
+                        ~base_path:(Mcp_server.workspace_config state).base_path
+                        ~permission:Masc_domain.CanAdmin httpun_request with
+                | Error error -> h2_respond_auth_error h2_reqd error
+                | Ok actor ->
+                  (match h2_check_agent_rate_limit
+                           ~quota:(read_request_quota httpun_request.Httpun.Request.meth) h2_reqd with
+                   | Error () -> ()
+                   | Ok () -> f state actor headers)))
+          | Ok Server_h2_route_gate.Open
+          | Ok Server_h2_route_gate.Read_auth
+          | Ok (Server_h2_route_gate.Token_permission _) ->
+            h2_artifact_kind_disagrees h2_reqd)
+      ; read_body = (fun f -> h2_read_body h2_reqd f)
+      ; refuse_auth = h2_respond_auth_error h2_reqd
+      }
+    in
+    let h2_respond_board_reaction_result h2_reqd = function
+      | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+      | Error error ->
+        h2_respond_json_value
+          h2_reqd
+          (Server_board_reaction_http.error_json error)
+          ~status:(Server_board_reaction_http.error_status error :> H2.Status.t)
+          ~extra_headers:cors
+    in
+    let session_id_opt = get_session_id_any httpun_request in
+    let h2_respond_dashboard_index () =
+      match Web_dashboard.load_dashboard_asset "index.html" with
+      | Ok body ->
+          let etag_value = "\"" ^ dashboard_etag_of_body body ^ "\"" in
+          let if_none_match = H2.Headers.get h2_headers "if-none-match" in
+          (match if_none_match with
+           | Some inm when String.equal inm etag_value ->
+               let resp_headers = H2.Headers.of_list ([
+                 ("etag", etag_value); ("cache-control", dashboard_index_cache_control);
+               ] @ cors) in
+               let response = H2.Response.create ~headers:resp_headers `Not_modified in
+               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
+               h2_close_after_flush writer
+           | _ ->
+               let extra = [("etag", etag_value); ("cache-control", dashboard_index_cache_control); ("vary", "Accept-Encoding")] @ cors in
+               h2_respond_html h2_reqd body ~extra_headers:extra)
+      | Error _ ->
+          h2_respond_html
+            h2_reqd
+            "<html><body>Dashboard assets unavailable. Inspect /health dashboard_surface.recovery.</body></html>"
+            ~status:`Service_unavailable
+            ~extra_headers:cors
+    in
+
+    let _h2_authorize_tool state ~tool_name =
+      authorize_tool_request
+        ~base_path:(Mcp_server.workspace_config state).base_path
+        ~tool_name ~request_authority httpun_request
+    in
+
+    (* The H1 ingress charges every request against the per-client-IP bucket
+       before it reaches a route. This handler took the address and threw it
+       away, so nothing on H2 had that limit -- and the observation routes this
+       lane exempts from the per-agent bucket were then unlimited on the
+       transport a client gets by default. Probe exemptions come from the same
+       SSOT the H1 ingress reads, so a renamed probe stays exempt in both. *)
+    let client_ip_rate_limited () =
+      if String.equal path "/health" || Server_health_paths.is_public path
+      then false
+      else
+        let rl_key = Rate_limit.key_of_sockaddr client_addr in
+        if Rate_limit.check_global ~key:rl_key then false
+        else begin
+          h2_respond_json
+            h2_reqd
+            (Rate_limit.too_many_requests_body ())
+            ~status:`Too_many_requests
+            ~extra_headers:(Rate_limit.headers_global ~key:rl_key @ cors);
+          Transport_metrics.record_http_rate_limit_response
+            ~acceptance:Transport_metrics.Accepted_by_writer
+            ~protocol:Transport_metrics.H2
+            ~scope:Transport_metrics.Client_ip;
+          true
+        end
+    in
+    let dispatch_h2_route () =
+      match httpun_meth, path with
+      (* ─────────────────────────────────────────────────────────────────────
+         Health & Metrics
+         ───────────────────────────────────────────────────────────────────── *)
+      | `GET, "/health" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          let body, timing_headers =
+            Server_routes_http_runtime.make_health_response_body
+              ~listener:"h2"
+              ~request_authority
+              httpun_request
+          in
+          h2_respond_json h2_reqd body ~extra_headers:(cors @ timing_headers)
+
+      | `GET, p when String.equal p Server_health_paths.liveness ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          let json =
+            `Assoc [
+              ("live", `Bool true);
+              ("startup", Server_startup_state.to_yojson ());
+            ]
+          in
+          h2_respond_json_value h2_reqd json ~extra_headers:cors
+
+      | `GET, p when String.equal p Server_health_paths.readiness ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          let current = Server_startup_state.snapshot () in
+          let json, status =
+            if Option.is_some (ready_server_state ()) then
+              (`Assoc [
+                 ("ready", `Bool true);
+                 ("phase", `String (Server_startup_state.phase_to_string current.phase));
+               ],
+               `OK)
+            else
+              (`Assoc [
+                 ("ready", `Bool false);
+                 ("phase", `String (Server_startup_state.phase_to_string current.phase));
+                 ("elapsed_sec", `Float (Server_startup_state.elapsed_since_start ()));
+               ],
+               `Service_unavailable)
+          in
+          h2_respond_json_value ~status h2_reqd json ~extra_headers:cors
+
+      | `GET, ("/.well-known/agent.json" | "/.well-known/agent-card.json") ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          h2_respond_json_value h2_reqd
+            (Server_routes_http_runtime.agent_card_json
+               ~request_authority
+               httpun_request)
+            ~extra_headers:cors
+
+      | `GET,
+        ( "/.well-known/oauth-protected-resource"
+        | "/.well-known/oauth-protected-resource/mcp"
+        | "/mcp/.well-known/oauth-protected-resource" ) ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          with_h2_oauth (fun () ->
+            h2_respond_json_value
+              h2_reqd
+              (Server_oauth_metadata.protected_resource_json request_authority)
+              ~extra_headers:[ "cache-control", "no-store" ])
+
+      | `GET, "/.well-known/oauth-authorization-server" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          with_h2_oauth (fun () ->
+            h2_respond_json_value
+              h2_reqd
+              (Server_oauth_metadata.authorization_server_json request_authority)
+              ~extra_headers:[ "cache-control", "no-store" ])
+
+      | `GET, "/oauth/authorize" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          with_h2_oauth_base_path (fun base_path ->
+            match
+              Server_oauth_service.authorize_get
+                ~base_path
+                ~authority:request_authority
+                ~target:httpun_request.Httpun.Request.target
+            with
+            | Error error -> h2_respond_oauth_error error
+            | Ok authorization_request ->
+              h2_respond_oauth_form authorization_request)
+
+      | `POST, "/oauth/authorize" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          with_h2_oauth_authorize_context (fun ~base_path ~fetch_client_metadata ->
+            match
+              ensure_same_origin_browser_request
+                ~request_authority
+                httpun_request
+            with
+            | Error error -> h2_respond_auth_error h2_reqd error
+            | Ok () ->
+              h2_read_oauth_body (fun body ->
+                match
+                  Server_oauth_service.authorize_post
+                    ~base_path
+                    ~authority:request_authority
+                    ~fetch_client_metadata
+                    ~body
+                with
+                | Error error -> h2_respond_oauth_error error
+                | Ok
+                    (Server_oauth_service.Authorization_form_error
+                      { status; message; request = authorization_request }) ->
+                  h2_respond_oauth_form
+                    ~status:(status :> H2.Status.t)
+                    ~error:message
+                    authorization_request
+                | Ok (Server_oauth_service.Authorization_redirect location) ->
+                  h2_respond_oauth_redirect location))
+
+      | `POST, "/oauth/register" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          with_h2_oauth_base_path (fun base_path ->
+            match
+              ensure_same_origin_if_browser_request
+                ~request_authority
+                httpun_request
+            with
+            | Error error -> h2_respond_auth_error h2_reqd error
+            | Ok () ->
+              h2_read_oauth_body (fun body ->
+                match Server_oauth_service.register_client ~base_path body with
+                | Error error -> h2_respond_oauth_error error
+                | Ok client ->
+                  Log.Misc.info "oauth_http: dynamic client registered";
+                  h2_respond_json_value
+                    h2_reqd
+                    (Server_oauth_service.registered_client_json client)
+                    ~status:`Created
+                    ~extra_headers:[ "cache-control", "no-store" ]))
+
+      | `POST, "/oauth/token" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          with_h2_oauth_base_path (fun base_path ->
+            match
+              ensure_same_origin_if_browser_request
+                ~request_authority
+                httpun_request
+            with
+            | Error error -> h2_respond_auth_error h2_reqd error
+            | Ok () ->
+              h2_read_oauth_body (fun body ->
+                match
+                  Server_oauth_service.token
+                    ~base_path
+                    ~authority:request_authority
+                    ~body
+                with
+                | Error error -> h2_respond_oauth_error error
+                | Ok pair ->
+                  Log.Misc.info "oauth_http: token grant completed";
+                  h2_respond_json_value
+                    h2_reqd
+                    (Server_oauth_service.token_pair_json pair)
+                    ~extra_headers:
+                      [ "cache-control", "no-store"; "pragma", "no-cache" ]))
+
+      | `GET, "/ws" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          let json =
+            Server_routes_http_runtime.websocket_discovery_json
+              ~request_authority
+              httpun_request
+          in
+          h2_respond_json_value h2_reqd json ~extra_headers:cors
+
+      (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics
+         now export via OTLP push (Otel_metrics observable). *)
+      | `GET, "/" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
+
+      | `GET, "/favicon.ico" | `GET, "/favicon.svg" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          h2_respond_bytes
+            h2_reqd
+            favicon_svg
+            ~content_type:"image/svg+xml"
+            ~extra_headers:cors
+
+      (* ─────────────────────────────────────────────────────────────────────
+         CORS Preflight
+         ───────────────────────────────────────────────────────────────────── *)
+      | `OPTIONS, _ ->
+          let headers =
+            match reflected_cors_origin with
+            | Some reflected -> cors_preflight_headers reflected
+            | None -> [ "vary", "Origin" ]
+          in
+          h2_respond_empty h2_reqd ~extra_headers:headers
+
+      (* ─────────────────────────────────────────────────────────────────────
+         MCP Endpoints
+         ───────────────────────────────────────────────────────────────────── *)
+      | `POST, "/mcp"
+      | `POST, "/"
+      | `POST, "/mcp/managed"
+      | `POST, "/mcp/operator"
+      | `POST, "/mcp/play" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          let session_id_opt =
+            if Server_mcp_transport_http_headers.header_selects_per_request_protocol
+                 httpun_request
+            then None
+            else session_id_opt
+          in
+          let session_id = match session_id_opt with
+            | Some id -> id
+            | None -> Mcp_session.generate ()
+          in
+          let profile = profile_for_mcp_path path in
+          (* HTTP-level auth check for MCP endpoints *)
+          let base_path = match current_server_state () with
+            | Some s -> (Mcp_server.workspace_config s).base_path
+            | None -> default_base_path ()
+          in
+          let context =
+            Server_mcp_request_context.make ~session_id_opt
+              ~generated_session_id:session_id
+              ~auth_token:(auth_token_from_request httpun_request)
+              ~protocol_version:
+                (get_protocol_version_for_session ~session_id httpun_request)
+              ~origin ~base_path
+          in
+          let session_id = context.session_id in
+          let auth_token = context.auth_token in
+          let protocol_version = context.protocol_version in
+          let auth_started = Mtime_clock.elapsed_ns () in
+          let auth_result =
+            match profile with
+            | Server_mcp_transport_http.Full
+            | Server_mcp_transport_http.Managed_agent ->
+                verify_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+            | Server_mcp_transport_http.Operator_remote ->
+                verify_operator_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+            | Server_mcp_transport_http.Seat ->
+                verify_seat_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+          in
+          let auth_ms =
+            Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) auth_started) /. 1e6
+          in
+          let respond_auth_failure failure =
+            Server_mcp_transport_http_respond.record_mcp_auth_reject
+              ~endpoint:("h2 POST " ^ Server_mcp_transport_http.profile_label profile)
+              ~claimed_agent:(agent_from_request httpun_request)
+              ~token_presented:(Option.is_some auth_token)
+              ~session_id:(Some session_id) failure;
+            let body = mcp_auth_error_body failure in
+            h2_respond_json h2_reqd body ~status:`Unauthorized
+              ~extra_headers:
+                (("www-authenticate", Server_oauth_metadata.challenge_for_authority
+                    request_authority) :: cors)
+          in
+          (match validate_mcp_session_profile ~profile session_id with
+           | Error msg ->
+               let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+               h2_respond_json h2_reqd body ~status:`Conflict ~extra_headers:cors
+           | Ok () ->
+               (match Server_mcp_transport_http.validate_protocol_version_continuity
+                        ~session_id httpun_request with
+                | Error rejection ->
+                    (match auth_result with
+                     | Error failure -> respond_auth_failure failure
+                     | Ok _ -> h2_read_body h2_reqd (fun request_body ->
+                      let body =
+                        match
+                          Server_mcp_transport_http_headers.validate_2026_request_headers
+                            httpun_request request_body
+                        with
+                        | Error header_error ->
+                          Server_mcp_transport_http_headers.header_rejection_body
+                            request_body header_error
+                        | Ok () ->
+                          Server_mcp_transport_http
+                          .protocol_version_rejection_body_for_request
+                            ~request_body rejection
+                      in
+                      h2_respond_json h2_reqd body ~status:`Bad_request
+                        ~extra_headers:(cors @ mcp_headers session_id protocol_version)))
+                | Ok () ->
+                    (match auth_result with
+                     | Error failure -> respond_auth_failure failure
+                     | Ok _cred_opt ->
+                         h2_read_body h2_reqd (fun body_str ->
+                             match
+                               Server_mcp_request_context.decide_post_body
+                                 ~request:httpun_request ~context
+                                 ~session_is_known:
+                                   (Server_mcp_transport_http.is_known_session
+                                      session_id)
+                                 body_str
+                             with
+                             | Error
+                                 (Server_mcp_request_context.Session_required msg)
+                               ->
+                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg
+                                   |> Server_mcp_transport_http_session.correlate_error_body_to_request
+                                        ~request_body:body_str in
+                                 h2_respond_json h2_reqd body
+                                   ~status:`Bad_request
+                                   ~extra_headers:
+                                     (cors
+                                     @ mcp_headers session_id
+                                         protocol_version)
+                             | Error
+                                 (Server_mcp_request_context.Unknown_session msg)
+                               ->
+                                  let new_session_id = Mcp_session.generate () in
+                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg
+                                    |> Server_mcp_transport_http_session.correlate_error_body_to_request
+                                         ~request_body:body_str in
+                                  h2_respond_json h2_reqd body
+                                    ~status:`Not_found
+                                    ~extra_headers:
+                                      (cors
+                                      @ mcp_headers new_session_id
+                                          protocol_version)
+                             | Error
+                                 (Server_mcp_request_context.Invalid_accept msg)
+                               ->
+                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg
+                                   |> Server_mcp_transport_http_session.correlate_error_body_to_request
+                                        ~request_body:body_str in
+                                 h2_respond_json h2_reqd body ~status:`Bad_request
+                                   ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                             | Error
+                                 (Server_mcp_request_context.Header_mismatch rejection)
+                               ->
+                                 let body =
+                                   Server_mcp_transport_http_headers.header_rejection_body body_str
+                                     rejection
+                                 in
+                                 h2_respond_json h2_reqd body ~status:`Bad_request
+                                   ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                             | Ok post_context ->
+                                 let stateless_request =
+                                   Server_mcp_transport_http_headers
+                                   .request_uses_stateless_protocol
+                                     httpun_request post_context.body_str
+                                 in
+                                 if not stateless_request then (
+                                   let otel_transport_context =
+                                     Otel_dispatch_hook.http_transport_context
+                                       ~protocol_version:"2"
+                                   in
+                                   remember_mcp_profile ~otel_transport_context
+                                     session_id profile);
+                                 with_server_state h2_reqd (fun state ->
+                                 (match
+                                    if Server_oauth_metadata.loopback_authority request_authority then
+                                      Auth_oauth.with_expected_resource
+                                        (Server_oauth_metadata.resource request_authority)
+                                        (fun () ->
+                                          Server_oauth_step_up.required_scope ~base_path
+                                            ~auth_token ~body:body_str
+                                            ~allowed_tool:
+                                              (Server_mcp_transport_http.tool_allowed_in_profile
+                                                 state profile))
+                                    else None
+                                  with
+                                  | Some scope ->
+                                      let auth_cors =
+                                        Server_mcp_transport_http.scope_challenge_cors_headers
+                                          ~request_authority httpun_request
+                                      in
+                                      let body =
+                                        Mcp_error_code.jsonrpc_error_body_with_id
+                                          Mcp_error_code.Insufficient_scope
+                                          ~id:(Option.value
+                                            ~default:`Null
+                                            (Server_mcp_transport_http.body_jsonrpc_id body_str))
+                                          ~message:(Printf.sprintf
+                                             "This tool needs the OAuth scope %s."
+                                             (Auth_oauth.scope_to_string scope))
+                                      in
+                                      h2_respond_json h2_reqd body ~status:`Forbidden
+                                        ~extra_headers:
+                                          (( "www-authenticate"
+                                           , Server_oauth_metadata
+                                             .insufficient_scope_challenge
+                                               request_authority scope )
+                                          :: (auth_cors
+                                             @ mcp_headers session_id protocol_version))
+                                  | None ->
+                                   let serves_listen =
+                                     Server_mcp_transport_http
+                                     .serves_subscriptions_listen ~profile
+                                       post_context.body_str
+                                   in
+                                   let profile =
+                                     mcp_eio_profile_of_transport_profile profile
+                                   in
+                                   let timing = Server_timing.create () in
+                                   Server_timing.record_ms timing Mcp_http_auth auth_ms;
+                                   let response_json =
+                                     let otel_transport_context =
+                                       Otel_dispatch_hook.http_transport_context
+                                         ~protocol_version:"2"
+                                     in
+                                     let expected_resource =
+                                       Server_oauth_metadata.resource request_authority
+                                     in
+                                     Auth_oauth.with_expected_resource
+                                       expected_resource
+                                       (fun () ->
+                                         let body_with_agent, internal_keeper_runtime =
+                                           Server_timing.measure timing Mcp_identity (fun () ->
+                                             let body_with_agent =
+                                               Server_mcp_transport_http.body_with_canonical_http_actor
+                                                 ~base_path ~auth_token httpun_request
+                                                 post_context.body_str
+                                             in
+                                             let internal_keeper_runtime =
+                                               Server_auth.is_verified_internal_keeper_request
+                                                 ~base_path httpun_request
+                                             in
+                                             body_with_agent, internal_keeper_runtime)
+                                         in
+                                         Server_timing.measure timing Mcp_dispatch (fun () ->
+                                           Mcp_eio.handle_request ~clock ~sw ~profile
+                                             ?mcp_session_id:
+                                               (if stateless_request then None
+                                                else Some session_id) ?auth_token
+                                             ~otel_mcp_protocol_version:protocol_version
+                                             ~otel_transport_context
+                                             ~internal_keeper_runtime state
+                                             body_with_agent))
+                                   in
+                                   let otel_transport_context =
+                                     Otel_dispatch_hook.http_transport_context
+                                       ~protocol_version:"2"
+                                   in
+                                   remember_protocol_version_if_initialize_succeeded
+                                     ~otel_transport_context
+                                     session_id
+                                     ~request_body:post_context.body_str
+                                     ~response_json;
+                                   let protocol_version =
+                                     get_protocol_version_for_session ~session_id
+                                       httpun_request
+                                   in
+                                   let mcp_hdrs =
+                                     mcp_headers session_id protocol_version @ cors
+                                     @ Server_timing.extra_header timing
+                                   in
+                                   if serves_listen
+                                      && (match response_json with
+                                          | `Assoc fields -> List.mem_assoc "result" fields
+                                          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+                                          | `String _ | `List _ -> false)
+                                   then
+                                     serve_subscriptions_listen_h2 ~sw:request_sw ~clock
+                                       ~cors ~body_str:post_context.body_str h2_reqd
+                                   else match response_json with
+                                   | `Null ->
+                                       h2_respond_empty h2_reqd ~status:`Accepted
+                                         ~extra_headers:mcp_hdrs
+                                   | json ->
+                                       (match
+                                          Server_mcp_transport_http_headers
+                                          .modern_response_http_error_status
+                                            ~request:httpun_request
+                                            ~body_str:post_context.body_str json
+                                        with
+                                        | Some status ->
+                                          h2_respond_json_value h2_reqd json
+                                            ~status:(status :> H2.Status.t)
+                                            ~extra_headers:mcp_hdrs
+                                        | None when Mcp_error_code.is_http_error_response json ->
+                                          h2_respond_json_value h2_reqd json ~status:`Bad_request
+                                            ~extra_headers:mcp_hdrs
+                                        | None ->
+                                          h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))))
+
+      | `DELETE, "/mcp"
+      | `DELETE, "/mcp/managed"
+      | `DELETE, "/mcp/operator"
+      | `DELETE, "/mcp/play" ->
+          h2_gate_unit h2_reqd @@ fun () ->
+          let profile = profile_for_mcp_path path in
+          let base_path = match current_server_state () with
+            | Some s -> (Mcp_server.workspace_config s).base_path
+            | None -> default_base_path ()
+          in
+          let auth_result =
+            match profile with
+            | Server_mcp_transport_http.Full
+            | Server_mcp_transport_http.Managed_agent ->
+                verify_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+            | Server_mcp_transport_http.Operator_remote ->
+                verify_operator_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+            | Server_mcp_transport_http.Seat ->
+                verify_seat_mcp_auth ~base_path httpun_request
+                |> Result.map_error
+                     Server_mcp_transport_http_types.auth_failure_of_masc_error
+          in
+          (match auth_result with
+           | Error failure ->
+               Server_mcp_transport_http_respond.record_mcp_auth_reject
+                 ~endpoint:
+                   ("h2 DELETE "
+                   ^ Server_mcp_transport_http.profile_label profile)
+                 ~claimed_agent:(agent_from_request httpun_request)
+                 ~token_presented:
+                   (Option.is_some (auth_token_from_request httpun_request))
+                 ~session_id:session_id_opt failure;
+               let body = mcp_auth_error_body failure in
+               h2_respond_json h2_reqd body ~status:`Unauthorized
+                 ~extra_headers:
+                   (( "www-authenticate"
+                    , Server_oauth_metadata.challenge_for_authority
+                        request_authority )
+                    :: cors)
+           | Ok _ ->
+               (match session_id_opt with
+                | Some session_id -> (
+                    match validate_mcp_session_delete_profile ~profile session_id with
+                    | Error msg ->
+                        let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                        h2_respond_json h2_reqd body ~status:`Conflict
+                          ~extra_headers:cors
+                    | Ok () ->
+                        (match Server_mcp_transport_http.validate_protocol_version_continuity
+                                 ~session_id httpun_request with
+                         | Error rejection ->
+                             let body =
+                               Server_mcp_transport_http
+                               .protocol_version_rejection_body rejection
+                             in
+                             h2_respond_json h2_reqd body ~status:`Bad_request
+                               ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
+                         | Ok () ->
+                             let protocol_version =
+                               get_protocol_version httpun_request
+                             in
+                             let sse_active_before_stop =
+                               Server_mcp_transport_http.is_active_sse_session
+                                 session_id
+                             in
+                             stop_sse_session session_id;
+                             Sse.unregister session_id;
+                             forget_mcp_session session_id;
+                             Log.H2_gateway.info "Session terminated: %s reason=client_delete \
+                                profile=%s protocol_version=%s \
+                                sse_active_before_stop=%b"
+                               session_id
+                               (Server_mcp_transport_http.profile_label profile)
+                               protocol_version sse_active_before_stop;
+                             let mcp_hdrs =
+                               mcp_headers session_id protocol_version
+                             in
+                             h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs))
+                | None ->
+                    h2_respond_text h2_reqd "Mcp-Session-Id required" ~status:`Bad_request ~extra_headers:cors))
+
+      (* ─────────────────────────────────────────────────────────────────────
+         Dashboard
+         ───────────────────────────────────────────────────────────────────── *)
+      | `GET, "/dashboard" | `GET, "/dashboard/" ->
+          h2_gate_state h2_reqd (fun _state -> h2_respond_dashboard_index ())
+
+      | `GET, p when is_dashboard_spa_deep_link p ->
+          h2_gate_state h2_reqd (fun _state -> h2_respond_dashboard_index ())
+
+      (* ─────────────────────────────────────────────────────────────────────
+         GraphQL
+         ───────────────────────────────────────────────────────────────────── *)
+      (* Both arms carry the same read gate the H1 route applies
+         (server_routes_http_routes_frontend.ml wraps GET and POST /graphql in
+         [with_read_auth]). /graphql is not in [is_public_read_path], so an
+         unauthenticated caller must be rejected on either transport. *)
+      | `GET, (("/api/v1/lane-addons/package-catalog" | "/api/v1/lane-addons/package-preview") as package_path) ->
+          h2_gate_state h2_reqd (fun state ->
+            let module Packages = Server_routes_http_routes_lane_addons in
+            let fields = Packages.query_fields httpun_request in
+            let result = match package_path with
+              | "/api/v1/lane-addons/package-catalog" -> Packages.package_catalog_payload state fields
+              | _ -> Packages.package_preview_payload state fields in
+            match result with
+            | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+            | Error detail -> h2_respond_json_value h2_reqd
+                (`Assoc ["error",`String detail]) ~status:`Bad_request ~extra_headers:cors)
+
+      | `GET, "/graphql" ->
+          h2_gate_state h2_reqd (fun _state ->
+            let nonce = fresh_graphql_csp_nonce () in
+            let csp_header = ("content-security-policy", graphql_csp_header nonce) in
+            h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors))
+
+      (* The gate runs before the body is read, as on H1 where [with_read_auth]
+         wraps [handle_post_graphql]; otherwise a client that will be refused
+         still gets the server to buffer its whole body first. *)
+      | `POST, "/graphql" ->
+          h2_gate_state h2_reqd (fun state ->
+            h2_read_body h2_reqd (fun body_str ->
+              let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in
+              let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
+              h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))
+
+      (* ─────────────────────────────────────────────────────────────────────
+         REST API
+         ───────────────────────────────────────────────────────────────────── *)
+      | `GET, "/api/v1/dashboard" ->
+          h2_gate_state h2_reqd (fun _state ->
+            let json =
+              `Assoc
+                [
+                  ("error", `String "dashboard batch contract removed");
+                  ("message", `String "Use /api/v1/dashboard/shell and surface-specific projection endpoints.");
+                ]
+            in
+            h2_respond_json_value h2_reqd json
+              ~status:`Gone ~extra_headers:cors)
+
+      | `GET, p when p = Server_dashboard_http_hitl_recover.uncertain_path ->
+          with_h2_token_permission_auth h2_reqd
+            ~permission:Server_dashboard_http_hitl_recover.permission (fun state _actor ->
+              let status, body = Server_dashboard_http_hitl_recover.uncertain_response state in
+              h2_respond_json_value h2_reqd body ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `GET, p when Option.is_some (Server_dashboard_http_keeper_child_content.route p) ->
+          (match Server_dashboard_http_keeper_child_content.route p with
+           | None -> h2_respond_json_value h2_reqd
+               (`Assoc ["error", `String "invalid_child_content_route"])
+               ~status:`Bad_request ~extra_headers:cors
+           | Some route ->
+               with_h2_token_permission_auth h2_reqd
+                 ~permission:Server_dashboard_http_keeper_child_content.permission
+                 (fun state _agent_name ->
+                   let status, json = Server_dashboard_http_keeper_child_content.response
+                     state httpun_request route in
+                   h2_respond_json_value h2_reqd json
+                     ~status:(status :> H2.Status.t) ~extra_headers:cors))
+
+      | `GET, p when Option.is_some (Server_dashboard_http_keeper_native_tasks.route p) ->
+          (match Server_dashboard_http_keeper_native_tasks.route p with
+           | None -> h2_respond_json_value h2_reqd
+               (`Assoc ["error", `String "invalid_native_task_route"])
+               ~status:`Bad_request ~extra_headers:cors
+           | Some route ->
+               with_h2_token_permission_auth h2_reqd
+                 ~permission:Server_dashboard_http_keeper_native_tasks.permission
+                 (fun state _agent_name ->
+                   let status, json = Server_dashboard_http_keeper_native_tasks.response
+                     state httpun_request route in
+                   h2_respond_json_value h2_reqd json
+                     ~status:(status :> H2.Status.t) ~extra_headers:cors))
+
+      | `GET, "/api/v1/dashboard/shell" ->
+          h2_gate_state h2_reqd (fun state ->
+            let light =
+              Server_utils.bool_query_param httpun_request "light" ~default:false
+            in
+            let json =
+              dashboard_shell_http_json ?clock:state.Mcp_server.clock
+                ~request:httpun_request ~light
+                (Mcp_server.workspace_config state)
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/fusion-runs" ->
+          h2_gate_state h2_reqd (fun _state ->
+            let json =
+              Server_dashboard_fusion_run_projection.list_response
+                ~generated_at:(Masc_domain.now_iso ())
+                ~registry:(Fusion_run_registry.global ())
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, p
+        when String.starts_with
+               ~prefix:Server_dashboard_fusion_run_projection.detail_prefix
+               p ->
+          h2_gate_state h2_reqd (fun _state ->
+            let status, json =
+              Server_dashboard_fusion_run_projection.detail_response
+                ~generated_at:(Masc_domain.now_iso ())
+                ~registry:(Fusion_run_registry.global ())
+                ~path
+            in
+            h2_respond_json_value
+              h2_reqd
+              json
+              ~status:(status :> H2.Status.t)
+              ~extra_headers:cors)
+
+      (* H1 serves this through [with_public_read]
+         (server_routes_http_routes_dashboard.ml). [with_server_state] only
+         fetches state; under MASC_HTTP_AUTH_STRICT it left the workspace
+         timeline readable over h2c while H1 demanded a token. *)
+      | `GET, "/api/v1/dashboard/workspace" ->
+          h2_gate_state h2_reqd (fun state ->
+            let limit =
+              Server_utils.int_query_param httpun_request "limit" ~default:50
+              |> Server_utils.clamp ~min_v:1 ~max_v:200
+            in
+            let me =
+              match trimmed_query_param httpun_request "me" with
+              | Some _ as value -> value
+              | None -> trimmed_query_param httpun_request "agent"
+            in
+            let json =
+              Dashboard_workspace.json ~config:(Mcp_server.workspace_config state) ?me
+                ~limit ()
+            in
+            h2_respond_json_value h2_reqd json
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/config" ->
+          h2_gate_state h2_reqd (fun _state ->
+            let json = Env_config_introspect.to_json () in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      (* Same owner and same shape as the HTTP/1 route; a client that reaches
+         the server over H2 must not see a different projection. *)
+      | `GET, "/api/v1/dashboard/scheduled-automation" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json =
+              dashboard_scheduled_automation_query_http_json
+                ~config:(Mcp_server.workspace_config state)
+                httpun_request
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      (* The tool inventory had no H2 route at all: an H2 client got 404 where
+         an HTTP/1 client got the inventory. Same selector as the HTTP/1 route,
+         so the snapshot fast path and exact Keeper projection both apply. *)
+      | `GET, "/api/v1/dashboard/tools" ->
+          h2_gate_state h2_reqd (fun state ->
+            let timing = Server_timing.create () in
+            let response =
+              Server_dashboard_snapshot_select.select_tools_response
+                ~timing
+                ?keeper:(Server_utils.query_param httpun_request "keeper")
+                (Mcp_server.workspace_config state)
+            in
+            let extra_headers = cors @ Server_timing.extra_header timing in
+            match response with
+            | Server_dashboard_snapshot_select.Tools_json json ->
+              h2_respond_json_value h2_reqd json ~extra_headers
+            | Tools_prepared tools ->
+              let body, headers = Http_response_payload.select_prepared
+                ~accept_encoding:(Httpun.Headers.get httpun_request.headers "accept-encoding")
+                tools.encoded in
+              let extra_headers = extra_headers @ headers
+                @ [ "etag", tools.etag;
+                    "cache-control", Http_server_eio.Response.json_revalidate_cache_control ] in
+              let unchanged =
+                match Httpun.Headers.get httpun_request.headers "if-none-match" with
+                | Some client_tag ->
+                  Http_server_eio.Response.client_tag_matches ~etag:tools.etag ~client_tag
+                | None -> false
+              in
+              if unchanged then
+                h2_respond_empty h2_reqd ~status:`Not_modified ~extra_headers
+              else h2_respond_json h2_reqd body ~compress:false ~extra_headers)
+
+      | `GET, "/api/v1/dashboard/skill-activations" ->
+          h2_gate_state h2_reqd (fun state ->
+            match trimmed_query_param httpun_request "trace_id" with
+            | None ->
+              h2_respond_json_value h2_reqd
+                (`Assoc [ "error", `String "trace_id query param is required" ])
+                ~status:`Bad_request ~extra_headers:cors
+            | Some raw_trace_id ->
+              (match
+                 Keeper_skill_activation_projection.resolve_trace_string
+                   ~config:(Mcp_server.workspace_config state)
+                   raw_trace_id
+               with
+               | Error detail ->
+                 h2_respond_json_value h2_reqd
+                   (`Assoc [ "error", `String detail ])
+                   ~status:`Bad_request ~extra_headers:cors
+               | Ok projection ->
+                 let json =
+                   Keeper_skill_activation_projection.trace_to_yojson projection
+                 in
+                 h2_respond_json_value h2_reqd json ~extra_headers:cors))
+
+      | `GET, "/api/v1/dashboard/project-snapshot" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json =
+              (* RFC-0138 Phase 3 Step 3 follow-up — route H/2 gateway
+                 through the snapshot selector for parity with the H/1
+                 router (see server_routes_http_routes_dashboard.ml).
+                 Without this, H/2 clients bypass Dashboard_snapshot
+                 entirely and the cold-start fallback claim is false. *)
+              Server_dashboard_snapshot_select.select_project_snapshot_json
+                ~state ~sw ~clock httpun_request
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/execution" ->
+          h2_gate_state h2_reqd (fun state ->
+            let respond_cached ~body ~etag ~headers =
+              let extra_headers =
+                cors @ headers
+                @ [ "etag", etag
+                  ; "cache-control", Http_server_eio.Response.json_revalidate_cache_control ]
+              in
+              let unchanged =
+                match Httpun.Headers.get httpun_request.headers "if-none-match" with
+                | Some client_tag ->
+                  Http_server_eio.Response.client_tag_matches ~etag ~client_tag
+                | None -> false
+              in
+              if unchanged then
+                h2_respond_empty h2_reqd ~status:`Not_modified ~extra_headers
+              else
+                h2_respond_json h2_reqd body ~compress:false ~extra_headers
+            in
+            let context = execution_http_request ~state httpun_request in
+            let response = match dashboard_execution_cached_http_response context with
+              | Some response -> response
+              | None -> dashboard_execution_http_response ~sw ~clock context in
+              (match response with
+               | Execution_json json ->
+                 h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors
+               | Execution_payload payload ->
+                 let body, headers = Dashboard_cache.select_http_representation
+                   ~accept_encoding:(Httpun.Headers.get httpun_request.headers "accept-encoding") payload in
+                 respond_cached ~body ~etag:payload.etag ~headers))
+
+      | `GET, "/api/v1/dashboard/execution-trust" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json =
+              dashboard_execution_trust_http_json ~state ~sw ~clock
+                httpun_request
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/board" ->
+          h2_gate_state h2_reqd (fun _state ->
+            let json = dashboard_memory_http_json httpun_request in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/gate" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json =
+              dashboard_gate_http_json httpun_request
+                ~base_path:(Mcp_server.workspace_config state).base_path
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/proof" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json =
+              dashboard_proof_http_json
+                ~config:(Mcp_server.workspace_config state) httpun_request
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/planning" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json =
+              dashboard_planning_http_json
+                ~config:(Mcp_server.workspace_config state)
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/bootstrap" ->
+          (* Same SSOT as the HTTP/1.1 router so the HTTP/2 client sees
+             the identical payload shape, slice list, and error
+             contract.  See [Server_dashboard_http.dashboard_bootstrap_http_json]. *)
+          h2_gate_state h2_reqd (fun state ->
+            let json =
+              dashboard_bootstrap_http_json ~state ~sw ~clock httpun_request
+            in
+            h2_respond_json_value_on_cpu h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/goals" ->
+          h2_gate_state h2_reqd (fun state ->
+            let payload =
+              cached_goals_tree_payload ~config:(Mcp_server.workspace_config state)
+            in
+            h2_respond_json_value h2_reqd payload.json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/goals/detail" ->
+          h2_gate_state h2_reqd (fun state ->
+            let goal_id =
+              match Server_utils.query_param httpun_request "goal_id" with
+              | Some value -> String.trim value
+              | None -> ""
+            in
+            if goal_id = "" then
+              h2_respond_json_value h2_reqd
+                (`Assoc
+                   [
+                     ("ok", `Bool false);
+                     ("error", `String "goal_id query param is required");
+                   ])
+                ~status:`Bad_request ~extra_headers:cors
+            else
+              let json =
+                dashboard_goal_detail_http_json
+                  ~config:(Mcp_server.workspace_config state) ~goal_id
+              in
+              h2_respond_json_value h2_reqd json
+                ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/tasks/search-text" ->
+          h2_gate_state h2_reqd (fun state ->
+            let config = Mcp_server.workspace_config state in
+            let status, json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              Server_dashboard_task_search_text.read ~config)
+              |> Server_dashboard_task_search_text.response in
+            h2_respond_json_value h2_reqd json
+              ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/tasks/detail" ->
+          h2_gate_state h2_reqd (fun state ->
+            let task_id = Server_utils.query_param httpun_request "task_id" in
+            let config = Mcp_server.workspace_config state in
+            let status, json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              Server_dashboard_task_detail.read ~config ~task_id)
+              |> Server_dashboard_task_detail.response in
+            h2_respond_json_value h2_reqd json
+              ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/tasks/history/page" ->
+          h2_gate_state h2_reqd (fun state ->
+            let status,json=Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              Server_dashboard_task_history_page.read ~config:(Mcp_server.workspace_config state)
+                ~task_id:(Server_utils.query_param httpun_request "task_id")
+                ~limit:(Server_utils.query_param httpun_request "limit")
+                ~cursor:(Server_utils.query_param httpun_request "cursor")) in
+            h2_respond_json_value h2_reqd json
+              ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/tasks/history" ->
+          h2_gate_state h2_reqd (fun state ->
+            let task_id =
+              match Server_utils.query_param httpun_request "task_id" with
+              | Some value -> String.trim value
+              | None -> ""
+            in
+            if task_id = "" then
+              h2_respond_json_value h2_reqd
+                (`Assoc [ ("error", `String "task_id is required") ])
+                ~status:`Bad_request ~extra_headers:cors
+            else
+              let limit =
+                Server_utils.int_query_param httpun_request "limit" ~default:50
+                |> Server_utils.clamp ~min_v:1 ~max_v:200
+              in
+              let json =
+                Task.Tool.task_history_events_json (Mcp_server.workspace_config state)
+                  ~task_id ~limit
+              in
+              h2_respond_json_value h2_reqd json
+                ~extra_headers:cors)
+
+      | `GET, "/api/v1/repositories/pulls" ->
+          h2_gate_state h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd
+              (Server_repository_pulls.snapshot_to_yojson
+                 (Server_repository_pulls.current ()))
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/lanes" ->
+          h2_gate_actor h2_reqd
+            (fun state _agent_name ->
+              Server_lane_inventory.snapshot ~config:(Mcp_server.workspace_config state)
+              |> Server_lane_inventory.to_json
+              |> fun json -> h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/briefing" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/briefing/sections" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json =
+              dashboard_briefing_sections_http_json ~state ~sw ~clock
+                httpun_request
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/transport-health" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json = dashboard_transport_health_http_json ~state in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/diagnostics/memprof" ->
+          h2_gate_actor h2_reqd
+            (fun _state _agent_name ->
+               let json = Server_diagnostics_memprof.report_json () in
+               h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/diagnostics/heap-roots" ->
+          h2_gate_actor h2_reqd
+            (fun _state _agent_name ->
+               let json = Server_diagnostics_heap_roots.report_json () in
+               h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/perf" ->
+          h2_gate_state h2_reqd (fun state ->
+            let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/agent_core/telemetry/recent" ->
+          h2_gate_state h2_reqd (fun _state ->
+            let provider = agent_core_telemetry_provider_param httpun_request in
+            let limit = agent_core_telemetry_limit_param httpun_request in
+            let json = Dashboard_agent_core_bridge.recent_json ?provider ~limit () in
+            h2_respond_json_value h2_reqd json
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/agent_core/telemetry/summary" ->
+          h2_gate_state h2_reqd (fun _state ->
+            let provider = agent_core_telemetry_provider_param httpun_request in
+            let limit = agent_core_telemetry_limit_param httpun_request in
+            let json = Dashboard_agent_core_bridge.summary_json ?provider ~limit () in
+            h2_respond_json_value h2_reqd json
+              ~extra_headers:cors)
+
+      (* H1 serves this through [with_public_read] (server_ide_http.ml:609). *)
+      | `GET, "/api/v1/status" ->
+          h2_gate_state h2_reqd (fun state ->
+            let config = (Mcp_server.workspace_config state) in
+            let workspace_state = Workspace.read_state config in
+            let tempo = Tempo.get_tempo config in
+            let json = `Assoc [
+              ("project", `String workspace_state.project);
+              ("tempo_interval_s", `Float tempo.current_interval_s);
+              ("paused", `Bool workspace_state.paused);
+            ] in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/openapi.json" ->
+          (* HTTP/1 wraps this in Server_auth.with_public_read and the path is
+             not in the public-read allowlist, so strict mode answers 401
+             there; this arm used to answer the document (#28161). *)
+          h2_gate_state h2_reqd (fun _state ->
+            let resolved_host = Server_request_authority.host request_authority in
+            let resolved_port =
+              Option.value
+                ~default:(Env_config_core.masc_http_port_int ())
+                (Server_request_authority.port request_authority)
+            in
+            let json =
+              Transport.Rest.generate_openapi_document
+                ~host:resolved_host ~port:resolved_port ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, keeper_path
+        when String.starts_with ~prefix:"/api/v1/keepers/" keeper_path
+             && String.ends_with
+                  ~suffix:
+                    Server_dashboard_http_keeper_api_types.keeper_suffix_github_identity
+                  keeper_path ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun state _actor ->
+               let suffix =
+                 Server_dashboard_http_keeper_api_types.keeper_suffix_github_identity
+               in
+               let keeper_name =
+                 Server_dashboard_http_keeper_api_types.extract_keeper_name_for_suffix
+                   keeper_path
+                   suffix
+               in
+               let config = Mcp_server.workspace_config state in
+               if String.equal keeper_name ""
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc [ "error", `String "missing or invalid keeper name" ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else if not (Keeper_config.validate_name keeper_name)
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc
+                      [ "error"
+                      , `String (Printf.sprintf "invalid keeper name: %s" keeper_name)
+                      ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else
+                 (* Effective meta: the lane is chosen by the TOML-owned
+                    [sandbox_profile], which a persisted read answers with
+                    the default. *)
+                 match Keeper_meta_store.read_effective_meta config keeper_name with
+                 | Error message ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String message ])
+                     ~status:`Internal_server_error
+                     ~extra_headers:cors
+                 | Ok None ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc
+                        [ "error"
+                        , `String (Printf.sprintf "keeper %S not found" keeper_name)
+                        ])
+                     ~status:`Not_found
+                     ~extra_headers:cors
+                 | Ok (Some meta) ->
+                   let hostname =
+                     Option.value
+                       ~default:Keeper_github_identity.default_hostname
+                       (Server_utils.query_param httpun_request "hostname")
+                   in
+                   (match Keeper_github_login_lane.observe ~config ~meta ~hostname with
+                    | Ok observation ->
+                      h2_respond_json_value
+                        h2_reqd
+                        (Keeper_github_identity.observation_to_yojson observation)
+                        ~extra_headers:cors
+                    | Error message ->
+                      h2_respond_json_value
+                        h2_reqd
+                        (`Assoc [ "error", `String message ])
+                        ~status:`Bad_request
+                        ~extra_headers:cors))
+
+      | `POST, keeper_path
+        when String.starts_with ~prefix:"/api/v1/keepers/" keeper_path
+             && String.ends_with
+                  ~suffix:
+                    Server_dashboard_http_keeper_api_types.keeper_suffix_github_login
+                  keeper_path ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun state _actor ->
+               let suffix =
+                 Server_dashboard_http_keeper_api_types.keeper_suffix_github_login
+               in
+               let keeper_name =
+                 Server_dashboard_http_keeper_api_types.extract_keeper_name_for_suffix
+                   keeper_path
+                   suffix
+               in
+               let config = Mcp_server.workspace_config state in
+               if String.equal keeper_name ""
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc [ "error", `String "missing or invalid keeper name" ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else if not (Keeper_config.validate_name keeper_name)
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc
+                      [ "error"
+                      , `String (Printf.sprintf "invalid keeper name: %s" keeper_name)
+                      ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else
+                 (* Effective meta, not persisted meta: [sandbox_profile] is
+                    TOML-owned and a persisted read answers with the default,
+                    which would send every Keeper's login to this host. *)
+                 match Keeper_meta_store.read_effective_meta config keeper_name with
+                 | Error message ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String message ])
+                     ~status:`Internal_server_error
+                     ~extra_headers:cors
+                 | Ok None ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc
+                        [ "error"
+                        , `String (Printf.sprintf "keeper %S not found" keeper_name)
+                        ])
+                     ~status:`Not_found
+                     ~extra_headers:cors
+                 | Ok (Some meta) ->
+                   let hostname =
+                     Option.value
+                       ~default:Keeper_github_identity.default_hostname
+                       (Server_utils.query_param httpun_request "hostname")
+                   in
+                   match
+                     Keeper_github_identity.login_scopes_of_query
+                       (Server_utils.query_param httpun_request "scopes")
+                   with
+                   | Error message ->
+                     h2_respond_json_value
+                       h2_reqd
+                       (`Assoc [ "error", `String message ])
+                       ~status:`Bad_request
+                       ~extra_headers:cors
+                   | Ok scopes ->
+                   let headers =
+                     H2.Headers.of_list
+                       ([ "content-type", "text/event-stream"
+                        ; "cache-control", "no-cache"
+                        ; "x-accel-buffering", "no"
+                        ]
+                        @ cors)
+                   in
+                   let response = H2.Response.create ~headers `OK in
+                   let writer =
+                     H2.Reqd.respond_with_streaming
+                       ~flush_headers_immediately:true
+                       h2_reqd
+                       response
+                   in
+                   let send_event event json =
+                     Server_h2_response_resources.write_and_flush
+                       writer
+                       (Printf.sprintf
+                          "event: %s\ndata: %s\n\n"
+                          event
+                          (Yojson.Safe.to_string json))
+                   in
+                   Fun.protect
+                     ~finally:(fun () -> h2_close_after_flush writer)
+                     (fun () ->
+                        match
+                          Keeper_github_identity.stream_login
+                            ~config
+                            ~keeper_name
+                            ~scopes
+                            (* Shaping a Remote_ssh lane runs commands on the
+                               endpoint. Doing that before this response existed
+                               left the browser waiting on a request that had not
+                               answered at all. *)
+                            ~make_lane:(fun () ->
+                              Keeper_github_login_lane.for_keeper
+                                ~config
+                                ~meta
+                                ~hostname)
+                            ~is_closed:(fun () -> H2.Body.Writer.is_closed writer)
+                            ~send_event
+                        with
+                        | Ok () -> ()
+                        | Error message when not (H2.Body.Writer.is_closed writer) ->
+                          send_event "error" (`Assoc [ "message", `String message ])
+                        | Error _ -> ()))
+
+      | `GET, "/api/v1/board/reactions/catalog" ->
+          h2_gate_state h2_reqd (fun _state ->
+            h2_respond_json_value
+              h2_reqd
+              (Server_board_reaction_http.catalog_json ())
+              ~extra_headers:cors)
+
+      | `GET, path when path = Server_routes_http_routes_play_room.path ->
+          h2_gate_actor h2_reqd (fun state viewer ->
+              let base_path = (Mcp_server.workspace_config state).base_path in
+              let status, json =
+                Server_routes_http_routes_play_room.read ~base_path httpun_request
+                |> Server_routes_http_routes_play_room.response ~viewer
+              in
+              h2_respond_json_value h2_reqd json
+                ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `POST, path when path = Server_routes_http_routes_play_room.path ->
+          h2_gate_actor h2_reqd (fun state viewer ->
+              let config = Mcp_server.workspace_config state in
+              h2_read_body h2_reqd (fun body ->
+                let status, json =
+                  Server_routes_http_routes_play_room.perform_bound ~config ~who:viewer body
+                in
+                h2_respond_json_value h2_reqd json
+                  ~status:(status :> H2.Status.t) ~extra_headers:cors))
+
+      | `GET, "/api/v1/board/reactions/batch" ->
+          h2_gate_actor
+            h2_reqd
+            (fun _state actor ->
+               let actor = String.trim actor in
+               let result =
+                 Server_board_reaction_http.targets_of_strings
+                   ~target_type:
+                     (Server_utils.query_param httpun_request "target_type")
+                   ~target_ids:
+                     (Server_utils.query_param httpun_request "target_ids")
+                 |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
+               in
+               h2_respond_board_reaction_result h2_reqd result)
+
+      | `GET, "/api/v1/board/reactions" ->
+          h2_gate_actor
+            h2_reqd
+            (fun _state actor ->
+               let actor = String.trim actor in
+               let result =
+                 Result.bind
+                   (Server_board_reaction_http.target_of_strings
+                      ~target_type:
+                        (Server_utils.query_param httpun_request "target_type")
+                      ~target_id:
+                        (Server_utils.query_param httpun_request "target_id"))
+                   (Server_board_reaction_http.list_json ~actor)
+               in
+               h2_respond_board_reaction_result h2_reqd result)
+
+      | `POST, "/api/v1/board/reactions" ->
+          h2_gate_actor
+            h2_reqd
+            (fun _state actor ->
+               let actor = String.trim actor in
+               h2_read_body h2_reqd (fun body ->
+                 let parsed =
+                   match Yojson.Safe.from_string body with
+                   | json -> Server_board_reaction_http.toggle_request_of_json json
+                   | exception Yojson.Json_error message ->
+                     Error (Server_board_reaction_http.malformed_json message)
+                 in
+                 let result =
+                   Result.bind
+                     parsed
+                     (Server_board_reaction_http.toggle_json ~actor)
+                 in
+                 h2_respond_board_reaction_result h2_reqd result))
+
+      (* ═══════════════════════════════════════════════════════════════════════
+         Delegated route groups
+         ═══════════════════════════════════════════════════════════════════════ *)
+      (* Probing an endpoint spends a credit on a metered provider, the same
+         reason /voice/transcribe is admin-gated rather than carrying a public
+         capability. The HTTP/1 router registers the same two paths in
+         server_routes_http_routes_voice.ml; both tables read the request and
+         shape the report through Server_voice_probe, so a client that selects
+         h2c is answered by the same code as one that does not. *)
+      | `POST, "/api/v1/voice/probe/tts" ->
+          h2_gate_actor
+            h2_reqd
+            (fun _state _actor ->
+               h2_read_body h2_reqd (fun body ->
+                 match Server_voice_probe.tts_report ~body with
+                 | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+                 | Error reason ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String reason ])
+                     ~status:`Bad_request
+                     ~extra_headers:cors))
+
+      (* The audio arrives in the raw body, not as a multipart part. *)
+      | `POST, "/api/v1/voice/probe/stt" ->
+          h2_gate_actor
+            h2_reqd
+            (fun _state _actor ->
+               h2_read_body h2_reqd (fun body ->
+                 match
+                   Server_voice_probe.stt_report
+                     ~content_type:
+                       (Httpun.Headers.get httpun_request.headers "content-type")
+                     ~body
+                 with
+                 | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+                 | Error reason ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String reason ])
+                     ~status:`Bad_request
+                     ~extra_headers:cors))
+
+      | `GET, path when String.starts_with ~prefix:"/api/v1/artifact-bytes/" path ->
+          h2_gate_actor
+            h2_reqd
+            (fun state _actor ->
+               let prefix = "/api/v1/artifact-bytes/" in
+               let sha256 = String.sub path (String.length prefix)
+                   (String.length path - String.length prefix) in
+               match Tool_blob_store.validate_sha256 sha256 with
+               | Error invalid ->
+                 h2_respond_json_value h2_reqd
+                   (`Assoc [ "error", `String (Tool_blob_store.invalid_sha256_to_string invalid) ])
+                   ~status:`Bad_request ~extra_headers:cors
+               | Ok () ->
+                 let base_path = (Mcp_server.workspace_config state).base_path in
+                 (match Server_routes_http_routes_artifacts.artifact_bytes ~base_path ~sha256 with
+                  | Ok (Some bytes) ->
+                    h2_respond_bytes h2_reqd bytes
+                      ~content_type:"application/octet-stream"
+                      ~extra_headers:
+                        ([ "cache-control", "no-store"
+                         ; "x-content-type-options", "nosniff"
+                         ; "content-disposition", "attachment; filename=artifact-" ^ sha256 ^ ".bin"
+                         ] @ cors)
+                  | Ok None ->
+                    h2_respond_json_value h2_reqd
+                      (`Assoc [ "error", `String "not found" ])
+                      ~status:`Not_found ~extra_headers:cors
+                  | Error (Tool_blob_store.Too_large { actual; maximum; _ }) ->
+                    h2_respond_json_value h2_reqd
+                      (Server_routes_http_routes_artifacts.too_large_response actual maximum)
+                      ~status:`Payload_too_large ~extra_headers:cors
+                  | Error
+                      ((Tool_blob_store.Invalid_sha256 _
+                       | Tool_blob_store.Owned_read_failed _
+                       | Tool_blob_store.Invalid_max_bytes _
+                       | Tool_blob_store.Integrity_mismatch _) as error) ->
+                    Log.Misc.error "tool blob raw read failed sha256=%s cause=%s"
+                      sha256 (Tool_blob_store.fetch_error_to_string error);
+                    h2_respond_json_value h2_reqd
+                      (`Assoc [ "error", `String "tool blob read failed" ])
+                      ~status:`Service_unavailable ~extra_headers:cors))
+
+      | _
+        when Server_h2_artifact_routes.dispatch ~request_sw ~h2_reqd
+               ~request:httpun_request ~path ~cors ~admission:artifact_admission httpun_meth ->
+          ()
+
+      | _
+        when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request
+               ~cors ~path
+               ~config:
+                 (Option.map
+                    (fun state -> (Mcp_server.workspace_config state))
+                    (current_server_state ()))
+               (* The delegated routes take this gateway's own public-read gate
+                  rather than deciding for themselves; five of them answered
+                  unauthenticated over h2c while HTTP/1 answered 401 (#28161). *)
+               ~gate:(fun f -> h2_gate_unit h2_reqd f)
+               httpun_meth ->
+          ()
+
+      (* ─────────────────────────────────────────────────────────────────────
+         Fallback
+         ───────────────────────────────────────────────────────────────────── *)
+      | _ ->
+          h2_respond_text h2_reqd (Printf.sprintf "404 Not Found: %s" path) ~status:`Not_found ~extra_headers:cors
+
+    in
+    (* The per-IP bucket is charged before the origin check, not after it. A
+       cross-origin MCP request is refused here without ever reaching
+       [dispatch_h2_route], so charging inside that function left this branch
+       unmetered: one client could hold it open with rejected requests and
+       never meet a limit. *)
+    if client_ip_rate_limited () then ()
+    else if
+      is_mcp_transport_request httpun_request
+      && not (validate_origin ~request_authority httpun_request)
+    then
+      h2_respond_json_value
+        h2_reqd
+        (`Assoc
+           [ "jsonrpc", `String "2.0"
+           ; ( "error"
+             , `Assoc
+                 [ ( "code"
+                   , `Int
+                       (Mcp_error_code.to_wire_code
+                          Mcp_error_code.Invalid_request) )
+                 ; "message", `String "Invalid origin"
+                 ] )
+           ; "id", `Null
+           ])
+        ~status:`Forbidden
+        ~extra_headers:cors
+    else (
+      match Server_workspace_precondition.check_current_request ~path httpun_request with
+      | Request_workspace_precondition.Refused refusal ->
+        h2_respond_json_value
+          h2_reqd
+          (Server_workspace_precondition.refusal_body refusal)
+          ~status:(Server_workspace_precondition.refusal_status refusal)
+          ~extra_headers:(Server_workspace_precondition.refusal_headers refusal @ cors)
+      | Request_workspace_precondition.No_precondition
+      | Request_workspace_precondition.Precondition_met ->
+        (try dispatch_h2_route () with
+         | Eio.Cancel.Cancelled
+             ((Server_h2_response_resources.Response_capacity_exhausted
+              | Server_h2_response_resources.Response_writer_closed) as resource_error) ->
+           (* GitHub login wraps a failed [send_event] in [Cancelled]. Only
+              unwrap these typed writer failures; an actually cancelled
+              request must still propagate its cancellation. *)
+           Eio.Fiber.check ();
+           H2.Reqd.report_exn h2_reqd resource_error
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | (Server_h2_response_resources.Response_capacity_exhausted
+           | Server_h2_response_resources.Response_writer_closed) as resource_error ->
+           H2.Reqd.report_exn h2_reqd resource_error
+         | Auth.Auth_config_error _ ->
+           h2_respond_text
+             h2_reqd
+             "Authentication configuration unavailable"
+             ~status:`Service_unavailable
+             ~extra_headers:cors
+         | exn ->
+           let msg = Printexc.to_string exn in
+           Log.Http.error "Handler error: %s" msg;
+           h2_respond_text
+             h2_reqd
+             ("500 Internal Server Error: " ^ msg)
+             ~status:`Internal_server_error
+             ~extra_headers:cors))
+    in
+    match
+      Server_request_authority.classify_h2_request ~trust_policy h2_req
+    with
+    | Server_request_authority.H2_authority
+        (Server_request_authority.Single request_authority) ->
+      (match classify_request_origin ~request_authority httpun_request with
+       | Multiple_origins ->
+         h2_request_authority_bad_request
+           ~error_code:"request_origin_multiple"
+           ~message:"request contains more than one Origin field"
+           h2_reqd
+       | Malformed_origin ->
+         h2_request_authority_bad_request
+           ~error_code:"request_origin_malformed"
+           ~message:"request Origin is not one complete HTTP(S) serialized origin"
+           h2_reqd
+       | Missing_origin | Single_origin _ ->
+         Server_request_authority.with_current request_authority (fun () ->
+           handle_admitted_request request_authority))
+    | Server_request_authority.H2_authority Server_request_authority.Missing ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_missing"
+        ~message:"request is missing :authority"
+        h2_reqd
+    | Server_request_authority.H2_authority Server_request_authority.Multiple ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_multiple"
+        ~message:"request contains multiple authority fields"
+        h2_reqd
+    | Server_request_authority.H2_authority Server_request_authority.Malformed ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_malformed"
+        ~message:"request authority is malformed"
+        h2_reqd
+    | Server_request_authority.H2_authority Server_request_authority.Untrusted ->
+      h2_request_authority_bad_request
+        ~error_code:"request_authority_untrusted"
+        ~message:"request authority is not a configured server identity"
+        h2_reqd
+    | Server_request_authority.Unsupported_asterisk_form_options ->
+      h2_request_authority_bad_request
+        ~error_code:"request_target_asterisk_unsupported"
+        ~message:"MASC does not support authority-free OPTIONS *"
+        h2_reqd)
+  in
+  h2_request_handler

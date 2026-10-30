@@ -1,0 +1,72 @@
+Testing `TUI ask projection'.
+This run has ID `RPDSOKI8'.
+
+  [OK]          answer receipt                  0   followup protocol preserv...
+  [OK]          answer receipt                  1   streamed followup require...
+  [OK]          answer receipt                  2   question source is explic...
+  [OK]          answer receipt                  3   retained feedback preserv...
+  [OK]          answer receipt                  4   recorded answer and wake ...
+  [OK]          answer receipt                  5   canonical conflict and wa...
+  [OK]          answer receipt                  6   append proof without winner.
+  [OK]          answer receipt                  7   foreign or incoherent evi...
+  [OK]          answer receipt                  8   refusal versus uncertainty.
+  [OK]          wire                            0   question reaches the answ...
+  [OK]          wire                            1   unknown resolution rejected.
+  [OK]          wire                            2   foreign or ambiguous work...
+  [OK]          draft                           0   keeps a matching ask.
+  [OK]          draft                           1   resets on another ask.
+  [OK]          draft                           2   clear removes.
+  [OK]          draft                           3   skip is an answer.
+  [OK]          choices                         0   single replaces.
+  [OK]          choices                         1   single re-pick clears.
+  [OK]          choices                         2   multi keeps pick order.
+  [OK]          choices                         3   multi removes.
+  [OK]          choices                         4   multi emptied is unanswered.
+  [OK]          free text                       0   alternative for choices-o...
+  [OK]          free text                       1   next digit or t.
+  [OK]          free text                       2   carries the hint.
+  [OK]          free text                       3   names its question.
+  [OK]          free text                       4   writes only its own ask.
+  [OK]          free text                       5   records text.
+  [OK]          free text                       6   blank clears.
+  [OK]          readiness                       0   every gap at once.
+  [OK]          readiness                       1   shrinks as answered.
+  [OK]          readiness                       2   ask order wins.
+  [OK]          readiness                       3   encodes each shape.
+  [OK]          readiness                       4   answered is closed.
+  [OK]          readiness                       5   withdrawn is closed.
+  [OK]          readiness                       6   foreign draft contributes...
+  [OK]          request                         0   omits blank session.
+  [OK]          request                         1   carries session, no ident...
+  [OK]          gate                            0   blocked while inflight.
+  [OK]          gate                            1   arms first.
+  [OK]          gate                            2   submits on second press.
+  [OK]          gate                            3   re-arms on a different ask.
+  [OK]          cursor                          0   follows the ask.
+  [OK]          cursor                          1   releases when gone.
+  [OK]          cursor                          2   clamps.
+  [OK]          cursor                          3   answered ask does not sel...
+  [OK]          cursor                          4   first read selects the fi...
+  [OK]          cursor                          5   released stays released.
+  [OK]          cursor                          6   move from released select...
+  [OK]          cursor                          7   move clamps.
+  [OK]          cursor                          8   move on empty list.
+  [OK]          cursor                          9   out of range selects noth...
+  [OK]          open rows                       0   keeps only what is waiting.
+  [OK]          arrival                         0   silent on the first read.
+  [OK]          arrival                         1   reports an arrival.
+  [OK]          arrival                         2   silent on a re-read.
+  [OK]          arrival                         3   ignores a closing ask.
+  [OK]          arrival                         4   rings off the asks surface.
+  [OK]          arrival                         5   silent on the asks surface.
+  [OK]          arrival                         6   silent with no arrival.
+  [OK]          installation questions          0   rows decode from the serv...
+  [OK]          installation questions          1   an unknown field or shape...
+  [OK]          installation questions          2   the answer body is what t...
+  [OK]          installation questions          3   receipts follow the route.
+  [OK]          installation questions          4   rows join the Keeper snap...
+  [OK]          installation questions          5   two installations asking ...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/TUI ask projection'.
+Test Successful in 0.012s. 65 tests run.
+exit=0

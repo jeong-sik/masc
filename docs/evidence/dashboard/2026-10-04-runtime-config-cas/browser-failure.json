@@ -1,0 +1,14 @@
+{
+  "message": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByTestId('runtime-toml-nav-toml')\u001b[22m\n",
+  "pageErrors": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+  ],
+  "unhandled": [
+    "/dashboard/src/api/dashboard.ts",
+    "/dashboard/src/api/dashboard-runtime.ts"
+  ],
+  "url": "http://127.0.0.1:5196/dashboard/evidence/2026-10-04-runtime-config-cas/fixture.html",
+  "scope": "Fixture routing failure before product mount; /src/api module requests were mistakenly intercepted. Corrected by restricting interception to pathnames beginning /api/."
+}

@@ -1,0 +1,148 @@
+{
+  "raw_run": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2",
+  "captures": [
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/before-stop-ledger.json",
+      "retained": "before-stop-ledger.json",
+      "sha256": "6b8ea6f236d88ca33bbb5b56a38a022c30d686c2472521e359358efb4b98d1f7",
+      "bytes": 1726,
+      "semantics": "Original capture bytes; execution reconstruction and root cause review are explicitly post-run derivatives"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/stopped-ledger.json",
+      "retained": "stopped-ledger.json",
+      "sha256": "6b8ea6f236d88ca33bbb5b56a38a022c30d686c2472521e359358efb4b98d1f7",
+      "bytes": 1726,
+      "semantics": "Original capture bytes; execution reconstruction and root cause review are explicitly post-run derivatives"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/after-first-death-ledger.json",
+      "retained": "after-first-death-ledger.json",
+      "sha256": "6b8ea6f236d88ca33bbb5b56a38a022c30d686c2472521e359358efb4b98d1f7",
+      "bytes": 1726,
+      "semantics": "Original capture bytes; execution reconstruction and root cause review are explicitly post-run derivatives"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/startup-failed-ledger.json",
+      "retained": "startup-failed-ledger.json",
+      "sha256": "6b8ea6f236d88ca33bbb5b56a38a022c30d686c2472521e359358efb4b98d1f7",
+      "bytes": 1726,
+      "semantics": "Original capture bytes; execution reconstruction and root cause review are explicitly post-run derivatives"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/restored-ledger.json",
+      "retained": "restored-ledger.json",
+      "sha256": "cf443d884a7e4384b5dff16772aa6b64629f8c3bedab1e1cc502129be52ad9f8",
+      "bytes": 3895,
+      "semantics": "Original capture bytes; execution reconstruction and root cause review are explicitly post-run derivatives"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/stopped-ledger-lease.json",
+      "retained": "stopped-ledger-lease.json",
+      "sha256": "c8883c748f766100b44277836b5c5e6416751bbea968660b32b1c1053140d0f2",
+      "bytes": 121,
+      "semantics": "Original capture bytes; execution reconstruction and root cause review are explicitly post-run derivatives"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/execution-reconstruction.json",
+      "retained": "execution-reconstruction.json",
+      "sha256": "0a0dea6c63aa5ebff37bf25bb88fd720ae38f07922b6e28934310e44d4289972",
+      "bytes": 1651,
+      "semantics": "Original capture bytes; execution reconstruction and root cause review are explicitly post-run derivatives"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/root-cause-review.json",
+      "retained": "root-cause-review.json",
+      "sha256": "9d133dcb0e8591c0cefa5713008dfbbb06577451480f17dce05ec59e9b58a942",
+      "bytes": 1698,
+      "semantics": "Original capture bytes; execution reconstruction and root cause review are explicitly post-run derivatives"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/http/summary.json",
+      "retained": "summary.json",
+      "sha256": "a06d311aa763ffab494f6c3bcf645e62347ea89e2246e0d4b761ef4fe3fa3141",
+      "bytes": 4485,
+      "semantics": "Original collector JSON bytes; selected identities are controller projections, not an entire HTTP response"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/http/process-A.json",
+      "retained": "process-A.json",
+      "sha256": "67fad7f43b86eff4646fd815abf3cda9861ae9ee6a6e68d7540a83efd0b40157",
+      "bytes": 140,
+      "semantics": "Original collector JSON bytes; selected identities are controller projections, not an entire HTTP response"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/http/process-B.json",
+      "retained": "process-B.json",
+      "sha256": "119001f0779fb8d48e15f689d07f10e39f5e3eb3de5a7193107665d908cbaf06",
+      "bytes": 140,
+      "semantics": "Original collector JSON bytes; selected identities are controller projections, not an entire HTTP response"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/http/stopped-process.json",
+      "retained": "stopped-process.json",
+      "sha256": "abb0b7df9520cfbb6c722a4fd3cc57e23a9c2acba9007bbb25d60b8bcfd3d99d",
+      "bytes": 103,
+      "semantics": "Original collector JSON bytes; selected identities are controller projections, not an entire HTTP response"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/http/frozen-running-identity.json",
+      "retained": "frozen-running-identity.json",
+      "sha256": "74e0aa6a41e42eb99e3bed161563551de14468be65861e8d7a6764089bdeadb1",
+      "bytes": 1324,
+      "semantics": "Original collector JSON bytes; selected identities are controller projections, not an entire HTTP response"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/http/lease-expiry-observation.json",
+      "retained": "lease-expiry-observation.json",
+      "sha256": "61b51ad5b05e266cf6d67122c3fd9dec061b86fd33906ef24bdff7455a4390b2",
+      "bytes": 177,
+      "semantics": "Original collector JSON bytes; selected identities are controller projections, not an entire HTTP response"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-2/http/staging-fault.json",
+      "retained": "staging-fault.json",
+      "sha256": "5941df209b7805f8464a59dc95dcd55e86f569674fef5099fe5348c7c30fd0a5",
+      "bytes": 247,
+      "semantics": "Original collector JSON bytes; selected identities are controller projections, not an entire HTTP response"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-1/http/summary.json",
+      "retained": "setup-failure-summary.json",
+      "sha256": "32533236ed85aa03be23b465c6b8a66400a46db8c211d8e7fb3646650dbf24af",
+      "bytes": 1795,
+      "semantics": "Original controller summary; no schedules were created"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/runs/startup-recovery-1/http/incomplete.json",
+      "retained": "setup-failure.json",
+      "sha256": "08968c430986657e28a446ae2ca4ddbe019720ab176fc71a1bdd5183cdc2fd42",
+      "bytes": 163,
+      "semantics": "Original pre-schedule TypeError record"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/probe_startup_recovery_actual.py",
+      "retained": "probe_startup_recovery_actual.py.txt",
+      "sha256": "7a1cbfaf8ab103bdcd920983016e966f33d8f81debcd04f9451df6a02eb65a7c",
+      "bytes": 25933,
+      "semantics": "Original controller source bytes, .txt extension only; do not execute in this retained location"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/probe_startup_recovery_actual_v2.py",
+      "retained": "probe_startup_recovery_actual_v2.py.txt",
+      "sha256": "b55ef2652223b4062188007599f884fb782b2789ffdadab7c173c5940823ba33",
+      "bytes": 25971,
+      "semantics": "Original controller source bytes, .txt extension only; do not execute in this retained location"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/startup-recovery-v2-derivation.json",
+      "retained": "controller-derivation.json",
+      "sha256": "bf0af842dbe0d1def8ff3a1a26b3e25ea1ddce19587e686f6d227f89366a489a",
+      "bytes": 973,
+      "semantics": "Original preparation/OS capability record; original controller and run preserved"
+    }
+  ],
+  "excluded": "Full raw API/status/server log/keeper metadata and credentials remain ignored. Selected health/owner/log derivatives have their original capture hashes separately.",
+  "independent_review": "Fresh /root/combined_independent_review session read controller/captures/c52 source and reported bounded bootstrap proof PASS without executing or changing anything; not a formal GitHub review.",
+  "scope": "c52 source only; no result transferred to combined D9 or installed runtime"
+}

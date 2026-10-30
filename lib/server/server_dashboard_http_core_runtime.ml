@@ -1,0 +1,41 @@
+(** Dashboard HTTP compute-runtime bindings, extracted from
+    [server_dashboard_http_core.ml]. Provides the [dashboard_runtime]
+    constructor, [run_dashboard_compute] dispatch wrapper, and
+    [state_dashboard_runtime_caps] state-decomposer. *)
+
+open Server_dashboard_http_runtime_support
+
+let dashboard_runtime ?net ?mono_clock ()
+  : Server_dashboard_http_runtime_support.runtime option
+  =
+  match net, mono_clock with
+  | Some net, Some mono_clock -> Some { net; mono_clock }
+  | Some _, None | None, Some _ | None, None -> None
+;;
+
+let run_dashboard_compute
+      ?(mode = Offloaded_readonly)
+      ?net
+      ?mono_clock
+      ~sw
+      ~clock
+      ~(config : Workspace.config)
+      ~kind
+      ~name
+      compute
+  =
+  let runtime = dashboard_runtime ?net ?mono_clock () in
+  Server_dashboard_http_runtime_support.run_dashboard_compute
+    ~mode
+    ?runtime
+    ~sw
+    ~clock
+    ~config
+    ~kind
+    ~name
+    compute
+;;
+
+let state_dashboard_runtime_caps (state : Mcp_server.server_state) =
+  state.Mcp_server.net, state.Mcp_server.mono_clock
+;;

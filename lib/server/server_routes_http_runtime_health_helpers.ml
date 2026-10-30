@@ -1,0 +1,144 @@
+(** /health probe building blocks, extracted from
+    [server_routes_http_runtime.ml] (godfile decomp).
+
+    Small self-contained JSON+diagnostics helpers used by the
+    [/health] probe response builder:
+
+    - [server_start_time] — captured at sibling module init via
+      [Unix.gettimeofday]. Operators see process uptime against
+      this constant (NDT-OK: no scheduler decision depends on it).
+    - [health_path_diagnostics] — resolves base-path inputs
+      ([Host_config.from_env]) against effective config to surface
+      mis-mapping in operator output. Falls back to
+      [Common.masc_dir_from_base_path] when no server state is
+      live (boot path).
+    - [health_uptime_secs] — process uptime in seconds (int).
+    - [health_uptime_string] — pretty-prints uptime as `<sec>s`,
+      `<min>m <sec>s`, or `<hour>h <min>m`.
+    - [protocol_json ~listener] — MCP protocol version negotiation
+      summary keyed by listener.
+    - [quick_gc_json] — operator-facing GC counter summary. Uses
+      [Gc.quick_stat] (not [Gc.stat]) so health probes don't trigger
+      a full major-cycle sync under live keeper load. Carries the
+      cumulative collection and word counters so two probes give
+      collection and allocation rates.
+    - [scheduler_json] — the main-domain scheduler-lag ring
+      ([Scheduler_lag.global]) plus the worker-domain count. *)
+
+open Server_routes_http_common
+
+let server_start_time = Unix.gettimeofday ()
+
+let health_path_diagnostics () =
+  match current_server_state_opt () with
+  | Some state ->
+      let config = Mcp_server.workspace_config state in
+      Server_base_path_diagnostics.detect
+        ?input_base_path:(Server_startup_state.input_base_path ())
+        ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
+        ~effective_base_path:config.base_path
+        ~effective_masc_root:(Workspace.masc_dir config)
+        ()
+  | None ->
+      let effective_base_path = default_base_path () in
+      let effective_masc_root = Common.masc_dir_from_base_path ~base_path:effective_base_path in
+      Server_base_path_diagnostics.detect
+        ?input_base_path:(Server_startup_state.input_base_path ())
+        ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
+        ~effective_base_path ~effective_masc_root ()
+
+let health_uptime_secs () =
+  (* NDT-OK: /health exposes wall-clock process uptime for operators; no
+     persisted state transition or scheduler decision depends on this value. *)
+  int_of_float (Unix.gettimeofday () -. server_start_time)
+
+let health_uptime_string uptime_secs =
+  if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
+  else if uptime_secs < Masc_time_constants.hour_int then
+    Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
+  else
+    Printf.sprintf
+      "%dh %dm"
+      (uptime_secs / Masc_time_constants.hour_int)
+      ((uptime_secs mod Masc_time_constants.hour_int) / 60)
+
+let protocol_json ~listener =
+  `Assoc
+    [
+      ("default", `String mcp_protocol_version_default);
+      ("listener", `String listener);
+      ( "supported",
+        `List (List.map (fun v -> `String v) mcp_protocol_versions) );
+    ]
+
+let quick_gc_json () =
+  (* Keep health probes cheap under live keeper load. [Gc.stat] can force a
+     full major-cycle sync across domains; [Gc.quick_stat] exposes the same
+     operator-facing counters without walking the heap. The word and
+     collection counters are cumulative since process start: a reader takes
+     two probes and divides by the gap to get rates. *)
+  let s = Gc.quick_stat () in
+  let control = Gc.get () in
+  `Assoc
+    [
+      ("compactions", `Int s.compactions);
+      ("heap_words", `Int s.heap_words);
+      ("live_words", `Int s.live_words);
+      ("minor_heap_size", `Int control.minor_heap_size);
+      ("space_overhead", `Int control.space_overhead);
+      ("minor_collections", `Int s.minor_collections);
+      ("major_collections", `Int s.major_collections);
+      ("forced_major_collections", `Int s.forced_major_collections);
+      ("minor_words", `Float s.minor_words);
+      ("promoted_words", `Float s.promoted_words);
+      ("major_words", `Float s.major_words);
+    ]
+
+let process_memory_json () =
+  let measurement =
+    Eio_guard.run_in_systhread ~label:"process-resident-memory"
+      Process_memory.resident_set
+  in
+  match measurement with
+  | Ok sample ->
+    let source, approximate =
+      match sample.Process_memory.source with
+      | Process_memory.Mach_task_info -> "mach_task_info", false
+      | Process_memory.Proc_statm -> "proc_statm", true
+    in
+    `Assoc
+      [ "status", `String "measured"
+      ; "pid", `Int (Unix.getpid ())
+      ; "resident_bytes", `Intlit (Int64.to_string sample.resident_bytes)
+      ; "source", `String source
+      ; "approximate", `Bool approximate
+      ]
+  | Error reason ->
+    `Assoc
+      [ "status", `String "unavailable"
+      ; "pid", `Int (Unix.getpid ())
+      ; "resident_bytes", `Null
+      ; "reason", `String reason
+      ]
+
+let scheduler_json () =
+  (* The probe fiber runs on the main domain; its ring says how late a ready
+     fiber there ran over the last minute. [pool_domains] is carried next to
+     it because a stall on the main domain while the pool is idle and a stall
+     while every worker is busy are different findings. [pool_wait] splits a
+     pool-routed request's time into waiting for a worker and running. *)
+  let pool_domains =
+    match Domain_pool_ref.domain_count_opt () with
+    | Some count -> `Int count
+    | None -> `Null
+  in
+  let read_pool_domains =
+    match Domain_pool_ref.read_domain_count_opt () with
+    | Some count -> `Int count
+    | None -> `Null
+  in
+  `Assoc
+    (("pool_domains", pool_domains)
+     :: ("read_pool_domains", read_pool_domains)
+     :: ("pool_wait", Pool_wait.to_json ())
+     :: Scheduler_lag.to_fields Scheduler_lag.global)

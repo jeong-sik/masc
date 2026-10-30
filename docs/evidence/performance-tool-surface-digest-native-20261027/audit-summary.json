@@ -1,0 +1,63 @@
+{
+  "schema": "masc.selected-native-digest-audit-summary.v1",
+  "kind": "New selected numeric/locator derivative; full reports retained as text captures, raw packets remain private.",
+  "raw_report": {
+    "name": "raw-evidence",
+    "retained_report": "reviews/raw-evidence.md.txt",
+    "original_report": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-raw-evidence-review-v1/README.md",
+    "sha256": "830dcbaf4a4fab313693679f03d6d6c2782a6781c2bbfd48b759300a54c32a04",
+    "scope": "Actual guarded immutable SQL/data joins and original conservation; prior unrelated profiling/TUI source authorship disclosed.",
+    "verdict_scope_label": "PASS_CLOSED_DIGEST_RAW_EVIDENCE_ONLY",
+    "formal_GitHub_approval": false
+  },
+  "descriptor_report": {
+    "name": "descriptor",
+    "retained_report": "reviews/descriptor.md.txt",
+    "original_report": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-descriptor-review-v1/README.md",
+    "sha256": "1ad10442ca0bc230e58e60e6c7da3ab589bf38ce0248556af9188f77ae54ce87",
+    "scope": "All six rows/150 hashes, actual root receipts and rational arithmetic; no new SQL or raw packet rescan; prior generic completion-helper authorship disclosed.",
+    "verdict_scope_label": "PASS_CLOSED_DESCRIPTOR_ROOT_RECEIPTS_AND_ARITHMETIC_ONLY",
+    "formal_GitHub_approval": false
+  },
+  "operations_and_scripted_calls": 2464,
+  "all_MCP_attempts": 8916,
+  "HTTP200": 8691,
+  "HTTP429": 217,
+  "status_read_timeout_attempts": 8,
+  "large_HTTP429": 213,
+  "valid_live_samples": 4712,
+  "guarded_immutable_SQL_opens": 3696,
+  "distinct_original_and_backup_DBs": 2464,
+  "reader_derivatives": {
+    "total": 30,
+    "exact_bytes": 24,
+    "only_audit_output_address_substitution": 6
+  },
+  "original_conserved_paths": 85613,
+  "all_six_original_path_counts": [
+    857,
+    2765,
+    20498,
+    20505,
+    20490,
+    20498
+  ],
+  "descriptor_input_hashes": 150,
+  "raw_audit_external_inputs": 148,
+  "reader_boundary": "Actual public0825 reader uses mode=ro; only independent audit adapter adds immutable/query-only/authorizer/effect guards.",
+  "batch_member_rows": {
+    "held": 0,
+    "terminal": 0
+  },
+  "legacy_be6_attempts": [
+    "NOT_ATTEMPTED",
+    "NOT_ATTEMPTED",
+    "NOT_ATTEMPTED",
+    "NOT_ATTEMPTED",
+    "NOT_ATTEMPTED",
+    "NOT_ATTEMPTED"
+  ],
+  "root_qualification_outer11932": "UNKNOWN; both identity children exited0, serverstderr82B/TUI0B",
+  "historical_states": "Root comparison summary audit pending and plan execute:false are preserved capture-time records; later complete reports are separate.",
+  "scope": "No raw audit, reader, aggregate, native or probe replay occurred during curation; no formal approval or performance/SLO acceptance."
+}

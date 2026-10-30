@@ -1,0 +1,38 @@
+ ▸Overview  Activity  Keepers  Lanes  Memory  Approvals  Board  Planning  Fusion  Workspace  Config
+
+   MASC Overview  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:18:51  HTTP [connected]                      
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Health: ok  Keepers: 0  MCP agents: 0  Approvals: 0?  Pulse: load failed                                            
+    Candle issued: 18446744073709551614.999                                                                             
+    Candle burned: 9007199254740.993                                                                                    
+    Candle circulating: 18446735066510296874.006                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   Start here (2 steps)                                                                                                 
+                                                                                                                        
+    1. New Keeper: masc keeper-create --edit --host 127.0.0.1 --port 33187                                              
+    2. Open Keepers with 2, select it, and press Enter.                                                                 
+                                                                                                                        
+  Goals (0)   No goal is executing or verifying.                                                                        
+                                                                                                                        
+  Attention (0) 
+                                                                                                                        
+  Nothing needs attention.                                                                                            
+                                                                                                                        
+ Plan usage                                                                                                             
+                                                                                                                        
+   no usage data                                                                                                        
+ Team     14d ▁▁▁▁▁▁▁▁▁▁▁▁▁▁ today 0 · peak 0                                                                           
+  ⇅ pull requests unread: pull requests load failed: HTTP 503: fixture endpoint unavailable                             
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ Tasks (0 open)                                                                                                         
+                                                                                                                        
+    No tasks.                                                                                                           
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit  | Port: 33187
+ › to alpha   (i to write)                                                                                              

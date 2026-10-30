@@ -1,0 +1,815 @@
+(** Keeper_fs — Centralized keeper filesystem operations.
+
+    Provides atomic file writes (write-to-temp + rename) and
+    fiber-safe directory creation. Consolidates the four scattered
+    ensure_dir implementations into one.
+
+    @since 2.162.0 — #3721 keeper stabilization *)
+
+(* ================================================================ *)
+(* Directory Creation (no lock)                                     *)
+(* ================================================================ *)
+
+(* RFC-0474 L4g. [ensure_dir] held one process-wide Eio mutex while it
+   checked that a cached directory still existed. The check is a stat that
+   eio_posix runs on a system thread, so the holder suspended inside the
+   lock and every other caller, on every domain, queued behind the slowest
+   stat. [keeper_meta_path] ensures [.masc/keepers] on every Keeper meta
+   read; on 2026-10-28 fibers waited 2,972 s on that mutex in 180 s, up to
+   45 s for one wait, and [gate/keepers] spent 95% of its wall time waiting.
+
+   It now takes no lock and keeps no cache. A cached path was stat'ed on
+   every call anyway, so a directory removed outside would be made again;
+   one stat per call is what an existing directory costs now. [mkdir_p]
+   accepts a directory that already exists, so two callers racing on one
+   path only stat twice. *)
+let note_ensure_dir_failure ~site path =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string FsFailures)
+    ~labels:[("path", path); ("site", Keeper_fs_failure_site.to_label site)]
+    ()
+
+let ensure_dir (path : string) : string =
+  if Fs_compat.file_exists path
+  then path
+  else
+    match Fs_compat.mkdir_p path with
+    | () -> path
+    | exception (Eio.Cancel.Cancelled _ as exn) ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      note_ensure_dir_failure ~site:Keeper_fs_failure_site.Ensure_dir_cancelled path;
+      Log.Keeper.warn "filesystem_runtime: ensure_dir cancelled path=%s" path;
+      Printexc.raise_with_backtrace exn backtrace
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Keeper_fd_pressure.note_exception ~site:"filesystem_runtime.ensure_dir" exn;
+      Keeper_disk_pressure.note_exception ~site:"filesystem_runtime.ensure_dir" exn;
+      note_ensure_dir_failure ~site:Keeper_fs_failure_site.Ensure_dir_failed path;
+      Log.Keeper.warn "filesystem_runtime: ensure_dir failed path=%s: %s"
+        path (Printexc.to_string exn);
+      Printexc.raise_with_backtrace exn backtrace
+
+let invalidate_dir (path : string) : unit =
+  Keeper_fs_durable_directory.invalidate path
+
+let clear_dir_cache () : unit =
+  Keeper_fs_durable_directory.clear ()
+
+(* ================================================================ *)
+(* Atomic File Write (write-to-temp + rename)                       *)
+(* ================================================================ *)
+
+(** Atomically save [content] to [path].
+    Delegates to {!Fs_compat.save_file_atomic} (Eio-aware, re-raises
+    [Eio.Cancel.Cancelled]).  Ensures the parent directory exists first.
+
+    Returns [(unit, string) result] for explicit error handling. *)
+let save_atomic (path : string) (content : string) : (unit, string) result =
+  try
+    let dir = Filename.dirname path in
+    ignore (ensure_dir dir);
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> Ok ()
+    | Error msg ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string FsFailures)
+          ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_failed))]
+          ();
+        Log.Keeper.warn "filesystem_runtime: save_atomic failed path=%s error=%s" path msg;
+        Error msg
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      let msg = Printexc.to_string exn in
+      Keeper_fd_pressure.note_exception
+        ~site:"filesystem_runtime.save_atomic"
+        exn;
+      Keeper_disk_pressure.note_exception
+        ~site:"filesystem_runtime.save_atomic"
+        exn;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string FsFailures)
+        ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_raised))]
+        ();
+      Log.Keeper.warn "filesystem_runtime: save_atomic raised path=%s error=%s" path msg;
+      Error msg
+
+(** Atomically save a Yojson value as pretty-printed JSON. *)
+let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) result =
+  save_atomic path (Yojson.Safe.pretty_to_string json)
+
+type durable_write_stage =
+  | Directory_prepare
+  | Payload_encode
+  | Temp_file_create
+  | Payload_write
+  | Payload_fsync
+  | Temp_file_close
+  | Atomic_rename
+  | Parent_directory_fsync_after_rename
+  | Temp_directory_fsync_after_rename
+
+let durable_write_stage_to_string = function
+  | Directory_prepare -> "directory_prepare"
+  | Payload_encode -> "payload_encode"
+  | Temp_file_create -> "temp_file_create"
+  | Payload_write -> "payload_write"
+  | Payload_fsync -> "payload_fsync"
+  | Temp_file_close -> "temp_file_close"
+  | Atomic_rename -> "atomic_rename"
+  | Parent_directory_fsync_after_rename ->
+    "parent_directory_fsync_after_rename"
+  | Temp_directory_fsync_after_rename ->
+    "temp_directory_fsync_after_rename"
+;;
+
+type directory_chain_error = Keeper_fs_durable_directory.chain_error =
+  | Non_directory_ancestor of { path : string }
+  | Outside_ownership_root of
+      { ownership_root : string
+      ; path : string
+      }
+  | Missing_root of { path : string }
+  | Creation_not_observed of { path : string }
+
+let directory_chain_error_to_string = function
+  | Non_directory_ancestor { path } ->
+    Printf.sprintf "directory path is occupied by a non-directory: %s" path
+  | Outside_ownership_root { ownership_root; path } ->
+    Printf.sprintf
+      "directory path %s is outside ownership root %s"
+      path
+      ownership_root
+  | Missing_root { path } -> Printf.sprintf "cannot create filesystem root: %s" path
+  | Creation_not_observed { path } ->
+    Printf.sprintf "directory creation returned without a visible directory: %s" path
+;;
+
+type durable_write_failure =
+  | Directory_chain_failed of directory_chain_error
+  | Operation_failed of string
+
+type durable_write_error =
+  { renamed : bool
+  ; stage : durable_write_stage
+  ; failure : durable_write_failure
+  }
+
+let durable_write_failure_to_string = function
+  | Directory_chain_failed error -> directory_chain_error_to_string error
+  | Operation_failed detail -> detail
+;;
+
+let durable_write_error_to_string error =
+  Printf.sprintf
+    "stage=%s renamed=%b reason=%s"
+    (durable_write_stage_to_string error.stage)
+    error.renamed
+    (durable_write_failure_to_string error.failure)
+;;
+
+exception Durable_write_failed of durable_write_error
+
+let note_pressure_observer ~observer ~site note exn =
+  try note ~site exn with
+  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | observer_error ->
+    Log.Keeper.error
+      "filesystem_runtime: pressure observer failed observer=%s site=%s primary_error=%s observer_error=%s"
+      observer
+      site
+      (Printexc.to_string exn)
+      (Printexc.to_string observer_error)
+;;
+
+let note_durable_write_pressure exn =
+  let site = "filesystem_runtime.save_durable_atomic" in
+  note_pressure_observer
+    ~observer:"fd"
+    ~site
+    (fun ~site exn -> Keeper_fd_pressure.note_exception ~site exn)
+    exn;
+  note_pressure_observer
+    ~observer:"disk"
+    ~site
+    (fun ~site exn -> Keeper_disk_pressure.note_exception ~site exn)
+    exn
+;;
+
+let note_durable_remove_pressure exn =
+  let site = "filesystem_runtime.remove_file_durable" in
+  note_pressure_observer
+    ~observer:"fd"
+    ~site
+    (fun ~site exn -> Keeper_fd_pressure.note_exception ~site exn)
+    exn;
+  note_pressure_observer
+    ~observer:"disk"
+    ~site
+    (fun ~site exn -> Keeper_disk_pressure.note_exception ~site exn)
+    exn
+;;
+
+let run_durable_write_stage ~renamed ~before_stage stage f =
+  try
+    before_stage stage;
+    f ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    note_durable_write_pressure exn;
+    raise
+      (Durable_write_failed
+         { renamed; stage; failure = Operation_failed (Printexc.to_string exn) })
+;;
+
+let run_in_systhread_cancel_checked f =
+  let outcome = Eio_guard.run_in_systhread ~label:"keeper-fs-op" f in
+  Eio_guard.check_if_ready ();
+  outcome
+;;
+
+let ensure_dir_durable
+      ~renamed
+      ~before_stage
+      ?(before_directory_fsync = fun _ -> ())
+      ?ownership_root
+      dir
+  =
+  match
+    Keeper_fs_durable_directory.ensure
+      ~before_prepare:(fun () -> before_stage Directory_prepare)
+      ~before_directory_fsync
+      ?ownership_root
+      dir
+  with
+  | Ok lease -> lease
+  | Error (Keeper_fs_durable_directory.Directory_chain_failed cause) ->
+    raise
+      (Durable_write_failed
+         { renamed
+         ; stage = Directory_prepare
+         ; failure = Directory_chain_failed cause
+         })
+  | Error (Keeper_fs_durable_directory.Operation_failed (exn, _)) ->
+    note_durable_write_pressure exn;
+    raise
+      (Durable_write_failed
+         { renamed
+         ; stage = Directory_prepare
+         ; failure = Operation_failed (Printexc.to_string exn)
+         })
+;;
+
+let protect_durable_write f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Durable_write_failed error -> Error error
+  | exn ->
+    note_durable_write_pressure exn;
+    Error
+      { renamed = false
+      ; stage = Directory_prepare
+      ; failure = Operation_failed (Printexc.to_string exn)
+      }
+;;
+
+let save_pieces_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      pieces
+  =
+  let dir = Filename.dirname path in
+  (* DET-OK: an omitted staging directory means the destination directory;
+     both paths are derived from the same explicit destination [path]. *)
+  let temp_dir = Option.value temp_dir ~default:dir in
+  let directory_lease =
+    ensure_dir_durable
+      ~renamed:false
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      dir
+  in
+  let temp_directory_lease =
+    if String.equal temp_dir dir
+    then directory_lease
+    else
+      ensure_dir_durable
+        ~renamed:false
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        temp_dir
+  in
+  let result =
+    Eio_guard.run_in_systhread ~label:"keeper-fs-durable-write" (fun () ->
+    let temp_path = ref None in
+    let channel = ref None in
+    let renamed = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        Option.iter close_out_noerr !channel;
+        match !temp_path with
+        | Some temp when not !renamed && Sys.file_exists temp ->
+          (try Sys.remove temp with
+           | exn -> (* cancel-guard-ok: Sys.remove performs no Eio operation, so Cancelled cannot originate in this body. *)
+             Log.Keeper.error
+               "filesystem_runtime: strict atomic temp cleanup failed path=%s error=%s"
+               temp
+               (Printexc.to_string exn))
+        | Some _ | None -> ())
+      (fun () ->
+         let temp, oc =
+           run_durable_write_stage
+             ~renamed:false
+             ~before_stage
+             Temp_file_create
+             (fun () -> Fs_compat.open_atomic_temp_file ~temp_dir ())
+         in
+         temp_path := Some temp;
+         channel := Some oc;
+         run_durable_write_stage
+           ~renamed:false
+           ~before_stage
+           Payload_write
+           (fun () ->
+              List.iter (output_string oc) pieces;
+              flush oc);
+         (* The stats of the file written, from its own descriptor: the rename
+            below keeps the inode, size and mtime, so they name the installed
+            file even when another writer replaces the path afterwards. *)
+         let written =
+           run_durable_write_stage
+             ~renamed:false
+             ~before_stage
+             Payload_fsync
+             (fun () ->
+                let fd = Unix.descr_of_out_channel oc in
+                Unix.fsync fd;
+                Unix.fstat fd)
+         in
+         run_durable_write_stage
+           ~renamed:false
+           ~before_stage
+           Temp_file_close
+           (fun () -> close_out oc; channel := None);
+         run_durable_write_stage
+           ~renamed:false
+           ~before_stage
+           Atomic_rename
+           (fun () -> Unix.rename temp path; renamed := true);
+         run_durable_write_stage
+           ~renamed:true
+           ~before_stage
+           Parent_directory_fsync_after_rename
+           (fun () -> Keeper_fs_durable_directory.fsync_directory dir);
+         if not (String.equal temp_dir dir)
+         then
+           run_durable_write_stage
+             ~renamed:true
+             ~before_stage
+             Temp_directory_fsync_after_rename
+             (fun () -> Keeper_fs_durable_directory.fsync_directory temp_dir);
+         Ok written))
+  in
+  let rec confirm_directory_lease lease =
+    if Keeper_fs_durable_directory.lease_is_current lease
+    then result
+    else (
+      let lease =
+        ensure_dir_durable
+          ~renamed:true
+          ~before_stage
+          ?before_directory_fsync
+          ?ownership_root
+          dir
+      in
+      Eio_guard.run_in_systhread ~label:"keeper-fs-durable-write-stage" (fun () ->
+        run_durable_write_stage
+          ~renamed:true
+          ~before_stage
+          Parent_directory_fsync_after_rename
+          (fun () ->
+             let (_ : Unix.stats) = Unix.lstat path in
+             Keeper_fs_durable_directory.fsync_directory dir));
+      confirm_directory_lease lease)
+  in
+  let result = confirm_directory_lease directory_lease in
+  let rec confirm_temp_directory_lease lease =
+    if String.equal temp_dir dir || Keeper_fs_durable_directory.lease_is_current lease
+    then result
+    else (
+      let lease =
+        ensure_dir_durable
+          ~renamed:true
+          ~before_stage
+          ?before_directory_fsync
+          ?ownership_root
+          temp_dir
+      in
+      Eio_guard.run_in_systhread ~label:"keeper-fs-durable-write-stage" (fun () ->
+        run_durable_write_stage
+          ~renamed:true
+          ~before_stage
+          Temp_directory_fsync_after_rename
+          (fun () -> Keeper_fs_durable_directory.fsync_directory temp_dir));
+      confirm_temp_directory_lease lease)
+  in
+  confirm_temp_directory_lease temp_directory_lease
+;;
+
+type durable_commit_outcome =
+  | Committed
+  | Committed_but_observer_failed of Eio.Exn.with_bt
+
+let check_durable_write_completion result =
+  Eio_guard.check_if_ready ();
+  result
+;;
+
+let observe_durable_write_success ~on_durable_commit = function
+  | Error _ as error ->
+    Eio_guard.check_if_ready ();
+    error
+  | Ok (_ : Unix.stats) ->
+    (* The blocking transaction and both final directory-lease confirmations
+       are complete. This pure caller-fiber publication must precede the
+       cooperative cancellation check: a systhread cannot stop once running,
+       so cancellation may already be pending after a fully durable commit. *)
+    (match on_durable_commit () with
+     | () ->
+       Eio_guard.check_if_ready ();
+       Ok Committed
+     | exception (Eio.Cancel.Cancelled _ as exn) ->
+       (* #37372: the observer's cancellation leaves unchanged. Propagating
+          costs no half-written state -- the blocking transaction and both
+          lease confirmations are already complete when this runs, which is
+          why the success branch above can raise a pending cancellation too.
+          [raise] here, not [raise_with_backtrace]: OCaml compiles raise of a
+          handler's own binding as a re-raise, so the original frames survive
+          either way, and this is the shape Cancel_safe.protect uses. *)
+       raise exn
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Ok (Committed_but_observer_failed (exn, backtrace)))
+;;
+
+let save_bytes_durable_atomic_observed_with
+      ~on_durable_commit
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  =
+  protect_durable_write (fun () ->
+    save_pieces_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      [ bytes ])
+  |> observe_durable_write_success ~on_durable_commit
+;;
+
+let save_bytes_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  =
+  protect_durable_write (fun () ->
+    save_pieces_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      [ bytes ])
+  |> check_durable_write_completion
+  |> Result.map (fun (_ : Unix.stats) -> ())
+;;
+
+let save_encoded_durable_atomic_from_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      encoded_source
+  =
+  protect_durable_write (fun () ->
+    let pieces =
+      run_durable_write_stage
+        ~renamed:false
+        ~before_stage
+        Payload_encode
+        (fun () ->
+           (* [Domain_pool_ref] is the typed CPU-weight policy layer keeper
+              call sites prefer (#25158). Unlike [Executor_pool_ref], a job
+              exception re-raises here instead of being conflated with a
+              pool failure and re-run inline; [run_durable_write_stage]
+              turns it into a typed [Payload_encode] failure. *)
+           Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ encoded_source)
+    in
+    save_pieces_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      pieces)
+  |> check_durable_write_completion
+;;
+
+let save_json_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      ?(pretty = true)
+      path
+      json
+  =
+  save_encoded_durable_atomic_from_with
+    ~before_stage
+    ?before_directory_fsync
+    ?ownership_root
+    ?temp_dir
+    path
+    (fun () ->
+       [ (if pretty
+          then Yojson.Safe.pretty_to_string json
+          else Yojson.Safe.to_string json)
+       ])
+  |> Result.map (fun (_ : Unix.stats) -> ())
+;;
+
+let save_bytes_durable_atomic ?ownership_root ?temp_dir path bytes =
+  save_bytes_durable_atomic_with
+    ~before_stage:(fun _ -> ())
+    ?ownership_root
+    ?temp_dir
+    path
+    bytes
+;;
+
+let save_bytes_durable_atomic_observed
+      ~on_durable_commit
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  =
+  save_bytes_durable_atomic_observed_with
+    ~on_durable_commit
+    ~before_stage:(fun _ -> ())
+    ?ownership_root
+    ?temp_dir
+    path
+    bytes
+;;
+
+let save_json_durable_atomic ?ownership_root ?temp_dir ?pretty path json =
+  save_json_durable_atomic_with
+    ~before_stage:(fun _ -> ())
+    ?ownership_root
+    ?temp_dir
+    ?pretty
+    path
+    json
+;;
+
+let save_encoded_durable_atomic_from ?ownership_root ?temp_dir path encoded_source =
+  save_encoded_durable_atomic_from_with
+    ~before_stage:(fun _ -> ())
+    ?ownership_root
+    ?temp_dir
+    path
+    encoded_source
+;;
+
+type durable_remove_stage =
+  | Unlink
+  | Parent_directory_fsync
+
+type durable_remove_error =
+  { removed : bool
+  ; failure : durable_remove_stage * string
+  }
+
+let durable_remove_stage_to_string = function
+  | Unlink -> "unlink"
+  | Parent_directory_fsync -> "parent_directory_fsync"
+;;
+
+let durable_remove_error_to_string error =
+  let stage, reason = error.failure in
+  Printf.sprintf "%s: %s" (durable_remove_stage_to_string stage) reason
+;;
+
+let remove_file_durable_with ~before_stage ?ownership_root path =
+  let parent = Filename.dirname path in
+  run_in_systhread_cancel_checked (fun () ->
+    let parent_available =
+      match ownership_root with
+      | None -> Ok true
+      | Some ownership_root ->
+        (try
+           match
+             Fs_compat.inspect_owned_directory_chain ~ownership_root parent
+           with
+           | Ok Fs_compat.Owned_directory_missing -> Ok false
+           | Ok (Fs_compat.Owned_directory _) -> Ok true
+           | Error rejection ->
+             Error
+               (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (Printexc.to_string exn))
+    in
+    match parent_available with
+    | Error reason -> Error { removed = false; failure = Unlink, reason }
+    | Ok false -> Ok ()
+    | Ok true ->
+      let removed =
+        try
+          before_stage Unlink;
+          Unix.unlink path;
+          Ok true
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+        | exn ->
+          note_durable_remove_pressure exn;
+          Error { removed = false; failure = Unlink, Printexc.to_string exn }
+      in
+      (match removed with
+       | Error _ as error -> error
+       | Ok removed ->
+      (try
+         before_stage Parent_directory_fsync;
+         Keeper_fs_durable_directory.fsync_directory parent;
+         Ok ()
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         note_durable_remove_pressure exn;
+         Error
+           { removed
+           ; failure = Parent_directory_fsync, Printexc.to_string exn
+           })))
+;;
+
+let remove_file_durable ?ownership_root path =
+  remove_file_durable_with ~before_stage:(fun _ -> ()) ?ownership_root path
+;;
+
+module For_testing = struct
+  let save_bytes_durable_atomic_observed
+        ~on_durable_commit
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        path
+        bytes
+    =
+    save_bytes_durable_atomic_observed_with
+      ~on_durable_commit
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  ;;
+
+  let save_bytes_durable_atomic
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        path
+        bytes
+    =
+    save_bytes_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  ;;
+
+  let save_encoded_durable_atomic_from
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        path
+        encoded_source
+    =
+    save_encoded_durable_atomic_from_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      encoded_source
+  ;;
+
+  let save_json_durable_atomic
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        ?pretty
+        path
+        json
+    =
+    save_json_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      ?pretty
+      path
+      json
+  ;;
+
+  let remove_file_durable ~before_stage ?ownership_root path =
+    remove_file_durable_with ~before_stage ?ownership_root path
+  ;;
+end
+;;
+
+(* ================================================================ *)
+(* Path Locks (refcounted Eio.Mutex registry keyed by path)         *)
+(* ================================================================ *)
+
+type path_lock =
+  { mutex : Eio.Mutex.t
+  ; mutable users : int
+  }
+
+let path_locks : (string, path_lock) Hashtbl.t = Hashtbl.create 16
+let path_locks_mutex = Stdlib.Mutex.create ()
+let path_lock_mutex lock = lock.mutex
+
+let acquire_path_lock key =
+  Stdlib.Mutex.protect path_locks_mutex (fun () ->
+    match Hashtbl.find_opt path_locks key with
+    | Some lock ->
+      lock.users <- lock.users + 1;
+      lock
+    | None ->
+      let lock = { mutex = Eio.Mutex.create (); users = 1 } in
+      Hashtbl.add path_locks key lock;
+      lock)
+;;
+
+let release_path_lock key lock =
+  Stdlib.Mutex.protect path_locks_mutex (fun () ->
+    lock.users <- lock.users - 1;
+    if lock.users = 0
+    then
+      match Hashtbl.find_opt path_locks key with
+      | Some current when current == lock -> Hashtbl.remove path_locks key
+      | Some _ | None -> ())
+;;
+
+(* ================================================================ *)
+(* Standard Keeper Paths                                            *)
+(* ================================================================ *)
+
+let keeper_dir (config : Workspace.config) : string =
+  let d = Workspace.keepers_runtime_dir config in
+  ensure_dir d
+
+let session_store_path_for_runtime_root runtime_root =
+  Filename.concat runtime_root "traces"
+;;
+
+let session_store_path (config : Workspace.config) : string =
+  session_store_path_for_runtime_root (Workspace.masc_dir config)
+;;
+
+let session_store_path_for_base_path base_path =
+  let runtime_root = (Workspace.backend_config_for base_path).base_path in
+  session_store_path_for_runtime_root runtime_root
+;;
+
+let session_base_dir (config : Workspace.config) : string =
+  ensure_dir (session_store_path config)
+
+let keeper_session_dir (config : Workspace.config) (trace_id : string) : string =
+  Filename.concat (session_base_dir config) trace_id

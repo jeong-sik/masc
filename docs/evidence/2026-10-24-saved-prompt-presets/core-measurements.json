@@ -1,0 +1,36 @@
+{
+  "source_base": "fd75478aa3146c4e3910773ad00336dd0adba472",
+  "candidate_files_sha256": {
+    "lib/prompt_preset.ml": "6cd74b602e35631cb932571b8fd26cf2c907b8f20686b40c29ee465b10e866a0",
+    "lib/prompt_preset.mli": "cae3a1cf4e521f5e0e711275ca94dfc3d165797f4d48bb4ff5ea66b08ef51de2",
+    "lib/server/server_routes_http_routes_presets.ml": "ef3b201c5c329024ddba1e582a09048ff898621a134b20a4c63aeeceead301d9",
+    "test/test_prompt_preset.ml": "146daefc73b4c5534f154f4a9b823d822c431840d814d5f9242e532c03563ec7"
+  },
+  "live_before": {
+    "readable": 0,
+    "unreadable": 2
+  },
+  "candidate_copied_data": {
+    "readable": 2,
+    "unreadable": 0,
+    "original_files": 63,
+    "live_original_bytes_unchanged": true
+  },
+  "focused_execution": {
+    "runner": "Native Candidate_preset compiled from changed source and linked with existing dependency artifacts; test file changes only module alias to candidate",
+    "cases_passed": 34,
+    "elapsed_s": 0.29,
+    "whole_server_build": false,
+    "installed_runtime_updated": false,
+    "dependency_artifact_checkout": "90269c9233e34ab22940a4e8d5ca386033916d8c",
+    "route_boundary": "HTTP route typechecked with Candidate_preset shadow only; not a full server build"
+  },
+  "copied_restore": {
+    "instructions_applied": 29,
+    "instructions_skipped": 0,
+    "runtime_status": "failed",
+    "runtime_reason": "One historical runtime assignment is absent from the current catalog; no replacement was invented",
+    "unavailable_lanes_skipped": 1,
+    "live_preset_restore": false
+  }
+}

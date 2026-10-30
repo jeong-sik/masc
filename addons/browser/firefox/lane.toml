@@ -1,0 +1,28 @@
+id = "browser-firefox"
+revision = "0.1.0"
+title = "Browser live Firefox (owned BiDi)"
+ui_category = "browser"
+runtime = "host_process"
+service = "browser"
+browser_backend = "owned_firefox"
+command = ["masc-browser-addon-worker"]
+contributions = ["observe"]
+
+[world.tools]
+export = ["browser_command"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+
+[world.outputs.connections]
+all_lanes = true
+
+[resources]
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{
+  "type": "object",
+  "properties": {"sources": {"type": "array", "items": {"type": "object", "properties": {}, "additionalProperties": false}, "maxItems": 0}},
+  "required": ["sources"],
+  "additionalProperties": false
+}'''

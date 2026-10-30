@@ -1,0 +1,74 @@
+{
+  "schedule_instance_id": "01a17814-34d5-7000-94ca-69fa05561225",
+  "schedule_id": "audit-retarget-cancel",
+  "requested_by": {
+    "id": "schedule-audit-admin",
+    "kind": "automated_actor",
+    "display_name": null
+  },
+  "scheduled_by": {
+    "id": "schedule-audit-admin",
+    "kind": "automated_actor",
+    "display_name": null
+  },
+  "requested_at": 1793015952.597585,
+  "due_at": 1793019553.597585,
+  "expires_at": null,
+  "payload": {
+    "kind": "masc.keeper_wake",
+    "body": {
+      "result_delivery": {
+        "policy": "none"
+      },
+      "keeper_name": "audit-retarget-a",
+      "message": "Isolated cancelled recurring wake; do not execute."
+    }
+  },
+  "status": "scheduled",
+  "source": "operator_request",
+  "recurrence": {
+    "kind": "interval",
+    "interval_sec": 3600
+  },
+  "cancellation": null,
+  "due_at_iso": "2026-10-26T12:59:13Z",
+  "next_due_at": 1793019553.597585,
+  "next_due_at_iso": "2026-10-26T12:59:13Z",
+  "requested_at_iso": "2026-10-26T11:59:12Z",
+  "recurrence_kind": "interval",
+  "recurrence_summary": "every 3600s",
+  "payload_digest": "18479fc9800a3102ae905fc6ec5a0c99e92176a6acaf3f9f44a5aca1dfd147ac",
+  "payload_kind": "masc.keeper_wake",
+  "payload_support": "supported",
+  "payload_dispatch_tool": "masc.keeper_wake",
+  "payload_target": "keeper:audit-retarget-a",
+  "payload_summary": "Isolated cancelled recurring wake; do not execute.",
+  "last_wake": {
+    "schedule_instance_id": "01a17814-34d5-7000-94ca-69fa05561225",
+    "schedule_id": "audit-retarget-cancel",
+    "started_at": 1793015967.439568,
+    "finished_at": 1793015967.448133,
+    "due_at": 1793015953.597585,
+    "payload_digest": "18479fc9800a3102ae905fc6ec5a0c99e92176a6acaf3f9f44a5aca1dfd147ac",
+    "status": "succeeded",
+    "detail": {
+      "kind": "masc.keeper_wake.enqueued",
+      "queue": "keeper_event_queue",
+      "stimulus": "schedule_due",
+      "stimulus_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+      "keeper_name": "audit-retarget-a",
+      "schedule_instance_id": "01a17814-34d5-7000-94ca-69fa05561225",
+      "schedule_id": "audit-retarget-cancel",
+      "urgency": "normal",
+      "post_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+      "result_delivery_policy": "none",
+      "occurrence_status": "awaiting_ack",
+      "activation_status": "deferred",
+      "activation_reason": "lifecycle_denied",
+      "activation_detail": "paused",
+      "reaction_ledger_status": "recorded",
+      "reaction_ledger_error": null
+    },
+    "error": null
+  }
+}

@@ -1,0 +1,70 @@
+name = "keeper_task_release"
+description = """
+Hand your claimed task back to the backlog so another Keeper can take it.
+
+\
+Use this when you cannot finish the task and it should not sit with you: the \
+work is blocked on something outside your reach, it needs a checkout or a \
+tool you do not have, or your verification keeps coming back rejected. The \
+task returns to the backlog with your summary attached, and you can claim \
+different work immediately. This does not cancel the task and does not \
+delete anything you already submitted. You must own the task."""
+
+# 지연 판단은 호출 수가 아니라 그 도구가 필요했던 서로 다른 턴 수로 한다
+# (masc #32062): 실으면 스키마 x 요청수, 지연하면 필요했던 턴 수 x 표면 바이트다.
+# agent-core 5 keeper 의 도구-사용 턴 11,164 개와 표면 67,000 B 기준으로 이 도구는
+# 1,146 B 를 매 요청에 싣고 114 턴(1.0%)에서만 필요했다 — 1.7x 다.
+#
+# 조회 도구는 이 계산이 유리해도 지연하지 않는다. keeper_capability_search 와
+# keeper_tools_list 는 목록이 길 때 찾는 수단이라, 지연하면 찾는 일 자체가 한 홉
+# 멀어진다. 그 비용은 바이트로 잡히지 않는다. 이 도구는 조회가 아니다.
+defer_loading = true
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID you currently hold"
+min_length = 1
+
+[[params]]
+name = "summary"
+type = "string"
+required = true
+description = """
+Where the task stands right now, in one line. The next owner starts from \
+this. Example: 'reproduced on the merged-cell table, fix not started'."""
+min_length = 1
+
+[[params]]
+name = "reason"
+type = "string"
+description = "Why you are handing it back: what blocked you, or what you lack."
+
+[[params]]
+name = "next_step"
+type = "string"
+description = "What the next owner should do first."
+
+[[params]]
+name = "evidence_refs"
+type = "array"
+items = { type = "string", min_length = 1 }
+description = """
+Optional sources to retain in the Task handoff for the next owner. Use \
+artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, \
+fusion:<run-id>, or task:<task-id>. These references preserve context; they do not copy a \
+peer's sandbox file. Export binary files with keeper_artifact_transfer \
+and pass the exported objects through masc_keeper_delegate artifacts."""
+
+[help]
+short_description = "Hand your claimed task back to the backlog with a summary."
+when_to_use = "Use when you hold a task you cannot finish and it should go back so someone else can take it."
+key_constraints = [
+  "Caller must own the task.",
+  "summary is required; the next owner starts from it.",
+  "The task returns to the backlog and can be reclaimed. It is not cancelled.",
+]
+details_markdown = "Issues release. Holding a task you cannot finish also blocks you from claiming anything else, so hand it back rather than idling on it. Include evidence_refs to retain the current sources with your handoff; the next owner's claim preserves them and your attribution. Export files separately when the next owner needs their bytes."
+examples = ["task_id='task-384' summary='4 verification rejections, no path forward from this Keeper' reason='no completion authority accepted the evidence' next_step='re-read the rejection notes before re-claiming'"]
+alternatives = ["keeper_task_done"]

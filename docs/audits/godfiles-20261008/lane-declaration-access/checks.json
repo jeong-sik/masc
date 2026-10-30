@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-09",
+  "parent": "d3d148e5ae41ecfab1d7191bd2eaa1d491147537",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/test_lane_addon_declaration.exe test/test_lane_addon_composition.exe test/test_lane_addon_live_route.exe",
+    "exit_code": 0,
+    "log": "build.log"
+  },
+  "tests": [
+    {
+      "command": "_build/default/test/test_lane_addon_declaration.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 10,
+      "log": "editor.log"
+    },
+    {
+      "command": "_build/default/test/test_lane_addon_composition.exe test 'world inputs' '5-7' --color=never",
+      "exit_code": 0,
+      "executed_cases": 3,
+      "log": "composition.log"
+    }
+  ],
+  "unique_cases": 13,
+  "compiled_only": {
+    "target": "_build/default/test/test_lane_addon_live_route.exe",
+    "reason": "Compiles the changed HTTP route consumer. Its live machine route scenarios do not exercise declaration read/save and were not run."
+  },
+  "scope": "Focused macOS compilation and isolated real TOML/ownership/CAS flows with fake external workers; no live Keeper/provider, HTTP behavior execution, UI, CI, installation or deployment proof."
+}

@@ -1,0 +1,283 @@
+
+open Server_utils
+open Server_voice_config
+open Server_routes_http
+open Server_h2_gateway_helpers
+
+(* Dispatch board, Gate, voice, karma, and static asset routes.
+   Returns [true] if the route was handled, [false] otherwise. *)
+(* [gate] is the parent gateway's gate for a request whose arm needs nothing
+   from it, handed in rather than rebuilt here. It runs the gate that goes with
+   the kind the HTTP/1 router records for the route, so under
+   MASC_HTTP_AUTH_STRICT=1 a token-less h2c read is refused exactly where
+   HTTP/1 answers 401 (#28161). Every arm below runs it, and no arm names a
+   kind. The Board list and post-detail arms resolve their optional reaction
+   actor inside that gate, in the same order as HTTP/1. *)
+let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~gate
+    (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
+                    | `CONNECT | `TRACE | `Other of string ]) =
+  let h2_respond_auth_error error =
+    let status, body =
+      Server_auth.auth_refusal_response ~protocol:"h2" ~path error
+    in
+    h2_respond_json
+      h2_reqd
+      body
+      ~status:(status :> H2.Status.t)
+      ~extra_headers:(Server_auth.auth_error_headers ~status ~cors)
+  in
+  let with_optional_board_reaction_actor f =
+    match config with
+    | None ->
+      if Server_auth.request_carries_auth_credential httpun_request
+      then (
+         h2_respond_json
+           h2_reqd
+           (Server_auth.not_initialized_response path)
+           ~status:`Internal_server_error
+           ~extra_headers:cors)
+      else f None
+    | Some (config : Workspace.config) ->
+      (match
+         Server_auth.authorize_optional_token_bound_permission_request
+           ~base_path:config.base_path
+           ~permission:Masc_domain.CanReadState
+           httpun_request
+       with
+       | Ok actor -> f (Option.map String.trim actor)
+       | Error error -> h2_respond_auth_error error)
+  in
+  match httpun_meth, path with
+  | `GET, path when path = Play_invite.agent_guide_path ->
+      gate (fun () ->
+      match Server_routes_http_routes_play_guide.guide_response () with
+      | Ok text ->
+        h2_respond_bytes h2_reqd text
+          ~content_type:Server_routes_http_routes_play_guide.markdown_content_type
+          ~extra_headers:(("cache-control", "no-store")
+                          :: ("x-content-type-options", "nosniff") :: cors)
+      | Error (status, json) ->
+        h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+          ~extra_headers:cors);
+      true
+
+  | `GET, "/api/v1/voice/config" ->
+      gate (fun () ->
+        let status, json = voice_config_payload () in
+        let status =
+          match status with `OK -> `OK | `Error -> `Internal_server_error
+        in
+        h2_respond_json_value h2_reqd json ~status ~extra_headers:cors);
+      true
+
+  | `GET, "/api/v1/board" ->
+      gate (fun () ->
+      with_optional_board_reaction_actor (fun reaction_actor ->
+      let payload =
+        Server_board_list_http.payload ?config ~reaction_actor
+          httpun_request
+      in
+      h2_respond_cached_payload h2_reqd payload ~extra_headers:cors));
+      true
+
+  | `GET, "/api/v1/board/curation" ->
+      gate (fun () ->
+        let json =
+          match Board_dispatch.latest_curation_snapshot () with
+          | None -> `Assoc [("snapshot", `Null)]
+          | Some snap ->
+              `Assoc [("snapshot", Board_curation.snapshot_to_yojson snap)]
+        in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
+      true
+
+  | `GET, "/api/v1/board/hearths" ->
+      gate (fun () ->
+        let exclude_system =
+          bool_query_param httpun_request "exclude_system" ~default:false
+        in
+        let exclude_automation =
+          bool_query_param httpun_request "exclude_automation" ~default:false
+        in
+        let hearths =
+          Board_dispatch.list_hearths ~exclude_system ~exclude_automation ()
+        in
+        let json = `Assoc [
+          ("hearths", `List (List.map (fun (name, count) ->
+            `Assoc [("name", `String name); ("count", `Int count)]
+          ) hearths));
+        ] in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
+      true
+
+  | `GET, "/api/v1/board/flairs" ->
+      gate (fun () ->
+      let flairs = List.map Board.flair_to_yojson Board.available_flairs in
+      let json = `Assoc [("flairs", `List flairs)] in
+      h2_respond_json_value h2_reqd json ~extra_headers:cors);
+      true
+
+  | `GET, "/api/v1/board/sub-boards" ->
+      gate (fun () ->
+        let sub_boards = Board_dispatch.list_sub_boards () in
+        let json =
+          `Assoc
+            [
+              ( "sub_boards",
+                `List (List.map Board.sub_board_to_yojson sub_boards) );
+            ]
+        in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
+      true
+
+  | `GET, "/api/v1/board/karma/ledger" ->
+      gate (fun () ->
+        (* Karma ledger contract endpoint — attributed karma events.
+           Query params:
+             agent  — filter to a single recipient (case-sensitive)
+             limit  — cap result count (default: 500) *)
+        let agent = query_param httpun_request "agent" in
+        let limit =
+          int_query_param httpun_request "limit" ~default:500
+          |> clamp ~min_v:1 ~max_v:5000
+        in
+        (* TEL-OK: read-only projection mirroring the HTTP/1 arm
+           [board_karma_ledger_json], which emits none either. This route
+           exists to make the two protocols answer identically, so telemetry
+           on one arm only would reintroduce the asymmetry it closes. *)
+        let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+        let totals =
+          (* TEL-OK: same read, same H1 counterpart, same reason. *)
+          Board_dispatch.get_all_karma ()
+          |> List.sort (fun (_, a) (_, b) -> compare b a)
+        in
+        let json =
+          `Assoc
+            [
+              ("events", `List (List.map Board.karma_event_to_yojson events));
+              ("count", `Int (List.length events));
+              ("scoring_rule", `String "up=+1,down=0");
+              ( "totals",
+                `List
+                  (List.map
+                     (fun (agent_name, k) ->
+                       `Assoc
+                         [ ("agent", `String agent_name); ("karma", `Int k) ])
+                     totals) );
+            ]
+        in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
+      true
+
+  (* Must stay above the [/api/v1/board/<post_id>] arm: that arm takes any
+     remainder, so a sub-board path placed after it would be answered as a
+     post lookup under the post arm's gate. *)
+  | `GET, p when String.starts_with ~prefix:board_sub_board_detail_prefix p ->
+      gate (fun () ->
+        let status, json = board_sub_board_detail_json ~path:p in
+        h2_respond_json_value h2_reqd json ~status ~extra_headers:cors);
+      true
+
+  | `GET, p
+    when String.starts_with ~prefix:"/api/v1/board/" p
+         && String.length p > 14 ->
+      gate (fun () ->
+      with_optional_board_reaction_actor (fun reaction_actor ->
+      let post_id = String.sub p 14 (String.length p - 14) in
+      match
+        Server_board_post_response_format.of_query
+          (query_param httpun_request "format")
+      with
+      | Error error ->
+        h2_respond_json_value
+          h2_reqd
+          (Server_board_post_response_format.error_json error)
+          ~status:`Bad_request
+          ~extra_headers:cors
+      | Ok response_format ->
+        (match
+           board_comment_request_of_query
+             ~offset:(query_param httpun_request "comment_offset")
+             ~limit:(query_param httpun_request "comment_limit")
+         with
+         | Error error ->
+           h2_respond_json_value h2_reqd error
+             ~status:`Bad_request ~extra_headers:cors
+         | Ok comment_request ->
+           let voter = board_voter_query httpun_request in
+           let status, body =
+             board_post_detail_json ~comment_request
+               ?focused_comment:(query_param httpun_request "comment_focus") ~voter
+               ~reaction_actor ~config ~response_format ~post_id ()
+           in
+           h2_respond_json h2_reqd body ~status ~extra_headers:cors)));
+      true
+
+  | `GET, "/api/v1/karma" ->
+      gate (fun () ->
+        let karma_list = Board_dispatch.get_all_karma () in
+        let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+        let json = `Assoc [
+          ("karma", `List (List.map (fun (agent, k) ->
+            `Assoc [("agent", `String agent); ("karma", `Int k)]
+          ) sorted));
+        ] in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
+      true
+
+  | `GET, "/static/css/middleware.css" ->
+      gate (fun () ->
+      match Option.map read_file (playground_asset_path "static/css/middleware.css") with
+      | Some (Ok body) ->
+          h2_respond_bytes ~content_type:"text/css; charset=utf-8" h2_reqd body
+      | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
+      true
+
+  | `GET, "/static/js/middleware.js" ->
+      gate (fun () ->
+      match Option.map read_file (playground_asset_path "static/js/middleware.js") with
+      | Some (Ok body) ->
+          h2_respond_bytes ~content_type:"application/javascript; charset=utf-8" h2_reqd body
+      | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
+      true
+
+  | `GET, p
+    when String.starts_with ~prefix:"/dashboard/assets/" p
+         && String.length p > 18 ->
+      gate (fun () ->
+      let filename = String.sub p 18 (String.length p - 18) in
+      if not (Web_dashboard.is_public_asset_relative_path filename) then
+        h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+      else
+        (match Web_dashboard.load_dashboard_asset ("assets/" ^ filename) with
+         | Ok body ->
+             let ct = asset_content_type filename in
+             let is_compressible =
+               Filename.check_suffix filename ".js"
+               || Filename.check_suffix filename ".css"
+               || Filename.check_suffix filename ".svg"
+             in
+             let final_body, encoding_headers =
+               Http_response_payload.compress_body_on_cpu
+                 ~compress:is_compressible
+                 ~accept_encoding:
+                   (Httpun.Headers.get
+                      httpun_request.Httpun.Request.headers
+                      "accept-encoding")
+                 body
+             in
+             h2_respond_bytes ~compress:false ~content_type:ct
+               ~extra_headers:(("cache-control", "public, max-age=31536000, immutable")
+                 :: encoding_headers) h2_reqd final_body
+         | Error error ->
+           (match Web_dashboard.asset_error_http_status error with
+            | `Not_found ->
+              h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+            | `Service_unavailable ->
+              h2_respond_text
+                h2_reqd
+                "Dashboard assets unavailable; inspect /health dashboard_surface.recovery"
+                ~status:`Service_unavailable)));
+      true
+
+  | _ -> false

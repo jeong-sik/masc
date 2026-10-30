@@ -1,0 +1,39 @@
+{
+  "recorded_at_unix": 1793052052.254216,
+  "workflow": "Test",
+  "workflow_file": "test.yml",
+  "source_ref": "ci/schedule-durable-candidate-20261027",
+  "expected_head": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "suites": [
+    "test_tui_loading_notice"
+  ],
+  "existing_case_count": 8,
+  "minimal": true,
+  "argv": [
+    "gh",
+    "workflow",
+    "run",
+    "test.yml",
+    "--ref",
+    "ci/schedule-durable-candidate-20261027",
+    "-f",
+    "suite=test_tui_loading_notice",
+    "-f",
+    "minimal=true"
+  ],
+  "dispatch_returncode": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/40409087814\n",
+  "stderr": "",
+  "scope": "Existing production state-decision checks for target/generation/retained read; no new screen, wording, layout or PTY assertions. Not full CI or visible UI evidence.",
+  "completion": "not_observed",
+  "run_id": 40409087814,
+  "initial_run_observation": {
+    "conclusion": "",
+    "event": "workflow_dispatch",
+    "headBranch": "ci/schedule-durable-candidate-20261027",
+    "headSha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+    "name": "Test",
+    "status": "queued",
+    "url": "https://github.com/jeong-sik/masc/actions/runs/40409087814"
+  }
+}

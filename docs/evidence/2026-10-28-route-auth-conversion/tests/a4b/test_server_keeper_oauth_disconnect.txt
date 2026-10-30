@@ -1,0 +1,9 @@
+Testing `server_keeper_oauth_disconnect'.
+This run has ID `HDPGW4EZ'.
+
+  [OK]          detaching a Keeper from a provider          0   the route rem...
+  [OK]          detaching a Keeper from a provider          1   an undeclared...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/server_keeper_oauth_disconnect'.
+Test Successful in 0.272s. 2 tests run.
+exit=0

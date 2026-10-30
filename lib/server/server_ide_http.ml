@@ -1,0 +1,678 @@
+(** Server IDE HTTP — REST endpoints for the IDE plane: file activity,
+    keeper events, and presence.
+
+    Reads/writes are scoped to the workspace base resolved by
+    {!Server_routes_http_routes_workspace.classify_workspace_query}. *)
+
+open Masc_domain
+module Http = Http_server_eio
+
+let base_path_of_state state = (Mcp_server.workspace_config state).base_path
+
+(* The scope vocabulary is shared with the LSP proxy; both surfaces resolve
+   through [Server_ide_scope] so a reader cannot address one store here
+   and a different one there. Equality re-declaration keeps this module's
+   existing field access on [ide_error] unchanged. *)
+type ide_error = Server_ide_scope.ide_error =
+  { code : string
+  ; message : string
+  }
+
+let json_error ?code message =
+  let fields = [ "ok", `Bool false; "error", `String message ] in
+  let fields =
+    match code with
+    | None -> fields
+    | Some code -> fields @ [ "code", `String code ]
+  in
+  `Assoc fields
+;;
+
+let respond_ide_error ~status ~request err reqd =
+  Http.Response.json_value
+    ~status
+    ~request
+    (json_error ~code:err.code err.message)
+    reqd
+;;
+
+
+type ide_scope = Server_ide_scope.ide_scope = Scope_codebase of { slug : string }
+
+let codebase_of_ide_scope = Server_ide_scope.codebase_of_ide_scope
+let resolve_ide_scope_for_query = Server_ide_scope.resolve_ide_scope_for_query
+
+let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
+
+let file_activity_window_hours uri =
+  match Uri.get_query_param uri "window_hours" with
+  | None -> Ok Server_dashboard_http_keeper_api.file_changes_default_window_hours
+  | Some raw -> (
+      match float_of_string_opt (String.trim raw) with
+      | Some hours when hours > 0. ->
+        Ok (Float.min hours Server_dashboard_http_keeper_api.file_changes_max_window_hours)
+      | Some _ | None ->
+        Error (Printf.sprintf "window_hours must be a positive number: %s" raw))
+
+let required_query_param uri name =
+  match Uri.get_query_param uri name with
+  | Some raw when String.trim raw <> "" -> Ok (String.trim raw)
+  | Some _ | None -> Error (Printf.sprintf "%s is required" name)
+
+let optional_query_param uri name =
+  match Uri.get_query_param uri name with
+  | Some raw when String.trim raw <> "" -> Some (String.trim raw)
+  | Some _ | None -> None
+
+let canonical_path path =
+  try Unix.realpath path with
+  | Unix.Unix_error _ -> path
+
+let find_registered_repository ~base_path ~repo_id =
+  match Repo_store.load_all ~base_path with
+  | Error detail -> Error (`Unavailable detail)
+  | Ok repositories -> (
+      let matches =
+        match repo_id with
+        | Some repo_id ->
+          List.filter
+            (fun (repository : Repo_manager_types.repository) ->
+              String.equal repository.id repo_id)
+            repositories
+        | None ->
+          let project_path = canonical_path base_path in
+          List.filter
+            (fun (repository : Repo_manager_types.repository) ->
+              String.equal
+                (canonical_path (Repo_store.local_path ~base_path repository))
+                project_path)
+            repositories
+      in
+      match matches with
+      | [] ->
+        Error
+          (`Not_found
+            (match repo_id with
+             | Some repo_id -> "repository is not registered: " ^ repo_id
+             | None ->
+               "the project base path is not a registered repository checkout"))
+      | _ :: _ :: _ ->
+        Error
+          (`Ambiguous
+            (match repo_id with
+             | Some repo_id ->
+               "more than one registered repository uses id " ^ repo_id
+             | None ->
+               "more than one registered repository resolves to the project base path"))
+      | [ repository ] -> Ok repository)
+
+(* File activity keys rows by codebase as well as repository, so it also needs
+   the remote's canonical form. Repository activity filters by the exact
+   repository ID alone and uses [find_registered_repository] directly. *)
+let resolve_file_activity_repository ~base_path ~repo_id =
+  match find_registered_repository ~base_path ~repo_id with
+  | Error (`Unavailable _ | `Not_found _ | `Ambiguous _ as error) -> Error error
+  | Ok (repository : Repo_manager_types.repository) -> (
+      match Agent_observation.canonical_url_of_remote repository.url with
+      | Some codebase -> Ok (repository, codebase)
+      | None ->
+        Error
+          (`No_codebase
+            (Printf.sprintf
+               "repository %s has no canonical codebase"
+               repository.id)))
+
+let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
+  let tally = Keeper_tool_call_log.file_change_tally ~window_hours () in
+  let changes =
+    Keeper_tool_call_file_change.for_repo_file
+      ~repo_id ~relative_path:file_path tally.changes
+  in
+  let incomplete =
+    Keeper_tool_call_file_change.unreadable_for_repo_file
+      ~repo_id ~relative_path:file_path tally.unreadable_rows
+  in
+  let count_reason reason =
+    List.fold_left
+      (fun total row -> if row.Keeper_tool_call_file_change.ur_reason = reason then total + 1 else total)
+      0
+  in
+  let incomplete_over_budget = count_reason Keeper_tool_call_file_change.Input_exceeded_log_budget incomplete in
+  let incomplete_malformed =
+    List.fold_left
+      (fun total row ->
+        match row.Keeper_tool_call_file_change.ur_reason with
+        | Keeper_tool_call_file_change.Malformed _ -> total + 1
+        | Keeper_tool_call_file_change.Input_exceeded_log_budget -> total)
+      0 incomplete
+  in
+  let unattributed =
+    List.filter
+      (fun row -> Option.is_none row.Keeper_tool_call_file_change.ur_location)
+      tally.unreadable_rows
+  in
+  let unattributed_over_budget =
+    count_reason Keeper_tool_call_file_change.Input_exceeded_log_budget unattributed
+  in
+  let unattributed_malformed =
+    List.length unattributed - unattributed_over_budget
+  in
+  `Assoc
+    [ "schema", `String "masc.ide.file_activity.v1"
+    ; "codebase", `String codebase
+    ; "repo_id", `String repo_id
+    ; "file_path", `String file_path
+    ; "window_hours", `Float window_hours
+      (* Same source as the keeper route: the tally already partitions what
+         was read. *)
+    ; "calls_in_window", `Int (Keeper_tool_call_file_change.rows_counted tally)
+    ; "changes", `List (List.map Keeper_tool_call_file_change.to_json changes)
+    ; "incomplete_over_budget", `Int incomplete_over_budget
+    ; "incomplete_malformed", `Int incomplete_malformed
+    (* These rows lost even their independent action-radius target. Keep the
+       counts explicitly fleet-wide; do not imply that they belong to this
+       file or silently omit them. *)
+    ; "unattributed_over_budget", `Int unattributed_over_budget
+    ; "unattributed_malformed", `Int unattributed_malformed
+    ]
+;;
+
+let repository_activity_json ~repo_id ~window_hours =
+  (* The fleet tally advances its shared ledger cursor once, independent of
+     roster size or assignment. No keeper-specific scan or row cap. *)
+  let tally = Keeper_tool_call_log.file_change_tally ~window_hours () in
+  let in_repo = function
+    | Keeper_tool_call_file_change.In_repo location -> String.equal location.repo_id repo_id
+    | In_bundle _ | At_absolute_path _ -> false in
+  let changes = List.filter (fun (row : Keeper_tool_call_file_change.t) -> in_repo row.location) tally.changes in
+  let incomplete, unattributed = List.fold_left (fun (known, unknown) row ->
+      match row.Keeper_tool_call_file_change.ur_location with
+      | None -> known, unknown + 1
+      | Some location -> known + (if in_repo location then 1 else 0), unknown)
+      (0, 0) tally.unreadable_rows in
+  `Assoc ["repo_id", `String repo_id; "window_hours", `Float window_hours;
+          "changes", `List (List.map Keeper_tool_call_file_change.to_json changes);
+          "incomplete", `Int incomplete; "unattributed", `Int unattributed]
+;;
+
+let file_activity_cache_ttl_sec = 10.0
+
+let cached_file_activity_json ~base_path ~codebase ~repo_id ~file_path ~window_hours =
+  let cache_key =
+    "ide:file-activity:" ^ Yojson.Safe.to_string (`List [
+      `String base_path; `String codebase; `String repo_id; `String file_path;
+      `String (Printf.sprintf "%h" window_hours);
+    ])
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:file_activity_cache_ttl_sec
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+       file_activity_json ~codebase ~repo_id ~file_path ~window_hours))
+;;
+
+let parse_int_query uri name =
+  match Uri.get_query_param uri name with
+  | None -> Ok None
+  | Some raw ->
+    let value = String.trim raw in
+    (match int_of_string_opt value with
+     | Some n -> Ok (Some n)
+     | None -> Error (Printf.sprintf "%s must be an integer" name))
+;;
+
+let parse_positive_int_query ?(default = 50) ?max_value uri name =
+  match parse_int_query uri name with
+  | Error _ as err -> err
+  | Ok None -> Ok default
+  | Ok (Some n) when n > 0 ->
+    let n =
+      match max_value with
+      | Some max_value -> min n max_value
+      | None -> n
+    in
+    Ok n
+  | Ok (Some _) -> Error (Printf.sprintf "%s must be greater than 0" name)
+;;
+
+let parse_non_negative_int_query ?(default = 0) uri name =
+  match parse_int_query uri name with
+  | Error _ as err -> err
+  | Ok None -> Ok default
+  | Ok (Some n) when n >= 0 -> Ok n
+  | Ok (Some _) -> Error (Printf.sprintf "%s must be greater than or equal to 0" name)
+;;
+
+let parse_pagination_query ?max_limit uri =
+  match parse_positive_int_query ?max_value:max_limit uri "limit" with
+  | Error _ as err -> err
+  | Ok limit ->
+    (match parse_non_negative_int_query uri "offset" with
+     | Error _ as err -> err
+     | Ok offset -> Ok (limit, offset))
+;;
+
+let event_kind_param uri =
+  match Uri.get_query_param uri "kind" with
+  | None -> Ok None
+  | Some raw ->
+    (match String.trim raw with
+     | "" | "all" -> Ok None
+     | kind ->
+       (match Ide_bridge.event_kind_of_string kind with
+        | Some parsed -> Ok (Some parsed)
+        | None -> Error "kind must be tool or all"))
+;;
+
+let keeper_id_param uri =
+  match Uri.get_query_param uri "keeper_id" with
+  | Some k when String.trim k <> "" -> Some (String.trim k)
+  | _ ->
+    (match Uri.get_query_param uri "keeper" with
+     | Some k when String.trim k <> "" -> Some (String.trim k)
+     | _ -> None)
+;;
+
+let runtime_id_and_branch state =
+  let base = base_path_of_state state in
+  let runtime_id =
+    let base_name = Filename.basename base in
+    if base_name = "" then "masc-runtime" else base_name
+  in
+  let branch =
+    let head_path = Filename.concat base ".git/HEAD" in
+    if Fs_compat.file_exists head_path
+    then (
+      match Fs_compat.load_file head_path with
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn ->
+        Log.Server.warn
+          "build_presence_snapshot: read %s failed, defaulting branch to 'main': %s"
+          head_path
+          (Printexc.to_string exn);
+        "main"
+      | content ->
+        let ref_line =
+          match String.split_on_char '\n' content with
+          | first :: _ -> first
+          | [] -> ""
+        in
+        if String.starts_with ~prefix:"ref: refs/heads/" ref_line
+        then String.sub ref_line 16 (String.length ref_line - 16)
+        else ref_line)
+    else "main"
+  in
+  runtime_id, branch
+;;
+
+let build_presence_snapshot state =
+  let base = base_path_of_state state in
+  let runtime_id, branch = runtime_id_and_branch state in
+  let config = Mcp_server.workspace_config state in
+  let entries =
+    Workspace.get_active_agents config
+    |> List.filter_map (fun (agent : Masc_domain.agent) ->
+         let keeper_name =
+           Option.bind agent.meta (fun meta -> meta.Masc_domain.keeper_name)
+         in
+         let presence_status =
+           match agent.status with
+           | Masc_domain.Active | Masc_domain.Busy -> Some "active"
+           | Masc_domain.Listening -> Some "idle"
+           | Masc_domain.Inactive -> None
+         in
+         match keeper_name, presence_status with
+         | None, _ | _, None -> None
+         | Some keeper_id, Some status ->
+           let last_seen_ms =
+             Server_presence.last_seen_ms ~context:"IDE presence" agent
+           in
+           Some
+             (`Assoc
+               [ "keeper_id", `String keeper_id
+               ; "workspace_label", `String (Filename.basename base)
+               ; "branch", `String branch
+               ; "role", `String "keeper"
+               ; "status", `String status
+               ; "last_seen_ms", `Intlit (Int64.to_string last_seen_ms)
+               ]))
+  in
+  `Assoc
+    [ "runtime_id", `String runtime_id
+    ; "branch", `String branch
+    ; "supervisor", `String "local"
+    ; "connected", `Bool true
+    ; "entries", `List entries
+    ]
+;;
+
+(* ── POST /api/v1/ide/asks ── IDE milestone M1: the first IDE-to-masc write.
+
+   An editor posts what the operator is asking about; masc files it as a Todo
+   task created by "ide" and the fleet's existing pickup does the rest: a
+   keeper claims it, works it, completes it, and the IDE polls the outcome
+   through the dashboard task detail/history routes it already reads.
+
+   Routing is pool-wide on purpose. Tasks carry no pre-assignment -- a keeper
+   becomes the assignee by claiming -- so the body names no keeper and there
+   is no client-supplied identity to spoof, which is what the task-1736 B3
+   mutation contract asks of this plane's first mutation. Targeted asks
+   (name a keeper, or the keeper attached to this codebase) are M2. *)
+
+open Result.Syntax
+
+type ide_ask =
+  { question : string
+  ; file_path : string option
+  ; line : int option
+  ; context : string option
+  ; priority : int
+  }
+
+let ide_ask_default_priority = 3
+
+let ide_ask_created_by = "ide"
+
+let json_int_member_opt json name =
+  match Yojson.Safe.Util.member name json with
+  | `Null -> Ok None
+  | `Int n -> Ok (Some n)
+  | `Intlit raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some n -> Ok (Some n)
+     | None -> Error (Printf.sprintf "%s must be an integer" name))
+  | _ -> Error (Printf.sprintf "%s must be an integer" name)
+;;
+
+let json_string_member_opt json name =
+  match Yojson.Safe.Util.member name json with
+  | `Null -> Ok None
+  | `String raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then Ok None else Ok (Some trimmed)
+  | _ -> Error (Printf.sprintf "%s must be a string" name)
+;;
+
+let parse_ide_ask (json : Yojson.Safe.t) : (ide_ask, string) result =
+  match json with
+  | `Assoc _ ->
+    (match Yojson.Safe.Util.member "question" json with
+     | `String raw when not (String.equal (String.trim raw) "") ->
+       let question = String.trim raw in
+       let* file_path = json_string_member_opt json "file_path" in
+       let* line = json_int_member_opt json "line" in
+       let* context = json_string_member_opt json "context" in
+       let* priority =
+         match json_int_member_opt json "priority" with
+         | Error _ as error -> error
+         | Ok None -> Ok ide_ask_default_priority
+         | Ok (Some n) -> Ok n
+       in
+       (match line, file_path with
+        | Some n, _ when n < 1 -> Error "line must be a positive integer"
+        | Some _, None -> Error "line requires file_path"
+        | _, _ ->
+          (match priority with
+           | n when n < 1 || n > 5 ->
+             Error (Printf.sprintf "priority must be between 1 and 5, got %d" n)
+           | _ -> Ok { question; file_path; line; context; priority }))
+     | _ -> Error "question is required and must be a non-blank string")
+  | _ -> Error "the ask body must be a JSON object"
+;;
+
+(* The file reference rides the description because tasks carry no file
+   column of their own: what the keeper reads is where the operator was
+   looking, then what else the operator sent. *)
+let ide_ask_description { file_path; line; context; _ } =
+  let where =
+    match file_path, line with
+    | None, _ -> None
+    | Some path, None -> Some (Printf.sprintf "IDE ask from %s" path)
+    | Some path, Some line -> Some (Printf.sprintf "IDE ask from %s:%d" path line)
+  in
+  match where, context with
+  | None, None -> ""
+  | Some where, None -> where
+  | None, Some context -> context
+  | Some where, Some context -> where ^ "\n\n" ^ context
+;;
+
+let add_routes router =
+  router
+  |> Server_route.get Server_route.Public_read "/api/v1/agents" (fun state request reqd ->
+         let config = Mcp_server.workspace_config state in
+         let agents = Workspace.get_active_agents config in
+         let entries =
+           List.map
+             (fun (agent : Masc_domain.agent) ->
+                `Assoc
+                  [ "name", `String agent.name
+                  ; "status", `String (Masc_domain.agent_status_to_string agent.status)
+                  ; "current_task", Json_util.string_opt_to_json agent.current_task
+                  ; "model", `Null
+                  ])
+             agents
+         in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok (`Assoc [ "agents", `List entries ]))
+           reqd)
+  |> Server_route.get Server_route.Public_read "/api/v1/status" (fun state request reqd ->
+         let config = (Mcp_server.workspace_config state) in
+         let workspace_state = Workspace.read_state config in
+         let tempo = Tempo.get_tempo config in
+         let json = `Assoc [
+           "project", `String workspace_state.project;
+           "tempo_interval_s", `Float tempo.current_interval_s;
+           "paused", `Bool workspace_state.paused;
+         ] in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok json)
+           reqd)
+  (* Exact before/after content has the same admin gate as file activity. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/ide/repository-activity" (fun state _agent_name request reqd ->
+        let uri = Uri.of_string request.target in
+        match required_query_param uri "repo_id", file_activity_window_hours uri with
+        | Error detail, _ | _, Error detail ->
+          Http.Response.json_value ~status:`Bad_request ~request (json_error detail) reqd
+        | Ok repo_id, Ok window_hours ->
+          match find_registered_repository ~base_path:(base_path_of_state state) ~repo_id:(Some repo_id) with
+          | Error (`Unavailable detail) ->
+            Http.Response.json_value ~status:`Service_unavailable ~request (json_error detail) reqd
+          | Error (`Not_found detail) ->
+            Http.Response.json_value ~status:`Not_found ~request (json_error detail) reqd
+          | Error (`Ambiguous detail) ->
+            Http.Response.json_value ~status:`Conflict ~request (json_error detail) reqd
+          | Ok _ ->
+            let data = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              repository_activity_json ~repo_id ~window_hours) in
+            Http.Response.json_value ~compress:true ~request (json_ok data) reqd)
+  (* Same data, same gate as [/api/v1/keepers/:name/file-changes]: every
+     row carries the exact text a keeper wrote (before/after strings, whole
+     file bodies), fleet-wide over the window. A public read here was a
+     second door onto content the keeper route keeps behind CanAdmin. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/ide/file-activity" (fun state _agent_name request reqd ->
+        let uri = Uri.of_string request.target in
+        match required_query_param uri "file_path", file_activity_window_hours uri with
+        | Error detail, _ | _, Error detail ->
+          Http.Response.json_value
+            ~status:`Bad_request ~request (json_error detail) reqd
+        | Ok file_path, Ok window_hours ->
+          let base_path = base_path_of_state state in
+          let requested_repo_id = optional_query_param uri "repo_id" in
+          (match
+             resolve_file_activity_repository ~base_path
+               ~repo_id:requested_repo_id
+           with
+              | Error (`Unavailable detail) ->
+                Http.Response.json_value
+                  ~status:`Internal_server_error ~request
+                  (json_error ~code:"repository_catalog_unavailable" detail)
+                  reqd
+              | Error (`Not_found detail) ->
+                Http.Response.json_value
+                  ~status:`Not_found ~request
+                  (json_error ~code:"repository_not_found" detail)
+                  reqd
+              | Error (`Ambiguous detail) ->
+                Http.Response.json_value
+                  ~status:`Conflict ~request
+                  (json_error ~code:"repository_ambiguous" detail)
+                  reqd
+              | Error (`No_codebase detail) ->
+                Http.Response.json_value
+                  ~status:`Bad_request ~request
+                  (json_error ~code:"repository_has_no_codebase" detail)
+                  reqd
+              | Ok (repository, codebase) ->
+                let repo_id = repository.Repo_manager_types.id in
+                (match Agent_observation.Code_address.v ~codebase ~path:file_path with
+                 | Error invalid ->
+                   Http.Response.json_value
+                     ~status:`Bad_request ~request
+                     (json_error
+                        ~code:"invalid_file_path"
+                        (Agent_observation.Code_address.invalid_to_string invalid))
+                     reqd
+                 | Ok _ ->
+                   Http.Response.json_value ~compress:true ~request
+                     (json_ok
+                        (cached_file_activity_json ~base_path:(base_path_of_state state)
+                           ~codebase ~repo_id ~file_path ~window_hours))
+                     reqd)))
+  |> Server_route.get Server_route.Public_read "/api/v1/ide/events" (fun state request reqd ->
+         let uri = Uri.of_string request.target in
+         match event_kind_param uri with
+         | Error msg ->
+           Http.Response.json_value
+             ~status:`Bad_request
+             ~request
+             (json_error msg)
+             reqd
+         | Ok kind ->
+           (match parse_pagination_query ~max_limit:200 uri with
+            | Error msg ->
+              Http.Response.json_value
+                ~status:`Bad_request
+                ~request
+                (json_error msg)
+                reqd
+            | Ok (limit, offset) ->
+              let base = base_path_of_state state in
+              (match resolve_ide_scope_for_query ~state ~uri with
+               | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
+               | Ok scope ->
+                 (let keeper_id = keeper_id_param uri in
+                    let codebase = codebase_of_ide_scope scope in
+                    let events =
+                      Keeper_tool_call_log.read_addressed
+                        ~base_path:base
+                        ~codebase
+                        ?keeper_name:keeper_id
+                        ~limit
+                        ~offset
+                        ()
+                      |> Result.map_error (fun _ -> "Canonical tool activity is unavailable")
+                      |> (fun result -> Result.bind result Ide_bridge.events_of_rows)
+                    in
+                    match events with
+                    | Error _ ->
+                      Http.Response.json_value ~status:`Service_unavailable ~request
+                        (json_error ~code:"tool_activity_unavailable"
+                           "Canonical tool activity is unavailable") reqd
+                    | Ok events ->
+                    let kind_json =
+                      match kind with
+                      | Some k -> `String (Ide_bridge.event_kind_to_string k)
+                      | None -> `String "all"
+                    in
+                    let result =
+                      `Assoc
+                        [ "events", `List events
+                        ; "count", `Int (List.length events)
+                        ; "kind", kind_json
+                        ; "limit", `Int limit
+                        ; "offset", `Int offset
+                        ]
+                    in
+                    Http.Response.json_value
+                      ~compress:true
+                      ~request
+                      (json_ok result)
+                      reqd))))
+  (* [build_presence_snapshot] extracted in main — conflict resolved by taking
+     main's helper call instead of our inline construction. *)
+  |> Server_route.get Server_route.Public_read "/api/v1/ide/presence" (fun state request reqd ->
+         let snapshot = build_presence_snapshot state in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok snapshot)
+           reqd)
+  (* The plane's first mutation, so the first route behind CanAdmin: filing
+     a task spends keeper attention, and an unauthenticated caller could
+     flood the backlog the fleet claims from. *)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/ide/asks" (fun state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           match
+             (match Yojson.Safe.from_string body_str with
+              | json -> parse_ide_ask json
+              | exception Yojson.Json_error _ -> Error "the ask body must be JSON")
+           with
+           | Error detail ->
+             Http.Response.json_value
+               ~status:`Bad_request ~request:req
+               (json_error ~code:"invalid_ask" detail)
+               reqd
+           | Ok ask ->
+             let config = Mcp_server.workspace_config state in
+             (match
+                (match
+                   Task.Goal_assignment.add_task_with_result
+                     ~created_by:ide_ask_created_by
+                     config
+                     ~title:ask.question
+                     ~priority:ask.priority
+                     ~description:(ide_ask_description ask)
+                 with
+                 | result -> result
+                 | exception Workspace.Not_initialized ->
+                   Error
+                     (Workspace_task.Backlog_read_failed
+                        "workspace is not initialized"))
+              with
+              | Ok created ->
+                Http.Response.json_value
+                  ~status:`Accepted ~request:req
+                  (json_ok
+                     (`Assoc
+                       [ "ask_id", `String created.task_id
+                       ; "status", `String "todo"
+                       ]))
+                  reqd
+              | Error
+                  ((Workspace_task.Unknown_goal _
+                   | Workspace_task.Unknown_predecessor _
+                   | Workspace_task.Predecessor_not_terminal _) as error) ->
+                (* Unreachable through this route -- asks carry no goal or
+                   predecessor -- but the backend's error is closed and the
+                   mapping stays total if that ever changes. *)
+                Http.Response.json_value
+                  ~status:`Bad_request ~request:req
+                  (json_error ~code:"invalid_ask"
+                     (Workspace_task.add_task_error_to_string error))
+                  reqd
+              | Error
+                  ((Workspace_task.Goal_source_unavailable _
+                   | Workspace_task.Goal_lock_failed _
+                   | Workspace_task.Backlog_read_failed _
+                   | Workspace_task.Goal_link_write_failed _
+                   | Workspace_task.Backlog_write_failed _
+                   | Workspace_task.Unexpected_error _) as error) ->
+                Http.Response.json_value
+                  ~status:`Internal_server_error ~request:req
+                  (json_error ~code:"ask_store_unavailable"
+                     (Workspace_task.add_task_error_to_string error))
+                  reqd)))
+;;

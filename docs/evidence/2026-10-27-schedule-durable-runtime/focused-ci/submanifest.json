@@ -1,0 +1,99 @@
+{
+  "schema": "masc.schedule-durable-runtime.submanifest.v1",
+  "created_at_utc": "2026-10-26T21:27:13.036678+00:00",
+  "bundle": "focused-ci",
+  "scope": "Original PR46272 exact-head focused Test40394461863:44+66cases.",
+  "paths_relative_to": "delivery repository root; original inputs also carry their actual original checkout",
+  "files": [
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/focused-ci/download-manifest.json",
+        "bytes": 650,
+        "sha256": "e8cc816e399d95b14e8a288a86cb541fecf8430a4d5f1030172b802610b835de"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/artifacts/schedule-actual-repair-20261027/test40394461863/download-manifest.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-actual-repair-20261027/test40394461863/download-manifest.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence",
+          "bytes": 650,
+          "sha256": "e8cc816e399d95b14e8a288a86cb541fecf8430a4d5f1030172b802610b835de"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/focused-ci/selected-results.json",
+        "bytes": 1900,
+        "sha256": "5d13d789328e56a3748fd57c5562115b86d90e8fa1d4636b40a360f02842d1d4"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/artifacts/schedule-actual-repair-20261027/test40394461863/selected-results.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-actual-repair-20261027/test40394461863/selected-results.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence",
+          "bytes": 1900,
+          "sha256": "5d13d789328e56a3748fd57c5562115b86d90e8fa1d4636b40a360f02842d1d4"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/focused-ci/raw-suite-runner.txt",
+        "bytes": 43473,
+        "sha256": "03eb55364bcf04a870a097e1ecc32def7c9b0de09d2c24d56382817f5f0c138b"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/artifacts/schedule-actual-repair-20261027/test40394461863/member-0.txt",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-actual-repair-20261027/test40394461863/member-0.txt",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence",
+          "bytes": 43473,
+          "sha256": "03eb55364bcf04a870a097e1ecc32def7c9b0de09d2c24d56382817f5f0c138b"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/focused-ci/suite-runner-log.zip",
+        "bytes": 8393,
+        "sha256": "4d104784ef8830b373f695fc5e702df5afe98eaa97f1cf274a64ec63c8c688bc"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/artifacts/schedule-actual-repair-20261027/test40394461863/suite-runner-log.zip",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-actual-repair-20261027/test40394461863/suite-runner-log.zip",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence",
+          "bytes": 8393,
+          "sha256": "4d104784ef8830b373f695fc5e702df5afe98eaa97f1cf274a64ec63c8c688bc"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    }
+  ],
+  "omitted_originals": [],
+  "limits": [
+    "Not C2 CI, full suite CI, runtime correctness or release proof.",
+    "Original selected-results.json is itself a derivative and is copied unchanged."
+  ],
+  "metadata_note": "README.md, submanifest.json, capture-path-digests.json and current-locations.json are newly authored retention metadata. Captured path/digest records are copied unchanged. Original-input hashes and retained hashes are separate; a derivative never inherits the original byte identity."
+}

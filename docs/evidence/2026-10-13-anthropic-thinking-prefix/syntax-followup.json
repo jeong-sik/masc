@@ -1,0 +1,40 @@
+{
+  "observed_at": "2026-10-13T06:21:27.063710+00:00",
+  "base_head": "d229e2cc9d22498bd31074b70b9435412bfb37c9",
+  "code_diff_sha256": "95490b7b977b9497eb5ba09b50b26fd4a7daad7b5689138f1de031f8a97240c5",
+  "scope": "syntax only; source tests added, not executed locally",
+  "results": [
+    {
+      "file": "lib/keeper/keeper_librarian.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "lib/keeper/keeper_librarian.mli",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/agent/agent_turn.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/agent/agent_turn.mli",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/pipeline/pipeline.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/test/test_agent_turn.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/test/test_pipeline.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "test/test_keeper_librarian_retry.ml",
+      "exit_code": 0
+    }
+  ]
+}

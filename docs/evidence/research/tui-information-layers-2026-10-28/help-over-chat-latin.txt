@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints off                                                                      │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                  │
+│Candle details                                   ◆ Chat                                           │
+│Candle unavailable: live keeper status             Left             empty composer: open the      │
+│unavailable: fixture unavailable                                    Keeper list; with text: move  │
+│                                                                    the cursor left               │
+│                                                   Right            roster focused: return focus  │
+│                                                                    to the chat composer          │
+│                                                   Up / Down        roster focused: move; chat    │
+│                                                                    scrolled back: adjust by one  │
+│                                                                    line                          │
+│                                                   Enter            send from chat, or open the   │
+│                                                                    selected Keeper from the      │
+│                                                                    roster                        │
+│                                                   Ctrl-J           newline in the draft          │
+│                                                   Ctrl-Y           record into the draft; again  │
+│                                                                    to stop and keep what was     │
+│  [lines 2-17/1087]                                                                               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  TUI ce29779 ≠ server fixture (generations differ)  ?:help
+ › to fixture   (i to write)

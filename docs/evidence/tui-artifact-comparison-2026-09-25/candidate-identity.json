@@ -1,0 +1,34 @@
+{
+  "manifest": {
+    "commit": "e25a54d8b38409ecb0c5244b3e80a9af23f83afe",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "a90fa72a0774ef50f912c5302f8db4a2cf5508c1edb13dda9f72820445b2ce99",
+      "masc_tui.exe": "f510bb38826d95ab99f1497d046d303de2e24ea927d0e811fd76e0a1b6f04727",
+      "masc_browser_host.exe": "402c82f285bd0c3f38db5065ae853ddc6eaf829e1c8a9b16640e15742b305515"
+    }
+  },
+  "artifact": {
+    "id": 10816817527,
+    "node_id": "MDg6QXJ0aWZhY3QxMDgxNjgxNzUyNw==",
+    "name": "runtime-probe-macos-arm64-e25a54d8b38409ecb0c5244b3e80a9af23f83afe-attempt-1",
+    "size_in_bytes": 66642634,
+    "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10816817527",
+    "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10816817527/zip",
+    "expired": false,
+    "digest": "sha256:2360ee08e6be6162607c9955fc0aa7bc64b119be89569894eec1a38ee7f3bd97",
+    "created_at": "2026-09-24T15:40:33Z",
+    "updated_at": "2026-09-24T15:40:33Z",
+    "expires_at": "2026-10-01T15:40:25Z",
+    "workflow_run": {
+      "id": 36020841971,
+      "repository_id": 1136640865,
+      "head_repository_id": 1136640865,
+      "head_branch": "perf/runtime-candidate-20260925",
+      "head_sha": "e25a54d8b38409ecb0c5244b3e80a9af23f83afe"
+    }
+  },
+  "binary": "/Users/runner/work/masc/masc/runtime-candidate/masc_tui.exe"
+}

@@ -1,0 +1,52 @@
+{
+  "inspected_head": "d069323ed726e7d8224d1c7a8b13397219cc0a00",
+  "reused_build_checkout": "90269c9233e34ab22940a4e8d5ca386033916d8c",
+  "scope": "Source bytes matched in the reused build tree; not a clean build or installed-runtime proof.",
+  "files": [
+    {
+      "path": "packages/agent_core/lib/llm_provider/backend_openai_parse.ml",
+      "sha256": "2418d5dee913703541e992edcd23fd56fa8621ce53123579b8a3fcbdae0228d5",
+      "matches_reused_build_source": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/backend_openai_serialize.ml",
+      "sha256": "e8489f7d80c14b61652a0790beef81931ca3f274ae8fac6c774cbc778ee9c75e",
+      "matches_reused_build_source": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/inline_reasoning_split.ml",
+      "sha256": "bb5bdef078173fef88efb1ecd2e5d68d7f73291d8bdb28bbfd617be6facfeac7",
+      "matches_reused_build_source": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/reasoning_dialect.ml",
+      "sha256": "0b68508e25bb0e1e009ce96040af2f4bbbd7c0e07bd432d4b5338991be9094b7",
+      "matches_reused_build_source": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/types.ml",
+      "sha256": "df4627969e180764cbaceb334398c9cc4aec0c1b3d8ac8e876f43662c4df9d63",
+      "matches_reused_build_source": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_common.ml",
+      "sha256": "326e1c6e19e103f5cebe6dcc29520331700497a56314d82447a1dcf68b58fd46",
+      "matches_reused_build_source": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/backend_openai_request.ml",
+      "sha256": "45c06de11cca687713fe7179ef03da56def9ad728ed9284a5635523fe9c972b8",
+      "matches_reused_build_source": true
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_state.ml",
+      "sha256": "414af22898aeaf78c73f89e13e52a8a78ee2f8c06fe0327fc38b00f7fffef334",
+      "matches_reused_build_source": true
+    },
+    {
+      "path": "packages/agent_core/models.toml",
+      "sha256": "88b702fcc77c085cae3b4e718a97afb2b213bd36ec0b60a2654b5e6c9a43344d",
+      "matches_reused_build_source": true
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+name = "masc_keeper_delegate_status"
+description = """
+Read your Keeper chat operation by exact target and operation_id.
+
+For a succeeded operation, completed_reply returns the original full assistant \
+reply for its exact outcome_ref, or an explicit unavailable reason. Queue \
+completion previews may be shortened. Read the full reply here before acting \
+on a shortened review; do not delegate again or relay it through Board merely \
+to retrieve the existing answer."""
+additional_properties = false
+
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 12 turns needed it across 6317 provider requests, and its
+# 617 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 12 turns and saves the 617 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
+defer_loading = true
+[[params]]
+name = "target"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params]]
+name = "kind"
+type = "string"
+required = true
+enum = ["keeper"]
+
+[[params.params]]
+name = "name"
+type = "string"
+required = true
+
+[[params]]
+name = "operation_id"
+type = "string"
+required = true

@@ -1,0 +1,19 @@
+{
+  "source_commit": "9109071810955b29163077ba3837e586d0118739",
+  "baseline_export_source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+  "modified_paths": [
+    "SKILL.md"
+  ],
+  "old_sha256": "8277e8b890542117d8f748967bf2c019cccf444bd8fa8a4aa4613d421f684671",
+  "new_sha256": "1d6005337db068c11c049f0a3aef0559b6298fa62215cb08581f169fef9e1a02",
+  "package_sha256": {
+    "SKILL.md": "1d6005337db068c11c049f0a3aef0559b6298fa62215cb08581f169fef9e1a02",
+    "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972",
+    "references/composition.md": "661203a7464152b506f7f62e480e3f9d903f4e428ba94918e291d06132b2e37a",
+    "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+    "references/extraction.md": "a2ad35c4a5b0079e8639b9962ef6f675f8a747ef382bacb9e8d871887c7fbf3f",
+    "references/observation.md": "5685ef16c9f0eb4eed1d432d2231211c22495bc9ca8ddbce5be6b4ac5309e0ea",
+    "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77"
+  },
+  "scope": "Filesystem instruction override only; baseline bundle.json remains the original binary export. All other package files and binaries are unchanged."
+}

@@ -1,0 +1,10 @@
+{
+  "normal_and_append": "pass",
+  "unchanged_files": 4,
+  "append_only_jsonl": [
+    "config/keepers/editor.memory-journal.jsonl"
+  ],
+  "ancestor_symlink": "rejected without receipt",
+  "state_symlink": "rejected without receipt",
+  "scope": "owned synthetic directory only; production BASE untouched"
+}

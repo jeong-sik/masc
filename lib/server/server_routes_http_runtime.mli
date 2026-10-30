@@ -1,0 +1,437 @@
+(** Server_routes_http_runtime — runtime route handlers for the
+    HTTP/1.1 listener (health / liveness / readiness / OPTIONS) +
+    shared helpers used by sister route modules.
+
+    Open'd by {!Server_routes_http_routes_frontend} and
+    {!Server_routes_http_routes_activity} so all top-level
+    bindings are part of the public surface.  The Http module
+    alias stays private. *)
+
+val is_dashboard_spa_deep_link : string -> bool
+(** [is_dashboard_spa_deep_link path] returns [true] iff [path]
+    is a dashboard SPA deep link that should be served by the
+    SPA shell rather than rejected as 404.
+
+    Three rules pinned at the contract seam:
+    - starts with [/dashboard/]
+    - NOT a [/dashboard/assets/] path (those have their own
+      asset handler)
+    - NOT [/dashboard/credits] (which has a dedicated handler)
+
+    A future "let's add /dashboard/api/..." route reopens this
+    classification — pinning so the SPA fallback does not
+    accidentally swallow API routes. *)
+
+(** {1 CORS} *)
+
+val cors_preflight_headers : string -> (string * string) list
+(** [cors_preflight_headers origin] returns the 4-header
+    CORS preflight response for [OPTIONS] requests:
+    [access-control-allow-origin] / [-allow-methods]
+    ([GET, POST, DELETE, OPTIONS]) / [-allow-headers] /
+    [-expose-headers] ([Mcp-Session-Id, Mcp-Protocol-Version]).
+    Pinned method set + exposed headers are the operator-visible
+    contract — runbook integrations key off these literals. *)
+
+(** {1 JSON-RPC error envelope} *)
+
+val json_rpc_error : Mcp_error_code.t -> string -> string
+(** [json_rpc_error code message] returns the canonical
+    JSON-RPC 2.0 error envelope as a string:
+    [{"jsonrpc":"2.0","error":{"code":<code>,"message":"<msg>"},"id":null}].
+    Delegates to {!Mcp_error_code.jsonrpc_error_body}.
+    Message is `String.escaped`-quoted; callers must not pre-
+    escape. *)
+
+(** {1 Server uptime} *)
+
+val server_start_time : float
+(** Captured at module init via {!Unix.gettimeofday}.  The
+    [/health] endpoint computes uptime as
+    [now - server_start_time].  Pinned as a float because the
+    health renderer formats with second precision (no micro). *)
+
+val configured_http_port : unit -> int
+val configured_http_host : unit -> string
+(** Aliases over {!Env_config_core.masc_http_port_int} /
+    {!Env_config_core.masc_host}.  Each call re-reads the env
+    var, supporting tests that override mid-process. *)
+
+val advertised_host_port :
+  request_authority:Server_request_authority.authority -> string * int
+(** [advertised_host_port ~request_authority] returns the
+    [(canonical_host, port)] pair the server should advertise
+    in JSON projections.  The authority was validated at request entry;
+    this function never reads wire headers. *)
+
+val advertised_base_url :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  string
+(** [advertised_base_url ~request_authority request] returns the
+    browser-visible HTTP(S) base URL.  Both scheme and authority come from the
+    typed trusted request-entry value; untrusted forwarded headers are not
+    scheme inputs. *)
+
+(** {1 Discovery / status JSON} *)
+
+val websocket_discovery_json :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [websocket_discovery_json ~request_authority request] returns the WebSocket
+    discovery payload using {!advertised_host_port}.  Always
+    sets [include_configured = true] so dashboards see the
+    enabled / runtime-listening pair.  Used by [GET /ws]
+    on both HTTP/1.1 and HTTP/2 listeners. *)
+
+val transport_json :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [transport_json ~request_authority request] returns the full transport status
+    JSON (HTTP + WS + protocol set).  Sub-projection used by
+    {!make_health_json}'s [transport] field. *)
+
+val agent_card_json :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [agent_card_json ~request_authority request] returns the public well-known MASC server
+    card served from [/.well-known/agent.json].  This route is public
+    discovery metadata; mutable operations still require normal tool auth. *)
+
+(** {1 Runtime subsystem helpers} *)
+
+(** {1 Health endpoints} *)
+
+val health_path_diagnostics :
+  unit -> Server_base_path_diagnostics.t
+(** [health_path_diagnostics ()] resolves the base-path
+    diagnostics for the [/health] response.  When the runtime
+    state is initialised, reads the immutable snapshot returned by
+    [Mcp_server.workspace_config]; otherwise falls back to the
+    default base path computed from env. *)
+
+val make_health_json :
+  ?listener:string ->
+  ?section_timings_ref:(string * int) list ref ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [make_health_json ?listener ~request_authority request] builds the full health diagnostics
+    JSON body.  [listener] defaults to ["http/1.1"] and is overridden to
+    ["h2"] by the H2 gateway.  This is the force-compute diagnostic builder
+    used by tests and snapshot refreshes.  The public [/health] route uses
+    {!make_health_response_json}; callers request cached full diagnostics with
+    [/health?full=1].
+
+    {2 Top-level keys (operator-visible contract)}
+
+    [status] / [server] / [version] / [release_version] /
+    [build] / [protocol] (default + listener + supported list) /
+    [transport] / [paths] / [internal_mcp_auth] / [uptime] /
+    [sse_clients] / [startup] / [subsystems] / [gc] /
+    [overall_status] / [operator_action_required] /
+    [operator_action_reasons] /
+    [keeper_fibers] / [fd_observation] / [fd_accountant] / [disk_observation] /
+    [keeper_fleet_safety] / [publication_recovery_activation] /
+    [keeper_reaction_ledger] / [keeper_terminal_effect_policy] /
+    [keeper_observability_artifacts] / [paused_keepers] /
+    [keeper_config_error_count] / [keeper_config_errors] /
+    [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
+    [keeper_config_schema_status] / [keeper_config_schema_blocking] /
+    [keeper_config_schema_terminal_reason] /
+    [keeper_config_operator_action_required] / [auxiliary_startup].
+
+    [auxiliary_startup] records synchronous startup attempts. Its [returned]
+    phase is not transport readiness or worker liveness. Private exceptions
+    and backtraces never enter this projection. The default probe reads the
+    current attempt snapshot; full-health retains its snapshot freshness
+    contract and rolls up observed startup failures.
+
+    [status] is the HTTP OK envelope/readiness status.  Full-health
+    operator diagnostics are summarized by [overall_status],
+    [operator_action_required], and [operator_action_reasons], so a live
+    server can remain probe-OK while still surfacing degraded keeper fleet
+    state at the top level.
+
+    {2 paused_keepers contract}
+
+    [paused_keepers.count] and [paused_keepers.names] are the union of
+    registry-visible paused keepers and durable [.masc/keepers/*.json]
+    metas with [paused = true].  The nested [registry_paused_*] and
+    [durable_*] fields keep the two sources inspectable so a paused keeper
+    removed from the live keepalive set does not disappear from [/health].
+    [autoboot_enabled_*] and [details] expose durable pause state without
+    changing it. [missing_pause_root_cause] is true when neither a typed latch
+    nor a runtime blocker explains the pause. [read_error_count]
+    surfaces corrupt durable meta instead of silently reporting a clean zero.
+
+    {2 fd_observation and keeper_fleet_safety contract}
+
+    [fd_observation] exposes the effective process [nofile] soft limit,
+    currently open FD count when available, the host kernel file-table snapshot
+    when available, and typed [EMFILE]/[ENFILE] observations. It never contains
+    a projected fleet cost or admission decision.
+
+    [fd_accountant] exposes observation scopes around spawn/HTTP/log activity:
+    process FD open/limit readings, per-kind active operations, and typed OS
+    resource-error counters. It never serializes or pre-admits those operations.
+
+    [disk_observation] exposes the raw filesystem-space probe and typed [ENOSPC]
+    count. It contains no free-space floor, cooldown, or admission decision.
+
+    [keeper_fleet_safety] compares configured, unpaused autoboot-enabled
+    keepers with the canonical executable keeper fiber count while separately
+    reporting durable paused keepers via [paused_autoboot_enabled_*] and
+    bootable keepers via [bootable_keeper_*].
+    The canonical reaction capacity and its shortfall use only the shared owner
+    execution snapshot's live [executable_keeper_fiber_count]. It reports
+    [blocked] when autoboot-enabled keepers exist but no executable fiber
+    remains, and [degraded] when live executable capacity is below
+    [target_reaction_capacity_count]. Phase counts do not determine executable
+    capacity. This builder supplies the registry phase snapshot. Current typed
+    [Turn_configuration_error] and [Official_client_recovery_required] causes on
+    non-paused Failing entries also require operator action, including manual
+    Keepers outside the autoboot set. Existing blocked-health and blocker
+    precedence rules still apply. [configuration_blocked_*] and
+    [all_target_keepers_configuration_blocked] describe autoboot targets.
+    [paused_autoboot_enabled_keeper_count] keeps operator-paused autoboot
+    keepers visible without counting them as reaction-capacity targets.
+
+    [keeper_reaction_ledger] summarizes recent durable stimulus -> reaction
+    rows per keeper.  It reports [degraded] when a persisted stimulus has no
+    later reaction/cursor/receipt row in the scanned window, making a stopped
+    reaction chain visible without scraping keeper-local JSONL files. *)
+
+val make_health_response_json :
+  ?timing:Server_timing.t ->
+  ?listener:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** [make_health_response_json ?listener ~request_authority request] is the public [/health]
+    renderer.  It returns {!make_health_probe_json} by default.  When the
+    request query contains [full=1] / [full=true], it returns the latest cached
+    full-health snapshot plus cheap request-local fields and marks the snapshot
+    for refresh when it is missing or stale.  The HTTP handler must not
+    synchronously run durable keeper scans; the Eio refresh loop started by
+    {!start_full_health_snapshot_refresh_loop} performs those scans. Optional
+    [timing] records only this request's work, never background refresh work.
+
+    A successful scan invalidated while running is still a measured
+    observation: publish its fields/time as [stale], retain the first stale
+    timestamp across unsuccessful attempts to obtain a current observation,
+    and request a successor. It never certifies the current generation. *)
+
+val make_health_response_body :
+  ?listener:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  string * (string * string) list
+(** Shared H1/H2 health JSON body and request-local Server-Timing headers.
+    Builds through {!make_health_response_json}, then serializes before emitting
+    the header. [health_response] is the total JSON-builder duration and overlaps
+    [health_build_identity], [health_paths], [health_internal_auth], and
+    [health_dashboard_surface]; [json_serialize] follows it. These monotonic wall
+    durations include suspension/rescheduling, and exclude work before the helper,
+    compression, validators, and response writing. No timing enters the cached
+    full-health snapshot or its background worker. *)
+
+val invalidate_full_health_snapshot : unit -> unit
+(** Mark the cached observation stale and request a background refresh after a
+    live state mutation. [full=1] retains its fields and measurement timestamp,
+    with stale metadata; only a cold cache returns warming placeholders.
+    A worker invalidated during its scan cannot certify a current snapshot.
+    Cancellation
+    does not interrupt it, and a caller outside Eio invalidates without waking
+    the refresh loop, which then refreshes at its next interval. *)
+
+val fleet_stream_hub : Fleet_stream_hub.t
+(** The fleet events the Keepers screen reads in place of polling
+    [/health?full=1] (RFC-0477). Every scan that stores a measured snapshot
+    tells it the fleet reading, and every failed or timed-out scan tells it the
+    failure, through the same two functions that publish the cached snapshot. A
+    subscriber that connects through {!Fleet_stream_hub.subscribe} sees the
+    state the cached snapshot would have shown, then each change. *)
+
+val start_full_health_snapshot_refresh_loop :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  request_authority:Server_request_authority.authority ->
+  unit
+(** Starts the Eio background refresh loop for cached [/health?full=1]
+    diagnostics.  The loop keeps heavy durable scans out of the HTTP request
+    path and stores stale/error metadata when refreshes fail or time out.  Its
+    projection context comes from the bootstrap trust policy, never a second
+    read of listener environment. *)
+
+module For_testing : sig
+  val reset_full_health_snapshot : unit -> unit
+  (** Clears the cached full-health snapshot and in-flight refresh marker. *)
+
+  val refresh_full_health_snapshot_now :
+    ?listener:string ->
+    request_authority:Server_request_authority.authority ->
+    Httpun.Request.t ->
+    unit
+  (** Synchronously recomputes the observation. A failed snapshot preserves the
+      last-good fields through the same publication boundary as the worker. *)
+
+  val mark_full_health_snapshot_failure : Proactive_refresh.failure -> unit
+  (** Records a failed background refresh without recomputing the snapshot. *)
+
+  val mark_full_health_refresh_wait_failure : Proactive_refresh.failure -> unit
+  (** Records the active worker's waiter failure once while its compute runs. *)
+
+  val full_health_refresh_timing : unit -> float * float * float
+  (** Returns [(interval_sec, timeout_sec, ttl_sec)] for full-health refresh. *)
+
+  val full_health_refresh_wakeup_coalesce_sec : unit -> float
+  (** Returns the fixed leading-edge coalescing bound for mutation wakes. *)
+
+  val run_full_health_refresh_worker :
+    sw:Eio.Switch.t ->
+    compute:(unit -> ((string * Yojson.Safe.t) list, Proactive_refresh.failure) result) -> unit
+  (** Runs an injected compute through the production full-health singleflight
+      coordinator. [Ok fields] supplies the measured fields, so observations
+      from successive workers can be distinguished. [Error failure] represents a completed compute that returned a
+      failed observation (not a thrown worker exception). The worker is attached
+      to [sw], not to a caller timeout. *)
+
+  val full_health_refresh_worker_stats : unit -> int * int * bool * int * bool * bool
+  (** Returns [(submissions, joins, active, invalidation_generation,
+      snapshot_present, refresh_requested)]. *)
+end
+
+val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list
+(** [keeper_fleet_runtime_resolution_fields ()] returns the health/fleet
+    safety subset projected into [/api/v1/dashboard/shell]'s
+    [runtime_resolution].  It intentionally flattens
+    [paused_keepers] to a count for the dashboard shell health chip while
+    [/health] keeps the richer paused keeper object.  The
+    [keeper_reaction_ledger] field keeps the same summary object as
+    [/health] so the dashboard can render pending durable stimuli without a
+    second endpoint.  [keeper_owner] mirrors the [/health] single-owner
+    scheduling and durable operation component without polling a second
+    endpoint.  [keeper_board_event_collection] mirrors the [/health] board
+    scanner failure component so the shell can show a reactive-board ingestion
+    fault without scraping logs or metrics.  [fd_accountant] is also projected here so the dashboard shell
+    can show the same backpressure source as [/health] without scraping
+    Otel_metric_store. *)
+
+val keeper_fleet_runtime_resolution_light_fields :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
+  unit -> (string * Yojson.Safe.t) list
+(** Like {!keeper_fleet_runtime_resolution_fields}, but omits the
+    reaction-ledger JSONL scan for the [/api/v1/dashboard/shell?light=true]
+    header hot path.  It keeps [keeper_owner] because the projection is
+    in-memory and cheap to read, and keeps
+    [keeper_board_event_collection] because the failure snapshot is in-memory
+    and cheap to read. *)
+
+val health_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** [health_handler request reqd] writes {!make_health_response_json} as the
+    response body. *)
+
+val liveness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** [liveness_handler request reqd] always responds [200] as
+    soon as the HTTP accept loop is running.  Does NOT depend
+    on server_state initialisation — Kubernetes / Railway
+    liveness probe target.  Body:
+    [{"live": true, "startup": <Server_startup_state.to_yojson>}]. *)
+
+val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** [readiness_handler request reqd] responds [200] only when
+    [Server_startup_state.state_ready] is [true].
+
+    | State | HTTP status | Body fields |
+    |---|---|---|
+    | ready | [200 OK] | [ready: true], [phase], [pid] |
+    | not ready | [503 Service Unavailable] | [ready: false], [phase], [elapsed_sec], [pid] |
+
+    [pid] is the answering server process, so [masc restart] can tell its
+    replacement's answer from the draining predecessor's on the same port.
+    Pinned at the contract seam — orchestrators (k8s, Railway)
+    key off the [200] vs [503] distinction. *)
+
+(** {1 Board} *)
+
+val board_comment_request_of_query :
+  offset:string option ->
+  limit:string option ->
+  (Board.Comment_page.request, Yojson.Safe.t) result
+(** Parse [comment_offset] and [comment_limit] from an HTTP query. An absent
+    offset reads the newest comments; explicit offset zero reads the oldest.
+    Invalid or out-of-bounds values return a JSON 400 body. *)
+
+val board_post_detail_json :
+  ?comment_request:Board.Comment_page.request ->
+  ?focused_comment:string ->
+  config:Workspace.config option ->
+  voter:string option ->
+  reaction_actor:string option ->
+  response_format:Server_board_post_response_format.t ->
+  post_id:string ->
+  unit ->
+  [> `OK | `Not_found | `Bad_request ] * string
+(** [board_post_detail_json ~voter ~reaction_actor ~response_format ~post_id] returns
+    [(status, json_string)] for [GET /api/v1/board/<post_id>].
+    When [voter] is supplied, post/comment rows include vote state for
+    that voter. [reaction_actor] independently selects the actor-aware
+    reaction state and must come from authenticated credential identity,
+    never a query parameter. When [config] is supplied, post rows include
+    contributor-quality projection fields.
+
+    [response_format] is decoded once at the HTTP boundary by
+    {!Server_board_post_response_format.of_query}; unsupported wire values are
+    rejected rather than silently projected as [nested].
+
+    | Format | Shape |
+    |---|---|
+    | {!Server_board_post_response_format.Flat} | post fields + [comments] and [comment_page] siblings |
+    | {!Server_board_post_response_format.Nested} | [{"post": ..., "comments": [...], "comment_page": {...}}] |
+
+    [comment_page] carries offset, returned, total and next_offset. By default
+    the page ends at the newest comment and contains at most 20; an explicit
+    [comment_offset] begins at that oldest-first position. [comment_context]
+    contains the same page plus its ancestors and the optional focused comment
+    with its ancestors, resolved from this one read. [comment_revision] identifies
+    the complete thread snapshot so clients can refuse mixed page generations.
+
+    {2 Status / body}
+
+    | Outcome | Status | Body |
+    |---|---|---|
+    | Post missing | [404 Not Found] | [{"error":"Post not found: <id>"}] |
+    | Offset past total | [400 Bad Request] | error and code |
+    | Found | [200 OK] | per response_format |
+
+    The post and its comments are read together under the Board store lock. *)
+
+val board_sub_board_detail_prefix : string
+(** Path prefix of [GET /api/v1/board/sub-boards/<id_or_slug>]. Both the
+    HTTP/1 router and the HTTP/2 gateway match this prefix before the
+    [GET /api/v1/board/<post_id>] arm, so a sub-board path never reaches the
+    post handler. *)
+
+val board_sub_board_detail_json :
+  path:string -> [> `OK | `Bad_request | `Not_found ] * Yojson.Safe.t
+(** [board_sub_board_detail_json ~path] answers
+    [GET /api/v1/board/sub-boards/<id_or_slug>] for both transports.
+
+    | Outcome | Status | Body |
+    |---|---|---|
+    | Empty id after the prefix | [400 Bad Request] | [{"error":"sub_board_id is required"}] |
+    | Unknown id or slug | [404 Not Found] | [{"error": <board error>}] |
+    | Found | [200 OK] | {!Board.sub_board_to_yojson} |
+    *)
+
+(** {1 OPTIONS} *)
+
+val options_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** [options_handler request reqd] handles [OPTIONS *] and
+    [OPTIONS <path>] CORS preflights.  It responds [204 No Content], reflecting
+    only origins admitted against the typed request authority, and always sets
+    [content-length: 0]. *)

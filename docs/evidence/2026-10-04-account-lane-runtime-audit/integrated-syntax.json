@@ -1,0 +1,356 @@
+{
+  "head": "a7377975fa7b83fcf00d5bc32e3a777aac938646",
+  "note": "Parsing and whitespace only; not an integrated typecheck or build",
+  "checks": [
+    {
+      "path": "bin/masc_tui.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_account_login.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_account_login.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_async_protocol.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_keys.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_loader.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_model_form.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_model_form.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_model_runtime_table.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_model_runtime_table.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_next_request_band.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_next_request_band.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_overview_providers.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_overview_providers.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_render.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_render_prim.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_runtime_evidence.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_runtime_evidence.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_usage_trend.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "bin/masc_tui_usage_trend.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/model_inference_metrics/model_inference_metrics.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/model_inference_metrics/model_inference_metrics_entry.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/model_inference_metrics/model_inference_metrics_entry.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/model_inference_metrics/model_inference_metrics_json.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/model_inference_metrics/model_inference_metrics_json.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/model_inference_metrics/model_inference_metrics_parser.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/model_inference_metrics/model_inference_metrics_reader.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_provider_usage_read.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_provider_usage_read.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_provider_usage_window.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_provider_usage_window.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_setup_batch.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_setup_spec.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_setup_spec.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_wizard_inventory.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/runtime/runtime_wizard_inventory.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/server/server_bootstrap_maintenance.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/server/server_dashboard_runtime_resolved_json.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/server/server_provider_usage_history.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_provider_runs.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/server/server_runtime_setup_actions.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/tui_decode_usage.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "lib/tui_decode_usage.mli",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_model_inference_metrics.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_provider_usage_snapshots.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_provider_usage_windows.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_runtime_codex_app_server.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_runtime_setup_batch.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_runtime_setup_spec.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_server_runtime_setup_actions.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_account_activation_pty.py",
+      "check": "Python AST",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_account_login.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_account_login_pty.py",
+      "check": "Python AST",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_model_form.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_model_runtime_table.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_next_request_band.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_overview_providers.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_quit_key_yields.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_runtime_evidence.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_runtime_evidence_pty.py",
+      "check": "Python AST",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_runtime_lane_editor.py",
+      "check": "Python AST",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_runtime_listing.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_runtime_status_pty.py",
+      "check": "Python AST",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_text_input_target.ml",
+      "check": "OCaml parsing",
+      "result": "pass"
+    },
+    {
+      "path": "test/test_tui_usage_studio_pty.py",
+      "check": "Python AST",
+      "result": "pass"
+    },
+    {
+      "path": "test/tui_keyboard_runtime.py",
+      "check": "Python AST",
+      "result": "pass"
+    }
+  ]
+}

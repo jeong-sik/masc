@@ -1,0 +1,190 @@
+(** [Keeper_checkpoint_store.classify_core_error] never returns [Not_found],
+    whatever the rendered detail string says: a missing checkpoint is decided
+    by the typed owned-file read before agent core runs, so any [core_error]
+    it sees is a real I/O, serialization or agent-core fault. Cold-start
+    absence is covered end to end by [load_agent_core] and
+    [load_agent_core_history_file]. *)
+
+module Store = Masc.Keeper_checkpoint_store
+
+(* Alcotest testable for [Store.checkpoint_load_error]. We only need
+   equality + a pretty printer for failure diagnostics; the variants
+   carry [string] payloads which is fine for value-level comparison. *)
+let pp_err fmt = function
+  | Store.Not_found -> Format.fprintf fmt "Not_found"
+  | Store.Superseded_version { expected; got } ->
+    Format.fprintf fmt "Superseded_version(expected=%d,got=%d)" expected got
+  | Store.Newer_version { expected; got } ->
+    Format.fprintf fmt "Newer_version(expected=%d,got=%d)" expected got
+  | Store.Store_error s -> Format.fprintf fmt "Store_error(%s)" s
+  | Store.Parse_error s -> Format.fprintf fmt "Parse_error(%s)" s
+  | Store.Io_error s -> Format.fprintf fmt "Io_error(%s)" s
+  | Store.Read_failed { detail; _ } -> Format.fprintf fmt "Read_failed(%s)" detail
+  | Store.Agent_core_error s -> Format.fprintf fmt "Agent_core_error(%s)" s
+  | Store.Objects_invalid error ->
+    Format.fprintf fmt "Objects_invalid(%s)" (Agent_core.Checkpoint_objects.load_error_to_string error)
+
+let load_err = Alcotest.testable pp_err ( = )
+
+let is_not_found = function Store.Not_found -> true | _ -> false
+let is_io_error = function Store.Io_error _ -> true | _ -> false
+let is_store_error = function Store.Store_error _ -> true | _ -> false
+let is_parse_error = function Store.Parse_error _ -> true | _ -> false
+let is_agent_core_error = function Store.Agent_core_error _ -> true | _ -> false
+
+(* ─── Invariant: classify_core_error never returns Not_found ──────── *)
+
+let check_not_not_found name detail =
+  let e = Agent_core.Error.Io (FileOpFailed { op = "load"; path = "p"; detail }) in
+  Alcotest.(check bool) name false (is_not_found (Store.classify_core_error e))
+
+let test_legacy_no_such_file_underscore () =
+  (* Previously string-matched as Not_found via the "no_such_file" prefix. *)
+  check_not_not_found "legacy no_such_file underscore prefix routes to Io_error"
+    "no_such_file: trace-xyz"
+
+let test_legacy_no_such_file_space () =
+  check_not_not_found "legacy 'No such file' phrase routes to Io_error"
+    "No such file or directory"
+
+let test_legacy_unix_error_enoent () =
+  check_not_not_found "legacy Unix_error(ENOENT prefix routes to Io_error"
+    "Unix_error (ENOENT, \"openat\", \"/tmp/x\")"
+
+let test_eio_io_fs_not_found_rendered () =
+  (* Exact detail string from /tmp/masc-6647-restart2.log. Under the new
+     contract this case is *unreachable* in practice (the [exists] gate
+     filters it), but if it does reach the classifier — e.g. a TOCTOU
+     race where the file was removed between [exists] and [load] — it is
+     a genuine [Io_error], not a cold-start absence. *)
+  check_not_not_found
+    "Eio.Io Fs Not_found rendered form routes to Io_error (not Not_found)"
+    "Eio.Io Fs Not_found Unix_error (No such file or directory, \
+     \"openat\", \"/p/trace.json\")"
+
+(* ─── Categorical routing on typed core_error variants ────────────── *)
+
+let test_io_file_op_failed_routes_io_error () =
+  let e =
+    Agent_core.Error.Io
+      (FileOpFailed { op = "load"; path = "/p/x"; detail = "EACCES" })
+  in
+  Alcotest.check load_err "FileOpFailed routes to Io_error"
+    (Store.Io_error "file load failed on /p/x: EACCES")
+    (Store.classify_core_error e)
+
+let test_io_validation_failed_routes_store_error () =
+  let e = Agent_core.Error.Io (ValidationFailed { detail = "bad schema" }) in
+  Alcotest.(check bool) "ValidationFailed routes to Store_error" true
+    (is_store_error (Store.classify_core_error e))
+
+let test_serialization_json_routes_parse_error () =
+  let e =
+    Agent_core.Error.Serialization (JsonParseError { detail = "EOF" })
+  in
+  Alcotest.(check bool) "JsonParseError routes to Parse_error" true
+    (is_parse_error (Store.classify_core_error e))
+
+let test_structured_failure_routes_without_private_evidence () =
+  let raw = "private-model-output-api-key-value" in
+  let error = Agent_core.Error.structured_output_parse_error
+      ~reason:Agent_core.Error.Invalid_json ~detail:raw ~raw in
+  match Store.classify_core_error error with
+  | Store.Parse_error message ->
+    Alcotest.(check string) "only public error text reaches checkpoint diagnostics"
+      (Agent_core.Error.to_string error) message
+  | other -> Alcotest.failf "wrong class: %s" (Store.checkpoint_load_error_to_string other)
+
+(* The two directions of a version mismatch need opposite answers, so they are
+   not one classification. An earlier canonical is replaceable: the load already
+   refused it and the keeper started fresh. A later one is not: an older binary
+   is reading a newer workspace, and overwriting or deleting it would destroy
+   history that binary can still read, so it is its own class, apart from the
+   corrupt payloads. *)
+let test_serialization_version_routes_by_direction () =
+  let mismatch ~got =
+    Store.classify_core_error
+      (Agent_core.Error.Serialization
+         (VersionMismatch { expected = 2; got }))
+  in
+  (match mismatch ~got:1 with
+   | Store.Superseded_version { expected; got } ->
+     Alcotest.(check (pair int int))
+       "an earlier version routes to Superseded_version, both numbers carried"
+       (2, 1) (expected, got)
+   | other ->
+     Alcotest.failf "an earlier version did not route to Superseded_version: %s"
+       (Store.checkpoint_load_error_to_string other));
+  (match mismatch ~got:3 with
+   | Store.Newer_version { expected; got } ->
+     Alcotest.(check (pair int int))
+       "a later version routes to Newer_version, both numbers carried"
+       (2, 3) (expected, got)
+   | other ->
+     Alcotest.failf "a later version did not route to Newer_version: %s"
+       (Store.checkpoint_load_error_to_string other));
+  Alcotest.(check bool) "an equal version cannot reach the classifier as a mismatch"
+    true
+    (is_parse_error (mismatch ~got:2))
+
+let test_serialization_unknown_variant_routes_parse_error () =
+  let e =
+    Agent_core.Error.Serialization
+      (UnknownVariant { type_name = "role"; value = "alien" })
+  in
+  Alcotest.(check bool) "UnknownVariant routes to Parse_error" true
+    (is_parse_error (Store.classify_core_error e))
+
+let test_internal_routes_agent_core_error () =
+  let e = Agent_core.Error.Internal "kaboom" in
+  Alcotest.(check bool) "Internal routes to Agent_core_error" true
+    (is_agent_core_error (Store.classify_core_error e))
+
+(* Negative-control: a permission failure must remain Io_error (not
+   Not_found, not Parse_error). *)
+let test_permission_denied_routes_io_error () =
+  let e =
+    Agent_core.Error.Io
+      (FileOpFailed
+         { op = "load"; path = "/p"; detail =
+             "Unix_error (EACCES, \"openat\", \"/p/trace.json\")" })
+  in
+  Alcotest.(check bool) "EACCES routes to Io_error" true
+    (is_io_error (Store.classify_core_error e))
+
+let () =
+  Alcotest.run "Keeper_checkpoint_classify"
+    [
+      ( "classify_core_error: no Not_found arm (RFC-0089 G4)",
+        [
+          Alcotest.test_case "legacy no_such_file underscore is Io_error" `Quick
+            test_legacy_no_such_file_underscore;
+          Alcotest.test_case "legacy 'No such file' is Io_error" `Quick
+            test_legacy_no_such_file_space;
+          Alcotest.test_case "legacy Unix_error(ENOENT is Io_error" `Quick
+            test_legacy_unix_error_enoent;
+          Alcotest.test_case "Eio.Io Fs Not_found rendered is Io_error" `Quick
+            test_eio_io_fs_not_found_rendered;
+        ] );
+      ( "classify_core_error: typed variant routing",
+        [
+          Alcotest.test_case "FileOpFailed -> Io_error" `Quick
+            test_io_file_op_failed_routes_io_error;
+          Alcotest.test_case "ValidationFailed -> Store_error" `Quick
+            test_io_validation_failed_routes_store_error;
+          Alcotest.test_case "JsonParseError -> Parse_error" `Quick
+            test_serialization_json_routes_parse_error;
+          Alcotest.test_case "structured failure keeps evidence private" `Quick
+            test_structured_failure_routes_without_private_evidence;
+          Alcotest.test_case
+            "VersionMismatch routes by direction: earlier is superseded, later              is a parse failure"
+            `Quick
+            test_serialization_version_routes_by_direction;
+          Alcotest.test_case "UnknownVariant -> Parse_error" `Quick
+            test_serialization_unknown_variant_routes_parse_error;
+          Alcotest.test_case "Internal -> Agent_core_error" `Quick
+            test_internal_routes_agent_core_error;
+          Alcotest.test_case "EACCES (FileOpFailed) -> Io_error" `Quick
+            test_permission_denied_routes_io_error;
+        ] );
+    ]

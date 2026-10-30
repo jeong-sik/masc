@@ -1,0 +1,34 @@
+{
+  "schema": "masc.owner-projection-index-helper-provenance.v1",
+  "baseline_ref": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+  "candidate_source_commit": "4d2fdfecdf9681d506c4ff0e9d76e9d89aadbee5",
+  "original_implementation_commit": "73acb6a9445e05ae9005cb9de7296c5c0cf214e5",
+  "candidate_source_files": {
+    "lib/keeper/keeper_owner_projection.ml": "f625a542b4aaced6974093660b85976f8d9fdd7f32effa30ce9291777572b445",
+    "lib/keeper/keeper_owner_projection.mli": "745a51f1ea694b3e7089e7afecaf94809b3b108fbf3ada83b85683b7633872ab",
+    "test/test_keeper_owner.ml": "f5f1b81631af5cf5bd501dce76e36582be736674a35d06e7dbcf9f722cc77f71"
+  },
+  "helper_plan_sha256": "5fa06bd0ec1f179f7b03923d0b25715463f2cb79beed999400d66cc24be4463e",
+  "helper_summary_sha256": "2e95907cafd339a3b7e5229d47ebe84dfec4e8fcf4634e1c09390205f41168c2",
+  "source_unchanged_after_helper": true,
+  "fixture_dependencies": {
+    "Keeper_owner": "distinct handles holding an Atomic int option projection",
+    "Keeper_owner_reducer.projection": "int option",
+    "Keeper_registry_types.canonical_base_path_exn": "identity on already canonical fixture keys; actual validation/environment/filesystem costs excluded",
+    "Set_util.StringMap": "exact current Map.Make(String) declaration"
+  },
+  "helper_audit": {
+    "local_readme": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-review-v1/README.md",
+    "readme_sha256": "789fdb4e1b6ced34aca5b066774f5143905f1c9ed865f76e3897c0608df48cba",
+    "scope": "Frozen whole-module interpreter fixture evidence; test repair is outside this audit."
+  },
+  "test_response": {
+    "original_test_sha256": "810572f2b035546b4cecdc531deee0b4f120505528c2cd85c2350e361eec335d",
+    "current_test_sha256": "f5f1b81631af5cf5bd501dce76e36582be736674a35d06e7dbcf9f722cc77f71",
+    "local_readme": "artifacts/runs/extreme-perf-20261026/owner-projection-map-review-response-v1/README.md",
+    "readme_sha256": "b8bd564a6107b758120aaad629d239b5ca899d56f94514b55d1ac555a52bbee5",
+    "response_diff_sha256": "e101596c43d9b835a85460bf225c7cfb2ce9830b76ec9aa929b59e8a24a51b00",
+    "scope": "A same-handle no-op concurrency fixture was replaced by actual per-round insert/remove/alternate-handle mutations. No production ML/MLI or helper run changed."
+  },
+  "runtime_scope": "No candidate Map native binary or runtime measurement is supplied by this bundle."
+}

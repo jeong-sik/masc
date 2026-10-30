@@ -1,0 +1,6 @@
+name = "keeper_lane_status"
+
+# Reachable inside a keeper's shell line: `masc lane status`.
+shell_command = "lane status"
+description = "Read observations the server already has about your execution lane. The shim probe describes the shared endpoint. The last dispatch belongs to this Keeper, but can be a preflight or another lane operation rather than Execute; it is not proof of GitHub access. A missing dispatch means none was recorded for this Keeper since the server started. A lane failure includes its class, detail, and operator guidance. Nothing here probes or changes state. Call it once after a lane error, and check the actual tool result before reporting success."
+additional_properties = false

@@ -1,0 +1,11 @@
+Frozen installed binary: 86751f610442e4d82992ebc54bf9eb8ba45ef6d2
+Binary SHA256: 96955f7800f497c831f6cd25c953d0143cc8c6441f0b7935d18198f49008760b
+Tools source blob matches current PR base179544426a: 582ee94f98dffda2b940e34f26c31e9323107ef2
+Original PTY byte SHA256: 65ffc62e12e0a088d21fe9242474e756edc0857a2ef1d5711dea992dfe58404d
+Repr artifact SHA256: 184a367f07ecdf27ef20698fe4da8c0d1423fd57525d51534b36a6646bd462e8
+Raw format: PTY_RAW_REPR followed by Python bytes repr; recover with ast.literal_eval.
+Two independent isolated80x18 color fixture captures, native PTY and browser PTY.
+Both show healthy Skill usage/source/rejection reading, path/diagnostic tails absent and revisions shortened.
+Browser fixture uses distinct config/rejection revisions; native capture preceded that fixture refinement.
+This is original metadata clipping only, not repaired-head or production evidence.
+Browser PNG SHA256: 903a5a33cb76b97eeae1d1123679af4c5e4155c24524a229c3e484b57611919f

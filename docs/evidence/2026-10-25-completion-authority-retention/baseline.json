@@ -1,0 +1,85 @@
+{
+  "scope": "Actual request presence and explicit counterevidence; no assertion that loss caused model decisions.",
+  "approval_carrier_source_sha256": "6378cdb632d592aeee8d6ba11215e1736a782bc36484626481e7cd1743be68ad",
+  "verified_request_observations": [
+    {
+      "request_id": "request-000021",
+      "sha256": "86ae740f7163adc5d3cc21e939ee9b2fdeec0b92db88c1772d7edb9235b3ee75",
+      "approval_notice_present": true,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000022",
+      "sha256": "0ec35201074f98808d1d290604083467abd01dfc5046d769f5d7d429c009d06d",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000023",
+      "sha256": "4d208f0a489b302db330195cc4cd46ee4599e4312ea138c8e1edf0fac070e2ff",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000024",
+      "sha256": "c179b9f38217e6f1de11ac468703df9de3993d86c13456923427d0790110e528",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000025",
+      "sha256": "b60e2af911abcc595fa7050e046af09f6f955776b3f5a23e7e26a05173a7364b",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000026",
+      "sha256": "c4bd3902dc861579b634e938baf88a1540de28238145349175f1f0b05cdec770",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000027",
+      "sha256": "53dd669a2c1d8804656a945a591e5570bf06b7f4ba32942a7f0917f8c66b8122",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000028",
+      "sha256": "41864f3050717dee51744e20c027bd4bc1249a9d83fc23440434cf5c5d52c74d",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    },
+    {
+      "request_id": "request-000029",
+      "sha256": "6a42002e32347db1c976614f3cff5276d8ff479c0876e6424fb888c85b2893ab",
+      "approval_notice_present": false,
+      "old_task_done_awaiting_feedback_present": true,
+      "current_goal_in_system": true
+    }
+  ],
+  "known_done_counterevidence": {
+    "sha256": "510413c39f5366142d279163843ebff1190b7e201e09c943d275fbba18ae91f7",
+    "request_id": "request-000029",
+    "returned_task_id": "task-001",
+    "returned_status": "done",
+    "returned_completed_at": "2026-10-24T16:33:21Z",
+    "subsequent_call_names": [
+      "keeper_task_done"
+    ]
+  },
+  "repair_base": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "observed_binary": {
+    "commit": "3014cfce79636f1e41cc39f6019a3428c6912145",
+    "executable_sha256": "bd9042e019d31c377e8c9ca72409bc5b152052dc79dd70621f027cc008c475b6",
+    "health_sha256": "2b86ed461ec86a582136c1ff5e27d8aaf3dc5f9eafdf1815af5306b8b56c1b8c"
+  }
+}

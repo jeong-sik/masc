@@ -1,0 +1,14 @@
+name = "keeper_voice_agent"
+description = """
+Get your own voice capability and configuration.
+
+Reports assigned voice, \
+available voices, active voice session state, available conversation modes, \
+and voice_loop guidance. Without MASC_VOICE_REALTIME_WS_URL, operator audio \
+is transcribed to normal keeper text turns and keeper output uses \
+keeper_voice_speak/dashboard audio clips. No network required."""
+
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+

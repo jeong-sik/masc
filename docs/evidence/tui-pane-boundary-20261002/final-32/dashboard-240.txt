@@ -1,0 +1,32 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [tui-audit-fixture]  17:10:15  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   p:Approvals / Questions
+   Health: ok · Candle ready: ?:Candle details
+   Work: 0 currently done in the last 24h · details in Work
+   Candle issued: 100.000
+   Candle burned: 10.000
+   Candle circulating: 90.000
+
+   Needs your decision
+    Approvals and questions: held calls not fully read; Gate queue not fully read; questions not fully read
+
+   Continue
+    Continue with alpha · this session only
+    New work  · choose a Keeper
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Refresh: 60s | Base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-audit-fixture-5ojbdz19 | Port: 65442
+ Choose a Keeper before writing · i:choose

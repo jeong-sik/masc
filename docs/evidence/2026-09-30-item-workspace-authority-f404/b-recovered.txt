@@ -1,0 +1,35 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha  Info  ▸Items  Sandbox  Settings  Secrets  GitHub  Identity  Channels  Automation  Runs                    
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+             ▄▄▄▄▄▄           Items 1/18 · j/k to preview                                                                     
+         ▄▀▀▀▀▀▀▀▀▀▀▀▀▄       Balance 7.500 Candle · preview only                                                             
+       ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄     > 1  face  glasses               2.000                                                          
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀      2  face  shades                2.000                                                          
+     ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄     3  face  eye_patch             2.000                                                          
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     4  face  plaster               2.000                                                          
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     5  face  freckles              2.000                                                          
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     6  face  beard                 2.000                                                          
+      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀      7  neck  scarf                 2.000                                                          
+       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       8  neck  bow_tie               2.000                                                          
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀         9  neck  medal                 2.000                                                          
+             ▀▀▀▀▀▀             10 head  bow                   2.000                                                          
+    Selected: 2.000                                                                                                           
+    Preview changes this picture only.                                                                                        
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+
+  MISMATCH local /tmp/build_adbe2c_dune/masc-tui-keyboard-rchzhvz9 (r:retry)  [ ]:tab  Left / Esc:back  q:quit  …?
+ › alpha — chat needs the server workspace for attachments and pasted files                                                   

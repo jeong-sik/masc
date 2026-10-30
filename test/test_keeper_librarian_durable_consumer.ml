@@ -1,0 +1,4869 @@
+module Original = Masc.Keeper_librarian_durable_capture
+open Alcotest
+
+module Workspace = Masc.Workspace
+module Consumer = Masc.Keeper_librarian_durable_consumer
+module Queue_refresh = Masc.Keeper_librarian_queue_refresh
+module Boundaries = Masc.Keeper_turn_boundaries
+module Progress = Masc.Keeper_librarian_progress
+module Store = Masc.Keeper_checkpoint_store
+module Keeper_chat_store = Masc.Keeper_chat_store
+module Keeper_external_attention = Masc.Keeper_external_attention
+module Keeper_counterpart_observation = Masc.Keeper_counterpart_observation
+
+let keeper_name = "durable-reader"
+
+let write_keeper_declaration config =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p (Filename.concat keepers_dir keeper_name);
+  let path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       Printf.fprintf
+         oc
+         "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"base\"\n"
+         keeper_name
+         "test durable Librarian"
+         "docker");
+  Masc.Keeper_types_profile.invalidate_keeper_profile_snapshots ()
+;;
+
+let with_workspace f =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  Eio_main.run @@ fun _env ->
+  let base_path = Filename.temp_dir "librarian-durable-consumer-" "" in
+  Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       let (_ : string) = Workspace.init config ~agent_name:None in
+       write_keeper_declaration config;
+       f config)
+;;
+
+let meta ?current_task_id trace_id =
+  let fields = [ "name", `String keeper_name; "trace_id", `String trace_id ] in
+  let fields =
+    match current_task_id with
+    | None -> fields
+    | Some task_id -> ("current_task_id", `String task_id) :: fields
+  in
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc fields)
+  with
+  | Ok meta -> meta
+  | Error detail -> failf "fixture metadata: %s" detail
+;;
+
+let write_meta ?current_task_id config trace_id =
+  match
+    Masc.Keeper_meta_store.replace_snapshot config (meta ?current_task_id trace_id)
+  with
+  | Ok () -> ()
+  | Error detail -> failf "write metadata: %s" detail
+;;
+
+let message marker =
+  Agent_core.Types.make_message
+    ~role:Agent_core.Types.User
+    [ Agent_core.Types.Text marker ]
+;;
+
+let checkpoint ~trace_id messages turn_count : Agent_core.Checkpoint.t =
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
+  ; session_id = trace_id
+  ; agent_name = keeper_name
+  ; model = "fixture-model"
+  ; system_prompt = None
+  ; messages
+  ; usage = Agent_core.Types.empty_usage
+  ; turn_count
+  ; created_at = Float.of_int turn_count
+  ; tools = []
+  ; tool_choice = None
+  ; disable_parallel_tool_use = false
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; reasoning_effort = None
+  ; enable_thinking = None
+  ; preserve_thinking = None
+  ; response_format = Agent_core.Types.Off
+  ; cache_system_prompt = false
+  ; context = Agent_core.Context.create_sync ()
+  ; pending_input = None; mcp_sessions = []
+  ; working_context = None
+  }
+;;
+
+let save_checkpoint config ~trace_id messages turn_count =
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  match
+    Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+      ~session_dir
+      ~history_retained:0
+      (checkpoint ~trace_id messages turn_count)
+  with
+  | Ok (Store.Saved _) -> ()
+  | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
+  | Error detail -> failf "save checkpoint: %s" detail
+;;
+
+let append_boundary ?(task_context = Masc.Keeper_turn_task_context.No_task) ?history_at_start config ~trace_id ~turn ~recorded_at messages =
+  let position =
+    match Boundaries.position_of_messages messages with
+    | Ok position -> position
+    | Error detail -> failf "boundary position: %s" detail
+  in
+  let record : Boundaries.record =
+    { recorded_at
+    ; event =
+        Boundaries.Turn_ended
+          { task_context; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          ; history_at_start =
+              (match history_at_start with
+               | Some history_at_start -> history_at_start
+               | None ->
+                 if turn = 1
+                 then Boundaries.Fresh_history
+                 else Boundaries.Continued_history)
+          ; position
+          }
+    }
+  in
+  match
+    Boundaries.append
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+      record
+  with
+  | Ok () -> ()
+  | Error error -> fail (Boundaries.append_error_to_string error)
+;;
+
+let read_progress config =
+  match
+    Progress.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+  with
+  | Ok progress -> progress
+  | Error error -> fail (Progress.read_error_to_string error)
+;;
+
+let text_markers (input : Masc.Keeper_librarian.input) =
+  List.concat_map
+    (fun (message : Agent_core.Types.message) ->
+       List.filter_map
+         (function
+           | Agent_core.Types.Text text -> Some text
+           | Agent_core.Types.Thinking _
+           | Agent_core.Types.ReasoningDetails _
+           | Agent_core.Types.RedactedThinking _
+           | Agent_core.Types.ToolUse _
+           | Agent_core.Types.ToolResult _
+           | Agent_core.Types.Image _
+           | Agent_core.Types.Document _
+           | Agent_core.Types.Audio _ -> None)
+         message.content)
+    input.messages
+;;
+
+let consume config commit =
+  match Consumer.consume_one ~config ~keeper_name ~commit with
+  | Ok outcome -> outcome
+  | Error error -> fail (Consumer.error_to_string error)
+;;
+
+let establish_progress config ~trace_id first =
+  write_meta config trace_id;
+  save_checkpoint config ~trace_id [ message first ] 1;
+  append_boundary config ~trace_id ~turn:1 ~recorded_at:1.0 [ message first ];
+  match consume config (fun _original -> Consumer.Memory_committed) with
+  | Consumer.Baseline_advanced progress | Consumer.Progress_advanced progress ->
+    check int "initial end" 1 progress.position.end_atom
+  | Consumer.Nothing_to_read
+  | Consumer.Official_advanced _
+  | Consumer.Pending
+  | Consumer.Memory_not_committed _ -> fail "initial range did not advance"
+;;
+
+module Historical = Masc.Keeper_librarian_task_context
+module Task_context = Masc.Keeper_turn_task_context
+
+let test_absent_admission_keeps_durable_progress () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-admission-not-recorded" in
+  establish_progress config ~trace_id "t1";
+  let first = [message "t1"] in
+  let messages = first @ [message "t2"] in
+  let record : Boundaries.record =
+    {recorded_at=2.;event=Boundaries.Turn_ended {
+      turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
+      task_context=Task_context.No_task;
+      history_at_start=Boundaries.history_at_start_of_messages first;
+      position=(match Boundaries.position_of_messages messages with
+        | Ok position -> position | Error detail -> fail detail)}} in
+  let json = match Boundaries.record_to_json record with
+    | `Assoc fields -> `Assoc (List.remove_assoc "task_context" fields)
+    | _ -> fail "boundary must be an object" in
+  let path = Boundaries.path_for_keepers_dir
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let oc = open_out_gen [Open_wronly; Open_append] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc (Yojson.Safe.to_string json ^ "\n"));
+  save_checkpoint config ~trace_id messages 2;
+  write_meta ~current_task_id:"task-current-unrelated" config trace_id;
+  let commits = ref 0 in
+  (match consume config (fun original ->
+    let input = Original.input original in
+    incr commits;
+    check (list string) "unread body selected exactly once" ["t2"] (text_markers input);
+    (match input.historical_task_contexts with
+     | [{Historical.scope={attribution=Historical.Observed {task_context; _}; _}; _}] ->
+       check bool "absence is not current Task or no Task" true
+         (task_context=Task_context.Admission_not_recorded)
+     | _ -> fail "missing explicit historical admission");
+    Consumer.Memory_committed) with
+   | Consumer.Progress_advanced progress ->
+     check int "durable reader advances" 2 progress.position.end_atom
+   | _ -> fail "unrecorded admission stopped durable reader");
+  check int "one commit" 1 !commits
+;;
+
+let historical_task task_id goal_id target =
+  let task_id = match Keeper_id.Task_id.of_string task_id with
+    | Ok id -> id | Error detail -> fail detail in
+  Task_context.Task {task_id;goals=Ok [{Task_context.goal_id;phase=Goal_phase.Executing;
+    criterion=Goal_store.Criterion {revision="original-" ^ goal_id;title=goal_id;
+      metric=Some "count";target_value=Some target}}]}
+
+let observed_task_ids contexts = List.filter_map (fun (entry : Historical.t) ->
+  match entry.scope.attribution with
+  | Historical.Observed {task_context=Task_context.Task {task_id;_};_} ->
+    Some (Keeper_id.Task_id.to_string task_id)
+  | Historical.Observed _ | Historical.Unattributed -> None) contexts
+
+let test_historical_contexts_in_one_batch ~missing_boundary () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-historical-contexts" in
+  establish_progress config ~trace_id "t1";
+  let first = [message "t1"] in
+  let tool_messages = if not missing_boundary then [] else
+    let module T = Agent_core.Types in
+    [ T.make_message ~role:T.Assistant
+        [T.ToolUse {id="read-1";name="read_file";input=`Assoc []}];
+      { (T.make_message ~role:T.Tool [T.ToolResult {tool_use_id="read-1";
+          content="source result";outcome=T.Tool_succeeded;json=None;content_blocks=None}])
+        with tool_call_id=Some "read-1" } ] in
+  let selected_first = message "t2" :: tool_messages in
+  let first_two = first @ selected_first in
+  let messages = first_two @ [message "t3"] in
+  let a = historical_task "task-a" "goal-a" "1" in
+  let b = historical_task "task-b" "goal-b" "2" in
+  if not missing_boundary then
+    append_boundary ~task_context:a
+      ~history_at_start:(Boundaries.history_at_start_of_messages first)
+      config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary ~task_context:b
+    ~history_at_start:(Boundaries.history_at_start_of_messages first_two)
+    config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  write_meta ~current_task_id:"task-current-unrelated" config trace_id;
+  let commits = ref 0 in
+  ignore (consume config (fun original ->
+    let input = Original.input original in
+    incr commits;
+    check bool "each selected message body occurs once" true
+      (input.messages = selected_first @ [message "t3"]);
+    check (list string) "gap splitting preserves tools once"
+      (if missing_boundary then ["read_file"] else [])
+      (List.map (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name) input.tool_observations);
+    check (list string) "source bodies are selected once" ["t2";"t3"] (text_markers input);
+    check (list string) "each turn retains its own Task" (if missing_boundary then ["task-b"] else ["task-a";"task-b"])
+      (observed_task_ids input.historical_task_contexts);
+    (match input.historical_task_contexts with
+     | [left;right] ->
+       check (pair int int) "first message association" (0,List.length selected_first) (left.first_message,left.after_message);
+       check (pair int int) "second message association" (List.length selected_first,List.length selected_first+1) (right.first_message,right.after_message);
+       check (pair int int) "earlier tools retain their own interval"
+         (0,if missing_boundary then 1 else 0)
+         (left.first_tool_observation,left.after_tool_observation);
+       check (pair int int) "later Task does not inherit earlier tools"
+         (left.after_tool_observation,left.after_tool_observation)
+         (right.first_tool_observation,right.after_tool_observation);
+       check bool "missing earlier boundary is an explicit gap" missing_boundary
+         (left.scope.attribution = Historical.Unattributed);
+       (match right.scope.attribution with
+        | Historical.Observed {turn_ref;task_context} ->
+          check int "right turn is T3" 3 (Ids.Turn_ref.absolute_turn turn_ref);
+          check bool "original criterion is retained" true (task_context=b)
+        | Historical.Unattributed -> fail "known T3 admission lost")
+     | _ -> fail "expected two distinct source contexts");
+    check bool "current Goal context stays separate" true (input.goal_context = Masc.Keeper_librarian.No_task);
+    let variables = Masc.Keeper_librarian.prompt_variables input in
+    check string "prompt carries exact context association"
+      (Yojson.Safe.to_string (Historical.to_json input.historical_task_contexts))
+      (List.assoc "historical_task_contexts" variables);
+    let history = List.assoc "conversation_history" variables in
+    check bool "existing message zero label identifies t2" true
+      (String_util.contains_substring history "[turn=0 role=user speaker=unknown] t2");
+    check bool "existing message one label identifies t3" true
+      (String_util.contains_substring history (Printf.sprintf "[turn=%d role=user speaker=unknown] t3" (List.length selected_first)));
+    Consumer.Memory_committed));
+  check int "one batch commits once" 1 !commits;
+  let expected_end = match Boundaries.position_of_messages messages with
+    | Ok (Boundaries.Atom_history {end_atom;_}) -> end_atom
+    | _ -> fail "fixture has no atom endpoint" in
+  check int "cursor reaches T3" expected_end (Option.get (read_progress config)).position.end_atom;
+  ignore (consume config (fun _original -> incr commits; Consumer.Memory_committed));
+  check int "drained sources do not call model again" 1 !commits
+;;
+
+let test_n_tick_reads_every_intermediate_turn () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-n-tick" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  let messages = first_two @ [ message "turn-3" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  let carried = ref [] in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       carried := text_markers input;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "all three turns reached" 3 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "unread range did not commit");
+  check (list string) "both unread turns are delivered" [ "turn-2"; "turn-3" ] !carried
+;;
+
+(* RFC §4.9, invariant I4. The count is read-only and comes from the same
+   files a pass reads: two turns end after the position, so two are behind,
+   and a pass that reads them leaves none. *)
+let test_unread_turns_counts_what_a_pass_has_left () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-unread" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  let messages = first_two @ [ message "turn-3" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  (match Consumer.unread_turns ~config ~keeper_name with
+   | Ok { atoms; official } ->
+     check int "two turns are behind" 2 atoms;
+     check int "no official turn" 0 official
+   | Error error -> fail (Consumer.error_to_string error));
+  (match consume config (fun _original -> Consumer.Memory_committed) with
+   | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "unread range did not commit");
+  match Consumer.unread_turns ~config ~keeper_name with
+  | Ok { atoms; official } ->
+    check int "nothing is behind after the pass" 0 atoms;
+    check int "and no official turn" 0 official
+  | Error error -> fail (Consumer.error_to_string error)
+;;
+
+let test_failed_commit_and_restart_retry_the_same_range () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-retry" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "retry-me" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let first = ref [] in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       first := text_markers input;
+       (Consumer.Memory_refused []))
+   with
+   | Consumer.Memory_not_committed _ -> ()
+   | Consumer.Pending
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Progress_advanced _ -> fail "failed commit advanced the pass");
+  let after_failure = read_progress config in
+  (match after_failure with
+   | Some progress -> check int "failed commit keeps progress" 1 progress.position.end_atom
+   | None -> fail "failed commit removed existing progress");
+  let after_restart = ref [] in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       after_restart := text_markers input;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "restart reaches retried turn" 2 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "restart did not retry unread range");
+  check (list string) "restart reads identical range" !first !after_restart
+;;
+
+(* #32461. A decode rejection is the one failure the write path can recover:
+   the commit below re-reads under the store lock and the quarantine branch in
+   [update_locked_with_error] moves the undecodable bytes aside, then the
+   replacement writes a fresh revision-1 snapshot. Feeding the empty current
+   in with no expected revision is what routes the pass through that branch
+   instead of skipping the write and leaving the keeper wedged. *)
+let test_undecodable_current_snapshot_routes_through_write_path_quarantine () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-undecodable-quarantine" in
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  (* A real writer produced a readable revision-2 snapshot; the next write
+     lands on a decode rejection when the file is damaged in place. *)
+  let write_claims claims =
+    let module Memory = Masc.Keeper_memory_os_types in
+    let facts =
+      List.map
+        (fun claim ->
+           Memory.observed
+             ~claim
+             ~category:Memory.Fact
+             ~now:1.
+             ~origin:{ kind = Memory.Authored; trace_id })
+        claims
+    in
+    match
+      Current.apply_disposition
+        ~revisions:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:1.
+        ~source:{ kind = Current.Librarian; trace_id }
+        ~new_claims:facts
+        ~absorbed:[]
+        ()
+    with
+    | Ok (disposition : Current.disposition) -> disposition.snapshot
+    | Error detail -> fail detail
+  in
+  let seeded = write_claims [ "seed fact" ] in
+  check int "seed revision" 1 seeded.revision;
+  (* The first pass commits its readable snapshot before the damage is
+     planted: it leaves a durable position to advance from, and a failed
+     pass here would narrow the next one to the oldest cut point. *)
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "undecodable" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let damaged = write_claims [ "seed fact"; "damaged" ] in
+  check int "damaged revision" 2 damaged.revision;
+  (* The counterpart reader insists both stores exist even when empty; the
+     fixture workspace has neither because no counterpart row was written. *)
+  Fs_compat.mkdir_p config.Workspace.base_path;
+  Fs_compat.mkdir_p
+    (Keeper_chat_store.chat_path
+       ~base_dir:config.Workspace.base_path
+       ~keeper_name
+     |> Filename.dirname);
+  Fs_compat.mkdir_p
+    (Keeper_external_attention.attention_path
+       ~base_path:config.Workspace.base_path
+       ~keeper_name
+     |> Filename.dirname);
+  let snapshot_path =
+    Filename.concat memory_keepers_dir (keeper_name ^ ".memory-current.json")
+  in
+  (match Fs_compat.save_file_atomic snapshot_path "{" with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  (* Positive control: the real store calls this undecodable. *)
+  (match
+     Current.read_for_keepers_dir ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "damaged snapshot unexpectedly decoded");
+  let commits = ref 0 in
+
+    let commit original =
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    incr commits;
+    match
+      Current.apply_disposition
+        ~revisions:[]
+        ?durable_range_id:range_id
+        ?official_range_id
+        ~absorbed:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:(Float.of_int !commits)
+        ~source:
+          { kind = Current.Librarian
+          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
+          }
+        ~new_claims:[]
+        ()
+    with
+    | Ok _ -> Consumer.Memory_committed
+    | Error detail -> fail detail
+  in
+  (match consume config commit with
+   | Consumer.Progress_advanced progress ->
+     check int "unread range advances" 2 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "undecodable snapshot blocked the pass");
+  check int "memory commit ran once" 1 !commits;
+  let recovered =
+    match
+      Current.read_for_keepers_dir ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
+    with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> fail "quarantine left no replacement snapshot"
+    | Error detail -> fail detail
+  in
+  check int "quarantine writes a fresh revision-1 snapshot" 1 recovered.revision;
+  let snapshot_basename = keeper_name ^ ".memory-current.json" in
+  check bool "the rejected bytes moved aside" true
+    (List.exists
+       (fun name ->
+          let prefix =
+            String.sub
+              name
+              0
+              (min (String.length name) (String.length snapshot_basename))
+          in
+          Fs_compat.file_exists (Filename.concat memory_keepers_dir name)
+          && String.equal prefix snapshot_basename
+          && not (String.equal name snapshot_basename))
+       (Array.to_list (Sys.readdir memory_keepers_dir)))
+;;
+
+(* An I/O failure is the other classification: the store the writer would
+   replace cannot even be read, so replacing it would destroy state blindly.
+   The pass must stop before any Memory commit and before its position moves,
+   and the offending path must survive for an operator. *)
+let test_unreadable_current_snapshot_stops_the_pass_before_commit () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-io-unreadable-stop" in
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "unreadable" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  Fs_compat.mkdir_p config.Workspace.base_path;
+  Fs_compat.mkdir_p
+    (Keeper_chat_store.chat_path
+       ~base_dir:config.Workspace.base_path
+       ~keeper_name
+     |> Filename.dirname);
+  Fs_compat.mkdir_p
+    (Keeper_external_attention.attention_path
+       ~base_path:config.Workspace.base_path
+       ~keeper_name
+     |> Filename.dirname);
+  let snapshot_path =
+    Filename.concat memory_keepers_dir (keeper_name ^ ".memory-current.json")
+  in
+  (* The snapshot path is a directory: every read of it fails with a
+     filesystem error, which is what a locked or unpluggable store looks
+     like from inside this process. *)
+  Fs_compat.mkdir_p snapshot_path;
+  (* Positive control: the classified read names this an I/O failure, not a
+     decode rejection. *)
+  (match
+     Current.read_classified ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
+   with
+   | Current.Io_unreadable _ -> ()
+   | Current.No_snapshot | Current.Readable _ | Current.Undecodable _ ->
+     fail "a directory in place of the snapshot was not classified as unreadable");
+  let commits = ref 0 in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun _original ->
+         incr commits;
+         Consumer.Memory_committed)
+   with
+   | Error (Consumer.Memory_snapshot_unreadable _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "an unreadable snapshot did not stop the pass");
+  check int "no Memory commit ran" 0 !commits;
+  (match read_progress config with
+   | Some progress ->
+     check int "the position stays before the unreadable snapshot" 1
+       progress.position.end_atom
+   | None -> fail "the stopped pass removed progress");
+  check bool "the offending path is untouched" true (Sys.is_directory snapshot_path)
+;;
+
+let test_committed_range_recovers_after_progress_write_failure () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let trace_id = "trace-post-commit-progress" in
+  establish_progress config ~trace_id "before";
+  let through_a = [ message "before"; message "commit-a" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 through_a;
+  save_checkpoint config ~trace_id through_a 2;
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  let commits = ref 0 in
+  let committed_inputs = ref [] in
+  let attempted_range = ref None in
+
+    let commit original =
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    incr commits;
+    committed_inputs := !committed_inputs @ [ text_markers input ];
+    attempted_range := range_id;
+    match
+      Current.apply_disposition ~revisions:[]
+        ?durable_range_id:range_id
+        ?official_range_id
+        ~absorbed:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:(Float.of_int !commits)
+        ~source:
+          { kind = Current.Librarian
+          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
+          }
+        ~new_claims:[]
+        ()
+    with
+    | Ok _ -> Consumer.Memory_committed
+    | Error detail -> fail detail
+  in
+  let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
+    Error
+      (Progress.Write_failed
+         { path = "injected-progress-write"; message = "post-commit failure" })
+  in
+  (match
+     Consumer.For_testing.consume_one_with_progress_writer
+       ~write_progress_store:fail_progress
+       ~write_official_progress_store:Masc.Keeper_librarian_official_progress.write
+       ~config
+       ~keeper_name
+       ~commit
+   with
+   | Error (Consumer.Progress_write_failed _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "read progress unexpectedly advanced after its write failed");
+  check int "Memory disposition committed once" 1 !commits;
+  (match read_progress config with
+   | Some progress -> check int "failed write keeps old progress" 1 progress.position.end_atom
+   | None -> fail "failed progress write removed the old position");
+  let committed_a =
+    match !attempted_range with
+    | Some range_id -> range_id
+    | None -> fail "Memory commit did not receive a range identity"
+  in
+  let receipt_after_commit =
+    match
+      Current.committed_durable_range
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~receipt_scope:(Workspace.keepers_runtime_dir config)
+    with
+    | Ok receipt -> receipt
+    | Error detail -> fail detail
+  in
+  (match receipt_after_commit with
+   | Some range_id ->
+     check int "receipt names range A" committed_a.end_atom range_id.end_atom
+   | None -> fail "Memory receipt did not retain range A");
+  let unrelated =
+    Memory.observed
+      ~claim:"unrelated writer"
+      ~category:Memory.Fact
+      ~now:3.0
+      ~origin:{ kind = Memory.Authored; trace_id }
+  in
+  (match
+     Current.upsert_fact
+       ~keepers_dir:memory_keepers_dir
+       ~keeper_id:keeper_name
+       ~now:3.0
+       ~source:{ kind = Current.Explicit_write; trace_id }
+       unrelated
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Current.upsert_error_to_string error));
+  (match
+     Current.committed_durable_range
+       ~keepers_dir:memory_keepers_dir
+       ~keeper_id:keeper_name
+       ~receipt_scope:(Workspace.keepers_runtime_dir config)
+   with
+   | Ok (Some range_id) ->
+     check int "explicit write preserves range A" committed_a.end_atom range_id.end_atom
+   | Ok None -> fail "a later Memory write erased the committed range receipt"
+   | Error detail -> fail detail);
+  let through_b = through_a @ [ message "commit-b" ] in
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 through_b;
+  save_checkpoint config ~trace_id through_b 3;
+  Consumer.For_testing.reset_process_state ();
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun _original ->
+         fail "restart submitted an already committed range again")
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "restart repairs only committed range A" 2 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "restart did not repair the committed range progress");
+  check int "restart does not write Memory again" 1 !commits;
+  let after_recovery =
+    match Current.read_for_keepers_dir ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> fail "Memory disappeared during progress recovery"
+    | Error detail -> fail detail
+  in
+  check int "progress recovery writes no Memory revision" 2 after_recovery.revision;
+  (match
+     Consumer.consume_one ~config ~keeper_name ~commit
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "next pass commits range B" 3 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "range B was not committed after A recovery");
+  check int "range B adds exactly one model commit" 2 !commits;
+  check (list (list string))
+    "model sees A once and then only B"
+    [ [ "commit-a" ]; [ "commit-b" ] ]
+    !committed_inputs
+;;
+
+let test_committed_wide_range_recovers_before_retry_narrowing () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-wide-receipt-recovery" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  let first_three = first_two @ [ message "turn-3" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 first_three;
+  save_checkpoint config ~trace_id first_three 3;
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  let commits = ref 0 in
+
+    let commit original =
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    incr commits;
+    match
+      Current.apply_disposition ~revisions:[]
+        ?durable_range_id:range_id
+        ?official_range_id
+        ~absorbed:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:(Float.of_int !commits)
+        ~source:
+          { kind = Current.Librarian
+          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
+          }
+        ~new_claims:[]
+        ()
+    with
+    | Ok _ -> Consumer.Memory_committed
+    | Error detail -> fail detail
+  in
+  let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
+    Error
+      (Progress.Write_failed
+         { path = "injected-progress-write"; message = "post-commit failure" })
+  in
+  (match
+     Consumer.For_testing.consume_one_with_progress_writer
+       ~write_progress_store:fail_progress
+       ~write_official_progress_store:Masc.Keeper_librarian_official_progress.write
+       ~config
+       ~keeper_name
+       ~commit
+   with
+   | Error (Consumer.Progress_write_failed _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "wide committed range did not hit progress failure");
+  check int "wide range committed once" 1 !commits;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun _original ->
+         fail "narrow retry recommitted the already committed wide range")
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "receipt repairs the wide endpoint" 3 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "wide receipt was not recovered before narrowing");
+  check int "receipt recovery performs no second Memory commit" 1 !commits
+;;
+
+(* The continuity round saves Memory itself for a range this round has not
+   committed, then publishes its snapshot. On 2026-09-25 the next durable
+   round sent the same atoms to the model again (jazz-developer: continuity
+   [6416,6455) at Memory revision 1444, durable [6416,6455) at 1447). Here the
+   durable round fails once over turns 2 and 3. The continuity round saves
+   turn 2 and publishes it, then saves turn 3 and stops before publishing, as
+   a server stop between the two writes would leave it. The durable rounds
+   that follow must reach the end of turn 3 without a model call: turn 2
+   through the snapshot, which outlives the receipt the WAL replaced, and
+   turn 3 through that receipt. *)
+let test_memory_the_continuity_round_saved_is_not_sent_again () =
+  with_workspace @@ fun config ->
+  let module Continuity = Masc.Keeper_librarian_continuity in
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-continuity-saved" in
+  establish_progress config ~trace_id "turn-1";
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  (* What the continuity round writes for one unit whose Memory no durable
+     receipt covers: Memory under its own receipt, then, unless stopped, the
+     snapshot. *)
+  let continuity_saves ~publish =
+    let prepared =
+      match Continuity.prepare ~config ~keeper_name ~trace_id () with
+      | Ok (Some prepared) -> prepared
+      | Ok None -> fail "the continuity round found no completed unit"
+      | Error detail -> failf "continuity prepare: %s" detail
+    in
+    let range_id =
+      match Continuity.memory_range_id ~config ~keeper_name prepared with
+      | Ok range_id -> range_id
+      | Error detail -> failf "continuity receipt identity: %s" detail
+    in
+    (match
+       Current.apply_disposition ~revisions:[]
+         ~durable_range_id:range_id
+         ~absorbed:[]
+         ~keepers_dir:memory_keepers_dir
+         ~keeper_id:keeper_name
+         ~now:(Float.of_int (Continuity.end_atom prepared))
+         ~source:{ kind = Current.Librarian; trace_id }
+         ~new_claims:[]
+         ()
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "continuity Memory save: %s" detail);
+    (if publish
+     then
+       match
+         Continuity.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared ~working_state:"continue"
+       with
+       | Ok _ -> ()
+       | Error detail -> failf "continuity publication: %s" detail);
+    Continuity.end_atom prepared
+  in
+  check int "the continuity round catches up to turn 1" 1 (continuity_saves ~publish:true);
+  let through_two = [ message "turn-1"; message "turn-2" ] in
+  let through_three = through_two @ [ message "turn-3" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 through_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 through_three;
+  save_checkpoint config ~trace_id through_three 3;
+  (match consume config (fun _original -> (Consumer.Memory_refused [])) with
+   | Consumer.Memory_not_committed _ -> ()
+   | Consumer.Pending
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Progress_advanced _ -> fail "the failing durable round advanced");
+  check int "the continuity round saves and publishes turn 2" 2
+    (continuity_saves ~publish:true);
+  check int "the continuity round saves turn 3 and stops before publishing" 3
+    (continuity_saves ~publish:false);
+  let sent = ref [] in
+
+    let commit original =
+    let input = Original.input original in
+    sent := !sent @ text_markers input;
+    Consumer.Memory_committed
+  in
+  (* One advance through the snapshot, one through the receipt, then nothing
+     is left. A round that reads again would reach the model instead. *)
+  let rounds_until_settled = 3 in
+  let rec drain remaining =
+    if remaining = 0
+    then fail "the durable rounds did not settle"
+    else (
+      match consume config commit with
+      | Consumer.Nothing_to_read -> ()
+      | Consumer.Progress_advanced _ -> drain (remaining - 1)
+      | Consumer.Baseline_advanced _
+      | Consumer.Official_advanced _
+      | Consumer.Pending
+      | Consumer.Memory_not_committed _ -> fail "unexpected durable outcome")
+  in
+  drain rounds_until_settled;
+  check (list string) "no atom the continuity round saved reaches the model again" [] !sent;
+  match read_progress config with
+  | Some progress ->
+    check int "the durable position ends past turn 3" 3 progress.position.end_atom
+  | None -> fail "the durable position disappeared"
+;;
+
+let test_receipt_does_not_cross_restarted_history_with_repeated_endpoint () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-repeated-restart" in
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  establish_progress config ~trace_id "old";
+  let repeated = [ message "repeated" ] in
+  append_boundary
+    ~history_at_start:Boundaries.Fresh_history
+    config
+    ~trace_id
+    ~turn:2
+    ~recorded_at:2.0
+    repeated;
+  save_checkpoint config ~trace_id repeated 2;
+  let commits = ref 0 in
+
+    let commit original =
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    incr commits;
+    match
+      Current.apply_disposition ~revisions:[]
+        ?durable_range_id:range_id
+        ?official_range_id
+        ~absorbed:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:(Float.of_int !commits)
+        ~source:
+          { kind = Current.Librarian
+          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
+          }
+        ~new_claims:[]
+        ()
+    with
+    | Ok _ -> Consumer.Memory_committed
+    | Error detail -> fail detail
+  in
+  let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
+    Error
+      (Progress.Write_failed
+         { path = "injected-progress-write"; message = "post-commit failure" })
+  in
+  (match
+     Consumer.For_testing.consume_one_with_progress_writer
+       ~write_progress_store:fail_progress
+       ~write_official_progress_store:Masc.Keeper_librarian_official_progress.write
+       ~config
+       ~keeper_name
+       ~commit
+   with
+   | Error (Consumer.Progress_write_failed _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "first restarted history did not hit injected progress failure");
+  check int "first restarted history committed" 1 !commits;
+  append_boundary
+    ~history_at_start:Boundaries.Fresh_history
+    config
+    ~trace_id
+    ~turn:3
+    ~recorded_at:3.0
+    repeated;
+  save_checkpoint config ~trace_id repeated 3;
+  Consumer.For_testing.reset_process_state ();
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "new restarted history advances its own endpoint" 1
+       progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "new restarted history was mistaken for the old receipt");
+  check int "same atom and digest in a new history commits again" 2 !commits
+;;
+
+let check_progress_end config expected =
+  match read_progress config with
+  | Some progress -> check int "durable progress end" expected progress.position.end_atom
+  | None -> fail "durable progress is missing"
+;;
+
+let check_no_task label = function
+  | Masc.Keeper_librarian.No_task -> ()
+  | Masc.Keeper_librarian.Task_goals { task_id; _ } ->
+    failf "%s borrowed current task %s" label task_id
+;;
+
+let test_historical_range_does_not_borrow_the_current_task () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-historical-goal-context" in
+  establish_progress config ~trace_id "before";
+  write_meta ~current_task_id:"task-current-a" config trace_id;
+  let messages = [ message "before"; message "historical" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let first_context = ref None in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       first_context := Some input.Masc.Keeper_librarian.goal_context;
+       (Consumer.Memory_refused []))
+   with
+   | Consumer.Memory_not_committed _ -> ()
+   | Consumer.Pending
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Progress_advanced _ -> fail "failed historical commit advanced");
+  (match !first_context with
+   | Some context -> check_no_task "first catch-up" context
+   | None -> fail "historical catch-up did not reach the commit boundary");
+  check_progress_end config 1;
+  write_meta ~current_task_id:"task-current-b" config trace_id;
+  let retry_context = ref None in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       retry_context := Some input.Masc.Keeper_librarian.goal_context;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "retried historical range advances" 2 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "historical retry did not advance");
+  (match !retry_context with
+   | Some context -> check_no_task "retried catch-up" context
+   | None -> fail "historical retry did not reach the commit boundary");
+  write_meta ~current_task_id:"task-current-c" config trace_id;
+  (match consume config (fun _original -> fail "quiet tick recommitted") with
+   | Consumer.Nothing_to_read -> ()
+   | Consumer.Baseline_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _
+   | Consumer.Official_advanced _
+   | Consumer.Progress_advanced _ -> fail "quiet tick did not stay quiet")
+;;
+
+let prepare_three_unread_turns config ~trace_id =
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  let first_three = first_two @ [ message "turn-3" ] in
+  let first_four = first_three @ [ message "turn-4" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 first_three;
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 first_four;
+  save_checkpoint config ~trace_id first_four 4
+;;
+
+(* These cases call the production wake body with only its Memory commit
+   result controlled. Boundaries, checkpoint, selection and progress use the
+   real stores; no provider or Memory snapshot write is simulated as proof.
+   Empty working-context sources rule out a separate queue signal continuing
+   the drain on the production loop's behalf. *)
+let markers_without_working_sources (input : Masc.Keeper_librarian.input) =
+  check int "no working-context source can schedule another wake" 0
+    (List.length input.working_context.sources);
+  text_markers input
+;;
+
+(* The Memory store and both progress readers remain real. Only the commit
+   callback can suspend; no production adapter claims to own a Pending input
+   until the durable Addon owner is implemented. *)
+let seed_pending_memory config ~trace_id =
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path in
+  let fact = Memory.observed ~claim:"Retain the current durable Memory fact."
+      ~category:Memory.Fact ~now:1.
+      ~origin:{kind=Memory.Authored;trace_id} in
+  (match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name
+      ~now:1. ~source:{kind=Current.Librarian;trace_id}
+      ~new_claims:[fact] ~absorbed:[] () with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  Current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
+;;
+
+let commit_pending_memory config ~expected_revision:_ ~range_id ~official_range_id
+    (input : Masc.Keeper_librarian.input) =
+  let module Current = Masc.Keeper_memory_os_current in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path in
+  match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name
+      ~now:5. ~source:{kind=Current.Librarian;trace_id=Ids.Turn_ref.trace_id input.turn_ref}
+      ?durable_range_id:range_id ?official_range_id ~new_claims:[] ~absorbed:[] () with
+  | Ok _ -> Consumer.Memory_committed
+  | Error detail -> fail detail
+;;
+
+let test_pending_preserves_selection_and_memory ~after_failure () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-pending-selection" in
+  prepare_three_unread_turns config ~trace_id;
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let progress_before = read_progress config in
+  if after_failure then (
+    match consume config (fun _original ->
+        Consumer.Memory_refused []) with
+    | Consumer.Memory_not_committed [] -> ()
+    | _ -> fail "the earlier refusal did not reach its real retry marker");
+  let selected = if after_failure then ["turn-2"] else ["turn-2";"turn-3";"turn-4"] in
+  let calls = ref 0 in
+
+    let pending original =
+    let range_id = Original.range_id original in
+    let input = Original.input original in
+    incr calls;
+    check bool "real selected range has an atom receipt" true (Option.is_some range_id);
+    check (list string) "Pending does not change the prior selection mode"
+      selected (text_markers input);
+    Consumer.Memory_pending in
+  List.iter (fun () ->
+    (match consume config pending with
+     | Consumer.Pending -> ()
+     | _ -> fail "an unfinished commit did not suspend the durable pass");
+    check bool "Pending preserves the actual atom position" true
+      (read_progress config=progress_before);
+    check string "Pending preserves exact Memory bytes" memory_before
+      (Fs_compat.load_file memory_path)) [();()];
+  check int "each external wake reaches its one unfinished commit" 2 !calls;
+
+    let commit original =
+    let expected_revision = Original.expected_revision original in
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    check (list string) "normal commit retains the pre-Pending selection mode"
+      selected (text_markers input);
+    commit_pending_memory config ~expected_revision ~range_id ~official_range_id input in
+  (match consume config commit with
+   | Consumer.Progress_advanced progress ->
+     check int "only a real Memory commit advances progress"
+       (if after_failure then 2 else 4) progress.position.end_atom
+   | _ -> fail "normal Memory commit did not resume progress");
+  if after_failure then (
+
+      let commit original =
+      let expected_revision = Original.expected_revision original in
+      let range_id = Original.range_id original in
+      let official_range_id = Original.official_range_id original in
+      let input = Original.input original in
+      check (list string) "prior failure remains narrow after the successful cut"
+        ["turn-3"] (text_markers input);
+      commit_pending_memory config ~expected_revision ~range_id ~official_range_id input in
+    match consume config commit with
+    | Consumer.Progress_advanced progress ->
+      check int "the next oldest cut advances normally" 3 progress.position.end_atom
+    | _ -> fail "the next oldest cut did not commit")
+;;
+
+let test_blocked_original_suspends_following_phases () =
+  with_workspace @@ fun config ->
+  let events = ref [] in
+  let run error = Queue_refresh.For_testing.run_with_readers
+    ~durable:(fun () -> Queue_refresh.Stopped error)
+    ~continuity:(fun () -> events := !events @ ["continuity"])
+    ~cleanup:(fun () -> events := !events @ ["cleanup"])
+    ~base_path:config.Workspace.base_path ~keeper_name in
+  run (Consumer.Original_publication_blocked "original journal could not be restored");
+  check (list string) "an unrestorable original suspends following effects" [] !events;
+  run (Consumer.Memory_snapshot_unreadable "ordinary reader failure");
+  check (list string) "ordinary reader errors retain the existing following-phase policy"
+    ["continuity";"cleanup"] !events
+;;
+
+let test_pending_wake_suspends_following_phases () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  let trace_id = "trace-pending-wake" in
+  prepare_three_unread_turns config ~trace_id;
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let events = ref [] in
+  let record event = events := !events @ [event] in
+  let run commit = Queue_refresh.For_testing.run_with_readers
+      ~durable:(fun () -> Queue_refresh.For_testing.run_durable_with_commit
+        ~config ~keeper_name ~commit)
+      ~continuity:(fun () -> record "continuity")
+      ~cleanup:(fun () -> record "cleanup")
+      ~base_path:config.Workspace.base_path ~keeper_name in
+
+    let pending original =
+    let input = Original.input original in
+    record "pending";
+    check (list string) "the actual drain selects all unread turns"
+      ["turn-2";"turn-3";"turn-4"] (text_markers input);
+    Consumer.Memory_pending in
+  run pending;
+  run pending;
+  check (list string) "an unfinished commit suppresses both following phases"
+    ["pending";"pending"] !events;
+  check_progress_end config 1;
+  check string "same-wake cleanup cannot change Memory" memory_before
+    (Fs_compat.load_file memory_path);
+  (match Queue_refresh.last_measurement ~config ~keeper_name with
+   | Some {last_pass=Queue_refresh.Pending;unread=Some {atoms=3;official=0};_} -> ()
+   | _ -> fail "Pending must retain the real unread observation");
+
+    let commit original =
+    let expected_revision = Original.expected_revision original in
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    record "committed";
+    check (list string) "the next normal wake still selects the full range"
+      ["turn-2";"turn-3";"turn-4"] (text_markers input);
+    commit_pending_memory config ~expected_revision ~range_id ~official_range_id input in
+  run commit;
+  check (list string) "a completed commit reopens the actual phase pipeline"
+    ["pending";"pending";"committed";"continuity";"cleanup"] !events;
+  check_progress_end config 4;
+  (match Queue_refresh.last_measurement ~config ~keeper_name with
+   | Some {last_pass=Queue_refresh.Drained;unread=Some {atoms=0;official=0};_} -> ()
+   | _ -> fail "the subsequent completed wake must drain normally")
+;;
+
+let test_one_wake_stops_on_failure_then_drains_successful_cuts () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  prepare_three_unread_turns config ~trace_id:"trace-wake-retry";
+  let failed_calls = ref [] in
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun original ->
+      let input = Original.input original in
+      failed_calls := markers_without_working_sources input :: !failed_calls;
+      (Consumer.Memory_refused [])));
+  check (list (list string)) "a refused commit ends this wake after one attempt"
+    [ [ "turn-2"; "turn-3"; "turn-4" ] ] (List.rev !failed_calls);
+  check_progress_end config 1;
+  let committed_calls = ref [] in
+
+    let commit original =
+    let input = Original.input original in
+    committed_calls := markers_without_working_sources input :: !committed_calls;
+    Consumer.Memory_committed
+  in
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit);
+  check (list (list string)) "one later wake drains all successful small cuts"
+    [ [ "turn-2" ]; [ "turn-3" ]; [ "turn-4" ] ] (List.rev !committed_calls);
+  check_progress_end config 4;
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit);
+  check int "an empty backlog is not committed again" 3 (List.length !committed_calls)
+;;
+
+(* A newly completed turn is produced during the Memory commit while another
+   unit waits on the real lane. Production dispatch calls the controlled
+   continuity edge; this proves its opportunity, not successful synthesis. *)
+let test_growing_source_allows_following_phases () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  let module Lane = Masc.Keeper_memory_lane in
+  let trace_id = "trace-growing-source" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  save_checkpoint config ~trace_id first_two 2;
+  Lane.For_testing.reset ();
+  Fun.protect ~finally:Lane.For_testing.reset (fun () ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let events = ref [] in
+      let record event = events := event :: !events in
+
+        let commit_later original =
+        let input = Original.input original in
+        List.iter record (text_markers input);
+        Consumer.Memory_committed
+      in
+      let next_unit () =
+        record "queued-context-opportunity";
+        ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+          ~commit:commit_later)
+      in
+      let appended = ref false in
+
+        let commit original =
+        let input = Original.input original in
+        List.iter record (text_markers input);
+        if not !appended then (
+          appended := true;
+          let first_three = first_two @ [ message "turn-3" ] in
+          append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 first_three;
+          save_checkpoint config ~trace_id first_three 3;
+          ignore (Lane.submit ~base_path:config.Workspace.base_path ~keeper_name next_unit));
+        Consumer.Memory_committed
+      in
+      ignore (Lane.submit ~base_path:config.Workspace.base_path ~keeper_name (fun () ->
+        Queue_refresh.For_testing.run_with_readers
+          ~durable:(fun () ->
+            Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit)
+          ~continuity:(fun () ->
+            (match Queue_refresh.last_measurement ~config ~keeper_name with
+             | Some {last_pass = Queue_refresh.Yielded_to_waiting_unit; unread = Some {atoms = 1; official = 0}; _} -> ()
+             | _ -> fail "yield must expose remaining source without reporting drained");
+            record "continuity-opportunity")
+          ~cleanup:(fun () -> ())
+          ~base_path:config.Workspace.base_path ~keeper_name));
+      Lane.For_testing.await_idle ~base_path:config.Workspace.base_path ~keeper_name;
+      check (list string) "new source waits until the following phases get an opportunity"
+        [ "turn-2"; "continuity-opportunity"; "queued-context-opportunity"; "turn-3" ]
+        (List.rev !events);
+      check_progress_end config 3))
+;;
+
+let test_one_wake_continues_after_an_initial_baseline () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  let trace_id = "trace-wake-baseline" in
+  write_meta config trace_id;
+  let first = [ message "recorded-1" ] in
+  let first_two = first @ [ message "recorded-2" ] in
+  let all = first_two @ [ message "recorded-3" ] in
+  append_boundary ~history_at_start:Boundaries.Continued_history config
+    ~trace_id ~turn:1 ~recorded_at:1.0 first;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 all;
+  save_checkpoint config ~trace_id all 3;
+  check bool "this Keeper has no read position yet" true
+    (Option.is_none (read_progress config));
+  let calls = ref [] in
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun original ->
+      let input = Original.input original in
+      calls := markers_without_working_sources input :: !calls;
+      Consumer.Memory_committed));
+  check (list (list string)) "baseline is skipped and the same wake commits unread turns"
+    [ [ "recorded-2"; "recorded-3" ] ] (List.rev !calls);
+  check_progress_end config 3
+;;
+
+let test_disabling_between_cuts_stops_until_a_new_enabled_wake () =
+  let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
+  Masc_test_deps.with_process_env env_key (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  prepare_three_unread_turns config ~trace_id:"trace-wake-disable";
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun original ->
+      let input = Original.input original in
+      ignore (markers_without_working_sources input : string list);
+      (Consumer.Memory_refused [])));
+  check_progress_end config 1;
+  let before_disable = ref [] in
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun original ->
+      let input = Original.input original in
+      before_disable := markers_without_working_sources input :: !before_disable;
+      Unix.putenv env_key "false";
+      Consumer.Memory_committed));
+  check (list (list string)) "turning off prevents the next cut in the same wake"
+    [ [ "turn-2" ] ] (List.rev !before_disable);
+  check_progress_end config 2;
+  Unix.putenv env_key "true";
+  let after_enable = ref [] in
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+    ~commit:(fun original ->
+      let input = Original.input original in
+      after_enable := markers_without_working_sources input :: !after_enable;
+      Consumer.Memory_committed));
+  check (list (list string)) "a separate enabled wake drains the remaining cuts"
+    [ [ "turn-3" ]; [ "turn-4" ] ] (List.rev !after_enable);
+  check_progress_end config 4
+;;
+
+let test_unchanged_boundaries_do_not_require_checkpoint () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-no-new-boundary" in
+  establish_progress config ~trace_id "before";
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id);
+  match consume config (fun _original -> fail "commit was called") with
+  | Consumer.Nothing_to_read -> ()
+  | Consumer.Baseline_advanced _
+  | Consumer.Pending
+  | Consumer.Memory_not_committed _
+  | Consumer.Official_advanced _
+  | Consumer.Progress_advanced _ -> fail "unchanged boundaries did not stop before checkpoint"
+;;
+
+let test_caught_up_prior_trace_transitions_to_current_trace () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-preflight-a" in
+  establish_progress config ~trace_id:trace_a "a";
+  let trace_b = "trace-preflight-b" in
+  let messages_b = [ message "b" ] in
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 messages_b;
+  let progress_a =
+    match read_progress config with
+    | Some progress -> progress
+    | None -> fail "trace-change fixture lost progress"
+  in
+  (match
+     Progress.write
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name
+       { progress_a with boundary_lines_seen = 2 }
+   with
+   | Ok () -> ()
+   | Error error -> fail (Progress.write_error_to_string error));
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  let carried = ref [] in
+  match
+    Consumer.consume_one
+      ~config
+      ~keeper_name
+      ~commit:(fun original ->
+        let input = Original.input original in
+        carried := text_markers input;
+        Consumer.Memory_committed)
+  with
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "progress transitions to current trace" trace_b progress.position.trace_id;
+    check (list string) "current trace starts at its fresh boundary" [ "b" ] !carried
+  | Ok _ -> fail "caught-up prior trace did not transition"
+;;
+
+let test_absent_prior_checkpoint_transitions_to_current_trace () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-removed-a" in
+  establish_progress config ~trace_id:trace_a "a";
+  let old_session_dir = Masc.Keeper_fs.keeper_session_dir config trace_a in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir:old_session_dir ~session_id:trace_a);
+  let trace_b = "trace-removed-b" in
+  let messages_b = [ message "b" ] in
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 messages_b;
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  let carried = ref [] in
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun original ->
+        let input = Original.input original in
+        carried := text_markers input;
+        Consumer.Memory_committed)
+  with
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "removed trace is retired" trace_b progress.position.trace_id;
+    check (list string) "new trace remains readable" [ "b" ] !carried
+  | Ok _ -> fail "missing prior checkpoint left progress on the old trace"
+;;
+
+let test_absent_prior_checkpoint_requires_current_history_start () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-unwitnessed-a" in
+  establish_progress config ~trace_id:trace_a "a";
+  let old_session_dir = Masc.Keeper_fs.keeper_session_dir config trace_a in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir:old_session_dir ~session_id:trace_a);
+  let trace_b = "trace-unwitnessed-b" in
+  let messages_b = [ message "b" ] in
+  append_boundary
+    ~history_at_start:Boundaries.Continued_history
+    config
+    ~trace_id:trace_b
+    ~turn:1
+    ~recorded_at:2.0
+    messages_b;
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun _original ->
+         fail "unwitnessed trace transition called commit")
+   with
+   | Error (Consumer.Position_in_other_trace position) ->
+     check string "old trace stays authoritative" trace_a position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "continued-only trace silently retired the old cursor");
+  match read_progress config with
+  | Some progress -> check string "old progress is unchanged" trace_a progress.position.trace_id
+  | None -> fail "unwitnessed transition removed progress"
+;;
+
+let test_unread_prior_trace_finishes_before_current_trace () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-unread-a" in
+  establish_progress config ~trace_id:trace_a "a-1";
+  let messages_a = [ message "a-1"; message "a-2" ] in
+  append_boundary config ~trace_id:trace_a ~turn:2 ~recorded_at:2.0 messages_a;
+  save_checkpoint config ~trace_id:trace_a messages_a 2;
+  let trace_b = "trace-unread-b" in
+  let messages_b = [ message "b-1" ] in
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:3.0 messages_b;
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  let carried = ref [] in
+
+    let commit original =
+    let input = Original.input original in
+    carried := !carried @ [ text_markers input ];
+    Consumer.Memory_committed
+  in
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "prior trace remains first" trace_a progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "unread prior trace did not advance");
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "current trace follows" trace_b progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "current trace did not follow prior trace");
+  check (list (list string))
+    "each trace is carried once in order"
+    [ [ "a-2" ]; [ "b-1" ] ]
+    !carried
+;;
+
+let counterpart_contents (input : Masc.Keeper_librarian.input) =
+  List.map
+    (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+    input.counterpart_observations
+;;
+
+(* #37362. Progress sits on trace A. Trace B finished a turn while nothing
+   read it, then the keeper moved on to trace C. B is read before C. A chat
+   message from before A's boundary was read with A's range, so B's first
+   range, which starts the atoms again from zero, must not read it again.
+   Chat rows take the clock at append time, so the turn ends are placed after
+   it. *)
+let test_intervening_trace_is_read_before_the_current_trace () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-walk-a" in
+  let trace_b = "trace-walk-b" in
+  let trace_c = "trace-walk-c" in
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"before-a"
+    ~speaker
+    ();
+  let a_ended = Time_compat.now () +. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
+  let carried = ref [] in
+
+    let commit original =
+    let input = Original.input original in
+    carried := !carried @ [ text_markers input, counterpart_contents input ];
+    Consumer.Memory_committed
+  in
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "trace A is read" trace_a progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary
+    config ~trace_id:trace_b ~turn:1 ~recorded_at:(a_ended +. 100.0) [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(a_ended +. 200.0) [ message "c" ];
+  write_meta config trace_c;
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the trace in between is read first" trace_b progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the trace in between was not read");
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the current trace follows" trace_c progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the current trace did not follow");
+  check
+    (list (pair (list string) (list string)))
+    "each trace once in order; A's counterpart is not read again"
+    [ [ "a" ], [ "before-a" ]; [ "b" ], []; [ "c" ], [] ]
+    !carried
+;;
+
+(* A trace in between whose checkpoint is gone has no atoms to read. The walk
+   passes it and reaches the current trace in the same pass. *)
+let test_intervening_trace_without_checkpoint_is_passed () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-pass-a" in
+  let trace_b = "trace-pass-b" in
+  let trace_c = "trace-pass-c" in
+  establish_progress config ~trace_id:trace_a "a";
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  let session_dir_b = Masc.Keeper_fs.keeper_session_dir config trace_b in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir:session_dir_b ~session_id:trace_b);
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
+  write_meta config trace_c;
+  let carried = ref [] in
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun original ->
+        let input = Original.input original in
+        carried := text_markers input;
+        Consumer.Memory_committed)
+  with
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "the current trace is reached" trace_c progress.position.trace_id;
+    check (list string) "only the current trace is read" [ "c" ] !carried
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "a trace without a checkpoint stopped the walk"
+;;
+
+let overwrite_checkpoint config ~trace_id contents =
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  (match Fs_compat.save_file_atomic path contents with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  session_dir
+;;
+
+(* A trace in between whose checkpoint holds a version this build supersedes.
+   No turn runs on a trace the keeper has left, so nothing rewrites that file:
+   the walk passes it, and the current trace is still read in the same pass. *)
+let test_superseded_intervening_checkpoint_is_passed () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-superseded-a" in
+  let trace_b = "trace-superseded-b" in
+  let trace_c = "trace-superseded-c" in
+  establish_progress config ~trace_id:trace_a "a";
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  (* [to_json] refuses a version this build does not write, which is what the
+     field is for, so the fixture cannot be built by handing it a retired
+     number. Only an older build leaves such a file, and this writes what that
+     build would have: the current document with the number put back. The
+     control below reads the file and fails if that did not take. *)
+  let older =
+    match
+      Agent_core.Checkpoint.to_json (checkpoint ~trace_id:trace_b [ message "b" ] 1)
+    with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if String.equal key "version"
+             then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
+             else key, value)
+           fields)
+    | _ -> fail "a checkpoint document is a JSON object"
+  in
+  let session_dir_b =
+    overwrite_checkpoint config ~trace_id:trace_b (Yojson.Safe.to_string older)
+  in
+  (* Positive control, as [damage_checkpoint] does: the real store calls this
+     superseded, not damaged. *)
+  (match Store.load_agent_core ~session_dir:session_dir_b ~session_id:trace_b with
+   | Error (Store.Superseded_version _) -> ()
+   | Error error ->
+     failf "superseded fixture: %s" (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "superseded checkpoint unexpectedly loaded");
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
+  write_meta config trace_c;
+  let carried = ref [] in
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun original ->
+        let input = Original.input original in
+        carried := text_markers input;
+        Consumer.Memory_committed)
+  with
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "the current trace is reached" trace_c progress.position.trace_id;
+    check (list string) "only the current trace is read" [ "c" ] !carried
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "a superseded checkpoint stopped the walk"
+;;
+
+(* A damaged checkpoint in between is not passed. A newer binary or an
+   operator can still make that file readable, so the pass does not walk past
+   the turns it holds: it stops and names the trace. *)
+let test_corrupt_intervening_checkpoint_stops_the_pass () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-corrupt-a" in
+  let trace_b = "trace-corrupt-b" in
+  let trace_c = "trace-corrupt-c" in
+  establish_progress config ~trace_id:trace_a "a";
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  let session_dir_b = overwrite_checkpoint config ~trace_id:trace_b "{" in
+  (match Store.load_agent_core ~session_dir:session_dir_b ~session_id:trace_b with
+   | Error (Store.Parse_error _) -> ()
+   | Error error ->
+     failf "damaged fixture: %s" (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "damaged checkpoint unexpectedly loaded");
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
+  write_meta config trace_c;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun _original ->
+         fail "a damaged trace in between reached commit")
+   with
+   | Error (Consumer.Checkpoint_unreadable { trace_id; error = Store.Saved_history.Parse_error _ }) ->
+     check string "the error names the trace it could not read" trace_b trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "a damaged trace in between was walked past");
+  match read_progress config with
+  | Some progress ->
+    check
+      string
+      "the position stays on the trace before it"
+      trace_a
+      progress.position.trace_id
+  | None -> fail "the stopped pass removed progress"
+;;
+
+(* The wall clock went backwards between the retired trace and the one that
+   follows it, and a counterpart row arrived in between. The hand-off range
+   reads nothing -- its own end is older than the bound carried from the trace
+   before it -- and the round after it, whose bound is that range's end, reads
+   the row. Nothing is stranded. *)
+let test_backwards_clock_at_hand_off_reads_the_row_next_round () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-backwards-a" in
+  let trace_b = "trace-backwards-b" in
+  let trace_c = "trace-backwards-c" in
+  let now = Time_compat.now () in
+  let a_ended = now +. 100.0 in
+  let b_ended = now -. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
+  let carried = ref [] in
+
+    let commit original =
+    let input = Original.input original in
+    carried := !carried @ [ text_markers input, counterpart_contents input ];
+    Consumer.Memory_committed
+  in
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  (* The row arrives after A's range was read, and the clock has gone back. *)
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"between the traces"
+    ~speaker
+    ();
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:b_ended [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
+  write_meta config trace_c;
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the trace in between is read" trace_b progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the trace in between was not read");
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the current trace follows" trace_c progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the current trace did not follow");
+  check
+    (list (pair (list string) (list string)))
+    "the row between the two traces is read once, by the round after the hand-off"
+    [ [ "a" ], []; [ "b" ], []; [ "c" ], [ "between the traces" ] ]
+    !carried
+;;
+
+let test_failed_long_range_retries_only_oldest_cut_point () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-bounded-retry" in
+  establish_progress config ~trace_id "turn-1";
+  let first_two = [ message "turn-1"; message "turn-2" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 first_two;
+  save_checkpoint config ~trace_id first_two 2;
+  (match consume config (fun _original -> (Consumer.Memory_refused [])) with
+   | Consumer.Memory_not_committed _ -> ()
+   | Consumer.Pending
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Progress_advanced _ -> fail "failed range unexpectedly advanced");
+  let first_four = first_two @ [ message "turn-3"; message "turn-4" ] in
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0
+    (first_two @ [ message "turn-3" ]);
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 first_four;
+  save_checkpoint config ~trace_id first_four 4;
+  let retry = ref [] in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       retry := text_markers input;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "bounded retry reaches oldest cut" 2 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "bounded retry did not advance");
+  check (list string) "retry does not grow with later turns" [ "turn-2" ] !retry;
+  let remaining = ref [] in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       remaining := text_markers input;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "bounded catch-up reaches next cut" 3 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "remaining range did not advance");
+  check (list string) "bounded catch-up remains active" [ "turn-3" ] !remaining;
+  let final = ref [] in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       final := text_markers input;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "bounded catch-up reaches final cut" 4 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "final range did not advance");
+  check (list string) "final turn remains readable" [ "turn-4" ] !final;
+  (match consume config (fun _original -> fail "empty range called commit") with
+   | Consumer.Nothing_to_read -> ()
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "empty pass did not clear bounded catch-up")
+;;
+
+let test_last_matching_boundary_wins_when_clock_moves_backward () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-clock-regression" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:20.0 messages;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:10.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  let selected_turn = ref None in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       selected_turn := Some (Ids.Turn_ref.absolute_turn input.turn_ref);
+       Consumer.Memory_committed)
+   with
+   | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "clock regression range did not advance");
+  check (option int) "last appended boundary is authoritative" (Some 3) !selected_turn
+;;
+
+let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-non-monotone-counterpart" in
+  write_meta config trace_id;
+  let first = [ message "turn-1" ] in
+  save_checkpoint config ~trace_id first 1;
+  append_boundary config ~trace_id ~turn:1 ~recorded_at:20.0 first;
+  (match consume config (fun _original -> Consumer.Memory_committed) with
+   | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "fixture progress did not advance");
+  let messages = first @ [ message "turn-2" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:10.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let commit_called = ref false in
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun _original ->
+         commit_called := true;
+         Consumer.Memory_committed)
+   with
+   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
+     check (float 0.001) "prior boundary time" 20.0 after;
+     check (float 0.001) "range end time" 10.0 before
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "non-monotone interval advanced as empty evidence");
+  check bool "memory commit is not attempted" false !commit_called;
+  match read_progress config with
+  | Some progress -> check int "cursor stays before rejected range" 1 progress.position.end_atom
+  | None -> fail "rejected interval removed progress"
+;;
+
+let test_equal_boundary_timestamps_form_an_empty_counterpart_interval () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-equal-counterpart-boundary" in
+  write_meta config trace_id;
+  let first = [ message "turn-1" ] in
+  save_checkpoint config ~trace_id first 1;
+  append_boundary config ~trace_id ~turn:1 ~recorded_at:20.0 first;
+  (match consume config (fun _original -> Consumer.Memory_committed) with
+   | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "fixture progress did not advance");
+  let messages = first @ [ message "turn-2" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:20.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let chat_path =
+    Keeper_chat_store.chat_path
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname chat_path);
+  Fs_compat.save_file
+    chat_path
+    ({|{"id":"outside-empty-interval","role":"user","content":"must not be read","ts":19.0,"speaker_authority":"unknown"}|}
+     ^ "\n");
+  let observed = ref None in
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun original ->
+         let input = Original.input original in
+         observed := Some input.Masc.Keeper_librarian.counterpart_observations;
+         Consumer.Memory_committed)
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "equal interval advances" 2 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "equal interval did not advance");
+  match !observed with
+  | Some observations -> check int "equal interval is empty" 0 (List.length observations)
+  | None -> fail "equal interval did not reach commit"
+;;
+
+let test_unknown_speaker_authority_does_not_advance_progress () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-unknown-speaker-authority" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let chat_path =
+    Keeper_chat_store.chat_path
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname chat_path);
+  (match
+     Fs_compat.save_file_atomic_strict
+       chat_path
+       ({|{"id":"unknown-authority","role":"user","content":"do not lose me","ts":1.5,"speaker_authority":"admin"}|}
+        ^ "\n")
+   with
+   | Ok () -> ()
+   | Error detail -> failf "write chat fixture: %s" detail);
+  let commit_called = ref false in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun _original ->
+         commit_called := true;
+         Consumer.Memory_committed)
+   with
+   | Error
+       (Consumer.Counterpart_observations_unreadable
+          (Masc.Keeper_librarian_input_sources.Chat_store_unreadable _)) ->
+     ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "unknown speaker authority advanced as absent evidence");
+  check bool "memory commit is not attempted" false !commit_called;
+  match read_progress config with
+  | Some progress ->
+    check int
+      "cursor stays before the unreadable counterpart row"
+      1
+      progress.position.end_atom
+  | None -> fail "unreadable counterpart row removed progress"
+;;
+
+let test_missing_speaker_authority_does_not_advance_progress () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-missing-speaker-authority" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let chat_path =
+    Keeper_chat_store.chat_path
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname chat_path);
+  (match
+     Fs_compat.save_file_atomic_strict
+       chat_path
+       ({|{"id":"missing-authority","role":"user","content":"do not lose me","ts":1.5,"speaker_id":"speaker-7"}|}
+        ^ "\n")
+   with
+   | Ok () -> ()
+   | Error detail -> failf "write chat fixture: %s" detail);
+  let commit_called = ref false in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun _original ->
+         commit_called := true;
+         Consumer.Memory_committed)
+   with
+   | Error
+       (Consumer.Counterpart_observations_unreadable
+          (Masc.Keeper_librarian_input_sources.Chat_store_unreadable _)) ->
+     ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "missing speaker authority advanced as absent evidence");
+  check bool "memory commit is not attempted" false !commit_called;
+  check_progress_end config 1
+;;
+
+let test_torn_external_tail_retries_the_same_range_once () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-torn-external-tail" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let external_item : Keeper_external_attention.item =
+    { event_id = Keeper_external_attention.event_id_of_dedupe_key "torn:consumer"
+    ; dedupe_key = "torn:consumer"
+    ; keeper_name
+    ; conversation =
+        { conversation_id = "agent:torn"
+        ; surface = Keeper_external_attention.Agent
+        }
+    ; external_message = None
+    ; source_label = "agent"
+    ; actor =
+        { actor_id = Some "external"
+        ; display_name = Some "External"
+        ; authority = Keeper_chat_store.External
+        }
+    ; urgency = Keeper_external_attention.Ambient
+    ; content_preview = "recover-after-newline"
+    ; content_ref = None
+    ; received_at = 1.5
+    ; metadata = []
+    }
+  in
+  let line =
+    Yojson.Safe.to_string
+      (Keeper_external_attention.event_to_json
+         (Keeper_external_attention.Recorded external_item))
+  in
+  let path =
+    Keeper_external_attention.attention_path
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let write contents =
+    match Fs_compat.save_file_atomic_strict path contents with
+    | Ok () -> ()
+    | Error detail -> failf "write external attention fixture: %s" detail
+  in
+  write line;
+  let commits = ref 0 in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun _original ->
+         incr commits;
+         Consumer.Memory_committed)
+   with
+   | Error
+       (Consumer.Counterpart_observations_unreadable
+          (Masc.Keeper_librarian_input_sources.External_attention_unreadable
+             (Keeper_external_attention.Incomplete_tail _))) ->
+     ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "torn external tail advanced as complete evidence");
+  check int "torn tail does not call Memory commit" 0 !commits;
+  check_progress_end config 1;
+  write (line ^ "\n");
+  let observations = ref [] in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun original ->
+         let input = Original.input original in
+         incr commits;
+         observations :=
+           List.map
+             (fun (observation : Keeper_counterpart_observation.t) ->
+                observation.content)
+             input.counterpart_observations;
+         Consumer.Memory_committed)
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "repaired range advances once" 2 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "repaired external row did not advance the same range");
+  check (list string)
+    "repaired row reaches the retried range"
+    [ "recover-after-newline" ]
+    !observations;
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun _original ->
+         incr commits;
+         Consumer.Memory_committed)
+   with
+   | Ok Consumer.Nothing_to_read -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "settled range was consumed more than once");
+  check int "Memory commit runs exactly once" 1 !commits
+;;
+
+let test_torn_chat_tail_retries_the_same_range_once () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-torn-chat-tail" in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "after" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let path =
+    Keeper_chat_store.chat_path
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let complete_prefix =
+    {|{"id":"complete-prefix","role":"user","content":"complete-prefix","ts":0.5,"speaker_authority":"owner"}|}
+    ^ "\n"
+  in
+  let torn_row =
+    {|{"id":"torn-chat","role":"user","content":"recover-after-newline","ts":1.5,"speaker_authority":"owner"}|}
+  in
+  let write contents =
+    match Fs_compat.save_file_atomic_strict path contents with
+    | Ok () -> ()
+    | Error detail -> failf "write chat fixture: %s" detail
+  in
+  write (complete_prefix ^ torn_row);
+  (match Keeper_chat_store.load_all ~base_dir:config.Workspace.base_path ~keeper_name with
+   | [ prefix ] ->
+     check string "permissive reader keeps complete prefix" "complete-prefix" prefix.content
+   | rows -> failf "expected one complete permissive row, got %d" (List.length rows));
+  let commits = ref 0 in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun _original ->
+         incr commits;
+         Consumer.Memory_committed)
+   with
+   | Error
+       (Consumer.Counterpart_observations_unreadable
+          (Masc.Keeper_librarian_input_sources.Chat_store_unreadable _)) ->
+     ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "torn chat tail advanced as complete evidence");
+  check int "torn chat tail does not call Memory commit" 0 !commits;
+  check_progress_end config 1;
+  write (complete_prefix ^ torn_row ^ "\n");
+  let observations = ref [] in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun original ->
+         let input = Original.input original in
+         incr commits;
+         observations :=
+           List.map
+             (fun (observation : Keeper_counterpart_observation.t) ->
+                observation.content)
+             input.counterpart_observations;
+         Consumer.Memory_committed)
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "repaired range advances once" 2 progress.position.end_atom
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "repaired chat row did not advance the same range");
+  check (list string)
+    "repaired row reaches the retried range"
+    [ "recover-after-newline" ]
+    !observations;
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun _original ->
+         incr commits;
+         Consumer.Memory_committed)
+   with
+   | Ok Consumer.Nothing_to_read -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "settled range was consumed more than once");
+  check int "Memory commit runs exactly once" 1 !commits
+;;
+
+let test_restart_cut_never_commits_a_current_unfinished_turn () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let trace_id = "trace-restart-cut" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path in
+  establish_progress config ~trace_id "old first";
+  let write_claims claims =
+    let facts = List.map (fun claim -> Memory.observed ~claim ~category:Memory.Fact
+        ~now:1. ~origin:{ kind = Memory.Authored; trace_id }) claims in
+    match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1.
+        ~source:{ kind = Current.Librarian; trace_id } ~new_claims:facts ~absorbed:[] () with
+    | Ok (disposition : Current.disposition) -> disposition.snapshot
+    | Error detail -> fail detail in
+  let seed = write_claims ["seed fact"] in
+  check int "seed revision" 1 seed.revision;
+  let old = List.map message ["old first"; "old middle"; "repeated endpoint"] in
+  save_checkpoint config ~trace_id old 2;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2. old;
+  save_checkpoint config ~trace_id [] 3;
+  let append event recorded_at =
+    match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_name { Boundaries.recorded_at; event } with
+    | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error) in
+  append (Boundaries.History_restarted { trace_id }) 3.;
+  let completed = [message "new completed"] in
+  save_checkpoint config ~trace_id completed 4;
+  let position = match Boundaries.position_of_messages completed with
+    | Ok position -> position | Error detail -> fail detail in
+  append (Boundaries.Turn_ended
+      { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:3;
+        history_at_start = Boundaries.Fresh_history; position }) 4.;
+  let in_flight = completed @ List.map message ["new unfinished"; "repeated endpoint"] in
+  save_checkpoint config ~trace_id in_flight 5;
+  let inputs = ref [] in
+
+    let commit original =
+    let input = Original.input original in
+    let markers = text_markers input in
+    inputs := !inputs @ [markers];
+    let (_ : Current.t) = write_claims markers in
+    Consumer.Memory_committed in
+  let cursor () = match read_progress config with
+    | Some progress -> progress.position.end_atom | None -> fail "missing progress" in
+  let snapshot () =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name with
+    | Ok (Some snapshot) -> snapshot | Ok None -> fail "missing Memory"
+    | Error detail -> fail detail in
+  (match consume config commit with
+   | Consumer.Progress_advanced _ -> () | _ -> fail "current completed turn not consumed");
+  let committed = snapshot () in
+  check (triple (list (list string)) int (list string))
+    "only completed current input reaches actual Memory and progress"
+    ([["new completed"]], 1, ["new completed"; "seed fact"])
+    (!inputs, cursor (), List.map (fun (fact : Memory.fact) -> fact.claim) committed.facts
+                         |> List.sort String.compare);
+  check int "one Memory commit" 2 committed.revision;
+  (match consume config commit with
+   | Consumer.Nothing_to_read -> () | _ -> fail "unfinished turn was consumed on next tick");
+  check int "no Memory commit while current turn remains unfinished" 2 (snapshot ()).revision;
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:6. in_flight;
+  (match consume config commit with
+   | Consumer.Progress_advanced _ -> () | _ -> fail "newly completed turn not consumed");
+  check (list (list string)) "each current message is consumed after its own turn ends"
+    [["new completed"]; ["new unfinished"; "repeated endpoint"]] !inputs;
+  check int "all current atoms now acknowledged" 3 (cursor ());
+  check int "one further Memory commit" 3 (snapshot ()).revision
+;;
+
+(* Establish real durable progress in a shorter restarted history. Setup uses
+   the commit result seam; checkpoint access below is the production store path. *)
+let with_consumed_shorter_history f =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-preflight-restarted" in
+  let old = List.map message ["old first"; "old middle"; "old end"] in
+  write_meta config trace_id;
+  save_checkpoint config ~trace_id old 1;
+  append_boundary config ~trace_id ~turn:1 ~recorded_at:1. old;
+  (match consume config (fun _original -> Consumer.Memory_committed) with
+   | Consumer.Progress_advanced _ -> () | _ -> fail "old history was not consumed");
+  save_checkpoint config ~trace_id [] 2;
+  let current = [message "current"] in
+  save_checkpoint config ~trace_id current 3;
+  let position = match Boundaries.position_of_messages current with
+    | Ok position -> position | Error detail -> fail detail in
+  (match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+      { recorded_at = 3.; event = Boundaries.Turn_ended
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:2;
+            history_at_start = Boundaries.Fresh_history; position } } with
+   | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
+  (match consume config (fun _original -> Consumer.Memory_committed) with
+   | Consumer.Progress_advanced progress ->
+     check int "shorter current history consumed" 1 progress.position.end_atom;
+     check int "both boundary lines seen" 2 progress.boundary_lines_seen
+   | _ -> fail "current history was not consumed");
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  f config trace_id current session_dir checkpoint_path
+;;
+
+type checkpoint_fault = Missing_checkpoint | Corrupt_checkpoint
+
+let damage_checkpoint fault ~session_dir ~trace_id checkpoint_path =
+  (match fault with
+   | Missing_checkpoint -> Sys.remove checkpoint_path
+   | Corrupt_checkpoint ->
+     (match Fs_compat.save_file_atomic checkpoint_path "{" with
+      | Ok () -> () | Error detail -> fail detail));
+  (* Positive control: loading this very file through the real store fails.
+     A quiet consumer tick must stop before that loader, not hide its error. *)
+  match fault, Store.load_agent_core ~session_dir ~session_id:trace_id with
+  | Missing_checkpoint, Error Store.Not_found
+  | Corrupt_checkpoint, Error (Store.Parse_error _) -> ()
+  | _, Error error -> fail (Store.checkpoint_load_error_to_string error)
+  | _, Ok _ -> fail "damaged checkpoint unexpectedly loaded"
+;;
+
+let test_seen_restart_skips_checkpoint fault () =
+  with_consumed_shorter_history @@ fun config trace_id _current session_dir path ->
+  damage_checkpoint fault ~session_dir ~trace_id path;
+  let progress_path = Progress.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let before = Fs_compat.load_file progress_path in
+  List.iter (fun _tick ->
+      (match Consumer.consume_one ~config ~keeper_name
+          ~commit:(fun _original -> fail "quiet tick called commit") with
+       | Ok Consumer.Nothing_to_read -> ()
+       | Ok _ -> fail "quiet tick changed progress"
+       | Error error -> fail (Consumer.error_to_string error));
+      (match Consumer.unread_turns ~config ~keeper_name with
+       | Ok { atoms = 0; official = 0 } -> ()
+       | Ok _ -> fail "quiet count reports unread history"
+       | Error error -> fail (Consumer.error_to_string error));
+      check string "quiet tick preserves actual progress bytes" before
+        (Fs_compat.load_file progress_path)) [1; 2; 3]
+;;
+
+let test_new_completed_cut_still_reads_checkpoint () =
+  with_consumed_shorter_history @@ fun config trace_id current session_dir path ->
+  damage_checkpoint Corrupt_checkpoint ~session_dir ~trace_id path;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:4.
+    (current @ [message "next completed"]);
+  match Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun _original -> fail "corrupt checkpoint called commit") with
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "new completed cut skipped checkpoint validation"
+;;
+
+let test_unseen_restart_still_reads_checkpoint () =
+  with_consumed_shorter_history @@ fun config trace_id _current session_dir path ->
+  damage_checkpoint Corrupt_checkpoint ~session_dir ~trace_id path;
+  (match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+      { recorded_at = 4.; event = Boundaries.History_restarted { trace_id } } with
+   | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
+  match Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun _original -> fail "unreadable restart called commit") with
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "unseen restart skipped checkpoint validation"
+;;
+
+let test_trace_change_without_history_witness_keeps_prior_progress () =
+  with_consumed_shorter_history @@ fun config trace_id _current _session_dir _path ->
+  write_meta config "trace-preflight-new";
+  match Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun _original -> fail "missing trace checkpoint called commit") with
+  | Error (Consumer.Position_in_other_trace position) ->
+    check string "prior trace remains authoritative" trace_id position.trace_id;
+    check int "prior trace position remains authoritative" 1 position.end_atom
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "trace change without a history witness discarded prior progress"
+;;
+
+let test_new_unreadable_boundary_is_not_hidden_by_preflight () =
+  with_consumed_shorter_history @@ fun config _trace_id _current _session_dir _path ->
+  let path = Boundaries.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let oc = open_out_gen [Open_wronly; Open_append; Open_binary] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc "{\n");
+  match Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun _original -> fail "unreadable boundary called commit") with
+  | Error (Consumer.Range_stopped (Masc.Keeper_librarian_range.Unreadable_line
+      { line = 3; error = Boundaries.Not_json _ })) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "new unreadable boundary was hidden as a quiet tick"
+;;
+
+let test_counterpart_range_reads_beyond_recent_windows () =
+  with_workspace @@ fun config ->
+  let base_dir = config.Workspace.base_path in
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "owner"
+    ; speaker_name = Some "Owner"
+    ; speaker_authority = Keeper_chat_store.Owner
+    }
+  in
+  List.iter
+    (fun index ->
+       Keeper_chat_store.append_user_message
+         ~base_dir
+         ~keeper_name
+         ~content:(Printf.sprintf "chat-%03d" index)
+         ~speaker
+         ())
+    (List.init 105 Fun.id);
+  let payload = String.make (1024 * 1024) 'x' in
+  let external_contents =
+    List.init 5 (fun index -> Printf.sprintf "external-%d:%s" index payload)
+  in
+  List.iteri
+    (fun index content_preview ->
+       let surface = Keeper_external_attention.Agent in
+       let dedupe_key = Printf.sprintf "complete-range-%d" index in
+       let item : Keeper_external_attention.item =
+         { event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key
+         ; dedupe_key
+         ; keeper_name
+         ; conversation = { conversation_id = "agent:test"; surface }
+         ; external_message = None
+         ; source_label = "agent"
+         ; actor =
+             { actor_id = Some "external"
+             ; display_name = Some "External"
+             ; authority = Keeper_chat_store.External
+             }
+         ; urgency = Keeper_external_attention.Ambient
+         ; content_preview
+         ; content_ref = None
+         ; received_at = Float.of_int (index + 1)
+         ; metadata = []
+         }
+       in
+       match Keeper_external_attention.For_testing.record_with_clock
+         ~now:(fun () -> item.Keeper_external_attention.received_at) ~base_path:base_dir item with
+       | `Recorded -> ()
+       | `Duplicate _ -> fail "unexpected duplicate external fixture"
+       | `Error detail -> fail detail)
+    external_contents;
+  let observations =
+    match
+      Masc.Keeper_librarian_input_sources.counterpart_observations_between_offloaded
+        ~base_dir
+        ~keeper_name
+        ~after:None
+        ~before:(Time_compat.now () +. 100.)
+    with
+    | Ok observations -> observations
+    | Error error ->
+      fail (Masc.Keeper_librarian_input_sources.read_error_to_string error)
+  in
+  let contents =
+    List.map (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+      observations
+  in
+  List.iter
+    (fun expected ->
+       check bool expected true (List.exists (String.equal expected) contents))
+    [ "chat-000"; "chat-052"; "chat-104" ];
+  List.iter
+    (fun index ->
+       let expected = List.nth external_contents index in
+       check bool (Printf.sprintf "external-%d" index) true
+         (List.exists (String.equal expected) contents))
+    [ 0; 2; 4 ]
+;;
+
+let test_counterpart_range_includes_upper_boundary_once () =
+  with_workspace @@ fun config ->
+  let base_dir = config.Workspace.base_path in
+  let record ~dedupe_key ~content_preview ~received_at =
+    let surface = Keeper_external_attention.Agent in
+    let item : Keeper_external_attention.item =
+      { event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key
+      ; dedupe_key
+      ; keeper_name
+      ; conversation = { conversation_id = "agent:boundary"; surface }
+      ; external_message = None
+      ; source_label = "agent"
+      ; actor =
+          { actor_id = Some "external"
+          ; display_name = Some "External"
+          ; authority = Keeper_chat_store.External
+          }
+      ; urgency = Keeper_external_attention.Ambient
+      ; content_preview
+      ; content_ref = None
+      ; received_at
+      ; metadata = []
+      }
+    in
+    match Keeper_external_attention.For_testing.record_with_clock
+         ~now:(fun () -> item.Keeper_external_attention.received_at) ~base_path:base_dir item with
+    | `Recorded -> ()
+    | `Duplicate _ -> fail "unexpected duplicate external fixture"
+    | `Error detail -> fail detail
+  in
+  record ~dedupe_key:"at-lower" ~content_preview:"at-lower" ~received_at:1.;
+  record ~dedupe_key:"at-upper" ~content_preview:"at-upper" ~received_at:2.;
+  let observations =
+    match
+      Masc.Keeper_librarian_input_sources.counterpart_observations_between
+        ~base_dir
+        ~keeper_name
+        ~after:(Some 1.)
+        ~before:2.
+    with
+    | Ok observations -> observations
+    | Error error ->
+      fail (Masc.Keeper_librarian_input_sources.read_error_to_string error)
+  in
+  check
+    (list string)
+    "range is open after and closed before"
+    [ "at-upper" ]
+    (List.map
+       (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+       observations)
+;;
+
+let test_external_chat_pair_straddling_a_boundary_is_not_duplicated () =
+  with_workspace @@ fun config ->
+  let base_dir = config.Workspace.base_path in
+  let surface = Keeper_external_attention.Agent in
+  let conversation_id = "agent:boundary-dedup" in
+  let message_id = "external-boundary-message" in
+  let received_at = Time_compat.now () -. 10.0 in
+  let boundary = received_at +. 1.0 in
+  let item : Keeper_external_attention.item =
+    { event_id = Keeper_external_attention.event_id_of_dedupe_key message_id
+    ; dedupe_key = message_id
+    ; keeper_name
+    ; conversation = { conversation_id; surface }
+    ; external_message =
+        Some { surface; message_id; reply_to_message_id = None }
+    ; source_label = "agent"
+    ; actor =
+        { actor_id = Some "external"
+        ; display_name = Some "External"
+        ; authority = Keeper_chat_store.External
+        }
+    ; urgency = Keeper_external_attention.Ambient
+    ; content_preview = "delivered once"
+    ; content_ref = None
+    ; received_at
+    ; metadata = []
+    }
+  in
+  (match Keeper_external_attention.For_testing.record_with_clock
+         ~now:(fun () -> item.Keeper_external_attention.received_at) ~base_path:base_dir item with
+   | `Recorded -> ()
+   | `Duplicate _ -> fail "unexpected duplicate external fixture"
+   | `Error detail -> fail detail);
+  let read ~after ~before =
+    match
+      Masc.Keeper_librarian_input_sources.counterpart_observations_between
+        ~base_dir
+        ~keeper_name
+        ~after
+        ~before
+    with
+    | Ok observations -> observations
+    | Error error ->
+      fail (Masc.Keeper_librarian_input_sources.read_error_to_string error)
+  in
+  check
+    (list string)
+    "the first range emits the external delivery"
+    [ "delivered once" ]
+    (List.map
+       (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+       (read ~after:None ~before:boundary));
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir
+    ~keeper_name
+    ~content:"delivered once"
+    ~conversation_id
+    ~external_message_id:message_id
+    ~speaker
+    ();
+  check
+    (list string)
+    "the later chat projection is not emitted a second time"
+    []
+    (List.map
+       (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+       (read ~after:(Some boundary) ~before:(Time_compat.now () +. 10.0)))
+;;
+
+(* {1 Official-client turns (RFC §10-3)} *)
+
+module Official = Masc.Keeper_librarian_official_progress
+module History = Masc.Keeper_context_core_history
+
+let append_official_boundary ?(task_context = Masc.Keeper_turn_task_context.No_task)
+    ?(history_at_start = Boundaries.Continued_history) config ~trace_id ~turn ~recorded_at =
+  let record : Boundaries.record =
+    { recorded_at
+    ; event =
+        Boundaries.Turn_ended
+          { task_context; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+          ; history_at_start
+          ; position = Boundaries.No_atom_history
+          }
+    }
+  in
+  match
+    Boundaries.append
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+      record
+  with
+  | Ok () -> ()
+  | Error error -> fail (Boundaries.append_error_to_string error)
+;;
+
+let session config trace_id =
+  Masc.Keeper_context_core.create_session
+    ~session_id:trace_id
+    ~base_dir:(Masc.Keeper_fs.session_store_path config)
+;;
+
+(* The lines an official-client turn leaves: the user's line, the assistant's,
+   and one observation per tool call. *)
+let write_official_turn config ~trace_id ~turn ~user ~assistant ~tools =
+  let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
+  let session = session config trace_id in
+  History.persist_message ~keeper_name ~turn_ref ~source:"direct_user" session (message user);
+  History.persist_message ~keeper_name ~turn_ref ~source:"direct_assistant" session
+    (Agent_core.Types.make_message
+       ~role:Agent_core.Types.Assistant
+       [ Agent_core.Types.Text assistant ]);
+  List.iter
+    (fun tool_name ->
+       History.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name
+         ~outcome:Tool_result.Ok)
+    tools
+;;
+
+let read_official config =
+  match
+    Official.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  with
+  | Ok cursor -> cursor
+  | Error error -> fail (Official.read_error_to_string error)
+;;
+
+(* Official boundaries never require reopening an unchanged atom checkpoint.
+   A broken checkpoint is a positive control: the next atom boundary must
+   still expose its error rather than silently hiding unread atom work. *)
+let test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms () =
+  let exercise config trace_id current session_dir path =
+    damage_checkpoint Corrupt_checkpoint ~session_dir ~trace_id path;
+    let before = read_progress config in
+    let commits = ref 0 in
+    List.iter (fun turn ->
+      let user = Printf.sprintf "official-q%d" turn in
+      let assistant = Printf.sprintf "official-a%d" turn in
+      write_official_turn config ~trace_id ~turn ~user ~assistant ~tools:[];
+      append_official_boundary config ~trace_id ~turn ~recorded_at:(Float.of_int turn);
+      (match consume config (fun original ->
+        let range_id = Original.range_id original in
+        let official_range_id = Original.official_range_id original in
+        let input = Original.input original in
+          incr commits;
+          check bool "no atom receipt" true (Option.is_none range_id);
+          check bool "official receipt retained" true (Option.is_some official_range_id);
+          check (list string) "only the new official turn" [user; assistant]
+            (text_markers input);
+          Consumer.Memory_committed) with
+       | Consumer.Official_advanced { atom = None; _ } -> ()
+       | _ -> fail "official turn did not advance independently of the checkpoint");
+      check bool "atom position is unchanged" true (read_progress config = before);
+      (match consume config (fun _original ->
+          fail "quiet wake repeated an official commit") with
+       | Consumer.Nothing_to_read -> ()
+       | _ -> fail "quiet wake changed progress")) [3; 4; 5];
+    check int "each official turn is committed once" 3 !commits;
+    append_boundary config ~trace_id ~turn:6 ~recorded_at:6.
+      (current @ [message "new atom turn"]);
+    match Consumer.consume_one ~config ~keeper_name
+        ~commit:(fun _original ->
+          fail "corrupt atom checkpoint reached commit") with
+    | Error (Consumer.Checkpoint_unreadable { error = Store.Saved_history.Parse_error _; _ }) -> ()
+    | Error error -> fail (Consumer.error_to_string error)
+    | Ok _ -> fail "new atom boundary did not reopen checkpoint"
+  in
+  if with_atoms then with_consumed_shorter_history exercise
+  else with_workspace (fun config ->
+    let trace_id = "official-with-unused-checkpoint" in
+    write_meta config trace_id;
+    save_checkpoint config ~trace_id [] 0;
+    let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+    let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+    exercise config trace_id [] session_dir path)
+;;
+
+(* A keeper that only ever ran on official-client runtimes: no checkpoint, no
+   atom position. Its turns are read from their fragments, in order, and the
+   official position moves to the last line read. *)
+let test_an_official_only_keeper_is_read_from_its_fragments () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-only" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"q1" ~assistant:"a1" ~tools:[ "masc_tasks" ];
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:2.0;
+  let carried = ref [] in
+  let tools = ref [] in
+  let commits = ref 0 in
+  (match
+     consume config (fun original ->
+       let range_id = Original.range_id original in
+       let official_range_id = Original.official_range_id original in
+       let input = Original.input original in
+       incr commits;
+       check bool "official receipt is carried" true (Option.is_some official_range_id);
+       carried := text_markers input;
+       tools :=
+         List.map
+           (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name)
+           input.tool_observations;
+       check bool "an official-only pass carries no atom receipt" true (Option.is_none range_id);
+       Consumer.Memory_committed)
+   with
+   | Consumer.Official_advanced { atom = None; official } ->
+     check int "the official position is the last line read" 2 official.boundary_line
+   | Consumer.Official_advanced { atom = Some _; _ } -> fail "an atom position appeared from nowhere"
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "official turns were not read");
+  check (list string) "both turns, each in its order" [ "q1"; "a1"; "q2"; "a2" ] !carried;
+  check (list string) "the tool the first turn called" [ "masc_tasks" ] !tools;
+  check int "one Memory commit" 1 !commits;
+  (match read_official config with
+   | Some { Official.boundary_line = 2 } -> ()
+   | Some { Official.boundary_line } -> failf "official position at line %d" boundary_line
+   | None -> fail "no official position was written");
+  match consume config (fun _original -> fail "a second pass read again") with
+  | Consumer.Nothing_to_read -> ()
+  | Consumer.Official_advanced _
+  | Consumer.Baseline_advanced _
+  | Consumer.Progress_advanced _
+  | Consumer.Pending
+  | Consumer.Memory_not_committed _ -> fail "read turns were read again"
+;;
+
+(* Rewrites the canonical as the build before the last [checkpoint_version]
+   bump left it: the current document with the earlier number. *)
+let supersede_checkpoint config ~trace_id =
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  let earlier =
+    Masc_test_deps.checkpoint_head_with_version path (Agent_core.Checkpoint.checkpoint_version - 1)
+  in
+  let (_ : string) = overwrite_checkpoint config ~trace_id earlier in
+  match Store.load_agent_core ~session_dir ~session_id:trace_id with
+  | Error (Store.Superseded_version _) -> ()
+  | Error error -> failf "superseded fixture: %s" (Store.checkpoint_load_error_to_string error)
+  | Ok _ -> fail "superseded checkpoint unexpectedly loaded"
+;;
+
+(* The current trace's checkpoint holds a version this build supersedes, and
+   the keeper's turns save no checkpoint, as an official client's do, so no
+   save replaces the file. The turn after the cut starts fresh. Its atoms are
+   nothing to read: the pass reads the official turn, the next pass has
+   nothing to do, and the unread count stays readable on both. *)
+let test_a_superseded_current_checkpoint_is_fresh_state () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  let trace_id = "trace-superseded-current" in
+  establish_progress config ~trace_id "before-the-cut";
+  supersede_checkpoint config ~trace_id;
+  write_official_turn config ~trace_id ~turn:2 ~user:"q-after-cut" ~assistant:"a-after-cut"
+    ~tools:[];
+  append_official_boundary ~history_at_start:Boundaries.Fresh_history config ~trace_id
+    ~turn:2 ~recorded_at:2.0;
+  let atom_position = read_progress config in
+  let carried = ref [] in
+  let commits = ref 0 in
+
+    let commit original =
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    incr commits;
+    check bool "no atom receipt" true (Option.is_none range_id);
+    check bool "the official receipt is carried" true (Option.is_some official_range_id);
+    carried := text_markers input;
+    Consumer.Memory_committed
+  in
+  let check_settled label =
+    match Queue_refresh.last_measurement ~config ~keeper_name with
+    | Some
+        { last_pass = Queue_refresh.Drained
+        ; unread = Some { atoms = 0; official = 0 }
+        ; _ } -> ()
+    | Some { last_pass = Queue_refresh.Stopped error; _ } ->
+      failf "%s: the pass stopped: %s" label (Consumer.error_to_string error)
+    | Some { unread = None; _ } -> failf "%s: the unread count is unavailable" label
+    | Some _ -> failf "%s: the pass did not drain" label
+    | None -> failf "%s: no measurement" label
+  in
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit);
+  check_settled "first pass";
+  check (list string) "the official turn after the cut is read"
+    [ "q-after-cut"; "a-after-cut" ] !carried;
+  ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit);
+  check_settled "next pass";
+  check int "the official turn is committed once" 1 !commits;
+  check bool "the atom position is unchanged" true (read_progress config = atom_position)
+;;
+
+(* An official-client turn that failed after its tools ran: its input is a
+   fragment from the start of the turn, it kept no assistant text, and the
+   error path writes its tool observations and its end line. The Librarian
+   reads that turn like any other, and the turn after it too. *)
+let test_a_failed_official_turn_is_read ?(tool_only=false) () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-failed" in
+  write_meta config trace_id;
+  let failed_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+  if not tool_only then History.persist_message ~keeper_name ~turn_ref:failed_ref ~source:"direct_user"
+    (session config trace_id) (message "q-failed");
+  let detail tool_name : Masc.Keeper_agent_result.tool_call_detail =
+    { tool_name
+    ; provider = "fixture"
+    ; execution_outcome = Tool_result.Ok
+    ; typed_outcome = None
+    ; latency_ms = 0.
+    ; task_id = None
+    ; route_evidence = None
+    ; input_fingerprint = None
+    ; output_fingerprint = None
+    }
+  in
+  Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+    ~task_context:(historical_task "task-failed" "goal-failed" "1")
+    ~config
+    ~meta:(meta trace_id)
+    ~turn_ref:failed_ref
+    ~session:(session config trace_id)
+    ~tool_observations:[ detail "fixture_effect" ]
+    ~history_at_start:Boundaries.Continued_history
+    ~restart_notice_pending:(Atomic.make false);
+  if tool_only then
+    Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+      ~task_context:(historical_task "task-second" "goal-second" "2")
+      ~config ~meta:(meta trace_id)
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:2)
+      ~session:(session config trace_id) ~tool_observations:[detail "second_effect"]
+      ~history_at_start:Boundaries.Continued_history
+      ~restart_notice_pending:(Atomic.make false)
+  else (
+    write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+    append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(Time_compat.now ()));
+
+  let carried = ref [] in
+  let tools = ref [] in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       carried := text_markers input;
+       (match input.historical_task_contexts with
+        | first :: _ ->
+          check (pair int int) "failed turn message interval" (0,if tool_only then 0 else 1)
+            (first.first_message,first.after_message);
+          check (list string) "failed turn retains exact Task even without text"
+            ["task-failed"] (observed_task_ids [first]);
+          (match first.scope.attribution with
+           | Historical.Observed {turn_ref;_} -> check bool "failed turn reference" true (Ids.Turn_ref.equal failed_ref turn_ref)
+           | Historical.Unattributed -> fail "failed official attribution lost")
+        | [] -> fail "failed official context absent");
+       if tool_only then (
+         check (list string) "two tool-only turns retain separate Tasks"
+           ["task-failed";"task-second"] (observed_task_ids input.historical_task_contexts);
+         check (list (pair int int)) "two tool-only turns retain separate observation intervals"
+           [(0,1);(1,2)] (List.map (fun (entry : Historical.t) ->
+             entry.first_tool_observation,entry.after_tool_observation) input.historical_task_contexts));
+       tools :=
+         List.map
+           (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name)
+           input.tool_observations;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Official_advanced { official; _ } ->
+     check int "the position passes both end lines" 2 official.boundary_line
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the failed turn left nothing to read");
+  check (list string) "the failed turn's input, then the next turn" (if tool_only then [] else [ "q-failed"; "q2"; "a2" ])
+    !carried;
+  check (list string) "the tool the failed turn called" (if tool_only then ["fixture_effect";"second_effect"] else ["fixture_effect"]) !tools
+;;
+
+(* RFC §10-3's counterexample: T1 Agent-Core, T2 official-client, T3
+   Agent-Core. One pass hands the Librarian T2 then T3, by the order of
+   their end lines, and moves both positions. *)
+let test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-mixed-refused" in
+  establish_progress config ~trace_id "t1";
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:2.;
+  let messages = [message "t1";message "t3"] in
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3. messages;
+  save_checkpoint config ~trace_id messages 3;
+  let module Runtime = Masc.Keeper_librarian_runtime in
+  let reports = if not with_reports then [] else
+    [ { Runtime.input_capacity_evidence = Runtime.Input_capacity_refused
+      ; provider_input_refusals = [Masc.Keeper_librarian_input_refusal.Request_body_refused]
+      ; detail = "provider refused the input"
+      ; walk_shows_size = true
+      ; message_descent = Runtime.Smaller_input_may_help
+      ; smaller_range_meets_same_failure = false }
+    ; { Runtime.input_capacity_evidence = Runtime.No_input_capacity_refusal
+      ; provider_input_refusals = []
+      ; detail = "later slot did not report input size"
+      ; walk_shows_size = false
+      ; message_descent = Runtime.No_descent_evidence
+      ; smaller_range_meets_same_failure = true } ] in
+  let atom_before = read_progress config and official_before = read_official config in
+  let sent = ref [] in
+  (match consume config (fun original ->
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    check bool "mixed range has an atom receipt" true (Option.is_some range_id);
+    check bool "mixed range has an official receipt" true (Option.is_some official_range_id);
+    sent := text_markers input;
+    Consumer.Memory_refused reports) with
+   | Consumer.Memory_not_committed actual ->
+     check bool "all reports survive in callback order" true (actual = reports)
+   | Consumer.Pending | Consumer.Nothing_to_read | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _ | Consumer.Official_advanced _ ->
+     fail "refused mixed range advanced");
+  check bool "refusal preserves atom cursor" true (read_progress config = atom_before);
+  check bool "refusal preserves official cursor" true (read_official config = official_before);
+  Consumer.For_testing.reset_process_state ();
+  (match consume config (fun original ->
+    let input = Original.input original in
+    check (list string) "restart receives exactly the refused source" !sent (text_markers input);
+    Consumer.Memory_committed) with
+   | Consumer.Official_advanced {atom=Some atom;official} ->
+     check int "only the successful retry advances atoms" 2 atom.position.end_atom;
+     check int "only the successful retry advances official lines" 2 official.boundary_line
+   | Consumer.Nothing_to_read | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _ | Consumer.Official_advanced {atom=None;_}
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "successful mixed retry did not advance")
+
+let test_pending_official_sources_preserve_memory_and_ack ~mixed () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-pending-official" in
+  if mixed then establish_progress config ~trace_id "t1"
+  else write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:2.;
+  let selected = if mixed then (
+    let first_two = [message "t1";message "t3"] in
+    let all = first_two @ [message "t4"] in
+    append_boundary config ~trace_id ~turn:3 ~recorded_at:3. first_two;
+    append_boundary config ~trace_id ~turn:4 ~recorded_at:4. all;
+    save_checkpoint config ~trace_id all 4;
+    ["q2";"a2";"t3";"t4"])
+    else (
+      write_official_turn config ~trace_id ~turn:3 ~user:"q3" ~assistant:"a3" ~tools:[];
+      append_official_boundary config ~trace_id ~turn:3 ~recorded_at:3.;
+      ["q2";"a2";"q3";"a3"]) in
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let atom_before = read_progress config and official_before = read_official config in
+  let item : Keeper_external_attention.item =
+    {event_id=Keeper_external_attention.event_id_of_dedupe_key "pending-counterpart";
+     dedupe_key="pending-counterpart";keeper_name;
+     conversation={conversation_id="agent:pending";surface=Keeper_external_attention.Agent};
+     external_message=None;source_label="agent";
+     actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+     urgency=Keeper_external_attention.Ambient;content_preview="Retain this external observation.";
+     content_ref=None;received_at=1.5;metadata=[]} in
+  (match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> 1.5)
+      ~base_path:config.Workspace.base_path item with
+   | `Recorded -> ()
+   | `Duplicate _ -> fail "duplicate pending counterpart fixture"
+   | `Error detail -> fail detail);
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let external_path = Masc.Keeper_external_read_cursor.path_for_keepers_dir
+      ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+  let check_external ~after ~prepared =
+    let open Yojson.Safe.Util in
+    let state = Fs_compat.load_file external_path |> Yojson.Safe.from_string in
+    check int "external acknowledgement follows Memory commit" after
+      (member "after" state |> to_int);
+    check bool "Pending retains preparation without acknowledging it" prepared
+      (member "pending" state <> `Null) in
+  let check_selected ~range_id ~official_range_id input =
+    check bool "only mixed input has an atom receipt" mixed (Option.is_some range_id);
+    check bool "official input retains its exact receipt" true (Option.is_some official_range_id);
+    check (list string) "Pending never narrows or drops official source messages"
+      selected (text_markers input);
+    check int "external evidence remains in the original selected input" 1
+      (List.length input.Masc.Keeper_librarian.counterpart_observations) in
+
+    let pending original =
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    check_selected ~range_id ~official_range_id input;
+    Consumer.Memory_pending in
+  List.iter (fun () ->
+    (match consume config pending with
+     | Consumer.Pending -> ()
+     | _ -> fail "official source did not suspend at its unfinished commit");
+    check bool "Pending preserves atom cursor" true (read_progress config=atom_before);
+    check bool "Pending preserves official cursor" true (read_official config=official_before);
+    check string "Pending preserves actual Memory bytes" memory_before
+      (Fs_compat.load_file memory_path);
+    check_external ~after:0 ~prepared:true) [();()];
+
+    let commit original =
+    let expected_revision = Original.expected_revision original in
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    check_selected ~range_id ~official_range_id input;
+    commit_pending_memory config ~expected_revision ~range_id ~official_range_id input in
+  (match consume config commit with
+   | Consumer.Official_advanced {atom;official} ->
+     check int "committed receipt advances the official position" 2 official.boundary_line;
+     (match mixed,atom with
+      | true,Some progress ->
+        check int "committed mixed receipt advances every selected atom" 3 progress.position.end_atom
+      | false,None -> ()
+      | true,None | false,Some _ -> fail "commit changed the selected source kinds")
+   | _ -> fail "normal official Memory commit did not resume both source cursors");
+  check_external ~after:1 ~prepared:false;
+  (match consume config (fun _original ->
+      fail "settled official source was submitted again") with
+   | Consumer.Nothing_to_read -> ()
+   | _ -> fail "normal commit left selected source unread")
+;;
+
+let test_a_mixed_keeper_is_read_in_line_order () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-mixed" in
+  establish_progress config ~trace_id "t1";
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary ~task_context:(historical_task "task-official" "goal-official" "1") config ~trace_id ~turn:2 ~recorded_at:2.0;
+  let messages = [ message "t1"; message "t3" ] in
+  append_boundary ~task_context:(historical_task "task-atom" "goal-atom" "2")
+    ~history_at_start:(Boundaries.history_at_start_of_messages [message "t1"]) config ~trace_id ~turn:3 ~recorded_at:3.0 messages;
+  save_checkpoint config ~trace_id messages 3;
+  let carried = ref [] in
+  (match
+     consume config (fun original ->
+       let range_id = Original.range_id original in
+       let official_range_id = Original.official_range_id original in
+       let input = Original.input original in
+       carried := text_markers input;
+       check (list string) "official then atom admission context"
+         ["task-official";"task-atom"] (observed_task_ids input.historical_task_contexts);
+       check (list (pair int int)) "mixed source message associations"
+         [(0,2);(2,3)] (List.map (fun (entry : Historical.t) ->
+           entry.first_message,entry.after_message) input.historical_task_contexts);
+       check bool "the atoms of the pass carry a receipt" true (Option.is_some range_id);
+       check bool "the official turns carry a receipt" true (Option.is_some official_range_id);
+       Consumer.Memory_committed)
+   with
+   | Consumer.Official_advanced { atom = Some atom; official } ->
+     check int "the atom position reaches T3" 2 atom.position.end_atom;
+     check int "the official position reaches T2's line" 2 official.boundary_line
+   | Consumer.Official_advanced { atom = None; _ } -> fail "T3's atoms were not read"
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the mixed pass did not advance");
+  check (list string) "T2 before T3, T1 not again" [ "q2"; "a2"; "t3" ] !carried
+;;
+
+(* Lines whose fragments predate turn-named history are passed without a
+   model call; the position still moves so they are not asked for again. *)
+let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?(with_unread = false) ~mixed ~cancel_after_save () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-official-commit-recovery" in
+  if mixed then establish_progress config ~trace_id "t1"
+  else write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:2.0;
+  write_official_turn config ~trace_id ~turn:3 ~user:"q3" ~assistant:"a3" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:3 ~recorded_at:3.0;
+  if mixed then (
+    let messages = [ message "t1"; message "t4" ] in
+    append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 messages;
+    save_checkpoint config ~trace_id messages 4);
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  let commits = ref 0 and expected_holes = ref [] in
+
+    let commit original =
+    let range_id = Original.range_id original in
+    let official_range_id = Original.official_range_id original in
+    let input = Original.input original in
+    incr commits;
+    check bool "official commit has a durable identity" true (Option.is_some official_range_id);
+    let range_id, official_range_id = if not with_unread then range_id,official_range_id else
+      let module H = Masc.Keeper_librarian_unread in
+      let reasons = [Masc.Keeper_librarian_input_refusal.Request_body_refused] in
+      let get = function Ok value -> value | Error detail -> fail detail in
+      let range_id = Option.map (fun (range : Current.durable_range_id) ->
+        let hole = H.for_atom ~trace_id:range.trace_id
+          ~history_start_boundary_line:range.history_start_boundary_line
+          ~atom:1 ~message_in_atom:0 ~messages:[message "t1";message "t4"] ~reasons |> get in
+        {range with unread_messages=[hole]}) range_id in
+      let official_range_id = Option.map (fun (range : Current.official_range_id) ->
+        let line,turn_ref = List.hd range.turns in
+        let messages = List.take 2 input.Masc.Keeper_librarian.messages in
+        let hole = H.for_official_turn ~turn_ref ~boundary_line:line ~message_in_turn:1
+          ~messages ~reasons |> get in
+        {range with unread_messages=[hole]}) official_range_id in
+      expected_holes := H.merge
+        (Option.fold ~none:[] ~some:(fun (r : Current.durable_range_id) -> r.unread_messages) range_id)
+        (Option.fold ~none:[] ~some:(fun (r : Current.official_range_id) -> r.unread_messages) official_range_id) |> get;
+      range_id,official_range_id in
+    (match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id ?official_range_id
+      ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:4.
+      ~source:{ kind = Current.Librarian; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref }
+      ~new_claims:[] () with
+     | Ok _ -> ()
+     | Error detail -> fail detail);
+    if cancel_after_save then raise (Eio.Cancel.Cancelled Exit);
+    Consumer.Memory_committed
+  in
+  let fail_official ~keepers_dir:_ ~keeper_id:_ _ =
+    Error (Official.Write_failed { path = "injected-official-progress"; message = "write failed after Memory commit" })
+  in
+  (match Consumer.For_testing.consume_one_with_progress_writer
+      ~write_progress_store:Progress.write ~write_official_progress_store:fail_official
+      ~config ~keeper_name ~commit with
+   | Error (Consumer.Official_progress_write_failed _) when not cancel_after_save -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "expected interruption between Memory and official progress"
+   | exception Eio.Cancel.Cancelled _ when cancel_after_save -> ());
+  check int "one Memory commit before interruption" 1 !commits;
+  check bool "official cursor was not saved" true (Option.is_none (read_official config));
+  (* Recover both with the process-local narrow-retry marker and after restart.
+     Neither may submit the already-saved official turns again. *)
+  if cancel_after_save then Consumer.For_testing.reset_process_state ();
+  let no_commit _original =
+    fail "saved input was sent for synthesis again"
+  in
+  if through_queue then (
+    ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name ~commit:no_commit);
+    (match read_official config with
+     | Some official -> check int "queue restores official cursor" (if mixed then 3 else 2) official.boundary_line
+     | None -> fail "queue left official cursor behind");
+    if mixed then check_progress_end config 2)
+  else (
+  (match consume config no_commit with
+   | Consumer.Official_advanced { official; _ } ->
+     check int "official range restored in full" (if mixed then 3 else 2) official.boundary_line
+   | _ -> fail "official commit receipt was not recovered");
+  if mixed && cancel_after_save then (
+    match consume config no_commit with
+    | Consumer.Progress_advanced progress -> check int "atom cursor restored separately" 2 progress.position.end_atom
+    | _ -> fail "mixed atom receipt was lost"));
+  (match consume config no_commit with
+   | Consumer.Nothing_to_read -> ()
+   | _ -> fail "receipt recovery left input to read again");
+  if with_unread then (
+    let read () = match Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name with
+      | Ok holes -> holes | Error detail -> fail detail in
+    check bool "recovery retains every accounted unread source" true (read () = !expected_holes);
+    (* A later interval can replace both WAL identities only after the old
+       holes are durable, even though the scalar positions contain no list. *)
+    let durable_range_id = {Current.receipt_scope=Workspace.keepers_runtime_dir config;
+      trace_id="later-after-recovery";history_start_boundary_line=5;start_atom=0;end_atom=1;
+      last_atom_digest=String.make 64 'a';end_boundary_line=5;boundary_lines_seen=5;unread_messages=[]} in
+    let official_range_id = {Current.receipt_scope=Workspace.keepers_runtime_dir config;
+      after_boundary_line=4;turns=[5,Ids.Turn_ref.make ~trace_id:"later-after-recovery" ~absolute_turn:1];unread_messages=[]} in
+    (match Current.apply_disposition ~revisions:[] ~durable_range_id ~official_range_id
+      ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:5.
+      ~source:{kind=Current.Librarian;trace_id="later-after-recovery"} ~new_claims:[] () with
+     | Ok _ -> () | Error detail -> fail detail);
+    check bool "later same-scope commit does not erase prior holes" true (read () = !expected_holes));
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name with
+   | Ok (Some snapshot) -> check int "recovery did not rewrite Memory" 1 snapshot.revision
+   | Ok None -> fail "committed Memory disappeared"
+   | Error detail -> fail detail)
+;;
+
+type native_descent_case =
+  | Native_codex_capacity
+  | Native_claude_capacity
+  | Native_invalid_json_first
+  | Native_invalid_domain_last
+  | Native_codex_effect_started
+  | Native_claude_response_started
+  | Native_opaque_failure
+
+let native_capacity_failure ~claude ~tool_effect ~response =
+  if claude then Masc.Fusion_official_client.Claude_failure
+    (Runtime_claude_code.Context_window_exceeded
+      {message="fixture unmeasured native context refusal";
+       tool_effect_attempted=tool_effect;response_emitted=response})
+  else Masc.Fusion_official_client.Codex_failure
+    (Runtime_codex_app_server.Context_window_exceeded
+      {message="fixture unmeasured native context refusal";tool_effect_attempted=tool_effect})
+
+let native_descent_answers = function
+  | Native_codex_capacity -> [Error (native_capacity_failure ~claude:false ~tool_effect:false ~response:false)]
+  | Native_claude_capacity -> [Error (native_capacity_failure ~claude:true ~tool_effect:false ~response:false)]
+  | Native_invalid_json_first -> [Ok "not-json";Error (native_capacity_failure ~claude:false ~tool_effect:false ~response:false)]
+  | Native_invalid_domain_last -> [Error (native_capacity_failure ~claude:false ~tool_effect:false ~response:false);Ok "{}"]
+  | Native_codex_effect_started -> [Error (native_capacity_failure ~claude:false ~tool_effect:true ~response:false)]
+  | Native_claude_response_started -> [Error (native_capacity_failure ~claude:true ~tool_effect:false ~response:true)]
+  | Native_opaque_failure -> [Error (Masc.Fusion_official_client.Setup_failure "fixture opaque native failure")]
+
+let native_descent_succeeds = function
+  | Native_codex_capacity | Native_claude_capacity -> true
+  | Native_invalid_json_first | Native_invalid_domain_last | Native_codex_effect_started
+  | Native_claude_response_started | Native_opaque_failure -> false
+
+type checkpoint_memory_floor_case =
+  | Partial_checkpoint_hole
+  | Retired_checkpoint_hole
+  | All_checkpoint_holes
+  | Checkpoint_holes_without_observations
+  | Unknown_checkpoint_refusal
+  | Cli_tail_checkpoint_refusal
+  | Late_checkpoint_failure
+  | Rewritten_checkpoint_source
+  | Appended_checkpoint_suffix
+  | Restarted_checkpoint_history
+  | Moved_checkpoint_progress
+  | Interrupted_checkpoint_progress
+
+(* The ordinary durable pass starts after a real stored atom position. A
+   single completion cut spans two further atoms: its tool result shares the
+   assistant's atom, so message coordinates cannot be a flattened index. *)
+let test_runtime_checkpoint_memory_floor ?native case () =
+  let open Masc in
+  let module Progress = Keeper_librarian_progress in
+  let module F = Exact_output_fixture in
+  let module Current = Keeper_memory_os_current in
+  let module Unread = Keeper_librarian_unread in
+  let module Program = Keeper_memory_os_program in
+  let module U = Yojson.Safe.Util in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  let with_runtimes f = if Option.is_some native || case=Cli_tail_checkpoint_refusal then F.with_official_client_runtimes f else f () in
+  with_runtimes @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "checkpoint-memory-floor-" "" in
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset (); Fs_compat.remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None);
+  write_keeper_declaration config;
+  let trace_id = "checkpoint-runtime-floor-a" in
+  let prefix_marker = "The first checkpoint turn was already consumed." in
+  establish_progress config ~trace_id prefix_marker;
+  let prior_progress = match read_progress config with Some value -> value | None -> fail "missing initial checkpoint position" in
+  let has_observations = case<>Checkpoint_holes_without_observations in
+  let claim = "Checkpoint project Meridian waits for operator approval." in
+  let question = message (claim ^ " Read the fixture file and preserve its actual outcome.") in
+  let source =
+    let open Agent_core.Types in
+    if not has_observations then [question;make_message ~role:Assistant [Text "An answer that has not been read."]]
+    else [question;
+      make_message ~role:Assistant [Text claim;ToolUse {id="checkpoint-floor-call";name="read_file";
+        input=`Assoc ["path",`String "checkpoint-private-argument"]}];
+      {(make_message ~role:Tool [ToolResult {tool_use_id="checkpoint-floor-call";
+        content="checkpoint-private-result";outcome=Tool_succeeded;json=None;content_blocks=None}])
+       with tool_call_id=Some "checkpoint-floor-call"}] in
+  let completed = message prefix_marker :: source in
+  save_checkpoint config ~trace_id completed 2;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:1000.
+    ~history_at_start:(Boundaries.history_at_start_of_messages [message prefix_marker]) completed;
+  let counterpart_marker = "The external speaker asks that the completed checkpoint be reviewed." in
+  if has_observations then (
+    let item : Keeper_external_attention.item =
+      {event_id=Keeper_external_attention.event_id_of_dedupe_key "checkpoint-floor-counterpart";
+       dedupe_key="checkpoint-floor-counterpart";keeper_name;
+       conversation={conversation_id="agent:checkpoint-floor";surface=Keeper_external_attention.Agent};
+       external_message=None;source_label="agent";
+       actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+       urgency=Keeper_external_attention.Ambient;content_preview=counterpart_marker;
+       content_ref=None;received_at=999.;metadata=[]} in
+    match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> 999.) ~base_path item with
+    | `Recorded -> () | `Duplicate _ -> fail "duplicate checkpoint counterpart fixture"
+    | `Error detail -> fail detail);
+  let next_trace = "checkpoint-runtime-floor-b" in
+  let next_trace_marker = "The new trace must wait for its retired predecessor." in
+  if case=Retired_checkpoint_hole then (
+    save_checkpoint config ~trace_id:next_trace [message next_trace_marker] 1;
+    append_boundary config ~trace_id:next_trace ~turn:1 ~recorded_at:1001. [message next_trace_marker];
+    write_meta config next_trace);
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let line_count = if case=Retired_checkpoint_hole then 3 else 2 in
+  let end_atom,last_atom_digest = match Boundaries.position_of_messages completed |> get with
+    | Boundaries.Atom_history {end_atom;last_atom_digest} -> end_atom,last_atom_digest
+    | Boundaries.Empty_atom_history | Boundaries.No_atom_history | Boundaries.Stale_noop -> fail "checkpoint fixture has no atoms" in
+  check int "one completion cut contains two new atoms after the consumed prefix" 3 end_atom;
+  let original_range : Current.durable_range_id =
+    {receipt_scope=runtime_keepers_dir;trace_id;history_start_boundary_line=1;start_atom=1;end_atom;
+     last_atom_digest;end_boundary_line=2;boundary_lines_seen=line_count;unread_messages=[]} in
+  let sources = Unread.sources_for_atom_range ~trace_id ~history_start_boundary_line:1
+    ~start_atom:1 ~end_atom ~messages:completed |> get in
+  let coordinates = List.map (function
+    | Unread.Atom {atom;message_in_atom;_} -> atom,message_in_atom
+    | Unread.Official_turn _ -> fail "checkpoint fixture received an official source") sources in
+  check (list (pair int int)) "global atom coordinates retain each atom's local message numbering"
+    (if has_observations then [1,0;2,0;2,1] else [1,0;2,0]) coordinates;
+  let all_holes = case=All_checkpoint_holes || not has_observations in
+  let hole message_in_source =
+    let atom,message_in_atom = List.nth coordinates message_in_source in
+    Unread.for_atom ~trace_id ~history_start_boundary_line:1 ~atom ~message_in_atom
+      ~messages:completed ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get in
+  let expected_holes = if Option.is_some native then [] else if all_holes then List.mapi (fun index _ -> hole index) source
+    else if case=Partial_checkpoint_hole || case=Retired_checkpoint_hole || case=Interrupted_checkpoint_progress
+    then [hole 0] else [] in
+  let registry = Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Exact_lane_run_registry.storage_filename) () in
+  (match Exact_lane_run_registry.install_global registry with
+   | Ok () | Error Exact_lane_run_registry.Already_installed -> ());
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Prompt_defaults.init ();
+  let stores =
+    [Current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.publication_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name;
+     Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name;
+     Keeper_librarian_continuity.path ~config ~keeper_name;
+     Progress.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     Official.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     Keeper_external_read_cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name] in
+  let bytes () = List.map Fs_compat.load_file_opt stores in
+  let external_state () = Keeper_external_read_cursor.path_for_keepers_dir
+    ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name |> Fs_compat.load_file |> Yojson.Safe.from_string in
+  let check_external_after expected = check int "external admission waits for a complete original checkpoint publication"
+    expected (U.member "after" (external_state ()) |> U.to_int) in
+  let check_unchanged_endpoint () =
+    let session_dir = Keeper_fs.keeper_session_dir config trace_id in
+    let persisted = Store.load_agent_core ~session_dir ~session_id:trace_id
+      |> Result.map_error Store.checkpoint_load_error_to_string |> get in
+    check bool "the actual stored checkpoint preserves every atom-opening endpoint witness" true
+      (Boundaries.position_of_messages persisted.Agent_core.Checkpoint.messages |> get
+       =Boundaries.Atom_history {end_atom;last_atom_digest}) in
+  let before_steps = ref None and after_external_mutation = ref None and requests = ref [] in
+  let cli_calls = ref 0 in
+  let selection index =
+    let first_accepted = if expected_holes=[] then 1 else 2 in
+    let new_claims = if not all_holes && index=first_accepted then
+      [`Assoc ["claim",`String claim;"category",`String "fact";"board_post_id",`Null;
+        "board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]] else [] in
+    `Assoc ["new_claims",`List new_claims;"dropped",`List [];
+      "working_contexts",`List [];"working_state",`String "Only successfully judged checkpoint messages are represented."] in
+  let refuse = `Request_entity_too_large,
+    {|{"error":{"type":"invalid_request_error","message":"fixture checkpoint body refused"}}|} in
+  let unknown = `Internal_server_error,
+    {|{"error":{"type":"server_error","message":"fixture opaque checkpoint failure"}}|} in
+  let before_request index body =
+      requests := !requests @ [body];
+      check_external_after 0;
+      (* The initial whole-pass refusal has already written its ordinary
+         diagnostic journal line; volatile steps begin after that baseline. *)
+      if index=1 then before_steps := Some (bytes ());
+      if index>1 then check bool "accepted volatile steps publish no Memory, receipt, unread ledger, context or progress"
+        true (bytes ()=Option.get !before_steps);
+      if index=3 then (
+        (match case with
+         | Rewritten_checkpoint_source ->
+           let changed = match source with
+             | [question;call;result] ->
+               [question;call;{result with Agent_core.Types.content=[Agent_core.Types.ToolResult
+                 {tool_use_id="checkpoint-floor-call";content="The original tool result was replaced.";
+                  outcome=Agent_core.Types.Tool_succeeded;json=None;content_blocks=None}]}]
+             | [] | [_] | [_;_] | _::_::_::_ -> fail "checkpoint fixture lost its tool result" in
+           (* Every atom opener, not just the endpoint, remains byte-identical.
+              Only the frozen full-message prefix detects this changed result. *)
+           save_checkpoint config ~trace_id (message prefix_marker::changed) 3;
+           check_unchanged_endpoint ()
+         | Appended_checkpoint_suffix ->
+           let extended = completed @ [message "A newly finished checkpoint suffix must remain unread."] in
+           save_checkpoint config ~trace_id extended 3;
+           append_boundary config ~trace_id ~turn:3 ~recorded_at:1001.
+             ~history_at_start:(Boundaries.history_at_start_of_messages completed) extended
+         | Restarted_checkpoint_history ->
+           (* Isolate the generation check: an adversarial restart marker
+              arrives while the entire canonical checkpoint stays unchanged. *)
+           (match Boundaries.append ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+             {Boundaries.recorded_at=1001.;event=Boundaries.History_restarted {trace_id}} with
+            | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
+           check_unchanged_endpoint ()
+         | Moved_checkpoint_progress ->
+           Progress.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+             {prior_progress with boundary_lines_seen=2}
+           |> Result.map_error Progress.write_error_to_string |> get
+         | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes
+         | Checkpoint_holes_without_observations | Unknown_checkpoint_refusal | Cli_tail_checkpoint_refusal
+         | Late_checkpoint_failure | Interrupted_checkpoint_progress -> ());
+        (* Any owner mutation is now the baseline. The response may complete
+           inference, but publication must not change another store byte. *)
+        after_external_mutation := Some (bytes ())) in
+  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
+    (F.Reply_with (fun index body ->
+      before_request index body;
+      match case with
+      | Unknown_checkpoint_refusal -> unknown
+      | Cli_tail_checkpoint_refusal -> refuse
+      | Checkpoint_holes_without_observations ->
+        if index<=List.length source then refuse else fail "an observation-free all-hole boundary invented a generation request"
+      | All_checkpoint_holes when index<=List.length source -> refuse
+      | Late_checkpoint_failure when index=List.length source -> unknown
+      | Partial_checkpoint_hole | Retired_checkpoint_hole | Interrupted_checkpoint_progress when index<2 -> refuse
+      | Late_checkpoint_failure | Rewritten_checkpoint_source | Appended_checkpoint_suffix
+      | Restarted_checkpoint_history | Moved_checkpoint_progress when index=0 -> refuse
+      | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes | Late_checkpoint_failure
+      | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
+      | Moved_checkpoint_progress | Interrupted_checkpoint_progress -> `OK,F.openai_response (selection index))) in
+  let native_answers = Option.fold ~none:[] ~some:native_descent_answers native in
+  let cli_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr cli_calls;
+    match native with
+    | None ->
+      check string "the real API walk reaches its declared CLI tail" F.cli_primary_runtime runtime_id;
+      Error (Fusion_official_client.Setup_failure "opaque CLI tail cannot authorize skipping a source message")
+    | Some scenario ->
+      let index = List.length !requests in
+      if native_descent_succeeds scenario then before_request index prompt
+      else (requests := !requests @ [prompt];check_external_after 0);
+      check string "the native walk visits its actual declared slot in order"
+        (if index=1 && List.length native_answers=2 then F.cli_secondary_runtime else F.cli_primary_runtime) runtime_id;
+      if index<List.length native_answers then List.nth native_answers index
+      else if native_descent_succeeds scenario then Ok (Yojson.Safe.to_string (selection index))
+      else fail "invalid output or outward effects incorrectly permitted a smaller-message native request" in
+  ignore (F.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:(if Option.is_some native then [] else ["checkpoint-floor-api"])
+    ~cli_slot_ids:(if List.length native_answers=2 then [F.cli_primary_runtime;F.cli_secondary_runtime]
+      else if Option.is_some native || case=Cli_tail_checkpoint_refusal then [F.cli_primary_runtime] else [])
+    (F.resolver_snapshot ~source:"checkpoint-floor-fixture" [{F.id="checkpoint-floor-api";base_url=server.base_url}]));
+  let run () = Consumer.consume_one_with_runtime
+    ?cli_runner:(if Option.is_some native || case=Cli_tail_checkpoint_refusal then Some cli_runner else None) ~config ~keeper_name () in
+  let result = if case=Interrupted_checkpoint_progress then
+      Consumer.For_testing.consume_one_with_runtime_and_progress_writers
+        ~write_official_progress_store:Official.write
+        ~write_progress_store:(fun ~keepers_dir:_ ~keeper_id:_ _ ->
+          check_external_after 1;
+          check bool "exact checkpoint holes are archived before external acknowledgement and atom progress" true
+            (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get=expected_holes);
+          check bool "the completed pending external receipt is cleared before atom progress" true
+            (U.member "pending" (external_state ())=`Null);
+          Error (Progress.Write_failed {path="injected-checkpoint-progress";message="fixture interrupted after checkpoint Memory"}))
+        ~config ~keeper_name ()
+    else run () in
+  let expected_calls = match native with
+    | Some scenario -> if native_descent_succeeds scenario then 4 else List.length native_answers
+    | None -> match case with
+    | Unknown_checkpoint_refusal -> 1 | Cli_tail_checkpoint_refusal -> 2
+    | Checkpoint_holes_without_observations -> 3 | All_checkpoint_holes -> 5
+    | Partial_checkpoint_hole | Retired_checkpoint_hole | Late_checkpoint_failure
+    | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
+    | Moved_checkpoint_progress | Interrupted_checkpoint_progress -> 4 in
+  check int "one actual whole-cut failure precedes each exact-message attempt" expected_calls (List.length !requests);
+  check int "only declared API slots receive HTTP generation requests"
+    (if Option.is_some native then 0 else expected_calls) (F.post_count server);
+  check int "only the declared CLI tail is dispatched and never treated as proven API exhaustion"
+    (if Option.is_some native then expected_calls else if case=Cli_tail_checkpoint_refusal then 2 else 0) !cli_calls;
+  let contains ~sub text =
+    let rec at index = index+String.length sub<=String.length text
+      && (String.sub text index (String.length sub)=sub || at (index+1)) in
+    at 0 in
+  List.iter (fun body ->
+    List.iter (fun marker -> check bool "only selected source content reaches the actual transport request" false
+      (contains ~sub:marker body))
+      [prefix_marker;next_trace_marker;"checkpoint-private-argument";"checkpoint-private-result"]) !requests;
+  let publications () = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
+    |> List.map get |> List.filter_map (function
+      | Current.Journal_committed {program=Some proof;_} -> Some proof
+      | Current.Journal_committed {program=None;_} | Current.Journal_failed _
+      | Current.Journal_quarantined _ -> None) in
+  let failed = match native with Some scenario -> not (native_descent_succeeds scenario) | None ->
+    match case with
+    | Unknown_checkpoint_refusal | Cli_tail_checkpoint_refusal | Late_checkpoint_failure
+    | Rewritten_checkpoint_source | Restarted_checkpoint_history | Moved_checkpoint_progress -> true
+    | Partial_checkpoint_hole | Retired_checkpoint_hole | All_checkpoint_holes
+    | Checkpoint_holes_without_observations | Appended_checkpoint_suffix | Interrupted_checkpoint_progress -> false in
+  if failed then (
+    (match result with
+     | Ok (Consumer.Memory_not_committed (_::_ as reports)) ->
+       (match native with
+        | None -> ()
+        | Some scenario ->
+          check bool "aggregate native evidence blocks message descent" false
+            (Keeper_librarian_runtime.may_descend_messages reports);
+          let invalid = match scenario with
+            | Native_invalid_json_first | Native_invalid_domain_last -> true
+            | Native_codex_capacity | Native_claude_capacity | Native_codex_effect_started
+            | Native_claude_response_started | Native_opaque_failure -> false in
+          check bool "invalid output remains an explicit absorbing descent veto" invalid
+            (List.exists (fun (report : Keeper_librarian_runtime.not_committed) ->
+              report.message_descent=Keeper_librarian_runtime.Invalid_output_blocks_descent) reports))
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "refused or changed checkpoint source advanced");
+    check bool "failed inference cannot create a Memory program, snapshot or unread authority" true
+      (publications ()=[] && (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get)=None
+       && (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get)=[]);
+    check_external_after 0;
+    check bool "no official position can appear from checkpoint work" true (read_official config=None);
+    (match !after_external_mutation,!before_steps with
+     | Some before,_ | None,Some before -> check bool "failure preserves every authoritative byte after any injected owner mutation"
+         true (bytes ()=before)
+     | None,None -> check bool "an opaque whole-cut failure preserves the original atom progress" true
+         (read_progress config=Some prior_progress)))
+  else (
+    let expected_range = {original_range with Current.unread_messages=expected_holes} in
+    check bool "one receipt accounts for the exact original complete checkpoint cut" true
+      (Current.committed_durable_coverage ~keepers_dir ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir |> get=Some expected_range);
+    check bool "accounted holes are never reported as fully read checkpoint history" true
+      (Current.committed_durable_range ~keepers_dir ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir |> get=if expected_holes=[] then Some expected_range else None);
+    check bool "the durable ledger preserves every original atom-local hash and actual named refusal" true
+      (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get=expected_holes);
+    let proof = match publications () with [proof] -> proof | _ -> fail "expected exactly one canonical checkpoint Memory program" in
+    let program = proof.Keeper_memory_os_program_types.execution.program in
+    check bool "the exact unflattened original source manifest is published once" true
+      (program.Program.sources=sources && program.unread=expected_holes);
+    check bool "the retired trace retains its own turn identity even while metadata names another trace" true
+      (Ids.Turn_ref.equal program.turn_ref (Ids.Turn_ref.make ~trace_id ~absolute_turn:2));
+    let accepted_sources,accepted_messages =
+      if all_holes then (if has_observations then [[]],[[]] else [],[])
+      else if expected_holes=[] then List.map (fun source -> [source]) sources,List.map (fun message -> [message]) source
+      else List.map (fun source -> [source]) (List.tl sources),List.map (fun message -> [message]) (List.tl source) in
+    check bool "only actually accepted messages receive source-bearing decisions" true
+      (List.map (fun (stage : Program.stage) -> stage.decision.sources) program.stages=accepted_sources);
+    check bool "accepted evidence preserves every original full message byte" true
+      (List.map (fun (stage : Program.stage) -> U.member "messages" stage.decision.input_evidence) program.stages
+       =List.map (fun messages -> `List (List.map Agent_core.Checkpoint.message_to_json messages)) accepted_messages);
+    let rec check_staged_facts = function
+      | first::(second::_ as rest) ->
+        check bool "each later Memory inference receives the preceding actual staged facts" true
+          (second.Program.decision.input_current=Some first.Program.after);
+        check_staged_facts rest
+      | [] | [_] -> () in
+    check_staged_facts program.stages;
+    List.iteri (fun index (stage : Program.stage) ->
+      let variables = U.member "prompt_variables" stage.decision.input_evidence in
+      check bool "joined successful tool evidence reaches the first accepted step exactly once" true
+        (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string
+         =`List (if index=0 then [`Assoc ["tool_name",`String "read_file";"outcome",`String "succeeded"]] else []));
+      check (list string) "the real external speaker reaches the first accepted step exactly once"
+        (if index=0 then [counterpart_marker] else [])
+        (U.member "counterpart_observations" variables |> U.to_string |> Yojson.Safe.from_string
+         |> U.to_list |> List.map (fun row -> U.member "content" row |> U.to_string))) program.stages;
+    let memory = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+    (match memory with Some snapshot ->
+       check int "one original cut publishes one Memory revision" 1 snapshot.revision;
+       check (list string) "only the actual accepted staged claim reaches final Memory"
+         (if all_holes then [] else [claim])
+         (List.map (fun (fact : Keeper_memory_os_types.fact) -> fact.claim) snapshot.facts)
+     | None -> fail "checkpoint program has no committed Memory snapshot");
+    if not has_observations then check bool "an all-hole checkpoint with no host evidence invents no judgment or summary" true
+      (program.stages=[] && program.initial_current=None && program.final_facts=[]
+       && Fs_compat.load_file_opt (Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name)=None
+       && Fs_compat.load_file_opt (Keeper_librarian_continuity.path ~config ~keeper_name)=None);
+    check_external_after (if has_observations then 1 else 0);
+    check bool "only completed external evidence is acknowledged" true (U.member "pending" (external_state ())=`Null);
+    (if case=Interrupted_checkpoint_progress then (
+       (match result with Error (Consumer.Progress_write_failed _) -> ()
+        | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "expected atom progress interruption after Memory");
+       check bool "the interrupted progress write leaves the old atom position" true (read_progress config=Some prior_progress);
+       Consumer.For_testing.reset_process_state ();
+       (match run () with Ok (Consumer.Progress_advanced _) -> ()
+        | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "checkpoint WAL recovery did not advance");
+       check int "checkpoint WAL recovery performs no new HTTP generation" expected_calls (List.length !requests);
+       check bool "checkpoint WAL recovery preserves committed Memory" true
+         (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get=memory))
+     else match result with Ok (Consumer.Progress_advanced _) -> ()
+       | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "complete checkpoint program did not advance");
+    (match read_progress config with
+     | Some progress ->
+       check string "the original checkpoint trace owns the new position" trace_id progress.position.trace_id;
+       check int "the original completion cut remains indivisible" end_atom progress.position.end_atom;
+       check int "progress counts only boundary rows captured before inference" line_count progress.boundary_lines_seen
+     | None -> fail "completed checkpoint program lost its position");
+    if case=Appended_checkpoint_suffix then (
+      match Consumer.unread_turns ~config ~keeper_name with
+      | Ok unread -> check int "the concurrently completed suffix remains unread" 1 unread.atoms
+      | Error error -> fail (Consumer.error_to_string error))
+    else if case<>Retired_checkpoint_hole then (
+      (match run () with Ok Consumer.Nothing_to_read -> ()
+       | Error error -> fail (Consumer.error_to_string error) | Ok _ -> fail "accounted checkpoint cut was synthesized again");
+      check int "quiet wake never generates for accounted checkpoint holes" expected_calls (List.length !requests)))
+;;
+
+(* These cases exercise the official consumer's production Runtime boundary:
+   only the HTTP lane's real exhausted walk may create an unread message. *)
+type official_memory_floor_case =
+  | Partial_official_hole
+  | All_official_holes
+  | All_official_holes_without_observations
+  | Unknown_official_refusal
+  | Late_official_failure
+  | Rewritten_official_message
+  | Rewritten_official_observation
+  | Appended_official_turn
+  | Interrupted_official_progress
+
+let test_runtime_official_memory_floor ?native case () =
+  let open Masc in
+  let module Progress = Keeper_librarian_progress in
+  let module F = Exact_output_fixture in
+  let module Current = Keeper_memory_os_current in
+  let module Unread = Keeper_librarian_unread in
+  let module Program = Keeper_memory_os_program in
+  let module U = Yojson.Safe.Util in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  let with_runtimes f = if Option.is_some native then F.with_official_client_runtimes f else f () in
+  with_runtimes @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "official-memory-floor-" "" in
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset (); Fs_compat.remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None);
+  write_keeper_declaration config;
+  let trace_id = "official-runtime-floor" in
+  write_meta config trace_id;
+  let source = [message "The original official question.";
+    Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+      [Agent_core.Types.Text "The original official answer."]] in
+  let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+  let has_observations = case<>All_official_holes_without_observations in
+  let counterpart_marker = "The external speaker still requires review of the original turn." in
+  let item : Keeper_external_attention.item =
+    {event_id=Keeper_external_attention.event_id_of_dedupe_key "official-floor-counterpart";
+     dedupe_key="official-floor-counterpart";keeper_name;
+     conversation={conversation_id="agent:official-floor";surface=Keeper_external_attention.Agent};
+     external_message=None;source_label="agent";
+     actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+     urgency=Keeper_external_attention.Ambient;content_preview=counterpart_marker;
+     content_ref=None;received_at=999.;metadata=[]} in
+  if has_observations then (match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> 999.) ~base_path item with
+   | `Recorded -> () | `Duplicate _ -> fail "duplicate official counterpart fixture"
+   | `Error detail -> fail detail);
+  write_official_turn config ~trace_id ~turn:1 ~user:"The original official question."
+    ~assistant:"The original official answer." ~tools:(if has_observations then ["read_file"] else []);
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1000.;
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let registry = Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Exact_lane_run_registry.storage_filename) () in
+  (match Exact_lane_run_registry.install_global registry with
+   | Ok () | Error Exact_lane_run_registry.Already_installed -> ());
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Prompt_defaults.init ();
+  let stores =
+    [Current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name;
+     Current.publication_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name;
+     Current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name;
+     Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name;
+     Progress.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     Official.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+     Keeper_external_read_cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name] in
+  let bytes () = List.map Fs_compat.load_file_opt stores in
+  let external_state () =
+    Keeper_external_read_cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    |> Fs_compat.load_file |> Yojson.Safe.from_string in
+  let check_external_after expected = check int "external admission advances only after a complete Memory publication"
+    expected (U.member "after" (external_state ()) |> U.to_int) in
+  let before_steps = ref None and requests = ref [] in
+  let rewrite_field path key value =
+    let rows = Fs_compat.load_file path |> String.split_on_char '\n'
+      |> List.filter (fun row -> row <> "") |> List.map Yojson.Safe.from_string in
+    let changed = match rows with
+      | `Assoc fields :: rest -> `Assoc ((key,value)::List.remove_assoc key fields)::rest
+      | _ -> fail "official mutation fixture lacks its original record" in
+    Out_channel.with_open_bin path (fun channel ->
+      List.iter (fun row -> output_string channel (Yojson.Safe.to_string row ^ "\n")) changed) in
+  let selection = `Assoc ["new_claims",`List [];"dropped",`List [];
+    "working_contexts",`List [];"working_state",`String "Only actually accepted messages were judged."] in
+  let refuse = `Request_entity_too_large,
+    {|{"error":{"type":"invalid_request_error","message":"fixture body refused"}}|} in
+  let unknown = `Internal_server_error,
+    {|{"error":{"type":"server_error","message":"fixture opaque failure"}}|} in
+  let before_request index body =
+      requests := !requests @ [body];
+      check_external_after 0;
+      if index=1 then before_steps := Some (bytes ());
+      if index>1 then check bool "volatile steps cannot write Memory, journal, receipts, ledger or cursor"
+        true (bytes ()=Option.get !before_steps);
+      if index=2 then (
+        let session_dir = (session config trace_id).session_dir in
+        match case with
+        | Rewritten_official_message ->
+          rewrite_field (History.main_history_path ~session_dir) "content_blocks"
+            (`List [`Assoc ["type",`String "text";"text",`String "Replaced original message."]])
+        | Rewritten_official_observation ->
+          rewrite_field (History.internal_history_path ~session_dir) History.key_tool_name
+            (`String "a_different_tool")
+        | Appended_official_turn ->
+          write_official_turn config ~trace_id ~turn:2 ~user:"A later official question."
+            ~assistant:"A later official answer." ~tools:[];
+          append_official_boundary config ~trace_id ~turn:2 ~recorded_at:1001.
+        | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Unknown_official_refusal
+        | Late_official_failure | Interrupted_official_progress -> ()) in
+  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
+    (F.Reply_with (fun index body ->
+      before_request index body;
+      match case with
+      | Unknown_official_refusal -> unknown
+      | All_official_holes_without_observations ->
+        if index<3 then refuse else fail "an all-hole boundary without host evidence must not invent a summary request"
+      | Late_official_failure when index=2 -> unknown
+      | Partial_official_hole | Interrupted_official_progress when index<2 -> refuse
+      | All_official_holes when index<3 -> refuse
+      | Late_official_failure | Rewritten_official_message | Rewritten_official_observation
+      | Appended_official_turn when index=0 -> refuse
+      | Partial_official_hole | All_official_holes | Late_official_failure
+      | Rewritten_official_message | Rewritten_official_observation | Appended_official_turn
+      | Interrupted_official_progress -> `OK,F.openai_response selection)) in
+  let cli_runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
+    check string "the actual official native slot serves the whole turn and exact messages" F.cli_primary_runtime runtime_id;
+    let index = List.length !requests in
+    before_request index prompt;
+    if index=0 then List.hd (native_descent_answers (Option.get native))
+    else if index<=List.length source then Ok (Yojson.Safe.to_string selection)
+    else fail "official native descent repeated an already accounted message" in
+  ignore (F.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:(if Option.is_some native then [] else ["official-floor-api"])
+    ~cli_slot_ids:(if Option.is_some native then [F.cli_primary_runtime] else []) (F.resolver_snapshot ~source:"official-floor-fixture"
+      [{F.id="official-floor-api";base_url=server.base_url}]));
+  let run () = Consumer.consume_one_with_runtime
+    ?cli_runner:(Option.map (fun _ -> cli_runner) native) ~config ~keeper_name () in
+  let result = match case with
+    | Interrupted_official_progress ->
+      Consumer.For_testing.consume_one_with_runtime_and_progress_writers
+        ~write_progress_store:Progress.write
+        ~write_official_progress_store:(fun ~keepers_dir:_ ~keeper_id:_ _ ->
+          check_external_after 1;
+          check bool "the cursor writer observes only an acknowledged external receipt" true
+            (U.member "pending" (external_state ())=`Null);
+          let hole = Unread.for_official_turn ~turn_ref ~boundary_line:1 ~message_in_turn:0
+            ~messages:source ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get in
+          check bool "exact unread evidence is archived before external acknowledgement and official progress"
+            true (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = [hole]);
+          Error (Official.Write_failed {path="injected-official-progress";message="fixture interrupted after Memory"}))
+        ~config ~keeper_name ()
+    | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Unknown_official_refusal
+    | Late_official_failure | Rewritten_official_message | Rewritten_official_observation
+    | Appended_official_turn -> run () in
+  let expected_calls = match case with
+    | Unknown_official_refusal -> 1 | All_official_holes -> 4
+    | Partial_official_hole | All_official_holes_without_observations | Late_official_failure | Rewritten_official_message
+    | Rewritten_official_observation | Appended_official_turn | Interrupted_official_progress -> 3 in
+  check int "one whole-turn attempt precedes the exact-message floor" expected_calls (List.length !requests);
+  check int "official native descent dispatches no undeclared HTTP target"
+    (if Option.is_some native then 0 else expected_calls) (F.post_count server);
+  let publications () = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
+    |> List.map get |> List.filter_map (function
+      | Current.Journal_committed {program=Some proof;_} -> Some proof
+      | Current.Journal_committed {program=None;_} | Current.Journal_failed _
+      | Current.Journal_quarantined _ -> None) in
+  match case with
+  | Unknown_official_refusal | Late_official_failure | Rewritten_official_message
+  | Rewritten_official_observation ->
+    (match result with
+     | Ok (Consumer.Memory_not_committed (_ :: _)) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "refused or changed official source advanced");
+    check bool "no original source cursor is granted" true (read_official config=None);
+    check_external_after 0;
+    check bool "no partial program is published" true (publications ()=[]);
+    check bool "no Memory snapshot or unread authority is created" true
+      (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = None
+       && Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = []);
+    (match !before_steps with
+     | Some before -> check bool "a late refusal or source rewrite preserves every authoritative byte" true (bytes ()=before)
+     | None -> ())
+  | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Appended_official_turn
+  | Interrupted_official_progress ->
+    let holes = if Option.is_some native || case=Appended_official_turn then [] else
+      List.init (if case=All_official_holes || not has_observations then 2 else 1) (fun message_in_turn ->
+        Unread.for_official_turn ~turn_ref ~boundary_line:1 ~message_in_turn ~messages:source
+          ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get) in
+    let expected_range : Current.official_range_id =
+      {receipt_scope=runtime_keepers_dir;after_boundary_line=0;turns=[1,turn_ref];unread_messages=holes} in
+    check bool "receipt accounts for the exact original whole turn and its proven holes" true
+      (Current.committed_official_coverage ~keepers_dir ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir |> get = Some expected_range);
+    check bool "ledger retains exactly the named source-local provider refusals" true
+      (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = holes);
+    check bool "coverage only claims fully read when every message was actually judged" true
+      (Current.committed_official_range ~keepers_dir ~keeper_id:keeper_name
+        ~receipt_scope:runtime_keepers_dir |> get =
+       if holes=[] then Some expected_range else None);
+    let proof = match publications () with [proof] -> proof | _ -> fail "expected one canonical official Memory program" in
+    let program = proof.Keeper_memory_os_program_types.execution.program in
+    let sources = List.mapi (fun message_in_turn original -> Unread.Official_turn
+      {turn_ref;boundary_line=1;message_in_turn;message_sha256=Unread.message_digest original}) source in
+    check bool "the manifest retains both exact official source hashes in order" true
+      (program.Program.sources=sources && program.unread=holes);
+    check bool "only accepted messages receive source-bearing decisions" true
+      (List.map (fun (stage : Program.stage) -> stage.decision.sources) program.stages =
+       if Option.is_some native || case=Appended_official_turn then List.map (fun source -> [source]) sources
+       else if not has_observations then []
+       else [if case=All_official_holes then [] else [List.nth sources 1]]);
+    let expected_messages = if Option.is_some native || case=Appended_official_turn then List.map (fun original -> [original]) source
+      else if not has_observations then []
+      else [if case=All_official_holes then [] else [List.nth source 1]] in
+    check bool "accepted stage evidence preserves exact original bytes and excludes each hole" true
+      (List.map (fun (stage : Program.stage) -> U.member "messages" stage.decision.input_evidence)
+         program.stages = List.map (fun messages -> `List (List.map Agent_core.Checkpoint.message_to_json messages)) expected_messages);
+    List.iteri (fun index (stage : Program.stage) ->
+      let variables = U.member "prompt_variables" stage.decision.input_evidence in
+      check bool "the actual original host tool observation is judged once, after skipped messages" true
+        (U.member "turn_tool_observations" variables |> U.to_string |> Yojson.Safe.from_string =
+         `List (if index=0 then [`Assoc ["tool_name",`String "read_file";"outcome",`String "succeeded"]] else []));
+      check (list string) "the real external speaker is judged by the first accepted step only"
+        (if index=0 then [counterpart_marker] else [])
+        (U.member "counterpart_observations" variables |> U.to_string |> Yojson.Safe.from_string
+         |> U.to_list |> List.map (fun row -> U.member "content" row |> U.to_string));
+      if case=All_official_holes then check bool "all-hole publication contains a real host-only judgment" true
+        (U.member "observations" stage.decision.input_evidence <> `List [])) program.stages;
+    let memory = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+    (match memory with
+     | Some snapshot -> check int "one original turn publishes one Memory revision" 1 snapshot.revision
+     | None -> fail "the canonical official program has no committed snapshot");
+    if not has_observations then (
+      check bool "an entirely unread boundary publishes unchanged facts with no invented Memory judgment" true
+        (program.stages=[] && program.initial_current=None && program.final_facts=[]);
+      check bool "an entirely unread boundary invents no working-state summary" true
+        (Fs_compat.load_file_opt (Keeper_librarian_context.path ~keepers_dir ~keeper_id:keeper_name)=None));
+    check_external_after (if has_observations then 1 else 0);
+    check bool "acknowledgement clears the completed pending receipt" true
+      (U.member "pending" (external_state ())=`Null);
+    (match case,result with
+     | Interrupted_official_progress,Error (Consumer.Official_progress_write_failed _) ->
+       check bool "Memory commit precedes the interrupted cursor write" true (read_official config=None);
+       Consumer.For_testing.reset_process_state ();
+       (match run () with
+        | Ok (Consumer.Official_advanced {atom=None;official}) -> check int "WAL recovery restores the original turn cursor" 1 official.boundary_line
+        | Error error -> fail (Consumer.error_to_string error)
+        | Ok _ -> fail "the real runtime path failed to recover the official program receipt");
+       check int "WAL recovery never generates again" expected_calls (List.length !requests);
+       check bool "WAL recovery preserves the committed Memory bytes" true
+         (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get=memory)
+     | (Partial_official_hole | All_official_holes | All_official_holes_without_observations | Appended_official_turn),
+       Ok (Consumer.Official_advanced {atom=None;official}) ->
+       check int "only the original turn boundary advances" 1 official.boundary_line
+     | _,Error error -> fail (Consumer.error_to_string error)
+     | _,Ok _ -> fail "the complete official Memory program did not advance");
+    if case=Appended_official_turn then (
+      match Consumer.unread_turns ~config ~keeper_name with
+      | Ok unread -> check int "the concurrently appended turn remains unread" 1 unread.official
+      | Error error -> fail (Consumer.error_to_string error));
+    if case<>Appended_official_turn then (
+      (match run () with Ok Consumer.Nothing_to_read -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "accounted official source was synthesized again");
+      check int "quiet wake does not generate for accounted holes" expected_calls (List.length !requests))
+;;
+
+let test_official_receipt_rejects_replaced_history ~bad_message_hash () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "new-official-history" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"new question" ~assistant:"new answer" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.;
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  let official_range_id : Current.official_range_id =
+    { unread_messages = []
+    ; receipt_scope = Workspace.keepers_runtime_dir config
+    ; after_boundary_line = 0
+    ; turns = [ 1, Ids.Turn_ref.make ~trace_id:"old-official-history" ~absolute_turn:1 ]
+    }
+  in
+  let official_range_id = if not bad_message_hash then official_range_id else
+    let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+    let messages = [message "new question";Agent_core.Types.make_message
+      ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "another original answer"]] in
+    let hole = match Masc.Keeper_librarian_unread.for_official_turn ~turn_ref
+      ~boundary_line:1 ~message_in_turn:1 ~messages
+      ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] with
+      | Ok hole -> hole | Error detail -> fail detail in
+    {official_range_id with turns=[1,turn_ref];unread_messages=[hole]} in
+  (match Current.apply_disposition ~revisions:[] ~official_range_id ~absorbed:[] ~keepers_dir
+    ~keeper_id:keeper_name ~now:1. ~source:{ kind = Current.Librarian; trace_id }
+    ~new_claims:[] () with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  (match Consumer.consume_one ~config ~keeper_name
+    ~commit:(fun _original -> fail "mismatched receipt admitted synthesis") with
+   | Error Consumer.Committed_official_range_mismatch -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "old receipt advanced over replacement content");
+  check bool "replacement content is not marked read" true (Option.is_none (read_official config))
+;;
+
+let test_untagged_fragments_are_passed_without_a_commit () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-untagged" in
+  write_meta config trace_id;
+  let path =
+    Masc.Keeper_turn_fragments.path
+      ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_id)
+      Masc.Keeper_turn_fragments.Main
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun oc ->
+    Out_channel.output_string oc
+      {|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}
+|});
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  match consume config (fun _original -> fail "nothing to commit") with
+  | Consumer.Official_advanced { atom = None; official } ->
+    check int "the position passes the line" 1 official.boundary_line
+  | Consumer.Official_advanced { atom = Some _; _ }
+  | Consumer.Nothing_to_read
+  | Consumer.Baseline_advanced _
+  | Consumer.Progress_advanced _
+  | Consumer.Pending
+  | Consumer.Memory_not_committed _ -> fail "the untagged line was not passed"
+;;
+
+(* A history line the decoder refuses, after the first named one, stops the
+   pass with a typed error naming the line; nothing is skipped. *)
+let test_a_refused_fragment_line_stops_the_pass () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-refused-fragment" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"q1" ~assistant:"a1" ~tools:[];
+  let path =
+    Masc.Keeper_turn_fragments.path
+      ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_id)
+      Masc.Keeper_turn_fragments.Main
+  in
+  Out_channel.with_open_gen [ Open_wronly; Open_append ] 0o600 path (fun oc ->
+    Out_channel.output_string oc "not json\n");
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  (match
+     Consumer.consume_one ~config ~keeper_name ~commit:(fun _original ->
+       fail "a refused line reached the model")
+   with
+   | Error (Consumer.Fragment_line_unreadable { line = 3; file = Masc.Keeper_turn_fragments.Main; _ }) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the pass read past a refused line");
+  check bool "no official position was written" true (Option.is_none (read_official config))
+;;
+
+(* An official line older than the atom baseline: the baseline pass passes
+   over it, the next pass reads it, and the atom position set after it does
+   not turn the counterpart interval backwards. *)
+let test_an_official_line_older_than_the_baseline_is_read () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-before-baseline" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"q1" ~assistant:"a1" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  save_checkpoint config ~trace_id [ message "t2" ] 2;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 [ message "t2" ];
+  (match consume config (fun _original -> fail "a baseline commits nothing") with
+   | Consumer.Baseline_advanced progress -> check int "the atom baseline" 1 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Progress_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the first pass did not set the baseline");
+  let carried = ref [] in
+  match
+    consume config (fun original ->
+      let input = Original.input original in
+      carried := text_markers input;
+      Consumer.Memory_committed)
+  with
+  | Consumer.Official_advanced { atom = None; official } ->
+    check int "the official position reaches the older line" 1 official.boundary_line;
+    check (list string) "the older official turn is read" [ "q1"; "a1" ] !carried
+  | Consumer.Official_advanced { atom = Some _; _ }
+  | Consumer.Nothing_to_read
+  | Consumer.Baseline_advanced _
+  | Consumer.Progress_advanced _
+  | Consumer.Pending
+  | Consumer.Memory_not_committed _ -> fail "the older official line was not read"
+;;
+
+let append_refused_boundary_line config =
+  let path =
+    Boundaries.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+  in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path (fun oc ->
+    Out_channel.output_string oc "{\n")
+;;
+
+(* The official stop at [line], with nothing committed. *)
+let check_official_stop config ~line =
+  match
+    Consumer.consume_one ~config ~keeper_name ~commit:(fun _original ->
+      fail "a pass read past a refused boundary line")
+  with
+  | Error (Consumer.Official_range_stopped { line = stopped; error = Boundaries.Not_json _ }) ->
+    check int "the official stop names the refused line" line stopped
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "the official stop was lifted or hidden"
+;;
+
+(* masc#37061 settles a refused line on the atom path when a continued turn
+   after it carries its start state. The official path still stands at that
+   line, and it must not take the atom part of the round with it: a keeper
+   that never ran an official-client turn has no official position, so every
+   refused line of its log is beyond it. The atoms are read and their
+   position moves; the official stop is the next pass's answer. *)
+let test_an_official_stop_does_not_hold_the_atom_part () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-refused-then-continued" in
+  establish_progress config ~trace_id "t1";
+  append_refused_boundary_line config;
+  let messages = [ message "t1"; message "t2" ] in
+  save_checkpoint config ~trace_id messages 2;
+  append_boundary
+    ~history_at_start:(Boundaries.history_at_start_of_messages [ message "t1" ])
+    config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  let carried = ref [] in
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun original ->
+         let official_range_id = Original.official_range_id original in
+         let input = Original.input original in
+         check bool "no official range is committed" true (Option.is_none official_range_id);
+         carried := text_markers input;
+         Consumer.Memory_committed)
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "the atom position moves past the refused line" 2 progress.position.end_atom
+   | Ok
+       ( Consumer.Nothing_to_read
+       | Consumer.Baseline_advanced _
+       | Consumer.Official_advanced _
+       | Consumer.Pending
+       | Consumer.Memory_not_committed _ ) -> fail "the atom part did not advance"
+   | Error error -> fail (Consumer.error_to_string error));
+  check (list string) "the settled round reads from atom zero" [ "t1"; "t2" ] !carried;
+  check_official_stop config ~line:2
+;;
+
+(* Two turns end after the atom position; the pass after them reads both. *)
+let check_next_pass_reads_both config ~trace_id =
+  let messages = [ message "t1"; message "t2"; message "t3"; message "t4" ] in
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0
+    [ message "t1"; message "t2"; message "t3" ];
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 messages;
+  save_checkpoint config ~trace_id messages 4;
+  let carried = ref [] in
+  (match
+     consume config (fun original ->
+       let input = Original.input original in
+       carried := text_markers input;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "both turns are reached" 4 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the two turns were not read");
+  check (list string) "one pass carries both turns" [ "t3"; "t4" ] !carried
+;;
+
+(* The official stop is no failed wide range. A pass that ends on it has
+   drained the atom side, so the passes after it read the whole backlog
+   instead of one turn per model call. *)
+let test_an_official_stop_does_not_narrow_later_passes () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-stop-then-backlog" in
+  establish_progress config ~trace_id "t1";
+  append_refused_boundary_line config;
+  let messages = [ message "t1"; message "t2" ] in
+  save_checkpoint config ~trace_id messages 2;
+  append_boundary
+    ~history_at_start:(Boundaries.history_at_start_of_messages [ message "t1" ])
+    config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  (match consume config (fun _original -> Consumer.Memory_committed) with
+   | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
+  check_official_stop config ~line:2;
+  check_next_pass_reads_both config ~trace_id
+;;
+
+(* Control: the same backlog with no refused line and no official stop. *)
+let test_a_drained_pass_does_not_narrow_later_passes () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-drained-then-backlog" in
+  establish_progress config ~trace_id "t1";
+  let messages = [ message "t1"; message "t2" ] in
+  save_checkpoint config ~trace_id messages 2;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  (match consume config (fun _original -> Consumer.Memory_committed) with
+   | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
+  (match consume config (fun _original ->
+     fail "a drained pass called commit") with
+   | Consumer.Nothing_to_read -> ()
+   | Consumer.Progress_advanced _
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the drained pass was not quiet");
+  check_next_pass_reads_both config ~trace_id
+;;
+
+(* A position left in a retired trace answers before the official stop:
+   the atom side cannot move either, and its error names why. The hand-off
+   walk returns this error before the official selection is consulted; the
+   selector's own [Position_in_other_trace] is not reachable from a pass,
+   because every [select] call here passes a position of the trace it
+   names. *)
+let test_a_position_in_another_trace_answers_before_an_official_stop () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-other-then-refused-a" in
+  establish_progress config ~trace_id:trace_a "a";
+  let old_session_dir = Masc.Keeper_fs.keeper_session_dir config trace_a in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir:old_session_dir ~session_id:trace_a);
+  append_refused_boundary_line config;
+  let trace_b = "trace-other-then-refused-b" in
+  let messages_b = [ message "b" ] in
+  append_boundary ~history_at_start:Boundaries.Continued_history config ~trace_id:trace_b
+    ~turn:1 ~recorded_at:2.0 messages_b;
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun _original ->
+        fail "a pass in another trace called commit")
+  with
+  | Error (Consumer.Position_in_other_trace position) ->
+    check string "the retired trace is named" trace_a position.trace_id
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "a pass advanced with its position in another trace"
+;;
+
+(* A refused boundary line beyond the official position stops the official
+   part of every pass: the line may be an official turn's end line, whose
+   words are still on disk, so no later restart lifts it the way one lifts
+   the atom stop (row 2c'). The keeper waits for a purge; the lag shows. The
+   atoms the restart settles are still read. *)
+let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-refused-then-restart" in
+  establish_progress config ~trace_id "t1";
+  append_refused_boundary_line config;
+  (match
+     Boundaries.append
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name
+       { Boundaries.recorded_at = 3.0; event = Boundaries.History_restarted { trace_id } }
+   with
+   | Ok () -> ()
+   | Error error -> fail (Boundaries.append_error_to_string error));
+  save_checkpoint config ~trace_id [ message "fresh" ] 3;
+  append_boundary ~history_at_start:Boundaries.Fresh_history config ~trace_id ~turn:3
+    ~recorded_at:4.0 [ message "fresh" ];
+  (match consume config (fun _original -> Consumer.Memory_committed) with
+   | Consumer.Progress_advanced progress ->
+     check int "the restarted history is read" 1 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
+  check_official_stop config ~line:2
+;;
+
+(* A refused boundary line stops the official part at that line, not before
+   it: an official turn that ended on an earlier line is read, the position
+   reaches it, and the next pass stands at the refused line. *)
+let test_an_official_turn_before_a_refused_boundary_line_is_read () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-then-refused" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"q1" ~assistant:"a1" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  append_refused_boundary_line config;
+  let carried = ref [] in
+  let committed_range = ref None in
+  (match
+     consume config (fun original ->
+       let official_range_id = Original.official_range_id original in
+       let input = Original.input original in
+       carried := text_markers input;
+       committed_range := official_range_id;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Official_advanced { atom = None; official } ->
+     check int "the position reaches the turn before the refused line" 1 official.boundary_line
+   | Consumer.Official_advanced { atom = Some _; _ }
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Pending
+   | Consumer.Memory_not_committed _ -> fail "the turn before the refused line was not read");
+  check (list string) "the turn before the refused line is carried" [ "q1"; "a1" ] !carried;
+  (match !committed_range with
+   | Some range ->
+     check int "the receipt starts at the log's beginning" 0
+       range.Masc.Keeper_memory_os_current.after_boundary_line;
+     check (list int) "the receipt names only the line before the refused one" [ 1 ]
+       (List.map fst range.Masc.Keeper_memory_os_current.turns)
+   | None -> fail "the official range was not committed");
+  check_official_stop config ~line:2
+;;
+
+(* The same backwards clock, but an official-client line of the retired era
+   is still the official cursor. This commit does not replace that cursor, so
+   the round after the hand-off would carry the same stamp and the row between
+   the traces would be read by nobody. The pass refuses instead of advancing
+   past it. *)
+let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-official-backwards-a" in
+  let trace_b = "trace-official-backwards-b" in
+  let trace_c = "trace-official-backwards-c" in
+  let now = Time_compat.now () in
+  let a_ended = now +. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
+  append_official_boundary config ~trace_id:trace_a ~turn:2 ~recorded_at:a_ended;
+  (match
+     Official.write
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name
+       { Official.boundary_line = 2 }
+   with
+   | Ok () -> ()
+   | Error error -> fail (Official.write_error_to_string error));
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun _original -> Consumer.Memory_committed)
+   with
+   | Ok (Consumer.Progress_advanced _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"between the traces"
+    ~speaker
+    ();
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary
+    config ~trace_id:trace_b ~turn:1 ~recorded_at:(now -. 100.0) [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
+  write_meta config trace_c;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun _original ->
+         fail "the hand-off committed a range that strands the row")
+   with
+   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
+     check (float 0.001) "the refusal names the carried bound" a_ended after;
+     check (float 0.001) "and this range's end" (now -. 100.0) before
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the hand-off advanced past a row no later range would read");
+  match read_progress config with
+  | Some progress ->
+    check string "the position stays on the retired trace" trace_a progress.position.trace_id
+  | None -> fail "the refused pass removed progress"
+;;
+
+let test_memory_count_cleanup_without_history () =
+  let module Cleanup = Masc.Keeper_memory_cleanup in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let module Limits = Masc.Keeper_memory_limits in
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.librarian_env_key
+    (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.category_cap_env_key
+    (Some "1") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.facts_per_category_cap_env_key
+    (Some "1") @@ fun () ->
+  with_workspace @@ fun config ->
+  write_meta config "cleanup-trace";
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  let custom = match Memory.category_of_string "deployment_rules" with
+    | Some value -> value | None -> fail "custom category" in
+  let fact category claim = Memory.observed ~category ~claim ~now:1.
+      ~origin:{kind=Memory.Injected;trace_id="cleanup-trace"} in
+  let first = fact Memory.Constraint "Production deployment requires approval." in
+  let second = fact custom "Deploy production only with rollback assets ready." in
+  let commit ?(absorbed=[]) new_claims =
+    match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:2.
+      ~source:{kind=Current.Librarian;trace_id="cleanup-trace"}
+      ~absorbed ~new_claims () with
+    | Ok _ -> true | Error detail -> fail detail in
+  ignore (commit [first;second]);
+  let report = Limits.current [first;second] in
+  check bool "custom category occupies the same category limit" true (Limits.exceeded report);
+  check bool "same-category item limit is independent" true
+    (Limits.exceeded (Limits.current [first; {second with category=Memory.Constraint}]));
+  let calls = ref 0 in
+  let execute ~keepers_dir:_ ~keeper_name:_ ~expected_revision:_ (input : Masc.Keeper_librarian.input) =
+    incr calls;
+    check int "no invented conversation for a count review" 0 (List.length input.messages);
+    check bool "no queue context admitted" true
+      (Masc.Keeper_librarian_context.shows_no_working_context input.working_context);
+    check int "complete current facts supplied" 2
+      (match input.current with Some current -> List.length current.facts | None -> 0);
+    commit [] in
+  let run execute = Cleanup.For_testing.run_with ~execute ~base_path:config.base_path ~keeper_name in
+  check bool "overflow reviewed without a finished turn" true
+    (run execute = Cleanup.Reviewed Cleanup.Excess_retained);
+  check bool "safe no-change choice is not immediately repeated" true
+    (run execute = Cleanup.Already_reviewed);
+  check int "one model decision" 1 !calls;
+  Cleanup.forget ~base_path:config.base_path ~keeper_name;
+  check bool "failed dispatch stays retryable" true
+    (match run (fun ~keepers_dir:_ ~keeper_name:_ ~expected_revision:_ _ -> false) with
+     | Cleanup.Unavailable _ -> true | _ -> false);
+  let merged = fact Memory.Constraint
+      "Production deployment requires approval and ready rollback assets." in
+  let merge ~keepers_dir:_ ~keeper_name:_ ~expected_revision:_ _ =
+    commit ~absorbed:
+      [ {Memory.absorbed=Memory.memory_id first;into=Memory.memory_id merged}
+      ; {Memory.absorbed=Memory.memory_id second;into=Memory.memory_id merged} ] [merged] in
+  check bool "next wake can consolidate with lineage" true
+    (run merge = Cleanup.Reviewed Cleanup.Limits_reached);
+  check bool "within limit requires no model" true (run execute = Cleanup.Within_limits);
+  check int "no additional no-change model calls" 1 !calls
+;;
+
+(* Use the production cleanup and queue signal on the real serialized lane.
+   Only the model boundary is replaced: each answer commits through Current,
+   and no external event arrives after the initial submission. *)
+let check_memory_cleanup_wakes ~category_cap ~item_cap ~initial ~decisions
+    ~expected_wakes ~expected_facts ~expected_results =
+  let module Cleanup = Masc.Keeper_memory_cleanup in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let module Lane = Masc.Keeper_memory_lane in
+  let module Signal = Masc.Keeper_librarian_queue_signal in
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.librarian_env_key
+    (Some "true") @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.category_cap_env_key
+    (Some (string_of_int category_cap)) @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_keeper.KeeperMemoryOs.facts_per_category_cap_env_key
+    (Some (string_of_int item_cap)) @@ fun () ->
+  with_workspace @@ fun config ->
+  write_meta config "cleanup-continuation";
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  let commit ~before after =
+    let after_ids = List.map Memory.memory_id after in
+    let dropped_statements = List.filter_map (fun fact ->
+      let memory_id = Memory.memory_id fact in
+      if List.mem memory_id after_ids then None
+      else Some {Memory.memory_id; reason="The fixture model chose to retire this memory."}) before in
+    match Current.apply_disposition ~revisions:[] ~absorbed:[] ~dropped_statements
+      ~keepers_dir ~keeper_id:keeper_name ~now:2.
+      ~source:{kind=Current.Librarian;trace_id="cleanup-continuation"}
+      ~new_claims:after () with
+    | Ok _ -> true
+    | Error detail -> fail detail in
+  ignore (commit ~before:[] initial);
+  let decisions_left = ref decisions in
+  let calls = ref 0 in
+  let execute ~keepers_dir:_ ~keeper_name:_ ~expected_revision:_ (input : Masc.Keeper_librarian.input) =
+    incr calls;
+    check int "sleeping Keeper has no new conversation" 0 (List.length input.messages);
+    match !decisions_left with
+    | [] -> fail "cleanup called the model without count progress"
+    | decision :: rest ->
+      decisions_left := rest;
+      (match decision with
+       | None -> false
+       | Some after ->
+         let before = match input.current with Some current -> current.facts | None -> [] in
+         commit ~before after) in
+  let wakes = ref 0 in
+  let results = ref [] in
+  let run () =
+    let result = Cleanup.For_testing.run_with ~execute ~base_path:config.base_path ~keeper_name in
+    results := result :: !results in
+  Lane.For_testing.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      Signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+      Cleanup.forget ~base_path:config.base_path ~keeper_name;
+      Lane.For_testing.reset ())
+    (fun () -> Eio.Switch.run @@ fun sw ->
+      Lane.init ~sw;
+      Signal.install (fun ~base_path ~keeper_name:signaled_name ->
+        check string "continuation keeps the runtime" config.base_path base_path;
+        check string "continuation keeps the Keeper" keeper_name signaled_name;
+        incr wakes;
+        ignore (Lane.submit ~base_path ~keeper_name:signaled_name run);
+        check bool "continuation waits on the current lane" true
+          (Lane.has_waiting ~base_path ~keeper_name:signaled_name));
+      ignore (Lane.submit ~base_path:config.base_path ~keeper_name run);
+      Lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name;
+      check int "only measured progress emits a wake" expected_wakes !wakes;
+      check int "every planned model decision ran" (List.length decisions) !calls;
+      check bool "saved decisions determine the continuation" true
+        (expected_results (List.rev !results));
+      let snapshot = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name with
+        | Ok (Some snapshot) -> snapshot
+        | Ok None -> fail "cleanup lost current memory"
+        | Error detail -> fail detail in
+      let identities_and_categories facts =
+        List.map (fun (fact : Memory.fact) ->
+          Memory.memory_id fact, Memory.category_to_string fact.category) facts
+        |> List.sort Stdlib.compare in
+      check (list (pair string string)) "the model-selected memory and categories are persisted"
+        (identities_and_categories expected_facts)
+        (identities_and_categories snapshot.facts))
+;;
+
+let cleanup_fixture_fact category claim =
+  Masc.Keeper_memory_os_types.observed ~category ~claim ~now:1.
+    ~origin:{kind=Masc.Keeper_memory_os_types.Injected;trace_id="cleanup-continuation"}
+;;
+
+let test_memory_count_cleanup_continues_without_external_wake () =
+  let module Cleanup = Masc.Keeper_memory_cleanup in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let first = cleanup_fixture_fact Memory.Constraint "Production requires approval." in
+  let second = cleanup_fixture_fact Memory.Constraint "Rollback assets are ready." in
+  let third = cleanup_fixture_fact Memory.Constraint "Record the deployment outcome." in
+  let run initial =
+    check_memory_cleanup_wakes ~category_cap:1 ~item_cap:1 ~initial
+      ~decisions:[Some (List.tl initial); Some [third]]
+      ~expected_wakes:1 ~expected_facts:[third]
+      ~expected_results:((=)
+        [Cleanup.Reviewed Cleanup.Progress_with_excess; Cleanup.Reviewed Cleanup.Limits_reached]) in
+  run [first; second; third];
+  let custom name = match Memory.category_of_string name with
+    | Some category -> category | None -> fail "custom category fixture" in
+  (* Every category is below its item cap. Category excess alone must wake. *)
+  run [{first with category=custom "deployment_rules"};
+       {second with category=custom "rollback_rules"}; third]
+;;
+
+let test_memory_count_cleanup_does_not_spin () =
+  let module Cleanup = Masc.Keeper_memory_cleanup in
+  let module Memory = Masc.Keeper_memory_os_types in
+  let first = cleanup_fixture_fact Memory.Constraint "Production requires approval." in
+  let second = cleanup_fixture_fact Memory.Constraint "Rollback assets are ready." in
+  let third = cleanup_fixture_fact Memory.Constraint "Record the deployment outcome." in
+  let rewritten = cleanup_fixture_fact Memory.Constraint "Approval is required for production." in
+  let preference = cleanup_fixture_fact Memory.Preference "Prefer rollback drills on staging." in
+  let lesson = cleanup_fixture_fact Memory.Lesson "A deployment log exposed the failed step." in
+  let initial = [first; second; third] in
+  let check_retained ~initial after =
+    check_memory_cleanup_wakes ~category_cap:1 ~item_cap:1 ~initial
+      ~decisions:[Some after] ~expected_wakes:0 ~expected_facts:after
+      ~expected_results:((=) [Cleanup.Reviewed Cleanup.Excess_retained]) in
+  check_retained ~initial initial;
+  check_retained ~initial [rewritten; second; third];
+  (* Fewer excess items cannot hide a newly overflowing category count. *)
+  check_retained ~initial [first; preference];
+  (* Fewer excess categories cannot hide a newly overflowing item count. *)
+  check_retained
+    ~initial:[first; preference; lesson]
+    [first; second; preference];
+  check_memory_cleanup_wakes ~category_cap:1 ~item_cap:1 ~initial
+    ~decisions:[Some [second;third]; Some [second;third]]
+    ~expected_wakes:1 ~expected_facts:[second;third]
+    ~expected_results:((=)
+      [Cleanup.Reviewed Cleanup.Progress_with_excess; Cleanup.Reviewed Cleanup.Excess_retained]);
+  check_memory_cleanup_wakes ~category_cap:1 ~item_cap:1 ~initial
+    ~decisions:[None] ~expected_wakes:0 ~expected_facts:initial
+    ~expected_results:(function [Cleanup.Unavailable _] -> true | _ -> false)
+;;
+
+let () =
+  run
+    "Keeper Librarian durable consumer"
+    [ ( "range lifecycle"
+      , [ test_case "absent admission preserves durable progress" `Quick
+            test_absent_admission_keeps_durable_progress
+        ; test_case "A and B retain distinct historical contexts in one batch" `Quick
+            (test_historical_contexts_in_one_batch ~missing_boundary:false)
+        ; test_case "missing boundary leaves earlier atoms unattributed" `Quick
+            (test_historical_contexts_in_one_batch ~missing_boundary:true)
+        ; test_case "N ticks retain intermediate turns" `Quick
+            test_n_tick_reads_every_intermediate_turn
+        ; test_case "unread turns counts what a pass has left" `Quick
+            test_unread_turns_counts_what_a_pass_has_left
+        ; test_case "failed commit and restart retry exact range" `Quick
+            test_failed_commit_and_restart_retry_the_same_range
+        ; test_case "undecodable current routes through write-path quarantine" `Quick
+            test_undecodable_current_snapshot_routes_through_write_path_quarantine
+        ; test_case "unreadable current stops the pass before commit" `Quick
+            test_unreadable_current_snapshot_stops_the_pass_before_commit
+        ; test_case "committed range repairs failed progress after restart" `Quick
+            test_committed_range_recovers_after_progress_write_failure
+        ; test_case "committed wide range repairs before retry narrowing" `Quick
+            test_committed_wide_range_recovers_before_retry_narrowing
+        ; test_case "Memory the continuity round saved is not sent again" `Quick
+            test_memory_the_continuity_round_saved_is_not_sent_again
+        ; test_case "receipt does not cross a restarted repeated endpoint" `Quick
+            test_receipt_does_not_cross_restarted_history_with_repeated_endpoint
+        ; test_case "historical range does not borrow current task" `Quick
+            test_historical_range_does_not_borrow_the_current_task
+        ; test_case "unchanged boundaries skip checkpoint" `Quick
+            test_unchanged_boundaries_do_not_require_checkpoint
+        ; test_case "caught-up prior trace transitions to current trace" `Quick
+            test_caught_up_prior_trace_transitions_to_current_trace
+        ; test_case "absent prior checkpoint transitions to current trace" `Quick
+            test_absent_prior_checkpoint_transitions_to_current_trace
+        ; test_case "absent prior checkpoint requires current history start" `Quick
+            test_absent_prior_checkpoint_requires_current_history_start
+        ; test_case "unread prior trace finishes before current trace" `Quick
+            test_unread_prior_trace_finishes_before_current_trace
+        ; test_case "trace in between is read before current trace" `Quick
+            test_intervening_trace_is_read_before_the_current_trace
+        ; test_case "trace in between without checkpoint is passed" `Quick
+            test_intervening_trace_without_checkpoint_is_passed
+        ; test_case "superseded checkpoint in between is passed" `Quick
+            test_superseded_intervening_checkpoint_is_passed
+        ; test_case "damaged checkpoint in between stops the pass" `Quick
+            test_corrupt_intervening_checkpoint_stops_the_pass
+        ; test_case "backwards clock at hand-off reads the row next round" `Quick
+            test_backwards_clock_at_hand_off_reads_the_row_next_round
+        ; test_case "failed growing range retries oldest cut" `Quick
+            test_failed_long_range_retries_only_oldest_cut_point
+        ; test_case "last boundary wins when wall clock goes backward" `Quick
+            test_last_matching_boundary_wins_when_clock_moves_backward
+        ; test_case "distinct backward clocks do not erase counterpart evidence" `Quick
+            test_distinct_boundaries_reject_non_monotone_counterpart_interval
+        ; test_case "equal boundary clocks make an empty interval" `Quick
+            test_equal_boundary_timestamps_form_an_empty_counterpart_interval
+        ; test_case "unknown speaker authority keeps durable progress" `Quick
+            test_unknown_speaker_authority_does_not_advance_progress
+        ; test_case "missing speaker authority keeps durable progress" `Quick
+            test_missing_speaker_authority_does_not_advance_progress
+        ; test_case "torn external tail retries the same range once" `Quick
+            test_torn_external_tail_retries_the_same_range_once
+        ; test_case "torn chat tail retries the same range once" `Quick
+            test_torn_chat_tail_retries_the_same_range_once
+        ; test_case "counterpart range exceeds recent windows" `Quick
+            test_counterpart_range_reads_beyond_recent_windows
+        ; test_case "counterpart range includes upper boundary once" `Quick
+            test_counterpart_range_includes_upper_boundary_once
+        ; test_case "external/chat pair across boundary is emitted once" `Quick
+            test_external_chat_pair_straddling_a_boundary_is_not_duplicated
+        ; test_case "restart cut excludes current unfinished turn" `Quick
+            test_restart_cut_never_commits_a_current_unfinished_turn
+        ; test_case "seen restart skips absent checkpoint" `Quick
+            (test_seen_restart_skips_checkpoint Missing_checkpoint)
+        ; test_case "seen restart skips corrupt checkpoint" `Quick
+            (test_seen_restart_skips_checkpoint Corrupt_checkpoint)
+        ; test_case "new completed cut reads checkpoint" `Quick
+            test_new_completed_cut_still_reads_checkpoint
+        ; test_case "unseen restart reads checkpoint" `Quick
+            test_unseen_restart_still_reads_checkpoint
+        ; test_case "trace change without witness keeps prior progress" `Quick
+            test_trace_change_without_history_witness_keeps_prior_progress
+        ; test_case "new unreadable boundary remains visible" `Quick
+            test_new_unreadable_boundary_is_not_hidden_by_preflight
+        ] )
+    ; ( "checkpoint runtime message floor"
+      , [ test_case "unmeasured native Codex capacity descends through the actual checkpoint producer without holes" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_codex_capacity Partial_checkpoint_hole)
+        ; test_case "unmeasured native Claude capacity descends through the actual checkpoint producer without holes" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_claude_capacity Partial_checkpoint_hole)
+        ; test_case "unmeasured native capacity finishes the retired checkpoint before current metadata" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_claude_capacity Retired_checkpoint_hole)
+        ; test_case "invalid JSON before native capacity vetoes checkpoint message descent" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_invalid_json_first Partial_checkpoint_hole)
+        ; test_case "invalid domain output after native capacity vetoes checkpoint message descent" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_invalid_domain_last Partial_checkpoint_hole)
+        ; test_case "native Codex refusal after a tool effect cannot descend checkpoint messages" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_codex_effect_started Partial_checkpoint_hole)
+        ; test_case "native Claude refusal after response emission cannot descend checkpoint messages" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_claude_response_started Partial_checkpoint_hole)
+        ; test_case "opaque native failure cannot descend checkpoint messages" `Quick
+            (test_runtime_checkpoint_memory_floor ~native:Native_opaque_failure Partial_checkpoint_hole)
+        ; test_case "actual runtime accounts a multi-atom checkpoint cut with one API hole" `Quick
+            (test_runtime_checkpoint_memory_floor Partial_checkpoint_hole)
+        ; test_case "actual runtime finishes the retired checkpoint before the metadata trace" `Quick
+            (test_runtime_checkpoint_memory_floor Retired_checkpoint_hole)
+        ; test_case "actual runtime judges host evidence after every checkpoint message is refused" `Quick
+            (test_runtime_checkpoint_memory_floor All_checkpoint_holes)
+        ; test_case "actual runtime publishes observation-free checkpoint holes without inventing a summary" `Quick
+            (test_runtime_checkpoint_memory_floor Checkpoint_holes_without_observations)
+        ; test_case "opaque checkpoint refusal grants no unread or progress authority" `Quick
+            (test_runtime_checkpoint_memory_floor Unknown_checkpoint_refusal)
+        ; test_case "an exhausted API walk with a CLI tail cannot skip a checkpoint message" `Quick
+            (test_runtime_checkpoint_memory_floor Cli_tail_checkpoint_refusal)
+        ; test_case "late checkpoint inference failure publishes no partial Memory" `Quick
+            (test_runtime_checkpoint_memory_floor Late_checkpoint_failure)
+        ; test_case "checkpoint publication refuses a changed source with the same endpoint" `Quick
+            (test_runtime_checkpoint_memory_floor Rewritten_checkpoint_source)
+        ; test_case "checkpoint publication leaves an appended completed suffix unread" `Quick
+            (test_runtime_checkpoint_memory_floor Appended_checkpoint_suffix)
+        ; test_case "checkpoint publication refuses a restart marker with unchanged checkpoint bytes" `Quick
+            (test_runtime_checkpoint_memory_floor Restarted_checkpoint_history)
+        ; test_case "checkpoint publication refuses a changed atom cursor" `Quick
+            (test_runtime_checkpoint_memory_floor Moved_checkpoint_progress)
+        ; test_case "checkpoint program WAL repairs atom progress without another HTTP request" `Quick
+            (test_runtime_checkpoint_memory_floor Interrupted_checkpoint_progress)
+        ] )
+    ; ( "official-client turns"
+      , [ test_case "unmeasured native Claude capacity descends the actual official turn without holes" `Quick
+            (test_runtime_official_memory_floor ~native:Native_claude_capacity Partial_official_hole)
+        ; test_case "actual runtime accounts an official turn with one proven API hole" `Quick
+            (test_runtime_official_memory_floor Partial_official_hole)
+        ; test_case "actual runtime judges host observations after all official messages are refused" `Quick
+            (test_runtime_official_memory_floor All_official_holes)
+        ; test_case "actual runtime publishes all official holes without inventing an observation-free judgment" `Quick
+            (test_runtime_official_memory_floor All_official_holes_without_observations)
+        ; test_case "opaque official runtime refusal grants no Memory or cursor authority" `Quick
+            (test_runtime_official_memory_floor Unknown_official_refusal)
+        ; test_case "late official inference failure publishes no partial Memory" `Quick
+            (test_runtime_official_memory_floor Late_official_failure)
+        ; test_case "official program refuses a rewritten source message" `Quick
+            (test_runtime_official_memory_floor Rewritten_official_message)
+        ; test_case "official program refuses a rewritten host tool observation" `Quick
+            (test_runtime_official_memory_floor Rewritten_official_observation)
+        ; test_case "official program allows a later turn append without consuming it" `Quick
+            (test_runtime_official_memory_floor Appended_official_turn)
+        ; test_case "official program WAL recovers a failed cursor write without generation" `Quick
+            (test_runtime_official_memory_floor Interrupted_official_progress)
+        ; test_case "mixed refusal preserves reports and both cursors across restart" `Quick
+            (test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports:true)
+        ; test_case "unclassified mixed refusal preserves both cursors across restart" `Quick
+            (test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports:false)
+        ; test_case "Pending official-only input preserves Memory cursors and external ACK" `Quick
+            (test_pending_official_sources_preserve_memory_and_ack ~mixed:false)
+        ; test_case "Pending mixed input preserves Memory cursors and external ACK" `Quick
+            (test_pending_official_sources_preserve_memory_and_ack ~mixed:true)
+        ; test_case "official turns skip an unchanged atom checkpoint" `Quick
+            (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:true)
+        ; test_case "official-only turns skip an unused checkpoint" `Quick
+            (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:false)
+        ; test_case "an official-only keeper is read from its fragments" `Quick
+            test_an_official_only_keeper_is_read_from_its_fragments
+        ; test_case "a superseded current checkpoint is fresh state" `Quick
+            test_a_superseded_current_checkpoint_is_fresh_state
+        ; test_case "tool-only errored official turn retains admission" `Quick
+            (test_a_failed_official_turn_is_read ~tool_only:true)
+        ; test_case "a failed official turn is read" `Quick
+            (test_a_failed_official_turn_is_read ~tool_only:false)
+        ; test_case "a mixed keeper is read in line order" `Quick
+            test_a_mixed_keeper_is_read_in_line_order
+        ; test_case "official receipt recovers failed cursor write" `Quick
+            (test_official_commit_recovers_without_resynthesis ~mixed:false ~cancel_after_save:false)
+        ; test_case "mixed receipt recovers partial cursor write" `Quick
+            (test_official_commit_recovers_without_resynthesis ~mixed:true ~cancel_after_save:false)
+        ; test_case "official receipt recovers cancellation after save" `Quick
+            (test_official_commit_recovers_without_resynthesis ~mixed:false ~cancel_after_save:true)
+        ; test_case "mixed receipt restores both cursors after cancellation" `Quick
+            (test_official_commit_recovers_without_resynthesis ~mixed:true ~cancel_after_save:true)
+        ; test_case "Memory lane drain recovers mixed cancellation without synthesis" `Quick
+            (test_official_commit_recovers_without_resynthesis ~through_queue:true ~mixed:true ~cancel_after_save:true)
+        ; test_case "Memory lane drain recovers partial cursor writes without synthesis" `Quick
+            (test_official_commit_recovers_without_resynthesis ~through_queue:true ~mixed:true ~cancel_after_save:false)
+        ; test_case "unread mixed Memory survives official-position write failure" `Quick
+            (test_official_commit_recovers_without_resynthesis ~with_unread:true ~mixed:true ~cancel_after_save:false)
+        ; test_case "unread mixed Memory survives cancellation before positions" `Quick
+            (test_official_commit_recovers_without_resynthesis ~with_unread:true ~mixed:true ~cancel_after_save:true)
+        ; test_case "official receipt cannot skip replaced history" `Quick
+            (test_official_receipt_rejects_replaced_history ~bad_message_hash:false)
+        ; test_case "official coverage cannot advance with another original message hash" `Quick
+            (test_official_receipt_rejects_replaced_history ~bad_message_hash:true)
+        ; test_case "untagged fragments are passed without a commit" `Quick
+            test_untagged_fragments_are_passed_without_a_commit
+        ; test_case "a refused fragment line stops the pass" `Quick
+            test_a_refused_fragment_line_stops_the_pass
+        ; test_case "an official line older than the baseline is read" `Quick
+            test_an_official_line_older_than_the_baseline_is_read
+        ; test_case "a refused boundary line is not lifted for official turns" `Quick
+            test_a_refused_boundary_line_is_not_lifted_for_official_turns
+        ; test_case "an official turn before a refused boundary line is read" `Quick
+            test_an_official_turn_before_a_refused_boundary_line_is_read
+        ; test_case "an official stop does not hold the atom part" `Quick
+            test_an_official_stop_does_not_hold_the_atom_part
+        ; test_case "an official stop does not narrow later passes" `Quick
+            test_an_official_stop_does_not_narrow_later_passes
+        ; test_case "a drained pass does not narrow later passes" `Quick
+            test_a_drained_pass_does_not_narrow_later_passes
+        ; test_case "a position in another trace answers before an official stop" `Quick
+            test_a_position_in_another_trace_answers_before_an_official_stop
+        ; test_case "official cursor above the range end refuses the hand-off" `Quick
+            test_official_cursor_above_the_range_end_refuses_the_hand_off
+        ] )
+    ; ( "production wake"
+      , [ test_case "count overflow is reviewed without unread history" `Quick
+            test_memory_count_cleanup_without_history
+        ; test_case "saved count progress continues without an external wake" `Quick
+            test_memory_count_cleanup_continues_without_external_wake
+        ; test_case "retained and worsening count excess does not spin" `Quick
+            test_memory_count_cleanup_does_not_spin
+        ; test_case "Pending preserves all-unread selection and Memory" `Quick
+            (test_pending_preserves_selection_and_memory ~after_failure:false)
+        ; test_case "Pending preserves the earlier narrow retry marker" `Quick
+            (test_pending_preserves_selection_and_memory ~after_failure:true)
+        ; test_case "blocked originals suspend following effects while ordinary failures keep their policy" `Quick
+            test_blocked_original_suspends_following_phases
+        ; test_case "Pending suspends the same wake and normal commit reopens phases" `Quick
+            test_pending_wake_suspends_following_phases
+        ; test_case "failure stops and a later wake drains successful cuts" `Quick
+            test_one_wake_stops_on_failure_then_drains_successful_cuts
+        ; test_case "growing source allows following phases" `Quick
+            test_growing_source_allows_following_phases
+        ; test_case "one wake continues after an initial baseline" `Quick
+            test_one_wake_continues_after_an_initial_baseline
+        ; test_case "disable between cuts waits for a new enabled wake" `Quick
+            test_disabling_between_cuts_stops_until_a_new_enabled_wake
+        ] )
+    ]
+;;

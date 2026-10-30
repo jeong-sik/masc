@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_event_bus_slots)
+ (public_name masc.event_bus_slots)
+ (wrapped false)
+ (modules event_bus_slots)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries masc.agent_core))

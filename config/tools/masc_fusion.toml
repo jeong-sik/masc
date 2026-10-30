@@ -1,0 +1,100 @@
+name = "masc_fusion"
+description = """
+Run an out-of-band panel+judge deliberation.
+
+A panel of models from the \
+configured preset answers the prompt independently; a judge model \
+synthesises consensus, contradictions, partial coverage, unique insights, \
+and blind spots. Advisory only: this keeper turn continues immediately; when \
+the deliberation completes you are WOKEN with the result, and the conclusion \
+(or the failure reason) is appended to your chat lane (also visible in the \
+dashboard) — do not poll masc_fusion_status while waiting. Returns a status \
+with a run_id. Panels answer from their own knowledge only: they cannot see \
+your files, tasks, or conversation, so phrase the prompt self-contained. Set \
+web_tools=true to let the panel and judge ground their answers with \
+web_search / web_fetch. Gated by runtime.toml [fusion] (disabled by \
+default)."""
+additional_properties = false
+
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 5 times in 5 turns, 2653 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 5 extra requests over the same week.
+defer_loading = true
+
+[[params]]
+name = "prompt"
+type = "string"
+required = true
+description = """
+Question or task to deliberate. A panel of models answers independently, \
+then a judge synthesises consensus, contradictions, partial coverage, unique \
+insights, and blind spots. Out-of-band: the synthesis arrives asynchronously \
+on this keeper's chat lane, not inline in this turn."""
+
+[[params]]
+name = "preset"
+type = "string"
+description = """
+Panel preset name from runtime.toml [fusion.presets]. Omitted uses the \
+configured default_preset."""
+
+[[params]]
+name = "web_tools"
+type = "boolean"
+description = """
+When true, the panel and judge agents are given web_search / web_fetch tools \
+to ground their answers. Defaults to false; the selected preset may also \
+enable web tools on its own (the effective setting is this flag OR the \
+preset's)."""
+
+[[params]]
+name = "topology"
+type = "string"
+description = """
+How to reduce the panel answers. \"simple\" (default): panel -> one judge -> \
+result. \"refine\": panel -> judge -> a second judge that critically reviews \
+and improves the first synthesis against the panel evidence -> result \
+(deeper, two judge passes). \"conditional\": like simple, but escalates to a \
+second (refine) judge only when the first judge could not decide (verdict \
+insufficient); otherwise returns the first synthesis. \"judge_of_judges\": \
+several distinct judges each synthesise the panel independently and a \
+meta-judge reconciles them (requires the preset to configure >= 2 judges). \
+\"staged_judge_of_judges\": first judges are grouped by \
+[fusion].staged_judge_group_size, each group is reconciled by a stage \
+meta-judge, then a final meta-judge reconciles the stage results (requires \
+at least two exact groups; ragged counts are rejected). Unknown values are \
+rejected."""
+
+[[params]]
+name = "judge"
+type = "string"
+description = """
+Route for the judge seat in this run only: a [runtime.lanes] lane name or a \
+runtime id. Omitted uses the preset's judge. An unknown route is rejected \
+before the run starts."""
+
+[[params]]
+name = "panel"
+type = "array"
+items = { type = "string" }
+min_items = 1
+description = """
+Routes for the panel in this run only, one seat per route ([runtime.lanes] \
+lane names or runtime ids). They form one group that takes its prompt, \
+web_tools, output budget and timeout from the preset's first group. Omitted \
+uses the preset's panel. Unknown routes, repeated routes, or fewer routes \
+than the preset's min_answered are rejected before the run starts."""
+
+[[params]]
+name = "task_id"
+type = "string"
+description = "Optional assigned Task to deliberate for. If neither task_id nor goal_id is supplied, the runtime selects your current active Task from authoritative ownership. Its title, description, completion contract and linked Goal criteria are captured before starting the panel; they are separate from your summary."
+[[params]]
+name = "goal_id"
+type = "string"
+description = "Optional Goal whose current criterion is captured. When task_id is also supplied, it must be linked to that Task."
+[[params]]
+name = "decision_context"
+type = "string"
+description = "Current evidence, competing alternatives and constraints relevant to the decision. This is caller-supplied context, kept separate from runtime-validated Task/Goal snapshots."

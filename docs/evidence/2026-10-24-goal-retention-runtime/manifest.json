@@ -1,0 +1,80 @@
+{
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 2908,
+      "sha256": "35bd831116e53a0fdd7809137756ad58ad91a951f5ab796f17a4c0ea15c1a149"
+    },
+    {
+      "file": "alpha-request-input.json",
+      "bytes": 658,
+      "sha256": "2e743234a3834c010b3e20c09d5f261bb0910780c7d003e336e522b4c4aff418"
+    },
+    {
+      "file": "alpha-request.json",
+      "bytes": 1162,
+      "sha256": "4e399aaa94187404e46644c1b26982853ec1ccf9bfc048d6b44a851dec49dcfd"
+    },
+    {
+      "file": "description-correction-on-wire.json",
+      "bytes": 6646,
+      "sha256": "a712c3fdce627e893ed780c4545039356b0b966282a85002acd347be066601fd"
+    },
+    {
+      "file": "failed-gemma-observation.json",
+      "bytes": 19743,
+      "sha256": "c62e19127b9ccf5944bc9807abcdb4540bf7dd83939cf3214146605cb8bb8fb8"
+    },
+    {
+      "file": "goal-baseline.json",
+      "bytes": 2430,
+      "sha256": "249ad02da1c77d0d6c7fa7f7b16b6c38960c5149238da6f00dbd1301135049f0"
+    },
+    {
+      "file": "goal-create.json",
+      "bytes": 4523,
+      "sha256": "7f84ce24a75747658827db4140887a9592c7699414fa2ff13372b30081f0fc71"
+    },
+    {
+      "file": "health.json",
+      "bytes": 34590,
+      "sha256": "590966d9a795d91fcdac2e82e0ae57ba06d7a242d2d4de38570e78bddd03e7f0"
+    },
+    {
+      "file": "identity.json",
+      "bytes": 296,
+      "sha256": "d5df0b8cd2e2b04a8efea9ae25cd15ef69567ca5c471c8077b5dd9ee4585cb34"
+    },
+    {
+      "file": "keeper-create.json",
+      "bytes": 2213,
+      "sha256": "22628b51c85dcda6ce6f002989270e12828d82ce832148bdccfb5b2899819980"
+    },
+    {
+      "file": "native-http-rerun-plan.json",
+      "bytes": 446,
+      "sha256": "7bce849c244295f402de6eed54c83fed39cffbea84863c067c03fabdd90f8533"
+    },
+    {
+      "file": "preflight.json",
+      "bytes": 435,
+      "sha256": "035c1f7aa0c445f0bf228b84f9d346546cfbe4be4ebeb9240d762671d434cae0"
+    },
+    {
+      "file": "server-extraction-receipt.json",
+      "bytes": 985,
+      "sha256": "a401957d65cf65d9ac4741ceabac033b6fa796ecc9cf96f407b61fd5dbef7e7c"
+    },
+    {
+      "file": "shutdown-admission.json",
+      "bytes": 2565,
+      "sha256": "bbfd63ac0da01abdcc841639cfc7243722858749ab2a43a8b097a3681f9c0b01"
+    },
+    {
+      "file": "shutdown-readback.json",
+      "bytes": 126835,
+      "sha256": "a58537a91203ed41142a4b7e20cfeb519e21ffd7d2fd7d6c387ea0d6eb883f7f"
+    }
+  ],
+  "scope": "selected public receipts and summaries; private tokens and provider Thinking excluded"
+}

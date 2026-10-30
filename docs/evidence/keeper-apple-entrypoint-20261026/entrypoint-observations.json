@@ -1,0 +1,120 @@
+{
+  "schema": "masc.evidence.apple-entrypoint.v1",
+  "observed_at_utc": "2026-10-26T14:30:34.800921+00:00",
+  "source_base": "38597593cd733e5db982ac34b08cfc0b025bb97e",
+  "source_files_sha256": {
+    "lib/keeper/keeper_microvm_boot_plan.ml": "9a151f3562c4062d90eca504d7013021ff9cc82dc6c5a511477908bd1ef70d41",
+    "lib/keeper/keeper_microvm_boot_plan.mli": "326810fcd1954a72c4f05e1e63ef46783dccc97d60a26c0eb054c8e821a5a068",
+    "lib/keeper/keeper_sandbox_microvm.ml": "dd5fad42f10f854905029a4f08c2d07e7d4b5c8aea083ddc27adf1782e9e1b96",
+    "test/test_keeper_microvm_boot_plan.ml": "9fda0aacc0eed03e0e5433d7315cb561423681735838f92b677a9ec959e7b510",
+    "test/test_keeper_microvm_backend.ml": "caf4193459cca168a1af934960ff2b7b9287cef1c02971006a94cc488add52cc",
+    "test/test_keeper_sandbox_microvm.ml": "9984f3f49999add36f8f4e7fcbb06f62b09a9895687ca340dca3ce7fb5b8e3d2"
+  },
+  "provenance": "direct isolated CLI boundary probe; compiled MASC and deployment unverified",
+  "container_version": "container CLI version 1.3.1 (build: release, commit: unspeci)",
+  "image": "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+  "expected_command": [
+    "tail",
+    "-f",
+    "/dev/null"
+  ],
+  "observations": [
+    {
+      "phase": "before",
+      "boot_argv": [
+        "container",
+        "run",
+        "-d",
+        "--name",
+        "masc-entrypoint-proof-before-72e81e652eab",
+        "--memory",
+        "512m",
+        "--cpus",
+        "1",
+        "--network",
+        "none",
+        "--no-dns",
+        "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+        "tail",
+        "-f",
+        "/dev/null"
+      ],
+      "boot_exit_code": 0,
+      "observed_command": [
+        "opam",
+        "exec",
+        "--",
+        "tail",
+        "-f",
+        "/dev/null"
+      ],
+      "status": "running",
+      "matches_expected_command": false,
+      "stop_exit_code": 0,
+      "delete_exit_code": 0,
+      "inspect_raw_sha256": "62b2bd49e6556aa577b0b128ea8381414dfe735575b9241cb422468b699ae8a3"
+    },
+    {
+      "phase": "after",
+      "boot_argv": [
+        "container",
+        "run",
+        "-d",
+        "--name",
+        "masc-entrypoint-proof-after-da6f88622ed7",
+        "--memory",
+        "512m",
+        "--cpus",
+        "1",
+        "--network",
+        "none",
+        "--no-dns",
+        "--entrypoint",
+        "tail",
+        "masc-sandbox-ocaml:20260928T0216Z-c48e1e05",
+        "-f",
+        "/dev/null"
+      ],
+      "boot_exit_code": 0,
+      "observed_command": [
+        "tail",
+        "-f",
+        "/dev/null"
+      ],
+      "status": "running",
+      "matches_expected_command": true,
+      "stop_exit_code": 0,
+      "delete_exit_code": 0,
+      "inspect_raw_sha256": "5139699e9b8221fc27fd9a43e55f9461c8653e65706afad5ab46ca810af75cfa"
+    }
+  ],
+  "ocaml_version": "5.5.1",
+  "syntax_only": [
+    {
+      "file": "lib/keeper/keeper_microvm_boot_plan.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "lib/keeper/keeper_microvm_boot_plan.mli",
+      "exit_code": 0
+    },
+    {
+      "file": "lib/keeper/keeper_sandbox_microvm.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "test/test_keeper_microvm_boot_plan.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "test/test_keeper_microvm_backend.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "test/test_keeper_sandbox_microvm.ml",
+      "exit_code": 0
+    }
+  ],
+  "executed_masc_tests": false,
+  "installed_runtime_changed": false
+}

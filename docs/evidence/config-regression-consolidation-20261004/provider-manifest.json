@@ -1,0 +1,18 @@
+{
+  "mode": "provider",
+  "scope": "complete registered suites; provider mode compiles candidate Runtime_toml against its unchanged cached public interface; boot mode verifies 16 source/interface files and compiles all eight candidate owners/consumers; other dependencies remain cached; no full server or production",
+  "cache": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/rel-41097-native",
+  "verified_cache_source_sha256": {
+    "lib/runtime/runtime.ml": "7705254b1daf98750f0b980ab21963f21d0b4832c4f53744419f9070d2619f9c",
+    "lib/runtime/runtime.mli": "3cce6f6cfc7236f5d8ca7bac32a905baa1cd69c8f176683f82c393cb25ccbd94"
+  },
+  "sources": {
+    "lib/runtime/runtime_toml.ml": "34ad56740a0e2b44d4f7896c26778db9649ad77a09f9350fcd77055a5810e936",
+    "lib/runtime/runtime_toml.mli": "9a5b27a830407e90ed8f277a61cacc34b6c5fbdd5dc615f3ad2329133de2fe7e",
+    "lib/runtime/runtime.ml": "7705254b1daf98750f0b980ab21963f21d0b4832c4f53744419f9070d2619f9c",
+    "lib/runtime/runtime.mli": "3cce6f6cfc7236f5d8ca7bac32a905baa1cd69c8f176683f82c393cb25ccbd94",
+    "test/test_runtime_toml_namespace.ml": "899ca85ae6481d31a6984746ce7138bb74a0312f1d7a5ee273bcf1f52ba3cd12",
+    "test/test_runtime_account_declaration.ml": "ac38f2047aada8bdebeef733b186854c8ec78fbd4a1d994b6291f4f2495bd48c",
+    "config/runtime.toml": "a5460fa572ad2764998576e0828a5e9aa9147994dbc0b0bb1262f5f0b1382542"
+  }
+}

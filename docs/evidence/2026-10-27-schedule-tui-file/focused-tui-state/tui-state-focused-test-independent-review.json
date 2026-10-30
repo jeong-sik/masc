@@ -1,0 +1,108 @@
+{
+  "schema": "masc.focused-test-independent-evidence-review.v1",
+  "verdict": "BOUNDED_FOCUSED_TEST_EVIDENCE_PASS",
+  "findings_P0_P2": [],
+  "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "run": {
+    "workflow": "Test",
+    "run_id": 40409087814,
+    "artifact_id": 12692432822,
+    "artifact_name": "suite-runner-log",
+    "selected_suite": "test_tui_loading_notice",
+    "minimal": true,
+    "retained_status": "completed",
+    "retained_conclusion": "success"
+  },
+  "raw_bindings": [
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/test40409087814/suite-runner-log.zip",
+      "bytes": 1465,
+      "sha256": "1e5679636c51b481662f9f4de409afaf457de53758fbb93bdc77d47b2ad20c7f"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/test40409087814/member-0.txt",
+      "bytes": 5158,
+      "sha256": "6b454b71058f1821c31abc03f02065dfc2871e07cc9ec6d9e6234f7a337d0498"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/test40409087814/download-manifest.json",
+      "bytes": 750,
+      "sha256": "e5085b8322f7da4610868c798612903c4ca7aea54ceb8b31b85b6a4042980634"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/test40409087814/selected-results.json",
+      "bytes": 2114,
+      "sha256": "073ef3b78da312016451965e271687db13d3853392576e9a6a9668f07ab3a2d3"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/tui-state-focused-test-dispatch.json",
+      "bytes": 1202,
+      "sha256": "575dc1971acafdbd8314f2ad2ba168b9044024729ddcf9628c644a44ea1cfbcf"
+    },
+    {
+      "path": "artifacts/schedule-durable-candidate-20261027/tui-state-focused-test-post-controller-review.json",
+      "bytes": 332,
+      "sha256": "3cc957be7f8783c0f39b6309808dbc7d9673452ce7589f95c705237fd992abf5"
+    }
+  ],
+  "independent_checks": {
+    "zip_bytes": 1465,
+    "member_bytes": 5158,
+    "ZIP_CRC": "PASS",
+    "single_member": "ci-run-tests.log",
+    "archive_member_equals_retained_log_bytes": true,
+    "selected_lines_exact_after_declared_ANSI_SGR_strip": true,
+    "OK_case_count": 8,
+    "failed_cases_in_log": 0,
+    "skipped_cases_in_log": 0,
+    "raw_final_success_line": "Test Successful in 0.001s. 8 tests run.",
+    "source_files_equal_frozen_git_objects": true
+  },
+  "source_bindings": {
+    "test/test_tui_loading_notice.ml": {
+      "bytes": 14368,
+      "sha256": "3802a9182c340ff62f039e8ef19c4c460184c63e8bd09116a0e3ee55191d07f9"
+    },
+    "bin/masc_tui_types.ml": {
+      "bytes": 1024106,
+      "sha256": "481643071b300594df770385095b02946cfc09f40becdcb69c5cc821c05c1ade"
+    },
+    ".github/workflows/test.yml": {
+      "bytes": 19283,
+      "sha256": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191"
+    }
+  },
+  "cases": [
+    "schedule responses follow target and generation",
+    "offscreen completion and late polls preserve a fresh wait",
+    "logs keep repainting after status arrives",
+    "the elapsed needs a start",
+    "two reads are timed apart",
+    "a background read does not reset the visible one",
+    "the same tab for two keepers is timed apart",
+    "the wait ends when the answer arrives"
+  ],
+  "scope": {
+    "dedicated_schedule_case_count": 1,
+    "generic_wait_case_count": 7,
+    "dedicated_case": "Actual production Types.apply_keeper_schedules_read/finish_detail_read and target decisions are called directly using synthetic state/snapshots. Covers late A answer/error while B selected, generation supersession, retaining previous page on refresh error, owner-specific identity target and chat target differing from roster selection.",
+    "generic_cases": "Generic elapsed/start/finish/per-tab/per-Keeper waiting state, offscreen completion and generation supersession (including automation tab), and sandbox-log wait decisions. The logs-repaint case checks state predicates, not actual painted frames.",
+    "execution_layer": "Existing focused OCaml suite log shows remote dune build target and all eight tests successful. No new test or local Dune invocation was performed by reviewer."
+  },
+  "source_locations": {
+    "test_case_registration": "test/test_tui_loading_notice.ml:256",
+    "dedicated_schedule_case": "test/test_tui_loading_notice.ml:183",
+    "generation_and_wait": "bin/masc_tui_types.ml:14132",
+    "target_and_apply": "bin/masc_tui_types.ml:14251",
+    "checkout_definition": ".github/workflows/test.yml:105"
+  },
+  "limits": [
+    "Only one selected suite and 8 cases; not completed full CI or a release/tag verdict.",
+    "Source/run binding uses retained GitHub dispatch/completion metadata and frozen workflow checkout expression (candidate_sha or github.sha); suite log does not contain a separate native build-commit receipt. No fresh GitHub/network query was made.",
+    "Pure production-state decisions with synthetic state/snapshots; no actual TUI/PTY, display/paint/layout, real HTTP callback ordering, F9 state or resize-processing acknowledgement demonstrated.",
+    "No scheduled runtime execution, model/provider behavior, installed binary or production deployment proof.",
+    "One schedule-specific case plus seven generic cases; do not call these eight schedule-specific runtime tests.",
+    "Logged 0.001s is this suite observation, not a stable performance claim."
+  ],
+  "reviewer_actions": "Read original ZIP/log, selected derivation and metadata; read entire test and relevant production helpers/workflow; hash and git-object equality checks only. No product/PR/CI/runtime/API/model action."
+}

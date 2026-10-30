@@ -1,0 +1,17 @@
+{
+  "frontend_commit": "10d3f9c02ae308720d0dd38126355a120fc4c344",
+  "backend_commit": "9cc33feff4917a1ae91804771a708d4a0e75e152",
+  "frontend_port": 18963,
+  "backend_port": 18951,
+  "scope": "Vite source preview, not installed dashboard artifact",
+  "observed": [
+    "authenticated WebSocket hello",
+    "Connected client status",
+    "both Keeper names",
+    "prior operator message and tool history",
+    "task-001 InProgress"
+  ],
+  "negative_control": "cross-origin browser WebSocket rejected",
+  "local_typecheck": "tsc --noEmit passed",
+  "backend_auth_changed": false
+}

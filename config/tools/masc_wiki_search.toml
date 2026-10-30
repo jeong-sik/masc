@@ -1,0 +1,15 @@
+name = "masc_wiki_search"
+description = """
+Search the wiki by content keywords or tags. A page matches when its \
+title, summary, tags or body contains the whole query, or every \
+whitespace-separated word of it in any order. Pages containing the \
+whole query come first, and inside each group the closest match comes \
+first. A word of one or two ASCII letters matches only as a whole \
+word, so "ci" does not match "decision". Use when \
+looking for pages on a specific topic without knowing the exact title. \
+Pair with masc_wiki_read to fetch matching pages in full."""
+
+[[params]]
+name = "query"
+type = "string"
+description = "Search query; empty or missing returns a workflow error"

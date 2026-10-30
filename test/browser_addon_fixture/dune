@@ -1,0 +1,7 @@
+(library
+ (name browser_addon_fixture)
+ (wrapped false)
+ (modules browser_addon_fixture)
+ (libraries masc masc.browser_lane masc.time_compat masc.tool_types
+  masc.lane_addon_call_context masc.lane_addon_tool_result masc.masc_eio_context
+  masc.fs_compat mcp_protocol eio eio.unix eio_main yojson unix))

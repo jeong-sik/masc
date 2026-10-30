@@ -1,0 +1,1018 @@
+(** Tests for Agent_turn module — turn preparation and usage. *)
+
+open Agent_core
+
+(* PR #33593 retuned deepseek prices without touching this suite; the
+   hardcoded 1.305 from af9a7190 was a copy of the pre-retune catalog.
+   Read the catalog instead, the way test_provider declared_pricing does. *)
+let declared_deepseek_price_sum () =
+  Model_catalog_test_support.install_embedded_model_catalog ~suite:"agent_turn";
+  match Llm_provider.Pricing.pricing_for_model_opt
+    ~provider:(Llm_provider.Model_catalog.Declared_provider "deepseek") "deepseek-v4-pro" with
+  | Some pricing -> pricing.input_per_million +. pricing.output_per_million
+  | None -> Alcotest.failf "expected catalog pricing for deepseek/deepseek-v4-pro"
+
+let invocation tool_use_id =
+  let schedule : Tool_contract.schedule =
+    { planned_index = 0
+    ; batch_index = 0
+    ; batch_size = 1
+    ; execution_mode = Tool_contract.Serial
+    }
+  in
+  Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn:0
+    ~schedule
+    ~completion:Tool_contract.Continue_after_success
+;;
+
+let context_messages ~original = function
+  | Ok Agent_turn.No_injection -> original
+  | Ok (Agent_turn.Injected messages) -> messages
+  | Error error -> Alcotest.fail error.Agent_turn.detail
+;;
+
+let prepared_turn = function
+  | Ok prep -> prep
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+;;
+
+(* ── prepare_turn tests ────────────────────────────────────── *)
+
+let test_prepare_turn_empty_tools () =
+  let prep =
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
+      ~tools:Tool_set.empty
+      ~messages:[]
+      ~turn_params:Hooks.default_turn_params
+      ()
+    |> prepared_turn
+  in
+  Alcotest.(check (option (list reject))) "no tools" None prep.tools_json
+;;
+
+let test_prepare_turn_with_tools () =
+  let tool =
+    Tool.create
+      ~strict:true
+      ~name:"echo"
+      ~description:"Echo"
+      ~parameters:
+        [ { Types.name = "msg"
+          ; description = "m"
+          ; param_type = Types.String
+          ; required = true
+          }
+        ]
+      (fun _ -> Ok { Types.content = "ok"; content_blocks = None; _meta = None })
+  in
+  let prep =
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
+      ~tools:(Tool_set.of_list [ tool ])
+      ~messages:[]
+      ~turn_params:Hooks.default_turn_params
+      ()
+    |> prepared_turn
+  in
+  Alcotest.(check bool)
+    "tools present"
+    true
+    (match prep.tools_json with
+     | Some (_ :: _) -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "strict reaches prepared provider input"
+    true
+    (match prep.tools_json with
+     | Some [ json ] -> Yojson.Safe.Util.(json |> member "strict" |> to_bool)
+     | _ -> false)
+;;
+
+let test_prepare_turn_preserves_supplied_tools () =
+  let tool_a =
+    Tool.create ~name:"a" ~description:"A" ~parameters:[] (fun _ ->
+      Ok { Types.content = ""; content_blocks = None; _meta = None })
+  in
+  let tool_b =
+    Tool.create ~name:"b" ~description:"B" ~parameters:[] (fun _ ->
+      Ok { Types.content = ""; content_blocks = None; _meta = None })
+  in
+  let prep =
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
+      ~tools:(Tool_set.of_list [ tool_a; tool_b ])
+      ~messages:[]
+      ~turn_params:Hooks.default_turn_params
+      ()
+    |> prepared_turn
+  in
+  let count =
+    match prep.tools_json with
+    | Some l -> List.length l
+    | None -> 0
+  in
+  Alcotest.(check int) "both tools" 2 count;
+  Alcotest.(check (list string))
+    "visible_tool_names matches caller input"
+    [ "a"; "b" ]
+    prep.visible_tool_names
+;;
+
+(* visible_tool_names mirrors the tool list the LLM actually sees this
+   turn — exposed via Event_bus.TurnReady for substrate observability.
+   Empty when the caller supplies no tools. *)
+let test_prepare_turn_visible_tool_names_empty () =
+  let prep =
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
+      ~tools:Tool_set.empty
+      ~messages:[]
+      ~turn_params:Hooks.default_turn_params
+      ()
+    |> prepared_turn
+  in
+  Alcotest.(check (list string)) "empty when no tools" [] prep.visible_tool_names
+;;
+
+let test_prepare_turn_visible_tool_names_preserves_order () =
+  let make n =
+    Tool.create ~name:n ~description:n ~parameters:[] (fun _ ->
+      Ok { Types.content = ""; content_blocks = None; _meta = None })
+  in
+  let tools = Tool_set.of_list [ make "Bash"; make "Read"; make "Edit" ] in
+  let prep =
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ()) ~tools ~messages:[] ~turn_params:Hooks.default_turn_params ()
+    |> prepared_turn
+  in
+  Alcotest.(check (list string))
+    "registry order preserved"
+    [ "Bash"; "Read"; "Edit" ]
+    prep.visible_tool_names
+;;
+
+(* ── prepare_messages tests ────────────────────────────────── *)
+
+let test_prepare_messages_no_reducer () =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hello" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let result =
+    Agent_turn.prepare_messages ~messages:msgs ~turn_params:Hooks.default_turn_params ()
+  in
+  Alcotest.(check int) "same count" 1 (List.length result)
+;;
+
+let test_prepare_messages_extra_context () =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hello" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let turn_params =
+    { Hooks.default_turn_params with extra_system_context = Some "You are in test mode." }
+  in
+  let result = Agent_turn.prepare_messages ~messages:msgs ~turn_params () in
+  Alcotest.(check int) "appended system context" 2 (List.length result);
+  let carrier = List.nth result 1 in
+  Alcotest.(check bool) "is User role" true (carrier.role = Types.User);
+  Alcotest.(check bool)
+    "typed provenance is present"
+    true
+    (carrier.origin = Types.System_context);
+  match carrier.content with
+  | [ Types.Text "[system context] You are in test mode." ] -> ()
+  | _ -> Alcotest.fail "expected single Text block"
+;;
+
+(* ── system_prompt_override does not affect prepare_messages ── *)
+
+let test_retained_context_respects_projection () =
+  let turn_params = { Hooks.default_turn_params with extra_system_context = Some "private" } in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let to_wire messages =
+    Agent_core.History.to_wire_messages media_store messages
+    |> Result.map_error (fun error -> Error.Media error)
+  in
+  let prepare project =
+    Agent_turn.prepare_turn ~media_store ~tools:Tool_set.empty ~messages:[Types.user_msg "hello"]
+      ~turn_params ~model_input_projection:project () |> Result.get_ok
+  in
+  let is_current (message : Types.message) =
+    message.origin = Types.System_context
+  in
+  let removed = prepare (fun messages -> to_wire (List.filter (fun m -> not (is_current m)) messages)) in
+  Alcotest.(check bool) "removed context is never retained" true
+    (Result.get_ok removed.context_message = None);
+  let rewritten = prepare (fun messages -> to_wire (List.map (fun (message : Types.message) ->
+    if is_current message then
+      { message with content = [Text "redacted"];
+        metadata = ("test-origin", `String "projected") :: message.metadata }
+    else message) messages)) in
+  match Result.get_ok rewritten.context_message with
+  | None -> Alcotest.fail "projected context missing"
+  | Some message ->
+    Alcotest.(check string) "retained bytes equal transmitted bytes" "redacted"
+      (Types.text_of_content message.content);
+    Alcotest.(check (option string)) "other metadata survives retention"
+      (Some "projected")
+      (message.metadata
+       |> List.assoc_opt "test-origin" |> Option.map Yojson.Safe.Util.to_string)
+;;
+
+let test_context_ambiguity_does_not_reject_preparation () =
+  let turn_params =
+    { Hooks.default_turn_params with extra_system_context = Some "context" }
+  in
+  let messages = [Types.user_msg "request"] in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let duplicate_current history =
+    match Agent_core.History.to_wire_messages media_store history with
+    | Error error -> Error (Error.Media error)
+    | Ok projected ->
+      let carrier = List.hd (List.rev projected) in
+      Ok (projected @ [carrier])
+  in
+  let prepared = Agent_turn.prepare_turn ~media_store ~tools:Tool_set.empty ~messages ~turn_params
+      ~model_input_projection:duplicate_current () |> Result.get_ok in
+  Alcotest.(check int) "all projected messages remain available" 3
+    (List.length prepared.effective_messages);
+  Alcotest.(check bool) "ambiguity is deferred to signed-response collection" true
+    (Result.is_error prepared.context_message)
+;;
+
+let test_prepare_messages_system_prompt_override_noop () =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hello" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let turn_params =
+    { Hooks.default_turn_params with
+      system_prompt_override = Some "Custom system prompt"
+    }
+  in
+  let result = Agent_turn.prepare_messages ~messages:msgs ~turn_params () in
+  (* system_prompt_override is handled in pipeline stage_parse, not
+     in prepare_messages. Message count should remain unchanged. *)
+  Alcotest.(check int) "no extra message from override" 1 (List.length result)
+;;
+
+let test_prepare_messages_both_override_and_extra_context () =
+  let msgs =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hello" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let turn_params =
+    { Hooks.default_turn_params with
+      extra_system_context = Some "Debug mode on."
+    ; system_prompt_override = Some "You are a reviewer."
+    }
+  in
+  let result = Agent_turn.prepare_messages ~messages:msgs ~turn_params () in
+  (* extra_system_context injects a User message; system_prompt_override
+     is applied separately in pipeline. So only extra_system_context
+     adds a message here. *)
+  Alcotest.(check int) "extra context adds 1 message" 2 (List.length result);
+  let carrier = List.nth result 1 in
+  Alcotest.(check bool) "injected msg is User" true (carrier.role = Types.User);
+  Alcotest.(check bool)
+    "typed provenance is present"
+    true
+    (carrier.origin = Types.System_context);
+  match carrier.content with
+  | [ Types.Text _ ] -> ()
+  | _ -> Alcotest.fail "expected single Text block"
+;;
+
+let starts_with ~prefix s =
+  let prefix_len = String.length prefix in
+  String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+;;
+
+
+let message_text_exn (msg : Types.message) =
+  match msg.content with
+  | [ Types.Text text ] -> text
+  | _ -> Alcotest.fail "expected single text message"
+;;
+
+(* ── accumulate_usage tests ──────────────────────────────── *)
+
+let test_accumulate_usage_with_response () =
+  let current = Types.empty_usage in
+  let response_usage : Types.api_usage =
+    { input_tokens = 100
+    ; output_tokens = 50
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 0
+    ; cost_usd = None
+    }
+  in
+  let provider_config =
+    Llm_provider.Provider_config.make
+      ~kind:Anthropic
+      ~provider_id:"claude"
+      ~model_id:"claude-sonnet-5"
+      ~base_url:"https://api.anthropic.com"
+      ()
+  in
+  let result =
+    Agent_turn.accumulate_usage
+      ~current_usage:current
+      ~provider_config:(Some provider_config)
+      ~response_model:(Some "claude-sonnet-5")
+      ~response_usage:(Some response_usage)
+  in
+  Alcotest.(check int) "input tokens" 100 result.total_input_tokens;
+  Alcotest.(check int) "output tokens" 50 result.total_output_tokens;
+  Alcotest.(check int) "reported response counted" 1 result.api_calls;
+  Alcotest.(check int) "payload is present" 0 result.missing_usage_responses;
+  Alcotest.(check (option reject)) "declared provider has pricing" None result.pricing_gap;
+  Alcotest.(check bool) "cost > 0" true (result.estimated_cost_usd > 0.0)
+;;
+
+let test_accumulate_usage_none_response () =
+  let current = { Types.empty_usage with api_calls = 2 } in
+  let result =
+    Agent_turn.accumulate_usage
+      ~current_usage:current
+      ~provider_config:None
+      ~response_model:None
+      ~response_usage:None
+  in
+  Alcotest.(check int) "api_calls incremented" 3 result.api_calls;
+  Alcotest.(check int) "missing payload counted" 1 result.missing_usage_responses;
+  Alcotest.(check bool) "missing usage is not missing model pricing" true
+    (result.pricing_gap = Some Types.Usage_not_reported)
+;;
+
+let test_usage_payload_gaps_preserve_known_subtotals () =
+  let observed count : Types.api_usage =
+    { input_tokens = count; output_tokens = 0;
+      cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
+      cost_usd = Some 0.0 } in
+  let accumulate current response_usage =
+    Agent_turn.accumulate_usage ~current_usage:current ~provider_config:None
+      ~response_model:None ~response_usage in
+  let zero = accumulate Types.empty_usage (Some (observed 0)) in
+  Alcotest.(check int) "measured zero has a payload" 0 zero.missing_usage_responses;
+  Alcotest.(check bool) "reported zero is priced" true (zero.pricing_gap = None);
+  let missing = accumulate zero None in
+  let known = accumulate missing (Some (observed 5)) in
+  Alcotest.(check int) "processed responses" 3 known.api_calls;
+  Alcotest.(check int) "known subtotal survives" 5 known.total_input_tokens;
+  Alcotest.(check int) "missing response remains visible" 1 known.missing_usage_responses;
+  Alcotest.(check bool) "later zero-priced report does not erase gap" true
+    (known.pricing_gap = Some Types.Usage_not_reported);
+  let prior_gap = { known with pricing_gap = Some (Types.Pricing_unavailable "unpriced") } in
+  let missing_again = accumulate prior_gap None in
+  Alcotest.(check int) "another gap counted independently" 2 missing_again.missing_usage_responses;
+  Alcotest.(check bool) "first price diagnostic retained" true
+    (missing_again.pricing_gap = prior_gap.pricing_gap);
+  let restored = Checkpoint.usage_to_json missing_again
+    |> Checkpoint.usage_of_json |> Result.get_ok in
+  Alcotest.(check bool) "durable projection retains subtotal and independent gaps"
+    true (restored = missing_again)
+;;
+
+let test_accumulate_usage_unknown_provider () =
+  let current = Types.empty_usage in
+  let response_usage : Types.api_usage =
+    { input_tokens = 1000
+    ; output_tokens = 500
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 0
+    ; cost_usd = None
+    }
+  in
+  let provider_config =
+    Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"local"
+      ~model_id:"qwen3.5"
+      ~base_url:"http://localhost:8085"
+      ()
+  in
+  let result =
+    Agent_turn.accumulate_usage
+      ~current_usage:current
+      ~provider_config:(Some provider_config)
+      ~response_model:(Some "qwen3.5")
+      ~response_usage:(Some response_usage)
+  in
+  Alcotest.(check (float 0.001)) "unknown price adds no invented cost" 0.0 result.estimated_cost_usd;
+  Alcotest.(check bool) "a local URL does not establish a free price" true
+    (result.pricing_gap = Some (Types.Pricing_unavailable "qwen3.5"));
+  Alcotest.(check int) "unknown pricing is not missing usage" 0 result.missing_usage_responses
+;;
+
+let test_accumulate_usage_prefers_response_cost () =
+  let current = Types.empty_usage in
+  let response_usage : Types.api_usage =
+    { input_tokens = 100
+    ; output_tokens = 50
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 0
+    ; cost_usd = Some 0.4321
+    }
+  in
+  let provider_config =
+    Llm_provider.Provider_config.make
+      ~kind:Anthropic
+      ~provider_id:"anthropic"
+      ~model_id:"claude-sonnet-5"
+      ~base_url:"https://api.anthropic.com"
+      ()
+  in
+  let result =
+    Agent_turn.accumulate_usage
+      ~current_usage:current
+      ~provider_config:(Some provider_config)
+      ~response_model:(Some "claude-sonnet-5")
+      ~response_usage:(Some response_usage)
+  in
+  Alcotest.(check (float 0.0001)) "uses response cost" 0.4321 result.estimated_cost_usd
+;;
+
+let test_accumulate_usage_uses_typed_provider_and_response_model () =
+  let provider_config =
+    Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"deepseek"
+      ~model_id:"configured-model-before-provider-rotation"
+      ~base_url:"https://api.deepseek.com"
+      ()
+  in
+  let response_usage : Types.api_usage =
+    { input_tokens = 1_000_000
+    ; output_tokens = 1_000_000
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 0
+    ; cost_usd = None
+    }
+  in
+  let result =
+    Agent_turn.accumulate_usage
+      ~current_usage:Types.empty_usage
+      ~provider_config:(Some provider_config)
+      ~response_model:(Some "deepseek-v4-pro")
+      ~response_usage:(Some response_usage)
+  in
+  Alcotest.(check (float 0.0001))
+    "exact provider and returned model price"
+    (declared_deepseek_price_sum ())
+    result.estimated_cost_usd;
+  Alcotest.(check (option reject)) "no pricing gap" None result.pricing_gap
+;;
+
+let test_accumulate_usage_records_incomplete_cache_pricing () =
+  let provider_config =
+    Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"qwen3.5"
+      ~base_url:"https://example.invalid"
+      ()
+  in
+  let response_usage : Types.api_usage =
+    { input_tokens = 100
+    ; output_tokens = 10
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 50
+    ; cost_usd = None
+    }
+  in
+  let result =
+    Agent_turn.accumulate_usage
+      ~current_usage:Types.empty_usage
+      ~provider_config:(Some provider_config)
+      ~response_model:(Some "qwen3.5")
+      ~response_usage:(Some response_usage)
+  in
+  Alcotest.(check (float 0.0001)) "no invented cost" 0.0 result.estimated_cost_usd;
+  match result.pricing_gap with
+  | Some (Types.Pricing_unavailable "qwen3.5") -> ()
+  | Some gap -> Alcotest.failf "unexpected pricing gap: %s" (Types.show_pricing_gap gap)
+  | None -> Alcotest.fail "missing explicit pricing gap"
+;;
+
+(* ── make_tool_results tests ─────────────────────────────── *)
+
+let test_make_tool_results () =
+  let results =
+    [ { Agent_tools.invocation = invocation "t1"
+      ; tool_name = "tool-1"
+      ; input = `Null
+      ; content = "success output"
+      ; content_blocks = None
+      ; outcome = Tool_succeeded
+      }
+    ; { invocation = invocation "t2"
+      ; tool_name = "tool-2"
+      ; input = `Null
+      ; content = "error msg"
+      ; content_blocks = None
+      ; outcome =
+          Tool_failed
+            { failure_kind = Agent_tools.Recoverable_tool_error
+            ; error_class = Some Types.Deterministic
+            }
+      }
+    ]
+  in
+  let blocks = Agent_turn.make_tool_results ~media_store:(Agent_core.History.Memory_store.create ()) results |> Result.get_ok in
+  Alcotest.(check int) "2 results" 2 (List.length blocks);
+  match List.hd blocks with
+  | Types.ToolResult { tool_use_id; outcome; _ } ->
+    Alcotest.(check string) "id" "t1" tool_use_id;
+    Alcotest.(check bool) "not error" false (Types.tool_result_outcome_is_error outcome);
+    (match List.nth blocks 1 with
+     | Types.ToolResult
+         { outcome =
+             Tool_failed
+               { failure_kind = Types.Recoverable_tool_error
+               ; error_class = Some Types.Deterministic
+               }
+         ; _
+         } -> ()
+     | _ -> Alcotest.fail "expected second ToolResult")
+  | _ -> Alcotest.fail "expected ToolResult"
+;;
+
+let media_result ~id media : Agent_tools.tool_execution_result =
+  { invocation = invocation id
+  ; tool_name = "inspect"
+  ; input = `Null
+  ; content = "inspected"
+  ; content_blocks = Some [ media ]
+  ; outcome = Tool_succeeded
+  }
+;;
+
+let test_make_tool_results_puts_media_in_the_store () =
+  let media_store = Agent_core.History.Memory_store.create () in
+  let raw = "\137PNG raw bytes" in
+  let encoded = "iVBORyByYXcgYnl0ZXM=" in
+  let wire =
+    Llm_provider.Types.Image
+      { media_type = "image/png"; source = Llm_provider.Types.Base64 encoded }
+  in
+  match Agent_turn.make_tool_results ~media_store [ media_result ~id:"m1" wire ] with
+  | Ok [ Types.ToolResult { content_blocks = Some [ Types.Image { source = Types.Stored stored; _ } ]; _ } ] ->
+    Alcotest.(check bool) "history holds the reference of the bytes" true
+      (stored = Agent_core.History.stored_of_raw raw);
+    Alcotest.(check bool) "the store returns the bytes" true (media_store.get stored = Ok raw)
+  | Ok _ -> Alcotest.fail "expected one ToolResult holding a stored image"
+  | Error error -> Alcotest.fail (Error.to_string error)
+;;
+
+let test_make_tool_results_fails_the_tool_on_undecodable_media () =
+  let puts = ref 0 in
+  let memory = Agent_core.History.Memory_store.create () in
+  let media_store =
+    { memory with put = (fun ~media_type ~raw -> incr puts; memory.put ~media_type ~raw) }
+  in
+  let wire =
+    Llm_provider.Types.Image
+      { media_type = "image/png"; source = Llm_provider.Types.Base64 "not base64!" }
+  in
+  match Agent_turn.make_tool_results ~media_store [ media_result ~id:"m1" wire ] with
+  | Ok [ Types.ToolResult { tool_use_id; content; outcome; content_blocks; _ } ] ->
+    Alcotest.(check string) "same tool call" "m1" tool_use_id;
+    Alcotest.(check bool) "the tool output is replaced" false (String.equal content "inspected");
+    Alcotest.(check bool) "no media reaches history" true (content_blocks = None);
+    Alcotest.(check bool) "nothing is put" true (!puts = 0);
+    Alcotest.(check bool) "a deterministic failure the model cannot retry" true
+      (outcome
+       = Tool_failed
+           { failure_kind = Types.Non_retryable_tool_error
+           ; error_class = Some Types.Deterministic
+           })
+  | Ok _ -> Alcotest.fail "expected one failed ToolResult"
+  | Error error -> Alcotest.fail (Error.to_string error)
+;;
+
+let test_make_tool_results_fails_the_turn_when_the_store_fails () =
+  let media_store : Agent_core.History.media_store =
+    { put = (fun ~media_type:_ ~raw:_ -> Error (Agent_core.History.Store_failed { detail = "disk full" }))
+    ; get = (fun stored -> Error (Agent_core.History.Missing_bytes stored))
+    }
+  in
+  let wire =
+    Llm_provider.Types.Image
+      { media_type = "image/png"; source = Llm_provider.Types.Base64 "cG5n" }
+  in
+  match Agent_turn.make_tool_results ~media_store [ media_result ~id:"m1" wire ] with
+  | Error (Error.Media (Agent_core.History.Store_failed { detail = "disk full" })) -> ()
+  | Error error -> Alcotest.failf "expected the store failure, got %s" (Error.to_string error)
+  | Ok _ -> Alcotest.fail "a failed put must fail the turn"
+;;
+
+(* ── accumulate_usage: no provider ──────────────────────── *)
+
+let test_accumulate_usage_no_provider () =
+  let current = Types.empty_usage in
+  let response_usage : Types.api_usage =
+    { input_tokens = 200
+    ; output_tokens = 100
+    ; cache_creation_input_tokens = 10
+    ; cache_read_input_tokens = 5
+    ; cost_usd = None
+    }
+  in
+  let result =
+    Agent_turn.accumulate_usage
+      ~current_usage:current
+      ~provider_config:None
+      ~response_model:None
+      ~response_usage:(Some response_usage)
+  in
+  Alcotest.(check int) "input" 200 result.total_input_tokens;
+  Alcotest.(check int) "output" 100 result.total_output_tokens;
+  Alcotest.(check int) "cache_create" 10 result.total_cache_creation_input_tokens;
+  Alcotest.(check int) "cache_read" 5 result.total_cache_read_input_tokens
+;;
+
+(* ── accumulate_usage: cumulative ───────────────────────── *)
+
+let test_accumulate_usage_cumulative () =
+  let current =
+    { Types.empty_usage with
+      total_input_tokens = 100
+    ; total_output_tokens = 50
+    ; api_calls = 1
+    }
+  in
+  let response_usage : Types.api_usage =
+    { input_tokens = 200
+    ; output_tokens = 100
+    ; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 0
+    ; cost_usd = None
+    }
+  in
+  let result =
+    Agent_turn.accumulate_usage
+      ~current_usage:current
+      ~provider_config:None
+      ~response_model:None
+      ~response_usage:(Some response_usage)
+  in
+  Alcotest.(check int) "cumulative input" 300 result.total_input_tokens;
+  Alcotest.(check int) "cumulative output" 150 result.total_output_tokens
+;;
+
+(* ── apply_context_injection ─────────────────────────────── *)
+
+let make_tool_use name input =
+  Llm_provider.Types.ToolUse { id = "t1"; name; input = Yojson.Safe.from_string input }
+;;
+
+let test_apply_context_injection_no_injector () =
+  let context = Context.create_sync () in
+  let messages =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hi" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let tool_uses =
+    [ Llm_provider.Types.ToolUse { id = "t1"; name = "search"; input = `Assoc [ "q", `String "test" ] }
+    ]
+  in
+  let results =
+    [ { Agent_tools.invocation = invocation "t1"
+      ; tool_name = "search"
+      ; input = `Assoc [ "q", `String "test" ]
+      ; content = "result"
+      ; content_blocks = None
+      ; outcome = Tool_succeeded
+      }
+    ]
+  in
+  List.iter
+    (fun injection ->
+      let injector ~tool_name:_ ~input:_ ~output:_ = injection in
+      match
+        Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
+      with
+      | Ok Agent_turn.No_injection -> ()
+      | Ok (Agent_turn.Injected _) -> Alcotest.fail "an empty injection was reported as a change"
+      | Error error -> Alcotest.fail error.Agent_turn.detail)
+    [ None; Some { Hooks.context_updates = []; extra_messages = [] } ]
+;;
+
+let test_apply_context_injection_with_context_update () =
+  let context = Context.create_sync () in
+  let messages =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hi" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let tool_uses = [ make_tool_use "search" {|{"q":"test"}|} ] in
+  let results =
+    [ { Agent_tools.invocation = invocation "t1"
+      ; tool_name = "search"
+      ; input = `Assoc [ "q", `String "test" ]
+      ; content = "found it"
+      ; content_blocks = None
+      ; outcome = Tool_succeeded
+      }
+    ]
+  in
+  let injector ~tool_name:_ ~input:_ ~output:_ =
+    Some
+      { Hooks.context_updates = [ "last_result", `String "found it" ]
+      ; extra_messages = []
+      }
+  in
+  let outcome =
+    Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
+  in
+  (match outcome with
+   | Ok (Agent_turn.Injected observed) ->
+     Alcotest.(check bool) "context-only update retains the message list" true
+       (observed == messages)
+   | Ok Agent_turn.No_injection -> Alcotest.fail "context-only update was lost"
+   | Error error -> Alcotest.fail error.Agent_turn.detail);
+  (* Check context was updated *)
+  match Context.get context "last_result" with
+  | Some (`String "found it") -> ()
+  | _ -> Alcotest.fail "expected context update"
+;;
+
+let test_apply_context_injection_with_extra_messages () =
+  let context = Context.create_sync () in
+  let messages =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hi" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let tool_uses = [ make_tool_use "search" {|{"q":"test"}|} ] in
+  let results =
+    [ { Agent_tools.invocation = invocation "t1"
+      ; tool_name = "search"
+      ; input = `Assoc [ "q", `String "test" ]
+      ; content = "result"
+      ; content_blocks = None
+      ; outcome = Tool_succeeded
+      }
+    ]
+  in
+  let injector ~tool_name:_ ~input:_ ~output:_ =
+    Some
+      { Hooks.context_updates = []
+      ; extra_messages =
+          [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+            ; content = [ Types.Text "injected" ]
+            ; name = None
+            ; tool_call_id = None
+            ; metadata = []
+            }
+          ]
+      }
+  in
+  let new_msgs =
+    Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
+    |> context_messages ~original:messages
+  in
+  Alcotest.(check int) "same-role message preserved" 2 (List.length new_msgs)
+;;
+
+let test_apply_context_injection_exception_is_error () =
+  let context = Context.create_sync () in
+  let messages =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hi" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let tool_uses = [ make_tool_use "search" {|{"q":"test"}|} ] in
+  let results =
+    [ { Agent_tools.invocation = invocation "t1"
+      ; tool_name = "search"
+      ; input = `Assoc [ "q", `String "test" ]
+      ; content = "result"
+      ; content_blocks = None
+      ; outcome = Tool_succeeded
+      }
+    ]
+  in
+  let injector ~tool_name:_ ~input:_ ~output:_ = failwith "injector crashed" in
+  match
+    Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
+  with
+  | Error { tool_name = Some "search"; detail } ->
+    Alcotest.(check bool)
+      "exception detail"
+      true
+      (String.starts_with ~prefix:"Failure(\"injector crashed\")" detail)
+  | Error _ -> Alcotest.fail "expected failing tool name"
+  | Ok _ -> Alcotest.fail "injector exception must be explicit"
+;;
+
+let test_apply_context_injection_preserves_non_retryable_error () =
+  let context = Context.create_sync () in
+  let messages =
+    [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
+      ; content = [ Types.Text "hi" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ]
+  in
+  let tool_uses = [ make_tool_use "search" {|{"q":"test"}|} ] in
+  let received_output = ref None in
+  let results =
+    [ { Agent_tools.invocation = invocation "t1"
+      ; tool_name = "search"
+      ; input = `Assoc [ "q", `String "test" ]
+      ; content = "fatal"
+      ; content_blocks = None
+      ; outcome =
+          Tool_failed
+            { failure_kind = Agent_tools.Non_retryable_tool_error
+            ; error_class = Some Types.Deterministic
+            }
+      }
+    ]
+  in
+  let injector ~tool_name:_ ~input:_ ~output =
+    received_output := Some output;
+    None
+  in
+  let _new_msgs =
+    Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
+    |> context_messages ~original:messages
+  in
+  match !received_output with
+  | Some (Error { message; recoverable; error_class }) ->
+    Alcotest.(check string) "message" "fatal" message;
+    Alcotest.(check bool) "recoverable false" false recoverable;
+    (match error_class with
+     | Some Types.Deterministic -> ()
+     | _ -> Alcotest.fail "expected deterministic error_class")
+  | Some (Ok _) -> Alcotest.fail "expected Error output"
+  | None -> Alcotest.fail "injector not called"
+;;
+
+(* ── resolve_turn_params ──────────────────────────────────── *)
+
+let expect_turn_params = function
+  | Ok params -> params
+  | Error _ -> Alcotest.fail "expected resolved turn params"
+;;
+
+let test_resolve_turn_params_no_hook () =
+  let hooks = Hooks.empty in
+  let invoke_hook ~hook_name:_ _h _input = Hooks.Continue in
+  let params =
+    Agent_turn.resolve_turn_params ~hooks ~messages:[] ~turn:0 ~invoke_hook
+    |> expect_turn_params
+  in
+  Alcotest.(check (option reject)) "default temperature" None params.temperature
+;;
+
+let test_resolve_turn_params_with_hook () =
+  let custom_params = { Hooks.default_turn_params with temperature = Some 0.5 } in
+  let hook _input = Hooks.AdjustParams custom_params in
+  let hooks = { Hooks.empty with before_turn_params = Some hook } in
+  let invoke_hook ~hook_name:_ h input =
+    match h with
+    | Some f -> f input
+    | None -> Hooks.Continue
+  in
+  let params =
+    Agent_turn.resolve_turn_params ~hooks ~messages:[] ~turn:0 ~invoke_hook
+    |> expect_turn_params
+  in
+  Alcotest.(check (option (float 0.01))) "custom temp" (Some 0.5) params.temperature
+;;
+
+(* ── Test runner ────────────────────────────────────────── *)
+
+let () =
+  Alcotest.run
+    "Agent_turn"
+    [ ( "prepare_turn"
+      , [ Alcotest.test_case "empty tools" `Quick test_prepare_turn_empty_tools
+        ; Alcotest.test_case "with tools" `Quick test_prepare_turn_with_tools
+        ; Alcotest.test_case
+            "preserves supplied tools"
+            `Quick
+            test_prepare_turn_preserves_supplied_tools
+        ; Alcotest.test_case
+            "visible_tool_names empty"
+            `Quick
+            test_prepare_turn_visible_tool_names_empty
+        ; Alcotest.test_case
+            "visible_tool_names preserves order"
+            `Quick
+            test_prepare_turn_visible_tool_names_preserves_order
+        ] )
+    ; ( "prepare_messages"
+      , [ Alcotest.test_case
+            "preserves transcript"
+            `Quick
+            test_prepare_messages_no_reducer
+        ; Alcotest.test_case "extra context" `Quick test_prepare_messages_extra_context
+        ; Alcotest.test_case "retained context respects projection" `Quick
+            test_retained_context_respects_projection
+        ; Alcotest.test_case "context ambiguity does not reject preparation" `Quick
+            test_context_ambiguity_does_not_reject_preparation
+        ; Alcotest.test_case
+            "system_prompt_override noop"
+            `Quick
+            test_prepare_messages_system_prompt_override_noop
+        ; Alcotest.test_case
+            "both override and extra_context"
+            `Quick
+            test_prepare_messages_both_override_and_extra_context
+        ] )
+    ; ( "accumulate_usage"
+      , [ Alcotest.test_case "with response" `Quick test_accumulate_usage_with_response
+        ; Alcotest.test_case "none response" `Quick test_accumulate_usage_none_response
+        ; Alcotest.test_case "payload gaps preserve known subtotals" `Quick
+            test_usage_payload_gaps_preserve_known_subtotals
+        ; Alcotest.test_case "unknown provider" `Quick test_accumulate_usage_unknown_provider
+        ; Alcotest.test_case
+            "prefers response cost"
+            `Quick
+            test_accumulate_usage_prefers_response_cost
+        ; Alcotest.test_case
+            "typed provider and response model"
+            `Quick
+            test_accumulate_usage_uses_typed_provider_and_response_model
+        ; Alcotest.test_case
+            "incomplete cache pricing"
+            `Quick
+            test_accumulate_usage_records_incomplete_cache_pricing
+        ; Alcotest.test_case "no provider" `Quick test_accumulate_usage_no_provider
+        ; Alcotest.test_case "cumulative" `Quick test_accumulate_usage_cumulative
+        ] )
+    ; ( "make_tool_results"
+      , [ Alcotest.test_case "tool results" `Quick test_make_tool_results
+        ; Alcotest.test_case "media is put in the store" `Quick
+            test_make_tool_results_puts_media_in_the_store
+        ; Alcotest.test_case "undecodable media fails the tool" `Quick
+            test_make_tool_results_fails_the_tool_on_undecodable_media
+        ; Alcotest.test_case "a store failure fails the turn" `Quick
+            test_make_tool_results_fails_the_turn_when_the_store_fails
+        ] )
+    ; ( "apply_context_injection"
+      , [ Alcotest.test_case "no injector" `Quick test_apply_context_injection_no_injector
+        ; Alcotest.test_case
+            "context update"
+            `Quick
+            test_apply_context_injection_with_context_update
+        ; Alcotest.test_case
+            "extra messages"
+            `Quick
+            test_apply_context_injection_with_extra_messages
+        ; Alcotest.test_case
+            "exception is explicit"
+            `Quick
+            test_apply_context_injection_exception_is_error
+        ; Alcotest.test_case
+            "preserves non-retryable error"
+            `Quick
+            test_apply_context_injection_preserves_non_retryable_error
+        ] )
+    ; ( "resolve_turn_params"
+      , [ Alcotest.test_case "no hook" `Quick test_resolve_turn_params_no_hook
+        ; Alcotest.test_case "with hook" `Quick test_resolve_turn_params_with_hook
+        ] )
+    ]
+;;

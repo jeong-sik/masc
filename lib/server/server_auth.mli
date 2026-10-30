@@ -1,0 +1,521 @@
+(** Server Auth — HTTP token / loopback / origin enforcement and the
+    [with_*_auth] handler combinators used by [bin/main_eio.ml] routes.
+
+    Centralises the policy that determines (a) whether a request is from
+    a verified internal keeper subprocess, (b) which agent name applies
+    for permission gating, (c) whether an origin is loopback-dev safe,
+    and (d) which CORS headers go on each response.  Every public route
+    handler should run through one of the [with_*_auth] wrappers
+    rather than reimplementing token / origin checks. *)
+
+(** {1 Trim / parse helpers} *)
+
+type agent_quota = Exempt_observation | Metered_operation
+val read_request_quota : Httpun.Method.t -> agent_quota
+val check_agent_rate_limit :
+  quota:agent_quota -> Httpun.Request.t -> Httpun.Reqd.t -> (unit, unit) result
+(** Consumes the caller's agent operation bucket when [quota] is
+    [Metered_operation]; on refusal the 429 response is already written and
+    [Error ()] is returned. *)
+(** For an already classified read endpoint, GET/HEAD use the ingress IP
+    limiter without consuming the agent operation bucket. Other methods stay
+    metered. This does not grant read authorization. *)
+
+val trim_opt : string option -> string option
+(** Trim a [string option]; collapses [Some ""] to [None]. *)
+
+val strip_prefix : prefix:string -> string -> string
+(** Remove [prefix] from [s] when present, else return [s] unchanged. *)
+
+val strip_suffix : suffix:string -> string -> string
+(** Remove [suffix] from [s] when present, else return [s] unchanged. *)
+
+(** [Some trimmed] when non-empty, else [None]. *)
+
+(** {1 Bind host / loopback classification} *)
+
+val is_loopback_host : string -> bool
+val is_unspecified_host : string -> bool
+
+val http_auth_strict_enabled : unit -> bool
+(** [true] when strict HTTP token auth is enabled by config. *)
+
+val http_auth_bind_is_loopback : unit -> bool
+(** [true] when [http_auth_bind_host] is loopback. *)
+
+val ensure_strict_http_token_auth :
+  endpoint:string -> Masc_domain.auth_config -> (Masc_domain.auth_config, string) result
+(** Validate [auth_config] for [endpoint]: when the endpoint is
+    non-loopback it must carry a strict token configuration. *)
+
+(** {1 Token / agent extraction from requests} *)
+
+val auth_token_from_request : Httpun.Request.t -> string option
+(** Token from [Authorization: Bearer …] on the request. *)
+
+val request_carries_auth_credential : Httpun.Request.t -> bool
+(** Whether the request presents either supported credential header, including
+    an empty or malformed value. This presence check lets optional-auth routes
+    distinguish a genuinely anonymous request from a credential that must fail
+    closed during parsing or validation. *)
+
+val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
+(** Combined header-or-query lookup for the SSE observer endpoint. *)
+
+val ide_lsp_upgrade_path : string
+
+val play_page_path : string
+(** [/play], the page an invite link opens. A public read path: the page
+    carries no data and sends the link's bearer on every request it makes. *)
+(** Route of the IDE language-server WebSocket. A browser WebSocket cannot
+    set headers, so token-bound auth also reads the token query parameter on
+    a GET to exactly this path; a credential header still takes precedence. *)
+
+val agent_from_request : Httpun.Request.t -> string option
+(** Caller-declared agent name from the request (header / query). *)
+
+(** {1 MCP / observer / operator verification} *)
+
+val verify_mcp_auth :
+  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+(** Bearer token check for the [/mcp] endpoint. *)
+
+val verify_seat_mcp_auth :
+  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+(** Bearer token check for the seat door [/mcp/play]: the same as
+    {!verify_mcp_auth} but asking [CanPlayMachine], which an invite's
+    [Player] credential holds (RFC play-link-for-the-shared-machine §2.7). *)
+
+val verify_mcp_auth_for_authority :
+  base_path:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  ('a option, Masc_domain.masc_error) result
+(** Bearer token check using an explicitly admitted authority.  Entry points
+    that already carry the typed authority should use this instead of
+    rebuilding a fiber-local dependency. *)
+
+val verify_mcp_observer_stream_auth :
+  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+(** Variant for the observer SSE stream (allows query token). *)
+
+val verify_operator_mcp_auth :
+  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+(** Variant for [/mcp/operator] (admin-tier). *)
+
+(** {1 Dashboard actor identification} *)
+
+val request_actor_hint : Httpun.Request.t -> string option
+(** Caller-supplied actor hint for dashboard audit attribution. *)
+
+val record_dashboard_actor_fallback :
+  Auth_error_kind.dashboard_actor_fallback -> unit
+(** Emit the [silent:dashboard_actor_fallback] warn log + increment
+    [metric_silent_dashboard_actor_fallback] for a typed fallback event.
+
+    Consolidates the two prior inline warn sites (Ok None / Error err
+    arms in [dashboard_actor_for_request]) onto a single helper. The
+    historical [silent:dashboard_actor_fallback] event key remains stable
+    for existing otel_metric_store log alerts.
+
+    The metric name is retained as an observability compatibility key,
+    but the actor resolver now rejects the hint instead of using it. *)
+
+val stale_token_warn_log_max_entries : int
+(** Ceiling on distinct token-hash prefixes retained for warn-log dedup.
+    Exposed for testing the bound. *)
+
+val stale_token_warn_log_entry_count : unit -> int
+(** Current number of tracked token-hash prefixes. Exposed for testing that
+    [record_dashboard_actor_fallback] keeps the dedup table bounded. *)
+
+type dashboard_actor_resolution =
+  | Authenticated_actor of string
+      (** Actor canonically owned by the request bearer token. *)
+  | Anonymous_actor_hint of string option
+      (** Caller-supplied hint on a request that carries no credential.
+          Public dashboard reads deliberately preserve this namespace. *)
+  | Rejected_credential of Auth_error_kind.dashboard_actor_fallback_outcome
+      (** The request carried a credential header, but it was malformed or
+          did not resolve. The accompanying request hint is diagnostic only
+          and must not become the effective actor. Endpoint authorization
+          remains a separate gate. *)
+
+val dashboard_actor_resolution_for_request :
+  base_path:string -> Httpun.Request.t -> dashboard_actor_resolution
+(** Resolve authenticated ownership, anonymous attribution, or explicit
+    credential rejection without collapsing the three states into [option]. *)
+
+val dashboard_actor_for_request :
+  base_path:string -> Httpun.Request.t -> string option
+(** Project a dashboard actor from [dashboard_actor_resolution_for_request].
+    Invalid/expired/rejected credentials return [None]; only requests without
+    credentials may use a request actor hint. This is actor attribution, not
+    endpoint authorization. *)
+
+val is_verified_internal_keeper_request :
+  base_path:string -> Httpun.Request.t -> bool
+(** [true] when the request carries a verified internal-keeper token. *)
+
+val sanitized_dashboard_actor_for_request :
+  base_path:string -> Httpun.Request.t -> string option
+(** [dashboard_actor_for_request] piped through
+    [sanitize_dashboard_actor_name]. *)
+
+(** {1 Origin / CORS} *)
+
+type configure_error = Already_configured
+
+val configure : Server_auth_config.t -> (unit, configure_error) result
+(** Install the boot-resolved authorization policy before request handlers are
+    constructed. Reinstalling the identical policy is an idempotent no-op so a
+    transient socket-bind retry can repeat bootstrap; a different policy is
+    rejected for the process lifetime. Request handlers cannot turn it into a
+    runtime control channel. *)
+
+val configure_error_to_string : configure_error -> string
+
+type browser_origin_admission =
+  | Same_origin
+  | Allowed_dev_origin
+  | Rejected
+
+type request_origin_admission =
+  | Missing_origin
+  | Single_origin of
+      { origin : string
+      ; admission : browser_origin_admission
+      }
+  | Multiple_origins
+  | Malformed_origin
+
+val classify_request_origin :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  request_origin_admission
+(** Classify the full case-insensitive [Origin] field set.  Exactly one field
+    is parsed as one complete HTTP(S) serialized origin; repeated fields and
+    partially consumed values are distinct fail-closed outcomes. *)
+
+val ensure_same_origin_browser_request :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  (unit, Masc_domain.masc_error) result
+(** Reject mutations from off-origin browsers; allows the loopback dev
+    allowlist. *)
+
+val ensure_same_origin_if_browser_request :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  (unit, Masc_domain.masc_error) result
+(** Reject an explicit cross-origin browser request while allowing native
+    clients that do not send browser provenance headers. *)
+
+(** {1 Auth-error wire format} *)
+
+val http_status_of_auth_error :
+  Masc_domain.masc_error ->
+  [> `Bad_request
+  | `Conflict
+  | `Forbidden
+  | `Not_found
+  | `Service_unavailable
+  | `Unauthorized
+  ]
+(** HTTP status to return for a given [Masc_domain.masc_error]. The .ml
+    matches every constructor (mirroring [Masc_error.code]). The signature
+    stays row-polymorphic so callers can narrow to [Httpun.Status.t] or
+    [H2.Status.t] at the use site — both protocols include these six
+    tags. A system I/O failure, and a store too contended to answer
+    ([LockContention]), answer [`Service_unavailable]: both are retryable
+    server-side failures, not bad requests. *)
+
+val current_server_state : unit -> Mcp_server.server_state option
+(** Return the currently published process-wide server state snapshot. *)
+
+val ready_server_state : unit -> Mcp_server.server_state option
+(** Return the published state only after the startup readiness barrier. Both
+    [/health/ready] and public HTTP admission use this same condition. *)
+
+val publish_server_state : Mcp_server.server_state -> unit
+(** Atomically publish the initialized process-wide server state. *)
+
+val clear_server_state : unit -> unit
+(** Atomically remove the process-wide server state during shutdown/reset. *)
+
+val get_origin : Httpun.Request.t -> Httpun.Headers.value
+(** Return the one syntactically valid serialized [Origin], or ["*"] when the
+    field is absent.  Raises [Invalid_origin_header] for repeated or malformed
+    fields; live request entry points reject those cases before routing. *)
+
+exception Invalid_origin_header
+
+val public_read_cors_origin_opt :
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t ->
+  Httpun.Headers.value option
+(** Origin to echo back on public-read CORS responses after comparison with the
+    admitted authority; [None] when the request is not eligible. *)
+
+val cors_allow_headers_value : string
+(** Static [Access-Control-Allow-Headers] value used for protected
+    routes. *)
+
+val cors_headers : string -> (string * string) list
+(** Build a CORS header set for [origin]. *)
+
+val respond_json_with_cors :
+  ?status:Httpun.Status.t ->
+  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Send a JSON body with CORS headers attached. *)
+
+val respond_json_value_with_cors :
+  ?status:Httpun.Status.t ->
+  Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
+(** Send a structured JSON body with CORS headers attached. *)
+
+val public_read_cors_headers :
+  Httpun.Request.t -> (string * Httpun.Headers.value) list
+(** Header set for public-read responses (looser than the protected
+    route policy). *)
+
+val respond_public_read_json_value :
+  ?status:Httpun.Status.t ->
+  Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
+(** Structured public-read JSON responder. *)
+
+val auth_error_json : Masc_domain.masc_error -> string
+(** Render an auth error as the standard JSON envelope. *)
+
+val auth_error_headers :
+  status:Httpun.Status.t -> cors:(string * string) list -> (string * string) list
+(** Shared HTTP/1 and HTTP/2 headers for generic auth errors. Unauthorized
+    responses receive a plain Bearer challenge; MCP resource metadata is added
+    only by MCP transport responders. *)
+
+val auth_error_cors_headers : Httpun.Request.t -> (string * string) list
+(** The CORS headers an auth-error response carries, for either protocol.
+
+    The origin goes through admission: an admitted one is reflected, and
+    anything else — absent, rejected, multiple, malformed — gets [vary: Origin]
+    and nothing more. H1 used to reflect [get_origin] instead, which answers
+    ["*"] with no Origin present and raises on a malformed one, so the same 401
+    left the server with different CORS headers depending on the protocol
+    (#28166). *)
+
+val auth_refusal_response :
+  protocol:string ->
+  path:string ->
+  Masc_domain.masc_error ->
+  [> `Bad_request
+  | `Conflict
+  | `Forbidden
+  | `Internal_server_error
+  | `Not_found
+  | `Service_unavailable
+  | `Too_many_requests
+  | `Unauthorized ]
+  * string
+(** Log the refusal and hand back the status and body. Every responder that
+    answers a refusal — the h1 responder, the h2 gateway, and the h2 route
+    dispatcher — builds its response from here, so a refusal cannot be answered
+    without a line. The status stays row-polymorphic so each protocol narrows
+    it to [Httpun.Status.t] or [H2.Status.t] at the use site. *)
+
+val respond_auth_error :
+  Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
+(** Compose [http_status_of_auth_error] + [auth_error_json] + generic Bearer
+    challenge + CORS, and log the refused path and status once for both
+    protocols. *)
+
+val log_auth_refusal : protocol:string -> path:string -> status:int -> unit
+(** Log a refused request's endpoint and status. [auth_refusal_response] calls
+    this, and the h2 gateway's own responder goes through it too, so both
+    protocols leave the same line. The raw bearer is never logged. *)
+
+val auth_refusal_details : protocol:string -> path:string -> status:int -> Yojson.Safe.t
+(** The structured details [log_auth_refusal] emits: the protocol, the refused
+    path and the status. *)
+
+val auth_refusal_message : protocol:string -> path:string -> status:int -> string
+(** The human-readable line [log_auth_refusal] emits. *)
+
+val agent_rl_key_of_request : Httpun.Request.t -> string option
+(** Extract a per-agent rate-limit key from the request.  Prefers the
+    bearer token (SHA-256 prefix) over the declared agent-name header.
+    Returns [None] for anonymous requests. *)
+
+(** {1 Handler combinators}
+
+    Each [with_*_auth] takes a handler that expects an authorised
+    [server_state] and returns a [Httpun] handler.  Failure paths emit
+    a structured auth error via [respond_auth_error].  All combinators
+    apply per-agent rate limiting after successful auth. *)
+
+val is_public_read_path : String.t -> bool
+(** [true] when [path] is on the public-read allowlist. *)
+
+val authorize_read_request :
+  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+(** Check read-tier auth. *)
+
+val authorize_tool_request :
+  base_path:string ->
+  tool_name:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+(** Check that the request is allowed to call [tool_name]. *)
+
+val authorize_tool_request_with_actor :
+  base_path:string ->
+  tool_name:string ->
+  request_authority:Server_request_authority.authority ->
+  Httpun.Request.t -> (string, Masc_domain.masc_error) result
+(** Check [tool_name] authority and return the exact principal used for that
+    decision. Ordinary bearer credentials resolve to their owner. An admitted
+    token-less same-origin request uses its supplied header/query attribution,
+    or ["dashboard"] when it supplies no name. The returned name alone does
+    not distinguish credential identity from local attribution. *)
+
+(** Route error for credential-standing failures: a bad request detail, or
+    a credential store that could not be read (answer 503 so the client
+    retries). Shared by the schedule and lane routes so the two mappings
+    cannot drift apart. *)
+type request_error =
+  | Bad_request_detail of string
+  | Credential_store_unreadable
+
+(** What the request's credential says about who is calling, beyond the name
+    {!authorize_tool_request_with_actor} returns. *)
+type request_credential_standing =
+  | Operator_credential
+      (** A bearer whose stored credential has the [Admin] role, the one
+          [masc login] and the TUI's workspace credential carry. The
+          internal keeper token is never this. *)
+  | Agent_credential
+      (** The internal keeper token with its keeper name header, or a bearer
+          whose credential has the [Worker] role. The name is verified; the
+          caller is not the operator. *)
+  | Player_credential
+      (** A bearer whose credential has the [Player] role: an invited
+          outsider who may play the shared machine and nothing else. The
+          name is verified; the caller is neither the operator nor a
+          keeper. *)
+  | No_credential
+      (** No bearer, or one that resolves to no credential: any name on the
+          request is the caller's own claim. A bearer the store could not
+          be read for is never this; see [Unreadable_credential]. *)
+  | Unreadable_credential
+      (** A bearer is present but the credential store could not be read
+          (an I/O failure or lock contention), so the role is unknown.
+          Callers must not treat this as an unauthenticated request: the
+          credential may be the operator's. Answer 503 so the client
+          retries. *)
+
+val request_credential_standing :
+  base_path:string -> Httpun.Request.t -> request_credential_standing
+
+val authorize_token_bound_permission_request :
+  base_path:string ->
+  permission:Masc_domain.permission ->
+  Httpun.Request.t -> (string, Masc_domain.masc_error) result
+(** Check that the request carries [permission] and return the credential's
+    canonical agent name, for operations that must be bound to an actor. *)
+
+val authorize_optional_token_bound_permission_request :
+  base_path:string ->
+  permission:Masc_domain.permission ->
+  Httpun.Request.t -> (string option, Masc_domain.masc_error) result
+(** Return [Ok None] only when the request carries no supported credential
+    header. If a header is present, validate its credential and permission and
+    return its canonical agent name. Malformed, empty, invalid, or
+    underprivileged credentials are errors rather than anonymous fallbacks. *)
+
+val not_initialized_status : [ `Service_unavailable ]
+(** HTTP 503 until the startup readiness barrier and state publication agree. *)
+
+val not_initialized_headers : (string * string) list
+(** A short HTTP retry hint for an otherwise healthy listener. *)
+
+val not_initialized_response : string -> string
+(** JSON body returned with {!not_initialized_status} while the server warms up. *)
+
+type read_workspace_precondition = Workspace_read_unbound | Workspace_read_matched
+
+val validate_read_workspace_precondition :
+  config:Workspace.config ->
+  Httpun.Request.t ->
+  (read_workspace_precondition, Workspace.expected_workspace_error) result
+(** GET/HEAD readers may bind their response to the canonical workspace with
+    exactly one [expected_base_path] and [expected_masc_root] query value.
+    An absent pair leaves an ordinary read unchanged; partial, repeated or
+    foreign values fail before the handler runs. Other methods retain their
+    own operation preconditions. *)
+val read_workspace_precondition_error_response :
+  Workspace.expected_workspace_error -> Yojson.Safe.t * Httpun.Status.t
+(** The shared HTTP refusal body and status for an invalid or changed read
+    workspace, used by both HTTP/1 and HTTP/2 transports. *)
+val with_read_workspace_precondition :
+  Mcp_server.server_state ->
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+val with_public_read :
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Public-read combinator (no auth, looser CORS). *)
+
+val with_read_auth :
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Read-tier auth combinator. *)
+
+val with_permission_auth :
+  permission:Masc_domain.permission ->
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Permission-tier combinator. *)
+
+val with_tool_auth :
+  tool_name:string ->
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Tool-call auth combinator for handlers that do not need caller attribution.
+    Use [with_tool_actor_auth] when a handler records or checks caller identity;
+    consume its resolved actor rather than reading identity headers. *)
+
+val with_tool_actor_auth :
+  tool_name:string ->
+  (Mcp_server.server_state ->
+   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Tool-call auth combinator that threads the principal used for authorization
+    into the handler. Identity resolution follows
+    [authorize_tool_request_with_actor], including supplied local attribution
+    for admitted token-less requests. *)
+
+val with_token_permission_auth :
+  permission:Masc_domain.permission ->
+  (Mcp_server.server_state ->
+   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Like [with_permission_auth] but threads the token id into the
+    handler so the handler can audit the call. *)
+val with_private_token_permission_auth :
+  permission:Masc_domain.permission ->
+  (Mcp_server.server_state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** The same token-bound permission and operation quota, with fixed refusal
+    bodies, no reflected CORS and no-store on every auth/startup/quota response.
+    Handlers still own their private body/response policy. *)
+
+module For_testing : sig
+  val snapshot_server_state : unit -> Mcp_server.server_state option
+  val restore_server_state : Mcp_server.server_state option -> unit
+  val restore_auth_config : Server_auth_config.t option -> unit
+end

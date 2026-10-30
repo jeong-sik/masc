@@ -1,0 +1,121 @@
+{
+  "scope": "parse and source-only static checks; no typecheck/build/native/CI/browser/network",
+  "source_commit": "487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08",
+  "base": "7dafe7e671cfbce6aeb0cf047dcd67516daad48c",
+  "actual_parent_head": "f81dc06dfaeb2c8cdd8d19ddb06003c0ea1f2f03",
+  "actual_parent_tree": "9ae5a41149b3a03fad5a3ed329b5141978facb21",
+  "checked_at_utc": "2026-09-30T09:49:54.461887+00:00",
+  "checks": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_credential_token.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "lib/auth/auth_credential_token.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "test/test_auth_credential_index_authority.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--include-tests",
+        "--strict",
+        "--target",
+        "lib/auth/auth.mli",
+        "lib/auth/auth_credential_token.mli",
+        "lib/auth/auth_credential_token.ml",
+        "test/test_auth_credential_index_authority.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "7dafe7e671cfbce6aeb0cf047dcd67516daad48c",
+        "487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-determinism-contract.sh",
+        "--base",
+        "7dafe7e671cfbce6aeb0cf047dcd67516daad48c",
+        "--head",
+        "487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08"
+      ],
+      "exit_code": 0,
+      "stdout": "=== Scan: new deterministic-boundary ratchet ===\nPASS: no new deterministic-boundary debt added in 7dafe7e671cfbce6aeb0cf047dcd67516daad48c...487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08, staged diff, or worktree diff\n=== Scan: deterministic branch on non-deterministic source ===\n=== Scan: permissive default on unknown input ===\nWARN: Option.value with default on potentially unknown input (sound partial?):\nlib/mcp_server_eio_call_tool.ml-314-    ~(execution_id : Ids.Execution_id.t) : unit =\nlib/mcp_server_eio_call_tool.ml:315:  let trace_id = Option.value ~default:\"runtime-mcp\" ctx.trace_id in\n--\nlib/mcp_server_eio_call_tool.ml-320-  in\nlib/mcp_server_eio_call_tool.ml:321:  let turn = Option.value ~default:0 ctx.turn in\n--\nlib/mcp_server_eio_protocol.ml-486-       let arguments =\nlib/mcp_server_eio_protocol.ml:487:         match Option.value ~default:`Null (Json_util.assoc_member_opt \"arguments\" payload) with\n--\nlib/mcp_server_eio_protocol.ml-1284-        else None)\nlib/mcp_server_eio_protocol.ml:1285:      |> Option.value ~default:0\n--\nlib/keeper/keeper_person_notes.ml-57-    | Some id when String.trim id <> \"\" ->\nlib/keeper/keeper_person_notes.ml:58:        Some (String.trim id, Option.value (field \"note\") ~default:\"\")\n--\nlib/keeper/keeper_runtime_contract.ml-179-    first_string_field [ \"action\"; \"action_key\"; \"op\"; \"cmd\"; \"command\" ] input\nlib/keeper/keeper_runtime_contract.ml:180:    |> Option.value ~default:tool_name\n--\nlib/keeper/keeper_sandbox_factory.ml-78-    let actual_network =\nlib/keeper/keeper_sandbox_factory.ml:79:      Option.value t.default_network_override ~default:effective_network\n=== Scan: catch-all permissive default ===\nWARN: catch-all branch returning Some (possible unsound default):\nlib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate\nlib/telemetry_unified/telemetry_unified.ml-114-\n--\nlib/fs_compat/fs_compat.ml:3167:     | _ -> Some failure)\nlib/fs_compat/fs_compat.ml-3168-;;\n--\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:161:        , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:162:        , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:163:        , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml-164-        , List.length values ) )\n--\nlib/fusion_core/fusion_harness_core.ml:55:          | _ -> Some (rep, n))\nlib/fusion_core/fusion_harness_core.ml-56-        None ordered_keys\n--\nlib/server/server_dashboard_http_keeper_api.ml:1161:                  | _ -> Some entry.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1162-                None entries\n--\nlib/server/server_dashboard_http_keeper_api.ml:1893:            | _ -> Some r.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1894-          None records\n--\n=== Scan: unordered iteration in deterministic context ===\n=== DET/NDT gate: PASS ===\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-ignore-without-comment-diff.sh",
+        "--base",
+        "7dafe7e671cfbce6aeb0cf047dcd67516daad48c",
+        "--head",
+        "487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08"
+      ],
+      "exit_code": 0,
+      "stdout": "New ignore sites are justified.\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/ci/check-fun-protect-finally-guard.py",
+        "--base",
+        "7dafe7e671cfbce6aeb0cf047dcd67516daad48c",
+        "--head",
+        "487c4b02d920adcf5d97c1b6e659ec8a1f0a1d08"
+      ],
+      "exit_code": 0,
+      "stdout": "Fun.protect finalizer guard passed (0 new Fun.protect line(s)).\n",
+      "stderr": ""
+    }
+  ]
+}

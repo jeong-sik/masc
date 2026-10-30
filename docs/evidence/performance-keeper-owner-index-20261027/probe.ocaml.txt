@@ -1,0 +1,231 @@
+module Keeper_owner_reducer = struct type projection = int option end
+module Keeper_owner = struct
+  type t = { state : Keeper_owner_reducer.projection Atomic.t }
+  let projection owner = Atomic.get owner.state
+end
+module Keeper_registry_types = struct
+  let canonical_base_path_exn value = value
+end
+module Set_util = struct
+module StringMap = Map.Make (String)
+end
+
+module Baseline = struct
+type lookup =
+  | Owner_absent
+  | Owner_projection of Keeper_owner_reducer.projection
+
+let owners : (string * Keeper_owner.t) list Atomic.t = Atomic.make []
+
+let cells_mu = Stdlib.Mutex.create ()
+
+let key ~base_path ~keeper_name =
+  Keeper_registry_types.canonical_base_path_exn base_path ^ "\000" ^ keeper_name
+;;
+
+let install ~base_path ~keeper_name owner =
+  let key = key ~base_path ~keeper_name in
+  Stdlib.Mutex.protect cells_mu (fun () ->
+    let without_key =
+      List.filter (fun (candidate, _) -> not (String.equal candidate key)) (Atomic.get owners)
+    in
+    Atomic.set owners ((key, owner) :: without_key))
+;;
+
+let remove ~base_path ~keeper_name owner =
+  let key = key ~base_path ~keeper_name in
+  Stdlib.Mutex.protect cells_mu (fun () ->
+    Atomic.set
+      owners
+      (List.filter
+         (fun (candidate, current) ->
+            not (String.equal candidate key && current == owner))
+         (Atomic.get owners)))
+;;
+
+let lookup ~base_path ~keeper_name =
+  let key = key ~base_path ~keeper_name in
+  match List.assoc_opt key (Atomic.get owners) with
+  | None -> Owner_absent
+  | Some owner -> Owner_projection (Keeper_owner.projection owner)
+;;
+
+end
+
+module Candidate = struct
+type lookup =
+  | Owner_absent
+  | Owner_projection of Keeper_owner_reducer.projection
+
+module Owner_map = Set_util.StringMap
+
+let owners : Keeper_owner.t Owner_map.t Atomic.t = Atomic.make Owner_map.empty
+
+let cells_mu = Stdlib.Mutex.create ()
+
+let key ~base_path ~keeper_name =
+  Keeper_registry_types.canonical_base_path_exn base_path ^ "\000" ^ keeper_name
+;;
+
+let install ~base_path ~keeper_name owner =
+  let key = key ~base_path ~keeper_name in
+  Stdlib.Mutex.protect cells_mu (fun () ->
+    Atomic.set owners (Owner_map.add key owner (Atomic.get owners)))
+;;
+
+let remove ~base_path ~keeper_name owner =
+  let key = key ~base_path ~keeper_name in
+  Stdlib.Mutex.protect cells_mu (fun () ->
+    let installed = Atomic.get owners in
+    match Owner_map.find_opt key installed with
+    | Some current when current == owner ->
+        Atomic.set owners (Owner_map.remove key installed)
+    | Some _ | None -> ())
+;;
+
+let lookup ~base_path ~keeper_name =
+  let key = key ~base_path ~keeper_name in
+  match Owner_map.find_opt key (Atomic.get owners) with
+  | None -> Owner_absent
+  | Some owner -> Owner_projection (Keeper_owner.projection owner)
+;;
+
+end
+
+type api =
+  { role : string
+  ; install : base_path:string -> keeper_name:string -> Keeper_owner.t -> unit
+  ; remove : base_path:string -> keeper_name:string -> Keeper_owner.t -> unit
+  ; read : base_path:string -> keeper_name:string -> int
+  }
+let baseline_read ~base_path ~keeper_name =
+  match Baseline.lookup ~base_path ~keeper_name with
+  | Owner_absent -> -2
+  | Owner_projection None -> -1
+  | Owner_projection (Some value) -> value
+let candidate_read ~base_path ~keeper_name =
+  match Candidate.lookup ~base_path ~keeper_name with
+  | Owner_absent -> -2
+  | Owner_projection None -> -1
+  | Owner_projection (Some value) -> value
+let baseline =
+  { role = "baseline"; install = Baseline.install; remove = Baseline.remove; read = baseline_read }
+let candidate =
+  { role = "candidate"; install = Candidate.install; remove = Candidate.remove; read = candidate_read }
+let roles = [baseline; candidate]
+let owner value = Keeper_owner.{ state = Atomic.make value }
+let checks = ref 0
+let check expected actual =
+  incr checks;
+  if expected <> actual then
+    failwith (Printf.sprintf "semantic check expected %d, actual %d" expected actual)
+let () =
+  List.iter (fun api ->
+    let root = "/fixture/replacement" in
+    let other = "/fixture/other-root" in
+    let name = "same-name" in
+    let first, second = owner (Some 7), owner (Some 7) in
+    if first == second || not (first = second) then failwith "identity fixture";
+    api.install ~base_path:root ~keeper_name:name first;
+    api.install ~base_path:other ~keeper_name:name first;
+    api.install ~base_path:root ~keeper_name:name second;
+    api.remove ~base_path:root ~keeper_name:name first;
+    check 7 (api.read ~base_path:root ~keeper_name:name);
+    Atomic.set second.state (Some 11);
+    check 11 (api.read ~base_path:root ~keeper_name:name);
+    check 7 (api.read ~base_path:other ~keeper_name:name);
+    Atomic.set second.state None;
+    check (-1) (api.read ~base_path:root ~keeper_name:name);
+    api.remove ~base_path:root ~keeper_name:name second;
+    check (-2) (api.read ~base_path:root ~keeper_name:name);
+    api.remove ~base_path:other ~keeper_name:name second;
+    check 7 (api.read ~base_path:other ~keeper_name:name);
+    api.remove ~base_path:other ~keeper_name:name first;
+    check (-2) (api.read ~base_path:other ~keeper_name:name)) roles;
+  let random = Random.State.make [|2026;10;27|] in
+  let root = "/fixture/model" in
+  let keys = Array.init 32 (Printf.sprintf "model-owner-%d") in
+  let handles = Array.init 16 (fun value -> owner (Some value)) in
+  let expected = Array.make 32 None in
+  for step = 1 to 20000 do
+    let key_index = Random.State.int random (Array.length keys) in
+    let handle = handles.(Random.State.int random (Array.length handles)) in
+    let name = keys.(key_index) in
+    (match Random.State.int random 4 with
+     | 0 ->
+         List.iter (fun api -> api.install ~base_path:root ~keeper_name:name handle) roles;
+         expected.(key_index) <- Some handle
+     | 1 ->
+         List.iter (fun api -> api.remove ~base_path:root ~keeper_name:name handle) roles;
+         (match expected.(key_index) with
+          | Some current when current == handle -> expected.(key_index) <- None
+          | Some _ | None -> ())
+     | 2 -> Atomic.set handle.state (if step mod 3 = 0 then None else Some step)
+     | _ -> ());
+    let observed_key = Random.State.int random (Array.length keys) in
+    let value =
+      match expected.(observed_key) with
+      | None -> -2
+      | Some handle -> (match Atomic.get handle.state with None -> -1 | Some n -> n)
+    in
+    List.iter (fun api ->
+      check value (api.read ~base_path:root ~keeper_name:keys.(observed_key))) roles
+  done;
+  Array.iteri (fun index -> function
+    | None -> ()
+    | Some handle ->
+        List.iter (fun api -> api.remove ~base_path:root ~keeper_name:keys.(index) handle) roles) expected;
+  Printf.printf "{\"kind\":\"semantics\",\"checks\":%d,\"random_steps\":20000}\n%!" !checks;
+  let measure api population block phase calls expected run =
+    Gc.full_major ();
+    let before = Gc.allocated_bytes () in
+    let started = Mtime_clock.elapsed_ns () in
+    let checksum = run () in
+    let ended = Mtime_clock.elapsed_ns () in
+    let after = Gc.allocated_bytes () in
+    if checksum <> expected then failwith ("measurement checksum: " ^ phase);
+    let elapsed = Int64.to_float (Int64.sub ended started) /. 1e6 in
+    Printf.printf
+      "{\"kind\":\"measurement\",\"role\":\"%s\",\"population\":%d,\"block\":%d,\"phase\":\"%s\",\"calls\":%d,\"started_ns\":%Ld,\"ended_ns\":%Ld,\"elapsed_ms\":%.6f,\"allocated_before\":%.0f,\"allocated_after\":%.0f,\"allocated_bytes\":%.0f,\"checksum\":%d}\n%!"
+      api.role population block phase calls started ended elapsed before after (after -. before) checksum
+  in
+  List.iter (fun population ->
+    let names = Array.init population (Printf.sprintf "owner-%d") in
+    let original = Array.init population (fun value -> owner (Some (value + 1))) in
+    let replacements = Array.init population (fun value -> owner (Some (value + 1001))) in
+    let root = "/fixture/canonical-owner-root" in
+    List.iteri (fun block api ->
+      Array.iter (fun name -> check (-2) (api.read ~base_path:root ~keeper_name:name)) names;
+      measure api population block "install" population population (fun () ->
+        Array.iteri (fun index name -> api.install ~base_path:root ~keeper_name:name original.(index)) names;
+        population);
+      Array.iteri (fun index name ->
+        check (index + 1) (api.read ~base_path:root ~keeper_name:name)) names;
+      measure api population block "lookup_sweep" (population * 1000)
+        (1000 * population * (population + 1) / 2) (fun () ->
+        let sum = ref 0 in
+        for _ = 1 to 1000 do
+          Array.iter (fun name -> sum := !sum + api.read ~base_path:root ~keeper_name:name) names
+        done;
+        !sum);
+      measure api population block "lookup_miss" (population * 1000) (-2 * population * 1000) (fun () ->
+        let sum = ref 0 in
+        for _ = 1 to population * 1000 do
+          sum := !sum + api.read ~base_path:root ~keeper_name:"missing-owner"
+        done;
+        !sum);
+      measure api population block "replace" population population (fun () ->
+        Array.iteri (fun index name -> api.install ~base_path:root ~keeper_name:name replacements.(index)) names;
+        population);
+      measure api population block "stale_remove" population population (fun () ->
+        Array.iteri (fun index name -> api.remove ~base_path:root ~keeper_name:name original.(index)) names;
+        population);
+      Array.iteri (fun index name ->
+        check (index + 1001) (api.read ~base_path:root ~keeper_name:name)) names;
+      measure api population block "current_remove" population population (fun () ->
+        Array.iteri (fun index name -> api.remove ~base_path:root ~keeper_name:name replacements.(index)) names;
+        population);
+      Array.iter (fun name -> check (-2) (api.read ~base_path:root ~keeper_name:name)) names)
+      [baseline;candidate;candidate;baseline])
+    [2;30;300];
+  Printf.printf "{\"kind\":\"final_checks\",\"checks\":%d}\n%!" !checks

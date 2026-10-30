@@ -1,0 +1,21 @@
+{
+  "baseline": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+  "checks": [
+    "ocamlc -stop-after parsing",
+    "git diff --check"
+  ],
+  "typecheck": false,
+  "executed_tests": false,
+  "files": {
+    "lib/prompt_registry/prompt_registry_store.mli": "24d6fa498ad26ad553308d79d7cbd71ef7a5fed8868e45762b55f371d5da0922",
+    "lib/prompt_registry/prompt_registry.mli": "3aadb60931377d63e143a0cef3c0b220b8083e7f2ede3df2164c16d091612990",
+    "lib/prompt_registry/prompt_registry_store.ml": "c2b180d444fe567e912f360ecc0005d910c76cf49c7fd88d870d79e299374610",
+    "lib/prompt_registry/prompt_registry.ml": "ae4f60d767367469561d8cf45d5d73a754932d66a09572a69a0663f64f0ff439",
+    "test/test_prompt_mutation_recovery.ml": "1bc932e557972d75f3f185bfae6fc19807b46c510a661b05d6efab3b9e65b795"
+  },
+  "requested_suites": [
+    "test/test_prompt_mutation_recovery",
+    "test/test_prompt_registry_dune_fallback"
+  ],
+  "full_regression": "not run on this candidate"
+}

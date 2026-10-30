@@ -1,0 +1,20 @@
+name = "keeper_voice_listen"
+description = """
+Record user speech via microphone and transcribe to text.
+
+Starts recording, \
+waits for speech, stops on silence (2s), then returns transcribed text."""
+
+# Held back from the request until the model asks for it by name. Not
+# called once on 2026-08-29 or 2026-08-30 across the fleet.
+defer_loading = true
+
+[[params]]
+name = "timeout_seconds"
+type = "number"
+description = "Max recording duration in seconds (default 15)"
+
+[[params]]
+name = "language_code"
+type = "string"
+description = "ISO language hint, e.g. ko, en"

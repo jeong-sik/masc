@@ -1,0 +1,13 @@
+verdict: PASS head: c06acc2fa134286e61a6bdb570dc1aea3fdf3a3a by: bidi_open_tab_review
+
+Independent SOURCE response review for PR #44801, local immutable candidate.
+
+Base: `ad6ca89213d57c9ac978e1f3e5704292c4334cf6`. Complete 17-file parent-relative diff identity: `7d2d1b35e0ada751dfa86018021501d059e385de71e4ffb7db99e40711c39286` (`masc-reviewed-git-diff-v1`).
+
+Correction: the previous clean SOURCE PASS at `9c294b7d9d345a295c49c50995ccdd53de38d1cb` is withdrawn. Actual direct-consumer run 39592343953 on product `5840bab469e8277194e405e6f2ec2cd712fc614e` failed compiling Runtime.attach_entry: its configuration parameter was inferred as configuration_application option instead of configuration_owner option. I read the archived compiler error in `/tmp/masc-addon-goal-resume-20261021/g01-direct-consumer-failure.log` lines 52–58 and confirmed that failed candidate's Runtime source equals the previously reviewed Runtime source. Dashboard and parser successes did not establish OCaml type correctness.
+
+This is a new response verdict after independently reading the exact old-head-to-current-head repair, complete current Runtime ML/MLI diff and affected direct consumers. The new configuration_application stores `owner : configuration_owner` and no longer introduces duplicate id/source_path labels that changed attach_entry inference. Its constructor and server/test consumers now use the original typed owner. All five joins remain: owner ID, owner path, owner desired revision, source revision and enabled. The existing attach_entry configuration path, export-owner uses and new application consumers were inspected for further record-label ambiguity; no remaining concrete P0–P2 was found by source inspection.
+
+The other 12 files of the original 17-file scope are unchanged by this repair and their direct source review is carried explicitly. Runtime application extraction, read-only owner domain behavior, missing/ambiguous/incomplete-to-Unknown handling, Dashboard schema/display reuse and strict TUI decode remain as previously inspected. Worklist changes accurately retain the real failed compile and mark repaired execution as still needing verification.
+
+Limits: no parser, OCaml typecheck, build, tests, CI query or browser/runtime/UI action was performed by this reviewer. This SOURCE PASS does not claim that the repaired head compiles or passes the suites. Native run 39592340135 was neither queried nor cancelled/restarted. A01/A02 native/installed UI evidence remain unverified. No formal GitHub APPROVE or whole-stack readiness/completion verdict; remote head/base not independently refreshed in this local binding.

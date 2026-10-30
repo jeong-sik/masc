@@ -1,0 +1,10 @@
+{
+  "head": "156d2bf8bf0b53903a2fd77258233a088ee02286",
+  "parent": "0562bea26e960b19de8b531a0c09579b872de505",
+  "build_exit": 0,
+  "binary_sha256": "dd04e26cb039d77721deeb416076ec49645e9e9e5688ff99fa02eee0317779d8",
+  "files": {
+    "README.md": "82010e759e7d6bc90cd371a0b398652f19c169c59882fa588fa5ded521866b15",
+    "build.log": "003d8db5527f2f2358d18caaa31f1fc04cceb4df9f5d29dd2d0e918c47900760"
+  }
+}

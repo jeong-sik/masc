@@ -1,0 +1,20 @@
+(** Pure projection of the mutable TUI state into the composer reading shared
+    by rendering and input routing. *)
+
+val source_reading : Masc_tui_types.state -> Masc_tui_composer.reading
+(** Constant-time source observation for a surface that only needs startup/read
+    information. Does not find a Keeper, inspect a draft or decide input authority. *)
+
+val of_state : Masc_tui_types.state -> Masc_tui_composer.t
+(** Snapshot the bound recipient while the composer is live (focused row or chat),
+    or selected recipient while idle,
+    authoritative availability, current metadata
+    observation, focus, and draft. Pending stages come only from the original
+    metadata source; optional Work never supplies them.
+    This is the only owner of the state-to-composer projection; it performs no
+    reads or effects beyond the supplied in-memory state. *)
+
+val classify_key : Masc_tui_types.state -> string -> Masc_tui_composer.key_outcome
+(** Read only key-required focus/recipient/draft from current state. The same
+    bound/idle target projection serves rendering and key decisions. Metadata
+    display observations and attachment counts are not prepared for keys. *)

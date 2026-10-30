@@ -1,0 +1,7 @@
+{"kind":"paid","at":"1970-01-01T00:00:00Z","goal_id":"fixture-paid-item-credit","request_id":"fixture-confirmed-request","verification_run_id":"fixture-confirmed-verifier","grade":"trivial","total_milli":700,"grade_trace":{"run_id":"fixture-grade","slot_id":"fixture-grade-slot"},"relations":[{"task_id":"fixture-task","relation":"related","trace":{"run_id":"fixture-relation","slot_id":"fixture-relation-slot"}}],"weights_trace":{"run_id":"fixture-weights","slot_id":"fixture-weights-slot"},"weight_max":1,"deduction_rate":0,"deduction_floor":1000,"overdue_hours":0,"coefficient":1000,"allocations":[{"keeper":"item-paid-probe","weight":1,"share_milli":700,"amount_milli":700}]}
+{"kind":"purchased","at":"2026-09-30T06:43:16Z","keeper":"item-runtime-probe","item":"glasses","amount_milli":0}
+{"kind":"equipped","at":"2026-09-30T06:43:16Z","keeper":"item-runtime-probe","slot":"face","item":"glasses"}
+{"kind":"equipped","at":"2026-09-30T06:43:20Z","keeper":"item-runtime-probe","slot":"face","item":null}
+{"kind":"equipped","at":"2026-09-30T06:43:20Z","keeper":"item-runtime-probe","slot":"face","item":"glasses"}
+{"kind":"purchased","at":"2026-09-30T06:43:20Z","keeper":"item-paid-probe","item":"crown","amount_milli":200}
+{"kind":"equipped","at":"2026-09-30T06:43:20Z","keeper":"item-paid-probe","slot":"head","item":"crown"}

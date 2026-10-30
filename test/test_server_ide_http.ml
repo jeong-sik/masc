@@ -1,0 +1,887 @@
+(** Black-box HTTP/router tests for [Server_ide_http].
+
+    These tests exercise the public route table and actual response
+    statuses rather than relying on [Server_ide_http.For_testing]
+    helpers. They guard the security contract from task-1736 B3:
+    mutation routes require a bearer token, reject a client-supplied
+    [keeper_id], and return the expected status codes. *)
+
+open Alcotest
+
+module Auth = Auth
+module Http = Masc.Http_server_eio
+module Json = Yojson.Safe.Util
+module Sse = Masc.Sse
+module Workspace = Masc.Workspace
+
+let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
+
+let has_route meth path router =
+  List.exists
+    (fun (route : Http.Router.route) ->
+       String.equal route.path path && List.mem meth route.methods)
+    (Http.Router.routes router)
+;;
+
+let test_read_routes_stay_public () =
+  let router = Server_ide_http.add_routes (Http.Router.create ()) in
+  check bool "GET /api/v1/ide/file-activity" true
+    (has_route `GET "/api/v1/ide/file-activity" router)
+;;
+
+(* ── End-to-end request/response harness ─────────────────────────────── *)
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let with_temp_workspace f =
+  let path = Filename.temp_file "masc-server-ide-http" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  let masc_dir = Filename.concat path Common.masc_dirname in
+  Unix.mkdir masc_dir 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
+;;
+
+let save_auth_config base_path =
+  let cfg = { Masc_domain.default_auth_config with enabled = true; require_token = true } in
+  Auth.save_auth_config base_path cfg
+;;
+
+let create_worker_token base_path agent_name =
+  match Auth.create_token base_path ~agent_name ~role:Masc_domain.Worker with
+  | Ok (raw_token, _cred) -> raw_token
+  | Error e ->
+    failf "create_token failed for %s: %s" agent_name (Masc_domain.masc_error_to_string e)
+;;
+
+let create_admin_token base_path agent_name =
+  match Auth.create_token base_path ~agent_name ~role:Masc_domain.Admin with
+  | Ok (raw_token, _cred) -> raw_token
+  | Error e ->
+    failf "create_token failed for %s: %s" agent_name (Masc_domain.masc_error_to_string e)
+;;
+
+let repository_fixture ~id ~url ~local_path : Repo_manager_types.repository =
+  { id
+  ; name = id
+  ; url
+  ; local_path
+  ; aliases = []
+  ; default_branch = "main"
+  ; keepers = []
+  ; status = Repo_manager_types.Active
+  ; auto_sync = false
+  ; sync_interval = 0
+  ; created_at = Int64.zero
+  ; updated_at = Int64.zero
+  }
+;;
+
+let masc_remote = "https://github.com/jeong-sik/masc.git"
+
+let git_fixture path arguments =
+  let status, _, detail = Process_eio.run_argv_with_status_split
+      ("git" :: "-C" :: path :: arguments) in
+  match status with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    failf "local Git fixture failed: %s" detail
+;;
+
+let masc_codebase () =
+  match Agent_observation.canonical_url_of_remote masc_remote with
+  | Some slug -> slug
+  | None -> fail "test remote must produce a canonical IDE codebase slug"
+;;
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv name old
+      | None -> Unix.putenv name "")
+    (fun () ->
+       (match value with
+        | Some next -> Unix.putenv name next
+        | None -> Unix.putenv name "");
+       f ())
+;;
+
+let http_request ~meth ~path ?(body = "") ?(token = None) () =
+  let headers =
+    [ "host", "localhost"
+    ; "content-length", string_of_int (String.length body)
+    ]
+  in
+  let headers =
+    match token with
+    | Some t -> ("authorization", "Bearer " ^ t) :: headers
+    | None -> headers
+  in
+  let request =
+    Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) meth path
+  in
+  request, body
+;;
+
+let dispatch router (request, body) =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+    in
+    let feed input =
+      let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length input) input in
+      let rec loop off =
+        let remaining = Bigstringaf.length bytes - off in
+        if remaining > 0
+        then (
+          let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+          if consumed <= 0 then failf "httpun test feed made no progress";
+          loop (off + consumed))
+      in
+      loop 0
+    in
+    let feed_eof input =
+      let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length input) input in
+      let rec loop off =
+        let remaining = Bigstringaf.length bytes - off in
+        if remaining > 0
+        then (
+          let consumed = Httpun.Server_connection.read_eof conn bytes ~off ~len:remaining in
+          if consumed <= 0 then failf "httpun test EOF feed made no progress";
+          loop (off + consumed))
+      in
+      loop 0
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    feed request_head;
+    if not (String.equal body "") then feed_eof body;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun acc (iov : Bigstringaf.t Httpun.IOVec.t) -> acc + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    Buffer.contents response_buf)
+;;
+
+let status_of_response response =
+  match String.split_on_char ' ' response with
+  | _ :: status :: _ -> int_of_string status
+  | _ -> failf "could not parse status from response: %S" response
+;;
+
+let check_status label expected response =
+  let actual = status_of_response response in
+  if actual <> expected
+  then failf "%s: expected status %d, got %d; response=%S" label expected actual response
+;;
+
+let response_body response =
+  let marker = "\r\n\r\n" in
+  let marker_len = String.length marker in
+  let response_len = String.length response in
+  let rec loop i =
+    if i + marker_len > response_len
+    then failf "could not find response body separator in: %S" response
+    else if String.equal (String.sub response i marker_len) marker
+    then
+      String.sub
+        response
+        (i + marker_len)
+        (response_len - i - marker_len)
+    else loop (i + 1)
+  in
+  loop 0
+;;
+
+let json_string_member label key json =
+  match Json.member key json with
+  | `String value -> value
+  | other -> failf "%s: expected string member %s, got %s" label key (Yojson.Safe.to_string other)
+;;
+
+let json_list_member label key json =
+  match Json.member key json with
+  | `List values -> values
+  | other -> failf "%s: expected list member %s, got %s" label key (Yojson.Safe.to_string other)
+;;
+
+let error_message_of_response response =
+  response
+  |> response_body
+  |> Yojson.Safe.from_string
+  |> json_string_member "error response" "error"
+;;
+
+let error_code_of_response response =
+  response
+  |> response_body
+  |> Yojson.Safe.from_string
+  |> json_string_member "error response" "code"
+;;
+
+let setup_state base_path =
+  save_auth_config base_path;
+  let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+  Server_auth.For_testing.restore_server_state @@ Some state;
+  state
+;;
+
+let with_ide_server f =
+  with_temp_workspace (fun base_path ->
+    let saved_state = Server_auth.For_testing.snapshot_server_state () in
+    Fun.protect
+      ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ saved_state)
+      (fun () ->
+         let state = setup_state base_path in
+         let router = Server_ide_http.add_routes (Http.Router.create ()) in
+         f ~base_path ~state ~router))
+;;
+
+let presence_agent ?keeper_name ?last_seen ~status name : Masc_domain.agent =
+  let now = Masc_domain.now_iso () in
+  let last_seen = Option.value last_seen ~default:now in
+  let meta : Masc_domain.agent_meta =
+    { session_id = "ide-presence:" ^ name
+    ; agent_type = "test"
+    ; pid = None
+    ; hostname = None
+    ; tty = None
+    ; parent_task = None
+    ; keeper_name
+    ; keeper_id = None
+    }
+  in
+  { id = None
+  ; name
+  ; agent_type = "test"
+  ; status
+  ; capabilities = []
+  ; current_task = None
+  ; session_bound_at = now
+  ; last_seen
+  ; meta = Some meta
+  }
+;;
+
+let test_presence_projects_only_canonical_keeper_identity () =
+  with_ide_server (fun ~base_path:_ ~state ~router ->
+    let config = Masc.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    let write_agent (agent : Masc_domain.agent) =
+      let path =
+        Filename.concat
+          (Workspace.agents_dir config)
+          (Workspace.safe_filename agent.name ^ ".json")
+      in
+      match Workspace.write_json_result config path (Masc_domain.agent_to_yojson agent) with
+      | Ok () -> ()
+      | Error message -> failf "write presence agent failed: %s" message
+    in
+    List.iter
+      write_agent
+      [ presence_agent
+          ~keeper_name:"busy-keeper"
+          ~last_seen:"2020-01-01T00:00:00Z"
+          ~status:Masc_domain.Busy
+          "runtime-busy"
+      ; presence_agent ~keeper_name:"idle-keeper" ~status:Masc_domain.Listening
+          "runtime-idle"
+      ; presence_agent ~status:Masc_domain.Active "ordinary-agent"
+      ; presence_agent ~keeper_name:"inactive-keeper" ~status:Masc_domain.Inactive
+          "runtime-inactive"
+      ];
+    let response =
+      dispatch router (http_request ~meth:`GET ~path:"/api/v1/ide/presence" ())
+    in
+    check_status "GET presence succeeds" 200 response;
+    let entries =
+      response
+      |> response_body
+      |> Yojson.Safe.from_string
+      |> Json.member "data"
+      |> json_list_member "presence response" "entries"
+    in
+    let entry_by_id keeper_id =
+      List.find_opt
+        (fun entry ->
+           String.equal
+             keeper_id
+             (json_string_member "presence entry" "keeper_id" entry))
+        entries
+    in
+    check int "only active keeper-owned agents are projected" 2 (List.length entries);
+    let busy =
+      match entry_by_id "busy-keeper" with
+      | Some entry -> entry
+      | None -> fail "busy keeper missing from presence"
+    in
+    let idle =
+      match entry_by_id "idle-keeper" with
+      | Some entry -> entry
+      | None -> fail "idle keeper missing from presence"
+    in
+    check string "busy keeper is active presence" "active"
+      (json_string_member "busy keeper" "status" busy);
+    check string "listening keeper is idle presence" "idle"
+      (json_string_member "idle keeper" "status" idle);
+    check string "role is canonical keeper role" "keeper"
+      (json_string_member "busy keeper" "role" busy))
+;;
+
+let test_presence_last_seen_ms_shared_projection () =
+  let valid =
+    presence_agent
+      ~keeper_name:"ms-keeper"
+      ~last_seen:"2020-01-01T00:00:00Z"
+      ~status:Masc_domain.Active
+      "runtime-ms"
+  in
+  check int64 "valid ISO8601 maps to epoch milliseconds" 1577836800000L
+    (Server_presence.last_seen_ms ~context:"test presence" valid);
+  let invalid = { valid with Masc_domain.last_seen = "not-a-timestamp" } in
+  check int64 "invalid timestamp maps to 0" 0L
+    (Server_presence.last_seen_ms ~context:"test presence" invalid)
+;;
+
+(* The rows carry keeper-written file text, the same content
+   [/api/v1/keepers/:name/file-changes] keeps behind CanAdmin. *)
+let test_file_activity_requires_auth () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/file-activity?file_path=lib/a.ml" ()
+    in
+    let response = dispatch router request in
+    check int "GET file-activity without token returns 401" 401 (status_of_response response))
+;;
+
+let test_read_events_accepts_unknown_codebase_as_empty () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    (* RFC-0378 §5.4: the scope universe is store-measured, not the
+       catalog — an unknown slug is a legitimate empty store, not a
+       registry miss. *)
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/events?codebase=github.com_x_missing" ()
+    in
+    let response = dispatch router request in
+    check_status "GET events with an unknown codebase returns 200" 200 response)
+;;
+
+let test_events_read_committed_canonical_fact_after_reopen () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Fun.protect ~finally:Masc.Keeper_tool_call_log.reset_for_testing (fun () ->
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      let checkout = Filename.concat base_path "arbitrarily-named-checkout" in
+      Unix.mkdir checkout 0o700;
+      git_fixture checkout ["init"; "--quiet"];
+      git_fixture checkout ["remote"; "add"; "origin"; "https://github.com/actual/repo.git"];
+      let library = Filename.concat checkout "lib" in
+      Unix.mkdir library 0o700;
+      let saved_path = Filename.concat library "saved.ml" in
+      let channel = open_out saved_path in output_string channel "let saved = true\n"; close_out channel;
+      Repo_store.save_all ~base_path
+        [repository_fixture ~id:"catalog-authority" ~url:"https://github.com/actual/repo.git"
+          ~local_path:checkout] |> Result.get_ok;
+      let attribution = Agent_observation.File
+          (Masc.Keeper_write_attribution.resolve ~base_dir:base_path ~file_path:saved_path) in
+      (match attribution with
+       | File (Addressed addressed) ->
+         check string "actual Git observation uses catalog identity" "github.com_actual_repo"
+           (Agent_observation.Code_address.codebase addressed.address)
+       | File (Unaddressed _) | Pathless -> fail "actual Git fixture was not attributed");
+      let observation = Tool_observation.
+        { attribution;
+          turn_ref = Ids.Turn_ref.make ~trace_id:"canonical-http" ~absolute_turn:23;
+          declared_progress = Some Progress } in
+      let execution = Ids.Execution_id.generate () in
+      (* An unusable retired store must have no bearing on current work facts. *)
+      let channel = open_out (Filename.concat base_path ".masc-ide") in close_out channel;
+      Masc.Keeper_tool_call_log.log_call ~keeper_name:"actual-http-keeper" ~tool_name:"Edit"
+        ~input:(`Assoc []) ~output_text:"persisted" ~duration_ms:1.
+        ~wire_outcome:Tool_result.Ok ~execution_id:execution ~tool_observation:observation ();
+      git_fixture checkout ["remote"; "set-url"; "origin"; "https://github.com/foreign/repo.git"];
+      (match Masc.Keeper_write_attribution.resolve ~base_dir:base_path ~file_path:saved_path with
+       | Unaddressed {reason;_} ->
+         check bool "fresh Git observation sees the unregistered origin" true
+           (reason = Agent_observation.Unattributed.Unregistered_origin)
+       | Addressed _ -> fail "changed origin must change a fresh Git observation");
+      let read () =
+        let response = dispatch router (http_request ~meth:`GET
+            ~path:"/api/v1/ide/events?codebase=github.com_actual_repo&limit=1" ()) in
+        check_status "canonical event HTTP query succeeds" 200 response;
+        response_body response |> Yojson.Safe.from_string |> Json.member "data"
+        |> Json.member "events" |> Json.to_list in
+      let before = read () in
+      check (list string) "HTTP preserves actual execution identity"
+        [Ids.Execution_id.to_string execution]
+        (List.map (fun row -> Json.(row |> member "event_id" |> to_string)) before);
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      check string "reopen returns the identical canonical event"
+        (Yojson.Safe.to_string (`List before)) (Yojson.Safe.to_string (`List (read ())))))
+;;
+
+let test_events_invalid_observation_is_explicit_and_private () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Fun.protect ~finally:Masc.Keeper_tool_call_log.reset_for_testing (fun () ->
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      let store = Masc.Keeper_tool_call_log.store () |> Option.get in
+      Dated_jsonl.append store (`Assoc
+        ["keeper",`String "corrupt-keeper";"tool",`String "Edit";
+         "ts",`Float (Unix.gettimeofday ());"execution_id",`String "corrupt-execution";
+         "tool_observation",`Assoc ["private_raw_error",`String "secret-fixture-value"]]);
+      let response = dispatch router (http_request ~meth:`GET
+          ~path:"/api/v1/ide/events?codebase=github.com_actual_repo" ()) in
+      check_status "invalid source does not become empty successful activity" 503 response;
+      check string "stable failure class" "tool_activity_unavailable" (error_code_of_response response);
+      check bool "private source detail is not projected" false
+        (String_util.contains_substring (response_body response) "secret-fixture-value")))
+;;
+
+let test_get_events_rejects_invalid_canonical_scope () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/events?codebase=Not%%20A%%20Slug" ()
+    in
+    let response = dispatch router request in
+    check_status "GET events with an invalid codebase returns 400" 400 response;
+    check
+      string
+      "invalid codebase code"
+      "invalid_codebase"
+      (error_code_of_response response))
+;;
+
+let test_get_events_rejects_invalid_limit () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/events?limit=not-an-int" () in
+    let response = dispatch router request in
+    check_status "GET events invalid limit returns 400" 400 response;
+    check string "typed limit error" "limit must be an integer" (error_message_of_response response))
+;;
+
+let test_get_events_rejects_negative_offset () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request = http_request ~meth:`GET ~path:"/api/v1/ide/events?offset=-1" () in
+    let response = dispatch router request in
+    check_status "GET events invalid offset returns 400" 400 response;
+    check
+      string
+      "typed offset error"
+      "offset must be greater than or equal to 0"
+      (error_message_of_response response))
+;;
+
+let test_get_file_activity_requires_a_file_path () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_admin_token base_path "operator" in
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/file-activity" ~token:(Some token) ()
+    in
+    let response = dispatch router request in
+    check_status "GET file activity without file path returns 400" 400 response;
+    check string "typed missing file path" "file_path is required"
+      (error_message_of_response response))
+;;
+
+let test_get_file_activity_rejects_invalid_window () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_admin_token base_path "operator" in
+    let request =
+      http_request ~meth:`GET
+        ~path:
+          "/api/v1/ide/file-activity?repo_id=masc&file_path=bin/x.ml&window_hours=0"
+        ~token:(Some token) ()
+    in
+    let response = dispatch router request in
+    check_status "GET file activity invalid window returns 400" 400 response;
+    check string "typed invalid window"
+      "window_hours must be a positive number: 0"
+      (error_message_of_response response))
+;;
+
+let test_get_file_activity_resolves_the_project_checkout_exactly () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let repository =
+      repository_fixture ~id:"project-masc" ~url:masc_remote
+        ~local_path:base_path
+    in
+    (match Repo_store.save_all ~base_path [ repository ] with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    let token = create_admin_token base_path "operator" in
+    let request =
+      http_request ~meth:`GET
+        ~path:"/api/v1/ide/file-activity?file_path=bin/masc_tui.ml"
+        ~token:(Some token) ()
+    in
+    let response = dispatch router request in
+    check_status "GET project file activity returns 200" 200 response;
+    let envelope = response |> response_body |> Yojson.Safe.from_string in
+    let data = Json.member "data" envelope in
+    check string "server-derived repository id" "project-masc"
+      (json_string_member "file activity" "repo_id" data);
+    check string "durable projection schema" "masc.ide.file_activity.v1"
+      (json_string_member "file activity" "schema" data))
+;;
+
+let test_file_activity_cached_windows_keep_exact_query () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    Fun.protect ~finally:Dashboard_cache.invalidate_all (fun () ->
+    Dashboard_cache.invalidate_all ();
+    let repository = repository_fixture ~id:"query-masc" ~url:masc_remote ~local_path:base_path in
+    (match Repo_store.save_all ~base_path [repository] with
+     | Ok () -> () | Error detail -> fail detail);
+    let token = create_admin_token base_path "operator" in
+    List.iter (fun window ->
+      let response = dispatch router (http_request ~meth:`GET ~token:(Some token)
+        ~path:("/api/v1/ide/file-activity?repo_id=query-masc&file_path=bin/x.ml&window_hours=" ^ window) ()) in
+      check_status "file activity query succeeds" 200 response;
+      let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+      check (float 1e-12) "file activity retains the exact window"
+        (float_of_string window) Json.(data |> member "window_hours" |> to_float))
+      ["1.01"; "1.04"; "1.010"]))
+;;
+
+let test_repository_activity_covers_all_writers () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let repository = repository_fixture ~id:"masc" ~url:masc_remote ~local_path:base_path in
+    (match Repo_store.save_all ~base_path [repository] with Ok () -> () | Error e -> fail e);
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    let store = match Masc.Keeper_tool_call_log.store () with
+      | Some store -> store | None -> fail "tool-call store was not initialized" in
+    Fun.protect ~finally:(fun () ->
+      Dated_jsonl.prepare_for_directory_removal store;
+      Masc.Keeper_tool_call_log.reset_for_testing ()) (fun () ->
+    let append ~keeper ~repo ~input = Dated_jsonl.append store
+      (`Assoc ["ts", `Float (Unix.gettimeofday ()); "keeper", `String keeper;
+        "route_evidence", `Assoc ["descriptor_id", `String "agent.edit_file"];
+        "action_radius", `Assoc ["target_path", `String ("repos/" ^ repo ^ "/a.ml")];
+        "disposition", `String "completed"; "input", input]) in
+    let input = `Assoc ["file_path", `String "a.ml"; "old_string", `String "old";
+                        "new_string", `String "new"] in
+    (* More writers than the UI roster, none assigned to the repository. *)
+    List.init 205 (fun n -> "writer-" ^ string_of_int n)
+    |> List.iter (fun keeper -> append ~keeper ~repo:"masc" ~input);
+    append ~keeper:"outsider" ~repo:"other" ~input;
+    append ~keeper:"incomplete" ~repo:"masc" ~input:(`Assoc []);
+    Dated_jsonl.append store (`Assoc ["ts", `Float (Unix.gettimeofday ());
+      "keeper", `String "unknown-address";
+      "route_evidence", `Assoc ["descriptor_id", `String "agent.edit_file"];
+      "disposition", `String "completed"; "input", `Assoc []]);
+    let token = create_admin_token base_path "operator" in
+    let path = "/api/v1/ide/repository-activity?repo_id=masc&window_hours=24" in
+    let read () =
+      let response = dispatch router (http_request ~meth:`GET ~path ~token:(Some token) ()) in
+      check_status "one fleet request" 200 response;
+      let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+      match Masc.Tui_decode.decode_repository_activity_snapshot data with
+      | Ok snapshot -> snapshot | Error e -> fail e in
+    let snapshot = read () in
+    check int "all unassigned writers, no other repository" 205 (List.length snapshot.ras_changes);
+    check (list string) "writer identities survive without roster membership"
+      (List.init 205 (fun n -> "writer-" ^ string_of_int n) |> List.sort String.compare)
+      (List.map (fun (row : Masc.Tui_decode.file_change) -> row.fc_keeper)
+         snapshot.ras_changes |> List.sort String.compare);
+    check int "incomplete addressed write is visible" 1 snapshot.ras_incomplete;
+    check int "unknown-address evidence is not attributed to repo" 1 snapshot.ras_unattributed;
+    append ~keeper:"later-writer" ~repo:"masc" ~input;
+    let next = read () in
+    check int "incremental fleet read retains old and new writers" 206 (List.length next.ras_changes);
+    check_status "exact write content requires authentication" 401
+      (dispatch router (http_request ~meth:`GET ~path ()))))
+;;
+
+let test_repository_activity_needs_no_canonical_remote () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let local_remote = "/srv/git/local-masc" in
+    check bool "precondition: a filesystem remote has no canonical codebase" true
+      (Option.is_none (Agent_observation.canonical_url_of_remote local_remote));
+    let repository = repository_fixture ~id:"local" ~url:local_remote ~local_path:base_path in
+    (match Repo_store.save_all ~base_path [repository] with Ok () -> () | Error e -> fail e);
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    let store = match Masc.Keeper_tool_call_log.store () with
+      | Some store -> store | None -> fail "tool-call store was not initialized" in
+    Fun.protect ~finally:(fun () ->
+      Dated_jsonl.prepare_for_directory_removal store;
+      Masc.Keeper_tool_call_log.reset_for_testing ()) (fun () ->
+    Dated_jsonl.append store
+      (`Assoc ["ts", `Float (Unix.gettimeofday ()); "keeper", `String "writer";
+        "route_evidence", `Assoc ["descriptor_id", `String "agent.edit_file"];
+        "action_radius", `Assoc ["target_path", `String "repos/local/a.ml"];
+        "disposition", `String "completed";
+        "input", `Assoc ["file_path", `String "a.ml"; "old_string", `String "old";
+                         "new_string", `String "new"]]);
+    let token = create_admin_token base_path "operator" in
+    let get path = dispatch router (http_request ~meth:`GET ~path ~token:(Some token) ()) in
+    let response = get "/api/v1/ide/repository-activity?repo_id=local&window_hours=24" in
+    check_status "repository activity needs only the registered id" 200 response;
+    let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+    (match Masc.Tui_decode.decode_repository_activity_snapshot data with
+     | Ok snapshot ->
+       check (list string) "the write is read by repository id"
+         ["writer"]
+         (List.map (fun (row : Masc.Tui_decode.file_change) -> row.fc_keeper) snapshot.ras_changes)
+     | Error e -> fail e);
+    check_status "an unknown repository id is still not found" 404
+      (get "/api/v1/ide/repository-activity?repo_id=missing&window_hours=24");
+    (* File activity keys rows by codebase too, so it still refuses. *)
+    check_status "file activity still needs a canonical codebase" 400
+      (get "/api/v1/ide/file-activity?repo_id=local&file_path=a.ml&window_hours=24")))
+;;
+
+(* ── POST /api/v1/ide/asks ── M1: the IDE files a Todo task for the pool. *)
+
+let ask_body ?(question = "why does this retry?") ?file_path ?line ?context ?priority () =
+  `Assoc
+    ([ "question", `String question ]
+     @ (match file_path with None -> [] | Some p -> [ "file_path", `String p ])
+     @ (match line with None -> [] | Some l -> [ "line", `Int l ])
+     @ (match context with None -> [] | Some c -> [ "context", `String c ])
+     @ (match priority with None -> [] | Some p -> [ "priority", `Int p ]))
+  |> Yojson.Safe.to_string
+;;
+
+let post_ask ~router ~token body =
+  let request =
+    http_request ~meth:`POST ~path:"/api/v1/ide/asks" ~body ~token:(Some token) ()
+  in
+  dispatch router request
+;;
+
+let init_workspace_for_asks ~base_path ~state =
+  let config = Masc.Mcp_server.workspace_config state in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "ide-asks-test"))
+;;
+
+let test_post_asks_is_registered () =
+  let router = Server_ide_http.add_routes (Http.Router.create ()) in
+  check bool "POST /api/v1/ide/asks" true
+    (has_route `POST "/api/v1/ide/asks" router)
+;;
+
+let test_post_asks_requires_auth () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`POST ~path:"/api/v1/ide/asks" ~body:(ask_body ()) ()
+    in
+    let response = dispatch router request in
+    check int "POST asks without token returns 401" 401 (status_of_response response))
+;;
+
+let test_post_asks_requires_admin () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_worker_token base_path "ide-agent" in
+    let response = post_ask ~router ~token (ask_body ()) in
+    check int "POST asks with worker token returns 403" 403 (status_of_response response))
+;;
+
+let test_post_asks_files_a_todo_task () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let body =
+      ask_body ~file_path:"lib/a.ml" ~line:12 ~context:"third retry this week" ()
+    in
+    let response = post_ask ~router ~token body in
+    check_status "POST asks returns 202" 202 response;
+    let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+    let ask_id = json_string_member "ask response" "ask_id" data in
+    check string "the ask starts as todo" "todo"
+      (json_string_member "ask response" "status" data);
+    (* The task the keeper fleet claims from carries the question as its
+       title, the file reference in its description, and ide as its author. *)
+    let config = Masc.Mcp_server.workspace_config state in
+    let backlog = Workspace.read_backlog config in
+    let contains haystack needle =
+      let hlen = String.length haystack in
+      let nlen = String.length needle in
+      let rec scan i =
+        i + nlen <= hlen
+        && (String.equal (String.sub haystack i nlen) needle || scan (i + 1))
+      in
+      scan 0
+    in
+    (match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id ask_id) backlog.tasks with
+     | None -> failf "ask task %s not found in backlog" ask_id
+     | Some task ->
+       check string "question becomes the title" "why does this retry?" task.title;
+       check bool "description names the file and line" true
+         (contains task.description "lib/a.ml:12");
+       check bool "description carries the context" true
+         (contains task.description "third retry");
+       check string "authored by the IDE" "ide"
+         (Option.value task.created_by ~default:"");
+       check int "default priority" 3 task.priority;
+       check bool "starts Todo" true (task.task_status = Masc_domain.Todo)))
+;;
+
+let test_post_asks_refuses_a_blank_question () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let response = post_ask ~router ~token (ask_body ~question:"   " ()) in
+    check_status "blank question returns 400" 400 response;
+    check string "invalid ask code" "invalid_ask" (error_code_of_response response))
+;;
+
+let test_post_asks_refuses_a_bad_priority () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let response = post_ask ~router ~token (ask_body ~priority:9 ()) in
+    check_status "priority 9 returns 400" 400 response;
+    check string "invalid ask code" "invalid_ask" (error_code_of_response response))
+;;
+
+let test_post_asks_refuses_a_mistyped_line () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let body =
+      `Assoc [ "question", `String "why?"; "line", `String "twelve" ]
+      |> Yojson.Safe.to_string
+    in
+    let response = post_ask ~router ~token body in
+    check_status "string line returns 400" 400 response)
+;;
+
+let test_post_asks_refuses_a_line_without_a_file () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let body =
+      `Assoc [ "question", `String "why?"; "line", `Int 12 ]
+      |> Yojson.Safe.to_string
+    in
+    let response = post_ask ~router ~token body in
+    check_status "line without file returns 400" 400 response;
+    check string "invalid ask code" "invalid_ask" (error_code_of_response response))
+;;
+
+let test_post_asks_refuses_non_json () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    init_workspace_for_asks ~base_path ~state;
+    let token = create_admin_token base_path "operator" in
+    let response = post_ask ~router ~token "not json{" in
+    check_status "non-JSON body returns 400" 400 response)
+;;
+
+let test_post_asks_needs_an_initialized_workspace () =
+  (* No init: the backlog the ask would land in does not exist. *)
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_admin_token base_path "operator" in
+    let response = post_ask ~router ~token (ask_body ()) in
+    check_status "uninitialized workspace returns 500" 500 response;
+    check string "store unavailable code" "ask_store_unavailable"
+      (error_code_of_response response))
+;;
+
+let () =
+  run
+    "server_ide_http"
+    [ ( "route_registration"
+      , [ test_case "read routes stay public" `Quick test_read_routes_stay_public
+        ; test_case "POST asks is registered" `Quick test_post_asks_is_registered
+        ] )
+    ; ( "presence_contract"
+      , [ test_case
+            "presence projects canonical keeper identity and status"
+            `Quick
+            test_presence_projects_only_canonical_keeper_identity
+        ; test_case
+            "last_seen_ms shared projection maps valid ISO and invalid to 0"
+            `Quick
+            test_presence_last_seen_ms_shared_projection
+        ] )
+    ; ( "scope_contract"
+      , [ test_case
+            "GET events accepts an unknown codebase as empty"
+            `Quick
+            test_read_events_accepts_unknown_codebase_as_empty
+        ; test_case "canonical events survive source reopen without duplicate writer" `Quick
+            test_events_read_committed_canonical_fact_after_reopen
+        ; test_case "invalid canonical observation is explicit and private" `Quick
+            test_events_invalid_observation_is_explicit_and_private
+        ; test_case
+            "GET events rejects an invalid codebase scope"
+            `Quick
+            test_get_events_rejects_invalid_canonical_scope
+        ] )
+    ; ( "query_parsing"
+      , [ test_case "GET events rejects invalid limit" `Quick
+            test_get_events_rejects_invalid_limit
+        ; test_case "GET events rejects negative offset" `Quick
+            test_get_events_rejects_negative_offset
+        ; test_case "repository activity covers all writers in one request" `Quick
+            test_repository_activity_covers_all_writers
+        ; test_case "repository activity needs no canonical remote" `Quick
+            test_repository_activity_needs_no_canonical_remote
+        ; test_case "GET file activity requires file path" `Quick
+            test_get_file_activity_requires_a_file_path
+        ; test_case "GET file activity rejects invalid window" `Quick
+            test_get_file_activity_rejects_invalid_window
+        ; test_case "GET file activity resolves project checkout" `Quick
+            test_get_file_activity_resolves_the_project_checkout_exactly
+        ; test_case "file activity cache retains exact windows" `Quick
+            test_file_activity_cached_windows_keep_exact_query
+        ; test_case "GET file activity without a token returns 401" `Quick
+            test_file_activity_requires_auth
+        ] )
+    ; ( "post_asks"
+      , [ test_case "POST asks without a token returns 401" `Quick
+            test_post_asks_requires_auth
+        ; test_case "POST asks with a worker token returns 403" `Quick
+            test_post_asks_requires_admin
+        ; test_case "POST asks files a Todo task" `Quick
+            test_post_asks_files_a_todo_task
+        ; test_case "POST asks refuses a blank question" `Quick
+            test_post_asks_refuses_a_blank_question
+        ; test_case "POST asks refuses a bad priority" `Quick
+            test_post_asks_refuses_a_bad_priority
+        ; test_case "POST asks refuses a mistyped line" `Quick
+            test_post_asks_refuses_a_mistyped_line
+        ; test_case "POST asks refuses a line without a file" `Quick
+            test_post_asks_refuses_a_line_without_a_file
+        ; test_case "POST asks refuses non-JSON" `Quick
+            test_post_asks_refuses_non_json
+        ; test_case "POST asks needs an initialized workspace" `Quick
+            test_post_asks_needs_an_initialized_workspace
+        ] )
+    ]
+;;

@@ -1,0 +1,116 @@
+(** Durable native calls belonging to one direct Keeper operation. This
+    adapter is for the outer native dispatch only. Nested Agent calls inherit
+    Core's ambient child scope and must not receive an explicit store. *)
+
+type binding =
+  { base_path : string
+  ; keeper_name : string
+  ; operation_id : Keeper_chat_operation.Operation_id.t
+  ; execution_digest : string
+  ; session_dir : string
+  ; session_id : string
+  }
+
+type input =
+  | New_input of
+      { blocks : Agent_core.Types.content_block list
+      ; metadata : Agent_core.Types.metadata
+      }
+  | Continue_from_checkpoint
+
+type resumed
+
+type admission =
+  | No_pending
+  | Resume of resumed
+  | Terminal_pending of
+      Keeper_native_call.t * Agent_core.Agent.execution_terminal_disposition
+
+val load : binding:binding -> (admission, string) result
+(** Read Owner authority and exact retained checkpoints. An Active Owner call
+    whose Core journal already terminated is reconciled to an unacknowledged
+    terminal receipt, without fabricating its lost response. A terminal pending
+    call is not a restartable provider attempt. No canonical-history fallback
+    is used for missing or inconsistent retained evidence. *)
+
+val reconcile_after_dispatch : binding -> (unit -> 'a) -> 'a
+(** Run the native dispatch. When it ends, by return or by exception, and the
+    Owner call is still Active, copy the Core journal's terminal disposition,
+    when one exists, into the Owner receipt under cancellation protection. The
+    result or exception then continues unchanged. A journal without a terminal,
+    or one that cannot be read, leaves the call Active. *)
+
+val runtime_id : resumed -> string
+val system_prompt : resumed -> string
+val checkpoint : resumed -> Agent_core.Checkpoint.t
+(** Exact retained checkpoint with in-memory reconciliation of this native
+    call's missing repetition observations from canonical settled results.
+    Stored checkpoint artifacts/references are not rewritten by loading. *)
+val restored_context : resumed -> Agent_core.Context.t
+(** A fresh Eio context containing the reconciled checkpoint entries.
+    Restore once before constructing tools, hooks or context injectors, then
+    pass this same object in [Runtime_agent.config.context]. [prepare]
+    preserves an explicitly supplied context, including setup mutations. *)
+val initial_messages : resumed -> Agent_core.Types.message list
+val input : resumed -> input
+
+type prepared
+
+type retired_history_cut
+
+val authorize_incomplete_response_cut :
+  binding:binding -> checkpoint:Agent_core.Checkpoint.t -> unit ->
+  (retired_history_cut, string) result
+(** For the host's typed [Retry_without_thinking] decision only. Witness that
+    this checkpoint removes exactly the last incomplete Assistant message
+    from the current Retire receipt, preserving every earlier message and
+    every other checkpoint field except its observation timestamp. The
+    removed message cannot contain a settled ToolResult. Pending input must be
+    absent. Preparation reads input authority against the original source;
+    actual scope publication retains the cut and atomically binds its input
+    reference with the next native call, using the actual next seed. The proof
+    cannot be reused for an edited checkpoint. This is neither
+    acknowledgement nor an execution-journal mutation. *)
+
+val prepare :
+  binding:binding -> runtime_id:string -> config:Runtime_agent.config ->
+  agent_core_checkpoint:Agent_core.Checkpoint.t option -> input:input ->
+  agent_ref:Agent_core.Agent.t option ref -> ?retired_history_cut:retired_history_cut ->
+  unit -> (prepared, string) result
+(** Call immediately before each actual native Agent API invocation. Active
+    scopes restore their exact seed/input and checkpoint. A known Retire
+    receipt is atomically replaced only when the next scope publishes its
+    locator; unknown effects cannot be replaced. The host must select the
+    saved runtime before preparing a recovered call. Recovery validates its
+    runtime ID, Agent name and model; this receipt grants no credential or
+    endpoint authority. Existing runtime materialization owns those checks.
+    Replacing a retired call preserves every canonically settled root
+    ToolResult. After Tool-attempt admission it also preserves its exact
+    transcript; the sole cut exception is an exact, still-current
+    [retired_history_cut] witness. Provider-only calls admit the host's existing
+    media projection when no Tool attempt was admitted.
+
+    Input checkpoint candidates advance the retained Owner before the optional
+    canonical sink. Until a subsequent ordinary checkpoint succeeds, terminal
+    disposition preserves the actual retained reference instead of publishing
+    an older in-memory Agent snapshot. A failed/uncertain sink is not a retry
+    permission and terminal handling does not replay that checkpoint write. *)
+
+val config : prepared -> Runtime_agent.config
+val prepared_checkpoint : prepared -> Agent_core.Checkpoint.t option
+val prepared_input : prepared -> input
+val binding_effect_observation : binding:binding -> Keeper_provider_attempt_effect.t
+val effect_observation : prepared -> Keeper_provider_attempt_effect.t
+(** Owner/journal read failure, an active scope, an unknown-effect terminal,
+    or a retained checkpoint missing canonically settled ToolResults keeps
+    provider fallback fenced. A known Retire receipt permits the existing
+    checkpoint-based continuation path; it does not claim zero historical
+    tool effects. *)
+
+
+
+(** Read the current matching call's root provider attempts after dispatch.
+    No matching call is distinct from unavailable/corrupt journal evidence. *)
+type request_boundary
+val capture_request_boundary : binding -> (request_boundary, string) result
+val request_evidence : binding -> boundary:request_boundary -> runtime_id:string -> Request_observation.evidence

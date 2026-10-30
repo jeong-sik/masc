@@ -1,0 +1,31 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40215791578
+Complete raw log SHA256: b5dabb2eb9b8a24c58eaf001c0259740939e55cd70c739f0407a24b42c824d4f
+Complete raw log bytes: 224925
+Selected checkout, relevant assertions, failures and suite summaries.
+
+test suite	Checkout	2026-10-25T17:18:21.6320068Z HEAD is now at 15b9700c fix(checkpoint): preserve exclusive caller authority before migration
+test suite	Test	2026-10-25T17:19:58.0336507Z ASSERT checkpoint retains actual source
+test suite	Test	2026-10-25T17:19:58.5106028Z ASSERT checkpoint persisted
+test suite	Test	2026-10-25T17:19:58.6884822Z ASSERT journal checkpoints exist without a caller sink
+test suite	Test	2026-10-25T17:19:58.6887320Z ASSERT latest checkpoint cites exact committed event and cursor
+test suite	Test	2026-10-25T17:19:58.6888417Z ASSERT each checkpoint reader receives an independent context
+test suite	Test	2026-10-25T17:19:58.6911162Z ASSERT reopened reader retains checkpoint identity and cursor
+test suite	Test	2026-10-25T17:19:58.7068353Z ASSERT effect committed before checkpoint observer failure
+test suite	Test	2026-10-25T17:19:58.7080743Z ASSERT required checkpoint authority refusal rejects continuation
+test suite	Test	2026-10-25T17:19:58.7081504Z ASSERT required checkpoint refusal never repeats committed effect
+test suite	Test	2026-10-25T17:19:58.7082171Z ASSERT required checkpoint refusal prevents next provider call
+test suite	Test	2026-10-25T17:19:58.7093684Z ASSERT caller-owned checkpoints are not dual-written into journal
+test suite	Test	2026-10-25T17:19:59.1253328Z Test Successful in 1.113s. 81 tests run.
+test suite	Test	2026-10-25T17:19:59.7033685Z Error: Unbound value Context.set
+test suite	Test	2026-10-25T17:20:01.3315001Z Test Successful in 0.263s. 20 tests run.
+test suite	Test	2026-10-25T17:20:03.1086737Z ASSERT assistant checkpoint persisted before provider lease release
+test suite	Test	2026-10-25T17:20:03.1103088Z ASSERT context checkpoint persisted before callback
+test suite	Test	2026-10-25T17:20:03.1104806Z ASSERT checkpoint turn count
+test suite	Test	2026-10-25T17:20:03.1105009Z ASSERT yielded checkpoint stage
+test suite	Test	2026-10-25T17:20:03.1105247Z ASSERT yielded checkpoint includes projected context
+test suite	Test	2026-10-25T17:20:03.1109002Z ASSERT base tool-result checkpoint boundary
+test suite	Test	2026-10-25T17:20:03.1115396Z ASSERT context checkpoint failure does not reacquire provider lease
+test suite	Test	2026-10-25T17:20:03.1154516Z ASSERT checkpoint stage
+test suite	Test	2026-10-25T17:20:03.1221083Z ASSERT cancellation stops before next provider
+test suite	Test	2026-10-25T17:20:03.1226927Z ASSERT exception stops before next provider call
+test suite	Test	2026-10-25T17:20:03.1241762Z Test Successful in 0.040s. 21 tests run.

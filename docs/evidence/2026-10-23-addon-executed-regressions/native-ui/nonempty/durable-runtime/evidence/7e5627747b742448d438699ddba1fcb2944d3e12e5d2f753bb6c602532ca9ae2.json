@@ -1,0 +1,22 @@
+{
+  "source_id": "vst-phrase",
+  "incarnation": "declared-local-fixture",
+  "cursor": "1",
+  "complete": true,
+  "detail": "Explicit local input fixture; not real rendering or playback",
+  "observations": [
+    {
+      "id": "declared-local-fixture:1",
+      "kind": "vst_phrase",
+      "observed_at": 1792748021.066765,
+      "actor": null,
+      "evidence": [],
+      "fields": {
+        "state": "failed",
+        "selection": null,
+        "render": null,
+        "error": "Declared input v1: render unavailable"
+      }
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "schema": "masc.goal.multicondition.private-prompt-proposal.source-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T18:10:27.654633+00:00",
+  "verdict": "PASS_SCOPED_PRIVATE_SOURCE_PROPOSAL_NO_NEW_P0_P1_P2_UNAPPLIED_UNEXECUTED",
+  "scope": "Only baseline.md, candidate.md and plan.json were read for this review. No current PR, model outcome, runtime, API or full original11 sufficiency audit is included.",
+  "inputs": [
+    {
+      "name": "baseline.md",
+      "bytes": 7672,
+      "sha256": "529f84a6a36146eca2821e02ade8a9467b166b5d1ed25eea4b37493cc5579539"
+    },
+    {
+      "name": "candidate.md",
+      "bytes": 8143,
+      "sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d"
+    },
+    {
+      "name": "plan.json",
+      "bytes": 1203,
+      "sha256": "db72fb14e11565029d7d1f3ae8d700c8084bc0d777d09a03851660e880fea0eb"
+    }
+  ],
+  "complete_text_delta": {
+    "algorithm": "Python difflib unified_diff with baseline.md/candidate.md labels",
+    "bytes": 2383,
+    "sha256": "b9f59964049bdd1bcc6bb50734275698006a1762d4830991819b218382a00b25",
+    "changed_surface": "proof guidance only; lookup body unchanged"
+  },
+  "assessments": [
+    {
+      "scope": "Declared multiple requirements",
+      "candidate_line": 44,
+      "assessment_ko": "여러 필수 조건이나 단계를 선언했을 때 각 조건을 실제 읽은 관측과 대조하도록 한정한다. 새로운 조건을 추가하거나 선언하지 않은 실행·시험을 요구하지 않는다. 한 단계 성공으로 관측하지 않은 다른 단계 성공을 주장하지 말라는 문구는 증거 범위 보존에 맞는다."
+    },
+    {
+      "scope": "Evidence reuse without a per-condition tool gate",
+      "candidate_line": 46,
+      "assessment_ko": "한 원문이 여러 조건의 실제 관측을 포함하면 공동 사용을 명시적으로 허용한다. 조건마다 다른 파일·별도 Read·새 실행을 요구하지 않는다. byte-identical mirror도 다른 관측으로 셈하거나 중복 실행으로 만들 근거가 추가되지 않는다. 단순 README 주장만으로 실제 관측이 생긴다는 의미도 아니다."
+    },
+    {
+      "scope": "Reported-value and aggregation scope",
+      "candidate_line": 42,
+      "assessment_ko": "보고된 수 자체를 재는 metric의 추가 증명·재실행 금지 예외가 유지된다. lookup의 선언 집계 허용 및 identity/scope 보존 문단은 byte-identical하다. 이전 집계 과잉 금지를 되살리지 않는다."
+    },
+    {
+      "scope": "Reason clarity",
+      "candidate_line": 54,
+      "assessment_ko": "한두 문장 지시를 제거하고 여러 필수 조건의 범위·근거가 드러나게 하되 공통 원문 조건은 함께 설명할 수 있게 했다. reason 비어 있지 않음과 정확히 한 번의 structured verdict 계약은 유지하며, 조건 수에 따른 최소 문장 수나 표·별도 tool call은 요구하지 않는다."
+    }
+  ],
+  "structural_checks": {
+    "placeholder_names": [
+      "goal_title",
+      "lookup_root_layout",
+      "lookup_section",
+      "lookup_tools",
+      "metric",
+      "reported_measurement",
+      "submitted_sources",
+      "target_value"
+    ],
+    "placeholder_set_unchanged": true,
+    "proof_and_lookup_section_declarations_unchanged": true,
+    "lookup_section_byte_equal": true,
+    "new_schema_API_tool_permission_variant_or_store_added": false,
+    "tool_call_budget_or_reexecution_rule_added": false
+  },
+  "direct_consumer_impact": {
+    "assessment_ko": "변경은 기존 proof template의 자연어 지침이며 같은 placeholder를 같은 reason 문자열 및 verdict 호출로 소비한다. 새 JSON 구조·필수 API 필드·권한·authority binding을 요구하지 않는다. 앞선 source 검토에서 직접 확인한 Goal Original의 rendered text 보존 및 reason/evidence 문자열 전달 계약과 충돌하는 변경은 보이지 않는다.",
+    "fresh_consumer_source_read": false,
+    "scope_limit": "The request restricted reading to the three proposal files. No API/schema implementation or native/template parser was reread or executed here. No new runtime compatibility or wire-delivery proof is claimed."
+  },
+  "baseline_and_outcome_boundary": {
+    "plan_status": "proposed_not_applied_or_executed",
+    "proposal_applied_or_executed_by_reviewer": false,
+    "actual_original11_baseline_sufficiency_adjudicated_here": false,
+    "A1_missing_stage_P2_established_here": false,
+    "proposal_improvement_success_claimed": false,
+    "assessment_ko": "plan의 Node verify·README와 A1 세 단계 충분성 우려는 별도 실제 원문 감사가 진행 중인 근거다. 이 source 검토는 그 baseline 판정의 정당성이나 새 문구가 문제를 고친 실측 결과를 가정하지 않는다. proposal428e는 현재 PR4b81 또는 운영 prompt가 아니다."
+  },
+  "findings_P0_P1_P2_in_three_file_source_scope": [],
+  "limits": [
+    "모델이 여러 조건을 실제로 정확히 분리·대조할지는 미실측이며 문구만으로 deterministic defense가 되지 않는다.",
+    "원래11개 기준, canonical4fdd, 원 Goal proof·사람 확인, 현재 PR source 승인·통합·운영 적용을 이 제안으로 완료했다고 세지 않는다."
+  ],
+  "effects": {
+    "files_outside_three_input_files_read_for_this_review": false,
+    "API_Git_source_runtime_Goal_Task_Board_or_existing_artifact_changes": false,
+    "model_provider_test_native_CI_Docker_calls": false,
+    "external_messages_PR_or_formal_approval_posts": false,
+    "agents_spawned": false,
+    "only_new_output": "review.json"
+  }
+}

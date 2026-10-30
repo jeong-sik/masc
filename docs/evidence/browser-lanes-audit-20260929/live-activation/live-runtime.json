@@ -1,0 +1,30 @@
+{
+  "status": "ok",
+  "build": {
+    "release_version": "0.46.0",
+    "binary_version": "0.46.0",
+    "commit": "1beabf795c64d5211714e4eed4850740fb9b6cce",
+    "commit_source": "embedded",
+    "binary_commit": "1beabf795c64d5211714e4eed4850740fb9b6cce",
+    "binary_commit_source": "embedded",
+    "ocaml_dos_core": {
+      "source_digest": "2a711d6932bbb72699645a40e835f8a1",
+      "pinned_source_digest": "2a711d6932bbb72699645a40e835f8a1",
+      "matches_pin": true
+    },
+    "provenance_source": "self_observed",
+    "executable_sha256": "0d411f99522ca444ef275ed1d1adf0fe930600e6f7aa2b890e5039b923496caa",
+    "binary_commit_unix_ts": 1790646111.0,
+    "binary_commit_age_seconds": 3036,
+    "repo_head_commit": "dd1359a6ea",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1790572670.0,
+    "repo_head_commit_age_seconds": 76477,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me",
+    "runtime_instance_id": "01a0eadc-635e-7000-84d8-c0098f6d8318",
+    "started_at": "2026-09-29T01:51:47Z",
+    "uptime_seconds": 2440
+  }
+}

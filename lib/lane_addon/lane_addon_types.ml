@@ -1,0 +1,271 @@
+type contribution = Observe | Derive | Act
+type row_kind = Event | Value | Relation
+type evidence = { uri : string; sha256 : string option }
+type clock = { domain : string; value : string }
+type row = {
+  id : string; lane_id : string; kind : row_kind; title : string;
+  observed_at : float; subject_id : string; clock : clock option;
+  actor : string option; fields : (string * Yojson.Safe.t) list;
+  evidence : evidence list; related_ids : string list;
+}
+type coverage = {
+  source_id : string; incarnation : string; cursor : string option;
+  complete : bool; detail : string option;
+}
+type output = { rows : row list; coverage : coverage list }
+type output_selection = All_lanes | Selected_lanes of string list
+type output_ports = (string * output_selection) list
+type runtime = Docker | Apple_container
+let runtime_to_string = function Docker -> "docker" | Apple_container -> "apple_container"
+let runtime_of_string = function
+  | "docker" -> Some Docker | "apple_container" -> Some Apple_container | _ -> None
+type resources = { cpus : float; memory_bytes : int64; pids : int option; max_reply_bytes : int }
+let nano_cpus_per_cpu = 1_000_000_000.
+let check_resources ?(runtime = Docker) r =
+  if not (Float.is_finite r.cpus) || r.cpus <= 0. then Error "cpus must be finite and positive"
+  else if r.memory_bytes <= 0L || r.max_reply_bytes <= 0 then
+    Error "memory_bytes and max_reply_bytes must be positive"
+  else match runtime, r.pids with
+  | Docker, Some pids when pids > 0 ->
+      if r.cpus *. nano_cpus_per_cpu < 1. then
+        Error "cpus must be representable as a positive Docker NanoCpus value"
+      else if r.cpus *. nano_cpus_per_cpu >= Int64.to_float Int64.max_int then
+        Error "cpus exceed Docker NanoCpus representation"
+      else Ok ()
+  | Docker, (None | Some _) -> Error "Docker requires a positive pids limit"
+  | Apple_container, Some _ -> Error "Apple microVM does not expose a PID cgroup limit; omit pids"
+  | Apple_container, None ->
+      if Float.floor r.cpus <> r.cpus || r.cpus >= float_of_int max_int then
+        Error "Apple microVM cpus must be a positive whole vCPU count"
+      else if Int64.rem r.memory_bytes 1_048_576L <> 0L then
+        Error "Apple microVM memory_bytes must be an exact number of MiB"
+      else Ok ()
+type container = { runtime : runtime; image : string; resources : resources }
+type execution = Container of container | Host_process of { max_reply_bytes : int }
+type refresh_policy = Every_hint | Source_changes
+type model_access = Model_disabled | Host_sampling
+type state_storage = Ephemeral | Persistent
+type tool_invocation = Direct | Host_context
+type tool_hook = Validate_input | Validate_output
+type worker_service = Mcp_tools | Browser_service of Browser_lane.Backend.t
+type request_schema_policy = Package_schema_only | Consumer_request_schema
+type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }
+type package = {
+  id : string; revision : string; title : string;
+  ui_category : Lane_addon_category.t option;
+  contributions : contribution list;
+  execution : execution;
+  worker_service : worker_service;
+  command : string list; directory : string;
+  action_tool : string option;
+  state_storage : state_storage;
+  tool_invocation : tool_invocation;
+  exported_tools : string list;
+  tool_hooks : tool_hook list;
+  outputs : output_ports;
+  refresh_policy : refresh_policy;
+  model_access : model_access;
+  binding_schema : Yojson.Safe.t option;
+  presentation : Lane_addon_presentation.t;
+  skills_directory : Skill_resource_path.t option;
+  exact_outputs : exact_output list; operator_asks : bool; web_search : bool;
+}
+let host_requests_tool = "lane_host_requests"
+let operator_tool = "lane_operator"
+let companion_tool = "lane_companion"
+let same_execution_package left right =
+  {left with ui_category=None} = {right with ui_category=None}
+let host_result_tool = "lane_host_result"
+let uses_host_requests package = package.exact_outputs <> [] || package.operator_asks
+  || package.web_search
+let max_reply_bytes (package : package) = match package.execution with
+  | Container container -> container.resources.max_reply_bytes
+  | Host_process specification -> specification.max_reply_bytes
+let container (package : package) = match package.execution with
+  | Container container -> Ok container
+  | Host_process _ -> Error "host_process has no container execution specification"
+let container_runtime (package : package) = match package.execution with
+  | Container container -> Some container.runtime
+  | Host_process _ -> None
+let validate_exported_tools ~action_tool names =
+  if action_tool = Some operator_tool || action_tool = Some companion_tool then
+    Error "private control port cannot be an action tool"
+  else if List.exists (fun name -> String.trim name = "" || String.trim name <> name) names then
+    Error "exported tools require non-blank names without surrounding whitespace"
+  else
+    let sorted = List.sort_uniq String.compare names in
+    if List.length sorted <> List.length names then Error "duplicate exported tool name"
+    else if List.exists (fun name -> name = "lane_observe" || name = Lane_addon_call_context.tool_name
+      || name = host_requests_tool || name = host_result_tool || name = operator_tool || name = companion_tool
+      || name = Machine_input_history.tool_name
+      || name = Machine_controller_contract.snapshot_tool || name = Machine_controller_contract.release_tool
+      || Some name = action_tool) sorted then
+      Error "worker control tools cannot be exported"
+    else Ok sorted
+
+type phase = Attached | Observing | Failed of string | Detaching | Detached
+
+open Result.Syntax
+let string value = `String value
+let optional f = function None -> `Null | Some value -> f value
+let strings values = `List (List.map string values)
+let object_fields expected = function
+  | `Assoc fields ->
+      let names = List.map fst fields |> List.sort String.compare in
+      if names = List.sort String.compare expected then Ok fields
+      else Error ("expected exactly fields: " ^ String.concat ", " expected)
+  | _ -> Error "expected an object"
+let field fields name = List.assoc name fields
+let text name = function
+  | `String value when String.trim value <> "" -> Ok value
+  | _ -> Error (name ^ ": expected non-blank string")
+let nullable parse = function `Null -> Ok None | value -> Result.map Option.some (parse value)
+let list parse = function
+  | `List values ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | value :: rest -> let* value = parse value in loop (value :: acc) rest
+      in loop [] values
+  | _ -> Error "expected an array"
+let finite = function
+  | `Int n -> Ok (float_of_int n)
+  | `Float value ->
+      (match classify_float value with
+       | FP_normal | FP_subnormal | FP_zero -> Ok value
+       | FP_nan | FP_infinite -> Error "expected finite timestamp")
+  | _ -> Error "expected numeric timestamp"
+let evidence_to_json (e : evidence) =
+  `Assoc ["uri", string e.uri; "sha256", optional string e.sha256]
+let evidence_of_json json =
+  let* fields = object_fields ["uri"; "sha256"] json in
+  let* uri = text "uri" (field fields "uri") in
+  let* sha256 = nullable (text "sha256") (field fields "sha256") in
+  Ok { uri; sha256 }
+let clock_to_json (c : clock) = `Assoc ["domain", string c.domain; "value", string c.value]
+let clock_of_json json =
+  let* fields = object_fields ["domain"; "value"] json in
+  let* domain = text "domain" (field fields "domain") in
+  let* value = text "value" (field fields "value") in
+  Ok { domain; value }
+let kind_to_string = function Event -> "event" | Value -> "value" | Relation -> "relation"
+let kind_of_json = function
+  | `String "event" -> Ok Event | `String "value" -> Ok Value
+  | `String "relation" -> Ok Relation | _ -> Error "unknown row kind"
+let row_to_json (r : row) =
+  `Assoc ["id", string r.id; "lane_id", string r.lane_id;
+    "kind", string (kind_to_string r.kind); "title", string r.title;
+    "observed_at", `Float r.observed_at; "subject_id", string r.subject_id;
+    "clock", optional clock_to_json r.clock; "actor", optional string r.actor;
+    "fields", `Assoc r.fields; "evidence", `List (List.map evidence_to_json r.evidence);
+    "related_ids", strings r.related_ids]
+let row_of_json json =
+  let* f = object_fields ["id"; "lane_id"; "kind"; "title"; "observed_at";
+    "subject_id"; "clock"; "actor"; "fields"; "evidence"; "related_ids"] json in
+  let* id = text "id" (field f "id") in
+  let* lane_id = text "lane_id" (field f "lane_id") in
+  let* kind = kind_of_json (field f "kind") in
+  let* title = text "title" (field f "title") in
+  let* observed_at = finite (field f "observed_at") in
+  let* subject_id = text "subject_id" (field f "subject_id") in
+  let* clock = nullable clock_of_json (field f "clock") in
+  let* actor = nullable (text "actor") (field f "actor") in
+  let* fields = match field f "fields" with
+    | `Assoc values ->
+        let names = List.map fst values in
+        if List.length names = List.length (List.sort_uniq String.compare names)
+        then Ok values else Error "duplicate display field"
+    | _ -> Error "fields: expected object" in
+  let* evidence = list evidence_of_json (field f "evidence") in
+  let* related_ids = list (text "related_ids") (field f "related_ids") in
+  Ok { id; lane_id; kind; title; observed_at; subject_id; clock; actor;
+       fields; evidence; related_ids }
+let coverage_to_json (c : coverage) =
+  `Assoc ["source_id", string c.source_id; "incarnation", string c.incarnation;
+    "cursor", optional string c.cursor; "complete", `Bool c.complete;
+    "detail", optional string c.detail]
+let coverage_of_json json =
+  let* f = object_fields ["source_id"; "incarnation"; "cursor"; "complete"; "detail"] json in
+  let* source_id = text "source_id" (field f "source_id") in
+  let* incarnation = text "incarnation" (field f "incarnation") in
+  let* cursor = nullable (text "cursor") (field f "cursor") in
+  let* complete = match field f "complete" with `Bool b -> Ok b | _ -> Error "complete: expected bool" in
+  let* detail = nullable (text "detail") (field f "detail") in
+  Ok { source_id; incarnation; cursor; complete; detail }
+let output_to_json (o : output) =
+  `Assoc ["rows", `List (List.map row_to_json o.rows);
+          "coverage", `List (List.map coverage_to_json o.coverage)]
+let output_of_json json =
+  let* f = object_fields ["rows"; "coverage"] json in
+  let* rows = list row_of_json (field f "rows") in
+  let* coverage = list coverage_of_json (field f "coverage") in
+  let ids = List.map (fun (r : row) -> r.id) rows in
+  if List.length ids <> List.length (List.sort_uniq String.compare ids)
+  then Error "duplicate row identity in one observation"
+  else Ok { rows; coverage }
+let phase_to_json = function
+  | Attached -> `Assoc ["kind", string "attached"]
+  | Observing -> `Assoc ["kind", string "observing"]
+  | Failed message -> `Assoc ["kind", string "failed"; "message", string message]
+  | Detaching -> `Assoc ["kind", string "detaching"]
+  | Detached -> `Assoc ["kind", string "detached"]
+let phase_of_json = function
+  | `Assoc ["kind", `String "attached"] -> Ok Attached
+  | `Assoc ["kind", `String "observing"] -> Ok Observing
+  | `Assoc ["kind", `String "detaching"] -> Ok Detaching
+  | `Assoc ["kind", `String "detached"] -> Ok Detached
+  | `Assoc fields ->
+      let* f = object_fields ["kind"; "message"] (`Assoc fields) in
+      (match field f "kind", field f "message" with
+       | `String "failed", `String message -> Ok (Failed message)
+       | _ -> Error "invalid Lane phase")
+  | _ -> Error "invalid Lane phase"
+let output_selection_to_json = function
+  | All_lanes -> `Assoc ["all_lanes", `Bool true]
+  | Selected_lanes lanes -> `Assoc ["lanes", strings lanes]
+let output_ports_to_json ports =
+  `Assoc (List.map (fun (id, selection) -> id, output_selection_to_json selection) ports)
+let package_to_json (p : package) =
+  (* runtime, exact_outputs and operator_asks are written only when they differ from what a
+     package without the key means, so such a package keeps its revision. *)
+  let runtime, image, resources = match p.execution with
+    | Container container ->
+        (match container.runtime with Docker -> []
+          | Apple_container -> ["runtime", string (runtime_to_string container.runtime)]),
+        ["image", string container.image],
+        `Assoc ["cpus", `Float container.resources.cpus;
+          "memory_bytes", `Intlit (Int64.to_string container.resources.memory_bytes);
+          "pids", optional (fun value -> `Int value) container.resources.pids;
+          "max_reply_bytes", `Int container.resources.max_reply_bytes]
+    | Host_process specification -> ["runtime", string "host_process"], [],
+        `Assoc ["max_reply_bytes", `Int specification.max_reply_bytes] in
+  `Assoc (runtime
+    @ (match p.ui_category with None -> []
+       | Some category -> ["ui_category", Lane_addon_category.to_json category])
+    @ (match p.worker_service with
+       | Mcp_tools -> []
+       | Browser_service backend ->
+         ["service", string "browser"; "browser_backend", string (Browser_lane.Backend.to_wire backend)])
+    @ (match p.tool_hooks with [] -> [] | hooks ->
+      ["tool_hooks", strings (List.map (function
+        | Validate_input -> "validate_input" | Validate_output -> "validate_output") hooks)])
+    @ (match p.exact_outputs with [] -> []
+      | outputs -> ["exact_outputs", `Assoc (List.map (fun output -> output.name,
+          `Assoc ["schema",output.schema;"request_schema",`Bool (match output.request_schema with
+            | Package_schema_only -> false | Consumer_request_schema -> true)]) outputs)])
+    @ (if p.operator_asks then ["operator_asks", `Bool true] else [])
+    @ (if p.web_search then ["web_search", `Bool true] else [])
+    @ ["id", string p.id; "revision", string p.revision; "title", string p.title;
+    "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);
+    ] @ image @ ["command", strings p.command; "directory", string p.directory;
+    "action_tool", optional string p.action_tool;
+    "state_storage", `String (match p.state_storage with Ephemeral -> "ephemeral" | Persistent -> "persistent");
+    "tool_invocation", `String (match p.tool_invocation with Direct -> "direct" | Host_context -> "host_context");
+    "exported_tools", strings p.exported_tools;
+    "outputs", output_ports_to_json p.outputs;
+    "refresh_policy", `String (match p.refresh_policy with Every_hint -> "every_hint" | Source_changes -> "source_changes");
+    "model_access", `String (match p.model_access with Model_disabled -> "disabled" | Host_sampling -> "host_sampling");
+    "binding_schema", optional Fun.id p.binding_schema;
+    "presentation", Lane_addon_presentation.to_json p.presentation;
+    "skills_directory", (match p.skills_directory with None -> `Null
+      | Some path -> string (Skill_resource_path.to_string path));
+    "resources", resources])

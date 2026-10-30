@@ -1,0 +1,38 @@
+{
+  "observed_at": "2026-09-10T15:09:35.670540+00:00",
+  "session_handle": 90493,
+  "completed_proposal": false,
+  "progress": [
+    {
+      "path": "groups/keeper-bc87119183cc5bff915fa42bac3d29b2489242a3bf39aa85e508e9f7ecdbe58b/progress.json",
+      "progress": {
+        "phase": "receiving",
+        "chunks": 8400,
+        "content_characters": 0,
+        "thinking_characters": 33782,
+        "observed_at": "2026-09-10T15:09:35.633584+00:00"
+      }
+    },
+    {
+      "path": "groups/keeper-ff26205ac753d89688a52850b54dff440a4839371a764ffc170c34605d91dfc9/progress.json",
+      "progress": {
+        "phase": "proposed",
+        "chunks": 14737,
+        "content_characters": 2271,
+        "thinking_characters": 54773,
+        "observed_at": "2026-09-10T14:52:17.243265+00:00"
+      }
+    },
+    {
+      "path": "progress.json",
+      "progress": {
+        "phase": "curating_keeper",
+        "keeper_id": "exhibit-editor",
+        "completed_group_ids": [
+          "keeper-ff26205ac753d89688a52850b54dff440a4839371a764ffc170c34605d91dfc9"
+        ],
+        "observed_at": "2026-09-10T14:52:17.243900+00:00"
+      }
+    }
+  ]
+}

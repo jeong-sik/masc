@@ -1,0 +1,100 @@
+{
+  "scope": "Actual model-supplied Goal association and persisted Task contract; no operator/observer link or messages, no raw thinking.",
+  "observed_at": "2026-10-24T15:33:57.429734+00:00",
+  "source_identity_record": {
+    "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+    "binary": "/tmp/masc-goal-runtime-54e8b9b7/masc",
+    "base_path": "/private/tmp/masc-goal-canary-54e8b9b7-qwen",
+    "pid": 41335,
+    "port": 58276,
+    "provider_proxy_port": 55595,
+    "model": "qwen3:8b",
+    "production_deployment": false
+  },
+  "tool_calls": [
+    {
+      "id": "call_9l2a9n9n",
+      "function": {
+        "index": 0,
+        "name": "keeper_task_create",
+        "arguments": {
+          "goal_id": "goal-canary-three-results",
+          "priority": 3,
+          "title": "Set alpha to true in acceptance.json",
+          "contract": {
+            "completion_contract": [
+              "artifact:workspace/acceptance.json"
+            ],
+            "inspect_gate_evidence": [
+              "artifact:workspace/acceptance.json"
+            ],
+            "verify_gate_evidence": [
+              "artifact:workspace/acceptance.json"
+            ]
+          },
+          "description": "Set alpha to true in acceptance.json while keeping beta and gamma as false. Verify the modified file as evidence."
+        }
+      }
+    }
+  ],
+  "request_sha256": "1a63a2ce0b1255157e7a37dac5ac0db5df99c47ba869d0cec6d15bf13980a3a7",
+  "response_sha256": "e7102a62f0a391fde8e7a575a5a97e7b1ed0292e1a0bbb905fef79b5bd52ec5f",
+  "response_terminal": [
+    {
+      "created_at": "2026-10-24T15:30:17.36555Z",
+      "done_reason": "stop"
+    }
+  ],
+  "goal_link": {
+    "path": "/tmp/masc-goal-canary-54e8b9b7-qwen/.masc/tasks/goal_task_links.json",
+    "value": {
+      "version": 1,
+      "last_updated": "2026-10-24T15:30:17Z",
+      "links": [
+        {
+          "goal_id": "goal-canary-three-results",
+          "task_ids": [
+            "task-001"
+          ]
+        }
+      ]
+    },
+    "sha256": "e38991b5d42d5b2844d63c49d16fe000d3bb011a451f9995851f58b1feda7d17"
+  },
+  "task": {
+    "id": "task-001",
+    "title": "Set alpha to true in acceptance.json",
+    "description": "Set alpha to true in acceptance.json while keeping beta and gamma as false. Verify the modified file as evidence.",
+    "priority": 3,
+    "files": [],
+    "created_at": "2026-10-24T15:30:17Z",
+    "created_by": "goal-canary",
+    "contract": {
+      "completion_contract": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "inspect_gate_evidence": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "verify_gate_evidence": [
+        "artifact:workspace/acceptance.json"
+      ]
+    },
+    "handoff_context": {
+      "summary": "alpha set to true in acceptance.json",
+      "evidence_refs": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "updated_at": "2026-10-24T15:33:20Z",
+      "updated_by": "goal-canary"
+    },
+    "status": "awaiting_verification",
+    "assignee": "goal-canary",
+    "started_at": "2026-10-24T15:30:34Z",
+    "submitted_at": "2026-10-24T15:33:20Z",
+    "verification_id": "vrf-bde76407212408089e633b68d1a153be"
+  },
+  "owner_input_goal_id_hint": false,
+  "owner_hint_basis": "first-wire-schema.json holds first actual User input hashes and no-GoalID result",
+  "limitations": "One actual cohort; Task contract supplies artifact refs and description states alpha-only expected behavior. No strict-contract enforcement, Goal measurement, Task approval or Goal completion claim."
+}

@@ -1,0 +1,253 @@
+(** Model_inference_metrics — per-model aggregate inference statistics.
+
+    Reads keeper decisions.jsonl files plus inference-level date-split costs
+    samples and computes per-model aggregates within a configurable time
+    window.
+
+    @since 2.259.0
+    Extended with cost/tool/error metrics: @since 2.270.0 *)
+
+type recent_entry = {
+  re_ts_unix : float;
+  re_outcome : string;
+  re_stop_reason : string option;
+  re_turn_lane : string option;
+  re_input_tokens : int option;
+  re_output_tokens : int option;
+  re_cache_read_tokens : int option;
+  re_cache_creation_tokens : int option;
+  re_latency_ms : float option;
+  re_prompt_tok_per_sec : float option;
+  re_peak_memory_gb : float option;
+  re_cost_usd : float option;
+  re_tools_count : int;
+  re_usage_reported : bool option;
+  re_telemetry_reported : bool option;
+  re_usage_trust : string option;
+  re_usage_anomaly_reasons : string list;
+  re_coverage_reason : string option;
+  re_coverage_stage : string option;
+  re_streaming_ttfrc_ms : float option;
+  re_streaming_inter_chunk_count : int option;
+  re_streaming_inter_chunk_avg_ms : float option;
+}
+
+type coverage_reason_count = {
+  crc_reason : string;
+  crc_count : int;
+}
+
+type bucket_metric = {
+  b_ts_start : float;
+    (** Unix seconds at the floor of the bucket (inclusive start). *)
+  b_entry_count : int;
+  b_success_count : int;
+  b_error_count : int;
+  b_p50_latency_ms : float option;
+  b_p95_latency_ms : float option;
+  b_error_rate : float;
+    (** error_count / entry_count; 0.0 when bucket is empty. *)
+  b_total_cost_usd : float option;
+  b_cache_hit_ratio : float option;
+    (** Sum of cache reads divided by inclusive input tokens from the same
+        successful entries reporting both fields, with positive input and
+        cache reads between zero and input. [None] when no such pair exists;
+        [Some 0.0] when valid pairs report zero cache reads. *)
+}
+
+type model_bucketed = {
+  mb_model_id : string;
+  mb_buckets : bucket_metric list;
+    (** Ordered oldest-first; only non-empty buckets are emitted. *)
+}
+
+type latency_bucket = {
+  lo_ms : int;
+  hi_ms : int option;
+  count : int;
+}
+
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
+
+(** See {!Model_inference_metrics_entry.coverage_status}. *)
+type coverage_status = Model_inference_metrics_entry.coverage_status =
+  | Coverage_error_only
+  | Coverage_full
+  | Coverage_none
+  | Coverage_partial
+
+val coverage_status_to_string : coverage_status -> string
+
+type model_stats = {
+  model_id : string;
+  entry_count : int;
+  avg_tok_per_sec : float option;
+  p50_tok_per_sec : float option;
+  p95_tok_per_sec : float option;
+  prompt_avg_tok_per_sec : float option;
+  prompt_p50_tok_per_sec : float option;
+  prompt_p95_tok_per_sec : float option;
+  hw_decode_avg_tok_per_sec : float option;
+  hw_decode_p50_tok_per_sec : float option;
+  hw_decode_p95_tok_per_sec : float option;
+  max_peak_memory_gb : float option;
+  thinking_fraction : float option;
+    (** Fraction [0.0, 1.0] of turns in window where the model was sent
+        think=true.
+        [None] when no entry in the window reported [thinking_enabled]
+        (older jsonl rows predating the field, or providers that don't
+        expose it). Denominator = count of reporting entries. *)
+  avg_latency_ms : float option;
+  p50_latency_ms : float option;
+  p95_latency_ms : float option;
+  total_input_tokens : int option;
+  total_output_tokens : int option;
+  total_cache_read_tokens : int option;
+  cached_input : cached_input option;
+  total_cache_creation_tokens : int option;
+  total_reasoning_tokens : int option;
+  usage_sample_count : int;
+  telemetry_sample_count : int;
+  usage_missing_count : int;
+  telemetry_missing_count : int;
+  coverage_status : coverage_status;
+  primary_coverage_stage : string option;
+  primary_coverage_reason : string option;
+  coverage_reason_counts : coverage_reason_count list;
+  success_count : int;
+  error_count : int;
+  total_cost_usd : float option;
+  avg_tool_calls_per_turn : float;
+  total_tool_calls : int;
+  top_tools : (string * int) list;
+  recent_entries : recent_entry list;
+  buckets : bucket_metric list;
+}
+
+type cost_read_diagnostics = {
+  malformed_rows : int;
+  schema_violation_rows : int;
+  identity_conflict_rows : int;
+}
+
+type cost_read_result =
+  (cost_read_diagnostics, Dated_jsonl.read_error) result
+
+type decision_read_error =
+  | Decision_directory_unavailable
+  | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
+
+type read_error =
+  | Decisions_unavailable of decision_read_error
+  | Costs_unavailable of Dated_jsonl.read_error
+
+type aggregate = {
+  window_minutes : int;
+  bucket_minutes : int;
+  models : model_stats list;
+  total_entries : int;
+  total_error_entries : int;
+  latency_buckets : latency_bucket list;
+  cost_read : cost_read_result;
+}
+
+val read_error_to_string : read_error -> string
+
+val compute : base_path:string -> window_minutes:int -> (aggregate, read_error) result
+(** [compute ~base_path ~window_minutes] reads all keeper decisions.jsonl
+    files, filters entries within the last [window_minutes], and returns
+    per-model aggregate statistics sorted by entry count descending. An unreadable
+    decision store or invalid decision rows return [Decisions_unavailable], so a
+    cache can retain its last complete snapshot. Cost diagnostics remain in the
+    successful aggregate's [cost_read].
+    Error turns (outcome="error") are counted separately per model.
+
+    The returned [model_stats] record carries an empty [buckets] list and
+    the enclosing [aggregate.bucket_minutes] is [0]. To include a
+    time-bucketed series, call {!compute_with_buckets} instead. *)
+
+val compute_with_buckets :
+  base_path:string ->
+  window_minutes:int ->
+  bucket_minutes:int ->
+  (aggregate, read_error) result
+(** Same as {!compute} but each returned [model_stats] additionally carries
+    a [buckets] list produced by {!aggregate_buckets}. *)
+
+val aggregate_buckets :
+  base_path:string ->
+  window_min:int ->
+  bucket_min:int ->
+  (model_bucketed list * cost_read_diagnostics, read_error) result
+(** [aggregate_buckets ~base_path ~window_min ~bucket_min] splits the last
+    [window_min] minutes into [bucket_min]-minute buckets, groups entries
+    per model, and for each non-empty bucket computes:
+    p50/p95 latency, error_rate, total_cost_usd, cache_hit_ratio.
+
+    - Buckets are keyed by [floor(ts_unix / (bucket_min * 60))].
+    - Only buckets with at least one entry are emitted.
+    - Buckets are returned oldest-first within each model.
+    - [cache_hit_ratio] is [None] when no valid positive-input/cache pair is reported.
+    - A non-positive [bucket_min] is treated as [1].
+    - Decision and cost-store read failures are returned instead of being
+      projected as successful partial or empty samples. *)
+
+val to_json : aggregate -> Yojson.Safe.t
+(** Serialize [aggregate] to JSON for API responses. [model_id] is a public
+    runtime-lens label only: concrete model identifiers stay internal to the
+    aggregator and are not emitted. *)
+
+val render_keeper_prompt_feedback : aggregate -> string
+(** Render a compact, redacted telemetry block for opt-in keeper prompt
+    feedback. Returns the empty string when the aggregate has no entries.
+    Provider/model identities are represented as stable runtime-lane labels
+    rather than concrete provider or model names. Billing and pricing values
+    are observation-only and are never included in this planning input. *)
+
+(** Token/cost fields and matrix cells preserve unreported values as null.
+    Totals require each successful sample to report that field; partial sums
+    are not complete totals. Explicit reported zero remains zero. No samples
+    or an incomplete lane makes global cost null. *)
+val compute_cost_latency_json :
+  base_path:string -> window_minutes:int -> (Yojson.Safe.t, read_error) result
+(** [compute_cost_latency_json ~base_path ~window_minutes] reads all
+    raw telemetry entries once and returns [Decisions_unavailable] if the decision
+    read is incomplete, otherwise the composed O4 cost-latency payload consumed by [GET /api/v1/dashboard/cost-latency]:
+
+    {[
+      {
+        "perAgent":      [ { "agent", "in_tok", "out_tok", "cost", "p50_ms", "p95_ms" } ],
+        "matrix":        { "providers": ["runtime"], "models": ["runtime_lane_1", ...], "grid": [[...]] },
+        "latencyBuckets": [ { "lo", "hi", "n" } ],
+        "p50":           number | null,
+        "p95":           number | null,
+        "total_cost_usd": number,
+        "window_minutes": number,
+        "generated_at":  unix_seconds
+      }
+    ]}
+
+    [perAgent] rows are sorted by cost descending and omit runtime lanes with
+    no cost/token signal.  [p50]/[p95] are exact global percentiles
+    computed from all raw latency samples in the window (not an average
+    of per-model estimates), or [null] when no latency sample
+    contributed. Per-agent [p50_ms]/[p95_ms] follow the same null
+    semantics. [matrix.grid] preserves cost shape using redacted runtime
+    lane labels rather than concrete provider/model axes.
+
+    @since 2.300.0 *)
+
+(** Operator-only runtime history. Groups by the exact executed runtime from
+    decision records; unpaired cost observations and records without an answerer
+    remain unattributed. The window and store diagnostics accompany the samples.
+    A failed decision-log read returns an unavailable history, never empty or
+    partial totals labelled as ready.
+    Call this from an asynchronous cached producer, never on a request's I/O path. *)
+val compute_runtime_metrics_json : base_path:string -> window_minutes:int -> Yojson.Safe.t

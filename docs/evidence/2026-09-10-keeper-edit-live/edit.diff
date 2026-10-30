@@ -1,0 +1,28 @@
+--- before/make_guide_v2.py
++++ after/make_guide_v2.py
+@@ -236,18 +236,16 @@
+     except Exception as e:
+         results.append(("pymupdf", 0, f"미사용({type(e).__name__})"))
+ 
+-    # pypdf
++    # poppler pdftotext
+     if not any(ok for _, _, ok in results if ok is True):
+         try:
+-            from pypdf import PdfReader
+-            r = PdfReader(path)
+-            npages = len(r.pages)
+-            txt = "\n".join((p.extract_text() or "") for p in r.pages)
+-            n_img = sum(len(p.images) for p in r.pages)
+-            embedded = sum(1 for o in r.pages[0].get("/Resources", {}).get("/Font", {}).values())
+-            results.append(("pypdf", len(txt), any("가" <= c <= "힣" for c in txt)))
++            r = subprocess.run(["pdftotext", path, "-"],
++                               capture_output=True, text=True, timeout=30)
++            if r.returncode == 0:
++                txt = r.stdout
++                results.append(("pdftotext", len(txt), any("가" <= c <= "힣" for c in txt)))
+         except Exception as e:
+-            results.append(("pypdf", 0, f"미사용({type(e).__name__})"))
++            results.append(("pdftotext", 0, f"미사용({type(e).__name__})"))
+ 
+     # pdftotext
+     if not any(ok for _, _, ok in results if ok is True):

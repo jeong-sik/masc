@@ -1,0 +1,107 @@
+type durability =
+  | Durable
+  | Durability_unconfirmed of string
+
+type config_state =
+  | Configured
+  | Rejected
+  | Unreadable
+
+type skill_application =
+  | Skill_published of
+      { input_source_revision : string
+      ; snapshot_revision : string
+      ; catalog_revision : string
+      ; config_state : config_state
+      }
+  | Skill_unchanged of
+      { input_source_revision : string
+      ; snapshot_revision : string
+      ; catalog_revision : string
+      ; config_state : config_state
+      }
+  | Skill_superseded of
+      { commit_order : string
+      ; applied_order : string
+      }
+  | Skill_workspace_retired of { input_source_revision : string }
+  | Skill_invalid_workspace
+
+type routing_status =
+  | Routing_active
+  | Routing_applied
+
+type keeper_overlay_status =
+  | Keeper_not_configured
+  | Keeper_pending_restart
+  | Keeper_applied
+  | Keeper_preempted_by_env
+  | Keeper_mixed
+
+type exact_output_targets =
+  | Targets_runtime_bindings
+  | Targets_replacement_catalog
+
+type exact_output_registry_status =
+  | Exact_output_registry_applied of exact_output_targets
+  | Exact_output_registry_unpublished
+  | Exact_output_registry_kept of { reason : string }
+
+type applied_at =
+  | Not_applied
+  | Applied_at_string of string
+  | Applied_at_int of int
+  | Applied_at_float of float
+
+type application =
+  { operation : string
+  ; routing_status : routing_status
+  ; routing_requires_restart : bool
+  ; routing_applied_at : applied_at
+  ; keeper_status : keeper_overlay_status
+  ; keeper_requires_restart : bool
+  ; keeper_applied_at : applied_at
+  ; keeper_configured_count : int
+  ; keeper_pending_keys : string list
+  ; keeper_applied_keys : string list
+  ; keeper_preempted_keys : string list
+  ; skills : skill_application
+  ; exact_output_registry : exact_output_registry_status
+  }
+
+type lock_warning =
+  { code : string
+  ; detail : string
+  }
+
+type t =
+  { source_revision : string
+  ; order : string
+  ; durability : durability
+  ; lock_warnings : lock_warning list
+  ; ignored_legacy_keys : string list
+  ; application : application
+  }
+
+val decode : Yojson.Safe.t -> (t, string) result
+val summary : t -> string
+
+val lane_summary : t -> string
+(** Operator-facing file and application outcome for a lane edit. Retains the
+    reason when exact lanes kept their prior configuration and names restart
+    requirements independently of a subsequent list refresh. *)
+
+val lane_needs_attention : t -> bool
+(** Whether the lane receipt carries a durability, application or lock warning. *)
+
+(** What POST /api/v1/runtime/config/raw/preview answers: whether the save
+    route would take the text, and when it would not, why. *)
+type preview =
+  | Can_save
+  | Cannot_save of string
+
+val decode_preview : Yojson.Safe.t -> (preview, string) result
+(** Reads [can_save]. A refusal carries [runtime_validation] when the runtime
+    parser refused, else the schema issues' details. An answer without a
+    boolean [can_save], or a refusal without a reason, is an error, never a
+    pass. *)

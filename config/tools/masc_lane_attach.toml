@@ -1,0 +1,26 @@
+name = "masc_lane_attach"
+description = """
+Attach an optional Lane Add-on package to existing sources.
+
+Adds observations and relationships without replacing Keeper, browser or game ownership. Returns an instance receipt; inspect its asynchronous state. Existing work never requires this layer's approval."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "manifest_path"
+type = "string"
+required = true
+description = "Path to the package lane.toml available to this MASC server."
+
+[[params]]
+name = "run_id"
+type = "string"
+required = true
+description = "Recorded run scope; this identifier does not create an isolated runtime."
+
+[[params]]
+name = "binding"
+type = "object"
+required = true
+additional_properties = true
+description = "Package-defined explicit source and target bindings; preserve observed identities."

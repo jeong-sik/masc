@@ -1,0 +1,20 @@
+name = "toxic"
+light = false
+
+[palette]
+base00 = "0a0f08"
+base01 = "121a0f"
+base02 = "1e2a17"
+base03 = "4a5c3a"
+base04 = "8aa072"
+base05 = "d6e8c4"
+base06 = "e8f5dc"
+base07 = "f6fff0"
+base08 = "ff4d4d"
+base09 = "ff8c1a"
+base0a = "eaff00"
+base0b = "39ff14"
+base0c = "00e5ff"
+base0d = "4d9fff"
+base0e = "b04dff"
+base0f = "ff5ecb"

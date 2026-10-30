@@ -1,0 +1,31 @@
+{
+  "base": "dd72436925365a0028981c8bbb5b9a1e52ef1877",
+  "files": {
+    "bin/dune": "89f1bdf698423f63105e9418d20873e7d10b517d13e536e0dbc5862b808a7563",
+    "bin/masc_tui.ml": "3e3700937d39814ca5495100d88ad0bd6a67fd8ed1f947898830ae60b1a000a8",
+    "bin/masc_tui_lane_inventory.ml": "26e0811625174a38c6050a37ead2b347daf607e20ea345deddf29e8ce2fb53cb",
+    "bin/masc_tui_lane_inventory.mli": "5c796b7d7259424da04d8deffe01f504233481e3ad1f19e8a0ba43b051fa7866",
+    "bin/masc_tui_press.ml": "80236874f98c6c58716b196160051831ebc446371a84112bcd768ef9bee9a9c8",
+    "bin/masc_tui_press.mli": "b398ed27582aac00e45b6e3231c7c29de02142bf6f9fe3e7a01b382ba308a3b0",
+    "bin/masc_tui_render_lanes.ml": "36848120409c397306aea3a7c30529c9e4cea8e5599979655d7f94853768b129",
+    "bin/masc_tui_types.ml": "77ca897208dc28ab1f3ff6418f59f79ef5bce9ee552a754429d03eb915f66267",
+    "docs/guides/lane-inventory.md": "bbb2c2da315d808a767fca20b0bc6bb6f2085a2dcef3686195cf8d3eb2f1e9f0",
+    "test/stanzas/test_tui_keys.inc": "f81c7e3bd74ca3e628fc87e53ecb02de11db0d4fff8362eedda8c77ebeaa3252",
+    "test/test_tui_keys.ml": "b55f26a4f1d0019edd8679aae732d4b94af3f17c7c61f999eea2a40343ffeaf4"
+  },
+  "validation": {
+    "eight_ml_mli_parsers": "PASS",
+    "git_diff_check": "PASS",
+    "published_dependency_46_bytes_compare": "PASS"
+  },
+  "independent_source_review": "PASS, addon-tui-role-groups-independent-review-20261023.md; no P0-P2",
+  "limits": [
+    "typing",
+    "build",
+    "Dune",
+    "OCaml tests",
+    "CI",
+    "installed TUI",
+    "visible UI"
+  ]
+}

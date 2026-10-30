@@ -1,0 +1,333 @@
+open Alcotest
+open Masc
+
+let write_all fd content =
+  let bytes = Bytes.unsafe_of_string content in
+  let rec loop offset =
+    if offset < Bytes.length bytes
+    then
+      let wrote = Unix.write fd bytes offset (Bytes.length bytes - offset) in
+      loop (offset + wrote)
+  in
+  loop 0
+;;
+
+let read_exact fd length =
+  let bytes = Bytes.create length in
+  let rec loop offset =
+    if offset < length
+    then
+      let got = Unix.read fd bytes offset (length - offset) in
+      if got = 0 then failwith "preflight stub: truncated frame"
+      else loop (offset + got)
+  in
+  loop 0;
+  Bytes.unsafe_to_string bytes
+;;
+
+let read_file path =
+  if not (Sys.file_exists path)
+  then ""
+  else
+    let ic = open_in_bin path in
+    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+      really_input_string ic (in_channel_length ic))
+;;
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc content)
+;;
+
+let increment path =
+  let current = Option.value (int_of_string_opt (String.trim (read_file path))) ~default:0 in
+  write_file path (string_of_int (current + 1))
+;;
+
+let stub_main () =
+  let count_path = Sys.argv.(2) in
+  let mode = Sys.argv.(3) in
+  increment count_path;
+  let last = Sys.argv.(Array.length Sys.argv - 1) in
+  if String.equal last "masc-exec-shim --probe"
+  then (
+    match mode with
+    | "unreachable" ->
+      write_all Unix.stderr "connection refused";
+      exit 255
+    | "skew" ->
+      (* One major past whatever this build speaks: the skew is the fact
+         under test, not the number. (One behind is v2, which this build
+         still speaks, so it would not be a skew.) *)
+      write_all Unix.stdout
+        (Printf.sprintf
+           {|{"name":"masc-exec-shim","version":"%d.0.0","capabilities":[]}|}
+           (Exec_ssh_protocol.protocol_version + 1));
+      exit 0
+    | _ ->
+      (* The host's own major, read from the protocol rather than typed:
+         #33372 moved it from 2 to 3 and a literal here turned every good
+         probe into a skew. *)
+      write_all Unix.stdout
+        (Printf.sprintf
+           {|{"name":"masc-exec-shim","version":"%d.0.0","capabilities":[]}|}
+           Exec_ssh_protocol.protocol_version);
+      exit 0)
+  else (
+    let header = read_exact Unix.stdin 8 in
+    let body_len =
+      Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int
+    in
+    let frame = header ^ read_exact Unix.stdin body_len in
+    let request =
+      match Exec_ssh_protocol.decode_request frame with
+      | Ok (request, _) -> request
+      | Error error -> failwith error
+    in
+    let trailer exit =
+      Exec_ssh_protocol.render_trailer
+        { v = Exec_ssh_protocol.newest
+        ; exit = Some exit
+        ; signal = None
+        ; timed_out = false
+        ; shim_error = None
+        ; observed_syscalls = []
+        }
+    in
+    match request.argv with
+    | "git" :: _ ->
+      write_all Unix.stdout "git version 2.50.0\n";
+      write_all Unix.stderr (trailer 0)
+    | "rg" :: _ when String.equal mode "rg-missing" ->
+      write_all Unix.stderr ("rg unavailable\n" ^ trailer 127)
+    | "rg" :: _ ->
+      write_all Unix.stdout "ripgrep 14.1.1\n";
+      write_all Unix.stderr (trailer 0)
+    (* The identity step is conditional on the endpoint having a login at
+       all, which the preflight reads as `test -s <gh config>/hosts.yml`. *)
+    | [ "test"; "-s"; path ] when String.equal (Filename.basename path) "hosts.yml" ->
+      write_all Unix.stderr
+        (trailer (if String.equal mode "gh-unconfigured" then 1 else 0))
+    | "test" :: _ -> write_all Unix.stderr (trailer 0)
+    | "df" :: _ ->
+      let available = if String.equal mode "disk-low" then 1 else 2_097_152 in
+      write_all Unix.stdout
+        (Printf.sprintf
+           "Filesystem 1024-blocks Used Available Capacity Mounted on\nfixture 4000000 10 %d 1%% /srv\n"
+           available);
+      write_all Unix.stderr (trailer 0)
+    | "env" :: _
+      when String.equal mode "gh-missing" || String.equal mode "gh-unconfigured" ->
+      (* No hosts.yml means gh reports no login, exactly as in gh-missing.
+         The two modes differ only in whether the endpoint was ever given
+         one, which is what the preflight now asks first. A fixture where gh
+         succeeds here would pass with or without that question. *)
+      write_all Unix.stderr ("not logged in\n" ^ trailer 1)
+    | "env" :: _ when String.equal mode "gh-blinded" ->
+      write_all Unix.stderr
+        ( "X Failed to log in to github.com account fixture: The token in \
+           hosts.yml is invalid.\n"
+        ^ trailer 1 )
+    | "env" :: _ -> write_all Unix.stderr (trailer 0)
+    | "curl" :: _ when String.equal mode "gh-missing" ->
+      (* gh failed for a real identity reason: the API answers. *)
+      write_all Unix.stderr (trailer 0)
+    | "curl" :: _ ->
+      (* gh failed with the endpoint off the network: DNS dies first. *)
+      write_all Unix.stderr
+        ("curl: (6) Could not resolve host: api.github.com\n" ^ trailer 6)
+    | argv -> failwith ("unexpected preflight argv: " ^ String.concat " " argv));
+  exit 0
+;;
+
+let shell_quote s = "'" ^ String.concat "'\\''" (String.split_on_char '\'' s) ^ "'"
+
+let temp_dir () =
+  let path = Filename.temp_file "masc-ssh-preflight-" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  path
+;;
+
+let make_stub ~dir ~mode =
+  let count_path = Filename.concat dir (mode ^ ".count") in
+  let script_path = Filename.concat dir (mode ^ ".ssh") in
+  write_file script_path
+    (Printf.sprintf "#!/bin/sh\nexec %s --preflight-stub %s %s \"$@\"\n"
+       (shell_quote Sys.executable_name)
+       (shell_quote count_path)
+       (shell_quote mode));
+  Unix.chmod script_path 0o755;
+  script_path, count_path
+;;
+
+let endpoint : Exec_ssh_endpoint.t =
+  { name = "fixture"
+  ; host = "fixture.invalid"
+  ; user = "masc"
+  ; port = 22
+  ; identity_file = ".masc/ssh/fixture.key"
+  ; known_hosts_file = ".masc/ssh/known_hosts.d/fixture"
+  ; remote_root = "/srv/masc/playground"
+  ; connect_timeout_sec = 1
+  ; max_concurrent_sessions = 2
+  ; env_allowlist = []
+  ; capabilities = []
+  ; private_home = false
+  ; allowed_paths = []
+  }
+;;
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+    f
+;;
+
+let with_eio f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:Process_eio.reset_for_testing f
+;;
+
+let state_for_endpoint ~base_path ~ssh_bin endpoint =
+  match
+    Keeper_sandbox_ssh.create ~ssh_bin ~base_path ~keeper_name:"keeper-a"
+      ~endpoint ()
+  with
+  | Ok state -> state
+  | Error error -> fail error
+;;
+
+let invocation_count path =
+  Option.value (int_of_string_opt (String.trim (read_file path))) ~default:0
+;;
+
+let make_state ~base_path ~ssh_bin = state_for_endpoint ~base_path ~ssh_bin endpoint
+;;
+
+let contains_prefix prefix = function
+  | Ok () -> false
+  | Error error -> String.starts_with ~prefix error
+;;
+
+let test_ready_ttl_and_force () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "60" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"ok" in
+  let state = make_state ~base_path ~ssh_bin in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  check (result unit string) "first ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight state);
+  check int "eight probes" 8 (invocation_count count_path);
+  check (result unit string) "cached ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight state);
+  check int "cache avoided respawn" 8 (invocation_count count_path);
+  check (result unit string) "forced ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight ~force:true state);
+  check int "force respawned" 16 (invocation_count count_path)
+;;
+
+let test_reconfigured_endpoint_does_not_inherit_readiness () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "60" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"ok" in
+  let state = make_state ~base_path ~ssh_bin in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  check (result unit string) "original ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight state);
+  List.iter
+    (fun (label, declaration) ->
+       let state = state_for_endpoint ~base_path ~ssh_bin declaration in
+       let before = invocation_count count_path in
+       check (result unit string) (label ^ " checked its own endpoint") (Ok ())
+         (Keeper_sandbox_remote.check_preflight state);
+       let after = invocation_count count_path in
+       check bool (label ^ " ran new probes") true (after > before);
+       check (result unit string) (label ^ " caches only its new result") (Ok ())
+         (Keeper_sandbox_remote.check_preflight state);
+       check int (label ^ " second read uses its own cache") after (invocation_count count_path))
+    [ "host", { endpoint with host = "changed.invalid" }
+    ; "root", { endpoint with remote_root = "/changed/root" }
+    ; "key path", { endpoint with identity_file = "changed-key" }
+    ; "host pin", { endpoint with known_hosts_file = "changed-hosts" }
+    ; "allowlist", { endpoint with env_allowlist = [ "TERM" ] }
+    ; "declared paths", { endpoint with allowed_paths = [ "/app" ] }
+    ];
+  let count = invocation_count count_path in
+  check (result unit string) "original cache remains its own" (Ok ())
+    (Keeper_sandbox_remote.check_preflight state);
+  check int "other declarations do not invalidate original evidence" count (invocation_count count_path)
+;;
+
+let test_zero_ttl_rechecks () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "0" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"ttl-zero" in
+  let state = make_state ~base_path ~ssh_bin in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  check (result unit string) "first ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight state);
+  check (result unit string) "second ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight state);
+  check int "zero TTL respawned every probe" 16 (invocation_count count_path)
+;;
+
+let test_named_failures () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "0" @@ fun () ->
+  List.iter
+    (fun (mode, prefix) ->
+      let base_path = temp_dir () in
+      let ssh_bin, _ = make_stub ~dir:base_path ~mode in
+      let state = make_state ~base_path ~ssh_bin in
+      check bool mode true
+        (contains_prefix prefix
+           (Keeper_sandbox_remote.check_preflight ~force:true state)))
+    [ "unreachable", "remote_ssh_endpoint_unreachable:"
+    ; "skew", "remote_shim_version_skew:"
+    ; "rg-missing", "remote_ripgrep_unavailable:"
+    ; "disk-low", "remote_ssh_disk_low:"
+    ; "gh-missing", "remote_github_identity_missing:"
+    ; "gh-blinded", "remote_github_unreachable:"
+    ]
+;;
+
+let test_absent_github_login_is_not_a_blocker () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "0" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, _ = make_stub ~dir:base_path ~mode:"gh-unconfigured" in
+  let state = make_state ~base_path ~ssh_bin in
+  (* The endpoint has no hosts.yml and `gh auth status` would fail. Until
+     #35412 that refused every tool call the keeper made, including work that
+     never touches GitHub. An endpoint that was never given an identity is not
+     an endpoint with a broken one. *)
+  check (result unit string) "no login, still ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight ~force:true state)
+;;
+
+let () =
+  if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--preflight-stub"
+  then stub_main ()
+  else
+    run "keeper_ssh_preflight"
+      [ ( "preflight"
+        , [ test_case "ready TTL + force" `Quick test_ready_ttl_and_force
+          ; test_case "reconfigured endpoint has independent readiness" `Quick
+              test_reconfigured_endpoint_does_not_inherit_readiness
+          ; test_case "zero TTL rechecks" `Quick test_zero_ttl_rechecks
+          ; test_case "named failures" `Quick test_named_failures
+          ; test_case "absent GitHub login" `Quick
+              test_absent_github_login_is_not_a_blocker
+          ] )
+      ]

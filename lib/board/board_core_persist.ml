@@ -1,0 +1,1080 @@
+(** Board Core — JSONL store logic and persistence. Types are in Board_types. *)
+include Board_core_classify
+include Board_core_payload
+
+let flush_interval_sec = Env_config.Board.flush_interval_sec
+let flusher_inbox_capacity = Env_config.Board.flusher_inbox_capacity
+
+(** Monotonic count of sweep/flush schedule messages skipped because the
+    bounded flusher inbox had no room for the whole batch. *)
+let flusher_schedule_dropped = Atomic.make 0
+let flusher_schedule_dropped_count () = Atomic.get flusher_schedule_dropped
+
+let record_flusher_schedule_drop scheduled_count =
+  (* Single atomic add instead of N increments, so a concurrent reader cannot
+     observe a partial count. [scheduled_count] is a [List.length], so it is
+     non-negative. *)
+  Atomic.fetch_and_add flusher_schedule_dropped scheduled_count |> ignore
+;;
+
+(** Monotonic counter of persist failures (disk full, permission errors, etc.). *)
+let persist_errors = Atomic.make 0
+let persist_error_count () = Atomic.get persist_errors
+let record_persist_error ~where msg =
+  Atomic.incr persist_errors;
+  Log.BoardLog.error "persist error (%s): %s" where msg
+;;
+
+let persist_io_error ~where msg =
+  record_persist_error ~where msg;
+  Error (Io_error (Printf.sprintf "%s: %s" where msg))
+;;
+
+let create_store () =
+  { posts_load_result = Ok ()
+  ; comments_load_result = Ok ()
+  ; votes_load_result = Ok ()
+  ; reactions_load_result = Ok ()
+  ; sub_boards_load_result = Ok ()
+  ; workspace_masc_dir = None
+  ; posts = Hashtbl.create 1024
+  ; comments = Hashtbl.create 4096
+  ; vote_log = Hashtbl.create 2048
+  ; post_count = ref 0
+  ; last_sweep = Time_compat.now ()
+  ; mutex = Eio.Mutex.create ()
+  ; persist_mutex = Eio.Mutex.create ()
+  ; origin_create_mutex = Eio.Mutex.create ()
+  ; karma_cache = None
+  ; sorted_posts_cache = None
+  ; comments_by_post = Hashtbl.create 1024
+  ; reactions = Hashtbl.create 4096
+  ; dirty_posts = false
+  ; dirty_comments = false
+  ; dirty_post_ids = Hashtbl.create 256
+  ; dirty_comment_ids = Hashtbl.create 512
+  ; post_rows = Hashtbl.create 1024
+  ; comment_rows = Hashtbl.create 4096
+  ; last_flush = Time_compat.now ()
+  ; flusher_inbox = Eio.Stream.create flusher_inbox_capacity
+  ; sub_boards = Hashtbl.create 64
+  ; sub_boards_by_slug = Hashtbl.create 64
+  ; posts_by_turn_ref = Hashtbl.create 256
+  ; posts_by_run_id = Hashtbl.create 256
+  }
+;;
+
+let require_persisted_snapshot_readable = function
+  | Ok () -> Ok ()
+  | Error detail -> Error (Io_error detail)
+;;
+
+(* RFC-0233 §7: maintain the origin secondary indexes. Shared by the create
+   path (create_fresh) and the load path (load_persisted_posts) so the two
+   stay in lockstep — a single maintenance site, not an N-of-M copy. *)
+let index_post_origin store (post : post) =
+  match post.origin with
+  | None -> ()
+  | Some (o : post_origin) ->
+    let pid = Post_id.to_string post.id in
+    (match o.turn_ref with
+     | Some tr -> Hashtbl.replace store.posts_by_turn_ref (Ids.Turn_ref.to_string tr) pid
+     | None -> ());
+    (match o.fusion_run_id with
+     | Some run_id -> Hashtbl.replace store.posts_by_run_id run_id pid
+     | None -> ())
+;;
+
+(* Prune the origin indexes when a post is swept / cap-evicted, mirroring the
+   [comments_by_post] cleanup in the sweeper. Without this the index tables
+   would grow unbounded over the store lifetime (the double-lookup in
+   [find_post_by_*] keeps a stale key from returning a wrong post, but the
+   entry would still leak). Single-valued [remove] matches the single-valued
+   [replace] in [index_post_origin]. *)
+let unindex_post_origin store (post : post) =
+  match post.origin with
+  | None -> ()
+  | Some (o : post_origin) ->
+    (match o.turn_ref with
+     | Some tr -> Hashtbl.remove store.posts_by_turn_ref (Ids.Turn_ref.to_string tr)
+     | None -> ());
+    (match o.fusion_run_id with
+     | Some run_id -> Hashtbl.remove store.posts_by_run_id run_id
+     | None -> ())
+;;
+
+(** Remove [value] from the string list stored at [key] in [tbl]. Removes the key entirely when the list becomes empty. *)
+let remove_from_list_index tbl key value =
+  match Hashtbl.find_opt tbl key with
+  | None -> ()
+  | Some ids ->
+    (match List.filter (fun id -> not (String.equal id value)) ids with
+     | [] -> Hashtbl.remove tbl key
+     | filtered -> Hashtbl.replace tbl key filtered)
+;;
+
+(** Invalidate caches that depend on post data *)
+let invalidate_post_caches store =
+  store.karma_cache <- None;
+  store.sorted_posts_cache <- None
+;;
+
+(** Invalidate caches that depend on comment data *)
+let invalidate_comment_caches store = store.karma_cache <- None
+let mark_dirty_post store post_id =
+  store.dirty_posts <- true;
+  Hashtbl.replace store.dirty_post_ids post_id ()
+;;
+let mark_dirty_comment store comment_id =
+  store.dirty_comments <- true;
+  Hashtbl.replace store.dirty_comment_ids comment_id ()
+;;
+
+(** {1 Eio-style Locking with Switch.on_release} *)
+
+let with_lock store f = Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f ())
+
+(** Serialize JSONL writes. Callers must never hold the state mutex while
+    acquiring [persist_mutex]. Acquire the persist lock before taking a state
+    snapshot, and retain it until the snapshot has been written. *)
+let with_persist_lock store f =
+  let started = Time_compat.now () in
+  Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
+    let acquired = Time_compat.now () in
+    Board_metrics_hooks.observe_persist_lock_acquire_sec
+      (acquired -. started);
+    let result = f () in
+    let released = Time_compat.now () in
+    Board_metrics_hooks.observe_persist_lock_held_sec
+      (released -. acquired);
+    result)
+;;
+
+(** {1 Sweeper - Aggressive Cleanup} *)
+let vote_key_target key =
+  match Board_vote_key.of_string key with
+  | None -> None
+  | Some vote ->
+    let target_id = Board_vote_key.target_id vote in
+    (match Board_vote_key.target_kind vote with
+     | Board_vote_key.Post -> Some (`Post, target_id)
+     | Board_vote_key.Comment -> Some (`Comment, target_id))
+;;
+
+let sweep store =
+  with_lock store (fun () ->
+    (* Best-effort loaded rows remain readable, but cannot authorize deletion
+       of a target and its dependents until all four sources loaded fully.
+       The loader retains the typed failures for diagnosis and healthy reload. *)
+    match store.posts_load_result, store.comments_load_result,
+          store.votes_load_result, store.reactions_load_result with
+    | Error _, _, _, _ | _, Error _, _, _
+    | _, _, Error _, _ | _, _, _, Error _ -> 0, 0
+    | Ok (), Ok (), Ok (), Ok () ->
+    let now = Time_compat.now () in
+    let removed_posts = ref 0 in
+    let removed_comments = ref 0 in
+    let expired_posts =
+      Hashtbl.fold
+        (fun id (post : post) acc ->
+           if
+             Stdlib.Float.compare post.expires_at 0.0 > 0
+             && Stdlib.Float.compare post.expires_at now < 0
+             && !removed_posts < Limits.sweeper_batch_size
+           then (
+             Stdlib.incr removed_posts;
+             id :: acc)
+           else acc)
+        store.posts
+        []
+    in
+    (* Both ordinary expiry and a partial post cascade must update the
+       surviving post's reply count and index before the next snapshot. *)
+    let remove_comment cid =
+      (match Hashtbl.find_opt store.comments cid with
+       | Some c ->
+         let post_key = Post_id.to_string c.post_id in
+         remove_from_list_index store.comments_by_post post_key cid;
+         (match Hashtbl.find_opt store.posts post_key with
+          | Some post ->
+            Hashtbl.replace store.posts post_key
+              { post with reply_count = post.reply_count - 1 };
+            mark_dirty_post store post_key
+          | None -> ())
+       | None -> ());
+      Hashtbl.remove store.comments cid;
+      mark_dirty_comment store cid
+    in
+    (* Drain each expired post's comments within the shared comment batch.
+       Keep the post until its last comment is removed, so even a cascade
+       larger than the batch converges without stranding replies. *)
+    let swept_posts = ref [] in
+    let cascaded_comment_ids = ref [] in
+    List.iter
+      (fun id ->
+         let remaining_budget = Limits.sweeper_batch_size - !removed_comments in
+         let cascade_ids, cascade_count, comments_remain =
+           Hashtbl.fold
+             (fun key (c : comment) (ids, count, remain) ->
+                if not (String.equal (Post_id.to_string c.post_id) id) then
+                  ids, count, remain
+                else if count < remaining_budget then
+                  key :: ids, count + 1, remain
+                else ids, count, true)
+             store.comments
+             ([], 0, false)
+         in
+         List.iter remove_comment cascade_ids;
+         removed_comments := !removed_comments + cascade_count;
+         cascaded_comment_ids := cascade_ids @ !cascaded_comment_ids;
+         if comments_remain then
+           Stdlib.decr removed_posts
+         else (
+           (match Hashtbl.find_opt store.posts id with
+            | Some p -> unindex_post_origin store p
+            | None -> ());
+           Hashtbl.remove store.posts id;
+           Hashtbl.remove store.comments_by_post id;
+           swept_posts := id :: !swept_posts;
+           Stdlib.decr store.post_count;
+           mark_dirty_post store id))
+      expired_posts;
+    let expired_comments =
+      Hashtbl.fold
+        (fun id (comment : comment) acc ->
+           if
+             Stdlib.Float.compare comment.expires_at 0.0 > 0
+             && Stdlib.Float.compare comment.expires_at now < 0
+             && !removed_comments < Limits.sweeper_batch_size
+           then (
+             Stdlib.incr removed_comments;
+             id :: acc)
+           else acc)
+        store.comments
+        []
+    in
+    (* [reply_count] is kept by the write that adds a comment and rebuilt
+       from the comments on load; a comment the sweeper removes has to take
+       its count with it, or the post keeps announcing a reply nobody can
+       read until the next restart. Each removal is marked dirty the way
+       [add_comment] marks its write, so the next flush writes the snapshot
+       without the expired rows instead of waiting for an unrelated edit. *)
+    List.iter remove_comment expired_comments;
+    (* Dependent rows die with their target, at the moment the target dies:
+       the expired ids are in hand right here. The previous pass instead
+       scanned for rows whose target is missing from the in-memory tables,
+       which cannot tell a deleted target from one that failed to load or
+       loaded empty; on 2026-09-19 a board that came up with no posts read
+       every vote as an orphan. A row whose target is absent is left alone —
+       [recalculate_vote_counts] never counts it, and the target may still
+       arrive on the next load. *)
+    let expired_targets = Hashtbl.create 16 in
+    List.iter (fun id -> Hashtbl.replace expired_targets (`Post, id) ()) !swept_posts;
+    List.iter
+      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
+      expired_comments;
+    List.iter
+      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
+      !cascaded_comment_ids;
+    let removed_reactions, removed_votes =
+      if Hashtbl.length expired_targets = 0
+      then 0, 0
+      else begin
+        let expired_reaction_keys =
+          Hashtbl.fold
+            (fun key (reaction : reaction) acc ->
+               let target =
+                 match reaction.target_type with
+                 | Reaction_post -> `Post, reaction.target_id
+                 | Reaction_comment -> `Comment, reaction.target_id
+               in
+               if Hashtbl.mem expired_targets target then key :: acc else acc)
+            store.reactions
+            []
+        in
+        let expired_vote_keys =
+          Hashtbl.fold
+            (fun key _ acc ->
+               match vote_key_target key with
+               | Some target when Hashtbl.mem expired_targets target -> key :: acc
+               | Some _ | None -> acc)
+            store.vote_log
+            []
+        in
+        List.iter (Hashtbl.remove store.reactions) expired_reaction_keys;
+        List.iter (Hashtbl.remove store.vote_log) expired_vote_keys;
+        List.length expired_reaction_keys, List.length expired_vote_keys
+      end
+    in
+    if removed_reactions > 0 || removed_votes > 0 then
+      Log.BoardLog.debug
+        "sweep removed %d reactions and %d votes of expired targets"
+        removed_reactions
+        removed_votes;
+    (* The sorted post cache holds post records, so a changed [reply_count]
+       invalidates it as much as a removed post does. *)
+    if !removed_posts > 0 || !removed_comments > 0 then invalidate_post_caches store;
+    if !removed_comments > 0 then invalidate_comment_caches store;
+    store.last_sweep <- now;
+    !removed_posts, !removed_comments)
+;;
+
+(** Auto-sweep if needed, delegates to flusher actor inbox *)
+type scheduled_flusher_msg =
+  { msg : flusher_msg
+  ; previous_ts : float
+  ; reserved_ts : float
+  }
+
+let rollback_scheduled_msg store scheduled =
+  with_lock store (fun () ->
+    match scheduled.msg with
+    | Sweep ->
+      if Stdlib.Float.equal store.last_sweep scheduled.reserved_ts
+      then store.last_sweep <- scheduled.previous_ts
+    | Flush ->
+      if Stdlib.Float.equal store.last_flush scheduled.reserved_ts
+      then store.last_flush <- scheduled.previous_ts)
+;;
+
+let enqueue_scheduled_msg store scheduled =
+  try Eio.Stream.add store.flusher_inbox scheduled.msg
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    rollback_scheduled_msg store scheduled;
+    Printexc.raise_with_backtrace exn bt
+;;
+
+let enqueue_scheduled_msgs store scheduled =
+  let scheduled_count = List.length scheduled in
+  let inbox_len = Eio.Stream.length store.flusher_inbox in
+  if scheduled_count = 0
+  then ()
+  else if scheduled_count > flusher_inbox_capacity - inbox_len
+  then (
+    record_flusher_schedule_drop scheduled_count;
+    List.iter (rollback_scheduled_msg store) scheduled;
+    Log.BoardLog.warn
+      "board flusher inbox full; skipped scheduling sweep/flush messages \
+       (queued=%d, requested=%d, capacity=%d)"
+      inbox_len scheduled_count flusher_inbox_capacity)
+  else (
+    (* [maybe_sweep] is the only producer of these messages and reserves
+       timestamps under [store.mutex] before this check. Once there is room for
+       the whole batch, these adds should not block on capacity. *)
+    List.iter (enqueue_scheduled_msg store) scheduled)
+;;
+
+let maybe_sweep store =
+  let scheduled =
+    with_lock store (fun () ->
+      let now = Time_compat.now () in
+      let scheduled = [] in
+      let scheduled =
+        if
+          Stdlib.Float.compare
+            (now -. store.last_sweep)
+            (Stdlib.Float.of_int Limits.sweeper_interval_sec)
+          > 0
+        then (
+          let previous_ts = store.last_sweep in
+          store.last_sweep <- now;
+          { msg = Sweep; previous_ts; reserved_ts = now } :: scheduled)
+        else scheduled
+      in
+      let scheduled =
+        if Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0
+        then (
+          let previous_ts = store.last_flush in
+          store.last_flush <- now;
+          { msg = Flush; previous_ts; reserved_ts = now } :: scheduled)
+        else scheduled
+      in
+      List.rev scheduled)
+  in
+  enqueue_scheduled_msgs store scheduled
+;;
+
+let reset_sweep_schedule_for_test store =
+  with_lock store (fun () ->
+    store.last_sweep <- 0.0;
+    store.last_flush <- 0.0)
+;;
+
+let sweep_schedule_timestamps_for_test store =
+  with_lock store (fun () -> store.last_sweep, store.last_flush)
+;;
+
+(** {1 Persistence Paths} *)
+let board_base_path = Board_paths.board_base_path
+let board_masc_dir = Board_paths.board_masc_dir
+let persist_path = Board_paths.persist_path
+let comments_path = Board_paths.comments_path
+let reactions_path = Board_paths.reactions_path
+let sub_boards_path = Board_paths.sub_boards_path
+let ensure_dir = Board_paths.ensure_dir
+let ensure_masc_dir = Board_paths.ensure_masc_dir
+include Board_core_json
+
+(** {1 Rewrite Helpers} *)
+let posts_jsonl_unlocked ?replacement store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun key (pst : post) ->
+       let pst = match replacement with
+         | Some (updated : post) when String.equal key (Post_id.to_string updated.id) -> updated
+         | Some _ | None -> pst in
+       Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
+       Buffer.add_char buf '\n')
+    store.posts;
+  Buffer.contents buf
+;;
+(* A snapshot replaces the whole file with what memory holds. The loader reads
+   every line and keeps each row it can decode, but a line it cannot decode
+   never reaches memory, so the rewrite would delete that line: the only
+   evidence of the damage, possibly a row from a newer schema (#38595). Every
+   posts and comments snapshot write goes through the two functions below,
+   which refuse while the load that filled memory was partial. Appends do not
+   come here and never delete a row. *)
+let refuse_partial_snapshot ~where ~file load_result =
+  match load_result with
+  | Ok () -> Ok ()
+  | Error detail ->
+    persist_io_error ~where
+      (Printf.sprintf
+         "%s has a line the loader could not read (%s); a rewrite from memory would \
+          drop that line, so the file is left as it is until it loads fully (fix \
+          or remove that line, then restart)"
+         file detail)
+;;
+
+let save_posts_snapshot store content =
+  match refuse_partial_snapshot ~where:"rewrite_posts" ~file:"posts" store.posts_load_result with
+  | Error _ as refused -> refused
+  | Ok () ->
+    (try
+       ensure_masc_dir ();
+       let path = persist_path () in
+       match Fs_compat.save_file_atomic path content with
+       | Ok () -> Ok ()
+       | Error msg -> persist_io_error ~where:"rewrite_posts" msg
+     with
+     | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg)
+;;
+(* The only caller rewrites the snapshot to drop an orphan row an aborted
+   append left on disk. Dropping the write's Error meant a failed rewrite left
+   the orphan there with nothing scheduled to try again, so a restart revived a
+   post that never reached memory -- the loader cannot tell a self-contained
+   row was never committed. Re-marking puts the snapshot back in the queue for
+   the next flush, the same way board_votes recovers (#29361). *)
+let rewrite_posts store =
+  with_persist_lock store (fun () ->
+    let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
+    match save_posts_snapshot store content with
+    | Ok () -> ()
+    | Error _ ->
+      with_lock store (fun () ->
+        store.dirty_posts <- true;
+        Hashtbl.iter
+          (fun key _ -> Hashtbl.replace store.dirty_post_ids key ())
+          store.posts))
+;;
+let comments_jsonl_unlocked store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun _ (cmt : comment) ->
+       Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
+       Buffer.add_char buf '\n')
+    store.comments;
+  Buffer.contents buf
+;;
+let save_comments_snapshot store content =
+  match
+    refuse_partial_snapshot ~where:"rewrite_comments" ~file:"comments"
+      store.comments_load_result
+  with
+  | Error _ as refused -> refused
+  | Ok () ->
+    (try
+       ensure_masc_dir ();
+       match Fs_compat.save_file_atomic (comments_path ()) content with
+       | Ok () -> Ok ()
+       | Error msg -> persist_io_error ~where:"rewrite_comments" msg
+     with
+     | Sys_error msg -> persist_io_error ~where:"rewrite_comments" msg)
+;;
+(* Snapshot capture and write share the persist lock, so a waiting rewrite
+   cannot overwrite a newer committed snapshot. A refused or failed write stays
+   scheduled for the next flush, as [rewrite_posts] does. *)
+let rewrite_comments store =
+  with_persist_lock store (fun () ->
+    let content = with_lock store (fun () -> comments_jsonl_unlocked store) in
+    match save_comments_snapshot store content with
+    | Ok () -> ()
+    | Error _ ->
+      with_lock store (fun () ->
+        store.dirty_comments <- true;
+        Hashtbl.iter
+          (fun key _ -> Hashtbl.replace store.dirty_comment_ids key ())
+          store.comments))
+;;
+let reactions_jsonl_unlocked store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       Buffer.add_string buf (Yojson.Safe.to_string (reaction_to_yojson reaction));
+       Buffer.add_char buf '\n')
+    store.reactions;
+  Buffer.contents buf
+;;
+let save_reactions_jsonl_result content =
+  try
+    ensure_masc_dir ();
+    let path = reactions_path () in
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_reactions" msg
+  with
+  | Sys_error msg -> persist_io_error ~where:"rewrite_reactions" msg
+;;
+
+(** {1 Append Helpers}  RFC-0091: [append_post] / [append_comment] are *create-only fast paths*. *)
+let append_post (p : post) =
+  try
+    ensure_masc_dir ();
+    let path = persist_path () in
+    Fs_compat.append_file path (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
+    Ok ()
+  with
+  | Sys_error msg -> persist_io_error ~where:"append_post" msg
+;;
+let append_comment (c : comment) =
+  try
+    ensure_masc_dir ();
+    let path = comments_path () in
+    Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
+    Ok ()
+  with
+  | Sys_error msg -> persist_io_error ~where:"append_comment" msg
+;;
+
+let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
+let sub_board_access_of_string_opt = Board_sub_board_json.sub_board_access_of_string_opt
+let sub_board_access_field_of_yojson =
+  Board_sub_board_json.sub_board_access_field_of_yojson
+let sub_board_post_counts_unlocked store =
+  let counts = Hashtbl.create 64 in
+  Hashtbl.iter
+    (fun _ (p : post) ->
+       match p.hearth with
+       | None -> ()
+       | Some slug ->
+         let count = Hashtbl.find_opt counts slug |> Option.value ~default:0 in
+         Hashtbl.replace counts slug (count + 1))
+    store.posts;
+  counts
+;;
+let sub_board_post_count_from_counts counts slug =
+  Hashtbl.find_opt counts slug |> Option.value ~default:0
+;;
+let sub_board_with_post_count_unlocked store (sb : sub_board) =
+  let counts = sub_board_post_counts_unlocked store in
+  { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
+;;
+let sub_board_with_post_count counts (sb : sub_board) =
+  { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
+;;
+let sub_board_author_allowed (sb : sub_board) ~author_id =
+  let author = Agent_id.to_string author_id in
+  let owner = Agent_id.to_string sb.owner in
+  match sb.access with
+  | Open -> true
+  | Owner_only -> String.equal author owner
+  | Members_only ->
+    String.equal author owner
+    || List.exists
+         (fun member_id -> String.equal author (Agent_id.to_string member_id))
+         sb.members
+;;
+let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
+  match hearth with
+  | None -> Ok ()
+  | Some slug ->
+    (match Hashtbl.find_opt store.sub_boards_by_slug slug with
+     | None -> Ok ()
+     | Some id ->
+       (match Hashtbl.find_opt store.sub_boards id with
+        | None -> Ok ()
+        | Some sb when sub_board_author_allowed sb ~author_id -> Ok ()
+        | Some sb ->
+          let author = Agent_id.to_string author_id in
+          let access = sub_board_access_to_string sb.access in
+          Error
+            (Validation_error
+               (Printf.sprintf "Sub-board %S is %s; %s cannot post" sb.slug access author))))
+;;
+
+(** {1 Post Operations} *)
+let create_post_with_audience
+      store
+      ~lookup
+      ~author
+      ~content
+      ?title
+      ?body
+      ~post_kind
+      ?meta_json
+      ?(visibility = Internal)
+      ?(ttl_hours = Limits.default_ttl_hours)
+  ?hearth
+  ?thread_id
+  ?origin
+  ()
+  : (post_creation, board_error) Result.t
+  =
+  maybe_sweep store;
+  match Agent_id.of_string author with
+  | Error e -> Error e
+  | Ok author_id ->
+    if ttl_hours < 0
+    then Error (Validation_error "ttl_hours must be non-negative")
+    else
+    let hearth =
+      match hearth with
+      | None -> None
+      | Some h ->
+        let normalized = String.lowercase_ascii (String.trim h) in
+        if String.equal normalized "" then None else Some normalized
+    in
+    let expires_at =
+      let now = Time_compat.now () in
+      if ttl_hours = 0
+      then 0.0
+      else now +. (Stdlib.Float.of_int ttl_hours *. Masc_time_constants.hour)
+    in
+    match
+      normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()
+    with
+    | Error (Board_core_payload.Meta_not_assoc payload) ->
+        Error
+          (Validation_error
+             (Printf.sprintf
+                "Malformed meta_json: expected JSON object, got %s"
+                (Yojson.Safe.to_string payload)))
+    | Ok (normalized_title, normalized_body, normalized_kind, normalized_meta)
+      ->
+    if String.length normalized_body = 0
+    then Error (Validation_error "Content cannot be empty")
+    else
+      match
+        Board_audience.audience_for_post
+          ~lookup
+          ~post_kind:normalized_kind
+          ~visibility
+          ~title:normalized_title
+          ~content:normalized_body
+      with
+      | Error _ as error -> error
+      | Ok (audience, unresolved) ->
+      (* Write-ahead (PR #28934 class, #28952): validate under
+         [with_lock] with no mutation, then hold the persistence lock across the durable
+         append and the in-memory commit under [with_lock]. The previous shape mutated
+         first and appended second, so a racing [flush_dirty] could
+         snapshot-write a post whose durable append was about to fail
+         and be rolled back — reviving it from the snapshot on restart.
+         If staging rejects or the append fails, nothing was mutated. *)
+      let staged =
+        with_lock store (fun () ->
+          match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
+            | Error e -> Error e
+            | Ok () ->
+              let now = Time_compat.now () in
+              Ok
+                { id = Post_id.generate ()
+                ; author = author_id
+                ; title = normalized_title
+                ; body = normalized_body
+                ; post_kind = normalized_kind
+                ; meta_json = normalized_meta
+                ; visibility
+                ; audience = Some audience
+                ; created_at = now
+                ; content_updated_at = now
+                ; updated_at = now
+                ; expires_at
+                ; votes_up = 0
+                ; votes_down = 0
+                ; reply_count = 0
+                ; pinned = false
+                ; hearth
+                ; thread_id
+                ; origin
+                ; closed = None
+                })
+      in
+      match staged with
+      | Error _ as e -> e
+      | Ok post ->
+        (match with_persist_lock store (fun () ->
+           match append_post post with
+           | Error _ as e -> e
+           | Ok () -> Ok (with_lock store (fun () ->
+               (* Commit re-checks the policy: staging validated it, but
+                  it can flip while the append is in flight, and commit
+                  is the authoritative gate — a durable row without a
+                  commit stays provisional. *)
+               match
+                 validate_sub_board_post_policy_unlocked store ~author_id ~hearth
+               with
+               | Error _ as e -> e
+               | Ok () ->
+                 Hashtbl.add store.posts (Post_id.to_string post.id) post;
+                 index_post_origin store post;
+                 Stdlib.incr store.post_count;
+                 invalidate_post_caches store;
+                 Ok ()) )) with
+         | Error _ as e -> e
+         | Ok committed ->
+           (match committed with
+            | Ok () -> Ok { post; audience; unresolved }
+            | Error e ->
+              (* The appended row is an orphan on disk (the policy
+                 flipped mid-append; the post never reached memory).
+                 Rewrite the posts snapshot to dispose of it — the
+                 snapshot cannot contain the orphan. If the rewrite
+                 itself fails, the next successful snapshot rewrite
+                 disposes of the row; a restart before that would
+                 revive the post, because a post row is self-contained
+                 and the loader cannot tell it was never committed. *)
+              rewrite_posts store;
+              Error e))
+;;
+
+let create_post store ~lookup ~author ~content ?title ?body ~post_kind ?meta_json
+      ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
+  =
+  create_post_with_audience
+    store
+    ~lookup
+    ~author
+    ~content
+    ?title
+    ?body
+    ~post_kind
+    ?meta_json
+    ?visibility
+    ?ttl_hours
+    ?hearth
+    ?thread_id
+    ?origin
+    ()
+  |> Result.map (fun creation -> creation.post)
+;;
+
+type create_post_once_result =
+  | Post_created of post_creation
+  | Post_already_present of post
+
+type post_edit =
+  { edited : post
+  ; recorded_audience : audience
+  ; unresolved : string list
+  ; content_changed : bool
+  }
+
+let create_post_once_by_fusion_run_id
+      store
+      ~lookup
+      ~fusion_run_id
+      ~author
+      ~content
+      ~post_kind
+      ?meta_json
+      ~visibility
+      ~ttl_hours
+      ~origin
+      ()
+  =
+  let option_equal equal left right =
+    match left, right with
+    | None, None -> true
+    | Some left, Some right -> equal left right
+    | None, Some _ | Some _, None -> false
+  in
+  let origin_equal left right =
+    option_equal Ids.Turn_ref.equal left.turn_ref right.turn_ref
+    && option_equal String.equal left.source right.source
+    && option_equal String.equal left.fusion_run_id right.fusion_run_id
+  in
+  let post_kind_equal left right =
+    match left, right with
+    | Human_post, Human_post
+    | Automation_post, Automation_post
+    | System_post, System_post -> true
+    | Human_post, (Automation_post | System_post)
+    | Automation_post, (Human_post | System_post)
+    | System_post, (Human_post | Automation_post) -> false
+  in
+  let visibility_equal left right =
+    match left, right with
+    | Public, Public
+    | Unlisted, Unlisted
+    | Internal, Internal
+    | Direct, Direct -> true
+    | Public, (Unlisted | Internal | Direct)
+    | Unlisted, (Public | Internal | Direct)
+    | Internal, (Public | Unlisted | Direct)
+    | Direct, (Public | Unlisted | Internal) -> false
+  in
+  if String.equal fusion_run_id ""
+  then Error (Validation_error "fusion_run_id must not be empty")
+  else if ttl_hours < 0
+  then Error (Validation_error "ttl_hours must be non-negative")
+  else
+    match origin.fusion_run_id with
+    | Some origin_run_id when String.equal origin_run_id fusion_run_id ->
+      (match
+         Agent_id.of_string author,
+         normalize_post_payload ~content ~post_kind ?meta_json ()
+       with
+       | Error error, _ -> Error error
+       | _, Error (Meta_not_assoc payload) ->
+         Error
+           (Validation_error
+              (Printf.sprintf
+                 "Malformed meta_json: expected JSON object, got %s"
+                 (Yojson.Safe.to_string payload)))
+       | Ok author_id, Ok (title, body, post_kind, meta_json) ->
+         if String.equal body ""
+         then Error (Validation_error "Content cannot be empty")
+         else
+           Eio.Mutex.use_rw ~protect:true store.origin_create_mutex (fun () ->
+             maybe_sweep store;
+             let existing_post =
+               with_lock store (fun () ->
+                 match Hashtbl.find_opt store.posts_by_run_id fusion_run_id with
+                 | None -> None
+                 | Some post_id -> Hashtbl.find_opt store.posts post_id)
+             in
+             match existing_post with
+             | Some post ->
+               let exact_replay =
+                 String.equal (Agent_id.to_string post.author) (Agent_id.to_string author_id)
+                 && String.equal post.title title
+                 && String.equal post.body body
+                 && post_kind_equal post.post_kind post_kind
+                 && option_equal Yojson.Safe.equal post.meta_json meta_json
+                 && visibility_equal post.visibility visibility
+                 && option_equal origin_equal post.origin (Some origin)
+                 (* [hearth]/[thread_id] are excluded: this creation path never
+                    sets them, so a post-*creation* hearth binding is out-of-band
+                    metadata and must not turn a legitimate replay into an
+                    [Already_exists] conflict. *)
+               in
+               if exact_replay
+               then Ok (Post_already_present post)
+               else
+                 Error
+                   (Already_exists
+                      (Printf.sprintf
+                         "conflicting Fusion Board projection for run_id=%S"
+                         fusion_run_id))
+             | None ->
+               create_post_with_audience store ~lookup ~author ~content ~post_kind
+                 ?meta_json ~visibility ~ttl_hours ~origin ()
+               |> Result.map (fun creation -> Post_created creation)))
+    | Some origin_run_id ->
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "fusion_run_id mismatch: argument=%S origin=%S"
+              fusion_run_id
+              origin_run_id))
+    | None ->
+      Error
+        (Validation_error
+           "create_post_once_by_fusion_run_id requires typed fusion origin")
+;;
+
+(* Owner-gated in-place edit of an existing post's title/body. The edited content is
+   normalized exactly like [create_post], with the existing
+   metadata passed through [normalize_meta_json] so an edit cannot silently
+   lose it. [post_kind]/[visibility]/[hearth]/[thread_id]/[origin] are
+   preserved. Author mismatch returns [Unauthorized] (no silent ignore).
+   Normalization and the audience depend on the existing post's [post_kind],
+   [visibility] and [meta_json], and the audience asks the recipient lookup,
+   which reads Keeper settings from disk. They are worked out before the locks
+   on the post as it stands. Under the locks that result is used only if what
+   it was worked out from is unchanged; otherwise both locks are released and
+   it is worked out again, so no write is based on a post it did not see.
+   Repeated concurrent changes can delay the edit; yielding between attempts
+   lets other fibers run and permits cancellation without holding either lock.
+   An edit that leaves the text alone keeps a recorded audience. If no
+   audience was recorded, even unchanged text needs an audience calculated;
+   resolving its address candidates may ask the lookup and fail. *)
+let update_post_with_outcome
+      store
+      ~lookup
+      ~post_id
+      ~editor
+      ~content
+      ?title
+      ?body
+      ?new_author
+      ()
+  : (post_edit, board_error) Result.t
+  =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+  match Agent_id.of_string editor with
+  | Error e -> Error e
+  | Ok editor_id ->
+    let key = Post_id.to_string pid in
+    (* What the edit stores for [existing], leaving out who owns it: the
+       normalized text, its meta and the audience the text names. Seeded with
+       the existing post's metadata so body edits cannot erase it. *)
+    let plan (existing : post) =
+      match
+        normalize_post_payload
+          ~content
+          ?title
+          ?body
+          ~post_kind:existing.post_kind
+          ?meta_json:existing.meta_json
+          ()
+      with
+      | Error (Board_core_payload.Meta_not_assoc payload) ->
+        Error
+          (Validation_error
+             (Printf.sprintf
+                "Malformed meta_json: expected JSON object, got %s"
+                (Yojson.Safe.to_string payload)))
+      | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
+        if String.length normalized_body = 0
+        then Error (Validation_error "Content cannot be empty")
+        else (
+          match existing.audience with
+          | Some recorded
+            when String.equal existing.title normalized_title
+                 && String.equal existing.body normalized_body ->
+            (* The text is the one the recorded audience was worked out from.
+               An edit that leaves it alone does not address anybody anew, so
+               the audience stays as written and the lookup is not asked: a
+               declaration that changed since then does not rewrite it. *)
+            Ok (normalized_title, normalized_body, normalized_meta, recorded, [])
+          | Some _ | None ->
+            Board_audience.audience_for_post
+              ~lookup
+              ~post_kind:existing.post_kind
+              ~visibility:existing.visibility
+              ~title:normalized_title
+              ~content:normalized_body
+            |> Result.map (fun (audience, unresolved) ->
+              normalized_title, normalized_body, normalized_meta, audience, unresolved))
+    in
+    (* What [plan] read from the post.  A vote or a comment replaces the record
+       and leaves these alone, so it does not spoil a plan; a write that changes
+       one of them does. *)
+    let same_plan_inputs (seen : post) (existing : post) =
+      seen.post_kind = existing.post_kind
+      && seen.visibility = existing.visibility
+      && seen.meta_json == existing.meta_json
+      && seen.audience == existing.audience
+      && String.equal seen.title existing.title
+      && String.equal seen.body existing.body
+    in
+    (* The first plan is made only for the owner of the snapshot. If ownership
+       changes after a snapshot, a plan based on it may still ask the lookup;
+       the editor must own the current post under the locks before any save. *)
+    let owned_by_editor (existing : post) =
+      String.equal (Agent_id.to_string existing.author) (Agent_id.to_string editor_id)
+    in
+    let planned =
+      match with_lock store (fun () -> Hashtbl.find_opt store.posts key) with
+      | Some existing when owned_by_editor existing -> Some (existing, plan existing)
+      | Some _ | None -> None
+    in
+    (* Persist-before-commit: acquire persistence first, then state. Keeping
+       state locked through the write preserves unrelated concurrent fields
+       without a rollback or a stale staged-row replacement. *)
+    let rec commit planned =
+      let outcome =
+        with_persist_lock store (fun () ->
+          with_lock store (fun () ->
+            match Hashtbl.find_opt store.posts key with
+            | None -> `Finished (Error (Post_not_found post_id))
+            | Some existing ->
+              let owner = Agent_id.to_string existing.author in
+              let editor_str = Agent_id.to_string editor_id in
+              if not (String.equal owner editor_str)
+              then
+                `Finished
+                  (Error
+                     (Unauthorized
+                        (Printf.sprintf
+                           "agent %s cannot edit post %s owned by %s"
+                           editor_str
+                           key
+                           owner)))
+              else
+                let next_author_result =
+                  match new_author with
+                  | None -> Ok existing.author
+                  | Some value -> Agent_id.of_string value
+                in
+                (match next_author_result with
+                 | Error e -> `Finished (Error e)
+                 | Ok next_author ->
+                   (* Normalized identically to create. [post_kind] is passed
+                      through and the existing post's kind is preserved. *)
+                   match planned with
+                   | Some (seen, result) when same_plan_inputs seen existing ->
+                     `Finished
+                       (match result with
+                        | Error error -> Error error
+                        | Ok (normalized_title, normalized_body, normalized_meta, audience, unresolved) ->
+                          let content_changed =
+                            not (String.equal existing.title normalized_title
+                                 && String.equal existing.body normalized_body
+                                 && String.equal (Agent_id.to_string existing.author)
+                                      (Agent_id.to_string next_author))
+                          in
+                          let now = Time_compat.now () in
+                          let updated =
+                            { existing with
+                              author = next_author
+                            ; title = normalized_title
+                            ; body = normalized_body
+                            ; meta_json = normalized_meta
+                            ; audience = Some audience
+                            ; content_updated_at =
+                                if content_changed then now else existing.content_updated_at
+                            ; updated_at = now
+                            }
+                          in
+                          let snapshot = posts_jsonl_unlocked ~replacement:updated store in
+                          match save_posts_snapshot store snapshot with
+                          | Error _ as error -> error
+                          | Ok () ->
+                            Hashtbl.replace store.posts key updated;
+                            mark_dirty_post store key;
+                            invalidate_post_caches store;
+                            Ok
+                              { edited = updated
+                              ; recorded_audience = audience
+                              ; unresolved
+                              ; content_changed
+                              })
+                   | Some _ | None -> `Replan existing)))
+      in
+      match outcome with
+      | `Finished result -> result
+      | `Replan existing ->
+        Eio.Fiber.yield ();
+        commit (Some (existing, plan existing))
+    in
+    commit planned
+;;

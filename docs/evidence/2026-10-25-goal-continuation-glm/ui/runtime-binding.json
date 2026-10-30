@@ -1,0 +1,100 @@
+{
+  "observed_at": "2026-10-25T00:06:04.005272+00:00",
+  "scope": "Actual isolated ordinary HTTP GLM backend plus separate Root16 Vite source; no install/vendor/native outcome proof",
+  "backend_identity_file": {
+    "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+    "binary": "/tmp/masc-goal-runtime-32805eb7/masc",
+    "base_path": "/private/tmp/masc-goal-canary-32805eb7-glm53",
+    "pid": 49755,
+    "port": 51535,
+    "provider_proxy_port": 51429,
+    "model": "glm-5.3",
+    "runtime_id": "glm-coding.glm-5-3",
+    "pure_single_provider": true,
+    "fallback_enabled": false,
+    "production_deployment": false
+  },
+  "health_build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "commit": "32805eb764eab2710262446e925b0ea5c3a44c08",
+    "commit_source": "embedded",
+    "binary_commit": "32805eb764eab2710262446e925b0ea5c3a44c08",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "98cd486335f7a40d2d49cc05501a52e1b4aee958732453405db8ded17e4de8b7",
+    "binary_commit_unix_ts": 1792862940.0,
+    "binary_commit_age_seconds": 3683,
+    "executable_path": "/private/tmp/masc-goal-runtime-32805eb7/masc",
+    "executable_dir": "/private/tmp/masc-goal-runtime-32805eb7",
+    "runtime_instance_id": "01a16f13-ad99-7000-a609-8d7c90507ff8",
+    "started_at": "2026-10-24T18:02:03Z",
+    "uptime_seconds": 1700
+  },
+  "health_paths": {
+    "cwd": "/private/tmp/masc-goal-canary-32805eb7-glm53",
+    "effective_base_path": "/private/tmp/masc-goal-canary-32805eb7-glm53",
+    "effective_masc_root": "/private/tmp/masc-goal-canary-32805eb7-glm53/.masc",
+    "current_task_path": "/private/tmp/masc-goal-canary-32805eb7-glm53/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": false,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/tmp/masc-goal-canary-32805eb7-glm53",
+    "env_masc_base_path": "/private/tmp/masc-goal-canary-32805eb7-glm53",
+    "resolution_source": "explicit_cli"
+  },
+  "frontend_git_head": "2bc6ae8fa1904d8232c8ea0738e0b14bab824945",
+  "frontend_root": "/tmp/masc-authority-round-integration-20261025",
+  "frontend_pid": 68316,
+  "frontend_url": "http://127.0.0.1:53888/dashboard/#workspace?section=planning",
+  "backend_fixed_target": "http://127.0.0.1:51535",
+  "frontend_status": "",
+  "source_files": [
+    {
+      "path": "dashboard/src/api/dashboard-goals.ts",
+      "sha256": "dcf6557dffdcd7d85483d207d622bf6fc78b90b0bd325e699d7710df8a57b3c8"
+    },
+    {
+      "path": "dashboard/src/api/goal-proof.ts",
+      "sha256": "694e1d01d2d115d46cf9c326ed02adf4878dda091c2f818e3b72f1b0dc087395"
+    },
+    {
+      "path": "dashboard/src/config/navigation.ts",
+      "sha256": "39dccd3bf3e1e3bf2eca8815f92bfe59e4632cb29b3a9dde8a3ec6b954cab145"
+    },
+    {
+      "path": "dashboard/src/components/planning-panel.ts",
+      "sha256": "860897246eb4e274aafd6f56523ef3aaeadc5c27fe13475d2d14e5a17ab63052"
+    },
+    {
+      "path": "dashboard/src/components/goals/goal-tree.ts",
+      "sha256": "6919ee5a9c2d88397983ab8416c9f6b090338b0a4f860876c71b8df4b0915ffb"
+    },
+    {
+      "path": "dashboard/src/components/goals/goal-proof.ts",
+      "sha256": "f99eaefb0483d2cb96156570e9c630c5169802986f1e8acf47d68de86c758740"
+    },
+    {
+      "path": "dashboard/src/components/goals/task-detail-overlay.ts",
+      "sha256": "26614b9978eaef6f2fa336535d72dc28f514c932327efa9d53122a0b0416634c"
+    },
+    {
+      "path": "dashboard/src/components/goals/task-wall.ts",
+      "sha256": "46670a4598543d98c3e88012460da7997c9be1ba86b0f0121675c4ff8abe49dd"
+    }
+  ],
+  "dependency_lock_sha256": "5d3c9f77d5f1bb316ee7a78b0798fe727c0513d885b21c525198e0fbeff49cd8",
+  "installed_dependency_lock_sha256": "5d3c9f77d5f1bb316ee7a78b0798fe727c0513d885b21c525198e0fbeff49cd8",
+  "node_modules_symlink": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules",
+  "private_proxy_config_sha256": "65fa31be22755fa7e690038565eb267afb05cd332ec2c1fced8a005e2147ceea",
+  "mcp_proxy_origin_contract": "Check incoming Origin.host equals incoming Host before translating both to fixed backend51535",
+  "task_space_id": 32,
+  "existing_finished_space31_touched": false,
+  "observer_model_task_goal_mutations": false,
+  "frontend_initial_route": "http://127.0.0.1:53888/dashboard/#planning (unknown route normalized to Overview)",
+  "observer_private_client_token_in_browser_or_evidence": false,
+  "dev_worker_delivery_limit": "Vite denied /private/tmp/.../workers/dashboard-ws.worker.ts because allow list names /tmp; actual HTTP projection/UI observation only, not WebSocket worker delivery proof"
+}

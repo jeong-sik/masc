@@ -1,0 +1,430 @@
+(** Structured tool result type for MASC. *)
+
+type tool_failure_class =
+  | Dependency_unavailable (** A required external dependency was unavailable. *)
+  | Policy_rejection
+      (** Permission, guardrail, validation reject (RFC-0062 §3.2) — permanent.
+          Covers caller-input/argument validation, not only auth/boundary. *)
+  | Runtime_failure (** Internal error/bug. *)
+  | Workflow_rejection (** Business rule violation. *)
+  | Operator_cancelled
+      (** An operator interrupted the work (#28810). *)
+[@@deriving yojson, show]
+
+let derived_tool_failure_class_of_yojson = tool_failure_class_of_yojson
+
+let tool_failure_class_of_yojson = function
+  | `List [ `String "Transient_error" ] -> Ok Dependency_unavailable
+  | json -> derived_tool_failure_class_of_yojson json
+;;
+
+type failure_effect_disposition =
+  | Proven_pre_effect
+  | Proven_post_effect
+  | Effect_outcome_unknown
+
+let failure_effect_disposition_to_string = function
+  | Proven_pre_effect -> "proven_pre_effect"
+  | Proven_post_effect -> "proven_post_effect"
+  | Effect_outcome_unknown -> "effect_outcome_unknown"
+;;
+
+let failure_effect_disposition_of_string = function
+  | "proven_pre_effect" -> Some Proven_pre_effect
+  | "proven_post_effect" -> Some Proven_post_effect
+  | "effect_outcome_unknown" -> Some Effect_outcome_unknown
+  | _ -> None
+;;
+
+let tool_failure_class_to_string = function
+  | Dependency_unavailable -> "dependency_unavailable"
+  | Policy_rejection -> "policy_rejection"
+  | Runtime_failure -> "runtime_failure"
+  | Workflow_rejection -> "workflow_rejection"
+  | Operator_cancelled -> "operator_cancelled"
+;;
+
+let tool_failure_class_of_string = function
+  | "dependency_unavailable" | "transient_error" -> Some Dependency_unavailable
+  | "policy_rejection" -> Some Policy_rejection
+  | "runtime_failure" -> Some Runtime_failure
+  | "workflow_rejection" -> Some Workflow_rejection
+  | "operator_cancelled" -> Some Operator_cancelled
+  | _ -> None
+;;
+
+let log_level_of_failure_class = function
+  | Workflow_rejection
+  | Policy_rejection
+  | Dependency_unavailable
+  | Operator_cancelled ->
+    Log.Warn
+  | Runtime_failure -> Log.Error
+;;
+
+(** Lightweight observation of an MCP/AGENT_CORE wire response.  This is not a MASC
+    execution disposition: the external protocol cannot represent [Deferred],
+    so callers must never use this projection as the internal outcome SSOT. *)
+type tool_call_outcome = Ok | Error | Unknown
+
+let string_of_tool_call_outcome = function
+  | Ok -> "ok"
+  | Error -> "error"
+  | Unknown -> "unknown"
+;;
+
+let tool_call_outcome_of_string = function
+  | "ok" -> Result.Ok Ok
+  | "error" -> Result.Ok Error
+  | "unknown" -> Result.Ok Unknown
+  | value -> Result.Error (Printf.sprintf "unknown tool call outcome: %S" value)
+;;
+
+let log_level_of_tool_call_outcome = function
+  | Error -> Log.Error
+  | Ok | Unknown -> Log.Info
+;;
+
+(** Classify a tool failure from an exception raised during execution.
+    Constructor-only fallback.  Semantic classes from exception messages must
+    be passed explicitly at the catch boundary. *)
+let classify_from_exception (exn : exn) : tool_failure_class =
+  match exn with
+  | Eio.Time.Timeout
+  | Eio.Cancel.Cancelled Eio.Time.Timeout ->
+    Dependency_unavailable
+  | Eio.Cancel.Cancelled _ -> Operator_cancelled
+  | Invalid_argument _ -> Runtime_failure
+  | Failure _ -> Runtime_failure
+  | _ -> Runtime_failure
+;;
+
+type ('completed, 'deferred, 'failed) disposition =
+  | Completed of 'completed
+  | Deferred of 'deferred
+  | Failed of 'failed
+
+let string_of_disposition = function
+  | Completed _ -> "completed"
+  | Deferred _ -> "deferred"
+  | Failed _ -> "failed"
+;;
+
+let unit_disposition_of_string = function
+  | "completed" -> Result.Ok (Completed ())
+  | "deferred" -> Result.Ok (Deferred ())
+  | "failed" -> Result.Ok (Failed ())
+  | value -> Result.Error (Printf.sprintf "unknown tool disposition: %S" value)
+;;
+
+type recorded_call_outcome =
+  | Recorded_succeeded
+  | Recorded_deferred
+  | Recorded_failed
+  | Recorded_unsettled
+  | Recorded_malformed
+
+let recorded_call_outcome = function
+  | `Assoc fields ->
+    (match List.assoc_opt "disposition" fields with
+     | Some (`String raw) ->
+       (match unit_disposition_of_string raw with
+        | Result.Ok (Completed ()) -> Recorded_succeeded
+        | Result.Ok (Deferred ()) -> Recorded_deferred
+        | Result.Ok (Failed ()) -> Recorded_failed
+        | Result.Error _ -> Recorded_malformed)
+     | Some _ -> Recorded_malformed
+     | None ->
+       (match List.assoc_opt "wire_outcome" fields with
+        | Some (`String raw) ->
+          (match tool_call_outcome_of_string raw with
+           | Result.Ok Ok -> Recorded_succeeded
+           | Result.Ok Error -> Recorded_failed
+           | Result.Ok Unknown -> Recorded_unsettled
+           | Result.Error _ -> Recorded_malformed)
+        | Some _ -> Recorded_malformed
+        | None -> Recorded_unsettled))
+  | _ -> Recorded_malformed
+;;
+
+let recorded_call_outcome_to_string = function
+  | Recorded_succeeded -> "succeeded"
+  | Recorded_deferred -> "deferred"
+  | Recorded_failed -> "failed"
+  | Recorded_unsettled -> "unsettled"
+  | Recorded_malformed -> "malformed"
+;;
+
+let recorded_call_outcome_of_string = function
+  | "succeeded" -> Result.Ok Recorded_succeeded
+  | "deferred" -> Result.Ok Recorded_deferred
+  | "failed" -> Result.Ok Recorded_failed
+  | "unsettled" -> Result.Ok Recorded_unsettled
+  | "malformed" -> Result.Ok Recorded_malformed
+  | _ -> Result.Error "unknown recorded tool outcome"
+;;
+
+type output_payload =
+  { retained_artifacts : Tool_output.artifact_ref list
+  ; data : Yojson.Safe.t
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; metadata : Yojson.Safe.t option
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+type failure_data = Message_as_data | Explicit_data of Yojson.Safe.t
+
+(** Payload carried by a failed tool invocation.  [class_] is required
+    (not an [option]): callers must commit to a typed classification at
+    the catch boundary. *)
+type failure_payload =
+  { effect_disposition : failure_effect_disposition
+  ; class_ : tool_failure_class
+  ; message : string
+  ; data_source : failure_data
+  ; metadata : Yojson.Safe.t option
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+type result =
+  (output_payload, output_payload, failure_payload) disposition
+
+let failure_data_to_json ~message = function
+  | Message_as_data -> `String message
+  | Explicit_data data -> data
+;;
+
+let failure_data_of_explicit ~message = function
+  | `String text when String.equal text message -> Message_as_data
+  | data -> Explicit_data data
+;;
+
+(** {1 Accessors}
+
+    Take [result] directly; pattern-match on its canonical disposition so
+    callers can keep the bare [Tool_result.message r] form. *)
+
+let message : result -> string = function
+  | Completed { data; _ } | Deferred { data; _ } ->
+    (match data with
+     | `String s -> s
+     | other -> Yojson.Safe.to_string other)
+  | Failed { message; _ } -> message
+;;
+
+let failure_class : result -> tool_failure_class option = function
+  | Completed _ | Deferred _ -> None
+  | Failed { class_; _ } -> Some class_
+;;
+
+let to_json (result : result) : Yojson.Safe.t =
+  let disposition = string_of_disposition result in
+  match result with
+  | Completed { data; metadata; tool_name; duration_ms; _ } ->
+    `Assoc
+      ([ "disposition", `String disposition
+      ; "data", data
+      ; "tool_name", `String tool_name
+      ; "duration_ms", `Float duration_ms
+      ]
+       @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
+  | Deferred { data; metadata; tool_name; duration_ms; _ } ->
+    `Assoc
+      ([ "disposition", `String disposition
+       ; "data", data
+       ; "tool_name", `String tool_name
+       ; "duration_ms", `Float duration_ms
+       ]
+       @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
+  | Failed { effect_disposition; class_; message; data_source; metadata; tool_name; duration_ms } ->
+    `Assoc
+      ([ "effect_disposition", `String (failure_effect_disposition_to_string effect_disposition)
+       ; "failure_class", `String (tool_failure_class_to_string class_)
+       ; "disposition", `String disposition
+       ; "data", failure_data_to_json ~message data_source
+       ; "message", `String message
+       ; "tool_name", `String tool_name
+       ; "duration_ms", `Float duration_ms
+       ]
+       @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
+;;
+
+let tool_name : result -> string = function
+  | Completed { tool_name; _ }
+  | Deferred { tool_name; _ }
+  | Failed { tool_name; _ } -> tool_name
+;;
+
+let duration_ms : result -> float = function
+  | Completed { duration_ms; _ }
+  | Deferred { duration_ms; _ }
+  | Failed { duration_ms; _ } -> duration_ms
+;;
+
+let data : result -> Yojson.Safe.t = function
+  | Completed { data; _ } | Deferred { data; _ } -> data
+  | Failed { message; data_source; _ } -> failure_data_to_json ~message data_source
+;;
+
+let retained_artifacts : result -> Tool_output.artifact_ref list = function
+  | Completed payload | Deferred payload -> payload.retained_artifacts
+  | Failed _ -> []
+;;
+
+let with_retained_artifacts references : result -> result = function
+  | Completed payload -> Completed { payload with retained_artifacts = references }
+  | Deferred payload -> Deferred { payload with retained_artifacts = references }
+  | Failed _ as failure -> failure
+;;
+
+let metadata : result -> Yojson.Safe.t option = function
+  | Completed { metadata; _ }
+  | Deferred { metadata; _ }
+  | Failed { metadata; _ } -> metadata
+;;
+
+let with_metadata metadata : result -> result = function
+  | Completed payload -> Completed { payload with metadata = Some metadata }
+  | Deferred payload -> Deferred { payload with metadata = Some metadata }
+  | Failed payload -> Failed { payload with metadata = Some metadata }
+;;
+
+let is_success : result -> bool = function
+  | Completed _ -> true
+  | Deferred _ | Failed _ -> false
+;;
+
+let is_deferred : result -> bool = function
+  | Deferred _ -> true
+  | Completed _ | Failed _ -> false
+;;
+
+let is_failed : result -> bool = function
+  | Failed _ -> true
+  | Completed _ | Deferred _ -> false
+;;
+
+(** {1 Constructors}
+
+    Bodies return [result] directly.  Callers must provide execution
+    metadata at the boundary instead of falling back to zero-duration
+    compatibility constructors. *)
+
+let ok ~tool_name ~start_time message_str : result =
+  let duration_ms = Tool_timing.elapsed_ms start_time in
+  Completed { retained_artifacts = []; data = `String message_str; content_blocks = None; metadata = None; tool_name; duration_ms }
+;;
+
+let error ~failure_class ~tool_name ~start_time message_str : result =
+  let duration_ms = Tool_timing.elapsed_ms start_time in
+  Failed
+    { effect_disposition = Effect_outcome_unknown
+    ; class_ = failure_class
+    ; message = message_str
+    ; data_source = Message_as_data
+    ; metadata = None
+    ; tool_name
+    ; duration_ms
+    }
+;;
+
+let of_exn ?failure_class ~tool_name ~start_time exn : result =
+  let duration_ms = Tool_timing.elapsed_ms start_time in
+  let class_ =
+    match failure_class with
+    | Some cls -> cls
+    | None -> classify_from_exception exn
+  in
+  let message =
+    Printf.sprintf
+      "dispatch handler error for %s: %s"
+      tool_name
+      (Stdlib.Printexc.to_string exn)
+  in
+  Failed
+    { effect_disposition = Effect_outcome_unknown
+    ; class_
+    ; message
+    ; data_source = Message_as_data
+    ; metadata = None
+    ; tool_name
+    ; duration_ms
+    }
+;;
+
+(** {1 Typed constructors (RFC-0189)}
+
+    Same intent as {!ok}/{!error} but with the [class_] requirement
+    enforced positionally for new code that wants to commit to a
+    classification at the catch boundary. *)
+
+let make_ok ~tool_name ~start_time ?(data = `Null) ?metadata ?content_blocks () : result =
+  let duration_ms = Tool_timing.elapsed_ms start_time in
+  Completed { retained_artifacts = []; data; content_blocks; metadata; tool_name; duration_ms }
+;;
+
+let make_deferred ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
+  let duration_ms = Tool_timing.elapsed_ms start_time in
+  Deferred { retained_artifacts = []; data; content_blocks = None; metadata; tool_name; duration_ms }
+;;
+
+let make_err
+      ~tool_name
+      ~class_
+      ~start_time
+      ?(data = `Null)
+      ?metadata
+      ?(effect_disposition = Effect_outcome_unknown)
+      message_str
+  : result
+  =
+  let duration_ms = Tool_timing.elapsed_ms start_time in
+  Failed
+    { effect_disposition
+    ; class_
+    ; message = message_str
+    ; data_source = failure_data_of_explicit ~message:message_str data
+    ; metadata
+    ; tool_name
+    ; duration_ms
+    }
+;;
+
+let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
+  let duration_ms = Tool_timing.elapsed_ms start_time in
+  let class_ =
+    match class_ with
+    | Some c -> c
+    | None -> classify_from_exception exn
+  in
+  let message =
+    Printf.sprintf
+      "dispatch handler error for %s: %s"
+      tool_name
+      (Stdlib.Printexc.to_string exn)
+  in
+  Failed
+    { effect_disposition = Effect_outcome_unknown
+    ; class_
+    ; message
+    ; data_source = Message_as_data
+    ; metadata = None
+    ; tool_name
+    ; duration_ms
+    }
+;;
+
+(** {1 Class-specialised constructors}
+
+    {!make_err} with the [class_] fixed, for the two classes that
+    [Tool_*.dispatch] handlers construct directly. *)
+
+let workflow_err ~tool_name ~start_time message_str : result =
+  make_err ~tool_name ~class_:Workflow_rejection ~start_time message_str
+;;
+
+let runtime_err ~tool_name ~start_time message_str : result =
+  make_err ~tool_name ~class_:Runtime_failure ~start_time message_str
+;;

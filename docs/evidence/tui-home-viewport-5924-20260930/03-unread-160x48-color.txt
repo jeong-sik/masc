@@ -1,0 +1,48 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  03:41:10  HTTP [connected]                                                             
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   Health: ok                                                                                                                                                   
+   Work: 0 currently done in the last 24h · details in Work                                                                                                     
+                                                                                                                                                                
+   Needs your decision                                                                                                                                          
+    Approvals and questions: held calls not fully read; Gate queue not fully read; questions not fully read                                                     
+                                                                                                                                                                
+   Continue                                                                                                                                                     
+    Choose a Keeper  · start a conversation                                                                                                                     
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Base: /tmp/build_1a98b0_dune/masc-tui-keyboard-pf6gwqft | Port: 38309
+ Choose a Keeper before writing · i:choose                                                                                                                      

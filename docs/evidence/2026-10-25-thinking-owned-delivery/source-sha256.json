@@ -1,0 +1,11 @@
+{
+  "source_head": "c0f2f3032b0cb998bb66b74b29433c242d63df34",
+  "base": "3bb76a77e056db40414dda4c5c297c111e2ca35a",
+  "files": {
+    "bin/masc_tui_keeper_chat_transcript.ml": "7ffa79e48cb5837da1220958519386ef6f35ad05319a14a68141f4b490687cc1",
+    "dashboard/src/keeper-stream.test.ts": "8e5540e1c57df2e06394cf9096d260e8bc9e8625bfe494dd31a7ab1960571c1c",
+    "dashboard/src/keeper-stream.ts": "c36c3eeede5101f3c76a992224342a70306d0358000c8610555399c4623dac63",
+    "test/dune": "d561f2330931d7fb3c5dbc05606ca4ca5d7280dec77df956ed7a5e643ba60f57",
+    "test/test_tui_keeper_chat_transcript.ml": "3d5c973d61b437de75edd03336c4921cfa47cfcc2a5842188c7c215fdf021c5e"
+  }
+}

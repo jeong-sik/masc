@@ -1,0 +1,135 @@
+(** Workspace paths + backend dispatch.
+
+    Resolves the canonical [.masc/] directory layout,
+    and dispatches CRUD/lock/pubsub calls to
+    the active [Backend] implementation (Memory / FileSystem). *)
+
+open Workspace_utils_backend_setup
+
+(** The workspace's state root, [<base>/.masc]. *)
+val masc_dir : config -> string
+
+type expected_workspace_error =
+  | Invalid_workspace_precondition
+  | Workspace_precondition_failed
+
+val validate_expected_workspace :
+  config:config -> Yojson.Safe.t -> (Yojson.Safe.t, expected_workspace_error) result
+
+val read_precondition_admission_header : string * string
+(** Wire receipt emitted only after a GET/HEAD's explicit workspace pair was
+    validated. Readers require exactly this receipt on successful/304 replies
+    before publishing a workspace-bound dataset. *)
+
+val agents_dir : config -> string
+val tasks_dir : config -> string
+val messages_dir : config -> string
+
+val message_seq_of_filename : string -> int
+(** The sequence a committed message's filename opens with, or [0] for a name
+    that carries none. Shared by the reader that pages in sequence order and
+    the bootstrap that resumes the counter, so the two cannot read a name
+    differently. *)
+val state_path : config -> string
+val backlog_path : config -> string
+val archive_path : config -> string
+
+(** Keeper OUTPUT directory (server-written state + sidecars). The
+    trailing segment is [Common.keepers_runtime_dirname]; relocating the OUTPUT
+    root flips that one constant. base_path-only and cycle-bound callers use
+    [Common.keepers_runtime_dir_of_base] instead. *)
+val keepers_runtime_dir : config -> string
+
+
+val dated_store_root : config -> Dated_jsonl.Store.root
+(** The workspace's state root, for locating a date-split JSONL store
+    through [Dated_jsonl.Store]. *)
+
+(** Project-scoped key prefix for backend keys (e.g.
+    ["proj:default"]). Used by broadcast/pubsub channel naming. *)
+val project_prefix : config -> string
+
+(** {1 Backend dispatch} *)
+
+val backend_get :
+  config -> key:string -> (string option, Backend_types.error) result
+
+val backend_set :
+  config -> key:string -> value:string -> (unit, Backend_types.error) result
+
+(** Returns [Ok true] if a key was deleted, [Ok false] if absent. *)
+val backend_delete :
+  config -> key:string -> (bool, Backend_types.error) result
+
+(** Plain [bool] (not [result]); the underlying backend implementations
+    do not return errors here, and call sites compose with [||]. *)
+val backend_exists :
+  config -> key:string -> bool
+
+val backend_list_keys :
+  config -> prefix:string -> (string list, Backend_types.error) result
+
+val backend_acquire_lock :
+  config -> key:string -> ttl_seconds:int -> owner:string ->
+  (bool, Backend_types.error) result
+
+val backend_release_lock :
+  config -> key:string -> owner:string ->
+  (bool, Backend_types.error) result
+
+(** Run [publish] inside [key]'s lease fence when [owner] still holds the
+    lease, renewing it first; see {!Backend.FileSystem.commit_under_lease}.
+    The Memory backend has no lease and runs [publish] directly. *)
+val backend_commit_under_lease :
+  config -> key:string -> ttl_seconds:int -> owner:string -> (unit -> 'a) ->
+  (('a, Backend.FileSystem.lease_lost) result, Backend_types.error) result
+
+(** Returns [Ok n] where [n] is the number of subscribers notified
+    (forwarded from [Pubsub_mem.publish]). *)
+val backend_publish :
+  config -> channel:string -> message:string ->
+  (int, Backend_types.error) result
+
+val backend_subscribe :
+  config -> channel:string -> callback:(string -> unit) ->
+  (unit, Backend_types.error) result
+
+val backend_name : config -> string
+
+(** [true] iff the backend mirrors keys to local-filesystem
+    directories (FileSystem backend). *)
+val backend_supports_local_dir : storage_backend -> bool
+
+val backend_cleanup_pubsub :
+  config -> days:int -> max_messages:int ->
+  (int, Backend_types.error) result
+
+(** {1 Path / key conversion} *)
+
+(** Convert an absolute filesystem path to a backend key.
+    Returns [None] when the path is not rooted under
+    [masc_dir]. *)
+val key_of_path : config -> string -> string option
+
+
+val strip_prefix : string -> string -> string
+(** [strip_prefix prefix s] removes the first [String.length prefix]
+    characters from [s] without verifying that they actually equal
+    [prefix] (callers must check separately). Returns [s] unchanged
+    when it is shorter than [prefix]. *)
+
+(** List directory entries either via [Sys.readdir] (when the
+    backend supports a local dir mirror) or via [backend_list_keys]
+    over the synthesized prefix. *)
+val list_dir : config -> string -> string list
+
+(** {1 Initialization check} *)
+
+(** [true] iff the selected backend has an initialized workspace
+    (state.json present). Filesystem checks use a 1-second TTL cache;
+    Memory checks read their own backend without that cache. *)
+val is_initialized : config -> bool
+
+(** Invalidate the is_initialized cache. Call when workspace state
+    changes (init, reset, cleanup). *)
+val invalidate_initialized_cache : unit -> unit

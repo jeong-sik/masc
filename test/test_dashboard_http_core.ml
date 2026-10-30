@@ -1,0 +1,8888 @@
+(* Test funding is a complete historical payout, not an orphan mint. *)
+let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_event.t list =
+  let identity = payment.identity in
+  let keeper = match payment.allocations with
+    | [allocation] -> allocation.Candle_payment.keeper
+    | _ -> Alcotest.fail "funding fixture expects one Keeper" in
+  let task_ids = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) payment.relations in
+  [ {Candle_event.at;body=Candle_event.Half_life_set Candle_decay.Off}
+  ; {Candle_event.at;body=Candle_event.Snapshot
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;criterion_revision="funding-proof";
+       passed_at=at;goal_created_at=(match Candle_time.of_rfc3339 "1970-01-01T00:00:00Z" with
+         | Ok value -> value | Error detail -> Alcotest.fail detail);
+       due_date=None;title="Completed funding fixture";metric=Some "completed";
+       target_value=Some "1";linked_task_ids=task_ids}}
+  ; {Candle_event.at;body=Candle_event.Payout_owed
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;passed_at=at;confirmed_at=at}}
+  ; {Candle_event.at;body=Candle_event.Candidates
+      {goal_id=identity.goal_id;request_id=identity.request_id;
+       verification_run_id=identity.verification_run_id;
+       tasks=List.map (fun id -> id, Candle_event.Found
+         {title="Completed contribution";assignee=Some keeper;
+          status=Candle_event.Done {completed_at=at}}) task_ids;
+       candidate_task_ids=task_ids;candidate_keepers=[keeper];
+       candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
+  ; {Candle_event.at;body=Candle_event.Paid payment}
+  ]
+;;
+
+module Types = Masc_domain
+
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
+let () = Mirage_crypto_rng_unix.use_default ()
+let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
+
+(* Direct execution (not through dune) does not inherit the (env ...) block in
+   test/dune, so the sandbox preflight would default on and every config POST
+   would answer docker_preflight_failed in a Docker-less sandbox. Pin the same
+   value the dune stanza uses, unless the caller set it explicitly. *)
+let () =
+  match Sys.getenv_opt "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" with
+  | Some _ -> ()
+  | None -> Unix.putenv "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false"
+
+(* Resolve a checkout-root-relative path no matter where the binary is launched
+   from: dune exports DUNE_SOURCEROOT, and a direct run walks up from the
+   working directory to the checkout root (the directory holding dune-project). *)
+let checkout_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when String.length root > 0 -> root
+  | _ ->
+    let rec up dir =
+      if Sys.file_exists (Filename.concat dir "dune-project") then dir
+      else
+        let parent = Filename.dirname dir in
+        if String.equal parent dir then dir else up parent
+    in
+    up (Sys.getcwd ())
+
+let checkout_file path = Filename.concat (checkout_root ()) path
+
+module Lib = Masc
+module Auth = Auth
+module Workspace = Masc.Workspace
+module Dashboard_http_keeper = Dashboard_http_keeper
+
+(* [Server_dashboard_http_keeper_api.tool_call_entries] answers
+   [Error Index_unavailable] when the read index cannot be read (audit F397);
+   the cases here are about rows, so that failure fails the case. *)
+let tool_call_entries_exn ~keeper_name ~limit =
+  match Server_dashboard_http_keeper_api.tool_call_entries ~keeper_name ~limit with
+  | Ok rows -> rows
+  | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
+open Alcotest
+
+let test_dir () =
+  let tmp = Filename.temp_file "masc_dashboard_http_core" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o755;
+  tmp
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun f -> rm (Filename.concat path f));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  rm dir
+
+let invalid_utf8_byte_count s =
+  let len = String.length s in
+  let rec loop i count =
+    if i >= len
+    then count
+    else (
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec
+      then loop (i + dlen) count
+      else loop (i + 1) (count + 1))
+  in
+  loop 0 0
+
+let nested_path_string_present_or_null json key =
+  let open Yojson.Safe.Util in
+  match json |> member key with
+  | `Null -> true
+  | value -> (
+      match value |> member "path" with
+      | `String path -> String.length path > 0
+      | _ -> false)
+
+let read_file path =
+  let path =
+    if Filename.is_relative path then
+      match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some root -> Filename.concat root path
+      | None -> path
+    else path
+  in
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let rec mkdir_p path =
+  if Sys.file_exists path then ()
+  else begin
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    Unix.mkdir path 0o755
+  end
+
+let with_cached_surface_success
+      (surface : Server_dashboard_http_cache.cached_surface)
+      json
+      f
+  =
+  (* One snapshot is the whole saved state now — the eight-field save and
+     restore this used to carry collapsed with the record. *)
+  let saved = Server_dashboard_http_cache.snapshot surface in
+  Fun.protect
+    ~finally:(fun () -> Server_dashboard_http_cache.update_cached_surface surface (fun _ -> saved))
+    (fun () ->
+      Server_dashboard_http_cache.mark_cached_surface_success surface json;
+      f ())
+
+let with_mission_cache_success json f =
+  let module Core = Server_dashboard_http_core in
+  let surface = Core.mission_cache in
+  let saved = Core.snapshot surface in
+  Fun.protect
+    ~finally:(fun () ->
+      Core.update_cached_surface surface (fun _ -> saved))
+    (fun () -> Core.mark_cached_surface_success surface json; f ())
+
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some prev -> Unix.putenv key prev
+      | None -> Unix.putenv key "")
+    f
+
+let request target =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
+
+let request_with_headers target headers =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET target
+
+(* The grammar is shared by there being one body behind both spellings. The
+   two used to be byte-for-byte identical definitions, and this case asserted
+   that they agreed -- which they could not fail to do, and would have gone
+   on passing if one of them drifted. Both are still called: the POST
+   dispatcher uses its own name. *)
+let test_keeper_name_extractors_use_shared_grammar () =
+  let keeper_name = "release.bot" in
+  check bool "dotted keeper name is valid" true
+    (Server_dashboard_http_keeper_api.is_valid_keeper_name keeper_name);
+  List.iter
+    (fun suffix ->
+       let path = "/api/v1/keepers/" ^ keeper_name ^ suffix in
+       check string (suffix ^ " suffix extraction") keeper_name
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix))
+    [ Server_dashboard_http_keeper_api.keeper_suffix_github_identity
+    ; Server_dashboard_http_keeper_api.keeper_suffix_github_login
+    ];
+  List.iter
+    (fun reserved ->
+       let suffix = Server_dashboard_http_keeper_api.keeper_suffix_github_login in
+       let path = "/api/v1/keepers/" ^ reserved ^ suffix in
+       check string (reserved ^ " remains reserved") ""
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix))
+    [ "."; ".." ]
+
+let test_keeper_paused_work_route_is_admin_exact () =
+  let path = "/api/v1/keepers/fixture-keeper/paused-work" in
+  check bool
+    "paused-work POST route kind"
+    true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_paused_work);
+  check bool
+    "paused-work GET route kind"
+    true
+    (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path path);
+  check string
+    "paused-work keeper name"
+    "fixture-keeper"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix
+       path
+       Server_dashboard_http_keeper_api.keeper_suffix_paused_work);
+  check bool
+    "paused-work route rejects trailing segment"
+    false
+    (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path (path ^ "/extra"))
+
+let test_keeper_up_route_classifies_and_extracts () =
+  let path = "/api/v1/keepers/fixture-keeper/up" in
+  check bool
+    "up POST route kind"
+    true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_up);
+  check string
+    "up keeper name"
+    "fixture-keeper"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix
+       path
+       Server_dashboard_http_keeper_api.keeper_suffix_up)
+;;
+
+let test_keeper_up_workspace_precondition () =
+  let module Lifecycle = Server_dashboard_http_keeper_api_lifecycle_post in
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let config = Workspace.default_config dir in
+    mkdir_p (Workspace.masc_dir config);
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_dir config) in
+    let expected base root = `Assoc ["base_path", `String base; "masc_root", `String root] in
+    let declaration = ["name", `String "new-keeper"; "create_only", `Bool true] in
+    let args workspace = `Assoc (("expected_workspace", workspace) :: declaration) in
+    (match Lifecycle.validate_up_workspace ~config (args (expected base root)) with
+     | Ok json ->
+       check bool "transport precondition removed, declaration retained" true
+         (json = `Assoc declaration)
+     | Error _ -> fail "matching canonical workspace refused");
+    check bool "ordinary Up clients retain their contract" true
+      (Lifecycle.validate_up_workspace ~config (`Assoc declaration) = Ok (`Assoc declaration));
+    List.iter (fun workspace ->
+      check bool "replacement workspace is refused before dispatch" true
+        (Lifecycle.validate_up_workspace ~config (args workspace)
+         = Error Lifecycle.Workspace_precondition_failed))
+      [expected (base ^ "-other") root; expected base (root ^ "-other")];
+    List.iter (fun workspace ->
+      check bool "malformed precondition fails closed" true
+        (Lifecycle.validate_up_workspace ~config (args workspace)
+         = Error Lifecycle.Invalid_workspace_precondition))
+      [`Null; `Assoc []; expected "" root; expected "." root;
+       `Assoc ["base_path", `String base; "masc_root", `Bool true]];
+    check bool "duplicate transport preconditions refused" true
+      (Lifecycle.validate_up_workspace ~config
+        (`Assoc (("expected_workspace", expected base root)
+          :: ("expected_workspace", expected base root) :: declaration))
+       = Error Lifecycle.Invalid_workspace_precondition);
+    Unix.rmdir (Workspace.masc_dir config);
+    check bool "unreadable receiving root fails closed" true
+      (Lifecycle.validate_up_workspace ~config (args (expected base root))
+       = Error Lifecycle.Workspace_precondition_failed))
+
+let test_gate_resolve_workspace_precondition () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let config = Workspace.default_config dir in
+    mkdir_p (Workspace.masc_dir config);
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_dir config) in
+    let request base_path masc_root =
+      `Assoc
+        [ "id", `String "absent-approval"
+        ; "decision", `String "approve"
+        ; "expected_workspace", `Assoc
+            [ "base_path", `String base_path
+            ; "masc_root", `String masc_root ] ]
+    in
+    let resolve args =
+      Server_dashboard_http.dashboard_gate_resolve_http_json
+        ~workspace_config:config ~base_path:base ~created_by:"operator"
+        ~args ()
+    in
+    (match resolve (request (base ^ "-replaced") root) with
+     | Error (Server_dashboard_http.Bad_request "workspace precondition failed") -> ()
+     | _ -> fail "Gate accepted a replaced workspace before resolution");
+    (match resolve (request base root) with
+     | Error (Server_dashboard_http.Gone _)
+     | Error (Server_dashboard_http.Unavailable _) -> ()
+     | _ -> fail "matching Gate workspace did not reach approval lookup"))
+
+(* The D4 recover route parses its [:id] exactly and refuses bodies whose
+   typed preconditions do not name a restart-latched attempt (design §5-4).
+   The queue's own CAS behavior is pinned in test_keeper_approval_queue;
+   this pins the HTTP surface's admission shape. *)
+let test_hitl_recover_route_and_preconditions () =
+  let module Recover = Server_dashboard_http_hitl_recover in
+  let ack = ["action", `String "ack_uncertain"; "keeper_name", `String "alpha";
+             "consume_id", `String "exact-consume"] in
+  check bool "ack uses listed keeper and exact consume without original args" true
+    (Recover.parse_ack_fields ack = Ok ("alpha", "exact-consume"));
+  check bool "ack cannot omit exact consume" true
+    (Result.is_error (Recover.parse_ack_fields (List.remove_assoc "consume_id" ack)));
+  check bool "ack rejects duplicate consume identity" true
+    (Result.is_error (Recover.parse_ack_fields (("consume_id", `String "other") :: ack)));
+  let base = "/api/v1/keepers/" in
+  check (option string)
+    "recover route extracts the approval id"
+    (Some "appr-1")
+    (Recover.route (base ^ "hitl/approvals/appr-1/recover"));
+  check (option string)
+    "recover route refuses non-recover keeper paths" None
+    (Recover.route (base ^ "hitl/approvals/appr-1/resolve"));
+  check (option string)
+    "recover route refuses an empty id" None
+    (Recover.route (base ^ "hitl/approvals//recover"));
+  (* task-2237: the journal-restore exit is its own CanAdmin POST path. *)
+  check string "journal restore path is the D4a exit"
+    "/api/v1/keepers/hitl/late-approval-restore"
+    Recover.journal_restore_path;
+  let rearm_body ~status ~disposition =
+    `Assoc
+      [ "action", `String "rearm"
+      ; "id", `String "appr-1"
+      ; "input_hash", `String (String.make 64 'a')
+      ; "sequence", `Int 1
+      ; "slot_id", `String "slot-1"
+      ; "call_id", `String "call-1"
+      ; "plan_fingerprint", `String "fp-1"
+      ; "request_body_sha256", `String (String.make 64 'b')
+      ; ( "exact_attempt"
+        , `Assoc
+            [ "state", `String "bound"
+            ; "approval_id", `String "appr-1"
+            ; "input_hash", `String (String.make 64 'a')
+            ; "sequence", `Int 1
+            ; "slot_id", `String "slot-1"
+            ; "call_id", `String "call-1"
+            ; "plan_fingerprint", `String "fp-1"
+            ; "request_body_sha256", `String (String.make 64 'b')
+            ; "status", `String status
+            ; "quarantine_cause", `Null
+            ] )
+      ; ( "summary_attempt_disposition"
+        , match disposition with
+          | "persistence_uncertain" ->
+            `Assoc
+              [ "code", `String disposition
+              ; ( "operator_detail"
+                , `String
+                    "Exact-output terminalization durability is not confirmed." )
+              ]
+          | other -> `Assoc [ "code", `String other ]
+        )
+      ]
+  in
+  let parse fields =
+    match (fields : Yojson.Safe.t) with
+    | `Assoc pairs -> (
+      match Recover.parse_rearm_fields pairs with
+      | Ok _ -> "admitted"
+      | Error detail -> detail)
+    | _ -> "recover request must be an object"
+  in
+  check string
+    "the unlatchable pair persistence_uncertain over released_recovery_required \
+     passes the typed preconditions"
+    "admitted"
+    (parse
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"persistence_uncertain"));
+  check string
+    "the only CAS-admitted pair is the only admitted pair"
+    "recover rearm requires summary_attempt_disposition \
+     persistence_uncertain"
+    (parse
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"in_flight"));
+  check string
+    "a restart-quarantined attempt is refused before the queue (terminal \
+     projection for dispatch-uncertain work)"
+    "recover rearm targets a released-recovery-required exact attempt \
+     (the only restart latch the queue's CAS admits)"
+    (parse
+       (rearm_body
+          ~status:"restart_quarantined"
+          ~disposition:"persistence_uncertain"));
+  check string
+    "a completed attempt is not recoverable"
+    "recover rearm targets a released-recovery-required exact attempt \
+     (the only restart latch the queue's CAS admits)"
+    (parse (rearm_body ~status:"completed" ~disposition:"in_flight"));
+  check string
+    "a settled disposition is not recoverable"
+    "recover rearm requires summary_attempt_disposition \
+     persistence_uncertain"
+    (parse
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"settled"));
+  (* The admitted binding must repeat the request's top-level identity, so
+     an inconsistent body fails typed admission instead of surfacing later
+     as a CAS key mismatch. *)
+  let mismatched =
+    match
+      rearm_body
+        ~status:"released_recovery_required"
+        ~disposition:"persistence_uncertain"
+    with
+    | `Assoc fields ->
+      let rewrite = function
+        | "exact_attempt", `Assoc binding ->
+          ( "exact_attempt"
+          , `Assoc
+              (List.map
+                 (function
+                   | "call_id", _ -> ("call_id", `String "call-OTHER")
+                   | field -> field)
+                 binding) )
+        | field -> field
+      in
+      `Assoc (List.map rewrite fields)
+    | other -> other
+  in
+  check string
+    "a binding that disagrees with the request identity is refused"
+    "recover request.exact_attempt must repeat the request's approval \
+     identity (id, input_hash, sequence, slot_id, call_id, \
+     plan_fingerprint, request_body_sha256)"
+    (parse mismatched)
+
+let test_gate_retry_workspace_precondition () =  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let config = Workspace.default_config dir in
+    mkdir_p (Workspace.masc_dir config);
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_dir config) in
+    let expected base_path masc_root =
+      `Assoc [ "base_path", `String base_path; "masc_root", `String masc_root ]
+    in
+    let retry fields =
+      Server_dashboard_http.dashboard_gate_retry_http_json
+        ~workspace_config:config ~base_path:base ~requested_by:"operator"
+        ~args:(`Assoc fields)
+    in
+    let expect_error label expected result =
+      match result with
+      | Error actual -> check string label expected actual
+      | Ok _ -> fail (label ^ ": retry unexpectedly admitted")
+    in
+    (* Invalid row data would fail with [id is required] after admission.
+       Refusal must precede row parsing, and therefore all queue mutation. *)
+    expect_error "foreign base refused before lookup" "workspace precondition failed"
+      (retry [ "expected_workspace", expected (base ^ "-other") root ]);
+    expect_error "foreign root refused before lookup" "workspace precondition failed"
+      (retry [ "expected_workspace", expected base (root ^ "-other") ]);
+    expect_error "duplicate precondition refused" "invalid expected_workspace precondition"
+      (retry [ "expected_workspace", expected base root
+             ; "expected_workspace", expected base root ]);
+    expect_error "matching workspace reaches row parser" "retry request.id is required"
+      (retry [ "expected_workspace", expected base root ]);
+    expect_error "unbound dashboard request keeps existing parser" "retry request.id is required"
+      (retry []))
+
+let test_keeper_memory_cleanup_routes_and_closed_requests () =
+  let module Cleanup = Server_dashboard_http_keeper_memory_cleanup in
+  let memory_path = "/api/v1/keepers/fixture-keeper/memory/retractions" in
+  let context_path =
+    "/api/v1/keepers/fixture-keeper/working-context/source-retractions"
+  in
+  check bool "cleanup route permission is Admin" true
+    (Cleanup.permission = Masc_domain.CanAdmin);
+  (match Cleanup.route memory_path with
+   | Some (Cleanup.Current_memory keeper) ->
+     check string "memory route keeper" "fixture-keeper" keeper
+   | Some (Cleanup.Working_context _) | None ->
+     fail "exact memory cleanup route was not classified");
+  (match Cleanup.route context_path with
+   | Some (Cleanup.Working_context keeper) ->
+     check string "context route keeper" "fixture-keeper" keeper
+   | Some (Cleanup.Current_memory _) | None ->
+     fail "exact context cleanup route was not classified");
+  check bool "memory route rejects trailing segments" true
+    (Cleanup.route (memory_path ^ "/bulk") = None);
+  check bool "context route rejects trailing segments" true
+    (Cleanup.route (context_path ^ "/bulk") = None);
+  let memory_id = "sha256:" ^ String.make 64 'a' in
+  let memory_body =
+    `Assoc
+      [ "plan_id", `String "plan-memory-1"
+      ; "expected_revision", `Int 7
+      ; "expected_snapshot_sha256", `String (String.make 64 'b')
+      ; ( "retractions"
+        , `List
+            [ `Assoc
+                [ "memory_id", `String memory_id
+                ; "reason", `String "wrong domain"
+                ]
+            ] )
+      ]
+  in
+  (match
+     Cleanup.parse_current_memory_request
+       (Yojson.Safe.to_string memory_body)
+   with
+   | Ok parsed ->
+     check string "memory plan id" "plan-memory-1" parsed.plan_id;
+     check int "memory expected revision" 7 parsed.expected_revision;
+     check string "memory expected snapshot hash" (String.make 64 'b')
+       parsed.expected_snapshot_sha256;
+     check int "one exact memory target" 1 (List.length parsed.retractions)
+   | Error detail -> fail detail);
+  let with_extra =
+    match memory_body with
+    | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
+    | _ -> fail "fixture must be an object"
+  in
+  check bool "memory request rejects unknown fields" true
+    (Result.is_error
+       (Cleanup.parse_current_memory_request
+          (Yojson.Safe.to_string with_extra)));
+  let uppercase_hash =
+    match memory_body with
+    | `Assoc fields ->
+      `Assoc
+        (("expected_snapshot_sha256", `String (String.make 64 'A'))
+         :: List.remove_assoc "expected_snapshot_sha256" fields)
+    | _ -> fail "fixture must be an object"
+  in
+  check bool "memory request requires a lowercase snapshot hash" true
+    (Result.is_error
+       (Cleanup.parse_current_memory_request
+          (Yojson.Safe.to_string uppercase_hash)));
+  let duplicate_target =
+    match memory_body with
+    | `Assoc fields ->
+      `Assoc
+        (( "retractions"
+         , `List
+             [ `Assoc
+                 [ "memory_id", `String memory_id
+                 ; "reason", `String "first"
+                 ]
+             ; `Assoc
+                 [ "memory_id", `String memory_id
+                 ; "reason", `String "second"
+                 ]
+             ] )
+         :: List.remove_assoc "retractions" fields)
+    | _ -> fail "fixture must be an object"
+  in
+  check bool "memory request rejects duplicate exact targets" true
+    (Result.is_error
+       (Cleanup.parse_current_memory_request
+          (Yojson.Safe.to_string duplicate_target)));
+  let context_body =
+    `Assoc
+      [ "plan_id", `String "plan-context-1"
+      ; "expected_generation", `String "generation-1"
+      ; "expected_revision", `Int 3
+      ; "expected_snapshot_sha256", `String (String.make 64 'c')
+      ; "source_references", `List [ `String "event:source:1" ]
+      ]
+  in
+  (match
+     Cleanup.parse_working_context_request
+       (Yojson.Safe.to_string context_body)
+   with
+   | Ok parsed ->
+     check string "context plan id" "plan-context-1" parsed.plan_id;
+     check (pair string int) "context expected version"
+       ("generation-1", 3) parsed.expected_version;
+     check string "context expected snapshot hash" (String.make 64 'c')
+       parsed.expected_snapshot_sha256;
+     check (list string) "exact source references"
+       ["event:source:1"] parsed.source_references
+   | Error detail -> fail detail);
+  let duplicate_source =
+    match context_body with
+    | `Assoc fields ->
+      `Assoc
+        (( "source_references"
+         , `List [ `String "event:source:1"; `String "event:source:1" ] )
+         :: List.remove_assoc "source_references" fields)
+    | _ -> fail "fixture must be an object"
+  in
+  check bool "context request rejects duplicate exact sources" true
+    (Result.is_error
+       (Cleanup.parse_working_context_request
+          (Yojson.Safe.to_string duplicate_source)))
+;;
+
+let test_keeper_sensitive_get_permissions_are_exact () =
+  let permission path =
+    Server_dashboard_http_keeper_api.keeper_get_permission path
+  in
+  List.iter
+    (fun suffix ->
+       let path = "/api/v1/keepers/fixture-keeper/" ^ suffix in
+       check bool (suffix ^ " permission") true
+         (permission path = Some Masc_domain.CanAdmin);
+       check bool (suffix ^ " trailing segment") true
+         (permission (path ^ "/extra") = None))
+    (* file-changes returns the exact text a keeper wrote to a file, which is
+       part of what raw-trace already holds. Same data, same gate — a lighter
+       one here would be a second door onto the first door's content. *)
+    [ "raw-traces"; "raw-trace"; "provider-input"; "provider-input/part"
+    ; "memory-journal"
+    ; "memory-facts"; "working-context"; "file-changes"; "tool-calls" ];
+  check bool "safe chat history stays on its ordinary read route" true
+    (permission "/api/v1/keepers/fixture-keeper/chat/history" = None);
+  (* The operator snapshot serves the same inventory rows under public read;
+     a per-Keeper door onto them keeps that gate rather than inventing one. *)
+  check bool "board quarantine rows share the operator snapshot's read gate" true
+    (permission
+       ("/api/v1/keepers/fixture-keeper"
+        ^ Server_dashboard_http_keeper_api.keeper_suffix_board_attention_quarantines)
+     = None);
+  check bool "checkpoint permission" true
+    (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
+  check bool "turn records require authenticated state read" true
+    (permission "/api/v1/keepers/fixture-keeper/turn-records"
+     = Some Masc_domain.CanReadState);
+  check bool "metrics require authenticated state read" true
+    (permission "/api/v1/keepers/fixture-keeper/metrics"
+     = Some Masc_domain.CanReadState);
+  check bool "metrics permission does not accept extra segments" true
+    (permission "/api/v1/keepers/fixture-keeper/metrics/extra" = None);
+  check bool "turn records route rejects trailing segment" true
+    (permission "/api/v1/keepers/fixture-keeper/turn-records/extra" = None);
+  check bool "ordinary keeper read stays public" true
+    (permission "/api/v1/keepers/fixture-keeper/trajectory" = None)
+
+let test_internal_exact_lane_registry_is_admin_only () =
+  check bool
+    "exact lane registry requires Admin"
+    true
+    (Server_routes_http_routes_dashboard.For_testing.exact_lane_run_permission
+     = Masc_domain.CanAdmin)
+
+let test_runtime_probe_route_owns_read_permission () =
+  check bool
+    "metadata-only runtime probe remains a read route"
+    true
+    (Server_routes_http_routes_dashboard.For_testing.runtime_probe_read_permission
+     = Masc_domain.CanReadState)
+
+let test_event_queue_operator_routes_are_exact () =
+  check (option string) "event operator route is exact" (Some "fixture-keeper")
+    (Server_dashboard_http_keeper_event_queue_operator.route
+       "/api/v1/keepers/fixture-keeper/events/operator");
+  check (option string) "event operator route rejects extra segments" None
+    (Server_dashboard_http_keeper_event_queue_operator.route
+       "/api/v1/keepers/fixture-keeper/events/operator/extra");
+  check bool "Worker cannot mutate pending events" false
+    (Masc_domain.has_permission
+       Masc_domain.Worker
+       Server_dashboard_http_keeper_event_queue_operator.operator_permission);
+  check bool "Admin can mutate pending events" true
+    (Masc_domain.has_permission
+       Masc_domain.Admin
+       Server_dashboard_http_keeper_event_queue_operator.operator_permission);
+  let source : Keeper_event_queue.stimulus =
+    { post_id = "board-post-sensitive"
+    ; urgency = Normal
+    ; arrived_at = 42.0
+    ; payload =
+        Board_signal
+          { kind = Post_created
+          ; author = "operator"
+          ; title = "private title"
+          ; content = "private title body"
+          ; hearth = None
+          ; updated_at = None
+          }
+    }
+  in
+  let same_post_id_source : Keeper_event_queue.stimulus =
+    { source with urgency = Low; payload = Bootstrap }
+  in
+  let duplicate_post_id_queue =
+    Keeper_event_queue.empty
+    |> fun queue -> Keeper_event_queue.enqueue queue source
+    |> fun queue -> Keeper_event_queue.enqueue queue same_post_id_source
+  in
+  let duplicate_state =
+    Keeper_event_queue_state.empty
+    |> Keeper_event_queue_state.with_revision 23L
+    |> Keeper_event_queue_state.with_pending duplicate_post_id_queue
+  in
+  let selections =
+    Keeper_event_queue_state.pending_selections duplicate_state
+  in
+  let refs =
+    List.map
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue_state.source_snapshot_ref selection.source)
+      selections
+  in
+  check int "duplicate post ids retain two exact source refs" 2
+    (List.sort_uniq String.compare refs |> List.length);
+  let quarantine_path =
+    "/api/v1/keepers/fixture-keeper/board-attention/quarantines/ba-root-123/recovery"
+  in
+  (match
+     Server_dashboard_http_keeper_api.classify_keeper_post_route quarantine_path
+   with
+   | Server_dashboard_http_keeper_api
+     .Keeper_post_board_attention_quarantine_recovery route ->
+     check string "quarantine route keeper" "fixture-keeper" route.keeper_name;
+     check string "quarantine route partition" "ba-root-123" route.partition_id
+   | _ -> fail "exact Board quarantine recovery route was not classified");
+  check bool "quarantine route rejects extra segments" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route
+       (quarantine_path ^ "/bulk")
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
+
+let with_test_env f =
+  let dir = test_dir () in
+	Fun.protect
+	  ~finally:(fun () -> cleanup_dir dir)
+	  (fun () ->
+	    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Workspace_utils.default_config dir in
+      Eio.Switch.run @@ fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        (fun () ->
+          let request_authority =
+            match
+              Server_request_authority.of_host_port
+                ~host:"localhost"
+                ~port:8935
+            with
+            | Ok authority -> authority
+            | Error `Malformed -> fail "test authority must be valid"
+          in
+          Server_request_authority.with_current request_authority (fun () ->
+            f ~env ~sw ~config)))
+
+let test_namespace_pause_status_reads_current_workspace () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let read () =
+    match Server_dashboard_http_core_entities.namespace_pause_status_json config with
+    | Ok json -> json
+    | Error detail -> fail detail
+  in
+  let member field json = Yojson.Safe.Util.member field json in
+  let initial = read () in
+  check bool "uninitialized namespace is initializing" true
+    (member "initializing" initial = `Bool true);
+  check bool "uninitialized namespace has no pause authority" true
+    (member "paused" initial = `Null);
+  ignore (Workspace.init config ~agent_name:None);
+  check bool "initialized namespace is running" true
+    (member "paused" (read ()) = `Bool false);
+  Workspace.pause config ~by:"pause-readback-test" ~reason:"current state";
+  check bool "a later pause is read directly" true
+    (member "paused" (read ()) = `Bool true);
+  ignore (Workspace.resume config ~by:"pause-readback-test");
+  check bool "resume does not reuse the previous paused snapshot" true
+    (member "paused" (read ()) = `Bool false);
+  Workspace.pause config ~by:"another-operator" ~reason:"later mutation";
+  check bool "another operator's pause remains observable" true
+    (member "paused" (read ()) = `Bool true)
+
+let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
+  with_test_env @@ fun ~env:_ ~sw ~config ->
+  let require_ok label = function
+    | Ok value -> value
+    | Error detail -> failf "%s: %s" label detail
+  in
+  let require_some label = function
+    | Some value -> value
+    | None -> fail (label ^ ": missing value")
+  in
+  let make_meta ~name ~trace_id =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "trace_id", `String trace_id
+          ])
+    with
+    | Error detail -> failf "meta fixture %s: %s" name detail
+    | Ok meta -> meta
+  in
+  let base_path = config.Workspace.base_path in
+  let cancel_keeper = "event-source-ref-cancel-source" in
+  let orphan_keeper = "event-source-ref-orphan-source" in
+  let dormant_keeper = "event-source-ref-dormant-source" in
+  let transfer_keeper = "event-source-ref-transfer-source" in
+  let target_keeper = "event-source-ref-target" in
+  let cancel_meta =
+    make_meta ~name:cancel_keeper ~trace_id:"event-source-ref-cancel-trace"
+  in
+  let transfer_meta =
+    make_meta ~name:transfer_keeper ~trace_id:"event-source-ref-transfer-trace"
+  in
+  let target_meta =
+    make_meta ~name:target_keeper ~trace_id:"event-source-ref-target-trace"
+  in
+  let dormant_meta =
+    make_meta ~name:dormant_keeper ~trace_id:"event-source-ref-dormant-trace"
+  in
+  let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
+    { post_id; urgency = Normal; arrived_at; payload = Bootstrap }
+  in
+  let cancelled_source = stimulus "event-source-ref-cancel" 1.0 in
+  let orphan_source = stimulus "event-source-ref-orphan" 1.5 in
+  let dormant_source = stimulus "event-source-ref-dormant" 1.75 in
+  let transferred_source = stimulus "event-source-ref-transfer" 2.0 in
+  let unrelated_source = stimulus "event-source-ref-unrelated" 3.0 in
+  let later_unrelated_source = stimulus "event-source-ref-later" 4.0 in
+  let load_state keeper_name =
+    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+    |> require_ok ("load event queue state for " ^ keeper_name)
+  in
+  let enqueue keeper_name (source : Keeper_event_queue.stimulus) =
+    Keeper_event_queue_persistence.update_result
+      ~base_path
+      ~keeper_name
+      (fun pending -> Keeper_event_queue.enqueue pending source)
+    |> require_ok ("enqueue " ^ source.post_id)
+  in
+  let selection_for (source : Keeper_event_queue.stimulus) state =
+    Keeper_event_queue_state.select_when
+      ~now:(Unix.gettimeofday ())
+      ~ready:(Keeper_event_queue.stimulus_identity_equal source)
+      state
+    |> require_some ("select " ^ source.post_id)
+  in
+  let result_status json =
+    match Yojson.Safe.Util.member "status" json with
+    | `String status -> status
+    | _ -> fail "event operator result omitted status"
+  in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path in
+  let post_event_operator ~keeper_name body =
+    let output = Buffer.create 512 in
+    let connection =
+      Httpun.Server_connection.create (fun reqd ->
+        Server_dashboard_http_keeper_event_queue_operator.handle_post
+          state
+          ~actor:"event-source-ref-test"
+          (Httpun.Reqd.request reqd)
+          reqd
+          ~keeper_name
+          body)
+    in
+    let request =
+      Printf.sprintf
+        "POST /api/v1/keepers/%s/events/operator HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s"
+        keeper_name
+        (String.length body)
+        body
+    in
+    let input =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request) request
+    in
+    ignore
+      (Httpun.Server_connection.read_eof
+         connection
+         input
+         ~off:0
+         ~len:(Bigstringaf.length input));
+    let rec drain () =
+      match Httpun.Server_connection.next_write_operation connection with
+      | `Write iovecs ->
+        let bytes =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+              Buffer.add_string
+                output
+                (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+              total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result connection (`Ok bytes);
+        drain ()
+      | `Yield | `Close _ -> ()
+    in
+    drain ();
+    let raw = Buffer.contents output in
+    let response_body =
+      match List.rev (String.split_on_char '\n' raw) with
+      | body :: _ -> String.trim body
+      | [] -> fail "event operator HTTP response has no body"
+    in
+    raw, Yojson.Safe.from_string response_body
+  in
+  let request_body
+        action
+        (selection : Keeper_event_queue_state.pending_selection)
+        fields
+    =
+    `Assoc
+      ([ "schema", `String "keeper_event_queue.operator.request.v2"
+       ; "action", `String action
+       ; ( "source_incarnation"
+         , `String (Int64.to_string selection.admitted_revision) )
+       ; ( "source_ref"
+         , `String
+             (Keeper_event_queue_state.source_snapshot_ref
+                selection.source) )
+       ]
+       @ fields)
+    |> Yojson.Safe.to_string
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path cancel_keeper;
+      Masc.Keeper_registry.For_testing.unregister ~base_path transfer_keeper;
+      Masc.Keeper_registry.For_testing.unregister ~base_path target_keeper)
+    (fun () ->
+       Masc.Keeper_meta_store.replace_snapshot config cancel_meta
+       |> require_ok "persist cancellation source keeper metadata";
+       Masc.Keeper_meta_store.replace_snapshot config transfer_meta
+       |> require_ok "persist transfer source keeper metadata";
+       Masc.Keeper_meta_store.replace_snapshot config target_meta
+       |> require_ok "persist target keeper metadata";
+       (match
+          Masc.Keeper_owner_registry.install_from_store
+            ~sw
+            ~operation_runner:None
+           ~on_turn_slot_released:None
+            config
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail (Masc.Keeper_owner_registry.install_error_to_string error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path
+            cancel_keeper
+            cancel_meta);
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path
+            transfer_keeper
+            transfer_meta);
+       enqueue cancel_keeper cancelled_source;
+       enqueue transfer_keeper transferred_source;
+       let cancel_selection =
+         load_state cancel_keeper |> selection_for cancelled_source
+       in
+       enqueue cancel_keeper unrelated_source;
+       let cancel_request =
+         request_body
+           "cancel"
+           cancel_selection
+           [ ( "operator_operation_id"
+             , `String "event-source-ref-cancel-operation" )
+           ; "reason", `String "operator cancelled exact source"
+           ]
+       in
+       let cancel_raw, cancel_response =
+         post_event_operator ~keeper_name:cancel_keeper cancel_request
+       in
+       check bool "cancellation HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" cancel_raw);
+       check string "cancellation applies once" "applied"
+         (cancel_response |> Yojson.Safe.Util.member "result" |> result_status);
+       check bool "cancellation removes only the selected source" false
+         (Keeper_event_queue_state.pending (load_state cancel_keeper)
+          |> Keeper_event_queue.to_list
+          |> List.exists (fun source ->
+            Keeper_event_queue.stimulus_identity_equal
+              cancel_selection.source
+              source));
+       check bool "unrelated enqueue survives cancellation" true
+         (Keeper_event_queue_state.pending (load_state cancel_keeper)
+          |> Keeper_event_queue.to_list
+          |> List.exists (fun source ->
+            Keeper_event_queue.stimulus_identity_equal
+              unrelated_source
+              source));
+       let cancel_replay_raw, cancel_replay_response =
+         post_event_operator ~keeper_name:cancel_keeper cancel_request
+       in
+       check bool "cancellation replay HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" cancel_replay_raw);
+       check string "cancellation replay uses its durable receipt"
+         "already_applied"
+         (cancel_replay_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
+       enqueue orphan_keeper orphan_source;
+       let orphan_selection =
+         load_state orphan_keeper |> selection_for orphan_source
+       in
+       let orphan_cancel_request =
+         request_body
+           "cancel"
+           orphan_selection
+           [ ( "operator_operation_id"
+             , `String "event-source-ref-orphan-cancel-operation" )
+           ; "reason", `String "source keeper was removed"
+           ]
+       in
+       let orphan_raw, orphan_response =
+         post_event_operator
+           ~keeper_name:orphan_keeper
+           orphan_cancel_request
+       in
+       check bool "orphan cancellation HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" orphan_raw);
+       check string "orphan cancellation applies once" "applied"
+         (orphan_response |> Yojson.Safe.Util.member "result" |> result_status);
+       check int "orphan cancellation removes the exact source" 0
+         (Keeper_event_queue_state.pending (load_state orphan_keeper)
+          |> Keeper_event_queue.length);
+       let orphan_replay_raw, orphan_replay_response =
+         post_event_operator
+           ~keeper_name:orphan_keeper
+           orphan_cancel_request
+       in
+       check bool "orphan cancellation replay succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" orphan_replay_raw);
+       check string "orphan replay uses its durable receipt"
+         "already_applied"
+         (orphan_replay_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
+       check bool "orphan cancellation releases lifecycle reservation" true
+         (Option.is_none
+            (Masc.Keeper_lifecycle_reservation.current
+               ~base_path
+               ~keeper_name:orphan_keeper));
+       Masc.Keeper_meta_store.replace_snapshot config dormant_meta
+       |> require_ok "persist dormant keeper metadata";
+       enqueue dormant_keeper dormant_source;
+       let dormant_selection =
+         load_state dormant_keeper |> selection_for dormant_source
+       in
+       let dormant_request =
+         request_body
+           "cancel"
+           dormant_selection
+           [ ( "operator_operation_id"
+             , `String "event-source-ref-dormant-cancel-operation" )
+           ; "reason", `String "must not cancel a dormant keeper"
+           ]
+       in
+       let dormant_raw, _ =
+         post_event_operator ~keeper_name:dormant_keeper dormant_request
+       in
+       check bool "dormant keeper cancellation is rejected" true
+         (String.starts_with ~prefix:"HTTP/1.1 409" dormant_raw);
+       check int "dormant keeper retains its source" 1
+         (Keeper_event_queue_state.pending (load_state dormant_keeper)
+          |> Keeper_event_queue.length);
+       check bool "rejected cancellation releases lifecycle reservation" true
+         (Option.is_none
+            (Masc.Keeper_lifecycle_reservation.current
+               ~base_path
+               ~keeper_name:dormant_keeper));
+       let transfer_selection =
+         load_state transfer_keeper |> selection_for transferred_source
+       in
+       enqueue transfer_keeper later_unrelated_source;
+       let transfer_request =
+         request_body
+           "transfer"
+           transfer_selection
+           [ ( "operator_operation_id"
+             , `String "event-source-ref-transfer-operation" )
+           ; "target_keeper", `String target_keeper
+         ]
+       in
+       let target_shutdown_operation_id =
+         Masc.Keeper_shutdown_types.Operation_id.generate ()
+       in
+       (match
+          Masc.Keeper_owner_registry.begin_shutdown
+            ~base_path
+            ~keeper_name:target_keeper
+            ~operation_id:target_shutdown_operation_id
+        with
+        | Ok (Masc.Keeper_owner.Shutdown_reserved _) -> ()
+        | Ok (Masc.Keeper_owner.Shutdown_already_reserved _) ->
+          fail "fresh target shutdown reservation was already owned"
+        | Error error ->
+          fail (Masc.Keeper_owner_registry.command_error_to_string error));
+       let fenced_raw, _fenced_response =
+         Fun.protect
+           ~finally:(fun () ->
+             match
+               Masc.Keeper_owner_registry.rollback_shutdown
+                 ~base_path
+                 ~keeper_name:target_keeper
+                 ~operation_id:target_shutdown_operation_id
+             with
+             | Ok Masc.Keeper_owner.Shutdown_rolled_back -> ()
+             | Ok Masc.Keeper_owner.Shutdown_not_reserved
+             | Ok (Masc.Keeper_owner.Shutdown_reserved_by_other _)
+             | Error _ ->
+               fail "target shutdown reservation was not released")
+           (fun () ->
+              post_event_operator
+                ~keeper_name:transfer_keeper
+                transfer_request)
+       in
+       check bool "target-fenced transfer request is rejected" true
+         (String.starts_with ~prefix:"HTTP/1.1 409" fenced_raw);
+       let fenced_source = load_state transfer_keeper in
+       check bool "target fence retains the exact source" true
+         (Keeper_event_queue_state.pending fenced_source
+          |> Keeper_event_queue.to_list
+          |> List.exists (fun source ->
+            Keeper_event_queue.stimulus_identity_equal
+              transfer_selection.source
+              source));
+       check int "target fence creates no source outbox" 0
+         (Keeper_event_queue_state.transition_outbox fenced_source
+          |> List.length);
+       check int "target fence creates no target projection" 0
+         (Keeper_event_queue_state.pending (load_state target_keeper)
+          |> Keeper_event_queue.length);
+       let transfer_raw, transfer_response =
+         post_event_operator ~keeper_name:transfer_keeper transfer_request
+       in
+       check bool "transfer HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" transfer_raw);
+       check string "transfer applies once" "applied"
+         (transfer_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
+       let transfer_replay_raw, transfer_replay_response =
+         post_event_operator ~keeper_name:transfer_keeper transfer_request
+       in
+       check bool "transfer replay HTTP request succeeds" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" transfer_replay_raw);
+       check string "transfer replay uses its durable receipt"
+         "already_applied"
+         (transfer_replay_response
+          |> Yojson.Safe.Util.member "result"
+          |> result_status);
+       let target_pending =
+         load_state target_keeper
+         |> Keeper_event_queue_state.pending
+         |> Keeper_event_queue.to_list
+       in
+       check int "transfer replay projects one target source" 1
+         (List.length target_pending);
+       check bool "target projection contains the exact transfer" true
+         (match target_pending with
+          | [ source ] ->
+            Keeper_event_queue.stimulus_identity_equal
+              transferred_source
+              source
+          | [] | _ :: _ :: _ -> false))
+
+let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let caller_domain = Domain.self () in
+  let result_domain =
+    Server_dashboard_http_core.run_dashboard_compute
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      ~config
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
+      (fun ~config:_ ~sw:_ -> Domain.self ())
+  in
+  check bool "no pool keeps compute on caller domain" true
+    (result_domain = caller_domain)
+
+let test_run_dashboard_compute_with_pool_uses_executor_domain () =
+  (* All backends offload to the executor pool when available.
+     FileSystem key_index is domain-safe via Stdlib.Mutex; Eio.Mutex
+     is domain-safe via Stdlib.Mutex internally.  Offloading isolates
+     dashboard compute from keeper turns on the main domain. *)
+  with_test_env @@ fun ~env ~sw ~config ->
+  let exec_pool =
+    Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool exec_pool @@ fun () ->
+  let caller_domain = Domain.self () in
+  let result_domain =
+    Server_dashboard_http_core.run_dashboard_compute
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      ~config
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
+      (fun ~config:_ ~sw:_ -> Domain.self ())
+  in
+  check bool "non-PG backend offloads to executor pool domain" true
+    (result_domain <> caller_domain)
+
+let test_run_dashboard_compute_nested_cache_does_not_starve () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  Dashboard_cache.invalidate_all ();
+  let clock = Eio.Stdenv.clock env in
+  let exec_pool =
+    Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool exec_pool @@ fun () ->
+  let result =
+    Server_dashboard_http_core.run_dashboard_compute
+      ~sw
+      ~clock
+      ~config
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
+      (fun ~config:_ ~sw:_ ->
+         Dashboard_cache.get_or_compute_with_timeout
+           "dashboard-runtime-nested-cache"
+           ~ttl:60.0
+           ~clock
+           ~timeout_sec:0.05
+           (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `String "ok")))
+  in
+  check string "nested cache compute completes on the current worker"
+    "ok"
+    Yojson.Safe.Util.(result |> to_string)
+
+let test_dashboard_shell_http_json_includes_paths () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let json = Server_dashboard_http_core.dashboard_shell_http_json config in
+  let open Yojson.Safe.Util in
+  let fields =
+    match json with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "dashboard shell payload must be an object"
+  in
+  let paths =
+    match List.assoc_opt "paths" fields with
+    | Some value -> value
+    | None -> Alcotest.fail "paths key missing from dashboard shell payload"
+  in
+  let config_resolution =
+    List.assoc_opt "config_resolution" fields
+    |> Option.value ~default:`Null
+  in
+  let runtime_resolution =
+    List.assoc_opt "runtime_resolution" fields
+    |> Option.value ~default:`Null
+  in
+  let effective_base_path = paths |> member "effective_base_path" |> to_string in
+  let effective_masc_root = paths |> member "effective_masc_root" |> to_string in
+  let expected_masc_root = Unix.realpath (Filename.concat config.base_path Common.masc_dirname) in
+  check bool "paths present" true
+    (match paths with `Assoc _ -> true | _ -> false);
+  check bool "paths key present" true
+    (List.mem_assoc "paths" fields);
+  check bool "config_resolution key present" true
+    (List.mem_assoc "config_resolution" fields);
+  check bool "runtime_resolution key present" true
+    (List.mem_assoc "runtime_resolution" fields);
+  check string "effective_base_path matches config" (Unix.realpath config.base_path)
+    effective_base_path;
+  check string "effective_masc_root matches config" expected_masc_root
+    effective_masc_root;
+  check bool "paths include cwd" true
+    (match paths |> member "cwd" with
+     | `String value -> String.length value > 0
+     | _ -> false);
+  check bool "paths include strict_mode_requested bool" true
+    (match paths |> member "strict_mode_requested" with
+     | `Bool _ -> true
+     | _ -> false);
+  check bool "paths include startup_rejected bool" true
+    (match paths |> member "startup_rejected" with
+     | `Bool _ -> true
+     | _ -> false);
+  check bool "shell config resolution is object or null" true
+    (match config_resolution with
+     | `Assoc _ | `Null -> true
+     | _ -> false);
+  check bool "shell config root path surfaced when available" true
+    (match config_resolution with
+     | `Null -> true
+     | _ -> nested_path_string_present_or_null config_resolution "config_root");
+  check bool "shell runtime authoring path surfaced when available" true
+    (match config_resolution with
+     | `Null -> true
+     | _ ->
+       nested_path_string_present_or_null config_resolution "runtime_authoring");
+  check bool "shell runtime resolution is object or null" true
+    (match runtime_resolution with
+     | `Assoc _ | `Null -> true
+     | _ -> false);
+  check bool "shell runtime data root path surfaced when available" true
+    (match runtime_resolution with
+     | `Null -> true
+     | _ -> nested_path_string_present_or_null runtime_resolution "data_root");
+  check bool "shell runtime warnings surfaced as list when available" true
+    (match runtime_resolution with
+     | `Null -> true
+     | _ -> (
+         match runtime_resolution |> member "warnings" with
+         | `List _ -> true
+         | _ -> false));
+  let diagnostics = json |> member "projection_diagnostics" in
+  check string "shell timing trace finished" "finished"
+    (diagnostics |> member "projection_timing_status" |> to_string);
+  check bool "shell timing top populated" true
+    ((diagnostics |> member "projection_timing_top" |> to_list |> List.length)
+     > 0)
+
+(* The server publishes its canonical owner in MASC_BASE_PATH and nothing else;
+   the operator's own spelling lives in the startup path diagnostics. *)
+let test_dashboard_shell_http_json_reports_the_published_base_path () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
+  let json = Server_dashboard_http_core.dashboard_shell_http_json config in
+  let open Yojson.Safe.Util in
+  check string "runtime base_path is the published owner" config.base_path
+    (json |> member "runtime_resolution" |> member "base_path" |> member "path"
+   |> to_string)
+
+let test_runtime_resolution_accepts_server_repo_inside_base_path () =
+  match Lib.Build_identity.repo_root () with
+  | None -> fail "Build_identity.repo_root unavailable; cannot test server/base path relation"
+  | Some repo_root ->
+    let repo_root =
+      try Unix.realpath repo_root with
+      | Unix.Unix_error _ -> repo_root
+    in
+    let config = Workspace.default_config (Filename.dirname repo_root) in
+    check bool "runtime accepts nested server repo" false
+      (Server_dashboard_http_runtime_info.server_workspace_mismatch_for_tests
+         ~server_repo_path:repo_root
+         config)
+
+let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good)
+    (fun () ->
+      Atomic.set Server_dashboard_http.shell_warmed false;
+      Atomic.set Server_dashboard_http.shell_warming true;
+      Atomic.set Server_dashboard_http.last_good_shell (`Assoc []);
+      let json =
+        Server_dashboard_http_core.dashboard_shell_http_json
+          ~request:(request "/api/v1/dashboard/shell")
+          config
+      in
+      let open Yojson.Safe.Util in
+      check string "bootstrap status project" "initializing"
+        (json |> member "status" |> member "project" |> to_string);
+      check int "bootstrap zero agents" 0
+        (json |> member "counts" |> member "agents" |> to_int);
+      check string "bootstrap cache state" "initializing"
+        (json |> member "projection_diagnostics" |> member "cache_state"
+        |> to_string))
+
+let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
+  let last_good =
+    `Assoc
+      [
+        ("generated_at", `String "2026-04-17T00:00:00Z");
+        ("status", `Assoc [("project", `String "warm-workspace")]);
+        ("counts", `Assoc [("agents", `Int 7); ("tasks", `Int 11); ("keepers", `Int 3)]);
+      ]
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good)
+    (fun () ->
+      Atomic.set Server_dashboard_http.shell_warmed false;
+      Atomic.set Server_dashboard_http.shell_warming true;
+      Atomic.set Server_dashboard_http.last_good_shell last_good;
+      let json =
+        Server_dashboard_http_core.dashboard_shell_http_json
+          ~request:(request "/api/v1/dashboard/shell")
+          config
+      in
+      let open Yojson.Safe.Util in
+      check string "last-good project reused" "warm-workspace"
+        (json |> member "status" |> member "project" |> to_string);
+      check int "last-good counts reused" 7
+        (json |> member "counts" |> member "agents" |> to_int))
+
+let test_dashboard_shell_http_json_records_light_last_good () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_light_last_good =
+    Atomic.get Server_dashboard_http.last_good_shell_light
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      Atomic.set
+        Server_dashboard_http.last_good_shell_light
+        original_light_last_good)
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      Atomic.set Server_dashboard_http.last_good_shell_light (`Assoc []);
+      let json =
+        Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+      in
+      let cached = Atomic.get Server_dashboard_http.last_good_shell_light in
+      let open Yojson.Safe.Util in
+      check bool "light last-good populated" true (cached = json);
+      check bool "cached payload is light shell" true
+        (cached
+         |> member "projection_diagnostics"
+         |> member "light"
+         |> to_bool))
+
+let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
+  let original_light_last_good =
+    Atomic.get Server_dashboard_http.last_good_shell_light
+  in
+  let full_last_good =
+    `Assoc
+      [
+        ("status", `Assoc [("project", `String "full-workspace")]);
+        ("counts", `Assoc [("agents", `Int 9)]);
+      ]
+  in
+  let light_last_good =
+    `Assoc
+      [
+        ("status", `Assoc [("project", `String "light-workspace")]);
+        ("counts", `Assoc [("agents", `Int 2)]);
+        ("projection_diagnostics", `Assoc [("light", `Bool true)]);
+      ]
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good;
+      Atomic.set
+        Server_dashboard_http.last_good_shell_light
+        original_light_last_good)
+    (fun () ->
+      Atomic.set Server_dashboard_http.shell_warmed false;
+      Atomic.set Server_dashboard_http.shell_warming true;
+      Atomic.set Server_dashboard_http.last_good_shell full_last_good;
+      Atomic.set Server_dashboard_http.last_good_shell_light light_last_good;
+      let json =
+        Server_dashboard_http_core.dashboard_shell_http_json
+          ~request:(request "/api/v1/dashboard/shell?light=1")
+          ~light:true
+          config
+      in
+      let open Yojson.Safe.Util in
+      check string "light last-good project reused" "light-workspace"
+        (json |> member "status" |> member "project" |> to_string);
+      check int "light last-good counts reused" 2
+        (json |> member "counts" |> member "agents" |> to_int);
+      check bool "light diagnostics preserved" true
+        (json
+         |> member "projection_diagnostics"
+         |> member "light"
+         |> to_bool))
+
+let test_operator_snapshot_default_route_hydrates_first_success () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  Dashboard_cache.invalidate_all ();
+  Operator_control.invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  let before =
+    Server_dashboard_http_core_operator.operator_snapshot_publication ()
+  in
+  check bool "invalidation clears the prior successful publication" false
+    before.has_success;
+  let state =
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+  in
+  let json =
+    Server_dashboard_http_core.operator_snapshot_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      ~broadcast_snapshot:(fun _publication -> ())
+      (request "/api/v1/operator")
+  in
+  let after =
+    Server_dashboard_http_core_operator.operator_snapshot_publication ()
+  in
+  check bool "first default request publishes a successful snapshot" true
+    after.has_success;
+  check int "first success stays in the invalidated generation"
+    before.generation after.generation;
+  check string "HTTP returns the canonical first-success publication"
+    (Yojson.Safe.to_string
+       (Server_dashboard_http_core_operator.operator_snapshot_publication_json
+          after))
+    (Yojson.Safe.to_string json);
+  let open Yojson.Safe.Util in
+  check bool "first response is not the initializing placeholder" false
+    (json |> member "status" = `String "initializing")
+
+let test_operator_snapshot_publication_rejects_stale_races () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  let lower =
+    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
+  in
+  let higher =
+    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
+  in
+  let higher_publication =
+    match
+      Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
+        ~compute:higher
+        (`Assoc [ "winner", `String "higher" ])
+    with
+    | Some publication -> publication
+    | None -> fail "higher sequence did not publish"
+  in
+  check bool "lower success is rejected after higher terminalization" true
+    (Option.is_none
+       (Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
+          ~compute:lower
+          (`Assoc [ "winner", `String "lower" ])));
+  check bool "lower error is rejected after higher terminalization" true
+    (Option.is_none
+       (Server_dashboard_http_core_operator.mark_operator_snapshot_error_if_current
+          ~compute:lower
+          (Failure "late lower error")));
+  let canonical =
+    Server_dashboard_http_core_operator.operator_snapshot_publication ()
+  in
+  check int "higher compute remains canonical"
+    higher_publication.compute_sequence canonical.compute_sequence;
+  let old_generation_compute =
+    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
+  in
+  (* This used to swap the process-global broadcaster and count what arrived on
+     it. The broadcaster is an argument now (#25927), so the assertion runs
+     against the function the observer actually calls: one invalidation yields
+     one publication, and a second read of the same generation yields none. *)
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  let generation = Dashboard_projection_cache.snapshot_invalidation_generation () in
+  let invalidation =
+    Server_dashboard_http_core_operator
+    .publish_operator_snapshot_invalidation_if_current
+      ~generation
+  in
+  (match invalidation with
+   | None -> fail "one invalidation must publish once"
+   | Some invalidation ->
+     let current =
+       Server_dashboard_http_core_operator.operator_snapshot_publication ()
+     in
+     check int "publication is the canonical generation" current.generation
+       invalidation.generation;
+     check int "publication is the canonical terminal sequence"
+       current.terminal_sequence invalidation.terminal_sequence);
+  (* Not "twice returns None": the contract says install *or return*, so a
+     second read of the current generation hands back the same tombstone. What
+     it refuses is a generation that is no longer current.
+
+     Two guards enforce that — the outer current_generation compare and the
+     inner publication.generation compare — so removing either one alone still
+     passes here. Removing both fails this case. *)
+  check bool "a stale generation does not publish" true
+    (Option.is_none
+       (Server_dashboard_http_core_operator
+        .publish_operator_snapshot_invalidation_if_current
+          ~generation:(generation - 1)));
+  check bool "old-generation completion is rejected" true
+    (Option.is_none
+       (Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
+          ~compute:old_generation_compute
+          (`Assoc [ "winner", `String "old-generation" ])))
+
+(* The refresh loop's broadcast encodes on the domain pool. A snapshot the
+   /api/v1/operator route published while it encoded replaces it: the route
+   broadcasts nothing itself, so the loop sends the route's snapshot instead of
+   its own. The broadcast for any other caller stays on its fiber. The 2.8 MB
+   snapshot used to be encoded twice and hashed on the calling fiber. *)
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+let test_refreshed_operator_snapshot_encodes_on_the_pool_and_hands_on_a_newer_one () =
+  with_test_env @@ fun ~env ~sw ~config:_ ->
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let auth = Masc_test_deps.make_sse_auth workspace "operator-snapshot-observer" in
+  let session_id = "operator-snapshot-observer" in
+  ignore (Lib.Session.McpSessionStore.get_or_create ~id:session_id ());
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Sse.unregister session_id;
+      (match previous_pool with
+       | None -> Domain_pool_ref.clear_for_tests ()
+       | Some previous -> Domain_pool_ref.set previous);
+      Masc_test_deps.cleanup_test_workspace workspace)
+  @@ fun () ->
+  (match Lib.Sse.register ~kind:Lib.Sse.Observer ~auth session_id ~last_event_id:0 with
+   | Ok _ -> ()
+   | Error error -> fail (Lib.Sse.registration_error_to_string error));
+  let publish marker =
+    match
+      Server_dashboard_http_core_operator.For_testing.publish_operator_snapshot_success
+        (`Assoc [ "marker", `String marker ])
+    with
+    | Some publication -> publication
+    | None -> fail ("the " ^ marker ^ " snapshot did not publish")
+  in
+  let frame_marker label =
+    match Lib.Sse.try_pop session_id with
+    | None -> fail (label ^ ": no frame")
+    | Some frame ->
+      (match Lib.Sse.data_payload_of_frame frame with
+       | Error Lib.Sse.Missing_data_payload -> fail (label ^ ": the frame has no data")
+       | Ok data ->
+         let open Yojson.Safe.Util in
+         let event = Yojson.Safe.from_string data in
+         check string (label ^ ": an operator snapshot") "operator_snapshot"
+           (event |> member "type" |> to_string);
+         event |> member "payload" |> member "marker" |> to_string)
+  in
+  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+  let occupy_worker () =
+    let occupied, occupied_u = Eio.Promise.create () in
+    let release, release_u = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        Eio.Promise.resolve occupied_u ();
+        Eio.Promise.await release));
+    Eio.Promise.await occupied;
+    release_u
+  in
+  let refreshed = publish "refreshed" in
+  let release_u = occupy_worker () in
+  let returned = ref false in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () ->
+      Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot
+        refreshed;
+      returned := true)
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && not !returned
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      check bool "the refreshed broadcast waits for the busy worker" false !returned;
+      ignore (publish "from the route" : Server_dashboard_http_core_operator.operator_snapshot_publication);
+      Eio.Promise.resolve release_u ());
+  check string "the newer snapshot is sent in place of the replaced one" "from the route"
+    (frame_marker "after the refresh");
+  check (option string) "and nothing else" None (Lib.Sse.try_pop session_id);
+  let inline = publish "inline" in
+  let release_u = occupy_worker () in
+  let outcome =
+    Eio.Fiber.first
+      (fun () ->
+        Server_dashboard_http_execution_surfaces.broadcast_operator_snapshot inline;
+        `Returned)
+      (fun () ->
+        Eio.Time.sleep clock
+          (Float.of_int busy_worker_polls *. busy_worker_poll_interval_s);
+        `Waited)
+  in
+  Eio.Promise.resolve release_u ();
+  check bool "any other caller's broadcast does not wait for the pool" true
+    (outcome = `Returned);
+  check string "and it is sent" "inline" (frame_marker "while the worker is busy")
+
+let test_operator_snapshot_error_clears_previous_success () =
+  let success =
+    match
+      Server_dashboard_http_core_operator.For_testing
+      .publish_operator_snapshot_success
+        (`Assoc
+          [ "pending_confirm_envelope", `Assoc [ "items", `List [] ]
+          ; "generated_at", `String "2026-08-08T00:00:00Z"
+          ])
+    with
+    | Some publication -> publication
+    | None -> fail "operator snapshot success did not publish"
+  in
+  check bool "precondition has a successful snapshot" true success.has_success;
+  let compute =
+    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
+  in
+  let failed =
+    match
+      Server_dashboard_http_core_operator.mark_operator_snapshot_error_if_current
+        ~compute
+        (Failure "pending-confirm store unreadable")
+    with
+    | Some publication -> publication
+    | None -> fail "operator snapshot error did not publish"
+  in
+  check bool "failed publication has no last success" false failed.has_success;
+  let open Yojson.Safe.Util in
+  check string "failed publication is unavailable" "unavailable"
+    (failed.json |> member "status" |> to_string);
+  check bool "failed publication does not retain pending rows" true
+    (failed.json |> member "pending_confirm_envelope" = `Null)
+
+let test_operator_snapshot_http_rejects_stale_success_after_store_error () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+  in
+  let path = Operator_control.pending_confirms_path config in
+  (match Workspace_utils.write_json_result config path (`List []) with
+   | Ok () -> ()
+   | Error reason -> fail reason);
+  let stale =
+    match
+      Server_dashboard_http_core_operator.For_testing
+      .publish_operator_snapshot_success
+        ~fresh_for_s:(-1.0)
+        (`Assoc
+          [ "pending_confirm_envelope", `Assoc [ "items", `List [] ]
+          ; "generated_at", `String "2026-08-08T00:00:00Z"
+          ])
+    with
+    | Some publication -> publication
+    | None -> fail "stale operator snapshot success did not publish"
+  in
+  check bool "precondition is stale success" true stale.has_success;
+  write_file path "{not-json";
+  Operator_control.invalidate_snapshot_cache ();
+  let json =
+    Server_dashboard_http_core.operator_snapshot_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      ~broadcast_snapshot:(fun _publication -> ())
+      (request "/api/v1/operator")
+  in
+  let open Yojson.Safe.Util in
+  check string "HTTP returns unavailable publication" "unavailable"
+    (json |> member "status" |> to_string);
+  check bool "HTTP drops pending rows" true
+    (json |> member "pending_confirm_envelope" = `Null)
+
+let test_operator_parameterized_snapshot_attests_workspace () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let json = Server_dashboard_http_core.operator_snapshot_http_json
+    ~state ~sw ~clock:(Eio.Stdenv.clock env) ~broadcast_snapshot:(fun _ -> ())
+    (request "/api/v1/operator?view=summary&include_messages=0&include_keepers=0") in
+  let open Yojson.Safe.Util in
+  let identity = json |> member "workspace_identity" in
+  check string "fresh response names its canonical base" (Unix.realpath config.base_path)
+    (identity |> member "base_path" |> to_string);
+  check string "fresh response names its canonical MASC root"
+    (Unix.realpath (Workspace.masc_dir config))
+    (identity |> member "masc_root" |> to_string);
+  check bool "readiness is sampled from this server"
+    (Lib.Server_startup_state.snapshot ()).state_ready
+    (identity |> member "state_ready" |> to_bool)
+
+let test_dashboard_query_cache_segment_normalizes_missing_values () =
+  check string "missing none" "missing"
+    (Server_dashboard_http_core_cache.dashboard_query_cache_segment None);
+  check string "missing blank" "missing"
+    (Server_dashboard_http_core_cache.dashboard_query_cache_segment (Some "  "));
+  check string "trimmed value" "keeper-a"
+    (Server_dashboard_http_core_cache.dashboard_query_cache_segment (Some " keeper-a "))
+
+let test_dashboard_query_cache_key_partitions_route_params () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let session_a =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "session-a") ]
+      in
+      let session_b =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "session-b") ]
+      in
+      let actor_b =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "keeper-b"); ("session", Some "session-a") ]
+      in
+      check bool "session_id partitions route cache" true
+        (not (String.equal session_a session_b));
+      check bool "actor partitions route cache" true
+        (not (String.equal session_a actor_b));
+      (* The partition is the directory the cached state lives in, so a
+         scope switch cannot serve the previous workspace's projection
+         (#24504). It used to be the constant "default". *)
+      check string "deterministic key shape"
+        (Printf.sprintf
+           "session:%s:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
+           (Workspace_utils.masc_dir config))
+        session_a)
+
+(* The cache partition is the workspace's root. It was once the constant
+   "default", so two workspaces shared keys and a scope switch could serve the
+   previous workspace's projection (#24504). *)
+let test_dashboard_cache_key_partitions_by_workspace_root () =
+  let dir = test_dir () in
+  let other_dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir; cleanup_dir other_dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let other = Workspace_utils.default_config other_dir in
+      check bool "two workspaces get different cache keys" true
+        (not
+           (String.equal
+              (Server_dashboard_http_core_cache.dashboard_cache_key config
+                 "session" "s")
+              (Server_dashboard_http_core_cache.dashboard_cache_key
+                 other "session" "s"))))
+
+let test_dashboard_query_cache_key_encodes_delimiter_values () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let actor_delimiter =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default:session=session-a")
+          ; ("session", Some "session-b")
+          ]
+      in
+      let session_delimiter =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default")
+          ; ("session", Some "session-a:session=session-b")
+          ]
+      in
+      let missing_session =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", None) ]
+      in
+      let literal_missing_session =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "missing") ]
+      in
+      let missing_actor =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", None); ("session", Some "session-a") ]
+      in
+      let explicit_default_actor =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "session-a") ]
+      in
+      check bool "delimiter-bearing values do not collide" true
+        (not (String.equal actor_delimiter session_delimiter));
+      check bool "literal missing does not collide with absent value" true
+        (not (String.equal missing_session literal_missing_session));
+      check bool "missing actor does not collide with explicit default actor" true
+        (not (String.equal missing_actor explicit_default_actor)))
+
+let test_operator_snapshot_default_route_exposes_provenance () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+  in
+  let seed =
+    `Assoc
+      [ "available_actions", `List []
+      ; "keepers", `List []
+      ; "generated_at", `String "2026-05-15T00:00:00Z"
+      ]
+    |> Server_dashboard_http_core_operator_query.with_operator_snapshot_metadata
+         ~config
+         ~query:
+           (Server_dashboard_http_core_operator_query
+            .operator_snapshot_default_query ())
+  in
+  let publication =
+    match
+      Server_dashboard_http_core_operator.For_testing
+      .publish_operator_snapshot_success
+        seed
+    with
+    | Some publication -> publication
+    | None -> fail "canonical operator snapshot test publication was superseded"
+  in
+  let current, is_fresh =
+    Server_dashboard_http_core_operator.operator_snapshot_publication_with_freshness ()
+  in
+  check bool "canonical publication is fresh" true is_fresh;
+  check int
+    "canonical publication identity retained"
+    publication.compute_sequence
+    current.compute_sequence;
+  let json =
+    Server_dashboard_http_core.operator_snapshot_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      ~broadcast_snapshot:(fun _publication -> ())
+      (request "/api/v1/operator")
+  in
+  check string
+    "HTTP serves the canonical publication byte-for-byte"
+    (Yojson.Safe.to_string
+       (Server_dashboard_http_core_operator.operator_snapshot_publication_json
+          publication))
+    (Yojson.Safe.to_string json);
+  let open Yojson.Safe.Util in
+  check string "surface" "/api/v1/operator"
+    (json |> member "dashboard_surface" |> to_string);
+  check string "source" "operator_snapshot_read_model"
+    (json |> member "source" |> to_string);
+  check string "generated_at_iso" "2026-05-15T00:00:00Z"
+    (json |> member "generated_at_iso" |> to_string);
+  check string "retention scope" "operator_snapshot"
+    (json |> member "retention" |> member "scope" |> to_string);
+  check string "retention store" "process_cache"
+    (json |> member "retention" |> member "store_kind" |> to_string);
+  check string "query effective actor" "dashboard"
+    (json |> member "query" |> member "effective_actor" |> to_string);
+  check bool "query default summary" true
+    (json |> member "query" |> member "default_summary_request" |> to_bool);
+  check bool "query includes keepers" true
+    (json |> member "query" |> member "include_keepers" |> to_bool);
+  check bool "request cache metadata absent" true
+    (json |> member "cache" = `Null);
+  let stale_publication =
+    match
+      Server_dashboard_http_core_operator.For_testing
+      .publish_operator_snapshot_success
+        ~fresh_for_s:(-1.0)
+        seed
+    with
+    | Some publication -> publication
+    | None -> fail "stale canonical operator snapshot test publication was superseded"
+  in
+  let current, is_fresh =
+    Server_dashboard_http_core_operator.operator_snapshot_publication_with_freshness ()
+  in
+  check bool "expired canonical publication is stale" false is_fresh;
+  check int
+    "stale publication remains canonical"
+    stale_publication.compute_sequence
+    current.compute_sequence
+
+let test_operator_digest_default_route_exposes_provenance () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+  in
+  let seed =
+    `Assoc
+      [ "health", `String "ok"
+      ; "generated_at", `String "2026-05-15T00:00:01Z"
+      ]
+  in
+  with_cached_surface_success Server_dashboard_http_core_operator.operator_digest_cache seed
+  @@ fun () ->
+  match
+    Server_dashboard_http_core.operator_digest_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/operator/digest")
+  with
+  | Error _ -> Alcotest.fail "operator digest default route returned error"
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    check string "surface" "/api/v1/operator/digest"
+      (json |> member "dashboard_surface" |> to_string);
+    check string "source" "operator_digest_read_model"
+      (json |> member "source" |> to_string);
+    check string "generated_at_iso" "2026-05-15T00:00:01Z"
+      (json |> member "generated_at_iso" |> to_string);
+    check string "retention scope" "operator_digest"
+      (json |> member "retention" |> member "scope" |> to_string);
+    check string "retention store" "process_cache"
+      (json |> member "retention" |> member "store_kind" |> to_string);
+    check string "query effective target" "workspace"
+      (json |> member "query" |> member "effective_target_type" |> to_string);
+    check bool "query default namespace" true
+      (json |> member "query" |> member "default_namespace_request" |> to_bool);
+    check string "cache state" "fresh"
+      (json |> member "projection_diagnostics" |> member "cache_state" |> to_string)
+
+let test_dashboard_shell_timeout_fallback_reports_timing_context () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
+  Fun.protect
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good)
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      Atomic.set Server_dashboard_http.shell_warmed true;
+      Atomic.set Server_dashboard_http.shell_warming false;
+      Atomic.set Server_dashboard_http.last_good_shell (`Assoc []);
+      let cache_key =
+        Server_dashboard_http_core.dashboard_shell_cache_key config
+      in
+      ignore
+        (Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+             `Assoc
+               [
+                 ("error", `String "computation_timeout");
+                 ("key", `String cache_key);
+               ])));
+      let json = Server_dashboard_http_core.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      let diagnostics = json |> member "projection_diagnostics" in
+      check string "timeout fallback cache state" "timeout_fallback"
+        (diagnostics |> member "cache_state" |> to_string);
+      check string "timeout fallback source" "bootstrap"
+        (diagnostics |> member "fallback_source" |> to_string);
+      check string "timeout cache key surfaced" cache_key
+        (diagnostics |> member "timeout_cache_key" |> to_string);
+      check (float 0.001) "full shell timeout surfaced" 16.0
+        (diagnostics |> member "timeout_sec" |> to_float);
+      check string "timing absence is explicit" "none"
+        (diagnostics |> member "projection_timing_status" |> to_string);
+      check int "timing top is empty without an active trace" 0
+        (diagnostics |> member "projection_timing_top" |> to_list |> List.length))
+
+(* Both routes below scan a store. Seeding a sentinel under the key the
+   projection is supposed to consult, then asserting the projection returns it,
+   pins that the cache is actually in the path: without it the call recomputes
+   and answers with real data instead of the sentinel.
+
+   Measured before this: scheduled-automation 272 ms cold / 204 ms warm for
+   96 KB, agent-activity 105 ms cold / 75 ms warm for 2.2 KB. Neither second
+   pass was cheaper than its first, which is what an absent cache looks like
+   from outside. *)
+let cache_sentinel key = `Assoc [ ("sentinel", `String key) ]
+
+let seed_cache key =
+  ignore (Dashboard_cache.get_or_compute key ~ttl:60.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () -> cache_sentinel key)))
+
+let test_scheduled_automation_reads_its_cache_key () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Dashboard_cache.invalidate_all
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let cache_key =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key
+          config
+          "scheduled_automation"
+          []
+      in
+      seed_cache cache_key;
+      check
+        (of_pp Yojson.Safe.pp)
+        "scheduled-automation is served from its cache key"
+        (cache_sentinel cache_key)
+        (Server_dashboard_http.dashboard_scheduled_automation_http_json ~config))
+
+(* The exact lookup answers with a closed status, so a blank id is a named
+   outcome rather than a not_found that reads like "no such schedule". Pin the
+   two the caller can reach without a store: an empty id is invalid_id, and the
+   projection stays a function of the clock it is handed. *)
+let test_schedule_exact_lookup_rejects_blank_id () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let now = 1_700_000_000.0 in
+  let body =
+    Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+      config
+      ~now
+      ~schedule_id:"   "
+  in
+  let field name =
+    match body with
+    | `Assoc fields ->
+      (match List.assoc_opt name fields with Some (`String s) -> Some s | _ -> None)
+    | _ -> None
+  in
+  check (option string) "blank id is named, not not_found" (Some "invalid_id") (field "status");
+  check
+    (option string)
+    "the echoed id is the caller's, untrimmed"
+    (Some "   ")
+    (field "schedule_id");
+  check
+    (option string)
+    "generated_at uses the same injected projection clock"
+    (Some (Masc_domain.iso8601_of_unix_seconds now))
+    (field "generated_at")
+
+let schedule_lookup_dashboard_fixture =
+  checkout_file "dashboard/src/api/fixtures/scheduled-automation-lookup-found.json"
+
+(* The Dashboard reads this envelope with an exact key list. #32273 added the
+   wake history to it without touching the Dashboard, and from then on every
+   found answer was refused there as carrying unknown keys (#38510). The
+   Dashboard decoder test reads the shared fixture; this pins the fixture to
+   what the server writes, every key at every depth and the kind of every
+   value, so the next key the server adds fails here before it reaches an
+   operator. *)
+let test_schedule_exact_lookup_found_matches_the_dashboard_fixture () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let schedule_id = "sched-dashboard-fixture" in
+  let actor id =
+    { Schedule_domain.id; kind = Schedule_domain.Human_operator; display_name = None }
+  in
+  let request =
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:(actor "requester")
+        ~scheduled_by:(actor "scheduler")
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+            [ "kind", `String "consumer.note"
+            ; "body", `Assoc [ "text", `String "dashboard fixture" ]
+            ])
+        ~source:Schedule_domain.Operator_request
+        ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  (match Schedule_store.insert_request config ~runner_tick_sec request with
+   | Ok _ -> ()
+   | Error _ -> fail "the fixture schedule could not be inserted");
+  (match Schedule_store.refresh_due config ~now:201.0
+    ~retention_days:Schedule_store.terminal_schedule_retention_days with
+   | Ok _ -> ()
+   | Error _ -> fail "refresh_due refused the fixture");
+  let started =
+    match Schedule_store.start_due_candidate config ~now:202.0 ~candidate:request with
+    | Ok started -> started
+    | Error _ -> fail "start_due_candidate refused the fixture"
+  in
+  (match Schedule_store.accept_running config ~now:203.0 ~attempt:started.attempt () with
+   | Ok _ -> ()
+   | Error _ -> fail "accept_running refused the fixture");
+  let body =
+    Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+      config
+      ~now:400.0
+      ~schedule_id
+  in
+  let fixture = Yojson.Safe.from_file schedule_lookup_dashboard_fixture in
+  (* Every key at every depth with the kind of its value. Values differ run to
+     run (the instance id), so they are not compared; a list is walked by
+     index, and both sides hold the one wake this setup produces. *)
+  let rec shape path json =
+    let here = [ path, Json_util.kind_name json ] in
+    match json with
+    | `Assoc fields ->
+      here
+      @ List.concat_map (fun (key, value) -> shape (path ^ "." ^ key) value) fields
+    | `List items ->
+      here @ List.concat (List.mapi (fun index item -> shape (Printf.sprintf "%s[%d]" path index) item) items)
+    | _ -> here
+  in
+  check
+    (list (pair string string))
+    "the found answer's keys and kinds at every depth"
+    (List.sort compare (shape "$" body))
+    (List.sort compare (shape "$" fixture))
+
+(* The exact lookup is where a schedule's past is read, because the aggregate
+   sends one wake per row and 20 rows of 323. Until this projection carried the
+   list, one attempt of the up-to-32 the store keeps was all an operator could
+   see. The ceiling travels with the list so a count of three cannot be read as
+   "it has only ever woken three times" when the sweep has trimmed. *)
+let test_schedule_exact_lookup_carries_the_wake_history () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let schedule_id = "sched-wake-history" in
+  let request =
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:
+          { Schedule_domain.id = "requester"
+          ; kind = Schedule_domain.Human_operator
+          ; display_name = None
+          }
+        ~scheduled_by:
+          { Schedule_domain.id = "scheduler"
+          ; kind = Schedule_domain.Human_operator
+          ; display_name = None
+          }
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+            [ "kind", `String "consumer.note"
+            ; "body", `Assoc [ "text", `String "wake history fixture" ]
+            ])
+        ~source:Schedule_domain.Operator_request
+        ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  (match Schedule_store.insert_request config ~runner_tick_sec request with
+   | Ok _ -> ()
+   | Error _ -> fail "the fixture schedule could not be inserted");
+  let occurrence now =
+    (match Schedule_store.refresh_due config ~now
+      ~retention_days:Schedule_store.terminal_schedule_retention_days with
+     | Ok _ -> ()
+     | Error _ -> fail "refresh_due refused the fixture");
+    let candidate = match Schedule_store.get_schedule config ~schedule_id with
+      | Some current -> current
+      | None -> fail "recurring fixture disappeared"
+    in
+    let started =
+      match Schedule_store.start_due_candidate config ~now:(now +. 1.0) ~candidate with
+      | Ok started -> started
+      | Error _ -> fail "start_due_candidate refused the fixture"
+    in
+    match Schedule_store.accept_running config ~now:(now +. 2.0) ~attempt:started.attempt () with
+    | Ok _ -> ()
+    | Error _ -> fail "accept_running refused the fixture"
+  in
+  occurrence 201.0;
+  occurrence 261.0;
+  occurrence 321.0;
+  let body =
+    Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+      config
+      ~now:400.0
+      ~schedule_id
+  in
+  let open Yojson.Safe.Util in
+  check string "the lookup found it" "found" (body |> member "status" |> to_string);
+  let wakes = body |> member "wakes" |> to_list in
+  check int "every retained occurrence is listed" 3 (List.length wakes);
+  let started = List.map (fun w -> w |> member "started_at" |> to_float) wakes in
+  check
+    (list (float 0.001))
+    "newest first"
+    (List.sort (fun a b -> Float.compare b a) started)
+    started;
+  check int "the count states the list it sent" 3
+    (body |> member "wake_count" |> to_int);
+  check int "and the store's ceiling travels with it"
+    Schedule_store.terminal_wakes_retained_per_schedule
+    (body |> member "wake_retention_per_schedule" |> to_int)
+(* The fleet page caps at 20 rows with active ones first, so a Keeper whose
+   schedules are terminal or simply further down is absent from it. The tab
+   that filtered that page reported them as non-existent. A target-scoped page
+   is what makes them readable, and it must narrow every part of the envelope:
+   a scoped page carrying fleet counts would be read as this Keeper's. *)
+let test_schedule_page_can_be_scoped_to_one_target () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let actor id =
+    { Schedule_domain.id
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let insert ~schedule_id ~keeper =
+    let payload =
+      `Assoc
+        [ "kind", `String "masc.keeper_wake"
+        ; ( "body"
+          , `Assoc
+              [ "keeper_name", `String keeper
+              ; "message", `String "wake for the scoped page test"
+              ] )
+        ]
+    in
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:(actor "requester")
+        ~scheduled_by:(actor "scheduler")
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload
+        ~source:Schedule_domain.Operator_request
+        ()
+    with
+    | Ok request ->
+      (match Schedule_store.insert_request config ~runner_tick_sec request with
+       | Ok _ -> ()
+       | Error _ -> fail ("could not insert " ^ schedule_id))
+    | Error msg -> fail msg
+  in
+  insert ~schedule_id:"sched-scoped-a" ~keeper:"alpha";
+  insert ~schedule_id:"sched-scoped-b" ~keeper:"alpha";
+  insert ~schedule_id:"sched-scoped-c" ~keeper:"beta";
+  let open Yojson.Safe.Util in
+  let scoped =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:alpha"
+      config
+  in
+  check int "the scoped page counts only its target" 2
+    (scoped |> member "request_count" |> to_int);
+  check (list string) "and lists only its target's rows"
+    [ "sched-scoped-a"; "sched-scoped-b" ]
+    (scoped |> member "requests" |> to_list
+     |> List.map (fun row -> row |> member "schedule_id" |> to_string)
+     |> List.sort String.compare);
+  check (option string) "the response says what it is scoped to"
+    (Some "keeper:alpha")
+    (scoped |> member "payload_target_selector" |> to_option to_string);
+  check int "the scoped limit is its own number"
+    Server_dashboard_schedule_projection.schedule_projection_target_request_limit
+    (scoped |> member "request_limit" |> to_int);
+  (* #38411: the runner's status rides the scoped page too, but only the word.
+     The rest of /health's runner object is every target's holds and every
+     tick's totals, which this page would carry as this Keeper's. *)
+  check (list string) "the scoped page carries the runner's status and nothing of the fleet's"
+    [ "schema"; "status" ]
+    (scoped |> member "schedule_runner" |> keys |> List.sort String.compare);
+  let fleet =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  check int "the unscoped page still counts the store" 3
+    (fleet |> member "request_count" |> to_int);
+  check bool "and does not claim a selector" true
+    (fleet |> member "payload_target_selector" = `Null);
+  let missing =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:nobody"
+      config
+  in
+  (* An empty scoped page is an answer, not a store failure: status stays ok so
+     the reader can tell "none for this target" from "could not read". *)
+  check string "an empty scope is still a read that succeeded" "ok"
+    (missing |> member "status" |> to_string);
+  check int "with nothing in it" 0 (missing |> member "request_count" |> to_int)
+
+(* [counts] describes definitions and the page carries only the newest wake of
+   twenty rows, so a burst of failed attempts that a later tick retried to
+   success was readable nowhere on the fleet page. The wake counts read every
+   retained wake, scoped the same way as the rows. *)
+let test_schedule_page_counts_retained_wakes () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let actor id =
+    { Schedule_domain.id
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let insert ~schedule_id ~keeper =
+    let payload =
+      `Assoc
+        [ "kind", `String "masc.keeper_wake"
+        ; ( "body"
+          , `Assoc
+              [ "keeper_name", `String keeper
+              ; "message", `String "wake for the wake counts test"
+              ] )
+        ]
+    in
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:(actor "requester")
+        ~scheduled_by:(actor "scheduler")
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload
+        ~source:Schedule_domain.Operator_request
+        ()
+    with
+    | Ok request ->
+      (match Schedule_store.insert_request config ~runner_tick_sec request with
+       | Ok _ -> ()
+       | Error _ -> fail ("could not insert " ^ schedule_id))
+    | Error msg -> fail msg
+  in
+  let store_ok label = function
+    | Ok _ -> ()
+    | Error err -> fail (label ^ ": " ^ Schedule_store.store_error_to_string err)
+  in
+  insert ~schedule_id:"sched-wakes-retried" ~keeper:"alpha";
+  insert ~schedule_id:"sched-wakes-accepted" ~keeper:"beta";
+  insert ~schedule_id:"sched-wakes-never" ~keeper:"beta";
+  store_ok "refresh" (Schedule_store.refresh_due config ~now:201.0
+    ~retention_days:Schedule_store.terminal_schedule_retention_days);
+  (* alpha: the attempt failed retryably, so the definition is still live
+     (Due) and its newest wake is Failed. *)
+  let start schedule_id =
+    let candidate = match Schedule_store.get_schedule config ~schedule_id with
+      | Some current -> current
+      | None -> fail ("fixture disappeared: " ^ schedule_id)
+    in
+    match Schedule_store.start_due_candidate config ~now:201.0 ~candidate with
+    | Ok started -> started
+    | Error error -> fail (Schedule_store.store_error_to_string error)
+  in
+  let alpha = start "sched-wakes-retried" in
+  store_ok "retry alpha"
+    (Schedule_store.retry_running config ~now:202.0
+       ~attempt:alpha.attempt
+       ~reason:(Schedule_store.Retryable_dispatch_failure "keeper store unavailable"));
+  (* beta: accepted, so the one-shot definition is Succeeded with a Succeeded wake. *)
+  let beta = start "sched-wakes-accepted" in
+  store_ok "accept beta"
+    (Schedule_store.accept_running config ~now:202.0
+       ~attempt:beta.attempt ());
+  let open Yojson.Safe.Util in
+  let fleet =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  let counts = fleet |> member "wake_counts" in
+  check int "every retained terminal wake is counted" 2 (counts |> member "retained" |> to_int);
+  check int "the failed attempt is counted" 1 (counts |> member "failed" |> to_int);
+  check int "the accepted attempt is counted" 1 (counts |> member "succeeded" |> to_int);
+  check int "nothing is mid-dispatch" 0 (counts |> member "running" |> to_int);
+  check int "one live definition's newest wake failed" 1
+    (counts |> member "active_with_failed_newest_wake" |> to_int);
+  check int "the ceiling travels with the numbers"
+    Schedule_store.terminal_wakes_retained_per_schedule
+    (counts |> member "retention_per_schedule" |> to_int);
+  let scoped =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:beta"
+      config
+  in
+  let scoped_counts = scoped |> member "wake_counts" in
+  check int "a scoped page counts only its target's wakes" 1
+    (scoped_counts |> member "retained" |> to_int);
+  check int "and none of the other target's failures" 0
+    (scoped_counts |> member "failed" |> to_int);
+  check int "beta's live definition has no failed newest wake" 0
+    (scoped_counts |> member "active_with_failed_newest_wake" |> to_int)
+
+(* The window selects which rows the scan covers, so two windows must not share
+   an entry. Seeding only the 24 h key and asking for 1 h has to miss. *)
+let test_agent_activity_keys_on_its_window () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Dashboard_cache.invalidate_all
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let key_for hours =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key
+          config
+          "agent_activity"
+          [ ("hours", Some (string_of_float hours)) ]
+      in
+      let default_key = key_for 24.0 in
+      seed_cache default_key;
+      check
+        (of_pp Yojson.Safe.pp)
+        "the default window is served from its cache key"
+        (cache_sentinel default_key)
+        (Server_dashboard_http_agent_api.agent_activity_http_json
+           ~config ~hours:24.0);
+      let other =
+        Server_dashboard_http_agent_api.agent_activity_http_json
+          ~config ~hours:1.0
+      in
+      check bool "a different window does not reuse the 24h entry" false
+        (Yojson.Safe.equal other (cache_sentinel default_key));
+      let open Yojson.Safe.Util in
+      check (float 0.001) "the computed window is the one asked for" 1.0
+        (other |> member "hours" |> to_float))
+
+let test_dashboard_proof_http_json_surfaces_submission_index () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let module V = Lib.Verification in
+  let output =
+    `Assoc
+      [
+        ("evidence_refs", `List [ `String "artifact://proof-route" ]);
+        ("task_title", `String "Proof route fixture");
+      ]
+  in
+  (match
+     V.create_request
+       ~base_path:config.base_path
+       ~task_id:"task-proof-route"
+       ~output
+       ~criteria:[ "proof route must expose verification evidence" ]
+       ~worker:"keeper-proof"
+       ()
+   with
+   | Ok _ -> ()
+   | Error message -> fail message);
+  let json =
+    Server_dashboard_http.dashboard_proof_http_json
+      ~config
+      (request "/api/v1/dashboard/proof?limit=5")
+  in
+  let open Yojson.Safe.Util in
+  check int "verification total" 1
+    (json |> member "summary" |> member "verification_total" |> to_int);
+  check bool "request status is not synthesized from immutable submissions" true
+    (json |> member "summary" |> member "verification_pending" = `Null);
+  check bool "rejection status is not synthesized from immutable submissions" true
+    (json |> member "summary" |> member "verification_rejected" = `Null);
+  check bool "verification requests exposed" true
+    (match json |> member "verification" |> member "requests" |> member "requests" with
+     | `List [ _ ] -> true
+     | _ -> false);
+  check bool "proof sources include execution trust route" true
+    (json
+     |> member "proof_sources"
+     |> to_list
+     |> List.exists (fun source ->
+       String.equal
+         (source |> member "route" |> to_string)
+         "/api/v1/dashboard/execution-trust"))
+
+let config_sync_runtime_toml =
+  {|[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+# The routing test appends this runtime to an exact lane; a save adding a
+# slot whose provider declares no exact-body-timeout-s is refused (#38779).
+exact-body-timeout-s = 120.0
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let execution_trust_keeper_row_keys =
+  [ "current_task_id"
+  ; "keeper_id"
+  ; "name"
+  ; "phase"
+  ; "pipeline_stage"
+  ; "status"
+  ; "trace_id"
+  ; "trust"
+  ]
+
+let test_execution_trust_uses_narrow_keeper_projection () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let runtime_path = Filename.concat config.Workspace.base_path "runtime.toml" in
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error error -> failf "runtime init: %s" error);
+  let name = "execution-trust-narrow-projection" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "trace_id", `String "execution-trust-narrow-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  (* #36066: both dashboard projections row an undeclared keeper as
+     [invalid_profile_dashboard_row], which carries no [trace_id]. *)
+  Masc_test_deps.declare_fixture_keeper
+    ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error error -> failf "write meta: %s" error);
+  let json = Dashboard_http_keeper.execution_trust_dashboard_json config in
+  let open Yojson.Safe.Util in
+  let row =
+    match json |> member "keepers" |> to_list with
+    | [ row ] -> row
+    | rows -> failf "expected one execution-trust row, got %d" (List.length rows)
+  in
+  let full_row =
+    match
+      Dashboard_http_keeper.keepers_dashboard_json ~compact:true config
+      |> member "keepers"
+      |> to_list
+    with
+    | [ full_row ] -> full_row
+    | rows -> failf "expected one full Keeper row, got %d" (List.length rows)
+  in
+  let full_row_field key =
+    Option.value ~default:`Null (Json_util.assoc_member_opt key full_row)
+  in
+  let expected_row =
+    `Assoc
+      (List.map
+         (fun key -> key, full_row_field key)
+         [ "name"
+         ; "keeper_id"
+         ; "phase"
+         ; "pipeline_stage"
+         ; "status"
+         ; "trace_id"
+         ; "current_task_id"
+         ; "trust"
+         ])
+  in
+  check bool "narrow row preserves the full projection wire values" true
+    (Yojson.Safe.equal expected_row row);
+  let keys =
+    match row with
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "execution-trust keeper row must be an object"
+  in
+  check (list string) "wire field set remains exact"
+    execution_trust_keeper_row_keys keys;
+  check string "name" name (row |> member "name" |> to_string);
+  check string "trace id" "execution-trust-narrow-trace"
+    (row |> member "trace_id" |> to_string);
+  check bool "trust summary remains populated" true
+    (match row |> member "trust" with `Assoc _ -> true | _ -> false)
+
+let test_gate_resolve_requires_reason_on_reject () =
+  let attempt reason_field =
+    let fields =
+      [ "id", `String "appr_regression_reject_reason"
+      ; "decision", `String "reject"
+      ]
+      @ reason_field
+    in
+    Server_dashboard_http.dashboard_gate_resolve_http_json
+      ~base_path:"/nonexistent/base/path"
+      ~created_by:"regression-test"
+      ~args:(`Assoc fields) ()
+  in
+  let expect_bad_request label result =
+    match result with
+    | Error (Server_dashboard_http.Bad_request msg) ->
+      Alcotest.(check string)
+        label
+        "reason is required when decision is 'reject'"
+        msg
+    | Error other ->
+      Alcotest.failf
+        "%s: expected Bad_request, got %s"
+        label
+        (Server_dashboard_http.approval_resolve_http_error_to_string other)
+    | Ok _ -> Alcotest.failf "%s: reject without a reason must not resolve" label
+  in
+  expect_bad_request "omitted reason" (attempt []);
+  expect_bad_request "empty reason" (attempt [ "reason", `String "" ]);
+  expect_bad_request "blank reason" (attempt [ "reason", `String "   " ]);
+  (* A supplied reason clears parsing and reaches the queue, where this
+     synthetic id has nothing to resolve. Any error other than Bad_request
+     proves the reason was accepted. *)
+  match attempt [ "reason", `String "clone target is unverified" ] with
+  | Error (Server_dashboard_http.Bad_request msg) ->
+    Alcotest.failf "a supplied reason must parse, got Bad_request: %s" msg
+  | Error _ | Ok _ -> ()
+;;
+
+let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
+  let open Yojson.Safe.Util in
+  let change : Masc.Keeper_gate_mode.change =
+    { previous = Some Masc.Keeper_gate_mode.Manual
+    ; current = Masc.Keeper_gate_mode.Auto_judge
+    ; actor = "operator"
+    ; changed_at = "2026-07-16T00:00:00Z"
+    ; replaced_read_error = None
+    }
+  in
+  let json recovery =
+    Server_routes_http_routes_dashboard.For_testing.gate_mode_change_json
+      change
+      recovery
+  in
+  let completed =
+    json
+      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+         { Masc.Keeper_gate.started_ids = [ "approval-1" ]
+         ; queued = 1
+         ; failures = []
+         ; blockers = []
+         })
+  in
+  check string "completed status" "completed"
+    (completed |> member "recovery_status" |> to_string);
+  check bool "completed error is null" true
+    (completed |> member "recovery_error" = `Null);
+  check int "completed started" 1 (completed |> member "started" |> to_int);
+  check int "completed queued" 1 (completed |> member "queued" |> to_int);
+  check int "completed failures" 0
+    (completed |> member "recovery_failure_count" |> to_int);
+  let partial =
+    json
+      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+         { Masc.Keeper_gate.started_ids = [ "approval-2" ]
+         ; queued = 1
+         ; failures =
+             [ { keeper_name = "keeper-a"
+               ; approval_id = Some "approval-1"
+               ; operator_detail = "worker unavailable"
+               }
+             ]
+         ; blockers =
+             [ { keeper_name = "keeper-b"
+               ; blocker =
+                   Masc.Keeper_gate.Drain_owner_at_capacity [ "approval-3" ]
+               }
+             ; { keeper_name = "keeper-a"
+               ; blocker =
+                   Masc.Keeper_gate.Drain_start_failed
+                     ("approval-1", "worker unavailable")
+               }
+             ]
+         })
+  in
+  check string "partial status" "partial"
+    (partial |> member "recovery_status" |> to_string);
+  check int "partial started" 1 (partial |> member "started" |> to_int);
+  check int "partial failures" 1
+    (partial |> member "recovery_failure_count" |> to_int);
+  check string "partial failure owner" "keeper-a"
+    (partial
+     |> member "recovery_failures"
+     |> index 0
+     |> member "keeper_name"
+     |> to_string);
+  (* #25979: an owner that started nothing still says why it is blocked. *)
+  let capacity_blocker = partial |> member "recovery_blockers" |> index 0 in
+  check string "blocked owner" "keeper-b"
+    (capacity_blocker |> member "keeper_name" |> to_string);
+  check string "blocker kind" "owner_at_capacity"
+    (capacity_blocker |> member "kind" |> to_string);
+  check (list string) "blocker approval ids" [ "approval-3" ]
+    (capacity_blocker |> member "approval_ids" |> to_list |> List.map to_string);
+  check bool "capacity blocker has no reason" true
+    (capacity_blocker |> member "reason" = `Null);
+  let start_blocker = partial |> member "recovery_blockers" |> index 1 in
+  check string "start failure kind" "start_failed"
+    (start_blocker |> member "kind" |> to_string);
+  check string "start failure reason" "worker unavailable"
+    (start_blocker |> member "reason" |> to_string);
+  check int "completed has no blockers" 0
+    (completed |> member "recovery_blockers" |> to_list |> List.length);
+  let failed =
+    json
+      (Server_routes_http_routes_dashboard.For_testing.Recovery_failed
+         "judge worker unavailable")
+  in
+  check string "failed status" "failed"
+    (failed |> member "recovery_status" |> to_string);
+  check string "failed detail" "judge worker unavailable"
+    (failed |> member "recovery_error" |> to_string);
+  check int "failed started" 0 (failed |> member "started" |> to_int);
+  check int "failed queued" 0 (failed |> member "queued" |> to_int);
+  let not_requested =
+    json Server_routes_http_routes_dashboard.For_testing.Recovery_not_requested
+  in
+  check string "not requested status" "not_requested"
+    (not_requested |> member "recovery_status" |> to_string);
+  check bool "not requested error is null" true
+    (not_requested |> member "recovery_error" = `Null);
+  check int "not requested started" 0
+    (not_requested |> member "started" |> to_int);
+  check int "not requested queued" 0
+    (not_requested |> member "queued" |> to_int)
+
+let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let hangul_ga = "\234\176\128" in
+  let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
+  (match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_store.write_error_to_string error));
+  let json = Server_dashboard_http.dashboard_planning_http_json ~config in
+  let serialized = Yojson.Safe.to_string json in
+  check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
+
+(* A Task awaiting verification is finished work waiting on a verifier, and
+   the Planning surface counts that queue on its own tab. Counted as
+   in_progress, the same seven Tasks were two numbers under two words on one
+   screen, and the word naming the wait was the one the count hid. *)
+let test_planning_counts_a_task_awaiting_verification_on_its_own () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let open Yojson.Safe.Util in
+  (* The store refuses a stamp that is not RFC 3339, in every status that
+     carries one. *)
+  let stamp = "2026-09-23T00:00:00Z" in
+  let task id status =
+    let json =
+      `Assoc
+        [ "id", `String id
+        ; "title", `String id
+        ; "description", `String ""
+        ; "priority", `Int 3
+        ; "status", `String "todo"
+        ; "files", `List []
+        ; "created_at", `String stamp
+        ]
+    in
+    match Masc_domain.task_of_yojson json with
+    | Ok task -> { task with Masc_domain.task_status = status }
+    | Error detail -> fail detail
+  in
+  let backlog =
+    match Workspace_backlog.read_backlog_r config with
+    | Ok backlog -> backlog
+    | Error detail -> fail detail
+  in
+  Workspace_backlog.write_backlog config
+    { backlog with
+      tasks =
+        [ task "t-todo" Masc_domain.Todo
+        ; task "t-claimed" (Masc_domain.Claimed { assignee = "a"; claimed_at = stamp })
+        ; task
+            "t-running"
+            (Masc_domain.InProgress { assignee = "a"; started_at = stamp })
+        ; task
+            "t-awaiting"
+            (Masc_domain.AwaitingVerification
+               { assignee = "a"
+               ; started_at = stamp
+               ; submitted_at = stamp
+               ; verification_id = "v-1"
+               })
+        ; task
+            "t-done"
+            (Masc_domain.Done
+               { assignee = "a"; completed_at = stamp; notes = None })
+        ; task
+            "t-cancelled"
+            (Masc_domain.Cancelled
+               { cancelled_by = "a"; cancelled_at = stamp; reason = None })
+        ]
+    };
+  let counts =
+    Server_dashboard_http.dashboard_planning_http_json ~config
+    |> member "task_backlog"
+  in
+  let count key = counts |> member key |> to_int in
+  check int "the one being worked" 1 (count "in_progress");
+  check int "the one waiting on a verifier" 1 (count "awaiting_verification");
+  check int "todo" 1 (count "todo");
+  check int "claimed" 1 (count "claimed");
+  check int "done" 1 (count "done");
+  check int "cancelled" 1 (count "cancelled")
+
+let test_goal_source_failure_is_not_empty () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let open Yojson.Safe.Util in
+  let planning () = Server_dashboard_http.dashboard_planning_http_json ~config in
+  let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
+  check int "fresh planning store is empty" 0
+    (planning () |> member "goals" |> to_list |> List.length);
+  check int "fresh tree store is empty" 0
+    (tree () |> member "tree" |> to_list |> List.length);
+  let goal, _ = match Goal_store.upsert_goal config ~title:"Source availability"
+      ~metric:"visible goals" ~target_value:"1" () with
+    | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let original = Fs_compat.load_file primary in
+  check int "valid primary is visible" 1
+    (planning () |> member "goals" |> to_list |> List.length);
+  (* RFC-0444 §2.3 row 4 / criterion 7: every dashboard projection answers
+     with the MCP envelope (reason, field, file, mirror, reset_step), so the
+     operator sees which file, why, and what the next step is. *)
+  let check_unavailable label ~reason ~field ~mirror_status ~mirror_goal_count ~reset_step =
+    let detail = match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+      | Ok json -> json | Error error -> fail error
+    in
+    List.iter (fun (surface, json) ->
+      check bool (label ^ surface ^ " not successful") false
+        (json |> member "ok" |> to_bool);
+      check string (label ^ surface ^ " source classification")
+        "goal_store_unavailable" (json |> member "error_code" |> to_string);
+      check string (label ^ surface ^ " reason") reason (json |> member "reason" |> to_string);
+      check bool (label ^ surface ^ " field") true (member "field" json = field);
+      check string (label ^ surface ^ " file") primary (json |> member "file" |> to_string);
+      check string (label ^ surface ^ " mirror status") mirror_status
+        (json |> member "mirror" |> member "status" |> to_string);
+      check bool (label ^ surface ^ " mirror goal_count") true
+        (json |> member "mirror" |> member "goal_count" = mirror_goal_count);
+      check string (label ^ surface ^ " reset_step") reset_step
+        (json |> member "reset_step" |> to_string);
+      check bool (label ^ surface ^ " carries no rendered line") true
+        (member "error" json = `Null);
+      List.iter (fun collection ->
+        check bool (label ^ surface ^ " no invented " ^ collection) true
+          (member collection json = `Null)) ["goals"; "tree"; "summary"; "rollup"])
+      ["planning", planning (); "tree", tree (); "detail", detail]
+  in
+  let invalid_schema =
+    match Yojson.Safe.from_string original with
+    | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          if key = "goals" then
+            key, `List (value |> to_list |> List.map (function
+              | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+              | json -> json))
+          else key, value) fields)
+    | _ -> fail "saved Goal store must be an object"
+  in
+  Fs_compat.save_file primary (Yojson.Safe.to_string invalid_schema);
+  check_unavailable "invalid criterion schema: " ~reason:"schema_rejected"
+    ~field:(`String "criterion_revision") ~mirror_status:"mirror_decodes"
+    ~mirror_goal_count:(`Int 1) ~reset_step:"repair_field";
+  Fs_compat.save_file primary "unreadable primary";
+  check_unavailable "valid mirror: " ~reason:"not_json" ~field:`Null
+    ~mirror_status:"mirror_decodes" ~mirror_goal_count:(`Int 1)
+    ~reset_step:"reset_goal_store";
+  check string "read does not replace primary" "unreadable primary"
+    (Fs_compat.load_file primary);
+  check string "read does not alter mirror" original (Fs_compat.load_file mirror);
+  Fs_compat.save_file mirror "unreadable mirror";
+  check_unavailable "both invalid: " ~reason:"not_json" ~field:`Null
+    ~mirror_status:"mirror_rejected" ~mirror_goal_count:`Null
+    ~reset_step:"reset_goal_store";
+  Sys.remove primary;
+  Fs_compat.save_file mirror original;
+  check_unavailable "primary missing: " ~reason:"missing_after_init" ~field:`Null
+    ~mirror_status:"mirror_decodes" ~mirror_goal_count:(`Int 1)
+    ~reset_step:"reset_goal_store";
+  check bool "read does not recreate missing primary" false (Sys.file_exists primary);
+  Sys.remove mirror;
+  check int "both absent is a fresh store" 0
+    (planning () |> member "goals" |> to_list |> List.length)
+
+(* RFC-0444 §2.3 row 4: the keeper detail's [active_goals_tree] member is
+   the same envelope as Planning and the Goal tree, not a second shape for
+   one error code. *)
+let test_keeper_detail_active_goals_tree_uses_goal_store_envelope () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let name = "goal-envelope-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path name)
+    (fun () ->
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc [ "name", `String name; "trace_id", `String (name ^ "-trace") ])
+        with
+        | Ok meta -> meta
+        | Error error -> fail ("meta fixture: " ^ error)
+      in
+      (* The per-keeper enrich resolves the keeper's runtime id through
+         [Keeper_meta_contract.runtime_id_of_meta], which reads the process
+         default runtime and raises when none was initialized (RFC-0206
+         §2.1: no silent fallback). This case runs before the groups that
+         call [Runtime.init_default], so it initializes the same fixture
+         runtime itself; without it the worker raised, the degraded row
+         raised again on the same read, and the keeper vanished from the
+         payload before [active_goals_tree] was ever built. *)
+      let runtime_path =
+        Config_dir_resolver.runtime_toml_path_for_base_path
+          ~base_path:config.Workspace.base_path
+      in
+      mkdir_p (Filename.dirname runtime_path);
+      write_file runtime_path config_sync_runtime_toml;
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error error -> fail ("runtime init: " ^ error));
+      (* #36066: both dashboard projections row an undeclared keeper as
+         [invalid_profile_dashboard_row], which carries no [trace_id]. *)
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
+      (match Masc.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error error -> fail ("write meta: " ^ error));
+      ignore
+        (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path name meta);
+      (match Goal_store.upsert_goal config ~title:"Keeper detail source"
+               ~metric:"visible goals" ~target_value:"1" () with
+       | Ok _ -> ()
+       | Error error -> fail (Goal_store.write_error_to_string error));
+      let primary = Goal_store.goals_path config in
+      let open Yojson.Safe.Util in
+      let invalid_schema =
+        match Yojson.Safe.from_string (Fs_compat.load_file primary) with
+        | `Assoc fields ->
+            `Assoc (List.map (fun (key, value) ->
+              if key = "goals" then
+                key, `List (value |> to_list |> List.map (function
+                  | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+                  | json -> json))
+              else key, value) fields)
+        | _ -> fail "saved Goal store must be an object"
+      in
+      Fs_compat.save_file primary (Yojson.Safe.to_string invalid_schema);
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      let row =
+        match
+          json |> member "keepers" |> to_list
+          |> List.find_opt (fun row -> row |> member "name" |> to_string = name)
+        with
+        | Some row -> row
+        | None -> fail "registered keeper is missing from the detail envelope"
+      in
+      let tree = row |> member "active_goals_tree" in
+      check bool "keeper active_goals_tree not successful" false (tree |> member "ok" |> to_bool);
+      check string "keeper active_goals_tree error_code" "goal_store_unavailable"
+        (tree |> member "error_code" |> to_string);
+      check string "keeper active_goals_tree reason" "schema_rejected"
+        (tree |> member "reason" |> to_string);
+      check string "keeper active_goals_tree field" "criterion_revision"
+        (tree |> member "field" |> to_string);
+      check string "keeper active_goals_tree file" primary (tree |> member "file" |> to_string);
+      check string "keeper active_goals_tree reset_step" "repair_field"
+        (tree |> member "reset_step" |> to_string);
+      check bool "keeper active_goals_tree carries no rendered line" true
+        (member "error" tree = `Null))
+
+let test_goal_link_source_failure_preserves_unrelated_planning () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let get_ok = function Ok value -> value | Error detail -> fail detail in
+  let goal, _ = get_ok (Result.map_error Goal_store.write_error_to_string
+      (Goal_store.upsert_goal config ~title:"Linked source"
+         ~metric:"tasks" ~target_value:"1" ())) in
+  let created = match Workspace.add_task_with_result ~goal_id:goal.id config
+      ~title:"Linked task" ~priority:3 ~description:"evidence" with
+    | Ok created -> created
+    | Error error -> fail (Workspace.add_task_error_to_string error) in
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  let mirror = links_path ^ ".last-good" in
+  let original = Fs_compat.load_file links_path in
+  let open Yojson.Safe.Util in
+  let tree () = Dashboard_goals.dashboard_goals_tree_json ~config in
+  let detail () = get_ok (Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id) in
+  let assert_link_visible () =
+    let node = tree () |> member "tree" |> to_list |> List.hd in
+    check int "tree preserves linked task" 1 (node |> member "tasks" |> to_list |> List.length);
+    check int "detail preserves linked task" 1
+      (detail () |> member "linked_tasks" |> to_list |> List.length)
+  in
+  assert_link_visible ();
+  let check_unavailable () =
+    List.iter (fun json ->
+      check bool "source failure is explicit" false (json |> member "ok" |> to_bool);
+      check string "link source is named" "goal_task_links_unavailable"
+        (json |> member "error_code" |> to_string);
+      check bool "no invented task collection" true (member "linked_tasks" json = `Null);
+      check bool "no fabricated tree" true (member "tree" json = `Null)) [tree (); detail ()];
+    (match Dashboard_goals.build_forest ~config ~goals:[goal]
+        ~tasks:(Workspace.get_tasks_safe config) ~pending_approvals:[] with
+     | Error _ -> () | Ok _ -> fail "forest builder accepted unavailable links");
+    let planning = Server_dashboard_http.dashboard_planning_http_json ~config in
+    check int "unrelated planning still lists its Goal" 1
+      (planning |> member "goals" |> to_list |> List.length);
+    check bool "unrelated Task remains available" true
+      (List.exists (fun (task : Masc_domain.task) -> task.id = created.task_id)
+        (Workspace.get_tasks_safe config))
+  in
+  Fs_compat.save_file links_path "{broken";
+  check_unavailable ();
+  check string "read does not repair primary" "{broken" (Fs_compat.load_file links_path);
+  check string "read does not alter recovery" original (Fs_compat.load_file mirror);
+  Sys.remove links_path;
+  check_unavailable ();
+  check bool "read does not recreate primary" false (Sys.file_exists links_path);
+  Fs_compat.save_file links_path original;
+  assert_link_visible ()
+
+let test_goal_proof_surfaces_share_persisted_criterion_truth () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let get_ok = function Ok value -> value | Error detail -> fail detail in
+  let goal, _ = get_ok (Result.map_error Goal_store.write_error_to_string
+      (Goal_store.upsert_goal config ~title:"Measured dashboard Goal"
+         ~metric:"passing cases" ~target_value:"10" ())) in
+  let goal_id = goal.Goal_store.id in
+  let open Yojson.Safe.Util in
+  let find_goal nodes =
+    nodes |> to_list |> List.find (fun row -> row |> member "id" |> to_string = goal_id)
+  in
+  let check_surfaces ~phase ~proof_state =
+    let planning = Server_dashboard_http.dashboard_planning_http_json ~config in
+    let planned = find_goal (member "goals" planning) in
+    let tree = Dashboard_goals.dashboard_goals_tree_json ~config in
+    let tree_goal = find_goal (member "tree" tree) in
+    let detail = get_ok (Dashboard_goals.goal_detail_json ~config ~goal_id) in
+    let detail_goal = member "goal" detail in
+    (* The Keeper detail assembles its own forest and uses this exact callback.
+       Exercise that caller shape against the same persisted source too. *)
+    let goals = get_ok (Result.map_error Goal_store.unavailable_to_string
+      (Goal_store.list_goals_result config ())) in
+    let projection = Dashboard_goals.verification_projection ~config in
+    let keeper_goal =
+      Dashboard_goals.build_forest ~config ~goals ~tasks:[] ~pending_approvals:[]
+      |> get_ok
+      |> List.find (fun (node : Dashboard_goals.tree_node) -> node.goal.id = goal_id)
+      |> Dashboard_goals.tree_node_to_json ~verification_for_goal:projection
+    in
+    let expected = member "verification" planned in
+    List.iter (fun (name, row) ->
+      check string (name ^ " lifecycle") phase (row |> member "phase" |> to_string);
+      let proof = member "verification" row in
+      let actual_state =
+        match member "state" proof with
+        | `String "ledger_error" -> "ledger_error"
+        | _ -> proof |> member "completion" |> member "state" |> to_string
+      in
+      check string (name ^ " proof state") proof_state actual_state;
+      (* Idle rows have no persisted record yet, so each projection stamps its
+         own default observation time. Every persisted proof compares exactly. *)
+      let comparable value = if proof_state = "idle" then member "completion" value else value in
+      check string (name ^ " same source projection")
+        (Yojson.Safe.to_string (comparable expected))
+        (Yojson.Safe.to_string (comparable proof)))
+      [ "planning", planned; "tree", tree_goal; "detail", detail_goal; "keeper", keeper_goal ];
+    expected
+  in
+  ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
+  let _, pending =
+    match Lib.Workspace_goals.request_current_proof config ~goal_id with
+    | Ok requested -> requested
+    | Error (Lib.Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
+    | Error (Lib.Workspace_goals.Refused { message; _ }) -> fail message
+  in
+  let request_id, criterion = match pending.Goal_verification.completion with
+    | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
+    | _ -> fail "request did not persist pending proof"
+  in
+  ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
+  let committed = Lib.Workspace_goals.commit_verifier_decision
+    ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config ~goal_id
+    ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
+    ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
+  check bool "internal verifier committed" true (Tool_result.is_success committed);
+  ignore (check_surfaces ~phase:"awaiting_confirmation" ~proof_state:"proof_proven");
+  ignore (get_ok (Result.map_error Goal_store.write_error_to_string
+    (Lib.Workspace_goals.confirm_completion config ~goal_id
+      ~operator_id:"dashboard-operator" ~request_id
+      ~verification_run_id:"dashboard-proof-run"
+      ~criterion_revision:goal.criterion_revision)));
+  let proven = check_surfaces ~phase:"completed" ~proof_state:"human_confirmed" in
+  ignore (get_ok (Result.map_error Goal_store.write_error_to_string
+    (Goal_store.upsert_goal config ~id:goal_id
+       ~title:"Measured dashboard Goal" ~target_value:"20" ())));
+  let stale = check_surfaces ~phase:"executing" ~proof_state:"stale_criterion" in
+  check string "stale projection preserves the original proof"
+    (Yojson.Safe.to_string (member "completion" proven))
+    (Yojson.Safe.to_string (stale |> member "completion" |> member "historical_completion"));
+  let path = Goal_verification.verifications_path config in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  Fs_compat.save_file path "invalid primary proof ledger";
+  ignore (check_surfaces ~phase:"executing" ~proof_state:"ledger_error");
+  check string "display never repairs primary from mirror"
+    "invalid primary proof ledger" (Fs_compat.load_file path);
+  check string "display preserves historical mirror" mirror
+    (Fs_compat.load_file (path ^ ".last-good"))
+
+let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+  | Ok (raw_token, _) ->
+      let json =
+        Server_dashboard_http_core.dashboard_shell_http_json
+          ~request:
+            (request_with_headers "/api/v1/dashboard/shell"
+               [
+                 ("authorization", "Bearer " ^ raw_token);
+                 ("x-masc-agent", "dashboard");
+               ])
+          config
+      in
+      let open Yojson.Safe.Util in
+      let auth = json |> member "auth" in
+      check bool "token_valid true" true (auth |> member "token_valid" |> to_bool);
+      check string "requested actor surfaced" "dashboard"
+        (auth |> member "requested_agent" |> to_string);
+      check string "token owner surfaced" "codex"
+        (auth |> member "token_agent" |> to_string);
+      check string "effective actor canonicalized to token owner" "codex"
+        (auth |> member "effective_agent" |> to_string);
+      check bool "auth error cleared after canonicalization" true
+        (match auth |> member "auth_error_code" with `Null -> true | _ -> false);
+      check bool "keeper message allowed for canonicalized worker" true
+        (auth |> member "can_keeper_msg" |> to_bool)
+
+let test_dashboard_shell_auth_json_reports_missing_token () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  let request =
+    request_with_headers "/api/v1/dashboard/shell"
+      [
+        ("origin", "http://localhost:5173");
+        ("host", "localhost:5173");
+      ]
+  in
+  let request_authority =
+    let trust_policy =
+      match
+        Server_request_authority.make_trust_policy
+          ~bind_host:"127.0.0.1"
+          ~bind_port:5173
+          ~explicit_base_url:None
+      with
+      | Ok policy -> policy
+      | Error error ->
+        fail (Server_request_authority.trust_policy_error_to_string error)
+    in
+    match
+      Server_request_authority.classify_http1_request ~trust_policy request
+    with
+    | Server_request_authority.Single authority -> authority
+    | ( Server_request_authority.Missing
+      | Server_request_authority.Multiple
+      | Server_request_authority.Malformed
+      | Server_request_authority.Untrusted ) ->
+      fail "expected valid authority"
+  in
+  let json =
+    Server_request_authority.with_current request_authority (fun () ->
+      Server_dashboard_http_core.dashboard_shell_http_json
+        ~request
+        config)
+  in
+  let open Yojson.Safe.Util in
+  let auth = json |> member "auth" in
+  check bool "token_valid false" false (auth |> member "token_valid" |> to_bool);
+  check string "missing token code surfaced" "missing_token"
+    (auth |> member "auth_error_code" |> to_string)
+
+let test_dashboard_shell_auth_json_rejects_stale_token_actor_hint () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  let json =
+    Server_dashboard_http_core.dashboard_shell_http_json
+      ~request:
+        (request_with_headers "/api/v1/dashboard/shell"
+           [
+             ("authorization", "Bearer stale-dashboard-token");
+             ("x-masc-agent", "dashboard");
+           ])
+      config
+  in
+  let open Yojson.Safe.Util in
+  let auth = json |> member "auth" in
+  check bool "token_valid false" false (auth |> member "token_valid" |> to_bool);
+  check string "requested actor surfaced for diagnosis" "dashboard"
+    (auth |> member "requested_agent" |> to_string);
+  check bool "effective actor not recovered from request hint" true
+    (match auth |> member "effective_agent" with `Null -> true | _ -> false);
+  check bool "effective role unavailable" true
+    (match auth |> member "effective_role" with `Null -> true | _ -> false);
+  check string "invalid token code surfaced" "invalid_token"
+    (auth |> member "auth_error_code" |> to_string);
+  check bool "keeper message blocked" false
+    (auth |> member "can_keeper_msg" |> to_bool)
+
+let test_dashboard_shell_auth_json_rejects_malformed_credential () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = false }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  let json =
+    Server_dashboard_http_core.dashboard_shell_http_json
+      ~request:
+        (request_with_headers "/api/v1/dashboard/shell"
+           [ ("authorization", "Basic malformed")
+           ; ("x-masc-agent", "forged-dashboard")
+           ])
+      config
+  in
+  let open Yojson.Safe.Util in
+  let auth = json |> member "auth" in
+  check bool "credential presence retained" true
+    (auth |> member "token_present" |> to_bool);
+  check bool "malformed credential invalid" false
+    (auth |> member "token_valid" |> to_bool);
+  check bool "effective actor unavailable" true
+    (match auth |> member "effective_agent" with `Null -> true | _ -> false);
+  check bool "effective role unavailable" true
+    (match auth |> member "effective_role" with `Null -> true | _ -> false);
+  check string "malformed credential code surfaced" "missing_token"
+    (auth |> member "auth_error_code" |> to_string);
+  check bool "keeper message blocked" false
+    (auth |> member "can_keeper_msg" |> to_bool)
+
+let test_dashboard_shell_snapshot_selector_injects_auth () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  Fun.protect
+    ~finally:Dashboard_snapshot.reset_for_test
+    (fun () ->
+       let snapshot =
+         Dashboard_snapshot.make_for_test ~config
+           ~shell:
+             (`Assoc
+                [
+                  ("status", `Assoc [ ("project", `String "snapshot") ]);
+                  ("paths", `Assoc []);
+                ])
+           ~tools:`Null
+           ~namespace_truth:`Null
+           ~telemetry_summary:`Null ()
+       in
+       Dashboard_snapshot.publish_for_test snapshot;
+       let json =
+         Server_dashboard_snapshot_select.select_shell_json
+           ~request:(request "/api/v1/dashboard/shell")
+           config
+       in
+       let open Yojson.Safe.Util in
+       check string "snapshot payload preserved" "snapshot"
+         (json |> member "status" |> member "project" |> to_string);
+       check bool "snapshot selector injects auth" true
+         (match json |> member "auth" with
+          | `Assoc _ -> true
+          | _ -> false))
+
+let test_execution_actor_for_request_canonicalizes_token_owner () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+  | Ok (raw_token, _) ->
+      let actor =
+        Server_dashboard_http_execution_surfaces.execution_actor_for_request
+          ~base_path:config.base_path
+          (request_with_headers "/api/v1/dashboard/execution"
+             [
+               ("authorization", "Bearer " ^ raw_token);
+               ("x-masc-agent", "dashboard");
+             ])
+      in
+      check (option string) "execution actor canonicalized to token owner"
+        (Some "codex") actor
+
+let with_execution_payload_env f =
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "true" @@ fun () ->
+  with_env "MASC_DASHBOARD_FIXTURE" "execution_smoke" @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  Dashboard_cache.invalidate_prefix "execution:";
+  Eio_guard.protect
+    ~finally:(fun () -> Dashboard_cache.invalidate_prefix "execution:")
+    (fun () ->
+      let state =
+        Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+      in
+      f ~env ~sw ~state)
+
+let execution_payload ~state ~sw ~clock req =
+  match
+    Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+      ~sw ~clock
+      (Server_dashboard_http_execution_surfaces.execution_http_request ~state req)
+  with
+  | Server_dashboard_http_execution_surfaces.Execution_payload payload -> payload
+  | Server_dashboard_http_execution_surfaces.Execution_json json ->
+    failf "expected cached execution bytes, received JSON: %s"
+      (Yojson.Safe.to_string json)
+
+let test_execution_request_resolves_actor_once () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let module Metrics = Masc.Otel_metric_store in
+  let labels = [ "outcome", "error"; "err_kind", "unauthorized" ] in
+  let count () = Metrics.metric_value_or_zero
+      Metrics.metric_silent_dashboard_actor_fallback ~labels () in
+  (* The real resolver records a typed fallback for this credential. It is
+     an observation of resolution, not a mocked call counter. HTTP admission
+     remains outside these surface helpers and is covered by wire/auth tests. *)
+  let req = request_with_headers
+      "/api/v1/dashboard/execution?fixture=execution_smoke&full=1"
+      [ "authorization", "Basic invalid" ] in
+  let before = count () in
+  let context = Surface.execution_http_request ~state req in
+  check (float 0.0) "request resolves actor once" (before +. 1.0) (count ());
+  check bool "parameterized request falls through prepared default lookup" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_response context));
+  let payload = match Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) context with
+    | Surface.Execution_payload payload -> payload
+    | Surface.Execution_json _ -> fail "expected parameterized fixture payload"
+  in
+  check (float 0.0) "fallback reuses resolved identity" (before +. 1.0) (count ());
+  let next_context = Surface.execution_http_request ~state req in
+  check (float 0.0) "next request resolves its own identity" (before +. 2.0) (count ());
+  match Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) next_context with
+  | Surface.Execution_payload next ->
+    check bool "same query retains prepared cache bytes" true
+      (payload.raw_json == next.raw_json)
+  | Surface.Execution_json _ -> fail "expected warm parameterized fixture payload"
+
+let execution_payload_key (payload : Dashboard_cache.cached_payload) =
+  Yojson.Safe.Util.(payload.json |> member "cache" |> member "request_cache_key" |> to_string)
+
+let test_execution_default_response_reuses_prepared_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
+  with_cached_surface_success
+    Server_dashboard_http_execution_surfaces.execution_cache
+    (`Assoc [ "default_marker", `String "last-success";
+              "candle", Candle_observation.to_json Candle_observation.Off;
+              "data", `String (String.make 4000 'x') ]) @@ fun () ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let context = Surface.execution_http_request ~state
+      (request_with_headers "/api/v1/dashboard/execution"
+         ["accept-encoding", "gzip"]) in
+  check bool "selected snapshot has no prepared bytes before first response" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_response context));
+  match Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env)
+      context with
+  | Surface.Execution_json _ ->
+    fail "the first default response discarded its prepared bytes"
+  | Surface.Execution_payload payload ->
+    let json = payload.json in
+    let open Yojson.Safe.Util in
+    check string "default snapshot retained" "last-success"
+      (json |> member "default_marker" |> to_string);
+    check bool "default-light query retained" true
+      (json |> member "query" |> member "default_light_request" |> to_bool);
+    check bool "identity bytes describe the same JSON" true
+      (Yojson.Safe.from_string payload.raw_json = json);
+    let gzip, headers = Dashboard_cache.select_http_representation
+        ~accept_encoding:(Some "gzip") payload in
+    check (option string) "first response can use gzip" (Some "gzip")
+      (List.assoc_opt "content-encoding" headers);
+    check bool "first compressed response is smaller" true
+      (String.length gzip < String.length payload.raw_json);
+    (match Surface.dashboard_execution_cached_http_response context with
+     | None | Some (Surface.Execution_json _) -> fail "first response did not leave prepared cache bytes"
+     | Some (Surface.Execution_payload warm_payload) ->
+       let warm, warm_headers = Dashboard_cache.select_http_representation
+           ~accept_encoding:(Some "gzip") warm_payload in
+       let etag = warm_payload.etag in
+       check bool "first and warm responses share gzip bytes" true (gzip == warm);
+       check string "same ETag" payload.etag etag;
+       check (list (pair string string)) "same representation headers" headers warm_headers);
+    let identity = Surface.execution_http_request ~state
+        (request_with_headers "/api/v1/dashboard/execution"
+           ["accept-encoding", "identity"]) in
+    (match Surface.dashboard_execution_cached_http_response identity with
+     | None | Some (Surface.Execution_json _) -> fail "identity bytes were not prepared"
+     | Some (Surface.Execution_payload warm_payload) ->
+       let warm = warm_payload.raw_json in
+       check bool "identity bytes are reused without serialization" true
+         (payload.raw_json == warm))
+
+let test_execution_fixture_selection_isolates_prepared_live_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  with_cached_surface_success Surface.execution_cache
+    (`Assoc [ "live_marker", `Bool true;
+              "candle", Candle_observation.to_json Candle_observation.Off ]) @@ fun () ->
+  let context query = Surface.execution_http_request ~state
+      (request_with_headers ("/api/v1/dashboard/execution" ^ query) []) in
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
+    ignore (Surface.dashboard_execution_http_response
+      ~sw ~clock:(Eio.Stdenv.clock env) (context "")));
+  List.iter (fun query ->
+    check bool ("fixture does not reuse prepared live bytes: " ^ query) true
+      (Option.is_none (Surface.dashboard_execution_cached_http_response
+        (context query))))
+    [ ""; "?fixture="; "?fixture=execution_smoke" ];
+  check bool "explicit unknown uses its own parameterized response" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_response
+      (context "?fixture=unknown")));
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
+    check bool "disabled explicit fixture uses its own parameterized response" true
+      (Option.is_none (Surface.dashboard_execution_cached_http_response
+        (context "?fixture=execution_smoke"))))
+
+let test_execution_first_compute_reuses_prepared_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  Surface.invalidate_execution_cache ();
+  Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
+    check bool "no successful projection before first compute" true
+      (Option.is_none (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+                        .last_success_unix);
+    let context = Surface.execution_http_request ~state
+        (request_with_headers "/api/v1/dashboard/execution"
+           ["accept-encoding", "identity"]) in
+    let response = Surface.dashboard_execution_http_response
+        ~sw ~clock:(Eio.Stdenv.clock env) context in
+    match response with
+    | Surface.Execution_json _ -> fail "first successful compute discarded prepared bytes"
+    | Surface.Execution_payload payload ->
+      check bool "first compute published a successful projection" true
+        (Option.is_some (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+                          .last_success_unix);
+      let open Yojson.Safe.Util in
+      check bool "default query retained" true
+        (payload.json |> member "query" |> member "default_light_request" |> to_bool);
+      check bool "prepared execution includes its Candle observation identity" true
+        (match payload.json |> member "candle_observation_sequence" with
+         | `Int _ -> true | _ -> false);
+      check bool "computed identity bytes match JSON" true
+        (Yojson.Safe.equal payload.json (Yojson.Safe.from_string payload.raw_json));
+      match Surface.dashboard_execution_cached_http_response context with
+      | None | Some (Surface.Execution_json _) -> fail "first compute did not leave prepared bytes"
+      | Some (Surface.Execution_payload warm_payload) ->
+        let warm, etag = warm_payload.raw_json, warm_payload.etag in
+        check bool "first compute and warm read reuse identity bytes" true
+          (payload.raw_json == warm);
+        check string "first compute and warm read retain ETag" payload.etag etag)
+
+let test_warm_dashboard_responses_follow_equipment_authority () =
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURE" None @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let module Portrait = Keeper_portrait_equipment in
+  let ok show = function Ok value -> value | Error error -> fail (show error) in
+  let base_path = config.Workspace.base_path in
+  let keeper = "portrait-http-cache" in
+  let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+  mkdir_p (Filename.dirname policy_path);
+  write_file policy_path {|half_life = "off"
+[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = 200
+beanie = 200
+|};
+  Candle_status.install_appraiser_check (fun () -> Ok ());
+  let owner = ok Fun.id (Keeper_id.Keeper_name.of_string keeper) in
+  (* A real ledger payment funds the purchase. The cached metadata below is
+     synthetic; the payment/purchase/equipment facts and their replay are real
+     isolated-store operations. This does not exercise the model appraisal. *)
+  let at = ok Fun.id (Candle_time.of_rfc3339 "2026-09-29T00:00:00Z") in
+  let payment = ok Fun.id (Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
+    ~identity:{goal_id="warm-cache-goal";request_id="warm-cache-request";verification_run_id="warm-cache-run"}
+    ~grade:(Option.get (Candle_grade.of_string "trivial")) ~total_milli:1000
+    ~grade_trace:{run_id="grade";slot_id="fixture"}
+    ~relations:[{task_id="task";relation=Candle_appraisal.Related;trace={run_id="relation";slot_id="fixture"}}]
+    ~weights_trace:{run_id="weights";slot_id="fixture"}
+    ~weight_max:1 ~deduction_rate:0 ~deduction_floor:1000 ~overdue_hours:0 ~weights:[keeper,1]) in
+  ok (Candle_ledger.update_error_to_string Fun.id)
+    (Candle_ledger.update ~base_path (fun _ -> Ok (funding_rows at payment, ())));
+  let starting = Keeper_portrait_look.equipment_of_name keeper in
+  let item_id = match starting.head with
+    | Keeper_portrait_look.Crown -> "beanie"
+    | Keeper_portrait_look.Bare_head | Keeper_portrait_look.Bow
+    | Keeper_portrait_look.Beanie -> "crown" in
+  let item = match Keeper_portrait_item.of_id item_id with
+    | Some item -> item | None -> fail "portrait catalog item missing" in
+  let expected = Keeper_portrait_item.preview item starting in
+  let account_revision = Candle_observe.account_revision
+    (Candle_observe.read ~now:Time_compat.now ~base_path) ~keeper in
+  (* Preserve the real builder's name-before-portrait order: an unchanged
+     authority must not defeat the prepared-byte path by reordering fields. *)
+  let row = `Assoc ["name", `String keeper;
+    "portrait", Portrait.reading_to_json (Portrait.Ready starting);
+    "candle_balance_milli", `String "1000";
+    "candle_account_revision", Json_util.option_to_yojson (fun value -> `String value) account_revision] in
+  let ready_candle = Candle_observation.Ready
+    {issued_milli="1000";burned_milli="0";circulating_milli="1000"} in
+  let candle_json = Candle_observation.to_json ready_candle in
+  let execution_seed = `Assoc ["cache_marker", `String "retained-metadata";
+    "candle", candle_json;
+    "keepers", `List [row]; "continuity_briefs", `List [row]] in
+  let mission_seed = `Assoc ["cache_marker", `String "retained-metadata";
+    "candle", candle_json;
+    "keeper_briefs", `List [row];
+    "operator_targets", `Assoc ["keepers", `List [row]]] in
+  Surface.invalidate_execution_cache ();
+  Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
+  with_cached_surface_success Surface.execution_cache execution_seed @@ fun () ->
+  with_mission_cache_success mission_seed @@ fun () ->
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path () in
+  let clock = Eio.Stdenv.clock env in
+  let req = request_with_headers "/api/v1/dashboard/execution"
+      ["accept-encoding", "identity"] in
+  let context () = Surface.execution_http_request ~state req in
+  let read_execution () = Surface.dashboard_execution_http_json ~state ~sw ~clock req in
+  let read_mission () = Server_dashboard_http_core.dashboard_briefing_http_json
+      ~state ~sw ~clock (request "/api/v1/dashboard/briefing") in
+  let observations path json =
+    let rows = List.fold_left (fun json key -> Yojson.Safe.Util.member key json) json path
+      |> Yojson.Safe.Util.to_list in
+    List.map (fun row ->
+      ok Fun.id (Portrait.reading_of_json Yojson.Safe.Util.(member "portrait" row)),
+      ok Fun.id (Candle_observation.balance_of_json
+        Yojson.Safe.Util.(member "candle_balance_milli" row))) rows in
+  let assert_surfaces label ~expected_portrait ~expected_candle ~expected_balance =
+    let execution = read_execution () in
+    let observed = match Surface.dashboard_execution_cached_http_response (context ()) with
+      | Some (Surface.Execution_json json) -> json
+      | Some (Surface.Execution_payload payload) -> payload.json
+      | None -> fail "prepared snapshot must return its current observation" in
+    let mission = read_mission () in
+    (* The production proactive on_result uses this exact preparation function
+       before broadcasting. Assert its payload, not a replacement test-only
+       projection; no SSE socket delivery is claimed by this scenario. *)
+    let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+    List.iter (fun (surface, json, paths) ->
+      let label = label ^ " " ^ surface in
+      check string (label ^ " preserves metadata") "retained-metadata"
+        Yojson.Safe.Util.(json |> member "cache_marker" |> to_string);
+      let candle = ok Fun.id (Candle_observation.of_json
+        Yojson.Safe.Util.(member "candle" json)) in
+      check bool (label ^ " Candle supply") true (expected_candle candle);
+      List.iter (fun path ->
+        match observations path json with
+        | [reading, balance] ->
+          check bool (label ^ " " ^ String.concat "." path) true (expected_portrait reading);
+          check (option string) (label ^ " balance " ^ String.concat "." path)
+            expected_balance balance
+        | _ -> fail "cached surface lost or duplicated its Keeper") paths)
+      ["HTTP execution", execution, [["keepers"]; ["continuity_briefs"]];
+       "HTTP prepared observation", observed, [["keepers"]; ["continuity_briefs"]];
+       "HTTP briefing", mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]];
+       "SSE payload preparation", broadcast, [["keepers"]; ["continuity_briefs"]]] in
+  (* Distinct whole-second reads must not invalidate encoded responses when
+     authoritative public observations are identical (half-life is off here).
+     A same-second test misses the ledger's internal replay-clock change. *)
+  let view_at at = Candle_observe.read ~now:(fun () -> at) ~base_path in
+  let earlier = view_at 1790640000. in
+  let later = view_at 1790640002. in
+  check bool "the replay clock really advanced" false (earlier = later);
+  let project view = Dashboard_projection_cache.For_test.with_current_keeper_observations
+    ~read:(fun () -> view) ~config execution_seed in
+  let first_observation = project earlier in
+  check bool "clock-only reads preserve the full prepared-response observation" true
+    (project later = first_observation);
+  let first = execution_payload ~state ~sw ~clock req in
+  (match Surface.dashboard_execution_cached_http_response (context ()) with
+   | Some (Surface.Execution_payload payload) ->
+     let body, etag = payload.raw_json, payload.etag in
+     check bool "unchanged portrait retains prepared identity bytes" true (body == first.raw_json);
+     check string "unchanged portrait retains its ETag" first.etag etag
+   | None | Some (Surface.Execution_json _) -> fail "unchanged authority discarded prepared execution bytes");
+  assert_surfaces "starting"
+    ~expected_portrait:(fun reading -> reading = Portrait.Ready starting)
+    ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "1000");
+  ignore (ok Candle_shop.error_to_string
+    (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
+  (match Lib.Keeper_candle_tools.handle ~operation:Lib.Keeper_candle_tools.Equip
+      ~base_path ~keeper_name:keeper ~keeper_names:(Ok []) ~tool_name:"keeper_candle_equip"
+      ~start_time:(Tool_timing.start ())
+      ~args:(`Assoc ["slot", `String "head"; "item", `String item_id]) with
+   | Tool_result.Completed _ -> ()
+   | result -> fail (Tool_result.message result));
+  check bool "equipped authority refuses old prepared HTTP bytes" true
+    (match Surface.dashboard_execution_cached_http_response (context ()) with
+     | Some (Surface.Execution_json _) -> true
+     | Some (Surface.Execution_payload _) | None -> false);
+  assert_surfaces "equipped"
+    ~expected_portrait:(fun reading -> reading = Portrait.Ready expected)
+    ~expected_candle:(fun candle -> candle = Candle_observation.Ready
+      {issued_milli="1000";burned_milli="200";circulating_milli="800"})
+    ~expected_balance:(Some "800");
+  check bool "equipment refresh does not rebuild cached execution metadata" true
+    ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = execution_seed);
+  check bool "equipment refresh does not rebuild cached mission metadata" true
+    ((Server_dashboard_http_core.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
+  let ledger = Candle_ledger.path ~base_path in
+  Fs_compat.append_file ledger "{partial";
+  let corrupt = Fs_compat.load_file ledger in
+  check bool "unreadable authority refuses prepared HTTP bytes" true
+    (match Surface.dashboard_execution_cached_http_response (context ()) with
+     | Some (Surface.Execution_json _) -> true
+     | Some (Surface.Execution_payload _) | None -> false);
+  assert_surfaces "unreadable"
+    ~expected_portrait:(function Portrait.Unavailable _ -> true | Portrait.Ready _ -> false)
+    ~expected_candle:(function
+      | Candle_observation.Disabled {reason} -> String.trim reason <> ""
+      | Candle_observation.Off | Candle_observation.Ready _ -> false)
+    ~expected_balance:None;
+  check string "warm HTTP and SSE preparation never repair the damaged ledger" corrupt (Fs_compat.load_file ledger)
+
+let test_board_address_overlay_follows_effective_config_after_cache () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let name = "board-address-beta" in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+    (`Assoc [ "name", `String name; "trace_id", `String "board-address-trace" ]) with
+    | Ok meta -> { meta with Masc.Keeper_meta_contract.mention_targets = [ "raw-address" ] }
+    | Error detail -> fail detail in
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> () | Error detail -> fail detail);
+  let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  mkdir_p dir;
+  let path = Filename.concat dir (name ^ ".toml") in
+  let configure target = write_file path (Printf.sprintf
+    "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"Board address fixture\"\nmention_targets = [%S]\n" target) in
+  (* This immutable seed stands for a previously computed metadata/HTTP
+     snapshot. The current-observation boundary must not reuse its addresses. *)
+  let seed = `Assoc [ "keepers", `List [`Assoc [ "name", `String name
+    ; "board_address", `Assoc [ "state", `String "ready"
+      ; "target_ids", `List [`String "stale-address"] ] ]] ] in
+  let projected () = Dashboard_projection_cache.with_current_keeper_observations ~config seed in
+  let address json = Yojson.Safe.Util.(json |> member "keepers" |> to_list |> List.hd |> member "board_address") in
+  let ids json = Yojson.Safe.Util.(address json |> member "target_ids" |> to_list |> List.map to_string) in
+  let routes target =
+    let signal : Masc.Board_dispatch.board_signal =
+      { kind = Masc.Board_dispatch.Board_post_created; post_id = "post-effective-address"
+      ; author = "external-author"; title = "address fixture"; content = "@" ^ target
+      ; hearth = None; updated_at = Some 123. } in
+    (* This test pins which keeper a written name reaches, so the name must
+       stand for itself in the audience. *)
+    let lookup = Masc.Recipient_lookup.make (fun candidate ->
+      Ok (Result.to_option (Masc.Board.Agent_id.parse
+        (Masc.Recipient_lookup.Candidate.to_string candidate)))) in
+    let board_audience = match Masc.Board.audience_for_post ~lookup ~post_kind:Masc.Board.Human_post ~visibility:Masc.Board.Internal
+        ~title:signal.Masc.Board_dispatch.title ~content:signal.Masc.Board_dispatch.content with
+      | Ok (board_audience, _unresolved) -> board_audience | Error error -> fail (Masc.Board.show_board_error error) in
+    let audience = match Masc.Keeper_board_audience.of_board_audience board_audience with
+      | Ok audience -> audience | Error error -> fail (Masc.Keeper_board_audience.classification_error_to_string error) in
+    let effective = match Masc.Keeper_meta_store.read_effective_meta config name with
+      | Ok (Some meta) -> meta | Ok None -> fail "effective meta missing" | Error detail -> fail detail in
+    match Masc.Keeper_board_audience.route_for_keeper ~audience ~meta:effective ~signal with
+    | Masc.Keeper_world_observation_board_signal.Available
+        (Masc.Keeper_board_audience.Deliver Masc.Keeper_world_observation_board_signal.Explicit_mention) -> true
+    | Masc.Keeper_world_observation_board_signal.Available _ -> false
+    | Masc.Keeper_world_observation_board_signal.Unavailable error ->
+      fail (Masc.Keeper_world_observation_board_signal.unavailable_to_string error)
+  in
+  configure "Alpha";
+  let first = projected () in
+  check (list string) "public current address uses profile, not raw metadata" [ "alpha" ] (ids first);
+  check bool "same alias receives backend direct delivery" true (routes "ALPHA");
+  check bool "Keeper name is not inferred as an address" false (routes name);
+  configure "Omega";
+  let changed = projected () in
+  check (list string) "same cached seed follows changed configuration" [ "omega" ] (ids changed);
+  let sequence json = Yojson.Safe.Util.(json |> member "candle_observation_sequence" |> to_int) in
+  check bool "address-only change advances fresh-observation ordering" true
+    (sequence changed > sequence first);
+  check bool "old alias no longer delivers" false (routes "Alpha");
+  check bool "new public alias delivers" true (routes "OMEGA");
+  write_file path "not = [\n";
+  let unavailable = address (projected ()) in
+  check string "bad profile is explicit unavailable, never raw fallback" "unavailable"
+    Yojson.Safe.Util.(unavailable |> member "state" |> to_string);
+  check string "typed read failure is retained" "effective_metadata_unread"
+    Yojson.Safe.Util.(unavailable |> member "reason" |> to_string);
+  check (list string) "cached metadata seed stays untouched" [ "stale-address" ] (ids seed)
+;;
+
+let test_candle_account_revision_tracks_free_purchase_and_price_edit () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let base_path = config.Workspace.base_path in
+  let keeper = "free-item-keeper" in
+  let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+  let write_policy price =
+    mkdir_p (Filename.dirname policy_path);
+    write_file policy_path (Printf.sprintf {|half_life = "off"
+[payout]
+weight_max = 1
+deduction_rate = 0
+deduction_floor = 1000
+share_rounding = "largest_remainder"
+remainder_tie_break = "name_ascending"
+deduction_rounding = "down"
+[payout.grade_criteria]
+trivial = "Minor adjustment"
+small = "Bounded change"
+medium = "Connected feature"
+large = "Cross-feature work"
+epic = "System outcome"
+[payout.grades_milli]
+trivial = 1000
+small = 1000
+medium = 1000
+large = 1000
+epic = 1000
+[shop.prices_milli]
+crown = %d
+|} price)
+  in
+  write_policy 0;
+  Candle_status.install_appraiser_check (fun () -> Ok ());
+  let observation_sequence = ref (-1) in
+  let row () =
+    let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+    let projected = Dashboard_projection_cache.with_current_keeper_observations ~config snapshot in
+    observation_sequence := Yojson.Safe.Util.(projected |> member "candle_observation_sequence" |> to_int);
+    match Yojson.Safe.Util.(projected |> member "keepers" |> to_list) with
+    | [row] -> row
+    | _ -> fail "Item revision projection lost the Keeper"
+  in
+  let revision row = Yojson.Safe.Util.(row |> member "candle_account_revision" |> to_string) in
+  let first = row () in
+  let first_sequence = !observation_sequence in
+  let first_view = Candle_observe.read ~now:Time_compat.now ~base_path in
+  let owner = match Keeper_id.Keeper_name.of_string keeper with
+    | Ok owner -> owner | Error reason -> fail reason in
+  let item = match Keeper_portrait_item.of_id "crown" with
+    | Some item -> item | None -> fail "crown absent from catalog" in
+  (match Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item with
+   | Ok _ -> ()
+   | Error error -> fail (Candle_shop.error_to_string error));
+  let purchased = row () in
+  check bool "purchase advances fresh overlay publication identity" true
+    (!observation_sequence > first_sequence);
+  check bool "free purchase changes Item account revision" false
+    (String.equal (revision first) (revision purchased));
+  check bool "free purchase preserves observed balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" first
+     = Yojson.Safe.Util.member "candle_balance_milli" purchased);
+  check bool "free purchase preserves observed outfit" true
+    (Yojson.Safe.Util.member "portrait" first
+     = Yojson.Safe.Util.member "portrait" purchased);
+  let purchased_view = Candle_observe.read ~now:Time_compat.now ~base_path in
+  let purchased_reader = Candle_observe.account_revision_reader purchased_view in
+  check (option string) "batch revision reader matches single-keeper revision for purchaser"
+    (Candle_observe.account_revision purchased_view ~keeper)
+    (purchased_reader ~keeper);
+  check (option string) "batch revision reader matches single-keeper revision for bystander"
+    (Candle_observe.account_revision purchased_view ~keeper:"bystander-keeper")
+    (purchased_reader ~keeper:"bystander-keeper");
+  let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
+  let project read = Dashboard_projection_cache.For_test.with_current_keeper_observations
+    ~read ~config snapshot in
+  let sequence json = Yojson.Safe.Util.(json |> member "candle_observation_sequence" |> to_int) in
+  let seed = project (fun () -> first_view) in
+  let newer = ref None in
+  (* A held B read finishes after the next request has already observed A.
+     Consecutive unchanged A reads may reuse an identity, but this gap cannot:
+     otherwise delayed B's request number could outrank the newer A identity. *)
+  let delayed = project (fun () ->
+    newer := Some (project (fun () -> first_view));
+    purchased_view) in
+  let newer = match !newer with Some json -> json | None -> fail "newer read did not run" in
+  check bool "newer overlapping read advances unchanged observation identity" true
+    (sequence newer > sequence seed);
+  check bool "held old read cannot outrank newer completed overlay" true
+    (sequence delayed < sequence newer);
+  let repeated = project (fun () -> first_view) in
+  check int "unchanged consecutive observation preserves reusable encoding identity"
+    (sequence newer) (sequence repeated);
+  write_policy 1;
+  let repriced = row () in
+  check bool "price-only edit changes Item account revision" false
+    (String.equal (revision purchased) (revision repriced));
+  check bool "price-only edit preserves observed balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" purchased
+     = Yojson.Safe.Util.member "candle_balance_milli" repriced);
+  write_file policy_path "not = [\n";
+  let disabled = row () in
+  write_file policy_path "[shop]\n";
+  let differently_disabled = row () in
+  check bool "changed disabled reason changes Item account revision" false
+    (String.equal (revision disabled) (revision differently_disabled));
+  check bool "disabled readings withdraw the balance" true
+    (Yojson.Safe.Util.member "candle_balance_milli" disabled = `Null
+     && Yojson.Safe.Util.member "candle_balance_milli" differently_disabled = `Null)
+
+let test_execution_parameterized_payload_reuses_decorated_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let config = Lib.Mcp_server.workspace_config state in
+  let req =
+    request_with_headers "/api/v1/dashboard/execution"
+      [ "x-masc-agent", "alice" ]
+  in
+  let first = execution_payload ~state ~sw ~clock req in
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "repeat request retains serialized string" true
+    (first.raw_json == second.raw_json);
+  check bool "repeat request retains decorated JSON" true
+    (first.json == second.json);
+  check string "repeat request retains ETag" first.etag second.etag;
+  check bool "bytes decode to the decorated JSON" true
+    (Yojson.Safe.equal first.json (Yojson.Safe.from_string first.raw_json));
+  check string "ETag identifies the exact response bytes"
+    (Lib.Http_server_eio.Response.weak_etag_value first.raw_json) first.etag;
+  let open Yojson.Safe.Util in
+  let expected = Dashboard_execution_fixture.execution_smoke_fixture_json () in
+  let keeper_money json field =
+    json |> member field |> to_list |> List.map (fun row ->
+      `List (List.map (fun key -> member key row)
+        ["name"; "portrait"; "candle_balance_milli"; "candle_account_revision"])) in
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    check bool "HTTP fill and warm read preserve the fixture Candle summary" true
+      (member "candle" payload.json = member "candle" expected);
+    List.iter (fun field ->
+      check bool ("HTTP fixture preserves money and portraits in " ^ field) true
+        (keeper_money payload.json field = keeper_money expected field))
+      ["keepers"; "continuity_briefs"])
+    [first; second];
+  check string "actor metadata is part of cached body" "alice"
+    (first.json |> member "query" |> member "actor" |> to_string);
+  check string "workspace metadata is part of cached body" config.workspace_path
+    (first.json |> member "retention" |> member "workspace_path" |> to_string);
+  let json =
+    Server_dashboard_http_execution_surfaces.dashboard_execution_http_json
+      ~state ~sw ~clock req
+  in
+  check bool "JSON accessor shares the same decorated snapshot" true
+    (json == first.json)
+
+let test_execution_fixture_broadcast_and_unknown_override () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let config = Lib.Mcp_server.workspace_config state in
+  let expected = Dashboard_execution_fixture.execution_smoke_fixture_json () in
+  Surface.invalidate_execution_cache ();
+  Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
+  let seeded = match expected with `Assoc fields ->
+    `Assoc (("cache_marker",`String "synthetic-seed") :: fields) | _ -> expected in
+  with_cached_surface_success Surface.execution_cache seeded @@ fun () ->
+  Surface.patch_keeper_dependent_caches ~keeper_name:"dm-keeper"
+    ~event:(Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped);
+  check bool "live lifecycle event preserves the fixture cache" true
+    ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = seeded);
+  let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+  List.iter (fun field ->
+    check bool ("broadcast preserves fixture " ^ field) true
+      (Yojson.Safe.Util.member field broadcast = Yojson.Safe.Util.member field expected))
+    ["candle";"keepers";"continuity_briefs"];
+  let unknown_request = request "/api/v1/dashboard/execution?fixture=unknown" in
+  check bool "explicit unknown cannot take prepared default bytes" true
+    (Option.is_none (Surface.For_testing.cached_response ~config unknown_request));
+  let actual = Surface.dashboard_execution_http_json ~state ~sw ~clock:(Eio.Stdenv.clock env)
+    unknown_request in
+  check bool "explicit unknown does not reuse the fixture-seeded cache" true
+    (Yojson.Safe.Util.member "cache_marker" actual = `Null)
+
+let test_execution_parameterized_payload_separates_request_queries () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let absent = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1") in
+  let empty = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&fixture=") in
+  let explicit = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&fixture=execution_smoke") in
+  let light = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?fixture=execution_smoke") in
+  let forced = execution_payload ~state ~sw ~clock
+      (request "/api/v1/dashboard/execution?full=1&force=1") in
+  let alice = execution_payload ~state ~sw ~clock
+      (request_with_headers "/api/v1/dashboard/execution?full=1"
+        [ "x-masc-agent", "alice" ]) in
+  let bob = execution_payload ~state ~sw ~clock
+      (request_with_headers "/api/v1/dashboard/execution?full=1"
+        [ "x-masc-agent", "bob" ]) in
+  let payloads = [ absent; empty; explicit; light; forced; alice; bob ] in
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    let encoded = match payload.encoded with Some value -> value
+      | None -> fail "parameterized execution lacks prepared encodings" in
+    check bool "each scoped encoding retains its own complete identity bytes" true
+      (encoded.identity == payload.raw_json)) payloads;
+  let keys = List.map execution_payload_key payloads in
+  check int "distinct resolved queries own separate response bytes"
+    (List.length payloads - 2) (List.length (List.sort_uniq String.compare keys));
+  List.iter (fun payload ->
+    check string "equivalent fixture selections share their cache key"
+      (execution_payload_key explicit) (execution_payload_key payload))
+    [ absent; empty ];
+  let open Yojson.Safe.Util in
+  List.iter (fun (payload : Dashboard_cache.cached_payload) ->
+    check string "query records the selected environment fixture" "execution_smoke"
+      (payload.json |> member "query" |> member "fixture" |> to_string))
+    [ absent; empty; explicit ];
+  check bool "full query preserved" true
+    (explicit.json |> member "query" |> member "full" |> to_bool);
+  check bool "light query preserved" true
+    (light.json |> member "query" |> member "light" |> to_bool);
+  check bool "parameterized force query preserved" true
+    (forced.json |> member "query" |> member "force" |> to_bool);
+  check string "second actor does not inherit first actor metadata" "bob"
+    (bob.json |> member "query" |> member "actor" |> to_string)
+
+let test_execution_parameterized_payload_separates_workspace_scope () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let req = request "/api/v1/dashboard/execution?full=1" in
+  let first_config = Lib.Mcp_server.workspace_config state in
+  let first = execution_payload ~state ~sw ~clock req in
+  let second_config =
+    { first_config with workspace_path = Filename.concat first_config.base_path "other-workspace" }
+  in
+  (match Lib.Mcp_server.set_workspace_config state second_config with
+   | Ok () -> ()
+   | Error error -> fail (Lib.Mcp_server.workspace_switch_error_to_string error));
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "same base with a different active workspace has another key" true
+    (execution_payload_key first <> execution_payload_key second);
+  check string "active workspace metadata is current" second_config.workspace_path
+    Yojson.Safe.Util.(second.json |> member "retention" |> member "workspace_path" |> to_string);
+  let other_base = test_dir () in
+  Eio_guard.protect ~finally:(fun () -> cleanup_dir other_base) @@ fun () ->
+  let other_state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:other_base () in
+  let other = execution_payload ~state:other_state ~sw ~clock req in
+  check bool "a different runtime base cannot reuse prior workspace bytes" true
+    (execution_payload_key second <> execution_payload_key other);
+  check string "runtime base metadata is current" other_base
+    Yojson.Safe.Util.(other.json |> member "retention" |> member "workspace_root" |> to_string)
+
+let test_execution_parameterized_payload_changes_after_invalidation () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let req = request "/api/v1/dashboard/execution?full=1" in
+  let first = execution_payload ~state ~sw ~clock req in
+  let generation payload =
+    Yojson.Safe.Util.(payload.Dashboard_cache.json
+      |> member "execution_publication_generation" |> to_int)
+  in
+  let first_generation = generation first in
+  Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+  let second = execution_payload ~state ~sw ~clock req in
+  check bool "publication generation advances" true
+    (generation second > first_generation);
+  check bool "invalidated bytes are not reused" true (first.raw_json != second.raw_json);
+  check bool "invalidated representations are rebuilt together" true
+    (Option.is_some second.encoded && first.encoded != second.encoded);
+  check bool "new generation has a new cache key" true
+    (execution_payload_key first <> execution_payload_key second);
+  check bool "old key was evicted" true
+    (Option.is_none (Dashboard_cache.peek_payload (execution_payload_key first)));
+  check int "the retained prior response is not restamped" first_generation
+    (generation first)
+
+let test_execution_parameterized_timeout_keeps_request_metadata () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let clock = Eio.Stdenv.clock env in
+  let config = Lib.Mcp_server.workspace_config state in
+  let req = request_with_headers "/api/v1/dashboard/execution?full=1"
+      [ "x-masc-agent", "timeout-observer" ] in
+  let key = execution_payload_key (execution_payload ~state ~sw ~clock req) in
+  Dashboard_cache.invalidate key;
+  (* Drive the existing no-stale timeout circuit through its public compute
+     boundary. Raising its typed timeout keeps this scenario deterministic. *)
+  for _attempt = 1 to 3 do
+    let timeout = Dashboard_cache.get_or_compute_with_timeout key
+        ~ttl:120.0 ~clock ~timeout_sec:0.01
+        (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+          raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner }))) in
+    check bool "timeout does not publish a successful payload" true
+      (Dashboard_cache.is_timeout_envelope timeout)
+  done;
+  let json =
+    match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+        ~sw ~clock
+        (Server_dashboard_http_execution_surfaces.execution_http_request ~state req) with
+    | Server_dashboard_http_execution_surfaces.Execution_json json -> json
+    | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
+      fail "a circuit timeout must remain an uncached JSON response"
+  in
+  let open Yojson.Safe.Util in
+  check bool "response retains the timeout envelope" true
+    (Dashboard_cache.is_timeout_envelope json);
+  check string "timeout kind is preserved" "circuit_open"
+    (json |> member "timeout_kind" |> to_string);
+  check string "timeout query actor is decorated" "timeout-observer"
+    (json |> member "query" |> member "actor" |> to_string);
+  check bool "timeout full query is decorated" true
+    (json |> member "query" |> member "full" |> to_bool);
+  check string "timeout workspace is decorated" config.workspace_path
+    (json |> member "retention" |> member "workspace_path" |> to_string);
+  check string "timeout cache key is decorated" key
+    (json |> member "cache" |> member "request_cache_key" |> to_string);
+  check bool "timeout was not cached as success" true
+    (Option.is_none (Dashboard_cache.peek_payload key))
+
+let test_dashboard_execution_force_refresh_bypasses_default_cache () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+  in
+  let seed =
+    `Assoc
+      [ "force_marker", `String "cached"
+      ; "generated_at", `String "2026-05-15T00:00:02Z"
+      ]
+  in
+  with_cached_surface_success
+    Server_dashboard_http_execution_surfaces.execution_cache
+    seed
+  @@ fun () ->
+  let json =
+    match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (Server_dashboard_http_execution_surfaces.execution_http_request ~state
+         (request "/api/v1/dashboard/execution?force=1")) with
+    | Server_dashboard_http_execution_surfaces.Execution_json json -> json
+    | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
+      fail "default force refresh must return its JSON response"
+  in
+  let open Yojson.Safe.Util in
+  check bool "force query surfaced" true
+    (json |> member "query" |> member "force" |> to_bool);
+  check bool "force is not the default cached light request" false
+    (json |> member "query" |> member "default_light_request" |> to_bool);
+  check bool "seed marker bypassed" true
+    (match json |> member "force_marker" with
+     | `Null -> true
+     | _ -> false);
+  check string "cache key" "execution:default:light"
+    (json |> member "cache" |> member "request_cache_key" |> to_string);
+  check string "cache state" "fresh"
+    (json |> member "cache" |> member "cache_state" |> to_string)
+
+let test_dashboard_execution_trust_default_route_uses_cached_surface () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
+  in
+  let seed =
+    `Assoc
+      [ "source", `String "execution_receipt"
+      ; "producer", `String "keeper_agent_run.execution_receipt"
+      ; "dashboard_surface", `String "/api/v1/dashboard/execution-trust"
+      ; "generated_at", `String "2026-05-15T00:00:03Z"
+      ; "freshness_slo_s", `Float 900.0
+      ; "entry_count", `Int 2
+      ; "exists", `Bool true
+      ; "keepers", `List []
+      ; "total", `Int 1
+      ; "coverage_gaps", `List []
+      ; "coverage_gap_count", `Int 0
+      ; "health", `String "ok"
+      ]
+  in
+  with_cached_surface_success
+    Server_dashboard_http_execution_surfaces.execution_trust_cache
+    seed
+  @@ fun () ->
+  let json =
+    Server_dashboard_http_execution_surfaces.dashboard_execution_trust_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/dashboard/execution-trust")
+  in
+  let open Yojson.Safe.Util in
+  check int "cached entry count" 2 (json |> member "entry_count" |> to_int);
+  check string "surface" "/api/v1/dashboard/execution-trust"
+    (json |> member "dashboard_surface" |> to_string);
+  check string "projection cache state" "fresh"
+    (json |> member "projection_diagnostics" |> member "cache_state" |> to_string);
+  check string "envelope cache state" "fresh"
+    (json |> member "dashboard_surface_envelope" |> member "cache" |> member "state"
+     |> to_string);
+  check string "envelope cache key" "execution-trust:default"
+    (json |> member "dashboard_surface_envelope" |> member "cache" |> member "key"
+     |> to_string)
+
+let test_dashboard_message_json_surfaces_temporal_fields () =
+  let message : Types.message =
+    {
+      request_id = "wmsg-dashboard-test";
+      seq = 7;
+      from_agent = "operator";
+      msg_type = "broadcast";
+      content = "hello";
+      mention = None;
+      mention_delivery = Types.Mention_passive;
+      timestamp = "2026-05-07T00:00:00Z";
+      trace_context = Some "traceparent";
+      expires_at = Some 1_714_067_200.0;
+    }
+  in
+  let json = Server_dashboard_http_core.dashboard_message_json message in
+  let open Yojson.Safe.Util in
+  check string "type" "broadcast" (json |> member "type" |> to_string);
+  check string "trace_context" "traceparent"
+    (json |> member "trace_context" |> to_string);
+  check (float 0.001) "expires_at" 1_714_067_200.0
+    (json |> member "expires_at" |> to_float)
+
+(* RFC-0138 Phase 3 Step 1 — /shell snapshot wire tests.
+
+   These exercise [Server_dashboard_snapshot_select.select_shell_json]
+   directly, which is what the /api/v1/dashboard/shell handler now
+   calls.  Three cases cover the full selector matrix:
+
+   1. snapshot published + light=false  -> return [snap.shell]
+   2. snapshot empty + light=false      -> fall back to compute path
+   3. snapshot published + light=true   -> return [snap.shell_light]
+                                           (RFC-0204 section 8.3 "A") *)
+
+let test_shell_snapshot_wire_returns_snapshot_when_published () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  let marker = `Assoc [ "wire_marker", `String "snapshot-path" ] in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test ~config
+       ~shell:marker ~tools:`Null
+       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+  let timing = Server_timing.create () in
+  let json =
+    Server_dashboard_snapshot_select.select_shell_json
+      ~timing config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "snapshot path returns published marker"
+    "snapshot-path"
+    (json |> member "wire_marker" |> to_string);
+  let header = Server_timing.to_header_value timing in
+  Alcotest.(check bool)
+    "Server-Timing header records snapshot_read phase on hit"
+    true
+    (let re = Re.compile (Re.Perl.re "snapshot_read") in
+     Re.execp re header);
+  Dashboard_snapshot.reset_for_test ()
+
+let test_shell_snapshot_wire_falls_back_when_empty () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  let timing = Server_timing.create () in
+  let snapshot_json =
+    Server_dashboard_snapshot_select.select_shell_json
+      ~timing config
+  in
+  let direct_json =
+    Server_dashboard_http_core.dashboard_shell_http_json
+      ~light:false config
+  in
+  let open Yojson.Safe.Util in
+  let paths_of j = j |> member "paths" in
+  Alcotest.(check bool)
+    "fallback path produces compute-equivalent paths key"
+    true
+    (paths_of snapshot_json <> `Null
+     && paths_of snapshot_json = paths_of direct_json)
+
+let test_shell_snapshot_wire_light_reads_shell_light () =
+  (* RFC-0204 section 8.3 ("A"): light=true now serves the published light
+     projection [snap.shell_light], not the full [snap.shell] and not a
+     recompute. *)
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  let full = `Assoc [ "wire_marker", `String "full-shell" ] in
+  let light = `Assoc [ "wire_marker", `String "light-shell" ] in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test ~config
+       ~shell:full ~shell_light:light ~tools:`Null
+       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+  let timing = Server_timing.create () in
+  let json =
+    Server_dashboard_snapshot_select.select_shell_json
+      ~timing ~light:true config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "light=true returns the published shell_light projection"
+    "light-shell"
+    (json |> member "wire_marker" |> to_string);
+  let header = Server_timing.to_header_value timing in
+  Alcotest.(check bool)
+    "Server-Timing records snapshot_read on light hit"
+    true
+    (let re = Re.compile (Re.Perl.re "snapshot_read") in Re.execp re header);
+  Dashboard_snapshot.reset_for_test ()
+
+let test_dashboard_shell_light_includes_runtime_health_ssot () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let json =
+    Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+  in
+  let open Yojson.Safe.Util in
+  let runtime_resolution = json |> member "runtime_resolution" in
+  let keeper_fibers = runtime_resolution |> member "keeper_fibers" |> to_int in
+  Alcotest.(check bool)
+    "light shell exposes runtime_resolution object"
+    true
+    (match runtime_resolution with
+     | `Assoc _ -> true
+     | _ -> false);
+  Alcotest.(check int)
+    "light shell keeper count follows runtime health keeper_fibers"
+    keeper_fibers
+    (json |> member "counts" |> member "keepers" |> to_int);
+  Alcotest.(check bool)
+    "light shell exposes fleet safety"
+    true
+    (match runtime_resolution |> member "keeper_fleet_safety" with
+     | `Assoc _ -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "light shell exposes fd accountant"
+    true
+    (match runtime_resolution |> member "fd_accountant" with
+     | `Assoc _ -> true
+     | _ -> false)
+
+let test_dashboard_fleet_composite_envelope_is_cached () =
+  (* [dashboard_fleet_composite_json] caches the fleet envelope so a second poll
+     inside the TTL returns the cached compute (identical generated_at) rather
+     than re-running the sequential N-keeper read path. Each keeper reaches
+     [Keeper_secret_projection.dashboard_status_json] (a synchronous disk
+     read), so an uncached poll costs N reads. This guards that regression. *)
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let json1 = Server_dashboard_http.dashboard_fleet_composite_json ~config () in
+  let json2 = Server_dashboard_http.dashboard_fleet_composite_json ~config () in
+  let open Yojson.Safe.Util in
+  let gen1 = json1 |> member "generated_at" |> to_float in
+  let gen2 = json2 |> member "generated_at" |> to_float in
+  Alcotest.(check bool)
+    "second fleet-composite poll hits cache (identical generated_at)"
+    true (gen1 = gen2)
+
+let test_offline_keeper_composite_exposes_secret_projection () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let keeper_name = "offline-secret-keeper" in
+  let sentinel = "ghs_offline_secret_projection_regression" in
+  (match
+     Masc.Keeper_secret_projection.set_env_entry
+       ~base_path:config.base_path
+       ~keeper_name
+       ~scope:Masc.Keeper_secret_projection.Shared_secret
+       ~name:"GH_TOKEN"
+       ~value:sentinel
+   with
+   | Ok () -> ()
+   | Error err -> Alcotest.failf "set shared secret failed: %s" err);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String keeper_name
+           ; "trace_id", `String "offline-secret-trace"
+           ])
+    with
+    | Ok meta -> { meta with Masc.Keeper_meta_contract.paused = true }
+    | Error err -> Alcotest.failf "meta fixture failed: %s" err
+  in
+  let json =
+    Server_dashboard_http_keeper_api.offline_keeper_composite_json
+      ~config
+      keeper_name
+      meta
+  in
+  let open Yojson.Safe.Util in
+  let projection = json |> member "secret_projection" in
+  Alcotest.(check string)
+    "offline composite includes ready secret projection"
+    "ready"
+    (projection |> member "status" |> to_string);
+  Alcotest.(check (list string))
+    "offline composite reports projected env names"
+    [ "GH_TOKEN" ]
+    (projection |> member "env_names" |> to_list |> List.map to_string);
+  Alcotest.(check bool)
+    "offline composite redacts secret values"
+    false
+    (String_util.contains_substring (Yojson.Safe.to_string json) sentinel)
+
+let test_offline_keeper_composite_names_why_the_keeper_is_not_running () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let module Claims = Server_dashboard_http_composite_claims in
+  let attention_state ~paused =
+    let keeper_name = if paused then "offline-paused" else "offline-absent" in
+    let meta =
+      match
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+             [ "name", `String keeper_name
+             ; "trace_id", `String (keeper_name ^ "-trace")
+             ])
+      with
+      | Ok meta -> { meta with Masc.Keeper_meta_contract.paused }
+      | Error err -> Alcotest.failf "meta fixture failed: %s" err
+    in
+    Server_dashboard_http_keeper_api.offline_keeper_composite_json
+      ~config
+      keeper_name
+      meta
+    |> Yojson.Safe.Util.member "runtime_attention"
+    |> Yojson.Safe.Util.member "state"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string)
+    "a paused keeper without a registry entry reads as paused"
+    (Claims.runtime_attention_state_to_wire Claims.Attention_paused)
+    (attention_state ~paused:true);
+  Alcotest.(check string)
+    "an unpaused keeper without a registry entry reads as offline"
+    (Claims.runtime_attention_state_to_wire Claims.Attention_offline)
+    (attention_state ~paused:false)
+
+let keeper_state_diagram_meta ?last_runtime_attempt_provider name =
+  let runtime_attempt_fields =
+    match last_runtime_attempt_provider with
+    | None -> []
+    | Some provider_id ->
+      [ ( "last_runtime_attempt"
+        , `Assoc
+            [ "provider_id", `String provider_id
+            ; "http_status", `Int 200
+            ; "outcome", `Assoc [ "kind", `String "success" ]
+            ; "timestamp", `Float 1_720_000_000.0
+            ] )
+      ]
+  in
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         ([ "name", `String name
+          ; "trace_id", `String ("trace-" ^ name)
+          ]
+          @ runtime_attempt_fields))
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.failf "state diagram meta fixture failed: %s" err
+
+let test_state_diagram_runtime_projection_redacts_live_runtime_evidence () =
+  let raw_provider = "openai:gpt-5-secret" in
+  let projection =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_projection
+      (Some
+         (keeper_state_diagram_meta
+            ~last_runtime_attempt_provider:raw_provider
+            "state-diagram-runtime"))
+  in
+  Alcotest.(check (list string))
+    "runtime model labels are public redaction labels"
+    [ "runtime" ]
+    projection.runtime_models;
+  Alcotest.(check (option string))
+    "last provider result is redacted to the public runtime label"
+    (Some "runtime")
+    projection.last_provider_result;
+  Alcotest.(check string)
+    "runtime model source records keeper meta provenance"
+    "keeper_meta.runtime.last_runtime_attempt"
+    projection.runtime_models_source;
+  Alcotest.(check string)
+    "last provider source records keeper meta provenance"
+    "keeper_meta.runtime.last_runtime_attempt"
+    projection.last_provider_result_source;
+  let json =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_projection_json
+      projection
+    |> Yojson.Safe.to_string
+  in
+  Alcotest.(check bool)
+    "projection JSON does not leak raw provider id"
+    false
+    (String_util.contains_substring json raw_provider);
+  let mermaid =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_fsm_mermaid
+      projection
+  in
+  Alcotest.(check bool)
+    "runtime FSM contains the redacted runtime node"
+    true
+    (String_util.contains_substring mermaid {|state "runtime" as P0|});
+  Alcotest.(check bool)
+    "runtime FSM no longer renders fake candidate node"
+    false
+    (String_util.contains_substring mermaid "candidate");
+  Alcotest.(check bool)
+    "runtime FSM does not leak raw provider id"
+    false
+    (String_util.contains_substring mermaid raw_provider)
+
+let test_state_diagram_runtime_projection_missing_meta_stays_empty () =
+  let projection =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_projection None
+  in
+  Alcotest.(check (list string))
+    "missing meta exposes no runtime model labels"
+    []
+    projection.runtime_models;
+  Alcotest.(check (option string))
+    "missing meta has no last provider result"
+    None
+    projection.last_provider_result;
+  Alcotest.(check string)
+    "missing meta source is explicit"
+    "missing_keeper_meta"
+    projection.runtime_models_source;
+  let mermaid =
+    Server_dashboard_http_keeper_api.state_diagram_runtime_fsm_mermaid
+      projection
+  in
+  Alcotest.(check bool)
+    "missing meta FSM reports zero models"
+    true
+    (String_util.contains_substring mermaid "Models: 0");
+  Alcotest.(check bool)
+    "missing meta FSM has no fake candidate node"
+    false
+    (String_util.contains_substring mermaid "candidate")
+
+let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let config_root =
+    Filename.concat
+      (Filename.concat config.base_path Common.masc_dirname)
+      "config"
+  in
+  let keepers_dir = Filename.concat config_root "keepers" in
+  mkdir_p keepers_dir;
+  write_file
+    (Filename.concat keepers_dir "base.toml")
+    "[keeper]\nactivation_mode = \"manual\"\ninstructions = \"Keeper base\"\n";
+  write_file
+    (Filename.concat keepers_dir "alpha.toml")
+    "[keeper]\nactivation_mode = \"autonomous\"\n";
+  write_file
+    (Filename.concat keepers_dir "beta.toml")
+    "[keeper]\nactivation_mode = \"autonomous\"\n";
+  with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () -> Config_dir_resolver.reset ())
+    (fun () ->
+      let expected_configured_names = [ "alpha"; "base"; "beta" ] in
+      let configured_names =
+        Masc.Keeper_meta_store.configured_keeper_names config
+        |> List.sort String.compare
+      in
+      Alcotest.(check (list string))
+        "configured Keeper inventory includes every declarative TOML"
+        expected_configured_names
+        configured_names;
+      let json =
+        Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check int)
+        "configured_keepers follows declarative runtime keeper TOML"
+        (List.length configured_names)
+        (json |> member "configured_keepers" |> to_int);
+      Alcotest.(check int)
+        "persisted_keepers exposes durable meta count separately"
+        0
+        (json |> member "persisted_keepers" |> to_int);
+      Alcotest.(check int)
+        "counts.persisted_keepers mirrors top-level persisted_keepers"
+        0
+        (json |> member "counts" |> member "persisted_keepers" |> to_int);
+      write_file
+        (Filename.concat keepers_dir "base.toml")
+        "[keeper]\nactivation_mode = \"autonomous\"\n";
+      Config_dir_resolver.reset ();
+      let configured_names_after_autoboot_change =
+        Masc.Keeper_meta_store.configured_keeper_names config
+        |> List.sort String.compare
+      in
+      Alcotest.(check (list string))
+        "autoboot policy does not change configured inventory"
+        expected_configured_names
+        configured_names_after_autoboot_change;
+      let json =
+        Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
+      in
+      Alcotest.(check int)
+        "configured_keepers remains the TOML inventory after autoboot change"
+        (List.length configured_names_after_autoboot_change)
+        (json |> member "configured_keepers" |> to_int))
+
+let test_dashboard_shell_light_counts_agents_from_summary_fields () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let write_agent ~name ~agent_type ~status =
+    let path =
+      Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename name ^ ".json")
+    in
+    Workspace.write_json
+      config
+      path
+      (`Assoc
+        [ "name", `String name
+        ; "agent_type", `String agent_type
+        ; "status", `String status
+        ; "capabilities", `List []
+        ; "session_bound_at", `String "2026-05-20T00:00:00Z"
+        ; "last_seen", `String "2026-05-20T00:00:00Z"
+        ])
+  in
+  write_agent ~name:"codex-active" ~agent_type:"codex" ~status:"active";
+  write_agent ~name:"keeper-active" ~agent_type:"keeper" ~status:"busy";
+  write_agent ~name:"codex-inactive" ~agent_type:"codex" ~status:"inactive";
+  let json =
+    Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int)
+    "light shell counts active non-keeper agents from summary fields"
+    1
+    (json |> member "counts" |> member "agents" |> to_int)
+
+(* RFC-0138 Phase 3 Step 2 — /tools and /telemetry/summary wire tests.
+
+   Cover the new selector matrix on
+   [Server_dashboard_snapshot_select.select_tools_json] and
+   [..._telemetry_summary_json]. *)
+
+let test_tools_worker_promotes_seed_before_component_ttl () =
+  let guard_was_ready = Eio_guard.is_ready () in
+  (* Restore after the fixture's entire Eio runtime and worker pool close,
+     including exceptional exits. Later synchronous fixtures must not inherit
+     this test's process-wide mutex guard. *)
+  Fun.protect
+    ~finally:(fun () ->
+      if guard_was_ready then Eio_guard.enable () else Eio_guard.disable ())
+  @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  Eio_guard.enable ();
+  let clock = Eio.Stdenv.clock env in
+  let key = "tools:" ^ config.Workspace.base_path in
+  Dashboard_cache.invalidate key;
+  let seed_json = `Assoc [ "status", `String "warming"; "tool_inventory", `List [] ] in
+  let ready_json = `Assoc [ "tool_inventory", `List [] ] in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. seed_json;
+  let started, started_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
+  let await promise = Eio.Time.with_timeout_exn clock 2.
+      (fun () -> Eio.Promise.await promise) in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    Fun.protect
+      ~finally:(fun () ->
+        if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u ();
+        Dashboard_cache.invalidate key)
+      (fun () ->
+        (* Keep the inventory fill pending while the real Tools producer and
+           snapshot component run on another worker. No HTTP request warms it. *)
+        let returned_seed = Dashboard_cache.get_or_compute_payload_with_timeout key
+          ~ttl:60. ~clock ~timeout_sec:2. (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+            Eio.Promise.resolve started_u ();
+            Eio.Promise.await release;
+            ready_json)) in
+        await started;
+        let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
+        let now_value = ref 100. in
+        let producer_calls = Atomic.make 0 in
+        let owner_domain = (Domain.self () :> int) in
+        let refresh () = Eio.Time.with_timeout_exn clock 2. (fun () ->
+          Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+            Dashboard_snapshot.For_testing.refresh_tools
+              ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config (fun () ->
+                check bool "tools producer remains on a worker" true
+                  ((Domain.self () :> int) <> owner_domain);
+                Atomic.incr producer_calls;
+                Server_dashboard_http_runtime_info.dashboard_tools_http_result config))) in
+        let pending = refresh () in
+        now_value := 102.;
+        let still_pending = refresh () in
+        check bool "pending cycles reuse identity and all encodings" true
+          (pending == still_pending);
+        check int "pending producer is retried without waiting sixty seconds" 2
+          (Atomic.get producer_calls);
+        Eio.Promise.resolve release_u ();
+        let rec await_computed () =
+          match Dashboard_cache.peek_payload key with
+          | Some payload when payload.origin = Dashboard_cache.Computed -> payload
+          | _ -> Eio.Fiber.yield (); await_computed ()
+        in
+        let computed = Eio.Time.with_timeout_exn clock 2. await_computed in
+        check bool "returned seed keeps its origin after concurrent publication" true
+          (returned_seed.origin = Dashboard_cache.Seeded);
+        check bool "completed empty inventory has computed origin" true
+          (computed.origin = Dashboard_cache.Computed);
+        now_value := 104.;
+        let ready = refresh () in
+        check bool "ready promotes on the next cycle before the old TTL" true
+          (ready != pending);
+        check int "empty inventory remains empty after promotion" 0
+          Yojson.Safe.Util.(ready.json |> member "tool_inventory" |> to_list |> List.length);
+        check bool "promotion keeps the real producer's final decoration" true
+          (Yojson.Safe.Util.(ready.json |> member "keeper_waiting_inventory") <> `Null);
+        check string "promoted bytes describe the decorated JSON"
+          (Yojson.Safe.to_string ready.json) ready.encoded.identity;
+        now_value := 106.;
+        let ready_again = refresh () in
+        check bool "ready cycles reuse all prepared encodings" true (ready == ready_again);
+        check int "ready component TTL avoids another producer call" 3
+          (Atomic.get producer_calls)))
+
+let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  let marker = `Assoc [ "tools_marker", `String "from-snapshot" ] in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test ~config
+       ~shell:`Null ~tools:marker
+       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+  let timing = Server_timing.create () in
+  let json =
+    Server_dashboard_snapshot_select.select_tools_json
+      ~timing config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "actor-less snapshot path returns published marker"
+    "from-snapshot"
+    (json |> member "tools_marker" |> to_string);
+  Alcotest.(check bool)
+    "Server-Timing header records snapshot_read phase on hit"
+    true
+    (let header = Server_timing.to_header_value timing in
+     let re = Re.compile (Re.Perl.re "snapshot_read") in
+     Re.execp re header);
+  Dashboard_snapshot.reset_for_test ()
+
+let test_tools_prepared_selector_scope_and_keeper_contract () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect ~finally:Dashboard_snapshot.reset_for_test (fun () ->
+    let marker = `Assoc [ "snapshot", `String "final-tools" ] in
+    let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null
+      ~tools:marker ~namespace_truth:`Null ~telemetry_summary:`Null () in
+    Dashboard_snapshot.publish_for_test snapshot;
+    let require_prepared timing =
+      match Server_dashboard_snapshot_select.select_tools_response ~timing config with
+      | Tools_prepared tools -> tools
+      | Tools_json _ -> fail "matching default tools request missed prepared snapshot"
+    in
+    let first_timing = Server_timing.create () in
+    ignore (Server_timing.measure first_timing (Server_timing.Custom "request_one") (fun () -> ()));
+    let first = require_prepared first_timing in
+    let second_timing = Server_timing.create () in
+    let second = require_prepared second_timing in
+    check bool "repeat request reuses typed component" true (first == second);
+    check bool "each request records its snapshot read" true
+      (String_util.contains_substring (Server_timing.to_header_value second_timing) "snapshot_read");
+    check bool "previous request timing is not cached" false
+      (String_util.contains_substring (Server_timing.to_header_value second_timing) "request_one");
+    let other_base = { config with Workspace.base_path = config.base_path ^ "-other" } in
+    let other_workspace = { config with Workspace.workspace_path = config.workspace_path ^ "-other" } in
+    let expect_json query_config keeper =
+      let seen = ref None in
+      let fallback ~keeper ~timing:_ actual_config =
+        seen := Some (keeper, actual_config);
+        `Assoc [ "live", `Bool true ]
+      in
+      match Server_dashboard_snapshot_select.For_testing.select_tools_response
+        ~fallback ?keeper query_config with
+      | Tools_prepared _ -> fail "scoped or cold request reused unrelated tools bytes"
+      | Tools_json json ->
+        check bool "fallback JSON preserved" true (json = `Assoc [ "live", `Bool true ]);
+        (match !seen with
+         | Some (actual_keeper, actual_config) ->
+           check (option string) "keeper selector forwarded exactly" keeper actual_keeper;
+           check bool "requested config forwarded unchanged" true (actual_config == query_config)
+         | None -> fail "live fallback was not called")
+    in
+    List.iter (fun (scope, keeper) -> expect_json scope keeper)
+      [ config, Some ""; config, Some "exact-keeper";
+        other_base, None; other_workspace, None ];
+    Dashboard_snapshot.reset_for_test ();
+    expect_json config None)
+
+let tools_h1_wire_response ~router ~headers target =
+  let output = Buffer.create 4096 in
+  let connection = Httpun.Server_connection.create (fun reqd ->
+    Lib.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+  let request = Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list (("host", "localhost:8935") :: headers)) `GET target in
+  let raw = Printf.sprintf "GET %s HTTP/1.1\r\n%s" target
+    (Httpun.Headers.to_string request.headers) in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let written = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+        Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+        total + iov.len) 0 iovecs in
+      Httpun.Server_connection.report_write_result connection (`Ok written);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let boundary = try Str.search_forward (Str.regexp_string "\r\n\r\n") raw 0
+    with Not_found -> failf "tools route produced invalid H1 response: %S" raw in
+  let head = String.sub raw 0 boundary |> String.split_on_char '\n' in
+  let status = int_of_string (List.nth (String.split_on_char ' ' (List.hd head)) 1) in
+  let headers = List.tl head |> List.map (fun line ->
+    let colon = String.index line ':' in
+    String.lowercase_ascii (String.sub line 0 colon),
+    String.trim (String.sub line (colon + 1) (String.length line - colon - 1))) in
+  status, headers, String.sub raw (boundary + 4) (String.length raw - boundary - 4)
+
+let test_pause_status_route_preserves_invalid_state () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  with_env "MASC_HTTP_AUTH_STRICT" "true" @@ fun () ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect
+    ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous_state)
+    (fun () ->
+      let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+      let config = Lib.Mcp_server.workspace_config state in
+      ignore (Workspace.init config ~agent_name:None);
+      Server_auth.For_testing.restore_server_state (Some state);
+      Auth.save_auth_config config.base_path
+        { Types.default_auth_config with enabled = true; require_token = true };
+      let actor = "pause-status-reader" in
+      let token = match Auth.create_token config.base_path ~agent_name:actor ~role:Types.Worker with
+        | Ok (token, _) -> token
+        | Error error -> fail (Types.masc_error_to_string error)
+      in
+      check bool "worker cannot administer the namespace" true
+        (Result.is_error (Auth.check_permission config.base_path ~agent_name:actor
+          ~token:(Some token) ~permission:Types.CanAdmin));
+      check bool "HTTP read authorization is enforced" true
+        (Server_auth.http_auth_strict_enabled ());
+      let router = Server_routes_http_routes_dashboard.add_routes ~sw
+        ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
+      let path = "/api/v1/operator/pause-status" in
+      let headers = [ "authorization", "Bearer " ^ token ] in
+      let send () =
+        let status, _, body = tools_h1_wire_response ~router ~headers path in
+        status, Yojson.Safe.from_string body
+      in
+      let status, json = send () in
+      check int "read-only worker reads valid state" 200 status;
+      check bool "valid running state is authoritative" true
+        (Yojson.Safe.Util.member "paused" json = `Bool false);
+      let state_path = Workspace.state_path config in
+      let original = Fs_compat.load_file state_path in
+      let wrong_type =
+        match Yojson.Safe.from_string original with
+        | `Assoc fields -> Yojson.Safe.to_string
+            (`Assoc (("paused", `String "false") :: List.remove_assoc "paused" fields))
+        | _ -> fail "initialized state must be an object"
+      in
+      List.iter (fun bytes ->
+        Fs_compat.save_file state_path bytes;
+        let status, json = send () in
+        check int "invalid state is unavailable" 503 status;
+        check bool "invalid state grants no pause authority" true
+          (Yojson.Safe.Util.member "paused" json = `Null);
+        check bool "invalid state does not report success" true
+          (Yojson.Safe.Util.member "ok" json = `Bool false);
+        check string "GET leaves invalid persisted bytes unchanged" bytes
+          (Fs_compat.load_file state_path))
+        [ ""; "{"; "{}"; wrong_type ];
+      Sys.remove state_path;
+      Unix.mkdir state_path 0o700;
+      let status, json = send () in
+      check int "unreadable state is unavailable" 503 status;
+      check bool "unreadable state grants no pause authority" true
+        (Yojson.Safe.Util.member "paused" json = `Null);
+      check bool "GET does not replace the unreadable state object" true
+        (Sys.is_directory state_path))
+
+let test_asks_list_publishes_written_alternative_capability () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let module Ask = Masc.Keeper_ask in
+  let name = "ask-capability" in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String name; "trace_id", `String "ask-capability-trace" ]) with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  let entry = Masc.Keeper_registry.register_offline ~base_path:config.base_path name meta in
+  Fun.protect
+    ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+    (fun () ->
+      let choice = match Ask.choice ~choice_id:"offered" ~label:"Offered route" () with
+        | Ok choice -> choice
+        | Error error -> fail (Ask.invalid_choice_to_string error)
+      in
+      let question id mode free_text =
+        match Ask.question ~question_id:id ~header:id ~prompt:"Choose or explain another route"
+          ~choices:[choice] ~mode ~free_text with
+        | Ok question -> question
+        | Error error -> fail (Ask.invalid_question_to_string error)
+      in
+      let questions =
+        [ question "single" Ask.Single Ask.Choices_only;
+          question "multi" Ask.Multi Ask.Choices_only;
+          question "hinted" Ask.Single (Ask.Free_text_allowed {hint = Some "Explain the constraint"}) ]
+      in
+      let ask = match Ask.ask ~ask_id:"ask-capability" ~keeper_name:name ~questions
+        ~continuation:(Keeper_continuation_channel.unrouted "projection fixture")
+        ~asked_at:100. () with
+        | Ok ask -> ask
+        | Error error -> fail (Ask.invalid_ask_to_string error)
+      in
+      (match Masc.Keeper_ask_store.record_ask ~base_path:config.base_path ask with
+       | Ok () -> () | Error detail -> fail detail);
+      let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+      let router = Lib.Http_server_eio.Router.create ()
+        |> Server_route.get Server_route.Always_public "/api/v1/keepers/asks"
+             (Server_routes_http_keeper_stream.handle_keeper_asks_list state)
+      in
+      let status, _, body = tools_h1_wire_response ~router ~headers:[]
+        ("/api/v1/keepers/asks?name=" ^ name) in
+      check int "asks list HTTP success" 200 status;
+      let open Yojson.Safe.Util in
+      let wire_questions = Yojson.Safe.from_string body |> member "asks" |> index 0
+        |> member "questions" |> to_list in
+      check int "all authored questions published" 3 (List.length wire_questions);
+      List.iter (fun json -> check bool "every question permits a written alternative" true
+        (json |> member "free_text" |> member "allowed" |> to_bool)) wire_questions;
+      check string "author hint survives capability projection" "Explain the constraint"
+        (List.nth wire_questions 2 |> member "free_text" |> member "hint" |> to_string);
+      match Masc.Keeper_ask_store.rows ~base_path:config.base_path ~keeper_name:name with
+      | [_, (stored, Ask.Open)] ->
+        check bool "wire capability does not rewrite stored author metadata" true
+          (List.map (fun (q : Ask.question) -> q.free_text) stored.questions
+           = [Ask.Choices_only; Ask.Choices_only;
+              Ask.Free_text_allowed {hint = Some "Explain the constraint"}])
+      | _ -> fail "stored open question metadata changed")
+
+let tools_h2_wire_response ~handler ~headers target =
+  let response = ref None in
+  let body = Buffer.create 4096 in
+  let complete = ref false in
+  let client = H2.Client_connection.create
+    ~error_handler:(fun _ -> fail "tools H2 connection error") () in
+  let request = H2.Request.create ~scheme:"http" `GET target
+    ~headers:(H2.Headers.of_list ((":authority", "localhost:8935") :: headers)) in
+  let writer = H2.Client_connection.request client request
+    ~error_handler:(fun _ -> fail "tools H2 stream error")
+    ~response_handler:(fun reply reader ->
+      response := Some (H2.Status.to_code reply.H2.Response.status, H2.Headers.to_list reply.headers);
+      let rec consume () = H2.Body.Reader.schedule_read reader
+        ~on_eof:(fun () -> complete := true)
+        ~on_read:(fun buffer ~off ~len ->
+          Buffer.add_string body (Bigstringaf.substring buffer ~off ~len);
+          consume ()) in
+      consume ()) in
+  H2.Body.Writer.close writer;
+  let server = H2.Server_connection.create handler in
+  let transfer next_write report_write read =
+    let rec drain progressed = match next_write () with
+      | `Write iovecs ->
+        let written = List.fold_left (fun total (iov : Bigstringaf.t H2.IOVec.t) ->
+          let rec feed off remaining =
+            if remaining > 0 then (
+              let consumed = read iov.buffer ~off ~len:remaining in
+              if consumed <= 0 then fail "tools H2 transfer made no progress";
+              feed (off + consumed) (remaining - consumed))
+          in
+          feed iov.off iov.len;
+          total + iov.len) 0 iovecs in
+        report_write (`Ok written);
+        drain true
+      | `Yield | `Close _ -> progressed
+    in
+    drain false
+  in
+  let rec pump () =
+    let sent = transfer
+      (fun () -> H2.Client_connection.next_write_operation client)
+      (H2.Client_connection.report_write_result client) (H2.Server_connection.read server) in
+    let received = transfer
+      (fun () -> H2.Server_connection.next_write_operation server)
+      (H2.Server_connection.report_write_result server) (H2.Client_connection.read client) in
+    if !complete then ()
+    else if sent || received then pump ()
+    else fail "tools H2 route stalled before response completion"
+  in
+  pump ();
+  match !response with
+  | Some (status, headers) -> status, headers, Buffer.contents body
+  | None -> fail "tools H2 route omitted response headers"
+
+(* On HTTP/2 a cached payload's timeout envelope goes out as 504 whoever
+   produced it: the cache (origin [Timeout]) or a builder whose envelope the
+   cache keeps as a computed page. *)
+let test_h2_cached_payload_timeout_is_504 () =
+  with_test_env @@ fun ~env:_ ~sw ~config:_ ->
+  let resources=Server_h2_response_resources.create
+    ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
+  let payload origin json =
+    { Dashboard_cache.json
+    ; raw_json = Yojson.Safe.to_string json
+    ; etag = "W/\"fixture\""
+    ; origin
+    ; encoded = None
+    }
+  in
+  let read payload =
+    Server_h2_response_resources.with_request resources ~sw (fun () ->
+    tools_h2_wire_response
+      ~handler:(fun reqd ->
+        Server_h2_gateway_helpers.h2_respond_cached_payload reqd payload)
+      ~headers:[] "/cached")
+  in
+  let envelope =
+    `Assoc [ "error", `String Dashboard_cache.timeout_error_code; "key", `String "k" ]
+  in
+  List.iter
+    (fun (label, origin) ->
+       let status, _, _ = read (payload origin envelope) in
+       check int (label ^ " is 504") 504 status)
+    [ "a cache timeout", Dashboard_cache.Timeout
+    ; "a builder's timeout kept as a page", Dashboard_cache.Computed
+    ];
+  let page = payload Dashboard_cache.Computed (`Assoc [ "posts", `List [] ]) in
+  let status, _, body = read page in
+  check int "a page is 200" 200 status;
+  check string "a page sends its kept bytes" page.raw_json body
+
+let tools_gunzip payload =
+  let input = De.bigstring_create De.io_buffer_size in
+  let output = De.bigstring_create De.io_buffer_size in
+  let decoded = Buffer.create 4096 in
+  let consumed = ref 0 in
+  let refill buffer =
+    let take = min (Bigstringaf.length buffer) (String.length payload - !consumed) in
+    Bigstringaf.blit_from_string payload ~src_off:!consumed buffer ~dst_off:0 ~len:take;
+    consumed := !consumed + take;
+    take
+  in
+  let flush buffer written = Buffer.add_string decoded (Bigstringaf.substring buffer ~off:0 ~len:written) in
+  match Gz.Higher.uncompress ~refill ~flush input output with
+  | Ok _ -> Buffer.contents decoded
+  | Error (`Msg detail) -> fail detail
+
+let test_tools_routes_serve_prepared_http_representations () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state previous_state;
+    Dashboard_snapshot.reset_for_test ();
+    Dashboard_cache.invalidate_all ()) (fun () ->
+    let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+    let config = Lib.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    Server_auth.For_testing.restore_server_state (Some state);
+    Auth.save_auth_config config.base_path
+      { Types.default_auth_config with enabled = true; require_token = true };
+    let token = match Auth.create_token config.base_path ~agent_name:"tools-wire-reader" ~role:Types.Worker with
+      | Ok (token, _) -> token
+      | Error error -> fail (Types.masc_error_to_string error) in
+    let final_json = `Assoc
+      [ "tool_inventory", `List (List.init 200 (fun i -> `Assoc
+          [ "name", `String ("tool-" ^ string_of_int i); "description", `String "full final snapshot tool description" ]))
+      ; "keeper_waiting_inventory", `Assoc [ "wire_marker", `String "final-decoration" ]
+      ; "effective_keeper_surface", `Null
+      ; "skill_activations", `Null ] in
+    let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null ~tools:final_json
+      ~namespace_truth:`Null ~telemetry_summary:`Null () in
+    Dashboard_snapshot.publish_for_test snapshot;
+    (* Keep exact-Keeper fallback cheap while still resolving its live fields. *)
+    ignore (Dashboard_cache.get_or_compute ("tools:" ^ config.base_path) ~ttl:60.
+      (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `Assoc [ "tool_inventory", `List [] ])));
+    let router = Server_routes_http_routes_dashboard.add_routes ~sw
+      ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
+    let trust_policy = match Server_request_authority.make_trust_policy
+      ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+      | Ok policy -> policy
+      | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
+    let h2_handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw ~request_sw:sw
+      (* A real client address: the handler charges the per-client-IP bucket
+         with it, which is the limit H2 was missing. *)
+      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
+    let request_headers = [ "origin", "http://localhost:8935";
+      "authorization", "Bearer " ^ token ] in
+    let path = "/api/v1/dashboard/tools" in
+    List.iter (fun (protocol, send) ->
+      let check_headers headers =
+        if protocol = "H2" then
+          List.iter (fun (name, _) ->
+            check string "H2 wire field names are lowercase"
+              (String.lowercase_ascii name) name) headers;
+        check (option string) (protocol ^ " CORS reflects admitted origin")
+          (Some "http://localhost:8935") (List.assoc_opt "access-control-allow-origin" headers);
+        let vary = List.filter_map (fun (name, value) ->
+          if name = "vary" then Some value else None) headers |> String.concat "," in
+        check bool (protocol ^ " Vary preserves Origin") true (String_util.contains_substring vary "Origin");
+        check bool (protocol ^ " Vary preserves Accept-Encoding") true
+          (String_util.contains_substring vary "Accept-Encoding");
+        check (option string) (protocol ^ " validator") (Some snapshot.tools.etag)
+          (List.assoc_opt "etag" headers);
+        check (option string) (protocol ^ " revalidate cache policy") (Some "no-cache")
+          (List.assoc_opt "cache-control" headers);
+        check bool (protocol ^ " request-local snapshot timing") true
+          (String_util.contains_substring
+            (Option.value ~default:"" (List.assoc_opt "server-timing" headers)) "snapshot_read")
+      in
+      List.iter (fun encoding ->
+        let headers = ("accept-encoding", encoding) :: request_headers in
+        let status, reply_headers, body = send ~headers path in
+        check int (protocol ^ " compressed success") 200 status;
+        check_headers reply_headers;
+        check (option string) (protocol ^ " selected content encoding") (Some encoding)
+          (List.assoc_opt "content-encoding" reply_headers);
+        check (option string) (protocol ^ " length describes compressed bytes")
+          (Some (string_of_int (String.length body))) (List.assoc_opt "content-length" reply_headers);
+        let decode body = if encoding = "gzip" then tools_gunzip body else
+          match Compression_codec.decompress ~orig_size:(String.length snapshot.tools.encoded.identity) body with
+          | Ok json -> json | Error error -> fail error in
+        check string (protocol ^ " decoded body is complete final projection")
+          (Yojson.Safe.to_string final_json) (decode body);
+        let status, reply_headers, body = send
+          ~headers:(("if-none-match", snapshot.tools.etag) :: headers) path in
+        check int (protocol ^ " matching validator") 304 status;
+        check_headers reply_headers;
+        check string (protocol ^ " 304 has no body") "" body;
+        check (option string) (protocol ^ " 304 omits Content-Length") None
+          (List.assoc_opt "content-length" reply_headers);
+        let status, reply_headers, body = send ~headers:(("if-none-match", "W/\"older\"") :: headers) path in
+        check int (protocol ^ " stale validator receives current representation") 200 status;
+        check_headers reply_headers;
+        check string (protocol ^ " stale validator receives complete current bytes")
+          (Yojson.Safe.to_string final_json) (decode body))
+        [ "gzip"; "zstd" ];
+      let status, _, body = send ~headers:request_headers (path ^ "?keeper=missing-wire-keeper") in
+      check int (protocol ^ " exact Keeper fallback succeeds") 200 status;
+      let json = Yojson.Safe.from_string body in
+      check string (protocol ^ " exact Keeper uses live effective projection") "keeper_not_found"
+        Yojson.Safe.Util.(json |> member "effective_keeper_surface" |> member "reason" |> to_string);
+      check bool (protocol ^ " exact Keeper does not receive default snapshot decoration") false
+        (String_util.contains_substring body "final-decoration"))
+      [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ];
+    (* Start from fresh address keys: a previously used bucket may refill during
+       the request, so comparing consecutive reads of it is timing-dependent. *)
+    let check_first_h2_charge label headers target expected_status =
+      let client_addr = `Unix (Filename.basename config.base_path ^ "-" ^ label) in
+      let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw ~request_sw:sw
+        ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. client_addr in
+      let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
+      let before = Masc.Rate_limit.remaining_global ~key:rl_key in
+      let status, _, _ = tools_h2_wire_response ~handler ~headers target in
+      check int (label ^ " response") expected_status status;
+      check int (label ^ " charges exactly one client token") (before - 1)
+        (Masc.Rate_limit.remaining_global ~key:rl_key)
+    in
+    check_first_h2_charge "observation" request_headers path 200;
+    check_first_h2_charge "origin-refusal"
+      [ "origin", "https://disallowed.example"; "authorization", "Bearer " ^ token ]
+      "/mcp" 403)
+
+(* A dashboard read that answers straight from [Dashboard_cache] sends the bytes
+   the cache serialized with the entry. The prepared-payload hook fires each
+   time the cache turns a value into those bytes, so two reads of an unchanged
+   entry count one: a route that serialized the cached value on every request
+   counts none, and one that prepared the bytes per request counts two.
+   Left out: [/harness-health] and [/board/hearths], whose stores sit under
+   [Env_config.base_path] outside this fixture's workspace; [/telemetry],
+   whose one-second TTL could lapse between the two reads; the keeper
+   [/trajectory] and [/file-changes] reads, which need a keeper record and an
+   admin token; and git [blame]/[log]/[diff], which need a repository. *)
+let test_cached_dashboard_reads_send_the_kept_bytes () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state previous_state;
+    Dashboard_cache.invalidate_all ()) (fun () ->
+    let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+    let config = Lib.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    Server_auth.For_testing.restore_server_state (Some state);
+    Unix.mkdir (Filename.concat config.base_path "fixture-dir") 0o755;
+    let router =
+      Server_routes_http_routes_dashboard.add_routes ~sw
+        ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ())
+      |> Server_routes_http_routes_workspace.add_routes
+    in
+    List.iter (fun target ->
+      Dashboard_cache.invalidate_all ();
+      let prepared = ref 0 in
+      let (first_status, first_headers, first_body),
+          (second_status, second_headers, second_body) =
+        Dashboard_cache.For_testing.with_payload_prepared_hook
+          (fun _ -> incr prepared)
+          (fun () ->
+             let first = tools_h1_wire_response ~router ~headers:[] target in
+             first, tools_h1_wire_response ~router ~headers:[] target)
+      in
+      check int (target ^ " answers") 200 first_status;
+      check int (target ^ " answers again") 200 second_status;
+      check int (target ^ " serializes its page once") 1 !prepared;
+      check string (target ^ " sends the kept bytes again") first_body second_body;
+      check (option string) (target ^ " keeps one validator")
+        (List.assoc_opt "etag" first_headers)
+        (List.assoc_opt "etag" second_headers))
+      [ "/api/v1/dashboard/planning"
+      ; "/api/v1/dashboard/goals"
+      ; "/api/v1/dashboard/goals/detail?goal_id=goal-absent"
+      ; "/api/v1/dashboard/briefing"
+      ; "/api/v1/dashboard/briefing/sections"
+      ; "/api/v1/dashboard/tool-quality?window_hours=1"
+      ; "/api/v1/dashboard/eval-feed"
+      ; "/api/v1/keepers/fixture-keeper/tool-stats"
+      ; "/api/v1/workspace/tree"
+      ; "/api/v1/workspace/children?path=fixture-dir"
+      ])
+
+(* Exact parsed queries must own distinct cached responses. Exercise the real
+   router and response cache, including the echoed query and retained rows. *)
+let with_exact_query_router ?(prepare = fun _ -> ()) ?(cleanup = fun _ -> ()) f =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state previous_state;
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Dashboard_cache.invalidate_all ()) (fun () ->
+    Dashboard_cache.invalidate_all ();
+    let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+    let config = Lib.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    Server_auth.For_testing.restore_server_state (Some state);
+    Auth.save_auth_config config.base_path
+      { Types.default_auth_config with enabled = true; require_token = true };
+    let token = match Auth.create_token config.base_path ~agent_name:"query-reader" ~role:Types.Admin with
+      | Ok (token, _) -> token
+      | Error error -> fail (Types.masc_error_to_string error) in
+    Fun.protect ~finally:(fun () -> cleanup config) (fun () ->
+    prepare config;
+    Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+    let store = match Masc.Keeper_tool_call_log.store () with
+      | Some store -> store | None -> fail "tool-call fixture unavailable" in
+    Fun.protect ~finally:(fun () -> Dated_jsonl.prepare_for_directory_removal store) (fun () ->
+    Dated_jsonl.append store (`Assoc [
+      "ts", `Float (Time_compat.now () -. 1.025 *. 3600.);
+      "keeper", `String "query-keeper"; "tool", `String "keeper_lane_status";
+      "record_kind", `String "tool_call"; "disposition", `String "completed";
+      "result_bytes", `Int 0; "wire_outcome", `String "ok"; "duration_ms", `Float 1. ]);
+    let router = Server_routes_http_routes_dashboard.add_routes ~sw
+      ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
+    let read target =
+      let status, headers, body = tools_h1_wire_response ~router
+        ~headers:["authorization", "Bearer " ^ token; "accept-encoding", "identity"] target in
+      check int (target ^ " status") 200 status;
+      headers, Yojson.Safe.from_string body in
+    f read)))
+
+let prepare_eval_feed_rows (config : Workspace.config) =
+  List.iter (fun name ->
+    let dir = Filename.concat (Filename.concat (Filename.concat config.base_path ".agent_core") "eval") name in
+    Fs_compat.mkdir_p dir;
+    List.iter (fun index ->
+      let snapshot : Dashboard_eval_feed.eval_snapshot = {
+        agent_name = name; session_id = None;
+        worker_run_id = name ^ "-run-" ^ string_of_int index;
+        timestamp = float_of_int index; baseline_status = None;
+        verdict = { schema_version = 1; all_passed = true; coverage = 1.; layer_results = [] };
+      } in
+      Yojson.Safe.to_file (Filename.concat dir (string_of_int index ^ ".json"))
+        (Dashboard_eval_feed.snapshot_to_json snapshot)) [1; 2]) ["-"; "eval-other"]
+
+let check_eval_fleet json =
+  let open Yojson.Safe.Util in
+  check (option int) "both retained agents remain visible" (Some 2)
+    (Safe_ops.json_int_opt "agent_count" json);
+  check bool "fleet has no per-agent selector" true (member "agent_name" json = `Null);
+  let agents = json |> member "agents" |> to_list in
+  check (list string) "fleet preserves sorted agents" ["-"; "eval-other"]
+    (List.map (fun row -> row |> member "agent_name" |> to_string) agents);
+  List.iter (fun row ->
+    let name = row |> member "agent_name" |> to_string in
+    check string "fleet keeps the latest retained snapshot" (name ^ "-run-2")
+      (row |> member "latest" |> member "worker_run_id" |> to_string)) agents
+
+let check_eval_agent ~name ~count:expected json =
+  let open Yojson.Safe.Util in
+  check (option string) "exact agent selector survives cache" (Some name)
+    (Safe_ops.json_string_opt "agent_name" json);
+  check int "count follows the effective limit" expected (json |> member "count" |> to_int);
+  check bool "agent result has no fleet rows" true (member "agents" json = `Null);
+  let snapshots = json |> member "snapshots" |> to_list in
+  check (list string) "requested snapshots retain their original order"
+    (if expected = 1 then [name ^ "-run-2"] else [name ^ "-run-2"; name ^ "-run-1"])
+    (List.map (fun row -> row |> member "worker_run_id" |> to_string) snapshots)
+
+let test_eval_feed_separates_fleet_from_dash_agent () =
+  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
+  List.iter (fun agent_first ->
+    Dashboard_cache.invalidate_all ();
+    let fleet () = let _, json = read "/api/v1/dashboard/eval-feed?limit=1" in check_eval_fleet json in
+    let agent () = let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-&limit=1" in
+      check_eval_agent ~name:"-" ~count:1 json in
+    if agent_first then (agent (); fleet (); agent ()) else (fleet (); agent (); fleet ())) [false; true]
+
+let test_eval_feed_fleet_reuses_effective_selection () =
+  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+    List.iter (fun query -> let _, json = read ("/api/v1/dashboard/eval-feed" ^ query) in
+      check_eval_fleet json)
+      [""; "?limit=1"; "?limit=100"; "?agent_name=&limit=2"; "?agent_name=%20%20&limit=100"]);
+  check int "unused limit and empty selector share one fleet preparation" 1 !prepared
+
+let test_eval_feed_agent_limits_remain_distinct () =
+  with_exact_query_router ~prepare:prepare_eval_feed_rows @@ fun read ->
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+    List.iter (fun (query, name, count) ->
+      let _, json = read ("/api/v1/dashboard/eval-feed?" ^ query) in
+      check_eval_agent ~name ~count json)
+      ["agent_name=-&limit=1", "-", 1;
+       "agent_name=-&limit=2", "-", 2;
+       "agent_name=%20-%20&limit=2", "-", 2;
+       "agent_name=eval-other&limit=1", "eval-other", 1;
+       "agent_name=-&limit=0", "-", 1;
+       "agent_name=-", "-", 2;
+       "agent_name=-&limit=invalid", "-", 2]);
+  check int "different effective selectors and limits stay distinct" 4 !prepared
+
+let prepare_eval_boundary_rows (config : Workspace.config) =
+  prepare_eval_feed_rows config;
+  let core = Filename.concat config.base_path ".agent_core" in
+  let root = Filename.concat core "eval" in
+  let outside = Filename.concat core "outside" in
+  Fs_compat.mkdir_p outside;
+  let foreign = Filename.concat outside "999.json" in
+  Yojson.Safe.to_file foreign
+    (Yojson.Safe.from_file (Filename.concat (Filename.concat root "-") "1.json"));
+  Unix.symlink outside (Filename.concat root "linked");
+  Unix.symlink foreign (Filename.concat (Filename.concat root "-") "999.json")
+
+let with_eval_boundary_router f =
+  with_exact_query_router ~prepare:prepare_eval_boundary_rows
+    ~cleanup:(fun (config : Workspace.config) ->
+      Fs_compat.remove_tree (Filename.concat config.base_path ".agent_core")) f
+
+let test_eval_http_rejects_parent_agent () =
+  with_eval_boundary_router @@ fun read ->
+  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=..%2Foutside" in
+  check int "parent selector cannot read sibling snapshots" 0
+    Yojson.Safe.Util.(json |> member "count" |> to_int)
+
+let test_eval_http_excludes_linked_agent () =
+  with_eval_boundary_router @@ fun read ->
+  let _, fleet = read "/api/v1/dashboard/eval-feed" in check_eval_fleet fleet;
+  let _, exact = read "/api/v1/dashboard/eval-feed?agent_name=linked" in
+  check int "linked agent cannot return foreign rows" 0
+    Yojson.Safe.Util.(exact |> member "count" |> to_int)
+
+let test_eval_http_ignores_linked_json () =
+  with_eval_boundary_router @@ fun read ->
+  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-&limit=1" in
+  check_eval_agent ~name:"-" ~count:1 json
+
+let test_eval_http_ignores_nul_agent () =
+  with_eval_boundary_router @@ fun read ->
+  let _, json = read "/api/v1/dashboard/eval-feed?agent_name=-%00suffix" in
+  check int "invalid filesystem spelling cannot select an existing agent" 0
+    Yojson.Safe.Util.(json |> member "count" |> to_int)
+
+let test_keeper_cached_windows_keep_exact_query () =
+  with_exact_query_router @@ fun read ->
+  let first_etag = ref None in
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+  List.iteri (fun index (window, count) ->
+    let headers, json = read ("/api/v1/keepers/query-keeper/file-changes?window_hours=" ^ window) in
+    let etag = List.assoc_opt "etag" headers in
+    check bool "validator is present" true (Option.is_some etag);
+    if index = 0 then first_etag := etag;
+    if index = 2 then check (option string) "equivalent windows retain the validator" !first_etag etag;
+    check (float 1e-12) "effective window is the requested window"
+      (float_of_string window) Yojson.Safe.Util.(json |> member "window_hours" |> to_float);
+    check int "window boundary selects the requested retained calls" count
+      Yojson.Safe.Util.(json |> member "calls_in_window" |> to_int))
+    ["1.01", 0; "1.04", 1; "1.010", 0]);
+  check int "two distinct windows prepare two payloads; the alias reuses one" 2 !prepared
+
+let test_tool_quality_cached_windows_keep_exact_query () =
+  with_exact_query_router @@ fun read ->
+  List.iter (fun window ->
+    let _, json = read ("/api/v1/dashboard/tool-quality?window_hours=" ^ window) in
+    check (float 1e-12) "sampling window is the requested window"
+      (float_of_string window) Yojson.Safe.Util.(json |> member "window_hours" |> to_float))
+    ["1.001"; "1.004"; "1.0010"]
+
+let with_tool_quality_sampling_rows f =
+  with_exact_query_router @@ fun read ->
+  let store = match Masc.Keeper_tool_call_log.store () with
+    | Some store -> store | None -> fail "sampling fixture unavailable" in
+  Dated_jsonl.append store (`Assoc [
+    "ts", `Float (Time_compat.now ()); "keeper", `String "sampling-keeper";
+    "tool", `String "keeper_lane_status"; "record_kind", `String "tool_call";
+    "disposition", `String "completed"; "result_bytes", `Int 0;
+    "wire_outcome", `String "ok"; "duration_ms", `Float 1. ]);
+  f read
+
+let test_tool_quality_window_reuses_irrelevant_limit () =
+  with_tool_quality_sampling_rows @@ fun read ->
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+    List.iter (fun n ->
+      let _, json = read ("/api/v1/dashboard/tool-quality?window_hours=2&n=" ^ n) in
+      check string "positive window sampling" "window_hours"
+        Yojson.Safe.Util.(json |> member "sampling_mode" |> to_string);
+      check bool "recent count does not limit a window" true
+        (Yojson.Safe.Util.member "sample_limit" json = `Null);
+      check int "the whole window retains both calls" 2
+        Yojson.Safe.Util.(json |> member "total" |> to_int)) ["1"; "5000"]);
+  check int "irrelevant n does not prepare the same window twice" 1 !prepared
+
+let check_tool_quality_recent_limits suffix =
+  with_tool_quality_sampling_rows @@ fun read ->
+  let prepared = ref 0 in
+  Dashboard_cache.For_testing.with_payload_prepared_hook (fun _ -> incr prepared) (fun () ->
+    List.iter (fun (n, total) ->
+      let _, json = read ("/api/v1/dashboard/tool-quality?n=" ^ string_of_int n ^ suffix) in
+      check string "recent sampling is retained" "recent_n"
+        Yojson.Safe.Util.(json |> member "sampling_mode" |> to_string);
+      check int "effective recent count remains visible" n
+        Yojson.Safe.Util.(json |> member "sample_limit" |> to_int);
+      check int "recent count selects different retained rows" total
+        Yojson.Safe.Util.(json |> member "total" |> to_int)) [1, 1; 5000, 2]);
+  check int "different effective recent counts prepare distinct payloads" 2 !prepared
+
+let test_tool_quality_recent_limits_remain_distinct () = check_tool_quality_recent_limits ""
+let test_tool_quality_nan_preserves_recent_limits () = check_tool_quality_recent_limits "&window_hours=nan"
+
+let test_telemetry_cached_queries_keep_exact_boundaries () =
+  with_exact_query_router @@ fun read ->
+  let root = "/api/v1/dashboard/telemetry?source=tool_call_io&n=1" in
+  List.iter (fun parameter ->
+    List.iter (fun window ->
+      let _, json = read (root ^ "&" ^ parameter ^ "=" ^ window) in
+      check (float 1e-9) "fractional millisecond boundary is retained"
+        (float_of_string window)
+        Yojson.Safe.Util.(json |> member "query" |> member parameter |> to_float))
+      ["1000.01"; "1000.04"; "1000.010"])
+    ["since_ms"; "until_ms"]
+
+let test_telemetry_cached_queries_keep_exact_filters () =
+  with_exact_query_router @@ fun read ->
+  let root = "/api/v1/dashboard/telemetry?source=tool_call_io&n=1" in
+  List.iter (fun (suffix, session, operation) ->
+    let _, json = read (root ^ suffix) in
+    let query = Yojson.Safe.Util.member "query" json in
+    check bool "session filter is preserved" true
+      (Yojson.Safe.Util.member "session_id" query = session);
+    check bool "operation filter is preserved" true
+      (Yojson.Safe.Util.member "operation_id" query = operation))
+    ["", `Null, `Null;
+     "&session_id=", `String "", `Null;
+     "&session_id=a%3Ao%3Db&operation_id=c", `String "a:o=b", `String "c";
+     "&session_id=a&operation_id=b%3Ao%3Dc", `String "a", `String "b:o=c";
+     "&session_id=a", `String "a", `Null;
+     "&session_id=%20a%20", `String " a ", `Null]
+
+let test_telemetry_cached_queries_keep_source_echo () =
+  with_exact_query_router @@ fun read ->
+  List.iter (fun (suffix, expected) ->
+    let _, json = read ("/api/v1/dashboard/telemetry?n=1" ^ suffix) in
+    check bool "raw source remains distinct even when it resolves to all sources" true
+      (Yojson.Safe.Util.(json |> member "query" |> member "source") = expected))
+    ["", `Null; "&source=all", `String "all";
+     "&source=unknown-one", `String "unknown-one";
+     "&source=unknown-two", `String "unknown-two"]
+
+(* A timeout envelope goes out as 504 whoever produced it: the cache (origin
+   [Timeout]) or a builder with a shorter ceiling of its own, whose envelope
+   the cache keeps as a computed page. Both envelopes here pass 8 KB, past the
+   body parse [json_lazy] falls back on. A page goes out as 200 with its kept
+   validator, and 304 when the client holds it. *)
+let test_cached_read_status_comes_from_the_payload_json () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  let payload origin json =
+    { Dashboard_cache.json
+    ; raw_json = Yojson.Safe.to_string json
+    ; etag = "W/\"fixture\""
+    ; origin
+    ; encoded = None
+    }
+  in
+  let read ?(headers = []) payload =
+    let router =
+      Lib.Http_server_eio.Router.create ()
+      |> Server_route.get Server_route.Always_public "/cached" (fun request reqd ->
+        Server_cached_read_http.respond ~request reqd payload)
+    in
+    tools_h1_wire_response ~router ~headers "/cached"
+  in
+  let envelope =
+    `Assoc
+      [ "error", `String Dashboard_cache.timeout_error_code
+      ; "key", `String (String.make 9000 'k')
+      ]
+  in
+  List.iter
+    (fun (label, origin) ->
+       let cached = payload origin envelope in
+       check bool (label ^ " is past the body parse's reach") true
+         (String.length cached.raw_json > 8192);
+       let status, headers, _ = read cached in
+       check int (label ^ " is 504") 504 status;
+       check (option string) (label ^ " carries no validator") None
+         (List.assoc_opt "etag" headers))
+    [ "a cache timeout", Dashboard_cache.Timeout
+    ; "a builder's timeout kept as a page", Dashboard_cache.Computed
+    ];
+  let page = payload Dashboard_cache.Computed (`Assoc [ "posts", `List [] ]) in
+  let status, headers, body = read page in
+  check int "a page is 200" 200 status;
+  check (option string) "a page carries its validator" (Some page.etag)
+    (List.assoc_opt "etag" headers);
+  check string "a page sends its kept bytes" page.raw_json body;
+  let status, _, body = read ~headers:[ "if-none-match", page.etag ] page in
+  check int "a page the client holds is 304" 304 status;
+  check string "a 304 has no body" "" body
+
+(* [respond_cached_read] answers through the same responder: a builder that
+   returns a timeout envelope larger than 8 KB gets 504, which the body parse
+   behind [json_lazy] would have sent as 200. *)
+let test_respond_cached_read_sends_a_builder_timeout_as_504 () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  Fun.protect ~finally:Dashboard_cache.invalidate_all (fun () ->
+    Dashboard_cache.invalidate_all ();
+    let router =
+      Lib.Http_server_eio.Router.create ()
+      |> Server_route.get Server_route.Always_public "/cached-read" (fun request reqd ->
+        Server_routes_http_common.respond_cached_read ~request ~reqd
+          ~cache_key:"test:cached-read-builder-timeout" ~ttl:60.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+            `Assoc
+              [ "error", `String Dashboard_cache.timeout_error_code
+              ; "key", `String (String.make 9000 'k')
+              ])))
+    in
+    let status, headers, _ = tools_h1_wire_response ~router ~headers:[] "/cached-read" in
+    check int "a builder's timeout is 504" 504 status;
+    check (option string) "it carries no validator" None (List.assoc_opt "etag" headers))
+
+let test_execution_routes_serve_prepared_http_representations () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous_state)
+  @@ fun () ->
+  let config = Lib.Mcp_server.workspace_config state in
+  Server_auth.For_testing.restore_server_state (Some state);
+  Auth.save_auth_config config.base_path
+    { Types.default_auth_config with enabled = true; require_token = true };
+  let token = match Auth.create_token config.base_path ~agent_name:"execution-wire-reader"
+    ~role:Types.Worker with
+    | Ok (token, _) -> token
+    | Error error -> fail (Types.masc_error_to_string error) in
+  let clock = Eio.Stdenv.clock env in
+  let path = "/api/v1/dashboard/execution" in
+  let request_headers = [ "origin", "http://localhost:8935";
+    "authorization", "Bearer " ^ token; "x-masc-agent", "untrusted-hint" ] in
+  let first = execution_payload ~state ~sw ~clock
+    (request_with_headers path request_headers) in
+  check string "authenticated producer canonicalizes the actor" "execution-wire-reader"
+    Yojson.Safe.Util.(first.json |> member "query" |> member "actor" |> to_string);
+  let router = Server_routes_http_routes_dashboard.add_routes ~sw ~clock
+    (Lib.Http_server_eio.Router.create ()) in
+  let trust_policy = match Server_request_authority.make_trust_policy
+    ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+    | Ok policy -> policy
+    | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
+  let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~sw ~request_sw:sw ~clock
+    ~server_start_time:0. (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
+  List.iter (fun (protocol, send) ->
+    List.iter (fun encoding ->
+      let headers = ("accept-encoding", encoding) :: request_headers in
+      let status, reply_headers, body = send ~headers path in
+      check int (protocol ^ " success") 200 status;
+      let expected_encoding = if encoding = "identity" then None else Some encoding in
+      check (option string) (protocol ^ " encoding selection") expected_encoding
+        (List.assoc_opt "content-encoding" reply_headers);
+      check (option string) (protocol ^ " wire length")
+        (Some (string_of_int (String.length body))) (List.assoc_opt "content-length" reply_headers);
+      let check_headers headers =
+        check (option string) (protocol ^ " identity ETag") (Some first.etag)
+          (List.assoc_opt "etag" headers);
+        let vary = List.filter_map (fun (name, value) -> if name = "vary" then Some value else None)
+          headers |> String.concat "," in
+        check bool (protocol ^ " encoding varies") true
+          (String_util.contains_substring vary "Accept-Encoding");
+        if protocol = "H2" then
+          check bool (protocol ^ " origin still varies") true
+            (String_util.contains_substring vary "Origin")
+      in
+      check_headers reply_headers;
+      let decoded = match encoding with
+        | "gzip" -> tools_gunzip body
+        | "zstd" -> (match Compression_codec.decompress ~orig_size:(String.length first.raw_json) body with
+          | Ok json -> json | Error error -> fail error)
+        | _ -> body in
+      check string (protocol ^ " full decorated payload decodes") first.raw_json decoded;
+      let status, cached_headers, cached_body = send
+        ~headers:(("if-none-match", first.etag) :: headers) path in
+      check int (protocol ^ " conditional response") 304 status;
+      check_headers cached_headers;
+      check string (protocol ^ " 304 empty body") "" cached_body;
+      check (option string) (protocol ^ " 304 omits length") None
+        (List.assoc_opt "content-length" cached_headers)) [ "identity"; "gzip"; "zstd" ])
+    [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler ];
+  let hit = execution_payload ~state ~sw ~clock (request_with_headers path request_headers) in
+  check bool "wire reads reuse the published encodings" true (first.encoded == hit.encoded)
+
+let test_telemetry_summary_snapshot_wire_returns_snapshot () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  let marker = `Assoc [ "tele_marker", `String "from-snapshot" ] in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test ~config
+       ~shell:`Null ~tools:`Null
+       ~namespace_truth:`Null ~telemetry_summary:marker ());
+  let timing = Server_timing.create () in
+  let json =
+    Server_dashboard_snapshot_select.select_telemetry_summary_json
+      ~timing config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "telemetry_summary snapshot path returns published marker"
+    "from-snapshot"
+    (json |> member "tele_marker" |> to_string);
+  Dashboard_snapshot.reset_for_test ()
+
+let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  let timing = Server_timing.create () in
+  let json =
+    Server_dashboard_snapshot_select.select_telemetry_summary_json
+      ~timing config
+  in
+  Alcotest.(check bool)
+    "fallback path produces a non-null JSON object"
+    true
+    (match json with `Assoc _ -> true | _ -> false)
+
+(* RFC-0138 Phase 3 Step 3 — /project-snapshot wire test.
+
+   We can only unit-test the snapshot-hit branch.  The fallback branch
+   calls [dashboard_namespace_truth_http_json] which requires a full
+   server_state + Eio scheduler + 6 timeout env knobs ([with_test_env]
+   does not synthesise these).  The fallback path lives in
+   [test_dashboard_namespace_truth.ml] integration coverage. *)
+
+let test_project_snapshot_wire_returns_snapshot_when_populated () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  Dashboard_snapshot.reset_for_test ();
+  let marker =
+    `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
+  in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test ~config
+       ~shell:`Null ~tools:`Null
+       ~namespace_truth:marker ~telemetry_summary:`Null ());
+  let clock = Eio.Stdenv.clock env in
+  let state =
+    Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
+  in
+  let req = request "/api/v1/dashboard/project-snapshot" in
+  let timing = Server_timing.create () in
+  let json =
+    Server_dashboard_snapshot_select.select_project_snapshot_json
+      ~state ~sw ~clock ~timing req
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "populated snapshot path returns published marker"
+    "from-snapshot"
+    (json |> member "namespace_truth_marker" |> to_string);
+  Alcotest.(check bool)
+    "Server-Timing header records snapshot_read phase on hit"
+    true
+    (let header = Server_timing.to_header_value timing in
+     let re = Re.compile (Re.Perl.re "snapshot_read") in
+     Re.execp re header);
+  Dashboard_snapshot.reset_for_test ()
+
+let assoc_has key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+
+let test_dashboard_bootstrap_omits_eager_goal_tree () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let clock = Eio.Stdenv.clock env in
+  let req = request "/api/v1/dashboard/bootstrap" in
+  let json = Server_dashboard_http.dashboard_bootstrap_http_json ~state ~sw ~clock req in
+  Alcotest.(check bool) "bootstrap includes shell" true (assoc_has "shell" json);
+  Alcotest.(check bool) "bootstrap includes execution" true
+    (assoc_has "execution" json);
+  Alcotest.(check bool) "bootstrap includes planning" true
+    (assoc_has "planning" json);
+  Alcotest.(check bool) "bootstrap includes namespace truth" true
+    (assoc_has "namespace_truth" json);
+  Alcotest.(check bool) "bootstrap omits eager goal tree" false
+    (assoc_has "goals" json)
+
+(* Freeze guard: /api/v1/dashboard/telemetry must never default to an
+   unbounded read. Observatory polls with since_ms/until_ms and no [n];
+   before this fix the windowed default was n=0 (unbounded), letting one
+   poll Yojson-parse up to the read clamp (#20659: 50k) per source across
+   all sources and peg the single Eio domain -> keeper-fleet freeze. *)
+let test_telemetry_n_default_is_bounded () =
+  let resolve ~has_time_window ~n_param =
+    Telemetry_unified.read_limit_to_int
+      (Server_routes_http_routes_dashboard_setup.resolve_telemetry_limit
+         ~has_time_window ~n_param)
+  in
+  Alcotest.(check int)
+    "windowed + no n -> bounded default, never 0"
+    2000 (resolve ~has_time_window:true ~n_param:None);
+  Alcotest.(check int)
+    "no window + no n -> small default"
+    100 (resolve ~has_time_window:false ~n_param:None);
+  Alcotest.(check int)
+    "unparseable n -> bounded default, never 0"
+    2000 (resolve ~has_time_window:true ~n_param:(Some "garbage"));
+  (* RFC-0372 replaces the #20659 all-in-window opt-out. Explicit n=0 used to
+     pass 0 through as "unbounded"; it now resolves to a positive limit like
+     any other input, and a window larger than that limit is reported via
+     [truncated] instead of scanning every store to its own cap. *)
+  Alcotest.(check int)
+    "explicit n=0 is bounded, not unbounded"
+    Telemetry_unified.default_read_entries
+    (resolve ~has_time_window:true ~n_param:(Some "0"));
+  Alcotest.(check bool)
+    "no input resolves to a non-positive limit"
+    true
+    (List.for_all
+       (fun raw -> resolve ~has_time_window:true ~n_param:(Some raw) > 0)
+       [ "0"; "-1"; "-99999"; "garbage"; "" ]);
+  Alcotest.(check int)
+    "a request above the ceiling is clamped"
+    Telemetry_unified.max_read_entries
+    (resolve ~has_time_window:true
+       ~n_param:(Some (string_of_int (Telemetry_unified.max_read_entries + 1))));
+  Alcotest.(check int)
+    "explicit positive n honoured"
+    500 (resolve ~has_time_window:true ~n_param:(Some "500"))
+
+(* Issue #22071: lifecycle event classification was reverse-mapped by a raw
+   string whitelist that bypassed compiler exhaustiveness, and the module
+   docstrings cited coverage tests ([lifecycle_events_ssot] /
+   [lifecycle_event_cache_patcher_coverage]) in a test/test_types.ml that does
+   not exist. These are the real guards. *)
+let current_lifecycle_events =
+  List.map
+    (fun verb ->
+      Keeper_lifecycle_events.Custom_event { verb; phase = None })
+    Keeper_lifecycle_events.all_custom_events
+  @ List.map
+      (fun phase -> Keeper_lifecycle_events.Phase_event phase)
+      [
+        Keeper_state_machine.Running;
+        Keeper_state_machine.Stopped;
+        Keeper_state_machine.Crashed;
+      ]
+
+let test_lifecycle_event_wire_roundtrip () =
+  List.iter
+    (fun event ->
+      let event_name =
+        Keeper_lifecycle_events.lifecycle_event_to_string event
+      in
+      let phase =
+        Keeper_lifecycle_events.lifecycle_event_phase event
+        |> Option.map Keeper_state_machine.phase_to_string
+      in
+      check bool
+        ("lifecycle wire round-trips " ^ event_name)
+        true
+        (Keeper_lifecycle_events.lifecycle_event_of_wire
+           ~event:event_name
+           ~phase
+         = Some event))
+    current_lifecycle_events;
+  check bool "unknown lifecycle wire event is rejected" true
+    (Option.is_none
+       (Keeper_lifecycle_events.lifecycle_event_of_wire
+          ~event:"no_such_lifecycle_event"
+          ~phase:None));
+  check bool "inconsistent phase event is rejected" true
+    (Option.is_none
+       (Keeper_lifecycle_events.lifecycle_event_of_wire
+          ~event:"running"
+          ~phase:(Some "stopped")))
+
+let test_lifecycle_event_cache_patcher_coverage () =
+  (* Every name in the SSOT vocabulary must be classified ([Some]) by all four
+     dashboard cache patchers — the coverage the phantom test only promised. The
+     custom-event subset is also compiler-enforced via [display_of_custom_event]. *)
+  List.iter
+    (fun event ->
+      let name =
+        Keeper_lifecycle_events.lifecycle_event_to_string event
+      in
+      check bool
+        ("keepalive_running classifies " ^ name)
+        true
+        (Option.is_some
+           (Server_dashboard_http_execution_surfaces.keepalive_running_of_lifecycle_event
+              event));
+      check bool
+        ("phase classifies " ^ name)
+        true
+        (Option.is_some
+           (Server_dashboard_http_execution_surfaces.phase_of_lifecycle_event event));
+      check bool
+        ("pipeline_stage classifies " ^ name)
+        true
+        (Option.is_some
+           (Server_dashboard_http_execution_surfaces.pipeline_stage_of_lifecycle_event
+              event));
+      check bool
+        ("paused classifies " ^ name)
+        (not
+           (event
+            = Keeper_lifecycle_events.Phase_event
+                Keeper_state_machine.Stopped))
+        (Option.is_some
+           (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event event)))
+    current_lifecycle_events
+
+let test_lifecycle_event_display_values () =
+  (* Pin the exact typed transition projection. *)
+  let cases =
+    [
+      ( Keeper_lifecycle_events.Custom_event
+          { verb = Keeper_lifecycle_events.Started; phase = None },
+        true, "running", "idle", Some false );
+      ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Paused,
+        true, "paused", "paused", Some true );
+      ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped,
+        false, "stopped", "offline", None );
+      ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Crashed,
+        false, "crashed", "crashed", Some false );
+    ]
+  in
+  List.iter
+    (fun (event, keepalive, phase, pipeline, paused) ->
+      let name =
+        Keeper_lifecycle_events.lifecycle_event_to_string event
+      in
+      check (option bool)
+        ("keepalive_running value for " ^ name)
+        (Some keepalive)
+        (Server_dashboard_http_execution_surfaces.keepalive_running_of_lifecycle_event
+           event);
+      check (option string)
+        ("phase value for " ^ name)
+        (Some phase)
+        (Server_dashboard_http_execution_surfaces.phase_of_lifecycle_event event);
+      check (option string)
+        ("pipeline_stage value for " ^ name)
+        (Some pipeline)
+        (Server_dashboard_http_execution_surfaces.pipeline_stage_of_lifecycle_event
+           event);
+      check (option bool)
+        ("paused value for " ^ name)
+        paused
+        (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event event))
+    cases
+
+(* A runtime row always comes back [Patched]; the declaration-row outcome has
+   its own tests below. *)
+let patched_runtime_row ~keeper_name ~event ~keepalive_running row =
+  match
+    Server_dashboard_http_execution_surfaces.patch_keeper_row
+      ~keeper_name ~event ~keepalive_running row
+  with
+  | Server_dashboard_http_execution_surfaces.Patched row -> row
+  | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale ->
+    fail "a runtime row was reported as a stale declaration row"
+
+(* The [paused] lifecycle event patches with [keepalive_running = true], so the
+   row goes through the keepalive branch of the status patcher. That branch used
+   to classify against the surface vocabulary alone, where "paused" is not a
+   member, and fell through to "idle" — producing a row that said [status =
+   "idle"] and [paused = true] at the same time. The rebuilt continuity brief
+   then read the row as live. *)
+let test_paused_lifecycle_event_keeps_paused_status () =
+  let patched =
+    patched_runtime_row
+      ~keeper_name:"pause-target"
+      ~event:
+        (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Paused)
+      ~keepalive_running:true
+      (`Assoc [ ("name", `String "pause-target"); ("status", `String "paused") ])
+  in
+  check string "status survives the patch" "paused"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "paused flag is set" true
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_reconciled_lifecycle_event_preserves_durable_pause () =
+  let patched =
+    patched_runtime_row
+      ~keeper_name:"paused-reconcile-target"
+      ~event:
+        (Keeper_lifecycle_events.Custom_event
+           { verb = Keeper_lifecycle_events.Reconciled; phase = None })
+      ~keepalive_running:true
+      (`Assoc
+        [ ("name", `String "paused-reconcile-target")
+        ; ("status", `String "paused")
+        ; ("paused", `Bool true)
+        ; ("phase", `String "paused")
+        ; ("pipeline_stage", `String "paused")
+        ])
+  in
+  let open Yojson.Safe.Util in
+  check string "reconciliation preserves paused status" "paused"
+    (patched |> member "status" |> to_string);
+  check bool "reconciliation preserves durable pause flag" true
+    (patched |> member "paused" |> to_bool);
+  check string "reconciliation preserves paused phase" "paused"
+    (patched |> member "phase" |> to_string);
+  check string "reconciliation preserves paused pipeline" "paused"
+    (patched |> member "pipeline_stage" |> to_string)
+
+let test_stopped_lifecycle_event_stays_offline () =
+  let patched =
+    patched_runtime_row
+      ~keeper_name:"stop-target"
+      ~event:
+        (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped)
+      ~keepalive_running:false
+      (`Assoc
+        [ ("name", `String "stop-target")
+        ; ("status", `String "active")
+        ; ("paused", `Bool false)
+        ])
+  in
+  check string "stopped status is offline" "offline"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "stopped event does not manufacture a pause" false
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_stopped_lifecycle_event_preserves_durable_pause () =
+  let patched =
+    patched_runtime_row
+      ~keeper_name:"paused-stop-target"
+      ~event:
+        (Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped)
+      ~keepalive_running:false
+      (`Assoc
+        [ ("name", `String "paused-stop-target")
+        ; ("status", `String "paused")
+        ; ("paused", `Bool true)
+        ])
+  in
+  check string "terminal stop preserves paused status" "paused"
+    Yojson.Safe.Util.(patched |> member "status" |> to_string);
+  check bool "terminal stop preserves durable pause flag" true
+    Yojson.Safe.Util.(patched |> member "paused" |> to_bool)
+
+let test_lifecycle_cache_patch_rejects_missing_or_unknown_status () =
+  let patch row =
+    patched_runtime_row
+      ~keeper_name:"drift-target"
+      ~event:
+        (Keeper_lifecycle_events.Custom_event
+           { verb = Keeper_lifecycle_events.Reconciled; phase = None })
+      ~keepalive_running:true
+      row
+    |> ignore
+  in
+  check_raises
+    "missing status stays fail-loud"
+    (Invalid_argument
+       "dashboard execution cache: keeper row has no current status")
+    (fun () ->
+      patch (`Assoc [ "name", `String "drift-target" ]));
+  check_raises
+    "unknown status stays fail-loud"
+    (Invalid_argument
+       "dashboard execution cache: unknown current keeper status \"suspended\"")
+    (fun () ->
+      patch
+        (`Assoc
+          [ "name", `String "drift-target"
+          ; "status", `String "suspended"
+          ]))
+
+let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-reconcile-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "continuity-reconcile-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let now = Masc_domain.now_iso () in
+       let keeper_row =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "keeper_id", `String ("k-" ^ keeper_name)
+           ; "status", `String "active"
+             (* #30084 moved [continuity_row_of_keeper] off the folded [status]
+                word onto two fields this row never carried: [health_state] and
+                the last action time. An absent diagnostic reads as health "",
+                which the builder refuses by design -- and the refusal took the
+                whole continuity list down with it, because it is raised inside
+                the [filter_map] that builds every brief.
+
+                The row now says in the new vocabulary what it always meant in
+                the old one: a live keeper that has taken its turn. Both fields
+                are ones the live producer always writes
+                ([keeper_status_runtime.ml] stamps [health_state] on every
+                diagnostic), so this is the fixture catching up, not the
+                builder being loosened. *)
+           ; ( "diagnostic"
+             , `Assoc [ "health_state", `String "healthy" ] )
+           ; "keepalive_running", `Bool false
+           ; "turn_count", `Int 1
+           ; "updated_at", `String now
+             (* [tool_audit_at] is where the builder reads "has this keeper
+                acted"; empty means never, and never is [Lc_idle]. The row
+                claims [turn_count = 1], so it has. *)
+           ; "tool_audit_at", `String now
+           ; "recent_tool_names", `List []
+           ; "latest_tool_names", `List []
+           ]
+       in
+       let stale_brief =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "status", `String "offline"
+           ; "state", `String "critical"
+           ; "lifecycle", `String "offline"
+           ]
+       in
+       let patched =
+         Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+           config
+           (`Assoc
+             [ "keepers", `List [ keeper_row ]
+             ; "continuity_briefs", `List [ stale_brief ]
+             ])
+       in
+       let open Yojson.Safe.Util in
+       let patched_keeper = patched |> member "keepers" |> to_list |> List.hd in
+       let patched_brief =
+         patched |> member "continuity_briefs" |> to_list |> List.hd
+       in
+       check string
+         "keeper status falls back to the top-level typed status"
+         "active"
+         (patched_keeper |> member "status" |> to_string);
+       check bool
+         "keeper keepalive uses reconciled registry state"
+         true
+         (patched_keeper |> member "keepalive_running" |> to_bool);
+       check string
+         "brief status is rebuilt from patched keeper"
+         "active"
+         (patched_brief |> member "status" |> to_string);
+       check string
+         "brief lifecycle is rebuilt from patched keeper"
+         "active"
+         (patched_brief |> member "lifecycle" |> to_string);
+       check string
+         "brief state is rebuilt from patched keeper"
+         "healthy"
+         (patched_brief |> member "state" |> to_string);
+       let unrelated_surface =
+         `Assoc
+           [ ( "keepers"
+             , `List
+                 [ `Assoc
+                     [ "name", `String "fixture-only-keeper"
+                     ; "status", `String "offline"
+                     ] ] )
+           ; "continuity_briefs", `List [ stale_brief ]
+           ]
+       in
+       check
+         bool
+         "unrelated running keeper leaves fixture surface byte-stable"
+         true
+         (unrelated_surface
+          =
+          Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+            config
+            unrelated_surface))
+
+(* A Keeper declared in config that has never booted rides in the same
+   [keepers] list as a declaration row: no diagnostic, so no health. The
+   reconciliation that rebuilds continuity for a running keeper walked every
+   row and raised on that one, so the whole execution surface answered 500
+   (live 2026-09-19, row [imp]). The declaration row stays in [keepers] and
+   gets no brief. *)
+let test_running_keeper_reconciliation_skips_declaration_rows () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-declared-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "continuity-declared-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let now = Masc_domain.now_iso () in
+       let running_row =
+         `Assoc
+           [ "name", `String keeper_name
+           ; "status", `String "active"
+           ; "diagnostic", `Assoc [ "health_state", `String "healthy" ]
+           ; "keepalive_running", `Bool false
+           ; "turn_count", `Int 1
+           ; "updated_at", `String now
+           ; "tool_audit_at", `String now
+           ; "recent_tool_names", `List []
+           ; "latest_tool_names", `List []
+           ]
+       in
+       let declared_row =
+         Masc.Keeper_declared_roster.to_json
+           { Masc.Keeper_declared_roster.name = "imp"
+           ; requirements = [ Masc.Keeper_declared_roster.Runtime_check_required ]
+           }
+       in
+       let patched =
+         Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+           config
+           (`Assoc
+             [ "keepers", `List [ running_row; declared_row ]
+             ; "continuity_briefs", `List []
+             ])
+       in
+       let open Yojson.Safe.Util in
+       let names key =
+         patched |> member key |> to_list
+         |> List.map (fun row -> row |> member "name" |> to_string)
+       in
+       check (list string)
+         "the declaration row stays in the keeper list"
+         [ keeper_name; "imp" ]
+         (names "keepers");
+       check (list string)
+         "only the running keeper gets a continuity brief"
+         [ keeper_name ]
+         (names "continuity_briefs"))
+
+let declared_keeper_row name =
+  Masc.Keeper_declared_roster.to_json
+    { Masc.Keeper_declared_roster.name
+    ; requirements = [ Masc.Keeper_declared_roster.Runtime_check_required ]
+    }
+
+(* The events a Keeper's boot publishes. Each one that names a declaration
+   row used to either raise ("unknown current keeper status \"unbooted\"") or
+   build a row that was declaration-only and running at once. *)
+let boot_lifecycle_events =
+  [ Keeper_lifecycle_events.Custom_event
+      { verb = Keeper_lifecycle_events.Started; phase = None }
+  ; Keeper_lifecycle_events.Custom_event
+      { verb = Keeper_lifecycle_events.Reconciled; phase = None }
+  ; Keeper_lifecycle_events.Phase_event Keeper_state_machine.Running
+  ]
+
+let test_lifecycle_patch_never_patches_a_declaration_row () =
+  List.iter
+    (fun event ->
+       let label = Keeper_lifecycle_events.lifecycle_event_to_string event in
+       (match
+          Server_dashboard_http_execution_surfaces.patch_keeper_row
+            ~keeper_name:"imp"
+            ~event
+            ~keepalive_running:true
+            (declared_keeper_row "imp")
+        with
+        | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale -> ()
+        | Server_dashboard_http_execution_surfaces.Patched row ->
+          failf "%s patched a declaration row into %s" label
+            (Yojson.Safe.to_string row));
+       match
+         Server_dashboard_http_execution_surfaces.patch_keeper_row
+           ~keeper_name:"another-keeper"
+           ~event
+           ~keepalive_running:true
+           (declared_keeper_row "imp")
+       with
+       | Server_dashboard_http_execution_surfaces.Patched row ->
+         check bool (label ^ " leaves another keeper's declaration row alone")
+           true
+           (Yojson.Safe.equal row (declared_keeper_row "imp"))
+       | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale ->
+         failf "%s for another keeper reported imp's row stale" label)
+    boot_lifecycle_events
+
+(* Route 1: the dashboard's Boot button, or any other boot, publishes a
+   lifecycle event, and the listener patches the cached execution surface with
+   it. The cached surface lists the Keeper as a declaration row, so the patch
+   cannot apply: the cache is invalidated and its row is left as it was. *)
+let test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  let surface =
+    `Assoc
+      [ "keepers", `List [ declared_keeper_row "imp" ]
+      ; "continuity_briefs", `List []
+      ]
+  in
+  List.iter
+    (fun event ->
+       let label = Keeper_lifecycle_events.lifecycle_event_to_string event in
+       with_cached_surface_success
+         Server_dashboard_http_execution_surfaces.execution_cache
+         surface
+       @@ fun () ->
+       Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
+         ~keeper_name:"imp"
+         ~event;
+       let cache = Server_dashboard_http_execution_surfaces.execution_cache in
+       check bool (label ^ " invalidates the cached surface") false
+         (Server_dashboard_http_cache.cached_surface_has_success cache);
+       let open Yojson.Safe.Util in
+       check bool (label ^ " leaves the declaration row unpatched") true
+         (Yojson.Safe.equal
+            (declared_keeper_row "imp")
+            ((Server_dashboard_http_cache.snapshot cache).json
+             |> member "keepers" |> to_list |> List.hd)))
+    boot_lifecycle_events
+
+(* Route 2: a fresh render whose operator snapshot predates the boot. The
+   Keeper already runs, so the running-keeper reconciliation reaches its row,
+   which is still the declaration row. It stays as the snapshot described it;
+   the boot's own lifecycle event invalidates the published surface. *)
+let test_running_keeper_reconciliation_leaves_a_stale_declaration_row () =
+  let dir = test_dir () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "continuity-booted-declared-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String "continuity-booted-declared-trace"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister
+        ~base_path:config.base_path
+        keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error error -> fail ("write meta: " ^ error));
+       ignore
+         (Masc.Keeper_registry.For_testing.register
+            ~base_path:config.base_path
+            keeper_name
+            meta);
+       let surface =
+         `Assoc
+           [ "keepers", `List [ declared_keeper_row keeper_name ]
+           ; "continuity_briefs", `List []
+           ]
+       in
+       check bool
+         "the surface comes back as the snapshot described it"
+         true
+         (Yojson.Safe.equal
+            surface
+            (Server_dashboard_http_execution_surfaces.patch_surface_json_for_running_keepers
+               config
+               surface)))
+
+let test_composite_preserves_runtime_attempt_scopes () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let check_receipt ~keeper_name ~lane_attempt_count ~fallback_applied ~outcome =
+    (* Observed turn 408: the selected GLM runtime had one internal attempt,
+       after a failed Kimi candidate. Turn 409 had one candidate and no fallback.
+       Persist the receipt wire, then read the actual composite execution view. *)
+    let runtime_fields =
+      [ "name", `String "glm-coding.glm-5.3"
+      ; "attempt_count", `Int 1
+      ; "fallback_applied", `Bool fallback_applied
+      ; "outcome", `String outcome
+      ]
+      @ Option.to_list
+          (Option.map (fun count -> "lane_attempt_count", `Int count) lane_attempt_count)
+    in
+    let receipt =
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "recorded_at", `String "2026-09-12T13:09:49Z"
+        ; "outcome", `String "success"
+        ; "terminal_reason_code", `String "success"
+        ; "operator_disposition",
+          `String (if fallback_applied then "pass_next_model" else "pass")
+        ; "runtime", `Assoc runtime_fields
+        ]
+    in
+    Dated_jsonl.append
+      (Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name)
+      receipt;
+    let execution =
+      Server_dashboard_http_composite_claims.composite_execution_receipt_json
+        ~config
+        ~claim_window:(Server_dashboard_http_composite_claims.read_claim_window ())
+        ~keeper_name
+    in
+    let open Yojson.Safe.Util in
+    check bool "durable receipt is present" true
+      (execution |> member "latest_receipt_present" |> to_bool);
+    let runtime = execution |> member "runtime" in
+    check int "selected runtime's internal attempt count stays one" 1
+      (runtime |> member "attempt_count" |> to_int);
+    check (option int) "lane candidate count retains its own scope"
+      lane_attempt_count
+      (Json_util.get_int runtime "lane_attempt_count");
+    check bool "observed fallback is preserved" fallback_applied
+      (runtime |> member "fallback_applied" |> to_bool);
+    check string "runtime outcome is preserved" outcome
+      (runtime |> member "outcome" |> to_string)
+  in
+  check_receipt ~keeper_name:"composite-failover" ~lane_attempt_count:(Some 2)
+    ~fallback_applied:true ~outcome:"passed_to_next_model";
+  check_receipt ~keeper_name:"composite-single" ~lane_attempt_count:(Some 1)
+    ~fallback_applied:false ~outcome:"completed";
+  check_receipt ~keeper_name:"composite-unobserved" ~lane_attempt_count:None
+    ~fallback_applied:false ~outcome:"completed"
+
+let test_composite_blocked_uses_terminal_contract_not_observational_metadata () =
+  let execution ~terminal_reason_code ~operator_disposition_reason =
+    `Assoc
+      [ "terminal_reason_code", `String terminal_reason_code
+      ; "operator_disposition", `String "pass"
+      ; "operator_disposition_reason", `String operator_disposition_reason
+      ; "error", `Null
+      ]
+  in
+  let blocked = Server_dashboard_http_composite_claims.composite_execution_blocked in
+  check bool
+    "observation metadata does not block a successful execution"
+    false
+    (blocked
+       (execution
+          ~terminal_reason_code:"success"
+          ~operator_disposition_reason:"trace_observation_present"));
+  check bool
+    "unknown terminal wire follows the generic failure path"
+    true
+    (blocked
+       (execution
+          ~terminal_reason_code:"opaque_terminal_failure"
+          ~operator_disposition_reason:"success"));
+  (* Every receipt the classifier marks [Disp_operator_action_required] ends
+     on a failed terminal, so the terminal alone blocks it. *)
+  let module R = Masc.Keeper_execution_receipt in
+  check bool
+    "an operator-action receipt is blocked by its failed terminal"
+    true
+    (blocked
+       (`Assoc
+          [ "terminal_reason_code", `String "config_error"
+          ; ( "operator_disposition"
+            , `String
+                (R.operator_disposition_kind_to_string R.Disp_operator_action_required) )
+          ; ( "operator_disposition_reason"
+            , `String (R.operator_disposition_reason_to_string R.Reason_config_invalid) )
+          ; "error", `Null
+          ]))
+
+(* Context-window shrink guard (#25062/#25268): reducing max_context_override
+   must be detected so the config POST can require an explicit
+   confirm_context_shrink, instead of silently applying a window smaller than the
+   live context and triggering a reactive Provider_overflow on the next turn. *)
+module Keeper_config_post = Server_dashboard_http_keeper_api_post
+
+let test_keeper_github_login_stream_headers_include_cors () =
+  let origin = "http://localhost:5173" in
+  let headers =
+    Keeper_config_post.For_testing.github_login_stream_headers origin
+  in
+  Alcotest.(check (option string)) "CORS origin is reflected" (Some origin)
+    (Httpun.Headers.get headers "access-control-allow-origin");
+  Alcotest.(check (option string)) "credentials are allowed" (Some "true")
+    (Httpun.Headers.get headers "access-control-allow-credentials")
+;;
+
+let test_keeper_github_login_stream_flushes_each_event () =
+  let actions = ref [] in
+  Keeper_config_post.For_testing.github_login_stream_send_with
+    ~write:(fun frame -> actions := !actions @ [ "write:" ^ frame ])
+    ~flush:(fun () -> actions := !actions @ [ "flush" ])
+    "device_code"
+    (`Assoc [ "code", `String "ABCD-EFGH" ]);
+  Alcotest.(check (list string)) "frame is written before it is flushed"
+    [ "write:event: device_code\ndata: {\"code\":\"ABCD-EFGH\"}\n\n"; "flush" ]
+    !actions
+;;
+
+let shrink_base_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ ("name", `String "shrink-fixture"); ("trace_id", `String "shrink-t") ])
+  with
+  | Ok m -> m
+  | Error e -> Alcotest.fail ("shrink meta fixture: " ^ e)
+
+let with_max_override meta o =
+  { meta with Masc.Keeper_meta_contract.max_context_override = o }
+
+let shrink_result = Alcotest.(option (pair string int))
+
+let test_context_shrink_detection () =
+  let base = shrink_base_meta () in
+  let shrink meta fields =
+    match Keeper_config_post.validate_dashboard_config_patch fields with
+    | Ok patch -> Keeper_config_post.context_shrink_of_patch ~meta patch
+    | Error error -> Alcotest.fail error
+  in
+  check shrink_result "cap introduced where there was none is a shrink"
+    (Some ("unset (full model window)", 1000))
+    (shrink (with_max_override base None) [ ("max_context_override", `Int 1000) ]);
+  check shrink_result "lowering an existing cap is a shrink"
+    (Some ("2000", 1000))
+    (shrink (with_max_override base (Some 2000)) [ ("max_context_override", `Int 1000) ]);
+  check shrink_result "raising the cap is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("max_context_override", `Int 2000) ]);
+  check shrink_result "removing the cap (Null) is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("max_context_override", `Null) ]);
+  check shrink_result "a patch without the field is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
+;;
+
+(* The two control fields come back typed and leave the persisted fields; the
+   handler no longer reads them from the JSON again. *)
+let test_config_patch_separates_control_fields () =
+  match
+    Keeper_config_post.validate_dashboard_config_patch
+      [ ("name", `String "shrink-fixture");
+        ("confirm_context_shrink", `Bool true);
+        ("expected_config_revision", `String "revision");
+        ("max_context_override", `Int 1000) ]
+  with
+  | Error error -> Alcotest.fail error
+  | Ok patch ->
+    Alcotest.(check bool) "confirmation is read" true
+      patch.Keeper_config_post.confirm_context_shrink;
+    Alcotest.(check (list string)) "only persisted fields remain, in order"
+      [ "name"; "max_context_override" ]
+      (List.map fst patch.Keeper_config_post.config_fields);
+    Alcotest.(check bool) "the checked cap is what gets persisted" true
+      (Yojson.Safe.equal (`Int 1000)
+         (List.assoc "max_context_override" patch.Keeper_config_post.config_fields))
+;;
+
+let test_config_patch_accepts_typed_skills () =
+  let validate fields =
+    Keeper_config_post.validate_dashboard_config_patch fields
+  in
+  let check_ok label fields =
+    match validate fields with
+    | Ok _ -> ()
+    | Error error -> Alcotest.failf "%s: %s" label error
+  in
+  let check_error label fields =
+    match validate fields with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s unexpectedly accepted" label
+  in
+  check_ok "empty object selects all" [ "skills", `Assoc [] ];
+  check_ok "empty names select none"
+    [ "skills", `Assoc [ "names", `List [] ] ];
+  check_ok "exact names are accepted"
+    [ ( "skills"
+      , `Assoc
+          [ "names", `List [ `String "ocaml-coding"; `String "proof-harness" ] ]
+      )
+    ];
+  check_error "skills must be an object" [ "skills", `List [] ]
+;;
+
+(* [remote_endpoint] takes a string or an explicit null, unlike the plain
+   string fields, which refuse the null an operator sends to detach the
+   endpoint. Whether the name
+   is declared under [exec.ssh.endpoints], and whether the profile admits an
+   endpoint at all, are decided later by [Keeper_turn_up_args.parse]. *)
+let test_config_patch_remote_endpoint_shape () =
+  let validate fields =
+    Keeper_config_post.validate_dashboard_config_patch fields
+  in
+  let check_ok label fields =
+    match validate fields with
+    | Ok _ -> ()
+    | Error error -> Alcotest.failf "%s: %s" label error
+  in
+  let check_error label fields =
+    match validate fields with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s unexpectedly accepted" label
+  in
+  check_ok "an endpoint name is accepted"
+    [ "remote_endpoint", `String "builder" ];
+  check_ok "null detaches the endpoint" [ "remote_endpoint", `Null ];
+  check_ok "it travels with the profile that requires it"
+    [ ("sandbox_profile", `String "remote_ssh")
+    ; ("remote_endpoint", `String "builder")
+    ];
+  check_error "whitespace is not a name" [ "remote_endpoint", `String "  " ];
+  check_error "the empty string is not a name" [ "remote_endpoint", `String "" ];
+  check_error "a non-string, non-null value is refused"
+    [ "remote_endpoint", `Int 1 ];
+  check_ok "sandbox image override" ["sandbox_image", `String "documents"];
+  check_error "an image tag is not a catalog name"
+    ["sandbox_image", `String "example/documents:v1"];
+  check_ok "sandbox image clear" ["sandbox_image", `Null];
+  check_error "blank image" ["sandbox_image", `String " "];
+  check_error "numeric image" ["sandbox_image", `Int 42]
+;;
+
+let prepare_config_sync_keeper ~sw config name =
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  mkdir_p (Filename.dirname runtime_path);
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error error -> fail ("runtime init: " ^ error));
+  (* Keeper up resolves a container profile's image name before it writes
+     anything, so the workspace promotes the one the fixtures name. *)
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "trace_id", `String (name ^ "-trace")
+          ])
+    with
+    | Error error -> fail ("meta fixture: " ^ error)
+    | Ok meta ->
+      { meta with
+        Masc.Keeper_meta_contract.activation_mode = Masc.Keeper_activation_mode.On_demand
+        (* keeper_turn_up_config_persistence.persist requires instructions
+           from somewhere -- explicit instructions_arg, an existing
+           keeper.toml -- before it will materialize a keeper.
+           None of the three config-sync fixtures below supply the first
+           two, so this stands in for "keeper already has instructions
+           from its meta / prior lifecycle" the way a real config-sync
+           target would. *)
+      ; instructions = name ^ " config-sync fixture instructions"
+      }
+  in
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error error -> fail ("write meta: " ^ error));
+  match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+  | Ok _ -> ()
+  | Error error ->
+    fail (Masc.Keeper_owner_registry.install_error_to_string error)
+
+(* These fixtures exercise config publication with a valid profile.
+   test/dune disables sandbox preflight, so Docker daemon readiness is not
+   part of these transaction tests. Profile validation still applies, and so
+   does the image name: [prepare_config_sync_keeper] promotes [base]. *)
+let write_config_sync_toml config name =
+  let dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  mkdir_p dir;
+  let path = Filename.concat dir (name ^ ".toml") in
+  write_file path
+    (Printf.sprintf
+       "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
+       name);
+  path
+
+let post_config ?(inject_revision = true) ~sw ~clock ~state ~name body =
+  let body =
+    if not inject_revision then body
+    else
+    match Yojson.Safe.from_string body with
+    | `Assoc fields
+      when not (List.mem_assoc "expected_config_revision" fields) ->
+      let config = Lib.Mcp_server.workspace_config state in
+      let revision =
+        match
+          Masc.Keeper_turn_up_config_persistence.current_config_revision
+            ~config
+            ~keeper_name:name
+        with
+        | Ok revision ->
+          Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson revision
+        | Error detail -> failf "read manifest revision: %s" detail
+      in
+      Yojson.Safe.to_string
+        (`Assoc (("expected_config_revision", revision) :: fields))
+    | json -> Yojson.Safe.to_string json
+  in
+  let output = Buffer.create 512 in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      Keeper_config_post.handle_keeper_config_post
+        ~sw ~clock state "dashboard-test" (Httpun.Reqd.request reqd) reqd body)
+  in
+  let request =
+    Printf.sprintf "POST /api/v1/keepers/%s/config HTTP/1.1\r\nHost: x\r\n\r\n" name
+  in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+            Buffer.add_string output
+              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+            total + iov.len)
+          0 iovecs
+      in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let body =
+    match List.rev (String.split_on_char '\n' raw) with
+    | body :: _ -> String.trim body
+    | [] -> fail "HTTP response has no body"
+  in
+  raw, Yojson.Safe.from_string body
+
+(* One POST through a handler the route calls after authentication, read back
+   as the status line and the JSON body. *)
+let post_to_handler ~target handle body =
+  let output = Buffer.create 512 in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      handle (Httpun.Reqd.request reqd) reqd body)
+  in
+  let request = Printf.sprintf "POST %s HTTP/1.1\r\nHost: x\r\n\r\n" target in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+  ignore
+    (Httpun.Server_connection.read_eof connection input ~off:0
+       ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+            Buffer.add_string output
+              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+            total + iov.len)
+          0 iovecs
+      in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let body =
+    match List.rev (String.split_on_char '\n' raw) with
+    | body :: _ -> String.trim body
+    | [] -> fail "HTTP response has no body"
+  in
+  raw, Yojson.Safe.from_string body
+
+let post_runtime_assignment ?set_assignment ~state body =
+  post_to_handler ~target:"/api/v1/runtime/config/assignment"
+    (fun request reqd body ->
+      match set_assignment with
+      | None ->
+        Server_routes_http_routes_dashboard.For_testing.handle_runtime_assignment_post
+          state "dashboard-test" request reqd body
+      | Some set_assignment ->
+        Server_routes_http_routes_dashboard.For_testing
+        .handle_runtime_assignment_post_with
+          ~set_assignment state "dashboard-test" request reqd body)
+    body
+
+let post_runtime_routing ~state body =
+  post_to_handler ~target:"/api/v1/runtime/config/routing"
+    (fun request reqd body ->
+      Server_routes_http_routes_dashboard.For_testing.handle_runtime_routing_post
+        state "dashboard-test" request reqd body)
+    body
+
+let expect_http_status label status raw =
+  let prefix = Printf.sprintf "HTTP/1.1 %d" status in
+  if not (String.starts_with ~prefix raw)
+  then failf "%s: expected %s, got %s" label prefix raw
+
+let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
+  Lib.Board.reset_global_for_test ();
+  Lib.Board_dispatch.reset_for_test ();
+  Lib.Board_dispatch.init_jsonl ~recipient_lookup:Lib.Recipient_lookup.none_declared ();
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Board.reset_global_for_test ();
+      Lib.Board_dispatch.reset_for_test ())
+    (fun () ->
+      let create content =
+        match Lib.Board_dispatch.create_post
+                ~author:"close-route-test" ~content
+                ~post_kind:Lib.Board.Human_post () with
+        | Ok post -> Lib.Board.Post_id.to_string post.id
+        | Error error -> fail (Lib.Board.show_board_error error)
+      in
+      let post_id = create "thread" in
+      let successor_id = create "successor" in
+      let check_open label =
+        match Lib.Board_dispatch.get_post ~post_id with
+        | Ok post -> check bool (label ^ " leaves post open") true
+                       (Option.is_none post.closed)
+        | Error error -> fail (Lib.Board.show_board_error error)
+      in
+      let attempt label decision_fields bad_field =
+        let body = Yojson.Safe.to_string
+            (`Assoc
+               (("post_id", `String post_id)
+                :: ("summary", `String "done") :: decision_fields))
+        in
+        let raw, json =
+          post_to_handler ~target:"/api/v1/dashboard/board/close"
+            (fun request reqd body ->
+              Server_dashboard_http_delete_actions.For_testing.handle_board_close_post
+                ~agent_name:"operator" request reqd body)
+            body
+        in
+        expect_http_status label 400 raw;
+        let error = Safe_ops.json_string_opt "error" json in
+        check bool (label ^ " names malformed field") true
+          (match error with
+           | Some error -> String_util.contains_substring error bad_field
+           | None -> false);
+        check_open label
+      in
+      attempt "wrong successor_id"
+        ["successor_id", `Int 123; "no_successor", `Bool true]
+        "successor_id";
+      attempt "wrong no_successor"
+        ["successor_id", `String successor_id;
+         "no_successor", `String "true"]
+        "no_successor")
+;;
+
+(* The PAT route's hostname picks the login lane the token is written to.
+   One that is written but unreadable is refused before any Keeper is read;
+   falling back to the query or github.com would store the token under a host
+   the caller did not name (#38766). Only an absent hostname falls back, which
+   here reaches the Keeper lookup and answers that there is no such Keeper. *)
+let test_github_token_post_refuses_an_unreadable_hostname () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post fields =
+    post_to_handler ~target:"/api/v1/keepers/pat-host/github-token"
+      (fun request reqd body ->
+        Keeper_config_post.handle_keeper_github_token_post state request reqd body)
+      (Yojson.Safe.to_string (`Assoc (("token", `String "pat-fixture") :: fields)))
+  in
+  List.iter
+    (fun (label, hostname) ->
+      let raw, json = post [ "hostname", hostname ] in
+      expect_http_status label 400 raw;
+      let message = Yojson.Safe.Util.(json |> member "error" |> to_string) in
+      check bool (label ^ ": the refusal names the field") true
+        (match Str.search_forward (Str.regexp_string "hostname") message 0 with
+         | _ -> true
+         | exception Not_found -> false))
+    [ "a number", `Int 123; "a blank string", `String "  "; "a null", `Null ];
+  let raw, _ = post [] in
+  expect_http_status "an absent hostname falls back and reaches the lookup" 404 raw
+
+let config_refusal_response ~name refusal =
+  let output = Buffer.create 512 in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      Keeper_config_post.For_testing.respond_config_refusal
+        ~request:(Httpun.Reqd.request reqd) reqd ~name ~refusal ~receipt:None)
+  in
+  let request = "POST /api/v1/keepers/test/config HTTP/1.1\r\nHost: x\r\n\r\n" in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+  ignore
+    (Httpun.Server_connection.read_eof connection input ~off:0
+       ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+            Buffer.add_string output
+              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+            total + iov.len)
+          0 iovecs
+      in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let body =
+    match List.rev (String.split_on_char '\n' raw) with
+    | body :: _ -> String.trim body
+    | [] -> fail "HTTP response has no body"
+  in
+  raw, Yojson.Safe.from_string body
+
+let test_composite_reconciliation_response_preserves_both_authorities () =
+  let manifest : Masc.Keeper_turn_up_config_persistence.reconciliation =
+    { path = "/workspace/.masc/config/keepers/alpha.toml"
+    ; detail = "manifest restore failed"
+    ; observed =
+        Masc.Keeper_turn_up_config_persistence.Observed_revision
+          Masc.Keeper_turn_up_config_persistence.Missing
+    }
+  in
+  let runtime_assignment :
+      Masc.Keeper_turn_up_config_persistence.runtime_reconciliation =
+    { path = Some "/workspace/.masc/config/runtime.toml"
+    ; detail = "runtime restore durability unconfirmed"
+    }
+  in
+  let raw, json =
+    config_refusal_response ~name:"alpha"
+      (Masc.Keeper_turn_up_update.Composite_reconciliation_required
+         { manifest = Some manifest; runtime_assignment = Some runtime_assignment })
+  in
+  expect_http_status "composite reconciliation" 503 raw;
+  let open Yojson.Safe.Util in
+  check string "typed composite reconciliation code"
+    "keeper_config_composite_reconciliation_required"
+    (json |> member "error" |> member "code" |> to_string);
+  check string "config application is closed indeterminate state" "indeterminate"
+    (json |> member "config_application" |> member "state" |> to_string);
+  check bool "old config_applied boolean is absent" true
+    (json |> member "config_applied" = `Null);
+  check string "manifest authority detail survives"
+    "manifest restore failed"
+    (json |> member "error" |> member "manifest" |> member "detail" |> to_string);
+  check string "runtime authority detail survives"
+    "runtime restore durability unconfirmed"
+    (json |> member "error" |> member "runtime_assignment"
+     |> member "detail" |> to_string)
+
+let test_config_post_requires_expected_revision () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-revision-required" in
+  prepare_config_sync_keeper ~sw config name;
+  ignore (write_config_sync_toml config name);
+  let raw, json =
+    post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"activation_mode":"autonomous"}|}
+  in
+  expect_http_status "missing revision HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "a refusal before the update says nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "and that the lane was not touched" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+let test_config_post_refuses_invalid_json_without_a_write () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-invalid-json-refused" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let before = In_channel.with_open_bin toml_path In_channel.input_all in
+  let raw, json =
+    post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name "{"
+  in
+  expect_http_status "invalid json HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "the refusal names the body parse" true
+    (String.starts_with ~prefix:"invalid json: "
+       (json |> member "error" |> to_string));
+  check bool "an unparsable body says nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "and that the lane was not touched" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  check string "the keeper TOML is unchanged" before
+    (In_channel.with_open_bin toml_path In_channel.input_all);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+(* The dashboard checks only that [input_policy] is a string; the value is
+   read by [Keeper_turn_up_args.parse], which runs before anything is
+   written. A value parse cannot read is answered 400 and the keeper TOML
+   stays as it was. *)
+let test_config_post_refuses_an_unreadable_input_policy_without_a_write () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-input-policy-refused" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let before = read_file toml_path in
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"input_policy":"automatic"}|}
+  in
+  expect_http_status "unreadable input_policy HTTP 400" 400 raw;
+  let body = Yojson.Safe.to_string json in
+  check bool "the refusal names the accepted policies" true
+    (String_util.contains_substring body "input_policy must be small or wide");
+  (* The removed dashboard check said the same words and added
+     "(received string)"; its absence is what shows parse refused. *)
+  check bool "the refusal is parse's, not the dashboard's" false
+    (String_util.contains_substring body "(received");
+  (let open Yojson.Safe.Util in
+   check bool "a parse refusal says nothing was written" false
+     (json |> member "config_applied" |> to_bool);
+   check string "and that the lane was not touched" "not_attempted"
+     (json |> member "runtime_sync" |> to_string));
+  check string "keeper TOML unchanged" before (read_file toml_path);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+let with_direct_assignment_model_catalog f =
+  let module Catalog = Llm_provider.Model_catalog in
+  (* Assignment publication validates the configured provider/model against
+     AGENT_CORE. Declare the synthetic model used by config_sync_runtime_toml
+     for the whole fixture, including its Keeper fiber cleanup. *)
+  let previous = Catalog.global () in
+  let catalog =
+    match
+      Catalog.of_toml_string ~source:"direct-assignment-fixture"
+        {|[[models]]
+model_id = "test-model"
+provider_name = "test_provider"
+base = "openai_chat"
+max_context_tokens = 8192
+|}
+    with
+    | Ok catalog -> catalog
+    | Error detail -> failf "direct assignment model catalog: %s" detail
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some catalog -> Catalog.set_global catalog
+      | None -> Catalog.clear_global ())
+    (fun () ->
+      Catalog.set_global catalog;
+      f ())
+
+let test_direct_assignment_route_rejects_stale_revision_without_write () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw ~config ->
+  let name = "direct-assignment-cas" in
+  prepare_config_sync_keeper ~sw config name;
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  let expected =
+    match Runtime.observe_keeper_assignment ~runtime_config_path:runtime_path
+            ~keeper_name:name () with
+    | Ok receipt -> receipt.value
+    | Error detail -> fail detail
+  in
+  let body =
+    `Assoc
+      [ "keeper_name", `String name
+      ; "runtime_id", `String "test_provider.test_model"
+      ; "expected_assignment_revision", Runtime.keeper_assignment_revision_to_yojson expected
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let winner_raw, _ = post_runtime_assignment ~state body in
+  expect_http_status "direct assignment winner" 200 winner_raw;
+  let after_winner = read_file runtime_path in
+  let loser_raw, loser_json = post_runtime_assignment ~state body in
+  expect_http_status "direct assignment stale writer" 409 loser_raw;
+  let open Yojson.Safe.Util in
+  check string "direct conflict is typed"
+    "runtime_assignment_revision_conflict"
+    (loser_json |> member "error" |> member "code" |> to_string);
+  check string "stale direct write changed no bytes"
+    after_winner (read_file runtime_path);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+(* Two raw editors read the same source; the first commit must survive the
+   second editor's POST, which carries its original revision. *)
+let test_runtime_raw_save_rejects_changed_path_with_identical_source () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.base_path in
+  mkdir_p (Filename.dirname original_path);
+  write_file original_path config_sync_runtime_toml;
+  let selected_dir = Filename.concat config.base_path "replacement-config" in
+  mkdir_p selected_dir;
+  let selected_path = Filename.concat selected_dir "runtime.toml" in
+  write_file selected_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:selected_path with
+   | Ok () -> () | Error detail -> fail ("runtime init: " ^ detail));
+  with_env "MASC_CONFIG_DIR" selected_dir @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let revision = Runtime.config_source_revision_to_string
+    (Runtime.config_observation ~path:original_path config_sync_runtime_toml).source_revision in
+  let audit_before = Lib.Audit_log.read_entries config in
+  let raw, json = post_to_handler ~target:"/api/v1/runtime/config/raw"
+    (fun request reqd body -> Server_routes_http_routes_dashboard.For_testing.handle_runtime_config_raw_post
+      state "path-editor-test" request reqd body)
+    (Yojson.Safe.to_string (`Assoc ["source_text", `String ("# must not write\n" ^ config_sync_runtime_toml);
+      "expected_source_revision", `String revision; "expected_source_path", `String original_path])) in
+  expect_http_status "identical bytes at a changed path must conflict" 409 raw;
+  let open Yojson.Safe.Util in
+  check string "conflict reports selected path" selected_path (json |> member "current" |> member "source_path" |> to_string);
+  check string "old path unchanged" config_sync_runtime_toml (read_file original_path);
+  check string "new path unchanged" config_sync_runtime_toml (read_file selected_path);
+  check bool "path conflict adds no write audit" true (Lib.Audit_log.read_entries config = audit_before)
+
+let test_runtime_raw_save_rejects_stale_source_without_write () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.base_path
+  in
+  mkdir_p (Filename.dirname runtime_path);
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error detail -> fail ("runtime init: " ^ detail));
+  with_env "MASC_CONFIG_DIR" (Filename.dirname runtime_path) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post body =
+    post_to_handler ~target:"/api/v1/runtime/config/raw"
+      (fun request reqd body ->
+        Server_routes_http_routes_dashboard.For_testing.handle_runtime_config_raw_post
+          state "raw-editor-test" request reqd body)
+      body
+  in
+  let revision text = Runtime.config_source_revision_to_string
+    (Runtime.config_observation ~path:runtime_path text).source_revision in
+  let body source revision = Yojson.Safe.to_string
+    (`Assoc ["source_text", `String source; "expected_source_revision", `String revision;
+      "expected_source_path", `String runtime_path]) in
+  let original_revision = revision config_sync_runtime_toml in
+  let winner = "# first editor\n" ^ config_sync_runtime_toml in
+  let loser = "# second editor\n" ^ config_sync_runtime_toml in
+  let winner_raw, winner_json = post (body winner original_revision) in
+  expect_http_status "first raw editor commits" 200 winner_raw;
+  let open Yojson.Safe.Util in
+  check string "raw save retains commit response" "committed"
+    (winner_json |> member "state" |> to_string);
+  let audit_before = Lib.Audit_log.read_entries config in
+  let loser_raw, loser_json = post (body loser original_revision) in
+  expect_http_status "second raw editor conflicts" 409 loser_raw;
+  check string "raw conflict code" "revision_conflict"
+    (loser_json |> member "code" |> to_string);
+  check bool "raw conflict has a readable error" true
+    (String.length (loser_json |> member "error" |> to_string) > 0);
+  let current = loser_json |> member "current" in
+  check string "conflict current source path" runtime_path
+    (current |> member "source_path" |> to_string);
+  check string "conflict current source text" winner
+    (current |> member "source_text" |> to_string);
+  check string "conflict current source revision" (revision winner)
+    (current |> member "source_revision" |> to_string);
+  check string "conflict preserves winner bytes" winner (read_file runtime_path);
+  check bool "conflict adds no audit entry" true
+    (Lib.Audit_log.read_entries config = audit_before);
+  List.iter (fun (label, invalid_body) ->
+    let raw, _ = post invalid_body in
+    expect_http_status label 400 raw;
+    check string (label ^ " preserves source") winner (read_file runtime_path))
+    [ "missing path", Yojson.Safe.to_string (`Assoc ["source_text", `String loser; "expected_source_revision", `String (revision winner)]);
+      "empty path", Yojson.Safe.to_string (`Assoc ["source_text", `String loser; "expected_source_revision", `String (revision winner); "expected_source_path", `String ""]);
+      "duplicate path", Yojson.Safe.to_string (`Assoc ["source_text", `String loser; "expected_source_revision", `String (revision winner); "expected_source_path", `String runtime_path; "expected_source_path", `String runtime_path]);
+      "missing revision", Yojson.Safe.to_string (`Assoc ["source_text", `String loser]);
+      "malformed revision", body loser "bad";
+      "uppercase revision", body loser (String.make 64 'A');
+      "wrong revision type", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser; "expected_source_revision", `Int 1]);
+      "duplicate source", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser; "source_text", `String winner;
+                 "expected_source_revision", `String (revision winner)]);
+      "duplicate revision", Yojson.Safe.to_string
+        (`Assoc ["source_text", `String loser;
+                 "expected_source_revision", `String (revision winner);
+                 "expected_source_revision", `String original_revision]) ];
+  check bool "invalid revisions add no audit entry" true
+    (Lib.Audit_log.read_entries config = audit_before);
+  let fresh_raw, _ = post (body loser (current |> member "source_revision" |> to_string)) in
+  expect_http_status "editor can save after reading current revision" 200 fresh_raw;
+  check string "fresh editor source is committed" loser (read_file runtime_path)
+
+(* The routing handler's create, remove and append branches. A created lane
+   lands in runtime.toml; a lane under a runtime id, and a lane the default
+   walks, are refused with 400 and the writer's own sentence; a removed lane
+   leaves the file; an exact-lane append adds its slot once and refuses it the
+   second time; an exact lane the server does not run is refused before any
+   write. *)
+let test_runtime_routing_creates_and_removes_a_lane () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  mkdir_p (Filename.dirname runtime_path);
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error error -> fail ("runtime init: " ^ error));
+  (* The handler writes the runtime.toml the resolver finds, as the server
+     does; point the resolver at this fixture's. *)
+  with_env "MASC_CONFIG_DIR" (Filename.dirname runtime_path) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post label status body =
+    let raw, json = post_runtime_routing ~state body in
+    expect_http_status label status raw;
+    json
+  in
+  let refusal json = Yojson.Safe.Util.(json |> member "error" |> to_string) in
+  let in_file text = String_util.contains_substring (read_file runtime_path) text in
+  ignore
+    (post "create" 200
+       {|{"lane":"coding","action":"create","runtime_ids":["test_provider.test_model"]}|});
+  check bool "the created lane is in the file" true (in_file "[runtime.lanes.coding]");
+  (* A lane named after a runtime shadows it, which is what the install path
+     writes and what [set] has always produced here; [create] refused it
+     alone. *)
+  ignore
+    (post "create under a runtime id" 200
+       {|{"lane":"test_provider.test_model","action":"create","runtime_ids":["test_provider.test_model"]}|});
+  check bool "the runtime's own lane is in the file" true
+    (in_file {|[runtime.lanes."test_provider.test_model"]|});
+  ignore (post "remove" 200 {|{"lane":"coding","action":"remove"}|});
+  check bool "the removed lane left the file" false (in_file "[runtime.lanes.coding]");
+  ignore
+    (post "write the default's lane" 200
+       {|{"lane":"test_provider.test_model","runtime_ids":["test_provider.test_model"]}|});
+  check string "a lane the default walks is refused"
+    {|lane "test_provider.test_model" is in use by [runtime].default, which every keeper without an assignment walks|}
+    (refusal
+       (post "remove the default's lane" 400
+          {|{"lane":"test_provider.test_model","action":"remove"}|}));
+  let append =
+    {|{"lane":"exact/board_attention_exact","action":"append","runtime_id":"test_provider.test_model"}|}
+  in
+  ignore (post "append to an exact lane" 200 append);
+  check bool "the exact lane is in the file" true
+    (in_file "[runtime.exact_output_lanes.board_attention_exact]");
+  check string "a declared slot is refused"
+    "test_provider.test_model is already a slot of board_attention_exact"
+    (refusal (post "append a declared slot" 400 append));
+  check string "an exact lane the server does not run is refused"
+    "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
+     hitl_auto_judge, board_attention_exact, verifier_exact, \
+     browser_stagehand_exact, candle_appraiser)"
+    (refusal
+       (post "append to a misspelled exact lane" 400
+          {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));
+  ignore (post "Curator observations grant no builtin write" 400
+    {|{"lane":"exact/workspace_curator_exact","action":"append","runtime_id":"test_provider.test_model"}|});
+  check bool "no Curator builtin table is created" false
+    (in_file "[runtime.exact_output_lanes.workspace_curator_exact]");
+  check bool "the misspelled lane left no table" false (in_file "verifer_exact")
+
+let test_direct_assignment_intervening_write_fences_keeper_config_post () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "direct-assignment-fences-config" in
+  prepare_config_sync_keeper ~sw config name;
+  ignore (write_config_sync_toml config name);
+  let expected_config =
+    match
+      Masc.Keeper_turn_up_config_persistence.current_config_revision
+        ~config ~keeper_name:name
+    with
+    | Ok revision -> revision
+    | Error detail -> fail detail
+  in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let direct_body =
+    `Assoc
+      [ "keeper_name", `String name
+      ; "runtime_id", `String "test_provider.test_model"
+      ; ( "expected_assignment_revision"
+        , Runtime.keeper_assignment_revision_to_yojson
+            expected_config.runtime_assignment )
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let direct_raw, _ = post_runtime_assignment ~state direct_body in
+  expect_http_status "intervening direct assignment committed" 200 direct_raw;
+  let keeper_body =
+    `Assoc
+      [ ( "expected_config_revision"
+        , Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson
+            expected_config )
+      ; "activation_mode", `String "autonomous"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let keeper_raw, keeper_json =
+    post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state ~name keeper_body
+  in
+  expect_http_status "stale Keeper config POST HTTP 409" 409 keeper_raw;
+  let open Yojson.Safe.Util in
+  check string "Keeper POST observes composite conflict"
+    "keeper_config_revision_conflict"
+    (keeper_json |> member "error" |> member "code" |> to_string);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw ~config ->
+  (* A known registry state: none published, so the commit response has one
+     right answer for its exact-output row. *)
+  (match Runtime_exact_output_registry.unpublish () with
+   | Ok () -> ()
+   | Error error -> fail (Runtime_exact_output_registry.publication_error_to_string error));
+  let name = "direct-assignment-release-warning" in
+  prepare_config_sync_keeper ~sw config name;
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  let expected =
+    match Runtime.observe_keeper_assignment ~runtime_config_path:runtime_path
+            ~keeper_name:name () with
+    | Ok receipt -> receipt.value
+    | Error detail -> fail detail
+  in
+  let lock_path = runtime_path ^ ".lock" in
+  let release_failure =
+    { File_lock_eio.lock_path
+    ; phase = File_lock_eio.Release_process_lock
+    ; cause =
+        { File_lock_eio.error = Unix.EIO
+        ; operation = "injected_route_release_after_commit"
+        ; argument = lock_path
+        }
+    ; cleanup_failure = None
+    }
+  in
+  let set_assignment ~runtime_config_path ~keeper_name ~runtime_id ~expected () =
+    Runtime.Assignment_for_testing.set_with_release_failure
+      ~release_failure ~runtime_config_path ~keeper_name ~runtime_id ~expected ()
+  in
+  let body =
+    `Assoc
+      [ "keeper_name", `String name
+      ; "runtime_id", `String "test_provider.test_model"
+      ; "expected_assignment_revision", Runtime.keeper_assignment_revision_to_yojson expected
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let raw, json = post_runtime_assignment ~set_assignment ~state body in
+  expect_http_status "committed warning response" 200 raw;
+  let open Yojson.Safe.Util in
+  check string "route preserves typed release warning"
+    "runtime_config_lock_release_unconfirmed"
+    (json |> member "commit" |> member "warnings" |> index 0
+     |> member "code" |> to_string);
+  (* Every commit response says what happened to the exact-output registry,
+     apart from routing: routing always applies, the registry only when one is
+     published (#38779). *)
+  let exact = json |> member "application" |> member "exact_output_registry" in
+  check string "a commit with no published registry reports it unpublished" "unpublished"
+    (exact |> member "status" |> to_string);
+  check bool "an unpublished registry is reported as needing a restart" true
+    (exact |> member "requires_restart" |> to_bool);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+let test_config_post_rejects_second_writer_with_same_revision () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-cas" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let initial_revision =
+    match
+      Masc.Keeper_turn_up_config_persistence.current_config_revision
+        ~config
+        ~keeper_name:name
+    with
+    | Ok revision -> revision
+    | Error detail -> failf "initial revision: %s" detail
+  in
+  let body activation_mode =
+    `Assoc
+      [ ( "expected_config_revision"
+        , Masc.Keeper_turn_up_config_persistence.config_revision_to_yojson
+            initial_revision )
+      ; "activation_mode", `String activation_mode
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let state =
+    Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
+  in
+  let winner_raw, _ =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body "autonomous")
+  in
+  expect_http_status "winner HTTP 200" 200 winner_raw;
+  let loser_raw, loser_json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body "manual")
+  in
+  expect_http_status "loser HTTP 409" 409 loser_raw;
+  let open Yojson.Safe.Util in
+  check string "typed conflict code" "keeper_config_revision_conflict"
+    (loser_json |> member "error" |> member "code" |> to_string);
+  check string "typed expected revision state" "sha256"
+    (loser_json
+     |> member "error"
+     |> member "expected"
+     |> member "manifest"
+     |> member "state"
+     |> to_string);
+  check string "typed observed revision state" "sha256"
+    (loser_json
+     |> member "error"
+     |> member "observed"
+     |> member "manifest"
+     |> member "state"
+     |> to_string);
+  check bool "loser did not apply config" false
+    (loser_json |> member "config_applied" |> to_bool);
+  let doc =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin toml_path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> fail error
+  in
+  check (option string) "winner remains durable" (Some "autonomous")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode");
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+let test_config_post_restarts_from_atomic_toml () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-success" in
+  prepare_config_sync_keeper ~sw config name;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path name))
+    (fun () ->
+      let toml_path = write_config_sync_toml config name in
+      let raw, response =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env)
+           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+           ~name {|{"activation_mode":"autonomous"}|}
+      in
+      expect_http_status "atomic config restart HTTP 200" 200 raw;
+      check string "readback carries manifest SHA-256 revision" "sha256"
+        Yojson.Safe.Util.
+          (response |> member "config_revision" |> member "manifest"
+           |> member "state" |> to_string);
+      check bool "write receipt says config applied" true
+        Yojson.Safe.Util.
+          (response |> member "config_write" |> member "applied" |> to_bool);
+      check string "idle keeper lane restarted" "lane_restarted"
+        Yojson.Safe.Util.(response |> member "runtime_sync" |> to_string);
+      check string "write receipt carries exact revision" "sha256"
+        Yojson.Safe.Util.
+          (response |> member "config_write" |> member "revision"
+           |> member "manifest" |> member "state" |> to_string);
+      let parsed =
+        Keeper_toml_loader.parse_toml
+          (In_channel.with_open_bin toml_path In_channel.input_all)
+      in
+      (match parsed with
+       | Error error -> fail error
+       | Ok doc ->
+         check (option string) "activation committed" (Some "autonomous")
+           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"));
+      check bool "running projection converged" true
+        (match Masc.Keeper_registry.get ~base_path:config.base_path name with
+         | Some entry -> Masc.Keeper_activation_mode.spontaneous entry.meta.activation_mode
+         | None -> false))
+
+(* A turn holding the Owner slot stands in for a keeper mid-turn: the POST
+   runs inside the admitted closure, as a keeper's own masc_keeper_up does. *)
+let post_config_mid_turn ~sw ~clock ~config ~name body =
+  match
+    Masc.Keeper_owner_registry.run_maintenance_if_idle
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:name
+      (fun () ->
+        post_config ~sw ~clock
+          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+          ~name body)
+  with
+  | Error error -> fail (Masc.Keeper_owner_registry.command_error_to_string error)
+  | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
+  | Ok (`Ran response) -> response
+
+(* The lane a mid-turn update leaves running. [proxy_port] stands for the
+   egress proxy a lane forks when it starts in the policy network mode. *)
+let register_running_lane ?proxy_port config name =
+  let meta =
+    match Masc.Keeper_meta_store.read_meta config name with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail "keeper metadata missing"
+    | Error error -> fail error
+  in
+  let entry =
+    Masc.Keeper_registry.register_offline ~base_path:config.Workspace.base_path
+      name meta
+  in
+  Atomic.set entry.Masc.Keeper_registry.egress_proxy_port proxy_port
+
+let unregister_lane config name =
+  match Masc.Keeper_registry.get ~base_path:config.Workspace.base_path name with
+  | None -> ()
+  | Some entry ->
+    ignore
+      (Masc.Keeper_registry.unregister_exact entry
+        : Masc.Keeper_registry.unregister_exact_result)
+
+let test_config_post_mid_turn_defers_runtime_sync () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-mid-turn" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  register_running_lane config name;
+  Fun.protect ~finally:(fun () -> unregister_lane config name) @@ fun () ->
+  let raw, json =
+    post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
+      {|{"activation_mode":"autonomous"}|}
+  in
+  expect_http_status "mid-turn config write is HTTP 200" 200 raw;
+  let open Yojson.Safe.Util in
+  check string "runtime sync waits for the turn" "deferred_until_turn_end"
+    (json |> member "runtime_sync" |> to_string);
+  check bool "write receipt says config applied" true
+    (json |> member "config_write" |> member "applied" |> to_bool);
+  (match
+     Keeper_toml_loader.parse_toml
+       (In_channel.with_open_bin toml_path In_channel.input_all)
+   with
+   | Error error -> fail error
+   | Ok doc ->
+     check (option string) "activation committed" (Some "autonomous")
+       (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"));
+  (* The running lane reads its meta from the registry each turn; the update
+     reached it without a restart. *)
+  (match Masc.Keeper_registry.get ~base_path:config.base_path name with
+   | None -> fail "the running lane disappeared"
+   | Some entry ->
+     check bool "running lane sees the new activation mode" true
+       (Masc.Keeper_activation_mode.spontaneous entry.meta.activation_mode));
+  (* The caller that reads 200 and moves on is right: a second POST built
+     from a fresh read goes through without a revision conflict. *)
+  let again_raw, again_json =
+    post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
+      {|{"activation_mode":"manual"}|}
+  in
+  expect_http_status "next write from fresh revision is HTTP 200" 200 again_raw;
+  check string "second write is also deferred" "deferred_until_turn_end"
+    (again_json |> member "runtime_sync" |> to_string)
+
+let expect_mid_turn_sync_failure ~label ~message_needle (raw, json) =
+  expect_http_status (label ^ " is HTTP 503") 503 raw;
+  let open Yojson.Safe.Util in
+  check string (label ^ ": typed runtime sync failure") "keeper_runtime_sync_failed"
+    (json |> member "error" |> member "code" |> to_string);
+  check bool (label ^ ": write itself applied") true
+    (json |> member "config_applied" |> to_bool);
+  check string (label ^ ": runtime sync failed") "failed"
+    (json |> member "runtime_sync" |> to_string);
+  check bool (label ^ ": refusal names its reason") true
+    (String_util.contains_substring
+       (json |> member "error" |> member "detail" |> to_string)
+       message_needle)
+
+let test_config_post_mid_turn_without_lane_still_fails () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-mid-turn-no-lane" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
+    {|{"activation_mode":"autonomous"}|}
+  |> expect_mid_turn_sync_failure ~label:"no running lane"
+       ~message_needle:"no keepalive lane is running";
+  (* [config_applied: true] above is only right if the write stayed. *)
+  match
+    Keeper_toml_loader.parse_toml
+      (In_channel.with_open_bin toml_path In_channel.input_all)
+  with
+  | Error error -> fail error
+  | Ok doc ->
+    check (option string) "the refused sync left the write committed"
+      (Some "autonomous")
+      (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
+
+let test_config_post_mid_turn_policy_needs_the_lanes_proxy () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-mid-turn-policy" in
+  prepare_config_sync_keeper ~sw config name;
+  (* A microVM keeper's image lives in its runtime's store, and a Linux runner
+     has no default runtime, so the TOML names one and that store promotes
+     the image. *)
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  mkdir_p keepers_dir;
+  write_file (Filename.concat keepers_dir (name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"apple_container\"\nsandbox_image = \"base\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
+       name);
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Masc.Keeper_sandbox_image_catalog.Microvm Masc.Keeper_microvm_backend.Apple_container)
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
+  register_running_lane config name;
+  Fun.protect ~finally:(fun () -> unregister_lane config name) @@ fun () ->
+  let policy = {|{"sandbox_profile":"microvm","network_mode":"policy"}|} in
+  post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name policy
+  |> expect_mid_turn_sync_failure ~label:"policy without a proxy"
+       ~message_needle:"no egress proxy";
+  unregister_lane config name;
+  register_running_lane ~proxy_port:40123 config name;
+  let raw, json =
+    post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name policy
+  in
+  expect_http_status "policy with a running proxy is HTTP 200" 200 raw;
+  check string "policy with a running proxy is deferred" "deferred_until_turn_end"
+    Yojson.Safe.Util.(json |> member "runtime_sync" |> to_string)
+
+let test_config_post_materializes_missing_toml () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-no-toml" in
+  prepare_config_sync_keeper ~sw config name;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name))
+    (fun () ->
+      let raw, json =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env)
+          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+          ~name
+          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"base"}|}
+      in
+      expect_http_status "HTTP 200" 200 raw;
+      let open Yojson.Safe.Util in
+      check string "runtime projection applied activation mode" "autonomous"
+        (json |> member "activation_mode" |> to_string);
+      let path =
+        Config_dir_resolver.keepers_dir_for_base_path
+          ~base_path:config.Workspace.base_path
+        |> fun dir -> Filename.concat dir (name ^ ".toml")
+      in
+      check bool "missing declarative TOML was materialized" true
+        (Sys.file_exists path);
+      let parsed =
+        Keeper_toml_loader.parse_toml
+          (In_channel.with_open_bin path In_channel.input_all)
+      in
+      match parsed with
+      | Error error -> fail error
+      | Ok doc ->
+        check (option string) "materialized sandbox profile" (Some "docker")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
+        check (option string) "materialized sandbox image"
+          (Some "base")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_image");
+        check (option string) "materialized activation mode" (Some "autonomous")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
+
+let test_config_post_rolls_back_missing_runtime_assignment () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-partial" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  Sys.remove runtime_path;
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"activation_mode":"autonomous","runtime_id":"missing.runtime"}|}
+  in
+  expect_http_status "HTTP 503" 503 raw;
+  let open Yojson.Safe.Util in
+  check bool "TOML rolled back" false (json |> member "config_applied" |> to_bool);
+  check string "runtime sync not attempted" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  check string "typed failure" "keeper_config_publication_rolled_back"
+    (json |> member "error" |> member "code" |> to_string);
+  check bool "runtime failure preserves rolled-back write receipt" false
+    (json |> member "config_write" |> member "applied" |> to_bool);
+  let doc =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin toml_path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> fail error
+  in
+  check (option string) "TOML is rolled back" (Some "manual")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
+
+(* A network_mode the keeper's profile cannot hold passes the route and
+   [parse] (both read the value, neither knows the profile) and the update
+   refuses the pair before writing anything: this docker keeper cannot take
+   "policy". Nothing changed and no lane was touched, so the refusal must say
+   so. An unparseable spelling never gets this far; [parse] refuses it. *)
+let test_config_post_refused_before_write_says_not_applied () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-refused-before-write" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let toml_before = read toml_path in
+  let runtime_before = read runtime_path in
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"activation_mode":"autonomous","network_mode":"policy"}|}
+  in
+  expect_http_status "a profile the update cannot resolve is HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "runtime sync was not attempted" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  check string "refusal names the profile, not a runtime sync failure"
+    "keeper_config_profile_refused"
+    (json |> member "error" |> member "code" |> to_string);
+  check bool "refusal names the rejected pair" true
+    (String_util.contains_substring
+       (json |> member "error" |> member "detail" |> to_string)
+       "docker_no_network_policy");
+  check string "keeper TOML is untouched" toml_before (read toml_path);
+  check string "runtime.toml is untouched" runtime_before (read runtime_path)
+
+let test_config_post_rejects_invalid_activation_mode () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-invalid-activation" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let original = In_channel.with_open_bin toml_path In_channel.input_all in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  List.iter
+    (fun body ->
+      let raw, _ =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name body
+      in
+      expect_http_status "invalid activation mode is rejected" 400 raw;
+      check string "rejected activation preserves config bytes" original
+        (In_channel.with_open_bin toml_path In_channel.input_all))
+    [ {|{"activation_mode":true}|}
+    ; {|{"activation_mode":"unknown"}|}
+    ]
+
+let test_config_post_prevalidates_mixed_request () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-invalid-mixed" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let raw, _ =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"activation_mode":"autonomous","allowed_paths":["*"]}|}
+  in
+  expect_http_status "HTTP 400" 400 raw;
+  let doc =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin toml_path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> fail error
+  in
+  check (option string) "activation was not committed" (Some "manual")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
+
+let test_config_post_round_trips_typed_tools_patch () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-tools" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Masc.Keeper_tool_approval_mode.set
+           (Masc.Keeper_tool_approval_mode.shared ())
+           ~base_path:config.base_path ~actor:"test" ~keeper_name:name
+           Masc.Keeper_tool_approval_mode.Auto);
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name))
+    (fun () ->
+       let raw, json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"tools":{"native":"full"}}|}
+       in
+       expect_http_status "HTTP 200" 200 raw;
+       let open Yojson.Safe.Util in
+       check string "readback native" "full"
+         (json |> member "tools" |> member "native" |> to_string);
+       check string "Auto rejects full preview" "rejected"
+         (json
+          |> member "tools"
+          |> member "full_native_admission"
+          |> member "status"
+          |> to_string);
+       let doc =
+         match
+           Keeper_toml_loader.parse_toml
+             (In_channel.with_open_bin toml_path In_channel.input_all)
+         with
+         | Ok doc -> doc
+         | Error error -> fail error
+       in
+       check (option string) "TOML native" (Some "full")
+         (Keeper_toml_loader.toml_string_opt doc "keeper.tools.native");
+       (* The POST above restarts this keeper's keepalive lane, and that lane
+          takes the turn slot once it runs. Stopping it here makes the second
+          POST start from the state the first one found, instead of from
+          whatever the lane reached in between. *)
+       ignore
+         (Masc.Keeper_keepalive.stop_keepalive_and_await
+            ~base_path:config.base_path
+            name);
+       ignore
+         (Masc.Keeper_tool_approval_mode.set
+            (Masc.Keeper_tool_approval_mode.shared ())
+            ~base_path:config.base_path ~actor:"test" ~keeper_name:name
+            Masc.Keeper_tool_approval_mode.Yolo);
+       let yolo_raw, yolo_json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"tools":{"native":"full"}}|}
+       in
+       expect_http_status "Yolo preview HTTP 200" 200 yolo_raw;
+       check string "Yolo allows full preview" "allowed"
+         Yojson.Safe.Util.(
+           yolo_json
+           |> member "tools"
+           |> member "full_native_admission"
+           |> member "status"
+           |> to_string);
+       ignore
+         (Masc.Keeper_tool_approval_mode.set
+            (Masc.Keeper_tool_approval_mode.shared ())
+            ~base_path:config.base_path ~actor:"test" ~keeper_name:name
+            Masc.Keeper_tool_approval_mode.Auto);
+       let invalid_raw, _ =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"tools":{"native":"yolo"}}|}
+       in
+       expect_http_status "invalid native is HTTP 400" 400 invalid_raw)
+;;
+
+let test_config_post_round_trips_typed_skills_patch () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-skills" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let initial_content =
+    In_channel.with_open_bin toml_path In_channel.input_all
+    ^ "\n[keeper.skills]\n"
+    ^ "names = [\"initial-skill\"]\n"
+    ^ "\n[keeper.tools]\n"
+    ^ "native = \"read\"\n"
+  in
+  write_file toml_path initial_content;
+  let parse_toml label =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin toml_path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> failf "%s: %s" label error
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name))
+    (fun () ->
+       let open Yojson.Safe.Util in
+       let exact_raw, exact_json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"skills":{"names":["ocaml-coding","proof-harness"]}}|}
+       in
+       expect_http_status "exact selection HTTP 200" 200 exact_raw;
+       check (list string) "exact selection reads back"
+         [ "ocaml-coding"; "proof-harness" ]
+         (exact_json
+          |> member "skills"
+          |> member "names"
+          |> to_list
+          |> List.map to_string);
+       let exact_doc = parse_toml "parse exact selection TOML" in
+       check (list string) "exact selection persisted"
+         [ "ocaml-coding"; "proof-harness" ]
+         (Keeper_toml_loader.toml_string_list
+            exact_doc
+            "keeper.skills.names");
+       ignore
+         (Masc.Keeper_keepalive.stop_keepalive_and_await
+            ~base_path:config.base_path
+            name);
+       let none_raw, none_json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"skills":{"names":[]}}|}
+       in
+       expect_http_status "empty selection HTTP 200" 200 none_raw;
+       check (list string) "empty selection reads back" []
+         (none_json
+          |> member "skills"
+          |> member "names"
+          |> to_list
+          |> List.map to_string);
+       let none_doc = parse_toml "parse empty selection TOML" in
+       check (list string) "empty selection persisted" []
+         (Keeper_toml_loader.toml_string_list
+            none_doc
+            "keeper.skills.names");
+       check (option string) "nested native posture survives exact and none"
+         (Some "read")
+         (Keeper_toml_loader.toml_string_opt
+            none_doc
+            "keeper.tools.native");
+       ignore
+         (Masc.Keeper_keepalive.stop_keepalive_and_await
+            ~base_path:config.base_path
+            name);
+       let all_raw, all_json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"skills":{}}|}
+       in
+       expect_http_status "all selection HTTP 200" 200 all_raw;
+       check bool "all selection reads back as null" true
+         (all_json |> member "skills" |> member "names" = `Null);
+       let all_doc = parse_toml "parse all selection TOML" in
+       check bool "nested Skill key removed" true
+         (List.assoc_opt "keeper.skills.names" all_doc = None);
+       check (option string) "nested native posture survives key removal"
+         (Some "read")
+         (Keeper_toml_loader.toml_string_opt
+            all_doc
+            "keeper.tools.native"))
+;;
+
+(* #10710 regression: [keepers_dashboard_json] must aggregate every persisted
+   keeper through the bounded fiber pool. Before the fiber-batch change the
+   per-keeper enrich ran as an unbounded fan-out; this pins that all registered
+   keepers still surface in the envelope (and that the pool cap stays a sane
+   positive bound). *)
+let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let names = [ "fiber-a"; "fiber-b"; "fiber-c" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun name ->
+          Masc.Keeper_registry.For_testing.unregister
+            ~base_path:config.base_path
+            name)
+        names)
+    (fun () ->
+      List.iter
+        (fun name ->
+          let meta =
+            match
+              Masc_test_deps.meta_of_json_fixture
+                (`Assoc
+                  [ "name", `String name
+                  ; "trace_id", `String (name ^ "-trace")
+                  ])
+            with
+            | Ok meta -> meta
+            | Error error -> fail ("meta fixture: " ^ error)
+          in
+          (* #36066: both dashboard projections row an undeclared keeper as
+             [invalid_profile_dashboard_row], which carries no [trace_id]. *)
+          Masc_test_deps.declare_fixture_keeper
+            ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
+          (match Masc.Keeper_meta_store.replace_snapshot config meta with
+           | Ok () -> ()
+           | Error error -> fail ("write meta: " ^ error));
+          ignore
+            (Masc.Keeper_registry.For_testing.register
+               ~base_path:config.base_path
+               name
+               meta))
+        names;
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      let open Yojson.Safe.Util in
+      let keeper_rows = json |> member "keepers" |> to_list in
+      let row_names =
+        keeper_rows
+        |> List.map (fun row -> row |> member "name" |> to_string)
+        |> List.sort String.compare
+      in
+      check (list string) "fiber pool collects every registered keeper"
+        (List.sort String.compare names)
+        row_names;
+      (* Since #36066 an undeclared keeper also yields a row that carries its
+         name, so the name check alone would pass on the refusal path. The
+         trace_id is written only by the per-keeper enrich this test pins. *)
+      List.iter
+        (fun row ->
+          let name = row |> member "name" |> to_string in
+          check string (name ^ " row came through the meta enrich")
+            (name ^ "-trace")
+            (row |> member "trace_id" |> to_string))
+        keeper_rows;
+      check int "total mirrors collected keeper count"
+        (List.length names)
+        (json |> member "total" |> to_int))
+
+(* #36101: a keeper whose dashboard worker raised used to drop out of the list
+   when its degraded row could not be built either, and the response still said
+   [ok]. Whatever the meta looks like, the keeper keeps a row that carries its
+   name and the error that broke its worker. Each case below can only be
+   served by one arm of the helper, except the stored meta: that one takes the
+   degraded row or, when building it raises for want of a runtime, the
+   name-only row, and both satisfy the same assertions. *)
+let test_keeper_row_after_worker_failure_is_never_absent () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let contains ~needle haystack =
+    let n = String.length needle
+    and h = String.length haystack in
+    let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+    scan 0
+  in
+  let error = "worker blew up on purpose" in
+  let row_of name =
+    Dashboard_http_keeper.For_test.keeper_row_after_worker_failure config ~name ~error
+  in
+  let open Yojson.Safe.Util in
+  let check_row ~name =
+    let row = row_of name in
+    check string (name ^ " keeps its name") name (row |> member "name" |> to_string);
+    check bool (name ^ " is marked degraded") true (row |> member "degraded" |> to_bool);
+    check string (name ^ " status") "degraded" (row |> member "status" |> to_string);
+    check bool (name ^ " carries the worker error") true
+      (contains ~needle:error (row |> member "diagnostic" |> member "error" |> to_string));
+    check bool (name ^ " has a trust object") true
+      (match row |> member "trust" with `Assoc _ -> true | _ -> false)
+  in
+  (* A stored meta. *)
+  let stored = "worker-fail-stored" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String stored; "trace_id", `String (stored ^ "-trace") ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail ("meta fixture: " ^ error)
+  in
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error error -> fail ("write meta: " ^ error));
+  check_row ~name:stored;
+  (* No meta file: the name-only row is the only row there is to give. *)
+  check_row ~name:"worker-fail-no-meta";
+  (* A meta file that is not JSON: [read_meta_presence] answers [Error]. *)
+  let unreadable = "worker-fail-unreadable" in
+  let unreadable_path = Masc.Keeper_types_profile.keeper_meta_path config unreadable in
+  Fs_compat.mkdir_p (Filename.dirname unreadable_path);
+  Out_channel.with_open_bin unreadable_path (fun channel ->
+    output_string channel "{ invalid json syntax }");
+  check_row ~name:unreadable
+
+(* The `.mli` calls the error clear on success a deliberate contract, and
+   nothing tested it. It is also exactly what a snapshot swap could drop,
+   since the fields now have to be named in the record update rather than
+   simply assigned. *)
+let test_cached_surface_success_clears_the_previous_error () =
+  let module Cache = Server_dashboard_http_cache in
+  let surface = Cache.create_cached_surface (`Assoc [ "seed", `Bool true ]) in
+  let diagnostic key =
+    Cache.cached_surface_json surface
+    |> Yojson.Safe.Util.member "projection_diagnostics"
+    |> Yojson.Safe.Util.member key
+  in
+  Cache.mark_cached_surface_attempt surface;
+  let attempted = Cache.snapshot surface in
+  (match attempted.Cache.last_attempt_unix with
+   | Some timestamp ->
+     check string "attempt wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_attempt_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "attempt timestamp missing");
+  Cache.mark_cached_surface_error surface (Failure "compute blew up");
+  let errored = Cache.snapshot surface in
+  check bool "the error is recorded" true (Option.is_some errored.Cache.last_error);
+  check bool "the error has a unix stamp" true
+    (Option.is_some errored.Cache.last_error_unix);
+  (match errored.Cache.last_error_unix with
+   | Some timestamp ->
+     check string "error wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_error_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "error timestamp missing");
+  Cache.mark_cached_surface_success surface (`Assoc [ "fresh", `Bool true ]);
+  let succeeded = Cache.snapshot surface in
+  check bool "success clears the error" true
+    (Option.is_none succeeded.Cache.last_error);
+  check bool "success clears the error unix stamp" true
+    (Option.is_none succeeded.Cache.last_error_unix);
+  check bool "success records its own stamp" true
+    (Option.is_some succeeded.Cache.last_success_unix);
+  (match succeeded.Cache.last_success_unix with
+   | Some timestamp ->
+     check string "success wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_success_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "success timestamp missing");
+  check bool "resolved error has no wire stamp" true
+    (diagnostic "last_error_at" = `Null);
+  check
+    string
+    "success installs the new payload"
+    (Yojson.Safe.to_string (`Assoc [ "fresh", `Bool true ]))
+    (Yojson.Safe.to_string succeeded.Cache.json)
+;;
+
+let test_cached_surface_retains_observations () =
+  let module Cache = Server_dashboard_http_cache in
+  let seed = `Assoc [ "value", `String "before" ] in
+  let surface = Cache.create_cached_surface seed in
+  Cache.mark_cached_surface_success surface seed;
+  let before = Cache.snapshot surface in
+  let payload_before = Cache.cached_surface_payload surface in
+  check bool "unchanged publication reuses its payload" true
+    (payload_before == Cache.cached_surface_payload surface);
+  let replacement = `Assoc [ "value", `String "after" ] in
+  Cache.invalidate_cached_surface ~json:replacement surface;
+  let after = Cache.snapshot surface in
+  check bool "retained snapshot keeps its success" true
+    (Option.is_some before.Cache.last_success_unix);
+  check bool "retained snapshot keeps its JSON" true (before.Cache.json = seed);
+  check bool "invalidation replaces JSON and success together" true
+    (after.Cache.json = replacement && Option.is_none after.Cache.last_success_unix);
+  let payload_after = Cache.cached_surface_payload surface in
+  check bool "invalidation retires encoded payload" false
+    (String.equal payload_before.raw_json payload_after.raw_json);
+  check bool "ETag follows the new payload" false
+    (String.equal payload_before.etag payload_after.etag);
+  let stale = { before with last_success_unix = Some 10.;
+    last_error_unix = Some 11.; last_error = Some "refresh failed" } in
+  let rendered = Cache.surface_snapshot_json ~now:12. stale in
+  check bool "same observation renders identically" true
+    (rendered = Cache.surface_snapshot_json ~now:12. stale);
+  check int "stale age uses the supplied observation time" 2000
+    (rendered |> Yojson.Safe.Util.member "projection_diagnostics"
+     |> Yojson.Safe.Util.member "stale_age_ms" |> Yojson.Safe.Util.to_int)
+;;
+
+let test_cached_surface_diagnostics_have_one_authority () =
+  let module Cache = Server_dashboard_http_cache in
+  let original = `Assoc [
+    "projection_diagnostics", `Assoc ["state", `String "old"; "state", `String "older"];
+    "projection_diagnostics", `Assoc ["state", `String "shadow"] ] in
+  let merged = Cache.extend_projection_diagnostics original
+    ["state", `String "first"; "state", `String "last"] in
+  check bool "last diagnostic wins with no duplicate authorities" true
+    (merged = `Assoc ["projection_diagnostics", `Assoc ["state", `String "last"]])
+;;
+
+let test_tool_calls_select_keeper_before_limiting () =
+  let base_path = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      cleanup_dir base_path)
+    (fun () ->
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      let append keeper index =
+        Masc.Keeper_tool_call_log.log_call ~keeper_name:keeper
+          ~tool_name:"keeper_lane_status" ~input:(`Assoc ["index", `Int index])
+          ~output_text:(string_of_int index) ~wire_outcome:Tool_result.Ok ~duration_ms:1. () in
+      for index = 1 to 100 do append "target" index done;
+      for index = 1 to 1001 do append "busy-neighbor" index done;
+      let entries = tool_call_entries_exn
+        ~keeper_name:"target" ~limit:100 in
+      check int "other Keepers cannot truncate the requested 100 calls" 100 (List.length entries);
+      check bool "every returned row belongs to the requested Keeper" true
+        (List.for_all (fun row -> Safe_ops.json_string_opt "keeper" row=Some "target") entries);
+      let outputs rows = List.map (fun row -> Safe_ops.json_string_opt "output" row) rows in
+      check (list (option string)) "chronological order is retained"
+        (List.init 100 (fun index -> Some (string_of_int (index+1)))) (outputs entries);
+      let tail = tool_call_entries_exn
+        ~keeper_name:"target" ~limit:3 in
+      check (list (option string)) "limit applies after Keeper selection"
+        [Some "98";Some "99";Some "100"] (outputs tail);
+      append "target" 101;
+      let latest = tool_call_entries_exn
+        ~keeper_name:"target" ~limit:3 in
+      check (list (option string)) "next request sees the committed indexed tail"
+        [Some "99";Some "100";Some "101"] (outputs latest))
+;;
+
+let test_keeper_metrics_reads_selected_strict_window () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let module Store = Dated_jsonl in
+  let keeper = "metrics-selected" in
+  let read ?(name = keeper) query =
+    let request = Httpun.Request.create `GET
+      ("/api/v1/keepers/" ^ name ^ "/metrics" ^ query) in
+    Server_dashboard_http_keeper_api.keeper_metrics_response
+      ~config ~keeper_name:name request
+  in
+  let expect_ok query = match read query with
+    | `OK, json -> json
+    | (`Bad_request | `Service_unavailable), json -> fail (Yojson.Safe.to_string json)
+  in
+  let write path contents =
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let channel = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel contents)
+  in
+  let metric trace ts =
+    `Assoc (Lib.Keeper_metrics_record.fields Lib.Keeper_metrics_record.Turn @
+      [ "ts_unix", `Float ts; "trace_id", `String trace; "channel", `String "turn"
+      ; "latency_ms", `Int 20; "turn_mode", `String "text_response"
+      ; "tools_used", `List []; "tool_call_count", `Int 0
+      ; "usage", `Assoc ["input_tokens", `Int 120; "output_tokens", `Int 80]
+      ; "cost_usd", `Float 0.01
+      ; "inference_telemetry", `Assoc
+          ["provider", `String "private-provider";
+           "nested", `Assoc ["model", `String "private-model"; "ttft_ms", `Int 2]]
+      ])
+  in
+  let heartbeat = `Assoc
+    (Lib.Keeper_metrics_record.fields Lib.Keeper_metrics_record.Heartbeat @
+      ["ts_unix", `Float 15.; "channel", `String "heartbeat"]) in
+  let store = Lib.Keeper_types_support.keeper_metrics_store config keeper in
+  let path = Filename.concat (Store.base_dir store) "2026-10/21.jsonl" in
+  write path (String.concat "\n"
+    [Yojson.Safe.to_string (metric "first" 10.); "{broken"; "{}";
+     Yojson.Safe.to_string (`Assoc (Lib.Keeper_metrics_record.fields Lib.Keeper_metrics_record.Turn));
+     Yojson.Safe.to_string heartbeat; Yojson.Safe.to_string (metric "last" 20.)] ^ "\n");
+  (* Another Keeper's corrupt layout must not participate in the selected read. *)
+  let foreign = Lib.Keeper_types_support.keeper_metrics_store config "metrics-foreign" in
+  write (Filename.concat (Store.base_dir foreign) "invalid-layout") "not metrics";
+  let open Yojson.Safe.Util in
+  let json = expect_ok "" in
+  check string "selected Keeper" keeper (json |> member "keeper" |> to_string);
+  check int "prior dashboard default" 120 (json |> member "limit" |> to_int);
+  check int "physical rows include malformed JSON" 6 (json |> member "scanned_rows" |> to_int);
+  check int "malformed, retired and invalid records are explicit" 3
+    (json |> member "skipped_rows" |> to_int);
+  check int "valid heartbeat belongs to summary" 1
+    (json |> member "window_summary" |> member "heartbeat_points" |> to_int);
+  let series = json |> member "series" |> to_list in
+  check (list string) "turns retain chronological identity" ["first"; "last"]
+    (List.map (fun row -> row |> member "trace_id" |> to_string) series);
+  let last = List.nth series 1 in
+  check int "actual usage survives projection" 120
+    (last |> member "usage" |> member "input_tokens" |> to_int);
+  check (float 0.000001) "actual cost survives projection" 0.01
+    (last |> member "cost_usd" |> to_float);
+  check bool "provider telemetry redacted" true
+    (last |> member "inference_telemetry" |> member "provider" = `Null);
+  check bool "nested model telemetry redacted" true
+    (last |> member "inference_telemetry" |> member "nested" |> member "model" = `Null);
+  List.iter (fun query -> check bool "fixed window rejects limit overrides" true
+    (fst (read query) = `Bad_request))
+    ["?limit=120"; "?limit=4"; "?limit=0"; "?limit=-1"; "?limit=abc"; "?limit=2&limit=3"];
+  check bool "invalid Keeper cannot select a store" true
+    (fst (read ~name:"../metrics-selected" "") = `Bad_request);
+  (match read ~name:"metrics-absent" "" with
+   | `OK, empty -> check int "missing store is a readable empty window" 0
+       (empty |> member "scanned_rows" |> to_int)
+   | (`Bad_request | `Service_unavailable), json -> fail (Yojson.Safe.to_string json));
+  let broken = Lib.Keeper_types_support.keeper_metrics_store config "metrics-unreadable" in
+  write (Store.base_dir broken) "not a directory";
+  (match read ~name:"metrics-unreadable" "" with
+   | `Service_unavailable, failure -> check string "store failure is explicit"
+       "metrics_store_unavailable" (failure |> member "code" |> to_string)
+   | (`OK | `Bad_request), json -> fail (Yojson.Safe.to_string json))
+;;
+
+let test_skill_evidence_joins_activation_and_composition () =
+  let source_id =
+    match Skill_source_config.source_id_of_string "workspace" with
+    | Ok value -> value
+    | Error detail -> fail detail
+  in
+  let package_id =
+    match Skill_catalog_snapshot.package_id_of_directory "release-checklist" with
+    | Ok value -> value
+    | Error _ -> fail "invalid Skill package fixture"
+  in
+  let content_revision =
+    match Skill_reference.content_revision_of_string (String.make 64 'a') with
+    | Ok value -> value
+    | Error _ -> fail "invalid content revision fixture"
+  in
+  let snapshot_revision =
+    match Skill_catalog_snapshot.snapshot_revision_of_string (String.make 64 'b') with
+    | Ok value -> value
+    | Error _ -> fail "invalid snapshot revision fixture"
+  in
+  let identity =
+    Skill_reference.make_identity
+      ~source_id
+      ~package_id
+      ~name:"release-checklist"
+  in
+  let reference = Skill_reference.make ~identity ~content_revision in
+  let activation =
+    match
+      Lib.Keeper_skill_activation_ledger.make_activation
+        ~identity
+        ~content_revision
+        ~snapshot_revision
+        ~turn_ref:(Ids.Turn_ref.make ~trace_id:"trace-evidence" ~absolute_turn:1)
+        ~runtime_id:"codex.default"
+        ~skill_tool_use_id:"skill-call-1"
+        ~agent_core_turn:1
+        ~invocation:
+          (Lib.Keeper_skill_activation_ledger.Instruction_invocation
+             { origin = Session_instruction
+             ; served_content = Skill_body { bytes = 4; sha256 = String.make 64 'c' }
+             })
+        ~activated_at:"2026-08-28T03:00:00Z"
+    with
+    | Ok value -> value
+    | Error _ -> fail "invalid Skill activation fixture"
+  in
+  let module Composition = Lib.Keeper_skill_composition_evidence in
+  let schedule : Agent_core.Tool_contract.schedule =
+    { planned_index = 0
+    ; batch_index = 0
+    ; batch_size = 1
+    ; execution_mode = Agent_core.Tool_contract.Serial
+    }
+  in
+  let completed tool_name data =
+    Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data ()
+  in
+  let node =
+    `Assoc
+      [ "node_id", `String "lane-status"
+      ; "execution_id", Ids.Execution_id.(generate () |> to_yojson)
+      ; ( "execution_origin"
+        , `String
+            (Composition.Node_execution_origin.to_string Fresh_dispatch) )
+      ; "tool_name", `String "keeper_lane_status"
+      ; "input", `Assoc []
+      ; ( "schedule", `Assoc
+            [ "planned_index", `Int schedule.planned_index
+            ; "batch_index", `Int schedule.batch_index
+            ; "batch_size", `Int schedule.batch_size
+            ; ( "execution_mode", `String
+                  (match schedule.execution_mode with
+                   | Agent_core.Tool_contract.Serial -> "serial"
+                   | Concurrent -> "concurrent") )
+            ] )
+      ; "result", Tool_result.to_json (completed "keeper_lane_status" (`Assoc []))
+      ; "tool_use_id", `String "lane-status-1"
+      ; "failure_effect_disposition", `Null
+      ; "deferred_kind", `Null
+      ; "result_bytes", `Int 2
+      ; "truncated_to", `Null
+      ]
+  in
+  let composition =
+    match
+      Composition.make
+        ~reference
+        ~composition_run_id:(Lib.Keeper_tool_plan.Composition_run_id.fresh ())
+        ~parent_invocation:
+          (Agent_core.Tool_contract.Invocation.create
+             ~tool_use_id:"skill-call-1"
+             ~turn:1
+             ~schedule
+             ~completion:Agent_core.Tool_contract.Continue_after_success)
+        ~request_id:None
+        ~keeper_name:"delta"
+        ~composition_tool:"keeper_compose_release-checklist"
+        ~composition_execution:Lib.Keeper_tool_composition_catalog.Inline
+        ~result:
+          (completed "keeper_compose_release-checklist"
+             (`Assoc [ "actions", `List [ node ] ]))
+        ~executor_settlements:[ node ]
+    with
+    | Ok evidence -> Composition.to_yojson evidence
+    | Error error -> fail (Composition.error_to_string error)
+  in
+  let json =
+    let activation =
+      `Assoc
+        [ "selection", `String "most_recent_observed"
+        ; ( "evidence"
+          , `Assoc
+              [ "trace_id", `String "trace-evidence"
+              ; ( "owner"
+                , `Assoc
+                    [ "status", `String "known"
+                    ; ( "claims"
+                      , `List
+                          [ `Assoc
+                              [ "keeper", `String "delta"
+                              ; "source", `String "current_meta"
+                              ]
+                          ] )
+                    ; "gaps", `List []
+                    ] )
+              ; ( "activation"
+                , Lib.Keeper_skill_activation_ledger.activation_to_yojson
+                    activation )
+              ; "async_result_deliveries", `List []
+              ; "async_actions", `List []
+              ] )
+        ]
+    in
+    Server_skill_evidence.For_testing.to_yojson
+      ~reference
+      ~composition:(Some composition)
+      ~composition_records_read:1
+      ~composition_scope:`Exact_reference_latest_completed
+      ~composition_unavailable:[]
+      ~activation:(Some activation)
+      ~activation_scope:Incomplete_retained_trace_snapshot
+      ~activation_sessions_inspected:187
+      ~activation_ledgers_loaded:10
+      ~activation_gaps:[]
+      ~activation_owner_gap_count:0
+  in
+  let open Yojson.Safe.Util in
+  check string "evidence schema" "masc.skill-evidence/v7"
+    (json |> member "schema" |> to_string);
+  check string "observed status" "observed" (json |> member "status" |> to_string);
+  check string "activation keeper" "delta"
+    (json |> member "activation" |> member "evidence" |> member "owner"
+     |> member "claims" |> index 0 |> member "keeper" |> to_string);
+  check int "composition node count" 1
+    (json |> member "composition" |> member "executor_settlements" |> to_list
+     |> List.length);
+  check int "activation ledger coverage" 10
+    (json |> member "coverage" |> member "activation_ledgers_loaded" |> to_int);
+  check bool "bounded evidence coverage is incomplete" false
+    (json |> member "coverage" |> member "coverage_complete" |> to_bool);
+  check string
+    "composition scan covers the exact-reference index"
+    "exact_reference_latest_completed"
+    (json |> member "coverage" |> member "composition_scope" |> to_string);
+  check int "activation sessions inspected" 187
+    (json |> member "coverage" |> member "activation_sessions_inspected"
+     |> to_int);
+  let not_observed =
+    Server_skill_evidence.For_testing.to_yojson
+      ~reference
+      ~composition:None
+      ~composition_records_read:0
+      ~composition_scope:`Exact_reference_latest_completed
+      ~composition_unavailable:[]
+      ~activation:None
+      ~activation_scope:Complete_retained_trace_snapshot
+      ~activation_sessions_inspected:0
+      ~activation_ledgers_loaded:0
+      ~activation_gaps:[]
+      ~activation_owner_gap_count:0
+  in
+  check string "bounded absence is not proof of never"
+    "not_observed_in_retained_coverage"
+    (not_observed |> member "status" |> to_string)
+;;
+
+let () =
+  run "dashboard_http_core"
+    [
+      ("eval_feed_owned_boundary", [
+        test_case "parent agent cannot read outside eval root" `Quick test_eval_http_rejects_parent_agent;
+        test_case "linked agent is excluded from fleet and exact reads" `Quick test_eval_http_excludes_linked_agent;
+        test_case "linked JSON cannot replace the latest snapshot" `Quick test_eval_http_ignores_linked_json;
+        test_case "NUL selector cannot alias a real directory" `Quick test_eval_http_ignores_nul_agent;
+      ]);
+      ("eval_feed_cache_selection", [
+        test_case "fleet and literal dash agent keep distinct results" `Quick test_eval_feed_separates_fleet_from_dash_agent;
+        test_case "fleet ignores limit and normalizes empty selectors" `Quick test_eval_feed_fleet_reuses_effective_selection;
+        test_case "agent counts, limits and aliases keep their meaning" `Quick test_eval_feed_agent_limits_remain_distinct;
+      ]);
+      ("effective_tool_quality_sampling", [
+        test_case "window ignores the recent-count option" `Quick test_tool_quality_window_reuses_irrelevant_limit;
+        test_case "recent counts remain separate" `Quick test_tool_quality_recent_limits_remain_distinct;
+        test_case "NaN keeps recent counts separate" `Quick test_tool_quality_nan_preserves_recent_limits;
+      ]);
+      ("exact_query_cache_identity", [
+        test_case "Keeper windows retain distinct responses" `Quick test_keeper_cached_windows_keep_exact_query;
+        test_case "tool quality windows retain distinct responses" `Quick test_tool_quality_cached_windows_keep_exact_query;
+        test_case "telemetry boundaries retain distinct responses" `Quick test_telemetry_cached_queries_keep_exact_boundaries;
+        test_case "telemetry filters retain distinct responses" `Quick test_telemetry_cached_queries_keep_exact_filters;
+        test_case "telemetry source echoes retain distinct responses" `Quick test_telemetry_cached_queries_keep_source_echo;
+      ]);
+      ( "executor_pool",
+        [
+          test_case "no pool stays on caller domain" `Quick
+            test_run_dashboard_compute_without_pool_stays_in_current_domain;
+          test_case "pool uses executor domain" `Quick
+            test_run_dashboard_compute_with_pool_uses_executor_domain;
+          test_case "pool worker runs nested cache inline" `Quick
+            test_run_dashboard_compute_nested_cache_does_not_starve;
+          test_case "shell payload includes paths diagnostics" `Quick
+            test_dashboard_shell_http_json_includes_paths;
+          test_case "shell runtime base_path is the published owner" `Quick
+            test_dashboard_shell_http_json_reports_the_published_base_path;
+          test_case "runtime resolution accepts server repo under base path" `Quick
+            test_runtime_resolution_accepts_server_repo_inside_base_path;
+          test_case "shell bootstrap payload while prewarming" `Quick
+            test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
+          test_case "shell reuses last good payload while prewarming" `Quick
+            test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
+          test_case "shell records light last good payload" `Quick
+            test_dashboard_shell_http_json_records_light_last_good;
+          test_case "shell reuses light last good payload while prewarming" `Quick
+            test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming;
+          test_case "operator snapshot hydrates on first default request" `Quick
+            test_operator_snapshot_default_route_hydrates_first_success;
+          test_case "tool-call limit applies to selected Keeper" `Slow
+            test_tool_calls_select_keeper_before_limiting;
+          test_case "dashboard query cache segment normalizes missing values" `Quick
+            test_dashboard_query_cache_segment_normalizes_missing_values;
+          test_case "dashboard query cache key partitions route params" `Quick
+            test_dashboard_query_cache_key_partitions_route_params;
+          test_case "dashboard query cache key encodes delimiter values" `Quick
+            test_dashboard_query_cache_key_encodes_delimiter_values;
+          test_case "cache key partitions by workspace root" `Quick
+            test_dashboard_cache_key_partitions_by_workspace_root;
+          test_case "operator snapshot default route exposes provenance" `Quick
+            test_operator_snapshot_default_route_exposes_provenance;
+          test_case "operator digest default route exposes provenance" `Quick
+            test_operator_digest_default_route_exposes_provenance;
+          test_case "shell timeout fallback reports timing context" `Quick
+            test_dashboard_shell_timeout_fallback_reports_timing_context;
+          test_case "Gate mode save reports recovery independently" `Quick
+            test_gate_mode_change_json_separates_saved_mode_from_recovery;
+          test_case "bootstrap omits eager goal tree" `Quick
+            test_dashboard_bootstrap_omits_eager_goal_tree;
+          test_case "Goal proof surfaces share persisted criterion truth" `Quick
+            test_goal_proof_surfaces_share_persisted_criterion_truth;
+          test_case "Goal source failure is not empty" `Quick
+            test_goal_source_failure_is_not_empty;
+          test_case "keeper detail active_goals_tree uses the goal store envelope" `Quick
+            test_keeper_detail_active_goals_tree_uses_goal_store_envelope;
+          test_case "Goal link source error preserves unrelated planning" `Quick
+            test_goal_link_source_failure_preserves_unrelated_planning;
+          test_case "planning payload keeps UTF-8 valid after truncation" `Quick
+            test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
+          test_case "planning counts a task awaiting verification on its own"
+            `Quick
+            test_planning_counts_a_task_awaiting_verification_on_its_own;
+          test_case "shell auth canonicalizes token owner" `Quick
+            test_dashboard_shell_auth_json_canonicalizes_token_owner;
+          test_case "shell auth reports missing token" `Quick
+            test_dashboard_shell_auth_json_reports_missing_token;
+          test_case "shell auth rejects stale token actor hint" `Quick
+            test_dashboard_shell_auth_json_rejects_stale_token_actor_hint;
+          test_case "shell auth rejects malformed credential" `Quick
+            test_dashboard_shell_auth_json_rejects_malformed_credential;
+          test_case "shell snapshot selector injects auth" `Quick
+            test_dashboard_shell_snapshot_selector_injects_auth;
+          test_case "execution actor canonicalizes token owner" `Quick
+            test_execution_actor_for_request_canonicalizes_token_owner;
+          test_case "execution request resolves actor once" `Quick
+            test_execution_request_resolves_actor_once;
+          test_case "execution default response reuses prepared bytes" `Quick
+            test_execution_default_response_reuses_prepared_bytes;
+          test_case "execution fixture selection isolates prepared live bytes" `Quick
+            test_execution_fixture_selection_isolates_prepared_live_bytes;
+          test_case "execution first compute reuses prepared bytes" `Quick
+            test_execution_first_compute_reuses_prepared_bytes;
+          test_case "warm execution and briefing follow equipped or unreadable authority" `Quick
+            test_warm_dashboard_responses_follow_equipment_authority;
+          test_case "Board current addresses follow effective config after cache" `Quick
+            test_board_address_overlay_follows_effective_config_after_cache;
+          test_case "Item account revision follows free purchase and price edit" `Quick
+            test_candle_account_revision_tracks_free_purchase_and_price_edit;
+          test_case "execution fixture broadcast and unknown override" `Quick
+            test_execution_fixture_broadcast_and_unknown_override;
+          test_case "execution parameterized response reuses decorated bytes" `Quick
+            test_execution_parameterized_payload_reuses_decorated_bytes;
+          test_case "execution parameterized responses separate queries" `Quick
+            test_execution_parameterized_payload_separates_request_queries;
+          test_case "execution parameterized responses separate workspace scopes" `Quick
+            test_execution_parameterized_payload_separates_workspace_scope;
+          test_case "execution parameterized response follows invalidation" `Quick
+            test_execution_parameterized_payload_changes_after_invalidation;
+          test_case "execution parameterized timeout keeps request metadata" `Quick
+            test_execution_parameterized_timeout_keeps_request_metadata;
+          test_case "execution force refresh bypasses default cache" `Quick
+            test_dashboard_execution_force_refresh_bypasses_default_cache;
+          test_case "execution trust default route uses cached surface" `Quick
+            test_dashboard_execution_trust_default_route_uses_cached_surface;
+          test_case "message JSON exposes temporal decay fields" `Quick
+            test_dashboard_message_json_surfaces_temporal_fields;
+          test_case "RFC-0138 shell wire returns snapshot when published" `Quick
+            test_shell_snapshot_wire_returns_snapshot_when_published;
+          test_case "RFC-0138 shell wire falls back when snapshot empty" `Quick
+            test_shell_snapshot_wire_falls_back_when_empty;
+          test_case "RFC-0204 shell wire light reads shell_light" `Quick
+            test_shell_snapshot_wire_light_reads_shell_light;
+          test_case "light shell carries runtime health SSOT" `Quick
+            test_dashboard_shell_light_includes_runtime_health_ssot;
+          test_case "shell separates configured and persisted keeper counts" `Quick
+            test_dashboard_shell_separates_configured_and_persisted_keeper_counts;
+          test_case "light shell counts agents from summary fields" `Quick
+            test_dashboard_shell_light_counts_agents_from_summary_fields;
+          test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
+            test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
+          test_case "worker Tools seed promotes before component TTL with empty inventory" `Quick
+            test_tools_worker_promotes_seed_before_component_ttl;
+          test_case "tools prepared selector scopes bytes and preserves exact keeper" `Quick
+            test_tools_prepared_selector_scope_and_keeper_contract;
+          test_case "tools routes serve prepared encodings and conditional responses" `Quick
+            test_tools_routes_serve_prepared_http_representations;
+          test_case "authenticated execution routes reuse prepared encodings" `Quick
+            test_execution_routes_serve_prepared_http_representations;
+          test_case "cached dashboard reads send the kept bytes" `Quick
+            test_cached_dashboard_reads_send_the_kept_bytes;
+          test_case "a cached read's status comes from the payload's JSON" `Quick
+            test_cached_read_status_comes_from_the_payload_json;
+          test_case "respond_cached_read sends a builder's timeout as 504" `Quick
+            test_respond_cached_read_sends_a_builder_timeout_as_504;
+          test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
+            test_telemetry_summary_snapshot_wire_returns_snapshot;
+          test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick
+            test_telemetry_summary_snapshot_wire_falls_back_when_empty;
+          test_case "RFC-0138 project-snapshot wire returns snapshot when populated" `Quick
+            test_project_snapshot_wire_returns_snapshot_when_populated;
+          test_case "telemetry n default is bounded (freeze guard)" `Quick
+            test_telemetry_n_default_is_bounded;
+          test_case "an HTTP/2 cached payload's timeout envelope is 504" `Quick
+            test_h2_cached_payload_timeout_is_504;
+          test_case "fleet-composite envelope is cached across polls" `Quick
+            test_dashboard_fleet_composite_envelope_is_cached;
+          test_case "state diagram runtime projection stays empty without meta" `Quick
+            test_state_diagram_runtime_projection_missing_meta_stays_empty;
+          test_case "keeper path extraction uses shared name grammar" `Quick
+            test_keeper_name_extractors_use_shared_grammar;
+          test_case "asks list publishes the written alternative capability" `Quick
+            test_asks_list_publishes_written_alternative_capability;
+          test_case "keeper paused-work route is exact" `Quick
+            test_keeper_paused_work_route_is_admin_exact;
+          test_case "keeper up route classifies and extracts" `Quick
+            test_keeper_up_route_classifies_and_extracts;
+          test_case "keeper up binds mutation to probed workspace" `Quick
+            test_keeper_up_workspace_precondition;
+          test_case "Gate resolve binds to receiving workspace" `Quick
+            test_gate_resolve_workspace_precondition;
+          test_case "Gate retry workspace precondition" `Quick
+            test_gate_retry_workspace_precondition;
+          test_case "HITL recover route and typed preconditions" `Quick
+            test_hitl_recover_route_and_preconditions;
+          test_case "keeper memory cleanup routes and requests are closed" `Quick
+            test_keeper_memory_cleanup_routes_and_closed_requests;
+          test_case "keeper sensitive GET permissions are exact" `Quick
+            test_keeper_sensitive_get_permissions_are_exact;
+          test_case "internal exact lane registry is Admin-only" `Quick
+            test_internal_exact_lane_registry_is_admin_only;
+          test_case "runtime probe route owns read permission" `Quick
+            test_runtime_probe_route_owns_read_permission;
+          test_case "event queue operator routes are exact" `Quick
+            test_event_queue_operator_routes_are_exact;
+          test_case "event operator keeps exact source refs across queue changes" `Quick
+            test_event_operator_uses_exact_source_refs_across_unrelated_enqueues;
+          test_case "composite preserves runtime attempt scopes" `Quick
+            test_composite_preserves_runtime_attempt_scopes;
+          test_case "observation metadata does not override terminal contract" `Quick
+            test_composite_blocked_uses_terminal_contract_not_observational_metadata;
+        ] );
+      ( "dashboard behavior contracts",
+        [ test_case "board close route rejects wrong typed decisions" `Quick
+            test_board_close_route_rejects_wrong_typed_decisions_without_closing;
+          test_case "Keeper metrics reads only the selected strict window" `Quick
+            test_keeper_metrics_reads_selected_strict_window;
+          test_case "Skill evidence joins activation and composition" `Quick
+            test_skill_evidence_joins_activation_and_composition;
+          test_case "GitHub login stream includes CORS" `Quick
+            test_keeper_github_login_stream_headers_include_cors;
+          test_case "GitHub login stream flushes each event" `Quick
+            test_keeper_github_login_stream_flushes_each_event;
+          test_case "GitHub token route refuses an unreadable hostname" `Quick
+            test_github_token_post_refuses_an_unreadable_hostname;
+          test_case "pause status read-only route preserves invalid state" `Quick
+            test_pause_status_route_preserves_invalid_state;
+          test_case "namespace pause status reads current workspace" `Quick
+            test_namespace_pause_status_reads_current_workspace;
+          test_case "operator snapshot rejects stale publication races" `Quick
+            test_operator_snapshot_publication_rejects_stale_races;
+          test_case "refreshed operator snapshot encodes on the pool and hands on a newer one" `Quick
+            test_refreshed_operator_snapshot_encodes_on_the_pool_and_hands_on_a_newer_one;
+          test_case "operator snapshot error clears previous success" `Quick
+            test_operator_snapshot_error_clears_previous_success;
+          test_case
+            "operator snapshot HTTP rejects stale success after store error"
+            `Quick
+            test_operator_snapshot_http_rejects_stale_success_after_store_error;
+          test_case "parameterized operator snapshot attests its workspace" `Quick
+            test_operator_parameterized_snapshot_attests_workspace;
+          test_case "proof payload exposes submission index" `Quick
+            test_dashboard_proof_http_json_surfaces_submission_index;
+          test_case "scheduled-automation reads its cache key" `Quick
+            test_scheduled_automation_reads_its_cache_key;
+          test_case "schedule exact lookup carries the wake history" `Quick
+            test_schedule_exact_lookup_carries_the_wake_history;
+          test_case "schedule exact lookup found matches the Dashboard fixture" `Quick
+            test_schedule_exact_lookup_found_matches_the_dashboard_fixture;
+          test_case "schedule page can be scoped to one target" `Quick
+            test_schedule_page_can_be_scoped_to_one_target;
+          test_case "schedule page counts retained wakes" `Quick
+            test_schedule_page_counts_retained_wakes;
+          test_case "schedule exact lookup names a blank id" `Quick
+            test_schedule_exact_lookup_rejects_blank_id;
+          test_case "agent-activity keys on its window" `Quick
+            test_agent_activity_keys_on_its_window;
+          test_case "execution trust uses narrow Keeper projection" `Quick
+            test_execution_trust_uses_narrow_keeper_projection;
+          test_case "offline keeper composite exposes secret projection" `Quick
+            test_offline_keeper_composite_exposes_secret_projection;
+          test_case "offline keeper composite names why the keeper is not running" `Quick
+            test_offline_keeper_composite_names_why_the_keeper_is_not_running;
+          test_case "state diagram runtime projection redacts live evidence" `Quick
+            test_state_diagram_runtime_projection_redacts_live_runtime_evidence;
+          test_case "activation config materializes missing TOML" `Quick
+            test_config_post_materializes_missing_toml;
+          test_case "reject without a reason is a bad request" `Quick
+            test_gate_resolve_requires_reason_on_reject;
+        ] );
+      ( "lifecycle event classification (#22071)",
+        [ test_case "typed wire lifecycle round-trips" `Quick
+            test_lifecycle_event_wire_roundtrip;
+          test_case "cache patchers cover the SSOT vocabulary" `Quick
+            test_lifecycle_event_cache_patcher_coverage;
+          test_case "cache patchers pin byte-identical values" `Quick
+            test_lifecycle_event_display_values;
+          test_case "paused lifecycle event keeps the paused status" `Quick
+            test_paused_lifecycle_event_keeps_paused_status;
+          test_case "reconciled lifecycle event preserves durable pause" `Quick
+            test_reconciled_lifecycle_event_preserves_durable_pause;
+          test_case "stopped lifecycle event stays offline" `Quick
+            test_stopped_lifecycle_event_stays_offline;
+          test_case "stopped lifecycle event preserves durable pause" `Quick
+            test_stopped_lifecycle_event_preserves_durable_pause;
+          test_case "cache patch rejects missing or unknown status" `Quick
+            test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
+          test_case "running keeper reconciliation rebuilds continuity brief" `Quick
+            test_running_keeper_reconciliation_rebuilds_continuity_brief;
+          test_case "reconciliation skips declaration rows" `Quick
+            test_running_keeper_reconciliation_skips_declaration_rows;
+          test_case "lifecycle patch never patches a declaration row" `Quick
+            test_lifecycle_patch_never_patches_a_declaration_row;
+          test_case "declared keeper's boot event invalidates the execution cache"
+            `Quick
+            test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache;
+          test_case "reconciliation leaves a booted keeper's declaration row" `Quick
+            test_running_keeper_reconciliation_leaves_a_stale_declaration_row;
+        ] );
+      ( "context-window shrink guard (#25062/#25268)",
+        [ test_case "cache retains immutable observations" `Quick
+            test_cached_surface_retains_observations;
+          test_case "cache diagnostics have one authority" `Quick
+            test_cached_surface_diagnostics_have_one_authority;
+          test_case "success clears the previous error" `Quick
+            test_cached_surface_success_clears_the_previous_error;
+          test_case "shrink of max_context_override is detected" `Quick
+            test_context_shrink_detection;
+          test_case "config patch accepts typed Skills" `Quick
+            test_config_patch_accepts_typed_skills;
+          test_case "config patch separates control fields" `Quick
+            test_config_patch_separates_control_fields;
+          test_case "config patch shape-checks remote_endpoint" `Quick
+            test_config_patch_remote_endpoint_shape;
+          test_case "config POST atomically restarts runtime" `Quick
+            test_config_post_restarts_from_atomic_toml;
+          test_case "config POST mid-turn defers runtime sync" `Quick
+            test_config_post_mid_turn_defers_runtime_sync;
+          test_case "config POST mid-turn without a lane fails" `Quick
+            test_config_post_mid_turn_without_lane_still_fails;
+          test_case "config POST mid-turn policy needs the lane's proxy" `Quick
+            test_config_post_mid_turn_policy_needs_the_lanes_proxy;
+          test_case "config POST requires expected revision" `Quick
+            test_config_post_requires_expected_revision;
+          test_case "config POST refuses invalid json without a write" `Quick
+            test_config_post_refuses_invalid_json_without_a_write;
+          test_case "config POST refuses an unreadable input_policy without a write" `Quick
+            test_config_post_refuses_an_unreadable_input_policy_without_a_write;
+          test_case "stale config POST loses with typed 409" `Quick
+            test_config_post_rejects_second_writer_with_same_revision;
+          test_case "direct assignment stale writer loses without a write" `Quick
+            test_direct_assignment_route_rejects_stale_revision_without_write;
+          test_case "routing POST creates and removes a lane" `Quick
+            test_runtime_routing_creates_and_removes_a_lane;
+          test_case "raw editors reject identical source at a changed config path" `Quick
+            test_runtime_raw_save_rejects_changed_path_with_identical_source;
+          test_case "raw editors require a revision and stale source loses without a write" `Quick
+            test_runtime_raw_save_rejects_stale_source_without_write;
+          test_case "direct assignment fences stale Keeper config POST" `Quick
+            test_direct_assignment_intervening_write_fences_keeper_config_post;
+          test_case "direct assignment response preserves lock warning" `Quick
+            test_direct_assignment_route_surfaces_runtime_lock_release_warning;
+          test_case "composite reconciliation preserves both authorities" `Quick
+            test_composite_reconciliation_response_preserves_both_authorities;
+          test_case "missing runtime assignment rolls config back" `Quick
+            test_config_post_rolls_back_missing_runtime_assignment;
+          test_case "mixed invalid request commits nothing" `Quick
+            test_config_post_prevalidates_mixed_request;
+          test_case "config refused before the write says not applied" `Quick
+            test_config_post_refused_before_write_says_not_applied;
+          test_case "config rejects invalid activation mode" `Quick
+            test_config_post_rejects_invalid_activation_mode;
+          test_case "typed tools patch round-trips and previews admission" `Quick
+            test_config_post_round_trips_typed_tools_patch;
+          test_case "typed Skills patch preserves all, exact and none" `Quick
+            test_config_post_round_trips_typed_skills_patch;
+        ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "keepers dashboard json fiber batch collects all keepers" `Quick test_keepers_dashboard_json_fiber_batch_collects_all_keepers
+          ; Alcotest.test_case "a keeper whose worker raised keeps a row" `Quick test_keeper_row_after_worker_failure_is_never_absent
+          ] );
+    ]

@@ -1,0 +1,611 @@
+// @vitest-environment happy-dom
+import { h } from 'preact'
+import { render } from 'preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { KeeperMetricsRead } from '../api/dashboard'
+
+const apiMocks = vi.hoisted(() => ({
+  fetchRuntimeModelMetrics: vi.fn(),
+  fetchKeeperCostMetrics: vi.fn(),
+  fetchAuditLedger: vi.fn(),
+  fetchKeeperDecisions: vi.fn(),
+}))
+
+vi.mock('../api/dashboard', () => apiMocks)
+
+function modelMetrics({
+  models = [
+    {
+      model_id: 'runtime_lane_1',
+      provider: null,
+      total_cost_usd: 0.12,
+      total_input_tokens: 1200,
+      total_output_tokens: 500,
+      p50_latency_ms: 1200,
+      p95_latency_ms: 3200,
+    },
+  ],
+  latency_buckets = [
+    { lo_ms: 0, hi_ms: 1000, count: 2 },
+    { lo_ms: 1000, hi_ms: 4000, count: 3 },
+  ],
+} = {}) {
+  return {
+    window_minutes: 60,
+    models,
+    latency_buckets,
+  }
+}
+
+// What the server reports for a store it read without a bad line.
+const READ_IN_FULL: KeeperMetricsRead = { state: 'read', malformed_rows: 0, unread_turn_rows: 0 }
+
+function keeperMetrics({
+  keepers = [
+    {
+      keeper_name: 'sangsu',
+      metrics_read: READ_IN_FULL,
+      total_cost_usd: 0.2 as number | null,
+      cost_reported_samples: 4,
+      cost_unreported_samples: 0,
+      cost_unread_samples: 0,
+      total_input_tokens: 2000 as number | null,
+      total_output_tokens: 700 as number | null,
+      total_tokens: 2700 as number | null,
+      tokens_reported_samples: 4,
+      tokens_unreported_samples: 0,
+      tokens_unread_samples: 0,
+      p50_latency_ms: 900 as number | null,
+      p95_latency_ms: 2100 as number | null,
+      sample_count: 4,
+    },
+  ],
+} = {}) {
+  return {
+    state: 'ready',
+    window_minutes: 60,
+    keepers,
+  }
+}
+
+// The value and the note of one stat tile, found by its label.
+function tile(container: HTMLElement, label: string): { value: string; note: string } {
+  const cell = Array.from(container.querySelectorAll('.kpi-cell'))
+    .find(el => el.querySelector('.kpi-label')?.textContent === label)
+  if (!cell) throw new Error(`no tile labelled ${label}`)
+  return {
+    value: cell.querySelector('.kpi-value')?.textContent ?? '',
+    note: cell.querySelector('.kpi-delta')?.textContent ?? '',
+  }
+}
+
+// A keeper row the server wrote for a store it could not read at all.
+function unreadKeeper(keeper_name: string) {
+  return {
+    keeper_name,
+    metrics_read: { state: 'failed', reason: 'disk read failed' } as KeeperMetricsRead,
+    total_cost_usd: null,
+    cost_reported_samples: 0,
+    cost_unreported_samples: 0,
+    cost_unread_samples: 0,
+    total_input_tokens: null,
+    total_output_tokens: null,
+    total_tokens: null,
+    tokens_reported_samples: 0,
+    tokens_unreported_samples: 0,
+    tokens_unread_samples: 0,
+    p50_latency_ms: null,
+    p95_latency_ms: null,
+    sample_count: 0,
+  }
+}
+
+async function waitFor(assertion: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 100; i += 1) {
+    if (assertion()) return
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+  throw new Error(`Timed out waiting for ${label}`)
+}
+
+describe('CostDashboard route-backed focus behavior', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    vi.resetModules()
+    apiMocks.fetchRuntimeModelMetrics.mockReset().mockResolvedValue(modelMetrics())
+    apiMocks.fetchKeeperCostMetrics.mockReset().mockResolvedValue(keeperMetrics())
+    apiMocks.fetchAuditLedger.mockReset().mockResolvedValue({ entries: [], limit: 0 })
+    apiMocks.fetchKeeperDecisions.mockReset().mockResolvedValue({ events: [], limit: 0 })
+    window.history.replaceState(null, '', '#overview')
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('shows a pending keeper aggregate and loads its result on recheck', async () => {
+    apiMocks.fetchKeeperCostMetrics
+      .mockResolvedValueOnce({ state: 'pending', window_minutes: 60 })
+      .mockResolvedValueOnce(keeperMetrics())
+    const { route } = await import('../router')
+    const { keeperState } = await import('./cost/cost-store')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'agent' }, postId: null,
+    }
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => keeperState.value.status === 'pending', 'keeper aggregation pending')
+    expect(container.textContent).toContain('Keeper 비용 집계 중')
+    expect(container.querySelector('table')).toBeNull()
+    expect(container.textContent).not.toContain('$0')
+    const retry = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === '집계 다시 확인')
+    expect(retry).toBeDefined()
+    retry!.click()
+    await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'completed keeper aggregation')
+    expect(keeperState.value.status).toBe('loaded')
+    expect(apiMocks.fetchKeeperCostMetrics.mock.calls.map(call => call[0])).toEqual([60, 60])
+  })
+
+  it('shows a failed keeper aggregate and lets the user retry it', async () => {
+    apiMocks.fetchKeeperCostMetrics
+      .mockResolvedValueOnce({ state: 'failed', message: 'metrics unavailable' })
+      .mockResolvedValueOnce(keeperMetrics())
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'agent' }, postId: null,
+    }
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('metrics unavailable') ?? false, 'aggregation error')
+    expect(container.querySelector('table')).toBeNull()
+    const retry = container.querySelector('button')
+    expect(retry).not.toBeNull()
+    retry!.click()
+    await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'aggregation error recovery')
+  })
+
+  it('keeps an existing runtime focus when the active runtime radio is clicked', async () => {
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'matrix' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('runtime_lane_1') ?? false, 'runtime metrics')
+
+    const runtimeButton = Array.from(container.querySelectorAll('button[role="radio"]'))
+      .find(button => button.textContent?.trim() === 'Runtime') as HTMLButtonElement | undefined
+    expect(runtimeButton?.getAttribute('aria-checked')).toBe('true')
+
+    runtimeButton?.click()
+    expect(route.value.params.focus).toBe('matrix')
+  })
+
+  it('leaves every focus chip unselected in the unfocused runtime overview', async () => {
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('runtime_lane_1') ?? false, 'runtime overview metrics')
+
+    const tabs = Array.from(
+      container.querySelectorAll('[data-testid="cost-focus-rail"] [role="tab"]'),
+    )
+    expect(tabs).toHaveLength(3)
+    expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual(['false', 'false', 'false'])
+  })
+
+  it('shows focused latency empty copy when the route has no latency buckets', async () => {
+    apiMocks.fetchRuntimeModelMetrics.mockResolvedValueOnce(modelMetrics({
+      models: [],
+      latency_buckets: [],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'latency' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(
+      () => container.textContent?.includes('이 시간 창에서 기록된 Runtime 지연 분포 없음') ?? false,
+      'focused latency empty state',
+    )
+
+    expect(container.querySelector('[aria-label^="Latency histogram"]')).toBeNull()
+  })
+
+  it('preserves cockpit context when selecting a cost focus chip', async () => {
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: {
+        section: 'runtime',
+        view: 'cost',
+        mode: 'Observe',
+        repo: 'viewer',
+        q: 'cost',
+      },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('runtime_lane_1') ?? false, 'runtime metrics')
+
+    const latencyTab = Array.from(
+      container.querySelectorAll('[data-testid="cost-focus-rail"] [role="tab"]'),
+    ).find(tab => tab.textContent?.includes('지연 분포')) as HTMLButtonElement | undefined
+    latencyTab?.click()
+
+    expect(route.value.params).toMatchObject({
+      section: 'runtime',
+      view: 'cost',
+      focus: 'latency',
+      mode: 'Observe',
+      tab: 'ct-lat',
+      repo: 'viewer',
+      q: 'cost',
+    })
+    expect(window.location.hash).toContain('focus=latency')
+    expect(window.location.hash).toContain('mode=Observe')
+    expect(window.location.hash).toContain('tab=ct-lat')
+    await waitFor(
+      () => container.querySelector('[aria-label^="Latency histogram"]') != null,
+      'focused latency histogram',
+    )
+  })
+
+  it('preserves cockpit context when switching to keeper cost mode', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '#monitoring?section=runtime&view=cost&mode=Observe&repo=viewer',
+    )
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: {
+        section: 'runtime',
+        view: 'cost',
+        mode: 'Observe',
+        repo: 'viewer',
+      },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('runtime_lane_1') ?? false, 'runtime metrics')
+
+    const keeperButton = Array.from(container.querySelectorAll('button[role="radio"]'))
+      .find(button => button.textContent?.trim() === 'Keeper') as HTMLButtonElement | undefined
+    keeperButton?.click()
+
+    expect(route.value.params).toMatchObject({
+      section: 'runtime',
+      view: 'cost',
+      focus: 'agent',
+      mode: 'Observe',
+      tab: 'ct-agt',
+      repo: 'viewer',
+    })
+    expect(window.location.hash).toContain('focus=agent')
+    expect(window.location.hash).toContain('mode=Observe')
+    expect(window.location.hash).toContain('tab=ct-agt')
+    await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'keeper metrics')
+  })
+
+  it('pins matching audit ledger rows when the route carries a log id', async () => {
+    apiMocks.fetchAuditLedger.mockResolvedValueOnce({
+      count: 2,
+      entries: [
+        {
+          id: 'audit-unrelated',
+          ts: '2026-05-06T00:00:01Z',
+          actor: 'keeper-alpha',
+          kind: 'tool_call',
+          summary: 'alpha called a tool',
+          severity: 'info',
+        },
+        {
+          id: 'audit-turn-9',
+          ts: '2026-05-06T00:00:02Z',
+          actor: 'keeper-alpha',
+          kind: 'keeper_turn',
+          summary: 'keeper turn completed',
+          severity: 'info',
+          payload: { log_id: 'turn-9' },
+        },
+      ],
+    })
+    window.history.replaceState(null, '', '#monitoring?section=runtime&view=audit&log_id=turn-9')
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'audit', log_id: 'turn-9' },
+      postId: null,
+    }
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+
+    render(h(CostDashboard, { view: 'audit' }), container)
+    await waitFor(
+      () => container.textContent?.includes('LOG turn-9') ?? false,
+      'audit log focus banner',
+    )
+
+    const rows = Array.from(container.querySelectorAll('tbody tr'))
+    expect(rows[0]?.textContent).toContain('keeper_turn')
+    expect(rows[1]?.textContent).toContain('tool_call')
+    const focus = container.querySelector('[data-testid="audit-log-focus"]')
+    expect(focus?.textContent).toContain('ROUTE FOCUS')
+    expect(focus?.textContent).toContain('1 matches pinned')
+
+    const clear = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'CLEAR') as HTMLButtonElement | undefined
+    expect(clear).toBeTruthy()
+    clear?.click()
+    expect(route.value.params).toEqual({
+      section: 'runtime',
+      view: 'audit',
+    })
+  })
+
+
+  it('says a subscription keeper cost was not reported instead of showing $0', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [
+        {
+          keeper_name: 'subscription-keeper',
+          metrics_read: READ_IN_FULL,
+          total_cost_usd: null,
+          cost_reported_samples: 0,
+          cost_unreported_samples: 3,
+          cost_unread_samples: 0,
+          total_input_tokens: 24_000_000,
+          total_output_tokens: 500_000,
+          total_tokens: 24_500_000,
+          tokens_reported_samples: 3,
+          tokens_unreported_samples: 0,
+          tokens_unread_samples: 0,
+          p50_latency_ms: 900,
+          p95_latency_ms: 2100,
+          sample_count: 3,
+        },
+      ],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('subscription-keeper') ?? false, 'keeper metrics')
+
+    const row = Array.from(container.querySelectorAll('tbody tr'))
+      .find(tr => tr.textContent?.includes('subscription-keeper'))
+    expect(row?.textContent).toContain('미보고')
+    expect(row?.textContent).toContain('3/3턴')
+    expect(row?.textContent).not.toContain('$0')
+    expect(container.textContent).toContain('3턴 비용 미보고')
+  })
+
+  it('says a keeper token usage was not reported instead of showing 0 tokens', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [
+        {
+          keeper_name: 'no-usage-keeper',
+          metrics_read: READ_IN_FULL,
+          total_cost_usd: null,
+          cost_reported_samples: 0,
+          cost_unreported_samples: 1,
+          cost_unread_samples: 1,
+          total_input_tokens: null,
+          total_output_tokens: null,
+          total_tokens: null,
+          tokens_reported_samples: 0,
+          tokens_unreported_samples: 2,
+          tokens_unread_samples: 0,
+          p50_latency_ms: 900,
+          p95_latency_ms: 2100,
+          sample_count: 2,
+        },
+      ],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('no-usage-keeper') ?? false, 'keeper metrics')
+
+    const row = Array.from(container.querySelectorAll('tbody tr'))
+      .find(tr => tr.textContent?.includes('no-usage-keeper'))
+    const tokenCells = Array.from(row?.querySelectorAll('td') ?? []).slice(0, 2).map(td => td.textContent?.trim())
+    expect(tokenCells).toEqual(['미보고', '미보고'])
+    expect(row?.textContent).toContain('1/2턴 · 못 읽음 1턴')
+    expect(container.textContent).toContain('미보고 / 미보고')
+    expect(container.textContent).toContain('2턴 토큰 미보고')
+    expect(container.textContent).toContain('1턴 비용 못 읽음')
+  })
+
+  it('says a keeper store could not be read instead of showing zero turns', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [
+        {
+          keeper_name: 'readable-keeper',
+          metrics_read: READ_IN_FULL,
+          total_cost_usd: 0.5,
+          cost_reported_samples: 2,
+          cost_unreported_samples: 0,
+          cost_unread_samples: 0,
+          total_input_tokens: 1000,
+          total_output_tokens: 400,
+          total_tokens: 1400,
+          tokens_reported_samples: 2,
+          tokens_unreported_samples: 0,
+          tokens_unread_samples: 0,
+          p50_latency_ms: 800,
+          p95_latency_ms: 1500,
+          sample_count: 2,
+        },
+        {
+          keeper_name: 'unreadable-keeper',
+          metrics_read: { state: 'failed', reason: 'disk read failed' } as KeeperMetricsRead,
+          total_cost_usd: null,
+          cost_reported_samples: 0,
+          cost_unreported_samples: 0,
+          cost_unread_samples: 0,
+          total_input_tokens: null,
+          total_output_tokens: null,
+          total_tokens: null,
+          tokens_reported_samples: 0,
+          tokens_unreported_samples: 0,
+          tokens_unread_samples: 0,
+          p50_latency_ms: null,
+          p95_latency_ms: null,
+          sample_count: 0,
+        },
+      ],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('unreadable-keeper') ?? false, 'keeper metrics')
+
+    const row = container.querySelector('tr[data-keeper-metrics-read="failed"]')
+    expect(row?.textContent).toContain('unreadable-keeper')
+    // The reason is on the row, and none of the value cells holds a number
+    // ("$0", "0") or the "not reported" word standing in for the unread store.
+    expect(row?.querySelector('[data-testid="keeper-cost-missing"]')?.textContent).toContain('disk read failed')
+    const valueCells = Array.from(row?.querySelectorAll('td') ?? []).slice(0, 3).map(td => td.textContent ?? '')
+    expect(valueCells).toHaveLength(3)
+    for (const cell of valueCells) expect(cell).not.toMatch(/\d|미보고/)
+    // The team total counts only the readable keeper, and each tile says so.
+    expect(tile(container, 'Total Cost').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'Total Cost').note).toContain('unreadable-keeper')
+    expect(tile(container, 'Tokens In / Out').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'Tokens In / Out').note).toContain('unreadable-keeper')
+    // The slowest keeper may be the unread one, so the max is a floor and the
+    // budget claim is not made for every keeper.
+    expect(tile(container, 'p95 Latency (max)').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'p95 Latency (max)').note).not.toBe('within budget')
+    expect(container.querySelector('tr[data-keeper-metrics-read="read"]')?.textContent).toContain('readable-keeper')
+  })
+
+  it('shows no figure at all when no keeper store could be read', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [unreadKeeper('first-unread'), unreadKeeper('second-unread')],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('first-unread') ?? false, 'keeper metrics')
+
+    // Not "$0", not "미보고" (a null the runtime reported), not "0ms within budget".
+    for (const label of ['Total Cost', 'Tokens In / Out', 'p50 Latency (avg)', 'p95 Latency (max)']) {
+      expect(tile(container, label).value, label).not.toMatch(/\d|미보고/)
+    }
+    expect(tile(container, 'p95 Latency (max)').note).not.toBe('within budget')
+    expect(tile(container, 'Total Cost').note).toContain('first-unread')
+    expect(tile(container, 'Total Cost').note).toContain('second-unread')
+  })
+
+  it('marks a keeper total with bad lines as at least that much', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [
+        {
+          keeper_name: 'torn-keeper',
+          metrics_read: { state: 'read', malformed_rows: 3, unread_turn_rows: 1 } as KeeperMetricsRead,
+          total_cost_usd: 0.25,
+          cost_reported_samples: 2,
+          cost_unreported_samples: 0,
+          cost_unread_samples: 0,
+          total_input_tokens: 600,
+          total_output_tokens: 200,
+          total_tokens: 800,
+          tokens_reported_samples: 2,
+          tokens_unreported_samples: 0,
+          tokens_unread_samples: 0,
+          p50_latency_ms: 700,
+          p95_latency_ms: 1200,
+          sample_count: 2,
+        },
+      ],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('torn-keeper') ?? false, 'keeper metrics')
+
+    const row = container.querySelector('tr[data-keeper-metrics-read="read"]')
+    const cells = Array.from(row?.querySelectorAll('td') ?? []).map(td => td.textContent?.trim() ?? '')
+    // Tokens in, tokens out and cost are all "at least".
+    expect(cells.slice(0, 3).every(cell => cell.startsWith('≥ '))).toBe(true)
+    // The note carries both counts the server sent, whatever the wording.
+    const note = row?.querySelector('[data-testid="keeper-cost-missing"]')?.textContent ?? ''
+    expect((note.match(/\d+/g) ?? []).sort()).toEqual(['1', '3'])
+    // Each team tile is a floor too, not only the keeper's own row.
+    expect(tile(container, 'Total Cost').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'Tokens In / Out').value.startsWith('≥ ')).toBe(true)
+    expect(tile(container, 'Total Cost').note).toContain('torn-keeper')
+  })
+
+  it('shows no lower-bound mark when every store was read in full', async () => {
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'keeper metrics')
+
+    expect(container.textContent).not.toContain('≥ ')
+    expect(tile(container, 'p95 Latency (max)').note).toBe('within budget')
+  })
+
+})

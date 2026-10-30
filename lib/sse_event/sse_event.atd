@@ -1,0 +1,106 @@
+(* Typed payload schemas for Agent Core events relayed to Dashboard SSE. The
+   shared envelope is owned by [Sse_event.wrap_envelope]. *)
+
+type agent_started_payload = {
+  agent_name: string;
+  task_id: string;
+}
+
+type tool_called_payload = {
+  agent_name: string;
+  tool_name: string;
+}
+
+type tool_completed_payload = {
+  agent_name: string;
+  tool_name: string;
+}
+
+type turn_started_payload = {
+  agent_name: string;
+  turn: int;
+}
+
+type turn_completed_payload = {
+  agent_name: string;
+  turn: int;
+}
+
+type turn_ready_payload = {
+  agent_name: string;
+  turn: int;
+  count: int;
+  names_hash: string;
+  tool_names: string list;
+}
+
+type handoff_requested_payload = {
+  from_agent: string;
+  to_agent: string;
+  reason: string;
+}
+
+type handoff_completed_payload = {
+  from_agent: string;
+  to_agent: string;
+  elapsed_s: float;
+}
+
+type content_replacement_replaced_payload = {
+  tool_use_id: string;
+  preview: string;
+  original_chars: int;
+  seen_count_after: int;
+}
+
+type content_replacement_kept_payload = {
+  tool_use_id: string;
+  seen_count_after: int;
+}
+
+type slot_scheduler_observed_payload = {
+  max_slots: int;
+  active: int;
+  available: int;
+  queue_length: int;
+  state: string;
+}
+
+type agent_completed_payload = {
+  agent_name: string;
+  task_id: string;
+  elapsed_s: float;
+}
+
+type agent_yielded_payload = {
+  agent_name: string;
+  task_id: string;
+  turn: int;
+  elapsed_s: float;
+}
+
+(* Variant-specific typed error details remain opaque to the shared reader. *)
+type json_value <ocaml module="Yojson.Safe" t="t"> = abstract
+
+type agent_input_required_payload = {
+  agent_name: string;
+  task_id: string;
+  elapsed_s: float;
+  request_id: string;
+  participant_name: string nullable;
+  question: string;
+  schema: json_value nullable;
+  timeout_s: float nullable;
+  created_at: float;
+}
+
+type agent_failed_payload = {
+  agent_name: string;
+  task_id: string;
+  elapsed_s: float;
+  error: string;
+  error_domain: string;
+  error_code: string;
+  error_retryable: bool;
+  error_detail: json_value;
+}

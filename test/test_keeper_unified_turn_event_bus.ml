@@ -1,0 +1,412 @@
+(** Regression tests for [Keeper_unified_turn_event_bus] concurrency fixes
+    (S1–S3): pending-tool count and drain-cancel handle must stay consistent
+    with the Atomic event-bus state. *)
+
+open Alcotest
+
+let () = Mirage_crypto_rng_unix.use_default ()
+
+module EB = Masc.Keeper_unified_turn_event_bus
+module Scope = Masc.Keeper_turn_scope
+
+let dummy_event payload =
+  { Agent_core.Event_bus.meta =
+      Agent_core.Event_bus.mk_envelope
+        ~event_id:"event"
+        ~correlation_id:"c"
+        ~run_id:"r"
+        ()
+  ; payload
+  }
+;;
+
+let invocation name =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id:name
+    ~turn:0
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+    ~schedule:
+      { planned_index = 0
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_core.Tool_contract.Serial
+      }
+;;
+
+let tool_called name =
+  dummy_event
+    (Agent_core.Event_bus.ToolCalled
+       { invocation = invocation name
+       ; agent_name = "a"
+       ; tool_name = name
+       ; input = `Null
+       })
+;;
+
+let tool_completed name =
+  dummy_event
+    (Agent_core.Event_bus.ToolCompleted
+       { invocation = invocation name
+       ; agent_name = "a"
+       ; tool_name = name
+       ; output = Ok { Agent_core.Types.content = "done"; content_blocks = None; _meta = None }
+       })
+;;
+
+let test_record_fsm_tool_transitions_counts_and_transitions () =
+  let open EB.For_testing in
+  let count, transitions =
+    record_fsm_tool_transitions ~keeper_name:"k" ~turn_id:1 0 []
+  in
+  check int "empty events keep count" 0 count;
+  check (list (of_pp (fun _ _ -> ()))) "empty events no transitions" [] transitions;
+  let count, transitions =
+    record_fsm_tool_transitions
+      ~keeper_name:"k"
+      ~turn_id:1
+      0
+      [ tool_called "a"; tool_called "b"; tool_completed "a"; tool_completed "b" ]
+  in
+  check int "balanced calls keep count" 0 count;
+  check
+    int
+    "balanced calls emit one enter and one leave"
+    2
+    (List.length transitions);
+  let count, transitions =
+    record_fsm_tool_transitions
+      ~keeper_name:"k"
+      ~turn_id:1
+      0
+      [ tool_called "a"; tool_called "b"; tool_completed "a" ]
+  in
+  check int "one pending remains" 1 count;
+  check
+    int
+    "enter awaiting emitted once"
+    1
+    (List.filter (function EB.For_testing.Enter_awaiting -> true | _ -> false) transitions
+     |> List.length)
+;;
+
+let test_record_fsm_tool_transitions_is_pure () =
+  let open EB.For_testing in
+  let events = [ tool_called "a"; tool_completed "a" ] in
+  let c1, _ = record_fsm_tool_transitions ~keeper_name:"k" ~turn_id:1 0 events in
+  let c2, _ = record_fsm_tool_transitions ~keeper_name:"k" ~turn_id:1 0 events in
+  check int "repeated call same count" c1 c2
+;;
+
+let test_drain_cancel_exchange () =
+  let open EB.For_testing in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"k" ~scope () in
+  check
+    bool
+    "cancel starts Inactive"
+    true
+    (match get_drain_cancel t with Inactive -> true | _ -> false);
+  set_drain_cancel t (Active (Obj.magic 42));
+  check
+    bool
+    "cancel set"
+    true
+    (match get_drain_cancel t with Active _ -> true | _ -> false);
+  let taken = exchange_drain_cancel t Inactive in
+  check
+    bool
+    "exchange returned old Active"
+    true
+    (match taken with Active _ -> true | _ -> false);
+  check
+    bool
+    "cancel cleared to Inactive"
+    true
+    (match get_drain_cancel t with Inactive -> true | _ -> false)
+;;
+
+let test_unsubscribe_closes_lifecycle_before_fiber_claims () =
+  let open EB.For_testing in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"k" ~scope () in
+  (* Simulate [unsubscribe] running before a freshly-forked background fiber
+     reaches [Atomic.compare_and_set]. The lifecycle must be [Closed] so the
+     late fiber sees it and exits instead of leaking a polling loop. *)
+  set_drain_cancel t Closed;
+  check
+    bool
+    "lifecycle is Closed after unsubscribe"
+    true
+    (match get_drain_cancel t with Closed -> true | _ -> false);
+  let attempt = exchange_drain_cancel t (Active (Obj.magic 42)) in
+  check
+    bool
+    "late fiber exchange fails against Closed"
+    true
+    (match attempt with Closed -> true | _ -> false)
+;;
+
+let test_state_pending_count_integrity_under_concurrent_updates () =
+  let open EB.For_testing in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"k" ~scope () in
+  let n = 100 in
+  let domains =
+    List.init 4 (fun _ ->
+      Domain.spawn (fun () ->
+        for _ = 1 to n do
+          let _ =
+            record_fsm_tool_transitions
+              ~keeper_name:"k"
+              ~turn_id:1
+              0
+              [ tool_called "x"; tool_completed "x" ]
+          in
+          ()
+        done))
+  in
+  List.iter Domain.join domains;
+  let state = get_state t in
+  check int "concurrent pure computation leaves count at zero" 0 state.pending_tool_count
+;;
+
+let test_keeper_event_bus_is_intentionally_process_wide () =
+  let bus = Agent_core.Event_bus.create () in
+  Event_bus_slots.set_keeper bus;
+  let worker = Domain.spawn (fun () -> Event_bus_slots.get_keeper ()) in
+  check
+    (option pass)
+    "event bus is intentionally process-wide and visible from another domain"
+    (Some bus)
+    (Domain.join worker)
+;;
+
+let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
+  Eio_main.run @@ fun _env ->
+  let captured_bus = Agent_core.Event_bus.create () in
+  let later_bus = Agent_core.Event_bus.create () in
+  Event_bus_slots.set_keeper captured_bus;
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"a" ~scope () in
+  let unsubscribed = ref false in
+  let unsubscribe_once () =
+    if not !unsubscribed
+    then (
+      unsubscribed := true;
+      EB.unsubscribe t)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      unsubscribe_once ();
+      Event_bus_slots.set_keeper captured_bus)
+    (fun () ->
+       Event_bus_slots.set_keeper later_bus;
+       let publisher = match EB.publishing_bus t with
+         | Some publisher -> Scope.bus publisher ~scope
+         | None -> fail "captured subscriber lost its publishing bus" in
+       Agent_core.Event_bus.publish publisher (tool_called "captured");
+       Agent_core.Event_bus.publish (Scope.bus later_bus ~scope) (tool_called "later");
+       let summary = EB.drain ~site:"test_creation_bus" t in
+       check int "captured bus only" 1 summary.event_count;
+       check
+         int
+         "pending count from captured bus"
+         1
+         (EB.For_testing.get_state t).pending_tool_count;
+       (* #29230: the terminal-path from-state reads this public accessor;
+          it must mirror the authoritative value exactly. *)
+       check
+         int
+         "public pending_tool_count mirrors the authoritative value"
+         1
+         (EB.pending_tool_count t);
+       unsubscribe_once ();
+       Agent_core.Event_bus.publish (Scope.bus captured_bus ~scope) (tool_called "after-unsubscribe");
+       let summary_after_unsubscribe =
+         EB.drain ~site:"test_after_unsubscribe" t
+       in
+       check
+         int
+         "captured subscription removed without new events"
+         summary.event_count
+         summary_after_unsubscribe.event_count)
+;;
+
+let test_turn_event_bus_prefers_injected_bus_over_fallback () =
+  Eio_main.run @@ fun _env ->
+  let injected_bus = Agent_core.Event_bus.create () in
+  let fallback_bus = Agent_core.Event_bus.create () in
+  Event_bus_slots.set_keeper fallback_bus;
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~event_bus:injected_bus ~keeper_name:"a" ~scope () in
+  Fun.protect
+    ~finally:(fun () ->
+      EB.unsubscribe t;
+      Event_bus_slots.set_keeper fallback_bus)
+    (fun () ->
+       Agent_core.Event_bus.publish (Scope.bus fallback_bus ~scope) (tool_called "fallback");
+       Agent_core.Event_bus.publish (Scope.bus injected_bus ~scope) (tool_called "injected");
+       let summary = EB.drain ~site:"test_injected_bus" t in
+       check int "injected bus only" 1 summary.event_count;
+       check
+         int
+         "pending count from injected bus"
+         1
+         (EB.For_testing.get_state t).pending_tool_count)
+;;
+
+let test_take_drain_cancel_clears_active_without_spin () =
+  let open EB.For_testing in
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"k" ~scope () in
+  set_drain_cancel t (Active (Obj.magic 42));
+  (* The previous [unsubscribe] reconstructed [Active cc] as the CAS [seen]
+     value; physical inequality made the CAS fail forever and the close loop
+     busy-spun at 100% CPU (server-wide hang, regression from #21447).
+     [take_drain_cancel] uses [Atomic.exchange] — it takes the handle and
+     closes the lifecycle in one step that cannot spin. *)
+  check bool "take returns the displaced active handle" true
+    (match take_drain_cancel t with Some _ -> true | None -> false);
+  check bool "lifecycle is Closed after take" true
+    (match get_drain_cancel t with Closed -> true | _ -> false);
+  (* idempotent: a second take observes [Closed] and yields nothing. *)
+  check bool "second take returns None" true
+    (match take_drain_cancel t with None -> true | Some _ -> false);
+  check bool "lifecycle stays Closed" true
+    (match get_drain_cancel t with Closed -> true | _ -> false)
+;;
+
+let test_background_drain_continues_across_multiple_polls () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env
+    ~net:env#net
+    ~clock:env#clock
+    ~mono_clock:env#mono_clock
+    ~sw
+  @@ fun () ->
+  let bus = Agent_core.Event_bus.create () in
+  Event_bus_slots.set_keeper bus;
+  let scope = Scope.create ~keeper_turn_id:1 in
+  let t = EB.create ~keeper_name:"a" ~scope () in
+  let interval = Masc.Keeper_turn_helpers.turn_event_bus_drain_interval_sec () in
+  let rec wait_for_event_count expected attempts =
+    if (EB.For_testing.get_state t).summary.event_count >= expected
+    then true
+    else if attempts <= 0
+    then false
+    else (
+      Eio.Time.sleep env#clock interval;
+      wait_for_event_count expected (attempts - 1))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      match EB.For_testing.take_drain_cancel t with
+      | None -> ()
+      | Some cc -> Eio.Cancel.cancel cc (Failure "background_drain_test_done"))
+    (fun () ->
+       Agent_core.Event_bus.publish (Scope.bus bus ~scope) (tool_called "first");
+       EB.start_background_drain ~clock:env#clock t;
+       check bool "first event drained" true (wait_for_event_count 1 20);
+       Agent_core.Event_bus.publish (Scope.bus bus ~scope) (tool_called "second");
+       check bool "second event drained" true (wait_for_event_count 2 20);
+       Agent_core.Event_bus.publish (Scope.bus bus ~scope) (tool_called "third");
+       check bool "background drain keeps polling" true (wait_for_event_count 3 20))
+;;
+
+let test_execution_scope_isolates_queue_tracker_and_fsm () =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file "keeper-scope-fsm-" ".jsonl" in
+  let previous = Sys.getenv_opt "MASC_KEEPER_TRANSITION_LOG" in
+  Unix.putenv "MASC_KEEPER_TRANSITION_LOG" path;
+  Fun.protect ~finally:(fun () ->
+    (match previous with
+     | Some value -> Unix.putenv "MASC_KEEPER_TRANSITION_LOG" value
+     | None -> Unix.unsetenv "MASC_KEEPER_TRANSITION_LOG");
+    Sys.remove path) (fun () ->
+    let bus = Agent_core.Event_bus.create () in
+    let scope_a = Scope.create ~keeper_turn_id:1 in
+    let scope_b = Scope.create ~keeper_turn_id:1 in
+    let published_a = Scope.bus bus ~scope:scope_a in
+    let published_b = Scope.bus bus ~scope:scope_b in
+    let a_counts = ref [] and b_counts = ref [] in
+    let a = EB.create ~event_bus:bus ~keeper_name:"a" ~scope:scope_a
+        ~on_pending_count_change:(fun count -> a_counts := count :: !a_counts) () in
+    let b = EB.create ~event_bus:bus ~keeper_name:"a" ~scope:scope_b
+        ~on_pending_count_change:(fun count -> b_counts := count :: !b_counts) () in
+    let evidence () = In_channel.with_open_bin path In_channel.input_all in
+    Fun.protect ~finally:(fun () -> EB.unsubscribe a; EB.unsubscribe b) (fun () ->
+      Agent_core.Event_bus.publish published_b (tool_called "b-tool");
+      ignore (EB.drain b);
+      check int "B starts its own pending tool" 1 (EB.pending_tool_count b);
+      let before = evidence () in
+      check bool "actual B drain emitted FSM evidence" true (String.length before > 0);
+      Agent_core.Event_bus.publish published_a (tool_called "a-tool");
+      Agent_core.Event_bus.publish published_a (tool_completed "a-tool");
+      Agent_core.Event_bus.publish bus (tool_completed "unscoped");
+      (* A producer-owned foreign scope survives publishing via B's handle. *)
+      let foreign = tool_completed "foreign" in
+      let foreign_scope = match Agent_core.Caller_scope.of_string "foreign" with
+        | Ok scope -> scope | Error message -> fail message in
+      Agent_core.Event_bus.publish published_b
+        { foreign with meta = { foreign.meta with caller_scope = Some foreign_scope } };
+      Agent_core.Event_bus.publish published_b
+        (dummy_event (Agent_core.Event_bus.ToolCalled
+          { invocation = invocation "other-agent"; agent_name = "other"
+          ; tool_name = "other-agent"; input = `Null }));
+      let b_summary = EB.drain b in
+      check int "A/foreign/unscoped input never enters B tracker" 1 b_summary.event_count;
+      check int "late A completion cannot release B tool" 1 (EB.pending_tool_count b);
+      check (list int) "B count callback is untouched" [1] !b_counts;
+      check string "B drain emits no FSM evidence for A" before (evidence ());
+      ignore (EB.drain a);
+      check int "A drains its own pair" 1 (EB.tool_completed_count a);
+      check int "A own pair settles" 0 (EB.pending_tool_count a);
+      check bool "A pair has no integrity error" true (EB.integrity_error a = None);
+      Agent_core.Event_bus.publish published_b (tool_completed "b-tool");
+      (* Subscription capacity is 256; foreign traffic above that boundary
+         must not evict the B completion already waiting in B's queue. *)
+      for _ = 1 to 257 do
+        Agent_core.Event_bus.publish published_a (tool_called "flood")
+      done;
+      ignore (EB.drain b);
+      check int "foreign flood cannot evict B completion" 0 (EB.pending_tool_count b);
+      check int "B records its own completion" 1 (EB.tool_completed_count b);
+      check (list int) "B gets exactly own count changes" [0; 1] !b_counts;
+      check bool "B tracker sees no foreign unmatched completion" true
+        (EB.integrity_error b = None)))
+;;
+
+let () =
+  Alcotest.run
+    "keeper-unified-turn-event-bus"
+    [ ( "record-fsm-tool-transitions"
+      , [ test_case "counts and transitions" `Quick
+            test_record_fsm_tool_transitions_counts_and_transitions
+        ; test_case "pure/idempotent" `Quick test_record_fsm_tool_transitions_is_pure
+        ] )
+    ; ( "drain-cancel"
+      , [ test_case "atomic exchange" `Quick test_drain_cancel_exchange
+        ; test_case "unsubscribe closes lifecycle" `Quick
+            test_unsubscribe_closes_lifecycle_before_fiber_claims
+        ; test_case "take_drain_cancel clears active without spin" `Quick
+            test_take_drain_cancel_clears_active_without_spin
+        ] )
+    ; ( "concurrency"
+      , [ test_case "execution scope isolates queue, tracker and FSM" `Quick
+            test_execution_scope_isolates_queue_tracker_and_fsm
+        ; test_case "pure transitions under concurrent domains" `Quick
+            test_state_pending_count_integrity_under_concurrent_updates
+        ; test_case "event bus is intentionally process-wide" `Quick
+            test_keeper_event_bus_is_intentionally_process_wide
+        ; test_case "turn event bus keeps creation bus" `Quick
+            test_turn_event_bus_uses_creation_bus_after_fallback_changes
+        ; test_case "turn event bus prefers injected bus" `Quick
+            test_turn_event_bus_prefers_injected_bus_over_fallback
+        ] )
+    ; ( "background-drain"
+      , [ test_case "continues across multiple polls" `Quick
+            test_background_drain_continues_across_multiple_polls
+        ] )
+    ]
+;;

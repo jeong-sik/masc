@@ -1,0 +1,22 @@
+name = "keeper_job_status"
+description = """
+Reconcile the exact durable isolated job_id and return its phase, original source context, \
+cancellation request, resource cleanup stage, result_ready flag, reconciliation state/reason, \
+and stdout/stderr artifact references when terminal output is available. A held non-ready job \
+reports status=unconfirmed while retaining its original phase and handle. result_ready marks \
+a settled result, including cancellation or explicitly unavailable outputs; read the outcome \
+and artifact references separately. \
+The handle survives Keeper turns and server restarts. Jobs run only in a private Docker \
+workspace without network access or Keeper/host identity. This call may persist reconciled \
+or terminal evidence. Unconfirmed create or launch remains unconfirmed; inspecting status \
+does not authorize relaunching or retrying the original command. Complete results remain \
+readable after maintenance removes the original container and private job data."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "job_id"
+type = "string"
+min_length = 1
+required = true
+description = "Exact durable job_id returned by keeper_job_start."

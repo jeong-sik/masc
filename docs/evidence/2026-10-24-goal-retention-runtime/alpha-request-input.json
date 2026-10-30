@@ -1,0 +1,4 @@
+{
+  "name": "goal-canary",
+  "message": "먼저 workspace/acceptance.json을 읽어 현재 상태를 확인하세요. workspace/acceptance.json의 alpha, beta, gamma를 모두 true로 완성해 주세요. 먼저 alpha만 true로 바꾸는 Task를 실제로 만들고 맡아 작업하세요. 첫 Task는 beta와 gamma를 false로 유지한 채 파일을 다시 읽고, artifact:workspace/acceptance.json을 증거로 검증에 제출하세요. 첫 Task가 승인되기 전에는 beta/gamma를 수정하지 마세요. 승인되면 추가 요청을 기다리지 말고 먼저 전체 달성 상태를 확인해 기록한 뒤 남은 작업을 이어가세요."
+}

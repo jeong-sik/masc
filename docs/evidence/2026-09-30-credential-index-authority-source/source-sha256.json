@@ -1,0 +1,11 @@
+{
+  "lib/auth/auth.mli": "f4a9aff28f60be18a4344201fa0f478d4cab88808d60917a15b6f572e80d13a5",
+  "lib/auth/auth_credential_base.ml": "7d5a6e9ee6510ef17dd5b931b69d9bb8ec261d3559e61fab9f721d5eb6dc47b6",
+  "lib/auth/auth_credential_token.ml": "4bbc08944510cffdd6d69f83a68dbd1a41040d52afc931cf81a7e443f98d3e0b",
+  "lib/auth/auth_credential_token.mli": "0059120e6841e4e0f35c681794f2fc582bf01a167d514d340a2815fd720246c5",
+  "test/test_auth_credential_index_authority.ml": "8509ae0cfdfc8544e5badc3f30deff118ca592c98028eeeba07e2b128fc09ab2",
+  "test/stanzas/test_auth_credential_index_authority.inc": "3c3d67abe499e5d36ce1d701fa4f495e448ac8840c95cb27840e7a7078e454b3",
+  "test/dune": "87c137632af312eb6923addc40d26a585c68270ceb13feac61f88c040f71bd4d",
+  "docs/constitution.xml": "999dcb3cb0502239b41be1d1f10c7f8757b1467adfc817d2866d65064c5e212e",
+  "changelog.d/40259.md": "5c46408cbc4022bdaffae4ba8e97b37ce8dc3e2340679b63b516e8c048aea8f5"
+}

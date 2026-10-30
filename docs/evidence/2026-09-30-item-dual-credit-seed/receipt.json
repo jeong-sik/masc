@@ -1,0 +1,14 @@
+{
+  "scope": "Executed actual fixture seed statements only; no native HTTP/CI/build",
+  "paid_rows": 2,
+  "ledger_sha256": "45f147af7bf29a723f98ccc4cbde03a1660a2ffd9a7c240c0c49fbdf7383ed14",
+  "fixture_sha256": {
+    "runtime.toml": "46abc8966c718ce01bf577ac028ecc09ae2ef28bfd5ff4bbcfd80df1a7487473",
+    "candle.toml": "f9f698fb8d0991ea98201203383eea99c4983110cd8b59948fb5ba3db8b9efda",
+    "keeper.toml": "ebe1779b46b9c98c180cd7f870020dca4b11a4d21fb38cd2c1ddefb283ba2c22",
+    "keeper.json": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909",
+    "restart-credit.jsonl": "e19520c771eaca3dec86ace96804f0e4a8ab6faf2edd17013a3a8a2417ccd305",
+    "paid-credit.jsonl": "d1db29938f8457f512a993dd037f4ccff4d2dc87be89d6f90a26a150b07cbbfe"
+  },
+  "result": "PASS"
+}

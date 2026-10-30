@@ -1,0 +1,33 @@
+{
+  "schema": "masc.selected-native-digest-reviews.v1",
+  "reviews": [
+    {
+      "name": "raw-evidence",
+      "retained_report": "reviews/raw-evidence.md.txt",
+      "original_report": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-raw-evidence-review-v1/README.md",
+      "sha256": "830dcbaf4a4fab313693679f03d6d6c2782a6781c2bbfd48b759300a54c32a04",
+      "scope": "Actual guarded immutable SQL/data joins and original conservation; prior unrelated profiling/TUI source authorship disclosed.",
+      "verdict_scope_label": "PASS_CLOSED_DIGEST_RAW_EVIDENCE_ONLY",
+      "formal_GitHub_approval": false
+    },
+    {
+      "name": "descriptor",
+      "retained_report": "reviews/descriptor.md.txt",
+      "original_report": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-descriptor-review-v1/README.md",
+      "sha256": "1ad10442ca0bc230e58e60e6c7da3ab589bf38ce0248556af9188f77ae54ce87",
+      "scope": "All six rows/150 hashes, actual root receipts and rational arithmetic; no new SQL or raw packet rescan; prior generic completion-helper authorship disclosed.",
+      "verdict_scope_label": "PASS_CLOSED_DESCRIPTOR_ROOT_RECEIPTS_AND_ARITHMETIC_ONLY",
+      "formal_GitHub_approval": false
+    },
+    {
+      "name": "source-gate",
+      "retained_report": "reviews/source-gate.md.txt",
+      "original_report": "artifacts/runs/extreme-perf-20261026/digest-native-comparison-source-review-v1/README.md",
+      "sha256": "401eafe2b8d4b94ac43c7630470c6f1a790c2023d46c239721466dbe015015bd",
+      "scope": "Pre-execution source/plan qualification gate; not a runtime or formal GitHub approval.",
+      "verdict_scope_label": "PASS_SOURCE_PLAN_AND_ARTIFACT_RECORDS_ONLY",
+      "formal_GitHub_approval": false
+    }
+  ],
+  "boundary": "Retained session reports are source/data reviews, not formal GitHub approvals. Historical Markdown is retained as .txt without rewriting its original private relative addresses."
+}

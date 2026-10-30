@@ -1,0 +1,23 @@
+name = "masc_agent_fitness"
+description = """
+Task success and fitness components measure recorded Task lifecycle outcomes only. Verifier approval does not establish external acceptance or Goal success; external acceptance coverage is explicitly unobserved in this stream and human Goal confirmation remains separate. Observed fitness components for exact agent identities. Named agents without recent records have null metrics and components. Missing completed-outcome or duration evidence leaves individual components null. Conflicting Task evidence is counted and excluded from completed outcomes without blocking other Tasks or agents. Handoff Task success is not a transfer receipt. Inventory queries combine recorded metric identities and the existing workspace agent listing, not a complete membership census."""
+additional_properties = false
+
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 2 turns needed it across 6317 provider requests, and its
+# 424 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 2 turns and saves the 424 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
+defer_loading = true
+[[params]]
+name = "agent_name"
+type = "string"
+description = """
+Optional exact agent identity. If omitted, returns metric-directory identities and the existing workspace agent listing."""
+
+[[params]]
+name = "days"
+type = "integer"
+description = "Task start-time window in days (default: 7)"
+default = 7

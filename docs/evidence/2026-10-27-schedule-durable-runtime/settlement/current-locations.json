@@ -1,0 +1,257 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Locate exact selected retained copies. Recorded capture paths belong to the original checkout roots listed in submanifest.json; generated retention index, not a rewrite of any captured manifest. Derived selections are bound separately in submanifest.json.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "capture-path-digests.json",
+    "sha256": "35efd08b86f7711a2463d47f12525438aff3843f36e0ff9ae664cf8933e1bb6b"
+  },
+  "files": {
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/controllers/trial1-v3.py.txt": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/probe_pending_settlement_actual_c2_v3.py",
+      "recorded_sha256": "0aca7602ed37123a4b124fc17048e7a4e695cfe8253b7c2a5840732f23e6fb1e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/controllers/trial1-v3-preparation.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-v3-preparation.json",
+      "recorded_sha256": "a518c00d66451ca343b8fb38337738f37954d9976f55949597e01992bd5cac03",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/invocation.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-1-invocation.json",
+      "recorded_sha256": "65dd570e3b50fe2ef98b2d0f5e69531090d299cd377449540aab6524ae751dff",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/controllers/trial2-v5.py.txt": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/probe_pending_settlement_actual_c2_v5.py",
+      "recorded_sha256": "1a513560e8d48580cdeb02c20f8a5c0a2403cb6730894ad7d0994cf9e5776577",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/controllers/trial2-v5-preparation.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-v5-preparation.json",
+      "recorded_sha256": "f02642126dea64c900cd074a388d09ffd1e3a08a6a79df34c8331ba6bb12123e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/invocation.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-2-invocation.json",
+      "recorded_sha256": "ddbf7e6c5405937257719894bd6a6dc6a0bf4f0bebc04e13cb0b8a22e3bcbe55",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/summary.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/summary.json",
+      "recorded_sha256": "466ef9253fb8dd85cb8543e71e54e56ccc01c54f9697c773353adfb07290a10f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/incomplete.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/incomplete.json",
+      "recorded_sha256": "c8606f25896964d3fa0df5fafc7ba6ed6449b185b1983864382aa4db47dce27c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/provenance.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/provenance.json",
+      "recorded_sha256": "da411113065945a038fd0cd5344131b9b0ed6c38ee1710f8f4547466ddd9d1db",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/process-A.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/process-A.json",
+      "recorded_sha256": "a4cac64f0401f8e3bdf77ae902019e2ed015705a193ad1bc25467a8cbc228088",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/after-owned-shutdown-ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/after-owned-shutdown-ledger.json",
+      "recorded_sha256": "d11ac63794072b51dbe578b170cc25b4a3f2d723fb5b1bb90d7ba3e52b03ced7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-accepted-ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-accepted-ledger.json",
+      "recorded_sha256": "b06a8c40b9acd2b20e07b33d8c1f4b64e6e06551f46fba5c69bdcda960cd4061",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-accepted-queue.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-accepted-queue.json",
+      "recorded_sha256": "368159f049435883e2f79c745447c939cf734a8715872f7c75132e30c72c81d4",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-cancelled-queue.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-cancelled-queue.json",
+      "recorded_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/before-stop-ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/before-stop-ledger.json",
+      "recorded_sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/frozen-ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-ledger.json",
+      "recorded_sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/frozen-queue.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-queue.json",
+      "recorded_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/frozen-wal.jsonl": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-wal.jsonl",
+      "recorded_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-after-cancel-wal.jsonl": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-after-cancel-wal.jsonl",
+      "recorded_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/after-owned-shutdown-ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/after-owned-shutdown-ledger.json",
+      "recorded_sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/final-source-address-queue.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/final-source-address-queue.json",
+      "recorded_sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/summary.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/summary.json",
+      "recorded_sha256": "fa9899443c01585678c156797cd757e902088bdadc0865e8a7251620b4396e5b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/provenance.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/provenance.json",
+      "recorded_sha256": "1f52b974ea1a7d72e1f74cb4742b1825850e31b0fbdd24e9d888fc3e0cc549a1",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/process-A.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/process-A.json",
+      "recorded_sha256": "996d9bd4f56e1eb81009522192e51130d4777b6ff5e57792f77f14779833e635",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/posix-lock-preflight.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/posix-lock-preflight.json",
+      "recorded_sha256": "698c90d7dccfe80fe142626df5110b1b4c04cbe1aa51a34d2c4164169b544b8a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/wal-barrier.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/wal-barrier.json",
+      "recorded_sha256": "833d35ad200d1a888e57067ae229dc0c7e6e1ddbf87498764ef47a9d9191dcca",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/stopped-process.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/stopped-process.json",
+      "recorded_sha256": "5eff394bb36d59d1703a39d190ce0f3b395ffc166af8efecb61cdf8959065f3f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/resumed-process.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/resumed-process.json",
+      "recorded_sha256": "efd9b0dfe436daf618a36620e225b67f533784bef45284af2eb0cd39695393d3",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/faults-installed.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/faults-installed.json",
+      "recorded_sha256": "5a4b03263b91551e9f68951c4e49408faae65b7d329d5bfcaba72a4ff672327d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/queue-effective-write-refusal.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-effective-write-refusal.json",
+      "recorded_sha256": "5f22fcc732c4d3d0b352127fca598a6256979140d0efa71891028d9067c8d0cd",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/queue-repaired.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-repaired.json",
+      "recorded_sha256": "d6244f93bcc45939013aa9e2033e16f52ce208a6dfca93257b9b8149ff7a0fe7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/ledger-repaired.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/ledger-repaired.json",
+      "recorded_sha256": "f0cfaf58ad72d3228ceaeca1f02aabba1139565d97d30303b1428d8e5a81f6f2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/original-retry-settled.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/original-retry-settled.json",
+      "recorded_sha256": "a6ee240a508673a672d290b9f64585d12e767d549aeae247c6a876cae0ec3354",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/final-source-address-proof.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/final-source-address-proof.json",
+      "recorded_sha256": "d11453ae3cedba45764959b2b7303e467df15686248f477ec818c529a0009f75",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-before-cancel-wal-metadata.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-before-cancel-wal-metadata.json",
+      "recorded_sha256": "8ce6e99cda05efdf225fcee0898a87f3652a5b633c3e8153e6b5fa19ebcb9238",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-after-cancel-wal-metadata.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-after-cancel-wal-metadata.json",
+      "recorded_sha256": "ed977121c2c196463c5159ca737b0717d1ef015b00a6062b884a27f69b5d2c54",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-cancellation-receipt-link.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-cancellation-receipt-link.json",
+      "recorded_sha256": "7dc556119c45081c4f8af4ddbe097564b36291a63e52386988ee03d93d1b734b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-cancelled-inventory.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-cancelled-inventory.json",
+      "recorded_sha256": "caef71324fc656dbb5a108d07353f98688cb0888fc07cfb235ca0b584a73d2f0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/first-failure.ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00065-response.bin",
+      "recorded_sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/first-failure.queue.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00066-response.bin",
+      "recorded_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/queue-repaired-ledger-fault.ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00275-response.bin",
+      "recorded_sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/queue-repaired-ledger-fault.queue.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00276-response.bin",
+      "recorded_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/retry-settled-only.ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00482-response.bin",
+      "recorded_sha256": "8aeb0b6a019c052565a8ab88d1efb2f76f3b0350eb2415d1dceff432fabf8bed",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/retry-settled-only.queue.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00483-response.bin",
+      "recorded_sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/fresh-admission.ledger.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00695-response.bin",
+      "recorded_sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/fresh-admission.queue.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00696-response.bin",
+      "recorded_sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-accepted-inventory.raw.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00021-response.bin",
+      "recorded_sha256": "f5209615ab0a7d617044921c4b847641dec6d38f5511296f42716c97a94d2847",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/final-exact-inventory.raw.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00697-response.bin",
+      "recorded_sha256": "cd6b319d07207f1b33f82ce9704031f63708bb20ac2d9d9d3d5c490898aa8274",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/independent-review.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/f5-c2-trial2-independent-review.json",
+      "recorded_sha256": "dfbcc7529f8a3ef5bd175882f957273a3e02912c21dd36d91688eba891693d9e",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

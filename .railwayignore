@@ -1,0 +1,30 @@
+# Railway ignore file - allows masc-linux-x64 binary for deployment
+# (This is a modified copy of .gitignore without the binary exclusion)
+
+# OCaml build artifacts
+_build/
+*.install
+*.merlin
+.merlin
+_opam/
+
+# Editor
+.vscode/
+*.swp
+*~
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MASC runtime data (not part of source)
+.masc/
+.worktrees/
+
+# Database files
+*.db
+
+# Test artifacts
+*.log
+benchmarks/results/

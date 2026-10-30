@@ -1,0 +1,65 @@
+[
+  {
+    "chat_line": 1206,
+    "chat_row_sha256": "222c7a9b5ca1d75765de008506c9a79b38a01a3d83748b945f667892109ebe8a",
+    "turn_ref": "trace-1788310783624-00004#1111",
+    "utc": "2026-09-04T16:36:56.442459+00:00",
+    "runtime": "ollama_cloud.deepseek-v4-pro",
+    "selected_model": "deepseek-v4-pro",
+    "enable_thinking": true,
+    "operation_id": "tui-01a06d45-df2c-7000-90c6-b3354b935807",
+    "journal_sha256": "4b0ac021d8dc782a2fe2295b103e05218ce5baabc966c15100c7463cd72f3aab",
+    "thinking_delta_count": 165,
+    "public_delta_count": 35,
+    "public_equals_final": true,
+    "turn_outcome": "external_effect_completed",
+    "public_start_seq": 171,
+    "public_end_seq": 205,
+    "tool_start_seq": [
+      207
+    ],
+    "raw_trace_present": false
+  },
+  {
+    "chat_line": 1218,
+    "chat_row_sha256": "2817ecff63437491cdc59fa80af9e912bcc15d531abbcbe9026e939d69570b06",
+    "turn_ref": "trace-1788310783624-00004#1115",
+    "utc": "2026-09-04T16:48:25.344433+00:00",
+    "runtime": "ollama_cloud.deepseek-v4-pro",
+    "selected_model": "deepseek-v4-pro",
+    "enable_thinking": true,
+    "operation_id": "tui-01a06d51-ad51-7000-a282-a3d2f9e73f0e",
+    "journal_sha256": "f2ad0e4decf4f0e31b5887c3e5cb82cb37c0d2edbbd1aeff967a11a6e13b2419",
+    "thinking_delta_count": 751,
+    "public_delta_count": 37,
+    "public_equals_final": true,
+    "turn_outcome": "external_effect_completed",
+    "public_start_seq": 757,
+    "public_end_seq": 793,
+    "tool_start_seq": [
+      795
+    ],
+    "raw_trace_present": false
+  },
+  {
+    "chat_line": 1252,
+    "chat_row_sha256": "cd7bddb70f76324533199426e0c21c660d67f53fdd39657f85654eccf7d48d3f",
+    "turn_ref": "trace-1788310783624-00004#1123",
+    "utc": "2026-09-04T16:58:01.235936+00:00",
+    "runtime": "ollama_cloud.deepseek-v4-pro",
+    "selected_model": "deepseek-v4-pro",
+    "enable_thinking": true,
+    "operation_id": "tui-01a06d56-fbe2-7000-9fb7-c21c994face2",
+    "journal_sha256": "bdbd8ca39a09a9231192e185b828b10f79fb521238b2ef9acac2f4ba21f683f7",
+    "thinking_delta_count": 629,
+    "public_delta_count": 40,
+    "public_equals_final": true,
+    "turn_outcome": "external_effect_completed",
+    "public_start_seq": 635,
+    "public_end_seq": 674,
+    "tool_start_seq": [
+      676
+    ],
+    "raw_trace_present": false
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "scope": "actual run_started metadata; prompt and reasoning excluded",
+  "runs": [
+    {
+      "record_type": "run_started",
+      "worker_run_id": "wr-1a16ed5ad2d-a94b-0000",
+      "agent_name": "agent_core-glm-coding.glm-5.3-flash",
+      "session_id": "trace-1792860859522-00000",
+      "ts": 1792860859.693816,
+      "model": "glm-5.3-flash",
+      "file": "turn-1792860859690-a94b-000000.jsonl",
+      "line": 1
+    }
+  ]
+}

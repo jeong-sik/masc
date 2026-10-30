@@ -1,0 +1,15 @@
+from pathlib import Path
+from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
+import json,os
+root=Path(__file__).parent
+html='''<!doctype html><meta charset="utf-8"><title>MASC · Zen terminal canvas</title>
+<style>*{box-sizing:border-box}body{margin:0;color:#d8edff;background:#081221;font:18px system-ui}header{position:sticky;top:0;background:#0d1d32ee;border-bottom:1px solid #254462;padding:18px 5vw;z-index:1}main{padding:6vw;max-width:1300px;margin:auto}small{color:#4fe0bd;letter-spacing:.15em}h1{font-size:clamp(32px,5vw,70px);letter-spacing:-.04em;margin:.4em 0}p{line-height:1.7;color:#a6b8ce}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;margin:50px 0}.card{min-height:240px;padding:28px;border:1px solid #416783;border-radius:24px;background:linear-gradient(140deg,#153d56,#281c40);box-shadow:0 20px 60px #0006}.orb{width:100px;height:100px;border-radius:50%;background:radial-gradient(circle at 30% 20%,#b8ffe9,#09a89f 40%,#252764);transform:rotate(-15deg)}section{padding:90px 0;border-top:1px solid #294059}h2{font-size:42px}code{color:#4fe0bd}@media(max-width:650px){.cards{grid-template-columns:1fr}}</style>
+<header><strong>MASC / ZEN</strong> <span style="float:right">REAL BROWSER PIXELS</span></header><main><small>TERMINAL VIEWPORT LAB</small><h1>The browser paints.<br>The terminal shows.</h1><p>Gecko computes CSS layout, text and color. This owned page exercises Grid, gradients, shadows and sticky positioning.</p><div class="cards"><div class="card"><div class="orb"></div><h3>CSS paint</h3></div><div class="card"><h3>한글도 그대로</h3><p>브라우저의 글꼴과 레이아웃을 터미널로.</p></div><div class="card"><h3>One live tab</h3><p>No separate CSS renderer.</p></div></div>'''+''.join(f'<section><small>SCROLL TARGET {n:02}</small><h2>Viewport section {n}</h2><p>Scroll changes the real page. The sticky header stays at the top.</p></section>' for n in range(1,7))+'</main>'
+(root/'index.html').write_text(html)
+class H(BaseHTTPRequestHandler):
+ def do_GET(self):
+  data=html.encode();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+ def log_message(self,*args):pass
+server=ThreadingHTTPServer(('127.0.0.1',0),H)
+(root/'fixture.json').write_text(json.dumps({'url':f'http://127.0.0.1:{server.server_port}/','pid':os.getpid()}))
+print('fixture ready',flush=True);server.serve_forever()

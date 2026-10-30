@@ -1,0 +1,24 @@
+{
+  "source": "34eced85849e37c20ab0c7113367b40a9735883d",
+  "sha256": {
+    "lib/runtime/runtime_adapter.ml": "ac9a8b69f7ad5764647ae1964e1f47230586f3ff6d2a07fbcc292688fd3d747b",
+    "lib/runtime/runtime_schema.ml": "6e9cea495855e00656eda0eae20280dbe12a6e540cf33aa1890d8c5d43a4b770",
+    "lib/runtime/runtime_schema.mli": "1a386f343671e09cbef8f6f99b85a910a754364aeb3fe0132e6ab498713cfe46",
+    "lib/runtime/runtime_toml.ml": "d07d7f4c1aada320a3481affeb181adbf075be791940afaa74358d12f0980bba",
+    "lib/server/server_dashboard_runtime_declaration_projection.ml": "969cdaa4a5ddd301d41035749aead90431c6937ee931c8cc7816816ebe0b19b9",
+    "packages/agent_core/lib/llm_provider/capabilities.ml": "c038c8f6dc3f86ce9f61391924cfcd091b222096d92593089c2a3380f68d21e6",
+    "packages/agent_core/lib/llm_provider/capabilities.mli": "820c9901fb28445e436d24d928eaf50fb5c36a2d243a77dd5d2bf70caa9654ac",
+    "packages/agent_core/lib/llm_provider/capability_vocab.ml": "ce83fe81a96374ef067a75dca2146c59a517a90abe9559da21a54e3dcb268a38",
+    "packages/agent_core/lib/llm_provider/capability_vocab.mli": "d7301be19925e8864c610f4924c6c3f6d7f15ce2db1a0ea9cba4f00c4c927e7a",
+    "packages/agent_core/lib/llm_provider/complete_common.ml": "044bf25f36bc826a86c02eeb7326646f09053ca9ae7c230a769c87617d55a4fe",
+    "packages/agent_core/lib/llm_provider/provider_config.ml": "e3477af3dc1d4d800ee52fed84f68c88adf3dacc724f6e22e6bc8ac6b14a78c5",
+    "packages/agent_core/lib/llm_provider/provider_config.mli": "98100be5feaae5b07b59ad1bdf263a4af31e13b0eb05003425858f68918ef895",
+    "packages/agent_core/lib/llm_provider/reasoning_dialect.ml": "f9f0df5c755a361046d4c9855bc1107cd1ee9eebd4d7731d841d2288bf532ab6",
+    "packages/agent_core/lib/llm_provider/reasoning_dialect.mli": "d01b3a49355715ff75d9067f3adabac4761972e49baebfde7a08dfab4083d107",
+    "packages/agent_core/lib/llm_provider/reasoning_effort.mli": "5c4fc4dc3bf9ed5c530cb2399899311d57ce60b8ba074a4020b0d05183e8e96f",
+    "packages/agent_core/models.toml": "7197fd0e8b455c063d471e34bcd312d8301dbb5a316fc750467a8377e39c2d59",
+    "packages/agent_core/test/test_backend_openai_codec.ml": "9fcaae43ab8d452801494d603e49be4825b5c604320bd88dc897280f825737c2",
+    "test/test_gate_hitl_runtime_info.ml": "9f5a858254c791a0248d76401cf16eee70d1b6f3492b6d70f30c7dfb60d533c9",
+    "test/test_thinking_control_format_unknown_error.ml": "819845ff3ae7644b8ff2c600ffc00a143dcac8e0a9cb9e98d1f70160b2a87323"
+  }
+}

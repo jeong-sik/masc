@@ -1,0 +1,4 @@
+{
+  "name": "exhibit-editor",
+  "message": "추가 검수 결과입니다. booklet.pdf를 외부에서 직접 렌더링해 renders/page1.png와 비교했습니다. 현재 renders/*.png는 PDF에서 나온 이미지가 아니라 make_renders가 별도로 그린 이미지라 글과 배치가 다릅니다. 성공 조건의 PNG 렌더는 최종 PDF의 실제 각 페이지를 렌더링한 것이어야 합니다. 최종 booklet.pdf를 3페이지로 생성한 뒤 그 파일 자체에서 PNG 세 장을 만들고, 그 PNG로 글리프·겹침·잘림을 확인해 주세요. 별도 재현 그림을 PDF 검증 증거로 제출하면 안 됩니다. 기존 Task와 운영자가 확인한 날짜·장소·무료 정보를 유지하여 마무리하세요."
+}

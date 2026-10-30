@@ -1,0 +1,45 @@
+{
+  "before": {
+    "slots": [
+      "kimi_coding.kimi-for-coding"
+    ]
+  },
+  "after": {
+    "slots": [],
+    "cli_slots": [
+      "codex_subscription.gpt-5.6-sol"
+    ]
+  },
+  "all_other_parsed_semantics_equal": true,
+  "candidate_sha256": "669508ef120954da200565c13e8bdf64ae44c1610e5adca375cbb7da1ba5a352",
+  "saved": true,
+  "save_revision": "f0a350e874970567a1c3796f073271560e0704df0d8779db8e0d05f3b4a0ebe6",
+  "application": {
+    "operation": "raw_save",
+    "routing": {
+      "status": "applied",
+      "requires_restart": false,
+      "applied_at": "2026-09-12T13:49:13Z"
+    },
+    "keeper_overlay": {
+      "status": "not_configured",
+      "configured_count": 0,
+      "requires_restart": false,
+      "pending_keys": [],
+      "applied_keys": [],
+      "preempted_keys": [],
+      "applied_at": null
+    },
+    "skills": {
+      "state": "unchanged",
+      "input_source_revision": "f0a350e874970567a1c3796f073271560e0704df0d8779db8e0d05f3b4a0ebe6",
+      "snapshot_revision": "8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2",
+      "catalog_revision": "fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d",
+      "config_state": "configured"
+    }
+  },
+  "readback_revision": "f0a350e874970567a1c3796f073271560e0704df0d8779db8e0d05f3b4a0ebe6",
+  "readback_semantics_equal": true,
+  "actual_model_and_effect_proof": "codex-gate-correction-2578/receipt.redacted.json",
+  "restarted": false
+}

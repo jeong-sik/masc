@@ -1,0 +1,229 @@
+(** Shared types and small helpers for model inference metrics. *)
+
+module StringMap : module type of Set_util.StringMap
+module IntMap : Map.S with type key = int
+
+type recent_entry =
+  { re_ts_unix : float
+  ; re_outcome : string
+  ; re_stop_reason : string option
+  ; re_turn_lane : string option
+  ; re_input_tokens : int option
+  ; re_output_tokens : int option
+  ; re_cache_read_tokens : int option
+  ; re_cache_creation_tokens : int option
+  ; re_latency_ms : float option
+  ; re_prompt_tok_per_sec : float option
+  ; re_peak_memory_gb : float option
+  ; re_cost_usd : float option
+  ; re_tools_count : int
+  ; re_usage_reported : bool option
+  ; re_telemetry_reported : bool option
+  ; re_usage_trust : string option
+  ; re_usage_anomaly_reasons : string list
+  ; re_coverage_reason : string option
+  ; re_coverage_stage : string option
+  ; re_streaming_ttfrc_ms : float option
+  ; re_streaming_inter_chunk_count : int option
+  ; re_streaming_inter_chunk_avg_ms : float option
+  }
+
+type coverage_reason_count =
+  { crc_reason : string
+  ; crc_count : int
+  }
+
+type bucket_metric =
+  { b_ts_start : float
+  ; b_entry_count : int
+  ; b_success_count : int
+  ; b_error_count : int
+  ; b_p50_latency_ms : float option
+  ; b_p95_latency_ms : float option
+  ; b_error_rate : float
+  ; b_total_cost_usd : float option
+  ; b_cache_hit_ratio : float option
+    (** Sum of cache reads divided by inclusive input tokens from the same
+        successful entries reporting both fields, with positive input and
+        cache reads between zero and input. [None] when no such pair exists;
+        [Some 0.0] when valid pairs report zero cache reads. *)
+  }
+
+type model_bucketed =
+  { mb_model_id : string
+  ; mb_buckets : bucket_metric list
+  }
+
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
+
+(** How much of a model's successful turns reported usage and telemetry. *)
+type coverage_status =
+  | Coverage_error_only  (** No successful turn, at least one error turn. *)
+  | Coverage_full  (** Every successful turn reported both. *)
+  | Coverage_none  (** No successful turn reported either. *)
+  | Coverage_partial  (** Some successful turns are missing one or both. *)
+
+val coverage_status_to_string : coverage_status -> string
+(** ["error_only"], ["full"], ["none"], ["partial"] — the JSON and text value. *)
+
+type model_stats =
+  { model_id : string
+  ; entry_count : int
+  ; avg_tok_per_sec : float option
+  ; p50_tok_per_sec : float option
+  ; p95_tok_per_sec : float option
+  ; prompt_avg_tok_per_sec : float option
+  ; prompt_p50_tok_per_sec : float option
+  ; prompt_p95_tok_per_sec : float option
+  ; hw_decode_avg_tok_per_sec : float option
+  ; hw_decode_p50_tok_per_sec : float option
+  ; hw_decode_p95_tok_per_sec : float option
+  ; max_peak_memory_gb : float option
+  ; thinking_fraction : float option
+  ; avg_latency_ms : float option
+  ; p50_latency_ms : float option
+  ; p95_latency_ms : float option
+  ; total_input_tokens : int option
+  ; total_output_tokens : int option
+  ; total_cache_read_tokens : int option
+  ; cached_input : cached_input option
+  ; total_cache_creation_tokens : int option
+  ; total_reasoning_tokens : int option
+  ; usage_sample_count : int
+  ; telemetry_sample_count : int
+  ; usage_missing_count : int
+  ; telemetry_missing_count : int
+  ; coverage_status : coverage_status
+  ; primary_coverage_stage : string option
+  ; primary_coverage_reason : string option
+  ; coverage_reason_counts : coverage_reason_count list
+  ; success_count : int
+  ; error_count : int
+  ; total_cost_usd : float option
+  ; avg_tool_calls_per_turn : float
+  ; total_tool_calls : int
+  ; top_tools : (string * int) list
+  ; recent_entries : recent_entry list
+  ; buckets : bucket_metric list
+  }
+
+type latency_bucket =
+  { lo_ms : int
+  ; hi_ms : int option
+  ; count : int
+  }
+
+type cost_read_diagnostics =
+  { malformed_rows : int
+  ; schema_violation_rows : int
+  ; identity_conflict_rows : int
+  }
+
+type cost_read_result =
+  (cost_read_diagnostics, Dated_jsonl.read_error) result
+
+type decision_read_error =
+  | Decision_directory_unavailable
+  | Decision_files_unreadable of int
+  | Decision_rows_invalid of { malformed_rows : int; schema_violation_rows : int }
+
+type read_error =
+  | Decisions_unavailable of decision_read_error
+  | Costs_unavailable of Dated_jsonl.read_error
+
+type aggregate =
+  { window_minutes : int
+  ; bucket_minutes : int
+  ; models : model_stats list
+  ; total_entries : int
+  ; total_error_entries : int
+  ; latency_buckets : latency_bucket list
+  ; cost_read : cost_read_result
+  }
+
+val read_error_to_string : read_error -> string
+
+type raw_entry =
+  { model : string
+  ; executed_runtime_id : string option
+    (** Exact observed answerer from the decision, never inferred from an API model name. *)
+  ; inference_key : Cost_ledger.inference_key option
+  ; ts_unix : float
+  ; outcome : Keeper_decision_outcome.t
+  ; stop_reason : string option
+  ; turn_lane : string option
+  ; tok_per_sec : float option
+  ; prompt_tok_per_sec : float option
+  ; hw_decode_tok_per_sec : float option
+  ; peak_memory_gb : float option
+  ; thinking_enabled : bool option
+  ; latency_ms : float option
+  ; input_tokens : int option
+  ; output_tokens : int option
+  ; cache_read_tokens : int option
+  ; cache_creation_tokens : int option
+  ; reasoning_tokens : int option
+  ; cost_usd : float option
+  ; tool_call_count : int
+  ; tools_used : string list
+  ; usage_reported : bool option
+  ; telemetry_reported : bool option
+  ; usage_trust : string option
+  ; usage_anomaly_reasons : string list
+  ; coverage_reason : string option
+  ; coverage_stage : string option
+  ; streaming_ttfrc_ms : float option
+  ; streaming_inter_chunk_count : int option
+  ; streaming_inter_chunk_avg_ms : float option
+  }
+
+type parse_error =
+  | Not_assoc
+  | Invalid_ts_unix
+  | Missing_ts_unix
+  | Out_of_window
+  | No_telemetry_object
+  | Missing_outcome
+  | Invalid_outcome
+  | Missing_usage_reported
+  | Missing_telemetry_reported
+  | Missing_success_model
+  | Missing_success_inference_identity
+  | Missing_error_model_attribution
+  | Invalid_executed_runtime_id
+  | Invalid_current_cost_row of Cost_ledger.decode_error
+
+val parse_error_label : parse_error -> string
+val parse_error_detail : parse_error -> string
+val parse_error_is_schema_violation : parse_error -> bool
+val percentile : float array -> float -> float
+val average_opt : float array -> float option
+val percentile_opt : float array -> float -> float option
+val count_if : ('a -> bool) -> 'a list -> int
+val take : int -> 'a list -> 'a list
+val sum_int_opt : int list -> int option
+val sum_float_opt : float list -> float option
+
+val json_float_field_opt :
+  string -> (string * Yojson.Safe.t) list -> float option
+
+val json_positive_float_field_opt :
+  string -> (string * Yojson.Safe.t) list -> float option
+
+val json_int_field_opt : string -> (string * Yojson.Safe.t) list -> int option
+val json_bool_field_opt : string -> (string * Yojson.Safe.t) list -> bool option
+val json_string_field_opt : string -> (string * Yojson.Safe.t) list -> string option
+val json_string_list_field : string -> (string * Yojson.Safe.t) list -> string list
+
+val infer_usage_trust_from_fields :
+  (string * Yojson.Safe.t) list ->
+  usage_reported:bool option ->
+  input_tokens:int option ->
+  output_tokens:int option ->
+  string option * string list

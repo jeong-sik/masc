@@ -1,0 +1,10 @@
+Testing `Lane declaration path identity'.
+This run has ID `HNZVO0KA'.
+
+  [OK]          draft navigation          0   explicit create comparison uses...
+  [OK]          draft navigation          1   same basename does not alias pa...
+  [OK]          draft navigation          2   conflict comparison retains exa...
+  [OK]          draft navigation          3   create-only draft is preserved.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-draft-path-check-d05qwi9d/_build/_tests/Lane declaration path identity'.
+Test Successful in 0.001s. 4 tests run.

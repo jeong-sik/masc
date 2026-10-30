@@ -1,0 +1,18 @@
+(include_subdirs no)
+
+(library
+ (name masc_skill_snapshot_service)
+ (public_name masc.skill_snapshot_service)
+ (wrapped false)
+ (modules skill_catalog_snapshot_service)
+ (libraries
+  masc.skill_snapshot
+  masc.skill_config
+  masc.masc_core
+  masc.masc_log
+  masc.cancel_safe
+  masc.config_dir_resolver
+  fs_compat
+  eio
+  eio.unix
+  unix))

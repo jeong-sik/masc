@@ -1,0 +1,254 @@
+{
+  "schema": "masc.original-goal.root-index-proof-independent-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T16:45:54.956958+00:00",
+  "reviewer": "measurement_publication_review",
+  "verdict": "CONFIRMED_P2_LINKED_ORIGINAL_VERIFICATION_OMISSION",
+  "Goal_id": "goal-outcome-driven-work-20261024",
+  "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+  "request_id": "b698fd712cfeb95c27549460520d610f",
+  "run_id": "01a173e9-ffe9-7000-856a-d284a2cd20a2",
+  "finding": {
+    "severity": "P2",
+    "kind": "Operational proof-quality false positive relative to the existing verification requirement",
+    "assessment": "The operational judge approved producer measured_pass/summary labels after reading the canonical report and delivery index, without opening a linked case file or actual behavior/source/result leaf. That does not discharge the original metric requiring linked-original reads and actual-behavior judgment. It is not evidence that the eleven original behaviors failed.",
+    "required_metric": "MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.",
+    "target_value": "G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.",
+    "new_success_condition_added": false,
+    "approval_reason_chars": 478,
+    "approval_reason_bytes": 692,
+    "approval_reason_sha256": "6f41aa77c47a4ecb7cce5ff2dae32685f6f3c435e5df7a2b4953923623740877",
+    "approval_basis": "The retained reason explicitly cites eleven measured_pass labels and matching summary/target counts. Declarations of scope and limits in that report do not independently establish the linked behavior originals."
+  },
+  "separately_recognized_delivery_success": {
+    "root_index_locator": "goal-outcome-driven-work-20261024-evidence-index.json",
+    "present_in_retained_prompt_and_root_layout": true,
+    "retained_prompt_bytes": 6433,
+    "retained_prompt_sha256": "35c64258d3b56e0bf5f3468552f008013401b1838fb5f14364f51238e2b8a931",
+    "index_tool_read_completed_with_success_marker": true,
+    "root_index_bytes": 5086,
+    "root_index_sha256": "0e52042fcd450c08024b068a6b139516b2cef8e26dceb9d4d7bf04772086d3c7",
+    "root_index_byte_equal_delivery_index": true,
+    "reported_measurement_in_retained_prompt": false,
+    "submitted_evidence_count": 0,
+    "limit": "The existing local root index carrier reached retained Original and a successful runtime-recorded lookup. This is distinct from adding reported-measurement rendering to primary25ba or auditing provider wire."
+  },
+  "retained_execution": {
+    "elapsed_s": 151.9440779685974,
+    "evaluator_runtime_receipt": "glm-coding.glm-5.3-flash",
+    "structured_gate": "structured_tool",
+    "tool_count": 4,
+    "canonical_page_reads": 2,
+    "index_reads": 1,
+    "linked_case_reads": 0,
+    "actual_behavior_source_result_leaf_reads": 0,
+    "tools": [
+      {
+        "ordinal": 1,
+        "name": "tool_read_file",
+        "disposition": "completed",
+        "finished_at": 1792946113.689622,
+        "retained_excerpt_bytes": 1024,
+        "retained_excerpt_sha256": "7d734fc4f5c37c27f5285e4cc3648bb30429f194213700cb68fb4bbd140805d0",
+        "retained_excerpt_truncated": true,
+        "input": {
+          "file_path": "codex-mcp-client/goal-outcomes-20261024/acceptance.json"
+        },
+        "lookup_success_marker": true
+      },
+      {
+        "ordinal": 2,
+        "name": "tool_read_file",
+        "disposition": "completed",
+        "finished_at": 1792946113.690573,
+        "retained_excerpt_bytes": 1024,
+        "retained_excerpt_sha256": "347e273a343c43e8c389ecbf100f7cf44813cd6a5888469f8101875f8889be80",
+        "retained_excerpt_truncated": true,
+        "input": {
+          "file_path": "goal-outcome-driven-work-20261024-evidence-index.json"
+        },
+        "lookup_success_marker": true
+      },
+      {
+        "ordinal": 3,
+        "name": "tool_read_file",
+        "disposition": "completed",
+        "finished_at": 1792946151.116348,
+        "retained_excerpt_bytes": 1024,
+        "retained_excerpt_sha256": "8de0e4402abf14f9a8c515ee12b653982609545376f68611f2a908054e170283",
+        "retained_excerpt_truncated": true,
+        "input": {
+          "file_path": "codex-mcp-client/goal-outcomes-20261024/acceptance.json",
+          "limit": 300,
+          "offset": 302
+        },
+        "lookup_success_marker": true
+      },
+      {
+        "ordinal": 4,
+        "name": "report_review_verdict",
+        "disposition": "completed",
+        "finished_at": 1792946208.294908,
+        "retained_excerpt_bytes": 730,
+        "retained_excerpt_sha256": "cfe6a010ba240cfae22f6496625b10488fca0df753832dbc13557c0b0f696416",
+        "retained_excerpt_truncated": false,
+        "input": {
+          "verdict": "APPROVE",
+          "native_reason_is_truncated_summary": true
+        }
+      }
+    ],
+    "tool_retention_limit": "The first3 output excerpts are each bounded to1024 bytes. They show successful lookup markers but are not full Tool messages. The full actual canonical/index bodies returned to the model cannot be reconstructed from these excerpts; no full-body byte-equality claim is made.",
+    "provider_wire_audit": false,
+    "provider_reported_model_or_weight_identity_established": false,
+    "unique_provider_call_ID_join_available": false,
+    "one_registered_run_and3_registry_events_not3_samples": true
+  },
+  "accepted_effect": {
+    "retained_result": "approve",
+    "native_evaluated_decision": "approved",
+    "native_stages": [
+      "reviewed",
+      "committed"
+    ],
+    "registration_request_run_criterion_match": true,
+    "owner_judgment_exact_equal_retained_judgment": true,
+    "full_approval_reason_equal_ack_registry_and_persisted_verdict_evidence": true,
+    "persisted_verdict_reason": null,
+    "Goal_last_review_note": null,
+    "explanation_storage_limit": "For this proven record the explanation is in verdict.evidence; verdict.reason and Goal.last_review_note are null. This field distinction is preserved and not independently classified as a product defect.",
+    "persisted_before_reopen_completion": "proof_proven",
+    "persisted_before_reopen_phase": "awaiting_confirmation",
+    "authority": {
+      "kind": "system_llm_agent",
+      "actor": "verifier_exact"
+    },
+    "terminal_not_inferred_from_registration_alone": true,
+    "owner_progress_events": [
+      "dispatch_intended",
+      "judgment_retained",
+      "commit_intended",
+      "commit_unknown",
+      "commit_retry_observed",
+      "commit_observed",
+      "observer_registration_intended",
+      "observer_completion_intended",
+      "observer_registration_recorded",
+      "observer_completion_recorded"
+    ],
+    "same_retained_judgment_commit_observation_retry_not_new_model_sample": true
+  },
+  "availability_and_unchanged_sources": {
+    "canonical_bytes": 26469,
+    "canonical_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+    "delivery_manifest_bytes": 34933,
+    "delivery_manifest_sha256": "2003ed2a127f1dfdbf9d174685d982632c6af99c42c78deed607ad5e749018a8",
+    "all73_leaf_bytes_SHA_and_readability_verified_at_review": true,
+    "before_terminal_integrity_receipt_preserved": true,
+    "observation_bound": "Reviewer hash reads prove readability at review time. The operator receipt separately records73 valid leaves before terminal. The judge trace contains no missing-source failure and no linked-original read attempt. This is an omission, not a source-absence finding or a repeat audit of the eleven actions.",
+    "measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "measurement_record_equal_before_request_before_reopen_and_current": true,
+    "criterion_title_metric_target_and_canonical_unchanged": true
+  },
+  "normal_reopen_verified": {
+    "operator_normal_API_reopen_already_performed": true,
+    "reviewer_API_reopen_or_retry": false,
+    "receipt_status": "ok",
+    "receipt_phase": "executing",
+    "receipt_completion": "idle",
+    "current_selected_local_phase": "executing",
+    "current_selected_local_completion": "idle",
+    "criterion_unchanged": true,
+    "human_Goal_completion_established": false,
+    "local_observation_limit": "Selected Goal/verification/measurement records were read sequentially. No atomic cross-store snapshot claim."
+  },
+  "not_established_or_refuted": [
+    "Existing eleven source-scoped behavior observations are not reclassified as failures.",
+    "Required original sources are not declared absent or invalid.",
+    "This approval is not sufficient original Goal proof or human final completion.",
+    "No causal A/B, reliability rate, independent-model weights, restacked-head execution, product repair, installation or whole-stack approval follows.",
+    "No all-one-head, production-install, microVM end-to-end or typed-approval-certificate condition was added."
+  ],
+  "identity": {
+    "frozen_primary_source": "25ba22387ffe0d71be8e0f8e58cb66b4bfa5237a",
+    "frozen_primary_binary_sha256": "d282dceb915388bfb9886aa9d49a02336016fe725738aafa6be0ea0dcd2ddf6d",
+    "runtime_identity_from_frozen_health_not_new_API": true
+  },
+  "input_bindings": [
+    {
+      "label": "original-request-private.json",
+      "bytes": 10239,
+      "sha256": "e05cccfb4359e63fda14312972a10d08b5da5bcc6b7d23a04d7b238cf4c45e36"
+    },
+    {
+      "label": "owner-terminal-private.json",
+      "bytes": 38324,
+      "sha256": "5266a63f499f89818632301692e3008da2e0ee07cf19e192ed3cdf6503524596"
+    },
+    {
+      "label": "retained-judgment-private.json",
+      "bytes": 7583,
+      "sha256": "073760b23781ce25e1279663ccc733b4c696d281616896ec146bfdd4f5748ce9"
+    },
+    {
+      "label": "terminal-registry.jsonl",
+      "bytes": 14926,
+      "sha256": "97c28ee63f46af3cf7ae05d6414a5b2b223b84cd6e3a2aa81f863f81636c46a9"
+    },
+    {
+      "label": "proof-gap-observation.json",
+      "bytes": 3584,
+      "sha256": "55daac19c75e5aebfbb8cfd70ae087755ddf0ccc1c753e59f950e2f1f04c4e7b"
+    },
+    {
+      "label": "goal-terminal.json",
+      "bytes": 1226,
+      "sha256": "65f6662c8ddff4ba62afc3f89501f2ec3c696475304938521fc1b87ac059361d"
+    },
+    {
+      "label": "verification-terminal.json",
+      "bytes": 2224,
+      "sha256": "9c775eaaf3373bb233132a5dd4e4b6c16a5af54b2934b8862af5679c86b15c39"
+    },
+    {
+      "label": "retained-delivery-observation.json",
+      "bytes": 1445,
+      "sha256": "32962f732b75ae57d7ab17be4a4ce50a689e9bf32e11303cd580ed098abf179b"
+    },
+    {
+      "label": "pack-integrity-before-terminal.json",
+      "bytes": 373,
+      "sha256": "4b3ca597c60944fb8e559941a099bda40a792478056dca9008ff65053d74a866"
+    },
+    {
+      "label": "goal-before.json",
+      "bytes": 3619,
+      "sha256": "e6a5f4fad9493bfffcb4afc4fd0e6dc5c66bec188dafda7b5d12d65d812e1a45"
+    },
+    {
+      "label": "health-before-private.json",
+      "bytes": 168805,
+      "sha256": "3f5f363d4c0b60be2749bd18aad0a90e863b6b098cd1f10e17eebb9f88cdd466"
+    },
+    {
+      "label": "reopen/reopen-decoded.json",
+      "bytes": 2343,
+      "sha256": "bd6ec061e4284e585b7f333cf78ccb975d60c4514fee15125a0fc653b8d534c1"
+    },
+    {
+      "label": "reopen/reopen-once.request.json",
+      "bytes": 994,
+      "sha256": "22768dd3a8338ffc9001a5a94de9c72d227600f82c3f1ef90dcee813f24016b1"
+    }
+  ],
+  "privacy_and_actions": {
+    "allowlisted_metadata_and_safe_relative_locators_only": true,
+    "full_owner_fields_paths_raw_prompts_or_tool_excerpts_exported": false,
+    "raw_model_reasoning_credentials_or_headers_exported": false,
+    "model_API_build_native_CI_Docker_calls": 0,
+    "Goal_Task_Board_store_source_runtime_mutations": 0,
+    "new_agents": 0,
+    "formal_GitHub_approval_or_merge": false,
+    "only_new_output": "This external review.json."
+  }
+}

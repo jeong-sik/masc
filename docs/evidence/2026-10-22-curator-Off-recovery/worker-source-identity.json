@@ -1,0 +1,28 @@
+{
+  "host_source": "db31e62fe17f92aea4919de7765f1ace65914772",
+  "actual_image": "masc-curator-proof:1196e280",
+  "actual_image_id": "sha256:8df21ee67174a57544597abf3ba16174f107508e9f523e2e1709b091da39d258",
+  "original_worker_source": "1196e280ee8b1b5d2381a59210fa51246affe76e",
+  "files": {
+    "addons/protocol.py": {
+      "source_sha256": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa",
+      "installed_sha256": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa",
+      "implementation_equal_except_owned_image": true
+    },
+    "addons/exact_worker.py": {
+      "source_sha256": "7dbcfc2946b1e47179669b32049209706675dcf5c71e7441adb560a912381c61",
+      "installed_sha256": "7dbcfc2946b1e47179669b32049209706675dcf5c71e7441adb560a912381c61",
+      "implementation_equal_except_owned_image": true
+    },
+    "addons/workspace-curator/server.py": {
+      "source_sha256": "85411e4661624ccaf828d1297c2967e9083b62aecee99f434c00c787952c8d22",
+      "installed_sha256": "85411e4661624ccaf828d1297c2967e9083b62aecee99f434c00c787952c8d22",
+      "implementation_equal_except_owned_image": true
+    },
+    "addons/workspace-curator/lane.toml": {
+      "source_sha256": "5d2419b486b7cc33b28fcabc0cdc9ecf8625cb872c94390b1db39b890a462473",
+      "installed_sha256": "b4cd4b3dd58d80a4964c2048ee5c56767be2fac2aeb924015c3294adf607a813",
+      "implementation_equal_except_owned_image": true
+    }
+  }
+}

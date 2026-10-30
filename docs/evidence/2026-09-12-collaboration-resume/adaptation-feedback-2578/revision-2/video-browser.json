@@ -1,0 +1,44 @@
+{
+  "source_sha256": "e9f26dde92b0b4120546d617c5cb89e420a3bc43943e5587b04c746bcd7f1283",
+  "scope": "Actual retained MP4 decoded and played by browser; not Dashboard acceptance",
+  "passed": true,
+  "metadata": {
+    "duration": 115,
+    "width": 1920,
+    "height": 1080,
+    "error": null
+  },
+  "playback_observed": true,
+  "frames": [
+    {
+      "time": 0,
+      "error": null,
+      "readyState": 4,
+      "screenshot": "video-browser-0.png"
+    },
+    {
+      "time": 31,
+      "error": null,
+      "readyState": 4,
+      "screenshot": "video-browser-31.png"
+    },
+    {
+      "time": 58,
+      "error": null,
+      "readyState": 4,
+      "screenshot": "video-browser-58.png"
+    },
+    {
+      "time": 85,
+      "error": null,
+      "readyState": 4,
+      "screenshot": "video-browser-85.png"
+    },
+    {
+      "time": 112,
+      "error": null,
+      "readyState": 4,
+      "screenshot": "video-browser-112.png"
+    }
+  ]
+}

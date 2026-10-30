@@ -1,0 +1,3256 @@
+---
+status: runbook
+---
+
+# MASC TUI Guide
+
+Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
+server is reachable, adds the surfaces that only exist over HTTP. Surfaces
+rotate with `Tab` in the order `surface_ring` spells in
+`bin/masc_tui_types.ml`: Dashboard, Work, Keepers, Usage, Board, Workspace,
+System. Dashboard is the first screen. It shows Goal measurements, Task flow,
+usage coverage, and what needs the operator. The full Goal and Task lists are
+under Work; provider quota scopes, Keeper costs and tokens, and daily provider
+reports are under Usage. Activity and server logs are under System (`A` / `L`).
+Additional surfaces hang off parents instead of holding Tab stops:
+Work's `t` switches Goals and Tasks, and `v` cycles through Task Review and
+Task Verdicts, then back to Goals;
+the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
+Automation, and Runs as tabs. Runtime reaches the common Lanes inventory with `p` (its
+third stop) and the clients roster with `c`, Workspace reaches Code with
+`Enter` on a repository row, and
+System reaches Runtime with `9` (Esc returns to System), Resources with `s` and Tools with `t`, and Activity
+reaches the server log with `l`. Task Review, Task Verdicts, Schedules,
+Fusion, Lanes, Clients, Runtime, Changes, Code, Resources, Tools, and Logs
+also keep `go <name>` palette entries, and each System pane has
+`go System / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
+`presets`, `themes`, `voice`). Changes follows the Keeper selected on
+Keepers. Keeper operations are reached from their parent only.
+
+Header clocks and ordinary row times use the terminal's timezone. Usage trends
+and Task completion days are explicitly labeled UTC.
+
+New here? The [first 30 minutes](../docs-site/src/content/docs/getting-started/first-30-minutes.md)
+chapter walks from install to your first Task and Board post, one signal at a
+time.
+
+## What can I do here
+
+Type `/features` in any composer and the feature sheet lists what this TUI
+can do — one sentence per feature, beside the command, key or name that
+opens it (`/keeper <name>`, `Ctrl-L`, `masc_tool_help`, ...). Names are wire
+names, so a row can be copied and typed as it is printed. The key-level
+reference is [`?`](guides/TUI-KEYS.md); `/help` lists the slash commands.
+
+The sheet also names all seven main surfaces with their reading entrypoints:
+Work's Goal/Task details, Keeper conversations and logs, Usage's account selector,
+Board's recorded successor, complete repository context, and complete model
+settings. Use `:` then `go <surface>` to reach a named surface; its `?` sheet
+explains the keys in the current context.
+
+## Quick Start
+
+For human contributors building from source (external coding-agent sessions must not run local `dune` commands per `docs/constitution.xml`):
+
+```bash
+dune build --root . bin/masc_tui.exe
+./_build/default/bin/masc_tui.exe --base-path ~/me
+```
+
+`.masc` must live directly below the path you pass. The base path resolves as
+`--base-path` -> `MASC_BASE_PATH` -> current directory, so the shorter form is
+`MASC_BASE_PATH=~/me ./_build/default/bin/masc_tui.exe`. An installed build is
+`masc-tui`.
+
+Point it at the same root the server uses. A TUI reading one root while the
+server writes another shows stale keepers with no error, because both roots are
+valid on their own.
+
+## UI language (Experimental)
+
+Switch selected TUI navigation and System/Configuration labels between Korean
+and English while the TUI is running. From navigation, press `:` to open the
+command palette, type `language` (`:language`), select
+`language: English` or `language: 한국어`, and press Enter.
+Searching for `언어` also finds these choices.
+
+The System sub-navigation bar also offers a clickable `[언어:KO 전환]` /
+`[Lang:EN toggle]` control. The System `Themes` (`테마·언어`) pane has a
+clickable `UI 언어` / `UI Language` control too. Each click switches to the
+other language. Use the palette when the control is clipped or terminal mouse
+input is unavailable; changing the display language needs no server connection
+or operator credential. This feature requires a TUI build containing the
+language choices; an older executable will not offer them.
+
+This Experimental setting covers the top-level navigation, Configuration tabs,
+and selected System labels and detail headings. Each of those surfaces shows
+one language only. It is a partial UI translation:
+other text can remain Korean, English or bilingual after a switch. Keeper
+messages, original content, command names and configuration keys keep their
+original text.
+
+To turn off English, select `language: 한국어` or click the language
+control again. The choice is stored as `[tui].language` in `runtime.toml`,
+so it is still there on the next start. An absent key starts in Korean,
+and an unknown stored value is named in the event log:
+
+```toml
+[tui]
+language = "en" # or "ko"
+```
+
+If the file cannot be written, the language still applies for this session and
+the event log says which of the two happened.
+
+## Browser
+
+Use `:`, then `go Browser Lane` (or `B` from Connectors). `l` / `a` select
+live / automation Firefox. `[` / `]` choose among open tabs and `r` refreshes.
+Live reads use the operator's browser login; automation owns an isolated session.
+See the [Browser guide](guides/tui-browser-lanes.md) for setup and controls.
+
+To revisit what a Keeper read, select that Keeper, open Browser Lane, and press
+`h`. The observation list comes from that Keeper's 100 most recent tool calls.
+`[` / `]` choose a saved page, `j` / `k` scroll it, and `y` copies its receipt
+and artifact reference. `h` or `Esc` returns to the browser. Saved pages remain
+readable after the browser closes; `h` also works from the browser picker.
+`Tab` / `Shift-Tab` leave the reader for the next / previous MASC surface.
+The MASC server must be running to fetch these records.
+
+## MSX
+
+Open Collab with `&` or `:` then `go Collab`. `m` watches MSX and `d` watches
+DOS directly, including an empty machine's status. `Esc` returns to Collab.
+Observation reads the shared screen without advancing the machine or sending
+keys. MSX's `F5` explicitly switches between observation and control; only
+control sends game keys, advances frames, or offers checkpoint/disk actions.
+Control and game changes require a verified server matching the TUI's local
+workspace. Losing that authority closes the machine view and clears control;
+returning to the same workspace requires a new explicit control action.
+Reopening the MSX view starts its own read even if a previous view is still
+waiting for a response.
+
+`g` in Collab (also `:` then `go MSX`) takes the terminal over with the workspace MSX
+machine (RFC-0439): a load menu first, listing the cartridge images in the MSX
+Add-on's volume, then the screen of the game a Keeper or you
+loaded. Entering this picker resets to observation, so `Esc` back to a loaded
+screen does not resume earlier control. The `F8` disk picker keeps the current
+control mode. The volume starts empty and the menu says so; when the Add-on
+cannot be reached the menu says the list is unavailable and gives the reason.
+The [MSX cartridges runbook](operations/msx-carts-runbook.md) says how an
+operator places images in the volume, what the machine accepts and where the
+images come from.
+
+## Shared DOS machine
+
+Open `:` then `go DOS` to watch the same live DOS screen an invited player
+sees at `/play`. The TUI view is a spectator: `Esc` returns and `+`/`-`
+resize it; game input and turn changes go through the server's controller.
+
+## Shared DOS play invites
+
+In Collab, `n` asks for a player name and expiry hours, then issues a link.
+`j`/`k` select an invite, Enter opens its locally retained QR/link, `x` asks
+to revoke the selected invite, and `r` refreshes the inventory. This needs
+no selected Keeper. `:` then `go Play links` opens the same screen.
+`q` or `Esc` closes Collab. Closing and reopening it keeps this workspace's
+issued links; pending mutations still refresh the reopened inventory when
+their replies arrive. Losing workspace authority closes Collab and hides its
+retained links. They return when the same workspace is confirmed again; a
+confirmed different workspace clears them before its invite names can be used.
+Issue and revoke requests run one at a time across Collab and chat, including
+while their originating view is closed, so delayed replies cannot replace a
+newer credential's card.
+Invite forms and writes require the server to match the TUI's local workspace.
+Observation and inventory reads remain available when it does not match.
+If a request loses its response or workspace authority, its outcome remains
+unknown for its original workspace. Returning to that workspace does not
+permit another issue or revoke, and refreshing inventory does not unlock it.
+The TUI durably records the origin and request before dispatch in the local
+workspace's `.masc/tui-play-pending.jsonl`; restarting retains unresolved
+changes as unknown. No invitation token is stored in this journal. An unreadable
+recovery journal refuses further changes instead of assuming none are pending.
+
+The Keeper chat composer also accepts `/play invites` to list invites, `/play invite <name>
+<hours>` issues one, `/play link` reopens the latest link issued in this TUI
+session, `/play link <name>` reopens an earlier link issued in this TUI
+session, and `/play revoke <name>` removes it. Issuance requires
+an admin operator credential, token-required authentication and
+`MASC_HTTP_BASE_URL`. A refusal shows the server's own sentence and what it
+says is missing, for example when auth is off or `require_token` is false.
+The server's default address is local. A link beginning with `localhost`,
+`127.*`, `::1`, or an IPv4-mapped loopback address works only on that computer; the card explains this before
+sharing. For another device, configure the server launch's `MASC_HTTP_BASE_URL`
+to an address it can reach through the listener or an authenticated reverse
+proxy. Changing the TUI connection address does not change issued links.
+
+The server shows the link once, so it goes on a card with a QR code and
+nowhere else: not the chat, not the footer, not the session log. `y` copies
+the link to the terminal clipboard through OSC 52; terminal clipboard support
+varies, and `Ctrl-T` still hands the mouse back so the link can be selected
+from the card. `Esc` or `q` closes the card. Enter does not, so an Enter
+pressed while the answer was on its way cannot dismiss it. `/play link` opens
+the card again. The TUI keeps issued cards until it exits or their invites
+are revoked. Only one invite request runs at a time: a `/play invite` sent
+before the answer to the last one has come back is refused, not queued.
+
+The QR is drawn only when all of it fits. A smaller window shows the link and
+the size the QR needs, because a cut QR scans as nothing. With `NO_COLOR` or
+on a terminal with fewer than 256 colours the card shows the link alone. A card
+taller than the window scrolls with `j`/`k`, the arrow keys or the mouse wheel,
+and `g`/`G` jump to its top and its end, so a long link can be read to its last
+byte.
+
+For an unknown outcome, first establish that the original server request
+cannot still finish later: inspect its completion in server logs, or stop that
+server process before restarting and inspecting the final invite state. An
+inventory read alone can race a delayed write and is not completion evidence.
+Then open Collab, press `u`, and explicitly confirm that check to permit further
+changes. Restarting the TUI does not bypass this check. If an issue's one-time
+link was lost, revoke its confirmed final invite before issuing another.
+A definitive revoke reply reporting controller-release failure may be retried
+with `/play revoke <name>`; a second request can release a controller after the
+invite credential was deleted.
+
+The invited person opens the link in a browser to watch and play the shared
+DOS machine. The link can also go to an AI agent (Claude Code, Codex, Hermes,
+OpenClaw, pi, ...): the page points it at `/play/agent.md`, which says how to
+join over MCP (`/mcp/play`) or plain HTTP with the token after `#`. The TUI can also watch through `go DOS` or the `go MSX` menu's
+`watch DOS machine` entry when a DOS machine is loaded.
+
+## Options
+
+| Option | Default | Effect |
+|--------|---------|--------|
+| `--base-path` (`--base`) | `MASC_BASE_PATH`, then cwd | Directory holding `.masc` |
+| `--port` | `8935` | MASC server port on `127.0.0.1` |
+| `--refresh` | `2` | Seconds between refreshes |
+| `--workspace` | derived from base path | Workspace label in the header |
+
+## What the server changes
+
+The TUI runs without a server. Which surfaces stay useful is not a detail - it
+decides whether launching one is worth it.
+
+| Surface | Without a server | Source |
+|---------|------------------|--------|
+| Keepers (list, detail, logs) | fully works | `.masc/keepers/`, turn records, metrics store |
+| Work - Tasks | works | `.masc/tasks/backlog.json` |
+| Dashboard - health, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
+| Dashboard - transport attention | unavailable | `GET /api/v1/dashboard/transport-health` |
+| Usage - Plan usage | unavailable | `GET /api/v1/runtime/resolved` |
+| Lanes | unavailable | `GET /api/v1/keepers/composite` |
+| Clients | unavailable | `GET /api/v1/dashboard/clients` |
+| Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
+| Board | unavailable | `GET /api/v1/board` |
+| Planning | unavailable | `GET /api/v1/dashboard/planning` |
+| Keeper Automation | unavailable | `GET /api/v1/dashboard/scheduled-automation`, filtered to the selected Keeper |
+| Keeper Runs | unavailable | `GET /api/v1/dashboard/fusion-runs`, filtered to the selected Keeper |
+| Runtime | unavailable | `GET /api/v1/runtime/resolved` + `GET /api/v1/dashboard/runtime-probe` + authenticated `GET /api/v1/runtime/metrics` |
+| Keeper message | unavailable | `POST /api/v1/keepers/chat/stream` |
+| System Logs | unavailable | `GET /api/v1/dashboard/logs` |
+
+An unreachable server is reported, not hidden. The header shows
+`[disconnected]`, the surface prints the failing call, and each failed load
+lands in the TUI session block on Metrics:
+
+```
+ MASC Board (0)  10:55:37  [disconnected]
+   (data unreliable: board load failed: (GET failed: Connection Error: ...
+```
+
+A count of `0` next to `data unreliable` means the read failed. It does not
+mean the board is empty.
+
+### When nothing answers
+
+When every read fails because nothing listens on the port, the TUI starts a
+server once per session: `masc start --base-path <base> --host 127.0.0.1
+--port <port>`, with the `masc` beside the TUI binary, or else the one on
+`PATH`. The server keeps running after the TUI closes. While the header says
+`[disconnected]`, `s` on the Keepers list starts one by hand.
+
+The server's stdout and stderr go to `.masc/logs/masc-server-<port>.log` under
+the base path, emptied at each start. When a server refuses to start before its
+own log exists, that file is the only place the reason is written. The TUI
+reads its last line back when the server exits before `/health` answers.
+
+Measured on 2026-09-13 with the base path already held by a server on port
+8976 and the TUI pointed at port 8977. The TUI added these four events, drawn
+oldest first:
+
+```
+starting masc server here...
+masc server exited (exit 1) before it was ready
+[FATAL] Base path <base> is locked. The lease records PID 15310; its namespace and current holder are unverified. Lock file: '…'. …
+full output: .masc/logs/masc-server-8977.log
+```
+
+The TUI session block on Metrics cuts each event at the frame width, and the
+lock line is longer than most frames, so open the file for the whole line. The file held 961 bytes: one `[INFO]` line
+and the `[FATAL]` line. If the server is still not answering after 30 seconds,
+the TUI says `masc server did not answer /health in time` and names the same
+file.
+
+`masc setup` starts its server the same way. When that server exits first,
+setup stops with the exit status, the last line and the absolute path of the
+file.
+
+A server that does start keeps writing its console log into this file until it
+stops. Three runs of 18 to 44 minutes with one keeper booted wrote about 13 KB
+while booting, then 5 to 35 KB an hour. The file is not rotated; the next start
+on that port empties it.
+
+## Navigation
+
+Every surface draws the Tab ring on its top row with the active surface
+highlighted; narrow terminals window the strip around the active entry and
+show how many entries hide past each edge (`‹4`, `5›`).
+
+| Key | Effect |
+|-----|--------|
+| `Tab` / `Shift-Tab` | next / previous surface in the strip's order |
+| `?` | help screen -- every binding, grouped by surface; `j`/`k` scroll, `Esc` closes |
+| `:` | command palette -- type to filter `go <surface>` and `keeper <name>` jumps, `Enter` runs the highlighted one |
+
+On the keeper roster, `/` searches names: typing moves the cursor to the
+first match live, `Enter` keeps the query for `n`/`N` cycling, `Esc` keeps
+nothing. The list itself never narrows, so every action still acts on the
+row it shows.
+
+`NO_COLOR` (non-empty) suppresses colour; borders, markers, and the
+reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
+
+The System surface's Themes pane picks a bundled base16 scheme (monokai,
+solarized, and others). Moving the cursor previews a scheme, `Esc` puts back
+whatever was in force, `Enter` keeps the pick and `x` withdraws it.
+
+Active navigation uses the theme's selection background. Markdown headings,
+code banners and table headers use palette-relative accents; headings also keep
+their weight and underline. Resources distinguish `[MD vN]`, `[HTML vN]` and
+`[MCP]` badges, with separate colours for explicit revision-check status.
+Selected cards use a neutral background and plain text so their contents stay
+readable. Colourless terminals retain selection and textual type/check labels.
+
+A kept pick is written to `runtime.toml` under a `[tui]` table, which the TUI
+reads at boot, so it is still there on the next start. Withdrawing removes the
+key rather than naming a scheme, because following the terminal is the absence
+of a choice. The same key can be set by hand, and an absent or unknown name
+follows the terminal:
+
+```toml
+[tui]
+theme = "monokai"
+```
+
+If the file cannot be written, the scheme still applies for this session and
+the event log says which of the two happened.
+
+The opening surface can also be selected in `runtime.toml`:
+
+```toml
+[tui]
+opening = "keeper" # or "last" or "overview"
+opening_keeper = "alpha"
+```
+
+An absent `opening` or `overview` starts on the Dashboard. `keeper` opens the
+named Keeper's chat; it needs `opening_keeper`. `last` opens the most recent
+explicitly visited chat target from `last_chat_keeper`. Explicit visits record
+that key in every opening mode; while the stored opening mode is `last`, the
+same locked config commit also updates `opening_keeper`. Automatic startup
+does not record a visit. A missing receipt uses the chosen Last opening target. The choice and the name are separate, so a Keeper named `last` can
+be selected. If the target is unavailable, the TUI starts on the Dashboard
+and shows the reason near the top. An invalid opening setting also starts
+on the Dashboard with a reason.
+
+`/about` shows the registered Keepers gathering beside the candle, then
+settling into a still roster after about two seconds. A narrow terminal shows
+two portraits and counts the rest as `+N`; a wider one shows up to four.
+Kitty graphics and the half-block mosaic use the same positions. A key
+during the arrival skips to the final frame without also activating its usual
+action; Esc closes `/about` directly. The animation stops when the final frame is drawn
+or the screen is closed. Set `reduce_motion` to show that frame immediately.
+
+The candle has two styles. `painted` is a 2D portrait with a flickering flame;
+`dotted` is a small figure in square dots. `c` on the settled `/about` screen
+turns the candle to the other style and stores it; an absent key is `painted`,
+and an unknown one is named in the event log:
+
+```toml
+[tui]
+candle = "dotted" # or "painted"
+reduce_motion = true # optional; default false
+```
+
+The table measures the seven colours MASC uses for semantic text against a
+4.5:1 contrast floor. `native 7/7` means the theme clears it without help;
+`lift N/7` means MASC raises those colours to the floor. With
+`[tui].lift_colours = false`, the same risk is shown as `N/7 low` instead of
+pretending the colours were lifted. Native-pass schemes are listed first;
+assisted schemes follow by lift count, and equal counts are alphabetical. The
+header reports both the bundled total and the native-pass count, so the
+high-contrast candidates no longer have to be found by scanning an unordered
+catalog. Theme names are fitted by terminal cells, so long bundled names keep
+the swatch, page, and contrast columns aligned.
+
+Keeper sub-views spell their position as a breadcrumb in the header:
+`Keepers ▸ <name> ▸ chat` (also `logs`, `calls`, `runtime`).
+
+The keeper detail pane has tabs, cycled with `[` and `]`: Info, the
+keeper's declared instructions with its effective system prompt, and its
+GitHub CLI identity observation. On the GitHub tab, `L` starts the gh
+device-flow login and streams its (redacted) output into the pane; when
+the stream ends the pane re-reads the identity observation.
+
+A browser consent started on the Identity tab keeps checking its Keeper even
+on another surface. The consent URL and the background wait end separately.
+The URL leaves the pane when the provider attaches or when the server's
+`expires_at` deadline passes. The wait ends when the server reports how the
+attempt ended (completed, failed, expired, superseded by a newer login, or no
+longer known to this server), when the provider leaves the inventory, or when
+the Keeper disappears from a successfully read roster. A callback the server
+admitted just before `expires_at` can still be publishing credentials after
+the URL is gone, so wait for its result instead of starting a second login.
+A failed roster read or unreadable provider declaration does not imply deletion.
+Workspace recovery keeps the waits that belong to the recovered workspace, but
+does not bring back their consent URLs.
+
+Code's Ctrl-P finder and B return preserve the source reading while a file is
+being fetched. See [Code navigation](guides/tui-code-navigation.md) for failure,
+cancellation and reading-position behavior.
+
+Reading a board post on a wide terminal keeps the post list beside it.
+`Ctrl-W` toggles focus; `h` selects the list and `l` selects the post. `j`/`k`
+then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post
+remains marked when the detail has focus.
+
+The System surface shows `runtime.toml` as the server reads it; `e` opens
+it in `$EDITOR` and the server's preview validation gates the write. `a` on
+the same pane adds one more Claude Code, Codex or Antigravity account: pick a
+provider the file declares with `←`/`→`, keep or change the suggested id, and
+type where the new account signs in (`account-home` for Claude Code and
+Codex, the OAuth file `masc runtime-antigravity-account --sign-in` reports for
+Antigravity). The form copies that provider's command and model bindings,
+refuses a location another provider of the same client already uses, and
+saves through the same preview. Enter on the last field re-reads
+`runtime.toml` from the server and declares against that, so a change made
+while the form was open is kept. The save also guards that fresh revision; a
+concurrent write is refused and the form remains available for retry. It does not sign in; the rows under the
+fields name the command that does, and after the save the same command is
+in the session log. Turns reach the new account only after a lane lists it
+as a candidate. The
+Resources surface hangs off System under `s` and lists every MCP
+resource and authorized published reports; `Enter` reads one beside the
+list. Reports use the existing admin API and pin the listed revision, with body
+digest and byte-length verification. A report API refusal leaves MCP resources
+available and records the refusal; per-report storage diagnostics remain visible.
+Report Markdown uses the shared document renderer; HTML has an inert document
+reading and a separate source presentation, selected with `v`.
+Press `u` to select the next unchecked report in the current format and day
+selection, wrapping at the end. With the reader focused, it opens that revision
+through the same verified read. Navigation never confirms a report. Refresh
+before navigating if report/check inventories are incomplete or unknown; a
+pending confirmation change must settle first. These refusals leave the current
+selection and reading in place.
+After reading a report, `{`/`}` opens the older/newer revision from its validated
+history. Each move fetches that exact revision and verifies the body again; it
+does not wrap at an end. The chosen revision stays open when the catalog refreshes
+to a newer latest version, as long as the report remains listed. Switching reports
+or withdrawing the workspace clears the old history. Request ownership also
+rejects superseded completions after navigating away and back to the same revision. The detail starts with the server's description, full URI, MIME type,
+and declared byte size, then the payload. JSON is pretty-printed; JSON, TOML,
+and YAML payloads use the shared code lexer, while Markdown uses the same
+renderer as chat and Board. Image parts retain their original encoded bytes:
+with detail focused, `,`/`.` selects an image and `Ctrl-O` previews it through
+the same terminal image presenter as chat. SVG text parts are also supported.
+With detail focused, `(`/`)` selects an original text part and `y` sends that
+part's exact source bytes to the terminal clipboard via OSC 52. Parts are not
+joined, pretty-printed or decoded for copying; JSON, HTML, tabs and line endings
+stay as received. Pending reads, refusals, withdrawn inventory and an unconfirmed
+workspace cannot copy a retained old body. Terminal clipboard support is
+unconfirmed; this action reports delivery of the request, not clipboard success.
+For a loaded published report, `s` opens a local destination field. Edit or paste
+the path, use `Ctrl-U` to clear it, then Enter to create the file or Esc to cancel.
+The existing parent directory must be present. Saving uses the verified original
+UTF-8 bytes and creates a private file without replacing an existing file or
+symlink. A failed or interrupted save may have created an incomplete file; inspect
+the reported destination before retrying. `o` explicitly opens the same report
+revision in Dashboard using the browser's own authentication. Neither action
+turns a rendered document into source or changes to the newest revision.
+Other binary parts report their encoded size. Previews use the retained content,
+not the resource URI as a local path, and require terminal image support.
+Reading the resource again, opening another resource or changing workspace withdraws the earlier
+image source; late results cannot take over the new reading.
+With detail focused, `[`/`]` read the previous
+or next resource without returning to the list. Responses carry their MCP URI or exact report revision, so
+a slow older read cannot replace a newer selection. `Ctrl-W` switches between
+list and detail, and `j`/`k` move whichever pane has focus. With the text focused,
+`End` keeps the end selected as the terminal reflows the document. `Home`, relative
+movement, a search landing or opening another resource releases that selection.
+`/` searches the focused pane: resource names in the list, or the loaded document
+in detail. `n`/`N` moves between matching rows, wrapping at the ends. The last
+landed result has a `>` and reverse video; other matches have `*` and underline.
+The symbols remain available without color. Ordinary scrolling retains the last
+search result independently of the viewport. A changed document, presentation,
+selection, query or pane width cannot borrow its current-result mark. Detail
+search follows the same width and document projection as drawing; an unread,
+failed or withdrawn resource offers no body search. Searching does not change
+the original resource bytes. The selected
+Keeper's Channels tab shows transport status; `b` opens a binding form with
+that Keeper already named, and `U` `U` removes all of its bindings (see
+[Keeper detail](#keeper-detail)).
+
+Tools has five deliberately different questions under `p`: `available` is
+the effective surface delivered to the selected Keeper now; `async runs` is
+the composition broker's live queue/recovery state; `receipts` is the current
+Keeper session's retained Skill activation ledger; `usage` is the workspace
+roll-up of actual Skill invocation/delivery/action counts; and `all tools` is
+the registered catalog. Registration or availability does not prove actual
+use, and a missing retained receipt does not prove a Skill was never used.
+
+The Keeper roster starts closed. At 110 columns and wider, `Ctrl-B` pins it
+beside the current surface with the cursor marked. Narrower terminals use
+the single-pane layout. `Ctrl-B` changes the roster preference
+only while the pane has room to show. Below 110 columns it reports the width
+requirement and leaves the preference unchanged, so resizing wider cannot
+reveal a hidden toggle that had no visible effect when it was pressed.
+
+From Dashboard (Overview), press `Left` to open the Keeper list. In chat,
+`Left` opens it only when the input is empty and its cursor is at the start.
+With text present, `Left`/`Right` move the editing cursor; typing, paste,
+Backspace and Ctrl-W edit at that cursor. Even at the start of a nonempty
+draft, `Left` stays in the input. Use `Ctrl-G` to switch Keepers with a draft.
+In the list, `Up`/`Down` (or `j`/`k`) select a Keeper; `Enter` opens its chat.
+`Right`, `Esc`, or `Tab` returns to the screen you were reading without sending
+a message or interrupting the Keeper. Chat drafts stay with their Keeper when
+you switch. `Left` also opens a list hidden with `Ctrl-B`, without changing
+that visibility preference. On a narrow terminal the list uses the whole body;
+on a wider terminal it sits to the left of Dashboard or the conversation.
+The list uses a quiet divider, a count (or visible range for a long list), and
+a highlighted cursor row. While selecting, the lower panel identifies the
+Keeper, its observed health and runtime; it labels the current conversation
+separately. Short viewports give those detail rows back to the list.
+
+The same list treatment is used beside Work, Tasks, Board, Approvals, Schedules,
+Task Review, Verdicts and Fusion details. Titles and counts sit apart, label
+columns stay aligned, and only the pane holding keyboard focus highlights the
+selected row. The focus band uses a quiet neutral tint with a known terminal
+palette and reverse video when colours or the palette are unavailable. The [layout language](design/tui/LAYOUT-LANGUAGE.md) records the
+shared direction and which custom surfaces still have separate renderers.
+
+### The Activity pane
+
+Home opens the narrow Recent pane on a wide enough terminal, like every other
+surface. `Ctrl-L` cycles narrow, wide and hidden, and `/activity fleet`
+chooses the wide layout; the choice survives navigation and resizing. On a
+short Home, decision and continuation destinations take the available rows
+before the ancillary health and completed-work context.
+
+`Ctrl-L` walks the pane on the right of eligible surfaces through narrow, wide
+and hidden. Activity and Logs keep this pane off, since it would repeat their
+own stream, and so does an open modal or the browser lane. On eligible surfaces
+the pane opens
+only where the surface keeps the width the Keepers list needs for its flag
+columns -- 102 columns (`Masc_tui_acting_pane.surface_floor_cols`): from 158
+columns for the narrow pane and from 176 for the wide one. Below that the
+surface has the whole terminal. Its `[Recent]` tab is what each keeper is doing now, one row
+each:
+
+```
+ [Recent] Changes · 11 keepers (5 offline)
+                    state     tool          calls   tokens
+ ● ocaml-agent-ic   open      tool_execute    16+
+ ● pr-updater       done                        10   72.3k
+ ● jazz-developer   no events
+```
+
+The mark is the keeper's health, as on the roster. `state` is the record the
+feed has: `open` (no end event yet), `done`, `no end` (the process is gone,
+so no end will come), `approval` (waiting on you), or `no events`. An open
+record names the tool it is in and counts the calls seen *so far*, which is
+what the `+` says: the feed may have started mid-turn. A done record carries
+the turn's calls and its new tokens (`new tok`): in and out summed, cache
+reads left out, so a cached turn shows what it processed fresh. A
+name longer than its
+column is cut with `…`; the wide pane has cells for the ones that outgrow
+the narrow one. The header says the feed only when it is not delivering
+(`no feed`, `feed opening`, `feed closed: …`).
+
+Under a rule, the selected keeper's own record: its state and the age of its
+newest event, then its calls, newest first (`o` turns the order). A run of
+the same tool is one row that counts it and says what the calls took
+(`Execute ×5 · 2.7s 274ms 1.4s 2.9s 4.7s`, or their sum where that does not
+fit); the Keeper Calls surface (`t`) reads each call one by one. `Enter` or
+a press on a call opens its facts, input and output; on an earlier turn's
+row it opens that keeper's calls surface.
+
+An earlier turn's row states its tokens as parts. When the runtime reports
+its cache, the input is split into what the turn processed fresh and what it
+read back from the cache: `30 calls · in 159.8k new · 3.56M cached · out
+6.6k`. The input count alone (`in 3.72M` for that turn) holds the cache reads
+and is mostly them on a cached runtime. Where the row is too narrow it drops
+the cost, then the output; where that still does not fit, it drops the
+cached part and shows the output again. The new part stays. A
+runtime that reports no cache reads, or counts that do not add up, keeps the
+single `in` figure.
+
+The `Changes` tab lists the files this keeper's calls wrote, newest first.
+
+## Surfaces
+
+### Dashboard
+
+The first screen shows workspace health, the number of listed Keepers, two
+active Goals, Task flow, quota coverage, and up to two operator attention
+items. It leaves individual Keeper rows, Task rows, provider meters, and logs
+to their own destinations. The Recent activity pane is open beside this screen
+on a terminal wide enough for it.
+
+For a Goal, `actual` comes only from an explicitly recorded measurement bound
+to that Goal's current criterion revision. The screen says `not recorded`,
+`not observed`, or `unavailable` when it has no valid value. The count of
+linked Tasks marked done is a separate fact; it never becomes the Goal's
+measured value.
+
+Goals are shared across the workspace. Open Work → Goals for the metric,
+proof, and activity. Creation, edits, and phase changes name the caller in
+their activity events.
+
+Work shows current Task statuses and a 14-day UTC plot of Tasks *currently*
+done by their completion date. Its coverage line names backlog, Goal-link,
+and archive read failures. The quota line on Dashboard is only a count of
+provider scopes with a report since server start; `m` or Tab opens the full
+Usage screen.
+
+### Work
+
+`t` switches between Goals and Tasks. On Tasks, `j`/`k`, paging, Home/End,
+search, `Enter`, and `Esc` operate on the visible Task rows and detail. Goal
+details retain their criterion, measurement and linked Task references.
+`v` opens Task Review and Task Verdicts, then returns to Goals. `p` opens
+operator Approvals and Keeper questions; `Esc` returns to Work.
+
+### Usage
+
+Current provider quota windows are grouped by **quota scope**. A scope may be
+a provider row or a credential source; its short identifier distinguishes
+multiple scopes without displaying a credential path. The provider reports
+their utilization and reset time. Catalogue quota blocks are labeled
+separately. The 1/7/14 UTC-day plot uses the latest stored provider report for
+each day; `·` means no report was stored for that day, and `w` changes the
+window. A failed read is labeled unavailable rather than drawn as zero.
+
+Keeper rows show recorded 24-hour token and cost totals with the number of
+turns that reported each value and the number missing it. Transport delivery
+is also here. `p` opens Telemetry, retaining the engine, work outcome, and
+memory/Gate safety readings (`1`/`2`/`3` select those sections); `p` returns
+to quota and Keeper usage. Activity and the server log are reached from
+System when a detailed event timeline is needed.
+
+Plan usage on Usage reads
+`provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
+strip per quota scope, named by its providers' `display-name` and the scope
+identifier, with the account's email under the name from
+`GET /api/v1/setup/account-emails` (Admin), read on every Usage refresh: a meter
+per usage window, the value as a whole percent (a fraction is multiplied by
+100 and floored), the reset time, and how long ago the provider said so. A
+meter takes 10 to 24 cells; when 10 do not fit beside the hearing age, the
+age is left out first.
+
+Connections selecting the same client's login file share one email observation
+within each inventory response, including an unavailable-file result. Their
+individual connection rows remain. The next refresh rereads the login sources,
+so signing in or repairing a login file is visible without restarting MASC.
+Different client formats remain separate even if they select the same path.
+Email is display metadata and does not select an account or authorize a turn.
+
+```
+ Plan usage
+ Claude Max · 1a2b3c4d  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago
+                        7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
+```
+
+An account that has not reported since the server started draws no row,
+unless the runtime catalogue observed its quota exhausted; then it draws one
+`no usage data` row with that tag. A read with no row to draw says
+`no usage data`.
+
+A meter is drawn in the exhausted style only when the value reaches the full
+value of its own unit (`1.0` for a fraction, `100` for a percent) and the
+window gates model calls. A window the server classifies as counting
+something a model call does not need (Z.AI `TIME_LIMIT`, OpenRouter's
+free-model daily requests) is drawn dim whatever its value. A window with no
+reset time shows `—`. A reset time
+that has passed reads `reset time passed · no newer report`; the meter keeps
+the last reported value. An account whose runtime rows carry
+`quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen
+time, and is listed first. A failed read is one line,
+`usage data unavailable: <reason>`. A failed email read adds
+`account emails unread: <reason>` after the rows, and email rows this build
+cannot read are counted in one note there.
+
+
+### Activity
+
+Every keeper's actions as the runtime event feed delivers them, newest first:
+tool calls and their returns, turn boundaries and turn done rows, chat rows
+landing. This is the surface for watching ten keepers at once without
+opening ten chats.
+
+```
+ MASC Activity (212 of 640 held, actions)  01:12:04  [connected]
+   feed: live 640  dropped 0
+   TIME     KEEPER             EVENT            DETAIL
+   01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
+   01:12:03 analyst          ✓ returned         read_file · 32ms [1/2] · task-494
+   01:11:58 rondo            ■ turn done        turn 2086 · in 159.8k new · 3.56M cached · out 6.6k · 30 calls
+   01:11:51 taskmaster       ● turn start       turn 1738
+  j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: 8935
+```
+
+The glyphs are the same vocabulary the Keepers roster uses: `▶` a call
+started, `✓` a call returned, `✗` a failure, `●` a boundary inside a turn
+(a provider call's start or end, an internal agent run's start), `■` done
+(the keeper's turn, or an internal agent run), `?` something needing
+attention, `·` the quiet kinds. A returned
+call shows how long it took when its start is among the events held; a
+call that began before the feed opened shows none.
+
+`f` cycles three explicit scopes. `turns` is the default and folds each Keeper
+turn to one row while leaving internal agent runs and approvals separate.
+`actions` shows the flat calls, returns, turn boundaries, turn done rows, and chat
+events. `everything` additionally shows heartbeats, composite/snapshot pushes,
+chat stream frames, waiting-queue changes, and telemetry. Its quiet gray rows
+carry no mark at all, and are state observations rather than failures;
+`composite` specifically means the Keeper composite snapshot changed. `agent start`/`agent done` are internal
+agent runs rather than Keeper turn boundaries. The current scope and these
+meanings are printed above the table, not hidden in this guide. An event kind
+this build was not taught always draws by its wire name, so a new kind is
+noticed rather than filtered away.
+
+Scrolling down into older rows (`j`) freezes the view: new events count up
+in `N new above (g)` on the status row instead of pushing the rows you are
+reading. `g` returns to the newest row and clears the count; `G` goes to the
+oldest held. The TUI holds the last 1,000 events; `dropped N` says how many
+fell off the end while it ran.
+
+### The composer and /task
+
+The input row at the bottom of every surface sends text to the keeper it
+names. A line that starts with `/` is a command for the TUI instead:
+
+- `/task <title>` — followed by any further lines as the body — creates a
+  task over the server's `masc_add_task` tool and then messages the keeper
+  the operator's own words with the new id in front: `[task-512] <title>`.
+  The keeper claims that exact task. The TUI records the original creation even
+  if workspace observations change before its reply. Follow-up handoff waits
+  for the matching workspace and current Keeper roster; a foreign workspace
+  does not receive it. New input also prevents an automatic chat jump; the
+  original Keeper handoff can still proceed. Only a failure before send restores the command
+  automatically, and only while its original input remains untouched.
+- `/task-recover` — restores the latest retained failed or unconfirmed Task
+  command for this Keeper and matching workspace. It only restores input;
+  it does not create or send a Task. A server error or missing reply does not
+  prove that creation failed: use `/task-inspect` before repeating the command.
+  While creation is active, the shared footer distinguishes preparation, awaiting
+  a reply, and a result awaiting UI application within its existing width rules.
+  New text, attachment and reference edits survive late replies, including
+  changing the draft and returning to empty.
+  Retained commands live in this TUI session; they are not restart recovery.
+- `/task-inspect` — opens this session's completed Task creation requests,
+  including successful creations, for this Keeper and the confirmed original
+  workspace. Successful requests remain available for reading, while
+  `/task-recover` continues to select only failed or unconfirmed commands.
+  To keep an existing chat draft, leave composer focus with Esc, open the `:`
+  command palette and search `task-inspect` or the original title. Choosing an
+  `inspect Task creation` entry opens that exact retained request without
+  consuming or restoring the draft. Entries follow the composer's Keeper and
+  confirmed original workspace; selection checks both again.
+  `[` selects an older request, `]` a newer one,
+  and `r` reads the displayed source again. The original title, body and
+  transport outcome remain visible beside the lookup. A failed refresh keeps
+  the last fact and its failure. “Not observed” does not prove that creation
+  failed; multiple records remain ambiguous. After a single ready creation
+  fact, `o` reads that exact original Task inside the inspector, independently
+  of the global Task list. It distinguishes live backlog, archive, not observed,
+  retained deletion evidence and read failure. Full decoded Task fields remain
+  scrollable; `r` refreshes that Task and `b` returns to the creation facts.
+  A failed Task refresh keeps its last observation and the failure. Not observed
+  is inconclusive; a deletion record reports historical evidence and its cleanup
+  phase. The creation fact itself does not prove current status or completion.
+  `h` reads a fresh stored history prefix; `H` reads its known older page.
+  The page demand follows the viewport, with no total-history cap. Exhausting
+  the observed prefix does not prove that retained-away events never existed.
+  Complete stored events include verdict reasons and authority metadata.
+  `v` reads the next verification submission observed in ready Task/history
+  data; evidence `r` stays pinned to that exact Task and submission. Retained
+  submissions can be inspected after Task settlement or archival, using the
+  existing CanAdmin credential. Missing, corrupt or mismatched submitted evidence
+  leaves its previous reading and the failure. This reader shows full captured
+  text and binary identity/preview availability; it does not draw image pixels.
+  Reading submitted evidence is separate from an approval or useful-work verdict.
+  `/` searches the displayed original document; typing and paste stay in that
+  query. Enter keeps it for `n`/`N` to move between matching rows. While editing,
+  source keys such as `r`, `h` and `v` are query text, and Esc cancels the query
+  while keeping the inspector open. Outside query editing, Esc closes it.
+  Inspection never repeats creation, restores input or hands work to a Keeper.
+  New input survives late replies. Closing/reopening or changing workspace
+  retires old reply admission; retained observations belong to this TUI session.
+
+- `/diff` — opens the working-tree Git changes directly in chat. Pressing
+  `Enter`, `d`, or `Right` opens the file's Git diff inline with syntax
+  highlighting and line numbers; `j`/`k` scrolls the diff, `v` opens the
+  file in the Code surface, and `Esc` or `Left` returns back to the files list,
+  or back to chat.
+- `/changes` — switches to the Changes surface showing the active keeper's
+  recent file modifications, with `Esc` returning straight back to chat.
+- Any other `/word` is reported as unknown and sent nowhere - a mistyped
+  command must not become an instruction the keeper acts on. Text that
+  merely contains a slash later in the line is a message.
+
+A command's answer (the command list, a queue snapshot, a preset listing) is
+a row in the chat pane. A step of the operator's that did not work - a
+command missing its argument, `Ctrl-V` on a clipboard with no image, an image
+that would not open - is not part of the conversation: it reads on the
+footer for twelve seconds and stays in the event log.
+
+### Keepers
+
+Every keeper under `.masc/keepers/`, sorted by name.
+
+```
+ MASC Keepers (10)
+    KEEPER             HEALTH       Mode S   TURN LIFECYCLE / RUNTIME             TASK
+```
+
+`Mode` is how the keeper is started — `M` manual, `D` on demand, `A`
+autonomous — and `S` is the sandbox profile as a letter — `D` docker, `M`
+microvm, `R` remote_ssh — because a sandbox is a name, not an on/off. `Mode S` and
+`LIFECYCLE / RUNTIME` are shown only when the pane has room for them. A keeper
+whose tool gate is YOLO draws its name in red; the stance has no column of its
+own. `TURN` is the time since the keeper's last turn (the lifetime turn
+count moved to the detail pane; a keeper that never turned shows a dash). The
+metadata list needs no server, so names, last-turn times, and tasks stay
+readable while the runtime is down. `HEALTH`, `LIFECYCLE / RUNTIME`, and lifecycle
+actions come from `GET /api/v1/gate/keepers`; an unread live roster is shown as
+`- unread` rather than guessed from metadata. The status glyph is the primary
+colour cue. `healthy` answers whether the heartbeat/readiness checks are good;
+`running` answers whether the Keeper process exists. They are separate axes,
+so `healthy` and `running` on the same row is expected. The runtime cell joins
+that phase to the producer's full canonical `runtime_id`; the TUI does not split
+the opaque id to guess a model. If the fixed-width column cannot hold a long id,
+it keeps both the shared head and distinguishing tail around a middle ellipsis.
+Phase and runtime identity stay neutral so an ordinary row does not turn into a
+strip of competing colours.
+
+Roster reads and pause/resume/wakeup requests bind to the complete workspace
+identity observed in `/health`: `paths.effective_base_path` and
+`paths.effective_masc_root`. API clients bind `GET /api/v1/gate/keepers` with
+both URL-encoded query parameters `expected_workspace=<base_path>` and
+`expected_masc_root=<masc_root>`. Supplying only one, a blank value, or a
+duplicate component returns 400. A different canonical path returns 409.
+Individual `POST /api/v1/keepers/:name/directive` and bulk
+`POST /api/v1/keepers_bulk/directive` accept the JSON field
+`"expected_workspace": {"base_path": "...", "masc_root": "..."}` and reject
+malformed or mismatched identities before applying any directive. Clients may
+omit the precondition entirely; the TUI always sends both components. On 409,
+refresh identity before issuing a new command; retained input stays local.
+
+Execution facts are not on the list. Open the selected Keeper's detail
+(`right`/`enter`); its Info tab shows `Lifecycle`, `Turn`, `Idle`,
+`Last outcome` and `Last runtime` (the runtime that produced the last
+outcome, which after a failover is not the runtime the Keeper is assigned),
+read from
+`GET /api/v1/keepers/composite`. When a refresh fails after an earlier
+reading, Info keeps that reading and puts `stale · refresh failed: <reason>`
+above it; when there was no earlier reading it says `unavailable` with the
+reason instead of guessing zeros.
+
+`g` toggles the selected Keeper's tool gate. The footer names the action that
+will happen next: `g yolo` from the approval policy and `g auto` while YOLO is
+active, so the safe return path is visible.
+
+What YOLO covers is narrower than the name. It skips the approval hook that
+asks over the open chat stream, and nothing else. External effects that go to
+the Gate — writing to a service the Keeper is attached to, a sandbox command,
+a durable memory write — are still decided by the workspace Gate mode and that
+Keeper's own override, whatever this toggle says. The per-Keeper `yolo` / `auto`
+setting is persisted under `.masc/gate/` across server restarts (or seeded from
+`[keeper_runtime] keeper_tool_approval_mode` in `runtime.toml`).
+
+### Lanes
+
+Lanes is the common operator inventory for exact-output services, Browser
+backends, shared MSX/DOS machines and package installations. Runtime candidate
+orders remain a separate Runtime tab. Keeper lifecycle and turn-cycle facts
+remain on Keepers.
+
+The inventory is loaded on entry from `GET /api/v1/lanes`; opening Add-ons first
+is unnecessary. Invalid TOML and workers with unconfirmed cleanup stay visible.
+A saved declaration and an observed worker have separate readings. Missing data
+from a partial read does not mean a Lane was removed or disabled.
+
+`j/k`, Page Up/Down, Home/End and `/` move through the same scrollable list. A
+mouse press selects the row actually drawn, and pressing the selected row opens
+it. Right or Enter opens exact runs, the selected Browser backend, the shared
+machine spectator, a declaration document or the exact manual instance.
+Declaration documents open for inspection: `E` edits and `s` saves explicitly.
+Existing drafts are retained. `&` still opens the machine media menu.
+
+`d` reads the selected row's full observation; `i` reads inventory diagnostics.
+Both readers scroll, and Esc/Left returns to the list. `o` or `A`, `/addons`, and
+`go Lane Add-ons` keep the full package management surface available. Its `i`
+key opens the local package browser, followed by package preview and the existing
+schema-based installation form; its scope differs from
+the inventory's diagnostics key. See the [Lane Add-on guide](guides/tui-lane-addons.md).
+
+This inventory does not provide enable/disable controls. Browser registration
+is not process health, a machine publication does not identify its controller,
+and an unapplied declaration is not a running worker. The
+[inventory contract](guides/lane-inventory.md) names each observation precisely.
+
+On Lanes, select an exact-output lane and press `s` to edit its model order. Arrow keys or
+`j/k` select a candidate. Press `r` to replace it at the same position;
+type a configured model and reasoning effort such as `luna medium`, select
+with arrows and press Enter. The choices show the declared reasoning effort,
+account provider ID and context. Unset reasoning is shown as `default`.
+The picker uses the terminal height and gives each model two lines: model
+and reasoning first, account and context below. The selected runtime ID is
+shown separately rather than crowding the model name.
+Replacing a candidate selects another configured runtime; it does not change
+the shared model's settings in other lanes.
+
+`a` adds a fallback. `1` moves the selected candidate to the first position
+within its HTTP or CLI group, preserving the other candidates' relative order.
+HTTP candidates always run before CLI candidates. `J/K` move within a group,
+`x` removes, and Esc returns. These changes save immediately. The result
+shows file durability separately from application: exact lanes may be applied,
+unchanged with a reason, or unavailable until restart. When the prior exact
+configuration is kept, correct the reported configuration problem before
+restarting. The notice also names pending Keeper settings and lock warnings.
+A subsequent list refresh does not turn a held application into success. If
+that read fails, the commit result remains visible beside the stale-list warning.
+Long result messages wrap to the terminal width. Navigation dismisses the notice;
+a delayed reread does not restore it. Keeper values overridden by environment
+settings remain visible as warnings even when no restart is required.
+
+Standalone Lane model settings use the same form as Config → Models. In the
+Lane's `s` model-order editor, `Enter` or `d` opens the selected account/model's
+context, output and sampling fields. Runtime detail's `e` and the All runtimes
+roster's `e` open the same form.
+These entries reread the saved source and resolve the full runtime ID,
+including the account. Leaving the screen or pane cancels a pending settings
+entry; an older read cannot open a newer selection. Saving refreshes Runtime,
+Lane and model inventories. `o` in Config → Models opens the source reading.
+
+### Clients
+
+Everyone attached to this workspace in one reading: directory agents,
+state-backed sessions, and runtime fibers. The Keepers roster answers which
+Keepers exist; this answers who is here now, which includes identities no
+other surface lists, such as a non-keeper MCP client. It hangs off Runtime
+with `c`; `Esc`, `Left`, or `p` returns to Runtime, and the palette keeps
+`go Clients`. `/` jumps the cursor to a matching name.
+
+```
+ MASC System / Runtime / Clients (12 attached)  17:02:53  [connected]
+  STATUS    NAME                 TYPE        KEEPER           TASK      LAST SEEN
+ >active   codex-mcp-client      codex       -                -         17:02:41
+  busy     analyst-agent         keeper      analyst          task-845  17:02:50
+```
+
+Rows come from `GET /api/v1/dashboard/clients`, sorted by name. The status
+is the closed agent enum (`active`, `busy`, `listening`, `inactive`);
+inactive rows stay in the roster, receded, because "who left" is part of
+the reading. This is a registry view, not a socket list - a leftover
+process holding a connection is still an `lsof` question.
+
+### Exact-output Lane detail
+
+The common inventory's `exact_snapshot` preserves the exact execution reading:
+retained runs and their window/source counts, admitted and declared model order,
+failures and elapsed-time measurements. An exact row expands underneath the
+scrolling inventory. `d` shows complete configuration readings, and Enter opens
+its retained runs.
+
+To open retained observations without a current configuration row or installed
+Addon, press `:` and choose `go Workspace Curator history` (or search by the
+logical lane ID, such as `workspace_curator_exact`). Each history destination
+uses the original lane identity; Enter on a run opens its retained detail. This
+closes any model editor or picker on Lanes while preserving outstanding writes
+and configuration drafts. The normal inventory refresh and the history request
+run independently; history still requires the current workspace read authority.
+These destinations provide observation access, not a model configuration route.
+
+The `[runtime.exact_output_lanes.<lane-id>]` table supplies `slots` for catalog
+references and `cli_slots` for official-client runtime IDs. At least one slot
+across the two groups is required. The lane tries admitted catalog slots in
+declaration order, then CLI runtimes in declaration order. Configuration is
+TOML; a run's retained Input and Output are JSON evidence. File durability,
+registry application and subsequent observation remain separate results.
+
+`s` opens the selected lane's provider editor. `a`, there or on the matrix,
+picks a runtime, and the runtime's kind decides the list it joins: an HTTP
+runtime goes to `slots`, an official client to `cli_slots`. `j`/`k` stop on
+slots only, so an empty group has no row to move into; its title reads
+`a adds one`. Every standalone lane walks its CLI slots after its HTTP slots.
+A client with no output-schema channel fits no exact lane, so the picker lists
+it below every runtime that can land, its row led by `no output schema`.
+
+Board Attention, HITL Auto Judge, and Librarian are schema-constrained
+structured-output generation flows, not MASC tool loops. Their run evidence is
+the exact Input and Output, outcome, elapsed time, and selected slot; there is
+no omitted tool-call ledger for those runs. Their outputs mean, respectively,
+the accepted Board candidate judgment, the validated and durably settled HITL
+context judgment summary, and selected memory facts plus committed snapshot
+metadata. Verifier is different: its Task/Goal review records also retain the
+verdict reason, evaluator runtime, and MASC tool observations, which appear in
+the exact run detail.
+
+`j` / `k` moves the lane cursor. `e` opens that lane's exact table in the
+Config `runtime.toml` source pane; another `e` uses the existing editor,
+server-side preview, and save path. Right or `Enter`
+opens that lane's recent exact runs, and another Right or `Enter` opens the
+exact run record. Input and output are pretty-printed as syntax-highlighted
+JSON and long JSON lines wrap by terminal cells, so a value does not disappear
+behind the right edge. Each payload is bounded at 64 KiB; a larger retained
+value says its original byte count instead of ending in an unexplained `~`.
+A standalone lane has no Keeper identity, so `c` / `m` explains that chat
+belongs on Keepers instead of silently opening an unrelated Keeper.
+
+`Verifier` joins two durable review registries: task completion-authority
+reviews and Goal proof reviews. Its run list names `task <id>` or `goal <id>`
+in the subject column and keeps the producer verdict (`approved`, `rejected`,
+`committed`, `deferred`, or the exact failure) as the status, so approval and
+rejection do not require opening every row. Detail names the review kind and
+shows the request followed by the retained result, reason, evaluator runtime,
+and tool observations including input, disposition, output excerpt, duration,
+and truncation state. The server filters a lane before cursor pagination;
+Verifier history is therefore not hidden behind a busier Librarian window.
+
+### Keeper detail
+
+Right or `Enter` from the Keeper list or Lanes. Live context comes from the
+newest trace-matched TurnRecord; missing, malformed, unreadable, usage-less,
+and prior-trace observations stay distinct unavailable states rather than
+collapsing to zero.
+
+```
+ Keeper: code-reviewer
+   Identity
+   Name:                  code-reviewer
+   Paused:                no
+   Current Work
+   Task:                  -
+   Live Context
+   Context:               8.9%  ##--------------------  93213 / 1048576 tokens
+   Observed:              2026-08-23T01:53:26
+   Turn Ref:              trace-1787333553810-0001a#429
+   Runtime Stats
+   Total Turns:           429
+   Total Tokens:          37669331
+   Total Cost:            $3.7016
+   Last Turn:             2026-08-23T01:53:26
+  j/k:scroll  l:logs  m:message  Esc:back  Tab:next  q:quit  r:refresh
+```
+
+The Channels tab lists every transport and its channel bindings. A channel
+reads `name (id)` when the connector's name directory knows it, and
+`id (name unknown)` when it does not.
+
+The Items tab is one `]` after Info. `v` cycles through All, Owned, Can buy,
+and the face/neck/head/hand/base slots. `j`/`k`, the page keys, and Home/End
+select within that view. The portrait tries the selected accessory over the
+Keeper's observed outfit; Space compares it with the current outfit. The wallet
+shows Candle and the number of purchased accessories. The selected item shows
+ownership, price, affordability or the missing Candle amount, even in a narrow
+pane. Wearing an accessory from the starting outfit does not make it purchased.
+Off, Disabled and unreadable accounts remain distinct; account-dependent views
+do not invent an empty wallet. An unavailable portrait leaves the catalog readable.
+
+`a` opens an editable chat draft asking this Keeper to buy and equip the selected
+item, or only equip it if already owned. The purchase request caps the price at
+the observed milli-Candle amount, including zero for free items. Enter sends the
+draft through normal chat. An existing text or attachment draft is preserved;
+send or save it before preparing the Item request again. Buying and equipping
+remain Keeper-owned tool actions, and the reply reports their result. Return to
+Items to read the resulting ownership and outfit. Browsing, comparison and draft
+preparation do not change the Candle ledger.
+
+| Key | Effect |
+|-----|--------|
+| `j` / `k` | move between transports |
+| `J` / `K` | move between the selected transport's bindings |
+| `b` | bind a channel to this Keeper (`$EDITOR` form) |
+| `e` | reassign the selected binding |
+| `u` `u` | remove the selected binding; the first press names it, the second removes it |
+| `U` `U` | remove every binding this Keeper holds, on every transport; the first press lists the channels, the second sends them |
+
+`U` `U` sends one unbind per binding with the Keeper's name as a condition, so
+a channel rebound to another Keeper after the first press is left as is.
+The TUI session block gets one line per binding -- removed, kept (now bound to
+another Keeper), not found (with the server's words), or FAILED with the
+server's reason, failures last -- and the footer shows the count of each and
+names the channels that failed. A transport whose binding list the server
+could not read is named in the prompt as not included. On this tab `U` is unbind-all; the runtime picker stays on `U`
+everywhere else in Keeper detail.
+
+Pausing (`p`) or shutting down (`s`) a Keeper that still holds channel
+bindings offers to remove them too. A paused Keeper keeps its channels routed
+to itself and answers on them as soon as it runs again. Once the pause or
+shutdown is accepted, the footer reads `y: also unbind <keeper>'s N channels,
+or any other key to keep them -- <channels>`. `y` sends the same conditional
+unbinds as `U` `U` on the Channels tab; any other key leaves the bindings.
+The offer does not answer to `U`: on the list `U` still opens the runtime
+picker, so pausing and then picking another runtime keeps the channels.
+
+The Terminal tab is the last tab, one `[` back from Info. It shows the
+Keeper's Execute output the way a terminal does, oldest row first and the
+newest at the bottom. A command line starts with `$ ` (`> ` on its later
+lines), then comes what it printed, with stderr in the warning colour and a
+`· exit 0` row when it ends. A signal, a rejection, or an unknown result gets
+its own row there. Colours the command wrote are kept, and a tab goes to the
+next stop of eight cells. The command line is the server's summary of the
+command, not a quoted shell line to paste.
+
+While the tab is open the TUI holds a connection to the Keeper's Execute output
+stream and keeps the newest 500 rows. A row reaches the screen as the server
+logs it, and rows that arrive faster than twenty times a second are drawn
+together. The row under the output says `following`, how many commands are
+active (`closed` when none is and the last one ended, `state unknown` when none
+is active and the server has not recorded an end), and when the server last
+said anything on the connection. The server sends a keepalive every 15
+seconds, so that time moves even when the Keeper is idle. When commands
+overlap their rows interleave, and each row then starts with its stream number
+as `[3] `, or `[?] ` for a row the server did not attribute to a stream.
+
+When a connection ends the last rows stay, marked stale with the reason. The
+TUI retries a lost connection or unreadable frame after two seconds, increasing
+the wait up to 30 seconds if failures continue. HTTP 408, 425, 429 and 5xx
+responses are retried the same way. Once an accepted initial frame has stayed
+connected for a heartbeat interval, the next retry starts at two seconds again.
+The first frame from a new connection replaces the rows. A gap in the stream
+also requests a new connection. The server keeps only the newest 5,000 events
+per Keeper, and says so when it skips some.
+
+Other HTTP refusals, including a successful HTTP status without the required
+workspace receipt, stop the stream and show the reason. After correcting the
+underlying problem, press `[` then `]` to leave and reopen Terminal and retry.
+The last rows remain available while the stream is stopped. The TUI sets a
+three-heartbeat-interval deadline for a refusal's body; if the deadline wins,
+the status is shown without the server's body. This deadline does not end a
+successful output stream.
+
+`k`, `PgUp`, `Home`, or the mouse wheel stops following and holds the screen as
+it was, so output that arrives meanwhile does not move the rows you are
+reading. The row under the output then says `paused`, how many newer rows have
+arrived, and `End:follow`.
+
+| Key | Effect |
+|-----|--------|
+| `j` / `k` | one row down / up; the mouse wheel does the same |
+| `PgDn` / `PgUp` | one page down / up |
+| `Home` | the oldest row the TUI holds |
+| `End` | the bottom; the view follows again |
+
+Scrolling down to the bottom follows again too. Leaving the tab, or choosing
+another Keeper, drops the hold: the next reading opens at the bottom. `g` is
+the approval-gate toggle on every tab, so the Terminal does not use it for the
+top. The rows come from the server process's memory (the newest 5,000 events
+per Keeper), so a Keeper that has run nothing since the last server restart
+shows `No Execute output observed in this server process.`
+
+### Keeper logs
+
+`l` from detail. The newest 200 physical rows from the keeper's dated metrics
+store, spanning month boundaries and rotated day segments. Reads are bounded by
+row count, not file size.
+
+```
+ Keeper Logs: sangsu  (85 entries)
+   Time     Kind Channel   Msgs          In/Out       Lat      Cost  Work
+   14:31:08 turn turn         7            10/12       0ms    $0.000  tool_use
+   14:31:32 hb   hb          --            --/--        --        --
+  j/k:scroll  Esc:back  q:quit  r:refresh
+```
+
+| Field | Meaning |
+|-------|---------|
+| Time | `HH:MM:SS` from the row timestamp |
+| Kind | current `keeper.metrics.v1` Turn or Heartbeat row |
+| Channel | canonical short label (`turn`, `sched`, `hb`) |
+| Msgs | observed message count, `--` when the heartbeat did not observe it |
+| In/Out | `input_tokens` / `output_tokens` from usage |
+| Lat | observed `latency_ms`, including zero; `--` when unavailable |
+| Cost | observed `cost_usd`, including zero; `--` when unavailable |
+| Work | `work_kind` label |
+
+Malformed JSON, current-schema decode failures, and storage failures are shown
+rather than skipped. Rejected rows consume the 200-row window and are never
+backfilled with older data. A current-schema row whose `name` does not match the
+selected keeper is rejected instead of being attributed to it by file location.
+
+### Keeper calls
+
+In a Keeper chat, `/calls` opens the original calls captured from that
+conversation. Use `j`/`k` or the arrow keys to choose by the original input,
+target and execution ID, then Enter to read the recorded input and output in
+full. The open action beside a folded long result opens that exact execution
+directly. It first reads the exact ledger entry through
+`GET /api/v1/keepers/<name>/tool-calls?execution_id=...`, then pages the retained
+original result through `/api/v1/keepers/<name>/tool-result?execution_id=...`.
+The server binds that execution to its enclosing turn and original tool
+occurrence; it does not substitute another call from the recent page. Each
+page is bound to the same source, and the complete body is verified before
+display. Execute results also expose their printed output with its original
+line breaks. If no original execution ID was recorded, the reader says so.
+
+Inside a result, `j`/`k`, PageUp/PageDown and Home/End scroll the whole record.
+`/` searches the captured document; Enter keeps the query for `n`/`N` to move
+between matching rows. Matching rows carry `*` in their existing left margin;
+the current search landing carries `>` and a reverse-video band, including with
+`NO_COLOR`. Search marks temporarily replace those rows' inline styles without
+changing their text, wrapping or original copy. Ordinary scrolling clears the
+current landing while retaining the matching-row marks. Esc while typing cancels
+the query and keeps the reader open. Query input and paste stay in this reader;
+they do not edit the chat draft.
+`r` rereads the same execution and keeps the last result, read position and any
+known read failure while the new read is pending. A missing, ambiguous or
+unavailable record remains a read failure. Esc returns to the original call
+selection; another Esc returns to the chat with its draft and conversation
+position intact. Ordinary `t` remains text in the chat composer. A ledger preview
+limit stays separate from the retained original body. If the turn has not
+published its trace, the trace was not retained, or reading fails, the reader
+keeps the preview and explains the source state. A failed original-source
+refresh preserves a previously read full body and its position. The original
+body contains the secret-redacted bytes retained by the producer; reading all
+of them does not prove that the producer captured all process output.
+
+`t` from the roster or from detail. The keeper's durable tool-call log, the
+newest page of `GET /api/v1/keepers/<name>/tool-calls`: one row per call
+with the finished glyph or `✗` for one that returned an error, the tool,
+its duration, the turn it ran in, and the subject the call is known by -
+the same naming the chat rows use. The header carries the server's own
+freshness verdict (`ok · latest 12s ago`), so a stale page does not read
+as a quiet keeper, and a row naming another keeper is counted and not
+drawn rather than attributed by file position.
+
+```
+ Keeper Calls: rondo (100)  ok · latest 8s ago  02:51:40  [connected]
+   Time     Tool                     Dur      Turn   Subject
+   11:36:57 ✓ Read                   28ms     2143   keeper_owner_reducer.ml
+   11:36:38 ✗ tool_execute           14.5s    2142   dune build
+  j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh  | Port: 8935
+```
+
+### Keeper message
+
+The pane's five regions and what draws each:
+
+![The chat pane, top to bottom: header, transcript, status band, composer, key footer](diagrams/tui-chat-pane-anatomy.svg)
+
+What the transcript draws for a live, an observed and a settled turn is the
+table under the same diagram in
+[`diagrams/tui-chat-pane-anatomy.html`](diagrams/tui-chat-pane-anatomy.html).
+
+`c` (or `m`) from the roster or detail. Sends to the keeper over
+`POST /api/v1/keepers/chat/stream` with a durable UUIDv7 request ID. The send
+runs in the background, so refresh and navigation stay responsive while the
+turn runs. `Esc` returns to the roster when chat opened there, and to detail
+when chat opened from detail.
+
+```
+ Message to: sangsu  ● active · running anthropic.claude-opus-5  (port 8935)
+   ► YOU ───────────────────────────────────────────────────── 14:35:01
+     hello, how are you?
+   ● ───────────────────────────────────────────────────────── 14:35:03
+   │ ✓ Read a.ml
+     ...reply text...
+   > type here_
+  Enter:send  Ctrl-G:next Keeper  Esc:list  Ctrl-U:clear
+```
+
+That is the `metadata:full` heading (`Ctrl-F`): the speaker whole at the
+left, the clock at the right edge and a rule
+between. A heading opens a turn, not a block: the keeper's reasoning, tool
+calls and reply in one request share it, and a later minute of that turn
+draws only the rule and its clock. The pane's own keeper is not named on
+its headings, since the header already says whose chat it is; the operator,
+another keeper writing in, `STATUS` and `AUTO` still are. A row without a
+trustworthy time draws no clock and the rule runs to the edge.
+
+The header joins the selected Keeper's published status with its typed runtime
+phase and producer-owned canonical `runtime_id`, using the same roster reading
+as the Keepers table. It also always names the chat approval stance
+(`AUTO` or `YOLO`) and the effective durable Gate mode in the words the [w]
+chooser uses (`gate: manual`, `gate: Auto Judge`, or `gate: allow-all`). A
+Keeper that inherits `workspace` shows the observed workspace mode rather than
+the word `workspace`; an unread Gate observation reads `gate: not loaded`.
+It never derives a model by parsing the id.
+When there is room, the Context item includes percentage, current/maximum token
+counts, and `^X`; narrower panes progressively keep the percentage before
+dropping the whole item. In a narrow split pane, only the displayed runtime id
+is middle-fitted so operational modes remain truthful in the header. While no
+turn is starting or running, `Ctrl-G` selects the next readable Keeper and
+wraps at the end of the roster. Each Keeper keeps its own draft. Every history
+GET carries a load generation, so a response that finishes after the operator
+switched away or left and returned is discarded instead of replacing the
+newer transcript. The shortcut is withdrawn while a turn is in flight or the
+roster cannot be read.
+
+Chat opens in a conversation layout: a small `›` marks your message, `●`
+marks the Keeper, and `◀` marks another sender. Other senders keep their name
+and origin above their message. Prose starts at one column, wraps within a
+100-cell reading width, and has a blank line between messages. Tool calls keep
+their own name and result mark without a second TOOLS label. Operator and Keeper
+prose uses the terminal foreground; tools and reasoning remain subdued.
+
+`Ctrl-F` cycles conversation → inline metadata → full origin headings →
+conversation. Inline metadata includes the minute clock, aligned speaker labels
+and turn rails. When an entry is too narrow for its full metadata and a readable
+body, it uses the existing origin heading above the body. Widening restores
+inline placement automatically; the selected mode and draft stay unchanged.
+Full headings give origins a row of their own. Technical request identity is available in expanded diagnostics after the body;
+metadata modes never insert turn numbers or receipt claims into speech.
+The header labels only expanded modes (`metadata:inline`, `metadata:full`).
+Font size, letter spacing and line height come from your terminal settings.
+
+The input area shows progress for the current conversation. Other Keepers' running
+requests remain in Keepers and Activity, without extra interrupt commands beside
+the composer. The default progress row shows the current activity without generated
+progress timers (request age, call age and model silence); those timers,
+runtime identity and cumulative tool details are available in the metadata views.
+An open request between continuation segments has no progress row or growing
+wait timer; progress returns when its next run starts.
+Pending inputs retain their delivery state. Failures, unconfirmed delivery,
+interrupt outcomes and approval requests stay visible. `Ctrl-S:details` opens
+folded approval records. `Ctrl-D` expands tool details independently of metadata.
+
+Auto-next requests priority for your message; current work continues until it
+finishes or yields. Use the explicit interrupt controls to stop current work.
+When
+one newest message is taller than the history pane, the live edge keeps its
+heading (or inline opening) and latest rows with an explicit
+`⋯ N hidden · PgUp` separator.
+That separator is a viewport projection, not a transcript row, and remains
+readable under `NO_COLOR`.
+
+Inputs waiting to enter a turn appear under `대기 입력` with the local `›` mark.
+The label beside each original input distinguishes unsent (`전송 대기`), sending
+(`전송 중`), accepted and waiting to be processed (`처리 대기`), and unconfirmed
+delivery (`전송 확인 중`). Acceptance alone does not mean the Keeper has processed
+it. A persisted input or one whose bound execution reports `Run_started` moves
+into the conversation once. Rejection details appear separately as an error.
+
+User and Keeper speech keeps the recorded text. Request IDs, turn numbers,
+delivery receipts and attempt details are never prepended to the body. Literal
+words such as `요청` or `입력 반영됨` in a message remain untouched.
+Full request IDs still group inputs and responses internally; technical identity
+stays in expanded diagnostics, and timestamps stay in the gutter or heading.
+Expanded diagnostics (`Ctrl-D` to full) follow the whole message, and a waiting
+input names its request there too.
+Working means the turn is in progress. The progress row says `THINKING` or
+`STREAMING` only after receiving the corresponding signal.
+
+`/find <text>` searches the conversation that is drawn, including replies and
+activity retained in live or settled journals. `/find` repeats toward older
+matches using record identity, so incoming messages and history backfill do
+not restart the search. Hidden reasoning is excluded. Editable pending inputs
+and replaceable polled excerpts contribute to scroll positioning but are not
+conversation search candidates.
+
+Search lands on the physical body row containing the match, including inside
+a long or wrapped answer. It searches rendered words, so `foo bar` also finds
+`foo **bar**`. A line break in the source is an optional boundary: words on
+either side of it match with or without a space in the query. Width wrapping
+is not: it changes where rows break, not the searched text, so a space the
+author wrote still has to be in the query (`foobar` does not find `foo bar`
+however the terminal wraps it). A wrapped phrase lands with its last row
+visible.
+
+While reading back, the pane pins projected history or journal origins and
+their physical body-row positions. Incoming input, broadcasts, streamed text,
+and settled journals therefore do not pull the view toward the tail. This also
+works when no raw history rows have been loaded. The canonical reply's typed
+alias keeps the same anchor when history and journal representations replace
+one another. Search installs its pin before the next frame. If output arrives
+before that frame, the reading-back notice and command menu already reflect the
+restored position, so their row heights do not move the match on the next paint.
+Returning to the bottom releases the pin and resumes following output.
+
+A pin on a source row keeps that row's exact source byte, so a terminal resize
+or an origin-gutter change that reflows the anchored entry brings back the same
+words, on whichever physical row they now occupy. A generated row, or a
+transient row whose source has no stable byte map, has no source byte and
+saves no pin point. If every saved point is gone, the view returns to the
+bottom instead of holding a numeric row distance.
+
+The pane opens on the keeper's durable transcript. A turn the keeper ran on
+its own is drawn as what it did. Reasoning starts folded with a `THINKING`
+label; tool calls start as a compact activity row labelled `TOOLS`.
+Folded reasoning summarizes a thought only when the summary uses fewer displayed
+rows than its source Markdown at the available message-body width, with the same
+trailing-blank trimming used by the transcript. Short notes stay visible, and
+link-preview cards do not make a fitting thought fold.
+Resizing or changing the origin display recalculates that fold.
+`Ctrl-R` cycles reasoning through folded, full, and hidden; `Ctrl-D` cycles
+tool details through compact, results, and full, so
+full arguments and unfolded Gate history are two presses from compact. Results
+keeps one row per call and adds what the call answered: a short preview of the
+recorded output, `not seen` when the transcript never observed a return, and
+`no call-log row` when the durable log has no entry for the turn. In compact
+mode, successful Gate lifecycle steps for the same Keeper and approval are
+summarized at the last step, even when conversation separates them. The summary
+names the step count; Full restores every original step. Unresolved approvals,
+rejections, failures, warnings, and indeterminate effects keep their complete
+history. Conversation text is preserved verbatim. `/thinking` and
+`/tools` expose the same choices by name (`/tools results` jumps straight to
+the middle stop). `--reasoning` and `--tool-view` can
+override the initial modes (`--tool-view results` opens on the concise
+results).
+
+A turn this TUI did not open -- one running when the TUI started, or one
+another surface opened -- is drawn from its journal while it runs. The
+runtime event feed carries a frame per event of a running chat operation
+opened from the dashboard, a TUI or the API; a frame for the open pane's
+keeper is read as "that operation's journal grew", and the pane reads the
+journal from where its record ends, one round trip behind the token. The
+frame itself is not folded: the journal alone carries every line in order,
+and two feeds into one log would have to agree on order after a dropped
+frame. Each history load (a row appended to the transcript, `r`) reads the
+same journals too, so a frame lost while the feed was down costs nothing,
+and a turn a connector (Discord, Slack, another keeper) opened -- which
+sends no frames -- is followed at that pace. The pane draws the turn as an
+open block, the same shape as a turn it streams itself. A turn the loaded
+transcript says is over, or whose journal the server can no longer serve,
+is drawn from its committed rows instead. The footer's turn line still says
+how long the turn has run and which tool it last touched; the `Latest
+output:` tail it used to carry is left out while the pane draws that text.
+A turn whose stream the TUI opened and lost is followed the same way.
+
+Memory journal rows start hidden. `Ctrl-N` or `/memory` cycles hidden → summary
+→ full → hidden. The header names the expanded modes as `journal:summary` and
+`journal:full`; the default needs no badge. Summary uses producer-owned compact
+text. Neutral system rows with no summary projection remain whole when the
+journal is shown. The help sheet lists the journal and metadata shortcuts.
+
+A failed Librarian pass is not a row in summary mode. While the passes after
+the last commit keep failing, the header's second row names the run once, in
+every journal mode: `Librarian failing ×5 since 14:02:13 ·
+exact_execution_failure` - how many in a row, when the first was recorded,
+and the server's word for how the newest failed. The next commit ends it.
+`journal:full` still draws every failed pass as a row of its own.
+
+Under `journal:full` a committed revision draws its summary, then each fact
+in two columns: the sign and category at the left, padded to the revision's
+widest category, and the claim wrapped under itself. A blank row separates
+the facts; a pane too narrow for the claim column wraps the claim under its
+lead at the full width.
+
+```
+◈ JOURNAL  ┊ Librarian · revision 454 · +2 −1 · 63 retained
+           ┊
+           ┊ + lesson   verifier_exact cannot read the job log,
+           ┊            so ancestry alone never satisfies …
+           ┊
+           ┊ − blocker  pr-check.yml has no pnpm step …
+```
+
+The folded tool row retains exact outcome counts. From compact, one `Ctrl-D`
+shows short results and a second opens full calls, schedule, and diffs. Full
+names, typed execution state, actual batch/concurrent scheduling, exact served
+input/output, and the hidden change view are discoverable from the row that owns it. The typed calls
+themselves stay attached to the message, so
+changing the view does not reconstruct facts from rendered glyphs. Expanded
+Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
+a mixed block does not collapse into an anonymous tool count.
+
+A turn's Skill invocations are one block, like its tool calls. At rest it
+draws one row per skill, in the order each was first triggered, with how many
+times: `msx-observe ×7`. A trigger that failed, or whose evidence the pane
+could not read, adds that state's words (`prior-art ×2 · 실패 1`). Cycle `Ctrl-D`
+to full to open every invocation: how far it got (an instruction skill is
+`읽음`, a
+composition `실행됨`), the tool calls the server attributes to it, and its
+proof coordinates. An `Execute`
+call whose result reads as the output schema its descriptor declares draws
+`status` (`exit 0 · 808 ms`, `signal 9 · 30012 ms · timed out at 30 s`), the
+command's `output`, and any `stderr`. Output too large to ride inline is named
+by the artifact that holds it (`artifact sha256:9f3a12c4d5e6… · 48213 bytes`).
+Where the command ran and the sandbox around it are not drawn; a result that
+does not read is drawn as it arrived. A served `input` or `output` longer
+than eight lines keeps its first eight and closes on `… +N lines · Keeper
+Calls (t)`; one line over is drawn rather than folded. The Keeper Calls view
+(`t`) keeps the stored result whole. A held tool call
+uses decision vocabulary independently of execution: `approval approved`,
+`approval denied`, `approval timed out`, or `approval displaced`. Its later
+tool row still reports whether execution returned or failed.
+Tool calls use `✓` when the turn received a result, `✗` for a recorded failure,
+`◌` while arguments are still streaming, `▶` while awaiting a result, `○` when
+this view did not see a result before the attempt ended, and `?` when it recorded
+no outcome. The results view uses `↩` for a received result; receipt does not
+mean the tool succeeded. A finished call carries
+its server-recorded duration; an open call has none.
+
+`ERROR` rows keep the complete producer message and wrap it through the same
+scrollable transcript layout as ordinary prose. They are never reduced with a
+cell-fit `~`; a reason longer than the visible page remains reachable with
+PgUp rather than being presented as a complete error.
+
+Full tool detail also keeps a Keeper's recorded file change inside the turn
+that made it. The pane does not fetch file-change bodies in compact or results
+mode; cycle `Ctrl-D` twice from compact to open Full and perform that lazy read.
+A tool row joins a change only
+by the producer's canonical `execution_id` — provider call ids, paths,
+timestamps, and list position never authorize the join. The inline block names
+the resolved file address, added/removed row counts, producer-recorded old/new
+line ranges, and a bounded `diff` preview. At most three changes are expanded
+per tool block and each preview holds at most twelve rows; an omission names
+its exact count and points to Changes for the complete view. A historical row
+without line evidence keeps its diff but invents no coordinates. A Write names
+its recorded new body and range only, because previous content is unavailable.
+
+When an autonomous turn says something, its badge is `· auto` instead of the
+Keeper name used for a direct chat reply. A blank autonomous turn with no trace
+still draws one `·` row, so the turn is visible without pretending it answered
+the preceding operator message.
+
+```
+ [21:41:34]  tools
+   ✗ Tools 4 · read_file 2 · web_fetch 1 · glob 1 · 3 returned · 4 details folded
+   ✗ 1 failed: web_fetch
+```
+
+What ran is on the first row and what did not is on the second, under its own
+mark. A block whose calls are all accounted for keeps one row, and so does a
+block of two calls -- splitting those would draw as many rows as showing each
+call whole.
+
+Only rows the server marks as autonomous turns are read this way. A turn
+in the conversation itself already has its calls in the transcript as tool
+rows, so its trace block is not drawn a second time.
+
+Conversation turns remain structural: rows inside one request use typed
+Input → Progress → Tool → Output phase and producer operation sequence. Each
+request phase, broadcast, and Memory journal observation then shares the
+displayed clock as one chronological axis. A parallel Journal row can sit
+between a request and its later reply; the reply is marked `↳` with the same
+request label instead of being mistaken for a new turn. If a producer clock
+would reverse phase order, the later phase is clamped to the latest preceding
+phase on this display axis. A phase with no valid source clock inherits that
+frontier; a leading unknown phase borrows the request's first later valid
+clock so it cannot fall behind its own output. Only an entirely clockless
+request reads `--:--:--`, never a fabricated epoch time. Stable server row IDs
+keep scroll anchors through refresh. A turn that is still streaming follows
+its latest committed causal frontier instead of escaping to a separate
+bottom-only lane.
+
+Only a request-correlated terminal keeper result is rendered as a reply.
+Interrupted streams, protocol errors, rejected turns, and terminal outcomes
+without visible text become explicit status or error rows; partial text is never
+promoted to a successful reply. Requests are tracked per keeper, so a turn
+running for one keeper does not decide what `Enter` does in another's window;
+sends going elsewhere show as `(also sending to X)`. Drafts are retained per
+keeper while navigating.
+
+#### Prompt presets
+
+Config 탭의 `presets` 패널(`p` 로 순환)이 이 기능의 자리다. 목록은 프리셋마다
+이름과 개수(프롬프트 오버라이드, 지시문을 담은 keeper, 런타임 배정, exact 레인),
+저장 시각을 보여주고, 아래 상세에는 설명과 keeper 목록이, 그 아래에는 이번
+세션의 마지막 복원 보고서가 남는다. manifest 가 읽히지 않는 디렉터리는 `!` 줄로
+따로 보인다. 키는 `j`/`k` 선택, `n` 저장(이름을 입력하고 Enter, Esc 취소),
+`u` 두 번 되돌리기, `D` 두 번 삭제, `r` 새로고침이다. Config 에서 `s` 와 `t` 는 이미
+Resources 와 Tools 로 가는 키라 쓰지 않는다. 되돌리기와 삭제는 한 번 누르면 준비만
+하고, 같은 키를 한 번 더 눌러야 실행된다. 다른 키를 누르면 풀린다. `!` 줄의
+프리셋은 목록에서 고를 수 없으니 채팅의 `/preset delete <name>` 으로 지운다.
+이름이 프리셋 이름 규칙(`A-Z a-z 0-9 . _ -`)에 맞지 않는 디렉터리는 이 명령으로도
+지울 수 없다.
+이름을 입력하는 동안에는 패널이 모든 인쇄 가능 키를 가져가므로 이름에 `n`, `u`,
+`D` 가 들어가도 키가 발화하지 않는다.
+
+채팅 창에서도 같은 일을 할 수 있다. `/preset` lists the prompt presets the server holds under `.masc/presets`:
+one line per preset with its counts (prompt overrides, keepers with
+instructions, runtime assignments, exact-output lanes), its description, and
+when it was saved; a directory whose manifest does not read gets a `!` line.
+`/preset save <name> [description]` snapshots the live state under that name.
+`/preset restore <name>` saves the live state first as `_autosave`, replacing
+the one the previous restore left, then applies the preset surface by surface
+and reports each one: prompt overrides take effect at once, keeper
+instructions at each keeper's next up, and runtime routing through a
+runtime.toml commit. `/preset restore _autosave` undoes the latest restore's
+prompt overrides and runtime assignments; a keeper that had no instructions,
+or a lane that restore added, stays as it left them. Every skipped key
+is listed with its reason, and a restore that skipped anything or whose
+commit failed is shown as an error. A visible runtime commit retains its
+source revision and commit order, directory-sync uncertainty, lock-release
+warnings, and the separate exact-lane registry application. Unpublished lanes
+require a restart; a retained stale registry instead needs its configuration
+repaired before a restart can publish it. A durability warning means the change
+is already applied, not that the restore should be repeated. Inspect current
+settings and `_autosave` first: repeating restore replaces the undo snapshot.
+An unreadable response also does not prove that nothing changed. The current
+server and TUI must both support these required commit fields; older incomplete
+commit reports are refused rather than assumed clean.
+`/preset delete <name>` removes that
+preset, including one listed with `!` because it does not load; typing the
+name is the confirmation. A directory whose name is not a valid preset name
+is refused.
+The answers land in the chat pane of the keeper selected when the command was
+typed.
+
+#### Context inspector
+
+`/context` opens three readings for the selected Keeper: `1:stack` summarizes
+the recorded context composition, `2:request` lists the exact canonical input
+items retained for the provider request, and `3:proof` explains each recorded
+component's source and evidence strength. At 110 columns and wider, the request
+and proof tabs draw two columns with their headers pinned above independent
+windows: `j`/`k` moves the left list while the selected item's text or
+provenance stays put at the top of the right column, `h`/`l` moves which pane
+hears `j`/`k` (the caret on the pinned header names it), and with the right
+pane focused `j`/`k` scrolls the item itself. Narrow terminals keep the same
+facts in one column; `Enter` opens exact text at full width.
+
+`1:stack` is three measurements of one turn, not three views of one number,
+and the section says so at the bottom. It reads top to bottom in the order the
+turn is built. COMPOSITION comes first: the turn's attributed bytes grouped by
+the producer they entered through — the prompt this turn assembled, the tool
+surface it was given, and the conversation handed to the provider — with each
+producer's components under it, largest first. One colour and one shade per
+producer, the same three on all three tabs, so a shade read here is the same
+shade on the request and proof tabs. It is a proportion table, not a breakdown
+of the request: the attributed total and the serialized bytes are measured at
+different points and the gap is not explained, and the arrow into SERIALIZED
+REQUEST is drawn only when both readings describe the same turn. SERIALIZED
+REQUEST is the request the dispatcher actually serialized, in bytes and in the
+provider's own token count. HISTORY REACH shows the last observed history
+range: a wire-shape projection or history prepared for a client. Its runtime
+is not recorded, so the turn's runtime does not identify who measured it.
+Atoms are the indivisible units a cut falls between, keeping a tool call and
+its result together. The count says how many atoms were outside that range;
+it does not prove what the provider received or what a client retained. A provider
+that reports usage across the whole conversation rather than per request
+gets no window percentage here, only the number it reported and a note that
+this request's own share was not. RECENT TURNS, the section at the bottom,
+is one row per dispatched turn on the fetched page, carrying the input,
+cache read, and output the provider itself counted — the per-turn answer to
+how much context goes in, newest first. A turn whose provider counted
+across the conversation states that instead of figures, and a turn whose
+provider reported nothing says the input was not reported; neither gets a
+number that looks like its own and is not.
+
+`[` and `]` step back and forward through the page's turns -- the caret on
+a RECENT TURNS row names the one on screen -- and every tab re-reads the
+exact provider input for the row they name; a turn that retained no
+snapshot says so on the request tab rather than showing another turn's.
+
+On the request tab, `/` searches the item labels the way the keeper
+roster searches names: typing jumps to the first match, `n`/`N` cycle,
+`Enter` settles, `Esc` clears. The query draws beside the tab row.
+
+`2:request` marks where each item stands in the assembly: `F` the fixed
+system prompt, `H` history the window carried forward, `N` the newest
+message added this turn (the wire is append-only, so the last message is the
+turn's own input, whether a user's text or this turn's latest tool result),
+`S` a tool schema. The header also states what came back, to the extent the
+turn record observed it: output tokens and the finish reason, and a
+RESPONSE band under the summary shows the reply itself -- the keeper's
+speech as markdown, its tool steps and reasoning dimmed -- joined from
+the newest transcript page by the turn's own key and capped at a
+screenful, with the chat pane named for the full text. A turn whose
+reply the newest page no longer reaches says so instead of borrowing
+another turn's answer. An item's text
+is the retained pre-dispatch copy; message rows are read as their typed
+blocks — prose as markdown, structured payloads as pretty JSON, tool calls
+and results under labels that name the tool and the outcome.
+
+Evidence badges are claims, not decoration. `VERIFIED` means exact text was
+checked against the producer digest and byte count. `SERIALIZED` means an exact
+same-turn pre-dispatch request snapshot exists but no item-level key joins that
+component to one retained item; it does not claim transport began or the
+provider accepted anything. `DIGEST ONLY` means a producer prompt-block digest
+is retained without same-turn exact text. `BYTES ONLY` means only the component
+byte count is available. The inspector never joins independent readings by
+label, position, or similar-looking content.
+
+#### Reading chat loading errors
+
+If saved history, older messages, or the memory journal cannot be loaded, a
+short warning above the input points to `/errors`. Run it in the open Keeper
+chat to put the current full details in the local conversation log, where
+lines wrap and you can scroll back through them. Hidden memory-journal errors
+are included. This reads the recorded failures without sending a message or
+retrying a request; no recorded error does not imply loading has finished.
+
+#### Copying a reply
+
+In a Keeper chat, type `/copy` and press Enter to send that Keeper's latest
+completed reply to the terminal clipboard through OSC 52. The TUI reads the
+stored reply text before terminal sanitizing and line wrapping, so long lines,
+blank lines, and tabs keep their original bytes. The chat notice names the
+Keeper and character and byte counts, and says terminal clipboard support is unconfirmed:
+OSC 52 has no success response. If the history cannot be read or has no reply,
+`/copy` reports the failure instead of copying a displayed line.
+
+#### Pasting
+
+The surface turns bracketed paste on (`ESC[?2004h`) while it runs. Without it a
+terminal delivers a paste as the keys it looks like, and the line break in
+pasted text is the same byte Return sends: a three-line paste becomes three
+messages, and during a turn, three queued fragments. With it the payload
+arrives as text and lands in the draft whole, so Markdown blocks, URLs, and
+log excerpts keep the shape they were copied in.
+
+A paste while the composer row is idle takes focus for it, so pasted text
+always lands somewhere visible and addressed to the keeper the row named. With
+no keeper to send to, the paste is refused out loud in the TUI session block
+rather than dropped.
+
+A paste longer than 50 lines, or larger than 8 KiB, is not put into the draft.
+The composer is five rows; a four-hundred-line paste in it is a draft nobody
+can read, and a draft nobody can read is a message nobody can check before
+sending. One line stands in its place:
+
+```
+   > [pasted 400 line(s), 3489 bytes → pasted-20260825-0211-01a034c1.txt]
+```
+
+When the message is sent, the text is written into the Keeper's own directory
+and the placeholder becomes a line naming that file. A Keeper reads paths
+relative to its sandbox root and refuses anything outside it - `/tmp` comes
+back as `path_outside_sandbox` - so the file goes into the root
+`Keeper_sandbox_config` reports for that Keeper's profile
+(`.masc/playground/<name>/`, or `.masc/playground/docker/<name>/` for a Docker
+Keeper) and the message names it bare.
+
+A Keeper that has never run has no directory, and one is not created for it -
+that would be this surface deciding something about the Keeper's own space.
+Nor is a failed write hidden: both cases put the pasted text into the message
+instead and say so in the TUI session block. A paste that arrives as a large message
+is worse than one read off disk; a paste that arrives as neither is the thing
+this must not do.
+
+`Ctrl-U` drops both. Switching Keepers puts the text back into the draft
+first, so a saved draft never holds a placeholder whose text has gone.
+
+Line breaks arrive as CR, LF, or CRLF depending on the terminal and on what
+was copied; all three become one LF in the draft. Everything else that is not
+printable becomes a space - a paste is the one way a terminal escape sequence
+could reach a message, since typed keys are filtered one scalar at a time.
+
+A paste over 1 MiB keeps the first 1 MiB. The rest is read - the end marker
+has to be consumed, or the tail of the paste arrives as keystrokes - and
+counted, and the TUI session block says how many bytes are not in the draft.
+
+#### Looking at an image
+
+`/image <path>` draws an image file on the terminal, if the terminal can hold
+one. The picture takes the whole screen, with the path above it, and the next
+key press takes it away and repaints the frame - that key does nothing else,
+so dismissing a screenshot cannot also move a cursor.
+
+Whether the terminal draws pictures is asked once, before the first frame,
+with the Kitty graphics protocol's own capability query. Terminals that
+implement it (Ghostty, Kitty, WezTerm) answer; terminals that do not say
+nothing, and `/image` then refuses in words instead of writing base64 onto the
+screen. Inside tmux the escapes are wrapped for passthrough, which also needs
+`allow-passthrough on` in the tmux config - that is the operator's setting and
+the TUI cannot check it.
+
+A path that cannot be read, or a file that is empty, is refused on the
+footer. Nothing takes the screen to report a failure.
+
+#### Keeper Job notifications
+
+Chat keeps the selected Keeper's scheduled Job status above the composer.
+Press **F9** to expand or fold the list. Arrival is a persistent status notice:
+it does not create repeated chat messages or popups on every elapsed interval.
+The existing Keeper-scoped refresh updates this notice; opening or drawing it
+does not dispatch, interrupt or acknowledge a wake.
+
+A delivered one-shot stays visible while queued, even though the schedule
+store calls its dispatch `succeeded`. The notice separates queued delivery,
+turn start, turn end, consumption and the durable occurrence result. A turn
+ending does not prove the work completed. A durable completed occurrence confirms
+turn processing, not delivery of the requested result to a channel or file.
+Transferred pending work names the recipient; an exact queue miss stays unconfirmed
+instead of appearing queued. Cancelling a declaration does not settle an
+occurrence the server still finds pending, including at a transferred owner.
+Failure includes its recorded reason;
+unknown or conflicting evidence remains unconfirmed. A retained receipt whose
+exact stimulus is unavailable stays visible as unconfirmed when the server
+reports missing identity, preserving the other Jobs on the page. Being busy on another
+request never makes this Job appear started.
+
+For a repeating Job, the last occurrence and next firing are distinct. A held
+next firing says whether the earlier wake remains unconsumed or the Keeper is
+shutting down. Pending work and failures use warning/error styling respectively;
+an elapsed due time alone is never a failure. Text carries the meaning with
+NO_COLOR as well. The list retains active/pending work and the latest closed
+result rather than showing the entire closed history.
+
+Read failures retain the last observation with its timestamp and refresh-failed
+label; an unread store is not an empty list. A stale/unhealthy runner's hold
+names when it was observed. A capped server page is marked partial. Extra Job rows yield to the existing
+chat input and transcript minimum on a small terminal. Keeper Automation remains
+the place to inspect the full schedule page.
+
+#### Lines typed during a turn
+
+Enter during a running turn is the explicit **queue next** action — the footer
+labels it `Enter:send update`. It holds the line for a later turn rather than
+pretending the running model saw it. Pending
+input is not inserted between the active turn's user, status/tool, and reply
+rows. It has its own `NEXT` lane below the causal transcript, oldest first:
+
+```
+   (sending tui-..d3530056 · 12s…)
+   NEXT 1 · 10:42:13 · check the CI run too
+   NEXT 2 · 10:42:18 · and the rebase
+   > _
+  Enter:send update (2 local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit  …
+```
+
+A count on its own is not enough - an operator who typed three lines during a
+turn needs to see which three. Up to three pending items are shown (the first
+two dispatch positions and the newest submission); a fourth row names how many
+middle items are hidden so a full 32-item queue cannot consume the viewport or
+disable cancel/edit. Each item keeps its first submission clock while it waits
+and after it starts. Only the first line is shown; the rest goes with it.
+
+`/steer <message>` is a distinct action. It signals the exact current request
+ID to stop and places the replacement in a typed `STEER` row ahead of ordinary
+`NEXT` rows for that Keeper. The replacement is dispatched only after the
+current operation reaches a terminal state; an interrupt acknowledgement is
+not misreported as completion. A second pending steer for the same Keeper is
+refused instead of silently replacing the first.
+
+If the stream disappears without terminal evidence, the row changes to
+`reconciling` and the TUI re-subscribes with the same idempotent operation ID.
+The Keeper remains occupied and every `NEXT`/`STEER` stays held until the
+server emits a verified terminal receipt. A transport error is never treated
+as a turn boundary.
+
+A queued line travels with the keeper it was written to, so switching keepers
+mid-turn cannot redirect it; a line addressed elsewhere names its keeper after
+the number. The visible `NEXT` count is scoped to the selected Keeper rather
+than the workspace-global queue. `Ctrl-K` drops the newest waiting line and
+`Ctrl-P` edits it in place. Newest means submission sequence, not dispatch
+position: editing preserves request ID, original submission clock, queue slot,
+attachments, `NEXT`/`STEER` intent, and a steer's causal parent. Nothing has
+been dispatched, so both are local.
+
+When the oldest `NEXT` row becomes active, its reserved row is handed to the
+active USER row one-for-one. The row therefore does not jump upward through an
+older turn's Tool or reply block.
+
+The arrows walk what the operator typed for this keeper, newest first, and the
+waiting lines come before the sent ones. `Up` on a fresh composer therefore
+hands back the line that is waiting rather than stepping over it into what was
+already delivered. The draft is put aside on the first step back and returned
+on the way forward past the newest.
+
+`Ctrl-T` or `/queue` opens the selected Keeper's queue in a separate panel,
+leaving the chat and draft in place. Use Up/Down to select an item, Enter to
+read its identity and available detail (including queued message text and
+attachment information), Page Up/Down to browse
+the list, `r` to refresh, `?` for help, and Esc to return. Closing help returns
+to the same queue panel and selection. A selected local message can be
+moved first or last among that Keeper's unsent messages with `n` or `l`;
+existing edit, admission and retained-input holds still apply. Moving it first
+does not claim it is ahead of messages already accepted by the server.
+Enter and queue changes use the selected item the terminal last displayed.
+Changes also require a current queue read and server authority. The selection mark and
+some item text must fit; if the terminal is too narrow, enlarge it before
+opening detail or changing the queue. If the selection or its content changes
+before the next frame, review the updated row before retrying. A partially
+shortened row can still be used.
+
+For an accepted server message, `n` requests the next position and `l` moves it
+to the end. The server authorizes changes to the operator's own messages. A
+next request does not interrupt the current turn. For a pending event, `n` and
+`l` set immediate and low urgency respectively; urgency is not an exact queue
+position. A grouped event exposes individual occurrences only when every exact
+member address is available. Running work and future scheduled jobs can be
+inspected, but this panel cannot run a future job before its due time.
+Server message pages can change while they are being read; duplicate identities
+are reported as an unavailable read, and an undetected concurrent move can
+still make the displayed order incomplete. Refresh before acting when in doubt.
+An open server detail reports loading or source failure instead of presenting
+an older body as current; local detail remains independent of server reads.
+
+When a command-only queue panel is visible over chat, an individual two-set
+Hangul key can also activate its corresponding Latin shortcut. A composed
+syllable is not replayed as multiple queue actions; chat and text fields keep
+their original input.
+
+The panel reads the selected Keeper's server inventory. Its counts separate
+pending inputs, running work, future schedules, due schedules and unavailable
+sources. An aggregated chat row counts every queued request. Future schedules
+show their due instant instead of treating their creation age as waiting time.
+Pending events are durable sources not yet acknowledged; they may already be
+part of the current turn. This inventory does not prove individual admission
+or completion of an external effect.
+
+A failed roster read blocks sending. When `.masc/keepers/` cannot be read
+reliably, a stale entry may still name the target, so membership alone does not
+authorize an external effect - the surface renders
+`Keeper roster is unavailable` and the footer reads
+`Enter:disabled (roster unavailable)`.
+
+### Approvals
+
+Operator approvals scoped to the acting actor.
+
+```
+ MASC Approvals (0/0, hidden 0, actor masc-tui)  10:55:48  [connected]
+   (no pending approvals)
+  j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next  | Port: 8935
+```
+
+`y` and `n` post to `/api/v1/operator/confirm`. Selection is held by item
+identity, so a refresh that reorders or drops items does not move the cursor
+onto a different request.
+
+`Enter` opens the selected request as a wrapped, scrollable field list before
+the operator decides it. A blocked Auto Judge request puts `state`, the exact
+producer `reason`, and the available `next` action before its approval ID,
+execution location, and input. The one-line queue summary may end in `~`; the
+detail never treats that prefix as the whole reason. `R` retries only when the
+detail says retry is offered, while `y` and `n` remain available for a human
+decision.
+
+### Board
+
+Posts with their vote and comment counts. Right or `Enter` opens the body;
+Left or `Esc` returns to the list.
+
+```
+ MASC Board (50)  10:44:52  [connected]
+   order net votes first; newer breaks ties · s cycles ranking
+ >   p-687c6844e~  polisher     [B1 mission draft v9] RW20 PoC scenario     +9  c39
+     p-0323d8b3c~  dashboard    RFC-0370 Draft: rotation census             +4  c22
+  j/k:move  Enter:read  r:refresh  Tab:next  | Port: 8935
+```
+
+Selection follows post identity across refreshes. Opening a post binds the
+detail view to that post's request, so a late response for a post you already
+left is discarded rather than rendered under the current title.
+
+`s` cycles five server-owned rankings, with the active formula printed above
+the table: `hot` is net votes descending with newer posts breaking ties;
+`trending` is net votes divided by the square root of age in hours; `recent`
+is newest creation first; `updated` is latest change first; and `discussed` is
+reply count descending with newer posts breaking ties. Replies do not inflate
+`hot` or `trending`. `f` cycles the hearth census shown on the next line, so
+ranking and topic narrowing remain separate axes.
+
+`w` on the list opens a new-post draft. The draft follows the commit-message
+convention: the first line is the title, the rest is the body. `Enter` makes
+a new line, and sending is armed rather than pressed - `esc` offers
+`s:send d:discard`, so no stray key publishes. The post goes out under the
+operator's agent identity; the server stamps the author. A rejected post
+keeps the draft and shows the server's message.
+
+`v` votes the row under the cursor up, `V` votes it down - the shift key is
+the direction. Like every irreversible action here, the first press arms and
+the same press again sends. In a post, `c` replies: the same compose pane
+opens with the post as its target, the whole draft is the comment, and
+sending returns to the post with the reply visible.
+
+Board comments keep their author and timestamp on a separate line. Markdown
+headings, lists, tables, code blocks, and wrapped paragraphs are rendered below
+that line instead of being flattened into one truncated row. When a post or
+comment body is a complete JSON object or array, Board pretty-prints it and
+uses the same JSON syntax colours as fenced code. Ordinary Markdown remains
+authored Markdown.
+
+A ` ```alphatex ` fenced block in a post or comment body is drawn as a guitar
+tablature box instead of plain code - what renders, what the fallback box
+means, and how to turn it off are in the
+[alphaTex tab guide](guides/alphatex-tab.md).
+
+Dashboard `s` or `/music` in Keeper chat opens the music workbench without a
+score fence or image-capable terminal. Choose a new phrase, arrangement or
+audio/MIDI recording, or continue a saved project or take. Work created through
+this entry lives under `<base-path>/.masc/music/projects` and `music/sessions`.
+The workbench also accepts `:open PATH`, `:midi PATH` and `:session PATH` for
+existing files. `/` searches library names and paths; arrows select and Enter
+opens a result. Esc cancels an in-progress search, restoring its previous query
+and selection; Ctrl-U clears the query. Refresh and editor return retain the
+query. In normal browsing, Esc clears an active query before leaving the library.
+`q` returns from an editor to the library and from the library
+to MASC. In Keeper chat, `/music midi` opens the newest readable MIDI attachment
+in the phrase editor, even when a newer voice or audio message follows it. The
+source is prepared from its original bytes before terminal handoff; leaving
+that conversation, replacing the request or entering another key, paste or mouse
+gesture retires its pending open. Already buffered input, a paste still arriving
+or an incomplete terminal/UTF-8 sequence also keeps the terminal
+from handing off to the editor; run `/music midi` again when ready. The reader
+treats undecoded terminal input conservatively, so even a terminal protocol
+reply can cancel a pending open, including during a screen transition. The chat
+and bounded session event history record the cancellation. The
+original attachment stays unchanged, and saved projects use the workspace's
+music project directory. The phrase editor's first audio Space opens instrument/preset selection;
+`i` changes it. For imported MIDI, the SoundFont choice captures the configured
+font (or the bundled default) with FluidSynth, preserving the original performance
+for audition and project reload. Ordinary note phrases keep their AlphaSynth
+SoundFont choice. Install or update the helper with `scripts/install-alphatex.sh`.
+
+In the music library, phrase and arrangement editors, and recording/take screen,
+`Ctrl-L` opens the full status and source path observed at that moment. Scroll
+with arrows, Page Up/Down or Home/End; Esc, q or Enter returns to the underlying
+screen. In normal browsing, `!` opens the same reading; `:status` is its
+argument-free command. Ctrl-L also works while entering a command or choosing
+an instrument and keeps that input/selection. The reading never saves, edits,
+starts playback or finalizes recording. Work already running continues; close
+and reopen to read a newer status. Earlier overwritten messages and recovery
+messages emitted only after exit are not retained by this reading.
+
+In the arrangement editor, `:wave /path/song.wav` exports the complete audible
+arrangement once, independently of playback loops, practice clicks, and hardware
+output selection. It combines verified WAV sources and MIDI regions rendered
+through their selected VST sounds. Output is 44.1 kHz float WAV; discrete source
+channels are retained, mono feeds each output channel, and the mix is not
+normalized. A peak above 0 dBFS is reported while the float samples are preserved.
+Existing files are never replaced. `:stop`, a new playback, a project edit,
+Save As, or closing the view cancels pending export; its private files are
+removed after worker cleanup. To export a capture containing MIDI, split the
+take and mute its MIDI component. Record the instrument return as audio when
+you want its synthesized sound included in the WAV.
+
+`:export /path/song.mid` writes the complete audible MIDI arrangement once as
+SMF1, independently of loop/practice and physical output selection. Source
+expression, bank/program changes, held notes and pedals are reconstructed at
+trim/repeat boundaries by the native MIDI projector. Equal-tick wire order is
+retained. Each region/source-port pair has its own exported port (0–127), so
+overlapping regions keep independent channel state. The receiving sequencer
+must honor port metadata and choose instruments; VST audio is exported with
+`:wave`. Text/lyrics/cues retain their bytes in the playback tracks. A separate
+`MASC` chunk retains the complete linear project, including original source
+bytes, other metadata, edits and owned instrument snapshots. Other sequencers
+can ignore this chunk; it is provenance, not automatic project restoration.
+
+The SMF has a 32767 PPQ grid and an integer-microsecond tempo. Event times are
+rounded to the nearest encoded tick; the result reports the largest measured
+grid error relative to the native projection (which already rounds region
+edges outward to nanoseconds). WAV regions are excluded and counted. Captured
+UMP, segmented SysEx and state that the native projector cannot reconstruct
+are refused explicitly rather than silently converted. Split/mute captured
+MIDI to export other regions. Existing files are never replaced, and MIDI
+export uses the same cancellation/cleanup ownership as WAV export.
+
+In Keeper chat, `/score [N]` opens a frozen alphaTex block in the same terminal
+with the official alphaTab engine for full notation, track selection, zoom,
+scroll and local synthesized playback. N counts closed scores newest first.
+Install the companion with `scripts/install-alphatex.sh`; this view requires
+Node.js 22+ and Kitty graphics with reported cell geometry. The guide above
+describes controls, SoundFont selection and current limits.
+
+In Keeper chat, `Ctrl-O` previews the newest image or closed `mermaid` fence.
+`/images` lists the available images and diagrams. `/images N` opens an item,
+counting newest first. The listed numbers keep their original sources even if
+new messages arrive; `/images` reads a fresh list. A Keeper or workspace change
+requires a new list before using its numbers. Without a previous list,
+`/images N` captures the current sources. This includes every retained image attachment and closed
+diagram within one reply, and staged composer images. The catalog covers the
+currently loaded conversation, selected live speech and generated media,
+excluding thinking and superseded attempts. A generated image becomes available
+once its original response has persisted the completed block, including while
+the same operation continues through a tool call. Generated audio and Standard
+MIDI files (`audio/midi` or `audio/x-midi`) are available through `/listen`.
+Generated MIDI retains its `.mid` attachment and original peer source in live
+chat and saved history; it uses the configured MIDI synth. Preparing audio or
+MIDI runs in the background, including the
+workspace-bound peer download, local byte read, cache save and MIDI metadata.
+A newer `/listen`, leaving chat, changing Keeper, or workspace reconnection retires
+the pending playback authority. Returning to the original Keeper does not revive
+that request; the prepared result starts a player only while its original request
+is still current. Preparation is separate from audible playback verification.
+Replayed events retain their original response ownership;
+a late block from a closed or superseded response cannot replace current media. Names remain labels; opening uses the retained source.
+An unavailable image keeps its number and reports why it cannot be opened.
+The selected source is frozen before fetching or rendering. At capture, a
+draft's existing priority relative to conversation arrivals also applies to
+number `1`; Ctrl-O continues to choose from the current conversation and draft.
+Structured Mermaid outputs use the same actions. Install Pele with
+`scripts/install-pele.sh` (Node.js 22+ and pnpm); the companion runs offline and
+renders charts, mindmaps, class diagrams and other Mermaid types as terminal
+images. The preview uses the available terminal width and observed colors;
+without a color observation it uses a standalone light canvas. Any key returns.
+The chat keeps its text diagram or source fallback, including when Pele is
+missing or rejects the syntax. An unfinished streaming fence is not opened.
+Image-capable terminal support is required, as for other `Ctrl-O` previews.
+See the [renderer installation and request contract](../tools/pele/README.md).
+
+A post's attachments are listed at the end of its body under `ATTACHMENTS`,
+each with a `[N]` number. On the read pane, pressing the number opens that
+attachment: audio plays locally (afplay or the next player on the chain),
+MIDI plays through fluidsynth (set `[tui] midi_soundfont` in runtime.toml;
+without it the file is handed to the local app with a note saying why), and
+file and score attachments with stored blob references open a captured reader.
+Use `u` for source, `m` for Markdown or `h` for inert HTML, `y` to request an
+original-text copy, and `s` to save original bytes. `/` searches this reading;
+Enter keeps the query for `n`/`N`, and Esc while typing cancels it. Binary
+attachments retain explicit save access. Other attachment actions use their
+local handler or default app. A MIDI that parses reports what it is on
+the status line (tracks, BPM, time signature, length). What each key did,
+or why it could not, stays on the pane's bottom line until the next post
+opens.
+
+### Work / Goals
+
+Planning is one workspace holding two different subjects, which is why its
+stops are not numbered. `Goals` is the goal lifecycle, judged against the
+goal verification ledger. `Task Review` and `Task Verdicts` are the two
+halves of the Task protocol: what is waiting for a ruling, and what was
+ruled. A goal sitting in `verifying` appears in neither of them, and Task
+Verdicts is the ledger of Gate rulings, not a Goal completion proof. `Schedules`
+and `Fusion` keep their own headers but continue the same `v` walk.
+
+Each side carries its own count on the strip: `Goals·2` is goals with the
+completion judge, `Task Review·7` is tasks waiting for a completion verdict.
+
+```
+ MASC Work  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
+   sort:phase/P1-P5  filter:active
+   Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
+   Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
+ >   [dropped ] P1  Reduce all exampleorg service backlogs to 0
+     [executi…] P1  Multi-Keeper real-world mission keeper-collab-e0-r7
+  j/k:move  Enter:detail  r:refresh  Tab:next  | Port: 8935
+```
+
+The cursor tracks goal identity in visible order, so a refresh that reorders
+goals keeps the same goal selected.
+
+`f` cycles `all`, `active`, `completed`, and `dropped`; active means exactly
+Executing plus Verifying. `s` cycles `phase/P1-P5` (Executing, Verifying,
+Completed, Dropped, then priority), `updated` (most recently changed first),
+and `due` (earliest due date first, undated last). The current meanings are
+printed above the rollup. Status colour and the proof marker remain independent
+of ordering, so a row does not look successful merely because it sorted first.
+
+Goal detail's `RELATED ACTIVITY` block is not a complete Task history. It shows
+the latest state per linked Task and Keeper, pending approvals, and Goal phase
+events. Task rows name the typed actor role (`claimed by`, `submitted by`,
+`completed by`, or `cancelled by`) and the latest handoff author and summary
+when present.
+
+Task cancellation requires a reason and the TUI's authenticated operator
+credential. It can cancel another agent's active Task without taking ownership;
+the cancellation records the operator and clears the former owner's Task cache.
+Completed Tasks cannot be cancelled. A missing or insufficient credential is
+refused. If the response is lost, the TUI reports the result as unconfirmed and
+refreshes the captured workspace; it does not claim the cancellation failed.
+
+In a goal detail, `c` requests completion, `x` drops, `o` reopens. Each is
+armed rather than pressed - the first press shows what the same key again
+would send, any other key disarms - and the server owns the phase rules: a
+transition the current phase does not allow comes back as the server's
+rejection on the detail, not a local guess.
+
+#### Task Review
+
+Task Review lists Tasks submitted for completion verification. The normal
+reviewer is the automatic completion authority; an operator can also decide a
+submission. A queue entry does not by itself mean human approval is required.
+
+The Task flow is `Todo → Claimed → InProgress → AwaitingVerification → Done`.
+A rejection returns the Task to `InProgress` for repair and resubmission. Goal
+proof and final human Goal confirmation are separate from Task completion.
+Task Verdicts is a record of automatic Gate rulings, not another approval step.
+
+The list separates submitted evidence count from required evidence count. The
+counts do not measure requirement coverage. The automatic-review column shows
+its last observed attempt: unobserved, running, stopped, or a recorded verdict.
+A recorded verdict is not proof that its Task transition committed. Open a
+stopped row to read the actual failure reason; this reader does not infer or
+schedule retries from error text.
+
+Press Enter to read a submission. Its title and review reason precede one
+selected evidence item. `e` / `E` select the next / previous evidence; `i`
+expands or folds the evidence index. The compact index is the default so moving
+to another item does not require scrolling past every other evidence body.
+`j` / `k` scroll the current detail, and `[` / `]` move between submissions.
+Completion conditions and required evidence remain available below the body.
+Notes, text files, collaboration snapshots and images are identified separately.
+Individual image selections reuse one graphics slot, including later images in
+the same submission; preview availability still follows the server's response.
+Board snapshots show the saved title, author, body and comments as readable
+text; exporting preserves the original JSON snapshot.
+
+`o` downloads the selected retained item and asks a local application to open
+it; `s` saves a private local copy without opening it. The resulting local path
+stays with that evidence item in the detail, including if the viewer cannot
+open. Copies keep their original basename inside a unique private directory in
+the local temporary directory and never replace existing files. A file reference such as `artifact:reports/a.pdf`
+names a producer-workspace source, not a file on the operator's machine. The
+submission metadata names the server's retained verification record; the
+local-copy path distinguishes confirmed saves from interrupted or failed write
+destinations whose completion is unknown.
+
+The export endpoint is the same admin-authenticated evidence GET with a
+zero-based `item_index`, bound to exact `task_id` and `verification_id`. Both
+ends verify downloaded size and SHA-256; binary export uses retained original
+bytes, including PDF/audio/video files without inline image previews. The model
+inline attachment limit does not restrict operator downloads. A missing
+body, incomplete text snapshot or invalid reference yields a reason rather
+than a purported full file. A successful download or opener request is not
+independent verification of the Task's completion claim.
+
+`a` on the row under the cursor arms an operator approval and the same key
+again sends it. `x` rejects with a required reason in `$EDITOR`. Both retain
+the Task verification API's admin permission boundary.
+
+### Schedules
+
+The scheduled-automation list: every wake the runtime has queued, active rows
+first by due time. This is the surface that answers "why is this keeper about
+to wake up". Open it through the `go Schedules` palette entry. The selected
+Keeper also exposes its automation in the Automation detail tab.
+
+```
+ MASC Keepers / Schedules  10:44:57  HTTP [connected]
+ ─────────────────────────────────────────────────────────────────────────────
+   Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
+ ─────────────────────────────────────────────────────────────────────────────
+   STATUS       DUE                 TARGET  WAKE      DELIVERY     RECURRENCE
+ ─────────────────────────────────────────────────────────────────────────────
+ > [scheduled]  2026-08-24 09:57:00 alpha   —         —            daily 09:57
+   [running]    2026-08-24 09:12:00 sangsu  succeeded consumed_ack one-shot
+  j/k:move  Enter:details  n:new  e:modify  x:cancel  r:refresh  Tab:next
+```
+
+WAKE is what the dispatch did and DELIVERY is what the reaction ledger made of
+it; they are two facts, and a wake the queue cancelled forty seconds later
+still reads `succeeded` under the first. Both used to be labelled inside the
+row — `wake:succeeded · consumed_ack` — while the four columns around them had
+no names at all.
+
+The header count and the page are different things: the server sorts the whole
+store active-first and serves the first twenty rows, so `(page shows first
+20)` names what is held back. A store that could not be read is
+`data unreliable` with the failing call, not an empty list - "the ledger is
+unreadable" and "nothing is scheduled" are different facts.
+
+`x` cancels the row under the cursor. Like every irreversible action here it
+is armed: the first press names the schedule, the same press again sends it,
+and the cursor moving between presses re-arms for the new row. Whether a row
+is still cancellable is the server's store rule to decide - cancelling a row
+that already ran comes back as the server's rejection on the surface, not a
+local guess from the status column. The payload target column names who the
+wake reaches (a keeper, for keeper wakes); rows without one fall back to the
+payload summary.
+
+`n` opens a JSON creation form in `$EDITOR`; `e` opens the selected row's
+exact editable definition, including its full message, due time, recurrence,
+expiry, urgency, and stable schedule id. Exiting the editor with zero sends
+the form, while a non-zero exit changes nothing. The form keeps example fields
+for interval, daily, and cron recurrence in place; `recurrence_kind` chooses
+which set the server reads. Modification is one atomic
+store transition: only `scheduled` or `due` rows can be replaced. It preserves
+the public `schedule_id` but creates a fresh `schedule_instance_id`, so wake
+evidence produced by the old definition is never shown as evidence for the
+new one. Running and terminal rows return the server's explicit refusal.
+
+Right or `Enter` opens the selected schedule. The detail includes schedule and instance
+identity, dispatch state, requesting actors, timestamps, recurrence, payload
+kind/tool/digest/summary, the pretty full payload JSON, last wake, and
+queue/reaction evidence. Keeper wakes also show the durable Keeper,
+stimulus/occurrence ids, every recorded step timestamp, and the projection's
+exact failure or quarantine reason. This receipt proves wake delivery and
+whether a turn started; it does not causally attribute later tool calls or a
+work result to the schedule. The detail says so explicitly and points to
+Keeper Calls or Activity for execution evidence after the recorded turn start,
+instead of presenting an unrelated tool output as the schedule result. Left or `Esc` returns
+to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
+
+### Fusion
+
+The retained Fusion run registry is the list. Fusion is a top-level Tab stop
+and is also reachable through the `go Fusion` palette entry. After following a link, `Esc` returns directly to its origin. Otherwise
+it closes detail to the run list, then returns to the Dashboard. While a run is active, `STATE`
+shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
+`computed(A/F)`, or `recording(A/F)`. A successful terminal row also carries a
+bounded decision and resolved-answer preview when the current producer wrote
+them; replayed legacy rows remain valid without that preview. The cursor
+follows run id across refreshes, so a newly sorted row cannot silently change
+what `Enter` opens.
+
+```
+ MASC Fusion (19 runs)  18:31:04  [connected]
+   STARTED          AGE     STATE              KEEPER           PRESET     RUN
+ > 2026-09-07 16:42 14s     judge(2/1)         rw-e0-r9         trio       kmsg-386bed...
+   2026-09-07 16:40 2m      completed          analyst          trio       kmsg-942ab1...
+  j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: 8935
+```
+
+`a` starts a run from the list. It reads the presets from
+`GET /api/v1/runtime/config/fusion` and opens the same schema form the Lane
+Add-ons action uses: `keeper`, `preset`, `topology` and `web_tools` are
+Left/Right choices, `prompt` is typed, `Tab` walks the fields, `Ctrl-S` opens
+the review and `Enter` there posts
+`POST /api/v1/keepers/<keeper>/fusion`. `Esc` cancels. The Keeper starts on
+the one that owns the selected run, the preset on the configured
+`default_preset`, and the topology on `simple`; a Keeper outside the roster
+or a preset outside the configuration falls back to the first of each. A
+prompt that is blank after trimming does not leave the form. While the post
+is out the form takes no key, so a second `Enter` cannot start a second run.
+A refusal — a preset that cannot run the chosen topology, for instance —
+returns the server's own sentence above the form with the values intact; the
+form does not restate it. A request that goes unanswered says the run may
+have started anyway, because it may have. On success the list is read again
+and the cursor moves to the new run the first time the list carries it; a
+list read that was already in flight can answer without it, so the move waits
+for one that has it.
+
+The detail is a separate exact read. Lifecycle remains the Registry fact;
+evidence comes only from a Board post whose typed origin is
+`source=fusion` with the same `fusion_run_id`. The header repeats the current
+stage and its panel counts. `recorded` puts the judge result, resolved answer,
+and reason alongside the original question and Board link, followed by every
+panel answer or failure in server order. Question, successful panel answers, judge resolution, reason, and
+the terminal summary use the TUI Markdown renderer; typed failures stay plain
+so their exact reason text is not reinterpreted. The panel header summarizes
+answered/failed counts and tokens; it does not calculate a majority, minimum
+answer count, timeout verdict, cost verdict, or any other local conclusion.
+The open list and exact detail refresh on the existing two-second dashboard
+cadence; `PgUp`/`PgDn` scroll a page at a time.
+
+`TOOL EXECUTIONS` is an execution ledger, not a copy of the `web_tools`
+configuration flag. `called` and `succeeded`/`failed` rows come from the exact
+AGENT_CORE `ToolCalled`/`ToolCompleted` occurrence and retain actor, tool-use
+identity, turn/index, tool name, bounded input/output previews, original byte
+counts, and truncation state. `complete` with no rows means the instrumented
+actors made no calls. The run ledger retains at most 256 events; EventBus or
+run-ledger overflow increments the visible dropped count. `partial` names dropped rows and actors that
+cannot publish this evidence; an official-client panel is shown as
+`official_client_uninstrumented` instead of being misreported as “used no
+tools.” Older Board evidence has `Trace unavailable` rather than a fabricated
+empty ledger.
+
+`SEAT ROUTES` is the walk each seat took through its candidates, from the
+`seat_routes` array the sink writes. One line per seat names the route it was
+given and the runtime that answered — `panel/first · route panel-lane →
+answered by glm-4.6` — with every candidate that failed before that one
+indented under it as `<runtime>: <code> <detail>`. A seat no candidate
+answered says so. Seats are spelled as the tool ledger spells its actors:
+`panel/<panelist>` and `judge/<role>/<identity>`. Evidence recorded before
+seats were written carries no `seat_routes` key and draws no block, and the
+`EVIDENCE RECORDED` section keeps its number; with the block present it
+follows as section 6.
+
+`pending` is legal only while the Registry row is running. `absent` means the
+retained completed/failed run has no current Board projection; it does not
+claim the post was never written, that the sink failed, or that retention
+expired. A failed refresh leaves the prior reading visible under an explicit
+error instead of redrawing it as an empty result.
+
+### Memory
+
+저장된 메모리 크기는 기본적으로 추정 토큰(≈)으로 표시한다. `u`로
+토큰과 바이트 단위(B/KiB/MiB)를 전환한다. Keeper를 선택하면 저장량 아래에
+전체 요청 입력의 `avg / max / min / last`도 표시한다. 범위는 최근 50개
+기록된 Keeper 턴이며, 각 턴의 마지막 요청 관측값을 사용한다. 토큰 모드는
+기록된 요청별 입력 토큰(런타임 추정값이 포함될 수 있음), KiB 모드는 별도로 관측한 요청 본문
+크기다. 측정된 표본 수를 함께 표시하며 누락값을 0으로 넣지 않는다.
+마지막 턴이 미보고이면 `last unreported`를 표시한다. `/context`에서
+같은 턴의 세부 구성을 확인할 수 있다.
+
+Keeper별 Memory OS 건강 상태를 한 표로 보여준다. ordinary current
+snapshot과 source-bound snapshot을 별도 열로 표시하며, 각 행은 두 저장소의
+revision, facts, 크기와 source invalidation 수, 최근 ordinary 변화
+(+추가/-제거), 상태를 담는다. `STARVING`은 Librarian 실행이 실패했고 두
+스냅샷 모두 없는 Keeper다. ordinary snapshot은 없지만 source-bound snapshot이
+남아 있으면 `source-only`로 표시한다. 이는 source 근거가 남았다는 뜻이지
+Librarian 선택이 성공했다거나 ordinary snapshot이 복구됐다는 뜻은 아니다.
+`no-current`는 아직 ordinary snapshot이 없는 조용한 상태, `degraded`는
+ordinary snapshot은 있지만 Librarian 갱신이 실패 중인 상태다. 두 저장소 중
+하나라도 읽지 못하면 `read-error`로 표시한다.
+
+상단의 `failed/no ordinary` 수는 서버가 `librarian_starvation`으로 판정한
+Keeper 수다. 따라서 source-bound snapshot이 남아 `source-only`로 표시되는
+행도 이 수에 포함될 수 있다. 표의 상태는 남아 있는 저장소를 말하고, 경고
+색과 상세 alert는 Librarian 실패의 서버 severity를 그대로 보존한다.
+Vision ingest 오류가 있으면 상세에 구조화된 reason별 횟수를 표시하고, 해당
+행을 warning으로 그린다. 이미지가 text placeholder로 대체된 실패를 정상
+ingest로 보이지 않게 하기 위함이다.
+
+커서가 가리키는 행의 전체 상태와 서버가 매긴 경고(alert) 목록이 표
+아래에 함께 나온다. `r`로 다시 불러온다.
+
+행에서 `Enter`를 누르면 그 Keeper의 **사실(fact) 브라우저**가 열린다.
+표가 개수만 말하던 것을 사실 단위로 보여준다: ordinary 저장소의 각 사실은
+`[category] 내용 ×강화횟수`로, source-bound 사실은 `[source] 경로 — 내용`
+으로, 무효화된 사실은 `[dropped] 경로 — 사유`로 그린다. category와
+origin, 무효화 사유는 서버가 보낸 문자열 그대로다 — TUI는 분류를 만들지
+않는다. 커서 행의 전체 내용(원문, origin, 강화 횟수, first/last seen,
+memory id, source sha)은 목록 아래에 펼쳐진다.
+
+`c`는 category 필터를 순환한다: All → 로드된 저장소가 실제로 가진
+category들(정렬순) → All. 필터는 ordinary 사실만 좁힌다 — source-bound
+행은 category가 없으므로 항상 보인다. `/`는 사실 내용으로 커서를 옮기고,
+`Esc`는 건강 표로 돌아간다. 두 저장소는 서버가 따로 답하므로, 한쪽이
+읽기 실패해도 다른 쪽 목록은 그대로 나오고 실패한 쪽은 사유가 화면에
+남는다.
+
+### Workspace
+
+등록된 저장소와 서버가 실제로 해석한 체크아웃 경로를 보여준다. Tab 링의
+정거장이며, Code 화면은 이 화면에 매달린 자식이다. 목록의
+`Path` 열은 폭이 부족하면 가운데를 줄여 표시하지만, 선택한 행 아래의
+`Path:`에는 전체 경로가 줄바꿈되어 나온다. 설정에 저장된 값이 상대 경로라면
+`Stored as:`가 함께 표시되고, 담당 Keeper는 `Keepers:`에서 확인할 수 있다.
+
+Right 또는 `Enter`를 누르면 선택한 저장소 범위의 Code 화면으로 이동한다.
+`d`를 누르면 선택한 저장소(또는 Keepers 목록/상세 화면에서 누를 경우 프로젝트)의 현재 Git 변경 파일을 연다. 각 행은 staged,
+worktree, untracked, conflict 상태를 구분한다. 이 목록에서 `Right`, `d`, 또는 `Enter`를 누르면
+해당 파일의 Git diff를 구문 강조와 줄 번호가 포함된 인라인 뷰로 바로 확인한다. diff 뷰에서는 `j`/`k`로 스크롤하고 `Esc`/`Left`로 파일 목록으로 돌아온다.
+`v`를 누르면 해당 파일을 Code 화면에서 직접 열 수 있다. Left 또는 `Esc`는 이전 화면(저장소 목록, Keeper 상세, 또는 채팅)으로 돌아간다.
+
+Workspace에서 `H`는 서버의 공유 도구 호출 기록에서 지난 24시간 동안의 파일
+변경을 읽고, 선택한 저장소의 정확한 ID에 해당하는 변경만 보여준다. Keeper
+명부로 거르지 않으므로, 저장소 담당이 아닌 Keeper와 그사이 삭제됐거나 지금
+로드되지 않은 Keeper가 남긴 변경도 24시간 안이면 함께 나온다. 24시간보다
+오래된 변경은 나오지 않으므로 전체 과거 감사 기록으로 해석하지 않는다.
+
+저장소의 Git 변경 사항과 Keeper가 남긴 작업 기록은 서로 다른 정보다.
+아래 Changes 화면은 선택한 Keeper가 지난 24시간 동안 남긴 기록을 보여준다.
+
+### Changes
+
+Changes follows the Keeper selected on the Keepers surface. `[` and `]` move
+that selection directly from Changes and reload the 24-hour change window;
+the header always names whose rows are shown. Right or `Enter` opens the
+selected recorded diff, and Left or `Esc` returns without moving the cursor (or back to Keeper chat if opened via `/changes`).
+
+`v` opens the row's file on the Code surface, read through the keeper's own
+workspace (`?keeper=`), so the bytes are the keeper's checkout rather than a
+same-named file in the project tree — and the jump aims at the changed line
+when the local copy can say where it is. `o` hands the file to `$EDITOR` /
+Neovim instead. An absolute-path write has no address inside the keeper's
+workspace, so `v` says so and leaves that row to `o`.
+
+### Code
+
+A file browser over the workspace the server serves, one directory level at
+a time (the tree route is lazy). Each row carries a one-column type mark: a
+folder shows `▸`, and a file shows a glyph coloured by its extension — `◆`
+code (cyan), `▤` data or config (yellow), `≡` prose (green), `»` script
+(magenta), `◈` web or style (blue), `▨` media (magenta), `·` anything else
+(dim). The glyphs are plain unicode, so no patched font is needed; under
+`NO_COLOR` the glyph stays and the colour drops. `j`/`k` move the cursor,
+`/` jumps it to a matching entry, Right or `Enter` drills into a directory or
+opens the file,
+and Left or `Esc` walks back out the way Enter came in. With a file
+focused, `/` searches the file's own lines instead of the tree — typing
+moves the line cursor to the first match, Enter keeps the query for
+`n`/`N`, and the view follows the cursor.
+
+Which workspace is a scope the header always names: the project tree by
+default, a keeper's playground after a Changes `v` jump (`alpha ▸ repos/…`),
+or a registered repository after `Enter` on a Workspace row
+(`masc ▸ /`). `Esc` at a scoped root returns to the project tree, and at the project
+root it lands on Workspace, the ring parent. The three
+scopes are one field, so the surface cannot read two workspaces at once.
+
+프로젝트 tree에 초점이 있을 때 `d`를 누르면 현재 프로젝트의 Git 변경
+파일을 모두 보여준다. 이 프로젝트는 Workspace에 등록되어 있지 않아도
+된다. 목록은 staged, worktree, untracked, conflict를 구분하고, `Enter`로
+선택한 파일을 연다. Left 또는 `Esc`를 누르면 같은 프로젝트 tree로
+돌아간다. 파일 pane에 초점이 있을 때의 `d`는 아래처럼 그 파일 하나의
+diff를 연다.
+
+An open file arrives whole and is lexed once — OCaml (nested comments
+included), bash, JSON, the curly-brace family (TypeScript/JavaScript,
+C/C++, Go, Rust, Java, and their kin: `//` and `/* */` comments, strings,
+numbers, keywords), and Python (`#` comments, triple-quoted strings)
+colour; an extension without a lexer draws plain, and a file past 500 KB
+draws plain rather than slowly. The pane then answers three more questions
+in place:
+
+CRLF files read with ordinary line breaks, without a carriage-return escape
+at the end of every line. A standalone carriage return or other control byte
+still appears escaped. This reading view does not change the source bytes.
+
+With file content focused, `y` asks the terminal to copy the whole original
+file through OSC 52. Tabs, indentation and original line endings are retained;
+colours, line numbers and display sanitation are not copied. The status reports
+the file and bytes sent, with terminal support unconfirmed. An initial, failed
+or suspended reading cannot supply source bytes; a same-file refresh keeps
+the observed source until new bytes arrive. Close History, Diff or Notes
+first. Mouse selection continues to copy displayed rows.
+
+`e` opens the exact source in `$EDITOR` and retains the returned candidate as
+a draft in this TUI session. `V` opens its comparison and `S` explicitly saves
+against the opening server revision. Navigation retains the draft; `Esc`
+closes only the comparison, and `X` discards an unsubmitted draft. The draft
+names its byte count and final line ending; comparison rows retain escaped
+controls so a change to the bytes remains visible.
+
+A conflict or uncertain save keeps the candidate. In that comparison, `r`
+reads the server again without authorizing another write, and `A` explicitly
+adopts the compared revision before another `S`. Repeated saves do not submit
+another write while one is pending. The quit warning includes retained drafts;
+they are not recovered after the TUI process exits.
+
+- `h`/`l` pan sideways by one display cell — the gutter stays put, the
+  title says `(col N)`, and a double-width glyph on the boundary pads
+  rather than splits.
+- `H` swaps the content for one newest-first timeline: commits from
+  `/api/v1/git/log` and durable Keeper `Edit`/`Write` calls from
+  `/api/v1/ide/file-activity`. The latter is filtered by the exact registered
+  repository id and repo-relative path; it does not revive the removed,
+  always-empty IDE region store. The coverage row states the trailing window,
+  exact match count, exact-address rows whose truncated/malformed body could
+  not be rendered, and fleet rows that lost even their address. `Enter` on a commit answers with its pull
+  request link (the subject's `(#N)` against the registered remote). `Enter`
+  on a Keeper change returns to the file at its producer-recorded line.
+  On a Keeper record, `d` expands its recorded edit/write text in the timeline;
+  press `d` on any of that record's rows to collapse it. Failed calls are
+  labelled as attempts. Writes have no recorded previous contents, and blob
+  materialization has no text diff. This reads the captured call, without
+  asking for the current working tree's Git diff.
+  `t` opens the selected Keeper record's Task detail, including its recorded
+  status, handoff, completion/evidence contract and transition history. `Esc`
+  returns to the same file-history position and expanded record. A missing Task
+  link, unavailable task read or Task absent from the current backlog leaves
+  the file history open and explains why there is no destination.
+  Git and Keeper reads are independent: if either fails, the other remains
+  visible with the failed source named. `r` in History retries both sources;
+  reopening `H` alone keeps the existing reading. A
+  project tree is joined automatically only when the server base path exactly
+  matches one registered repository's resolved path; otherwise it keeps Git
+  history and explicitly says why Keeper activity cannot be joined.
+- `d` swaps it for the working tree's diff against HEAD, drawn by the same
+  renderer the Changes surface uses. A clean file says it matches its last
+  commit.
+
+- `m` lists memos written as standalone comments in the opened file, such as
+  `-- masc(alpha) decision: keep the lock` in Lua. It works in project,
+  Keeper and repository scopes. It shows the line, author, optional kind and
+  text; malformed memos show their parse error. To add or edit one, edit the
+  source file through the external editor. There is no separate note-store
+  write form on this surface.
+- File memos mark their own gutter lines. Once history has been read (`H`),
+  exact producer-recorded Keeper ranges also mark the gutter. Historical
+  changes without line evidence remain `L?`; the pane does not invent a range
+  or fetch history solely to decorate the file.
+- `K` asks the language server what a name on the cursor line is, and `D`
+  where it is defined. The line's own names are the candidates (the pane
+  has no character cursor): one name is asked about at once, several open
+  the palette with each as an entry — typing narrows them, `Enter` runs
+  the highlighted one, and a typed `def <name>` still works — and a line
+  with none says so. The answer lands beside the title, and a definition
+  inside the workspace moves the cursor there — another file opens at the
+  answered line, and a location outside the workspace (stdlib, a package)
+  is named rather than opened. The reverse-video gutter is the cursor
+  line, which is what the question is asked about.
+
+One overlay at a time — opening any of them closes the others, so
+`j`/`k` always has one owner. `Esc` closes the overlay first, then the
+file, then climbs directories.
+
+MASC ships no language server. It starts the one the project's language
+names and expects that program on `PATH`; an absent one answers
+`Command_not_found` rather than a guess.
+
+| Language | Program | Project marker |
+|---|---|---|
+| OCaml | `ocamllsp` | `dune-project`, `dune-workspace` |
+| TypeScript | `typescript-language-server` | `tsconfig.json`, `package.json` |
+| JavaScript | `typescript-language-server` | `jsconfig.json`, `package.json` |
+| Python | `pyright-langserver` | `pyproject.toml`, `setup.py`, `setup.cfg` |
+| Rust | `rust-analyzer` | `Cargo.toml` |
+| Go | `gopls` | `go.mod` |
+| C | `clangd` | `compile_commands.json`, `CMakeLists.txt`, `Makefile` |
+| C++ | `clangd` | `compile_commands.json`, `CMakeLists.txt`, `Makefile` |
+| Swift | `sourcekit-lsp` | `Package.swift` |
+| Java | `jdtls` | `pom.xml`, `build.gradle`, `build.gradle.kts` |
+| Kotlin | `kotlin-language-server` | `build.gradle.kts`, `settings.gradle.kts`, `build.gradle` |
+| Ruby | `ruby-lsp` | `Gemfile` |
+| PHP | `intelephense` | `composer.json` |
+| Lua | `lua-language-server` | `.luarc.json` |
+| Bash | `bash-language-server` | workspace boundary |
+| JSON | `vscode-json-language-server` | workspace boundary |
+| YAML | `yaml-language-server` | workspace boundary |
+| Zig | `zls` | `build.zig` |
+| Haskell | `haskell-language-server-wrapper` | `stack.yaml`, `cabal.project` |
+| Elixir | `elixir-ls` | `mix.exs` |
+| Dart | `dart` | `pubspec.yaml` |
+| Scala | `metals` | `build.sbt` |
+| C# | `csharp-ls` | workspace boundary |
+| Markdown | `marksman` | workspace boundary |
+
+The same servers back the Keeper's `keeper_code_query` tool, so a Keeper
+asked about a language whose server is missing falls back to reading text.
+For OCaml, `references` also needs `dune build @ocaml-index`; without it the
+answer names that command rather than returning a short list.
+Python reference queries wait for analysis of the opened file version before
+asking for locations, so a cold server does not answer using only the opened
+file and its imports. If that observation is unavailable, the query fails
+explicitly and the current file remains open. This preparation does not claim
+that every workspace diagnostic has completed.
+
+### Tools
+
+The Tools surface hangs off Config under `t` and has five panes. Press `p` to move through the selected
+Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
+Skill usage, and the registered Tool catalog. This keeps the Skill views from
+being buried below a long Tool list.
+
+In async requests, `J/K` selects an original request and `Enter` opens its
+detail. `r` refreshes that exact request; `Esc` returns to the active list.
+The selection stays on the original submitter, request ID and target Keeper
+when a terminal request disappears from the active list. `o` opens an editor
+with those three JSON fields, so a known terminal request can also be read
+directly without browsing history. The target Keeper cannot stand in for the
+original submitter.
+
+The detail separates the physical worker outcome from its original Composition
+run, source Task, owner generation and explicit logical decision. Unavailable
+logical evidence stays separate from a successful physical read. Refresh
+failures retain the last observation with its failure; retained logical data is
+marked as an earlier reading. Status observations do not authorize replay.
+
+From request detail, `t` opens the original source Task and its event history.
+The source comes from the confirmed original run, including an explicitly
+retained earlier reading when the same source cannot be revalidated. Its run
+and observation time stay visible. A run without a source Task reports that
+fact; it never substitutes the current Keeper's Task.
+
+Task body and history load independently through their exact endpoints, so
+the Task need not be present in the current list. A failure retains that
+component's last reading and leaves the sibling component available. `r`
+refreshes both; `Esc` returns to the original request. This is read-only
+inspection and does not declare the Task complete or resume the Composition.
+
+Task documents keep their complete text while scrolling. When their source or
+pane width changes, the new display is prepared separately. An earlier display
+is retained only for the same source at the same width and is marked as earlier
+content. Read/refresh failures and progress continue to reflect the current
+reading; a prepared display does not make that reading fresh or complete.
+
+The Skill Usage pane opens with a summary box: observed catalog entries,
+distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
+These are observations from current Keeper sessions at exact Skill revisions,
+not lifetime totals or success rates. Missing ledgers make the totals partial
+and are called out beside the summary.
+
+Skill cards follow in descending invocation order. Each card shows its own
+totals and Keeper rows, with the last use in this terminal's timezone.
+Narrow terminals stack a Keeper's counts and last use below its name;
+wider terminals align them in columns. Source configuration and rejected or
+shadowed entries follow the usage cards. If retained usage
+coverage has no time, the row says `time unavailable`; it does not turn
+bounded evidence into a `never used` claim.
+
+The effective surface lists a skill's name, kind and sizes; a composition
+also carries the shape of its plan (`nodes`, `batches`, `parallel`), which an
+instruction skill has none of. `why loaded` is drawn only when something
+other than the catalog chose the skill - a Keeper profile or a task - or when
+nothing accounts for it at all.
+
+The Skill activations pane reads as counts rather than as the ledger's field
+names: per scope, `triggered / delivered / handed off / actions` for
+instruction and composition, then what it served and which runtimes it ran
+on. The scope itself is the skill, its revision, its turn and its snapshot;
+the JSON encoding of the same reference is not drawn beside them.
+
+### Runtime
+
+Runtime candidate orders, joined to the latest provider
+metadata reachability reading by exact `runtime_id`.
+
+```
+ MASC Runtime (43 lanes, 46 candidates)  degraded / stale  19:20:04  [connected]
+   SSOT: runtime.toml · projections: resolved + probe · 2 reachable / 16 failed / 28 skipped
+   /Users/operator/work/.masc/config/runtime.toml · 2 probe-only
+   LANE           CANDIDATE                  PROVIDER / MODEL         ROUTE / PROBE
+   primary        1/3 anthropic.opus         Anthropic / claude-opus ready / reachable
+   local          1/1 local.codex            Codex / codex           ready / CLI not probed
+```
+
+The authority row is one sentence of clauses and breaks at the clause marks
+when the frame is narrower than the sentence, so the config path it ends with
+is spelled whole at every width rather than cut at the right edge.
+
+The authority is `runtime.toml`, read through two server-owned views.
+`GET /api/v1/runtime/resolved` projects lane order, candidate identity and
+provider/model labels. The lane fact on each row says why that candidate is
+the one the lane walks: `head`, `fallback #n`, or `single candidate`.
+`GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
+metadata-endpoint reachability reading. It does not send a completion, execute a CLI
+runtime, or report runtime candidate order history.
+
+Runtime detail also reads the authenticated `GET /api/v1/runtime/metrics`.
+It shows the last and recent recorded successes within a 24-hour window,
+successful/error sample counts, reported usage and telemetry coverage, and
+cache reads as a share of inclusive input tokens from the same valid pairs.
+Zero cache reads and missing reports remain distinct. Only the decision's
+observed executed runtime ID attributes a sample; API model names, the selected
+lane, and unpaired cost rows do not identify an account. Records without an
+answerer and unavailable cost-store reads are shown separately. These are
+recorded samples, not a claim that every call was logged. Snapshot age and
+staleness accompany the history; a cold cache shows loading until refreshed.
+
+The same detail lists current catalog context/output limits separately from
+model, provider and binding context declarations. Official-client catalog
+limits that the runtime does not expose remain unreported. These current
+specifications do not describe earlier calls. Bound Keeper totals are labelled
+as lifetime activity across all runtimes, separate from this runtime's history.
+
+`CLI not probed` is neutral, and a candidate absent from a stale probe is
+`unobserved`, not unhealthy. Green is limited to the `reachable` token; model,
+provider, and ordinary row text use the terminal foreground. A blocked route,
+probe failure, and missing authentication remain distinct typed states.
+
+The freshness badge is the server's closed value: `fresh`, `recent`, `stale`
+(`served_stale` on the wire), or `warming` (`warming_up`). `r` sends
+`force=1`, but the route remains non-blocking: a stale or warming response
+means background work was scheduled and a later poll carries the new value.
+Only one joined load may be in flight, so a slow authenticated request cannot
+stack every two-second refresh tick. A manual refresh pressed during a periodic
+read is coalesced into one force request when that read settles. If only the
+probe read fails, resolved lanes still render: a last-good probe is retained,
+or cold candidates are `unobserved`. If the resolved identity read fails, the
+last joined rows stay visible under the error.
+
+`j`/`k` selects a row in both `Lanes` and `All runtimes`. Right or `Enter`
+opens an untruncated detail view bound to that exact runtime identity. It shows
+the complete runtime id, provider and model, every lane using it, candidate
+position, dispatch blocker/default state, last-success timestamp, and the
+probe's status, transport, timestamp, latency, HTTP result, and error when
+those observations exist. `PgUp`/`PgDn` pages the detail; Left or `Esc` returns
+to the same list row.
+
+### System
+
+Config is five views over the runtime's settings. Press `p` to move through
+`runtime.toml`, `models`, typed `params`, prompt overrides, and themes.
+
+Open typed parameters with `:settings`. Until the server registry has been read,
+this pane reports that parameters are not read; a missing connection does not
+mean the registry is empty. Only a successful empty response reports no
+registered settings. Read failures remain separate from both states.
+
+The `runtime.toml` view shows the source revision, validation result, and routing
+and Keeper application status returned with that source. `v` opens the complete
+read status: individual validation issues, restart requirements, pending keys,
+and settings preempted by environment variables. Use `j/k` or `PgUp/PgDn` to
+scroll, `v` or `Esc` to return, and `r` to reload. A failed reload remains visible
+and labels retained metadata as a previous read. Invalid TOML remains readable
+with its parse error; a read status does not claim a write committed.
+
+`e` opens the raw source or retained draft in `$EDITOR`. Preview and save
+failures keep the edited text in this TUI session, scoped to the workspace and
+configuration path. Moving to another screen or temporarily losing workspace
+authority does not discard it; quitting the TUI ends the session. The save
+compares the revision read with the original source under the server's write
+lock, so another writer's changes cause a conflict instead of an overwrite.
+
+With a retained draft, `r` reads the current file without changing the draft or
+its save basis. `C` switches between the draft and that current snapshot.
+After comparing and combining changes in the editor, `u` adopts the displayed
+current revision while keeping your draft; `S` retries saving it. `U` instead
+replaces the draft with the displayed current text, and `X` discards the local
+draft and reads the file again. Adoption does not write anything. Another writer
+can still cause a new conflict. A lost response or uncertain durability keeps
+the draft and asks you to read the file before retrying.
+
+The `runtime.toml` view keeps comments and section headings on screen, while
+`j`/`k` select only rows that contain actual assignments. `PgUp`/`PgDn` jump
+by a visible page and land on the nearest assignment. The selected row is a
+full-width band, so navigation always has a visible position.
+
+Models groups saved model bindings by account/provider and shows the API model,
+declared context, reasoning effort, temperature, and output cap. `e` opens the
+selected binding's settings; `c` copies it into an independently named variant
+on the same account; `o` opens its source section in `runtime.toml`. In the form,
+Tab or Up/Down select a field, Ctrl-U clears it, Enter advances and saves from
+the last field, and Esc cancels. On Context, Left/Right cycle through 272k,
+500k, 750k, 1M and custom input; returning to custom restores the typed value.
+Copy suggests a context-based name after choosing a preset, until the operator
+edits the name. These are requested limits; Runtime shows the effective context
+and any capability clamp. Add a saved copy to a Lane to use it.
+
+The source revision is kept with each model/account draft and checked before
+applying its fields and again when saving. If the source changed, close and
+reopen the form after reload. A missing or unreadable save reply is shown as an
+unknown outcome: the draft remains and Config, Runtime and Lanes are reloaded
+to inspect the result. No write is retried automatically.
+
+Context and output edits belong to the selected account/model binding.
+Reasoning effort and temperature belong to `[models.NAME]` and affect every
+account sharing that model; use Copy for independent settings. The detail names
+each owning section and whether declared context comes from the binding,
+provider, or model. `-` means a setting is absent; undeclared context directs
+you to Runtime's resolved value. Typed parse errors remain visible instead of
+inventing values for unsupported settings. Params come from the typed live
+registry, and `Enter` edits one value while `x` restores its registered default.
+
+Prompt overrides open as a reduced operator catalog: the complete prompts
+for Keeper, Librarian, verification, and judges are visible by default. The
+assembly fragments in `config/prompts/` remain live, editable fragments; `a` toggles
+them into the list without presenting headings and row snippets as complete
+prompts. The list uses Korean category and purpose labels, while exact keys and
+template-variable names remain unchanged. The detail pane renders the effective
+body as Markdown (including fenced-code syntax highlighting), names whether it
+came from a file or an override, and keeps `PgUp`/`PgDn` paging. `e` edits the
+effective prompt through `$EDITOR`, and `x` clears only its persisted override.
+
+### System Logs
+
+Activity combines Events and Logs: `1` opens Events and `2` opens Logs from either view. `l` also opens Logs from Events; Esc returns there.
+
+The server's log ring, the same source the dashboard `logs` tab reads.
+
+```
+ MASC System Logs (247 of 774273, seq 774272)  level≥INFO  verbose:off
+   Time     Level   Module           Keeper       Category  Message
+   03:09:21 INFO    Discord          system       routine   presence update: idle
+   03:09:18 WARN    Keeper           alpha        turn      turn budget exceeded
+   03:08:57 ERROR   Board            system       boundary  board post write failed
+```
+
+The first count is what the fetched page shows after its category filter;
+`774273` is what the ring has seen. A page count on its own would read as
+"that is all there is".
+
+`v` toggles verbose DEBUG rows directly: off uses the INFO floor and on asks
+the server for every level. The header always says `verbose:on` or
+`verbose:off`. `l` remains the full server-side floor ladder through INFO,
+WARN, and ERROR, then opens back to every level; changing either control
+refetches the page. `c` cycles `all` and
+each category observed on the loaded page. Right or `Enter` opens the exact
+sequence under the cursor with its untruncated timestamp, level, category,
+source, module, keeper, turn, message, and pretty syntax-highlighted JSON
+details. `[`/`]` steps through adjacent visible entries while detail is open;
+Left or `Esc` returns to the filtered list.
+
+Levels are coloured: `ERROR` red, `WARN` yellow, `DEBUG` dim. A level the
+server emits that this build does not name keeps its own text and renders
+unstyled, so it shows up as itself rather than as an ordinary line.
+
+When the load fails the previous page stays on screen under a red line saying
+so. The count above it is then stale, not a fresh reading.
+
+## Keybindings
+
+Cross-surface shortcuts. An active field or panel handles its own keys first:
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Next surface, in the ring order the strip draws |
+| `3` | Jump to Keepers when the active field or panel does not use the number |
+| `r` | Force refresh |
+| `q` twice | Quit; any other input after the first `q` cancels |
+
+Per surface:
+
+| Key | Surface | Action |
+|-----|---------|--------|
+| `j` / `k` | Keepers, Lanes, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
+| `j` / `k` | Runtime, System Logs | Move the list cursor; scroll when detail is open |
+| `j` / `k` | Keeper detail, logs, Planning detail, Fusion detail | Scroll content |
+| `j` / `k` | Board read | Scroll the focused post body or comments |
+| `b` | Board read | Switch focus between the post body and comments |
+| Right / `Enter` | Keepers | Open keeper detail |
+| Mouse click | Keepers | Select a row; click the selected row again to open its detail |
+| Right / `Enter` | Lanes | Open the selected Lane's management surface |
+| `d` / `i` | Lanes overview | Read full selected-row observation / inventory diagnostics |
+| `c` / `m` | Lanes | Explain that standalone lanes have no Keeper chat target |
+| Right / `Enter` | Board | Open post body |
+| `Ctrl-W` | Board read, Resources | Switch the focused pane |
+| `[` / `]` | Resources detail | Open the previous / next resource |
+| `h` / `l` | Wide Board read | Focus post list / post detail |
+| `PgUp` / `PgDn` | Board, Schedules, Fusion, System Logs detail | Move the active list or detail by a page |
+| Right / `Enter` | Schedules | Open schedule details |
+| Right / `Enter` | Planning | Open goal detail |
+| Right / `Enter` | Fusion | Open exact run evidence detail |
+| `a` | Fusion list | Open the launch form for a new run |
+| `[` / `]` | Changes | Previous / next Keeper |
+| Right / `Enter` | Changes | Open the selected recorded diff |
+| `v` | Changes | View the row's file on the Code surface, in the keeper's workspace |
+| `a` twice | Verification | Approve the row under the cursor |
+| `x` | Verification | Reject it, with a reason through `$EDITOR` |
+| Right / `Enter` | Workspace | Browse the repository's tree on the Code surface |
+| `d` | Workspace | Show the repository's current Git working-tree changes |
+| `d` | Code, project tree focused | Show every Git change in the current project, even when it is not registered |
+| Right / `Enter` | Code | Drill into a directory / open the file |
+| Left / `Esc` | Code | Close the overlay, then the file, then climb a directory; `Esc` at the project root leaves for Workspace |
+| `/`, `n` / `N` | Code | Jump the tree cursor to a match |
+| `h` / `l` | Code, file open | Pan the file sideways by one cell |
+| `H` | Code, file open | The commits that touched the file, newest first |
+| `d` | Code, file open | The working tree's diff against HEAD |
+| `m` | Code, file open, repository scope | The notes anchored to the file |
+| `K` / `D` | Code, file open | Ask the language server: hover / definition of a name on the cursor line |
+| `o` | Keeper detail | Open logs (container logs on the Sandbox tab) |
+| `h` / `l` | Keeper detail, split width | Focus roster / detail; below the split width `l` opens logs |
+| `Enter` | Memory | Browse the selected keeper's facts, both stores |
+| `c` | Memory facts | Cycle the category filter through the loaded categories |
+| `Esc` | Memory facts | Close the browser, back to the health table |
+| `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
+| `y` / `n` | Approvals | Confirm / deny the selected request |
+| `n` | Schedules | Create a schedule through the `$EDITOR` JSON form |
+| `e` | Schedules | Modify the selected active schedule atomically |
+| `x` | Schedules | Cancel the selected schedule (armed: same key again sends) |
+| `e` | Keeper list or detail | Read the selected Keeper's settings in the background, then open `$EDITOR`. Esc cancels preparation. Only changed fields are sent against the opening revision; editor exit 0 submits the edit, other exits change nothing |
+| `a` | Keeper list or detail | Create a keeper in `$EDITOR`. Malformed or refused declarations remain available for another `a` in this session. A confirmed response opens that Keeper's composer; writing and sending the first request is a separate action |
+| Left / `Esc` | any structural detail or logs view | Back one level; Left never interrupts chat |
+| `Enter` | Message | Send |
+| `Ctrl-S` | Message | Toggle chat detail view (including live turn-preparation scopes and saved preparation reports bound to the selected execution) |
+| `…?` | Message footer | Toggle the chat footer key legend (hidden by default) |
+| `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |
+| `Ctrl-U` | Message | Clear the input line |
+| `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
+| `PgUp` / `PgDn` | Message | Scroll chat history by a page |
+| `Up` / `Down` | Message after scrolling back | Adjust chat history by one line |
+
+Keeper settings preparation leaves the TUI usable while reading. Moving to
+another Keeper, surface or tab, opening another input/modal, or losing workspace
+identity cancels that preparation. Repeated `e` shares the pending read; queued
+keys and paste are processed before its editor handoff. Preparation status stays
+in the footer. The later external editor and save are separate operations.
+
+On the Keepers surface, `v` cycles compact, detailed and grouped views; `o`
+cycles priority, recent activity, oldest activity, activity kind and name.
+Compact and grouped views give the row to the current work and waiting detail.
+Detailed view shows the lifecycle/runtime column when the terminal is wide
+enough; the selected Keeper's Info tab also retains runtime details.
+Grouped view keeps the selected order within each status group. Both choices
+are stored in `tui-keepers.toml` in the resolved config directory and restored
+on the next start; a failed or unconfirmed save is reported. `J` opens the
+selected Keeper's Automation tab and its own schedule list. A schedule mark in
+the roster is an observed waiting-inventory item, not a complete schedule count.
+When the Activity pane is visible and tall enough, it shows the selected
+Keeper's observed task and waiting items above its Recent/Changes content.
+A failed or unread waiting inventory is labelled separately; the schedule
+example is one last-observed item rather than a promise that it is the next due.
+An inventory with a source read error is marked partial.
+`K` opens a read-only relationship view for the selected Keeper: each arrow
+comes from the recorded Keeper sender of a request queued for that recipient.
+The view reads the first server page; more queued requests may exist. It does
+not list running or completed requests, and an unrecognized sender is not
+guessed from the submitter's name. Esc closes the view.
+A delegate-result mark represents a queued terminal result; its sentence may
+name the other Keeper and outcome, but it is not an inventory of active delegations.
+The recent and oldest orders use the observed turn or waiting-inventory time;
+they are not measures of how long a Keeper has been blocked. The attention group
+includes failures that may be retrying as well as questions and held calls.
+
+## Navigation
+
+```
+Tab cycles the surfaces:
+
+  Dashboard -> Work -> Keepers -> Usage -> Board -> Workspace
+            -> System -> Dashboard
+
+Within a surface:
+
+  Keepers   --Right/Enter-->  Keeper detail  --o-->  Keeper logs
+  Lanes     --Right/Enter-->  Selected Lane management
+
+  Keeper list/detail  --c-->  Message input
+
+  Board     --Right/Enter-->  Board read
+  Work      --t-->  Goals / Tasks  --Right/Enter-->  Detail
+Off-ring children:
+
+  Work      --v-->  Task Review --v--> Verdicts
+  Keepers   --f-->  Changes
+  Keeper detail --[ / ]--> Channels / Automation / Runs
+  Runtime   --p--> ... --p--> Lanes
+  Workspace --Enter-->  Code (the selected repository's tree)
+  System    --A-->  Activity         System --L--> Logs
+  System    --s-->  Resources        System --t--> Tools
+  Activity  --l-->  Logs             Logs --e--> Activity
+```
+
+`3` reaches Keepers after the active field or panel has declined it.
+`Esc` returns one level within Keepers, Board, and Work.
+
+## Requirements
+
+Interactive TTY stdin and stdout, and a terminal other than `dumb`.
+
+Rendering is input-driven: a frame is produced after input, an applied refresh
+or result, or a terminal resize. Background changes are coalesced into 16 ms
+windows and only changed viewport rows are written. An idle TUI neither redraws
+nor re-probes the terminal size.
+
+Each non-empty paint is sent as one synchronized-output update (CSI 2026) so
+terminals supporting the protocol reveal the frame atomically. `MASC_TUI_SYNC=off`
+omits that envelope; row-diff correctness does not depend on protocol support.
+
+Apple Terminal uses a conservative profile because it does not advertise the
+optional synchronized-output or Kitty keyboard protocols. Synchronized output,
+Kitty keyboard mode, and dynamic OSC window titles default off when
+`TERM_PROGRAM=Apple_Terminal`; `MASC_TUI_SYNC=on`,
+`MASC_TUI_KITTY_KEYBOARD=on`, and `MASC_TUI_TITLE=on` explicitly opt them back
+in. Other terminals keep the existing defaults, and each setting also accepts
+`off`.
+
+Exit signals restore terminal modes and cursor state. Job-control suspension
+(`Ctrl-Z`) restores the shell terminal, and `fg` re-enters raw mode and forces a
+complete repaint.
+
+Every session writes one line saying why it ended to its own stderr log,
+`.masc/logs/masc-tui-<pid>.log`, prefixed so it can be collected on its own:
+
+```
+[masc-tui] exit: normal (quit key)
+[masc-tui] exit: normal (interrupt)
+[masc-tui] exit: normal (signal SIGTERM)
+[masc-tui] exit: abnormal (exception Failure("..."))
+```
+
+A normal end is the operator or the session's owner asking for it — the `q`
+key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is the
+surface leaving without being asked, such as an uncaught exception. A session
+that leaves without naming a cause reads as `abnormal (no cause was
+recorded)`, which is its own wording rather than a made-up exception. A cause
+longer than 200 bytes is cut on a character boundary and the row ends in
+`[+N bytes]`, so a backtrace cannot turn one session's row into a page.
+
+The line is the only record of the end: the log otherwise holds the boot
+lines, so a session that ended used to leave no reason behind. Counting a
+day's ends by cause is one command:
+
+```
+grep -h '\[masc-tui\] exit:' .masc/logs/masc-tui-*.log | sort | uniq -c | sort -rn
+```
+
+A session killed with `SIGKILL`, or one whose machine lost power, writes
+nothing — no handler runs — so the count covers ends the process survived
+long enough to name.
+
+Viewports below the fixed chrome budget render a compact resize gate instead of
+a clipped frame, and message editing is suppressed until the terminal grows.
+
+## Troubleshooting
+
+**`masc` started a server instead of the TUI.** The handover looks for a
+`masc-tui` beside the running binary and then on `PATH`. An install lays both
+names down together; a source checkout builds `_build/default/bin/masc_tui.exe`,
+which matches neither, so the bare name serves — the same rule that keeps a
+container or a unit file from opening a TUI. Run the built path, or link both
+names into one directory on `PATH`; the README's source-checkout section spells
+out the two commands.
+
+**The TUI does not show a change that is already on `main`.** The TUI is its
+own binary. `start-masc.sh` builds and restarts the server (`bin/main_eio.exe`)
+and does not touch it, so a server restart leaves the TUI on the binary it
+started with. Rebuild with `dune build bin/masc_tui.exe`, then quit and reopen
+the TUI. To restart every local TUI process at once, inspect the target PIDs
+with `scripts/tui-graceful-restart.sh --dry-run` before running
+`scripts/tui-graceful-restart.sh --build`. The script searches the system for
+all processes named `masc_tui.exe` or `masc-tui`, including other checkouts and
+installed copies. `--base-path` selects the exit-log location and new TUI
+workspace; it does not narrow the processes to stop. The script builds first
+(a failed build leaves the running sessions untouched), sends each matched
+process `SIGTERM`, and starts one fresh binary only after every old process's
+per-PID log carries a graceful row (`[masc-tui] exit: normal (signal SIGTERM)`,
+the vocabulary above). A session that does not end within `--timeout` is left
+alone — the script never escalates to `SIGKILL` and never starts a new TUI
+while a matched session remains live.
+
+**Header shows `[disconnected]`.** The server is not answering on
+`127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,
+Planning, Fusion, and messaging do not. Check the port with `--port`.
+
+**Keepers list is empty but the runtime is running.** The base path is probably
+wrong. The list reads `.masc/keepers/` below `--base-path`, with no server
+involved, so an empty list with no error means the directory is empty.
+
+**Tasks panel prints `task backlog unavailable`.** The message carries the full
+path and says which case it is: `no backlog at <path>` when
+`.masc/tasks/backlog.json` does not exist, `backlog decode failed for <path>`
+when it exists but does not match the schema, and `backlog read failed for
+<path>` when it is blank, unparsable or unreadable.
+
+**A surface says `(not loaded yet)`.** Nothing has been read for it: the
+request is still out, or the surface was opened before a server was reachable.
+It is not an empty result. A read that came back with nothing says so in its
+own words - `(nothing waiting on a verdict)`, `(no verdicts recorded)` - and
+only after the header has stopped saying `(not loaded)`.
+
+**Keepers shows `- unread` in the STATUS column.** The live roster at
+`GET /api/v1/gate/keepers` has not been read for that keeper - the first load
+is still out, the read failed (the reason is printed above the list), or the
+roster came back short and did not carry that keeper. It is not a status the
+keeper is in. The header's `N unread` counts the same rows.
+
+**A surface shows a count of `0` next to `data unreliable`.** The read failed;
+the count is not an observation. The failing call is printed on the same row and
+recorded in the TUI session block on Metrics.
+
+### Preset source and current settings
+
+Config Presets distinguishes the selected saved preset from a settings match. Its detail shows the server-resolved preset directory, whether the settings currently saved in the workspace match, and the actual Markdown path/current source for each overridden prompt. A selection alone does not apply a preset. A saved-settings match does not claim every Keeper has reloaded its instructions.
+
+Config Prompts labels whether the effective text comes from an override or the Markdown file. When an override is active, the displayed Markdown path identifies the base file, not the effective override storage.
+
+### Following a Fusion run
+
+Fusion lists full start dates. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
+
+Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
+`a` on the list starts a run instead of following one, and the detail's `SEAT ROUTES` block names the runtime that answered each seat and the candidates that failed before it.
+
+### Questions and Gate modes
+
+In Approvals, `a` opens the selected Ask in a dedicated answer reader. The header shows Ask and Question position plus answered count. Left/Right (or j/k) changes the question; PgUp/PgDn and the wheel scroll long prompts and choices. `[`/`]` changes the Ask, and Esc returns to Approvals. Choice digits apply only to the active question.
+
+While the current workspace remains verified, background refreshes can deliver
+questions before slower Dashboard or roster reads finish. The question read
+checks the server workspace again before delivery. First connection and recovery
+from an unconfirmed workspace still wait for the complete verified refresh.
+Question updates keep the existing answer reader and notification behavior;
+they do not finish the other loading indicators or change workspace authority.
+
+After an answer is recorded, reaction, Tool and original Task observations arrive
+independently. A received Task observation remains available if another source
+fails; sources that never arrived stay unconfirmed. Follow-up parts and their
+final result remain retained while other notifications are queued. Changing the
+read authority retires old responses. A received observation does not prove that
+the Keeper consumed the answer or completed useful work.
+
+A refresh delivers its question listing once. Starting an answer retires older
+question reads, so a delayed background response cannot restore the question
+after the answer's own reload removed it. New question listings resume when
+answer submission finishes. A failed question read retains the previous snapshot
+and draft; submission waits for a successful read.
+
+`w` opens Workspace Gate modes; `e` opens Outside services modes. Choose from “Ask me for each decision”, “Let Auto Judge decide”, and “Allow every call without review”. Opening the chooser makes no change. Enter applies the selected mode through the existing authenticated API; Esc cancels. The status row reflects the next server reading.
+
+### Board navigation and Planning changes
+
+Board `s` stores the chosen order in `[tui].board_sort` in the resolved `runtime.toml`. `f` and `F` move to the next and previous Hearth; `H` opens a searchable chooser including all Hearths. IDs use subdued text, Hearths the information color, and authors the success color; votes retain their sign and replies remain an explicit count.
+
+Planning shows net changes in completed Goals, completed Tasks, and pending Goal reviews since the first successful Planning reading in this TUI session. The displayed baseline timestamp defines the window. These are changes in snapshot counts, not a durable completion history or operator-approval throughput.
+
+### Memory overview
+
+The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
+
+Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
+
+### Workspace activity
+
+On a repository, `H` reads the last 24 hours of recorded clone writes from the loaded Keeper roster. The activity page shows counts by Keeper and each change's date, Task ID and file. Failed Keeper reads and calls omitted by the source decoder remain visible. It counts recorded changes, not time spent working; absolute writes outside registered clones are not attributed to a repository.
+
+Select a row and press Enter to open the original Keeper's file. In Code, `H` opens file history and `m` opens notes. Esc from activity returns to the repository list.
+
+
+## Dashboard: decisions and conversations
+
+Dashboard gives its body to two sections: **Needs your decision** and
+**Continue**. Individual request rows show their kind, recipient and reason.
+Enter opens that exact held-call, approval, question, Goal or task reader;
+it never submits a decision. Identity is the request kind plus its authoritative
+ID, so two calls belonging to one Keeper remain distinct while repeated delivery
+of one request is shown once. The full requests and Agenda destinations remain
+available. A failed source has its own visible reading; successful sources keep
+their request rows. Unknown or failed reads never claim that no decision is waiting. Automatic verifier work and generic
+incidents are not counted as operator decisions.
+
+Use j/k or the arrows to choose, then Enter to open. Long request lists window
+around the selected identity while Continue and new work remain visible; the
+heading states the shown row range, and a window that shows only some requests
+is drawn as plain rows, never as cards. Esc from a Home-opened reader returns to
+Home with its selection and request window retained. If the request disappears
+or its source becomes unreadable, Home requires explicit reselection. A new
+top-level navigation ends the previous reader's return context.
+
+A Home-origin operator decision retains its last receipt in the Home context.
+A confirmation accepted with execution deferred remains labelled deferred;
+request presence is determined by the current source read. This session receipt
+does not prove application or survive restart. Creation retries retain their
+original return destination alongside the authored declaration. If the lifecycle
+accepts creation before its roster appears, the named draft remains available
+while sending waits for a reliable roster observation. Creation refuses an
+existing name and preserves the declaration; a reconfiguration response is
+reported as reconfiguration rather than opening a first-assignment composer.
+
+`p` opens requests, `;`
+opens Agenda, and `m` opens Usage. `?` opens Help over Agenda; Esc returns to
+Agenda. Work retains Goal observations, task lists,
+and verification evidence; Usage retains quota and telemetry detail. Home shows
+only a brief task-flow reading, with no duplicated tables or quota graphs.
+
+Continue uses the last explicitly visited conversation saved as
+`[tui].last_chat_keeper`, independently of the opening preference. A fixed
+`opening = "keeper"` target is not a last-chat record. Failed saves retain the
+visited target with a session-only notice; a visible save whose durability is
+unconfirmed has its own notice. Unreadable receipts show history unavailable.
+A failed roster read offers named history without permitting a new send.
+A deleted recipient can remain visible in already-open history; Home requires
+choosing an available Keeper to continue. With no available remembered target, choose a
+Keeper. An empty, successfully read roster offers creation while any existing
+Goal or task decisions remain visible. Home's `i` also selects a Keeper before
+writing. A conversation opened through Continue returns to Dashboard with Esc
+and keeps its draft through the existing per-Keeper draft store.
+
+If a previously matched server workspace becomes unreadable, Home shows the
+remembered conversation as unavailable with choose-Keeper guidance. It offers
+no history shortcut until workspace identity matches. Existing conversation
+drafts remain stored. New messages and waiting messages stay unsent;
+Goal confirmation and Task changes require a matching workspace reading. Refresh
+to read the server workspace again. A matching reading restores send authority and resumes already-authorized
+waiting messages once the Keeper roster is reliable. Unsent composer drafts
+remain drafts. A transient question read failure also preserves partial answers;
+submission waits for a successful read.
+
+Plan Usage is a frequent-use destination on the top-level **Usage** tab, not
+an expanded Home panel. The tab, Home's `m`, `go Usage` and `/cost` open its
+account rows even if the previous visit ended in Telemetry. The account reading
+includes scope, observed usage,
+reset times and freshness; scrolling reaches rows below the viewport. `p`
+opens the separate Telemetry reading, as do `/metrics` and `/telemetry`.
+A missing report is not a zero balance.
+
+Usage starts its independent source reads together, including transport, fleet,
+runtime quota, Keeper usage, provider history and account identity. The complete
+bundle still waits for the requested sources and the final workspace check;
+one slow source can keep that refresh pending. A source's reported failure
+remains separate from a successfully read zero value.
+
+### Complete selected details
+
+Workspace's repository list and System → Models offer `v` for a full, read-only
+capture of the selected object. Long paths, assignment lists, failure reasons,
+account names and owning TOML sections wrap without the preview's row limit.
+`/` searches this captured document, Enter keeps the query for `n`/`N`, and
+Esc while typing cancels the query. Query text and paste belong to the capture.
+Captured readers also show the query and match count ahead of the document
+title, with `Find` while typing, so a collapsed footer does not hide the search.
+`j/k`, arrows, PageUp/PageDown and Home/End read the complete capture; Esc or `v`
+returns to the same selection. The capture stays fixed while background reads
+or selections change. Close, refresh and reopen for updated data. Leaving the
+surface or changing workspace revokes it. It never opens an editor or submits
+an action, and paste cannot reach a composer underneath it.
+
+### Continuing a closed Board discussion
+
+A closed post's resolution is part of its scrollable body: the closer, supplied
+close time, complete summary and recorded successor remain readable at narrow
+widths. `S` opens the successor named by that post's metadata, including posts
+outside the loaded list. Esc returns to the original post. A missing successor
+read remains an explicit failure; the TUI does not choose another post from
+body text or the current list cursor.
+
+### Following an account through Usage
+
+On Usage, `f` searches accounts through the command palette. Choose an account
+from current inventory or recorded history; `v` switches Plan/Trend/Keepers and
+`w` changes the history window while retaining the exact quota scope ID. Plan
+and Trend show that account; `a` restores all accounts. Keepers usage remains a
+workspace-wide reading. If an account disappears from current inventory, its
+selection remains explicit instead of jumping to a different account. Missing
+history, unreadable reports and failed reads keep their distinct states.

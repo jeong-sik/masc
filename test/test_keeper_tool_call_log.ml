@@ -1,0 +1,3476 @@
+(** Tests for Keeper_tool_call_log — truncation, redaction, and read_recent. *)
+
+open Masc
+
+(* [Keeper_tool_call_log.read_recent], [read_recent_rows] and
+   [Dashboard_http_tool_quality.aggregate] answer [Error Index_unavailable]
+   when the read index cannot be read (audit F397). Every case in this file
+   exercises rows, so the failure is the case's failure. *)
+let read_recent ?keeper_name ?n () =
+  match Keeper_tool_call_log.read_recent ?keeper_name ?n () with
+  | Ok rows -> rows
+  | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
+let read_recent_rows ~n () =
+  match Keeper_tool_call_log.read_recent_rows ~n () with
+  | Ok rows -> rows
+  | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
+let aggregate ?n ?window_hours () =
+  let sampling = Dashboard_http_tool_quality.select_sampling ?n ?window_hours () in
+  match Dashboard_http_tool_quality.aggregate sampling with
+  | Ok summary -> summary
+  | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
+let eio_test name fn =
+  Alcotest.test_case name `Quick (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    fn ())
+
+let eio_env_test name fn =
+  Alcotest.test_case name `Quick (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    fn env)
+
+let artifact_ref_exn ~sha256 ~bytes ~preview ~mime =
+  match Tool_output.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+  | Ok r -> r
+  | Error e -> Alcotest.fail (Tool_output.make_error_to_string e)
+
+let counter = ref 0
+
+let invocation ~tool_use_id ~turn ~planned_index =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+    ~schedule:
+      { planned_index
+      ; batch_index = 0
+      ; batch_size = 2
+      ; execution_mode = Agent_core.Tool_contract.Concurrent
+      }
+;;
+
+let test_pending_observations_are_occurrence_scoped () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let first = invocation ~tool_use_id:"" ~turn:7 ~planned_index:0 in
+  let sibling_with_same_blank_id =
+    invocation ~tool_use_id:"" ~turn:7 ~planned_index:1
+  in
+  let later_with_repeated_id =
+    invocation ~tool_use_id:"repeated" ~turn:8 ~planned_index:0
+  in
+  let earlier_with_repeated_id =
+    invocation ~tool_use_id:"repeated" ~turn:7 ~planned_index:2
+  in
+  List.iter
+    (fun (invocation, original_bytes) ->
+       Keeper_tool_call_log.set_truncation_info
+         ~invocation
+         ~original_bytes
+         ())
+    [ first, 11
+    ; sibling_with_same_blank_id, 22
+    ; earlier_with_repeated_id, 33
+    ; later_with_repeated_id, 44
+    ];
+  let consume invocation =
+    Keeper_tool_call_log.consume_truncation_info
+      ~invocation
+      ()
+  in
+  Alcotest.(check (pair int (option int)))
+    "blank-id sibling keeps its own observation"
+    (22, None)
+    (consume sibling_with_same_blank_id);
+  Alcotest.(check (pair int (option int)))
+    "first blank-id occurrence remains available"
+    (11, None)
+    (consume first);
+  Alcotest.(check (pair int (option int)))
+    "later repeated-id occurrence keeps its own observation"
+    (44, None)
+    (consume later_with_repeated_id);
+  Alcotest.(check (pair int (option int)))
+    "earlier repeated-id occurrence remains available"
+    (33, None)
+    (consume earlier_with_repeated_id);
+  Alcotest.(check (pair int (option int)))
+    "consumed occurrence is absent"
+    (0, None)
+    (consume first)
+;;
+
+let test_pending_file_change_evidence_is_occurrence_scoped () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let first = invocation ~tool_use_id:"repeated" ~turn:7 ~planned_index:0 in
+  let second = invocation ~tool_use_id:"repeated" ~turn:7 ~planned_index:1 in
+  let first_evidence = Keeper_file_change_evidence.written "one\n" in
+  let second_evidence = Keeper_file_change_evidence.written "one\ntwo\n" in
+  Keeper_tool_call_log.set_file_change_evidence
+    ~artifact_refs:[]
+    ~invocation:first
+    ~evidence:first_evidence;
+  Keeper_tool_call_log.set_file_change_evidence
+    ~artifact_refs:[]
+    ~invocation:second
+    ~evidence:second_evidence;
+  let consume invocation =
+    Keeper_tool_call_log.consume_file_change_evidence ~invocation ()
+    |> Option.map (fun evidence ->
+      Keeper_file_change_evidence.to_yojson evidence
+      |> Yojson.Safe.to_string)
+  in
+  let encoded evidence =
+    Keeper_file_change_evidence.to_yojson evidence |> Yojson.Safe.to_string
+  in
+  Alcotest.(check (option string))
+    "peek leaves evidence pending until commit acknowledgement"
+    (Some (encoded second_evidence))
+    (Keeper_tool_call_log.peek_file_change_evidence ~invocation:second ()
+     |> Option.map encoded);
+  Alcotest.(check (option string))
+    "same provider id keeps the second physical occurrence"
+    (Some (encoded second_evidence))
+    (consume second);
+  Alcotest.(check (option string))
+    "same provider id keeps the first physical occurrence"
+    (Some (encoded first_evidence))
+    (consume first);
+  Alcotest.(check (option string))
+    "evidence is consumed once"
+    None
+    (consume first)
+;;
+
+let test_abandoned_observation_is_released_with_invocation () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let record_abandoned () =
+    let abandoned = invocation ~tool_use_id:"cancelled" ~turn:9 ~planned_index:0 in
+    Keeper_tool_call_log.set_truncation_info
+      ~invocation:abandoned
+      ~original_bytes:99
+      ()
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  Alcotest.(check int)
+    "settlement-skip observation is weakly released"
+    0
+    (Keeper_tool_call_log.pending_truncation_count_for_testing ())
+;;
+
+let test_abandoned_file_change_evidence_is_released_with_invocation () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let record_abandoned () =
+    let abandoned = invocation ~tool_use_id:"cancelled" ~turn:9 ~planned_index:0 in
+    Keeper_tool_call_log.set_file_change_evidence
+      ~artifact_refs:[]
+      ~invocation:abandoned
+      ~evidence:(Keeper_file_change_evidence.written "orphaned\n")
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  Alcotest.(check int)
+    "cancelled invocation weakly releases file change evidence"
+    0
+    (Keeper_tool_call_log.pending_file_change_evidence_count_for_testing ())
+;;
+
+let with_tmp_log f =
+  incr counter;
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test-keeper-tool-call-log-%d-%d-%d"
+       (Unix.getpid ()) !counter
+       (int_of_float (Unix.gettimeofday () *. 1000.0))) in
+  Fs_compat.mkdir_p dir;
+  Keeper_tool_call_log.reset_for_testing ();
+  Keeper_tool_call_log.init ~base_path:dir ();
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Fs_compat.remove_tree dir)
+    (fun () -> f ())
+
+(* The tool call store of a workspace whose base path is [base_path]. *)
+let tool_calls_location base_path =
+  Dated_jsonl.Store.at
+    (Dated_jsonl.Store.root_of_masc_dir (Filename.concat base_path ".masc"))
+    Tool_calls
+
+let with_tmp_log_dir f =
+  incr counter;
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test-keeper-tool-call-log-%d-%d-%d"
+       (Unix.getpid ()) !counter
+       (int_of_float (Unix.gettimeofday () *. 1000.0))) in
+  Fs_compat.mkdir_p dir;
+  Keeper_tool_call_log.reset_for_testing ();
+  Keeper_tool_call_log.init ~base_path:dir ();
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Fs_compat.remove_tree dir)
+    (fun () -> f dir)
+
+let with_tmp_corrupt_tool_call_store f =
+  incr counter;
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test-keeper-tool-call-log-corrupt-%d-%d-%d"
+       (Unix.getpid ()) !counter
+       (int_of_float (Unix.gettimeofday () *. 1000.0))) in
+  let masc_root = Filename.concat dir ".masc" in
+  Fs_compat.mkdir_p masc_root;
+  Fs_compat.save_file (Filename.concat masc_root "tool_calls") "not a directory";
+  Keeper_tool_call_log.reset_for_testing ();
+  Keeper_tool_call_log.init ~base_path:dir ();
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Fs_compat.remove_tree dir)
+    (fun () -> f ~dir ~masc_root)
+
+(* ── read_window ─────────────────────────── *)
+
+(* [read_window] filters as it reads rather than building the day range and
+   filtering after. What it keeps, and in what order, is the contract; the
+   store held 40,268 rows in a 24h window on 2026-09-06 and a keeper-scoped
+   caller kept 7-19% of them, so what the other 80% cost is the reason the
+   read changed and not part of the contract. *)
+let test_read_window_keeps_the_keepers_rows_in_order () =
+  with_tmp_log (fun () ->
+    let log keeper tool =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:keeper ~tool_name:tool
+        ~input:(`Assoc []) ~output_text:"out"
+        ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ()
+    in
+    log "alice" "first";
+    log "bob" "between";
+    log "alice" "second";
+    log "carol" "other";
+    log "alice" "third";
+    let tools rows =
+      List.filter_map (fun row -> Safe_ops.json_string_opt "tool" row) rows
+    in
+    let alice = Keeper_tool_call_log.read_window ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check (list string))
+      "the keeper's rows, in the order they were written"
+      [ "first"; "second"; "third" ]
+      (tools alice);
+    let all = Keeper_tool_call_log.read_window ~window_hours:1.0 () in
+    Alcotest.(check (list string))
+      "no keeper filter keeps every row"
+      [ "first"; "between"; "second"; "other"; "third" ]
+      (tools all);
+    Alcotest.(check int)
+      "a keeper that wrote nothing has nothing"
+      0
+      (List.length
+         (Keeper_tool_call_log.read_window ~keeper_name:"dave" ~window_hours:1.0 ()));
+    Alcotest.(check int)
+      "a non-positive window is empty"
+      0
+      (List.length (Keeper_tool_call_log.read_window ~window_hours:0.0 ())))
+;;
+
+(* ── file_change_tally carries its answer ─────────────── *)
+
+(* The tally is folded from what the store gained since the last call. Two
+   things have to hold for that to be safe: the answer must equal what a whole
+   read produces, and a row appended between calls must appear. The counts are
+   what this checks — a keeper's rows are not file changes in this fixture, so
+   [rows_counted] is where they land, and it is the field the endpoint reports
+   as "of m calls". *)
+let test_file_change_tally_matches_a_whole_read () =
+  with_tmp_log (fun () ->
+    let module Change = Keeper_tool_call_file_change in
+    let log keeper tool =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:keeper ~tool_name:tool
+        ~input:(`Assoc []) ~output_text:"out"
+        ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ()
+    in
+    log "alice" "first";
+    log "bob" "other";
+    log "alice" "second";
+    let whole_read keeper =
+      Change.classify_all
+        (Keeper_tool_call_log.read_window ~keeper_name:keeper ~window_hours:1.0 ())
+    in
+    let carried = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int)
+      "a first fold equals a whole read"
+      (Change.rows_counted (whole_read "alice"))
+      (Change.rows_counted carried);
+    Alcotest.(check int) "and it saw alice's two rows" 2 (Change.rows_counted carried);
+    (* Called again with nothing appended, the carried tally must not double. *)
+    let again = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int) "a repeat call does not re-count" 2 (Change.rows_counted again);
+    log "alice" "third";
+    let after = Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours:1.0 () in
+    Alcotest.(check int) "a row appended between calls appears" 3 (Change.rows_counted after);
+    Alcotest.(check int)
+      "and still equals a whole read"
+      (Change.rows_counted (whole_read "alice"))
+      (Change.rows_counted after);
+    (* A different keeper and an unfiltered read are separate carried answers. *)
+    Alcotest.(check int)
+      "bob's own answer"
+      1
+      (Change.rows_counted
+         (Keeper_tool_call_log.file_change_tally ~keeper_name:"bob" ~window_hours:1.0 ()));
+    Alcotest.(check int)
+      "no keeper filter sees every row"
+      4
+      (Change.rows_counted (Keeper_tool_call_log.file_change_tally ~window_hours:1.0 ()));
+    Alcotest.(check int)
+      "a non-positive window is empty"
+      0
+      (Change.rows_counted (Keeper_tool_call_log.file_change_tally ~window_hours:0.0 ())))
+;;
+
+(* The rule the carried tally is reused under. The read that applies it needs
+   a clock; this does not, so the aging-out case is checked here.
+
+   The first version of this compared calendar days, which made a one-hour
+   window's entry stay valid from the moment it was folded until midnight —
+   the answer grew all day instead of trailing an hour behind (#33563 review).
+   The floor moving forward is the case that has to invalidate. *)
+let test_carried_entry_answers_only_while_nothing_aged_out () =
+  let day ts = Jsonl_writer.day_key ~ts in
+  let now = 1_788_000_000.0 in
+  let hour = 3600.0 in
+  let floor_at h = now -. (h *. hour) in
+  let answers ~folded_at ~oldest ~asking_at =
+    Keeper_tool_call_log.carried_entry_answers
+      ~entry_since_ts:folded_at
+      ~entry_oldest_row_ts:oldest
+      ~since_ts:asking_at
+      ~since:(day asking_at)
+  in
+  (* Folded for a 3h window whose oldest row is 2h old. Asked again a moment
+     later: the floor has moved a little, the row is still inside. *)
+  Alcotest.(check bool)
+    "still inside the window"
+    true
+    (answers ~folded_at:(floor_at 3.0) ~oldest:(Some (floor_at 2.0))
+       ~asking_at:(floor_at 3.0 +. 60.0));
+  (* The same entry once the floor has passed that row. This is the case the
+     day-keyed version got wrong. *)
+  Alcotest.(check bool)
+    "the oldest row has aged out"
+    false
+    (answers ~folded_at:(floor_at 3.0) ~oldest:(Some (floor_at 2.0))
+       ~asking_at:(floor_at 1.0));
+  (* An entry that counted nothing has nothing to age out. *)
+  Alcotest.(check bool)
+    "no rows, nothing to drop"
+    true
+    (answers ~folded_at:(floor_at 3.0) ~oldest:None ~asking_at:(floor_at 1.0));
+  (* A floor that went backwards is not this entry's window. *)
+  Alcotest.(check bool)
+    "the floor moved backwards"
+    false
+    (answers ~folded_at:(floor_at 1.0) ~oldest:None ~asking_at:(floor_at 3.0));
+  (* A day range that no longer starts where the entry read from: files it
+     never opened are inside the window now. *)
+  let yesterday = now -. (26.0 *. hour) in
+  Alcotest.(check bool)
+    "the day range moved"
+    false
+    (Keeper_tool_call_log.carried_entry_answers
+       ~entry_since_ts:yesterday ~entry_oldest_row_ts:None
+       ~since_ts:(floor_at 1.0) ~since:(day (floor_at 1.0)))
+;;
+
+(* A row that has aged out must leave the answer, and the carried tally cannot
+   drop it -- an unreadable row has no timestamp to drop it by -- so the entry
+   is refolded once the window floor passes a row it counted.
+
+   A test cannot advance the clock, but it does not need to: the floor is
+   [now - window_hours], so asking with a shorter window moves the floor
+   forward exactly as time would. The cache key includes [window_hours], so
+   two lengths are two entries; the third call reuses the first key with the
+   floor now past the row it counted, which is the case under test.
+
+   Rows go straight to the store because [log_call] stamps [ts] with the clock
+   and this needs rows at chosen times. *)
+let test_file_change_tally_drops_rows_that_aged_out () =
+  with_tmp_log (fun () ->
+    let module Change = Keeper_tool_call_file_change in
+    let store =
+      match Keeper_tool_call_log.store () with
+      | Some store -> store
+      | None -> Alcotest.fail "the log has no store"
+    in
+    let now = Unix.gettimeofday () in
+    let write ~ts tool =
+      Dated_jsonl.append store
+        (`Assoc
+           [ "ts", `Float ts
+           ; "keeper", `String "alice"
+           ; "tool", `String tool
+           ; "wire_outcome", `String "ok"
+           ])
+    in
+    let counted ~window_hours =
+      Change.rows_counted
+        (Keeper_tool_call_log.file_change_tally ~keeper_name:"alice" ~window_hours ())
+    in
+    let whole_read ~window_hours =
+      Change.rows_counted
+        (Change.classify_all
+           (Keeper_tool_call_log.read_window ~keeper_name:"alice" ~window_hours ()))
+    in
+    (* One row a minute old, one two hours old -- the same calendar day, so a
+       day-keyed cache treats every window below as one entry. *)
+    write ~ts:(now -. 60.0) "recent";
+    write ~ts:(now -. (2.0 *. 3600.0)) "two-hours-ago";
+    Alcotest.(check int) "a 3h window reaches both" 2 (counted ~window_hours:3.0);
+    Alcotest.(check int)
+      "and agrees with a whole read"
+      (whole_read ~window_hours:3.0)
+      (counted ~window_hours:3.0);
+    (* A floor an hour further forward. The older row is behind it. *)
+    Alcotest.(check int) "a 1h window reaches only the recent row" 1 (counted ~window_hours:1.0);
+    Alcotest.(check int)
+      "and agrees with a whole read"
+      (whole_read ~window_hours:1.0)
+      (counted ~window_hours:1.0);
+    (* Appending inside the shorter window must reach the carried answer. *)
+    write ~ts:(now -. 30.0) "newer";
+    Alcotest.(check int)
+      "a row appended inside the window appears"
+      (whole_read ~window_hours:1.0)
+      (counted ~window_hours:1.0);
+    Alcotest.(check int) "which is two rows" 2 (counted ~window_hours:1.0);
+    (* And the longer window still sees everything, from its own entry. *)
+    Alcotest.(check int)
+      "the longer window is unchanged by the shorter one"
+      (whole_read ~window_hours:3.0)
+      (counted ~window_hours:3.0))
+;;
+
+(* ── read_recent edge cases ─────────────────────────── *)
+
+let test_read_recent_n_zero () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_a"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let result = read_recent ~n:0 () in
+    Alcotest.(check int) "n=0 returns empty" 0 (List.length result))
+
+let test_read_recent_n_negative () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_a"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let result = read_recent ~n:(-1) () in
+    Alcotest.(check int) "n<0 returns empty" 0 (List.length result))
+
+let test_read_recent_keeper_filter () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"alice" ~tool_name:"tool_x"
+      ~input:(`Assoc []) ~output_text:"out"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:5.0 ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"bob" ~tool_name:"tool_y"
+      ~input:(`Assoc []) ~output_text:"out"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:5.0 ();
+    let alice_entries = read_recent ~keeper_name:"alice" () in
+    let bob_entries = read_recent ~keeper_name:"bob" () in
+    let all_entries = read_recent () in
+    Alcotest.(check int) "alice gets 1 entry" 1 (List.length alice_entries);
+    Alcotest.(check int) "bob gets 1 entry" 1 (List.length bob_entries);
+    Alcotest.(check int) "all gets 2 entries" 2 (List.length all_entries))
+
+(* The dashboard /tool-calls handler derives each keeper's slice from one
+   shared fleet read instead of per-keeper [read_recent] calls. The
+   derivation must be observationally equal to [read_recent]. *)
+(* The unfiltered read stops at [n]; the keeper-filtered one still scans past
+   it to find [n] matches. Both have to hold at once — dropping the over-scan
+   everywhere would silently shorten per-keeper answers, and keeping it
+   everywhere reads five times the store for a fleet answer that cannot
+   change. *)
+let test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n () =
+  with_tmp_log (fun () ->
+    List.iter
+      (fun (keeper, tool) ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:keeper ~tool_name:tool
+          ~input:(`Assoc []) ~output_text:"out"
+          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ())
+      [ ("alice", "t1"); ("bob", "t2"); ("bob", "t3"); ("bob", "t4")
+      ; ("bob", "t5"); ("bob", "t6"); ("bob", "t7"); ("bob", "t8")
+      ; ("bob", "t9"); ("alice", "t10")
+      ];
+    let tools rows =
+      List.map
+        (fun json ->
+          match Safe_ops.json_string_opt "tool" json with
+          | Some tool -> tool
+          | None -> "?")
+        rows
+    in
+    Alcotest.(check (list string))
+      "unfiltered read returns exactly the newest n"
+      [ "t9"; "t10" ]
+      (tools (read_recent ~n:2 ()));
+    (* alice's two rows sit at opposite ends of the store, so finding both
+       requires reading well past n — this is what the over-scan buys. *)
+    Alcotest.(check (list string))
+      "keeper-filtered read still scans past n to find n matches"
+      [ "t1"; "t10" ]
+      (tools (read_recent ~keeper_name:"alice" ~n:2 ())))
+;;
+
+let test_fleet_rows_derivation_matches_read_recent () =
+  with_tmp_log (fun () ->
+    List.iter
+      (fun (keeper, tool) ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:keeper ~tool_name:tool
+          ~input:(`Assoc []) ~output_text:"out"
+          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ())
+      [ ("alice", "t1"); ("bob", "t2"); ("alice", "t3");
+        ("carol", "t4"); ("alice", "t5"); ("bob", "t6") ];
+    let n = 2 in
+    let fleet =
+      read_recent_rows
+        ~n:(n * Keeper_tool_call_log.read_over_scan_factor) ()
+    in
+    List.iter
+      (fun keeper ->
+        let direct =
+          read_recent ~keeper_name:keeper ~n ()
+        in
+        let derived =
+          Keeper_tool_call_log.filter_rows_for_keeper
+            ~keeper_name:keeper ~n fleet
+        in
+        Alcotest.(check (list string))
+          (Printf.sprintf "derived slice equals read_recent for %s" keeper)
+          (List.map Yojson.Safe.to_string direct)
+          (List.map Yojson.Safe.to_string derived))
+      [ "alice"; "bob"; "carol"; "absent-keeper" ])
+
+let test_exact_agent_core_occurrence_persisted () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k"
+      ~tool_name:"tool_a"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0
+      ~tool_use_id:""
+      ~turn:9
+      ~planned_index:4
+      ~batch_index:2
+      ~batch_size:3
+      ~execution_mode:Agent_core.Tool_contract.Concurrent
+      ();
+    match read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "blank provider id persisted"
+        (Some "")
+        (Safe_ops.json_string_opt "tool_use_id" entry);
+      Alcotest.(check int)
+        "turn persisted"
+        9
+        (Safe_ops.json_int ~default:(-1) "turn" entry);
+      Alcotest.(check int)
+        "planned index persisted"
+        4
+        (Safe_ops.json_int ~default:(-1) "planned_index" entry);
+      Alcotest.(check int)
+        "batch index persisted"
+        2
+        (Safe_ops.json_int ~default:(-1) "batch_index" entry);
+      Alcotest.(check int)
+        "batch size persisted"
+        3
+        (Safe_ops.json_int ~default:(-1) "batch_size" entry);
+      Alcotest.(check (option string))
+        "execution mode persisted"
+        (Some "concurrent")
+        (Safe_ops.json_string_opt "execution_mode" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+(* The ordinary path knows the disposition but not the payload, so it cannot
+   supply [typed_result]. Before this it supplied nothing and the row carried
+   only [success], which cannot tell a policy rejection from a runtime failure
+   and cannot represent [Deferred] at all. *)
+let test_ordinary_path_disposition_persisted () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:"refused"
+      ~wire_outcome:Tool_result.Error
+      ~duration_ms:3.0
+      ~disposition:(Tool_result.Failed Tool_result.Policy_rejection)
+      ();
+    match read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "the row says which kind of failure"
+        (Some "failed")
+        (Safe_ops.json_string_opt "disposition" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_file_change_evidence_persists_with_execution_identity () =
+  with_tmp_log (fun () ->
+    let occurrence =
+      Keeper_file_change_evidence.edit_occurrence
+        ~old_start_line:2
+        ~new_start_line:2
+        ~old_string:"old a\nold b"
+        ~new_string:"new a\nnew b\nnew c"
+    in
+    let evidence = Keeper_file_change_evidence.edited [ occurrence ] in
+    let execution_id = Ids.Execution_id.of_string "exec-file-change-evidence" in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_edit"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:(String.make 5000 'x')
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:3.0
+      ~execution_id
+      ~file_change_evidence:evidence
+      ();
+    match read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "same row keeps canonical execution id"
+        (Some "exec-file-change-evidence")
+        (Safe_ops.json_string_opt "execution_id" entry);
+      let expected =
+        Keeper_file_change_evidence.to_yojson evidence |> Yojson.Safe.to_string
+      in
+      let actual =
+        Yojson.Safe.Util.member "file_change_evidence" entry
+        |> Yojson.Safe.to_string
+      in
+      Alcotest.(check string)
+        "typed evidence bypasses the truncated output preview"
+        expected
+        actual
+    | _ -> Alcotest.fail "expected exactly one file change entry")
+;;
+
+(* A caller that observed no projection says so with [Unknown]; the row
+   keeps that case, and with no typed disposition either it claims no
+   execution verdict anywhere: no [success] shadow and no [action_radius]
+   that would have to pick a side. *)
+let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~wire_outcome:Tool_result.Unknown
+      ~duration_ms:1.0
+      ();
+    match read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "no disposition is written when none was known"
+        None
+        (Safe_ops.json_string_opt "disposition" entry);
+      Alcotest.(check (option string))
+        "an unobserved wire outcome is explicit"
+        (Some "unknown")
+        (Safe_ops.json_string_opt "wire_outcome" entry);
+      Alcotest.(check bool)
+        "no parallel success shadow is persisted"
+        false
+        (match entry with
+         | `Assoc fields -> List.mem_assoc "success" fields
+         | _ -> false);
+      Alcotest.(check bool)
+        "an unobserved call states no action radius"
+        false
+        (match entry with
+         | `Assoc fields -> List.mem_assoc "action_radius" fields
+         | _ -> false)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_composition_action_context_persisted () =
+  with_tmp_log (fun () ->
+    let source_id =
+      Skill_source_config.source_id_of_string "workspace" |> Result.get_ok
+    in
+    let package_id = Skill_reference.package_id_of_directory "research" |> Result.get_ok in
+    let skill_reference =
+      Skill_reference.make
+        ~identity:
+          (Skill_reference.make_identity
+             ~source_id
+             ~package_id
+             ~name:"research")
+        ~content_revision:
+          (Skill_reference.content_revision_of_string (String.make 64 'a')
+           |> Result.get_ok)
+    in
+    let typed_result =
+      Tool_result.Completed
+        { retained_artifacts = []; content_blocks = None; Tool_result.tool_name = "keeper_fs_read"
+        ; data = `Assoc [ "content", `String "typed output" ]
+        ; metadata = None
+        ; duration_ms = 12.5
+        }
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"delta"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:"typed output"
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:12.5
+      ~typed_result
+      ~composition_tool:"keeper_research_pipeline"
+      ~skill_reference
+      ~composition_run_id:"run-42"
+      ~composition_node_id:"fetch_sources"
+      ~composition_execution:Keeper_tool_composition_catalog.Async
+      ~parent_tool_use_id:"outer-7"
+      ();
+    match read_recent ~n:1 () with
+    | [ entry ] ->
+      List.iter
+        (fun (label, key, expected) ->
+           Alcotest.(check (option string))
+             label
+             (Some expected)
+             (Safe_ops.json_string_opt key entry))
+        [ "typed disposition", "disposition", "completed"
+        ; "composition tool", "composition_tool", "keeper_research_pipeline"
+        ; "composition run", "composition_run_id", "run-42"
+        ; "composition node", "composition_node_id", "fetch_sources"
+        ; "composition execution", "composition_execution", "async"
+        ; "outer provider call", "parent_tool_use_id", "outer-7"
+        ]
+      ; Alcotest.(check string)
+          "exact Skill reference"
+          (Skill_reference.to_yojson skill_reference |> Yojson.Safe.to_string)
+          (match Safe_ops.json_member_opt "skill_reference" entry with
+           | Some json -> Yojson.Safe.to_string json
+           | None -> "missing")
+    | _ -> Alcotest.fail "expected exactly one composition action entry")
+
+(* One keeper, one trace: a submitted turn and the keeper's own autonomous
+   cycle each run the same composition tool. Rows of both carry the same
+   keeper, trace_id and composition tool, so a reader asking which run
+   belongs to the submission had nothing to separate them and fell back to
+   the submission's wall clock — which the autonomous run overlaps
+   (masc#28977 RW17: builder-b's autonomous compose runs were read as
+   exactly-once violations of the submitted mission).
+
+   The rows are written the way both production writers do it: context into
+   a per-run cell, read back as a record, passed explicitly to log_call. *)
+let test_composition_rows_separate_submitted_from_autonomous_turn () =
+  with_tmp_log (fun () ->
+    let node_ids = [ "tasks"; "board"; "answers"; "scheduled" ] in
+    let log_composition_run ~turn_kind ~keeper_turn_id ~run_id =
+      let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+      Keeper_tool_call_log.set_turn_context
+        ~cell
+        ~agent_name:"keeper-build-b-agent"
+        ~turn_kind
+        ~lane:"tool_optional"
+        ~trace_id:"trace-shared"
+        ~session_id:"trace-shared"
+        ~keeper_turn_id
+        ();
+      let context : Keeper_tool_call_log_context.turn_context =
+        Keeper_tool_call_log_context.get_turn_context_record ~cell ()
+      in
+      List.iter
+        (fun node_id ->
+           Keeper_tool_call_log.log_call
+             ~keeper_name:"build-b"
+             ~tool_name:"masc_board_stats"
+             ~input:(`Assoc [])
+             ~output_text:"ok"
+             ~wire_outcome:Tool_result.Ok
+             ~duration_ms:1.0
+             ?agent_name:context.agent_name
+             ?turn_kind:context.turn_kind
+             ?lane:context.lane
+             ?trace_id:context.trace_id
+             ?session_id:context.session_id
+             ?keeper_turn_id:context.keeper_turn_id
+             ~composition_tool:"keeper_compose_work-intake"
+             ~composition_run_id:run_id
+             ~composition_node_id:node_id
+             ~composition_execution:Keeper_tool_composition_catalog.Inline
+             ~parent_tool_use_id:("call-" ^ run_id)
+             ())
+        node_ids
+    in
+    log_composition_run
+      ~turn_kind:Turn_record.Direct
+      ~keeper_turn_id:2
+      ~run_id:"run-submitted";
+    log_composition_run
+      ~turn_kind:Turn_record.Autonomous
+      ~keeper_turn_id:3
+      ~run_id:"run-autonomous";
+    let entries = read_recent ~n:16 () in
+    Alcotest.(check int) "every node row of both runs persisted" 8
+      (List.length entries);
+    let run_ids_for kind =
+      List.filter_map
+        (fun entry ->
+           match Safe_ops.json_string_opt "turn_kind" entry with
+           | Some value when String.equal value kind ->
+             Safe_ops.json_string_opt "composition_run_id" entry
+           | Some _ | None -> None)
+        entries
+      |> List.sort_uniq String.compare
+    in
+    Alcotest.(check (list string)) "submitted turn owns exactly its run"
+      [ "run-submitted" ]
+      (run_ids_for "direct");
+    Alcotest.(check (list string)) "autonomous cycle owns exactly its run"
+      [ "run-autonomous" ]
+      (run_ids_for "autonomous");
+    let submitted_node_rows =
+      List.filter
+        (fun entry ->
+           match Safe_ops.json_string_opt "turn_kind" entry with
+           | Some value -> String.equal value "direct"
+           | None -> false)
+        entries
+    in
+    Alcotest.(check int) "submitted run keeps all four node rows" 4
+      (List.length submitted_node_rows);
+    Alcotest.(check (list string)) "every node of the submitted run is named"
+      (List.sort String.compare node_ids)
+      (List.filter_map
+         (Safe_ops.json_string_opt "composition_node_id")
+         submitted_node_rows
+       |> List.sort String.compare))
+
+(* ── Redaction: tool names do not suppress evidence ────────────── *)
+
+let test_sensitive_named_tool_logged_with_redaction () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"mcp_auth_create"
+      ~input:(`Assoc [("token", `String "secret123")]) ~output_text:"done"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let result = read_recent () in
+    Alcotest.(check int) "tool call logged" 1 (List.length result);
+    let encoded = Yojson.Safe.to_string (List.hd result) in
+    Alcotest.(check bool)
+      "sensitive value redacted"
+      false
+      (String_util.contains_substring encoded "secret123"))
+
+(* ── Redaction: sensitive fields stripped ────────────── *)
+
+let test_sensitive_input_fields_redacted () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc [
+        ("token", `String "sk-proj-abcdefghijklmnop12345678");
+        ("content", `String "hello");
+      ])
+      ~output_text:"done"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let entries = read_recent () in
+    Alcotest.(check int) "one entry logged" 1 (List.length entries);
+    let entry_str = Yojson.Safe.to_string (List.hd entries) in
+    Alcotest.(check bool) "token value redacted" false
+      (String_util.contains_substring entry_str "sk-proj-abcdefghijklmnop12345678"))
+
+(* ── Model field redacted ───────────────────────────── *)
+
+let test_model_field_stored () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
+      ~model:"glm-4-9b"
+      ~runtime_profile:"local_qwen3_27b_only"
+      ();
+    let entries = read_recent () in
+    Alcotest.(check int) "one entry" 1 (List.length entries);
+    let entry_str = Yojson.Safe.to_string (List.hd entries) in
+    Alcotest.(check bool) "raw model absent" false
+      (String_util.contains_substring entry_str "glm-4-9b");
+    Alcotest.(check (option string)) "model redacted to runtime"
+      (Some "runtime")
+      (Safe_ops.json_string_opt "model" (List.hd entries));
+    Alcotest.(check (option string)) "runtime profile stored"
+      (Some "local_qwen3_27b_only")
+      (Safe_ops.json_string_opt "runtime_profile" (List.hd entries)))
+
+let test_turn_context_fields_stored () =
+  with_tmp_log (fun () ->
+    (* Mirrors the production reader (keeper_hooks_agent_core): context is
+       written to a per-run cell, read back as a record, and passed
+       explicitly to log_call — there is no ambient fallback. *)
+    let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+    Keeper_tool_call_log.set_turn_context
+      ~cell
+      ~agent_name:"keeper-k-agent"
+      ~lane:"tool_optional"
+      ~tool_choice:"auto"
+      ~thinking_enabled:false
+      ~prompt_fingerprint:"prompt-fp-k"
+      ~trace_id:"trace-k"
+      ~session_id:"trace-k"
+      ~turn:7
+      ~keeper_turn_id:7
+      ~task_id:"task-runtime-trust"
+      ~sandbox_profile:"docker"
+      ~sandbox_root:"/tmp/k-sandbox"
+      ~sandbox_roots:["/tmp/k-sandbox"; "/tmp/shared"]
+      ~network_mode:"inherit"
+      ~runtime_profile:"tool_use_strict"
+      ();
+    let tctx : Keeper_tool_call_log_context.turn_context =
+      Keeper_tool_call_log_context.get_turn_context_record ~cell ()
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc [("path", `String "/tmp/k-sandbox/status.json")])
+      ~output_text:"ok"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
+      ?agent_name:tctx.agent_name
+      ?lane:tctx.lane ?tool_choice:tctx.tool_choice
+      ?thinking_enabled:tctx.thinking_enabled
+      ?prompt_fingerprint:tctx.prompt_fingerprint
+      ?trace_id:tctx.trace_id ?session_id:tctx.session_id
+      ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
+      ?task_id:tctx.task_id
+      ?sandbox_profile:tctx.sandbox_profile
+      ?sandbox_root:tctx.sandbox_root
+      ?sandbox_roots:tctx.sandbox_roots
+      ?network_mode:tctx.network_mode
+      ?runtime_profile:tctx.runtime_profile
+      ();
+    let entries = read_recent () in
+    Alcotest.(check int) "one entry" 1 (List.length entries);
+    let entry = List.hd entries in
+    Alcotest.(check (option string)) "lane field"
+      (Some "tool_optional")
+      (Safe_ops.json_string_opt "lane" entry);
+    Alcotest.(check (option string)) "tool_choice field"
+      (Some "auto")
+      (Safe_ops.json_string_opt "tool_choice" entry);
+    Alcotest.(check bool) "thinking_enabled present" true
+      (match Yojson.Safe.Util.member "thinking_enabled" entry with
+       | `Bool false -> true
+       | _ -> false);
+    Alcotest.(check (option string)) "prompt_fingerprint field"
+      (Some "prompt-fp-k")
+      (Safe_ops.json_string_opt "prompt_fingerprint" entry);
+    Alcotest.(check (option string)) "trace_id field"
+      (Some "trace-k")
+      (Safe_ops.json_string_opt "trace_id" entry);
+    Alcotest.(check (option string)) "session_id field"
+      (Some "trace-k")
+      (Safe_ops.json_string_opt "session_id" entry);
+    Alcotest.(check int) "turn field" 7
+      (Safe_ops.json_int ~default:0 "turn" entry);
+    Alcotest.(check int) "keeper_turn_id field" 7
+      (Safe_ops.json_int ~default:0 "keeper_turn_id" entry);
+    Alcotest.(check (option string)) "runtime_profile field"
+      (Some "tool_use_strict")
+      (Safe_ops.json_string_opt "runtime_profile" entry);
+    Alcotest.(check (option string)) "task_id field"
+      (Some "task-runtime-trust")
+      (Safe_ops.json_string_opt "task_id" entry);
+    Alcotest.(check (option string)) "sandbox_profile field"
+      (Some "docker")
+      (Safe_ops.json_string_opt "sandbox_profile" entry);
+    Alcotest.(check (option string)) "network_mode field"
+      (Some "inherit")
+      (Safe_ops.json_string_opt "network_mode" entry);
+    let runtime_contract =
+      Yojson.Safe.Util.member "runtime_contract" entry
+    in
+    Alcotest.(check (option string)) "runtime_contract keeper"
+      (Some "k")
+      (Safe_ops.json_string_opt "keeper_name" runtime_contract);
+    (* Top level, not inside runtime_contract: that is where the readers look.
+       The dashboard's turn-actor resolver takes entry.agent_name first and
+       never descends into the contract, and no producer has ever put the name
+       there. Asserting the contract slot pinned a field nothing wrote and
+       nothing read. *)
+    Alcotest.(check (option string)) "agent_name field"
+      (Some "keeper-k-agent")
+      (Safe_ops.json_string_opt "agent_name" entry);
+    Alcotest.(check bool) "agent_name is not duplicated into runtime_contract" true
+      (match Yojson.Safe.Util.member "agent_name" runtime_contract with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check (list string)) "runtime_contract sandbox_roots"
+      ["/tmp/k-sandbox"; "/tmp/shared"]
+      Yojson.Safe.Util.(
+        runtime_contract |> member "sandbox_roots" |> to_list |> List.map to_string);
+    let path_resolution =
+      Yojson.Safe.Util.member "path_resolution" runtime_contract
+    in
+    Alcotest.(check bool)
+      "runtime contract explains Execute repo cwd path basis"
+      true
+      (String_util.contains_substring
+         Yojson.Safe.Util.(member "execute_path_basis" path_resolution |> to_string)
+         "do not repeat the cwd prefix");
+    Alcotest.(check bool)
+      "runtime contract points .masc state at task/context tools"
+      true
+      (String_util.contains_substring
+         Yojson.Safe.Util.(member "masc_state_basis" path_resolution |> to_string)
+         "Use keeper task/context tools");
+    let omits_field name =
+      match runtime_contract with
+      | `Assoc fields -> not (List.mem_assoc name fields)
+      | _ -> false
+    in
+    Alcotest.(check bool) "runtime_contract omits required_tools" true
+      (omits_field "required_tools");
+    Alcotest.(check bool) "runtime_contract omits required_tool_candidates" true
+      (omits_field "required_tool_candidates");
+    Alcotest.(check bool) "runtime_contract omits missing_required_tools" true
+      (omits_field "missing_required_tools");
+    Alcotest.(check (option string)) "runtime_contract runtime_profile"
+      (Some "tool_use_strict")
+      (Safe_ops.json_string_opt "runtime_profile" runtime_contract);
+    let action_radius = Yojson.Safe.Util.member "action_radius" entry in
+    Alcotest.(check (option string)) "action_radius tool"
+      (Some "masc_status")
+      (Safe_ops.json_string_opt "tool_name" action_radius);
+    Alcotest.(check (option string)) "action_radius target path"
+      (Some "/tmp/k-sandbox/status.json")
+      (Safe_ops.json_string_opt "target_path" action_radius);
+    Alcotest.(check bool) "action_radius carries no verdict of its own" false
+      (match action_radius with
+       | `Assoc fields -> List.mem_assoc "success" fields
+       | _ -> true);
+    Alcotest.(check (option string)) "the row's wire outcome is the verdict"
+      (Some "ok")
+      (Safe_ops.json_string_opt "wire_outcome" entry))
+
+(* RFC-0225 §3.3 regression: two runs of the SAME keeper each carry their
+   own cell — setting one must not disturb the other. Under the previous
+   keeper_name-keyed global the second set overwrote the first and the
+   first run's tool calls were logged with the second run's identity. *)
+let test_turn_context_cells_do_not_cross_runs () =
+  let cell_a = Keeper_tool_call_log.create_turn_ctx_cell () in
+  let cell_b = Keeper_tool_call_log.create_turn_ctx_cell () in
+  Keeper_tool_call_log.set_turn_context
+    ~cell:cell_a ~trace_id:"trace-a" ~keeper_turn_id:1 ();
+  Keeper_tool_call_log.set_turn_context
+    ~cell:cell_b ~trace_id:"trace-b" ~keeper_turn_id:2 ();
+  let ctx_a : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record ~cell:cell_a ()
+  in
+  let ctx_b : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record ~cell:cell_b ()
+  in
+  Alcotest.(check (option string)) "run A keeps its trace_id"
+    (Some "trace-a") ctx_a.trace_id;
+  Alcotest.(check (option int)) "run A keeps its keeper_turn_id"
+    (Some 1) ctx_a.keeper_turn_id;
+  Alcotest.(check (option string)) "run B keeps its trace_id"
+    (Some "trace-b") ctx_b.trace_id;
+  Alcotest.(check (option int)) "run B keeps its keeper_turn_id"
+    (Some 2) ctx_b.keeper_turn_id;
+  let fresh : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record
+      ~cell:(Keeper_tool_call_log.create_turn_ctx_cell ()) ()
+  in
+  Alcotest.(check (option string)) "fresh cell reads empty" None
+    fresh.trace_id
+
+let test_turn_context_fields_absent_without_context () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0 ();
+    let entries = read_recent () in
+    Alcotest.(check int) "one entry" 1 (List.length entries);
+    let entry = List.hd entries in
+    Alcotest.(check (option string)) "lane absent"
+      None
+      (Safe_ops.json_string_opt "lane" entry);
+    Alcotest.(check (option string)) "tool_choice absent"
+      None
+      (Safe_ops.json_string_opt "tool_choice" entry);
+    Alcotest.(check bool) "thinking_enabled absent" true
+      (match Yojson.Safe.Util.member "thinking_enabled" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "prompt_fingerprint absent" true
+      (match Yojson.Safe.Util.member "prompt_fingerprint" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "trace_id absent" true
+      (match Yojson.Safe.Util.member "trace_id" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "session_id absent" true
+      (match Yojson.Safe.Util.member "session_id" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "turn absent" true
+      (match Yojson.Safe.Util.member "turn" entry with
+       | `Null -> true
+       | _ -> false))
+
+(* #39035: a completed Execute keeps its route in execution evidence, which
+   the model does not read. The row stores it and route evidence reads it
+   beside the output's status. *)
+let test_execution_evidence_is_recorded_and_routes () =
+  with_tmp_log (fun () ->
+    let execution_evidence =
+      `Assoc
+        [ "shim_execution_evidence"
+        , `Assoc [ "status", `String "recorded"; "receipts", `List [] ]
+        ; "via", `String "docker"
+        ; "sandbox_profile", `String "docker"
+        ]
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"tool_execute"
+      ~input:(`Assoc [ "argv", `List [ `String "true" ] ])
+      ~output_text:
+        {|{"ok":true,"status":{"kind":"exit","code":0},"cwd":"/home/keeper/playground/omega","output":""}|}
+      ~execution_evidence
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0
+      ();
+    match read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check string)
+        "the row keeps the evidence the model did not read"
+        (Yojson.Safe.to_string execution_evidence)
+        (Yojson.Safe.Util.member "execution_evidence" entry |> Yojson.Safe.to_string);
+      let route = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "via comes from the evidence"
+        (Some "docker") (Safe_ops.json_string_opt "via" route);
+      Alcotest.(check (option string)) "sandbox_profile comes from the evidence"
+        (Some "docker") (Safe_ops.json_string_opt "sandbox_profile" route);
+      Alcotest.(check (option string)) "status still comes from the output"
+        (Some "exit")
+        (Yojson.Safe.Util.member "status" route |> Safe_ops.json_string_opt "kind")
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_execution_evidence_metadata_round_trip () =
+  Alcotest.(check (option string)) "metadata carries the evidence object"
+    (Some {|{"via":"docker"}|})
+    (Keeper_tool_call_log.execution_evidence_of_metadata
+       (Some (Keeper_tool_call_log.execution_evidence_metadata [ "via", `String "docker" ]))
+     |> Option.map Yojson.Safe.to_string);
+  Alcotest.(check bool) "metadata without the key carries none" true
+    (Option.is_none
+       (Keeper_tool_call_log.execution_evidence_of_metadata
+          (Some (`Assoc [ "masc.artifact_manifest", `Null ]))));
+  Alcotest.(check bool) "no metadata carries none" true
+    (Option.is_none (Keeper_tool_call_log.execution_evidence_of_metadata None));
+  (* A Gate-authorized Execute keeps its producer metadata under "producer"
+     (Keeper_gate.authorization_metadata); the reader must look there. *)
+  Alcotest.(check (option string)) "evidence under a Gate authorization is found"
+    (Some {|{"via":"docker"}|})
+    (Keeper_tool_call_log.execution_evidence_of_metadata
+       (Some
+          (`Assoc
+              [ "gate", `Assoc [ "decision", `String "allow" ]
+              ; ( "producer"
+                , Keeper_tool_call_log.execution_evidence_metadata
+                    [ "via", `String "docker" ] )
+              ]))
+     |> Option.map Yojson.Safe.to_string)
+
+let test_route_evidence_stored_for_git_push () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"tool_execute"
+      ~input:
+        (`Assoc
+           [
+             ( "argv",
+               `List
+                 [
+                   `String "git";
+                   `String "push";
+                   `String "-u";
+                   `String "origin";
+                   `String "keeper/executor-direct-clone-pr-proof-20260506-1039";
+                 ] );
+             ( "cwd",
+               `String "repos/masc-keeper-direct-proof-20260506-1039" );
+           ])
+      ~output_text:
+        {|{"ok":true,"via":"docker","cwd":"repos/masc-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:42.0
+      ();
+    let entries = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "tool name"
+        (Some "tool_execute")
+        (Safe_ops.json_string_opt "tool_name" evidence);
+      Alcotest.(check (option string)) "descriptor id"
+        (Some "agent.execute")
+        (Safe_ops.json_string_opt "descriptor_id" evidence);
+      Alcotest.(check (option string)) "public name"
+        (Some "Execute")
+        (Safe_ops.json_string_opt "public_name" evidence);
+      Alcotest.(check (option string)) "canonical name"
+        (Some "tool_execute")
+        (Safe_ops.json_string_opt "canonical_name" evidence);
+      Alcotest.(check (option string)) "command captured"
+        (Some "[REDACTED]")
+        (Safe_ops.json_string_opt "command" evidence);
+      Alcotest.(check (option string)) "cwd captured"
+        (Some "[REDACTED]")
+        (Safe_ops.json_string_opt "cwd" evidence);
+      Alcotest.(check (option string)) "via captured"
+        (Some "docker")
+        (Safe_ops.json_string_opt "via" evidence);
+      Alcotest.(check (option string)) "sandbox profile captured"
+        (Some "docker")
+        (Safe_ops.json_string_opt "sandbox_profile" evidence);
+      Alcotest.(check (option string)) "network mode captured"
+        (Some "bridge")
+        (Safe_ops.json_string_opt "network_mode" evidence);
+      let status = Yojson.Safe.Util.member "status" evidence in
+      Alcotest.(check (option string)) "status label"
+        (Some "success")
+        (Safe_ops.json_string_opt "label" status)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_route_evidence_stored_for_blob_backed_git_push () =
+  with_tmp_log (fun () ->
+    let marker =
+      Tool_output.encode_for_agent_core
+        (Tool_output.Stored
+           (artifact_ref_exn
+              ~sha256:(String.make 64 'b')
+              ~bytes:8192
+              ~mime:"application/json"
+              ~preview:{|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}))
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"tool_execute"
+      ~input:
+        (`Assoc
+           [
+             ( "argv",
+               `List
+                 [
+                   `String "git";
+                   `String "push";
+                   `String "-u";
+                   `String "origin";
+                   `String "keeper/large-route-proof";
+                 ] );
+             ("cwd", `String "repos/masc-keeper-direct-proof");
+           ])
+      ~output_text:marker
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:42.0
+      ();
+    let entries = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "via captured from blob preview"
+        (Some "docker")
+        (Safe_ops.json_string_opt "via" evidence);
+      Alcotest.(check (option string)) "network mode captured"
+        (Some "bridge")
+        (Safe_ops.json_string_opt "network_mode" evidence);
+      let status = Yojson.Safe.Util.member "status" evidence in
+      Alcotest.(check (option string)) "status label captured"
+        (Some "success")
+        (Safe_ops.json_string_opt "label" status);
+      Alcotest.(check (option string)) "command captured"
+        (Some "[REDACTED]")
+        (Safe_ops.json_string_opt "command" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_route_evidence_redacts_wrapped_git_push () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"tool_execute"
+      ~input:
+        (`Assoc
+           [
+             ( "cmd",
+               `String
+                 "env FOO=bar git -C repos/private-worktree push origin feature/private-proof"
+             );
+           ])
+      ~output_text:
+        {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:42.0
+      ();
+    let entries = read_recent ~n:1 () in
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "wrapped command redacted"
+        (Some "[REDACTED]")
+        (Safe_ops.json_string_opt "command" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_route_evidence_command_redaction_fails_closed () =
+  let commands =
+    [
+      "git push --repo /Users/worker/private origin feature/private-proof";
+      "git push --repo=/Users/worker/private origin feature/private-proof";
+      "git -c safe.directory=/Users/worker/private push origin feature/private-proof";
+      "env FOO=bar git push origin 'feature/private proof'";
+    ]
+  in
+  List.iter
+    (fun command ->
+       with_tmp_log (fun () ->
+         Keeper_tool_call_log.log_call
+           ~keeper_name:"omega"
+           ~tool_name:"tool_execute"
+           ~input:(`Assoc [ ("cmd", `String command) ])
+           ~output_text:
+             {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+           ~wire_outcome:Tool_result.Ok
+           ~duration_ms:42.0
+           ();
+         match read_recent ~n:1 () with
+         | [ entry ] ->
+           let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+           Alcotest.(check (option string))
+             "command is fail-closed"
+             (Some "[REDACTED]")
+             (Safe_ops.json_string_opt "command" evidence);
+           let evidence_text = Yojson.Safe.to_string evidence in
+           Alcotest.(check bool)
+             "absolute path is absent"
+             false
+             (String_util.contains_substring evidence_text "/Users/worker");
+           Alcotest.(check bool)
+             "private branch marker is absent"
+             false
+             (String_util.contains_substring evidence_text "private-proof")
+           ;
+           Alcotest.(check bool)
+             "quoted private branch marker is absent"
+             false
+             (String_util.contains_substring evidence_text "private proof")
+         | _ -> Alcotest.fail "expected exactly one entry"))
+    commands
+;;
+
+let test_route_evidence_records_descriptor_for_filesystem_calls () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"Read"
+      ~input:(`Assoc [ ("file_path", `String "README.md") ])
+      ~output_text:"file contents"
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:4.0
+      ();
+    let entries = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "tool name"
+        (Some "Read")
+        (Safe_ops.json_string_opt "tool_name" evidence);
+      Alcotest.(check (option string)) "descriptor id"
+        (Some "agent.read_file")
+        (Safe_ops.json_string_opt "descriptor_id" evidence);
+      Alcotest.(check (option string)) "public name"
+        (Some "Read")
+        (Safe_ops.json_string_opt "public_name" evidence);
+      Alcotest.(check (option string)) "canonical name"
+        (Some "tool_read_file")
+        (Safe_ops.json_string_opt "canonical_name" evidence);
+      Alcotest.(check (option string)) "executor"
+        (Some "filesystem")
+        (Safe_ops.json_string_opt "executor" evidence);
+      Alcotest.(check (option string)) "backend"
+        (Some "sandbox_process")
+        (Safe_ops.json_string_opt "backend" evidence);
+      Alcotest.(check (option string)) "sandbox"
+        (Some "backend_selected")
+        (Safe_ops.json_string_opt "sandbox" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_route_evidence_records_internal_descriptor () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"keeper_lane_status"
+      ~input:(`Assoc [])
+      ~output_text:
+        {|{"profile":"docker","lane":null,"endpoint":null,"operator_action":null}|}
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0
+      ();
+    let entries = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "tool name"
+        (Some "keeper_lane_status")
+        (Safe_ops.json_string_opt "tool_name" evidence);
+      Alcotest.(check (option string)) "descriptor id"
+        (Some "keeper.lane.status")
+        (Safe_ops.json_string_opt "descriptor_id" evidence);
+      Alcotest.(check (option string)) "public name"
+        (Some "keeper_lane_status")
+        (Safe_ops.json_string_opt "public_name" evidence);
+      Alcotest.(check (option string)) "canonical name"
+        (Some "keeper_lane_status")
+        (Safe_ops.json_string_opt "canonical_name" evidence);
+      Alcotest.(check (option string)) "executor"
+        (Some "in_process")
+        (Safe_ops.json_string_opt "executor" evidence);
+      Alcotest.(check (option string)) "backend"
+        (Some "ocaml_runtime")
+        (Safe_ops.json_string_opt "backend" evidence);
+      Alcotest.(check (option string)) "sandbox"
+        (Some "none")
+        (Safe_ops.json_string_opt "sandbox" evidence);
+      Alcotest.(check (option string)) "runtime handler"
+        (Some "tool_lane_status")
+        (Safe_ops.json_string_opt "runtime_handler" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_route_evidence_records_masc_board_descriptor () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"mcp__masc__masc_board_post"
+      ~input:(`Assoc [ "body", `String "descriptor evidence test" ])
+      ~output_text:{|{"ok":true,"post_id":"post-1"}|}
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:2.0
+      ();
+    let entries = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "tool name"
+        (Some "mcp__masc__masc_board_post")
+        (Safe_ops.json_string_opt "tool_name" evidence);
+      Alcotest.(check (option string)) "descriptor id"
+        (Some "masc.board.post")
+        (Safe_ops.json_string_opt "descriptor_id" evidence);
+      Alcotest.(check (option string)) "public name"
+        (Some "masc_board_post")
+        (Safe_ops.json_string_opt "public_name" evidence);
+      Alcotest.(check (option string)) "canonical name"
+        (Some "masc_board_post")
+        (Safe_ops.json_string_opt "canonical_name" evidence);
+      Alcotest.(check (option string)) "executor"
+        (Some "in_process")
+        (Safe_ops.json_string_opt "executor" evidence);
+      Alcotest.(check (option string)) "runtime handler"
+        (Some "tool_board_dispatch")
+        (Safe_ops.json_string_opt "runtime_handler" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let route_evidence_for_tool tool_name =
+  match
+    Keeper_tool_call_log.route_evidence_json_of_tool_io
+      ~tool_name
+      ~input:(`Assoc [])
+      ~output_text:"{}"
+      ~execution_evidence:None
+  with
+  | Some evidence -> evidence
+  | None -> Alcotest.failf "missing route evidence for %s" tool_name
+;;
+
+let check_eval_tags tool_name expected =
+  let evidence = route_evidence_for_tool tool_name in
+  Alcotest.(check (list string))
+    (tool_name ^ " eval tags")
+    expected
+    (Safe_ops.json_string_list "eval_tags" evidence)
+;;
+
+let test_route_evidence_records_descriptor_eval_tags () =
+  check_eval_tags "keeper_tools_list" [ "capability_introspection" ];
+  check_eval_tags "keeper_surface_read" [ "surface_context_read" ];
+  check_eval_tags "masc_agent_card" [ "agent_profile_lookup" ];
+  check_eval_tags "keeper_lane_status" []
+;;
+
+let test_non_object_input_still_logs_action_radius () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"tool_write_file"
+      ~input:(`String "raw pre-tool gate payload")
+      ~output_text:"gate_waiting_for_operator"
+      ~wire_outcome:Tool_result.Error
+      ~duration_ms:3.0
+      ();
+    let entries = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let action_radius = Yojson.Safe.Util.member "action_radius" entry in
+      Alcotest.(check (option string)) "action key falls back to tool"
+        (Some "tool_write_file")
+        (Safe_ops.json_string_opt "action_key" action_radius);
+      Alcotest.(check (option string)) "target kind falls back to tool"
+        (Some "tool")
+        (Safe_ops.json_string_opt "target_kind" action_radius);
+      Alcotest.(check bool) "input preserved as string" true
+        (match Yojson.Safe.Util.member "input" entry with
+         | `String "raw pre-tool gate payload" -> true
+         | _ -> false)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let find_bucket name json =
+  json
+  |> Yojson.Safe.Util.to_list
+  |> List.find (fun item ->
+         Safe_ops.json_string_opt "name" item = Some name)
+
+let test_dashboard_aggregate_groups_runtime_fields () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k1" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
+      ~model:"glm-5.1" ~lane:"tool_optional"
+      ~tool_choice:"auto"
+      ~thinking_enabled:false
+      ~runtime_profile:"primary" ();
+    let failure_output = "error: {\"ok\":false,\"error\":\"boom\"}" in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k2" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:failure_output
+      ~result_bytes:(String.length failure_output)
+      ~wire_outcome:Tool_result.Error ~duration_ms:3.0
+      ~model:"qwen3.5-27b-unified" ~lane:"retry"
+      ~tool_choice:"auto"
+      ~thinking_enabled:true
+      ~runtime_profile:"local_qwen3_27b_only" ();
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check (option string)) "sampling mode present"
+      (Some "recent_n")
+      (Safe_ops.json_string_opt "sampling_mode" summary);
+    Alcotest.(check int) "sample limit echoed" 10
+      (Safe_ops.json_int ~default:0 "sample_limit" summary);
+    Alcotest.(check (option string)) "dashboard source"
+      (Some "tool_call_io")
+      (Safe_ops.json_string_opt "source" summary);
+    Alcotest.(check (option string)) "dashboard producer"
+      (Some "keeper_hooks_agent_core|mcp_server_eio_call_tool")
+      (Safe_ops.json_string_opt "producer" summary);
+    Alcotest.(check (option string)) "dashboard surface"
+      (Some "/api/v1/dashboard/tool-quality")
+      (Safe_ops.json_string_opt "dashboard_surface" summary);
+    Alcotest.(check bool) "dashboard durable store present" true
+      (Safe_ops.json_string ~default:"" "durable_store" summary <> "");
+    Alcotest.(check int) "source entry count" 2
+      (Safe_ops.json_int ~default:0 "entry_count" summary);
+    Alcotest.(check bool) "source store exists" true
+      (Safe_ops.json_bool ~default:false "exists" summary);
+    Alcotest.(check (option string)) "source health ok"
+      (Some "ok")
+      (Safe_ops.json_string_opt "health" summary);
+    Alcotest.(check bool) "latest age present" true
+      (Safe_ops.json_float_opt "latest_age_s" summary |> Option.is_some);
+    let by_model = Yojson.Safe.Util.member "by_model" summary in
+    let by_runtime = Yojson.Safe.Util.member "by_runtime" summary in
+    let by_lane = Yojson.Safe.Util.member "by_lane" summary in
+    let by_thinking = Yojson.Safe.Util.member "by_thinking_mode" summary in
+    let by_tool_choice = Yojson.Safe.Util.member "by_tool_choice" summary in
+    let runtime_bucket = find_bucket "runtime" by_model in
+    let primary_runtime_bucket = find_bucket "primary" by_runtime in
+    let local_runtime_bucket = find_bucket "local_qwen3_27b_only" by_runtime in
+    let retry_bucket = find_bucket "retry" by_lane in
+    let enabled_bucket = find_bucket "enabled" by_thinking in
+    let auto_bucket = find_bucket "auto" by_tool_choice in
+    Alcotest.(check int) "runtime bucket calls" 2
+      (Safe_ops.json_int ~default:0 "calls" runtime_bucket);
+    Alcotest.(check int) "primary runtime bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" primary_runtime_bucket);
+    Alcotest.(check int) "local runtime bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" local_runtime_bucket);
+    Alcotest.(check int) "retry bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" retry_bucket);
+    Alcotest.(check int) "enabled thinking calls" 1
+      (Safe_ops.json_int ~default:0 "calls" enabled_bucket);
+    Alcotest.(check int) "auto tool_choice calls" 2
+      (Safe_ops.json_int ~default:0 "calls" auto_bucket))
+
+let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k-missing-runtime"
+      ~tool_name:"masc_status"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~result_bytes:2
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0
+      ();
+    let summary = aggregate ~n:10 () in
+    let by_runtime = Yojson.Safe.Util.member "by_runtime" summary in
+    let unknown_bucket =
+      find_bucket Dashboard_http_tool_quality.unknown_runtime_profile_bucket by_runtime
+    in
+    Alcotest.(check int)
+      "missing runtime profile goes to unknown bucket"
+      1
+      (Safe_ops.json_int ~default:0 "calls" unknown_bucket))
+
+let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
+  with_tmp_log (fun () ->
+    let result =
+      Tool_result.make_deferred
+        ~tool_name:"keeper_wait"
+        ~start_time:(Tool_timing.start ())
+        ~data:(`Assoc [ "reason", `String "external_effect_pending" ])
+        ()
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k-deferred"
+      ~tool_name:"keeper_wait"
+      ~input:(`Assoc [])
+      ~output_text:(Tool_result.message result)
+      ~result_bytes:(String.length (Tool_result.message result))
+      ~wire_outcome:Tool_result.Unknown
+      ~duration_ms:(Tool_result.duration_ms result)
+      ~typed_result:result
+      ();
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int)
+      "deferred remains visible as typed neutral outcome"
+      1
+      (Safe_ops.json_int ~default:0 "deferred" summary);
+    Alcotest.(check int)
+      "deferred excluded from settled quality total"
+      0
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int)
+      "deferred is not a failure"
+      0
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    Alcotest.(check bool)
+      "deferred is absent from settled per-tool rates"
+      true
+      Yojson.Safe.Util.(member "by_tool" summary |> to_list |> List.is_empty))
+
+let test_dashboard_aggregate_separates_unsettled_from_malformed () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    let row fields =
+      `Assoc
+        ([ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "pending")
+         ; ("result_bytes", `Int 7)
+         ; ("duration_ms", `Float 2.0)
+         ]
+         @ fields)
+    in
+    Dated_jsonl.append store (row [ "wire_outcome", `String "unknown" ]);
+    Dated_jsonl.append store (row []);
+    Dated_jsonl.append store (row [ "disposition", `String "future_state" ]);
+    Dated_jsonl.append store
+      (`Assoc
+         [ "ts", `Float (Unix.gettimeofday ())
+         ; "record_kind", `String "lifecycle_event"
+         ; "keeper", `String "k"
+         ; "tool", `String "vision_candidate"
+         ; "wire_outcome", `String "unknown"
+         ]);
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "known unknown wire outcomes stay readable" 2
+      (Safe_ops.json_int ~default:(-1) "unsettled" summary);
+    Alcotest.(check int) "unknown disposition token is malformed" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "unsettled rows stay out of settled total" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
+
+(* A composition writes one [tool_call] row per step and one [composition_run]
+   summary row for the whole run. The summary is not another call: counting it
+   read one composition as its step count plus one calls, and its success as
+   one more settled invocation (#38687). *)
+let test_dashboard_aggregate_does_not_count_the_composition_summary () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    let row ~record_kind ~tool ~wire_outcome =
+      `Assoc
+        [ ("ts", `Float (Unix.gettimeofday ()))
+        ; ("record_kind", `String record_kind)
+        ; ("keeper", `String "k")
+        ; ("tool", `String tool)
+        ; ("input", `Assoc [])
+        ; ("output", `String "ok")
+        ; ("result_bytes", `Int 2)
+        ; ("wire_outcome", `String wire_outcome)
+        ; ("duration_ms", `Float 2.0)
+        ]
+    in
+    Dated_jsonl.append store
+      (row ~record_kind:"tool_call" ~tool:"step_one" ~wire_outcome:"ok");
+    Dated_jsonl.append store
+      (row ~record_kind:"tool_call" ~tool:"step_two" ~wire_outcome:"error");
+    Dated_jsonl.append store
+      (row ~record_kind:"composition_run" ~tool:"keeper_tool_composition"
+         ~wire_outcome:"ok");
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "the two steps are the calls" 2
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int) "only a step's success counts" 1
+      (Safe_ops.json_int ~default:(-1) "success" summary);
+    Alcotest.(check int) "the summary is not malformed" 0
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    let tools =
+      Yojson.Safe.Util.(member "by_tool" summary |> to_list)
+      |> List.filter_map (Safe_ops.json_string_opt "name")
+      |> List.sort String.compare
+    in
+    Alcotest.(check (list string)) "the summary row is not a tool's call"
+      [ "step_one"; "step_two" ] tools)
+
+let test_dashboard_aggregate_names_an_unknown_record_kind_malformed () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("record_kind", `String "composition_runs")
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
+         ; ("wire_outcome", `String "ok")
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "a record kind nothing writes is malformed" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "and enters no total" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
+
+let test_dashboard_hourly_trend_numeric_ts () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    let ts = 1_710_000_000 in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Int ts)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
+         ; ("wire_outcome", `String "ok")
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    let expected_hour =
+      let tm = Unix.gmtime (Float.of_int ts) in
+      Printf.sprintf "%04d-%02d-%02dT%02d"
+        (tm.Unix.tm_year + 1900)
+        (tm.Unix.tm_mon + 1)
+        tm.Unix.tm_mday
+        tm.Unix.tm_hour
+    in
+    let hourly =
+      aggregate ~n:10 ()
+      |> Yojson.Safe.Util.member "hourly_trend"
+      |> Yojson.Safe.Util.to_list
+    in
+    let bucket =
+      List.find (fun item ->
+        Safe_ops.json_string_opt "hour" item = Some expected_hour
+      ) hourly
+    in
+    Alcotest.(check int) "hour bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" bucket);
+    Alcotest.(check int) "hour bucket success" 1
+      (Safe_ops.json_int ~default:0 "success" bucket))
+
+let test_dashboard_aggregate_window_hours () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    let now = Unix.gettimeofday () in
+    let inside = now -. (30.0 *. 60.0) in
+    let outside = now -. (48.0 *. 3600.0) in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float inside)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
+         ; ("wire_outcome", `String "ok")
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float outside)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "error: {\"ok\":false,\"error\":\"stale\"}")
+         ; ("result_bytes", `Int 35)
+         ; ("wire_outcome", `String "error")
+         ; ("duration_ms", `Float 5.0)
+         ]);
+    List.iter (fun (window_hours, total) ->
+      let summary = aggregate ~n:1 ~window_hours () in
+      Alcotest.(check (option string)) "window sampling mode"
+        (Some "window_hours") (Safe_ops.json_string_opt "sampling_mode" summary);
+      Alcotest.(check int) "window retains the matching rows without a recent cap" total
+        (Safe_ops.json_int ~default:0 "total" summary);
+      Alcotest.(check (option int)) "sample limit omitted" None
+        (Safe_ops.json_int_opt "sample_limit" summary);
+      Alcotest.(check (option (float 0.0001))) "direct windows are not route-clamped"
+        (Some window_hours) (Safe_ops.json_float_opt "window_hours" summary))
+      [0.01, 0; 24., 1; 200., 2])
+
+let test_dashboard_aggregate_drops_rows_without_result_bytes () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    let now = Unix.gettimeofday () in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float now)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
+         ; ("wire_outcome", `String "ok")
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    (* No [result_bytes]: an inline output string must not stand in for it. *)
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float now)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "error: {\"ok\":false,\"error\":\"boom\"}")
+         ; ("wire_outcome", `String "error")
+         ; ("duration_ms", `Float 5.0)
+         ]);
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "malformed row counted" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "malformed row excluded from total" 1
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int) "malformed row excluded from failures" 0
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    let masc_status =
+      find_bucket "masc_status" (Yojson.Safe.Util.member "by_tool" summary)
+    in
+    Alcotest.(check int) "malformed row excluded from per-tool calls" 1
+      (Safe_ops.json_int ~default:(-1) "calls" masc_status);
+    Alcotest.(check bool) "malformed row excluded from failure categories" true
+      Yojson.Safe.Util.(member "failure_categories" summary |> to_list |> List.is_empty))
+
+let test_dashboard_aggregate_only_malformed_rows_is_empty_summary () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("wire_outcome", `String "ok")
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "malformed row counted" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "nothing aggregated" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
+
+let test_append_failure_records_coverage_gap () =
+  with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
+      ~trace_id:"trace-gap" ();
+    let gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:10 in
+    Alcotest.(check int) "one coverage gap" 1 (List.length gaps);
+    match gaps with
+    | [ gap ] ->
+      Alcotest.(check (option string)) "coverage source"
+        (Some "tool_call_io")
+        (Safe_ops.json_string_opt "source" gap);
+      Alcotest.(check (option string)) "coverage stale reason"
+        (Some "tool_call_io_append_failed")
+        (Safe_ops.json_string_opt "stale_reason" gap);
+      Alcotest.(check (option string)) "coverage keeper"
+        (Some "k")
+        (Safe_ops.json_string_opt "keeper_name" gap);
+      Alcotest.(check (option string)) "coverage trace"
+        (Some "trace-gap")
+      (Safe_ops.json_string_opt "trace_id" gap)
+    | _ -> Alcotest.fail "expected exactly one coverage gap")
+
+let test_dashboard_aggregate_surfaces_coverage_gap () =
+  with_tmp_log_dir (fun dir ->
+    let masc_root = Filename.concat dir ".masc" in
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"tool_call_io"
+      ~producer:"keeper_hooks_agent_core"
+      ~durable_store:(Filename.concat masc_root "tool_calls")
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+      ~stale_reason:"tool_call_io_append_failed"
+      ~keeper_name:"k"
+      ~trace_id:"trace-gap"
+      ();
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check (option string)) "coverage gap health"
+      (Some "coverage_gap")
+      (Safe_ops.json_string_opt "health" summary);
+    Alcotest.(check (option string)) "coverage gap stale reason"
+      (Some "tool_call_io_append_failed")
+      (Safe_ops.json_string_opt "stale_reason" summary);
+    Alcotest.(check int) "coverage gap count" 1
+      (Safe_ops.json_int ~default:0 "coverage_gap_count" summary))
+
+let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
+  with_tmp_log_dir (fun dir ->
+    let masc_root = Filename.concat dir ".masc" in
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"tool_call_io"
+      ~producer:"keeper_hooks_agent_core"
+      ~durable_store:(Filename.concat masc_root "tool_calls")
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+      ~stale_reason:"tool_call_io_append_failed"
+      ~keeper_name:"k"
+      ~trace_id:"trace-gap"
+      ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
+      ~trace_id:"trace-recovered" ();
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check (option string)) "recovered gap health"
+      (Some "ok")
+      (Safe_ops.json_string_opt "health" summary);
+    Alcotest.(check (option string)) "recovered gap stale reason cleared"
+      None
+      (Safe_ops.json_string_opt "stale_reason" summary);
+    Alcotest.(check int) "historical gap count" 1
+      (Safe_ops.json_int ~default:0 "coverage_gap_count" summary);
+    Alcotest.(check int) "active gap count" 0
+      (Safe_ops.json_int ~default:(-1) "active_coverage_gap_count" summary))
+
+(* ── UTF-8 sanitization ────────────────────────────── *)
+
+(* Regression guard: tool output may contain invalid UTF-8 bytes from
+   subprocess captures or truncated multi-byte sequences. Without the
+   writer-side sanitize, Python / dashboard readers fail to decode the
+   entire JSONL file and silently drop rows. *)
+let test_output_invalid_utf8_sanitized () =
+  with_tmp_log_dir (fun dir ->
+    Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+    let raw_output = "prefix\xecsuffix" in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_bin"
+      ~input:(`Assoc []) ~output_text:raw_output
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let results = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length results);
+    let today =
+      let open Unix in
+      let tm = gmtime (gettimeofday ()) in
+      Printf.sprintf "%04d-%02d/%02d.jsonl"
+        (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+    in
+    let file =
+      Filename.concat dir (Filename.concat ".masc/tool_calls" today)
+    in
+    let contents =
+      let ic = open_in_bin file in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let n = in_channel_length ic in
+        really_input_string ic n)
+    in
+    let len = String.length contents in
+    let rec scan i =
+      if i >= len then true
+      else
+        let dec = String.get_utf_8_uchar contents i in
+        let dlen = Uchar.utf_decode_length dec in
+        if dlen > 0 && Uchar.utf_decode_is_valid dec then scan (i + dlen)
+        else false
+    in
+    Alcotest.(check bool) "persisted file is valid UTF-8" true (scan 0);
+    let repair_stats = Safe_ops.persistence_utf8_repair_stats () in
+    Alcotest.(check int)
+      "writer-side tool output parsing does not emit persistence repair"
+      0
+      repair_stats.repaired_reads)
+
+let test_output_valid_utf8_untouched () =
+  with_tmp_log (fun () ->
+    let korean = "한글 메시지" in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_ok"
+      ~input:(`Assoc []) ~output_text:korean
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let results = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length results);
+    match results with
+    | [ json ] ->
+        let output = Safe_ops.json_string ~default:"" "output" json in
+        Alcotest.(check string) "valid UTF-8 preserved verbatim" korean output
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+(* When the tool output is the OCaml [%S]-quoted [masc:blob ...] marker
+   produced by Tool_output.encode_for_agent_core, the persisted record must
+   normalize it into a structured _blob object so that telemetry readers
+   (UI, jq scripts) see a clean JSON shape instead of doubly-escaped
+   string fields. *)
+let test_output_blob_marker_normalized () =
+  with_tmp_log (fun () ->
+    let marker =
+      Tool_output.encode_for_agent_core
+        (Tool_output.Stored
+           (artifact_ref_exn
+              ~sha256:(String.make 64 'a')
+              ~bytes:6436
+              ~mime:"text/plain"
+              ~preview:"{\"ok\":true,\"result\":\"42\"}"))
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_blob"
+      ~input:(`Assoc []) ~output_text:marker
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let results = read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length results);
+    match results with
+    | [ json ] ->
+      let output =
+        match json with
+        | `Assoc fields -> List.assoc_opt "output" fields
+        | _ -> None
+      in
+      (match output with
+       | Some (`Assoc [("_blob", `Assoc blob)]) ->
+         let sha = Safe_ops.json_string ~default:"" "sha256" (`Assoc blob) in
+         let bytes = Safe_ops.json_int ~default:0 "bytes" (`Assoc blob) in
+         let mime = Safe_ops.json_string ~default:"" "mime" (`Assoc blob) in
+         let preview = Safe_ops.json_string ~default:"" "preview" (`Assoc blob) in
+         Alcotest.(check string) "sha256 round-trips" (String.make 64 'a') sha;
+         Alcotest.(check int) "bytes round-trips" 6436 bytes;
+         Alcotest.(check string) "mime round-trips" "text/plain" mime;
+         Alcotest.(check string) "preview round-trips"
+           "{\"ok\":true,\"result\":\"42\"}" preview
+       | Some (`String s) ->
+         Alcotest.failf "expected normalized _blob object, got string: %s" s
+       | _ -> Alcotest.fail "missing/unexpected output field")
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+(* Inline outputs (below the externalization threshold) must stay as
+   plain JSON strings so legacy jq pipelines and the UI's string-render
+   path keep working. *)
+let test_output_inline_string_preserved () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_inline"
+      ~input:(`Assoc []) ~output_text:"small inline result"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let results = read_recent ~n:1 () in
+    match results with
+    | [ json ] ->
+      let s = Safe_ops.json_string ~default:"" "output" json in
+      Alcotest.(check string) "inline output stays a string"
+        "small inline result" s
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+(* A tool result that carries a URL and, in a later member, an e-mail address
+   (a GitHub PR, a git log, a Slack message) must be stored as JSON the TUI
+   can parse (#37804). Scanning the serialized text for URL credentials matched
+   from the URL's [://] to the address's [@] and replaced the quotes and commas
+   between them. The credential inside a single string is still redacted. *)
+let test_output_json_with_url_and_address_stays_json () =
+  let doc ~padding =
+    `Assoc
+      [ ("html_url", `String "https://github.com/jeong-sik/masc/pull/1")
+      ; ("authors", `List [ `String "dev@example.com" ])
+      ; ("remote", `String "https://bot:hunter2@example.com/repo.git")
+      ; ("body", `String padding)
+      ]
+    |> Yojson.Safe.to_string
+  in
+  List.iter
+    (fun (label, padding) ->
+      with_tmp_log (fun () ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:"k" ~tool_name:"tool_github"
+          ~input:(`Assoc []) ~output_text:(doc ~padding)
+          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+        match read_recent ~n:1 () with
+        | [ row ] ->
+          let stored = Safe_ops.json_string ~default:"" "output" row in
+          (match Yojson.Safe.from_string stored with
+           | `Assoc fields ->
+             Alcotest.(check (option string)) (label ^ ": url member kept")
+               (Some "https://github.com/jeong-sik/masc/pull/1")
+               (match List.assoc_opt "html_url" fields with
+                | Some (`String s) -> Some s
+                | _ -> None);
+             Alcotest.(check bool) (label ^ ": address member kept") true
+               (List.mem_assoc "authors" fields)
+           | _ -> Alcotest.fail (label ^ ": stored output is not an object")
+           | exception Yojson.Json_error e ->
+             Alcotest.fail (label ^ ": stored output is not JSON: " ^ e));
+          Alcotest.(check bool) (label ^ ": credential redacted") false
+            (String_util.contains_substring stored "hunter2")
+        | _ -> Alcotest.fail "expected exactly one entry"))
+    [ ("within the budget", "short"); ("over the budget", String.make 5000 'x') ]
+
+(* A credential outside the string values of a JSON output is still
+   redacted: in an object key (a map keyed by URL), and in a comment, which
+   the JSON parser accepts and drops, so it never reaches the tree. The stored
+   value is the redacted document serialized again, not the input text. *)
+let test_output_json_credential_in_key_or_comment_redacted () =
+  List.iter
+    (fun (label, output_text) ->
+      with_tmp_log (fun () ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:"k" ~tool_name:"tool_config"
+          ~input:(`Assoc []) ~output_text
+          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+        match read_recent ~n:1 () with
+        | [ row ] ->
+          let stored = Safe_ops.json_string ~default:"" "output" row in
+          Alcotest.(check bool) (label ^ ": credential redacted") false
+            (String_util.contains_substring stored "bot:pw")
+        | _ -> Alcotest.fail "expected exactly one entry"))
+    [ ("comment", "// see https://bot:pw@git.example.com\n{\"a\":1}")
+    ; ("key within the budget", {|{"https://bot:pw@x":1}|})
+    ; ( "key over the budget"
+      , Yojson.Safe.to_string
+          (`Assoc
+            [ ("https://bot:pw@x", `Int 1)
+            ; ("body", `String (String.make 5000 'x'))
+            ]) )
+    ]
+
+let test_output_preview_derives_truncation_metadata () =
+  with_tmp_log (fun () ->
+    let output_text = String.make 5000 'x' in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k"
+      ~tool_name:"tool_large"
+      ~input:(`Assoc [])
+      ~output_text
+      ~result_bytes:(String.length output_text)
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0
+      ();
+    match read_recent ~n:1 () with
+    | [ `Assoc fields ] ->
+      Alcotest.(check (option int))
+        "producer bytes retained"
+        (Some 5000)
+        (List.assoc_opt "result_bytes" fields |> Option.map Yojson.Safe.Util.to_int);
+      Alcotest.(check (option int))
+        "log preview clamp is explicit"
+        (Some 4000)
+        (List.assoc_opt "truncated_to" fields |> Option.map Yojson.Safe.Util.to_int)
+    | _ -> Alcotest.fail "expected exactly one object entry")
+
+(* A file target and a working directory are both strings. Reported as the
+   same target_kind, a consumer reading "path" as "a file" opened a directory:
+   1,094 of 2026-08-18's 1,323 Execute rows carried a cwd that way (#29013). *)
+let test_action_radius_tells_a_file_from_a_directory () =
+  with_tmp_log (fun () ->
+    let radius_of_input input =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"k" ~tool_name:"probe" ~input ~output_text:"ok"
+        ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+      match read_recent ~n:1 () with
+      | [ json ] ->
+        let radius =
+          match json with
+          | `Assoc fields ->
+            Option.value (List.assoc_opt "action_radius" fields) ~default:`Null
+          | _ -> `Null
+        in
+        ( Safe_ops.json_string ~default:"" "target_kind" radius
+        , Safe_ops.json_string ~default:"" "target_path" radius )
+      | _ -> Alcotest.fail "expected exactly one entry"
+    in
+    Alcotest.(check (pair string string))
+      "file_path is a file target"
+      ("path", "lib/keeper/keeper_tool_call_log.ml")
+      (radius_of_input
+         (`Assoc [ "file_path", `String "lib/keeper/keeper_tool_call_log.ml" ]));
+    Alcotest.(check (pair string string))
+      "cwd is a directory target"
+      ("directory", "repos/masc")
+      (radius_of_input (`Assoc [ "cwd", `String "repos/masc" ]));
+    Alcotest.(check (pair string string))
+      "repo_path is a directory target"
+      ("directory", "repos/masc")
+      (radius_of_input (`Assoc [ "repo_path", `String "repos/masc" ]));
+    (* An explicit declaration still wins over the key it was found under. *)
+    Alcotest.(check (pair string string))
+      "declared target_kind is not overridden"
+      ("workspace", "repos/masc")
+      (radius_of_input
+         (`Assoc
+            [ "cwd", `String "repos/masc"; "target_kind", `String "workspace" ])))
+;;
+
+let test_string_input_keeps_action_radius () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_large_input"
+      ~input:(`String "{\"action\":\"write\"}")
+      ~output_text:"ok"
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+    let results = read_recent ~n:1 () in
+    match results with
+    | [ json ] ->
+      let action_radius =
+        match json with
+        | `Assoc fields ->
+          Option.value (List.assoc_opt "action_radius" fields) ~default:`Null
+        | _ -> `Null
+      in
+      let action_key =
+        Safe_ops.json_string ~default:"" "action_key" action_radius
+      in
+      let target_kind =
+        Safe_ops.json_string ~default:"" "target_kind" action_radius
+      in
+      Alcotest.(check string)
+        "falls back when input is not a JSON object"
+        "tool_large_input"
+        action_key;
+      Alcotest.(check string) "non-object input has tool target" "tool" target_kind
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_async_append_defers_until_flush env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw
+        ~clock:(Eio.Stdenv.clock env);
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"async-k"
+        ~tool_name:"masc_status"
+        ~input:(`Assoc [])
+        ~output_text:"ok"
+        ~wire_outcome:Tool_result.Ok
+        ~duration_ms:1.0
+        ();
+      Alcotest.(check int)
+        "record queued before background flush"
+        1
+        (Keeper_tool_call_log.queued_count_for_testing ());
+      Alcotest.(check int)
+        "queued record not visible before explicit flush"
+        0
+        (List.length (read_recent ~n:1 ()));
+      Keeper_tool_call_log.flush_now ();
+      Alcotest.(check int)
+        "queue drained by explicit flush"
+        0
+        (Keeper_tool_call_log.queued_count_for_testing ());
+      let entries = read_recent ~n:1 () in
+      Alcotest.(check int) "record persisted after flush" 1 (List.length entries);
+      match entries with
+      | [ entry ] ->
+        Alcotest.(check (option string))
+          "keeper persisted"
+          (Some "async-k")
+          (Safe_ops.json_string_opt "keeper" entry)
+      | _ -> Alcotest.fail "expected exactly one entry"))
+
+exception Post_commit_guard_failure
+
+let test_async_append_guard_commit_boundary env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw ~clock:(Eio.Stdenv.clock env);
+      let keeper_name = "guard-k" in
+      let revision () = Keeper_tool_call_log.committed_revision ~keeper_name in
+      let before = revision () in
+      Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"masc_status"
+        ~input:(`Assoc []) ~output_text:"ready" ~wire_outcome:Tool_result.Ok
+        ~duration_ms:1.0 ();
+      Fun.protect
+        ~finally:(fun () -> Dated_jsonl.set_append_guard (fun run -> run ()))
+        (fun () ->
+          Dated_jsonl.set_append_guard (fun _run -> ());
+          (match Keeper_tool_call_log.flush_now () with
+           | () -> Alcotest.fail "skipped append must not report flush success"
+           | exception Dated_jsonl.Append_guard_skipped -> ());
+          Alcotest.(check int) "uncommitted row remains queued" 1
+            (Keeper_tool_call_log.queued_count_for_testing ());
+          Alcotest.(check int) "no revision without commit" before (revision ());
+          Dated_jsonl.set_append_guard (fun run ->
+            run (); raise Post_commit_guard_failure);
+          (match Keeper_tool_call_log.flush_now () with
+           | () -> Alcotest.fail "post-commit failure must propagate"
+           | exception Post_commit_guard_failure -> ());
+          Alcotest.(check int) "committed row is not queued again" 0
+            (Keeper_tool_call_log.queued_count_for_testing ());
+          Alcotest.(check int) "commit invalidates cache despite later failure"
+            (before + 1) (revision ());
+          Dated_jsonl.set_append_guard (fun run -> run ());
+          Keeper_tool_call_log.flush_now ();
+          Alcotest.(check int) "repeated flush does not republish revision"
+            (before + 1) (revision ());
+          let rows = read_recent ~n:10 () |> List.filter (fun row ->
+            Safe_ops.json_string_opt "keeper" row = Some keeper_name
+            && Safe_ops.json_string_opt "tool" row = Some "masc_status") in
+          Alcotest.(check int) "exactly one tool-call row survives" 1 (List.length rows))))
+
+let test_committed_flush_distinguishes_post_commit_failure ~pending_failure env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      let keeper_name = "flush-frontier-k" in
+      List.iter (fun tool_name ->
+        Keeper_tool_call_log.log_call ~keeper_name ~tool_name ~input:(`Assoc [])
+          ~output_text:"same" ~input_fingerprint:"input" ~output_fingerprint:"output"
+          ~wire_outcome:Tool_result.Ok ~duration_ms:0. ()) ["first"; "second"];
+      Fun.protect
+        ~finally:(fun () -> Dated_jsonl.set_append_guard (fun run -> run ()))
+        (fun () ->
+          Dated_jsonl.set_append_guard (fun run ->
+            if pending_failure
+               && Keeper_tool_call_log.committed_revision ~keeper_name > 0
+            then ()
+            else (run (); raise Post_commit_guard_failure));
+          let flushed =
+            try Ok (Keeper_tool_call_log.flush_committed ()) with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error exn
+          in
+          if pending_failure then (
+            Alcotest.(check bool) "uncommitted row prevents a completed receipt" true
+              (Result.is_error flushed);
+            Alcotest.(check int) "the uncommitted row is retained" 1
+              (Keeper_tool_call_log.queued_count_for_testing ()))
+          else (
+            Alcotest.(check bool) "all committed rows permit frontier advancement" true
+              (Result.is_ok flushed);
+            Alcotest.(check int) "drain continues beyond post-commit failure" 0
+              (Keeper_tool_call_log.queued_count_for_testing ());
+            match flushed with
+            | Ok (All_committed_with_post_commit_failures _) -> ()
+            | Ok All_committed -> Alcotest.fail "maintenance failure must remain observable"
+            | Error exn -> raise exn);
+          Dated_jsonl.set_append_guard (fun run -> run ());
+          Keeper_tool_call_log.flush_now ();
+          Alcotest.(check int) "both rows persist once after recovery" 2
+            (List.length (read_recent ~keeper_name ~n:10 ())))))
+;;
+
+(* A keeper's revision moves with its own committed appends only, so one
+   keeper's tool calls do not make another keeper's derived caches stale. *)
+let test_a_keepers_revision_moves_with_its_own_appends_only env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw
+        ~clock:(Eio.Stdenv.clock env);
+      let busy_before = Keeper_tool_call_log.committed_revision ~keeper_name:"busy-k" in
+      let quiet_before = Keeper_tool_call_log.committed_revision ~keeper_name:"quiet-k" in
+      let committed = ref 0 in
+      let append () =
+        Keeper_tool_call_log.log_call
+          ~keeper_name:"busy-k"
+          ~tool_name:"masc_status"
+          ~input:(`Assoc [])
+          ~output_text:"ready"
+          ~wire_outcome:Tool_result.Ok
+          ~duration_ms:1.0
+          ~on_committed:(fun () -> incr committed)
+          ()
+      in
+      append ();
+      append ();
+      Alcotest.(check int) "both appends committed" 2 !committed;
+      Alcotest.(check int) "the busy keeper's revision moved once per append"
+        (busy_before + 2)
+        (Keeper_tool_call_log.committed_revision ~keeper_name:"busy-k");
+      Alcotest.(check int) "the quiet keeper's revision did not move"
+        quiet_before
+        (Keeper_tool_call_log.committed_revision ~keeper_name:"quiet-k")))
+
+let test_commit_callback_bypasses_async_queue ~success env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw
+        ~clock:(Eio.Stdenv.clock env);
+      let committed = ref false in
+      let before_revision = Keeper_tool_call_log.committed_revision ~keeper_name:"chat-k" in
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"chat-k"
+        ~tool_name:"masc_status"
+        ~input:(`Assoc [])
+        ~output_text:"ready"
+        ~wire_outcome:(if success then Tool_result.Ok else Tool_result.Error)
+        ~duration_ms:1.0
+        ~on_committed:(fun () ->
+          (* Publication may trigger an immediate history read from here. *)
+          Alcotest.(check int) "row readable inside publication callback" 1
+            (List.length (read_recent ~n:1 ()));
+          Alcotest.(check bool) "history revision advanced before publication" true
+            (Keeper_tool_call_log.committed_revision ~keeper_name:"chat-k" > before_revision);
+          committed := true)
+        ();
+      Alcotest.(check bool) "callback observed committed row" true !committed;
+      Alcotest.(check int)
+        "committed row did not enter async queue"
+        0
+        (Keeper_tool_call_log.queued_count_for_testing ());
+      Alcotest.(check int)
+        "committed row is immediately readable"
+        1
+        (List.length (read_recent ~n:1 ()))))
+
+let test_commit_observers_keep_durable_occurrences_and_fiber_scopes env =
+  with_tmp_log (fun () -> Eio.Switch.run (fun sw ->
+    Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+    let first = Ids.Execution_id.generate () and second = Ids.Execution_id.generate () in
+    let observe expected node target (receipt : Keeper_tool_call_log.committed_call) =
+      let id = match receipt.execution_id with Some id -> id | None -> Alcotest.fail "committed source execution is missing" in
+      Alcotest.(check bool) "original physical execution identity" true (Ids.Execution_id.equal expected id);
+      Alcotest.(check (option string)) "original native node identity" node receipt.composition_node_id;
+      let rows = read_recent ~keeper_name:"observed-k" () in
+      Alcotest.(check bool) "observation follows readable durable append" true
+        (List.exists (fun row -> Yojson.Safe.Util.member "execution_id" row = `String (Ids.Execution_id.to_string id)) rows);
+      target := receipt :: !target in
+    let left = ref [] and right = ref [] in
+    let first_observer = Keeper_tool_call_log.make_commit_observer (observe first None left) in
+    let second_observer = Keeper_tool_call_log.make_commit_observer (observe second (Some "original-child") right) in
+    let append ?composition_node_id ?on_committed execution_id =
+      Keeper_tool_call_log.log_call ~keeper_name:"observed-k" ~tool_name:"Read"
+        ~input:(`Assoc []) ~output_text:"original bytes" ~duration_ms:1.0 ~wire_outcome:Tool_result.Ok
+        ~execution_id ~tool_use_id:"" ?composition_node_id ?on_committed () in
+    Eio.Fiber.both
+      (fun () -> Keeper_tool_call_log.with_commit_observer first_observer (fun () ->
+        Eio.Fiber.yield (); append first))
+      (fun () -> Keeper_tool_call_log.with_commit_observer second_observer (fun () ->
+        Eio.Fiber.yield (); append ~composition_node_id:"original-child" second));
+    append ~on_committed:(fun () -> ()) (Ids.Execution_id.generate ());
+    Alcotest.(check int) "first scope sees only its own source" 1 (List.length !left);
+    Alcotest.(check int) "second scope sees only its own source" 1 (List.length !right);
+    Alcotest.(check int) "physical calls are not duplicated" 3 (List.length (read_recent ~keeper_name:"observed-k" ()));
+    Alcotest.(check int) "durable observations bypass the asynchronous queue" 0
+      (Keeper_tool_call_log.queued_count_for_testing ())))
+;;
+
+let test_commit_observer_capture_retains_scope_and_absence () =
+  with_tmp_log (fun () ->
+    let left = ref [] and right = ref [] in
+    let first = Keeper_tool_call_log.make_commit_observer (fun event -> left := event :: !left) in
+    let second = Keeper_tool_call_log.make_commit_observer (fun event -> right := event :: !right) in
+    let append execution_id =
+      Keeper_tool_call_log.log_call ~keeper_name:"actor-observed-k" ~tool_name:"Read"
+        ~input:(`Assoc []) ~output_text:"original bytes" ~duration_ms:1.0 ~wire_outcome:Tool_result.Ok
+        ~execution_id ~on_committed:(fun () -> ()) () in
+    let captured_id = Ids.Execution_id.generate () in
+    let captured = Keeper_tool_call_log.with_commit_observer first (fun () ->
+      Keeper_tool_call_log.capture_commit_observer (fun () -> append captured_id)) in
+    let absent = Keeper_tool_call_log.capture_commit_observer (fun () -> append (Ids.Execution_id.generate ())) in
+    Keeper_tool_call_log.with_commit_observer second (fun () ->
+      captured (); absent (); append (Ids.Execution_id.generate ()));
+    Alcotest.(check int) "actor handoff retains exactly the original observer" 1 (List.length !left);
+    Alcotest.(check bool) "handoff preserves the physical identity" true
+      (match !left with
+       | [{Keeper_tool_call_log.execution_id=Some id;_}] -> Ids.Execution_id.equal id captured_id
+       | [] | [{execution_id=None;_}] | _ :: _ :: _ -> false);
+    Alcotest.(check int) "absent captured scope never borrows actor ambient observation" 1 (List.length !right);
+    Alcotest.(check int) "all original durable calls remain" 3
+      (List.length (read_recent ~keeper_name:"actor-observed-k" ())))
+;;
+
+let test_commit_observer_failure_preserves_commit_and_callback () =
+  with_tmp_log (fun () ->
+    let observer = Keeper_tool_call_log.make_commit_observer (fun _ -> failwith "fixture observer delivery failure") in
+    let notified = ref false in
+    Keeper_tool_call_log.with_commit_observer observer (fun () ->
+      Keeper_tool_call_log.log_call ~keeper_name:"observer-failure" ~tool_name:"Read"
+        ~input:(`Assoc []) ~output_text:"committed bytes" ~duration_ms:1.0 ~wire_outcome:Tool_result.Ok
+        ~execution_id:(Ids.Execution_id.generate ()) ~on_committed:(fun () -> notified := true) ());
+    Alcotest.(check int) "coverage gap is explicit" 1 (Keeper_tool_call_log.failed_commit_deliveries observer);
+    Alcotest.(check bool) "original completion callback still runs" true !notified;
+    Alcotest.(check int) "committed physical effect evidence is retained" 1
+      (List.length (read_recent ~keeper_name:"observer-failure" ())))
+;;
+
+let test_commit_observer_never_invents_failed_append_evidence () =
+  with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root:_ ->
+    let observed = ref 0 in
+    let observer = Keeper_tool_call_log.make_commit_observer (fun _ -> incr observed) in
+    let result =
+      try
+        Keeper_tool_call_log.with_commit_observer observer (fun () ->
+          Keeper_tool_call_log.log_call ~keeper_name:"uncommitted-k" ~tool_name:"Read"
+            ~input:(`Assoc []) ~output_text:"not committed" ~duration_ms:1.0 ~wire_outcome:Tool_result.Ok ());
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as error -> raise error
+      | error -> Error error in
+    (match result with Error _ -> () | Ok () -> Alcotest.fail "required observation used an unavailable store");
+    Alcotest.(check int) "no physical commit was invented" 0 !observed)
+;;
+
+let test_commit_callback_fails_closed_without_store () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let raised =
+    try
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"chat-k"
+        ~tool_name:"masc_status"
+        ~input:(`Assoc [])
+        ~output_text:"unavailable"
+        ~wire_outcome:Tool_result.Ok
+        ~duration_ms:1.0
+        ~on_committed:(fun () -> Alcotest.fail "callback must not run")
+        ();
+      false
+    with _ -> true
+  in
+  Alcotest.(check bool) "required commit fails closed" true raised
+
+(* The read used to pay for its keeper filter with an over-scan and could not
+   say what it had covered: 500 requested returned 454. Answered from the
+   index it is exact - what comes back is what the store holds. *)
+let write_rows store ~keeper ~count ~base_ts ~label =
+  for i = 0 to count - 1 do
+    Dated_jsonl.append
+      store
+      (`Assoc
+         [ "ts", `Float (base_ts +. float_of_int i)
+         ; "keeper", `String keeper
+         ; "tool", `String (Printf.sprintf "%s-%s-%d" keeper label i)
+         ; "wire_outcome", `String "ok"
+         ])
+  done
+;;
+
+let log_store () =
+  match Keeper_tool_call_log.store () with
+  | Some store -> store
+  | None -> Alcotest.fail "the log has no store"
+;;
+
+let tool_names rows =
+  List.filter_map
+    (fun row ->
+       match row with
+       | `Assoc fields ->
+         (match List.assoc_opt "tool" fields with
+          | Some (`String name) -> Some name
+          | _ -> None)
+       | _ -> None)
+    rows
+;;
+
+let test_read_recent_returns_every_row_the_store_holds () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let base_ts = Unix.gettimeofday () in
+    (* Interleave so a tail scan of [n] fleet rows could not hold [n] of one
+       keeper's: the noisy keeper writes four rows for each quiet one. *)
+    for i = 0 to 119 do
+      let label = string_of_int i in
+      write_rows store ~keeper:"noisy" ~count:4 ~label
+        ~base_ts:(base_ts +. (float_of_int i *. 10.));
+      write_rows store ~keeper:"quiet" ~count:1 ~label
+        ~base_ts:(base_ts +. (float_of_int i *. 10.) +. 5.)
+    done;
+    let quiet = read_recent ~keeper_name:"quiet" ~n:120 () in
+    Alcotest.(check int) "every quiet row comes back" 120 (List.length quiet);
+    let fleet = read_recent ~n:600 () in
+    Alcotest.(check int) "every fleet row comes back" 600 (List.length fleet);
+    let short = read_recent ~keeper_name:"quiet" ~n:5 () in
+    Alcotest.(check int) "a smaller request is honoured exactly" 5 (List.length short);
+    Alcotest.(check (list string))
+      "and it is the newest five, oldest first"
+      [ "quiet-115-0"; "quiet-116-0"; "quiet-117-0"; "quiet-118-0"; "quiet-119-0" ]
+      (tool_names short);
+    let absent = read_recent ~keeper_name:"nobody" ~n:10 () in
+    Alcotest.(check int) "a keeper with no rows answers empty" 0 (List.length absent))
+;;
+
+let test_read_recent_picks_up_rows_appended_between_reads () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let base_ts = Unix.gettimeofday () in
+    write_rows store ~keeper:"alice" ~count:3 ~base_ts ~label:"first";
+    Alcotest.(check int) "the first read sees three" 3
+      (List.length (read_recent ~keeper_name:"alice" ~n:50 ()));
+    Alcotest.(check int) "reading again does not double them" 3
+      (List.length (read_recent ~keeper_name:"alice" ~n:50 ()));
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(base_ts +. 100.) ~label:"second";
+    Alcotest.(check int) "rows appended between reads appear" 5
+      (List.length (read_recent ~keeper_name:"alice" ~n:50 ())))
+;;
+
+let test_read_recent_rebuilds_a_removed_index () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"only";
+    let before = read_recent ~keeper_name:"alice" ~n:50 () in
+    Alcotest.(check int) "four before" 4 (List.length before);
+    let ledger_dir =
+      match Keeper_tool_call_log.store_dir () with
+      | Some dir -> dir
+      | None -> Alcotest.fail "the log has no store"
+    in
+    Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+    (try Sys.remove (Keeper_tool_call_index.database_path ~ledger_dir) with
+     | Sys_error _ -> ());
+    let after = read_recent ~keeper_name:"alice" ~n:50 () in
+    Alcotest.(check int) "the same four after the index is deleted" 4 (List.length after))
+;;
+
+let index_rows store ?keeper_name () =
+  match Keeper_tool_call_index.recent_rows ~store ?keeper_name ~n:50 () with
+  | Ok rows -> rows
+  | Error detail -> Alcotest.fail detail
+;;
+
+let execution_rows store ~keeper_name execution_ids =
+  match Keeper_tool_call_index.by_execution_ids ~store ~keeper_name ~execution_ids with
+  | Ok rows -> rows
+  | Error detail -> Alcotest.fail detail
+;;
+
+let execution_row ~keeper ~execution_id ~tool ~ts =
+  `Assoc [ "ts", `Float ts; "keeper", `String keeper
+         ; "execution_id", `String execution_id; "tool", `String tool ]
+;;
+
+let test_execution_lookup_covers_complete_ledger () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let base_ts = Unix.gettimeofday () -. 600. in
+    let append ~keeper ~execution_id ~tool ~ts =
+      Dated_jsonl.append store (execution_row ~keeper ~execution_id ~tool ~ts)
+    in
+    append ~keeper:"alice" ~execution_id:"exec-old" ~tool:"old-edit" ~ts:base_ts;
+    append ~keeper:"bruce" ~execution_id:"exec-old" ~tool:"foreign-edit" ~ts:base_ts;
+    append ~keeper:"bruce" ~execution_id:"exec-foreign" ~tool:"foreign-only" ~ts:base_ts;
+    write_rows store ~keeper:"alice" ~count:300 ~base_ts:(base_ts +. 1.) ~label:"later";
+    let recent = match Keeper_tool_call_index.recent_rows
+        ~store ~keeper_name:"alice" ~n:200 () with
+      | Ok rows -> rows | Error detail -> Alcotest.fail detail
+    in
+    Alcotest.(check bool) "old edit is outside the recent tail" false
+      (List.mem "old-edit" (tool_names recent));
+    Alcotest.(check (list string)) "exact lookup crosses the tail and isolates the keeper"
+      [ "old-edit" ]
+      (tool_names (execution_rows store ~keeper_name:"alice"
+        [ "exec-old"; "exec-old"; "exec-foreign"; "exec-missing" ]));
+    append ~keeper:"alice" ~execution_id:"exec-old" ~tool:"conflicting-edit"
+      ~ts:(base_ts +. 400.);
+    append ~keeper:"alice" ~execution_id:"exec-' OR 1=1 --" ~tool:"quoted-id"
+      ~ts:(base_ts +. 401.);
+    Alcotest.(check (list string)) "duplicate canonical identities remain visible"
+      [ "old-edit"; "conflicting-edit" ]
+      (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-old"; "exec-old" ]));
+    Alcotest.(check (list string)) "execution IDs are bound as data"
+      [ "quoted-id" ]
+      (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-' OR 1=1 --" ]));
+    Alcotest.(check int) "empty batch has no rows" 0
+      (List.length (execution_rows store ~keeper_name:"alice" [])))
+;;
+
+let test_execution_lookup_orders_only_matches () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let ts = Unix.gettimeofday () in
+    List.iter (fun (execution_id, tool, delta) ->
+      Dated_jsonl.append store
+        (execution_row ~keeper:"alice" ~execution_id ~tool ~ts:(ts +. delta)))
+      [ "exec-b", "b-first", -10.
+      ; "exec-a", "a-last", 10.
+      ; "exec-a", "a-tie-first", 0.
+      ; "exec-a", "a-first", -5.
+      ; "exec-a", "a-tie-second", 0. ];
+    Alcotest.(check (list string)) "identity batches retain timestamp and offset ordering"
+      [ "a-first"; "a-tie-first"; "a-tie-second"; "a-last"; "b-first" ]
+      (tool_names (execution_rows store ~keeper_name:"alice"
+        [ "exec-b"; "exec-a"; "exec-missing"; "exec-a" ])))
+;;
+
+let test_execution_lookup_uses_both_index_keys () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:300
+      ~base_ts:(Unix.gettimeofday ()) ~label:"plan";
+    ignore (index_rows store () : Yojson.Safe.t list);
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+    let db = Sqlite3.db_open (Keeper_tool_call_index.database_path ~ledger_dir) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+      (fun () ->
+        let stmt = Sqlite3.prepare db
+          ("EXPLAIN QUERY PLAN " ^ Keeper_tool_call_index.For_testing.select_execution_sql) in
+        Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t))
+          (fun () ->
+            let rec collect acc =
+              match Sqlite3.step stmt with
+              | Sqlite3.Rc.ROW -> collect (Sqlite3.column_text stmt 3 :: acc)
+              | Sqlite3.Rc.DONE -> String.concat "\n" (List.rev acc)
+              | rc -> Alcotest.fail (Sqlite3.Rc.to_string rc)
+            in
+            let plan = collect [] in
+            let contains needle =
+              let rec loop i =
+                i + String.length needle <= String.length plan
+                && (String.sub plan i (String.length needle) = needle || loop (i + 1))
+              in loop 0
+            in
+            Alcotest.(check bool) ("exact composite lookup: " ^ plan) true
+              (contains "rows_keeper_execution (keeper_name=? AND execution_id=?)"))))
+;;
+
+let test_execution_lookup_rebuilds_changed_ledger () =
+  List.iter (fun mode ->
+    with_tmp_log (fun () ->
+      let store = log_store () in
+      let ts = Unix.gettimeofday () in
+      Dated_jsonl.append store
+        (execution_row ~keeper:"alice" ~execution_id:"exec-old" ~tool:"old" ~ts);
+      let path = match Dated_jsonl.range_day_file_paths store
+          ~since:"1970-01-01" ~until:"9999-12-31" with
+        | [ path ] -> path | _ -> Alcotest.fail "expected one ledger file"
+      in
+      Fs_compat.invalidate_cached_writer path;
+      Unix.utimes path 1. 1.;
+      Alcotest.(check int) "old execution is indexed" 1
+        (List.length (execution_rows store ~keeper_name:"alice" [ "exec-old" ]));
+      let replacement = Yojson.Safe.to_string
+          (execution_row ~keeper:"alice" ~execution_id:"exec-new" ~tool:"new" ~ts) ^ "\n" in
+      let target = match mode with
+        | `Replace -> path ^ ".replacement" | `Same_inode -> path
+      in
+      let oc = open_out_bin target in
+      Fun.protect ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc replacement);
+      (match mode with `Replace -> Unix.rename target path | `Same_inode -> ());
+      Alcotest.(check (list string)) "rewritten identity replaces stale execution key"
+        [ "new" ]
+        (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-old"; "exec-new" ]));
+      let ledger_dir = Dated_jsonl.base_dir store in
+      Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+      let db = Sqlite3.db_open (Keeper_tool_call_index.database_path ~ledger_dir) in
+      Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+        (fun () ->
+          let rc = Sqlite3.exec db
+            "UPDATE rows SET execution_id = 'wrong'; PRAGMA user_version = 2" in
+          Alcotest.(check bool) "seed obsolete schema" true (Sqlite3.Rc.is_success rc));
+      Alcotest.(check (list string)) "obsolete schema rebuilds exact execution lookup"
+        [ "new" ]
+        (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-new" ]))))
+    [ `Replace; `Same_inode ]
+;;
+
+let test_execution_lookup_revalidates_indexed_identity () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    Dated_jsonl.append store
+      (execution_row ~keeper:"alice" ~execution_id:"exec-real" ~tool:"real-edit"
+         ~ts:(Unix.gettimeofday ()));
+    Alcotest.(check int) "seed exact index" 1
+      (List.length (execution_rows store ~keeper_name:"alice" [ "exec-real" ]));
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+    let db = Sqlite3.db_open (Keeper_tool_call_index.database_path ~ledger_dir) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+      (fun () ->
+        let rc = Sqlite3.exec db "UPDATE rows SET execution_id = 'exec-fake'" in
+        Alcotest.(check bool) "seed a stale execution identity" true
+          (Sqlite3.Rc.is_success rc));
+    Alcotest.(check int) "stale index never attributes real evidence to the wrong execution"
+      0 (List.length (execution_rows store ~keeper_name:"alice" [ "exec-fake" ]));
+    Alcotest.(check (list string)) "identity mismatch rebuild restores authoritative lookup"
+      [ "real-edit" ]
+      (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-real" ])))
+;;
+
+let test_read_index_concurrent_fibers () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:12 ~base_ts:(Unix.gettimeofday ()) ~label:"shared";
+    let results =
+      Eio.Fiber.List.map
+        (fun _ ->
+          match Keeper_tool_call_index.For_testing.recent_rows
+                  ~before_scan:(fun ~path:_ ->
+                    Alcotest.(check bool) "scan runs outside the Eio scheduler" true
+                      (Fs_compat.execution_context () = Fs_compat.Non_eio))
+                  ~store ~keeper_name:"alice" ~n:50 () with
+          | Ok rows -> tool_names rows
+          | Error detail -> Alcotest.fail detail)
+        (List.init 8 Fun.id)
+    in
+    let expected = tool_names (index_rows store ~keeper_name:"alice" ()) in
+    List.iter
+      (Alcotest.(check (list string)) "concurrent readers see the complete ledger" expected)
+      results)
+;;
+
+let test_read_index_rewritten_files () =
+  List.iter
+    (fun mode ->
+      with_tmp_log (fun () ->
+        let store = log_store () in
+        write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"seed";
+        let path =
+          match Dated_jsonl.range_day_file_paths store ~since:"1970-01-01" ~until:"9999-12-31" with
+          | [ path ] -> path
+          | _ -> Alcotest.fail "expected one day file"
+        in
+        Fs_compat.invalidate_cached_writer path;
+        let line keeper tool ts =
+          Yojson.Safe.to_string
+            (`Assoc [ "keeper", `String keeper; "tool", `String tool; "ts", `Int ts ]) ^ "\n"
+        in
+        let old = line "alice" "old" 1 ^ line "alice" "end" 2 in
+        let replacement =
+          match mode with
+          | `Shrink -> line "bruce" "replacement-row-longer-than-an-old-row" 3
+          | `Replace | `Same_inode -> line "bruce" "new" 3 ^ line "bruce" "end" 4
+        in
+        let write path bytes =
+          let oc = open_out_bin path in
+          Fun.protect ~finally:(fun () -> close_out_noerr oc)
+            (fun () -> output_string oc bytes)
+        in
+        write path old;
+        Unix.utimes path 1. 1.;
+        Alcotest.(check int) "old keeper indexed" 2
+          (List.length (index_rows store ~keeper_name:"alice" ()));
+        (match mode with
+         | `Replace ->
+           let temporary = path ^ ".replacement" in
+           write temporary replacement;
+           Unix.rename temporary path
+         | `Same_inode | `Shrink -> write path replacement);
+        Alcotest.(check int) "old keeper cannot receive replacement rows" 0
+          (List.length (index_rows store ~keeper_name:"alice" ()));
+        let expected =
+          match mode with
+          | `Shrink -> [ "replacement-row-longer-than-an-old-row" ]
+          | `Replace | `Same_inode -> [ "new"; "end" ]
+        in
+        Alcotest.(check (list string)) "replacement has exactly its own rows" expected
+          (tool_names (index_rows store ~keeper_name:"bruce" ()))))
+    [ `Replace; `Same_inode; `Shrink ]
+;;
+
+let test_read_index_rebuilds_wrong_schema_version () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(Unix.gettimeofday ()) ~label:"version";
+    let expected = tool_names (index_rows store ~keeper_name:"alice" ()) in
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+    let db = Sqlite3.db_open (Keeper_tool_call_index.database_path ~ledger_dir) in
+    Fun.protect
+      ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+      (fun () ->
+        let rc = Sqlite3.exec db
+            "UPDATE rows SET keeper_name = 'wrong'; PRAGMA user_version = 0" in
+        Alcotest.(check bool) "seed incompatible derived state" true
+          (Sqlite3.Rc.is_success rc));
+    Alcotest.(check (list string)) "version mismatch rebuilds from the ledger" expected
+      (tool_names (index_rows store ~keeper_name:"alice" ())))
+;;
+
+let test_frontier_reads_only_new_positions_and_restores () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    let names batch = tool_names (List.map (fun (row : _ Index.positioned) -> row.value) batch.Index.rows) in
+    let now = Unix.gettimeofday () in
+    write_rows store ~keeper:"alice" ~count:205 ~base_ts:now ~label:"old";
+    write_rows store ~keeper:"other" ~count:7 ~base_ts:now ~label:"foreign";
+    let first = read Index.empty_frontier in
+    Alcotest.(check int) "no sliding tail drops unjudged rows" 205 (List.length first.rows);
+    let restored = match Index.frontier_of_json (Index.frontier_to_json first.frontier) with
+      | Ok frontier -> frontier | Error detail -> Alcotest.fail detail in
+    Alcotest.(check int) "same position does not replay old rows" 0 (List.length (read restored).rows);
+    (* Observation times may go backwards; append offsets still move forward. *)
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(now -. 1000.) ~label:"new";
+    let second = read restored in
+    Alcotest.(check (list string)) "new rows remain newest-append-first despite older timestamps"
+      ["alice-new-1"; "alice-new-0"] (names second);
+    let source = Agent_core.Context.create_sync () in
+    let target = Agent_core.Context.create_sync () in
+    Keeper_repetition_judged.record source {history_generation = Keeper_repetition_judged.Initial; history_pairs = 7; ledger_frontier = first.frontier};
+    Keeper_repetition_judged.record target {history_generation = Keeper_repetition_judged.Initial; history_pairs = 5; ledger_frontier = second.frontier};
+    let restored = match Keeper_repetition_judged.restore ~source ~target with
+      | Ok boundary -> boundary
+      | Error error -> Alcotest.fail (Keeper_repetition_judged.error_to_string error) in
+    Alcotest.(check int) "history count restores independently" 7 restored.history_pairs;
+    Alcotest.(check bool) "later ledger position is not pulled back by older history" true
+      (Index.equal_frontiers second.frontier restored.ledger_frontier);
+    Alcotest.(check int) "restored position reads no already-judged calls" 0
+      (List.length (read restored.ledger_frontier).rows))
+;;
+
+let test_frontier_restarts_replaced_and_truncated_files () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"old";
+    let first = read Index.empty_frontier in
+    let path = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "missing fixture ledger path" in
+    Fs_compat.save_file path "";
+    write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"short";
+    let short = read first.frontier in
+    Alcotest.(check int) "truncation rereads the shorter file" 1 (List.length short.rows);
+    Alcotest.(check bool) "truncation releases the old cached evidence" true
+      (Index.equal_frontiers Index.empty_frontier short.retained);
+    Unix.rename path (path ^ ".saved");
+    write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"replacement";
+    let replacement = read short.frontier in
+    Alcotest.(check int) "replacement inode rereads from the beginning" 1 (List.length replacement.rows);
+    Alcotest.(check bool) "replacement releases old cached evidence" true
+      (Index.equal_frontiers Index.empty_frontier replacement.retained))
+;;
+
+(* A rewrite that keeps the inode and the byte length of every row leaves the
+   old frontier's offsets valid for the new rows. Only the generation tells
+   the two runs of the file apart. *)
+let test_frontier_restarts_a_same_inode_rewrite ~grow ~rebuild () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    let names batch = tool_names (List.map (fun (row : _ Index.positioned) -> row.value) batch.Index.rows) in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"aaa";
+    let first = read Index.empty_frontier in
+    Alcotest.(check int) "first read sees every row" 4 (List.length first.rows);
+    let path = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "missing fixture ledger path" in
+    let inode_before = (Unix.stat path).Unix.st_ino in
+    let rewritten = String_util.replace_substring ~needle:"alice-aaa-" ~by:"alice-bbb-" (Fs_compat.load_file path) in
+    let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      ignore (Unix.write_substring fd rewritten 0 (String.length rewritten) : int));
+    Alcotest.(check int) "the rewrite keeps the inode" inode_before (Unix.stat path).Unix.st_ino;
+    if grow then (
+      let row = String.split_on_char '\n' rewritten |> List.hd |> Yojson.Safe.from_string in
+      Dated_jsonl.append store row);
+    if rebuild then (
+      let ledger_dir = Dated_jsonl.base_dir store in
+      Index.forget_for_ledger ~ledger_dir;
+      Unix.unlink (Index.database_path ~ledger_dir));
+    let second = read first.frontier in
+    Alcotest.(check (list string)) "the rewritten rows are all new evidence"
+      ((if grow then ["alice-bbb-0"] else [])
+       @ ["alice-bbb-3"; "alice-bbb-2"; "alice-bbb-1"; "alice-bbb-0"]) (names second);
+    Alcotest.(check bool) "cached evidence of the old run is released" true
+      (Index.equal_frontiers Index.empty_frontier second.retained);
+    Alcotest.(check int) "the new run is read once" 0 (List.length (read second.frontier).rows))
+;;
+
+(* The same rewrite, landing after the index proved the prefix and before it
+   finished scanning. The scan's own reading cannot vouch for a prefix that
+   changed under it, so the read that saw the change must not move the
+   continuity on, and the next read takes every rewritten row as new
+   evidence. *)
+let test_frontier_restarts_a_rewrite_during_the_scan () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    let names batch = tool_names (List.map (fun (row : _ Index.positioned) -> row.value) batch.Index.rows) in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"aaa";
+    let first = read Index.empty_frontier in
+    let path = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "missing fixture ledger path" in
+    let rewrite_in_place ~path:_ =
+      let rewritten =
+        String_util.replace_substring ~needle:"alice-aaa-" ~by:"alice-bbb-" (Fs_compat.load_file path) in
+      let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+        ignore (Unix.write_substring fd rewritten 0 (String.length rewritten) : int)) in
+    (match Index.For_testing.recent_rows ~before_scan:rewrite_in_place ~store ~keeper_name:"alice" ~n:50 () with
+     | Ok _ | Error _ -> ());
+    let second = read first.frontier in
+    Alcotest.(check (list string)) "the rows rewritten during the scan are all new evidence"
+      [ "alice-bbb-3"; "alice-bbb-2"; "alice-bbb-1"; "alice-bbb-0" ] (names second);
+    Alcotest.(check bool) "cached evidence of the old run is released" true
+      (Index.equal_frontiers Index.empty_frontier second.retained))
+;;
+
+let test_frontier_survives_disposable_index_rebuild ~schema_mismatch () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"judged";
+    let first = read Index.empty_frontier in
+    let held = match Index.frontier_of_json (Index.frontier_to_json first.frontier) with
+      | Ok held -> held | Error detail -> Alcotest.fail detail in
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Index.forget_for_ledger ~ledger_dir;
+    let path = Index.database_path ~ledger_dir in
+    if schema_mismatch then (
+      let db = Sqlite3.db_open path in
+      Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool)) (fun () ->
+        Alcotest.(check bool) "invalidate only the disposable schema" true
+          (Sqlite3.Rc.is_success (Sqlite3.exec db "PRAGMA user_version = 0"))))
+    else Unix.unlink path;
+    let rebuilt = read held in
+    Alcotest.(check int) "rebuild does not rejudge durable calls" 0 (List.length rebuilt.rows);
+    Alcotest.(check bool) "memo frontier survives unchanged file rebuild" true
+      (Index.equal_frontiers held rebuilt.retained);
+    write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"new";
+    let appended = read held in
+    Alcotest.(check (list string)) "ordinary append only supplies the new call"
+      ["alice-new-0"]
+      (tool_names (List.map (fun (row : _ Index.positioned) -> row.value) appended.rows)))
+;;
+
+let test_continuity_follows_ledger_retention () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let ledger_dir = Dated_jsonl.base_dir store in
+    let old_path = List.fold_left Filename.concat ledger_dir [ "1970-01"; "01.jsonl" ] in
+    Jsonl_writer.append_jsonl ~path:old_path
+      (`Assoc ["keeper", `String "alice"; "tool", `String "expired"; "ts", `Float 0.]);
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    let first = read Index.empty_frontier in
+    Alcotest.(check int) "expired file had a continuity record" 1 (List.length first.rows);
+    ignore (Dated_jsonl.prune store ~days:1 : int);
+    Alcotest.(check bool) "continuity does not prevent month removal" false
+      (Sys.file_exists (Filename.dirname old_path));
+    let retired = read first.frontier in
+    Alcotest.(check bool) "retained frontier releases the retired file" true
+      (Index.equal_frontiers Index.empty_frontier retired.retained);
+    Alcotest.(check int) "expired continuity records are removed" 0
+      (Array.length (Sys.readdir (Filename.concat ledger_dir ".continuity"))))
+;;
+
+let test_continuity_preserves_blank_and_incomplete_lines () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"first";
+    let path = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "missing ledger path" in
+    let row = Yojson.Safe.to_string
+      (`Assoc ["keeper", `String "alice"; "tool", `String "tail"; "ts", `Int 1]) in
+    let split = String.length row / 2 in
+    Fs_compat.append_file path ("\n" ^ String.sub row 0 split);
+    let first = read Index.empty_frontier in
+    Alcotest.(check int) "partial row is not evidence" 1 (List.length first.rows);
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Index.forget_for_ledger ~ledger_dir;
+    Unix.unlink (Index.database_path ~ledger_dir);
+    let restored = read first.frontier in
+    Alcotest.(check int) "blank-line witness survives rebuild" 0 (List.length restored.rows);
+    Fs_compat.append_file path (String.sub row split (String.length row - split) ^ "\n");
+    let completed = read restored.frontier in
+    Alcotest.(check (list string)) "only the now-complete row becomes new evidence" ["tail"]
+      (tool_names (List.map (fun (row : _ Index.positioned) -> row.value) completed.rows)))
+;;
+
+let test_rows_after_keeps_only_the_projection () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:5 ~base_ts:(Unix.gettimeofday ()) ~label:"p";
+    let seen = ref 0 in
+    let project row =
+      incr seen;
+      match Safe_ops.json_string_opt "tool" row with
+      | Some name when not (String.equal name "alice-p-2") -> Some name
+      | Some _ | None -> None in
+    match Index.rows_after ~store ~keeper_name:"alice" ~after:Index.empty_frontier ~project with
+    | Error detail -> Alcotest.fail detail
+    | Ok batch ->
+      Alcotest.(check int) "every row passes through the projection" 5 !seen;
+      Alcotest.(check (list string)) "only projected values stay, newest append first"
+        ["alice-p-4"; "alice-p-3"; "alice-p-1"; "alice-p-0"]
+        (List.map (fun (row : string Index.positioned) -> row.value) batch.rows))
+;;
+
+let test_failed_flush_keeps_the_row_and_frontier env =
+  with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      Keeper_tool_call_log.log_call ~keeper_name:"alice" ~tool_name:"pending"
+        ~input:(`Assoc []) ~output_text:"answer" ~wire_outcome:Tool_result.Ok ~duration_ms:0. ();
+      let failed = match Keeper_tool_call_log.flush_now () with
+        | () -> false
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception _ -> true in
+      Alcotest.(check bool) "write failure is not reported as a successful flush" true failed;
+      Alcotest.(check int) "failed row remains queued" 1 (Keeper_tool_call_log.queued_count_for_testing ());
+      (match Keeper_tool_call_log.current_frontier ~keeper_name:"alice" with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "unreadable ledger supplied a successful frontier");
+      Unix.unlink (Filename.concat masc_root "tool_calls");
+      Fs_compat.mkdir_p (Filename.concat masc_root "tool_calls");
+      Keeper_tool_call_log.flush_now ();
+      Alcotest.(check int) "repair commits the retained row once" 1
+        (List.length (read_recent ~keeper_name:"alice" ~n:10 ()));
+      Alcotest.(check int) "successful repair drains the queue" 0
+        (Keeper_tool_call_log.queued_count_for_testing ())))
+;;
+
+let test_read_index_recovers_after_scan_io_failure () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(Unix.gettimeofday ()) ~label:"recovery";
+    let calls = Atomic.make 0 in
+    let result = Keeper_tool_call_index.For_testing.recent_rows
+        ~before_scan:(fun ~path:_ ->
+          ignore (Atomic.fetch_and_add calls 1);
+          raise (Sys_error "injected ledger read failure"))
+        ~store ~keeper_name:"alice" ~n:50 () in
+    (match result with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "failed ledger read was reported as success");
+    Alcotest.(check int) "one fresh-index retry" 2 (Atomic.get calls);
+    Alcotest.(check bool) "failure leaves no derived index" false
+      (Sys.file_exists
+         (Keeper_tool_call_index.database_path ~ledger_dir:(Dated_jsonl.base_dir store)));
+    Alcotest.(check int) "later reads recover with all authoritative rows" 2
+      (List.length (index_rows store ~keeper_name:"alice" ())))
+;;
+
+let test_read_index_rejects_unlistable_month () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(Unix.gettimeofday ()) ~label:"listing";
+    let expected = tool_names (index_rows store ~keeper_name:"alice" ()) in
+    let month_path =
+      match Dated_jsonl.range_day_file_paths_result store
+              ~since:"1970-01-01" ~until:"9999-12-31" with
+      | Ok [ path ] -> Filename.dirname path
+      | Ok _ -> Alcotest.fail "expected one ledger month"
+      | Error error -> Alcotest.fail (Dated_jsonl.read_error_to_string error)
+    in
+    (* Replace the directory with a regular file. Sys.readdir fails even
+       when tests run as root, unlike a permission-bit-only fault. The
+       permissive enumerator used to swallow this as an empty month. *)
+    let saved = month_path ^ ".saved" in
+    Unix.rename month_path saved;
+    let oc = open_out_bin month_path in
+    close_out oc;
+    Fun.protect
+      ~finally:(fun () -> Sys.remove month_path; Unix.rename saved month_path)
+      (fun () ->
+        (match Dated_jsonl.range_day_file_paths_result store
+                 ~since:"1970-01-01" ~until:"9999-12-31" with
+         | Error (Dated_jsonl.Not_a_directory { path }) ->
+           Alcotest.(check string) "failure identifies the selected month" month_path path
+         | Error error -> Alcotest.fail (Dated_jsonl.read_error_to_string error)
+         | Ok _ -> Alcotest.fail "unlistable month became successful enumeration");
+        match Keeper_tool_call_index.recent_rows ~store ~keeper_name:"alice" ~n:50 () with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "unlistable month became an empty or partial answer");
+    Alcotest.(check (list string)) "read recovers after directory restoration" expected
+      (tool_names (index_rows store ~keeper_name:"alice" ())))
+;;
+
+let () =
+  Alcotest.run "keeper_tool_call_log"
+    [ ( "invocation observation",
+        [ Alcotest.test_case
+            "blank and repeated ids remain occurrence-scoped"
+            `Quick
+            test_pending_observations_are_occurrence_scoped
+        ; Alcotest.test_case
+            "file evidence remains occurrence-scoped"
+            `Quick
+            test_pending_file_change_evidence_is_occurrence_scoped
+        ; Alcotest.test_case
+            "cancelled invocation releases abandoned observation"
+            `Quick
+            test_abandoned_observation_is_released_with_invocation
+        ; Alcotest.test_case
+            "cancelled invocation releases file evidence"
+            `Quick
+            test_abandoned_file_change_evidence_is_released_with_invocation
+        ] )
+    ; ( "file_change_tally",
+        [ eio_test "matches a whole read and sees appends"
+            test_file_change_tally_matches_a_whole_read
+        ; Alcotest.test_case "a carried entry answers only while nothing aged out"
+            `Quick test_carried_entry_answers_only_while_nothing_aged_out
+        ; eio_test "drops rows that aged out of the window"
+            test_file_change_tally_drops_rows_that_aged_out
+        ] )
+    ; ( "read_window",
+        [ eio_test "keeps the keeper's rows in order"
+            test_read_window_keeps_the_keepers_rows_in_order
+        ] )
+    ; ( "read_recent",
+        [ eio_test "n=0 returns []" test_read_recent_n_zero
+        ; eio_test "n<0 returns []" test_read_recent_n_negative
+        ; eio_test "keeper filter" test_read_recent_keeper_filter
+        ; eio_test "fleet-row derivation equals read_recent"
+            test_fleet_rows_derivation_matches_read_recent
+        ; eio_test "unfiltered read is exactly n; filtered still finds n"
+            test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n
+        ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
+        ; eio_test "ordinary path disposition"
+            test_ordinary_path_disposition_persisted
+        ; eio_test "file evidence shares the execution identity row"
+            test_file_change_evidence_persists_with_execution_identity
+        ; eio_test "no typed outcome writes unknown wire outcome"
+            test_row_without_a_typed_outcome_writes_unknown_wire_outcome
+        ; eio_test "composition action context"
+            test_composition_action_context_persisted
+        ; eio_test "composition rows separate submitted from autonomous turn"
+            test_composition_rows_separate_submitted_from_autonomous_turn
+        ] )
+    ; ( "redaction",
+        [ eio_test "sensitive-named tool logged with redaction"
+            test_sensitive_named_tool_logged_with_redaction
+        ; eio_test "sensitive input fields redacted" test_sensitive_input_fields_redacted
+        ; eio_test "model field stored" test_model_field_stored
+        ; eio_test "turn context fields stored" test_turn_context_fields_stored
+        ; Alcotest.test_case "turn context cells do not cross runs" `Quick
+            test_turn_context_cells_do_not_cross_runs
+        ; eio_test "turn context fields absent without context"
+            test_turn_context_fields_absent_without_context
+        ; eio_test "route evidence stored for git push"
+            test_route_evidence_stored_for_git_push
+        ; eio_test "execution evidence is recorded and read as route"
+            test_execution_evidence_is_recorded_and_routes
+        ; Alcotest.test_case "execution evidence metadata round trip" `Quick
+            test_execution_evidence_metadata_round_trip
+        ; eio_test "route evidence reads blob-backed git push preview"
+            test_route_evidence_stored_for_blob_backed_git_push
+        ; eio_test "route evidence redacts wrapped git push"
+            test_route_evidence_redacts_wrapped_git_push
+        ; eio_test "route evidence command redaction fails closed"
+            test_route_evidence_command_redaction_fails_closed
+        ; eio_test "route evidence records descriptor for filesystem calls"
+            test_route_evidence_records_descriptor_for_filesystem_calls
+        ; eio_test "route evidence records internal descriptor"
+            test_route_evidence_records_internal_descriptor
+        ; eio_test "route evidence records masc board descriptor"
+            test_route_evidence_records_masc_board_descriptor
+        ; Alcotest.test_case
+            "route evidence records descriptor eval tags"
+            `Quick
+            test_route_evidence_records_descriptor_eval_tags
+        ; eio_test "non-object input still logs action radius"
+            test_non_object_input_still_logs_action_radius
+        ; eio_test "dashboard aggregate groups runtime fields"
+            test_dashboard_aggregate_groups_runtime_fields
+        ; eio_test "dashboard aggregate marks missing runtime profile unknown"
+            test_dashboard_aggregate_missing_runtime_profile_is_unknown
+        ; eio_test "dashboard aggregate keeps deferred neutral"
+            test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate
+        ; eio_test "dashboard aggregate separates unsettled and malformed"
+            test_dashboard_aggregate_separates_unsettled_from_malformed
+        ; eio_test "dashboard aggregate does not count the composition summary"
+            test_dashboard_aggregate_does_not_count_the_composition_summary
+        ; eio_test "dashboard aggregate names an unknown record kind malformed"
+            test_dashboard_aggregate_names_an_unknown_record_kind_malformed
+        ; eio_test "dashboard hourly trend buckets numeric ts"
+            test_dashboard_hourly_trend_numeric_ts
+        ; eio_test "dashboard aggregate window hours"
+            test_dashboard_aggregate_window_hours
+        ; eio_test "dashboard aggregate drops rows without result_bytes"
+            test_dashboard_aggregate_drops_rows_without_result_bytes
+        ; eio_test "dashboard aggregate with only malformed rows is empty"
+            test_dashboard_aggregate_only_malformed_rows_is_empty_summary
+        ; eio_test "append failure records coverage gap"
+            test_append_failure_records_coverage_gap
+        ; eio_test "dashboard aggregate surfaces coverage gap"
+            test_dashboard_aggregate_surfaces_coverage_gap
+        ; eio_test "dashboard aggregate ignores recovered coverage gap"
+            test_dashboard_aggregate_ignores_recovered_coverage_gap
+        ] )
+    ; ( "utf8_sanitize",
+        [ eio_test "invalid UTF-8 bytes scrubbed before persist"
+            test_output_invalid_utf8_sanitized
+        ; eio_test "valid UTF-8 preserved verbatim"
+            test_output_valid_utf8_untouched
+        ] )
+    ; ( "blob_normalize",
+        [ eio_test "blob marker persists as structured _blob object"
+            test_output_blob_marker_normalized
+        ; eio_test "inline string output stays a JSON string"
+            test_output_inline_string_preserved
+        ; eio_test "large output records preview truncation"
+            test_output_preview_derives_truncation_metadata
+        ; eio_test "JSON output with a URL and an address stays JSON"
+            test_output_json_with_url_and_address_stays_json
+        ; eio_test "JSON output credential in a key or comment is redacted"
+            test_output_json_credential_in_key_or_comment_redacted
+        ] )
+    ; ( "action_radius",
+        [ eio_test "string input does not break action radius"
+            test_string_input_keeps_action_radius
+        ; Alcotest.test_case "action radius tells a file from a directory" `Quick
+            test_action_radius_tells_a_file_from_a_directory
+        ] )
+    ; ( "read index",
+        [ eio_test "read_recent returns every row the store holds"
+            test_read_recent_returns_every_row_the_store_holds
+        ; eio_test "read_recent picks up rows appended between reads"
+            test_read_recent_picks_up_rows_appended_between_reads
+        ; eio_test "read_recent rebuilds a removed index"
+            test_read_recent_rebuilds_a_removed_index
+        ; eio_test "frontier reads only new append positions and restores independently"
+            test_frontier_reads_only_new_positions_and_restores
+        ; eio_test "frontier restarts replaced and truncated files"
+            test_frontier_restarts_replaced_and_truncated_files
+        ; eio_test "frontier restarts a same-inode rewrite"
+            (test_frontier_restarts_a_same_inode_rewrite ~grow:false ~rebuild:false)
+        ; eio_test "frontier restarts a larger same-inode rewrite"
+            (test_frontier_restarts_a_same_inode_rewrite ~grow:true ~rebuild:false)
+        ; eio_test "frontier sees larger rewrite even after index loss"
+            (test_frontier_restarts_a_same_inode_rewrite ~grow:true ~rebuild:true)
+        ; eio_test "frontier restarts a rewrite during the scan"
+            test_frontier_restarts_a_rewrite_during_the_scan
+        ; eio_test "frontier survives index file deletion"
+            (test_frontier_survives_disposable_index_rebuild ~schema_mismatch:false)
+        ; eio_test "frontier survives schema replacement"
+            (test_frontier_survives_disposable_index_rebuild ~schema_mismatch:true)
+        ; eio_test "continuity metadata follows data retention"
+            test_continuity_follows_ledger_retention
+        ; eio_test "continuity includes blank lines and waits for complete rows"
+            test_continuity_preserves_blank_and_incomplete_lines
+        ; eio_test "rows_after keeps only what the projection returns"
+            test_rows_after_keeps_only_the_projection
+        ; eio_test "execution lookup covers history, keeper isolation and duplicate identities"
+            test_execution_lookup_covers_complete_ledger
+        ; eio_test "execution lookup preserves unordered duplicate evidence ordering"
+            test_execution_lookup_orders_only_matches
+        ; eio_test "execution lookup uses both composite index keys"
+            test_execution_lookup_uses_both_index_keys
+        ; eio_test "execution lookup rebuilds changed files and obsolete schema"
+            test_execution_lookup_rebuilds_changed_ledger
+        ; eio_test "execution lookup revalidates indexed execution identity"
+            test_execution_lookup_revalidates_indexed_identity
+        ; eio_test "concurrent fibers read outside the scheduler"
+            test_read_index_concurrent_fibers
+        ; eio_test "replacement and shrink retire every old row"
+            test_read_index_rewritten_files
+        ; eio_test "wrong schema version rebuilds derived rows"
+            test_read_index_rebuilds_wrong_schema_version
+        ; eio_test "scan I/O failure closes and recovers the index"
+            test_read_index_recovers_after_scan_io_failure
+        ; eio_test "unlistable month is an error, not a deleted ledger"
+            test_read_index_rejects_unlistable_month
+        ] )
+    ; ( "async_append",
+        [ eio_env_test "committed flush reports maintenance failures after draining"
+            (test_committed_flush_distinguishes_post_commit_failure ~pending_failure:false)
+        ; eio_env_test "committed flush fails with an uncommitted row"
+            (test_committed_flush_distinguishes_post_commit_failure ~pending_failure:true)
+        ; eio_env_test "append guard preserves commit and queue boundaries"
+            test_async_append_guard_commit_boundary
+        ; eio_env_test "append queues until flush when async fiber is active"
+            test_async_append_defers_until_flush
+        ; eio_env_test "failed flush retains its row and publishes no frontier"
+            test_failed_flush_keeps_the_row_and_frontier
+        ; eio_env_test "commit callback runs after synchronous readable append"
+            (test_commit_callback_bypasses_async_queue ~success:true)
+        ; eio_env_test "failed tool row commits before publication"
+            (test_commit_callback_bypasses_async_queue ~success:false)
+        ; eio_env_test "durable commit observations retain original identities and fiber scopes"
+            test_commit_observers_keep_durable_occurrences_and_fiber_scopes
+        ; eio_test "actor handoff retains original observer scope and explicit absence"
+            test_commit_observer_capture_retains_scope_and_absence
+        ; eio_test "observer delivery failure preserves commit and original callback"
+            test_commit_observer_failure_preserves_commit_and_callback
+        ; eio_test "failed append emits no committed observation"
+            test_commit_observer_never_invents_failed_append_evidence
+        ; eio_test "commit callback fails closed without store"
+            test_commit_callback_fails_closed_without_store
+        ; eio_env_test "a keeper's revision moves with its own appends only"
+            test_a_keepers_revision_moves_with_its_own_appends_only
+        ] )
+    ]

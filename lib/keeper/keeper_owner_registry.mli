@@ -1,0 +1,387 @@
+(** Process-local inventory of per-Keeper owners.
+
+    The existing BasePath process lease remains the authority.  This module
+    adds no process lease, worker epoch, or persistent ownership record. *)
+
+type install_error =
+  | Inventory_already_installed of string
+  | Inventory_load_failed of
+      { keeper_name : string option
+      ; detail : string
+      }
+
+type lookup_error =
+  | Inventory_not_installed of string
+  | Owner_not_found of string
+  | Owner_unavailable of string
+  | Owner_initialization_failed of Keeper_owner.error
+  | Inventory_stopping
+
+type command_error =
+  | Command_lookup_failed of lookup_error
+  | Command_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Command_rejected of Keeper_owner.error
+
+exception Install_failed of install_error
+
+val install_from_store
+  :  sw:Eio.Switch.t
+  -> operation_runner:Keeper_owner.operation_runner option
+  -> on_turn_slot_released:(keeper_name:string -> unit) option
+  -> Workspace.config
+  -> (int, install_error) result
+(** Load each valid persisted Keeper independently and start exactly one owner
+    actor for it under [sw]. A snapshot the store reads as absent (the file is
+    gone, or it does not decode under the current schema, which the store
+    reports at WARN) is not in the inventory: the name stays unknown to the
+    pool and [create_meta] materialises it, at boot from its TOML declaration.
+    A snapshot the store cannot read at all, or whose payload identity differs
+    from its path, is reported and fenced under its exact Keeper name without
+    preventing other owners from starting; that name cannot be read, created,
+    or mutated until process restart re-audits durable state. Failure to
+    enumerate the inventory still fails installation. Returns the installed
+    owner count. *)
+
+val get
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_owner.t, lookup_error) result
+
+val operation_projection
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_owner.operation_projection, lookup_error) result
+(** Lock-free immutable operation inventory for routine read models. *)
+
+val wake_operation_drain
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit, command_error) result
+(** Notify one Owner that its operation runner dependency is ready. *)
+
+val begin_scheduled_turn_consumer : base_path:string -> keeper_name:string ->
+  (Keeper_owner.scheduled_turn_consumer, command_error) result
+val end_scheduled_turn_consumer : base_path:string -> keeper_name:string ->
+  consumer:Keeper_owner.scheduled_turn_consumer -> (unit, command_error) result
+val observe_scheduled_turn : base_path:string -> keeper_name:string ->
+  Keeper_event_queue_state.pending_selection list ->
+  (Keeper_owner.scheduled_turn_handoff option, command_error) result
+val scheduled_turn_handoff : base_path:string -> keeper_name:string ->
+  (Keeper_owner.scheduled_turn_handoff option, command_error) result
+val release_scheduled_turn :
+  base_path:string -> keeper_name:string -> handoff:Keeper_owner.scheduled_turn_handoff ->
+  (unit, command_error) result
+val run_scheduled_if_idle :
+  base_path:string -> keeper_name:string ->
+  handoff:Keeper_owner.scheduled_turn_handoff option ->
+  sources:(Keeper_event_queue_state.pending_selection list, string) result ->
+  (Keeper_event_queue_state.pending_selection list -> 'a) ->
+  ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block | `Interrupted ], command_error) result
+
+val run_autonomous_if_idle
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block | `Interrupted ], command_error) result
+(** Submit one autonomous turn attempt to the Keeper's Owner mailbox. *)
+
+val run_maintenance_if_idle
+  :  ?defer_to_chat:bool
+  -> base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block ], command_error) result
+(** Submit one exclusive maintenance attempt to the Keeper's Owner mailbox.
+    [defer_to_chat] reserves priority for queued/running chat; default false
+    preserves explicit maintenance transactions. *)
+
+val shutdown_operation_id
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_shutdown_types.Operation_id.t option, lookup_error) result
+
+val begin_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (Keeper_owner.begin_shutdown_result, command_error) result
+
+val rollback_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (Keeper_owner.rollback_shutdown_result, command_error) result
+
+val restore_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (Keeper_owner.restore_shutdown_result, command_error) result
+
+val transition_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> from_operation_id:Keeper_shutdown_types.Operation_id.t
+  -> to_operation_id:Keeper_shutdown_types.Operation_id.t option
+  -> (Keeper_owner.transition_shutdown_result, command_error) result
+
+val await_idle_after_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit, command_error) result
+(** Join the Owner child and durable intake that preceded its shutdown
+    reservation. *)
+
+val apply_meta
+  :  ?lifecycle_token:Keeper_lifecycle_reservation.token
+  -> base_path:string
+  -> keeper_name:string
+  -> Keeper_owner_reducer.meta_command
+  -> (Keeper_meta_contract.keeper_meta option, command_error) result
+(** Mailbox-linearized metadata mutation.  Registry metadata is refreshed only
+    from the committed owner projection.  The existing lifecycle reservation
+    remains the admission authority through the owner commit. *)
+
+val commit_turn_runtime
+  :  base_path:string
+  -> keeper_name:string
+  -> before:Keeper_meta_contract.keeper_meta
+  -> after:Keeper_meta_contract.keeper_meta
+  -> (Keeper_meta_contract.keeper_meta option, command_error) result
+(** Derive and commit only the closed turn delta. Cumulative fields are added
+    to the actor's current snapshot; callers cannot overwrite the record. *)
+
+val create_meta
+  :  ?intake_token:Keeper_shutdown_intake_fence.intake_token
+  -> ?initial_input:Keeper_input_birth.seed
+  -> base_path:string
+  -> Keeper_meta_contract.keeper_meta
+  -> (Keeper_meta_contract.keeper_meta option, command_error) result
+(** Under the durable-intake fence, install an empty actor for a new Keeper,
+    then commit its first snapshot via the closed [Create] command. A failed
+    commit leaves the empty actor in place so same-name retries remain
+    mailbox-linearized. An active shutdown reservation rejects creation before
+    an empty actor is installed. When [intake_token] is supplied, the caller's
+    already-open exact-name intake transaction is reused instead of reacquiring
+    the same fence. [initial_input] uses the Owner's creation-only command;
+    ordinary metadata creation never infers a new-trace input authority. *)
+
+val batch_operations : base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t ->
+  (Keeper_chat_operation.t list, command_error) result
+
+val exact_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_chat_operation.Operation_id.t
+  -> (Keeper_chat_operation.t option, command_error) result
+
+val has_queued_handoff_recipient
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_chat_operation.Operation_id.t
+  -> (bool, command_error) result
+
+(** Durable cooperative checkpoint continuation, independent of provider retry. *)
+val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, command_error) result
+
+(** [direct_native_call], [checkpoint_direct_native_call] and
+    [terminal_direct_native_call] still reach an installed Owner after
+    [begin_stopping_all] has fenced the inventory, so the child that Owner is
+    draining records its native call receipt. [bind_direct_native_call] admits
+    a call for dispatch, a fresh one or a resumed one. It is refused with
+    [Inventory_stopping] once the fence is up, and a stopping Owner refuses it
+    with [Owner_stopping]. *)
+val direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_native_call.state, command_error) result
+val current_input_checkpoint : base_path:string -> keeper_name:string ->
+  (Keeper_owner.current_input_checkpoint, command_error) result
+(** Read the original Owner's current trace/root/input tuple, including while
+    draining. This lookup does not create an Owner or grant response admission. *)
+val begin_history_clear : base_path:string -> keeper_name:string ->
+  (Keeper_owner.history_clear_writer, command_error) result
+val commit_history_clear : base_path:string -> keeper_name:string ->
+  writer:Keeper_owner.history_clear_writer -> receipt:Keeper_history_clear.receipt ->
+  (unit, command_error) result
+(** Fresh admission uses the normal lifecycle fence; an already installed clear
+    receipt reaches its original draining Owner through the receipt lookup. *)
+val begin_input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
+  (Keeper_owner.input_checkpoint_writer, command_error) result
+val input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
+  (Keeper_chat_operation_store.input_checkpoint_observation, command_error) result
+val advance_autonomous_input_checkpoint : allow_turn_reset:bool -> base_path:string -> keeper_name:string ->
+  writer:Keeper_owner.input_checkpoint_writer -> checkpoint:Keeper_checkpoint_ref.t ->
+  (Keeper_owner.input_checkpoint_writer, command_error) result
+val advance_direct_input_checkpoint : allow_turn_reset:bool -> base_path:string -> keeper_name:string ->
+  writer:Keeper_owner.input_checkpoint_writer -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  execution_digest:string -> call_id:string -> observed:Keeper_checkpoint_ref.t ->
+  checkpoint:Keeper_checkpoint_ref.t -> (Keeper_owner.input_checkpoint_writer, command_error) result
+(** Writer capture uses admission lookup; durable reads and publication reach
+    an existing stopping Owner so its draining child can record actual input. *)
+val bind_retired_input_cut : base_path:string -> keeper_name:string -> writer:Keeper_owner.input_checkpoint_writer ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t ->
+  cut:Keeper_input_history_cut.binding -> (Keeper_owner.input_checkpoint_writer, command_error) result
+(** Admit a new call and the exact retired-response cut together. This requires
+    the current direct child and refuses stopping/shutdown admission. *)
+val bind_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (unit, command_error) result
+val checkpoint_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t -> (unit, command_error) result
+val terminal_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, command_error) result
+val defer_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Keeper_owner.Chat_operation.t, command_error) result
+type input_response_error =
+  | Response_owner_lookup_failed of lookup_error
+  | Response_owner_failed of Keeper_owner.input_response_error
+val input_response_error_to_string : input_response_error -> string
+(** Lookup and Owner response failure remain distinct; installation/commit
+    uncertainty is never folded into a generic command rejection. *)
+val respond_direct_input_wait : base_path:string -> keeper_name:string -> net:Eio_context.eio_net ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.input_wait ->
+  response:Agent_core.Hooks.elicitation_response ->
+  ([ `Accepted | `Busy of Keeper_owner.autonomous_block ], input_response_error) result
+(** Explicit response under an exclusive original Owner maintenance child. Busy
+    means no response effects began. Acceptance consumes the exact wait/input
+    witness and enables only the original operation continuation. Partial file
+    installation or uncertain journal acknowledgement remains Error. *)
+val direct_input_wait : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_wait option, command_error) result
+val defer_direct_input_wait : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  request:Agent_core.Agent_input_request.t ->
+  (Keeper_chat_operation.t, command_error) result
+(** Existing-Owner receipt lookup. Deferral still requires the original live
+    chat child and verifies the visible request before publishing a wait;
+    neither lookup nor a pending question grants dispatch rights. *)
+val resume_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.gate_checkpoint -> (unit, command_error) result
+
+val direct_runtime_retry : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.runtime_retry option, command_error) result
+val defer_direct_runtime_retry : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  continuation:Keeper_semantic_execution.runtime_retry -> retry_wait:Keeper_owner.runtime_retry_wait option ->
+  (Keeper_chat_operation.t, command_error) result
+val resume_direct_runtime_retry : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.runtime_retry ->
+  (unit, command_error) result
+
+val pause_observed_turn : base_path:string -> keeper_name:string ->
+  interrupt_token:Keeper_interrupt_token.t ->
+  (Keeper_owner.pause_result * string, command_error) result
+val interrupt_observed_turn : base_path:string -> keeper_name:string ->
+  interrupt_token:Keeper_interrupt_token.t ->
+  (Keeper_owner.pause_result * string, command_error) result
+val pause_running_operation : ?expected_control_token:string -> base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t -> (Keeper_owner.pause_result * string, command_error) result
+val run_next_operation : ?priority_predecessors:Keeper_chat_operation.Operation_id.t list ->
+  base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  interrupt_token:Keeper_interrupt_token.t option ->
+  unit ->
+  (Keeper_owner.run_next_result, command_error) result
+
+val interrupt_running_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_chat_operation.Operation_id.t
+  -> (Keeper_owner.operation_interrupt_result, command_error) result
+(** Mailbox-linearized exact-operation interrupt. A request naming an older
+    operation cannot cancel a newer child for the same Keeper. *)
+
+type interactive_target =
+  | Observed_turn_token of Keeper_interrupt_token.t
+  | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t
+val submit_interactive_operation : base_path:string -> keeper_name:string -> operation_id:Keeper_owner.Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> control_token:string -> target:interactive_target option -> (Keeper_owner.operation_acceptance * Keeper_owner.interactive_receipt, command_error) result
+
+val submit_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_chat_operation.Operation_id.t
+  -> source:Yojson.Safe.t
+  -> input:Yojson.Safe.t
+  -> (Keeper_owner.operation_acceptance, command_error) result
+
+val list_queued_operations
+  :  base_path:string
+  -> keeper_name:string
+  -> after_sequence:int64 option
+  -> limit:int
+  -> (Keeper_chat_operation.t list, command_error) result
+
+val edit_queued_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_chat_operation.Operation_id.t
+  -> input:Yojson.Safe.t
+  -> (Keeper_chat_operation.t, command_error) result
+
+val move_queued_operation_to_front : base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t -> (Keeper_chat_operation.t, command_error) result
+
+val move_queued_operation_to_end
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_chat_operation.Operation_id.t
+  -> (Keeper_chat_operation.t, command_error) result
+
+val cancel_queued_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_chat_operation.Operation_id.t
+  -> (Keeper_chat_operation.t, command_error) result
+
+val all_projections
+  :  base_path:string
+  -> (Keeper_owner_reducer.projection list, lookup_error) result
+(** Lock-free fleet projection. *)
+
+val begin_stopping_all
+  :  base_path:string
+  -> ((unit, Keeper_owner.error) result list, lookup_error) result
+(** Fence the BasePath inventory, concurrently stop every Owner, and return
+    after each active child has joined its terminal persistence attempt. The
+    fence refuses every lookup except the native call receipt commands above. *)
+
+val install_error_to_string : install_error -> string
+val lookup_error_to_string : lookup_error -> string
+val command_error_to_string : command_error -> string
+
+module For_testing : sig
+  val installed_owner_count : base_path:string -> int
+end
+
+val heap_root : (Obj.t -> 'a) -> 'a
+(** Run [walk] on this module's retained state, under the lock that guards
+    it, for [Heap_roots.measure] to size with [Obj.reachable_words].
+    Diagnostics only: the walk stalls the process for its duration. *)
+
+val direct_gate_state : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_wait_state option, command_error) result
+val direct_gate_waits : base_path:string -> keeper_name:string ->
+  ((Keeper_chat_operation.Operation_id.t * Keeper_semantic_execution.gate_wait_state) list, command_error) result
+val direct_gate_obligations : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_obligation list, command_error) result
+val defer_direct_gate : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  execution_digest:string -> waiting:Keeper_semantic_execution.gate_wait -> (Keeper_chat_operation.t, command_error) result
+val resolve_direct_gate : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  resolution:Keeper_semantic_execution.gate_resolution -> (Keeper_chat_operation.t, command_error) result
+val resume_direct_gate : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  waiting:Keeper_semantic_execution.gate_wait -> resolution:Keeper_semantic_execution.gate_resolution -> (unit, command_error) result
+val discharge_direct_gate : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  obligation:Keeper_semantic_execution.gate_obligation -> (unit, command_error) result
+
+val defer_direct_gate_reconciliation : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  binding:Keeper_semantic_execution.gate_binding -> diagnostic:string -> (Keeper_chat_operation.t, command_error) result
+
+val direct_gate_binding : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.gate_binding option, command_error) result
+
+val direct_gate_bindings : base_path:string -> keeper_name:string ->
+  ((Keeper_chat_operation.Operation_id.t * Keeper_semantic_execution.gate_binding) list, command_error) result
+val reconcile_direct_gate_binding : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  binding:Keeper_semantic_execution.gate_binding -> waiting:Keeper_semantic_execution.gate_wait -> (unit, command_error) result

@@ -1,0 +1,113 @@
+{
+  "schema": "masc.goal.restored3067.preparation-review.v1",
+  "freeze": "FINAL FROZEN",
+  "reviewed_at_utc": "2026-10-25T20:57:02.452464+00:00",
+  "verdict": "PASS_SCOPED_TRUSTED_PRESTART_FIXTURE_AND_SINGLE_REQUEST_DESIGN",
+  "summary": "No actionable P0-P2 identified in the prepared selected-record restore, helper routing or single normal proof-request path. The fixture retains the authoritative3067 criterion, original measurement and Idle state without rewriting primary stores or forcing a verdict. This is a static/copy review; no isolated server/model outcome is established.",
+  "findings": {
+    "new_P0": [],
+    "new_P1": [],
+    "new_P2": []
+  },
+  "inputs": [
+    {
+      "path": "masc-goal-originals-restored3067-20261026.py",
+      "bytes": 10238,
+      "sha256": "8f54417bd13723b7412efb353215e36fbedc0a316dabf9f95969dd7e2a6c3c3c"
+    },
+    {
+      "path": "masc-goal-restored3067-snapshot-20261026.py",
+      "bytes": 3941,
+      "sha256": "043d562314f7d878fcbfe32f4604237b3c5d58cb0d59c0ded0b641fb3b0404e4"
+    },
+    {
+      "path": "masc-goal-restored3067-canary-20261026.py",
+      "bytes": 24356,
+      "sha256": "a4b0cc9a88f3a7f303b620270dc29af45e4f4c8f0d20a04b68221ef128010b6d"
+    },
+    {
+      "path": "masc-goal-originals-restored3067-3e0d-20261026/plan-private.json",
+      "bytes": 4557,
+      "sha256": "7356c03c949676dc5dda47e919d0f9df7bd0570f262b8d53992a13db0217ccb9"
+    },
+    {
+      "path": "masc-goal-originals-restored3067-3e0d-20261026/launch-inputs-private.json",
+      "bytes": 753,
+      "sha256": "7a77d56bcbe40aeeb8c5b31bfa0df1b26225325f3cf44f573b407fd891815e06"
+    },
+    {
+      "path": "masc-goal-originals-restored3067-3e0d-20261026/bootstrap-private/manifest.json",
+      "bytes": 2133,
+      "sha256": "a0259baa863d1e3f0982c9b30354a629544be3dea388d513018c634f13838944"
+    }
+  ],
+  "method": "Full driver and snapshot-helper reading; exact cloned-canary delta against previously reviewed23079B/a60067 helper, plus direct read of affected launch/write/Client sections. Checked eight listed source hashes, four source ASTs without execution, all three bootstrap files and selected-row digests, primary before/after projections and their saved normal API replies, and current76 staged row hashes. No target import/function, API/Git/build/test/model/process action or new agent.",
+  "reuse": [
+    {
+      "path": "masc-goal-originals-0dc-preparation-review-20261026-v1/review.json",
+      "sha256": "9686617199ac1dd8ccd19fcce2a7f7be0d049c26fb7d5d2ab238024b2bddbb8d",
+      "scope": "Unchanged private copied-evidence/Client/override boundaries; new restore delta reviewed here."
+    },
+    {
+      "path": "masc-goal-read-scope-head4edc-source-review-20261026-v1/review.json",
+      "sha256": "84a2b16c40cc65aa8f9ee7806f835dacaa367debc7c8902c98cf0c1a78f284e5",
+      "scope": "Same0dc product/source identity and bounded instructions; no repeated publication/raw-cohort audit."
+    }
+  ],
+  "bootstrap_checks": {
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "documents": [
+      {
+        "path": "goals.json",
+        "bytes": 2204,
+        "sha256": "c5828fef99e3feab880a404b72f23f9ea674e3a7c48f8dfe5c4bed3574068f66"
+      },
+      {
+        "path": "goal_measurements.json",
+        "bytes": 1366,
+        "sha256": "41ca4fd4388cab10bf9977718546a5a55ef90114589d1265ab1f57dfd723b496"
+      },
+      {
+        "path": "goal_verifications.json",
+        "bytes": 275,
+        "sha256": "8c7d2669a0eeb7321acd43b4deef98a7a60f41619698a36adefdfaeb2fbdaa4c"
+      }
+    ],
+    "value_binding": "Before/after projections are byte-equal3594B SHA2560b625ef27c4c1adca1e9078f63bd9182502a096caca68d1e10ab104411494437. Their Goal fields, measurement.record and verification equal the selected bootstrap rows. Each selected canonical-row digest matches the recorded authoritative-source metadata.",
+    "normal_read_capture": "Offline decoded saved initialize plus goals-before/goals-after request/reply receipts. Both list calls use masc_goal_list with empty arguments and matching success IDs; each selected reply equals its saved projection. These are already captured parent reads, not API calls made by this reviewer.",
+    "envelopes": "Each document has exactly one selected record and a new version1 wrapper. Goal pending_events/pending_notifications are empty; verification is exactly Idle with no submitted_evidence. No unrelated Goals, workers, proof registry/journals or whole primary state documents are copied. The selected Goal row retains its own authoritative last_review_note metadata.",
+    "non_atomic_limit": "Before/after equality and selected-row consistency are not an atomic whole-workspace snapshot, a production restore or proof that unrelated records never changed. Whole primary stores are represented only by source byte/hash metadata."
+  },
+  "routing_and_installation": [
+    "The aggregate/provenance modules now reference the cloned h via a.h/p.h. ROOT/operator/source/slot are rebound to this new private run; clone.health is p.checked_health, clone.source_binding is the existing baseline checker. runtime_text is borrowed from the previously reviewed pure negative-helper TOML renderer. No legacy prepare/control path is selected.",
+    "Clone delta only adds install_prestart_goal_fixture and calls it immediately after native config-only init, before any proxy/server Popen. launch still checks binary digest/build source and baseline source/prompt, creates an exclusive owned base and uses explicit private environment/base-path.",
+    "Installer accepts only the three exact state filenames and manifest3067, verifies byte lengths/SHA, requires no saved server/proxy process records, and writes exclusively through the owned-path/O_NOFOLLOW helper. It duplicates goals.json to goals.json.last-good and records installation privately. Existing target files cause failure rather than overwrite. No primary path is a write target.",
+    "This establishes intended ordering and safe refusal in source, not actual init compatibility, successful installation, process absence or server acceptance. Later install receipt and normal API readback must be retained before claiming an actual restored run."
+  ],
+  "normal_submission_review": {
+    "before_request": "After normal two-section overrides and checked_health, submit copies/verifies the unchanged historical packet, creates an exclusive submission directory and initializes only the private Client. A normal masc_goal_list must return exactly one selected Goal with exact title/metric/target,3067,Executing, original full measurement record and Idle completion.",
+    "mutation": "There is no Goal upsert or measurement API call in the selected submit path. It sends exactly one masc_goal_transition request_complete after successful readback. Client has no retry loop; exclusive output prevents a whole-submit replay. Provider/tool-loop call counts remain unconstrained and must be observed.",
+    "verdict_boundary": "The local m object explicitly describes an existing snapshot measurement. Local no-preset diagnostic is not a verdict/API condition. Idle is restored, not Proven/Refuted, and normal verification must create its own future run/verdict. No outcome is forced.",
+    "primary_boundary": "The snapshot helper primary Client imports safely under a non-main module name and only initializes/calls Goal list inside capture(). It writes request/reply logs under the new private capture root, not Goal stores. Reading configured credentials is in memory; headers are not written by that Client."
+  },
+  "evidence_and_source_identity": {
+    "candidate_source": "4edcba731f79a4e0297c98cc5df3960b4d5263d1",
+    "candidate_prompt_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "managed_baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "identity_limit": "Prepared bindings plus reused reviews, not a new Git/build/embedded-identity query. Runtime mechanism remains frozen3e and normal API prompt overrides, not a native4edc execution.",
+    "packet": "76 current staged files match the prior unchanged18299B manifest SHA256584df4b041fbdee5a97a298bb55dc2e34c7220a1f42c3001a5c336ff1a9d987f. Canonical acceptance remains4fdd and packet2003; no historical behavior is rerun or oracle rewritten.",
+    "additional_read_client": "Separately read3193B masc-goal-delivery-mcp-20261026.py SHA25608d97ffd1307aac32dae31df1cffbed276f0609eccf25fbee59f60b4ee32790c. It is a preparation-only transitive capture dependency not listed in launch-inputs-private.json; this report supplies that explicit binding rather than claiming the eight-entry list covers every preparation dependency."
+  },
+  "adjudication_and_limits": [
+    "This trusted prestart state fixture addresses the deliberate freshB39/current3067 identity confound by preserving current criterion and measurement IDs. It changes fixture construction, not the original metric/target or acceptance bytes. It is not an API-only fresh-Goal experiment or a production restoration procedure.",
+    "Actual removal of that confound from model input still requires successful restored API readback and retained Original/provider bytes with3067/ada746. No such new runtime observation exists in this static review.",
+    "Old154 REJECT and old159 insufficient APPROVE remain immutable. This new design cannot retroactively fix them, establish read-gap resolution or provide source-only causal A/B evidence.",
+    "No original11 behavior rerun, primary3067 proof/update/completion, human confirmation, installed runtime, current-head native tests, general reliability, formal GitHub approval, whole-stack admission or merge is established.",
+    "Any future verdict must be audited against the actual required original content returned; same revision, reported11/11 and successful bootstrap alone are not sufficient proof. Preserve unexpected outcomes and all remaining semantic gaps."
+  ],
+  "effects": "Read-only sources/frozen prepared files and offline parse/hash/value comparisons. No live primary lookup or Goal mutation, server/model launch, API/Git/test/build/CI/process action, new agent or external message. Only this new review file is written."
+}

@@ -1,0 +1,146 @@
+type rejection_kind = Input_rejected | Paste_rejected
+type rejection = { kind : rejection_kind; generation : int list }
+type preferred = No_preferred | Csi_recovery | Rejection of rejection
+type lifetime = Pending of rejection | Draining of rejection | Presented of rejection * float
+type csi = Csi_inactive | Csi_active of (string * float) option
+type quit_kind = Quit_key | Interrupt
+type quit_phase = Quit_pending | Quit_draining | Quit_visible
+type quit_confirmation = {
+  quit_kind : quit_kind;
+  quit_ordinary : string * float;
+  quit_phase : quit_phase;
+}
+
+let arm_quit ~kind ~ordinary =
+  { quit_kind = kind; quit_ordinary = ordinary; quit_phase = Quit_pending }
+let quit_kind confirmation = confirmation.quit_kind
+let quit_ordinary confirmation = confirmation.quit_ordinary
+let same_quit left right =
+  left.quit_kind = right.quit_kind && left.quit_ordinary == right.quit_ordinary
+
+let quit_presented confirmation ~visible ~was_visible ~input_pending =
+  match visible with
+  | Some shown when same_quit confirmation shown ->
+      (match confirmation.quit_phase with
+       | Quit_visible when was_visible -> confirmation
+       | Quit_pending | Quit_draining | Quit_visible ->
+           { confirmation with quit_phase = if input_pending then Quit_draining else Quit_visible })
+  | Some _ | None -> { confirmation with quit_phase = Quit_pending }
+
+let quit_after_drain confirmation ~currently_visible ~input_pending =
+  let visible = Option.exists (same_quit confirmation) currently_visible in
+  match confirmation.quit_phase with
+  | Quit_draining when not input_pending && visible ->
+      { confirmation with quit_phase = Quit_visible }
+  | Quit_visible when not visible -> { confirmation with quit_phase = Quit_pending }
+  | Quit_pending | Quit_draining | Quit_visible -> confirmation
+
+let quit_authorized confirmation ~kind ~currently_visible ~ordinary_before ~now ~window =
+  confirmation.quit_kind = kind
+  && confirmation.quit_phase = Quit_visible
+  && Option.exists (same_quit confirmation) currently_visible
+  && Option.exists (fun ordinary -> ordinary == confirmation.quit_ordinary) ordinary_before
+  && now -. snd confirmation.quit_ordinary <= window
+
+type t = {
+  ordinary : (string * float) option;
+  rejection : lifetime option;
+  next_generation : int list;
+  csi : csi;
+}
+
+let empty = { ordinary = None; rejection = None; next_generation = [0]; csi = Csi_inactive }
+let ordinary notice = notice.ordinary
+let ordinary_visible notice ~now ~window =
+  match notice.ordinary with
+  | Some (_, at) as ordinary when now -. at <= window -> ordinary
+  | Some _ | None -> None
+let set_ordinary notice ordinary = { notice with ordinary }
+let csi_active notice = match notice.csi with Csi_inactive -> false | Csi_active _ -> true
+let start_csi notice = { notice with csi = Csi_active notice.ordinary }
+let end_csi notice = { notice with csi = Csi_inactive }
+let ordinary_is_csi notice =
+  match notice.csi, notice.ordinary with
+  | Csi_active (Some original), Some current -> original == current
+  | Csi_active (Some _), None | Csi_active None, (Some _ | None)
+  | Csi_inactive, (Some _ | None) -> false
+
+(* Little-endian digits avoid both integer wraparound and a mutable token. *)
+let rec successor = function
+  | [] -> [1]
+  | digit :: rest when digit = max_int -> 0 :: successor rest
+  | digit :: rest -> (digit + 1) :: rest
+
+let reject notice kind ~now ~window =
+  match notice.rejection, kind with
+  | Some (Pending {kind = Paste_rejected; _} | Draining {kind = Paste_rejected; _}),
+    Input_rejected -> notice
+  | Some (Presented ({kind = Paste_rejected; _}, at)), Input_rejected
+    when now -. at <= window -> notice
+  | (Some (Pending _ | Draining _ | Presented _) | None), (Input_rejected | Paste_rejected) ->
+      { notice with rejection = Some (Pending {kind; generation = notice.next_generation});
+                    next_generation = successor notice.next_generation }
+
+let rejection notice ~now ~window =
+  match notice.rejection with
+  | Some (Pending rejection | Draining rejection) -> Some rejection
+  | Some (Presented (rejection, at)) when now -. at <= window -> Some rejection
+  | Some (Presented _) | None -> None
+
+let preferred notice ~existing_action ~now ~window =
+  if existing_action then No_preferred
+  else if csi_active notice then Csi_recovery
+  else match rejection notice ~now ~window with
+    | Some notice -> Rejection notice
+    | None -> No_preferred
+
+let csi_recovery_text = "Key pending; Ctrl-C"
+
+let recovery_slot notice ~now ~window ~csi_fits ~rejection_fits =
+  match preferred notice ~existing_action:false ~now ~window with
+  | Csi_recovery -> if csi_fits then Csi_recovery else No_preferred
+  | Rejection rejection -> if rejection_fits then Rejection rejection else No_preferred
+  | No_preferred -> No_preferred
+
+let rejection_text rejection = match rejection.kind with
+  | Input_rejected -> "Input lost; retry"
+  | Paste_rejected -> "Paste lost; retry"
+
+let same_rejection left right = List.equal Int.equal left.generation right.generation
+
+let presented notice shown ~at ~input_pending =
+  match notice.rejection with
+  | Some (Pending current) when same_rejection current shown ->
+      { notice with rejection = Some (if input_pending then Draining current
+          else Presented (current, at)) }
+  | Some (Pending _ | Draining _ | Presented _) | None -> notice
+
+let after_drain notice ~at ~input_pending ~currently_visible =
+  match notice.rejection with
+  | Some (Draining current) when not input_pending ->
+      let lifetime = match currently_visible with
+        | Some visible when same_rejection current visible -> Presented (current, at)
+        | Some _ | None -> Pending current in
+      { notice with rejection = Some lifetime }
+  | Some (Pending _ | Draining _ | Presented _) | None -> notice
+
+let after_input notice ~input_seen ~operator_input ~currently_visible ~now ~window =
+  let ordinary = if input_seen then None else notice.ordinary in
+  let rejection = match notice.rejection with
+    | Some (Presented (_, at)) when now -. at > window -> None
+    | Some (Presented (current, _)) ->
+        (match currently_visible with
+         | Some visible when same_rejection current visible ->
+             if operator_input then None else notice.rejection
+         | Some _ | None -> Some (Pending current))
+    | Some (Pending _ | Draining _) | None -> notice.rejection in
+  { notice with ordinary; rejection }
+
+let after_rejected_input notice ~ordinary_before ~currently_visible ~now ~window =
+  let ordinary_is_new = match ordinary_before, notice.ordinary with
+    | Some before, Some current -> before != current
+    | None, Some _ -> true
+    | (Some _ | None), None -> false in
+  let settled = after_input notice ~input_seen:true ~operator_input:false
+      ~currently_visible ~now ~window in
+  if ordinary_is_new then { settled with ordinary = notice.ordinary } else settled

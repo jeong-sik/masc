@@ -1,0 +1,376 @@
+diff --git a/bin/masc_tui_chat_portrait.ml b/bin/masc_tui_chat_portrait.ml
+index 152e65bed1..c82a8d704d 100644
+--- a/bin/masc_tui_chat_portrait.ml
++++ b/bin/masc_tui_chat_portrait.ml
+@@ -11,8 +11,10 @@ type t = {
+    The portrait yields before that navigation capacity is reduced. *)
+ let minimum_roster_rows = Masc_tui_frame.chrome_rows + 4
+ 
++let band_size = Portrait.band_size
++
+ let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
+-  match portrait, Portrait.band_size display with
++  match portrait, band_size display with
+   | Keeper_portrait_equipment.Unavailable _, _
+   | Keeper_portrait_equipment.Ready _, None -> None
+   | Keeper_portrait_equipment.Ready equipment, Some band ->
+@@ -31,7 +33,7 @@ let prepare cache ~display ~project ~name ~portrait ~rows ~cols =
+             match display with
+             | View.Pixels _ -> Some {
+                 View.image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Keeper_portrait;
+-                row = roster_rows + 1;
++                row = 1;
+                 column = Masc_tui_ansi.framed_content_column + padding;
+                 box; image;
+               }
+diff --git a/bin/masc_tui_chat_portrait.mli b/bin/masc_tui_chat_portrait.mli
+index e5498e2647..5e3a88a755 100644
+--- a/bin/masc_tui_chat_portrait.mli
++++ b/bin/masc_tui_chat_portrait.mli
+@@ -1,4 +1,4 @@
+-(** The active conversation's portrait under the Keeper roster. The roster
++(** The active conversation's portrait above the Keeper roster. The roster
+     keeps at least four selectable rows; the conversation keeps every row. *)
+ type t = private {
+   roster_rows : int;  (** Requested roster budget, including its chrome. *)
+@@ -6,6 +6,9 @@ type t = private {
+   placement : Masc_tui_portrait_view.placement option;
+ }
+ 
++val band_size : Masc_tui_portrait_view.display -> Masc_tui_keeper_portrait.band_size option
++(** Conversation icon budget shared with the Keeper Info header. *)
++
+ val prepare :
+   Masc_tui_keeper_portrait.cache ->
+   display:Masc_tui_portrait_view.display ->
+@@ -15,8 +18,8 @@ val prepare :
+     full roster when the portrait cannot fit, its equipment reading is unavailable,
+     or colour is disabled.
+     [name] is the conversation owner, independently of the roster cursor.
+-    The caller draws the roster, one caption row, [picture_lines], then the
+-    bottom border. The placement row is nominal within the requested budget;
++    The caller draws one caption row, [picture_lines], one spacer row, then
++    the roster. The placement row is nominal within the requested budget;
+     the renderer anchors it to the actual line immediately after the caption,
+     including the shared tab strip, before requesting pixels. *)
+ 
+diff --git a/bin/masc_tui_keeper_portrait.ml b/bin/masc_tui_keeper_portrait.ml
+index 42fa13a055..9adfd9a686 100644
+--- a/bin/masc_tui_keeper_portrait.ml
++++ b/bin/masc_tui_keeper_portrait.ml
+@@ -4,24 +4,25 @@ module Look = Keeper_portrait_look
+ 
+ type band_size = { rows : int; cols : int }
+ 
+-(* The smallest box each display shows a portrait's face in, judged by
+-   rendering Keepers at 16, 24, 32 and 48 px. Placed pixels are scaled by
+-   the terminal, and eight rows is a 160 px picture on a 20 px cell. A
+-   mosaic draws a pixel per cell across and two per row: at 16 px a candle
+-   is its colours alone, and its eyes, mouth and glasses show from 24 px,
+-   twelve rows by 24 cells. *)
+-let pixel_band = { rows = 8; cols = 16 }
+-let mosaic_band = { rows = 12; cols = 24 }
++(* Info and conversation headers use an icon. Only Items, where the outfit
++   is the subject being inspected, uses the larger preview band. *)
++let preview_band_size = function
++  | View.Pixels _ -> Some { rows = 8; cols = 16 }
++  | View.Mosaic -> Some { rows = 12; cols = 24 }
++  | View.No_picture -> None
+ 
+ let band_size = function
+-  | View.Pixels _ -> Some pixel_band
+-  | View.Mosaic -> Some mosaic_band
++  | View.Pixels { cell_width; cell_height } when cell_width > 0 && cell_height > 0 ->
++      let rows = View.min_pixel_rows in
++      Some { rows; cols = (rows * cell_height + cell_width - 1) / cell_width }
++  | View.Pixels _ -> None
++  | View.Mosaic ->
++      (* At sixteen cells, observed glasses quantize into the face colour.
++         Twenty-four is the smallest mosaic retaining equipped features. *)
++      Some { rows = 12; cols = 24 }
+   | View.No_picture -> None
+ 
+-(* Rows the facts keep below the portrait. In the PTY harness the detail has
+-   23 content rows on a 30-row terminal and 17 on a 24-row one, so a mosaic
+-   portrait (20) shows on the first and gives every row to facts on the
+-   second; placed pixels (16) show on both. *)
++(* Leave room for operational diagnostics below the identity/work/context header. *)
+ let rows_kept_for_facts = 8
+ let min_content_rows size = size.rows + rows_kept_for_facts
+ 
+@@ -128,7 +129,7 @@ let shown ~name ~equipment ~content_rows ~content_cols =
+ 
+ let preview ~name ~equipment ~content_rows ~content_cols =
+   let display = View.current_display () in
+-  match band_size display with
++  match preview_band_size display with
+   | None -> None
+   | Some size when content_rows < size.rows + 2 || content_cols < String.length indent + size.cols + 2 ->
+       None
+diff --git a/bin/masc_tui_render.ml b/bin/masc_tui_render.ml
+index c4f2b1eef6..ba8a2e494d 100644
+--- a/bin/masc_tui_render.ml
++++ b/bin/masc_tui_render.ml
+@@ -5155,12 +5155,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
+       let section_line title = Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset in
+       let add_section title = add_line (section_line title) in
+ 
+-      (* Identity section, beside the portrait when the pane has room *)
++      (* Identity, current task and context share the icon's header. These
++         facts use the same label column, rather than leaving the portrait's
++         lower rows blank while the current work falls below the viewport. *)
++      let header_width = match portrait with
++        | None -> inner
++        | Some band -> max 1 (inner - 2 - band.Masc_tui_keeper_portrait.box.cols)
++      in
+       let identity =
+-        let width = match portrait with
+-          | None -> inner
+-          | Some band -> max 1 (inner - 2 - band.Masc_tui_keeper_portrait.box.cols)
+-        in
++        let width = header_width in
+         [ section_line "Identity" ]
+         @ row_lines ~width "Name:" (Terminal_text.single_line k.k_name)
+         @ row_lines ~width "Paused:"
+@@ -5179,26 +5182,94 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
+            | None -> []
+            | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
+       in
+-      List.iter add_line
+-        (match portrait with
+-         | Some band -> Masc_tui_keeper_portrait.beside band identity
+-         | None -> identity);
++      List.iter add_line identity;
+       (match portrait_reading with
+        | Tui_decode.Ready _ -> ()
+        | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
+       add_empty ();
+-      (* The short Overview names only the reading's state. Info retains
+-         every diagnostic and exact supply amount, wrapped and scrollable. *)
+-      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
+-      if candle_lines <> [] then (
+-        add_section "Candle details";
+-        List.iter
+-          (fun line ->
+-            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
+-              (Terminal_text.single_line line)
+-            |> List.iter (fun line -> add_line ("  " ^ line)))
+-          candle_lines;
+-        add_empty ());
++      let add_row label value =
++        List.iter add_line (row_lines ~width:header_width label value)
++      in
++      (* Current work section *)
++      add_section "Current Work";
++      add_row "Task:"
++        (match k.k_activity with
++         | None -> "not observed"
++         | Some activity -> Terminal_text.single_line_or
++             ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
++      add_empty ();
++
++      (* Live Context section (Phase 2) *)
++      add_section "Live Context";
++      (match
++         Context_state.reading_for_keeper ~keeper_name:k.k_name
++           state.live_context
++       with
++       | None ->
++           add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
++       | Some reading ->
++           (match
++              Terminal_text.optional_single_line reading.error,
++              reading.observation
++            with
++            | Some error, _ ->
++                add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
++            | None, Some observation ->
++                (match Observation_layout.context_summary observation with
++                 | Observation_layout.Context_measured observation ->
++                     let ratio = observation.ratio in
++                     let pct =
++                       Float.of_int (Observation_layout.percentage_tenths ratio)
++                       /. 10.0
++                     in
++                     let bar_width =
++                       Layout.keeper_context_bar_width
++                         ~inner_width:header_width
++                     in
++                     add_row "Context:"
++                       (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
++                          (ctx_color ratio) pct Ansi.reset
++                          (ctx_bar ratio bar_width)
++                          (Masc_tui_message_layout.compact_count
++                             observation.tokens)
++                          (Masc_tui_message_layout.compact_count
++                             observation.maximum));
++                     add_row "Observed:"
++                       (Terminal_text.short_timestamp observation.observed_at);
++                     add_row "Turn Ref:"
++                       (Terminal_text.single_line observation.turn_ref)
++                 | Observation_layout.Context_partial observation ->
++                     (* The one reading in this row that printed a bare number.
++                        The row also carries a cumulative figure, which says
++                        "cumulative usage" in its own sentence, and a measured
++                        one, which carries a percentage and a window -- so a
++                        number alone was the only thing here a reader had to
++                        guess the scope of, and the two differ by an order of
++                        magnitude (#33791). This one is occupancy: the
++                        projection emits an observation only once it has
++                        confirmed the turn's own usage. *)
++                     add_row "Context:"
++                       (Printf.sprintf
++                          "%s tokens in context; window not observed"
++                          (Masc_tui_message_layout.compact_count
++                             observation.tokens));
++                     add_row "Observed:"
++                       (Terminal_text.short_timestamp observation.observed_at);
++                     add_row "Turn Ref:"
++                       (Terminal_text.single_line observation.turn_ref)
++                 | Observation_layout.Context_unavailable reason ->
++                     add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
++            | None, None ->
++                add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)));
++      add_empty ();
++
++      let header_lines = List.rev !lines in
++      lines := [];
++      List.iter add_line
++        (match portrait with
++         | Some band -> Masc_tui_keeper_portrait.beside band header_lines
++         | None -> header_lines);
++      let add_row label value = List.iter add_line (row_lines ~width:inner label value) in
+ 
+       (* The live roster owns this reading, including its absence after a
+          successful turn. Neither historical last_error nor the last outcome
+@@ -5314,79 +5385,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
+               ^ Terminal_text.single_line reason ^ Ansi.reset));
+       add_empty ();
+ 
+-      (* Current work section *)
+-      add_section "Current Work";
+-      add_row "Task:"
+-        (match k.k_activity with
+-         | None -> "not observed"
+-         | Some activity -> Terminal_text.single_line_or
+-             ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
+-      add_empty ();
+-
+-      (* Live Context section (Phase 2) *)
+-      add_section "Live Context";
+-      (match
+-         Context_state.reading_for_keeper ~keeper_name:k.k_name
+-           state.live_context
+-       with
+-       | None ->
+-           add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
+-       | Some reading ->
+-           (match
+-              Terminal_text.optional_single_line reading.error,
+-              reading.observation
+-            with
+-            | Some error, _ ->
+-                add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
+-            | None, Some observation ->
+-                (match Observation_layout.context_summary observation with
+-                 | Observation_layout.Context_measured observation ->
+-                     let ratio = observation.ratio in
+-                     let pct =
+-                       Float.of_int (Observation_layout.percentage_tenths ratio)
+-                       /. 10.0
+-                     in
+-                     let bar_width =
+-                       Layout.keeper_context_bar_width
+-                         ~inner_width:inner
+-                     in
+-                     add_row "Context:"
+-                       (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
+-                          (ctx_color ratio) pct Ansi.reset
+-                          (ctx_bar ratio bar_width)
+-                          (Masc_tui_message_layout.compact_count
+-                             observation.tokens)
+-                          (Masc_tui_message_layout.compact_count
+-                             observation.maximum));
+-                     add_row "Observed:"
+-                       (Terminal_text.short_timestamp observation.observed_at);
+-                     add_row "Turn Ref:"
+-                       (Terminal_text.single_line observation.turn_ref)
+-                 | Observation_layout.Context_partial observation ->
+-                     (* The one reading in this row that printed a bare number.
+-                        The row also carries a cumulative figure, which says
+-                        "cumulative usage" in its own sentence, and a measured
+-                        one, which carries a percentage and a window -- so a
+-                        number alone was the only thing here a reader had to
+-                        guess the scope of, and the two differ by an order of
+-                        magnitude (#33791). This one is occupancy: the
+-                        projection emits an observation only once it has
+-                        confirmed the turn's own usage. *)
+-                     add_row "Context:"
+-                       (Printf.sprintf
+-                          "%s tokens in context; window not observed"
+-                          (Masc_tui_message_layout.compact_count
+-                             observation.tokens));
+-                     add_row "Observed:"
+-                       (Terminal_text.short_timestamp observation.observed_at);
+-                     add_row "Turn Ref:"
+-                       (Terminal_text.single_line observation.turn_ref)
+-                 | Observation_layout.Context_unavailable reason ->
+-                     add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
+-            | None, None ->
+-                add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)));
+-      add_empty ();
+-
+       (* Runtime section *)
+       add_section "Runtime Stats";
+       let assignment =
+@@ -5536,6 +5534,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
+             | None -> Masc_tui_theme.Glyph.no_value));
+       add_empty ();
+ 
++      (* The short Overview names only the reading's state. Info retains
++         every diagnostic and exact supply amount, wrapped and scrollable. *)
++      let candle_lines = Masc_tui_candle.summary_lines state.candle_observation in
++      if candle_lines <> [] then (
++        add_section "Candle details";
++        List.iter
++          (fun line ->
++            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
++              (Terminal_text.single_line line)
++            |> List.iter (fun line -> add_line ("  " ^ line)))
++          candle_lines;
++        add_empty ());
++
+       (* Timestamps section *)
+       add_section "Timestamps";
+       (match k.k_identity with
+diff --git a/bin/masc_tui_render_chat.ml b/bin/masc_tui_render_chat.ml
+index b35e8f2ec2..656af874af 100644
+--- a/bin/masc_tui_render_chat.ml
++++ b/bin/masc_tui_render_chat.ml
+@@ -3686,14 +3686,10 @@ let render_keeper_message (state : state) =
+       let roster_rows = match portrait with
+         | None -> pane_rows
+         | Some portrait -> portrait.Masc_tui_chat_portrait.roster_rows in
+-      keeper_roster_pane
+-        ~focused:(state.keeper_message_focus = Left_pane)
+-        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
+       Option.iter (fun portrait ->
+         box_line left_buf keeper_roster_pane_cols
+-          (Theme.recede () ^ " 대화 · " ^ display_keeper_name ^ Ansi.reset);
+-        (* Anchor pixels to the actual caption, since the roster renderer can
+-           emit fewer lines than its requested budget. *)
++          (Theme.recede () ^ " 현재 대화 · " ^ display_keeper_name ^ Ansi.reset);
++        (* Anchor pixels to the caption actually drawn above the selectable roster. *)
+         let picture_row = count_frame_lines left_buf in
+         List.iter (box_line left_buf keeper_roster_pane_cols)
+           portrait.Masc_tui_chat_portrait.picture_lines;
+@@ -3705,6 +3701,9 @@ let render_keeper_message (state : state) =
+           Masc_tui_portrait_view.request
+             {placement with row = picture_row + strip_rows}) portrait.placement)
+         portrait;
++      keeper_roster_pane
++        ~focused:(state.keeper_message_focus = Left_pane)
++        state ~rows:roster_rows ~cols:keeper_roster_pane_cols left_buf;
+       write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
+         ~right:chat_buf
+     end;

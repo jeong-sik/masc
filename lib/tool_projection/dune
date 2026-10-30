@@ -1,0 +1,24 @@
+; Model-facing projection of typed tool results to AGENT_CORE.
+;
+; Extracted from tool_bridge (root masc library) so mid-level libraries
+; (masc_task_handlers) can project results without a cycle: the root masc
+; library depends on masc_task_handlers, so the projection surface must live
+; below it. tool_bridge re-exports this module's API unchanged.
+
+(include_subdirs no)
+
+(library
+ (name tool_projection)
+ (public_name masc.tool_projection)
+ (wrapped false)
+ (modules tool_projection)
+ (libraries
+  yojson
+   masc.agent_core.digest
+  eio
+  masc_core
+  masc_log
+  masc.tool_types
+  masc.masc_tool_blob_store
+  masc.agent_core
+  masc.prompt_registry))

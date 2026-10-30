@@ -1,0 +1,14 @@
+{
+  "observed_at_utc": "2026-10-26T12:17:34.701019+00:00",
+  "path": "/api/v1/keepers/masc-pro-builder/chat/operations/kmsg-0ee5cad6044d0c44843de8a152152104",
+  "http_status": 200,
+  "operation": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "kmsg-0ee5cad6044d0c44843de8a152152104",
+    "state": "Failed",
+    "completed_at": 1793016681.405733,
+    "failure_kind": "Turn_cancelled",
+    "failure_detail": "The operation was cancelled.",
+    "incident_id": "kmsg-0ee5cad6044d0c44843de8a152152104"
+  }
+}

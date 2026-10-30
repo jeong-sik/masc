@@ -1,0 +1,46 @@
+name = "masc_web_search"
+description = """
+Search the public web. Use exact tool name WebSearch. Example input: \
+{\"query\":\"OCaml 5.2 release date\",\"limit\":5,\"includeContent\":true}. \
+Returns result.results with title, url, snippet. With includeContent:true \
+the response gains a human-readable content_text rendering of every fetched \
+page. When the configured provider is brave_llm_context the response instead \
+carries grounded=true, context_text (pre-extracted chunks) and sources \
+metadata, with no results rows — includeContent is then a no-op since the \
+content already rides inline. Do not use snake_case names like web_search."""
+additional_properties = false
+
+[[params]]
+name = "query"
+type = "string"
+required = true
+description = """
+Plain-text search query. Example: \"OCaml 5.2 release date\"."""
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Maximum number of results to return (1-10, default 5)."
+
+[[params]]
+name = "includeContent"
+type = "boolean"
+description = """
+When true, also fetch each result page and add a human-readable content_text \
+rendering. Recommended for research."""
+
+[[params]]
+name = "contentMaxChars"
+type = "integer"
+description = "Maximum fetched characters per result inside content_text."
+minimum = 100
+maximum = 20000
+default = 4000
+
+[[params]]
+name = "contentTimeout"
+type = "integer"
+description = "Per-result content fetch timeout in seconds."
+minimum = 1
+maximum = 60
+default = 15

@@ -1,0 +1,15 @@
+{
+  "executed_candidate": "34cbedbe5746855db9033921f4b0c9365f1fbbb6",
+  "source_comparison": "12c001e55e27c7a9340ae27f956e112fd5360c76",
+  "unchanged_owner_source_files": [
+    "lib/browser_addon_live_ego.ml",
+    "lib/lane_addon/lane_addon_runtime.ml"
+  ],
+  "sdk_signal_sent_by_probe": false,
+  "keeper_model_task_run": false,
+  "production_installation_changed": false,
+  "new_client_policy_executed": false,
+  "build_run": 40110786294,
+  "selected_run": 40110779108,
+  "pending_new_policy_run": 40112787489
+}

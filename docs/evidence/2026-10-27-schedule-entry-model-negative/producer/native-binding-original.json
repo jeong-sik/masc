@@ -1,0 +1,26 @@
+{
+  "schema": "masc.schedule-c3-native-binding.v1",
+  "source_sha": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+  "workflow_sha": "87e6f274ddd5958b3966608fab376cfd1cb50ed3",
+  "workflow_name": "Minimal manual checks",
+  "workflow_run": 40428400174,
+  "workflow_ref": "ci/schedule-entry-candidate-20261027",
+  "artifact_id": 12700992849,
+  "server_sha256": "8fb19608eac66c5b0cbaf10cc5a549ae9e3093222d4a504abcd8b6e85473adfe",
+  "archive_sha256": "83950a5247389ee0d915668ac27fccaa209b018d4f017a95fc4aa0e941937f4c",
+  "archive": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/native.zip",
+    "bytes": 74913965,
+    "sha256": "83950a5247389ee0d915668ac27fccaa209b018d4f017a95fc4aa0e941937f4c"
+  },
+  "artifact_receipt": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/extracted/receipt.json",
+    "bytes": 1622,
+    "sha256": "62f296dbb8759fd38d1304797e95c928d071be9e54c78b40cc1edadf3122479c"
+  },
+  "download_verification": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-entry-candidate/artifacts/schedule-entry-candidate-20261027/native40428400174/download-verification.json",
+    "bytes": 1987,
+    "sha256": "3dc6c453dc91f55d8778fed8dd909e2cbef8f681377f33e16f2af646e4e738cf"
+  }
+}

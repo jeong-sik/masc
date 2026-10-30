@@ -1,0 +1,252 @@
+(** Workspace Task ID - Task ID parsing and archive management.
+
+    Extracted from workspace_state.ml. *)
+
+open Masc_domain
+open Workspace_utils
+
+let task_id_to_int id =
+  let prefix = "task-" in
+  let prefix_len = String.length prefix in
+  if String.length id <= prefix_len then None
+  else if String.sub id 0 prefix_len <> prefix then None
+  else int_of_string_opt (String.sub id prefix_len (String.length id - prefix_len))
+
+(** Extract the raw task-entry JSON list from a parsed archive document.
+    The archive is the [{"tasks": [...]}] envelope; the bare-[`List] shape
+    that predated it is no longer read.  Single source for the archive
+    readers/writers so the shape cannot drift between them. *)
+let archive_entries_of_json json =
+  match Json_util.assoc_member_opt "tasks" json with
+  | Some (`List tasks) -> tasks
+  | _ -> []
+
+let read_archive_entries config =
+  if not (path_exists config (archive_path config)) then []
+  else archive_entries_of_json (read_json config (archive_path config))
+
+let read_archive_task_ids config =
+  List.filter_map (fun task ->
+    match Json_util.get_string task "id" with
+    | Some id -> task_id_to_int id
+    | None -> None
+  ) (read_archive_entries config)
+
+(* The archive rows a writer is about to rewrite. A missing file is an empty
+   archive. A file that cannot be read, is blank, does not parse, or has no
+   [tasks] list is an error: a writer that took any of those for an empty
+   archive would replace the file and drop every row in it. *)
+let read_archive_entries_for_write config =
+  match read_json_doc config (archive_path config) with
+  | Ok None -> Ok []
+  | Error error -> Error (json_doc_error_to_string error)
+  | Ok (Some json) ->
+    (match Json_util.assoc_member_opt "tasks" json with
+     | Some (`List tasks) -> Ok tasks
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _)
+     | None -> Error "the document has no \"tasks\" list")
+
+module Archive_ids = Map.Make (String)
+type archive_identity = Unique of Yojson.Safe.t | Duplicate
+type archive_index = { rows : archive_identity Archive_ids.t; unidentified : bool }
+
+let archive_status_cache : archive_index File_version_cache.t = File_version_cache.create ()
+
+let archive_index config =
+  let decode () =
+    let entries = match read_json_doc config (archive_path config) with
+      | Ok None -> Ok []
+      | Error error -> Error (json_doc_error_to_string error)
+      | Ok (Some (`Assoc fields)) ->
+          (match List.filter (fun (key, _) -> key = "tasks") fields with
+           | [_, `List entries] -> Ok entries
+           | _ -> Error "archive needs one tasks list")
+      | Ok (Some _) -> Error "archive must be an object" in
+    entries |> Result.map (fun entries ->
+      List.fold_left (fun index row ->
+        let identity = match row with
+          | `Assoc fields ->
+              (match List.filter (fun (key, _) -> key = "id") fields with
+               | [_, `String id] when String.trim id <> "" -> Some id
+               | _ -> None)
+          | _ -> None in
+        match identity with
+        | None -> { index with unidentified = true }
+        | Some id ->
+            let entry = if Archive_ids.mem id index.rows then Duplicate else Unique row in
+            { index with rows = Archive_ids.add id entry index.rows })
+        { rows = Archive_ids.empty; unidentified = false } entries) in
+  match config.backend with
+  | Memory _ -> decode ()
+  | FileSystem _ -> File_version_cache.load archive_status_cache (archive_path config) ~decode
+
+let read_archived_task_row_r config ~task_id =
+  let open Result.Syntax in
+  let* index = archive_index config in
+  match Archive_ids.find_opt task_id index.rows with
+  | Some Duplicate -> Error "archive contains duplicate requested Task identities"
+  | Some (Unique row) -> Ok (Some row)
+  | None when index.unidentified -> Error "archive has unidentified rows; requested Task absence is unconfirmed"
+  | None -> Ok None
+
+let read_archived_task_r config ~task_id =
+  Result.bind (read_archived_task_row_r config ~task_id) (function
+    | None -> Ok None
+    | Some row -> task_of_yojson row |> Result.map Option.some)
+
+let read_archived_task_status_r config ~task_id =
+  let open Result.Syntax in
+  let* row = read_archived_task_row_r config ~task_id in
+  match row with
+  | None -> Ok None
+  | Some row ->
+      let* _task = task_of_yojson row in
+      Task_status_observation.of_yojson row |> Result.map Option.some
+
+(** Append tasks to archive file (tasks-archive.json).
+
+    The read->merge->write sequence is wrapped in [with_file_lock] so
+    concurrent callers cannot lose each other's archive entries. *)
+let append_archive_tasks config (tasks : task list) =
+  if tasks = [] then Ok ()
+  else
+    let arch_path = archive_path config in
+    with_file_lock config arch_path (fun () ->
+      match read_archive_entries_for_write config with
+      | Error detail ->
+        Error
+          (Printf.sprintf
+             "tasks-archive.json could not be read, so nothing was appended: %s"
+             detail)
+      | Ok existing_rows ->
+        let new_rows = List.map task_to_yojson tasks in
+        let id_of row = Json_util.get_string row "id" in
+        let incoming = Hashtbl.create 64 in
+        List.iter
+          (fun row -> Option.iter (fun id -> Hashtbl.replace incoming id ()) (id_of row))
+          new_rows;
+        (* The rows given are the current copies, so each replaces the archive
+           row with the same id, whatever that row holds: an older copy, or a
+           row that does not decode as a Task. Every other row stays as it is,
+           rows with no id and repeated ids included. This is not the place to
+           drop them, the rule [drop_archive_tasks] applies to the same file. *)
+        let kept =
+          List.filter
+            (fun row ->
+              match id_of row with
+              | Some id -> not (Hashtbl.mem incoming id)
+              | None -> true)
+            existing_rows
+        in
+        let seen = Hashtbl.create 64 in
+        let appended =
+          List.filter
+            (fun row ->
+              match id_of row with
+              | Some id ->
+                if Hashtbl.mem seen id then false else (Hashtbl.add seen id (); true)
+              | None -> true)
+            new_rows
+        in
+        let archive_json = `Assoc [
+          ("tasks", `List (kept @ appended));
+          ("last_updated", `String (now_iso ()));
+        ] in
+        Fun.protect ~finally:(fun () -> File_version_cache.forget archive_status_cache arch_path)
+          (fun () -> write_json_result config arch_path archive_json)
+        |> Result.map_error (fun detail ->
+             Printf.sprintf "tasks-archive.json could not be written: %s" detail))
+
+(** Read the archive and return every task whose status is non-terminal. A
+    non-terminal task in the archive is an obligation a
+    prior buggy GC pass stranded (masc_transition and dashboard verification
+    read only the live backlog); the GC restore path splices these back into
+    the backlog.  Read-only — the caller rewrites the live backlog first, then
+    calls {!drop_archive_tasks}, so a crash between the two leaves the task in
+    both stores (recovered by dedup on the next pass) rather than losing it.
+    Entries that fail to parse are skipped here and preserved by
+    {!drop_archive_tasks}. *)
+let read_orphaned_nonterminal_tasks config : task list =
+  List.filter_map (fun entry ->
+    match task_of_yojson entry with
+    | Ok task when not (task_status_is_terminal task.task_status) -> Some task
+    | Ok _ | Error _ -> None
+  ) (read_archive_entries config)
+
+(** Remove archive entries whose task id is in [ids], under the archive lock.
+    Entries without an [id] field are preserved — an unreadable archive line is
+    never silently dropped.  An archive that cannot be read is an [Error] and
+    is left as it was, because rewriting it from what could not be read would
+    erase every row.  No-op on []. *)
+let drop_archive_tasks config ~ids =
+  if ids = [] then Ok ()
+  else
+    let arch_path = archive_path config in
+    with_file_lock config arch_path (fun () ->
+      match read_archive_entries_for_write config with
+      | Error detail ->
+        Error
+          (Printf.sprintf
+             "tasks-archive.json could not be read, so nothing was dropped: %s"
+             detail)
+      | Ok entries ->
+        let kept = List.filter (fun entry ->
+          match Json_util.get_string entry "id" with
+          | Some id -> not (List.mem id ids)
+          | None -> true
+        ) entries in
+        let archive_json = `Assoc [
+          ("tasks", `List kept);
+          ("last_updated", `String (now_iso ()));
+        ] in
+        Fun.protect ~finally:(fun () -> File_version_cache.forget archive_status_cache arch_path)
+          (fun () -> write_json_result config arch_path archive_json)
+        |> Result.map_error (fun detail ->
+             Printf.sprintf "tasks-archive.json could not be written: %s" detail))
+
+let task_ids_of_event_json json =
+  [ Json_util.get_string json "task"; Json_util.get_string json "task_id" ]
+  |> List.filter_map (function
+    | Some id -> task_id_to_int id
+    | None -> None)
+
+let event_history_task_ids config =
+  let events_dir = Filename.concat (masc_dir config) "events" in
+  if not (Sys.file_exists events_dir) then []
+  else
+    Sys.readdir events_dir
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.concat_map (fun month ->
+      let month_path = Filename.concat events_dir month in
+      if not (Sys.file_exists month_path) then []
+      else if Sys.is_directory month_path then
+        Sys.readdir month_path
+        |> Array.to_list
+        |> List.sort String.compare
+        |> List.map (Filename.concat month_path)
+      else [ month_path ])
+    |> List.concat_map (fun path ->
+      if Sys.file_exists path && not (Sys.is_directory path) then
+        Fs_compat.load_file path
+        |> String.split_on_char '\n'
+        |> List.filter_map (fun line ->
+          if String.equal line "" then None
+          else
+            match Yojson.Safe.from_string line with
+            | json -> Some (task_ids_of_event_json json)
+            | exception Yojson.Json_error _ -> None)
+        |> List.concat
+      else [])
+
+let next_task_number config (backlog : backlog) =
+  let backlog_ids = List.filter_map (fun (task : task) -> task_id_to_int task.id) backlog.tasks in
+  let receipt_ids = List.filter_map (fun receipt -> task_id_to_int receipt.deleted_task_id) backlog.task_deletion_receipts in
+  let creation_ids = List.filter_map (fun receipt -> task_id_to_int receipt.created_task_id) backlog.task_creation_receipts in
+  let archive_ids = read_archive_task_ids config in
+  (* Event history outlives both the live backlog and its archive after a
+     workspace restore. Reusing an id that history still names aliases two
+     unrelated task lifecycles in [masc_task_history]. *)
+  let event_ids = event_history_task_ids config in
+  let max_id = List.fold_left max 0 (backlog_ids @ receipt_ids @ creation_ids @ archive_ids @ event_ids) in
+  max_id + 1

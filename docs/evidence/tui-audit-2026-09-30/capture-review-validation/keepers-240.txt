@@ -1,0 +1,41 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+                                                                                                                                                                                          │[Recent] Changes · feed closed: MCP initialize: HTTP 50
+   MASC Keepers (2)   1 healthy · 1 idle                                                                                                                      22:34:14  HTTP [connected]  │alpha · no events on this feed yet
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    fleet ok   running 0/0   turn capacity 0/0
+     HEALTH     KEEPER                           Mode S   TURN LIFECYCLE / RUNTIME              TASK
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     ●          alpha                            A D      — anthropic.claude-opus-5          —
+     · idle     beta                             D D      — paused anthropic.claude-sonnet-4 —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    OPERATIONS unavailable · keeper lanes load failed: HTTP 503: fixture endpoint unavailable
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  j/k:move  p:pause  w:wake  s:shutdown  x:delete  e:settings  a:new  l:logs  t:calls  g:yolo  u:runtime  c:chat  right/enter:detail  r:refresh  q:quit  | Port: 62426
+ › to alpha   (i to write)

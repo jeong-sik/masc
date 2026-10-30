@@ -1,0 +1,5 @@
+[default] GET    /api/v1/dashboard/namespace-truth  none 200->404, bad 200->404, worker 200->404, admin 200->404
+[strict] GET    /.well-known/agent-card.json  none 200->401, bad 200->401
+[strict] GET    /.well-known/agent.json  none 200->401, bad 200->401
+[strict] GET    /api/v1/dashboard/namespace-truth  none 401->404, bad 401->404, worker 200->404, admin 200->404
+compared 2854 statuses, 4 problems

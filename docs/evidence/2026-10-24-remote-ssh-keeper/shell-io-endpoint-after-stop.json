@@ -1,0 +1,19 @@
+{
+  "cwd": "/srv/masc/playground/ssh-proof-20261025-c",
+  "hostname": "6758e8d27ec8",
+  "notes": "after\n",
+  "sha256": "7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919",
+  "denied_effect_exists": false,
+  "shell_io": {
+    "redirect input.txt": "alpha\n",
+    "redirect output.txt": "alpha\nbeta\n",
+    "redirect stdout.txt": "separate-out\n",
+    "redirect stderr.txt": "separate-err\n"
+  },
+  "initial": {
+    "marker": "6609600e382b411596c04b47f913d406",
+    "cwd": "/srv/masc/playground/ssh-proof-20261025-c",
+    "hostname": "6758e8d27ec8",
+    "uid": 1000
+  }
+}

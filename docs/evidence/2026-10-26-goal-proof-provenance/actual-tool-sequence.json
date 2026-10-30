@@ -1,0 +1,339 @@
+{
+  "schema": "masc.goal.provenance.safe-protocol-projection.v1",
+  "controls": [
+    {
+      "control": "N",
+      "goal_id": "goal-proof-provenance-conflicting-report-20261026",
+      "steps": [
+        {
+          "call_id": "call_-7138162013032671973",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/report.json"
+          },
+          "disposition": "completed",
+          "finished_at": 1792946877.046478,
+          "wire_response_id": "request-000003",
+          "Tool_result_bytes": 625,
+          "Tool_result_sha256": "a204307cb7c1d3ab4adeb861163e58eae62eed161ae80f3a1f23aa3f211d7417",
+          "read_result": {
+            "bytes": 242,
+            "file_bytes": 242,
+            "truncated": false,
+            "offset": 1,
+            "returned_lines": 11
+          },
+          "read_content_sha256": "33a25eafc3b38f7db4d1cafe816448ff9877c9f36b21343d98d9086a6cd28994",
+          "producer_report": {
+            "schema": "masc.goal.provenance.producer-report.v1",
+            "reported_value": 20,
+            "state": "measured_pass",
+            "summary": {
+              "passed": 1,
+              "failed": 0
+            },
+            "execution": "proof-data/command-output.json",
+            "controlled_fixture": true
+          }
+        },
+        {
+          "call_id": "call_-7138159058095174443",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/command-output.json"
+          },
+          "disposition": "completed",
+          "finished_at": 1792946879.576658,
+          "wire_response_id": "request-000005",
+          "Tool_result_bytes": 719,
+          "Tool_result_sha256": "70adde5f5c0b9c05187ff216e27ec05abaddd2cd6c9ab094bb73f38503b00898",
+          "read_result": {
+            "bytes": 303,
+            "file_bytes": 303,
+            "truncated": false,
+            "offset": 1,
+            "returned_lines": 13
+          },
+          "read_content_sha256": "2928025297bfa7f4227def33d943eb360f51a820f73a829f0055e0da435f779c",
+          "safe_recorded_command_fields": {
+            "schema": "masc.goal.provenance.command-output.v1",
+            "exit_code": 0,
+            "stdout": "10\n",
+            "stderr": "",
+            "controlled_fixture": true
+          },
+          "omitted_source_fields": [
+            "absolute executable argv",
+            "recorded timestamp"
+          ]
+        },
+        {
+          "call_id": "call_-7138153732335730629",
+          "name": "report_review_verdict",
+          "arguments": {
+            "verdict": "REJECT",
+            "reason": "metric이 지정한 절차대로 proof-data/report.json의 execution이 가리키는 proof-data/command-output.json(기록된 명령 실행)을 직접 읽었고, 기록된 Python 명령(print(sum(range(5))))의 stdout 정수는 10이었다. target은 정확히 20이므로 미달이다. report.json의 reported_value 20과 measured_pass 라벨은 metric이 실행 출력 대신 사용을 금지한 생산자 보고이므로 채택하지 않았다. 재실행은 요구하지 않으므로 하지 않았다."
+          },
+          "disposition": "completed",
+          "finished_at": 1792946891.404602,
+          "wire_response_id": "request-000008",
+          "Tool_result_bytes": 541,
+          "Tool_result_sha256": "c3132258f42193a66bc7516192b1549fdc27964d08d96aa0d5c822fa6993eb12",
+          "verdict_ack_contains_reason": true
+        }
+      ],
+      "model_calls": [
+        {
+          "wire_id": "request-000003",
+          "request_sha256": "e7e2585d593f7f0d8a683f6864f585be18fd8195b4a0af9948396b64a26e6ff3",
+          "request_bytes": 17234,
+          "response_sha256": "737f0de8218a068179ddfba5da44c3fd42ed7565cf0be18fab72c2aa3900be54",
+          "response_bytes": 1900,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "wire_id": "request-000005",
+          "request_sha256": "e000746eca480b889fa3087cf54ad9a51fcac110f09bf9285ef9f198bc0769b3",
+          "request_bytes": 18283,
+          "response_sha256": "69dd4ff7908208b50bf33bf6ca1732bab9b6fb5eb215c5a162e10c133701ca2f",
+          "response_bytes": 919,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "wire_id": "request-000008",
+          "request_sha256": "f1dcc86cd0758fa36a5b42777740f7e609b252e9e5c212a76ff3e0e760180f55",
+          "request_bytes": 19609,
+          "response_sha256": "a3a43d925bae1ed3d9ac53dd30aa7d072f41dacdc39f58684acd874d347fee9f",
+          "response_bytes": 2945,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "wire_id": "request-000010",
+          "request_sha256": "e9c63e27ea6a81fe65073273b7f1e2ddd7dc8fb3179765a889917556c210f050",
+          "request_bytes": 21867,
+          "response_sha256": "9c86ad8fc10b3ee18a91b874abf0fcbd5f420be6f35fba85f76e0e3a1f179eb3",
+          "response_bytes": 1460,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        }
+      ],
+      "private_model_reasoning_exported": false
+    },
+    {
+      "control": "P",
+      "goal_id": "goal-proof-provenance-matching-raw-20261026",
+      "steps": [
+        {
+          "call_id": "call_-7138160947880787702",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/report.json"
+          },
+          "disposition": "completed",
+          "finished_at": 1792946877.408922,
+          "wire_response_id": "request-000002",
+          "Tool_result_bytes": 625,
+          "Tool_result_sha256": "a204307cb7c1d3ab4adeb861163e58eae62eed161ae80f3a1f23aa3f211d7417",
+          "read_result": {
+            "bytes": 242,
+            "file_bytes": 242,
+            "truncated": false,
+            "offset": 1,
+            "returned_lines": 11
+          },
+          "read_content_sha256": "33a25eafc3b38f7db4d1cafe816448ff9877c9f36b21343d98d9086a6cd28994",
+          "producer_report": {
+            "schema": "masc.goal.provenance.producer-report.v1",
+            "reported_value": 20,
+            "state": "measured_pass",
+            "summary": {
+              "passed": 1,
+              "failed": 0
+            },
+            "execution": "proof-data/command-output.json",
+            "controlled_fixture": true
+          }
+        },
+        {
+          "call_id": "call_-7138168953699827646",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/command-output.json"
+          },
+          "disposition": "completed",
+          "finished_at": 1792946883.009665,
+          "wire_response_id": "request-000006",
+          "Tool_result_bytes": 719,
+          "Tool_result_sha256": "70adde5f5c0b9c05187ff216e27ec05abaddd2cd6c9ab094bb73f38503b00898",
+          "read_result": {
+            "bytes": 303,
+            "file_bytes": 303,
+            "truncated": false,
+            "offset": 1,
+            "returned_lines": 13
+          },
+          "read_content_sha256": "2928025297bfa7f4227def33d943eb360f51a820f73a829f0055e0da435f779c",
+          "safe_recorded_command_fields": {
+            "schema": "masc.goal.provenance.command-output.v1",
+            "exit_code": 0,
+            "stdout": "10\n",
+            "stderr": "",
+            "controlled_fixture": true
+          },
+          "omitted_source_fields": [
+            "absolute executable argv",
+            "recorded timestamp"
+          ]
+        },
+        {
+          "call_id": "call_-7138173832782674433",
+          "name": "report_review_verdict",
+          "arguments": {
+            "reason": "공유 루트의 proof-data/report.json을 읽어 execution이 가리키는 proof-data/command-output.json(기록된 실행, argv `print(sum(range(5)))`, exit 0)을 직접 열었고, 기록된 Python 명령의 stdout 정수는 10이었다. report의 reported_value(20)와 성공 라벨은 metric 선언대로 배제했으며, stdout 측정값 10은 target '정확히 10'과 일치한다.",
+            "verdict": "APPROVE"
+          },
+          "disposition": "completed",
+          "finished_at": 1792946896.655059,
+          "wire_response_id": "request-000009",
+          "Tool_result_bytes": 425,
+          "Tool_result_sha256": "f80d9329e3eeed63fd9633862e6a987c93b15dfa0e26542826de61a50ae4c780",
+          "verdict_ack_contains_reason": true
+        }
+      ],
+      "model_calls": [
+        {
+          "wire_id": "request-000002",
+          "request_sha256": "e9d446a49eba6126389909e1351b7a90377c62365e12a525be69a23f19b1d40a",
+          "request_bytes": 17228,
+          "response_sha256": "df02413d51efad707a4245df0699ce8f56c2f2434ff9a66ad92ed22c131d7cdc",
+          "response_bytes": 1746,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "wire_id": "request-000006",
+          "request_sha256": "a3fb9c0a8cb06e4917e505988d2176d89e97bc57e93ff3747355c62fa7585d40",
+          "request_bytes": 18277,
+          "response_sha256": "f6db3fc86e6e545961267720b4c24a12a0accacc78a26eef277cf944d65235c8",
+          "response_bytes": 935,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "wire_id": "request-000009",
+          "request_sha256": "71d684a0f11ff0b8ed9b5d9dfdb80215f58da34de653a9a094b19d7ec83af6f5",
+          "request_bytes": 19618,
+          "response_sha256": "b8d8879fc35a611b8cce7a2753958bffdeffbbc4a31151db9ab4f251624d01a4",
+          "response_bytes": 2668,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "wire_id": "request-000012",
+          "request_sha256": "f6fd69687e6af34ffb33c5ee9847bd84674f6fe9e359b1822346e5ae0ed687b7",
+          "request_bytes": 21515,
+          "response_sha256": "3932aae73dedf9e44ee4a5f0c0b74ab8138623b4dbf278a5148ef4dcff06fdf4",
+          "response_bytes": 1074,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        }
+      ],
+      "private_model_reasoning_exported": false
+    },
+    {
+      "control": "R",
+      "goal_id": "goal-proof-provenance-reported-value-20261026",
+      "steps": [
+        {
+          "call_id": "call_-7138176100525402069",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/report.json"
+          },
+          "disposition": "completed",
+          "finished_at": 1792946879.300272,
+          "wire_response_id": "request-000004",
+          "Tool_result_bytes": 625,
+          "Tool_result_sha256": "a204307cb7c1d3ab4adeb861163e58eae62eed161ae80f3a1f23aa3f211d7417",
+          "read_result": {
+            "bytes": 242,
+            "file_bytes": 242,
+            "truncated": false,
+            "offset": 1,
+            "returned_lines": 11
+          },
+          "read_content_sha256": "33a25eafc3b38f7db4d1cafe816448ff9877c9f36b21343d98d9086a6cd28994",
+          "producer_report": {
+            "schema": "masc.goal.provenance.producer-report.v1",
+            "reported_value": 20,
+            "state": "measured_pass",
+            "summary": {
+              "passed": 1,
+              "failed": 0
+            },
+            "execution": "proof-data/command-output.json",
+            "controlled_fixture": true
+          }
+        },
+        {
+          "call_id": "call_-7138163215623519408",
+          "name": "report_review_verdict",
+          "arguments": {
+            "reason": "metric이 지정한 공유 playground 상대 경로 proof-data/report.json을 직접 읽어 reported_value 정수 20을 확인했고, metric은 보고된 값 자체를 측정 대상으로 선언하므로(재실행·실행값 재검증 불요) 측정값 20은 target '정확히 20'을 정확히 충족합니다.",
+            "verdict": "APPROVE"
+          },
+          "disposition": "completed",
+          "finished_at": 1792946892.922641,
+          "wire_response_id": "request-000007",
+          "Tool_result_bytes": 348,
+          "Tool_result_sha256": "19ff8176acc2b0bd66ac4918b586754363c17f2ccede73705930104cfc57e115",
+          "verdict_ack_contains_reason": true
+        }
+      ],
+      "model_calls": [
+        {
+          "wire_id": "request-000004",
+          "request_sha256": "66f03fa9b94ff6b7531577ed5b60ddf93b9b7de22c18fc1ec8dc92b57f4fd931",
+          "request_bytes": 17135,
+          "response_sha256": "39f6d2c4505a086771353bbeb6f6ace306b9b1a888549cd976fef9b7c44c2644",
+          "response_bytes": 2313,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "wire_id": "request-000007",
+          "request_sha256": "7864df52df57714782f8e12a2f1dae101a82e6983349c47287abaf271ab203f1",
+          "request_bytes": 18184,
+          "response_sha256": "c17bc2922a306e2b4efed95de7f3afe3c1b2da345c7df95f75454e59768ad6fc",
+          "response_bytes": 2402,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        },
+        {
+          "wire_id": "request-000011",
+          "request_sha256": "731c00e25fb544dfd3af38f0bc0ced1e7e1c504d7520e07647406e333f34c6b5",
+          "request_bytes": 19513,
+          "response_sha256": "c331603ee8f5105934da6e8fd9a3d23110dcedf8e7324685073138bc0f4bf5d4",
+          "response_bytes": 1168,
+          "http_status": 200,
+          "requested_model": "glm-5.3-flash",
+          "reported_model": "glm-5.3-flash"
+        }
+      ],
+      "private_model_reasoning_exported": false
+    }
+  ]
+}

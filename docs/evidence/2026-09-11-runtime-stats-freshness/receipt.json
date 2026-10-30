@@ -1,0 +1,28 @@
+{
+  "observed_at": "2026-09-10T15:00:45.814Z",
+  "backend_commit": "9cc33feff4917a1ae91804771a708d4a0e75e152",
+  "scope": "Vite source previews: before/after replay the exact recorded stale response; live uses actual isolated backend",
+  "results": [
+    {
+      "name": "before",
+      "url": "http://127.0.0.1:18965/dashboard/#overview",
+      "replayed_exact_prior_response": true,
+      "page_errors": [],
+      "text_characters": 711
+    },
+    {
+      "name": "after",
+      "url": "http://127.0.0.1:18967/dashboard/#overview",
+      "replayed_exact_prior_response": true,
+      "page_errors": [],
+      "text_characters": 768
+    },
+    {
+      "name": "live",
+      "url": "http://127.0.0.1:18967/dashboard/#overview",
+      "replayed_exact_prior_response": false,
+      "page_errors": [],
+      "text_characters": 766
+    }
+  ]
+}

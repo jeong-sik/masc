@@ -1,0 +1,89 @@
+0e36e77cbdf6c753e943b7e70b3b8e052576791f8dbc0ac46d16fa640143dbe4
+0e36e77cbdf6c753e943b7e70b3b8e052576791f8dbc0ac46d16fa640143dbe4
+0e36e77cbdf6c753e943b7e70b3b8e052576791f8dbc0ac46d16fa640143dbe4
+test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) ... 
+  test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='provider') ... FAIL
+  test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='model') ... FAIL
+  test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='memory_mode') ... FAIL
+  test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='experiment_digest') ... FAIL
+  test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='run_id') ... FAIL
+  test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='nested') ... FAIL
+  test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='manifest') ... FAIL
+test_frozen_resume_rejects_changed_inputs (__main__.CodingBoundary.test_frozen_resume_rejects_changed_inputs) ... FAIL
+
+======================================================================
+FAIL: test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='provider')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-eval-json-integrity-20261024/scripts/tests/test_coding_eval_boundary.py", line 62, in test_collect_refuses_duplicate_json_before_replacing_the_index
+    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 == 0 : 
+
+======================================================================
+FAIL: test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='model')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-eval-json-integrity-20261024/scripts/tests/test_coding_eval_boundary.py", line 62, in test_collect_refuses_duplicate_json_before_replacing_the_index
+    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 == 0 : 
+
+======================================================================
+FAIL: test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='memory_mode')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-eval-json-integrity-20261024/scripts/tests/test_coding_eval_boundary.py", line 62, in test_collect_refuses_duplicate_json_before_replacing_the_index
+    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 == 0 : 
+
+======================================================================
+FAIL: test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='experiment_digest')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-eval-json-integrity-20261024/scripts/tests/test_coding_eval_boundary.py", line 62, in test_collect_refuses_duplicate_json_before_replacing_the_index
+    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 == 0 : 
+
+======================================================================
+FAIL: test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='run_id')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-eval-json-integrity-20261024/scripts/tests/test_coding_eval_boundary.py", line 62, in test_collect_refuses_duplicate_json_before_replacing_the_index
+    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 == 0 : 
+
+======================================================================
+FAIL: test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='nested')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-eval-json-integrity-20261024/scripts/tests/test_coding_eval_boundary.py", line 62, in test_collect_refuses_duplicate_json_before_replacing_the_index
+    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 == 0 : 
+
+======================================================================
+FAIL: test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) (duplicate='manifest')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-eval-json-integrity-20261024/scripts/tests/test_coding_eval_boundary.py", line 62, in test_collect_refuses_duplicate_json_before_replacing_the_index
+    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 == 0 : 
+
+======================================================================
+FAIL: test_frozen_resume_rejects_changed_inputs (__main__.CodingBoundary.test_frozen_resume_rejects_changed_inputs)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/masc-eval-json-integrity-20261024/scripts/tests/test_coding_eval_boundary.py", line 137, in test_frozen_resume_rejects_changed_inputs
+    with self.assertRaisesRegex(ValueError, "duplicate JSON object key"):
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.545s
+
+FAILED (failures=8)

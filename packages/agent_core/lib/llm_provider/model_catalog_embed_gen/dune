@@ -1,0 +1,2 @@
+(executable
+ (name model_catalog_embed_gen))

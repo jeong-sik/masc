@@ -1,0 +1,34 @@
+{
+  "at": 1792747377.866899,
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/lane-addons",
+    "body": null,
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "etag": "W/\"716192a0ab30\"",
+      "cache-control": "no-cache",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "192"
+    },
+    "body": {
+      "configuration": {
+        "directory": "/tmp/masc-addon-actual-review-20261023/workspace/.masc/config/lane-addons",
+        "complete": true,
+        "issues": [],
+        "declarations": []
+      },
+      "instances": [],
+      "rows": [],
+      "coverage": []
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "pr": 35501,
+  "head": "c45f51353e18c92820120cd0369163e549aa4363",
+  "test_run": 34696911670,
+  "test_status": "completed",
+  "independent_review": "no P1/P2",
+  "installed": false,
+  "scope": "Automatically capture active owned Task completion contract and linked Goal criteria when both IDs are omitted. Does not fix incorrect consumption of an already delivered verdict.",
+  "ci_status_scope": "Status at initial exact-head dispatch verification; not a terminal verdict.",
+  "test_conclusion": "success",
+  "suite_cases": {
+    "test_fusion_decision": 4,
+    "test_fusion_wake": 17
+  }
+}

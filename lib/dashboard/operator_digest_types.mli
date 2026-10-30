@@ -1,0 +1,94 @@
+(** Operator_digest_types — severity levels, attention items,
+    recommended actions, and derived summaries for operator control. *)
+
+(** {1 Severity}
+
+    Closed set — exhaustive matching catches new levels at compile time. *)
+
+type operator_severity = Sev_critical | Sev_bad | Sev_warn | Sev_info
+
+val operator_severity_to_string : operator_severity -> string
+
+(** Safe reverse: [None] on unknown input. *)
+val operator_severity_of_string_opt : string -> operator_severity option
+
+val operator_severity_of_failure_envelope :
+  Failure_envelope.severity -> operator_severity
+
+(** {1 Attention item} *)
+
+type attention_item = {
+  kind : string;
+  severity : operator_severity;
+  summary : string;
+  target_type : string;
+  target_id : string option;
+  actor : string option;
+  evidence : Yojson.Safe.t;
+}
+
+(** {1 Recommended action} *)
+
+(** A catalog action recommended for one target. Its target type is the
+    catalog's ({!Operator_action_catalog.target_type}) and is not carried
+    here. *)
+type recommended_action = {
+  action : Operator_action_catalog.t;
+  target_id : string option;
+  severity : operator_severity;
+  reason : string;
+  suggested_payload : Yojson.Safe.t;
+}
+
+(** {1 Thresholds and ranking} *)
+
+val stalled_session_threshold_sec : float
+
+(** [Sev_critical → 4], [Sev_bad → 3], [Sev_warn → 2], [Sev_info → 1]. Used
+    for descending-severity comparators; 0 is reserved for a string that is
+    not a severity. *)
+val severity_rank : operator_severity -> int
+
+(** [severity_rank_of_string raw] decodes a serialized severity and ranks it.
+    Anything that is not an [operator_severity] ranks 0. *)
+val severity_rank_of_string : string -> int
+
+(** Compare attention items: primary by descending severity rank,
+    then by [target_id] (None last), then by [kind]. *)
+val compare_attention : attention_item -> attention_item -> int
+
+(** Compare recommended actions: same ordering as {!compare_attention}
+    but with the action's wire name as the final tiebreaker. *)
+val compare_recommendation : recommended_action -> recommended_action -> int
+
+(** {1 JSON serialisation} *)
+
+(** Emit with [provenance = "derived"], [authoritative = false]. *)
+val attention_item_to_yojson : attention_item -> Yojson.Safe.t
+
+(** Emit with preview envelope, [provenance = "fallback"],
+    [authoritative = false]. *)
+val recommended_action_to_yojson :
+  actor:string -> recommended_action -> Yojson.Safe.t
+
+(** {1 Summary builders} *)
+
+(** Sorted count + bad/warn breakdown + top item, JSON-encoded. *)
+val summary_of_attention_items : attention_item list -> Yojson.Safe.t
+
+(** Deduplicate by [(action, target_id, normalised reason)] keeping the
+    highest-severity representative. *)
+val dedup_recommendations : recommended_action list -> recommended_action list
+
+val summary_of_recommendations :
+  actor:string -> recommended_action list -> Yojson.Safe.t
+
+(** {1 Target type normalisation} *)
+
+(** [true] for the canonical ["workspace"] target type. *)
+val is_workspace_target_type : string -> bool
+
+(** Accepts [None] → [Ok "workspace"]; [Some raw] is trimmed + lowercased, then
+    checked via {!is_workspace_target_type}. Otherwise returns the canonical
+    workspace-target validation error. *)
+val normalize_digest_target_type : string option -> (string, string) result

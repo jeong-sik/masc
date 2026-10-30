@@ -1,0 +1,14 @@
+{
+  "fixture_sha256": "ba5e3b2af644fcfa2c9fba133ce2497daa5167e58b5390d5a8db8b2b407b79d4",
+  "raw_checker_sha256": {
+    "baseline-pyright": "ead44fad8d842ac31a01e1cc34c6a61078b52914fbaf524d29327ec644bc41f8",
+    "pyright": "34e30ca4ca1281f156da0b98195bc42d52f7b4c026d1f93a5d2f2a7c7f856640"
+  },
+  "files": {
+    "pyright-after.json": "34e30ca4ca1281f156da0b98195bc42d52f7b4c026d1f93a5d2f2a7c7f856640",
+    "pyright-before.json": "ead44fad8d842ac31a01e1cc34c6a61078b52914fbaf524d29327ec644bc41f8",
+    "README.md": "8a3af8e5758b6a1cb7da02d36298f032c56c08eb9d1bb6ac1f9e979dbbda521f",
+    "metadata-pty.log": "2888aefca490fd110ef1631ab34c76f0a20b4f772badfdd50536436d7c41285d",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "schema": "duplicate-consolidation.native-leaf.v1",
+  "compiler": "5.5.1",
+  "recorded_at": "2026-10-26T12:20:45.932590+00:00",
+  "status": "PASS",
+  "production_source_sha256": {
+    "lib/mcp_error_code.mli": "68cff61e11a28f64ce070932bd83b446b152bf27251548cb92e35fe82a442032",
+    "lib/mcp_error_code.ml": "a965e4d05dbe98a9be3d705fcc0027bbbac3e8008d8d5218eec1ed664690ab5a",
+    "lib/core/executable_path.mli": "81643f78b2a4695d7e0421edc04ba4ec4c9b272fffe8c94f77e5fb078ec61ea3",
+    "lib/core/executable_path.ml": "1282a2709fd78d6645a608f74ea116a4068caf94ec0493882db5bbb1a1ebff9f"
+  },
+  "test_source_sha256": "56afd21216c4b82e1d8cbc13664ad67dd944310735534183be72f104c58ac9f8",
+  "test_source_adaptation": "Only module C = Masc.Mcp_error_code changed to module C = Mcp_error_code in artifact copy, to run existing tests against actual leaf outside Dune wrapper. No assertions removed or changed.",
+  "tests_run": 13,
+  "tests_passed": 13,
+  "production_warning_flags": [
+    "-w",
+    "+4+32+69",
+    "-warn-error",
+    "+a"
+  ],
+  "test_warning_policy": "Existing test/dune:323-328 test-only -w -4 override; production modules retain strict warnings.",
+  "production_compile_commands": [
+    [
+      "ocamlfind",
+      "ocamlopt",
+      "-package",
+      "httpun,yojson",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "mcp_error_code.mli"
+    ],
+    [
+      "ocamlfind",
+      "ocamlopt",
+      "-package",
+      "httpun,yojson",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "mcp_error_code.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlopt",
+      "-package",
+      "unix",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "executable_path.mli"
+    ],
+    [
+      "ocamlfind",
+      "ocamlopt",
+      "-package",
+      "unix",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "executable_path.ml"
+    ]
+  ],
+  "test_compile_command": [
+    "ocamlfind",
+    "ocamlopt",
+    "-package",
+    "alcotest,httpun,yojson",
+    "-linkpkg",
+    "-w",
+    "+4+32+69",
+    "-w",
+    "-4",
+    "-warn-error",
+    "+a",
+    "mcp_error_code.cmx",
+    "test_mcp_error_code.ml",
+    "-o",
+    "test_mcp_error_code"
+  ],
+  "test_run_command": [
+    "./test_mcp_error_code"
+  ],
+  "limits": "Actual Mcp_error_code mli/ml native typecheck and existing protocol tests; actual Executable_path mli/ml native typecheck. Not full mascot/HTTP server/browser/keeper linking or runtime proof."
+}

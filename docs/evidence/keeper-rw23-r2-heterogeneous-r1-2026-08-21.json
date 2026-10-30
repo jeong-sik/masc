@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-21T09:52:12Z",
+  "kind": "keeper_rw23_and_heterogeneous_failed_observations",
+  "authority": "exact_source_runtime_artifact_and_durable_receipts",
+  "completion_claim": "none",
+  "protected_main_r2": {
+    "status": "failed",
+    "source_sha": "386a517d01cf89f894b7c1357b567ea7d3b8030a",
+    "workflow_run_id": 32464464661,
+    "job_id": 96722750063,
+    "artifact_id": 9441447063,
+    "artifact_name": "keeper-realworld-evidence-32464464661-1",
+    "artifact_url": "https://github.com/jeong-sik/masc/actions/runs/32464464661",
+    "fatal_sha256": "c80f8e51fd884b9b3cf097ec89cc483d65d41ac9c5ba0c7917a9ca0c101f5a6b",
+    "failure": "verifier Task did not reach in_progress: last=null",
+    "typed_task_verdict": {
+      "outcome": "rejected",
+      "from_status": "awaiting_verification",
+      "to_status": "in_progress",
+      "verification_id": "vrf-f2f3c09c2b408db641c47c211172e62c",
+      "raw_artifact_path": "evidence/raw/108-goal-verifier-task-history-in-progress-7.json",
+      "raw_sha256": "994da63b254b985c45fddefd035768d2149ab50610b86599b29d6ce844f65938"
+    },
+    "board_projection": {
+      "observed_task_status": "in_progress",
+      "shape": "human_rendered_text",
+      "raw_artifact_path": "evidence/raw/117-goal-verifier-task-poll-in-progress-9.json",
+      "raw_sha256": "2c1decaafd5e92f7ed0ea323284396b3910fe531811e4a8b3fd0e5b49be6d23f"
+    },
+    "verdict": "The product Task verifier rejected the bad artifact correctly. The harness then produced a false negative by recursively searching a human Board string for a structured task object. No Goal or browser completion claim is made."
+  },
+  "heterogeneous_r1": {
+    "status": "failed",
+    "run_id": "hetero-386a517d01-20260821T091539Z",
+    "source_sha": "386a517d01cf89f894b7c1357b567ea7d3b8030a",
+    "runtime_artifact": {
+      "workflow_run_id": 32464464661,
+      "artifact_id": 9440944491,
+      "artifact_name": "masc-runtime-macos-arm64-32464464661-1",
+      "binary_sha256": "e004bb0300b0732c9ad7f4a2acac85a1f5d0d9c936346d49d13556bbe3ec3a89",
+      "target": "macos-arm64",
+      "source_ref": "refs/heads/main",
+      "source_ref_protected": true
+    },
+    "isolated_base": true,
+    "configured_role_count": 5,
+    "configured_distinct_runtime_count": 5,
+    "actual_serving": {
+      "status": "failed",
+      "served_role_count": 4,
+      "distinct_served_runtime_count": 4,
+      "minimum_exact_successes_required_per_role": 10,
+      "roles": {
+        "coordinator": {
+          "runtime_id": "codex_subscription.gpt-5.6-terra",
+          "exact_success_count": 26,
+          "fallback_receipt_count": 0,
+          "ten_turn_status": "passed"
+        },
+        "builder-a": {
+          "runtime_id": "claude_code.claude-sonnet-5",
+          "exact_success_count": 32,
+          "fallback_receipt_count": 0,
+          "ten_turn_status": "passed"
+        },
+        "builder-b": {
+          "runtime_id": "antigravity_subscription.gemini-3-6-flash-medium",
+          "exact_success_count": 0,
+          "fallback_receipt_count": 0,
+          "ten_turn_status": "failed"
+        },
+        "reviewer": {
+          "runtime_id": "kimi_coding.kimi-for-coding-highspeed",
+          "exact_success_count": 3,
+          "fallback_receipt_count": 3,
+          "ten_turn_status": "failed"
+        },
+        "researcher": {
+          "runtime_id": "ollama.qwen3-8-27b",
+          "exact_success_count": 6,
+          "fallback_receipt_count": 0,
+          "ten_turn_status": "failed"
+        }
+      }
+    },
+    "goal_race": {
+      "goal_id": "goal-keeper-collab-hetero-386a517d0-verifier",
+      "expected_initial_phase": "executing",
+      "observed_phase": "completed",
+      "observed_completion_state": "proof_proven",
+      "criterion_verification_run_id": "01a0239a-c442-7000-8052-1207f50d3e42",
+      "completion_verification_run_id": "01a023a2-dd53-7000-957d-c035b145df86",
+      "task_actor": "keeper-rw-hetero-386a517d0-build-a-agent",
+      "task_verification_id": "vrf-63735ebee6ac45fed461c8fa69744c2d",
+      "cause": "The verifier Goal was assigned during setup and its success path became visible to the autonomous fleet. Builder-a claimed and submitted task-009 with the success artifact; the Goal then reached proof_proven before the directed RW23 phase."
+    },
+    "artifact_hashes": {
+      "fatal_json": {
+        "bytes": 106134,
+        "sha256": "830e7f5882740f7be66d0e9c51608d55c7cb2b0fe1322eab4796eef70c3fb839"
+      },
+      "server_log": {
+        "bytes": 1495562,
+        "sha256": "9733d380b99de79c88c9133c77a77bc7fdef13a3c36ebb470c39b87df545abe5"
+      },
+      "runtime_manifests": {
+        "coordinator": "5162167bf912430bdb365729ce3fb21f1fd4e15276495e7cebb5ab2b3e1f5bca",
+        "builder-a": "55dea743edb0a371e735c32407f50d1dc3581a43e007e9c66f002e138a35cbbb",
+        "builder-b": "efc55f36582243ca48597bb5b854b475fb99859a04e90bba53a93b2d02213e52",
+        "reviewer": "e82da7532090a137c5d946043c1bc2f8ffa8e15dbbad1c56b134ca85f0c41258",
+        "researcher": "28e810223091db293e3d1d1a4041a8d35061ab31c28b35a444397c6f5905a0dd"
+      }
+    },
+    "verdict": "Five runtime IDs were configured, but only four distinct requested runtimes produced an exact successful serving receipt, and only two roles reached ten exact successful turns. The run is failed and is not combined with any other attempt."
+  },
+  "open_slices": [
+    {
+      "pr": 29280,
+      "purpose": "project exact per-role runtime serving receipts into every acceptance bundle"
+    },
+    {
+      "pr": 29281,
+      "purpose": "trust typed Task verifier verdicts and defer verifier Goal ownership until directed RW23"
+    },
+    {
+      "pr": 29283,
+      "purpose": "package a source- and digest-bound canary runner for five-provider ten-turn and duration executions"
+    }
+  ],
+  "limitations": [
+    "This file summarizes a failed local isolated run; the full local raw bundle is not promoted to a completion artifact.",
+    "The protected-main workflow artifact is retained by GitHub for seven days.",
+    "No 23-of-23 scenario PASS, five-of-five ten-turn serving PASS, Goal refute-reenter-prove PASS, or product browser screenshot was produced by either run."
+  ]
+}

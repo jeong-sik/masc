@@ -1,0 +1,33 @@
+{
+  "source": "63b6a34a2e5d8a5388ff8da6088fb6755e81506f",
+  "artifact": {
+    "id": 10913715720,
+    "node_id": "MDg6QXJ0aWZhY3QxMDkxMzcxNTcyMA==",
+    "name": "linux-x64-probe-63b6a34a2e5d8a5388ff8da6088fb6755e81506f-attempt-1",
+    "size_in_bytes": 110576866,
+    "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10913715720",
+    "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10913715720/zip",
+    "expired": false,
+    "digest": "sha256:dd8ef738dac55de87302fe63101addb49e67f775f045d401f991ce77d669ec0f",
+    "created_at": "2026-09-26T19:01:16Z",
+    "updated_at": "2026-09-26T19:01:16Z",
+    "expires_at": "2026-10-03T19:01:04Z",
+    "workflow_run": {
+      "id": 36263898895,
+      "repository_id": 1136640865,
+      "head_repository_id": 1136640865,
+      "head_branch": "perf/worker-support-baseline-probe-20260927",
+      "head_sha": "63b6a34a2e5d8a5388ff8da6088fb6755e81506f"
+    }
+  },
+  "run_id": 36263898895,
+  "sha256": {
+    "deployment_preflight_helper.exe": "cf5ee9264648eb303a58b935928baf39f21505aa8da54d69a91e80ee9eacdb97",
+    "main_eio.exe": "8d9f7b5508e9b1ec7e2d5d445099cc26ce8cc091d40a703a783b4b82fd04786c",
+    "masc_browser_host.exe": "f00767faf8b453ded6e95926b78bac9f32918a96e930cb0fa265b220ee160049",
+    "masc_tui.exe": "2d1c935ef60074c7d4635dc5f9abaf536a9ec019327d5ce1cc0718b80afdd958"
+  },
+  "build_workflow": ".github/workflows/linux-x64-probe.yml",
+  "scope": "CI probe output; not release, deployment or performance acceptance",
+  "binary": "<CI_CHECKOUT>/runtime-baseline/masc_tui.exe"
+}

@@ -1,0 +1,93 @@
+{
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/39894327289",
+  "exact_head": "d22196b9e65e83df4d6aaacac40b716ee5dbdcfd",
+  "conclusion": "failure",
+  "compilation": "passed for the ten selected suites",
+  "tests": 438,
+  "passed": 421,
+  "failed": 17,
+  "suites": [
+    {
+      "name": "test_keeper_librarian_durable_execution",
+      "tests": 11,
+      "failed": 10,
+      "seconds": 0.528
+    },
+    {
+      "name": "test_keeper_librarian_durable_preparation",
+      "tests": 3,
+      "failed": 0,
+      "seconds": 0.02
+    },
+    {
+      "name": "test_keeper_librarian_durable_capture",
+      "tests": 7,
+      "failed": 6,
+      "seconds": 0.093
+    },
+    {
+      "name": "test_keeper_librarian_durable_consumer",
+      "tests": 113,
+      "failed": 0,
+      "seconds": 4.156
+    },
+    {
+      "name": "test_keeper_librarian_continuity",
+      "tests": 75,
+      "failed": 0,
+      "seconds": 33.938
+    },
+    {
+      "name": "test_keeper_librarian_capacity_callback",
+      "tests": 25,
+      "failed": 1,
+      "seconds": 0.336
+    },
+    {
+      "name": "test_keeper_external_attention",
+      "tests": 16,
+      "failed": 0,
+      "seconds": 0.375
+    },
+    {
+      "name": "test_keeper_memory_os_current",
+      "tests": 154,
+      "failed": 0,
+      "seconds": 8.01
+    },
+    {
+      "name": "test_lane_addon_request_discovery",
+      "tests": 12,
+      "failed": 0,
+      "seconds": 0.11
+    },
+    {
+      "name": "test_keeper_librarian_addon_owner",
+      "tests": 22,
+      "failed": 0,
+      "seconds": 11.852
+    }
+  ],
+  "failure_evidence": [
+    {
+      "suite": "test_keeper_librarian_durable_execution",
+      "failure": "Eio_guard.Non_eio_mutex_context in fixture checkpoint path resolution inside run_in_systhread",
+      "cases": 10
+    },
+    {
+      "suite": "test_keeper_librarian_durable_capture",
+      "failure": "canonical checkpoint encoder refuses duplicate message metadata.input_speaker keys in fixture",
+      "cases": 6
+    },
+    {
+      "suite": "test_keeper_librarian_capacity_callback",
+      "failure": "fixture baseline Fresh_history correctly starts reading from atom zero and dispatches commit",
+      "cases": 1
+    }
+  ],
+  "limits": [
+    "No installed or live managed runtime was replaced.",
+    "Fixture failures are not passing integration evidence. Later repairs require a new exact-head execution.",
+    "Seven completely successful suites account for 395 tests; partial suite successes do not clear the seventeen failures."
+  ]
+}

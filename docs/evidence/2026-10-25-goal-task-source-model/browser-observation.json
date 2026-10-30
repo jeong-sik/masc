@@ -1,0 +1,17 @@
+{
+  "schema": "masc.task-source.browser-observation.v1",
+  "source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "frontend_source_checkout_head": "5ef6623937fab2a04f10862605b7d7db56ab8bdb",
+  "frontend_tree_same_as_code_candidate": true,
+  "frontend_mode": "Vite dev server using existing local dependency cache",
+  "backend": "the same isolated exact-source server used for the controls",
+  "runtime_static_dashboard_before_dev_server_HTTP": 503,
+  "production_dashboard_packaging_proven": false,
+  "space_id": 12,
+  "space_finished": true,
+  "observed_P": "proof_proven / awaiting_confirmation, 증명됨 · 최종 확인 대기",
+  "observed_N": "proof_refuted / executing, 반증됨",
+  "Goal_task_rollups": "0/0 because controlled source Tasks are goalless; evidence references do not create Goal links",
+  "human_confirmation_clicked": false,
+  "image_sha256": "2b4bb74057f8567f78b07213c5c463f04f8e26e6d567b7dcb4f2a6420424fbec"
+}

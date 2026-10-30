@@ -1,0 +1,543 @@
+(** Explicit Shell IR path-scope contract.
+
+    [Exec_policy] validates typed [cwd] and redirect targets. Positional argv
+    remains opaque application data: command names, flags, and token shapes do
+    not create an inferred filesystem authorization boundary.
+
+    The suite also pins the filesystem-grounded hint that
+    [Exec_policy.existing_sibling_dirs_hint] fills into a [Cwd_not_directory]
+    error.
+
+    The hint must come from real directory entries read via [Sys.readdir],
+    never from a hardcoded rename table or a substring/similarity match.
+    A stale "repos/masc-mcp" path must surface the real "repos/" entries so
+    the caller self-corrects from ground truth. *)
+
+(* The hint this suite pins moved out of exec_policy.ml into
+   config/prompts/exec_policy.md, rendered through the prompt registry. *)
+let () =
+  Masc.Prompt_defaults.init ()
+;;
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path)
+  then (
+    mkdir_p (Filename.dirname path);
+    try Sys.mkdir path 0o755 with Sys_error _ -> ())
+;;
+
+let rec rm_rf path =
+  match Sys.is_directory path with
+  | true ->
+    Array.iter (fun e -> rm_rf (Filename.concat path e)) (Sys.readdir path);
+    (try Sys.rmdir path with Sys_error _ -> ())
+  | false -> (try Sys.remove path with Sys_error _ -> ())
+  | exception Sys_error _ -> ()
+;;
+
+let with_temp_tree f =
+  let root = Filename.temp_dir "masc_cwd_hint" "" in
+  Fun.protect ~finally:(fun () -> rm_rf root) (fun () -> f root)
+;;
+
+let test_lists_existing_sibling_dirs () =
+  with_temp_tree (fun root ->
+    mkdir_p (Filename.concat root "repos/masc");
+    mkdir_p (Filename.concat root "repos/agent_core");
+    let hint = Exec_policy.existing_sibling_dirs_hint ~workdir:root "repos/masc-mcp" in
+    Alcotest.(check (option string))
+      "stale repos/masc-mcp surfaces the real repos/ entries (sorted, no rename table)"
+      (* Sorted by String.compare, so agent_core precedes masc. The literal is
+         written out rather than derived from the mkdir_p calls above: deriving
+         it would call the same sort the subject uses and pass whatever order
+         the subject produced. *)
+      (Some "(existing directories under repos/: agent_core, masc)")
+      hint)
+;;
+
+let test_none_when_ancestor_has_no_subdirs () =
+  with_temp_tree (fun root ->
+    let hint = Exec_policy.existing_sibling_dirs_hint ~workdir:root "nope/missing" in
+    Alcotest.(check (option string))
+      "no child directories under nearest existing ancestor -> None"
+      None
+      hint)
+;;
+
+let test_ignores_plain_files () =
+  with_temp_tree (fun root ->
+    mkdir_p (Filename.concat root "repos/masc");
+    (* a plain file sibling must NOT appear in the directory listing *)
+    let oc = open_out (Filename.concat root "repos/README.md") in
+    close_out oc;
+    let hint = Exec_policy.existing_sibling_dirs_hint ~workdir:root "repos/gone" in
+    Alcotest.(check (option string))
+      "plain files are excluded; only real directories are listed"
+      (Some "(existing directories under repos/: masc)")
+      hint)
+;;
+
+let lit value = Masc_exec.Shell_ir.Lit (value, Masc_exec.Shell_ir.default_meta)
+
+let shell_ir ?cwd ?(redirects = []) ~workdir args =
+  let cwd =
+    Option.map (fun raw -> Masc_exec.Path_scope.classify ~raw ~cwd:workdir) cwd
+  in
+  let bin =
+    match Masc_exec.Exec_program.of_string "cat" with
+    | Ok bin -> bin
+    | Error _ -> Alcotest.fail "literal cat executable must be non-empty"
+  in
+  Masc_exec.Shell_ir.Simple
+    { bin
+    ; args = List.map lit args
+    ; env = []
+    ; cwd
+    ; redirects
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+;;
+
+let test_positional_argv_is_not_inferred_as_path () =
+  with_temp_tree (fun workdir ->
+    let ir = shell_ir ~workdir [ "/etc/passwd"; "../../opaque-token" ] in
+    Alcotest.(check bool)
+      "argv is opaque to exec policy"
+      true
+      (Result.is_ok (Exec_policy.validate_shell_ir_paths ~extra_roots:[] ~workdir ir)))
+;;
+
+let test_explicit_cwd_outside_workdir_is_rejected () =
+  with_temp_tree (fun workdir ->
+    let ir = shell_ir ~cwd:"/etc" ~workdir [] in
+    Alcotest.(check bool)
+      "typed cwd remains contained"
+      true
+      (Result.is_error (Exec_policy.validate_shell_ir_paths ~extra_roots:[] ~workdir ir)))
+;;
+
+let test_explicit_redirect_outside_workdir_is_rejected () =
+  with_temp_tree (fun workdir ->
+    let target = Masc_exec.Path_scope.classify ~raw:"/etc/passwd" ~cwd:workdir in
+    let redirect =
+      Masc_exec.Redirect_scope.File
+        { fd = 1
+        ; target = Masc_exec.Redirect_scope.In_command_namespace target
+        ; mode = Masc_exec.Redirect_scope.Write
+        }
+    in
+    let ir = shell_ir ~redirects:[ redirect ] ~workdir [] in
+    Alcotest.(check bool)
+      "typed redirect remains contained"
+      true
+      (Result.is_error (Exec_policy.validate_shell_ir_paths ~extra_roots:[] ~workdir ir)))
+;;
+
+let test_cwd_missing_on_host_is_rejected_by_default () =
+  with_temp_tree (fun workdir ->
+    let ir = shell_ir ~cwd:"repos/masc" ~workdir [] in
+    match Exec_policy.validate_shell_ir_paths ~extra_roots:[] ~workdir ir with
+    | Error msg ->
+      Alcotest.(check bool)
+        "missing directory surfaces cwd_not_directory by default"
+        true
+        (String_util.contains_substring msg "cwd_not_directory")
+    | Ok () -> Alcotest.fail "missing directory must fail by default")
+;;
+
+let test_cwd_missing_on_host_is_allowed_when_requires_existing_dir_false () =
+  with_temp_tree (fun workdir ->
+    let ir = shell_ir ~cwd:"repos/masc" ~workdir [] in
+    match
+      Exec_policy.validate_shell_ir_paths ~extra_roots:[]
+        ~requires_existing_dir:false
+        ~workdir
+        ir
+    with
+    | Ok () -> ()
+    | Error msg ->
+      Alcotest.failf
+        "missing host directory should be allowed when requires_existing_dir is false, got: %s"
+        msg)
+;;
+
+(* The token a downstream classifier reads, taken from the module that
+   defines it rather than spelled here. Its sibling variant renders
+   "cwd_not_directory:", and #33579 wrote this one as
+   "path_outside_whitelist" on the assumption that the pair matches. It does
+   not -- the prefix is "path blocked:" -- so both checks below have asked
+   for a string no producer emits since the day they were added.
+
+   Matched case-insensitively: [message_prefix] is documented as a prefix of
+   the lowercase form of [to_message], and [to_message] opens with a capital. *)
+let outside_whitelist_prefix =
+  Keeper_path_check_error.message_prefix
+    (* Built the way exec_policy.ml builds it at the site under test; the
+       prefix does not read the payload, the message around it does. *)
+    (Keeper_path_check_error.Path_outside_whitelist
+       { path = ""; for_keeper_command = true })
+;;
+
+let test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false () =
+  with_temp_tree (fun workdir ->
+    let ir = shell_ir ~cwd:"/etc" ~workdir [] in
+    match
+      Exec_policy.validate_shell_ir_paths ~extra_roots:[]
+        ~requires_existing_dir:false
+        ~workdir
+        ir
+    with
+    | Error msg ->
+      Alcotest.(check bool)
+        "outside workdir surfaces path_outside_whitelist"
+        true
+        (String_util.contains_substring_ci msg outside_whitelist_prefix)
+    | Ok () ->
+      Alcotest.fail
+        "cwd outside workdir must be rejected even when requires_existing_dir is false")
+;;
+
+(* A [cd] operand inside the command -- an argv [cd masc] stage, or the
+   [cd masc && ...] a re-opened [sh -c] script opens with -- is judged by the
+   same existence rule as the stage's cwd: required where the command runs on
+   this filesystem, not for a guest whose checkouts the host cannot see. Every
+   microvm keeper's "cd masc" was refused on the host for a checkout its own
+   prompt listed (2026-09-22). *)
+let stage ~bin_name ~workdir args =
+  let bin =
+    match Masc_exec.Exec_program.of_string bin_name with
+    | Ok bin -> bin
+    | Error _ -> Alcotest.failf "literal %s executable must be non-empty" bin_name
+  in
+  ignore workdir;
+  Masc_exec.Shell_ir.Simple
+    { bin
+    ; args = List.map lit args
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+;;
+
+let test_cd_operand_into_missing_dir_is_rejected_on_host () =
+  with_temp_tree (fun workdir ->
+    List.iter
+      (fun ir ->
+         match Exec_policy.validate_shell_ir_paths ~extra_roots:[] ~workdir ir with
+         | Error msg ->
+           Alcotest.(check bool)
+             "a cd operand naming a missing host directory is cwd_not_directory"
+             true
+             (String_util.contains_substring msg "cwd_not_directory")
+         | Ok () -> Alcotest.fail "a cd operand naming a missing host directory must fail on the host")
+      [ stage ~bin_name:"cd" ~workdir [ "masc" ]
+      ; stage ~bin_name:"sh" ~workdir [ "-c"; "cd masc && ls" ]
+      ])
+;;
+
+let test_cd_operand_into_missing_dir_is_allowed_for_a_guest () =
+  with_temp_tree (fun workdir ->
+    List.iter
+      (fun ir ->
+         match
+           Exec_policy.validate_shell_ir_paths
+             ~extra_roots:[]
+             ~requires_existing_dir:false
+             ~workdir
+             ir
+         with
+         | Ok () -> ()
+         | Error msg ->
+           Alcotest.failf
+             "a guest's cd operand must not be judged against the host filesystem, got: %s"
+             msg)
+      [ stage ~bin_name:"cd" ~workdir [ "masc" ]
+      ; stage ~bin_name:"sh" ~workdir [ "-c"; "cd masc && ls" ]
+      ])
+;;
+
+let test_cd_operand_outside_workdir_is_rejected_for_a_guest () =
+  with_temp_tree (fun workdir ->
+    match
+      Exec_policy.validate_shell_ir_paths ~extra_roots:[]
+        ~requires_existing_dir:false
+        ~workdir
+        (stage ~bin_name:"cd" ~workdir [ "/etc" ])
+    with
+    | Error msg ->
+      Alcotest.(check bool)
+        "containment still applies to a guest's cd operand"
+        true
+        (String_util.contains_substring_ci msg outside_whitelist_prefix)
+    | Ok () -> Alcotest.fail "a cd operand outside the workdir must be rejected for a guest too")
+;;
+
+let dummy_runner
+      ~on_stdout_chunk:_
+      ~on_stderr_chunk:_
+      ~stdin_content:_
+      ~argv:_
+      ~env:_
+      ~cwd:_
+  =
+  failwith "dummy runner is never invoked during path validation"
+;;
+
+let dummy_ssh_endpoint : Masc_exec.Sandbox_target.ssh_endpoint =
+  { name = "test-endpoint"
+  ; host = "test.internal"
+  ; user = "masc"
+  ; port = 22
+  ; identity_file = "/base/.masc/ssh/test.key"
+  ; known_hosts_file = "/base/.masc/ssh/known_hosts.d/test"
+  ; remote_root = "/srv/masc/playground/keeper"
+  ; connect_timeout_sec = 10
+  ; env_allowlist = [ "PATH" ]
+  ; allowed_paths = []
+  }
+;;
+
+let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
+  with_temp_tree (fun workdir ->
+    let ir = shell_ir ~cwd:"repos/masc" ~workdir [] in
+    (match
+       Keeper_tooling.Execute_shell_ir.validate_paths
+         ~sandbox:(Masc_exec.Sandbox_target.host ())
+         ~workdir
+         ir
+     with
+     | Error msg ->
+       Alcotest.(check bool)
+         "host target rejects missing host directory"
+         true
+         (String_util.contains_substring msg "cwd_not_directory")
+     | Ok () -> Alcotest.fail "host target must reject missing directory");
+    (match
+       Keeper_tooling.Execute_shell_ir.validate_paths
+         ~sandbox:
+           (Masc_exec.Sandbox_target.docker
+              ~image:"masc-test:latest"
+              ~runner:dummy_runner
+              ())
+         ~workdir
+         ir
+     with
+     | Error msg ->
+       Alcotest.(check bool)
+         "docker target rejects missing host directory"
+         true
+         (String_util.contains_substring msg "cwd_not_directory")
+     | Ok () -> Alcotest.fail "docker target must reject missing directory");
+    (match
+       Keeper_tooling.Execute_shell_ir.validate_paths
+         ~sandbox:
+           (Masc_exec.Sandbox_target.micro_vm
+              ~image:"masc-test:latest"
+              ~runner:dummy_runner
+              ())
+         ~workdir
+         ir
+     with
+     | Ok () -> ()
+     | Error msg ->
+       Alcotest.failf
+         "micro_vm target must allow endpoint-owned directory, got: %s"
+         msg);
+    (match
+       Keeper_tooling.Execute_shell_ir.validate_paths
+         ~sandbox:
+           (Masc_exec.Sandbox_target.ssh
+              ~endpoint:dummy_ssh_endpoint
+              ~runner:dummy_runner
+              ())
+         ~workdir
+         ir
+     with
+     | Ok () -> ()
+     | Error msg ->
+       Alcotest.failf
+         "ssh target must allow endpoint-owned directory, got: %s"
+         msg);
+    let ir_escape = shell_ir ~cwd:"/etc" ~workdir [] in
+    match
+      Keeper_tooling.Execute_shell_ir.validate_paths
+        ~sandbox:
+          (Masc_exec.Sandbox_target.micro_vm
+             ~image:"masc-test:latest"
+             ~runner:dummy_runner
+             ())
+        ~workdir
+        ir_escape
+    with
+    | Error msg ->
+      Alcotest.(check bool)
+        "micro_vm target rejects outside workdir"
+        true
+        (String_util.contains_substring_ci msg outside_whitelist_prefix)
+    | Ok () -> Alcotest.fail "micro_vm target must reject path outside workdir")
+;;
+
+(* An ssh endpoint may declare extra roots its commands may name
+   ([exec.ssh.endpoints.<name>] allowed_paths): a Terminal-Bench task lives
+   in /app on the endpoint. The roots widen only the Ssh target, only by the
+   roots declared, and compare lexically, so [..] cannot walk out of them. *)
+let test_execute_shell_ir_ssh_allowed_paths_widen_only_the_ssh_target () =
+  with_temp_tree (fun workdir ->
+    let ssh_target allowed_paths =
+      Masc_exec.Sandbox_target.ssh
+        ~endpoint:{ dummy_ssh_endpoint with allowed_paths }
+        ~runner:dummy_runner
+        ()
+    in
+    let micro_vm_target =
+      Masc_exec.Sandbox_target.micro_vm
+        ~image:"masc-test:latest"
+        ~runner:dummy_runner
+        ()
+    in
+    let validate sandbox ir =
+      Keeper_tooling.Execute_shell_ir.validate_paths ~sandbox ~workdir ir
+    in
+    let expect_ok label sandbox ir =
+      match validate sandbox ir with
+      | Ok () -> ()
+      | Error msg -> Alcotest.failf "%s must be allowed, got: %s" label msg
+    in
+    let expect_outside label sandbox ir =
+      match validate sandbox ir with
+      | Error msg ->
+        Alcotest.(check bool)
+          (label ^ " surfaces path_outside_whitelist")
+          true
+          (String_util.contains_substring_ci msg outside_whitelist_prefix)
+      | Ok () -> Alcotest.failf "%s must be rejected" label
+    in
+    let declared = ssh_target [ "/app" ] in
+    expect_ok "ssh cd /app" declared (stage ~bin_name:"cd" ~workdir [ "/app" ]);
+    expect_ok
+      "ssh mkdir -p /app/output"
+      declared
+      (stage ~bin_name:"mkdir" ~workdir [ "-p"; "/app/output" ]);
+    expect_ok
+      "ssh sh -c cd /app"
+      declared
+      (stage ~bin_name:"sh" ~workdir [ "-c"; "cd /app && ls" ]);
+    expect_outside "ssh cwd /etc" declared (shell_ir ~cwd:"/etc" ~workdir []);
+    expect_outside
+      "ssh cd /app/../etc"
+      declared
+      (stage ~bin_name:"cd" ~workdir [ "/app/../etc" ]);
+    expect_outside
+      "ssh cd /application (a sibling, not a child, of /app)"
+      declared
+      (stage ~bin_name:"cd" ~workdir [ "/application" ]);
+    expect_outside
+      "ssh without allowed_paths cd /app"
+      (ssh_target [])
+      (stage ~bin_name:"cd" ~workdir [ "/app" ]);
+    expect_outside
+      "micro_vm cd /app"
+      micro_vm_target
+      (stage ~bin_name:"cd" ~workdir [ "/app" ]);
+    expect_outside "micro_vm cwd /etc" micro_vm_target (shell_ir ~cwd:"/etc" ~workdir []))
+;;
+
+let test_subst_child_redirect_is_jailed () =
+  with_temp_tree (fun workdir ->
+    (* The jail descends into a substitution's child stages: their cwd and
+       redirects are exactly what it exists to validate. *)
+    let parent_of child =
+      match shell_ir ~workdir [] with
+      | Masc_exec.Shell_ir.Simple s ->
+        Masc_exec.Shell_ir.Simple
+          { s with Masc_exec.Shell_ir.args = [ Masc_exec.Shell_ir.Subst child ] }
+      | _ -> Alcotest.fail "shell_ir helper builds a Simple"
+    in
+    let child_with raw =
+      let target = Masc_exec.Path_scope.classify ~raw ~cwd:workdir in
+      let redirect =
+        Masc_exec.Redirect_scope.File
+          { fd = 1
+          ; target = Masc_exec.Redirect_scope.In_command_namespace target
+          ; mode = Masc_exec.Redirect_scope.Write
+          }
+      in
+      shell_ir ~redirects:[ redirect ] ~workdir []
+    in
+    Alcotest.(check bool)
+      "subst child redirect inside workdir passes"
+      true
+      (Result.is_ok
+         (Exec_policy.validate_shell_ir_paths ~extra_roots:[]
+            ~workdir
+            (parent_of (child_with "out.txt"))));
+    Alcotest.(check bool)
+      "subst child redirect outside workdir is rejected"
+      true
+      (Result.is_error
+         (Exec_policy.validate_shell_ir_paths ~extra_roots:[]
+            ~workdir
+            (parent_of (child_with "/etc/passwd")))))
+;;
+
+let () =
+  Alcotest.run
+    "exec_policy_cwd_hint"
+    [ ( "existing_sibling_dirs_hint"
+      , [ Alcotest.test_case "lists existing sibling dirs" `Quick test_lists_existing_sibling_dirs
+        ; Alcotest.test_case "none when no subdirs" `Quick test_none_when_ancestor_has_no_subdirs
+        ; Alcotest.test_case "ignores plain files" `Quick test_ignores_plain_files
+        ] )
+    ; ( "explicit path scopes"
+      , [ Alcotest.test_case
+            "positional argv is opaque"
+            `Quick
+            test_positional_argv_is_not_inferred_as_path
+        ; Alcotest.test_case
+            "cwd outside workdir is rejected"
+            `Quick
+            test_explicit_cwd_outside_workdir_is_rejected
+        ; Alcotest.test_case
+            "redirect outside workdir is rejected"
+            `Quick
+            test_explicit_redirect_outside_workdir_is_rejected
+        ; Alcotest.test_case
+            "missing host directory is rejected by default"
+            `Quick
+            test_cwd_missing_on_host_is_rejected_by_default
+        ; Alcotest.test_case
+            "missing host directory is allowed when requires_existing_dir is false"
+            `Quick
+            test_cwd_missing_on_host_is_allowed_when_requires_existing_dir_false
+        ; Alcotest.test_case
+            "outside workdir is rejected even when requires_existing_dir is false"
+            `Quick
+            test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false
+        ; Alcotest.test_case
+            "cd operand into a missing directory is rejected on the host"
+            `Quick
+            test_cd_operand_into_missing_dir_is_rejected_on_host
+        ; Alcotest.test_case
+            "cd operand into a missing directory is allowed for a guest"
+            `Quick
+            test_cd_operand_into_missing_dir_is_allowed_for_a_guest
+        ; Alcotest.test_case
+            "cd operand outside the workdir is rejected for a guest"
+            `Quick
+            test_cd_operand_outside_workdir_is_rejected_for_a_guest
+        ; Alcotest.test_case
+            "subst child redirect is jailed"
+            `Quick
+            test_subst_child_redirect_is_jailed
+        ; Alcotest.test_case
+            "execute_shell_ir validate_paths respects sandbox target"
+            `Quick
+            test_execute_shell_ir_validate_paths_respects_sandbox_target
+        ; Alcotest.test_case
+            "execute_shell_ir ssh allowed_paths widen only the ssh target"
+            `Quick
+            test_execute_shell_ir_ssh_allowed_paths_widen_only_the_ssh_target
+        ] )
+    ]
+;;

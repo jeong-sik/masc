@@ -1,0 +1,48 @@
+{
+  "platform": "Linux-6.18.1-0-virt-aarch64-with",
+  "machine": "aarch64",
+  "python": "3.12.12",
+  "scope": "isolated Linux syscall behavior only; not MASC",
+  "results": [
+    {
+      "case": "fifo-read",
+      "timeout": true,
+      "seconds": 1.004
+    },
+    {
+      "case": "fifo-read-nonblock",
+      "returncode": 0,
+      "stdout": "{\"kind\": 4096, \"size\": 0}",
+      "stderr": "",
+      "seconds": 0.016
+    },
+    {
+      "case": "fifo-rdwr-nonblock",
+      "returncode": 0,
+      "stdout": "{\"kind\": 4096, \"size\": 0}",
+      "stderr": "",
+      "seconds": 0.021
+    },
+    {
+      "case": "fifo-rdwr-append-nonblock",
+      "returncode": 0,
+      "stdout": "{\"kind\": 4096, \"size\": 0}",
+      "stderr": "",
+      "seconds": 0.019
+    },
+    {
+      "case": "regular-read-nonblock",
+      "returncode": 0,
+      "stdout": "{\"kind\": 32768, \"size\": 3}",
+      "stderr": "",
+      "seconds": 0.018
+    },
+    {
+      "case": "regular-rdwr-nonblock",
+      "returncode": 0,
+      "stdout": "{\"kind\": 32768, \"size\": 3}",
+      "stderr": "",
+      "seconds": 0.018
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+(* The states a pane can be in about one fetched thing.
+
+   The reason this is a type rather than two options: two options cannot say
+   "asked, still waiting", so a pane before its first answer looked exactly
+   like a pane with nothing in it. *)
+
+open Alcotest
+module F = Masc_tui_fetched
+
+let equal = String.equal
+let view t ~key = F.view_for ~equal t ~key
+
+let started = function
+  | F.Started (t, request) -> t, request
+  | F.Already_loading -> fail "expected the request to start"
+;;
+
+let test_the_four_states_are_distinguishable () =
+  let t = F.initial in
+  check bool "never asked" true (view t ~key:"a" = F.Absent);
+  let t, request = started (F.start ~equal t ~key:"a") in
+  (* This is the state the option pair could not express. *)
+  check bool "asked, waiting" true (view t ~key:"a" = F.Loading);
+  let ready = F.complete ~equal t request (Ok "the answer") in
+  check bool "answered" true (view ready ~key:"a" = F.Ready "the answer");
+  let failed = F.complete ~equal t request (Error "it broke") in
+  check bool "failed" true (view failed ~key:"a" = F.Failed "it broke")
+;;
+
+let test_a_pane_asks_once_per_key () =
+  let t, _ = started (F.start ~equal F.initial ~key:"a") in
+  (* The pane redraws per keystroke, so asking again for what is already in
+     flight has to be a no-op rather than a second request. *)
+  check bool "the same key while in flight does not ask again" true
+    (F.start ~equal t ~key:"a" = F.Already_loading);
+  match F.start ~equal t ~key:"b" with
+  | F.Already_loading -> fail "a different key must ask"
+  | F.Started (moved, _) ->
+    check bool "and the old key is no longer what this pane is showing" true
+      (view moved ~key:"a" = F.Absent);
+    check bool "the new one is waiting" true (view moved ~key:"b" = F.Loading)
+;;
+
+let test_an_answer_for_a_key_left_behind_is_dropped () =
+  let t, first = started (F.start ~equal F.initial ~key:"a") in
+  let moved, _ = started (F.start ~equal t ~key:"b") in
+  let settled = F.complete ~equal moved first (Ok "a's answer") in
+  (* Rendering it would put one key's value under another key's name. *)
+  check bool "the late answer does not land" true (view settled ~key:"b" = F.Loading);
+  check bool "and it does not resurrect the key it belonged to" true
+    (view settled ~key:"a" = F.Absent)
+;;
+
+let test_a_refresh_keeps_the_last_good_value_on_screen () =
+  let t, request = started (F.start ~equal F.initial ~key:"a") in
+  let ready = F.complete ~equal t request (Ok "first") in
+  let refreshing, again = started (F.start ~equal ready ~key:"a") in
+  (* Flipping back to Loading here empties the pane for a frame, and a scroll
+     clamp that runs against the empty frame loses the reader's position. *)
+  check bool "the old value keeps rendering" true
+    (view refreshing ~key:"a" = F.Ready "first");
+  let swapped = F.complete ~equal refreshing again (Ok "second") in
+  check bool "and the new one replaces it when it lands" true
+    (view swapped ~key:"a" = F.Ready "second")
+;;
+
+let test_a_failed_refresh_keeps_the_last_good_value () =
+  let t, request = started (F.start ~equal F.initial ~key:"a") in
+  let ready = F.complete ~equal t request (Ok "first") in
+  let refreshing, again = started (F.start ~equal ready ~key:"a") in
+  let stale = F.complete ~equal refreshing again (Error "it broke") in
+  (* A failed refresh read as Failed threw the value away, so a server that
+     blinked emptied the pane it had already drawn. *)
+  check bool "the value stays, with why it is stale" true
+    (view stale ~key:"a" = F.Stale ("first", "it broke"));
+  let retrying, retry = started (F.start ~equal stale ~key:"a") in
+  check bool "a retry in flight does not make it fresh" true
+    (view retrying ~key:"a" = F.Stale ("first", "it broke"));
+  check bool "and the pane's current reading says the same" true
+    (F.current retrying = Some ("a", F.Stale ("first", "it broke")));
+  check bool "the next answer does" true
+    (view (F.complete ~equal retrying retry (Ok "second")) ~key:"a" = F.Ready "second");
+  check bool "a failed retry stays stale on the same value" true
+    (view (F.complete ~equal retrying retry (Error "again")) ~key:"a"
+     = F.Stale ("first", "again"));
+  match F.start ~equal stale ~key:"b" with
+  | F.Already_loading -> fail "a different key must ask"
+  | F.Started (moved, _) ->
+    check bool "another key does not inherit the stale value" true
+      (view moved ~key:"b" = F.Loading)
+;;
+
+let test_clearing_forgets_it () =
+  let t, request = started (F.start ~equal F.initial ~key:"a") in
+  let ready = F.complete ~equal t request (Ok "answer") in
+  check bool "cleared reads as never asked" true
+    (view (F.clear ready) ~key:"a" = F.Absent)
+;;
+
+let test_suspension_keeps_reader_key_and_refuses_retired_answers () =
+  let initial, old = started (F.start ~equal F.initial ~key:"source.ml") in
+  let suspended = F.suspend initial in
+  check (option string) "pending file remains selected" (Some "source.ml") (F.current_key suspended);
+  check bool "late answer is retired" false (F.is_current ~equal suspended old);
+  let restarted, current = started (F.start ~equal suspended ~key:"source.ml") in
+  check bool "new read owns a different generation" false (F.same_request ~equal old current);
+  let ready = F.complete ~equal restarted current (Ok "original") in
+  let refreshing, _ = started (F.start ~equal ready ~key:"source.ml") in
+  match view (F.suspend refreshing) ~key:"source.ml" with
+  | F.Stale (text, _) -> check string "last value is retained honestly" "original" text
+  | _ -> fail "interrupted refresh was not marked stale"
+;;
+
+let test_cancellation_keeps_the_existing_observation () =
+  let loading, first = started (F.start ~equal F.initial ~key:"source.ml") in
+  let cancelled = F.cancel_pending ~reason:"cancelled" loading in
+  check bool "an initial cancelled read invents no completed value" true
+    (view cancelled ~key:"source.ml" = F.Failed "cancelled");
+  check bool "late initial answer no longer owns the source" false
+    (F.is_current ~equal cancelled first);
+  let failed = F.complete ~equal loading first (Error "original failure") in
+  let retrying_failure, retry_failure = started (F.refresh ~equal failed ~key:"source.ml") in
+  let cancelled_retry = F.cancel_pending ~reason:"cancelled" retrying_failure in
+  check bool "cancellation keeps the retry's known failure" true
+    (view cancelled_retry ~key:"source.ml" = F.Failed "original failure");
+  check bool "late retry no longer owns the source" false
+    (F.is_current ~equal cancelled_retry retry_failure);
+  let ready = F.complete ~equal loading first (Ok "original") in
+  let refreshing, old = started (F.start ~equal ready ~key:"source.ml") in
+  let retained = F.cancel_pending ~reason:"cancelled" refreshing in
+  check bool "retained value keeps its existing ready observation" true
+    (view retained ~key:"source.ml" = F.Ready "original");
+  check bool "refresh admission ends" false (F.in_flight retained);
+  check bool "late refresh no longer owns the source" false
+    (F.is_current ~equal retained old);
+  check bool "late success cannot replace the retained observation" true
+    (F.complete ~equal retained old (Ok "late") == retained);
+  let retrying, retry = started (F.start ~equal retained ~key:"source.ml") in
+  let stale = F.complete ~equal retrying retry (Error "unavailable") in
+  let refreshing_stale, old_stale = started (F.start ~equal stale ~key:"source.ml") in
+  let retained_stale = F.cancel_pending ~reason:"cancelled" refreshing_stale in
+  check bool "cancelling a retry does not make stale data fresh" true
+    (view retained_stale ~key:"source.ml" = F.Stale ("original", "unavailable"));
+  check bool "late failure cannot change the retained stale cause" true
+    (F.complete ~equal retained_stale old_stale (Error "late failure") == retained_stale)
+;;
+
+let () =
+  run "tui_fetched"
+    [ ( "states"
+      , [ test_case "suspended reader retains its key" `Quick test_suspension_keeps_reader_key_and_refuses_retired_answers
+        ; test_case "cancelled refresh retains the existing observation" `Quick
+            test_cancellation_keeps_the_existing_observation
+        ; test_case "the four states are distinguishable" `Quick
+            test_the_four_states_are_distinguishable
+        ; test_case "a pane asks once per key" `Quick test_a_pane_asks_once_per_key
+        ; test_case "an answer for a key left behind is dropped" `Quick
+            test_an_answer_for_a_key_left_behind_is_dropped
+        ; test_case "a refresh keeps the last good value on screen" `Quick
+            test_a_refresh_keeps_the_last_good_value_on_screen
+        ; test_case "a failed refresh keeps the last good value" `Quick
+            test_a_failed_refresh_keeps_the_last_good_value
+        ; test_case "clearing forgets it" `Quick test_clearing_forgets_it
+        ] )
+    ]
+;;

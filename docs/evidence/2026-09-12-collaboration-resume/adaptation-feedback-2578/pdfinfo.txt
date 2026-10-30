@@ -1,0 +1,19 @@
+Title:           기억의 정원 이야기 시간
+Author:          exhibit-editor
+Creator:         Impress
+Producer:        LibreOffice 7.4
+CreationDate:    Sat Sep 12 23:00:12 2026 KST
+Custom Metadata: no
+Metadata Stream: no
+Tagged:          no
+UserProperties:  no
+Suspects:        no
+Form:            none
+JavaScript:      no
+Pages:           8
+Encrypted:       no
+Page size:       960.009 x 540 pts
+Page rot:        0
+File size:       57307 bytes
+Optimized:       no
+PDF version:     1.6

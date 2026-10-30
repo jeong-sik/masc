@@ -1,0 +1,132 @@
+---
+status: reference
+---
+
+# Root-Cause Rubric
+
+> Supersedes the ad-hoc 5-category list in `PRODUCT-OPERATING-PLAN.md` (Model-Agnostic MASC Epic, #6715) and the 4-category grouping in historical 2026-04-09 tool-failure notes.
+> Status: Living — markers are refined when detection signal drops on the external BookShelf benchmark suite.
+> Last Updated: 2026-10-17
+
+## Purpose
+
+Every open issue in `masc` and `agent core` should be classifiable into one or more of eight categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (0/17 valid matches in the 2026-04-19 issue-close sweep incident).
+
+The rubric is applied two ways:
+
+1. The issue body declares `root: <value>[, <value>]` in its `masc-triage` block for each marker that matches.
+   The vocabulary and label colors live in `.github/issue-taxonomy.json` (the hourly `Issue Taxonomy` reconciliation workflow was retired in `v0.50.0`, `#41275`).
+2. Benchmark: the external BookShelf benchmark harness seeds one bug per category and measures whether the Keeper agent detects, fixes, and self-classifies them.
+
+## The 8 Categories
+
+### SSOT — Single Source of Truth Violation
+
+| Field | Content |
+|-------|---------|
+| Label | `root/ssot` |
+| Marker | Same literal or constant appears in ≥2 sites AND at least one site does not go through `Env_config_runtime` / `Config.*` |
+| Example | `"127.0.0.1"` inlined in 6 files with one using a different host (`#8387`) |
+| Issue body triggers | "hardcoded", "drift", "duplicated in N files", "not using Env_config" |
+
+### TEL — Telemetry Gap
+
+| Field | Content |
+|-------|---------|
+| Label | `root/telemetry` |
+| Marker | A request path, state transition, or error branch exists without a corresponding metric / span / `correlation_id` propagation |
+| Example | `emit_task_activity ~correlation_id:_` signature exists but no caller wires a real value (`#7520`) |
+| Issue body triggers | "metric", "correlation_id", "OTel", "span", "observability gap" |
+
+### BND — agent core-MASC Boundary Violation
+
+| Field | Content |
+|-------|---------|
+| Label | `root/boundary` |
+| Marker | MASC-side code reimplements something agent core already provides: lifecycle, budget, retry, approval hook, context injector |
+| Example | MASC-side context wrapper manually tracking token counts or checkpoint state that duplicates `Agent_core.Checkpoint` / context reduction |
+| Issue body triggers | "agent core 재구현", "lifecycle", "budget", "retry", "approval hook", "MASC-side reimplement" |
+
+### SIL — Silent Failure
+
+| Field | Content |
+|-------|---------|
+| Label | `root/silent` |
+| Marker | Error / unknown branch coerced to a default without caller signal: `try ... with _ -> default`, `match ... Error _ -> ""`, `Result.value ~default`, `_ -> Unknown → Some Default` |
+| Example | `timeout_s >= interval_s silently clamps across 3 components` (`#7695`) |
+| Issue body triggers | "silent", "fail-open", "swallow", "wildcard default" |
+
+### VAR — Variant Miss
+
+| Field | Content |
+|-------|---------|
+| Label | `root/variant` |
+| Marker | A `match` uses `| _ -> fallback` where the wildcard collapses a constructor added later; or a schema enum hand-rolled drifts from a Variant type |
+| Example | A schema enum is maintained separately from its typed variant and omits a constructor |
+| Issue body triggers | "variant miss", "match wildcard", "schema enum drift", "exhaustive", "new constructor" |
+
+### STR — Naive String Matching
+
+| Field | Content |
+|-------|---------|
+| Label | `root/string` |
+| Marker | Control flow branches on `String.contains`, `Str.regexp`, or substring check where a structural parse exists |
+| Example | Title-similarity triage pairing PRs with issues produces 0/17 valid matches (2026-04-19 incident) |
+| Issue body triggers | "string match", "substring", "String.contains", "regex dispatch", "magic string" |
+
+### DET — Deterministic Assumption
+
+| Field | Content |
+|-------|---------|
+| Label | `root/det` |
+| Marker | Code assumes a single input shape, a race-free ordering, or a stable LLM tool-call format without synchronization or parsing fallback |
+| Example | Admission queue lacks fd/memory saturation gate (`#7500`); shared `ref` counter without `Atomic.int` or `Mutex` |
+| Issue body triggers | "race", "concurrent", "deterministic assumption", "single input shape", "LLM tool-call non-determinism" |
+
+### NDT — Non-Determinism Not Embraced
+
+| Field | Content |
+|-------|---------|
+| Label | `root/ndt` |
+| Marker | A step whose outcome is not deterministic (provider call, network, scheduler) is treated as if it were: no retry, no fallback lane, no jitter, so one unlucky outcome becomes a stuck state |
+| Example | A single-candidate runtime candidate order makes the fallback a no-op; a keeper turn that ends on the first provider error |
+| Issue body triggers | "no retry", "no fallback", "single candidate", "stuck after one failure", "jitter" |
+
+## Mapping from Prior Categorizations
+
+The Model-Agnostic MASC Epic (`#6715`, 2026-04-12) and the 2026-04-09 tool-failure memory used partially overlapping taxonomies. The 8-category rubric subsumes them:
+
+| Prior category | New categories |
+|----------------|----------------|
+| `classify_model_family` stringly-typed | STR + VAR |
+| Inference parameter hardcoding | SSOT + BND |
+| Spawn CLI hardcoding | SSOT |
+| Vendor-specific branching | STR + DET |
+| Runtime-specific fallbacks | SIL + VAR |
+| Guard false positives (`#6166`) | SIL |
+| Read-path mismatch (`#6167`) | DET |
+| Readonly bash crash (`#6168`) | STR |
+| Dashboard loss of detail (`#6169`) | TEL |
+
+Complex issues carry multiple labels. Empirically ≥30% of open issues fall into 2+ categories (e.g. `#7716` null `pause_reason` is both DET and TEL).
+
+## Application Procedure
+
+For a new or existing issue:
+
+1. Read title + body first 800 chars.
+2. For each of the 8 triggers above, check marker match.
+3. Put the matching value in the issue body's `masc-triage` block under `root:` and apply the corresponding `root/*` label from `.github/issue-taxonomy.json` (the automatic hourly `Issue Taxonomy` workflow was retired in `v0.50.0`, `#41275`).
+4. If no marker matches, do not apply a default label — either the rubric is underspecified for this case (data for next iteration) or the issue is a pure feature request, not a root-cause fix.
+
+## Benchmark Linkage
+
+The external BookShelf synthetic project seeds one bug per category. When Keeper processes the benchmark, its Detection rate against the 8 bugs directly measures whether this rubric's markers are concrete enough for an LLM agent to apply.
+
+If Detection drops below 6/8, the markers are too abstract and need to be tightened — this document gets updated, not the Keeper prompt.
+
+## Non-Goals
+
+- This rubric does not rank categories by severity.
+- It does not prescribe fixes — only classification.
+- It does not replace PR review; it makes triage machine-readable.

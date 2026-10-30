@@ -1,0 +1,1825 @@
+import type { KeeperCostCoverage } from '../lib/keeper-cost-coverage'
+import type { KeeperResponseOwner, KeeperResponseState } from '../lib/keeper-response-state'
+import type { KeeperPortraitReading } from '../lib/keeper-portrait'
+import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
+// MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
+
+import type { KeeperChatDeliveryKey, KeeperChatDeliveryProvenance } from '../keeper-delivery-provenance'
+
+// --- Shared options ---
+
+export interface RefreshOptions {
+  force?: boolean
+  immediate?: boolean
+  light?: boolean
+}
+
+// --- Shared signal / evidence primitives (SSOT) ---
+// Mission and execution domains extend these with domain-specific values.
+
+/** Core signal truth values shared across mission and execution domains. */
+export type SignalTruthCore = 'live' | 'stale'
+/** Mission-domain signal truth (extends core with archived, unknown). */
+export type MissionSignalTruth = SignalTruthCore | 'archived' | 'unknown'
+/** Execution-domain signal truth (extends core with absent). */
+export type ExecutionSignalTruth = SignalTruthCore | 'absent'
+
+/** Core evidence source values shared across domains. */
+export type EvidenceSourceCore = 'message' | 'presence' | 'none'
+/** Mission-domain evidence source (extends core with session). */
+export type MissionEvidenceSource = EvidenceSourceCore | 'session'
+
+// --- Core entities ---
+
+export interface Agent {
+  name: string
+  agent_type?: string
+  keeper_name?: string | null
+  keeper_id?: string | null
+  status?: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
+  current_task: string | null
+  context_ratio?: number
+  session_bound_at?: string
+  last_seen?: string
+  capabilities?: string[]
+  emoji?: string
+  koreanName?: string
+  model?: string
+  preferredHours?: number[]
+  peakHour?: number
+  synthetic?: boolean
+}
+
+export interface Task {
+  /** Summary rows require a detail read before rendering complete task fields. */
+  detail_level?: 'summary' | 'full'
+  description_revision?: string
+  id: string
+  title: string
+  goal_id?: string | null
+  status?: 'todo' | 'in_progress' | 'claimed' | 'awaiting_verification' | 'done' | 'cancelled' | 'blocked' | 'paused' | 'unknown'
+  status_raw?: string | null
+  priority?: number
+  assignee?: string
+  description?: string
+  created_at?: string
+  updated_at?: string
+  completed_at?: string
+  /** Present only for status=cancelled; the API flattens it out of the task
+   *  status. `assignee` is null on a cancelled task because the status no
+   *  longer carries one, so this is the only actor the row can name. */
+  cancelled_by?: string | null
+  /** Stated reason for a terminal transition, flattened out of the task status
+   *  alongside `cancelled_by`. Distinct from `handoff_context.reason`, which is
+   *  a working note the assignee left and is usually absent on a plain cancel. */
+  reason?: string | null
+  predecessor_task_id?: string | null
+  contract?: TaskContract | null
+  handoff_context?: TaskHandoffContext | null
+  execution_links?: TaskExecutionLinks | null
+}
+
+interface TaskExecutionLinks {
+  operation_id?: string | null
+  session_id?: string | null
+}
+
+interface TaskContract {
+  strict?: boolean
+  completion_contract?: string[]
+  required_evidence?: string[]
+  inspect_gate_evidence?: string[]
+  verify_gate_evidence?: string[]
+}
+
+interface TaskHandoffContext {
+  summary: string
+  reason?: string | null
+  next_step?: string | null
+  failure_mode?: string | null
+  evidence_refs?: string[]
+  updated_at?: string | null
+  updated_by?: string | null
+}
+
+// SSOT for mention-delivery status values. Consumers that decode this field
+// from the wire (api/dashboard-workspace.ts, store-normalizers.ts) derive
+// their guard from this array instead of repeating the literal set.
+export const MENTION_DELIVERY_STATUSES = ['passive', 'pending', 'accepted', 'rejected'] as const
+export type MentionDeliveryStatus = (typeof MENTION_DELIVERY_STATUSES)[number]
+
+export interface Message {
+  id?: string
+  requestId?: string
+  seq?: number
+  from?: string
+  content: string
+  timestamp?: string
+  type?: string
+  workspace?: string
+  mentionDelivery?: MentionDeliveryStatus
+  mentions?: string[]
+}
+
+// --- Board ---
+
+type BoardPostMeta = Record<string, unknown> & {
+  source?: string | null
+  classification_reason?: string | null
+  judgment?: unknown
+}
+
+/** Decoded Board attachment written through the typed post argument. */
+export type BoardAttachmentKind =
+  | 'image' | 'video' | 'youtube' | 'external_link'
+  | 'file' | 'audio' | 'score' | 'midi'
+
+export type BoardAttachmentSource =
+  | { kind: 'url'; url: string; name?: string; sizeBytes?: number; width?: number | null; height?: number | null }
+  | { kind: 'artifact'; sha256: string; bytes: number; mime: string; name?: string }
+
+/** `source.name` is the entry's optional display label (the original file name). */
+export interface BoardAttachment {
+  kind: BoardAttachmentKind
+  source: BoardAttachmentSource
+}
+
+/**
+ * Decode result for one raw `meta.attachments` entry. Entries that fail the
+ * typed wire contract are kept as `{ ok: false }` so surfaces render an
+ * explicit failure card instead of silently skipping them.
+ */
+export type BoardAttachmentDecode =
+  | { ok: true; attachment: BoardAttachment }
+  | { ok: false; raw: unknown }
+
+export type BoardVoteDirection = 'up' | 'down'
+
+export interface BoardActorIdentity {
+  kind: 'keeper' | 'agent'
+  id: string
+  key: string
+  display_name: string
+  raw: string
+  source?: 'keeper_registry_name' | 'raw_agent'
+}
+
+/**
+ * RFC-0233 §7: originating-turn provenance of a board post. `turn_ref` is the
+ * join key "<trace_id>#<absolute_turn>" identical to the chat row the same turn
+ * produced (board post -> exact chat turn navigation). `fusion_run_id` is the
+ * distinct fusion run correlation id. All optional: legacy/system posts have no
+ * origin.
+ */
+export interface BoardPostOrigin {
+  turn_ref?: string | null
+  source?: string | null
+  fusion_run_id?: string | null
+}
+
+/**
+ * task-1758/#39356: typed close state on a board post. `closed_by` and
+ * `closed_at` are always present when a post is closed; `successor_id` and
+ * `summary` are optional. Absence of `closed` on the post means open.
+ */
+export interface BoardPostCloseState {
+  closed_by: string
+  closed_at: string
+  successor_id?: string | null
+  summary?: string | null
+}
+
+/** Persisted Board write-boundary audience; never inferred from rendered prose. */
+export type BoardAudience =
+  | { kind: 'targets'; targets: string[] }
+  | { kind: 'broadcast' | 'thread_participants' | 'discoverable' }
+  | { kind: 'unavailable'; reason: 'not_recorded' | 'invalid_payload' }
+
+/** Current canonical addresses from the same effective configuration as routing. */
+export type KeeperBoardAddress =
+  | { state: 'ready'; target_ids: string[] }
+  | { state: 'unavailable'; reason:
+      | 'metadata_absent' | 'effective_metadata_unread'
+      | 'not_reported' | 'invalid_payload' }
+
+export interface BoardPost {
+  audience?: BoardAudience
+  id: string
+  author: string
+  author_identity?: BoardActorIdentity | null
+  post_kind?: 'direct' | 'automation' | 'system'
+  pinned?: boolean
+  classification_reason?: string | null
+  title: string
+  body: string
+  meta?: BoardPostMeta | null
+  attachments?: BoardAttachmentDecode[]
+  tags: string[]
+  votes: number
+  vote_balance?: number
+  current_vote?: BoardVoteDirection | null
+  has_voted?: boolean
+  comment_count: number
+  created_at: string
+  updated_at: string
+  flair?: string
+  hearth?: string | null
+  visibility?: string
+  expires_at?: string | null
+  hearth_count?: number
+  reactions?: BoardReactionSummary[]
+  supported_reaction_emojis?: string[]
+  origin?: BoardPostOrigin | null
+  closed?: BoardPostCloseState | null
+}
+
+export interface BoardComment {
+  /** Position in the companion context's server thread snapshot. */
+  thread_offset?: number
+  id: string
+  post_id: string
+  parent_id?: string | null
+  author: string
+  author_identity?: BoardActorIdentity | null
+  content: string
+  created_at: string
+  votes?: number
+  vote_balance?: number
+  votes_up?: number
+  votes_down?: number
+  current_vote?: BoardVoteDirection | null
+  has_voted?: boolean
+  reactions?: BoardReactionSummary[]
+  supported_reaction_emojis?: string[]
+}
+
+export type BoardReactionTargetType = 'post' | 'comment'
+
+export interface BoardReactionSummary {
+  emoji: string
+  count: number
+  reacted: boolean
+  recent_user_ids: string[]
+}
+
+export interface BoardReactionToggleResult {
+  target_type: BoardReactionTargetType
+  target_id: string
+  user_id: string
+  emoji: string
+  reacted: boolean
+  summary: BoardReactionSummary[]
+}
+
+export interface BoardReactionState {
+  summaries: BoardReactionSummary[]
+  supportedEmojis: string[]
+}
+
+export interface BoardCurationSnapshot {
+  id: string
+  generated_at: string
+  submitted_by: string
+  model?: string | null
+  summary?: string | null
+  ordering: string[]
+  highlights: string[]
+  tag_suggestions: BoardCurationTagSuggestion[]
+  answer_matches: BoardCurationAnswerMatch[]
+  health_score?: number | null
+  health_components: BoardCurationHealthComponent[]
+  rationale: string
+  provenance?: unknown
+}
+
+export interface BoardCurationTagSuggestion {
+  post_id: string
+  tags: string[]
+  rationale: string
+}
+
+export interface BoardCurationAnswerMatch {
+  question_post_id: string
+  answer_post_id: string
+  score: number
+  rationale: string
+}
+
+export interface BoardCurationHealthComponent {
+  name: string
+  score: number
+  weight: number
+  rationale: string
+}
+
+export interface BoardKarmaLedgerEvent {
+  recipient: string
+  voter: string
+  target_kind: 'post' | 'comment'
+  target_id: string
+  delta: number
+  ts: number
+  ts_iso: string
+}
+
+export interface BoardKarmaTotal {
+  agent: string
+  karma: number
+}
+
+export interface BoardKarmaLedger {
+  events: BoardKarmaLedgerEvent[]
+  count: number
+  scoring_rule: string
+  totals: BoardKarmaTotal[]
+}
+
+// --- SubBoard ---
+
+export type SubBoardAccess = 'open' | 'members_only' | 'owner_only'
+
+export interface SubBoard {
+  id: string
+  slug: string
+  name: string
+  description: string
+  owner: string
+  members: string[]
+  access: SubBoardAccess
+  created_at: string
+  post_count: number
+}
+// --- Keeper Metrics ---
+
+export interface InferenceTelemetry {
+  system_fingerprint: string | null
+  timings: {
+    prompt_n: number | null
+    prompt_ms: number | null
+    prompt_per_second: number | null
+    predicted_n: number | null
+    predicted_ms: number | null
+    predicted_per_second: number | null
+    cache_n: number | null
+  } | null
+  reasoning_tokens: number | null
+  peak_memory_gb: number | null
+  request_latency_ms: number | null
+  ttfrc_ms: number | null
+  prefill_ms: number | null
+}
+
+export interface PromptSegmentTelemetry {
+  bytes: number
+  fingerprint: string | null
+}
+
+export interface PromptTelemetry {
+  fingerprint: string | null
+  total_bytes: number | null
+  cacheable_bytes: number | null
+  segments: Record<string, PromptSegmentTelemetry>
+}
+
+// Byte attribution of one turn's model input. `not_measured` carries no byte
+// count: reading an absent measurement as 0 is what made 40% of Keeper turns
+// look free (masc#32995). Splitting the union puts `attributed_bytes` only on
+// the branch that has one, so `?? 0` on the other branch is a type error.
+export type CtxAttribution =
+  | {
+      status: 'attributed'
+      // The lane attempt that produced this attribution. It can differ from
+      // the turn's settled runtime after a failover.
+      runtime_profile: string
+      attributed_bytes: number
+      segments: Record<string, PromptSegmentTelemetry>
+    }
+  | { status: 'not_measured'; reason: string; detail: string | null }
+
+export interface CtxCompositionTelemetry {
+  actual_input_tokens: number | null
+  attribution: CtxAttribution
+}
+
+export interface KeeperMetricPoint {
+  ts: number
+  context_ratio: number | null
+  context_tokens: number | null
+  context_max: number | null
+  latency_ms: number | null
+  channel: string
+  cost_usd: number
+  prompt_fingerprint: string | null
+  prompt_metrics: PromptTelemetry | null
+  ctx_composition: CtxCompositionTelemetry | null
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  wall_tokens_per_second: number | null
+  inference_telemetry: InferenceTelemetry | null
+  runtime_id?: string | null
+  runtime_outcome?: string | null
+  runtime_attempt_count?: number | null
+}
+
+export interface ProviderHealth {
+  provider: string
+  model: string
+  status: 'healthy' | 'degraded' | 'unhealthy'
+  ttfrc_ms_ewma: number
+  timeout_count_5m: number
+  prefill_ms_ewma: number
+  last_updated: number
+}
+
+export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
+  'heartbeat_failures',
+  'turn_failures',
+  'runtime_exhausted',
+  'provider_runtime_error',
+  'official_client_recovery_required',
+  'turn_configuration_error',
+  'fiber_unresolved',
+  'exception',
+  'operator_interrupt',
+] as const
+
+export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
+
+export type KeeperLiveActivitySource =
+  | 'keeper_meta'
+  | 'tool_call'
+  | 'approval_pending'
+
+export interface KeeperLiveActivity {
+  source?: KeeperLiveActivitySource | null
+  at?: string | null
+  age_s?: number | null
+  tool?: string | null
+  turn?: number | null
+  keeper_turn_id?: number | null
+}
+
+export interface KeeperCurrentGate {
+  kind?: 'approval_required' | string | null
+  source?: string | null
+  id?: string | null
+  tool?: string | null
+  turn_id?: number | null
+  at?: string | null
+  age_s?: number | null
+  disposition?: string | null
+  disposition_reason?: string | null
+}
+
+// Wire emit: `lib/keeper/keeper_status_bridge.ml:720` —
+//   `pause_state = if meta.paused then "paused" else "active"`.
+// Closed 2-arm; the previous `| string` catch-all hid the fact that
+// the wire vocabulary is exhaustive and let unmapped values flow
+// silently through narrowing.
+export type KeeperPauseState = 'active' | 'paused'
+
+export type KeeperRuntimeBlockerState = 'clear' | 'blocked'
+
+export type StopCauseSource =
+  | 'runtime_blocker_class'
+  | 'terminal_reason_code'
+  | 'stop_reason'
+  | 'error_kind'
+  | 'attention_reason'
+
+export interface StopCause {
+  code: string
+  source: StopCauseSource
+  label: string
+  summary?: string | null
+  severity?: string | null
+  next_action?: string | null
+}
+
+export interface KeeperTrustLatestEvent {
+  kind: string
+  ts: string
+  ts_unix?: number | null
+  keeper_turn_id?: number | null
+  task_id?: string | null
+  goal_ids?: string[]
+  title: string
+  summary: string
+  severity: 'ok' | 'warn' | 'bad'
+  next_human_action?: string | null
+  // Trace id for deep-linking the causal event to its distributed trace.
+  trace_id?: string | null
+}
+
+export interface KeeperTrustApprovalPendingFirst {
+  id?: string | null
+  tool_name?: string | null
+  task_id?: string | null
+  blocker_class?: string | null
+}
+
+export interface KeeperTrustApprovalState {
+  state?: string | null
+  summary?: string | null
+  pending_count?: number | null
+  pending_first?: KeeperTrustApprovalPendingFirst | null
+  // ISO8601 timestamp of the last approval-audit event.
+  latest_event_at?: string | null
+}
+
+export interface KeeperTrustExecutionSummary {
+  runtime_lane_observation?: import('../lib/keeper-runtime-walk').RuntimeLaneObservation | null
+  provider_attempt_count?: number | null
+  provider_fallback_applied?: boolean | null
+  provider_selected_model?: string | null
+  runtime_outcome?: string | null
+  sandbox_summary?: string | null
+  sandbox_root?: string | null
+  completion_observation_summary?: string | null
+  latest_receipt_at?: string | null
+}
+
+export interface KeeperTrustTerminalReason {
+  code?: string | null
+  source?: string | null
+  severity?: 'ok' | 'warn' | 'bad' | null
+  summary?: string | null
+  next_action?: string | null
+}
+
+// The values Keeper_trust_disposition.to_wire sends, in its declaration
+// order. trust-disposition.test.ts and test_keeper_trust_disposition
+// each check this against api/fixtures/trust-dispositions.json.
+export const TRUST_DISPOSITIONS = ['Pass', 'Alert', 'Blocked', 'Degraded'] as const
+
+export type TrustDisposition = (typeof TRUST_DISPOSITIONS)[number]
+
+export interface KeeperTrustSummary {
+  disposition?: TrustDisposition | null
+  disposition_reason?: string | null
+  operator_disposition?: string | null
+  operator_disposition_reason?: string | null
+  needs_attention?: boolean | null
+  attention_reason?: string | null
+  next_human_action?: string | null
+  latest_terminal_reason?: KeeperTrustTerminalReason | null
+  latest_next_action?: string | null
+  approval_state?: KeeperTrustApprovalState | null
+  execution_summary?: KeeperTrustExecutionSummary | null
+  latest_causal_event?: KeeperTrustLatestEvent | null
+}
+
+// Dashboard rendering union returned by `deriveLifecycleState`
+// (keeper-store-normalize.ts). This is a display union, not the backend
+// keeper FSM. Offline-detail rendering may surface terminal sub-states
+// from `keeperDisplayStatus`; keep the accepted set explicit instead
+// of trusting arbitrary wire strings.
+export type KeeperLifecycleState =
+  | 'active'
+  | 'idle'
+  | 'offline'
+  | 'unbooted'
+  | 'stopped'
+  // Offline-detail sub-states emitted by keeperDisplayStatus.
+  | 'paused'
+  | 'crashed'
+  | 'unknown'
+
+export interface GoalProofCriterion {
+  revision: string
+  title: string
+  metric: string | null
+  target_value: string | null
+}
+
+export type GoalProofCompletion =
+  | { state: 'idle' }
+  | { state: 'pending'; criterion: GoalProofCriterion; requestId: string; requestedAt: string }
+  | ({ criterion: GoalProofCriterion; requestId: string; runId: string;
+       evidence: string; recordedAt: string; actor: string } &
+       ({ state: 'proven'; confirmation?: { operatorId: string; confirmedAt: string } } | { state: 'refuted'; reason: string }))
+
+export type GoalProof =
+  | { state: 'current'; completion: GoalProofCompletion }
+  | { state: 'stale'; historical: Exclude<GoalProofCompletion, { state: 'idle' }> }
+  | { state: 'unreadable'; detail: string }
+
+export interface Goal {
+  resume_phase?: import("../api/goal-lifecycle").GoalResumePhase | null
+  verification?: GoalProof
+  id: string
+  title: string
+  metric?: string | null
+  target_value?: string | null
+  due_date?: string | null
+  priority: number
+  phase: string
+  last_review_note?: string | null
+  last_review_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+// --- Keeper ---
+
+// Exactly what Keeper_status_runtime.keeper_health_to_string serializes.
+type KeeperHealthState = 'healthy' | 'idle' | 'failing' | 'offline'
+
+// Exactly what Keeper_status_runtime.keeper_quiet_reason serializes.
+type KeeperQuietReason =
+  | 'disabled'
+  | 'not_running'
+  | 'startup'
+  | 'never_started'
+
+// Exactly what Keeper_status_runtime.keeper_next_action_path serializes.
+type KeeperNextActionPath =
+  | 'recover'
+  | 'probe'
+  | 'direct_message'
+
+type KeeperReplyStatus =
+  | 'never'
+  | 'awaiting_reply'
+  | 'delivered'
+  | 'fresh'
+  | 'stale'
+  | 'error'
+  | 'unknown'
+
+export interface KeeperDiagnostic {
+  health_state: KeeperHealthState
+  quiet_reason?: KeeperQuietReason | null
+  next_action_path: KeeperNextActionPath
+  last_reply_status: KeeperReplyStatus
+  last_reply_at?: string | null
+  last_reply_preview?: string | null
+  last_error?: string | null
+  recoverable?: boolean
+  summary?: string
+  keepalive_running?: boolean
+}
+
+export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
+
+export type KeeperApprovalLifecyclePhase =
+  | 'requested'
+  | 'resolved_approved'
+  | 'resolved_rejected'
+  | 'replay_applied'
+  | 'replay_applied_with_warning'
+  | 'replay_failed'
+  | 'replay_indeterminate'
+  | 'continuation_recorded'
+  | 'continuation_failed'
+
+export interface KeeperApprovalLifecycle {
+  approvalId: string
+  toolName: string | null
+  phase: KeeperApprovalLifecyclePhase
+  artifactSha256: string | null
+  callSummary?: string | null
+}
+
+/** Canonical actor name for system-originated entries (backend convention).
+ *  Used when an actor field is null/missing and the entry came from a
+ *  system source rather than a real user/agent. */
+export const SYSTEM_ACTOR_NAME = 'system' as const
+
+export type KeeperConversationSource =
+  | 'direct_user'
+  | 'direct_assistant'
+  | 'world_state_prompt'
+  | 'internal_assistant'
+  // A keeper turn that ran without anyone addressing the keeper. Its ordinary
+  // User/Assistant/Tool exchange is durable in the Agent Core checkpoint; these
+  // dashboard-only rows avoid duplicating that conversation in the chat store
+  // and are projected by Keeper_autonomous_turn_source. Visible by default but
+  // folded into one collapsed group, because a keeper may wake once a minute.
+  | 'autonomous_turn'
+  | 'tool_result'
+  | 'system'
+  | 'unknown'
+
+export type KeeperConversationDelivery =
+  | 'history'
+  | 'queued'
+  | 'sending'
+  | 'streaming'
+  | 'delivered'
+  | 'no_reply'
+  | 'timeout'
+  | 'cancelled'
+  | 'error'
+  // Durable keeper_chat_store row written when a request failed before the
+  // keeper produced an utterance. Unlike generic client/tool errors, this
+  // writer-declared state is watermark-neutral.
+  | 'request_failure'
+  // Stream ended without a terminal RUN_FINISHED / RUN_ERROR event —
+  // the transport was cut mid-response, so the text may be incomplete.
+  | 'interrupted'
+
+interface KeeperConversationUsage {
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+  cacheCreationInputTokens?: number | null
+  cacheReadInputTokens?: number | null
+  costUsd?: number | null
+}
+
+// A tool call the keeper is holding for an operator decision. The stream
+// event KEEPER_TOOL_APPROVAL_REQUESTED mints it; KEEPER_TOOL_APPROVAL_SETTLED
+// (or a timeout-driven settle on the server) retires it. Without this row the
+// dashboard drew nothing while the call waited and the answer, when it came,
+// was only the 180-second timeout read as a denial nobody chose.
+export interface KeeperToolApprovalPending {
+  toolCallId: string
+  toolName: string
+  args: string
+  question: string
+  // Policy-owned reason the call was held. Empty for an older emitter that
+  // predates the field; the card omits the reason row in that case.
+  because: string
+  askedAtMs: number | null
+  // Server-stated seconds until the wait retires itself. Null when unknown;
+  // the view derives the remaining time from its own clock.
+  timeoutSec: number | null
+  // Client-side answer state: 'answering' while the POST is in flight so the
+  // buttons cannot be double-clicked into two answers for one call.
+  answering: boolean
+  answeredDecision: 'approve' | 'deny' | null
+  answeredOutcome: string | null
+  settled: boolean
+}
+
+// RFC-0232 P2: producer-typed turn outcome carried in the reply payload
+// (`turn_outcome`). `continuation_checkpoint` marks a resume-next-cycle
+// boundary, `external_effect_pending` marks a durable control wait,
+// `external_effect_completed` marks a reply delivered by an external
+// connector (e.g. Slack/Discord), and `no_visible_reply` marks a completed
+// runtime turn with no assistant text.
+export type KeeperTurnOutcome =
+  | 'visible_reply'
+  | 'continuation_checkpoint'
+  | 'external_effect_completed'
+  | 'external_effect_pending'
+  | 'no_visible_reply'
+
+// Where an `external_effect_completed` turn actually delivered its reply
+// (`external_effect_target` on the reply payload / the
+// KEEPER_EXTERNAL_EFFECT_COMPLETED event value). Present exactly on those
+// turns; other outcomes carry no target and the card keeps generic copy.
+export type KeeperExternalEffectTarget =
+  | { kind: 'dashboard' }
+  | { kind: 'discord'; channelId: string }
+  | { kind: 'slack'; channelId: string; threadTs: string | null }
+  | { kind: 'telegram' | 'imessage'; channelId: string }
+
+export interface KeeperConversationDetails {
+  traceId?: string | null
+  turnRef?: string | null
+  providerMessageId?: string | null
+  modelUsed?: string | null
+  stopReason?: string | null
+  latencyMs?: number | null
+  costUsd?: number | null
+  usage?: KeeperConversationUsage | null
+  replyText?: string | null
+  turnOutcome?: KeeperTurnOutcome | null
+  externalEffectTarget?: KeeperExternalEffectTarget | null
+  rawPayload?: unknown
+}
+
+/** An image reference the provider resolves itself (#33728): an external
+ *  http(s) URL or a Files-API id minted by a keeper upload tool. The server
+ *  never fetches either; the wire form is `{type:'image', url}` /
+ *  `{type:'image', file_id}`. */
+export type KeeperImageReference =
+  | { kind: 'url'; url: string }
+  | { kind: 'file_id'; fileId: string }
+
+export type KeeperConversationAttachment =
+  | {
+      /** Bytes this client already holds, as a data URL. */
+      kind?: undefined
+      id: string
+      type: 'image' | 'file'
+      name: string
+      size: number
+      mimeType: string
+      data: string
+      /** Optional image dimensions (e.g. "1920×1080") computed for composer blocks. */
+      dims?: string
+    }
+  | (KeeperImageReference & {
+      /** Discriminated by [kind]; [name] is the display label. */
+      id: string
+      name: string
+      mimeType?: string
+    })
+
+/** The byte-backed arm of the attachment union — what history decode and the
+ *  wire [attachments] array always produce. */
+export type KeeperByteAttachment = Extract<KeeperConversationAttachment, { kind?: undefined }>
+
+export type KeeperUserInputMediaKind = 'image' | 'document' | 'audio'
+
+export type KeeperUserInputBlock =
+  | { type: 'text'; text: string }
+  | {
+      type: KeeperUserInputMediaKind
+      attachmentId: string
+      name: string
+      mimeType: string
+      size: number
+    }
+  | { type: 'image'; url: string; mimeType?: string }
+  | { type: 'image'; fileId: string; mimeType?: string }
+
+// RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
+// `audioUrl` is the absolute/relative URL the dashboard uses for playback;
+// `token` is the capability in `/api/v1/voice/audio/<token>` used as a
+// fallback when the backend did not emit a full URL.
+export interface KeeperConversationAudioClip {
+  token: string
+  audioUrl?: string | null
+  mime: string
+  durationSec?: number | null
+  messageText: string
+  deviceId?: string | null
+  expired?: boolean | null
+}
+
+// --- Keeper v2 rich chat blocks (optional; when present the bubble renderer
+// uses them instead of plain markdown text). See ChatMessageBubble in
+// src/components/chat/primitives.ts.
+
+export type ChatTextBlock = { t: 'p'; html: string }
+export type ChatHeadingBlock = { t: 'h4'; html: string }
+export type ChatListBlock = { t: 'ul'; items: string[] }
+
+export type ChatCalloutSeverity = 'info' | 'warn' | 'bad'
+export type ChatCalloutBlock = { t: 'callout'; severity?: ChatCalloutSeverity; html: string }
+
+export type ChatTableCellValue = string | { v: string; num?: boolean; muted?: boolean }
+export type ChatTableBlock = { t: 'table'; head: ChatTableCellValue[]; rows: ChatTableCellValue[][] }
+
+export type ChatCodeBlock = { t: 'code'; cap?: string; html: string; source?: string }
+
+export type ChatShellLine = { t?: 'cmd' | 'out' | 'err'; v: string }
+export type ChatShellBlock = { t: 'shell'; title?: string; lines: ChatShellLine[]; exit?: number; dur?: string }
+
+export type ChatArtifactBlock = { t: 'artifact'; kind?: string; name: string; size?: string; note?: string; data?: string; mimeType?: string }
+
+export type ChatChartSeries = { label: string; color?: string; values: number[] }
+export type ChatChartBlock = { t: 'chart'; title: string; series: ChatChartSeries[]; labels?: string[]; xLabel?: string; yMax?: number }
+
+export type ChatSuggestionItem = { icon?: string; label: string; action?: string }
+export type ChatSuggestionsBlock = { t: 'suggestions'; items: ChatSuggestionItem[] }
+
+export type ChatIssueBlock = { t: 'issue'; repo: string; number: number; title: string; status: 'open' | 'closed'; url?: string; meta?: string }
+
+export type ChatAttachBlock = {
+  t: 'attach'
+  name: string
+  dims?: string
+  src?: string
+  svg?: string
+  ph?: string
+  via?: string
+  size?: string
+  /** Optional source data carried so the parent can forward attachments to the API. */
+  data?: string
+  mimeType?: string
+  sizeBytes?: number
+  id?: string
+  kind?: string
+  /** When set, this attach chip is an image reference (#33728) the provider
+   *  fetches, not bytes this client holds; [src] then carries the url verbatim
+   *  for display and the queue rebuilds the attachment from this field. */
+  ref?: KeeperImageReference
+}
+
+export type ChatVoiceBlock = { t: 'voice'; secs?: number; wave?: number[]; via?: string; size?: string; transcript?: string; src?: string }
+
+export type ChatImageBlock = { t: 'image'; src?: string; ph?: string; cap?: string }
+export type ChatSvgBlock = { t: 'svg'; svg: string; cap?: string }
+export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string }
+
+// `ts` (ISO-8601) records when the trace event arrived. Live streams preserve
+// think/tool order structurally in this array; persisted legacy rows may omit
+// timestamps and still render in stored order.
+// `contentWithheld` marks a step the server admitted without carrying its
+// reasoning (RFC-0358 §2 public autonomous projection). `text` is '' in that
+// case and the label shown for it is this client's to choose. Distinct from
+// ChatThinkingBlock's `redacted`, which means the provider itself sent only a
+// signature.
+export type ChatTraceThinkStep = {
+  responseOwner?: KeeperResponseOwner
+  kind: 'think'
+  text: string
+  contentWithheld?: boolean
+  ts?: string
+  agentCoreBlockIndex?: number
+}
+export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string; ts?: string }
+export type ChatTraceProgressStep = { kind: 'progress'; text: string; ts?: string; agentCoreBlockIndex?: number }
+export type ChatTraceToolStep = {
+  kind: 'tool'
+  name: string
+  toolCallId?: string
+  executionId?: string
+  /** Live-only delivery occurrence. Provider IDs are not row identity. */
+  toolOccurrenceId?: string
+  status?: 'pending' | 'ok' | 'err'
+  dur?: string
+  args?: string
+  result?: string
+  ts?: string
+  agentCoreBlockIndex?: number
+}
+export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceProgressStep | ChatTraceToolStep
+// `omitted` counts steps this surface did not carry (absent or 0 when whole).
+// A shorter `trace` with no count would read as a shorter turn, which is a
+// different fact from a turn whose trace was abridged for transport.
+export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[]; omitted?: number }
+export type ChatThinkingBlock = { t: 'thinking'; content: string; redacted: boolean }
+
+export type ChatLinkBlock = { t: 'link'; url: string; title: string; desc?: string; meta?: string; fav?: string; kind?: string }
+
+export type ChatBroadcastAck = 'acked' | 'read' | 'delivered' | string
+export type ChatBroadcastRecipient = { id: string; ack: ChatBroadcastAck; at?: string }
+export type ChatBroadcastBlock = { t: 'broadcast'; scope: string; via?: string; note: string; recipients: ChatBroadcastRecipient[] }
+// RFC-0252: a reference from a keeper chat message to a fusion deliberation's
+// board post. Carries only ids (snake_case to match the backend wire shape in
+// keeper_chat_blocks.ml); ChatFusionCard lazy-fetches the board post by
+// board_post_id and renders its meta_json (panel answers + judge synthesis).
+export type ChatFusionBlock = { t: 'fusion'; board_post_id: string; run_id?: string }
+export type ChatStatusBlock = {
+  t: 'status'
+  kind: 'continuation_checkpoint' | 'external_effect_pending'
+}
+
+export type ChatBlock =
+  | ChatTextBlock
+  | ChatHeadingBlock
+  | ChatListBlock
+  | ChatCalloutBlock
+  | ChatTableBlock
+  | ChatCodeBlock
+  | ChatShellBlock
+  | ChatArtifactBlock
+  | ChatChartBlock
+  | ChatSuggestionsBlock
+  | ChatIssueBlock
+  | ChatAttachBlock
+  | ChatVoiceBlock
+  | ChatImageBlock
+  | ChatSvgBlock
+  | ChatMermaidBlock
+  | ChatTraceBlock
+  | ChatThinkingBlock
+  | ChatLinkBlock
+  | ChatBroadcastBlock
+  | ChatFusionBlock
+  | ChatStatusBlock
+export type KeeperConversationStreamState =
+  | 'cancelling'
+  | 'opening'
+  | 'thinking'
+  | 'retrying'
+  | 'streaming'
+  | 'finalizing'
+  | null
+
+export type KeeperConversationStreamContractSource =
+  | 'keeper_chat_store'
+  | 'backend_stream_lifecycle'
+  | 'backend_turn_trace'
+  | 'rest_history'
+  | 'sse_event'
+  | 'client_operation_store'
+  | 'client_operation_lookup'
+  | 'client_local_send'
+  | 'client_stream_failure'
+
+export type KeeperConversationStreamContractStatus =
+  | 'backend_stream_event'
+  | 'backend_terminal_event'
+  | 'backend_lifecycle_replay'
+  | 'backend_trace_join'
+  | 'history_without_turn_ref'
+  | 'history_without_stream_events'
+  | 'client_operation_terminal'
+  | 'client_placeholder'
+  | 'client_reconciled_history'
+  | 'contract_gap'
+
+export interface KeeperConversationStreamContract {
+  source: KeeperConversationStreamContractSource
+  status: KeeperConversationStreamContractStatus
+  eventName?: string | null
+  requestId?: string | null
+  turnRef?: string | null
+  traceEventCount?: number | null
+  lifecycleEvents?: string[] | null
+  reason?: string | null
+}
+
+// Mirrors the closed variant vocabulary in lib/keeper/surface_ref.ml —
+// same seven kinds, no open string escape. keeper-state.ts owns the one
+// closed parse (normalizeSurfaceRef); an unknown wire kind drops the
+// surface, never the row, matching keeper_chat_store.load's policy.
+export type SurfaceRefKind =
+  | 'dashboard'
+  | 'discord'
+  | 'slack'
+  | 'webhook'
+  | 'agent'
+  | 'broadcast'
+  | 'gate'
+
+export interface SurfaceRef {
+  kind: SurfaceRefKind
+  session_id?: string
+  guild_id?: string
+  channel_id?: string
+  parent_channel_id?: string
+  thread_id?: string
+  team_id?: string
+  thread_ts?: string
+  source?: string
+  event_id?: string
+  label?: string
+  address?: Record<string, string>
+}
+
+export interface KeeperConversationEntry {
+  id: string
+  role: KeeperConversationRole
+  source: KeeperConversationSource
+  label: string
+  text: string
+  rawText?: string | null
+  timestamp?: string | null
+  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" correlation key.
+  // Carries the originating turn for trace attachment; it is not row identity.
+  turnRef?: string | null
+  // Exact append-once identity for history reconciliation. This preserves the
+  // backend SSOT pair instead of flattening it into a role-qualified request id.
+  deliveryProvenance?: KeeperChatDeliveryProvenance | null
+  // Canonical physical tool execution. Provider tool-call identity remains
+  // optional correlation data; neither conversation row identity nor output
+  // hydration substitutes one for the other.
+  executionId?: string | null
+  // Provider correlation is explicit data, never encoded in [id].
+  toolCallId?: string | null
+  // Live lifecycle state for selecting the current provider occurrence.
+  toolCallEnded?: boolean
+  /** Original wire identity is separate from the admitted display label. */
+  toolProviderName?: string
+  toolProviderMessageId?: string | null
+  toolAdmittedName?: string
+  /** Server occurrence coordinates; row IDs and provider IDs are not ownership. */
+  toolOccurrence?:
+    | { readonly kind: 'identified'; readonly streamScope: number; readonly blockIndex: number }
+    | { readonly kind: 'conflicting'; readonly coordinates: readonly { readonly streamScope: number; readonly blockIndex: number }[] }
+  /** Explicit parent for an observation that carried no delivery identity. */
+  toolParentEntryId?: string
+  toolOccurrenceQuarantined?: true
+  toolObservationAuthority?: 'unavailable'
+  toolOwnerKey?: KeeperChatDeliveryKey
+  toolTranscriptOrdinal?: number
+  toolTranscriptBindings?: readonly { readonly deliveryKey: KeeperChatDeliveryKey; readonly executionId: string; readonly ordinal: number }[]
+  delivery: KeeperConversationDelivery
+  streamState?: KeeperConversationStreamState
+  runtimeAttempt?: Readonly<{ runtimeId: string; index: number }>
+  responseState?: KeeperResponseState
+  streamContract?: KeeperConversationStreamContract | null
+  attachments?: KeeperConversationAttachment[]
+  /** Exact ordered multimodal input sent to the Keeper. Kept on optimistic and
+   * pending rows so editing never reconstructs model input from display text. */
+  userBlocks?: KeeperUserInputBlock[]
+  blocks?: ChatBlock[]
+  /** Exact range created from reply text by this client, never inferred from block tags. */
+  replyTextProjection?: Readonly<{ offset: number; length: number }>
+  /** Supplied canonical history blocks represent the complete committed body. */
+  replyBlockSource?: 'canonical_body'
+  traceSteps?: ChatTraceStep[]
+  details?: KeeperConversationDetails | null
+  error?: string | null
+  surface?: SurfaceRef | null
+  conversationId?: string | null
+  externalMessageId?: string | null
+  speakerId?: string | null
+  speakerName?: string | null
+  speakerAuthority?: string | null
+  audio?: KeeperConversationAudioClip | null
+  approvalLifecycle?: KeeperApprovalLifecycle | null
+}
+
+export interface KeeperStatusDetail {
+  name: string
+  diagnostic?: KeeperDiagnostic | null
+  history: KeeperConversationEntry[]
+  rawText: string
+  rawStatus?: unknown
+  loadedAt: string
+}
+
+// Backend SSOT: `Keeper_status_runtime.pipeline_stage_of_phase`
+// (lib/keeper/keeper_status_runtime.ml:537) deterministic mapping from
+// the KeeperPhase lifecycle. Emits the closed set below;
+// values; `unknown` is a dashboard-side marker for missing data
+// (`asString(row.pipeline_stage) ?? 'unknown'`). Removed legacy
+// `thinking` / `tool_use` (= trajectory content_type, never
+// pipeline_stage) and `scheduled_autonomous` (= turn channel, never
+// pipeline_stage).
+export type PipelineStage =
+  | 'idle'
+  | 'offline'
+  | 'failing'
+  | 'draining'
+  | 'paused'
+  | 'crashed'
+  | 'restarting'
+  | 'unknown'
+
+// Aggregated metrics computed by the backend over a sliding window.
+// Fields mirror dashboard_http_keeper_detail.ml summary output.
+interface MetricsWindowTopItem {
+  tool?: string
+  kind?: string
+  model?: string
+  reason?: string
+  trigger?: string
+  count?: number
+  [key: string]: unknown
+}
+
+export interface MetricsWindow {
+  // -- Sample metadata --
+  sample_points?: number
+  window_sample_points?: number
+  turn_points?: number
+  window_turn_points?: number
+  heartbeat_points?: number
+  window_heartbeat_points?: number
+  proactive_points?: number
+  window_proactive_points?: number
+  window_interactions?: number
+  window_turns?: number
+  window_series_max_lines?: number
+
+  // -- Intervention --
+  intervention_share?: number
+  intervention_per_turn?: number
+
+  // -- Tool --
+  tool_call_count?: number
+
+  // -- Top-N lists --
+  top_work_kinds?: MetricsWindowTopItem[]
+  top_tools?: MetricsWindowTopItem[]
+
+  // Catch-all for future fields
+  [key: string]: unknown
+}
+
+export type KeeperPhase =
+  | 'Offline'
+  | 'Running'
+  | 'Failing'
+  | 'Draining'
+  | 'Paused'
+  | 'Stopped'
+  | 'Crashed'
+  | 'Restarting'
+
+export const KEEPER_AUTOBOOT_EXCLUSION_REASONS = [
+  'declarative_autoboot_disabled',
+  'paused',
+  'autoboot_disabled',
+] as const
+
+export type KeeperAutobootExclusionReason =
+  typeof KEEPER_AUTOBOOT_EXCLUSION_REASONS[number]
+
+export type KeeperProfileConfigErrorKind =
+  | 'read_error'
+  | 'parse_error'
+  | 'profile_error'
+  | 'invalid_name'
+  | 'unknown'
+
+export interface KeeperProfileConfigError {
+  keeper: string
+  keeper_path: string
+  failing_path: string
+  kind: KeeperProfileConfigErrorKind
+  reported_kind?: string | null
+  detail: string
+  terminal_reason: 'config_invalid'
+  blocking: true
+  operator_action_required: true
+  next_action: 'fix_keeper_toml_config'
+}
+
+export interface KeeperLastTurnUsage {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  observed_at: string | null
+  source: 'keeper_runtime_usage'
+}
+
+// Mirrors the closed reason set in
+// lib/keeper/keeper_context_observation_projection.ml — extend both together.
+export const KEEPER_CONTEXT_NOT_OBSERVED_REASONS = [
+  'context_measurement_missing',
+  'turn_record_undecodable',
+  'turn_record_read_failed',
+  'turn_record_without_usage',
+  'turn_record_trace_mismatch',
+  'conversation_cumulative_usage',
+  'turn_total_usage',
+  'usage_scope_unavailable',
+  'context_tokens_exceed_window',
+] as const
+
+export type KeeperContextNotObservedReason =
+  (typeof KEEPER_CONTEXT_NOT_OBSERVED_REASONS)[number]
+
+interface KeeperContextUsageEvidence {
+  raw_input_tokens: number | null
+  context_window: number | null
+}
+
+export type KeeperContextMetricsUnavailable =
+  | {
+      kind: 'not_observed'
+      reason: Exclude<KeeperContextNotObservedReason,
+        'conversation_cumulative_usage' | 'turn_total_usage' | 'usage_scope_unavailable' | 'context_tokens_exceed_window'>
+    }
+  | ({
+      kind: 'not_observed'
+      reason: 'conversation_cumulative_usage'
+      usage_scope: 'conversation_cumulative'
+    } & KeeperContextUsageEvidence)
+  | ({
+      kind: 'not_observed'
+      reason: 'turn_total_usage'
+      usage_scope: 'turn_total'
+    } & KeeperContextUsageEvidence)
+  | ({
+      kind: 'not_observed'
+      reason: 'usage_scope_unavailable'
+      usage_scope: 'unavailable'
+    } & KeeperContextUsageEvidence)
+  | {
+      kind: 'not_observed'
+      reason: 'context_tokens_exceed_window'
+      usage_scope: 'per_request'
+      raw_input_tokens: number
+      context_window: number
+    }
+  | {
+      kind: 'invalid_payload'
+      reported_kind: string | null
+      reported_reason: string | null
+    }
+
+/** The sandbox profile a keeper runs under.
+ *
+ *  Mirrors the runtime's closed set (`lib/config/keeper_sandbox_config.ml`:
+ *  `Docker | Micro_vm | Remote_ssh` rendered as `docker` / `microvm` /
+ *  `remote_ssh`). The runtime parses anything outside the set to `None`, so a
+ *  value this union does not name is unknown here too — never a default.
+ *
+ *  SSOT contract: a member added to this union must also be added to
+ *  {@link SANDBOX_PROFILE_COVERAGE}, which is the single driver of
+ *  {@link toSandboxProfile} and {@link SANDBOX_PROFILE_OPTIONS}. Omitting it
+ *  fails to typecheck. The OCaml half cannot be checked from here; the file
+ *  named above is the only link, and adding a variant there means editing this
+ *  union by hand. */
+export type SandboxProfile = 'docker' | 'microvm' | 'remote_ssh'
+
+/** Every {@link SandboxProfile} member, once, in the order the operator sees
+ *  them in a select. `satisfies Record<SandboxProfile, true>` rejects both
+ *  directions of drift: a missing key is an unsatisfied constraint, an extra
+ *  key is an excess property. */
+export const SANDBOX_PROFILE_COVERAGE = {
+  docker: true,
+  microvm: true,
+  remote_ssh: true,
+} as const satisfies Record<SandboxProfile, true>
+
+/** The profile list in declaration order, derived from
+ *  {@link SANDBOX_PROFILE_COVERAGE} so a new member reaches every select
+ *  without a second edit. The assertion holds because the coverage record's
+ *  keys are constrained to `SandboxProfile` above. */
+export const SANDBOX_PROFILE_OPTIONS: readonly SandboxProfile[] = Object.keys(
+  SANDBOX_PROFILE_COVERAGE,
+) as SandboxProfile[]
+
+/** Reads a server-supplied string as a {@link SandboxProfile}, applying the
+ *  same trim and lowercase the runtime applies in
+ *  `keeper_sandbox_config.sandbox_profile_of_string`. Returns `null` for
+ *  anything outside the set, including `undefined`, `''` and profiles the
+ *  runtime once had: an unreadable profile stays unreadable rather than
+ *  collapsing onto a member. */
+export function toSandboxProfile(raw: string | null | undefined): SandboxProfile | null {
+  if (raw === null || raw === undefined) return null
+  const normalized = raw.trim().toLowerCase()
+  if (!Object.prototype.hasOwnProperty.call(SANDBOX_PROFILE_COVERAGE, normalized)) return null
+  return normalized as SandboxProfile
+}
+
+/** What `normalizeKeeperConfig` (api/dashboard-keeper-config.ts) writes into
+ *  `KeeperConfig.sandbox_profile` when the response has no such key. The server
+ *  omits it whenever the keeper's profile fails to load: `keeper_config_json`
+ *  still answers `200` and the body then carries `config_error` with no sandbox
+ *  keys (`lib/dashboard/dashboard_http_keeper_snapshot.mli`). A reader telling
+ *  the operator what the server sent has to compare against this first, or it
+ *  attributes the client's own placeholder to the server. */
+export const UNKNOWN_SANDBOX_PROFILE = '(unknown sandbox_profile)'
+
+/** The same substitution for `network_mode`, omitted on the same branch. */
+export const UNKNOWN_NETWORK_MODE = '(unknown network_mode)'
+
+/** Whether the profile runs the keeper inside a guest this host creates and
+ *  discards, rather than on an account that outlives the turn. Three panel
+ *  branches ask this question: `network_mode` accepts `none` only for a guest,
+ *  the hardening guide card applies only to a guest, and switching profile
+ *  rewrites a stored `none` back to `inherit` when the new profile has no
+ *  guest to isolate.
+ *
+ *  `satisfies Record<SandboxProfile, boolean>` makes a new union member fail to
+ *  typecheck until this record answers for it, so the question is never
+ *  answered by a fallthrough. */
+export const SANDBOX_PROFILE_IS_GUEST = {
+  docker: true,
+  microvm: true,
+  remote_ssh: false,
+} as const satisfies Record<SandboxProfile, boolean>
+
+/** [SANDBOX_PROFILE_IS_GUEST] for a server-supplied string. An unreadable
+ *  profile returns `false`: it is not known to run a guest, and the branches
+ *  that read this widen what the operator may save. */
+export function isGuestSandboxProfile(raw: string | null | undefined): boolean {
+  const profile = toSandboxProfile(raw)
+  return profile !== null && SANDBOX_PROFILE_IS_GUEST[profile]
+}
+
+/** The CLI that lists and follows a profile's containers. `remote_ssh` maps to
+ *  `null` because it has none — `keeper_sandbox_control.ml` returns no
+ *  containers for it (`Remote_ssh -> ([], None)`) and emits
+ *  `managed_container_kind: null`. `null` means there is no command to print,
+ *  not a command to guess.
+ *
+ *  `satisfies Record<SandboxProfile, string | null>` makes a new union member
+ *  fail to typecheck until this record answers for it. */
+export const SANDBOX_PROFILE_CONTAINER_CLI = {
+  docker: 'docker',
+  microvm: 'container',
+  remote_ssh: null,
+} as const satisfies Record<SandboxProfile, string | null>
+
+/** [SANDBOX_PROFILE_CONTAINER_CLI] for a server-supplied string. Returns
+ *  `null` for an unreadable profile as well as for one with no CLI. */
+export function sandboxContainerCli(raw: string | null | undefined): string | null {
+  const profile = toSandboxProfile(raw)
+  return profile === null ? null : SANDBOX_PROFILE_CONTAINER_CLI[profile]
+}
+
+export interface Keeper {
+  cost_coverage?: KeeperCostCoverage | null
+  board_address?: KeeperBoardAddress
+  /** Required by the live wire; absent local fixtures are explicitly unavailable. */
+  portrait?: KeeperPortraitReading
+  candle_balance_milli?: string | null
+  candle_account_revision?: string | null
+  declaration_only?: boolean
+  preparation_requirements?: Array<'runtime_check_required' | 'sandbox_check_required' | 'declaration_invalid'>
+  name: string
+  keeper_id?: string | null
+  pipeline_stage?: PipelineStage
+  pipeline_stage_detail?: string | null
+  lifecycle_phase?: KeeperPhase | null
+  phase?: KeeperPhase | null
+  runtime_class?: 'keeper'
+  paused?: boolean
+  /** Autoboot exclusion reason mirrored from `Keeper_runtime`.
+   *  null when bootable. Surfaced from execution `keepers` and briefing
+   *  `keeper_briefs`. */
+  exclusion_reason?: KeeperAutobootExclusionReason | null
+  registered?: boolean
+  emoji?: string
+  koreanName?: string
+  trace_id?: string
+  model?: string
+  primary_model?: string
+  active_model?: string
+  active_model_label?: string | null
+  last_model_used?: string
+  next_model_hint?: string | null
+  runtime_id?: string | null
+  runtime_ref?: RuntimeRef | null
+  runtime_canonical?: string | null
+  selected_runtime_canonical?: string | null
+  status: string
+  keepalive_running?: boolean
+  keeper_keepalive_interval_s?: number | null
+  diagnostic?: KeeperDiagnostic | null
+  registry_state?: string | null
+  activation_mode?: KeeperActivationMode
+  pause_state?: KeeperPauseState | null
+  runtime_blocker_state?: KeeperRuntimeBlockerState | null
+  runtime_blocker_class?: KeeperRuntimeBlockerClass | null
+  runtime_blocker_summary?: string | null
+  stop_cause?: StopCause | null
+  needs_attention?: boolean | null
+  attention_reason?: string | null
+  next_human_action?: string | null
+  config_error?: KeeperProfileConfigError | null
+  // Normalized at the store boundary by `normalizeKeeperSandboxProfile`, so
+  // this is already the runtime's closed set — null means the row carried no
+  // readable profile, not that some profile is missing from the union.
+  sandbox_profile?: SandboxProfile | null
+  sandbox_target?: string | null
+  keeper_last_error?: string | null
+  blocked_task_count?: number | null
+  goal_progress?: {
+    linked_task_count?: number
+    done_task_count?: number
+    open_task_count?: number
+    blocked_task_count?: number
+    convergence?: number | null
+  } | null
+  created_at?: string
+  updated_at?: string
+  keeper_age_s?: number
+  last_turn_ago_s?: number
+  last_proactive_ago_s?: number
+  last_proactive_reason?: string | null
+  last_proactive_preview?: string | null
+  last_drift_reason?: string | null
+  drift_count_total?: number
+  runtime_warning_ctx_ratio?: number | null
+  trust?: KeeperTrustSummary | null
+  turn_count?: number
+  total_turns?: number
+  total_tokens?: number
+  last_latency_ms?: number
+  last_activity_ago_s?: number
+  last_activity_at?: string | null
+  last_activity_source?: KeeperLiveActivitySource | null
+  live_activity?: KeeperLiveActivity | null
+  current_gate?: KeeperCurrentGate | null
+  context_ratio?: number | null
+  context_tokens?: number | null
+  context_max?: number | null
+  context_source?: string | null
+  context_metrics_unavailable?: KeeperContextMetricsUnavailable | null
+  last_turn_usage?: KeeperLastTurnUsage | null
+  context?: {
+    source?: string | null
+    context_ratio?: number | null
+    context_tokens?: number | null
+    context_max?: number | null
+    // Provenance of a turn_record-sourced measurement (RFC-0233): which
+    // completed turn produced the numbers and its serialized request size.
+    observed_at?: string | null
+    turn_ref?: string | null
+    absolute_turn?: number | null
+    request_body_bytes?: number | null
+    message_count?: number
+    has_checkpoint?: boolean
+  }
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_tool_names?: string[]
+  // Observed audit fallback from the shell summary; not authored tool policy.
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
+  conversation_tail_count?: number
+  addressed_message_count?: number
+  keeper_mention_counts?: Array<{ keeper: string; count: number }>
+  metrics_window?: MetricsWindow
+  // Metrics time-series (from backend metrics_series)
+  metrics_series?: KeeperMetricPoint[]
+  inventory?: string[]
+  relationships?: Record<string, string>
+  supervisor_diagnostics?: KeeperSupervisorDiagnostics
+  provider_health?: ProviderHealth | null
+  outcomes?: KeeperOutcomes
+  conditions?: KeeperConditions
+}
+
+/** Outcomes rollup — aggregated successes / failures / validation
+ *  for the last 50-entry transition ring. Backed by
+ *  [Dashboard_http_keeper.compute_outcomes_rollup]. See
+ *  [specs/keeper-state-machine/KeeperOutcomesConservation.tla] for the
+ *  conservation invariant:
+ *    successes.substantive_turns + failures.turn_failed = observed_turns
+ */
+export interface KeeperOutcomes {
+  window: string
+  observed_turns: number
+  successes: {
+    substantive_turns: number
+    handoffs_ok: number
+  }
+  failures: {
+    turn_failed: number
+    handoff_failed: number
+    crashes: number
+    restarts: number
+    consecutive_fail_current: number
+  }
+  validation: {
+    agent_core_verdicts: {
+      pass: number
+      fail: number
+      unknown: number
+      top_failure_reasons: string[]
+    }
+    last_verdict_at: number | null
+  }
+}
+
+/** Observable conditions that drive the keeper FSM.
+ *  Serialized by [Keeper_state_machine.conditions_to_json]. */
+export interface KeeperConditions {
+  launch_pending: boolean
+  fiber_alive: boolean
+  heartbeat_healthy: boolean
+  turn_healthy: boolean
+  context_handoff_needed: boolean
+  operator_paused: boolean
+  stop_requested: boolean
+  drain_complete: boolean
+}
+
+export interface KeeperSupervisorCrashLogEntry {
+  ts?: number
+  reason?: string
+}
+
+interface KeeperSupervisorDiagnostics {
+  restart_count?: number
+  crash_log?: KeeperSupervisorCrashLogEntry[]
+  last_failure_reason?: string | null
+}
+
+// --- Keeper Config (structured read-only view) ---
+
+// The system prompt a keeper turn would send (#38354). A turn that cannot
+// build it is refused, so the server sends the typed reason instead of text.
+// A shape this client does not know fails only this field.
+export type KeeperSystemPromptPreview =
+  | { state: 'available'; effective: string; assembled: string }
+  | { state: 'unavailable'; reason: 'constitution_unreadable'; path: string; detail: string }
+  | { state: 'unavailable'; reason: 'workspace_unavailable'; detail: string }
+  | { state: 'unavailable'; reason: 'prompt_unrenderable'; detail: string }
+  | { state: 'decode_failed'; detail: string }
+
+interface KeeperConfigPrompt {
+  instructions: string
+  // The server emits exactly one shared block. keeper.constitution,
+  // keeper.world and keeper.capabilities were folded into keeper by
+  // #26823; decoding them produced three empty blocks and the panel rendered
+  // nothing for the shared prompt.
+  system_prompt_blocks: {
+    system: {
+      key: string
+      source: string
+      text: string
+    }
+  }
+  system_prompt: KeeperSystemPromptPreview
+  unified_user_message_preview: string
+}
+
+interface KeeperConfigExecution {
+  models: string[]
+  active_model: string
+  active_model_label?: string | null
+  verify: boolean
+  selected_runtime_id: string
+  selected_runtime_canonical: string
+  runtime_options: string[]
+  runtime_ref?: RuntimeRef | null
+}
+
+
+export interface KeeperConfigSkills {
+  /** null inherits every published Skill; [] explicitly selects none. */
+  names: string[] | null
+}
+
+export type KeeperManifestRevision =
+  | { state: 'missing' }
+  | { state: 'sha256'; value: string }
+
+export type KeeperRuntimeAssignmentState =
+  | { state: 'missing' }
+  | { state: 'assigned'; runtime_id: string }
+
+export type KeeperRuntimeAssignmentRevision =
+  | { state: 'runtime_config_missing' }
+  | {
+      state: 'runtime_config_present'
+      source_revision: string
+      assignment: KeeperRuntimeAssignmentState
+    }
+
+export interface KeeperConfigRevision {
+  manifest: KeeperManifestRevision
+  runtime_assignment: KeeperRuntimeAssignmentRevision
+}
+
+/** The server's answer when it could not read the revision at all —
+ * dashboard_http_keeper_snapshot emits `{state:"unavailable", detail}` in
+ * place of the manifest/runtime_assignment pair. Carried as its own arm so
+ * the panel can show `detail` and a save cannot post it as a CAS expected
+ * value. */
+export interface KeeperConfigRevisionUnavailable {
+  state: 'unavailable'
+  detail: string
+}
+
+export type KeeperConfigRevisionState =
+  | KeeperConfigRevision
+  | KeeperConfigRevisionUnavailable
+
+export interface RuntimeRef {
+  group: string
+  item: string | null
+}
+
+export interface KeeperConfigRuntimeTrust {
+  disposition?: string | null
+  disposition_reason?: string | null
+  needs_attention?: boolean | null
+  attention_reason?: string | null
+  next_human_action?: string | null
+  approval?: unknown
+  execution?: unknown
+  latest_causal_event?: unknown
+}
+
+interface KeeperConfigRuntime {
+  paused: boolean
+  registered: boolean
+  keepalive_running: boolean
+  registry_state?: string | null
+  fiber_health: string
+  runtime_blocker_class?: KeeperRuntimeBlockerClass | null
+  active_model_label?: string | null
+  runtime_blocker_summary?: string | null
+}
+
+interface KeeperConfigWorkspace {
+  mention_targets: string[]
+  board_interests: string[]
+  bound_workspace_ids: string[]
+}
+
+export interface KeeperConfigOverrideFieldSource {
+  field: string
+  source: string | null
+  live_source: string | null
+  default_source: string | null
+  default_source_kind: 'toml' | null
+  default_manifest_path: string | null
+  default_manifest_exists: boolean | null
+  default_missing: boolean | null
+  default_value: unknown
+  live_value: unknown
+}
+
+interface KeeperConfigSources {
+  live_meta_path: string
+  default_manifest_path: string | null
+  default_source_kind: 'toml' | null
+  precedence: string[]
+  has_live_override: boolean
+  override_fields: string[]
+  override_field_sources: KeeperConfigOverrideFieldSource[]
+}
+
+interface KeeperConfigMetrics {
+  total_turns: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  total_cost_usd: KeeperCostCoverage | null
+  last_model_used: string
+  last_input_tokens: number
+  last_output_tokens: number
+  last_total_tokens: number
+  last_latency_ms: number | null
+  last_total_tokens_per_sec: number | null
+  last_output_tokens_per_sec: number | null
+}
+
+export interface KeeperConfigFieldPresence {
+  schema: string
+  producer: string
+  present_paths: string[]
+}
+
+export interface KeeperManifestWarning {
+  code: string
+  detail: string
+}
+
+export interface KeeperConfigWriteReceipt {
+  revision: KeeperConfigRevision
+  applied: boolean
+  warnings: KeeperManifestWarning[]
+}
+
+export interface KeeperHookSlot {
+  active: boolean
+  source: string
+  gates?: string[]
+  effects?: string[]
+  features?: string[]
+}
+
+interface KeeperHookIntrospection {
+  scope: string | null
+  slots: Record<string, KeeperHookSlot>
+}
+
+export type KeeperInputPolicy = 'small' | 'wide'
+
+/** What a successful config POST did to the running lane. Absent on GET. */
+export type KeeperConfigRuntimeSync = 'lane_restarted' | 'deferred_until_turn_end'
+
+export type RemoteSshProbe =
+  | { state: 'not_asked' }
+  | { state: 'answered'; protocol_major: number; shim_release: string | null; observed_at_unix: number }
+  | { state: 'failed'; at_unix: number; detail: string }
+
+export interface RemoteSshEndpoint {
+  name: string
+  host: string
+  user: string
+  port: number
+  remote_root: string
+  observation: {
+    probe: RemoteSshProbe
+    last_dispatch:
+      | null
+      | { outcome: 'payload_finished'; at_unix: number; status: string }
+      | { outcome: 'lane_failed'; at_unix: number; failure: string; detail: string }
+    operator_action: string | null
+  }
+}
+
+export type RemoteSshEndpointCatalog =
+  | { state: 'available'; endpoints: RemoteSshEndpoint[] }
+  | { state: 'unavailable'; detail: string }
+
+export interface KeeperConfig {
+  name: string
+  config_revision: KeeperConfigRevisionState
+  config_write?: KeeperConfigWriteReceipt
+  runtime_sync?: KeeperConfigRuntimeSync
+  config_transaction_warnings?: KeeperManifestWarning[]
+  activation_mode: KeeperActivationMode
+  input_policy: KeeperInputPolicy
+  max_context_override: number | null
+  // The server's string, unnormalized. It is not a `SandboxProfile`: when the
+  // response omits the field `normalizeKeeperConfig` writes the placeholder
+  // `UNKNOWN_SANDBOX_PROFILE` (api/dashboard-keeper-config.ts) here, and a
+  // future runtime member arrives before this bundle knows it. Anything
+  // telling the operator what the server sent has to compare against that
+  // constant first. `'docker' | 'microvm' | 'remote_ssh' | string`
+  // collapsed to `string` anyway, so the literals only looked like a contract.
+  // The contract is `toSandboxProfile`, which every reader goes through.
+  sandbox_profile?: string
+  network_mode?: 'none' | 'inherit' | string
+  remote_endpoint?: string | null
+  remote_ssh_endpoints?: RemoteSshEndpointCatalog
+  voice_always_allow?: boolean | null
+  keeper_last_error?: string | null
+  sandbox_roots: string[]
+  prompt: KeeperConfigPrompt
+  execution: KeeperConfigExecution
+  skills: KeeperConfigSkills
+  hooks?: KeeperHookIntrospection
+  runtime: KeeperConfigRuntime
+  runtime_trust?: KeeperConfigRuntimeTrust | null
+  workspace: KeeperConfigWorkspace
+  sources: KeeperConfigSources
+  metrics: KeeperConfigMetrics
+  field_presence?: KeeperConfigFieldPresence
+}

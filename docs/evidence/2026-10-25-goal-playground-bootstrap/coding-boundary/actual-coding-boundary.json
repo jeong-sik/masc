@@ -1,0 +1,750 @@
+{
+  "schema": "masc.coding-eval.actual-boundary-supplement/v1",
+  "verdict": "PASS_SELECTED_EXISTING_CONSUMERS_ON_CAPABLE_IMAGE_WITH_RETAINED_FIRST_IMAGE_FAILURE",
+  "observed_at_utc": "2026-10-25T10:36:38.273875+00:00",
+  "source_commit": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "source_files": [
+    {
+      "path": "benchmarks/coding/cases/l1-node-sum/case.json",
+      "git_blob": "3b3e3a9131483d9c2d2ebba8590997e45f47255d",
+      "mode": "100644",
+      "bytes": 511,
+      "sha256": "d189c064909ecf80315a7e3a3d96d3a62e32cdd26b7dba6d36576e11bcda9472"
+    },
+    {
+      "path": "benchmarks/coding/cases/l1-node-sum/solution/sum.js",
+      "git_blob": "e60d365f8b9435513d5807bef1ec23b84c6c71d9",
+      "mode": "100644",
+      "bytes": 141,
+      "sha256": "fc26d91e868d5bb44b118c48f32e0126b05580921fa9099b0cb5970b55e534eb"
+    },
+    {
+      "path": "benchmarks/coding/cases/l1-node-sum/verify.sh",
+      "git_blob": "94916dcb38ea0d013bf3d60c7a8b9fb6f10fc8f9",
+      "mode": "100755",
+      "bytes": 118,
+      "sha256": "69cdd7177c59b14b716a2a981bd6f947ff7a124d1a74caff6a9d7402b5a69147"
+    },
+    {
+      "path": "benchmarks/coding/cases/l1-node-sum/workspace/check.js",
+      "git_blob": "a135ba176f8863463f5a3e9b2440d8f373542ee0",
+      "mode": "100644",
+      "bytes": 210,
+      "sha256": "47ac993c454d477d1201fdc6f592f418834c6f29b409e83b8da95b1985b98c8d"
+    },
+    {
+      "path": "benchmarks/coding/cases/l1-node-sum/workspace/check.sh",
+      "git_blob": "fe8c025899071e30367d67bc094dddcba16dba37",
+      "mode": "100755",
+      "bytes": 73,
+      "sha256": "4192432dca3ac295af16d5965326295c9ad1fdcf42f75f14103114e6f3f3d265"
+    },
+    {
+      "path": "benchmarks/coding/cases/l1-node-sum/workspace/sum.js",
+      "git_blob": "31ef1d478a86c5a12f0a0fc11251f21d53efcfa9",
+      "mode": "100644",
+      "bytes": 141,
+      "sha256": "3f38f0ed117516ffee3ced6473e9f8271fbc792abe33a59659da6680c705cdf4"
+    },
+    {
+      "path": "benchmarks/coding/cases/l2-node-stats/case.json",
+      "git_blob": "ea619c5d96aa714a8f2ebf8cd36eb404e6b24526",
+      "mode": "100644",
+      "bytes": 487,
+      "sha256": "a76d8c46ffd3fdd0e4c18ca8740b19e5f51d030add7b6029c8aac41e7456aec0"
+    },
+    {
+      "path": "benchmarks/coding/cases/l2-node-stats/solution/stats.js",
+      "git_blob": "2cfb86310287c1126774c0a8fb3885b3a169cb24",
+      "mode": "100644",
+      "bytes": 248,
+      "sha256": "57e1e53b59e9c5ba25b66fd6f834aca30c746a8018ad7a9e07b417fff3252872"
+    },
+    {
+      "path": "benchmarks/coding/cases/l2-node-stats/verify.sh",
+      "git_blob": "94916dcb38ea0d013bf3d60c7a8b9fb6f10fc8f9",
+      "mode": "100755",
+      "bytes": 118,
+      "sha256": "69cdd7177c59b14b716a2a981bd6f947ff7a124d1a74caff6a9d7402b5a69147"
+    },
+    {
+      "path": "benchmarks/coding/cases/l2-node-stats/workspace/check.js",
+      "git_blob": "dfc7a35d4779ae2ebab598982835e8a85879e85c",
+      "mode": "100644",
+      "bytes": 277,
+      "sha256": "bb36de3e295658b2da6072640b9ce8934be2c431bbd1e63a451390a0d2d45961"
+    },
+    {
+      "path": "benchmarks/coding/cases/l2-node-stats/workspace/check.sh",
+      "git_blob": "fe8c025899071e30367d67bc094dddcba16dba37",
+      "mode": "100755",
+      "bytes": 73,
+      "sha256": "4192432dca3ac295af16d5965326295c9ad1fdcf42f75f14103114e6f3f3d265"
+    },
+    {
+      "path": "benchmarks/coding/cases/l2-node-stats/workspace/stats.js",
+      "git_blob": "878130591760993576714fb80eb4538a85231794",
+      "mode": "100644",
+      "bytes": 242,
+      "sha256": "a4dc9032236deca927f118f07371a0198b422e6e70bbcc901b971673ad62db42"
+    },
+    {
+      "path": "scripts/harness/lib/coding_eval_inputs.py",
+      "git_blob": "2b2d677a3037bd23eddf839b72d30b45abfed49a",
+      "mode": "100644",
+      "bytes": 9488,
+      "sha256": "69d0e3832cd21a994df9efa595afa648b5ea71d6fb503e2b7dab1a5ef32aa339"
+    },
+    {
+      "path": "scripts/harness/lib/coding_eval_sandbox.py",
+      "git_blob": "75248b5fa2e3ceb075723450f1d6caa76a8ddd5f",
+      "mode": "100644",
+      "bytes": 9573,
+      "sha256": "5427e8af828b2bcc7eeac73a627c3821c0739e7e170eef114428be2ab2b57d96"
+    },
+    {
+      "path": "scripts/tests/test_coding_eval_boundary.py",
+      "git_blob": "3aea5ff2fa47fa8c7a542255622fe5078a998267",
+      "mode": "100644",
+      "bytes": 17678,
+      "sha256": "5c77ab0b978d486aae0edd307249ffef0570702936c7ad2e30e0f5c15346fded"
+    }
+  ],
+  "docker_server_version": "29.4.3",
+  "scope": "Actual Docker Python boundary fixture with verify/regression/build dispatch, plus separately executed host Node oracle capture and static symlink refusal consumers. No full suite or real project build claim.",
+  "first_attempt": {
+    "image_id": "sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d",
+    "existing_methods_executed": 3,
+    "method_passes": 2,
+    "method_failures": 1,
+    "skips": 0,
+    "Docker_verify_exit": 127,
+    "failure_class": "Python interpreter unavailable inside selected image",
+    "stdout_excerpt": "/work/workspace/check.sh: line 3: python3: command not found\n",
+    "raw_stdout": {
+      "source_id": "attempt01.docker.verify.stdout",
+      "bytes": 61,
+      "sha256": "2e77fffdf9ba2b0f26029541eb7a195de451f47e85e0aa22382a6e8befeb6052"
+    },
+    "three_stage_grading_reached": false,
+    "Python_isolation_assertions_reached": false,
+    "failure_preserved": true
+  },
+  "second_attempt": {
+    "image_id": "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+    "image_cohort": "Previously installed python:3.12-slim; distinct from first image. No pull/build.",
+    "existing_methods_executed": 1,
+    "method_passes": 1,
+    "method_failures": 0,
+    "skips": 0,
+    "actual_Docker_runs": [
+      {
+        "observer_invocation_id": "command-001",
+        "stage": "verify",
+        "role": "initial-isolation-verify",
+        "exit_code": 0,
+        "actual_argv_sha256": "a4612b9e0a15d829486a52389081cc52605f968fdf47c5eb4f876b2cfa78b662",
+        "public_command_with_only_host_snapshot_path_redacted": [
+          "docker",
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--read-only",
+          "--cap-drop=ALL",
+          "--security-opt",
+          "no-new-privileges",
+          "--user",
+          "65534:65534",
+          "--tmpfs",
+          "/work:rw,exec,nosuid,mode=1777",
+          "--tmpfs",
+          "/tmp:rw,nosuid,mode=1777",
+          "--mount",
+          "type=bind,src=<owned-frozen-snapshot>,dst=/input,readonly",
+          "--workdir",
+          "/work",
+          "--env",
+          "HOME=/tmp",
+          "--env",
+          "PYTHONDONTWRITEBYTECODE=1",
+          "--entrypoint",
+          "/bin/bash",
+          "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+          "-c",
+          "set -euo pipefail; cp -R /input/workspace /work/workspace; chmod -R u+w /work/workspace; exec bash \"$1\" /work/workspace",
+          "coding-eval-grader",
+          "/input/case/verify.sh"
+        ],
+        "stdout": {
+          "source_id": "command-001.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "container_identity": "Docker automatically assigns a unique container ID/name; direct run did not emit it. Only --rm of the created container applies."
+      },
+      {
+        "observer_invocation_id": "command-002",
+        "stage": "verify",
+        "role": "frozen-verify",
+        "exit_code": 0,
+        "actual_argv_sha256": "853dce1711fe98f107bb2f6b1b9d57dc7b7f6d660dafd6f64a904149e1beef27",
+        "public_command_with_only_host_snapshot_path_redacted": [
+          "docker",
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--read-only",
+          "--cap-drop=ALL",
+          "--security-opt",
+          "no-new-privileges",
+          "--user",
+          "65534:65534",
+          "--tmpfs",
+          "/work:rw,exec,nosuid,mode=1777",
+          "--tmpfs",
+          "/tmp:rw,nosuid,mode=1777",
+          "--mount",
+          "type=bind,src=<owned-frozen-snapshot>,dst=/input,readonly",
+          "--workdir",
+          "/work",
+          "--env",
+          "HOME=/tmp",
+          "--env",
+          "PYTHONDONTWRITEBYTECODE=1",
+          "--entrypoint",
+          "/bin/bash",
+          "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+          "-c",
+          "set -euo pipefail; cp -R /input/workspace /work/workspace; chmod -R u+w /work/workspace; exec bash \"$1\" /work/workspace",
+          "coding-eval-grader",
+          "/input/case/verify.sh"
+        ],
+        "stdout": {
+          "source_id": "command-002.source-stage-stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "container_identity": "Docker automatically assigns a unique container ID/name; direct run did not emit it. Only --rm of the created container applies."
+      },
+      {
+        "observer_invocation_id": "command-003",
+        "stage": "regression",
+        "role": "frozen-regression",
+        "exit_code": 0,
+        "actual_argv_sha256": "38de6ca5bc9eca26c34e042dc3881823a19f7053d598d68a62d6a1f22c9b7682",
+        "public_command_with_only_host_snapshot_path_redacted": [
+          "docker",
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--read-only",
+          "--cap-drop=ALL",
+          "--security-opt",
+          "no-new-privileges",
+          "--user",
+          "65534:65534",
+          "--tmpfs",
+          "/work:rw,exec,nosuid,mode=1777",
+          "--tmpfs",
+          "/tmp:rw,nosuid,mode=1777",
+          "--mount",
+          "type=bind,src=<owned-frozen-snapshot>,dst=/input,readonly",
+          "--workdir",
+          "/work",
+          "--env",
+          "HOME=/tmp",
+          "--env",
+          "PYTHONDONTWRITEBYTECODE=1",
+          "--entrypoint",
+          "/bin/bash",
+          "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+          "-c",
+          "set -euo pipefail; cp -R /input/workspace /work/workspace; chmod -R u+w /work/workspace; exec bash \"$1\" /work/workspace",
+          "coding-eval-grader",
+          "/input/case/regression.sh"
+        ],
+        "stdout": {
+          "source_id": "command-003.source-stage-stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "container_identity": "Docker automatically assigns a unique container ID/name; direct run did not emit it. Only --rm of the created container applies."
+      },
+      {
+        "observer_invocation_id": "command-004",
+        "stage": "build",
+        "role": "frozen-build",
+        "exit_code": 0,
+        "actual_argv_sha256": "83381fe618d6ab87876b96d3ae60569ed7a882689be3d464e023bc36e7f71bee",
+        "public_command_with_only_host_snapshot_path_redacted": [
+          "docker",
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--read-only",
+          "--cap-drop=ALL",
+          "--security-opt",
+          "no-new-privileges",
+          "--user",
+          "65534:65534",
+          "--tmpfs",
+          "/work:rw,exec,nosuid,mode=1777",
+          "--tmpfs",
+          "/tmp:rw,nosuid,mode=1777",
+          "--mount",
+          "type=bind,src=<owned-frozen-snapshot>,dst=/input,readonly",
+          "--workdir",
+          "/work",
+          "--env",
+          "HOME=/tmp",
+          "--env",
+          "PYTHONDONTWRITEBYTECODE=1",
+          "--entrypoint",
+          "/bin/bash",
+          "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+          "-c",
+          "set -euo pipefail; cp -R /input/workspace /work/workspace; chmod -R u+w /work/workspace; exec bash \"$1\" /work/workspace",
+          "coding-eval-grader",
+          "/input/case/build.sh"
+        ],
+        "stdout": {
+          "source_id": "command-004.source-stage-stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "container_identity": "Docker automatically assigns a unique container ID/name; direct run did not emit it. Only --rm of the created container applies."
+      },
+      {
+        "observer_invocation_id": "command-005",
+        "stage": "verify",
+        "role": "fresh-failing-candidate-verify",
+        "exit_code": 7,
+        "actual_argv_sha256": "fa62ba1b310f6023372d043c4e3f82ab787b49d15b29f295233a127cf91c3544",
+        "public_command_with_only_host_snapshot_path_redacted": [
+          "docker",
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--read-only",
+          "--cap-drop=ALL",
+          "--security-opt",
+          "no-new-privileges",
+          "--user",
+          "65534:65534",
+          "--tmpfs",
+          "/work:rw,exec,nosuid,mode=1777",
+          "--tmpfs",
+          "/tmp:rw,nosuid,mode=1777",
+          "--mount",
+          "type=bind,src=<owned-frozen-snapshot>,dst=/input,readonly",
+          "--workdir",
+          "/work",
+          "--env",
+          "HOME=/tmp",
+          "--env",
+          "PYTHONDONTWRITEBYTECODE=1",
+          "--entrypoint",
+          "/bin/bash",
+          "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+          "-c",
+          "set -euo pipefail; cp -R /input/workspace /work/workspace; chmod -R u+w /work/workspace; exec bash \"$1\" /work/workspace",
+          "coding-eval-grader",
+          "/input/case/verify.sh"
+        ],
+        "stdout": {
+          "source_id": "command-005.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "container_identity": "Docker automatically assigns a unique container ID/name; direct run did not emit it. Only --rm of the created container applies."
+      }
+    ],
+    "grading": {
+      "verify": 0,
+      "regression": 0,
+      "build": 0
+    },
+    "stages": [
+      {
+        "stage": "verify",
+        "exit_code": 0,
+        "image_id": "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+        "input_manifest": {
+          "files": [
+            {
+              "bytes": 27,
+              "path": "case/build.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 103,
+              "path": "case/case.json",
+              "sha256": "59d86a0d25e3a7b76e3983e8d5071df758fbe3048df56eea82b7665d07ddf1d5"
+            },
+            {
+              "bytes": 27,
+              "path": "case/regression.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 27,
+              "path": "case/verify.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 667,
+              "path": "workspace/candidate.py",
+              "sha256": "de6375d058fc5b58e721d4a2e2c338b4e18501c046d0e566f24648a2f6c92f99"
+            },
+            {
+              "bytes": 50,
+              "path": "workspace/check.sh",
+              "sha256": "5df91f2135c5bbbd7c90b3407536b4703e13843010a6b1d644d07f6c0a536155"
+            }
+          ],
+          "sha256": "b04488ec3ce1be744c8a016f155c2cb6e393b4a01c0b8f525d53143689fb0729"
+        },
+        "declared_isolation": {
+          "host_credentials": "not_forwarded",
+          "input_mount": "read_only",
+          "network": "none",
+          "rootfs": "read_only",
+          "user": "65534:65534"
+        },
+        "raw_receipt": {
+          "source_id": "verify.receipt",
+          "bytes": 1170,
+          "sha256": "afc211c0a74e9231b7c1b820a3a5d086857ece3f45ffbf91a3b2b29496cd7f10"
+        },
+        "actual_stdout": {
+          "source_id": "verify.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stdout_text": ""
+      },
+      {
+        "stage": "regression",
+        "exit_code": 0,
+        "image_id": "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+        "input_manifest": {
+          "files": [
+            {
+              "bytes": 27,
+              "path": "case/build.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 103,
+              "path": "case/case.json",
+              "sha256": "59d86a0d25e3a7b76e3983e8d5071df758fbe3048df56eea82b7665d07ddf1d5"
+            },
+            {
+              "bytes": 27,
+              "path": "case/regression.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 27,
+              "path": "case/verify.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 667,
+              "path": "workspace/candidate.py",
+              "sha256": "de6375d058fc5b58e721d4a2e2c338b4e18501c046d0e566f24648a2f6c92f99"
+            },
+            {
+              "bytes": 50,
+              "path": "workspace/check.sh",
+              "sha256": "5df91f2135c5bbbd7c90b3407536b4703e13843010a6b1d644d07f6c0a536155"
+            }
+          ],
+          "sha256": "b04488ec3ce1be744c8a016f155c2cb6e393b4a01c0b8f525d53143689fb0729"
+        },
+        "declared_isolation": {
+          "host_credentials": "not_forwarded",
+          "input_mount": "read_only",
+          "network": "none",
+          "rootfs": "read_only",
+          "user": "65534:65534"
+        },
+        "raw_receipt": {
+          "source_id": "regression.receipt",
+          "bytes": 1174,
+          "sha256": "feb23da09605362df354293f27c867de87afb0b78c6797f91805b6b43f297ce0"
+        },
+        "actual_stdout": {
+          "source_id": "regression.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stdout_text": ""
+      },
+      {
+        "stage": "build",
+        "exit_code": 0,
+        "image_id": "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+        "input_manifest": {
+          "files": [
+            {
+              "bytes": 27,
+              "path": "case/build.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 103,
+              "path": "case/case.json",
+              "sha256": "59d86a0d25e3a7b76e3983e8d5071df758fbe3048df56eea82b7665d07ddf1d5"
+            },
+            {
+              "bytes": 27,
+              "path": "case/regression.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 27,
+              "path": "case/verify.sh",
+              "sha256": "6a015bba70c90a7db4cb578987009005a0c7d730bb90f1a6990aa22ee95dee66"
+            },
+            {
+              "bytes": 667,
+              "path": "workspace/candidate.py",
+              "sha256": "de6375d058fc5b58e721d4a2e2c338b4e18501c046d0e566f24648a2f6c92f99"
+            },
+            {
+              "bytes": 50,
+              "path": "workspace/check.sh",
+              "sha256": "5df91f2135c5bbbd7c90b3407536b4703e13843010a6b1d644d07f6c0a536155"
+            }
+          ],
+          "sha256": "b04488ec3ce1be744c8a016f155c2cb6e393b4a01c0b8f525d53143689fb0729"
+        },
+        "declared_isolation": {
+          "host_credentials": "not_forwarded",
+          "input_mount": "read_only",
+          "network": "none",
+          "rootfs": "read_only",
+          "user": "65534:65534"
+        },
+        "raw_receipt": {
+          "source_id": "build.receipt",
+          "bytes": 1169,
+          "sha256": "2809498d2d2c097b1939a21ab4ab14382d3afcde6a57360ceb7a4ba8a427030e"
+        },
+        "actual_stdout": {
+          "source_id": "build.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stdout_text": ""
+      }
+    ],
+    "same_snapshot_manifest_sha256": "b04488ec3ce1be744c8a016f155c2cb6e393b4a01c0b8f525d53143689fb0729",
+    "same_mount_for_three_stages": true,
+    "retained_snapshot_recomputed_exact": true,
+    "candidate_host_source_changed_between_stages": true,
+    "captured_candidate_sha256": "de6375d058fc5b58e721d4a2e2c338b4e18501c046d0e566f24648a2f6c92f99",
+    "final_host_candidate_sha256": "4dc37ada8d1912c24af4ab3a37f16bcbc291e3ca1d45d22e67f2c61712342236",
+    "final_fresh_capture_of_failure_returns_7": true,
+    "trusted_check_sha256": "5df91f2135c5bbbd7c90b3407536b4703e13843010a6b1d644d07f6c0a536155",
+    "trusted_check_matches_actual_frozen_input": true,
+    "reference_solution_absent_from_grading_snapshot": true
+  },
+  "actual_Python_fixture_observations": {
+    "nonroot_UID_assertion": true,
+    "controlled_host_environment_sentinel_absent": true,
+    "controlled_host_marker_not_visible": true,
+    "host_marker_unchanged_after_grading": true,
+    "docker_socket_not_visible": true,
+    "input_mount_write_attempt_refused": true,
+    "connection_to_external_1_1_1_1_port443_refused": true,
+    "guest_file_cannot_leak_to_host_candidate": true,
+    "fresh_guest_workspace_each_stage": true,
+    "credential_scope": "Controlled sentinel and host marker, not access to real credential values or exhaustive secret inventory."
+  },
+  "separate_host_oracle_controls": {
+    "existing_method": "test_node_oracle_edit_does_not_fix_the_candidate",
+    "Node_corpus_subcases": 2,
+    "host_subprocess_runs": [
+      {
+        "case_id": "l1-node-sum",
+        "phase": "tampered-oracle-before-capture",
+        "executor": "host Node via existing corpus verify.sh",
+        "exit_code": 0,
+        "command_with_host_paths_redacted": [
+          "bash",
+          "<source-corpus>/l1-node-sum/verify.sh",
+          "<controlled-candidate-or-snapshot>"
+        ],
+        "actual_argv_sha256": "bcac41eb9031571d8e5289d179d3c2d409dcd0415ece4e5c4c200cb59adae2d4",
+        "stdout": {
+          "source_id": "command-002.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "source_id": "command-002.stderr",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "case_id": "l1-node-sum",
+        "phase": "trusted-oracle-after-capture",
+        "executor": "host Node via existing corpus verify.sh",
+        "exit_code": 1,
+        "command_with_host_paths_redacted": [
+          "bash",
+          "<source-corpus>/l1-node-sum/verify.sh",
+          "<controlled-candidate-or-snapshot>"
+        ],
+        "actual_argv_sha256": "f034e51cfeb7261b0f548600b8371e2b4d5df8f7b15c6bcae03678ca0b4424b7",
+        "stdout": {
+          "source_id": "command-003.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "source_id": "command-003.stderr",
+          "bytes": 886,
+          "sha256": "02869f223abb5c280330b69972a4d41c287cfdb838abe33ed74c17030746cce6"
+        }
+      },
+      {
+        "case_id": "l2-node-stats",
+        "phase": "tampered-oracle-before-capture",
+        "executor": "host Node via existing corpus verify.sh",
+        "exit_code": 0,
+        "command_with_host_paths_redacted": [
+          "bash",
+          "<source-corpus>/l2-node-stats/verify.sh",
+          "<controlled-candidate-or-snapshot>"
+        ],
+        "actual_argv_sha256": "41a71844d6731e5dada083a14de55f4a2061e02570dc5b608553daceb4c68e6d",
+        "stdout": {
+          "source_id": "command-004.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "source_id": "command-004.stderr",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "case_id": "l2-node-stats",
+        "phase": "trusted-oracle-after-capture",
+        "executor": "host Node via existing corpus verify.sh",
+        "exit_code": 1,
+        "command_with_host_paths_redacted": [
+          "bash",
+          "<source-corpus>/l2-node-stats/verify.sh",
+          "<controlled-candidate-or-snapshot>"
+        ],
+        "actual_argv_sha256": "2866e90f048bd78bcd76b07a1beec0a5763038266be703c67a4cf101b7d1c6fa",
+        "stdout": {
+          "source_id": "command-005.stdout",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "source_id": "command-005.stderr",
+          "bytes": 946,
+          "sha256": "9e616922b3d39270c6b56f2658e1bc724a273066b0c6266081c9b9182dc34d10"
+        }
+      }
+    ],
+    "scope": "Existing source32 prepare_snapshot restoration exercised by host corpus consumers. These are not Docker/VM grader executions.",
+    "candidate_program_bytes_unchanged_during_restore": true,
+    "protected_check_restored_to_canonical_case_bytes": true
+  },
+  "static_link_refusal": {
+    "existing_method": "test_candidate_link_is_refused_before_host_oracle_restoration",
+    "method_result": "PASS",
+    "candidate_check_symlink_refused": true,
+    "host_target_marker_unchanged": true,
+    "scope": "Static link before capture; no live race stress or VM claim."
+  },
+  "counting": {
+    "distinct_existing_methods_selected": 3,
+    "first_attempt_method_invocations": 3,
+    "second_attempt_method_invocations": 1,
+    "method_invocations_total": 4,
+    "initial_method_failure_preserved": 1,
+    "actual_Docker_run_invocations_total": 6,
+    "capable_image_Docker_run_invocations": 5,
+    "host_Node_subprocess_invocations": 4,
+    "whole_suite_executed": false
+  },
+  "execution_instrumentation": {
+    "unittest_source_and_expectations_changed": false,
+    "grader_source_or_Docker_argv_changed": false,
+    "observer_changes": [
+      "owned temporary-root placement",
+      "copy private context immediately before original cleanup",
+      "capture formerly inherited Docker stdout; source stage log routing unchanged",
+      "record actual subprocess argv/exit"
+    ],
+    "copied_source_exact_git_blobs": true,
+    "source_sparse_clone_modified": false,
+    "automatic_unique_container_names": true,
+    "global_Docker_operations": false
+  },
+  "limits": [
+    "build.sh and regression.sh in this existing fixture copy verify.sh and execute the Python boundary candidate. This proves stage dispatch/isolation on a frozen snapshot; it is not compilation of a real project.",
+    "Actual three-stage result belongs only to source3228 and the capable a6e34 image cohort. de170b failed before Python assertions, and that failure is retained.",
+    "The Node oracle checks execute host corpus consumers, coupled to the same source32 snapshot preparer; they are not a separately demonstrated Docker oracle-tampering attack.",
+    "microVM/SSH grading was not executed. Source refusal is not VM/SSH grading success.",
+    "No actual full coding-eval suite, provider/model calls, local Dune, CI watch, production runtime/Goal/Task changes, image pulls/builds, global prune/stop or installation.",
+    "No population reliability or production secret-safety claim follows from these controlled probes."
+  ],
+  "private_originals_manifest": {
+    "source_id": "private-originals-manifest",
+    "bytes": 23101,
+    "sha256": "5981718a4a0003979c7144d296bd2af11c4a4dac89bd4de4ac4e7127940d3af7"
+  },
+  "raw_provenance": [
+    {
+      "source_id": "attempt01.unittest-result",
+      "bytes": 293,
+      "sha256": "1aba9d7c23f5b79baa05885be77952285cceb924f69d6f8c64e8a1cae346aade"
+    },
+    {
+      "source_id": "attempt01.unittest-log",
+      "bytes": 1334,
+      "sha256": "c1261371c207ad78879d9f8696bd2af0b1105cdda5128ccb4c0d44cc159c4ac6"
+    },
+    {
+      "source_id": "attempt01.actual-commands",
+      "bytes": 4069,
+      "sha256": "0aa5f154c52a55abf69e691c79afb4823a38e352f473ae24e9a40434f0094a45"
+    },
+    {
+      "source_id": "attempt02.unittest-result",
+      "bytes": 167,
+      "sha256": "c33f90ba41f1903c509be6848739d904a71391c71103ae5a2582f3f49161a2bf"
+    },
+    {
+      "source_id": "attempt02.unittest-log",
+      "bytes": 252,
+      "sha256": "1877bb574f24e20e18597a92abc196363d38f09184fa7d6249e345795c3cece8"
+    },
+    {
+      "source_id": "attempt02.actual-commands",
+      "bytes": 6774,
+      "sha256": "4ca30cf2fcd47b929e0824b40d96a37573537596d02a8886e0ca2c9eece6a379"
+    },
+    {
+      "source_id": "observer-source",
+      "bytes": 5241,
+      "sha256": "b73f4a9950c8aba770bf0548e8b1669d41633e57549a3c1677387f5239ec0c1b"
+    }
+  ]
+}

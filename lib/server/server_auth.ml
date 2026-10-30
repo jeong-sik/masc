@@ -1,0 +1,1446 @@
+
+open Masc_domain
+open Server_utils
+open Result.Syntax
+
+let trim_opt = Env_config_core.trim_opt
+
+let configured_bind_host () =
+  Env_config_core.masc_host ()
+
+let is_loopback_host = Masc_network_defaults.is_loopback_host
+
+let is_unspecified_host = Masc_network_defaults.is_unspecified_host
+
+let base_url_has_non_loopback_host () =
+  match Env_config_core.masc_http_base_url_result () with
+  | Error _ -> false  (* no base URL configured — defer to bind-host check *)
+  | Ok url -> (
+      match Uri.host (Uri.of_string url) with
+      | None -> true  (* fail-closed: unparseable host → treat as non-local *)
+      | Some host -> not (is_loopback_host host))
+
+let http_auth_strict_enabled () =
+  Env_config.Transport.http_auth_strict_env_enabled ()
+  || not (is_loopback_host (configured_bind_host ()))
+  || base_url_has_non_loopback_host ()
+
+let http_auth_bind_is_loopback () =
+  is_loopback_host (configured_bind_host ())
+
+let strict_http_auth_error endpoint =
+  Printf.sprintf
+    "%s requires workspace auth enabled with require_token=true when server is \
+     bound to a non-loopback host or MASC_HTTP_BASE_URL points to a public address."
+    endpoint
+
+let ensure_strict_http_token_auth ~endpoint auth_config =
+  if not (http_auth_strict_enabled ()) then
+    Ok auth_config
+  else if not auth_config.Masc_domain.enabled then
+    Error (strict_http_auth_error endpoint)
+  else if not auth_config.require_token then
+    Error (strict_http_auth_error endpoint)
+  else
+    Ok auth_config
+
+let bearer_token_from_header value =
+  let prefix_len = 7 in (* String.length "Bearer " *)
+  if String.length value > prefix_len
+     && String_util.starts_with_ci ~prefix:"Bearer " value
+  then Some (String.sub value prefix_len (String.length value - prefix_len))
+  else None
+
+let authorization_header_name = "authorization"
+let internal_token_header_name = "x-masc-internal-token"
+
+type request_auth_credential =
+  | Absent_credential
+  | Parsed_credential of string
+  | Malformed_credential of string
+
+let request_auth_credential_from_request request =
+  let authorization =
+    Httpun.Headers.get request.Httpun.Request.headers authorization_header_name
+  in
+  let internal =
+    Httpun.Headers.get request.Httpun.Request.headers internal_token_header_name
+  in
+  let bearer =
+    Option.bind
+      (Option.bind authorization bearer_token_from_header)
+      (fun token -> trim_opt (Some token))
+  in
+  match bearer with
+  | Some token -> Parsed_credential token
+  | None ->
+      (match internal, authorization with
+       | Some token, _ ->
+           (match trim_opt (Some token) with
+            | Some token -> Parsed_credential token
+            | None -> Malformed_credential token)
+       | None, Some raw -> Malformed_credential raw
+       | None, None -> Absent_credential)
+
+let token_of_request_auth_credential = function
+  | Parsed_credential token -> Some token
+  | Absent_credential | Malformed_credential _ -> None
+
+let auth_token_from_request request =
+  request_auth_credential_from_request request
+  |> token_of_request_auth_credential
+
+let request_carries_auth_credential request =
+  match request_auth_credential_from_request request with
+  | Absent_credential -> false
+  | Parsed_credential _ | Malformed_credential _ -> true
+
+let malformed_request_credential_error () =
+  Masc_domain.Auth
+    (Masc_domain.Auth_error.Unauthorized
+       { reason = Missing_token
+       ; message =
+           "Request credential header did not contain a bearer or internal token."
+       })
+
+let reject_malformed_request_credential = function
+  | Malformed_credential _ -> Error (malformed_request_credential_error ())
+  | Absent_credential | Parsed_credential _ -> Ok ()
+
+let observer_sse_query_credential_from_request request =
+  let path = Http_server_eio.Request.path request in
+  let observer_stream_requested =
+    match query_param request "sse_kind" with
+    | Some raw ->
+        String.equal "observer" (String.lowercase_ascii (String.trim raw))
+    | None -> false
+  in
+  match request.Httpun.Request.meth with
+  | `GET
+    when (observer_stream_requested && String.equal path "/mcp")
+         || String.equal path "/events/presence" ->
+      (match query_param request "token" with
+       | None -> Absent_credential
+       | Some raw ->
+           (match trim_opt (Some raw) with
+            | Some token -> Parsed_credential token
+            | None -> Malformed_credential raw))
+  | _ -> Absent_credential
+
+let observer_sse_auth_credential_from_request request =
+  match request_auth_credential_from_request request with
+  | (Parsed_credential _ | Malformed_credential _) as credential -> credential
+  | Absent_credential -> observer_sse_query_credential_from_request request
+
+let observer_sse_auth_token_from_request request =
+  observer_sse_auth_credential_from_request request
+  |> token_of_request_auth_credential
+
+let ide_lsp_upgrade_path = "/api/v1/ide/lsp"
+
+(* The page an invite link opens (RFC play-link-for-the-shared-machine §2.6).
+   Public, because the page itself carries nothing: it reads the bearer from
+   the link's fragment and sends it on every data request. *)
+let play_page_path = Play_invite.play_path
+
+(* The IDE language-server socket is opened by a browser WebSocket, which
+   cannot set request headers, so its upgrade GET carries the bearer in the
+   token query parameter, the same admission the observer streams above
+   use. A credential header still wins, and only that exact path reads the
+   query. *)
+let token_bound_auth_token_from_request request =
+  match request_auth_credential_from_request request with
+  | Parsed_credential token -> Some token
+  | Malformed_credential _ -> None
+  | Absent_credential ->
+      (match request.Httpun.Request.meth with
+       | `GET
+         when String.equal
+                (Http_server_eio.Request.path request)
+                ide_lsp_upgrade_path ->
+           trim_opt (query_param request "token")
+       | _ -> None)
+
+let agent_from_request request =
+  let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
+  let qp key = query_param request key in
+  let first_some xs = List.find_map Fun.id xs in
+  first_some [ hdr "x-gate-agent"; hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
+  |> Option.map Uri.pct_decode
+
+let strip_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  if String.length value > prefix_len
+     && String.starts_with ~prefix value
+  then
+    String.sub value prefix_len (String.length value - prefix_len)
+  else value
+
+let strip_suffix ~suffix value =
+  let suffix_len = String.length suffix in
+  let value_len = String.length value in
+  if value_len > suffix_len
+     && String.ends_with ~suffix value
+  then
+    String.sub value 0 (value_len - suffix_len)
+  else value
+
+let internal_keeper_agent_from_request request =
+  match Httpun.Headers.get request.Httpun.Request.headers "x-masc-keeper-name" with
+  | None -> None
+  | Some raw ->
+      (* RFC-0393: the header carries the keeper_name itself — no wrapper
+         spelling to strip or re-mint. *)
+      let normalized =
+        raw |> Uri.pct_decode |> String.trim |> String.lowercase_ascii
+      in
+      if normalized = "" then None else Some normalized
+
+let resolve_agent_name_for_auth_raw ~base_path request ~token :
+    (string option, Masc_domain.masc_error) result =
+  match token with
+  | Some t when Auth.verify_internal_keeper_token base_path ~token:t -> (
+      match internal_keeper_agent_from_request request with
+      | Some agent_name -> Ok (Some agent_name)
+      | None ->
+          Error
+            (Masc_domain.Auth
+               (Masc_domain.Auth_error.Unauthorized
+                  { reason = Missing_token
+                  ; message = "Internal keeper auth requires x-masc-keeper-name header."
+                  })))
+  | Some t ->
+      let+ agent_name = Auth.resolve_agent_from_token base_path ~token:t in
+      Some agent_name
+  | None -> (
+      match agent_from_request request with
+      | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
+      | _ -> Ok None)
+
+(** Bind OAuth credential lookup to the resource derived from the admitted
+    request authority. Static bearer lookup is unaffected by this scope. *)
+let with_mcp_expected_resource f =
+  let authority = Server_request_authority.current_exn () in
+  Auth_oauth.with_expected_resource (Server_oauth_metadata.resource authority) f
+;;
+
+let mcp_unauthorized ?(reason = Masc_domain.Auth_error.Generic) message =
+  Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason; message })
+;;
+
+(** Verify Bearer token for MCP endpoints. [permission] is what the endpoint's
+    profile asks of the credential: [CanReadState] for /mcp and /mcp/managed,
+    [CanPlayMachine] for the seat door /mcp/play. *)
+let verify_mcp_auth_unscoped ~permission ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  let credential = request_auth_credential_from_request request in
+  let* auth_config =
+    ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config
+    |> Result.map_error mcp_unauthorized
+  in
+  let* () = reject_malformed_request_credential credential in
+  if not auth_config.Masc_domain.enabled then
+    Ok None  (* Auth disabled - allow all *)
+  else
+    match token_of_request_auth_credential credential with
+    | None when not auth_config.require_token ->
+        Ok None  (* Token not required *)
+    | None ->
+        Error
+          (mcp_unauthorized
+             ~reason:Masc_domain.Auth_error.Missing_token
+             "Authentication required. Use 'Authorization: Bearer <token>' header.")
+    | Some token -> (
+        let* agent_name =
+          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
+        in
+        match agent_name with
+        | None ->
+            (* Fail-closed: dead branch today (resolver:154-157 returns
+               [Ok (Some _)] or [Error] for [Some token]) but kept
+               explicit so a future [Anonymous] case cannot silently
+               rewrite to "dashboard". Spec:
+               [specs/auth/AuthIdentityFSM.tla] invariant
+               [NoSilentRewrite] (I2). *)
+            Error
+              (Masc_domain.Auth
+                 (Masc_domain.Auth_error.InvalidToken
+                    "Bearer token did not resolve to a credential identity."))
+        | Some agent_name ->
+            Auth.check_permission base_path ~agent_name ~token:(Some token)
+              ~permission
+            |> Result.map (fun () -> None))
+
+let verify_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_auth_unscoped ~permission:Masc_domain.CanReadState ~base_path request)
+;;
+
+let verify_seat_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_auth_unscoped ~permission:Masc_domain.CanPlayMachine ~base_path request)
+;;
+
+let verify_mcp_auth_for_authority ~base_path ~request_authority request =
+  Auth_oauth.with_expected_resource
+    (Server_oauth_metadata.resource request_authority)
+    (fun () ->
+      verify_mcp_auth_unscoped ~permission:Masc_domain.CanReadState ~base_path request)
+;;
+
+let verify_mcp_observer_stream_auth_unscoped ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  let credential = observer_sse_auth_credential_from_request request in
+  let* auth_config =
+    ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config
+    |> Result.map_error mcp_unauthorized
+  in
+  let* () = reject_malformed_request_credential credential in
+  if not auth_config.Masc_domain.enabled then
+    Ok None
+  else
+    match token_of_request_auth_credential credential with
+    | None when not auth_config.require_token ->
+        Ok None
+    | None ->
+        Error
+          (mcp_unauthorized
+             ~reason:Masc_domain.Auth_error.Missing_token
+             "Authentication required. Use 'Authorization: Bearer <token>' header \
+              or 'token' query param for the observer/presence/cursor SSE stream.")
+    | Some token -> (
+        let* agent_name =
+          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
+        in
+        match agent_name with
+        | None ->
+            (* Fail-closed: see verify_mcp_auth above. *)
+            Error
+              (Masc_domain.Auth
+                 (Masc_domain.Auth_error.InvalidToken
+                    "Authentication required. Bearer token did not resolve to \
+                     any agent."))
+        | Some agent_name ->
+            Auth.check_permission base_path ~agent_name ~token:(Some token)
+              ~permission:Masc_domain.CanReadState
+            |> Result.map (fun () -> None))
+
+let verify_mcp_observer_stream_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_mcp_observer_stream_auth_unscoped ~base_path request)
+;;
+
+let verify_operator_mcp_auth_unscoped ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  let credential = request_auth_credential_from_request request in
+  if not auth_config.Masc_domain.enabled then
+    Error
+      (mcp_unauthorized
+         "/mcp/operator requires workspace auth enabled with require_token=true.")
+  else if not auth_config.require_token then
+    Error
+      (mcp_unauthorized
+         "/mcp/operator requires bearer token auth (require_token=true).")
+  else
+    match credential with
+    | Malformed_credential _ ->
+        Error (malformed_request_credential_error ())
+    | Absent_credential ->
+        Error
+          (mcp_unauthorized
+             ~reason:Masc_domain.Auth_error.Missing_token
+             "Authentication required. Use 'Authorization: Bearer <token>' header.")
+    | Parsed_credential token -> (
+        let* agent_name =
+          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
+        in
+        match agent_name with
+        | None ->
+            (* Fail-closed: see verify_mcp_auth above. *)
+            Error
+              (Masc_domain.Auth
+                 (Masc_domain.Auth_error.InvalidToken
+                    "Authentication required. Bearer token did not resolve to \
+                     any agent."))
+        | Some agent_name ->
+            Auth.check_permission base_path ~agent_name ~token:(Some token)
+              ~permission:Masc_domain.CanAdmin
+            |> Result.map (fun () -> None))
+
+let verify_operator_mcp_auth ~base_path request =
+  with_mcp_expected_resource (fun () ->
+    verify_operator_mcp_auth_unscoped ~base_path request)
+;;
+
+let request_actor_hint request =
+  match agent_from_request request with
+  | Some raw ->
+      let agent_name = String.trim raw in
+      if String.equal agent_name "" then None else Some agent_name
+  | None -> None
+
+let sanitize_dashboard_actor_name raw =
+  let value = String.trim raw in
+  let buf = Buffer.create (String.length value) in
+  String.iter
+    (fun c ->
+      match c with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' ->
+          Buffer.add_char buf c
+      | _ -> ())
+    value;
+  Buffer.contents buf
+
+(* Consolidates the two prior [silent:dashboard_actor_fallback] warn sites
+   (Ok None / Error err arms in [dashboard_actor_for_request]) onto a single
+   helper. The message rendering and otel_metric_store labels are owned by
+   [Auth_error_kind] so the contract is round-tripped through a typed
+   record rather than two parallel inline format strings.
+
+   Log dedup: a stale dashboard token triggers this path on *every* HTTP
+   request the browser makes.  Without a cooldown, 140+ identical WARN
+   lines/day accumulate for the same token hash prefix.  The Otel_metric_store
+   counter is always incremented (metrics remain accurate); the log line
+   is emitted at most once per [warn_cooldown_sec] per token prefix. *)
+let warn_cooldown_sec = 300.0
+
+(* Ceiling on distinct token-hash prefixes retained for log dedup. The prefix
+   is derived from client bearer tokens (16^8 keyspace), so without a cap the
+   table grows with every rotated/invalid token over process lifetime. The
+   cooldown gates log frequency per prefix, not table size. *)
+let stale_token_warn_log_max_entries = 1024
+
+let stale_token_warn_log : (string, float) Hashtbl.t = Hashtbl.create 16
+let stale_token_warn_mu = Stdlib.Mutex.create ()
+
+let record_dashboard_actor_fallback
+    (fb : Auth_error_kind.dashboard_actor_fallback) =
+  let now = Time_compat.now () in
+  let should_log =
+    Stdlib.Mutex.protect stale_token_warn_mu (fun () ->
+      match Hashtbl.find_opt stale_token_warn_log fb.token_hash_prefix with
+      | Some last_ts ->
+        if now -. last_ts >= warn_cooldown_sec then begin
+          Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
+          true
+        end else false
+      | None ->
+        if not (Hashtbl.mem stale_token_warn_log fb.token_hash_prefix) then
+          Server_utils.evict_oldest_if_full
+            ~max_entries:stale_token_warn_log_max_entries ~age_of:Fun.id
+            stale_token_warn_log;
+        Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
+        true)
+  in
+  if should_log then
+    Log.Auth.warn "%s"
+      (Auth_error_kind.dashboard_actor_fallback_log_message fb);
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_silent_dashboard_actor_fallback
+    ~labels:(Auth_error_kind.dashboard_actor_fallback_metric_labels fb)
+    ()
+
+(* Exposed for testing: current size of the dedup table, used to assert the
+   bound holds under churn. *)
+let stale_token_warn_log_entry_count () =
+  Stdlib.Mutex.protect stale_token_warn_mu (fun () ->
+    Hashtbl.length stale_token_warn_log)
+
+type dashboard_actor_resolution =
+  | Authenticated_actor of string
+  | Anonymous_actor_hint of string option
+  | Rejected_credential of Auth_error_kind.dashboard_actor_fallback_outcome
+
+let dashboard_token_hash_prefix_length = 8
+
+let dashboard_token_hash_prefix raw_credential =
+  String.sub
+    (Auth.sha256_hash raw_credential)
+    0
+    dashboard_token_hash_prefix_length
+
+let dashboard_actor_resolution_for_request ~base_path request =
+  match request_auth_credential_from_request request with
+  | Parsed_credential token -> (
+      (* First 8 hex chars of the bearer token's SHA-256. Lets operators
+         correlate a token-mismatch rejection with the keeper credential
+         that holds the matching hash (see [auth.ml:677] credential
+         storage). The hash itself is one-way; the prefix alone is
+         insufficient to reconstruct the token but unique enough to
+         pinpoint a specific credential rotation event in production
+         logs (2026-04-27 incident: same hash prefix observed firing
+         twice in the same second, masking which keeper was affected). *)
+      let token_hash_prefix = dashboard_token_hash_prefix token in
+      match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
+      | Ok (Some agent_name) -> Authenticated_actor agent_name
+      | Ok None ->
+          (* An explicit credential and an anonymous actor hint are distinct
+             trust states. Preserve the public-read availability contract by
+             returning a typed rejection that projects to the unparameterized
+             dashboard namespace; never turn the unauthenticated hint into an
+             authenticated actor. The historical metric/log key is retained so
+             existing alerts continue to surface stale credential churn. *)
+          let fb : Auth_error_kind.dashboard_actor_fallback =
+            { outcome = Auth_error_kind.Outcome_none; token_hash_prefix }
+          in
+          record_dashboard_actor_fallback fb;
+          Rejected_credential Auth_error_kind.Outcome_none
+      | Error err ->
+          (* The previous warn line elided the actual error string and the
+             request actor hint, leaving operators with a counter that only
+             told them *something* errored — not what.  Production logs
+             showed the warn firing 1–2 times/second with no diagnostic
+             surface, so the WARN was loud noise without root-cause
+             attribution.  Surface both the error class and the hint via
+             the typed [Auth_error_kind.Outcome_error] arm — the
+             [Token_mismatch] remediation tail is embedded in
+             [dashboard_actor_fallback_log_message]. *)
+          let fb : Auth_error_kind.dashboard_actor_fallback =
+            { outcome =
+                Auth_error_kind.Outcome_error
+                  { err
+                  ; err_kind = Auth_error_kind.classify err
+                  ; actor_hint = request_actor_hint request
+                  }
+            ; token_hash_prefix
+            }
+          in
+          record_dashboard_actor_fallback fb;
+          Rejected_credential fb.outcome)
+  | Malformed_credential raw_credential ->
+      let err = malformed_request_credential_error () in
+      let outcome =
+        Auth_error_kind.Outcome_error
+          { err
+          ; err_kind = Auth_error_kind.classify err
+          ; actor_hint = request_actor_hint request
+          }
+      in
+      record_dashboard_actor_fallback
+        { outcome
+        ; token_hash_prefix = dashboard_token_hash_prefix raw_credential
+        };
+      Rejected_credential outcome
+  | Absent_credential -> Anonymous_actor_hint (request_actor_hint request)
+
+let dashboard_actor_for_request ~base_path request =
+  match dashboard_actor_resolution_for_request ~base_path request with
+  | Authenticated_actor actor -> Some actor
+  | Anonymous_actor_hint actor_hint -> actor_hint
+  | Rejected_credential _ -> None
+
+let is_verified_internal_keeper_request ~base_path request =
+  match auth_token_from_request request with
+  | Some token when Auth.verify_internal_keeper_token base_path ~token ->
+      Option.is_some (internal_keeper_agent_from_request request)
+  | _ -> false
+
+let sanitized_dashboard_actor_for_request ~base_path request =
+  match dashboard_actor_for_request ~base_path request with
+  | Some raw ->
+      let sanitized = sanitize_dashboard_actor_name raw in
+      if String.equal sanitized "" then None else Some sanitized
+  | None -> None
+
+type browser_origin_admission =
+  | Same_origin
+  | Allowed_dev_origin
+  | Rejected
+
+type request_origin_admission =
+  | Missing_origin
+  | Single_origin of
+      { origin : string
+      ; admission : browser_origin_admission
+      }
+  | Multiple_origins
+  | Malformed_origin
+
+type configure_error = Already_configured
+
+type resolved_config_state =
+  | Unconfigured
+  | Configured of Server_auth_config.t
+
+let resolved_config = Atomic.make Unconfigured
+
+let rec configure config =
+  let current = Atomic.get resolved_config in
+  match current with
+  | Configured installed ->
+    if Server_auth_config.equal installed config
+    then Ok ()
+    else Error Already_configured
+  | Unconfigured ->
+    if Atomic.compare_and_set resolved_config current (Configured config)
+    then Ok ()
+    else configure config
+;;
+
+let configure_error_to_string = function
+  | Already_configured -> "HTTP authorization policy is already configured"
+;;
+
+let current_resolved_config () =
+  match Atomic.get resolved_config with
+  | Configured config -> config
+  | Unconfigured -> Server_auth_config.fail_closed
+;;
+
+let allowlisted_dev_origin_matches_request ~request_authority origin =
+  let request_host = Server_request_authority.host request_authority in
+  let origin_host = Server_request_authority.serialized_origin_host origin in
+  if not (is_loopback_host request_host && is_loopback_host origin_host)
+  then false
+  else
+    Server_auth_config.loopback_dev_mutation_origins (current_resolved_config ())
+    |> List.exists (Server_request_authority.serialized_origin_equal origin)
+;;
+
+let admission_of_serialized_origin ~request_authority origin =
+  if
+    Server_request_authority.serialized_origin_matches_authority
+      origin
+      request_authority
+  then Same_origin
+  else if allowlisted_dev_origin_matches_request ~request_authority origin
+  then Allowed_dev_origin
+  else Rejected
+;;
+
+let classify_request_origin ~request_authority request =
+  match Httpun.Headers.get_multi request.Httpun.Request.headers "origin" with
+  | [] -> Missing_origin
+  | [ raw ] ->
+    (match Server_request_authority.parse_serialized_origin raw with
+     | Error `Malformed -> Malformed_origin
+     | Ok parsed ->
+       Single_origin
+         { origin = raw
+         ; admission =
+             admission_of_serialized_origin ~request_authority parsed
+         })
+  | _ -> Multiple_origins
+;;
+
+let ascii_is_whitespace = function
+  | ' ' | '\t' | '\r' | '\n' -> true
+  | _ -> false
+;;
+
+let serialized_origin_of_referer referer =
+  if
+    String.equal referer ""
+    || not (String.equal referer (String.trim referer))
+    || String.exists ascii_is_whitespace referer
+  then None
+  else
+    let uri = Uri.of_string referer in
+    match
+      Uri.scheme uri |> Option.map String.lowercase_ascii,
+      Uri.userinfo uri,
+      Uri.host uri,
+      Uri.fragment uri
+    with
+    | Some ("http" | "https" as scheme), None, Some host, None ->
+      let rendered_host =
+        match Ipaddr.V6.of_string host with
+        | Ok _ -> "[" ^ host ^ "]"
+        | Error _ -> host
+      in
+      let rendered_port =
+        Option.fold ~none:"" ~some:(Printf.sprintf ":%d") (Uri.port uri)
+      in
+      (match
+         Server_request_authority.parse_serialized_origin
+           (Printf.sprintf "%s://%s%s" scheme rendered_host rendered_port)
+       with
+       | Ok origin -> Some origin
+       | Error `Malformed -> None)
+    | Some _, _, _, _ | None, _, _, _ -> None
+;;
+
+let referer_matches_request_authority ~request_authority referer =
+  match serialized_origin_of_referer referer with
+  | Some origin ->
+    Server_request_authority.serialized_origin_matches_authority
+      origin
+      request_authority
+  | None -> false
+;;
+
+(* Browsers omit Origin for some same-origin requests. Referer is parsed by a
+   separate URL parser because it legitimately carries a path/query; it never
+   goes through the serialized-Origin grammar. The admitted request authority
+   is already parsed at request entry, so this path never re-reads Host. *)
+let ensure_same_origin_browser_request ~request_authority request :
+    (unit, Masc_domain.masc_error) result =
+  match classify_request_origin ~request_authority request with
+  | Missing_origin ->
+    (match Httpun.Headers.get_multi request.Httpun.Request.headers "referer" with
+     | [ referer ]
+       when referer_matches_request_authority ~request_authority referer ->
+       Ok ()
+     | [] | [ _ ] | _ :: _ :: _ ->
+       if
+         Server_auth_config.allow_anonymous_mutations (current_resolved_config ())
+       then Ok ()
+       else
+         Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+           { reason = Missing_token
+           ; message = "Authentication required: provide a bearer token (run `masc login --base-path <dir> --client-env MASC_TOKEN`) \
+                        or a same-origin Origin header. Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true only when \
+                        workspace token auth is disabled."
+           })))
+  | Single_origin
+      { admission = (Same_origin | Allowed_dev_origin); _ } ->
+    Ok ()
+  | Single_origin { origin; admission = Rejected } ->
+    Log.Auth.debug
+      "same-origin check failed: origin=%S scheme=%s authority=%S trust=%s"
+      origin
+      (Server_request_authority.scheme request_authority
+       |> Server_request_authority.scheme_to_string)
+      (Server_request_authority.rendered request_authority)
+      (match Server_request_authority.trust_class request_authority with
+       | Server_request_authority.Configured_bind -> "configured_bind"
+       | Server_request_authority.Explicit_trusted_host ->
+         "explicit_trusted_host");
+    Error
+      (Masc_domain.Auth
+         Masc_domain.Auth_error.SameOriginBlocked)
+  | Multiple_origins | Malformed_origin ->
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Forbidden
+            { agent = "browser"; action = "malformed Origin header" }))
+
+let ensure_same_origin_if_browser_request ~request_authority request :
+    (unit, Masc_domain.masc_error) result =
+  match classify_request_origin ~request_authority request with
+  | Missing_origin -> Ok ()
+  | Single_origin
+      { admission = (Same_origin | Allowed_dev_origin); _ } ->
+    Ok ()
+  | Single_origin { origin; admission = Rejected } ->
+    Log.Auth.debug
+      "browser-origin check failed: origin=%S scheme=%s authority=%S trust=%s"
+      origin
+      (Server_request_authority.scheme request_authority
+       |> Server_request_authority.scheme_to_string)
+      (Server_request_authority.rendered request_authority)
+      (match Server_request_authority.trust_class request_authority with
+       | Server_request_authority.Configured_bind -> "configured_bind"
+       | Server_request_authority.Explicit_trusted_host ->
+         "explicit_trusted_host");
+    Error
+      (Masc_domain.Auth
+         Masc_domain.Auth_error.SameOriginBlocked)
+  | Multiple_origins | Malformed_origin ->
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Forbidden
+            { agent = "browser"; action = "malformed Origin header" }))
+
+(* Mirrors [Masc_error.code] (the typed SSOT in lib/types/masc_error.ml).
+   The match is exhaustive, so [Task/Agent (NotFound _)] answer 404 and the
+   400-class validation errors answer 400 instead of falling into a
+   catch-all 500; adding a new [Masc_error.t] outer variant will trip
+   Warning 8 here and force an explicit HTTP-status decision. *)
+(* Type annotation kept row-polymorphic (no [Httpun.Status.t] ascription)
+   so callers in both [server_h2_gateway] (H2.Status.t) and the Httpun
+   handlers can narrow to their respective protocol enums.  The .mli
+   pins the six tags this function actually returns. *)
+let http_status_of_auth_error = function
+  | Masc_domain.Auth
+      (Masc_domain.Auth_error.Unauthorized _
+      | Masc_domain.Auth_error.InvalidToken _
+      | Masc_domain.Auth_error.TokenExpired _) -> `Unauthorized
+  | Masc_domain.Auth
+      (Masc_domain.Auth_error.Forbidden _
+      | Masc_domain.Auth_error.SameOriginBlocked) -> `Forbidden
+  | Masc_domain.Task (Masc_domain.Task_error.NotFound _) -> `Not_found
+  | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _) -> `Not_found
+  | Masc_domain.Task
+      (Masc_domain.Task_error.AlreadyClaimed _
+      | Masc_domain.Task_error.NotClaimed _
+      | Masc_domain.Task_error.TransitionRejected _
+      | Masc_domain.Task_error.InvalidState _
+      | Masc_domain.Task_error.InvalidId _) -> `Bad_request
+  | Masc_domain.Task (Masc_domain.Task_error.VerificationSuperseded _) -> `Conflict
+  | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _) -> `Bad_request
+  (* A system failure is the server's, not the request's: 503 tells the
+     client to retry. A credential the server could not read, or a store
+     too contended to answer ([LockContention] is retryable congestion),
+     answers this way, not 401 (the token is fine) and not 400 (the
+     request is fine). Mirrors [Masc_error.code]. *)
+  | Masc_domain.System
+      (Masc_domain.System_error.IoError _
+      | Masc_domain.System_error.LockContention _) -> `Service_unavailable
+  | Masc_domain.System
+      (Masc_domain.System_error.ValidationError _
+      | Masc_domain.System_error.NotInitialized) -> `Bad_request
+
+(** Server state - initialized at startup.  The published handle is replaced
+    atomically so request domains never race a plain ref read with startup or
+    shutdown publication. *)
+let server_state : Mcp_server.server_state option Atomic.t = Atomic.make None
+
+let current_server_state () = Atomic.get server_state
+let publish_server_state state = Atomic.set server_state (Some state)
+let clear_server_state () = Atomic.set server_state None
+
+let ready_server_state () =
+  if (Server_startup_state.snapshot ()).state_ready then current_server_state ()
+  else None
+
+(** CORS origin *)
+exception Invalid_origin_header
+
+let get_origin (request : Httpun.Request.t) =
+  match Httpun.Headers.get_multi request.headers "origin" with
+  | [] -> "*"
+  | [ origin ] ->
+    (match Server_request_authority.parse_serialized_origin origin with
+     | Ok _ -> origin
+     | Error `Malformed -> raise Invalid_origin_header)
+  | _ -> raise Invalid_origin_header
+
+let public_read_cors_origin_opt ~request_authority (request : Httpun.Request.t) =
+  match classify_request_origin ~request_authority request with
+  | Single_origin
+      { origin; admission = (Same_origin | Allowed_dev_origin) } ->
+    Some origin
+  | Missing_origin
+  | Single_origin { admission = Rejected; _ }
+  | Multiple_origins
+  | Malformed_origin ->
+    None
+
+(** CORS headers *)
+let cors_allow_headers_value =
+  String.concat ", "
+    [ "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
+       Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name"
+    ; Request_workspace_precondition.expected_base_path_header
+    ; Request_workspace_precondition.expected_masc_root_header ]
+
+let cors_expose_headers_value =
+  String.concat ", "
+    [ "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
+    ; fst Workspace.read_precondition_admission_header ]
+
+let cors_headers origin =
+  let base = [
+    ("access-control-allow-origin", origin);
+    ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+    ("access-control-allow-headers", cors_allow_headers_value);
+    ("access-control-expose-headers", cors_expose_headers_value);
+    ("vary", "Origin");
+  ] in
+  (* CORS spec: Access-Control-Allow-Credentials must not be paired with
+     wildcard "*" origin.  Only include it when reflecting a real origin. *)
+  if origin <> "*" then
+    ("access-control-allow-credentials", "true") :: base
+  else
+    base
+
+let respond_json_with_cors ?(status = `OK) request reqd body =
+  let origin = get_origin request in
+  Http_server_eio.Response.json ~status ~request
+    ~extra_headers:(cors_headers origin) body reqd
+
+let respond_json_value_with_cors ?(status = `OK) request reqd value =
+  let origin = get_origin request in
+  Http_server_eio.Response.json_value ~status ~request
+    ~extra_headers:(cors_headers origin) value reqd
+
+let public_read_cors_headers request =
+  match Httpun.Headers.get_multi request.Httpun.Request.headers "origin" with
+  | [] -> [ ("vary", "Origin") ]
+  | [ _ ] ->
+    let request_authority = Server_request_authority.current_exn () in
+    (match public_read_cors_origin_opt ~request_authority request with
+     | Some origin -> cors_headers origin
+     | None -> [ ("vary", "Origin") ])
+  | _ -> raise Invalid_origin_header
+
+let respond_public_read_json_value ?(status = `OK) request reqd value =
+  Http_server_eio.Response.json_value ~status
+    ~request ~extra_headers:(public_read_cors_headers request) value reqd
+
+(* The 401/403 body carries the typed [auth_error_code] alongside the
+   human-readable [error] string. Clients (dashboard keeper stream retry
+   gate) dispatch on the typed code instead of substring-matching the
+   message. The code is the same SSOT mapping the dashboard shell
+   summary uses ([Masc_domain.dashboard_auth_error_code]). *)
+let auth_error_json err =
+  let base = [ ("error", `String (Masc_domain.masc_error_to_string err)) ] in
+  let fields =
+    match Masc_domain.dashboard_auth_error_code err with
+    | Some code -> base @ [ ("auth_error_code", `String code) ]
+    | None -> base
+  in
+  Yojson.Safe.to_string (`Assoc fields)
+
+let auth_error_headers ~(status : Httpun.Status.t) ~cors =
+  match status with
+  | `Unauthorized -> ("www-authenticate", "Bearer") :: cors
+  | _ -> cors
+
+(* One CORS answer for an auth error, whichever protocol asked.
+
+   H1 used to reflect [get_origin], which answers "*" when the request carries
+   no Origin and raises on a malformed one; H2 has always run the origin
+   through admission and emitted only [vary: Origin] when nothing was admitted.
+   Same 401, same typed code, same bearer challenge, different CORS headers
+   (#28166). Admission is the answer that holds: a 401 is not the place to hand
+   an unadmitted origin permission to read the response, and a malformed Origin
+   header should not raise out of the error responder. *)
+let auth_error_cors_headers request =
+  match Server_request_authority.current () with
+  | None -> [ "vary", "Origin" ]
+  | Some request_authority ->
+    (match public_read_cors_origin_opt ~request_authority request with
+     | Some origin -> cors_headers origin
+     | None -> [ "vary", "Origin" ])
+;;
+
+(* A 401/403 is about the credential the client presented, and the client is
+   not where it is decided: the TUI's refresh path reaches this responder (h1)
+   and the h2 gateway reaches its twin, so a refusal must name the endpoint
+   that produced it. /mcp already names its endpoint through
+   [record_mcp_auth_reject]. [auth_refusal_response] logs the path and status
+   and hands back the response parts, so every responder that answers a
+   refusal goes through one logging call and none can answer without a line.
+   The raw bearer is never logged — only the endpoint and the status. *)
+let auth_refusal_details ~protocol ~path ~status =
+  `Assoc [ "protocol", `String protocol; "path", `String path; "status", `Int status ]
+;;
+
+let auth_refusal_message ~protocol ~path ~status =
+  Printf.sprintf "HTTP auth rejected: %s %s -> %d" protocol path status
+;;
+
+let log_auth_refusal ~protocol ~path ~status =
+  Log.Auth.emit
+    Log.Warn
+    ~details:(auth_refusal_details ~protocol ~path ~status)
+    ~category:Log.Routine
+    (auth_refusal_message ~protocol ~path ~status)
+;;
+
+(* Log the refusal and hand back the status and body. Every responder that
+   answers a refusal — the h1 responder, the h2 gateway, and the h2 route
+   dispatcher — builds its response from here, so a refusal cannot be answered
+   without a line. *)
+let auth_refusal_response ~protocol ~path err =
+  let status = http_status_of_auth_error err in
+  log_auth_refusal ~protocol ~path
+    ~status:(Httpun.Status.to_code (status :> Httpun.Status.t));
+  (status, auth_error_json err)
+;;
+
+let respond_auth_error request reqd err =
+  let status, body =
+    auth_refusal_response ~protocol:"h1"
+      ~path:(Http_server_eio.Request.path request) err
+  in
+  let headers =
+    Httpun.Headers.of_list
+      (("content-length", string_of_int (String.length body))
+       :: auth_error_headers ~status ~cors:(auth_error_cors_headers request))
+  in
+  let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
+  Httpun.Reqd.respond_with_string reqd response body
+
+(** Respond with 429 Too Many Requests when the per-agent rate limit is
+    exceeded.  Includes standard rate-limit headers and CORS so browser
+    clients can inspect the response. *)
+let respond_agent_rate_limited ~rl_key request reqd =
+  let origin = get_origin request in
+  let body = Rate_limit.too_many_agent_requests_body () in
+  let rl_headers = Rate_limit.headers_agent_global ~key:rl_key in
+  let headers = Httpun.Headers.of_list (
+    ("content-type", "application/json") ::
+    ("content-length", string_of_int (String.length body)) ::
+    rl_headers @
+    cors_headers origin
+  ) in
+  Httpun.Reqd.respond_with_string reqd
+    (Httpun.Response.create ~headers `Too_many_requests) body;
+  Transport_metrics.record_http_rate_limit_response
+    ~acceptance:Transport_metrics.Accepted_by_writer
+    ~protocol:Transport_metrics.H1
+    ~scope:Transport_metrics.Agent
+
+(** Extract a per-agent rate-limit key from the request.  Prefers the bearer
+    token (keyed by a short SHA-256 prefix) over the declared agent-name
+    header so that token-bearing clients cannot evade per-agent limits by
+    rotating their agent-name header. *)
+let agent_rl_key_of_request request =
+  let token = auth_token_from_request request in
+  let agent_name = agent_from_request request in
+  Rate_limit.agent_key_of_token_or_name ?token ?agent_name ()
+
+type agent_quota = Exempt_observation | Metered_operation
+
+let read_request_quota = function
+  | `GET | `HEAD -> Exempt_observation
+  | _ -> Metered_operation
+
+(** Check the per-agent rate limit for a request.  Returns [Ok ()] when the
+    request is allowed.  Returns [Error ()] and sends a 429 response when the
+    per-agent limit is exceeded.  Anonymous requests (no token, no agent
+    header) are always allowed through — the per-IP limit in
+    [bin/main_eio.ml:try_rate_limit_block] covers that case. *)
+(* [~quota] has no default. With one, every wrapper that did not name a
+   classification took [Metered_operation] silently: after the read exemption
+   landed, three of the eight call sites passed the classifier and five used
+   the default, so the same observation GET was metered or not depending on
+   which wrapper its route happened to use. Each caller now says which it is. *)
+let check_agent_rate_limit ~quota request reqd =
+  match quota, agent_rl_key_of_request request with
+  | Exempt_observation, _ -> Ok ()
+  | Metered_operation, None -> Ok ()  (* anonymous — covered by per-IP limit *)
+  | Metered_operation, Some rl_key ->
+      if Rate_limit.check_agent_global ~key:rl_key then
+        Ok ()
+      else begin
+        respond_agent_rate_limited ~rl_key request reqd;
+        Error ()
+      end
+
+let is_public_published_artifact_read_path path =
+  let raw_path =
+    match String.index_opt path '?' with
+    | Some i -> String.sub path 0 i
+    | None -> path
+  in
+  let prefix = "/api/v1/published-artifacts/" in
+  let prefix_len = String.length prefix in
+  String.length raw_path > prefix_len
+  && String.starts_with ~prefix raw_path
+  && Published_artifact.valid_id
+       (String.sub raw_path prefix_len (String.length raw_path - prefix_len))
+
+(** Public read access - no auth required (dashboard, health) *)
+let is_public_read_path path =
+  String.equal path "/health"
+  (* Issue #8403: derive probe whitelist from Server_health_paths SSOT
+     so adding/renaming a probe automatically refreshes the auth filter
+     instead of leaking an auth-required probe through. *)
+  || Server_health_paths.is_public path
+  || String.equal path "/api/v1/gate/health"
+  || String.equal path "/api/v1/gate/status"
+  || String.equal path "/api/v1/gate/connectors"
+  || String.equal path "/api/v1/gate/connector/status"
+  || String.equal path "/api/v1/gate/events"
+  || String.equal path "/"
+  || String.equal path "/dashboard"
+  || String.equal path "/dashboard/"
+  || String.equal path "/favicon.ico"
+  || String.equal path "/favicon.svg"
+  || String.equal path play_page_path
+  (* What an agent handed the link reads to join: addresses and tool schemas,
+     no token and no workspace state (RFC play-link-for-the-shared-machine §2.7). *)
+  || String.equal path Play_invite.agent_guide_path
+  || String.starts_with ~prefix:"/dashboard/" path
+  (* The cartridge inventory the TUI load menu reads before it can pick a
+     game (RFC-0439 §3.7): file names under <.masc>/msx/carts, not workspace
+     state. Loading a game stays a write, gated like the MSX tools. *)
+  || String.equal path "/api/v1/msx/carts"
+  || String.starts_with ~prefix:"/static/" path
+  || String.starts_with ~prefix:"/graphiql/" path
+  (* Tier F2 dashboard reads — multimodal artifact gallery + detail
+     panel. The Bonsai dashboard was their only in-tree consumer; since
+     its removal nothing in the tree issues these requests, but the
+     routes stay public-read: they are wrapped in [with_public_read] in
+     [server_routes_http_routes_multimodal], and this whitelist entry is
+     what makes that wrapper actually public when
+     [http_auth_strict_enabled] is on. *)
+  || String.starts_with ~prefix:"/api/v1/multimodal/list" path
+  || String.starts_with ~prefix:"/api/v1/multimodal/get/" path
+  || String.starts_with ~prefix:"/api/v1/multimodal/provenance/" path
+  (* Voice TTS audio clips: unguessable token filenames act as the
+     capability, and the browser <audio> element cannot send a bearer
+     token in its request headers. *)
+  || String.starts_with ~prefix:Masc_network_defaults.voice_audio_path_prefix
+       path
+  (* Capability-addressed published artifact links: 128-bit random
+     artifact-<32hex> IDs allow external read-only sharing without
+     exposing the catalog listing (/api/v1/published-artifacts). *)
+  || is_public_published_artifact_read_path path
+
+let resolve_agent_name_for_auth ~base_path request ~token :
+    (string option, Masc_domain.masc_error) result =
+  resolve_agent_name_for_auth_raw ~base_path request ~token
+
+type request_authorization_actor =
+  | Resolved_request_actor of string
+  | Anonymous_dashboard_actor
+
+let request_authorization_actor_name = function
+  | Resolved_request_actor agent_name -> agent_name
+  | Anonymous_dashboard_actor -> "dashboard"
+;;
+
+let resolve_request_authorization_actor ~token = function
+  | Some agent_name -> Ok (Resolved_request_actor agent_name)
+  | None ->
+    (match token with
+     | None -> Ok Anonymous_dashboard_actor
+     | Some _ ->
+       Error
+         (Masc_domain.Auth
+            (Masc_domain.Auth_error.InvalidToken
+               "Bearer token did not resolve to a credential identity.")))
+;;
+
+let authorize_permission_request ~base_path ~permission request :
+    (unit, Masc_domain.masc_error) result =
+  let auth_cfg = Auth.load_auth_config base_path in
+  let credential = request_auth_credential_from_request request in
+  let token = token_of_request_auth_credential credential in
+  let* auth_cfg =
+    ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg
+    |> Result.map_error (fun msg ->
+          Masc_domain.Auth
+            (Masc_domain.Auth_error.Unauthorized
+               { reason = Generic; message = msg }))
+  in
+  let* () = reject_malformed_request_credential credential in
+  let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
+  let* actor = resolve_request_authorization_actor ~token agent_name_opt in
+  Auth.check_permission
+    base_path
+    ~agent_name:(request_authorization_actor_name actor)
+    ~token
+    ~permission
+
+let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
+  authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
+
+let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority request :
+    (string, Masc_domain.masc_error) result =
+  let auth_cfg = Auth.load_auth_config base_path in
+  let credential = request_auth_credential_from_request request in
+  let token = token_of_request_auth_credential credential in
+  let* () = reject_malformed_request_credential credential in
+  let* () =
+    if Option.is_some token then Ok ()
+    else ensure_same_origin_browser_request ~request_authority request
+  in
+  let* auth_cfg =
+    ensure_strict_http_token_auth
+      ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
+    |> Result.map_error (fun msg ->
+          Masc_domain.Auth
+            (Masc_domain.Auth_error.Unauthorized
+               { reason = Generic; message = msg }))
+  in
+  let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
+  let* actor = resolve_request_authorization_actor ~token agent_name_opt in
+  let agent_name = request_authorization_actor_name actor in
+  let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
+  Ok agent_name
+
+type request_error =
+  | Bad_request_detail of string
+  | Credential_store_unreadable
+
+type request_credential_standing =
+  | Operator_credential
+  | Agent_credential
+  | Player_credential
+  | No_credential
+  | Unreadable_credential
+
+let request_credential_standing ~base_path request =
+  match token_of_request_auth_credential (request_auth_credential_from_request request) with
+  | None -> No_credential
+  | Some token when Auth.verify_internal_keeper_token base_path ~token -> (
+      match internal_keeper_agent_from_request request with
+      | Some _ -> Agent_credential
+      | None -> No_credential)
+  | Some token -> (
+      match Auth.find_credential_by_token base_path ~token with
+      | Ok { Masc_domain.role = Masc_domain.Admin; _ } -> Operator_credential
+      | Ok { Masc_domain.role = Masc_domain.Worker; _ } -> Agent_credential
+      | Ok { Masc_domain.role = Masc_domain.Player; _ } -> Player_credential
+      (* A read failure is not an absent credential: the bearer may be
+         the operator's, and answering [No_credential] demoted it to an
+         unnamed caller. Only a store that failed to answer (I/O failure
+         or lock contention) is [Unreadable_credential]; a token the
+         store positively refused, and any other error, is
+         [No_credential]. Every constructor is named: no catch-all may
+         silently adopt a future error. *)
+      | Error
+          (Masc_domain.System
+             (Masc_domain.System_error.IoError _
+             | Masc_domain.System_error.LockContention _)) ->
+          Unreadable_credential
+      | Error
+          (Masc_domain.System
+             (Masc_domain.System_error.NotInitialized
+             | Masc_domain.System_error.ValidationError _)
+          | Masc_domain.Task _
+          | Masc_domain.Agent _
+          | Masc_domain.Auth _) -> No_credential)
+
+let authorize_tool_request ~base_path ~tool_name ~request_authority request :
+    (unit, Masc_domain.masc_error) result =
+  authorize_tool_request_with_actor
+    ~base_path
+    ~tool_name
+    ~request_authority
+    request
+  |> Result.map (fun _agent_name -> ())
+
+let authorize_token_bound_permission_request ~base_path ~permission request :
+    (string, Masc_domain.masc_error) result =
+  let auth_cfg = Auth.load_auth_config base_path in
+  if not auth_cfg.enabled then
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Unauthorized
+            { reason = Missing_token
+            ; message = "HTTP mutation requires workspace auth enabled with require_token=true."
+            }))
+  else if not auth_cfg.require_token then
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Unauthorized
+            { reason = Missing_token
+            ; message = "HTTP mutation requires bearer token auth (require_token=true)."
+            }))
+  else
+    match token_bound_auth_token_from_request request with
+    | None ->
+        Error
+          (Masc_domain.Auth
+             (Masc_domain.Auth_error.Unauthorized
+                { reason = Missing_token
+                ; message =
+                    "Authentication required. Use 'Authorization: Bearer <token>' header."
+                }))
+    | Some token ->
+        let* cred = Auth.find_credential_by_token base_path ~token in
+        if Masc_domain.has_permission cred.role permission then
+          Ok cred.agent_name
+        else
+          Error
+            (Masc_domain.Auth
+               (Masc_domain.Auth_error.Forbidden
+                  { agent = cred.agent_name
+                  ; action = Masc_domain.show_permission permission
+                  }))
+
+let authorize_optional_token_bound_permission_request
+    ~base_path
+    ~permission
+    request =
+  if request_carries_auth_credential request
+  then
+    authorize_token_bound_permission_request ~base_path ~permission request
+    |> Result.map Option.some
+  else Ok None
+
+let is_dashboard_bootstrap_path path =
+  String.starts_with ~prefix:"/api/v1/dashboard/" path
+
+let not_initialized_status = `Service_unavailable
+let not_initialized_headers = [ "retry-after", "1" ]
+
+let not_initialized_response path =
+  if is_dashboard_bootstrap_path path then
+    {|{"status":"initializing","message":"Server is warming up"}|}
+  else
+    {|{"error":"not initialized"}|}
+
+let respond_not_initialized request reqd =
+  Http_server_eio.Response.json ~status:not_initialized_status
+    ~extra_headers:not_initialized_headers
+    (not_initialized_response (Http_server_eio.Request.path request)) reqd
+
+type read_workspace_precondition = Workspace_read_unbound | Workspace_read_matched
+
+let validate_read_workspace_precondition ~config request =
+  match request.Httpun.Request.meth with
+  | `GET | `HEAD ->
+    let expected = Uri.query (Uri.of_string request.target)
+      |> List.filter (fun (key, _) ->
+        key = "expected_base_path" || key = "expected_masc_root") in
+    (match expected with
+     | [] -> Ok Workspace_read_unbound
+     | fields when List.length fields = 2 ->
+       (match List.assoc_opt "expected_base_path" fields,
+              List.assoc_opt "expected_masc_root" fields with
+        | Some [base], Some [root] ->
+          Workspace.validate_expected_workspace ~config
+            (`Assoc ["expected_workspace", `Assoc
+              ["base_path", `String base; "masc_root", `String root]])
+          |> Result.map (fun _ -> Workspace_read_matched)
+        | Some _, Some _ | Some _, None | None, Some _ | None, None ->
+          Error Workspace.Invalid_workspace_precondition)
+     | _ -> Error Workspace.Invalid_workspace_precondition)
+  | _ -> Ok Workspace_read_unbound
+
+let read_workspace_precondition_error_response error =
+  let status, code, message = match error with
+    | Workspace.Invalid_workspace_precondition ->
+      `Bad_request, "invalid_workspace_precondition",
+      "expected_base_path and expected_masc_root must each occur once"
+    | Workspace.Workspace_precondition_failed ->
+      `Conflict, "workspace_precondition_failed", "workspace precondition failed" in
+  (* Keep both keys for existing consumers. *)
+  (`Assoc ["error_code", `String code; "error", `String message; "code", `String code], status)
+
+let with_read_workspace_precondition state handler request reqd =
+  match validate_read_workspace_precondition
+      ~config:(Mcp_server.workspace_config state) request with
+  | Ok Workspace_read_unbound -> handler state request reqd
+  | Ok Workspace_read_matched ->
+    Http_server_eio.Response.with_scoped_headers [Workspace.read_precondition_admission_header]
+      (fun () -> handler state request reqd)
+  | Error error ->
+    let json, status = read_workspace_precondition_error_response error in
+    Http_server_eio.Response.json_value ~status ~request
+      ~extra_headers:(public_read_cors_headers request) json reqd
+
+let rec with_public_read handler request reqd =
+  match ready_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+      let strict = http_auth_strict_enabled () in
+      let path = Http_server_eio.Request.path request in
+      if strict && not (is_public_read_path path) then
+        with_read_auth handler request reqd
+      else
+        with_read_workspace_precondition state handler request reqd
+
+and with_read_auth handler request reqd =
+  match current_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      (match authorize_read_request ~base_path request with
+      | Ok () ->
+          (match check_agent_rate_limit
+                   ~quota:(read_request_quota request.Httpun.Request.meth)
+                   request reqd with
+          | Ok () -> with_read_workspace_precondition state handler request reqd
+          | Error () -> ())
+      | Error err -> respond_auth_error request reqd err)
+
+and with_permission_auth ~permission handler request reqd =
+  match current_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      (match authorize_permission_request ~base_path ~permission request with
+      | Ok () ->
+          (* A permission-gated GET is still an observation. The dashboard reads
+             /api/v1/dashboard/runtime-probe the way it reads anything else, and
+             metering it as an operation made watching the runtime cost an agent
+             the same tokens as changing it. Same rule [with_read_auth] applies. *)
+          (match check_agent_rate_limit
+                   ~quota:(read_request_quota request.Httpun.Request.meth)
+                   request reqd with
+          | Ok () -> with_read_workspace_precondition state handler request reqd
+          | Error () -> ())
+      | Error err -> respond_auth_error request reqd err)
+
+and with_tool_auth ~tool_name handler request reqd =
+  match current_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      let request_authority = Server_request_authority.current_exn () in
+      (match
+         authorize_tool_request
+           ~base_path
+           ~tool_name
+           ~request_authority
+           request
+       with
+      | Ok () ->
+          (* Metered whatever the method: a tool invocation is an operation
+             because of what it does, not because of how it was addressed. *)
+          (match check_agent_rate_limit ~quota:Metered_operation request reqd with
+          | Ok () -> handler state request reqd
+          | Error () -> ())
+      | Error err -> respond_auth_error request reqd err)
+
+and with_tool_actor_auth ~tool_name handler request reqd =
+  match current_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let request_authority = Server_request_authority.current_exn () in
+    (match
+       authorize_tool_request_with_actor
+         ~base_path
+         ~tool_name
+         ~request_authority
+         request
+     with
+     | Ok agent_name ->
+       (* Metered for the same reason as [with_tool_auth]. *)
+       (match check_agent_rate_limit ~quota:Metered_operation request reqd with
+        | Ok () -> handler state agent_name request reqd
+        | Error () -> ())
+     | Error err -> respond_auth_error request reqd err)
+
+and with_token_permission_auth ~permission handler request reqd =
+  match current_server_state () with
+  | None -> respond_not_initialized request reqd
+  | Some state ->
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      (match authorize_token_bound_permission_request ~base_path ~permission request with
+      | Ok agent_name ->
+          (* The third wrapper that serves both halves, and the one the other
+             two hid: /api/v1/dashboard/standalone-lanes is a GET on it.
+             Classified in the other two alone, a dashboard poll of this route
+             kept spending the operation bucket. The tool wrappers above stay
+             metered whatever the method -- a tool invocation is an operation
+             because of what it does, not because of how it was addressed. *)
+          (match check_agent_rate_limit
+                   ~quota:(read_request_quota request.Httpun.Request.meth)
+                   request reqd with
+          | Ok () -> with_read_workspace_precondition state
+              (fun state request reqd -> handler state agent_name request reqd) request reqd
+          | Error () -> ())
+      | Error err -> respond_auth_error request reqd err)
+
+let with_private_token_permission_auth ~permission handler request reqd =
+  let refuse status message =
+    Http_server_eio.Response.with_scoped_headers
+      ["cache-control","no-store";"referrer-policy","no-referrer";"x-content-type-options","nosniff"]
+      (fun () -> Http_server_eio.Response.json_value ~status ~compress:false ~request
+        (`Assoc ["error",`String message]) reqd) in
+  match current_server_state () with
+  | None -> refuse `Service_unavailable "private operator service unavailable"
+  | Some state ->
+      let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+      match authorize_token_bound_permission_request ~base_path ~permission request with
+      | Error error ->
+          let status = http_status_of_auth_error error in
+          log_auth_refusal ~protocol:"h1" ~path:(Http_server_eio.Request.path request)
+            ~status:(Httpun.Status.to_code (status :> Httpun.Status.t));
+          refuse (status :> Httpun.Status.t) "private operator authorization refused"
+      | Ok actor ->
+          match agent_rl_key_of_request request with
+          | Some key when not (Rate_limit.check_agent_global ~key) ->
+              refuse `Too_many_requests "private operator quota unavailable"
+          | Some _ | None -> handler state actor request reqd
+
+module For_testing = struct
+  let snapshot_server_state = current_server_state
+  let restore_server_state state = Atomic.set server_state state
+
+  let restore_auth_config = function
+    | None -> Atomic.set resolved_config Unconfigured
+    | Some config -> Atomic.set resolved_config (Configured config)
+  ;;
+end

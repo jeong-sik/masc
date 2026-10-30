@@ -1,0 +1,14 @@
+Testing `runtime_account_removal'.
+This run has ID `885RQEFD'.
+
+  [OK]          remove          0   disabled exact lane can lose last account.
+  [OK]          remove          1   the account and what routes to it go.
+  [OK]          remove          2   an antigravity account takes its credenti...
+  [OK]          remove          3   accounts using a shared model set are rem...
+  [OK]          remove          4   what has no replacement is refused.
+  [OK]          remove          5   a lane named like its runtime keeps its r...
+  [OK]          remove          6   a layout the line editor cannot reach is ...
+  [OK]          remove          7   only an official-client account is removed.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build/_tests/runtime_account_removal'.
+Test Successful in 0.030s. 8 tests run.

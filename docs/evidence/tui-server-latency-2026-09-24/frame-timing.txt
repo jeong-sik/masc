@@ -1,0 +1,32 @@
+build frames=60 mean=1.83ms p50=1.58 p95=3.37 p99=4.65 max=5.21
+  build[overview] frames=12 mean=2.90ms p50=2.83 p95=4.33 p99=4.65 max=4.65
+  build[memory] frames=7 mean=1.40ms p50=1.55 p95=1.91 p99=1.91 max=1.91
+  build[keeper-list] frames=7 mean=1.16ms p50=1.08 p95=1.61 p99=1.61 max=1.61
+  build[config] frames=6 mean=1.59ms p50=1.43 p95=2.52 p99=2.52 max=2.52
+  build[fusion-list] frames=5 mean=2.06ms p50=1.67 p95=3.17 p99=3.17 max=3.17
+  build[board-list] frames=5 mean=2.42ms p50=2.54 p95=3.35 p99=3.35 max=3.35
+  build[lanes] frames=5 mean=1.31ms p50=1.37 p95=1.52 p99=1.52 max=1.52
+  build[acting] frames=5 mean=1.38ms p50=0.44 p95=5.21 p99=5.21 max=5.21
+  build[repositories] frames=4 mean=1.26ms p50=1.28 p95=1.68 p99=1.68 max=1.68
+  build[planning-list] frames=4 mean=1.64ms p50=1.80 p95=1.92 p99=1.92 max=1.92
+  worst[0] frame=7 5.21ms tag=acting
+  worst[1] frame=55 4.65ms tag=overview
+  worst[2] frame=54 4.33ms tag=overview
+  worst[3] frame=58 3.37ms tag=overview
+  worst[4] frame=33 3.35ms tag=board-list
+present frames=60 mean=0.21ms p50=0.02 p95=0.96 p99=1.11 max=4.91
+  present[overview] frames=12 mean=0.11ms p50=0.02 p95=0.31 p99=0.64 max=0.64
+  present[memory] frames=7 mean=0.04ms p50=0.01 p95=0.13 p99=0.13 max=0.13
+  present[keeper-list] frames=7 mean=0.10ms p50=0.07 p95=0.41 p99=0.41 max=0.41
+  present[config] frames=6 mean=0.40ms p50=0.29 p95=1.11 p99=1.11 max=1.11
+  present[fusion-list] frames=5 mean=0.21ms p50=0.00 p95=0.68 p99=0.68 max=0.68
+  present[board-list] frames=5 mean=0.05ms p50=0.02 p95=0.10 p99=0.10 max=0.10
+  present[lanes] frames=5 mean=1.01ms p50=0.02 p95=4.91 p99=4.91 max=4.91
+  present[acting] frames=5 mean=0.04ms p50=0.01 p95=0.15 p99=0.15 max=0.15
+  present[repositories] frames=4 mean=0.34ms p50=0.24 p95=1.09 p99=1.09 max=1.09
+  present[planning-list] frames=4 mean=0.06ms p50=0.11 p95=0.11 p99=0.11 max=0.11
+  worst[0] frame=18 4.91ms tag=lanes
+  worst[1] frame=52 1.11ms tag=config
+  worst[2] frame=44 1.09ms tag=repositories
+  worst[3] frame=48 0.96ms tag=config
+  worst[4] frame=38 0.68ms tag=fusion-list

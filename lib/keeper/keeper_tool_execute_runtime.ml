@@ -1,0 +1,1350 @@
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_tool_shared_runtime
+
+(* The one field of an Execute payload that measures the call instead of
+   answering it. Every payload below writes it under this name, and
+   [answer_of_output] leaves it out, so the repeat guard does not read two
+   identical runs as progress (2026-08-24: [gh auth status] four times, the
+   outputs differing only here). *)
+let execution_time_field = "execution_time_ms"
+
+(* Process-local observation identity. It is not a durable tool-call ID. *)
+let execute_stream_counter = Atomic.make 0
+
+let start_execute_stream ~keeper_name ~stream_id ~task_id ~command =
+  try
+    Keeper_keepalive_signal.record_execute_stream_start
+      ~keeper_name ~stream_id ~task_id ~command
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Dashboard.warn "execute stream start callback failed keeper=%s: %s"
+      keeper_name (Printexc.to_string exn)
+;;
+
+let finish_execute_stream ~keeper_name ~stream_id ~task_id ~ended ~status =
+  if not !ended then (
+    let record () =
+      ended := true;
+      try
+        Keeper_keepalive_signal.record_execute_stream_end
+          ~keeper_name ~stream_id ~task_id ~status
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Dashboard.warn "execute stream end callback failed keeper=%s: %s"
+          keeper_name (Printexc.to_string exn)
+    in
+    match Fs_compat.execution_context () with
+    | Fs_compat.Eio_fiber -> Eio.Cancel.protect record
+    | Fs_compat.Non_eio -> record ())
+;;
+
+type command_observation =
+  | Command_result_observed
+  | Command_request_not_sent
+  | Command_effect_unknown
+
+(* A failed stage that never sent its request is pre-effect only when no
+   other stage in this dispatch might have run. A missing optional receipt
+   can coexist with a valid process trailer and is not a transport failure. *)
+let command_observation receipts =
+  let not_sent, unknown, other =
+    List.fold_left (fun (not_sent, unknown, other) -> function
+      | Keeper_sandbox_remote.Execution_unavailable Request_not_sent -> true, unknown, other
+      | Execution_unavailable (Transport_unavailable _ | Shim_refused_without_receipt) ->
+        not_sent, true, other
+      | Execution_observed (_, { Exec_ssh_protocol.shim_error = Some _; _ }) ->
+        not_sent, true, other
+      | Execution_unavailable (Peer_receipt_missing | Invalid_receipt _)
+      | Execution_observed _ -> not_sent, unknown, true)
+      (false, false, false) receipts
+  in
+  if unknown || (not_sent && other) then Command_effect_unknown
+  else if not_sent then Command_request_not_sent
+  else Command_result_observed
+;;
+
+let answer_of_output output_text =
+  match Yojson.Safe.from_string output_text with
+  | `Assoc fields ->
+    Some
+      (`Assoc
+          (List.filter
+             (fun (key, _) -> not (String.equal key execution_time_field))
+             fields))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
+let elapsed_duration_ms ~start_time ~end_time =
+  let elapsed_ms = (end_time -. start_time) *. 1000. in
+  match classify_float elapsed_ms with
+  | FP_nan | FP_infinite -> 0
+  | FP_normal | FP_subnormal | FP_zero when elapsed_ms <= 0. -> 0
+  | FP_normal | FP_subnormal | FP_zero when elapsed_ms < 1. -> 1
+  | FP_normal | FP_subnormal | FP_zero -> int_of_float elapsed_ms
+
+let model_execute_location_fields ~remote_workspace_root ~config ~meta ~args ~cwd =
+  let execution_location =
+    Keeper_sandbox_repo_path.execution_location_json ~remote_workspace_root ~config ~meta ~args ~cwd
+  in
+  let response_cwd =
+    match execution_location with
+    | `Assoc fields ->
+      (match List.assoc_opt "cwd" fields with
+       | Some cwd -> cwd
+       | None -> `Null)
+    | _ -> `Null
+  in
+  [ "cwd", response_cwd; "execution_location", execution_location ]
+
+let shim_execution_evidence_json receipts =
+  `Assoc
+    [ "status", `String (match receipts with [] -> "not_observed" | _ :: _ -> "recorded")
+    ; "receipts", `List
+        (List.map Keeper_sandbox_remote.execution_observation_to_yojson receipts)
+    ]
+
+(* The usual shell receipt: an effect the shim ran inside the sandbox it
+   applied, with no shim error. Every mode, boundary and unavailable reason is
+   named so a new one has to be placed here. *)
+let observation_is_ordinary_effect = function
+  | Keeper_sandbox_remote.Execution_unavailable
+      ( Keeper_sandbox_remote.Request_not_sent
+      | Keeper_sandbox_remote.Transport_unavailable _
+      | Keeper_sandbox_remote.Peer_receipt_missing
+      | Keeper_sandbox_remote.Invalid_receipt _
+      | Keeper_sandbox_remote.Shim_refused_without_receipt ) -> false
+  | Keeper_sandbox_remote.Execution_observed
+      ({ Exec_ssh_protocol.mode; boundary }, trailer) ->
+    let ran_as_effect =
+      match mode with
+      | Exec_ssh_protocol.Effect -> true
+      | Exec_ssh_protocol.Observe | Exec_ssh_protocol.Guest_local -> false
+    in
+    let applied =
+      match boundary with
+      | Exec_ssh_protocol.Sandbox_applied -> true
+      | Exec_ssh_protocol.Setup_failed
+      | Exec_ssh_protocol.Exec_failed
+      | Exec_ssh_protocol.Child_ack_unavailable
+      | Exec_ssh_protocol.Refused
+      | Exec_ssh_protocol.Refused_socket
+      | Exec_ssh_protocol.Refused_write -> false
+    in
+    ran_as_effect && applied && Option.is_none trailer.Exec_ssh_protocol.shim_error
+
+(* A completed call shows the model its shell receipts only when they are not
+   one usual receipt, so an Observe or Guest_local stage, a refusal, a setup
+   failure, a missing acknowledgement, a missing receipt or several stages
+   still reach it (#34112). The ledger's [execution_evidence] keeps every
+   receipt either way (#39035). *)
+let model_shim_evidence_fields receipts =
+  match receipts with
+  | [ observation ] when observation_is_ordinary_effect observation -> []
+  | [] | [ _ ] | _ :: _ :: _ ->
+    [ "shim_execution_evidence", shim_execution_evidence_json receipts ]
+
+let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
+  let code = Keeper_tool_execute_path.execute_cwd_resolution_error_code error in
+  let private_message =
+    Keeper_tool_execute_path.execute_cwd_resolution_error_private_message error
+  in
+  Log.Keeper.warn
+    ~keeper_name:meta.name
+    "execute cwd resolution rejected code=%s detail=%s"
+    code
+    private_message;
+  let fields =
+    [ "typed", `Bool true; "code", `String code ]
+    @ model_execute_location_fields ~remote_workspace_root:None ~config ~meta ~args ~cwd
+  in
+  let message =
+    match meta.sandbox_profile with
+    | Docker ->
+      Keeper_tool_execute_path.execute_cwd_resolution_error_public_message error
+    | Micro_vm | Remote_ssh -> private_message
+  in
+  Keeper_tool_execution.failure
+    ~class_:(Keeper_tool_execute_path.execute_cwd_resolution_error_class error)
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    (error_json ~fields message)
+
+let sandbox_target_label = function
+  | Masc_exec.Sandbox_target.Host -> "host"
+  | Masc_exec.Sandbox_target.Docker { image; _ } -> "docker:" ^ image
+  | Masc_exec.Sandbox_target.Micro_vm { image; _ } -> "microvm:" ^ image
+  | Masc_exec.Sandbox_target.Ssh { endpoint; _ } -> "ssh:" ^ endpoint.host
+  | Masc_exec.Sandbox_target.Delegated _ -> "delegated"
+;;
+
+(* The Gate operation name this runtime submits under. Shared with the replay
+   path so the two cannot drift apart into an unsupported-replay repair. *)
+let gate_operation = Keeper_gate.tool_execute_gate_operation
+
+(* The resolved [cwd] is upserted into the wrapped arguments as well as the
+   envelope: replay hands back [input] verbatim, so the arguments alone must
+   name the directory the operator approved. Owning the upsert here keeps the
+   producer and its inverse [replay_args_of_gate_input] pinned by the same
+   round-trip test (#26143). *)
+let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
+  `Assoc
+    [ "schema", `String "masc.keeper_gate.request.v1"
+    ; "input", Keeper_tool_execute_input.assoc_upsert "cwd" (`String cwd) input
+    ; "cwd", `String cwd
+    ; "sandbox_profile", `String sandbox_profile
+    ; "sandbox_target", `String sandbox_target
+    ]
+;;
+
+(* Inverse of [execute_gate_input]. The producer owns the argument schema and
+   the effect encoding, so it owns the inversion — replay only decides whether
+   to spend the grant.
+
+   Unlike the write path, nothing is reconstructed: the approved tool
+   arguments were stored verbatim under [input], because the Gate request
+   wraps them with execution context rather than re-encoding them. The
+   surrounding [cwd]/[sandbox_*] fields describe where the approval was
+   granted; the handler re-derives them from the current turn, and a
+   divergence there fails the canonical-input match rather than silently
+   executing somewhere else. *)
+let replay_args_of_gate_input input =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "input" fields with
+     | Some args -> Ok args
+     | None -> Error "approved Gate input has no input")
+  | _ -> Error "approved Gate input is not an object"
+;;
+
+let execute_secret_redaction
+      ~additional_secret_files
+      ~base_path
+      ~keeper_name
+  =
+  Keeper_secret_redaction.snapshot_with_additional_secret_files
+    ~redact_identity_scalars:
+      (Runtime_params.get Runtime_settings.keeper_chat_redact_identity_scalars)
+    ~additional_secret_files
+    ~base_path
+    ~keeper_name
+
+let redact_execute_text redaction text =
+  Keeper_secret_redaction.redact_text redaction text
+
+let redact_execute_output redaction ~stdout ~stderr =
+  let stdout = redact_execute_text redaction stdout in
+  let stderr = redact_execute_text redaction stderr in
+  let output =
+    if String.equal stderr "" then stdout else stdout ^ stderr
+  in
+  stdout, stderr, output
+
+(* [inline_ceiling_bytes] is the ceiling of the projection this call's result
+   crosses on its way to the model, resolved for the lane running it. Holding
+   stdout back at a narrower global bound would spill output the lane had
+   declared (maxResultSizeChars) it would take inline. *)
+let composable_output_fields ~inline_ceiling_bytes ~base_path ~stdout ~stderr ~output =
+  if String.length output <= inline_ceiling_bytes && String_util.is_valid_utf8 output
+  then Ok [ "output", `String output ]
+  else
+    try
+      let store = Tool_blob_store.create ~base_path in
+      let store_stream bytes =
+        Tool_blob_store.put_durable store ~bytes ~mime:"text/plain"
+        |> Tool_output.normalized_artifact_ref_to_json
+      in
+      Ok
+        [ "output_artifact", store_stream output
+        ; "stdout_artifact", store_stream stdout
+        ; "stderr_artifact", store_stream stderr
+        ]
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+
+let secret_files_for_source ~source ~observed ~prepare =
+  match source with
+  | Keeper_gate.Observed_in_box _ -> Ok (observed ())
+  | Keeper_gate.One_shot_resolution _
+  | Keeper_gate.Exact_always_rule _
+  | Keeper_gate.Keeper_always_allow
+  | Keeper_gate.Workspace_always_allow
+  | Keeper_gate.Readonly_sandbox
+  | Keeper_gate.Local_output -> prepare ()
+;;
+
+module For_testing = struct
+  let secret_files_for_source = secret_files_for_source
+
+  (* Test seam: when set, [handle_tool_execute_typed] routes its dispatch
+     through this override instead of the real shell dispatch. The override
+     returns a controlled [Execute_shell_ir.dispatch_error] so tests can
+     drive each rejected-dispatch branch through the real production wiring
+     (stream start -> dispatch -> stream end) without spawning a process. *)
+  let dispatch_override
+      : (unit ->
+        ( Masc_exec.Exec_dispatch.dispatch_result
+        , Keeper_tooling.Execute_shell_ir.dispatch_error )
+        result)
+        option ref
+    = ref None
+
+  let model_execute_location_fields = model_execute_location_fields
+  let redact_execute_output_with_additional_secret_files
+        ~additional_secret_files
+        ~base_path
+        ~keeper_name
+        ~stdout
+        ~stderr
+    =
+    let redaction =
+      execute_secret_redaction
+        ~additional_secret_files
+        ~base_path
+        ~keeper_name
+    in
+    redact_execute_output redaction ~stdout ~stderr
+
+  let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
+    redact_execute_output_with_additional_secret_files
+      ~additional_secret_files:[]
+      ~base_path
+      ~keeper_name
+      ~stdout
+      ~stderr
+
+end
+
+(* Typed Execute input projections extracted to
+   [Keeper_tool_execute_input] (godfile decomp). *)
+let assoc_upsert = Keeper_tool_execute_input.assoc_upsert
+let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_text
+let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
+let typed_input_timeout_budget = Keeper_tool_execute_input.typed_input_timeout_budget
+let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
+
+(* Backend target helpers for typed Shell IR dispatch. *)
+let guest_sandbox_target = Keeper_sandbox_shell_ir_target.guest_target
+
+type dispatch_bundle =
+  { sandbox : Masc_exec.Sandbox_target.t
+  ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
+  ; fields : (string * Yojson.Safe.t) list
+  ; base_host_env : string array option
+  ; github_secret_files :
+      unit ->
+      ( string list
+      , Keeper_turn_sandbox_runtime.github_identity_preparation_error )
+        result
+  ; observed_github_secret_files : unit -> string list
+  ; observe_route : unit -> Keeper_sandbox_shell_ir_target.observe_route
+    (* Where this call can run boxed before the judge is asked (RFC-0422).
+       Lazy: resolving it may acquire the guest. *)
+  ; cleanup : unit -> unit
+  }
+
+let input_with_cwd cwd (input : Keeper_tool_execute_typed_input.execute_input) =
+  { input with Keeper_tool_execute_typed_input.cwd = Some cwd }
+
+let handle_tool_execute_typed
+      ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~shell_ir_rewrite
+      ~(result_projection : Tool_output.model_projection)
+      ~(args : Yojson.Safe.t)
+      ()
+  =
+  let inline_ceiling_bytes = Tool_output.inline_ceiling_bytes result_projection in
+  let endpoint = match meta.sandbox_profile with
+    | Remote_ssh -> Keeper_sandbox_ssh.resolve_endpoint
+        ~base_path:config.base_path ~keeper_name:meta.name |> Result.map Option.some
+    | Docker | Micro_vm -> Ok None in
+  match endpoint with
+  | Error detail -> Keeper_tool_execution.failure
+      ~class_:Tool_result.Dependency_unavailable
+      ~effect_disposition:Tool_result.Proven_pre_effect (error_json detail)
+  | Ok endpoint ->
+  let remote_workspace_root = Option.map (fun (endpoint : Exec_ssh_endpoint.t) ->
+    Keeper_sandbox_remote.keeper_root ~remote_root:endpoint.remote_root
+      ~keeper_name:meta.name) endpoint in
+  match
+    Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+      ~remote_workspace_root
+      ~config
+      ~meta
+      (* Keep all keepers on the shared execute-worktree root. The exact
+         external-effect Gate is evaluated after the concrete cwd and sandbox
+         target have both been resolved. *)
+      ~write_enabled:true
+      ~args
+  with
+    | Error e ->
+      let cwd =
+        Keeper_tool_execute_path.requested_tool_execute_cwd
+          ~config
+          ~meta
+          ~write_enabled:true
+          ~args
+      in
+      model_execute_cwd_resolution_error ~config ~meta ~args ~cwd e
+    | Ok cwd ->
+        let model_location_fields =
+          model_execute_location_fields ~remote_workspace_root:None ~config ~meta ~args ~cwd
+      in
+      let typed_args = assoc_upsert "cwd" (`String cwd) args in
+      match Keeper_tool_execute_typed_input.of_json typed_args with
+      | Error e ->
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Policy_rejection
+          ~effect_disposition:Tool_result.Proven_pre_effect
+          (error_json
+             ~fields:
+               ([ "typed", `Bool true ] @ model_location_fields)
+             e)
+      | Ok input ->
+        (match Keeper_tool_execute_typed_input.validate input with
+         | Error e ->
+           let fields =
+             [ "typed", `Bool true ] @ model_location_fields
+           in
+           Keeper_tool_execution.failure
+             ~class_:Tool_result.Policy_rejection
+             ~effect_disposition:Tool_result.Proven_pre_effect
+             (error_json ~fields (typed_validation_error_text e))
+         | Ok () ->
+        let cmd = typed_input_command_text input in
+        let timeout_budget = typed_input_timeout_budget input in
+        let timeout_sec = typed_input_timeout_sec input in
+        let input = input_with_cwd cwd input in
+        (* This collector belongs to exactly this tool execution. Both an
+           Observe attempt and later authorized stages append their own
+           response, without consulting endpoint-wide latest status. *)
+        let shim_receipts = Atomic.make [] in
+        let on_receipt receipt =
+          Lockfree_atomic.update shim_receipts (fun receipts -> receipt :: receipts)
+        in
+        let current_shim_receipts () = List.rev (Atomic.get shim_receipts) in
+        let shim_receipt_fields () =
+          [ "shim_execution_evidence"
+          , shim_execution_evidence_json (current_shim_receipts ()) ]
+        in
+        let sandbox_profile, effective_network =
+          Keeper_sandbox_runner.effective_sandbox_profile ~meta
+        in
+        (* The conditions a result was produced under. A resolved route passes
+           its own frozen profile: this meta snapshot must not decide whether
+           a microVM backend applies to a route the factory already fixed. *)
+        let execution_condition_fields
+              ~(sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile)
+          =
+          [ "network_mode"
+          , `String
+              (Keeper_types_profile_sandbox.network_mode_to_string effective_network)
+          ]
+          @ (match sandbox_profile, meta.microvm_backend with
+             | Micro_vm, Some backend ->
+               [ "microvm_backend", `String (Keeper_microvm_backend.to_string backend) ]
+             | Micro_vm, None | Docker, _ | Remote_ssh, _ -> [])
+        in
+        let resolved_dispatch =
+          match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
+          | No_factory ->
+            (match sandbox_profile with
+             | Remote_ssh -> Ok `Remote_ssh
+             | Docker | Micro_vm ->
+               Error
+                 (Keeper_sandbox_shell_ir_target.target_error
+                    ~class_:Tool_result.Runtime_failure
+                    "typed Shell IR guest dispatch requires a turn sandbox factory (no factory provided)"))
+          | Remote_ssh_profile ->
+            if sandbox_profile = Remote_ssh
+            then Ok `Remote_ssh
+            else
+              Error
+                (Keeper_sandbox_shell_ir_target.profile_contract_mismatch
+                   ~expected:sandbox_profile
+                   ~actual:Remote_ssh)
+          | Runtime binding ->
+            guest_sandbox_target
+              ~on_receipt
+              ~capture_dir:(Keeper_execute_output_files.capture_directory
+                ~base_path:config.base_path)
+              ~binding
+              ~meta
+              ~cwd
+              ~timeout_sec
+              ~base_path:config.base_path
+              ()
+            |> Result.map (fun dispatch -> `Guest dispatch)
+        in
+        let dispatch_sandbox =
+          match resolved_dispatch with
+          | Error _ as error -> error
+          | Ok `Remote_ssh ->
+            (* Host identity projection is deliberately absent: the remote
+               shim synthesizes its own minimal environment. *)
+            (let target = match endpoint with
+              | None -> Error (Keeper_sandbox_shell_ir_target.target_error
+                  ~class_:Tool_result.Dependency_unavailable "remote_ssh_endpoint_unavailable")
+              | Some endpoint -> Keeper_sandbox_shell_ir_target.ssh_target
+                 ~endpoint
+                 ~on_receipt
+                 ~base_path:config.base_path
+                 ~meta
+                 ~timeout_sec
+                 ()
+             in match target with
+             | Error error -> Error error
+             | Ok dispatch ->
+               let endpoint_fields =
+                 match dispatch.target with
+                 | Masc_exec.Sandbox_target.Ssh { endpoint; _ } ->
+                   [ "remote_endpoint", `String endpoint.name
+                   ; "remote_host", `String endpoint.host
+                   ]
+                 | Host | Docker _ | Micro_vm _ | Delegated _ -> []
+               in
+               Ok
+                 { sandbox = dispatch.target
+                 ; sandbox_profile = Remote_ssh
+                 ; fields = execution_condition_fields ~sandbox_profile:Remote_ssh @
+                     [ "requested_sandbox", `String "remote_ssh"
+                     ; "via", `String "remote_ssh"
+                     ; "sandbox_profile", `String "remote_ssh"
+                     ]
+                     @ endpoint_fields
+                 ; base_host_env = None
+                 ; github_secret_files = (fun () -> Ok [])
+                 ; observed_github_secret_files = (fun () -> [])
+                 ; observe_route = dispatch.observe_route
+                 ; cleanup = Fun.id
+                 })
+          (* The factory result is the sole route authority. Its frozen guest
+             profile selects both the concrete target and the Gate label, so
+             a later meta snapshot cannot split execution from observability. *)
+          | Ok (`Guest (dispatch : Keeper_sandbox_shell_ir_target.guest_dispatch)) ->
+            let label =
+              Keeper_types_profile_sandbox.sandbox_profile_to_string
+                dispatch.sandbox_profile
+            in
+            Ok
+              { sandbox = dispatch.target
+              ; sandbox_profile = dispatch.sandbox_profile
+              ; fields = execution_condition_fields ~sandbox_profile:dispatch.sandbox_profile @
+                  [ "requested_sandbox", `String label
+                  ; "via", `String label
+                  ; "sandbox_profile", `String label
+                  ]
+              ; base_host_env = None
+              ; github_secret_files =
+                  (fun () ->
+                     Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
+                       ~timeout_sec
+                       dispatch.runtime)
+              ; observed_github_secret_files =
+                  (fun () ->
+                     Keeper_turn_sandbox_runtime.github_identity_secret_files
+                       dispatch.runtime)
+              ; observe_route = dispatch.observe_route
+              ; cleanup = Fun.id
+              }
+        in
+        (match dispatch_sandbox with
+         | Error ({ message; fields; class_ } : Keeper_sandbox_shell_ir_target.target_error) ->
+           Keeper_tool_execution.failure
+             ~class_
+             ~effect_disposition:Tool_result.Proven_pre_effect
+             (error_json
+                ~fields:
+                  ([ "typed", `Bool true; "cmd", `String cmd ]
+                   @ execution_condition_fields ~sandbox_profile
+                   @ model_location_fields
+                   @ fields)
+                message)
+         | Ok dispatch_bundle ->
+        Fun.protect ~finally:dispatch_bundle.cleanup (fun () ->
+        let dispatch_sandbox = dispatch_bundle.sandbox in
+        let sandbox_extra_fields = dispatch_bundle.fields in
+        let base_host_env = dispatch_bundle.base_host_env in
+        let dispatched_location_fields () =
+          (* [Host] is unreachable on this lane: every profile a keeper may
+             declare builds a guest or SSH target. The arm stays because
+             [Sandbox_target.t] is the general execution type and other
+             callers do run on this host; it answers with the same fields the
+             other targets do rather than describing a keeper that cannot
+             exist. *)
+          match dispatch_sandbox with
+          | Masc_exec.Sandbox_target.Host
+          | Docker _ | Micro_vm _ -> model_location_fields
+          | Ssh { endpoint; _ } ->
+            let root = Keeper_sandbox_remote.keeper_root
+              ~remote_root:endpoint.remote_root ~keeper_name:meta.name in
+            model_execute_location_fields ~remote_workspace_root:(Some root)
+              ~config ~meta ~args ~cwd
+          | Masc_exec.Sandbox_target.Delegated _ ->
+            (* Unreachable from a profile-built target today (no profile
+               builds one); a delegated stage is labelled where the
+               delegation is minted, not here. *)
+            model_location_fields
+        in
+        let dispatched_model_location_fields () =
+          shim_receipt_fields () @ dispatched_location_fields ()
+        in
+        (* Lower the validated typed input exactly once. The resulting Shell IR
+           is the neutral dispatch representation; it carries no product or
+           inferred authorization semantics. *)
+        (* RFC tools-as-shell-commands: the one conversion point.  Stages
+           whose program is the bare reserved word [masc] become delegated
+           tool calls before dispatch.  Every caller supplies a surface, and
+           a lane with no turn to look a tool up in supplies the one that
+           refuses ([Keeper_shell_tool_command.refuse_reserved_command]).
+           There is no absent case: routing lives in the IR's sandbox field,
+           so a line that skipped the rewrite is not refused, it runs as a
+           host program of that name (#32730).  A refusal reads as a typed
+           refusal with its own code; both refusals travel the same failure
+           shape below. *)
+        (* Lowering classifies the cwd with realpath; it performs no Eio
+           effect, so it runs on a host system thread instead of holding
+           this domain while the kernel answers (#46410). *)
+        let shell_ir_error =
+          match
+            Systhread_host.run ~label:"execute-shell-lowering" (fun () ->
+              Keeper_tool_execute_typed_input.to_shell_ir
+                ~sandbox:dispatch_sandbox
+                input)
+          with
+          | Error e ->
+            Error (typed_validation_error_text e, "typed_validation_failed")
+          | Ok ir -> (
+            match shell_ir_rewrite ir with
+            | Ok rewritten -> Ok rewritten
+            | Error message -> Error (message, "shell_tool_command_rejected"))
+        in
+        match shell_ir_error with
+        | Error (text, code) ->
+          let fields =
+            [ "typed", `Bool true; "cmd", `String cmd; "code", `String code ]
+            @ dispatched_model_location_fields ()
+          in
+          Keeper_tool_execution.failure
+            ~class_:Tool_result.Policy_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            (error_json ~fields text)
+        | Ok ir ->
+        let cmd_for_log =
+          Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
+          |> Exec_policy.truncate_for_log
+        in
+        let message_for_log s =
+          String.map
+            (function
+              | '\n' | '\r' | '\t' -> ' '
+              | c -> c)
+            s
+          |> Exec_policy.truncate_for_log
+        in
+        let typed_context_fields () =
+          [ "typed", `Bool true; "cmd", `String cmd_for_log ]
+          @ sandbox_extra_fields
+          @ dispatched_model_location_fields ()
+        in
+        let typed_error_json ~class_ ?(extra_fields = []) msg =
+          Keeper_tool_execution.failure
+            ~class_
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            (error_json
+               ~fields:(typed_context_fields () @ extra_fields)
+               msg)
+        in
+        let sandbox_profile_label =
+          Keeper_types_profile_sandbox.sandbox_profile_to_string
+            dispatch_bundle.sandbox_profile
+        in
+        let gate_input =
+          execute_gate_input
+            ~input:typed_args
+            ~cwd
+            ~sandbox_profile:sandbox_profile_label
+            ~sandbox_target:(sandbox_target_label dispatch_sandbox)
+        in
+        let gate_request : Keeper_gate.request =
+          { keeper_name = meta.name
+          ; operation = gate_operation
+          ; input = gate_input
+          ; call_summary = Keeper_tool_execute_input.typed_input_call_summary input
+          ; base_path = config.base_path
+          ; causal_context = Option.map (fun current -> current ()) gate_context
+          ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
+          ; continuation_channel
+          ; sandbox_profile = Some dispatch_bundle.sandbox_profile
+          }
+        in
+        (* RFC-0422: the box the gate may ask for, after every cheaper
+           authority has declined. The same IR, the same cwd and budget, a
+           target whose runner asks the shim for [Observe]; no output
+           streaming, because until the gate has read the answer this run is
+           not yet the call's result. The IR is rewritten with the box's
+           target because execution reads the target from the IR, not from
+           [~sandbox] — handing the effect-built IR to the box unchanged ran
+           the real call and reported its exit as an observation. *)
+        let observation =
+          Keeper_tool_execute_observe.create
+            ~execution_evidence:(fun () -> List.rev (Atomic.get shim_receipts))
+            ~route:dispatch_bundle.observe_route
+            ~dispatch:(fun sandbox ->
+              (* Gate observations are not yet authorized for display. Show
+                 only their lifetime, without their command or output. *)
+              let stream_id = Atomic.fetch_and_add execute_stream_counter 1 in
+              let task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id in
+              let ended = ref false in
+              let finish outcome =
+                finish_execute_stream ~keeper_name:meta.name ~stream_id ~task_id ~ended
+                  ~status:(`Assoc [ "phase", `String "gate_observation"; "outcome", `String outcome ])
+              in
+              Fun.protect
+                ~finally:(fun () -> finish "unknown")
+                (fun () ->
+                  start_execute_stream ~keeper_name:meta.name ~stream_id ~task_id
+                    ~command:"[gate observation]";
+                  let prior_receipt_count = List.length (current_shim_receipts ()) in
+                  let result = Keeper_tooling.Execute_shell_ir.dispatch
+                    ~workdir:cwd
+                    ~sandbox
+                    ~timeout_sec
+                    ?base_host_env
+                    (Masc_exec.Shell_ir.with_sandbox sandbox ir)
+                  in
+                  let receipts = List.drop prior_receipt_count (current_shim_receipts ()) in
+                  let outcome = match command_observation receipts with
+                    | Command_result_observed -> "observation_ended"
+                    | Command_request_not_sent -> "request_not_sent"
+                    | Command_effect_unknown -> "unknown"
+                  in
+                  finish outcome;
+                  result))
+        in
+        let gate_decision =
+          Keeper_gate.decide
+            ~intent:input.intent
+            ?cycle_grant:gate_grant
+            ~observe:(Keeper_tool_execute_observe.observe observation)
+            (* NDT-OK: this typed, caller-owned policy input is consumed only
+               at the external-effect authorization boundary. *)
+            ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
+            gate_request
+        in
+        (match
+           gate_decision
+         with
+         | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
+           (* RFC-0422 §3.3: a keeper whose request the box refused is told
+              what was refused, in the same bytes the judge reads, so it can
+              choose an observation-only path instead of waiting. *)
+           let observation_fields =
+             match Keeper_tool_execute_observe.outcome observation with
+             | Some (Keeper_gate.Observed_refused { status; stderr; refusal_kind }) ->
+               [ ( "observation"
+                 , Keeper_approval_queue_rules_types.observed_refusal_to_yojson
+                     (Keeper_gate.observed_refusal ~refusal_kind ~status ~stderr) )
+               ]
+             | Some
+                 ( Keeper_gate.Observed_result _
+                 | Keeper_gate.Observed_partly_refused _
+                 | Keeper_gate.Observation_unavailable _ )
+             | None -> []
+           in
+           Keeper_gate_deferred_payload.create
+             ~operation:gate_operation
+             ~approval_id
+             ~reason
+             ~audit_receipts
+             ~context:(`Assoc (typed_context_fields () @ observation_fields))
+             ()
+           |> Keeper_gate_deferred_payload.to_execution
+         | Keeper_gate.Unavailable reason ->
+           typed_error_json
+             ~class_:Tool_result.Dependency_unavailable
+             ~extra_fields:
+               [ "code", `String "gate_unavailable"
+               ; "gate_reason"
+               , `String (Keeper_gate.unavailable_reason_to_string reason)
+               ]
+             "External effect was not executed because the Gate could not durably record its decision state. This Keeper remains active and may continue other work."
+         | Keeper_gate.Allow authorization ->
+          Log.Keeper.info
+            ~keeper_name:meta.name
+            "Execute result authorization operation=tool_execute source=%s"
+            (Keeper_gate.authorization_source_to_string authorization.source);
+          let authorized result =
+            Keeper_tool_execution.with_gate_authorization authorization result
+          in
+          (* A boxed call already acquired a running guest and its identity.
+             Preparing again can fail a token refresh or replace that guest
+             after a partial write, discarding the real result as pre-effect.
+             Read the bound snapshot for redaction; prepare only a call that
+             still needs dispatch. *)
+          (match
+             secret_files_for_source
+               ~source:authorization.source
+               ~observed:dispatch_bundle.observed_github_secret_files
+               ~prepare:dispatch_bundle.github_secret_files
+           with
+           | Error (Keeper_turn_sandbox_runtime.Sandbox_unavailable err) ->
+             authorized
+               (typed_error_json
+                  ~class_:Tool_result.Runtime_failure
+                  ~extra_fields:
+                    [ "code", `String "sandbox_guest_unavailable"
+                    ; "failure_stage", `String "sandbox_guest_prepare"
+                    ]
+                  ("Sandbox guest unavailable: " ^ err))
+           | Error (Keeper_turn_sandbox_runtime.Identity_unavailable err) ->
+             authorized
+               (typed_error_json
+                  ~class_:Tool_result.Runtime_failure
+                  ~extra_fields:[ "code", `String "github_identity_snapshot_unavailable" ]
+                  ("GitHub identity snapshot unavailable: " ^ err))
+           | Ok github_secret_files ->
+          let output_redaction =
+            execute_secret_redaction
+              ~additional_secret_files:github_secret_files
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
+          in
+          (* NDT-OK: wall clock is used only for elapsed telemetry, never for
+             dispatch branching or policy decisions. *)
+          let t0 = Tool_timing.start () in
+          let task_id =
+            Option.map Keeper_id.Task_id.to_string meta.current_task_id
+          in
+          let stream_id = Atomic.fetch_and_add execute_stream_counter 1 in
+          let command =
+            Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
+            |> redact_execute_text output_redaction
+            |> Exec_policy.truncate_for_log
+          in
+          let stdout_stream_redaction =
+            Keeper_secret_redaction.create_stream_state output_redaction
+          in
+          let stderr_stream_redaction =
+            Keeper_secret_redaction.create_stream_state output_redaction
+          in
+          (* Execute output always streams. The MASC_STREAM_EXECUTE_OUTPUT
+             kill switch was read here on every tool execution — an env
+             effect inside the dispatch path — while nothing in the
+             repository, shell config, or deployment scripts ever set it,
+             and its parse accepted every value except the exact string
+             "false" (RFC-0371 B7). *)
+          let stream_ended = ref false in
+          let finish_stream status =
+            finish_execute_stream ~keeper_name:meta.name ~stream_id ~task_id
+              ~ended:stream_ended ~status
+          in
+          Fun.protect
+            ~finally:(fun () ->
+              (* A cancelled or exceptional observer has no trustworthy exit
+                 status. This closes observation, not the remote effect. *)
+              finish_stream (`Assoc [ "outcome", `String "unknown" ]))
+            (fun () ->
+          start_execute_stream ~keeper_name:meta.name ~stream_id ~task_id ~command;
+          let record_stream_chunk stream data =
+            if not (String.equal data "")
+            then (
+              try
+                Keeper_keepalive_signal.record_execute_stream_chunk
+                  ~keeper_name:meta.name
+                  ~stream_id
+                  ~stream
+                  data
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream chunk callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn))
+          in
+          (* The line-buffered redactor is boundary-safe when a credential is
+             split across process chunks and scans every byte once. *)
+          let on_output_chunk chunk =
+            let stream, state, data =
+              match chunk with
+              | `Stdout s -> `Stdout, stdout_stream_redaction, s
+              | `Stderr s -> `Stderr, stderr_stream_redaction, s
+            in
+            let data = Keeper_secret_redaction.redact_stream_chunk state data in
+            record_stream_chunk stream data
+          in
+          (* RFC execute-subset-dispositions step 1.  A script that arrived
+             inside [argv:["sh";"-c";...]] is invisible to everything else on
+             this path, so it is counted here and nowhere else.  Recognition
+             and classification only -- the dispatch below is unchanged, and
+             what runs is exactly what ran before this line existed. *)
+          (* [lowered] is what the step-1 line was missing. The finding says
+             what was hidden inside the argv; it does not say whether step 4
+             then put the call under the boundary, because the tap reads the
+             input and the lowering happens after it. Measured on 27 live
+             records: 9 [representable], and no way to tell how many of them
+             the gate actually took.
+
+             It is a property of the call rather than of the stage, so every
+             stage has to answer: lowering rewrites one costume, and a
+             multi-stage call whose second stage is still [bash -c] has not
+             left its shell behind because its first stage did.  Reading only
+             the [Simple] arm and calling the other two lowered said the
+             opposite.
+
+             Since #32662 no multi-stage call reaches here: [Argv] and
+             [Command] both lower to one [Simple]. The stage traversal is
+             {!Keeper_tooling.Shell_costume.ir_keeps_a_shell}'s answer for
+             the whole [Shell_ir.t] type, and only its own tests still take
+             it. Kept because the predicate is about the type, not about
+             which caller happens to be the last one standing. *)
+          let lowered = not (Keeper_tooling.Shell_costume.ir_keeps_a_shell ir) in
+          (* Classifying the script parses it and realpaths its redirect
+             targets, with no Eio effect: a host system thread, as for the
+             lowering above. *)
+          let costume_findings =
+            Systhread_host.run ~label:"execute-shell-costume" (fun () ->
+              Keeper_tool_execute_typed_input.hidden_script_findings
+                ~sandbox:dispatch_sandbox
+                input)
+          in
+          List.iter
+            (fun (shell, finding) ->
+               Log.Keeper.info
+                 "shell_costume keeper=%s shell=%s finding=%s lowered=%b cmd=%s"
+                 meta.name
+                 shell
+                 (Keeper_tooling.Shell_costume.finding_tag finding)
+                 lowered
+                 cmd_for_log)
+            costume_findings;
+          (* Tell without refusing.  Two thirds of live escapes are [;], which
+             the IR omits on purpose, and none of them is refused: an
+             argv-shaped costume arrives as one opaque program, so the gate has
+             nothing to object to and the call runs.  Refusing them would break
+             work that runs today; saying nothing gives the writer no reason to
+             stop.  So the answer also says what the call should have been.
+
+             It goes in the payload, not in [metadata].  A completed result's
+             model-visible text is the serialized [data]
+             ([Tool_result.message]); [_meta] is a separate field, and every
+             read of it in agent_core discards it -- [agent_tools.ml] answers
+             [Ok { content; _ }] at the point a tool result becomes
+             conversation.  Metadata reaches dispatch observers and an MCP wire
+             client; it does not reach the keeper this sentence is written for.
+             A field beside the others leaves [ok], the status and the streams
+             alone, so a call that worked still reads as a call that worked. *)
+          let costume_advice =
+            List.filter_map
+              (fun (shell, finding) ->
+                 match finding with
+                 | Keeper_tooling.Shell_costume.Outside_the_subset reason ->
+                   Some
+                     (`Assoc
+                         [ "shell", `String shell
+                         ; ( "finding"
+                           , `String
+                               (Keeper_tooling.Shell_costume.finding_tag finding) )
+                         ; ( "should_have_been"
+                           , `String
+                               (Keeper_tooling.Subset_rewrite.to_string
+                                  (Keeper_tooling.Subset_rewrite.of_reason reason))
+                           )
+                         ])
+                 | Keeper_tooling.Shell_costume.Representable
+                 | Keeper_tooling.Shell_costume.Refused_by_policy _
+                 | Keeper_tooling.Shell_costume.Unparsable _ -> None)
+              costume_findings
+          in
+          let escaped_shell_fields =
+            match costume_advice with
+            | [] -> []
+            | advice -> [ "escaped_shell", `List advice ]
+          in
+          let dispatch_unboxed () =
+            Keeper_tooling.Execute_shell_ir.dispatch
+              ~workdir:cwd
+              ~sandbox:dispatch_sandbox
+              ~timeout_sec
+              ?base_host_env
+              ~on_output_chunk
+              ir
+          in
+          let dispatch () =
+            match !For_testing.dispatch_override with
+            | Some override -> override ()
+            | None ->
+              Keeper_tool_execute_observe.dispatch_authorized
+                ~source:authorization.source
+                ~on_output_chunk
+                ~dispatch:dispatch_unboxed
+          in
+          let prior_receipt_count = List.length (current_shim_receipts ()) in
+          let dispatch_result =
+            match dispatch_sandbox with
+            | Masc_exec.Sandbox_target.Host ->
+              Keeper_external_resource_lease.with_lease
+                (Keeper_external_resource_lease.Host_cwd cwd)
+                dispatch
+            | Docker _ | Micro_vm _ | Ssh _ | Delegated _ -> dispatch ()
+          in
+          match dispatch_result with
+          | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->
+            (* RFC-0208 P1: gate denial audit line. *)
+            Log.Keeper.warn
+              "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
+              meta.name
+              cmd_for_log
+              (message_for_log diagnostic);
+            finish_stream (`Assoc [ "rejected", `String "gate_reject" ]);
+            (* The gate, parser and complexity checks judge only the Shell IR
+               masc builds. An argv command is a Simple node with literal
+               arguments; a script is an opaque [-c] argument of its shell.
+               Pipes and redirects are allowed here, so this IR cannot
+               produce these refusals. One firing is masc's own fault:
+               Runtime_failure. Path_reject instead judges the cwd and argv
+               path operands supplied by the caller, not script contents. *)
+            authorized (typed_error_json ~class_:Tool_result.Runtime_failure diagnostic)
+          | Error (Keeper_tooling.Execute_shell_ir.Cannot_parse reason) ->
+            let reason_tag = Keeper_tooling.Execute_shell_ir.parse_reason_tag reason in
+            (* Parity with gate_reject/path_reject, which have always carried
+               their diagnostic.  These two could not until the typed gate
+               could produce them. *)
+            Log.Keeper.warn
+              "shell_ir cannot_parse keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              reason_tag;
+            finish_stream
+              (`Assoc [ "rejected", `String "cannot_parse"; "reason", `String reason_tag ]);
+            authorized
+              (typed_error_json
+                 ~class_:Tool_result.Runtime_failure
+                 (Printf.sprintf "Cannot parse command: %s" reason_tag))
+          | Error (Keeper_tooling.Execute_shell_ir.Too_complex reason) ->
+            let reason_tag = Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason in
+            (* Parity with gate_reject/path_reject, which have always carried
+               their diagnostic.  These two could not until the typed gate
+               could produce them. *)
+            Log.Keeper.warn
+              "shell_ir too_complex keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              reason_tag;
+            finish_stream
+              (`Assoc [ "rejected", `String "too_complex"; "reason", `String reason_tag ]);
+            authorized
+              (typed_error_json
+                 ~class_:Tool_result.Runtime_failure
+                 (Printf.sprintf
+                    "Command too complex: %s. %s."
+                    reason_tag
+                    (Keeper_tooling.Subset_rewrite.to_string
+                       (Keeper_tooling.Subset_rewrite.of_reason reason))))
+          | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
+            (* RFC-0208 P1: path-policy denial audit line. *)
+            Log.Keeper.warn
+              "shell_ir path_reject keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              (message_for_log e);
+            finish_stream (`Assoc [ "rejected", `String "path_reject" ]);
+            authorized
+              (typed_error_json
+                 ~class_:Tool_result.Policy_rejection
+                 ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
+                 e)
+          | Ok result ->
+            let elapsed_ms =
+              (* NDT-OK: second wall-clock read closes the elapsed telemetry
+                 span recorded immediately below. *)
+              elapsed_duration_ms ~start_time:(Tool_timing.started_at t0)
+                ~end_time:(Time_compat.now ())
+            in
+            let stdout, stderr, output =
+              redact_execute_output output_redaction
+                ~stdout:result.stdout
+                ~stderr:result.stderr
+            in
+            (* One reading of the status, so the values it decides cannot
+               disagree, and a test can ask what a status means without
+               starting a child ([Keeper_tool_execute_exit_report]). *)
+            let exit_report =
+              Keeper_tool_execute_exit_report.of_status
+                ~status:result.status
+                ~timeout_budget
+            in
+            (* A failed transport is converted to a synthetic Unix status by
+               the shell dispatcher. It is not the remote child's exit. Only
+               this authorized dispatch's receipts apply: an earlier Observe
+               attempt is not the result of the later effect, unless the gate
+               explicitly reused that Observe result. *)
+            let receipts = current_shim_receipts () in
+            let dispatch_receipts = match authorization.source with
+              | Keeper_gate.Observed_in_box _ -> receipts
+              | One_shot_resolution _ | Exact_always_rule _ | Keeper_always_allow
+              | Workspace_always_allow | Readonly_sandbox | Local_output ->
+                List.drop prior_receipt_count receipts
+            in
+            let observation = command_observation dispatch_receipts in
+            let effect_disposition = match observation with
+              | Command_result_observed -> Tool_result.Proven_post_effect
+              | Command_request_not_sent -> Tool_result.Proven_pre_effect
+              | Command_effect_unknown -> Tool_result.Effect_outcome_unknown
+            in
+            let transport_failure = match observation with
+              | Command_result_observed -> None
+              | Command_request_not_sent -> Some
+                  "The execution request was not sent to the endpoint. No command effect was started by this request."
+              | Command_effect_unknown -> Some
+                  "The endpoint did not provide a trustworthy command result. The remote effect may have happened; inspect its state before deciding whether to run it again."
+            in
+            let status_json =
+              match observation with
+              | Command_result_observed -> exit_report.Keeper_tool_execute_exit_report.status
+              | Command_request_not_sent -> `Assoc [ "outcome", `String "request_not_sent" ]
+              | Command_effect_unknown -> `Assoc [ "outcome", `String "unknown" ]
+            in
+            Log.Keeper.info
+              "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
+              meta.name sandbox_profile_label (Yojson.Safe.to_string status_json) elapsed_ms;
+            (* The line-buffered redactor holds a partial trailing line, so the
+               stream is flushed here before the end marker. *)
+            record_stream_chunk
+              `Stdout
+              (Keeper_secret_redaction.redact_stream_finish stdout_stream_redaction);
+            record_stream_chunk
+              `Stderr
+              (Keeper_secret_redaction.redact_stream_finish stderr_stream_redaction);
+            finish_stream status_json;
+            (try
+               Keeper_keepalive_signal.record_execute_output
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~stdout
+                 ~stderr
+                 ~status:status_json
+                 ~streamed:true
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Dashboard.warn
+                 "execute output callback failed keeper=%s: %s"
+                 meta.name
+                 (Printexc.to_string exn));
+            let succeeded = Option.is_none transport_failure && exit_report.Keeper_tool_execute_exit_report.ok in
+            let output_fields =
+              match result.output_files with
+              | Some files ->
+                Keeper_execute_output_files.publish
+                  ~inline_ceiling_bytes
+                  ~base_path:config.base_path ~redaction:output_redaction files
+                |> Result.map (fun publication -> publication, [])
+              | None ->
+                composable_output_fields
+                  ~inline_ceiling_bytes
+                  ~base_path:config.base_path ~stdout ~stderr ~output
+                |> Result.map (fun fields ->
+                  ( { Keeper_execute_output_files.fields
+                    ; compared_output_bytes = String.length output
+                    ; release_sources = (fun () -> ())
+                    }
+                    (* Published files mark themselves "complete" in the
+                       fields the model reads. A captured stream carries no
+                       proof that both streams reached EOF; that is the usual
+                       case, so its marker is recorded as evidence only
+                       (#39035). *)
+                  , [ "output_completeness", `String "capture_only" ] ))
+                |> Result.map_error (fun message ->
+                  Keeper_execute_output_files.Persistence_failed message)
+            in
+            (match output_fields with
+             | Error detail ->
+               Log.Keeper.warn
+                 ~keeper_name:meta.name
+                 "execute output artifact persistence failed: %s"
+                 (Keeper_execute_output_files.error_to_string detail);
+               let message = match observation with
+                 | Command_result_observed ->
+                   "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."
+                 | Command_request_not_sent ->
+                   "The request was not sent, and its captured output could not be preserved. No command effect was started by this request."
+                 | Command_effect_unknown ->
+                   "The remote effect is unconfirmed and its captured output could not be preserved. Inspect its state before deciding whether to run the command again."
+               in
+               authorized
+                 (Keeper_tool_execution.failure
+                    ~class_:Tool_result.Runtime_failure
+                    ~effect_disposition
+                    (error_json
+                       ~fields:
+                         ([ "typed", `Bool true
+                          ; "code", `String (Keeper_execute_output_files.error_code detail)
+                          ; "status", status_json
+                          ; "output", `String (String_util.sanitize_utf8 output)
+                          ; execution_time_field, `Int elapsed_ms
+                          ]
+                          @ dispatched_model_location_fields ())
+                       message))
+             | Ok (publication, completeness_evidence) ->
+               let output_fields = publication.Keeper_execute_output_files.fields in
+               let handler_stored = List.mem_assoc "output_artifact" output_fields in
+               let timeout_fields = match observation with
+                 | Command_result_observed -> exit_report.Keeper_tool_execute_exit_report.timeout_fields
+                 | Command_request_not_sent | Command_effect_unknown -> [] in
+               (* [execution_location] stays with the model: it is the
+                  observation channel for where a call ran
+                  (RFC-keeper-workspace-root-only §3.3, §3.6). *)
+               let payload =
+                 `Assoc
+                   ([ "ok", `Bool succeeded
+                    ; "status", status_json
+                    ]
+                    @ model_shim_evidence_fields receipts
+                    @ dispatched_location_fields ()
+                    @ escaped_shell_fields
+                    @ timeout_fields
+                    @ output_fields
+                    @ [ "typed", `Bool true
+                      ; execution_time_field, `Int elapsed_ms
+                      ])
+               in
+               (* The same call's audit fields, which the model does not read:
+                  tool-result metadata reaches the tool-call ledger as
+                  [execution_evidence] and is not part of a direct call's
+                  provider request (#39035). *)
+               let execution_evidence =
+                 Keeper_tool_call_log.execution_evidence_metadata
+                   ([ "shim_execution_evidence", shim_execution_evidence_json receipts
+                    ; "compared_output_bytes", `Int publication.compared_output_bytes
+                    ; "handler_stored", `Bool handler_stored
+                    ]
+                    @ completeness_evidence
+                    @ sandbox_extra_fields)
+               in
+               (* A process that ran and exited nonzero (or died to a
+                  signal) is an observed tool result the model reads and
+                  reacts to — the payload carries ok:false, the exit
+                  status, and stderr exactly once: inside [output], or as
+                  [stderr_artifact] once the output is externalized. Routing it through the failure
+                  disposition marked the whole turn
+                  Terminal_effect_failed (sticky), so a keeper probing a
+                  missing path with `ls` died mid-mission — four turn
+                  deaths across the E0 campaign and a pilot Keeper
+                  (masc#28983). Only infra failures — sandbox dispatch,
+                  secret projection, output/manifest persistence — keep
+                  the failure disposition. *)
+               authorized
+                 (match
+                    Tool_bridge.attach_artifact_manifest
+                      ~base_path:config.base_path
+                      (let answered =
+                         match transport_failure with
+                         | Some message ->
+                           Tool_result.make_err
+                             ~tool_name:"tool_execute"
+                             ~class_:Tool_result.Dependency_unavailable
+                             ~effect_disposition
+                             ~start_time:t0 ~data:payload ~metadata:execution_evidence
+                             message
+                         | None ->
+                           Tool_result.make_ok
+                             ~tool_name:"tool_execute"
+                             ~start_time:t0
+                             ~data:payload
+                             ~metadata:execution_evidence
+                             ()
+                       in
+                       answered)
+                  with
+                  | Ok result ->
+                    publication.release_sources ();
+                    Keeper_tool_execution.of_tool_result result
+                  | Error _ ->
+                    let message = match observation with
+                      | Command_result_observed ->
+                        "Execute completed, but its result manifest could not be persisted."
+                      | Command_request_not_sent ->
+                        "The request was not sent and its result manifest could not be persisted. No command effect was started by this request."
+                      | Command_effect_unknown ->
+                        "The remote effect is unconfirmed and its result manifest could not be persisted. Inspect its state before deciding whether to run the command again."
+                    in
+                    Keeper_tool_execution.failure
+                      ~class_:Tool_result.Runtime_failure
+                      ~effect_disposition
+                      (error_json
+                         ~fields:
+                           ([ "typed", `Bool true
+                            ; "code", `String "execute_result_manifest_failed"
+                            ; "status", status_json
+                            ; "output", `String (String_util.sanitize_utf8 output)
+                            ; execution_time_field, `Int elapsed_ms
+                            ]
+                            @ dispatched_model_location_fields ())
+                         message)))
+        ))))))
+
+let handle_tool_execute_with_outcome
+      ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~shell_ir_rewrite
+      ~result_projection
+      ~(args : Yojson.Safe.t)
+      ()
+  =
+  (* No key pre-check: [Keeper_tool_execute_typed_input.of_json] is the one
+     admission door, and its errors name the field that was wrong. A second
+     key list here is a copy that diverges from the schema, and every
+     schema-conformant call it did not know would bounce before the parser
+     could read it (#29813). *)
+  handle_tool_execute_typed
+    ~turn_sandbox_factory
+    ~config
+    ~meta
+    ?continuation_channel
+    ?gate_context
+    ?gate_grant
+    ~shell_ir_rewrite
+    ~result_projection
+    ~args
+    ()
+;;
+
+let handle_tool_execute
+      ~turn_sandbox_factory
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~shell_ir_rewrite
+      ~result_projection
+      ~args
+      ()
+  =
+  (handle_tool_execute_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~meta
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~shell_ir_rewrite
+     ~result_projection
+     ~args
+     ()).raw_output
+;;

@@ -1,0 +1,460 @@
+#!/usr/bin/env bash
+# Pin private/external opam dependencies that are not published on opam-repository.
+#
+# All first-party packages are pinned to specific commit SHAs so that the
+# opam cache in CI stays stable across runs. When upstream changes are needed,
+# update the readonly SHA below.
+#
+# To bump a pin:
+#   git ls-remote https://github.com/jeong-sik/<repo>.git HEAD
+#   # update the readonly SHA below, commit, push
+#
+# ──────────────────────────────────────────────────────────────────────────
+# pin vs install trap (2026-04-11 post-mortem)
+#
+# Every `opam pin add` here uses `-n -y`: `-y` answers yes automatically,
+# `-n` means "do NOT install/rebuild the pinned package". Those flags are
+# correct for CI, which runs a clean `opam install` pass after pinning so
+# the cache stays deterministic. But for LOCAL development they are a
+# footgun: after bumping a SHA and re-running this script you will see
+# "pinned successfully" and conclude the new code is live, when in fact
+# the installed binary is still the OLD commit.
+#
+# Pass `--install` to run `opam install --yes <pinned packages>` at the
+# tail of this script so the binary actually matches the pin. The full
+# install takes several minutes, which is why it is opt-in.
+# ──────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# --check reads the pin table and writes nothing, so it takes a read lease.
+# A write lease waits behind every reader, which turned the check into a 5s
+# refusal whenever anything else held the switch -- including the read lease
+# dune-local.sh is already holding when it calls this.
+lease_mode=write
+lease_flag=MASC_OPAM_WRITE_LEASE_HELD
+check_only=false
+for arg in "$@"; do
+  if [[ "${arg}" == "--check" ]]; then
+    lease_mode=read
+    lease_flag=MASC_OPAM_READ_LEASE_HELD
+    check_only=true
+  fi
+done
+
+lease_already_held() {
+  [[ "${MASC_OPAM_WRITE_LEASE_HELD:-0}" == "1" ]] && return 0
+  # A write lease covers a read; the reverse does not hold.
+  [[ "${lease_mode}" == "read" && "${MASC_OPAM_READ_LEASE_HELD:-0}" == "1" ]]
+}
+
+if ! lease_already_held; then
+  script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  exec "${SCRIPT_DIR}/opam-switch-rw-lock.sh" \
+    "${lease_mode}" -- "${ENV_CMD:-/usr/bin/env}" "${lease_flag}=1" \
+    "${script_path}" "$@"
+fi
+
+# Refuse to mutate a different or unsupported switch.  This script is the
+# documented repair path for external dependency pin drift, so it must not silently
+# repair the switch named by opam while the caller's shell still executes
+# tools from another prefix.
+required_ocaml_version="$(sed -nE '/^[[:space:]]*\(ocaml[[:space:]]+\(=[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)\)\).*$/ { s//\1/; p; q; }' \
+  "${REPO_ROOT}/dune-project")"
+if [[ -z "${required_ocaml_version}" ]]; then
+  echo "[opam-pin] ERROR: unable to read exact OCaml version from ${REPO_ROOT}/dune-project" >&2
+  exit 1
+fi
+if ! command -v opam >/dev/null 2>&1; then
+  echo "[opam-pin] ERROR: opam is unavailable; MASC requires OCaml ${required_ocaml_version}" >&2
+  exit 1
+fi
+active_opam_switch="$(opam switch show 2>/dev/null || true)"
+active_opam_prefix="$(opam var prefix 2>/dev/null || true)"
+active_ocaml_version="$(opam exec -- ocamlc -version 2>/dev/null || true)"
+if [[ -z "${active_opam_switch}" || -z "${active_opam_prefix}" ]]; then
+  echo "[opam-pin] ERROR: unable to resolve the active opam switch and prefix" >&2
+  exit 1
+fi
+if [[ -n "${OPAM_SWITCH_PREFIX:-}" \
+      && "${OPAM_SWITCH_PREFIX%/}" != "${active_opam_prefix%/}" ]]; then
+  echo "[opam-pin] ERROR: split opam environment: switch ${active_opam_switch} uses ${active_opam_prefix} but OPAM_SWITCH_PREFIX=${OPAM_SWITCH_PREFIX}" >&2
+  echo "[opam-pin] repair (local switch, as in README): eval \"\$(opam env --switch=${REPO_ROOT} --set-switch)\"" >&2
+  echo "[opam-pin] repair (named switch): eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
+  exit 1
+fi
+# A switch on the wrong compiler must not be pinned into, so pinning still
+# stops here. Reading is different: a machine whose switch drifted off the
+# required compiler is exactly where a dropped pin hides, and stopping at the
+# version left the pin comparison unreached. Measured 2026-09-10 -- this
+# machine sat on 5.5.0 with no 5.5.1 switch, so every --check since exited
+# before reading a single pin while cohttp-eio was missing from the switch and
+# corrupting provider SSE. --check now reports both and fails at the end.
+ocaml_version_drift=false
+if [[ "${active_ocaml_version}" != "${required_ocaml_version}" ]]; then
+  echo "[opam-pin] ERROR: OCaml ${active_ocaml_version:-unknown} detected; MASC requires exactly ${required_ocaml_version}" >&2
+  echo "[opam-pin] repair (local switch, as in README): eval \"\$(opam env --switch=${REPO_ROOT} --set-switch)\"" >&2
+  echo "[opam-pin] repair (named switch): eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
+  if ${check_only}; then
+    ocaml_version_drift=true
+    echo "[opam-pin] continuing to the pin comparison; the switch below is the drifted one" >&2
+  else
+    exit 1
+  fi
+fi
+
+# --- Pin SHAs (bump these when upstream changes are needed) ---
+readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
+# d812d6f = ws-direct v0.2.0 (Endpoint.Wsd.send_text_bigstring).
+readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
+# MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for
+# core development; SHA-pinned here for CI.
+# 4e2799a = ocaml-msx #21: slot-aware disk BIOS dispatch and random reads;
+# retains DOS save-file writes, disk swapping and machine snapshots.
+# 27706b9 adds Backspace matrix input and replay support (ocaml-msx #25).
+# a754105 adds joystick-1 directions, SHIFT/CTRL/GRAPH modifiers (ocaml-msx #22, #23).
+# 3133d7c adds disk HLE boot for Rune Master II (NMS8250 slot layout, page-0
+# vectors, BDOS _DIRIN), the VDP FH/IE1 gate and the Select key (ocaml-msx #26).
+# 870e610 keeps the interface ROM unmounted during the warm-up replay: a
+# C-BIOS boot that found it leaked game code into the 720-frame warm-up and
+# the replay landed on that polluted state (Sangokushi II cold-boot stall
+# pc=e1dc); boot_disk now mounts the ROM at replay time (ocaml-msx #37).
+# 3143a55 moves the pin to ocaml-msx #43: ambiguous v1 checkpoint layouts
+# are rejected instead of restoring state with a guessed field boundary.
+# 052f50b reverts ocaml-msx #41 (#44): 0x0024 is BIOS ENASLT, not SNSMAT, and
+# serving it as an implicit CALSLT restored ppi_a after every slot switch, so
+# a Sangokushi II warm-boot drew only black from #41 through #43.
+# ab17a2b is the squash merge of ocaml-msx #47. It persists the WD2793
+# drive state in save-state format v3, including in-flight sector reads, so
+# restoring a live disk campaign does not cold-reset the FDC. The core's
+# top-level lib source digest at this pin is cc6489f2ddae4a48596b4879b3c0e368.
+# 7cc5836 is ocaml-msx main with #48 and #50 (#49 relanded): refresh the
+# build Git identity and publish a commit only for the core project's own
+# clean checkout. The top-level lib source digest is unchanged.
+# cec423387 = ocaml-msx #52: the plain-CALL trap serves SNSMAT 0x0141,
+# GTSTCK 0x00D5 and GTTRIG 0x00D8, and the served-vector ledger records
+# whether the caller returned into ROM or RAM. Before this pin the same trap
+# admitted only CHSNS 0x009C, CHGET 0x009F, CHPUT 0x00A2 and 0x0156
+# (ocaml-msx 7cc5836 lib/msx.ml:1444), so a plain CALL to any of the three
+# newly served vectors, made while page 0 is RAM, got no served answer.
+# Which game paths issue those calls is not verified here. The top-level lib
+# source digest moves cc6489f2ddae4a48596b4879b3c0e368 -> 78f5ad93c70d726594517af5e0f4c57b.
+readonly OCAML_MSX_SHA="cec423387a7335f7d095e3a3489ec3e7272581fa"
+# DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
+# Path-pinned locally for core development; SHA-pinned here for CI.
+# d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and
+# "enter" from a keeper instead of BIOS words in hex. It sits on #9 (the
+# real-chip CPU repair and the BIOS/DOS surface) and #10 (graphics modes).
+# e1d7f45 keeps screen_digest and input_requests from ocaml-dos #12, and adds
+# #26: INT 33h reaches the host mouse handler and the mouse is attached by
+# default, so a guest can observe the state injected by Dos_machine.set_mouse.
+# 1c75fbc = ocaml-dos #28: a guest reading the BIOS ring head itself counts as
+# asking for a key, so a game that polls the ring (삼국지3's copy protection
+# and name entry) settles instead of spending every step budget.
+# 49bc232 = ocaml-dos #29: a mode set reloads the VGA DAC and the ROM font is
+# served in IBM bit order, so 삼국지3's copy-protection prompt is visible and
+# its letters are no longer mirrored.
+# 909e143 = ocaml-dos #32: the core reports a build-time digest of its lib/
+# sources (ocaml-dos.core-identity), which masc shows on DOS answers and /health.
+# a4c8b5f = ocaml-dos #33: lib/dune is hashed with the sources, so a flag or
+# module-list change moves the digest too.
+# d9e2cba = ocaml-dos #34: Dos_snapshot saves and restores the whole machine
+# (format 2), which masc_dos_save/masc_dos_restore write through.
+# 1d51834 = ocaml-dos #36-#38: EXEC of a truncated MZ child fails instead of
+# raising; an Unsupported instruction leaves IP on itself, so running again
+# faults again instead of executing the next byte; and separate opens of one
+# file share its bytes, so closing one handle no longer overwrites what another
+# wrote. #38 moved Dos_snapshot to format 3, which refuses format 2: checkpoints
+# written under d9e2cba are refused on restore, and a game starts fresh.
+# e570d41 = ocaml-dos #40-#41: ENTER with a nesting level frames its locals
+# below the display it pushed, and 186 shift counts use their low five bits
+# (#40); re-mapping the EMS page a window already shows keeps the window instead
+# of copying the never-saved page over it (#41). 삼국지3 re-maps its EMS page
+# all the time, so the old core wiped that page and a carried-over war came
+# back as one ruler against himself; the all-AI game then never asked for a key
+# again. The snapshot format stays 3, so checkpoints from 1d51834 restore.
+# a7b1ad6 = ocaml-dos #42: INT 33h AX=0x0C keeps the mask (CX) and address
+# (ES:DX) the guest registered, and set_mouse far-calls the handler when an
+# event lands in the mask (AX events, BX buttons, CX/DX position, SI/DI
+# movement, consumed like AX=0x0B). Dos_snapshot moves to format 4 carrying
+# the registration, which refuses format 3: checkpoints written under e570d41
+# are refused on restore, and a game starts fresh (its own save files still
+# load). AX=0x0C returns nothing on the chip, so AX is left alone.
+# Bump Dos_lane.pinned_core_source_digest (lib/dos_lane/dos_lane.ml) with this
+# SHA. test_dos_tools names this file, so the PR that moves the SHA runs it, and
+# it fails with the new digest in its message until the two agree. A build that
+# says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
+# than #32: re-run this script with --install, or vendor the pinned core.
+readonly OCAML_DOS_SHA="323609dd3c4d9f4f9d678290b36e88a8b9b8f488"
+# cohttp-eio 6.2.1 carries the partial body read fix and typed response-head
+# errors. The latter lets browser-host distinguish peer EOF (retryable) from
+# malformed HTTP (answered, do not replay). Keep this pin until both changes
+# are in a release or the upstream branch.
+readonly COHTTP_EIO_SHA="9963da4c028b5681ff96eeeaa9b276d6be60c507"
+# H2 0.13.0 with typed body completion, discarded DATA credit recovery, and
+# balanced concurrent peer-stream accounting. Refused or server-pushed streams
+# must not release another request's slot. Keep core and Eio on one source.
+# https://github.com/jeong-sik/ocaml-h2/pull/2
+readonly H2_SHA="d7601f201da809857f3878172eea513aaea498ac"
+# ocaml-protoc-plugin 6.2.0 + one commit: protoc-gen-ocaml reads its request
+# until end of input. 6.2.0 stops at the first read shorter than its 1024-byte
+# buffer, and a macOS pipe hands over 512 bytes first, so every local build of
+# proto/masc_workspace.proto on macOS failed with Premature_end_of_input. A
+# Linux pipe filled the first read, which is why CI never saw it. Pinned as
+# version 6.2.0 so the generated code and the lock constraint stay 6.2.0's.
+# Remove the pin when a release carries the fix
+# (andersfugmann/ocaml-protoc-plugin#60).
+readonly OCAML_PROTOC_PLUGIN_SHA="4ffa25b5174e811951e7b5192195214afe776ce9"
+# eio_posix 1.3 + one commit: the scheduler retries its wake-up pipe on EINTR.
+# Eio 1.3 reads that pipe with a bare Unix.read, so a signal that lands on the
+# read raises Unix_error(EINTR) out of Eio_main.run and ends the process. The
+# masc server exited that way on 2026-10-13 and 2026-10-15 (#43225), and the
+# second time it stayed down for 18 hours. Pinned as version 1.3 so the lock
+# constraint and every other eio package stay 1.3's. Remove the pin when an
+# Eio release carries the fix (ocaml-multicore/eio#957).
+readonly EIO_POSIX_SHA="3a8ab387d748bcc8d8ae682cfb0ec7da2c9544b7"
+
+include_bisect=false
+include_compact_protocol=false
+do_install=false
+do_check=false
+for arg in "$@"; do
+  case "$arg" in
+    --with-bisect)
+      include_bisect=true
+      ;;
+    --with-compact-protocol)
+      include_compact_protocol=true
+      ;;
+    --install)
+      do_install=true
+      ;;
+    --check)
+      do_check=true
+      ;;
+    *)
+      echo "unknown argument: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+
+# Accumulate the package names we pin so a follow-up `opam install` in
+# --install mode can rebuild exactly the set that changed, nothing more.
+pinned_pkgs=()
+
+# --check reports which of the pins below the active switch is missing or
+# holding at a different target, and pins nothing. It exists because a pin
+# added here reaches a developer's switch only when they re-run this script,
+# and nothing told them to: cohttp-eio was pinned on 2026-09-05 (#33206) to
+# stop a body-flow bug that silently corrupts SSE payloads, and two days
+# later the switch this was written on still had the stock build. The check
+# reads one `opam pin list`, so adding a pin above is enough to cover it.
+pin_drift=()
+# A pin the developer aimed at a checkout on this machine. Kept apart from
+# drift because it is the opposite situation: drift means the switch quietly
+# holds a build nobody chose, while a path pin is a deliberate act -- someone
+# is editing that dependency. Failing on it was worse than useless, because
+# the only repair this script offers (--install) replaces the path pin with
+# the git one and throws the working copy out of the build.
+pin_local=()
+# One "name<TAB>target" line per live pin. A table rather than an associative
+# array: macOS ships bash 3.2, where `declare -A` does not exist.
+live_pin_table=""
+
+load_live_pins() {
+  # `opam pin list` prints `name.version  kind  target  (at sha)`, and writes
+  # the target with a `git+` prefix that `opam pin add` does not take.
+  live_pin_table="$(opam pin list 2>/dev/null | awk '
+    { name = $1; sub(/\..*/, "", name)
+      target = $3; sub(/^git\+/, "", target)
+      print name "\t" target }')"
+}
+
+# awk reads the whole table: an awk that exits at the match can close the pipe
+# while printf is still writing, and under pipefail that SIGPIPE (exit 141)
+# ended the --check dune-local.sh runs before every build.
+live_pin_target() {
+  printf '%s\n' "${live_pin_table}" \
+    | awk -F'\t' -v want="$1" '$1 == want && !found { print $2; found = 1 }'
+}
+
+# A target naming a place on this machine rather than a repository to fetch.
+# `opam pin list` writes these as `file:///path` for a path or rsync pin.
+is_local_pin_target() {
+  case "$1" in
+    file://* | /*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+check_pin() {
+  local package="${1%%.*}"
+  local want="$2"
+  local have
+  have="$(live_pin_target "${package}")"
+
+  if [[ -z "${have}" ]]; then
+    pin_drift+=("${package}: not pinned; expected ${want}")
+  elif [[ "${have}" == "${want}" ]]; then
+    :
+  elif is_local_pin_target "${have}"; then
+    pin_local+=("${package}: your checkout at ${have}; this repo names ${want}")
+  else
+    pin_drift+=("${package}: pinned to ${have}; expected ${want}")
+  fi
+}
+
+opam_pin_add() {
+  local package="$1"
+  local source="$2"
+  shift 2
+
+  if $do_check; then
+    check_pin "${package}" "${source}"
+    return 0
+  fi
+
+  # A path pin is somebody's working copy, and re-pinning it to the named
+  # commit throws that out of the build -- which is what the check used to
+  # send people here to do, to fix an unrelated package. Left alone and said
+  # out loud; OPAM_PIN_REPLACE_LOCAL=1 asks for the named commit back.
+  local live
+  live="$(live_pin_target "${package%%.*}")"
+  if [[ -n "${live}" ]] \
+     && [[ "${live}" != "${source#git+}" ]] \
+     && is_local_pin_target "${live}" \
+     && [[ "${OPAM_PIN_REPLACE_LOCAL:-0}" != "1" ]]; then
+    echo "[opam-pin] keeping your checkout for ${package}: ${live}" >&2
+    echo "[opam-pin]   this repo names ${source#git+}; OPAM_PIN_REPLACE_LOCAL=1 to switch back" >&2
+    return 0
+  fi
+
+  local max_attempts="${OPAM_PIN_RETRIES:-4}"
+  local retry_delay_sec="${OPAM_PIN_RETRY_DELAY_SEC:-5}"
+  local attempt=1
+  local status=0
+
+  while true; do
+    # Printed before the network call so a run that stalls here names the
+    # dependency and source it is waiting on (#26179): GitHub shows a running
+    # job's log only once the job ends, and the line is the last one written.
+    echo "[opam-pin] pinning ${package} from ${source} (attempt ${attempt}/${max_attempts})" >&2
+    if opam pin add "${package}" "${source}" "$@"; then
+      return 0
+    else
+      status=$?
+    fi
+
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      echo "[opam-pin] ERROR: opam pin add failed after ${attempt} attempts: ${package} ${source}" >&2
+      return "${status}"
+    fi
+
+    echo "[opam-pin] WARN: opam pin add failed for ${package} (attempt ${attempt}/${max_attempts}, exit=${status}); retrying in ${retry_delay_sec}s" >&2
+    sleep "${retry_delay_sec}"
+    attempt=$((attempt + 1))
+  done
+}
+
+# Read for every mode. A pinning run needs it too, so it can tell a package
+# nobody has touched from one already aimed at a checkout on this machine.
+load_live_pins
+
+if $include_compact_protocol; then
+  opam_pin_add compact-protocol https://github.com/jeong-sik/compact-protocol.git#main -n -y
+  pinned_pkgs+=("compact-protocol")
+fi
+
+# mcp_protocol_eio and mcp_protocol_http merged into mcp_protocol
+# as sub-libraries (mcp-protocol-sdk#60). Pin the released single-package line.
+opam_pin_add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0 -n -y
+pinned_pkgs+=("mcp_protocol")
+opam_pin_add grpc-direct-core "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
+pinned_pkgs+=("grpc-direct-core")
+opam_pin_add grpc-direct "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
+pinned_pkgs+=("grpc-direct")
+opam_pin_add ws-direct-core "https://github.com/jeong-sik/ws-direct.git#${WS_DIRECT_SHA}" -n -y
+pinned_pkgs+=("ws-direct-core")
+opam_pin_add ws-direct-gluten "https://github.com/jeong-sik/ws-direct.git#${WS_DIRECT_SHA}" -n -y
+pinned_pkgs+=("ws-direct-gluten")
+opam_pin_add ws-direct-eio "https://github.com/jeong-sik/ws-direct.git#${WS_DIRECT_SHA}" -n -y
+pinned_pkgs+=("ws-direct-eio")
+opam_pin_add ocaml-msx "https://github.com/jeong-sik/ocaml-msx.git#${OCAML_MSX_SHA}" -n -y
+pinned_pkgs+=("ocaml-msx")
+opam_pin_add ocaml-dos "https://github.com/jeong-sik/ocaml-dos.git#${OCAML_DOS_SHA}" -n -y
+pinned_pkgs+=("ocaml-dos")
+opam_pin_add cohttp-eio.6.2.1 "https://github.com/anyang-keepers/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
+pinned_pkgs+=("cohttp-eio")
+opam_pin_add h2.0.13.0 "https://github.com/jeong-sik/ocaml-h2.git#${H2_SHA}" -n -y
+pinned_pkgs+=("h2")
+opam_pin_add h2-eio.0.13.0 "https://github.com/jeong-sik/ocaml-h2.git#${H2_SHA}" -n -y
+pinned_pkgs+=("h2-eio")
+opam_pin_add ocaml-protoc-plugin.6.2.0 "https://github.com/jeong-sik/ocaml-protoc-plugin.git#${OCAML_PROTOC_PLUGIN_SHA}" -n -y
+pinned_pkgs+=("ocaml-protoc-plugin")
+opam_pin_add eio_posix.1.3 "https://github.com/jeong-sik/eio.git#${EIO_POSIX_SHA}" -n -y
+pinned_pkgs+=("eio_posix")
+
+if $include_bisect; then
+  # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.
+  opam_pin_add bisect_ppx git+https://github.com/patricoferris/bisect_ppx.git#5.2 -n -y
+  pinned_pkgs+=("bisect_ppx")
+fi
+
+if $do_check; then
+  # Said whether or not anything failed, so a build off a working copy says so
+  # once per run instead of looking like a build of the named commit.
+  if [[ ${#pin_local[@]} -gt 0 ]]; then
+    echo "[opam-pin] built from a checkout on this machine, not the named commit:" >&2
+    printf '[opam-pin]   %s\n' "${pin_local[@]}" >&2
+    echo "[opam-pin] whatever is in that directory right now is what links." >&2
+    echo "[opam-pin] to go back to the named commit: bash scripts/opam-pin-external-deps.sh --install" >&2
+  fi
+  if [[ ${#pin_drift[@]} -eq 0 ]]; then
+    if ${ocaml_version_drift}; then
+      echo "[opam-pin] all ${#pinned_pkgs[@]} pins are in place, on the wrong compiler" >&2
+      exit 1
+    fi
+    echo "[opam-pin] all ${#pinned_pkgs[@]} pins are in place"
+    exit 0
+  fi
+  echo "[opam-pin] the active switch does not carry these pins:" >&2
+  printf '[opam-pin]   %s\n' "${pin_drift[@]}" >&2
+  echo "[opam-pin] the installed build is not the one this repo expects" >&2
+  echo "[opam-pin] repair: bash scripts/opam-pin-external-deps.sh --install" >&2
+  exit 1
+fi
+
+if $do_install; then
+  echo ""
+  echo "[opam-pin] --install set; rebuilding ${#pinned_pkgs[@]} pinned packages..."
+  # opam's depext (e.g. conf-protoc -> libprotobuf-dev protobuf-compiler) runs
+  # apt-get from this script too, and #45174 refreshed the index only in
+  # install-ocaml-deps/install.sh. A stale runner index then 404s every deb
+  # this install asks for (run 40038962695, step exit 10), so refresh here as
+  # well before the first apt-get can run. Same shape as #45174: a warning, not
+  # a hard failure, so an air-gapped mirror still gets its chance.
+  refresh_apt_index() {
+    local started_at
+    started_at="$(date +%s)"
+    echo "Refreshing apt package index..."
+    if sudo apt-get update -qq; then
+      echo "Refreshed apt package index in $(( $(date +%s) - started_at ))s"
+    else
+      echo "::warning::apt package index refresh failed; attempting install with existing package index" >&2
+    fi
+  }
+  refresh_apt_index
+  opam install --yes "${pinned_pkgs[@]}"
+  echo "[opam-pin] install complete. Installed binaries now match the pins above."
+else
+  echo ""
+  echo "[opam-pin] Pins updated. NOTE: installed binaries are still the previous versions."
+  echo "[opam-pin] Run the same command with --install to rebuild, or run manually:"
+  printf '[opam-pin]   opam install --yes'
+  printf ' %s' "${pinned_pkgs[@]}"
+  printf '\n'
+fi

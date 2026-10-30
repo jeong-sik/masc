@@ -1,0 +1,12 @@
+[2026-10-29 00:18:09] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `dashboard fusion run projection'.
+This run has ID `0Z4Z6WRP'.
+
+  [OK]          routes             0   H1 route is registered.
+  [OK]          responses          0   list and unknown detail responses.
+  [OK]          responses          1   detail uses exact typed Board origin.
+  [OK]          responses          2   replay failure keeps historical eviden...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/dashboard fusion run projection'.
+Test Successful in 0.103s. 4 tests run.
+exit=0

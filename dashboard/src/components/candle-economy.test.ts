@@ -1,0 +1,246 @@
+import { html } from 'htm/preact'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CandleSummary } from './candle-economy'
+import { KeeperDetailHeaderInfo } from './keeper-detail-shell'
+import { candleObservation, hydrateExecutionSnapshot, keepers, executionWorkspaceAuthority, invalidateExecutionSnapshotGeneration, resetExecutionSnapshotGeneration, refreshExecution } from '../store'
+import type { DashboardExecutionResponse } from '../types'
+
+const fetchDashboardExecution = vi.hoisted(() => vi.fn())
+vi.mock('../api/dashboard-execution', () => ({ fetchDashboardExecution }))
+vi.mock('../sse', () => ({ journal: { log: vi.fn() } }))
+
+const ready = { status: 'ready', issued_milli: '18446744073709551614000', burned_milli: '1000', circulating_milli: '18446744073709551613000' } as const
+function View() {
+  const keeper = keepers.value[0]
+  return html`<div><${CandleSummary} reading=${candleObservation.value} />${keeper
+    ? html`<${KeeperDetailHeaderInfo} keeper=${keeper} titleId="keeper" phaseEnteredAtSec=${null} onClose=${() => {}} />`
+    : null}</div>`
+}
+let generation = 0
+let epochSequence = 0
+let fixtureEpoch = ''
+let connectionGeneration = 0
+function reconnect() {
+  resetExecutionSnapshotGeneration()
+  connectionGeneration += 1
+}
+function snapshot(candle: unknown, amount: unknown, root = '/fixture/candle-a'): DashboardExecutionResponse {
+  return {
+    execution_publication_epoch: fixtureEpoch,
+    execution_publication_generation: ++generation,
+    status: { project: 'candle-fixture', workspace_root: root },
+    candle, keepers: [{ name: 'alpha', status: 'active', emoji: 'A', candle_balance_milli: amount }],
+  } as DashboardExecutionResponse
+}
+beforeEach(() => {
+  fixtureEpoch = `candle-ui-fixture-${++epochSequence}`
+  generation = 0
+  fetchDashboardExecution.mockReset()
+  expect(invalidateExecutionSnapshotGeneration(fixtureEpoch, 0)).toBe(true)
+})
+function observe(candle: unknown, amount: unknown, root: string | undefined = '/fixture/currency-a') {
+  const accepted = hydrateExecutionSnapshot({
+    execution_publication_epoch: fixtureEpoch, execution_publication_generation: ++generation,
+    status: { project: 'same-project', ...(root === undefined ? {} : { workspace_root: root }) },
+    candle, keepers: [{ name: 'alpha', status: 'active', emoji: 'A', candle_balance_milli: amount }],
+  }, { requestGeneration: connectionGeneration })
+  expect(accepted).toBe(true)
+}
+afterEach(() => {
+  cleanup()
+  vi.clearAllTimers()
+  vi.useRealTimers()
+  keepers.value = []
+  candleObservation.value = { status: 'unavailable', reason: 'Not yet read' }
+})
+
+describe('Candle existing screen consumers', () => {
+  it('withdraws supply and wallet on reconnect and warm-up, retaining the fleet until a ready HTTP read', async () => {
+    observe(ready, '9007199254740993')
+    render(html`<${View} />`)
+    const retainedKeeper = keepers.value[0]
+    vi.useFakeTimers()
+    await act(async () => { reconnect() })
+    expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614.000')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
+    expect(keepers.value[0]).toBe(retainedKeeper)
+
+    fetchDashboardExecution.mockResolvedValueOnce({ status: { project: 'initializing' }, keepers: [] })
+    await act(async () => {
+      await expect(refreshExecution({ immediate: true })).rejects.toThrow('Execution projection is initializing')
+    })
+    expect(candleObservation.value.status).toBe('unavailable')
+    expect(keepers.value[0]).toBe(retainedKeeper)
+    const recovered = { status: 'ready', issued_milli: '7000', burned_milli: '2000', circulating_milli: '5000' }
+    fetchDashboardExecution.mockResolvedValueOnce(snapshot(recovered, '500', '/fixture/candle-b'))
+    await act(async () => { await refreshExecution({ immediate: true }) })
+    expect(screen.getByTestId('candle-summary').textContent).toContain('7.000 Candle')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 0.500 Candle')
+
+    // A successful warm-up without a reconnect also withdraws the accepted money.
+    fetchDashboardExecution.mockResolvedValueOnce({ status: { project: 'initializing' } })
+    await act(async () => {
+      await expect(refreshExecution({ immediate: true })).rejects.toThrow('Execution projection is initializing')
+    })
+    expect(screen.getByTestId('candle-summary').textContent).not.toContain('7.000 Candle')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('0.500 Candle')
+    fetchDashboardExecution.mockRejectedValueOnce(new Error('current endpoint failed'))
+    await act(async () => {
+      await expect(refreshExecution({ immediate: true })).rejects.toThrow('current endpoint failed')
+    })
+    expect(screen.getByTestId('candle-summary').textContent).toContain('current endpoint failed')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('Workspace authority is being verified')
+    expect(keepers.value[0]?.name).toBe('alpha')
+    fetchDashboardExecution.mockResolvedValueOnce(snapshot(recovered, '500', '/fixture/candle-b'))
+    await act(async () => { await refreshExecution({ immediate: true }) })
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 0.500 Candle')
+  })
+
+  it.each(['initializing', 'failure'] as const)('ignores a late %s response from before reconnect after current money recovers', async outcome => {
+    observe(ready, '9007199254740993')
+    render(html`<${View} />`)
+    vi.useFakeTimers()
+    let finish!: (data: DashboardExecutionResponse) => void
+    let fail!: (error: Error) => void
+    const held = new Promise<DashboardExecutionResponse>((resolve, reject) => { finish = resolve; fail = reject })
+    let started!: () => void
+    const requested = new Promise<void>(resolve => { started = resolve })
+    fetchDashboardExecution.mockImplementationOnce(() => { started(); return held })
+    let rejected!: Promise<void>
+    await act(async () => {
+      const refresh = refreshExecution({ immediate: true })
+      rejected = expect(refresh).rejects.toThrow(
+        outcome === 'initializing'
+          ? 'Execution initialization was superseded by a newer observation'
+          : 'Execution failure was superseded by a newer observation',
+      )
+      await requested
+    })
+    await act(async () => {
+      reconnect()
+      observe({ status: 'ready', issued_milli: '7000', burned_milli: '2000', circulating_milli: '5000' }, '500', '/fixture/candle-b')
+    })
+    await act(async () => {
+      if (outcome === 'initializing') finish({ status: { project: 'initializing' } } as DashboardExecutionResponse)
+      else fail(new Error('old endpoint failed'))
+      await rejected
+    })
+    expect(screen.getByTestId('candle-summary').textContent).toContain('7.000 Candle')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 0.500 Candle')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('withdraws current currency when the real fetch path receives a warm-up envelope', async () => {
+    vi.useFakeTimers()
+    observe(ready, '9007199254740993')
+    render(html`<${View} />`)
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('9007199254740.993')
+    fetchDashboardExecution.mockResolvedValue({ status: { project: 'initializing' } })
+    await act(async () => { await expect(refreshExecution({ immediate: true })).rejects.toThrow('Execution projection is initializing') })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    expect(executionWorkspaceAuthority.peek()).toBeNull()
+    expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614.000')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
+  })
+
+  it('ignores a held warm-up reply after a newer pushed execution snapshot', async () => {
+    vi.useFakeTimers()
+    observe(ready, '1000')
+    render(html`<${View} />`)
+    let release!: (value: unknown) => void
+    fetchDashboardExecution.mockReturnValue(new Promise(resolve => { release = resolve }))
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = refreshExecution({ force: true })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    await act(async () => { observe(ready, '2000') })
+    const authority = executionWorkspaceAuthority.peek()
+    await act(async () => {
+      release({ status: { project: 'initializing' } })
+      await expect(pending).rejects.toThrow('superseded by a newer observation')
+    })
+    expect(executionWorkspaceAuthority.peek()).toBe(authority)
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 2.000 Candle')
+    expect(candleObservation.peek().status).toBe('ready')
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000) })
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+  })
+
+  it('withdraws both summary and Keeper wallet through reconnect warm-up', async () => {
+    observe(ready, '9007199254740993')
+    render(html`<${View} />`)
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('9007199254740.993')
+    const oldConnection = connectionGeneration
+    resetExecutionSnapshotGeneration()
+    connectionGeneration += 1
+    await waitFor(() => expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614.000'))
+    expect(executionWorkspaceAuthority.peek()).toBeNull()
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
+    expect(candleObservation.peek().status).toBe('unavailable')
+    expect(hydrateExecutionSnapshot({
+      execution_publication_epoch: fixtureEpoch, execution_publication_generation: ++generation,
+      status: { workspace_root: '/fixture/currency-a' }, candle: ready,
+      keepers: [{ name: 'alpha', candle_balance_milli: '9007199254740993' }],
+    }, { requestGeneration: oldConnection })).toBe(false)
+    const fresh = { status: 'ready', issued_milli: '2000', burned_milli: '0', circulating_milli: '2000' }
+    observe(fresh, '2000', '/fixture/currency-b')
+    await waitFor(() => expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 2.000 Candle'))
+    expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614.000')
+  })
+
+  it('refuses retained display roots and withdraws currency at epoch invalidation', async () => {
+    observe(ready, '9007199254740993')
+    render(html`<${View} />`)
+    expect(hydrateExecutionSnapshot({
+      execution_publication_epoch: fixtureEpoch, execution_publication_generation: ++generation,
+      status: { project: 'same-project' }, candle: ready,
+      keepers: [{ name: 'alpha', candle_balance_milli: '9007199254740993' }],
+    }, { requestGeneration: connectionGeneration })).toBe(true)
+    await waitFor(() => expect(screen.getByTestId('candle-summary').textContent).toContain('Current workspace identity unavailable'))
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
+    observe(ready, '9007199254740993')
+    await waitFor(() => expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('9007199254740.993'))
+    fixtureEpoch += '-new-server'
+    expect(invalidateExecutionSnapshotGeneration(fixtureEpoch, generation)).toBe(true)
+    await waitFor(() => expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614.000'))
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
+  })
+
+  it('hydrates an execution response into exact Overview totals and Keeper header balance', async () => {
+    observe(ready, '9007199254740993')
+    render(html`<${View} />`)
+    expect(screen.getByTestId('candle-summary').textContent).toContain('18446744073709551614.000 Candle')
+    expect(screen.getByTestId('candle-summary').textContent).toContain('18446744073709551613.000 Candle')
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 9007199254740.993 Candle')
+    observe({ status: 'disabled', reason: 'ledger unreadable' }, null)
+    await waitFor(() => expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('ledger unreadable'))
+    expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614')
+    observe({ status: 'off' }, null)
+    await waitFor(() => expect(screen.queryByTestId('candle-summary')).toBeNull())
+    expect(screen.queryByTestId('keeper-candle-balance')).toBeNull()
+    observe(ready, '0')
+    await waitFor(() => expect(screen.getByTestId('keeper-candle-balance').textContent).toBe('잔액 0.000 Candle'))
+  })
+  it('does not turn malformed or missing money into zero', async () => {
+    observe(ready, 9007199254740993)
+    render(html`<${View} />`)
+    expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('잔액 조회 불가')
+    expect(screen.getByTestId('candle-summary').textContent).not.toContain('18446744073709551614.000')
+    for (const [candle, amount] of [
+      [ready, null], [ready, undefined],
+      [{ status: 'off' }, '1'], [{ status: 'disabled', reason: 'ledger unreadable' }, '1'],
+    ]) {
+      observe(ready, '9007199254740993')
+      await waitFor(() => expect(screen.getByTestId('keeper-candle-balance').textContent).toContain('9007199254740.993'))
+      observe(candle, amount)
+      await waitFor(() => expect(screen.getByTestId('candle-summary').textContent).toContain('Candle row balances disagree'))
+      expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
+    }
+    observe(undefined, '0')
+    await waitFor(() => expect(screen.getByTestId('candle-summary').textContent).toContain('Candle observation missing or malformed'))
+    expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('0.000 Candle')
+  })
+})

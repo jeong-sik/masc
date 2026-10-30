@@ -1,0 +1,10 @@
+{
+  "baseline": "f4e6ff0eb583a3354486a0a3cc334f144d8ec1c1",
+  "scope": "full native Schedule_payload_projection and exact source-sliced world visibility and inventory schedule projection with cached real Schedule_domain dependencies; no storage/HTTP/PTY run",
+  "source_sha256": {
+    "lib/schedule_payload_projection.mli": "9dce8fbbc200e99da9d4b4fecdd511b23a97e80c582fc3f80399f20888ce82fb",
+    "lib/schedule_payload_projection.ml": "1092221158244a1a00fa752791fbd539161208b072e91d654f511c15a948982a",
+    "lib/keeper/keeper_world_observation.ml": "20328aff497a33bc3a0b03be613996c0b4e5c432881e5576da697b086963f30a",
+    "lib/server_keeper_waiting_inventory.ml": "2c3d2c3384a32b093d2db9e1492d60e54d95dcdc871267e294b3add243fb9d53"
+  }
+}

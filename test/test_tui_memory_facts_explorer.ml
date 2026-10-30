@@ -1,0 +1,328 @@
+open Alcotest
+module Cat = Masc.Keeper_memory_os_types
+module Types = Masc_tui_types
+
+let make_fact ?(category = Cat.Fact) ?(origin = "chat") ?(first = 100.0)
+    ?(last = 200.0) ?(events = Masc.Tui_decode_memory_facts.no_memory_fact_events) ~claim id : Masc.Tui_decode_memory_facts.memory_fact =
+  { mf_keeper = "test_keeper"
+  ; mf_claim = claim
+  ; mf_category = category
+  ; mf_origin = origin
+  ; mf_first_seen = first
+  ; mf_last_seen = last
+  ; mf_memory_id = id
+  ; mf_events = events
+  }
+
+let retrieved ~count ~days ~last ?(retracted = 0) ?(revised_from = []) () :
+  Masc.Tui_decode_memory_facts.memory_fact_events =
+  { mfe_retrieval = Masc.Tui_decode_memory_facts.Retrieved { count; distinct_days = days; last_at = last }
+  ; mfe_retracted_count = retracted
+  ; mfe_revised_from = revised_from
+  }
+
+let make_source_fact ~path ~claim sha : Masc.Tui_decode_memory_facts.memory_source_fact =
+  { msf_keeper = "test_keeper"
+  ; msf_claim = claim
+  ; msf_first_seen = 150.0
+  ; msf_path = path
+  ; msf_sha256 = sha
+  }
+
+let make_invalidation ~path ~reason ts : Masc.Tui_decode_memory_facts.memory_invalidation =
+  { mi_keeper = "test_keeper"
+  ; mi_source_path = path
+  ; mi_invalidated_at = ts
+  ; mi_reason = reason
+  }
+
+let make_snapshot ~ordinary_facts ~source_facts ~invalidations =
+  { Masc.Tui_decode_memory_facts.mfs_keeper = "test_keeper"
+  ; mfs_ordinary =
+      Masc.Tui_decode_memory_facts.Memory_store_present
+        { mos_facts = ordinary_facts }
+  ; mfs_source =
+      Masc.Tui_decode_memory_facts.Memory_store_present
+        { mss_facts = source_facts
+        ; mss_invalidations = invalidations
+        }
+  ; mfs_events_read_error = None
+  }
+
+let category_filter_testable =
+  let pp fmt = function
+    | Types.Category_all -> Format.pp_print_string fmt "Category_all"
+    | Types.Category_ordinary c ->
+        Format.fprintf fmt "Category_ordinary %S"
+          (Cat.category_to_string c)
+    | Types.Category_source -> Format.pp_print_string fmt "Category_source"
+    | Types.Category_dropped -> Format.pp_print_string fmt "Category_dropped"
+  in
+  testable pp ( = )
+;;
+
+(* The browser open on the snapshot's keeper, with its facts answered the way
+   the answer handler settles them. *)
+let answer_memory_facts (state : Types.state) (snapshot : Masc.Tui_decode_memory_facts.memory_fact_snapshot) =
+  let keeper = snapshot.Masc.Tui_decode_memory_facts.mfs_keeper in
+  state.Types.memory_facts_keeper <- Some keeper;
+  match Masc_tui_fetched.start ~equal:String.equal state.Types.memory_facts ~key:keeper with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+  | Masc_tui_fetched.Started (next, request) ->
+      state.Types.memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal next request (Ok (snapshot, None))
+;;
+
+let make_state () =
+  Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+;;
+
+let test_category_toggle_obeys_visible_surface_width () =
+  let state = make_state () in
+  let drawable = Masc_tui_roster_pane.threshold_cols in
+  List.iter (fun initially_open ->
+    state.memory_facts_categories_open <- initially_open;
+    Types.toggle_memory_facts_categories ~cols:(drawable - 1) state;
+    check bool "narrow key leaves the preference unchanged" initially_open
+      state.memory_facts_categories_open;
+    Types.toggle_memory_facts_categories ~cols:drawable state;
+    check bool "first drawable width toggles the preference" (not initially_open)
+      state.memory_facts_categories_open;
+    Types.toggle_memory_facts_categories ~cols:80 state;
+    check bool "resize to narrow cannot change the wide preference" (not initially_open)
+      state.memory_facts_categories_open)
+    [false; true]
+;;
+
+let test_category_navigation () =
+  let state = make_state () in
+  let f1 = make_fact ~category:Cat.Constraint ~claim:"No local dune" "1" in
+  let f2 = make_fact ~category:Cat.Preference ~claim:"Voice is Roger" "2" in
+  let f3 = make_fact ~category:Cat.Constraint ~claim:"Always test" "3" in
+  let sf = make_source_fact ~path:"config.toml" ~claim:"Config bound" "sha1" in
+  let inv = make_invalidation ~path:"docs.md" ~reason:"File removed" 250.0 in
+  let snap =
+    make_snapshot
+      ~ordinary_facts:[ f1; f2; f3 ]
+      ~source_facts:[ sf ]
+      ~invalidations:[ inv ]
+  in
+  answer_memory_facts state snap;
+  let cats = Types.memory_fact_categories state in
+  check (list category_filter_testable) "categories list contains ordinary, source, and dropped"
+    [ Types.Category_ordinary Cat.Preference
+    ; Types.Category_ordinary Cat.Constraint
+    ; Types.Category_source
+    ; Types.Category_dropped
+    ] cats;
+  (* Test cycling forward *)
+  let c1 = Types.next_memory_category Types.Category_all cats in
+  check category_filter_testable "first category" (Types.Category_ordinary Cat.Preference) c1;
+  let c2 = Types.next_memory_category c1 cats in
+  check category_filter_testable "second category" (Types.Category_ordinary Cat.Constraint) c2;
+  let c3 = Types.next_memory_category c2 cats in
+  check category_filter_testable "third category" Types.Category_source c3;
+  let c4 = Types.next_memory_category c3 cats in
+  check category_filter_testable "fourth category" Types.Category_dropped c4;
+  let c5 = Types.next_memory_category c4 cats in
+  check category_filter_testable "wraps back to All" Types.Category_all c5;
+  (* Test cycling backward *)
+  let p1 = Types.prev_memory_category Types.Category_all cats in
+  check category_filter_testable "last category from All" Types.Category_dropped p1;
+  let p2 = Types.prev_memory_category p1 cats in
+  check category_filter_testable "backward from dropped" Types.Category_source p2;
+  let p3 = Types.prev_memory_category (Types.Category_ordinary Cat.Preference) cats in
+  check category_filter_testable "backward from first wraps to All" Types.Category_all p3
+;;
+
+(* The three kinds of row keep to their own filter. This used to also guard a
+   collision that is now unrepresentable: an ordinary fact whose category was
+   the word "source" had to stay out of [Category_source]. The category is the
+   librarian taxonomy's closed sum now, and "source" is not one of its eight,
+   so no fact can carry it. *)
+let test_category_filtering_isolation () =
+  let state = make_state () in
+  let f_ord_source = make_fact ~category:Cat.Goal ~claim:"Ordinary goal" "1" in
+  let f_ord_other = make_fact ~category:Cat.Constraint ~claim:"Ordinary rule" "2" in
+  let sf = make_source_fact ~path:"src.ml" ~claim:"Source file fact" "sha" in
+  let inv = make_invalidation ~path:"inv.ml" ~reason:"File gone" 100.0 in
+  answer_memory_facts state
+     (make_snapshot
+      ~ordinary_facts:[ f_ord_source; f_ord_other ]
+      ~source_facts:[ sf ]
+      ~invalidations:[ inv ]);
+  (* Category_all -> 4 rows *)
+  state.memory_facts_category <- Types.Category_all;
+  check int "all rows" 4 (List.length (Types.memory_fact_rows state));
+  state.memory_facts_category <- Types.Category_ordinary Cat.Goal;
+  let rows_ord_src = Types.memory_fact_rows state in
+  check int "only the ordinary goal" 1 (List.length rows_ord_src);
+  (match rows_ord_src with
+   | [ Types.Memory_row_fact f ] -> check string "claim matches" "Ordinary goal" f.mf_claim
+   | _ -> fail "expected ordinary fact");
+  (* Category_source -> only source file fact sf *)
+  state.memory_facts_category <- Types.Category_source;
+  let rows_src = Types.memory_fact_rows state in
+  check int "only source fact" 1 (List.length rows_src);
+  (match rows_src with
+   | [ Types.Memory_row_source_fact f ] -> check string "claim matches" "Source file fact" f.msf_claim
+   | _ -> fail "expected source-bound fact");
+  (* Category_dropped -> only invalidation inv *)
+  state.memory_facts_category <- Types.Category_dropped;
+  let rows_drop = Types.memory_fact_rows state in
+  check int "only dropped fact" 1 (List.length rows_drop);
+  (match rows_drop with
+   | [ Types.Memory_row_invalidation f ] -> check string "reason matches" "File gone" f.mi_reason
+   | _ -> fail "expected invalidation")
+;;
+
+let test_sorting_orders () =
+  let state = make_state () in
+  let f_low = make_fact ~category:Cat.Constraint ~last:100.0 ~claim:"C_low" "1" in
+  let f_high = make_fact ~category:Cat.Preference ~last:50.0 ~claim:"A_high" "2" in
+  let f_newest = make_fact ~category:Cat.Code_change ~last:500.0 ~claim:"B_newest" "3" in
+  answer_memory_facts state
+     (make_snapshot ~ordinary_facts:[ f_low; f_high; f_newest ] ~source_facts:[] ~invalidations:[]);
+  (* 1. Sort by Recency (newest last_seen first) *)
+  state.memory_facts_sort <- Types.Sort_recency;
+  let rows_recency = Types.memory_fact_rows state in
+  let claims_recency =
+    List.map (function Types.Memory_row_fact f -> f.mf_claim | _ -> "") rows_recency
+  in
+  check (list string) "recency sort" [ "B_newest"; "C_low"; "A_high" ] claims_recency;
+  (* 2. Sort by Category (A-Z) *)
+  state.memory_facts_sort <- Types.Sort_category;
+  let rows_cat = Types.memory_fact_rows state in
+  let cats_sorted =
+    List.map
+      (function
+        | Types.Memory_row_fact f -> Cat.category_to_string f.mf_category
+        | _ -> "")
+      rows_cat
+  in
+  check (list string) "category sort"
+    [ "code_change"; "constraint"; "preference" ] cats_sorted;
+  (* 3. Sort by Claim (A-Z) *)
+  state.memory_facts_sort <- Types.Sort_claim;
+  let rows_claim = Types.memory_fact_rows state in
+  let claims_sorted =
+    List.map (function Types.Memory_row_fact f -> f.mf_claim | _ -> "") rows_claim
+  in
+  check (list string) "claim sort" [ "A_high"; "B_newest"; "C_low" ] claims_sorted;
+  (* 4. Cycle: recency -> last retrieved -> retrieved count -> category -> claim -> recency *)
+  let labels_from start steps =
+    let rec go order n acc =
+      if n = 0 then List.rev acc
+      else go (Types.next_memory_sort order) (n - 1) (Types.memory_sort_order_label order :: acc)
+    in
+    go start steps []
+  in
+  check (list string) "the cycle visits every order once and wraps"
+    [ "Recency (Newest)"
+    ; "Last retrieved (Newest)"
+    ; "Retrieved (Most)"
+    ; "Category (A-Z)"
+    ; "Claim (A-Z)"
+    ; "Recency (Newest)"
+    ]
+    (labels_from Types.Sort_recency 6)
+;;
+
+(* RFC-0418: the two use-based orders read the record. A fact never retrieved
+   sorts after the retrieved ones, and source and dropped rows, which have no
+   record, stay last in their own recency order. *)
+let test_use_based_sorting () =
+  let state = make_state () in
+  let often = make_fact ~last:100.0 ~claim:"often" ~events:(retrieved ~count:5 ~days:3 ~last:1_000.0 ()) "1" in
+  let latest = make_fact ~last:900.0 ~claim:"latest" ~events:(retrieved ~count:2 ~days:1 ~last:5_000.0 ()) "2" in
+  let never = make_fact ~last:800.0 ~claim:"never" "3" in
+  answer_memory_facts state
+     (make_snapshot ~ordinary_facts:[ never; often; latest ]
+            ~source_facts:[ make_source_fact ~path:"docs/x.md" ~claim:"bound" "sha" ]
+            ~invalidations:[]);
+  let claims rows =
+    List.map
+      (function
+        | Types.Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+        | Types.Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+        | Types.Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason)
+      rows
+  in
+  state.memory_facts_sort <- Types.Sort_last_retrieved;
+  check (list string) "last retrieved first, never-retrieved next, source last"
+    [ "latest"; "often"; "never"; "bound" ]
+    (claims (Types.memory_fact_rows state));
+  state.memory_facts_sort <- Types.Sort_retrieved_count;
+  check (list string) "most retrieved first, ties and zero by recency, source last"
+    [ "often"; "latest"; "never"; "bound" ]
+    (claims (Types.memory_fact_rows state))
+;;
+
+let test_search_filtering () =
+  let state = make_state () in
+  let f1 = make_fact ~category:Cat.Constraint ~claim:"Dune 로컬 빌드 금지" "1" in
+  let f2 = make_fact ~category:Cat.Preference ~claim:"Roger 음성 모델" "2" in
+  let f3 = make_fact ~category:Cat.Code_change ~claim:"CI Dune 검사 필수" "3" in
+  answer_memory_facts state
+     (make_snapshot ~ordinary_facts:[ f1; f2; f3 ] ~source_facts:[] ~invalidations:[]);
+  (* No query -> returns all 3 *)
+  check int "all rows without query" 3 (List.length (Types.memory_fact_rows state));
+  (* Filter by 'dune' case-insensitively -> matches f1 and f3 *)
+  state.search_last <- "dune";
+  let matched = Types.memory_fact_rows state in
+  check int "matches 'dune'" 2 (List.length matched);
+  (* Filter by 'roger' -> matches f2 *)
+  state.search_last <- "roger";
+  let matched_roger = Types.memory_fact_rows state in
+  check int "matches 'roger'" 1 (List.length matched_roger);
+  (* Active search input empty query: Some "" does not fall back to search_last *)
+  state.search <- Some "";
+  check int "active empty search matches all" 3 (List.length (Types.memory_fact_rows state));
+  state.search <- None;
+  (* Non-matching query *)
+  state.search_last <- "nonexistent";
+  check int "no match" 0 (List.length (Types.memory_fact_rows state))
+;;
+
+(* The keeper is part of what the all-keepers list shows beside each row, so
+   a query for its name finds that keeper's rows there. A single keeper's view
+   does not show it, and its name matches nothing the view does not display. *)
+let test_search_matches_the_keeper_only_where_it_is_shown () =
+  let snapshot =
+    make_snapshot
+      ~ordinary_facts:[ make_fact ~claim:"Dune build" "1" ]
+      ~source_facts:[]
+      ~invalidations:[]
+  in
+  let single = make_state () in
+  answer_memory_facts single snapshot;
+  single.search_last <- "test_keeper";
+  check int "a single keeper's view does not match its own name" 0
+    (List.length (Types.memory_fact_rows single));
+  let fleet = make_state () in
+  answer_memory_facts fleet { snapshot with Masc.Tui_decode_memory_facts.mfs_keeper = "*" };
+  fleet.search_last <- "test_keeper";
+  check int "the all-keepers view matches the keeper its rows name" 1
+    (List.length (Types.memory_fact_rows fleet))
+;;
+
+let () =
+  run "masc_tui_memory_facts_explorer"
+    [ ( "navigation"
+      , [ test_case "category toggle respects visible width" `Quick test_category_toggle_obeys_visible_surface_width
+        ; test_case "category navigation" `Quick test_category_navigation
+        ; test_case "category filtering isolation" `Quick test_category_filtering_isolation
+        ] )
+    ; ( "sorting"
+      , [ test_case "sorting orders" `Quick test_sorting_orders
+        ; test_case "use-based sorting reads the record" `Quick test_use_based_sorting
+        ] )
+    ; ( "search"
+      , [ test_case "search filtering" `Quick test_search_filtering
+        ; test_case "search matches the keeper only where it is shown" `Quick
+            test_search_matches_the_keeper_only_where_it_is_shown
+        ] )
+    ; ( "layout"
+      , [] )
+    ]
+;;

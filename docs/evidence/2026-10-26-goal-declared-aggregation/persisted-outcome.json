@@ -1,0 +1,51 @@
+{
+  "goal": {
+    "id": "goal-proof-provenance-declared-aggregate-20261026",
+    "criterion_revision": "e0534d15effb0e62e52cb04dd466809e",
+    "title": "Declared sum of two recorded executions",
+    "metric": "공유 Goal playground 상대 aggregate-data/index.json의 executions에 선언된 run-a와 run-b 기록을 각각 직접 읽는다. 각 기록의 execution_id를 보존하여 stdout 정수 두 개의 합을 측정한다. 선언된 두 실행이 집계 범위이며 다른 실행을 섞지 않는다. index의 reported_value는 보고자 주장으로 합계 대신 쓰지 않는다. 명령 재실행은 요구하지 않는다.",
+    "target_value": "정확히 10",
+    "due_date": null,
+    "priority": 3,
+    "phase": "awaiting_confirmation",
+    "last_review_note": null,
+    "last_review_at": "2026-10-25T17:19:06Z",
+    "created_at": "2026-10-25T17:18:35Z",
+    "updated_at": "2026-10-25T17:19:06Z"
+  },
+  "verification": {
+    "goal_id": "goal-proof-provenance-declared-aggregate-20261026",
+    "completion": {
+      "state": "proof_proven",
+      "verdict": {
+        "outcome": "proven",
+        "reason": null,
+        "request_id": "427492fbf97c6dc4b41c6876ddaba52d",
+        "criterion": {
+          "revision": "e0534d15effb0e62e52cb04dd466809e",
+          "title": "Declared sum of two recorded executions",
+          "metric": "공유 Goal playground 상대 aggregate-data/index.json의 executions에 선언된 run-a와 run-b 기록을 각각 직접 읽는다. 각 기록의 execution_id를 보존하여 stdout 정수 두 개의 합을 측정한다. 선언된 두 실행이 집계 범위이며 다른 실행을 섞지 않는다. index의 reported_value는 보고자 주장으로 합계 대신 쓰지 않는다. 명령 재실행은 요구하지 않는다.",
+          "target_value": "정확히 10"
+        },
+        "verification_run_id": "01a17412-3eea-7000-aac4-f3265d72a09a",
+        "authority": {
+          "kind": "system_llm_agent",
+          "actor": "verifier_exact"
+        },
+        "evidence": "공유 Goal playground의 aggregate-data/index.json을 직접 읽어 선언된 run-a, run-b 실행 기록 경로를 확인했고, 각 기록 파일을 직접 열어 실행 ID를 보존한 채 stdout 정수를 읽었다: run-a stdout 4, run-b stdout 6. index의 reported_value 99는 합계에 쓰지 않았고 보고자 관측값 99도 채택하지 않았다. metric이 선언한 두 실행만의 합계 4+6=10은 target '정확히 10'에 도달한다.",
+        "recorded_at": "2026-10-25T17:19:06Z"
+      }
+    },
+    "submitted_evidence": [],
+    "updated_at": "2026-10-25T17:19:06Z"
+  },
+  "measurement": {
+    "id": "2fc01ef43447f9cf9b78021135f604c0",
+    "goal_id": "goal-proof-provenance-declared-aggregate-20261026",
+    "criterion_revision": "e0534d15effb0e62e52cb04dd466809e",
+    "observed_value": "99",
+    "evidence": "note:Shared Goal playground relative aggregate-data/index.json names the two declared execution records aggregate-data/run-a.json and aggregate-data/run-b.json. Preserve execution IDs and apply only the metric-declared aggregation.",
+    "actor": "declared-aggregate-control-operator",
+    "recorded_at": "2026-10-25T17:18:35Z"
+  }
+}

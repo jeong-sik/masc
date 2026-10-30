@@ -1,0 +1,126 @@
+{
+  "prepared": [
+    {
+      "number": 41185,
+      "old": "798b1950f5f98cb716af972ce285b3f85f1b0348",
+      "head": "79c591a53dc5b8bfbe85d0931bd01d1ce05dbdb7",
+      "branch": "feat/browser-lane-activity-20261004"
+    },
+    {
+      "number": 41187,
+      "old": "6e22126d8325d61cc627461a8e05402b70fc9fc4",
+      "head": "ebab15fae7e12b5caec598ec838a6a6f1f9dcbc6",
+      "branch": "feat/tui-browser-activity-20261004"
+    },
+    {
+      "number": 41191,
+      "old": "8356bfff3c12ac49dfc4dabfe4035919922fdde2",
+      "head": "6025883e770d061be9e8fb38b5110bd0fc78bfa6",
+      "branch": "feat/web-browser-activity-20261005"
+    },
+    {
+      "number": 41194,
+      "old": "c7d951d46fdc8c5749080871a12056a26896ce77",
+      "head": "37778894b3abc1535fdaf490330f037889ef4b87",
+      "branch": "fix/settings-runtime-workspace-20261005"
+    },
+    {
+      "number": 41199,
+      "old": "7ae580bf8766d1cab1ed704f6dba5f54b1370fc0",
+      "head": "46ae9622d6964fd9a088bc9840a711b88498e079",
+      "branch": "feat/machine-lane-activity-20261005"
+    },
+    {
+      "number": 41201,
+      "old": "7a9ca7238534700a9ecdca942c0296ef33156970",
+      "head": "2433c855a9c9f01e2373826c88571b8d223d04db",
+      "branch": "feat/tui-machine-activity-20261005"
+    },
+    {
+      "number": 41203,
+      "old": "c645e376f0779b2c8f37a856c79d2d8241bdf695",
+      "head": "a54b2db5130ec48129f9b6c4b0987c2961b66424",
+      "branch": "feat/web-machine-activity-20261005"
+    },
+    {
+      "number": 41204,
+      "old": "cf5c943eeea9ec966befb47074dbc6c95b1a0002",
+      "head": "e21cc898b0808cedf85ecba2d039393cdf9ee298",
+      "branch": "fix/browser-activity-toml-reader-20261005"
+    },
+    {
+      "number": 41205,
+      "old": "c1048a823563383cfbbf2c975f7643a9819906ab",
+      "head": "53fe9ca6076208448b34cc605a4056a2df29978b",
+      "branch": "feat/tui-package-discovery-20261005"
+    },
+    {
+      "number": 41206,
+      "old": "962fc6bff24adcdc79bd116ff861b24b6f0a3138",
+      "head": "83cc6a68b7e111aa1797e50dd33426e047b16b87",
+      "branch": "feat/web-package-installation-20261005"
+    },
+    {
+      "number": 41208,
+      "old": "b2ed9d7483f0b83bc5b620310cc5f76ac9e3002f",
+      "head": "3a753cd28d06fc8d19a5556ddee76df03829cc79",
+      "branch": "feat/web-package-activity-20261005"
+    },
+    {
+      "number": 41209,
+      "old": "3bd876278dda63aac1a3a27d76e557bf88fe2c4e",
+      "head": "71976891a3fe20e93baea52aaecaa2ddfcb94e82",
+      "branch": "feat/web-lane-target-navigation-20261005"
+    },
+    {
+      "number": 41210,
+      "old": "4187f3f1f41a57b9bb507b60cfdd85a78973d699",
+      "head": "149e60ea8420f8a7785f17203a02a17f95d65300",
+      "branch": "fix/web-lane-read-ownership-20261005"
+    }
+  ],
+  "qualified_leaf": "149e60ea8420f8a7785f17203a02a17f95d65300",
+  "source_sha256": {
+    "lib/browser_lane/browser_lane.ml": "870686abae714c4650dc5d7e94f2ce61bca0f784aa2056d6f0129ba434f145df",
+    "lib/server/server_browser_configuration.ml": "8f448007dc6797beeefacddd7de6d4c9921b8460159da23d4ee3e32e5d51c150",
+    "lib/server/server_browser_configuration.mli": "9fb3b5bb2c7e60e969a35b0d4fc00c74b94be978d811d33c34eead0044ef3f66",
+    "lib/server/server_lane_inventory.ml": "156576648b741c5c15e7162f2e677893fc8edd723a8a4f8672855dafd6f90900",
+    "test/test_server_lane_inventory.ml": "9deb4e1a479fac0f698bb63c02da54aa8a0b6dfaa65af15dff866da891bfbaad",
+    "test/dune": "e14f039e674469c480e010db8582a28171e4ac11199883f7a5afcc7d43986021",
+    "bin/masc_tui_browser_activity.ml": "3c90286e8995fc1d278bc4daec433da5562638af6935dff468cabbd1baeb3a76",
+    "test/test_tui_browser_activity.ml": "1bfe7c74ba0ba8a38b52cba74f34ed9a407b847080cd8d7bcc73749460f9efa2",
+    "docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md": "5d8c5a4d7f50989f9c3837b1740ffecb9eb1196663f9e249f103e83d3890e0a0",
+    "docs/TOML-RELOAD-MATRIX.md": "27e85b9c5f330269d24e5befd931b2265e0a34df303028ce428c16f4a2cf6fa8"
+  },
+  "raw_sha256": {
+    "browser-review-chain-build.log": "b8e701f971d11f8cad928c40d93ddffcbe9bf915fbba6227267a2a69ae7de3e9",
+    "browser-review-chain-tests.json": "6d0a8d46c5d1843d4fbf180a82841e77ac85011e8e34ba067dc914cc30e842ff",
+    "browser-review-chain-test_server_lane_inventory.log": "a3f50bb5ec91497b0a958abff216eac1ced73a2500e9d78c8a7690dd5bad1f50",
+    "browser-review-chain-test_browser_activity.log": "ea76fca39b0a3d53940bad6590878045a2ac88e21f7ed87578a2fad59054bbf8",
+    "browser-review-chain-test_browser_lane.log": "7653bf8a2e9fcf922885bd238250bf83632791d57f40fd7b4bb90afb0d4f892b",
+    "browser-review-chain-test_tui_browser_activity.log": "5046dd9c4617e29ab1aca7dd2d90d64a4e4793301256448cb5b78c6f909df6b7"
+  },
+  "binary_sha256": {
+    "test/test_server_lane_inventory.exe": "f860eda62aaadb3973aa092faa912a15c65eff13b56e1bf5d291c93851d0c57a",
+    "test/test_browser_activity.exe": "1ed59895d7b8c8ee686fbfdf440c9dc4537efa74e36f9adb9c29e0ba0ac779d1",
+    "test/test_browser_lane.exe": "4387df3b7264dd3a9136a188fe3fa2741c2bee692c6a741dde69e0be649f6eee",
+    "test/test_tui_browser_activity.exe": "f6a4352ec1673e0c105d1337c820af0c15adf8d76517fc4650bfe7e8e094cb55"
+  },
+  "build": {
+    "handle": 83566,
+    "exit": 0
+  },
+  "tests": {
+    "handle": 68891,
+    "exit": 0,
+    "counts": [
+      10,
+      15,
+      8,
+      17
+    ],
+    "total": 50
+  },
+  "web_source_unchanged": true,
+  "published": false
+}

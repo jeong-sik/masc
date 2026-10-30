@@ -1,0 +1,47 @@
+{
+  "schema": "masc.native-digest-evidence-provenance.v1",
+  "candidate_application": "6df61978e0b638e672c7cd76664b90be7ba72fd1",
+  "candidate_builder": "6df61978e0b638e672c7cd76664b90be7ba72fd1",
+  "control_application": "8e61fa43fbf93f0e1edf06f07420fde6c79ccbc0",
+  "control_builder": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "build_relevant_source_difference": [
+    "lib/keeper/keeper_tool_load_receipts.ml"
+  ],
+  "candidate_run": 40419664296,
+  "candidate_workflow": "FAILURE: inherited retained diff whitespace in syntax job",
+  "candidate_native_job": 121910651163,
+  "candidate_native_job_result": "SUCCESS, 7 selected targets and55 resource cases",
+  "separate_typed_run": 40418592615,
+  "separate_typed_result": "SUCCESS:44+14+1=59 selected cases; not full regression",
+  "candidate_identity_children": "0/0, stdout exact6df; serverstderr82B/TUI0B",
+  "candidate_qualification_enclosing_tool11932": "UNKNOWN",
+  "runner": {
+    "path": "scripts/harness/perf/keeper_scale_session.py",
+    "sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284"
+  },
+  "reader": {
+    "path": "scripts/harness/perf/keeper_scale_packet_audit.py",
+    "sha256": "0825b96717c9939c7751c918258713476d207b4c8da8db825b5c8eba6fdf56c2"
+  },
+  "fixture": {
+    "path": "scripts/fixtures/release-evidence/runtime.toml",
+    "sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+  },
+  "frozen_plan_sha256": "9a550effd9a218fb27430df13ebe48edbbad8b189cf69e75e278ba6829e6a41a",
+  "frozen_execution_qualification_sha256": "14c304cd3fa4c3635bc6792219a26ba133fa545ca7485a40080635bf40585f73",
+  "descriptor_original_sha256": "3da31448dbb21d1176b3cc92b2b98a12c15881fa1c2ae0647c834c634c20d56c",
+  "source_PR": 46295,
+  "publication_parent_PR": 46322,
+  "publication_parent_boundary": "Later TUI observation code468 is absent from this native comparison; publication ancestry does not relabel measured binaries.",
+  "model": "loopback scripted text fixture, actual stream:true; retained TOML streaming=false is not observed transport authority.",
+  "not_bundled": [
+    "raw RPC/provider payloads",
+    "original or backup databases",
+    "native executables",
+    "operator credentials",
+    "primary installation",
+    "physical UI proof",
+    "loaded dynamic-library identity"
+  ],
+  "reproduction": "Historical sources/plan have frozen absolute paths and completed output leaves. They are source captures only; no portable execution or --output override is promised."
+}

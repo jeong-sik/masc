@@ -1,0 +1,126 @@
+{
+  "exports_by_owner": {
+    "tui_keyboard_chat": [
+      "AtomicChatFixture",
+      "IMAGE_NAME",
+      "keeper_chat_succeeded_response",
+      "open_atomic_chat",
+      "seed_image_workspace",
+      "unwrapped"
+    ],
+    "tui_keyboard_harness": [
+      "DASHBOARD_GOALS_PATH",
+      "PLANNING_PATH",
+      "RUNTIME_RESOLVED_PATH",
+      "board_detail_comment",
+      "board_selection_post",
+      "composer_showing",
+      "copy_reference",
+      "empty_runtime_resolved_fixture",
+      "escape_to_keeper_detail",
+      "fixture_cell_width",
+      "path_without_masc",
+      "planning_goal",
+      "planning_snapshot",
+      "press_and_settle",
+      "row_budget_http_fixtures",
+      "screen_row_of",
+      "seed_row_budget_workspace",
+      "seed_workspace",
+      "test_http_endpoint",
+      "wait_for_http_request",
+      "with_workspace_identity"
+    ],
+    "tui_keyboard_workspace": [
+      "FILE_CHANGES_ALPHA_PATH",
+      "code_lane_fixtures",
+      "file_changes_alpha_response",
+      "open_changes"
+    ],
+    "tui_keyboard_repositories": [
+      "REPOSITORIES_PATH",
+      "repositories_fixture"
+    ],
+    "tui_keyboard_schedule": [
+      "SCHEDULES_PATH",
+      "schedule_detail_http_fixtures"
+    ],
+    "tui_keyboard_runtime": [
+      "runtime_resolved_response",
+      "runtime_resolved_runtime"
+    ]
+  },
+  "dependency_rules": [
+    [
+      "test/stanzas/test_tui_code_diff_pan_pty.inc",
+      "runtest-test_tui_code_diff_pan_pty",
+      24
+    ],
+    [
+      "test/stanzas/test_tui_keeper_logs_wrap_pty.inc",
+      "runtest-test_tui_keeper_logs_wrap_pty",
+      24
+    ],
+    [
+      "test/stanzas/test_tui_keeper_metadata_wrap_pty.inc",
+      "runtest-test_tui_keeper_metadata_wrap_pty",
+      24
+    ],
+    [
+      "test/stanzas/test_tui_recorded_diff_pan_pty.inc",
+      "runtest-test_tui_recorded_diff_pan_pty",
+      24
+    ],
+    [
+      "test/stanzas/test_tui_runtime_picker_width_pty.inc",
+      "runtest-test_tui_runtime_picker_width_pty",
+      24
+    ],
+    [
+      "test/stanzas/test_tui_schedule_detail_viewport_pty.inc",
+      "runtest-test_tui_schedule_detail_viewport_pty",
+      24
+    ]
+  ],
+  "entry_consumers": [
+    "test/test_tui_keeper_draft_payload_pty.py",
+    "test/test_tui_recorded_diff_pan_pty.py",
+    "test/test_tui_keeper_create_journey_pty.py",
+    "test/test_tui_context_inspector.py",
+    "test/test_tui_keeper_logs_wrap_pty.py",
+    "test/test_tui_code_diff_pan_pty.py",
+    "test/test_tui_keyboard_scenario_selection.py",
+    "test/test_tui_schedule_detail_viewport_pty.py",
+    "test/test_tui_runtime_picker_width_pty.py",
+    "test/test_tui_preset_viewport_pty.py",
+    "test/test_tui_agenda_navigation_pty.py",
+    "test/test_tui_keeper_metadata_wrap_pty.py",
+    "scripts/capture-tui-audit.py",
+    "docs/evidence/tui-footer-pinned-key-rules-2026-09-26/profile-scenario.py",
+    "docs/evidence/browser-live-viewport-20260913/gesture-capture.py",
+    "docs/evidence/browser-current-native-20260913/capture-helper-after-run.py",
+    "docs/evidence/browser-history-20260913/capture-original.py",
+    "docs/evidence/browser-delivery-20260913/native-history-fixture.py",
+    "docs/evidence/tui-footer-parse-once-2026-09-27/profile-scenario.py",
+    "docs/evidence/browser-navigation-composition-20260912/composed/capture-tui.py",
+    "docs/evidence/browser-handoff-20260912/raw-follow-c230/probe.py",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/profile-scenario.py",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/profile-scenario.py",
+    "docs/evidence/browser-context-recovery-20260913/scripts/capture-browser-context-action.py",
+    "docs/evidence/browser-delivery-20260913/scripts/capture-persistent-content-browser.py",
+    "docs/evidence/browser-delivery-20260913/scripts/capture-bundled-browser-history.py",
+    "docs/evidence/browser-history-20260913/direct/capture-original.py",
+    "docs/evidence/tui-fixture-readable-wait-2026-09-26/reader-wait/scenario.py",
+    "docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/window.py",
+    "docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/oracle.py",
+    "docs/evidence/tui-fixture-readable-wait-2026-09-26/screen-window/whole.py",
+    "docs/evidence/browser-live-content-20260913/native-history-d441/fixture.py",
+    "docs/evidence/browser-live-content-20260913/scripts/capture-live-content-browser.py",
+    "docs/evidence/browser-continuity-20260913/after-viewport/gesture-capture.py",
+    "docs/evidence/browser-bidi-live-20260913/metadata-assumptions/capture.py",
+    "docs/evidence/browser-bidi-live-20260913/post-drag-scene-adapter-failure/capture.py",
+    "docs/evidence/browser-bidi-live-20260913/corrected/capture.py",
+    "docs/evidence/browser-bidi-live-20260913/corrected/capture-original.py",
+    "evidence/39827/capture.py"
+  ]
+}

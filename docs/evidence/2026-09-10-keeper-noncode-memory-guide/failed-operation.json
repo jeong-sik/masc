@@ -1,0 +1,34 @@
+{
+  "schema": "masc.keeper_chat_operation.v1",
+  "operation_id": "kmsg-33f4c994e9afd0fe78c40c8dcbce1be2",
+  "sequence": "144",
+  "created_at": 1788982627.965719,
+  "execution_digest": "1ac8f209e1e72a551b2e1ebcf6fb98bcec476439b32c792eeb96cd4526b7c71e",
+  "source": {
+    "channel": "agent",
+    "channel_user_id": "",
+    "channel_user_name": "",
+    "channel_workspace_id": "",
+    "continuation_channel": {
+      "kind": "dashboard",
+      "thread_id": "keeper:analyst"
+    },
+    "conversation_id": null,
+    "external_message_id": null,
+    "extra_mentions": [],
+    "schema": "masc.keeper_chat_operation.source.v1",
+    "submitted_by": "codex-mcp-client",
+    "surface": {
+      "kind": "agent"
+    },
+    "thread_id": "keeper:analyst",
+    "user_row_origin": "needs_append",
+    "workspace_id": null
+  },
+  "input": null,
+  "state": "Failed",
+  "completed_at": 1788982732.011648,
+  "failure_kind": "Turn_exception",
+  "failure_detail": "turn_failed: Rate limited: Rate limit reached for requests",
+  "outcome_ref": null
+}

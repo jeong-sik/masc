@@ -1,0 +1,266 @@
+{
+  "schema": "masc.keeper_canary_run.v1",
+  "captured_at": "2026-08-16T12:21:33Z",
+  "harness": { "git_commit": "96e882509509c01180f05442b00c75b08b8483df" },
+  "run_id": "canary-10t-ollama-local-20260816",
+  "keeper": {
+    "name": "canary-10t-ollama-local-20260816",
+    "runtime": null,
+    "base_path": "/Users/dancer/me"
+  },
+  "transport": {
+    "endpoint": "http://127.0.0.1:8935/api/v1/keepers/chat/stream",
+    "turn_interval_s": 0.0,
+    "wall_clock_target_s": null
+  },
+  "facts_established": [
+    {
+      "category": "project_codename",
+      "statement": "The project codename is Codename-e4ac7950d3af.",
+      "value": "Codename-e4ac7950d3af"
+    },
+    {
+      "category": "lead_reviewer",
+      "statement": "The lead reviewer is Reviewer-54de38b3238a.",
+      "value": "Reviewer-54de38b3238a"
+    },
+    {
+      "category": "deadline",
+      "statement": "The deadline is 2026-01-22.",
+      "value": "2026-01-22"
+    },
+    {
+      "category": "blocked_dependency",
+      "statement": "The blocked dependency is dep-4769b3686980.",
+      "value": "dep-4769b3686980"
+    },
+    {
+      "category": "fallback_runtime",
+      "statement": "The fallback runtime is runtime-cf472f72e0f6.",
+      "value": "runtime-cf472f72e0f6"
+    },
+    {
+      "category": "incident_number",
+      "statement": "The incident number is 7088.",
+      "value": "7088"
+    },
+    {
+      "category": "reviewer_timezone",
+      "statement": "The reviewer timezone is Europe/London.",
+      "value": "Europe/London"
+    },
+    {
+      "category": "artifact_name",
+      "statement": "The artifact name is artifact-f72a081d3b7c.json.",
+      "value": "artifact-f72a081d3b7c.json"
+    },
+    {
+      "category": "rollback_switch",
+      "statement": "The rollback switch is called rollback-b8388f820fbd.",
+      "value": "rollback-b8388f820fbd"
+    }
+  ],
+  "turns": [
+    {
+      "index": 1,
+      "category": "project_codename",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-0d5a29b8fcd529d0"
+      },
+      "turn_ref": "trace-1786881664416-00006#2",
+      "sent_at": "2026-08-16T12:01:15Z",
+      "round_trip_s": 338.4375419616699,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 2,
+      "category": "lead_reviewer",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-0c1cd023d3a3ccdb"
+      },
+      "turn_ref": "trace-1786881664416-00006#3",
+      "sent_at": "2026-08-16T12:06:54Z",
+      "round_trip_s": 64.18452596664429,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 3,
+      "category": "deadline",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-ffea33fbaa00bc61"
+      },
+      "turn_ref": "trace-1786881664416-00006#4",
+      "sent_at": "2026-08-16T12:07:58Z",
+      "round_trip_s": 70.9604389667511,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 4,
+      "category": "blocked_dependency",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-9cbc143217d24fcb"
+      },
+      "turn_ref": "trace-1786881664416-00006#5",
+      "sent_at": "2026-08-16T12:09:09Z",
+      "round_trip_s": 86.46144604682922,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 5,
+      "category": "fallback_runtime",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-0da80faf6fe426f1"
+      },
+      "turn_ref": "trace-1786881664416-00006#6",
+      "sent_at": "2026-08-16T12:10:35Z",
+      "round_trip_s": 85.25665211677551,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 6,
+      "category": "incident_number",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-6be71ce9fb212a76"
+      },
+      "turn_ref": "trace-1786881664416-00006#7",
+      "sent_at": "2026-08-16T12:12:01Z",
+      "round_trip_s": 70.7928102016449,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 7,
+      "category": "reviewer_timezone",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-1c48b9c87e7150b4"
+      },
+      "turn_ref": "trace-1786881664416-00006#8",
+      "sent_at": "2026-08-16T12:13:12Z",
+      "round_trip_s": 82.09531402587891,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 8,
+      "category": "artifact_name",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-7e44584e8a86bfb3"
+      },
+      "turn_ref": "trace-1786881664416-00006#9",
+      "sent_at": "2026-08-16T12:14:34Z",
+      "round_trip_s": 118.65145301818848,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 9,
+      "category": "rollback_switch",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-5b44b5e7d4c9d327"
+      },
+      "turn_ref": "trace-1786881664416-00006#10",
+      "sent_at": "2026-08-16T12:16:32Z",
+      "round_trip_s": 100.58806896209717,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 10,
+      "category": null,
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-f792fca9d1c50a59"
+      },
+      "turn_ref": "trace-1786881664416-00006#11",
+      "sent_at": "2026-08-16T12:18:13Z",
+      "round_trip_s": 200.5308599472046,
+      "reply_digest": "c89fd95d77394ca22fb5ea73871329bda0e16e2962b367df1fde7b618fae7c18"
+    }
+  ],
+  "recall": {
+    "turn_index": 10,
+    "request_id": "canary-f792fca9d1c50a59",
+    "prompt": "Without looking anything up, please list every fact I told you to remember earlier in this conversation, in the order I gave them to you.",
+    "reply": "Here are the facts in the order you gave them:\n\n1. The project codename is Codename-e4ac7950d3af.\n2. The lead reviewer is Reviewer-54de38b3238a.\n3. The deadline is 2026-01-22.\n4. The blocked dependency is dep-4769b3686980.\n5. The fallback runtime is runtime-cf472f72e0f6.\n6. The incident number is 7088.\n7. The reviewer timezone is Europe/London.\n8. The artifact name is artifact-f72a081d3b7c.json.\n9. The rollback switch is called rollback-b8388f820fbd.Here are the facts in the order you gave them:\n\n1. The project codename is Codename-e4ac7950d3af.\n2. The lead reviewer is Reviewer-54de38b3238a.\n3. The deadline is 2026-01-22.\n4. The blocked dependency is dep-4769b3686980.\n5. The fallback runtime is runtime-cf472f72e0f6.\n6. The incident number is 7088.\n7. The reviewer timezone is Europe/London.\n8. The artifact name is artifact-f72a081d3b7c.json.\n9. The rollback switch is called rollback-b8388f820fbd."
+  },
+  "timing": {
+    "min_s": 64.18452596664429,
+    "median_s": 85.85904908180237,
+    "max_s": 338.4375419616699
+  },
+  "deterministic_signal": {
+    "facts_total": 9,
+    "facts_recalled": 9,
+    "order_matches": true,
+    "recalled_categories": [
+      "project_codename", "lead_reviewer", "deadline", "blocked_dependency",
+      "fallback_runtime", "incident_number", "reviewer_timezone",
+      "artifact_name", "rollback_switch"
+    ],
+    "missing_categories": [],
+    "per_fact": [
+      {
+        "category": "project_codename",
+        "value": "Codename-e4ac7950d3af",
+        "recalled": true,
+        "first_index": 75
+      },
+      {
+        "category": "lead_reviewer",
+        "value": "Reviewer-54de38b3238a",
+        "recalled": true,
+        "first_index": 122
+      },
+      {
+        "category": "deadline",
+        "value": "2026-01-22",
+        "recalled": true,
+        "first_index": 164
+      },
+      {
+        "category": "blocked_dependency",
+        "value": "dep-4769b3686980",
+        "recalled": true,
+        "first_index": 205
+      },
+      {
+        "category": "fallback_runtime",
+        "value": "runtime-cf472f72e0f6",
+        "recalled": true,
+        "first_index": 250
+      },
+      {
+        "category": "incident_number",
+        "value": "7088",
+        "recalled": true,
+        "first_index": 298
+      },
+      {
+        "category": "reviewer_timezone",
+        "value": "Europe/London",
+        "recalled": true,
+        "first_index": 332
+      },
+      {
+        "category": "artifact_name",
+        "value": "artifact-f72a081d3b7c.json",
+        "recalled": true,
+        "first_index": 371
+      },
+      {
+        "category": "rollback_switch",
+        "value": "rollback-b8388f820fbd",
+        "recalled": true,
+        "first_index": 432
+      }
+    ]
+  },
+  "judgment": null,
+  "injections": [],
+  "notes": []
+}

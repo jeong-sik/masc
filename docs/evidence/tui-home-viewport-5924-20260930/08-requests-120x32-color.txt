@@ -1,0 +1,32 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Dashboard  [workspace\x1B]8;;https://attacker.invalid\x07owned]  03:41:17  HTTP [connected]                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+   Health: ok                                                                                                           
+   Work: 0 currently done in the last 24h · details in Work                                                             
+                                                                                                                        
+   Needs your decision                                                                                                  
+    Approval · masc-tui [token-a     ] · namespace_pause on workspace (masc_pause)                                      
+    Approval · masc-tui [token-b     ] · keeper_probe on keeper (masc_keeper_status)                                    
+    Approval · masc-tui [token-c     ] · keeper_message on keeper (masc_keeper_delegate)                                
+    Approvals and questions: 3 need you · all requests                                                                  
+                                                                                                                        
+   Continue                                                                                                             
+    Choose a Keeper  · start a conversation                                                                             
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  r:refresh  Tab:next  q:quit  | Port: 33807
+ Choose a Keeper before writing · i:choose                                                                              

@@ -1,0 +1,192 @@
+{
+  "source_revision": "9210d531ef16498e07cdc10770356d807d78143d",
+  "route": "http://127.0.0.1:5297/dashboard/#settings?section=runtime",
+  "scope": "production dashboard settings route with isolated browser API mocks; no live provider authentication",
+  "results": [
+    {
+      "client": "codex",
+      "viewport": 1280,
+      "models": [
+        {
+          "integration_id": "codex",
+          "account_ref": "0000000000000000000000000000000000000000000000000000000000000065"
+        }
+      ],
+      "saves": [
+        {
+          "revision": "fixture-revision",
+          "connections": [
+            {
+              "source": {
+                "integration_id": "codex",
+                "account_ref": "0000000000000000000000000000000000000000000000000000000000000065"
+              },
+              "models": [
+                {
+                  "id": "fixture-model",
+                  "context": 123456,
+                  "streaming": true
+                }
+              ]
+            }
+          ],
+          "selection": [
+            {
+              "connection": 0,
+              "model": 0
+            }
+          ]
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "text"
+        }
+      ],
+      "recovered": 0,
+      "cancel": 0,
+      "sequence": 1,
+      "dropComplete": false,
+      "overflow": false
+    },
+    {
+      "client": "claude",
+      "viewport": 1280,
+      "models": [
+        {
+          "integration_id": "claude",
+          "account_ref": "0000000000000000000000000000000000000000000000000000000000000065"
+        }
+      ],
+      "saves": [
+        {
+          "revision": "fixture-revision",
+          "connections": [
+            {
+              "source": {
+                "integration_id": "claude",
+                "account_ref": "0000000000000000000000000000000000000000000000000000000000000065"
+              },
+              "models": [
+                {
+                  "id": "fixture-model",
+                  "context": 123456,
+                  "streaming": true
+                }
+              ]
+            }
+          ],
+          "selection": [
+            {
+              "connection": 0,
+              "model": 0
+            }
+          ]
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "text"
+        }
+      ],
+      "recovered": 1,
+      "cancel": 0,
+      "sequence": 1,
+      "dropComplete": true,
+      "overflow": false
+    },
+    {
+      "client": "antigravity",
+      "viewport": 390,
+      "models": [
+        {
+          "integration_id": "antigravity",
+          "account_ref": "0000000000000000000000000000000000000000000000000000000000000066"
+        }
+      ],
+      "saves": [
+        {
+          "revision": "fixture-revision",
+          "connections": [
+            {
+              "source": {
+                "integration_id": "antigravity",
+                "account_ref": "0000000000000000000000000000000000000000000000000000000000000066"
+              },
+              "models": [
+                {
+                  "id": "fixture-model",
+                  "context": 32000,
+                  "streaming": true
+                }
+              ]
+            }
+          ],
+          "selection": [
+            {
+              "connection": 0,
+              "model": 0
+            }
+          ]
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "text"
+        }
+      ],
+      "recovered": 2,
+      "cancel": 1,
+      "sequence": 2,
+      "dropComplete": false,
+      "overflow": false
+    },
+    {
+      "client": "muse",
+      "viewport": 390,
+      "models": [
+        {
+          "integration_id": "muse",
+          "account_ref": "0000000000000000000000000000000000000000000000000000000000000065"
+        }
+      ],
+      "saves": [
+        {
+          "revision": "fixture-revision",
+          "connections": [
+            {
+              "source": {
+                "integration_id": "muse",
+                "account_ref": "0000000000000000000000000000000000000000000000000000000000000065"
+              },
+              "models": [
+                {
+                  "id": "fixture-model",
+                  "context": 32000,
+                  "streaming": true,
+                  "max_prompt_bytes": 32768
+                }
+              ]
+            }
+          ],
+          "selection": [
+            {
+              "connection": 0,
+              "model": 0
+            }
+          ]
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "text"
+        }
+      ],
+      "recovered": 0,
+      "cancel": 0,
+      "sequence": 1,
+      "dropComplete": false,
+      "overflow": false
+    }
+  ]
+}

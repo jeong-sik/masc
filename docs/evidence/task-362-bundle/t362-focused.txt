@@ -1,0 +1,22 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-2374876840.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/.masc/playground/microvm/polisher/masc-t362/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/.masc/playground/microvm/polisher/masc-t362 test/test_runtime_claude_code.exe test/test_runtime_codex_app_server.exe test/test_keeper_antigravity_runtime.exe test/test_keeper_context_observation_projection.exe test/test_tui_decode.exe
+Warning: option "-j-std" is deprecated.
+BUILD_EXIT=0
+
+Full test results in `[36m~/me/.masc/playground/microvm/polisher/masc-t362/_build/_tests/runtime_claude_code[0m'.
+[32mTest Successful[0m in 14.080s. 50 tests run.
+RUN_EXIT_test_runtime_claude_code=0
+
+Full test results in `[36m~/me/.masc/playground/microvm/polisher/masc-t362/_build/_tests/runtime codex app-server[0m'.
+[31m1 failure![0m in 36.151s. 64 tests run.
+RUN_EXIT_test_runtime_codex_app_server=0
+
+Full test results in `[36m~/me/.masc/playground/microvm/polisher/masc-t362/_build/_tests/keeper_antigravity_runtime[0m'.
+[32mTest Successful[0m in 1.181s. 10 tests run.
+RUN_EXIT_test_keeper_antigravity_runtime=0
+
+Full test results in `[36m~/me/.masc/playground/microvm/polisher/masc-t362/_build/_tests/keeper_context_observation_projection[0m'.
+[32mTest Successful[0m in 0.015s. 11 tests run.
+RUN_EXIT_test_keeper_context_observation_projection=0

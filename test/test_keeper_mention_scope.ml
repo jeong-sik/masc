@@ -1,0 +1,586 @@
+(* RFC-0230: keeper mention reactivity.
+
+   Two pure cores are tested here:
+   - the boundary mention parse + match (RFC-0232 P4: parse at append,
+     match persisted ids; the substring bug that made "@alicex" /
+     "email@alice.com" false-match "@alice" must not recur).
+   - pending message acknowledgement: stable row ids advance only through the
+     exact source range injected into a completed turn. *)
+
+open Alcotest
+
+module MS = Masc.Keeper_world_observation_message_scope
+module Store = Masc.Keeper_chat_store
+module Lane = Masc.Keeper_lane_mentions
+
+let targets = [ "alice" ]
+
+(* Boundary-parse-then-match: the P4 equivalent of the deleted
+   read-time [line_mentions]. *)
+let lm content =
+  Lane.ids_match
+    ~target_ids:(Lane.target_ids_of targets)
+    (Lane.mention_ids_of_content content)
+
+let test_plain_mention () = check bool "@alice by another" true (lm "hey @alice look")
+
+let test_alicex_not_matched () =
+  check bool "@alicex is a different token" false (lm "ping @alicex now")
+;;
+
+let test_email_not_matched () =
+  check bool "email@alice.com is one token" false (lm "send to email@alice.com")
+;;
+
+let test_case_insensitive () = check bool "@ALICE" true (lm "PING @ALICE NOW")
+let test_trailing_punct () = check bool "@alice, comma" true (lm "ok @alice, thanks")
+let test_no_mention () = check bool "no @target" false (lm "just chatting here")
+
+let test_empty_targets () =
+  check bool "no targets to match" false
+    (Lane.ids_match
+       ~target_ids:(Lane.target_ids_of [])
+       (Lane.mention_ids_of_content "@alice"))
+;;
+
+let msg ~role ?(id = "test-msg") ?(ts = 1.0) ?(surface = None) ?(speaker = None)
+    ?(audio = None)
+    ?(turn_ref = None) content
+  : Store.chat_message
+  =
+  { id
+  ; role
+  ; content
+  ; ts
+  ; attachments = None
+  ; tool_call_id = None
+  ; execution_id = None
+  ; tool_call_name = None
+  ; surface
+  ; conversation_id = None
+  ; external_message_id = None
+  ; workspace_id = None
+  ; speaker
+  ; audio
+  ; blocks = None
+  ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
+  ; turn_ref
+  ; stream_lifecycle = None
+  ; approval_lifecycle = None
+  ; delivery_provenance = None
+  }
+;;
+
+let contents pms = List.map snd pms
+
+let turn_ref n = Some (Ids.Turn_ref.make ~trace_id:"trace-scope" ~absolute_turn:n)
+
+let test_unanswered_mention_is_pending () =
+  let messages = [ msg ~role:Store.Role.User ~ts:10.0 "@alice please look" ] in
+  check (list string) "no later own line -> pending" [ "@alice please look" ]
+    (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+let test_answered_mention_is_cleared () =
+  let turn_ref = turn_ref 1 in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~turn_ref "@alice please look"
+    ; msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "on it"
+    ]
+  in
+  check (list string) "own line after mention -> cleared" []
+    (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+let test_rementioned_after_reply_is_pending () =
+  let turn_ref = turn_ref 2 in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~turn_ref "@alice first"
+    ; msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "done"
+    ; msg ~role:Store.Role.User ~ts:12.0 "@alice again"
+    ]
+  in
+  check (list string) "new mention after reply -> pending" [ "@alice again" ]
+    (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+(* 2026-09-10 drain investigation: a checkpoint/defer boundary persists an
+   empty-content assistant Utterance row as the carrier of its typed status
+   block, stamped with the same delivery key as the user message it follows.
+   That row never spoke, so it must not mark the user message answered —
+   before the guard, the user's chat line silently never reached a turn. *)
+let test_empty_carrier_row_does_not_answer_the_delivery () =
+  let provenance slot =
+    let request_id =
+      Keeper_chat_delivery_identity.Request_id.of_string "kmsg-drain-carrier"
+      |> Result.get_ok
+    in
+    Some
+      { Keeper_chat_delivery_identity.delivery_key =
+          Keeper_chat_delivery_identity.Operation request_id
+      ; transcript_slot = slot
+      }
+  in
+  let user =
+    { (msg ~role:Store.Role.User ~id:"u1" ~ts:10.0 "@alice status?") with
+      delivery_provenance = provenance Keeper_chat_delivery_identity.Accepted_user
+    }
+  in
+  let empty_carrier =
+    { (msg ~role:Store.Role.Assistant ~id:"a1" ~ts:11.0 "") with
+      blocks =
+        Some
+          [ Masc.Keeper_chat_blocks.Status
+              { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
+          ]
+    ; delivery_provenance =
+        provenance Keeper_chat_delivery_identity.Terminal_result
+    }
+  in
+  let spoken_reply =
+    { (msg ~role:Store.Role.Assistant ~id:"a2" ~ts:12.0 "on it") with
+      delivery_provenance =
+        provenance Keeper_chat_delivery_identity.Terminal_result
+    }
+  in
+  (* A media-only reply is persisted with empty content and completes as
+     Delivered — it is the answer, and nothing follows it. *)
+  let media_reply =
+    { (msg ~role:Store.Role.Assistant ~id:"a3" ~ts:12.0 "") with
+      blocks =
+        Some
+          [ Masc.Keeper_chat_blocks.Image
+              { src = "masc://media/1.png"; cap = None }
+          ]
+    ; delivery_provenance =
+        provenance Keeper_chat_delivery_identity.Terminal_result
+    }
+  in
+  check (list string) "empty carrier row leaves the message pending"
+    [ "@alice status?" ]
+    (contents (MS.pending_mentions_of_messages ~targets [ user; empty_carrier ]));
+  check (list string) "a spoken reply still answers the delivery" []
+    (contents (MS.pending_mentions_of_messages ~targets [ user; spoken_reply ]));
+  check (list string) "a media-only reply answers the delivery" []
+    (contents (MS.pending_mentions_of_messages ~targets [ user; media_reply ]))
+;;
+
+let test_assistant_self_mention_ignored () =
+  let messages = [ msg ~role:Store.Role.Assistant ~ts:10.0 "@alice note to self" ] in
+  check (list string) "own assistant line is never a pending mention" []
+    (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+let speaker_with authority : Store.speaker option =
+  Some { speaker_id = None; speaker_name = None; speaker_authority = authority }
+;;
+
+let owner = speaker_with Store.Owner
+let external_ = speaker_with Store.External
+let keeper_speaker = speaker_with Store.Keeper
+
+(* Fleet layer: keeper broadcasts projected into this keeper's transcript.
+   The two reactive lanes admit only rows addressed to this keeper, so without
+   this layer a projected broadcast reaches the dashboard and never the prompt.
+   These cases pin the layer's boundary against both lanes. *)
+
+let agent_surface = Some Masc.Surface_ref.Agent
+let fleet_contents fms = List.map (fun (f : MS.fleet_message) -> f.fleet_content) fms
+let fleet ~limit messages = MS.fleet_messages_of_messages ~limit ~targets messages
+
+let test_projected_broadcast_reaches_the_layer () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface
+        ~speaker:external_ "deploy is green"
+    ]
+  in
+  check (list string) "unaddressed keeper speech is fleet context"
+    [ "deploy is green" ]
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_addressed_row_is_not_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface
+        ~speaker:external_ "@alice take this"
+    ]
+  in
+  check (list string) "a row addressed to me belongs to the mention lane only" []
+    (fleet_contents (fleet ~limit:10 messages));
+  check (list string) "and it is still a pending mention" [ "@alice take this" ]
+    (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+(* RFC-0468 §3.2: another Keeper's direct message is Keeper speech, not the
+   operator's, but it was still sent to this Keeper: it stays a watermarked
+   scope line, so an unanswered one is raised again, and it is not fleet
+   context. A Keeper's broadcast is fleet context and not a scope line. *)
+let test_keeper_direct_row_is_scope_not_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface
+        ~speaker:keeper_speaker "can you take task-12?"
+    ]
+  in
+  check (list string) "a direct Keeper line is a scope line"
+    [ "can you take task-12?" ]
+    (contents (MS.pending_scope_of_messages ~targets messages));
+  check (list string) "and it is not fleet context" []
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_keeper_broadcast_row_is_fleet_not_scope () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:(Some Masc.Surface_ref.Broadcast)
+        ~speaker:keeper_speaker "deploy is green"
+    ]
+  in
+  check (list string) "a Keeper broadcast is fleet context" [ "deploy is green" ]
+    (fleet_contents (fleet ~limit:10 messages));
+  check (list string) "and it is not a scope line" []
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
+let test_owner_row_is_not_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface ~speaker:owner
+        "status?"
+    ]
+  in
+  check (list string) "an Owner line belongs to the scope lane only" []
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_connector_row_is_not_fleet () =
+  let discord =
+    Some
+      (Masc.Surface_ref.Discord
+         { guild_id = None
+         ; channel_id = "c1"
+         ; channel_name = None
+         ; parent_channel_id = None
+         ; thread_id = None
+         })
+  in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:discord ~speaker:external_
+        "channel chatter"
+    ]
+  in
+  check (list string) "connector chatter is not fleet speech" []
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_own_assistant_line_is_not_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.Assistant ~ts:10.0 ~surface:agent_surface "I said this" ]
+  in
+  check (list string) "the keeper's own output is not inbound fleet speech" []
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_zero_limit_disables_the_layer () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface
+        ~speaker:external_ "deploy is green"
+    ]
+  in
+  check (list string) "limit 0 turns the section off" []
+    (fleet_contents (fleet ~limit:0 messages))
+;;
+
+let test_limit_keeps_the_newest_in_arrival_order () =
+  let row n =
+    msg ~role:Store.Role.User ~id:(Printf.sprintf "row-%d" n)
+      ~ts:(float_of_int n) ~surface:agent_surface ~speaker:external_
+      (Printf.sprintf "note %d" n)
+  in
+  let messages = List.map row [ 1; 2; 3; 4; 5 ] in
+  check (list string) "newest two, still oldest-first" [ "note 4"; "note 5" ]
+    (fleet_contents (fleet ~limit:2 messages))
+;;
+
+(* The partition itself, which the per-case tests above do not check: one
+   message list, and every classifiable row lands in exactly one of the two
+   sections. This is what [lane_of] makes structural — the lanes take its
+   [Some], the fleet layer its [None]. *)
+let test_rows_partition_across_lanes_and_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.User ~id:"m1" ~ts:10.0 ~surface:agent_surface
+        ~speaker:external_ "@alice take this"
+    ; msg ~role:Store.Role.User ~id:"m2" ~ts:11.0 ~surface:agent_surface
+        ~speaker:owner "status?"
+    ; msg ~role:Store.Role.User ~id:"m3" ~ts:12.0 ~surface:agent_surface
+        ~speaker:external_ "fleet note"
+    ]
+  in
+  let pending =
+    MS.pending_messages_of_messages ~targets messages
+    |> List.map (fun (m : MS.pending_message) -> m.content)
+  in
+  let fleet = fleet_contents (fleet ~limit:10 messages) in
+  check (list string) "lanes take the addressed rows"
+    [ "@alice take this"; "status?" ] pending;
+  check (list string) "fleet takes what no lane claimed" [ "fleet note" ] fleet;
+  check (list string) "no row is in both"
+    [] (List.filter (fun c -> List.mem c fleet) pending);
+  check int "every row is placed exactly once"
+    (List.length messages) (List.length pending + List.length fleet)
+;;
+
+let test_owner_unmentioned_line_is_scope () =
+  let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:owner "can you check the deploy" ] in
+  check (list string) "operator without @ -> scope" [ "can you check the deploy" ]
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
+let test_owner_mention_is_not_scope () =
+  (* an owner line that mentions is a mention, not a scope message (disjoint) *)
+  let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:owner "@alice check it" ] in
+  check (list string) "owner mention excluded from scope" []
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
+let test_external_unmentioned_is_not_scope () =
+  let messages = [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:external_ "random channel chatter" ] in
+  check (list string) "external without @ -> ignored" []
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
+let test_answered_owner_line_is_cleared () =
+  let turn_ref = turn_ref 3 in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~speaker:owner ~turn_ref "please check"
+    ; msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "done"
+    ]
+  in
+  check (list string) "answered owner line -> cleared" []
+    (contents (MS.pending_scope_of_messages ~targets messages))
+;;
+
+(* Exact causal acknowledgement properties. Stable lane ids and typed
+   [turn_ref] joins decide consumption; wall-clock timestamps do not. *)
+
+let test_skewed_clock_cannot_unanswer () =
+  (* The reply's wall clock is *behind* the mention's (NTP step, skewed
+     writer). The shared typed [turn_ref] still proves that it answers the
+     user row. *)
+  let turn_ref = turn_ref 4 in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:100.0 ~turn_ref "@alice please look"
+    ; msg ~role:Store.Role.Assistant ~ts:5.0 ~turn_ref "on it"
+    ]
+  in
+  check (list string) "skewed reply ts still clears" []
+    (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+let test_ts_fuzz_does_not_change_pending () =
+  (* Same lane, two ts assignments (ordered, reversed): the pending set
+     depends on lane order alone. *)
+  let lane ts_of =
+    let turn_ref = turn_ref 5 in
+    [ msg ~role:Store.Role.User ~ts:(ts_of 0) ~turn_ref "@alice first"
+    ; msg ~role:Store.Role.Assistant ~ts:(ts_of 1) ~turn_ref "done"
+    ; msg ~role:Store.Role.User ~ts:(ts_of 2) "@alice again"
+    ]
+  in
+  let expected = [ "@alice again" ] in
+  List.iter
+    (fun (label, ts_of) ->
+      check (list string) label expected
+        (contents (MS.pending_mentions_of_messages ~targets (lane ts_of))))
+    [ ("ordered ts", fun i -> float_of_int (10 + i))
+    ; ("reversed ts", fun i -> float_of_int (10 - i))
+    ]
+;;
+
+let tool_line : Store.chat_message =
+  { id = "test-tool"
+  ; role = Store.Role.Tool
+  ; content = "{}"
+  ; ts = 10.5
+  ; attachments = None
+  ; tool_call_id = Some "tc-0"
+  ; execution_id = None
+  ; tool_call_name = Some "Read"
+  ; surface = None
+  ; conversation_id = None
+  ; external_message_id = None
+  ; workspace_id = None
+  ; speaker = None
+  ; audio = None
+  ; blocks = None
+  ; mentions = []
+  ; turn_ref = None
+  ; stream_lifecycle = None
+  ; approval_lifecycle = None
+  ; delivery_provenance = None
+  }
+;;
+
+let test_tool_lines_do_not_clear () =
+  (* Tool lines are the keeper *working*, not a causal acknowledgement. *)
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 "@alice please look"; tool_line ]
+  in
+  check (list string) "tool line is not an answer" [ "@alice please look" ]
+    (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+let test_transport_failure_does_not_clear () =
+  (* A transport-failure marker is the server recording a failed request
+     terminal ("Keeper request failed: ..."), not the keeper answering;
+     the user line stays pending so the keeper revisits it on its next
+     turn. A real utterance afterwards still clears. *)
+  let turn_ref = turn_ref 7 in
+  let failure =
+    msg ~role:Store.Role.Request_failure ~ts:10.5
+      ~turn_ref
+      "Keeper request failed: Idle detected"
+  in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~turn_ref "@alice please look"; failure ]
+  in
+  check (list string) "failure marker is not an answer" [ "@alice please look" ]
+    (contents (MS.pending_mentions_of_messages ~targets messages));
+  let answered =
+    messages @ [ msg ~role:Store.Role.Assistant ~ts:11.0 ~turn_ref "done" ]
+  in
+  check (list string) "a real utterance still clears" []
+    (contents (MS.pending_mentions_of_messages ~targets answered))
+;;
+
+let test_voice_audio_self_output_is_not_recent_context () =
+  let audio =
+    Some
+      { Store.token = "voice-token-1"
+      ; audio_url = None
+      ; mime = "audio/mpeg"
+      ; duration_sec = None
+      ; message_text = "saying this out loud"
+      ; device_id = None
+      ; expired = false
+      }
+  in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 "please say it out loud"
+    ; msg ~role:Store.Role.Assistant ~ts:11.0 ~audio
+        "saying this out loud"
+    ; msg ~role:Store.Role.Assistant ~ts:12.0 "text follow-up"
+    ]
+  in
+  let lines = MS.recent_direct_conversation_of_messages messages in
+  check (list string) "voice audio assistant row omitted from prompt context"
+    [ "user"; "assistant" ]
+    (List.map
+       (fun (line : MS.recent_direct_line) ->
+         MS.direct_line_role_to_label line.role)
+       lines);
+  check (list string) "spoken text is not quoted back"
+    [ "please say it out loud"; "text follow-up" ]
+    (List.map (fun (line : MS.recent_direct_line) -> line.content) lines)
+;;
+
+let test_unrelated_assistant_does_not_clear_pending () =
+  let lane =
+    [ msg ~id:"m1" ~role:Store.Role.User "@alice a"
+    ; msg ~id:"m2" ~role:Store.Role.User ~speaker:owner "status?"
+    ; msg ~id:"a1" ~role:Store.Role.Assistant "unrelated output"
+    ]
+  in
+  check (list string) "unrelated assistant keeps mention pending" [ "@alice a" ]
+    (contents (MS.pending_mentions_of_messages ~targets lane));
+  check (list string) "unrelated assistant keeps scope pending" [ "status?" ]
+    (contents (MS.pending_scope_of_messages ~targets lane))
+;;
+
+let test_ack_clears_only_injected_prefix () =
+  let lane =
+    [ msg ~id:"m1" ~role:Store.Role.User "@alice first"
+    ; msg ~id:"m2" ~role:Store.Role.User ~speaker:owner "second"
+    ; msg ~id:"m3" ~role:Store.Role.User "@alice arrived during turn"
+    ]
+  in
+  let pending = MS.pending_messages_of_messages ~ack_id:"m2" ~targets lane in
+  check (list string) "only rows after exact ack remain"
+    [ "@alice arrived during turn" ]
+    (List.map (fun (message : MS.pending_message) -> message.content) pending)
+;;
+
+let test_all_pending_rows_preserve_source_order_without_cap () =
+  let lane =
+    List.init 20 (fun index ->
+      msg
+        ~id:(Printf.sprintf "m%d" index)
+        ~role:Store.Role.User
+        (Printf.sprintf "@alice message-%d" index))
+  in
+  let pending = MS.pending_messages_of_messages ~targets lane in
+  check int "no fixed pending cap" 20 (List.length pending);
+  check (list string) "source order preserved"
+    (List.init 20 (fun index -> Printf.sprintf "message-%d" index))
+    (List.map
+       (fun (message : MS.pending_message) ->
+          String.sub message.content 7 (String.length message.content - 7))
+       pending)
+;;
+
+let () =
+  run "keeper_mention_scope"
+    [ ( "boundary_mention_match"
+      , [ test_case "plain" `Quick test_plain_mention
+        ; test_case "alicex_not_matched" `Quick test_alicex_not_matched
+        ; test_case "email_not_matched" `Quick test_email_not_matched
+        ; test_case "case_insensitive" `Quick test_case_insensitive
+        ; test_case "trailing_punct" `Quick test_trailing_punct
+        ; test_case "no_mention" `Quick test_no_mention
+        ; test_case "empty_targets" `Quick test_empty_targets
+        ] )
+    ; ( "pending_mentions_of_messages"
+      , [ test_case "unanswered_pending" `Quick test_unanswered_mention_is_pending
+        ; test_case "answered_cleared" `Quick test_answered_mention_is_cleared
+        ; test_case "rementioned_pending" `Quick test_rementioned_after_reply_is_pending
+        ; test_case "assistant_self_ignored" `Quick test_assistant_self_mention_ignored
+        ; test_case "empty_carrier_row_not_an_answer" `Quick
+            test_empty_carrier_row_does_not_answer_the_delivery
+        ] )
+    ; ( "pending_scope_of_messages"
+      , [ test_case "owner_unmentioned_is_scope" `Quick test_owner_unmentioned_line_is_scope
+        ; test_case "owner_mention_not_scope" `Quick test_owner_mention_is_not_scope
+        ; test_case "external_unmentioned_ignored" `Quick test_external_unmentioned_is_not_scope
+        ; test_case "answered_owner_cleared" `Quick test_answered_owner_line_is_cleared
+        ] )
+    ; ( "causal_acknowledgement"
+      , [ test_case "skewed_clock_cannot_unanswer" `Quick test_skewed_clock_cannot_unanswer
+        ; test_case "ts_fuzz_invariant" `Quick test_ts_fuzz_does_not_change_pending
+        ; test_case "tool_lines_do_not_clear" `Quick test_tool_lines_do_not_clear
+        ; test_case "transport_failure_does_not_clear" `Quick
+            test_transport_failure_does_not_clear
+        ; test_case "voice_audio_self_output_not_recent_context" `Quick
+            test_voice_audio_self_output_is_not_recent_context
+        ; test_case "unrelated_assistant_does_not_clear" `Quick
+            test_unrelated_assistant_does_not_clear_pending
+        ; test_case "ack_clears_only_injected_prefix" `Quick
+            test_ack_clears_only_injected_prefix
+        ; test_case "all_rows_source_order_no_cap" `Quick
+            test_all_pending_rows_preserve_source_order_without_cap
+        ] )
+    ; ( "fleet_messages"
+      , [ test_case "projected_broadcast_reaches_layer" `Quick
+            test_projected_broadcast_reaches_the_layer
+        ; test_case "addressed_row_not_fleet" `Quick test_addressed_row_is_not_fleet
+        ; test_case "owner_row_not_fleet" `Quick test_owner_row_is_not_fleet
+        ; test_case "keeper_direct_row_scope_not_fleet" `Quick
+            test_keeper_direct_row_is_scope_not_fleet
+        ; test_case "keeper_broadcast_row_fleet_not_scope" `Quick
+            test_keeper_broadcast_row_is_fleet_not_scope
+        ; test_case "connector_row_not_fleet" `Quick test_connector_row_is_not_fleet
+        ; test_case "own_assistant_not_fleet" `Quick test_own_assistant_line_is_not_fleet
+        ; test_case "zero_limit_disables" `Quick test_zero_limit_disables_the_layer
+        ; test_case "limit_keeps_newest_in_order" `Quick
+            test_limit_keeps_the_newest_in_arrival_order
+        ; test_case "rows_partition_across_lanes_and_fleet" `Quick
+            test_rows_partition_across_lanes_and_fleet
+        ] )
+    ]
+;;

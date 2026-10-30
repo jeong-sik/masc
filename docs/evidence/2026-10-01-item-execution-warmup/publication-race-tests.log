@@ -1,0 +1,9 @@
+
+ RUN  v5.0.2 /private/tmp/masc-40466-review-response-20261001/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  24 passed (24)
+   Start at  19:15:10
+   Duration  1.83s (import 32%, transform 22%, environment 19%, setup 17%, tests 10%)
+

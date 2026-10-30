@@ -1,0 +1,29 @@
+[
+  {
+    "operation_id": "kmsg-96fbfa3ff1f7b5a11207b554a6bd0a01",
+    "state": "failed",
+    "created_at": 1788998654.430488,
+    "started_at": 1788998654.432416,
+    "completed_at": 1788998654.509221,
+    "failure_kind": "Turn_exception",
+    "failure_detail": "turn_failed: Missing env var: KIMI_API_KEY"
+  },
+  {
+    "operation_id": "kmsg-3b0d820c21168eca6bd64774fb15f02b",
+    "state": "succeeded",
+    "created_at": 1788998880.360979,
+    "started_at": 1788998884.057089,
+    "completed_at": 1788998987.125933,
+    "failure_kind": null,
+    "failure_detail": null
+  },
+  {
+    "operation_id": "kmsg-12af2a401bea7ba73e1e7319a53f5200",
+    "state": "succeeded",
+    "created_at": 1788999405.443757,
+    "started_at": 1788999418.857974,
+    "completed_at": 1788999467.520531,
+    "failure_kind": null,
+    "failure_detail": null
+  }
+]

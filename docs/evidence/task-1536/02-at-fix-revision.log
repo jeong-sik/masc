@@ -1,0 +1,13 @@
+# receipt: at-fix-revision checks (task-1536) -- clean rerun
+branch=polish/task-1536-credential-freeze-red head=9140a6a13a70f3564fd0e52fbe710dc7d93cad6c
+fix_commit=9140a6a ancestor_of_head=yes
+utc=2026-09-11T21:39:24Z
+
+% dune build @check
+check_exit=0
+% dune runtest --force packages/agent_core/lib/llm_provider
+[llm_provider] [INFO] [backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"glm","provider_instance_id":"ff8c77493949cab1772a41cfeeb8a709701f952c3cc5ee298b794eb3b5f3655d","canonical_model_id":"glm-5","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":1,"replay_policy_excluded":1,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[llm_provider] [WARN] [backend_openai] dropping request field min_p for model glm-5.1: capability record reports supports_min_p = false. Update Capabilities.for_model_id if this model actually supports it, otherwise remove the field from your request config.
+[llm_provider] [WARN] [backend_openai] dropping request field top_k for model glm-5.1: capability record reports supports_top_k = false. Update Capabilities.for_model_id if this model actually supports it, otherwise remove the field from your request config.
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 8000 to the output ceiling 4096 (catalog model row) for model glm-4-flash: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+llmprovider_exit=0

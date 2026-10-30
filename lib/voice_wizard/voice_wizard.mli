@@ -1,0 +1,141 @@
+(** Voice_wizard — the steps of setting up one voice endpoint, without any I/O.
+
+    A wizard is a sequence of questions whose shape depends on the answers
+    already given, plus the rule that decides when enough has been answered.
+    Both live here, so the TUI and a later dashboard ask the same questions in
+    the same order and refuse the same incomplete drafts. Neither this module
+    nor anything it returns reads a file, opens a socket, or looks at the clock.
+
+    What it produces is a {!Voice_setup.change} list, which is what actually
+    reaches runtime.toml. It does not decide whether an endpoint works: that is
+    what the endpoint probes answer ([masc voice-verify]), measured
+    against the endpoint itself. A wizard that judged an address by looking at it would
+    be guessing. *)
+
+type provider =
+  | Macos_say
+  | Espeak_ng
+  | Whisper_cli
+  | Elevenlabs
+  | Openai_compatible
+  | Mcp_tool
+
+val provider_label : provider -> string
+val provider_of_label : string -> provider option
+
+val providers_for : Voice_setup.section -> provider list
+(** Which providers can serve this section, in the order they are offered.
+    [Mcp_tool], [Macos_say] and [Espeak_ng] are offered for speech out and not
+    for speech in: all three synthesize and have no transcribe path.
+    [Whisper_cli] is the mirror, offered for speech in only. The command kinds
+    lead their side: they need no address and no key, so what they cost is
+    whether the command
+    is on the machine. *)
+
+type draft =
+  { section : Voice_setup.section
+  ; provider : provider
+  ; endpoint_id : string
+  ; address : string
+      (** [base_url] for an HTTP provider, [mcp_url] for {!Mcp_tool}. Blank is
+          allowed for {!Elevenlabs}, which then resolves to
+          {!Voice_config.default_elevenlabs_base_url}. *)
+  ; credential_variable : string
+      (** Name of the environment variable holding the key, never the key. A
+          wizard that took the secret itself would put it in runtime.toml,
+          which is committed. *)
+  ; model : string
+  ; voice : string  (** [tts.default_voice]. Unused for speech in. *)
+  ; timeout_seconds : float option
+  }
+
+val blank : section:Voice_setup.section -> provider:provider -> draft
+(** A draft with the defaults that provider implies and nothing else filled in.
+    [Elevenlabs] arrives with its credential variable and address already set to
+    the usual ones, because they are the same on every workstation; nothing
+    else is guessed. *)
+
+val suggested_addresses : Voice_setup.section -> (string * string) list
+(** [(what it is, address)] starting points for a local server, to save typing.
+
+    Not a list of supported products, and not a claim that anything is running:
+    the wizard cannot tell what is listening on a port, and the probe is what
+    decides. A starting point that is wrong costs one edit. *)
+
+type gap =
+  | Endpoint_id_is_blank
+  | Address_is_blank
+  | Credential_variable_is_blank
+  | Model_is_blank
+  | Voice_is_blank
+
+val gap_message : gap -> string
+
+val gaps : draft -> gap list
+(** What this draft still needs, in the order the steps ask for it. Empty
+    exactly when {!changes} answers [Ok].
+
+    Which fields are required depends on the provider: an OpenAI-compatible
+    endpoint needs an address and can go without a credential (omitting it is
+    what keeps the Authorization header off a local server that never asked for
+    one), while ElevenLabs needs the credential and can go without an address.
+    A command kind needs neither: [Macos_say] needs only a name, because it is
+    asked for a voice rather than a model, and [Whisper_cli] needs the name and
+    the model file it loads. *)
+
+val changes
+  :  draft
+  -> alongside:Voice_config.endpoint_kind option list
+  -> (Voice_setup.change list, gap list) result
+(** The changes this draft describes, or what it is still missing. [alongside]
+    is the kinds already in the section this endpoint is going into, empty when
+    there is none yet.
+
+    The model is written on the endpoint, not as the section's
+    [default_model], so adding a provider leaves the model every other endpoint
+    in the section is asked for as it was.
+
+    The voice goes wherever {!Voice_setup.voice_placement} says, which is what
+    [alongside] is for: a voice name is provider vocabulary, so a section
+    default written over one another kind reads hands that endpoint a voice it
+    cannot resolve. *)
+
+type step =
+  | Section
+  | Provider
+  | Name
+  | Address
+  | Credential
+  | Model
+  | Voice
+  | Review
+
+val steps : draft -> step list
+(** The questions this draft has to answer, in order. Depends on the provider
+    and the section: ElevenLabs is not asked for an address, an MCP tool is not
+    asked for a credential, and speech in is not asked for a voice. *)
+
+val step_prompt : step -> string
+(** One line asking for that step, in the second person. *)
+
+val step_gap : step -> gap option
+(** The gap a step fills, when it fills one. [Review] fills none. *)
+
+val save_request
+  :  draft
+  -> revision:string
+  -> alongside:Voice_config.endpoint_kind option list
+  -> (Yojson.Safe.t, gap list) result
+(** The body for [POST /api/v1/voice/setup]: the revision this draft was written
+    against, and the changes it describes.
+
+    The wire shape is the server's to read -- it parses back into the closed sum
+    type before it means anything. Producing it here keeps one spelling of it on
+    the sending side: a TUI and a dashboard that each wrote their own would
+    drift, and the drift would show only as a request the server refuses. *)
+
+val with_section : draft -> Voice_setup.section -> draft
+(** Move a draft to the other side. The provider is re-picked when the current
+    one does not serve the new side -- an MCP tool speaks and does not listen --
+    and everything but the endpoint's name is reset with it, since the rest is
+    provider vocabulary. *)

@@ -1,0 +1,433 @@
+{
+  "captures": [
+    {
+      "stem": "dashboard-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Health: ok"
+      ],
+      "text_sha256": "65fc709373f59247e93f450f5bcf208d6f8c57c3537566350fb94af5f3de920a",
+      "png_sha256": "31532e881b6b9d29a3ad21711dedf150c8d51986219eb7e6a277050b69f931c8"
+    },
+    {
+      "stem": "work-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Audit goal"
+      ],
+      "text_sha256": "5b2e2b7f38d75cc40ba95568afdea7efc25077198fa49cc5f236ab0b72287668",
+      "png_sha256": "dcf14a3ece17c918d9dd8c22b4ad0f3a554cf6e8ab7bb84374971b8bff599840"
+    },
+    {
+      "stem": "keepers-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "alpha",
+        "beta"
+      ],
+      "text_sha256": "288ef03e090ba9f5e4b3854aa4f6f41f8b70cb25d6f8aaf991e82c276630f683",
+      "png_sha256": "571da535388af068d8b6ffe79a47d21bf565c1a39098a7885c0825b8d862ddfd"
+    },
+    {
+      "stem": "keeper-info-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Name:",
+        "alpha"
+      ],
+      "text_sha256": "82b49bcc543830fd9b7d80f165f98f2cecf6566d3e577771b22f14797cfc3daa",
+      "png_sha256": "816fe9780f12bad19fdef9e95501b4b009181782530980b7571b1bebefdf70dc"
+    },
+    {
+      "stem": "keeper-chat-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Keepers ▸ alpha ▸ chat",
+        "Context"
+      ],
+      "text_sha256": "ed5d0952ef1985301694b98790174f16aaed84134b2e8eed63be96a236299228",
+      "png_sha256": "c999a58532010c5ad04b7ec8d60ebabcdf6a11f26e20fc2534a708b57b0160da"
+    },
+    {
+      "stem": "usage-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Audit provider",
+        "40%"
+      ],
+      "text_sha256": "a96eb27c753fd498b44391f15635470fc0908c2de247ec070608231fce122e7b",
+      "png_sha256": "44a2f697ad48d69957d12085ebb123f943a0529d5bcd0485faeea1ac229a0971"
+    },
+    {
+      "stem": "board-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Sort [s]",
+        "댓글 폭 기준 화면"
+      ],
+      "text_sha256": "6fd529b46e2303f087a8510aa7d9f0c563444ea8db10165faa38264be1eb4244",
+      "png_sha256": "a39dd9a0afa03cacf5c75627b57674f0fdc55f16e4452a3727ebd10943a26232"
+    },
+    {
+      "stem": "workspace-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "/srv/masc/workspace/masc"
+      ],
+      "text_sha256": "f7b5ec8305851eceba84c8def97621fbf424e85d9ee43d698f8e7dcd6395be1d",
+      "png_sha256": "b5f6a5f4b09404d6e96ec0109633f2c84034e637417f6f70cc6796825fab4cff"
+    },
+    {
+      "stem": "system-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "runtime config load failed:"
+      ],
+      "text_sha256": "9bb41b79441c9c08129edb2314c670c21967e73f49c6c0ba6eada7ff3218f0c5",
+      "png_sha256": "c185295126ee36742af6f9df2bcdfa11635c72a66730eb469cbeb50237a7720f"
+    },
+    {
+      "stem": "board-detail-80",
+      "terminal": {
+        "columns": 80,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Comments",
+        "긴 댓글 본문은"
+      ],
+      "text_sha256": "650458cb2ba0ff9567236dd75e1511a9bcd42dd043c3a7f351331f065851526b",
+      "png_sha256": "8b47d2a8eaae5614fb550fa56a12413900099f39c3f3b3492d4f7379b02c6930"
+    },
+    {
+      "stem": "dashboard-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Health: ok"
+      ],
+      "text_sha256": "8ab5a3ff8746b9aab7a62475611fd9ba06d0c4e92a1b499d37a0b12d01061163",
+      "png_sha256": "c40f0b6931c203e3901ed039f96f1355acd3ecc8f50c5062959d73b77a075de6"
+    },
+    {
+      "stem": "work-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Audit goal"
+      ],
+      "text_sha256": "b3a283a98721ae122cf59e9af3fcc3af4d2110b2c84d8a4b37faa02e73d46d7f",
+      "png_sha256": "add88a82fe65d051de98ee96ee989d4e86799b4e78f49f29c7ee77fb5dce1855"
+    },
+    {
+      "stem": "keepers-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "alpha",
+        "beta"
+      ],
+      "text_sha256": "4c96f984988581e801c128c302cecf1a1aaa6130a46c14f4a2b7c49e78834e44",
+      "png_sha256": "4450d1ea249b334d28dd9f91f210d4cc096ec95a9185cc04de3640de746b2900"
+    },
+    {
+      "stem": "keeper-info-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Name:",
+        "alpha"
+      ],
+      "text_sha256": "5f36cb6e2b0722be6a470451cac3e6bbecf0a090a07a715e9e5f8b621a856326",
+      "png_sha256": "17f3fa339f634dcfa5b0d2f263515e0995b6981787b3d5c5eb91fa8341c04d5c"
+    },
+    {
+      "stem": "keeper-chat-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Keepers ▸ alpha ▸ chat",
+        "Context"
+      ],
+      "text_sha256": "6cc47ccbe7f67ab89b572bed53e53ccc6596e6f5d1ee2c03a64f72bbb8e9834b",
+      "png_sha256": "91eb26bae28d98a6722f6c3cd8530f15e7bcdf28784263b4c50934f80a9b4153"
+    },
+    {
+      "stem": "usage-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Audit provider",
+        "40%"
+      ],
+      "text_sha256": "b9ab956d57dc5e44124a1d0209af2657c0b73568878aaa19dc485e79bf8c25d2",
+      "png_sha256": "9d8dc6169c0f66a66b7635ba35f677ecf50ae6ae6f3a385e04be497d317bc9f5"
+    },
+    {
+      "stem": "board-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Sort [s]",
+        "댓글 폭 기준 화면"
+      ],
+      "text_sha256": "3ee69d06bc1d1d39fd3b998d8738e750fe7255d9866c374d2da00a783395dc81",
+      "png_sha256": "79a0e089b18eabac580b62a49eb32aceee28cb9282dfd93896ca831c59a80cbd"
+    },
+    {
+      "stem": "workspace-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "/srv/masc/workspace/masc"
+      ],
+      "text_sha256": "d63f4da880875e737fd661e8b02fb129d3d71bf0206c958647614a9ede2a8924",
+      "png_sha256": "09506e7c6932be510ce1568be2cc63694699c1d3400fc31a81de3c5e5dbe6ac6"
+    },
+    {
+      "stem": "system-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "runtime config load failed:"
+      ],
+      "text_sha256": "9ab84f2731e7c06951b531d53b2b433f27fc1a716a97605d212507643d245597",
+      "png_sha256": "dd4f7bbde11bc38ad941727973505aad7849d8c67cb89d1451d11228e270b44a"
+    },
+    {
+      "stem": "board-detail-120",
+      "terminal": {
+        "columns": 120,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Comments",
+        "긴 댓글 본문은"
+      ],
+      "text_sha256": "3af1ffa0ddc60e1d4a7288ce9628d35bdce9300493a65d7d2e666bed9c798282",
+      "png_sha256": "72f93bbdeac332414308c4585599e52c7d30e27ad0fbbc42a6e45c765d38eb8e"
+    },
+    {
+      "stem": "dashboard-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Health: ok"
+      ],
+      "text_sha256": "d8cecdc1fc5d9cdb4ba559fdd1d3de5f0af944bef7a57d0810b00142722416e4",
+      "png_sha256": "82c14e9641d39b7e305c91f25b7f19980f83e6688a44a5c9a8e5f5f313e8cb9a"
+    },
+    {
+      "stem": "work-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Audit goal"
+      ],
+      "text_sha256": "659796722b901c1448f607a972d74443dbafaf024b2622f8d769480a698fe62b",
+      "png_sha256": "827b57e92c371bf3848a255279bdba53210fad9137fa8980d53d12d47eb4ad43"
+    },
+    {
+      "stem": "keepers-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "alpha",
+        "beta"
+      ],
+      "text_sha256": "e8d5bfaccb7d2b6ebaa6e551aefa0a0c745da82a001a78182caa656166d1689c",
+      "png_sha256": "696e8caafb370c2c517ba113892cbad7e27c815f45ed4d3fc10a4a69bad1289c"
+    },
+    {
+      "stem": "keeper-info-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Name:",
+        "alpha"
+      ],
+      "text_sha256": "38cf395bdf436ace3879305b4f5741a7d88da03c5f6ab6b405b04f1ba548a63f",
+      "png_sha256": "bd59d9d706fc4c3f8ac29a7ae3f9b9ee232ea131dcf861c10b1c0b724857686a"
+    },
+    {
+      "stem": "keeper-chat-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Keepers ▸ alpha ▸ chat",
+        "Context"
+      ],
+      "text_sha256": "85ae0b61eb02211cab3da6b40cdad2fa48ab1c9448de7d97f1afeac5dc0d0f4b",
+      "png_sha256": "06eb2cf0886ad0ecfa58acfb4b3d2a05d42252684edd0c25e921a47434db29f1"
+    },
+    {
+      "stem": "usage-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Audit provider",
+        "40%"
+      ],
+      "text_sha256": "0c421bfdd0432779c80c74300724609b4b6af6e5e8a3b16bc39e2c0737cf7e39",
+      "png_sha256": "162bcdfb1094ef7c87d58fb1076afce0debd076342039e41dd41da2696270b9b"
+    },
+    {
+      "stem": "board-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Sort [s]",
+        "댓글 폭 기준 화면"
+      ],
+      "text_sha256": "5c09a53edee1227a078e296757518b19f2ef81f71077dc3c804a07be33971407",
+      "png_sha256": "362d64cd8c81eeec5e8d0b59483caec351cc2b3d9edc85a9508857d826aba165"
+    },
+    {
+      "stem": "workspace-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "/srv/masc/workspace/masc"
+      ],
+      "text_sha256": "65f0e866e5a3c07e5e162435f6f45ee51692df9a6f5da0b43524315deeb52f83",
+      "png_sha256": "bc0d6c7ad44274809d5dca3cd5ee478a444d922402fcd582abdb0b46a22282e8"
+    },
+    {
+      "stem": "system-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "runtime config load failed:"
+      ],
+      "text_sha256": "146663f5a4bc360f42ac2da22efbcdbfbc3b58620d01c958cacb921a1257a334",
+      "png_sha256": "134615e6a462bf73ee2397db7a8ad1056b34cc96329048cb09c67cfa17e1f21b"
+    },
+    {
+      "stem": "board-detail-240",
+      "terminal": {
+        "columns": 240,
+        "rows": 32
+      },
+      "provenance": "exact_main_binary_fixture_PTY",
+      "ready_markers": [
+        "Comments",
+        "긴 댓글 본문은"
+      ],
+      "text_sha256": "5e013661eb24d488a462601fd48bb0cc83e15cf2d26e8280fd0ea83fd57cdb25",
+      "png_sha256": "1e7d9c46bbcc951e783ec30f0cdf8ec18c993e53de0decc5920d2190be758fae"
+    }
+  ],
+  "complete": true,
+  "limitations": [
+    "Synthetic fixture data",
+    "Direct native executable only; no wrapper provenance claim",
+    "Missing fixture API returns HTTP503",
+    "Terminal dimensions are measured, not filename values"
+  ],
+  "binary_commit": "6458f92ef3d407bd9bacfbfcf25548c06fb0be27",
+  "binary_sha256": "bc8f1aa0d6a2d29add31d98be53252f0e52e220d5ceebfd8dbef29b9560a3283",
+  "launched_executable": "/private/tmp/masc-layout-baseline-main-20261002",
+  "input_sha256": {
+    "executable": "bc8f1aa0d6a2d29add31d98be53252f0e52e220d5ceebfd8dbef29b9560a3283",
+    "capture_script": "d699f5ac65c6bd970f14ddc2795cacba278b47bc68bcaef072457c21fa034430",
+    "fixture_helper": "56246f6e87174c28b1cc9cdd83519a9ad5b81eb9edb66c27fee666fad3e81f9e",
+    "terminal_helper": "5e332f6c0a06fd74c638b6c42b51a61037ca1e5a6594b429c032e7f95b407d4c"
+  },
+  "fixture_parameters": {
+    "author": "wkbl-layout-reviewer-with-long-name",
+    "board_only": false
+  },
+  "fixture_sha256": "eb2b61b7fcb3e834cd5a715f69bdac8ae42e0650f43aee1d7d887af854a5f70a"
+}

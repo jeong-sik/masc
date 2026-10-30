@@ -1,0 +1,67 @@
+{
+  "schema": "masc.independent-source-review.v2",
+  "review_date": "2026-10-26",
+  "reviewer": "/root/concurrent_probe_review",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026",
+  "parent_revision": "4ac6dce147d735d74440263ad79071da34d77878",
+  "application_api_authority": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "checkout_head": "4ac6dce147d735d74440263ad79071da34d77878",
+  "diff_sha256": "edbc65cd679a6a5c3d57da12136635a0b42cec832ee5d0d51c046f46f1b0ddeb",
+  "diff_bytes": 35929,
+  "diff_options": [
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-color",
+    "--binary"
+  ],
+  "files": [
+    {
+      "path": "scripts/harness/perf/README-keeper-scale-session.md",
+      "sha256": "0ab3b926cde79ef7cd325733b489fc5d2cd2d7cddc18fd324367d6ff1ec8b36e",
+      "bytes": 5494,
+      "lines": 94,
+      "parent_sha256": "b85d749288a6c56ab3048a7184ec5402215d39a37d1e9ad63c0763071f6541a0"
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_fault_probe.py",
+      "sha256": "bb788cb70fe91301f922b5b8aedc257f039e92b5a87fefebe3b6beb0e34b5822",
+      "bytes": 14182,
+      "lines": 240,
+      "parent_sha256": "39813847175b0ad83c92a904bd159533af5e96d318a286fc19af3e8d48cee9e8"
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_packet_audit.py",
+      "sha256": "e355de804fbf64d9f52237f9ffdb3ba0e1c04fe424a1874f674fb6fad2b739f0",
+      "bytes": 26417,
+      "lines": 408,
+      "parent_sha256": "d90322b27342bc392913a831678ec155f9bac1975eb6963ec6c1e305165383a5"
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_session.py",
+      "sha256": "c9e8f173d4e69b4c63d3472c15d8b7377501875d4b6f455028e899288662f9da",
+      "bytes": 55094,
+      "lines": 1013,
+      "parent_sha256": "ab5157338bea4e3f019bac7c5f856d135f8f9875b00b6624a2a1178b73000f29"
+    }
+  ],
+  "native_executions": 0,
+  "local_dune_builds": 0,
+  "ci_or_network_queries": 0,
+  "target_edits": 0,
+  "batch_projection_authority": {
+    "path": "lib/keeper_chat_operations/keeper_chat_operation_store.ml",
+    "c3cb_sha256": "709cefc00acfd3711b0c8f0731ed874e17bf8958bfc6186b2575725267214398",
+    "parent_sha256": "709cefc00acfd3711b0c8f0731ed874e17bf8958bfc6186b2575725267214398",
+    "c3cb_equals_parent": true,
+    "lines": [
+      500,
+      512,
+      1857,
+      1878,
+      3010,
+      3016
+    ]
+  },
+  "validation_scope": "Independent source review plus allowed pure Python fault probes; no MASC native or local Dune execution.",
+  "freeze_notice": "Hashes bind reviewed.diff and original frozen four file bytes; later target worktree changes are outside this review."
+}

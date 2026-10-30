@@ -1,0 +1,28 @@
+[
+  {
+    "ts": 1789049004.843552,
+    "keeper": "exhibit-editor",
+    "tool": "masc_goal_transition",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "completed",
+    "input": {
+      "action": "request_complete",
+      "goal_id": "exhibition-publication-baseline",
+      "note": "성공 조건 5개에 대한 증거 (사람 최종 확인은 아직 미확정 상태임을 명시):\n\n1) booklet.pdf 실재: 102,608 bytes, SHA-256 ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb (evidence.json files[0], 해시 재계산 일치 확인).\n2) 실제 PDF 3페이지: %PDF- 헤더 확인 + /Type /Page 3개 (파이프라인 CHECK pdf-pages-3 OK).\n3) PDF 원본 렌더링 PNG 3장: renders/page1~3.png는 최종 booklet.pdf를 pdftoppm -r 150으로 직접 렌더링(1241x1754). 독립 검수에서 검수자가 PDF에서 별도 렌더링한 3장과 픽셀 단위 일치 확인. 시각 검수 4장 모두 한글 글리프 깨짐·겹침·잘림 없음, '입장료: 무료'와 허구 고지 '※ 본 행사는 허구로 구성되었습니다.' 픽셀 확인.\n4) poster.png 실재·표기: 86,709 bytes(제 작업공간 대체본, exhibit-designer 확정 팔레트·폰트), 제목 '기억의 정원', 대상 '초등학교 고학년과 보호자', 일시 2026-10-17(토) 14:00-17:00, 장소 은빛정류장 전시실, 입장료 무료 표기. 인쇄 최종 포스터는 exhibit-designer본(484,694 bytes, SHA-256 1e4a8fc1...3ebad16, board 무결성 검증)이며 evidence.json poster_final에 기록, 협업 기록은 p-c36a80b0af5448a967fcfdae547f263f 댓글.\n5) evidence.json 기록: 5개 파일의 경로·바이트·SHA256 전부 수록, page_count=3. 독립 검수에서 바이트·해시 전부 일치 확인. 부수 정정: page_render_size [1240,1754]→[1241,1754] 실측 반영(corrections 배열에 변경 사유·시각 기록, 5개 해시 불변 재확인)."
+    },
+    "output": "{\"status\":\"ok\",\"goal_id\":\"exhibition-publication-baseline\",\"action\":\"request_complete\",\"goal\":{\"id\":\"exhibition-publication-baseline\",\"criterion_revision\":\"c36f5a9061458b3efbeb8cbb2cacfc6b\",\"title\":\"가상 전시 출판물 완성\",\"metric\":\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.\",\"target_value\":\"5개 기준 모두 충족\",\"due_date\":null,\"priority\":3,\"phase\":\"verifying\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-09-10T12:16:35Z\",\"updated_at\":\"2026-09-10T14:03:24Z\"},\"verification\":{\"goal_id\":\"exhibition-publication-baseline\",\"completion\":{\"state\":\"proof_pending\",\"requested_at\":\"2026-09-10T14:03:24Z\",\"request_id\":\"2ab52c7b22e15b3e1fa4eaa4bcfdf455\",\"criterion\":{\"revision\":\"c36f5a9061458b3efbeb8cbb2cacfc6b\",\"title\":\"가상 전시 출판물 완성\",\"metric\":\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.\",\"target_value\":\"5개 기준 모두 충족\"}},\"updated_at\":\"2026-09-10T14:03:24Z\"}}"
+  },
+  {
+    "ts": 1789049034.201995,
+    "keeper": "exhibit-editor",
+    "tool": "masc_board_post",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "disposition": "completed",
+    "input": {
+      "content": "Goal exhibition-publication-baseline 완료 검증 요청 (exhibit-editor)\n\n- 상태: verifying / proof_pending (request_id 2ab52c7b22e15b3e1fa4eaa4bcfdf455, 2026-09-10T14:03:24Z). 사람 최종 확인은 아직 미확정.\n- 5개 기준 증거: evidence.json 기준 — booklet.pdf(102,608B, ebabc3f7…c3eb, 3페이지), PDF 직접 렌더링 renders/page1~3.png(1241x1754, 독립 검수 픽셀 일치), poster.png(제목·대상·행사 정보 일치; 인쇄 최종은 exhibit-designer본 484,694B, SHA 1e4a8fc1…3ebad16, poster_final 필드에 기록), 한글 글리프·겹침·잘림 없음(시각 검수 4장), 가상의 행사 명시 + 확정 정보만 표기.\n- 정정 기록: page_render_size [1240,1754] → 실측 [1241,1754] (corrections 배열에 사유·시각 기록, 5개 파일 해시 불변 재확인). PDF/PNG 재생성 없이 요약 필드만 정정.\n- 협업 기록: p-c36a80b0af5448a967fcfdae547f263f 댓글(c-a158ff5d…)에 exhibit-designer 최종 전달·'묣료' 왜곡 무효 처리·해시 근거 정리.",
+      "hearth": "ops",
+      "title": "Goal 완료 검증 요청 + evidence 정정 기록"
+    },
+    "output": "{\"id\":\"p-a42c4ec8976182be19bc3fc6489f6a1a\",\"author\":\"exhibit-editor\",\"title\":\"Goal 완료 검증 요청 + evidence 정정 기록\",\"body\":\"Goal exhibition-publication-baseline 완료 검증 요청 (exhibit-editor)\\n\\n- 상태: verifying / proof_pending (request_id 2ab52c7b22e15b3e1fa4eaa4bcfdf455, 2026-09-10T14:03:24Z). 사람 최종 확인은 아직 미확정.\\n- 5개 기준 증거: evidence.json 기준 — booklet.pdf(102,608B, ebabc3f7…c3eb, 3페이지), PDF 직접 렌더링 renders/page1~3.png(1241x1754, 독립 검수 픽셀 일치), poster.png(제목·대상·행사 정보 일치; 인쇄 최종은 exhibit-designer본 484,694B, SHA 1e4a8fc1…3ebad16, poster_final 필드에 기록), 한글 글리프·겹침·잘림 없음(시각 검수 4장), 가상의 행사 명시 + 확정 정보만 표기.\\n- 정정 기록: page_render_size [1240,1754] → 실측 [1241,1754] (corrections 배열에 사유·시각 기록, 5개 파일 해시 불변 재확인). PDF/PNG 재생성 없이 요약 필드만 정정.\\n- 협업 기록: p-c36a80b0af5448a967fcfdae547f263f 댓글(c-a158ff5d…)에 exhibit-designer 최종 전달·'묣료' 왜곡 무효 처리·해시 근거 정리.\",\"post_kind\":\"automation\",\"visibility\":\"internal\",\"created_at\":1789049034.199171,\"updated_at\":1789049034.199171,\"expires_at\":0.0,\"votes_up\":0,\"votes_down\":0,\"reply_count\":0,\"pinned\":false,\"hearth\":\"ops\",\"meta\":{\"source\":\"masc_board_post\"}}"
+  }
+]

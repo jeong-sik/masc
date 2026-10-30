@@ -1,0 +1,184 @@
+{
+  "schema": "masc.task-source.model-control-design-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T13:50:16.205504+00:00",
+  "reviewer": "repair_eval_metrics",
+  "verdict": "PASS_SCOPED_DESIGN_WITH_OBSERVATION_REQUIREMENTS",
+  "findings_P0_P1_P2": [],
+  "review_scope": "Static full wrapper/helper/proxy review plus immutable plan/adapter/failure receipts. No script import/execution, Git, API/provider/CI/Docker call, runtime observation or outcome certification.",
+  "declared_candidate": {
+    "source_sha": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "source_checkout_head": "5ef6623937fab2a04f10862605b7d7db56ab8bdb",
+    "canonical_goal_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "slot": "glm-coding.glm-5-3",
+    "configured_model": "glm-5.3",
+    "identity_status": "Declared plan and source validation code checked; artifact/runtime identity was already verified by Root and is not independently reexecuted in this design review."
+  },
+  "controls": {
+    "metric": "1 exactly when the referenced submitted canonical Task row has status done; otherwise 0. The Goal tests this lifecycle observation only, not an approval certificate, external acceptance or actual Edit ordering.",
+    "reported_value_both": "1",
+    "target_value_both": "1",
+    "P": {
+      "precondition": "Positive controlled Task actually automatically approved; exact submitted canonical status done",
+      "expected_proof": "proof_proven",
+      "expected_phase": "awaiting_confirmation"
+    },
+    "N": {
+      "precondition": "Negative controlled Task remains in_progress without completion submission",
+      "expected_proof": "proof_refuted",
+      "expected_phase": "executing"
+    },
+    "explicit_source": "task:<exact controlled Task ID>",
+    "human_confirmation_performed": false
+  },
+  "design_assessment": [
+    {
+      "topic": "Ownership and mutation boundary",
+      "result": "PASS_SCOPED",
+      "detail": "Fresh exclusive private root/base, free loopback ports, exact binary digest/embedded-source checks, source/prompt binding, root health checks and local client token bind the operator controls to an isolated receiver. Wrapper mutates only owned fixture artifacts, newly created controlled Tasks/Goals and required lifecycle/measurement/proof requests. No manual verdict or Goal confirmation API is called; original main Goal IDs are absent."
+    },
+    {
+      "topic": "Environment and lanes",
+      "result": "PASS_SCOPED",
+      "detail": "Helper permits a small process environment plus one selected credential reference, writes one provider/model runtime with singleton hitl_auto_judge/board_attention_exact/verifier_exact lanes and no CLI fallbacks. Proxy receives forwarded authorization only in memory and does not persist request headers. Actual health validation checks exact receiver source/hash/roots and verifier_exact admission; it does not itself certify the automatic Task judge lane or actual reported model."
+    },
+    {
+      "topic": "Plan and source binding",
+      "result": "PASS",
+      "detail": "Exclusive prepared plan fixes lifecycle mapping, report/target values, expected P/N outcomes and source. Prepare/launch inputs bind original wrapper/helper/proxy; a separate adapter repair receipt binds the repaired wrapper. Model controls remain unchanged. The helper rejects source/prompt or binary/embedded-source drift on launch. No fake provider/model answer or oracle-verdict injection is implemented."
+    },
+    {
+      "topic": "Actual automatic Task approval",
+      "result": "OBSERVATION_REQUIRED",
+      "detail": "Positive Task submits the real JSON artifact through the normal Task FSM and completion protocol. Script exposes no manual approval call. Its later status==done check alone does not prove automatic approval; actual automatic reviewer invocation, artifact input/read, structured verdict, accepted commit identity and primary Task state must be retained and checked separately."
+    },
+    {
+      "topic": "Source lookup and verdict observability",
+      "result": "PASS_CAPABILITY_NOT_RESULT",
+      "detail": "Private proxy preserves actual POST bodies/raw SSE responses and hash receipts without rewriting bodies. Goal proof source metadata and exact keeper_tasks_list call/result can be correlated through later sent messages and retained Original/request/criterion identities. Structured report_review_verdict must also bind to accepted registry/primary effects; a model-emitted call alone is not an accepted verdict. Repeated assistant history is not another source lookup."
+    },
+    {
+      "topic": "Snapshot completeness",
+      "result": "LIMIT_IDENTIFIED_AND_ROOT_ACKNOWLEDGED",
+      "detail": "Reused helper snapshot includes Goal files and retained owner JSON but not primary Task backlog/verification requests. Those Task originals need a separate frozen capture for automatic-approval attribution. Root reports adding separate Task/request/run and Goal-request proof captures; their actual contents/outcomes are outside this design verdict."
+    },
+    {
+      "topic": "Unblinded control",
+      "result": "LIMIT_EXPLICIT",
+      "detail": "P/N labels and Task titles/descriptions signal positive/negative or unfinished state. This can establish a scoped source-lookup/semantic-verdict integration example if actual lookup is observed, but cannot isolate source causality from hints, estimate reliability or support population/model-independence claims. Root explicitly accepted this limit."
+    },
+    {
+      "topic": "Host artifact path",
+      "result": "PASS_SOURCE_LAYOUT",
+      "detail": "The operator name is a safe unchanged path component, and its positive artifact location agrees with the existing shared playground producer layout. Submitted evidence is artifact:workspace/positive.json and does not change or counterfeit the actual read source."
+    }
+  ],
+  "instrumentation_recoveries": [
+    {
+      "kind": "prepare_path_failure",
+      "receipt": "prepare-failed-1/failure.json",
+      "sha256": "e374c837d8f5c484290378dc5a6881b2817642eec0f2d852ebbe9f98af84f83a",
+      "preserved_claim": "Initial unresolved macOS temporary-root spelling was rejected by helper owned-path comparison before plan/runtime creation; a subsequent dependent launch found no plan and created no process. Root records the empty-root failure rather than replacing it with prepared success.",
+      "repair": "Resolve wrapper ROOT before helper use.",
+      "review_limit": "Failure receipt and static early control flow read; no independent process history or provider execution audit here."
+    },
+    {
+      "kind": "post_effect_claim_parse_failure",
+      "receipt": "claim-adapter-failure.json",
+      "sha256": "a10c4ddf04b9340f7425b13a3abd8eb80dde8f2a435a70ba25b8985f5317d727",
+      "initial_wrapper_sha256": "ccb3b505f5acf1e80f05a5c814b76d18a7350cf4d88060ad07479a2a30d6a4e4",
+      "repaired_wrapper_sha256": "3eb4a1631db3f1ccc56b4b3cedce1724f1ca21a85fc7bc3dbe0c1c1b8b704a94",
+      "preserved_claim": "Old Client.call expected JSON text although the successful Task claim reply was plain text. Root observed committed Claimed state and did not retry creation/claim.",
+      "repair": "Task transition now retains the successful MCP envelope, checks typed primary status/assignee for claim/start, and offers explicit resume-positive only for that same Claimed Task. It continues start/submission with the production APIs; no verdict/payload substitution or metric change is introduced.",
+      "review_limit": "Repair source and receipts checked; Root executed the control, not this reviewer."
+    }
+  ],
+  "required_actual_result_evidence": [
+    "Exact server health source/binary/hash/effective roots and singleton actual lanes; raw provider-reported model per inference, not configured alias alone. Catalog GET requests are setup, not verifier inference.",
+    "Positive Task submission artifact hash/full bytes, verification request, actual automatic reviewer artifact input/read, structured APPROVE, typed system_llm_agent actor/run/request/verdict and primary Done commit. No manual verdict is allowed; producer operator fixture has no model identity to invent.",
+    "Negative primary Task stays InProgress without submission or approval; freeze canonical pre-proof row/revision and both Goal submitted source contents/hash.",
+    "For each Goal, exact criterion revision/current reported measurement/target and retained Original/schema/source snapshot must agree with actual sent provider messages.",
+    "Actual keeper_tasks_list with exactly the captured Task ID must resolve to its immutable canonical state, and that tool result must be present in the model input before the accepted structured verdict. Preserve failed lookup attempts and unknown response coverage.",
+    "Accepted structured Goal verdict, typed tool observations and registry/run/request/criterion/primary phase must correlate. Expected P is awaiting_confirmation, N executing; no person-confirmed completion is inferred.",
+    "Retain instrumentation failures, wrapper repair identity, run ordering and role scopes. Re-readback/publication does not add execution samples or statistical/model-family independence."
+  ],
+  "public_safety": {
+    "paths": "Only symbolic relative input/receipt names are recorded; no private host paths/endpoints/credentials/headers/raw thinking/full model outputs are copied.",
+    "input_file_hashes": [
+      {
+        "path": "model-controls.py",
+        "sha256": "3eb4a1631db3f1ccc56b4b3cedce1724f1ca21a85fc7bc3dbe0c1c1b8b704a94",
+        "bytes": 12596
+      },
+      {
+        "path": "canary.py",
+        "sha256": "a60067e9d5d3ba8c6ce194056db0754f49171a68b4715d821f9c7193fab89830",
+        "bytes": 23079
+      },
+      {
+        "path": "wire_proxy.py",
+        "sha256": "9ec19df518e28d16cb0bfb42a843115b4b820db4384a7787cd8ab517eca3bf60",
+        "bytes": 5021
+      },
+      {
+        "path": "initial-wrapper.py",
+        "sha256": "ccb3b505f5acf1e80f05a5c814b76d18a7350cf4d88060ad07479a2a30d6a4e4",
+        "bytes": 11540
+      },
+      {
+        "path": "repaired-wrapper.py",
+        "sha256": "3eb4a1631db3f1ccc56b4b3cedce1724f1ca21a85fc7bc3dbe0c1c1b8b704a94",
+        "bytes": 12596
+      },
+      {
+        "path": "plan-private.json",
+        "sha256": "6cc0b6bed6b4f21abdcd3324c534fdd05dfcdc1d70275c9cf7b7ab5fcffc100d",
+        "bytes": 2066
+      },
+      {
+        "path": "launch-inputs-private.json",
+        "sha256": "08fe7d353598baffe7e328acc2ecf48bf892592c5d93c777aa777b66990022ef",
+        "bytes": 263
+      },
+      {
+        "path": "adapter-repair.json",
+        "sha256": "06227b718f630a01cb0917a94240e8671de9d420bec2fa30cabf4d070393f93b",
+        "bytes": 309
+      },
+      {
+        "path": "claim-adapter-failure.json",
+        "sha256": "a10c4ddf04b9340f7425b13a3abd8eb80dde8f2a435a70ba25b8985f5317d727",
+        "bytes": 511
+      },
+      {
+        "path": "prepare-failed-1/failure.json",
+        "sha256": "e374c837d8f5c484290378dc5a6881b2817642eec0f2d852ebbe9f98af84f83a",
+        "bytes": 396
+      }
+    ],
+    "provider_endpoint_shape_readback": {
+      "https": true,
+      "userinfo": false,
+      "query_or_fragment": false,
+      "value_not_published": true
+    }
+  },
+  "static_checks": {
+    "wrapper_helper_proxy_AST_parse": "PASS without importing or executing scripts",
+    "launch_input_hash_links": "PASS",
+    "repaired_wrapper_receipt_hash_link": "PASS",
+    "plan_byte_hash": "6cc0b6bed6b4f21abdcd3324c534fdd05dfcdc1d70275c9cf7b7ab5fcffc100d",
+    "initial_source_to_repaired_source_diff_read": true,
+    "Git_API_CI_provider_Docker_calls": 0,
+    "original_source_plan_publication_or_runtime_edits": 0
+  },
+  "limitations": [
+    "This design PASS is neither actual Goal P/N success nor automatic Task approval certification. Root supplied interim actual notifications while review ran; no result has been promoted into this design verdict.",
+    "The experiment measures exact submitted Task lifecycle observation only. It does not prove an approval certificate, external acceptance, artifact edit ordering, autonomous Keeper implementation or original main Goal completion.",
+    "One configured GLM5.3 in Task/Goal verifier roles is not independent-model verification. Actual reported identity and unknown coverage require later raw receipt validation.",
+    "Predeclared controls are unblinded. No causal effect estimate, model reliability percentage, population pass rate, microVM/SSH grading or production installation claim is supported.",
+    "The helper retains private raw model responses. Publication must use an allowlist and exclude raw reasoning/headers/credentials/private paths; command state output and private snapshot files are not automatically public-safe.",
+    "No models, provider/API, Git, CI, Docker, server process, Task, Goal or original file was invoked or mutated by this reviewer. Only this external review.json was written."
+  ]
+}

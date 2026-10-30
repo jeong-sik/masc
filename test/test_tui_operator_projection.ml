@@ -1,0 +1,542 @@
+open Alcotest
+
+module Projection = Masc_tui_operator_projection
+
+let contains_substring text substring =
+  let text_length = String.length text in
+  let substring_length = String.length substring in
+  let rec loop index =
+    if index + substring_length > text_length then false
+    else if String.sub text index substring_length = substring then true
+    else loop (index + 1)
+  in
+  loop 0
+
+let string_option_to_json = function
+  | Some value -> `String value
+  | None -> `Null
+
+let approval_item_json ?(action_type = "namespace_pause")
+    ?(target_type = "workspace") ?(target_id = None)
+    ?(delegated_tool = "masc_pause")
+    ?(expires_at = Some "2026-08-21T12:15:00Z")
+    ?(actor = "masc-tui") ?trace_id token =
+  let trace_id = Option.value ~default:("trace-" ^ token) trace_id in
+  `Assoc
+    [ "confirm_token", `String token
+    ; "trace_id", `String trace_id
+    ; "actor", `String actor
+    ; "action_type", `String action_type
+    ; "target_type", `String target_type
+    ; "target_id", string_option_to_json target_id
+    ; "payload", `Assoc [ "reason", `String "operator requested" ]
+    ; "delegated_tool", `String delegated_tool
+    ; "created_at", `String "2026-08-21T12:00:00Z"
+    ; "expires_at", string_option_to_json expires_at
+    ]
+
+let default_items () =
+  [ approval_item_json "token-pause"
+  ; approval_item_json ~action_type:"keeper_probe"
+      ~target_type:"keeper" ~target_id:(Some "keeper.one")
+      ~delegated_tool:"masc_keeper_status" ~expires_at:None
+      "token-probe"
+  ]
+
+let snapshot_json ?(actor_filter = Some "masc-tui") ?(filter_active = true)
+    ?(visible_count = 2) ?(total_count = 3) ?(hidden_count = 1)
+    ?items ?(hidden_actors = Some [ `String "other-agent" ])
+    ?(confirm_required_actions = Some [ `Assoc [] ]) () =
+  let items = Option.value ~default:(default_items ()) items in
+  let optional_field name = Option.map (fun value -> name, `List value) in
+  let summary_fields =
+    [ Some ("actor_filter", string_option_to_json actor_filter)
+    ; Some ("filter_active", `Bool filter_active)
+    ; Some ("visible_count", `Int visible_count)
+    ; Some ("total_count", `Int total_count)
+    ; Some ("hidden_count", `Int hidden_count)
+    ; optional_field "hidden_actors" hidden_actors
+    ; optional_field "confirm_required_actions" confirm_required_actions
+    ]
+    |> List.filter_map Fun.id
+  in
+  `Assoc
+    [ ( "pending_confirm_envelope"
+      , `Assoc
+          [ "items", `List items; "summary", `Assoc summary_fields ] )
+    ]
+
+let test_current_contract () =
+  match Projection.decode_snapshot (snapshot_json ()) with
+  | Error err -> fail err
+  | Ok snapshot ->
+      check int "visible count" 2 snapshot.aps_visible_count;
+      check int "total count" 3 snapshot.aps_total_count;
+      check int "hidden count" 1 snapshot.aps_hidden_count;
+      check (option string) "actor scope" (Some "masc-tui")
+        snapshot.aps_actor_filter;
+      check bool "filter active" true snapshot.aps_filter_active;
+      (match snapshot.aps_items with
+       | pause :: probe :: [] ->
+           check string "pause token" "token-pause" pause.ap_token;
+           check (option string) "workspace target id" None pause.ap_target_id;
+           check (option string) "pause expiry"
+             (Some "2026-08-21T12:15:00Z") pause.ap_expires_at;
+           check string "payload" {|{"reason":"operator requested"}|}
+             (Yojson.Safe.to_string pause.ap_payload);
+           check (option string) "keeper target" (Some "keeper.one")
+             probe.ap_target_id;
+           check (option string) "nullable expiry" None probe.ap_expires_at
+       | _ -> fail "expected two approval items")
+
+let test_payload_terminal_projection () =
+  let rendered =
+    Projection.approval_payload_for_terminal
+      (`Assoc
+        [ "reason", `String "safe\027]0;owned\007\155\194\155done" ])
+  in
+  check bool "payload contains no ESC" false (String.contains rendered '\027');
+  check bool "payload contains no BEL" false (String.contains rendered '\007');
+  check bool "payload contains no raw or encoded C1 byte" false
+    (String.contains rendered '\155');
+  check bool "raw C1 byte is visible as inert evidence" true
+    (contains_substring rendered "\\x9B");
+  check bool "UTF-8 C1 code point is visible as inert evidence" true
+    (contains_substring rendered "\\u009B")
+
+let test_fails_closed () =
+  let malformed =
+    [ `Assoc []
+    ; `Assoc [ "pending_confirm_envelope", `Null ]
+    ; `Assoc
+        [ ( "pending_confirm_envelope"
+          , `Assoc [ "items", `String "not-a-list"; "summary", `Assoc [] ] )
+        ]
+    ; snapshot_json ~visible_count:1 ()
+    ; snapshot_json ~total_count:4 ()
+    ; snapshot_json ~actor_filter:None ()
+    ; snapshot_json ~filter_active:false ()
+    ; snapshot_json ~visible_count:(-1) ()
+    ; snapshot_json
+        ~items:
+          [ approval_item_json "duplicate"
+          ; approval_item_json "duplicate"
+          ]
+        ()
+    ; snapshot_json
+        ~items:
+          [ approval_item_json "token-pause"
+          ; approval_item_json ~actor:"other-agent" "token-probe"
+          ]
+        ()
+    ; snapshot_json ~hidden_actors:None ()
+    ; snapshot_json ~hidden_actors:(Some [ `Int 1 ]) ()
+    ; snapshot_json ~confirm_required_actions:None ()
+    ; snapshot_json ~confirm_required_actions:(Some [ `String "bad" ]) ()
+    ]
+  in
+  List.iteri
+    (fun index json ->
+      check bool (Printf.sprintf "malformed snapshot %d rejected" index) true
+        (Result.is_error (Projection.decode_snapshot json)))
+    malformed
+
+let confirm_response ?(status = "ok") ?(decision = "confirm")
+    ?(token = "token-pause") ?trace_id ?tool_name ?(include_result = true)
+    ?executed_trace_id ?result_status () =
+  let trace_id = Option.value ~default:("trace-" ^ token) trace_id in
+  let executed_trace_id = Option.value ~default:trace_id executed_trace_id in
+  let tool_name = Option.value ~default:"masc_pause" tool_name in
+  let fields =
+    [ Some ("status", `String status)
+    ; Some ("trace_id", `String trace_id)
+    ; Some ("decision", `String decision)
+    ; Some ("tool_name", `String tool_name)
+    ; (if include_result then Some ("result", `Assoc []) else None)
+    ; Option.map (fun value -> "result_status", `String value) result_status
+    ; Some
+        ( "executed_action"
+        , approval_item_json ~trace_id:executed_trace_id
+            ~delegated_tool:tool_name token )
+    ]
+    |> List.filter_map Fun.id
+  in
+  `Assoc fields
+
+let decode_confirm ?(token = "token-pause") decision json =
+  Projection.decode_confirm_response ~expected_token:token
+    ~expected_decision:decision json
+
+let test_confirm_response_status () =
+  (match decode_confirm Projection.Confirm (confirm_response ()) with
+   | Ok (Projection.Completed _) -> ()
+   | Ok (Projection.Deferred _ | Projection.Execution_failed _) ->
+       fail "ok response misclassified"
+   | Error err -> fail err);
+  (match
+     decode_confirm Projection.Confirm (confirm_response ~status:"deferred" ())
+   with
+   | Ok (Projection.Deferred _) -> ()
+   | Ok (Projection.Completed _ | Projection.Execution_failed _) ->
+       fail "deferred response misclassified"
+   | Error err -> fail err);
+  (match
+     decode_confirm Projection.Confirm
+       (confirm_response ~status:"error" ())
+   with
+   | Ok (Projection.Execution_failed _) -> ()
+   | Ok (Projection.Completed _ | Projection.Deferred _) ->
+       fail "execution error misclassified"
+   | Error err -> fail err);
+  check bool "deny accepted" true
+    (Result.is_ok
+       (decode_confirm Projection.Deny
+          (confirm_response ~decision:"deny" ~include_result:false
+             ~result_status:"not_executed" ())));
+  List.iter
+    (fun json ->
+      check bool "non-success status rejected" true
+        (Result.is_error (decode_confirm Projection.Confirm json)))
+    [ `Assoc [ "status", `String "error"; "message", `String "failed" ]
+    ; `Assoc [ "status", `String "unknown" ]
+    ; `Assoc []
+    ; `Assoc [ "status", `String "ok" ]
+    ; confirm_response ~decision:"deny" ()
+    ; confirm_response ~token:"other-token" ()
+    ; confirm_response ~trace_id:"other-trace"
+        ~executed_trace_id:"trace-token-pause" ()
+    ; confirm_response ~tool_name:"masc_other" ()
+    ; confirm_response ~include_result:false ()
+    ]
+
+let test_deny_response_fails_closed () =
+  List.iter
+    (fun json ->
+      check bool "invalid deny response rejected" true
+        (Result.is_error (decode_confirm Projection.Deny json)))
+    [ confirm_response ~status:"deferred" ~decision:"deny"
+        ~include_result:false ~result_status:"not_executed" ()
+    ; confirm_response ~decision:"deny" ~include_result:false ()
+    ; confirm_response ~decision:"deny" ~include_result:false
+        ~result_status:"executed" ()
+    ]
+
+let test_approval_flow_rejects_stale_results () =
+  (* [observe] never advances the generation itself (#37461, #37609 review):
+     only [begin_action] does. So an observation taken before an action
+     opens reads a generation the action then supersedes, and observing
+     again while that action is still open reads the action's own
+     generation back -- there is nothing left for a caller to suppress at
+     the [Flow] level; that decision (skip the read while an action is
+     open) lives at each call site via [action_inflight]. *)
+  let old_generation = Projection.Flow.observe Projection.Flow.initial in
+  let flow, action_generation =
+    match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok value -> value
+    | Error `Already_inflight -> fail "first action unexpectedly in flight"
+  in
+  check bool "pre-action observation is stale" false
+    (Projection.Flow.is_current flow old_generation);
+  check bool "action generation is current" true
+    (Projection.Flow.is_current flow action_generation);
+  check bool "observing during an open action reads the action's generation"
+    true
+    (Projection.Flow.observe flow = action_generation);
+  let unchanged, owned = Projection.Flow.finish_action flow old_generation in
+  check bool "stale completion does not own action" false owned;
+  check bool "stale completion cannot clear action" true
+    (Projection.Flow.action_inflight unchanged);
+  let finished, owned = Projection.Flow.finish_action unchanged action_generation in
+  check bool "current completion owns action" true owned;
+  check bool "current completion clears action" false
+    (Projection.Flow.action_inflight finished)
+
+(* task-1672: two fetches of one listing can be out at once, and the network
+   decides which lands first. The press clock alone cannot order them -- both
+   observed the same generation -- so the older answer, landing last, used to
+   put back what the newer one had replaced. *)
+let test_listing_order_keeps_the_newest_answer () =
+  let flow = Projection.Flow.initial in
+  let order = Projection.Listing_order.initial in
+  let order, older = Projection.Listing_order.dispatch order flow in
+  let order, newer = Projection.Listing_order.dispatch order flow in
+  let order, admitted = Projection.Listing_order.admit order flow newer in
+  check bool "the newer answer lands first and is shown" true admitted;
+  let order, admitted = Projection.Listing_order.admit order flow older in
+  check bool "the older answer landing last is dropped" false admitted;
+  let order, next = Projection.Listing_order.dispatch order flow in
+  let _order, admitted = Projection.Listing_order.admit order flow next in
+  check bool "a dropped answer does not hold back the next fetch" true admitted
+
+let test_listing_order_in_sequence_answers_all_land () =
+  let flow = Projection.Flow.initial in
+  let order = Projection.Listing_order.initial in
+  let order, first = Projection.Listing_order.dispatch order flow in
+  let order, admitted = Projection.Listing_order.admit order flow first in
+  check bool "first answer shown" true admitted;
+  let order, second = Projection.Listing_order.dispatch order flow in
+  let _order, admitted = Projection.Listing_order.admit order flow second in
+  check bool "second answer shown" true admitted
+
+(* #37461: separate listings keep separate sequences, so one listing's fetch
+   never drops another's answer. *)
+let test_listings_do_not_supersede_each_other () =
+  let flow = Projection.Flow.initial in
+  let stances, stance = Projection.Listing_order.dispatch Projection.Listing_order.initial flow in
+  let held, held_call = Projection.Listing_order.dispatch Projection.Listing_order.initial flow in
+  let _held, held_call_again = Projection.Listing_order.dispatch held flow in
+  let _stances, admitted = Projection.Listing_order.admit stances flow stance in
+  check bool "stance answer survives the held-call fetches" true admitted;
+  ignore held_call;
+  ignore held_call_again
+
+(* #37609 review: a press that opens after the fetch went out supersedes its
+   answer, whether the press is still open or already closed. *)
+let test_listing_order_press_supersedes () =
+  let order, ticket =
+    Projection.Listing_order.dispatch Projection.Listing_order.initial
+      Projection.Flow.initial
+  in
+  let flow, generation =
+    match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok value -> value
+    | Error `Already_inflight -> fail "first action unexpectedly in flight"
+  in
+  let _order, admitted = Projection.Listing_order.admit order flow ticket in
+  check bool "dropped while the press is open" false admitted;
+  let closed, _owned = Projection.Flow.finish_action flow generation in
+  let order, admitted = Projection.Listing_order.admit order closed ticket in
+  check bool "still dropped after the press closed" false admitted;
+  let order, after = Projection.Listing_order.dispatch order closed in
+  let _order, admitted = Projection.Listing_order.admit order closed after in
+  check bool "a fetch sent after the press is shown" true admitted
+
+(* The Gate and held-tool resolve paths in the TUI now take the same
+   single-action slot the operator-confirm path takes, so a decision keypress
+   arriving while one is still in flight must be refused here rather than
+   dispatching a second, duplicate resolve. This locks that guard: a second
+   [begin_action] while one is in flight is [`Already_inflight], and only a
+   matching [finish_action] admits the next decision. *)
+let test_second_action_blocked_while_inflight () =
+  let flow, generation =
+    match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok value -> value
+    | Error `Already_inflight -> fail "first action unexpectedly in flight"
+  in
+  check bool "first action is in flight" true
+    (Projection.Flow.action_inflight flow);
+  (match Projection.Flow.begin_action flow with
+   | Error `Already_inflight -> ()
+   | Ok _ -> fail "second action started while one was in flight");
+  let released, owned = Projection.Flow.finish_action flow generation in
+  check bool "completion owns and releases the slot" true owned;
+  check bool "slot is free after completion" false
+    (Projection.Flow.action_inflight released);
+  match Projection.Flow.begin_action released with
+  | Ok _ -> ()
+  | Error `Already_inflight -> fail "next action refused after slot released"
+
+let test_two_key_gate () =
+  let armed =
+    match
+      Projection.approval_gate_transition ~inflight:false ~pending:None
+        ~token:"token-pause" ~decision:Projection.Confirm
+    with
+    | Projection.Gate_arm pending -> pending
+    | Projection.Gate_blocked_inflight | Projection.Gate_submit ->
+        fail "first key did not arm"
+  in
+  (match
+     Projection.approval_gate_transition ~inflight:false ~pending:(Some armed)
+       ~token:"token-pause" ~decision:Projection.Confirm
+   with
+   | Projection.Gate_submit -> ()
+   | Projection.Gate_blocked_inflight | Projection.Gate_arm _ ->
+       fail "matching second key did not submit");
+  (match
+     Projection.approval_gate_transition ~inflight:false ~pending:(Some armed)
+       ~token:"token-pause" ~decision:Projection.Deny
+   with
+   | Projection.Gate_arm pending ->
+       check bool "opposite decision re-arms" true
+         (pending.paa_decision = Projection.Deny)
+   | Projection.Gate_blocked_inflight | Projection.Gate_submit ->
+       fail "opposite decision submitted");
+  (match
+     Projection.approval_gate_transition ~inflight:true ~pending:(Some armed)
+       ~token:"token-pause" ~decision:Projection.Confirm
+   with
+   | Projection.Gate_blocked_inflight -> ()
+   | Projection.Gate_arm _ | Projection.Gate_submit ->
+       fail "inflight key was not blocked")
+
+let decode_approval_items tokens =
+  let items = List.map approval_item_json tokens in
+  let count = List.length items in
+  match
+    Projection.decode_snapshot
+      (snapshot_json ~items ~visible_count:count ~total_count:count
+         ~hidden_count:0 ())
+  with
+  | Ok snapshot -> snapshot.aps_items
+  | Error err -> fail err
+
+let reconcile ~current_tokens ~cursor next_tokens =
+  Projection.reconcile_cursor
+    ~current_items:(decode_approval_items current_tokens)
+    ~cursor ~next_items:(decode_approval_items next_tokens)
+
+let test_refresh_preserves_selected_token () =
+  check int "B moves after newest prepend" 2
+    (reconcile ~current_tokens:[ "A"; "B"; "C" ] ~cursor:1
+       [ "NEW"; "A"; "B"; "C" ]);
+  check int "missing token keeps valid cursor" 1
+    (reconcile ~current_tokens:[ "A"; "B"; "C" ] ~cursor:1 [ "A"; "C" ]);
+  check int "shrunk list clamps missing token" 0
+    (reconcile ~current_tokens:[ "A"; "B"; "C" ] ~cursor:2 [ "A" ]);
+  check int "empty list resets cursor" 0
+    (reconcile ~current_tokens:[ "A" ] ~cursor:0 []);
+  check int "negative cursor is normalized" 0
+    (reconcile ~current_tokens:[ "A" ] ~cursor:(-1) [ "A" ])
+
+let test_workspace_withdrawal_releases_only_its_owner () =
+  let old_order, old_ticket =
+    Projection.Listing_order.dispatch Projection.Listing_order.initial
+      Projection.Flow.initial in
+  let old_flow, old_action = match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok started -> started
+    | Error `Already_inflight -> fail "initial action must be available" in
+  let withdrawn = Projection.Flow.invalidate old_flow in
+  check bool "withdrawal releases action" false (Projection.Flow.action_inflight withdrawn);
+  let current, current_action = match Projection.Flow.begin_action withdrawn with
+    | Ok started -> started
+    | Error `Already_inflight -> fail "new workspace action must be available" in
+  let still_current, stale_owned = Projection.Flow.finish_action current old_action in
+  check bool "old completion cannot settle successor" false stale_owned;
+  check bool "successor remains pending" true (Projection.Flow.action_inflight still_current);
+  let _, stale_listing = Projection.Listing_order.admit old_order still_current old_ticket in
+  check bool "old listing cannot replace successor workspace" false stale_listing;
+  let current_order, current_ticket = Projection.Listing_order.dispatch old_order still_current in
+  let _, admitted = Projection.Listing_order.admit current_order still_current current_ticket in
+  check bool "fresh listing is accepted" true admitted;
+  let finished, owned = Projection.Flow.finish_action still_current current_action in
+  check bool "successor completion owns its action" true owned;
+  check bool "successor completion releases it" false (Projection.Flow.action_inflight finished)
+
+(* #41763: A recovery confirm-queue read dispatched during initial identity
+   recovery must not supersede a newer full refresh answer that landed first,
+   even though both reads target the same workspace. *)
+let test_recovery_listing_superseded_by_newer_refresh () =
+  let flow = Projection.Flow.initial in
+  let order = Projection.Listing_order.initial in
+  (* Recovery GET A dispatches first *)
+  let order, recovery_ticket = Projection.Listing_order.dispatch order flow in
+  (* Full refresh B dispatches next *)
+  let order, refresh_ticket = Projection.Listing_order.dispatch order flow in
+  (* B arrives first and applies *)
+  let order, admitted_b = Projection.Listing_order.admit order flow refresh_ticket in
+  check bool "newer refresh answer B is accepted" true admitted_b;
+  (* Recovery GET A arrives late; its sequence is older than B's *)
+  let _order, admitted_a = Projection.Listing_order.admit order flow recovery_ticket in
+  check bool "stale recovery answer A arriving after B is rejected" false admitted_a
+
+(* #41763: A recovery confirm-queue read dispatched before an operator action
+   must not supersede the action outcome when arriving after the action commits,
+   preventing already-handled rows from reappearing. *)
+let test_recovery_listing_superseded_by_action () =
+  let order, recovery_ticket =
+    Projection.Listing_order.dispatch Projection.Listing_order.initial
+      Projection.Flow.initial
+  in
+  let flow, generation =
+    match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok value -> value
+    | Error `Already_inflight -> fail "action must be available"
+  in
+  let closed, owned = Projection.Flow.finish_action flow generation in
+  check bool "action finish owns completion" true owned;
+  let _order, admitted = Projection.Listing_order.admit order closed recovery_ticket in
+  check bool "recovery read dispatched before action is rejected after action commits"
+    false admitted
+
+let test_workspace_bound_approval_listing () =
+  let base = "/workspace/approval-reader" in
+  let root = Filename.concat base ".masc" in
+  let decode = Projection.decode_workspace_snapshot
+    ~expected_base_path:base ~expected_masc_root:root in
+  let identity ?(base_path = base) ?(masc_root = root) ?(ready = `Bool true) () =
+    `Assoc ["base_path", `String base_path; "masc_root", `String masc_root;
+      "state_ready", ready] in
+  let fields = match snapshot_json () with
+    | `Assoc fields -> fields
+    | _ -> fail "fixture snapshot must be an object" in
+  let response identity = `Assoc (("workspace_identity", identity) :: fields) in
+  let expect_refusal json =
+    match decode json with
+    | Error _ -> ()
+    | Ok _ -> fail "unconfirmed response must not publish approvals" in
+  let snapshot = match decode (response (identity ())) with
+    | Ok snapshot -> snapshot
+    | Error detail -> fail detail in
+  check (list string) "response preserves original confirmation tokens"
+    ["token-pause"; "token-probe"] (List.map (fun item -> item.Projection.ap_token) snapshot.aps_items);
+  let flow = Projection.Flow.initial in
+  let order, ticket = Projection.Listing_order.dispatch Projection.Listing_order.initial flow in
+  let order, early = Projection.Listing_order.admit order flow ticket in
+  let _, terminal = Projection.Listing_order.admit order flow ticket in
+  check bool "early original receipt can publish" true early;
+  check bool "terminal duplicate cannot publish again" false terminal;
+  List.iter expect_refusal
+    [ `Assoc fields
+    ; response (identity ~base_path:"/other-workspace" ())
+    ; response (identity ~masc_root:"/other-workspace/.masc" ())
+    ; response (identity ~ready:(`Bool false) ())
+    ; response (identity ~ready:(`String "true") ())
+    ; response (`Assoc ["base_path", `String base; "state_ready", `Bool true])
+    ; `Assoc (("workspace_identity", identity ()) :: ("workspace_identity", identity ()) :: fields)
+    ];
+  let empty_fields = match snapshot_json ~items:[] ~visible_count:0 ~total_count:0
+      ~hidden_count:0 ~hidden_actors:(Some []) () with
+    | `Assoc fields -> fields
+    | _ -> fail "empty fixture must be an object" in
+  expect_refusal (`Assoc empty_fields);
+  match decode (`Assoc (("workspace_identity", identity ()) :: empty_fields)) with
+  | Ok empty -> check int "attested empty listing clears the old count" 0 empty.aps_visible_count
+  | Error detail -> fail detail
+
+let () =
+  run "tui_operator_projection"
+    [ ( "operator approvals"
+      , [ test_case "current contract" `Quick test_current_contract
+        ; test_case "workspace-bound approval listing settles once" `Quick
+            test_workspace_bound_approval_listing
+        ; test_case "payload terminal projection" `Quick
+            test_payload_terminal_projection
+        ; test_case "fails closed" `Quick test_fails_closed
+        ; test_case "semantic confirm status" `Quick
+            test_confirm_response_status
+        ; test_case "deny response fails closed" `Quick
+            test_deny_response_fails_closed
+        ; test_case "stale request generations" `Quick
+            test_approval_flow_rejects_stale_results
+        ; test_case "workspace withdrawal isolates action and listing ownership" `Quick
+            test_workspace_withdrawal_releases_only_its_owner
+        ; test_case "second action blocked while inflight" `Quick
+            test_second_action_blocked_while_inflight
+        ; test_case "listing keeps the newest answer" `Quick
+            test_listing_order_keeps_the_newest_answer
+        ; test_case "listing answers in sequence all land" `Quick
+            test_listing_order_in_sequence_answers_all_land
+        ; test_case "listings do not supersede each other" `Quick
+            test_listings_do_not_supersede_each_other
+        ; test_case "press supersedes a listing answer" `Quick
+            test_listing_order_press_supersedes
+        ; test_case "recovery listing superseded by newer refresh (#41763)" `Quick
+            test_recovery_listing_superseded_by_newer_refresh
+        ; test_case "recovery listing superseded by action (#41763)" `Quick
+            test_recovery_listing_superseded_by_action
+        ; test_case "two-key safety gate" `Quick test_two_key_gate
+        ; test_case "refresh preserves selected token" `Quick
+            test_refresh_preserves_selected_token
+        ] )
+    ]

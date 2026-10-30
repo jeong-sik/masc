@@ -1,0 +1,31 @@
+{
+  "is_derivative": true,
+  "first": {
+    "schedule_id": "audit-real-model-30fa0db345e24e7790b4f5e0f7c36103",
+    "schedule_instance_id": "01a179c8-b3b5-7000-b855-e9c27ee9099b",
+    "requested_by": {
+      "id": "schedule-audit-observer",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "schedule-audit-observer",
+      "kind": "automated_actor",
+      "display_name": null
+    },
+    "due_at": 1793044559.773274,
+    "payload": {
+      "kind": "masc.keeper_wake",
+      "body": {
+        "result_delivery": {
+          "policy": "none"
+        },
+        "keeper_name": "audit-live-glm",
+        "message": "This authorized scheduled job has TWO required effects on schedule_id \"audit-real-model-30fa0db345e24e7790b4f5e0f7c36103\". First append exactly one note with body \"SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb\" using masc_schedule_note_add. Then observe schedule_id \"audit-real-model-30fa0db345e24e7790b4f5e0f7c36103-second\" with masc_schedule_notes_list until its note with exact body \"SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb_SECOND\" and author_id \"audit-live-glm\" is available. A missing schedule or missing note means the dependency has not arrived yet, not completion. Only AFTER observing that exact B note, append exactly one note to your original schedule_id \"audit-real-model-30fa0db345e24e7790b4f5e0f7c36103\" with body \"SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb_AFTER_B\". Both effects belong to this original job. Do not write B's note yourself, create another schedule, send a message, invoke shell tools, or ask for confirmation. Preserve this unfinished request when another scheduled job arrives. Do not finish this job until both of its required notes have been written and read back."
+      }
+    },
+    "payload_digest": "c2ac53a1a8c163ae793113f42ee56003d3ad7b121111054bfc5dc306d829d358",
+    "status": "scheduled"
+  },
+  "second_created": false
+}

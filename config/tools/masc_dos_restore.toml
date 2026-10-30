@@ -1,0 +1,34 @@
+name = "masc_dos_restore"
+description = """
+Resume a saved DOS machine, or list the saved ones.
+
+Replaces the current machine with the named checkpoint only after it reads; \
+you then hold the controller. Needs the controller free or yours, like \
+masc_dos_load. The key ledger continues from the checkpoint; the game's \
+saves folder is left as it is. No slot lists checkpoints.
+
+Restoring a named slot starts a new machine: its first save copies the \
+autosave to autosave-prev, replacing what autosave-prev held. When both are \
+on disk that restore is refused and names what would be lost; pass \
+discard_previous_autosave=true to let it go. Restoring autosave or \
+autosave-prev never asks: the autosave's machine goes on writing autosave \
+and leaves autosave-prev as it is, and autosave-prev's machine already holds \
+what its first save replaces.
+
+When the DOS worker starts, it restores autosave by itself, with the \
+controller free, if the autosave holds the machine that was running. After \
+an eject, an exit or a fault it does not; restore it here."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "slot"
+type = "string"
+description = "Checkpoint to restore. Omit to list them."
+
+[[params]]
+name = "discard_previous_autosave"
+type = "boolean"
+description = "Set true only after a refused restore of a named slot showed what autosave-prev holds and you do not need it. The restored machine's first save then replaces it. Not used for autosave or autosave-prev. Default false."
+default = false

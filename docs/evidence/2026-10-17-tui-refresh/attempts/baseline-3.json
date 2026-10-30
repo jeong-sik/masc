@@ -1,0 +1,46 @@
+{
+  "arm": "baseline",
+  "base": "/private/tmp/masc-tui-observability-evidence-20261016/native-baseline-attempt-3/workspace",
+  "viewport": [
+    120,
+    36
+  ],
+  "delay_seconds": 2.0,
+  "status": "captured",
+  "physical_paint_measured": false,
+  "input_scope": "Real isolated backend; proxy delays briefing/operator and marks fixture roster paused at warm refresh",
+  "dependency_scope": "Both CI binaries use the same recorded local Homebrew dependencies",
+  "frame_scope": "Captured native PTY output decoded with pyte; PNG is a rendering of that captured cell state",
+  "inherited_environment_keys": [
+    "COLORTERM",
+    "HOME",
+    "LANG",
+    "MASC_BASE_PATH",
+    "PATH",
+    "TERM",
+    "TMPDIR",
+    "XDG_CONFIG_HOME"
+  ],
+  "binary_identity": {
+    "server": {
+      "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-macos-arm64",
+      "sha256": "9cc1f84b908aa7978a7ed6d4364022edc8db1fee0762b082ecb38ce8e993fadf",
+      "source": "683c7950682b45a2591002e09f654515ccf02155",
+      "returncode": 0,
+      "stderr": "[2026-10-17 00:10:57] [INFO] [MCP] Tag registry initialized: 178 tools registered\n"
+    },
+    "tui": {
+      "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-tui-macos-arm64",
+      "sha256": "a66362553de8975dd9e9fe67929e70fc6ac5193e0daedb531b96f2bb765be889",
+      "source": "683c7950682b45a2591002e09f654515ccf02155",
+      "returncode": 0,
+      "stderr": ""
+    }
+  },
+  "fixture_sha256": "20a5411360dbef927f7a9021b802e5656ede61d312bcb12f964ca7c99831aada",
+  "meta_fixture_sha256": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909",
+  "warm_refresh_sent_ms": 10346.287042018957,
+  "warm_fixture_rows_changed": 0,
+  "tui_exit_before_stop": null,
+  "elapsed_seconds": 16.234997833962552
+}

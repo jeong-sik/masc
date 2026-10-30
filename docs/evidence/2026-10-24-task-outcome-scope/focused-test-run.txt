@@ -1,0 +1,8 @@
+Testing `task_outcome_measurement'.
+This run has ID `3RXNLHRZ'.
+
+  [OK]          evidence boundaries          0   approval does not assert ext...
+  [OK]          evidence boundaries          1   Task statistics refuse inven...
+
+Full test results in `/private/tmp/masc-task-outcome-probe-20261024-r2/candidate/test-logs/task_outcome_measurement'.
+Test Successful in 0.001s. 2 tests run.

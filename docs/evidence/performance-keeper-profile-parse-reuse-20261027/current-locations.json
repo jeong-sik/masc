@@ -1,0 +1,73 @@
+{
+  "schema": "masc.retained-capture-locations.v1",
+  "private_run_root": "artifacts/runs/extreme-perf-20261026",
+  "selected_files": [
+    {
+      "retained": "observations.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/keeper-profile-parse-reuse-native-plan-v1/observations.json",
+      "capture_sha256": "bed9b7328883ef8695d95c2716ed5c3d81e5792aed25688758344642822b0920",
+      "retained_sha256": "30de83ffa82ddf58552277cb9418579c7a7bcbf52dcb860de934361ce4b9bb85",
+      "treatment": "Whitespace-only JSON formatting derivative; all decoded values equal."
+    },
+    {
+      "retained": "reproduction/derive_observations.py",
+      "capture": "artifacts/runs/extreme-perf-20261026/keeper-profile-parse-reuse-native-plan-v1/derive_observations.py",
+      "capture_sha256": "d67dab60f7f86e49b94355738999c54860796f150946a0db1963a03632b8b6c8",
+      "retained_sha256": "d67dab60f7f86e49b94355738999c54860796f150946a0db1963a03632b8b6c8",
+      "treatment": "Exact selected capture."
+    },
+    {
+      "retained": "reproduction/plan.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/keeper-profile-parse-reuse-native-plan-v1/plan.json",
+      "capture_sha256": "16fd4047266a278653106bf6ed1f567712db472d81d144d4b99a83d9d248c3fc",
+      "retained_sha256": "16fd4047266a278653106bf6ed1f567712db472d81d144d4b99a83d9d248c3fc",
+      "treatment": "Exact selected capture."
+    },
+    {
+      "retained": "reproduction/execution-qualification.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/keeper-profile-parse-reuse-native-plan-v1/execution-qualification.json",
+      "capture_sha256": "044064409c386edb4a812510ad3f7e6baea5e6ace2504457dd287d09645075ea",
+      "retained_sha256": "044064409c386edb4a812510ad3f7e6baea5e6ace2504457dd287d09645075ea",
+      "treatment": "Exact selected capture."
+    },
+    {
+      "retained": "native/candidate-receipt.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-profile-55a0c748/receipt.json",
+      "capture_sha256": "15ba480719d2e4f892e4d4349a8613380690c3f90c94d19ae631e9559934edb1",
+      "retained_sha256": "15ba480719d2e4f892e4d4349a8613380690c3f90c94d19ae631e9559934edb1",
+      "treatment": "Exact selected capture."
+    },
+    {
+      "retained": "native/candidate-qualification.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-profile-55a0c748/qualification/summary.json",
+      "capture_sha256": "0c10f7bbea11c58a59606c5c7b128a1ba9fbdd9dde67128b71a2567b56b472ce",
+      "retained_sha256": "0c10f7bbea11c58a59606c5c7b128a1ba9fbdd9dde67128b71a2567b56b472ce",
+      "treatment": "Exact selected capture."
+    },
+    {
+      "retained": "native/candidate-identity-commands.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-profile-55a0c748/qualification/identity-commands.json",
+      "capture_sha256": "dc05e71651b0549d247badbc216026596065af26c60f5bd92d60744ecdcf7b56",
+      "retained_sha256": "dc05e71651b0549d247badbc216026596065af26c60f5bd92d60744ecdcf7b56",
+      "treatment": "Exact selected capture."
+    },
+    {
+      "retained": "native/control-receipt.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-c3cb371/receipt.json",
+      "capture_sha256": "c2280625e4dfec83f87adccfa4f7a4826da0c469739bd133a544a8886db3e674",
+      "retained_sha256": "c2280625e4dfec83f87adccfa4f7a4826da0c469739bd133a544a8886db3e674",
+      "treatment": "Exact selected capture."
+    },
+    {
+      "retained": "native/control-identity-commands.json",
+      "capture": "artifacts/runs/extreme-perf-20261026/native-c3cb371/qualification/identity-commands.json",
+      "capture_sha256": "2e6bc50ee4f28b828faf1bbc72eee1138b027dd51b9dbea2fefd58269f1fd6a3",
+      "retained_sha256": "2e6bc50ee4f28b828faf1bbc72eee1138b027dd51b9dbea2fefd58269f1fd6a3",
+      "treatment": "Exact selected capture."
+    }
+  ],
+  "review_locators": "reviews.json",
+  "audit_locators": "evidence-audits/summary.json",
+  "original_observations_sha256": "bed9b7328883ef8695d95c2716ed5c3d81e5792aed25688758344642822b0920",
+  "note": "Parsed numeric selections and frozen provenance only; raw RPCs,credentials,DBs,executables remain local. Reproduction inputs keep capture paths and need new output outside this bundle."
+}

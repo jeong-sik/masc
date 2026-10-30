@@ -1,0 +1,22 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40192538692
+Head: 4373fd876bbbb1d4c54680727807f9d0b5372100
+Full raw log SHA256: 398b1f90da5d1648d86700bbe65a5e9901e32d7cb4addd05d0b1fdeae19c919d
+Trailing whitespace normalized.
+test suite	Checkout	2026-10-25T12:18:49.2612894Z   ref: 4373fd876bbbb1d4c54680727807f9d0b5372100
+test suite	Test	2026-10-25T12:20:46.3122904Z ^[[32mTest Successful^[[0m in 0.029s. 64 tests run.
+test suite	Test	2026-10-25T12:20:47.7738676Z ^[[32mTest Successful^[[0m in 0.033s. 124 tests run.
+test suite	Test	2026-10-25T12:20:49.1440507Z ASSERT full output content retained
+test suite	Test	2026-10-25T12:20:49.1446377Z ASSERT full text mapped to documented input summary
+test suite	Test	2026-10-25T12:20:49.1447583Z ASSERT later user content
+test suite	Test	2026-10-25T12:20:49.1670638Z ASSERT stamped source and request contract agree
+test suite	Test	2026-10-25T12:20:49.1671119Z ASSERT stamped source and request contract agree
+test suite	Test	2026-10-25T12:20:49.1671771Z ASSERT Responses-only option leaves other protocol defaults
+test suite	Test	2026-10-25T12:20:49.1672090Z ASSERT Responses-only option leaves other protocol defaults
+test suite	Test	2026-10-25T12:20:49.1672412Z ASSERT Responses-only option leaves other protocol defaults
+test suite	Test	2026-10-25T12:20:49.1672729Z ASSERT Responses-only option leaves other protocol defaults
+test suite	Test	2026-10-25T12:20:49.1673673Z ASSERT Chat preserve-always cannot opt Responses into plaintext
+test suite	Test	2026-10-25T12:20:49.1674365Z ASSERT public manifest parses dedicated typed policy
+test suite	Test	2026-10-25T12:20:49.1679473Z ASSERT plaintext admission does not rotate opaque tokens
+test suite	Test	2026-10-25T12:20:49.1680058Z Test Successful in 0.024s. 16 tests run.
+test suite	Test	2026-10-25T12:20:49.1713092Z [targeted] packages/agent_core/test/test_responses_reasoning_content: OK in 0s
+test suite	Test	2026-10-25T12:20:49.2360959Z Test Successful in 0.020s. 24 tests run.

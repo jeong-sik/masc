@@ -1,0 +1,45 @@
+{
+  "run_id": 39937556339,
+  "artifact_id": 12494244356,
+  "source": "a6fba325404c963061b7b95c4c564e35f5ea5e2e",
+  "workflow_source": "d78ce9eb8bec2c351ad84fc2a3b6e92701e56755",
+  "files": [
+    {
+      "path": "masc",
+      "sha256": "eb5f32fbe3d6e9b79d01995b8e46505da834a2cfc301eab5dc0f4e21fe75cb25",
+      "matches_receipt": true
+    },
+    {
+      "path": "masc-tui",
+      "sha256": "197191491c4ac4bb83fb1e35407788e2668c312dae5545f4ffb054908b6088d1",
+      "matches_receipt": true
+    },
+    {
+      "path": "key-reference.md",
+      "sha256": "ff7801c80c97cb5c4aed57139da799c706da0675253018a8bd6f7b5d23eaebdf",
+      "matches_receipt": true
+    },
+    {
+      "path": "masc-native-addon-launcher",
+      "sha256": "fe2803bcddbed5865a5d6213b8340da3c188d67e1a0063391255711ac046e93d",
+      "matches_receipt": true
+    }
+  ],
+  "actual_identity_commands": [
+    {
+      "program": "masc",
+      "argument": "build-commit",
+      "exit_code": 0,
+      "stdout": "a6fba325404c963061b7b95c4c564e35f5ea5e2e"
+    },
+    {
+      "program": "masc-tui",
+      "argument": "--build-commit",
+      "exit_code": 0,
+      "stdout": "a6fba325404c963061b7b95c4c564e35f5ea5e2e"
+    }
+  ],
+  "native_launcher_source_binding": "receipt producer + exact source build target; no embedded build-commit command",
+  "installed_runtime_verified": false,
+  "new_worker_execution_verified": false
+}

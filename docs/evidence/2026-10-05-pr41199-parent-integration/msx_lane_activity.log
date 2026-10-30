@@ -1,0 +1,10 @@
+Testing `MSX activity with retained state'.
+This run has ID `6G9073SJ'.
+
+  [OK]          activity          0   configuration and reserved namespace.
+  [OK]          activity          1   off refuses mutation and preserves mach...
+  [OK]          activity          2   unobserved refuses execution but allows...
+  [OK]          activity          3   accepted input finishes after off.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/review-pr41199-20261005/_build/_tests/MSX activity with retained state'.
+Test Successful in 0.071s. 4 tests run.

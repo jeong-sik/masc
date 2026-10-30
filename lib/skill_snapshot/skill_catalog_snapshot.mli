@@ -1,0 +1,180 @@
+(** Immutable catalog snapshot built from ordered Agent Skills sources. *)
+
+type package_id = Skill_reference.package_id
+
+type package_id_error = Skill_reference.package_id_error =
+  | Empty_package_id
+  | Current_directory_package_id
+  | Parent_directory_package_id
+  | Package_id_contains_separator
+  | Package_id_contains_nul
+
+type content_revision = Skill_reference.content_revision
+type config_source_revision = private string
+type config_revision = private string
+type catalog_revision = private string
+type snapshot_revision = private string
+
+type revision_error = Skill_reference.revision_error =
+  | Invalid_revision_length of { actual : int }
+  | Invalid_revision_character of { index : int; found : char }
+
+type identity = Skill_reference.identity
+
+type source_operation =
+  | Inspect_source
+  | Read_source_directory
+
+type source_observation =
+  | Source_ready of
+      { resolved_path : string
+      ; candidates : int
+      }
+  | Source_missing of { resolved_path : string }
+  | Source_not_directory of
+      { resolved_path : string
+      ; kind : Unix.file_kind
+      }
+  | Source_unavailable of
+      { resolved_path : string
+      ; operation : source_operation
+      ; detail : string
+      }
+  | Source_unresolved of Skill_source_config.resolution
+
+type candidate =
+  | Candidate_document of
+      { directory : string
+      ; source_text : string
+      }
+  | Candidate_unreadable of
+      { directory : string
+      ; path : string
+      ; detail : string
+      }
+
+type source_scan =
+  { source : Skill_source_config.resolved_source
+  ; observation : source_observation
+  ; candidates : candidate list
+  }
+
+type entry = private
+  { identity : identity
+  ; source_index : int
+  ; directory : string
+  ; document : Agent_core.Skill_document.t
+  ; content_revision : content_revision
+        (** SHA-256 identity of the exact [SKILL.md] bytes. Resource files are
+            intentionally outside this revision until resource snapshots are
+            introduced. *)
+  }
+
+type rejection_reason =
+  | Document_rejected of Agent_core.Skill_document.diagnostic list
+  | Document_unreadable of
+      { path : string
+      ; detail : string
+      }
+  | Exact_identity_duplicate of { first_directory : string }
+  | Invalid_package_id of package_id_error
+
+type rejection = private
+  { source_index : int
+  ; source_id : Skill_source_config.source_id
+  ; package_id : package_id option
+  ; directory : string
+  ; content_revision : content_revision option
+        (** Digest of the exact candidate bytes when the document was read.
+            Unreadable candidates have no content revision. *)
+  ; reason : rejection_reason
+  }
+
+type shadow = private
+  { winner : identity
+  ; shadowed : identity
+  }
+
+type config_state =
+  | Configured of
+      { config : Skill_source_config.t
+      ; revision : config_revision
+      }
+  | Config_rejected of
+      { source_revision : config_source_revision
+      ; diagnostics : Skill_source_config.diagnostic list
+      }
+  | Config_unreadable of { detail : string }
+
+type t
+
+type build_error =
+  | Missing_source_scan of Skill_source_config.source_id
+  | Duplicate_source_scan of Skill_source_config.source_id
+  | Unexpected_source_scan of Skill_source_config.source_id
+  | Source_scan_config_mismatch of Skill_source_config.source_id
+
+type reference_resolution_error =
+  | Identity_not_found of identity
+  | Content_revision_mismatch of
+      { identity : identity
+      ; requested : content_revision
+      ; observed : content_revision
+      }
+
+val package_id_of_directory : string -> (package_id, package_id_error) result
+val package_id_to_string : package_id -> string
+val content_revision_of_string : string -> (content_revision, revision_error) result
+val snapshot_revision_of_string : string -> (snapshot_revision, revision_error) result
+val make_identity :
+  source_id:Skill_source_config.source_id ->
+  package_id:package_id ->
+  name:string ->
+  identity
+
+val configured :
+  config:Skill_source_config.t -> source_scan list -> (t, build_error list) result
+
+val config_rejected :
+  source_text:string ->
+  diagnostics:Skill_source_config.diagnostic list ->
+  t
+
+val config_unreadable : detail:string -> t
+
+val config_state : t -> config_state
+val sources : t -> source_scan list
+val entries : t -> entry list
+val effective_entries : t -> entry list
+val rejections : t -> rejection list
+val shadows : t -> shadow list
+val config_revision : t -> config_revision option
+val catalog_revision : t -> catalog_revision
+val snapshot_revision : t -> snapshot_revision
+
+val find_exact : t -> identity -> entry option
+(** Indexed exact lookup, including shadowed entries. Returns the original
+    immutable entry object from {!entries}. *)
+val entry_reference : entry -> Skill_reference.t
+val resolve_reference :
+  t -> Skill_reference.t -> (entry, reference_resolution_error) result
+val find_effective_by_name : t -> string -> entry option
+val is_effective_identity : t -> identity -> bool
+(** Whether this exact identity is the snapshot's first-source winner for its
+    name. A shadowed or missing identity is false; content revisions remain
+    the separate {!resolve_reference} check. *)
+
+val source_operation_to_string : source_operation -> string
+val content_revision_to_string : content_revision -> string
+val config_source_revision_to_string : config_source_revision -> string
+val config_revision_to_string : config_revision -> string
+val config_state_to_string : config_state -> string
+(** Short dashboard/health label: configured, rejected, or unreadable. The
+    one spelling; renderers must not re-derive it. *)
+val catalog_revision_to_string : catalog_revision -> string
+val snapshot_revision_to_string : snapshot_revision -> string
+val equal_snapshot_revision : snapshot_revision -> snapshot_revision -> bool
+val identity_to_yojson : identity -> Yojson.Safe.t
+val to_public_yojson : t -> Yojson.Safe.t
+(** Public projection omits Skill bodies, source text, resolved host paths, and
+    raw filesystem error details. *)

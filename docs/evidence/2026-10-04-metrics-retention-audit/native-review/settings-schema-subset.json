@@ -1,0 +1,45 @@
+{
+  "source": "actual Keeper_runtime_setting_registry.schema_to_yojson output, filtered to the two metrics keys",
+  "settings": [
+    {
+      "key": "metrics.max_bytes",
+      "env": "MASC_KEEPER_METRICS_MAX_BYTES",
+      "exposure": "toml_and_env",
+      "type": "integer",
+      "range": {
+        "kind": "integer",
+        "min_inclusive": 0,
+        "max_inclusive": null
+      },
+      "default": "10485760",
+      "reload_class": "process_restart",
+      "requires_restart": true,
+      "consumers": [
+        "Env_config_keeper.KeeperMetrics",
+        "Keeper_types_support.append_jsonl_line"
+      ],
+      "category": "metrics",
+      "description": "Auxiliary Keeper JSONL log size before rotation (bytes; 0 disables)"
+    },
+    {
+      "key": "metrics.max_rotated",
+      "env": "MASC_KEEPER_METRICS_MAX_ROTATED",
+      "exposure": "toml_and_env",
+      "type": "integer",
+      "range": {
+        "kind": "integer",
+        "min_inclusive": 0,
+        "max_inclusive": null
+      },
+      "default": "1",
+      "reload_class": "process_restart",
+      "requires_restart": true,
+      "consumers": [
+        "Env_config_keeper.KeeperMetrics",
+        "Keeper_types_support.append_jsonl_line"
+      ],
+      "category": "metrics",
+      "description": "Auxiliary Keeper JSONL log backups retained (0 discards old versions)"
+    }
+  ]
+}

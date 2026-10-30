@@ -1,0 +1,2407 @@
+(** Runtime-resolution and dashboard tools projections extracted from the
+    dashboard HTTP facade. *)
+
+
+open Server_dashboard_runtime_declaration_projection
+
+let take = Server_dashboard_http_runtime_info_json.take
+type dashboard_runtime_probe_cache_entry =
+  { probe : Yojson.Safe.t
+  ; refreshed_at : float
+  }
+
+let dashboard_runtime_probe_cache : dashboard_runtime_probe_cache_entry option Atomic.t =
+  Atomic.make None
+;;
+
+let dashboard_runtime_probe_cache_ttl_sec = 30.0
+let dashboard_runtime_probe_force_min_refresh_sec = 10.0
+(* Metadata-probe timeout. The dashboard probe hits provider metadata endpoints
+   only ([/api/tags] for Ollama, [/models] for messages/chat — see
+   {!dashboard_runtime_probe_url}); it never sends a completion request, so there
+   is no warm-KV inference to wait for. A dead/dropping runtime therefore fails
+   fast (RST) and a slow one is bounded here. 15s matched the completion-probe
+   timeout and let one unreachable runtime stall the whole dashboard for the
+   full window ("runtime-probe 한 번 잡히면 모든 게 다 느려짐"); 5s is a ~10x margin
+   over observed metadata latency (<500ms) while cutting the worst-case stall
+   by 3x. The completion-probe ([tool_local_runtime_probe]) keeps its own
+   longer timeout because it does run inference.
+
+   Caveat: this 5s is a total-request cap that also bounds remote provider
+   [/models] endpoints (Messages/Chat APIs reached over the public internet),
+   not just loopback Ollama. A legitimately-slow-but-alive cloud endpoint that
+   the prior 15s tolerated can now be cut to [network_error]/unreachable;
+   because the probe runs off the hot path and the next poll retries this
+   self-heals, but the <500ms margin is evidenced for the local path only. *)
+let dashboard_runtime_probe_timeout_sec = 5
+(* Soft-TTL for stale-while-revalidate. A cache value is served as fresh for the
+   full [dashboard_runtime_probe_cache_ttl_sec], but once its age crosses this
+   threshold the request path schedules a non-blocking background refresh so the
+   *next* poll (default 30s) sees a fresh value instead of a post-expiry miss.
+   Set to half the TTL so a value refreshed on poll N is pre-warmed before
+   poll N+1 -- this is what closes the TTL==poll-interval hit-rate-0 trap
+   (cache expiry landing right at the next poll). *)
+let dashboard_runtime_probe_soft_refresh_sec = 15.0
+(* Concurrency cap for the parallel runtime-probe fan-out
+   ([dashboard_runtime_probe_payload_json_of_runtimes]). The configured runtime
+   fleet is small (a handful of providers), so this is a safety bound against
+   unbounded fork rather than a tuned throughput knob; it mirrors
+   [Dashboard_execution.dashboard_enrich_max_fibers] (8). *)
+let dashboard_runtime_probe_max_fibers = 8
+let dashboard_runtime_probe_refresh_in_flight = Atomic.make false
+
+let dashboard_runtime_probe_runner_hook : (unit -> Yojson.Safe.t) option Atomic.t =
+  Atomic.make None
+;;
+
+let dashboard_runtime_provider_http_get_hook :
+  (url:string ->
+   headers:(string * string) list ->
+   timeout_sec:float ->
+   (int * (string * string) list * string, string) result)
+    option
+    Atomic.t
+  =
+  Atomic.make None
+;;
+
+let set_dashboard_runtime_probe_runner_for_tests hook =
+  Atomic.set dashboard_runtime_probe_runner_hook (Some hook)
+;;
+
+let clear_dashboard_runtime_probe_runner_for_tests () =
+  Atomic.set dashboard_runtime_probe_runner_hook None
+;;
+
+let set_dashboard_runtime_provider_http_get_for_tests hook =
+  Atomic.set dashboard_runtime_provider_http_get_hook (Some hook)
+;;
+
+let clear_dashboard_runtime_provider_http_get_for_tests () =
+  Atomic.set dashboard_runtime_provider_http_get_hook None
+;;
+
+let clear_dashboard_runtime_probe_cache_for_tests () =
+  Atomic.set dashboard_runtime_probe_cache None;
+  Atomic.set dashboard_runtime_probe_refresh_in_flight false
+;;
+
+let set_dashboard_runtime_probe_cache_for_tests ~probe ~age_sec () =
+  (* Seed the probe cache with a value [age_sec] seconds old so tests can drive
+     the fresh / recent-window / stale branches of [dashboard_runtime_probe_http_json]
+     deterministically. Unit tests have no Eio switch to fork a real background
+     refresh into, so the cache must be seeded directly. The [age_sec] is
+     translated to an absolute [refreshed_at] here so callers do not depend on
+     [Time_compat]. *)
+  Atomic.set
+    dashboard_runtime_probe_cache
+    (Some { probe; refreshed_at = Time_compat.now () -. age_sec })
+;;
+
+(* Per-path TTL cache for `git rev-parse --short HEAD`.  Each miss forks
+   git and can take seconds on large worktrees, yet HEAD
+   changes infrequently, and every dashboard shell refresh calls this
+   twice (workspace + base).  Serving cached values keeps snapshot_json
+   off the 5 s git-probe budget on the hot path. *)
+let git_rev_parse_short_ttl_sec = 60.0
+
+(** Per-directory, mutex-guarded single-flight cache backing a background
+    refresh probe.
+
+    Extracted from the structurally identical bookkeeping that
+    {!git_rev_parse_short} and {!git_upstream_status} each inlined
+    (2026-06-17). The cache owns only state plus lookup/guard/store
+    bookkeeping; the caller-driven background refresh orchestration and
+    the domain-fork-aware fiber fork stay in the enclosing module and
+    call [try_begin_refresh] / [finish_refresh] / [cancel_refresh].
+
+    Concurrency model is unchanged from the previous inlined code:
+    [mu] guards [cache] and [in_flight] together; [try_begin_refresh]
+    is the single-flight gate (one refresh per key); [finish_refresh] /
+    [cancel_refresh] release it. *)
+module Make_probe_cache (C : sig
+  type value
+
+  val ttl_sec : float
+end) = struct
+  let cache : (string, C.value * float) Hashtbl.t = Hashtbl.create 4
+
+  let in_flight : (string, unit) Hashtbl.t = Hashtbl.create 4
+
+  let mu = Stdlib.Mutex.create ()
+
+  let probe_hook_for_tests : (string -> C.value) option Atomic.t =
+    Atomic.make None
+
+  (** [Mutex.protect] (OCaml >= 5.1) is the manual-recommended primitive for a
+      mutex-bracketed critical section. Unlike the hand-rolled
+      [Mutex.lock; Fun.protect ~finally:unlock] form, it guarantees [unlock]
+      even when an asynchronous exception (e.g. [Sys.Break]) is raised, so the
+      mutex can never be left locked. *)
+  let with_lock f = Stdlib.Mutex.protect mu f
+
+  let cached_lookup dir ~now =
+    with_lock (fun () ->
+        match Hashtbl.find_opt cache dir with
+        | Some (value, ts) when now -. ts <= C.ttl_sec -> Some value
+        | _ -> None)
+
+  let cached_any dir =
+    with_lock (fun () -> Hashtbl.find_opt cache dir |> Option.map fst)
+
+  let try_begin_refresh dir =
+    with_lock (fun () ->
+        if Hashtbl.mem in_flight dir then false
+        else (
+          Hashtbl.replace in_flight dir ();
+          true))
+
+  let finish_refresh dir value ~now =
+    with_lock (fun () ->
+        Hashtbl.replace cache dir (value, now);
+        Hashtbl.remove in_flight dir)
+
+  let cancel_refresh dir =
+    with_lock (fun () -> Hashtbl.remove in_flight dir)
+
+  let clear_cache_for_tests () =
+    with_lock (fun () ->
+        Hashtbl.clear cache;
+        Hashtbl.clear in_flight)
+
+  let seed_cache_for_tests dir value ~refreshed_at =
+    with_lock (fun () ->
+        Hashtbl.replace cache dir (value, refreshed_at);
+        Hashtbl.remove in_flight dir)
+
+  let set_probe_hook_for_tests hook =
+    Atomic.set probe_hook_for_tests (Some hook)
+
+  let clear_probe_hook_for_tests () = Atomic.set probe_hook_for_tests None
+end
+
+module Rev_parse_cache =
+  Make_probe_cache (struct
+    type value = string option
+
+    let ttl_sec = git_rev_parse_short_ttl_sec
+  end)
+
+let set_git_rev_parse_short_probe_hook_for_tests =
+  Rev_parse_cache.set_probe_hook_for_tests
+
+let clear_git_rev_parse_short_probe_hook_for_tests =
+  Rev_parse_cache.clear_probe_hook_for_tests
+;;
+
+let eio_switch_fork_unavailable = function
+  | Invalid_argument msg ->
+    String_util.contains_substring msg "Switch accessed from wrong domain"
+    || String_util.contains_substring msg "Switch finished"
+  | _ -> false
+;;
+
+(* Dashboard shell projections may run on Domain_pool worker domains.  Those
+   domains can read the stale cache, but they must not fork fibers on the
+   server root switch owned by the main Eio domain. *)
+let background_refresh_unavailable_domains : (int, unit) Hashtbl.t = Hashtbl.create 4
+let background_refresh_unavailable_domains_mu = Stdlib.Mutex.create ()
+
+let current_domain_id () = (Domain.self () :> int)
+
+let background_refresh_domain_unavailable () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.mem background_refresh_unavailable_domains (current_domain_id ()))
+;;
+
+let background_refresh_mark_domain_unavailable () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.replace background_refresh_unavailable_domains (current_domain_id ()) ())
+;;
+
+let background_refresh_clear_unavailable_domains_for_tests () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.clear background_refresh_unavailable_domains)
+;;
+
+let fork_background_refresh_or_cancel ~dir ~cancel_refresh run =
+  if background_refresh_domain_unavailable ()
+  then cancel_refresh dir
+  else match Eio_context.get_switch_opt () with
+  | None -> cancel_refresh dir
+  | Some sw ->
+    (* No request waits on this refresh (RFC-0204 3.4). *)
+    (try Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background run) with
+     | exn when eio_switch_fork_unavailable exn ->
+       background_refresh_mark_domain_unavailable ();
+       cancel_refresh dir
+     | exn ->
+       cancel_refresh dir;
+       raise exn)
+;;
+
+let git_rev_parse_short_probe_argv dir =
+  [ "git"; "-C"; dir; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
+;;
+
+let git_probe_command_available ?(getenv = Sys.getenv_opt) () =
+  Executable_path.command_available ~getenv "git"
+;;
+
+(* Bumped 5s → 15s for large repos (#9765, #9775).
+   A large base-path repository repeatedly trips the 5s budget on the
+   first probe after TTL expiry (3 occurrences in issue #9775 logs at
+   18:29/18:41/18:50).
+   The probe runs on a background fiber via
+   [maybe_refresh_git_rev_parse_short_in_background], so the extra
+   wall-time does not affect the hot dashboard path — cached values
+   keep serving during the refresh. This git-probe timeout is deliberately
+   independent of (and larger than) the metadata probe
+   [dashboard_runtime_probe_timeout_sec] (now 5s): a git rev-parse on a large
+   repo is slower than an HTTP metadata GET, so the two are tuned separately. *)
+let git_rev_parse_short_probe_timeout_sec = 15.0
+
+let git_rev_parse_short_probe dir =
+  match Atomic.get Rev_parse_cache.probe_hook_for_tests with
+  | Some hook -> hook dir
+  | None when not (git_probe_command_available ()) -> None
+  | None ->
+    let argv = git_rev_parse_short_probe_argv dir in
+    (match
+       Process_eio.run_argv_with_status
+         ~timeout_sec:git_rev_parse_short_probe_timeout_sec
+         argv
+     with
+     | Unix.WEXITED 0, output -> String_util.trim_nonempty output
+     | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None)
+;;
+
+let git_rev_parse_short_refresh dir =
+  try
+    let value = git_rev_parse_short_probe dir in
+    Rev_parse_cache.finish_refresh dir value ~now:(Time_compat.now ());
+    value
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Rev_parse_cache.cancel_refresh dir;
+    raise exn
+;;
+
+let maybe_refresh_git_rev_parse_short_in_background dir =
+  if Rev_parse_cache.try_begin_refresh dir
+  then
+    fork_background_refresh_or_cancel
+      ~dir
+      ~cancel_refresh:Rev_parse_cache.cancel_refresh
+      (fun () ->
+        try
+          let _ = git_rev_parse_short_refresh dir in
+          ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Dashboard.warn
+            "dashboard runtime git probe refresh failed for %s: %s"
+            dir
+            (Printexc.to_string exn))
+;;
+
+let git_rev_parse_short path =
+  match String_util.trim_nonempty path with
+  | None -> None
+  | Some dir when not (Sys.file_exists dir) -> None
+  | Some dir ->
+    let now = Time_compat.now () in
+    (match Rev_parse_cache.cached_lookup dir ~now with
+     | Some value -> value
+     | None ->
+       (match Rev_parse_cache.cached_any dir with
+        | Some stale ->
+          maybe_refresh_git_rev_parse_short_in_background dir;
+          stale
+        | None ->
+          if Rev_parse_cache.try_begin_refresh dir
+          then git_rev_parse_short_refresh dir
+          else Option.join (Rev_parse_cache.cached_any dir)))
+;;
+
+let opt_string_json = Server_dashboard_http_runtime_info_json.opt_string_json
+let opt_commit_equal = Server_dashboard_http_runtime_info_json.opt_commit_equal
+let opt_int_json = Server_dashboard_http_runtime_info_json.opt_int_json
+
+type git_upstream_status =
+  Server_dashboard_http_runtime_info_json.git_upstream_status =
+  { branch : string option
+  ; upstream_ref : string option
+  ; upstream_head_commit : string option
+  ; ahead_count : int option
+  ; behind_count : int option
+  }
+
+let empty_git_upstream_status =
+  Server_dashboard_http_runtime_info_json.empty_git_upstream_status
+
+let git_upstream_status_ttl_sec = 60.0
+
+module Upstream_status_cache =
+  Make_probe_cache (struct
+    type value = git_upstream_status option
+
+    let ttl_sec = git_upstream_status_ttl_sec
+  end)
+
+let set_git_upstream_status_probe_hook_for_tests =
+  Upstream_status_cache.set_probe_hook_for_tests
+
+let clear_git_upstream_status_probe_hook_for_tests =
+  Upstream_status_cache.clear_probe_hook_for_tests
+;;
+
+let git_probe_trimmed dir args =
+  let argv = [ "git"; "-C"; dir; "--no-optional-locks" ] @ args in
+  match
+    Process_eio.run_argv_with_status
+      ~timeout_sec:git_rev_parse_short_probe_timeout_sec
+      argv
+  with
+  | Unix.WEXITED 0, output -> String_util.trim_nonempty output
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
+;;
+
+let parse_ahead_behind raw =
+  match
+    raw
+    |> String.trim
+    |> String.split_on_char '\t'
+    |> List.concat_map (String.split_on_char ' ')
+    |> List.filter_map String_util.trim_nonempty
+  with
+  | [ ahead; behind ] ->
+    (match int_of_string_opt ahead, int_of_string_opt behind with
+     | Some ahead, Some behind -> Some (ahead, behind)
+     | _ -> None)
+  | _ -> None
+;;
+
+let git_default_origin_head dir =
+  git_probe_trimmed dir [ "symbolic-ref"; "--short"; "refs/remotes/origin/HEAD" ]
+;;
+
+let git_upstream_status_probe dir =
+  match Atomic.get Upstream_status_cache.probe_hook_for_tests with
+  | Some hook -> hook dir
+  | None when not (git_probe_command_available ()) -> None
+  | None ->
+    let branch = git_probe_trimmed dir [ "rev-parse"; "--abbrev-ref"; "HEAD" ] in
+    let upstream_ref =
+      match
+        git_probe_trimmed
+          dir
+          [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
+      with
+      | Some upstream -> Some upstream
+      | None -> git_default_origin_head dir
+    in
+    let upstream_head_commit =
+      Option.bind upstream_ref (fun ref_name ->
+        git_probe_trimmed dir [ "rev-parse"; "--short"; ref_name ])
+    in
+    let ahead_count, behind_count =
+      match upstream_ref with
+      | None -> None, None
+      | Some ref_name ->
+        (match
+           git_probe_trimmed
+             dir
+             [ "rev-list"; "--left-right"; "--count"; "HEAD..." ^ ref_name ]
+         with
+         | Some raw ->
+           (match parse_ahead_behind raw with
+            | Some (ahead, behind) -> Some ahead, Some behind
+            | None -> None, None)
+         | None -> None, None)
+    in
+    if branch = None
+       && upstream_ref = None
+       && upstream_head_commit = None
+       && ahead_count = None
+       && behind_count = None
+    then None
+    else Some { branch; upstream_ref; upstream_head_commit; ahead_count; behind_count }
+;;
+
+let git_upstream_status_refresh dir =
+  try
+    let value = git_upstream_status_probe dir in
+    Upstream_status_cache.finish_refresh dir value ~now:(Time_compat.now ());
+    value
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Upstream_status_cache.cancel_refresh dir;
+    raise exn
+;;
+
+let maybe_refresh_git_upstream_status_in_background dir =
+  if Upstream_status_cache.try_begin_refresh dir
+  then
+    fork_background_refresh_or_cancel
+      ~dir
+      ~cancel_refresh:Upstream_status_cache.cancel_refresh
+      (fun () ->
+        try
+          let _ = git_upstream_status_refresh dir in
+          ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Dashboard.warn
+            "dashboard runtime git upstream refresh failed for %s: %s"
+            dir
+            (Printexc.to_string exn))
+;;
+
+let git_upstream_status path =
+  match String_util.trim_nonempty path with
+  | None -> None
+  | Some dir when not (Sys.file_exists dir) -> None
+  | Some dir ->
+    let now = Time_compat.now () in
+    (match Upstream_status_cache.cached_lookup dir ~now with
+     | Some value -> value
+     | None ->
+       (match Upstream_status_cache.cached_any dir with
+        | Some stale ->
+          maybe_refresh_git_upstream_status_in_background dir;
+          stale
+        | None ->
+          if Upstream_status_cache.try_begin_refresh dir
+          then git_upstream_status_refresh dir
+          else Option.join (Upstream_status_cache.cached_any dir)))
+;;
+
+let deployment_state_json
+      ~(build : Build_identity.t)
+      ~server_repo_commit
+      ~workspace_commit
+      ~resolved_base_commit
+      ~upstream_status
+  ~source_mismatch
+  =
+  let binary_commit_known = Option.is_some build.binary_commit in
+  let deployed_commit = build.binary_commit in
+  let deployed_commit_source = build.binary_commit_source in
+  let runtime_repo_matches_server_repo =
+    opt_commit_equal build.repo_head_commit server_repo_commit
+  in
+  let runtime_repo_matches_upstream =
+    opt_commit_equal build.repo_head_commit upstream_status.upstream_head_commit
+  in
+  let built_matches_upstream =
+    opt_commit_equal build.binary_commit upstream_status.upstream_head_commit
+  in
+  let built_matches_runtime_repo =
+    opt_commit_equal build.binary_commit build.repo_head_commit
+  in
+  let server_repo_behind_upstream =
+    match upstream_status.behind_count with
+      | Some count -> count > 0
+      | None -> false
+  in
+  let binary_diverged =
+    match built_matches_upstream, built_matches_runtime_repo with
+    | Some false, _ | _, Some false -> true
+    | _ -> false
+  in
+  let runtime_repo_snapshot_diverged =
+    match runtime_repo_matches_server_repo, runtime_repo_matches_upstream with
+    | Some false, _ | _, Some false -> true
+    | _ -> false
+  in
+  let deployment_diverged =
+    server_repo_behind_upstream
+    || binary_diverged
+    || runtime_repo_snapshot_diverged
+  in
+  let status =
+    if source_mismatch || deployment_diverged
+    then "diverged"
+    else if not binary_commit_known
+    then "unproven"
+    else (
+      match built_matches_runtime_repo with
+      | Some true -> "current"
+      | Some false -> "diverged"
+      | None -> "unknown")
+  in
+  `Assoc
+    [ "schema", `String "masc.runtime_deployment_state.v1"
+    ; "status", `String status
+    ; "operator_action_required", `Bool (String.equal status "diverged")
+    ; "binary_commit_known", `Bool binary_commit_known
+    ; ( "upstream"
+      , `Assoc
+          [ "branch", opt_string_json upstream_status.branch
+          ; "ref", opt_string_json upstream_status.upstream_ref
+          ; "head_commit", opt_string_json upstream_status.upstream_head_commit
+          ; "ahead_count", opt_int_json upstream_status.ahead_count
+          ; "behind_count", opt_int_json upstream_status.behind_count
+          ; "source", `String "local_tracking_ref"
+          ] )
+    ; ( "merged"
+      , `Assoc
+          [ "commit", opt_string_json server_repo_commit
+          ; "source", `String "server_repo_head"
+          ] )
+    ; ( "built"
+      , `Assoc
+          [ "commit", opt_string_json build.binary_commit
+          ; "source", opt_string_json build.binary_commit_source
+          ; ( "proof"
+            , `String
+                (if binary_commit_known
+                 then "build_env_commit"
+                 else "missing_build_env_commit") )
+          ] )
+    ; ( "deployed"
+      , `Assoc
+          [ "commit", opt_string_json deployed_commit
+          ; "source", opt_string_json deployed_commit_source
+          ; ( "proof"
+            , `String
+                (if binary_commit_known
+                 then "build_env_commit"
+                 else "missing_binary_commit") )
+          ; "started_at", `String build.started_at
+          ; "executable_path", `String build.executable_path
+          ] )
+    ; ( "runtime_repo"
+      , `Assoc
+          [ "head_commit", opt_string_json build.repo_head_commit
+          ; "head_commit_source", opt_string_json build.repo_head_commit_source
+          ] )
+    ; ("checks", `Assoc [ "source_mismatch", `Bool source_mismatch ])
+    ]
+;;
+
+let clear_git_rev_parse_short_cache_for_tests () =
+  background_refresh_clear_unavailable_domains_for_tests ();
+  Rev_parse_cache.clear_cache_for_tests ()
+;;
+
+let seed_git_rev_parse_short_cache_for_tests =
+  Rev_parse_cache.seed_cache_for_tests
+
+let clear_git_upstream_status_cache_for_tests () =
+  background_refresh_clear_unavailable_domains_for_tests ();
+  Upstream_status_cache.clear_cache_for_tests ()
+;;
+
+let seed_git_upstream_status_cache_for_tests =
+  Upstream_status_cache.seed_cache_for_tests
+;;
+
+let path_item_json ~source path =
+  `Assoc
+    [ "path", `String path
+    ; "exists", `Bool (String.trim path <> "" && Sys.file_exists path)
+    ; "source", `String source
+    ]
+;;
+
+let normalized_path_opt path =
+  match String_util.trim_nonempty path with
+  | None -> None
+  | Some path ->
+    let normalized =
+      if Sys.file_exists path
+      then (
+        try Unix.realpath path with
+        | Unix.Unix_error _ -> path)
+      else path
+    in
+    Some normalized
+;;
+
+let normalized_path_segments path =
+  let normalized = Env_config_core.normalize_path_lexically path in
+  if String.equal normalized "/" || String.equal normalized "."
+  then []
+  else normalized |> String.split_on_char '/' |> List.filter (fun segment -> segment <> "")
+;;
+
+let rec segment_prefix ~prefix path =
+  match prefix, path with
+  | [], _ -> true
+  | _ :: _, [] -> false
+  | p :: ps, x :: xs -> String.equal p x && segment_prefix ~prefix:ps xs
+;;
+
+let same_or_descendant_normalized_path path expected =
+  match normalized_path_opt path, normalized_path_opt expected with
+  | Some path, Some expected ->
+    segment_prefix
+      ~prefix:(normalized_path_segments expected)
+      (normalized_path_segments path)
+  | _ -> false
+;;
+
+let server_workspace_mismatch ~server_repo_path (config : Workspace.config) =
+  not
+    (same_or_descendant_normalized_path server_repo_path config.workspace_path
+     || same_or_descendant_normalized_path server_repo_path config.base_path)
+;;
+
+let server_workspace_mismatch_for_tests ~server_repo_path (config : Workspace.config) =
+  match normalized_path_opt server_repo_path with
+  | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
+  | None -> false
+;;
+
+let shutdown_signal_of_message message =
+  if String_util.contains_substring message "Received SIGTERM"
+  then Some "SIGTERM"
+  else if String_util.contains_substring message "Received SIGINT"
+  then Some "SIGINT"
+  else None
+;;
+
+let runtime_diagnostics_json () =
+  let entries = Log.Ring.recent ~limit:200 ~order:`Newest_first () in
+  let diagnostics =
+    entries
+    |> List.filter_map (fun (entry : Log.Ring.entry) ->
+      let message = entry.message in
+      match shutdown_signal_of_message message with
+      | Some signal ->
+        Some
+          (`Assoc
+              [ "ts", `String entry.ts
+              ; "kind", `String "external_signal"
+              ; "signal", `String signal
+              ; "message", `String message
+              ])
+      (* Two needles were removed from this classifier because nothing in the
+         repository produces them: "repairing state and rewriting canonical
+         JSON" (whole state_repair arm) and "parse error:
+         Types_core.agent.last_seen". A guard with no producer classifies
+         nothing and only pins the phrasing of future log lines
+         (RFC-0371 §3.7). *)
+      | None
+        when String_util.contains_substring message "invalid agent JSON"
+             || String_util.contains_substring message "repaired agent JSON" ->
+        Some
+          (`Assoc
+              [ "ts", `String entry.ts
+              ; "kind", `String "agent_state"
+              ; "message", `String message
+              ])
+      | None -> None)
+    |> take 8
+  in
+  let count kind =
+    List.fold_left
+      (fun acc json ->
+         match Json_util.assoc_member_opt "kind" json with
+         | Some (`String value) when String.equal value kind -> acc + 1
+         | _ -> acc)
+      0
+      diagnostics
+  in
+  `List diagnostics, count "external_signal", count "agent_state"
+;;
+
+type dashboard_runtime_provider_probe =
+  { runtime_id : string
+  ; json : Yojson.Safe.t
+  ; status : string
+  ; reachable : bool option
+  ; skipped : bool
+  }
+
+
+let dashboard_runtime_probe_timeout_sec_float =
+  Float.of_int dashboard_runtime_probe_timeout_sec
+;;
+
+let dashboard_runtime_trim_trailing_slashes raw =
+  let raw = String.trim raw in
+  let rec loop idx =
+    if idx < 0
+    then ""
+    else if Char.equal raw.[idx] '/'
+    then loop (idx - 1)
+    else String.sub raw 0 (idx + 1)
+  in
+  loop (String.length raw - 1)
+;;
+
+let dashboard_runtime_append_probe_path base ~suffix =
+  let base = dashboard_runtime_trim_trailing_slashes base in
+  if String.equal base "" || String.ends_with ~suffix base
+  then base
+  else base ^ suffix
+;;
+
+(* What the probe can do with an HTTP endpoint, decided by the wire format.
+   An official-client format reached over HTTP is a misconfiguration. Vertex
+   authenticates with Google Application Default Credentials that only the
+   provider transport can mint, so its reachability is not probed here; that
+   is a stated skip, not a broken transport (it used to answer with the
+   codex-app-server message). *)
+type dashboard_runtime_probe_target =
+  | Probe_url of string
+  | Probe_requires_cli_transport
+  | Probe_native_auth
+
+let dashboard_runtime_probe_target ~(api_format : Runtime_schema.api_format) base_url =
+  match api_format with
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Muse_serve_runtime -> Probe_requires_cli_transport
+  | Runtime_schema.Vertex_gemini_api -> Probe_native_auth
+  | Runtime_schema.Ollama_api ->
+    let base = dashboard_runtime_trim_trailing_slashes base_url in
+    Probe_url
+      (if String.ends_with ~suffix:"/api/tags" base
+       then base
+       else if String.ends_with ~suffix:"/api" base
+       then base ^ "/tags"
+       else base ^ "/api/tags")
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
+    Probe_url (dashboard_runtime_append_probe_path base_url ~suffix:"/models")
+;;
+
+let dashboard_runtime_url_for_json raw =
+  let uri = Uri.of_string raw in
+  Uri.with_uri ~userinfo:None ~query:None ~fragment:None uri |> Uri.to_string
+;;
+
+let dashboard_runtime_http_url_valid url =
+  let uri = Uri.of_string url in
+  match Option.map String.lowercase_ascii (Uri.scheme uri), Uri.host uri with
+  | Some ("http" | "https"), Some host when String.trim host <> "" -> true
+  | _ -> false
+;;
+
+let dashboard_runtime_provider_auth_kind = function
+  | None -> "none"
+  | Some (Runtime_schema.Env key) -> "env:" ^ key
+  | Some (Runtime_schema.File path) -> "file:" ^ path
+  | Some (Runtime_schema.Inline _) -> "inline"
+;;
+
+(* One list, owned by [Runtime_adapter] — the module that strips these from
+   [Provider_config.headers]. A separate copy here meant the dashboard could
+   hide a header the adapter still forwarded. *)
+let dashboard_runtime_header_is_auth = Runtime_adapter.is_auth_header_key
+
+let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
+  match provider.headers with
+  | None -> []
+  | Some headers ->
+    List.filter (fun (name, _) -> not (dashboard_runtime_header_is_auth name)) headers
+;;
+
+let dashboard_runtime_credential_value = function
+  | Runtime_schema.Env key ->
+    (match Option.bind (Sys.getenv_opt key) String_util.trim_nonempty with
+     | Some value -> Ok value
+     | None -> Error (Printf.sprintf "env credential %s is empty or unset" key))
+  | Runtime_schema.File path ->
+    (try
+       match Fs_compat.load_file path |> String_util.trim_nonempty with
+       | Some value -> Ok value
+       | None -> Error (Printf.sprintf "credential file %s is empty" path)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> Error (Printf.sprintf "credential file %s: %s" path (Printexc.to_string exn)))
+  | Runtime_schema.Inline value ->
+    (match String_util.trim_nonempty value with
+     | Some value -> Ok value
+     | None -> Error "inline credential is empty")
+;;
+
+(* The auth header is the one the transport itself would send for this
+   provider kind ([Provider_config.auth_headers_for_kind_and_key]): Gemini
+   keys go in [x-goog-api-key], Anthropic-style keys in [x-api-key], the rest
+   as a Bearer token. A Bearer literal here answered auth_failed for a Gemini
+   runtime the keepers were using fine. *)
+let dashboard_runtime_probe_headers
+    ~(kind : Llm_provider.Provider_config.provider_kind)
+    (provider : Runtime_schema.provider)
+  =
+  let base_headers =
+    [ "Accept", "application/json" ] @ dashboard_runtime_non_auth_headers provider
+  in
+  match provider.credentials with
+  | None -> Ok (false, base_headers)
+  | Some credential ->
+    (match dashboard_runtime_credential_value credential with
+     | Ok value ->
+       Ok
+         ( true
+         , Llm_provider.Provider_config.auth_headers_for_kind_and_key ~kind ~api_key:value
+           @ base_headers )
+     | Error _ as error -> error)
+;;
+
+let dashboard_runtime_probe_transport_kind = function
+  | Runtime_schema.Cli _ -> "cli"
+  | Runtime_schema.Http url
+    when Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt ->
+    "local"
+  | Runtime_schema.Http _ -> "http"
+;;
+
+let dashboard_runtime_probe_http_get ~url ~headers ~timeout_sec =
+  match Atomic.get dashboard_runtime_provider_http_get_hook with
+  | Some hook -> hook ~url ~headers ~timeout_sec
+  | None ->
+    let clock = Eio_context.get_clock_opt () in
+    (match Masc_http_client.get_response_sync ?clock ~timeout_sec ~url ~headers () with
+     | Ok response -> Ok (response.status, response.headers, response.body)
+     | Error _ as error -> error)
+;;
+
+let dashboard_runtime_header_value name headers =
+  let name = String.lowercase_ascii name in
+  headers
+  |> List.find_map (fun (k, v) ->
+    if String.equal name (String.lowercase_ascii k) then Some v else None)
+;;
+
+let dashboard_runtime_list_member_len key json =
+  match Json_util.assoc_member_opt key json with
+  | Some (`List items) -> Some (List.length items)
+  | _ -> None
+;;
+
+let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_format) body =
+  try
+    let json = Yojson.Safe.from_string body in
+    match api_format with
+    | Runtime_schema.Codex_app_server_runtime
+    | Runtime_schema.Claude_code_runtime
+    | Runtime_schema.Antigravity_cli_runtime
+    | Runtime_schema.Muse_serve_runtime
+    | Runtime_schema.Vertex_gemini_api -> None
+    | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api -> dashboard_runtime_list_member_len "models" json
+    | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
+      (match dashboard_runtime_list_member_len "data" json with
+       | Some _ as value -> value
+       | None -> dashboard_runtime_list_member_len "models" json)
+  with
+  | Yojson.Json_error _ -> None
+;;
+
+let dashboard_runtime_status_of_http_status = function
+  | Some code when code >= 200 && code < 300 -> "reachable"
+  | Some 401 | Some 403 -> "auth_failed"
+  | Some 404 -> "endpoint_not_found"
+  | Some code when code >= 500 -> "server_error"
+  | Some _ -> "http_error"
+  | None -> "unknown_http_status"
+;;
+
+let dashboard_runtime_provider_probe_json
+    ?(http_get = dashboard_runtime_probe_http_get)
+    (rt : Runtime_instance.t)
+  =
+  let runtime_kind = dashboard_runtime_probe_transport_kind rt.provider.transport in
+  let auth_kind = dashboard_runtime_provider_auth_kind rt.provider.credentials in
+  let credential_required = Option.is_some rt.provider.credentials in
+  let endpoint_url =
+    match rt.provider.transport with
+    | Runtime_schema.Http url -> Some (dashboard_runtime_url_for_json url)
+    | Runtime_schema.Cli _ -> None
+  in
+  let base_fields
+        ?probe_url
+        ?http_status
+        ?latency_ms
+        ?model_count
+        ?content_type
+        ?downloaded_bytes
+        ?error
+        ~auth_present
+        ~status
+        ~reachable
+        ()
+    =
+    [ "runtime_id", `String rt.id
+    ; "provider_id", `String rt.provider.id
+    ; "provider_display_name", `String rt.provider.display_name
+    ; "model_id", `String rt.model.id
+    ; "model_api_name", `String rt.model.api_name
+    ; "protocol", `String rt.provider.protocol
+    ; "runtime_kind", `String runtime_kind
+    ; "transport", `String (match rt.provider.transport with Runtime_schema.Http _ -> "http" | Runtime_schema.Cli _ -> "cli")
+    ; "auth_kind", `String auth_kind
+    ; "credential_required", `Bool credential_required
+    ; "auth_present", `Bool auth_present
+    ; "status", `String status
+    ; "reachable", (match reachable with Some value -> `Bool value | None -> `Null)
+    ; "http_status", Json_util.int_opt_to_json http_status
+    ; "latency_ms", Json_util.float_opt_to_json latency_ms
+    ; "model_count", Json_util.int_opt_to_json model_count
+    ; "content_type", Json_util.string_opt_to_json content_type
+    ; "downloaded_bytes", Json_util.int_opt_to_json downloaded_bytes
+    ; "endpoint_url", Json_util.string_opt_to_json endpoint_url
+    ; "probe_url", Json_util.string_opt_to_json probe_url
+    ; "error", Json_util.string_opt_to_json error
+    ; "checked_at", `String (Masc_domain.now_iso ())
+    ]
+  in
+  let make ?probe_url ?http_status ?latency_ms ?model_count ?content_type
+      ?downloaded_bytes ?error ~auth_present ~status ~reachable ~skipped () =
+    { json =
+        `Assoc
+          (base_fields
+             ?probe_url
+             ?http_status
+             ?latency_ms
+             ?model_count
+             ?content_type
+             ?downloaded_bytes
+             ?error
+             ~auth_present
+             ~status
+             ~reachable
+             ())
+    ; runtime_id = rt.id
+    ; status
+    ; reachable
+    ; skipped
+    }
+  in
+  match rt.provider.transport with
+  | Runtime_schema.Cli _ ->
+    make
+      ~auth_present:false
+      ~status:"skipped_cli"
+      ~reachable:None
+      ~skipped:true
+      ~error:"CLI runtimes do not expose an HTTP reachability endpoint"
+      ()
+  | Runtime_schema.Http endpoint_url ->
+    begin match
+      rt.execution,
+      dashboard_runtime_probe_target ~api_format:rt.provider.api_format endpoint_url
+    with
+     | ( Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _ ), _
+     | Runtime_execution.Agent_core _, Probe_requires_cli_transport ->
+      make
+        ~auth_present:false
+        ~status:"invalid_execution_transport"
+        ~reachable:(Some false)
+        ~skipped:false
+        ~error:"official-client runtimes must use the CLI transport"
+        ()
+     | Runtime_execution.Agent_core _, Probe_native_auth ->
+      make
+        ~auth_present:false
+        ~status:"skipped_native_auth"
+        ~reachable:None
+        ~skipped:true
+        ~error:
+          "Vertex Gemini authenticates with Google Application Default Credentials; \
+           this probe holds no such credential and does not test reachability"
+        ()
+     | Runtime_execution.Agent_core provider_config, Probe_url probe_url ->
+      let probe_url_json = dashboard_runtime_url_for_json probe_url in
+      if not (dashboard_runtime_http_url_valid probe_url)
+      then
+        make
+          ~probe_url:probe_url_json
+          ~auth_present:false
+          ~status:"invalid_endpoint"
+          ~reachable:(Some false)
+          ~skipped:false
+          ~error:"runtime endpoint is not an absolute http(s) URL"
+          ()
+      else (
+      match
+        dashboard_runtime_probe_headers
+          ~kind:provider_config.Llm_provider.Provider_config.kind
+          rt.provider
+      with
+      | Error error ->
+        make
+          ~probe_url:probe_url_json
+          ~auth_present:false
+          ~status:"missing_auth"
+          ~reachable:(Some false)
+          ~skipped:false
+          ~error
+          ()
+      | Ok (auth_present, headers) ->
+        let started_at = Time_compat.now () in
+        (match
+           http_get ~url:probe_url ~headers
+             ~timeout_sec:dashboard_runtime_probe_timeout_sec_float
+         with
+         | Ok (http_status, response_headers, body) ->
+           let latency_ms = (Time_compat.now () -. started_at) *. 1000.0 in
+           let status = dashboard_runtime_status_of_http_status (Some http_status) in
+           let reachable = http_status >= 200 && http_status < 300 in
+           let model_count =
+             if reachable
+             then dashboard_runtime_model_count_of_body ~api_format:rt.provider.api_format body
+             else None
+           in
+           make
+             ~probe_url:probe_url_json
+             ~http_status
+             ~latency_ms
+             ?model_count
+             ?content_type:(dashboard_runtime_header_value "content-type" response_headers)
+             ?downloaded_bytes:(Some (String.length body))
+             ~auth_present
+             ~status
+             ~reachable:(Some reachable)
+             ~skipped:false
+             ()
+         | Error error ->
+           let latency_ms = (Time_compat.now () -. started_at) *. 1000.0 in
+           make
+             ~probe_url:probe_url_json
+             ~latency_ms
+             ~auth_present
+             ~status:"network_error"
+             ~reachable:(Some false)
+             ~skipped:false
+             ~error
+             ()))
+    end
+;;
+
+let dashboard_runtime_probe_representatives runtimes =
+  let _, representatives_rev =
+    List.fold_left
+      (fun (seen, representatives_rev) (runtime : Runtime_instance.t) ->
+         if Set_util.StringSet.mem runtime.provider.id seen
+         then seen, representatives_rev
+         else
+           ( Set_util.StringSet.add runtime.provider.id seen
+           , runtime :: representatives_rev ))
+      (Set_util.StringSet.empty, [])
+      runtimes
+  in
+  List.rev representatives_rev
+;;
+
+let dashboard_runtime_project_provider_probe (runtime : Runtime_instance.t) probe =
+  let json =
+    match probe.json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "runtime_id", _ -> "runtime_id", `String runtime.id
+             | "model_id", _ -> "model_id", `String runtime.model.id
+             | "model_api_name", _ ->
+               "model_api_name", `String runtime.model.api_name
+             | field -> field)
+           fields)
+    | json -> json
+  in
+  { probe with json; runtime_id = runtime.id }
+;;
+
+let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
+  (* Probe one representative per provider concurrently when a server switch
+     is reachable (the
+     production background-refresh fiber / boot warm, or a switch-bearing
+     test). Models bound to one provider share its transport, credentials,
+     protocol, and metadata endpoint, so repeating the same GET for every
+     model creates duplicate load and duplicate-looking failures without new
+     reachability evidence. The representative result is projected back onto
+     every runtime row below so the public schema and exact runtime-id join stay
+     unchanged.
+
+     Each provider probe is an independent URL/HTTP connection with no
+     shared mutable state, so the work is embarrassingly parallel and latency
+     collapses from [sum latencies] to [max latencies] -- a dead runtime no
+     longer serializes the probes after it.
+
+     Concurrency goes through [Eio.Fiber.List.map], the established in-repo
+     idiom for bounded parallel dashboard fan-out (see
+     [Dashboard_execution]'s enrich_keeper_with_diagnostic). It (a) preserves
+     input order, so the count / summary / errors invariants below stay
+     byte-identical to the sequential branch; (b) runs the bodies on its OWN
+     internal switch and re-raises any non-[Cancelled] exception at THIS call
+     site, NOT on the ambient (server root) switch. That distinction matters
+     because the probe body is NOT total: [dashboard_runtime_provider_probe_json]
+     reaches [Masc_http_client]'s pool init ([Pool.create] / [register_pool]),
+     which can raise [Invalid_argument] / [Eio.Mutex.Poisoned]. A bare
+     [Eio.Fiber.fork ~sw] onto the root switch would let such a raise call
+     [Switch.fail sw] and cancel sibling server background fibers; routing
+     through [Fiber.List.map] instead degrades the whole batch to the caller's
+     failure envelope ([maybe_fork_dashboard_runtime_probe_refresh]'s bare
+     exception arm, which calls [record_failure]) -- the same outcome the
+     sequential [List.map] already produces, so the parallel path is no worse than
+     sequential under a rogue exn. [Eio.Cancel.Cancelled] (server shutdown)
+     still propagates. Bounded at [dashboard_runtime_probe_max_fibers].
+
+     Without a switch (unit tests, no Eio scheduler) it falls back to a
+     sequential [List.map] so deterministic ordering and test seams hold. *)
+  let representatives = dashboard_runtime_probe_representatives runtimes in
+  let provider_probes =
+    match Eio_context.get_switch_opt () with
+    | None -> List.map dashboard_runtime_provider_probe_json representatives
+    | Some _sw ->
+      Eio.Fiber.List.map
+        ~max_fibers:dashboard_runtime_probe_max_fibers
+        dashboard_runtime_provider_probe_json
+        representatives
+  in
+  let probes_by_provider =
+    List.map2
+      (fun (runtime : Runtime_instance.t) probe -> runtime.provider.id, probe)
+      representatives
+      provider_probes
+  in
+  let probes =
+    List.map
+      (fun (runtime : Runtime_instance.t) ->
+         let probe = List.assoc runtime.provider.id probes_by_provider in
+         dashboard_runtime_project_provider_probe runtime probe)
+      runtimes
+  in
+  let count pred = probes |> List.filter pred |> List.length in
+  let skipped = count (fun p -> p.skipped) in
+  let reachable = count (fun p -> Option.equal Bool.equal p.reachable (Some true)) in
+  let failed = count (fun p -> Option.equal Bool.equal p.reachable (Some false)) in
+  let probed = List.length probes - skipped in
+  (* Published on the shared vocabulary. Spelled as this function's own words,
+     three of the four rungs — [reachable], [no_http_runtimes], [unreachable] —
+     were absent from it and arrived at readers as [Unknown], which ranks the
+     same as [Degraded]: every probe failing read no worse than some failing,
+     and a workspace with nothing to probe read as troubled (#27560). *)
+  let status : Health_status.t =
+    if failed = 0 && probed > 0
+    then Health_status.Ok
+    else if failed = 0
+    then Health_status.Idle
+    else if reachable > 0
+    then Health_status.Degraded
+    else Health_status.Unavailable
+  in
+  let errors =
+    probes
+    |> List.filter_map (fun probe ->
+      match probe.reachable with
+      | Some false ->
+        Some (Printf.sprintf "%s: %s" probe.runtime_id probe.status)
+      | _ -> None)
+  in
+  `Assoc
+    [ "source", `String runtime_inventory_source
+    ; "status", `String (Health_status.to_string status)
+    ; "probe_ok", `Bool (failed = 0)
+    ; "checked_at", `String (Masc_domain.now_iso ())
+    ; ( "summary"
+      , `Assoc
+          [ "runtimes", `Int (List.length runtimes)
+          ; "probed", `Int probed
+          ; "reachable", `Int reachable
+          ; "failed", `Int failed
+          ; "skipped", `Int skipped
+          ; "default_runtime_id", Json_util.string_opt_to_json default_id
+          ] )
+    ; "providers", `List (List.map (fun p -> p.json) probes)
+    ; "errors", Json_util.json_string_list errors
+    ; ( "observations"
+      , Json_util.json_string_list
+          [ Printf.sprintf
+              "runtime.toml provider reachability: %d reachable, %d failed, %d skipped"
+              reachable
+              failed
+              skipped
+          ] )
+    ; "limitations"
+      , Json_util.json_string_list
+          [ "Probe checks provider metadata endpoints only; it does not send a completion request."
+          ; "CLI runtimes are listed but not executed by the dashboard probe."
+          ]
+    ]
+;;
+
+let run_dashboard_runtime_probe () =
+  match Atomic.get dashboard_runtime_probe_runner_hook with
+  | Some hook -> hook ()
+  | None ->
+    let runtimes = Runtime.get_runtimes () in
+    let default_id =
+      Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime_instance.t) -> rt.id)
+    in
+    dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
+;;
+
+let dashboard_runtime_probe_degraded_envelope
+      ~status ~error ~observation ~limitation () =
+  (* Degraded probe envelope shared by the warming-up (cold start, no prior
+     cache value) and unreachable paths. Keeps [probe_ok] false and every
+     summary count zero so the dashboard surfaces a clear "no data yet" state
+     rather than stalling the HTTP response. *)
+  `Assoc
+    [ "source", `String runtime_inventory_source
+    ; "status", `String status
+    ; "probe_ok", `Bool false
+    ; "checked_at", `String (Masc_domain.now_iso ())
+    ; ( "summary"
+      , `Assoc
+          [ "runtimes", `Int 0
+          ; "probed", `Int 0
+          ; "reachable", `Int 0
+          ; "failed", `Int 0
+          ; "skipped", `Int 0
+          ; "default_runtime_id", `Null
+          ] )
+    ; "providers", `List []
+    ; "errors", `List [ `String error ]
+    ; "observations", `List [ `String observation ]
+    ; "limitations", `List [ `String limitation ]
+    ]
+;;
+
+let dashboard_runtime_probe_failure_envelope_of_exn (exn : exn) =
+  (* Failure envelope persisted to the cache when a background refresh raises,
+     so the dashboard surfaces the cause instead of masking it as a stale or
+     warming-up value (failure-visibility contract). [Printexc.to_string]
+     carries the exception message into the [errors] array; the next refresh
+     after TTL expiry retries the probe. Pure function so the envelope shape is
+     unit-testable independent of the cache/atomic plumbing. *)
+  dashboard_runtime_probe_degraded_envelope
+    ~status:"unreachable"
+    ~error:(Printexc.to_string exn)
+    ~observation:
+      "Runtime probe background refresh failed; the value below is a failure \
+       snapshot cached for the cache TTL window so the dashboard surfaces the \
+       cause. The next refresh after TTL expiry retries the probe."
+    ~limitation:"Cached failure envelope; a successful refresh replaces it."
+    ()
+
+let dashboard_runtime_probe_record_failure exn =
+  (* Write the failure envelope to the cache (so subsequent reads within the
+     TTL window see the cause) and release the single-flight CAS. [Atomic.set]
+     never yields. *)
+  Atomic.set
+    dashboard_runtime_probe_cache
+    (Some
+       { probe = dashboard_runtime_probe_failure_envelope_of_exn exn
+       ; refreshed_at = Time_compat.now ()
+       });
+  Atomic.set dashboard_runtime_probe_refresh_in_flight false
+;;
+
+let maybe_fork_dashboard_runtime_probe_refresh () =
+  (* Trigger a background refresh of the runtime probe cache without ever
+     blocking the caller. Single-flight via the
+     [dashboard_runtime_probe_refresh_in_flight] CAS: if a refresh is already
+     running, this is a no-op. On domains where a background [Eio.Fiber.fork]
+     is not permitted (Domain_pool worker domains, or when no server switch is
+     reachable), release the CAS and skip -- a subsequent request on the main
+     domain will pick it up. [Atomic.set] never yields, so the in-flight flag
+     is always cleared even when the forked fiber raises or is cancelled.
+
+     This replaces the previous synchronous wait (up to
+     [dashboard_runtime_probe_timeout_sec], i.e. 15s) that stalled the whole
+     dashboard shell on every cache-miss poll and every force=1 request.
+     Mirrors the git-rev-parse background-refresh pattern
+     ([maybe_refresh_git_rev_parse_short_in_background]) already in this
+     module. *)
+  if Atomic.compare_and_set dashboard_runtime_probe_refresh_in_flight false true
+  then begin
+    if background_refresh_domain_unavailable () then
+      Atomic.set dashboard_runtime_probe_refresh_in_flight false
+    else
+      match Eio_context.get_switch_opt () with
+      | None -> Atomic.set dashboard_runtime_probe_refresh_in_flight false
+      | Some sw ->
+        let run () =
+          match run_dashboard_runtime_probe () with
+          | fresh ->
+            let refreshed_at = Time_compat.now () in
+            Atomic.set
+              dashboard_runtime_probe_cache
+              (Some { probe = fresh; refreshed_at });
+            Atomic.set dashboard_runtime_probe_refresh_in_flight false
+          | exception Eio.Cancel.Cancelled _ ->
+            (* Switch cancelled (e.g. server shutdown): release CAS, do not
+               cache. A shutdown is not a probe failure. *)
+            Atomic.set dashboard_runtime_probe_refresh_in_flight false
+          | exception exn ->
+            (* Persist a failure envelope so the dashboard surfaces the cause
+               instead of masking it as a stale or warming-up value
+               (failure-visibility contract). Cached for the TTL window; the
+               next refresh after expiry retries. Covers [Eio.Mutex.Poisoned]
+               and any other exn -- [dashboard_runtime_probe_record_failure]
+               writes the envelope and releases the CAS atomically. *)
+            Log.Dashboard.warn
+              "runtime probe background refresh failed: %s"
+              (Printexc.to_string exn);
+            dashboard_runtime_probe_record_failure exn
+        in
+        (* No request waits on this refresh (RFC-0204 3.4). *)
+        (try Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background run) with
+         | exn when eio_switch_fork_unavailable exn ->
+           background_refresh_mark_domain_unavailable ();
+           Atomic.set dashboard_runtime_probe_refresh_in_flight false
+         | exn ->
+           Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+           raise exn)
+  end
+;;
+
+let dashboard_runtime_probe_cached_value () =
+  match Atomic.get dashboard_runtime_probe_cache with
+  | Some entry -> Some (entry.probe, entry.refreshed_at)
+  | None -> None
+;;
+
+let dashboard_runtime_probe_fresh_value ~now =
+  match dashboard_runtime_probe_cached_value () with
+  | Some (probe, refreshed_at)
+    when now -. refreshed_at <= dashboard_runtime_probe_cache_ttl_sec ->
+    Some (probe, refreshed_at)
+  | _ -> None
+;;
+
+let dashboard_runtime_probe_recent_value ~now =
+  match dashboard_runtime_probe_cached_value () with
+  | Some (probe, refreshed_at)
+    when now -. refreshed_at <= dashboard_runtime_probe_force_min_refresh_sec ->
+    Some (probe, refreshed_at)
+  | _ -> None
+;;
+
+(* Why this exists: force=1 callers (the dashboard "Live probe" button) expect an
+   immediate fresh value, but the route is non-blocking — a cache miss schedules
+   a background refresh and returns the best value available now. This tag makes
+   that contract explicit in the response so the client can tell "this is the
+   refreshed value" from "a refresh was scheduled; the next poll carries the new
+   value", instead of inferring it from [cache_hit] alone. Closed sum so adding a
+   freshness branch forces an exhaustive update of the serializer. *)
+type dashboard_runtime_probe_refresh_state =
+  | Refresh_fresh (* TTL-fresh cache hit (non-force); no background refresh triggered. *)
+  | Refresh_recent
+  (* force=1 within [dashboard_runtime_probe_force_min_refresh_sec]: the recent
+     value is served and no new refresh is triggered (force rate limit). *)
+  | Refresh_served_stale
+  (* Cache miss with a stale value: the stale value is returned and a background
+     refresh was scheduled; the next poll carries the fresh value. *)
+  | Refresh_warming_up
+(* Cold start (no cache value): a warming-up placeholder is returned and a
+     background refresh was scheduled; the next poll carries the fresh value. *)
+
+let dashboard_runtime_probe_refresh_state_to_string = function
+  | Refresh_fresh -> "fresh"
+  | Refresh_recent -> "recent"
+  | Refresh_served_stale -> "served_stale"
+  | Refresh_warming_up -> "warming_up"
+;;
+
+let dashboard_runtime_probe_http_json ?(force = false) () =
+  let now = Time_compat.now () in
+  let probe, cache_hit, refreshed_at, refresh_state =
+    match
+      if force
+      then dashboard_runtime_probe_recent_value ~now
+      else dashboard_runtime_probe_fresh_value ~now
+    with
+    | Some (cached, cached_at) ->
+      (* Cache hit: a force=1 hit inside the recent-value window is rate-limited
+         (no new refresh) and tagged [recent]; a plain TTL-fresh hit is [fresh].
+         Stale-while-revalidate: even on a TTL-fresh (non-force) hit, once the
+         cached value's age crosses the soft-TTL
+         [dashboard_runtime_probe_soft_refresh_sec] we schedule a non-blocking
+         background refresh. The single-flight CAS inside
+         {!maybe_fork_dashboard_runtime_probe_refresh} makes this a no-op when a
+         refresh is already running. This pre-warms the cache so the *next* poll
+         sees a fresh value instead of letting cache expiry land on a poll (the
+         TTL==poll-interval hit-rate-0 trap). The current response still serves
+         the fresh value; the refresh is invisible to the client. *)
+      let age = now -. cached_at in
+      if (not force) && age > dashboard_runtime_probe_soft_refresh_sec
+      then maybe_fork_dashboard_runtime_probe_refresh ();
+      cached, true, cached_at, (if force then Refresh_recent else Refresh_fresh)
+    | None ->
+      (* Cache miss (or forced refresh past the recent window): trigger a
+         non-blocking background refresh and return the best value available
+         right now (stale cache, or a warming-up envelope on cold start). This
+         removes the synchronous up-to-[dashboard_runtime_probe_timeout_sec]
+         wait that previously stalled the dashboard shell on every cache-miss
+         poll and on every force=1 request. [refresh_state] tells the client a
+         refresh was scheduled, so a force=1 caller does not mistake the
+         stale/warming-up value for an immediate fresh probe. *)
+      maybe_fork_dashboard_runtime_probe_refresh ();
+      (match dashboard_runtime_probe_cached_value () with
+       | Some (stale, stale_at) -> stale, false, stale_at, Refresh_served_stale
+       | None ->
+         ( dashboard_runtime_probe_degraded_envelope
+             ~status:"warming_up"
+             ~error:"background probe in progress"
+             ~observation:
+               "Runtime probe is running in the background after a cold \
+                start or cache expiry; the next poll returns the refreshed \
+                value."
+             ~limitation:
+               "First response with no prior cache value returns this \
+                placeholder until the background probe completes."
+             (),
+           false,
+           0.0,
+           Refresh_warming_up ))
+  in
+  let response_now = Time_compat.now () in
+  let refreshed_at_json, cache_age_json =
+    if refreshed_at > 0.0
+    then `Float refreshed_at, `Float (max 0.0 (response_now -. refreshed_at))
+    else `Null, `Null
+  in
+  `Assoc
+    [ "generated_at", `String (Masc_domain.now_iso ())
+    ; "refreshed_at_unix", refreshed_at_json
+    ; "cache_ttl_sec", `Float dashboard_runtime_probe_cache_ttl_sec
+    ; "cache_age_sec", cache_age_json
+    ; "cache_hit", `Bool cache_hit
+    ; ( "refresh_state"
+      , `String (dashboard_runtime_probe_refresh_state_to_string refresh_state) )
+    ; "probe", probe
+    ]
+;;
+
+let runtime_endpoint_url_of_transport = function
+  | Runtime_schema.Http url -> Some url
+  | Runtime_schema.Cli _ -> None
+;;
+
+let runtime_http_transport_is_loopback url =
+  Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+;;
+
+(* Closed over the transports a runtime can have. The dashboard label used to
+   be derived from the serialized name with a wildcard, so "http" reached
+   "cloud" implicitly and a fourth transport kind would have joined it in
+   silence. Both mappings are exhaustive now; the wire strings are unchanged. *)
+type runtime_transport_kind =
+  | Kind_cli
+  | Kind_local
+  | Kind_http
+
+let runtime_kind_of_transport = function
+  | Runtime_schema.Cli _ -> Kind_cli
+  | Runtime_schema.Http url when runtime_http_transport_is_loopback url -> Kind_local
+  | Runtime_schema.Http _ -> Kind_http
+;;
+
+let runtime_kind_to_string = function
+  | Kind_cli -> "cli"
+  | Kind_local -> "local"
+  | Kind_http -> "http"
+;;
+
+(* The operator-facing bucket: a non-loopback HTTP endpoint is remote. *)
+let runtime_dashboard_kind_of_runtime_kind = function
+  | Kind_local -> "local"
+  | Kind_cli -> "cli"
+  | Kind_http -> "cloud"
+;;
+
+let runtime_default_runtime_id () =
+  Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime_instance.t) -> rt.id)
+;;
+
+let effective_capabilities_json (rt : Runtime_instance.t) =
+  match rt.execution with
+  | Runtime_execution.Codex_app_server _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String "codex_app_server"
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Antigravity_cli _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String "antigravity_cli"
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Claude_code _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String "claude_code"
+      ; "execution_mode", `String "masc_mcp_only"
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Muse_serve _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String (Runtime_execution.label rt.execution)
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Agent_core provider_config ->
+   (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
+  | None -> `Null
+  | Some caps ->
+    let accepted_reasoning_efforts =
+      match caps.accepted_reasoning_efforts with
+      | None -> `Null
+      | Some efforts ->
+        efforts
+        |> List.map Llm_provider.Reasoning_effort.to_string
+        |> Json_util.json_string_list
+    in
+    let supported_models =
+      match caps.supported_models with
+      | None -> `Null
+      | Some models -> Json_util.json_string_list models
+    in
+    `Assoc
+      [ "source", `String "agent_core-provider-config-model"
+      ; "max_context_tokens", Json_util.int_opt_to_json caps.max_context_tokens
+      ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
+      ; "supports_tools", `Bool caps.supports_tools
+      ; "supports_tool_choice", `Bool caps.supports_tool_choice
+      ; "supports_required_tool_choice", `Bool caps.supports_required_tool_choice
+      ; "supports_named_tool_choice", `Bool caps.supports_named_tool_choice
+      ; "supports_parallel_tool_calls", `Bool caps.supports_parallel_tool_calls
+      ; ( "assistant_tool_content_format"
+        , `String (assistant_tool_content_format_wire caps.assistant_tool_content_format) )
+      ; "supports_reasoning", `Bool caps.supports_reasoning
+      ; "accepted_reasoning_efforts", accepted_reasoning_efforts
+      ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
+      ; ( "preserve_thinking_control_format"
+        , `String (preserve_thinking_control_format_wire caps.preserve_thinking_control_format)
+        )
+      ; "reasoning_output_format", `String (reasoning_output_format_wire caps.reasoning_output_format)
+      ; "reasoning_streaming_format", reasoning_streaming_format_json caps.reasoning_streaming_format
+      ; "reasoning_replay_override", `String (reasoning_replay_override_wire caps.reasoning_replay_override)
+      ; "supports_response_format_json", `Bool caps.supports_response_format_json
+      ; "supports_structured_output", `Bool caps.supports_structured_output
+      ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
+      ; "supports_image_input", `Bool caps.supports_image_input
+      ; "supports_audio_input", `Bool caps.supports_audio_input
+      ; "supports_video_input", `Bool caps.supports_video_input
+      ; "modality_priority", `String (modality_priority_wire caps.modality_priority)
+      ; "task", task_json caps.task
+      ; "supports_native_streaming", `Bool caps.supports_native_streaming
+      ; "supports_system_prompt", `Bool caps.supports_system_prompt
+      ; "supports_assistant_prefill", `Bool caps.supports_assistant_prefill
+      ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
+      ; "supports_top_k", `Bool caps.supports_top_k
+      ; "supports_min_p", `Bool caps.supports_min_p
+      ; "supports_seed", `Bool caps.supports_seed
+      ; ( "ignored_sampling_parameters"
+        , caps.ignored_sampling_parameters
+          |> List.map Llm_provider.Capabilities.sampling_parameter_to_string
+          |> Json_util.json_string_list )
+      ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
+      ; "supported_models", supported_models
+      ])
+;;
+
+let runtime_parameter_policy_json (rt : Runtime_instance.t) =
+  let module RD = Llm_provider.Reasoning_dialect in
+  let sampling_parameter_json_list values =
+    values
+    |> List.map Llm_provider.Capabilities.sampling_parameter_to_string
+    |> Json_util.json_string_list
+  in
+  match rt.execution with
+  | Runtime_execution.Codex_app_server _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String "codex_app_server"
+      ]
+  | Runtime_execution.Antigravity_cli _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String "antigravity_cli"
+      ]
+  | Runtime_execution.Claude_code _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String "claude_code"
+      ; "execution_mode", `String "masc_mcp_only"
+      ]
+  | Runtime_execution.Muse_serve _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String (Runtime_execution.label rt.execution)
+      ]
+  | Runtime_execution.Agent_core provider_config ->
+    let dialect = RD.for_provider_config provider_config in
+    let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
+    let ignored_sampling_params =
+      List.filter
+        (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:None field)
+        sampling_candidates
+    in
+    let always_ignored_sampling_params =
+      List.filter
+        (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:(Some false) field)
+        sampling_candidates
+    in
+    `Assoc
+    [ "reasoning_toggle_wire", `String (RD.toggle_wire_to_string dialect.toggle_wire)
+    ; "reasoning_replay_policy", `String (RD.replay_policy_to_string dialect.replay_policy)
+    ; "requires_reasoning_replay_on_tool_call", `Bool (RD.requires_reasoning_replay_on_tool_call dialect)
+    ; "ignored_sampling_params", sampling_parameter_json_list ignored_sampling_params
+    ; ( "always_ignored_sampling_params"
+      , sampling_parameter_json_list always_ignored_sampling_params )
+    ]
+;;
+
+let runtime_admission_json (rt : Runtime_instance.t) =
+  match rt.execution with
+  | Runtime_execution.Agent_core config ->
+    let snapshot = Llm_provider.Provider_admission.snapshot_for ~config in
+    `Assoc
+      [ "scope", `String "process_endpoint_credential"
+      ; "declared_max", Json_util.int_opt_to_json config.max_concurrent_requests
+      ; "enforced_for_runtime", `Bool (Option.is_some config.max_concurrent_requests)
+      ; "snapshot",
+        (match snapshot with
+         | None -> `Null
+         | Some snapshot ->
+           `Assoc
+             [ "max_slots", `Int snapshot.max_slots
+             ; "active", `Int snapshot.active
+             ; "available", `Int snapshot.available
+             ; "queue_length", `Int snapshot.queue_length
+             ])
+      ]
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Muse_serve _ -> `Null
+;;
+
+let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
+  let runtime_kind = runtime_kind_of_transport rt.provider.transport in
+  let is_official_client_runtime =
+    match Runtime_execution.checkpoint_owner rt.execution with
+    | Runtime_execution.Official_client -> true
+    | Runtime_execution.Masc_agent_core -> false
+  in
+  let runtime_status =
+    if is_official_client_runtime then "configured_unverified" else "configured"
+  in
+  let models = [ rt.model.api_name ] in
+  let capabilities_declared, caps =
+    match rt.model.capabilities with
+    | Some caps -> true, caps
+    | None ->
+      ( false
+      , Runtime_schema.model_capabilities_default
+        (* DET-OK: absent [models.<id>.capabilities] is exposed below as
+           [capabilities_declared=false]; the all-[None] record only keeps this
+           read-only dashboard projection total, it is not a policy default. *) )
+  in
+  `Assoc
+    [ "provider", `String rt.id
+    ; "runtime_id", `String rt.id
+    ; "provider_id", `String rt.provider.id
+    ; "provider_display_name", `String rt.provider.display_name
+    ; "model_id", `String rt.model.id
+    ; "model_api_name", `String rt.model.api_name
+    ; "protocol", `String rt.provider.protocol
+    ; "usage_read_configured", `Bool (Option.is_some rt.provider.usage_read)
+    ; "transport", `String (runtime_transport_string rt.provider.transport)
+    ; "kind", `String (runtime_dashboard_kind_of_runtime_kind runtime_kind)
+    ; "runtime_kind", `String (runtime_kind_to_string runtime_kind)
+    ; "auth_kind", `String (runtime_auth_kind_of_credential rt.provider.credentials)
+    ; "status", `String runtime_status
+    ; "available", `Bool (not is_official_client_runtime)
+    ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
+    ; "max_context", `Int (Runtime_instance.max_context_of_runtime rt)
+    ; "tools_support", `Bool (rt.model.tools_support && not is_official_client_runtime)
+    ; "thinking_support", Json_util.bool_opt_to_json
+        (if is_official_client_runtime then Some false else rt.model.thinking_support)
+    ; "streaming", `Bool (rt.model.streaming && not is_official_client_runtime)
+      (* Per-model sampling temperature override ([models.<id>].temperature).
+         [`Null] when unset (the runtime keeps the fleet fallback). Read-only
+         projection for the dashboard runtime capability card. *)
+    ; ( "temperature"
+      , match rt.model.temperature with
+        | Some t -> `Float t
+        | None -> `Null )
+    ; "top_p", Json_util.float_opt_to_json rt.model.top_p
+    ; "top_k", Json_util.int_opt_to_json rt.model.top_k
+    ; "min_p", Json_util.float_opt_to_json rt.model.min_p
+      (* Additive capability projection for dashboard runtime snapshot cards.
+         These mirrors are declared model capabilities from runtime.toml only.
+         Each key is [null] when the operator wrote nothing for it, and
+         [capabilities_declared] below says whether the block existed at
+         all — an absent block and a block that states one key are different
+         facts (#37435). *)
+    ; "capabilities_declared", `Bool capabilities_declared
+    ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
+    ; "supports_tool_choice", Json_util.bool_opt_to_json caps.supports_tool_choice
+    ; "supports_required_tool_choice", Json_util.bool_opt_to_json caps.supports_required_tool_choice
+    ; "supports_named_tool_choice", Json_util.bool_opt_to_json caps.supports_named_tool_choice
+    ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
+    ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs
+    ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+    ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
+    ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
+    ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
+    ; "anthropic_thinking_control", anthropic_thinking_control_json caps.anthropic_thinking_control
+    ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
+    ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
+    ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt
+    ; "supports_assistant_prefill", Json_util.bool_opt_to_json caps.supports_assistant_prefill
+    ; "supports_prompt_caching", Json_util.bool_opt_to_json caps.supports_prompt_caching
+    ; "supports_top_k", Json_util.bool_opt_to_json caps.supports_top_k
+    ; "supports_min_p", Json_util.bool_opt_to_json caps.supports_min_p
+    ; "supports_seed", Json_util.bool_opt_to_json caps.supports_seed
+    ; "emits_usage_tokens", Json_util.bool_opt_to_json caps.emits_usage_tokens
+    ; "effective_capabilities", effective_capabilities_json rt
+    ; "parameter_policy", runtime_parameter_policy_json rt
+    ; "request_config", runtime_request_config_json rt
+    ; "provider_admission", runtime_admission_json rt
+    ; ( "verification"
+      , if is_official_client_runtime
+        then
+          `Assoc
+            [ "status", `String "unverified"
+            ; "measured", `Bool false
+            ; "evidence", `Null
+            ; "reason", `String "no_successful_runtime_observation"
+            ]
+        else `Null )
+    ; "declared_spec", runtime_declared_spec_json rt
+    ; "model_count", `Int (List.length models)
+    ; "models", Json_util.json_string_list models
+    ; "source", `String runtime_inventory_source
+    ; "endpoint_url", Json_util.string_opt_to_json (runtime_endpoint_url_of_transport rt.provider.transport)
+    ; "note", `Null
+    ]
+;;
+
+let runtime_unique_count values =
+  values |> List.sort_uniq String.compare |> List.length
+;;
+
+let runtime_assignment_status_json ~default_id =
+  let assignments =
+    Runtime.keeper_assignments ()
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  in
+  let assignment_count = List.length assignments in
+  let assigned_runtime_ids = List.map snd assignments in
+  let assigned_runtimes = List.sort_uniq String.compare assigned_runtime_ids in
+  let assigned_runtime_count = List.length assigned_runtimes in
+  let default_assignment_count =
+    match default_id with
+    | None -> 0
+    | Some default_id ->
+      assignments
+      |> List.filter (fun (_, runtime_id) -> String.equal runtime_id default_id)
+      |> List.length
+  in
+  let single_runtime_pin = assignment_count > 1 && assigned_runtime_count = 1 in
+  let assignments_match_default =
+    assignment_count > 0 && default_assignment_count = assignment_count
+  in
+  let add_if condition warning warnings =
+    if condition then warning :: warnings else warnings
+  in
+  let warnings =
+    []
+    |> add_if (assignment_count > 0) "explicit_assignments_present"
+    |> add_if single_runtime_pin "single_runtime_assignment_pin"
+    |> add_if assignments_match_default "assignments_match_default_runtime"
+    |> List.rev
+  in
+  let status =
+    if warnings = []
+    then "ok"
+    else if single_runtime_pin || assignments_match_default
+    then "degraded"
+    else "watch"
+  in
+  `Assoc
+    [ "schema", `String "masc.runtime_assignment_status.v1"
+    ; "source", `String runtime_inventory_source
+    ; "status", `String status
+    ; "degraded", `Bool (String.equal status "degraded")
+    ; "operator_action_required", `Bool (warnings <> [])
+    ; "blast_radius",
+      `String
+        (if assignment_count = 0
+         then "default_runtime_only"
+         else if single_runtime_pin
+         then "single_runtime_assignment_pin"
+         else "mixed_runtime_assignments")
+    ; "assignment_count", `Int assignment_count
+    ; "assigned_runtime_count", `Int assigned_runtime_count
+    ; "default_assignment_count", `Int default_assignment_count
+    ; "default_runtime_id", Json_util.string_opt_to_json default_id
+    ; "warnings", Json_util.json_string_list warnings
+    ; "assigned_runtimes", Json_util.json_string_list assigned_runtimes
+    ; ( "assignments"
+      , `List
+          (List.map
+             (fun (keeper_name, runtime_id) ->
+                `Assoc
+                  [ "keeper", `String keeper_name
+                  ; "runtime_id", `String runtime_id
+                  ; ( "matches_default"
+                    , `Bool (Option.equal String.equal default_id (Some runtime_id)) )
+                  ])
+             assignments) )
+    ]
+;;
+
+let gate_hitl_json () =
+  `Assoc
+    [ "schema", `String "masc.gate_hitl.v1"
+    ; "state", `String "available"
+    ; "nonblocking", `Bool true
+    ]
+;;
+
+let runtime_inventory_json () =
+  let runtimes = Runtime.get_runtimes () in
+  let default_id = runtime_default_runtime_id () in
+  let kind_of_runtime (rt : Runtime_instance.t) =
+    runtime_kind_of_transport rt.provider.transport
+    |> runtime_dashboard_kind_of_runtime_kind
+  in
+  let count_models kind =
+    runtimes
+    |> List.filter (fun rt -> String.equal (kind_of_runtime rt) kind)
+    |> List.length
+  in
+  let provider_ids = List.map (fun (rt : Runtime_instance.t) -> rt.provider.id) runtimes in
+  `Assoc
+    [ "updated_at", `String (Masc_domain.now_iso ())
+    ; "source", `String runtime_inventory_source
+    ; "config_path", Json_util.string_opt_to_json (Runtime.config_path ())
+    ; ( "startup_degradation"
+      , Runtime.startup_degradation_to_yojson
+         ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
+         (Runtime.startup_degradation ()) )
+    ; ( "summary"
+      , `Assoc
+          [ "providers", `Int (runtime_unique_count provider_ids)
+          ; "runtimes", `Int (List.length runtimes)
+          ; "local_models", `Int (count_models "local")
+          ; "cloud_models", `Int (count_models "cloud")
+          ; "cli_models", `Int (count_models "cli")
+          ; "default_runtime_id", Json_util.string_opt_to_json default_id
+          ] )
+    ; "assignment_status", runtime_assignment_status_json ~default_id
+    ; "providers", `List (List.map (runtime_inventory_entry_json ~default_id) runtimes)
+    ]
+;;
+
+let runtime_resolution_json (config : Workspace.config) =
+  let build = Build_identity.current () in
+  let runtime_commit = build.binary_commit in
+  let runtime_commit_known = Option.is_some runtime_commit in
+  let server_repo_path = Build_identity.repo_root () in
+  let server_repo_commit = Option.bind server_repo_path git_rev_parse_short in
+  let upstream_status =
+    Option.bind server_repo_path git_upstream_status
+    |> Option.value ~default:empty_git_upstream_status
+  in
+  let workspace_commit = git_rev_parse_short config.workspace_path in
+  let resolved_base_commit = git_rev_parse_short config.base_path in
+  let base_path_input =
+    (* The server publishes its canonical owner in MASC_BASE_PATH. The
+       operator's own spelling is kept in the startup path diagnostics, which
+       bootstrap computes from the explicit ~input_base_path argument. *)
+    Env_config_core.base_path_source_opt ()
+    |> Option.map snd
+    |> Option.value ~default:config.workspace_path
+  in
+  let prompt_markdown_dir =
+    Prompt_registry.get_markdown_dir ()
+    |> Option.value
+         ~default:
+           (Config_dir_resolver.prompts_dir_for_base_path
+              ~base_path:config.base_path)
+  in
+  (* The registry is filled by [Prompt_defaults.bootstrap_runtime], which
+     resolves against the server's base path. Comparing it to a cwd-resolved
+     directory reported a mismatch whenever the server ran from anywhere but
+     its own workspace (masc#35146). *)
+  let expected_prompt_dir =
+    Config_dir_resolver.prompts_dir_for_base_path ~base_path:config.base_path
+  in
+  let prompt_dir_mismatch =
+    prompt_markdown_dir <> ""
+    && not (String.equal prompt_markdown_dir expected_prompt_dir)
+  in
+  let source_mismatch =
+    match runtime_commit, server_repo_commit, workspace_commit with
+    | Some runtime, Some server_repo, _ ->
+      not (Server_dashboard_http_runtime_info_json.commit_equal runtime server_repo)
+    | Some runtime, None, Some workspace ->
+      not (Server_dashboard_http_runtime_info_json.commit_equal runtime workspace)
+    | _ -> false
+  in
+  let server_workspace_mismatch =
+    match Option.bind server_repo_path normalized_path_opt with
+    | None -> false
+    | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
+  in
+  let diagnostics, signal_count, agent_issue_count =
+    runtime_diagnostics_json ()
+  in
+  let add_source_mismatch_warning acc =
+    if source_mismatch
+    then (
+      (* When [runtime_commit] is [None] the warning previously
+         rendered as "Runtime build commit (unknown) differs from ...".
+         The *reason* the binary commit is unknown was emitted as a
+         separate [add_binary_commit_unknown_warning] further down,
+         forcing the dashboard reader to cross-reference two warnings
+         to understand a single mismatch.  Inline the reason in the
+         marker itself so the warning is self-contained. *)
+      let runtime =
+        match runtime_commit with
+        | Some commit -> commit
+        | None ->
+            "<unknown — Build_identity.binary_commit not populated by build \
+             pipeline>"
+      in
+      let source_label, source_commit =
+        match server_repo_commit with
+        | Some commit -> "server repo HEAD", commit
+        | None ->
+            (* [workspace_commit] is [git_rev_parse_short config.workspace_path].
+               [None] means [git rev-parse] failed at that path; naming the
+               path gives the operator the worktree to check. *)
+            let commit =
+              match workspace_commit with
+              | Some c -> c
+              | None ->
+                  Printf.sprintf
+                    "<unknown — git rev-parse failed at workspace_path=%s>"
+                    config.workspace_path
+            in
+            "workspace HEAD", commit
+      in
+      Printf.sprintf
+        "Runtime build commit (%s) differs from %s (%s). Rebuild/restart from \
+         the intended server worktree."
+        runtime
+        source_label
+        source_commit
+      :: acc)
+    else acc
+  in
+  let add_binary_commit_unknown_warning acc =
+    if (not runtime_commit_known) && Option.is_some build.repo_head_commit
+    then
+      "Runtime binary commit is unknown; runtime_repo_head_commit is only the \
+       checkout HEAD snapshot captured by the running process and must not be \
+       treated as binary/deploy proof."
+      :: acc
+    else acc
+  in
+  let add_runtime_repo_snapshot_drift_warning acc =
+    if runtime_commit_known
+    then acc
+    else
+      match build.repo_head_commit, server_repo_commit with
+      | Some runtime_head, Some server_head
+        when not
+          (Server_dashboard_http_runtime_info_json.commit_equal runtime_head server_head) ->
+        Printf.sprintf
+          "Runtime source snapshot (%s) differs from server repo HEAD (%s), \
+           but the binary commit is unknown. Rebuild/restart before trusting \
+           runtime identity."
+          runtime_head
+          server_head
+        :: acc
+      | _ -> acc
+  in
+  let add_upstream_drift_warning acc =
+    match upstream_status.behind_count, upstream_status.upstream_head_commit with
+    | Some behind, Some upstream when behind > 0 ->
+      let deployed =
+        match build.binary_commit, build.repo_head_commit with
+        | Some commit, _ -> "binary " ^ commit
+        | None, Some commit -> "runtime source snapshot " ^ commit
+        | None, None -> "unknown binary commit"
+      in
+      let branch =
+        Option.value ~default:"detached" upstream_status.branch
+      in
+      let upstream_ref =
+        Option.value ~default:"upstream" upstream_status.upstream_ref
+      in
+      Printf.sprintf
+        "Server source branch %s is behind %s by %d commit(s); running runtime \
+         identity (%s) differs from upstream %s. Fetch/build/restart from \
+         current main before trusting runtime identity."
+        branch
+        upstream_ref
+        behind
+        deployed
+        upstream
+      :: acc
+    | _ -> acc
+  in
+  let add_server_workspace_mismatch_warning acc =
+    if server_workspace_mismatch
+    then (
+      (* [server_workspace_mismatch] is only true when [server_repo_path] is
+         [Some _] (see the [Option.bind] guard above), so the [None] branch is
+         dead at runtime — but [Option.value ~default:"unknown server repo"]
+         silently buried that invariant.  Use the structured form instead:
+         the dead branch documents *why* it cannot fire. *)
+      let server_repo =
+        match server_repo_path with
+        | Some repo -> repo
+        | None ->
+            (* Unreachable: [server_workspace_mismatch] requires
+               [Option.bind server_repo_path normalized_path_opt = Some _],
+               which in turn requires [server_repo_path = Some _]. *)
+            "<unreachable — server_workspace_mismatch implies server_repo_path \
+             = Some _>"
+      in
+      Printf.sprintf
+        "Server binary checkout (%s) differs from dashboard workspace/base \
+         path (%s / %s). This can be intentional; verify the running worktree \
+         when dashboard data looks stale."
+        server_repo
+        config.workspace_path
+        config.base_path
+      :: acc)
+    else acc
+  in
+  let add_prompt_dir_mismatch_warning acc =
+    if prompt_dir_mismatch
+    then
+      Printf.sprintf
+        "Prompt markdown dir (%s) differs from resolved config root (%s)."
+        prompt_markdown_dir
+        expected_prompt_dir
+      :: acc
+    else acc
+  in
+  let add_signal_warning acc =
+    if signal_count > 0
+    then
+      Printf.sprintf
+        "Recent external shutdown signals detected in server logs (%d). Ephemeral \
+         agents will not auto-rejoin after these restarts."
+        signal_count
+      :: acc
+    else acc
+  in
+  let add_agent_issue_warning acc =
+    if agent_issue_count > 0
+    then
+      Printf.sprintf "Recent agent-state compatibility warnings detected (%d)."
+        agent_issue_count
+      :: acc
+    else acc
+  in
+  let warnings =
+    []
+    |> add_source_mismatch_warning
+    |> add_binary_commit_unknown_warning
+    |> add_runtime_repo_snapshot_drift_warning
+    |> add_upstream_drift_warning
+    |> add_server_workspace_mismatch_warning
+    |> add_prompt_dir_mismatch_warning
+    |> add_signal_warning
+    |> add_agent_issue_warning
+    |> List.rev
+  in
+  let status = if warnings = [] then "ready" else "warn" in
+  `Assoc
+    ( [ "status", `String status
+      ; "warnings", `List (List.map (fun warning -> `String warning) warnings)
+      ; "base_path", path_item_json ~source:"input" base_path_input
+      ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
+      ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_dir config)
+      ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
+      ; ( "server_repo_path"
+        , match server_repo_path with
+          | Some path -> path_item_json ~source:"server_binary" path
+          | None ->
+            `Assoc
+              [ "path", `Null; "exists", `Bool false; "source", `String "server_binary" ] )
+      ; ( "server_repo_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) server_repo_commit )
+      ; ( "runtime_binary_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) runtime_commit )
+      ; ( "runtime_repo_head_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit )
+      ; ( "workspace_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) workspace_commit )
+      ; ( "resolved_base_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) resolved_base_commit )
+      ; "source_mismatch", `Bool source_mismatch
+      ; "server_workspace_mismatch", `Bool server_workspace_mismatch
+      ; "diagnostics", diagnostics
+      ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
+      ; "build", Build_identity.to_yojson build
+      ; ( "deployment_state"
+        , deployment_state_json ~build ~server_repo_commit ~workspace_commit
+            ~resolved_base_commit ~upstream_status ~source_mismatch )
+      ; "gate_hitl", gate_hitl_json ()
+      ]
+      @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
+;;
+
+let light_runtime_resolution_json ?profile_snapshot (config : Workspace.config) =
+  let build = Build_identity.current () in
+  let base_path_input =
+    Env_config_core.base_path_source_opt ()
+    |> Option.map snd
+    |> Option.value ~default:config.workspace_path
+  in
+  let prompt_markdown_dir =
+    Prompt_registry.get_markdown_dir ()
+    |> Option.value
+         ~default:
+           (Config_dir_resolver.prompts_dir_for_base_path
+              ~base_path:config.base_path)
+  in
+  let server_repo_path = Build_identity.repo_root () in
+  let server_workspace_mismatch =
+    match Option.bind server_repo_path normalized_path_opt with
+    | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
+    | None -> false
+  in
+  let fleet_fields =
+    Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ?profile_snapshot ()
+  in
+  let fleet_safety =
+    match List.assoc_opt "keeper_fleet_safety" fleet_fields with
+    | Some ((`Assoc _) as json) -> Some json
+    | _ -> None
+  in
+  let fleet_warning =
+    match fleet_safety with
+    | Some (`Assoc fields) ->
+      (* A grade that is not the scan's own [ok] -- degraded, blocked, a
+         word this build does not know, or none -- is a warning. *)
+      let graded_ok =
+        match List.assoc_opt "status" fields with
+        | Some (`String word) -> (
+            match Keeper_fleet_grade.of_wire_name word with
+            | Some Keeper_fleet_grade.Fleet_ok -> true
+            | Some (Keeper_fleet_grade.Fleet_degraded | Keeper_fleet_grade.Fleet_blocked)
+            | None ->
+                false)
+        | Some _ | None -> false
+      in
+      let operator_action_required =
+        match List.assoc_opt "operator_action_required" fields with
+        | Some (`Bool value) -> value
+        | _ -> false
+      in
+      (not graded_ok) || operator_action_required
+    | _ -> false
+  in
+  let warnings =
+    []
+    |> (fun acc ->
+         if server_workspace_mismatch
+         then
+           "Server binary checkout differs from dashboard workspace/base path."
+           :: acc
+         else acc)
+    |> (fun acc ->
+         if fleet_warning
+         then "Keeper fleet safety is degraded; inspect keeper_fleet_safety." :: acc
+         else acc)
+    |> List.rev
+  in
+  let status = if warnings = [] then "ready" else "warn" in
+  `Assoc
+    ( [ "status", `String status
+      ; "warnings", `List (List.map (fun warning -> `String warning) warnings)
+      ; "base_path", path_item_json ~source:"input" base_path_input
+      ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
+      ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_dir config)
+      ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
+      ; ( "server_repo_path"
+        , match server_repo_path with
+          | Some path -> path_item_json ~source:"server_binary" path
+          | None ->
+            `Assoc
+              [ "path", `Null; "exists", `Bool false; "source", `String "server_binary" ] )
+      ; "source_mismatch", `Bool false
+      ; "server_workspace_mismatch", `Bool server_workspace_mismatch
+      ; "diagnostics", `List []
+      ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
+      ; "build", Build_identity.to_yojson build
+      ]
+      @ fleet_fields )
+;;
+
+(* 30-second TTL chosen to match the dashboard frontend's natural refresh
+   cadence (~3s polling × 10 = a fresh value at least every minute under
+   sustained load).  Tool inventory + usage stats rarely change inside a
+   30s window. The effective Keeper selector is part of the cache key because
+   those surfaces can differ. Schedule FSM projection is attached outside this
+   cache because due/pending state is operationally time-sensitive. *)
+let dashboard_tools_cache_ttl_sec = 30.0
+
+(* The cache holds only what is the same for every viewer: the inventory,
+   the usage summary, the resolutions. What is about one Keeper -- its
+   effective surface, its skill activations -- is answered live per request
+   below, so the key names the workspace alone. *)
+let dashboard_tools_cache_key ~base_path = Printf.sprintf "tools:%s" base_path
+
+let dashboard_tools_warming_json () =
+  `Assoc
+    [ "generated_at", `String (Masc_domain.now_iso ())
+    ; "status", `String "warming"
+    ; "is_warming", `Bool true
+    ; "stale_reason", `String "warming"
+    ; "config_resolution", `Assoc [ "status", `String "warming" ]
+    ; "runtime_resolution", `Assoc [ "status", `String "warming" ]
+    ; ( "tool_inventory"
+      , `Assoc
+          [ "count", `Int 0
+          ; "tools", `List []
+          ; "surface_summary", `Assoc []
+          ] )
+    ; ( "tool_usage"
+      , `Assoc
+          [ "total_calls", `Int 0
+          ; "distinct_tools_called", `Int 0
+          ; "top_20", `List []
+          ; "never_called_count", `Int 0
+          ; "registered_count", `Int 0
+          ] )
+    ]
+;;
+
+
+let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
+  let ctx : Tool_misc.context =
+    { config
+    ; agent_name = "dashboard"
+    ; help_schemas = Config.raw_all_tool_schemas
+    }
+  in
+  let run phase f =
+    match timing with
+    | None -> f ()
+    | Some t -> Server_timing.measure t phase f
+  in
+  let cache_key = dashboard_tools_cache_key ~base_path:config.base_path in
+  Dashboard_cache.seed_stale_if_missing cache_key
+    ~stale_for:dashboard_tools_cache_ttl_sec
+    (dashboard_tools_warming_json ());
+  let compute = Pool_work.cpu ~name:__FUNCTION__ @@ fun () ->
+    let config_resolution =
+      run Projection_config_resolution (fun () ->
+        Config_dir_resolver.(resolve () |> to_json))
+    in
+    let runtime_resolution =
+      run Projection_runtime_resolution (fun () -> runtime_resolution_json config)
+    in
+    let inventory =
+      run Tools_compute (fun () ->
+        Tool_misc.tool_inventory_json ctx ~include_hidden:true)
+    in
+    let usage =
+      run Tools_compute (fun () ->
+        Tool_unified.summary_report
+          ~public_names:
+            Keeper_tool_descriptor_resolution.public_names_for_internal
+          ()
+        |> fun metrics ->
+        `Assoc (("non_public_call_log",
+          Tool_usage_log.source_metadata_json
+             ~masc_root:(Workspace.masc_dir config))
+          :: Yojson.Safe.Util.to_assoc metrics))
+    in
+    `Assoc
+      [ "generated_at", `String (Masc_domain.now_iso ())
+      ; "config_resolution", config_resolution
+      ; "runtime_resolution", runtime_resolution
+      ; "tool_inventory", inventory
+      ; "tool_usage", usage
+      ]
+  in
+  let attach_live_tools_projections json =
+    let keeper_waiting_inventory =
+      run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
+    in
+    (* Resolved on every request, never from the cache: a Keeper whose
+       metadata does not exist answers [keeper_not_found] here, where the
+       cold-cache placeholder used to answer "warming" for it -- a keeper
+       taken down by an admin shutdown looked, to every single read, like
+       one the server had not looked at yet. *)
+    let effective_keeper_surface =
+      match keeper with
+      | None -> `Null
+      | Some keeper_name ->
+        run Tools_compute (fun () ->
+          Keeper_effective_tool_surface.resolve ~config ~keeper_name
+          |> Keeper_effective_tool_surface.to_yojson)
+    in
+    let skill_activations =
+      match keeper with
+      | None -> `Null
+      | Some keeper_name ->
+        run Tools_compute (fun () ->
+          Keeper_skill_activation_projection.resolve ~config ~keeper_name
+          |> Keeper_skill_activation_projection.to_yojson)
+    in
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [ "effective_keeper_surface", effective_keeper_surface
+           ; "keeper_waiting_inventory", keeper_waiting_inventory
+           ; "skill_activations", skill_activations
+           ])
+    | other -> other
+  in
+  let cached =
+    match timing with
+    | None ->
+      Dashboard_cache.get_or_compute_payload cache_key ~ttl:dashboard_tools_cache_ttl_sec
+        compute
+    | Some t ->
+      Server_timing.measure t Cache_lookup (fun () ->
+        Dashboard_cache.get_or_compute_payload cache_key
+          ~ttl:dashboard_tools_cache_ttl_sec compute)
+  in
+  let json = attach_live_tools_projections cached.json in
+  match cached.origin with
+  | Dashboard_cache.Seeded -> Dashboard_snapshot.Tools_pending json
+  | Dashboard_cache.Computed -> Dashboard_snapshot.Tools_ready json
+  | Dashboard_cache.Timeout -> Dashboard_snapshot.Tools_error json
+;;
+
+let dashboard_tools_http_json ?keeper ?timing config =
+  match dashboard_tools_http_result ?keeper ?timing config with
+  | Dashboard_snapshot.Tools_pending json
+  | Dashboard_snapshot.Tools_ready json
+  | Dashboard_snapshot.Tools_error json -> json
+;;
+
+let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "/Users/dancer/.opam/5.5.1/bin/ocaml",
+    "-noinit",
+    "-noprompt",
+    "unix.cma",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/tui-frame-lines-prototype-v1/carrier.ml"
+  ],
+  "started_perf_ns": 226945163373416,
+  "source_sha256": "8d7248cfc9cb44a152bffa70d3448c0d90292bec10ba5b1afdceaffc8b595b41",
+  "carrier_sha256": "6ef5b204484b059f1671225e14e9694bec408524f7d97abe968202ae4174fe71",
+  "pid": 47626,
+  "child_exit_code": 0,
+  "child_reaped": true,
+  "returned_perf_ns": 226946628924791,
+  "stdout_sha256": "c0fecc2fbd812d8777eb87346fae8c5f77345623d67ecb0d3cf45fd84c6a08ac",
+  "stderr_sha256": "e23fc0d8a0251ef2d0f22701902d056b612b8f50bc4d4506ee04920cd80e4cda",
+  "original_source_unchanged": true
+}

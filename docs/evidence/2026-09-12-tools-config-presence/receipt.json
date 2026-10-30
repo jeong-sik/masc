@@ -1,0 +1,66 @@
+{
+  "observed_at": "2026-09-12T09:37:11.077Z",
+  "source_worktree": "/tmp/masc-tools-config-presence",
+  "base_commit": "1588a54e31",
+  "frontend": "Vite development source with null-path patch",
+  "backend_build": {
+    "release_version": "0.35.12",
+    "binary_version": "0.35.12",
+    "commit": "703ce088c8548e5c2e74a4f682a5ccf6a9a586c4",
+    "commit_source": "embedded",
+    "binary_commit": "703ce088c8548e5c2e74a4f682a5ccf6a9a586c4",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "67ccd4bba372202ba5f2ec30757158fdecb6cb3ae27fb1edeaf374d985460b05",
+    "binary_commit_unix_ts": 1789182311,
+    "binary_commit_age_seconds": 23516,
+    "executable_path": "/private/tmp/masc-collaboration-release-03512/runtime/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-collaboration-release-03512/runtime",
+    "runtime_instance_id": "01a094e2-9242-7000-b4f9-3ed5aeb2788f",
+    "started_at": "2026-09-12T09:11:11Z",
+    "uptime_seconds": 1555
+  },
+  "checks": [
+    "actual_null_repo_path_shown",
+    "missing_path_copy_absent",
+    "existing_path_clipboard_exact",
+    "actual_goal_tool_search_and_description",
+    "no_render_errors"
+  ],
+  "tool": {
+    "name": "masc_goal_list",
+    "description": "List shared planning goals, optionally filtered by explicit lifecycle phase."
+  },
+  "runtime_paths": {
+    "server_repo_path": {
+      "path": null,
+      "exists": false,
+      "source": "server_binary"
+    },
+    "data_root": {
+      "path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc",
+      "exists": true,
+      "source": "runtime_data"
+    }
+  },
+  "mobile_width": {
+    "scroll": 390,
+    "client": 390
+  },
+  "page_errors": [],
+  "blocked_requests": [
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/logs/tool-host-failures"
+    }
+  ],
+  "deployed": false
+}

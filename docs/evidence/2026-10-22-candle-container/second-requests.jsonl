@@ -1,0 +1,8 @@
+{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {}}}
+{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "lane_observe", "arguments": {"context": {"instance_id": "second", "incarnation": "second"}, "binding": {"sources": []}, "sources": []}}}
+{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "lane_host_requests", "arguments": {}}}
+{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "lane_host_result", "arguments": {"request_id": "container-grade-1", "result": {"status": "answered", "output": {"grade": "A"}, "slot": "scripted-container-slot", "usage": {"input_tokens": 11, "output_tokens": 3}}}}}
+{"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "lane_call", "arguments": {"tool": "candle_appraise", "arguments": {"kind": "read", "request_id": "container-grade-1"}, "caller": {"kind": "operator"}}}}
+{"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "lane_host_result", "arguments": {"request_id": "container-unknown-1", "result": {"status": "outcome_unknown"}}}}
+{"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "lane_call", "arguments": {"tool": "candle_appraise", "arguments": {"kind": "read", "request_id": "container-unknown-1"}, "caller": {"kind": "operator"}}}}
+{"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "lane_host_requests", "arguments": {}}}

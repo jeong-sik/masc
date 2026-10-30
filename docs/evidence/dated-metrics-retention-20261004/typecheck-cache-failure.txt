@@ -1,0 +1,4 @@
+File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/dated-metrics-retention-20261004/lib/keeper/keeper_fs.ml", line 1:
+Error: The files eio_guard.cmi
+       and /Users/dancer/me/workspace/yousleepwhen/masc/_build/default/lib/.masc.objs/byte/masc__Workspace.cmi
+       make inconsistent assumptions over interface Fs_compat

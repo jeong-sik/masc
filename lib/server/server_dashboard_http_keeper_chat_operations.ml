@@ -1,0 +1,690 @@
+module Http = Http_server_eio
+module Operation = Keeper_owner.Chat_operation
+module Operation_id = Operation.Operation_id
+module Owner = Keeper_owner
+module Registry = Keeper_owner_registry
+module Public_error = Server_keeper_chat_public_error
+
+let mutation_permission = Masc_domain.CanBroadcast
+
+type get_route =
+  | Operation_list of { keeper_name : string }
+  | Operation_exact of
+      { keeper_name : string
+      ; raw_operation_id : string
+      }
+  | Chat_events of { keeper_name : string }
+  | Turn_events of { keeper_name : string; raw_turn_ref : string }
+
+(* Operation reads carry state and input the dashboard already shows. The
+   event log carries the turn's reasoning in full, which /raw-trace and
+   /trajectory?include_thinking already put behind CanAdmin: same data, same
+   gate (server_dashboard_http_keeper_api_types.ml, keeper_get_permission). *)
+let get_permission = function
+  | Operation_list _ | Operation_exact _ -> Masc_domain.CanReadState
+  | Chat_events _ | Turn_events _ -> Masc_domain.CanAdmin
+;;
+
+type mutation =
+  | Edit
+  | Move_to_end
+  | Cancel
+
+type mutation_route =
+  { keeper_name : string
+  ; raw_operation_id : string
+  ; mutation : mutation
+  }
+
+type api_error = Public_error.t = private
+  { status : Httpun.Status.t
+  ; code : string
+  ; message : string
+  ; incident_id : string
+  }
+
+let path_segments path =
+  path
+  |> String.split_on_char '/'
+  |> List.filter_map (fun value ->
+    let value = Uri.pct_decode value |> String.trim in
+    if String.equal value "" then None else Some value)
+;;
+
+let get_route path =
+  match path_segments path with
+  | [ "api"; "v1"; "keepers"; keeper_name; "chat"; "operations" ] ->
+    Some (Operation_list { keeper_name })
+  | [ "api"; "v1"; "keepers"; keeper_name; "chat"; "operations"; raw_operation_id ] ->
+    Some (Operation_exact { keeper_name; raw_operation_id })
+  | [ "api"; "v1"; "keepers"; keeper_name; "chat"; "events" ] ->
+    Some (Chat_events { keeper_name })
+  | [ "api"; "v1"; "keepers"; keeper_name; "turns"; raw_turn_ref; "events" ] ->
+    Some (Turn_events { keeper_name; raw_turn_ref })
+  | _ -> None
+;;
+
+let mutation_route path =
+  match path_segments path with
+  | [ "api"; "v1"; "keepers"; keeper_name; "chat"; "operations"
+    ; raw_operation_id; action
+    ] ->
+    let mutation =
+      match action with
+      | "edit" -> Some Edit
+      | "move-to-end" -> Some Move_to_end
+      | "cancel" -> Some Cancel
+      | _ -> None
+    in
+    Option.map
+      (fun mutation -> { keeper_name; raw_operation_id; mutation })
+      mutation
+  | _ -> None
+;;
+
+let error_json = Public_error.to_json
+
+let respond_error request reqd (error : api_error) =
+  Log.Dashboard.warn "keeper_chat_operation_api error=%s" error.code;
+  Server_auth.respond_json_value_with_cors
+    ~status:error.status
+    request
+    reqd
+    (error_json error)
+;;
+
+let public_error kind detail =
+  let error = Public_error.make ~incident_id:(Random_id.uuid_v7 ()) kind in
+  Log.Dashboard.warn "keeper_chat_error incident_id=%s code=%s detail=%s"
+    error.incident_id error.code detail;
+  error
+;;
+
+let invalid_input message = public_error Public_error.Invalid_input message
+let unknown_operation message = public_error Public_error.Unknown_operation message
+let unavailable kind message = public_error kind message
+let gone kind message = public_error kind message
+
+let api_error_of_command_error error =
+  let kind = match error with
+    | Registry.Command_lookup_failed
+        (Owner_not_found _ | Owner_unavailable _ | Inventory_not_installed _) ->
+      Public_error.Unknown_operation
+    | Command_lookup_failed (Owner_initialization_failed _ | Inventory_stopping) ->
+      Public_error.Store_unavailable
+    | Command_lifecycle_reserved _ -> Public_error.Owner_stopping
+    | Command_rejected (Owner.Operation_rejected operation_error) ->
+      (match Owner.operation_error_kind operation_error with
+       | Invalid_operation_input -> Public_error.Invalid_input
+       | Unknown_operation -> Public_error.Unknown_operation
+       | Operation_not_queued -> Public_error.Not_queued
+       | Operation_idempotency_conflict -> Public_error.Idempotency_conflict
+       | Operation_native_call_unsettled -> Public_error.Native_call_unsettled
+       | Operation_store_unavailable -> Public_error.Store_unavailable)
+    | Command_rejected (Owner.Store_unavailable _ | Owner.Reducer_rejected _) ->
+      Public_error.Store_unavailable
+    | Command_rejected (Owner.Owner_stopping | Owner.Owner_closed) -> Public_error.Owner_stopping
+  in
+  public_error kind (Registry.command_error_to_string error)
+;;
+
+let public_operation_json ~redaction (operation : Operation.t) =
+  let redact_json = Keeper_secret_redaction.redact_json redaction in
+  Operation.to_public_json
+    { operation with source = redact_json operation.source
+    ; input = Option.map redact_json operation.input }
+;;
+
+let operation_id raw =
+  Operation_id.of_string raw |> Result.map_error invalid_input
+;;
+
+let base_path state =
+  (Mcp_server.workspace_config state).Workspace.base_path
+;;
+
+let parse_after_sequence request =
+  match Server_utils.query_param request "after_sequence" with
+  | None -> Ok None
+  | Some raw ->
+    (match Int64.of_string_opt (String.trim raw) with
+     | Some value when Int64.compare value 0L >= 0 -> Ok (Some value)
+     | Some _ | None -> Error (invalid_input "after_sequence must be a non-negative int64"))
+;;
+
+(* RFC-0412 §3.2, v2 events endpoint: the journal as written, paged over seq.
+   The default page and the ceiling are the journal's own
+   ([Keeper_chat_event_log.page_default_limit], [page_max_limit]), read here
+   and by the TUI that pages at the ceiling. *)
+
+(* The wire's absence rule lives in [Keeper_chat_event_log.replay_position_of_wire]:
+   no [since_seq] is the whole journal, [n >= 0] is the last seq already held. *)
+let parse_since_seq request =
+  let rejected () =
+    Error
+      (invalid_input
+         "since_seq must be an integer >= 0, the last seq already held; omit it for \
+          the whole journal")
+  in
+  let raw =
+    match Server_utils.query_param request "since_seq" with
+    | None -> Ok None
+    | Some raw ->
+      (match int_of_string_opt (String.trim raw) with
+       | Some value -> Ok (Some value)
+       | None -> rejected ())
+  in
+  match raw with
+  | Error _ as error -> error
+  | Ok raw ->
+    (match Keeper_chat_event_log.replay_position_of_wire raw with
+     | Some position -> Ok position
+     | None -> rejected ())
+;;
+
+(* The byte-offset cursor beside [since_seq]: absent reads from the first row,
+   [n >= 0] is the [next_since_offset] of the page before
+   ([Keeper_chat_event_log.page_start_of_wire]). *)
+let parse_since_offset request =
+  let rejected () =
+    Error
+      (invalid_input
+         "since_offset must be an integer >= 0, the next_since_offset of the page \
+          before; omit it to read from the first row")
+  in
+  let raw =
+    match Server_utils.query_param request "since_offset" with
+    | None -> Ok None
+    | Some raw ->
+      (match int_of_string_opt (String.trim raw) with
+       | Some value -> Ok (Some value)
+       | None -> rejected ())
+  in
+  match raw with
+  | Error _ as error -> error
+  | Ok raw ->
+    (match Keeper_chat_event_log.page_start_of_wire raw with
+     | Some start -> Ok start
+     | None -> rejected ())
+;;
+
+(* A cursor the journal cannot place is the client's request, 400 under the
+   refusal's own name; a corrupt row is the journal, the same 503 a whole read
+   reports. An unsupported persisted codec is a stable 409 refusal. The three
+   cursor codes are spelled once, in the journal
+   ([Keeper_chat_event_log.cursor_refusal_to_wire]), so this and the TUI's
+   decoder cannot drift. *)
+let page_failure_error failure =
+  let message = Keeper_chat_event_log.page_failure_to_string failure in
+  let cursor refusal = public_error (Public_error.Cursor_refusal refusal) message
+  in
+  match failure with
+  | Keeper_chat_event_log.Page_offset_past_rows _ ->
+    cursor Keeper_chat_event_log.Offset_past_rows
+  | Page_offset_inside_row _ -> cursor Keeper_chat_event_log.Offset_inside_row
+  | Page_cursor_mismatch _ -> cursor Keeper_chat_event_log.Cursor_pair_mismatch
+  | Page_limit_not_positive _ -> invalid_input message
+  | Page_corrupt _ -> unavailable Public_error.Journal_corrupt message
+  | Page_unsupported_version _ -> public_error Public_error.Journal_unsupported_version message
+;;
+
+let parse_limit request =
+  match Server_utils.query_param request "limit" with
+  | None -> Ok Keeper_chat_event_log.page_default_limit
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some value when value >= 1 && value <= Keeper_chat_event_log.page_max_limit ->
+       Ok value
+     | Some _ | None ->
+       Error
+         (invalid_input
+            (Printf.sprintf
+               "limit must be an integer in 1..%d"
+               Keeper_chat_event_log.page_max_limit)))
+;;
+
+let parse_operation_id_query request =
+  match Server_utils.query_param request "operation_id" with
+  | None -> Error (invalid_input "operation_id is required")
+  | Some raw -> operation_id (String.trim raw)
+;;
+
+(* What a missing journal means depends on what the store holds for the
+   operation. Queued or Running: nothing journaled yet, so an empty page is
+   the truth. Terminal: there is no journal and the row does not say why —
+   the retention sweep removes finished operations' journals, but a fail-open
+   append that never created the file (mkdir or first append failure) and an
+   operation that ran before journaling existed leave the same absence — so
+   an empty page would draw an empty conversation with no error, and the
+   caller is told only what is known: no journal. No row at all: an operation
+   nobody submitted. *)
+type missing_journal =
+  | Nothing_journaled_yet
+  | No_journal_for_settled_operation
+  | Unknown_operation
+
+let classify_missing_journal = function
+  | None -> Unknown_operation
+  | Some state ->
+    if Operation.is_terminal state
+    then No_journal_for_settled_operation
+    else Nothing_journaled_yet
+;;
+
+let no_journal_for_settled_operation_message ~operation_id =
+  "no journal exists for Keeper chat operation " ^ operation_id ^ ", which has ended"
+;;
+
+let journal_events_page ~schema ~identity ~since_seq ~redact_text (page : Keeper_chat_event_log.page) =
+  (* The position to feed back: after the last event served, or the caller's
+     own position when the page is empty — [null] when that was the whole
+     journal, since a response field cannot be absent the way a request field
+     can. *)
+  let next_since_seq =
+    match List.rev page.events with
+    | [] -> since_seq
+    | (last : Keeper_chat_event_log.journaled_event) :: _ ->
+      Keeper_chat_event_log.After_seq last.seq
+  in
+  `Assoc
+    [ "schema", `String schema
+    ; identity
+    ; ( "events"
+      , `List
+          (List.map
+             (fun (entry : Keeper_chat_event_log.journaled_event) ->
+               let event = Keeper_chat_events.public_content ~redact_text entry.event in
+               Keeper_chat_event_log.journaled_event_to_json {entry with event})
+             page.events) )
+    ; "has_more", `Bool page.has_more
+    ; "next_since_seq", Keeper_chat_event_log.replay_position_to_yojson next_since_seq
+    ; "next_since_offset", `Int page.next_offset
+    ]
+;;
+
+let chat_events_page ~operation_id ~since_seq ~redact_text page =
+  journal_events_page ~schema:"masc.keeper_chat_events.v2"
+    ~identity:("operation_id", `String operation_id) ~since_seq ~redact_text page
+;;
+
+let turn_events_page ~turn_ref ~since_seq ~redact_text page =
+  journal_events_page ~schema:"masc.keeper_turn_events.v1"
+    ~identity:("turn_ref", `String (Ids.Turn_ref.to_string turn_ref)) ~since_seq ~redact_text page
+;;
+
+(* Everything the events route reads off the query, parsed once. The handler
+   reads and renders the page from the whole record, so a cursor cannot be
+   read and then dropped on the way to the page. *)
+type events_request =
+  { er_operation_id : Operation_id.t
+  ; er_since_seq : Keeper_chat_event_log.replay_position
+  ; er_start : Keeper_chat_event_log.page_start
+  ; er_limit : int
+  }
+
+let parse_events_request request =
+  let open Result.Syntax in
+  let* er_operation_id = parse_operation_id_query request in
+  let* er_since_seq = parse_since_seq request in
+  let* er_start = parse_since_offset request in
+  let* er_limit = parse_limit request in
+  Ok { er_operation_id; er_since_seq; er_start; er_limit }
+;;
+
+(* The page the request asked for, as the body to send and how many events it
+   served, or the error the page earned. *)
+let events_page_of_page ~redact_text query page =
+  page
+  |> Result.map (fun (page : Keeper_chat_event_log.page) ->
+    ( List.length page.events
+    , chat_events_page
+        ~operation_id:(Operation_id.to_string query.er_operation_id)
+        ~since_seq:query.er_since_seq
+        ~redact_text
+        page ))
+  |> Result.map_error page_failure_error
+;;
+
+(* The same over rows already read: the empty rows of a journal nothing has
+   been written to yet, and the test hook. Pure. *)
+let events_page_of_rows ~path ~redact_text query rows =
+  Keeper_chat_event_log.page_of_rows
+    ~path
+    ~since_seq:query.er_since_seq
+    ~start:query.er_start
+    ~limit:query.er_limit
+    rows
+  |> events_page_of_page ~redact_text query
+;;
+
+let handle_get state request reqd = function
+  | Turn_events { keeper_name; raw_turn_ref } ->
+    let query =
+      let open Result.Syntax in
+      let* turn_ref = match Ids.Turn_ref.of_string raw_turn_ref with
+        | Some turn_ref -> Ok turn_ref
+        | None -> Error (invalid_input "turn_ref must identify a durable Keeper turn") in
+      let* since_seq = parse_since_seq request in
+      let* start = parse_since_offset request in
+      let* limit = parse_limit request in
+      Ok (turn_ref, since_seq, start, limit)
+    in
+    (match query with
+     | Error error -> respond_error request reqd error
+     | Ok (turn_ref, since_seq, start, limit) ->
+       let base_path = base_path state in
+       let path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+       let render page =
+         page
+         |> Result.map (turn_events_page ~turn_ref ~since_seq
+              ~redact_text:(Keeper_secret_redaction.redact_text redaction))
+         |> Result.map_error page_failure_error
+       in
+       (* Reading the page's rows, decoding them and building the JSON are one
+          job off the serving fiber; the read covers the page, not the
+          journal. *)
+       let page =
+         match
+           Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+             Keeper_chat_event_log.read_page_path ~path ~since_seq ~start ~limit
+             |> Result.map render)
+         with
+         | Ok rendered -> rendered
+         | Error Keeper_chat_event_log.Journal_missing ->
+             (match Keeper_autonomous_stream.current ~base_path ~keeper_name with
+              | Some current when Ids.Turn_ref.equal current turn_ref ->
+                render (Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit "")
+              | Some _ | None -> Error (public_error Public_error.Journal_missing "No autonomous event journal exists for this turn"))
+         | Error (Journal_unreadable detail) -> Error (unavailable Public_error.Journal_unreadable detail)
+         | Error (Journal_corrupt detail) -> Error (unavailable Public_error.Journal_corrupt detail)
+         | Error (Journal_unsupported_version version) ->
+             Error (public_error Public_error.Journal_unsupported_version
+               (Keeper_chat_event_log.version_mismatch_to_string version))
+       in
+       (match page with
+        | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
+        | Error error -> respond_error request reqd error))
+  | Chat_events { keeper_name } ->
+    (match parse_events_request request with
+     | Error error -> respond_error request reqd error
+     | Ok query ->
+       let base_path = base_path state in
+       let operation_id_text = Operation_id.to_string query.er_operation_id in
+       let path =
+         Keeper_chat_event_log.journal_path
+           ~base_dir:base_path
+           ~keeper_name
+           ~operation_id:operation_id_text
+       in
+       let respond_page ~served body =
+         Log.Dashboard.debug
+           "keeper_chat_events keeper=%s operation_id=%s since_seq=%s since_offset=%d limit=%d served=%d"
+           keeper_name
+           operation_id_text
+           (Keeper_chat_event_log.replay_position_to_string query.er_since_seq)
+           (Keeper_chat_event_log.page_start_offset query.er_start)
+           query.er_limit
+           served;
+         Server_auth.respond_json_value_with_cors request reqd body
+       in
+       let respond_rows ~redact_text rows =
+         match events_page_of_rows ~path ~redact_text query rows with
+         | Ok (served, body) -> respond_page ~served body
+         | Error error -> respond_error request reqd error
+       in
+       (* Same typed content redaction layer the SSE projection and reconnect
+          replay apply: preserve envelope identities and protocol fields.
+          The journal is redacted at publish; this also covers
+          lines written before that held. The snapshot is taken here, where
+          its secret files are statted; its compiled patterns guard their
+          own automaton with a mutex (Re 1.14), and the chat store already
+          redacts with a caller's snapshot inside a pool job. Reading the
+          page's rows, decoding them, redacting them and building the JSON
+          are one job off the serving fiber; the read covers the page, not
+          the journal. *)
+       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+       (match
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            Keeper_chat_event_log.read_page_path
+              ~path
+              ~since_seq:query.er_since_seq
+              ~start:query.er_start
+              ~limit:query.er_limit
+            |> Result.map
+                 (events_page_of_page
+                    ~redact_text:(Keeper_secret_redaction.redact_text redaction)
+                    query))
+        with
+        | Ok (Ok (served, body)) -> respond_page ~served body
+        | Ok (Error error) -> respond_error request reqd error
+        | Error Keeper_chat_event_log.Journal_missing ->
+          (match
+             Registry.exact_operation ~base_path ~keeper_name query.er_operation_id
+           with
+           | Ok operation ->
+             (match
+                classify_missing_journal
+                  (Option.map (fun (operation : Operation.t) -> operation.state) operation)
+              with
+              (* Nothing journaled yet is an empty page, served from empty
+                 rows: a client holding an offset into a journal that does not
+                 exist is told so by the same cursor check every page uses,
+                 not handed its own offset back. *)
+              | Nothing_journaled_yet -> respond_rows ~redact_text:Fun.id ""
+              | No_journal_for_settled_operation ->
+                (* The [journal_pruned] code is the client's contract for
+                   "nothing to reload, now or later"; the message states only
+                   what the server knows. *)
+                respond_error
+                  request
+                  reqd
+                  (gone
+                     Public_error.Journal_pruned
+                     (no_journal_for_settled_operation_message
+                        ~operation_id:operation_id_text))
+              | Unknown_operation ->
+                respond_error
+                  request
+                  reqd
+                  (unknown_operation
+                     ("unknown Keeper chat operation: " ^ operation_id_text)))
+           | Error error -> respond_error request reqd (api_error_of_command_error error))
+        | Error (Journal_unreadable detail) ->
+          (* This endpoint exists to serve the log, so the log's failure is
+             the response (RFC-0412 §3.5: loud from day one on v2). *)
+          respond_error request reqd (unavailable Public_error.Journal_unreadable detail)
+        | Error (Journal_unsupported_version version) ->
+          respond_error request reqd (public_error Public_error.Journal_unsupported_version
+            (Keeper_chat_event_log.version_mismatch_to_string version))
+        | Error (Journal_corrupt detail) ->
+          respond_error request reqd (unavailable Public_error.Journal_corrupt detail)))
+  | Operation_exact { keeper_name; raw_operation_id } ->
+    (match operation_id raw_operation_id with
+     | Error error -> respond_error request reqd error
+     | Ok operation_id ->
+       (match Registry.exact_operation ~base_path:(base_path state) ~keeper_name operation_id with
+        | Error error -> respond_error request reqd (api_error_of_command_error error)
+        | Ok None ->
+          respond_error
+            request
+            reqd
+            (unknown_operation
+               ("unknown Keeper chat operation: " ^ Operation_id.to_string operation_id))
+        | Ok (Some operation) ->
+          Log.Dashboard.debug
+            "keeper_chat_operation_get keeper=%s operation_id=%s state=%s"
+            keeper_name
+            (Operation_id.to_string operation.operation_id)
+            (Operation.state_to_string operation.state);
+          Server_auth.respond_json_value_with_cors
+            request
+            reqd
+            (public_operation_json
+               ~redaction:(Keeper_secret_redaction.snapshot
+                 ~base_path:(base_path state) ~keeper_name) operation)))
+  | Operation_list { keeper_name } ->
+    let state_filter = Server_utils.query_param request "state" in
+    (match parse_after_sequence request with
+     | Error error -> respond_error request reqd error
+     | Ok after_sequence ->
+       (match state_filter with
+        | Some "queued" ->
+       (match
+          Registry.list_queued_operations
+            ~base_path:(base_path state)
+            ~keeper_name
+            ~after_sequence
+            ~limit:100
+        with
+        | Error error -> respond_error request reqd (api_error_of_command_error error)
+        | Ok operations ->
+          Log.Dashboard.debug
+            "keeper_chat_operation_list keeper=%s state=queued count=%d"
+            keeper_name
+            (List.length operations);
+          Server_auth.respond_json_value_with_cors
+            request
+            reqd
+            (`Assoc
+               [ "schema", `String "masc.keeper_chat_operations.list.v1"
+               ; "state", `String "Queued"
+               ; "operations", `List (List.map
+                   (public_operation_json ~redaction:(Keeper_secret_redaction.snapshot
+                     ~base_path:(base_path state) ~keeper_name)) operations)
+               ]))
+        | Some _ | None ->
+          respond_error request reqd (invalid_input "state=queued is required")))
+;;
+
+let strict_object body =
+  try
+    match Yojson.Safe.from_string body with
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names <> List.length (List.sort_uniq String.compare names)
+      then Error (invalid_input "request body must contain unique fields")
+      else Ok fields
+    | _ -> Error (invalid_input "request body must be a JSON object")
+  with
+  | Yojson.Json_error detail -> Error (invalid_input ("invalid json: " ^ detail))
+;;
+
+let parse_edit body =
+  match strict_object body with
+  | Error _ as error -> error
+  | Ok [ "input", input ] ->
+    (match Keeper_chat_operation_payload.input_of_json input with
+     | Ok _ -> Ok input
+     | Error detail -> Error (invalid_input ("input: " ^ detail)))
+  | Ok _ -> Error (invalid_input "edit body must contain exactly the input field")
+;;
+
+let parse_empty mutation body =
+  match strict_object body with
+  | Ok [] -> Ok ()
+  | Ok _ -> Error (invalid_input (mutation ^ " body must be an empty object"))
+  | Error _ as error -> error
+;;
+
+let mutation_to_string = function
+  | Edit -> "edit"
+  | Move_to_end -> "move_to_end"
+  | Cancel -> "cancel"
+;;
+
+let handle_mutation state request reqd route body =
+  match operation_id route.raw_operation_id with
+  | Error error -> respond_error request reqd error
+  | Ok operation_id ->
+    let result =
+      match route.mutation with
+      | Edit ->
+        (match parse_edit body with
+         | Error error -> Error error
+         | Ok input ->
+           Registry.edit_queued_operation
+             ~base_path:(base_path state)
+             ~keeper_name:route.keeper_name
+             ~operation_id
+             ~input
+           |> Result.map_error api_error_of_command_error)
+      | Move_to_end ->
+        (match parse_empty "move-to-end" body with
+         | Error error -> Error error
+         | Ok () ->
+           Registry.move_queued_operation_to_end
+             ~base_path:(base_path state)
+             ~keeper_name:route.keeper_name
+             operation_id
+           |> Result.map_error api_error_of_command_error)
+      | Cancel ->
+        (match parse_empty "cancel" body with
+         | Error error -> Error error
+         | Ok () ->
+           Registry.cancel_queued_operation
+             ~base_path:(base_path state)
+             ~keeper_name:route.keeper_name
+             operation_id
+           |> Result.map_error api_error_of_command_error)
+    in
+    (match result with
+     | Error error -> respond_error request reqd error
+     | Ok operation ->
+       Log.Dashboard.info
+         "keeper_chat_operation_mutation keeper=%s operation_id=%s action=%s state=%s"
+         route.keeper_name
+         (Operation_id.to_string operation.operation_id)
+         (mutation_to_string route.mutation)
+         (Operation.state_to_string operation.state);
+       Server_auth.respond_json_value_with_cors
+         request
+         reqd
+       (public_operation_json
+         ~redaction:(Keeper_secret_redaction.snapshot
+           ~base_path:(base_path state) ~keeper_name:route.keeper_name) operation))
+;;
+
+module For_testing = struct
+  let invalid_input_response detail =
+    let error = invalid_input detail in
+    error.status, error_json error
+  ;;
+
+  let command_error_response cause =
+    let error = api_error_of_command_error cause in
+    error.status, error_json error
+  ;;
+
+  let page_failure_response cause =
+    let error = page_failure_error cause in
+    error.status, error_json error
+  ;;
+
+  let events_page_of_request ~path request rows =
+    match parse_events_request request with
+    | Error error -> Error (error.status, error.code)
+    | Ok query ->
+      (match events_page_of_rows ~path ~redact_text:Fun.id query rows with
+       | Ok (_served, body) -> Ok body
+       | Error error -> Error (error.status, error.code))
+  ;;
+
+  let no_journal_for_settled_operation_message = no_journal_for_settled_operation_message
+
+  let parse_mutation_body mutation body =
+    match mutation with
+    | Edit ->
+      parse_edit body
+      |> Result.map Option.some
+      |> Result.map_error (fun (error : api_error) -> error.code)
+    | Move_to_end ->
+      parse_empty "move-to-end" body
+      |> Result.map (fun () -> None)
+      |> Result.map_error (fun (error : api_error) -> error.code)
+    | Cancel ->
+      parse_empty "cancel" body
+      |> Result.map (fun () -> None)
+      |> Result.map_error (fun (error : api_error) -> error.code)
+  ;;
+end

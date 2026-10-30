@@ -1,0 +1,26 @@
+{
+  "finding": "F1 repair regression",
+  "positive_oracle": "successful cancel withdraws the exact previous-instance source from both observed owners",
+  "exact_original_source_absent_after_successful_cancel": true,
+  "all_schedule_due_pending_absent_at_observed_owners": true,
+  "observed_owners": [
+    "audit-retarget-a",
+    "audit-retarget-b"
+  ],
+  "source_before": {
+    "queue_index": 0,
+    "post_id": "06c5c5c0d1b1c2d99becb4c6842f7c0b3fda30b81a93ff9da85b3c6c6d57dc63",
+    "source_ref": "2685c5439f2edc250cef8a9684a2f7a58f756cfd67054b23b1b3fb01b6243f16",
+    "source_incarnation": "0",
+    "urgency": "normal",
+    "arrived_at_unix": 1793039253.991955,
+    "payload_kind": "schedule_due"
+  },
+  "remaining_exact_sources": [],
+  "remaining_schedule_due_pending": [],
+  "original_instance": "01a17977-885a-7000-99c5-7c7ce0634794",
+  "cancelled_instance": "01a17977-c40b-7000-9eef-73dbec05f8b5",
+  "replay_or_resume_performed": false,
+  "successful_external_effect_observed": false,
+  "scope_limit": "one A-to-B retarget followed by cancel, not fleet/transfer/race coverage"
+}

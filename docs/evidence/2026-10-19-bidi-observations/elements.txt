@@ -1,0 +1,16 @@
+{"hiddenAncestor":null,"nativeStyleReads":10,"extensionStyleReads":40}
+{"hiddenAncestor":"body","nativeStyleReads":9,"extensionStyleReads":32}
+{"hiddenAncestor":"html","nativeStyleReads":10,"extensionStyleReads":40}
+{"hiddenAncestor":null,"nativeStyleReads":10,"extensionStyleReads":40}
+✔ native elements expose actionable current states without sensitive values (3.605042ms)
+✔ live elements retain tab identity and match native control observations (1.933916ms)
+✔ shared ancestor visibility stays correct and is refreshed for each observation (3.381917ms)
+✔ element text is cut by code point, never through a surrogate pair (1.976709ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 129.202208

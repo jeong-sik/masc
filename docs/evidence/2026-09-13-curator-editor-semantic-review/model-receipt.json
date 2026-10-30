@@ -1,0 +1,15 @@
+{
+  "status": "proposed",
+  "request_sha256": "2dd9104ad709057f9e3840985c53afffab0074f414f3972252f17ee025c3c10f",
+  "started_at": "2026-09-12T19:20:51.478973+00:00",
+  "semantic_verification": "not_performed",
+  "result_sha256": "31142f36865a7f8253a2b95d458420193b3f60631afc457f6237fefbe8a9c1dc",
+  "response_sha256": "d4c0bf1c15e71d68946d9ad3dca9d2205906368d14938149a8e915a5ac9580e7",
+  "raw_response_sha256": "72b8a5478e0981cc4f5852544526c792780418b5cbe4b36d8e9d64829eb6a21a",
+  "prompt_eval_count": 47159,
+  "eval_count": 22073,
+  "chunks": 22002,
+  "content_characters": 8338,
+  "thinking_characters": 61878,
+  "elapsed_seconds": 4083.7896333329845
+}

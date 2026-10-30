@@ -1,0 +1,881 @@
+type decision =
+  | Idle
+  | Wait_until of int64
+  | Render
+
+type request =
+  | Input
+  | Background
+  | Force
+
+type t
+
+val create : min_interval_ns:int64 -> unit -> t
+val request : t -> request -> unit
+val take : input_pending:bool -> t -> now_ns:int64 -> decision
+(** Handled input renders when currently available input is drained, including
+    after a recent input frame. [input_pending] covers decoded events, buffered
+    bytes, probe replay and terminal readiness; it coalesces a continuous burst
+    until it drains or the deadline arrives. Background updates keep the
+    minimum interval. No timer delays the last input of a burst. *)
+val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
+val normalize_keeper_detail_scroll :
+  line_count:int -> content_height:int -> int -> int
+
+val collapse_consecutive : key:('a -> string) -> 'a list -> ('a * int) list
+(** Fold consecutive runs with the same key into (newest element, run length),
+    preserving order. The TUI session block on Metrics draws a burst of
+    identical lines (six manual refreshes, a broadcast fan-out) as one row with
+    a [×N] tail instead of spending its rows repeating itself. *)
+
+module Input_wait : sig
+  type 'a poll_result =
+    | Ready of 'a
+    | Timed_out
+    | Interrupted
+
+  val await :
+    now_ns:(unit -> int64) ->
+    timeout_ns:int64 ->
+    poll:(float -> 'a poll_result) ->
+    'a option
+end
+
+module Input_shortcut : sig
+  val is_quit : message_mode:bool -> string -> bool
+end
+
+module Viewport : sig
+  val minimum_fixed_chrome_rows : int
+  val requires_compact_frame : rows:int -> bool
+end
+
+(** {1 Keeper roster columns} *)
+
+val keeper_marker_width : int
+val keeper_status_width : int
+val keeper_flags_width : int
+val keeper_last_turn_width : int
+
+val keeper_flags_minimum_inner_width : int
+(** The inner width from which the roster shows its flag columns. The
+    Activity pane opens only where a surface keeps this much inside its
+    frame. *)
+
+type keeper_columns = {
+  kcol_show_flags : bool;
+  kcol_show_runtime : bool;
+  kcol_name : int;
+  kcol_runtime : int;
+  kcol_task : int;
+}
+(** Plain-text cell budgets for one roster row, in cells. *)
+
+val allocate_keeper_columns :
+  ?runtime_visible:bool ->
+  prioritize_runtime:bool ->
+  inner_width:int ->
+  widest_runtime:int ->
+  unit ->
+  keeper_columns
+(** Divide the box's inner width across the roster columns. Columns drop from
+    the right as the terminal narrows; the keeper's name and its status never
+    drop. Above the minimum, slack goes to name and runtime before task, unless
+    a failure context asks the runtime column to take priority.
+    [runtime_visible] defaults to [true]. When it is [false], the runtime cell
+    is absent and its width is available to the other columns. *)
+
+val keeper_columns_used_width : keeper_columns -> int
+(** Total cells the allocation occupies, separators included. Never exceeds the
+    [inner_width] it was allocated for, and equals it once that width admits
+    the minimum row. *)
+
+type waiting_group_layout = {
+  compact : bool;
+  cells : int;
+  segment_count : int;
+}
+(** A width decision for the Waiting summary. [cells] measures the whole group
+    heading, and [segment_count] retains every nonzero reason and async count. *)
+
+val waiting_group_layout :
+  available_cells:int ->
+  group_count:int ->
+  Masc_tui_keeper_list_model.waiting_summary ->
+  waiting_group_layout
+(** Use dense labels only when the full heading exceeds [available_cells].
+    The compact decision never drops a nonzero summary segment. *)
+
+val waiting_group_heading_detail :
+  available_cells:int ->
+  group_count:int ->
+  Masc_tui_keeper_list_model.waiting_summary ->
+  string
+(** Render the suffix selected by [waiting_group_layout]. *)
+
+val keeper_failure_context_for_detail : show_runtime:bool -> string option -> string option
+(** Preserve the existing failure reading for DETAIL only when its runtime cell
+    is hidden. A visible runtime keeps the sole copy and returns [None]. *)
+
+(** {1 Memory fleet columns} *)
+
+type memory_columns = {
+  mcol_show_updated : bool;
+  mcol_show_source : bool;
+  mcol_name : int;
+}
+(** Plain-text cell budgets for one Memory row, in cells. *)
+
+type memory_row_values = {
+  mrow_state : string;
+  mrow_name : string;
+  mrow_updated : string;
+  mrow_facts : string;
+  mrow_size : string;
+  mrow_source : string;
+  mrow_delta : string;
+}
+(** One row's readings, already rendered as text. Each field is its own cell:
+    the revision, the fact count and the byte size are three units and do not
+    share one. *)
+
+val allocate_memory_columns : inner_width:int -> memory_columns
+(** Divide the box's inner width across the Memory columns. The source-bound
+    cell drops first and the revision second; the keeper's name and its state
+    never drop. Slack above the minimum goes to the name, up to the widest
+    name worth reading whole. *)
+
+val memory_columns_used_width : memory_columns -> int
+(** Total cells the allocation occupies, gaps included. Never exceeds the
+    [inner_width] it was allocated for. Unlike the roster it can fall short of
+    it: every Memory cell has a widest known reading, so surplus width stays
+    margin instead of padding one cell out to the frame. *)
+
+val memory_header_row : ?ko:bool -> memory_columns -> string
+(** The column names, laid out on the allocation. [ko] selects Korean. *)
+
+val memory_row :
+  ?state_style:string ->
+  ?size_style:string ->
+  ?delta_style:string ->
+  ?close:string ->
+  memory_columns ->
+  memory_row_values ->
+  string
+(** One row, laid out on the same allocation as {!memory_header_row}. Both are
+    built from one description of the columns, so a cell can never sit at a
+    different offset from the header that names it -- the defect this pair
+    replaces, where a name over eighteen cells or a reading over fourteen
+    pushed the rest of its row right of the header.
+
+    The three styles dress the state cell, the size reading and the delta, and
+    nothing else. A keeper that deviates says so where it deviates rather than
+    turning its whole line one colour: the readings that are fine keep the
+    line's own dress. Escapes cost no display cells, so a dressed row is still
+    exactly as wide as its header. *)
+
+(** {1 Workspace repository columns} *)
+
+val workspace_minimum_path_width : int
+val workspace_minimum_width : int
+(** Width of all repository columns at their floors, including table gaps. *)
+
+type workspace_row_values = {
+  wrow_name : string;
+  wrow_branch : string;
+  wrow_status : string;
+  wrow_sync : string;
+  wrow_path : string;
+}
+(** One repository row's readings, already rendered as text. *)
+
+type workspace_column =
+  | Workspace_name
+  | Workspace_branch
+  | Workspace_status
+  | Workspace_sync
+  | Workspace_path
+
+val workspace_layout : inner_width:int -> workspace_column Masc_tui_table.layout
+(** Keep repository, status and path. Fold sync and then branch as the
+    viewport narrows; path receives the remaining cells. *)
+
+val workspace_header_row : layout:workspace_column Masc_tui_table.layout -> string
+val workspace_row :
+  layout:workspace_column Masc_tui_table.layout -> workspace_row_values -> string
+(** Header and rows share the measured column allocation. *)
+
+(** {1 System log columns} *)
+
+val system_log_minimum_message_width : int
+
+type system_log_row_values = {
+  slog_time : string;
+  slog_level : string;
+  slog_module : string;
+  slog_keeper : string;
+  slog_category : string;
+  slog_message : string;
+}
+
+type system_log_styles = {
+  slog_time_style : string;
+  slog_module_style : string;
+  slog_keeper_style : string;
+  slog_category_style : string;
+}
+(** The dresses a log row wears whatever it says. The level's is separate
+    because it is the one that changes with the reading. *)
+
+val system_log_plain_styles : system_log_styles
+(** No dress at all, for a caller drawing an undressed row and for the tests
+    that check a dressed row measures the same. *)
+
+type system_log_column =
+  | Log_time
+  | Log_level
+  | Log_module
+  | Log_keeper
+  | Log_category
+  | Log_message
+
+val system_log_layout : inner_width:int -> system_log_column Masc_tui_table.layout
+(** Keep time, level and message. Fold category, keeper and module in that
+    order when they would squeeze the message below its readable floor. *)
+
+val system_log_header_row : layout:system_log_column Masc_tui_table.layout -> string
+val system_log_row :
+  styles:system_log_styles -> level_style:string ->
+  layout:system_log_column Masc_tui_table.layout -> system_log_row_values -> string
+(** Header and styled rows share the measured column allocation. *)
+
+(** {1 Task Review columns} *)
+
+type verification_row_values = {
+  vrow_task : string;
+  vrow_submitted_by : string;
+  vrow_evidence : string;
+  vrow_review : string;
+  vrow_title : string;
+}
+
+val verification_minimum_title_width : int
+
+val verification_title_width : inner_width:int -> submitter_width:int -> int
+(** Cells the title may occupy: what the named columns leave, never below
+    {!verification_minimum_title_width}. *)
+
+val verification_header_row : submitter_width:int -> title_width:int -> string
+
+val verification_row :
+  submitter_width:int ->
+  title_width:int ->
+  verification_row_values ->
+  string
+(** One request, on the same columns as {!verification_header_row}. The widths
+    used to live in two format strings, and printf's width is a floor: a task
+    id past fourteen cells pushed every column after it out of line. *)
+
+(** {1 Schedules list columns} *)
+
+type schedule_row_values = {
+  srow_status : string;
+  srow_due : string;
+  srow_target : string;
+  srow_wake : string;
+  srow_delivery : string;
+  srow_recurrence : string;
+}
+
+val schedule_minimum_recurrence_width : int
+
+val schedule_minimum_target_width : int
+val schedule_maximum_target_width : int
+(** The bounds of the target column, which the caller measures from the
+    names on the page: never under the minimum, and never past the maximum,
+    so a long fallback summary cannot take the recurrence's room. *)
+
+val schedule_minimum_delivery_width : int
+val schedule_maximum_delivery_width : int
+
+val schedule_delivery_width : string list -> int
+(** Cells the delivery column needs for [words]: the widest of them, never
+    under {!schedule_minimum_delivery_width} -- what the column drew before it
+    was measured -- and never over {!schedule_maximum_delivery_width}, so one
+    long word cannot take the recurrence's room. *)
+
+(** The list's columns, named so a narrow list can say which it gives up. *)
+type schedule_column =
+  | Schedule_status
+  | Schedule_due
+  | Schedule_target
+  | Schedule_wake
+  | Schedule_delivery
+  | Schedule_recurrence
+
+(** The columns the list draws and the widths it drew them at. Only
+    {!schedule_layout} makes one, so the header and every row are drawn from
+    the widths the columns were fitted with. *)
+type schedule_layout = private {
+  sl_columns : schedule_column Masc_tui_table.layout;
+  sl_due_width : int;
+  sl_target_width : int;
+  sl_wake_width : int;
+  sl_delivery_width : int;
+}
+
+val schedule_layout :
+  inner_width:int ->
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  schedule_layout
+(** The columns the list draws in [inner_width], given the target, wake and
+    delivery widths measured from the page. When the row is narrow the
+    delivery goes first, then the wake and state. Due time, target and
+    recurrence stay; target names are bounded before fitting so one long name
+    cannot consume the recurrence. Very narrow tables shrink those primary
+    widths and the detail carries their full readings. *)
+
+val schedule_header_row : layout:schedule_layout -> string
+
+val schedule_row :
+  ?status_style:string ->
+  ?wake_style:string ->
+  ?recurrence_style:string ->
+  layout:schedule_layout ->
+  schedule_row_values ->
+  string
+(** One schedule, on the same columns as {!schedule_header_row}. The list used
+    to name one of its six columns and name it inside the row -- "wake:" on the
+    wake's word, a dot before the delivery's -- and leave the other five for the
+    reader to work out. *)
+
+(** {1 Keeper automation tab columns} *)
+
+type kauto_row_values = {
+  krow_mark : string;
+  krow_status : string;
+  krow_triggered : string;
+  krow_outcome : string;
+  krow_received : string;
+  krow_recurrence : string;
+  krow_by : string;
+  krow_requested : string;
+  krow_what : string;
+}
+
+(** What a row wears whatever it says: the recurrence and the storage context
+    recede. The mark, the state word and the outcome change with the reading
+    and are the row's own. *)
+type kauto_row_styles = {
+  kstyle_mark : string;
+  kstyle_status : string;
+  kstyle_outcome : string;
+  kstyle_recurrence : string;
+  kstyle_by : string;
+}
+
+(** The tab's columns, named so a narrow pane can say which it gives up: the
+    storage context (BY, then REQUESTED), then the outcome word, then the
+    recurrence. The mark, the state, the two clocks and the summary never
+    go. *)
+type kauto_column =
+  | Kauto_mark
+  | Kauto_status
+  | Kauto_triggered
+  | Kauto_outcome
+  | Kauto_received
+  | Kauto_recurrence
+  | Kauto_by
+  | Kauto_requested
+  | Kauto_what
+
+val kauto_minimum_recurrence_width : int
+val kauto_maximum_recurrence_width : int
+
+val kauto_recurrence_width : string list -> int
+(** Cells the RECURRENCE column needs for the recurrences on the page: the
+    widest of them, never under {!kauto_minimum_recurrence_width} and never
+    over {!kauto_maximum_recurrence_width}. *)
+
+val kauto_minimum_by_width : int
+val kauto_maximum_by_width : int
+
+val kauto_by_width : string list -> int
+(** Cells the BY column needs for the actors on the page: the widest of
+    them, never under {!kauto_minimum_by_width} and never over
+    {!kauto_maximum_by_width}. *)
+
+(** The columns the tab draws and the widths it drew them at. Only
+    {!kauto_layout} makes one, so the header and every row are drawn from the
+    widths the columns were fitted with. *)
+type kauto_layout = private {
+  k_columns : kauto_column Masc_tui_table.layout;
+  k_status_width : int;
+  k_clock_width : int;
+  k_outcome_width : int;
+  k_recurrence_width : int;
+  k_by_width : int;
+}
+
+val kauto_layout :
+  inner_width:int ->
+  status_width:int ->
+  clock_width:int ->
+  outcome_width:int ->
+  recurrence_width:int ->
+  by_width:int ->
+  kauto_layout
+(** The columns the tab draws in [inner_width], given the status width
+    (measured from the contract's own word list), the clock width (from the
+    stamp format) and the outcome, recurrence and actor widths measured from
+    the page. *)
+
+val kauto_plain_styles : kauto_row_styles
+
+val kauto_header_row : layout:kauto_layout -> string
+
+val kauto_row :
+  styles:kauto_row_styles ->
+  layout:kauto_layout ->
+  kauto_row_values ->
+  string
+(** One automation, on the same columns as {!kauto_header_row}. *)
+
+val kauto_status_mark : string -> string
+(** The mark a status word draws: the Fusion pipeline's vocabulary, one cell
+    -- waiting, active, done, failed. A word this build does not name keeps
+    the middot, saying the pane did not classify it; a cancelled or expired
+    schedule keeps the waiting mark, inert beside the word that names
+    it. *)
+
+val kauto_group_label : title:string -> string list -> string
+(** The label on the rule parting the live rows from the closed ones: the
+    title alone when there are no parts, the parts after it when there are. *)
+
+(** {1 Lane run columns} *)
+
+type lane_run_row_values = {
+  lrow_started : string;
+  lrow_subject : string;
+  lrow_status : string;
+  lrow_elapsed : string;
+  lrow_slot : string;
+}
+
+(** The run list's columns, named so a narrow list can say which it spares. *)
+type lane_run_column =
+  | Lane_started
+  | Lane_subject
+  | Lane_status
+  | Lane_elapsed
+  | Lane_slot
+
+val lane_run_layout : inner_width:int -> lane_run_column Masc_tui_table.layout
+(** The columns the run list draws in [inner_width] and the slot's share of
+    it. When the row is narrow the start goes first, then the elapsed time;
+    the subject, the status and the slot stay, and the slot takes what the
+    others leave, never below its floor. *)
+
+val lane_run_header_row :
+  identity_header:string -> layout:lane_run_column Masc_tui_table.layout -> string
+
+val lane_run_row :
+  identity_header:string ->
+  status_style:string ->
+  layout:lane_run_column Masc_tui_table.layout ->
+  lane_run_row_values ->
+  string
+(** One run, on the same columns as {!lane_run_header_row}. [identity_header]
+    names the subject column: the Verifier's runs are about a task or a goal,
+    every other lane's about who asked. *)
+
+(** {1 File change columns} *)
+
+type change_row_values = {
+  crow_turn : string;
+  crow_task : string;
+  crow_op : string;
+  crow_result : string;
+  crow_file : string;
+  crow_summary : string;
+}
+
+(** The change list's columns, named so a narrow list can say which it
+    spares. *)
+type change_column =
+  | Change_turn
+  | Change_task
+  | Change_op
+  | Change_result
+  | Change_file
+  | Change_summary
+
+val change_layout : inner_width:int -> change_column Masc_tui_table.layout
+(** The columns the change list draws in [inner_width] and the summary's share
+    of it. When the row is narrow the turn goes first, then the task, the
+    operation and the result; the file and the summary stay, and the summary
+    takes what the others leave, never below its floor. *)
+
+val change_header_row : layout:change_column Masc_tui_table.layout -> string
+
+val change_row :
+  op_style:string ->
+  result_style:string ->
+  layout:change_column Masc_tui_table.layout ->
+  change_row_values ->
+  string
+(** One change, on the same columns as {!change_header_row}. The file cell is
+    fitted now: it was padded and never cut, so a long path pushed the summary
+    beside it -- the column that says what the turn actually did -- off the
+    frame. *)
+
+(** {1 Fusion run columns} *)
+
+type fusion_row_values = {
+  frow_time : string;
+  frow_age : string;
+  frow_state : string;
+  frow_keeper : string;
+  frow_preset : string;
+  frow_run : string;
+}
+
+type fusion_columns = {
+  fcol_keeper : int;
+  fcol_run : int;
+  fcol_show_preset : bool;
+}
+
+val allocate_fusion_columns : inner_width:int -> keeper_width:int -> fusion_columns
+val fusion_header_row : fusion_columns -> string
+
+val fusion_row :
+  state_style:string ->
+  fusion_columns ->
+  fusion_row_values ->
+  string
+(** One run, on the same columns as {!fusion_header_row}. The keeper cell is
+    sized by the caller to the names it holds; the run id takes what is left,
+    where it used to be unbounded in the header and cut at fourteen in the
+    row. *)
+
+val sidebar_row_label : about:string -> apart:string option -> string
+(** A list pane's row label: what the row is about, then the value that parts
+    it from its neighbours. The parting value goes last because the pane
+    folds a label from the middle and keeps its tail.
+
+    Every index that parts its rows asks this one, so a row reads the same
+    way whichever pane draws it. [None] is a row with nothing to be parted
+    by, and it keeps its subject alone. *)
+
+val fusion_sidebar_label :
+  status:string -> time:string -> keeper:string -> run_id:string -> string
+
+val task_history_sidebar_label : task_id:string -> apart:string option -> string
+(** A Task Review or Verdicts list row. Both lists hold a task once per
+    submission, so the id alone draws the same row many times over. [apart]
+    is the value that parts this row from its siblings: it must hold still
+    while the reader looks at it, and it must be the row's own value rather
+    than a reading of one. A row with nothing to part it keeps the id
+    alone. *)
+
+val verdict_sidebar_labels : (string * string) list -> string list
+(** Task id and local clock for each Verdicts row. Rows whose displayed
+    clock is identical receive a snapshot-local ordinal, so two verdicts
+    recorded in the same second do not read as the same row. *)
+
+val fusion_pipeline_diagram :
+  ?glyph_done:string ->
+  ?glyph_active:string ->
+  ?glyph_waiting:string ->
+  ?glyph_failed:string ->
+  ?arrow:string ->
+  status:[ `Completed | `Running | `Failed ] ->
+  stage:[ `Accepted | `Panel | `Judge | `Evidence | `Failed | `Completed ] ->
+  panel_answered:int ->
+  panel_expected:int ->
+  unit ->
+  string
+
+(** {1 Harness verdict columns} *)
+
+type harness_row_values = {
+  hrow_time : string;
+  hrow_task : string;
+  hrow_gate : string;
+  hrow_verdict : string;
+  hrow_evaluator : string;
+  hrow_reason : string;
+}
+
+(** The verdict list's columns, named so a narrow list can say which it
+    spares. *)
+type harness_column =
+  | Harness_time
+  | Harness_task
+  | Harness_gate
+  | Harness_verdict
+  | Harness_evaluator
+  | Harness_reason
+
+val harness_layout : inner_width:int -> harness_column Masc_tui_table.layout
+(** The columns the verdict list draws in [inner_width] and the reason's share
+    of it. When the row is narrow the evaluator goes first, then the time and
+    the gate; the task, the verdict and the reason stay, and the reason takes
+    what the others leave, never below its floor. *)
+
+val harness_header_row : layout:harness_column Masc_tui_table.layout -> string
+
+val harness_row :
+  verdict_style:string ->
+  layout:harness_column Masc_tui_table.layout ->
+  harness_row_values ->
+  string
+(** One verdict, on the same columns as {!harness_header_row}. The task and
+    gate cells are fitted now: they were padded and never cut, so an id or a
+    gate name longer than its column pushed the evaluator and the reason
+    beside it out of line with every other row. *)
+
+(** Planning goal columns.
+
+    The list named no columns at all, and its title took the terminal minus a
+    hand-summed constant minus however wide the age and the due date happened
+    to be. Both are optional, so the pair at the end of the row began at a
+    different column on every row -- a goal with no due date started them ten
+    cells left of the goal above it. Each has a widest form and each has a
+    column now. *)
+
+type planning_row_values = {
+  prow_phase : string;
+      (** The phase carries the brackets it is drawn in, so [phase_width] below
+          is the bracketed width rather than the label's own. *)
+  prow_proof : string;
+  prow_priority : string;
+  prow_open : string;
+  prow_title : string;
+  prow_age : string;
+  prow_due : string;
+}
+
+(** The goal list's columns, named so a narrow list can say which it spares. *)
+type planning_column =
+  | Planning_phase
+  | Planning_proof
+  | Planning_priority
+  | Planning_open
+  | Planning_title
+  | Planning_age
+  | Planning_due
+
+val planning_layout :
+  inner_width:int -> phase_width:int -> planning_column Masc_tui_table.layout
+(** The columns the goal list draws in [inner_width] and the title's share of
+    it. When the row is narrow the due date goes first, then the age, the
+    open-work tally and the judge's mark; the phase, the priority and the
+    title stay, and the title takes what the others leave, never below its
+    floor: a title folded past that point identifies no goal. *)
+
+val planning_header_row :
+  phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
+
+val planning_header_row_korean :
+  phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
+
+val planning_open_width : int
+(** Cell width available for the open Task count and its activity. *)
+
+val planning_row :
+  ?priority_style:string ->
+  ?open_style:string ->
+  phase_style:string ->
+  phase_width:int ->
+  layout:planning_column Masc_tui_table.layout ->
+  planning_row_values ->
+  string
+(** One goal, on the same columns as {!planning_header_row}. The judge's mark
+    gets a named column of its own: the glyph is the only part of a row that
+    cannot be read straight off, and it was the one column with no header. *)
+
+(** Board post columns.
+
+    The list sized its title as the terminal minus a constant summed by hand
+    from ten widths and their gaps, and the header carried a second copy of the
+    same arithmetic. They disagreed: at eighty columns the header ran eight
+    cells long, which pushed SCORE into the frame and REPLIES off it, leaving
+    two columns drawn on every row with nothing saying what they were.
+
+    Board also spaced its columns two cells apart while every other table used
+    one, so six cells of the title were spent on being different. They match
+    now. *)
+
+val board_id_width : int
+(** Cells the ID column holds. The reader names a post by the same id and folds
+    it at the same width. *)
+
+type board_row_values = {
+  brow_mark : string;
+  brow_id : string;
+  brow_hearth : string;
+  brow_author : string;
+  brow_title : string;
+  brow_age : string;
+  brow_score : string;
+  brow_replies : string;
+}
+
+type board_row_styles = {
+  bstyle_id : string;
+  bstyle_hearth : string;
+  bstyle_author : string;
+  bstyle_age : string;
+  bstyle_score : string;
+  bstyle_replies : string;
+}
+(** What dresses each reading. The layout module carries no palette, so the
+    colours come from the caller that owns one; the score's varies by row and
+    the rest are the screen's constants. *)
+
+val board_no_styles : board_row_styles
+(** Every reading undressed. A caller drawing the row plain -- a test, or a
+    surface that dresses the whole line -- has nothing to spell out. *)
+
+val board_age_text : now:float -> float option -> string
+(** The age cell: the span since the time the caller chose, or ["—"] when the
+    post carried no such time. Which time that is follows the sort, which
+    {!Masc_tui_types.board_sort_time} answers. *)
+
+(** The list's columns, named so a narrow list can say which it spares. *)
+type board_column =
+  | Board_mark
+  | Board_id
+  | Board_hearth
+  | Board_author
+  | Board_title
+  | Board_age
+  | Board_score
+  | Board_replies
+
+val board_layout : inner_width:int -> board_column Masc_tui_table.layout
+(** The columns the list draws in [inner_width] and the title's share of it.
+    [inner_width] is what the row has left of the frame, the four cells of
+    lead ahead of the mark already taken off. When the row is narrow the id
+    goes first, then the hearth, the replies, the score and the author; the
+    mark, the title and the age stay, and the title takes what the others
+    leave, never below its floor. *)
+
+val board_header_row :
+  age_header:string -> layout:board_column Masc_tui_table.layout -> string
+(** [age_header] is the word over the age column, which names the time the
+    column holds. *)
+
+val board_row :
+  ?close:string ->
+  styles:board_row_styles ->
+  age_header:string ->
+  layout:board_column Masc_tui_table.layout ->
+  board_row_values ->
+  string
+(** One post, on the same columns as {!board_header_row}. The kind mark carries
+    its own dress: the glyph and its colour are chosen together. *)
+
+module Terminal_size_cache : sig
+  type refresh =
+    | Changed of (int * int)
+    | Unchanged of (int * int)
+
+  type t
+
+  val create : fallback:int * int -> t
+  val invalidate : t -> unit
+  val get : t -> probe:(unit -> (int * int) option) -> int * int
+  val refresh : t -> probe:(unit -> (int * int) option) -> refresh
+end
+
+(** {1 Planning strip and Keeper schedule page} *)
+
+type planning_tab =
+  | Planning_goals
+  | Planning_task_review
+  | Planning_verdicts
+
+val planning_strip_plain :
+  tab:planning_tab ->
+  review_count:int option ->
+  verifying_count:int option ->
+  window:string ->
+  (planning_tab * string) list
+(** The Planning strip's stop labels, in order, without styling. Exactly three:
+    Schedules and Fusion are tabs of the selected Keeper, not stops here.
+
+    Unnumbered, and the two task stops share a word. The numbers read as a
+    pipeline the surfaces do not form: Goals is the goal lifecycle judged
+    against its own ledger, while Task Review and Task Verdicts are the two
+    halves of the task protocol, and a goal in [verifying] appears in neither.
+
+    [verifying_count] and [review_count] are what each side is holding, so
+    the reading an operator opens this screen for is on the strip rather than
+    counted by eye. [window] is the page-versus-ledger reading, already
+    formatted (e.g. [" (8 of 4223)"]); it is appended to [tab]'s label and to
+    no other, because a count placed after the whole strip reads as belonging
+    to its last name. *)
+
+type keeper_schedule_absence =
+  | Store_has_none
+  | Page_capped of { shown : int; total : int option }
+
+val classify_keeper_schedule_absence :
+  truncated:bool -> shown:int -> total:int option -> keeper_schedule_absence
+(** Why a Keeper's schedule filter matched nothing. A capped page cannot say
+    the store is empty; it can only say it did not look at all of it. *)
+
+(** {1 Schedule wake reading} *)
+
+type wake_reading =
+  | Wake_history of { count : int; retention : int }
+  | Wake_never
+  | Wake_last_only
+  | Wake_history_failed of string
+
+val classify_wake_reading :
+  history_error:string option -> history:(int * int) option -> wake_reading
+(** What the schedule detail can say about a schedule's wakes. [history] is
+    (retained count, per-schedule ceiling) once the exact lookup answers.
+    [Wake_last_only] is the row's single newest attempt while the list is in
+    flight; it is not an empty history, and neither is a failed load. *)
+
+(** {1 Schedule hold reading} *)
+
+val schedule_hold_tag : due:string -> string
+(** The short form, for a line that also names the schedule and its status:
+    only since when the held occurrence has been due. It leads
+    {!schedule_hold_reading}, so the two cannot say different things. *)
+
+val schedule_hold_reading : due:string -> string
+(** What the Schedules screen says about a schedule the runner is holding:
+    since when its held occurrence has been due, and that it waits for the
+    target Keeper to take the previous wake. [due] is already formatted. *)
+
+val schedule_fence_hold_reading :
+  due:string -> target:string -> fence_owner:string -> string
+(** The same reading for a schedule held because its target Keeper is
+    shutting down: it names the Keeper and the shutdown operation instead of
+    the previous wake. *)
+
+val schedule_hold_as_of_tag : checked:string -> string
+(** The short form of a hold the runner has not read again since [checked]:
+    the time the hold was seen, in place of since when it has been due. It
+    leads {!schedule_hold_as_of_reading}. *)
+
+val schedule_hold_as_of_reading : checked:string -> string
+(** The same hold in the detail pane: that the keeper had not taken the
+    previous wake as of [checked]. Drawn instead of {!schedule_hold_reading}
+    when the runner status beside the list is not [ok], because a failed tick
+    does not re-read the hold (#38411). [checked] is already formatted. *)
+
+val schedule_fence_hold_as_of_reading :
+  checked:string -> target:string -> fence_owner:string -> string
+(** The fence hold ({!schedule_fence_hold_reading}) drawn as of [checked],
+    for the same failed-tick reason as {!schedule_hold_as_of_reading}.
+    [checked] is already formatted. *)

@@ -1,0 +1,81 @@
+[
+  {
+    "created_at": 1788995287.751651,
+    "current_sources": [],
+    "frame": {
+      "active": {
+        "id": "kmsg-5f90948b1ecb4cac1bd5ada0e01bc8fb",
+        "kind": "direct_operation"
+      },
+      "schema": "masc.keeper_repetition_scopes.v1",
+      "scopes": [
+        {
+          "id": {
+            "id": "kmsg-5f90948b1ecb4cac1bd5ada0e01bc8fb",
+            "kind": "direct_operation"
+          },
+          "observations": []
+        }
+      ]
+    },
+    "id": {
+      "id": "kmsg-5f90948b1ecb4cac1bd5ada0e01bc8fb",
+      "kind": "direct_operation"
+    },
+    "input": {
+      "payload": {
+        "attachments": [],
+        "message": "Synthetic Gate probe: request the supplied one-time file effect, wait for its durable approval, then finish this exact original request.",
+        "schema": "masc.keeper_chat_operation.input.v1",
+        "surface_context": null,
+        "turn_instructions": null,
+        "user_blocks": []
+      }
+    },
+    "input_sha256": "580a77ed1df79179d3e463688aed6ff9d8ca5ad09eb65870824aecc7b1384c86",
+    "phase": {
+      "kind": "resuming_gate",
+      "resolution": {
+        "decision": {
+          "kind": "approved"
+        },
+        "obligation": {
+          "approval_id": "appr_01a0886d-ba8a-7000-977d-2bee99e89d63",
+          "input_hash": "93b6db42cc3cb81f1467bcf118725ccfe46493863b9b7a517700aa4b42b5d6d0",
+          "tool_name": "tool_execute"
+        }
+      },
+      "waiting": {
+        "checkpoint": {
+          "sha256": "79c8d79c3252ca20f183c79f246e91f1f4b345d2ab5eaea473fa124c51ba4515",
+          "trace_id": "trace-1788995287448-00000",
+          "turn_count": 1
+        },
+        "obligations": [
+          {
+            "approval_id": "appr_01a0886d-ba8a-7000-977d-2bee99e89d63",
+            "input_hash": "93b6db42cc3cb81f1467bcf118725ccfe46493863b9b7a517700aa4b42b5d6d0",
+            "tool_name": "tool_execute"
+          }
+        ],
+        "runtime_retry": {
+          "assignment_id": "primary.sample",
+          "checkpoint": {
+            "sha256": "79c8d79c3252ca20f183c79f246e91f1f4b345d2ab5eaea473fa124c51ba4515",
+            "trace_id": "trace-1788995287448-00000",
+            "turn_count": 1
+          },
+          "failed_runtime_id": "primary.sample",
+          "kind": "runtime_retry",
+          "later_runtime_ids": [],
+          "next_runtime_id": "alternate.sample"
+        },
+        "session_scope": []
+      }
+    },
+    "revision": 6,
+    "schema": "masc.keeper_semantic_execution.v1",
+    "sources": [],
+    "updated_at": 1788995288.520547
+  }
+]

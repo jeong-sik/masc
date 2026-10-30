@@ -1,0 +1,2107 @@
+open Alcotest
+
+module History = Masc_tui_keeper_chat_history
+module Transcript = Masc_tui_keeper_chat_transcript
+
+let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface
+    ?(speaker_authority = "owner") content =
+  `Assoc
+    ([ "id", `String "row"
+     ; "role", `String "user"
+     ; "content", `String content
+     ; "ts", `Float ts
+     ; "speaker_authority", `String speaker_authority
+     ]
+     @ (match speaker_name with
+        | None -> []
+        | Some name -> [ "speaker_name", `String name ])
+     @ (match speaker_id with
+        | None -> []
+        | Some id -> [ "speaker_id", `String id ])
+     @ (match surface with None -> [] | Some json -> [ "surface", json ]))
+;;
+
+(* The live store holds 6217 unnamed user rows and 6216 of them carry
+   [speaker_authority], so a fixture without it is not a row this pane will
+   normally see. [owner] is the operator's own, which is what these cases are
+   about; the one row that lacks it falls to unresolved, which is the case
+   below. *)
+let row ?(id = "row") ?(ts = 1.0) ~role ?tool_call_id ?execution_id ?tool_call_name
+    ?delivery_key ?transcript_slot ?turn_ref ?(speaker_authority = "owner")
+    content =
+  `Assoc
+    ([ "id", `String id
+     ; "role", `String role
+     ; "content", `String content
+     ; "ts", `Float ts
+     ]
+     @ (if role = "user" then [ "speaker_authority", `String speaker_authority ]
+        else [])
+     @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
+     @ (match transcript_slot with
+        | None -> []
+        | Some json -> [ "transcript_slot", json ])
+     @ (match turn_ref with None -> [] | Some id -> [ "turn_ref", `String id ])
+     @ (match tool_call_id with
+        | None -> []
+        | Some id -> [ "tool_call_id", `String id ])
+     @ (match execution_id with
+        | None -> []
+        | Some id -> [ "execution_id", `String id ])
+     @ (match tool_call_name with
+        | None -> []
+        | Some name -> [ "tool_call_name", `String name ]))
+
+let operation_key id =
+  `Assoc [ "kind", `String "operation"; "operation_id", `String id ]
+
+let transcript_slot kind = `Assoc [ "kind", `String kind ]
+
+let tool_transcript_slot execution_id ordinal =
+  `Assoc
+    [ "kind", `String "tool_call"
+    ; "execution_id", `String execution_id
+    ; "ordinal", `Int ordinal
+    ]
+
+let origin_request_id = function
+  | History.Delivery_failed { origin_request_id; _ } -> origin_request_id
+  | History.Addressed_to_keeper _ | History.Said_by_keeper
+  | History.Autonomous_reply
+  | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
+  | History.Gate_activity _ | History.Memory_activity _
+  | History.Fusion_conclusion _ -> None
+
+let full_tool_rows = History.tool_rows
+
+(* The pane draws the pair apart. Joined is how a whole-row assertion reads
+   it, so the join lives here rather than in the module under test. *)
+let joined_label speaker surface =
+  match History.addressed_label_parts speaker surface with
+  | name, None -> name
+  | name, Some surface -> name ^ " \xc2\xb7 " ^ surface
+;;
+
+let kind_to_string : History.kind -> string = function
+  | History.Addressed_to_keeper { speaker; surface } ->
+      Printf.sprintf "addressed(%s)" (joined_label speaker surface)
+  | History.Said_by_keeper -> "keeper"
+  | History.Autonomous_reply -> "autonomous"
+  | History.Delivery_failed _ -> "delivery_failed"
+  | History.Tool_calls block ->
+      Printf.sprintf "tools[%s]" (String.concat " | " (full_tool_rows block))
+  | History.Skill_activity skills ->
+      Printf.sprintf "skill[%s]"
+        (String.concat " | " (Transcript.skill_rows ~full:true skills))
+  | History.Reasoning lines ->
+      Printf.sprintf "thinking[%s]" (String.concat " | " lines)
+  | History.Gate_activity { approval_id; phase; tool; _ } ->
+      Printf.sprintf "gate[%s %s%s]" approval_id
+        (Keeper_approval_lifecycle.approval_lifecycle_phase_to_label phase)
+        (match tool with None -> "" | Some tool -> " " ^ tool)
+  | History.Memory_activity _ -> "memory"
+  | History.Fusion_conclusion _ -> "fusion"
+
+(* An assistant row the way an autonomous turn persists it: the server's
+   [autonomous_turn] marker, a blank [content], and a [t: "trace"] block of
+   steps. [content] is [null] on the wire when the turn said nothing
+   ([server_dashboard_http_keeper_api.ml], the autonomous row encoder), so
+   the default here is the wire's shape, not an empty string. *)
+let autonomous_turn ?(ts = 1.0) ?(content = `Null) ?(marked = true) ?omitted
+    ?turn_ref ?skill_activations steps =
+  `Assoc
+    ([ "id", `String "autonomous:trace-1#54"
+     ; "role", `String "assistant"
+     ; "content", content
+     ; "ts", `Float ts
+     ]
+    @ (match turn_ref with None -> [] | Some id -> [ "turn_ref", `String id ])
+    @ (match skill_activations with
+       | None -> []
+       | Some json -> [ "skill_activations", json ])
+    @ (if marked then
+         [ "autonomous_turn", `Assoc [ "turn_id", `String "trace-1#54" ] ]
+       else [])
+    @ [ ( "blocks"
+      , `List
+          [ `Assoc
+              ([ "t", `String "trace"; "trace", `List steps ]
+               @ (match omitted with None -> [] | Some n -> [ "omitted", `Int n ]))
+          ] )
+      ])
+
+let think_withheld =
+  `Assoc [ "kind", `String "think"; "text", `String ""; "content_withheld", `Bool true ]
+
+let reason text = `Assoc [ "kind", `String "reason"; "text", `String text ]
+
+let tool ?execution_id ?tool_call_id ?status ?dur name =
+  `Assoc
+    ([ "kind", `String "tool"; "name", `String name ]
+     @ (match execution_id with
+        | None -> []
+        | Some id -> [ "execution_id", `String id ])
+     @ (match tool_call_id with
+        | None -> []
+        | Some id -> [ "tool_call_id", `String id ])
+     @ (match status with None -> [] | Some s -> [ "status", `String s ])
+     @ (match dur with None -> [] | Some d -> [ "dur", `String d ]))
+
+let skill_activation ?(delivery = `Assoc []) ?(actions = [])
+    ?(name = "ci-red-attribution")
+    ?(invocation = `Assoc [ "kind", `String "instruction" ]) () =
+  `Assoc
+    [ "identity", `Assoc [ "name", `String name ]
+    ; "invocation", invocation
+    ; "content_revision", `String "sha256:content-1"
+    ; "turn_ref", `String "trace-1#54"
+    ; "runtime_id", `String "codex-app-server"
+    ; "skill_tool_use_id", `String "skill-use-1"
+    ; "delivery", delivery
+    ; ( "actions"
+      , `List
+          (List.map
+             (fun tool_name -> `Assoc [ "tool_name", `String tool_name ])
+             actions) )
+    ]
+
+let skill_projection ?detail ~status activations =
+  `Assoc
+    ([ "schema", `String "masc.keeper_chat.skill_activations.v2"
+     ; "status", `String status
+     ; "activations", `List activations
+     ]
+     @ (match detail with None -> [] | Some value -> [ "detail", `String value ]))
+
+let decode json =
+  match History.rows_of_json json with
+  | Ok decoded -> decoded
+  | Error detail -> failf "expected a decode, got %s" detail
+
+(* A Gate row is drawn from its typed phase, so it has to reach the pane as one.
+   The approval id is what folds a run of steps back into the one approval they
+   describe; a lifecycle without it is not a step this pane can place, and is
+   dropped as undecodable rather than drawn as a lone approval or filed under
+   Memory. *)
+let gate_row ~ts ~slot ?approval_id ~phase ?tool ?summary content =
+  `Assoc
+    [ "id", `String ("gate-" ^ slot)
+    ; "role", `String "system"
+    ; "content", `String content
+    ; "ts", `Float ts
+    ; "transcript_slot", `Assoc [ "kind", `String slot ]
+    ; ( "approval_lifecycle"
+      , `Assoc
+          ([ "phase", `String phase ]
+           @ (match approval_id with
+              | None -> []
+              | Some id -> [ "approval_id", `String id ])
+           @ (match tool with
+              | None -> []
+              | Some name -> [ "tool_name", `String name ])
+           @ (match summary with
+              | None -> []
+              | Some text -> [ "call_summary", `String text ])) )
+    ]
+
+(* A step row is read on its own, without the pane going back to the request
+   row: the summary of what the gated call asked for travels with every
+   phase. *)
+let test_a_gate_row_carries_its_call_summary () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_request" ~approval_id:"appr_01s"
+             ~phase:"requested" ~tool:"tool_execute"
+             ~summary:"git reflog --date=iso | head -30" ""
+         ])
+  in
+  (match decoded.History.rows with
+   | [ row ] -> (
+     match row.History.kind with
+     | History.Gate_activity { summary; _ } ->
+       check (option string) "the summary names what was deferred"
+         (Some "git reflog --date=iso | head -30") summary
+     | _ -> failf "expected a gate row")
+   | rows -> failf "expected one gate row, got %d" (List.length rows))
+
+let test_a_gate_row_carries_its_approval () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_request" ~approval_id:"appr_01a"
+             ~phase:"requested" ~tool:"Execute" ""
+         ; gate_row ~ts:2.0 ~slot:"approval_replay" ~approval_id:"appr_01a"
+             ~phase:"replay_applied" ~tool:"Execute" ""
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  check (list string) "each step keeps its approval, phase and tool"
+    [ "gate[appr_01a requested Execute]"; "gate[appr_01a replay_applied Execute]" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+(* A lifecycle payload that is present but not a step this pane can place is
+   an undecodable row: it is dropped and counted, like any other row this
+   build cannot read. It used to be filed under Memory, where a malformed
+   gate row hid in the journal lane. *)
+let test_a_lifecycle_without_an_approval_id_is_dropped () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_replay" ~phase:"replay_applied"
+             ~tool:"Execute" "적용 완료"
+         ; gate_row ~ts:2.0 ~slot:"approval_replay" ~approval_id:"  "
+             ~phase:"replay_applied" ~tool:"Execute" "적용 완료"
+         ])
+  in
+  check int "both rows are counted as dropped" 2 decoded.History.dropped;
+  check (list string) "and neither is drawn" []
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+let test_an_unknown_phase_label_is_a_decode_error () =
+  let decoded =
+    decode
+      (`List
+         [ gate_row ~ts:1.0 ~slot:"approval_request" ~approval_id:"appr_01u"
+             ~phase:"quarantined" ~tool:"Execute" ""
+         ; gate_row ~ts:2.0 ~slot:"approval_request" ~approval_id:"appr_01u"
+             ~phase:"requested" ~tool:"Execute" ""
+         ])
+  in
+  check int "the unknown label is counted as dropped" 1 decoded.History.dropped;
+  check (list string) "the row with a known label still reads"
+    [ "gate[appr_01u requested Execute]" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+(* The payload key present with a shape that is not a lifecycle object is
+   the same undecodable row, not a neutral system row. *)
+let test_a_lifecycle_that_is_not_an_object_is_dropped () =
+  let decoded =
+    decode
+      (`List
+         [ `Assoc
+             [ "id", `String "row"
+             ; "role", `String "system"
+             ; "content", `String "승인됨 · Execute"
+             ; "ts", `Float 1.0
+             ; "approval_lifecycle", `String "requested"
+             ]
+         ])
+  in
+  check int "dropped" 1 decoded.History.dropped;
+  check int "no rows" 0 (List.length decoded.History.rows)
+
+let test_roles_map_to_what_the_pane_draws () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"user" "고쳐줘"
+         ; row ~ts:2.0 ~role:"assistant" "고쳤어요"
+         ; row ~ts:3.0 ~role:"request_failure" "slack 5xx"
+         ; row ~ts:4.0 ~role:"system"
+             ~delivery_key:
+               (`Assoc
+                  [ "kind", `String "approval_lifecycle"
+                  ; "approval_id", `String "appr_01typed"
+                  ])
+             ~transcript_slot:(transcript_slot "approval_resolution")
+             "승인됨 · Execute"
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  check (list string) "each role lands where it belongs"
+    [ "addressed(you)"; "keeper"; "delivery_failed"; "memory" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows);
+  check (list string) "and the text comes through"
+    [ "고쳐줘"; "고쳤어요"; "slack 5xx"; "승인됨 · Execute" ]
+    (List.map (fun r -> r.History.text) decoded.History.rows);
+  (match (List.nth decoded.History.rows 3).History.kind with
+   | History.Gate_activity _ -> failf "unexpected gate row"
+   | History.Memory_activity { summary; journal = _; pass } ->
+       check (option string) "a neutral system row stays whole" None summary;
+       check bool "a neutral system row reports no pass" true
+         (match pass with
+          | Masc_tui_message_layout.No_pass -> true
+          | Masc_tui_message_layout.Pass_failed _
+          | Masc_tui_message_layout.Pass_committed -> false)
+   | History.Addressed_to_keeper _ | History.Said_by_keeper
+   | History.Autonomous_reply | History.Delivery_failed _
+   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
+   | History.Fusion_conclusion _ ->
+       fail "expected the system row to use the neutral Memory lane")
+
+(* The pane writes its own row when a turn fails, because most error rows are
+   notices the server has no row for. A failed turn is the one it does record,
+   and it comes back under the operation the client dispatched -- which is what
+   lets the pane drop its own copy instead of drawing the failure twice.
+
+   Only an operation key names a turn this client dispatched. A row the server
+   wrote under another producer's key reads as [None] rather than handing back
+   an id that belongs to someone else. *)
+let test_a_failed_turn_names_the_request_it_came_from () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"request_failure"
+             ~delivery_key:(operation_key "tui-28e58beb") "provider closed the connection"
+         ; row ~ts:2.0 ~role:"request_failure"
+             ~delivery_key:
+               (`Assoc
+                  [ "kind", `String "fusion_run"; "request_id", `String "fusion-1" ])
+             "provider closed the connection"
+         ; row ~ts:3.0 ~role:"request_failure"
+             "provider closed the connection"
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  check (list (option string)) "an operation key is the request, anything else is not"
+    [ Some "tui-28e58beb"; None; None ]
+    (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows);
+  check (list (option string)) "failure grouping retains the operation without a transcript slot"
+    [ Some "tui-28e58beb"; None; None ]
+    (List.map (fun r -> r.History.turn_id) decoded.History.rows)
+;;
+
+(* The row the server persists, built by the producers' own functions rather
+   than by hand: [keeper_turn] puts [user_message_of_core_error] of the failed
+   turn's error into the tool result, and the stream prefixes "Keeper request
+   failed: " to it. A hand-written copy would keep passing after either side
+   changed shape (RFC-0454 §5). *)
+let persisted_failure_row error =
+  "Keeper request failed: "
+  ^ Masc.Keeper_agent_error.user_message_of_core_error
+      (Keeper_internal_error.core_error_of_masc_internal_error error)
+;;
+
+let fence_of cause =
+  Keeper_internal_error.Provider_attempt_effect_fenced
+    { runtime_id = "codex_subscription.gpt-5.6-luna"
+    ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+    ; cause
+    }
+;;
+
+(* The two runtime stops the pane draws a lifecycle for, as the runtime
+   reports them (RFC-0454 P2). Before the value existed, the pane searched the
+   row for the sentences these used to be rendered into. *)
+let host_shutdown =
+  Keeper_internal_error.Host_stopped_turn
+    { runtime_id = "codex_app_server"
+    ; stop = Keeper_internal_error.Host_graceful_shutdown
+    }
+;;
+
+let connection_closed =
+  Keeper_internal_error.Runtime_connection_closed
+    { runtime_id = "codex_app_server"
+    ; detail = "stdout closed"
+    ; turn_accepted = true
+    }
+;;
+
+(* A fence whose cause is a carried MASC error. *)
+let fenced_masc_failure error =
+  persisted_failure_row (fence_of (Keeper_internal_error.Fenced_masc error))
+;;
+
+(* A fence whose cause is agent-core's own error: nothing typed to find. *)
+let fenced_core_failure message =
+  persisted_failure_row
+    (fence_of
+       (Keeper_internal_error.Fenced_core
+          (Keeper_request_failure_core.of_core_error
+             (Agent_core.Error.Internal message))))
+;;
+
+let test_runtime_interruption_becomes_a_recovered_lifecycle () =
+  let failure = fenced_masc_failure host_shutdown in
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"user" "brief me"
+         ; row ~ts:2.0 ~role:"request_failure" failure
+         ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
+         ])
+  in
+  let failed = List.nth decoded.History.rows 1 in
+  match failed.History.kind with
+  | History.Delivery_failed { recovered_at; _ } ->
+    check (option (float 0.0)) "later reply is recovery evidence" (Some 3.0)
+      recovered_at;
+    (match History.present_delivery_failure ?recovered_at failed.History.text with
+     | None -> fail "typed runtime interruption was not presented"
+     | Some (text, recovered) ->
+       check bool "no longer a live error" true recovered;
+       check string "compact lifecycle"
+         "Runtime shutdown interrupted this turn · lane recovered in a later Keeper reply · same-turn replay blocked to avoid duplicate tool calls · details in Logs"
+         text)
+  | _ -> fail "expected a delivery failure"
+;;
+
+let test_stdout_close_stays_pending_without_a_later_reply () =
+  let failure = fenced_masc_failure connection_closed in
+  let decoded =
+    decode (`List [ row ~ts:2.0 ~role:"request_failure" failure ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Delivery_failed { recovered_at; _ }; text; _ } ] ->
+    check (option (float 0.0)) "no recovery was invented" None recovered_at;
+    (match History.present_delivery_failure ?recovered_at text with
+     | None -> fail "provider EOF was not presented"
+     | Some (presented, recovered) ->
+       check bool "still pending" false recovered;
+       check string "compact pending lifecycle"
+         "Provider connection closed during this turn · recovery pending · same-turn replay blocked to avoid duplicate tool calls · details in Logs"
+         presented)
+  | _ -> fail "expected one delivery failure"
+;;
+
+let test_a_carried_masc_cause_of_another_kind_draws_nothing () =
+  let failure =
+    fenced_masc_failure
+      (Keeper_internal_error.Terminal_effect_failed
+         { failure_class = Tool_result.Runtime_failure
+         ; effect_disposition = Tool_result.Effect_outcome_unknown
+         ; detail =
+             Keeper_terminal_effect_detail.Boundary_observation_failed
+               { model_tool_name = "masc_surface_post"
+               ; cause =
+                   Keeper_request_failure_core.of_core_error
+                     (Agent_core.Error.Internal "receipt append failed")
+               }
+         })
+  in
+  check (option (pair string bool)) "no lifecycle was invented" None
+    (History.present_delivery_failure failure)
+;;
+
+(* A fence over agent-core's own error carries no MASC value, and the sentence
+   inside it is not evidence of anything the pane may claim. *)
+let test_a_fenced_core_cause_draws_nothing () =
+  let failure =
+    fenced_core_failure "MASC runtime shutdown interrupted the active Codex turn"
+  in
+  check (option (pair string bool)) "a sentence is not a cause" None
+    (History.present_delivery_failure failure)
+;;
+
+let test_an_unfenced_stop_is_marked_recovered_by_a_later_reply () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"user" "brief me"
+         ; row ~ts:2.0 ~role:"request_failure"
+             (persisted_failure_row connection_closed)
+         ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
+         ])
+  in
+  match (List.nth decoded.History.rows 1).History.kind with
+  | History.Delivery_failed { recovered_at; _ } ->
+    check (option (float 0.0)) "later reply is recovery evidence" (Some 3.0)
+      recovered_at
+  | _ -> fail "expected a delivery failure"
+;;
+
+let test_local_claim_refusal_is_not_a_runtime_interruption () =
+  let error =
+    Keeper_internal_error.Official_client_recovery_required
+      { runtime_id = "synthetic-runtime"
+      ; recovery_id = "synthetic-recovery"
+      ; reason = Keeper_internal_error.Effect_fenced
+      }
+  in
+  (* Exercise the shared typed decoder even though the human summary can be
+     rendered directly. The stored reason names an earlier fenced attempt. *)
+  let diagnostic =
+    Agent_core.Error.to_string
+      (Keeper_internal_error.core_error_of_masc_internal_error error)
+  in
+  check (option (pair string bool)) "local refusal has no current interruption badge"
+    None (History.present_delivery_failure diagnostic);
+  check (option (pair string bool)) "public failure row invents no interruption"
+    None (History.present_delivery_failure (persisted_failure_row error))
+;;
+
+let test_unrelated_failure_is_not_marked_recovered () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"request_failure"
+             "Keeper request failed: auth denied"
+         ; row ~ts:2.0 ~role:"assistant" "a later reply"
+         ])
+  in
+  match decoded.History.rows with
+  | { History.kind = History.Delivery_failed { recovered_at; _ }; text; _ } :: _ ->
+    check (option (float 0.0)) "unrelated failure stays a failure" None recovered_at;
+    check string "raw detail remains visible" "Keeper request failed: auth denied" text;
+    check (option (pair string bool)) "no lifecycle was invented" None
+      (History.present_delivery_failure text)
+  | _ -> fail "expected the unrelated delivery failure first"
+;;
+
+let test_rows_retain_the_exact_turn_identity () =
+  let key = operation_key "tui-turn-42" in
+  let decoded =
+    decode
+      (`List
+         [ row ~role:"user" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "accepted_user") "check it"
+         ; row ~role:"tool" ~delivery_key:key
+             ~transcript_slot:(tool_transcript_slot "exec-1" 0)
+             ~tool_call_name:"Read" "{}"
+         ; row ~role:"assistant" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "terminal_result") "done"
+         ])
+  in
+  check (list (option string)) "every row keeps the producer's operation id"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
+(* The operation id is the delivery key's operation, typed, on every row of
+   a direct turn -- and nothing else: an autonomous turn's rows carry their
+   turn_ref as turn identity and no operation. *)
+let test_rows_carry_the_operation_id_only_for_direct_turns () =
+  let key = operation_key "tui-turn-42" in
+  let decoded =
+    decode
+      (`List
+         [ row ~role:"user" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "accepted_user") "check it"
+         ; row ~role:"tool" ~delivery_key:key
+             ~transcript_slot:(tool_transcript_slot "exec-1" 0)
+             ~tool_call_name:"Read" "{}"
+         ; row ~role:"assistant" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "terminal_result") "done"
+           (* A failure row carries no transcript slot. Its operation key
+              still owns both journal lookup and conversation grouping. *)
+         ; row ~role:"request_failure" ~delivery_key:key
+             "the wire dropped"
+         ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
+         ; row ~role:"user"
+             ~delivery_key:(`Assoc [ "kind", `String "fusion_run"; "request_id", `String "fr-1" ])
+             ~transcript_slot:(transcript_slot "accepted_user") "from a fusion run"
+         ])
+  in
+  check (list (option string))
+    "every row of the direct turn carries it; autonomous and other keys do not"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
+    ; None; None; None ]
+    (List.map (fun row -> row.History.operation_id) decoded.History.rows);
+  check (list (option string)) "turn identity includes the operation's failure"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
+    ; Some "trace-1#54"; Some "trace-1#54"; None ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
+let test_delivery_keys_do_not_invent_turn_ownership () =
+  let keys = [
+    `Assoc ["kind",`String "workspace_message";"request_id",`String "shared-id"];
+    `Assoc ["kind",`String "fusion_run";"request_id",`String "shared-id"];
+    `Assoc ["kind",`String "approval_lifecycle";"approval_id",`String "shared-id"]] in
+  List.iter (fun key ->
+    let decoded = decode (`List [
+      row ~id:"context-row" ~role:"user" ~delivery_key:key
+        ~transcript_slot:(transcript_slot "accepted_user") "delivered context";
+      row ~id:"tool-row" ~role:"tool" ~delivery_key:key ~turn_ref:"trace-1#54"
+        ~transcript_slot:(tool_transcript_slot "approval-exec" 0)
+        ~tool_call_name:"Read" "{}";
+      row ~id:"assistant-row" ~role:"assistant" ~delivery_key:key ~turn_ref:"trace-1#54"
+        ~transcript_slot:(transcript_slot "terminal_result") "done";
+      row ~id:"operator-row" ~role:"user" ~delivery_key:(operation_key "shared-id")
+        ~transcript_slot:(transcript_slot "accepted_user") "operator request"])
+    in
+    check (list (option string)) "delivery alone is unowned; explicit turn wins for nonoperations"
+      [None;Some "trace-1#54";Some "trace-1#54";Some "shared-id"]
+      (List.map (fun r -> r.History.turn_id) decoded.History.rows);
+    check (list (option string)) "only the actual operation names its journal"
+      [None;None;None;Some "shared-id"]
+      (List.map (fun r -> r.History.operation_id) decoded.History.rows);
+    let autonomous_source =
+      Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
+        (Ids.Turn_ref.of_string "trace-1#54")
+    in
+    check bool "explicit nonoperation turn source retained without passive ownership" true
+      (List.map (fun r -> r.History.execution_source) decoded.History.rows =
+         [None; autonomous_source; autonomous_source;
+          Some (Masc_tui_keeper_chat_log.Operation "shared-id")]);
+    List.iter (fun (r:History.row) -> check bool "append row identity remains available" true
+      (Option.is_some r.structural_id)) decoded.History.rows;
+    let context = List.hd decoded.History.rows
+    and operator = List.nth decoded.History.rows 3 in
+    check bool "same string from separate delivery namespaces is not the same row" true
+      (context.structural_id <> operator.structural_id)
+  ) keys
+;;
+
+let test_native_continuation_rows_keep_the_original_operation () =
+  let key = `Assoc [ "kind", `String "operation_native";
+    "operation_id", `String "original-operation";
+    "continuation_id", `String "native-attempt" ] in
+  let decoded = decode (`List [
+    row ~role:"tool" ~delivery_key:key
+      ~transcript_slot:(tool_transcript_slot "native-execution" 0)
+      ~tool_call_name:"Read" "{}" ]) in
+  check (list (option string)) "journal lookup uses the original operation"
+    [Some "original-operation"]
+    (List.map (fun row -> row.History.operation_id) decoded.History.rows);
+  check (list (option string)) "continuation tools remain in the original turn"
+    [Some "original-operation"]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
+let test_consecutive_tools_from_different_turns_do_not_merge () =
+  let tool turn execution =
+    row ~role:"tool" ~delivery_key:(operation_key turn)
+      ~transcript_slot:(tool_transcript_slot execution 0)
+      ~tool_call_name:"Read" "{}"
+  in
+  let decoded =
+    decode (`List [ tool "turn-one" "exec-1"; tool "turn-two" "exec-2" ])
+  in
+  check int "two turn identities produce two blocks" 2
+    (List.length decoded.History.rows);
+  check (list (option string)) "each block keeps its own turn"
+    [ Some "turn-one"; Some "turn-two" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
+(* An autonomous wake that produced nothing used to reach the pane as a
+   speaker label over an empty line, and later as a label over a middle dot.
+   Neither says anything the header does not already say about a running
+   Keeper, and on one live screen eleven of fourteen Keeper rows were that
+   dot. *)
+let test_a_silent_autonomous_turn_draws_no_row () =
+  let decoded = decode (`List [ autonomous_turn [] ]) in
+  check (list string) "nothing is drawn for a turn that neither spoke nor ran"
+    []
+    (List.map (fun row -> kind_to_string row.History.kind) decoded.History.rows);
+  (* Not drawn because it had nothing to draw, not because the decoder could
+     not read it. *)
+  check int "the row was read" 0 decoded.History.dropped
+
+let test_a_whitespace_autonomous_reply_is_as_blank_as_none () =
+  (* The guard used to compare against "" exactly, so a reply of one newline
+     passed it and drew under the turn's own calls. *)
+  let decoded =
+    decode (`List [ autonomous_turn ~content:(`String "\n  ") [ tool "Read" ] ])
+  in
+  check bool "no reply row stands beside the call" false
+    (List.exists
+       (fun (row : History.row) -> row.History.kind = History.Autonomous_reply)
+       decoded.History.rows);
+  check int "the call the turn made is still drawn" 1
+    (List.length decoded.History.rows)
+
+let test_a_direct_turn_keeps_its_blank_reply () =
+  (* Somebody asked. That the answer came back empty is part of the exchange,
+     so the narrowing above stops at autonomous turns. *)
+  let decoded = decode (`List [ row ~role:"assistant" "" ]) in
+  check (list string) "the keeper row survives" [ "keeper" ]
+    (List.map (fun row -> kind_to_string row.History.kind) decoded.History.rows)
+
+(* The production shape: no [turn_ref] field, no delivery key, the turn id in
+   the marker. Of 598 rows on one live pane, 198 were autonomous and every one
+   looked like this, so reading only the other two places left every one of
+   them in no turn at all -- and the pane draws a turn's bracket, folds a
+   repeated speaker and hangs work off its turn from exactly that id. *)
+let test_an_autonomous_turn_is_identified_by_its_marker () =
+  let decoded = decode (`List [ autonomous_turn [ reason "look"; tool "Read" ] ]) in
+  check (list (option string)) "the trace rows share the marker's turn"
+    [ Some "trace-1#54"; Some "trace-1#54" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows);
+  (* Turn identity, not an operation: the journal endpoint is keyed by the
+     latter and an autonomous turn never ran as one. *)
+  check (list (option string)) "and claim no operation"
+    [ None; None ]
+    (List.map (fun row -> row.History.operation_id) decoded.History.rows)
+;;
+
+let test_autonomous_trace_rows_keep_the_turn_ref () =
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             [ reason "look"; tool "Read" ]
+         ])
+  in
+  check (list (option string)) "reasoning, tools and reply share the turn_ref"
+    [ Some "trace-1#54"; Some "trace-1#54" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
+(* A [role: "user"] row is whatever was put in front of the keeper, and most of
+   them are not the operator. One live keeper carried 92 such rows from 23
+   distinct speakers — a keeper, an MCP client, the exact-lane verifier, a
+   dozen canaries — and the pane drew every one as "you", which told the
+   operator they had said things they had never seen. *)
+(* Who sent a row and what the row is labelled are different answers, and the
+   pane used to keep only the second. Everything downstream then asked the
+   label: the chat's message recall asked [String.equal label "you"], which is
+   false for the operator's own lines that came in on any surface but the
+   dashboard, so the up-arrow walked past them.
+
+   One live transcript: 23 rows the store calls the owner's, 2 of them on the
+   agent surface, against 31 broadcasts from six other senders. *)
+let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
+  let speaker json =
+    match (List.hd (decode (`List [ json ])).History.rows).History.kind with
+    | History.Addressed_to_keeper { speaker; _ } -> speaker
+    | History.Said_by_keeper | History.Autonomous_reply
+    | History.Delivery_failed _ | History.Tool_calls _
+    | History.Skill_activity _ | History.Reasoning _
+    | History.Fusion_conclusion _
+    | History.Gate_activity _ -> failf "unexpected gate row"
+    | History.Memory_activity _ ->
+        failf "expected an addressed row"
+  in
+  let is_operator json =
+    match speaker json with
+    | History.Operator -> true
+    | History.Named _ | History.Unresolved _ -> false
+  in
+  let surface kind = `Assoc [ "kind", `String kind ] in
+  check bool "an owner row is the operator" true (is_operator (addressed "hi"));
+  (* The label here reads "you . agent", which is why asking the label was
+     wrong: the row is still the operator's. *)
+  check bool "an owner row that came in on the agent surface is still the operator"
+    true
+    (is_operator (addressed ~surface:(surface "agent") "hi"));
+  check bool "a named broadcast is not the operator" false
+    (is_operator
+       (addressed ~speaker_authority:"external" ~speaker_name:"spruce"
+          ~surface:(surface "broadcast") "hi"));
+  check bool "an unnamed external row is not the operator either" false
+    (is_operator (addressed ~speaker_authority:"external" "hi"));
+  check bool "explicit owner authority wins over a display name" true
+    (is_operator (addressed ~speaker_name:"owner-display" "hi"));
+  check bool "unknown authority remains unresolved despite a display name" true
+    (match speaker (addressed ~speaker_authority:"unknown" ~speaker_name:"someone" "hi") with
+     | History.Unresolved _ -> true
+     | History.Operator | History.Named _ -> false)
+
+let test_consecutive_tool_rows_become_one_block () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"user" "봐줘"
+         ; row ~ts:2.0 ~role:"tool" ~tool_call_name:"read_file"
+             "{\"file_path\":\"lib/a.ml\"}"
+         ; row ~ts:3.0 ~role:"tool" ~tool_call_name:"edit_file"
+             "{\"file_path\":\"lib/b.ml\"}"
+         ; row ~ts:4.0 ~role:"assistant" "봤어요"
+         ])
+  in
+  match decoded.History.rows with
+  | [ operator; tools; keeper ] ->
+      check string "the operator's line is first" "addressed(you)"
+        (kind_to_string operator.History.kind);
+      check string "the keeper's line is last" "keeper"
+        (kind_to_string keeper.History.kind);
+      (match tools.History.kind with
+       | History.Tool_calls block ->
+           let rows = full_tool_rows block in
+           check int "both calls are in one block" 2 (List.length rows);
+           check bool "each row names the file it acted on" true
+             (List.exists
+                (fun r ->
+                  String.length r > 0
+                  && Option.is_some (String.index_opt r 'a'))
+                rows);
+           check bool "the rows carry the finished marker" true
+             (List.for_all (fun r -> String.length r > 0) rows)
+           ; check (list bool)
+               "delivery-only rows do not claim a recorded return"
+               [ true; true ]
+               (List.map
+                  (fun (activity : Transcript.tool_activity) ->
+                    activity.outcome = Transcript.Outcome_unrecorded)
+                  block.activities)
+       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Autonomous_reply
+       | History.Delivery_failed _ | History.Skill_activity _
+       | History.Reasoning _
+       | History.Fusion_conclusion _
+       | History.Gate_activity _ -> failf "unexpected gate row"
+    | History.Memory_activity _ ->
+           fail "expected the middle row to be a tool block");
+      check (float 0.0) "the block is keyed to its first call" 2.0
+        tools.History.at
+  | rows -> failf "expected three rows, got %d" (List.length rows)
+
+let test_history_keeps_producer_tool_call_identity () =
+  let args_a = "{\"file_path\":\"lib/a.ml\"}" in
+  let args_b = "{\"file_path\":\"lib/b.ml\"}" in
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:2.0 ~role:"tool" ~tool_call_id:"c1" ~execution_id:"exec-1"
+             ~tool_call_name:"read_file" args_a
+         ; row ~ts:3.0 ~role:"tool" ~tool_call_id:"c2" ~execution_id:"exec-2"
+             ~tool_call_name:"edit_file" args_b
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Tool_calls block; _ } ] ->
+      let activities = block.activities in
+      check (list (option string)) "producer identities stay in source order"
+        [ Some "c1"; Some "c2" ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) -> activity.call_id)
+           activities);
+      check (list (option string)) "canonical identities stay separate"
+        [ Some "exec-1"; Some "exec-2" ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) -> activity.execution_id)
+           activities);
+      check (list string) "the same subject authority names both calls"
+        [ "lib/a.ml"; "lib/b.ml" ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) ->
+             Option.value ~default:"" activity.subject)
+           activities);
+      check (list (option string)) "direct rows do not invent durations"
+        [ None; None ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) -> activity.duration)
+           activities);
+      check (list bool) "canonical result rows are recorded as returned"
+        [ true; true ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) ->
+             activity.outcome = Transcript.Returned)
+           activities)
+  | rows -> failf "expected one history tool block, got %d rows" (List.length rows)
+
+(* The decoded rows keep the order the turn ran in, which Full and Results
+   draw. Compact gathers one turn's blocks into one when the pane builds its
+   rows; that rule is tested where it runs (test_tui_chat_rows_memo). *)
+let test_tool_blocks_separated_by_speech_stay_separate () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"tool" ~tool_call_name:"read_file" "{}"
+         ; row ~ts:2.0 ~role:"assistant" "중간 설명"
+         ; row ~ts:3.0 ~role:"tool" ~tool_call_name:"edit_file" "{}"
+         ])
+  in
+  check (list string) "speech between two calls breaks the block"
+    [ "tools"; "keeper"; "tools" ]
+    (decoded.History.rows
+     |> List.map (fun r ->
+            match r.History.kind with
+            | History.Tool_calls _ -> "tools"
+            | other -> kind_to_string other))
+
+(* On one live keeper 32 of 183 assistant rows had a blank [content] and a
+   trace block behind it -- 1,333 tool steps and 917 withheld reasoning steps
+   -- and every one drew as a timestamp over an empty line. *)
+let test_an_autonomous_turn_draws_what_it_did () =
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~ts:5.0
+             [ think_withheld
+             ; tool ~execution_id:"trace-1" ~status:"ok" ~dur:"32ms"
+                 "masc_task_history"
+             ; think_withheld
+             ; tool ~execution_id:"trace-2" ~status:"err" ~dur:"1200ms"
+                 "tool_execute"
+             ; tool ~execution_id:"trace-3" ~status:"pending"
+                 "keeper_task_claim"
+             ; tool "read_file"
+             ]
+         ])
+  in
+  check int "nothing was dropped" 0 decoded.History.dropped;
+  match decoded.History.rows with
+  | [ thinking; tools ] ->
+      check string "the withheld reasoning is counted, not drawn blank"
+        "thinking[2 reasoning steps · text not recorded]"
+        (kind_to_string thinking.History.kind);
+      (match tools.History.kind with
+       | History.Tool_calls block ->
+           let rows = full_tool_rows block in
+           check int "every tool step is a row" 4 (List.length rows);
+           let activities = block.activities in
+           check (list (option string)) "trace has no provider identities"
+             [ None; None; None; None ]
+             (List.map
+                (fun (activity : Transcript.tool_activity) -> activity.call_id)
+                activities);
+           check (list (option string)) "trace ids are canonical executions"
+             [ Some "trace-1"; Some "trace-2"; Some "trace-3"; None ]
+             (List.map
+                (fun (activity : Transcript.tool_activity) ->
+                  activity.execution_id)
+                activities);
+           check (list (option string)) "trace durations are not inferred"
+             [ Some "32ms"; Some "1200ms"; None; None ]
+             (List.map
+                (fun (activity : Transcript.tool_activity) -> activity.duration)
+                activities);
+           let starts_with prefix row =
+             String.length row >= String.length prefix
+             && String.equal (String.sub row 0 (String.length prefix)) prefix
+           in
+           let row n = List.nth rows n in
+           check bool "a call that returned carries the finished glyph" true
+             (starts_with "\xe2\x9c\x93 MascTaskHistory" (row 0));
+           check bool "and its duration" true
+             (starts_with "\xe2\x9c\x93 MascTaskHistory \xc2\xb7 32ms" (row 0));
+           check bool "a call that returned an error carries its own glyph" true
+             (starts_with "\xe2\x9c\x97 ToolExecute" (row 1));
+           (* A settled attempt with no observed result is an evidence gap,
+              distinct from both a still-running call and a failed call. *)
+           check bool "a call the trace never saw finish carries its own glyph"
+             true
+             (starts_with "○ KeeperTaskClaim" (row 2));
+           check bool "a step with no status says it was not recorded" true
+             (starts_with "? ReadFile" (row 3))
+       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Autonomous_reply
+       | History.Delivery_failed _ | History.Skill_activity _
+       | History.Reasoning _
+       | History.Fusion_conclusion _
+       | History.Gate_activity _ -> failf "unexpected gate row"
+    | History.Memory_activity _ ->
+           fail "expected the second row to be a tool block");
+      check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
+  | rows -> failf "expected two rows, got %d" (List.length rows)
+
+let test_exact_skill_evidence_replaces_the_raw_call_and_names_actions () =
+  let projection =
+    skill_projection ~status:"available"
+      [ skill_activation ~actions:[ "Execute"; "Read" ] () ]
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             ~skill_activations:projection
+             [ tool ~tool_call_id:"skill-use-1" ~status:"ok" "keeper_skill"
+             ; tool ~status:"ok" "Execute"
+             ; tool ~status:"ok" "Read"
+             ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ skill_row; tools_row ] ->
+      (match skill_row.kind with
+       | History.Skill_activity [ skill ] ->
+           check string "the exact ledger names the Skill" "ci-red-attribution"
+             skill.skill_name;
+           check bool "an instruction skill was read" true
+             (skill.invocation = Some Transcript.Instruction_read);
+           check bool "delivery plus observed actions means used" true
+             (skill.state = Transcript.Skill_used);
+           check (list string) "the exact action sequence is kept"
+             [ "Execute"; "Read" ] skill.actions;
+           let rows = Transcript.skill_rows ~full:true [ skill ] in
+           check string "the strongest evidence state is bold"
+             "**전달됨, 도구 씀** \xc2\xb7 **ci-red-attribution** \xc2\xb7 2 actions"
+             (List.hd rows);
+           check bool "the exact turn proof is visible" true
+             (List.exists
+                (String.starts_with ~prefix:"  proof \xc2\xb7 turn=trace-1#54")
+                rows);
+           check (list string) "the compact row is the name alone"
+             [ "**ci-red-attribution**" ]
+             (Transcript.skill_rows ~full:false [ skill ])
+       | other ->
+           failf "expected a Skill row, got %s" (kind_to_string other));
+      (match tools_row.kind with
+       | History.Tool_calls block ->
+           check (list string) "the raw Skill tool is replaced, not duplicated"
+             [ "Execute"; "Read" ]
+             (List.map
+                (fun (activity : Transcript.tool_activity) -> activity.tool_name)
+                block.activities)
+       | other ->
+           failf "expected an action Tool block, got %s" (kind_to_string other))
+  | rows ->
+      failf "expected Skill plus action Tools, got %d row(s): %s"
+        (List.length rows)
+        (String.concat "; "
+           (List.map
+              (fun (row : History.row) -> kind_to_string row.kind)
+              rows))
+
+let test_served_skill_without_delivery_does_not_claim_use () =
+  let projection =
+    skill_projection ~status:"available"
+      [ skill_activation ~delivery:`Null () ]
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             ~skill_activations:projection
+             [ tool ~tool_call_id:"skill-use-1" ~status:"ok" "keeper_skill" ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity [ skill ]; _ } ] ->
+      check bool "served is weaker than delivered" true
+        (skill.state = Transcript.Skill_served_only);
+      check string "the full row says delivery was not recorded"
+        "**읽음, 전달 기록 없음** \xc2\xb7 **ci-red-attribution**"
+        (List.hd (Transcript.skill_rows ~full:true [ skill ]));
+      check (list string) "the compact row says only that it was triggered"
+        [ "**ci-red-attribution**" ]
+        (Transcript.skill_rows ~full:false [ skill ])
+  | rows ->
+      failf "expected one served-only Skill row, got %d: %s" (List.length rows)
+        (String.concat "; "
+           (List.map (fun (r : History.row) -> kind_to_string r.kind) rows))
+
+let test_missing_skill_evidence_stays_visible_beside_the_raw_call () =
+  let projection =
+    skill_projection ~status:"missing"
+      ~detail:"No activation matched this exact turn" []
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             ~skill_activations:projection
+             [ tool ~status:"ok" "keeper_skill" ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity [ warning ]; _ }
+    ; { History.kind = History.Tool_calls raw; _ }
+    ] ->
+      check bool "the evidence gap is a typed warning" true
+        (warning.state = Transcript.Skill_evidence_missing);
+      check bool "the pane's own warning row carries no invocation" true
+        (warning.invocation = None);
+      check string "the producer's raw call is retained" "keeper_skill"
+        (List.hd raw.activities).tool_name;
+      check (option string) "the exact failure reason is visible"
+        (Some "No activation matched this exact turn") warning.detail
+  | rows ->
+      failf "expected warning plus raw Skill tool, got %d row(s)" (List.length rows)
+
+let test_unmatched_skill_evidence_retains_every_raw_call () =
+  let projection =
+    skill_projection ~status:"available" [ skill_activation () ]
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             ~skill_activations:projection
+             [ tool ~status:"ok" "keeper_skill"
+             ; tool ~status:"ok" "keeper_skill"
+             ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity [ exact; warning ]; _ }
+    ; { History.kind = History.Tool_calls raw; _ }
+    ] ->
+      check string "the exact activation is still shown" "ci-red-attribution"
+        exact.skill_name;
+      check bool "unmatched call authority is a visible evidence gap" true
+        (warning.state = Transcript.Skill_evidence_unavailable);
+      check int "neither unmatched raw call is hidden" 2
+        (List.length raw.activities)
+  | rows ->
+      failf "expected one skill block of exact evidence and warning, then raw calls; got %d row(s)"
+        (List.length rows)
+
+let test_an_unknown_invocation_kind_does_not_decode () =
+  let projection =
+    skill_projection ~status:"available"
+      [ skill_activation ~invocation:(`Assoc [ "kind", `String "ritual" ]) () ]
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54" ~skill_activations:projection
+             [ tool ~status:"ok" "keeper_skill" ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity [ warning ]; _ }; _ ] ->
+      check bool "the projection could not be read" true
+        (warning.state = Transcript.Skill_evidence_unavailable);
+      check bool "the reason names the kind" true
+        (match warning.detail with
+         | Some detail -> String.ends_with ~suffix:"unknown: ritual" detail
+         | None -> false)
+  | rows ->
+      failf "expected an evidence warning, got %d row(s): %s" (List.length rows)
+        (String.concat "; " (List.map (fun (r : History.row) -> kind_to_string r.kind) rows))
+
+let test_a_turn_that_also_spoke_keeps_the_order_it_ran_in () =
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~ts:6.0
+             ~content:(`String "\xea\xb3\xa0\xec\xb3\xa4\xec\x96\xb4\xec\x9a\x94")
+             [ reason "the test names the old label"
+             ; tool ~status:"ok" "edit_file"
+             ]
+         ])
+  in
+  check (list string) "reasoning, then calls, then what it said"
+    [ "thinking[the test names the old label]"; "tools"; "autonomous" ]
+    (decoded.History.rows
+     |> List.map (fun r ->
+            match r.History.kind with
+            | History.Tool_calls _ -> "tools"
+            | other -> kind_to_string other));
+  check string "the text is the keeper's own row"
+    "\xea\xb3\xa0\xec\xb3\xa4\xec\x96\xb4\xec\x9a\x94"
+    (List.nth decoded.History.rows 2).History.text
+
+let test_a_direct_turn_s_trace_is_not_drawn_twice () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"tool" ~tool_call_name:"read_file" "{}"
+         ; autonomous_turn ~ts:2.0 ~marked:false ~content:(`String "done")
+             [ think_withheld; tool ~status:"ok" "read_file" ]
+         ])
+  in
+  check (list string) "one tool block from the tool rows, then the text"
+    [ "tools"; "keeper" ]
+    (decoded.History.rows
+     |> List.map (fun r ->
+            match r.History.kind with
+            | History.Tool_calls _ -> "tools"
+            | other -> kind_to_string other))
+
+let test_a_null_content_is_the_wire_s_blank () =
+  let decoded =
+    decode (`List [ autonomous_turn ~ts:3.0 [ tool ~status:"ok" "read_file" ] ])
+  in
+  check (list string) "null content draws the trace and no text row"
+    [ "tools" ]
+    (decoded.History.rows
+     |> List.map (fun r ->
+            match r.History.kind with
+            | History.Tool_calls _ -> "tools"
+            | other -> kind_to_string other))
+
+let test_a_blank_turn_with_no_trace_keeps_its_line () =
+  (* The server holds an empty row for it; drawing nothing would hide that a
+     turn happened. Unchanged from before trace blocks were read. *)
+  let decoded = decode (`List [ row ~ts:7.0 ~role:"assistant" "" ]) in
+  check (list string) "one keeper row, blank" [ "keeper" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+let test_persisted_identity_and_absolute_turn_survive_projection () =
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~content:(`String "done")
+             [ reason "consider"; tool "Execute" ] ])
+  in
+  check (list (option int)) "one structural turn sequence on every projection"
+    [ Some 54; Some 54; Some 54 ]
+    (List.map (fun row -> row.History.turn_sequence) decoded.History.rows);
+  let identities =
+    List.filter_map (fun row -> row.History.structural_id) decoded.History.rows
+  in
+  check int "one stable identity per projected row" 3
+    (List.length (List.sort_uniq String.compare identities))
+;;
+
+let test_server_order_is_kept () =
+  (* The server appends in order and asks a client not to reposition rows that
+     carry no ts. A decoder that sorted would move these three. *)
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:9.0 ~role:"user" "first"
+         ; row ~ts:0.0 ~role:"assistant" "second"
+         ; row ~ts:5.0 ~role:"user" "third"
+         ])
+  in
+  check (list string) "rows stay in the order they arrived"
+    [ "first"; "second"; "third" ]
+    (List.map (fun r -> r.History.text) decoded.History.rows)
+
+let test_one_unreadable_row_does_not_cost_the_transcript () =
+  let decoded =
+    decode
+      (`List
+         [ row ~ts:1.0 ~role:"user" "kept"
+         ; `Assoc [ "role", `String "wat"; "content", `String "dropped" ]
+         ; `String "not even an object"
+         ; (* A tool row with no name draws as a bare marker, so it is dropped
+              rather than rendered nameless. *)
+           row ~ts:2.0 ~role:"tool" "{}"
+         ; row ~ts:3.0 ~role:"assistant" "also kept"
+         ])
+  in
+  check int "the three unreadable rows are counted" 3 decoded.History.dropped;
+  check (list string) "and the readable ones survive" [ "kept"; "also kept" ]
+    (List.map (fun r -> r.History.text) decoded.History.rows)
+
+let test_a_non_array_payload_is_an_error () =
+  match History.rows_of_json (`Assoc [ "rows", `List [] ]) with
+  | Ok _ -> fail "an object should not decode as a transcript"
+  | Error detail ->
+      check bool "the error names the shape" true (String.length detail > 0)
+
+let test_a_missing_ts_reads_as_zero_not_a_failure () =
+  let decoded =
+    decode
+      (`List
+         [ `Assoc [ "role", `String "user"; "content", `String "no ts here" ] ])
+  in
+  check int "the row is kept" 0 decoded.History.dropped;
+  match decoded.History.rows with
+  | [ r ] -> check (float 0.0) "and sorts as the oldest" 0.0 r.History.at
+  | rows -> failf "expected one row, got %d" (List.length rows)
+
+(* Paging. The envelope is new; the rows inside are the transcript's, so what
+   matters here is the cursor and the "is there more" flag -- getting either
+   wrong either stops the pane short of the conversation's start or has it ask
+   forever for a page that does not exist. *)
+
+let page json =
+  match History.page_of_json json with
+  | Ok page -> page
+  | Error detail -> failf "expected a page, got %s" detail
+
+let page_envelope ?(has_more = true) ?next_cursor rows =
+  `Assoc
+    ([ "schema", `String "masc.keeper_chat_history.page.v2"
+     ; "messages", `List rows
+     ; "has_more", `Bool has_more
+     ]
+     @ (match next_cursor with
+        | None -> [ "next_cursor", `Null ]
+        | Some cursor -> [ "next_cursor", `String cursor ]))
+
+let test_a_page_decodes_its_rows_and_cursor () =
+  let p =
+    page
+      (page_envelope ~has_more:true ~next_cursor:"opaque-position"
+         [ row ~ts:20.0 ~role:"user" "older question"
+         ; row ~ts:21.0 ~role:"assistant" "older answer"
+         ])
+  in
+  check (list string) "the rows read like any other transcript rows"
+    [ "older question"; "older answer" ]
+    (List.map (fun r -> r.History.text) p.History.decoded.History.rows);
+  check bool "more remain" true p.History.has_more;
+  check (option string) "and the cursor for them" (Some "opaque-position")
+    p.History.next_cursor
+
+let test_the_top_of_the_conversation_says_so () =
+  let p = page (page_envelope ~has_more:false [ row ~role:"user" "first ever" ]) in
+  check bool "nothing older" false p.History.has_more;
+  check (option string) "and no cursor to ask with" None
+    p.History.next_cursor
+
+let test_an_incomplete_page_is_refused () =
+  match History.page_of_json (`Assoc [ "messages", `List [row ~role:"user" "only row"] ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "an incomplete envelope must not assert page exhaustion"
+
+let test_an_unreadable_page_row_preserves_the_cursor () =
+  match History.page_of_json (page_envelope ~has_more:true ~next_cursor:"held-cursor"
+    [row ~role:"user" "valid row"; `Assoc ["content", `String "missing id and role"]]) with
+  | Error _ -> ()
+  | Ok _ -> fail "an unreadable row must not advance an exact page cursor"
+
+let test_tool_rows_fold_in_a_page_as_they_do_in_the_transcript () =
+  let p =
+    page
+      (page_envelope ~has_more:false
+         [ row ~ts:1.0 ~role:"tool" ~tool_call_name:"read_file" "{}"
+         ; row ~ts:2.0 ~role:"tool" ~tool_call_name:"edit_file" "{}"
+         ])
+  in
+  match p.History.decoded.History.rows with
+  | [ { History.kind = History.Tool_calls block; _ } ] ->
+      let rows = full_tool_rows block in
+      check int "consecutive calls are one block here too" 2
+        (List.length rows)
+  | rows -> failf "expected one folded block, got %d rows" (List.length rows)
+
+let test_a_page_that_is_not_an_object_is_an_error () =
+  match History.page_of_json (`List []) with
+  | Ok _ -> fail "an array is not a page envelope"
+  | Error detail -> check bool "and says so" true (String.length detail > 0)
+
+let test_a_page_without_messages_is_an_error () =
+  match History.page_of_json (`Assoc [ "has_more", `Bool true ]) with
+  | Ok _ -> fail "a page with no rows array should not decode"
+  | Error detail -> check bool "and says so" true (String.length detail > 0)
+
+let contains text needle =
+  let rec loop at =
+    if at + String.length needle > String.length text
+    then false
+    else if String.sub text at (String.length needle) = needle
+    then true
+    else loop (at + 1)
+  in
+  loop 0
+;;
+
+let test_memory_commit_names_added_removed_and_drop_reason () =
+  let payload =
+    `Assoc
+      [ ( "entries"
+        , `List
+            [ `Assoc
+                [ "ok", `Bool true
+                ; "outcome", `String "committed"
+                ; "recorded_at", `Float 1_700_000_010.0
+                ; "revision", `Int 7
+                ; "source", `Assoc [ "kind", `String "librarian" ]
+                ; ( "change"
+                  , `Assoc
+                      [ ( "added"
+                        , `List
+                            [ `Assoc
+                                [ "category", `String "fact"
+                                ; "claim", `String "the probe uses HTTP/2"
+                                ]
+                            ] )
+                      ; ( "removed"
+                        , `List
+                            [ `Assoc
+                                [ "category", `String "constraint"
+                                ; "claim", `String "use the old endpoint"
+                                ]
+                            ] )
+                      ; "retained", `Int 3
+                      ] )
+                ; ( "dropped"
+                  , `List
+                      [ `Assoc
+                          [ "memory_id", `String "memory-old"
+                          ; "reason", `String "superseded by live evidence"
+                          ]
+                      ] )
+                ]
+            ] )
+      ]
+  in
+  match History.memory_rows_of_json payload with
+  | Error detail -> failf "memory journal decode failed: %s" detail
+  | Ok { History.rows = [ row ]; dropped = 0 } ->
+      check (float 0.0) "journal timestamp retained" 1_700_000_010.0 row.at;
+      check bool "journal has a stable producer identity" true
+        (Option.is_some row.structural_id);
+      (match row.kind with
+       | History.Gate_activity _ -> failf "unexpected gate row"
+   | History.Memory_activity { summary; journal; pass } ->
+           check bool "a committed revision is a committed pass" true
+             (match pass with
+              | Masc_tui_message_layout.Pass_committed -> true
+              | Masc_tui_message_layout.Pass_failed _
+              | Masc_tui_message_layout.No_pass -> false);
+           check (option string) "typed summary is producer-built"
+             (Some
+                "Librarian \xc2\xb7 revision 7 \xc2\xb7 +1 \xe2\x88\x921 \xc2\xb7 3 retained")
+             summary;
+           (* Typed, so the pane draws the columns without reading text back
+              to find where the category ends. *)
+           check bool "the lines arrive typed, added then removed then dropped" true
+             (match journal with
+              | [ Masc_tui_message_layout.Journal_fact
+                    { sign = Journal_added; category = "fact"; tone = Tone_fact;
+                      claim = "the probe uses HTTP/2" }
+                ; Journal_fact
+                    { sign = Journal_removed; category = "constraint";
+                      tone = Tone_intent; claim = "use the old endpoint" }
+                ; Journal_drop
+                    { memory_id = "memory-old";
+                      reason = "superseded by live evidence" } ] ->
+                  true
+              | _ -> false)
+       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Autonomous_reply | History.Delivery_failed _
+       | History.Tool_calls _ | History.Skill_activity _
+       | History.Reasoning _ | History.Fusion_conclusion _ ->
+           fail "journal row lost its Memory activity type");
+      (* The text says the same for readers of text; there is no fence left
+         for a lexer to read the category back out of. *)
+      check (list string) "the plain text is the summary, then a line each"
+        [ "Librarian \xc2\xb7 revision 7 \xc2\xb7 +1 \xe2\x88\x921 \xc2\xb7 3 retained"
+        ; "+ [fact] the probe uses HTTP/2"
+        ; "\xe2\x88\x92 [constraint] use the old endpoint"
+        ; "drop memory-old \xe2\x80\x94 superseded by live evidence"
+        ]
+        (String.split_on_char '\n' row.text)
+  | Ok decoded ->
+      failf "expected one decoded memory row, got %d/%d"
+        (List.length decoded.rows) decoded.dropped
+;;
+
+(* Eight categories and five colours, grouped by what a reader does about a
+   fact, because eight hues is a legend to memorise. The group is read off the
+   producer's closed category sum, so what matters is that the groups stay
+   apart and that a category this build was not taught reads as a fact rather
+   than borrowing a colour that would say something about it. *)
+let test_memory_categories_group_by_what_they_ask () =
+  let tone_of category =
+    let payload =
+      `Assoc
+        [ ( "entries"
+          , `List
+              [ `Assoc
+                  [ "ok", `Bool true
+                  ; "outcome", `String "committed"
+                  ; "recorded_at", `Float 1_700_000_010.0
+                  ; "revision", `Int 1
+                  ; "source", `Assoc [ "kind", `String "librarian" ]
+                  ; ( "change"
+                    , `Assoc
+                        [ ( "added"
+                          , `List
+                              [ `Assoc
+                                  [ "category", `String category
+                                  ; "claim", `String "a claim"
+                                  ]
+                              ] )
+                        ; "removed", `List []
+                        ; "retained", `Int 0
+                        ] )
+                  ]
+              ] )
+        ]
+    in
+    match History.memory_rows_of_json payload with
+    | Ok
+        { History.rows =
+            [ { kind =
+                  History.Memory_activity
+                    { journal = [ Masc_tui_message_layout.Journal_fact { tone; _ } ]; _ }
+              ; _ } ]
+        ; dropped = 0 } ->
+        tone
+    | Ok _ | Error _ -> failf "no typed fact for category %s" category
+  in
+  let same a b = tone_of a = tone_of b in
+  check bool "a lesson and an approach read alike" true
+    (same "lesson" "validated_approach");
+  check bool "a preference, a goal and a constraint read alike" true
+    (same "preference" "goal" && same "goal" "constraint");
+  check bool "a code change is not a lesson" false (same "code_change" "lesson");
+  check bool "a blocker is not a preference" false (same "blocker" "preference");
+  check bool "an unknown category reads as a fact" true
+    (same "some_new_category" "fact")
+;;
+
+let test_memory_failure_keeps_kind_and_detail () =
+  let payload =
+    `Assoc
+      [ ( "entries"
+        , `List
+            [ `Assoc
+                [ "ok", `Bool true
+                ; "outcome", `String "failed"
+                ; "recorded_at", `Float 1_700_000_020.0
+                ; "trace_id", `String "trace-memory-failure"
+                ; "kind", `String "exact_execution_failure"
+                ; "detail", `String "provider returned 503"
+                ; "snapshot_present", `Bool true
+                ]
+            ] )
+      ]
+  in
+  match History.memory_rows_of_json payload with
+  | Ok { History.rows = [ row ]; dropped = 0 } ->
+      check bool "failed observation has a stable producer identity" true
+        (Option.is_some row.structural_id);
+      (match row.kind with
+       | History.Gate_activity _ -> failf "unexpected gate row"
+   | History.Memory_activity { summary; journal = _; pass } ->
+           check (option string) "failure summary omits the detail body"
+             (Some "Librarian failed \xc2\xb7 exact_execution_failure") summary;
+           check bool "the pass is typed as failed, with the server's kind" true
+             (match pass with
+              | Masc_tui_message_layout.Pass_failed { kind = "exact_execution_failure" } ->
+                  true
+              | Masc_tui_message_layout.Pass_failed _
+              | Masc_tui_message_layout.Pass_committed
+              | Masc_tui_message_layout.No_pass -> false)
+       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Autonomous_reply | History.Delivery_failed _
+       | History.Tool_calls _ | History.Skill_activity _
+       | History.Reasoning _ | History.Fusion_conclusion _ ->
+           fail "failed journal row lost its Memory activity type");
+      check bool "failure kind survives" true
+        (contains row.text "exact_execution_failure");
+      check bool "failure detail survives" true
+        (contains row.text "provider returned 503")
+  | Ok decoded ->
+      failf "expected one failed memory row, got %d/%d"
+        (List.length decoded.rows) decoded.dropped
+  | Error detail -> failf "memory failure decode failed: %s" detail
+;;
+
+let memory_commit_entry ~revision ~recorded_at =
+  `Assoc
+    [ "ok", `Bool true
+    ; "outcome", `String "committed"
+    ; "recorded_at", `Float recorded_at
+    ; "revision", `Int revision
+    ; "source", `Assoc [ "kind", `String "librarian" ]
+    ; ( "change"
+      , `Assoc
+          [ "added", `List []
+          ; "removed", `List []
+          ; "retained", `Int revision
+          ] )
+    ; "dropped", `List []
+    ]
+;;
+
+let memory_failed_entry trace_id =
+  `Assoc
+    [ "ok", `Bool true
+    ; "outcome", `String "failed"
+    ; "recorded_at", `Float 1_700_000_020.0
+    ; "trace_id", `String trace_id
+    ; "kind", `String "exact_execution_failure"
+    ; "detail", `String "provider returned 503"
+    ; "snapshot_present", `Bool true
+    ]
+;;
+
+let memory_structural_ids entries =
+  match History.memory_rows_of_json (`Assoc [ "entries", `List entries ]) with
+  | Ok { History.rows; dropped = 0 } ->
+      List.map (fun row -> row.History.structural_id) rows
+  | Ok decoded ->
+      failf "memory identity fixture dropped %d row(s)" decoded.dropped
+  | Error detail -> failf "memory identity fixture failed: %s" detail
+;;
+
+let test_memory_identity_survives_a_producer_prepend () =
+  let current = memory_commit_entry ~revision:7 ~recorded_at:1_700_000_010.0 in
+  let backfill = memory_commit_entry ~revision:6 ~recorded_at:1_800_000_000.0 in
+  match memory_structural_ids [ current ], memory_structural_ids [ backfill; current ] with
+  | [ Some before ], [ Some backfilled; Some after ] ->
+      check string "the existing Journal identity survives prepend" before after;
+      check bool "the prepended Journal row has a distinct identity" true
+        (not (String.equal backfilled after))
+  | before, after ->
+      failf "expected stable Journal identities, got %d then %d"
+        (List.length before) (List.length after)
+;;
+
+let test_failed_memory_identity_includes_trace_id () =
+  match memory_structural_ids [ memory_failed_entry "trace-a"; memory_failed_entry "trace-b" ] with
+  | [ Some left; Some right ] ->
+      check bool "two failure traces have distinct identities" true
+        (not (String.equal left right))
+  | identities ->
+      failf "expected two failed Journal identities, got %d"
+        (List.length identities)
+;;
+
+let test_unreadable_memory_identity_is_server_supplied () =
+  let structural_id = "memory:journal:5:alpha:17" in
+  let payload =
+    `Assoc
+      [ ( "entries"
+        , `List
+            [ `Assoc
+                [ "structural_id", `String structural_id
+                ; "ok", `Bool false
+                ; "error", `String "journal line is not valid JSON"
+                ]
+            ] )
+      ]
+  in
+  match History.memory_rows_of_json payload with
+  | Ok { History.rows = [ row ]; dropped = 0 } ->
+      check (option string) "unreadable row keeps storage identity"
+        (Some structural_id) row.structural_id
+  | Ok decoded ->
+      failf "expected one unreadable Journal row, got %d/%d"
+        (List.length decoded.rows) decoded.dropped
+  | Error detail -> failf "unreadable Journal fixture failed: %s" detail
+;;
+
+(* The store has carried [attachments] since the composer learned to stage a
+   file. This reader ignored the field, so a message that arrived with a 70 KB
+   image read as the sentence beside it and nothing else -- the only trace was
+   the [[Image #1]] the composer had typed into the draft, which is text and
+   not a file. *)
+let test_a_row_names_the_file_it_carries () =
+  let row =
+    `Assoc
+      [ "id", `String "row"
+      ; "role", `String "user"
+      ; "content", `String "here it is"
+      ; "ts", `Float 1.0
+      ; ( "attachments"
+        , `List
+            [ `Assoc
+                [ "id", `String "tui-att-1"
+                ; "type", `String "image"
+                ; "name", `String "image-1.png"
+                ; "size", `Int 70970
+                ; "mime_type", `String "image/png"
+                ]
+            ] )
+      ]
+  in
+  match (decode (`List [ row ])).History.rows with
+  | [ r ] ->
+    check int "the file is named once" 1
+      (List.length r.History.attachments);
+    (match r.History.attachments with
+     | [ note ] ->
+       check string "by its name" "image-1.png"
+         note.History.att_name;
+       check int "and its size" 70970 note.History.att_bytes;
+       check string "and its type" "image/png"
+         note.History.att_mime
+     | _ -> fail "expected one note");
+    (* The words are untouched: the note is drawn beside them, not folded in. *)
+    check string "the message still says what it said" "here it is"
+      r.History.text
+  | rows -> failf "expected one row, got %d" (List.length rows)
+;;
+
+(* A row with no file gains nothing. A marker on every row stops being read. *)
+let test_a_row_without_a_file_says_nothing () =
+  match
+    (decode (`List [ addressed ~speaker_name:"vincent" "just words" ]))
+      .History.rows
+  with
+  | [ r ] ->
+    check int "no notes" 0 (List.length r.History.attachments)
+  | rows -> failf "expected one row, got %d" (List.length rows)
+;;
+
+(* A row copied verbatim from a live keeper transcript
+   (~/.masc/keeper_chat/analyst.jsonl, 2026-08-25). The pane could not be made
+   to scroll back this far by hand, so the row itself is the check: whatever
+   the runtime writes has to survive this decoder. *)
+let live_attachment_row =
+  {json|[{
+    "id": "msg-1787650428127921-11",
+    "role": "user",
+    "content": "첨부한 이미지에 무엇이 보이나요?",
+    "ts": 1787650428.127921,
+    "attachments": [
+      { "id": "probe-1"
+      , "type": "image"
+      , "name": "vision_probe.png"
+      , "size": 2129
+      , "mime_type": "image/png"
+      , "data": "masc://attachment/probe-1/b40a4fdf6d377a7f23c18089f04b66dfaf8ebed1036aa4faa539ae9d47e6639b"
+      }
+    ],
+    "surface": { "kind": "dashboard" },
+    "speaker_authority": "owner",
+    "delivery_key": { "kind": "operation", "operation_id": "vision-probe-7431" },
+    "transcript_slot": { "kind": "accepted_user" }
+  }]|json}
+
+let test_live_row_keeps_its_file () =
+  match History.rows_of_json (Yojson.Safe.from_string live_attachment_row) with
+  | Error msg -> Alcotest.failf "live row did not decode: %s" msg
+  | Ok decoded ->
+    Alcotest.(check int) "nothing dropped" 0 decoded.History.dropped;
+    (match decoded.History.rows with
+     | [ row ] ->
+       (match row.History.attachments with
+        | [ att ] ->
+          Alcotest.(check string) "name" "vision_probe.png" att.History.att_name;
+          Alcotest.(check string) "mime" "image/png" att.History.att_mime;
+          Alcotest.(check int) "bytes" 2129 att.History.att_bytes
+        | other ->
+          Alcotest.failf "expected one attachment, got %d" (List.length other))
+     | other -> Alcotest.failf "expected one row, got %d" (List.length other))
+
+let sized_attachment_row =
+  {json|[{
+    "id": "msg-1",
+    "role": "user",
+    "content": "what is in this",
+    "ts": 1787650428.0,
+    "attachments": [
+      { "id": "att-1"
+      , "type": "image"
+      , "name": "shot.png"
+      , "size": 2129
+      , "mime_type": "image/png"
+      , "data": "masc://attachment/att-1/abc"
+      , "width": 3456
+      , "height": 2168
+      }
+    ]
+  }]|json}
+
+let test_stored_attachment_history_decodes_preview_reference () =
+  let sha = String.make 64 'a' in
+  let marker = Printf.sprintf "[masc:blob sha256=%s bytes=4 mime=text/plain preview=%S]" sha "attachment payload" in
+  let wire = `List [`Assoc ["id", `String "sent-image"; "role", `String "user";
+    "content", `String "look"; "ts", `Float 1787650428.;
+    "attachments", `List [`Assoc ["id", `String "image"; "type", `String "image";
+      "name", `String "image-1.png"; "mime_type", `String "image/png"; "data", `String marker]]]] in
+  match History.rows_of_json wire with
+  | Ok { rows = [{ attachments = [note]; _ }]; _ } ->
+      (match note.History.att_image with
+       | Masc_tui_image_preview.Stored_attachment { name; _ } ->
+           Alcotest.(check string) "sent image remains a readable typed reference" "image-1.png" name
+       | _ -> Alcotest.fail "history lost the durable preview reference")
+  | _ -> Alcotest.fail "sent image history failed to decode"
+
+let test_a_sized_row_decodes_its_pixels () =
+  match History.rows_of_json (Yojson.Safe.from_string sized_attachment_row) with
+  | Error msg -> Alcotest.failf "sized row did not decode: %s" msg
+  | Ok decoded ->
+    (match decoded.History.rows with
+     | [ row ] ->
+       (match row.History.attachments with
+        | [ att ] ->
+          Alcotest.(check (option int)) "width" (Some 3456) att.History.att_width;
+          Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height;
+          (match att.History.att_image with
+           | Masc_tui_image_preview.Unavailable_image { name = "shot.png"; _ } -> ()
+           | _ -> Alcotest.fail "hash-only history has no readable payload")
+        | other ->
+          Alcotest.failf "expected one attachment, got %d" (List.length other))
+     | other -> Alcotest.failf "expected one row, got %d" (List.length other))
+;;
+
+(* A fusion conclusion arrives as a direct-conversation assistant row: the
+   conclusion is the [content], and a [t: "fusion"] block names the run and
+   the board post that hold the panel/judge detail. The row the block becomes
+   rides ahead of the conclusion so the transcript says where the text is
+   from. [board_post_id] is required the way the dashboard's normalizer
+   requires it: a fusion block without it points at nothing and makes no
+   row. *)
+let fusion_row ?(run_id = Some "kmsg-fus-1") ?(board_post_id = "p-fus-1")
+    content =
+  `Assoc
+    ([ "id", `String "fusion-1"
+     ; "role", `String "assistant"
+     ; "content", `String content
+     ; "ts", `Float 1.0
+     ]
+    @ [ ( "blocks"
+        , `List
+            [ `Assoc
+                ([ "t", `String "fusion"
+                 ; "board_post_id", `String board_post_id
+                 ]
+                 @ (match run_id with
+                    | None -> []
+                    | Some r -> [ "run_id", `String r ]))
+            ] ) ])
+;;
+
+let test_a_fusion_block_names_the_run_ahead_of_the_conclusion () =
+  match
+    decode
+      (`List
+         [ fusion_row "Fusion deliberation (run kmsg-fus-1) — answer — 결론 본문" ])
+  with
+  | { History.rows = [ pointer; conclusion ]; _ } -> (
+      (match pointer.History.kind with
+       | History.Fusion_conclusion { fusion_run_id; fusion_board_post_id } ->
+           check (option string) "run id" (Some "kmsg-fus-1") fusion_run_id;
+           check string "board post id" "p-fus-1" fusion_board_post_id
+       | _ -> failf "expected a fusion pointer row first") |> ignore;
+      match conclusion.History.kind with
+      | History.Said_by_keeper ->
+          check string "the conclusion stays the row's text"
+            "Fusion deliberation (run kmsg-fus-1) — answer — 결론 본문"
+            conclusion.History.text
+      | _ -> failf "expected the conclusion row second")
+  | { History.rows = other; _ } ->
+      failf "expected two rows, got %d" (List.length other)
+;;
+
+let test_a_fusion_block_without_a_post_id_makes_no_row () =
+  match
+    decode (`List [ fusion_row ~board_post_id:"" "Fusion deliberation — 결론" ])
+  with
+  | { History.rows = [ conclusion ]; _ } -> (
+      match conclusion.History.kind with
+      | History.Said_by_keeper -> ()
+      | _ -> failf "expected only the conclusion row")
+  | { History.rows = other; _ } ->
+      failf "expected one row, got %d" (List.length other)
+;;
+
+let test_operation_and_autonomous_sources_keep_typed_tool_blocks () =
+  let turn = Ids.Turn_ref.make ~trace_id:"collision" ~absolute_turn:7 in
+  let key = Ids.Turn_ref.to_string turn in
+  let operation_id = "collision-7" in
+  let decoded = decode (`List [
+    row ~role:"tool" ~tool_call_name:"Execute" ~execution_id:"op-call"
+      ~delivery_key:(operation_key operation_id)
+      ~transcript_slot:(tool_transcript_slot "op-call" 0) "{}";
+    row ~role:"tool" ~tool_call_name:"Execute" ~execution_id:"turn-call"
+      ~turn_ref:key "{}" ]) in
+  check int "different sources do not coalesce tool rows" 2 (List.length decoded.rows);
+  check bool "operation and autonomous keys survive decoding" true
+    (List.map (fun row -> row.History.execution_source) decoded.rows =
+     [Some (Masc_tui_keeper_chat_log.Operation operation_id);
+      Some (Masc_tui_keeper_chat_log.Autonomous_turn turn)])
+;;
+
+let composition_activation status =
+  let activation = skill_activation ~actions:["Execute"]
+    ~invocation:(`Assoc ["kind", `String "composition";
+      "tool_name", `String "keeper_compose_review"; "execution_id", `String "physical-original"]) () in
+  let execution = `Assoc (["status", `String status] @
+    if status = "unrecorded" then [] else ["execution_id", `String "physical-original"]) in
+  match activation with `Assoc fields -> `Assoc (("execution", execution) :: fields)
+  | _ -> fail "invalid fixture"
+
+let test_composition_execution_and_delivery_remain_separate () =
+  List.iter (fun status ->
+    let decoded = decode (`List [autonomous_turn ~turn_ref:"trace-1#54"
+      ~skill_activations:(skill_projection ~status:"available" [composition_activation status])
+      [tool ~execution_id:"physical-original" ~status:"err" "keeper_compose_review"]]) in
+    let skills = List.concat_map (fun (row : History.row) -> match row.kind with
+      | History.Skill_activity skills -> skills | _ -> []) decoded.History.rows in
+    let skill = List.find (fun (skill : Transcript.skill_activity) -> skill.execution_id = Some "physical-original") skills in
+    check bool "raw wire error survives independent canonical disposition" true skill.call_failed;
+    check bool "delivery and subsequent actions are still true even after failure" true (skill.state = Transcript.Skill_used);
+    check (list string) "subsequent action is preserved without promoting the composition" ["Execute"] skill.actions;
+    let execution = match skill.execution with Some value -> value | None -> fail "execution missing" in
+    check string "independent canonical execution disposition" status
+      Yojson.Safe.Util.(Masc.Keeper_skill_execution_projection.to_yojson execution |> member "status" |> to_string);
+    let raw = List.concat_map (fun (row : History.row) -> match row.kind with
+      | History.Tool_calls block -> block.activities | _ -> []) decoded.rows in
+    check int "only known exact execution replaces its raw call"
+      (if status = "unrecorded" then 1 else 0) (List.length raw))
+    ["completed";"deferred";"failed";"unrecorded"]
+
+let test_composition_never_hides_a_different_execution () =
+  let decoded = decode (`List [autonomous_turn ~turn_ref:"trace-1#54"
+    ~skill_activations:(skill_projection ~status:"available" [composition_activation "failed"])
+    [tool ~execution_id:"physical-other" ~tool_call_id:"skill-use-1" ~status:"ok" "keeper_compose_review"]]) in
+  let raw = List.concat_map (fun (row : History.row) -> match row.kind with
+    | History.Tool_calls block -> block.activities | _ -> []) decoded.History.rows in
+  check (list (option string)) "same provider call ID cannot hide another physical call"
+    [Some "physical-other"] (List.map (fun (tool : Transcript.tool_activity) -> tool.execution_id) raw)
+
+let test_redundant_settled_failure_is_suppressed_after_terminal_request_failure () =
+  let op_key =
+    `Assoc
+      [ "kind", `String "operation"
+      ; "operation_id", `String "kmsg-superseded-1"
+      ]
+  in
+  let wire =
+    `List
+      [ `Assoc
+          [ "id", `String "msg-fail-terminal"
+          ; "role", `String "request_failure"
+          ; "content", `String "Keeper request failed: checkpoint version 13 is superseded by 15"
+          ; "ts", `Float 10.0
+          ; "delivery_key", op_key
+          ; "transcript_slot", `Assoc [ "kind", `String "terminal_result" ]
+          ]
+      ; `Assoc
+          [ "id", `String "msg-fail-settled"
+          ; "role", `String "request_failure"
+          ; "content", `String "Keeper request failed: The operation could not complete."
+          ; "ts", `Float 10.1
+          ; "delivery_key", op_key
+          ; "transcript_slot", `Assoc [ "kind", `String "settled_failure" ]
+          ]
+      ]
+  in
+  let decoded = decode wire in
+  check int "suppressed settled_failure is not counted as dropped" 0 decoded.History.dropped;
+  match decoded.History.rows with
+  | [ row ] ->
+      check string "specific terminal failure text is kept"
+        "Keeper request failed: checkpoint version 13 is superseded by 15"
+        row.History.text
+  | ([] | _ :: _ :: _) as rows ->
+      failf "expected 1 failure row, got %d" (List.length rows)
+
+let test_settled_failure_is_kept_when_no_terminal_request_failure_exists () =
+  let op_key =
+    `Assoc
+      [ "kind", `String "operation"
+      ; "operation_id", `String "kmsg-settled-only-1"
+      ]
+  in
+  let wire =
+    `List
+      [ `Assoc
+          [ "id", `String "msg-assistant-terminal"
+          ; "role", `String "assistant"
+          ; "content", `String "partial reply before settlement failed"
+          ; "ts", `Float 10.0
+          ; "delivery_key", op_key
+          ; "transcript_slot", `Assoc [ "kind", `String "terminal_result" ]
+          ]
+      ; `Assoc
+          [ "id", `String "msg-fail-settled"
+          ; "role", `String "request_failure"
+          ; "content", `String "Keeper request failed: The operation could not complete."
+          ; "ts", `Float 10.1
+          ; "delivery_key", op_key
+          ; "transcript_slot", `Assoc [ "kind", `String "settled_failure" ]
+          ]
+      ]
+  in
+  let decoded = decode wire in
+  check int "nothing dropped" 0 decoded.History.dropped;
+  check int "both assistant terminal row and settled failure row are kept" 2
+    (List.length decoded.History.rows)
+
+let () =
+  run "tui_keeper_chat_history"
+    [ ( "rows"
+      , [ test_case "composition delivery and execution remain independent" `Quick test_composition_execution_and_delivery_remain_separate
+        ; test_case "redundant settled failure is suppressed after terminal request failure" `Quick
+            test_redundant_settled_failure_is_suppressed_after_terminal_request_failure
+        ; test_case "settled failure is kept when no terminal request failure exists" `Quick
+            test_settled_failure_is_kept_when_no_terminal_request_failure_exists
+        ; test_case "composition keeps other physical executions" `Quick test_composition_never_hides_a_different_execution
+        ; test_case "operation and autonomous sources keep typed tool blocks" `Quick
+            test_operation_and_autonomous_sources_keep_typed_tool_blocks
+        ; test_case "roles map to what the pane draws" `Quick
+            test_roles_map_to_what_the_pane_draws
+        ; test_case "a fusion block names the run ahead of the conclusion"
+            `Quick test_a_fusion_block_names_the_run_ahead_of_the_conclusion
+        ; test_case "a fusion block without a post id makes no row" `Quick
+            test_a_fusion_block_without_a_post_id_makes_no_row
+        ; test_case "a gate row carries its approval" `Quick
+            test_a_gate_row_carries_its_approval
+        ; test_case "a gate row carries its call summary" `Quick
+            test_a_gate_row_carries_its_call_summary
+        ; test_case "a lifecycle without an approval id is dropped" `Quick
+            test_a_lifecycle_without_an_approval_id_is_dropped
+        ; test_case "an unknown phase label is a decode error" `Quick
+            test_an_unknown_phase_label_is_a_decode_error
+        ; test_case "a lifecycle that is not an object is dropped" `Quick
+            test_a_lifecycle_that_is_not_an_object_is_dropped
+        ; test_case "a failed turn names the request it came from" `Quick
+            test_a_failed_turn_names_the_request_it_came_from
+        ; test_case "runtime interruption becomes a recovered lifecycle" `Quick
+            test_runtime_interruption_becomes_a_recovered_lifecycle
+        ; test_case "stdout close stays pending without a later reply" `Quick
+            test_stdout_close_stays_pending_without_a_later_reply
+        ; test_case "an unfenced stop is marked recovered by a later reply" `Quick
+            test_an_unfenced_stop_is_marked_recovered_by_a_later_reply
+        ; test_case "local claim refusal is not a runtime interruption" `Quick
+            test_local_claim_refusal_is_not_a_runtime_interruption
+        ; test_case "a carried MASC cause of another kind draws nothing" `Quick
+            test_a_carried_masc_cause_of_another_kind_draws_nothing
+        ; test_case "a fenced agent-core cause draws nothing" `Quick
+            test_a_fenced_core_cause_draws_nothing
+        ; test_case "unrelated failure is not marked recovered" `Quick
+            test_unrelated_failure_is_not_marked_recovered
+        ; test_case "rows carry the operation id only for direct turns" `Quick
+            test_rows_carry_the_operation_id_only_for_direct_turns
+        ; test_case "delivery keys do not invent turn ownership" `Quick
+            test_delivery_keys_do_not_invent_turn_ownership
+        ; test_case "native continuation keeps original operation" `Quick
+            test_native_continuation_rows_keep_the_original_operation
+        ; test_case "rows retain the exact turn identity" `Quick
+            test_rows_retain_the_exact_turn_identity
+        ; test_case "different turns do not merge their tool blocks" `Quick
+            test_consecutive_tools_from_different_turns_do_not_merge
+        ; test_case "autonomous trace rows retain turn_ref" `Quick
+            test_autonomous_trace_rows_keep_the_turn_ref
+        ; test_case "an autonomous turn is identified by its marker" `Quick
+            test_an_autonomous_turn_is_identified_by_its_marker
+        ; test_case "a silent autonomous turn draws no row" `Quick
+            test_a_silent_autonomous_turn_draws_no_row
+        ; test_case "a whitespace autonomous reply is as blank as none" `Quick
+            test_a_whitespace_autonomous_reply_is_as_blank_as_none
+        ; test_case "a direct turn keeps its blank reply" `Quick
+            test_a_direct_turn_keeps_its_blank_reply
+        ; test_case "an addressed row says who sent it" `Quick
+            test_an_addressed_row_says_who_sent_it_not_only_what_to_draw
+        ; test_case "consecutive tool rows become one block" `Quick
+            test_consecutive_tool_rows_become_one_block
+        ; test_case "history keeps producer tool-call identity" `Quick
+            test_history_keeps_producer_tool_call_identity
+        ; test_case "speech splits decoded tool blocks" `Quick
+            test_tool_blocks_separated_by_speech_stay_separate
+        ; test_case "the server's order is kept" `Quick test_server_order_is_kept
+        ; test_case "an autonomous turn draws what it did" `Quick
+            test_an_autonomous_turn_draws_what_it_did
+        ; test_case "exact Skill evidence replaces the raw call" `Quick
+            test_exact_skill_evidence_replaces_the_raw_call_and_names_actions
+        ; test_case "served Skill does not claim delivery" `Quick
+            test_served_skill_without_delivery_does_not_claim_use
+        ; test_case "missing Skill evidence remains visible" `Quick
+            test_missing_skill_evidence_stays_visible_beside_the_raw_call
+        ; test_case "Skill evidence count mismatch keeps raw calls" `Quick
+            test_unmatched_skill_evidence_retains_every_raw_call
+        ; test_case "an unknown invocation kind does not decode" `Quick
+            test_an_unknown_invocation_kind_does_not_decode
+        ; test_case "projection keeps stable row and absolute turn identity"
+            `Quick
+            test_persisted_identity_and_absolute_turn_survive_projection
+        ; test_case "a turn that also spoke keeps the order it ran in" `Quick
+            test_a_turn_that_also_spoke_keeps_the_order_it_ran_in
+        ; test_case "a blank turn with no trace keeps its line" `Quick
+            test_a_blank_turn_with_no_trace_keeps_its_line
+        ; test_case "a direct turn's trace is not drawn twice" `Quick
+            test_a_direct_turn_s_trace_is_not_drawn_twice
+        ; test_case "a null content is the wire's blank" `Quick
+            test_a_null_content_is_the_wire_s_blank
+        ] )
+    ; ( "paging"
+      , [ test_case "a page decodes its rows and cursor" `Quick
+            test_a_page_decodes_its_rows_and_cursor
+        ; test_case "the top of the conversation says so" `Quick
+            test_the_top_of_the_conversation_says_so
+        ; test_case "an incomplete page envelope is refused" `Quick
+            test_an_incomplete_page_is_refused
+        ; test_case "an unreadable page row refuses the cursor" `Quick
+            test_an_unreadable_page_row_preserves_the_cursor
+        ; test_case "tool rows fold in a page too" `Quick
+            test_tool_rows_fold_in_a_page_as_they_do_in_the_transcript
+        ; test_case "a non-object page is an error" `Quick
+            test_a_page_that_is_not_an_object_is_an_error
+        ; test_case "a page without messages is an error" `Quick
+            test_a_page_without_messages_is_an_error
+        ] )
+    ; ( "tolerance"
+      , [ test_case "one unreadable row does not cost the transcript" `Quick
+            test_one_unreadable_row_does_not_cost_the_transcript
+        ; test_case "a non-array payload is an error" `Quick
+            test_a_non_array_payload_is_an_error
+        ; test_case "a sized row decodes its pixels" `Quick
+            test_a_sized_row_decodes_its_pixels
+        ; test_case "a live row keeps its file" `Quick
+            test_live_row_keeps_its_file
+        ; test_case "a row names the file it carries" `Quick
+            test_a_row_names_the_file_it_carries
+        ; test_case "a row without a file says nothing" `Quick
+            test_a_row_without_a_file_says_nothing
+        ; test_case "a missing ts reads as zero" `Quick
+            test_a_missing_ts_reads_as_zero_not_a_failure
+        ] )
+    ; ( "memory journal"
+      , [ test_case "commit names added removed and drop reason" `Quick
+            test_memory_commit_names_added_removed_and_drop_reason
+        ; test_case "failure keeps kind and detail" `Quick
+            test_memory_failure_keeps_kind_and_detail
+        ; test_case "categories group by what they ask" `Quick
+            test_memory_categories_group_by_what_they_ask
+        ; test_case "producer prepend keeps structural identities" `Quick
+            test_memory_identity_survives_a_producer_prepend
+        ; test_case "failed identity includes trace id" `Quick
+            test_failed_memory_identity_includes_trace_id
+        ; test_case "unreadable row keeps server identity" `Quick
+            test_unreadable_memory_identity_is_server_supplied
+        ] )
+      ; ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "stored attachment history decodes preview reference" `Quick test_stored_attachment_history_decodes_preview_reference
+          ] )
+    ]

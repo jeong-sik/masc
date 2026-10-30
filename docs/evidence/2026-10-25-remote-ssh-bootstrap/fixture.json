@@ -1,0 +1,14 @@
+{
+  "container": "masc-ssh-bootstrap-proof-20261025",
+  "container_id": "7c0b77a2fd787f9fae757dcdf6a4bd6d18f26922b1ff8530458a9a61de739f72",
+  "image": "sha256:4912ad8314963342d28a92719a9bddf0d7b161d5bc463959249b96b0c170ee9c",
+  "host": "127.0.0.1",
+  "port": 65479,
+  "fingerprint": "SHA256:MlAet0f4elnlFVGg4/vxQqtfvzMkecAITbrQUI8Z8yo",
+  "out_of_band": "Docker-owned fixture host public key matched against ssh-keyscan",
+  "shim_sha256": "ad79352d398d00eb48eebdf0bc29faacd3b4de633349e377ed81d560dc379183",
+  "shim_source": "preexisting separately identified fixture binary; not source rebuilt",
+  "remote_root": "/srv/masc/bootstrap-ready",
+  "base": "/tmp/mssh-bootstrap-native-20261025/workspace",
+  "shim": "/tmp/mssh-bootstrap-native-20261025/preexisting-shim-linux-arm64"
+}

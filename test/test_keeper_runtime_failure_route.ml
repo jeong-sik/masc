@@ -1,0 +1,1011 @@
+(** Mapping tests for [Keeper_runtime_failure_route].
+
+    Totality over [Agent_core.Error.t] is compiler-enforced (the
+    route function has no catch-all); these tests pin the mapping opinion
+    per class and the typed retry_after extraction so a refactor cannot
+    silently move a class between routes. *)
+
+module KFR = Keeper_runtime_failure_route
+
+let route_of_agent_core_error = KFR.route_of_error ~boundary:KFR.Agent_core_execution
+let route_of_masc_error = KFR.route_of_error ~boundary:KFR.Masc_execution
+
+let route = Alcotest.testable (fun fmt r -> Format.pp_print_string fmt (KFR.route_kind_label r ^ ":" ^ KFR.route_class_label r)) ( = )
+
+let check_route name expected err =
+  Alcotest.check route name expected (route_of_agent_core_error err)
+
+let check_masc_route name expected err =
+  Alcotest.check route name expected (route_of_masc_error err)
+
+let internal_err masc_internal =
+  Keeper_internal_error.core_error_of_masc_internal_error masc_internal
+
+let test_api_rate_limited_threads_hint () =
+  check_route
+    "soft 429 preserves provider retry-after"
+    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 30.0 })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.RateLimited
+          { retry_after = Some 30.0; message = "slow down" }))
+
+let test_api_quota_message_does_not_override_rate_limit () =
+  let err =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.RateLimited
+         { retry_after = None; message = "You have exceeded your current quota." })
+  in
+  check_route
+    "rate-limit prose cannot invent hard quota"
+    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None })
+    err;
+  check_route
+    "PaymentRequired is the typed API hard-quota signal"
+    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.PaymentRequired { message = "billing required" }))
+
+let test_api_overloaded_is_provider_capacity () =
+  check_route
+    "a 529 overload is the provider's capacity, not MASC's (#38061)"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Provider_capacity; retry_after = None })
+    (Agent_core.Error.Api (Llm_provider.Retry.Overloaded { message = "overloaded" }))
+
+let test_api_server_error_uses_typed_variant () =
+  check_route
+    "ServerError does not reinterpret status codes"
+    (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.ServerError { status = 524; message = "timeout" }));
+  check_route
+    "typed ServerError remains a server error for an unusual status"
+    (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.ServerError { status = 418; message = "teapot" }))
+
+let test_api_auth_rotates_invalid_request_judges () =
+  check_route
+    "auth error rotates (credentials differ per runtime)"
+    (KFR.Rotate_now { rotate = KFR.Auth_failed })
+    (Agent_core.Error.Api (Llm_provider.Retry.AuthError { message = "401" }));
+  check_route
+    "a 403 refuses the account, a class of its own apart from a 401"
+    (KFR.Rotate_now { rotate = KFR.Authorization_refused })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.AuthorizationError { message = "403" }));
+  check_route
+    "provider authorization error is the same account refusal"
+    (KFR.Rotate_now { rotate = KFR.Authorization_refused })
+    (Agent_core.Error.Provider
+       (Llm_provider.Error.AuthorizationError
+          { provider = "provider"; detail = "403" }));
+  match
+    route_of_agent_core_error
+      (Agent_core.Error.Api
+         (Llm_provider.Retry.InvalidRequest
+            { message = "bad body"
+            ; reason = Llm_provider.Retry.Json_parse_error
+            }))
+  with
+  | KFR.Rotate_now { rotate = KFR.Admission } -> ()
+  | other ->
+    Alcotest.failf "an unparsed request is an admission refusal and rotates, got %s"
+      (KFR.route_kind_label other)
+
+(* #33057: the driver already moves a lane to its next candidate when masc's
+   own pre-wire policy refuses the attempt, but the route labelled that
+   failure a deterministic terminal one. The label now says rotate. A
+   provider's own refusal of the body rotates too, because the walk moves on
+   it (#37631). RFC-one-slot-fault-judgment-for-every-walk.md §3.2 absorbs
+   [Json_parse_error] and [InputCapacity]
+   into [Admission], so a JSON parse failure rotates as well — the walk
+   predicate now moves the lane on it, and the route names that rotation. *)
+let test_api_attempt_rejected_routes_as_rotation () =
+  (* [Attempt_rejected] is [Binding Admission] in the [Candidate_fault]
+     judgment (a pre-dispatch refusal another binding may accept), so the
+     route through [Candidate_fault] names it [Admission]. The walk predicate
+     [attempt_rejected_should_try_next] rotates on [Admission] — the route
+     and the walk agree. *)
+  check_route
+    "pre-wire policy refusal rotates as admission"
+    (KFR.Rotate_now { rotate = KFR.Admission })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.InvalidRequest
+          { message = "reasoning effort 'xhigh' is outside the ladder for this model"
+          ; reason = Llm_provider.Retry.Attempt_rejected
+          }));
+  List.iter
+    (fun (label, reason) ->
+      check_route
+        (label ^ " rotates as an admission refusal")
+        (KFR.Rotate_now { rotate = KFR.Admission })
+        (Agent_core.Error.Api
+           (Llm_provider.Retry.InvalidRequest { message = label; reason })))
+    [ "json parse error", Llm_provider.Retry.Json_parse_error ];
+  List.iter
+    (fun (label, reason) ->
+      check_route
+        (label ^ " rotates to the next candidate")
+        (KFR.Rotate_now { rotate = KFR.Request_refused })
+        (Agent_core.Error.Api
+           (Llm_provider.Retry.InvalidRequest { message = label; reason })))
+    [ "unknown 400", Llm_provider.Retry.Unknown_invalid_request
+    ; ( "413"
+      , Llm_provider.Retry.Request_body_refused_by_provider { status = 413 } )
+    ]
+
+let test_api_input_capacity_is_terminal_judgment () =
+  let constraint_ =
+    Llm_provider.Serving_constraint.make
+      ~source_kind:Llm_provider.Serving_constraint.Probe
+      ~source_ref:"probe://incident/2793"
+      ~checked_at_unix_s:0
+      ~confidence:Llm_provider.Serving_constraint.High
+      ~expires_at_unix_s:200
+      ~accepted_through:524298
+      ~rejected_from:524299
+      ()
+    |> Result.get_ok
+  in
+  let error reason =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InputCapacity
+         { message = "typed capacity"; constraint_; reason })
+  in
+  check_route
+    "accepted bound rotates as an admission refusal"
+    (KFR.Rotate_now { rotate = KFR.Admission })
+    (error
+       (Llm_provider.Retry.Serving_constraint_rejected
+          (Llm_provider.Serving_constraint.Input_rejected
+             { input_tokens = 524299
+             ; accepted_through = 524298
+             ; rejected_from = 524299
+             })));
+  let measurement_unavailable =
+    error
+      (Llm_provider.Retry.Token_measurement_unavailable
+         Llm_provider.Input_token_count.Anthropic_messages_count_tokens)
+  in
+  check_route
+    "measurement-unavailable rotates as an admission refusal"
+    (KFR.Rotate_now { rotate = KFR.Admission })
+    measurement_unavailable
+
+let test_provider_quota_family_threads_hint () =
+  check_route
+    "provider HardQuota preserves retry-after"
+    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 3600.0 })
+    (Agent_core.Error.Provider
+       (Llm_provider.Error.HardQuota
+          { provider = "glm"; retry_after = Some 3600.0; detail = "balance 0" }));
+  (* [keeper_runtime_attempt] folds RateLimit and HardQuota into one transport
+     value for the walk. The route reads the provider error before that fold,
+     so a rate limit stays this candidate's backpressure and never becomes
+     the whole scope's quota window. *)
+  check_route
+    "provider RateLimit stays the candidate's rate limit"
+    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 30.0 })
+    (Agent_core.Error.Provider
+       (Llm_provider.Error.RateLimit
+          { provider = "codex"; retry_after = Some 30.0; detail = "slow down" }));
+  check_route
+    "provider CapacityExhausted is the provider's capacity"
+    (KFR.Retry_after_observed
+       { retry_class = KFR.Provider_capacity; retry_after = None })
+    (Agent_core.Error.Provider
+       (Llm_provider.Error.CapacityExhausted
+          { scope = Llm_provider.Error.CapacityUnknown
+          ; affected = []
+          ; retry_after = None
+          ; detail = "pool saturated"
+          }))
+
+let empty_completion stop_reason = KFR.Empty_completion { stop_reason }
+
+let empty_completion_error stop_reason =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.EmptyCompletion
+       { provider = "openrouter"
+       ; stop_reason
+       ; detail = "empty assistant turn"
+       })
+;;
+
+let test_empty_completion_keeps_answer_observation () =
+  List.iter
+    (fun stop_reason ->
+       let error = empty_completion_error stop_reason in
+       let route = route_of_agent_core_error error in
+       check_route
+         "typed empty completion keeps its stop reason"
+         (KFR.Retry_after_observed
+            { retry_class = empty_completion stop_reason; retry_after = None })
+         error;
+       Alcotest.(check bool)
+         "the provider completed the request, so the input was observed"
+         true
+         (KFR.response_observed route);
+       Alcotest.(check string)
+         "the low-cardinality class label keeps the typed reason"
+         ("empty_completion_"
+          ^ Llm_provider.Types.stop_reason_to_metric_label stop_reason)
+         (KFR.route_class_label route))
+    [ Agent_core.Types.EndTurn
+    ; Agent_core.Types.StopToolUse
+    ; Agent_core.Types.MaxTokens
+    ; Agent_core.Types.StopSequence
+    ; Agent_core.Types.Refusal
+    ; Agent_core.Types.ContentFilter
+    ; Agent_core.Types.RepetitionTruncation
+    ; Agent_core.Types.PauseTurn
+    ; Agent_core.Types.Compaction
+    ; Agent_core.Types.UnmatchedToolCalls
+    ]
+;;
+
+let test_unmodeled_empty_completion_is_visible_terminal () =
+  let error = empty_completion_error (Agent_core.Types.Unknown "future_provider_reason") in
+  let route = route_of_agent_core_error error in
+  check_route "unknown response contract stops without blaming the request"
+    (KFR.Exhausted_visible_alive {terminal=KFR.Unmodeled_empty_completion}) error;
+  Alcotest.(check bool) "wire arrival does not prove input observation" false (KFR.response_observed route);
+  Alcotest.(check bool) "same-path recovery is not inferred" false (KFR.route_resumes_on_same_path route);
+  check_route "known overflow remains a context fact"
+    (KFR.Rotate_now {rotate=KFR.Context_window_exceeded})
+    (empty_completion_error Agent_core.Types.ContextWindowExceeded)
+;;
+
+let test_provider_config_judges () =
+  match
+    route_of_agent_core_error
+      (Agent_core.Error.Provider
+         (Llm_provider.Error.MissingApiKey { var_name = "GLM_API_KEY" }))
+  with
+  | KFR.Exhausted_visible_alive { terminal = KFR.Config_mismatch } -> ()
+  | other ->
+    Alcotest.failf "missing api key should exhaust config, got %s"
+      (KFR.route_kind_label other)
+
+
+(* RFC last-path-resumes-after-progress §4: the stream ended before the
+   completion contract's stop. The provider took the request and the bytes
+   that would have said why never came, so the failure passes with time, as a
+   dropped transport does. The other wire kinds are defects in what did
+   arrive: the same path sends them again, so they rotate rather than wait. *)
+let test_wire_error_kinds_split_on_what_arrived () =
+  let wire kind =
+    route_of_agent_core_error
+      (Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderWireError
+            { provider = "openrouter"
+            ; format = Llm_provider.Http_client.Sse
+            ; kind
+            ; detail = "stream_terminated_without_stop_reason"
+            }))
+  in
+  (match wire Llm_provider.Http_client.Incomplete_stream with
+   | KFR.Retry_after_observed { retry_class = KFR.Network_transient; retry_after = None } -> ()
+   | other ->
+     Alcotest.failf "an incomplete stream should observe a transient failure, got %s:%s"
+       (KFR.route_kind_label other) (KFR.route_class_label other));
+  List.iter
+    (fun kind ->
+       match wire kind with
+       | KFR.Rotate_now { rotate = KFR.Provider_wire_defect } -> ()
+       | other ->
+         Alcotest.failf "%s should rotate as a wire defect, got %s:%s"
+           (Llm_provider.Http_client.provider_wire_error_kind_to_string kind)
+           (KFR.route_kind_label other) (KFR.route_class_label other))
+    [ Llm_provider.Http_client.Malformed_payload
+    ; Llm_provider.Http_client.Unknown_event
+    ; Llm_provider.Http_client.Oversized_payload
+    ]
+
+(* A generation the provider ended without saying why reads as the provider
+   failing to serve the call, the same class its documented shape carries when
+   the provider does attach its object. *)
+let test_an_interrupted_generation_observes_a_server_failure () =
+  match
+    Llm_provider.Error.of_http_error
+      ~provider:"openrouter"
+      (Llm_provider.Http_client.ProviderFailure
+         { kind = Llm_provider.Http_client.Provider_interrupted
+         ; message =
+             "SSE stream error: the provider ended the choice with finish_reason error"
+         })
+  with
+  | Llm_provider.Error.ProviderUnavailable _ as provider_error ->
+    (match route_of_agent_core_error (Agent_core.Error.Provider provider_error) with
+     | KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } -> ()
+     | other ->
+       Alcotest.failf "an interrupted generation should observe a server failure, got %s:%s"
+         (KFR.route_kind_label other) (KFR.route_class_label other))
+  | other ->
+    Alcotest.failf "an interruption should read as the provider failing, got %s"
+      (Llm_provider.Error.to_string other)
+
+let test_provider_wire_error_rotates () =
+  match
+    route_of_agent_core_error
+      (Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderWireError
+            { provider = "glm"
+            ; format = Llm_provider.Http_client.Sse
+            ; kind = Llm_provider.Http_client.Malformed_payload
+            ; detail = "malformed JSON"
+            }))
+  with
+  | KFR.Rotate_now { rotate = KFR.Provider_wire_defect } -> ()
+  | other ->
+    Alcotest.failf "provider wire error should rotate, got %s"
+      (KFR.route_kind_label other)
+
+(* A 5xx the provider marked as permanent: the walk rotates on every 5xx, so
+   the route says rotate. A non-transient code outside the 5xx class is not a
+   server failure and stays a provider integration defect. *)
+let test_non_transient_server_error_rotates_on_5xx () =
+  let server code =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ServerError
+         { provider = "p"; code; transient = false; detail = "fatal" })
+  in
+  check_route
+    "non-transient 500 rotates"
+    (KFR.Rotate_now { rotate = KFR.Server_error_not_transient })
+    (server 500);
+  match route_of_agent_core_error (server 418) with
+  | KFR.Exhausted_visible_alive { terminal = KFR.Provider_integration } -> ()
+  | other ->
+    Alcotest.failf "a non-5xx server error should exhaust, got %s:%s"
+      (KFR.route_kind_label other) (KFR.route_class_label other)
+
+let test_masc_internal_terminal_classes () =
+  (match
+     route_of_masc_error
+       (internal_err
+          (Keeper_internal_error.Internal_contract_rejected { reason = "empty" }))
+   with
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque } -> ()
+   | other ->
+     Alcotest.failf "internal contract rejection should remain opaque, got %s"
+       (KFR.route_kind_label other));
+  check_masc_route
+    "session conflict rotates"
+    (KFR.Rotate_now { rotate = KFR.Runtime_exhausted })
+    (internal_err
+       (Keeper_internal_error.Runtime_exhausted
+          { runtime_id = "r"; reason = Keeper_internal_error.Session_conflict }))
+
+let test_non_provider_families_judge () =
+  let raw_internal = Agent_core.Error.Internal "boom" in
+  (match route_of_agent_core_error raw_internal with
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque } -> ()
+   | other ->
+     Alcotest.failf "raw Internal should exhaust, got %s" (KFR.route_kind_label other));
+  (match route_of_masc_error raw_internal with
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque } -> ()
+   | other ->
+     Alcotest.failf
+       "MASC-produced raw Internal should exhaust, got %s"
+       (KFR.route_kind_label other));
+  match
+    route_of_agent_core_error
+      (Agent_core.Error.Mcp (Agent_core.Error.InitializeFailed { detail = "handshake" }))
+  with
+  | KFR.Exhausted_visible_alive { terminal = KFR.Protocol_error } -> ()
+  | other ->
+    Alcotest.failf "mcp error should exhaust protocol, got %s"
+      (KFR.route_kind_label other)
+
+(* #38456: the admission check refuses a broken history before provider
+   dispatch. That turn carried nothing to the model, so a Gate continuation
+   riding it must not be settled as answered. *)
+let test_transcript_refusal_is_not_an_answer () =
+  let refused reason tool_use_ids =
+    internal_err
+      (Keeper_internal_error.Incomplete_tool_transcript
+         { reason; detail = "refused before dispatch"; tool_use_ids })
+  in
+  List.iter
+    (fun (label, error) ->
+       match route_of_masc_error error with
+       | KFR.Exhausted_visible_alive { terminal = KFR.Transcript_refused } as route ->
+         Alcotest.(check string) (label ^ ": own route label") "transcript_refused"
+           (KFR.route_class_label route);
+         Alcotest.(check bool) (label ^ ": no provider answer") false
+           (KFR.response_observed route)
+       | other ->
+         Alcotest.failf "%s: a refused transcript routed to %s:%s" label
+           (KFR.route_kind_label other) (KFR.route_class_label other))
+    [ "unresolved tool results", refused Keeper_internal_error.Unresolved_tool_results [ "t1" ]
+    ; "structurally invalid", refused Keeper_internal_error.Structurally_invalid []
+    ]
+
+(* #32956: the heartbeat settles a Gate continuation on a failed turn only
+   when the provider answered the request. Every class is named on one side
+   so a new class has to be placed. *)
+let test_response_observed_per_class () =
+  let retry retry_class =
+    KFR.Retry_after_observed { retry_class; retry_after = None }
+  in
+  let rotate rotate = KFR.Rotate_now { rotate } in
+  let terminal terminal =
+    KFR.Exhausted_visible_alive { terminal }
+  in
+  let check_observed expected route =
+    Alcotest.(check bool)
+      (KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route)
+      expected
+      (KFR.response_observed route)
+  in
+  List.iter
+    (check_observed false)
+    [ retry KFR.Rate_limited
+    ; retry KFR.Hard_quota
+    ; retry KFR.Provider_capacity
+    ; retry KFR.Server_error
+    ; retry KFR.Network_transient
+    ; retry KFR.Provider_timeout
+    ; rotate KFR.Auth_failed
+    ; rotate KFR.Authorization_refused
+    ; rotate KFR.Model_unavailable
+    ; rotate KFR.Resumable_cli_session
+    ; rotate KFR.Candidates_filtered
+    ; rotate KFR.Admission
+    ; rotate KFR.Refusal_body_not_received
+    ; rotate KFR.Runtime_exhausted
+    ; rotate KFR.Request_refused
+    ; rotate KFR.Provider_wire_defect
+    ; rotate KFR.Server_error_not_transient
+    ; rotate KFR.Context_window_exceeded
+    ; terminal KFR.Deterministic_request
+    ; terminal KFR.Session_claim_refused
+    ; terminal KFR.Transcript_refused
+    ; terminal KFR.Protocol_error
+    ; terminal KFR.Config_mismatch
+    ; terminal KFR.Provider_integration
+    ; terminal KFR.Internal_opaque
+    ; terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable)
+    ; terminal (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable)
+    ];
+  List.iter
+    (check_observed true)
+    [ retry (empty_completion Agent_core.Types.EndTurn)
+    ; rotate KFR.No_progress_empty
+    ; rotate KFR.No_progress_thinking_only
+    ; rotate KFR.No_progress_truncated
+    ; terminal KFR.Contract_violation
+    ; terminal KFR.Terminal_effect_dependency_unavailable
+    ; terminal KFR.Terminal_effect_policy_rejection
+    ; terminal KFR.Terminal_effect_runtime_failure
+    ; terminal KFR.Terminal_effect_workflow_rejection
+    ; terminal KFR.Terminal_effect_operator_cancelled
+    ; terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted)
+    ; terminal (KFR.Tool_correction_lost KFR.Fenced_effect_attempted)
+    ]
+
+(* Through production routing: the MaxTokens accept rejection the #32956
+   turns ended on is an observed answer; a provider timeout is not. *)
+let test_response_observed_through_route_of_error () =
+  let truncated =
+    internal_err
+      (Keeper_internal_error.Accept_rejected
+         { scope = "ollama_cloud.deepseek-v4-flash-0731"
+         ; model = Some "deepseek-v4-flash-0731"
+         ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+         ; response_shape = None
+         ; stop_reason = Some Agent_core.Types.MaxTokens
+         ; reason = "response rejected by accept"
+         })
+  in
+  Alcotest.(check bool)
+    "a MaxTokens accept rejection is an observed answer"
+    true
+    (KFR.response_observed (route_of_masc_error truncated));
+  Alcotest.(check bool)
+    "a provider timeout is not"
+    false
+    (KFR.response_observed
+       (route_of_agent_core_error
+          (Agent_core.Error.Api
+             (Llm_provider.Retry.Timeout { message = "deadline"; phase = None }))))
+
+(* The two effect fences carry what the lane had observed. The codex lane
+   fences with [Observation_unavailable] when the turn input could not be
+   written ([Keeper_codex_runtime] Turn_input_write_failed) and the
+   claude-code lane sets it when the prompt is sent ([on_prompt_sent]), so a
+   post-dispatch failure before any answer arrives the same way: no answer is
+   on record. A fence after a tool handler was entered is an answer. *)
+let test_response_observed_fences_follow_the_disposition () =
+  let fenced effect_disposition ~runtime_id ~diagnostic =
+    internal_err
+      (Keeper_internal_error.Provider_attempt_effect_fenced
+         { runtime_id
+         ; effect_disposition
+         ; cause =
+             Keeper_internal_error.Fenced_core
+               (Keeper_request_failure_core.of_core_error
+                  (Agent_core.Error.Internal diagnostic))
+         })
+  in
+  let lost effect_disposition ~runtime_id =
+    internal_err
+      (Keeper_internal_error.Tool_correction_lost
+         { runtime_id
+         ; effect_disposition
+         ; reject_count = 2
+         ; cause =
+             Keeper_internal_error.Fenced_core
+               (Keeper_request_failure_core.of_core_error
+                  (Agent_core.Error.Internal
+                     "turn died after two corrective tool rejections"))
+         })
+  in
+  let observed label err =
+    Alcotest.(check bool) label true (KFR.response_observed (route_of_masc_error err))
+  in
+  let unobserved label err =
+    Alcotest.(check bool) label false (KFR.response_observed (route_of_masc_error err))
+  in
+  unobserved
+    "codex: the turn input could not be written, so no answer exists"
+    (fenced
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"codex_app_server.gpt-5.5"
+       ~diagnostic:"Turn_input_write_failed");
+  unobserved
+    "claude-code: the process was spawned and failed before any answer"
+    (fenced
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"claude_code.opus"
+       ~diagnostic:"Process_exited before a turn result");
+  unobserved
+    "a lost correction with no observation is not an answer either"
+    (lost
+       Keeper_provider_attempt_effect_core.Observation_unavailable
+       ~runtime_id:"codex_app_server.gpt-5.5");
+  observed
+    "a fence after a tool handler was entered is an answer"
+    (fenced
+       Keeper_provider_attempt_effect_core.Effect_attempted
+       ~runtime_id:"antigravity_subscription.gemini-3-6-flash-high"
+       ~diagnostic:"stream closed after a tool effect");
+  observed
+    "a lost correction after a tool handler was entered is an answer"
+    (lost
+       Keeper_provider_attempt_effect_core.Effect_attempted
+       ~runtime_id:"antigravity_subscription.gemini-3-6-flash-high");
+  Alcotest.(check string)
+    "the unavailable observation keeps its own label"
+    "provider_attempt_effect_fenced_observation_unavailable"
+    (KFR.route_class_label
+       (route_of_masc_error
+          (fenced
+             Keeper_provider_attempt_effect_core.Observation_unavailable
+             ~runtime_id:"codex_app_server.gpt-5.5"
+             ~diagnostic:"Turn_input_write_failed")))
+
+
+(* RFC last-path-resumes-after-progress §3.3: which failures pass with time on
+   the path that answered them. A quota resumes only with a reset it named. *)
+let test_route_resumes_on_same_path_per_class () =
+  let retry ?retry_after retry_class =
+    KFR.Retry_after_observed { retry_class; retry_after }
+  in
+  let rotate rotate = KFR.Rotate_now { rotate } in
+  let terminal terminal =
+    KFR.Exhausted_visible_alive { terminal }
+  in
+  let check_resumes expected (label, route) =
+    Alcotest.(check bool)
+      (label ^ " " ^ KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route)
+      expected
+      (KFR.route_resumes_on_same_path route)
+  in
+  List.iter
+    (check_resumes true)
+    [ "", retry KFR.Rate_limited
+    ; "with a hint", retry ~retry_after:30.0 KFR.Rate_limited
+    ; "", retry KFR.Provider_capacity
+    ; "end turn", retry (empty_completion Agent_core.Types.EndTurn)
+    ; "max tokens", retry (empty_completion Agent_core.Types.MaxTokens)
+    ; "stop sequence", retry (empty_completion Agent_core.Types.StopSequence)
+    ; "", retry KFR.Server_error
+    ; "", retry KFR.Network_transient
+    ; "", retry KFR.Provider_timeout
+    ; "with a reset", retry ~retry_after:3600.0 KFR.Hard_quota
+    ];
+  List.iter
+    (check_resumes false)
+    [ "without a reset", retry KFR.Hard_quota
+    ; "refusal", retry (empty_completion Agent_core.Types.Refusal)
+    ; "content filter", retry (empty_completion Agent_core.Types.ContentFilter)
+    ; ( "repetition truncation"
+      , retry (empty_completion Agent_core.Types.RepetitionTruncation) )
+    ; "tool use", retry (empty_completion Agent_core.Types.StopToolUse)
+    ; "pause turn", retry (empty_completion Agent_core.Types.PauseTurn)
+    ; "compaction", retry (empty_completion Agent_core.Types.Compaction)
+    ; ( "context window exceeded"
+      , retry (empty_completion Agent_core.Types.ContextWindowExceeded) )
+    ; "unmatched tool calls", retry (empty_completion Agent_core.Types.UnmatchedToolCalls)
+    ; ( "unknown"
+      , retry (empty_completion (Agent_core.Types.Unknown "future_provider_reason")) )
+    ; "with a zero reset", retry ~retry_after:0.0 KFR.Hard_quota
+    ; "with a negative reset", retry ~retry_after:(-5.0) KFR.Hard_quota
+    ; "with a NaN reset", retry ~retry_after:Float.nan KFR.Hard_quota
+    ; "", rotate KFR.Auth_failed
+    ; "", rotate KFR.Authorization_refused
+    ; "", rotate KFR.Model_unavailable
+    ; "", rotate KFR.Resumable_cli_session
+    ; "", rotate KFR.Candidates_filtered
+    ; "", rotate KFR.Runtime_exhausted
+    ; "", rotate KFR.No_progress_empty
+    ; "", rotate KFR.No_progress_thinking_only
+    ; "", rotate KFR.No_progress_truncated
+    ; "", rotate KFR.Refusal_body_not_received
+    ; "", rotate KFR.Admission
+    ; "", rotate KFR.Provider_reported_failure
+    ; "", rotate KFR.Request_refused
+    ; "", rotate KFR.Provider_wire_defect
+    ; "", rotate KFR.Server_error_not_transient
+    ; "", rotate KFR.Context_window_exceeded
+    ; "", terminal KFR.Deterministic_request
+    ; "", terminal KFR.Session_claim_refused
+    ; "", terminal KFR.Transcript_refused
+    ; "", terminal KFR.Contract_violation
+    ; "", terminal KFR.Protocol_error
+    ; "", terminal KFR.Config_mismatch
+    ; "", terminal KFR.Provider_integration
+    ; "", terminal KFR.Terminal_effect_dependency_unavailable
+    ; "", terminal KFR.Terminal_effect_policy_rejection
+    ; "", terminal KFR.Terminal_effect_runtime_failure
+    ; "", terminal KFR.Terminal_effect_workflow_rejection
+    ; "", terminal KFR.Terminal_effect_operator_cancelled
+    ; "", terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted)
+    ; "", terminal (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable)
+    ; "", terminal (KFR.Tool_correction_lost KFR.Fenced_effect_attempted)
+    ; "", terminal (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable)
+    ; "", terminal KFR.Internal_opaque
+    ]
+
+(* RFC-one-slot-fault-judgment-for-every-walk.md §4 step 4: the route's
+   Api-error classes derive from the closed [Candidate_fault] judgment, and
+   the Keeper walk predicates read the same judgment. This test calls both on
+   one fixture per [Retry.api_error] constructor, so a change on either side
+   shows up here instead of in a second hand-typed table. The walk side is the
+   lane's own decision, [Keeper_turn_driver.lane_should_retry] with every
+   gate open (not the last candidate, retry allowed): every predicate in its
+   chain plus the HTTP fallback, so a predicate added to the chain is compared
+   without editing this test.
+   - [Rotate_now] must meet a walk that advances;
+   - [Exhausted_visible_alive] must meet a walk that stops;
+   - [Retry_after_observed] is exempt: the route reports a wait hint, and
+     whether the walk rests on the same candidate or rotates is decided by
+     [Runtime_attempt_fsm.should_try_next], not by the route.
+   No row may disagree. The last one, a typed [ContextOverflow]
+   ([Binding Window]) that advanced the walk while the route stayed terminal,
+   closed with #38984, so the expected list is [[]] and any disagreement fails. Each row also pins its route class so a class
+   cannot move silently. A new [Retry.api_error] constructor stops
+   [Candidate_fault.of_api_error] from compiling, which is where this table
+   has to grow. *)
+let test_candidate_fault_route_agreement () =
+  let walk_advances api =
+    Masc.Keeper_turn_driver.For_testing.lane_should_retry
+      ~is_last:false
+      ~allow_retry:true
+      ~allow_accept_no_progress_retry:true
+      (Agent_core.Error.Api api)
+  in
+  let label_of route = KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route in
+  let retry ?retry_after retry_class =
+    KFR.Retry_after_observed { retry_class; retry_after }
+  in
+  let rotate rotate = KFR.Rotate_now { rotate } in
+  let invalid_request reason = Llm_provider.Retry.InvalidRequest { message = "refused"; reason } in
+  let input_capacity =
+    Llm_provider.Retry.InputCapacity
+      { message = "too large"
+      ; constraint_ =
+          Llm_provider.Serving_constraint.make
+            ~source_kind:Llm_provider.Serving_constraint.Probe
+            ~source_ref:"probe://test"
+            ~checked_at_unix_s:0
+            ~confidence:Llm_provider.Serving_constraint.High
+            ~expires_at_unix_s:200
+            ~accepted_through:100
+            ~rejected_from:101
+            ()
+          |> Result.get_ok
+      ; reason =
+          Llm_provider.Retry.Serving_constraint_rejected
+            (Llm_provider.Serving_constraint.Input_rejected
+               { input_tokens = 101; accepted_through = 100; rejected_from = 101 })
+      }
+  in
+  let rows =
+    [ "AuthError", Llm_provider.Retry.AuthError { message = "401" }, rotate KFR.Auth_failed
+    ; ( "AuthorizationError"
+      , Llm_provider.Retry.AuthorizationError { message = "403" }
+      , rotate KFR.Authorization_refused )
+    ; ( "PaymentRequired"
+      , Llm_provider.Retry.PaymentRequired { message = "402" }
+      , retry KFR.Hard_quota )
+    ; "NotFound", Llm_provider.Retry.NotFound { message = "404" }, rotate KFR.Model_unavailable
+    ; ( "RateLimited with hint"
+      , Llm_provider.Retry.RateLimited { retry_after = Some 30.0; message = "slow down" }
+      , retry ~retry_after:30.0 KFR.Rate_limited )
+    ; ( "RateLimited without hint"
+      , Llm_provider.Retry.RateLimited { retry_after = None; message = "slow down" }
+      , retry KFR.Rate_limited )
+    ; ( "Overloaded"
+      , Llm_provider.Retry.Overloaded { message = "529" }
+      , retry KFR.Provider_capacity )
+    ; ( "ServerError"
+      , Llm_provider.Retry.ServerError { status = 500; message = "5xx" }
+      , retry KFR.Server_error )
+    ; ( "ContextOverflow"
+      , Llm_provider.Retry.ContextOverflow { message = "too large"; limit = None }
+      , rotate KFR.Context_window_exceeded )
+    ; ( "Request_body_refused_by_provider"
+      , invalid_request
+          (Llm_provider.Retry.Request_body_refused_by_provider { status = 413 })
+      , rotate KFR.Request_refused )
+    ; ( "Json_parse_error"
+      , invalid_request Llm_provider.Retry.Json_parse_error
+      , rotate KFR.Admission )
+    ; "InputCapacity", input_capacity, rotate KFR.Admission
+    ; ( "Attempt_rejected"
+      , invalid_request Llm_provider.Retry.Attempt_rejected
+      , rotate KFR.Admission )
+    ; ( "Refusal_body_not_received"
+      , invalid_request Llm_provider.Retry.Refusal_body_not_received
+      , rotate KFR.Refusal_body_not_received )
+    ; ( "Unknown_invalid_request"
+      , invalid_request Llm_provider.Retry.Unknown_invalid_request
+      , rotate KFR.Request_refused )
+    ; ( "Timeout"
+      , Llm_provider.Retry.Timeout { message = "deadline"; phase = None }
+      , retry KFR.Provider_timeout )
+    ; ( "NetworkError"
+      , Llm_provider.Retry.NetworkError
+          { message = "connection reset"; kind = Llm_provider.Http_client.Connection_reset }
+      , retry KFR.Network_transient )
+    ]
+  in
+  let disagreements =
+    List.filter_map
+      (fun (label, api, expected) ->
+         let actual = route_of_agent_core_error (Agent_core.Error.Api api) in
+         (* Kind and class only: [detail] is display-only and carries the raw
+            error string, which the test does not pin. *)
+         Alcotest.(check string) (label ^ " route class") (label_of expected) (label_of actual);
+         let agrees =
+           match actual with
+           | KFR.Retry_after_observed _ -> true
+           | KFR.Rotate_now _ -> walk_advances api
+           | KFR.Exhausted_visible_alive _ -> not (walk_advances api)
+         in
+         if agrees then None else Some label)
+      rows
+  in
+  Alcotest.(check (list string))
+    "route and walk agree on every row"
+    []
+    disagreements
+
+(* The route must factor through [Candidate_fault]: [route_of_api_error]
+   is [class_of_fault (Candidate_fault.of_api_error api)] for some function
+   [class_of_fault], with only the wait hint read off the raw constructor.
+   So two errors with the same judgment must get the same route kind and
+   class. If they do not, the route is reading a second table next to
+   [Candidate_fault], and the walk, which reads only the judgment, cannot
+   see that split (#38975: a 401 and a 403 were both [Binding Credential],
+   while the route told them apart from the raw constructor; task-1773).
+   [fault_key] is wildcard-free, so a new judgment has to be named here. *)
+let test_route_factors_through_candidate_fault () =
+  let fault_key (fault : Llm_provider.Candidate_fault.t) =
+    match fault with
+    | Llm_provider.Candidate_fault.Binding b ->
+      "binding:"
+      ^ (match b with
+         | Llm_provider.Candidate_fault.Credential -> "credential"
+         | Llm_provider.Candidate_fault.Account_access -> "account_access"
+         | Llm_provider.Candidate_fault.Account -> "account"
+         | Llm_provider.Candidate_fault.Model_absent -> "model_absent"
+         | Llm_provider.Candidate_fault.Rate_limit -> "rate_limit"
+         | Llm_provider.Candidate_fault.Capacity -> "capacity"
+         | Llm_provider.Candidate_fault.Server -> "server"
+         | Llm_provider.Candidate_fault.Window -> "window"
+         | Llm_provider.Candidate_fault.Body_limit -> "body_limit"
+         | Llm_provider.Candidate_fault.Admission -> "admission"
+         | Llm_provider.Candidate_fault.Deadline -> "deadline"
+         | Llm_provider.Candidate_fault.Output_dialect -> "output_dialect"
+         | Llm_provider.Candidate_fault.Refusal_unread -> "refusal_unread")
+    | Llm_provider.Candidate_fault.Unattributed -> "unattributed"
+    | Llm_provider.Candidate_fault.Unknown_after_dispatch -> "unknown_after_dispatch"
+  in
+  let label_of route = KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route in
+  let invalid_request reason = Llm_provider.Retry.InvalidRequest { message = "refused"; reason } in
+  let errors =
+    [ Llm_provider.Retry.AuthError { message = "401" }
+    ; Llm_provider.Retry.AuthorizationError { message = "403" }
+    ; Llm_provider.Retry.PaymentRequired { message = "402" }
+    ; Llm_provider.Retry.NotFound { message = "404" }
+    ; Llm_provider.Retry.RateLimited { retry_after = Some 30.0; message = "slow down" }
+    ; Llm_provider.Retry.RateLimited { retry_after = None; message = "slow down" }
+    ; Llm_provider.Retry.Overloaded { message = "529" }
+    ; Llm_provider.Retry.ServerError { status = 500; message = "5xx" }
+    ; Llm_provider.Retry.ServerError { status = 503; message = "5xx" }
+    ; Llm_provider.Retry.ContextOverflow { message = "too large"; limit = None }
+    ; invalid_request (Llm_provider.Retry.Request_body_refused_by_provider { status = 413 })
+    ; invalid_request Llm_provider.Retry.Json_parse_error
+    ; invalid_request Llm_provider.Retry.Attempt_rejected
+    ; invalid_request Llm_provider.Retry.Refusal_body_not_received
+    ; invalid_request Llm_provider.Retry.Unknown_invalid_request
+    ; Llm_provider.Retry.Timeout { message = "deadline"; phase = None }
+    ; Llm_provider.Retry.NetworkError
+        { message = "connection reset"; kind = Llm_provider.Http_client.Connection_reset }
+    ]
+  in
+  (* For each judgment, the first route label seen; every later error with the
+     same judgment must match it. *)
+  let seen = Hashtbl.create 16 in
+  let splits =
+    List.filter_map
+      (fun api ->
+         let key = fault_key (Llm_provider.Candidate_fault.of_api_error api) in
+         let label = label_of (route_of_agent_core_error (Agent_core.Error.Api api)) in
+         match Hashtbl.find_opt seen key with
+         | None ->
+           Hashtbl.add seen key label;
+           None
+         | Some first when String.equal first label -> None
+         | Some first -> Some (Printf.sprintf "%s: %s vs %s" key first label))
+      errors
+  in
+  Alcotest.(check (list string))
+    "one judgment, one route class (no second table beside Candidate_fault)"
+    []
+    splits
+
+let test_model_absent_classifier () =
+  (* The classifier and the route must agree: model-absence is the typed
+     NotFound family on either side of the provider boundary. *)
+  let api_not_found =
+    Agent_core.Error.Api (Llm_provider.Retry.NotFound { message = "glm-5.1 was retired at 2026-09-25" })
+  in
+  let provider_not_found =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.NotFound { provider = "ollama_cloud"; detail = "model not found" })
+  in
+  Alcotest.(check bool) "API NotFound is model absence" true
+    (KFR.core_error_is_model_absent api_not_found);
+  Alcotest.(check bool) "provider NotFound is model absence" true
+    (KFR.core_error_is_model_absent provider_not_found);
+  check_route
+    "API NotFound rotates as model_unavailable"
+    (KFR.Rotate_now { rotate = KFR.Model_unavailable })
+    api_not_found;
+  check_route
+    "provider NotFound rotates as model_unavailable"
+    (KFR.Rotate_now { rotate = KFR.Model_unavailable })
+    provider_not_found;
+  (* The live retirement shape: a 400 refusal whose body carries the
+     retirement fact as free-form prose. No machine-readable signal names it,
+     so the classifier deliberately says [false] — prose is never matched.
+     It stays out of retry candidacy through Error.is_retryable instead. *)
+  Alcotest.(check bool)
+    "a 400 refusal with retirement prose is not typed model-absence"
+    false
+    (KFR.core_error_is_model_absent
+       (Agent_core.Error.Api
+          (Llm_provider.Retry.InvalidRequest
+             { message = "glm-5.1 was retired at 2026-09-25"
+             ; reason = Llm_provider.Retry.Unknown_invalid_request
+             })));
+  Alcotest.(check bool) "rate limit is not model absence" false
+    (KFR.core_error_is_model_absent
+       (Agent_core.Error.Api
+          (Llm_provider.Retry.RateLimited { retry_after = None; message = "slow down" })));
+  Alcotest.(check bool) "hard quota is not model absence" false
+    (KFR.core_error_is_model_absent
+       (Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired { message = "402" })))
+
+let () =
+  Alcotest.run
+    "keeper_runtime_failure_route"
+    [ ( "model_absent"
+      , [ Alcotest.test_case
+            "typed not-found is model absence"
+            `Quick
+            test_model_absent_classifier
+        ] )
+    ; ( "api"
+      , [ Alcotest.test_case "rate limited hint" `Quick test_api_rate_limited_threads_hint
+        ; Alcotest.test_case
+            "quota prose stays rate limited"
+            `Quick
+            test_api_quota_message_does_not_override_rate_limit
+        ; Alcotest.test_case "overloaded is provider capacity" `Quick test_api_overloaded_is_provider_capacity
+        ; Alcotest.test_case
+            "server error typed variant"
+            `Quick
+            test_api_server_error_uses_typed_variant
+        ; Alcotest.test_case "auth rotates, invalid exhausts" `Quick test_api_auth_rotates_invalid_request_judges
+        ; Alcotest.test_case
+            "attempt rejected routes as rotation"
+            `Quick
+            test_api_attempt_rejected_routes_as_rotation
+        ; Alcotest.test_case
+            "input capacity is terminal observation"
+            `Quick
+            test_api_input_capacity_is_terminal_judgment
+        ] )
+    ; ( "candidate_fault_agreement"
+      , [ Alcotest.test_case
+            "route class agrees with the walk predicates"
+            `Quick
+            test_candidate_fault_route_agreement
+        ; Alcotest.test_case
+            "route factors through Candidate_fault"
+            `Quick
+            test_route_factors_through_candidate_fault
+        ] )
+    ; ( "provider"
+      , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint
+        ; Alcotest.test_case "config exhausts" `Quick test_provider_config_judges
+        ; Alcotest.test_case
+            "wire error rotates"
+            `Quick
+            test_provider_wire_error_rotates
+        ; Alcotest.test_case
+            "non-transient 5xx rotates"
+            `Quick
+            test_non_transient_server_error_rotates_on_5xx
+        ; Alcotest.test_case
+            "empty completion keeps answer observation"
+            `Quick
+            test_empty_completion_keeps_answer_observation
+        ; Alcotest.test_case "unmodeled empty completion is terminal but observed" `Quick
+            test_unmodeled_empty_completion_is_visible_terminal
+        ; Alcotest.test_case
+            "wire error kinds split on what arrived"
+            `Quick
+            test_wire_error_kinds_split_on_what_arrived
+        ; Alcotest.test_case
+            "an interrupted generation observes a server failure"
+            `Quick
+            test_an_interrupted_generation_observes_a_server_failure
+        ] )
+    ; ( "masc_internal"
+      , [ Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
+        ] )
+    ; ( "families"
+      , [ Alcotest.test_case "non-provider terminal" `Quick test_non_provider_families_judge ] )
+    ; ( "response_observed"
+      , [ Alcotest.test_case
+            "every class is placed"
+            `Quick
+            test_response_observed_per_class
+        ; Alcotest.test_case
+            "a refused transcript is not an answer"
+            `Quick
+            test_transcript_refusal_is_not_an_answer
+        ; Alcotest.test_case
+            "through route_of_error"
+            `Quick
+            test_response_observed_through_route_of_error
+        ; Alcotest.test_case
+            "fences follow the lane's observation"
+            `Quick
+            test_response_observed_fences_follow_the_disposition
+        ] )
+    ; ( "route_resumes_on_same_path"
+      , [ Alcotest.test_case
+            "every class is placed"
+            `Quick
+            test_route_resumes_on_same_path_per_class
+        ] )
+    ]

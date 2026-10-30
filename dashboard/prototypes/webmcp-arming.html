@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebMCP Mutating Arm</title>
+<!--
+  RFC-webmcp-capability-lanes Lane E prototype.
+
+  A page that is a UI for the human and a tool surface for the keeper. Read-only
+  tools are always registered. A mutating tool is registered ONLY while a human
+  has armed it, and it auto-disarms after a countdown — the human-in-the-loop
+  the WebMCP spec is built for, and the answer to the deferred mutating exposure
+  in RFC-webmcp-dashboard-agent-surface.
+
+  Load in Chrome with --enable-features=WebMCP. Verifiable with the bridge:
+  before arming, `list` shows only the read tool; while armed it also shows the
+  mutating tool; after expiry it is gone again.
+-->
+<style>
+  :root {
+    --ground: #12151a; --surface: #1b212a; --line: #2b333f;
+    --ink: #e7e2d8; --muted: #8b95a3; --brass: #d8a03d; --live: #7fd8a4; --off: #6b7280;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", sans-serif; padding: 40px 28px; line-height: 1.55; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 15px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin: 16px 0; }
+  .state { display: flex; align-items: center; gap: 10px; font-size: 15px; margin-bottom: 14px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--off); }
+  .dot.live { background: var(--live); box-shadow: 0 0 0 4px rgba(127,216,164,.18); }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 11px 18px; cursor: pointer; }
+  #arm { background: var(--brass); color: #1a1205; }
+  #arm:disabled { background: #3a3524; color: var(--muted); cursor: default; }
+  #disarm { background: transparent; color: var(--muted); border: 1px solid var(--line); margin-left: 10px; }
+  .count { font-variant-numeric: tabular-nums; color: var(--brass); font-weight: 700; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 26px 0 8px; }
+  #log { list-style: none; padding: 0; margin: 0; font-size: 14px; }
+  #log li { padding: 8px 12px; border-left: 3px solid var(--line); margin: 6px 0; background: #171d25; border-radius: 6px; }
+  #log li.mut { border-left-color: var(--brass); }
+  #log li.read { border-left-color: #3f6f88; }
+  code { font-family: "SF Mono", monospace; font-size: 13px; color: var(--brass); }
+</style>
+</head>
+<body>
+<main>
+  <h1>WebMCP Mutating Arm</h1>
+  <p class="sub">읽기 도구는 항상 열려 있어요. 쓰기 도구는 사람이 arm 한 동안에만 keeper 에게 보입니다.</p>
+
+  <div class="panel">
+    <div class="state"><span id="dot" class="dot"></span><span id="stateText">쓰기 도구: 잠김</span></div>
+    <button id="arm">쓰기 도구 5분간 열기</button>
+    <button id="disarm" hidden>지금 닫기</button>
+    <div id="surfaceNote" style="color:var(--muted); font-size:13px; margin-top:12px;"></div>
+  </div>
+
+  <h2>도구 호출 기록</h2>
+  <ol id="log"></ol>
+</main>
+
+<script>
+  const ARM_MS = 5 * 60 * 1000;
+  const READ_TOOL = 'notes_read';
+  const MUT_TOOL = 'notes_add';
+  const notes = [];
+  let armExpiresAt = null;
+  let mutRegistered = false;
+  let tick = null;
+
+  const mc = document.modelContext ?? null;
+  const armBtn = document.getElementById('arm');
+  const disarmBtn = document.getElementById('disarm');
+  const dot = document.getElementById('dot');
+  const stateText = document.getElementById('stateText');
+  const surfaceNote = document.getElementById('surfaceNote');
+
+  function logCall(kind, text) {
+    const li = document.createElement('li');
+    li.className = kind;
+    li.innerHTML = `<code>${kind === 'mut' ? MUT_TOOL : READ_TOOL}</code> · ${text} <span style="color:var(--muted)">(${new Date().toLocaleTimeString()})</span>`;
+    document.getElementById('log').prepend(li);
+  }
+
+  if (!mc || typeof mc.registerTool !== 'function') {
+    surfaceNote.textContent = 'document.modelContext 없음 — Chrome --enable-features=WebMCP 로 열어야 도구가 등록돼요.';
+    armBtn.disabled = true;
+  } else {
+    // Read tool is always available.
+    mc.registerTool({
+      name: READ_TOOL,
+      description: '[read-only] the current notes list',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      async execute() {
+        logCall('read', `${notes.length}개 반환`);
+        return { content: [{ type: 'text', text: JSON.stringify(notes) }] };
+      },
+    });
+    surfaceNote.innerHTML = '읽기 도구 <code>notes_read</code> 등록됨. 쓰기 도구 <code>notes_add</code> 는 arm 중에만.';
+  }
+
+  async function registerMutating() {
+    await mc.registerTool({
+      name: MUT_TOOL,
+      description: '[mutating] append a note. Available only while a human has armed it.',
+      inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
+      async execute({ text }) {
+        // The result tells the keeper who armed this and when it expires, so it
+        // never leans on an arm that has already lapsed.
+        if (!armExpiresAt || Date.now() > armExpiresAt) {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: false, reason: 'arm expired' }) }] };
+        }
+        notes.push({ text, at: Date.now() });
+        logCall('mut', `"${text}" 추가`);
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, count: notes.length, arm_expires_at: armExpiresAt }) }] };
+      },
+    });
+    mutRegistered = true;
+  }
+
+  function unregisterMutating() {
+    // Spec surface may or may not expose unregister; where it does not, the
+    // execute guard above still refuses once the arm lapses. Best-effort here.
+    if (mutRegistered && typeof mc.unregisterTool === 'function') {
+      try { mc.unregisterTool(MUT_TOOL); } catch { /* fall back to the guard */ }
+    }
+    mutRegistered = false;
+  }
+
+  function render() {
+    const armed = armExpiresAt && Date.now() < armExpiresAt;
+    dot.classList.toggle('live', !!armed);
+    disarmBtn.hidden = !armed;
+    armBtn.disabled = !!armed || armBtn.disabled;
+    if (armed) {
+      const s = Math.ceil((armExpiresAt - Date.now()) / 1000);
+      const mm = String(Math.floor(s / 60)).padStart(2, '0');
+      const ss = String(s % 60).padStart(2, '0');
+      stateText.innerHTML = `쓰기 도구: <b style="color:var(--live)">열림</b> · 남은 시간 <span class="count">${mm}:${ss}</span>`;
+    } else {
+      stateText.textContent = '쓰기 도구: 잠김';
+      if (mc && typeof mc.registerTool === 'function') armBtn.disabled = false;
+    }
+  }
+
+  function disarm() {
+    armExpiresAt = null;
+    unregisterMutating();
+    if (tick) { clearInterval(tick); tick = null; }
+    render();
+  }
+
+  armBtn.addEventListener('click', async () => {
+    armExpiresAt = Date.now() + ARM_MS;
+    if (!mutRegistered) await registerMutating();
+    render();
+    tick = setInterval(() => {
+      if (Date.now() > armExpiresAt) disarm();
+      else render();
+    }, 500);
+  });
+  disarmBtn.addEventListener('click', disarm);
+
+  render();
+</script>
+</body>
+</html>

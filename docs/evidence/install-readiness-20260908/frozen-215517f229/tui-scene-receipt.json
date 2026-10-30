@@ -1,0 +1,18 @@
+{
+  "schema": "masc.tui_scene_acceptance.v1",
+  "result": "PASS",
+  "source_commit": "215517f229fd74c5300ee7fc4aae91f29da1db4c",
+  "release_run": 34192837971,
+  "artifact_id": 10043038236,
+  "binary_sha256": "140499a1a640747c90cf9720d7b3b9d806b2ce7bf1aa0e6ac5e3428fc6c67a75",
+  "scenario": "browser-screenshot (viewport, connection selection, scene)",
+  "checks": [
+    "real PTY renders scene text and numbered controls",
+    "n/p selection sends no browser effect",
+    "Enter sends exact observed document/node and browser/tab identity",
+    "fresh scene appears after click",
+    "wrong screenshot identity is refused"
+  ],
+  "scope": "CI release artifact TUI with loopback HTTP fixtures; live Gecko script proof is separate",
+  "log": "tui-browser-pty-fixed.log"
+}

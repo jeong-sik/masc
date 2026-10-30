@@ -1,0 +1,598 @@
+{
+  "schema": "masc.openrouter-free-probe/v1",
+  "observed_at": "2026-09-26T16:08:06Z",
+  "source_head": "18a16e558467831a8bc71203ac637b4318b109d6",
+  "admission": "basic HTTP 200 with trimmed OK and toolcall HTTP 200 naming get_weather; nonthinking 400 is allowed when reasoning is mandatory",
+  "scope": "Synthetic non-streaming provider requests, not a Keeper continuity or lane failover test",
+  "models": [
+    {
+      "id": "cohere/north-mini-code:free",
+      "admitted": true,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": "OK",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 40
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 69
+        },
+        "nothink": {
+          "http": 200,
+          "content": "391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "dots-studio/dots-3-note-preview:free",
+      "admitted": true,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": "\n\nOK",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 31
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 55
+        },
+        "nothink": {
+          "http": 200,
+          "content": "391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "google/gemma-4-26b-a4b-it:free",
+      "admitted": false,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "Google AI Studio",
+              "provider_error_code": "429",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 0
+        },
+        "nothink": {
+          "http": 200,
+          "content": "391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "google/gemma-4-31b-it:free",
+      "admitted": false,
+      "none_verified": false,
+      "cases": {
+        "basic": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "Google AI Studio",
+              "provider_error_code": "429",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        },
+        "toolcall": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "Google AI Studio",
+              "provider_error_code": "429",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        },
+        "nothink": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "Google AI Studio",
+              "provider_error_code": "429",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "inclusionai/ling-3.0-flash-fin:free",
+      "admitted": false,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "length",
+          "tool_names": [],
+          "reasoning_tokens": 59
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 32
+        },
+        "nothink": {
+          "http": 200,
+          "content": "391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "inclusionai/ling-3.0-flash-sante:free",
+      "admitted": false,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "length",
+          "tool_names": [],
+          "reasoning_tokens": 70
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 32
+        },
+        "nothink": {
+          "http": 200,
+          "content": "391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "liquid/lfm-2.5-2.6b:free",
+      "admitted": true,
+      "none_verified": false,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": "OK",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 28
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 64
+        },
+        "nothink": {
+          "http": 400,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 400,
+            "message": "Reasoning is mandatory for this endpoint and cannot be disabled.",
+            "metadata": {
+              "provider_name": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "admitted": false,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": "OK",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 43
+        },
+        "toolcall": {
+          "http": 502,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 502,
+            "message": "Upstream error from Nvidia: ResourceExhausted: Worker local total request limit reached (16/16)",
+            "metadata": {}
+          }
+        },
+        "nothink": {
+          "http": 200,
+          "content": "\n391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b:free",
+      "admitted": false,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": "OK",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 19
+        },
+        "toolcall": {
+          "http": 200,
+          "content": "[\n[{\n\"name\": \"get_weather\",\n\"parameters\": {\n\"city\": \"Seoul\"\n}\n}\n]",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 36
+        },
+        "nothink": {
+          "http": 200,
+          "content": "391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "admitted": false,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": "OK",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 23
+        },
+        "toolcall": {
+          "http": 200,
+          "content": "[[{\"name\":\"get_weather\",\"parameters\":{\"city\":\"Seoul\"}}]",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 43
+        },
+        "nothink": {
+          "http": 200,
+          "content": "391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "nvidia/nemotron-3.5-lightning:free",
+      "admitted": false,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 200,
+          "content": "Here's a thinking process:\n\n1.  **Analyze User Input:** \n   - User says: \"Reply with exactly: OK\"\n   - This is a direct instruction to output exactly the word \"OK\"\n\n2.  **Identify the Task:** \n   - Output exactly \"OK\" and nothing",
+          "finish_reason": "length",
+          "tool_names": [],
+          "reasoning_tokens": 60
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather",
+            "get_weather"
+          ],
+          "reasoning_tokens": 11
+        },
+        "nothink": {
+          "http": 200,
+          "content": "391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "poolside/laguna-s-2.1:free",
+      "admitted": false,
+      "none_verified": true,
+      "cases": {
+        "basic": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "Poolside",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 0
+        },
+        "nothink": {
+          "http": 200,
+          "content": "17 multiplied by 23 equals 391. Breaking it down:  \n- 10 × 23 = 230  \n- 7 × 23 = 161  \n- 230 + 161 = 391  \n\n**Answer:** 391",
+          "finish_reason": "stop",
+          "tool_names": [],
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "poolside/laguna-xs-2.1:free",
+      "admitted": false,
+      "none_verified": false,
+      "cases": {
+        "basic": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "Poolside",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        },
+        "toolcall": {
+          "http": 200,
+          "content": "I'll use the weather tool to get the current conditions in Seoul for you.",
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 0
+        },
+        "nothink": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "Poolside",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-27b:free",
+      "admitted": false,
+      "none_verified": false,
+      "cases": {
+        "basic": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "ModelRun",
+              "provider_error_code": "429",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        },
+        "toolcall": {
+          "http": 200,
+          "content": null,
+          "finish_reason": "tool_calls",
+          "tool_names": [
+            "get_weather"
+          ],
+          "reasoning_tokens": 34
+        },
+        "nothink": {
+          "http": 429,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 429,
+            "message": "Provider returned error",
+            "metadata": {
+              "provider_name": "ModelRun",
+              "provider_error_code": "429",
+              "limit_source": "upstream_provider_shared_pool"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "thinkingmachines/inkling-small:free",
+      "admitted": false,
+      "none_verified": false,
+      "cases": {
+        "basic": {
+          "http": 403,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 403,
+            "message": "thinkingmachines/inkling-small:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps",
+            "metadata": {}
+          }
+        },
+        "toolcall": {
+          "http": 403,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 403,
+            "message": "thinkingmachines/inkling-small:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps",
+            "metadata": {}
+          }
+        },
+        "nothink": {
+          "http": 403,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 403,
+            "message": "thinkingmachines/inkling-small:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps",
+            "metadata": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "thinkingmachines/inkling:free",
+      "admitted": false,
+      "none_verified": false,
+      "cases": {
+        "basic": {
+          "http": 403,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 403,
+            "message": "thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps",
+            "metadata": {}
+          }
+        },
+        "toolcall": {
+          "http": 403,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 403,
+            "message": "thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps",
+            "metadata": {}
+          }
+        },
+        "nothink": {
+          "http": 403,
+          "content": null,
+          "finish_reason": null,
+          "tool_names": [],
+          "reasoning_tokens": null,
+          "error": {
+            "code": 403,
+            "message": "thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps",
+            "metadata": {}
+          }
+        }
+      }
+    }
+  ]
+}

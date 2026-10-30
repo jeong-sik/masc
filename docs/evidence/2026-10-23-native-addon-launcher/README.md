@@ -1,0 +1,9 @@
+# Candidate native Addon launcher provenance
+
+Actual native Plugin observation in [#45528](https://github.com/jeong-sik/masc/pull/45528) used a matching server/TUI at exacta6fba325404c963061b7b95c4c564e35f5ea5e2e, but required a private copy of an installed native launcher whose build source was unverified. Its recorded SHA256 identifies that executable only; it does not establish candidate provenance. Those historical observations retain that limitation.
+
+[#45564](https://github.com/jeong-sik/masc/pull/45564) changes the explicit addon-lifecycle workflow to build bin/masc_native_addon_launcher.exe from the selected source, package it as masc-native-addon-launcher, and record the producer, SHA256 and native dependencies. Actual Native_addon_program.locate searches the server executable directory before PATH; the candidate executable name matches that public launcher name. Thus a verified artifact directory can supply the same-source helper without copying an installed executable.
+
+The launcher has no embedded build-commit option. Verify its digest against the receipt and its presence in the exact-source build-target list; keep workflow/source identities separate. An accepted CI request, source review and packaging code are not an executed artifact or worker. Old artifact receipts are not retroactively expanded.
+
+Independent source review read the full workflow/caller delta at cdb6de0713da85b785da3f54a25d0c874a828006 and found no P0-P2. Actionlint/diff checks passed. The upper guide includes the requested build-table correction. Final numbered-layer deltas require head-bound review. No local Dune/build/typecheck/test, new artifact, operator installation, real browser/audio/Agent/provider, Dashboard or whole54 completion is asserted here. Follow [the manual native proof procedure](../../guides/NATIVE-TUI-PROOF.md) for the explicit selected check and separate actual lifecycle observation.

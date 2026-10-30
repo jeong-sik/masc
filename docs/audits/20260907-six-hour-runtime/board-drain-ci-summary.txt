@@ -1,0 +1,7 @@
+Run34086843337 headac8005c3eac2d73ed3bf90084056d827f2540f24 SUCCESS
+test suite	Test	2026-09-07T05:31:27.8080384Z Testing `keeper_board_attention_worker'.
+test suite	Test	2026-09-07T05:31:28.1300070Z Test Successful in 0.322s. 40 tests run.
+test suite	Test	2026-09-07T05:31:28.1938037Z Testing `keeper_board_attention_candidate'.
+test suite	Test	2026-09-07T05:31:28.2396944Z Test Successful in 0.046s. 21 tests run.
+test suite	Test	2026-09-07T05:31:28.3021529Z Testing `keeper_board_attention_partition'.
+test suite	Test	2026-09-07T05:31:28.3751048Z Test Successful in 0.073s. 15 tests run.

@@ -1,0 +1,63 @@
+{
+  "scope": "Source extraction and concrete Dune declaration audit; not a typecheck/build/runtime receipt",
+  "base": "121f51ef10cb1ea48ce9499582cb9925d11ef9c7",
+  "relocations": [
+    {
+      "from": "lib/runtime_params.ml",
+      "to": "lib/core/runtime_params.ml",
+      "sha256": "1ae009fe1d1069424158817b116c937e8304a31fea7708fa15461b6d48e2ae59",
+      "byte_identical": true
+    },
+    {
+      "from": "lib/runtime_params.mli",
+      "to": "lib/core/runtime_params.mli",
+      "sha256": "ae1b02e48f95a07b1163994870141e5f00392b631dd606942f17af166ab94d36",
+      "byte_identical": true
+    }
+  ],
+  "policy_definitions": "The sole enum helper and configured values/setters/parameter declarations match the original after identifier-only renaming. Persisted keys, metadata, defaults, parsers and validators preserved; stale env-plane prose corrected to runtime.toml.",
+  "direction": [
+    "masc -> masc_gate -> masc_core",
+    "masc_server -> masc_gate -> masc_core"
+  ],
+  "core_existing_dependency_owners": {
+    "Common": "masc_core",
+    "Eio_guard": "masc_core",
+    "Fs_compat": "fs_compat",
+    "Log": "masc_log",
+    "Yojson": "yojson",
+    "Eio": "eio",
+    "Unix": "unix"
+  },
+  "test_deps_reexports": [
+    "masc_core",
+    "masc.gate"
+  ],
+  "qualified_caller_audit": "All Masc.Runtime_params calls removed; direct users already link masc_core or masc_test_deps re-export. Runtime_settings old trigger handle/setter declarations removed; all readers use Connector_trigger_params directly.",
+  "expected_validation_suites": [
+    "test_workspace",
+    "test_keeper_effective_meta_overlay",
+    "test_channel_gate_discord_state",
+    "test_server_discord_trigger_policy",
+    "test_server_slack_trigger_policy",
+    "test_dashboard_keeper_metrics_10286"
+  ],
+  "parser_check": {
+    "ocaml_version": "5.5.1",
+    "command": "ocamlc -stop-after parsing -c FILE",
+    "changed_existing_or_new_files": 23,
+    "result": "pass",
+    "limit": "No local Dune, OCaml typing, linking or behavior execution."
+  },
+  "module_identity_audit": {
+    "new_module": "Connector_trigger_params",
+    "gate_files": [
+      "lib/gate/connector_trigger_params.ml",
+      "lib/gate/connector_trigger_params.mli"
+    ],
+    "root_policy_loader": "lib/connector_trigger_policy.ml/.mli remains byte-identical to direct base; existing Make/load_error callers preserved",
+    "prior_name_collision": "Caught by independent source review; corrected before claiming execution success",
+    "prior_unvalidated_dispatch": 40063030116
+  },
+  "startup_behavior_repair": "Resolve strict policy and install the configured default before Discord bot-token and Slack disabled/app-token admission. New actual-start fixture cases prepared in both existing policy suites; no network tokens supplied."
+}

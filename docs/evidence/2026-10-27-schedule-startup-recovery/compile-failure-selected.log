@@ -1,0 +1,6 @@
+52: test suite	Test	2026-10-26T16:10:17.0740123Z File "test/test_schedule_consumer_dispatch.ml", line 3955, characters 34-41:
+53: test suite	Test	2026-10-26T16:10:17.0740687Z 3955 |         ((recovery_request config request).status = Schedule_domain.Running);
+54: test suite	Test	2026-10-26T16:10:17.0741109Z                                          ^^^^^^^
+55: test suite	Test	2026-10-26T16:10:17.0741469Z Error: The value request has type Schedule_domain.schedule_note
+56: test suite	Test	2026-10-26T16:10:17.0741837Z        but an expression was expected of type
+57: test suite	Test	2026-10-26T16:10:17.0742138Z          Schedule_domain.schedule_request

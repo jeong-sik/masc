@@ -1,0 +1,36 @@
+{
+  "source_commit_at_recording": "8c4c4caf411ce574ff950510e87051325c819416",
+  "source_sha256": {
+    "bin/masc_tui_terminal_palette.ml": "d6e32a6c90ea5446479950071a5e5a428067022d066ee8b0a14004a64b0ff0ea",
+    "bin/masc_tui_terminal_palette.mli": "bed4ca58bd36094067d97e92facddb37190be95fddb1f5df8a302827f03d8e32",
+    "bin/masc_tui_color.ml": "42b0a8b80e5d045ab162b4eacf054d1560a5815eee8487b9278aa7181dbc101b",
+    "bin/masc_tui_color.mli": "bae7ec5c16774d110a7121a8efb60c90426d8aca48611718b0560debb03d49c1",
+    "bin/masc_tui_theme.ml": "93b3214abab9ca85cded4d264b42b5344c2c4857bb6b832dc1758484416987eb",
+    "bin/masc_tui_theme.mli": "d8ded5efbaeb291599789ba0eebcfbae9b3775a30e82930640378f46e8bffd57",
+    "bin/masc_tui_terminal_palette_stubs.c": "78bc6b9010a653276fec623e1fc14e5413568cfd52a1290e130f7aa0548ddc66"
+  },
+  "compiler": "OCaml 5.5.1 native",
+  "scope": "three color modules and interfaces, original native terminal-palette C stub, ncurses",
+  "theme_count": 53,
+  "depths": [
+    "truecolor",
+    "ansi256",
+    "ansi16",
+    "unknown"
+  ],
+  "observations": 212,
+  "missing_palette_checked": true,
+  "tui_renderer_compiled": false,
+  "visible_ui_verified": false,
+  "installed_runtime_verified": false,
+  "disabled_colours_branch_checked": true,
+  "no_color_environment_checked": true,
+  "no_color_environment": {
+    "NO_COLOR": "1",
+    "MASC_TUI_FORCE_COLOR": "0",
+    "assertions": [
+      "production colors_enabled false",
+      "production recede returns empty string"
+    ]
+  }
+}

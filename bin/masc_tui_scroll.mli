@@ -1,0 +1,130 @@
+(** How far a list of rows can scroll, and how a keypress moves within it.
+
+    The arithmetic is four lines and it was written out fourteen times, once
+    per surface, each naming its own field. Thirteen of those copies lived in
+    the drawing, which meant drawing a frame corrected the state it was
+    drawing from: the key handler moved the scroll without a bound and the
+    renderer clamped it back on the way past.
+
+    A bound belongs where the move happens. {!down} and {!up} normalise before
+    they move, so a scroll left stale by a list that shrank answers the next
+    keypress with a step from where the reader actually is rather than from a
+    position that no longer exists. *)
+
+val maximum : count:int -> height:int -> int
+(** The largest scroll that still shows content. *)
+
+val normalize : count:int -> height:int -> int -> int
+(** A scroll held inside {!maximum}. Reading is safe on a stale value; it is
+    the moving that has to be bounded. *)
+
+module Position : sig
+  (** A reading position with an explicit end selection. Normalizing a frame
+      preserves that selection; only navigation or a new reading releases it. *)
+  type t
+  type movement = First | Last | By of int
+  val first : t
+  val is_end : t -> bool
+  val at : int -> t
+  (** An explicit source/search landing. Negative positions start at zero. *)
+  val offset : count:int -> height:int -> t -> int
+  val clamp : count:int -> height:int -> t -> t
+  (** Clamp an absolute offset while retaining an end selection. *)
+  val move : count:int -> height:int -> movement -> t -> t
+  (** Relative navigation starts at the current bounded position and releases
+      the end selection. [First] releases it; [Last] selects it. *)
+end
+
+val down : count:int -> height:int -> int -> int
+val up : count:int -> height:int -> int -> int
+
+val step_uncounted : delta:int -> int -> int
+(** A scroll moved by [delta] on a surface no listing counts, held at the
+    top. There is no bound below to hold it at, but a negative scroll is not
+    a position either: the frame indexes the list with it. The Git-changes
+    overlay opened over the Keepers surface was unlisted, and one up-key
+    from the top stored -1. *)
+
+val page_step : height:int -> int
+(** A page of visible rows with the existing one-row overlap. *)
+
+val page_down : count:int -> height:int -> int -> int
+val page_up : count:int -> height:int -> int -> int
+(** A whole window, less one row kept from the window being left. Reading a
+    long list one page at a time otherwise drops the row the reader stopped on:
+    it sits just past the new edge and nothing reports it. Same bound and same
+    stale-value rule as {!down} and {!up}. *)
+
+(** A row cursor over the same list. The cursor names a row, the scroll names
+    a window; a keypress moves the cursor and the window follows with
+    {!ensure_visible}. The same stale-value rule applies: moving normalises
+    first, so a list that shrank answers from its last row, not from a row
+    that no longer exists. *)
+
+val cursor_down : count:int -> int -> int
+val cursor_up : count:int -> int -> int
+
+val cursor_move : count:int -> delta:int -> int -> int
+(** The cursor moved by [delta] rows, clamped to the list. The steppers above
+    move one row and are this with [delta] of 1 and -1; a page key passes its
+    own size. Before this existed the movers took a delta and used only its
+    sign, so a page moved a single row. *)
+
+val cursor_last : count:int -> int
+(** The last row a cursor can name, and 0 for an empty list. What End lands
+    on. *)
+
+val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
+(** Like {!ensure_visible} for a cursor that names a run of lines [start] to
+    [stop] (inclusive). A window that already shows some line of the run is
+    left where the reader scrolled it, so the body of a tall item can be
+    walked; the window moves only when the whole run has left it. *)
+
+val ensure_visible : cursor:int -> height:int -> int -> int
+(** The smallest move of [scroll] that keeps [cursor] inside the window. *)
+
+(** A surface that draws a preview under its list splits the rows it has. The
+    split belongs here for the same reason the bound does: the keypress and
+    the frame have to work it out the same way. A renderer that shrank its
+    own list while the key handler kept moving against the full height is
+    what this module was written to stop, and Changes reintroduced it -- the
+    list drew ten rows and the keypress stopped at the bound for twenty, so
+    the rows past that could not be reached. *)
+
+val preview_height : total:int -> keep:int -> int
+(** The preview's rows out of [total], leaving the list at least [keep]. *)
+
+val body_height : total:int -> keep:int -> int
+(** The list's rows out of [total] once the preview has taken its share. *)
+
+val content_height
+  :  rows:int
+  -> chrome:int
+  -> count:int
+  -> preview_keep:int option
+  -> overflow_takes_row:bool
+  -> int
+(** The list height after fixed chrome, an optional preview, and a conditional
+    overflow indicator have each taken their declared rows. *)
+
+val window_text : scroll:int -> height:int -> int -> string
+(** Where a window of [height] rows from [scroll] stands in a list of [count]:
+    ["first-last/count"], counted from one, [0/count] with no rows to show
+    them in, and [0/0] for an empty list. *)
+
+val window_reading : noun:string -> scroll:int -> height:int -> int -> string
+(** A window with its counted item named, such as ["rows 1-10/60"]. A new
+    reading site must supply its noun instead of assembling one afterward. *)
+
+val position_row : scroll:int -> height:int -> ?hint:string -> int -> string option
+(** The ["[lines a-b/n]"] row under a window of [height] rows from [scroll]
+    over [count], followed by [hint] when there is one; [None] when there is
+    nothing to say. The one builder of that row: three surfaces wrote their
+    own, each beside its own height sum, and one missing the overflow row
+    would put the window's last row under the reading (#38744).
+
+    Without a hint the row is drawn only when the rows overflow, which is the
+    row {!content_height} takes off with [~overflow_takes_row:true]. With a
+    hint there is always something to say, so the row is drawn at every
+    count and is part of the chrome: [~overflow_takes_row:false]. The row is
+    plain text; the surface dresses it. *)

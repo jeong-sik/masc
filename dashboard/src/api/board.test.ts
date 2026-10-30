@@ -1,0 +1,1681 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  derivePostTitle,
+  createSubBoard,
+  createPost,
+  fetchBoard,
+  fetchBoardCuration,
+  fetchBoardFlairs,
+  fetchBoardHearths,
+  fetchBoardKarmaLedger,
+  fetchBoardPost,
+  fetchBoardReactionState,
+  fetchFusionRunEvidence,
+  normalizeBoardContextInferenceSubmission,
+  normalizeBoardKarmaLedger,
+  normalizeBoardAttachments,
+  requestBoardContextInference,
+  sanitizeBoardTitle,
+  toggleReaction,
+  voteComment,
+  asNullableIsoTimestamp,
+  normalizePendingConfirmation,
+  normalizeKeeperApprovalQueueItem,
+  normalizeSubBoard,
+} from './board'
+import { boardLatencyMetrics, resetBoardLatencyMetrics } from '../board-metrics'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  resetBoardLatencyMetrics()
+})
+
+// ================================================================
+// board title helpers (existing)
+// ================================================================
+
+describe('Fusion evidence observation', () => {
+  async function observe(evidence: unknown) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ evidence }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+    return fetchFusionRunEvidence('run/exact')
+  }
+
+  it.each(['pending', 'absent'] as const)('preserves %s independently of lifecycle', async status => {
+    await expect(observe({ status, post: null })).resolves.toEqual({ status })
+  })
+
+  it('keeps exact run origin with a recorded post', async () => {
+    const result = await observe({ status: 'recorded', post: {
+      id: 'evidence-post', author: 'keeper', content: 'evidence',
+      origin: { source: 'fusion', fusion_run_id: 'run/exact' },
+    } })
+    expect(result).toMatchObject({ status: 'recorded', post: { id: 'evidence-post' } })
+  })
+
+  it.each([
+    null, {}, { status: 'unknown', post: null }, { status: 'recorded', post: null },
+    { status: 'pending', post: { id: 'inconsistent' } },
+    { status: 'recorded', post: { id: 'wrong-run', author: 'keeper', origin: { source: 'fusion', fusion_run_id: 'other' } } },
+  ])('rejects malformed or inconsistent observations: %j', async evidence => {
+    await expect(observe(evidence)).rejects.toThrow('Malformed Fusion run evidence')
+  })
+})
+
+describe('board title helpers', () => {
+  it('strips markdown headings from derived titles', () => {
+    expect(derivePostTitle('## Deploy Plan\n\nBody')).toBe('Deploy Plan')
+  })
+
+  it('skips fenced code when deriving fallback titles', () => {
+    expect(derivePostTitle('```md\n# sample\n```\n\n## Real Title\ncontent')).toBe('Real Title')
+  })
+
+  it('sanitizes explicit board titles before display', () => {
+    expect(sanitizeBoardTitle('## Incident Review')).toBe('Incident Review')
+  })
+})
+
+// ================================================================
+// derivePostTitle (expanded)
+// ================================================================
+
+describe('derivePostTitle expanded', () => {
+  it('extracts first non-empty line', () => {
+    expect(derivePostTitle('Hello world')).toBe('Hello world')
+  })
+
+  it('skips leading blank lines', () => {
+    expect(derivePostTitle('\n\nActual title')).toBe('Actual title')
+  })
+
+  it('strips [flair:...] prefix', () => {
+    expect(derivePostTitle('[flair:alert] Important notice')).toBe('Important notice')
+  })
+
+  it('strips blockquote prefix', () => {
+    expect(derivePostTitle('> Quoted text')).toBe('Quoted text')
+  })
+
+  it('strips list prefix', () => {
+    expect(derivePostTitle('- List item')).toBe('List item')
+    expect(derivePostTitle('* Star item')).toBe('Star item')
+    expect(derivePostTitle('+ Plus item')).toBe('Plus item')
+  })
+
+  it('strips numbered list prefix', () => {
+    expect(derivePostTitle('1. First item')).toBe('First item')
+  })
+
+  it('returns "제목 없음" for empty content', () => {
+    expect(derivePostTitle('')).toBe('제목 없음')
+    expect(derivePostTitle('   ')).toBe('제목 없음')
+  })
+
+  it('truncates long titles', () => {
+    const long = 'a'.repeat(100)
+    const result = derivePostTitle(long)
+    expect(result!.length).toBeLessThanOrEqual(96)
+    expect(result).toContain('...')
+  })
+
+  it('skips horizontal rules', () => {
+    expect(derivePostTitle('---\nActual title')).toBe('Actual title')
+  })
+})
+
+// ================================================================
+// sanitizeBoardTitle (expanded)
+// ================================================================
+
+describe('sanitizeBoardTitle expanded', () => {
+  it('uses first line only', () => {
+    expect(sanitizeBoardTitle('Line one\nLine two')).toBe('Line one')
+  })
+
+  it('falls back to derivePostTitle from body', () => {
+    expect(sanitizeBoardTitle('', 'Body title')).toBe('Body title')
+  })
+
+  it('falls back for whitespace-only title', () => {
+    expect(sanitizeBoardTitle('   ', 'Fallback')).toBe('Fallback')
+  })
+})
+
+// ================================================================
+// asNullableIsoTimestamp
+// ================================================================
+
+describe('asNullableIsoTimestamp', () => {
+  it('returns null for null', () => {
+    expect(asNullableIsoTimestamp(null)).toBeNull()
+  })
+
+  it('returns null for undefined', () => {
+    expect(asNullableIsoTimestamp(undefined)).toBeNull()
+  })
+
+  it('returns trimmed string for valid ISO string', () => {
+    expect(asNullableIsoTimestamp('  2026-04-17T12:00:00Z  ')).toBe('2026-04-17T12:00:00Z')
+  })
+
+  it('returns null for empty string', () => {
+    expect(asNullableIsoTimestamp('')).toBeNull()
+  })
+
+  it('returns null for whitespace-only string', () => {
+    expect(asNullableIsoTimestamp('   ')).toBeNull()
+  })
+
+  it('converts epoch seconds to ISO', () => {
+    const result = asNullableIsoTimestamp(1_700_000_000)
+    expect(result).not.toBeNull()
+  })
+
+  it('converts epoch milliseconds to ISO', () => {
+    const result = asNullableIsoTimestamp(1_700_000_000_000)
+    expect(result).not.toBeNull()
+  })
+
+  it('returns null for NaN', () => {
+    expect(asNullableIsoTimestamp(NaN)).toBeNull()
+  })
+
+  it('returns null for Infinity', () => {
+    expect(asNullableIsoTimestamp(Infinity)).toBeNull()
+  })
+})
+
+// ================================================================
+// normalizePendingConfirmation (board)
+// ================================================================
+
+describe('normalizePendingConfirmation (board)', () => {
+  const pendingConfirmation = {
+    confirm_token: 'tok-1',
+    trace_id: 'trace-1',
+    actor: 'agent-1',
+    action_type: 'keeper_probe',
+    target_type: 'keeper',
+    target_id: 'janitor',
+    payload: {},
+    delegated_tool: 'masc_keeper_status',
+    created_at: '2026-04-17T12:00:00Z',
+    expires_at: null,
+  }
+
+  it('returns null for null', () => {
+    expect(normalizePendingConfirmation(null)).toBeNull()
+  })
+
+  it('returns null when confirm_token is missing', () => {
+    expect(normalizePendingConfirmation({ actor: 'a1' })).toBeNull()
+  })
+
+  it('extracts confirm_token', () => {
+    const result = normalizePendingConfirmation(pendingConfirmation)
+    expect(result!.confirm_token).toBe('tok-1')
+  })
+
+  it('extracts the complete item', () => {
+    const result = normalizePendingConfirmation(pendingConfirmation)
+    expect(result!.actor).toBe('agent-1')
+    expect(result!.target_id).toBe('janitor')
+    expect(result!.delegated_tool).toBe('masc_keeper_status')
+  })
+})
+
+// ================================================================
+// normalizeKeeperApprovalQueueItem
+// ================================================================
+
+describe('normalizeKeeperApprovalQueueItem', () => {
+  it('returns null for null', () => {
+    expect(normalizeKeeperApprovalQueueItem(null)).toBeNull()
+  })
+
+  it('returns null when id is missing', () => {
+    expect(normalizeKeeperApprovalQueueItem({ keeper_name: 'k', tool_name: 't' })).toBeNull()
+  })
+
+  it('returns null when keeper_name is missing', () => {
+    expect(normalizeKeeperApprovalQueueItem({ id: '1', tool_name: 't' })).toBeNull()
+  })
+
+  it('returns null when tool_name is missing', () => {
+    expect(normalizeKeeperApprovalQueueItem({ id: '1', keeper_name: 'k' })).toBeNull()
+  })
+
+  // The server writes exactly these members for a pending row without its
+  // input (Keeper_approval_queue.pending_entry_json_fields). A stale member
+  // left in the allowed list made every live row a violation.
+  const serverPendingRow = {
+    origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+    continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
+    id: 'q-live',
+    keeper_name: 'janitor',
+    tool_name: 'shell_exec',
+    input_hash: 'c'.repeat(64),
+    sequence: 1,
+    requested_at: 1_776_427_200,
+    waiting_s: 4,
+    turn_id: 12,
+    task_id: null,
+    goal_id: null,
+    summary_status: 'not_requested',
+    exact_attempt: { state: 'unbound' },
+    summary_attempt_disposition: { code: 'ready' },
+    phase: 'queued',
+  }
+
+  it('accepts the pending row the server writes', () => {
+    expect(normalizeKeeperApprovalQueueItem(serverPendingRow)?.id).toBe('q-live')
+  })
+
+  it('retains the actual origin and continuation instead of inferring them from the input', () => {
+    const origin = { source: { kind: 'direct_operation', operation_id: 'actual-operation' }, turn_ref: 'actual-trace#3' }
+    const continuation_channel = { kind: 'slack', channel_id: 'actual-channel', user_id: 'actor', thread_ts: '123.456' }
+    const parsed = normalizeKeeperApprovalQueueItem({ ...serverPendingRow, origin, continuation_channel, input: { post_id: 'invented' }, input_preview: 'Board invented#9' })
+    expect(parsed?.origin).toEqual(origin)
+    expect(parsed?.continuation_channel).toEqual(continuation_channel)
+  })
+
+  it('refuses missing or malformed provenance instead of accepting a partial request', () => {
+    for (const key of ['origin', 'continuation_channel']) {
+      const missing = Object.fromEntries(Object.entries(serverPendingRow).filter(([field]) => field !== key))
+      expect(normalizeKeeperApprovalQueueItem(missing)).toBeNull()
+      expect(normalizeKeeperApprovalQueueItem({ ...serverPendingRow, [key]: { kind: 'unknown' } })).toBeNull()
+    }
+  })
+
+  it('refuses a pending row with a member the server does not write', () => {
+    expect(normalizeKeeperApprovalQueueItem({ ...serverPendingRow, goal_ids: [] })).toBeNull()
+  })
+
+  it('extracts all fields', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+      continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
+      id: 'q-1',
+      keeper_name: 'janitor',
+      tool_name: 'shell_exec',
+      input_hash: 'a'.repeat(64),
+      requested_at: 1_776_427_200,
+      waiting_s: 30,
+      sequence: 7,
+      turn_id: null,
+      task_id: null,
+      goal_id: null,
+      input: { cmd: 'ls' },
+      input_preview: 'ls -la',
+      phase: 'queued',
+      summary_status: 'not_requested',
+      exact_attempt: { state: 'unbound' },
+      summary_attempt_disposition: { code: 'ready' },
+    })
+    expect(result!.id).toBe('q-1')
+    expect(result!.keeper_name).toBe('janitor')
+    expect(result!.tool_name).toBe('shell_exec')
+    expect(result!.waiting_s).toBe(30)
+    expect(result!.input_preview).toBe('ls -la')
+    expect(result!.phase).toBe('queued')
+    expect(result!.exact_attempt).toEqual({ state: 'unbound' })
+    expect(result!.summary_attempt_disposition).toEqual({ code: 'ready' })
+  })
+
+  it('requires phase to be one of the closed queue progression phases', () => {
+    const base = {
+      origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+      continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
+      id: 'q-p',
+      keeper_name: 'janitor',
+      tool_name: 'shell_exec',
+      input_hash: 'a'.repeat(64),
+      sequence: 1,
+      requested_at: 1_776_427_200,
+      waiting_s: 30,
+      turn_id: null,
+      task_id: null,
+      goal_id: null,
+      summary_status: 'not_requested',
+      exact_attempt: { state: 'unbound' },
+      summary_attempt_disposition: { code: 'ready' },
+    }
+    expect(normalizeKeeperApprovalQueueItem(base)).toBeNull()
+    expect(normalizeKeeperApprovalQueueItem({ ...base, phase: 'unknown' })).toBeNull()
+    for (const phase of ['queued', 'judging', 'human_required', 'blocked'] as const) {
+      const item = normalizeKeeperApprovalQueueItem({ ...base, phase })
+      expect(item).not.toBeNull()
+      expect(item!.phase).toBe(phase)
+    }
+  })
+
+  const baseItem = {
+    origin: { source: { kind: 'no_admitted_source' }, turn_ref: null },
+    continuation_channel: { kind: 'keeper', keeper_name: 'fixture-origin-recipient' },
+    id: 'q-summary',
+    keeper_name: 'janitor',
+    tool_name: 'shell_exec',
+    input_hash: 'a'.repeat(64),
+    sequence: 3,
+    requested_at: 1_776_427_200,
+    waiting_s: 30,
+    turn_id: null,
+    task_id: null,
+    goal_id: null,
+    phase: 'queued' as const,
+    exact_attempt: { state: 'unbound' },
+    summary_attempt_disposition: { code: 'ready' },
+  }
+
+  it('parses an available summary into the typed union', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      ...baseItem,
+      exact_attempt: {
+        state: 'bound',
+        approval_id: baseItem.id,
+        input_hash: baseItem.input_hash,
+        sequence: baseItem.sequence,
+        slot_id: 'slot-available',
+        call_id: 'run-9',
+        plan_fingerprint: 'plan-available',
+        request_body_sha256: 'b'.repeat(64),
+        status: 'completed',
+        quarantine_cause: null,
+      },
+      summary_attempt_disposition: { code: 'settled' },
+      summary_status: {
+        status: 'available',
+        summary: {
+          summary_version: 2,
+          generated_at: 1_783_123_200,
+          model_run_id: 'run-9',
+          context_summary: 'This changes the requested target.',
+          key_questions: ['Is there a backup?'],
+          judgment: 'require_human',
+          rationale: 'The requested target needs Human context.',
+        },
+      },
+    })
+    expect(result!.summary_status).toEqual({
+      status: 'available',
+      summary: {
+        summary_version: 2,
+        generated_at: '2026-07-04T00:00:00.000Z',
+        model_run_id: 'run-9',
+        context_summary: 'This changes the requested target.',
+        key_questions: ['Is there a backup?'],
+        judgment: 'require_human',
+        rationale: 'The requested target needs Human context.',
+      },
+    })
+  })
+
+  it('parses bare-string pending / not_requested statuses', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'pending' })!.summary_status,
+    ).toEqual({ status: 'pending' })
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'not_requested' })!
+        .summary_status,
+    ).toEqual({ status: 'not_requested' })
+  })
+
+  it('parses only the current terminal failed status', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-failed',
+          call_id: 'call-failed',
+          plan_fingerprint: 'plan-failed',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'quarantined',
+          quarantine_cause: 'flow_execution_failed',
+        },
+        summary_attempt_disposition: { code: 'settled' },
+        summary_status: {
+          status: 'failed',
+          reason: 'Auto Judge exact attempt quarantined: flow_execution_failed',
+        },
+      })!.summary_status,
+    ).toEqual({
+      status: 'failed',
+      reason: 'Auto Judge exact attempt quarantined: flow_execution_failed',
+    })
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-failed',
+          call_id: 'call-failed',
+          plan_fingerprint: 'plan-failed',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'quarantined',
+          quarantine_cause: 'flow_execution_failed',
+        },
+        summary_attempt_disposition: { code: 'settled' },
+        summary_status: {
+          status: 'failed',
+          reason: 'Auto Judge exact attempt quarantined: cancellation',
+        },
+      }),
+    ).toBeNull()
+    // `retryable` left the wire contract with #26094: the OCaml producer no
+    // longer writes it, so any occurrence — either value — is a stale or
+    // hand-edited payload and rejects the row.
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: { status: 'failed', reason: 'provider down', retryable: false },
+      }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: { status: 'failed', reason: 'provider down', retryable: true },
+      }),
+    ).toBeNull()
+  })
+
+  it('parses exact attempt and blocked disposition without defaults', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      ...baseItem,
+      exact_attempt: {
+        state: 'bound',
+        approval_id: baseItem.id,
+        input_hash: baseItem.input_hash,
+        sequence: 3,
+        slot_id: 'slot-3',
+        call_id: 'call-3',
+        plan_fingerprint: 'plan-3',
+        request_body_sha256: 'b'.repeat(64),
+        status: 'released_recovery_required',
+        quarantine_cause: null,
+      },
+      summary_attempt_disposition: {
+        code: 'persistence_uncertain',
+        operator_detail: 'Exact-output terminalization durability is not confirmed.',
+      },
+      summary_status: 'pending',
+    })
+    expect(result!.exact_attempt).toMatchObject({
+      state: 'bound',
+      slot_id: 'slot-3',
+      status: 'released_recovery_required',
+    })
+    expect(result!.summary_attempt_disposition).toEqual({
+      code: 'persistence_uncertain',
+      operator_detail: 'Exact-output terminalization durability is not confirmed.',
+    })
+  })
+
+  it('preserves the exact durable pre-worker block code and detail', () => {
+    const result = normalizeKeeperApprovalQueueItem({
+      ...baseItem,
+      summary_attempt_disposition: {
+        code: 'pre_worker_unavailable',
+        reason_code: 'auto_judge_unavailable',
+        operator_detail: 'Auto Judge unavailable: server root switch is not installed',
+      },
+      summary_status: 'pending',
+    })
+
+    expect(result!.summary_attempt_disposition).toEqual({
+      code: 'pre_worker_unavailable',
+      reason_code: 'auto_judge_unavailable',
+      operator_detail: 'Auto Judge unavailable: server root switch is not installed',
+    })
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_attempt_disposition: {
+          code: 'pre_worker_unavailable',
+          reason_code: 'unknown',
+          operator_detail: 'lost authority',
+        },
+        summary_status: 'pending',
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects unknown queue-row authority fields', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: 'pending',
+        summary_attempt_authority: 'ready',
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects restart-only exact states from in-flight rows', () => {
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-restart-only',
+          call_id: 'call-restart-only',
+          plan_fingerprint: 'plan-restart-only',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'released_recovery_required',
+          quarantine_cause: null,
+        },
+        summary_attempt_disposition: { code: 'in_flight' },
+        summary_status: 'pending',
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects absent or malformed current queue state without fabricating defaults', () => {
+    expect(normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: undefined })).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'garbage' }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: { status: 'weird' } }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-old-summary',
+          call_id: 'run-old-summary',
+          plan_fingerprint: 'plan-old-summary',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'completed',
+          quarantine_cause: null,
+        },
+        summary_attempt_disposition: { code: 'settled' },
+        summary_status: {
+          status: 'available',
+          summary: {
+            summary_version: 1,
+            generated_at: 1_783_123_200,
+            model_run_id: 'run-old-summary',
+            context_summary: 'Old schema.',
+            key_questions: [],
+            judgment: 'require_human',
+            rationale: 'Old schema.',
+          },
+        },
+      }),
+    ).toBeNull()
+    // available with an empty summary body carries no operator value -> null
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: { status: 'available', summary: { context_summary: '  ' } },
+      }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: {
+          status: 'failed',
+          reason: 'summary generation failed',
+          retryable: false,
+          unknown_status_field: true,
+        },
+      }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        summary_status: {
+          status: 'available',
+          summary: {
+            summary_version: 2,
+            generated_at: 1_783_123_200,
+            model_run_id: 'run-summary-drift',
+            context_summary: 'Current summary.',
+            key_questions: [],
+            judgment: 'require_human',
+            rationale: 'Current rationale.',
+            unknown_summary_field: true,
+          },
+        },
+      }),
+    ).toBeNull()
+  })
+})
+
+// ================================================================
+// fetchBoard
+// ================================================================
+
+describe('fetchBoard', () => {
+  it('preserves board actor identity provenance from the server', async () => {
+    const rawResponse = {
+      posts: [
+        {
+          id: 'post-1',
+          author: 'analyst',
+          title: 'Status',
+          body: 'Working',
+          created_at: 1_713_000_000,
+          updated_at: 1_713_000_000,
+          current_vote: 'up',
+          has_voted: true,
+          reactions: [
+            {
+              emoji: '🔥',
+              count: 2,
+              reacted: true,
+              recent_user_ids: ['analyst', 'reviewer'],
+            },
+          ],
+          supported_reaction_emojis: ['🔥', '👍'],
+          author_identity: {
+            kind: 'keeper',
+            id: 'analyst',
+            key: 'keeper:analyst',
+            display_name: 'analyst',
+            raw: 'keeper-analyst-agent',
+            source: 'keeper_registry_name',
+          },
+        },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]).toMatchObject({
+      current_vote: 'up',
+      has_voted: true,
+      reactions: [
+        {
+          emoji: '🔥',
+          count: 2,
+          reacted: true,
+          recent_user_ids: ['analyst', 'reviewer'],
+        },
+      ],
+      supported_reaction_emojis: ['🔥', '👍'],
+    })
+    expect(result.posts[0]?.author_identity).toMatchObject({
+      kind: 'keeper',
+      id: 'analyst',
+      raw: 'keeper-analyst-agent',
+      source: 'keeper_registry_name',
+    })
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('voter=')
+  })
+
+  it('passes hearth filters through to the board API', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ posts: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchBoard('recent', { hearth: 'ops' })
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/v1/board?')
+    expect(url).toContain('hearth=ops')
+    expect(url).toContain('limit=150')
+  })
+
+  it('normalizes the RFC-0233 origin (turn_ref / source / fusion_run_id)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-origin',
+            author: 'fusion',
+            title: 'Fusion deliberation',
+            body: 'resolved',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+            origin: {
+              source: 'fusion',
+              fusion_run_id: 'fus-abc',
+              turn_ref: 'trace-1780648779957-00000#4071',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.origin).toEqual({
+      source: 'fusion',
+      fusion_run_id: 'fus-abc',
+      turn_ref: 'trace-1780648779957-00000#4071',
+    })
+  })
+
+  it('leaves origin null on legacy posts without dropping the post', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-legacy',
+            author: 'analyst',
+            title: 'No origin',
+            body: 'legacy row',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.id).toBe('post-legacy')
+    expect(result.posts[0]?.origin).toBeNull()
+  })
+
+  // task-1758/#39356 completion criterion 4: the wire "closed" object must
+  // reach BoardPost.closed, not be silently dropped by normalization.
+  it('normalizes the closed state (closed_by / closed_at / successor_id / summary)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-closed',
+            author: 'thread-owner',
+            title: 'Wrapped up',
+            body: 'closing this out',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+            closed: {
+              closed_by: 'thread-owner',
+              closed_at: 1_713_000_500,
+              successor_id: 'p-successor000000000000000000000',
+              summary: 'moved to the successor',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.closed).toEqual({
+      closed_by: 'thread-owner',
+      closed_at: new Date(1_713_000_500 * 1000).toISOString(),
+      successor_id: 'p-successor000000000000000000000',
+      summary: 'moved to the successor',
+    })
+  })
+
+  it('leaves closed null on an open post without dropping the post', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-open',
+            author: 'analyst',
+            title: 'Still going',
+            body: 'open row',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.id).toBe('post-open')
+    expect(result.posts[0]?.closed).toBeNull()
+  })
+
+})
+
+describe('fetchBoardHearths', () => {
+  it('normalizes active hearth rows from the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        hearths: [
+          { name: 'ops', count: 3 },
+          { name: '  ', count: 9 },
+          { name: 'research' },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchBoardHearths({
+      excludeSystem: true,
+      excludeAutomation: true,
+    })).resolves.toEqual([
+      { name: 'ops', count: 3 },
+      { name: 'research', count: 0 },
+    ])
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/board/hearths?exclude_system=true&exclude_automation=true',
+      expect.any(Object),
+    )
+  })
+})
+
+describe('fetchBoardFlairs', () => {
+  it('normalizes the board flair catalog from the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        flairs: [
+          { name: 'insight', emoji: '💡', label: 'Insight' },
+          { name: '  ', emoji: 'x', label: 'Ignored' },
+          { name: 'meta' },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchBoardFlairs()).resolves.toEqual([
+      { name: 'insight', emoji: '💡', label: 'Insight' },
+      { name: 'meta', emoji: '', label: 'meta' },
+    ])
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/board/flairs', expect.any(Object))
+  })
+})
+
+describe('fetchBoardCuration', () => {
+  it('normalizes summary, tags, answer matches, and health score from the curation snapshot', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        snapshot: {
+          id: 'cu-1',
+          generated_at: 1_748_779_200,
+          submitted_by: 'keeper-curator',
+          model: 'gpt-5',
+          summary: 'Two active incidents need review.',
+          ordering: ['post-a', { id: 'not-coerced' }, 'post-b', 7, ' '],
+          highlights: ['post-a', { name: 'not-coerced' }, null],
+          tag_suggestions: [
+            { post_id: 'post-a', tags: ['incident', { name: 'not-coerced' }, ' ops ', ' '], rationale: 'Incident thread' },
+            { post_id: ' ', tags: ['ignored'], rationale: 'missing post id' },
+          ],
+          answer_matches: [
+            {
+              question_post_id: 'post-question',
+              answer_post_id: 'post-answer',
+              score: 0.86,
+              rationale: 'Same stack trace',
+            },
+          ],
+          health_score: 0.74,
+          health_components: [
+            { name: 'answer_rate', score: 0.8, weight: 0.25, rationale: 'Most questions have replies' },
+          ],
+          rationale: 'Prioritize incidents before planning threads.',
+          provenance: { run_id: 'curation-run-1' },
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardCuration()
+
+    expect(result).toMatchObject({
+      id: 'cu-1',
+      submitted_by: 'keeper-curator',
+      model: 'gpt-5',
+      summary: 'Two active incidents need review.',
+      ordering: ['post-a', 'post-b'],
+      highlights: ['post-a'],
+      tag_suggestions: [
+        { post_id: 'post-a', tags: ['incident', 'ops'], rationale: 'Incident thread' },
+      ],
+      answer_matches: [
+        {
+          question_post_id: 'post-question',
+          answer_post_id: 'post-answer',
+          score: 0.86,
+          rationale: 'Same stack trace',
+        },
+      ],
+      health_score: 0.74,
+      health_components: [
+        { name: 'answer_rate', score: 0.8, weight: 0.25, rationale: 'Most questions have replies' },
+      ],
+      rationale: 'Prioritize incidents before planning threads.',
+      provenance: { run_id: 'curation-run-1' },
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/board/curation', expect.any(Object))
+  })
+
+  it('returns null when no curation snapshot exists', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ snapshot: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchBoardCuration()).resolves.toBeNull()
+  })
+})
+
+describe('fetchBoardPost', () => {
+  it('requests focused context directly and uses the complete companion rows', async () => {
+    const root = { id: 'root', thread_offset: 0, post_id: 'post-1', author: 'keeper', content: 'root', created_at: 1_713_000_000 }
+    const reply = { ...root, id: 'reply', thread_offset: 219, parent_id: 'root', content: 'reply' }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      post: { id: 'post-1', body: 'Body' }, comments: [reply],
+      comment_context: [root, reply], comment_revision: 'snapshot-revision',
+      comment_page: { offset: 200, total: 220 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await fetchBoardPost('post-1', undefined, undefined, 'reply')
+    expect(result.comments.map(comment => comment.id)).toEqual(['root', 'reply'])
+    expect(result.commentPage).toEqual({ offset: 200, total: 220, revision: 'snapshot-revision' })
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('comment_focus=reply')
+  })
+
+  it('normalizes comment vote fields from the server detail payload', async () => {
+    const rawResponse = {
+      post: {
+        id: 'post-1',
+        author: 'analyst',
+        title: 'Status',
+        body: 'Working',
+        created_at: 1_713_000_000,
+        updated_at: 1_713_000_000,
+        current_vote: 'down',
+        has_voted: true,
+        reactions: [
+          {
+            emoji: '👍',
+            count: 1,
+            reacted: false,
+            recent_user_ids: ['reader-a'],
+          },
+        ],
+        supported_reaction_emojis: ['👍', '🚀'],
+      },
+      comment_page: { offset: 26, returned: 1, total: 27, has_more: false, next_offset: null },
+      comments: [
+        {
+          id: 'comment-1',
+          post_id: 'post-1',
+          author: 'reviewer',
+          content: 'Useful',
+          created_at: 1_713_000_100,
+          votes_up: 5,
+          votes_down: 2,
+          score: 3,
+          current_vote: 'up',
+          has_voted: true,
+          reactions: [
+            {
+              emoji: '🚀',
+              count: 4,
+              reacted: true,
+              recent_user_ids: ['reviewer'],
+            },
+          ],
+          supported_reaction_emojis: ['👍', '🚀'],
+        },
+      ],
+    }
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardPost('post-1')
+
+    expect(result.comments[0]).toMatchObject({
+      id: 'comment-1',
+      votes: 3,
+      vote_balance: 3,
+      votes_up: 5,
+      votes_down: 2,
+      current_vote: 'up',
+      has_voted: true,
+      reactions: [
+        {
+          emoji: '🚀',
+          count: 4,
+          reacted: true,
+          recent_user_ids: ['reviewer'],
+        },
+      ],
+      supported_reaction_emojis: ['👍', '🚀'],
+    })
+    expect(result.current_vote).toBe('down')
+    expect(result.reactions).toEqual([
+      {
+        emoji: '👍',
+        count: 1,
+        reacted: false,
+        recent_user_ids: ['reader-a'],
+      },
+    ])
+    expect(result.supported_reaction_emojis).toEqual(['👍', '🚀'])
+    expect(result.commentPage).toEqual({ offset: 26, total: 27 })
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('format=flat')
+    expect(url).toContain('voter=')
+    expect(url).not.toContain('comment_offset=')
+
+    await fetchBoardPost('post-1', 6, 20)
+    const [olderUrl] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(olderUrl).toContain('comment_offset=6')
+    expect(olderUrl).toContain('comment_limit=20')
+  })
+
+  it('rejects missing page metadata instead of calling a partial thread complete', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ post: { id: 'post-1', body: 'Body' }, comments: [] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+    await expect(fetchBoardPost('post-1')).rejects.toThrow('invalid comment page')
+  })
+})
+
+describe('normalizeBoardAttachments', () => {
+  it('decodes a typed HTTPS image and an artifact reference', () => {
+    const sha256 = 'a'.repeat(64)
+    expect(normalizeBoardAttachments([
+      { kind: 'image', url: 'https://cdn.example.com/a.png' },
+      { kind: 'external_link', artifact: { _blob: {
+        sha256, bytes: 12, mime: 'application/octet-stream', preview: '',
+      } } },
+    ])).toEqual([
+      { ok: true, attachment: { kind: 'image', source: {
+        kind: 'url', url: 'https://cdn.example.com/a.png',
+      } } },
+      { ok: true, attachment: { kind: 'external_link', source: {
+        kind: 'artifact', sha256, bytes: 12, mime: 'application/octet-stream',
+      } } },
+    ])
+  })
+
+  it('shows a failure card for old untyped entries, including HTTPS ones', () => {
+    const old = {
+      id: 'a-old', kind: 'image', origin_url: 'https://cdn.example.com/old.png',
+      origin_name: 'old.png', origin_size_bytes: 12, created_at: 1,
+    }
+    expect(normalizeBoardAttachments([
+      old,
+      { ...old, origin_url: 'http://example.com/old.png' },
+    ])).toEqual([
+      { ok: false, raw: old },
+      { ok: false, raw: { ...old, origin_url: 'http://example.com/old.png' } },
+    ])
+  })
+
+  it('passes an optional name through on url and artifact entries', () => {
+    const sha256 = 'a'.repeat(64)
+    expect(normalizeBoardAttachments([
+      { kind: 'image', url: 'https://cdn.example.com/a.png', name: 'a.png' },
+      { kind: 'external_link', name: 'trace.log', artifact: { _blob: {
+        sha256, bytes: 12, mime: 'text/plain', preview: '',
+      } } },
+    ])).toEqual([
+      { ok: true, attachment: { kind: 'image', source: {
+        kind: 'url', url: 'https://cdn.example.com/a.png', name: 'a.png',
+      } } },
+      { ok: true, attachment: { kind: 'external_link', source: {
+        kind: 'artifact', sha256, bytes: 12, mime: 'text/plain', name: 'trace.log',
+      } } },
+    ])
+  })
+
+  it('reads the file, audio, score and midi kinds the handler stores', () => {
+    const artifact = { _blob: { sha256: 'b'.repeat(64), bytes: 3, mime: 'audio/midi', preview: '' } }
+    const kinds = ['file', 'audio', 'score', 'midi']
+    expect(
+      normalizeBoardAttachments(kinds.map((kind) => ({ kind, artifact })))
+        ?.map((entry) => (entry.ok ? entry.attachment.kind : null)),
+    ).toEqual(kinds)
+  })
+
+  it('shows a failure card for an entry whose name is not a string', () => {
+    const entry = { kind: 'image', url: 'https://cdn.example.com/a.png', name: 42 }
+    expect(normalizeBoardAttachments([entry])).toEqual([{ ok: false, raw: entry }])
+  })
+})
+
+describe('createPost', () => {
+  it('passes hearth assignment through to the board post tool', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createPost('Plan', 'Body', 'dashboard-user', { hearth: ' ops ' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/tools/masc_board_post')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      title: 'Plan',
+      content: 'Body',
+      author: 'dashboard-user',
+      hearth: 'ops',
+    })
+  })
+
+  it('sends attachments through the typed argument, outside meta', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createPost('Plan', 'Body', 'dashboard-user', {
+      meta: { source: 'dashboard' },
+      attachments: [{ kind: 'external_link', url: 'https://example.test/trace.log' }],
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      title: 'Plan',
+      content: 'Body',
+      author: 'dashboard-user',
+      meta: { source: 'dashboard' },
+      attachments: [{ kind: 'external_link', url: 'https://example.test/trace.log' }],
+    })
+  })})
+
+describe('SubBoard API helpers', () => {
+  it('normalizes sub-board members', () => {
+    expect(normalizeSubBoard({
+      id: 'sb-1',
+      slug: 'ops',
+      name: 'Ops',
+      owner: 'agent-owner',
+      members: [' agent-owner ', { name: 'agent-a' }, ''],
+      access: 'members_only',
+      created_at: 1_700_000_000,
+      post_count: 2,
+    })).toMatchObject({
+      id: 'sb-1',
+      slug: 'ops',
+      owner: 'agent-owner',
+      members: ['agent-owner', 'agent-a'],
+      access: 'members_only',
+      post_count: 2,
+    })
+  })
+
+  it('sends create-time members with the sub-board create request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createSubBoard('ops', 'Ops', 'Operations', 'members_only', [' agent-a ', '', 'agent-b'])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/board/sub-boards')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      slug: 'ops',
+      name: 'Ops',
+      description: 'Operations',
+      access: 'members_only',
+      members: ['agent-a', 'agent-b'],
+    })
+  })
+})
+
+describe('fetchBoardKarmaLedger', () => {
+  it('normalizes ledger events, totals, and scoring rule', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        events: [
+          {
+            recipient: 'keeper-a',
+            voter: 'operator',
+            target_kind: 'post',
+            target_id: 'post-1',
+            delta: 1,
+            ts: 1_748_779_200,
+            ts_iso: '2025-06-01T12:00:00Z',
+          },
+          { recipient: '', voter: 'ignored', target_kind: 'post', target_id: 'post-x' },
+        ],
+        count: 2,
+        scoring_rule: 'up=+1,down=0',
+        totals: [
+          { agent: 'keeper-a', karma: 3 },
+          { agent: '', karma: 9 },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardKarmaLedger({ agent: ' keeper-a ', limit: 25.9 })
+
+    expect(result).toEqual({
+      events: [
+        {
+          recipient: 'keeper-a',
+          voter: 'operator',
+          target_kind: 'post',
+          target_id: 'post-1',
+          delta: 1,
+          ts: 1_748_779_200,
+          ts_iso: '2025-06-01T12:00:00Z',
+        },
+      ],
+      count: 2,
+      scoring_rule: 'up=+1,down=0',
+      totals: [{ agent: 'keeper-a', karma: 3 }],
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/board/karma/ledger?agent=keeper-a&limit=25',
+      expect.any(Object),
+    )
+  })
+
+  it('falls back to event length when the ledger count is absent', () => {
+    expect(normalizeBoardKarmaLedger({
+      events: [
+        {
+          recipient: 'keeper-a',
+          voter: 'operator',
+          target_kind: 'comment',
+          target_id: 'comment-1',
+          delta: 1,
+          ts: 1_748_779_200,
+        },
+      ],
+    })).toMatchObject({
+      count: 1,
+      events: [{ ts_iso: '2025-06-01T12:00:00.000Z' }],
+      totals: [],
+    })
+  })
+})
+
+describe('voteComment', () => {
+  it('posts to the comment vote tool with the dashboard voter', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await voteComment('comment-1', 'down')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/tools/masc_board_comment_vote')
+    expect(JSON.parse(String(init.body))).toEqual({
+      comment_id: 'comment-1',
+      direction: 'down',
+      voter: 'dashboard-reviewer',
+    })
+  })
+})
+
+describe('board reactions', () => {
+  it('fetches reaction state without sending a forgeable user id', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
+    vi.spyOn(performance, 'now')
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(18)
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        reactions: [{
+          emoji: '👍',
+          count: 2,
+          reacted: true,
+          recent_user_ids: ['agent-b', 'agent-a'],
+        }],
+        supported_reaction_emojis: ['👍', '🚀'],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardReactionState('post', 'post-1')
+
+    expect(result).toEqual({
+      summaries: [{
+        emoji: '👍',
+        count: 2,
+        reacted: true,
+        recent_user_ids: ['agent-b', 'agent-a'],
+      }],
+      supportedEmojis: ['👍', '🚀'],
+    })
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/v1/board/reactions?')
+    expect(url).toContain('target_type=post')
+    expect(url).toContain('target_id=post-1')
+    expect(url).not.toContain('user_id=')
+    expect(boardLatencyMetrics.value.reaction_summary).toMatchObject({
+      last_latency_ms: 18,
+      last_ok: true,
+      sample_count: 1,
+    })
+  })
+
+  it('toggles a reaction through the board reaction endpoint', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-reviewer')
+    vi.spyOn(performance, 'now')
+      .mockReturnValueOnce(10)
+      .mockReturnValueOnce(31)
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        target_type: 'comment',
+        target_id: 'comment-1',
+        user_id: 'dashboard-reviewer',
+        emoji: '🚀',
+        reacted: true,
+        summary: [{
+          emoji: '🚀',
+          count: 1,
+          reacted: true,
+          recent_user_ids: ['dashboard-reviewer'],
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await toggleReaction('comment', 'comment-1', '🚀')
+
+    expect(result.summary).toEqual([{
+      emoji: '🚀',
+      count: 1,
+      reacted: true,
+      recent_user_ids: ['dashboard-reviewer'],
+    }])
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/board/reactions')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      target_type: 'comment',
+      target_id: 'comment-1',
+      emoji: '🚀',
+    })
+    expect(JSON.parse(String(init.body))).not.toHaveProperty('user_id')
+    expect(boardLatencyMetrics.value.reaction_toggle).toMatchObject({
+      last_latency_ms: 21,
+      last_ok: true,
+      sample_count: 1,
+    })
+  })
+
+  it('rejects a reaction state without the server-owned emoji catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ reactions: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchBoardReactionState('post', 'post-1')).rejects.toThrow(
+      'supported_reaction_emojis is required',
+    )
+  })
+})
+
+describe('board context inference', () => {
+  it('normalizes queued keeper submissions', () => {
+    expect(normalizeBoardContextInferenceSubmission({
+      ok: true,
+      operation_id: 'kmsg-1',
+      keeper_name: 'luna',
+      post_id: 'post-1',
+      state: 'queued',
+      target_source: 'explicit_target',
+    })).toEqual({
+      ok: true,
+      operationId: 'kmsg-1',
+      keeperName: 'luna',
+      postId: 'post-1',
+      state: 'queued',
+      targetSource: 'explicit_target',
+    })
+  })
+
+  it('rejects malformed context inference submissions', () => {
+    expect(normalizeBoardContextInferenceSubmission({ ok: true, keeper_name: 'luna' })).toBeNull()
+    expect(normalizeBoardContextInferenceSubmission({ ok: false })).toBeNull()
+    expect(normalizeBoardContextInferenceSubmission({
+      ok: true, operation_id: 'kmsg-1', keeper_name: 'luna', post_id: 'post-1', state: 'unknown',
+    })).toBeNull()
+  })
+
+  it('requests board context inference with an explicit target keeper', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        operation_id: 'kmsg-ctx',
+        keeper_name: 'luna',
+        post_id: 'post-1',
+        state: 'queued',
+        target_source: 'explicit_target',
+      }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await requestBoardContextInference(' post-1 ', ' luna ')
+
+    expect(result).toMatchObject({
+      operationId: 'kmsg-ctx',
+      keeperName: 'luna',
+      postId: 'post-1',
+      state: 'queued',
+      targetSource: 'explicit_target',
+    })
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/board/context-inference')
+    expect(JSON.parse(String(init.body))).toEqual({
+      post_id: 'post-1',
+      target_keeper: 'luna',
+    })
+  })
+
+  it('fails when the server returns a malformed context inference response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        keeper_name: 'luna',
+        post_id: 'post-1',
+        state: 'queued',
+      }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(requestBoardContextInference('post-1')).rejects.toThrow(
+      'Malformed board context inference response',
+    )
+  })
+})
+
+// ================================================================
+// board attachments decode (RFC-0000 §3.1)
+// ================================================================
+
+describe('board attachments decode', () => {
+  function stubBoardResponse(meta: unknown) {
+    const rawResponse = {
+      posts: [
+        {
+          id: 'post-att',
+          author: 'analyst',
+          title: 'With attachments',
+          body: 'body',
+          created_at: 1_713_000_000,
+          updated_at: 1_713_000_000,
+          meta,
+        },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  function attachmentEntry(kind: string, overrides: Record<string, unknown> = {}) {
+    return { kind, url: 'https://cdn.example.com/a.png', ...overrides }
+  }
+
+  it('decodes all four attachment kinds into typed entries', async () => {
+    stubBoardResponse({
+      attachments: [
+        attachmentEntry('image'),
+        attachmentEntry('video', { url: 'https://cdn.example.com/b.mp4' }),
+        attachmentEntry('youtube', { url: 'https://youtu.be/abc123def45' }),
+        attachmentEntry('external_link', { url: 'https://example.com/spec' }),
+      ],
+    })
+
+    const result = await fetchBoard()
+    const attachments = result.posts[0]?.attachments
+    expect(attachments).toHaveLength(4)
+    expect(attachments?.map(entry => entry.ok)).toEqual([true, true, true, true])
+    const first = attachments?.[0]
+    expect(first).toMatchObject({
+      ok: true,
+      attachment: {
+        kind: 'image',
+        source: { kind: 'url', url: 'https://cdn.example.com/a.png' },
+      },
+    })
+    expect(attachments?.[3]).toMatchObject({
+      ok: true,
+      attachment: { kind: 'external_link', source: { kind: 'url', url: 'https://example.com/spec' } },
+    })
+  })
+
+  it('keeps entries that fail the wire contract as explicit decode failures', async () => {
+    stubBoardResponse({
+      attachments: [
+        attachmentEntry('image'),
+        { id: 'a-broken', kind: 'image' },
+        attachmentEntry('hologram'),
+      ],
+    })
+
+    const result = await fetchBoard()
+    const attachments = result.posts[0]?.attachments
+    expect(attachments).toHaveLength(3)
+    expect(attachments?.[0]?.ok).toBe(true)
+    expect(attachments?.[1]).toMatchObject({ ok: false, raw: { id: 'a-broken', kind: 'image' } })
+    expect(attachments?.[2]?.ok).toBe(false)
+  })
+
+  it('treats a non-array attachments carrier as one explicit decode failure', async () => {
+    stubBoardResponse({ attachments: 'not-a-list' })
+
+    const result = await fetchBoard()
+    const attachments = result.posts[0]?.attachments
+    expect(attachments).toHaveLength(1)
+    expect(attachments?.[0]).toMatchObject({ ok: false, raw: 'not-a-list' })
+  })
+
+  it('leaves attachments undefined when meta has no carrier', async () => {
+    stubBoardResponse({ source: 'keeper' })
+
+    const result = await fetchBoard()
+    expect(result.posts[0]?.attachments).toBeUndefined()
+  })
+})
+
+
+describe('Board persisted audience wire boundary', () => {
+  it('preserves authoritative audience through the direct Board list decoder', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ posts: [
+      { id: 'post-alias', author: 'human', title: 'Alias', body: '@Alpha', audience: { kind: 'targets', targets: ['Alpha'] } },
+      { id: 'post-legacy', author: 'human', title: 'Missing', body: '@Alpha' },
+      { id: 'post-bad', author: 'human', title: 'Malformed', body: '@Alpha', audience: { kind: 'targets', targets: [] } },
+    ] }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const result = await fetchBoard()
+    expect(result.posts[0]?.body).toBe('@Alpha')
+    expect(result.posts.map(post => post.audience)).toEqual([
+      { kind: 'targets', targets: ['Alpha'] },
+      { kind: 'unavailable', reason: 'not_recorded' },
+      { kind: 'unavailable', reason: 'invalid_payload' },
+    ])
+  })
+})

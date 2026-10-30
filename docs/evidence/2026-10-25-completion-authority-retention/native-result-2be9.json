@@ -1,0 +1,18 @@
+{
+  "run": "40114401559",
+  "source_sha": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+  "conclusion": "failure",
+  "stage": "compile before selected executables",
+  "selected_suites": [
+    "test_keeper_direct_goal_provider_wire",
+    "test_keeper_official_client_host",
+    "test_keeper_run_tools_hooks",
+    "test_keeper_prompt_capture",
+    "test_keeper_next_request_forecast",
+    "test_turn_record"
+  ],
+  "suites_executed": [],
+  "error": "test/test_keeper_direct_goal_provider_wire.ml:465 Unbound constructor Text",
+  "log_sha256": "ed2f5d6654d6270bb21dcbe8e97ae72c97e3e7d19dc100adaf1a344c07e28f7a",
+  "scope": "Compilation blocked execution of all six requested suites; not six executed behavior failures."
+}

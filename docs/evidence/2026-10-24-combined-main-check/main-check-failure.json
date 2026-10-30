@@ -1,0 +1,48 @@
+{
+  "recorded_at": "2026-10-24T13:50:17.803344+00:00",
+  "run_id": 40099129775,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/40099129775",
+  "job_id": 120887469600,
+  "head_sha": "fde6f30f922bb5613f3cfea75be05fe2c833ce61",
+  "conclusion": "failure",
+  "typecheck_step": "Type-check the tree",
+  "actual_command": "dune build @check",
+  "errors": [
+    {
+      "file": "packages/agent_core/test/test_output_token_receipt.ml",
+      "line": 501,
+      "error": "Unbound constructor OpenAI_compat",
+      "raw_lines": [
+        629,
+        632
+      ]
+    },
+    {
+      "file": "test/test_keeper_native_result_retention.ml",
+      "line": 5,
+      "error": "Unbound module Llm_provider",
+      "raw_lines": [
+        634,
+        637
+      ]
+    },
+    {
+      "file": "test/test_anti_rationalization_empty_reject.ml",
+      "lines": [
+        532,
+        578
+      ],
+      "error": "Reviewer stub signature does not match current optional/system_prompt and attempt-continuation interface",
+      "raw_lines": [
+        639,
+        665
+      ]
+    }
+  ],
+  "raw_log": {
+    "file": "job-120887469600.log",
+    "bytes": 109125,
+    "sha256": "b2b11cbd96409016cd1149cd3f2462bc32690e4bdf7382e0d5d47c07c78fd751"
+  },
+  "scope": "Actual @check failure, no test cases executed by this type-only lane. Separate focused five-suite and four-operator builds are not this result. Minimal fresh repair required; no blind retry."
+}

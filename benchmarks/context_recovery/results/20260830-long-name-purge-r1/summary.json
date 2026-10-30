@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T14:14:04+09:00",
+  "source_commit": "f04d50dff57b3a49143f8786aebdec5f321a426b",
+  "binary_sha256": "39ceeef14183564c97527e66eff17105f8da3592a3d27b0a2d1b202e7d81521b",
+  "keeper_name": "coding-eval-ollama-qwen3-8b-l1-context-source-bound-refresh-source-bound-r1",
+  "keeper_name_length": 75,
+  "seed": {
+    "port": 9515,
+    "model": "qwen3:8b",
+    "status": "ok",
+    "verify_exit": 0,
+    "duration_ms": 57000,
+    "final_source_revision": 3,
+    "final_fact_count": 1,
+    "final_invalidation_count": 0,
+    "artifact_sha256": {
+      "evidence.json": "5bc9360a7d7b36e137cbd75675333018713496a1767230f8c02abffc6c7fd262",
+      "last-prompt.json": "f42261e7b8fdd632524a1fc47ae3b06dee1666943bd40779aa7bc779298419bb",
+      "memory-source-final.json": "39a7c4cefc5272ad8a2cceb7e6990fbb98e7463dbbff54bc00addcb7392df8b4"
+    }
+  },
+  "purge": {
+    "port": 9516,
+    "http_status": 202,
+    "operation_id": "shutdown-a8870a13-7926-45e8-9b93-01f9de62bfa1",
+    "source_snapshot_present_after": false,
+    "keeper_config_present_after": false,
+    "runtime_directory_present_after": false,
+    "keeper_meta_present_after": false,
+    "completion_or_recovery_error_matches": 0,
+    "artifact_sha256": {
+      "purge-response.json": "fb3efac127867b86a4b5c5a71bbda8ea04f3c02c5f74cee28938d71d8636c125",
+      "post-purge-state.json": "1d6a8de1e17d778a18561d2471879bc5f431ec661e1d53b2a15e32942f0469f7"
+    }
+  },
+  "same_name_recreate": {
+    "port": 9517,
+    "operation_state": "Succeeded",
+    "outcome_ref": "trace-1788066799732-00000#1",
+    "assistant_response": "LONG_PURGE_OK",
+    "dynamic_context_bytes": 0,
+    "last_prompt_http_status": 404,
+    "source_snapshot_present": false,
+    "completion_or_recovery_error_matches": 0,
+    "artifact_sha256": {
+      "operation-final.json": "0559aae73fe327a68f9070d5392302190c517e8aacf82c0cd822c8e544e78c1d",
+      "keeper-metrics.jsonl": "c54b5412d1b3fb766e2b89cc45cd5e86144ea8d9a46489a7715398a9ac52a5b4",
+      "keeper-chat.jsonl": "dffce1ea6290bdd18cff9874a4db9e2ed552fc894e7e189cc48fef75350c24e1",
+      "post-recreate-state.json": "f384d3da41645b81ac9f64421b8425047d49565b33beb4b0cff9bacaecce3783"
+    }
+  },
+  "max_length_boundary": {
+    "keeper_name_length": 128,
+    "seed_port": 9519,
+    "purge_port": 9520,
+    "recreate_port": 9521,
+    "purge_http_status": 202,
+    "purge_operation_id": "shutdown-ed7d2a67-a086-429c-887b-e5d18a56cfdd",
+    "artifacts_present_after_purge": 0,
+    "completion_or_recovery_error_matches": 0,
+    "recreate_operation_state": "Succeeded",
+    "assistant_response": "BOUNDARY_PURGE_OK",
+    "dynamic_context_bytes": 0,
+    "source_snapshot_present": false,
+    "chat_path_projection": "hash_suffixed",
+    "artifact_sha256": {
+      "evidence.json": "b0e63597c7f446c412e2ec88440898d0b3023a7f92764de88952995df960be21",
+      "last-prompt.json": "a124fe0386afb3ef8a962bbc71fcf41a34b079325af7f66c109c451f2f026f02",
+      "memory-source-final.json": "5488257147affce17a8dc2f3fdba110a42febfc042be01d9c3631c4531094d26",
+      "purge-response.json": "fca8eff56ebbe67dd787e9cbbe8674086bc6b8e4b2d6fc92e90eb38ca866181e",
+      "post-purge-state.json": "a3a5e3351556aa8b2303d8a82bd65a015bcf3fc48ee4af620a45e6ac507363eb",
+      "operation-final.json": "25b61f3b5c4f1824b9bb946849286ecd892fb0d2042953d98b14a1b8e03e906e",
+      "keeper-metrics.jsonl": "56c46fb643874cdda79a7d8fac328cc8042558217535857c2c067577761a406f",
+      "keeper-chat.jsonl": "c06ebc31f585a6bdd7cb16247b36a0bda845ab9751c1d8ad8523e5dff1fe23ae",
+      "post-recreate-state.json": "9a5291aa6bba7f11fa1109e57d48b267fc02e950463bfdf8b599fd6776e68778"
+    }
+  },
+  "focused_checks": {
+    "dashboard_purge_resolution": "1/1",
+    "dashboard_purge_completion": "1/1"
+  },
+  "isolated_ports_stopped": [9515, 9516, 9517, 9518, 9519, 9520, 9521],
+  "performance_claim": false
+}

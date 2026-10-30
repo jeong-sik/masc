@@ -1,0 +1,791 @@
+(* Total typed failure routing. See keeper_runtime_failure_route.mli. *)
+
+type retry_class =
+  | Rate_limited
+  | Hard_quota
+  | Provider_capacity
+  | Empty_completion of { stop_reason : Llm_provider.Types.stop_reason }
+  | Server_error
+  | Network_transient
+  | Provider_timeout
+
+type rotate_class =
+  | Auth_failed
+  | Authorization_refused
+  | Model_unavailable
+  | Resumable_cli_session
+  | Candidates_filtered
+  | Runtime_exhausted
+  | No_progress_empty
+  | No_progress_thinking_only
+  | No_progress_truncated
+  | Refusal_body_not_received
+  | Admission
+  | Provider_reported_failure
+  | Request_refused
+  | Provider_wire_defect
+  | Server_error_not_transient
+  | Context_window_exceeded
+
+type fence_disposition =
+  | Fenced_effect_attempted
+  | Fenced_observation_unavailable
+
+type terminal_class =
+  | Deterministic_request
+  | Session_claim_refused
+  | Transcript_refused
+  | Contract_violation
+  | Protocol_error
+  | Config_mismatch
+  | Provider_integration
+  | Unmodeled_empty_completion
+  | Terminal_effect_dependency_unavailable
+  | Terminal_effect_policy_rejection
+  | Terminal_effect_runtime_failure
+  | Terminal_effect_workflow_rejection
+  | Terminal_effect_operator_cancelled
+  | Provider_attempt_effect_fenced of fence_disposition
+  | Tool_correction_lost of fence_disposition
+  | Internal_opaque
+
+type error_boundary =
+  | Masc_execution
+  | Agent_core_execution
+
+type route =
+  | Retry_after_observed of
+      { retry_class : retry_class
+      ; retry_after : float option
+      }
+  | Rotate_now of { rotate : rotate_class }
+  | Exhausted_visible_alive of { terminal : terminal_class }
+
+let core_error_is_hard_quota (err : Agent_core.Error.t) =
+  match err with
+  | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
+    true
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
+  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
+  | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NotFound _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal _)
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ ->
+    false
+;;
+
+let core_error_is_model_absent : Agent_core.Error.t -> bool = function
+  | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NotFound _) ->
+    true
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
+  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)
+  | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal _)
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ ->
+    false
+;;
+
+let observe_retry ?retry_after retry_class =
+  Retry_after_observed { retry_class; retry_after }
+
+let rotate rotate_class = Rotate_now { rotate = rotate_class }
+
+let exhaust terminal_class = Exhausted_visible_alive { terminal = terminal_class }
+
+let empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason =
+  reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+  && response_shape = Some Keeper_internal_error.Accept_response_empty
+  && stop_reason = Some Llm_provider.Types.MaxTokens
+;;
+
+let route_of_masc_internal (internal : Keeper_internal_error.masc_internal_error) =
+  match internal with
+  | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
+  | Keeper_internal_error.Runtime_exhausted { reason; _ } ->
+    (match reason with
+     | Keeper_internal_error.Candidates_filtered_after_cycles ->
+       rotate Candidates_filtered
+     | Keeper_internal_error.Connection_refused
+     | Keeper_internal_error.Dns_failure ->
+       observe_retry Network_transient
+     | Keeper_internal_error.No_providers_available
+     | Keeper_internal_error.All_providers_failed
+     | Keeper_internal_error.Session_conflict
+     | Keeper_internal_error.Other_detail _ ->
+       rotate Runtime_exhausted)
+  (* The SDK preserves an empty authoritative truncation as a response. The
+     accept gate retains its original stop and shape, so keep the same retry
+     policy as the former provider-level EmptyCompletion MaxTokens error. *)
+  | Keeper_internal_error.Accept_rejected
+      { reason_kind; response_shape; stop_reason; _ }
+    when empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason ->
+    observe_retry (Empty_completion { stop_reason = Llm_provider.Types.MaxTokens })
+  | Keeper_internal_error.Accept_rejected _ ->
+    (match Keeper_internal_error.accept_no_progress_retry_kind internal with
+     | Some `Empty_no_progress -> rotate No_progress_empty
+     | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
+     | Some `Truncated_no_progress -> rotate No_progress_truncated
+     | None -> exhaust Internal_opaque)
+  | Keeper_internal_error.Internal_contract_rejected _
+  | Keeper_internal_error.Receipt_persistence_failed _
+  | Keeper_internal_error.Gate_replay_repair_required _ ->
+    exhaust Internal_opaque
+  (* The host stopped this turn on purpose. Nothing about the provider failed,
+     so there is no other candidate that would do better. *)
+  | Keeper_internal_error.Host_stopped_turn _ -> exhaust Internal_opaque
+  (* The runtime's transport closed. [route_of_provider_error] answers
+     [observe_retry Server_error] for agent-core's [ProviderUnavailable]; the
+     typed value must not change which runtime is tried next, so it answers
+     the same. *)
+  | Keeper_internal_error.Runtime_connection_closed _ ->
+    observe_retry Server_error
+  (* A local claim refuses the durable session before a provider attempt.
+     Keep the turn exhausted without implying a response or attempted effect. *)
+  | Keeper_internal_error.Official_client_recovery_required _ ->
+    exhaust Session_claim_refused
+  (* The admission check refuses the history before provider dispatch
+     ([Keeper_agent_run.provider_transcript_admission]): no request carried
+     the turn's input. *)
+  | Keeper_internal_error.Incomplete_tool_transcript _ ->
+    exhaust Transcript_refused
+  | Keeper_internal_error.Terminal_effect_failed
+      { failure_class; effect_disposition; _ } ->
+    (match effect_disposition with
+     | Tool_result.Proven_pre_effect ->
+       (* A proven pre-effect rejection must remain correction-capable inside
+          the provider turn and must never reach this terminal boundary. *)
+       exhaust Contract_violation
+     | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown ->
+       (match failure_class with
+        | Tool_result.Dependency_unavailable ->
+          exhaust Terminal_effect_dependency_unavailable
+        | Tool_result.Policy_rejection ->
+          exhaust Terminal_effect_policy_rejection
+        | Tool_result.Runtime_failure ->
+          exhaust Terminal_effect_runtime_failure
+        | Tool_result.Workflow_rejection ->
+          exhaust Terminal_effect_workflow_rejection
+        | Tool_result.Operator_cancelled ->
+          exhaust Terminal_effect_operator_cancelled))
+  | Keeper_internal_error.Provider_attempt_effect_fenced
+      { effect_disposition; _ } ->
+    (match effect_disposition with
+     | Keeper_provider_attempt_effect_core.No_effect_observed ->
+       exhaust Contract_violation
+     | Keeper_provider_attempt_effect_core.Effect_attempted ->
+       exhaust (Provider_attempt_effect_fenced Fenced_effect_attempted)
+     | Keeper_provider_attempt_effect_core.Observation_unavailable ->
+       exhaust
+         (Provider_attempt_effect_fenced Fenced_observation_unavailable))
+  | Keeper_internal_error.Tool_correction_lost { effect_disposition; _ } ->
+    (match effect_disposition with
+     | Keeper_provider_attempt_effect_core.No_effect_observed ->
+       exhaust Contract_violation
+     | Keeper_provider_attempt_effect_core.Effect_attempted ->
+       exhaust (Tool_correction_lost Fenced_effect_attempted)
+     | Keeper_provider_attempt_effect_core.Observation_unavailable ->
+       exhaust (Tool_correction_lost Fenced_observation_unavailable))
+  | Keeper_internal_error.Internal_unhandled_exception _
+  | Keeper_internal_error.Internal_bridge_exception _ ->
+    exhaust Internal_opaque
+
+(* [api_error_retry_after] extracts the provider's wait hint from the typed
+   [Retry.api_error] when one exists. It is the only reason the route still
+   touches the raw [api_error]: the route class comes from the closed
+   [Candidate_fault] judgment below, and only the hint needs the original
+   constructor's payload. *)
+let api_error_retry_after (api : Llm_provider.Retry.api_error) =
+  match api with
+  | Llm_provider.Retry.RateLimited { retry_after; _ } -> retry_after
+  | Llm_provider.Retry.Overloaded _
+  | Llm_provider.Retry.ServerError _
+  | Llm_provider.Retry.AuthError _
+  | Llm_provider.Retry.AuthorizationError _
+  | Llm_provider.Retry.PaymentRequired _
+  | Llm_provider.Retry.InvalidRequest _
+  | Llm_provider.Retry.NotFound _
+  | Llm_provider.Retry.ContextOverflow _
+  | Llm_provider.Retry.InputCapacity _
+  | Llm_provider.Retry.NetworkError _
+  | Llm_provider.Retry.Timeout _ -> None
+;;
+
+(* [route_of_api_error] derives its rotate / retry / exhaust class from the
+   closed [Candidate_fault] judgment ([of_api_error]) rather than matching
+   [Retry.api_error] by hand. The two walks (exact and Keeper) therefore read
+   the same fact table (RFC-one-slot-fault-judgment-for-every-walk.md §4
+   step 4): a new [Retry.api_error] constructor stops
+   [Candidate_fault.of_api_error] from compiling, which forces a route
+   decision here instead of a silent default. No wildcard: every
+   [binding_fact] maps to exactly one route action, and the two non-binding
+   judgments ([Unattributed], [Unknown_after_dispatch]) each answer one as
+   well. The rich per-class comments from the previous hand-written match
+   live on the [rotate_class] / [retry_class] / [terminal_class] type
+   declarations and the .mli docstrings. *)
+let route_of_api_error (api : Llm_provider.Retry.api_error) =
+  (* Intended, not a pass-through: the wait hint belongs to the source
+     constructor and the class belongs to [Candidate_fault], so every
+     [observe_retry] arm forwards whatever hint the constructor carried
+     through this one binding, and no arm picks the hint by class. Today
+     only [RateLimited] carries one; Account ([PaymentRequired]), Capacity,
+     Server, Deadline and Unknown_after_dispatch ([NetworkError]) receive
+     [None]. When a constructor gains a hint in [api_error_retry_after],
+     its arm forwards it without an edit here. *)
+  let observe = observe_retry ?retry_after:(api_error_retry_after api) in
+  match Llm_provider.Candidate_fault.of_api_error api with
+  | Llm_provider.Candidate_fault.Binding Credential -> rotate Auth_failed
+  | Llm_provider.Candidate_fault.Binding Account_access -> rotate Authorization_refused
+  | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
+  | Llm_provider.Candidate_fault.Binding Model_absent ->
+    rotate Model_unavailable
+  | Llm_provider.Candidate_fault.Binding Rate_limit -> observe Rate_limited
+  | Llm_provider.Candidate_fault.Binding Capacity -> observe Provider_capacity
+  | Llm_provider.Candidate_fault.Binding Server -> observe Server_error
+  | Llm_provider.Candidate_fault.Binding Window ->
+    (* The request did not fit this binding's window. A later candidate with
+       a larger window can serve the same turn, and the walk moves on
+       ([Keeper_turn_driver_try_runtime.context_overflow_should_try_next]),
+       so the route rotates with it (#38984). *)
+    rotate Context_window_exceeded
+  | Llm_provider.Candidate_fault.Binding Body_limit ->
+    rotate Request_refused
+  | Llm_provider.Candidate_fault.Binding Admission -> rotate Admission
+  | Llm_provider.Candidate_fault.Binding Deadline -> observe Provider_timeout
+  | Llm_provider.Candidate_fault.Binding Output_dialect ->
+    (* No [Retry.api_error] constructor currently maps here. If one is
+       added, this arm names the route action for a binding whose declared
+       output dialect refused the request: another binding's dialect may
+       accept the same input, so the lane rotates. *)
+    rotate Request_refused
+  | Llm_provider.Candidate_fault.Binding Refusal_unread ->
+    rotate Refusal_body_not_received
+  | Llm_provider.Candidate_fault.Unattributed ->
+    (* The provider refused without a machine-readable reason
+       ([Unknown_invalid_request]). Another declared candidate may accept
+       the same semantic input (a larger window, a different vendor's
+       schema), and [attempt_rejected_should_try_next] moves the lane there
+       in the same turn (#37631), so the route names that rotation. The
+       same body to the same path is refused again, which
+       [route_resumes_on_same_path] says. *)
+    rotate Request_refused
+  | Llm_provider.Candidate_fault.Unknown_after_dispatch ->
+    (* A network failure is not a key, account or model fact: nothing the
+       provider answered says whose affair it is, and [Retry.NetworkError]
+       carries no dispatch fact to split "sent, then lost" from wiring every
+       candidate shares. The walk still rotates on it through
+       [Runtime_attempt_fsm.should_try_next]; the route answers the same
+       observation it did when the match was hand-written. *)
+    observe Network_transient
+
+let route_of_provider_error (p : Llm_provider.Error.provider_error) =
+  match p with
+  | Llm_provider.Error.RateLimit { retry_after; _ } -> observe_retry ?retry_after Rate_limited
+  | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
+  | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
+    observe_retry ?retry_after Provider_capacity
+  | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
+  | Llm_provider.Error.EmptyCompletion { stop_reason; detail; _ } ->
+    (match Llm_provider.Retry.verdict_of_empty_completion ~stop_reason ~message:detail with
+     | Empty_attributed -> observe_retry (Empty_completion { stop_reason })
+     | Empty_unattributed _ -> exhaust Unmodeled_empty_completion
+     | Empty_overflow overflow -> route_of_api_error overflow)
+  | Llm_provider.Error.ServerError { transient = true; _ } ->
+    observe_retry Server_error
+  (* The provider said this 5xx is not transient, so the same path answers
+     the same way; a different candidate is a different server. The walk
+     ([Runtime_attempt_fsm.should_try_next]) and this route both read the
+     server-failure class from [Retry.server_status_class_of_code]. A code
+     outside it is not a server failure the walk moves on. *)
+  | Llm_provider.Error.ServerError { transient = false; code; _ } ->
+    (match Llm_provider.Retry.server_status_class_of_code code with
+     | Some (Llm_provider.Retry.Overloaded_status | Llm_provider.Retry.Server_error_status)
+       -> rotate Server_error_not_transient
+     | None -> exhaust Provider_integration)
+  | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
+  | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
+  | Llm_provider.Error.AuthError _ -> rotate Auth_failed
+  | Llm_provider.Error.AuthorizationError _ -> rotate Authorization_refused
+  | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
+  (* The provider reported a structured failure of its own for this attempt
+     (a CLI-adapter turn failure, an RPC error, a post-activity context-window
+     report). [Runtime_attempt_fsm.should_try_next] already rotates on every
+     [Http_client.ProviderFailure] kind; calling this class terminal disagreed with
+     a walk that was already moving on (task-1642, census
+     "provider:reported_error" rotates=true). Unlike the wire-format defects
+     below, the same bytes do not have to arrive again: a different candidate
+     is a different provider attempt that may not repeat this provider's own
+     report. *)
+  | Llm_provider.Error.ProviderReportedError _ -> rotate Provider_reported_failure
+  | Llm_provider.Error.MissingApiKey _ -> exhaust Config_mismatch
+  | Llm_provider.Error.InvalidConfig _ -> exhaust Config_mismatch
+  | Llm_provider.Error.InvalidRequest _ -> exhaust Deterministic_request
+  (* The stream ended before the completion contract's stop reason. The
+     provider accepted the request and the bytes that would have said why the
+     generation stopped never arrived, which is what a dropped transport looks
+     like. *)
+  | Llm_provider.Error.ProviderWireError
+      { kind = Llm_provider.Http_client.Incomplete_stream; _ } ->
+    observe_retry Network_transient
+  (* The bytes that did arrive broke this provider's declared wire format.
+     The same path sends the same bytes again, but the next candidate is a
+     different provider attempt with its own stream, and the walk already
+     rotates on every [Http_client.ProviderFailure] kind. *)
+  | Llm_provider.Error.ProviderWireError
+      { kind =
+          ( Llm_provider.Http_client.Malformed_payload
+          | Llm_provider.Http_client.Unknown_event
+          | Llm_provider.Http_client.Oversized_payload )
+      ; _
+      } ->
+    rotate Provider_wire_defect
+  (* [ParseError] and [UnknownVariant] are our own reading of the reply,
+     which every candidate reaches; [ProviderTerminal] is a condition the
+     provider ended its stream on (a session conflict among them). The walk
+     carries all three as [Http_client.ProviderTerminal] and stops. *)
+  | Llm_provider.Error.ParseError _
+  | Llm_provider.Error.UnknownVariant _
+  | Llm_provider.Error.ProviderTerminal _ ->
+    exhaust Provider_integration
+
+let route_of_error_family (err : Agent_core.Error.t) : route =
+  match err with
+  | Agent_core.Error.Api api -> route_of_api_error api
+  | Agent_core.Error.Provider p -> route_of_provider_error p
+  | Agent_core.Error.Mcp _ -> exhaust Protocol_error
+  | Agent_core.Error.Config _ -> exhaust Config_mismatch
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
+    exhaust Internal_opaque
+;;
+
+let route_of_error ~boundary (err : Agent_core.Error.t) : route =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  (* Both of these decide their own route whichever boundary reported them.
+     [Terminal_effect_failed] because the effect is the fact, and
+     [Runtime_connection_closed] because the agent-core family arm would read
+     its carrier as a bare internal error and drop the retry the untyped
+     [ProviderUnavailable] used to earn (RFC-0454 P2). *)
+  | Some
+      (( Keeper_internal_error.Terminal_effect_failed _
+       | Keeper_internal_error.Runtime_connection_closed _ ) as internal) ->
+    route_of_masc_internal internal
+  (* The provider walk reads its result at the AGENT_CORE boundary, after
+     MASC's accept gate may have rejected the SDK-preserved empty truncation.
+     That exact typed outcome carries the same provider observation at either
+     boundary; other accept rejections retain their boundary-specific route. *)
+  | Some
+      (Keeper_internal_error.Accept_rejected
+         { reason_kind; response_shape; stop_reason; _ } as internal)
+    when empty_max_tokens_accept_rejection ~reason_kind ~response_shape ~stop_reason
+         && Option.is_some (Keeper_internal_error.carried_masc_internal_error err) ->
+    route_of_masc_internal internal
+  | Some
+      (( Keeper_internal_error.Official_client_recovery_required _
+       | Keeper_internal_error.Runtime_exhausted _
+       | Keeper_internal_error.Resumable_cli_session _
+       | Keeper_internal_error.Accept_rejected _
+       | Keeper_internal_error.Internal_unhandled_exception _
+       | Keeper_internal_error.Internal_bridge_exception _
+       | Keeper_internal_error.Internal_contract_rejected _
+       | Keeper_internal_error.Incomplete_tool_transcript _
+       | Keeper_internal_error.Provider_attempt_effect_fenced _
+       | Keeper_internal_error.Tool_correction_lost _
+       | Keeper_internal_error.Host_stopped_turn _
+       | Keeper_internal_error.Receipt_persistence_failed _
+       | Keeper_internal_error.Gate_replay_repair_required _ ) as internal) ->
+    (match boundary with
+     | Masc_execution -> route_of_masc_internal internal
+     | Agent_core_execution -> route_of_error_family err)
+  | None -> route_of_error_family err
+
+(* A provider's retry hint that names a wait: present, finite, above zero. *)
+let usable_retry_after = function
+  | None -> None
+  | Some hint when Float.is_finite hint && hint > 0.0 -> Some hint
+  | Some _ -> None
+;;
+
+(* How long a path rests after a provider refused it (RFC-provider-path-rest).
+   The rest belongs to the path that received the answer, so its length comes
+   from that answer alone: the keeper's cadence spaces periodic turns and says
+   nothing about a provider's window.
+
+   A usable hint rests that long. A positive fractional hint still rests at
+   least one second so the chat lane cannot re-fire in a tight loop (#35246).
+   Without a usable hint (absent, zero, negative, infinite, NaN) the class decides: a
+   throttle rests the named floor, and an account exhaustion rests the cap,
+   because a quota that said nothing about its end is not known to come back
+   within a minute. Only the unstated fallback is clamped to [cap_sec].
+   A validated provider hint is evidence of when the path can serve again;
+   cutting it short repeatedly calls a path that is still exhausted (#39190). *)
+let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
+  let cap_sec = Float.max 0.0 cap_sec in
+  let unstated () =
+    match retry_class with
+    | Hard_quota -> cap_sec
+    | Rate_limited
+    | Provider_capacity
+    | Empty_completion _
+    | Server_error
+    | Network_transient
+    | Provider_timeout ->
+      Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
+  in
+  match usable_retry_after retry_after_hint with
+  | None -> Float.min cap_sec (unstated ())
+  | Some hint -> Float.max hint 1.0
+;;
+
+let route_kind_label = function
+  | Retry_after_observed _ -> "retry_after_observed"
+  | Rotate_now _ -> "rotate_now"
+  | Exhausted_visible_alive _ -> "exhausted_visible_alive"
+
+let retry_class_label = function
+  | Rate_limited -> "rate_limited"
+  | Hard_quota -> "hard_quota"
+  | Provider_capacity -> "provider_capacity"
+  | Empty_completion { stop_reason } ->
+    "empty_completion_" ^ Llm_provider.Types.stop_reason_to_metric_label stop_reason
+  | Server_error -> "server_error"
+  | Network_transient -> "network_transient"
+  | Provider_timeout -> "provider_timeout"
+
+let rotate_class_label = function
+  | Auth_failed -> "auth_failed"
+  | Authorization_refused -> "authorization_refused"
+  | Model_unavailable -> "model_unavailable"
+  | Resumable_cli_session -> "resumable_cli_session"
+  | Candidates_filtered -> "candidates_filtered"
+  | Runtime_exhausted -> "runtime_exhausted"
+  | No_progress_empty -> "no_progress_empty"
+  | No_progress_thinking_only -> "no_progress_thinking_only"
+  | No_progress_truncated -> "no_progress_truncated"
+  | Admission -> "admission"
+  | Refusal_body_not_received -> "refusal_body_not_received"
+  | Provider_reported_failure -> "provider_reported_failure"
+  | Request_refused -> "request_refused"
+  | Provider_wire_defect -> "provider_wire_defect"
+  | Server_error_not_transient -> "server_error_not_transient"
+  | Context_window_exceeded -> "context_overflow"
+
+let terminal_class_label = function
+  | Deterministic_request -> "deterministic_request"
+  | Session_claim_refused -> "session_claim_refused"
+  | Transcript_refused -> "transcript_refused"
+  | Contract_violation -> "contract_violation"
+  | Protocol_error -> "protocol_error"
+  | Config_mismatch -> "config_mismatch"
+  | Provider_integration -> "provider_integration"
+  | Unmodeled_empty_completion -> "unmodeled_empty_completion"
+  | Terminal_effect_dependency_unavailable ->
+    "terminal_effect_dependency_unavailable"
+  | Terminal_effect_policy_rejection -> "terminal_effect_policy_rejection"
+  | Terminal_effect_runtime_failure -> "terminal_effect_runtime_failure"
+  | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
+  | Terminal_effect_operator_cancelled -> "terminal_effect_operator_cancelled"
+  | Provider_attempt_effect_fenced Fenced_effect_attempted ->
+    "provider_attempt_effect_fenced"
+  | Provider_attempt_effect_fenced Fenced_observation_unavailable ->
+    "provider_attempt_effect_fenced_observation_unavailable"
+  | Tool_correction_lost Fenced_effect_attempted -> "tool_correction_lost"
+  | Tool_correction_lost Fenced_observation_unavailable ->
+    "tool_correction_lost_observation_unavailable"
+  | Internal_opaque -> "internal_opaque"
+
+let route_class_label = function
+  | Retry_after_observed { retry_class; _ } -> retry_class_label retry_class
+  | Rotate_now { rotate } -> rotate_class_label rotate
+  | Exhausted_visible_alive { terminal } -> terminal_class_label terminal
+
+(* Whether the provider answered the request that carried the turn's input.
+   Read by the heartbeat to settle a Gate continuation that failed on this
+   route: an answer means the model already saw the replay evidence the turn
+   carried (#32956). Every constructor is named so a new class has to say
+   which side it is on. *)
+let response_observed = function
+  | Retry_after_observed { retry_class; retry_after = _ } ->
+    (match retry_class with
+     | Empty_completion _ ->
+       (* The provider completed the turn with a modeled stop reason and an
+          empty assistant answer. The model saw the input even though it made
+          no usable progress. *)
+       true
+     | Rate_limited
+     (* 429: the request was refused before any generation. *)
+     | Hard_quota
+     (* 402: refused before any generation. *)
+     | Provider_capacity
+     (* the provider's overload or capacity pool: refused before any
+        generation. *)
+     | Server_error
+     (* 5xx or provider unavailable: nothing the model said is on record. *)
+     | Network_transient
+     (* the transport failed; no answer arrived. *)
+     | Provider_timeout ->
+       (* the deadline expired before an answer. *)
+       false)
+  | Rotate_now { rotate } ->
+    (match rotate with
+     | Auth_failed
+     (* the credential was refused before any generation. *)
+     | Authorization_refused
+     (* the account was refused before any generation. *)
+     | Model_unavailable
+     (* the model or endpoint was not found: no generation. *)
+     | Resumable_cli_session
+     (* the CLI session ended without an answer; a recovery lane resumes it. *)
+     | Candidates_filtered
+     (* the candidate set emptied before any answer. *)
+     | Admission
+     (* this binding's pre-dispatch admission refused the prepared request
+        (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
+        [InputCapacity]/[Json_parse_error], or the candidate's own policy
+        refusing it before the wire, #34475): no generation. *)
+     | Refusal_body_not_received
+     (* the provider refused the request; the body naming why never
+        arrived, and a refusal is not an answer. *)
+     | Provider_reported_failure
+     (* the provider reported its own structured failure for this attempt;
+        nothing here says the model
+        produced content the turn's input carried into. *)
+     | Request_refused
+     (* the provider refused the body before any generation. *)
+     | Provider_wire_defect
+     (* the bytes that arrived broke the wire format: no usable answer is on
+        record. *)
+     | Server_error_not_transient
+     (* a 5xx: nothing the model said is on record. *)
+     | Context_window_exceeded
+     (* the request did not fit the window: no generation. *)
+     | Runtime_exhausted ->
+       (* a whole-runtime exhaustion wrapper: it carries no answer. *)
+       false
+     | No_progress_empty
+     (* the provider answered with an empty body and the accept gate
+        rejected that answer. *)
+     | No_progress_thinking_only
+     (* the provider answered with thinking only; rejected by the accept
+        gate. *)
+     | No_progress_truncated ->
+     (* the provider answered and stopped at MaxTokens; rejected by the
+        accept gate. *)
+       true)
+  | Exhausted_visible_alive { terminal } ->
+    (match terminal with
+     | Deterministic_request
+     (* invalid request or input capacity: refused before any generation. *)
+     | Session_claim_refused
+     (* the durable local session claim was refused before dispatch; the
+        model did not see the turn input or its replay evidence. *)
+     | Transcript_refused
+     (* the history was refused before dispatch; the model did not see the
+        turn input or its replay evidence. *)
+     | Protocol_error
+     (* an MCP protocol failure; whether an answer arrived is not on the
+        route. *)
+     | Config_mismatch
+     (* missing key or invalid configuration: no generation. *)
+     | Unmodeled_empty_completion
+     (* An empty wire reply with an unknown stop reason may be an overflow or
+        refusal; it does not prove that the model observed the turn input. *)
+     | Provider_integration
+     (* unparseable, provider-reported, or unknown-variant reply: no usable
+        answer is on record. *)
+     | Internal_opaque
+     (* unhandled exceptions and internal families. An accept rejection
+        without a no-progress hint also lands here, but the route cannot
+        tell it from an exception, so the evidence keeps its wake. *)
+     | Provider_attempt_effect_fenced Fenced_observation_unavailable
+     | Tool_correction_lost Fenced_observation_unavailable ->
+       (* the adapter could not say whether a tool effect was attempted,
+          and it says so before any answer: the claude-code lane marks it
+          when the process is spawned ([Keeper_claude_code_runtime]
+          on_spawned), the codex lane when the turn input could not be
+          written ([Keeper_codex_runtime] Turn_input_write_failed). The
+          request may never have reached the provider, so the evidence
+          keeps its wake. *)
+       false
+     | Contract_violation
+     (* a proven pre-effect tool failure: the model answered and the turn's
+        own contract over that answer failed. The two effect fences reach
+        this class only with [No_effect_observed], which the driver never
+        produces. *)
+     | Terminal_effect_dependency_unavailable
+     | Terminal_effect_policy_rejection
+     | Terminal_effect_runtime_failure
+     | Terminal_effect_workflow_rejection
+     | Terminal_effect_operator_cancelled
+     (* a tool the model called failed terminally: the call is the answer. *)
+     | Provider_attempt_effect_fenced Fenced_effect_attempted
+     (* a dynamic tool handler was entered before the attempt was fenced
+        ([Keeper_turn_driver], masc#28885): the model answered with that
+        call, and what failed came after it. *)
+     | Tool_correction_lost Fenced_effect_attempted ->
+       (* the same fence on a turn that also recorded pre_tool_use
+          rejections: the model answered, the correction round did not
+          land. *)
+       true)
+
+let route_resumes_on_same_path = function
+  | Retry_after_observed { retry_class; retry_after } ->
+    (match retry_class with
+     | Rate_limited
+     (* 429: the provider lifts the throttle over time. A weekly limit sent as
+        a 429 fails the resumed attempt before it runs a tool, which ends the
+        operation. *)
+     | Provider_capacity
+     (* the provider's capacity was full for the moment. *)
+     | Empty_completion
+         { stop_reason =
+             ( Llm_provider.Types.EndTurn | Llm_provider.Types.MaxTokens
+             | Llm_provider.Types.StopSequence )
+         }
+     (* A direct operation that saved tool results resumes once from that
+        checkpoint rather than discarding the work. If the empty answer
+        repeats before another tool result is saved, the progress condition
+        withholds a second resume. *)
+     | Server_error
+     (* 5xx or provider unavailable. *)
+     | Network_transient
+     (* the transport dropped. *)
+     | Provider_timeout ->
+       (* a deadline expired. *)
+       true
+     | Empty_completion
+         { stop_reason =
+             ( Llm_provider.Types.Refusal | Llm_provider.Types.ContentFilter
+             | Llm_provider.Types.RepetitionTruncation
+             | Llm_provider.Types.StopToolUse | Llm_provider.Types.PauseTurn
+             | Llm_provider.Types.Compaction
+             | Llm_provider.Types.ContextWindowExceeded
+             | Llm_provider.Types.UnmatchedToolCalls | Llm_provider.Types.Unknown _ )
+         } ->
+       (* Refusal, content filtering, and repetition truncation are
+          deterministic for the same input, matching
+          [Refusal_body_not_received] below.
+          [PauseTurn] and [Compaction] require replaying the provider's actual
+          assistant response. An [EmptyCompletion] error carries no response
+          content, so replaying the pre-response checkpoint is not that
+          continuation. Known overflow normally becomes a typed API error,
+          while unknown reasons now have their own terminal class. Keep
+          injected retry values closed rather than guessing recovery. *)
+       false
+     | Hard_quota ->
+       (* a quota comes back by itself only when the provider said when; one
+          with no reset may stay closed until the account is paid. *)
+       Option.is_some (usable_retry_after retry_after))
+  | Rotate_now { rotate } ->
+    (match rotate with
+     | Authorization_refused ->
+       (* a 403 names no time it ends, like [Hard_quota] without a reset:
+          the account may stay refused until someone pays or grants it. *)
+       false
+     | Auth_failed
+     | Model_unavailable
+     | Resumable_cli_session
+     | Candidates_filtered
+     | Runtime_exhausted
+     | No_progress_empty
+     | No_progress_thinking_only
+     | No_progress_truncated
+     | Refusal_body_not_received
+     | Admission
+     | Provider_reported_failure
+     | Request_refused
+     | Provider_wire_defect
+     | Server_error_not_transient
+     | Context_window_exceeded ->
+       (* the credential, the model, the client session, the request body
+          or its size against this window,
+          the provider's wire or its own non-transient answer: the same path
+          answers the same way after any wait. *)
+       false)
+  | Exhausted_visible_alive { terminal } ->
+    (match terminal with
+     | Deterministic_request
+     | Session_claim_refused
+     | Transcript_refused
+     | Contract_violation
+     | Protocol_error
+     | Config_mismatch
+     | Provider_integration
+     | Unmodeled_empty_completion
+     | Terminal_effect_dependency_unavailable
+     | Terminal_effect_policy_rejection
+     | Terminal_effect_runtime_failure
+     | Terminal_effect_workflow_rejection
+     | Terminal_effect_operator_cancelled
+     | Provider_attempt_effect_fenced
+         (Fenced_effect_attempted | Fenced_observation_unavailable)
+     | Tool_correction_lost (Fenced_effect_attempted | Fenced_observation_unavailable)
+     | Internal_opaque ->
+       (* the request, its size, the configuration, a tool, or MASC itself
+          failed: sending it again to the same path fails the same way. *)
+       false)

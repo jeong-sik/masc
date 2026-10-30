@@ -1,0 +1,1206 @@
+open Alcotest
+
+module Live = Masc_tui_keeper_chat_live
+
+(* Most fixtures compare stream content and sequence only; timestamp parity is
+   exercised separately through the observed-delta API. *)
+let feed decoder chunk =
+  Live.feed decoder chunk
+  |> List.map (fun (item : Live.observed_delta) -> item.seq, item.delta)
+
+(* The live decoder takes bytes, not lines, so the property that matters is
+   that it does not care where the chunks were cut. Every test that asserts a
+   delta sequence therefore asserts it for a whole-body feed and for a
+   byte-at-a-time feed, and the invariance test below pins the general case. *)
+
+let token_count = function Some value -> string_of_int value | None -> "none"
+
+let delta_to_string : Live.delta -> string = function
+  | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
+  | Live.Run_started -> "run_started"
+  | Live.Provider_retry_observed { retry; _ } ->
+      Yojson.Safe.to_string (Runtime_claude_api_retry.to_json retry)
+  | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
+      Printf.sprintf "runtime_attempt_started(%s,%s)"
+        (Option.value ~default:"none" runtime_id)
+        (match attempt_index with Some i -> string_of_int i | None -> "none")
+  | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Model_content_activity activity -> Yojson.Safe.to_string (Masc.Keeper_chat_events.model_content_activity_to_json activity)
+  | Live.Stream_model_stopped _ -> "stream_model_stopped"
+  | Live.Stream_details { usage; stop_reason; _ } ->
+      Printf.sprintf "stream_details(%s,stop=%s)"
+        (match usage with
+         | None -> "no usage"
+         | Some usage ->
+             Printf.sprintf "in=%s,out=%s,cache_read=%s,cache_write=%s"
+               (token_count usage.Live.input_tokens)
+               (token_count usage.Live.output_tokens)
+               (token_count usage.Live.cache_read_input_tokens)
+               (token_count usage.Live.cache_creation_input_tokens))
+        (Option.fold ~none:"none" ~some:Agent_core.Types.stop_reason_to_string stop_reason)
+  | Live.Text {text=text; _} -> Printf.sprintf "text(%s)" text
+  | Live.Media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
+  | Live.Thinking {text;_} -> Printf.sprintf "thinking(%s)" text
+  | Live.Thinking_snapshot {text;index;response} ->
+      Printf.sprintf "thinking_snapshot(%s,index=%d,response=%d.%d)" text index
+        response.Masc.Keeper_chat_events.response_generation response.Masc.Keeper_chat_events.response_scope
+  | Live.Native_tool_started { occurrence; tool_name } ->
+      Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index (Option.value ~default:"unnamed" tool_name)
+  | Live.Native_tool_progress { occurrence; _ } ->
+      Printf.sprintf "native_tool_progress(%d/%d)" occurrence.stream_scope occurrence.block_index
+  | Live.Native_tool_ended { occurrence; _ } ->
+      Printf.sprintf "native_tool_ended(%d/%d)" occurrence.stream_scope occurrence.block_index
+  | Live.Tool_admitted { occurrence; provider_tool_name; tool_name } ->
+      Printf.sprintf "tool_admitted(%d/%d,%s,%s)" occurrence.stream_scope occurrence.block_index provider_tool_name tool_name
+  | Live.Tool_started { occurrence; tool_name } ->
+      Printf.sprintf "tool_started(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index tool_name
+  | Live.Tool_args { occurrence; fragment = Live.Args_delta delta } ->
+      Printf.sprintf "tool_args_delta(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index delta
+  | Live.Tool_args { occurrence; fragment = Live.Args_snapshot snapshot } ->
+      Printf.sprintf "tool_args_snapshot(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index snapshot
+  | Live.Tool_ended { occurrence } ->
+      Printf.sprintf "tool_ended(%d/%d)" occurrence.stream_scope occurrence.block_index
+  | Live.Tool_result { occurrence; execution_id } ->
+      Printf.sprintf "tool_result(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index execution_id
+  | Live.Stream_protocol_error { quarantined_occurrence; detail } ->
+      let occurrence =
+        Option.fold ~none:"-"
+          ~some:(fun (occurrence : Live.tool_occurrence) ->
+            Printf.sprintf "%d/%d" occurrence.stream_scope occurrence.block_index)
+          quarantined_occurrence
+      in
+      Printf.sprintf "stream_protocol_error(%s,%s)" occurrence detail
+  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
+      Printf.sprintf "approval_requested(%s,%s,%s,%s,%s)" call_id tool_name
+        args question because
+  | Live.Approval_settled { call_id; outcome } ->
+      Printf.sprintf "approval_settled(%s,%s)" call_id outcome
+  | Live.Accepted { admission; queue_length; _ } ->
+      let admission =
+        match admission with
+        | Live.Queued -> "queued"
+        | Live.Running -> "running"
+        | Live.Settled -> "settled"
+      in
+      Printf.sprintf "accepted(%s,%d)" admission queue_length
+  | Live.Checkpoint -> "checkpoint"
+  | Live.External_effect_completed -> "external_effect_completed"
+  | Live.Reply_details { reply; turn_outcome; turn_ref; _ } ->
+      Printf.sprintf "reply_details(%s,%s,%s)" reply
+        (Masc.Keeper_turn_outcome.to_label turn_outcome)
+        turn_ref
+  | Live.Run_failed { message } -> Printf.sprintf "run_failed(%s)" message
+  | Live.Run_finished -> "run_finished"
+  | Live.Undecodable detail -> Printf.sprintf "undecodable(%s)" detail
+
+let delta = testable (Fmt.of_to_string delta_to_string) ( = )
+
+(* ── Stream fixtures ─────────────────────────────────────────────── *)
+
+let thread_id = "keeper:keeper.one"
+let run_id = "keeper-operation-run-tui-request-1"
+let message_id = "keeper-operation-message-tui-request-1"
+
+let event event_type fields =
+  `Assoc
+    ([ "type", `String event_type
+     ; "threadId", `String thread_id
+     ; "timestamp", `Float 1.0
+     ]
+     @ fields)
+
+let sse json = "data: " ^ Yojson.Safe.to_string json ^ "\n\n"
+
+let text_content delta =
+  event "TEXT_MESSAGE_CONTENT"
+    [ "runId", `String run_id
+    ; "messageId", `String message_id
+    ; "delta", `String delta
+    ]
+
+let custom name value =
+  event "CUSTOM"
+    [ "runId", `String run_id; "name", `String name; "value", value ]
+
+let occurrence_fields ?(scope = 2) ?(block_index = 1) ?(call_id = Some "call-1") () =
+  [ "toolStreamScope", `Int scope
+  ; "toolCallBlockIndex", `Int block_index
+  ]
+  @ Option.fold ~none:[] ~some:(fun id -> [ "toolCallId", `String id ]) call_id
+;;
+
+let occurrence ?(scope = 2) ?(block_index = 1) ?(call_id = Some "call-1") () =
+  { Live.stream_scope = scope
+  ; block_index
+  ; provider_message_id = None
+  ; tool_call_id = call_id
+  }
+;;
+
+(* A turn that answers, reads a file, thinks, and answers again — the shape
+   the live pane exists to show. *)
+let coding_turn_events =
+  [ event "RUN_STARTED" [ "runId", `String run_id ]
+  ; event "TEXT_MESSAGE_START"
+      [ "runId", `String run_id
+      ; "messageId", `String message_id
+      ; "role", `String "assistant"
+      ]
+  ; text_content "Let me "
+  ; text_content "look."
+  ; event "TOOL_CALL_START"
+      ([ "runId", `String run_id; "toolCallName", `String "read_file" ]
+       @ occurrence_fields ())
+  ; event "TOOL_CALL_ARGS"
+      ([ "runId", `String run_id; "delta", `String "{\"path\":\"lib/a.ml\"}" ]
+       @ occurrence_fields ())
+  ; event "TOOL_CALL_END"
+      ([ "runId", `String run_id ] @ occurrence_fields ())
+  ; custom "KEEPER_TOOL_RESULT_READY"
+      (`Assoc
+         (occurrence_fields () @ [ "executionId", `String "exec-1" ]))
+  ; custom "KEEPER_THINKING_DELTA"
+      (`Assoc [ "index", `Int 0; "delta", `String "weighing it" ])
+  ; text_content " Found it."
+  ; event "TEXT_MESSAGE_END"
+      [ "runId", `String run_id; "messageId", `String message_id ]
+  ; event "RUN_FINISHED" [ "runId", `String run_id ]
+  ]
+
+let coding_turn_body =
+  coding_turn_events |> List.map sse |> String.concat ""
+
+let expected_coding_turn =
+  [ Live.Run_started
+  ; Live.Text {text="Let me "; response=Unobserved_scope (None)}
+  ; Live.Text {text="look."; response=Unobserved_scope (None)}
+  ; Live.Tool_started { occurrence = occurrence (); tool_name = "read_file" }
+  ; Live.Tool_args
+      { occurrence = occurrence (); fragment = Live.Args_delta "{\"path\":\"lib/a.ml\"}" }
+  ; Live.Tool_ended { occurrence = occurrence () }
+  ; Live.Tool_result { occurrence = occurrence (); execution_id = "exec-1" }
+  ; Live.Thinking {text="weighing it";index=0;response=None}
+  ; Live.Text {text=" Found it."; response=Unobserved_scope (None)}
+  ; Live.Run_finished
+  ]
+
+(* ── Feed drivers ────────────────────────────────────────────────── *)
+
+(* The acceptance event carries no runId: the server sends it before there is
+   a run. Built here rather than through [custom] so the fixture is the shape
+   the server actually writes. *)
+let accepted ?(operation_id = "op-1") ~state ~queued_count () =
+  event "CUSTOM"
+    [ "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"
+    ; ( "value"
+      , `Assoc
+          [ "operation_id", `String operation_id
+          ; "state", `String state
+          ; "queued_count", `Int queued_count
+          ] )
+    ]
+
+let feed_whole body =
+  let decoder = Live.create () in
+  List.map snd (feed decoder body)
+
+let feed_whole_tagged body =
+  let decoder = Live.create () in
+  feed decoder body
+
+(* Split [body] into [size]-byte chunks and concatenate what each feed
+   returns. *)
+let feed_in_chunks ~size body =
+  let decoder = Live.create () in
+  let length = String.length body in
+  let rec loop offset acc =
+    if offset >= length then List.rev acc
+    else
+      let take = min size (length - offset) in
+      let chunk = String.sub body offset take in
+      loop (offset + take) (List.rev_append (feed decoder chunk) acc)
+  in
+  List.map snd (loop 0 [])
+
+let feed_in_chunks_tagged ~size body =
+  let decoder = Live.create () in
+  let length = String.length body in
+  let rec loop offset acc =
+    if offset >= length then List.rev acc
+    else
+      let take = min size (length - offset) in
+      let chunk = String.sub body offset take in
+      loop (offset + take) (List.rev_append (feed decoder chunk) acc)
+  in
+  loop 0 []
+
+let tagged = pair (option int) delta
+
+(* ── Tests ───────────────────────────────────────────────────────── *)
+
+let test_coding_turn_whole_body () =
+  check (list delta) "deltas of a whole-body feed" expected_coding_turn
+    (feed_whole coding_turn_body)
+
+let test_chunk_boundaries_do_not_matter () =
+  (* 1 catches every mid-line and mid-escape cut. The others are chosen to
+     land inside JSON payloads, on and around the "\n\n" that ends an event,
+     and past the end of one event into the next. *)
+  List.iter
+    (fun size ->
+      check (list delta)
+        (Printf.sprintf "deltas are the same in %d-byte chunks" size)
+        expected_coding_turn
+        (feed_in_chunks ~size coding_turn_body))
+    [ 1; 2; 3; 7; 13; 64; 997; String.length coding_turn_body ]
+
+let test_partial_line_emits_nothing_until_it_ends () =
+  let decoder = Live.create () in
+  let body = sse (text_content "hello") in
+  let split_at = String.length body - 4 in
+  let head = String.sub body 0 split_at in
+  let tail = String.sub body split_at (String.length body - split_at) in
+  check (list delta) "an unfinished line yields no delta" []
+    (List.map snd (feed decoder head));
+  check (list delta) "the delta arrives when the line ends"
+    [ Live.Text {text="hello"; response=Unobserved_scope (None)} ]
+    (List.map snd (feed decoder tail))
+
+(* ── Journal seq on the frame ─────────────────────────────────────── *)
+
+let with_id seq frame = Printf.sprintf "id: %d\n%s" seq frame
+
+let test_a_frame_id_tags_its_deltas () =
+  check (list tagged) "the id line's seq rides the delta"
+    [ (Some 7, Live.Text {text="hello"; response=Unobserved_scope (None)}) ]
+    (feed_whole_tagged (with_id 7 (sse (text_content "hello"))))
+
+let test_frame_timestamps_keep_server_epoch_seconds () =
+  let published_at = 1791363124.206972 in
+  let frame seq timestamp text =
+    with_id seq
+      (sse
+         (`Assoc
+            ([ "type", `String "TEXT_MESSAGE_CONTENT"
+             ; "runId", `String run_id
+             ; "messageId", `String message_id
+             ; "delta", `String text
+             ]
+             @ Option.fold ~none:[]
+                 ~some:(fun value -> [ "timestamp", value ]) timestamp)))
+  in
+  let body =
+    frame 7 (Some (`Float published_at)) "fractional"
+    ^ frame 8 (Some (`Int 1791363125)) "integer"
+    ^ frame 9 None "untimed"
+  in
+  let expected =
+    [ ((Some 7, Some published_at), Live.Text {text="fractional"; response=Unobserved_scope (None)})
+    ; ((Some 8, Some 1791363125.), Live.Text {text="integer"; response=Unobserved_scope (None)})
+    ; ((Some 9, None), Live.Text {text="untimed"; response=Unobserved_scope (None)})
+    ]
+  in
+  List.iter
+    (fun size ->
+      let decoder = Live.create () in
+      let rec read offset =
+        if offset >= String.length body then []
+        else
+          let length = min size (String.length body - offset) in
+          let observed = Live.feed decoder (String.sub body offset length) in
+          observed @ read (offset + length)
+      in
+      let actual =
+        read 0
+        |> List.map (fun (item : Live.observed_delta) ->
+               ((item.seq, item.at), item.delta))
+      in
+      check (list (pair (pair (option int) (option (float 0.000001))) delta))
+        (Printf.sprintf "server time survives %d-byte chunks" size)
+        expected actual)
+    [ 1; 17; String.length body ]
+
+let test_an_id_held_across_a_chunk_boundary () =
+  let decoder = Live.create () in
+  check (list tagged) "the id line alone yields nothing" []
+    (feed decoder "id: 7\n");
+  check (list tagged) "the data line that follows carries it"
+    [ (Some 7, Live.Text {text="hello"; response=Unobserved_scope (None)}) ]
+    (feed decoder (sse (text_content "hello")))
+
+(* A stream cut right after an [id:] line leaves that decoder armed with the
+   seq and half a frame buffered. The reconnect opens a fresh decoder, so the
+   new stream's id-less acceptance is tagged [None] and nothing from the cut
+   stream glues onto it; the position the cut decoder held is the log's to
+   remember, not the decoder's. *)
+let test_a_fresh_decoder_starts_without_a_seq () =
+  let cut = Live.create () in
+  check (list tagged) "the cut stream ends armed" []
+    (feed cut "id: 9\ndata: {\"type\":\"TEXT_MESSAGE_CON");
+  let fresh = Live.create () in
+  check (list tagged) "the new stream's acceptance carries no seq"
+    [ (None, Live.Accepted { admission = Live.Running; queue_length = 0; interactive = None }) ]
+    (feed fresh (sse (accepted ~state:"Running" ~queued_count:0 ())));
+  check (list tagged) "the cut decoder's seq never reaches the new stream"
+    [ (Some 10, Live.Text {text="b"; response=Unobserved_scope (None)}) ]
+    (feed fresh (with_id 10 (sse (text_content "b"))))
+
+let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
+  let body =
+    with_id 3 (sse (text_content "a"))
+    ^ sse (accepted ~state:"Running" ~queued_count:1 ())
+    ^ with_id 4 (sse (text_content "b"))
+  in
+  check (list tagged) "acceptance is None between two tagged frames"
+    [ (Some 3, Live.Text {text="a"; response=Unobserved_scope (None)})
+    ; (None, Live.Accepted { admission = Live.Running; queue_length = 1; interactive = None })
+    ; (Some 4, Live.Text {text="b"; response=Unobserved_scope (None)})
+    ]
+    (feed_whole_tagged body);
+  List.iter
+    (fun size ->
+      check (list tagged)
+        (Printf.sprintf "the same tags in %d-byte chunks" size)
+        (feed_whole_tagged body)
+        (feed_in_chunks_tagged ~size body))
+    [ 1; 2; 3; 7; 13 ]
+
+let test_a_non_integer_id_is_no_seq () =
+  check (list tagged) "id: x tags nothing"
+    [ (None, Live.Text {text="hello"; response=Unobserved_scope (None)}) ]
+    (feed_whole_tagged ("id: x\n" ^ sse (text_content "hello")));
+  List.iter
+    (fun raw ->
+      check (list tagged) (raw ^ " is not a decimal seq")
+        [ (None, Live.Text {text="hello"; response=Unobserved_scope (None)}) ]
+        (feed_whole_tagged (raw ^ "\n" ^ sse (text_content "hello"))))
+    [ "id: 0x10"; "id: 1_0"; "id: -1"; "id: +5" ]
+
+let test_id_line_spellings () =
+  check (list tagged) "no space after the colon" [ (Some 7, Live.Text {text="hello"; response=Unobserved_scope (None)}) ]
+    (feed_whole_tagged ("id:7\n" ^ sse (text_content "hello")));
+  check (list tagged) "trailing spaces" [ (Some 7, Live.Text {text="hello"; response=Unobserved_scope (None)}) ]
+    (feed_whole_tagged ("id: 7   \n" ^ sse (text_content "hello")));
+  check (list tagged) "two id lines: the last one wins" [ (Some 8, Live.Text {text="hello"; response=Unobserved_scope (None)}) ]
+    (feed_whole_tagged ("id: 7\nid: 8\n" ^ sse (text_content "hello")))
+
+(* SSE dispatches on the empty line alone; a line of spaces is a nameless
+   field and must not end the frame -- or the seq would be dropped before the
+   data line it belongs to. *)
+let test_a_whitespace_line_is_not_a_frame_end () =
+  check (list tagged) "the seq survives a blank-but-not-empty line"
+    [ (Some 7, Live.Text {text="hello"; response=Unobserved_scope (None)}) ]
+    (feed_whole_tagged ("id: 7\n   \n" ^ sse (text_content "hello")))
+
+let reply_details_value ?(outcome = "visible_reply") ?(turn_ref = "trace-1#3") () =
+  `Assoc
+    [ "reply", `String "done"
+    ; "turn_outcome", `String outcome
+    ; "turn_ref", `String turn_ref
+    ]
+
+let test_reply_details_is_read_whole () =
+  check (list delta) "the three fields come through"
+    [ Live.Reply_details
+        { terminal_stream_scope = None; reply = "done"
+        ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+        ; turn_ref = "trace-1#3"
+        }
+    ]
+    (feed_whole (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ()))))
+
+let test_native_tool_end_without_completion_is_reported () =
+  (* An END with no completion is a wire-valid record of a call whose
+     outcome was never recorded (#42241), not an undecodable frame. *)
+  check bool "a native end without completion reads as completion_unrecorded" true
+    (match feed_whole (sse (custom "KEEPER_NATIVE_TOOL_END"
+       (`Assoc ["toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 1]))) with
+     | [ Live.Native_tool_ended { occurrence = o; completion } ] ->
+       o = occurrence ~scope:0 ~block_index:1 ~call_id:None ()
+       && completion = Runtime_native_tools.completion_unrecorded
+     | _ -> false)
+
+let test_reply_details_short_of_a_field_is_reported () =
+  let undecodable body =
+    match feed_whole body with
+    | [ Live.Undecodable _ ] -> true
+    | _ -> false
+  in
+  check bool "a non-object value" true
+    (undecodable (sse (custom "KEEPER_REPLY_DETAILS" (`String "x"))));
+  check bool "an unknown outcome" true
+    (undecodable
+       (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~outcome:"shrug" ()))));
+  check bool "a turn_ref that is not <trace>#<turn>" true
+    (undecodable
+       (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ~turn_ref:"nope" ()))));
+  List.iter (fun scope ->
+    let fields = match reply_details_value () with `Assoc fields -> fields | _ -> assert false in
+    check bool "malformed terminal provenance is not silently discarded" true
+      (undecodable (sse (custom "KEEPER_REPLY_DETAILS"
+        (`Assoc (("terminal_stream_scope", scope) :: fields))))))
+    [`Int (-1);`String "1";`Null]
+
+(* Multiple data fields form one JSON payload and carry the frame's id. *)
+let test_two_data_lines_in_one_frame_share_the_seq () =
+  let frame = "id: 7\ndata:{\ndata: \"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"a\"}\n\n" in
+  check (list tagged) "one complete multiline event carries seq 7"
+    [ (Some 7, Live.Text {text="a"; response=Unobserved_scope (None)}) ] (feed_whole_tagged frame);
+  List.iter (fun size ->
+    check (list tagged) "chunk boundaries preserve multiline event"
+      [ (Some 7, Live.Text {text="a"; response=Unobserved_scope (None)}) ] (feed_in_chunks_tagged ~size frame)) [1; 2; 7]
+;
+  List.iter (fun newline ->
+    let wire = "\239\187\191" ^ String.concat newline
+      ["id:7"; "data:{"; "data:\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"a\"}"; ""; ""] in
+    check (list tagged) "byte chunks preserve BOM and line endings"
+      [Some 7, Live.Text {text="a"; response=Unobserved_scope (None)}] (feed_in_chunks_tagged ~size:1 wire)) ["\n"; "\r\n"; "\r"];
+  check (list delta) "unterminated frame does not publish a delta" []
+    (feed_whole ("data:" ^ Yojson.Safe.to_string (text_content "unfinished")))
+
+let test_unreadable_line_is_reported_and_does_not_stop_the_stream () =
+  let body =
+    "data: {not json\n\n" ^ sse (text_content "after") ^ "data:{\"type\":\"X\"}\n\n"
+  in
+  match feed_whole body with
+  | [ Live.Undecodable json_detail; Live.Text {text="after"; response=Unobserved_scope (None)}; Live.Undecodable frame_detail ]
+    ->
+      check bool "the unreadable JSON says so" true
+        (String.length json_detail > 0);
+      check string "valid no-space framing reaches event validation"
+        "unknown event type X" frame_detail
+  | other ->
+      failf "expected report, text, report; got [%s]"
+        (String.concat "; " (List.map delta_to_string other))
+
+let test_missing_field_names_the_event () =
+  let body =
+    sse
+      (event "TOOL_CALL_START"
+         ([ "runId", `String run_id ]
+          @ occurrence_fields ~call_id:(Some "call-9") ()))
+  in
+  check (list delta) "a tool start with no name is reported as such"
+    [ Live.Undecodable "TOOL_CALL_START has no nonblank toolCallName" ]
+    (feed_whole body)
+
+let test_tool_result_requires_nonblank_canonical_identity () =
+  let result value =
+    sse (custom "KEEPER_TOOL_RESULT_READY" value) |> feed_whole
+  in
+  check (list delta) "missing execution id is reported"
+    [ Live.Undecodable "KEEPER_TOOL_RESULT_READY has no nonblank executionId" ]
+    (result (`Assoc (occurrence_fields ~call_id:(Some "call-9") ())));
+  check (list delta) "blank execution id is reported"
+    [ Live.Undecodable "KEEPER_TOOL_RESULT_READY has no nonblank executionId" ]
+    (result
+       (`Assoc
+          (occurrence_fields ~call_id:(Some "call-9") ()
+           @ [ "executionId", `String " " ])))
+
+let admitted_tool_fields =
+  occurrence_fields ~scope:4 ~block_index:7 ~call_id:(Some "raw-call-1") ()
+  @ [ "providerMessageId", `String "raw-message-1"
+    ; "providerToolName", `String "Read"
+    ; "toolCallName", `String "masc_file_read"
+    ]
+
+let admitted_tool_delta =
+  Live.Tool_admitted
+    { occurrence =
+        { (occurrence ~scope:4 ~block_index:7 ~call_id:(Some "raw-call-1") ()) with
+          provider_message_id = Some "raw-message-1" }
+    ; provider_tool_name = "Read"
+    ; tool_name = "masc_file_read"
+    }
+
+let test_tool_admission_preserves_raw_and_canonical_identity () =
+  let value = `Assoc admitted_tool_fields in
+  check bool "the shared structural validator accepts a valid admission" true
+    (Result.is_ok
+       (Masc_tui_keeper_chat_projection.validate_custom_value
+          ~name:"KEEPER_TOOL_CALL_ADMITTED" value));
+  let body = sse (custom "KEEPER_TOOL_CALL_ADMITTED" value) in
+  List.iter (fun decode ->
+    check (list delta) "incremental admission retains its exact identities"
+      [admitted_tool_delta] (decode body))
+    [feed_whole; feed_in_chunks ~size:1; feed_in_chunks ~size:7]
+
+let test_tool_admission_rejects_malformed_values_without_poisoning_next_frame () =
+  let replace name value =
+    `Assoc (List.map (fun (key, original) ->
+      key, if String.equal key name then value else original) admitted_tool_fields) in
+  let omit name =
+    `Assoc (List.filter (fun (key, _) -> not (String.equal key name)) admitted_tool_fields) in
+  let malformed =
+    [ "execution authority is not admission metadata",
+        `Assoc (("executionId", `String "forged-execution") :: admitted_tool_fields)
+    ; "control authority is not admission metadata",
+        `Assoc (("chat_control_token", `String "forged-control") :: admitted_tool_fields)
+    ; "provider name is required", omit "providerToolName"
+    ; "canonical name is required", omit "toolCallName"
+    ; "occurrence scope is required", omit "toolStreamScope"
+    ; "provider name is nonblank", replace "providerToolName" (`String " ")
+    ; "canonical name is a string", replace "toolCallName" (`Int 1)
+    ; "scope is an integer", replace "toolStreamScope" (`String "4")
+    ; "block index is nonnegative", replace "toolCallBlockIndex" (`Int (-1))
+    ; "a present provider message identity is nonblank", replace "providerMessageId" (`String " ")
+    ; "a present raw call identity is a string", replace "toolCallId" (`List [])
+    ; "duplicate names do not choose an authority",
+        `Assoc (("toolCallName", `String "other_tool") :: admitted_tool_fields)
+    ; "admission is an object", `Null
+    ] in
+  List.iter (fun (description, value) ->
+    check bool description true
+      (Result.is_error
+         (Masc_tui_keeper_chat_projection.validate_custom_value
+            ~name:"KEEPER_TOOL_CALL_ADMITTED" value));
+    let body = sse (custom "KEEPER_TOOL_CALL_ADMITTED" value)
+      ^ sse (custom "KEEPER_TOOL_CALL_ADMITTED" (`Assoc admitted_tool_fields)) in
+    List.iter (fun decode ->
+      match decode body with
+      | [Live.Undecodable _; admitted] ->
+          check delta "the next valid admission keeps its identities" admitted_tool_delta admitted
+      | other -> failf "%s: expected a rejected frame then a valid admission, got [%s]"
+          description (String.concat "; " (List.map delta_to_string other)))
+      [feed_whole; feed_in_chunks ~size:1; feed_in_chunks ~size:7]) malformed
+
+let test_tool_transcript_commit_reads_without_a_view () =
+  (* The exact value Server_keeper_chat_agui_projection writes for
+     Tool_transcript_committed, and the shapes it never writes. *)
+  let commit value = sse (custom "KEEPER_TOOL_TRANSCRIPT_COMMITTED" value) |> feed_whole in
+  let delivery_key =
+    `Assoc [ "kind", `String "operation"; "operation_id", `String "kmsg-1" ]
+  in
+  let value ?(fields = []) () =
+    `Assoc
+      ([ "deliveryKey", delivery_key
+       ; "executionId", `String "exec-1"
+       ; "ordinal", `Int 0
+       ]
+       @ fields)
+  in
+  check (list delta) "the committed binding draws nothing and is not undecodable" []
+    (commit (value ()));
+  let rejected description value =
+    match commit value with
+    | [ Live.Undecodable _ ] -> ()
+    | other ->
+      failf "%s: expected one undecodable delta, got [%s]" description
+        (String.concat "; " (List.map delta_to_string other))
+  in
+  rejected "an extra field" (value ~fields:[ "extra", `Bool true ] ());
+  rejected "a null value" `Null;
+  rejected "a blank execution id"
+    (`Assoc [ "deliveryKey", delivery_key; "executionId", `String " "; "ordinal", `Int 0 ]);
+  rejected "a negative ordinal"
+    (`Assoc [ "deliveryKey", delivery_key; "executionId", `String "exec-1"; "ordinal", `Int (-1) ]);
+  rejected "an unreadable delivery key"
+    (`Assoc [ "deliveryKey", `String "kmsg-1"; "executionId", `String "exec-1"; "ordinal", `Int 0 ])
+
+let test_protocol_error_carries_only_the_quarantined_occurrence () =
+  let value =
+    `Assoc
+      [ "kind", `String "tool_replay_mismatch"
+      ; "reason", `String "replayed arguments changed"
+      ; ( "quarantined_occurrence"
+        , `Assoc (occurrence_fields ~scope:4 ~block_index:7 ~call_id:None ()) )
+      ]
+  in
+  check (list delta) "the exact quarantined row reaches the live view"
+    [ Live.Stream_protocol_error
+        { quarantined_occurrence =
+            Some (occurrence ~scope:4 ~block_index:7 ~call_id:None ())
+        ; detail = "tool_replay_mismatch: replayed arguments changed"
+        }
+    ]
+    (sse (custom "KEEPER_STREAM_PROTOCOL_ERROR" value) |> feed_whole)
+
+let test_duplicate_quarantined_occurrence_does_not_acquire_tool_authority () =
+  let occurrence =
+    `Assoc
+      (("toolStreamScope", `Int 9)
+       :: occurrence_fields ~scope:4 ~block_index:7 ~call_id:None ())
+  in
+  let value =
+    `Assoc
+      [ "kind", `String "tool_replay_mismatch"
+      ; "reason", `String "replayed arguments changed"
+      ; "quarantined_occurrence", occurrence
+      ]
+  in
+  match sse (custom "KEEPER_STREAM_PROTOCOL_ERROR" value) |> feed_whole with
+  | [ Live.Undecodable _ ] -> ()
+  | _ -> fail "repeated quarantined occurrence acquired live tool authority"
+
+let test_args_snapshot_replaces_rather_than_appends () =
+  let body =
+    sse
+      (event "TOOL_CALL_ARGS"
+         ([ "runId", `String run_id
+          ; "snapshot", `String "{\"path\":\"b.ml\"}"
+          ]
+          @ occurrence_fields ~call_id:(Some "call-2") ()))
+  in
+  check (list delta) "a snapshot is carried as a snapshot"
+    [ Live.Tool_args
+        { occurrence = occurrence ~call_id:(Some "call-2") ()
+        ; fragment = Live.Args_snapshot "{\"path\":\"b.ml\"}"
+        }
+    ]
+    (feed_whole body)
+
+let test_run_error_is_a_failure_even_with_no_message () =
+  let body = sse (event "RUN_ERROR" [ "runId", `String run_id ]) in
+  check (list delta) "a run error with no message still fails the run"
+    [ Live.Run_failed { message = "" } ]
+    (feed_whole body)
+
+let test_events_this_view_does_not_draw_are_silent () =
+  let body =
+    sse (custom "KEEPER_STREAM_PING" `Null)
+    ^ sse
+        (event "TEXT_MESSAGE_END"
+           [ "runId", `String run_id; "messageId", `String message_id ])
+  in
+  check (list delta)
+    "a ping and a message end produce nothing rather than a report" []
+    (feed_whole body)
+
+let test_checkpoint_and_external_effect_are_drawn () =
+  let body =
+    sse (custom "KEEPER_CONTINUATION_CHECKPOINT" (`Assoc []))
+    ^ sse (custom "KEEPER_EXTERNAL_EFFECT_COMPLETED" (`Assoc []))
+  in
+  check (list delta) "both reach the view"
+    [ Live.Checkpoint; Live.External_effect_completed ]
+    (feed_whole body)
+
+let test_an_approval_request_is_read_whole () =
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"
+            ; "tool_call_name", `String "Edit"
+            ; "args", `String "{\"file_path\":\"a.ml\"}"
+            ; "question", `String "Run Edit on a.ml?"
+            ]))
+  in
+  check (list delta) "every field the prompt needs comes through"
+    [ Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Edit"
+        ; args = "{\"file_path\":\"a.ml\"}"
+        ; question = "Run Edit on a.ml?"
+        ; because = ""
+        }
+    ]
+    (feed_whole body)
+
+let test_a_request_missing_its_question_is_reported () =
+  (* Without a question there is nothing to ask, so this is reported rather
+     than drawn as a prompt with a blank line. *)
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"; "tool_call_name", `String "Edit" ]))
+  in
+  match feed_whole body with
+  | [ Live.Undecodable detail ] ->
+      check bool "the report names what was missing" true
+        (String.length detail > 0)
+  | other ->
+      failf "expected one report, got [%s]"
+        (String.concat "; " (List.map delta_to_string other))
+
+let test_the_because_reaches_the_pane () =
+  (* The approval list screen shows why a call was held (#30518). A reader
+     answering from the chat pane decides on the same call, so the reason has
+     to arrive here too -- without it the pane asks a question the rest of the
+     TUI already answers. *)
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"
+            ; "tool_call_name", `String "Edit"
+            ; "args", `String "{}"
+            ; "question", `String "Run Edit on a.ml?"
+            ; "because", `String "file_path touches /etc"
+            ]))
+  in
+  check (list delta) "why the call was held travels with the ask"
+    [ Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Edit"
+        ; args = "{}"
+        ; question = "Run Edit on a.ml?"
+        ; because = "file_path touches /etc"
+        }
+    ]
+    (feed_whole body)
+
+let test_a_request_with_no_arguments_is_still_a_prompt () =
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"
+            ; "tool_call_name", `String "Execute"
+            ; "question", `String "Run Execute?"
+            ]))
+  in
+  check (list delta) "a reader still has to answer it"
+    [ Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Execute"
+        ; args = ""
+        ; question = "Run Execute?"
+        ; because = ""
+        }
+    ]
+    (feed_whole body)
+
+let test_the_settled_event_carries_its_outcome () =
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_SETTLED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"; "outcome", `String "timed_out" ]))
+  in
+  check (list delta) "including the paths where nobody answered"
+    [ Live.Approval_settled { call_id = "c1"; outcome = "timed_out" } ]
+    (feed_whole body)
+
+(* The acceptance is what the pane has to answer "why has this not started"
+   with. Before it, a wait of minutes and a wait of seconds look the same. *)
+let test_interactive_acceptance_reports_authority () =
+  let receipt = `Assoc ["outcome", `String "stale_control"; "chat_control_token", `String "new-owner-control";
+    "signalled", `Bool false; "resumed", `Bool false; "interrupt_error", `Null;
+    "interrupt_error_code", `Null; "interrupt_incident_id", `Null] in
+  let body = sse (custom "KEEPER_CHAT_OPERATION_ACCEPTED" (`Assoc ["operation_id", `String "tui-request-1";
+    "state", `String "Queued"; "queued_count", `Int 2; "interactive", receipt])) in
+  match feed_whole body with
+  | [Live.Accepted {interactive = Some value; _}] ->
+    check bool "stale admission is visible" true (value.outcome = Masc_tui_keeper_chat_projection.Stale_control);
+    check string "fresh control token reaches consumer" "new-owner-control" value.chat_control_token;
+    check bool "stale control never signals" false value.signalled
+  | _ -> fail "interactive admission receipt did not reach live consumer"
+
+let scoped_request : Masc_tui_keeper_chat_projection.request =
+  { request_id="tui-request-1"; keeper_name="keeper.one"; message="hello";
+    attachments=[]; references=[] }
+
+let scoped_acceptance ?(operation_id="tui-request-1") ?(state="Running") ?interactive () =
+  `Assoc ["type", `String "CUSTOM"; "threadId", `String "default";
+    "timestamp", `Float 1.0; "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED";
+    "value", `Assoc (["operation_id", `String operation_id; "state", `String state;
+      "queued_count", `Int 0] @ Option.to_list (Option.map (fun receipt -> "interactive", receipt) interactive))]
+
+let test_scoped_live_stream_rejects_foreign_acceptance () =
+  let receipt = `Assoc ["outcome", `String "applied"; "chat_control_token", `String "foreign-control";
+    "signalled", `Bool false; "resumed", `Bool false; "interrupt_error", `Null;
+    "interrupt_error_code", `Null; "interrupt_incident_id", `Null] in
+  let decoder = Live.create ~request:scoped_request () in
+  let foreign = scoped_acceptance ~operation_id:"foreign-request" ~interactive:receipt () in
+  let body = sse foreign ^ "id: 999\n" ^ sse (text_content "foreign") in
+  (match feed decoder body with
+   | [(None, Live.Undecodable _)] -> ()
+   | _ -> fail "foreign acceptance or its later cursor acquired live authority");
+  check bool "foreign acceptance requests exact-operation reconciliation" true
+    (Live.requires_reconnect decoder);
+  check (list tagged) "later frames remain refused on this stream" []
+    (feed decoder (sse (scoped_acceptance ())))
+;;
+
+let test_scoped_live_stream_refuses_a_second_acceptance () =
+  let decoder = Live.create ~request:scoped_request () in
+  let acceptance = "id: 999\n" ^ sse (scoped_acceptance ()) in
+  let matching = "id: 7\n" ^ sse (text_content "owned") in
+  (match feed decoder (acceptance ^ matching) with
+   | [(None, Live.Accepted _); (Some 7, Live.Text {text="owned"; _})] -> ()
+   | _ -> fail "acceptance advanced the cursor or a matching suffix was rejected");
+  let foreign = scoped_acceptance ~operation_id:"foreign-request" () in
+  (match feed decoder ("id: 1000\n" ^ sse foreign) with
+   | [(None, Live.Undecodable _)] -> ()
+   | _ -> fail "a second acceptance acquired the request's cursor or authority");
+  check bool "duplicate acceptance requests reconciliation" true (Live.requires_reconnect decoder);
+  check (list tagged) "later frames remain refused" [] (feed decoder matching);
+  let one_chunk = Live.create ~request:scoped_request () in
+  (match feed one_chunk (acceptance ^ matching ^ sse foreign ^ matching) with
+   | [(None, Live.Accepted _); (Some 7, Live.Text {text="owned"; _});
+      (None, Live.Undecodable _)] -> ()
+   | _ -> fail "a rejected frame discarded or extended its valid chunk prefix")
+;;
+
+let test_scoped_live_stream_reconnect_and_preacceptance_error () =
+  let acceptance = sse (scoped_acceptance ()) in
+  let decoder = Live.create ~request:scoped_request () in
+  let body = acceptance ^ "id: 8\n" ^ sse (text_content "resumed") in
+  let received =
+    String.to_seq body |> List.of_seq
+    |> List.concat_map (fun char -> feed decoder (String.make 1 char)) in
+  (match received with
+   | [(None, Live.Accepted _); (Some 8, Live.Text {text="resumed"; _})] -> ()
+   | _ -> fail "fragmented reconnect suffix did not retain request ownership");
+  let decoder = Live.create ~request:scoped_request () in
+  let failure = event "RUN_ERROR" ["runId", `String run_id; "message", `String "rejected";
+    "code", `String "not_ready"] in
+  (match feed decoder (sse failure) with
+   | [(None, Live.Run_failed {message="rejected"})] -> ()
+   | _ -> fail "pre-acceptance error became an acceptance");
+  check bool "pre-acceptance error is left to whole-body decoding" false
+    (Live.requires_reconnect decoder);
+  check (list tagged) "a pre-acceptance error ends this stream" [] (feed decoder acceptance);
+  let decoder = Live.create ~request:scoped_request () in
+  let premature = event "RUN_STARTED" ["runId", `String run_id] in
+  (match feed decoder ("id: 999\n" ^ sse premature ^ acceptance) with
+   | [(None, Live.Undecodable _)] -> ()
+   | _ -> fail "an event before acceptance acquired cursor or admission authority")
+;;
+
+let test_scoped_reconnect_keeps_the_server_terminal_replay () =
+  let acceptance = sse (scoped_acceptance ~state:"Failed" ()) in
+  let orphaned = `Assoc ["type", `String "RUN_ERROR"; "threadId", `String "default";
+    "timestamp", `Float 1.0; "message", `String "public failure"; "code", `String "turn_failed"] in
+  let decoder = Live.create ~request:scoped_request () in
+  (match feed decoder (acceptance ^ "id: 12\n" ^ sse orphaned) with
+   | [(None, Live.Accepted _); (Some 12, Live.Run_failed {message="public failure"})] -> ()
+   | _ -> fail "request-owned replay lost its terminal journal cursor");
+  let decoder = Live.create ~request:scoped_request () in
+  let fallback = event "RUN_ERROR" ["runId", `String run_id;
+    "message", `String "public failure"; "code", `String "turn_failed"] in
+  (match feed decoder (acceptance ^ sse fallback) with
+   | [(None, Live.Accepted _); (None, Live.Run_failed {message="public failure"})] -> ()
+   | _ -> fail "the next replay lost the operation's fallback terminal");
+  let decoder = Live.create ~request:scoped_request () in
+  ignore (feed decoder acceptance);
+  (match feed decoder "id: 13\ndata: {\n\n" with
+   | [(Some 13, Live.Undecodable _)] -> ()
+   | _ -> fail "an unreadable post-acceptance event changed the existing cursor behavior");
+  check bool "an unreadable post-acceptance event does not request reconnection" false
+    (Live.requires_reconnect decoder);
+  (match feed decoder ("id: 14\n" ^ sse (text_content "later")) with
+   | [(Some 14, Live.Text {text="later"; _})] -> ()
+   | _ -> fail "post-acceptance events stopped after an unreadable frame")
+;;
+
+let test_acceptance_states_are_read () =
+  let deltas state = feed_whole (sse (accepted ~state ~queued_count:2 ())) in
+  check (list delta) "queued keeps its place in the queue"
+    [ Live.Accepted { admission = Live.Queued; queue_length = 2; interactive = None } ]
+    (deltas "Queued");
+  check (list delta) "running has started"
+    [ Live.Accepted { admission = Live.Running; queue_length = 2; interactive = None } ]
+    (deltas "Running");
+  (* One admission for the three terminal words: the pane draws them the same,
+     and keeping them apart here would be a distinction nothing reads. *)
+  List.iter
+    (fun state ->
+      check (list delta) ("a finished operation is settled: " ^ state)
+        [ Live.Accepted { admission = Live.Settled; queue_length = 2; interactive = None } ]
+        (deltas state))
+    [ "Succeeded"; "Failed"; "Cancelled" ]
+
+(* An unknown state is reported rather than folded into one of the three. A
+   reader that guessed would draw a queue position for a word it did not
+   understand. *)
+let test_unknown_acceptance_state_is_reported () =
+  check (list delta) "the unknown word is named"
+    [ Live.Undecodable
+        "unknown Keeper chat operation state \"Vanished\""
+    ]
+    (feed_whole (sse (accepted ~state:"Vanished" ~queued_count:1 ())))
+
+let test_acceptance_missing_fields_are_named () =
+  let value fields = event "CUSTOM"
+    [ "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"
+    ; "value", `Assoc (("operation_id", `String "op-1") :: fields)
+    ]
+  in
+  check (list delta) "a missing state names itself"
+    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED.value.state is required" ]
+    (feed_whole (sse (value [ "queued_count", `Int 1 ])));
+  check (list delta) "a missing queued_count names itself"
+    [ Live.Undecodable
+        "KEEPER_CHAT_OPERATION_ACCEPTED.value.queued_count is required"
+    ]
+    (feed_whole (sse (value [ "state", `String "Queued" ])))
+
+let test_acceptance_rejects_negative_queue_length () =
+  check (list delta) "the live and strict readers share the queue bound"
+    [ Live.Undecodable
+        "KEEPER_CHAT_OPERATION_ACCEPTED.value.queued_count must be a nonnegative integer"
+    ]
+    (feed_whole (sse (accepted ~state:"Queued" ~queued_count:(-1) ())))
+
+let test_runtime_attempt_boundary_is_typed () =
+  let body = sse (custom "KEEPER_RUNTIME_ATTEMPT_STARTED" `Null) in
+  check (list delta) "runtime boundary without payload is parsed"
+    [ Live.Runtime_attempt_started { runtime_id = None; attempt_index = None } ]
+    (feed_whole body);
+  let body_with_fields =
+    sse
+      (custom "KEEPER_RUNTIME_ATTEMPT_STARTED"
+         (`Assoc [ "runtime_id", `String "claude-3-7-sonnet"; "attempt_index", `Int 1 ]))
+  in
+  check (list delta) "runtime boundary with payload is parsed"
+    [ Live.Runtime_attempt_started
+        { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
+    ]
+    (feed_whole body_with_fields)
+
+let test_runtime_attempt_rejects_invalid_payload () =
+  let body =
+    sse
+      (custom "KEEPER_RUNTIME_ATTEMPT_STARTED"
+         (`Assoc [ "unexpected", `String "field" ]))
+  in
+  check (list delta) "runtime boundary payload rejects unexpected fields"
+    [ Live.Undecodable
+        "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED has unexpected fields"
+    ]
+    (feed_whole body)
+
+let test_stream_model_started_is_typed () =
+  let body =
+    sse
+      (custom "KEEPER_STREAM_MESSAGE_START"
+         (`Assoc
+            [ "content_generation", `Int 7; "stream_scope", `Int 4; "provider_message_id", `String "pm-1"
+            ; "model", `String "claude-3-7-sonnet"
+            ]))
+  in
+  check (list delta) "stream message start yields stream_model_started"
+    [ Live.Stream_model_started { generation=Some 7; stream_scope = Some 4; message_id = Some "pm-1"; model = "claude-3-7-sonnet"; usage = None } ]
+    (feed_whole body)
+
+let test_stream_generation_refuses_malformed_values () =
+  List.iter (fun generation_fields ->
+    let body=sse (custom "KEEPER_STREAM_MESSAGE_START" (`Assoc
+      (generation_fields @ ["stream_scope",`Int 4;"model",`String "supplied"]))) in
+    match feed_whole body with
+    | [Live.Undecodable _] -> ()
+    | _ -> fail "malformed generation granted a model-start event")
+    [["content_generation",`Int (-1)];["content_generation",`Null];
+     ["content_generation",`String "7"];
+     ["content_generation",`Int 7;"content_generation",`Int 8]]
+
+let test_stream_model_stop_reaches_the_view () =
+  let body = sse (custom "KEEPER_STREAM_MESSAGE_STOP" `Null) in
+  List.iter (fun actual ->
+    check (list delta) "provider stop is preserved across chunk boundaries"
+      [Live.Stream_model_stopped None] actual)
+    [feed_whole body; feed_in_chunks ~size:1 body];
+  List.iter (fun (label, value) ->
+    let body = sse (event "CUSTOM"
+      (["name", `String "KEEPER_STREAM_MESSAGE_STOP"]
+       @ Option.to_list (Option.map (fun value -> "value", value) value))) in
+    List.iter (fun actual ->
+      match actual with
+      | [Live.Undecodable _] -> ()
+      | _ -> failf "%s stop payload must be undecodable, got %s" label
+          (String.concat ", " (List.map delta_to_string actual)))
+      [feed_whole body; feed_in_chunks ~size:1 body])
+    ["missing", None; "object", Some (`Assoc []); "array", Some (`List []);
+     "string", Some (`String ""); "boolean", Some (`Bool false);
+     "number", Some (`Int 0)]
+
+let test_stream_usage_is_typed () =
+  let body =
+    sse
+      (custom "KEEPER_STREAM_MESSAGE_DELTA"
+         (`Assoc
+            [ "stream_scope", `Int 4; "stop_reason", `String "end_turn"
+            ; ( "usage"
+              , `Assoc
+                  [ "input_tokens", `Int 1200
+                  ; "output_tokens", `Int 340
+                  ; "cache_read_input_tokens", `Int 900
+                  ] )
+            ]))
+  in
+  (* The counters the provider did report are carried; the one it did not
+     stays None rather than becoming a zero the screen would state as a
+     measured fact. *)
+  check (list delta) "stream message delta yields the reported token counters"
+    [ Live.Stream_details
+        {generation=None; stream_scope = Some 4; usage =
+            Some
+              { input_tokens = Some 1200
+              ; output_tokens = Some 340
+              ; cache_read_input_tokens = Some 900
+              ; cache_creation_input_tokens = None
+              }
+        ; stop_reason = Some Agent_core.Types.EndTurn
+        }
+    ]
+    (feed_whole body)
+
+let test_stream_delta_with_only_a_stop_reason_is_a_row () =
+  (* The counters and the stop reason travel in the same event but not always
+     in the same one: a delta that carries only the reason still says
+     something the screen has no other way to learn, so it is a row with no
+     usage rather than no row. *)
+  let body =
+    sse
+      (custom "KEEPER_STREAM_MESSAGE_DELTA"
+         (`Assoc [ "stop_reason", `String "max_tokens" ]))
+  in
+  check (list delta) "a delta that reported only why it stopped is still a row"
+    [ Live.Stream_details {generation=None; stream_scope = None; usage = None; stop_reason = Some Agent_core.Types.MaxTokens } ]
+    (feed_whole body)
+
+let test_stream_delta_without_usage_is_no_row () =
+  (* The dividing input: a delta that reported neither fact. Without this, an
+     implementation that answers every message delta with a row of blanks
+     passes both tests above. *)
+  let body = sse (custom "KEEPER_STREAM_MESSAGE_DELTA" (`Assoc [])) in
+  check (list delta) "a delta that reported nothing draws nothing" []
+    (feed_whole body)
+
+let test_unknown_custom_event_is_reported () =
+  let body = sse (custom "KEEPER_FUTURE_EVENT" `Null) in
+  check (list delta) "new server vocabulary cannot disappear silently"
+    [ Live.Undecodable "unknown CUSTOM event name: KEEPER_FUTURE_EVENT" ]
+    (feed_whole body)
+
+let approval_fixture_text = "019a0000-0000-7000-8000-000000000001"
+
+let test_duplicate_live_metadata_does_not_acquire_identity () =
+  let tool = event "TOOL_CALL_START"
+    (["runId", `String run_id; "toolCallName", `String "Read"] @ occurrence_fields ()) in
+  let duplicate field = function
+    | `Assoc fields -> `Assoc (field :: fields)
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      fail "fixture must be an object" in
+  let approval = `Assoc ["approval_id", `String approval_fixture_text;
+    "tool_call_id", `String "call-1"; "outcome", `String "approve"] in
+  let cases =
+    [ duplicate ("type", `String "RUN_FINISHED") tool
+    ; duplicate ("toolStreamScope", `Int 9) tool
+    ; duplicate ("toolCallBlockIndex", `Int 9) tool
+    ; duplicate ("toolCallId", `String "foreign") tool
+    ; custom "KEEPER_TOOL_APPROVAL_SETTLED"
+        (duplicate ("tool_call_id", `String "foreign") approval)
+    ; custom "KEEPER_TOOL_APPROVAL_SETTLED"
+        (duplicate ("approval_id", `String approval_fixture_text) approval)
+    ] in
+  List.iter (fun json -> match feed_whole (sse json) with
+    | [Live.Undecodable _] -> ()
+    | _ -> fail "repeated metadata acquired live stream authority") cases;
+  match feed_whole (sse tool) with
+  | [Live.Tool_started _] -> ()
+  | _ -> fail "unique canonical tool event was refused"
+;;
+
+let () =
+  run "tui_keeper_chat_live"
+    [ ( "deltas"
+      , [ test_case "admission preserves raw and canonical identity" `Quick test_tool_admission_preserves_raw_and_canonical_identity
+        ; test_case "malformed admission cannot acquire live authority" `Quick test_tool_admission_rejects_malformed_values_without_poisoning_next_frame
+        ; test_case "duplicate live metadata refuses authority" `Quick test_duplicate_live_metadata_does_not_acquire_identity
+        ; test_case "interactive acceptance reports authority" `Quick test_interactive_acceptance_reports_authority
+        ; test_case "coding turn, whole body" `Quick test_coding_turn_whole_body
+        ; test_case "chunk size does not change the deltas" `Quick
+            test_chunk_boundaries_do_not_matter
+        ; test_case "a partial line is held" `Quick
+            test_partial_line_emits_nothing_until_it_ends
+        ; test_case "args snapshot stays a snapshot" `Quick
+            test_args_snapshot_replaces_rather_than_appends
+        ; test_case "checkpoint and external effect are drawn" `Quick
+            test_checkpoint_and_external_effect_are_drawn
+        ; test_case "runtime attempt boundary is typed" `Quick
+            test_runtime_attempt_boundary_is_typed
+        ; test_case "runtime attempt rejects invalid payload" `Quick
+            test_runtime_attempt_rejects_invalid_payload
+        ; test_case "stream message start model is typed" `Quick
+            test_stream_model_started_is_typed
+        ; test_case "malformed response generation is refused" `Quick
+            test_stream_generation_refuses_malformed_values
+        ; test_case "provider stop reaches the view" `Quick test_stream_model_stop_reaches_the_view
+        ; test_case "a turn in flight reports the tokens it has spent" `Quick
+            test_stream_usage_is_typed
+        ; test_case "a delta that reported only why it stopped is still a row"
+            `Quick test_stream_delta_with_only_a_stop_reason_is_a_row
+        ; test_case "a delta that reported nothing draws nothing" `Quick
+            test_stream_delta_without_usage_is_no_row
+        ] )
+    ; ( "acceptance"
+      , [ test_case "the three states are read" `Quick
+            test_acceptance_states_are_read
+        ; test_case "foreign acceptance cannot acquire a live request" `Quick
+            test_scoped_live_stream_rejects_foreign_acceptance
+        ; test_case "a live stream refuses a second acceptance" `Quick
+            test_scoped_live_stream_refuses_a_second_acceptance
+        ; test_case "reconnect and pre-acceptance errors keep ownership" `Quick
+            test_scoped_live_stream_reconnect_and_preacceptance_error
+        ; test_case "scoped reconnect keeps terminal replay and fallback" `Quick
+            test_scoped_reconnect_keeps_the_server_terminal_replay
+        ; test_case "an unknown state is reported" `Quick
+            test_unknown_acceptance_state_is_reported
+        ; test_case "missing fields name themselves" `Quick
+            test_acceptance_missing_fields_are_named
+        ; test_case "negative queue length is rejected" `Quick
+            test_acceptance_rejects_negative_queue_length
+        ] )
+    ; ( "held calls"
+      , [ test_case "an approval request is read whole" `Quick
+            test_an_approval_request_is_read_whole;
+          test_case "the because reaches the pane" `Quick
+            test_the_because_reaches_the_pane;
+        test_case "a request with no arguments is still a prompt" `Quick
+            test_a_request_with_no_arguments_is_still_a_prompt
+        ; test_case "the settled event carries its outcome" `Quick
+            test_the_settled_event_carries_its_outcome
+        ; test_case "a request missing its question is reported" `Quick
+            test_a_request_missing_its_question_is_reported
+        ] )
+    ; ( "reporting"
+      , [ test_case "an unreadable line is reported, the stream continues"
+            `Quick test_unreadable_line_is_reported_and_does_not_stop_the_stream
+        ; test_case "a missing field names its event" `Quick
+            test_missing_field_names_the_event
+        ; test_case "tool result requires canonical identity" `Quick
+            test_tool_result_requires_nonblank_canonical_identity
+        ; test_case "tool transcript commit reads without a view" `Quick
+            test_tool_transcript_commit_reads_without_a_view
+        ; test_case "protocol error carries quarantined occurrence" `Quick
+            test_protocol_error_carries_only_the_quarantined_occurrence
+        ; test_case "duplicate quarantined occurrence refuses authority" `Quick
+            test_duplicate_quarantined_occurrence_does_not_acquire_tool_authority
+        ; test_case "a run error with no message still fails" `Quick
+            test_run_error_is_a_failure_even_with_no_message
+        ; test_case "undrawn events stay silent" `Quick
+            test_events_this_view_does_not_draw_are_silent
+        ; test_case "a frame id tags its deltas" `Quick test_a_frame_id_tags_its_deltas
+        ; test_case "frame timestamps keep server epoch seconds" `Quick
+            test_frame_timestamps_keep_server_epoch_seconds
+        ; test_case "an id held across a chunk boundary" `Quick
+            test_an_id_held_across_a_chunk_boundary
+        ; test_case "a fresh decoder starts without a seq" `Quick
+            test_a_fresh_decoder_starts_without_a_seq
+        ; test_case "an id-less frame does not inherit the previous seq" `Quick
+            test_an_id_less_frame_does_not_inherit_the_previous_seq
+        ; test_case "a non-integer id is no seq" `Quick test_a_non_integer_id_is_no_seq
+        ; test_case "id line spellings" `Quick test_id_line_spellings
+        ; test_case "a whitespace line is not a frame end" `Quick
+            test_a_whitespace_line_is_not_a_frame_end
+        ; test_case "two data lines in one frame share the seq" `Quick
+            test_two_data_lines_in_one_frame_share_the_seq
+        ; test_case "reply details is read whole" `Quick test_reply_details_is_read_whole
+        ; test_case "reply details short of a field is reported" `Quick
+            test_reply_details_short_of_a_field_is_reported
+        ; test_case "native end without completion reads as unrecorded" `Quick
+            test_native_tool_end_without_completion_is_reported
+        ; test_case "unknown custom event is reported" `Quick
+            test_unknown_custom_event_is_reported
+        ] )
+    ]

@@ -1,0 +1,40 @@
+{
+  "observed_at": "2026-09-07T14:31:57.673117+00:00",
+  "pr_number": 34087,
+  "head_sha": "a0e412d45b3391d0cdc0179479cb7919feb98595",
+  "run_id": 34132833533,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34132833533",
+  "conclusion": "success",
+  "passed_total": 93,
+  "failed_total": 0,
+  "suites": [
+    {
+      "suite": "keeper_turn_driver_failover",
+      "passed": 62
+    },
+    {
+      "suite": "runtime_lane_preference",
+      "passed": 18
+    },
+    {
+      "suite": "runtime_quota_window",
+      "passed": 13
+    }
+  ],
+  "new_scenarios_passed": 3,
+  "independent_source_review": "pass",
+  "required_checks": {
+    "run_id": 34132761749,
+    "conclusion": "success"
+  },
+  "limits": [
+    "Actual HTTP error attribution and production candidate walk fixtures; no provider HTTP server in these scenarios.",
+    "No account permission repair, deployment or live successful fallback proof."
+  ],
+  "merge": {
+    "merged": true,
+    "merged_at": "2026-09-07T14:38:29Z",
+    "merge_commit_sha": "656d1493d5974a82e7296cf416f6bd47209b0962"
+  },
+  "merge_verified_at": "2026-09-07T14:39:40.619602+00:00"
+}

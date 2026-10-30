@@ -1,0 +1,67 @@
+{
+  "base": "293520d7e3117128e845fbdb03c8f10af21685f5",
+  "scope": "B2 Dashboard in-memory Lane declaration session lifetime; uncommitted authored source at verification time",
+  "checks": [
+    {
+      "name": "focused Vitest",
+      "exit_code": 0,
+      "files": 4,
+      "passed": 54,
+      "failed": 0,
+      "log": "focused-vitest.log"
+    },
+    {
+      "name": "TypeScript noEmit",
+      "exit_code": 0,
+      "log": "typecheck.log"
+    },
+    {
+      "name": "ESLint changed five TypeScript files",
+      "exit_code": 0,
+      "log": "eslint.log"
+    },
+    {
+      "name": "actual Chromium synthetic HTTP fixture",
+      "passed": 10,
+      "log": "browser.log",
+      "result": "browser-result.json",
+      "screenshots_inspected": [
+        "late-create-restored.png",
+        "workspace-a-restored.png"
+      ]
+    }
+  ],
+  "source_sha256": {
+    "dashboard/src/lib/lane-declaration-sessions.ts": "63134a8b38deff9240662e27a0bb2e2f653d7770db6edb9770b58fa54ab31f59",
+    "dashboard/src/components/lane-declaration-editor.ts": "76ab9e0896fbcdff9f68eb01c68e918d323fcc80a520f2bd333ff53a74703d57",
+    "dashboard/src/components/lane-addons-panel.ts": "36d0ef65f1fae37c77183fc0acd79b729177e9c4b9dc2ff5d97cbb1999336a0e",
+    "dashboard/src/components/lane-declaration-editor.test.ts": "b6af9f3cf5718829d195892ca64ab3347c1a1b6491e1dda57c3597d62e523b39",
+    "dashboard/src/components/lane-addons-panel.test.ts": "13ebb5c8bffa0c882e9ba41176f5c0f9084af2427cd7e0898e323be4f977b8d7",
+    "docs/guides/lane-declaration-editor.md": "97c962d0d27beb9f3fa901f7491b57294db6d2cd3ac27f9ea2751dad4b92a18a"
+  },
+  "limits": [
+    "Synthetic HTTP and accepted execution snapshot authority; no native backend/filesystem/provider or deployment execution",
+    "No native OCaml/Dune, full CI, or production claims",
+    "Session state is process-memory in the browser tab, not persistent storage",
+    "Pending requests are not canceled by route/authority changes; stale result rejection and needsRead happen only after settlement",
+    "No independent source review or merge approval inferred from author checks"
+  ],
+  "artifact_sha256": {
+    "browser-failure.json": "4f884cecce4b2f80cdf7f47b3c4db3f35592ae0722787dc97a246c51aaeb4dbb",
+    "browser-fixture.mjs": "4e5f33a782f513da8b3e6c92670b7cc07457eafb9cdfd8503c85714e9f7e2e67",
+    "browser-result.json": "ba3a716d2492106995cba268785c792b0bee18d125d45a24d26a8766a7429efe",
+    "browser.log": "a92a8f3d2d16185fcbc9cd5823a55fb44db271aae9bd420e9305c4e4bac372bb",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixture.html": "287d9349759cd177905836fc785c0e312127c5788c2b789b7e99b3a018318818",
+    "fixture.ts": "0167d9f088602af3fa5048a6a7c60be92aba816a37bdf87782f60732ff81b6ff",
+    "focused-vitest.log": "f8c80475bd9a2921384228a933a947cc9d2625079a406bf3a0e45863c72f7e0f",
+    "late-create-restored.png": "c80bad2546079fda44b204688953edd50d0237464db3191663005b5aee58e1d1",
+    "typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "workspace-a-restored.png": "313fc2109f3c372283cc3415582c7978035795ac672028ceb097aacd802a9962"
+  },
+  "artifact_normalization": {
+    "file": "focused-vitest.log",
+    "change": "Removed terminal blank line at EOF only; test output content is unchanged.",
+    "original_sha256": "32e2cf0aa914bf95ae03cb95d8b49e7b1e6b42cffce5722584290cbbf294cef8"
+  }
+}

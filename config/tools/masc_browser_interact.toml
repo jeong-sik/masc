@@ -1,0 +1,609 @@
+name = "masc_browser_interact"
+description = """
+Click, fill, scroll, hover, drag, follow a link, activate a browser tab, set the page viewport size, or set actual browser zoom. tap_at and swipe send a touch pointer (not a mouse) on a live BiDi connection or the owned Firefox: tap_at presses and releases at an observed point, swipe holds the touch from one observed point to another; Stagehand and a connected WebExtension refuse them before any effect. set_viewport takes width and height together in CSS pixels (100–4096) on a live BiDi connection, an automation Firefox or Stagehand; on a live BiDi connection or an automation Firefox, giving neither restores the browser's own size. An automation Firefox resizes its window and keeps at least about 500 x 120 outer pixels, so a smaller request is refused with the size the page kept. Read scene/screenshot geometry again afterward. set_zoom requires an exact WebExtension client/tab, expectedUrl and factor 0.3–5. It measures the resulting zoomFactor and zoomScope; Firefox per-origin zoom can affect same-site tabs. Read scene/screenshot geometry again afterward. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. On connections other than ego they resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. Ego selector hover uses SDK resolution and auto-scrolling. hover_at (no click) and drag move a trusted pointer. automation, Stagehand Chromium, live webdriver_bidi and ego task spaces serve these actions; Stagehand and ego support custom drag paths but require durationMs=0. activate_tab is live-only: WebExtension verifies active=true without window focus; live BiDi activates and focuses its browser window; Ego requires a native managed Page (including explicit adoption) and expectedUrl, uses native TaskSpace CDP to restore only a minimized window and activate the same target, and reports native active/window state without promising rendered UI or OS focus. Use Ego activation before hand_off, never during delegated control; after an unconfirmed response observe the same Space rather than replaying. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
+On an ego task space action=workflow runs known native Page calls in steps, then returns a final native snapshot. Methods include click, dblclick, hover, fill, focus, press, selectOption, goto, reload, native URL/selector/load waits, and keyboard.type/insertText/paste/press. Focus an observed editor before keyboard input; paste accepts text and optional HTML, and the SDK restores the native clipboard. SDK methods own resolution and waits. A step failure stops the sequence and retains completed steps; inspect before continuing and never replay the workflow. expectedUrl guards the initial page only; later navigation is allowed. Use separate workflows when an intermediate observation requires new judgment. No host JavaScript is accepted. Receipt-less holding input (including the current SDK keyboard.type) stops before later steps and remains outside the completed prefix with release unconfirmed, even when Page.info has no dialog. Retain the original connection and use its private operator input-reset confirmation after the operator checks/resets that Space; never replay the input.
+On an ego task space, selector click/fill/hover/double_click/select_option use ego native Page methods. The selector follows ego SDK syntax (snapshot refs, semantic locators, CSS, iframe/shadow traversal); ego owns target resolution, actionability and auto-scrolling. Prefer BrowserRead mode=snapshot and its refs. Ego selectOption follows native programmatic selection semantics, including disabled options. TUI documentId/nodeId actions retain their scene adapter.
+The tab is explicit. Browser JavaScript is available only through workflow evaluate/waitForFunction on Ego, never through host execution. Native workflow fetch obeys browser CORS. These calls may change external state, so their failure is not replay permission. drag/drag_to issue trusted pointer input; a receipt does not prove the application accepted a drop. On an ego connection only a selector drag_to without via is answered by the SDK, and it frees the next input when its receipt has no dialog. Once they have sent input, a coordinate drag, a drag_to with via and a drag by scene node end as an unknown outcome and block the next input until the operator resets it; one refused before any input leaves input usable. HTML5 DataTransfer/drop is not guaranteed by Firefox and has no synthetic fallback. Read again after success or failure before retrying: page handlers can change external state. click/fill require an inspected target; ego applies its native actionability rules. On automation, Stagehand Chromium and live webdriver_bidi, click resolves an unobstructed selector or scene node and sends native pointerDown/pointerUp, supporting trusted pointerdown/mousedown menus; disabled and aria-disabled targets are refused. On those three connections click captures the current URL when expectedUrl is omitted, then checks it before input. Ego reads the URL before entering its SDK method, which can itself wait; this is not an atomic navigation guard. WebExtension retains DOM click. Ego fill follows its native SDK input behavior; other connections fill text inputs/textarea with input/change events. Fill does not press Enter or submit. scroll_at scrolls the pane under the point. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence."""
+additional_properties = false
+# 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
+# 3,294 B 를 매번 실었고, 09-17~23 7일간 이 도구를 부른 서로 다른
+# Keeper 턴은 22개다. 지연의 손익은 호출 수가 아니라 필요했던 턴 수로
+# 가른다(masc #32062). 지연돼도 keeper_tool_search 목록에 이름이 남고,
+# 부르면 그 턴에 스키마가 붙는다. 한 줄 요약은 그 답에 한 번 나온다.
+defer_loading = true
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["live", "automation", "stagehand"]
+description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+
+[[params]]
+name = "tabId"
+type = "integer"
+required = true
+minimum = 0
+
+[[params]]
+name = "framePath"
+type = "array"
+items = { type = "string" }
+description = "Observed outer-to-inner iframe selectors (preserve CSS escapes). Only for click, fill, select_option and scroll with a selector, on an automation Firefox or a live BiDi connection; the selector and expectedUrl then refer to the innermost frame document. Omit for the top document. An ego connection takes none: give target instead."
+
+[[params]]
+name = "expectedUrl"
+type = "string"
+description = "Observed URL guard; required for explicit pointer actions, hover/drag_to, follow_link and activate_tab. Required also for double_click/type_text/press_key/set_zoom/set_viewport. Semantic click may omit it. Ego then reports the URL read before SDK entry; other native backends capture and guard the resolved page URL."
+
+[[params]]
+name = "action"
+type = "string"
+required = true
+enum = ["workflow", "set_zoom", "set_viewport", "tap_at", "swipe", "activate_tab", "follow_link", "double_click", "double_click_at", "type_text", "press_key", "click", "fill", "select_option", "scroll", "click_at", "scroll_at", "hover", "drag_to", "hover_at", "drag"]
+
+[[params]]
+name = "selector"
+type = "string"
+description = "click/double_click/fill/hover/select_option: observed selector; alternative to documentId/nodeId (select_option takes the selector only). Ego uses its native SDK locator syntax and actionability, including refs and iframe/shadow traversal. Other connections require one visible top-document CSS match."
+
+[[params]]
+name = "text"
+type = "string"
+description = "fill replaces the value of a text input or textarea, or the whole content of a contenteditable editor (typed in as insertText, so a rich editor sees input events); type_text sends native Unicode text to the currently focused enabled editable control. Empty fill clears. Control characters require explicit press_key, so text cannot navigate focus or submit. Text is never echoed."
+
+[[params]]
+name = "value"
+type = "string"
+description = "select_option only: exact option value. Ego passes {value} to native selectOption; it follows SDK selection semantics and may programmatically select disabled options. Other connections require one enabled matching option in a single-choice select and refuse ambiguous, disabled or multiple-select targets before any effect. The select gets input and change events; this is not a trusted click on the list."
+
+[[params]]
+name = "values"
+type = "array"
+items = { type = "string" }
+description = "select_option only, instead of value: distinct option values; [] clears selection. Ego passes an array of {value} to native selectOption and returns its selected values; it permits disabled options and does not independently validate later page-handler changes. Other connections require a multiple select, check each value names exactly one enabled option before changing selection, and report selectedValues after handlers. This is programmatic selection, not trusted pointer input."
+
+[[params]]
+name = "x"
+type = "integer"
+description = "scroll/scroll_at horizontal CSS-pixel delta."
+
+[[params]]
+name = "y"
+type = "integer"
+description = "scroll/scroll_at vertical CSS-pixel delta."
+
+[[params]]
+name = "button"
+type = "string"
+enum = ["primary", "middle", "secondary"]
+description = "click_at only: the mouse button, primary by default. middle and secondary need native pointer input: a live BiDi connection, the owned Firefox or Stagehand. A connected WebExtension refuses them before any effect."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Retain the observed live clientId on every subsequent tab read/action; stale IDs fail. Omit for a work browser."
+
+[[params]]
+name = "target"
+type = "object"
+additional_properties = false
+description = "click/fill/hover/double_click on an ego connection, with the observed top-level expectedUrl and without selector or documentId/nodeId: {ref} from the latest BrowserRead/masc_browser_read snapshot of the same page (12 for ref=12), {role, name} or {text}. Read a new snapshot after page changes/input or a stale/unknown ref refusal. A ref from an iframe's snapshot acts inside that frame; role and text also search frames when the top document has none; framePath is not combined with target. exact (default true) matches the whole name or text; false matches a part, any case."
+
+[[params.params]]
+name = "ref"
+type = "integer"
+minimum = 0
+
+[[params.params]]
+name = "role"
+type = "string"
+
+[[params.params]]
+name = "name"
+type = "string"
+
+[[params.params]]
+name = "text"
+type = "string"
+
+[[params.params]]
+name = "exact"
+type = "boolean"
+
+[[params]]
+name = "documentId"
+type = "string"
+description = "Scene document with nodeId; required for follow_link. type_text/press_key require the observed documentId with expectedUrl and retain current focus. Reload fails."
+
+[[params]]
+name = "nodeId"
+type = "string"
+description = "Scene node; survives reordering, fails on detach/replacement."
+
+[[params]]
+name = "point"
+type = "object"
+description = "click_at/hover_at/scroll_at/tap_at: normalized x/y in [0,1); copy screenshot viewport/expectedUrl."
+
+additional_properties = false
+
+[[params.params]]
+name = "x"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params.params]]
+name = "y"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params]]
+name = "from"
+type = "object"
+description = "Native drag or swipe start; normalized x/y in [0,1)."
+
+additional_properties = false
+
+[[params.params]]
+name = "x"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params.params]]
+name = "y"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params]]
+name = "to"
+type = "object"
+description = "Native drag or swipe end; normalized x/y in [0,1)."
+
+additional_properties = false
+
+[[params.params]]
+name = "x"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params.params]]
+name = "y"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params]]
+name = "viewport"
+type = "object"
+description = "click_at/hover_at/scroll_at/drag: copy screenshot documentId, CSS dimensions and scroll offsets exactly; changes fail."
+
+additional_properties = false
+
+[[params.params]]
+name = "documentId"
+type = "string"
+required = true
+
+[[params.params]]
+name = "width"
+type = "number"
+required = true
+exclusive_minimum = 0.0
+
+[[params.params]]
+name = "height"
+type = "number"
+required = true
+exclusive_minimum = 0.0
+
+[[params.params]]
+name = "scrollX"
+type = "number"
+required = true
+
+[[params.params]]
+name = "scrollY"
+type = "number"
+required = true
+
+# follow_link uses documentId/nodeId and expectedUrl already declared above.
+
+[[params]]
+name = "source"
+type = "object"
+description = "drag_to source: one selector OR observed documentId/nodeId. Must be visible and unobstructed."
+additional_properties = false
+
+[[params.params]]
+name = "selector"
+type = "string"
+
+[[params.params]]
+name = "documentId"
+type = "string"
+
+[[params.params]]
+name = "nodeId"
+type = "string"
+
+[[params]]
+name = "destination"
+type = "object"
+description = "drag_to destination: one selector OR observed documentId/nodeId, in the same current document."
+additional_properties = false
+
+[[params.params]]
+name = "selector"
+type = "string"
+
+[[params.params]]
+name = "documentId"
+type = "string"
+
+[[params.params]]
+name = "nodeId"
+type = "string"
+
+[[params]]
+name = "via"
+type = "array"
+description = "drag/drag_to/swipe: observed intermediate viewport fractions, in order. Omit for a straight drag through its midpoint. Stagehand also supports these paths through native CSS-pixel runtime routes."
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "x"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params.items.params]]
+name = "y"
+type = "number"
+required = true
+minimum = 0.0
+exclusive_maximum = 1.0
+
+[[params]]
+name = "durationMs"
+type = "integer"
+minimum = 0
+maximum = 9007199254740991
+description = "drag/drag_to/swipe: duration of each intermediate and destination move in milliseconds; default 0. Requires automation or live webdriver_bidi when nonzero."
+
+[[params]]
+name = "key"
+type = "string"
+description = "press_key: Enter, Tab, Escape, Backspace, Delete, ArrowUp/Down/Left/Right, Home, End, or one Unicode scalar. Stagehand refuses supplementary scalar keys; use type_text for Unicode text. Sends native down/up to current focus; no guessed selector or synthetic events."
+
+[[params]]
+name = "modifiers"
+type = "array"
+items = { type = "string", enum = ["Control", "Meta", "Alt", "Shift"] }
+description = "press_key: explicit distinct modifiers, e.g. [Meta] with key a selects all on macOS; [Control] on other systems. Native keys and double clicks require Stagehand, automation, or live webdriver_bidi. WebExtension does not serve native keyboard actions. set_zoom is a separate WebExtension-only action."
+
+[[params]]
+name = "width"
+type = "integer"
+minimum = 100
+maximum = 4096
+description = "set_viewport only: viewport width in CSS pixels, given together with height. Omit both on a live BiDi connection to restore the browser's own size."
+
+[[params]]
+name = "height"
+type = "integer"
+minimum = 100
+maximum = 4096
+description = "set_viewport only: viewport height in CSS pixels, given together with width."
+
+[[params]]
+name = "factor"
+type = "number"
+minimum = 0.3
+maximum = 5.0
+description = "set_zoom only: actual browser zoom factor (0.3–5), requires exact clientId/tabId and expectedUrl on a WebExtension >=0.8.0. Receipt measures zoomFactor and actual zoomScope; Firefox per-origin zoom can affect/persist for same-site tabs. Re-read scene/screenshot geometry afterward. Other adapters refuse before input."
+
+[[params]]
+name = "steps"
+type = "array"
+description = "workflow only: native Ego Page calls followed by one final snapshot. Each step uses only its method arguments and native options. click/dblclick/hover/focus take selector; dragAndDrop takes selector,destination; mouse.click/move/wheel take CSS x,y (wheel uses deltas and needs a move/click in this round first); fill takes selector,text; press takes selector,key; selectOption takes selector,selectionJson; goto takes an absolute HTTP(S) url; waitForURL takes exactly one string/glob url or native urlRegex {source,flags?}; waitForSelector takes selector,state; waitForLoadState state is optional. Keyboard methods take text or key; paste also accepts html. evaluate/waitForFunction take source and optional argumentJson. fetch takes an HTTP(S) or relative url and returns its structured response as the step receipt. options.saveAs is an artifact filename, never a host path; retrieve the returned downloadId with BrowserRead mode=downloads on the same client/tab without repeating fetch. download.cancel takes a canonical downloadId observed on this exact Page in this SDK process. It calls a pending native Download handle once; cancelReturned only means the SDK call returned, since completion can win the race. Re-read BrowserRead mode=downloads for actual status; never replay after a lost result. Fetch, completed, unknown and foreign-Page downloads are refused before cancellation. url/title/info return native Page state; snapshot returns native text with scope/root/action-mark/stable-locator options; events drains this SDK process's Page event buffer and is a non-replayable effect, not cross-process history. waitForTimeout takes nonnegative milliseconds and is not a page-readiness check. Native options use SDK names and are strictly validated for that method; omission uses SDK defaults. evaluate/keyboard.insertText/keyboard.paste/download.cancel/url/title/info/events/waitForTimeout accept no options. Source runs only in the browser; Page code and fetch may have effects even on failure. A failed pointer click/drag or lost key input result keeps release unconfirmed without synthetic cleanup. Paste can hold ControlOrMeta+V. Answering a dialog does not acknowledge button/key release; automatic continuation after interrupted input is unsupported. An unconfirmed release blocks further input. Choose the next action from current observations; no new judgment inside the call. There is no cumulative step/time limit."
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "method"
+type = "string"
+enum = ["click", "dblclick", "hover", "dragAndDrop", "mouse.click", "mouse.move", "mouse.wheel", "fill", "press", "focus", "reload", "keyboard.type", "keyboard.insertText", "keyboard.paste", "keyboard.press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState", "evaluate", "waitForFunction", "fetch", "download.cancel", "url", "title", "info", "snapshot", "events", "waitForTimeout"]
+required = true
+
+[[params.items.params]]
+name = "selector"
+type = "string"
+
+[[params.items.params]]
+name = "destination"
+type = "string"
+
+[[params.items.params]]
+name = "text"
+type = "string"
+
+[[params.items.params]]
+name = "key"
+type = "string"
+
+[[params.items.params]]
+name = "url"
+type = "string"
+
+[[params.items.params]]
+name = "downloadId"
+type = "string"
+description = "download.cancel only: canonical UUID observed in this same Page's downloads. Native pending downloads only; never a host path or a Fetch save."
+
+[[params.items.params]]
+name = "urlRegex"
+type = "object"
+description = "waitForURL only: native RegExp {source, flags?}, instead of url. Empty source is valid. Syntax and flags are checked by the JavaScript engine before the SDK wait; native polling and timeout remain SDK-owned. Does not accept function source."
+additional_properties = false
+
+[[params.items.params.params]]
+name = "source"
+type = "string"
+required = true
+
+[[params.items.params.params]]
+name = "flags"
+type = "string"
+
+[[params.items.params]]
+name = "x"
+type = "number"
+
+[[params.items.params]]
+name = "y"
+type = "number"
+
+[[params.items.params]]
+name = "milliseconds"
+type = "number"
+minimum = 0.0
+description = "waitForTimeout only: explicit SDK wait duration; use a state wait to verify readiness."
+
+[[params.items.params]]
+name = "html"
+type = "string"
+description = "keyboard.paste: rich HTML alongside its plain text fallback; native clipboard is restored."
+
+[[params.items.params]]
+name = "selectionJson"
+type = "string"
+description = "selectOption: JSON-encoded string, {value?,label?,index?}, array of strings/option objects, or null. [] and null clear selection. Native programmatic selection includes disabled options."
+
+[[params.items.params]]
+name = "state"
+type = "string"
+enum = ["attached", "detached", "visible", "hidden", "domcontentloaded", "load", "networkidle"]
+
+[[params.items.params]]
+name = "source"
+type = "string"
+description = "evaluate/waitForFunction: browser expression. With argumentJson it is called as a function with that JSON value; Node/host APIs are unavailable. Predicate and code failures may have effects."
+
+[[params.items.params]]
+name = "argumentJson"
+type = "string"
+description = "One JSON-encoded function argument of any JSON type. Omit to evaluate source as a plain browser expression."
+
+[[params.items.params]]
+name = "options"
+type = "object"
+description = "Native SDK options for the exact method; all time values are milliseconds. Keyboard type/press accept delay only; evaluate/insertText/paste/url/title/info/events/waitForTimeout have no options. Native pointer labels include Keeper ownership. fetch saveAs is an artifact filename, never a host path: the SDK writes a fresh private path and returns a downloadId; retrieve its finalized artifact with BrowserRead mode=downloads on the same client/tab."
+additional_properties = false
+
+[[params.items.params.params]]
+name = "scope"
+type = "string"
+enum = ["full_page", "only_within_viewport", "subtree"]
+description = "snapshot only: native scope; subtree requires root."
+
+[[params.items.params.params]]
+name = "root"
+type = "string"
+description = "snapshot only, with subtree scope: a current snapshot ref from this Page, such as @21."
+
+[[params.items.params.params]]
+name = "includeActionMarks"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "includeStableLocator"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "timeout"
+type = "number"
+minimum = 0.0
+
+[[params.items.params.params]]
+name = "delay"
+type = "number"
+minimum = 0.0
+
+[[params.items.params.params]]
+name = "idleMs"
+type = "number"
+minimum = 0.0
+
+[[params.items.params.params]]
+name = "polling"
+type = "number"
+minimum = 0.0
+
+[[params.items.params.params]]
+name = "clickCount"
+type = "integer"
+minimum = 0
+maximum = 9007199254740991
+
+[[params.items.params.params]]
+name = "steps"
+type = "integer"
+minimum = 0
+maximum = 9007199254740991
+
+[[params.items.params.params]]
+name = "button"
+type = "string"
+enum = ["left", "middle", "right"]
+
+[[params.items.params.params]]
+name = "force"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "clearFirst"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "label"
+type = "string"
+
+[[params.items.params.params]]
+name = "referer"
+type = "string"
+
+[[params.items.params.params]]
+name = "waitUntil"
+type = "string"
+enum = ["commit", "domcontentloaded", "load", "networkidle"]
+
+[[params.items.params.params]]
+name = "position"
+type = "object"
+additional_properties = false
+
+[[params.items.params.params.params]]
+name = "x"
+type = "number"
+required = true
+
+[[params.items.params.params.params]]
+name = "y"
+type = "number"
+required = true
+
+[[params.items.params.params]]
+name = "sourcePosition"
+type = "object"
+additional_properties = false
+
+[[params.items.params.params.params]]
+name = "x"
+type = "number"
+required = true
+
+[[params.items.params.params.params]]
+name = "y"
+type = "number"
+required = true
+
+[[params.items.params.params]]
+name = "targetPosition"
+type = "object"
+additional_properties = false
+
+[[params.items.params.params.params]]
+name = "x"
+type = "number"
+required = true
+
+[[params.items.params.params.params]]
+name = "y"
+type = "number"
+required = true
+
+[[params.items.params.params]]
+name = "method"
+type = "string"
+
+[[params.items.params.params]]
+name = "headers"
+type = "object"
+description = "HTTP header names with string values."
+additional_properties = true
+
+[[params.items.params.params]]
+name = "saveAs"
+type = "string"
+description = "fetch only: requested artifact filename, with no directories or control characters. Returned downloadId identifies the saved response in the same tab's download reader. suggestedFilename is this requested name, not a server suggestion. HTTP error responses can still save successfully. Never replay fetch to retrieve an existing save."
+
+[[params.items.params.params]]
+name = "body"
+type = "string"
+
+[[params.items.params.params]]
+name = "cache"
+type = "string"
+enum = ["default", "no-store", "reload", "no-cache", "force-cache", "only-if-cached"]
+
+[[params.items.params.params]]
+name = "credentials"
+type = "string"
+enum = ["omit", "same-origin", "include"]
+
+[[params.items.params.params]]
+name = "integrity"
+type = "string"
+
+[[params.items.params.params]]
+name = "keepalive"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "mode"
+type = "string"
+enum = ["cors", "no-cors", "same-origin"]
+
+[[params.items.params.params]]
+name = "redirect"
+type = "string"
+enum = ["follow", "error", "manual"]
+
+[[params.items.params.params]]
+name = "referrer"
+type = "string"
+
+[[params.items.params.params]]
+name = "referrerPolicy"
+type = "string"
+enum = ["", "no-referrer", "no-referrer-when-downgrade", "origin", "origin-when-cross-origin", "same-origin", "strict-origin", "strict-origin-when-cross-origin", "unsafe-url"]
+
+[[params]]
+name = "snapshotScope"
+type = "string"
+enum = ["viewport", "full_page"]
+description = "workflow only: scope of the final native snapshot, viewport by default."
+
+[[params]]
+name = "maxChars"
+type = "integer"
+minimum = 1
+maximum = 100000
+description = "workflow only: final snapshot character limit, following the existing BrowserRead/masc_browser_read size policy. A cut reports truncated and preserves surrogate pairs."

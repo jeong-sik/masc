@@ -1,0 +1,2823 @@
+(* DOS lane tools — the lane's tools through the shared worker implementation.
+
+   The machine needs no image from outside: the tests assemble a COM program
+   of their own, so CI carries no game. What they pin: the no-machine
+   refusal, the inventory listing, that a loaded program's screen text comes
+   back readable, that empty keyboard polling is observed, that a key reaches the
+   guest and lands in the ledger under the caller's name, that a key name the
+   machine has no key for is refused before anything is pressed, the per-call
+   step cap, memory reads, and the read-only classification. *)
+
+open Alcotest
+open Masc
+module Dos_tools = Dos_machine_tools.Make (Machine_dos_host_events)
+
+let dispatch ~base_path ?(agent = "dos-test") name assoc =
+  match Machine_controller_contract.dos_tool_of_name name with
+  | Some tool -> Dos_tools.dispatch ~base_path ~agent ~tool ~arguments:(`Assoc assoc)
+  | None -> fail (name ^ " is not a DOS tool")
+;;
+
+(* Ejects whatever machine is there, as whoever holds it: the machine is
+   process-global and one test must not hand it to the next. *)
+let eject_held () =
+  let who =
+    match Dos_lane.screen () with
+    | Ok { Dos_lane.controller = Some holder; _ } -> holder
+    | Ok _ | Error _ -> "test-cleanup"
+  in
+  ignore (Dos_lane.eject ~who ~announce:ignore () : (unit, Dos_lane.error) result)
+;;
+
+let with_workspace f =
+  let base_path = Filename.temp_dir "masc-dos-tools-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Dos_lane.install_activity_observer None;
+      (* The machine is process-global: a test that leaves one loaded would
+         hand it to the next one. *)
+      eject_held ();
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      f base_path)
+;;
+
+let member name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
+let string_field name result =
+  match member name (Tool_result.data result) with
+  | Some (`String s) -> s
+  | _ -> fail (Printf.sprintf "no %s in %s" name (Tool_result.message result))
+;;
+
+let int_field name result =
+  match member name (Tool_result.data result) with
+  | Some (`Int n) -> n
+  | _ -> fail (Printf.sprintf "no %s in %s" name (Tool_result.message result))
+;;
+
+let bool_field name result =
+  match member name (Tool_result.data result) with
+  | Some (`Bool b) -> b
+  | _ -> fail (Printf.sprintf "no %s in %s" name (Tool_result.message result))
+;;
+
+let is_completed result = Tool_result.failure_class result = None
+
+let refused_before_any_effect name result =
+  match result with
+  | Tool_result.Failed
+      { Tool_result.class_ = Tool_result.Workflow_rejection
+      ; effect_disposition = Tool_result.Proven_pre_effect
+      ; _
+      } -> ()
+  | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    fail (name ^ " is not a refusal that declares no effect")
+;;
+
+let contains needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
+(* A COM image that prints HI, then loops on the BIOS key read until one
+   arrives, then terminates. The loop is the real idiom: a blocking read with
+   an empty ring returns AX=0 here rather than blocking the whole process, and
+   every DOS runtime spins on that. A program that fell straight through would
+   exit before anyone could press anything.
+
+   org 0x100: mov ah,9 / mov dx,msg / int 21h
+              wait: mov ah,0 / int 16h / or ax,ax / jz wait
+              int 20h / "HI$" *)
+let hello_com =
+  "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
+;;
+
+(* jmp $ -- a program that never asks the BIOS for a key, so a press runs its
+   whole budget instead of settling on the first chunk. *)
+let spinner_com = "\xeb\xfe"
+
+(* Poll INT 33h until the left button goes down, print D, then poll until it
+   comes back up, print U, and exit. The guest therefore proves both state
+   transitions; a ledger entry alone only proves that the host accepted the
+   call.
+
+   org 0x100: down: mov ax,3 / int 33h / test bx,1 / jz down
+              print 'D'
+              up:   mov ax,3 / int 33h / test bx,1 / jnz up
+              print 'U' / int 20h *)
+let mouse_click_com =
+  "\xb8\x03\x00\xcd\x33\xf7\xc3\x01\x00\x74\xf5\xb2\x44\xb4\x02\xcd\x21\
+   \xb8\x03\x00\xcd\x33\xf7\xc3\x01\x00\x75\xf5\xb2\x55\xb4\x02\xcd\x21\
+   \xcd\x20"
+;;
+
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_p (Filename.dirname dir);
+    Sys.mkdir dir 0o755
+  end
+;;
+
+let programs_dir ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
+  |> fun d -> Filename.concat d "programs"
+;;
+
+let write_file path contents =
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
+;;
+
+let install_program ~base_path name contents =
+  let dir = programs_dir ~base_path in
+  mkdir_p dir;
+  write_file (Filename.concat dir name) contents
+;;
+
+let install_program_file ~base_path program name contents =
+  let dir = Filename.concat (programs_dir ~base_path) program in
+  mkdir_p dir;
+  write_file (Filename.concat dir name) contents
+;;
+
+(* These two consent to discarding the previous autosave: most tests load more
+   than once into one workspace and are about something other than the guard.
+   The refusal is pinned by
+   [test_a_load_that_would_discard_the_previous_autosave_is_refused] and
+   test_dos_lane_autosave. *)
+let load ~base_path name =
+  dispatch ~base_path "masc_dos_load"
+    [ ("program", `String name); ("discard_previous_autosave", `Bool true) ]
+
+(* Setup for the tests that are about what happens after a load. The load's
+   own result has its own test. *)
+let boot ?(agent = "dos-test") ~base_path name =
+  ignore
+    (dispatch ~base_path ~agent "masc_dos_load"
+       [ ("program", `String name); ("discard_previous_autosave", `Bool true) ]
+      : Tool_result.result)
+
+let test_no_machine () =
+  with_workspace (fun base_path ->
+    let result = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "screen without a machine is refused" false (is_completed result);
+    check bool "and says which tool starts one" true
+      (contains "masc_dos_load" (Tool_result.message result)))
+;;
+
+(* A click needs a machine to land on, like every other input tool: without one
+   it is refused and names the tool that starts one. *)
+let test_click_without_a_machine_is_refused () =
+  with_workspace (fun base_path ->
+    let result = dispatch ~base_path "masc_dos_click" [ ("x", `Int 1); ("y", `Int 1) ] in
+    check bool "click without a machine is refused" false (is_completed result);
+    check bool "and says which tool starts one" true
+      (contains "masc_dos_load" (Tool_result.message result)))
+;;
+
+(* The inventory directory is there and will not read (permissions, a vanished
+   mount). Listing it used to raise Sys_error out of the tool. Root reads any
+   directory, so the case does not exist there. *)
+let test_an_unreadable_inventory_is_a_failure_not_an_exception () =
+  if Unix.getuid () = 0 then skip ();
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let dir = programs_dir ~base_path in
+    Unix.chmod dir 0o000;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod dir 0o755)
+      (fun () ->
+        match dispatch ~base_path "masc_dos_load" [] with
+        | Tool_result.Failed { Tool_result.class_ = Tool_result.Runtime_failure; message; _ } ->
+          check bool "and the host path stays out of the message" false
+            (contains base_path message)
+        | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+          fail "an unreadable inventory should fail with a runtime failure"))
+;;
+
+let test_inventory_when_unnamed () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let result = dispatch ~base_path "masc_dos_load" [] in
+    check bool "listing succeeds" true (is_completed result);
+    check bool "unnamed load does not expose a host path" true
+      (member "programs_dir" (Tool_result.data result) = None);
+    match member "programs_available" (Tool_result.data result) with
+    | Some (`List [ `String name ]) -> check string "the inventory" "hello.com" name
+    | _ -> fail "no programs_available")
+;;
+
+let test_inventory_describes_mountable_assets_without_a_machine () =
+  with_workspace (fun base_path ->
+    install_program_file ~base_path "sg3" "KOEI.COM" hello_com;
+    install_program_file ~base_path "sg3" "END.EXE" "end";
+    install_program ~base_path "solo.com" hello_com;
+    let result = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "inventory succeeds without a loaded game" true (is_completed result);
+    check bool "inventory does not expose a host path" true
+      (member "programs_dir" (Tool_result.data result) = None);
+    let programs =
+      match member "programs" (Tool_result.data result) with
+      | Some (`List entries) -> entries
+      | _ -> fail "no structured programs inventory"
+    in
+    let entry name =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              (match List.assoc_opt "name" fields with
+               | Some (`String actual) -> String.equal actual name
+               | _ -> false)
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | Some _ -> fail (name ^ " is not an object")
+      | None -> fail (name ^ " is absent")
+    in
+    let sg3 = entry "sg3" in
+    check string "directory kind" "directory"
+      (match List.assoc_opt "kind" sg3 with Some (`String value) -> value | _ -> "");
+    check bool "both executables are advertised" true
+      (match List.assoc_opt "executable_candidates" sg3 with
+       | Some (`List [ `String "END.EXE"; `String "KOEI.COM" ]) -> true
+       | _ -> false);
+    check bool "ambiguous boot is explicit" true
+      (List.assoc_opt "default_boot" sg3 = Some `Null);
+    let files =
+      match List.assoc_opt "files" sg3 with
+      | Some (`List values) -> values
+      | _ -> fail "directory has no files"
+    in
+    let file_name value =
+      match value with
+      | `Assoc fields ->
+        (match List.assoc_opt "name" fields with Some (`String name) -> name | _ -> "")
+      | _ -> ""
+    in
+    check bool "the executable is listed" true (List.exists (fun value -> file_name value = "sg3/KOEI.COM") files);
+    check bool "the companion file is listed" true (List.exists (fun value -> file_name value = "sg3/END.EXE") files);
+    let solo = entry "solo.com" in
+    check string "standalone file kind" "file"
+      (match List.assoc_opt "kind" solo with Some (`String value) -> value | _ -> "");
+    check bool "standalone file reports bytes" true
+      (match List.assoc_opt "bytes" solo with Some (`Int value) -> value > 0 | _ -> false);
+    check bool "standalone file reports sha256" true
+      (match List.assoc_opt "sha256" solo with
+       | Some (`String value) -> String.length value = 64
+       | _ -> false);
+    check string "sha256 matches the mounted bytes"
+      Agent_core_sha256.(to_hex (digest_string hello_com))
+      (match List.assoc_opt "sha256" solo with
+       | Some (`String value) -> value
+       | _ -> ""))
+;;
+
+(* FIFO entries must be reported without opening them. In particular, a
+   writer-free FIFO must never hold the inventory worker, and no error result
+   may disclose the resolved host path. *)
+let test_inventory_rejects_special_files_without_host_paths () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    let top_fifo = Filename.concat root "pipe.com" in
+    Unix.mkfifo top_fifo 0o600;
+    let game = Filename.concat root "pipe-game" in
+    mkdir_p game;
+    write_file (Filename.concat game "pipe-game.com") hello_com;
+    Unix.mkfifo (Filename.concat game "asset.fifo") 0o600;
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "special files do not block inventory" true (is_completed inventory);
+    let programs =
+      match member "programs" (Tool_result.data inventory) with
+      | Some (`List values) -> values
+      | _ -> fail "no inventory programs"
+    in
+    let entry name =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String name)
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail (name ^ " is absent")
+    in
+    let kind fields =
+      match List.assoc_opt "kind" fields with Some (`String value) -> value | _ -> ""
+    in
+    check string "top-level FIFO is unavailable" "unavailable" (kind (entry "pipe.com"));
+    let child_files =
+      match List.assoc_opt "files" (entry "pipe-game") with
+      | Some (`List values) -> values
+      | _ -> fail "pipe-game has no files"
+    in
+    let child_fifo =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String "pipe-game/asset.fifo")
+            | _ -> false)
+          child_files
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail "child FIFO is absent"
+    in
+    check string "child FIFO is unavailable" "unavailable" (kind child_fifo);
+    let top_load = load ~base_path "pipe.com" in
+    let child_load = load ~base_path "pipe-game" in
+    List.iter
+      (fun result ->
+        check bool "special-file load is refused" false (is_completed result);
+        check bool "special-file error has no host path" false
+          (contains (Common.masc_dir_from_base_path ~base_path) (Tool_result.message result)))
+      [ top_load; child_load ])
+;;
+
+(* Inventory names are the caller-visible identity. A symlink alias and its
+   target may contain different conventional executables; inventory and load
+   must choose from the same identity so the advertised default is the one
+   that actually boots. *)
+let test_inventory_and_load_share_alias_selection () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    let real = Filename.concat root "real-game" in
+    mkdir_p real;
+    write_file (Filename.concat real "alias.com") hello_com;
+    write_file (Filename.concat real "real-game.com") spinner_com;
+    Unix.symlink real (Filename.concat root "alias");
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    let programs =
+      match member "programs" (Tool_result.data inventory) with
+      | Some (`List values) -> values
+      | _ -> fail "no inventory programs"
+    in
+    let alias =
+      match
+        List.find_opt
+          (function
+            | `Assoc fields ->
+              List.assoc_opt "name" fields = Some (`String "alias")
+            | _ -> false)
+          programs
+      with
+      | Some (`Assoc fields) -> fields
+      | _ -> fail "alias is absent"
+    in
+    check bool "alias advertises the alias-named executable" true
+      (List.assoc_opt "default_boot" alias = Some (`String "alias.com"));
+    let loaded = load ~base_path "alias" in
+    check bool "alias load succeeds" true (is_completed loaded);
+    check string "load follows the advertised default" "alias.com"
+      (string_field "program" loaded))
+;;
+
+(* The operator may mount the whole inventory through a symlink. The boundary
+   check resolves both the root and the leaf before the descriptor-bound read;
+   inventory and load must keep working in that canonical tree. *)
+let test_a_linked_inventory_root_is_readable () =
+  with_workspace (fun base_path ->
+    let lexical_root = programs_dir ~base_path in
+    let real_root = lexical_root ^ ".real" in
+    mkdir_p real_root;
+    write_file (Filename.concat real_root "hello.com") hello_com;
+    Unix.symlink real_root lexical_root;
+    let inventory = dispatch ~base_path "masc_dos_inventory" [] in
+    check bool "linked inventory root lists files" true (is_completed inventory);
+    let loaded = load ~base_path "hello.com" in
+    check bool "linked inventory root loads files" true (is_completed loaded);
+    check string "linked root program" "hello.com" (string_field "program" loaded))
+;;
+
+(* Enumerating a directory is part of the boundary too. Replace the validated
+   inventory root with a different real directory at the deterministic read
+   seam and ensure the descriptor identity check refuses it before publishing
+   the outside child name. *)
+let test_inventory_directory_replacement_hides_child_names () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    let game = Filename.concat root "game" in
+    mkdir_p game;
+    write_file (Filename.concat game "game.com") hello_com;
+    let outside = Filename.temp_dir "masc-dos-outside-dir-" "" in
+    Fun.protect
+      ~finally:(fun () -> Fs_compat.remove_tree outside)
+      (fun () ->
+        write_file (Filename.concat outside "outside-private-name.dat") "private";
+        let moved = root ^ ".moved" in
+        let replaced = ref false in
+        let result =
+          Dos_tools.handle_inventory_with_read_hooks
+            ~before_program:(fun _ -> ())
+            ~after_read:(fun _ -> ())
+            ~before_read:(fun real ->
+              Unix.rename real moved;
+              Unix.rename outside real;
+              replaced := true)
+            ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path
+        in
+        let response =
+          Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result)
+        in
+        check bool "root replacement hook completed" true !replaced;
+        check bool "replaced root is refused" false (is_completed result);
+        check bool "outside child name is not enumerated" false
+          (contains "outside-private-name.dat" response)))
+;;
+
+(* Inventory describes base assets. Without a saved overlay, loading mounts
+   these direct files; subdirectories never become mounted files. *)
+let test_inventory_skips_subdirectories_like_load () =
+  with_workspace (fun base_path ->
+    install_program_file ~base_path "game" "game.com" hello_com;
+    let root = Filename.concat (programs_dir ~base_path) "game" in
+    mkdir_p (Filename.concat root "fake.exe");
+    mkdir_p (Filename.concat root "assets");
+    let result = dispatch ~base_path "masc_dos_inventory" [] in
+    let programs = match member "programs" (Tool_result.data result) with
+      | Some (`List values) -> values | _ -> fail "no inventory" in
+    let game = List.find (fun value ->
+      member "name" value = Some (`String "game")) programs in
+    check bool "inventory explicitly describes base assets" true
+      (member "asset_scope" (Tool_result.data result) = Some (`String "base_inventory"));
+    check bool "saved files are explicitly deferred to load" true
+      (member "saved_overlay" (Tool_result.data result) = Some (`String "applied_on_load"));
+    check bool "only the mounted executable is a candidate" true
+      (member "executable_candidates" game = Some (`List [`String "game.com"]));
+    let files = match member "files" game with
+      | Some (`List values) -> values | _ -> fail "no mounted files" in
+    check (list string) "inventory lists only the mounted file" ["game/game.com"]
+      (List.map (fun value -> match member "name" value with
+        | Some (`String name) -> name | _ -> fail "no filename") files);
+    let loaded = load ~base_path "game" in
+    check bool "directory with subdirectories still loads" true (is_completed loaded);
+    (* The machine reports the names the guest sees, and DOS folds names to
+       upper case (Dos_lane.dos_name_collision). *)
+    check bool "machine mounts exactly the advertised file" true
+      (member "files" (Tool_result.data loaded)
+       = Some (`List [`String (String.uppercase_ascii "game.com")])))
+;;
+
+(* Swap a directory out during enumeration, then restore it before final
+   validation. Pathname before/after checks alone would accept the outside
+   names; descriptor enumeration returns only the original inventory names. *)
+let test_inventory_temporary_swap_cannot_publish_foreign_names () =
+  List.iter (fun nested ->
+    with_workspace (fun base_path ->
+      let root = programs_dir ~base_path in
+      install_program_file ~base_path "game" "game.com" hello_com;
+      let target = Unix.realpath (if nested then Filename.concat root "game" else root) in
+      let moved = target ^ ".moved" in
+      let outside = Filename.temp_dir "masc-dos-outside-swap-" "" in
+      Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->
+        write_file (Filename.concat outside "private-outside.exe") "private";
+        let swapped = ref false in
+        let result = Dos_tools.handle_inventory_with_read_hooks
+            ~before_program:(fun _ -> ())
+          ~before_read:(fun directory ->
+            if String.equal directory target then begin
+              Unix.rename target moved;
+              Unix.symlink outside target;
+              swapped := true
+            end)
+          ~after_read:(fun directory ->
+            if String.equal directory target then begin
+              Unix.unlink target;
+              Unix.rename moved target
+            end)
+          ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path in
+        check bool "the actual enumeration crossed the swap" true !swapped;
+        check bool "bound original inventory remains readable" true (is_completed result);
+        let response = Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result) in
+        check bool "outside names never enter the response" false
+          (contains "private-outside.exe" response);
+        check bool "host root is never serialized" false (contains base_path response);
+        check bool "original executable is still advertised" true (contains "game.com" response))))
+    [false; true]
+;;
+
+(* The root identity remains owned after enumeration. A replacement between
+   that read and per-program inspection cannot become a new authority merely
+   because it contains a matching game name. *)
+let test_inventory_root_replacement_between_reads_is_refused () =
+  with_workspace (fun base_path ->
+    install_program_file ~base_path "game" "game.com" hello_com;
+    let root = programs_dir ~base_path in
+    let moved = root ^ ".moved" in
+    let outside = Filename.temp_dir "masc-dos-outside-authority-" "" in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->
+      mkdir_p (Filename.concat outside "game");
+      write_file (Filename.concat outside "game/private-outside.com") "foreign";
+      let replaced = ref false in
+      let result = Dos_tools.handle_inventory_with_read_hooks
+        ~before_program:(fun canonical ->
+          Unix.rename canonical moved;
+          Unix.symlink outside canonical;
+          replaced := true)
+        ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ())
+        ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path in
+      check bool "replacement happened between inventory reads" true !replaced;
+      check bool "request refuses replacement authority" false (is_completed result);
+      let response = Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result) in
+      check bool "foreign filename is never published" false (contains "private-outside.com" response);
+      check bool "foreign digest is never published" false
+        (contains Agent_core_sha256.(to_hex (digest_string "foreign")) response);
+      check bool "host path is never published" false (contains outside response)))
+;;
+
+let test_load_runs_to_the_first_key_request () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let result = load ~base_path "hello.com" in
+    check bool "load succeeds" true (is_completed result);
+    check string "the program name" "hello.com" (string_field "program" result);
+    check bool "its output is on the screen" true
+      (contains "HI" (string_field "screen_text" result));
+    (* The program is spinning on INT 16h with an empty ring and its screen
+       has stopped moving. Both halves are why the load stopped here instead
+       of burning its whole budget. *)
+    check bool "it settled" true (bool_field "settled" result);
+    check bool "it is waiting for a key" true (bool_field "waiting_for_key" result);
+    check bool "and has not exited" false (bool_field "exited" result))
+;;
+
+(* The load and the screen say which DOS core answered. Two servers built
+   from one masc commit can link different cores; a black screen from the
+   older one otherwise looks like a game bug. *)
+let test_load_and_screen_name_the_core () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let expected = Dos_lane.core_to_yojson Dos_lane.core in
+    let core_of name result =
+      match member "core" (Tool_result.data result) with
+      | Some core -> core
+      | None -> fail (Printf.sprintf "%s carries no core: %s" name (Tool_result.message result))
+    in
+    let loaded = load ~base_path "hello.com" in
+    check bool "load succeeds" true (is_completed loaded);
+    check string "the load names the linked core"
+      (Yojson.Safe.to_string expected) (Yojson.Safe.to_string (core_of "load" loaded));
+    let screen = dispatch ~base_path "masc_dos_screen" [] in
+    check string "the screen names the linked core"
+      (Yojson.Safe.to_string expected) (Yojson.Safe.to_string (core_of "screen" screen));
+    check string "the digest is the one the core baked at its build"
+      Dos_core_identity.source_digest Dos_lane.core.Dos_lane.source_digest)
+;;
+
+let test_meta_names_the_core_without_a_machine () =
+  with_workspace (fun base_path ->
+    let result = dispatch ~base_path "masc_dos_meta" [] in
+    check bool "meta succeeds without a loaded game" true (is_completed result);
+    let actual =
+      match member "core" (Tool_result.data result) with
+      | Some value -> value
+      | None -> fail "meta carries no core"
+    in
+    check string "meta returns the linked core"
+      (Yojson.Safe.to_string (Dos_lane.core_to_yojson Dos_lane.core))
+      (Yojson.Safe.to_string actual))
+;;
+
+(* CI links the core at OCAML_DOS_SHA. This fails when the SHA moved without
+   Dos_lane's pinned digest, and locally when the build linked another core
+   (an older opam install, a vendored checkout on another branch). *)
+(* The pin lives in these two files. Naming them here, as the literals the
+   edited-tests selector reads, makes a PR that moves only OCAML_DOS_SHA run
+   this suite, so a digest left behind fails that PR and not a later main. *)
+let pin_script = "scripts/opam-pin-external-deps.sh"
+let pin_lock = "masc.opam.locked"
+
+let test_the_linked_core_is_the_pinned_one () =
+  let core = Dos_lane.core in
+  if not core.Dos_lane.matches_pin then
+    fail
+      (Printf.sprintf
+         "linked ocaml-dos source digest %s differs from the pinned %s: either this \
+          build linked a core other than OCAML_DOS_SHA (%s, %s), or the SHA moved and \
+          Dos_lane.pinned_core_source_digest must become %s"
+         core.source_digest core.pinned_source_digest pin_script pin_lock
+         core.source_digest)
+;;
+
+let test_press_reaches_the_guest_and_the_ledger () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~agent:"vincent" ~base_path "hello.com";
+    let result =
+      dispatch ~base_path ~agent:"vincent" "masc_dos_press"
+        [ ("keys", `List [ `String "enter" ]) ]
+    in
+    check bool "press succeeds" true (is_completed result);
+    (* The guest took the key and ran into INT 20h. *)
+    check bool "the program finished" true (bool_field "exited" result);
+    match Dos_lane.ledger () with
+    | [ entry ] ->
+      check string "the ledger names the caller" "vincent" entry.Dos_lane.who;
+      check string "and the key" "enter" entry.Dos_lane.key_name
+    | entries ->
+      fail (Printf.sprintf "expected one ledger entry, got %d" (List.length entries)))
+;;
+
+(* A click is button down, run, button up, run, in one call, sharing one step
+   ceiling. The guest prints D only after INT 33h reports the button down, and
+   prints U and exits only after the host clears it, so the screen and the exit
+   are what prove both halves reached the guest. The step total is not asked to
+   prove that -- how many steps the poll loop burns belongs to ocaml-dos -- it
+   only has to stay inside the one ceiling. *)
+(* Polls INT 33h AX=3 until any button is down, prints the digit of BX, exits.
+   org 0x100: poll: mov ax,3 / int 33h / or bx,bx / jz poll
+              mov dl,bl / add dl,'0' / mov ah,2 / int 21h / int 20h *)
+let mouse_mask_com =
+  "\xb8\x03\x00\xcd\x33\x09\xdb\x74\xf7\x88\xda\x80\xc2\x30\xb4\x02\xcd\x21\xcd\x20"
+;;
+
+(* [buttons] is a mask, and 3 is both buttons. It was refused above 2. *)
+let test_click_takes_the_whole_button_mask () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "mask.com" mouse_mask_com;
+    List.iter
+      (fun buttons ->
+        boot ~base_path "mask.com";
+        let result =
+          dispatch ~base_path "masc_dos_click"
+            [ ("x", `Int 1); ("y", `Int 1); ("buttons", `Int buttons); ("steps", `Int 1_000) ]
+        in
+        check bool (Printf.sprintf "buttons %d clicks" buttons) true (is_completed result);
+        check bool (Printf.sprintf "and the guest reads %d in BX" buttons) true
+          (contains (string_of_int buttons) (string_field "screen_text" result)))
+      [ 1; 2; 3; 4; 7 ];
+    boot ~base_path "mask.com";
+    List.iter
+      (fun buttons ->
+        refused_before_any_effect (Printf.sprintf "buttons %d" buttons)
+          (dispatch ~base_path "masc_dos_click"
+             [ ("x", `Int 1); ("y", `Int 1); ("buttons", `Int buttons) ]))
+      [ 8; -1; 15 ])
+;;
+
+let test_click_reaches_the_guest_and_the_ledger () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "mouse.com" mouse_click_com;
+    boot ~agent:"vincent" ~base_path "mouse.com";
+    let result =
+      dispatch ~base_path ~agent:"vincent" "masc_dos_click"
+        [ ("x", `Int 1); ("y", `Int 1); ("steps", `Int 1_000) ]
+    in
+    check bool "click succeeds" true (is_completed result);
+    check bool "the guest observed release and exited" true (bool_field "exited" result);
+    check bool "the guest observed down and up" true
+      (contains "DU" (string_field "screen_text" result));
+    check bool "down and up share one ceiling, not two" true
+      (int_field "steps_run" result <= 1_000);
+    match Dos_lane.ledger () with
+    | [ entry ] ->
+      check string "the ledger names the caller" "vincent" entry.Dos_lane.who;
+      (* The default buttons is 1 (left); the entry names the button that
+         went down, not the 0 the up half releases it to. *)
+      check string "and the click as mouse(x,y,buttons)" "mouse(1,1,1)"
+        entry.Dos_lane.key_name
+    | entries ->
+      fail (Printf.sprintf "expected one ledger entry, got %d" (List.length entries)))
+;;
+
+(* The machine reads a program into guest memory and masc_dos_peek reads guest
+   memory back out. A caller-supplied path would therefore be an arbitrary
+   host-file read, so only inventory names resolve. *)
+let test_only_inventory_names_resolve () =
+  with_workspace (fun base_path ->
+    let outside = Filename.temp_file "masc-dos-outside-" ".com" in
+    Out_channel.with_open_bin outside (fun oc -> output_string oc hello_com);
+    Fun.protect
+      ~finally:(fun () -> Sys.remove outside)
+      (fun () ->
+        let by_path = load ~base_path outside in
+        check bool "a host path is refused" false (is_completed by_path);
+        let climbing = load ~base_path "../../etc/passwd" in
+        check bool "and so is climbing out" false (is_completed climbing)))
+;;
+
+(* The name is checked for separators and dots, but a symbolic link carries a
+   path no name spells. Until the boundary moved onto the resolved path, an
+   entry linked at a host file was loaded into guest memory, where
+   masc_dos_peek hands it back out 256 bytes at a time. *)
+let test_a_link_out_of_the_inventory_is_refused () =
+  with_workspace (fun base_path ->
+    let outside = Filename.temp_file "masc-dos-secret-" ".com" in
+    write_file outside hello_com;
+    Fun.protect
+      ~finally:(fun () -> Sys.remove outside)
+      (fun () ->
+        let dir = programs_dir ~base_path in
+        mkdir_p dir;
+        Unix.symlink outside (Filename.concat dir "secret.com");
+        check bool "a linked host file is refused" false
+          (is_completed (load ~base_path "secret.com"));
+        (* The same link one level down, where the mount list reads it. *)
+        let game = Filename.concat dir "game" in
+        mkdir_p game;
+        write_file (Filename.concat game "game.com") hello_com;
+        Unix.symlink outside (Filename.concat game "data.dat");
+        check bool "and so is a linked file beside the executable" false
+          (is_completed (load ~base_path "game"))))
+;;
+
+(* The lexical realpath check is not the read boundary: replace the leaf
+   between the first parent inspection and the descriptor check and require the
+   descriptor-bound reader to reject the changed identity. The hook is the
+   deterministic replacement point used by Fs_compat's regression suite, so
+   this does not depend on a sleep or a timing race. *)
+let test_inventory_read_rejects_a_controlled_replacement () =
+  with_workspace (fun base_path ->
+    let root = programs_dir ~base_path in
+    mkdir_p root;
+    Unix.chmod root 0o700;
+    let path = Filename.concat root "race.com" in
+    let moved = path ^ ".old" in
+    write_file path hello_com;
+    let inspections = ref 0 in
+    let parent_lstat directory =
+      let stat = Unix.lstat directory in
+      if String.equal directory root then begin
+        incr inspections;
+        if !inspections = 2 then begin
+          Unix.rename path moved;
+          write_file path "replacement"
+        end
+      end;
+      stat
+    in
+    match
+      Fs_compat.Owned_read_for_testing.load_with_snapshot
+        ~parent_lstat ~owner_uid:(Unix.geteuid ()) ~ownership_root:root path
+    with
+    | Error { Fs_compat.failure = Fs_compat.Filesystem_identity_changed _; _ } -> ()
+    | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+    | Ok _ -> fail "descriptor-bound inventory read accepted a replaced leaf")
+;;
+
+(* A game directory often holds several programs: 삼국지3 boots KOEI.COM,
+   which runs OPEN.EXE and MAIN.EXE beside it, and the setup and editor sit
+   there too. The refusal used to ask the caller to name one with no argument
+   to name it by. [boot] is that argument; it names a file inside the
+   directory, folded the way DOS folds, and nothing else. *)
+let test_boot_names_the_program_inside_a_directory () =
+  with_workspace (fun base_path ->
+    let game = Filename.concat (programs_dir ~base_path) "arcade" in
+    mkdir_p game;
+    write_file (Filename.concat game "LOADER.COM") hello_com;
+    write_file (Filename.concat game "SETUP.COM") spinner_com;
+    let unnamed = load ~base_path "arcade" in
+    check bool "two programs and no boot is a question" false (is_completed unnamed);
+    check bool "the question names the argument" true
+      (contains "boot" (Tool_result.message unnamed));
+    let booted =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "loader.com") ]
+    in
+    check bool "boot picks the loader, folded like DOS" true (is_completed booted);
+    check string "the loader is what runs" "LOADER.COM" (string_field "program" booted);
+    check bool "the loader reaches its first key request" true
+      (bool_field "waiting_for_key" booted);
+    let missing =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "MAIN.EXE") ]
+    in
+    check bool "a boot the directory does not hold is refused" false (is_completed missing);
+    write_file (Filename.concat game "SAVE.DAT") "not a program";
+    let data =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "SAVE.DAT") ]
+    in
+    check bool "a boot that is not a program is refused" false (is_completed data);
+    let climbing =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "../LOADER.COM") ]
+    in
+    check bool "boot is a file name, not a path" false (is_completed climbing);
+    install_program ~base_path "hello.com" hello_com;
+    let single =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "hello.com"); ("boot", `String "hello.com") ]
+    in
+    check bool "boot on a single file is refused" false (is_completed single))
+;;
+
+(* The step budget is declared per key. Multiplied by a caller-controlled
+   number of keys it stopped bounding anything: sixty-four keys at four
+   million each is a quarter of a billion instructions run under the
+   machine's mutex, with every other keeper waiting. A sequence now spends
+   one ceiling and says how far it got. *)
+let test_a_sequence_spends_one_ceiling_not_one_per_key () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "spin.com" spinner_com;
+    boot ~base_path "spin.com";
+    let result =
+      dispatch ~base_path "masc_dos_press"
+        [ ("keys", `List [ `String "a"; `String "b" ]); ("steps", `Int 4_000_000) ]
+    in
+    check bool "the press is accepted" true (is_completed result);
+    check bool "the call stops at one budget, not two" true
+      (int_field "steps_run" result <= 4_000_000);
+    check int "and says how many keys landed" 1 (int_field "keys_pressed" result);
+    (* The first key left the program busy, so the second was never put in
+       the ring: a key typed into a running loop is eaten by it. *)
+    check int "the unsent key is not in the ledger" 1 (List.length (Dos_lane.ledger ())))
+;;
+
+(* The ceiling bounds the machine's time, not the call's work: a program that
+   has exited runs no instructions, so a sequence of any length would still
+   walk every key and write every ledger line. *)
+let test_a_sequence_has_a_length () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    check bool "65 keys is refused" false
+      (is_completed
+         (dispatch ~base_path "masc_dos_press"
+            [ ("keys", `List (List.init 65 (fun _ -> `String "a"))) ]));
+    check bool "and 257 characters is refused" false
+      (is_completed
+         (dispatch ~base_path "masc_dos_type"
+            [ ("text", `String (String.make 257 'a')) ])))
+;;
+
+(* DOS folds filenames, so two entries that differ only in case are one name
+   to the guest: one would shadow the other while the observation still listed
+   both. Called on the lane rather than through the inventory on purpose --
+   this machine's filesystem folds case too, so the two files cannot both
+   exist here to be found. *)
+let test_two_names_that_differ_only_in_case_are_refused () =
+  with_workspace (fun base_path ->
+    let announced = ref 0 in
+    let result =
+      Dos_lane.load ~who:"dos-test"
+        ~ledger_dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        ~saves_dir:(Filename.concat base_path "saves")
+        ~checkpoint_dir:(Filename.concat base_path "checkpoints")
+        ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"game.com" ~program_bytes:hello_com
+        ~files:[ ("GAME.COM", hello_com); ("DATA.DAT", "upper"); ("data.dat", "lower") ]
+        ~announce:(fun () -> incr announced)
+    in
+    check bool "the load is refused" true (Result.is_error result);
+    check int "and nothing was announced" 0 !announced)
+;;
+
+(* A game in miniature: if SAVE.DAT opens it prints it, otherwise it writes
+   "NEW$" there -- create, write, close -- and waits for a key either way.
+
+   100 mov ax,3D00h / mov dx,fname / int 21h / jc create
+   10A mov bx,ax / mov ah,3Fh / mov cx,16 / mov dx,buf / int 21h
+   116 mov ah,3Eh / int 21h / mov ah,9 / mov dx,buf / int 21h / jmp wait
+   123 create: mov ah,3Ch / xor cx,cx / mov dx,fname / int 21h / mov bx,ax
+       mov ah,40h / mov cx,4 / mov dx,msg / int 21h / mov ah,3Eh / int 21h
+   13C wait: mov ah,0 / int 16h / or ax,ax / jz wait / int 20h
+   146 fname "SAVE.DAT",0   14F msg "NEW$"   153 buf 16 x "$" *)
+let saver_com_named fname =
+  let word n = String.init 2 (fun i -> Char.chr ((n lsr (8 * i)) land 0xff)) in
+  let fname_at = 0x146 in
+  let msg_at = fname_at + String.length fname + 1 in
+  let buf_at = msg_at + 4 in
+  "\xb8\x00\x3d\xba" ^ word fname_at ^ "\xcd\x21\x72\x19"
+  ^ "\x89\xc3\xb4\x3f\xb9\x10\x00\xba" ^ word buf_at ^ "\xcd\x21"
+  ^ "\xb4\x3e\xcd\x21\xb4\x09\xba" ^ word buf_at ^ "\xcd\x21\xeb\x19"
+  ^ "\xb4\x3c\x31\xc9\xba" ^ word fname_at ^ "\xcd\x21\x89\xc3"
+  ^ "\xb4\x40\xb9\x04\x00\xba" ^ word msg_at ^ "\xcd\x21\xb4\x3e\xcd\x21"
+  ^ "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
+  ^ fname ^ "\000" ^ "NEW$" ^ String.make 16 '$'
+;;
+
+let saver_com = saver_com_named "SAVE.DAT"
+
+let saves_of ~base_path name =
+  Filename.concat
+    (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "saves")
+    name
+;;
+
+let install_game ~base_path name files =
+  let dir = Filename.concat (programs_dir ~base_path) name in
+  mkdir_p dir;
+  List.iter (fun (f, contents) -> write_file (Filename.concat dir f) contents) files
+;;
+
+let eject () = eject_held ()
+
+(* A game saves by writing a file, and the machine kept what the guest wrote
+   only in memory: an eject or a server restart took the campaign with it,
+   as the MSX 삼국지2 lane's Keepers found. What the program wrote is now on
+   disk after the call that wrote it, and the next load mounts it. *)
+let test_a_save_outlives_its_machine () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    let first = load ~base_path "quest" in
+    check bool "the first run boots" true (is_completed first);
+    let kept = Filename.concat (saves_of ~base_path "quest") "SAVE.DAT" in
+    check bool "the save is on disk after the call that wrote it" true (Sys.file_exists kept);
+    check string "with what the program wrote" "NEW$"
+      (In_channel.with_open_bin kept In_channel.input_all);
+    eject ();
+    let second = load ~base_path "quest" in
+    check bool "the next machine finds the save and prints it" true
+      (contains "NEW" (string_field "screen_text" second)))
+;;
+
+(* A save made earlier stands in for the inventory's copy of the same file,
+   matched the way DOS matches names. *)
+let test_a_save_is_mounted_over_the_inventory_copy () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com); ("SAVE.DAT", "OLD$") ];
+    let saves = saves_of ~base_path "quest" in
+    mkdir_p saves;
+    write_file (Filename.concat saves "save.dat") "MINE$";
+    let loaded = load ~base_path "quest" in
+    let text = string_field "screen_text" loaded in
+    check bool "the save wins" true (contains "MINE" text);
+    check bool "the inventory copy is not what the guest opened" false (contains "OLD" text))
+;;
+
+let unsaved result =
+  match member "unsaved" (Tool_result.data result) with
+  | Some (`List items) -> List.map (function `String u -> u | _ -> fail "unsaved item") items
+  | _ -> fail (Printf.sprintf "no unsaved in %s" (Tool_result.message result))
+;;
+
+(* When the save cannot be written the call still returns what the guest did
+   -- it moved either way, and an error would be answered by sending the same
+   keys again -- and lists the save that did not reach disk. *)
+let test_a_save_that_cannot_be_written_is_reported () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    let saves = saves_of ~base_path "quest" in
+    mkdir_p (Filename.dirname saves);
+    write_file saves "a file where the save directory would be";
+    let loaded = load ~base_path "quest" in
+    check bool "the call returns the screen" true (is_completed loaded);
+    (match unsaved loaded with
+     | [ line ] -> check bool "naming the save" true (contains "SAVE.DAT" line)
+     | lines -> fail (Printf.sprintf "expected one unsaved line, got %d" (List.length lines)));
+    let next = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "the machine is still there" true (is_completed next))
+;;
+
+(* DOS takes "/" as a separator, so a guest asked for a save name can create
+   "../OUT.DAT". That name never reaches the host: it stays in the machine,
+   is reported once, and nothing lands beside the saves directory. *)
+let test_a_guest_path_never_reaches_the_host () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com_named "../OUT.DAT") ];
+    let loaded = load ~base_path "quest" in
+    check bool "the call returns" true (is_completed loaded);
+    check bool "the path is reported" true
+      (List.exists (contains "a path, not a file name") (unsaved loaded));
+    let saves = saves_of ~base_path "quest" in
+    check bool "nothing beside the saves directory" false
+      (Sys.file_exists (Filename.concat (Filename.dirname saves) "OUT.DAT"));
+    check bool "nothing in it either" false
+      (Sys.file_exists saves && Array.length (Sys.readdir saves) > 0);
+    let again = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1000) ] in
+    check (list string) "reported once, not on every call" [] (unsaved again))
+;;
+
+let controller result =
+  match member "controller" (Tool_result.data result) with
+  | Some (`String who) -> Some who
+  | Some `Null | None -> None
+  | Some _ -> fail "controller is neither a name nor null"
+;;
+
+let press_as ~base_path who key =
+  dispatch ~base_path ~agent:who "masc_dos_press" [ ("keys", `List [ `String key ]) ]
+;;
+
+(* A hotseat game asks each human ruler in turn at one keyboard. Without a
+   controller a second Keeper's key lands in whoever's turn is on screen, and
+   on the MSX lane Keepers swapped programs and restored slots under each
+   other mid-campaign. Whoever loads holds the machine; others are refused
+   before anything happens and can still watch. *)
+let test_only_the_holder_moves_the_machine () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let loaded = dispatch ~base_path ~agent:"liu-bei" "masc_dos_load" [ ("program", `String "hello.com") ] in
+    check (option string) "the loader holds it" (Some "liu-bei") (controller loaded);
+    let refused = press_as ~base_path "cao-cao" "a" in
+    check bool "another player's key is refused" false (is_completed refused);
+    check bool "the refusal names the holder" true
+      (contains "liu-bei" (Tool_result.message refused));
+    check int "and nothing reached the ledger" 0 (List.length (Dos_lane.ledger ()));
+    check bool "watching needs no controller" true
+      (is_completed (dispatch ~base_path ~agent:"cao-cao" "masc_dos_screen" []));
+    check bool "nor may another player eject it" false
+      (is_completed (dispatch ~base_path ~agent:"cao-cao" "masc_dos_eject" []));
+    check bool "or load over it" false
+      (is_completed
+         (dispatch ~base_path ~agent:"cao-cao" "masc_dos_load" [ ("program", `String "hello.com") ])))
+;;
+
+let test_pass_hands_the_machine_on () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let not_mine =
+      dispatch ~base_path ~agent:"cao-cao" "masc_dos_pass" [ ("to", `String "cao-cao") ]
+    in
+    check bool "only the holder passes" false (is_completed not_mine);
+    let passed =
+      dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [ ("to", `String "cao-cao") ]
+    in
+    check (option string) "the controller moves" (Some "cao-cao") (controller passed);
+    check bool "the new holder plays" true (is_completed (press_as ~base_path "cao-cao" "a"));
+    check bool "the old holder no longer does" false
+      (is_completed (press_as ~base_path "dos-test" "a")))
+;;
+
+(* A freed controller goes to whoever next moves the machine and succeeds; a
+   call that is refused for its own arguments takes nothing. *)
+let test_a_free_controller_goes_to_the_next_successful_mover () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let freed = dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [] in
+    check (option string) "freed" None (controller freed);
+    let typo = press_as ~base_path "sun-quan" "no-such-key" in
+    check bool "a bad key is refused" false (is_completed typo);
+    let after_typo = dispatch ~base_path "masc_dos_screen" [] in
+    check (option string) "and took nothing" None (controller after_typo);
+    let moved = press_as ~base_path "sun-quan" "a" in
+    check (option string) "the next successful mover holds it" (Some "sun-quan")
+      (controller moved))
+;;
+
+(* A hotseat game runs for hours, and the Keeper holding the controller can
+   stop in that time. It will never pass, so a stopped holder is let go the
+   next time a Keeper moves the machine. A finished stop removes the Keeper
+   from the registry and keeps its meta, so that is the case pinned here. A
+   Keeper that is running, or launching, keeps it, and so does a name that
+   is not a Keeper. The check reads Keeper state, so it sits on the Keeper's
+   own tool path, not the generic dispatch. *)
+let keeper_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ ("name", `String name); ("activation_mode", `String "manual") ])
+  with
+  | Ok meta -> meta
+  | Error error -> fail error
+;;
+
+type holder_state =
+  | Stopped_and_gone
+  | Running
+  | Launching
+  | Not_a_keeper
+
+let with_holder ~base_path state name f =
+  let config = Workspace.default_config base_path in
+  let meta = keeper_meta name in
+  let store_meta () =
+    match Keeper_meta_store.replace_snapshot config meta with
+    | Ok () -> ()
+    | Error error -> fail error
+  in
+  (match state with
+   | Stopped_and_gone -> store_meta ()
+   | Running ->
+     store_meta ();
+     ignore (Keeper_registry.For_testing.register ~base_path name meta : Keeper_registry.registry_entry)
+   | Launching ->
+     store_meta ();
+     ignore (Keeper_registry.register_offline ~base_path name meta : Keeper_registry.registry_entry)
+   | Not_a_keeper -> ());
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path name)
+    f
+;;
+
+(* Keeper calls below cross the real attached SDK worker. Direct handler
+   helpers elsewhere in this file exercise the worker library itself. *)
+let with_attached_workspace f =
+  with_workspace (fun base_path ->
+    Eio_main.run (fun env ->
+      let previous_runtime = Runtime.For_testing.snapshot () in
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:(fun () ->
+        Runtime.For_testing.restore previous_runtime;
+        Fs_compat.clear_fs ()) (fun () ->
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              let runtime_path = Filename.concat base_path "runtime.toml" in
+              Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+              (match Runtime.init_default ~config_path:runtime_path with
+               | Ok () -> () | Error detail -> fail detail);
+              Lane_addon_runtime.For_testing.reset ();
+              Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+                (fun ~invoke:_ ~detach -> let value = f base_path in detach (); value)))))))
+;;
+
+let keeper_call ~base_path who name arguments =
+  let config = Workspace.default_config base_path in
+  let exports = (Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:who).exports in
+  let export = List.find (fun (export : Lane_addon_tool_export.t) -> export.tool.name=name) exports in
+  Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name:who ~export ~arguments
+;;
+
+let keeper_press ~base_path who key =
+  let execution = keeper_call ~base_path who "masc_dos_press"
+    (`Assoc ["keys", `List [`String key]]) in
+  match execution.disposition with
+  | Tool_result.Completed () -> true
+  | Tool_result.Failed _ | Tool_result.Deferred _ -> false
+;;
+
+let current_controller () =
+  match Dos_lane.screen () with
+  | Ok o -> o.Dos_lane.controller
+  | Error e -> fail (Dos_lane.error_to_string e)
+;;
+
+let test_a_stopped_holders_controller_is_let_go () =
+  List.iter
+    (fun (state, label, released) ->
+      with_attached_workspace (fun base_path ->
+        install_program ~base_path "hello.com" hello_com;
+        with_holder ~base_path state "cao-cao" (fun () ->
+          boot ~agent:"cao-cao" ~base_path "hello.com";
+          check bool (label ^ ": the next Keeper moves") released
+            (keeper_press ~base_path "liu-bei" "a");
+          check (option string) (label ^ ": holder")
+            (Some (if released then "liu-bei" else "cao-cao"))
+            (current_controller ());
+          check (list string) (label ^ ": only admitted Keeper input reaches the ledger")
+            (if released then ["liu-bei"] else [])
+            (List.map (fun entry -> entry.Dos_lane.who) (Dos_lane.ledger ())))))
+    [ (Stopped_and_gone, "a stopped Keeper", true)
+    ; (Running, "a running Keeper", false)
+    ; (Launching, "a launching Keeper", false)
+      (* The workspace has no auth file, so auth is on with a token required:
+         a name that is neither a Keeper nor a credential cannot act here. *)
+    ; (Not_a_keeper, "a name with no Keeper and no credential", true)
+    ]
+;;
+
+(* A Keeper removed for good leaves no registry entry and no meta, only its
+   own credential, which has no expiry. The next move reads that like an agent
+   coming back, so the shutdown that removes it lets the controller go. *)
+let test_a_removed_keeper_lets_its_controller_go () =
+  with_attached_workspace (fun base_path ->
+    let config = Workspace.default_config base_path in
+    install_program ~base_path "hello.com" hello_com;
+    (match Auth.create_token base_path ~agent_name:"cao-cao" ~role:Masc_domain.Worker with
+     | Ok _ -> ()
+     | Error e -> fail (Masc_domain.masc_error_to_string e));
+    with_holder ~base_path Not_a_keeper "cao-cao" (fun () ->
+      boot ~agent:"cao-cao" ~base_path "hello.com";
+      let departure =
+        match Auth.with_credential_transaction base_path (fun transaction ->
+          Keeper_machine_controller_authority.holder_left ~transaction ~config
+            ~now:(Unix.gettimeofday ()) "cao-cao") with
+        | Ok departure -> departure
+        | Error error -> fail (Masc_domain.masc_error_to_string error)
+      in
+      check bool "the next move cannot see that a removed Keeper left" true
+        (Option.is_none departure);
+      check (result unit string) "removing a Keeper that holds nothing succeeds" (Ok ())
+        (Keeper_dos_controller.release_retired ~config ~keeper_name:"liu-bei" ~by:"operator");
+      check (option string) "leaves the holder" (Some "cao-cao") (current_controller ());
+      check (result unit string) "removing the holder succeeds" (Ok ())
+        (Keeper_dos_controller.release_retired ~config ~keeper_name:"cao-cao" ~by:"operator");
+      check (option string) "frees the controller" None (current_controller ());
+      check bool "and the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a")))
+;;
+
+(* RFC play-link-for-the-shared-machine §2.8: under enforced auth, a holder
+   whose credential ran out has left. A holder that is not a
+   Keeper has also left when no credential carries its name. Where requests
+   need no token a name may be self-declared, and it keeps the controller. *)
+let test_a_holder_departs_with_its_credential () =
+  with_workspace (fun base_path ->
+    let config = Workspace.default_config base_path in
+    let departure name at =
+      match Auth.with_credential_transaction base_path (fun transaction ->
+        Keeper_machine_controller_authority.holder_left ~transaction ~config ~now:at name) with
+      | Ok departure -> departure
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+    in
+    let reason = function
+      | None -> "still here"
+      | Some Machine_controller_contract.Keeper_stopped -> "keeper stopped"
+      | Some Machine_controller_contract.Credential_expired -> "credential expired"
+      | Some Machine_controller_contract.No_credential -> "no credential"
+      | Some Machine_controller_contract.Participant_departed -> "participant departed"
+    in
+    let token name role =
+      match Auth.create_token base_path ~agent_name:name ~role with
+      | Ok _ -> ()
+      | Error e -> fail (Masc_domain.masc_error_to_string e)
+    in
+    List.iter (fun (agent_name, role) ->
+      match Auth.create_token_expiring_in base_path ~agent_name ~role ~hours:1 with
+      | Ok _ -> ()
+      | Error e -> fail (Masc_domain.masc_error_to_string e))
+      [ "minsu", Masc_domain.Player; "visiting-operator", Masc_domain.Admin;
+        "running-operator", Masc_domain.Admin ];
+    token "operator" Masc_domain.Admin;
+    token "codex" Masc_domain.Worker;
+    let now = Unix.gettimeofday () and later = Unix.gettimeofday () +. (2. *. 3600.) in
+    check string "a live invite stays" "still here" (reason (departure "minsu" now));
+    check string "an invite past its time has left" "credential expired" (reason (departure "minsu" later));
+    check string "an operator whose credential expired has left" "credential expired"
+      (reason (departure "visiting-operator" later));
+    with_holder ~base_path Running "running-operator" (fun () ->
+      check string "a running Keeper retains ownership despite its expired external credential"
+        "still here" (reason (departure "running-operator" later)));
+    check string "an operator stays" "still here" (reason (departure "operator" later));
+    check string "an agent's credential stays" "still here" (reason (departure "codex" later));
+    check string "a name no credential carries has left" "no credential" (reason (departure "ghost" now));
+    Out_channel.with_open_bin (Auth.credential_file base_path "broken") (fun oc ->
+      output_string oc "{ not json");
+    check string "a credential file that cannot be read says nothing, so the holder stays"
+      "still here" (reason (departure "broken" now));
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = false };
+    check string "where a request needs no token a name may be self-declared, so it stays"
+      "still here" (reason (departure "ghost" now));
+    check string "an expired operator can still act in self-declared mode" "still here"
+      (reason (departure "visiting-operator" later));
+    Auth.save_auth_config base_path { Masc_domain.default_auth_config with enabled = false };
+    check string "without auth it stays too" "still here" (reason (departure "ghost" now));
+    check string "without auth an expired bearer does not establish that the holder left"
+      "still here" (reason (departure "minsu" later));
+    Out_channel.with_open_bin
+      (Filename.concat (Filename.concat (Filename.concat base_path ".masc") "auth") "config.json")
+      (fun oc -> output_string oc "{ not json");
+    check string "an unreadable auth config says nothing, so the holder stays" "still here"
+      (reason (departure "ghost" now));
+    check string "expiry with unreadable auth config does not release the holder" "still here"
+      (reason (departure "visiting-operator" later));
+    let config = Workspace.default_config base_path in
+    (match Auth.with_credential_transaction base_path (fun transaction ->
+       Keeper_machine_controller_authority.pass_refusal ~transaction ~config ~target:(Ok (Some "operator"))) with
+     | Ok (Some (Keeper_machine_controller_authority.Seats_unknown _)) -> ()
+     | Ok (Some (Keeper_machine_controller_authority.Refused message)) ->
+         failf "an unreadable auth config is not the caller's fault: %s" message
+     | Ok None -> fail "handoff admission ignored unreadable auth"
+     | Error error -> fail (Masc_domain.masc_error_to_string error)))
+;;
+
+(* A credential listing that fails is not an empty list: nobody can say who
+   sits at the machine, so a pass is refused as [Seats_unknown] and nothing
+   raises out of the gate. *)
+let test_a_pass_is_refused_when_the_credentials_do_not_list () =
+  with_workspace (fun base_path ->
+    let agents = Filename.dirname (Auth.credential_file base_path "minsu") in
+    if Sys.file_exists agents then Fs_compat.remove_tree agents;
+    Fs_compat.mkdir_p (Filename.dirname agents);
+    Out_channel.with_open_bin agents (fun oc -> output_string oc "not a directory");
+    match Auth.with_credential_transaction base_path (fun transaction ->
+      Keeper_machine_controller_authority.pass_refusal ~transaction
+        ~config:(Workspace.default_config base_path) ~target:(Ok (Some "minsu"))) with
+    | Ok (Some (Keeper_machine_controller_authority.Seats_unknown _)) -> ()
+    | Ok (Some (Keeper_machine_controller_authority.Refused message)) ->
+        failf "a listing that failed is not the caller's fault: %s" message
+    | Ok None -> fail "handoff admission ignored unreadable credentials"
+    | Error error -> fail (Masc_domain.masc_error_to_string error))
+;;
+
+let keeper_pass ~base_path who target =
+  keeper_call ~base_path who "masc_dos_pass" (`Assoc ["to", `String target])
+;;
+
+(* RFC play-link-for-the-shared-machine §2.8 on a Keeper's own call: a pass
+   goes only to someone at the machine. A name nobody sits under would leave
+   the controller with no one who can move the machine. *)
+let test_a_keeper_passes_only_to_someone_at_the_machine () =
+  with_attached_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    with_holder ~base_path Running "cao-cao" (fun () ->
+      with_holder ~base_path Running "liu-bei" (fun () ->
+        boot ~agent:"cao-cao" ~base_path "hello.com";
+        let refused = keeper_pass ~base_path "cao-cao" "nobody" in
+        check bool "a pass to a name not at the machine is refused" true
+          (match refused.disposition with Tool_result.Failed _ -> true | _ -> false);
+        check bool "and says so" true
+          (contains "not at the DOS machine" refused.raw_output);
+        check (option string) "the holder keeps the controller" (Some "cao-cao")
+          (current_controller ());
+        let passed = keeper_pass ~base_path "cao-cao" "liu-bei" in
+        check bool "a pass to a Keeper goes through" false
+          (match passed.disposition with Tool_result.Failed _ -> true | _ -> false);
+        check (option string) "the Keeper holds it" (Some "liu-bei") (current_controller ());
+        (match
+           Auth.create_token_expiring_in base_path ~agent_name:"minsu"
+             ~role:Masc_domain.Player ~hours:1
+         with
+         | Ok _ -> ()
+         | Error e -> fail (Masc_domain.masc_error_to_string e));
+        let to_invite = keeper_pass ~base_path "liu-bei" "minsu" in
+        check bool "a pass to an invite goes through" false
+          (match to_invite.disposition with Tool_result.Failed _ -> true | _ -> false);
+        check (option string) "the invite holds it" (Some "minsu") (current_controller ());
+        (* Without auth a name may be self-declared: there is no list, and the
+           pass goes through as it did before. *)
+        Auth.save_auth_config base_path { Masc_domain.default_auth_config with enabled = false };
+        let self_declared = keeper_pass ~base_path "minsu" "somebody" in
+        check bool "without auth a pass to any name goes through" false
+          (match self_declared.disposition with Tool_result.Failed _ -> true | _ -> false);
+        check (option string) "and that name holds it" (Some "somebody") (current_controller ()))))
+;;
+
+(* A pass to a name no caller can ever have -- "@liu-bei", "liu bei" --
+   would leave the machine held by nobody who can move or eject it again. It
+   is refused, and the controller stays where it was. *)
+let test_a_pass_to_an_impossible_name_is_refused () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    List.iter
+      (fun bad ->
+        let refused =
+          dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [ ("to", `String bad) ]
+        in
+        check bool (bad ^ " is refused") false (is_completed refused))
+      [ "@liu-bei"; "liu bei"; "\xec\x9c\xa0\xeb\xb9\x84" ];
+    check (option string) "the holder still holds it" (Some "dos-test")
+      (controller (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
+(* Only a [to] that is left out frees the controller. An empty [to] used to
+   free it too, so a caller whose template left the name unset handed the
+   machine to whoever moved it next. *)
+let test_only_an_absent_recipient_frees_the_controller () =
+  let parse name = Ok name in
+  let target arguments = Machine_controller_contract.pass_target ~parse arguments in
+  check bool "no to frees" true (target (`Assoc []) = Ok None);
+  check bool "a null to frees" true (target (`Assoc [ ("to", `Null) ]) = Ok None);
+  check bool "no arguments at all frees" true (target `Null = Ok None);
+  check bool "a name is trimmed" true
+    (target (`Assoc [ ("to", `String " liu-bei ") ]) = Ok (Some "liu-bei"));
+  List.iter
+    (fun (name, value) ->
+      check bool (name ^ " is an error") true
+        (Result.is_error (target (`Assoc [ ("to", value) ]))))
+    [ "an empty to", `String ""; "a blank to", `String "  \t"; "a number", `Int 7 ];
+  check bool "a name the parser refuses is an error" true
+    (Result.is_error
+       (Machine_controller_contract.pass_target
+          ~parse:(fun _ -> Error "no") (`Assoc [ ("to", `String "x") ])));
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~agent:"liu-bei" ~base_path "hello.com";
+    List.iter
+      (fun recipient ->
+        let refused =
+          dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" [ ("to", `String recipient) ]
+        in
+        refused_before_any_effect (Printf.sprintf "to=%S" recipient) refused;
+        match Dos_lane.screen () with
+        | Ok { Dos_lane.controller = Some "liu-bei"; _ } -> ()
+        | Ok _ | Error _ -> fail (Printf.sprintf "to=%S freed or moved the controller" recipient))
+      [ ""; "   " ];
+    let freed = dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" [] in
+    check bool "leaving to out frees it" true (is_completed freed);
+    check (option string) "and nobody holds it" None (controller freed))
+;;
+
+(* lea ax, ax: an instruction the emulator does not implement. The core
+   raises instead of misbehaving. A fault while the program boots is still a
+   load: the machine is installed and the loader holds the controller, so the
+   answer is a result whose [boot] says it faulted, not an error that reads as
+   "nothing was loaded". *)
+let boot_status result =
+  match member "boot" (Tool_result.data result) with
+  | Some boot -> boot
+  | None -> fail (Printf.sprintf "no boot in %s" (Tool_result.message result))
+;;
+
+let test_a_fault_while_booting_is_a_load () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "fault.com" "\x8d\xc0";
+    let loaded = load ~base_path "fault.com" in
+    check bool "the load completes" true (is_completed loaded);
+    check bool "and its boot says it faulted" true
+      (member "status" (boot_status loaded) = Some (`String "faulted"));
+    check bool "of the unimplemented-instruction kind" true
+      (member "kind" (boot_status loaded) = Some (`String "unimplemented_instruction"));
+    check bool "with the core's reason" true
+      (match member "fault" (boot_status loaded) with
+       | Some (`String reason) -> reason <> ""
+       | _ -> false);
+    check (option string) "the loader holds the controller" (Some "dos-test") (controller loaded);
+    check bool "no autosave was written for a machine that faults again" true
+      (member "autosave" (Tool_result.data loaded) = None);
+    check bool "the stopped machine is loaded" true
+      (is_completed (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
+let test_a_clean_boot_says_so () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let loaded = load ~base_path "hello.com" in
+    check bool "the boot status is booted" true
+      (member "status" (boot_status loaded) = Some (`String "booted")))
+;;
+
+(* The instructions before a fault still ran and may have repainted the
+   screen. The step count in tool responses and ledger positions must include
+   them. Three instructions complete here (mov ax,0xb800; mov es,ax;
+   mov byte es:[0],'X') before lea ax,ax faults. *)
+let test_a_fault_keeps_the_steps_that_ran () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "paint-then-fault.com"
+      "\xb8\x00\xb8\x8e\xc0\x26\xc6\x06\x00\x00\x58\x8d\xc0";
+    let loaded = load ~base_path "paint-then-fault.com" in
+    check bool "the load completes" true (is_completed loaded);
+    check int "the answer counts the completed instructions" 3 (int_field "steps" loaded);
+    match Dos_lane.screen () with
+    | Error e -> fail (Dos_lane.error_to_string e)
+    | Ok observation ->
+      check int "the completed instructions are counted" 3 observation.Dos_lane.steps)
+;;
+
+let test_unknown_key_is_refused () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let result =
+      dispatch ~base_path "masc_dos_press"
+        [ ("keys", `List [ `String "enter"; `String "hyperspace" ]) ]
+    in
+    check bool "the call is refused" false (is_completed result);
+    (* Refused before anything was pressed: the good key in front of the bad
+       one must not reach the ring, or half a sequence lands in the game. *)
+    check int "nothing was pressed" 0 (List.length (Dos_lane.ledger ())))
+;;
+
+let test_step_cap () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let result =
+      dispatch ~base_path "masc_dos_step"
+        [ ("steps", `Int (Dos_lane.max_steps_per_call + 1)) ]
+    in
+    check bool "over the cap is refused" false (is_completed result);
+    check bool "and names the cap" true
+      (contains (string_of_int Dos_lane.max_steps_per_call) (Tool_result.message result)))
+;;
+
+let test_peek_reads_the_text_page () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let result =
+      dispatch ~base_path "masc_dos_peek" [ ("address", `String "b8000"); ("length", `Int 4) ]
+    in
+    check bool "peek succeeds" true (is_completed result);
+    (* 'H' with the default attribute, then 'I': character and attribute
+       alternate in the text page. *)
+    check string "the first two cells" "48074907" (string_field "hex" result))
+;;
+
+(* The address is hex digits and nothing else. It used to become -1 on any
+   other text and fail as "got -1", with a comment claiming decimal parsed. *)
+let test_peek_takes_hex_digits_only () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let peek text =
+      dispatch ~base_path "masc_dos_peek" [ ("address", `String text); ("length", `Int 1) ]
+    in
+    List.iter
+      (fun text -> check bool (Printf.sprintf "%S reads" text) true (is_completed (peek text)))
+      [ "b8000"; "0xB8000"; " 0XB8000 "; "0"; "fffff"; "000b8000" ];
+    check string "a number is hex: 255 is 0x255" "00255" (string_field "address" (peek "255"));
+    List.iter
+      (fun text -> refused_before_any_effect (Printf.sprintf "%S" text) (peek text))
+      [ ""; "0x"; "-1"; "b_8000"; "12 34"; "zz"; "100000"; "123456789"; "1.5" ])
+;;
+
+let test_peek_refuses_before_looking_for_a_machine () =
+  with_workspace (fun base_path ->
+    refused_before_any_effect "an address that is not hex"
+      (dispatch ~base_path "masc_dos_peek" [ ("address", `String "-1") ]);
+    check bool "the refusal names what was written" true
+      (contains "-1"
+         (Tool_result.message (dispatch ~base_path "masc_dos_peek" [ ("address", `String "-1") ]))))
+;;
+
+(* A data file named in the inventory is not a program. It used to boot as a
+   COM and run its bytes as instructions. *)
+let test_a_single_file_must_be_a_program () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "notes.txt" hello_com;
+    install_program ~base_path "plain" hello_com;
+    install_program ~base_path "real.com" hello_com;
+    install_program ~base_path "UPPER.EXE" hello_com;
+    List.iter
+      (fun name ->
+        refused_before_any_effect name (dispatch ~base_path "masc_dos_load"
+          [ ("program", `String name); ("discard_previous_autosave", `Bool true) ]))
+      [ "notes.txt"; "plain" ];
+    check bool "no machine was installed by the refused names" true
+      (match Dos_lane.screen () with Error Dos_lane.No_machine -> true | Ok _ | Error _ -> false);
+    check bool "a .com loads" true (is_completed (load ~base_path "real.com"));
+    (* The name decides what is a program; the bytes decide how it boots. *)
+    check bool "an .EXE name is judged without case" true
+      (is_completed (load ~base_path "UPPER.EXE")))
+;;
+
+(* Ask the catalog, not the facade. The gate that decides whether a tool call
+   counts as a read looks the flag up in Tool_catalog, and Tool_misc writes it
+   there when it registers each name -- so a classification that never reaches
+   the catalog fails here instead of passing against an internal function. *)
+let test_read_only_classification () =
+  let read_only name =
+    match Tool_catalog.registered_metadata name with
+    | None -> fail (name ^ " registered no runtime metadata")
+    | Some metadata ->
+      (match metadata.Tool_catalog.readonly with
+       | Some flag -> flag
+       | None -> fail (name ^ " declares no readonly flag"))
+  in
+  check bool "screen reads" true (read_only "masc_dos_screen");
+  check bool "meta reads" true (read_only "masc_dos_meta");
+  check bool "inventory reads" true (read_only "masc_dos_inventory");
+  check bool "peek reads" true (read_only "masc_dos_peek");
+  check bool "load changes the machine" false (read_only "masc_dos_load");
+  check bool "press changes the machine" false (read_only "masc_dos_press");
+  check bool "click changes the machine" false (read_only "masc_dos_click");
+  check bool "step changes the machine" false (read_only "masc_dos_step");
+  check bool "save writes a slot" false (read_only "masc_dos_save");
+  check bool "restore replaces the machine" false (read_only "masc_dos_restore")
+;;
+
+let test_every_tool_is_declared () =
+  List.iter
+    (fun name ->
+      match Tool_schemas_misc.misc_operation_of_tool_name name with
+      | None -> fail (name ^ " has no misc operation")
+      | Some op ->
+        check bool (name ^ " is not statically registered") true
+          (Tool_schemas_misc.misc_registered_schema op = None);
+        check bool (name ^ " remains a packaged worker schema") true
+          (Option.is_some (Embedded_config.read ("tools/" ^ name ^ ".toml"))))
+    [ "masc_dos_load"; "masc_dos_meta"; "masc_dos_inventory"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
+      "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
+      "masc_dos_pass"; "masc_dos_save"; "masc_dos_restore" ]
+;;
+
+(* ---------- checkpoints ---------- *)
+
+(* Echoes every key it is given and asks for the next one, forever: a program
+   whose screen is the history of its input, so two runs that took the same
+   keys from the same state show the same text.
+
+   org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait
+              mov dl,al / mov ah,2 / int 21h / jmp wait *)
+let echo_com = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x88\xc2\xb4\x02\xcd\x21\xeb\xf0"
+
+(* Disable IRQ delivery, wait for one key, poll an empty keyboard 65535 times
+   without changing the screen, print N, then echo subsequent input. CLI
+   makes the guest LOOP's instruction count independent of timer interrupts.
+   Early settling can return before N; an explicit run allowance must advance
+   through that same observation. *)
+let delayed_prompt_com =
+  "\xfa\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xb9\xff\xff\
+   \xb4\x01\xcd\x16\xe2\xfa\xb2\x4e\xb4\x02\xcd\x21" ^ echo_com
+
+let test_attached_input_can_run_past_a_settling_observation () =
+  with_attached_workspace (fun base_path ->
+    let who = "input-reader" in
+    with_holder ~base_path Running who (fun () ->
+      install_program ~base_path "delayed.com" delayed_prompt_com;
+      let call name fields =
+        let execution = keeper_call ~base_path who name (`Assoc fields) in
+        match execution.disposition, execution.data with
+        | Tool_result.Completed (), Some wire ->
+            (match member "structuredContent" wire with
+             | Some data -> data
+             | None -> fail "attached worker omitted structured observation")
+        | _ -> fail execution.raw_output
+      in
+      let number key data = Yojson.Safe.Util.(data |> member key |> to_int) in
+      let screen data = Yojson.Safe.Util.(data |> member "screen_text" |> to_string) in
+      let load () = call "masc_dos_load" ["program", `String "delayed.com"; "discard_previous_autosave", `Bool true] in
+      ignore (load ());
+      let ordinary = call "masc_dos_press" ["keys", `List [`String "a"]] in
+      check bool "default keeps the existing settling observation" true
+        (member "settled" ordinary = Some (`Bool true));
+      check bool "settling is not the delayed guest prompt" false
+        (contains "N" (screen ordinary));
+      (* The guest's delay takes three instructions per LOOP iteration.
+         Four per iteration leaves room to print and return to the echo loop. *)
+      let steps = 4 * 65535 in
+      List.iter (fun (name, arguments, activity) ->
+        let before = load () in
+        let result = call name (("until_ready", `Bool false) :: ("steps", `Int steps) :: arguments) in
+        check int "full allowance actually executes" steps (number "steps_run" result);
+        check int "absolute execution clock matches the receipt" steps
+          (number "steps" result - number "steps" before);
+        check bool "full allowance does not report readiness" true
+          (member "settled" result = Some (`Bool false));
+        check bool "empty polling did not stop execution" true (number "input_requests" result > 0);
+        check bool "the delayed guest output is now observed" true (contains "N" (screen result));
+        check int "only the first key was injected" 1 (number "keys_pressed" result);
+        check (list string) "the unsent suffix is absent from the ledger" ["a"]
+          (List.map (fun (entry : Dos_lane.entry) -> entry.key_name) (Dos_lane.ledger ()));
+        (match Dos_lane.recent_activity () with
+         | (entry : Machine_action_feed.entry) :: _ ->
+             check string "activity describes only delivered input" activity entry.action
+         | [] -> fail "input activity was not recorded");
+        check bool "the unsent suffix was not consumed by the guest" false
+          (contains "b" (screen result));
+        let after = call "masc_dos_step" ["steps", `Int 1000; "until_ready", `Bool false] in
+        check bool "the unsent suffix was not left queued in the BIOS ring" false
+          (contains "b" (screen after)))
+        [ "masc_dos_press", ["keys", `List [`String "a"; `String "b"]], "press a"
+        ; "masc_dos_press", ["keys", `List [`String "a"; `String "b"];
+            "expected_program", `String "delayed.com"], "press a"
+        ; "masc_dos_type", ["text", `String "ab"], "type 1 chars" ]))
+;;
+
+(* A blocking BIOS read must retain its guest continuation. IRQ0 is masked
+   here so an idle interval has no guest interrupt instructions to count. *)
+let blocking_read_com =
+  "\xfa\xb0\x01\xe6\x21\xb4\x00\xcd\x16\xb2\x58\xb4\x02\xcd\x21\xb8\x00\x4c\xcd\x21"
+
+let test_attached_blocking_read_and_execution_clock () =
+  with_attached_workspace (fun base_path ->
+    let who = "blocking-reader" in
+    with_holder ~base_path Running who (fun () ->
+      install_program ~base_path "blocking.com" blocking_read_com;
+      let call name fields =
+        let execution = keeper_call ~base_path who name (`Assoc fields) in
+        match execution.disposition, execution.data with
+        | Tool_result.Completed (), Some wire ->
+            (match member "structuredContent" wire with
+             | Some data -> data
+             | None -> fail "attached worker omitted structured observation")
+        | _ -> fail execution.raw_output
+      in
+      let number key data = Yojson.Safe.Util.(data |> member key |> to_int) in
+      let screen data = Yojson.Safe.Util.(data |> member "screen_text" |> to_string) in
+      let loaded = call "masc_dos_load" ["program", `String "blocking.com"] in
+      check bool "empty BIOS read cannot reach exit" true
+        (member "exited" loaded = Some (`Bool false));
+      check bool "empty BIOS read cannot print its following marker" false
+        (contains "X" (screen loaded));
+      let budget = 1_000 in
+      let waited = call "masc_dos_step"
+        ["steps", `Int budget; "until_ready", `Bool false] in
+      check int "idle time consumes the bounded execution budget" budget
+        (number "steps_run" waited);
+      check int "idle time preserves the input ledger clock" budget
+        (number "steps" waited - number "steps" loaded);
+      check int "idle time is not guest instructions" 0
+        (number "instructions_run" waited);
+      check bool "idle clocks advance" true (number "elapsed_cycles" waited > 0);
+      check bool "no-key execution still cannot print the marker" false
+        (contains "X" (screen waited));
+      ignore (call "masc_dos_save" ["slot", `String "blocking-input"]);
+      let complete () =
+        let result = call "masc_dos_press"
+          ["keys", `List [`String "a"; `String "b"];
+           "steps", `Int budget; "until_ready", `Bool false] in
+        check int "one supplied key completes the blocking read" 1
+          (number "keys_pressed" result);
+        check bool "guest instructions resume" true
+          (number "instructions_run" result > 0);
+        check bool "the marker is reached after input" true
+          (contains "X" (screen result));
+        check bool "the guest exits after the completed read" true
+          (member "exited" result = Some (`Bool true));
+        check (list string) "the unused suffix never enters the ledger" ["a"]
+          (List.map (fun (entry : Dos_lane.entry) -> entry.key_name) (Dos_lane.ledger ()))
+      in
+      complete ();
+      ignore (call "masc_dos_restore" ["slot", `String "blocking-input"]);
+      complete ()))
+;;
+
+let save_as ?(agent = "dos-test") ~base_path slot =
+  dispatch ~base_path ~agent "masc_dos_save" [ ("slot", `String slot) ]
+;;
+
+(* Consents to discarding the previous autosave: most tests restore after
+   loading more than once and are about something other than the consent,
+   which [test_restore_asks_before_discarding_the_previous_autosave] pins. *)
+let restore_as ?(agent = "dos-test") ~base_path slot =
+  dispatch ~base_path ~agent "masc_dos_restore"
+    [ ("slot", `String slot); ("discard_previous_autosave", `Bool true) ]
+;;
+
+let mark () =
+  match Dos_lane.current_publication () with
+  | Dos_lane.Stable m | Dos_lane.Running m -> m
+  | Dos_lane.No_screen -> fail "no machine is published"
+;;
+
+let ledger_keys () = List.map (fun e -> e.Dos_lane.key_name) (Dos_lane.ledger ())
+
+let ledger_file ~base_path =
+  Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "ledger.jsonl"
+;;
+
+(* The contract the whole feature stands on: load, play, save, eject,
+   restore, play on -- and the machine is where it would have been had the
+   eject never happened. Screen, step count, CS:IP and ledger all agree. *)
+let test_a_restored_machine_plays_on_as_if_never_stopped () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    let play_rest () =
+      ignore (press_as ~base_path "dos-test" "b");
+      press_as ~base_path "dos-test" "c"
+    in
+    boot ~base_path "echo.com";
+    ignore (press_as ~base_path "dos-test" "a");
+    let direct = play_rest () in
+    let direct_ledger = ledger_keys () in
+    eject ();
+    boot ~base_path "echo.com";
+    ignore (press_as ~base_path "dos-test" "a");
+    let saved = save_as ~base_path "mid" in
+    check bool "save succeeds" true (is_completed saved);
+    check string "and names its slot" "mid" (string_field "slot" saved);
+    eject ();
+    let restored = restore_as ~base_path "mid" in
+    check bool "restore succeeds with no machine loaded" true (is_completed restored);
+    check bool "the saved screen is back" true
+      (contains "a" (string_field "screen_text" restored));
+    let resumed = play_rest () in
+    check string "the same screen" (string_field "screen_text" direct)
+      (string_field "screen_text" resumed);
+    check int "the same step count" (int_field "steps" direct) (int_field "steps" resumed);
+    check string "the same CS:IP" (string_field "cs_ip" direct) (string_field "cs_ip" resumed);
+    check (list string) "the same ledger" direct_ledger (ledger_keys ()))
+;;
+
+(* Anyone may save -- it moves nothing -- but a restore replaces the machine,
+   so it asks what a load asks: the controller free or the caller's. A
+   refused restore changes nothing. *)
+let test_restore_needs_the_controller () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~agent:"liu-bei" ~base_path "echo.com";
+    let watched = save_as ~agent:"cao-cao" ~base_path "watched" in
+    check bool "a watcher may save" true (is_completed watched);
+    check (option string) "and the holder keeps the controller" (Some "liu-bei")
+      (controller watched);
+    let before = mark () in
+    let refused = restore_as ~agent:"cao-cao" ~base_path "watched" in
+    check bool "another player's restore is refused" false (is_completed refused);
+    check bool "naming the holder" true (contains "liu-bei" (Tool_result.message refused));
+    let after = mark () in
+    check string "the machine is the same one" before.Dos_lane.incarnation
+      after.Dos_lane.incarnation;
+    check int "and did not change" before.Dos_lane.count after.Dos_lane.count;
+    ignore (dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" []);
+    let taken = restore_as ~agent:"cao-cao" ~base_path "watched" in
+    check bool "with the controller free it restores" true (is_completed taken);
+    check (option string) "and the restorer holds it" (Some "cao-cao") (controller taken))
+;;
+
+(* A restore is a new history even when it installs the same bytes twice:
+   an observer holding the old incarnation must see the machine was
+   replaced, and the change count moves. *)
+let test_a_restore_is_a_new_incarnation () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "same");
+    let loaded = mark () in
+    ignore (restore_as ~base_path "same");
+    let first = mark () in
+    ignore (restore_as ~base_path "same");
+    let second = mark () in
+    check bool "the restore is not the loaded machine" true
+      (loaded.Dos_lane.incarnation <> first.Dos_lane.incarnation);
+    check bool "restoring the same slot again is another one" true
+      (first.Dos_lane.incarnation <> second.Dos_lane.incarnation);
+    check bool "the count rises" true
+      (first.Dos_lane.count > loaded.Dos_lane.count
+       && second.Dos_lane.count > first.Dos_lane.count))
+;;
+
+(* The ledger is the replay record, so a restore puts back the checkpoint's
+   ledger -- the keys pressed after the save belong to a history that no
+   longer exists -- and the next key continues it, in memory and on disk. *)
+let test_the_ledger_continues_from_the_checkpoint () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (press_as ~base_path "dos-test" "a");
+    ignore (save_as ~base_path "after-a");
+    ignore (press_as ~base_path "dos-test" "x");
+    ignore (press_as ~base_path "dos-test" "y");
+    ignore (restore_as ~base_path "after-a");
+    check (list string) "the checkpoint's ledger" [ "a" ] (ledger_keys ());
+    ignore (press_as ~base_path "dos-test" "b");
+    check (list string) "continued" [ "a"; "b" ] (ledger_keys ());
+    let lines =
+      In_channel.with_open_bin (ledger_file ~base_path) In_channel.input_all
+      |> String.split_on_char '\n'
+      |> List.filter (fun l -> l <> "")
+      |> List.map (fun l ->
+        match Yojson.Safe.from_string l with
+        | `Assoc fields ->
+          (match List.assoc_opt "key" fields with Some (`String k) -> k | _ -> fail l)
+        | _ -> fail l)
+    in
+    check (list string) "and the file says the same" [ "a"; "b" ] lines)
+;;
+
+(* A restore does not write the saves directory. A game may have saved after
+   the checkpoint; putting the older machine back must not put its older
+   save file over the newer one. The directory changes again only when the
+   guest writes. *)
+let test_a_restore_leaves_the_saves_directory () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    ignore (load ~base_path "quest");
+    let kept = Filename.concat (saves_of ~base_path "quest") "SAVE.DAT" in
+    check string "the game saved" "NEW$" (In_channel.with_open_bin kept In_channel.input_all);
+    ignore (save_as ~base_path "early");
+    write_file kept "LATER$";
+    let restored = restore_as ~base_path "early" in
+    check bool "restored" true (is_completed restored);
+    check string "the newer save is still there" "LATER$"
+      (In_channel.with_open_bin kept In_channel.input_all);
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 10_000) ]);
+    check string "and a run that writes nothing leaves it" "LATER$"
+      (In_channel.with_open_bin kept In_channel.input_all))
+;;
+
+(* A refusal is a failure that provably changed nothing, so a Keeper turn that
+   called the tool reads it and goes on. Without that declaration a bad slot
+   name read as effect-outcome-unknown and ended the turn (msx-retro-mania,
+   2026-10-14, masc_dos_save). *)
+let test_refusals_declare_no_effect () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let refused name result =
+      match result with
+      | Tool_result.Failed { Tool_result.class_ = Tool_result.Workflow_rejection;
+                             effect_disposition = Tool_result.Proven_pre_effect; _ } -> ()
+      | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+        fail (name ^ " is not a refusal that declares no effect")
+    in
+    refused "a slot name with a dot" (save_as ~base_path "no.dots");
+    refused "an empty-looking path slot" (save_as ~base_path "a/b");
+    refused "a slot never saved" (restore_as ~base_path "never");
+    refused "a key the machine has no key for"
+      (dispatch ~base_path "masc_dos_press" [ ("keys", `List [ `String "no-such-key" ]) ]))
+;;
+
+(* What the caller can get wrong is refused before anything changes: a name
+   that is not a slot, a slot never saved, a file that is not a DOS
+   checkpoint. With no slot the tool lists what there is. *)
+let test_restore_refusals_and_listing () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "kept");
+    let before = mark () in
+    let unchanged name result =
+      check bool (name ^ " is refused") false (is_completed result);
+      check string (name ^ " changes nothing") before.Dos_lane.incarnation
+        (mark ()).Dos_lane.incarnation
+    in
+    unchanged "a path" (restore_as ~base_path "../kept");
+    unchanged "a slot never saved" (restore_as ~base_path "never");
+    let dir =
+      Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        "checkpoints"
+    in
+    write_file (Filename.concat dir "junk.ckpt") "not a checkpoint";
+    unchanged "a file that is not a checkpoint" (restore_as ~base_path "junk");
+    check bool "a save to a path is refused" false
+      (is_completed (save_as ~base_path "a/b"));
+    let listing = dispatch ~base_path "masc_dos_restore" [] in
+    check bool "no slot lists" true (is_completed listing);
+    match member "checkpoints" (Tool_result.data listing) with
+    | Some (`List rows) ->
+      let slots = List.map (fun r -> match member "slot" r with Some (`String s) -> s | _ -> "") rows in
+      (* [boot] above ran the guest, so it autosaved too: a third, earlier
+         slot alongside the two this test saved itself. *)
+      check (list string) "every slot" [ "autosave"; "junk"; "kept" ] slots;
+      (match rows with
+       | [ _autosave; junk; kept ] ->
+         check bool "the broken one says why" true (member "unreadable" junk <> None);
+         check bool "the good one names its core" true
+           (member "core" kept = Some (`String Dos_core_identity.source_digest))
+       | _ -> fail "three rows")
+    | _ -> fail "no checkpoints list")
+;;
+
+(* A manual save cannot take a slot the lane writes itself. Saving under the
+   autosave name replaced the campaign every load and restore offers back,
+   with no confirmation. *)
+let test_a_save_cannot_take_the_autosave_slot () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let autosave = Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        "checkpoints" in
+    let before = Digest.file (Filename.concat autosave "autosave.ckpt") in
+    List.iter
+      (fun slot ->
+        let refused = save_as ~base_path slot in
+        (match refused with
+         | Tool_result.Failed
+             { Tool_result.class_ = Tool_result.Workflow_rejection
+             ; effect_disposition = Tool_result.Proven_pre_effect
+             ; _
+             } -> ()
+         | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+           fail (slot ^ ": not a refusal that declares no effect"));
+        check string (slot ^ " left the autosave as it was") before
+          (Digest.file (Filename.concat autosave "autosave.ckpt")))
+      [ "autosave"; "AUTOSAVE"; "autosave-prev"; "Autosave-Prev" ];
+    check bool "autosave-prev was not created" false
+      (Sys.file_exists (Filename.concat autosave "autosave-prev.ckpt")))
+;;
+
+(* Reusing a name replaces that checkpoint; the answer says what it held, so a
+   caller who reused "quick" for a different game finds out. *)
+let test_a_save_reports_what_it_replaced () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~agent:"liu-bei" ~base_path "echo.com";
+    let first = save_as ~base_path "mid" in
+    check bool "a new name replaces nothing" true (member "replaced" (Tool_result.data first) = None);
+    ignore (press_as ~base_path "dos-test" "a");
+    let second = save_as ~agent:"cao-cao" ~base_path "mid" in
+    check bool "the save completes" true (is_completed second);
+    match member "replaced" (Tool_result.data second) with
+    | Some replaced ->
+      check bool "it names the program" true
+        (member "program" replaced = Some (`String "echo.com"));
+      check bool "and who saved it" true (member "saved_by" replaced = Some (`String "dos-test"));
+      check bool "and its step count" true
+        (match member "steps" replaced with Some (`Int n) -> n > 0 | _ -> false)
+    | None -> fail "the second save did not say what it replaced")
+;;
+
+(* ---------- autosave ---------- *)
+
+let autosave_field result =
+  match member "autosave" (Tool_result.data result) with
+  | Some a -> a
+  | None -> fail (Printf.sprintf "no autosave in %s" (Tool_result.message result))
+;;
+
+let autosave_saved result = member "saved" (autosave_field result) = Some (`Bool true)
+
+let checkpoints_dir ~base_path =
+  Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "checkpoints"
+;;
+
+let autosave_file ~base_path = Filename.concat (checkpoints_dir ~base_path) "autosave.ckpt"
+
+let offered_steps result =
+  match member "steps" (autosave_field result) with
+  | Some (`Int n) -> n
+  | _ -> fail (Printf.sprintf "the autosave names no step count in %s" (Tool_result.message result))
+;;
+
+let test_autosave_written_after_a_successful_step () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let stepped = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] in
+    check bool "the step succeeds" true (is_completed stepped);
+    check bool "and reports the autosave as saved" true (autosave_saved stepped);
+    let before_steps = int_field "steps" stepped in
+    let restored = restore_as ~base_path "autosave" in
+    check bool "the autosave slot restores" true (is_completed restored);
+    check int "at the same step count" before_steps (int_field "steps" restored))
+;;
+
+(* Every tool that moves the guest ends in the one lane tail that autosaves,
+   but a tool that stopped calling it would still pass every other test. Each
+   case removes the file the boot wrote, so only this call can bring it back. *)
+let test_every_tool_that_moves_the_guest_autosaves () =
+  let saves name tool args =
+    with_workspace (fun base_path ->
+      install_program ~base_path "echo.com" echo_com;
+      boot ~base_path "echo.com";
+      Sys.remove (autosave_file ~base_path);
+      let result = dispatch ~base_path tool args in
+      check bool (name ^ " succeeds") true (is_completed result);
+      check bool (name ^ " reports the autosave as saved") true (autosave_saved result);
+      check bool (name ^ " left the file") true (Sys.file_exists (autosave_file ~base_path)))
+  in
+  saves "step" "masc_dos_step" [ ("steps", `Int 1_000) ];
+  saves "press" "masc_dos_press" [ ("keys", `List [ `String "a" ]) ];
+  saves "type" "masc_dos_type" [ ("text", `String "a") ];
+  saves "click" "masc_dos_click" [ ("x", `Int 1); ("y", `Int 1); ("buttons", `Int 1) ]
+;;
+
+(* Reads a slot's step count through [Machine_checkpoint] directly, the way
+   [Dos_lane.lookup_autosave] reads [autosave_slot] -- never through
+   [masc_dos_restore], which would itself start a new incarnation and make
+   "the same incarnation's second autosave" a different scenario than the one
+   being checked. *)
+let steps_in_slot ~base_path slot_name =
+  match Machine_checkpoint.slot_of_string slot_name with
+  | Error message -> fail message
+  | Ok slot ->
+    (match
+       Machine_checkpoint.read_meta ~dir:(checkpoints_dir ~base_path) slot
+         ~machine:Machine_checkpoint.Dos ~format:Dos_lane.checkpoint_format
+     with
+     | Error e -> fail (Machine_checkpoint.error_to_string e)
+     | Ok { meta; _ } ->
+       (match member "steps" meta with
+        | Some (`Int n) -> n
+        | _ -> fail "the checkpoint's meta names no step count"))
+;;
+
+(* A restart looks like a fresh [masc_dos_load]: a new incarnation in memory,
+   [previous_kept] starting false again, and the previous incarnation's
+   autosave still on disk at the one slot everything writes to. With nothing in
+   autosave-prev the new machine's first write moves that file there instead of
+   overwriting it, and no consent is asked because nothing is discarded. *)
+let test_a_load_keeps_the_previous_incarnations_autosave_in_autosave_prev () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let stepped = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] in
+    let steps_before_restart = int_field "steps" stepped in
+    let prev_file = Filename.concat (checkpoints_dir ~base_path) "autosave-prev.ckpt" in
+    check bool "no autosave-prev before a restart" false (Sys.file_exists prev_file);
+    let reloaded =
+      dispatch ~base_path "masc_dos_load" [ ("program", `String "echo.com") ]
+    in
+    check bool "the reload succeeds" true (is_completed reloaded);
+    check bool "the previous incarnation's autosave moved to autosave-prev" true
+      (Sys.file_exists prev_file);
+    check bool "the new incarnation's own load autosaved too" true (autosave_saved reloaded);
+    check int "autosave-prev holds the step count from before the restart"
+      steps_before_restart (steps_in_slot ~base_path "autosave-prev");
+    (* A second autosave by the same (new) incarnation is its own history
+       replacing its own history: [autosave-prev] does not move again. *)
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    check int "and a later autosave by the same incarnation leaves it alone"
+      steps_before_restart (steps_in_slot ~base_path "autosave-prev"))
+;;
+
+let prev_file ~base_path = Filename.concat (checkpoints_dir ~base_path) "autosave-prev.ckpt"
+
+let object_field name result =
+  match member name (Tool_result.data result) with
+  | Some (`Assoc _ as fields) -> fields
+  | Some _ | None -> fail (Printf.sprintf "no %s object in %s" name (Tool_result.message result))
+;;
+
+(* A third start used to replace autosave-prev with a fresh boot, so the
+   campaign the second start had moved there was gone without anyone having
+   asked for that. The first start asks nothing: autosave-prev was empty and
+   the campaign moved into it. *)
+let test_a_load_that_would_discard_the_previous_autosave_is_refused () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let stepped = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] in
+    let campaign_steps = int_field "steps" stepped in
+    let program = ("program", `String "echo.com") in
+    let second = dispatch ~base_path "masc_dos_load" [ program ] in
+    check bool "a load that discards nothing needs no consent" true (is_completed second);
+    let boot_steps = int_field "steps" second in
+    check int "and the campaign is in autosave-prev" campaign_steps
+      (steps_in_slot ~base_path "autosave-prev");
+    let autosave_before = Digest.file (autosave_file ~base_path)
+    and previous_before = Digest.file (prev_file ~base_path) in
+    let machine = (mark ()).Dos_lane.incarnation in
+    let check_untouched name =
+      check string (name ^ ": the autosave is byte for byte as it was") autosave_before
+        (Digest.file (autosave_file ~base_path));
+      check string (name ^ ": autosave-prev is byte for byte as it was") previous_before
+        (Digest.file (prev_file ~base_path));
+      check string (name ^ ": the running machine is the same one") machine
+        (mark ()).Dos_lane.incarnation
+    in
+    let default_refusal = dispatch ~base_path "masc_dos_load" [ program ] in
+    refused_before_any_effect "a load with no consent" default_refusal;
+    let discarded = object_field "would_discard" default_refusal in
+    check bool "the refusal names the slot it would empty" true
+      (member "slot" discarded = Some (`String "autosave-prev"));
+    check bool "the program it holds" true (member "program" discarded = Some (`String "echo.com"));
+    check bool "and the step count it would discard" true
+      (member "steps" discarded = Some (`Int campaign_steps));
+    let moved = object_field "moves_to_previous" default_refusal in
+    check bool "it also names the autosave that moves in" true
+      (member "slot" moved = Some (`String "autosave") && member "steps" moved = Some (`Int boot_steps));
+    check_untouched "no consent";
+    let explicit_refusal =
+      dispatch ~base_path "masc_dos_load" [ program; ("discard_previous_autosave", `Bool false) ]
+    in
+    refused_before_any_effect "a load that declines to discard" explicit_refusal;
+    check_untouched "declined";
+    check bool "listing the inventory is not a load" true
+      (is_completed (dispatch ~base_path "masc_dos_load" []));
+    let consented =
+      dispatch ~base_path "masc_dos_load" [ program; ("discard_previous_autosave", `Bool true) ]
+    in
+    check bool "with consent the load goes through" true (is_completed consented);
+    check int "and the autosave that was current is in autosave-prev" boot_steps
+      (steps_in_slot ~base_path "autosave-prev"))
+;;
+
+(* An unreadable file counts as there: it may hold the only copy of a
+   campaign. Alone in autosave it moves to autosave-prev byte for byte; in
+   autosave-prev it is what the next start would discard. *)
+let test_an_unreadable_autosave_file_is_kept_or_asked_about () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    mkdir_p (checkpoints_dir ~base_path);
+    write_file (autosave_file ~base_path) "not a checkpoint";
+    let moved = dispatch ~base_path "masc_dos_load" [ ("program", `String "echo.com") ] in
+    check bool "an unreadable autosave alone needs no consent" true (is_completed moved);
+    check string "and moves to autosave-prev as it was" "not a checkpoint"
+      (In_channel.with_open_bin (prev_file ~base_path) In_channel.input_all);
+    eject ();
+    write_file (prev_file ~base_path) "damaged";
+    let refused = dispatch ~base_path "masc_dos_load" [ ("program", `String "echo.com") ] in
+    refused_before_any_effect "a load over an unreadable autosave-prev" refused;
+    check bool "the refusal carries the reason" true
+      (member "unreadable" (object_field "would_discard" refused) <> None);
+    check string "and the file is as it was" "damaged"
+      (In_channel.with_open_bin (prev_file ~base_path) In_channel.input_all);
+    let consented =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "echo.com"); ("discard_previous_autosave", `Bool true) ]
+    in
+    check bool "with consent it loads" true (is_completed consented))
+;;
+
+(* A call refused before anything ran leaves the previous autosave as it was.
+   The boot's file is removed first, so a write by a refused call would show
+   up as a file that should not be there, not as an unchanged one. *)
+let test_a_refused_call_writes_no_autosave () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~agent:"liu-bei" ~base_path "echo.com";
+    Sys.remove (autosave_file ~base_path);
+    let writes_nothing name result =
+      check bool (name ^ " is refused") false (is_completed result);
+      check bool (name ^ " wrote nothing") false (Sys.file_exists (autosave_file ~base_path))
+    in
+    writes_nothing "another player's press"
+      (dispatch ~base_path ~agent:"cao-cao" "masc_dos_press" [ ("keys", `List [ `String "a" ]) ]);
+    writes_nothing "the holder's press with no keys"
+      (dispatch ~base_path ~agent:"liu-bei" "masc_dos_press" [ ("keys", `List []) ]);
+    eject ();
+    writes_nothing "a step with no machine" (dispatch ~base_path "masc_dos_step" []))
+;;
+
+(* wait: mov ah,0 / int 16h / or ax,ax / jz wait / lea ax,ax: polls for a key
+   the way [echo_com] does (INT 16h does not block), then faults. The machine a
+   fault leaves faults again on its next step, so it must not replace the
+   autosave a Keeper can still resume. *)
+let test_a_fault_leaves_the_last_good_autosave () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "key-then-fault.com" "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8d\xc0";
+    let booted = load ~base_path "key-then-fault.com" in
+    check bool "the load settles on the key wait" true (is_completed booted);
+    let steps_at_boot = int_field "steps" booted in
+    let faulted =
+      dispatch ~base_path "masc_dos_press" [ ("keys", `List [ `String "a" ]) ]
+    in
+    check bool "the press reaches the fault" false (is_completed faulted);
+    check bool "and does not report an autosave of its own" true
+      (member "autosave" (Tool_result.data faulted) = None);
+    eject ();
+    check int "the autosave on file is the one from before the fault" steps_at_boot
+      (offered_steps (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
+(* A program that has exited has nothing to resume. Its exit step would
+   replace the last state a Keeper could pick up mid-game. *)
+let test_an_exited_program_does_not_replace_the_autosave () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let booted = load ~base_path "hello.com" in
+    let steps_at_boot = int_field "steps" booted in
+    let pressed = dispatch ~base_path "masc_dos_press" [ ("keys", `List [ `String "a" ]) ] in
+    check bool "the press succeeds" true (is_completed pressed);
+    check bool "the program exited" true
+      (member "exited" (Tool_result.data pressed) = Some (`Bool true));
+    check bool "and the answer has no autosave field" true
+      (member "autosave" (Tool_result.data pressed) = None);
+    eject ();
+    check int "the autosave on file is the one from before the exit" steps_at_boot
+      (offered_steps (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
+let test_no_autosave_offered_when_nothing_ever_ran () =
+  with_workspace (fun base_path ->
+    let result = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "no machine" false (is_completed result);
+    check bool "and nothing to offer" true (member "autosave" (Tool_result.data result) = None);
+    (* Tool_bridge drops only a `Null data field from the model-facing
+       message; an empty `Assoc [] is not the same to it, and every plain
+       No_machine refusal (no autosave to report) would carry a JSON
+       envelope where it used to carry the plain refusal text. *)
+    check bool "and the refusal carries no data envelope at all" true
+      (Tool_result.data result = `Null))
+;;
+
+let test_a_failed_autosave_does_not_fail_the_call () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    let checkpoints_dir = checkpoints_dir ~base_path in
+    mkdir_p (Filename.dirname checkpoints_dir);
+    write_file checkpoints_dir "a file where the checkpoints directory would be";
+    let loaded = load ~base_path "echo.com" in
+    check bool "the load still succeeds" true (is_completed loaded);
+    let autosave = autosave_field loaded in
+    check bool "reports the write as failed" true (member "saved" autosave = Some (`Bool false));
+    check bool "and says why" true (member "reason" autosave <> None))
+;;
+
+let test_no_machine_names_the_autosave_after_an_eject () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~agent:"liu-bei" ~base_path "echo.com";
+    eject ();
+    let names_it name result =
+      check bool (name ^ " is refused: no machine") false (is_completed result);
+      check bool (name ^ " points at the autosave") true
+        (contains "autosave" (Tool_result.message result));
+      let autosave = autosave_field result in
+      check bool (name ^ " names the program") true
+        (member "program" autosave = Some (`String "echo.com"));
+      check bool (name ^ " names who saved it") true
+        (member "saved_by" autosave = Some (`String "liu-bei"));
+      check bool (name ^ " names how to resume") true
+        (match member "resume" autosave with
+         | Some (`String s) -> contains "masc_dos_restore" s && contains "autosave" s
+         | _ -> false)
+    in
+    names_it "screen" (dispatch ~base_path "masc_dos_screen" []);
+    names_it "peek" (dispatch ~base_path "masc_dos_peek" [ ("address", `String "0") ]))
+;;
+
+(* With no machine loaded the autosave is the way back: [masc_dos_restore]
+   works with no machine loaded. The guidance is a value first and a sentence
+   second, so the order the sentence gives is the order of the constructor,
+   not of some string edit. The previous autosave is part of the value: it is
+   what a load would discard, and the only thing left to resume when the
+   autosave is gone. *)
+let held_lookup ?(program = "echo.com") steps =
+  Dos_lane.Autosave { Dos_lane.program; steps; saved_by = "liu-bei"; mtime = 1.0 }
+;;
+
+let discards_of = function
+  | Dos_tools.Restore_autosave { discards; _ } | Dos_tools.Unreadable_autosave { discards; _ }
+  | Dos_tools.Restore_failed_at_start { discards; _ } ->
+    discards
+  | Dos_tools.Restore_previous_autosave _ | Dos_tools.Unreadable_previous_autosave _
+  | Dos_tools.Load_a_program -> None
+;;
+
+let test_no_machine_guidance_leads_with_the_autosave () =
+  let guide current previous =
+    Dos_tools.no_machine_guidance ~start_failure:None { Dos_tools.current; previous }
+  in
+  (match guide (held_lookup 120) Dos_lane.No_autosave with
+   | Dos_tools.Restore_autosave { autosave; discards = None } ->
+     check string "restore names the program" "echo.com" autosave.Dos_lane.program;
+     check int "and its steps" 120 autosave.Dos_lane.steps
+   | Dos_tools.Restore_autosave { discards = Some _; _ } ->
+     fail "with autosave-prev empty nothing is discarded"
+   | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_previous_autosave _
+   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program ->
+     fail "a readable autosave must lead with a restore");
+  (match guide (held_lookup 120) (held_lookup 90) with
+   | Dos_tools.Restore_autosave { autosave; discards = Some (Dos_lane.Held previous) } ->
+     check int "the autosave is still what resumes" 120 autosave.Dos_lane.steps;
+     check int "autosave-prev is what a load would discard" 90 previous.Dos_lane.steps
+   | Dos_tools.Restore_autosave _ | Dos_tools.Unreadable_autosave _
+   | Dos_tools.Restore_previous_autosave _ | Dos_tools.Unreadable_previous_autosave _
+   | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program -> fail "a readable autosave-prev is at stake");
+  (match discards_of (guide (held_lookup 120) (Dos_lane.Autosave_unreadable "damaged")) with
+   | Some (Dos_lane.Held_unreadable reason) ->
+     check string "with the reason" "damaged" reason
+   | Some (Dos_lane.Held _) | None -> fail "an unreadable autosave-prev is still at stake");
+  (match guide (Dos_lane.Autosave_unreadable "damaged") Dos_lane.No_autosave with
+   | Dos_tools.Unreadable_autosave { reason = "damaged"; discards = None } -> ()
+   | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_autosave _
+   | Dos_tools.Restore_previous_autosave _ | Dos_tools.Unreadable_previous_autosave _
+   | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program -> fail "an unreadable autosave cannot be restored");
+  (match discards_of (guide (Dos_lane.Autosave_unreadable "damaged") (held_lookup 90)) with
+   | Some (Dos_lane.Held previous) -> check int "autosave-prev is at stake" 90 previous.Dos_lane.steps
+   | Some (Dos_lane.Held_unreadable _) | None -> fail "a readable autosave-prev is at stake");
+  (match guide Dos_lane.No_autosave (held_lookup 90) with
+   | Dos_tools.Restore_previous_autosave status ->
+     check int "with only autosave-prev left, it is what resumes" 90 status.Dos_lane.steps
+   | Dos_tools.Restore_autosave _ | Dos_tools.Unreadable_autosave _
+   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program ->
+     fail "autosave-prev alone must lead with its restore");
+  (match guide Dos_lane.No_autosave (Dos_lane.Autosave_unreadable "damaged") with
+   | Dos_tools.Unreadable_previous_autosave "damaged" -> ()
+   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Restore_autosave _
+   | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_previous_autosave _
+   | Dos_tools.Restore_failed_at_start _ | Dos_tools.Load_a_program -> fail "an unreadable autosave-prev alone is reported as such");
+  match guide Dos_lane.No_autosave Dos_lane.No_autosave with
+  | Dos_tools.Load_a_program -> ()
+  | Dos_tools.Restore_autosave _ | Dos_tools.Unreadable_autosave _
+  | Dos_tools.Restore_failed_at_start _ | Dos_tools.Restore_previous_autosave _
+  | Dos_tools.Unreadable_previous_autosave _ ->
+    fail "with nothing saved, loading is the only way forward"
+;;
+
+(* A start that could not restore the autosave it still finds: the guidance
+   gives the reason and does not lead with that restore again. *)
+let test_no_machine_guidance_after_a_failed_start () =
+  let guide current previous =
+    Dos_tools.no_machine_guidance ~start_failure:(Some "cut short") { Dos_tools.current; previous }
+  in
+  (match guide (held_lookup 120) (held_lookup 90) with
+   | Dos_tools.Restore_failed_at_start { reason; discards = Some (Dos_lane.Held previous) } ->
+     check string "the start's reason" "cut short" reason;
+     check int "and what a load would discard" 90 previous.Dos_lane.steps
+   | Dos_tools.Restore_failed_at_start _ | Dos_tools.Restore_autosave _
+   | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_previous_autosave _
+   | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Load_a_program ->
+     fail "a readable autosave the start could not restore is not offered again");
+  match guide (Dos_lane.Autosave_unreadable "damaged") Dos_lane.No_autosave with
+  | Dos_tools.Unreadable_autosave { reason = "damaged"; discards = None } -> ()
+  | Dos_tools.Unreadable_autosave _ | Dos_tools.Restore_failed_at_start _
+  | Dos_tools.Restore_autosave _ | Dos_tools.Restore_previous_autosave _
+  | Dos_tools.Unreadable_previous_autosave _ | Dos_tools.Load_a_program ->
+    fail "an unreadable autosave is reported with its own reason"
+;;
+
+(* With both autosave files on disk, so that the command named here is one a
+   consent rule could refuse: it is not, because restoring the autosave
+   discards nothing, and autosave-prev is untouched by its first save. *)
+let test_a_refusal_with_no_machine_carries_the_restore_command () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    ignore (dispatch ~base_path "masc_dos_load" [ ("program", `String "echo.com") ] : Tool_result.result);
+    eject ();
+    let previous = Digest.file (prev_file ~base_path) in
+    let refused = dispatch ~base_path "masc_dos_screen" [] in
+    refused_before_any_effect "a screen with no machine" refused;
+    check bool "the data names the restore command" true
+      (member "resume" (autosave_field refused)
+       = Some (`String "masc_dos_restore slot=autosave"));
+    (* The command the refusal names works as named, with no machine loaded. *)
+    check bool "and that command restores" true
+      (is_completed (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "autosave") ]));
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    check string "and its first save leaves autosave-prev as it was" previous
+      (Digest.file (prev_file ~base_path)))
+;;
+
+(* Right after a restart with only autosave-prev left: the refusal names it
+   and the command it names works with no consent, because the restored machine
+   already holds what the next save would replace. *)
+let test_a_refusal_with_only_autosave_prev_left_names_it () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let campaign_steps = int_field "steps" (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ]) in
+    ignore (dispatch ~base_path "masc_dos_load" [ ("program", `String "echo.com") ] : Tool_result.result);
+    eject ();
+    Sys.remove (autosave_file ~base_path);
+    let refused = dispatch ~base_path "masc_dos_screen" [] in
+    refused_before_any_effect "a screen with no machine" refused;
+    check bool "there is no autosave to name" true (member "autosave" (Tool_result.data refused) = None);
+    let previous = object_field "previous_autosave" refused in
+    check bool "autosave-prev is named with its steps" true
+      (member "steps" previous = Some (`Int campaign_steps));
+    check bool "and the command that resumes it" true
+      (member "resume" previous = Some (`String "masc_dos_restore slot=autosave-prev"));
+    let resumed =
+      dispatch ~base_path "masc_dos_restore" [ ("slot", `String "autosave-prev") ]
+    in
+    check bool "which asks for nothing" true (is_completed resumed);
+    check int "and brings the campaign back" campaign_steps (int_field "steps" resumed))
+;;
+
+(* The second way to lose the campaign: autosave A, restore a named slot, run,
+   restore it again, run. The second run's first save replaced the copy of A. *)
+let test_restore_asks_before_discarding_the_previous_autosave () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let campaign_steps = int_field "steps" (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ]) in
+    check bool "the named slot saves" true (is_completed (save_as ~base_path "quick"));
+    let restore_quick args =
+      dispatch ~base_path "masc_dos_restore" (("slot", `String "quick") :: args)
+    in
+    check bool "the first restore asks nothing: autosave-prev is empty" true
+      (is_completed (restore_quick []));
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    check int "and its first save moved the campaign to autosave-prev" campaign_steps
+      (steps_in_slot ~base_path "autosave-prev");
+    let autosave_before = Digest.file (autosave_file ~base_path)
+    and previous_before = Digest.file (prev_file ~base_path) in
+    let machine = (mark ()).Dos_lane.incarnation in
+    let refused = restore_quick [] in
+    refused_before_any_effect "a second restore with no consent" refused;
+    check bool "the refusal names the campaign it would discard" true
+      (member "steps" (object_field "would_discard" refused) = Some (`Int campaign_steps));
+    check string "the autosave is byte for byte as it was" autosave_before
+      (Digest.file (autosave_file ~base_path));
+    check string "autosave-prev is byte for byte as it was" previous_before
+      (Digest.file (prev_file ~base_path));
+    check string "the running machine is the same one" machine (mark ()).Dos_lane.incarnation;
+    check bool "a restore that declines is refused too" false
+      (is_completed (restore_quick [ ("discard_previous_autosave", `Bool false) ]));
+    check bool "a slot that does not exist is reported, not asked about" true
+      (contains "never-saved"
+         (Tool_result.message
+            (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "never-saved") ])));
+    (* The autosave's machine carries on writing the autosave, as uninterrupted
+       play does, so it asks nothing and the campaign stays in autosave-prev. *)
+    check bool "a restore of the autosave asks nothing" true
+      (is_completed (dispatch ~base_path "masc_dos_restore" [ ("slot", `String "autosave") ]));
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    check string "and its save leaves autosave-prev byte for byte as it was" previous_before
+      (Digest.file (prev_file ~base_path));
+    check bool "with consent the restore goes through" true
+      (is_completed (restore_quick [ ("discard_previous_autosave", `Bool true) ])))
+;;
+
+let test_inventory_names_the_autosave () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    eject ();
+    let listing = dispatch ~base_path "masc_dos_load" [] in
+    check bool "listing succeeds" true (is_completed listing);
+    check bool "and names the program it holds" true
+      (member "program" (autosave_field listing) = Some (`String "echo.com")))
+;;
+
+(* A file that is there but will not read is not "no autosave": the next call
+   that runs the guest would replace it without anyone having been told. *)
+let test_a_damaged_autosave_is_named_not_hidden () =
+  with_workspace (fun base_path ->
+    mkdir_p (checkpoints_dir ~base_path);
+    write_file (autosave_file ~base_path) "not a checkpoint";
+    let screen = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "still no machine" false (is_completed screen);
+    check bool "the message says the file cannot be read" true
+      (contains "cannot read" (Tool_result.message screen));
+    check bool "and the data carries the reason" true
+      (member "unreadable" (autosave_field screen) <> None);
+    let listing = dispatch ~base_path "masc_dos_load" [] in
+    check bool "the inventory names it too" true
+      (member "unreadable" (autosave_field listing) <> None))
+;;
+
+(* An autosave whose outer checkpoint format and meta are valid but whose inner
+   Dos_snapshot format version is unsupported must be reported as unreadable
+   rather than advertised as resumable (#39960). *)
+let test_an_autosave_with_unsupported_snapshot_format_is_unreadable () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    eject ();
+    let dir = checkpoints_dir ~base_path in
+    let { Machine_checkpoint.header; meta; machine_bytes } =
+      match
+        Machine_checkpoint.read ~dir Dos_lane.autosave_slot
+          ~machine:Machine_checkpoint.Dos ~format:Dos_lane.checkpoint_format
+      with
+      | Ok checkpoint -> checkpoint
+      | Error e -> fail (Machine_checkpoint.error_to_string e)
+    in
+    let magic = "OCAML-DOS-SNAPSHOT\000" in
+    let magic_len = String.length magic in
+    let current_format = Int64.to_int (String.get_int64_be machine_bytes magic_len) in
+    let bumped = Bytes.of_string machine_bytes in
+    Bytes.set_int64_be bumped magic_len (Int64.of_int (current_format + 1));
+    (match
+       Machine_checkpoint.write ~dir Dos_lane.autosave_slot header ~meta
+         ~machine_bytes:(Bytes.to_string bumped)
+     with
+     | Ok () -> ()
+     | Error message -> fail message);
+    (match Dos_lane.lookup_autosave ~dir with
+     | Dos_lane.Autosave_unreadable reason ->
+       check bool "unreadable reason names the unsupported format" true
+         (contains (Printf.sprintf "format %d" (current_format + 1)) reason)
+     | Dos_lane.No_autosave | Dos_lane.Autosave _ ->
+       fail "lookup_autosave treated an unsupported inner snapshot format as readable");
+    let screen = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "still no machine" false (is_completed screen);
+    check bool "screen does not advertise resuming an unreadable snapshot format" false
+      (contains "resume with masc_dos_restore" (Tool_result.message screen));
+    check bool "screen reports that the autosave cannot be read" true
+      (contains "cannot read" (Tool_result.message screen));
+    check bool "autosave field carries unreadable reason" true
+      (member "unreadable" (autosave_field screen) <> None);
+    check bool "autosave field omits resume command" true
+      (member "resume" (autosave_field screen) = None))
+;;
+
+let test_activity_refusal_is_proven_pre_effect () =
+  with_workspace @@ fun base_path ->
+  List.iter (fun activity ->
+    Dos_lane.install_activity_observer (Some (fun () -> activity));
+    List.iter (fun (name, args) ->
+      let result = dispatch ~base_path name args in
+      check bool "activity refusal took no requested machine effect" true
+        (match result with
+         | Tool_result.Failed { effect_disposition=Tool_result.Proven_pre_effect;
+             class_=Tool_result.Workflow_rejection; _ } -> true
+         | _ -> false))
+      ["masc_dos_step", ["steps", `Int 1];
+       "masc_dos_press", ["keys", `List [`String "space"]]];
+    List.iter (fun name ->
+      check bool "inventory inspection remains available" true
+        (is_completed (dispatch ~base_path name [])))
+      ["masc_dos_load"; "masc_dos_inventory"; "masc_dos_restore"])
+    [Machine_configuration.Disabled; Unobserved]
+;;
+
+let test_prepared_load_rejects_changed_save_snapshot () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let prepared = match Dos_lane.prepare_load
+        ~ledger_dir:(Dos_tools.dos_dir ~base_path)
+        ~saves_dir:(Dos_tools.saves_dir ~base_path "echo.com")
+        ~checkpoint_dir:(checkpoints_dir ~base_path)
+        ~previous_autosave:Dos_lane.Discard_previous_autosave ~program_name:"echo.com" ~program_bytes:echo_com ~files:[] with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    ignore (dispatch ~base_path "masc_dos_step" ["steps", `Int 1; "until_ready", `Bool false]);
+    let before = mark () in
+    (match Dos_lane.commit_load ~who:"dos-test" prepared ~announce:ignore with
+     | Error (Dos_lane.Invalid_request _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "a changed save snapshot was installed");
+    check int "refused preparation leaves current screen unchanged" before.count (mark ()).count)
+;;
+
+let restore_stages ~base_path =
+  let dir = Dos_tools.dos_dir ~base_path in
+  Sys.readdir dir |> Array.to_list
+  |> List.filter (fun name -> String.starts_with ~prefix:".restore-ledger-" name)
+  |> List.map (Filename.concat dir)
+
+let prepare_restore_fixture ~base_path slot =
+  Dos_lane.prepare_restore ~dir:(checkpoints_dir ~base_path) ~slot
+    ~previous_autosave:Dos_lane.Discard_previous_autosave ~ledger_dir:(Dos_tools.dos_dir ~base_path)
+    ~saves_dir_of:(Dos_tools.saves_dir ~base_path)
+
+let test_restore_stages_before_admission_and_cleans_refusal () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    check bool "fixture writes a nonempty input ledger" true
+      (Tool_result.is_success (dispatch ~base_path "masc_dos_press" ["keys",`List [`String "a"]]));
+    ignore (save_as ~base_path "staged");
+    let ledger = Filename.concat (Dos_tools.dos_dir ~base_path) "ledger.jsonl" in
+    let original = In_channel.with_open_bin ledger In_channel.input_all in
+    check bool "staged fixture ledger has input bytes" true (String.length original > 0);
+    let before = mark () in
+    (match prepare_restore_fixture ~base_path (Machine_checkpoint.slot_of_string "staged"
+       |> function Ok slot -> slot | Error detail -> fail detail) with
+     | Ok prepared ->
+        (match restore_stages ~base_path with
+         | [path] -> check string "full ledger is already staged before credential admission"
+             original (In_channel.with_open_bin path In_channel.input_all)
+         | _ -> fail "expected one owned staging file");
+        (* The admission the commit would run under refused, so the caller
+           discards the preparation instead of committing it. *)
+        Dos_lane.discard_prepared_restore prepared
+     | Error error -> fail (Dos_lane.error_to_string error));
+    check (list string) "refusal discards staged ledger" [] (restore_stages ~base_path);
+    check string "installed ledger retained" original (In_channel.with_open_bin ledger In_channel.input_all);
+    check int "refusal leaves machine untouched" before.count (mark ()).count)
+;;
+
+let test_prepared_restore_uses_snapshot_and_rechecks_controller () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "prepared");
+    let slot = match Machine_checkpoint.slot_of_string "prepared" with
+      | Ok slot -> slot | Error detail -> fail detail in
+    let prepared = match Dos_lane.prepare_restore ~dir:(checkpoints_dir ~base_path) ~slot
+        ~previous_autosave:Dos_lane.Discard_previous_autosave ~ledger_dir:(Dos_tools.dos_dir ~base_path)
+        ~saves_dir_of:(Dos_tools.saves_dir ~base_path) with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore prepared) (fun () ->
+    check int "preparation owns one unique staging file" 1 (List.length (restore_stages ~base_path));
+    write_file (Machine_checkpoint.path ~dir:(checkpoints_dir ~base_path) slot) "replaced after preparation";
+    (match Dos_lane.commit_restore ~who:"other" prepared ~announce:ignore with
+     | Error (Dos_lane.Held_by _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "prepared restore ignored current controller");
+    (match Dos_lane.commit_restore ~who:"dos-test" prepared ~announce:ignore with
+     | Ok _ -> () | Error error -> fail (Dos_lane.error_to_string error));
+    let after = mark () in
+    (match Dos_lane.commit_restore ~who:"dos-test" prepared ~announce:ignore with
+     | Error (Dos_lane.Invalid_request _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "prepared mutable guest was installed twice");
+    check int "consumed preparation cannot replace current screen" after.count (mark ()).count;
+    Dos_lane.discard_prepared_restore prepared;
+    Dos_lane.discard_prepared_restore prepared;
+    check (list string) "commit/discard never leaves or removes installed ledger" [] (restore_stages ~base_path);
+    check bool "installed ledger survives repeated cleanup" true
+      (Sys.file_exists (Filename.concat (Dos_tools.dos_dir ~base_path) "ledger.jsonl"))))
+;;
+
+let test_prepared_restore_refuses_a_slot_saved_again () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "raced");
+    let slot = match Machine_checkpoint.slot_of_string "raced" with
+      | Ok slot -> slot | Error detail -> fail detail in
+    let prepare () = match prepare_restore_fixture ~base_path slot with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    let raced = prepare () in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore raced) (fun () ->
+      (* A lane save lands on the prepared slot between preparation and commit:
+         installing the older prepared bytes would fit neither serial order. *)
+      check bool "concurrent save of the same slot succeeds" true
+        (Tool_result.is_success (save_as ~base_path "raced"));
+      let before = mark () in
+      (match Dos_lane.commit_restore ~who:"dos-test" raced ~announce:ignore with
+       | Error (Dos_lane.Invalid_request _) -> ()
+       | Error error -> fail (Dos_lane.error_to_string error)
+       | Ok _ -> fail "a restore installed bytes older than its slot");
+      check int "refused restore leaves the current machine" before.count (mark ()).count;
+      check (list string) "refused restore leaves no stage" [] (restore_stages ~base_path));
+    let other = prepare () in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore other) (fun () ->
+      check bool "a save to another slot succeeds" true
+        (Tool_result.is_success (save_as ~base_path "elsewhere"));
+      match Dos_lane.commit_restore ~who:"dos-test" other ~announce:ignore with
+      | Ok _ -> ()
+      | Error error -> fail ("another slot's save refused the restore: " ^ Dos_lane.error_to_string error)))
+;;
+
+let () =
+  run "dos-lane-tools"
+    [ ( "tools"
+      , [ test_case "no machine" `Quick test_no_machine
+        ; test_case "click no machine" `Quick test_click_without_a_machine_is_refused
+        ; test_case "unreadable inventory is a failure" `Quick
+            test_an_unreadable_inventory_is_a_failure_not_an_exception
+        ; test_case "inventory" `Quick test_inventory_when_unnamed
+        ; test_case "inventory describes assets" `Quick
+            test_inventory_describes_mountable_assets_without_a_machine
+        ; test_case "inventory mount parity" `Quick test_inventory_skips_subdirectories_like_load
+        ; test_case "inventory temporary directory swap" `Quick
+            test_inventory_temporary_swap_cannot_publish_foreign_names
+        ; test_case "inventory root authority across reads" `Quick
+            test_inventory_root_replacement_between_reads_is_refused
+        ; test_case "inventory special files" `Quick
+            test_inventory_rejects_special_files_without_host_paths
+        ; test_case "inventory alias selection" `Quick
+            test_inventory_and_load_share_alias_selection
+        ; test_case "linked inventory root" `Quick test_a_linked_inventory_root_is_readable
+        ; test_case "inventory directory replacement" `Quick
+            test_inventory_directory_replacement_hides_child_names
+        ; test_case "load" `Quick test_load_runs_to_the_first_key_request
+        ; test_case "load and screen name the core" `Quick
+            test_load_and_screen_name_the_core
+        ; test_case "meta names the core without a machine" `Quick
+            test_meta_names_the_core_without_a_machine
+        ; test_case "linked core is the pinned one" `Quick
+            test_the_linked_core_is_the_pinned_one
+        ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger
+        ; test_case "click reaches the guest" `Quick
+            test_click_reaches_the_guest_and_the_ledger
+        ; test_case "inventory only" `Quick test_only_inventory_names_resolve
+        ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
+        ; test_case "inventory replacement identity" `Quick
+            test_inventory_read_rejects_a_controlled_replacement
+        ; test_case "boot inside a directory" `Quick
+            test_boot_names_the_program_inside_a_directory
+        ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
+        ; test_case "attached input runs past a settling observation" `Quick
+            test_attached_input_can_run_past_a_settling_observation
+        ; test_case "attached blocking read and execution clock" `Quick
+            test_attached_blocking_read_and_execution_clock
+        ; test_case "sequence length" `Quick test_a_sequence_has_a_length
+        ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
+        ; test_case "save outlives machine" `Quick test_a_save_outlives_its_machine
+        ; test_case "save over inventory" `Quick
+            test_a_save_is_mounted_over_the_inventory_copy
+        ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
+        ; test_case "guest path" `Quick test_a_guest_path_never_reaches_the_host
+        ; test_case "holder only" `Quick test_only_the_holder_moves_the_machine
+        ; test_case "pass" `Quick test_pass_hands_the_machine_on
+        ; test_case "free controller" `Quick
+            test_a_free_controller_goes_to_the_next_successful_mover
+        ; test_case "pass to an impossible name" `Quick
+            test_a_pass_to_an_impossible_name_is_refused
+        ; test_case "stopped holder is let go" `Quick
+            test_a_stopped_holders_controller_is_let_go
+        ; test_case "a removed Keeper lets its controller go" `Quick
+            test_a_removed_keeper_lets_its_controller_go
+        ; test_case "a Keeper passes only to someone at the machine" `Quick
+            test_a_keeper_passes_only_to_someone_at_the_machine
+        ; test_case "a holder departs with its credential" `Quick
+            test_a_holder_departs_with_its_credential
+        ; test_case "a pass is refused when the credentials do not list" `Quick
+            test_a_pass_is_refused_when_the_credentials_do_not_list
+        ; test_case "click takes the whole button mask" `Quick
+            test_click_takes_the_whole_button_mask
+        ; test_case "only an absent recipient frees the controller" `Quick
+            test_only_an_absent_recipient_frees_the_controller
+        ; test_case "a fault while booting is a load" `Quick
+            test_a_fault_while_booting_is_a_load
+        ; test_case "a clean boot says so" `Quick test_a_clean_boot_says_so
+        ; test_case "a fault keeps the steps that ran" `Quick
+            test_a_fault_keeps_the_steps_that_ran
+        ; test_case "unknown key" `Quick test_unknown_key_is_refused
+        ; test_case "step cap" `Quick test_step_cap
+        ; test_case "peek" `Quick test_peek_reads_the_text_page
+        ; test_case "read-only" `Quick test_read_only_classification
+        ; test_case "declared" `Quick test_every_tool_is_declared
+        ; test_case "prepared load detects concurrent guest changes" `Quick test_prepared_load_rejects_changed_save_snapshot
+        ; test_case "prepared restore snapshots bytes and rechecks ownership" `Quick test_prepared_restore_uses_snapshot_and_rechecks_controller
+        ; test_case "prepared restore refuses a slot saved again" `Quick test_prepared_restore_refuses_a_slot_saved_again
+        ; test_case "checkpoint round trip" `Quick
+            test_a_restored_machine_plays_on_as_if_never_stopped
+        ; test_case "restore needs the controller" `Quick test_restore_needs_the_controller
+        ; test_case "restore is a new incarnation" `Quick test_a_restore_is_a_new_incarnation
+        ; test_case "ledger continues" `Quick test_the_ledger_continues_from_the_checkpoint
+        ; test_case "restore leaves saves" `Quick test_a_restore_leaves_the_saves_directory
+        ; test_case "restore refusals and listing" `Quick test_restore_refusals_and_listing
+        ; test_case "refusals declare no effect" `Quick test_refusals_declare_no_effect
+        ; test_case "autosave after a step" `Quick test_autosave_written_after_a_successful_step
+        ; test_case "every tool that moves the guest autosaves" `Quick
+            test_every_tool_that_moves_the_guest_autosaves
+        ; test_case "peek takes hex digits only" `Quick test_peek_takes_hex_digits_only
+        ; test_case "peek refuses before looking for a machine" `Quick
+            test_peek_refuses_before_looking_for_a_machine
+        ; test_case "a single file must be a program" `Quick test_a_single_file_must_be_a_program
+        ; test_case "a save cannot take the autosave slot" `Quick
+            test_a_save_cannot_take_the_autosave_slot
+        ; test_case "a save reports what it replaced" `Quick test_a_save_reports_what_it_replaced
+        ; test_case "a load keeps the previous incarnation's autosave in autosave-prev" `Quick
+            test_a_load_keeps_the_previous_incarnations_autosave_in_autosave_prev
+        ; test_case "a load that would discard the previous autosave is refused" `Quick
+            test_a_load_that_would_discard_the_previous_autosave_is_refused
+        ; test_case "an unreadable autosave file is kept or asked about" `Quick
+            test_an_unreadable_autosave_file_is_kept_or_asked_about
+        ; test_case "a restore asks before discarding the previous autosave" `Quick
+            test_restore_asks_before_discarding_the_previous_autosave
+        ; test_case "a refusal with only autosave-prev left names it" `Quick
+            test_a_refusal_with_only_autosave_prev_left_names_it
+        ; test_case "autosave skips a refusal" `Quick test_a_refused_call_writes_no_autosave
+        ; test_case "a fault keeps the last good autosave" `Quick
+            test_a_fault_leaves_the_last_good_autosave
+        ; test_case "an exited program keeps the last autosave" `Quick
+            test_an_exited_program_does_not_replace_the_autosave
+        ; test_case "no autosave to offer" `Quick test_no_autosave_offered_when_nothing_ever_ran
+        ; test_case "a failed autosave still returns the call" `Quick
+            test_a_failed_autosave_does_not_fail_the_call
+        ; test_case "no machine names the autosave" `Quick
+            test_no_machine_names_the_autosave_after_an_eject
+        ; test_case "no-machine guidance leads with the autosave" `Quick
+            test_no_machine_guidance_leads_with_the_autosave
+        ; test_case "no-machine guidance after a failed start" `Quick
+            test_no_machine_guidance_after_a_failed_start
+        ; test_case "a no-machine refusal carries the restore command" `Quick
+            test_a_refusal_with_no_machine_carries_the_restore_command
+        ; test_case "inventory names the autosave" `Quick test_inventory_names_the_autosave
+        ; test_case "restore stages before admission and cleans refusal" `Quick
+            test_restore_stages_before_admission_and_cleans_refusal
+        ; test_case "activity refusal is proven pre-effect" `Quick test_activity_refusal_is_proven_pre_effect
+        ; test_case "a damaged autosave is named" `Quick test_a_damaged_autosave_is_named_not_hidden
+        ; test_case "an autosave with an unsupported snapshot format is unreadable" `Quick
+            test_an_autosave_with_unsupported_snapshot_format_is_unreadable
+        ] )
+    ]
+;;

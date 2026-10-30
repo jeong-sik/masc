@@ -1,0 +1,119 @@
+{
+  "schema": "masc.owned-tui-first-input-readiness-preparation.v1",
+  "status": "PREPARED_NOT_EXECUTED",
+  "source": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "controller": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v5.py",
+    "sha256": "a97ec74d24c7cca29263d3ad4a78ec80c9e2fa996f31c40b382f51f9c0f00b97",
+    "bytes": 64074
+  },
+  "parent": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v4.py",
+    "sha256": "2180b2f37a34a40ad9670188901a33a1d62f541b38f2a75c2285deb819a92a2d",
+    "bytes": 56286
+  },
+  "diff": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/v4-to-v5.diff",
+    "sha256": "8f443bcfa663599eb53ad1ca70636c53199092e49623889742eff868b8062360",
+    "bytes": 12401
+  },
+  "invocation": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/invocation-template-v5.json",
+    "sha256": "a0c9b9a13a78223b8b06d5d71eec2eea645a60399759fe96b8105fa06ebb88ed",
+    "bytes": 1401
+  },
+  "source_bindings": {
+    "bin/masc_tui_local_read_observation.ml": {
+      "bytes": 10608,
+      "sha256": "af1b7b6e59af6933226c756ac0ff0baaf8f8c42cfff802bfa5beeef957260857"
+    },
+    "bin/masc_tui_local_read_observation.mli": {
+      "bytes": 3991,
+      "sha256": "9a6edeaaaaa44e18089ed3b7708274cf027e51d3fce488c52e65bc6947370e99"
+    },
+    "bin/masc_tui_observation_store.ml": {
+      "bytes": 4290,
+      "sha256": "e359407b0ee3c19cb8680ea6422f4a1deb6cd2db775bfb107b2ffa2836207492"
+    },
+    "bin/masc_tui_startup_observation.ml": {
+      "bytes": 6455,
+      "sha256": "9cc84b1f1ff262e28d628c26470c9e7fb5eb3e777dd6ff568c3568594256a61b"
+    },
+    "bin/masc_tui_input_reader.ml": {
+      "bytes": 28456,
+      "sha256": "4a9939b715ee4518e48a3b4155c321250843c9edb212de7ab4769488c919092d"
+    },
+    "bin/masc_tui_loader.ml": {
+      "bytes": 85699,
+      "sha256": "cce541a19ce37d5c74a1186fccc5359c1994ad723b20c8f5179b6128b2adc88d"
+    },
+    "bin/masc_tui_palette.ml": {
+      "bytes": 22083,
+      "sha256": "ba5d899a043ed97f74e7d71fb6bebc63c769c4bb90345c05965f15130e5093f6"
+    },
+    "bin/masc_tui.ml": {
+      "bytes": 1857848,
+      "sha256": "0b23150f665b9f0831332019abcb6b6ff67650e8186a68265b3d6cfa06f0c90b"
+    },
+    "bin/masc_tui_types.ml": {
+      "bytes": 1024106,
+      "sha256": "481643071b300594df770385095b02946cfc09f40becdcb69c5cc821c05c1ade"
+    },
+    "lib/masc_log/log.ml": {
+      "bytes": 44269,
+      "sha256": "dd15b0fcbc4243bbeec4ff4856cb75827f4e3e9c9483debd9a22094ab0043853"
+    }
+  },
+  "changes": [
+    "TUI child only receives existing MASC_LOG_ROUTINE_LEVEL=info; setup and server environment unchanged.",
+    "Read unique owned session-PID directory; validate existing initialization details PID/directory; parse complete JSONL records only, bind log snapshot prefix hashes/bytes without copying whole log.",
+    "Join local source keepers requested PID/capture identity to accepted admission and applied state, preserving actual sequence/time order. Unsuccessful/retired/malformed facts refuse readiness.",
+    "Require same-PID startup capabilities_applied with caller returned and ordered decoder_installed_ns; no keys sent before both semantic prerequisites.",
+    "Use existing bounded wait loop; no additional sleep, timeout knob, input replay, screen parser or product code. Missing facts/deadline remain INCOMPLETE; later actual target GET unchanged."
+  ],
+  "checks": {
+    "ast_parse": true,
+    "new_top_level_definitions": [
+      "initial_input_readiness"
+    ],
+    "changed_existing_top_level_definitions": [
+      "main"
+    ],
+    "all_other_existing_function_class_asts_unchanged": true,
+    "new_source_hashes_verified": true,
+    "first_input_after_saved_readiness": true,
+    "fresh_trial4_output_absent": true,
+    "controller_or_helper_execution": false,
+    "preflight_native_api_pty_ci_execution": false
+  },
+  "source_order": {
+    "local_apply": "bin/masc_tui.ml:22477-22487 -> loader:589-592 -> replace_keeper_rows:391; observation apply:142-146 logs only after return.",
+    "schema": "bin/masc_tui_local_read_observation.ml:60-116 requested has PID/source/capture; later phases share capture_id.",
+    "startup": "input_reader:87,101-118,600-604; startup_observation:77-104; masc_tui.ml:23455-23498 capability consumer updates precede observation.",
+    "logging": "observation_store:5-40 owns unique PID session and initialized details; lib/masc_log/log.ml:118-134,1051-1056 existing routine-level setting."
+  },
+  "limits": [
+    "Trial3 local Keeper admission113.381416ms precedes first_input_received113.522958ms; earlier HTTP-roster142ms/fullfinish161ms comparison cannot prove empty-palette cause. Original INCOMPLETE and cause uncertainty preserved.",
+    "Application receipt does not include decoded Keeper identities and may apply a reading with an embedded metadata error; it proves application returned, not both expected names present. Subsequent TUI-origin target GET is still mandatory.",
+    "State/capability application is not paint, F9, usable input or exact resize acknowledgement.",
+    "Diagnostic emission may be suppressed/fail, log file may be incomplete, state can change after observation; no receipt is fabricated and no later success assured.",
+    "Readiness helper and live routine logging are not executed/tested in this preparation unit."
+  ],
+  "original_trial3_bindings": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/result.json",
+      "sha256": "a13726509d17c34d994ba31bbfb9ab12c0326a82a0f5925071ecedc84975c4ed",
+      "bytes": 173
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/pty-input-trace.json",
+      "sha256": "64ef4284eaf783f693a2e46274590539324faca42e463fcb7dc2b5731d45af06",
+      "bytes": 395
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/root-observer-stop-reason.json",
+      "sha256": "93148eb10e9bd5ff9a36454af722ef07df6ffb1d398dfdad900f07efe2493f16",
+      "bytes": 629
+    }
+  ]
+}

@@ -1,0 +1,186 @@
+{
+  "observed_at": "2026-10-24T16:36:23.259736+00:00",
+  "scope": "Actual model effect after approved partial Task; observer made no calls or changes.",
+  "actual_wire": [
+    {
+      "request_id": "request-000021",
+      "request_sha256": "86ae740f7163adc5d3cc21e939ee9b2fdeec0b92db88c1772d7edb9235b3ee75",
+      "response_sha256": "75e9dd43b95d02173c969765a70cc4b5bb05f0e8c34d448563bdfd3af92ab577",
+      "calls": [
+        {
+          "id": "call_jib9axmp",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "cwd": "workspace",
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "terminal": [
+        {
+          "created_at": "2026-10-24T16:34:51.00906Z",
+          "done_reason": "stop",
+          "eval_count": 438,
+          "prompt_eval_count": 24478
+        }
+      ],
+      "feedback": {
+        "role": "tool",
+        "tool_name": "keeper_task_done",
+        "content": "{\"result\":\"task-001 in_progress → awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-a7a1fde77b0d53ceae734673258aa74b\",\"diagnostics\":[]},\"disposition\":\"completed\",\"typed_outcome\":{\"kind\":\"Progress\"}}"
+      }
+    },
+    {
+      "request_id": "request-000022",
+      "request_sha256": "0ec35201074f98808d1d290604083467abd01dfc5046d769f5d7d429c009d06d",
+      "response_sha256": "627ba912f13ca5ee444a661025195e989b703e911995eb802292d140b61ecdae",
+      "calls": [
+        {
+          "id": "call_wly99sjh",
+          "function": {
+            "index": 0,
+            "name": "Write",
+            "arguments": {
+              "file_path": "workspace/acceptance.json",
+              "content": "{\"alpha\":false,\"beta\":false,\"gamma\":false}"
+            }
+          }
+        }
+      ],
+      "terminal": [
+        {
+          "created_at": "2026-10-24T16:35:26.722006Z",
+          "done_reason": "stop",
+          "eval_count": 450,
+          "prompt_eval_count": 20287
+        }
+      ],
+      "feedback": {
+        "role": "tool",
+        "tool_name": "Read",
+        "content": "{\"error\":\"docker_read_failed: path_not_found: /private/tmp/masc-goal-canary-3014cfce-qwen/.masc/playground/docker/goal-canary/workspace/workspace/acceptance.json (host path does not exist; verify the relative path under your playground before calling Read)\",\"ok\":false,\"path\":\"/private/tmp/masc-goal-canary-3014cfce-qwen/.masc/playground/docker/goal-canary/workspace/workspace/acceptance.json\",\"input_file_path\":\"workspace/acceptance.json\",\"cwd\":\"workspace\"}\nfailure_class=policy_rejection — Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments."
+      }
+    },
+    {
+      "request_id": "request-000023",
+      "request_sha256": "4d208f0a489b302db330195cc4cd46ee4599e4312ea138c8e1edf0fac070e2ff",
+      "response_sha256": "35ef62705e8fbe056adf3ea25a7da3b11081149db153ad181d9a2287c4b4f432",
+      "calls": [
+        {
+          "id": "call_658gtqtx",
+          "function": {
+            "index": 0,
+            "name": "Edit",
+            "arguments": {
+              "old_string": "\"alpha\": false",
+              "cwd": "workspace",
+              "file_path": "acceptance.json",
+              "new_string": "\"alpha\": true"
+            }
+          }
+        }
+      ],
+      "terminal": [
+        {
+          "created_at": "2026-10-24T16:36:01.907795Z",
+          "done_reason": "stop",
+          "eval_count": 452,
+          "prompt_eval_count": 20801
+        }
+      ],
+      "feedback": {
+        "role": "tool",
+        "tool_name": "Write",
+        "content": "{\"ok\":true,\"path\":\"/private/tmp/masc-goal-canary-3014cfce-qwen/.masc/playground/docker/goal-canary/workspace/acceptance.json\",\"mode\":\"overwrite\",\"bytes_written\":42,\"via\":\"docker\"}"
+      }
+    }
+  ],
+  "current_artifact": {
+    "path": "/tmp/masc-goal-canary-3014cfce-qwen/.masc/playground/docker/goal-canary/workspace/acceptance.json",
+    "bytes": 42,
+    "sha256": "119404c791e9fff00ff0b8a056c5ca3f02ea8ed4e42c88b612e2154e368ee7d2",
+    "value": {
+      "alpha": false,
+      "beta": false,
+      "gamma": false
+    }
+  },
+  "approved_immutable_artifact": {
+    "verification_id": "vrf-a7a1fde77b0d53ceae734673258aa74b",
+    "created_at_utc": "2026-10-24T16:30:30.143792+00:00",
+    "bytes": 42,
+    "declared_bytes": 42,
+    "sha256": "394f8fa3779b4ede93235e973ace265bc4180f7558be5ef888b3bd15267bf093",
+    "equals_current_frozen_bytes": true,
+    "value": {
+      "alpha": true,
+      "beta": false,
+      "gamma": false
+    }
+  },
+  "task": [
+    {
+      "id": "task-001",
+      "title": "Set alpha to true in acceptance.json",
+      "description": "Modify workspace/acceptance.json to set alpha to true while keeping beta and gamma as false.",
+      "priority": 3,
+      "files": [],
+      "created_at": "2026-10-24T16:25:17Z",
+      "created_by": "goal-canary",
+      "contract": {
+        "completion_contract": [
+          "alpha is set to true",
+          "beta and gamma remain false"
+        ],
+        "required_evidence": [
+          "artifact:workspace/acceptance.json"
+        ]
+      },
+      "handoff_context": {
+        "summary": "alpha set to true, beta and gamma remain false",
+        "evidence_refs": [
+          "artifact:workspace/acceptance.json"
+        ],
+        "updated_at": "2026-10-24T16:30:30Z",
+        "updated_by": "goal-canary"
+      },
+      "status": "done",
+      "assignee": "goal-canary",
+      "completed_at": "2026-10-24T16:33:21Z",
+      "notes": "Controlled operator-proxy canary approval after exact retained artifact inspection: alpha=true, beta=false, gamma=false; first Task only. No independent LLM verdict or human Goal completion confirmation claim."
+    }
+  ],
+  "goal": [
+    {
+      "id": "goal-canary-three-results",
+      "criterion_revision": "758734e544c88f1dbbe384aed0da6d15",
+      "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+      "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+      "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+      "due_date": null,
+      "priority": 1,
+      "phase": "executing",
+      "last_review_note": null,
+      "last_review_at": null,
+      "created_at": "2026-10-24T16:21:04Z",
+      "updated_at": "2026-10-24T16:21:04Z"
+    }
+  ],
+  "measurement": {
+    "version": 1,
+    "measurements": [
+      {
+        "id": "37013a65955873185c53e336a48fd19f",
+        "goal_id": "goal-canary-three-results",
+        "criterion_revision": "758734e544c88f1dbbe384aed0da6d15",
+        "observed_value": "0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread",
+        "evidence": "note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.",
+        "actor": "goal-canary-operator",
+        "recorded_at": "2026-10-24T16:21:04Z"
+      }
+    ]
+  }
+}

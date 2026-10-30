@@ -1,0 +1,10 @@
+{
+  "verdict": "PASS",
+  "head": "cf60643a1680b6c1cfa678feb5c97034b3bd8d22",
+  "base": "6f2d9cda69307a2ab58f5943412a9ab49b8b0c43",
+  "reviewer": "repair_evidence_integrity",
+  "raw_binary_diff_sha256": "530ecde62694300f7fb1677e6fb2f04a96aa04560bcbd43160a643c006d09ae2",
+  "files_in_full_direct_diff": 108,
+  "product_config_ui_tests_changelog_files_reviewed": 40,
+  "scope": "Independent current direct PR source review; no new P0-P2. Official Resume and blank-base findings clear. Not GitHub approval, all-stack approval, CI or runtime verdict. Uncommitted later evidence and label correction excluded."
+}

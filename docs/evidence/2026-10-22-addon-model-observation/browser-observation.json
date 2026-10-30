@@ -1,0 +1,10 @@
+{
+  "requests": [
+    {
+      "path": "/api/v1/lanes",
+      "method": "GET"
+    }
+  ],
+  "location": "http://127.0.0.1:5187/dashboard/.addon-model-probe-20261022.html",
+  "renderedText": "Exact-output model routesInstallation: custom-curatorModels are configured per installation and output in runtime.addon_exact_lanes. Package activity and worker presence are separate observations.classificationDeclared package outputAdmitted HTTP: http.firstCLI fallbacks: cli.fallbackDeclared HTTP: http.first → refusedDeclared CLI: cli.fallbackDropped HTTP: refusedruntime refusedbriefingDeclared package outputunavailable: registry unavailableremoved-outputTable only · no declared package output; not an execution capabilityModel route off · declared candidates retainedDeclared HTTP: retainedDeclared CLI: noneOpen Runtime configuration"
+}

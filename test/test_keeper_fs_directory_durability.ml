@@ -1,0 +1,1452 @@
+open Alcotest
+
+module KF = Masc.Keeper_fs
+module KDD = Masc.Keeper_fs_durable_directory
+
+exception Synthetic_owner_failure
+exception Synthetic_observer_cancel
+
+(* This is a test-runner watchdog, not a production scheduling policy. It
+   localizes a coordination liveness regression instead of consuming the
+   quick-suite-wide 35 minute watchdog. *)
+let coordination_watchdog_seconds = 5.0
+
+type owner_outcome =
+  | Owner_error of KF.durable_write_error
+  | Owner_cancelled
+
+type blocking_hook =
+  { trigger_parent : string
+  ; entered : unit Eio.Promise.t
+  ; resolve_entered : unit Eio.Promise.u
+  ; armed : bool Atomic.t
+  ; mutex : Stdlib.Mutex.t
+  ; condition : Stdlib.Condition.t
+  ; mutable released : bool
+  }
+
+let blocking_hook trigger_parent =
+  let entered, resolve_entered = Eio.Promise.create () in
+  { trigger_parent
+  ; entered
+  ; resolve_entered
+  ; armed = Atomic.make true
+  ; mutex = Stdlib.Mutex.create ()
+  ; condition = Stdlib.Condition.create ()
+  ; released = false
+  }
+;;
+
+let release_blocking_hook hook =
+  Stdlib.Mutex.protect hook.mutex (fun () ->
+    if not hook.released
+    then (
+      hook.released <- true;
+      Stdlib.Condition.broadcast hook.condition))
+;;
+
+let with_blocking_hook_release hook f =
+  Fun.protect ~finally:(fun () -> release_blocking_hook hook) f
+;;
+
+let await_blocking_hook_release hook =
+  Stdlib.Mutex.lock hook.mutex;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock hook.mutex)
+    (fun () ->
+       while not hook.released do
+         Stdlib.Condition.wait hook.condition hook.mutex
+       done)
+;;
+
+let block_once hook after_release parent =
+  if
+    String.equal parent hook.trigger_parent
+    && Atomic.compare_and_set hook.armed true false
+  then (
+    Eio.Promise.resolve hook.resolve_entered ();
+    await_blocking_hook_release hook;
+    after_release ())
+;;
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_fs_directory_durability_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+let cleanup_dir dir =
+  let rec remove path =
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path
+    | _ -> Unix.unlink path
+  in
+  try remove dir with
+  | Sys_error _ | Unix.Unix_error _ -> ()
+;;
+
+let require_ok label = function
+  | Ok () -> ()
+  | Error detail -> failf "%s: %s" label detail
+;;
+
+let require_durable_ok label = function
+  | Ok () -> ()
+  | Error detail -> failf "%s: %s" label (KF.durable_write_error_to_string detail)
+;;
+
+let require_observed_commit label = function
+  | Ok KF.Committed -> ()
+  | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+    failf "%s: durable observer failed: %s" label (Printexc.to_string exn)
+  | Error detail -> failf "%s: %s" label (KF.durable_write_error_to_string detail)
+;;
+
+let require_directory_lease label = function
+  | Ok _ -> ()
+  | Error _ -> failf "%s: directory lease preparation failed" label
+;;
+
+let with_eio_guard f =
+  Eio_guard.enable ();
+  Fun.protect ~finally:Eio_guard.disable f
+;;
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv name (Option.value ~default:"" previous))
+    f
+;;
+
+let with_strict_malformed_disk_pressure_cooldown f =
+  with_env "MASC_PARSE_WARN" "true" (fun () ->
+    with_env "MASC_KEEPER_DISK_PRESSURE_COOLDOWN_SEC" "not-a-float" f)
+;;
+
+let test_non_directory_ancestor_does_not_poison_preparation () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let occupied = Filename.concat base "occupied" in
+       require_ok "seed non-directory ancestor" (KF.save_atomic occupied "not a directory");
+       let blocked_path = Filename.concat occupied "request.json" in
+       (match KF.save_json_durable_atomic blocked_path (`Assoc []) with
+        | Error
+            { renamed = false
+            ; stage = KF.Directory_prepare
+            ; failure = KF.Directory_chain_failed (KF.Non_directory_ancestor { path })
+            } ->
+          check string "typed failure retains occupied path" occupied path
+        | Error error ->
+          failf
+            "unexpected durable write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "non-directory ancestor unexpectedly accepted");
+       let sibling_path = Filename.concat base "sibling/request.json" in
+       match KF.save_json_durable_atomic sibling_path (`Assoc []) with
+       | Ok () -> ()
+        | Error error ->
+         failf
+           "directory prepare failure poisoned the next write: %s"
+           (KF.durable_write_error_to_string error))
+;;
+
+let test_symlink_ancestor_is_rejected () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  let outside = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base; cleanup_dir outside)
+    (fun () ->
+       let linked = Filename.concat base "linked" in
+       Unix.symlink outside linked;
+       let path = Filename.concat linked "request.json" in
+       let weak_json = `Assoc [ "mode", `String "legacy-follow" ] in
+       require_durable_ok
+         "seed weak cached symlink path"
+         (KF.save_json_durable_atomic path weak_json);
+       (match
+          KF.save_json_durable_atomic
+            ~ownership_root:base
+            path
+            (`Assoc [ "mode", `String "strict" ])
+        with
+        | Error
+            { renamed = false
+            ; stage = KF.Directory_prepare
+            ; failure = KF.Directory_chain_failed (KF.Non_directory_ancestor { path })
+            } ->
+          check string "typed failure retains symlink path" linked path
+        | Error error ->
+          failf
+            "unexpected durable write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "symlink ancestor unexpectedly accepted");
+       check string "strict write did not overwrite outside target"
+         (Yojson.Safe.pretty_to_string weak_json)
+         (Fs_compat.load_file (Filename.concat outside "request.json")))
+;;
+
+let test_cached_owned_chain_rejects_symlink_retarget () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  let outside = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base; cleanup_dir outside)
+    (fun () ->
+       let linked = Filename.concat base "linked" in
+       let retired = Filename.concat base "retired" in
+       Unix.mkdir linked 0o755;
+       let path = Filename.concat linked "request.json" in
+       require_durable_ok
+         "seed strict cached directory"
+         (KF.save_json_durable_atomic
+            ~ownership_root:base
+            path
+            (`Assoc [ "generation", `Int 1 ]));
+       Unix.rename linked retired;
+       Unix.symlink outside linked;
+       (match
+          KF.save_json_durable_atomic
+            ~ownership_root:base
+            path
+            (`Assoc [ "generation", `Int 2 ])
+        with
+        | Error
+            { renamed = false
+            ; stage = KF.Directory_prepare
+            ; failure = KF.Directory_chain_failed (KF.Non_directory_ancestor { path })
+            } ->
+          check string "retargeted symlink is identified" linked path
+        | Error error ->
+          failf
+            "unexpected cached-chain error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "cached strict chain followed a retargeted symlink");
+       check bool "outside target was not created" false
+         (Sys.file_exists (Filename.concat outside "request.json")))
+;;
+
+let test_cached_owned_chain_reanchors_replaced_directory () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let active = Filename.concat base "active" in
+       let retired = Filename.concat base "retired" in
+       Unix.mkdir active 0o755;
+       require_durable_ok
+         "seed cached owned directory"
+         (KF.save_json_durable_atomic
+            ~ownership_root:base
+            (Filename.concat active "first.json")
+            (`Assoc []));
+       Unix.rename active retired;
+       Unix.mkdir active 0o755;
+       let reanchored = Atomic.make false in
+       require_durable_ok
+         "write through replaced owned directory"
+         (KF.For_testing.save_json_durable_atomic
+            ~before_stage:(fun _ -> ())
+            ~before_directory_fsync:(fun parent ->
+              if String.equal parent base then Atomic.set reanchored true)
+            ~ownership_root:base
+            (Filename.concat active "second.json")
+            (`Assoc []));
+       check bool "replacement directory entry is re-anchored" true
+         (Atomic.get reanchored))
+;;
+
+let test_cached_owned_prefix_rejects_uncached_descendant_escape () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  let outside = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base; cleanup_dir outside)
+    (fun () ->
+       let linked = Filename.concat base "linked" in
+       let retired = Filename.concat base "retired" in
+       Unix.mkdir linked 0o755;
+       require_durable_ok
+         "seed cached owned prefix"
+         (KF.save_json_durable_atomic
+            ~ownership_root:base
+            (Filename.concat linked "first.json")
+            (`Assoc []));
+       Unix.rename linked retired;
+       Unix.symlink outside linked;
+       let escaped_dir = Filename.concat outside "uncached" in
+       let path = Filename.concat linked "uncached/second.json" in
+       (match
+          KF.save_json_durable_atomic
+            ~ownership_root:base
+            path
+            (`Assoc [])
+        with
+        | Error
+            { renamed = false
+            ; stage = KF.Directory_prepare
+            ; failure = KF.Directory_chain_failed (KF.Non_directory_ancestor { path })
+            } ->
+          check string "cached prefix symlink is identified" linked path
+        | Error error ->
+          failf
+            "unexpected uncached-descendant error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "cached owned prefix escaped through an uncached descendant");
+       check bool "outside descendant directory was not created" false
+         (Sys.file_exists escaped_dir))
+;;
+
+let test_owned_remove_rejects_symlink_ancestor () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  let base = temp_dir () in
+  let outside = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base; cleanup_dir outside)
+    (fun () ->
+       let outside_path = Filename.concat outside "request.json" in
+       require_ok "seed outside removal target" (KF.save_atomic outside_path "outside");
+       let linked = Filename.concat base "linked" in
+       Unix.symlink outside linked;
+       let path = Filename.concat linked "request.json" in
+       (match KF.remove_file_durable ~ownership_root:base path with
+        | Error { removed = false; failure = KF.Unlink, _ } -> ()
+        | Error error ->
+          failf
+            "unexpected owned remove error: %s"
+            (KF.durable_remove_error_to_string error)
+        | Ok () -> fail "owned remove followed a symbolic-link ancestor");
+       check bool "outside removal target remains" true (Sys.file_exists outside_path))
+;;
+
+let test_owned_temp_directory_trailing_separator_converges () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let temp_dir = Filename.concat base "staging" ^ Filename.dir_sep in
+       let path = Filename.concat base "request.json" in
+       require_durable_ok
+         "owned trailing-separator temp directory"
+         (KF.save_json_durable_atomic
+            ~ownership_root:base
+            ~temp_dir
+            path
+            (`Assoc [ "ok", `Bool true ])))
+;;
+
+let test_retry_reanchors_partial_directory () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let partial = Filename.concat base "partial" in
+       let path = Filename.concat partial "leaf/request.json" in
+       let injected = ref false in
+       let first =
+         KF.For_testing.save_json_durable_atomic
+           ~before_stage:(fun _ -> ())
+           ~before_directory_fsync:(fun parent ->
+             if (not !injected) && String.equal parent base
+             then (
+               injected := true;
+               failwith "injected directory fsync failure"))
+           path
+           (`Assoc [])
+       in
+       (match first with
+        | Error { renamed = false; stage = KF.Directory_prepare; _ } -> ()
+        | Error error ->
+          failf
+            "unexpected durable write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "injected directory fsync failure unexpectedly succeeded");
+       check bool "directory fsync fault was injected" true !injected;
+       check bool "failed component remains visible" true (Sys.is_directory partial);
+       let partial_reanchored = ref false in
+       (match
+          KF.For_testing.save_json_durable_atomic
+            ~before_stage:(fun _ -> ())
+            ~before_directory_fsync:(fun parent ->
+              if String.equal parent base then partial_reanchored := true)
+            path
+            (`Assoc [])
+        with
+        | Ok () -> ()
+        | Error error ->
+          failf
+            "retry after directory fsync failure failed: %s"
+            (KF.durable_write_error_to_string error));
+       check bool "retry re-anchors the visible component" true !partial_reanchored)
+;;
+
+let test_pressure_observer_failure_preserves_post_rename_error () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "request.json" in
+       with_strict_malformed_disk_pressure_cooldown (fun () ->
+         match
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(function
+               | KF.Parent_directory_fsync_after_rename ->
+                 raise (Unix.Unix_error (Unix.ENOSPC, "fsync", base))
+               | _ -> ())
+             path
+             (`Assoc [])
+         with
+         | Error
+             { renamed = true
+             ; stage = KF.Parent_directory_fsync_after_rename
+             ; failure = KF.Operation_failed _
+             } ->
+           check bool "rename remains visible" true (Sys.file_exists path)
+         | Error error ->
+           failf
+             "pressure observer replaced post-rename error: %s"
+             (KF.durable_write_error_to_string error)
+         | Ok () -> fail "injected post-rename ENOSPC unexpectedly succeeded"))
+;;
+
+let test_pressure_observer_failure_preserves_post_unlink_error () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "request.json" in
+       require_ok "seed removable file" (KF.save_atomic path "payload");
+       with_strict_malformed_disk_pressure_cooldown (fun () ->
+         match
+           KF.For_testing.remove_file_durable
+             ~before_stage:(function
+               | KF.Parent_directory_fsync ->
+                 raise (Unix.Unix_error (Unix.ENOSPC, "fsync", base))
+               | KF.Unlink -> ())
+             path
+         with
+         | Error { removed = true; failure = KF.Parent_directory_fsync, _ } ->
+           check bool "unlink remains visible" false (Sys.file_exists path)
+         | Error error ->
+           failf
+             "pressure observer replaced post-unlink error: %s"
+             (KF.durable_remove_error_to_string error)
+         | Ok () -> fail "injected post-unlink ENOSPC unexpectedly succeeded"))
+;;
+
+type system_wait_outcome = Preparation_succeeds | Preparation_fails | Preparation_invalidated
+
+let test_system_thread_waiter outcome () =
+  Eio_main.run @@ fun env ->
+  with_eio_guard @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let target = Filename.concat base "system-thread-waiter" in
+    let hook = blocking_hook base in
+    let waiting, resolve_waiting = Eio.Promise.create () in
+    let owner_result, resolve_owner = Eio.Promise.create () in
+    let waiter_result, resolve_waiter = Eio.Promise.create () in
+    let waiter_preparations = Atomic.make 0 in
+    let after_release () = match outcome with
+      | Preparation_fails -> raise Synthetic_owner_failure
+      | Preparation_succeeds | Preparation_invalidated -> () in
+    Eio.Switch.run @@ fun sw ->
+    with_blocking_hook_release hook @@ fun () ->
+    Eio.Time.with_timeout_exn env#clock coordination_watchdog_seconds (fun () ->
+      Eio.Fiber.fork ~sw (fun () ->
+        let result = Eio_unix.run_in_systhread (fun () ->
+          KDD.ensure ~before_prepare:(fun () -> block_once hook after_release base)
+            ~before_directory_fsync:(fun _ -> ()) ~ownership_root:base target) in
+        Eio.Promise.resolve resolve_owner result);
+      Eio.Promise.await hook.entered;
+      Eio.Fiber.fork ~sw (fun () ->
+        let result = Eio_unix.run_in_systhread (fun () ->
+          KDD.For_testing.ensure ~after_validation:(fun () -> ())
+            ~before_claim:(fun () -> ())
+            ~before_wait:(fun () -> ignore (Eio.Promise.try_resolve resolve_waiting ()))
+            ~before_prepare:(fun () -> ignore (Atomic.fetch_and_add waiter_preparations 1 : int))
+            ~before_directory_fsync:(fun _ -> ()) ~ownership_root:base target) in
+        Eio.Promise.resolve resolve_waiter result);
+      Eio.Promise.await waiting;
+      (* The signal is sent under the completion mutex. Completion must acquire
+         that same mutex, so it cannot overtake the waiter's park operation. *)
+      (match outcome with
+       | Preparation_invalidated -> KDD.invalidate base
+       | Preparation_succeeds | Preparation_fails -> release_blocking_hook hook);
+      let waiter = Eio.Promise.await waiter_result in
+      (match outcome, waiter with
+       | Preparation_fails, Error (KDD.Operation_failed (Synthetic_owner_failure, _)) -> ()
+       | Preparation_fails, (Ok _ | Error _) -> fail "system-thread waiter lost owner's failure"
+       | (Preparation_succeeds | Preparation_invalidated), result ->
+         require_directory_lease "system-thread waiter" result);
+      release_blocking_hook hook;
+      let owner = Eio.Promise.await owner_result in
+      (match outcome, owner with
+       | Preparation_fails, Error (KDD.Operation_failed (Synthetic_owner_failure, _)) -> ()
+       | Preparation_fails, (Ok _ | Error _) -> fail "owner lost its ordinary failure"
+       | (Preparation_succeeds | Preparation_invalidated), result ->
+         require_directory_lease "system-thread owner" result);
+      match outcome with
+      | Preparation_succeeds | Preparation_fails ->
+        check int "waiter consumes owner's outcome without preparing again" 0
+          (Atomic.get waiter_preparations)
+      | Preparation_invalidated ->
+        check bool "invalidation lets the waiting system thread prepare again" true
+          (Atomic.get waiter_preparations > 0)))
+;;
+
+let test_concurrent_owned_writers_share_uncached_preparation () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let target = Filename.concat base "contended" in
+       let hook = blocking_hook base in
+       let preparation_count = Atomic.make 0 in
+       let waiter_first_validation = Atomic.make true in
+       let waiter_validated, resolve_waiter_validated = Eio.Promise.create () in
+       let allow_waiter_claim, resolve_allow_waiter_claim = Eio.Promise.create () in
+       let owner_result, resolve_owner_result = Eio.Promise.create () in
+       let waiter_result, resolve_waiter_result = Eio.Promise.create () in
+       let count_preparation () =
+         ignore (Atomic.fetch_and_add preparation_count 1 : int)
+       in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KDD.For_testing.ensure
+             ~after_validation:(fun () -> ())
+             ~before_claim:(fun () -> ())
+             ~before_prepare:count_preparation
+             ~before_directory_fsync:(block_once hook (fun () -> ()))
+             ~ownership_root:base
+             target
+         in
+         Eio.Promise.resolve resolve_owner_result result);
+       Eio.Promise.await hook.entered;
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KDD.For_testing.ensure
+             ~after_validation:(fun () ->
+               if Atomic.compare_and_set waiter_first_validation true false
+               then (
+                 Eio.Promise.resolve resolve_waiter_validated ();
+                 Eio.Promise.await allow_waiter_claim))
+             ~before_claim:(fun () -> ())
+             ~before_prepare:count_preparation
+             ~before_directory_fsync:(fun _ -> ())
+             ~ownership_root:base
+             target
+         in
+         Eio.Promise.resolve resolve_waiter_result result);
+       Eio.Promise.await waiter_validated;
+       check int
+         "cache miss does not retire the in-flight owner"
+         1
+         (Atomic.get preparation_count);
+       Eio.Promise.resolve resolve_allow_waiter_claim ();
+       release_blocking_hook hook;
+       require_directory_lease "owned preparation owner" (Eio.Promise.await owner_result);
+       require_directory_lease "owned preparation waiter" (Eio.Promise.await waiter_result);
+       check int
+         "both writers share one owned preparation"
+         1
+         (Atomic.get preparation_count))
+;;
+
+let test_owner_cancellation_wakes_waiter () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let contended = Filename.concat base "contended" in
+       let path = Filename.concat contended "request.json" in
+       let hook = blocking_hook base in
+       let owner_result, resolve_owner_result = Eio.Promise.create () in
+       let waiter_started, resolve_waiter_started = Eio.Promise.create () in
+       let waiter_result, resolve_waiter_result = Eio.Promise.create () in
+       let waiter_prepared = Atomic.make false in
+       Eio.Switch.run
+       @@ fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             match
+               KF.For_testing.save_json_durable_atomic
+                 ~before_stage:(fun _ -> ())
+                 ~before_directory_fsync:
+                   (block_once hook (fun () ->
+                      raise (Eio.Cancel.Cancelled (Failure "synthetic owner cancel"))))
+                 path
+                 (`Assoc [])
+             with
+             | Ok () -> fail "faulted owner unexpectedly succeeded"
+             | Error error -> Owner_error error
+           with
+           | Eio.Cancel.Cancelled _ -> Owner_cancelled
+         in
+         Eio.Promise.resolve resolve_owner_result outcome);
+       Eio.Promise.await hook.entered;
+       Eio.Fiber.fork ~sw (fun () ->
+         Eio.Promise.resolve resolve_waiter_started ();
+         let result =
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(function
+               | KF.Directory_prepare -> Atomic.set waiter_prepared true
+               | _ -> ())
+             path
+             (`Assoc [])
+         in
+         Eio.Promise.resolve resolve_waiter_result result);
+       Fun.protect
+         ~finally:(fun () -> release_blocking_hook hook)
+         (fun () ->
+            Eio.Promise.await waiter_started;
+            release_blocking_hook hook;
+            (match Eio.Promise.await owner_result with
+             | Owner_cancelled -> ()
+             | Owner_error error ->
+               failf
+                 "owner cancellation was converted to an error: %s"
+                 (KF.durable_write_error_to_string error));
+            require_durable_ok "waiter takeover" (Eio.Promise.await waiter_result);
+            check bool "cancelled owner permits waiter retry" true
+              (Atomic.get waiter_prepared)))
+;;
+
+(* An ordinary owner failure is shared with whoever is already parked on that
+   preparation; a claimant that arrives after the owner released the chain
+   legitimately becomes the next owner and prepares it itself. The two answers
+   differ, so the arrangement has to be pinned before the owner fails.
+
+   [before_claim] is the boundary that pins it: nothing runs between it and
+   either parking on the owner's preparation or becoming the owner, so once
+   the waiter has signalled from there, that fiber runs on through [claim] and
+   parks before this one is scheduled again. [claim] takes the preparation
+   mutex only to touch the table, and the owner holds it across nothing.
+
+   [after_validation] cannot do it. The root is anchored in a systhread
+   between the two boundaries, which parks the waiter and lets this fiber
+   release the owner; the owner then fails and drops its claim before the
+   waiter's claim arrives, so the waiter legitimately becomes the next owner.
+   That is what the case recorded while it sat in ci-known-failures.txt
+   reading as a behaviour claim, and signalling from [after_validation]
+   reproduced it (run 34489490942).
+
+   The waiter takes the directory boundary rather than the save path because
+   the claim ordering is only observable there; the save path's own
+   translation of a shared failure is what the owner assertion below
+   covers. *)
+let test_parked_waiter_shares_the_owners_ordinary_failure () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let contended = Filename.concat base "contended" in
+       let path = Filename.concat contended "request.json" in
+       let hook = blocking_hook base in
+       let owner_result, resolve_owner_result = Eio.Promise.create () in
+       let waiter_claiming, resolve_waiter_claiming = Eio.Promise.create () in
+       let waiter_result, resolve_waiter_result = Eio.Promise.create () in
+       let waiter_first_claim = Atomic.make true in
+       let waiter_prepared = Atomic.make false in
+       Eio.Switch.run
+       @@ fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(fun _ -> ())
+             ~before_directory_fsync:
+               (block_once hook (fun () -> raise Synthetic_owner_failure))
+             path
+             (`Assoc [])
+         in
+         Eio.Promise.resolve resolve_owner_result outcome);
+       Eio.Promise.await hook.entered;
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KDD.For_testing.ensure
+             ~after_validation:(fun () -> ())
+             ~before_claim:(fun () ->
+               if Atomic.compare_and_set waiter_first_claim true false
+               then Eio.Promise.resolve resolve_waiter_claiming ())
+             ~before_prepare:(fun () -> Atomic.set waiter_prepared true)
+             ~before_directory_fsync:(fun _ -> ())
+             contended
+         in
+         Eio.Promise.resolve resolve_waiter_result result);
+       Eio.Promise.await waiter_claiming;
+       Fun.protect
+         ~finally:(fun () -> release_blocking_hook hook)
+         (fun () ->
+            release_blocking_hook hook;
+            (match Eio.Promise.await owner_result with
+             | Error { KF.stage = KF.Directory_prepare; _ } -> ()
+             | Error error ->
+               failf
+                 "owner failed at unexpected stage: %s"
+                 (KF.durable_write_error_to_string error)
+             | Ok () -> fail "faulted owner unexpectedly succeeded");
+            match Eio.Promise.await waiter_result with
+            | Error _ ->
+              check
+                bool
+                "a parked waiter does not prepare the chain itself"
+                false
+                (Atomic.get waiter_prepared)
+            | Ok _ -> fail "a parked waiter took over a failed preparation"))
+;;
+
+
+let test_owner_context_cancellation_wakes_waiter () =
+  Eio_main.run
+  @@ fun _env ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "context-cancelled/request.json" in
+       let owner_context, resolve_owner_context = Eio.Promise.create () in
+       let owner_entered, resolve_owner_entered = Eio.Promise.create () in
+       let owner_result, resolve_owner_result = Eio.Promise.create () in
+       let waiter_started, resolve_waiter_started = Eio.Promise.create () in
+       let waiter_result, resolve_waiter_result = Eio.Promise.create () in
+       let waiter_prepared = Atomic.make false in
+       Eio.Switch.run
+       @@ fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             Eio.Cancel.sub (fun context ->
+               Eio.Promise.resolve resolve_owner_context context;
+               match
+                 KF.For_testing.save_json_durable_atomic
+                   ~before_stage:(function
+                     | KF.Directory_prepare ->
+                       Eio.Promise.resolve resolve_owner_entered ();
+                       Eio.Fiber.await_cancel ()
+                     | _ -> ())
+                   path
+                   (`Assoc [])
+               with
+               | Ok () -> fail "context-cancelled owner unexpectedly succeeded"
+               | Error error -> Owner_error error)
+           with
+           | Eio.Cancel.Cancelled _ -> Owner_cancelled
+         in
+         Eio.Promise.resolve resolve_owner_result outcome);
+       let context = Eio.Promise.await owner_context in
+       Eio.Promise.await owner_entered;
+       Eio.Fiber.fork ~sw (fun () ->
+         Eio.Promise.resolve resolve_waiter_started ();
+         let result =
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(function
+               | KF.Directory_prepare -> Atomic.set waiter_prepared true
+               | _ -> ())
+             path
+             (`Assoc [])
+         in
+         Eio.Promise.resolve resolve_waiter_result result);
+       Eio.Promise.await waiter_started;
+       Eio.Cancel.cancel context Synthetic_owner_failure;
+       (match Eio.Promise.await owner_result with
+        | Owner_cancelled -> ()
+        | Owner_error error ->
+          failf
+            "owner context cancellation was converted to an error: %s"
+            (KF.durable_write_error_to_string error));
+       require_durable_ok "context-cancelled waiter takeover"
+         (Eio.Promise.await waiter_result);
+       check bool "context-cancelled waiter owns retry" true
+         (Atomic.get waiter_prepared))
+;;
+
+let test_independent_suffix_progresses_after_common_prefix () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let common = Filename.concat base "common" in
+       let owner_path = Filename.concat common "left/deep/request.json" in
+       let sibling_path = Filename.concat common "right/request.json" in
+       let hook = blocking_hook common in
+       let owner_result, resolve_owner_result = Eio.Promise.create () in
+       let sibling_result, resolve_sibling_result = Eio.Promise.create () in
+       let sibling_claimed_before_release = Atomic.make false in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(fun _ -> ())
+             ~before_directory_fsync:(block_once hook (fun () -> ()))
+             owner_path
+             (`Assoc [])
+         in
+         Eio.Promise.resolve resolve_owner_result result);
+       Eio.Promise.await hook.entered;
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(function
+               | KF.Directory_prepare ->
+                 Atomic.set sibling_claimed_before_release true;
+                 release_blocking_hook hook
+               | _ -> ())
+             sibling_path
+             (`Assoc [])
+         in
+         Eio.Promise.resolve resolve_sibling_result result);
+       require_durable_ok "independent sibling" (Eio.Promise.await sibling_result);
+       require_durable_ok "blocked owner" (Eio.Promise.await owner_result);
+       check bool "sibling claims its suffix before owner release" true
+         (Atomic.get sibling_claimed_before_release))
+;;
+
+let test_invalidate_reaps_resolved_ticket () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let common = Filename.concat base "common" in
+       let owner_path = Filename.concat common "deep/leaf/request.json" in
+       let reclaimer_path = Filename.concat common "reclaimed.json" in
+       let hook = blocking_hook common in
+       let owner_result, resolve_owner_result = Eio.Promise.create () in
+       let reclaimer_result, resolve_reclaimer_result = Eio.Promise.create () in
+       let reclaimed_before_release = Atomic.make false in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(fun _ -> ())
+             ~before_directory_fsync:(block_once hook (fun () -> ()))
+             owner_path
+             (`Assoc [])
+         in
+         Eio.Promise.resolve resolve_owner_result result);
+       Eio.Promise.await hook.entered;
+       KF.invalidate_dir common;
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KF.For_testing.save_json_durable_atomic
+             ~before_stage:(function
+               | KF.Directory_prepare ->
+                 Atomic.set reclaimed_before_release true;
+                 release_blocking_hook hook
+               | _ -> ())
+             reclaimer_path
+             (`Assoc [])
+         in
+         Eio.Promise.resolve resolve_reclaimer_result result);
+       require_durable_ok "invalidated prefix reclaimer"
+         (Eio.Promise.await reclaimer_result);
+       require_durable_ok "original owner" (Eio.Promise.await owner_result);
+       check bool "resolved ticket is reaped before owner release" true
+         (Atomic.get reclaimed_before_release))
+;;
+
+let test_durable_commit_observer_cardinality () =
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let committed = ref 0 in
+       let committed_path = Filename.concat base "committed.bin" in
+       require_observed_commit
+         "observed durable write"
+         (KF.For_testing.save_bytes_durable_atomic_observed
+            ~on_durable_commit:(fun () -> incr committed)
+            ~before_stage:(fun _ -> ())
+            committed_path
+            "committed");
+       check int "successful write publishes once" 1 !committed;
+       let rejected = ref 0 in
+       let rejected_path = Filename.concat base "rejected.bin" in
+       (match
+          KF.For_testing.save_bytes_durable_atomic_observed
+            ~on_durable_commit:(fun () -> incr rejected)
+            ~before_stage:(function
+              | KF.Payload_fsync -> failwith "injected precommit failure"
+              | _ -> ())
+            rejected_path
+            "rejected"
+        with
+        | Error { renamed = false; stage = KF.Payload_fsync; _ } -> ()
+       | Error error ->
+          failf
+            "unexpected observed write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok KF.Committed -> fail "injected precommit failure unexpectedly committed"
+        | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+          failf
+            "injected precommit failure reached observer: %s"
+            (Printexc.to_string exn));
+       check int "failed write does not publish" 0 !rejected;
+       let post_rename = ref 0 in
+       let post_rename_path = Filename.concat base "post-rename.bin" in
+       (match
+          KF.For_testing.save_bytes_durable_atomic_observed
+            ~on_durable_commit:(fun () -> incr post_rename)
+            ~before_stage:(function
+              | KF.Parent_directory_fsync_after_rename ->
+                failwith "injected parent directory fsync failure"
+              | _ -> ())
+            post_rename_path
+            "renamed-not-durable"
+        with
+        | Error
+            { renamed = true
+            ; stage = KF.Parent_directory_fsync_after_rename
+            ; _
+            } ->
+          ()
+        | Error error ->
+          failf
+            "unexpected post-rename observed write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok KF.Committed ->
+          fail "injected parent directory fsync failure unexpectedly committed"
+        | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+          failf
+            "injected parent directory fsync failure reached observer: %s"
+            (Printexc.to_string exn));
+       check int "post-rename fsync failure does not publish" 0 !post_rename)
+;;
+
+(* [Printexc.raise_with_backtrace] extends the installed backtrace with the
+   frames between the raise site and its handler, so the observed backtrace is
+   the callback's capture plus whatever sits between. #34519 measured this on
+   OCaml 5.5.0 for the sibling suite -- even a single raise_with_backtrace
+   caught immediately adds frames -- which makes exact equality unreachable for
+   any implementation. What the durable write promises, and what is testable,
+   is that the captured frames survive as a prefix.
+
+   Written here rather than shared with test_fs_compat_capability_write: two
+   sites is where extraction starts to pay, and a shared module means wiring a
+   stanza into both of these large tests stanzas for ten lines. A third site
+   should extract it. *)
+let check_preserves_raw_backtrace ~label ~expected_backtrace observed_backtrace =
+  let expected = Printexc.raw_backtrace_to_string expected_backtrace in
+  let observed = Printexc.raw_backtrace_to_string observed_backtrace in
+  check
+    bool
+    (label ^ " preserves raw backtrace prefix")
+    true
+    (String.length observed >= String.length expected
+     && String.equal (String.sub observed 0 (String.length expected)) expected)
+;;
+
+let test_durable_commit_observer_failure_is_typed () =
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let assert_typed_failure ~label ~filename ~payload exception_ backtrace =
+         let path = Filename.concat base filename in
+         let observer_count = ref 0 in
+         (match
+            KF.For_testing.save_bytes_durable_atomic_observed
+              ~on_durable_commit:(fun () ->
+                incr observer_count;
+                Printexc.raise_with_backtrace exception_ backtrace)
+              ~before_stage:(fun _ -> ())
+              path
+              payload
+          with
+          | Ok (KF.Committed_but_observer_failed (observed_exn, observed_backtrace)) ->
+            check bool (label ^ " exception identity") true (observed_exn == exception_);
+            check_preserves_raw_backtrace
+              ~label
+              ~expected_backtrace:backtrace
+              observed_backtrace
+          | Ok KF.Committed -> failf "%s observer failure was lost" label
+          | Error error ->
+            failf
+              "%s durable write failed before observer: %s"
+              label
+              (KF.durable_write_error_to_string error));
+         check int (label ^ " observer cardinality") 1 !observer_count;
+         check
+           string
+           (label ^ " payload remains committed")
+           payload
+           (In_channel.with_open_bin path In_channel.input_all)
+       in
+       let ordinary_exception = Failure "injected durable observer failure" in
+       assert_typed_failure
+         ~label:"ordinary observer exception"
+         ~filename:"observer-failed.bin"
+         ~payload:"committed-before-observer-failure"
+         ordinary_exception
+         (Printexc.get_callstack 32);
+       (* A Cancelled raised by the observer is the one exception that does not
+          become a typed failure (#37372). It leaves unchanged, and the two
+          cases sit side by side so the distinction is readable: an ordinary
+          Failure is still absorbed and recorded, a cancellation is not.
+
+          Propagating is free here. [observe_durable_write_success] is reached
+          only on [Ok ()], after the blocking transaction and both directory
+          lease confirmations -- so the payload is already durable when the
+          observer runs, which this case asserts on the cancellation path too.
+          The success branch one line away already raises a pending
+          cancellation through [Eio_guard.check_if_ready]. *)
+       let assert_cancellation_propagates ~label ~filename ~payload reason backtrace =
+         let path = Filename.concat base filename in
+         let observer_count = ref 0 in
+         (match
+            KF.For_testing.save_bytes_durable_atomic_observed
+              ~on_durable_commit:(fun () ->
+                incr observer_count;
+                Printexc.raise_with_backtrace (Eio.Cancel.Cancelled reason) backtrace)
+              ~before_stage:(fun _ -> ())
+              path
+              payload
+          with
+          | Ok KF.Committed ->
+            failf "%s cancellation was lost and the commit reported clean" label
+          | Ok (KF.Committed_but_observer_failed _) ->
+            failf "%s cancellation was absorbed into a typed observer failure" label
+          | Error error ->
+            failf
+              "%s durable write failed before observer: %s"
+              label
+              (KF.durable_write_error_to_string error)
+          | exception Eio.Cancel.Cancelled observed_reason ->
+            check
+              bool
+              (label ^ " cancellation reason identity")
+              true
+              (observed_reason == reason);
+            check_preserves_raw_backtrace
+              ~label
+              ~expected_backtrace:backtrace
+              (Printexc.get_raw_backtrace ()));
+         check int (label ^ " observer cardinality") 1 !observer_count;
+         check
+           string
+           (label ^ " payload remains committed")
+           payload
+           (In_channel.with_open_bin path In_channel.input_all)
+       in
+       assert_cancellation_propagates
+         ~label:"observer cancellation"
+         ~filename:"observer-cancelled.bin"
+         ~payload:"committed-before-observer-cancellation"
+         Synthetic_observer_cancel
+         (Printexc.get_callstack 32))
+;;
+
+let test_durable_commit_observer_precedes_pending_cancellation () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "cancelled-after-commit.bin" in
+       let hook = blocking_hook base in
+       let context, resolve_context = Eio.Promise.create () in
+       let outcome, resolve_outcome = Eio.Promise.create () in
+       let publish_count = Atomic.make 0 in
+       let published_on_caller_thread = Atomic.make false in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let caller_domain_id = Domain.self () in
+         let outcome =
+           try
+             Eio.Cancel.sub (fun cancel_context ->
+               Eio.Promise.resolve resolve_context cancel_context;
+               match
+                 KF.For_testing.save_bytes_durable_atomic_observed
+                   ~on_durable_commit:(fun () ->
+                     Atomic.set
+                       published_on_caller_thread
+                       (Domain.self () = caller_domain_id);
+                     ignore (Atomic.fetch_and_add publish_count 1))
+                   ~before_stage:(function
+                     | KF.Parent_directory_fsync_after_rename ->
+                       block_once hook (fun () -> ()) base
+                     | _ -> ())
+                   path
+                   "committed-before-cancel"
+               with
+               | Ok KF.Committed -> `Returned
+               | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+                 failf
+                   "pending-cancellation observer failed: %s"
+                   (Printexc.to_string exn)
+               | Error error ->
+                 failf
+                   "pending-cancellation write failed: %s"
+                   (KF.durable_write_error_to_string error))
+           with
+           | Eio.Cancel.Cancelled _ -> `Cancelled
+         in
+         Eio.Promise.resolve resolve_outcome outcome);
+       let cancel_context = Eio.Promise.await context in
+       Eio.Promise.await hook.entered;
+       Eio.Cancel.cancel cancel_context Synthetic_observer_cancel;
+       release_blocking_hook hook;
+       (match Eio.Promise.await outcome with
+        | `Cancelled -> ()
+        | `Returned -> fail "pending cancellation was not propagated");
+       check int "publication precedes pending cancellation" 1
+         (Atomic.get publish_count);
+       check bool "observer ran on caller thread" true
+         (Atomic.get published_on_caller_thread))
+;;
+
+let test_durable_commit_observer_error_preserves_pending_cancellation () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "cancelled-with-error.bin" in
+       let hook = blocking_hook base in
+       let context, resolve_context = Eio.Promise.create () in
+       let outcome, resolve_outcome = Eio.Promise.create () in
+       let publish_count = Atomic.make 0 in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             Eio.Cancel.sub (fun cancel_context ->
+               Eio.Promise.resolve resolve_context cancel_context;
+               match
+                 KF.For_testing.save_bytes_durable_atomic_observed
+                   ~on_durable_commit:(fun () ->
+                     ignore (Atomic.fetch_and_add publish_count 1))
+                   ~before_stage:(function
+                     | KF.Payload_fsync ->
+                       block_once
+                         hook
+                         (fun () -> failwith "injected operation error")
+                         base
+                     | _ -> ())
+                   path
+                   "must-not-commit"
+               with
+               | Ok KF.Committed -> `Returned_ok
+               | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+                 failf
+                   "precommit error unexpectedly reached observer: %s"
+                   (Printexc.to_string exn)
+               | Error _ -> `Returned_error)
+           with
+           | Eio.Cancel.Cancelled _ -> `Cancelled
+         in
+         Eio.Promise.resolve resolve_outcome outcome);
+       let cancel_context = Eio.Promise.await context in
+       Eio.Promise.await hook.entered;
+       Eio.Cancel.cancel cancel_context Synthetic_observer_cancel;
+       release_blocking_hook hook;
+       (match Eio.Promise.await outcome with
+        | `Cancelled -> ()
+        | `Returned_ok -> fail "faulted write unexpectedly succeeded"
+        | `Returned_error ->
+          fail "pending cancellation was hidden by the operation error");
+       check int "cancelled error path does not publish" 0
+         (Atomic.get publish_count))
+;;
+
+let test_durable_commit_observer_waits_for_reanchor () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let dir = Filename.concat base "owned" in
+       let path = Filename.concat dir "request.bin" in
+       require_durable_ok
+         "seed directory lease"
+         (KF.save_bytes_durable_atomic path "seed");
+       let initial_fsync = blocking_hook dir in
+       let reanchor_fsync = blocking_hook dir in
+       let fsync_count = Atomic.make 0 in
+       let publish_count = Atomic.make 0 in
+       let outcome, resolve_outcome = Eio.Promise.create () in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release initial_fsync
+       @@ fun () ->
+       with_blocking_hook_release reanchor_fsync
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KF.For_testing.save_bytes_durable_atomic_observed
+             ~on_durable_commit:(fun () ->
+               ignore (Atomic.fetch_and_add publish_count 1))
+             ~before_stage:(function
+               | KF.Parent_directory_fsync_after_rename ->
+                 let occurrence = Atomic.fetch_and_add fsync_count 1 in
+                 if occurrence = 0
+                 then block_once initial_fsync (fun () -> ()) dir
+                 else if occurrence = 1
+                 then block_once reanchor_fsync (fun () -> ()) dir
+               | _ -> ())
+             path
+             "replacement"
+         in
+         Eio.Promise.resolve resolve_outcome result);
+       Eio.Promise.await initial_fsync.entered;
+       KF.invalidate_dir dir;
+       release_blocking_hook initial_fsync;
+       Eio.Promise.await reanchor_fsync.entered;
+       check int "observer remains absent before re-anchor fsync" 0
+         (Atomic.get publish_count);
+       release_blocking_hook reanchor_fsync;
+       require_observed_commit
+         "re-anchored observed write"
+         (Eio.Promise.await outcome);
+       check int "main write and re-anchor both fsync" 2
+         (Atomic.get fsync_count);
+       check int "observer publishes once after re-anchor" 1
+         (Atomic.get publish_count))
+;;
+
+let () =
+  run
+    "Keeper_fs directory durability"
+    [ ( "directory preparation"
+      , [ test_case
+            "non-directory ancestor does not poison preparation"
+            `Quick
+            test_non_directory_ancestor_does_not_poison_preparation
+        ; test_case
+            "symlink ancestor is rejected"
+            `Quick
+            test_symlink_ancestor_is_rejected
+        ; test_case
+            "cached owned chain rejects symlink retarget"
+            `Quick
+            test_cached_owned_chain_rejects_symlink_retarget
+        ; test_case
+            "cached owned chain reanchors replaced directory"
+            `Quick
+            test_cached_owned_chain_reanchors_replaced_directory
+        ; test_case
+            "cached owned prefix rejects uncached descendant escape"
+            `Quick
+            test_cached_owned_prefix_rejects_uncached_descendant_escape
+        ; test_case
+            "owned remove rejects symlink ancestor"
+            `Quick
+            test_owned_remove_rejects_symlink_ancestor
+        ; test_case
+            "owned temp directory trailing separator converges"
+            `Quick
+            test_owned_temp_directory_trailing_separator_converges
+        ; test_case
+            "retry re-anchors partial directory"
+            `Quick
+            test_retry_reanchors_partial_directory
+        ; test_case
+            "pressure observer preserves post-rename error"
+            `Quick
+            test_pressure_observer_failure_preserves_post_rename_error
+        ; test_case
+            "pressure observer preserves post-unlink error"
+            `Quick
+            test_pressure_observer_failure_preserves_post_unlink_error
+        ] )
+    ; ( "durable commit observer"
+      , [ test_case
+            "success publishes once and error never publishes"
+            `Quick
+            test_durable_commit_observer_cardinality
+        ; test_case
+            "observer exception and cancellation return committed evidence"
+            `Quick
+            test_durable_commit_observer_failure_is_typed
+        ; test_case
+            "publication precedes pending cancellation"
+            `Quick
+            test_durable_commit_observer_precedes_pending_cancellation
+        ; test_case
+            "pending cancellation wins over operation error"
+            `Quick
+            test_durable_commit_observer_error_preserves_pending_cancellation
+        ; test_case
+            "publication waits for directory lease re-anchor"
+            `Quick
+            test_durable_commit_observer_waits_for_reanchor
+        ] )
+    ; ( "coordination"
+      , [ test_case
+            "system-thread waiter shares preparation success"
+            `Quick
+            (test_system_thread_waiter Preparation_succeeds)
+        ; test_case
+            "system-thread waiter shares preparation failure"
+            `Quick
+            (test_system_thread_waiter Preparation_fails)
+        ; test_case
+            "invalidation wakes a system-thread waiter"
+            `Quick
+            (test_system_thread_waiter Preparation_invalidated)
+        ; test_case
+            "concurrent owned writers share uncached preparation"
+            `Quick
+            test_concurrent_owned_writers_share_uncached_preparation
+        ; test_case
+            "a parked waiter shares the owner's ordinary failure"
+            `Quick
+            test_parked_waiter_shares_the_owners_ordinary_failure
+        ; test_case
+            "owner cancellation wakes waiter takeover"
+            `Quick
+            test_owner_cancellation_wakes_waiter
+        ; test_case
+            "owner context cancellation wakes waiter takeover"
+            `Quick
+            test_owner_context_cancellation_wakes_waiter
+        ; test_case
+            "independent suffix progresses after common prefix"
+            `Quick
+            test_independent_suffix_progresses_after_common_prefix
+        ; test_case
+            "invalidate reaps resolved ticket"
+            `Quick
+            test_invalidate_reaps_resolved_ticket
+        ] )
+    ]
+;;

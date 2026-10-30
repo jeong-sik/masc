@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual component and decoder, synthetic HTTP; no native/backend/worker execution",
+  "assertions": [
+    "declared order and label",
+    "number unit including zero",
+    "boolean false remains false",
+    "multiline HTML escaped",
+    "JSON preserved",
+    "absent and wrong type unavailable",
+    "other instance cannot supply labels",
+    "original fields/evidence accessible",
+    "selected detail renders same contract",
+    "display starts no writes"
+  ],
+  "errors": [],
+  "unhandled": [],
+  "writes": []
+}

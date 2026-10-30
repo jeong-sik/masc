@@ -1,0 +1,97 @@
+{
+  "verdict": "FAIL",
+  "head": "e9f72f1c985761e032e0fef878ce1dc6d0111ad2",
+  "base": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "diff_sha256": "dd8fd2a3790db096b0afc0c3bf6b0b6ced2301110b17477726c4ac14dadfbd55",
+  "reviewer": "codex-eval-metrics-independent",
+  "scope": "Entire exact author commit source/config/tests/evidence delta; no GitHub approval, integration, CI status or model-success claim.",
+  "findings": [
+    {
+      "priority": "P2",
+      "title": "Official Start pins a turn-specific completion event in the session System",
+      "trigger": "An official-client session starts while current Completion_authority contains approval or rejection, then resumes a later owner turn without that event. This can occur on a fresh or failed-over official session consuming a durable outcome.",
+      "source": [
+        {
+          "file": "lib/keeper/keeper_run_prompt.ml",
+          "line": 61,
+          "fact": "Exact authority layer becomes a System observation."
+        },
+        {
+          "file": "lib/keeper/keeper_context_assembly.ml",
+          "line": 97,
+          "fact": "Observation text is appended to the effective System without a native/official Start distinction."
+        },
+        {
+          "file": "lib/keeper/keeper_claude_code_runtime.ml",
+          "line": 892,
+          "fact": "prepared.system_prompt enters the actual Claude System config."
+        },
+        {
+          "file": "lib/runtime/runtime_claude_code.ml",
+          "line": 2765,
+          "fact": "Adapter explicitly pins first-launch System with --system-prompt-snapshot on."
+        },
+        {
+          "file": "lib/keeper/keeper_codex_runtime.ml",
+          "line": 1007,
+          "fact": "prepared.system_prompt enters developerInstructions; source1022 documents Resume updates applying only after compaction."
+        },
+        {
+          "file": "lib/keeper/keeper_official_client_context_projection.ml",
+          "line": 304,
+          "fact": "Later absent authority creates no carried observation or clearing input."
+        }
+      ],
+      "observed_source_probe": {
+        "start_system": "BASE\n\nGOAL 현재 criterion\n\nApproved task-first vrf-first operator-첫번째",
+        "next_local_system": "BASE",
+        "next_resume_prompt": "NEXT OWNER"
+      },
+      "impact": "The original turn event can remain in vendor standing System after its queue acknowledgement and later turns, while local current-turn assembly no longer records it. Sent_every_resume correctly sends events that exist; it cannot remove an event already pinned in the initial System. This violates the requested turn-local retention boundary and current input provenance.",
+      "bounded_repair": "Keep ordinary HTTP System observations and Goal Start/held semantics. Exclude Completion Authority from official standing System at Start and deliver its current event as a separately issued User observation with exact source/target proof. Update Start-to-absent and Start-to-changed-event fixtures. A known-empty User notice alone cannot remove the original standing System event. Do not claim a physical System/Extra carrier for text actually sent through another carrier.",
+      "evidence_scope": "Actual pure assembler/projection output plus exact adapter retention policy source. No Host/native vendor process or model execution was performed by this reviewer."
+    }
+  ],
+  "checked_successes": [
+    "Exact renderer partition/text equality and unique Dynamic ID prevent unproven promotion.",
+    "Private issued observation list has only Goal/Completion Authority variants and rejects duplicate kinds.",
+    "Production before-hook uses per-turn accumulator; SDK starts fresh default params each provider round, so suffixes do not accumulate.",
+    "Task/Gate/Lane/clock retain first-round-only suppression; later System observations reuse only previous current-turn assembly.",
+    "No-Goal/no-authority combinations, None versus Some empty, override preservation, immutable post-tool snapshots, malformed UTF8 normalization, byte offsets and hashes pass actual-source probes.",
+    "Official current-present Resume authority retransmission and Goal held omission use separate exact System spans, including combined Unicode data.",
+    "Logical block accounting, closed block decoders, forecast classification and TUI/dashboard identities were traced; no additional P0-P2 found there."
+  ],
+  "independent_checks": {
+    "existing_request_probe": {
+      "before": 70,
+      "after": 74,
+      "result": "PASS"
+    },
+    "existing_official_probe": {
+      "checks": 24,
+      "result": "PASS"
+    },
+    "additional_request_probe": {
+      "checks": 12,
+      "result": "PASS"
+    },
+    "additional_official_probe": {
+      "checks": 4,
+      "result": "PASS",
+      "diagnostic": "Start event then absent event emits no clearing input"
+    },
+    "parse_files": 17,
+    "parse_result": "PASS",
+    "diff_check": "PASS",
+    "author_generated_probe_receipts_equal_rerun": true,
+    "author_worktree_unchanged": true
+  },
+  "not_executed": [
+    "Full native typing/linking and real production before-hook fixture",
+    "Native HTTP receiver and Host integration fixtures",
+    "Vendor SDK/client sessions and remote model effects",
+    "Dashboard127 suite (author receipt inspected; not rerun independently)",
+    "Any current CI status or GitHub review operation"
+  ],
+  "fixture_difference": "New native HTTP cases exercise the real event projection/world renderer/assembler/provider bytes but install a local custom before-hook and synthetic read tool; they do not call Keeper_run_tools_hooks. Production hook was independently source-traced. Supplied event queue equality is not persisted queue acknowledgement proof."
+}

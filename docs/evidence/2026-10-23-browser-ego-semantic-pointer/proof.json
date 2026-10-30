@@ -1,0 +1,167 @@
+{
+  "spaceId": 66,
+  "finished": false,
+  "url": "http://localhost:63664/",
+  "frameOrigin": "http://127.0.0.1:63663",
+  "observations": [
+    {
+      "action": "hover",
+      "target": "@9",
+      "result": {
+        "urlBefore": "http://localhost:63664/",
+        "receipt": {},
+        "error": null
+      },
+      "observed": {
+        "inner": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          }
+        ],
+        "outer": []
+      }
+    },
+    {
+      "action": "double_click",
+      "target": "@9",
+      "result": {
+        "urlBefore": "http://localhost:63664/",
+        "receipt": {},
+        "error": null
+      },
+      "observed": {
+        "inner": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          },
+          {
+            "type": "dblclick",
+            "trusted": true
+          }
+        ],
+        "outer": []
+      }
+    },
+    {
+      "action": "hover",
+      "target": "loc=role:button[name=\"Frame action\"]",
+      "result": {
+        "urlBefore": "http://localhost:63664/",
+        "receipt": {},
+        "error": null
+      },
+      "observed": {
+        "inner": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          },
+          {
+            "type": "dblclick",
+            "trusted": true
+          }
+        ],
+        "outer": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          }
+        ]
+      }
+    },
+    {
+      "action": "double_click",
+      "target": "text=\"Frame action\"",
+      "result": {
+        "urlBefore": "http://localhost:63664/",
+        "receipt": {},
+        "error": null
+      },
+      "observed": {
+        "inner": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          },
+          {
+            "type": "dblclick",
+            "trusted": true
+          }
+        ],
+        "outer": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          },
+          {
+            "type": "dblclick",
+            "trusted": true
+          }
+        ]
+      }
+    },
+    {
+      "action": "wrong_url",
+      "result": {
+        "before": true,
+        "error": "the tab is at http://localhost:63664/, not at expectedUrl; read it again"
+      },
+      "observed": {
+        "inner": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          },
+          {
+            "type": "dblclick",
+            "trusted": true
+          }
+        ],
+        "outer": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          },
+          {
+            "type": "dblclick",
+            "trusted": true
+          }
+        ]
+      }
+    },
+    {
+      "action": "removed_frame_ref",
+      "target": "@9",
+      "result": {
+        "before": true,
+        "error": "Stale ref: @9; take a new snapshot"
+      },
+      "observed": {
+        "inner": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          },
+          {
+            "type": "dblclick",
+            "trusted": true
+          }
+        ],
+        "outer": [
+          {
+            "type": "mouseenter",
+            "trusted": true
+          },
+          {
+            "type": "dblclick",
+            "trusted": true
+          }
+        ]
+      }
+    }
+  ],
+  "script_sha256": "17f56114dac1e162c554a12691722513c19e0fe7fff2164daec5e6db82798bdd",
+  "scope": "Production ego nativeTargetInput boundary; no OCaml typing, host/Add-on integration or autonomous Keeper benchmark."
+}

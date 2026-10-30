@@ -1,0 +1,6 @@
+[2026-09-01 05:01:27] [INFO] [MCP] Tag registry initialized: 126 tools registered
+[2026-09-01 05:01:27] [INFO] [Misc] model_catalog: deployment overlay /Users/dancer/me/.masc/config/agent-core-models-overlay.toml installed onto embedded catalog
+probing 1 runtime(s) x 1 projected tool(s) x 1 attempt(s)
+[2026-09-01 05:01:27] [INFO] [runtime_agent] Codex app-server subscription turn starting thread=new model=gpt-5.4-mini
+[2026-09-01 05:01:38] [INFO] [runtime_agent] Codex app-server subscription turn completed (thread_id=01a05969-98f0-7230-b653-ebef60c630c3 turn_id=01a05969-9a18-7f01-b71f-62b0d9cf807c model=gpt-5.4-mini)
+  codex_subscription.gpt-5.4-mini                keeper_time_now        #1  invoked keeper_time_now in 11.2s

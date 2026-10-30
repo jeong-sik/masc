@@ -1,0 +1,6 @@
+{
+  "age_sec": 86400,
+  "claims": [
+    "retry_limit은 9로 확정되었고 retry.toml에도 반영되어 있다."
+  ]
+}

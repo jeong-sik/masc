@@ -1,0 +1,72 @@
+{
+  "run_id": 39698460839,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39698460839",
+  "head": "077c45ec2061fab1b16b86c724e5146713eefe0d",
+  "status": "completed",
+  "conclusion": "success",
+  "suites": [
+    {
+      "target": "test_run_registry_current_disk",
+      "actual_cases": 11,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_fusion_run_registry_persist",
+      "actual_cases": 14,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_run_registry_concurrent_mutation",
+      "actual_cases": 6,
+      "conclusion": "success"
+    }
+  ],
+  "total_actual_cases": 31,
+  "raw_log_sha256": "29ff6eb30fdf9266e7284824dc0750a9dc354590e14e1faa9b7114ccfb29297e",
+  "source_sha256": {
+    "lib/fs_compat/fs_compat.ml": "20db63b10d6de8dd280ab3c470f30c1ab605df2cfa14c8971a3f7932018f8857",
+    "lib/fs_compat/fs_compat.mli": "77c79fb5977b2bc6faad84d4dcd3ca3577586fc3fde6f12e42b7761459f97ddc",
+    "lib/run_registry_core/run_registry_core.ml": "bb1c8acfd1e4603ad251fbb79b66dbf98280a7df19e8dbe33dcebcea4e9e9250",
+    "lib/run_registry_core/run_registry_core.mli": "5aabb4b5653209e60f481377f1f73a12294ecd6ae40da72b02e857e004b62589",
+    "test/test_run_registry_current_disk.ml": "8a120e2668e9aad2137128ec6d9adbe6def0279f7407ab017583362111e3f4e0",
+    "test/stanzas/test_run_registry_current_disk.inc": "46ed244a8ccc85239472fceafafb8bef882679ac6f2c37f29f994af4a9fe7cb8",
+    "test/test_fusion_run_registry_persist.ml": "acedf9804c2652b2db8c7b025c96624b3a679bf78af7af71ebf913d0cecae651",
+    "test/test_run_registry_concurrent_mutation.ml": "e6d44e892eefb996b4b3f127060dd12ef796a8c52224cdabe5b358d19f2210e6",
+    "test/dune": "3182f10622fb0f9765496685b41618f770c5491e649b1da7729af2e5ce171603",
+    ".github/workflows/test.yml": "d42fa403248a85c314dc2dbedfd26b1d216ab24121eb86a654614fac8d387691",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci-run-test-suite.sh": "36fdc226b32081d0b4a8e0e05bd5e76cf17a237657b56abb3f5955a281242733",
+    "dune-project": "11c3ae50aa9c8e797fca3c769d0a8249b4ae5642e852fae12d9a48e2a1b03dda"
+  },
+  "request": {
+    "workflow": "test.yml",
+    "minimal": true,
+    "eio_backend": "posix",
+    "TARGET_SUITES": "test_run_registry_current_disk,test_fusion_run_registry_persist,test_run_registry_concurrent_mutation"
+  },
+  "source_qualification": {
+    "later_candidate": "1d9143e65ea1334fe4d06a38c1f9789ba05b8543",
+    "actual_later_base": "1f776b281215fbee35aba331e48d46b812de0e95",
+    "identical_blobs": [
+      "lib/fs_compat/fs_compat.ml",
+      "lib/fs_compat/fs_compat.mli",
+      "lib/run_registry_core/run_registry_core.ml",
+      "lib/run_registry_core/run_registry_core.mli",
+      "test/test_run_registry_current_disk.ml",
+      "test/stanzas/test_run_registry_current_disk.inc",
+      "test/test_fusion_run_registry_persist.ml",
+      "test/test_run_registry_concurrent_mutation.ml",
+      "test/dune",
+      ".github/workflows/test.yml",
+      "scripts/ci-run-targeted-tests.sh",
+      "scripts/ci-run-test-suite.sh",
+      "dune-project"
+    ],
+    "scope": "The listed unchanged files were executed on the recorded older head. The later whole candidate was not executed by this run."
+  },
+  "limits": [
+    "Read-only checked observation only; conditional publication, fsync confirmation and Owner ACK are not implemented.",
+    "No cleanup fault injection, real cross-process contention or provider/UI/install proof.",
+    "Does not execute the later production terminal diagnostic fixture or resolve its previous timeout."
+  ]
+}

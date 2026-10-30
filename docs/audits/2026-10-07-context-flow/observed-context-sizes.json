@@ -1,0 +1,156 @@
+{
+  "observed_at": "2026-10-07T05:17:52.175523+00:00",
+  "scope": "retained UTC 2026-10-07 rows, not a controlled provider comparison",
+  "cost_rows": {
+    "('runtime', 'per_request', 'auto_trajectory')": {
+      "rows": 3850,
+      "input_tokens": 449851313,
+      "output_tokens": 2771315,
+      "cache_read_tokens": 431922974,
+      "non_cached_input_tokens": 17928339,
+      "usage_missing": 0,
+      "usage_anomaly": 0
+    },
+    "('runtime', 'turn_total', 'auto_trajectory')": {
+      "rows": 406,
+      "input_tokens": 598182846,
+      "output_tokens": 826261,
+      "cache_read_tokens": 586972696,
+      "non_cached_input_tokens": 11210150,
+      "usage_missing": 0,
+      "usage_anomaly": 0
+    },
+    "('runtime', None, 'auto_trajectory')": {
+      "rows": 4474,
+      "input_tokens": 1161039404,
+      "output_tokens": 3850798,
+      "cache_read_tokens": 1128843230,
+      "non_cached_input_tokens": 32196174,
+      "usage_missing": 8,
+      "usage_anomaly": 0
+    },
+    "('runtime', 'conversation_cumulative', 'auto_trajectory')": {
+      "rows": 19,
+      "input_tokens": 184246789,
+      "output_tokens": 480292,
+      "cache_read_tokens": 175515809,
+      "non_cached_input_tokens": 8730980,
+      "usage_missing": 3,
+      "usage_anomaly": 0
+    },
+    "('runtime', 'unavailable', 'auto_trajectory')": {
+      "rows": 8,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "non_cached_input_tokens": 0,
+      "usage_missing": 8,
+      "usage_anomaly": 0
+    }
+  },
+  "cost_parse_errors": 0,
+  "wire_sizes": {
+    "tool_count": {
+      "n": 4515,
+      "min": 47,
+      "p50": 52,
+      "p90": 155,
+      "max": 245
+    },
+    "tool_schema_bytes": {
+      "n": 4515,
+      "min": 67659,
+      "p50": 75327,
+      "p90": 155572,
+      "max": 247616
+    },
+    "history_message_count": {
+      "n": 4515,
+      "min": 1,
+      "p50": 12812,
+      "p90": 32440,
+      "max": 47089
+    },
+    "system_prompt_bytes": {
+      "n": 4515,
+      "min": 18066,
+      "p50": 21199,
+      "p90": 28605,
+      "max": 32107
+    },
+    "user_message_bytes": {
+      "n": 4515,
+      "min": 10,
+      "p50": 141,
+      "p90": 141,
+      "max": 1652
+    },
+    "extra_system_context_bytes": {
+      "n": 1442,
+      "min": 10851,
+      "p50": 25894.0,
+      "p90": 40459,
+      "max": 51976
+    }
+  },
+  "wire_kinds": {
+    "request": 4515,
+    "response": 469
+  },
+  "wire_parse_errors": 0,
+  "old_digest": {
+    "claims_total": 1146,
+    "claims_rendered": 34,
+    "rendered_bytes": 8061,
+    "selection": "claim_id order; unrelated to current task"
+  },
+  "workspace_ledger_file_bytes": 1376428,
+  "interpretation": "request rows record canonical history before projection and offered tools, not provider-received history or official-client deferred schemas; usage_scope groups must not be summed as disjoint spend",
+  "source_sha": "b99c9d77b503fe53c1635712fae24d5e744bb180",
+  "observed_binary_sha": "831bbeaa0d91014554f570318f6dba91b3c7c223",
+  "collection_note": "Costs and digest were read at observed_at; subsequent wire/projection aggregates were read before 2026-10-07T05:26Z. These are separate reads of retained growing logs, not an atomic fleet snapshot.",
+  "glm_example": {
+    "runtime": "glm-coding.glm-5.3-flash",
+    "consecutive_turns": [
+      1196,
+      1197,
+      1198,
+      1199,
+      1200
+    ],
+    "request_rows": [
+      18,
+      22,
+      25,
+      7,
+      13
+    ],
+    "projected_message_count_min_max": [
+      [
+        223,
+        257
+      ],
+      [
+        37,
+        79
+      ],
+      [
+        45,
+        93
+      ],
+      [
+        51,
+        63
+      ],
+      [
+        2,
+        26
+      ]
+    ],
+    "limitation": "Canonical history counts and checkpoint identities were not retained for these turns; projected counts alone do not establish continued canonical accumulation or exclude a history reset."
+  },
+  "withdrawn_measurements": {
+    "projection_change_counts": "Withdrawn: total and kind counts were inconsistent; exact per-read boundaries were not preserved. Regenerate from one retained snapshot before using projection frequencies.",
+    "keeper_tool_ledger_size": "Withdrawn: row count, body-byte calculation and collection scope were not preserved."
+  }
+}

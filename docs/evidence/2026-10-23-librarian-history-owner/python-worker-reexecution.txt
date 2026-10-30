@@ -1,0 +1,12 @@
+test_both_full_requests_and_terminals_survive_real_restarts (test_keeper_librarian.LibrarianWorker.test_both_full_requests_and_terminals_survive_real_restarts) ... ok
+test_corrupted_original_is_not_absent_or_relisted (test_keeper_librarian.LibrarianWorker.test_corrupted_original_is_not_absent_or_relisted) ... ok
+test_invalid_or_unadmitted_requests_create_no_pending_intent (test_keeper_librarian.LibrarianWorker.test_invalid_or_unadmitted_requests_create_no_pending_intent) ... ok
+test_manifest_and_discovery_expose_two_purpose_specific_tools (test_keeper_librarian.LibrarianWorker.test_manifest_and_discovery_expose_two_purpose_specific_tools) ... ok
+test_request_identity_cannot_change_purpose_or_original_input (test_keeper_librarian.LibrarianWorker.test_request_identity_cannot_change_purpose_or_original_input) ... ok
+test_wrong_tool_cannot_submit_or_read_other_purpose_before_or_after_restart (test_keeper_librarian.LibrarianWorker.test_wrong_tool_cannot_submit_or_read_other_purpose_before_or_after_restart) ... ok
+Librarian worker subprocesses: 17, total=0.861s, min=0.047s, max=0.065s
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.874s
+
+OK

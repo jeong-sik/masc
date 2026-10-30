@@ -1,0 +1,246 @@
+(** Keeper_registry_types — pure type definitions extracted from
+    Keeper_registry (3041 LoC godfile).
+
+    See keeper_registry_types.mli for rationale and contract. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+module StringMap = Set_util.StringMap
+
+(* Failure reason types and kill-class re-exports extracted to
+   [Keeper_registry_types_failure] (godfile decomp). *)
+include Keeper_registry_types_failure
+
+exception Operator_interrupt = Keeper_operator_interrupt.Operator_interrupt
+
+(* One string for every [Operator_interrupt] terminal (ledger rows, queued
+   outcomes, tool responses) so the incident class stays greppable as one
+   thing. The classification itself is typed on the exception; this is only
+   the human-facing detail, and the typed request failure renders it
+   (RFC-0454 D2) so the chat row and this path cannot word it apart. *)
+let operator_interrupt_detail =
+  Keeper_request_failure.summary
+    { Keeper_request_failure.cause = Keeper_request_failure.Operator_cancelled }
+;;
+
+(* Recursive classifier for every shape Eio can deliver the interrupt in:
+   bare at the [Switch.run] boundary, [Cancelled]-wrapped inside the switch,
+   [Fun.Finally_raised] when a cancellable finalizer trips a cancellation
+   point, and [Eio.Exn.Multiple] when the switch combines the interrupt with
+   what cancelled fibers raised. A [Multiple] counts only when every member
+   reduces to the interrupt — a real co-occurring error must keep its crash
+   classification. Mirrors [Shutdown.is_benign_termination] (#28868 review:
+   constructor-only arms missed the combined shapes). *)
+let is_operator_interrupt = Keeper_operator_interrupt.is_operator_interrupt
+;;
+
+(* Turn_phase FSM types, witnesses, transitions, and resolver extracted to
+   [Keeper_registry_types_turn_phase] (500-line decomp). *)
+include Keeper_registry_types_turn_phase
+(* Decision_stage FSM types, witnesses, and transitions extracted to
+   [Keeper_registry_types_decision] (500-line decomp). *)
+include Keeper_registry_types_decision
+
+type turn_attempt_state =
+  { turn_id : int
+  ; attempts : int
+  ; first_started_at : float
+  }
+
+(* #16 (38-bug campaign PR-5): see .mli for rationale. *)
+type wake_reason =
+  | Proactive_tick
+  | Woken of Keeper_event_queue.stimulus_payload list
+  | Chat_request
+
+let wake_reason_label = function
+  | Proactive_tick -> "proactive_tick"
+  | Woken _ -> "woken"
+  | Chat_request -> "chat_request"
+;;
+
+type turn_measurement =
+  { tm_captured_at : float
+  ; tm_context_actions : Keeper_state_machine.context_actions
+  }
+
+type done_resolution = [ `Stopped | `Crashed of string ]
+
+type lifecycle_transaction_purpose =
+  | Paused_work_disposition
+  | Keepalive_launch
+  | Configuration_removal
+
+type lifecycle_reservation_snapshot =
+  { owner_id : string
+  ; purpose : lifecycle_transaction_purpose
+  }
+
+type registry_entry =
+  { base_path : string
+  ; name : string
+  ; meta : keeper_meta
+  ; phase : Keeper_state_machine.phase
+    (** Raw Keeper lifecycle phase. *)
+  ; conditions : Keeper_state_machine.conditions
+    (** Observable conditions that derive [phase]. *)
+  ; fiber_stop : bool Atomic.t
+  ; fiber_wakeup : bool Atomic.t
+  ; cadence_sleeping : bool Atomic.t
+    (** Ephemeral sleep handshake for runtime cadence decreases. [true] only
+        while the heartbeat fiber is inside its inter-cycle sleep. A cadence
+        wake consumes it with CAS, so active pre-turn work cannot queue an
+        extra paid cycle. *)
+  ; event_queue : Keeper_event_queue.t Atomic.t
+  ; started_at : float
+  ; grpc_close : (unit -> unit) option Atomic.t
+  ; egress_proxy_port : int option Atomic.t
+  ; lane : Keeper_lane.t
+  ; done_p : done_resolution Eio.Promise.t
+  ; done_r : done_resolution Eio.Promise.u
+  ; restart_count : int
+  ; crash_log : (float * string) list
+  ; last_error : string option
+  ; last_failure_reason : failure_reason option
+  ; last_failure_at : float option
+  ; turn_consecutive_failures : int
+  ; turn_attempt_state : turn_attempt_state option Atomic.t
+  ; current_turn_switch : Eio.Switch.t option Atomic.t
+  ; board_cursor_ts : float
+  ; board_cursor_post_id : string option
+  ; tool_usage : tool_call_entry StringMap.t
+  ; transition_seq : int
+  ; waiting_for_inference : bool Atomic.t
+    (** Ephemeral flag: true when keeper is blocked in admission queue.
+          Set/cleared around the AGENT_CORE inference boundary.
+          Does not affect state machine phase derivation. *)
+  ; last_event_bus_correlation : string option
+  ; pending_turn_measurement : turn_measurement option
+  ; current_turn_observation : turn_observation option
+  ; last_completed_turn : completed_turn_observation option
+  ; last_skip_observation : (float * string list) option
+  }
+
+and turn_observation =
+  { observation_token : Keeper_turn_observation_token.t
+  ; turn_id : int
+  ; started_at : float
+  ; last_progress_at : float
+  ; last_progress_kind : string option
+  ; active_tool_count : int
+  ; turn_phase : packed_turn_phase
+  ; decision_stage : packed_decision_stage
+  ; measurement : turn_measurement option
+  ; measurement_bind_count : int
+  ; selected_runtime : selected_runtime option
+  ; wake : wake_reason
+  }
+
+and selected_runtime =
+  { sr_runtime_id : string
+  ; sr_model : string option
+  }
+
+and completed_turn_observation =
+  { ct_turn_id : int
+  ; ct_started_at : float
+  ; ct_ended_at : float
+  ; ct_decision_stage : packed_decision_stage
+  ; ct_selected_runtime : selected_runtime option
+  ; ct_wake : wake_reason
+  }
+
+type done_resolve_result =
+  | Done_resolved of { source : string }
+  | Done_already_resolved of
+      { source : string
+      ; previous : done_resolution
+      }
+
+type registry_entry_health =
+  | Healthy
+  | Lifecycle_transaction_reserved of lifecycle_reservation_snapshot
+  | Meta_validation_failed of { reason : string }
+  | Required_field_missing of { field : string }
+  | Base_path_mismatch of { expected : string; actual : string }
+  | Name_mismatch of { expected : string; actual : string }
+
+type registry_entry_validation_error = registry_entry_health
+
+let resolve_done entry ~source (value : done_resolution) =
+  match Eio.Promise.peek entry.done_p with
+  | Some previous -> Done_already_resolved { source; previous }
+  | None ->
+    (try
+       Eio.Promise.resolve entry.done_r value;
+       Done_resolved { source }
+     with
+     | Invalid_argument _ ->
+       let previous =
+         match Eio.Promise.peek entry.done_p with
+         | Some previous -> previous
+         | None -> value
+       in
+       Done_already_resolved { source; previous })
+;;
+
+let lane_has_exited entry = Option.is_some (Keeper_lane.peek_exit entry.lane)
+
+let canonical_base_path_exn raw =
+  match Config_dir_resolver.canonical_base_path raw with
+  | Ok canonical -> canonical
+  | Error error ->
+    invalid_arg
+      (Printf.sprintf
+         "invalid keeper registry base path: %s"
+         (Config_dir_resolver.canonical_base_path_error_to_string error))
+;;
+
+let registry_key ~base_path name =
+  if String.contains name '\x1f'
+  then invalid_arg (Printf.sprintf "keeper name contains unit separator: %s" name);
+  let base_path = canonical_base_path_exn base_path in
+  base_path ^ "\x1f" ^ name
+;;
+
+let registry_key_parts key =
+  match String.rindex_opt key '\x1f' with
+  | None -> Error (Printf.sprintf "malformed registry key: %S" key)
+  | Some idx ->
+    let key_len = String.length key in
+    let base_path = String.sub key 0 idx in
+    let name = String.sub key (idx + 1) (key_len - idx - 1) in
+    Ok (base_path, name)
+;;
+
+let completed_turn_outcome_of_observation (obs : turn_observation)
+  : Keeper_transition_audit.completed_turn_outcome
+  =
+  (* RFC-0206: the runtime selection FSM was removed; turn substantiveness is
+     now read off the surviving [turn_phase] projection. Terminal
+     [Turn_finalizing] (the phase the deleted [turn_phase_of_runtime_state]
+     mapped [Runtime_done] onto) = substantive; every other phase = failed.
+     Exhaustive match (no wildcard) so a new turn_phase variant fails the
+     build rather than silently degrading to Turn_failed. *)
+  match obs.turn_phase with
+  | Packed Turn_finalizing -> Keeper_transition_audit.Turn_substantive
+  | Packed Turn_idle
+  | Packed Turn_prompting
+  | Packed Turn_routing
+  | Packed Turn_executing
+  | Packed Turn_exhausted -> Keeper_transition_audit.Turn_failed
+;;
+
+let pending_measurement_after_event now entry event =
+  match event with
+  | Keeper_state_machine.Context_measured { context_actions; _ } ->
+    Some { tm_captured_at = now; tm_context_actions = context_actions }
+  | Keeper_state_machine.Heartbeat_ok | Keeper_state_machine.Turn_succeeded
+  | Keeper_state_machine.Operator_pause | Keeper_state_machine.Operator_resume
+  | Keeper_state_machine.Stop_requested | Keeper_state_machine.Drain_complete
+  | Keeper_state_machine.Fiber_started | Keeper_state_machine.Heartbeat_failed _
+  | Keeper_state_machine.Turn_failed _ | Keeper_state_machine.Fiber_terminated _
+  | Keeper_state_machine.Supervisor_restart_attempt _
+  | Keeper_state_machine.Operator_clear_requested _ -> entry.pending_turn_measurement
+;;

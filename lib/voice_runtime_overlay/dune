@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name voice_runtime_overlay)
+ (public_name masc.voice_runtime_overlay)
+ (wrapped false)
+ (modules voice_runtime_overlay)
+ (libraries uri yojson masc.config masc.voice_config))

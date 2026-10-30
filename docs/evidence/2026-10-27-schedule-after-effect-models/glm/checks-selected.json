@@ -1,0 +1,20 @@
+{
+  "is_derivative": true,
+  "checks": [
+    {
+      "name": "owned workspace and pinned native source are actually served",
+      "passed": true
+    },
+    {
+      "name": "owned workspace gate accepts setting",
+      "passed": true
+    },
+    {
+      "name": "owned Keeper tool approval accepts setting",
+      "passed": true
+    }
+  ],
+  "passed": 3,
+  "failed": 0,
+  "scope": "Original observer checks only; neither semantic approval nor all-effects accounting."
+}

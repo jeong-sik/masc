@@ -1,0 +1,56 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+                                                                                                        │[Recent] Changes · 0 keepers (1 offline)
+  MASC Lanes · Workspace Curator    (6 loaded / 6 retained · end)  HTTP [connected]                     │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────── │───────────────────────────────────────────────────────
+   STARTED           ACTOR            STATUS       ELAPSED SLOT                                         │curator-source-1196 · turn 4 · last event 4m26s
+ ────────────────────────────────────────────────────────────────────────────────────────────────────── │  calls · newest first
+   10-22 14:08:54    /priv…2-3ksh84lf succeeded          — glm-coding.glm-5.3-flash                     │■    keeper_memory_write                            5ms
+   10-22 14:08:47    /priv…2-3ksh84lf succeeded          — glm-coding.glm-5.3-flash
+   10-22 14:07:43    /priv…2-3ksh84lf succeeded          — glm-coding.glm-5.3-flash
+   10-22 14:07:26    /priv…2-3ksh84lf succeeded          — glm-coding.glm-5.3-flash
+   10-22 13:35:05    /priv…2-3ksh84lf succeeded          — glm-coding.glm-5.3-flash
+   10-22 13:34:50    /priv…2-3ksh84lf succeeded          — glm-coding.glm-5.3-flash
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:move  Right / Enter:prompt  ]:older  Left / Esc:back  r:refresh  Tab:next  q:quit  ?:help
+ › to curator-source-1196   (i to write)

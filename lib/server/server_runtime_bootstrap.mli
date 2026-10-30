@@ -1,0 +1,299 @@
+(** Server_runtime_bootstrap — Server lifecycle orchestrator.
+
+    Initializes the Eio runtime, creates server state, bootstraps
+    subsystems (keepers, PG schemas), and runs the HTTP
+    accept loop with auto-detect HTTP/1.1 + HTTP/2. *)
+
+(** {1 Environment} *)
+
+val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
+val bootstrap_base_path_config_root : base_path:string -> unit
+
+val apply_runtime_toml : base_path:string -> unit
+(** Apply the keeper runtime overrides from the resolved config root's
+    runtime.toml into the boot-override layer the
+    [Env_config_keeper.KeeperKeepalive] readers consult. A setting the
+    registry marks [Toml_only] ignores the process env from then on; a
+    [Toml_and_env] setting keeps the env ahead of the file. Every process that
+    resolves keeper settings
+    for a provider call runs this after {!bootstrap_base_path_config_root}:
+    the server at boot, the capability probe CLI before its call. Raises
+    [Env_config_core.Config_error] when the file does not load. *)
+val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
+val bootstrap_prompt_registry_from_binary : base_path:string -> unit
+(** Load {!Prompt_registry} from this binary's embedded prompts, unpacked
+    into a private temporary directory removed at exit, with the overrides
+    saved under [base_path] on top. For standalone prompt consumers (the
+    probes): the runtime prompt directory under the config root is written
+    only by the server's boot sync. *)
+
+val configure_agent_core_model_catalog_env :
+  ?env:(string -> string option) ->
+  ?agent_core_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
+  ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
+  ?set_catalog:(Llm_provider.Model_catalog.t -> unit) ->
+  unit ->
+  string option
+(** Install only an operator-supplied [AGENT_CORE_MODEL_CATALOG] as a full catalog
+    replacement. Without it, require AGENT_CORE's packaged catalog.
+    Config-root and executable-parent full catalogs are deliberately not
+    discovered. *)
+
+val config_load_failure_diagnostic : detail:string -> string
+(** Operator-facing diagnostic for runtime configuration load failures:
+    attributes the failure to configuration — explicitly not a
+    model connection problem — carries the underlying detail (which already
+    names the file) verbatim, and states the next action. Pure formatting; no
+    I/O, no exit-code decision. *)
+
+(** {1 Runtime Context}
+
+    Extracts Eio resources from the standard environment.
+    Returns (clock, mono_clock, net, domain_mgr, proc_mgr, fs). The proc_mgr is
+    always [Posix_spawn_process_mgr.mgr] — children start via posix_spawn so a
+    large live heap does not tax every spawn. *)
+
+val init_runtime_context :
+  < clock : ([> float Eio.Time.clock_ty] as 'a) Eio.Resource.t;
+    mono_clock : ([> Eio.Time.Mono.ty] as 'b) Eio.Resource.t;
+    net : ([> [> `Generic] Eio.Net.ty] as 'c) Eio.Resource.t;
+    domain_mgr : ([> Eio.Domain_manager.ty] as 'd) Eio.Resource.t;
+    process_mgr : [> [> `Generic] Eio.Process.mgr_ty] Eio.Resource.t;
+    fs : ([> Eio.Fs.dir_ty] as 'f) Eio.Path.t;
+    .. > ->
+  'a Eio.Resource.t * 'b Eio.Resource.t * 'c Eio.Resource.t *
+  'd Eio.Resource.t * Eio_unix.Process.mgr_ty Eio.Resource.t * 'f Eio.Path.t
+
+(** {1 Server State Lifecycle} *)
+
+val create_server_state :
+  sw:Eio.Switch.t ->
+  base_path:string ->
+  ?input_base_path:string ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
+  net:[ `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
+  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
+  fs:Eio.Fs.dir_ty Eio.Path.t ->
+  ?env:Eio_unix.Stdenv.base ->
+  unit ->
+  Mcp_server.server_state
+(** [input_base_path] preserves the operator's pre-canonical path for
+    diagnostics while [base_path] remains the sole effective runtime path.
+    [env] is optional for backwards compatibility with existing
+    [create_server_state] callers (tests, MCP execute contexts);
+    when supplied (server bootstrap path), it is recorded into
+    [Eio_context.set_env] so long-lived HTTP consumers like
+    [Masc_http_client.Pool] can lazy-init with the full
+    {!Eio_unix.Stdenv.base}.  RFC-0107 Phase D.2c. *)
+
+val check_exact_output_registry : ?config_root:string -> unit -> unit
+(** What boot's exact-output registry step refuses for the runtime.toml under
+    [config_root] and the runtimes {!Runtime} has loaded: an unusable
+    mandatory lane, a resolver snapshot that does not build, or a registry
+    {!Runtime_exact_output_registry.publish} would refuse. Publishes nothing.
+    Raises [Env_config_core.Config_error] with the same text boot raises. The
+    deployment preflight runs it after {!Runtime.init_default_degraded_observation}. *)
+
+(** Why one of [Standalone_lane.required_ids] is unusable in the resolved
+    [runtime.toml]: it has no [\[runtime.exact_output_lanes.<id>\]] table, or
+    the table declares neither [slots] nor [cli_slots]. *)
+type mandatory_exact_output_lane_violation =
+  | Mandatory_lane_missing of { lane_id : string }
+  | Mandatory_lane_without_slots of { lane_id : string }
+
+val publish_exact_output_registry_from_file : config_path:string -> unit
+(** Publish the exact-output lanes [config_path] declares and the catalog its
+    loaded runtimes give them, through the same publication boot uses. The
+    file is the authority even when its name is not [runtime.toml] and the
+    ambient configuration root names another file. For a standalone tool that
+    loads one explicit configuration, such as [bin/stagehand_model_probe.ml].
+    Raises [Env_config_core.Config_error] when a mandatory lane is unusable
+    or the registry refuses the declarations. *)
+
+val publish_exact_output_registry_from_observation : Runtime.config_observation -> unit
+(** Same publication policy using the exact configuration bytes already
+    loaded by [Runtime.init_default_degraded_observation]. The caller must use
+    that observation for both operations without loading another runtime
+    table between them. Does not reopen the configuration path. *)
+
+module For_testing : sig
+  val configure_exact_output_registry : ?config_root:string -> unit -> unit
+
+  val mandatory_exact_output_lane_violations :
+    Runtime_schema.exact_output_lane_decl list ->
+    mandatory_exact_output_lane_violation list
+  (** Every violation, in [Standalone_lane.required_ids] order. Startup raises
+      one [Env_config_core.Config_error] naming every lane that is missing or
+      has no slots rather than synthesizing a default, so those ids are also
+      the contract every boot-path config fixture has to satisfy. *)
+
+  val require_explicit_mandatory_exact_output_lanes :
+    config_path:string -> Runtime_schema.exact_output_lane_decl list -> unit
+  (** Raises one [Env_config_core.Config_error] that names every violation. *)
+
+  val install_domain_pool_references : ?read:Domain_pool.t -> Domain_pool.t -> unit
+end
+
+val restore_persisted_sessions : Mcp_server.server_state -> unit
+val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
+(** {1 Startup Tasks} *)
+
+val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
+
+type lazy_startup_task = Restore_sessions
+
+type lazy_startup_group = {
+  group_name : string;
+  tasks : lazy_startup_task list;
+}
+
+val lazy_startup_plan : unit -> lazy_startup_group list
+(** Deterministic grouping of work required before Keeper autoboot. Retention
+    runs separately as post-readiness maintenance. Groups run in list order; the
+    tasks inside a group run in parallel, so a group holds only tasks whose
+    stores are independent. *)
+
+val lazy_startup_task_names : unit -> string list
+(** Flattened task names in the same dependency order used to activate
+    {!Server_startup_state}'s lazy task queue. *)
+
+type startup_failure_disposition =
+  | Fatal_pre_ready
+  | Degraded_after_ready
+
+val startup_failure_disposition : state_ready:bool -> startup_failure_disposition
+(** Classify an exception from the initialization subtree. Before readiness,
+    continuing would leave an unpublished partial owner mutating the
+    workspace, so the only valid disposition is fatal. Degraded serving is
+    available only after readiness has been published. *)
+
+type owner_initialization_error =
+  | Runtime_config_read_failed of string
+  | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
+  | Domain_budget_exceeded of Domain_budget.error
+  | Keeper_config_recovery_failed of Keeper_config_journal.report
+  | Admin_credential_bootstrap_failed of Masc_domain.masc_error
+  | Run_registry_already_installed of
+      [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
+  | Keeper_persistence_preparation_failed of
+      Server_bootstrap_loops.keeper_persistence_prepare_error
+  | Keeper_persistence_claim_failed of
+      Server_bootstrap_loops.keeper_persistence_claim_error
+  | Keeper_persistence_start_failed of
+      Server_bootstrap_loops.keeper_persistence_start_error
+  | Startup_path_guard_rejected of Server_base_path_diagnostics.t
+  | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
+  | Readiness_transition_failed of Server_startup_state.state_ready_error
+  | Readiness_publication_failed of
+      { observed_phase : Server_startup_state.phase
+      }
+
+exception Owner_initialization_failed of owner_initialization_error
+
+val owner_initialization_error_to_string : owner_initialization_error -> string
+
+type initialized_owner_state
+
+type activated_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
+  ; domain_pool : Domain_pool.t
+  }
+
+val initialize_owner_state_blocking
+  :  sw:Eio.Switch.t
+  -> env:Eio_unix.Stdenv.base
+  -> base_path:string
+  -> ?input_base_path:string
+  -> accept_store_quarantine:bool
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> mono_clock:Eio.Time.Mono.ty Eio.Resource.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> domain_mgr:[> Eio.Domain_manager.ty ] Eio.Domain_manager.t
+  -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> fs:Eio.Fs.dir_ty Eio.Path.t
+  -> unit
+  -> initialized_owner_state
+(** Complete every transport-neutral, fallible owner-initialization step and
+    return the still-unclaimed persistence preparation. A transport must
+    pass this opaque value directly to {!activate_owner_state}; the prepared
+    ownership token is intentionally not exposed to transports.
+    [accept_store_quarantine] is the operator's [--accept-store-quarantine]
+    (RFC-0420): without it a keeper store this build cannot decode fails
+    initialization with [Keeper_persistence_preparation_failed
+    (Store_quarantine_refused _)] and nothing is moved aside. An unread store inventory
+    refuses preparation even with the flag; repair directory access first.
+    Keeper metadata file I/O failures also refuse with the flag; repair
+    file access or the file kind instead of quarantining unread bytes.
+    Failed quarantine moves also refuse preparation: accepting the move does
+    not authorize continuing with the unreadable store still in place. *)
+
+val activate_owner_state
+  :  ?boot_stage:(string -> unit)
+  -> sw:Eio.Switch.t
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> initialized_owner_state
+  -> activated_owner_state
+(** Shared HTTP/stdio commit protocol: restore the durable Gate and MCP session
+    protocol/profile state from the actual owner's base path, publish the
+    lazy-task barrier under the exclusive BasePath lease, claim canonical
+    persistence ownership, then immediately start the affine Keeper token.
+    Current request writers use a disjoint staging namespace, so forensic
+    cleanup cannot hold readiness. Readiness remains an explicit transport
+    commit after its required surfaces are installed. [boot_stage] is the
+    optional release-smoke timing observer; direct test/stdio callers may
+    omit it. *)
+
+val mark_owner_state_ready
+  :  unit
+  -> (unit, owner_initialization_error) result
+(** Publish and verify readiness after the transport has installed every
+    surface required by its own serving contract. *)
+
+val start_post_ready_owner_lanes :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Time.clock ->
+  env:Eio_unix.Stdenv.base ->
+  Mcp_server.server_state ->
+  string * string
+(** Start the transport-neutral post-readiness lanes in their required order:
+    the application-owned system-LLM completion authority, then background
+    maintenance. Both HTTP and stdio use this sequence. *)
+
+(** {1 Main Entry Point} *)
+
+(** [on_ready] runs once the owner is ready and the HTTP listener is bound.
+    It is not called when initialization fails before either boundary.
+    [address] is the bind host already read by
+    {!Server_bootstrap_http.parse_bind_address}. *)
+val run :
+  sw:Eio.Switch.t ->
+  env:Eio_unix.Stdenv.base ->
+  address:Ipaddr.t ->
+  port:int ->
+  base_path:string ->
+  ?input_base_path:string ->
+  ?on_ready:(unit -> unit) ->
+  accept_store_quarantine:bool ->
+  make_routes:(port:int -> host:string -> sw:Eio.Switch.t ->
+               clock:float Eio.Time.clock_ty Eio.Resource.t -> 'a) ->
+  make_request_handler:(trust_policy:Server_request_authority.trust_policy ->
+                        'a ->
+                        Eio.Net.Sockaddr.stream ->
+                        Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
+  make_h2_request_handler:(trust_policy:Server_request_authority.trust_policy ->
+                           routes:'a ->
+                           sw:Eio.Switch.t ->
+                           clock:float Eio.Time.clock_ty Eio.Resource.t ->
+                           server_start_time:float ->
+                           request_sw:Eio.Switch.t ->
+                           Eio.Net.Sockaddr.stream ->
+                           H2.Reqd.t -> unit) ->
+  make_h2_error_handler:(unit ->
+                         Eio.Net.Sockaddr.stream ->
+                         H2.Server_connection.error_handler) ->
+  unit ->
+  unit

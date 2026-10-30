@@ -1,0 +1,36 @@
+{
+  "observed_at": "2026-09-26T12:08:42.135471+00:00",
+  "runner_sha256": "cb1832812612685349a5d1724847b6406bf1288686844e8ab14b55cedd6f7b90",
+  "platform": "macOS-26.6.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "binary_source": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+  "harness_source": "4d31a42ca9c948d9c1605625dd45c2b6c122d0a3",
+  "helper_sha256": {
+    "sleep": "5a69a72030864b5fc146f7ab79e97ec23810ebfc8cc9d086bbf5599f383b201b",
+    "readable": "4841c61f45457db49dac8afb8a6714a8a9f109671a33e5e9b96b7cf8d4bd39d8"
+  },
+  "scenario_sha256": "34c9ad112918edd1dfbb44e2538d3bcce4ef47f4b8614285fc6f2adb6776f4d9",
+  "execution_order": [
+    "sleep",
+    "readable",
+    "readable",
+    "sleep",
+    "sleep",
+    "readable"
+  ],
+  "comparison_transitions": 600,
+  "preflight": {
+    "metadata_sha256": "5ee56d0c08a735b95330e4d4b7b1f9d8201925600c61e4c02933702fe5a3a2c1",
+    "visible_keepers": [
+      "alpha",
+      "beta"
+    ],
+    "retained_channels": {
+      "count": 250,
+      "fixture_sha256": "a57996f8ba3a01b5357180200dbd61d7ec7433dbd799b07ec2609efe4e2b73a8",
+      "loaded_header": "250 here / 251 total",
+      "returned_tab": "Info"
+    }
+  },
+  "scope": "Same local macOS ARM host, exact diagnostic binary and scenario. Only helper wait_for_fixture_state sleep(0.02) changes to readiness wait capped at0.02. Both use whole-history screen reconstruction. No product speedup/deployment/physical display proof."
+}

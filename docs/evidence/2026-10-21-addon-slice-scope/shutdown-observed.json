@@ -1,0 +1,44 @@
+{
+  "at": 1792593616.438912,
+  "processes": [
+    {
+      "pid": 2325,
+      "ps_exit": 1,
+      "output": ""
+    },
+    {
+      "pid": 80887,
+      "ps_exit": 1,
+      "output": ""
+    },
+    {
+      "pid": 80714,
+      "ps_exit": 1,
+      "output": ""
+    }
+  ],
+  "ports": [
+    {
+      "port": 61735,
+      "connect_exit": 61
+    },
+    {
+      "port": 61736,
+      "connect_exit": 61
+    }
+  ],
+  "owned_containers": [
+    {
+      "id": "435d8f25e3442abf0bc41142235528366b8e0abd7b25a5235004f46ddad916c2",
+      "exit": 1,
+      "stdout": "[]\n",
+      "stderr": "error: no such object: 435d8f25e3442abf0bc41142235528366b8e0abd7b25a5235004f46ddad916c2\n"
+    },
+    {
+      "id": "fac3d15c6c309e65e8e6787acbd048079ca8b8feeb9020efa98bdce6a620a9e4",
+      "exit": 1,
+      "stdout": "[]\n",
+      "stderr": "error: no such object: fac3d15c6c309e65e8e6787acbd048079ca8b8feeb9020efa98bdce6a620a9e4\n"
+    }
+  ]
+}

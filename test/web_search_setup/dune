@@ -1,0 +1,6 @@
+; The [web_search] section writer: a config-lock write against a temporary
+; runtime.toml, and the provider table that writer and the search tool share.
+
+(test
+ (name test_web_search_setup)
+ (libraries alcotest masc.web_search_setup masc.config unix))

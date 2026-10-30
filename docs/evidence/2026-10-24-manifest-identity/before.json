@@ -1,0 +1,13 @@
+{
+  "base": "d587bf1ffa123a05ae688cbc9fabe8e35221b206",
+  "result": {
+    "forward": true,
+    "reverse": false
+  },
+  "sources": {
+    "model_identifiers": "8ce8c2ae936b7d6f141f7dc864acaaf0742b4f15a32e31f7272b61d77f02f779",
+    "capability_vocab": "c9fa478c24b8a42ce6d92a926985292ade36f28b90aea738ffdeeef61b99798f",
+    "reasoning_effort": "143a311cbd071ba7834b5d9e83f910afe12ad2d6b77033477b06454a2d4fc601",
+    "capability_manifest": "beca64299c5fa982ab3d8635394bd04fa5ed9c8eaa118881155e4ccad90075ad"
+  }
+}

@@ -1,0 +1,4 @@
+(test
+ (name test_keeper_microvm_guest_inventory)
+ (modules test_keeper_microvm_guest_inventory)
+ (libraries masc masc.masc_process masc.fs_compat masc_core alcotest eio eio_main unix))

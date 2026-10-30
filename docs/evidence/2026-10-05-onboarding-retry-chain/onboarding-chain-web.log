@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/integrate-onboarding-retry-chain-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/exact-lane-activity-panel.test.ts src/components/onboarding-settings.test.ts src/components/model-setup-resume-control.test.ts src/components/runtime-toml-editor.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/integrate-onboarding-retry-chain-20261005/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  146 passed (146)
+   Start at  07:48:05
+   Duration  6.33s (tests 51%, import 19%, transform 12%, environment 10%, setup 7%)
+
+    Isolate  4 workers spawned · ~249ms startup each (spawn + environment, per file)
+             at least ~747ms faster with isolate: false — reuses workers across files instead of one per file
+

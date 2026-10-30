@@ -1,0 +1,32 @@
+{
+  "baseline_source": "d6ec0b84124d8c44ed395578e9d7cf1fd0a6f10e",
+  "tested_source_sha256": {
+    "lib/dashboard/dashboard_projection_cache.ml": "68c2f2b83f665b96abbc43b0fb9f1ee2c4a2854d2c85ded5bc79fa58bfd57ce3",
+    "lib/dashboard/dashboard_projection_cache.mli": "cae9f258faf55d4d9a7f141a2d924754cab2e5758f20dcc1678531f5dea7a805",
+    "test/test_dashboard_http_core.ml": "f0e10f6965289dde4bc29b2f769bc68fb3220e0807a4f69e1ec1cbee43b11d57",
+    "benchmarks/dashboard_observation/main.ml": "17a8024a88b981fb64f423b14ec71c00cae19801eab5f02c983a00a09919e53f",
+    "benchmarks/dashboard_observation/dune": "de2f43ede10585065c3a38ea371245324918e58073f80dbd6949c7ff22522a95"
+  },
+  "explicit_build_targets": [
+    "test/test_dashboard_http_core.exe",
+    "benchmarks/dashboard_observation/main.exe"
+  ],
+  "test_command": "test_dashboard_http_core.exe test executor_pool 34-44",
+  "tests_run": 11,
+  "tests_passed": 11,
+  "original_regression_exit": 1,
+  "original_failed_assertion": "clock-only reads preserve the full prepared-response observation",
+  "full_regression": "not run",
+  "full_ci": "not run",
+  "candidate_installed": false,
+  "measurement_hashes": {
+    "benchmark-before.exe": "57994f7b1b5399eaee46cb7c2d020070953a177668cf3d0d9ae090f7d5a90fcb",
+    "benchmark-after.exe": "611c2934616050c625012f85eca76886f5a32894e7dde33a9aa84e51a2b69c85",
+    "execution-actor-baseline.json": "03f299d45337d1b4da9867d1a9411c84c286c04756d87e538329835101f56ab0",
+    "run-comparison.py": "ddbf995fc761c722078c480b5937c02a222b991dcfb85a2a40d80a35853c5ead",
+    "fixture-off/.masc/config/candle.toml": "0c8e2c830aa2abc474758d12d70f4a68fe849adfa3b6dbbe34e07ad06e8ceef5",
+    "fixture-off/.masc/candle-ledger.jsonl": "40813fca96984533ca0be3e0304075b0beeb17819fa5c546658249a1eb0c0451",
+    "fixture-decay/.masc/config/candle.toml": "2d3673e6c2e4150e7f84e353faa4f1bd74441a43ef61dba1bc841b140e73d873",
+    "fixture-decay/.masc/candle-ledger.jsonl": "39ca4f97fe468d9814a17d99f68e7d694adf9038437f4074d80694cc2b8e3152"
+  }
+}

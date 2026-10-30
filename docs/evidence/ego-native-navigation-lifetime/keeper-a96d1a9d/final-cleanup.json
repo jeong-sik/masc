@@ -1,0 +1,17 @@
+{
+  "all_recorded_pids": [
+    76809,
+    76939,
+    77158,
+    5218,
+    5266,
+    5338,
+    20809,
+    92745
+  ],
+  "remaining": [],
+  "space25_after_native_detach": "absent as observed by listTaskSpaces",
+  "new_candidate_worker_and_sdk_exited_after_explicit_detach": true,
+  "old_candidate_server_signal_left_sdk_requiring_recorded_targeted_stop": true,
+  "production_installation_changed": false
+}

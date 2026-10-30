@@ -1,0 +1,188 @@
+[
+  {
+    "name": "owned workspace and pinned native source are actually served",
+    "passed": true,
+    "detail": {
+      "release_version": "0.64.0",
+      "binary_version": "0.64.0",
+      "repo_version": "0.64.0",
+      "commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "commit_source": "embedded",
+      "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "binary_commit_unix_ts": 1793046677.0,
+      "binary_commit_age_seconds": 1336,
+      "repo_head_commit": "a3950a189b9",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793046677.0,
+      "repo_head_commit_age_seconds": 1336,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+      "runtime_instance_id": "01a179fd-6626-7000-9880-41d495259afe",
+      "started_at": "2026-10-26T20:53:32Z",
+      "uptime_seconds": 1
+    }
+  },
+  {
+    "name": "owned workspace gate accepts setting",
+    "passed": true,
+    "detail": {
+      "recovery_status": "not_requested",
+      "recovery_error": null,
+      "started": 0,
+      "queued": 0,
+      "recovery_failure_count": 0,
+      "recovery_failures": [],
+      "recovery_blockers": [],
+      "ok": true,
+      "previous_mode": "auto_judge",
+      "mode": "always_allow",
+      "actor": "schedule-audit-observer",
+      "changed_at": "2026-10-26T20:53:33Z"
+    }
+  },
+  {
+    "name": "owned Keeper tool approval accepts setting",
+    "passed": true,
+    "detail": {
+      "keeper": "audit-live-glm",
+      "mode": "yolo"
+    }
+  },
+  {
+    "name": "first actual A1 publication has exactly one Keeper-authored note",
+    "passed": true,
+    "detail": [
+      {
+        "note_id": "6",
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+        "author_id": "audit-live-glm",
+        "author_kind": "automated_actor",
+        "created_at": 1793048034.209748,
+        "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+      }
+    ]
+  },
+  {
+    "name": "both synthetic schedules contain exactly the three requested notes",
+    "passed": true,
+    "detail": {
+      "first_note_count": 2,
+      "second_note_count": 1
+    }
+  },
+  {
+    "name": "A1 B A2 each exist exactly once with the actual Keeper author",
+    "passed": true,
+    "detail": {
+      "notes": [
+        [
+          {
+            "note_id": "6",
+            "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+            "author_id": "audit-live-glm",
+            "author_kind": "automated_actor",
+            "created_at": 1793048034.209748,
+            "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+          }
+        ],
+        [
+          {
+            "note_id": "11",
+            "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+            "author_id": "audit-live-glm",
+            "author_kind": "automated_actor",
+            "created_at": 1793048048.849434,
+            "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+          }
+        ],
+        [
+          {
+            "note_id": "12",
+            "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+            "author_id": "audit-live-glm",
+            "author_kind": "automated_actor",
+            "created_at": 1793048072.48934,
+            "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+          }
+        ]
+      ],
+      "primary": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/schedules.json",
+        "sha256": "9d23b3fec333d67f059b6547a3888e3298b4b941ab70d77ff00792dec8ef79e5",
+        "bytes": 5763,
+        "observed_at_unix": 1793048084.1046772
+      }
+    }
+  },
+  {
+    "name": "synthetic schedules have exactly three note_add calls with no additional attempt",
+    "passed": true,
+    "detail": {
+      "note_add_call_count": 3
+    }
+  },
+  {
+    "name": "A1 precedes B arrival, actual A checkpoint and B source entry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "original A has no premature ACK and is readmitted after B ACK",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "A retention and final ACK refer to the exact original incarnation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "successful tool result names its exact stored note 6",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "successful tool result names its exact stored note 11",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "successful tool result names its exact stored note 12",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "B actual effect belongs to B admitted source before its ACK",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "exact execution lookup confirms execution-node-e2670fec6758d0bb60ee78a27c4d8fa6",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "exact execution lookup confirms execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "exact execution lookup confirms execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "A2 executes only after exact A readmission, separately from the B Keeper turn",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "readmitted A actually observes B note before writing A2",
+    "passed": false,
+    "detail": null
+  }
+]

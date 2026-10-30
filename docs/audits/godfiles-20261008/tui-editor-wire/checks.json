@@ -1,0 +1,27 @@
+{
+  "build": {
+    "command": "opam exec -- dune build bin/.masc_tui.eobjs/byte/dune__exe__Masc_tui_http.cmo bin/.masc_tui.eobjs/byte/dune__exe__Masc_tui.cmo test/test_runtime_setup_credentials.exe",
+    "exit_code": 0
+  },
+  "tests": {
+    "command": "_build/default/test/test_runtime_setup_credentials.exe --color=never",
+    "exit_code": 0,
+    "run_id": "OVCFG3M6",
+    "passed": 4,
+    "new_revision_api_cases": [
+      "storage 0",
+      "storage 3"
+    ],
+    "other_credential_cases": [
+      "storage 1",
+      "storage 2"
+    ]
+  },
+  "not_executed": [
+    "editor JSON codecs",
+    "actual HTTP requests",
+    "installed TUI",
+    "physical terminal",
+    "full CI"
+  ]
+}

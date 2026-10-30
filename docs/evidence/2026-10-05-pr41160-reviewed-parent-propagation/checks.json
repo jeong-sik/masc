@@ -1,0 +1,32 @@
+{
+  "checkpoint": "dede8305f40276b656728c3ea80f02d18a138afd",
+  "parent": "0e7b89eadc9ba1d59b6639bbf02308915f649c10",
+  "logs": {
+    "web.log": {
+      "source": "/tmp/pr41160-propagate-final-web.log",
+      "sha256": "71ee9fee5c1aace86ebec03902cbcc4f6d6516e75adf2b15f194e2f34fdc90d2"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41160-propagate-final-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.json": {
+      "source": "/tmp/pr41160-propagate-final-eslint.json",
+      "sha256": "404d414d2892ec3771cb5beff183f68cb4dbbb6a2482c66c03ef9946bbfac2e8"
+    }
+  },
+  "web": {
+    "passed": 165,
+    "suites": 3,
+    "handle": 5319,
+    "exit": 0
+  },
+  "tsc_exit": 0,
+  "eslint": {
+    "handle": 75037,
+    "exit": 1,
+    "errors": 2,
+    "inherited": 2,
+    "new": 0
+  }
+}

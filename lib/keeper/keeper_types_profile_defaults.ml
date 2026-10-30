@@ -1,0 +1,88 @@
+type keeper_profile_defaults = {
+  id : Ids.Keeper_id.t option;
+  manifest_path : string option;
+  instructions : string option;
+  activation_mode : Keeper_activation_mode.t option;
+  input_policy : Keeper_input_policy.t option;
+  mention_targets : string list;
+  board_interests : string list;
+  sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
+  sandbox_image : string option;
+  network_mode : Keeper_types_profile_sandbox.network_mode option;
+  (* Phase 1 SSH lane: name of the [exec.ssh.endpoints.<name>] registry
+     entry a [Remote_ssh] keeper dispatches through. Required when
+     [sandbox_profile] is [Remote_ssh] — enforced at meta validation with
+     [remote_ssh_endpoint_missing]; the registry itself arrives with
+     Phase 1 task 2. *)
+  remote_endpoint : string option;
+  microvm_backend : Keeper_microvm_backend.t option;
+  microvm_memory : Keeper_microvm_guest_size.memory option;
+  microvm_cpus : Keeper_microvm_guest_size.cpus option;
+  (* RFC-0422 §3.4: which box a tool_execute runs in before the judge is
+     asked. [None] is [Observe]. Read where the route is built, not carried
+     on keeper meta, as [remote_endpoint] is. *)
+  observation_run : Keeper_types_profile_sandbox.observation_run option;
+  max_context_override : int option;
+  (* Telemetry Feedback — inject behavioral stats into keeper context *)
+  telemetry_feedback_enabled : bool option;
+  telemetry_feedback_window_hours : int option;
+  always_allow : bool option;
+  voice_always_allow : bool option;
+  (* RFC-0390: how much of an official client's built-in tool surface this
+     keeper may use. [None] keeps each runtime's own default posture. *)
+  native_tool_posture : Runtime_native_tools.posture option;
+  (* Profile-only Skill selection; explicit empty is distinct from absence. *)
+  skill_names : string list option;
+  (* RFC-0403: which of the attached services' tools this keeper takes.
+     [None] is every tool the attached providers offer, which is what a
+     keeper got before this field existed. Attached tools only: built-ins
+     defer globally through [defer_loading] or per keeper through
+     [tool_deny], and two axes over one attached tool would leave no way to
+     read which one held it back. *)
+  attached_tool_allow : string list option;
+  (* Built-in tools this keeper never offers the model, named by their
+     model-visible name (e.g. ["keeper_spawn"; "masc_keeper_delegate"]).
+     Absent and explicit [] both deny nothing, so unlike [skill_names] this is
+     a plain list. The capability surface drops the descriptor entirely: the
+     tool is neither listed to the model nor present in the turn's dispatch
+     bundle. Composition skills still gate through [skill_names]; this axis is
+     for the ordinary built-ins that have no other per-keeper selection. *)
+  tool_deny : string list;
+  (* Per-keeper AGENT_CORE CLI transport env vars (AGENT_CORE 0.159+).
+     Parsed from [[keeper.agent_core_env]] table.  Keys MUST match
+     ^AGENT_CORE_[A-Z]+_.+ — any other entries are dropped with
+     a warning to avoid ambient env injection via keeper TOML.
+     Applied via Unix.putenv right before each turn so AGENT_CORE transport
+     build_args picks them up.  Empty list = no overrides. *)
+  agent_core_env : (string * string) list;
+}
+
+let empty_keeper_profile_defaults =
+  {
+    id = None;
+    manifest_path = None;
+    instructions = None;
+    activation_mode = None;
+    input_policy = None;
+    mention_targets = [];
+    board_interests = [];
+    sandbox_profile = None;
+    sandbox_image = None;
+    network_mode = None;
+    remote_endpoint = None;
+    microvm_backend = None;
+    microvm_memory = None;
+    microvm_cpus = None;
+    observation_run = None;
+    max_context_override = None;
+    telemetry_feedback_enabled = None;
+    telemetry_feedback_window_hours = None;
+    always_allow = None;
+    voice_always_allow = None;
+    native_tool_posture = None;
+    skill_names = None;
+    attached_tool_allow = None;
+    tool_deny = [];
+    agent_core_env = [];
+  }
+;;

@@ -1,0 +1,34 @@
+Raw workflow log SHA256: b998cc99bf1befbccfc856f939135876034c115c676feb1639f51fc549b59b95
+Source: https://github.com/jeong-sik/masc/actions/runs/40199106856
+
+test suite	Checkout	2026-10-25T13:46:09.4129143Z HEAD is now at 0178e767 feat(minimax): declare native Responses replay and model-specific controls
+test suite	Test	2026-10-25T13:47:21.5519282Z   [FAIL]        native models          0   MiniMax-M2.
+test suite	Test	2026-10-25T13:47:21.5527277Z   [FAIL]        native models          1   MiniMax-M2.1.
+test suite	Test	2026-10-25T13:47:21.5533173Z   [FAIL]        native models          2   MiniMax-M2.1-highspeed.
+test suite	Test	2026-10-25T13:47:21.5538605Z   [FAIL]        native models          3   MiniMax-M2.5.
+test suite	Test	2026-10-25T13:47:21.5545890Z   [FAIL]        native models          4   MiniMax-M2.5-highspeed.
+test suite	Test	2026-10-25T13:47:21.5551352Z   [FAIL]        native models          5   MiniMax-M2.7.
+test suite	Test	2026-10-25T13:47:21.5556991Z   [FAIL]        native models          6   MiniMax-M2.7-highspeed.
+test suite	Test	2026-10-25T13:47:21.5563449Z   [FAIL]        native models          7   MiniMax-M3.
+test suite	Test	2026-10-25T13:47:21.5571951Z   [FAIL]        native models          8   MiniMax-M3.1-Flash.
+test suite	Test	2026-10-25T13:47:21.5574065Z │ [FAIL]        native models          0   MiniMax-M2.                         │
+test suite	Test	2026-10-25T13:47:21.5575724Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5598964Z │ [FAIL]        native models          1   MiniMax-M2.1.                       │
+test suite	Test	2026-10-25T13:47:21.5599962Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5615388Z │ [FAIL]        native models          2   MiniMax-M2.1-highspeed.             │
+test suite	Test	2026-10-25T13:47:21.5616533Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5632261Z │ [FAIL]        native models          3   MiniMax-M2.5.                       │
+test suite	Test	2026-10-25T13:47:21.5633871Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5648298Z │ [FAIL]        native models          4   MiniMax-M2.5-highspeed.             │
+test suite	Test	2026-10-25T13:47:21.5649359Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5663783Z │ [FAIL]        native models          5   MiniMax-M2.7.                       │
+test suite	Test	2026-10-25T13:47:21.5664766Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5678430Z │ [FAIL]        native models          6   MiniMax-M2.7-highspeed.             │
+test suite	Test	2026-10-25T13:47:21.5679418Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5693261Z │ [FAIL]        native models          7   MiniMax-M3.                         │
+test suite	Test	2026-10-25T13:47:21.5694235Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5707915Z │ [FAIL]        native models          8   MiniMax-M3.1-Flash.                 │
+test suite	Test	2026-10-25T13:47:21.5708897Z Backend_openai_serialize.tool_definition_of_json: unknown field "type"
+test suite	Test	2026-10-25T13:47:21.5722162Z 9 failures! in 0.031s. 9 tests run.
+test suite	Test	2026-10-25T13:47:21.6520341Z Test Successful in 0.032s. 16 tests run.
+test suite	Test	2026-10-25T13:47:21.7143902Z Test Successful in 0.002s. 22 tests run.

@@ -1,0 +1,25 @@
+(include_subdirs no)
+
+(library
+ (name embedded_browser_extension)
+ (public_name masc.embedded_browser_extension)
+ (modules embedded_browser_extension)
+ (wrapped false))
+
+; The Firefox extension the browser lane loads, written into the binary the way
+; embedded_config carries config/ and skills/. -m plain produces
+;   val read : string -> string option
+;   val file_list : string list
+; with each path relative to connectors/browser/extension. Only .json and .js
+; files are carried, so an editor's backup file or a Finder's .DS_Store in the
+; source directory is not written to an operator's machine. The extension
+; that `masc browser-lane-setup` writes is always the one this binary was built
+; with, and no checkout or download is needed on the machine that installs it.
+(rule
+ (target embedded_browser_extension.ml)
+ (deps
+  (source_tree ../../connectors/browser/extension))
+ (action
+  (with-stdout-to
+   %{target}
+   (run ocaml-crunch -m plain -e json -e js ../../connectors/browser/extension))))

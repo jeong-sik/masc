@@ -1,0 +1,23 @@
+(** Runtime_observation_query_operation — closed sum for the [operation] label on
+    [metric_keeper_observation_query_failures].
+
+    Replaces 5 hardcoded literals in [keeper_world_observation.ml].
+    Each value names a distinct read-path failure mode of the
+    world-observation query layer. *)
+
+type t =
+  | Read_backlog_snapshot
+  | Read_current_task (** [meta.current_task_id] → backlog record resolve failure (RFC-0315). *)
+  | Read_held_task_skills (** Held-task skills read for the direct-message lane (task-364). *)
+  | Count_running_keeper_fibers
+  | Cursor_stale
+  | Board_events (** Cursor-based board scan (collect_board_events). *)
+  | Board_stimulus_intake
+      (** Event-queue stimulus intake (consume_single_heartbeat_stimulus /
+          consume_single_heartbeat_stimulus) — distinct from [Board_events] so the
+          scan path and the queued-stimulus path do not conflate failure
+          sources in the same metric. *)
+  | Scheduled_automation
+  | Reconcile_read_meta (** Supervisor reconcile-loop meta read failure (#14828 sweep). *)
+
+val to_label : t -> string

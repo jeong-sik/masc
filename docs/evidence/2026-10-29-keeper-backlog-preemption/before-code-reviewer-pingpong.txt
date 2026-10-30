@@ -1,0 +1,43 @@
+# captured 2026-10-29T05:01:54Z from the server at ~/me/.masc (binary_commit 3e41385b549 until 2026-10-29T03:07Z, 216f7ab8456 after)
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --since 2026-10-29T02:08:00Z --until 2026-10-29T02:47:00Z --keeper code-reviewer
+2. Turn endings per Keeper and UTC day (window 2026-10-29T02:08:00Z .. 2026-10-29T02:47:00Z; ckpt_t01 = checkpoint turns with 0 or 1 tool calls)
+keeper                     day         turns   ckpt durable    op_q   done done+tool ckpt_t01 ckpt_share
+code-reviewer              2026-10-29     64     51      50       1     13         0       48      79.7%
+fleet                      all            64     51      50       1     13         0       48      79.7%
+
+3. Checkpoint turns by tool calls made (window 2026-10-29T02:08:00Z .. 2026-10-29T02:47:00Z)
+tools      turns    share
+0              0     0.0%
+1             48    94.1%
+2              2     3.9%
+3-5            0     0.0%
+6+             1     2.0%
+all           51
+
+4. Turn endings by execution path and runtime family (window 2026-10-29T02:08:00Z .. 2026-10-29T02:47:00Z)
+path               family        turns   ckpt durable    op_q   done
+autonomous_cycle   claude_code      32     25      24       1      7
+direct_turn        claude_code      32     26      26       0      6
+
+5. Length of completed turns in seconds, nearest rank (window 2026-10-29T02:08:00Z .. 2026-10-29T02:47:00Z)
+path                 turns      p50      p90      p99       max
+(all paths)             13       13       15       16        16
+autonomous_cycle         7       12       16       16        16
+direct_turn              6       13       15       15        15
+
+6. Longest run of consecutive turns ended on a durable stimulus (window 2026-10-29T02:08:00Z .. 2026-10-29T02:47:00Z)
+keeper                          turns from_utc             to_utc              
+code-reviewer                      14 2026-10-29T02:10:29Z 2026-10-29T02:17:53Z
+
+7. System log lines per Keeper (window 2026-10-29T02:08:00Z .. 2026-10-29T02:47:00Z)
+keeper                       busy  consumed    again  yield probe and head kind
+code-reviewer                  20       168      139  
+fleet                          20       168      139  
+again = consumed a stimulus that an earlier turn of the same Keeper had consumed in the window; by class: board_attention=116, schedule_due=23
+
+7b. Stimuli consumed by code-reviewer, per class (window 2026-10-29T02:08:00Z .. 2026-10-29T02:47:00Z)
+class                             consumed  distinct  max_repeat  gap_p50_s
+board_attention                        141        25          43          0
+schedule_due                            27         4          15        193
+gap_p50_s = median seconds between the first consumptions of two distinct stimuli of the class
+

@@ -1,0 +1,72 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-web-lane-declaration-drafts-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-declaration-editor.test.ts src/components/lane-addons-panel.test.ts src/components/status.test.ts src/api/lane-declarations.test.ts --reporter verbose
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-web-lane-declaration-drafts-20261004/dashboard
+
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > explains unavailable editing and verifies authority before admitting a fresh configuration 37ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps verification failures actionable without admitting an unknown workspace 11ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > restores new-file and existing-file drafts after actual Status route unmounts 47ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > finishes an original read while Status has unmounted the editor 18ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > retains the receipt and edits typed during a save after a routed unmount 23ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > migrates a late create and rotates the new-file key without a mounted callback 26ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > isolates workspaces even when their configured directory is identical and rejects an old A response after A-B-A 24ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps an old-workspace write outcome uncertain in its own draft and never saves without current authority 26ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > creates a user TOML file without Attach and separates the file receipt from application 14ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > resumes an unsaved new-file draft after closing and starts fresh after creating it 20ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps newer create-time edits when reopening the now-existing file 19ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > preserves the reopened file draft when an earlier create response arrives late 21ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps both the create-time draft and the separately reopened draft recoverable 41ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > recovers a lost create response through the file list while retaining the new-file draft 20ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > reads invalid original text from the issue entry and preserves a rejected correction 14ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > offers issue editing only for exact declaration files in the configured directory 12ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps the draft on conflict and only adopts a new raw revision after an explicit choice 21ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > preserves edits made while a save is pending and keeps them dirty afterward 19ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps a file draft across closing and another new-file session 15ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps a draft when a save response fails and reads the current file without replacing it 21ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > does not claim durable storage when a file receipt reports unconfirmed durability 15ms
+ ✓ src/components/lane-declaration-editor.test.ts > Lane declaration editing through the status surface > keeps saving unavailable after a failed original read and permits a successful retry 16ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > renders the owning package display contract in order while retaining raw fields and binding schema 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > shows unavailable for absent or incorrectly typed readings without inventing successful values 5ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects malformed package display contracts instead of discarding them 5ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > opens original evidence from horizontal lanes without filtering and includes empty workers 28ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > allows keyboard selection of simultaneous observations and exposes missing relationship targets 16ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > projects an unknown package and its common evidence without a domain-specific renderer 9ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > shows installed and pending TOML declarations independently of observation health 8ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps the previous instance visible while a changed declaration and parse errors remain unresolved 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps detached history without offering edits to absent or differently owned files 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > allows detaching while observation is in progress without waiting for observe 14ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > distinguishes semantic lanes from the same package and keeps their full identities accessible 7ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > distinguishes matching local lanes from UUIDv7 instances sharing a timestamp prefix 7ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > queries the selected time and lane, showing partial coverage and explicit evidence action 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps a failed optional read local and allows leaving while a read remains pending 8ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > attaches a user package with the supplied binding through the common contract 9ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > selects a cross-lane time range by dragging and submits that exact query window 19ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > does not restore a cleared slice when its older request finishes 17ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects unknown control states and malformed common rows instead of inventing defaults 2ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > submits an advertised package action with an exact binding while slice and other controls remain usable 33ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > retains uncertain requests without replay and cancels a held status read independently of slice 26ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > reports outcome_unknown honestly without turning the receipt into successful completion 18ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > reports failed_before_effect honestly without turning the receipt into successful completion 20ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > requires selection after incarnation replacement while preserving old receipts and giving new requests unique IDs 28ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps last recorded status visible when a later receipt read fails 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects non-object action input and hides new actions for detached instances 21ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > uses real action transport with exact request identity and rejects mismatched or malformed receipts 2ms
+ ✓ src/api/lane-declarations.test.ts > Lane declaration transport contract > reads malformed raw text without inventing a parsed declaration revision 2ms
+ ✓ src/api/lane-declarations.test.ts > Lane declaration transport contract > uses explicit create and save modes with a raw source revision only for save 0ms
+ ✓ src/api/lane-declarations.test.ts > Lane declaration transport contract > preserves a typed conflict document from the HTTP409 response 1ms
+ ✓ src/api/lane-declarations.test.ts > Lane declaration transport contract > rejects a receipt for a different file or text and unknown application states 1ms
+ ✓ src/api/lane-declarations.test.ts > Lane declaration transport contract > never offers another file as the conflict save base 0ms
+ ✓ src/components/status.test.ts > sectionLabel > uses monitoring navigation labels as the SSOT 1ms
+ ✓ src/components/status.test.ts > monitor lane visibility > uses monitoring navigation hidden flags as the SSOT 0ms
+ ✓ src/components/status.test.ts > normalizeStatusSection > accepts every monitoring navigation section 0ms
+ ✓ src/components/status.test.ts > normalizeStatusSection > falls back to the monitoring default section 0ms
+
+ Test Files  4 passed (4)
+      Tests  57 passed (57)
+   Start at  15:07:07
+   Duration  4.38s (import 34%, tests 23%, environment 16%, transform 15%, setup 12%)
+
+    Isolate  4 workers spawned · ~256ms startup each (spawn + environment, per file)
+             at least ~768ms faster with isolate: false — reuses workers across files instead of one per file

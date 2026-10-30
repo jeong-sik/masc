@@ -1,0 +1,13 @@
+[
+    {
+        "CreatedAt": "2026-10-21T15:45:36Z",
+        "Driver": "local",
+        "Labels": {
+            "masc.proof-owner": "candle-container-proof-0c67b092c532"
+        },
+        "Mountpoint": "/var/lib/docker/volumes/masc-candle-proof-state-0c67b092c532/_data",
+        "Name": "masc-candle-proof-state-0c67b092c532",
+        "Options": null,
+        "Scope": "local"
+    }
+]

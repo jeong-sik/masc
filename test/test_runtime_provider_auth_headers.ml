@@ -1,0 +1,3762 @@
+open Alcotest
+open Masc
+
+let header_count name headers =
+  headers
+  |> List.filter (fun (k, _) -> String.equal k name)
+  |> List.length
+
+let normalized_header_count name headers =
+  let name = String.lowercase_ascii name in
+  headers
+  |> List.filter (fun (k, _) -> String.equal name (String.lowercase_ascii k))
+  |> List.length
+
+let normalized_header_value name headers =
+  let name = String.lowercase_ascii name in
+  headers
+  |> List.find_map (fun (k, v) ->
+    if String.equal name (String.lowercase_ascii k) then Some v else None)
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    f
+
+let runpod_provider =
+  { Runtime_schema.id = "runpod_mtp"
+  ; enabled = true
+  ; display_name = "RunPod"
+  ; protocol = "openai-compatible-http"
+  ; api_format = Chat_completions_api
+  ; request_path = None
+  ; wire_kind = None
+  ; max_context = None
+  ; transport = Http "https://example-runpod.proxy.runpod.net/v1"
+  ; is_non_interactive = true
+  ; credentials = Some (Inline "rp-test-token")
+  ; capabilities = None
+  ; healthcheck_path = None
+  ; headers = None
+  ; connect_timeout_s = None
+  ; exact_body_timeout_s = None
+  ; admission_priority_run_limit = None
+  ; antigravity_cli = None
+  ; account_home = None
+  ; usage_read = None
+  }
+
+let qwen_model =
+  { Runtime_schema.id = "qwen"
+  ; api_name = "qwen"
+  ; tools_support = true
+  ; max_context = Some 160000
+  ; thinking_support = Some true
+  ; preserve_thinking = Some false
+  ; streaming = true
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; reasoning_uncontrolled = false
+  ; reasoning_effort = None
+  ; turn_timeout_s = None
+  ; capabilities = None
+  }
+
+let runpod_binding =
+  { Runtime_schema.provider_id = "runpod_mtp"
+  ; model_id = "qwen"
+  ; enabled = true
+  ; is_default = true
+  ; wizard_default = false
+  ; max_context = None
+  ; max_concurrent = None
+  ; disable_parallel_tool_use = false
+  ; max_tokens = None
+  ; price_input = None
+  ; price_output = None
+  ; keep_alive = None
+  ; num_ctx = None
+  ; repeat_penalty = None
+  ; repeat_last_n = None
+  ; return_progress = None
+  }
+
+let runtime_toml_with_credentials ?(provider_extra = "") ?(model_extra = "") credentials =
+  Printf.sprintf
+    {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "openai-compatible-http"
+endpoint = "https://example-runpod.proxy.runpod.net/v1"
+
+%s
+
+%s
+
+[models.qwen]
+api-name = "qwen"
+max-context = 160000
+tools-support = true
+%s
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+|}
+    provider_extra
+    credentials
+    model_extra
+
+let check_parse_error errors expected_path expected_message =
+  let matches =
+    List.exists
+      (fun (err : Runtime_toml.parse_error) ->
+         String.equal err.path expected_path
+         && String.equal err.message expected_message)
+      errors
+  in
+  check bool "expected parse error" true matches
+
+let check_parse_error_contains errors expected_path expected_message_fragment =
+  let matches =
+    List.exists
+      (fun (err : Runtime_toml.parse_error) ->
+         String.equal err.path expected_path
+         && String_util.contains_substring err.message expected_message_fragment)
+      errors
+  in
+  check bool "expected parse error" true matches
+
+let inline_credentials =
+  {|
+[providers.runpod_mtp.credentials]
+type = "inline"
+value = "rp-test-token"
+|}
+
+let test_runtime_toml_rejects_blank_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+key = ""
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML credential parse error"
+  | Error errors ->
+    check_parse_error
+      errors
+      "providers.runpod_mtp.credentials.key"
+      "credential type 'env' requires non-empty 'key'"
+
+let test_runtime_toml_threads_provider_connect_timeout () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 123.5")
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected runtime TOML connect-timeout-s to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.providers, cfg.bindings with
+     | [ provider ], [ binding ] ->
+       check (option (float 0.0)) "provider connect timeout" (Some 123.5)
+         provider.Runtime_schema.connect_timeout_s;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check (option (float 0.0)) "provider config connect timeout"
+            (Some 123.5) provider_cfg.connect_timeout_s)
+     | providers, bindings ->
+       failf "expected one provider/binding, got %d/%d"
+         (List.length providers)
+         (List.length bindings))
+
+(* A declared credential header must not survive into Provider_config.headers:
+   auth travels as [api_key] and AGENT_CORE merges it at request time, so a copy here
+   duplicates the secret. The strip used to know only authorization and
+   x-api-key, while the dashboard's separate list also knew api-key and
+   x-auth-token — so the dashboard hid exactly the header the adapter kept
+   forwarding. *)
+let test_declared_credential_headers_never_reach_provider_config () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:
+        {|[providers.runpod_mtp.headers]
+"api-key" = "sk-declared-secret"
+"x-auth-token" = "tok-declared-secret"
+"x-trace-hint" = "keep-me"
+|}
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected runtime TOML provider headers to parse: %s"
+      (String.concat "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          let keys =
+            List.map
+              (fun (key, _) -> String.lowercase_ascii (String.trim key))
+              provider_cfg.headers
+          in
+          List.iter
+            (fun secret_key ->
+               check bool
+                 (Printf.sprintf "%s is stripped from provider config" secret_key)
+                 false
+                 (List.exists (String.equal secret_key) keys))
+            [ "api-key"; "x-auth-token" ];
+          check bool "a non-credential header survives" true
+            (List.exists (String.equal "x-trace-hint") keys))
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_threads_model_sampling_config () =
+  let content =
+    runtime_toml_with_credentials
+      ~model_extra:{|top-p = 0.91
+top-k = 42
+min-p = 0.07
+|}
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected runtime TOML model sampling config to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.models, cfg.bindings with
+     | [ model ], [ binding ] ->
+       check (option (float 0.0001)) "model top_p" (Some 0.91)
+         model.Runtime_schema.top_p;
+       check (option int) "model top_k" (Some 42) model.Runtime_schema.top_k;
+       check (option (float 0.0001)) "model min_p" (Some 0.07)
+         model.Runtime_schema.min_p;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check (option (float 0.0001)) "provider config top_p" (Some 0.91)
+            provider_cfg.top_p;
+          check (option int) "provider config top_k" (Some 42)
+            provider_cfg.top_k;
+          check (option (float 0.0001)) "provider config min_p" (Some 0.07)
+            provider_cfg.min_p)
+     | models, bindings ->
+       failf "expected one model/binding, got %d/%d"
+         (List.length models)
+         (List.length bindings))
+
+let test_runtime_toml_rejects_non_positive_provider_connect_timeout () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 0.0")
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML connect-timeout-s parse error"
+  | Error errors ->
+    check_parse_error_contains
+      errors
+      "providers.runpod_mtp.connect-timeout-s"
+      "positive finite float"
+
+let test_runtime_toml_rejects_wrong_typed_provider_connect_timeout () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = \"600\"")
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML connect-timeout-s type error"
+  | Error errors ->
+    check_parse_error_contains
+      errors
+      "providers.runpod_mtp.connect-timeout-s"
+      (Runtime_schema.connect_timeout_s_key ^ " must be a float")
+
+let test_runtime_toml_rejects_invalid_exact_body_timeout () =
+  let key = Runtime_schema.exact_body_timeout_s_key in
+  List.iter
+    (fun raw ->
+       let content =
+         runtime_toml_with_credentials
+           ~provider_extra:(key ^ " = " ^ raw)
+           inline_credentials
+       in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected %s = %s to be rejected" key raw
+       | Error errors ->
+         check_parse_error_contains
+           errors
+           ("providers.runpod_mtp." ^ key)
+           "positive finite float")
+    [ "0.0"; "-1.0"; "nan"; "inf" ]
+
+let test_runtime_toml_rejects_wrong_typed_exact_body_timeout () =
+  let key = Runtime_schema.exact_body_timeout_s_key in
+  List.iter
+    (fun raw ->
+       let content =
+         runtime_toml_with_credentials
+           ~provider_extra:(key ^ " = " ^ raw)
+           inline_credentials
+       in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected %s = %s to be rejected" key raw
+       | Error errors ->
+         check_parse_error errors ("providers.runpod_mtp." ^ key) (key ^ " must be a float"))
+    [ "30"; "\"30\"" ]
+
+let test_runtime_toml_rejects_missing_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML credential parse error"
+  | Error errors ->
+    check_parse_error
+      errors
+      "providers.runpod_mtp.credentials.key"
+      "credential type 'env' requires non-empty 'key'"
+
+let test_runtime_toml_trims_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+key = " OLLAMA_CLOUD_API_KEY "
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error _ -> fail "expected runtime TOML to parse"
+  | Ok config ->
+    (match config.providers with
+     | [ provider ] ->
+       (match provider.credentials with
+        | Some (Runtime_schema.Env key) ->
+          check string "trimmed env key" "OLLAMA_CLOUD_API_KEY" key
+        | Some _ -> fail "expected env credential"
+        | None -> fail "expected credential")
+     | _ -> fail "expected one provider")
+
+let test_runtime_toml_rejects_unknown_protocol () =
+  let content =
+    {|
+[runtime]
+default = "invalid_protocol.test_model"
+
+[providers.invalid_protocol]
+display-name = "Invalid protocol"
+protocol = "future-wire"
+endpoint = "https://invalid.example/v1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[invalid_protocol.test_model]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML to reject an unknown protocol"
+  | Error errors ->
+    check bool "rejects unknown protocol"
+      true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+            String.equal err.path "providers.invalid_protocol.protocol"
+            && String.equal err.message
+                 "unknown protocol \"future-wire\": expected one of \
+                  messages-cli, messages-http, openai-compatible-cli, \
+                  openai-compatible-http, ollama-http, gemini-http, \
+                  vertex-gemini, codex-app-server, claude-code, \
+                  antigravity-cli, muse-serve")
+         errors)
+
+let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
+  let render (protocol : Runtime_toml.editor_protocol) =
+    let transport =
+      match protocol.transport with
+      | Runtime_toml.Endpoint -> "endpoint"
+      | Runtime_toml.Command -> "command"
+    in
+    let semantics =
+      match protocol.semantics with
+      | Runtime_toml.Http_provider -> "http_provider"
+      | Runtime_toml.Official_client -> "official_client"
+    in
+    let credential_policy =
+      match protocol.credential_policy with
+      | Runtime_toml.Credentials_optional -> "optional"
+      | Runtime_toml.Credentials_forbidden -> "forbidden"
+      | Runtime_toml.Credentials_file_required -> "file_required"
+    in
+    Printf.sprintf
+      "%s:%s:%s:%s:%b:%s:%s"
+      protocol.protocol
+      transport
+      semantics
+      credential_policy
+      protocol.requires_non_interactive
+      (String.concat "," protocol.provider_fields)
+      (String.concat "," protocol.required_provider_fields)
+  in
+  check
+    (list string)
+    "only production-materializable protocols are offered"
+    [ "messages-http:endpoint:http_provider:optional:false::"
+    ; "openai-compatible-http:endpoint:http_provider:optional:false::"
+    ; "ollama-http:endpoint:http_provider:optional:false::"
+    ; "gemini-http:endpoint:http_provider:optional:false::"
+    ; "vertex-gemini:endpoint:http_provider:optional:false::"
+    ; "codex-app-server:command:official_client:forbidden:true:account-home:"
+    ; "claude-code:command:official_client:forbidden:true:account-home:"
+    ; "antigravity-cli:command:official_client:file_required:true:agent,effort,timeout-s:timeout-s"
+    ; "muse-serve:command:official_client:forbidden:true:account-home:account-home"
+    ]
+    (List.map render Runtime_toml.editor_protocols)
+;;
+
+(* Only a provider id becomes a top-level table (its bindings), so only a
+   provider id is refused for naming one; test_runtime_toml_namespace
+   covers every name and shows model ids are not refused (#39539). *)
+let test_runtime_toml_rejects_reserved_provider_ids () =
+  let cases =
+    [ ( "provider"
+      , "providers.runtime"
+      , {|
+[providers.runtime]
+display-name = "Reserved"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+|} )
+    ]
+  in
+  List.iter
+    (fun (kind, path, content) ->
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected reserved %s id to fail" kind
+       | Error errors -> check_parse_error_contains errors path "reserved top-level")
+    cases
+;;
+
+let test_runtime_toml_rejects_obsolete_top_level_namespaces () =
+  List.iter
+    (fun namespace ->
+       let content = Printf.sprintf "[%s]\nlegacy = true\n" namespace in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected obsolete namespace %s to fail" namespace
+       | Error errors ->
+         check_parse_error
+           errors
+           namespace
+           (Printf.sprintf
+              "obsolete top-level namespace %S is not supported"
+              namespace))
+    [ "system"; "routes"; "profiles" ]
+;;
+
+let test_runtime_toml_accepts_messages_caching_capability () =
+  let content =
+    {|
+[runtime]
+default = "anthropic.claude-opus-4"
+
+[providers.anthropic]
+display-name = "Anthropic"
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+
+[providers.anthropic.capabilities]
+uses-messages-caching = true
+
+[models.claude-opus-4]
+api-name = "claude-opus-4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[anthropic.claude-opus-4]
+max-concurrent = 2
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    fail
+      (errors
+       |> List.map (fun (err : Runtime_toml.parse_error) ->
+         err.path ^ ": " ^ err.message)
+       |> String.concat "; ")
+  | Ok config ->
+    (match config.providers with
+     | [ provider ] ->
+       (match provider.Runtime_schema.capabilities with
+        | Some caps ->
+          check bool "uses_anthropic_caching from uses-messages-caching" true
+            caps.uses_anthropic_caching
+        | None -> fail "expected provider capabilities")
+     | _ -> fail "expected one provider")
+
+let test_runtime_adapter_uses_canonical_anthropic_headers () =
+  let content =
+    {|
+[runtime]
+default = "claude.claude-opus-4"
+
+[providers.claude]
+display-name = "Anthropic"
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+
+[models.claude-opus-4]
+api-name = "claude-opus-4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[claude.claude-opus-4]
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    fail
+      (errors
+       |> List.map (fun (err : Runtime_toml.parse_error) ->
+         err.path ^ ": " ^ err.message)
+       |> String.concat "; ")
+  | Ok config ->
+    let expected =
+      [ "anthropic-version", "2023-06-01"
+      ; "Content-Type", "application/json"
+      ]
+    in
+    check
+      (list (pair string string))
+      "canonical Anthropic defaults"
+      expected
+      (Runtime_provider_binding.default_headers_for_kind
+         Llm_provider.Provider_config.Anthropic);
+    (match config.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config config binding with
+        | Error message -> fail message
+        | Ok provider_config ->
+          check
+            (list (pair string string))
+            "adapter uses canonical non-auth header defaults"
+            expected
+            provider_config.headers)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let kimi_runtime_toml =
+  {|
+[runtime]
+default = "kimi.kimi-for-coding"
+
+[providers.kimi]
+display-name = "Kimi Code Plan"
+protocol = "messages-http"
+endpoint = "https://example.invalid/kimi"
+
+[providers.kimi.credentials]
+type = "inline"
+value = "test-kimi-key"
+
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 256000
+tools-support = true
+streaming = true
+
+[kimi.kimi-for-coding]
+|}
+
+let kimi_runtime_config_or_fail () =
+  match Runtime_toml.parse_string kimi_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected Kimi runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let test_runtime_adapter_materializes_kimi_messages_http () =
+  let cfg = kimi_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Error msg -> failf "unexpected Kimi messages-http adapter error: %s" msg
+     | Ok provider_cfg ->
+       check string "base url" "https://example.invalid/kimi" provider_cfg.base_url;
+       check string "request path" "/v1/messages" provider_cfg.request_path;
+       check
+         string
+         "api key"
+         "test-kimi-key"
+         (Llm_provider.Secret.header_value provider_cfg.api_key);
+       (match provider_cfg.kind with
+        | Llm_provider.Provider_config.Kimi -> ()
+        | other ->
+          failf
+            "expected Kimi provider kind, got %s"
+            (Llm_provider.Provider_config.string_of_provider_kind other)))
+  | bindings -> failf "expected one Kimi binding, got %d" (List.length bindings)
+
+let unregistered_messages_http_toml =
+  {|
+[runtime]
+default = "local.model"
+
+[providers.local]
+display-name = "Local Messages API"
+protocol = "messages-http"
+endpoint = "https://example.invalid/messages"
+
+[models.model]
+api-name = "model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[local.model]
+|}
+
+let incompatible_messages_http_toml =
+  {|
+[runtime]
+default = "deepseek.model"
+
+[providers.deepseek]
+display-name = "DeepSeek over wrong protocol"
+protocol = "messages-http"
+endpoint = "https://api.deepseek.com/v1/messages"
+
+[models.model]
+api-name = "model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[deepseek.model]
+|}
+
+let test_runtime_adapter_rejects_unregistered_messages_http () =
+  match Runtime_toml.parse_string unregistered_messages_http_toml with
+  | Error errors ->
+    failf
+      "expected unregistered messages-http runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Ok provider_cfg ->
+          failf
+            "unregistered messages-http provider must fail closed, got kind %s"
+            (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+        | Error _ -> ())
+     | bindings -> failf "expected one local binding, got %d" (List.length bindings))
+
+let test_runtime_adapter_rejects_incompatible_messages_http_kind () =
+  match Runtime_toml.parse_string incompatible_messages_http_toml with
+  | Error errors ->
+    failf
+      "expected incompatible messages-http runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Ok provider_cfg ->
+          failf
+            "incompatible messages-http provider must fail closed, got kind %s"
+            (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+        | Error msg ->
+          check
+            bool
+            "error names messages compatibility policy"
+            true
+            (String_util.contains_substring msg "messages-compatible");
+          check
+            bool
+            "error names provider"
+            true
+            (String_util.contains_substring msg "deepseek"))
+     | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings))
+
+let deepseek_runtime_toml =
+  {|
+[runtime]
+default = "deepseek.deepseek-v4-pro"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+thinking-control-format = "reasoning-effort"
+supports-response-format-json = true
+supports-structured-output = true
+
+[deepseek.deepseek-v4-pro]
+max-concurrent = 2
+|}
+
+let deepseek_runtime_config_or_fail () =
+  match Runtime_toml.parse_string deepseek_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected DeepSeek runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let deepseek_provider_config_or_fail () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected DeepSeek adapter error: %s" msg)
+  | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings)
+
+let with_deepseek_env deepseek f = with_env "DEEPSEEK_API_KEY" deepseek f
+
+let glm_coding_runtime_toml =
+  {|
+[runtime]
+default = "glm-coding.glm-4-7-coding"
+
+[providers.glm-coding]
+display-name = "GLM Coding Plan"
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_CODING_API_KEY"
+
+[models.glm-4-7-coding]
+api-name = "glm-4.7"
+max-context = 200000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.glm-4-7-coding.capabilities]
+max-output-tokens = 128000
+supports-tool-choice = false
+supports-response-format-json = true
+supports-structured-output = false
+
+[glm-coding.glm-4-7-coding]
+max-concurrent = 3
+|}
+
+let glm_coding_runtime_config_or_fail () =
+  match Runtime_toml.parse_string glm_coding_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected GLM Coding Plan runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let glm_coding_provider_config_or_fail () =
+  let cfg = glm_coding_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected GLM Coding Plan adapter error: %s" msg)
+  | bindings ->
+    failf "expected one GLM Coding Plan binding, got %d" (List.length bindings)
+
+let with_glm_coding_env general coding f =
+  with_env "ZAI_API_KEY" general (fun () -> with_env "ZAI_CODING_API_KEY" coding f)
+
+let test_runtime_toml_accepts_deepseek_reasoning_effort_capability () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    (match model.capabilities with
+     | Some caps ->
+       check bool "reasoning effort parsed" true
+         (caps.thinking_control_format = Runtime_schema.Reasoning_effort);
+       check (option int) "max output" (Some 384000) caps.max_output_tokens
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_toml_accepts_chat_template_token_capability () =
+  let toml =
+    {|
+[runtime]
+default = "ollama.gemma4"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.gemma4]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4.capabilities]
+thinking-control-format = "chat_template_token"
+thinking-control-token = "<|think|>"
+
+[ollama.gemma4]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf
+      "expected Gemma4 runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.models with
+     | [ model ] ->
+       (match model.capabilities with
+        | Some caps ->
+          check bool "chat template token parsed" true
+            (caps.thinking_control_format
+             = Runtime_schema.Chat_template_token "<|think|>")
+        | None -> fail "expected model capabilities")
+     | models -> failf "expected one model, got %d" (List.length models))
+
+(* [ollama_cloud] serves two surfaces. Its catalog row declares
+   [identity_kinds = ["ollama"; "openai_compat"]] and one [request_path],
+   "/api/chat", which is the native Ollama one. A workspace that reaches it
+   over the OpenAI-compatible surface must not get that path stamped on: it
+   built https://ollama.com/v1/api/chat and 404'd 794 times across five
+   keepers on 2026-09-06 (#33652), because a registry-declared path was taken
+   whatever kind it belonged to. *)
+let ollama_cloud_openai_compat_toml =
+  {|
+[runtime]
+default = "ollama_cloud.glm-5-3"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.com/v1"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[models.glm-5-3]
+api-name = "glm-5.3"
+max-context = 262144
+tools-support = true
+streaming = true
+
+[ollama_cloud.glm-5-3]
+max-concurrent = 2
+|}
+
+let test_openai_compat_surface_keeps_the_chat_completions_path () =
+  with_env "OLLAMA_CLOUD_API_KEY" "oc-test-key" (fun () ->
+    let cfg =
+      match Runtime_toml.parse_string ollama_cloud_openai_compat_toml with
+      | Ok cfg -> cfg
+      | Error errors ->
+        failf
+          "expected ollama_cloud runtime TOML to parse: %s"
+          (String.concat
+             "; "
+             (List.map
+                (fun (err : Runtime_toml.parse_error) ->
+                   Printf.sprintf "%s: %s" err.path err.message)
+                errors))
+    in
+    match cfg.bindings with
+    | [ binding ] ->
+      (match Runtime_adapter.binding_to_provider_config cfg binding with
+       | Ok provider_cfg ->
+         check bool "kind is the one the workspace declared" true
+           (provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat);
+         check string "base_url" "https://ollama.com/v1" provider_cfg.base_url;
+         (* The catalog row's "/api/chat" belongs to its own kind, not this
+            one, so the Chat-completions default stands. *)
+         check string "request_path" "/chat/completions" provider_cfg.request_path
+       | Error msg -> failf "unexpected ollama_cloud adapter error: %s" msg)
+    | bindings ->
+      failf "expected one ollama_cloud binding, got %d" (List.length bindings))
+;;
+
+let test_runtime_adapter_materializes_deepseek_openai_compat () =
+  with_deepseek_env "ds-test-key" (fun () ->
+    let provider_cfg = deepseek_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat);
+    check string "base_url" "https://api.deepseek.com" provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "deepseek-v4-pro" provider_cfg.model_id;
+    check string "api key" "ds-test-key" (Llm_provider.Secret.header_value provider_cfg.api_key);
+    check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
+    check (option int) "max_tokens is not synthesized from capability" None
+      provider_cfg.max_tokens;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
+
+let test_runtime_adapter_max_tokens_wire_omission_and_explicit_override () =
+  with_deepseek_env "ds-test-key" (fun () ->
+    let provider_cfg = deepseek_provider_config_or_fail () in
+    let body =
+      Llm_provider.Backend_openai.build_request_assoc
+        ~config:provider_cfg
+        ~messages:[]
+        ()
+    in
+    (match body with
+     | `Assoc fields ->
+       check bool "catalog capability does not become a wire max_tokens field"
+         false
+         (List.mem_assoc "max_tokens" fields)
+     | _ -> fail "expected OpenAI request object");
+    let explicit_cfg =
+      { provider_cfg with Llm_provider.Provider_config.max_tokens = Some 2048 }
+    in
+    let explicit_body =
+      Llm_provider.Backend_openai.build_request_assoc
+        ~config:explicit_cfg
+        ~messages:[]
+        ()
+    in
+    match explicit_body with
+    | `Assoc fields ->
+      check (option (of_pp Yojson.Safe.pp))
+        "explicit override reaches wire unchanged"
+        (Some (`Int 2048))
+        (List.assoc_opt "max_tokens" fields)
+    | _ -> fail "expected explicit OpenAI request object")
+
+let test_runtime_toml_accepts_glm_coding_capability () =
+  let cfg = glm_coding_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    check (option bool) "thinking enabled" (Some true) model.thinking_support;
+    check (option bool) "preserve thinking" (Some true) model.preserve_thinking;
+    (match model.capabilities with
+     | Some caps ->
+       check (option int) "max output" (Some 128000) caps.max_output_tokens;
+       (* This test is about the parser accepting the declaration, so the
+          declaration is what it asserts. *)
+       check (option bool) "forced tool choice declared off" (Some false)
+         caps.supports_tool_choice
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_adapter_materializes_glm_coding_provider () =
+  with_glm_coding_env "general-key" "coding-key" (fun () ->
+    let provider_cfg = glm_coding_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.Glm);
+    check string "base_url" "https://api.z.ai/api/coding/paas/v4"
+      provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "glm-4.7" provider_cfg.model_id;
+    check string "api key uses coding lane" "coding-key" (Llm_provider.Secret.header_value provider_cfg.api_key);
+    check (option int) "max_context" (Some 200000) provider_cfg.max_context;
+    check (option int) "max_tokens is not synthesized from capability" None
+      provider_cfg.max_tokens;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
+
+let test_runtime_adapter_file_credentials () =
+  let directory = Filename.temp_file "runtime-credentials-" "" in
+  Sys.remove directory;
+  Unix.mkdir directory 0o700;
+  let path = Filename.concat directory "api-key" in
+  let link = Filename.concat directory "linked-key" in
+  let materialize path =
+    let cfg =
+      { Runtime_schema.providers =
+          [ { runpod_provider with credentials = Some (File path) } ]
+      ; models = [ qwen_model ]
+      ; bindings = [ runpod_binding ]
+      ; default_runtime_id = Some "runpod_mtp.qwen"
+      ; keeper_assignments = []; media_failover = []; lane_decls = []
+      ; exact_output_lane_decls = []; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+      ; egress_allowlists = []; lsp_servers = []
+      }
+    in
+    Runtime_adapter.binding_to_provider_config cfg runpod_binding
+  in
+  let reject path expected =
+    match materialize path with
+    | Ok _ -> fail "unavailable credential unexpectedly materialized"
+    | Error message -> check string "safe credential error" expected message
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (fun file -> if Sys.file_exists file then Sys.remove file) [ link; path ];
+      Unix.rmdir directory)
+    (fun () ->
+      reject path "API credential file is missing";
+      let write value =
+        let channel = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o600 path in
+        Fun.protect ~finally:(fun () -> close_out channel)
+          (fun () -> output_string channel value)
+      in
+      write "  fixture-secret-token\n";
+      (match materialize path with
+       | Error message -> failf "file credential failed: %s" message
+       | Ok config ->
+         check string "file key reaches provider authentication" "fixture-secret-token"
+           (Llm_provider.Secret.header_value config.api_key);
+         check int "secret not duplicated in headers" 0
+           (normalized_header_count "Authorization" config.headers));
+      Unix.chmod path 0o644;
+      reject path "API credential file must be owned by the current user and private";
+      Unix.chmod path 0o600;
+      Unix.symlink path link;
+      reject link "API credential file could not be read as an owned regular file";
+      write {|{"access_token":"fixture-secret-token"}|};
+      reject path "API credential file must contain a raw API key, not a JSON credential document";
+      write " \n";
+      reject path "API credential file is empty";
+      reject "relative-secret-path" "API credential file must use an absolute path")
+
+let test_runtime_adapter_keeps_auth_out_of_headers () =
+  let cfg =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []
+    ; lsp_servers = []
+    }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  | Error msg -> failf "unexpected adapter error: %s" msg
+  | Ok provider_cfg ->
+    check string "api key" "rp-test-token" (Llm_provider.Secret.header_value provider_cfg.api_key);
+    check int "Authorization header count" 0
+      (header_count "Authorization" provider_cfg.headers);
+    check int "Content-Type header count" 1
+      (header_count "Content-Type" provider_cfg.headers)
+
+let test_runtime_adapter_filters_toml_auth_headers () =
+  let provider =
+    { runpod_provider with
+      headers =
+        Some
+          [ "Authorization", "Bearer from-toml"
+          ; "X-API-Key", "from-toml"
+          ; "Content-Type", "application/custom+json"
+          ; "X-Trace-Id", "trace-1"
+          ]
+    }
+  in
+  let cfg =
+    { Runtime_schema.providers = [ provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []
+    ; lsp_servers = []
+    }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  | Error msg -> failf "unexpected adapter error: %s" msg
+  | Ok provider_cfg ->
+    check string "api key" "rp-test-token" (Llm_provider.Secret.header_value provider_cfg.api_key);
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers);
+    check int "x-api-key header count" 0
+      (normalized_header_count "x-api-key" provider_cfg.headers);
+    check int "Content-Type header count" 1
+      (normalized_header_count "Content-Type" provider_cfg.headers);
+    check
+      (option string)
+      "Content-Type override"
+      (Some "application/custom+json")
+      (normalized_header_value "Content-Type" provider_cfg.headers);
+    check
+      (option string)
+      "non-auth custom header"
+      (Some "trace-1")
+      (normalized_header_value "X-Trace-Id" provider_cfg.headers)
+
+let provider_cfg () =
+  let cfg =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []
+    ; lsp_servers = []
+    }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  | Ok provider_cfg -> provider_cfg
+  | Error msg -> failf "unexpected adapter error: %s" msg
+
+(* --- provider_id capability qualification ---
+
+   The adapter must stamp the runtime.toml [providers.<id>] table name into
+   [Provider_config.provider_id]: it is the capability-catalog qualification
+   key ([capability_provider_label] prefers it over the wire kind), and the
+   AGENT_CORE contract (provider_config.mli, capabilities_for_config_model) only
+   accepts an exact provider-scoped row once a provider is declared. Without
+   it every OpenAI-compatible endpoint collapsed into the "openai_compat"
+   label, which no catalog row carries — the 2026-07-15 boot-gate wipeout
+   where all routed runtimes were reported catalog-missing. *)
+
+let with_model_catalog toml f =
+  match Llm_provider.Model_catalog.of_toml_string ~source:"inline-test-catalog" toml with
+  | Error msg -> failf "test catalog parse failed: %s" msg
+  | Ok catalog ->
+    Llm_provider.Model_catalog.set_global catalog;
+    Fun.protect ~finally:Llm_provider.Model_catalog.clear_global f
+
+let test_adapter_stamps_declared_provider_id () =
+  check
+    (option string)
+    "provider_id"
+    (Some "runpod_mtp")
+    (provider_cfg ()).provider_id
+
+let test_provider_scoped_catalog_row_resolves_for_declared_provider () =
+  with_model_catalog
+    {|
+[[models]]
+model_id = "qwen"
+provider_name = "runpod_mtp"
+max_context_tokens = 160000
+|}
+    (fun () ->
+       match
+         Llm_provider.Provider_config.capabilities_for_config_model (provider_cfg ())
+       with
+       | Some caps ->
+         check
+           (option int)
+           "max_context_tokens from provider-scoped row"
+           (Some 160000)
+           caps.Llm_provider.Capabilities.max_context_tokens
+       | None -> fail "provider-scoped catalog row did not resolve")
+
+let test_bare_catalog_row_stays_fail_closed_for_declared_provider () =
+  with_model_catalog
+    {|
+[[models]]
+model_id = "qwen"
+max_context_tokens = 160000
+|}
+    (fun () ->
+       match
+         Llm_provider.Provider_config.capabilities_for_config_model (provider_cfg ())
+       with
+       | Some _ ->
+         fail
+           "bare catalog row must not satisfy a declared provider (exact \
+            provider-scoped row required)"
+       | None -> ())
+
+let test_declared_thinking_capabilities_override_catalog () =
+  with_model_catalog
+    {|
+[[models]]
+model_id = "qwen"
+provider_name = "runpod_mtp"
+supports_system_prompt = true
+max_output_tokens = 32768
+supports_reasoning = true
+thinking_control_format = "ollama_think"
+|}
+    (fun () ->
+       let runtime_caps =
+         { Runtime_schema.model_capabilities_default with
+           thinking_control_format = Runtime_schema.No_thinking_control
+         ; declared_thinking_control_format = Some Runtime_schema.No_thinking_control
+         ; reasoning_streaming_format =
+             Some (Runtime_schema.Delta_reasoning_field "reasoning_content")
+         }
+       in
+       let model = { qwen_model with capabilities = Some runtime_caps } in
+       let cfg =
+         { Runtime_schema.providers = [ runpod_provider ]
+         ; models = [ model ]
+         ; bindings = [ runpod_binding ]
+         ; default_runtime_id = Some "runpod_mtp.qwen"
+         ; keeper_assignments = []
+         ; media_failover = []
+         ; lane_decls = []
+         ; exact_output_lane_decls = []
+         ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+         ; egress_allowlists = []
+         ; lsp_servers = []
+         }
+       in
+       let provider_cfg =
+         match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+         | Ok provider_cfg -> provider_cfg
+         | Error msg -> failf "unexpected adapter error: %s" msg
+       in
+       match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
+       | None -> fail "declared thinking capability override should resolve"
+       | Some caps ->
+         check bool "declared thinking control wins" true
+           (caps.thinking_control_format
+            = Llm_provider.Capabilities.No_thinking_control);
+         check bool "sparse system prompt preserves catalog" true caps.supports_system_prompt;
+         check bool "declared transport stream parser wins" true
+           (caps.reasoning_streaming_format
+            = Llm_provider.Capabilities.Delta_reasoning_field "reasoning_content");
+         let body =
+           Llm_provider.Backend_openai.build_request_assoc
+             ~config:{ provider_cfg with max_tokens = Some 65536 }
+             ~messages:[] ()
+         in
+         check int "sparse thinking override preserves catalog output ceiling on wire"
+           32768 Yojson.Safe.Util.(body |> member "max_tokens" |> to_int))
+
+let glm_vision_binding_config ~runtime_caps =
+  let provider = { runpod_provider with id = "glm-coding" } in
+  let model =
+    { qwen_model with id = "glm-4.6v"; api_name = "glm-4.6v"
+    ; capabilities = Some runtime_caps }
+  in
+  let binding =
+    { runpod_binding with provider_id = provider.id; model_id = model.id }
+  in
+  let cfg =
+    { Runtime_schema.providers = [ provider ]; models = [ model ]
+    ; bindings = [ binding ]; default_runtime_id = Some "glm-coding.glm-4.6v"
+    ; keeper_assignments = []; media_failover = []; lane_decls = []
+    ; exact_output_lane_decls = []; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []; lsp_servers = [] }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg binding with
+  | Ok config -> config
+  | Error detail -> failf "vision binding failed: %s" detail
+
+let check_vision_output_wire config =
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "65536" (fun () ->
+    let body =
+      Llm_provider.Backend_openai.build_request_assoc ~config
+        ~messages:[] ()
+    in
+    check bool "absent request budget remains absent despite known ceiling" true
+      (Yojson.Safe.Util.member "max_tokens" body = `Null);
+    let vision = Keeper_vision_tool.provider_for_vision config in
+    check (option int) "vision requests its configured default" (Some 65536)
+      vision.max_tokens;
+    let body =
+      Llm_provider.Backend_openai.build_request_assoc ~config:vision
+        ~messages:[] ()
+    in
+    check int "vision request reaches wire within GLM image-model ceiling"
+      32768 Yojson.Safe.Util.(body |> member "max_tokens" |> to_int))
+
+let test_runtime_max_only_capability_overrides_provider_base_on_wire () =
+  with_model_catalog
+    {|
+[[providers]]
+id = "glm-coding"
+kind = "glm"
+base_url = "https://example.invalid/v4"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "glm"
+|}
+    (fun () ->
+       let baseline =
+         glm_vision_binding_config
+           ~runtime_caps:Runtime_schema.model_capabilities_default
+       in
+       let baseline_caps =
+         match Llm_provider.Provider_config.capabilities_for_config_model baseline with
+         | Some caps -> caps | None -> fail "provider base must resolve"
+       in
+       check (option int) "fixture reaches broader provider ceiling"
+         (Some 40960) baseline_caps.max_output_tokens;
+       let config =
+         glm_vision_binding_config
+           ~runtime_caps:{ Runtime_schema.model_capabilities_default with
+             max_output_tokens = Some 32768 }
+       in
+       (match Llm_provider.Provider_config.capabilities_for_config_model config with
+        | None -> fail "explicit model ceiling lost provider capabilities"
+        | Some caps ->
+          check bool "max-only declaration preserves provider reasoning contract"
+            baseline_caps.supports_reasoning caps.supports_reasoning);
+       check_vision_output_wire config)
+
+let test_embedded_glm_vision_catalog_ceiling_reaches_wire () =
+  let previous = Llm_provider.Model_catalog.global () in
+  Llm_provider.Model_catalog.clear_global ();
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+      | None -> Llm_provider.Model_catalog.clear_global ())
+    (fun () ->
+       glm_vision_binding_config
+         ~runtime_caps:Runtime_schema.model_capabilities_default
+       |> check_vision_output_wire)
+
+(* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
+   Provider_config. Before the fix the adapter dropped both binding
+   fields, so keep_alive fell back to AGENT_CORE_OLLAMA_KEEP_ALIVE / "-1" and
+   num_ctx to the Ollama Modelfile default. *)
+let ollama_keep_alive_runtime_toml =
+  {|
+[runtime]
+default = "ollama.qwen-local"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen-local]
+api-name = "qwen3:32b"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[ollama.qwen-local]
+max-concurrent = 1
+keep-alive = "30m"
+num-ctx = 16384
+|}
+
+let test_runtime_adapter_threads_binding_keep_alive_and_num_ctx () =
+  match Runtime_toml.parse_string ollama_keep_alive_runtime_toml with
+  | Error errors ->
+    failf
+      "expected Ollama keep-alive runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       check (option string) "binding keep_alive parsed" (Some "30m")
+         binding.Runtime_schema.keep_alive;
+       check (option int) "binding num_ctx parsed" (Some 16384)
+         binding.Runtime_schema.num_ctx;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check bool "kind" true
+            (provider_cfg.kind = Llm_provider.Provider_config.Ollama);
+          check (option string) "provider config keep_alive" (Some "30m")
+            provider_cfg.keep_alive;
+          check (option int) "provider config num_ctx" (Some 16384)
+            provider_cfg.num_ctx)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default () =
+  let provider_cfg = provider_cfg () in
+  check (option string) "keep_alive unset without TOML value" None
+    provider_cfg.keep_alive;
+  check (option int) "num_ctx unset without TOML value" None
+    provider_cfg.num_ctx
+
+let runtime_or_fail ?(provider = runpod_provider) () =
+  let cfg =
+    { Runtime_schema.providers = [ provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []
+    ; lsp_servers = []
+    }
+  in
+  match Runtime_instance.of_binding cfg runpod_binding with
+  | Ok runtime -> runtime
+  | Error reason ->
+    failf
+      "expected runtime binding to materialize: %s"
+      (Runtime_config_error.string_of_drop_reason reason)
+
+let agent_core_provider_config_or_fail runtime =
+  match runtime.Runtime_instance.execution with
+  | Runtime_execution.Agent_core provider_config -> provider_config
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ ->
+    fail "expected Agent Core runtime"
+
+let test_dispatch_rejects_missing_declared_env_credential () =
+  let env_key = "MASC_TEST_DISPATCH_CREDENTIAL_MISSING_5D72C48E" in
+  with_env env_key "" (fun () ->
+    let provider =
+      { runpod_provider with credentials = Some (Runtime_schema.Env env_key) }
+    in
+    let runtime = runtime_or_fail ~provider () in
+    let provider_config = agent_core_provider_config_or_fail runtime in
+    match Runtime_instance.validate_dispatch_credential ~provider_config runtime with
+    | Error
+        ((Runtime_instance.Required_env_credential_missing
+            { provider_id; env_key = actual_env_key }) as error) ->
+      check string "provider id" "runpod_mtp" provider_id;
+      check string "env key" env_key actual_env_key;
+      (match Runtime_instance.dispatch_credential_error_to_core_error error with
+       | Agent_core.Error.Config (Agent_core.Error.MissingEnvVar { var_name }) ->
+         check string "typed missing credential env" env_key var_name
+       | core_error ->
+         failf
+           "expected MissingEnvVar, got: %s"
+           (Agent_core.Error.to_string core_error))
+    | Error error ->
+      failf
+        "expected missing env credential, got: %s"
+        (Runtime_instance.dispatch_credential_error_to_string error)
+    | Ok () -> fail "expected dispatch credential validation to fail");
+  let check_unavailable credential expected_carrier =
+    let provider = { runpod_provider with credentials = Some credential } in
+    let runtime = runtime_or_fail ~provider () in
+    let provider_config = agent_core_provider_config_or_fail runtime in
+    match Runtime_instance.validate_dispatch_credential ~provider_config runtime with
+    | Error (Runtime_instance.Declared_credential_unavailable _ as error) ->
+      (match Runtime_instance.dispatch_credential_error_to_core_error error with
+       | Agent_core.Error.Config
+           (Agent_core.Error.CredentialUnavailable
+              { provider_id; carrier }) ->
+         check string "unavailable provider id" "runpod_mtp" provider_id;
+         check bool "typed unavailable carrier" true (carrier = expected_carrier)
+       | core_error ->
+         failf
+           "expected CredentialUnavailable, got: %s"
+           (Agent_core.Error.to_string core_error))
+    | Error error ->
+      failf
+        "expected unavailable credential, got: %s"
+        (Runtime_instance.dispatch_credential_error_to_string error)
+    | Ok () -> fail "expected unavailable credential validation to fail"
+  in
+  check_unavailable
+    (Runtime_schema.Inline "")
+    Agent_core.Error.InlineCredential
+  (* File credentials now fail during materialization, before a dispatchable
+     runtime exists; the file materialization case above covers that boundary. *)
+
+let test_dispatch_accepts_transformed_or_credential_free_provider () =
+  let env_key = "MASC_TEST_DISPATCH_CREDENTIAL_TRANSFORM_0187ABCE" in
+  with_env env_key "" (fun () ->
+    let provider =
+      { runpod_provider with credentials = Some (Runtime_schema.Env env_key) }
+    in
+    let runtime = runtime_or_fail ~provider () in
+    let provider_config = agent_core_provider_config_or_fail runtime in
+    let transformed_provider_config =
+      { provider_config with
+        Llm_provider.Provider_config.api_key =
+          Llm_provider.Secret.of_string "injected-at-dispatch"
+      }
+    in
+    check (result unit reject) "transformed credential" (Ok ())
+      (Runtime_instance.validate_dispatch_credential
+         ~provider_config:transformed_provider_config
+         runtime));
+  let provider = { runpod_provider with credentials = None } in
+  let runtime = runtime_or_fail ~provider () in
+  let provider_config = agent_core_provider_config_or_fail runtime in
+  check (result unit reject) "credential-free provider" (Ok ())
+    (Runtime_instance.validate_dispatch_credential ~provider_config runtime)
+
+(* Two catalog rows that take an API key ([glm-coding], [openrouter]) and one
+   that does not ([ollama]). [declare] names the rows that carry a
+   [credentials] block; the others leave the request without an auth header
+   unless dispatch turns it away. *)
+let keyed_rows_runtime ~declare ~provider_id =
+  let credentials id =
+    if List.mem id declare
+    then Printf.sprintf {|[providers.%s.credentials]
+type = "inline"
+value = "fixture-key"
+|} id
+    else ""
+  in
+  let toml = Printf.sprintf
+    {|[runtime]
+default = "glm-coding.probe"
+[providers.glm-coding]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+%s
+[providers.openrouter]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+%s
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://127.0.0.1:2"
+[models.probe]
+api-name = "probe-model"
+tools-support = true
+[models.probe.capabilities]
+max-output-tokens = 4096
+[glm-coding.probe]
+max-tokens = 1024
+[openrouter.probe]
+max-tokens = 1024
+[ollama.probe]
+max-tokens = 1024
+|} (credentials "glm-coding") (credentials "openrouter")
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf "keyed rows config failed: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) ->
+           e.path ^ ": " ^ e.message) errors))
+  | Ok cfg ->
+    (match
+       List.find_opt
+         (fun (b : Runtime_schema.binding) -> String.equal b.provider_id provider_id)
+         cfg.bindings
+     with
+     | None -> failf "no binding for %s" provider_id
+     | Some binding ->
+       (match Runtime_instance.of_binding cfg binding with
+        | Ok runtime -> runtime
+        | Error reason ->
+          failf "%s did not materialize: %s" provider_id
+            (Runtime_config_error.string_of_drop_reason reason)))
+
+let test_dispatch_rejects_undeclared_keyed_row () =
+  let runtime = keyed_rows_runtime ~declare:[] ~provider_id:"glm-coding" in
+  let provider_config = agent_core_provider_config_or_fail runtime in
+  check bool "the row carries no secret" true
+    (Llm_provider.Secret.is_empty provider_config.api_key);
+  match Runtime_instance.validate_dispatch_credential ~provider_config runtime with
+  | Error (Runtime_instance.Undeclared_credential { provider_id } as error) ->
+    check string "provider id" "glm-coding" provider_id;
+    check string "message names the block to add"
+      "provider \"glm-coding\" requires an API key and declares no credential: add \
+       [providers.glm-coding.credentials] with the environment variable that holds it"
+      (Runtime_instance.dispatch_credential_error_to_string error);
+    (match Runtime_instance.dispatch_credential_error_to_core_error error with
+     | Agent_core.Error.Config
+         (Agent_core.Error.CredentialUnavailable { provider_id; carrier }) ->
+       check string "typed provider id" "glm-coding" provider_id;
+       check bool "typed undeclared carrier" true
+         (carrier = Agent_core.Error.UndeclaredCredential)
+     | core_error ->
+       failf "expected CredentialUnavailable, got: %s"
+         (Agent_core.Error.to_string core_error))
+  | Error error ->
+    failf "expected undeclared credential, got: %s"
+      (Runtime_instance.dispatch_credential_error_to_string error)
+  | Ok () -> fail "an undeclared keyed row was let through to dispatch"
+
+let test_dispatch_rejects_only_the_undeclared_sibling_row () =
+  let declare = [ "glm-coding" ] in
+  let declared = keyed_rows_runtime ~declare ~provider_id:"glm-coding" in
+  check (result unit reject) "declared row dispatches" (Ok ())
+    (Runtime_instance.validate_dispatch_credential
+       ~provider_config:(agent_core_provider_config_or_fail declared)
+       declared);
+  let bare = keyed_rows_runtime ~declare ~provider_id:"openrouter" in
+  match
+    Runtime_instance.validate_dispatch_credential
+      ~provider_config:(agent_core_provider_config_or_fail bare)
+      bare
+  with
+  | Error (Runtime_instance.Undeclared_credential { provider_id }) ->
+    check string "only the missing row is named" "openrouter" provider_id
+  | Error error ->
+    failf "expected undeclared credential, got: %s"
+      (Runtime_instance.dispatch_credential_error_to_string error)
+  | Ok () -> fail "the undeclared sibling row was let through"
+
+let test_dispatch_accepts_auth_none_row_without_credentials () =
+  let runtime = keyed_rows_runtime ~declare:[] ~provider_id:"ollama" in
+  check (result unit reject) "auth = none needs no credential block" (Ok ())
+    (Runtime_instance.validate_dispatch_credential
+       ~provider_config:(agent_core_provider_config_or_fail runtime)
+       runtime)
+
+let test_runtime_of_binding_preserves_failure_reason () =
+  let cfg =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []
+    ; lsp_servers = []
+    }
+  in
+  match Runtime_instance.of_binding cfg { runpod_binding with enabled = false } with
+  | Ok _ -> fail "expected disabled binding materialization to fail"
+  | Error Runtime_config_error.Binding_disabled ->
+    check string "disabled binding reason"
+      "binding is disabled by runtime.toml"
+      (Runtime_config_error.string_of_drop_reason Runtime_config_error.Binding_disabled)
+  | Error other ->
+    failf
+      "expected Binding_disabled, got %s"
+      (Runtime_config_error.string_of_drop_reason other)
+
+let with_dashboard_probe_http_get hook f =
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
+    hook;
+  Fun.protect
+    ~finally:(fun () ->
+      Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
+    f
+
+let first_provider_probe json =
+  match Yojson.Safe.Util.(member "providers" json |> to_list) with
+  | provider :: _ -> provider
+  | [] -> fail "expected at least one provider probe"
+
+let dashboard_probe_missing_auth_calls = ref 0
+
+let assert_dashboard_runtime_probe_reachable runtime =
+  let reachable_json =
+    with_dashboard_probe_http_get
+      (fun ~url ~headers ~timeout_sec:_ ->
+         check string "models probe URL"
+           "https://example-runpod.proxy.runpod.net/v1/models"
+           url;
+         check bool "auth header present" true
+           (Option.is_some (normalized_header_value "authorization" headers));
+         check bool "auth header is bearer" true
+           (match normalized_header_value "authorization" headers with
+            | Some value -> String.starts_with ~prefix:"Bearer " value
+            | None -> false);
+         Ok
+           ( 200
+           , [ "content-type", "application/json" ]
+           , {|{"data":[{"id":"qwen"}]}|} ))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let reachable_provider = first_provider_probe reachable_json in
+  check string "provider status" "reachable"
+    Yojson.Safe.Util.(member "status" reachable_provider |> to_string);
+  check int "http status" 200
+    Yojson.Safe.Util.(member "http_status" reachable_provider |> to_int);
+  check int "model count" 1
+    Yojson.Safe.Util.(member "model_count" reachable_provider |> to_int);
+  let () =
+    check bool "payload redacts inline token" false
+      (String_util.contains_substring
+         (Yojson.Safe.to_string reachable_json)
+         "rp-test-token")
+  in
+  ()
+
+let assert_dashboard_runtime_probe_missing_auth runtime =
+  dashboard_probe_missing_auth_calls := 0;
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
+    (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
+       incr dashboard_probe_missing_auth_calls;
+       Ok (200, [], {|{"data":[]}|}));
+  let json =
+    Fun.protect
+      ~finally:(fun () ->
+        Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let provider = first_provider_probe json in
+  check int "missing auth does not execute HTTP" 0
+    !dashboard_probe_missing_auth_calls;
+  check string "provider status" "missing_auth"
+    (Yojson.Safe.Util.(member "status" provider |> to_string));
+  check bool "provider not reachable" false
+    (Yojson.Safe.Util.(member "reachable" provider |> to_bool));
+  let () =
+    check bool "probe not ok" false
+      (Yojson.Safe.Util.(member "probe_ok" json |> to_bool))
+  in
+  ()
+
+let assert_dashboard_runtime_probe_redacts_url_credentials () =
+  let provider =
+    { runpod_provider with
+      transport =
+        Runtime_schema.Http
+          "https://user:secret@example-runpod.proxy.runpod.net/v1?token=secret#frag"
+    }
+  in
+  let runtime = runtime_or_fail ~provider () in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ -> Ok (200, [], {|{"data":[]}|}))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let provider = first_provider_probe json in
+  check bool "payload redacts URL secrets" false
+    (String_util.contains_substring (Yojson.Safe.to_string provider) "secret");
+  check string "redacted endpoint URL"
+    "https://example-runpod.proxy.runpod.net/v1"
+    (Yojson.Safe.Util.(member "endpoint_url" provider |> to_string))
+
+let test_dashboard_runtime_probe_reachability_contracts () =
+  let runtime = runtime_or_fail () in
+  assert_dashboard_runtime_probe_reachable runtime;
+  assert_dashboard_runtime_probe_redacts_url_credentials ();
+  let env_key = "MASC_TEST_RUNTIME_PROBE_TOKEN_MISSING_6F4C1D7A" in
+  Unix.putenv env_key "";
+  let provider =
+    { runpod_provider with credentials = Some (Runtime_schema.Env env_key) }
+  in
+  let runtime = runtime_or_fail ~provider () in
+  assert_dashboard_runtime_probe_missing_auth runtime
+
+(* The probe used to send every credential as a Bearer token. A Gemini runtime
+   the keepers were using fine therefore answered auth_failed on the health
+   surface, because the Generative Language API reads the key from
+   x-goog-api-key. The header now comes from the same per-kind table the
+   transport uses. *)
+let test_dashboard_runtime_probe_auth_header_follows_provider_kind () =
+  let provider =
+    { runpod_provider with
+      id = "runpod_mtp"
+    ; display_name = "Gemini"
+    ; protocol = "gemini-http"
+    ; api_format = Runtime_schema.Gemini_api
+    ; request_path = None
+    ; wire_kind = None
+    ; transport = Runtime_schema.Http "https://generativelanguage.googleapis.com/v1beta"
+    ; credentials = Some (Runtime_schema.Inline "gm-test-key")
+    }
+  in
+  let runtime = runtime_or_fail ~provider () in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url ~headers ~timeout_sec:_ ->
+         check bool "models probe URL" true
+           (String.ends_with ~suffix:"/v1beta/models" url);
+         check (option string) "gemini key rides x-goog-api-key" (Some "gm-test-key")
+           (normalized_header_value "x-goog-api-key" headers);
+         check (option string) "no bearer token for a gemini key" None
+           (normalized_header_value "authorization" headers);
+         Ok (200, [ "content-type", "application/json" ], {|{"models":[{"name":"m"}]}|}))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let provider = first_provider_probe json in
+  check string "provider status" "reachable"
+    Yojson.Safe.Util.(member "status" provider |> to_string);
+  check int "model count" 1
+    Yojson.Safe.Util.(member "model_count" provider |> to_int)
+
+(* Vertex authenticates with Application Default Credentials the probe cannot
+   mint. It used to fall into the only unprobed arm, which answered
+   invalid_execution_transport with the codex-app-server message; a correctly
+   configured Vertex runtime showed as a broken transport. *)
+let test_dashboard_runtime_probe_vertex_is_a_stated_skip () =
+  let base_url =
+    match
+      Llm_provider.Vertex_endpoint.base_url
+        ~project:"proj"
+        ~location:(Llm_provider.Vertex_endpoint.Regional "us-central1")
+    with
+    | Ok url -> url
+    | Error detail -> failf "vertex base url: %s" detail
+  in
+  let provider =
+    { runpod_provider with
+      display_name = "Vertex"
+    ; protocol = "vertex-gemini"
+    ; api_format = Runtime_schema.Vertex_gemini_api
+    ; request_path = None
+    ; wire_kind = None
+    ; transport = Runtime_schema.Http base_url
+    ; credentials = None
+    }
+  in
+  let runtime = runtime_or_fail ~provider () in
+  let calls = ref 0 in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
+         incr calls;
+         Ok (200, [], "{}"))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let provider = first_provider_probe json in
+  check int "no HTTP request is made without a credential to send" 0 !calls;
+  check string "provider status" "skipped_native_auth"
+    Yojson.Safe.Util.(member "status" provider |> to_string);
+  check bool "reachable is unknown, not false" true
+    (Yojson.Safe.Util.(member "reachable" provider) = `Null);
+  check bool "the error names the credential, not codex-app-server" true
+    (String_util.contains_substring
+       Yojson.Safe.Util.(member "error" provider |> to_string)
+       "Application Default Credentials")
+
+let test_dashboard_runtime_probe_groups_models_by_provider () =
+  let second_model =
+    { qwen_model with Runtime_schema.id = "qwen-2"; api_name = "qwen-2" }
+  in
+  let second_binding =
+    { runpod_binding with
+      Runtime_schema.model_id = second_model.id
+    ; is_default = false
+    }
+  in
+  let config =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model; second_model ]
+    ; bindings = [ runpod_binding; second_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []
+    ; lsp_servers = []
+    }
+  in
+  let runtime binding =
+    match Runtime_instance.of_binding config binding with
+    | Ok runtime -> runtime
+    | Error reason ->
+      failf "expected grouped runtime to materialize: %s" (Runtime_config_error.string_of_drop_reason reason)
+  in
+  let calls = ref 0 in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
+         incr calls;
+         Ok (200, [ "content-type", "application/json" ], {|{"data":[]}|}))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen"
+           [ runtime runpod_binding; runtime second_binding ])
+  in
+  check int "one provider metadata request" 1 !calls;
+  let providers = Yojson.Safe.Util.(member "providers" json |> to_list) in
+  check (list string) "runtime rows preserved"
+    [ "runpod_mtp.qwen"; "runpod_mtp.qwen-2" ]
+    (List.map Yojson.Safe.Util.(fun row -> member "runtime_id" row |> to_string) providers);
+  check int "reachable runtime projections" 2
+    Yojson.Safe.Util.(member "summary" json |> member "reachable" |> to_int)
+
+let test_runtime_agent_terminal_observation_uses_runtime_identity () =
+  let config =
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+      ~name:"agent_core-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with runtime_id = Some "runpod_mtp.qwen" }
+  in
+  let observation =
+    Runtime_agent.For_testing.runtime_observation_for_completed_config
+      ~total_duration_ms:42.9
+      ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
+      config
+  in
+  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
+  check (option string) "selected model" (Some "qwen")
+    observation.selected_model;
+  check int "attempt count" 1 (List.length observation.attempts);
+  check string "attempt detail source" "runtime_agent_terminal"
+    observation.attempt_details_source
+
+let test_runtime_agent_terminal_error_preserves_uncaptured_failure () =
+  let config =
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+      ~name:"agent_core-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with runtime_id = Some "runpod_mtp.qwen" }
+  in
+  let error = "Not found: OpenAI-compatible endpoint returned 404" in
+  let observation =
+    Runtime_agent.For_testing.runtime_observation_for_terminal_config
+      ~total_duration_ms:31.2
+      ~error
+      config
+  in
+  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
+  check (option string) "no unobserved answerer is selected" None
+    observation.selected_model;
+  check int "missing capture invents no attempt" 0 (List.length observation.attempts);
+  check bool "attempt details unavailable" false observation.attempt_details_available;
+  (match observation.execution_evidence with
+   | Runtime_observation.Uncaptured_failure actual -> check string "runtime error" error actual
+   | Captured_execution -> fail "raw error cannot supply a capture");
+  check string "runtime outcome" "failed"
+    (Keeper_execution_receipt.runtime_outcome_to_string
+       (Keeper_agent_error.runtime_outcome_of_observation
+          ~lane_failover_applied:false
+          (Some observation)));
+  (* The boundary failure is unchanged, but a lane walk that
+     landed this attempt on a later candidate (lane_failover_applied)
+     always reports the turn as passed-to-next-model — that signal comes
+     from the lane walk, not from anything on the observation. *)
+  check string "runtime outcome reflects lane failover truth, not observation shape"
+    "passed_to_next_model"
+    (Keeper_execution_receipt.runtime_outcome_to_string
+       (Keeper_agent_error.runtime_outcome_of_observation
+          ~lane_failover_applied:true
+          (Some observation)))
+
+let test_runtime_agent_context_preserves_max_tokens_intent () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let check_builder_max_tokens expected max_tokens =
+        let config =
+          Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+            ~name:"agent_core-runpod_mtp.qwen"
+            ~provider_cfg:(provider_cfg ())
+            ~system_prompt:""
+            ~tools:[]
+        in
+        let config = { config with max_tokens } in
+        let builder =
+          Runtime_agent_context.builder
+            ~net:(Eio.Stdenv.net env)
+            ~config
+            ()
+        in
+        match Agent_core.Builder.build_safe builder with
+        | Error err -> fail (Agent_core.Error.to_string err)
+        | Ok agent ->
+          check (option int) "builder max_tokens intent" expected
+            (Agent_core.Agent.state agent).config.max_tokens;
+          Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent)
+      in
+      check_builder_max_tokens None None;
+      check_builder_max_tokens (Some 2048) (Some 2048)))
+
+let test_runtime_agent_context_preserves_provider_sampling_config () =
+  let provider_cfg =
+    { (provider_cfg ()) with
+      Llm_provider.Provider_config.top_p = Some 0.91
+    ; top_k = Some 42
+    ; min_p = Some 0.07
+    }
+  in
+  let config =
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+      ~name:"agent_core-runpod_mtp.qwen"
+      ~provider_cfg
+      ~system_prompt:""
+      ~tools:[]
+  in
+  check (option (float 0.0001)) "config top_p" (Some 0.91) config.top_p;
+  check (option int) "config top_k" (Some 42) config.top_k;
+  check (option (float 0.0001)) "config min_p" (Some 0.07) config.min_p;
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_core.Builder.build_safe builder with
+      | Error err -> fail (Agent_core.Error.to_string err)
+      | Ok agent ->
+        let agent_config = (Agent_core.Agent.state agent).config in
+        check (option (float 0.0001)) "builder top_p" (Some 0.91)
+          agent_config.top_p;
+        check (option int) "builder top_k" (Some 42) agent_config.top_k;
+        check (option (float 0.0001)) "builder min_p" (Some 0.07)
+          agent_config.min_p;
+        Eio.Switch.on_release sw (fun () ->
+          Agent_core.Agent.close agent)));
+  let checkpoint =
+    { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "agent_core-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 3
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = Some 0.12
+    ; top_k = Some 7
+    ; min_p = Some 0.02
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = (Agent_core.Types.default_config ~model:"qwen").response_format
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; pending_input = None; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  check (option (float 0.0001)) "resume checkpoint top_p" (Some 0.91)
+    prepared.patched_checkpoint.top_p;
+  check (option int) "resume checkpoint top_k" (Some 42)
+    prepared.patched_checkpoint.top_k;
+  check (option (float 0.0001)) "resume checkpoint min_p" (Some 0.07)
+    prepared.patched_checkpoint.min_p;
+  check (option (float 0.0001)) "resume agent top_p" (Some 0.91)
+    prepared.agent_config.top_p;
+  check (option int) "resume agent top_k" (Some 42)
+    prepared.agent_config.top_k;
+  check (option (float 0.0001)) "resume agent min_p" (Some 0.07)
+    prepared.agent_config.min_p
+
+let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
+  let provider_cfg_with_response_format =
+    let base = provider_cfg () in
+    { base with
+      Llm_provider.Provider_config.response_format = Agent_core.Types.JsonMode
+    }
+  in
+  let config =
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+      ~name:"agent_core-runpod_mtp.qwen"
+      ~provider_cfg:provider_cfg_with_response_format
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let checkpoint =
+    { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "agent_core-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 3
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; pending_input = None; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  let expected_response_format =
+    provider_cfg_with_response_format.Llm_provider.Provider_config.response_format
+  in
+  check bool "resume patches checkpoint response_format to base contract" true
+    (prepared.patched_checkpoint.Agent_core.Checkpoint.response_format
+     = expected_response_format)
+
+let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
+  let tool =
+    Agent_core.Tool.create
+      ~name:"probe_tool"
+      ~description:"probe tool"
+      ~parameters:[]
+      (fun _input -> Ok { content = "ok"; content_blocks = None; _meta = None })
+  in
+  let config =
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+      ~name:"agent_core-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[ tool ]
+  in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_core.Builder.build_safe builder with
+      | Error err -> fail (Agent_core.Error.to_string err)
+      | Ok agent ->
+        let agent_config = (Agent_core.Agent.state agent).config in
+        check
+          (option string)
+          "tool_choice remains unset"
+          None
+          (Option.map Agent_core.Types.show_tool_choice agent_config.tool_choice);
+        Eio.Switch.on_release sw (fun () ->
+          Agent_core.Agent.close agent)))
+
+let fresh_loopback_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port =
+    match Unix.getsockname socket with
+    | Unix.ADDR_INET (_, port) -> port
+    | _ -> fail "loopback socket did not expose a TCP port"
+  in
+  Unix.close socket;
+  port
+
+(* Exercise the catalog-owned wire choice through the runtime TOML and real
+   HTTP dispatch. No synthetic capability override or custom transport may
+   bypass the provider-qualified model row or select a codec for this test.
+   Explicit sampling values must survive binding and then be omitted by the
+   catalog-owned wire policy. The loopback responses prove local wire/parser
+   behavior, not account access or acceptance by OpenAI. *)
+let test_setup_responses_http_dispatch () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let observed = ref None in
+  let handler _ request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) |> Yojson.Safe.from_string in
+    observed := Some (Uri.path (Cohttp.Request.uri request), body);
+    Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"id":"setup-response","model":"fixture-model","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1}}|} () in
+  let socket = Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ()) ~on_error:raise);
+  let credential = Filename.temp_file "masc-setup-surface-" ".key" in
+  Out_channel.with_open_bin credential (fun out -> output_string out "fixture-only-key");
+  Unix.chmod credential 0o600;
+  Eio.Switch.on_release sw (fun () -> Sys.remove credential);
+  List.iter (fun request_path ->
+    let spec = Runtime_setup_spec.of_json (`Assoc [
+      "choice", `String "openai_compatible"; "model", `String "fixture-model";
+      "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool false;
+      "endpoint", `String (Printf.sprintf "http://127.0.0.1:%d/v1" port);
+      "request_path", `String request_path; "credential_file", `String credential]) |> Result.get_ok in
+    let rendered = Runtime_setup_spec.render spec in
+    let runtime = Runtime_toml.parse_string rendered.runtime_toml |> Result.get_ok in
+    let config = Runtime_adapter.binding_to_provider_config runtime (List.hd runtime.bindings) |> Result.get_ok in
+    let response = (Llm_provider.Complete.complete ~sw ~net ~config
+        ~messages:[Llm_provider.Types.make_message ~role:Llm_provider.Types.User [Llm_provider.Types.Text "Reply ok."]] ()).Llm_provider.Completion_outcome.result in
+    (match response with
+     | Ok response -> check string "Responses envelope decoded" "setup-response" response.id
+     | Error _ -> fail "setup-generated Responses request failed");
+    let path, body = Option.get !observed in
+    check string "actual request path" "/v1/responses" path;
+    let open Yojson.Safe.Util in
+    check int "actual Responses input envelope" 1 (body |> member "input" |> to_list |> List.length);
+    check bool "chat envelope absent" true (body |> member "messages" = `Null))
+    ["/responses"; "/v1/responses"]
+
+let test_openai_responses_round_trip_through_runtime_toml () =
+  let module Provider = Llm_provider.Provider_config in
+  let module Types = Llm_provider.Types in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let module Json = Yojson.Safe.Util in
+  let catalog =
+    match Llm_provider.Model_catalog.load_default () with
+    | Ok catalog -> catalog
+    | Error message -> failf "embedded catalog failed: %s" message
+  in
+  let parameters =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc [ "query", `Assoc [ "type", `String "string" ] ]
+      ; "required", `List [ `String "query" ]
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  let tool =
+    `Assoc
+      [ "name", `String "lookup_record"
+      ; "description", `String "Look up the requested record."
+      ; "input_schema", parameters
+      ]
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Eio.Switch.on_release sw (fun () ->
+    match previous_catalog with
+    | Some previous -> Llm_provider.Model_catalog.set_global previous
+    | None -> Llm_provider.Model_catalog.clear_global ());
+  Llm_provider.Model_catalog.set_global catalog;
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let requests = ref [] in
+  let handler _conn request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    let body = Yojson.Safe.from_string body in
+    requests := (path, body) :: !requests;
+    if String.equal path "/v1/responses" then
+      let model = Json.member "model" body |> Yojson.Safe.to_string in
+      let response =
+        Printf.sprintf
+          {|{"id":"response-fixture","model":%s,"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Checking the record."}]},{"type":"function_call","id":"item-distinct-from-call-id","call_id":"call-fixture","name":"lookup_record","arguments":"{\"query\":\"fixture\"}"}],"usage":{"input_tokens":17,"output_tokens":9}}|}
+          model
+      in
+      Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+    else
+      Cohttp_eio.Server.respond_string ~status:`Not_found
+        ~body:{|{"error":"unexpected provider path"}|} ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:raise);
+  List.iter
+    (fun (model_id, suffix) ->
+       let provider_id = "openai-responses" in
+       let toml =
+         Printf.sprintf
+           {|
+[runtime]
+default = "%s.fixture"
+[providers.%s]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d%s"
+[providers.%s.credentials]
+type = "inline"
+value = "local-fixture-key"
+[models.fixture]
+api-name = "%s"
+tools-support = true
+thinking-support = true
+reasoning-effort = "high"
+temperature = 0.3
+top-p = 0.8
+streaming = false
+[%s.fixture]
+is-default = true
+|}
+           provider_id provider_id port suffix provider_id model_id provider_id
+       in
+       let runtime =
+         match Runtime_toml.parse_string toml with
+         | Ok runtime -> runtime
+         | Error errors ->
+           failf "runtime TOML failed: %s"
+             (String.concat "; "
+                (List.map (fun (error : Runtime_toml.parse_error) ->
+                   error.path ^ ": " ^ error.message) errors))
+       in
+       let config =
+         match runtime.bindings with
+         | [ binding ] ->
+           (match Runtime_adapter.binding_to_execution runtime binding with
+            | Ok (Runtime_execution.Agent_core config) -> config
+            | Ok (Runtime_execution.Codex_app_server _
+                 | Runtime_execution.Claude_code _
+                 | Runtime_execution.Antigravity_cli _
+                 | Runtime_execution.Muse_serve _) ->
+              fail "HTTP binding selected an official client"
+            | Error message -> failf "binding failed: %s" message)
+         | _ -> fail "expected one declared binding"
+       in
+       check (option string) "provider qualifier survives binding"
+         (Some provider_id) config.provider_id;
+       check string "model api-name survives binding" model_id config.model_id;
+       check (option (float 0.0001)) "explicit temperature survives binding"
+         (Some 0.3) config.temperature;
+       check (option (float 0.0001)) "explicit top_p survives binding"
+         (Some 0.8) config.top_p;
+       check bool "no synthetic capability override" true
+         (Option.is_none config.model_capabilities_override);
+       (* This public accessor uses Some config.kind and disables bare-model
+          fallback for declared provider IDs, exactly as completion does. *)
+       let capabilities =
+         match Provider.capabilities_for_config_model config with
+         | Some capabilities -> capabilities
+         | None -> fail "declared provider/model has no capabilities"
+       in
+       check bool "provider-qualified model admits high reasoning" true
+         (match capabilities.accepted_reasoning_efforts with
+          | Some efforts -> List.mem Effort.High efforts
+          | None -> false);
+       check bool "TOML preserves the exact requested effort" true
+         (config.reasoning_effort = Some Effort.High);
+       (match Provider.validate_reasoning_effort_request_typed config with
+        | Ok () -> ()
+        | Error rejection ->
+          fail (Provider.reasoning_effort_request_rejection_to_message rejection));
+       let response =
+         match (Llm_provider.Complete.complete ~sw ~net ~config ~tools:[ tool ]
+                 ~messages:[ Types.make_message ~role:Types.User [ Types.Text "Find fixture." ] ] ()).Llm_provider.Completion_outcome.result with
+         | Ok response -> response
+         | Error error ->
+           fail
+             (Agent_core.Provider_failure_attribution.core_error_of_http_error error
+              |> Agent_core.Error.to_string)
+       in
+       check string "response model parsed" model_id response.model;
+       check string "Responses envelope parsed" "response-fixture" response.id;
+       check bool "tool use stop is parsed" true
+         (response.stop_reason = Types.StopToolUse);
+       (match response.content with
+        | [ Types.Text "Checking the record."
+          ; Types.ToolUse { id; name; input } ] ->
+          check string "call_id, not Responses item id" "call-fixture" id;
+          check string "tool name parsed" "lookup_record" name;
+          check string "tool arguments parsed" "fixture"
+            Json.(input |> member "query" |> to_string)
+        | _ -> fail "surface response lost text or the typed function call");
+       (match response.usage with
+        | Some usage ->
+          check int "input usage parsed" 17 usage.input_tokens;
+          check int "output usage parsed" 9 usage.output_tokens
+        | None -> fail "surface response lost usage");
+       let path, body =
+         match !requests with
+         | [ request ] -> request
+         | _ -> fail "each completion must dispatch exactly one local HTTP request"
+       in
+       requests := [];
+       check string "actual path has one v1 segment" "/v1/responses" path;
+       check string "requested reasoning effort reaches Responses" "high"
+         Json.(body |> member "reasoning" |> member "effort" |> to_string);
+       check string "wire model remains exact" model_id
+         Json.(body |> member "model" |> to_string);
+       (match body with
+        | `Assoc fields ->
+          List.iter
+            (fun field ->
+               check bool (field ^ " is omitted rather than sent as null")
+                 false (List.mem_assoc field fields))
+            [ "temperature"; "top_p" ]
+        | _ -> fail "Responses request is not an object");
+       check int "one input message" 1
+         Json.(body |> member "input" |> to_list |> List.length);
+       check bool "Chat input envelope absent" true (Json.member "messages" body = `Null);
+       check bool "Chat reasoning field absent" true (Json.member "reasoning_effort" body = `Null);
+       let function_json =
+         match Json.(body |> member "tools" |> to_list) with
+         | [ tool ] -> tool
+         | _ -> fail "expected one function tool"
+       in
+       check string "wire tool type" "function"
+         Json.(function_json |> member "type" |> to_string);
+       check bool "Chat function wrapper absent" true
+         (Json.member "function" function_json = `Null);
+       check string "function schema name" "lookup_record"
+         Json.(function_json |> member "name" |> to_string);
+       check string "function description" "Look up the requested record."
+         Json.(function_json |> member "description" |> to_string);
+       check bool "function parameter schema preserved" true
+         (Json.member "parameters" function_json = parameters))
+    [ "gpt-5.6-luna", ""
+    ; "gpt-5.6-luna", "/v1"
+    ; "gpt-6-astra", ""
+    ; "gpt-6-astra", "/v1"
+    ]
+
+let with_native_count_server f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let paths = ref [] in
+  let handler _conn request body =
+    let _body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    paths := path :: !paths;
+    if String.equal path "/v1/messages/count_tokens"
+    then Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":500}|} ()
+    else
+      Cohttp_eio.Server.respond_string
+        ~status:`Internal_server_error
+        ~body:{|{"error":"completion must not be dispatched"}|}
+        ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, List.rev !paths
+
+let with_native_projection_server f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let requests = ref [] in
+  let handler _conn request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    requests := (path, body) :: !requests;
+    if String.equal path "/v1/messages/count_tokens"
+    then Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":64}|} ()
+    else if String.equal path "/v1/messages"
+    then
+      Cohttp_eio.Server.respond_string
+        ~status:`OK
+        ~body:
+          {|{"id":"msg-projection","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"context-fit-fixture","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":64,"output_tokens":1}}|}
+        ()
+    else
+      Cohttp_eio.Server.respond_string
+        ~status:`Not_found
+        ~body:{|{"error":"unexpected path"}|}
+        ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, List.rev !requests
+
+let context_fit_provider_config base_url =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Anthropic
+    ~model_id:"context-fit-fixture"
+    ~base_url
+    ~api_key:"test-key"
+    ~headers:[ "Content-Type", "application/json"; "anthropic-version", "2023-06-01" ]
+    ~request_path:"/v1/messages"
+    ~max_tokens:64
+    ~max_context:512
+    ~temperature:0.2
+    ()
+
+let context_fit_runtime_config base_url =
+  Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+    ~name:"context-fit-fixture"
+    ~provider_cfg:(context_fit_provider_config base_url)
+    ~system_prompt:"Count the exact provider request before dispatch."
+    ~tools:[]
+
+let context_fit_checkpoint () =
+  { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
+  ; session_id = "context-fit-session"
+  ; agent_name = "context-fit-fixture"
+  ; model = "context-fit-fixture"
+  ; system_prompt = Some "stale"
+  ; messages = []
+  ; usage = Agent_core.Types.empty_usage
+  ; turn_count = 3
+  ; created_at = 0.0
+  ; tools = []
+  ; tool_choice = None
+  ; disable_parallel_tool_use = false
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; reasoning_effort = None
+  ; enable_thinking = None
+  ; preserve_thinking = None
+  ; response_format = Agent_core.Types.Off
+  ; cache_system_prompt = false
+  ; context = Agent_core.Context.create_sync ()
+  ; pending_input = None; mcp_sessions = []
+  ; working_context = None
+  }
+
+let check_context_fit_overflow = function
+  | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit = Some 512; _ })) ->
+    ()
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "overflowed request must not reach completion dispatch"
+
+let test_runtime_agent_fresh_build_enforces_native_context_fit () =
+  let (), paths =
+    with_native_count_server
+    @@ fun ~sw ~net ~base_url ->
+    let config = context_fit_runtime_config base_url in
+    let agent =
+      match Runtime_agent.build ~sw ~net ~config with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_core.Agent.close agent)
+      (fun () -> Agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+  in
+  check (list string) "fresh request paths" [ "/v1/messages/count_tokens" ] paths
+
+let test_runtime_agent_resume_enforces_native_context_fit () =
+  let (), paths =
+    with_native_count_server
+    @@ fun ~sw ~net ~base_url ->
+    let config = context_fit_runtime_config base_url in
+    let agent =
+      match
+        Runtime_agent.resume_from_checkpoint
+          ~sw
+          ~net
+          ~config
+          ~checkpoint:(context_fit_checkpoint ())
+      with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_core.Agent.close agent)
+      (fun () -> Agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+  in
+  check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
+
+(* Capture the native HTTP body after runtime admission and serialization.
+   Both observed failover targets use Chat Completions, including the
+   OpenAI-compatible Kimi runtime. These fixtures prove local wire behavior;
+   they do not claim acceptance by a remote provider. *)
+let with_native_source_change_server f =
+  let module Json = Yojson.Safe.Util in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let requests = ref [] in
+  let handler _conn request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all)
+      |> Yojson.Safe.from_string in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    if not (String.equal path "/v1/chat/completions") then
+      Cohttp_eio.Server.respond_string ~status:`Not_found
+        ~body:{|{"error":"unexpected source-change fixture path"}|} ()
+    else
+      let tool_turn = List.is_empty !requests in
+      requests := (path, body) :: !requests;
+      let model = Json.member "model" body in
+      let stop = if tool_turn then "tool_calls" else "stop" in
+      let content = if tool_turn then "target-visible-answer" else "continued" in
+      let call_fields = if tool_turn then
+          [ "reasoning_content", `String "target-private-reasoning"
+          ; "tool_calls", `List [ `Assoc
+              [ "id", `String "fresh-call"; "type", `String "function"
+              ; "function", `Assoc
+                  [ "name", `String "inspect"; "arguments", `String "{}" ] ] ] ]
+        else [] in
+      let fields =
+        [ "role", `String "assistant"; "content", `String content ] @ call_fields in
+      if Json.member "stream" body = `Bool true then
+        let frame delta finish_reason =
+          "data: " ^ Yojson.Safe.to_string (`Assoc
+            [ "id", `String "source-change"; "model", model
+            ; "object", `String "chat.completion.chunk"
+            ; "choices", `List [ `Assoc
+                [ "index", `Int 0; "delta", `Assoc delta
+                ; "finish_reason", finish_reason ] ] ]) ^ "\n\n" in
+        let delta = List.map (function
+          | "tool_calls", `List calls ->
+            "tool_calls", `List (List.map (function
+              | `Assoc fields -> `Assoc (("index", `Int 0) :: fields)
+              | value -> value) calls)
+          | field -> field) fields in
+        Cohttp_eio.Server.respond_string ~status:`OK
+          ~headers:(Cohttp.Header.of_list [ "content-type", "text/event-stream" ])
+          ~body:(frame delta `Null ^ frame [] (`String stop) ^ "data: [DONE]\n\n") ()
+      else
+        Cohttp_eio.Server.respond_string ~status:`OK
+          ~headers:(Cohttp.Header.of_list [ "content-type", "application/json" ])
+          ~body:(Yojson.Safe.to_string (`Assoc
+            [ "id", `String "source-change"; "model", model
+            ; "object", `String "chat.completion"
+            ; "choices", `List [ `Assoc
+                [ "index", `Int 0; "message", `Assoc fields
+                ; "finish_reason", `String stop ] ] ])) ()
+  in
+  let socket = Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, List.rev !requests
+
+let test_runtime_source_change_preserves_history () =
+  let module Json = Yojson.Safe.Util in
+  let module Types = Agent_core.Types in
+  let module Provider = Llm_provider.Provider_config in
+  let module Caps = Llm_provider.Capabilities in
+  let source_for config =
+    match Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config config with
+    | Ok source -> source
+    | Error detail -> fail detail in
+  let has_call id message =
+    Json.member "role" message = `String "assistant"
+    && (match Json.member "tool_calls" message with
+        | `List calls -> List.exists (fun call ->
+            Json.member "id" call = `String id
+            && Json.(call |> member "function" |> member "name") = `String "inspect"
+            && Json.(call |> member "function" |> member "arguments") = `String "{}") calls
+        | _ -> false) in
+  let has_result id content message =
+    Json.member "role" message = `String "tool"
+    && Json.member "tool_call_id" message = `String id
+    && Json.member "content" message = `String content in
+  List.iter (fun (model_id, replay_override, replay_fresh_reasoning) ->
+    List.iter (fun resume ->
+      List.iter (fun stream ->
+        let (), requests = with_native_source_change_server
+          @@ fun ~sw ~net ~base_url ->
+          let original = Provider.make ~kind:Provider.Glm
+              ~model_id:"glm-5.3-flash" ~base_url:(base_url ^ "/glm-source")
+              ~model_capabilities_override:
+                { Caps.glm_capabilities with reasoning_replay_override = Force_no_replay }
+              () in
+          let source = source_for original in
+          check bool "persisted GLM source has No_replay" true
+            (source.replay_contract.replay_policy = Llm_provider.Reasoning_replay_contract.No_replay);
+          let foreign =
+            { (Types.assistant_msg "foreign-visible-answer") with
+              content =
+                [ Types.Thinking { content = "foreign-private-reasoning"; signature = None }
+                ; Types.Text "foreign-visible-answer"
+                ; Types.ToolUse { id = "settled-call"; name = "inspect"; input = `Assoc [] } ]
+            ; metadata = Types.Reasoning_source.metadata source } in
+          let settled = Types.tool_result_msg ~tool_use_id:"settled-call"
+              ~content:"settled-result" () in
+          let checkpoint =
+            { (context_fit_checkpoint ()) with model = original.model_id
+            ; provider_binding = Some source
+            ; messages = [ Types.user_msg "persisted question"; foreign; settled ] } in
+          let before = Agent_core.Checkpoint.to_json checkpoint in
+          (* Exercise the durable codec before the MASC resume entry point. *)
+          let checkpoint = match Agent_core.Checkpoint.of_json before with
+            | Ok checkpoint -> checkpoint
+            | Error error -> fail (Agent_core.Error.to_string error) in
+          let caps =
+            { Caps.openai_compat_chat_capabilities with supports_reasoning = true
+            ; reasoning_streaming_format = Delta_reasoning_field "reasoning_content"
+            ; reasoning_replay_override = replay_override } in
+          let target = Provider.make ~kind:Provider.OpenAI_compat ~model_id ~base_url
+              ~request_path:"/v1/chat/completions" ~model_capabilities_override:caps
+              ~max_tokens:64 () in
+          let effects = ref 0 in
+          let tool = Agent_core.Tool.create ~name:"inspect" ~description:"Inspect"
+              ~parameters:[] (fun _ ->
+                incr effects;
+                Ok { Types.content = "fresh-result"; content_blocks = None; _meta = None }) in
+          let config =
+            { (Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"source-change" ~provider_cfg:target
+                 ~system_prompt:"continue" ~tools:[ tool ]) with
+              initial_messages = checkpoint.messages } in
+          let agent = match
+            (if resume then Runtime_agent.resume_from_checkpoint ~sw ~net ~config ~checkpoint
+             else Runtime_agent.build ~sw ~net ~config) with
+            | Ok agent -> agent
+            | Error error -> fail (Agent_core.Error.to_string error) in
+          Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+            let result = if stream then
+                Agent_core.Agent.run_stream ~sw ~on_event:ignore agent "new query"
+              else Agent_core.Agent.run ~sw agent "new query" in
+            (match result with
+             | Ok response -> check bool "target finishes the fresh tool round" true
+                 (response.stop_reason = Types.EndTurn)
+             | Error error -> fail (Agent_core.Error.to_string error));
+            check int "only the fresh tool executes" 1 !effects;
+            let messages = (Agent_core.Agent.state agent).messages in
+            check bool "canonical foreign history and settled effect remain exact" true
+              (List.take (List.length checkpoint.messages) messages = checkpoint.messages);
+            check bool "target reasoning remains canonical even under No_replay" true
+              (List.exists (fun (message : Types.message) ->
+                List.mem (Types.Thinking
+                  { content = "target-private-reasoning"; signature = None }) message.content)
+                messages);
+            let continued = Agent_core.Agent.checkpoint agent in
+            check bool "continued checkpoint carries the target binding" true
+              (match continued.provider_binding with
+               | Some actual -> Types.Reasoning_source.equal (source_for target) actual
+               | None -> false);
+            check bool "continued checkpoint retains the foreign source artifact" true
+              (List.mem foreign continued.messages));
+          check bool "original checkpoint is unmodified" true
+            (before = Agent_core.Checkpoint.to_json checkpoint)
+        in
+        let first, second = match requests with
+          | [ (first_path, first); (second_path, second) ] ->
+            check (list string) "native requests use Chat Completions"
+              [ "/v1/chat/completions"; "/v1/chat/completions" ] [ first_path; second_path ];
+            first, second
+          | _ -> failf "%s resume=%b stream=%b: expected two native completions, got %d"
+              model_id resume stream (List.length requests) in
+        List.iter (fun body ->
+          check string "target API name reaches actual HTTP body" model_id
+            Json.(body |> member "model" |> to_string);
+          check bool "sync and streaming use their actual native wire modes" stream
+            (Json.member "stream" body = `Bool true);
+          let tools = Json.(body |> member "tools" |> to_list) in
+          check (list string) "configured tool reaches native wire" [ "inspect" ]
+            (List.map (fun tool -> Json.(tool |> member "function" |> member "name" |> to_string)) tools);
+          let messages = Json.(body |> member "messages" |> to_list) in
+          check bool "historical visible answer reaches native wire" true
+            (List.exists (fun message -> Json.member "content" message =
+                `String "foreign-visible-answer") messages);
+          check bool "settled tool call reaches native wire" true
+            (List.exists (has_call "settled-call") messages);
+          check bool "settled tool result reaches native wire" true
+            (List.exists (has_result "settled-call" "settled-result") messages);
+          check bool "foreign reasoning is excluded from every native request" true
+            (List.for_all (fun message -> Json.member "reasoning_content" message <>
+                `String "foreign-private-reasoning") messages)
+        ) [ first; second ];
+        let first_messages = Json.(first |> member "messages" |> to_list) in
+        check bool "old turn reasoning is absent on the initial failover request" true
+          (List.for_all (fun message -> Json.member "reasoning_content" message = `Null)
+             first_messages);
+        let second_messages = Json.(second |> member "messages" |> to_list) in
+        check bool "fresh tool call reaches follow-up HTTP request" true
+          (List.exists (has_call "fresh-call") second_messages);
+        check bool "fresh tool result reaches follow-up HTTP request" true
+          (List.exists (has_result "fresh-call" "fresh-result") second_messages);
+        check bool "target contract controls fresh tool reasoning replay" replay_fresh_reasoning
+          (List.exists (fun message -> has_call "fresh-call" message
+              && Json.member "reasoning_content" message = `String "target-private-reasoning")
+             second_messages)
+      ) [ false; true ]
+    ) [ false; true ]
+  ) [ "deepseek-v4.1-flash", Caps.Force_latest_user_turn_tool_calls, true
+    ; "kimi-k3.1-pro", Caps.Force_no_replay, false ]
+
+let test_runtime_trimmed_reasoning_boundary () =
+  let module Types = Agent_core.Types in
+  let module Provider = Llm_provider.Provider_config in
+  let module Caps = Llm_provider.Capabilities in
+  let module Window = Runtime_model_input_tail_window in
+  let source_for config =
+    match Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config config with
+    | Ok source -> source
+    | Error detail -> fail detail in
+  List.iter (fun (foreign_source, no_replay, new_query) ->
+    List.iter (fun resume ->
+      List.iter (fun stream ->
+        let blocked = foreign_source && not no_replay && not new_query in
+        let (), requests = with_native_source_change_server
+          @@ fun ~sw ~net ~base_url ->
+          let caps =
+            { Caps.openai_compat_chat_capabilities with supports_reasoning = true
+            ; reasoning_streaming_format = Delta_reasoning_field "reasoning_content"
+            ; reasoning_replay_override =
+                if no_replay then Force_no_replay else Force_latest_user_turn_tool_calls } in
+          let target = Provider.make ~kind:Provider.OpenAI_compat
+              ~model_id:"trimmed-target" ~base_url ~request_path:"/v1/chat/completions"
+              ~model_capabilities_override:caps ~max_tokens:64 () in
+          let original = if foreign_source then
+              Provider.make ~kind:Provider.Glm ~model_id:"glm-5.3-flash"
+                ~base_url:(base_url ^ "/source") ()
+            else target in
+          let source = source_for original in
+          let retained =
+            { (Types.assistant_msg "retained-answer") with
+              content =
+                [ Types.Thinking { content = "retained-reasoning"; signature = None }
+                ; Types.Text "retained-answer"
+                ; Types.ToolUse { id = "settled-call"; name = "inspect"; input = `Assoc [] } ]
+            ; metadata = Types.Reasoning_source.metadata source } in
+          let settled = Types.tool_result_msg ~tool_use_id:"settled-call"
+              ~content:"settled-result" () in
+          let checkpoint =
+            { (context_fit_checkpoint ()) with model = original.model_id
+            ; provider_binding = Some source
+            ; messages = [ Types.user_msg "original caller"; retained; settled ] } in
+          let before = Agent_core.Checkpoint.to_json checkpoint in
+          let projection_calls = ref 0 in
+          let project messages =
+            incr projection_calls;
+            let projection, _ = Window.project_from_atom ~first_atom:1
+                ~measure_message_bytes:(fun message ->
+                  Agent_core.Checkpoint.message_to_json message
+                  |> Yojson.Safe.to_string |> String.length) messages in
+            check bool "actual tail window inserts only a control preamble" true
+              (match projection.messages with
+               | preamble :: _ -> Window.is_synthetic_preamble preamble
+               | [] -> false);
+            check bool "retained call/result atom survives the actual cut" true
+              (List.mem retained projection.messages && List.mem settled projection.messages);
+            check bool "only a genuine new query supplies caller-boundary evidence" new_query
+              (List.exists (fun (message : Types.message) ->
+                message.role = Types.User && message.origin = Types.Conversation)
+                projection.messages);
+            (* The window cuts history; the request carries its wire form. *)
+            Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ())
+              projection.messages
+            |> Result.map_error (fun error -> Agent_core.Error.Media error) in
+          let effects = ref 0 in
+          let tool = Agent_core.Tool.create ~name:"inspect" ~description:"Inspect"
+              ~parameters:[] (fun _ ->
+                incr effects;
+                Ok { Types.content = "fresh-result"; content_blocks = None; _meta = None }) in
+          let config =
+            { (Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"trimmed-source-change" ~provider_cfg:target
+                 ~system_prompt:"continue" ~tools:[tool]) with
+              initial_messages = checkpoint.messages; model_input_projection = Some project } in
+          let agent = match
+            (if resume then Runtime_agent.resume_from_checkpoint ~sw ~net ~config ~checkpoint
+             else Runtime_agent.build ~sw ~net ~config) with
+            | Ok agent -> agent
+            | Error error -> fail (Agent_core.Error.to_string error) in
+          Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+            let api_strategy = if stream then
+                Agent_core.Agent.Stream {on_event=ignore; on_telemetry=None}
+              else Agent_core.Agent.Sync in
+            let result = if new_query then
+                Agent_core.Agent.Advanced.run_blocks ~sw ~api_strategy
+                  ~on_tool_boundary:(fun _ -> Agent_core.Agent.Advanced.Continue)
+                  agent [Types.Text "new caller query"]
+              else Agent_core.Agent.Advanced.continue ~sw ~api_strategy
+                ~on_tool_boundary:(fun _ -> Agent_core.Agent.Advanced.Continue) agent in
+            (match blocked, result with
+             | true, Error (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig {field="reasoning_replay";_})) -> ()
+             | false, Ok (Agent_core.Agent.Advanced.Completed _) -> ()
+             | _, Error error -> fail (Agent_core.Error.to_string error)
+             | _, Ok (Agent_core.Agent.Advanced.Completed _
+                     | Agent_core.Agent.Advanced.Yielded _
+                     | Agent_core.Agent.Advanced.Terminal_tool_completed _) ->
+               fail "unexpected trimmed-history continuation outcome");
+            check int "actual projection runs before every admitted dispatch"
+              (if blocked then 1 else 2) !projection_calls;
+            check int "historical effects never rerun; only an admitted fresh tool executes"
+              (if blocked then 0 else 1) !effects;
+            check bool "canonical history preserves its original caller and exact exchange" true
+              (List.take (List.length checkpoint.messages)
+                (Agent_core.Agent.state agent).messages = checkpoint.messages));
+          check bool "source checkpoint survives projected continuation unchanged" true
+            (before = Agent_core.Checkpoint.to_json checkpoint)
+        in
+        check int "foreign mandatory replay is refused before native HTTP"
+          (if blocked then 0 else 2) (List.length requests);
+        match requests with
+        | [] -> ()
+        | (_, first) :: _ ->
+          let open Yojson.Safe.Util in
+          check bool "compatible retained tool reasoning survives the cut on native wire"
+            (not foreign_source && not no_replay && not new_query)
+            (first |> member "messages" |> to_list |> List.exists (fun message ->
+              member "reasoning_content" message = `String "retained-reasoning"))
+      ) [false;true]
+    ) [false;true]
+  ) [true,false,false; false,false,false; true,true,false; true,false,true]
+
+let projection_messages marker messages =
+  let project_block = function
+    | Agent_core.Types.Text _ -> Agent_core.Types.Text marker
+    | block -> block
+  in
+  List.map
+    (fun (message : Agent_core.Types.message) ->
+      { message with content = List.map project_block message.content })
+    messages
+
+let run_projection_case ~resume =
+  let canonical_marker = "canonical-unprojected-message" in
+  let projected_marker = "projected-provider-message" in
+  let projection_calls = ref 0 in
+  let (), requests =
+    with_native_projection_server
+    @@ fun ~sw ~net ~base_url ->
+    let config =
+      { (context_fit_runtime_config base_url) with
+        model_input_projection =
+          Some
+            (fun messages ->
+               incr projection_calls;
+               Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ())
+                 (projection_messages projected_marker messages)
+               |> Result.map_error (fun error -> Agent_core.Error.Media error))
+      }
+    in
+    let agent =
+      if resume
+      then
+        Runtime_agent.resume_from_checkpoint
+          ~sw
+          ~net
+          ~config
+          ~checkpoint:(context_fit_checkpoint ())
+      else Runtime_agent.build ~sw ~net ~config
+    in
+    let agent =
+      match agent with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_core.Agent.close agent)
+      (fun () ->
+         match Agent_core.Agent.run ~sw agent canonical_marker with
+         | Ok _ -> ()
+         | Error error -> fail (Agent_core.Error.to_string error))
+  in
+  check int "projection executes once" 1 !projection_calls;
+  check
+    (list string)
+    "measurement and completion both execute"
+    [ "/v1/messages/count_tokens"; "/v1/messages" ]
+    (List.map fst requests);
+  List.iter
+    (fun (path, body) ->
+       check bool (path ^ " sees projected input") true
+         (String_util.contains_substring body projected_marker);
+       check bool (path ^ " excludes canonical input") false
+         (String_util.contains_substring body canonical_marker))
+    requests
+
+let test_runtime_agent_fresh_projection_precedes_measurement () =
+  run_projection_case ~resume:false
+
+let test_runtime_agent_resume_projection_precedes_measurement () =
+  run_projection_case ~resume:true
+
+let run_pre_dispatch_serialization_observer_case ~resume =
+  let observed_body_bytes = ref [] in
+  let (), requests =
+    with_native_projection_server
+    @@ fun ~sw ~net ~base_url ->
+    let config =
+      { (context_fit_runtime_config base_url) with
+        pre_dispatch_serialization_observer =
+          Some
+            (fun observation ->
+               observed_body_bytes :=
+                 observation.Llm_provider.Request_wire_observer.body_bytes
+                 :: !observed_body_bytes;
+               Ok ())
+      }
+    in
+    let agent =
+      if resume
+      then
+        Runtime_agent.resume_from_checkpoint
+          ~sw
+          ~net
+          ~config
+          ~checkpoint:(context_fit_checkpoint ())
+      else Runtime_agent.build ~sw ~net ~config
+    in
+    let agent =
+      match agent with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_core.Agent.close agent)
+      (fun () ->
+         match Agent_core.Agent.run ~sw agent "observe exact request bytes" with
+         | Ok _ -> ()
+         | Error error -> fail (Agent_core.Error.to_string error))
+  in
+  let completion_body = List.assoc "/v1/messages" requests in
+  check
+    (list int)
+    "observer receives the exact dispatched body size once"
+    [ String.length completion_body ]
+    (List.rev !observed_body_bytes)
+
+let test_runtime_agent_fresh_observes_pre_dispatch_serialization () =
+  run_pre_dispatch_serialization_observer_case ~resume:false
+
+let test_runtime_agent_resume_observes_pre_dispatch_serialization () =
+  run_pre_dispatch_serialization_observer_case ~resume:true
+
+(* Agent Core contract §4.6: a configured stream-idle deadline with no resolvable clock
+   must fail loudly rather than silently disarm the only I2-legitimate
+   streaming timeout. *)
+let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
+  match
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:(Some 120.0)
+      ~first_event_timeout_s:None
+      ~clock:None
+  with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+    check string "field" "stream_idle_timeout_s" field;
+    check
+      bool
+      "message identifies the configured idle deadline with no clock"
+      true
+      (String.starts_with
+         ~prefix:"runtime_agent: stream_idle_timeout_s configured"
+         detail)
+  | Error err ->
+    fail
+      (Printf.sprintf
+         "expected InvalidConfig stream_idle_timeout_s, got %s"
+         (Agent_core.Error.to_string err))
+  | Ok _ -> fail "expected typed error when idle is configured but no clock resolves"
+
+let test_clock_failfast_opt_out_when_no_idle_no_clock () =
+  (* Legitimate opt-out: no streaming deadline + no clock stays None, no raise. *)
+  let clock =
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:None
+      ~first_event_timeout_s:None
+      ~clock:None
+  in
+  check bool "no idle + no clock -> None" true
+    (match clock with
+     | Ok None -> true
+     | Ok (Some _) | Error _ -> false)
+
+(* RFC-AC-037: the first-event (TTFT/prefill) bound has the same clock
+   dependency as the idle bound — configured without a resolvable clock it
+   must fail loudly, naming its own knob. *)
+let test_clock_failfast_returns_typed_error_when_first_event_set_without_clock () =
+  match
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:None
+      ~first_event_timeout_s:(Some 600.0)
+      ~clock:None
+  with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+    check string "field" "first_event_timeout_s" field;
+    check
+      bool
+      "message identifies the configured first-event deadline with no clock"
+      true
+      (String.starts_with
+         ~prefix:"runtime_agent: first_event_timeout_s configured"
+         detail)
+  | Error err ->
+    fail
+      (Printf.sprintf
+         "expected InvalidConfig first_event_timeout_s, got %s"
+         (Agent_core.Error.to_string err))
+  | Ok _ ->
+    fail "expected typed error when first-event is configured but no clock resolves"
+
+let test_clock_failfast_names_idle_when_both_deadlines_set () =
+  (* Both knobs configured: the error names the idle knob (its arm is
+     checked first); the point pinned here is that SOME typed error fires,
+     not a silent disarm. *)
+  match
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:(Some 120.0)
+      ~first_event_timeout_s:(Some 600.0)
+      ~clock:None
+  with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
+    check string "field" "stream_idle_timeout_s" field
+  | Error err ->
+    fail (Printf.sprintf "expected InvalidConfig, got %s" (Agent_core.Error.to_string err))
+  | Ok _ -> fail "expected typed error when both deadlines set without clock"
+
+(* The binding is execution intent. The catalog still says these models can
+   return several tool calls, while fresh and resumed Keeper requests can ask
+   for one. Assert the actual provider bodies, not a rendered TOML spelling. *)
+let parallel_policy_runtime ~provider_id ~protocol ~model_id ~policy =
+  let toml = Printf.sprintf
+    {|[runtime]
+default = "%s.probe"
+[providers.%s]
+protocol = "%s"
+endpoint = "http://127.0.0.1:1"
+[providers.%s.credentials]
+type = "inline"
+value = "fixture-no-account"
+[models.probe]
+api-name = "%s"
+tools-support = true
+reasoning-uncontrolled = true
+[models.probe.capabilities]
+max-output-tokens = 64000
+[%s.probe]
+max-tokens = 4096
+%s
+|} provider_id provider_id protocol provider_id model_id provider_id policy
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors -> failf "parallel policy config failed: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) ->
+           e.path ^ ": " ^ e.message) errors))
+  | Ok cfg ->
+    match cfg.bindings with
+    | [ binding ] -> cfg, binding
+    | _ -> fail "expected one parallel policy binding"
+
+let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
+  let module Json = Yojson.Safe.Util in
+  let tool_json = `Assoc
+      [ "name", `String "inspect"
+      ; "description", `String "Inspect an artifact"
+      ; "input_schema", `Assoc
+          [ "type", `String "object"; "properties", `Assoc [] ] ]
+  in
+  let bodies =
+    [ "claude", "messages-http", "claude-fable-5",
+      (fun config -> Llm_provider.Backend_anthropic.build_request
+          ~config ~messages:[] ~tools:[ tool_json ] () |> Yojson.Safe.from_string),
+      (fun body -> match Json.member "tool_choice" body with
+         | `Null -> `Null
+         | choice -> Json.member "disable_parallel_tool_use" choice),
+      `Bool true
+    ; "openai-responses", "openai-compatible-http", "gpt-5.6-luna",
+      (fun config -> Llm_provider.Backend_openai_responses.build_request
+          ~config ~messages:[] ~tools:[ tool_json ] () |> Yojson.Safe.from_string),
+      Json.member "parallel_tool_calls", `Bool false
+    ]
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  List.iter (fun (provider_id, protocol, model_id, body, wire_policy, disabled) ->
+    List.iter (fun (policy, expected) ->
+      let cfg, binding = parallel_policy_runtime ~provider_id ~protocol ~model_id ~policy in
+      let provider_cfg =
+        match Runtime_adapter.binding_to_execution cfg binding with
+        | Ok (Runtime_execution.Agent_core config) -> config
+        | Ok _ -> fail "HTTP policy selected an official client"
+        | Error detail -> fail detail
+      in
+      (match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
+       | None -> fail "parallel policy test requires a real catalog row or provider base"
+       | Some caps -> check bool "catalog capability remains true" true caps.supports_parallel_tool_calls);
+      let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+          ~name:"parallel-policy" ~provider_cfg ~system_prompt:"inspect" ~tools:[] in
+      let builder = Runtime_agent_context.builder ~net:(Eio.Stdenv.net env) ~config () in
+      let agent = match Agent_core.Builder.build_safe builder with
+        | Ok agent -> agent | Error e -> fail (Agent_core.Error.to_string e) in
+      Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent);
+      let check_wire label agent_config =
+        let request = Agent_core.Agent_turn.provider_config_with_agent_config
+            ~config:agent_config provider_cfg |> body in
+        check string (provider_id ^ " " ^ label) (Yojson.Safe.to_string
+            (if expected then disabled else `Null))
+          (Yojson.Safe.to_string (wire_policy request))
+      in
+      check_wire "fresh request" (Agent_core.Agent.state agent).config;
+      let checkpoint = { (Agent_core.Agent.checkpoint agent) with
+          disable_parallel_tool_use = not expected } in
+      let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+      check bool "resume replaces stale checkpoint policy" expected
+        prepared.patched_checkpoint.disable_parallel_tool_use;
+      check_wire "resumed request" prepared.agent_config
+    ) [ "", false; "disable-parallel-tool-use = true", true;
+        "disable-parallel-tool-use = false", false ]
+  ) bodies
+
+let test_parallel_policy_rejects_unsupported_runtimes () =
+  let cfg, binding = parallel_policy_runtime ~provider_id:"claude"
+      ~protocol:"messages-http" ~model_id:"claude-fable-5"
+      ~policy:"disable-parallel-tool-use = true" in
+  let provider = List.hd cfg.providers in
+  List.iter (fun (api_format, protocol) ->
+    let provider = { provider with Runtime_schema.api_format; protocol } in
+    let cfg = { cfg with Runtime_schema.providers = [ provider ] } in
+    let expected = Printf.sprintf
+        "binding claude.probe declares disable-parallel-tool-use = true, but protocol %s cannot carry that request policy"
+        protocol in
+    let check_refusal = function
+      | Error error -> check string "unsupported policy is named" expected error
+      | Ok _ -> failf "%s silently accepted the parallel-disable policy" protocol in
+    check_refusal (Runtime_adapter.binding_to_execution cfg binding);
+    check_refusal (Runtime_adapter.binding_to_provider_config cfg binding)
+  ) [ Runtime_schema.Claude_code_runtime, "claude-code"
+    ; Codex_app_server_runtime, "codex-app-server"
+    ; Antigravity_cli_runtime, "antigravity-cli"
+    ; Muse_serve_runtime, "muse-serve"
+    ; Ollama_api, "ollama-http"
+    ; Gemini_api, "gemini-http"
+    ; Vertex_gemini_api, "vertex-gemini" ]
+
+let test_parallel_policy_wrong_type_is_rejected () =
+  let toml = {|[providers.p]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.m]
+[p.m]
+disable-parallel-tool-use = "true"
+|} in
+  match Runtime_toml.parse_string toml with
+  | Ok _ -> fail "string parallel policy silently loaded"
+  | Error errors -> check bool "wrong-type error names the binding key" true
+      (List.exists (fun (error : Runtime_toml.parse_error) ->
+           String.equal error.path "p.m.disable-parallel-tool-use") errors)
+
+let test_parallel_policy_requires_provider_contract () =
+  List.iter (fun provider_id ->
+    let cfg, binding = parallel_policy_runtime ~provider_id
+        ~protocol:"openai-compatible-http" ~model_id:"glm-5.3"
+        ~policy:"disable-parallel-tool-use = true" in
+    let expected = Printf.sprintf
+        "binding %s.probe declares disable-parallel-tool-use = true, but provider %S has no catalog-declared parallel tool suppression contract"
+        provider_id provider_id in
+    let check_refusal = function
+      | Error error -> check string "missing provider contract is explicit" expected error
+      | Ok _ -> fail "wire compatibility silently accepted suppression" in
+    check_refusal (Runtime_adapter.binding_to_execution cfg binding);
+    check_refusal (Runtime_adapter.binding_to_provider_config cfg binding)
+  ) [ "glm-coding"; "openrouter"; "unregistered-endpoint" ];
+  let cfg, binding = parallel_policy_runtime ~provider_id:"claude"
+      ~protocol:"messages-http" ~model_id:"claude-fable-5" ~policy:"" in
+  let provider = { (List.hd cfg.providers) with Runtime_schema.id = "fixture-alias" } in
+  let cfg = { cfg with Runtime_schema.providers = [ provider ] } in
+  let binding = { binding with Runtime_schema.provider_id = provider.id } in
+  let catalog value = Printf.sprintf {|[[providers]]
+id = "fixture-provider"
+aliases = ["fixture-alias"]
+kind = "anthropic"
+capabilities_base = "anthropic"
+base_url = "https://fixture.invalid"
+request_path = "/v1/messages"
+auth = "none"
+%s
+|} value in
+  List.iter (fun (declaration, supported) ->
+    with_model_catalog (catalog declaration) (fun () ->
+      let result = Runtime_adapter.binding_to_execution cfg
+          { binding with disable_parallel_tool_use = true } in
+      check bool "canonical alias uses only the provider contract" supported
+        (Result.is_ok result);
+      check bool "no suppression request needs no contract" true
+        (Result.is_ok (Runtime_adapter.binding_to_execution cfg
+          { binding with disable_parallel_tool_use = false })))
+  ) [ "", false; "supports_parallel_tool_suppression = false", false;
+      "supports_parallel_tool_suppression = true", true ];
+  match Llm_provider.Model_catalog.of_toml_string ~source:"parallel-contract-type"
+      (catalog "supports_parallel_tool_suppression = \"true\"") with
+  | Error error -> check string "provider contract rejects a string"
+      "provider entry \"fixture-provider\" field \"supports_parallel_tool_suppression\" expected bool"
+      error
+  | Ok _ -> fail "provider contract silently accepted a string"
+
+(* #37849. A config that names a provider reads bare rows only when that
+   provider declares serves_bare_models. The runtime mirrors the Terminal-Bench
+   anthropic lane: reasoning-effort = "high" and a capabilities block that keeps
+   the binding on the catalogued branch. The model id carries a date suffix that
+   only the bare row's prefix covers, since a scoped row would need the exact
+   id. *)
+let bare_rows_runtime ~provider_id ~model_id =
+  let toml = Printf.sprintf
+    {|[runtime]
+default = "%s.probe"
+[providers.%s]
+protocol = "messages-http"
+endpoint = "http://127.0.0.1:1"
+[providers.%s.credentials]
+type = "inline"
+value = "fixture-no-account"
+[models.probe]
+api-name = "%s"
+tools-support = true
+reasoning-effort = "high"
+thinking-support = true
+[models.probe.capabilities]
+max-output-tokens = 64000
+[%s.probe]
+max-tokens = 4096
+|} provider_id provider_id provider_id model_id provider_id
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors -> failf "bare rows config failed: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) ->
+           e.path ^ ": " ^ e.message) errors))
+  | Ok cfg ->
+    match cfg.bindings with
+    | [ binding ] -> cfg, binding
+    | _ -> fail "expected one bare rows binding"
+
+let test_declared_provider_reads_bare_rows_only_when_it_serves_them () =
+  let cfg, binding = bare_rows_runtime ~provider_id:"fixture-provider"
+      ~model_id:"fixture-model" in
+  let catalog declaration = Printf.sprintf {|[[providers]]
+id = "fixture-provider"
+kind = "anthropic"
+capabilities_base = "anthropic"
+base_url = "https://fixture.invalid"
+request_path = "/v1/messages"
+auth = "none"
+%s
+
+[[models]]
+model_id = "fixture-model"
+base = "anthropic"
+accepted_reasoning_efforts = ["low", "high"]
+|} declaration in
+  List.iter (fun (declaration, serves) ->
+    with_model_catalog (catalog declaration) (fun () ->
+      match Runtime_adapter.binding_to_provider_config cfg binding with
+      | Error error ->
+        failf "%S: the binding was refused before the effort check: %s"
+          declaration error
+      | Ok config ->
+        check bool
+          (Printf.sprintf "%S: high reaches the bare row's ladder" declaration)
+          serves
+          (Result.is_ok
+             (Llm_provider.Provider_config.validate_reasoning_effort_request config)))
+  ) [ "", false; "serves_bare_models = []", false;
+      "serves_bare_models = [\"foreign-model\"]", false;
+      "serves_bare_models = [\"fixture-model\"]", true ];
+  List.iter (fun declaration ->
+    match Llm_provider.Model_catalog.of_toml_string ~source:"serves-bare-rows-type"
+        (catalog declaration) with
+    | Error error -> check string "the declaration requires a family array"
+        "provider entry \"fixture-provider\" field \"serves_bare_models\" expected string array"
+        error
+    | Ok _ -> fail "serves_bare_models silently accepted a non-array")
+    ["serves_bare_models = true"; "serves_bare_models = false";
+     "serves_bare_models = \"fixture-model\""; "serves_bare_models = [1]"];
+  List.iter (fun (declaration, expected) ->
+    match Llm_provider.Model_catalog.of_toml_string ~source:"serves-bare-rows-family"
+        (catalog declaration) with
+    | Error error -> check string "invalid family declaration is rejected" expected error
+    | Ok _ -> fail "serves_bare_models accepted an invalid family")
+    [ "serves_bare_models = [\"\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_models\" must not contain empty strings"
+    ; "serves_bare_models = [\" fixture-model\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_models\" must not contain padded strings"
+    ; "serves_bare_models = [\"fixture-model\", \"FIXTURE-MODEL\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_models\" must not contain duplicate model ids"
+    ]
+
+(* #37086. The fixture above proves the mechanism; this proves the shipped
+   declarations. With the embedded catalog, the Terminal-Bench anthropic lane
+   (provider "claude", effort "high", a capabilities block) builds a Messages
+   request that carries effort "high". *)
+let test_bench_anthropic_lane_sends_high_with_the_embedded_catalog () =
+  let module Json = Yojson.Safe.Util in
+  Llm_provider.Model_catalog.clear_global ();
+  List.iter (fun model_id ->
+    let cfg, binding = bare_rows_runtime ~provider_id:"claude" ~model_id in
+    match Runtime_adapter.binding_to_provider_config cfg binding with
+    | Error error -> failf "%s: the binding was refused: %s" model_id error
+    | Ok config ->
+      check (option string) (model_id ^ ": provider") (Some "claude")
+        config.provider_id;
+      match Llm_provider.Backend_anthropic.build_request_artifact
+              ~config ~messages:[] () with
+      | Error error -> failf "%s: the Messages request was refused: %s" model_id
+          (Llm_provider.Backend_anthropic.required_output_token_error_message
+             config error)
+      | Ok artifact ->
+        let body = Llm_provider.Backend_anthropic.request_payload artifact
+                   |> Yojson.Safe.from_string in
+        check string (model_id ^ ": wire effort") "high"
+          (body |> Json.member "output_config" |> Json.member "effort"
+           |> Json.to_string)
+  ) [ "claude-fable-5"; "claude-fable-5-1" ]
+
+let () =
+  run "runtime_provider_auth_headers"
+    [ ( "provider_config"
+      , [ test_case "parallel policy reaches fresh and resumed provider requests"
+            `Quick test_parallel_policy_survives_fresh_resume_and_wire_serialization
+        ; test_case "unsupported runtimes refuse parallel policy"
+            `Quick test_parallel_policy_rejects_unsupported_runtimes
+        ; test_case "parallel policy rejects a wrong-typed value"
+            `Quick test_parallel_policy_wrong_type_is_rejected
+        ; test_case "parallel policy requires a canonical provider contract"
+            `Quick test_parallel_policy_requires_provider_contract
+        ; test_case "a declared provider reads bare rows only when it serves them"
+            `Quick test_declared_provider_reads_bare_rows_only_when_it_serves_them
+        ; test_case "the bench anthropic lane sends high with the embedded catalog"
+            `Quick test_bench_anthropic_lane_sends_high_with_the_embedded_catalog
+        ; test_case
+            "runtime binding materialization preserves failure reason"
+            `Quick
+            test_runtime_of_binding_preserves_failure_reason
+        ; test_case
+            "dispatch rejects missing declared env credential"
+            `Quick
+            test_dispatch_rejects_missing_declared_env_credential
+        ; test_case
+            "dispatch accepts transformed or credential-free provider"
+            `Quick
+            test_dispatch_accepts_transformed_or_credential_free_provider
+        ; test_case
+            "dispatch rejects undeclared keyed row"
+            `Quick
+            test_dispatch_rejects_undeclared_keyed_row
+        ; test_case
+            "dispatch rejects only the undeclared sibling row"
+            `Quick
+            test_dispatch_rejects_only_the_undeclared_sibling_row
+        ; test_case
+            "dispatch accepts auth none row without credentials"
+            `Quick
+            test_dispatch_accepts_auth_none_row_without_credentials
+        ; test_case
+            "adapter stamps declared provider id"
+            `Quick
+            test_adapter_stamps_declared_provider_id
+        ; test_case
+            "provider-scoped catalog row resolves for declared provider"
+            `Quick
+            test_provider_scoped_catalog_row_resolves_for_declared_provider
+        ; test_case
+            "bare catalog row stays fail-closed for declared provider"
+            `Quick
+            test_bare_catalog_row_stays_fail_closed_for_declared_provider
+        ; test_case
+            "declared thinking capabilities override catalog"
+            `Quick
+            test_declared_thinking_capabilities_override_catalog
+        ; test_case
+            "max-only runtime capability overrides provider base on wire"
+            `Quick
+            test_runtime_max_only_capability_overrides_provider_base_on_wire
+        ; test_case
+            "embedded GLM vision catalog ceiling reaches wire"
+            `Quick
+            test_embedded_glm_vision_catalog_ceiling_reaches_wire
+        ; test_case
+            "runtime adapter carries auth in api_key only"
+            `Quick
+            test_runtime_adapter_keeps_auth_out_of_headers
+        ; test_case
+            "runtime adapter filters TOML auth headers"
+            `Quick
+            test_runtime_adapter_filters_toml_auth_headers
+        ; test_case
+            "runtime adapter uses canonical Anthropic headers"
+            `Quick
+            test_runtime_adapter_uses_canonical_anthropic_headers
+        ; test_case
+            "runtime TOML rejects blank env credential key"
+            `Quick
+            test_runtime_toml_rejects_blank_env_credential_key
+        ; test_case
+            "runtime TOML rejects missing env credential key"
+            `Quick
+            test_runtime_toml_rejects_missing_env_credential_key
+        ; test_case
+            "runtime TOML trims env credential key"
+            `Quick
+            test_runtime_toml_trims_env_credential_key
+        ; test_case
+            "runtime TOML threads provider connect timeout"
+            `Quick
+            test_runtime_toml_threads_provider_connect_timeout
+        ; test_case
+            "runtime TOML rejects invalid exact body deadlines"
+            `Quick
+            test_runtime_toml_rejects_invalid_exact_body_timeout
+        ; test_case
+            "runtime TOML rejects wrong-typed exact body deadlines"
+            `Quick
+            test_runtime_toml_rejects_wrong_typed_exact_body_timeout
+        ; test_case
+            "runtime TOML threads model sampling config"
+            `Quick
+            test_runtime_toml_threads_model_sampling_config
+        ; test_case
+            "declared credential headers never reach provider config"
+            `Quick
+            test_declared_credential_headers_never_reach_provider_config
+        ; test_case
+            "runtime TOML rejects non-positive provider connect timeout"
+            `Quick
+            test_runtime_toml_rejects_non_positive_provider_connect_timeout
+        ; test_case
+            "runtime TOML rejects wrong-typed provider connect timeout"
+            `Quick
+            test_runtime_toml_rejects_wrong_typed_provider_connect_timeout
+        ; test_case
+            "runtime TOML rejects unknown protocol"
+            `Quick
+            test_runtime_toml_rejects_unknown_protocol
+        ; test_case
+            "runtime TOML editor protocol inventory is backend-owned"
+            `Quick
+            test_runtime_toml_editor_protocol_inventory_is_backend_owned
+        ; test_case
+            "runtime TOML rejects reserved provider and model ids"
+            `Quick
+            test_runtime_toml_rejects_reserved_provider_ids
+        ; test_case
+            "runtime TOML rejects obsolete top-level namespaces"
+            `Quick
+            test_runtime_toml_rejects_obsolete_top_level_namespaces
+        ; test_case
+            "runtime TOML reads uses-messages-caching capability"
+            `Quick
+            test_runtime_toml_accepts_messages_caching_capability
+        ; test_case
+            "runtime adapter materializes Kimi messages-http provider"
+            `Quick
+            test_runtime_adapter_materializes_kimi_messages_http
+        ; test_case
+            "runtime adapter rejects unregistered messages-http provider"
+            `Quick
+            test_runtime_adapter_rejects_unregistered_messages_http
+        ; test_case
+            "runtime adapter rejects incompatible messages-http registry kind"
+            `Quick
+            test_runtime_adapter_rejects_incompatible_messages_http_kind
+        ; test_case
+            "runtime TOML accepts DeepSeek reasoning effort"
+            `Quick
+            test_runtime_toml_accepts_deepseek_reasoning_effort_capability
+        ; test_case
+            "runtime TOML accepts GLM Coding Plan capabilities"
+            `Quick
+            test_runtime_toml_accepts_glm_coding_capability
+        ; test_case
+            "runtime TOML accepts chat template token thinking"
+            `Quick
+            test_runtime_toml_accepts_chat_template_token_capability
+        ; test_case
+            "runtime adapter materializes DeepSeek OpenAI compat"
+            `Quick
+            test_runtime_adapter_materializes_deepseek_openai_compat
+        ; test_case
+            "an OpenAI-compatible surface keeps the chat-completions path"
+            `Quick
+            test_openai_compat_surface_keeps_the_chat_completions_path
+        ; test_case "setup-generated Responses account dispatches real HTTP" `Quick test_setup_responses_http_dispatch
+        ; test_case
+            "catalog Responses models round trip through runtime TOML and HTTP"
+            `Quick
+            test_openai_responses_round_trip_through_runtime_toml
+        ; test_case
+            "runtime max_tokens wire omission and explicit override"
+            `Quick
+            test_runtime_adapter_max_tokens_wire_omission_and_explicit_override
+        ; test_case "runtime file credentials materialize or fail safely" `Quick
+            test_runtime_adapter_file_credentials
+        ; test_case
+            "runtime adapter materializes GLM Coding Plan provider"
+            `Quick
+            test_runtime_adapter_materializes_glm_coding_provider
+        ; test_case
+            "runtime adapter threads binding keep-alive and num-ctx"
+            `Quick
+            test_runtime_adapter_threads_binding_keep_alive_and_num_ctx
+        ; test_case
+            "runtime adapter leaves keep-alive and num-ctx unset by default"
+            `Quick
+            test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default
+        ; test_case
+            "runtime agent terminal observation carries model identity"
+            `Quick
+            test_runtime_agent_terminal_observation_uses_runtime_identity
+        ; test_case
+            "runtime agent terminal error preserves missing capture and failure"
+            `Quick
+            test_runtime_agent_terminal_error_preserves_uncaptured_failure
+        ; test_case
+            "runtime agent context preserves max_tokens intent"
+            `Quick
+            test_runtime_agent_context_preserves_max_tokens_intent
+        ; test_case
+            "runtime agent context preserves provider sampling config"
+            `Quick
+            test_runtime_agent_context_preserves_provider_sampling_config
+        ; test_case
+            "runtime agent context resume patches stale response_format to base contract"
+            `Quick
+            test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract
+        ; test_case
+            "runtime agent context leaves tool_choice unset with tools"
+            `Quick
+            test_runtime_agent_context_leaves_tool_choice_unset_with_tools
+        ; test_case
+            "runtime fresh build enforces native context fit"
+            `Quick
+            test_runtime_agent_fresh_build_enforces_native_context_fit
+        ; test_case
+            "runtime resume enforces native context fit"
+            `Quick
+            test_runtime_agent_resume_enforces_native_context_fit
+        ; test_case
+            "fresh and resumed source changes preserve canonical history"
+            `Quick
+            test_runtime_source_change_preserves_history
+        ; test_case
+            "trimmed caller boundaries protect resumed and fresh tool exchanges"
+            `Quick
+            test_runtime_trimmed_reasoning_boundary
+        ; test_case
+            "fresh projection precedes measurement and dispatch"
+            `Quick
+            test_runtime_agent_fresh_projection_precedes_measurement
+        ; test_case
+            "resumed projection precedes measurement and dispatch"
+            `Quick
+            test_runtime_agent_resume_projection_precedes_measurement
+        ; test_case
+            "fresh agent observes exact pre-dispatch serialization"
+            `Quick
+            test_runtime_agent_fresh_observes_pre_dispatch_serialization
+        ; test_case
+            "resumed agent observes exact pre-dispatch serialization"
+            `Quick
+            test_runtime_agent_resume_observes_pre_dispatch_serialization
+        ; test_case
+            "dashboard runtime provider reachability contracts"
+            `Quick
+            test_dashboard_runtime_probe_reachability_contracts
+        ; test_case
+            "dashboard runtime probe groups models by provider"
+            `Quick
+            test_dashboard_runtime_probe_groups_models_by_provider
+        ; test_case
+            "dashboard runtime probe auth header follows the provider kind"
+            `Quick
+            test_dashboard_runtime_probe_auth_header_follows_provider_kind
+        ; test_case
+            "dashboard runtime probe reports Vertex as a stated skip"
+            `Quick
+            test_dashboard_runtime_probe_vertex_is_a_stated_skip
+        ; test_case
+            "clock fail-fast raises when idle set without clock (Agent Core contract)"
+            `Quick
+            test_clock_failfast_returns_typed_error_when_idle_set_without_clock
+        ; test_case
+            "clock fail-fast opt-out when no idle no clock"
+            `Quick
+            test_clock_failfast_opt_out_when_no_idle_no_clock
+        ; test_case
+            "clock fail-fast raises when first-event set without clock (RFC-AC-037)"
+            `Quick
+            test_clock_failfast_returns_typed_error_when_first_event_set_without_clock
+        ; test_case
+            "clock fail-fast names idle when both deadlines set"
+            `Quick
+            test_clock_failfast_names_idle_when_both_deadlines_set
+        ] )
+    ]

@@ -1,0 +1,78 @@
+{
+  "root": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-container-qualification-20261022-gwrm03w4",
+  "source": "d35d2559c56814b38615545a5f4f081304bccc05",
+  "owner": "candle-container-proof-0c67b092c532",
+  "image": "masc-candle-proof:d35d2559-0c67b092c532",
+  "volume": "masc-candle-proof-state-0c67b092c532",
+  "source_files": [
+    {
+      "path": "addons/protocol.py",
+      "sha256": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa",
+      "blob": "f38a14257d44ea250c03d29940bdf237000458c2"
+    },
+    {
+      "path": "addons/candle-appraiser/Dockerfile",
+      "sha256": "229a214a442613d4ad1e34706967cc710951e8423e6965518bf3a6a8c705d3e2",
+      "blob": "cdcaefe20e59a7ab8c1af3860cae29da39f8b653"
+    },
+    {
+      "path": "addons/candle-appraiser/lane.toml",
+      "sha256": "14e496db22c7114bb92ec4e6d193b7ce4165a1071481883fbcab9fb1ac68426b",
+      "blob": "6ecc0b35f4f5eeef5fd7be3b9209c3a8805b711a"
+    },
+    {
+      "path": "addons/candle-appraiser/server.py",
+      "sha256": "93fc380ee8b61468389b31367b22c765bef6a0d1d7b35b2d0dcc54a557ad8c02",
+      "blob": "d019a5490d2f17fa199d4f96d251f5cc540860e8"
+    },
+    {
+      "path": "addons/candle-appraiser/schemas/grade.json",
+      "sha256": "45c7e2e99f9305d0639d2ebf6fad947973a01320084b457631e830eabae74933",
+      "blob": "7918a6a109257abad0ea4a5315779742ed6f5cc4"
+    },
+    {
+      "path": "addons/candle-appraiser/schemas/relation.json",
+      "sha256": "45895e2634a256b7809f25e31e0eda24639ce8b53709d62be7ba4f18215309a5",
+      "blob": "fe85f09fa16b4550c4e15948a56c60de982d63c9"
+    },
+    {
+      "path": "addons/candle-appraiser/schemas/weights.json",
+      "sha256": "50378c8cf5f240cd3a04d79697d471b1ee8e2142890ab21a12a5eb35c3d2410f",
+      "blob": "9730a7b8a53534d6ddf7e08723f5a2f416bed139"
+    }
+  ],
+  "created_at": "2026-10-21T15:43:56.018005+00:00",
+  "scope": "direct real Docker worker/persistent volume; no host Runtime, Exact provider or ledger",
+  "image_build": {
+    "argv": [
+      "docker",
+      "build",
+      "--label",
+      "masc.proof-owner=candle-container-proof-0c67b092c532",
+      "--label",
+      "org.opencontainers.image.revision=d35d2559c56814b38615545a5f4f081304bccc05",
+      "-f",
+      "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-container-qualification-20261022-gwrm03w4/addons/candle-appraiser/Dockerfile",
+      "-t",
+      "masc-candle-proof:d35d2559-0c67b092c532",
+      "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-container-qualification-20261022-gwrm03w4/addons"
+    ],
+    "started_at": "2026-10-21T15:43:56.055655+00:00",
+    "finished_at": "2026-10-21T15:43:56.725655+00:00",
+    "exit_code": 0
+  },
+  "containers": [
+    {
+      "incarnation": "first",
+      "id": "a63e79582f7d334141e14726ade452d1ef221452e1b64152b8b90e6edcf24409"
+    },
+    {
+      "incarnation": "second",
+      "id": "a7eba40ee92bfd141f59883c6dfab2bc68ebe2f2edb79c9ceb41a4f91a866033"
+    },
+    {
+      "incarnation": "third",
+      "id": "1e4e6d084f0385733faa4019b452d06a282a29b29d22e7f48b387a65644eea1a"
+    }
+  ]
+}

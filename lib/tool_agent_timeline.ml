@@ -1,0 +1,664 @@
+(** Tool_agent_timeline - Unified agent activity timeline.
+
+    Collects events from multiple data sources and merges them into
+    a single chronological timeline for a given agent.
+
+    Data sources:
+    - Agent session status (Workspace.get_agents_raw)
+    - Task state transitions (Workspace.get_tasks_raw)
+    - Broadcast messages (Workspace.get_messages_raw)
+*)
+
+open Tool_args
+
+type tool_result = Tool_result.result
+
+type context = {
+  config : Workspace.config;
+  agent_name : string;
+}
+
+let parse_iso_timestamp value = Time_codec.parse_rfc3339_opt value
+
+(* A completed turn's usage as its activity event carried it. [None] is a
+   value the event did not carry. *)
+type turn_usage = {
+  input_tokens : int option;
+  output_tokens : int option;
+  cost_usd : float option;
+}
+
+(* What a timeline row records. Every kind is produced in this module and the
+   summary counts by kind, so the set is closed here; a turn carries the
+   numbers the summary adds up. *)
+type event_kind =
+  | Session_bound
+  | Task_claimed
+  | Task_started
+  | Task_completed
+  | Task_cancelled
+  | Broadcast
+  | Tool_call
+  | Turn_completed of turn_usage
+  | Chat
+
+let event_kind_to_string = function
+  | Session_bound -> "session_bound"
+  | Task_claimed -> "task_claimed"
+  | Task_started -> "task_started"
+  | Task_completed -> "task_completed"
+  | Task_cancelled -> "task_cancelled"
+  | Broadcast -> "broadcast"
+  | Tool_call -> "tool_call"
+  | Turn_completed _ -> "turn_completed"
+  | Chat -> "chat"
+;;
+
+(* Event type for the unified timeline *)
+type timeline_event = {
+  ts : float;
+  ts_iso : string;
+  kind : event_kind;
+  detail : Yojson.Safe.t;
+}
+
+let dashboard_surface = "/api/v1/agent-timeline"
+let dashboard_source = "agent_timeline_read_model"
+
+let dashboard_retention_json =
+  `Assoc
+    [
+      ("scope", `String "multi_source_tail");
+      ( "durable_store",
+        `String
+          ".masc/agents/*.json + .masc/tasks/*.json + \
+           .masc/messages/*.json + \
+           .masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl + \
+           .masc/keeper_chat/*.jsonl" );
+      ( "durable_stores",
+        `List
+          [
+            `String ".masc/agents/*.json";
+            `String ".masc/tasks/*.json";
+            `String ".masc/messages/*.json";
+            `String ".masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl";
+            `String ".masc/keeper_chat/*.jsonl";
+          ] );
+      ( "activity_event_kinds",
+        `List
+          (List.map
+             (fun kind ->
+               `String
+                 (Activity_graph.tool_execution_event_kind_to_string kind))
+             Activity_graph.all_tool_execution_event_kinds
+           @ [ `String "keeper.turn_completed" ]) );
+    ]
+
+let event_to_json (e : timeline_event) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("ts", `String e.ts_iso);
+      ("type", `String (event_kind_to_string e.kind));
+      ("detail", e.detail);
+    ]
+
+
+(* RFC-0393: a keeper is written everywhere under its keeper_name. The
+   only second form is the Activity_graph entity key ("keeper:<name>"),
+   which is a kind namespace, not a spelling of the identity. *)
+let identity_matches ~(agent_name : string) (candidate : string) : bool =
+  String.equal candidate agent_name
+  || String.equal candidate ("keeper:" ^ agent_name)
+
+let activity_event_matches_agent ~(agent_name : string) (e : Activity_graph.event) =
+  let actor_matches =
+    match e.actor with
+    | Some a -> identity_matches ~agent_name a.id
+    | None -> false
+  in
+  actor_matches
+  || Safe_ops.json_string_opt "keeper_name" e.payload = Some agent_name
+  || Safe_ops.json_string_opt "agent_name" e.payload = Some agent_name
+  || Safe_ops.json_string_opt "name" e.payload = Some agent_name
+
+(* Collect agent session/status events *)
+let agent_events (config : Workspace.config) ~agent_name :
+    timeline_event list =
+  let agents = Workspace.get_active_agents config in
+  agents
+  |> List.filter (fun (a : Masc_domain.agent) -> identity_matches ~agent_name a.name)
+  |> List.filter_map (fun (a : Masc_domain.agent) ->
+         match parse_iso_timestamp a.session_bound_at with
+         | Some ts ->
+             Some
+               {
+                 ts;
+                 ts_iso = a.session_bound_at;
+                 kind = Session_bound;
+                 detail =
+                   `Assoc
+                     [
+                       ("workspace", `String "default");
+                       ( "status",
+                         `String (Masc_domain.agent_status_to_string a.status) );
+                       ( "current_task", Json_util.string_opt_to_json a.current_task );
+                     ];
+               }
+         | None -> None)
+
+(* Collect task-related events for an agent *)
+let task_events (config : Workspace.config) ~agent_name :
+    timeline_event list =
+  let tasks = Workspace.get_tasks_safe config in
+  tasks
+  |> List.filter_map (fun (task : Masc_domain.task) ->
+         match task.task_status with
+         | Masc_domain.Claimed { assignee; claimed_at }
+           when identity_matches ~agent_name assignee -> (
+             match parse_iso_timestamp claimed_at with
+             | Some ts ->
+                 Some
+                   {
+                     ts;
+                     ts_iso = claimed_at;
+                     kind = Task_claimed;
+                     detail =
+                       `Assoc
+                         [
+                           ("task_id", `String task.id);
+                           ("title", `String task.title);
+                           ("priority", `Int task.priority);
+                         ];
+                   }
+             | None -> None)
+         | Masc_domain.InProgress { assignee; started_at }
+           when identity_matches ~agent_name assignee -> (
+             match parse_iso_timestamp started_at with
+             | Some ts ->
+                 Some
+                   {
+                     ts;
+                     ts_iso = started_at;
+                     kind = Task_started;
+                     detail =
+                       `Assoc
+                         [
+                           ("task_id", `String task.id);
+                           ("title", `String task.title);
+                           ("priority", `Int task.priority);
+                         ];
+                   }
+             | None -> None)
+         | Masc_domain.Done { assignee; completed_at; notes }
+           when identity_matches ~agent_name assignee -> (
+             match parse_iso_timestamp completed_at with
+             | Some ts ->
+                 Some
+                   {
+                     ts;
+                     ts_iso = completed_at;
+                     kind = Task_completed;
+                     detail =
+                       `Assoc
+                         [
+                           ("task_id", `String task.id);
+                           ("title", `String task.title);
+                           ("priority", `Int task.priority);
+                           ( "notes", Json_util.string_opt_to_json notes );
+                         ];
+                   }
+             | None -> None)
+         | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason }
+           when identity_matches ~agent_name cancelled_by -> (
+             match parse_iso_timestamp cancelled_at with
+             | Some ts ->
+                 Some
+                   {
+                     ts;
+                     ts_iso = cancelled_at;
+                     kind = Task_cancelled;
+                     detail =
+                       `Assoc
+                         [
+                           ("task_id", `String task.id);
+                           ("title", `String task.title);
+                           ( "reason", Json_util.string_opt_to_json reason );
+                         ];
+                   }
+             | None -> None)
+         | Types_core.Todo | Types_core.AwaitingVerification _
+         | (Claimed _|InProgress _|Done _|Cancelled _) -> None)
+
+(* Collect broadcast messages from agent *)
+let message_events (config : Workspace.config) ~agent_name ~limit :
+    timeline_event list =
+  (* [limit] counts THIS agent's messages. Reading a global window and
+     filtering afterwards made it count everyone's, so a busy fleet crowded
+     this agent out of its own timeline before the filter ran. *)
+  let messages =
+    Workspace.get_messages_matching config ~since_seq:0 ~limit
+      ~keep:(fun (m : Masc_domain.message) ->
+        identity_matches ~agent_name m.from_agent)
+  in
+  messages
+  |> List.filter_map (fun (m : Masc_domain.message) ->
+         match parse_iso_timestamp m.timestamp with
+         | Some ts ->
+             Some
+               {
+                 ts;
+                 ts_iso = m.timestamp;
+                 kind = Broadcast;
+                 detail =
+                   `Assoc
+                     [
+                       ("content", `String m.content);
+                       ("type", `String m.msg_type);
+                       ( "mention", Json_util.string_opt_to_json m.mention );
+                     ];
+               }
+         | None -> None)
+
+(* Keep the newest [n] events. [Activity_graph.list_events ~after_seq:0]
+   returns the source's newest window in seq-ascending order (oldest first),
+   so this agent's newest matches sit at the tail; a front-take would discard
+   exactly the recent events the tool contracts to surface (period.to = now)
+   whenever a keeper exceeds the per-source cap. Mirrors [build_timeline]'s
+   tail-keep on the merged list, and preserves the source's ascending order. *)
+(* Collect tool call events from Activity Graph. Two producers feed this
+   source: the external MCP dispatch path ([tool.called]) and the keeper
+   in-turn execution hook ([keeper.tool_exec], #23540 — without it a keeper
+   working through its own turn reported tool_calls = 0). Both share the
+   tool_name/success/duration_ms payload contract projected below. *)
+let tool_call_events (config : Workspace.config) ~agent_name ~limit :
+    timeline_event list =
+  (* [keep] runs inside the read, so [limit] counts THIS agent's tool events.
+     The multiplied window this replaced could only reduce the chance that a
+     busy workspace crowded them out, never remove it. *)
+  let all_events =
+    Activity_graph.list_events config
+      ~kinds:
+        (List.map
+           Activity_graph.tool_execution_event_kind_to_string
+           Activity_graph.all_tool_execution_event_kinds)
+      ~after_seq:0
+      ~limit
+      ~keep:(activity_event_matches_agent ~agent_name)
+      ()
+  in
+  all_events
+  |> List.filter_map (fun (e : Activity_graph.event) ->
+       let ts = Float.of_int e.ts_ms /. 1000.0 in
+       let tool_name =
+         Safe_ops.json_string ~default:"unknown" "tool_name" e.payload
+       in
+       (* The emitter always records success, so a missing or unreadable field
+          means the row is damaged. Defaulting to true rendered such a row as a
+          succeeded call. Carry the uncertainty instead. *)
+       let success = Safe_ops.json_bool_opt "success" e.payload in
+       let duration_ms =
+         Safe_ops.json_int ~default:0 "duration_ms" e.payload
+       in
+       let error_str = Safe_ops.json_string_opt "error" e.payload in
+       let source_str = Safe_ops.json_string_opt "source" e.payload in
+       let keeper_turn_id = Safe_ops.json_int_opt "keeper_turn_id" e.payload in
+       let agent_core_turn = Safe_ops.json_int_opt "agent_core_turn" e.payload in
+       let task_id = Safe_ops.json_string_opt "task_id" e.payload in
+       let provider = Safe_ops.json_string_opt "provider" e.payload in
+       let typed_outcome = Yojson.Safe.Util.member "typed_outcome" e.payload in
+       Some
+         {
+           ts;
+           ts_iso = e.ts_iso;
+           kind = Tool_call;
+           detail =
+             `Assoc
+               [
+                 ("tool_name", `String tool_name);
+                 ("success", Json_util.bool_opt_to_json success);
+                 ("duration_ms", `Int duration_ms);
+                 ("error", Json_util.string_opt_to_json error_str);
+                 ("source", Json_util.string_opt_to_json source_str);
+                 ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
+                 ("agent_core_turn", Json_util.int_opt_to_json agent_core_turn);
+                 ("task_id", Json_util.string_opt_to_json task_id);
+                 ("provider", Json_util.string_opt_to_json provider);
+                 ("typed_outcome", typed_outcome);
+               ];
+         })
+
+(* Collect turn-completed events from Activity Graph *)
+let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
+    timeline_event list =
+  let all_events =
+    Activity_graph.list_events config
+      ~kinds:["keeper.turn_completed"] ~after_seq:0 ~limit
+      ~keep:(activity_event_matches_agent ~agent_name) ()
+  in
+  all_events
+  |> List.filter_map (fun (e : Activity_graph.event) ->
+       let ts = Float.of_int e.ts_ms /. 1000.0 in
+       (* Pure-shape JSON access via Safe_ops: no exception swallow, no
+          performative [Cancelled] re-raise. Behavior parity with the prior
+          [try ... |> to_X with _ -> default] pattern (* cancel-guard-ok: prose *) on missing/wrong-typed
+          fields; widens acceptance to string-coerced numerics per the
+          codebase convention documented in Safe_ops.json_*_opt. *)
+       let keeper_name = Safe_ops.json_string ~default:"unknown" "keeper_name" e.payload in
+       let input_tokens = Safe_ops.json_int_opt "input_tokens" e.payload in
+       let output_tokens = Safe_ops.json_int_opt "output_tokens" e.payload in
+       let cache_creation_tokens =
+         Safe_ops.json_int_opt "cache_creation_tokens" e.payload
+       in
+       let cache_read_tokens = Safe_ops.json_int_opt "cache_read_tokens" e.payload in
+       let cache_miss_input_tokens =
+         Safe_ops.json_int_opt "cache_miss_input_tokens" e.payload
+       in
+       let cost_usd = Safe_ops.json_float_opt "cost_usd" e.payload in
+       let latency_ms = Safe_ops.json_int_opt "latency_ms" e.payload in
+       let model_used = Safe_ops.json_string ~default:"unknown" "model_used" e.payload in
+       let work_kind =
+         (* RFC-0182 §3.1 cycle break — codec moved to lib/Turn_mode_codec
+            (was Keeper_unified_metrics.work_kind_of_json in lib/keeper/). *)
+         Turn_mode_codec.work_kind_of_json e.payload
+         |> Option.value ~default:"unknown"
+       in
+       let context_ratio = Safe_ops.json_float_opt "context_ratio" e.payload in
+       let tools_used = Safe_ops.json_string_list "tools_used" e.payload in
+       let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key e.payload) in
+       let optional_fields =
+         let reasoning =
+           match m "reasoning_tokens" with
+           | `Int n -> [("reasoning_tokens", `Int n)]
+           | _ -> []
+         in
+        let tps =
+          match m "tokens_per_second" with
+          | `Float v -> [("tokens_per_second", `Float v)]
+          | _ -> []
+        in
+        let prompt_tps =
+          match m "prompt_per_second" with
+          | `Float v -> [("prompt_per_second", `Float v)]
+          | _ -> []
+        in
+        let hw_decode_tps =
+          match m "hw_decode_tokens_per_second" with
+          | `Float v -> [("hw_decode_tokens_per_second", `Float v)]
+          | _ -> []
+        in
+         reasoning @ tps @ prompt_tps @ hw_decode_tps
+       in
+       Some
+         {
+           ts;
+           ts_iso = e.ts_iso;
+           kind = Turn_completed { input_tokens; output_tokens; cost_usd };
+           detail =
+             `Assoc
+               ([
+                 ("keeper_name", `String keeper_name);
+                 ("input_tokens", Json_util.int_opt_to_json input_tokens);
+                 ("output_tokens", Json_util.int_opt_to_json output_tokens);
+                 ("cache_creation_tokens", Json_util.int_opt_to_json cache_creation_tokens);
+                 ("cache_read_tokens", Json_util.int_opt_to_json cache_read_tokens);
+                 ("cache_miss_input_tokens", Json_util.int_opt_to_json cache_miss_input_tokens);
+                 ("cost_usd", Json_util.float_opt_to_json cost_usd);
+                 ("latency_ms", Json_util.int_opt_to_json latency_ms);
+                 ("model_used", `String model_used);
+                 ("work_kind", `String work_kind);
+                 ("context_ratio", Json_util.float_opt_to_json context_ratio);
+                 ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+               ] @ optional_fields);
+         })
+
+(* Neutral projection of one keeper chat line for the timeline. The chat
+   store (.masc/keeper_chat/<keeper>.jsonl) lives in the keeper subsystem,
+   and this tool module must not reference it (RFC-0194 §3 tool -> keeper
+   boundary). So a keeper-aware caller reads the store, drops tool rows, and
+   passes the surviving user/assistant lines in as [chat_line] values via
+   [build_timeline]'s [load_chat]. This module
+   only maps that neutral data into timeline events. *)
+type chat_role =
+  | Chat_user
+  | Chat_assistant
+
+let chat_role_to_string = function
+  | Chat_user -> "user"
+  | Chat_assistant -> "assistant"
+
+type chat_line = {
+  cl_role : chat_role;
+  cl_content : string;
+  cl_ts : float;
+  cl_connector : string option;  (** dashboard | discord | slack | agent | ... *)
+  cl_conversation_id : string option;
+}
+
+(* Map keeper chat lines into timeline events. Granularity mirrors
+   [message_events]: one event per user/assistant line. That store is the
+   sole record of keeper<->operator conversation turns — the activity-event
+   log the other sources read carries autonomous turns but no chat, so
+   before this source a keeper's chat time and actions were absent from the
+   timeline entirely (task-1647). Ordering within a turn (user before
+   assistant, which share one ts) is preserved by the stable sort in
+   [build_timeline]; no timestamp is fabricated. *)
+let chat_events (lines : chat_line list) : timeline_event list =
+  List.map
+    (fun (l : chat_line) ->
+      {
+        ts = l.cl_ts;
+        ts_iso = Masc_domain.iso8601_of_unix_seconds l.cl_ts;
+        kind = Chat;
+        detail =
+          `Assoc
+            [
+              ("role", `String (chat_role_to_string l.cl_role));
+              ("content", `String l.cl_content);
+              ("source", Json_util.string_opt_to_json l.cl_connector);
+              ( "conversation_id",
+                Json_util.string_opt_to_json l.cl_conversation_id );
+            ];
+      })
+    lines
+
+type summary = {
+  tasks_completed : int;
+  tasks_claimed : int;
+  messages_sent : int;
+  tool_calls : int;
+  chat_messages : int;
+  turns_completed : int;
+  total_input_tokens : int;
+  total_output_tokens : int;
+  total_cost_usd : float;
+}
+
+let empty_summary =
+  {
+    tasks_completed = 0;
+    tasks_claimed = 0;
+    messages_sent = 0;
+    tool_calls = 0;
+    chat_messages = 0;
+    turns_completed = 0;
+    total_input_tokens = 0;
+    total_output_tokens = 0;
+    total_cost_usd = 0.0;
+  }
+
+(* One match over the kind, so a new kind has to say what it adds.
+
+   A value a turn did not carry adds 0 (Task #28): the turn's own row in
+   ["events"] shows what was missing, and a sum of what was read beats an
+   invented value. *)
+let add_to_summary summary event =
+  match event.kind with
+  | Task_completed -> { summary with tasks_completed = summary.tasks_completed + 1 }
+  | Task_claimed -> { summary with tasks_claimed = summary.tasks_claimed + 1 }
+  | Broadcast -> { summary with messages_sent = summary.messages_sent + 1 }
+  | Tool_call -> { summary with tool_calls = summary.tool_calls + 1 }
+  | Chat -> { summary with chat_messages = summary.chat_messages + 1 }
+  | Turn_completed usage ->
+    {
+      summary with
+      turns_completed = summary.turns_completed + 1;
+      total_input_tokens =
+        summary.total_input_tokens + Option.value usage.input_tokens ~default:0;
+      total_output_tokens =
+        summary.total_output_tokens + Option.value usage.output_tokens ~default:0;
+      total_cost_usd =
+        summary.total_cost_usd +. Option.value usage.cost_usd ~default:0.0;
+    }
+  | Session_bound | Task_started | Task_cancelled -> summary
+;;
+
+(* Build the full timeline. [load_chat] is the keeper-aware chat reader
+   injected by the caller (see [chat_line]); it defaults to producing no
+   chat events so this module never depends on the keeper subsystem. *)
+let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
+    (config : Workspace.config) ~agent_name ~since_hours ~limit
+    ~include_tasks ~include_board:_ ~include_tool_calls =
+  let now = Time_compat.now () in
+  let cutoff = now -. (since_hours *. Masc_time_constants.hour) in
+  (* Collect events from the default namespace. *)
+  let all_events =
+    let agent_evts = agent_events config ~agent_name in
+    let task_evts =
+      if include_tasks then task_events config ~agent_name
+      else []
+    in
+    let msg_evts = message_events config ~agent_name ~limit in
+    let tool_evts =
+      if include_tool_calls then tool_call_events config ~agent_name ~limit
+      else []
+    in
+    let turn_evts =
+      turn_completed_events config ~agent_name ~limit
+    in
+    let chat_evts = chat_events (load_chat ~agent_name) in
+    agent_evts @ task_evts @ msg_evts @ tool_evts @ turn_evts
+    @ chat_evts
+  in
+  (* Filter by time cutoff and sort chronologically. [stable_sort] (not
+     [sort]) so events sharing a timestamp keep their source order — a
+     chat turn's user and assistant lines share one ts (Keeper_chat_store
+     writes them together), and structural trace order must survive the
+     merge rather than being scrambled by an unstable sort. No timestamp
+     is rewritten to force order. *)
+  let filtered =
+    all_events
+    |> List.filter (fun e -> Stdlib.Float.compare e.ts cutoff >= 0)
+    |> List.stable_sort (fun a b -> Stdlib.Float.compare a.ts b.ts)
+  in
+  (* Truncate to limit — keep the most recent events (tail of sorted list) *)
+  let events =
+    let len = List.length filtered in
+    if len > limit then
+      let drop = len - limit in
+      let rec skip n = function
+        | [] -> []
+        | _ :: rest when n > 0 -> skip (n - 1) rest
+        | remaining -> remaining
+      in
+      skip drop filtered
+    else filtered
+  in
+  let summary = List.fold_left add_to_summary empty_summary events in
+  (* Active duration: time between first and last event *)
+  let active_duration_minutes =
+    match (events, List.rev events) with
+    | first :: _, last :: _ ->
+        let diff = last.ts -. first.ts in
+        Float.round (diff /. 60.0)
+    | _ -> 0.0
+  in
+  let since_iso = Masc_domain.iso8601_of_unix_seconds cutoff in
+  let now_iso = Masc_domain.now_iso () in
+  `Assoc
+    [
+      ("dashboard_surface", `String dashboard_surface);
+      ("source", `String dashboard_source);
+      ("retention", dashboard_retention_json);
+      ("generated_at_iso", `String now_iso);
+      ("agent", `String agent_name);
+      ( "period",
+        `Assoc [ ("from", `String since_iso); ("to", `String now_iso) ] );
+      ("events", `List (List.map event_to_json events));
+      ( "summary",
+        `Assoc
+          [
+            ("tasks_completed", `Int summary.tasks_completed);
+            ("tasks_claimed", `Int summary.tasks_claimed);
+            ("messages_sent", `Int summary.messages_sent);
+            ("tool_calls", `Int summary.tool_calls);
+            ("chat_messages", `Int summary.chat_messages);
+            ("turns_completed", `Int summary.turns_completed);
+            ("total_input_tokens", `Int summary.total_input_tokens);
+            ("total_output_tokens", `Int summary.total_output_tokens);
+            ("total_cost_usd", `Float summary.total_cost_usd);
+            ("active_duration_minutes", `Float active_duration_minutes);
+            ("total_events", `Int (List.length events));
+          ] );
+    ]
+
+(* The declaration and the closed vocabulary live in
+   [Tool_schemas_agent_timeline], beside every other surface's. *)
+let schemas : Masc_domain.tool_schema list = Tool_schemas_agent_timeline.schemas
+
+(* RFC-0189 PR-1b.13 — typed result. Success carries the [build_timeline]
+   [Yojson.Safe.t] envelope as [~data:json] first-class (drops the
+   [Yojson.Safe.to_string] round-trip). *)
+
+let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
+  : Tool_result.result
+  =
+  let agent_name = get_string args "agent_name" "" in
+  if String.length agent_name = 0 then
+    error_result_typed
+      ~tool_name
+      ~start_time
+      ~code:Validation_error
+      "agent_name is required"
+  else
+    let since_hours = get_float args "since_hours" 24.0 in
+    let limit = get_int args "limit" 50 in
+    let include_tasks = get_bool args "include_tasks" true in
+    let include_board = get_bool args "include_board" false in
+    let include_tool_calls = get_bool args "include_tool_calls" true in
+    let json =
+      build_timeline ?load_chat ctx.config ~agent_name ~since_hours ~limit
+        ~include_tasks ~include_board ~include_tool_calls
+    in
+    Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+
+(* Dispatch routes by tool name and threads [load_chat] to the handler; the
+   timeline read and its telemetry live in the handler / build path, not in
+   this pure router.
+   TEL-OK: pure dispatch router, delegates the significant action (and its
+   telemetry) to [handle_agent_timeline]; no action of its own to instrument. *)
+let dispatch ?load_chat (ctx : context) ~name ~args : Tool_result.result option =
+  let start = Tool_timing.start () in
+  match Tool_schemas_agent_timeline.operation_of_tool_name name with
+  | None -> None
+  | Some Tool_schemas_agent_timeline.Agent_timeline ->
+      Some
+        (handle_agent_timeline ?load_chat ~tool_name:name ~start_time:start ctx
+           args)
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+(* Registration walks the same list the router resolves against. *)
+let () =
+  List.iter
+    (fun (_operation, (s : Masc_domain.tool_schema)) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_agent_timeline
+           ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
+           ()))
+    Tool_schemas_agent_timeline.definitions

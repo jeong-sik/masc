@@ -1,0 +1,365 @@
+(** Configured-LLM task-completion review. Only the structured
+    [report_review_verdict] tool call can produce [Approve] or [Reject]. Missing
+    configuration, provider failure, prompt-render failure, and missing or
+    malformed tool calls remain typed non-verdict outcomes. *)
+
+(** RFC-0436 §4.3: a binary image artifact the judge receives as an attached
+    image block. The body is a base64 copy read from the snapshot's filed body
+    at assembly time; the hash and size recorded in the snapshot stay the
+    authority the prompt text cites. *)
+type evidence_image =
+  { image_reference : string
+  ; image_sha256 : string
+  ; image_bytes : int
+  ; image_media_type : string
+  ; image_body_base64 : string
+  }
+
+type review_request =
+  { task_title : string
+  ; task_description : string
+  ; completion_notes : string
+  ; agent_name : string
+  ; task_id : string
+  ; evidence_refs : string list
+  ; evidence_images : evidence_image list
+  }
+
+(** The read-only tools the evaluator holds besides the submitted evidence
+    snapshot (RFC-0361 D1). Every review is handed one: both lanes build the
+    surface before the review runs and defer when they cannot, so there is no
+    tool-less review to describe. This module deliberately does not build the
+    surface itself: the tools that read a producer's tree belong above the
+    containment primitives, not inside the review protocol. Every advertised
+    filesystem tool is bound to the one producer named by the review
+    request. *)
+(** [dispatch] receives every tool name the reviewer calls except the
+    verdict tool, so it must answer a name outside [schemas] with a typed
+    [Tool_result] error rather than raise. *)
+type lookup_surface =
+  { schemas : Types_core.tool_schema list
+  ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
+  }
+
+(** Where the Task lane's file tools resolve, as the judge is told about it.
+    Each case renders its own [verification.lookup.*] slot, so the prose
+    about a root describes that root's case and no other. *)
+type lookup_root =
+  | Producer_namespace of { root : string }
+      (** Declared namespace of the captured read authority. This makes no
+          claim about existence, readability or inventory completeness.
+          Task admission does not require a recursive workspace scan. *)
+  | Producer_tree of string list
+      (** Paths the lookup tools actually resolve against, listed from disk at
+          review time and relative to the root they are rooted at. The
+          evaluator is otherwise told only that the tools point at "the
+          producer's tree" and has to guess the shape: an evaluator that
+          assumed a repository root spent 77 consecutive failed reads on
+          [dune-project], [.git], [lib/], [README.md], [Makefile], [src] and
+          [bin] against a sandbox root whose real entries were [repos/],
+          [artifacts/], [mind/] and [poc/] (masc task-403, vrf-8bac5f46,
+          2026-08-21). Empty means the root was read and holds nothing; an
+          unreadable root never reaches here, the lane defers instead. *)
+  | Producer_root_absent of { root : string }
+      (** A workspace producer (not a Keeper) whose playground [root] does not
+          exist. Nothing creates that directory for such a producer, so the
+          judge is told there is no tree to read and which tools remain. *)
+
+(** Both outcomes carry the reviewer's stated reason. The string may be empty:
+    the tool schema asks for one on either outcome, but only [Reject] is
+    refused without it. *)
+type verdict =
+  | Approve of string
+  | Reject of string
+
+type reviewer_reply =
+  { selected_runtime_id : string
+  ; verdict : verdict option
+  ; evaluator_execution : Runtime_response_identity.t option
+  }
+
+type execution_owner =
+  { keeper_name : string
+  ; session_root : string
+  ; on_execution_ready : runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result
+  }
+(** Stable original owner of review calls. Native references confirm ownership
+    after locator publication; official references bind the existing session
+    namespace before dispatch. The callback must confirm durable ownership
+    before provider effects. Neither reference grants replay authority. *)
+(** The runtime that actually answered, not a lane alias requested by the
+    caller. A successful dispatch without a verdict still names its owner. *)
+
+val verdict_constructor_name : verdict -> string
+
+(** The verdict vocabulary the [report_review_verdict] tool schema must
+    advertise, owned by the {!verdict} variant. The TOML declaration in
+    [config/tools/report_review_verdict.toml] carries it as a literal; the
+    mirror test in [test_anti_rationalization_empty_reject] pins the two
+    together (RFC prompts-and-tool-definitions-outside-ocaml §2.2). *)
+val valid_verdict_strings : string list
+
+type gate =
+  | Structured_tool
+  | Invalid_verdict
+  | Evaluator_unavailable
+
+val gate_to_string : gate -> string
+
+type review_result =
+  { verdict : verdict option
+  ; evaluator_runtime : string
+  ; generator_runtime : string option
+  ; evaluator_execution : Runtime_response_identity.t option
+        (** Exact native response and tool invocation that supplied the
+            accepted verdict. Missing capture stays unknown. *)
+  ; gate : gate
+  ; fallback_reason : string option
+  ; retryable_runtimes : string list
+        (** Actual candidates whose failure passes with time, in attempt
+            order, and the only authority for reviewing the same submission
+            again without a producer or an operator acting. A candidate is
+            named here for a transient error ({!Agent_core.Error.is_retryable})
+            or when its path rests until a time the provider stated, as the
+            caller's [provider_rest] reads it when the slot has answered
+            ({!provider_rest}). How long the retry waits is not carried: the
+            scheduler reads each candidate's recorded path rest when it arms
+            the retry ([Verification_retry.delay]). A
+            later non-retryable fallback cannot mask an earlier candidate, and
+            the final diagnostic runtime does not own their retry time. Empty
+            for a produced verdict, a reply without a verdict from candidates
+            that never failed transiently, a prompt or slot resolution
+            failure, and every failure that time alone does not change:
+            nothing about those outcomes says a repeat of the same request
+            would end differently. *)
+  ; model_absent_runtimes : string list
+        (** Actual candidates whose typed refusal was model-absence
+            ({!Keeper_runtime_failure_route.core_error_is_model_absent}: a
+            typed [NotFound]), in attempt order. A retired or unknown model is
+            a permanent failure for the unchanged request: these candidates
+            are kept out of [retryable_runtimes] and named here so the
+            deferral records per-candidate outcomes, not only the last
+            candidate's error (2026-10-07 audit F-02). *)
+  }
+
+(** What the stores the provider walk writes say about one runtime's path when
+    a review's slot has answered. [Rests_until_stated_end]: the provider
+    stated when the path serves again — a hard quota's reset, the reset of a
+    spent usage window read after a refusal, a rate-limit wait — and that
+    time is still ahead. [No_stated_rest]: the path serves, or rests with no
+    end the provider named. The reader belongs to the caller, which owns the
+    walk's stores; it is read once per failed candidate, after the slot
+    answers, because the walk records a refusal's rest after it reports the
+    failed attempt. *)
+type provider_rest =
+  | Rests_until_stated_end
+  | No_stated_rest
+
+(** Whether the typed candidate failure establishes that no reviewer remains
+    in flight. Dispatch alone never proves a response was received. *)
+type failure_certainty = Before_dispatch | Definite_refusal | Outcome_unknown
+type execution_observation =
+  | Admission_refused
+  | Attempt_failed of { runtime_id:string; certainty:failure_certainty; error:Agent_core.Error.t }
+  | Reply_received of { runtime_id:string }
+
+val failure_certainty : dispatch:Runtime_attempt_dispatch.t -> Agent_core.Error.t -> failure_certainty
+
+val run
+  :  ?evaluator_runtime:string
+  -> ?generator_runtime:string
+  -> ?on_verdict:(review_result -> unit)
+  -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
+  -> ?sw:Eio.Switch.t option
+  -> ?system_prompt:string
+  -> ?on_execution:(execution_observation -> unit)
+  -> log_info:(string -> unit)
+  -> log_warn:(string -> unit)
+  -> render_prompt:(unit -> (string, string) result)
+  -> ?goal_blocks:Agent_core.Types.content_block list
+  -> lookup:lookup_surface
+  -> provider_rest:(string -> provider_rest)
+  -> base_path:string
+  -> unit
+  -> review_result
+(** Run one review over an already-rendered prompt. This is the whole of what
+    a verification lane shares: evaluator slot resolution, frozen-order slot
+    failover, the model call, and the structured verdict channel. What the
+    prompt says, and what subject the log lines name, belong to the lane.
+
+    [~render_prompt] is called after the slots resolve, so a render failure is
+    still reported against the slot that would have run.
+
+    [~goal_blocks], when present, carries attached media with the rendered
+    prompt as the leading [Text] block. Completion-review admission rejects
+    candidates that cannot consume that evidence; it does not replace an
+    attachment with an unreadable reference.
+
+    Actual lookup observations from earlier declared slots are retained for
+    this invocation and attached, with their slot/name/arguments/disposition
+    relation and admitted model content/media, to each later slot's input.
+    The full tool bridge projects each observation once when the lookup returns,
+    using the completion-review inline policy. Its typed projection refusals
+    survive instead of raw rejected data; host-only metadata is not added to
+    model input. These are evidence data, not synthetic provider ToolUse
+    receipts or a completion verdict.
+    A later fresh lookup may observe changed source; the earlier observation
+    remains explicit rather than being silently replaced. No cross-review
+    cache or new execution/retry permission is introduced.
+
+    Task completion review is {!review}. Goal proof review renders its own
+    template and calls this directly: the two lanes judge different things and
+    share no prompt variables. *)
+
+(** The question the completion authority is asked, and the material it
+    needs. *)
+
+(** The evidence posture of a completion submission, as the judge sees it.
+    [Note_only]: zero artifacts it can open — every item a note or an unusable
+    reference. [Usable_artifacts n]: [n] readable, untruncated artifacts. The
+    arithmetic is the judge prompt's rules 3 and 4 made typed, so the prose
+    cannot drift from what the snapshot holds. *)
+type evidence_posture =
+  | Note_only
+  | Usable_artifacts of int
+
+type verdict_question =
+  { completion_contract : string list option
+  ; required_evidence : string list
+  ; evidence_posture : evidence_posture
+        (** Computed at the review site from the fixed snapshot. The question
+            picker reads no store. *)
+  ; few_shot_block : string
+        (** Operator disagreements returned to the judge as examples, filled
+            at the review site where the calibration ledger is read. *)
+  }
+
+val review
+  :  ?evaluator_runtime:string
+  -> ?generator_runtime:string
+  -> ?on_verdict:(review_result -> unit)
+  -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
+  -> ?sw:Eio.Switch.t option
+  -> question:verdict_question
+  -> lookup:lookup_surface
+  -> lookup_root:lookup_root
+  -> provider_rest:(string -> provider_rest)
+  -> base_path:string
+  -> review_request
+  -> review_result
+(** [base_path] is the workspace BasePath selected by the caller. The review
+    must not rediscover it from process-global environment state.
+
+    Without [~evaluator_runtime], the evaluator slots come from the published
+    [verifier_exact] exact-output lane (RFC-0361 D7(a)) and are tried in frozen
+    declaration order: a slot that fails or returns no valid verdict tool call
+    yields to the next slot, and the terminal result describes the last
+    attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
+    failover.
+
+    The prompt carries the typed [question.evidence_posture] and the lookup's
+    initial success state. Every completed lookup is returned to the judge as
+    an object with [evidence_lookup_succeeded = true] and the original payload
+    under [lookup_result]. Failed and deferred lookups are unchanged. The judge
+    owns the verdict; this projection is never parsed back into a local verdict
+    override (RFC-0417 section 4.3). *)
+
+(** Render the review prompt {!Prompt_names.verification} with the sections
+    the [question], the [lookup] surface and its [lookup_root] supply.
+
+    There is no inline fallback prompt; an error keeps the Task nonterminal. *)
+val build_prompt
+  :  question:verdict_question
+  -> lookup:lookup_surface
+  -> lookup_root:lookup_root
+  -> review_request
+  -> (string, string) result
+
+val review_rendered :
+  generator_runtime:string option -> system_prompt:string ->
+  ?execution_owner:execution_owner ->
+  ?on_execution:(execution_observation -> unit) ->
+  ?on_verdict:(review_result -> unit) ->
+  ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+  ?sw:Eio.Switch.t option -> prompt:string -> lookup:lookup_surface ->
+  provider_rest:(string -> provider_rest) -> base_path:string ->
+  review_request -> review_result
+(** Execute a retained exact prompt through the same media delivery, lookup
+    success projection, slot failover and structured verdict channel as
+    {!review}. Both [system_prompt] and the review [prompt] are retained bytes.
+    Possible-dispatch unknown errors stop slot rotation and are observed
+    through [on_execution]; ordinary {!run} and {!review} keep their
+    existing policy. Does not read or re-render the current prompt registry. *)
+
+val run_retained :
+  system_prompt:string -> prompt:string ->
+  ?on_execution:(execution_observation -> unit) ->
+  ?on_verdict:(review_result -> unit) ->
+  ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
+  ?sw:Eio.Switch.t option ->
+  log_info:(string -> unit) -> log_warn:(string -> unit) ->
+  lookup:lookup_surface -> provider_rest:(string -> provider_rest) ->
+  base_path:string -> unit -> review_result
+(** Subject-independent retained execution for the Goal caller. Both messages
+    are already captured. Use the existing candidate/slot dispatch policy and
+    structured verdict protocol, with the retained-original unknown-outcome
+    fence and the same read-result projection as Task review. No synthetic
+    Task request, producer, second runner or prompt-registry read is needed.
+    The caller owns retention, actual read authority and domain commitment. *)
+
+val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
+
+(** Which decision a refused [report_review_verdict] call named. *)
+type verdict_refusal =
+  | Reject_without_reason
+      (** The refused call named REJECT and gave no reason. *)
+  | Unreadable_verdict  (** The refused call named no decision that can be read. *)
+
+(** What one review's [report_review_verdict] calls have established. *)
+type verdict_call =
+  { recorded : verdict option
+  ; refusal : verdict_refusal option
+  ; violation : string option
+      (** [Some] ends the review as a verdict protocol violation. *)
+  }
+
+type verdict_answer =
+  | Verdict_recorded of verdict
+  | Verdict_already_recorded of { detail : string }
+  | Verdict_refused of { detail : string }
+
+val empty_verdict_call : verdict_call
+
+val step_verdict_call : verdict_call -> Yojson.Safe.t -> verdict_call * verdict_answer
+(** Apply one verdict call. A verdict sent after a parse refusal clears the
+    violation only when it carries the refused call's decision (a REJECT
+    without a reason resent as a REJECT with one). A changed decision, a
+    resend after an unreadable refusal, and any call after a recorded verdict
+    keep or set the violation. Only the latest refusal counts. *)
+
+val outcome_observer_fn : (outcome:string -> runtime:string -> unit) Atomic.t
+
+val run_llm_reviewer_fn
+  :  (base_path:string
+      -> ?sw:Eio.Switch.t
+      -> ?execution_owner:execution_owner
+      -> evaluator_runtime:string
+      -> candidate_kind:Types_core.verifier_slot_kind
+      -> prompt:string
+      -> ?system_prompt:string
+      -> ?goal_blocks:Agent_core.Types.content_block list
+      -> report_tool_schema:Types_core.tool_schema
+      -> lookup:lookup_surface
+      -> on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
+      -> attempt_continuation:(dispatch:Runtime_attempt_dispatch.t -> Agent_core.Error.t -> Runtime_attempt_dispatch.continuation)
+      -> on_runtime_attempt_error:
+        (runtime_id:string
+         -> attempt:int
+         -> dispatch:Runtime_attempt_dispatch.t
+         -> Agent_core.Error.t
+         -> unit)
+      -> unit
+      -> (reviewer_reply, Agent_core.Error.t) result)
+       Atomic.t
+(** The system agent supplies its owning workspace BasePath explicitly; this
+    callback must not substitute a process-global BasePath. *)

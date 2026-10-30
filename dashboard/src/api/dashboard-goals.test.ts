@@ -1,0 +1,546 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const getMock = vi.hoisted(() => vi.fn())
+
+vi.mock('./core', async importOriginal => ({
+  ...await importOriginal<typeof import('./core')>(),
+  get: getMock,
+}))
+
+import {
+  GoalSourceUnavailableError,
+  GoalStoreEnvelopeError,
+  fetchDashboardGoalDetail,
+  fetchDashboardGoalsTree,
+  goalSourceUnavailable,
+} from './dashboard-goals'
+import { fetchDashboardPlanning } from './dashboard-mission'
+import {
+  GOAL_STORE_MIRROR_STATUSES,
+  GOAL_STORE_RESET_STEPS,
+  GOAL_STORE_UNAVAILABLE_REASONS,
+} from '../types/goal-store-unavailable'
+
+function validNode(id: string, title: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    title,
+    status: 'active',
+    phase: 'executing',
+    priority: 1,
+    criterion_revision: 'revision-default',
+    measurement: { state: 'not_recorded' },
+    tasks: [],
+    children: [],
+    ...overrides,
+  }
+}
+
+function validTask(id: string, title: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    title,
+    status: 'todo',
+    priority: 1,
+    assignee: null,
+    goal_id: null,
+    is_terminal: false,
+    created_at: '2026-01-01',
+    updated_at: '2026-01-02',
+    ...overrides,
+  }
+}
+
+function emptySummary() {
+  return {
+    total_goals: 0,
+    active_goals: 0,
+    phase_counts: {},
+    total_tasks: 0,
+    done_tasks: 0,
+    pending_approvals: 0,
+  }
+}
+
+const readyApprovalQueue = {
+  approval_queue_state: { state: 'ready' as const },
+}
+
+// Synthetic projection in the exact shape tree_node_to_json sends, including
+// a child and a measurement store failure on another goal.
+const measurementFixture = JSON.parse(readFileSync(
+  resolve(__dirname, 'fixtures/goal-measurement-tree.json'), 'utf8',
+))
+
+afterEach(() => {
+  vi.clearAllMocks()
+})
+
+describe('fetchDashboardGoalsTree decoding', () => {
+  it('preserves current criterion measurements through tree and detail fetches', async () => {
+    getMock.mockResolvedValueOnce(measurementFixture)
+    const tree = await fetchDashboardGoalsTree()
+    const measured = tree.tree[0]!
+    expect(measured.criterion_revision).toBe('8cf9d7190ba045e7bd218b86955bd90a')
+    expect(measured.measurement).toEqual({
+      state: 'reported',
+      record: {
+        id: 'measurement-1', goal_id: 'goal-measured',
+        criterion_revision: measured.criterion_revision,
+        observed_value: '7', evidence: 'artifact:seven-passing-cases',
+        actor: 'keeper-alpha', recorded_at: '2026-09-24T10:00:00Z',
+      },
+    })
+    expect(measured.children[0]?.measurement).toEqual({ state: 'not_recorded' })
+    expect(tree.tree[1]?.measurement).toEqual({
+      state: 'unavailable', reason: 'goal_measurement: store read failed',
+    })
+
+    getMock.mockResolvedValueOnce({
+      approval_queue_state: { state: 'ready' }, goal: measurementFixture.tree[0],
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    const detail = await fetchDashboardGoalDetail(measured.id)
+    expect(detail.goal.measurement).toEqual(measured.measurement)
+  })
+
+  it('refuses a stale or unknown measurement instead of losing it silently', async () => {
+    const stale = structuredClone(measurementFixture)
+    stale.tree[0].measurement.record.criterion_revision = 'previous-revision'
+    getMock.mockResolvedValueOnce(stale)
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow('belongs to another criterion')
+
+    const unknown = structuredClone(measurementFixture)
+    unknown.tree[0].measurement.state = 'invented'
+    getMock.mockResolvedValueOnce(unknown)
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow('알 수 없는 dashboard goal')
+
+    const missing = structuredClone(measurementFixture)
+    delete missing.tree[0].measurement
+    getMock.mockResolvedValueOnce(missing)
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow('measurement')
+  })
+
+  it('drops nodes missing required id, title, or status', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-valid', 'Valid goal'),
+        { id: 'goal-no-title', status: 'active' },
+        { id: 'goal-no-status', title: 'No status' },
+        { title: 'No id', status: 'active' },
+      ],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree).toHaveLength(1)
+    expect(result.tree[0]!.id).toBe('goal-valid')
+    expect(result.tree[0]!.title).toBe('Valid goal')
+  })
+
+  // Aged-out linked cancellations reach Work only through this decoder. It
+  // dropped the actor and the reason, so the card rendered a bare cancelled in
+  // production while component tests that assign goalTreeData directly passed.
+  it('decodes cancellation actor and reason on tree tasks', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-1', 'Goal one', {
+          tasks: [
+            {
+              ...validTask('task-cancelled', 'Aged out cancellation'),
+              status: 'cancelled',
+              cancelled_by: 'keeper-rondo-agent',
+              reason: 'superseded by G-2',
+            },
+          ],
+        }),
+      ],
+      summary: { ...emptySummary(), total_goals: 1, total_tasks: 1 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+    const task = result.tree[0]!.tasks[0]!
+
+    expect(task.cancelled_by).toBe('keeper-rondo-agent')
+    expect(task.reason).toBe('superseded by G-2')
+  })
+
+  it('leaves cancellation fields null when the payload omits them', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-1', 'Goal one', {
+          tasks: [validTask('task-plain', 'Plain task')],
+        }),
+      ],
+      summary: { ...emptySummary(), total_goals: 1, total_tasks: 1 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+    const task = result.tree[0]!.tasks[0]!
+
+    expect(task.cancelled_by).toBeNull()
+    expect(task.reason).toBeNull()
+  })
+
+  it('drops tasks missing required id, title, or status', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-1', 'Goal one', {
+          tasks: [
+            validTask('task-valid', 'Valid task'),
+            { id: 'task-no-title', status: 'todo' },
+            { id: 'task-no-status', title: 'No status' },
+            { title: 'No id', status: 'todo' },
+          ],
+        }),
+      ],
+      summary: { ...emptySummary(), total_goals: 1, total_tasks: 1 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]!.tasks).toHaveLength(1)
+    expect(result.tree[0]!.tasks[0]!.id).toBe('task-valid')
+  })
+
+  it('drops malformed child nodes while keeping valid descendants', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-parent', 'Parent goal', {
+          children: [
+            validNode('goal-child', 'Child goal'),
+            { id: 'bad-child', title: 'Bad child' },
+          ],
+        }),
+      ],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree).toHaveLength(1)
+    expect(result.tree[0]!.children).toHaveLength(1)
+    expect(result.tree[0]!.children[0]!.id).toBe('goal-child')
+  })
+
+  it('decodes timeline events in the shape the goals endpoint serves and drops anything else', async () => {
+    // Wire shape: `tree_node_to_json` (lib/dashboard/dashboard_goals.ml) maps
+    // each goal_events.jsonl row through `goal_event_timeline_json`
+    // (lib/dashboard/dashboard_goals_types_timeline.ml), which emits
+    // {ts, kind, lane, title, summary, severity}. The first two rows below
+    // are that output verbatim for a goal_phase event and for an event type
+    // the normalizer has no title for. The third row is a ledger row as
+    // written by `emit_goal_event` (lib/workspace_goals.ml), which never
+    // reaches the wire; the decoder does not read that shape.
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: [
+        validNode('goal-1', 'Goal one', {
+          timeline_events: [
+            {
+              ts: '2026-08-05T01:00:00Z',
+              kind: 'goal_phase',
+              lane: 'goal',
+              title: 'Goal Phase',
+              summary: 'phase=blocked by sangsu',
+              severity: 'bad',
+            },
+            {
+              ts: '2026-08-07T18:42:22Z',
+              kind: 'goal_owner',
+              lane: 'goal',
+              title: 'Goal Event',
+              summary: 'goal_owner',
+              severity: 'ok',
+            },
+            {
+              ts: '2026-08-05T01:00:00Z',
+              goal_id: 'goal-1',
+              event_type: 'goal_phase',
+              payload: { phase: 'blocked', actor: 'sangsu' },
+            },
+          ],
+        }),
+        validNode('goal-2', 'Goal two'),
+      ],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]!.timeline_events).toEqual([
+      {
+        ts: '2026-08-05T01:00:00Z',
+        kind: 'goal_phase',
+        lane: 'goal',
+        title: 'Goal Phase',
+        summary: 'phase=blocked by sangsu',
+        severity: 'bad',
+      },
+      {
+        ts: '2026-08-07T18:42:22Z',
+        kind: 'goal_owner',
+        lane: 'goal',
+        title: 'Goal Event',
+        summary: 'goal_owner',
+        severity: 'ok',
+      },
+    ])
+    expect(result.tree[1]!.timeline_events).toEqual([])
+  })
+
+  it('rejects a typed unavailable approval queue instead of decoding an empty tree', async () => {
+    getMock.mockResolvedValue({
+      generated_at: '2026-07-27T00:00:00Z',
+      approval_queue_state: {
+        state: 'unavailable',
+        code: 'reset_required',
+        title: 'Gate durable queue unavailable · runtime reset required',
+        operator_detail: 'pending store requires reset',
+        severity: 'bad',
+        icon: '!',
+      },
+      tree: null,
+      summary: null,
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow(
+      '! Gate durable queue unavailable · runtime reset required: pending store requires reset',
+    )
+  })
+
+  it('rejects a missing approval queue state', async () => {
+    getMock.mockResolvedValue({
+      tree: [],
+      summary: emptySummary(),
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow(
+      '유효하지 않은 dashboard goals approval_queue_state payload',
+    )
+  })
+
+  it('rejects a malformed approval queue state', async () => {
+    getMock.mockResolvedValue({
+      approval_queue_state: { state: 'ready', legacy: true },
+      tree: [],
+      summary: emptySummary(),
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow(
+      '유효하지 않은 dashboard goals approval_queue_state payload',
+    )
+  })
+
+  it('rejects null tree and summary under a ready queue state', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      tree: null,
+      summary: null,
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow()
+  })
+
+  it('preserves an explicit runtime snapshot failure in Goal detail', async () => {
+    getMock.mockResolvedValue({
+      ...readyApprovalQueue,
+      goal: validNode('goal-runtime', 'Runtime goal'),
+      linked_tasks: [],
+      linked_keepers: [
+        {
+          name: 'keeper-a',
+          agent_name: 'agent-a',
+          current_task_id: null,
+          sandbox_profile: 'workspace',
+          network_mode: 'enabled',
+          runtime_id: 'runtime-a',
+          runtime_outcome: null,
+          latest_execution_outcome: null,
+          latest_execution_at: null,
+          latest_receipt: null,
+          runtime_trust: {
+            snapshot_status: 'unavailable',
+            snapshot_error: 'snapshot read failed',
+          },
+          latest_causal_event: null,
+        },
+      ],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    })
+
+    const result = await fetchDashboardGoalDetail('goal-runtime')
+
+    expect(result.linked_keepers[0]?.runtime_trust).toMatchObject({
+      snapshot_status: 'unavailable',
+      snapshot_error: 'snapshot read failed',
+    })
+  })
+})
+
+const proofCriterion = { revision: 'criterion-v2', title: 'Measured goal', metric: 'passed cases', target_value: '10' }
+const proofVerdict = {
+  outcome: 'proven', reason: null, request_id: 'request-v2', criterion: proofCriterion,
+  verification_run_id: 'verifier-v2', authority: { kind: 'system_llm_agent', actor: 'verifier_exact' },
+  evidence: '10 cases passed', recorded_at: '2026-09-09T00:00:00Z',
+}
+const currentProof = { state: 'proof_proven', verdict: proofVerdict }
+
+function verificationRecord(completion: unknown) {
+  return { goal_id: 'proof-goal', updated_at: '2026-09-09T00:00:00Z', completion }
+}
+
+describe('Goal proof projection through tree and detail APIs', () => {
+  it.each([
+    ['idle', verificationRecord({ state: 'idle' }), 'current', 'idle'],
+    ['pending', verificationRecord({ state: 'proof_pending', criterion: proofCriterion,
+      request_id: 'request-v2', requested_at: '2026-09-09T00:00:00Z' }), 'current', 'pending'],
+    ['proven', verificationRecord(currentProof), 'current', 'proven'],
+    ['human confirmed', verificationRecord({ state: 'human_confirmed', verdict: proofVerdict,
+      operator_id: 'operator', confirmed_at: '2026-09-10T00:00:00Z' }), 'current', 'proven'],
+    ['missing confirmation identity', verificationRecord({ state: 'human_confirmed', verdict: proofVerdict }), 'unreadable', null],
+    ['refuted', verificationRecord({ state: 'proof_refuted', verdict: {
+      ...proofVerdict, outcome: 'refuted', reason: 'Only 9 cases passed',
+    } }), 'current', 'refuted'],
+    ['stale', verificationRecord({ state: 'stale_criterion', historical_completion: currentProof }), 'stale', null],
+    ['unreadable', { state: 'ledger_error', detail: 'primary ledger read failed' }, 'unreadable', null],
+    ['malformed proven', verificationRecord({ state: 'proof_proven', verdict: {
+      ...proofVerdict, outcome: 'refuted', reason: 'inconsistent state',
+    } }), 'unreadable', null],
+    ['missing request identity', verificationRecord({ state: 'proof_pending', criterion: proofCriterion,
+      requested_at: '2026-09-09T00:00:00Z' }), 'unreadable', null],
+  ])('%s remains separate from lifecycle phase', async (_label, verification, state, completionState) => {
+    const node = validNode('proof-goal', 'Measured goal', { phase: 'completed', verification })
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue, tree: [node], summary: emptySummary() })
+    const tree = await fetchDashboardGoalsTree()
+    expect(tree.tree[0]?.phase).toBe('completed')
+    const proof = tree.tree[0]?.verification
+    expect(proof?.state).toBe(state)
+    if (proof?.state === 'current') expect(proof.completion.state).toBe(completionState)
+    getMock.mockResolvedValueOnce({ ...readyApprovalQueue, goal: node, linked_tasks: [],
+      linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+    const detail = await fetchDashboardGoalDetail('proof-goal')
+    expect(detail.goal.verification).toEqual(proof)
+  })
+})
+
+
+// RFC-0444 §2.3 row 4: the wire envelope Goal_unavailable_envelope.to_yojson
+// emits for a store this build rejected on the criterion_revision field.
+const schemaRejectedEnvelope = {
+  ok: false,
+  error_code: 'goal_store_unavailable',
+  reason: 'schema_rejected',
+  field: 'criterion_revision',
+  file: '/srv/masc/.masc/goals.json',
+  mirror: { status: 'mirror_decodes', goal_count: 97 },
+  reset_step: 'repair_field',
+}
+
+const schemaRejectedUnion = {
+  kind: 'unavailable',
+  reason: 'schema_rejected',
+  field: 'criterion_revision',
+  file: '/srv/masc/.masc/goals.json',
+  mirror: { status: 'mirror_decodes', goalCount: 97 },
+  resetStep: 'repair_field',
+} as const
+
+describe('Goal source unavailable across HTTP projections', () => {
+  it.each([
+    ['planning', () => fetchDashboardPlanning()],
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s throws the parsed Goal store union', async (_name, fetch) => {
+    getMock.mockResolvedValue(schemaRejectedEnvelope)
+    const thrown = await fetch().then(() => null, (error: unknown) => error)
+    expect(thrown).toBeInstanceOf(GoalSourceUnavailableError)
+    expect((thrown as GoalSourceUnavailableError).unavailable).toEqual(schemaRejectedUnion)
+    expect((thrown as GoalSourceUnavailableError).message).toContain('/srv/masc/.masc/goals.json')
+    expect((thrown as GoalSourceUnavailableError).message).toContain('criterion_revision')
+  })
+
+  it.each([
+    ['planning', () => fetchDashboardPlanning()],
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s refuses an envelope with an unknown reason instead of defaulting', async (_name, fetch) => {
+    getMock.mockResolvedValue({ ...schemaRejectedEnvelope, reason: 'corrupt', field: null })
+    await expect(fetch()).rejects.toBeInstanceOf(GoalStoreEnvelopeError)
+    await expect(fetch()).rejects.toThrow('unknown reason "corrupt"')
+  })
+})
+
+
+describe('goalSourceUnavailable', () => {
+  it('parses the full envelope into the closed union', () => {
+    expect(goalSourceUnavailable(schemaRejectedEnvelope)).toEqual(schemaRejectedUnion)
+  })
+
+  it('returns null for a snapshot and for an unrelated failure', () => {
+    expect(goalSourceUnavailable({ ok: true, goals: [] })).toBeNull()
+    expect(goalSourceUnavailable({ ok: false, error_code: 'internal_error', error: 'boom' })).toBeNull()
+    expect(goalSourceUnavailable(null)).toBeNull()
+  })
+
+  it.each(GOAL_STORE_UNAVAILABLE_REASONS)('accepts reason %s exactly as the server spells it', reason => {
+    const field = reason === 'schema_rejected' ? 'criterion_revision' : null
+    const parsed = goalSourceUnavailable({ ...schemaRejectedEnvelope, reason, field })
+    expect(parsed).toEqual({ ...schemaRejectedUnion, reason, field })
+  })
+
+  it.each(GOAL_STORE_MIRROR_STATUSES)('accepts mirror status %s', status => {
+    const goal_count = status === 'mirror_decodes' ? 3 : null
+    const parsed = goalSourceUnavailable({ ...schemaRejectedEnvelope, mirror: { status, goal_count } })
+    expect(parsed).toEqual({ ...schemaRejectedUnion, mirror: { status, goalCount: goal_count } })
+  })
+
+  it.each(GOAL_STORE_RESET_STEPS)('accepts reset step %s', reset_step => {
+    const parsed = goalSourceUnavailable({ ...schemaRejectedEnvelope, reset_step })
+    expect(parsed).toEqual({ ...schemaRejectedUnion, resetStep: reset_step })
+  })
+
+  it.each([
+    ['unknown reason', { reason: 'corrupt', field: null }, 'unknown reason "corrupt"'],
+    ['unknown mirror status', { mirror: { status: 'mirror_stale', goal_count: null } }, 'unknown mirror status "mirror_stale"'],
+    ['unknown reset step', { reset_step: 'reboot' }, 'unknown reset_step "reboot"'],
+    ['schema_rejected without a field', { field: null }, 'schema_rejected names no field'],
+    ['not_json carrying a field', { reason: 'not_json' }, 'not_json carries a field'],
+    ['mirror_decodes without a count', { mirror: { status: 'mirror_decodes', goal_count: null } }, 'mirror_decodes carries no goal_count'],
+    ['a rendered error line added to the envelope', { error: 'goals.json: criterion_revision is missing' }, 'expected 7 members, got 8'],
+    ['an empty file', { file: '' }, 'file is not a path'],
+  ] as const)('refuses %s', (_name, patch, detail) => {
+    expect(() => goalSourceUnavailable({ ...schemaRejectedEnvelope, ...patch })).toThrow(GoalStoreEnvelopeError)
+    expect(() => goalSourceUnavailable({ ...schemaRejectedEnvelope, ...patch })).toThrow(detail)
+  })
+
+  it('parses the Goal–Task link registry failure into its own constructor', () => {
+    expect(goalSourceUnavailable({ ok: false, error_code: 'goal_task_links_unavailable',
+      error: 'goal_task_links: primary registry is missing' }))
+      .toEqual({ kind: 'links_unavailable', detail: 'goal_task_links: primary registry is missing' })
+    expect(() => goalSourceUnavailable({ ok: false, error_code: 'goal_task_links_unavailable' }))
+      .toThrow(GoalStoreEnvelopeError)
+  })
+})
+
+
+describe('Goal–Task link source unavailable', () => {
+  it.each([
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s preserves the link source cause', async (_name, fetch) => {
+    getMock.mockResolvedValue({ ok: false, error_code: 'goal_task_links_unavailable',
+      error: 'goal_task_links: primary registry is missing; recovery is non-authoritative' })
+    await expect(fetch()).rejects.toThrow('primary registry is missing')
+  })
+})

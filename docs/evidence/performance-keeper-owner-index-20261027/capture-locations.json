@@ -1,0 +1,69 @@
+{
+  "schema": "masc.retained-capture-locations.v1",
+  "selected_files": [
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/plan.json",
+      "retained": "plan.json",
+      "capture_sha256": "5fa06bd0ec1f179f7b03923d0b25715463f2cb79beed999400d66cc24be4463e",
+      "retained_sha256": "5fa06bd0ec1f179f7b03923d0b25715463f2cb79beed999400d66cc24be4463e",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/summary.json",
+      "retained": "summary.json",
+      "capture_sha256": "2e95907cafd339a3b7e5229d47ebe84dfec4e8fcf4634e1c09390205f41168c2",
+      "retained_sha256": "2e95907cafd339a3b7e5229d47ebe84dfec4e8fcf4634e1c09390205f41168c2",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/stdout.jsonl",
+      "retained": "measurements.jsonl",
+      "capture_sha256": "cfe8cdb1bfeb189896ae352a126eac3bb6c114979c05d454e0981e6ff89b7ca9",
+      "retained_sha256": "cfe8cdb1bfeb189896ae352a126eac3bb6c114979c05d454e0981e6ff89b7ca9",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/stderr.txt",
+      "retained": "interpreter.stderr.txt",
+      "capture_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/execution.json",
+      "retained": "execution.json",
+      "capture_sha256": "e0467bbebf3e892e69188cc66c275c4c8e1a8e123201247ec0080c25467a9b17",
+      "retained_sha256": "e0467bbebf3e892e69188cc66c275c4c8e1a8e123201247ec0080c25467a9b17",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/probe.ml",
+      "retained": "probe.ocaml.txt",
+      "capture_sha256": "26f0c68cc3a6b0681221c4e7b332f680936a16e08ab1feb8475cb7efb4e0c0bb",
+      "retained_sha256": "26f0c68cc3a6b0681221c4e7b332f680936a16e08ab1feb8475cb7efb4e0c0bb",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-preparation-v1/run_probe.py",
+      "retained": "reproduce.py",
+      "capture_sha256": "dc1c3fb3eacef86e8436378653d49aea00964a91b500123e1c9752926733659e",
+      "retained_sha256": "dc1c3fb3eacef86e8436378653d49aea00964a91b500123e1c9752926733659e",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-review-response-v1/verification.json",
+      "retained": "test-response-checks.json",
+      "capture_sha256": "034d40726b8ac10e4ddda8e3a29e3328ceca6eef1ef863a2d3c543c3d2688d7c",
+      "retained_sha256": "034d40726b8ac10e4ddda8e3a29e3328ceca6eef1ef863a2d3c543c3d2688d7c",
+      "treatment": "Exact selected capture; renamed when indicated by retained path."
+    },
+    {
+      "capture": "artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-response-v1/verification.json",
+      "retained": "ci-response-checks.json",
+      "capture_sha256": "2113ff125b06da0450f9fca28ec9fe5c65d4a2a7dadfc340c1b359faf0d66aca",
+      "retained_sha256": "2113ff125b06da0450f9fca28ec9fe5c65d4a2a7dadfc340c1b359faf0d66aca",
+      "treatment": "Exact new compile-response parsing receipt; original concurrency response capture remains unchanged."
+    }
+  ],
+  "note": "Original commands, filenames and paths stay frozen. Reproduction writes to a fresh artifacts directory."
+}

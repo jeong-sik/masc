@@ -1,0 +1,543 @@
+[
+  {
+    "id": "call_93gg6rgk",
+    "name": "BrowserSession",
+    "input": {
+      "action": "open",
+      "headless": true
+    },
+    "result": {
+      "opened": true,
+      "reused": false,
+      "backend": "firefox-webdriver"
+    },
+    "started_at_unix": 1788794794.338741,
+    "finished_at_unix": 1788794796.152361,
+    "duration_ms": 1813.62,
+    "success": true
+  },
+  {
+    "id": "call_azlei5a1",
+    "name": "BrowserGoto",
+    "input": {
+      "url": "http://127.0.0.1:50077/"
+    },
+    "result": {
+      "title": "Zen full cycle · Browser Lab",
+      "url": "http://127.0.0.1:50077/"
+    },
+    "started_at_unix": 1788794799.78969,
+    "finished_at_unix": 1788794799.826068,
+    "duration_ms": 36.38,
+    "success": true
+  },
+  {
+    "id": "call_ks2rttkf",
+    "name": "BrowserRead",
+    "input": {
+      "lane": "automation",
+      "mode": "text"
+    },
+    "result": {
+      "clientId": null,
+      "chars": 307,
+      "text": "MASC Browser Lab · 5dcf856da527\nBrowser verification checks\n\nFind a check and record its verification.\n\nSearch checks\nFirefox layout review\n\nA separate check.\n\nZen full cycle\n\nCheck browser tools, complete the form, and read the visual receipt.\n\nOpen Zen full cycle\nMemory snapshot review\n\nA separate check.",
+      "title": "Zen full cycle · Browser Lab",
+      "truncated": false,
+      "url": "http://127.0.0.1:50077/"
+    },
+    "started_at_unix": 1788794800.918573,
+    "finished_at_unix": 1788794800.923108,
+    "duration_ms": 4.54,
+    "success": true
+  },
+  {
+    "id": "call_h5098pdz",
+    "name": "BrowserRead",
+    "input": {
+      "lane": "automation",
+      "mode": "elements"
+    },
+    "result": {
+      "clientId": null,
+      "tabId": 1,
+      "elements": [
+        {
+          "disabled": false,
+          "href": null,
+          "name": "Search checks",
+          "readOnly": false,
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)",
+          "tag": "input",
+          "text": "",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "disabled": false,
+          "href": null,
+          "name": "Open Zen full cycle",
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > article:nth-of-type(2) > button:nth-of-type(1)",
+          "tag": "button",
+          "text": "Open Zen full cycle",
+          "type": null
+        }
+      ],
+      "title": "Zen full cycle · Browser Lab",
+      "total": 2,
+      "truncated": false,
+      "url": "http://127.0.0.1:50077/"
+    },
+    "started_at_unix": 1788794807.703967,
+    "finished_at_unix": 1788794807.709632,
+    "duration_ms": 5.66,
+    "success": true
+  },
+  {
+    "id": "call_tmjnnxtg",
+    "name": "BrowserAct",
+    "input": {
+      "action": "click",
+      "lane": "automation",
+      "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > article:nth-of-type(2) > button:nth-of-type(1)",
+      "tabId": 1
+    },
+    "result": {
+      "tabId": 1,
+      "performed": true,
+      "result": null
+    },
+    "started_at_unix": 1788794809.616534,
+    "finished_at_unix": 1788794809.650093,
+    "duration_ms": 33.56,
+    "success": true
+  },
+  {
+    "id": "call_9dhk1x8q",
+    "name": "BrowserRead",
+    "input": {
+      "lane": "automation",
+      "mode": "text"
+    },
+    "result": {
+      "clientId": null,
+      "chars": 238,
+      "text": "MASC Browser Lab · 5dcf856da527\nZen full cycle\nRecord a completed browser verification. The receipt code is printed only in the image.\nStatus\nOperator note\n I reviewed the rendered page\nVisual receipt\nVisual receipt code\nSave verification",
+      "title": "Zen full cycle · Browser Lab",
+      "truncated": false,
+      "url": "http://127.0.0.1:50077/check"
+    },
+    "started_at_unix": 1788794821.402893,
+    "finished_at_unix": 1788794821.41129,
+    "duration_ms": 8.4,
+    "success": true
+  },
+  {
+    "id": "call_y3sscdbo",
+    "name": "BrowserRead",
+    "input": {
+      "lane": "automation",
+      "mode": "elements"
+    },
+    "result": {
+      "clientId": null,
+      "tabId": 1,
+      "elements": [
+        {
+          "disabled": false,
+          "href": null,
+          "multiple": false,
+          "name": "Status",
+          "options": [
+            {
+              "disabled": false,
+              "label": "Draft",
+              "selected": true,
+              "value": "draft"
+            },
+            {
+              "disabled": false,
+              "label": "Verified",
+              "selected": false,
+              "value": "verified"
+            }
+          ],
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > select:nth-of-type(1)",
+          "tag": "select",
+          "text": "",
+          "type": null,
+          "value": "draft"
+        },
+        {
+          "disabled": false,
+          "href": null,
+          "name": "Operator note",
+          "readOnly": false,
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > textarea:nth-of-type(1)",
+          "tag": "textarea",
+          "text": "",
+          "type": null,
+          "value": ""
+        },
+        {
+          "checked": false,
+          "disabled": false,
+          "href": null,
+          "indeterminate": false,
+          "name": "I reviewed the rendered page",
+          "readOnly": false,
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > input:nth-of-type(1)",
+          "tag": "input",
+          "text": "",
+          "type": "checkbox",
+          "value": "on"
+        },
+        {
+          "disabled": false,
+          "href": null,
+          "name": "Visual receipt code",
+          "readOnly": false,
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(5) > input:nth-of-type(1)",
+          "tag": "input",
+          "text": "",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "disabled": false,
+          "href": null,
+          "name": "Save verification",
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+          "tag": "button",
+          "text": "Save verification",
+          "type": "submit"
+        }
+      ],
+      "title": "Zen full cycle · Browser Lab",
+      "total": 5,
+      "truncated": false,
+      "url": "http://127.0.0.1:50077/check"
+    },
+    "started_at_unix": 1788794823.140461,
+    "finished_at_unix": 1788794823.146274,
+    "duration_ms": 5.81,
+    "success": true
+  },
+  {
+    "id": "call_yilpoihg",
+    "name": "BrowserAct",
+    "input": {
+      "action": "select",
+      "lane": "automation",
+      "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > select:nth-of-type(1)",
+      "tabId": 1,
+      "value": "verified"
+    },
+    "result": {
+      "tabId": 1,
+      "performed": true,
+      "result": null
+    },
+    "started_at_unix": 1788794827.341861,
+    "finished_at_unix": 1788794827.406435,
+    "duration_ms": 64.57,
+    "success": true
+  },
+  {
+    "id": "call_yqvzlvus",
+    "name": "BrowserAct",
+    "input": {
+      "action": "fill",
+      "lane": "automation",
+      "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > textarea:nth-of-type(1)",
+      "tabId": 1,
+      "text": "Zen browser tools completed the full cycle."
+    },
+    "result": {
+      "tabId": 1,
+      "performed": true,
+      "result": null
+    },
+    "started_at_unix": 1788794839.473472,
+    "finished_at_unix": 1788794839.484346,
+    "duration_ms": 10.87,
+    "success": true
+  },
+  {
+    "id": "call_xt1bdr2u",
+    "name": "BrowserAct",
+    "input": {
+      "action": "click",
+      "lane": "automation",
+      "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > input:nth-of-type(1)",
+      "tabId": 1
+    },
+    "result": {
+      "tabId": 1,
+      "performed": true,
+      "result": null
+    },
+    "started_at_unix": 1788794841.163703,
+    "finished_at_unix": 1788794841.220865,
+    "duration_ms": 57.16,
+    "success": true
+  },
+  {
+    "id": "call_zzbp6408",
+    "name": "BrowserRead",
+    "input": {
+      "lane": "automation",
+      "mode": "elements"
+    },
+    "result": {
+      "clientId": null,
+      "tabId": 1,
+      "elements": [
+        {
+          "disabled": false,
+          "href": null,
+          "multiple": false,
+          "name": "Status",
+          "options": [
+            {
+              "disabled": false,
+              "label": "Draft",
+              "selected": false,
+              "value": "draft"
+            },
+            {
+              "disabled": false,
+              "label": "Verified",
+              "selected": true,
+              "value": "verified"
+            }
+          ],
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > select:nth-of-type(1)",
+          "tag": "select",
+          "text": "",
+          "type": null,
+          "value": "verified"
+        },
+        {
+          "disabled": false,
+          "href": null,
+          "name": "Operator note",
+          "readOnly": false,
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > textarea:nth-of-type(1)",
+          "tag": "textarea",
+          "text": "",
+          "type": null,
+          "value": "Zen browser tools completed the full cycle."
+        },
+        {
+          "checked": true,
+          "disabled": false,
+          "href": null,
+          "indeterminate": false,
+          "name": "I reviewed the rendered page",
+          "readOnly": false,
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(3) > input:nth-of-type(1)",
+          "tag": "input",
+          "text": "",
+          "type": "checkbox",
+          "value": "on"
+        },
+        {
+          "disabled": false,
+          "href": null,
+          "name": "Visual receipt code",
+          "readOnly": false,
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(5) > input:nth-of-type(1)",
+          "tag": "input",
+          "text": "",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "disabled": false,
+          "href": null,
+          "name": "Save verification",
+          "role": null,
+          "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+          "tag": "button",
+          "text": "Save verification",
+          "type": "submit"
+        }
+      ],
+      "title": "Zen full cycle · Browser Lab",
+      "total": 5,
+      "truncated": false,
+      "url": "http://127.0.0.1:50077/check"
+    },
+    "started_at_unix": 1788794846.267181,
+    "finished_at_unix": 1788794846.272432,
+    "duration_ms": 5.25,
+    "success": true
+  },
+  {
+    "id": "call_4wqklloe",
+    "name": "BrowserRead",
+    "input": {
+      "lane": "automation",
+      "mode": "screenshot",
+      "tabId": 1
+    },
+    "result": {
+      "clientId": null,
+      "artifact": "0cc8e29cd9fa74428ba9f1f1de4150230ac241cc1b41ee25c0071172f67ede52",
+      "media_type": "image/png",
+      "tabId": 1,
+      "url": "http://127.0.0.1:50077/check",
+      "title": "Zen full cycle · Browser Lab",
+      "width": 1122,
+      "height": 752,
+      "bytes": 62686,
+      "scope": "viewport"
+    },
+    "started_at_unix": 1788794849.865166,
+    "finished_at_unix": 1788794849.891655,
+    "duration_ms": 26.49,
+    "success": true
+  },
+  {
+    "id": "call_cegex6oh",
+    "name": "keeper_analyze_image",
+    "input": {
+      "artifact": "0cc8e29cd9fa74428ba9f1f1de4150230ac241cc1b41ee25c0071172f67ede52",
+      "query": "Transcribe the text shown in this screenshot, especially any code printed in the \"Visual receipt\" image area. Report the code exactly as displayed."
+    },
+    "result": {
+      "ok": true,
+      "text": "MASC Browser Lab · 5dcf856da527\nZen full cycle\nRecord a completed browser verification. The receipt code is printed only in the image.\nStatus Verified\nOperator note\nZen browser tools completed the full cycle.\nI reviewed the rendered page\nVisual receipt\nWFEYKC\nVisual receipt code\nSave verification"
+    },
+    "started_at_unix": 1788794852.210506,
+    "finished_at_unix": 1788794853.247367,
+    "duration_ms": 1036.86,
+    "success": true
+  },
+  {
+    "id": "call_1uzswyt3",
+    "name": "BrowserAct",
+    "input": {
+      "action": "fill",
+      "lane": "automation",
+      "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(5) > input:nth-of-type(1)",
+      "tabId": 1,
+      "text": "WFEYKC"
+    },
+    "result": {
+      "tabId": 1,
+      "performed": true,
+      "result": null
+    },
+    "started_at_unix": 1788794855.792826,
+    "finished_at_unix": 1788794855.799549,
+    "duration_ms": 6.72,
+    "success": true
+  },
+  {
+    "id": "call_o3hzpi9g",
+    "name": "BrowserAct",
+    "input": {
+      "action": "click",
+      "lane": "automation",
+      "selector": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+      "tabId": 1
+    },
+    "result": {
+      "tabId": 1,
+      "performed": true,
+      "result": null
+    },
+    "started_at_unix": 1788794866.425226,
+    "finished_at_unix": 1788794866.445343,
+    "duration_ms": 20.12,
+    "success": true
+  },
+  {
+    "id": "call_q99579m2",
+    "name": "BrowserRead",
+    "input": {
+      "lane": "automation",
+      "mode": "text"
+    },
+    "result": {
+      "clientId": null,
+      "chars": 341,
+      "text": "MASC Browser Lab · 5dcf856da527\nZen full cycle\nFULL_CYCLE_CONFIRMED\n\nStatus: Verified\n\nOperator note: Zen browser tools completed the full cycle.\n\nRendered page reviewed: yes\n\nImage-only receipt: verified\n\nThe browser submitted a valid verification to the local web application.\n\nBrowser tools → rendered controls → vision → confirmed result",
+      "title": "Zen full cycle · Browser Lab",
+      "truncated": false,
+      "url": "http://127.0.0.1:50077/receipt"
+    },
+    "started_at_unix": 1788794867.711375,
+    "finished_at_unix": 1788794867.715131,
+    "duration_ms": 3.76,
+    "success": true
+  },
+  {
+    "id": "call_n6otfh8m",
+    "name": "BrowserRead",
+    "input": {
+      "lane": "automation",
+      "mode": "screenshot",
+      "tabId": 1
+    },
+    "result": {
+      "clientId": null,
+      "artifact": "6423f3a898ec23d3e33a3faeb7d62e955d901febb14f526dad962bf01f2b9c3b",
+      "media_type": "image/png",
+      "tabId": 1,
+      "url": "http://127.0.0.1:50077/receipt",
+      "title": "Zen full cycle · Browser Lab",
+      "width": 1122,
+      "height": 752,
+      "bytes": 59575,
+      "scope": "viewport"
+    },
+    "started_at_unix": 1788794869.883726,
+    "finished_at_unix": 1788794869.924466,
+    "duration_ms": 40.74,
+    "success": true
+  },
+  {
+    "id": "call_eztahhue",
+    "name": "keeper_analyze_image",
+    "input": {
+      "artifact": "6423f3a898ec23d3e33a3faeb7d62e955d901febb14f526dad962bf01f2b9c3b",
+      "query": "Transcribe the text shown in this receipt screenshot, including the confirmation status line and all field values exactly as displayed."
+    },
+    "result": {
+      "ok": true,
+      "text": "FULL_CYCLE_CONFIRMED\n\nStatus: Verified\n\nOperator note: Zen browser tools completed the full cycle.\n\nRendered page reviewed: yes\n\nImage-only receipt: verified"
+    },
+    "started_at_unix": 1788794871.382214,
+    "finished_at_unix": 1788794872.685557,
+    "duration_ms": 1303.34,
+    "success": true
+  },
+  {
+    "id": "call_699qm7sp",
+    "name": "BrowserSession",
+    "input": {
+      "action": "close"
+    },
+    "result": {
+      "closed": true
+    },
+    "started_at_unix": 1788794882.240735,
+    "finished_at_unix": 1788794882.526668,
+    "duration_ms": 285.93,
+    "success": true
+  }
+]

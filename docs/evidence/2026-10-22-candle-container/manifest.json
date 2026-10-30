@@ -1,0 +1,120 @@
+{
+  "schema": "file-integrity-inventory-v1",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2386,
+      "sha256": "d2a095e69fabac29ee1b3b01decdccf0b55c501a07af4a5889814413e47b663d"
+    },
+    {
+      "path": "candle-container-independent-review-20261022.md",
+      "bytes": 9617,
+      "sha256": "0fcae713a9f62b1309f8f731e6679b836fc324ae43d0b7d0233367816ba92d0c"
+    },
+    {
+      "path": "candle-container-session-20261022.json",
+      "bytes": 3072,
+      "sha256": "d556151cfa94ff63f210f79924cf51579a3410d962270db13197a62b97fda6de"
+    },
+    {
+      "path": "candle_container_qualification.py",
+      "bytes": 8190,
+      "sha256": "0ddcc1dd587d6d2d09305db7d595d4a55cb30af218f09061442b697f6fd4dffe"
+    },
+    {
+      "path": "cleanup-observed.json",
+      "bytes": 187,
+      "sha256": "b9c4c6616fd5fa8369c97c2448a66a718bf802ee8cbffb58e0b5f963e6b768cf"
+    },
+    {
+      "path": "docker-commands.json.gz",
+      "bytes": 5215,
+      "sha256": "f3651d581d0aa6749cff7f6eaa89a082f4757b916225a63b250130748607dcf6"
+    },
+    {
+      "path": "first-container-inspect.json",
+      "bytes": 6443,
+      "sha256": "56a6db6d4177d5b10fb79e0f91fc0fd7152e286a39c0f19782ccf1779ba0704d"
+    },
+    {
+      "path": "first-replies.jsonl",
+      "bytes": 1816,
+      "sha256": "07e5ae7ae94e4e24dc23ca971855bbd7675abd4f69dd07668bcec93a7e9b9794"
+    },
+    {
+      "path": "first-requests.jsonl",
+      "bytes": 1698,
+      "sha256": "188ad1168207800827c9c6168bfbf73abbf4a9f4f61299ffc1cbeb389498ff46"
+    },
+    {
+      "path": "image-build.log",
+      "bytes": 1552,
+      "sha256": "1e2f2d847a30ad31c1313a267ae75660ab92222073f7d3d8db22dda7424f5587"
+    },
+    {
+      "path": "image-inspect.json",
+      "bytes": 2030,
+      "sha256": "07623274106c19108b20ce08900bc39b49ff8f04858b997d887aac64fd63ffc4"
+    },
+    {
+      "path": "receipt.json",
+      "bytes": 896,
+      "sha256": "c8a3545e05a43f0370be6c7a3be547ba07620dd6fc466daee4961f2b9611a241"
+    },
+    {
+      "path": "retained-state/candle-appraiser/5f2211dc1389306cc8fcc0c7d3937fa2ef214c7d5a6da2e7649c0554733d1c2d.json",
+      "bytes": 649,
+      "sha256": "befdbcaf595afec9882851d716cc9e6ac925261a8929a271b216b8a1f39f632d"
+    },
+    {
+      "path": "retained-state/candle-appraiser/66d21f23cf53177a7a8512e1692c5c3bc5283a9d6d2c22ea0d7d40a8e6459492.json",
+      "bytes": 556,
+      "sha256": "44530d431a8c99e00b013a961c836b6b2b8079d3689ead6ba4c8717f7d8c08c6"
+    },
+    {
+      "path": "second-container-inspect.json",
+      "bytes": 6445,
+      "sha256": "9a6686c333431691e1556f0d6f92dfea9bc0d7880d57dbc9eac71552d34f1ca5"
+    },
+    {
+      "path": "second-replies.jsonl",
+      "bytes": 2538,
+      "sha256": "38fb28e184f4fdcb229b8d6b969097794c790483d48587a36f4236d4a489ff07"
+    },
+    {
+      "path": "second-requests.jsonl",
+      "bytes": 1440,
+      "sha256": "ed7530314c6594fceb967a074fe90d17a8fee9611d2ef3bd881bedc2755a05c9"
+    },
+    {
+      "path": "third-container-inspect.json",
+      "bytes": 6443,
+      "sha256": "bbe9c8f5cd95c8ee2bdba4b090ee79e951220b22d1849ffb9923a0daffc2284c"
+    },
+    {
+      "path": "third-replies.jsonl",
+      "bytes": 2256,
+      "sha256": "ae881b3cf7ef2b22b3bc425f2c97a71536d36f6ee002debeae21d60ddfb7e8c8"
+    },
+    {
+      "path": "third-requests.jsonl",
+      "bytes": 2697,
+      "sha256": "e729fa42a6f612d1bbe76d736dbfd24c6e515905a013ec54e4f18041a374e186"
+    },
+    {
+      "path": "volume-after-first-container-removal.json",
+      "bytes": 387,
+      "sha256": "0ab79c12350c7cece97069898465aed91b037540bbcdc3fc6b5e195b0ade074d"
+    },
+    {
+      "path": "volume-before-final-cleanup.json",
+      "bytes": 319,
+      "sha256": "c0d3b527657df3f7e98b51a9dde085c4fa8506bd72c604829f1379d65b684ead"
+    },
+    {
+      "path": "volume-created.json",
+      "bytes": 319,
+      "sha256": "c0d3b527657df3f7e98b51a9dde085c4fa8506bd72c604829f1379d65b684ead"
+    }
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "scope": "Actual stores read without mutation; task descriptions/handoff prose omitted",
+  "observed_at": "2026-10-25T00:06:03.997427+00:00",
+  "stores": [
+    {
+      "path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/goals.json",
+      "sha256": "d061806041f27779e0441ca402fd252d04f5cea78ef82e02e85ffc10a982ab88",
+      "bytes": 798,
+      "content": {
+        "version": 4,
+        "updated_at": "2026-10-24T18:19:55Z",
+        "goals": [
+          {
+            "id": "goal-canary-three-results",
+            "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+            "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+            "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+            "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+            "due_date": null,
+            "priority": 1,
+            "phase": "verifying",
+            "last_review_note": null,
+            "last_review_at": null,
+            "created_at": "2026-10-24T18:02:10Z",
+            "updated_at": "2026-10-24T18:19:55Z"
+          }
+        ],
+        "pending_events": [],
+        "pending_notifications": []
+      },
+      "projection_only": false
+    },
+    {
+      "path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/goal_measurements.json",
+      "sha256": "779dbc7825973a2cf4b3ab8c5c04a9b63771cf523b39593884cdebb7f6a04b43",
+      "bytes": 468,
+      "content": {
+        "version": 1,
+        "measurements": [
+          {
+            "id": "ff7a4f86482a94260ba642d65c5ae6b2",
+            "goal_id": "goal-canary-three-results",
+            "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+            "observed_value": "3/3: alpha=true, beta=true, gamma=true; reread after task-002 edit (alpha from approved task-001)",
+            "evidence": "artifact:workspace/acceptance.json",
+            "actor": "goal-canary",
+            "recorded_at": "2026-10-24T18:19:18Z"
+          }
+        ]
+      },
+      "projection_only": false
+    },
+    {
+      "path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/goal_verifications.json",
+      "sha256": "4544b8f5d5815efba602cff40fcc61d74c462f910b721df6f6785c11c986c4e1",
+      "bytes": 2446,
+      "content": {
+        "version": 2,
+        "updated_at": "2026-10-24T18:19:55Z",
+        "records": [
+          {
+            "goal_id": "goal-canary-three-results",
+            "completion": {
+              "state": "proof_pending",
+              "requested_at": "2026-10-24T18:19:55Z",
+              "request_id": "cd97da098881f0de109d028d3de5b57e",
+              "criterion": {
+                "revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+                "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+                "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+                "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread"
+              }
+            },
+            "submitted_evidence": [
+              {
+                "kind": "collaboration",
+                "reference": "board:p-9d29e90b0d8bb894450bb96beee6172d",
+                "sha256": "8e90a777f309091a4d4d5b598a3e7b526b72f3651fbfe3b414e403f5e03a075f",
+                "content_omitted": true,
+                "content_bytes": 1310
+              }
+            ],
+            "updated_at": "2026-10-24T18:19:55Z"
+          }
+        ]
+      },
+      "projection_only": true
+    },
+    {
+      "path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/tasks/backlog.json",
+      "sha256": "7bc27519e5226e0a9f139f42a41372c53e1d4f3de760db38452e43cbcec8a576",
+      "bytes": 4014,
+      "content": {
+        "version": 12,
+        "last_updated": "2026-10-24T18:19:19Z",
+        "tasks": [
+          {
+            "id": "task-001",
+            "title": "workspace/acceptance.json의 alpha를 true로 변경한다",
+            "created_at": "2026-10-24T18:02:32Z",
+            "status": "done",
+            "assignee": "goal-canary",
+            "completed_at": "2026-10-24T18:16:32Z"
+          },
+          {
+            "id": "task-002",
+            "title": "workspace/acceptance.json의 beta와 gamma를 true로 변경한다",
+            "created_at": "2026-10-24T18:18:35Z",
+            "status": "awaiting_verification",
+            "assignee": "goal-canary",
+            "started_at": "2026-10-24T18:18:44Z",
+            "submitted_at": "2026-10-24T18:19:19Z",
+            "verification_id": "vrf-6206a9fbd9d587cba81331282b0e2ee5"
+          }
+        ]
+      },
+      "projection_only": true
+    },
+    {
+      "path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/tasks/goal_task_links.json",
+      "sha256": "ad28c76349a3df09e7c7ee1f41a7dd3a47174229b7f3151244019b1116ec959a",
+      "bytes": 181,
+      "content": {
+        "version": 1,
+        "last_updated": "2026-10-24T18:18:35Z",
+        "links": [
+          {
+            "goal_id": "goal-canary-three-results",
+            "task_ids": [
+              "task-001",
+              "task-002"
+            ]
+          }
+        ]
+      },
+      "projection_only": false
+    }
+  ]
+}

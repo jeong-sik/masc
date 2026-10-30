@@ -1,0 +1,20 @@
+[
+  {
+    "record_type": "run_finished",
+    "worker_run_id": "wr-1a16e987856-1462-0000",
+    "ts": 1792856909.50725,
+    "final_text": null,
+    "stop_reason": null,
+    "file": "turn-1792856848467-1462-000000.jsonl",
+    "line": 59
+  },
+  {
+    "record_type": "run_finished",
+    "worker_run_id": "wr-1a16e996748-1462-0000",
+    "ts": 1792856930.312033,
+    "final_text": "검증을 완료했습니다. 요청하신 경로 그대로, 같은 연결·같은 탭에서만 동작했습니다.\n\n**수행 경로 (일반 이동·새로고침 경로 검증)**\n1. `browser-lanes` 스킬 읽기 → lane 생략 BrowserTabs로 관측: lane=live, clientId `d0ec6763-0de9-40b2-9a14-eb71f5783c65`, transport `ego_task_space`, 탭 1개(id=1, 이전 URL http://127.0.0.1:9451/, \"SDK 대기 검증 완료\")\n2. 일반 **BrowserGoto**로 같은 clientId·tabId=1에서 http://127.0.0.1:9449/ 이동 → 제목 \"Ego native 장시간 처리 검증\" 확인\n3. 일반 **BrowserAct reload**로 같은 탭 새로고침 → 같은 제목으로 정상 복귀\n4. **BrowserRead mode=snapshot**으로 관측\n\n이 두 동작은 workflow로 묶거나 다른 동작으로 대체하지 않았고, 새 탭·새 공간을 만들지 않았습니다. 스냅샷 헤더도 같은 공간 25(`masc-ego-native-sdk-20261024`, p1)에서 1 managed, 0 untracked임을 보여 줍니다.\n\n**관측 결과 (native snapshot)**\n- **제목**: Ego native 장시간 처리 검증\n- **본문 안내**: \"이 검증 앱은 접수 뒤 서버에서 130초간 처리합니다. 완료 결과가 화면에 나타날 때까지 기다려 주세요.\"\n- **양식 항목**:\n  - 신청인 이름 — textbox (`input[name=\"name\"]`, ref=14)\n  - 수령 방법 — combobox (`select[name=\"delivery\"]`, ref=15), 현재 \"선택하세요\"\n  - 알림 수단 (복수 선택 가능) — 다중 선택 listbox (`select[name=\"notifications\"]`, ref=16), 옵션: 이메일 / 문자 메시지 / 전화\n  - 버튼 \"배송 신청하기\" (ref=17)\n- **상태 표시**: \"접수 대기\"\n\n양식 입력과 신청 버튼은 누르지 않았고 관측만 했으므로, 앱 서버의 기존 신청 EGO-001은 건드리지 않고 보존됩니다(화면 상태도 \"접수 대기\"로 변화 없음).",
+    "stop_reason": "Types.EndTurn",
+    "file": "turn-1792856909637-1462-000001.jsonl",
+    "line": 8
+  }
+]

@@ -1,0 +1,137 @@
+{
+  "scope": "Only actual tool_execution_started/finished measurement facts extracted; model Thinking, prompt/history and assistant blocks excluded",
+  "measurements": [
+    {
+      "raw_trace_path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/keepers/goal-canary/raw-traces/turn-1792864933387-c25b-000000.jsonl",
+      "raw_trace_sha256": "1f5d526bee81f40468bfca91e8a35ee04a91bd94c1dd47bd391ecdf189501916",
+      "start_seq": 64,
+      "finish_seq": 66,
+      "tool_turn": 5,
+      "tool_planned_index": 1,
+      "tool_use_id": "call_af4f335127eb4d25b3e0f044",
+      "input": {
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "evidence": "artifact:workspace/acceptance.json",
+        "goal_id": "goal-canary-three-results",
+        "observed_value": "1/3: alpha=true, beta=false, gamma=false; reread after task-001 edit"
+      },
+      "result": {
+        "status": "ok",
+        "measurement_status": "reported_only",
+        "measurement": {
+          "id": "6224eec75468dded0612099ffdcffbba",
+          "goal_id": "goal-canary-three-results",
+          "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+          "observed_value": "1/3: alpha=true, beta=false, gamma=false; reread after task-001 edit",
+          "evidence": "artifact:workspace/acceptance.json",
+          "actor": "goal-canary",
+          "recorded_at": "2026-10-24T18:02:56Z"
+        },
+        "goal_at_recording": {
+          "id": "goal-canary-three-results",
+          "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+          "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+          "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+          "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+          "due_date": null,
+          "priority": 1,
+          "phase": "executing",
+          "last_review_note": null,
+          "last_review_at": null,
+          "created_at": "2026-10-24T18:02:10Z",
+          "updated_at": "2026-10-24T18:02:10Z"
+        },
+        "completion_effect": "unchanged"
+      },
+      "tool_error": false
+    },
+    {
+      "raw_trace_path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/keepers/goal-canary/raw-traces/turn-1792865792970-c25b-000003.jsonl",
+      "raw_trace_sha256": "7c3041c95372e75a99561114b72bf82d4590ac6fb0451200c3fd4a9e788fa17d",
+      "start_seq": 52,
+      "finish_seq": 54,
+      "tool_turn": 28,
+      "tool_planned_index": 2,
+      "tool_use_id": "call_55e9e72f43bb4d718f7349d8",
+      "input": {
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "evidence": "artifact:workspace/acceptance.json",
+        "goal_id": "goal-canary-three-results",
+        "observed_value": "1/3: alpha=true, beta=false, gamma=false; task-001 approved (done, 2026-10-24T18:16:32Z), file reread before starting beta/gamma work"
+      },
+      "result": {
+        "status": "ok",
+        "measurement_status": "reported_only",
+        "measurement": {
+          "id": "c43ffbe4723f28980bb1e9972babd7e6",
+          "goal_id": "goal-canary-three-results",
+          "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+          "observed_value": "1/3: alpha=true, beta=false, gamma=false; task-001 approved (done, 2026-10-24T18:16:32Z), file reread before starting beta/gamma work",
+          "evidence": "artifact:workspace/acceptance.json",
+          "actor": "goal-canary",
+          "recorded_at": "2026-10-24T18:18:45Z"
+        },
+        "goal_at_recording": {
+          "id": "goal-canary-three-results",
+          "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+          "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+          "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+          "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+          "due_date": null,
+          "priority": 1,
+          "phase": "executing",
+          "last_review_note": null,
+          "last_review_at": null,
+          "created_at": "2026-10-24T18:02:10Z",
+          "updated_at": "2026-10-24T18:02:10Z"
+        },
+        "completion_effect": "unchanged"
+      },
+      "tool_error": false
+    },
+    {
+      "raw_trace_path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/keepers/goal-canary/raw-traces/turn-1792865792970-c25b-000003.jsonl",
+      "raw_trace_sha256": "7c3041c95372e75a99561114b72bf82d4590ac6fb0451200c3fd4a9e788fa17d",
+      "start_seq": 80,
+      "finish_seq": 82,
+      "tool_turn": 31,
+      "tool_planned_index": 0,
+      "tool_use_id": "call_d890750f947f405c937794d7",
+      "input": {
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "evidence": "artifact:workspace/acceptance.json",
+        "goal_id": "goal-canary-three-results",
+        "observed_value": "3/3: alpha=true, beta=true, gamma=true; reread after task-002 edit (alpha from approved task-001)"
+      },
+      "result": {
+        "status": "ok",
+        "measurement_status": "reported_only",
+        "measurement": {
+          "id": "ff7a4f86482a94260ba642d65c5ae6b2",
+          "goal_id": "goal-canary-three-results",
+          "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+          "observed_value": "3/3: alpha=true, beta=true, gamma=true; reread after task-002 edit (alpha from approved task-001)",
+          "evidence": "artifact:workspace/acceptance.json",
+          "actor": "goal-canary",
+          "recorded_at": "2026-10-24T18:19:18Z"
+        },
+        "goal_at_recording": {
+          "id": "goal-canary-three-results",
+          "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+          "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+          "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+          "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+          "due_date": null,
+          "priority": 1,
+          "phase": "executing",
+          "last_review_note": null,
+          "last_review_at": null,
+          "created_at": "2026-10-24T18:02:10Z",
+          "updated_at": "2026-10-24T18:02:10Z"
+        },
+        "completion_effect": "unchanged"
+      },
+      "tool_error": false
+    }
+  ]
+}

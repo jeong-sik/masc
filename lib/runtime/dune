@@ -1,0 +1,86 @@
+(include_subdirs no)
+
+(library
+ (name masc_runtime)
+ (public_name masc.runtime)
+ (wrapped false)
+ (private_modules runtime_lane_edit runtime_config_projection runtime_claude_environment_projection embedded_antigravity_context embedded_account_login runtime_codex_environment_projection runtime_provider_usage_types runtime_provider_usage_observations)
+ (libraries
+  masc.apple_keychain
+  masc.watched_work
+  masc.egress_host
+  masc.build_version
+  masc.embedded_config
+  ptime
+  yojson
+  cstruct
+  otoml
+  masc.toml_line_editor
+  masc.fusion_core
+  base64
+  dune-build-info
+   masc.agent_core.digest
+  unix
+  uuidm
+  logs
+  eio
+  eio.unix
+  cohttp
+  cohttp-eio
+  eqaf
+  masc.agent_core
+  masc.agent_core.base
+  masc.agent_core.llm_provider
+  masc.mcp_transport_protocol
+  masc.masc_core
+  masc.masc_types
+  uri
+  masc.masc_log
+  masc.secret_patterns
+  masc_eio_context
+  ; [lsp.servers] names languages the language-server client knows; the
+  ; client sits below this library, so the edge points down.
+  masc.lsp_client
+  masc.runtime_model
+  masc.tool_types
+  ; The model-facing MCP outcome-unknown line is a managed prompt
+  ; (config/prompts/tool_guidance.md); the masc.prompt_registry closure does
+  ; not reach this library, so the edge is cycle-free.
+  masc.prompt_registry
+  masc.masc_tool_dispatch
+  masc.config
+  masc.config_dir_resolver
+  masc.config_journal
+  masc.skill_config
+  masc.runtime_toml_namespace
+  masc.browser_configuration
+  masc.machine_configuration
+  masc.provider_tool_support
+  masc.keeper_runtime
+  masc.keeper_registry
+  masc.auth
+  masc.fs_compat
+  masc.fd_accountant
+  masc.types_boundary
+  time_compat
+  masc.time_codec
+  masc_random_id
+  masc.masc_process
+  masc.otel_spans
+  tls-eio)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_enumerate)))
+
+(rule
+ (target embedded_account_login.ml)
+ (deps ../../scripts/embed-setup.py ../../scripts/account-login-transport.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:../../scripts/embed-setup.py} %{dep:../../scripts/account-login-transport.py}))))
+
+(rule
+ (target embedded_antigravity_context.ml)
+ (deps ../../scripts/embed-setup.py ../../scripts/antigravity-context-pty.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:../../scripts/embed-setup.py} %{dep:../../scripts/antigravity-context-pty.py}))))

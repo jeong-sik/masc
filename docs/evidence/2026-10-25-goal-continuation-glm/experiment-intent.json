@@ -1,0 +1,18 @@
+{
+  "recorded_at": "2026-10-24T18:02:10.736207+00:00",
+  "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "binary_sha256": "98cd486335f7a40d2d49cc05501a52e1b4aee958732453405db8ded17e4de8b7",
+  "model": "glm-5.3",
+  "runtime_id": "glm-coding.glm-5-3",
+  "pure_single_provider": true,
+  "cascade": false,
+  "same_owner_request_as": "2be9d216-qwen",
+  "scope": "ordinary HTTP: unforced Goal association, alpha-only artifact before approval, approval event response and subsequent Goal measurement/remaining work",
+  "limitations": [
+    "Different source and model from the Qwen cohort; not an isolated causal model comparison.",
+    "Native run40116634161 executed with one lifecycle fixture failure, under investigation.",
+    "No live Official client or production installation claim.",
+    "Only approve after the terminal provider response and current/immutable alpha-only artifact equality.",
+    "No Goal ID hint or extra Keeper message after approval."
+  ]
+}

@@ -1,0 +1,2 @@
+MASC_FINAL_CAPTURE {"spaceId":14,"name":"masc-ego-native-sdk-20261024","page":"p1","url":"http://127.0.0.1:9448/confirmation","title":"배송 신청 완료","snapshot":"[p1 \"배송 신청 완료\" | space \"masc-ego-native-sdk-20261024\"(14): 1 managed, 0 untracked — p1* \"배송 신청 완료\"]\nroot\n  heading\n    text \"배송 신청 완료\"\n  status\n    text \"신청 번호 EGO-001\"\n","origin":"independent reviewer SDK capture after real Keeper completed; not Keeper-produced screenshot"}
+

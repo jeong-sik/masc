@@ -1,0 +1,2083 @@
+(* keeper_heartbeat_loop — the main heartbeat loop body and its helpers:
+   presence sync, board event collection, in-turn liveness pulse,
+   unified turn dispatch, exact cadence sleep, stage timing recording,
+   and [run_heartbeat_loop].
+
+   Extracted from keeper_keepalive.ml. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
+open Keeper_memory
+open Keeper_keepalive_signal
+module Observations = Keeper_heartbeat_loop_observations
+module Cycle = Keeper_heartbeat_loop_cycle
+
+(* Presence/identity sync extracted to
+   [Keeper_heartbeat_loop_presence] (godfile decomp). *)
+let effective_keepalive_meta = Keeper_heartbeat_loop_presence.effective_keepalive_meta
+let keeper_agent_status = Keeper_heartbeat_loop_presence.keeper_agent_status
+let sync_keeper_presence = Keeper_heartbeat_loop_presence.sync_keeper_presence
+
+(* Pending board-event collection extracted to
+   [Keeper_heartbeat_loop_board_events] (godfile decomp). *)
+let collect_keepalive_board_events = Keeper_heartbeat_loop_board_events.collect_keepalive_board_events
+
+let in_turn_liveness_pulse_interval_sec =
+  Keeper_heartbeat_loop_in_turn_pulse.in_turn_liveness_pulse_interval_sec
+
+let emit_in_turn_liveness_pulse =
+  Keeper_heartbeat_loop_in_turn_pulse.emit_in_turn_liveness_pulse
+
+let with_in_turn_liveness_pulse =
+  Keeper_heartbeat_loop_in_turn_pulse.with_in_turn_liveness_pulse
+
+(* Event-Layer stimulus intake extracted to [Keeper_heartbeat_stimulus_intake]
+   (godfile decomp). Type + entry point are re-exported as transparent
+   aliases so callers (incl. .mli consumers) stay byte-identical. *)
+module Stimulus_intake = Keeper_heartbeat_stimulus_intake
+
+let record_event_queue_stimulus_turn_started =
+  Stimulus_intake.record_event_queue_stimulus_turn_started
+;;
+
+type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
+  pending_board_events : Keeper_world_observation.pending_board_event list;
+  source_batch : Keeper_heartbeat_source_batch.t;
+  diagnostic_selection : Keeper_event_queue_state.pending_selection option;
+  event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
+  event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
+}
+
+type turn_intake_admission =
+  | Intake_admitted
+  | Intake_lifecycle_blocked of Keeper_lifecycle_admission.autonomous_denial
+
+let classify_turn_intake_admission ~lifecycle =
+  match lifecycle with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    Intake_lifecycle_blocked denial
+  | Keeper_lifecycle_admission.Autonomous_admitted -> Intake_admitted
+;;
+
+let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
+
+(* Keepalive scheduling decision (record + decide function) extracted to
+   [Keeper_heartbeat_loop_scheduling] (godfile decomp). *)
+type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
+  turn_decision : Keeper_world_observation.keeper_cycle_decision;
+  should_run_turn : bool;
+  verdict_reasons : string list;
+  channel : string;
+}
+
+let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
+
+let should_run_turn_after_event_intake
+      ~scheduled
+      ~event_queue_intake_error
+  =
+  scheduled
+  &&
+  match event_queue_intake_error with
+  | None | Some (Stimulus_intake.Connector_read_failed _)
+  | Some (Stimulus_intake.Connector_item_missing _)
+  | Some (Stimulus_intake.Ask_read_failed _)
+  | Some (Stimulus_intake.Completion_rejection_read_failed _)
+  | Some (Stimulus_intake.Job_result_unavailable _)
+  | Some (Stimulus_intake.Addon_result_unavailable _) -> true
+  | Some (Stimulus_intake.Pending_selection_failed _) -> false
+;;
+
+let provider_timeout_observation_reasons =
+  Observations.provider_timeout_observation_reasons
+;;
+
+let record_provider_timeout_observation =
+  Observations.record_provider_timeout_observation
+;;
+
+(* #10008 fm3: canonical metric name for proactive-scheduler skip
+   reasons. Labels: [("keeper", <name>); ("reason", <skip_reason>)]. *)
+let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
+
+
+(** Run keeper cycle with holder diagnostics. *)
+let run_keeper_cycle = Cycle.run_keeper_cycle
+
+(* T6 audit: outcome of one keepalive cycle evaluation.
+
+   [cycle_crashed = true] means either the catch-all in
+   [run_keepalive_unified_turn] swallowed an exception to keep the
+   keeper fiber alive, or event-queue work did not complete. The failure has
+   already been recorded via
+   [Keeper_registry.increment_turn_failures] (the same counter the
+   unified-turn failure path in [Keeper_unified_turn_failure] uses),
+   so the caller reads a non-zero [turn_fail_count] and dispatches
+   [Turn_failed] instead of [Turn_succeeded]. Such a cycle must also
+   NOT refresh the work-as-heartbeat lease; the count is observation and never
+   terminates the Keeper lane. *)
+type keepalive_cycle_status =
+  | Turn_cycle_completed
+  | Turn_cycle_interrupted
+  | Turn_cycle_crashed
+  | Turn_cycle_busy of Keeper_owner.autonomous_block
+
+type work_heartbeat_action =
+  | Refresh_work_heartbeat
+  | Preserve_work_heartbeat
+
+type keepalive_cycle_action =
+  | Defer_autonomous_work of Keeper_owner.autonomous_block
+  | Skip_interrupted_turn
+  | Record_turn_status of work_heartbeat_action
+
+let decide_keepalive_cycle_action = function
+  | Turn_cycle_completed -> Record_turn_status Refresh_work_heartbeat
+  | Turn_cycle_interrupted -> Skip_interrupted_turn
+  | Turn_cycle_crashed -> Record_turn_status Preserve_work_heartbeat
+  | Turn_cycle_busy block -> Defer_autonomous_work block
+;;
+
+(* Which cycle status an Owner-registry rejection of the autonomous turn
+   records. The Owner stopping and its inventory stopping are the same
+   shutdown boundary: the turn was never admitted, so the cycle completes
+   without a turn and nothing is a crash. Every other rejection is a crash of
+   the cycle. Both sums are closed and matched in full, so a new constructor
+   is named here at compile time instead of falling into the crash arm
+   (audit S9: [Inventory_stopping] was logged at ERROR and counted as a
+   crash once per Keeper per shutdown, 39 times in five days). *)
+let owner_turn_rejection_cycle_status
+    (error : Keeper_owner_registry.command_error)
+  : keepalive_cycle_status
+  =
+  match error with
+  | Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping
+  | Keeper_owner_registry.Command_lookup_failed
+      Keeper_owner_registry.Inventory_stopping -> Turn_cycle_completed
+  | Keeper_owner_registry.Command_lookup_failed
+      ( Keeper_owner_registry.Inventory_not_installed _
+      | Keeper_owner_registry.Owner_not_found _
+      | Keeper_owner_registry.Owner_unavailable _
+      | Keeper_owner_registry.Owner_initialization_failed _ )
+  | Keeper_owner_registry.Command_lifecycle_reserved _
+  | Keeper_owner_registry.Command_rejected
+      ( Keeper_owner.Reducer_rejected _
+      | Keeper_owner.Operation_rejected _
+      | Keeper_owner.Store_unavailable _
+      | Keeper_owner.Owner_closed ) -> Turn_cycle_crashed
+;;
+
+(* What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
+   belongs to the path that received the rate limit or quota answer, so the
+   keeper waits only while the path it would send next rests.
+   [Continue_on_deferred_lane]: the walk head of the deferred suffix is not
+   resting, and a pending input runs on it without a sleep.
+   [Wait_for_path_release]: the sleep lasts until [release_at]; [waiting_on]
+   names the runtime or assignment whose release that is. A wakeup does not
+   cut the wait short (#34653). *)
+type after_failure =
+  | Continue_on_deferred_lane of { next_runtime_id : string }
+  | Wait_for_path_release of
+      { release_at : float
+      ; waiting_on : string
+      ; basis : Keeper_turn_driver.wait_basis
+      }
+
+type keepalive_turn_outcome = {
+  meta : keeper_meta;
+  cycle_status : keepalive_cycle_status;
+  stimuli_acked : bool;
+      (** The cycle admitted at least one event-queue stimulus and acked
+          every entry of that batch on completion. *)
+  after_failure : after_failure option;
+      (** What the cycle's turn failure leaves the next cycle; [None] keeps
+          the plain cadence. *)
+}
+
+(* The loop-local hint is the in-process view of
+   [Keeper_deferred_runtime_lane_store]. The provider checkpoint the suffix
+   escapes survives a restart, so the suffix must too: without the file a
+   restarted keeper walks its assignment from the head and hands the input back
+   to the runtime whose response was just rejected. Every write to the hint goes
+   through here so the file and the ref move together. A store error is logged
+   with its path and never replaced by a fresh default; the in-process hint
+   keeps serving this process either way. *)
+module Deferred_lane_slot = struct
+  module Store = Keeper_deferred_runtime_lane_store
+
+  (* [Held] is a suffix the next cycle walks. [Dispatched] means a dispatch
+     consumed it and its cycle has not settled; the file still names the suffix
+     that dispatch runs. *)
+  type state =
+    | Idle
+    | Held of Keeper_turn_driver.deferred_runtime_lane
+    | Dispatched
+
+  type t =
+    { base_path : string
+    ; keepers_dir : string
+    ; keeper_name : string
+    ; state : state ref
+    }
+
+  let log_store_error slot ~action error =
+    Log.Keeper.warn
+      ~keeper_name:slot.keeper_name
+      "deferred runtime lane %s failed at %s: %s"
+      action
+      (Store.path_for ~keepers_dir:slot.keepers_dir ~keeper_name:slot.keeper_name)
+      (Store.error_to_string error)
+  ;;
+
+  let clear_durable slot =
+    match
+      Store.clear
+        ~base_path:slot.base_path
+        ~keepers_dir:slot.keepers_dir
+        ~keeper_name:slot.keeper_name
+    with
+    | Ok () -> ()
+    | Error error -> log_store_error slot ~action:"clear" error
+  ;;
+
+  (* What the assignment walks now. A restart is also how an operator applies
+     an edited [runtime.toml], so a suffix frozen before the restart may name
+     candidates the lane no longer has. *)
+  type lane_now =
+    | Lane_candidates of string list
+    | Lane_missing
+    | Lane_unavailable
+
+  let current_lane assignment_id =
+    match Runtime.resolve_assignment assignment_id with
+    | `Lane lane -> Lane_candidates (Runtime_lane.ordered_candidates lane)
+    | `Missing -> Lane_missing
+    | `Unavailable _ -> Lane_unavailable
+  ;;
+
+  (* The frozen suffix survives only while every id in it is still a candidate
+     of the assignment. Membership, not a positional suffix: the walk that
+     froze it had already demoted quota-exhausted candidates. An unavailable
+     catalog entry says nothing about lane membership, so it keeps the hint and
+     the walk reports that entry as it would without one. *)
+  let stale_reason ~lane_now (hint : Keeper_turn_driver.deferred_runtime_lane) =
+    match lane_now with
+    | Lane_unavailable -> None
+    | Lane_missing ->
+      Some (Printf.sprintf "assignment %s is no longer configured" hint.assignment_id)
+    | Lane_candidates candidates ->
+      List.find_opt
+        (fun id -> not (List.mem id candidates))
+        (Keeper_turn_driver.deferred_runtime_ids hint)
+      |> Option.map (fun id ->
+        Printf.sprintf
+          "%s is no longer a candidate of %s"
+          id
+          hint.assignment_id)
+  ;;
+
+  let restore ~lane_now ~base_path ~keepers_dir ~keeper_name =
+    let slot =
+      { base_path; keepers_dir; keeper_name; state = ref Idle }
+    in
+    (match Store.load ~keepers_dir ~keeper_name with
+     | Ok None -> ()
+     | Ok (Some (restored : Keeper_turn_driver.deferred_runtime_lane)) ->
+       (match stale_reason ~lane_now:(lane_now restored.assignment_id) restored with
+        | Some reason ->
+          Log.Keeper.info
+            ~keeper_name
+            "dropped restored deferred runtime lane next=%s: %s"
+            restored.next_runtime_id
+            reason;
+          clear_durable slot
+        | None ->
+          Log.Keeper.info
+            ~keeper_name
+            "restored deferred runtime lane assignment=%s failed=%s next=%s"
+            restored.assignment_id
+            restored.failed_runtime_id
+            restored.next_runtime_id;
+          slot.state := Held restored)
+     | Error error ->
+       (* The file is kept as evidence, so this warning repeats on every
+          start until an operator acts on it or the next deferral replaces
+          it; name that action in the line itself. *)
+       Log.Keeper.warn
+         ~keeper_name
+         "deferred runtime lane restore failed at %s: %s; this start walks \
+          the assignment from its head. Delete the file to start without a \
+          hint; the next deferred lane replaces it otherwise"
+         (Store.path_for ~keepers_dir ~keeper_name)
+         (Store.error_to_string error));
+    slot
+  ;;
+
+  let record slot hint =
+    (match
+       Store.save
+         ~base_path:slot.base_path
+         ~keepers_dir:slot.keepers_dir
+         ~keeper_name:slot.keeper_name
+         hint
+     with
+     | Ok () -> ()
+     | Error error -> log_store_error slot ~action:"save" error);
+    slot.state := Held hint
+  ;;
+
+  (* The driver consumes the hint at dispatch, before the next runtime is
+     called. The file stays until that cycle settles: a restart while B runs
+     must still start from B, not walk back to the runtime just rejected. *)
+  let consume slot expected =
+    match !(slot.state) with
+    | Held current when Keeper_turn_driver.equal_deferred_runtime_lane expected current ->
+      slot.state := Dispatched
+    | Held _ | Idle | Dispatched -> ()
+  ;;
+
+  (* Once the cycle ends, the suffix it ran is either replaced by the one it
+     left behind or settled. *)
+  let settle slot left_behind =
+    match left_behind, !(slot.state) with
+    | Some hint, (Idle | Held _ | Dispatched) -> record slot hint
+    | None, Dispatched ->
+      clear_durable slot;
+      slot.state := Idle
+    | None, (Idle | Held _) -> ()
+  ;;
+
+  (* A hint was recorded for one runtime assignment. A config update that
+     changes [runtime_id] while a turn holds the slot does not restart the
+     lane, so the hint can outlive its assignment; the next cycle would keep
+     walking the old assignment's candidates. It is dropped, file and all,
+     once the current assignment differs, as a lane restart does. *)
+  let for_assignment slot ~assignment_id =
+    match !(slot.state) with
+    | Held (hint : Keeper_turn_driver.deferred_runtime_lane)
+      when String.equal hint.assignment_id assignment_id -> Some hint
+    | Held _ ->
+      clear_durable slot;
+      slot.state := Idle;
+      None
+    | Idle | Dispatched -> None
+  ;;
+
+  let invalidate slot =
+    clear_durable slot;
+    slot.state := Idle
+  ;;
+end
+
+(* The next dispatch after a failed turn. The decision is
+   [Keeper_turn_driver.next_dispatch_after_failure], which the chat lane's
+   deferred retry also reads; this maps it onto the heartbeat's sleep. The
+   assignment is the one a turn without a deferred suffix walks. *)
+let after_failure ~now ~assignment_id (failure : Keeper_unified_turn.turn_failure)
+  : after_failure option
+  =
+  match
+    Keeper_turn_driver.next_dispatch_after_failure
+      ~now
+      ~route:failure.route
+      ~assignment_id
+      failure.deferred_runtime_lane
+  with
+  | None -> None
+  | Some (Keeper_turn_driver.Dispatch_now { runtime_id }) ->
+    Some (Continue_on_deferred_lane { next_runtime_id = runtime_id })
+  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on; basis }) ->
+    Some (Wait_for_path_release { release_at; waiting_on; basis })
+;;
+
+exception Event_queue_cycle_failed of string
+
+(* A provider wait belongs to the dispatch that failed. The runtime snapshot
+   includes same-named lane/binding edits, not only the assignment label.
+   A fresh success can also release an observed path without a config edit.
+   Route-only waits with no stored rest retain their original deadline. *)
+let provider_wait_interrupt
+      ~keeper_name ~dispatch_snapshot ~assignment_id ~deferred_runtime_lane ~basis =
+  let walk_rest ~now =
+    match deferred_runtime_lane with
+    | Some lane -> Keeper_turn_driver.deferred_lane_rest ~now lane
+    | None -> Keeper_turn_driver.assignment_walk_rest ~now assignment_id
+  in
+  fun ~now ->
+    not
+      (Runtime.same_keeper_dispatch dispatch_snapshot
+         (Runtime.keeper_dispatch_snapshot ~keeper_name))
+    || (match basis with
+        | Keeper_turn_driver.Failure_response -> false
+        | Keeper_turn_driver.Observed_path_rest ->
+          match walk_rest ~now with
+          | Keeper_turn_driver.Walk_head_serving _ -> true
+          | Keeper_turn_driver.Walk_waits_until _ -> false)
+;;
+
+
+(* Which stimuli own a turn-entry reaction. Both halves of the turn read this
+   one predicate: a finish row for a stimulus that never wrote a start row would
+   be evidence of a turn nobody recorded entering. *)
+let stimulus_owns_turn_reaction (stimulus : Keeper_event_queue.stimulus) =
+  match stimulus.payload with
+  (* Same shape as the HITL resolution beside it: an async thing this keeper was
+     waiting on came back, and the turn's cause should say so. *)
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _ -> true
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+  | Keeper_event_queue.Task_outcome _ -> false
+;;
+
+let record_replay_owned_turn_finished_reactions ~ctx ~keeper_name ~disposition stimuli =
+  List.iter
+    (fun stimulus ->
+       if stimulus_owns_turn_reaction stimulus
+       then
+         Stimulus_intake.record_event_queue_stimulus_turn_finished ~ctx ~keeper_name
+           ~disposition stimulus)
+    stimuli
+;;
+
+let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
+  List.iter
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+       match stimulus.payload with
+       (* Same shape as the HITL resolution beside it: an async thing this
+          keeper was waiting on came back, and the turn's cause should say so. *)
+       | ( Keeper_event_queue.Schedule_due _
+         | Keeper_event_queue.Hitl_resolved _
+         | Keeper_event_queue.Ask_answered _ ) ->
+         record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
+       | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_attention _
+       | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Bootstrap
+       | Keeper_event_queue.Connector_attention _
+       | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_cancelled _
+       | Keeper_event_queue.Workspace_message _
+       | Keeper_event_queue.Delegate_completed _
+       | Keeper_event_queue.Composition_completed _
+       | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+       | Keeper_event_queue.Task_outcome _ -> ())
+    stimuli
+;;
+
+
+
+(* T6 audit: record a swallowed cycle exception as a turn failure.
+
+   Catch-and-survive is intentional (the fiber must outlive the
+   crash); the bug being fixed is that the crash was invisible to the
+   scheduling/observation layer. Incrementing the registry counter routes the
+   crash through the same [Turn_failed] telemetry channel as other failures. *)
+let set_failure_reason_exact registry_entry ~site reason =
+  Keeper_registry.update_entry_exact registry_entry (fun latest ->
+    { latest with
+      last_failure_reason = reason
+    ; last_failure_at = Option.map (fun _ -> Time_compat.now ()) reason
+    })
+  |> Keeper_registry.exact_update_succeeded registry_entry ~site
+;;
+
+let record_crashed_cycle_failure
+      ~(registry_entry : Keeper_registry.registry_entry)
+      exn
+  =
+  (* Capture the backtrace before any other call can clobber it. *)
+  let backtrace = Printexc.get_backtrace () in
+  let base_path = registry_entry.base_path in
+  let keeper_name = registry_entry.name in
+  let detail = Keeper_types_profile.short_preview (Printexc.to_string exn) in
+  let current_lane =
+    set_failure_reason_exact
+      registry_entry
+      ~site:"crashed_cycle_failure"
+      (Some (Keeper_registry.Exception detail))
+  in
+  if current_lane
+  then (
+    let _turn_fail_count =
+      Keeper_turn_failure_streak.increment ~base_path ~keeper_name
+    in
+    Health.record_failure ~agent_name:keeper_name ~reason:detail);
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string CycleExceptions)
+    ~labels:[ "keeper", keeper_name ]
+    ();
+  Log.Keeper.error
+    "%s: keeper cycle exception (recorded as turn failure): %s%s"
+    keeper_name
+    (Printexc.to_string exn)
+    (if String.equal backtrace "" then "" else "\n" ^ backtrace)
+;;
+
+let interrupted_cycle_outcome ~(meta : keeper_meta) =
+  Log.Keeper.info
+    ~keeper_name:meta.name
+    "%s: keeper cycle interrupted by operator; no turn failure recorded"
+    meta.name;
+  { meta
+  ; cycle_status = Turn_cycle_interrupted
+  ; stimuli_acked = false
+  ; after_failure = None
+  }
+;;
+
+let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) exn =
+  if Keeper_registry_types.is_operator_interrupt exn
+  then interrupted_cycle_outcome ~meta
+  else (
+    record_crashed_cycle_failure
+      ~registry_entry
+      exn;
+    { meta
+    ; cycle_status = Turn_cycle_crashed
+    ; stimuli_acked = false
+    ; after_failure = None
+    })
+;;
+
+
+
+
+type turn_terminal_settlement =
+  { settled : bool
+  ; queue_failure : string option
+  }
+
+(* How one admitted entry's turn-end terminal leaves the batch. A withdrawn
+   entry is no longer pending under its identity and this attempt has no
+   receipt: something removed it while the turn ran (a schedule cancel or
+   supersede, a transfer, another terminal, or a removal that writes no
+   receipt). Nothing is left for this turn to settle, nothing re-delivers it
+   because it is not pending, and it is not a queue failure. *)
+let turn_terminal_settlement ~label = function
+  | Error message -> { settled = false; queue_failure = Some message }
+  | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
+    { settled = true; queue_failure = None }
+  | Ok
+      (Keeper_registry_event_queue.Turn_source_acked
+         ( Keeper_registry_event_queue.Acked _
+         | Keeper_registry_event_queue.Already_acked _ )) ->
+    { settled = true; queue_failure = None }
+  | Ok
+      (Keeper_registry_event_queue.Turn_source_acked
+         (Keeper_registry_event_queue.Ack_committed_followup_failed
+            { stage; detail; _ })) ->
+    let stage =
+      match stage with
+      | `Checkpoint -> "checkpoint"
+      | `Wal_compaction -> "wal_compaction"
+      | `Projection -> "projection"
+    in
+    { settled = true
+    ; queue_failure =
+        Some
+          (Printf.sprintf
+             "%s receipt committed but %s follow-up failed: %s"
+             label
+             stage
+             detail)
+    }
+;;
+
+(* The queue records attention that a Keeper must observe, not provider health.
+   A source normally leaves only after a completed turn has observed the
+   admitted batch. Every typed checkpoint is the other case: attention-only
+   rows advance after the continuation is durably preserved, because each
+   checkpoint reason is produced after a model round ran with the batch
+   projected. Provider/config/context failures therefore leave every source
+   untouched; otherwise one runtime failure can terminally discard an
+   arbitrary batch of unrelated Board, Schedule, Task, or
+   completion-authority facts. *)
+type batch_disposition =
+  | Batch_ack_completed
+  | Batch_ack_attention_only
+  | Batch_no_action
+
+type checkpoint_source_policy =
+  | Attention_delivered
+  | Preserve_and_rotate
+
+let checkpoint_source_policy : Keeper_event_queue.stimulus_payload -> checkpoint_source_policy = function
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Fusion_completed _ | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _
+  | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+  | Keeper_event_queue.Workspace_message _ | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Completion_authority_rejected _ | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Task_outcome _ | Keeper_event_queue.Schedule_due _ -> Preserve_and_rotate
+  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Hitl_resolved _ -> Attention_delivered
+;;
+
+let checkpoint_source_may_ack payload =
+  match checkpoint_source_policy payload with
+  | Attention_delivered -> true
+  | Preserve_and_rotate -> false
+;;
+
+(* A checkpoint can lose request-only context on provider/session replacement.
+   Keep original messages/results until a completed turn, and rotate retained
+   sources so old batches cannot exclude every later ready source. Connector
+   conversations move as a whole to preserve their unadmitted suffix's FIFO.
+   A failed rotation still retains the source; it never authorizes an ACK. *)
+let retain_checkpoint_continuations ~base_path ~keeper_name selections =
+  let selections = List.filter
+    (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      match checkpoint_source_policy selection.source.payload with
+      | Attention_delivered -> false
+      | Preserve_and_rotate -> true)
+    selections in
+  let retained = match selections with
+    | [] -> Ok []
+    | _ :: _ -> Keeper_registry_event_queue.retain_checkpoint_batch_result
+        ~base_path keeper_name ~selections in
+  match retained with
+  | Error _ as error -> error
+  | Ok failures ->
+    List.iter (fun (selection, detail) ->
+        Log.Keeper.error
+          "turn exit: checkpoint continuation retention failed event_id=%s keeper=%s: %s"
+          selection.Keeper_event_queue_state.source.post_id keeper_name detail) failures;
+    match failures with
+    | [] -> Ok ()
+    | _ :: _ -> Error (String.concat "\n" (List.map
+        (fun (selection, detail) -> selection.Keeper_event_queue_state.source.post_id ^ ": " ^ detail)
+        failures))
+;;
+
+let batch_disposition_of_cycle_outcome
+      (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
+  : batch_disposition
+  =
+  match cycle_outcome with
+  | Some (Cycle.Completed completion) ->
+    (match completion.continuation_route with
+     | Keeper_unified_turn.Continuation_route_addressed ->
+       Batch_ack_completed
+     | Keeper_unified_turn.Continuation_route_mismatch
+     | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
+     | Keeper_unified_turn.Continuation_route_not_applicable ->
+       (* A completed turn projected every admitted row and chose its actions
+          with them in view; that is what the queue delivered and what the
+          ack records. Connector attention used to be held back here until an
+          exact reply/ignore receipt existed (#32114), which turned "the
+          keeper read this and did not answer" into a wake reason: the same
+          Discord rows were re-promoted on every wake (sangsu, 17 rows for a
+          day, 3,711 consumption lines on 2026-09-08 and 36 turns in thirty
+          minutes on 2026-09-09, #34655), the same way refusing the board ack
+          replayed one post 297 times (#32277). Whether the keeper answered is
+          not the queue's question, and today no store answers it durably:
+          the ack receipt is [Turn_completed] for every route and the
+          reaction ledger's disposition token is "completed" for every route
+          (#34666). The message itself stays in the external-attention
+          store. *)
+       Batch_ack_completed)
+  | Some
+      (Cycle.Checkpointed
+         { checkpoint_reason =
+             ( Keeper_unified_turn.Durable_stimulus_arrived
+             | Keeper_unified_turn.Repeated_assistant_text _
+             | Keeper_unified_turn.Repeated_tool_call _
+             | Keeper_unified_turn.Operation_queued )
+         ; continuation_route = _
+         ; _
+         }) ->
+    (* The admitted batch is an attention layer, not the continuation store.
+       Every checkpoint reason is produced after at least one model round
+       ran with the admitted attention projected: a newer durable source
+       arrived, the loop guard durably preserved the turn, a tool call was
+       deferred to the Gate, or a chat operation took the slot. On the
+       agent-core lane the checkpoint preserves canonical turn state, while
+       provider-specific dynamic context can remain request-only (in
+       particular on OpenAI-compatible requests). On an official-client lane
+       a session replacement can lose prior context. This delivery ACK is not
+       a guarantee that observation text survives in resumed model input.
+       Retaining the batch replays the same attention into the
+       continuation. For a HITL resolution the cost was a full turn per wake:
+       the intake admits one resolution per turn and the resumed turn ended
+       on the same deferred call, so a spent grant at the queue head was
+       re-delivered on every cycle and the resolutions behind it never
+       reached the model (edgar.a.poe, 2026-09-02, eight turns on one
+       Execute; docs/audits/keeper-fleet-waiting-audit-20260902.md §13.4 in
+       #32479). The ACK below still requires the HITL continuation receipt,
+       so an unconsumed grant is retained. Connector attention, messages,
+       producer/decision outcomes and scheduled work remain pending until a
+       completed turn; transiently observing an answer is not a durable
+       consumer handoff. A scheduled occurrence is work, not an attention
+       delivery: its checkpoint cannot certify completion. *)
+    Batch_ack_attention_only
+  | Some
+      ( Cycle.Failed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _ )
+  | None ->
+    Batch_no_action
+;;
+
+let batch_disposition_records_continuation = function
+  | Batch_ack_completed | Batch_ack_attention_only -> true
+  | Batch_no_action -> false
+;;
+
+type continuation_settlement =
+  | Continuation_settled_recorded
+  | Continuation_settled_failed of
+      { route : Keeper_runtime_failure_route.route }
+  | Continuation_unsettled
+
+(* How a turn's outcome settles the HITL continuation it was handed. A
+   completed or checkpointed turn records it, through the batch disposition
+   above. A failed turn settles it only when the provider answered the
+   request that carried the replay evidence: the model saw the evidence and
+   what failed came after it (#32956: with no receipt from a failed turn the
+   same approval was re-delivered for 24 turns, each ending at MaxTokens). A
+   failure before any answer leaves the continuation unsettled so the
+   evidence reaches a fresh turn. The queue disposition of a failed turn is
+   unchanged: [Batch_no_action]. *)
+let continuation_settlement_of_cycle_outcome
+      (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
+  : continuation_settlement
+  =
+  match cycle_outcome with
+  | Some (Cycle.Failed { failure; meta = _ }) ->
+    if
+      Keeper_runtime_failure_route.response_observed
+        failure.Keeper_unified_turn.route
+    then Continuation_settled_failed { route = failure.Keeper_unified_turn.route }
+    else Continuation_unsettled
+  | Some
+      ( Cycle.Completed _
+      | Cycle.Checkpointed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _ )
+  | None ->
+    if
+      batch_disposition_records_continuation
+        (batch_disposition_of_cycle_outcome cycle_outcome)
+    then Continuation_settled_recorded
+    else Continuation_unsettled
+;;
+
+
+(* Pure: post-turn status event derived from the registry turn-failure
+   counter. Extracted from the loop body so the crashed-cycle ->
+   [Turn_failed] mapping is unit-testable. *)
+let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
+  if turn_fail_count > 0
+  then Keeper_state_machine.Turn_failed { consecutive = turn_fail_count }
+  else Keeper_state_machine.Turn_succeeded
+;;
+
+let failure_reason_after_turn_status ~turn_fail_count current =
+  if turn_fail_count <= 0
+  then current
+  else
+    match current with
+    | Some (Keeper_registry.Turn_consecutive_failures _) | None ->
+      Some (Keeper_registry.Turn_consecutive_failures turn_fail_count)
+    | Some
+        ( Keeper_registry.Heartbeat_consecutive_failures _
+          (* Phase 1 records this while workspace I/O is failing now. *)
+        | Keeper_registry.Provider_runtime_error _
+        | Keeper_registry.Turn_configuration_error _
+        | Keeper_registry.Official_client_recovery_required _
+        | Keeper_registry.Fiber_unresolved _
+        | Keeper_registry.Exception _
+        | Keeper_registry.Operator_interrupt ) -> current
+;;
+
+let refresh_failure_reason_after_turn ~registry_entry ~turn_fail_count =
+  if turn_fail_count > 0
+  then (
+    let result =
+      Keeper_registry.update_entry_exact registry_entry (fun latest ->
+        { latest with
+          last_failure_reason =
+            failure_reason_after_turn_status
+              ~turn_fail_count
+              latest.last_failure_reason
+        ; last_failure_at =
+            (let reason =
+               failure_reason_after_turn_status
+                 ~turn_fail_count
+                 latest.last_failure_reason
+             in
+             if Option.equal (=) reason latest.last_failure_reason
+             then latest.last_failure_at
+             else Option.map (fun _ -> Time_compat.now ()) reason)
+        })
+    in
+    let _committed =
+      Keeper_registry.exact_update_succeeded
+        registry_entry
+        ~site:"post_turn_failure_reason_refresh"
+        result
+    in
+    ())
+;;
+
+(* Whether the event queue still holds any pending entry. Read errors are
+   logged and answered [false]: the cycle then sleeps the cadence and the
+   next intake reports the same error through its own path. *)
+let pending_stimulus_remains ~ctx ~keeper_name =
+  match
+    Keeper_registry_event_queue.peek_when_result
+      ~base_path:ctx.config.base_path
+      keeper_name
+      ~now:(Time_compat.now ())
+      ~ready:(fun (_ : Keeper_event_queue.stimulus) -> true)
+  with
+  | Ok (Some _) -> true
+  | Ok None -> false
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name
+      "event queue peek after acked cycle failed; sleeping the cadence: %s"
+      detail;
+    false
+;;
+
+(* A serving deferred suffix is the failed turn's unfinished input. It does
+   not need a second Event Queue row to authorize the next cycle. Path waits
+   and ordinary cadence keep the existing acknowledged-pending-stimulus rule;
+   in particular this does not let a wake cut short #34653's resting-path
+   wait. *)
+let next_cycle_starts_now ~after_failure ~stimuli_acked ~pending_stimulus =
+  match after_failure with
+  | Some (Continue_on_deferred_lane _) -> true
+  | Some (Wait_for_path_release _) | None ->
+    stimuli_acked && pending_stimulus ()
+;;
+
+let cycle_wake ~periodic_due ~deferred_runtime_lane =
+  match deferred_runtime_lane with
+  | Some _ -> Keeper_world_observation.Deferred_runtime_lane
+  | None ->
+    if periodic_due
+    then Keeper_world_observation.Periodic_tick
+    else Keeper_world_observation.Attention_wake
+;;
+
+(* Wake labels choose why this turn runs; cadence accounting answers whether
+   the already-due boundary was served. A deferred suffix wins the label but
+   must not leave the same periodic boundary due for the next cycle. *)
+let periodic_cadence_after_cycle ~periodic_due ~now cadence =
+  if periodic_due
+  then Keeper_keepalive_signal.consume_periodic ~now
+  else cadence
+;;
+
+(* A cycle that raises leaves no outcome to settle the deferred lane from.
+   Settle empty instead of skipping: the slot and its durable file then agree
+   that no suffix is running, so the next cycle walks from the head
+   in-process and after a restart alike. Skipping leaves the slot Dispatched
+   with the suffix file behind, and a restart resurrects a suffix the
+   in-process next cycle never sees. *)
+let run_cycle_and_settle_lane ~run ~settle ~lane_of_outcome =
+  match run () with
+  | outcome ->
+    settle (lane_of_outcome outcome);
+    outcome
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    settle None;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+let release_scheduled_handoff ~base_path ~keeper_name handoff =
+  Option.iter (fun handoff ->
+    match Keeper_owner_registry.release_scheduled_turn ~base_path ~keeper_name ~handoff with
+    | Ok () -> ()
+    | Error error -> Log.Keeper.warn ~keeper_name
+        "scheduled source slot release failed: %s"
+        (Keeper_owner_registry.command_error_to_string error)) handoff
+
+let run_keepalive_unified_turn
+      ~scheduled_handoff
+      ~on_handoff_observed
+      ~wake
+      ~(ctx : _ context)
+      ~(registry_entry : Keeper_registry.registry_entry)
+      ~(meta_after_triage : keeper_meta)
+      ~pending_board_events
+      ~(stop : bool Atomic.t)
+      ~(proactive_warmup_elapsed : bool)
+      ~(reactive_wake : bool)
+      ~(shared_context : Agent_core.Context.t)
+      ~(deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option)
+      ~(on_deferred_runtime_consumed : unit -> unit)
+      ~(settle_deferred_runtime_lane :
+          Keeper_turn_driver.deferred_runtime_lane option -> unit)
+  : keepalive_turn_outcome
+  =
+    let () = match Keeper_direct_gate_continuation.reconcile ~config:ctx.config ~meta:meta_after_triage with
+      | Ok () -> ()
+      | Error detail -> Log.Keeper.warn "Gate continuation reconciliation: %s" detail in
+  if not proactive_warmup_elapsed
+  then (
+    release_scheduled_handoff ~base_path:ctx.config.base_path
+      ~keeper_name:meta_after_triage.name scheduled_handoff;
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_completed
+    ; stimuli_acked = false
+    ; after_failure = None
+    })
+  else
+    let scheduled_sources = Keeper_scheduled_turn_handoff.pending
+      ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name in
+    let scheduled_handoff = match scheduled_sources with
+     | Error detail ->
+       Log.Keeper.error ~keeper_name:meta_after_triage.name
+         "scheduled source handoff read unavailable: %s" detail;
+       scheduled_handoff
+     | Ok sources ->
+       (match Keeper_owner_registry.observe_scheduled_turn
+          ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name sources with
+        | Ok observed ->
+          on_handoff_observed observed;
+          observed
+        | Error error ->
+          Log.Keeper.warn ~keeper_name:meta_after_triage.name
+            "scheduled source observation unavailable: %s"
+            (Keeper_owner_registry.command_error_to_string error);
+          scheduled_handoff)
+    in
+    match
+      Keeper_owner_registry.run_scheduled_if_idle
+        ~handoff:scheduled_handoff ~sources:scheduled_sources
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name
+        (* Keep the caller's Tool/HTTP observer bindings captured before the
+           Owner forks its child. The Owner supplies priority only at admission. *)
+        (let admitted_sources = ref [] in
+         let captured = Keeper_tool_call_log.capture_commit_observer
+         @@ Llm_provider.Http_request_observer.capture (fun () ->
+           let priority_sources = !admitted_sources in
+           Keeper_turn_dispatch_authority.run (fun admission_token ->
+    let source_batch = ref Keeper_heartbeat_source_batch.empty in
+    let diagnostic_selection = ref None in
+    let cycle_outcome_ref = ref None in
+    let hitl_resolution_for_cycle = ref None in
+    let hitl_continuation_projection_ok = ref true in
+    let selection_acked = ref false in
+    let stimuli_acked = ref false in
+    let event_queue_failed = ref false in
+    let record_event_queue_failure message =
+      event_queue_failed := true;
+      match !cycle_outcome_ref with
+      | Some (Cycle.Failed _) ->
+        (* The failed turn already recorded its failure counter. The queue
+           error remains explicit in the log and durable pending state. *)
+        ()
+      | Some
+          ( Cycle.Completed _
+          | Cycle.Checkpointed _
+          | Cycle.Input_required _
+          | Cycle.Cancelled _
+          | Cycle.Skipped _
+          )
+      | None ->
+        record_crashed_cycle_failure
+          ~registry_entry
+          (Event_queue_cycle_failed message)
+    in
+    try
+      (match
+         Keeper_board_attention_worker.settle_completed_snapshot
+           ~base_path:ctx.config.base_path
+           ~keeper_name:meta_after_triage.name
+           ()
+       with
+       | Error detail ->
+         Log.Keeper.error
+           ~keeper_name:meta_after_triage.name
+           "Board attention completion remains pending; it did not block this Keeper turn: %s"
+           detail
+       | Ok Keeper_board_attention_worker.No_completed_partition ->
+         ()
+       | Ok
+           (Keeper_board_attention_worker.Partition_settled
+              { candidate_id; continuation_wake = _ }) ->
+         Log.Keeper.info
+           "Board attention completed snapshot settled on owner lane keeper=%s last_candidate=%s"
+           meta_after_triage.name
+           candidate_id);
+      let event_intake =
+        Stimulus_intake.heartbeat_event_intake_with_priority
+          ~priority_sources
+          ~ctx
+          ~meta_after_triage
+          ~pending_board_events
+      in
+      source_batch := event_intake.source_batch;
+      diagnostic_selection := event_intake.diagnostic_selection;
+      let selected_source_authority () =
+        match
+          Keeper_meta_store.read_effective_meta
+            ctx.config
+            meta_after_triage.name
+        with
+        | Error message ->
+          Error ("keeper meta read failed before dispatch: " ^ message)
+        | Ok None -> Error "keeper meta disappeared before dispatch"
+        | Ok (Some current) when current.paused ->
+          Error "keeper paused before dispatch"
+        | Ok (Some _) ->
+          (match
+             Keeper_heartbeat_source_batch.validate
+               ~diagnostic:!diagnostic_selection
+               ~standing:(fun selection ->
+                 Keeper_registry_event_queue.admitted_selection_standing_result
+                   ~base_path:ctx.config.base_path
+                   meta_after_triage.name
+                   ~selection)
+               !source_batch
+           with
+           | Error _ as error -> error
+           | Ok (admitted, withdrawn) ->
+             (* These entries stopped being pending after intake: a schedule
+                cancel or supersede, a transfer, another terminal, or a removal
+                that writes no receipt. The turn still runs on the prompt it
+                was given; they only leave the batch it settles at turn end,
+                so the rest of the batch is not failed with them. *)
+             List.iter
+               (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                  Log.Keeper.info
+                    ~keeper_name:meta_after_triage.name
+                    "provider dispatch found a source withdrawn after intake post_id=%s kind=%s"
+                    selection.source.post_id
+                    (Keeper_event_queue.payload_kind_label selection.source.payload))
+               withdrawn;
+             source_batch := admitted;
+             Ok ())
+      in
+      (match
+         Keeper_turn_dispatch_authority.install
+           admission_token
+           selected_source_authority
+       with
+       | Ok () -> ()
+       | Error message -> failwith message);
+      (match event_intake.event_queue_intake_error with
+       | None -> ()
+       | Some error
+         when
+           Stimulus_intake.event_queue_intake_error_counts_as_cycle_failure
+             error ->
+         record_event_queue_failure
+           (Stimulus_intake.event_queue_intake_error_to_string error)
+       | Some _ -> ());
+      let pending_board_events = event_intake.pending_board_events in
+      let obs =
+        Keeper_world_observation.observe
+          ~pending_board_events:(Some pending_board_events)
+          ~config:ctx.config
+          ~meta:meta_after_triage
+      in
+      let scheduling =
+        decide_keepalive_scheduling ~wake
+          ~event_queue_triggers:event_intake.event_queue_triggers
+          ~stop
+          ~meta:meta_after_triage
+          obs
+      in
+      let turn_decision = scheduling.turn_decision in
+      (* Manual reconcile blocker check removed — keepers no longer get
+         stuck behind sticky blockers. Failed turns record evidence via
+         Keeper_registry; recovery is autonomous (next turn's observation)
+         or operator-driven (board/keeper_chat), not blocker-driven. *)
+      let should_run_turn =
+        should_run_turn_after_event_intake
+          ~scheduled:scheduling.should_run_turn
+          ~event_queue_intake_error:event_intake.event_queue_intake_error
+      in
+      let verdict_strs =
+        match event_intake.event_queue_intake_error with
+        | None -> scheduling.verdict_reasons
+        | Some error ->
+          Stimulus_intake.event_queue_intake_error_reason_label error
+          :: scheduling.verdict_reasons
+      in
+      let channel_str = scheduling.channel in
+      if not should_run_turn
+      then (
+        (* #10008 fm3: emit per-reason skip counter so operators can
+           see why proactive scheduler never fires for a given keeper.
+           two Keepers stayed at [proactive_count_total=0,
+           last_proactive_ts=0.0] for 45+ min despite
+           proactive_enabled=true — the info log alone buried the
+           reason across many lines.  Labelled counter lets Grafana
+           split [keeper_paused] vs [reactive_disabled] vs
+           [scheduled_autonomous_disabled] so the bootstrap problem
+           ("need signals to fire, need to fire to generate signals")
+           is visible fleet-wide. *)
+        List.iter
+          (fun reason_str ->
+             Otel_metric_store.inc_counter proactive_skip_reason_metric
+               ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
+               ())
+          verdict_strs;
+        (* #10940 follow-up — Otel_metric_store counters aggregate skip reasons
+           across time, but operators need recent skip verdict context
+           when diagnosing idle/quiet keepers. Stamping the registry on
+           every skip preserves that local context. *)
+        Keeper_registry.record_skip_reasons
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name
+          ~reasons:verdict_strs;
+        Keeper_registry.touch_last_turn_ts
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name;
+        let paused_info =
+          if meta_after_triage.paused
+          then (
+            let paused_since_sec =
+              match
+                Workspace_resilience.Time.parse_iso8601_opt meta_after_triage.updated_at
+              with
+              | Some ts -> int_of_float (max 0.0 (Time_compat.now () -. ts))
+              | None -> -1
+            in
+            Printf.sprintf " paused_since=%ds" paused_since_sec)
+          else ""
+        in
+        let log_not_scheduled =
+          match turn_decision.verdict with
+          | Keeper_world_observation.Skip _ -> Log.Keeper.debug
+          | Keeper_world_observation.Run _ -> Log.Keeper.info
+        in
+        log_not_scheduled
+          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] \
+           idle=%ds since_last=%s%s"
+          meta_after_triage.name
+          should_run_turn
+          channel_str
+          (String.concat "," verdict_strs)
+          obs.idle_seconds
+          (Keeper_keepalive_signal.format_since_last_scheduled_autonomous
+             turn_decision.since_last_scheduled_autonomous)
+          paused_info);
+      if should_run_turn
+      then
+        Log.Keeper.info
+          "keepalive turn scheduled for %s: channel=%s reasons=%s"
+          meta_after_triage.name
+          channel_str
+          (String.concat "," verdict_strs);
+      let tool_usage_entries =
+        Keeper_registry.tool_usage_of
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name
+      in
+      let available_tools =
+        Keeper_tool_policy.keeper_model_tool_names ()
+      in
+      let tool_diversity_summary =
+        let stats = Keeper_tool_diversity.stats_of_registry_entries tool_usage_entries in
+        Keeper_tool_diversity.compute_diversity ~available_tools stats
+      in
+      Keeper_tool_diversity.record_underused_tool_metrics
+        ~keeper_name:meta_after_triage.name
+        tool_diversity_summary;
+      let audit_wall_clock = Time_compat.now () in
+      let tool_diversity_entropy =
+        if tool_usage_entries = []
+        then None
+        else Some tool_diversity_summary.normalized_entropy
+      in
+      Keeper_decision_audit.append
+        ~keeper_name:meta_after_triage.name
+        (Keeper_decision_audit.make
+           ~cycle_id:
+             (Printf.sprintf
+                "cycle-%s-%Ld"
+                meta_after_triage.name
+                (Int64.of_float (audit_wall_clock *. 1000.0)))
+           ~keeper_name:meta_after_triage.name
+           ~turn_verdict:turn_decision.verdict
+           ~wall_clock:audit_wall_clock
+           ?tool_diversity_entropy
+           ());
+      Keeper_decision_audit.flush_if_needed
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name;
+      let meta_after_cycle =
+        if Atomic.get stop
+        then meta_after_triage
+        else if should_run_turn
+        then (
+          (* fd/disk pressure is pre-checked
+             by [classify_turn_intake_admission] in [run_heartbeat_loop] BEFORE
+             stimulus intake, so this branch is reached only when a turn is
+             admitted. The four prior inline pressure gates here were removed: they
+             ran AFTER intake had already consumed the stimulus, forcing a
+             consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
+          (* Captured before dispatch: a source withdrawn after intake leaves
+             [source_batch] there, and its turn-entry reaction still gets its
+             closing half below. *)
+          let turn_stimuli = Keeper_heartbeat_source_batch.stimuli !source_batch in
+          record_replay_owned_turn_started_reactions
+            ~ctx
+            ~keeper_name:meta_after_triage.name
+            turn_stimuli;
+          let event_bus = Event_bus_slots.get_keeper () in
+          (* Preserve the typed resolution as input to the originating
+             Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
+          let hitl_resolution =
+            match
+              List.find_map
+                (fun (stim : Keeper_event_queue.stimulus) ->
+                  match stim.Keeper_event_queue.payload with
+                  | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
+                  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+                  | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+                  | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
+                  | Keeper_event_queue.Ask_answered _
+                  | Keeper_event_queue.Completion_authority_rejected _
+                  | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+                  | Keeper_event_queue.Delegate_completed _
+                  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ | Keeper_event_queue.Task_outcome _ -> None)
+                (Keeper_heartbeat_source_batch.stimuli !source_batch)
+            with
+            | Some resolution -> Some resolution
+            | None ->
+              (* #28809: a ready resolution may be queued behind the stimulus
+                 that woke this turn (e.g. a redelivered workspace message
+                 whose own earlier turn deferred on this very approval).
+                 Project the durable resolution into this turn instead of
+                 waiting for its queue position; the untouched queue entry is
+                 retired as a spent grant by [reconcile_spent_selection]
+                 without costing a turn. *)
+              (match
+                 Stimulus_intake.ready_hitl_resolution_peek
+                   ~base_path:ctx.config.base_path
+                   ~keeper_name:meta_after_triage.name
+               with
+               | None -> None
+               | Some resolution ->
+                 Log.Keeper.info
+                   "hitl resolution projected from pending queue approval=%s \
+                    decision=%s (keeper=%s)"
+                   resolution.Keeper_event_queue.approval_id
+                   (Keeper_event_queue.hitl_resolution_decision_to_string
+                      resolution.Keeper_event_queue.decision)
+                   meta_after_triage.name;
+                 Some resolution)
+          in
+          hitl_resolution_for_cycle := hitl_resolution;
+          let turn_input =
+            Keeper_heartbeat_source_batch.for_turn ~reactive:reactive_wake !source_batch
+          in
+          let run_fresh_cycle () =
+            run_keeper_cycle
+              ~admission_token
+              ?deferred_runtime_lane
+              ~on_deferred_runtime_consumed
+              ?event_bus
+              ?hitl_resolution
+              ~ctx
+              ~meta_after_triage
+              ~stop
+              ~obs
+              ~turn_decision
+              ~shared_context
+              ~turn_input
+              ()
+          in
+          let run_cycle () = run_fresh_cycle () in
+          let cycle_outcome =
+            run_cycle_and_settle_lane
+              ~run:run_cycle
+              ~settle:settle_deferred_runtime_lane
+              ~lane_of_outcome:Cycle.deferred_runtime_lane
+          in
+          cycle_outcome_ref := Some cycle_outcome;
+          (* What the next turn is told about this one moved into
+             [Keeper_heartbeat_loop_cycle.run_keeper_cycle]: every lane runs
+             through that wrapper, so the stop reason crosses lanes now
+             instead of living in this loop's ref. *)
+          (* The closing half of the turn-entry reactions written above. The
+             stimulus's evidence otherwise ends at "a turn started", and what
+             the turn did is recovered by comparing that clock against the
+             keeper's calls. *)
+          record_replay_owned_turn_finished_reactions
+            ~ctx
+            ~keeper_name:meta_after_triage.name
+            ~disposition:(Cycle.disposition_token cycle_outcome)
+            turn_stimuli;
+          Cycle.meta cycle_outcome)
+        else meta_after_triage
+      in
+      let record_terminal_selection_result
+            ~label
+            ~(selection : Keeper_event_queue_state.pending_selection)
+            result
+        =
+        (match result with
+         | Ok Keeper_registry_event_queue.Turn_selection_withdrawn ->
+           Log.Keeper.info
+             ~keeper_name:meta_after_triage.name
+             "%s found its admitted source withdrawn from the queue post_id=%s kind=%s"
+             label
+             selection.source.post_id
+             (Keeper_event_queue.payload_kind_label selection.source.payload)
+         | Ok (Keeper_registry_event_queue.Turn_source_acked _) | Error _ -> ());
+        let settlement = turn_terminal_settlement ~label result in
+        Option.iter record_event_queue_failure settlement.queue_failure;
+        if settlement.settled then selection_acked := true;
+        settlement.settled
+      in
+      let terminalize_completed_selection ~selection =
+        Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name
+          ~applied_at:(Time_compat.now ())
+          ~selection
+        |> record_terminal_selection_result ~label:"turn completion" ~selection
+      in
+      let disposition =
+        batch_disposition_of_cycle_outcome !cycle_outcome_ref
+      in
+      (match
+         ( continuation_settlement_of_cycle_outcome !cycle_outcome_ref
+         , !hitl_resolution_for_cycle )
+       with
+       | Continuation_settled_recorded, Some resolution ->
+         (match
+            Keeper_approval_queue.ensure_settled_continuation_chat_projection
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name
+              ~resolution
+          with
+          | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+          | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+            hitl_continuation_projection_ok := false
+          | Error detail ->
+            hitl_continuation_projection_ok := false;
+            record_event_queue_failure
+              ("approval continuation projection failed: " ^ detail))
+       | Continuation_settled_failed { route }, Some resolution ->
+         (* The failed turn keeps [Batch_no_action] below: only the
+            continuation slot is settled, and the intake retires the queued
+            wake when it reaches it. A grant this turn never spent stays
+            unsettled ([Continuation_projection_not_ready]): the model was not
+            shown its outcome, so the wake is kept. *)
+         (match
+            Keeper_approval_queue.ensure_failed_continuation_chat_projection
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name
+              ~resolution
+              ~route
+          with
+          | Ok Keeper_approval_queue.Continuation_projection_recorded
+          | Ok Keeper_approval_queue.Continuation_projection_not_ready -> ()
+          | Error detail ->
+            (* [record_event_queue_failure] keeps no message after a failed
+               turn, so the detail is logged here. *)
+            Log.Keeper.warn
+              ~keeper_name:meta_after_triage.name
+              "approval continuation failure projection failed: %s"
+              detail;
+            record_event_queue_failure
+              ("approval continuation failure projection failed: " ^ detail))
+       | Continuation_unsettled, _
+       | (Continuation_settled_recorded | Continuation_settled_failed _), None ->
+         ());
+      (match !cycle_outcome_ref with
+       | Some (Cycle.Failed _)
+       | Some
+           ( Cycle.Completed _
+           | Cycle.Checkpointed _
+           | Cycle.Input_required _
+           | Cycle.Cancelled _
+           | Cycle.Skipped _
+           )
+       | None ->
+         ());
+      (* RFC-0377: every entry admitted into this turn (the primary plus any
+         Connector_attention batch companions) shares the turn's outcome. A
+         turn completion acks all of them; a turn failure applies the same
+         quarantine/defer/preserve disposition to all of them, so a
+         companion is never silently left un-acked while the primary is. *)
+      (match Keeper_heartbeat_source_batch.selections !source_batch with
+       | [] -> ()
+       | (_ :: _) as selections ->
+           let remove_completed_selections ~should_ack =
+             let should_ack selection =
+               should_ack selection
+               &&
+               match selection.Keeper_event_queue_state.source.payload with
+               | Keeper_event_queue.Hitl_resolved _ ->
+                 !hitl_continuation_projection_ok
+               | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+               | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+               | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
+               | Keeper_event_queue.Ask_answered _
+               | Keeper_event_queue.Completion_authority_rejected _
+               | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+               | Keeper_event_queue.Delegate_completed _
+               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ | Keeper_event_queue.Task_outcome _ -> true
+             in
+             let selections_to_ack, retained_selections =
+               List.partition should_ack selections
+             in
+             let all_acked =
+               List.fold_left
+                 (fun all_acked selection ->
+                    let acked = terminalize_completed_selection ~selection in
+                    all_acked && acked)
+                 true
+                 selections_to_ack
+             in
+             stimuli_acked := all_acked && List.is_empty retained_selections
+           in
+           match disposition with
+           | Batch_ack_completed ->
+             remove_completed_selections ~should_ack:(fun _ -> true)
+           | Batch_ack_attention_only ->
+             (match retain_checkpoint_continuations
+                ~base_path:ctx.config.base_path
+                ~keeper_name:meta_after_triage.name selections with
+              | Ok () -> ()
+              | Error detail -> record_event_queue_failure
+                  ("checkpoint continuation retention failed: " ^ detail));
+             (* Source policy is shared with retention: a failed rotation
+                cannot turn an unread result/message into delivered attention. *)
+             remove_completed_selections
+               ~should_ack:(fun selection ->
+                 checkpoint_source_may_ack
+                   selection.Keeper_event_queue_state.source.payload)
+           | Batch_no_action -> ());
+      { meta = meta_after_cycle
+      ; cycle_status =
+          (if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed)
+      ; stimuli_acked = !stimuli_acked
+      ; after_failure =
+          (match !cycle_outcome_ref with
+           | Some (Cycle.Failed { failure; meta }) ->
+             after_failure
+               ~now:(Time_compat.now ())
+               ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+               failure
+           | Some
+               ( Cycle.Completed _
+               | Cycle.Checkpointed _
+               | Cycle.Input_required _
+               | Cycle.Cancelled _
+               | Cycle.Skipped _ )
+           | None -> None)
+      }
+    with
+    | exn when Keeper_registry_types.is_operator_interrupt exn ->
+      (* The Owner failed the child switch with this exception, so
+         [Switch.run] re-raises it whatever this body returns. Let it
+         propagate; [run_autonomous_if_idle] answers [`Interrupted] and the
+         outcome is built once, below. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace exn backtrace
+    | Eio.Cancel.Cancelled _ as e ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace e backtrace
+    | Keeper_registry.Keeper_fiber_crash as e ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace e backtrace
+    | exn ->
+      (* T6 audit: keep the fiber alive, but surface the crash as a
+         turn failure so the caller does not dispatch
+         [Turn_succeeded] for a cycle that never completed. *)
+      handle_cycle_exception
+        ~registry_entry
+        ~meta:meta_after_triage
+        exn)) in
+         fun sources -> admitted_sources := sources; captured ())
+    with
+  | Ok (`Ran outcome) -> outcome
+  | Ok `Interrupted -> interrupted_cycle_outcome ~meta:meta_after_triage
+  | Ok (`Busy ((Keeper_owner.Turn_busy (Some in_flight)) as block)) ->
+    Log.Keeper.info
+      ~keeper_name:meta_after_triage.name
+      "keeper owner busy before stimulus intake: %s"
+      (Keeper_owner.autonomous_block_to_string
+         (Keeper_owner.Turn_busy (Some in_flight)));
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_busy block
+    ; stimuli_acked = false
+    ; after_failure = None
+    }
+  | Ok
+      (`Busy
+        (( Keeper_owner.Turn_busy None
+         | Keeper_owner.Admission_paused
+         | Keeper_owner.Shutdown_requested _ ) as block)) ->
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_busy block
+    ; stimuli_acked = false
+    ; after_failure = None
+    }
+  | Error error ->
+    let cycle_status = owner_turn_rejection_cycle_status error in
+    (match cycle_status with
+     | Turn_cycle_crashed ->
+       Log.Keeper.error
+         ~keeper_name:meta_after_triage.name
+         "keeper owner rejected autonomous turn: %s"
+         (Keeper_owner_registry.command_error_to_string error)
+     | Turn_cycle_completed | Turn_cycle_interrupted | Turn_cycle_busy _ -> ());
+    { meta = meta_after_triage
+    ; cycle_status
+    ; stimuli_acked = false
+    ; after_failure = None
+    }
+;;
+
+let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
+
+let maybe_write_heartbeat_snapshot = Keeper_heartbeat_loop_snapshot_timing.maybe_write_heartbeat_snapshot
+let record_keepalive_stage_timing = Keeper_heartbeat_loop_snapshot_timing.record_keepalive_stage_timing
+
+(* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 27 anchor for
+   B1 (Heartbeat).  Authoritative spec mirror is
+   specs/keeper-state-machine/KeeperHeartbeat.tla (Cycle 7 / Tier B1,
+   PR #11408).
+
+   The spec preamble cites [run_heartbeat_loop] by function name.
+
+   Action mapping (TLA+ -> OCaml):
+     WakeupSignal     external code sets [wakeup] Atomic to true
+                      (e.g., wakeup_keeper / operator_resume).
+     HeartbeatTick    [Keeper_keepalive_signal.interruptible_sleep]
+                      consumes the wakeup via
+                      [Atomic.compare_and_set wakeup true false], then
+                      the loop body services the pending event.
+     TurnComplete     turn body finishes; loop returns to next sleep
+                      cycle.
+     MissedWakeup     bug action — the wakeup is observed and cleared
+                      but the loop fails to start a turn.  In OCaml
+                      this would be a regression where the
+                      compare_and_set succeeds but the surrounding
+                      branch returns early without dispatching.  The
+                      spec's NoMissedSignals invariant catches that
+                      drift; in code, the structural invariant is
+                      that every successful compare_and_set returns [Woken]
+                      and recurs directly into dispatch without another
+                      policy decision or sleep. *)
+
+let run_heartbeat_loop
+      ~proactive_warmup_sec
+      ~(registry_entry : Keeper_registry.registry_entry)
+      (ctx : _ context)
+      (m : keeper_meta)
+      (stop : bool Atomic.t)
+      ~(wakeup : bool Atomic.t)
+      ~(cadence_sleeping : bool Atomic.t)
+  : unit
+  =
+  let keepalive_started_ts = Time_compat.now () in
+  let snapshot_interval_sec () =
+    Runtime_params.get Runtime_settings.keeper_snapshot_sec
+  in
+  let last_snapshot_ts = ref 0.0 in
+  let consecutive_failures = ref 0 in
+  (* Cycle 43: KeeperHeartbeat.tla [turn_state] mirror. Single-fiber by
+     construction — only this loop body reads/writes the ref. *)
+  let turn_running = ref false in
+  (* Phase 0: per-stage timing ring buffer.
+     ring_size is read once at fiber start — mid-flight resize requires
+     ring buffer reallocation, so new values apply on next fiber restart. *)
+  let ring_sz = Keeper_keepalive_signal.stage_timing_ring_size () in
+  let timing_ring =
+    Array.make
+      ring_sz
+      { presence_ms = 0.0
+      ; snapshot_ms = 0.0
+      ; board_ms = 0.0
+      ; turn_ms = 0.0
+      }
+  in
+  let timing_cursor = ref 0 in
+  let timing_filled = ref 0 in
+  let work_as_hb () = Runtime_params.get Runtime_settings.keeper_work_as_hb_enabled in
+  (* Persistent AGENT_CORE Context.t — created once per keeper lifecycle.
+     AGENT_CORE Context.t is a mutable cross-turn state container for values
+     written directly into the shared context. This preserves shared
+     metadata across turns, but per-turn context_injector-local timing
+     and tool-call counters are recreated inside run_turn and therefore
+     do not accumulate for the full keeper lifecycle. *)
+  let shared_context = Agent_core.Context.create () in
+  let deferred_runtime_lane_slot =
+    Deferred_lane_slot.restore
+      ~lane_now:Deferred_lane_slot.current_lane
+      ~base_path:ctx.config.base_path
+      ~keepers_dir:(Workspace.keepers_runtime_dir ctx.config)
+      ~keeper_name:m.name
+  in
+  (* Mtime-based change detection for keeper meta disk reads.
+     Avoids re-parsing the JSON file on every heartbeat cycle when
+     no operator has modified it.  Initialized to 0.0 so the first
+     cycle always reads. *)
+  (* Wake-source carry (thundering-herd fix). Records whether the most recent
+     sleep ended via an external broadcast wakeup ([Woken]) or this keeper's own
+     cadence timer ([Timeout]). Read at turn dispatch so a broadcast-driven early
+     wake does not let the GLOBAL task backlog drive a turn on every keeper at
+     once. Single-fiber owned, like the other loop-local refs above. *)
+  let last_wake_source = ref Keeper_keepalive_signal.Timeout in
+  let cadence_clock = Monotonic_deadline.start () in
+  let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
+  let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
+      (float_of_int (max 0 proactive_warmup_sec))) in
+  (* Why the last turn that ran ended before completing now lives in
+     [Keeper_last_turn_stop], recorded by the cycle wrapper every lane
+     shares — see the note at [run_fresh_cycle]. *)
+  let captured_handoff = ref None in
+  let rec loop () =
+    if Atomic.get stop
+    then ()
+    else (
+      (* Yield before each heartbeat cycle to prevent N keeper fibers
+               from monopolizing the Eio scheduler during CPU-bound phases
+               (tool filtering, snapshot construction, prompt building). *)
+      Eio_guard.fair_yield ();
+      (match Keeper_owner_registry.scheduled_turn_handoff
+         ~base_path:ctx.config.base_path ~keeper_name:m.name with
+       | Ok handoff -> captured_handoff := handoff
+       | Error error -> Log.Keeper.warn ~keeper_name:m.name
+           "scheduled source slot observation failed: %s"
+           (Keeper_owner_registry.command_error_to_string error));
+      (* Phase 0: timing markers *)
+      let t_presence_start = Time_compat.now () in
+      let owner_meta =
+        match
+          Keeper_owner_registry.get
+            ~base_path:ctx.config.base_path
+            ~keeper_name:m.name
+        with
+        | Ok owner -> (Keeper_owner.projection owner).meta
+        | Error error ->
+          Log.Keeper.error
+            "%s: heartbeat owner projection unavailable: %s"
+            m.name
+            (Keeper_owner_registry.lookup_error_to_string error);
+          None
+      in
+      let meta_current =
+        effective_keepalive_meta
+          ~base_path:ctx.config.base_path
+          ~fallback:m
+          ~disk_meta_opt:owner_meta
+      in
+      (* A live lane evaluates every configured heartbeat tick. Busy/idle
+         labels, observer count, and prior activity never suppress the cycle;
+         an explicit wake atomically cuts the sleep for this Keeper only. *)
+      let meta_current =
+        (* Phase 1: sync presence and emit heartbeat metric *)
+        let meta_current =
+          sync_keeper_presence
+            ~ctx
+            ~registry_entry
+            ~meta_current
+            ~consecutive_failures
+        in
+        if !consecutive_failures > 0
+        then (
+          let _committed =
+            set_failure_reason_exact
+              registry_entry
+              ~site:"heartbeat_failure_reason"
+              (Some (Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures))
+          in
+          ());
+        meta_current
+      in
+        let t_presence_end = Time_compat.now () in
+        let now_ts = t_presence_end in
+        let t_snapshot_start = now_ts in
+        maybe_write_heartbeat_snapshot
+          ~ctx
+          ~meta_current
+          ~now_ts
+          ~last_snapshot_ts
+          ~snapshot_interval_sec:(snapshot_interval_sec ())
+          ~timing_ring
+          ~timing_filled:!timing_filled;
+        let t_snapshot_end = Time_compat.now () in
+        let t_board_start = t_snapshot_end in
+        (* Compute warmup state BEFORE board collection so cursor
+                 is not advanced while keeper cannot act on events. *)
+        let proactive_warmup_elapsed =
+          proactive_warmup_sec <= 0
+          || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
+        in
+        (* Lifecycle state is evaluated before durable stimulus intake. Resource
+           pressure remains observable but cannot pre-empt every Keeper lane;
+           concrete I/O boundaries report their own failures explicitly. *)
+        let lifecycle_state =
+          Keeper_lifecycle_admission.state
+            ~paused:meta_current.paused
+            ~latched_reason:meta_current.latched_reason
+        in
+        let intake_admission =
+          classify_turn_intake_admission
+            ~lifecycle:
+              (Keeper_lifecycle_admission.admit_autonomous lifecycle_state)
+        in
+        let admitted_turn =
+          match intake_admission with
+          | Intake_admitted -> true
+          | Intake_lifecycle_blocked _ -> false
+        in
+        let lifecycle_blocked =
+          match intake_admission with
+          | Intake_lifecycle_blocked _ -> true
+          | Intake_admitted -> false
+        in
+        (match intake_admission with
+         | Intake_admitted -> ()
+         | Intake_lifecycle_blocked denial ->
+           let reason =
+             Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+           in
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string LifecycleDispatchRejections)
+             ~labels:
+               [ "keeper", meta_current.name
+               ; "event", "heartbeat_pre_intake"
+               ; "reason", reason
+               ]
+             ();
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:[ "lifecycle_" ^ reason ];
+           Log.Keeper.info
+             "%s: heartbeat intake denied by lifecycle admission: %s"
+             meta_current.name
+             reason;
+           (* [autonomous_denial] carries one variant, an ordinary pause, which
+              keeps the lane parked so an explicit resume stays local. The loop
+              therefore never stops itself here. *)
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name
+         );
+        let pending_board_events, meta_after_triage =
+          if admitted_turn
+          then
+            collect_keepalive_board_events
+              ~ctx
+              ~meta_current
+              ~proactive_warmup_elapsed
+          else [], meta_current
+        in
+        let t_board_end = Time_compat.now () in
+        let t_turn_start = t_board_end in
+        let periodic_due = Keeper_keepalive_signal.periodic_is_due
+            ~now:(cadence_now ())
+            ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
+            !periodic_cadence in
+        let deferred_runtime_lane =
+          Deferred_lane_slot.for_assignment
+            deferred_runtime_lane_slot
+            ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta_current)
+        in
+        let wake = cycle_wake ~periodic_due ~deferred_runtime_lane in
+        let dispatch_snapshot =
+          Runtime.keeper_dispatch_snapshot ~keeper_name:m.name
+        in
+        let turn_outcome =
+          if not admitted_turn
+          then (
+            release_scheduled_handoff ~base_path:ctx.config.base_path
+              ~keeper_name:m.name !captured_handoff;
+            { meta = meta_current
+            ; cycle_status = Turn_cycle_completed
+            ; stimuli_acked = false
+            ; after_failure = None
+            })
+          else (
+            (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
+               [turn_running] flag toggles around the dispatch and the
+               pre/post guards mirror the spec's [turn_state] transition
+               "running" -> "idle". *)
+            turn_running := true;
+            (* [Woken] => this cycle was triggered by an external broadcast, not
+               the keeper's own cadence. The distinction is recorded as the
+               turn's wake reason. *)
+            let reactive_wake =
+              match !last_wake_source with
+              | Keeper_keepalive_signal.Woken -> true
+              | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
+                false
+            in
+            let on_deferred_runtime_consumed () =
+              Option.iter
+                (Deferred_lane_slot.consume deferred_runtime_lane_slot)
+                deferred_runtime_lane
+            in
+            let r =
+              run_keepalive_unified_turn ~wake ~scheduled_handoff:!captured_handoff
+                ~on_handoff_observed:(fun handoff -> captured_handoff := handoff)
+                ~ctx
+                ~registry_entry
+                ~meta_after_triage
+                ~pending_board_events
+                ~stop
+                ~proactive_warmup_elapsed
+                ~reactive_wake
+                ~shared_context
+                ~deferred_runtime_lane
+                ~on_deferred_runtime_consumed
+                ~settle_deferred_runtime_lane:
+                  (Deferred_lane_slot.settle deferred_runtime_lane_slot)
+            in
+            Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
+            turn_running := false;
+            Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;
+            r)
+        in
+        let meta_after_proactive = turn_outcome.meta in
+        (match decide_keepalive_cycle_action turn_outcome.cycle_status with
+         | Defer_autonomous_work block ->
+            Keeper_registry.record_skip_reasons
+              ~base_path:ctx.config.base_path
+              m.name
+              ~reasons:
+                [ "keeper_owner_"
+                  ^ Keeper_owner.autonomous_block_kind block
+                ];
+            Log.Keeper.info
+              ~keeper_name:m.name
+              "Keeper Owner deferred autonomous work: %s; this keepalive cycle \
+               records no turn status, crash, or work-health refresh"
+              (Keeper_owner.autonomous_block_to_string block)
+         | Skip_interrupted_turn ->
+           Log.Keeper.info
+             ~keeper_name:m.name
+             "%s: operator-interrupted cycle records no turn status or work-health refresh"
+             m.name
+         | Record_turn_status _ when lifecycle_blocked -> ()
+         | Record_turn_status work_heartbeat_action ->
+             (* The registry tracks failure count as observation. A
+                lifecycle-blocked cycle did not run a turn and must not emit a
+                false [Turn_succeeded]. *)
+             let turn_fail_count =
+               Keeper_registry.get_turn_failures
+                 ~base_path:ctx.config.base_path
+                 m.name
+             in
+             (* RFC-0002: dispatch turn status event *)
+             Keeper_keepalive_signal.dispatch_keepalive_event
+               ~ctx
+               ~keeper_name:m.name
+               (turn_status_event
+                  ~turn_fail_count);
+             refresh_failure_reason_after_turn
+               ~registry_entry
+               ~turn_fail_count;
+             (* Phase 1: work-as-heartbeat — renew point (b).
+                After turn, call Workspace.heartbeat to prove workspace I/O health.
+                On success: reset consecutive_failures.
+                T6 audit: a crashed cycle proves nothing about health — do not
+                reset consecutive_failures for it. *)
+             (match work_heartbeat_action with
+              | Refresh_work_heartbeat ->
+               refresh_work_as_heartbeat
+                 ~ctx
+                 ~meta_after_proactive
+                 ~proactive_warmup_elapsed
+                 ~work_as_hb
+                 ~consecutive_failures
+              | Preserve_work_heartbeat ->
+               Log.Keeper.info
+                 "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
+                 m.name));
+        let t_turn_end = Time_compat.now () in
+        (* Phase 0: push stage timing to ring buffer *)
+        record_keepalive_stage_timing
+          ~timing_ring
+          ~timing_cursor
+          ~timing_filled
+          ~ring_sz
+          ~t_presence_start
+          ~t_presence_end
+          ~t_snapshot_start
+          ~t_snapshot_end
+          ~t_board_start
+          ~t_board_end
+          ~t_turn_start
+          ~t_turn_end;
+        (* Carry the inter-cycle sleep result into the next iteration so the
+           turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
+           keeper's configured cadence ([Timeout]).
+
+           A cycle that acked its stimulus batch and left more entries pending
+           does not sleep the cadence: the queue is the wake signal, and the
+           next cycle dispatches as [Woken]. A checkpointed, failed, or busy
+           cycle keeps the cadence so a turn that made no progress is not
+           re-run back to back.
+
+           A failed cycle follows [turn_outcome.after_failure]
+           (RFC-provider-path-rest). When the driver deferred the input to a
+           path that is not resting, a pending input runs on it at once: the
+           next turn is that path, not the same turn again. When the path the
+           input goes to next rests, the sleep lasts until its release, and a
+           rate limit or quota wait is not cut short by a stimulus: every wake
+           that cut it short re-ran the same refused call (183 failed turns in
+           41 minutes, 2026-09-09, #34653). The queue keeps the stimulus; the
+           wakeup is consumed when the wait ends. *)
+        periodic_cadence :=
+          periodic_cadence_after_cycle
+            ~periodic_due
+            ~now:(cadence_now ())
+            !periodic_cadence;
+        (match turn_outcome.after_failure with
+         | Some (Continue_on_deferred_lane { next_runtime_id }) ->
+           Log.Keeper.info
+             ~keeper_name:m.name
+             "%s: the failed turn deferred its input to %s, which is not resting; \
+              the next cycle takes it without waiting"
+             m.name
+             next_runtime_id
+         | Some (Wait_for_path_release { release_at; waiting_on; basis = _ }) ->
+           Log.Keeper.warn
+             ~keeper_name:m.name
+             "%s: the next dispatch waits %.0fs for %s to be released at %.0f; \
+              stimuli queued meanwhile are served when it ends"
+             m.name
+             (Float.max 0.0 (release_at -. Time_compat.now ()))
+             waiting_on
+             release_at
+         | None -> ());
+        let wake_policy =
+          match turn_outcome.after_failure with
+          | Some (Wait_for_path_release _) ->
+            Keeper_keepalive_signal.Serve_wakeup_after_duration
+          | Some (Continue_on_deferred_lane _) | None ->
+            Keeper_keepalive_signal.Interrupt_on_wakeup
+        in
+        let interrupt_when =
+          match turn_outcome.after_failure with
+          | Some (Wait_for_path_release { basis; release_at = _; waiting_on = _ }) ->
+            let assignment_id = Keeper_meta_contract.runtime_id_of_meta turn_outcome.meta in
+            let deferred_runtime_lane =
+              Deferred_lane_slot.for_assignment deferred_runtime_lane_slot ~assignment_id
+            in
+            let invalidated =
+              provider_wait_interrupt ~keeper_name:m.name ~dispatch_snapshot
+                ~assignment_id ~deferred_runtime_lane ~basis
+            in
+            (fun () -> invalidated ~now:(Time_compat.now ()))
+          | Some (Continue_on_deferred_lane _) | None -> (fun () -> false)
+        in
+        (* The cadence handshake stays offered while a path rests: it is also
+           how [Keeper_status_runtime.keeper_metric_producer_active] knows a
+           failing lane is in its legitimate sleep, and withholding it (#34670)
+           marked the keeper's metric source stale once a wait outlived the
+           freshness SLO. A cadence change taken during a wait is honoured
+           when the wait ends; the producer is told its signal was taken,
+           which is true, only later than the outcome vocabulary can say. *)
+        let sleep_duration () =
+          match turn_outcome.after_failure with
+          | Some (Wait_for_path_release { release_at; waiting_on = _; basis = _ }) ->
+            Float.max 0.0 (release_at -. Time_compat.now ())
+          | Some (Continue_on_deferred_lane _) | None ->
+            Keeper_keepalive_signal.periodic_remaining
+              ~now:(cadence_now ())
+              ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
+              !periodic_cadence
+        in
+        let next_cycle_now =
+          next_cycle_starts_now
+            ~after_failure:turn_outcome.after_failure
+            ~stimuli_acked:turn_outcome.stimuli_acked
+            ~pending_stimulus:(fun () ->
+              pending_stimulus_remains ~ctx ~keeper_name:m.name)
+        in
+        last_wake_source :=
+          (if next_cycle_now
+           then Keeper_keepalive_signal.Woken
+           else
+             Keeper_keepalive_signal.interruptible_sleep
+               ~cadence_sleeping
+               ~wake_policy
+               ~interrupt_when
+               ~clock:ctx.clock
+               ~stop
+               ~wakeup
+               sleep_duration);
+        if not
+             (Runtime.same_keeper_dispatch dispatch_snapshot
+                (Runtime.keeper_dispatch_snapshot ~keeper_name:m.name))
+        then Deferred_lane_slot.invalidate deferred_runtime_lane_slot;
+      if Atomic.get stop then () else loop ())
+  in
+  Eio.Switch.run (fun sw ->
+    let consumer = ref None in
+    Eio.Switch.on_release sw (fun () ->
+      Option.iter (fun consumer ->
+        match Keeper_owner_registry.end_scheduled_turn_consumer
+          ~base_path:ctx.config.base_path ~keeper_name:m.name ~consumer with
+        | Ok () -> ()
+        | Error error -> Log.Keeper.warn ~keeper_name:m.name
+            "scheduled source consumer release failed: %s"
+            (Keeper_owner_registry.command_error_to_string error)) !consumer);
+    (* Install cleanup before the protected, bounded mailbox registration.
+       Cancellation cannot retire an untracked accepted consumer. *)
+    Eio.Cancel.protect (fun () ->
+      match Keeper_owner_registry.begin_scheduled_turn_consumer
+        ~base_path:ctx.config.base_path ~keeper_name:m.name with
+      | Ok active -> consumer := Some active
+      | Error error ->
+        Log.Keeper.warn ~keeper_name:m.name "scheduled source consumer unavailable: %s"
+          (Keeper_owner_registry.command_error_to_string error));
+    loop ())
+;;
+
+module For_testing = struct
+  let record_replay_owned_turn_started_reactions =
+    record_replay_owned_turn_started_reactions
+
+  let provider_wait_interrupt = provider_wait_interrupt
+  let retain_checkpoint_continuations = retain_checkpoint_continuations
+  let checkpoint_source_may_ack = checkpoint_source_may_ack
+  type deferred_lane_slot = Deferred_lane_slot.t
+
+  type deferred_lane_now = Deferred_lane_slot.lane_now =
+    | Lane_candidates of string list
+    | Lane_missing
+    | Lane_unavailable
+
+  let restore_deferred_lane_slot = Deferred_lane_slot.restore
+  let record_deferred_lane = Deferred_lane_slot.record
+  let consume_deferred_lane = Deferred_lane_slot.consume
+  let settle_deferred_lane = Deferred_lane_slot.settle
+  let deferred_lane_for_assignment = Deferred_lane_slot.for_assignment
+  let run_cycle_and_settle_lane = run_cycle_and_settle_lane
+  let batch_disposition_records_continuation =
+    batch_disposition_records_continuation
+  ;;
+
+  let after_failure = after_failure
+  let next_cycle_starts_now = next_cycle_starts_now
+  let cycle_wake = cycle_wake
+  let periodic_cadence_after_cycle = periodic_cadence_after_cycle
+end

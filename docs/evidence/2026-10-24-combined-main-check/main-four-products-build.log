@@ -1,0 +1,44 @@
+2026-10-24T13:41:28.0605610Z ##[group]Run set -euo pipefail
+2026-10-24T13:41:28.0605953Z [36;1mset -euo pipefail[0m
+2026-10-24T13:41:28.0606377Z [36;1m[ "$(git rev-parse HEAD)" = "$SHA" ] || { echo 'HEAD moved during setup' >&2; exit 1; }[0m
+2026-10-24T13:41:28.0607137Z [36;1m[ -z "$(git status --porcelain)" ] || { echo 'workspace modified during setup:' >&2; git status --porcelain >&2; exit 1; }[0m
+2026-10-24T13:41:28.0671690Z shell: /usr/bin/bash -e {0}
+2026-10-24T13:41:28.0672034Z env:
+2026-10-24T13:41:28.0672277Z   DUNE_JOBS: 4
+2026-10-24T13:41:28.0672580Z   DUNE_CACHE: enabled-except-user-rules
+2026-10-24T13:41:28.0673034Z   DUNE_CACHE_ROOT: /home/runner/work/_temp/masc-dune-cache
+2026-10-24T13:41:28.0673464Z   OPAMCOLOR: always
+2026-10-24T13:41:28.0673767Z   OPAMCONFIRMLEVEL: unsafe-yes
+2026-10-24T13:41:28.0674090Z   OPAMERRLOGLEN: 0
+2026-10-24T13:41:28.0674394Z   OPAMEXTERNALSOLVER: builtin-0install
+2026-10-24T13:41:28.0674751Z   OPAMRETRIES: 10
+2026-10-24T13:41:28.0675069Z   OPAMSOLVERTIMEOUT: 600
+2026-10-24T13:41:28.0675364Z   OPAMYES: 1
+2026-10-24T13:41:28.0675619Z   OPAMSWITCH: ci-5-5-1
+2026-10-24T13:41:28.0675974Z   SHA: fde6f30f922bb5613f3cfea75be05fe2c833ce61
+2026-10-24T13:41:28.0676359Z ##[endgroup]
+2026-10-24T13:41:28.3936835Z ##[group]Run set -euo pipefail
+2026-10-24T13:41:28.3937174Z [36;1mset -euo pipefail[0m
+2026-10-24T13:41:28.3937482Z [36;1mopam exec -- dune build --root . \[0m
+2026-10-24T13:41:28.3937889Z [36;1m  bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \[0m
+2026-10-24T13:41:28.3938472Z [36;1m  bin/deployment_preflight_helper.exe[0m
+2026-10-24T13:41:28.3938875Z [36;1m# Record the SHA that was actually built: GITHUB_SHA is main's[0m
+2026-10-24T13:41:28.3939299Z [36;1m# (the dispatch ref), not the checked-out head.[0m
+2026-10-24T13:41:28.3939905Z [36;1mprintf '%s\n' "fde6f30f922bb5613f3cfea75be05fe2c833ce61" > "/home/runner/work/_temp/.ci-main-build-receipt"[0m
+2026-10-24T13:41:28.4003696Z shell: /usr/bin/bash -e {0}
+2026-10-24T13:41:28.4003985Z env:
+2026-10-24T13:41:28.4004197Z   DUNE_JOBS: 4
+2026-10-24T13:41:28.4004453Z   DUNE_CACHE: enabled-except-user-rules
+2026-10-24T13:41:28.4004854Z   DUNE_CACHE_ROOT: /home/runner/work/_temp/masc-dune-cache
+2026-10-24T13:41:28.4005574Z   OPAMCOLOR: always
+2026-10-24T13:41:28.4005840Z   OPAMCONFIRMLEVEL: unsafe-yes
+2026-10-24T13:41:28.4006133Z   OPAMERRLOGLEN: 0
+2026-10-24T13:41:28.4006411Z   OPAMEXTERNALSOLVER: builtin-0install
+2026-10-24T13:41:28.4006744Z   OPAMRETRIES: 10
+2026-10-24T13:41:28.4007015Z   OPAMSOLVERTIMEOUT: 600
+2026-10-24T13:41:28.4007288Z   OPAMYES: 1
+2026-10-24T13:41:28.4007530Z   OPAMSWITCH: ci-5-5-1
+2026-10-24T13:41:28.4007796Z ##[endgroup]
+2026-10-24T13:41:34.5908950Z (cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+2026-10-24T13:41:34.5910269Z Warning: option "-j-std" is deprecated.
+2026-10-24T13:45:24.0522984Z ##[group]Run actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9

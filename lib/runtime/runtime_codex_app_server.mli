@@ -1,0 +1,558 @@
+(** A single-turn Codex app-server client.
+
+    This is an agent-runtime boundary, not an {!Llm_provider.Llm_transport}
+    implementation. Codex owns the whole turn. MASC owns process lifetime,
+    typed CLI authentication admission, and terminal projection. *)
+
+type subscription =
+  | Chatgpt of { plan_type : string; email : string option }
+  | Api_key
+  | Provider_managed
+  | Amazon_bedrock
+
+val authentication_to_string : subscription -> string
+
+type probe_result =
+  { subscription : subscription
+  ; user_agent : string option
+  }
+
+type config =
+  { cli_path : string
+  ; account_home : string option
+    (** Operator-selected Codex login and configuration directory for normal
+        client turns. [None] inherits the process's ordinary Codex home. *)
+  ; isolated_home : string option
+    (** Verification-only private CODEX_HOME prepared with projected auth and
+        provider configuration. Its safe CLI overrides apply only here. *)
+  ; model : string option
+  ; context_window : int option
+    (** Resolved MASC model window, passed to the actual client on both start
+        and resume. [None] preserves the selected account's Codex setting. *)
+  ; developer_instructions : string option
+  ; native : Runtime_native_tools.posture
+    (** Built-in tool posture (RFC-0390): [Native_read] maps to the
+        [:read-only] named permissions profile, [Native_full] to
+        [:workspace]. These are app-server profile ids sent as
+        [thread/start]'s [permissions], not values of the CLI's [SandboxMode]
+        vocabulary, which belongs to the [sandbox] field this client never
+        sends. [Native_none] is unrepresentable on Codex and fails as
+        config. *)
+  ; admission_timeout_s : float
+    (** Finite bound for post-spawn subscription/account checks, thread
+        creation, history injection, and the complete [turn/start] write. *)
+  ; timeout_s : float option
+    (** Maximum silence between app-server protocol messages while the model
+        turn is running. Each received message resets the deadline; a
+        progressing turn has no wall limit. It is not armed while the model is
+        waiting on an item the app-server started (a [commandExecution],
+        [fileChange], [mcpToolCall] or [sleep] item between its [item/started]
+        and its [item/completed]): the app-server may write nothing while such
+        an item runs, so that silence has no idle timer. An item of the model stream or a
+        message delta arms it again even while a tool item stays open, as a
+        background command's item does under unified exec.
+        [None] removes the deadline after the complete [turn/start] dispatch —
+        the spawned client decides when its own turn ends, which is the posture
+        of running the CLI directly. Setup and dispatch remain bounded by
+        [admission_timeout_s]. Declared as [turn-timeout-s] in runtime config,
+        where [0] selects [None]. *)
+  ; output_schema : Yojson.Safe.t option
+    (** JSON Schema for the turn's final assistant message, sent as
+        [outputSchema] on the v2 [turn/start] request. The flag documented for
+        [codex exec] is a different surface; this transport speaks the
+        app-server protocol, whose own generated schema declares the field.
+        The schema binds the message itself, so unlike the Antigravity adapter
+        there is no separate structured field to prefer. *)
+  }
+
+val default_timeout_s : float
+val default_config : unit -> config
+val effective_account_home : string option -> string option
+(** The CODEX_HOME that a child receives: an explicit account home, the
+    process CODEX_HOME, or the default derived from HOME. Quota ownership
+    uses this same resolution. *)
+
+(** One image attached to a turn. [base64_data] is the raw base64 payload with
+    no data-URL prefix and no newlines; the app-server [image] input variant
+    takes an inline data URL, which this module builds. *)
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
+type thread_mode =
+  | Start
+  | Resume of { thread_id : string }
+
+(* The per-turn counts the app-server reports on thread/tokenUsage/updated,
+   its [last] breakdown. OpenAI counting: [input_tokens] already includes the
+   cached prefix and [output_tokens] already includes reasoning, the same
+   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
+   defaults to 0 on the wire. *)
+type token_usage =
+  { input_tokens : int
+  ; cached_input_tokens : int
+  ; cache_write_input_tokens : int
+  ; output_tokens : int
+  ; reasoning_output_tokens : int
+  ; total_tokens : int
+  }
+
+(* What a frame's [last] breakdown is. Codex writes it two ways
+   (rust-v0.156.1): after a response, that request's counts, whose
+   [total_tokens] is [input_tokens + output_tokens]; after a compaction
+   replaces the history, recompute_token_usage writes an estimate of the
+   context the new history occupies as [total_tokens] with every other count
+   zero. *)
+type last_usage =
+  | Request_usage of token_usage
+  | Context_estimate of { estimated_tokens : int }
+
+(* One thread/tokenUsage/updated frame. [Counted] is the ordinary frame:
+   [last] and [thread_total], the thread's running count. [Context_window_filled]
+   is the frame Codex sends when a request overflows the context window: its
+   running count becomes zero counts with the window size as [total_tokens]
+   (fill_to_context_window) and the turn fails right after. The count before
+   it is the thread's last real count. *)
+type frame_usage =
+  | Counted of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Context_window_filled of { context_window : int }
+
+(* A turn's frames, folded. [Thread_count] holds the newest [last] and the
+   thread's running count, from which the turn's spend is resolved against
+   the previous count of the same thread. [Thread_count_replaced] says a
+   context-window fill replaced the running count during the turn: a count
+   read after it starts again from zero, so no one count measures the turn. *)
+type turn_usage =
+  | Thread_count of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Thread_count_replaced
+
+val frame_usage_of_breakdowns : last:token_usage -> thread_total:token_usage -> frame_usage
+
+type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
+(** Scheduling notice outcome at natural turn completion. Pending means a
+    notice was sent but its acknowledgement did not precede the terminal frame;
+    it is not evidence that the original operation finished. *)
+
+type turn_result =
+  { thread_id : string
+  ; turn_id : string
+  ; model : string
+  ; text : string
+  ; dynamic_tool_calls : int
+  ; scheduling_handoff : handoff_state
+  ; subscription : subscription
+  ; user_agent : string option
+  ; resumed : bool
+  ; usage : turn_usage option
+    (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
+       arrived before turn/completed. *)
+  ; model_context_window : int option
+    (* The model window the newest of those frames named
+       ([tokenUsage.modelContextWindow]), apart from MASC's own shaping
+       ceiling; [None] when none named one. The context that window holds is
+       the newest [last]: its [input_tokens + output_tokens], or the
+       estimate after a compaction. Never the thread's cumulative total. *)
+  }
+
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; detail : Keeper_terminal_effect_detail.t
+      }
+
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
+
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
+  { success : bool
+  ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
+  }
+
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
+
+type undelivered_tool_result =
+  { thread_id : string
+  ; turn_id : string
+  ; call_id : string
+  ; tool_name : string
+  ; arguments : Yojson.Safe.t
+  ; response : Yojson.Safe.t
+  }
+(** A settled host result whose vendor turn ended before delivery. The
+    response retains success/failure and the exact projected content. *)
+
+type elicitation_mode = Form | Openai_form | Url
+
+type elicitation_cancel_reason = Host_input_unavailable
+
+type reasoning_part = Summary of int | Content of int
+
+type text_completion_source = Item_content | Adopted_anonymous_content
+
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
+      (** One [item/agentMessage/delta]. [item_id] is its [itemId], the
+          agentMessage item the piece belongs to, so a reader can tell two
+          assistant messages of one turn apart. [None] when the frame omits
+          it or sends it blank; the delta still streams (#28010). *)
+  | Thinking_delta of
+      { item_id : string
+      ; part : reasoning_part
+      ; delta : string
+      }
+      (** Provider-exposed reasoning text, identified by item and summary/content
+          part. Completed items contribute only the suffix not already streamed. *)
+  | Text_completed of { item_id : string option; source : text_completion_source }
+  | Thinking_completed of { item_id : string; part : reasoning_part }
+      (** The matching model item/part completed, after its final missing
+          suffix. [Adopted_anonymous_content] means the runtime reconciled an
+          unnamed prefix against the completed item's text. Only that source
+          may bind an unnamed adapter block to this completed item.
+          A tool completion never produces these boundaries. *)
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Tool_delivery_closed of { pending_tool_calls : int }
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of { item_id : string; progress : Runtime_native_tools.progress }
+  | Compaction_observed
+      (** An active turn's [contextCompaction] item completed. Previously
+          delivered context may have been replaced, independently of usage
+          notifications. This is not a native tool effect. *)
+  | Elicitation_cancelled of
+      { server_name : string
+      ; mode : elicitation_mode
+      ; reason : elicitation_cancel_reason
+      }
+  | Usage_windows_reported of Runtime_provider_usage_window.report
+      (** The windows an [account/rateLimits/updated] notification reported,
+          for the operator projection only; nothing that routes or retries
+          reads it. *)
+  | Usage_reported of
+      { thread_id : string
+      ; turn_id : string
+      ; model : string
+      ; frame : frame_usage
+      }
+      (** One [thread/tokenUsage/updated] frame for this turn, parsed: its
+          [total] breakdown is the running count of [thread_id], or the
+          fill that replaced it. A frame is not one
+          response; the app-server repeats it on rate-limit updates,
+          refusals and retries, and a repeat carries the same count. Emitted
+          when the frame is read, before the turn's outcome is known, so a
+          turn that ends in an error still reports its count.
+
+          The count is the app-server's, with its gaps (rust-v0.156.1): a
+          context-window overflow replaces it with zero counts and the
+          window size as [total_tokens] (fill_to_context_window), after
+          which it counts up from zero; remote compaction spend never enters
+          it; and a response whose frame was not persisted before the
+          process stopped is not in any later count. *)
+  | Turn_finished of { text : string }
+
+type history_role =
+  | User
+  | Assistant
+  | Developer
+
+type history_message =
+  { role : history_role
+  ; text : string
+  }
+
+val history_bytes : history_message list -> int
+(** Bytes the history occupies on the wire. On a [Start] this is what
+    [thread/inject_items] carries into the new thread; on a [Resume] the thread
+    already holds it. Bytes this process sends, not provider tokens. *)
+
+val dynamic_tool_bytes : dynamic_tool list -> int
+(** Bytes the tool declarations occupy in [thread/start]'s [dynamicTools]. Sums
+    each name, description, and serialized input schema; the protocol wrapper
+    keys are excluded because they are fixed per tool. *)
+
+(** The provider's own classification of a failed turn: [CodexErrorInfo] in
+    the app-server's generated protocol schema (codex-cli 0.156.0), minus
+    [contextWindowExceeded], which arrives as {!error.Context_window_exceeded}.
+    A value the schema does not name is carried whole in [Unrecognized]. *)
+module Codex_error_info : sig
+  type non_steerable_turn_kind =
+    | Review
+    | Compact
+
+  type t =
+    | Session_budget_exceeded
+    | Usage_limit_exceeded
+    | Rate_limit_exceeded
+    | Server_overloaded
+    | Cyber_policy
+    | Misalignment_policy_violation
+    | Internal_server_error
+    | Unauthorized
+    | Bad_request
+    | Thread_rollback_failed
+    | Sandbox_error
+    | Other
+    | Http_connection_failed of { http_status_code : int option }
+    | Response_stream_connection_failed of { http_status_code : int option }
+    | Response_stream_disconnected of { http_status_code : int option }
+    | Response_too_many_failed_attempts of { http_status_code : int option }
+    | Active_turn_not_steerable of { turn_kind : non_steerable_turn_kind }
+    | Unrecognized of Yojson.Safe.t
+end
+
+type error =
+  | Invalid_config of string
+  | Spawn_failed of string
+  | Reasoning_effort_admission_failed of { model : string; detail : string }
+      (* Account metadata refused an explicit effort before history or turn
+         input was sent. Retrying this failure cannot replay a model turn. *)
+  | Turn_input_write_failed of string
+      (* The client and thread were initialized, but complete turn-input
+         transmission is unconfirmed. Partial delivery must not be replayed
+         as a proven pre-spawn failure. *)
+  | Protocol_error of
+      { stage : string
+      ; detail : string
+      }
+  | Rpc_error of
+      { method_ : string
+      ; code : int option
+      ; message : string
+      ; data : Yojson.Safe.t option
+      }
+  | Subscription_required of string
+  | Unsupported_server_request of string
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      }
+  | Turn_failed of
+      { detail : string
+      ; codex_error_info : Codex_error_info.t option
+        (** [None] when the failed turn carried no [codexErrorInfo]. *)
+      }
+  | Stopped_by_host of host_stop
+  | Turn_interrupted
+  | Runtime_shutting_down
+      (** The MASC host entered graceful shutdown while this client was
+          active. Kept distinct from {!Process_exited}: EOF is only the
+          transport symptom here; host shutdown is the observed cause. *)
+  | Process_exited of
+      { detail : string
+      ; turn_accepted : bool
+      }
+      (** [turn_accepted] is false when the client died before [turn/start] was
+          accepted, which means no turn was submitted and another candidate may
+          still be tried. *)
+  | Timeout of
+      { seconds : float
+      ; turn_accepted : bool
+        (** [true] when [turn/start] was accepted before the protocol went
+            silent: the upstream turn may still be executing (and committing
+            effects) server-side, so the outcome is ambiguous and must not
+            trigger lane rotation. [false] means nothing was started upstream
+            and retrying elsewhere is safe. *)
+      }
+
+val prompt_char_count : string -> (int, string) result
+(** Count Unicode scalar values in the exact submitted prompt, matching Codex's
+    input character unit. Reject malformed UTF-8; do not normalize text or count
+    JSON escaping. The caller supplies the final prompt including any suffix. *)
+
+type input_capacity = { actual_chars : int; max_chars : int }
+val input_capacity_refusal : error -> input_capacity option
+(** Decode only a structurally witnessed turn/start input limit refusal.
+    Missing, ambiguous or malformed error data and other invalid-params errors
+    remain ordinary RPC errors. Counts come from the server, never a local cap. *)
+
+val error_to_string : error -> string
+val client_environment : string option -> (string array, error) result
+(** Selected-account child environment shared by execution and explicit login. *)
+
+val refused_for_spent_usage : error -> bool
+(** [true] when the account refused the turn because its usage is spent: the
+    provider's own [usageLimitExceeded] or [sessionBudgetExceeded]. The
+    refusal states its reset time only in message text, never in a typed
+    field, so a caller that records it records an exhaustion with no end. *)
+
+val validate_turn :
+  ?dynamic_tools:dynamic_tool list ->
+  ?thread_mode:thread_mode ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config ->
+  prompt:string ->
+  images:image_input list ->
+  (unit, error) result
+(** Validate every deterministic client-side admission condition. Keeper calls
+    this before it durably claims a session; [run_turn] repeats the same check
+    at the process boundary. *)
+
+val probe_subscription :
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config ->
+  (probe_result, error) result
+(** Start the official app-server and measure only [initialize] plus
+    [account/read]. No thread or model turn is created. *)
+
+type listed_model = {
+  id : string; model : string; display_name : string; is_default : bool;
+  supported_reasoning_efforts : string list;
+  default_reasoning_effort : string;
+}
+val list_models :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config -> (listed_model list, error) result
+(** Account admission followed by paginated model/list, without thread/start or
+    turn/start. The CLI owns cache policy; callers needing refresh use an isolated
+    connection home without a model cache. This response has no context window. *)
+
+val read_rate_limits :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config -> (Runtime_provider_usage_window.report, error) result
+(** Account admission followed by [account/rateLimits/read], without
+    thread/start or turn/start. The windows are for the operator projection;
+    the app-server's schema says clients must not infer recovery from them. *)
+
+type context_submission_method =
+  | Thread_start
+  | Thread_resume
+  | Thread_inject_items
+  | Turn_start
+  | Turn_steer
+  | Dynamic_tool_response
+(** Every context-bearing frame MASC writes to Codex stdin. The send site names
+    the frame; the method is never re-read from the serialized JSON. A
+    [Dynamic_tool_response] answers the app-server's [item/tool/call] with the
+    tool's content items. Control traffic (initialize, account and model reads,
+    notifications, refusals, elicitation cancels) is not observed. *)
+
+val context_submission_method_label : context_submission_method -> string
+(** The JSON-RPC method of a request, or for [Dynamic_tool_response] the
+    method of the app-server request it answers. *)
+
+type context_frame_id =
+  | Request_id of int
+  | Answered_request_id of Yojson.Safe.t
+(** A request MASC numbers itself, or the app-server's request id that a
+    response echoes, kept as the JSON value the server sent. *)
+
+val context_frame_id_to_json : context_frame_id -> Yojson.Safe.t
+
+type context_submission = private
+  { method_ : context_submission_method
+  ; request_id : context_frame_id
+  ; thread_id : string option
+  ; write : Runtime_official_client_write.t
+        (** The compact JSON written before the LF. Start and resume select
+            [Developer_instructions] and [Dynamic_tools]; inject_items selects
+            each [Injected_item]; turn/start and turn/steer select each
+            [Turn_text]. A [Dynamic_tool_response] selects no slot: its
+            content items are counted in [Unattributed_carrier]. *)
+  }
+
+val context_submission_to_json : context_submission -> Yojson.Safe.t
+(** Content-free proof of a complete JSON-plus-newline write to Codex stdin.
+    This is neither server acceptance nor the provider's complete model input. *)
+
+val run_turn :
+  ?await_handoff:(unit -> bool) ->
+  (* Event-driven scheduling notice. The waiter returns true when queued input
+     needs the turn slot, false when its owner closes. It is cancelled when the
+     turn ends. Only the protocol consumer writes the steer, after any active
+     dynamic-tool result, including before the first tool. Input is not consumed
+     and the client still completes naturally. *)
+  ?dynamic_tools:dynamic_tool list ->
+  ?on_undelivered_tool_result:(undelivered_tool_result -> (unit, string) result) ->
+  (* Persist before returning the ended turn. A persistence failure fails the
+     attempt; a Keeper must replay the retained receipt into its next input,
+     never replay the already executed tool or wait on an old exec cell. *)
+  ?on_tool_response_confirmed:(call_id:string -> unit) ->
+  (* A same-turn dynamicToolCall completed item independently matches the
+     exact successful response written for this unique call. Failed responses
+     are not confirmed because Codex can synthesize indistinguishable failures.
+     This witnesses client receipt, not final model-input consumption. *)
+  ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
+  ?thread_mode:thread_mode ->
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  ?history:history_message list ->
+  ?developer_context:string list ->
+  (* Explicit developer items appended on Start and Resume before turn/start.
+     They retain developer authority and persist in the thread; this is not
+     a temporary context replacement or an idempotent delivery API. Callers
+     own retry/reconciliation and must not infer token savings from IPC bytes.
+     Empty by default; Keeper production projection is unchanged. *)
+  ?on_context_submission:(context_submission -> unit) ->
+  (* Observes every [context_submission_method] frame after
+      both payload and newline were written. Non-reserved observer exceptions,
+      including a timeout the observer raises itself, are reported as
+      unavailable measurement, never retried as a failed write. The turn
+      continues, so a completed turn write retains its dispatch fence.
+      Cancellation propagates. *)
+  ?on_prompt_sent:(unit -> unit) ->
+  (* Called after the complete turn-input message is written to the CLI.
+      This is transport evidence, not provider acceptance. Never called for
+      preparation, spawn, handshake, or incomplete input-write failures. *)
+  ?on_reasoning_effort_resolved:(model:string ->
+    requested:Llm_provider.Reasoning_effort.t option ->
+    effective:Llm_provider.Reasoning_effort.t option -> unit) ->
+  (* Explicit effort is admitted against this account's paginated model/list
+     before turn input is sent. Unsupported values snap to the nearest known
+     lower advertised tier, or the lowest known tier. Unknown upstream strings
+     remain discovery metadata; they never acquire an invented rank. An unset
+     request leaves Codex's default in charge and sends no model/list request. *)
+  ?on_thread_ready:(thread_id:string -> (unit, string) result) ->
+  ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
+  ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->
+  ?on_stream_event:(stream_event -> unit) ->
+  config ->
+  prompt:string ->
+  images:image_input list ->
+  (turn_result, error) result
+(** [config.admission_timeout_s] finitely bounds initialization, account
+    admission, thread preparation, and the complete [turn/start] write. The
+    model's [config.timeout_s] takes authority only after that dispatch
+    succeeds. *)

@@ -1,0 +1,138 @@
+{
+  "scope": "Controlled same-task input immediately after mount of actual component; no deployed server, passive scheduling unmodified.",
+  "sources": {
+    "mainRevision": "727fc531230d48f601bc78c7b33f6ad26c5de654",
+    "mainSha256": "1840f350ff435ea892c57be34c5acac04cf8e3afb61ea602ec05589f1c0cd5dc",
+    "fixedSha256": "8e0ba72f05d5f314274641cb062743affb42f69a509a842ab091569154c0971e",
+    "sourceUnchanged": true
+  },
+  "results": [
+    {
+      "variant": "main",
+      "afterInput": "Original instructions",
+      "afterBlur": [
+        "Original instructions"
+      ],
+      "afterReset": "Server reset",
+      "errors": [],
+      "trace": [
+        {
+          "kind": "render",
+          "time": 1208.6999999999534,
+          "value": "Original instructions",
+          "local": "Original instructions"
+        },
+        {
+          "kind": "dom-set",
+          "time": 1219.0999999999767,
+          "from": "",
+          "value": "Original instructions"
+        },
+        {
+          "kind": "dom-set",
+          "time": 1222.5,
+          "from": "Original instructions",
+          "value": "First instructions"
+        },
+        {
+          "kind": "input-dispatch",
+          "time": 1222.5999999999767,
+          "value": "First instructions"
+        },
+        {
+          "kind": "sync-effect",
+          "time": 1222.8999999999069,
+          "value": "Original instructions"
+        },
+        {
+          "kind": "render",
+          "time": 1222.8999999999069,
+          "value": "Original instructions",
+          "local": "Original instructions"
+        },
+        {
+          "kind": "render",
+          "time": 1223.0999999999767,
+          "value": "Original instructions",
+          "local": "Original instructions"
+        },
+        {
+          "kind": "dom-set",
+          "time": 1223.0999999999767,
+          "from": "First instructions",
+          "value": "Original instructions"
+        },
+        {
+          "kind": "render",
+          "time": 1264.3999999999069,
+          "value": "Original instructions",
+          "local": "Original instructions"
+        }
+      ],
+      "committed": [
+        "Original instructions"
+      ],
+      "inputs": []
+    },
+    {
+      "variant": "fixed",
+      "afterInput": "First instructions",
+      "afterBlur": [
+        "First instructions"
+      ],
+      "afterReset": "Server reset",
+      "errors": [],
+      "trace": [
+        {
+          "kind": "render",
+          "time": 51.5,
+          "value": "Original instructions",
+          "local": "Original instructions"
+        },
+        {
+          "kind": "dom-set",
+          "time": 58,
+          "from": "",
+          "value": "Original instructions"
+        },
+        {
+          "kind": "sync-effect",
+          "time": 58.29999999993015,
+          "value": "Original instructions"
+        },
+        {
+          "kind": "dom-set",
+          "time": 60,
+          "from": "Original instructions",
+          "value": "First instructions"
+        },
+        {
+          "kind": "input-dispatch",
+          "time": 60,
+          "value": "First instructions"
+        },
+        {
+          "kind": "render",
+          "time": 60.29999999993015,
+          "value": "Original instructions",
+          "local": "First instructions"
+        },
+        {
+          "kind": "render",
+          "time": 108.19999999995343,
+          "value": "First instructions",
+          "local": "First instructions"
+        },
+        {
+          "kind": "sync-effect",
+          "time": 108.39999999990687,
+          "value": "First instructions"
+        }
+      ],
+      "committed": [
+        "First instructions"
+      ],
+      "inputs": []
+    }
+  ]
+}

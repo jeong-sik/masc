@@ -1,0 +1,8 @@
+Testing `play-pad-routes'.
+This run has ID `63TS4CMD'.
+
+  [OK]          routes          0   layout, turn, unbound buttons and a press.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/play-pad-routes'.
+Test Successful in 1.318s. 1 test run.
+exit=0

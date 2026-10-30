@@ -1,0 +1,65 @@
+;; RFC-0056 Phase 2 / LANE 6 — Tool surface leaf extracted from the flat masc
+;; mega-library. These are the pure tool-surface modules (schema / vocabulary /
+;; policy / shard-type) with ZERO mega-outbound: they reference only the already
+;; -extracted Tool spine (masc_tool_dispatch / tool_types / tool_catalog_surfaces),
+;; masc_core / masc_types / masc_exec, and stdlib. The compiler now enforces that
+;; this layer cannot reference keeper / runtime / goal / task / board / server:
+;; none of them appear in (libraries) below, so a re-coupling is a dune cycle.
+;;
+;; (wrapped false) keeps bare [Tool_spec.X] / [Tool_capability.X] / ... working in
+;; the mega-lib and tests without a Masc. prefix (RFC-0056 G3).
+
+(include_subdirs no)
+
+(library
+ (name masc_tool_surface)
+ (public_name masc.masc_tool_surface)
+ (wrapped false)
+ (private_modules
+  tool_shard_types_schemas_filesystem_toml
+  tool_shard_types_schemas_wiki_toml
+  tool_shard_types_schemas_execute_toml
+  tool_shard_types_schemas_taskboard_toml
+  tool_shard_types_schemas_base_toml
+  tool_shard_types_schemas_voice_toml
+  tool_shard_types_schemas_surface_toml
+  tool_shard_types_core
+  tool_shard_types_enum_mirrors
+  tool_shard_types_schemas_base
+  tool_shard_types_board_keeper_projection
+  tool_shard_types_schemas_execute
+  tool_shard_types_schemas_filesystem
+  tool_shard_types_schemas_wiki
+  tool_shard_types_schemas_surface
+  tool_shard_types_schemas_search_files
+  tool_shard_types_schemas_taskboard
+  tool_shard_types_schemas_voice)
+ (libraries
+  masc_types
+  masc_core
+  masc_config
+  masc_log
+  masc.tool_types
+  masc.tool_catalog_surfaces
+  masc.masc_tool_dispatch
+  masc.masc_exec
+  masc.agent_core
+  masc.agent_core.base
+  time_compat
+  fs_compat
+  yojson
+  ; Tool_definition_toml parses config/tools/<name>.toml declarations, and
+  ; the board keeper projections read them from the binary-embedded config
+  ; tree. embedded_config is generated data with no masc dependencies, so
+  ; the leaf constraint above still holds.
+  otoml
+  masc.embedded_config
+  ; Tool_help_registry renders its shared fallback prose from
+  ; config/prompts/tool_help.md slots (RFC prompts-and-tool-definitions-outside-ocaml).
+  ; prompt_registry sits on the workspace/core spine, not on keeper/runtime,
+  ; so the leaf constraint above still holds.
+  masc.prompt_registry
+  eio
+  unix)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

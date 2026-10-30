@@ -1,0 +1,1026 @@
+type lane_configuration =
+  | Configured of
+      { admitted_slots : string list
+      ; cli_slots : string list
+      ; dropped_slots : string list
+      ; declared_slots : string list
+          (** [slots] in the order the file writes them, admitted or not. The
+              three lists above are an admission reading and cannot be put back
+              in file order once a sibling was rejected, so an editor that
+              moves or drops one slot needs this to say where the slot sits. *)
+      ; declared_cli_slots : string list
+          (** [cli_slots] in source order, including any client admission rejected. *)
+      ; admission_error : string option
+      }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
+  | Unconfigured of string
+  | Registry_unavailable of string
+
+type terminal_kind =
+  | Succeeded
+  | Failed
+  | Cancelled
+
+type observed_terminal =
+  { kind : terminal_kind
+  ; elapsed_s : float option
+    (** Only an actual measured duration can supply latency/finish statistics.
+        Unknown and replay interruption durations remain absent. *)
+  ; answered_by : answered_by
+  }
+
+(* Who a finished run's record names. The run registry keeps one
+   [selected_slot : string option], and [None] means different things
+   depending on how the run ended, so the reading is made here, once, from
+   the typed row. *)
+and answered_by =
+  | Slot of string
+  | Vendor_system_one
+      (** A Board Attention run that succeeded without a slot. The registry
+          contract (exact_lane_run_registry.mli, [mark_completed]) says
+          Vendor System One answers before any HTTP or CLI slot is bound and
+          leaves [selected_slot] empty; every other success binds one. *)
+  | Closed_by_restart
+      (** Closed on replay after a restart; replay cannot know the slot. *)
+  | No_slot
+      (** Finished without a slot for another reason: it failed or was
+          cancelled before one was bound, or its producer recorded none. *)
+
+type observed_status =
+  | Running
+  | Terminal of observed_terminal
+
+type observation_id =
+  | Exact_id of string
+  | Task_verification_id of string
+  | Goal_verification_id of string
+
+type observed_run =
+  { observation_id : observation_id
+  ; lane : Lane_run_identity.t
+  ; started_at : float
+  ; status : observed_status
+  }
+
+type lane_spec =
+  { lane : Standalone_lane.t
+  ; label : string
+  ; purpose : string
+  ; required : bool
+  }
+
+(* Every lane's row. The label and purpose come from [Lane_manifest] and the
+   obligation from [Standalone_lane.obligation], the one place each is
+   written; both are exhaustive, so a lane added to [Standalone_lane.t] does
+   not compile there until it has them. *)
+let lane_spec (lane : Standalone_lane.t) =
+  { lane
+  ; label = Lane_manifest.label (Lane_id.Exact lane)
+  ; purpose = Lane_manifest.purpose (Lane_id.Exact lane)
+  ; required =
+      (match Standalone_lane.obligation lane with
+       | Standalone_lane.Required -> true
+       | Standalone_lane.Optional -> false)
+  }
+;;
+
+(* The order the Lanes table draws: the two required lanes first. That is not
+   [Standalone_lane.all]'s order, which the runtime file editor keeps, so the
+   list is its own; test_server_standalone_lane_projection holds it to
+   [Standalone_lane.all] as a set. *)
+let lane_specs =
+  List.map
+    lane_spec
+    [ Standalone_lane.Board_attention
+    ; Standalone_lane.Hitl_auto_judge
+    ; Standalone_lane.Librarian
+    ; Standalone_lane.Verifier
+    ; Standalone_lane.Browser_stagehand
+    ; Standalone_lane.Candle_appraiser
+    ]
+;;
+
+(* The overview above joins three durable registries into all declared lanes. The run
+   drill-down must read the same set: serving only [Exact_lane_run_registry]
+   made the Verifier row open an empty list even while its task and Goal
+   registries held reviews, tool observations, and verdicts. Keep the source
+   variant private so no caller can accidentally flatten away which durable
+   record owns the detail. *)
+type retained_run =
+  | Exact_run of Exact_lane_run_registry.run
+  | Task_verification_run of Verification_run_registry.run
+  | Goal_verification_run of Goal_verification_run_registry.run
+
+type run_kind = Exact_output | Task_verification | Goal_verification
+
+let run_kind_of_string = function
+  | "exact_output" -> Ok Exact_output
+  | "task_verification" -> Ok Task_verification
+  | "goal_verification" -> Ok Goal_verification
+  | value ->
+    Error (Printf.sprintf
+      "unknown standalone run kind %S; expected exact_output, task_verification, or goal_verification"
+      value)
+;;
+
+let retained_run_kind = function
+  | Exact_run _ -> Exact_output
+  | Task_verification_run _ -> Task_verification
+  | Goal_verification_run _ -> Goal_verification
+;;
+
+(* A skipped verifier scan (RFC-0444 §2.3 row 7) is retained beside the Goal
+   reviews but is not a lane run: no lane admitted it and no model ran. The
+   lane overview and the run drill-down read only the reviews; the skipped
+   scans are served by the goal-verification-runs route. *)
+let retained_goal_reviews () =
+  Goal_verification_run_registry.list_runs (Goal_verification_run_registry.global ())
+  |> List.filter_map (function
+    | Goal_verification_run_registry.Review run -> Some run
+    | Goal_verification_run_registry.Scan_skipped _ -> None)
+;;
+
+type detail_lookup =
+  | Detail_found of Yojson.Safe.t
+  | Detail_not_found
+  | Detail_ambiguous
+
+let retained_run_id = function
+  | Exact_run run -> run.Exact_lane_run_registry.run_id
+  | Task_verification_run run -> run.Verification_run_registry.verification_id
+  | Goal_verification_run run -> run.Goal_verification_run_registry.run_id
+;;
+
+let retained_run_lane = function
+  | Exact_run run ->
+    Exact_lane_run_registry.lane_id run.Exact_lane_run_registry.lane
+  | Task_verification_run _ | Goal_verification_run _ ->
+    Lane_run_identity.to_id Lane_run_identity.Verifier
+;;
+
+let retained_run_started_at = function
+  | Exact_run run -> run.Exact_lane_run_registry.started_at
+  | Task_verification_run run -> run.Verification_run_registry.started_at
+  | Goal_verification_run run -> run.Goal_verification_run_registry.started_at
+;;
+
+let known_lane lane_id = Option.is_some (Lane_run_identity.of_id lane_id)
+;;
+
+let selected_slot_field = function
+  | None -> "selected_slot", `Null
+  | Some slot -> "selected_slot", `String slot
+;;
+
+let task_verification_summary_fields (run : Verification_run_registry.run) =
+  let completion =
+    match run.status with
+    | Verification_run_registry.Running -> []
+    | Verification_run_registry.Completed
+        { evaluator_runtime; elapsed_s; _ } ->
+      [ "elapsed_s", `Float elapsed_s; selected_slot_field evaluator_runtime ]
+  in
+  [ "run_id", `String run.verification_id
+  ; "run_kind", `String "task_verification"
+  ; "lane", `String (Lane_run_identity.to_id Lane_run_identity.Verifier)
+  ; "subject_id", `String run.task_id
+  ; "actor", `String run.authority_actor
+  ; "started_at", `Float run.started_at
+  ; "status", `String (Verification_run_registry.status_label run.status)
+  ]
+  @ completion
+;;
+
+let goal_verification_summary_fields (run : Goal_verification_run_registry.run) =
+  let completion =
+    match run.status with
+    | Goal_verification_run_registry.Running -> []
+    | Goal_verification_run_registry.Completed
+        { evaluator_runtime; elapsed_s; _ } ->
+      [ "elapsed_s", `Float elapsed_s; selected_slot_field evaluator_runtime ]
+  in
+  [ "run_id", `String run.run_id
+  ; "run_kind", `String "goal_verification"
+  ; "lane", `String (Lane_run_identity.to_id Lane_run_identity.Verifier)
+  ; "subject_id", `String run.goal_id
+  ; "actor", `String run.authority_actor
+  ; "started_at", `Float run.started_at
+  ; "status", `String (Goal_verification_run_registry.status_label run.status)
+  ]
+  @ completion
+;;
+
+let assoc_fields = function
+  | `Assoc fields -> fields
+  | _ -> invalid_arg "standalone lane run serializer returned a non-object"
+;;
+
+let retained_run_summary_json = function
+  | Exact_run run ->
+    `Assoc
+      (("run_kind", `String "exact_output")
+       :: assoc_fields (Exact_lane_run_registry.run_summary_to_yojson run))
+  | Task_verification_run run -> `Assoc (task_verification_summary_fields run)
+  | Goal_verification_run run -> `Assoc (goal_verification_summary_fields run)
+;;
+
+let verifier_input ~kind ~subject_key ~subject_id fields =
+  `Assoc
+    [ "kind", `String "exact"
+    ; ( "payload"
+      , `Assoc
+          ([ "kind", `String kind; subject_key, `String subject_id ] @ fields) )
+    ]
+;;
+
+let retained_run_skill_evidence_json = function
+  | Exact_run run ->
+    (match run.Exact_lane_run_registry.lane with
+     | Exact_lane_run_registry.Librarian
+     | Exact_lane_run_registry.Hitl_auto_judge
+     | Exact_lane_run_registry.Board_attention
+     | Exact_lane_run_registry.Workspace_curator
+     | Exact_lane_run_registry.Candle_appraiser ->
+       `Assoc [ "state", `String "no_keeper_skills" ])
+  | Task_verification_run _ | Goal_verification_run _ ->
+    `Assoc [ "state", `String "no_keeper_skills" ]
+;;
+
+let retained_run_detail_json run =
+  let with_skill_evidence fields =
+    let available =
+      Exact_lane_run_registry.availability_to_yojson Exact_lane_run_registry.Available
+    in
+    let verifier_availability has_output =
+      [ "payload_availability", `Assoc
+          [ "input", available; "output", (if has_output then available else `Null) ] ]
+    in
+    let availability =
+      match run with
+      | Exact_run _ -> []
+      | Task_verification_run run ->
+        verifier_availability
+          (match run.Verification_run_registry.status with Running -> false | Completed _ -> true)
+      | Goal_verification_run run ->
+        verifier_availability
+          (match run.Goal_verification_run_registry.status with Running -> false | Completed _ -> true)
+    in
+    `Assoc (("skill_evidence", retained_run_skill_evidence_json run) :: availability @ fields)
+  in
+  match run with
+  | Exact_run run ->
+    with_skill_evidence
+      (("run_kind", `String "exact_output")
+       :: assoc_fields (Exact_lane_run_registry.run_to_yojson run))
+  | Task_verification_run run ->
+    let output =
+      match run.Verification_run_registry.status with
+      | Verification_run_registry.Running -> []
+      | Verification_run_registry.Completed _ ->
+        [ "output", Verification_run_registry.run_to_yojson run ]
+    in
+    with_skill_evidence
+      (task_verification_summary_fields run
+       @ [ ( "input"
+           , verifier_input
+               ~kind:"task_verification"
+               ~subject_key:"task_id"
+               ~subject_id:run.task_id
+               [ "producer", `String run.producer
+               ; "authority_kind", `String run.authority_kind
+               ; "authority_actor", `String run.authority_actor
+               ] ) ]
+       @ output)
+  | Goal_verification_run run ->
+    let output =
+      match run.Goal_verification_run_registry.status with
+      | Goal_verification_run_registry.Running -> []
+      | Goal_verification_run_registry.Completed _ ->
+        [ "output", Goal_verification_run_registry.run_to_yojson run ]
+    in
+    with_skill_evidence
+      (goal_verification_summary_fields run
+       @ [ ( "input"
+           , verifier_input
+               ~kind:"goal_verification"
+               ~subject_key:"goal_id"
+               ~subject_id:run.goal_id
+               [ "review_kind", `String "proof"
+               ; "request_id", `String run.request_id
+               ; "criterion", Goal_store.criterion_to_yojson run.criterion
+               ; "authority_actor", `String run.authority_actor
+               ] ) ]
+       @ output)
+;;
+
+let newer_first left right =
+  match Float.compare (retained_run_started_at right) (retained_run_started_at left) with
+  | 0 -> String.compare (retained_run_id right) (retained_run_id left)
+  | order -> order
+;;
+
+let is_older_than ~before run =
+  match before with
+  | None -> true
+  | Some (started_at, run_id) ->
+    Float.compare (retained_run_started_at run) started_at < 0
+    || (Float.equal (retained_run_started_at run) started_at
+        && String.compare (retained_run_id run) run_id < 0)
+;;
+
+let retained_runs ~exact_runs ~verification_runs ~goal_verification_runs =
+  List.map (fun run -> Exact_run run) exact_runs
+  @ List.map (fun run -> Task_verification_run run) verification_runs
+  @ List.map (fun run -> Goal_verification_run run) goal_verification_runs
+;;
+
+let take_page ~limit runs =
+  let rec loop taken count = function
+    | [] -> List.rev taken, false
+    | _ :: _ when count >= limit -> List.rev taken, true
+    | run :: rest -> loop (run :: taken) (count + 1) rest
+  in
+  if limit <= 0 then [], false else loop [] 0 runs
+;;
+
+let recent_run_page_json_with
+      ~limit
+      ~before
+      ~lane
+      ~run_kind
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs
+  =
+  match lane with
+  | Some lane_id when not (known_lane lane_id) ->
+    Error (Printf.sprintf "unknown standalone lane %S" lane_id)
+  | None | Some _ ->
+    let all =
+      retained_runs ~exact_runs ~verification_runs ~goal_verification_runs
+      |> List.filter (fun run ->
+        match run_kind with
+        | None -> true
+        | Some kind -> retained_run_kind run = kind)
+    in
+    let relevant =
+      match lane with
+      | None -> all
+      | Some lane_id ->
+        List.filter (fun run -> String.equal (retained_run_lane run) lane_id) all
+    in
+    let candidates =
+      relevant |> List.filter (is_older_than ~before) |> List.sort newer_first
+    in
+    let runs, has_more = take_page ~limit candidates in
+    Ok
+      (`Assoc
+        [ "generated_at", `String (Masc_domain.now_iso ())
+        ; "count", `Int (List.length runs)
+        ; "total", `Int (List.length relevant)
+        ; "has_more", `Bool has_more
+        ; "runs", `List (List.map retained_run_summary_json runs)
+        ])
+;;
+
+let recent_run_page_json ~limit ~before ~lane ~run_kind =
+  recent_run_page_json_with
+    ~limit
+    ~before
+    ~lane
+    ~run_kind
+    ~exact_runs:
+      (Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ()))
+    ~verification_runs:
+      (Verification_run_registry.list_runs (Verification_run_registry.global ()))
+    ~goal_verification_runs:(retained_goal_reviews ())
+;;
+
+let run_detail_json_with
+      ~run_id
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs
+  =
+  let matches =
+    retained_runs ~exact_runs ~verification_runs ~goal_verification_runs
+    |> List.filter (fun run -> String.equal (retained_run_id run) run_id)
+  in
+  match matches with
+  | [] -> Detail_not_found
+  | [ run ] ->
+    Detail_found
+      (`Assoc
+        [ "generated_at", `String (Masc_domain.now_iso ())
+        ; "run", retained_run_detail_json run
+        ])
+  | _ -> Detail_ambiguous
+;;
+
+let run_detail_json ~run_id =
+  let exact_runs =
+    match Exact_lane_run_registry.get (Exact_lane_run_registry.global ()) ~run_id with
+    | Some run -> [ run ]
+    | None -> []
+  in
+  run_detail_json_with
+    ~run_id
+    ~exact_runs
+    ~verification_runs:
+      (Verification_run_registry.list_runs (Verification_run_registry.global ()))
+    ~goal_verification_runs:(retained_goal_reviews ())
+;;
+
+let terminal_kind_to_string = function
+  | Succeeded -> "succeeded"
+  | Failed -> "failed"
+  | Cancelled -> "cancelled"
+;;
+
+let json_float_opt = function
+  | None -> `Null
+  | Some value -> `Float value
+;;
+
+let json_string_opt = function
+  | None -> `Null
+  | Some value -> `String value
+;;
+
+type jev_lane_readiness =
+  | Jev_off
+  | Jev_configured of { destinations : Typesafeai_client.destination_id list }
+  | Jev_cli_only
+  | Jev_lane_unavailable
+
+let jev_lane_readiness configuration = function
+  | Typesafeai_config.Off -> Jev_off
+  | Typesafeai_config.Configured { destinations } ->
+    (match configuration with
+     | Configured { admitted_slots = _ :: _; _ } -> Jev_configured { destinations }
+     | Configured { admitted_slots = []; cli_slots = _ :: _; _ } -> Jev_cli_only
+     | Configured { admitted_slots = []; cli_slots = []; _ }
+     | Disabled _ | Unconfigured _ | Registry_unavailable _ -> Jev_lane_unavailable)
+;;
+
+let jev_readiness_json = function
+  | Jev_off -> `Assoc [ "state", `String "off" ]
+  | Jev_cli_only -> `Assoc [ "state", `String "cli_only" ]
+  | Jev_lane_unavailable -> `Assoc [ "state", `String "lane_unavailable" ]
+  | Jev_configured { destinations } ->
+    `Assoc
+      [ "state", `String "configured"
+      ; "destinations", `List (List.map Typesafeai_client.destination_id_to_yojson destinations)
+      ]
+;;
+
+let terminal_of_exact_outcome = function
+  | Exact_lane_run_registry.Succeeded -> Succeeded
+  | Exact_lane_run_registry.Cancelled -> Cancelled
+  | Exact_lane_run_registry.Failed _ -> Failed
+;;
+
+let exact_answered_by ~lane ~outcome ~origin selected_slot =
+  match origin with
+  | Exact_lane_run_registry.Restart_replay -> Closed_by_restart
+  | Exact_lane_run_registry.Producer -> match selected_slot with
+    | Some slot -> Slot slot
+    | None -> match lane,outcome with
+      | Exact_lane_run_registry.Board_attention,Exact_lane_run_registry.Succeeded -> Vendor_system_one
+      | (Exact_lane_run_registry.Board_attention | Librarian | Hitl_auto_judge | Workspace_curator | Candle_appraiser),
+        (Exact_lane_run_registry.Succeeded | Cancelled | Failed _) -> No_slot
+;;
+
+let optional_slot = function
+  | Some slot -> Slot slot
+  | None -> No_slot
+;;
+
+let observed_exact_run (run : Exact_lane_run_registry.run) =
+  let status =
+    match run.status with
+    | Exact_lane_run_registry.Running -> Running
+    | Exact_lane_run_registry.Completed { outcome; origin; elapsed_s; selected_slot; _ } ->
+      Terminal
+        { kind = terminal_of_exact_outcome outcome
+        ; elapsed_s
+        ; answered_by = exact_answered_by ~lane:run.lane ~outcome ~origin selected_slot
+        }
+    | Exact_lane_run_registry.Completion_persistence_failed
+        { intended_outcome; elapsed_s; selected_slot; _ } ->
+      (* Counted as Failed: the record did not persist. Who answered is still
+         the intended outcome's answer. *)
+      Terminal
+        { kind = Failed
+        ; elapsed_s
+        ; answered_by =
+            exact_answered_by ~lane:run.lane ~outcome:intended_outcome ~origin:Exact_lane_run_registry.Producer selected_slot
+        }
+  in
+  { observation_id = Exact_id run.run_id
+  ; lane = Exact_lane_run_registry.run_lane run.lane; started_at = run.started_at; status }
+;;
+
+(* Success for this lane means A VERDICT WAS PRODUCED. [Not_reviewed] is
+   emitted when every evaluator slot was exhausted without a verdict
+   (Evaluator_unavailable / Invalid_verdict) — counting it as succeeded made
+   the panel unreadable as a judgement metric (lane audit W5). *)
+let terminal_of_verification_outcome = function
+  | Verification_run_registry.Infrastructure_unavailable _
+  | Verification_run_registry.Commit_failed _
+  | Verification_run_registry.Raised _
+  | Verification_run_registry.Execution_pending _
+  | Verification_run_registry.Execution_repair_required _
+  | Verification_run_registry.Not_reviewed _ -> Failed
+  | Verification_run_registry.Approved _
+  | Verification_run_registry.Rejected _ -> Succeeded
+  | Verification_run_registry.Review_cancelled _ -> Cancelled
+  | Verification_run_registry.Superseded_by _ -> Cancelled
+;;
+
+let observed_verification_run (run : Verification_run_registry.run) =
+  let status =
+    match run.status with
+    | Verification_run_registry.Running -> Running
+    | Verification_run_registry.Completed
+        { outcome; evaluator_runtime; elapsed_s; _ } ->
+      Terminal
+        { kind = terminal_of_verification_outcome outcome
+        ; elapsed_s = Some elapsed_s
+        ; answered_by = optional_slot evaluator_runtime
+        }
+  in
+  { observation_id = Task_verification_id run.verification_id
+  ; lane = Lane_run_identity.Verifier; started_at = run.started_at; status }
+;;
+
+let terminal_of_goal_verification_outcome ~evaluated_verdict = function
+  | Goal_verification_run_registry.Review_cancelled _ -> Cancelled
+  | Goal_verification_run_registry.Raised _
+  | Goal_verification_run_registry.Deferred _
+  | Goal_verification_run_registry.Reviewed
+  | Goal_verification_run_registry.Committed
+  | Goal_verification_run_registry.Superseded _ ->
+    (* This is judgement production, not application success. Replacing a
+       request, or a later commit failure, cannot change whether it evaluated. *)
+    (match evaluated_verdict with Some _ -> Succeeded | None -> Failed)
+;;
+
+let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
+  let status =
+    match run.status with
+    | Goal_verification_run_registry.Running -> Running
+    | Goal_verification_run_registry.Completed
+        { outcome; evaluated_verdict; evaluator_runtime; elapsed_s; _ } ->
+      Terminal
+        { kind = terminal_of_goal_verification_outcome ~evaluated_verdict outcome
+        ; elapsed_s = Some elapsed_s
+        ; answered_by = optional_slot evaluator_runtime
+        }
+  in
+  { observation_id = Goal_verification_id run.run_id
+  ; lane = Lane_run_identity.Verifier; started_at = run.started_at; status }
+;;
+
+let p50 values =
+  match List.sort Float.compare values with
+  | [] -> None
+  | sorted -> Some (List.nth sorted (List.length sorted / 2))
+;;
+
+let latest_run runs =
+  List.fold_left
+    (fun latest run ->
+       match latest with
+       | None -> Some run
+       | Some current when run.started_at > current.started_at
+                            || (Float.equal run.started_at current.started_at
+                                && Stdlib.compare run.observation_id current.observation_id > 0) -> Some run
+       | Some _ -> latest)
+    None
+    runs
+;;
+
+(* A measured finish orders known completions. For an unmeasured terminal,
+   its registration is an ordering anchor only: first observation may occur
+   after execution completed. It is not a lower bound or finish timestamp.
+   [last_terminal_at] remains absent for that row. Stable source/id ties do not
+   depend on the input registry traversal order. *)
+let terminal_order run terminal = match terminal.elapsed_s with
+  | Some elapsed -> run.started_at +. elapsed
+  | None -> run.started_at
+let latest_terminal_run terminal_runs =
+  List.fold_left (fun latest ((run,terminal) as candidate) -> match latest with
+    | None -> Some candidate
+    | Some (current,current_terminal)
+        when let order = Float.compare (terminal_order run terminal) (terminal_order current current_terminal) in
+          order > 0 || (order = 0 && Stdlib.compare run.observation_id current.observation_id > 0) -> Some candidate
+    | Some _ -> latest) None terminal_runs
+;;
+
+let slot_counts runs =
+  let counts = Hashtbl.create 8 in
+  List.iter
+    (fun run ->
+       match run.status with
+       | Running -> ()
+       | Terminal { answered_by = Vendor_system_one | Closed_by_restart | No_slot; _ } -> ()
+       | Terminal { answered_by = Slot slot_id; _ } ->
+         let previous_count =
+           match Hashtbl.find_opt counts slot_id with
+           | None -> 0
+           | Some count -> count
+         in
+         Hashtbl.replace counts slot_id (1 + previous_count))
+    runs;
+  Hashtbl.to_seq counts
+  |> List.of_seq
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+;;
+
+(* The finished runs [slot_counts] leaves out, by why. With the slot counts
+   they add up to succeeded + failed + cancelled, since all come from one list
+   of terminal runs. *)
+let runs_without_slot_json terminal_runs =
+  let count wanted =
+    List.fold_left
+      (fun count (_, terminal) -> if terminal.answered_by = wanted then count + 1 else count)
+      0
+      terminal_runs
+  in
+  `Assoc
+    [ "vendor_system_one", `Int (count Vendor_system_one)
+    ; "server_restarted", `Int (count Closed_by_restart)
+    ; "no_slot", `Int (count No_slot)
+    ]
+;;
+
+let lane_json
+      ~now:_
+      ~resolve_lane
+      ~jev_readiness
+      (all_runs : observed_run list)
+      (spec : lane_spec)
+  =
+  let runs =
+    List.filter
+      (fun (run : observed_run) -> Lane_run_identity.equal run.lane (Standalone_lane.run_identity spec.lane))
+      all_runs
+  in
+  let running_count =
+    List.fold_left (fun count run -> match run.status with Running -> count + 1 | Terminal _ -> count) 0 runs
+  in
+  let terminal_runs =
+    List.filter_map
+      (fun run -> match run.status with Running -> None | Terminal terminal -> Some (run, terminal))
+      runs
+  in
+  let count_kind kind =
+    List.fold_left
+      (fun count (_, terminal) -> if terminal.kind = kind then count + 1 else count)
+      0
+      terminal_runs
+  in
+  let succeeded_count = count_kind Succeeded in
+  let failed_count = count_kind Failed in
+  let cancelled_count = count_kind Cancelled in
+  let elapsed_values =
+    List.filter_map
+      (fun (_, terminal) ->
+         terminal.elapsed_s)
+      terminal_runs
+  in
+  let latest = latest_run runs in
+  let latest_terminal = latest_terminal_run terminal_runs in
+  let latest_terminal_kind =
+    match latest_terminal with
+    | None -> None
+    | Some (_, terminal) -> Some terminal.kind
+  in
+  let lane_id = Standalone_lane.to_id spec.lane in
+  let configuration = resolve_lane lane_id in
+  let configured, config_state, admitted_slots, admission_error =
+    match configuration with
+    | Configured { admitted_slots; cli_slots; dropped_slots; declared_slots; declared_cli_slots; admission_error } ->
+      Some true,
+      (if Option.is_some admission_error || admitted_slots = [] && cli_slots = []
+       then "degraded" else "ready"),
+      (admitted_slots, cli_slots, dropped_slots, declared_slots, declared_cli_slots),
+      admission_error
+    | Disabled { declared_slots; declared_cli_slots } ->
+      Some true, "off", ([], [], [], declared_slots, declared_cli_slots), None
+    | Unconfigured error -> Some false, "unconfigured", ([], [], [], [], []), Some error
+    | Registry_unavailable error -> None, "unavailable", ([], [], [], [], []), Some error
+  in
+  let admitted_slots, cli_slots, dropped_slots, declared_slots, declared_cli_slots = admitted_slots in
+  let status =
+    match configuration with
+    | Disabled _ -> "off"
+    | Registry_unavailable _ | Unconfigured _ -> "unavailable"
+    | Configured { admitted_slots = []; cli_slots = []; _ } -> "degraded"
+    (* A lane that could not admit is not healthy while it runs, and this word
+       is where a reader learns that: the table beside it draws slot names,
+       not the sentence saying why. *)
+    | Configured { admission_error = Some _; _ } -> "degraded"
+    | Configured _ when running_count > 0 -> "running"
+    | Configured _ when runs = [] -> "no_retained_observation"
+    | Configured _ ->
+      (match latest_terminal_kind with
+       | Some Failed -> "degraded"
+       | Some (Succeeded | Cancelled) | None -> "idle")
+  in
+  let last_started_at = Option.map (fun run -> run.started_at) latest in
+  (* This is the selected original's measured finish, never the clock when
+     replay or another observer noticed that original. *)
+  let last_terminal_at = Option.bind latest_terminal (fun (run,terminal) ->
+    Option.map (fun elapsed -> run.started_at +. elapsed) terminal.elapsed_s) in
+  let jev_field =
+    match spec.lane with
+    | Standalone_lane.Board_attention ->
+      [ "jev", jev_readiness_json (jev_lane_readiness configuration jev_readiness) ]
+    | Standalone_lane.Librarian
+    | Standalone_lane.Hitl_auto_judge
+    | Standalone_lane.Candle_appraiser
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> []
+  in
+  `Assoc
+    ([ "lane_id", `String lane_id
+    ; "label", `String spec.label
+    ; "purpose", `String spec.purpose
+    ; "required", `Bool spec.required
+    ; "observation_only", `Bool true
+    ; "configured", (match configured with None -> `Null | Some value -> `Bool value)
+    ; "configuration_state", `String config_state
+    ; "admitted_slots", `List (List.map (fun slot -> `String slot) admitted_slots)
+    ; "cli_slots", `List (List.map (fun slot -> `String slot) cli_slots)
+    ; "dropped_slots", `List (List.map (fun slot -> `String slot) dropped_slots)
+    ; ( "declared_slots"
+      , `List (List.map (fun slot -> `String slot) declared_slots) )
+    ; ( "declared_cli_slots"
+      , `List (List.map (fun slot -> `String slot) declared_cli_slots) )
+    ; "admission_error", json_string_opt admission_error
+    ; "status", `String status
+    ; "retained_run_count", `Int (List.length runs)
+    ; "running_count", `Int running_count
+    ; "succeeded_count", `Int succeeded_count
+    ; "failed_count", `Int failed_count
+    ; "cancelled_count", `Int cancelled_count
+    ; "last_started_at", json_float_opt last_started_at
+    ; "last_terminal_at", json_float_opt last_terminal_at
+    ; ( "last_outcome"
+      , match latest_terminal_kind with
+        | None -> `Null
+        | Some kind -> `String (terminal_kind_to_string kind) )
+    ; "p50_elapsed_s", json_float_opt (p50 elapsed_values)
+    ; ( "selected_slots"
+      , `List
+          (List.map
+             (fun (slot_id, count) ->
+                `Assoc [ "slot_id", `String slot_id; "count", `Int count ])
+             (slot_counts runs)) )
+    ; "runs_without_slot", runs_without_slot_json terminal_runs
+    ]
+     @ jev_field)
+;;
+
+let snapshot_json_with
+      ~now
+      ~resolve_lane
+      ~jev_readiness
+      ~exact_runs_total
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs
+  =
+  let all_runs =
+    List.map observed_exact_run exact_runs
+    @ List.map observed_verification_run verification_runs
+    @ List.map observed_goal_verification_run goal_verification_runs
+  in
+  let exact_run_projection_count = List.length exact_runs in
+  let exact_run_source_total = max exact_run_projection_count exact_runs_total in
+  `Assoc
+    [ "schema", `String "masc.standalone_llm_lanes.v2"
+    ; "generated_at", `String (Masc_domain.now_iso ())
+    ; "observed_at_unix", `Float now
+    ; "observation_only", `Bool true
+    ; "exact_run_projection_count", `Int exact_run_projection_count
+    ; "exact_run_source_total", `Int exact_run_source_total
+    ; ( "exact_run_projection_truncated"
+      , `Bool (exact_run_projection_count < exact_run_source_total) )
+    ; ( "lanes"
+      , `List
+          (List.map
+             (lane_json ~now ~resolve_lane ~jev_readiness all_runs)
+             lane_specs) )
+    ]
+;;
+
+let live_lane_configuration registry lane_id =
+  (* The file's own order for [slots], which no admission reading reproduces:
+     [admitted_slots] and [dropped_slots] are two lists by then, and a slot's
+     position among its siblings is gone. The slot editor moves and drops by
+     position, so it reads this. *)
+  let declared_slots, declared_cli_slots =
+    match Runtime_exact_output_registry.declared_lane registry ~lane_id with
+    | Some declared -> declared.Runtime_schema.slot_ids, declared.cli_slot_ids
+    | None -> [], []
+  in
+  (* Publication keeps declared-but-inadmissible slots as typed observations;
+     surfacing them per lane is what lets an operator distinguish "configured
+     single" from "configured double, one silently dropped" without going
+     back to the boot log. *)
+  let dropped_slots =
+    Runtime_exact_output_registry.rejected_slots registry
+    |> List.filter_map
+         (fun (rejected : Runtime_exact_output_registry.rejected_slot) ->
+            if String.equal rejected.lane_id lane_id
+            then Some rejected.slot_id
+            else None)
+  in
+  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+  | Ok ({ selected_slots; cli_slots } as resolved) ->
+    (* [verifier_exact] dispatches each of its slots as a judge, so the ids it
+       can actually judge through are a shorter list than the declaration
+       whenever one names a binding that takes no inline tools or no system
+       prompt, a client with no native-tool suppression, or a Claude Code
+       binding without tools-support. Showing the declaration here would read
+       as a configured judge that then refuses every review (#37179, #37382).
+       Sibling lanes answer an unresolved cli id with a typed error at
+       execution and walk on, so their declaration is what to show. *)
+    let registry_admitted_catalog_slots =
+      List.map
+        (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+        selected_slots
+    in
+    let typed_lane = Standalone_lane.of_id lane_id in
+    let admitted_catalog_slots, admitted_cli_slots, slot_rejections,
+        stagehand_dropped_slots, stagehand_error =
+      match
+        typed_lane,
+        Runtime_exact_output_registry.declared_lane registry ~lane_id
+      with
+      | Some Runtime.Verifier, Some declared ->
+        let lane =
+          Runtime.verifier_exact_lane_admission ~declared ~registry_admitted_catalog_slots
+        in
+        ( lane.Runtime.admitted_catalog_slot_ids
+        , lane.Runtime.admitted_cli_slot_ids
+        , lane.Runtime.slot_rejections
+        , []
+        , None )
+      | Some Runtime.Browser_stagehand, _ ->
+        (match Browser_stagehand_model.admit_lane resolved with
+         | Ok admitted ->
+           ( List.map
+               (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+               admitted.http_slots
+           , admitted.cli_slots
+           , []
+           , List.map
+               (fun (slot : Browser_stagehand_model.refused_slot) -> slot.slot_id)
+               admitted.refused_slots
+           , None )
+         | Error refusal ->
+           ( []
+           , cli_slots
+           , []
+           , []
+           , Some
+               (Browser_stagehand_model.refusal_to_string
+                  (Browser_stagehand_model.Lane_refused refusal)) ))
+      | Some Runtime.Verifier, None
+      | Some
+          ( Runtime.Librarian
+          | Runtime.Hitl_auto_judge
+          | Runtime.Board_attention
+          | Runtime.Candle_appraiser )
+        , _
+      | None, _ -> registry_admitted_catalog_slots, cli_slots, [], [], None
+    in
+    let dropped_slots =
+      dropped_slots
+      @ List.map
+          (fun (rejection : Runtime.verifier_slot_rejection) ->
+             rejection.Runtime.slot_id)
+          slot_rejections
+      @ stagehand_dropped_slots
+    in
+    Configured
+      { admitted_slots = admitted_catalog_slots
+      ; cli_slots = admitted_cli_slots
+      ; dropped_slots
+      ; declared_slots
+      ; declared_cli_slots
+      ; admission_error =
+          (match stagehand_error with
+           | Some _ as error -> error
+           | None ->
+          (match admitted_catalog_slots, admitted_cli_slots with
+           | [], [] ->
+             (match slot_rejections with
+              | [] -> None
+              | _ :: _ as rejections ->
+                Some
+                  (String.concat
+                     "; "
+                     (List.map Runtime.verifier_slot_rejection_to_string rejections)))
+           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ -> None))
+      }
+  | Error (Runtime_exact_output_registry.Exact_lane_off _) ->
+    Disabled { declared_slots; declared_cli_slots }
+  | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
+    Unconfigured
+      (Runtime_exact_output_registry.lane_resolution_error_to_string
+         (Runtime_exact_output_registry.Exact_lane_unconfigured { lane_id }))
+  | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
+    Configured
+      { admitted_slots = []
+      ; cli_slots = []
+      ; dropped_slots
+      ; declared_slots
+      ; declared_cli_slots
+      ; admission_error =
+          Some
+            (Runtime_exact_output_registry.lane_resolution_error_to_string
+               (Runtime_exact_output_registry.No_admitted_lane_slots { lane_id }))
+      }
+;;
+
+type observation = {
+  now : float;
+  resolve_lane : string -> lane_configuration;
+  resolve_addon : Runtime_schema.addon_lane -> lane_configuration;
+  addon_lanes : Runtime_schema.addon_lane list;
+  jev_readiness : Typesafeai_config.readiness;
+  exact_runs_total : int;
+  exact_runs : Exact_lane_run_registry.run list;
+  verification_runs : Verification_run_registry.run list;
+  goal_verification_runs : Goal_verification_run_registry.run list;
+}
+
+let observe () =
+  let registry_result = Runtime_exact_output_registry.current () in
+  let resolve_lane lane_id =
+    match registry_result with
+    | Ok registry -> live_lane_configuration registry lane_id
+    | Error error ->
+      Registry_unavailable
+        (Runtime_exact_output_registry.publication_error_to_string error)
+  in
+  let resolve_addon addon = resolve_lane (Runtime_schema.exact_lane_key (Runtime_schema.Addon addon)) in
+  let addon_lanes = match registry_result with
+    | Error _ -> []
+    | Ok registry ->
+        List.filter_map (fun (lane : Runtime_schema.exact_output_lane_decl) -> match lane.owner with
+          | Runtime_schema.Addon addon -> Some addon
+          | Runtime_schema.Builtin _ -> None) (Runtime_exact_output_registry.declared_lanes registry) in
+  let configurations = List.map (fun lane ->
+    let id = Standalone_lane.to_id lane in id,resolve_lane id) Standalone_lane.all in
+  let resolve_lane lane_id = match List.assoc_opt lane_id configurations with
+    | Some configuration -> configuration
+    | None -> Registry_unavailable "unknown standalone lane" in
+  (* [list_runs] is already newest-first from the registry's immutable
+     projection. Do not call [recent_runs] here: it sorts the entire list
+     again, and persistence-failed core rows can remain Running beyond normal
+     completed retention. Traverse once for the source count and take only the
+     bounded prefix used by this matrix. *)
+  let exact_run_source =
+    Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+  in
+  let rec take_exact_runs remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | run :: rest -> take_exact_runs (remaining - 1) (run :: acc) rest
+  in
+  let exact_runs =
+    take_exact_runs
+      Exact_lane_run_registry.max_completed_retained
+      []
+      exact_run_source
+  in
+  { now=Time_compat.now (); resolve_lane; resolve_addon; addon_lanes;
+    jev_readiness=Typesafeai_config.readiness ();
+    exact_runs_total=List.length exact_run_source; exact_runs;
+    verification_runs=Verification_run_registry.list_runs (Verification_run_registry.global ());
+    goal_verification_runs=retained_goal_reviews () }
+;;
+
+let configuration observation lane = observation.resolve_lane (Standalone_lane.to_id lane)
+let addon_configuration observation addon = observation.resolve_addon addon
+let addon_tables observation ~declaration_id =
+  List.filter_map (fun (addon : Runtime_schema.addon_lane) ->
+    if String.equal addon.declaration_id declaration_id then Some addon.output else None) observation.addon_lanes
+let observation_to_json observation =
+  snapshot_json_with ~now:observation.now ~resolve_lane:observation.resolve_lane
+    ~jev_readiness:observation.jev_readiness ~exact_runs_total:observation.exact_runs_total
+    ~exact_runs:observation.exact_runs ~verification_runs:observation.verification_runs
+    ~goal_verification_runs:observation.goal_verification_runs
+let snapshot_json () = observation_to_json (observe ())
+
+module For_testing = struct
+  let snapshot_json_with = snapshot_json_with
+  let recent_run_page_json_with = recent_run_page_json_with
+  let run_detail_json_with = run_detail_json_with
+end

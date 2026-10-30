@@ -1,0 +1,44 @@
+{
+  "at": 1792748041.655945,
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/lane-addons/declaration",
+    "body": {
+      "file_name": "phrase-source.toml",
+      "source_text": "enabled = true\nid = \"phrase-source\"\nrun_id = \"nonempty-review\"\nmanifest_path = \"/tmp/masc-addon-nonempty-review-20261023/workspace/packages/vst-phrase/lane.toml\"\n[binding]\nsources = [{source_id = \"vst-phrase\", kind = \"snapshot_file\", path = \"/tmp/masc-addon-nonempty-review-20261023/workspace/inputs/phrase.json\"}]\n",
+      "mode": "create"
+    },
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "825"
+    },
+    "body": {
+      "document": {
+        "file_name": "phrase-source.toml",
+        "source_path": "/tmp/masc-addon-nonempty-review-20261023/workspace/.masc/config/lane-addons/phrase-source.toml",
+        "source_text": "enabled = true\nid = \"phrase-source\"\nrun_id = \"nonempty-review\"\nmanifest_path = \"/tmp/masc-addon-nonempty-review-20261023/workspace/packages/vst-phrase/lane.toml\"\n[binding]\nsources = [{source_id = \"vst-phrase\", kind = \"snapshot_file\", path = \"/tmp/masc-addon-nonempty-review-20261023/workspace/inputs/phrase.json\"}]\n",
+        "source_revision": "f83beb43d0304834d36443ffef98d5dddcc9f102d437d382d8fbf7d4d15dab93",
+        "desired_revision": "1c0863ca6287e269fb2eafc34435786039f81ad318c5d2732b6ab005c0a7168b",
+        "validation": {
+          "valid": true,
+          "messages": []
+        }
+      },
+      "write": {
+        "state": "created",
+        "durability": "durable",
+        "detail": null
+      },
+      "application": "pending_reconciliation"
+    }
+  }
+}

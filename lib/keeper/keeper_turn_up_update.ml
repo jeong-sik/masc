@@ -1,0 +1,791 @@
+(** Keeper_turn_up_update -- update an existing keeper from parsed arguments.
+
+    Extracted from keeper_turn_up.ml (Ok (Some old) branch).
+    Handles merging of new arguments with existing keeper meta,
+    policy validation, and keepalive restart. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
+open Keeper_keepalive
+open Keeper_turn_up_args
+
+let resume_operator_pause
+    (ctx : _ context)
+    (old : keeper_meta)
+  =
+  match old.paused, old.latched_reason with
+  | true, (None | Some (Keeper_latched_reason.Operator_paused _)) ->
+    let request : Keeper_paused_work_resume_transaction.request =
+      { operator_operation_id =
+          Random_id.prefixed ~prefix:"keeper-up-resume-" ~bytes:16
+      }
+    in
+    (match
+       Keeper_paused_work_resume_transaction.resume
+         ctx.config
+         ~keeper_name:old.name
+         request
+     with
+     | Error error ->
+       Error
+         ("explicit keeper up could not resume operator pause: "
+          ^ Keeper_paused_work_resume_transaction.error_to_string error)
+     | Ok _ ->
+       (match
+          Keeper_owner_registry.get
+            ~base_path:ctx.config.base_path
+            ~keeper_name:old.name
+        with
+        | Error error ->
+          Error
+            ("resumed Keeper owner lookup failed: "
+             ^ Keeper_owner_registry.lookup_error_to_string error)
+        | Ok owner ->
+          (match Keeper_owner.exact_projection owner with
+           | Error error ->
+             Error
+               ("resumed Keeper owner projection failed: "
+                ^ Keeper_owner.error_to_string error)
+           | Ok { meta = None; _ } -> Error "resumed Keeper metadata disappeared"
+           | Ok { meta = Some resumed; _ } when resumed.paused ->
+             Error "explicit keeper up committed but pause remained set"
+           | Ok { meta = Some resumed; _ } -> Ok resumed)))
+  | false, _ -> Ok old
+;;
+
+type lane_swap_refusal =
+  | Swap_turn_in_flight of Keeper_owner.turn_in_flight
+  | Swap_failed of tool_result
+
+type runtime_sync =
+  | Lane_restarted
+  | Deferred_until_turn_end of Keeper_owner.turn_in_flight
+
+let runtime_sync_to_wire = function
+  | Lane_restarted -> "lane_restarted"
+  | Deferred_until_turn_end _ -> "deferred_until_turn_end"
+;;
+
+type config_write =
+  | Config_unchanged
+  | Config_committed
+  | Config_indeterminate
+
+type refusal =
+  | Profile_resolution_refused of string
+  | Shutdown_preflight_failed of string
+  | Revision_conflict of Keeper_turn_up_config_persistence.conflict
+  | Publication_rolled_back of string
+  | Manifest_reconciliation_required of
+      Keeper_turn_up_config_persistence.reconciliation
+  | Composite_reconciliation_required of
+      Keeper_turn_up_config_persistence.composite_reconciliation
+  | Failed_after_commit of string
+
+let config_revision_conflict_code = "keeper_config_revision_conflict"
+
+let refusal_code = function
+  | Profile_resolution_refused _ -> "keeper_config_profile_refused"
+  | Shutdown_preflight_failed _ -> "keeper_shutdown_preflight_failed"
+  | Revision_conflict _ -> config_revision_conflict_code
+  | Publication_rolled_back _ -> "keeper_config_publication_rolled_back"
+  | Manifest_reconciliation_required _ -> "keeper_manifest_reconciliation_required"
+  | Composite_reconciliation_required _ ->
+    "keeper_config_composite_reconciliation_required"
+  | Failed_after_commit _ -> "keeper_runtime_sync_failed"
+;;
+
+(* Where each refusal is raised fixes what it left on disk: everything up to
+   the commit is refused before the first rename or after both before-images
+   were restored, and a failed restore or journal retirement is the
+   reconciliation pair. *)
+let config_write_of_refusal = function
+  | Profile_resolution_refused _
+  | Shutdown_preflight_failed _
+  | Revision_conflict _
+  | Publication_rolled_back _ -> Config_unchanged
+  | Manifest_reconciliation_required _ | Composite_reconciliation_required _ ->
+    Config_indeterminate
+  | Failed_after_commit _ -> Config_committed
+;;
+
+type update_outcome =
+  | Runtime_synced of
+      { result : tool_result
+      ; runtime_sync : runtime_sync
+      }
+  | Update_refused of
+      { result : tool_result
+      ; refusal : refusal
+      }
+
+let result_of_outcome = function
+  | Runtime_synced { result; _ } | Update_refused { result; _ } -> result
+;;
+
+let runtime_synced_result ~keeper_name (updated : keeper_meta) runtime_sync =
+  let sync_fields =
+    match runtime_sync with
+    | Lane_restarted -> []
+    | Deferred_until_turn_end info ->
+      [ ( "block"
+        , Keeper_owner.autonomous_block_to_yojson
+            (Keeper_owner.Turn_busy (Some info)) )
+      ; ( "message"
+        , `String
+            (Printf.sprintf
+               "keeper %s configuration was saved and published. A turn \
+                holds the keeper's slot, so the keepalive lane was not \
+                restarted; the turn in flight keeps the configuration it \
+                started with and the next turn reads the new one. Do not \
+                resend this update."
+               keeper_name) )
+      ]
+  in
+  tool_result_ok_data
+    (`Assoc
+       (( "runtime_sync", `String (runtime_sync_to_wire runtime_sync) )
+        :: sync_fields
+        @ [ "meta", Keeper_meta_json.meta_to_json updated ]))
+;;
+
+(* Why a turn-in-flight swap refusal cannot be reported as deferred. Every
+   editable field is read per turn or per cycle, so a running lane picks the
+   update up without a restart -- but only a running lane, and not the egress
+   proxy: it is forked only when a lane starts in the policy network mode
+   ([Keeper_keepalive.fork_egress_proxy]). Nothing restarts the lane after the
+   turn ends. The registry's bound port is the lane's own answer; comparing
+   old and new meta would miss an earlier update that also skipped the
+   restart. *)
+type deferral_blocker =
+  | No_running_lane
+  | Policy_lane_without_egress_proxy
+
+let deferral_blocker ~base_path (updated : keeper_meta) =
+  match Keeper_registry.get ~base_path updated.name with
+  | None -> Some No_running_lane
+  | Some entry ->
+    (match updated.network_mode with
+     | Keeper_types_profile_sandbox.Network_none
+     | Keeper_types_profile_sandbox.Network_inherit -> None
+     | Keeper_types_profile_sandbox.Network_policy ->
+       (match Atomic.get entry.egress_proxy_port with
+        | Some _ -> None
+        | None -> Some Policy_lane_without_egress_proxy))
+;;
+
+let deferral_blocker_message ~keeper_name = function
+  | No_running_lane ->
+    Printf.sprintf
+      "keeper %s configuration was saved and published, but a turn holds the \
+       keeper's slot and no keepalive lane is running, so none was started. \
+       Call masc_keeper_up again when the keeper is idle."
+      keeper_name
+  | Policy_lane_without_egress_proxy ->
+    Printf.sprintf
+      "keeper %s configuration was saved and published, but a turn holds the \
+       keeper's slot, so the keepalive lane was not restarted. The running \
+       lane has no egress proxy, and network_mode=policy needs one: it takes \
+       effect only when the lane restarts. Call masc_keeper_up again when the \
+       keeper is idle."
+      keeper_name
+;;
+
+(* The lane swap tears down the registry entry a live turn's finalize path
+   still needs: a swap that raced an admitted turn left that turn's slot
+   permanently held after its provider run completed (#26542 — a keeper
+   calling masc_keeper_up on itself mid-turn locked itself out of every
+   subsequent turn until process restart). The swap therefore requires an
+   idle Owner, enforced with the same lifecycle reservation the shutdown
+   path uses:
+
+   - [begin_shutdown] fences new admissions and samples the current holder
+     in one critical section; a published holder rejects the swap (typed,
+     no waiting) — a keeper's own turn always holds the slot, so a
+     mid-turn self keeper_up lands on that rejection by construction.
+   - A holder that acquired the slot but has not yet published bounces at
+     its publish-time fence check without running a turn body, so the
+     fenced swap window stays turn-free.
+   - The fence is rolled back before [start_keepalive]:
+     [commit_registration_if_open] refuses lane registration under any
+     fence.
+   - [Shutdown_already_reserved] with an idle slot proceeds without a
+     fence of our own: that is the durable blocked-shutdown supersession
+     path (metadata commit takes ownership of the foreign fence), and the
+     concurrent-update race it also matches is absorbed by the existing
+     launch-conflict arm. *)
+let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
+  : (joined_stop_result * start_keepalive_outcome, lane_swap_refusal) result =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      swap_keepalive_lane_fenced ctx updated)
+  else
+    let base_path = ctx.config.base_path in
+  let keeper_name = updated.name in
+  let rollback ~operation_id =
+    match
+      Keeper_owner_registry.rollback_shutdown
+        ~base_path
+        ~keeper_name
+        ~operation_id
+    with
+    | Ok Keeper_owner.Shutdown_rolled_back
+    | Ok Keeper_owner.Shutdown_not_reserved
+    | Ok (Keeper_owner.Shutdown_reserved_by_other _)
+    | Error _ -> ()
+  in
+  let swap () = stop_keepalive_and_await ~base_path keeper_name in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  match
+    Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name ~operation_id
+  with
+  | Error error ->
+    Error
+      (Swap_failed
+         (tool_result_error ~class_:Tool_result.Runtime_failure
+            (Keeper_owner_registry.command_error_to_string error)))
+  | Ok (Keeper_owner.Shutdown_reserved { in_flight = Some info; _ }) ->
+    rollback ~operation_id;
+    Error (Swap_turn_in_flight info)
+  | Ok (Keeper_owner.Shutdown_already_reserved
+      { in_flight = Some _; _ }) ->
+    (* Another operation's fence stays in place and blocks admissions, so
+       the next turn is not this update's to promise. *)
+    Error
+      (Swap_failed
+         (tool_result_error ~class_:Tool_result.Workflow_rejection
+            (Printf.sprintf
+               "keeper %s configuration was saved, but another shutdown \
+                operation holds the keeper and a turn is in flight; the \
+                keepalive lane was not restarted."
+               keeper_name)))
+  | Ok (Keeper_owner.Shutdown_reserved { in_flight = None; _ }) ->
+    let stop_outcome =
+      match swap () with
+      | outcome ->
+        rollback ~operation_id;
+        outcome
+      | exception exn ->
+        rollback ~operation_id;
+        raise exn
+    in
+    Ok (stop_outcome, start_keepalive ctx updated)
+  | Ok (Keeper_owner.Shutdown_already_reserved { in_flight = None; _ }) ->
+    Ok (swap (), start_keepalive ctx updated)
+;;
+
+let config_revision_conflict_data
+      ({ expected; observed } as conflict : Keeper_turn_up_config_persistence.conflict)
+  =
+  `Assoc
+    [ "code", `String (refusal_code (Revision_conflict conflict))
+    ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
+    ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
+    ]
+;;
+
+(* The receipt's [applied] is read off the outcome, so it cannot say
+   something the outcome does not. An indeterminate write has no revision to
+   report and gets no receipt: its refusal names the files to reconcile. *)
+let with_config_receipt ~revision ~warnings outcome =
+  let attach ~applied result =
+    Tool_result.with_metadata
+      (`Assoc
+         [ ( "keeper_config_write"
+           , `Assoc
+               [ "revision", Keeper_turn_up_config_persistence.config_revision_to_yojson revision
+               ; "applied", `Bool applied
+               ; ( "warnings"
+                 , `List
+                     (List.map
+                        Keeper_turn_up_config_persistence.warning_to_yojson
+                        warnings) )
+               ] )
+         ])
+      result
+  in
+  match outcome with
+  | Runtime_synced { result; runtime_sync } ->
+    Runtime_synced { result = attach ~applied:true result; runtime_sync }
+  | Update_refused { result; refusal } ->
+    (match config_write_of_refusal refusal with
+     | Config_committed ->
+       Update_refused { result = attach ~applied:true result; refusal }
+     | Config_unchanged ->
+       Update_refused { result = attach ~applied:false result; refusal }
+     | Config_indeterminate -> outcome)
+;;
+
+let reconciliation_authority_fields
+      ({ path; detail; observed } :
+        Keeper_turn_up_config_persistence.reconciliation)
+  =
+  let observed =
+    match observed with
+    | Keeper_turn_up_config_persistence.Observed_revision revision ->
+      `Assoc
+        [ "state", `String "revision"
+        ; "revision", Keeper_turn_up_config_persistence.revision_to_yojson revision
+        ]
+    | Keeper_turn_up_config_persistence.Unreadable_manifest error ->
+      `Assoc [ "state", `String "unreadable"; "detail", `String error ]
+  in
+  [ "path", `String path
+  ; "detail", `String detail
+  ; "observed", observed
+  ]
+;;
+
+let reconciliation_required_data state =
+  `Assoc
+    (("code", `String (refusal_code (Manifest_reconciliation_required state)))
+     :: reconciliation_authority_fields state)
+;;
+
+let reconciliation_authority_data state =
+  `Assoc (reconciliation_authority_fields state)
+;;
+
+let composite_reconciliation_required_data
+      ({ manifest; runtime_assignment } as state :
+        Keeper_turn_up_config_persistence.composite_reconciliation)
+  =
+  let manifest =
+    match manifest with
+    | None -> `Null
+    | Some state -> reconciliation_authority_data state
+  in
+  let runtime_assignment =
+    match runtime_assignment with
+    | None -> `Null
+    | Some state ->
+      `Assoc
+        [ ( "path"
+          , match state.path with
+            | None -> `Null
+            | Some path -> `String path )
+        ; "detail", `String state.detail
+        ]
+  in
+  `Assoc
+    [ "code", `String (refusal_code (Composite_reconciliation_required state))
+    ; "manifest", manifest
+    ; "runtime_assignment", runtime_assignment
+    ]
+;;
+
+let refusal_error_json refusal =
+  match refusal with
+  | Revision_conflict conflict -> config_revision_conflict_data conflict
+  | Manifest_reconciliation_required state -> reconciliation_required_data state
+  | Composite_reconciliation_required state ->
+    composite_reconciliation_required_data state
+  | Profile_resolution_refused detail
+  | Shutdown_preflight_failed detail
+  | Publication_rolled_back detail
+  | Failed_after_commit detail ->
+    `Assoc [ "code", `String (refusal_code refusal); "detail", `String detail ]
+;;
+
+(* A refusal whose tool data is its wire error body: the keeper tool surface
+   sees the same JSON the config POST answers with. *)
+let refused_with_data ~class_ refusal =
+  Update_refused
+    { result = tool_result_error_data ~class_ (refusal_error_json refusal)
+    ; refusal
+    }
+;;
+
+type manifest_publication =
+  | Publication_failed of
+      Keeper_turn_up_config_persistence.outcome
+      * Keeper_turn_up_config_persistence.config_revision
+      * tool_result
+  | Publication_applied of
+      Keeper_turn_up_config_persistence.outcome
+      * keeper_meta
+      * Keeper_turn_up_config_persistence.config_revision
+  | Publication_applied_with_runtime_failure of
+      Keeper_turn_up_config_persistence.outcome
+      * Keeper_turn_up_config_persistence.config_revision
+      * string
+
+let profile_update_command (meta : keeper_meta) =
+  Keeper_owner_reducer.Update_profile
+    { instructions = meta.instructions
+    ; sandbox_profile = meta.sandbox_profile
+    ; sandbox_image = meta.sandbox_image
+    ; microvm_backend = meta.microvm_backend
+    ; microvm_memory = meta.microvm_memory
+    ; microvm_cpus = meta.microvm_cpus
+    ; network_mode = meta.network_mode
+    ; mention_targets = meta.mention_targets
+    ; board_interests = meta.board_interests
+    ; max_context_override = meta.max_context_override
+    ; activation_mode = meta.activation_mode
+    ; input_policy = meta.input_policy
+    ; telemetry_feedback_enabled = meta.telemetry_feedback_enabled
+    ; telemetry_feedback_window_hours = meta.telemetry_feedback_window_hours
+    ; always_allow = meta.always_allow
+    ; voice_always_allow = meta.voice_always_allow
+    ; agent_core_env = meta.agent_core_env
+    ; updated_at = meta.updated_at
+    }
+;;
+
+(* Refused after [commit_configuration] returned: the declaration and runtime
+   assignment are durable, and only publication or the lane restart failed. *)
+let refused_after_commit result =
+  Update_refused
+    { result; refusal = Failed_after_commit (tool_result_body result) }
+;;
+
+let finish_published_update ~supersession ctx updated =
+  (* Metadata is already durable. A cancelled HTTP/MCP caller must not
+     interrupt the matching shutdown supersession, temporary admission-fence
+     rollback, or lane restart. *)
+  Eio.Cancel.protect (fun () ->
+    match
+      Keeper_shutdown_supersession.commit_after_metadata_update
+        ~config:ctx.config
+        supersession
+    with
+    | Error error ->
+      refused_after_commit
+        (tool_result_error ~class_:Tool_result.Runtime_failure
+           (Keeper_shutdown_supersession.error_to_string error))
+    | Ok
+        ( Keeper_shutdown_supersession.No_shutdown_admission
+        | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
+      (match swap_keepalive_lane_fenced ctx updated with
+       | Error (Swap_failed result) -> refused_after_commit result
+       | Error (Swap_turn_in_flight info) ->
+         (match deferral_blocker ~base_path:ctx.config.base_path updated with
+          | Some blocker ->
+            refused_after_commit
+              (tool_result_error ~class_:Tool_result.Workflow_rejection
+                 (deferral_blocker_message ~keeper_name:updated.name blocker))
+          | None ->
+           (* The owner publication above already carries the new profile;
+              the turn holding the slot finishes on the meta it was admitted
+              with and the next admitted turn reads the published one. *)
+           let runtime_sync = Deferred_until_turn_end info in
+           Runtime_synced
+             { result =
+                 runtime_synced_result ~keeper_name:updated.name updated
+                   runtime_sync
+             ; runtime_sync
+             })
+       | Ok (stop_outcome, launch_outcome) ->
+         (match launch_outcome with
+          | Keepalive_started _ ->
+            Runtime_synced
+              { result =
+                  runtime_synced_result ~keeper_name:updated.name updated
+                    Lane_restarted
+              ; runtime_sync = Lane_restarted
+              }
+          | Keepalive_already_registered entry ->
+            let stop_detail =
+              match stop_outcome with
+              | Keeper_not_registered ->
+                "keeper was not registered before restart"
+              | Keeper_joined _ -> "previous keeper lane joined"
+            in
+            refused_after_commit
+              (tool_result_error ~class_:Tool_result.Workflow_rejection
+                 (Printf.sprintf
+                    "keeper update launch conflicted after %s: %s"
+                    stop_detail
+                    (start_keepalive_outcome_to_string
+                       (Keepalive_already_registered entry))))
+          | ( Keepalive_lifecycle_denied _
+            | Keepalive_registration_rejected _
+            | Keepalive_fiber_start_rejected _
+            | Keepalive_launch_callback_failed _
+            | Keepalive_lane_ownership_lost
+            | Keepalive_fork_rejected _ ) as rejected ->
+            refused_after_commit
+              (tool_result_error ~class_:Tool_result.Runtime_failure
+                 (Printf.sprintf
+                    "keeper metadata was updated but lane restart failed: %s"
+                    (start_keepalive_outcome_to_string rejected))))))
+;;
+
+let finish_publication_after_runtime_failure ~supersession ctx detail =
+  Eio.Cancel.protect (fun () ->
+    match
+      Keeper_shutdown_supersession.commit_after_metadata_update
+        ~config:ctx.config
+        supersession
+    with
+    | Error error ->
+      tool_result_error ~class_:Tool_result.Runtime_failure
+        (Keeper_shutdown_supersession.error_to_string error)
+    | Ok
+        ( Keeper_shutdown_supersession.No_shutdown_admission
+        | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
+      tool_result_error ~class_:Tool_result.Runtime_failure detail)
+;;
+
+let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
+    ~(expected_config_revision : Keeper_turn_up_config_persistence.config_revision)
+    (ctx : _ context) (p : parsed_args)
+    (old : keeper_meta) : update_outcome
+    =
+  (* Same precedence as [effective_meta_of_profile_defaults]: the TOML owns
+     this field, and [old.sandbox_profile] is only a fallback. Reading [old]
+     first meant a keeper whose meta came back from JSON carried the
+     decoder's placeholder rather than its declaration -- so updating a
+     keeper that states "microvm" in its TOML was refused for a profile it
+     never asked for. *)
+  let sandbox_profile =
+    match
+      resolve_sandbox_profile
+        ?requested:p.sandbox_profile_opt
+        ~fallback:p.profile_defaults.sandbox_profile
+        ()
+    with
+    | Some profile -> profile
+    | None -> old.sandbox_profile
+  in
+  (* Same non-durable pin as [sandbox_profile] above: [fallback] is the TOML
+     declaration, never [old.network_mode]. The meta decoder fixes that field
+     to the profile default, so reading it back would flip a declared "none"
+     to inherit on any field-only update.
+
+     The resolution itself is [Keeper_turn_up_args]'s, shared with create.
+     It was not: create computed its own from [profile_defaults] and threw
+     away the caller's argument, so the same declaration produced a different
+     keeper depending on whether the name already existed. *)
+  match
+    resolve_requested_network_mode
+      ~requested:p.network_mode_opt
+      ~sandbox_profile
+      ~fallback:p.profile_defaults.network_mode
+  with
+  | Error msg ->
+    Update_refused
+      { result = tool_result_error ~class_:Tool_result.Policy_rejection msg
+      ; refusal = Profile_resolution_refused msg
+      }
+  | Ok network_mode ->
+  let input_policy = match p.input_policy_opt, p.profile_defaults.input_policy with
+    | Some policy, _ | None, Some policy -> policy
+    | None, None -> old.input_policy in
+  let activation_mode =
+    match p.activation_mode_opt, p.profile_defaults.activation_mode with
+    | Some value, _ -> value
+    | None, Some value -> value
+    | None, None -> old.activation_mode
+  in
+  let mention_targets =
+    resolve_mention_targets
+      ~mention_targets_opt:p.mention_targets_opt
+      ~fallback_targets:
+        (if old.mention_targets <> [] then old.mention_targets
+         else p.profile_defaults.mention_targets)
+      ~name:p.name
+  in
+  let board_interests =
+    resolve_board_interests
+      ~board_interests_opt:p.board_interests_opt
+      ~fallback_interests:p.profile_defaults.board_interests
+  in
+  let source_meta = old in
+  let updated = { source_meta with
+    instructions =
+      (match p.instructions_arg with
+       | Some v -> v
+       | None ->
+           if preserve_prompt_defaults then old.instructions
+           else
+             Option.value
+               ~default:
+                 (if String.trim old.instructions <> "" then old.instructions
+                  else Option.value ~default:"" p.profile_defaults.instructions)
+               p.instructions_opt);
+    sandbox_profile;
+    sandbox_image =
+      (match p.sandbox_image_patch with
+       | Some image -> image
+       | None -> (match p.profile_defaults.sandbox_image with
+           | Some _ as image -> image
+           | None -> old.sandbox_image));
+    network_mode;
+    microvm_backend = p.profile_defaults.microvm_backend;
+    microvm_memory = p.profile_defaults.microvm_memory;
+    microvm_cpus = p.profile_defaults.microvm_cpus;
+    activation_mode;
+    input_policy;
+    paused = old.paused;
+    latched_reason = source_meta.latched_reason;
+    runtime = source_meta.runtime;
+    mention_targets;
+    board_interests;
+    telemetry_feedback_enabled =
+      Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled
+        old.telemetry_feedback_enabled;
+    telemetry_feedback_window_hours =
+      Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_window_hours
+        old.telemetry_feedback_window_hours;
+    always_allow =
+      Dashboard_utils.first_some p.profile_defaults.always_allow old.always_allow;
+    voice_always_allow =
+      Dashboard_utils.first_some p.profile_defaults.voice_always_allow old.voice_always_allow;
+    max_context_override =
+      (if p.max_context_override_present then p.max_context_override_opt
+       else old.max_context_override);
+    updated_at = now_iso ();
+  } in
+         (match
+            Keeper_shutdown_supersession.preflight
+              ~config:ctx.config
+              ~keeper_name:updated.name
+              ~actor:ctx.agent_name
+          with
+          | Error error ->
+            let detail = Keeper_shutdown_supersession.error_to_string error in
+            Update_refused
+              { result =
+                  tool_result_error ~class_:Tool_result.Runtime_failure detail
+              ; refusal = Shutdown_preflight_failed detail
+              }
+          | Ok supersession ->
+            let publish outcome config_revision =
+              let failed detail =
+                Publication_failed
+                  (outcome, config_revision,
+                   tool_result_error ~class_:Tool_result.Runtime_failure
+                     ("configuration saved, but owner publication failed: " ^ detail))
+              in
+              match apply_profile ~base_path:ctx.config.base_path
+                      ~keeper_name:updated.name (profile_update_command updated) with
+              | Error error ->
+                failed (Keeper_owner_registry.command_error_to_string error)
+              | Ok None -> failed "Keeper owner metadata disappeared during update"
+              | Ok (Some published_meta) ->
+                (match resume_operator_pause ctx published_meta with
+                 | Error message ->
+                   Publication_applied_with_runtime_failure
+                     (outcome, config_revision, message)
+                 | Ok resumed_meta ->
+                   Publication_applied (outcome, resumed_meta, config_revision))
+            in
+            (match
+               Keeper_turn_up_config_persistence.commit_configuration
+                 ~expected_revision:expected_config_revision
+                 ~config:ctx.config
+                 ~parsed:p
+                 ~meta:updated
+                 ~publish:(fun outcome revision ->
+                   try publish outcome revision with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn -> Publication_failed
+                       (outcome, revision,
+                        tool_result_error ~class_:Tool_result.Runtime_failure
+                          ("configuration saved, but owner publication raised: " ^ Printexc.to_string exn)))
+                 ()
+             with
+             | Error
+                 (Keeper_turn_up_config_persistence.Revision_conflict conflict) ->
+               refused_with_data ~class_:Tool_result.Workflow_rejection
+                 (Revision_conflict conflict)
+             | Error (Keeper_turn_up_config_persistence.Io_error detail) ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string TurnUpUpdateFailures)
+                 ~labels:
+                   [ ( "keeper", p.name )
+                   ; ( "site"
+                     , Keeper_turn_up_update_failure_site.(to_label Config_persistence)
+                     )
+                   ]
+                 ();
+               (* [Io_error] leaves the pair as it was: raised before the
+                  first rename, or after a rollback that restored both
+                  before-images. A rollback that could not restore them is
+                  [Reconciliation_required] or
+                  [Composite_reconciliation_required] instead. *)
+               refused_with_data ~class_:Tool_result.Runtime_failure
+                 (Publication_rolled_back detail)
+               |> with_config_receipt ~revision:expected_config_revision
+                    ~warnings:[]
+             | Error
+                 (Keeper_turn_up_config_persistence.Reconciliation_required state) ->
+               refused_with_data ~class_:Tool_result.Runtime_failure
+                 (Manifest_reconciliation_required state)
+             | Error
+                 (Keeper_turn_up_config_persistence.Composite_reconciliation_required
+                    state) ->
+               refused_with_data ~class_:Tool_result.Runtime_failure
+                 (Composite_reconciliation_required state)
+             | Error
+                 (Keeper_turn_up_config_persistence.Publication_exception
+                    { detail; _ }) ->
+               (* The persistence transaction rolls a [Publication_exception]
+                  back before returning it; a failed rollback surfaces as a
+                  reconciliation error instead. *)
+               refused_with_data ~class_:Tool_result.Runtime_failure
+                 (Publication_rolled_back
+                    ("keeper config publication raised and was rolled back: "
+                     ^ detail))
+               |> with_config_receipt ~revision:expected_config_revision
+                    ~warnings:[]
+             | Ok { value = publication; warnings } ->
+               match publication with
+             | Publication_failed (_outcome, revision, result) ->
+               refused_after_commit result
+               |> with_config_receipt ~revision ~warnings
+             | Publication_applied (_outcome, updated, revision) ->
+               finish_published_update ~supersession ctx updated
+               |> with_config_receipt ~revision ~warnings
+             | Publication_applied_with_runtime_failure (_outcome, revision, detail) ->
+               refused_after_commit
+                 (finish_publication_after_runtime_failure
+                    ~supersession ctx detail)
+               |> with_config_receipt ~revision ~warnings))
+
+let update_keeper_outcome ?preserve_prompt_defaults ~expected_config_revision
+    ctx p old =
+  update_keeper_with
+    ~apply_profile:(fun ~base_path ~keeper_name command ->
+      Keeper_owner_registry.apply_meta ~base_path ~keeper_name command)
+    ?preserve_prompt_defaults
+    ~expected_config_revision
+    ctx
+    p
+    old
+;;
+
+let update_keeper ?preserve_prompt_defaults ~expected_config_revision ctx p old =
+  update_keeper_outcome
+    ?preserve_prompt_defaults
+    ~expected_config_revision
+    ctx
+    p
+    old
+  |> result_of_outcome
+;;
+
+module For_testing = struct
+  let update_keeper_with_apply_profile
+        ~apply_profile
+        ?preserve_prompt_defaults
+        ~expected_config_revision
+        ctx
+        p
+        old
+    =
+    update_keeper_with
+      ~apply_profile
+      ?preserve_prompt_defaults
+      ~expected_config_revision
+      ctx
+      p
+      old
+  ;;
+end

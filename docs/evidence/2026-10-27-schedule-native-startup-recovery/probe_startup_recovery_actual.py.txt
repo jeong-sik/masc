@@ -1,0 +1,370 @@
+#!/usr/bin/env python3
+"""One macOS kqueue observation trial on two owned native server processes.
+
+A missed Running/stop window is incomplete; never forge a ledger or retry the
+trial. First intentional process death is distinct from final forced cleanup.
+"""
+import argparse
+import hashlib
+import importlib.util
+import json
+import math
+import os
+from pathlib import Path
+import select
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+import uuid
+
+
+class Incomplete(RuntimeError):
+    pass
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    for name in ['binary', 'output']:
+        p.add_argument('--' + name, type=Path, required=True)
+    for name in ['source-commit', 'expected-sha256', 'image-reference', 'producer-workflow',
+                 'producer-run-id', 'producer-head', 'producer-ref', 'producer-source-ref']:
+        p.add_argument('--' + name, required=True)
+    p.add_argument('--runtime-id', default='ollama_cloud.deepseek-v4.1-flash')
+    p.add_argument('--wait-seconds', type=float, default=90, help='Finite observation envelope only')
+    a = p.parse_args()
+    def hexid(value, size):
+        return len(value) == size and all(c in '0123456789abcdef' for c in value)
+    if sys.platform != 'darwin' or not hasattr(select, 'kqueue'):
+        p.error('this controller requires macOS kqueue; no polling/debugger fallback')
+    if not all(hexid(v, 40) for v in [a.source_commit, a.producer_head]) or not hexid(a.expected_sha256, 64):
+        p.error('full lowercase source/producer commit and executable SHA-256 required')
+    if not math.isfinite(a.wait_seconds) or a.wait_seconds <= 0:
+        p.error('positive finite observation window required')
+    repo = Path(__file__).resolve().parents[2]
+    output, binary = a.output.resolve(), a.binary.resolve(strict=True)
+    if not output.is_relative_to(repo / 'artifacts') or output.exists():
+        p.error('output must be a NEW directory under this checkout artifacts/')
+    output.mkdir(mode=0o700, parents=True)
+    def sha(data):
+        return hashlib.sha256(data).hexdigest()
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(repo), *args])
+    helper_bytes = git('show', a.source_commit + ':scripts/lane-addons/qualify.py')
+    helper = output / 'qualify-source.py'
+    helper.write_bytes(helper_bytes)
+    spec = importlib.util.spec_from_file_location('startup_probe_http', helper)
+    q = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(q)  # imports guarded collector classes, never its main
+    ev = q.Evidence(output / 'http')
+    checks, processes, stopped = [], {}, set()
+    intentional_death, final_forced_kills = None, []
+    rpc_session, rpc_id, api, token, url = None, 0, None, None, None
+    outcome, staging, fault_removed_at = 'incomplete', None, None
+    provenance = {'source_commit': a.source_commit, 'expected_executable_sha256': a.expected_sha256,
+        'executable_sha256': sha(binary.read_bytes()), 'controller_sha256': sha(Path(__file__).read_bytes()),
+        'helper_sha256': sha(helper_bytes), 'harness_checkout_head': git('rev-parse', 'HEAD').decode().strip(),
+        'producer': {'workflow': a.producer_workflow, 'run_id': a.producer_run_id, 'execution_head': a.producer_head,
+                     'ref': a.producer_ref, 'source_input': a.producer_source_ref, 'basis': 'supplied; no CI query'},
+        'scope': 'isolated native candidate; one opportunistic kqueue/SIGSTOP trial, not installation',
+        'existing_image_reference': a.image_reference,
+        'interpretation_limit': 'Root must read original startup-failed-health.json last_error and server-B.log to identify startup-recovery staging-write failure before a product PASS interpretation.',
+        'not_proven': ['power-loss durability', 'model execution', 'arbitrary exactly-once effects',
+                       'ordinary uninstrumented crash frequency', 'all scheduler races', 'whole feature']}
+    def check(name, condition):
+        checks.append({'name': name, 'passed': bool(condition)})
+        print(('PASS ' if condition else 'INCOMPLETE ') + name, flush=True)
+        if not condition:
+            raise Incomplete(name)
+    def command(args, env):
+        result = subprocess.run(args, env=env, capture_output=True, timeout=a.wait_seconds)
+        if result.returncode:
+            raise Incomplete(str(args[:2]) + ' exit ' + str(result.returncode) + '; output withheld')
+        return result.stdout  # login output is credential-bearing and is never journalled
+    def wait(read, accept, *, process, deadline=None):
+        deadline = time.monotonic() + a.wait_seconds if deadline is None else deadline
+        while True:
+            if process.poll() is not None:
+                raise Incomplete('owned process exited before observation')
+            value = read()
+            if accept(value):
+                return value
+            if time.monotonic() >= deadline:
+                raise Incomplete('observation deadline; no replay/restart/retry of this trial')
+            time.sleep(min(.2, max(0, deadline - time.monotonic())))
+    def request(method, path, body=None, *, stage):
+        return api.request(method, path, body, stage=stage)
+    def tool(name, args):
+        nonlocal rpc_session, rpc_id
+        def rpc(payload):
+            headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
+                       'Accept': 'application/json, text/event-stream', 'Mcp-Protocol-Version': '2025-11-25'}
+            if rpc_session:
+                headers['Mcp-Session-Id'] = rpc_session
+            req = urllib.request.Request(url + '/mcp', json.dumps(payload).encode(), headers)
+            with api.opener.open(req, timeout=15) as response:
+                raw, status, session = response.read(8*1024*1024 + 1), response.status, response.headers.get('Mcp-Session-Id')
+            ev.record({'kind': 'http-mcp', 'stage': name, 'method': 'POST', 'path': '/mcp',
+                       'status': status, 'request_body': payload, 'observed_at': time.time()}, raw)
+            check('bounded successful MCP response', status == 200 and len(raw) <= 8*1024*1024)
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = next(json.loads(line[5:]) for line in raw.decode().splitlines()
+                            if line.startswith('data:') and json.loads(line[5:]).get('id') == payload['id'])
+            return data, session
+        if rpc_session is None:
+            rpc_id += 1
+            initialized, rpc_session = rpc({'jsonrpc': '2.0', 'id': rpc_id, 'method': 'initialize',
+                'params': {'protocolVersion': '2025-11-25', 'capabilities': {}, 'clientInfo': {'name': 'owned-startup-recovery', 'version': '1'}}})
+            check('MCP initialized', bool(rpc_session) and 'error' not in initialized)
+        rpc_id += 1
+        result, _ = rpc({'jsonrpc': '2.0', 'id': rpc_id, 'method': 'tools/call', 'params': {'name': name, 'arguments': args}})
+        check(name + ' succeeds', 'error' not in result and result['result'].get('isError') is not True)
+        reply = result['result']
+        return reply['structuredContent'] if 'structuredContent' in reply else json.loads(next(b['text'] for b in reply['content'] if b['type'] == 'text'))
+    def save_raw(name, raw):
+        q.private_write(output / name, raw)
+    def read_ledger():
+        raw = primary.read_bytes()
+        return raw, json.loads(raw)
+    def row(state, sid):
+        return next(r for r in state['schedules'] if r['schedule_id'] == sid)
+    def wakes(state, definition):
+        return [w for w in state['wakes'] if w['schedule_id'] == definition['schedule_id']
+                and w['schedule_instance_id'] == definition['schedule_instance_id']]
+    def running(state):
+        current = row(state, original['schedule_id'])
+        matches = [w for w in wakes(state, original) if w['status'] == 'running'
+                   and w['due_at'] == original['due_at'] and w['payload_digest'] == original['payload_digest']]
+        if (current['status'] != 'running' or current['schedule_instance_id'] != original['schedule_instance_id']
+                or current['due_at'] != original['due_at'] or current['payload'] != original['payload'] or len(matches) != 1):
+            return None
+        attempt = matches[0].get('attempt_id')
+        if not isinstance(attempt, str):
+            return None
+        parsed = uuid.UUID(attempt)
+        return matches[0] if str(parsed) == attempt and parsed.version == 7 else None
+    with tempfile.TemporaryDirectory(prefix='masc-startup-actual-') as directory:
+        base = Path(directory).resolve()
+        primary, staging = base / '.masc/schedules.json', base / '.masc/schedules.json.tmp-atomic'
+        lease = base / '.masc/locks/schedules.json'
+        env = {k: v for k, v in os.environ.items() if k in ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR']}
+        env.update(MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='false')
+        names = ['audit-startup-a', 'audit-startup-b']
+        def launch(label):
+            nonlocal api, url, rpc_session
+            rpc_session = None
+            with (output / ('server-' + label + '.log')).open('xb') as log:
+                process = subprocess.Popen([str(binary), 'start', '--base-path', str(base), '--host', '127.0.0.1',
+                                            '--port', str(port)], cwd=base, env=env, stdout=log, stderr=log)
+            processes[label] = process
+            api = q.API(url, ev, token=token, timeout=15, max_response_bytes=8*1024*1024)
+            ev.json('process-' + label + '.json', {'pid': process.pid, 'port': port, 'base_path': str(base)})
+            def health():
+                try:
+                    return request('GET', '/health?full=1', stage='health-' + label)
+                except q.QualificationError:
+                    return {}
+            observed = wait(health, lambda h: h.get('startup', {}).get('state_ready') is True, process=process)
+            check(label + ' verified owned candidate identity', observed['paths']['effective_base_path'] == str(base)
+                  and observed['build']['binary_commit'] == a.source_commit and observed['build']['executable_sha256'] == a.expected_sha256)
+            ev.json('build-' + label + '.json', observed['build'])
+            return process, observed
+        def owner_checks(stage):
+            for name in names:
+                inv = request('GET', '/api/v1/keepers/' + name + '/waiting-inventory', stage=stage + '-queue-' + name)
+                status = tool('masc_keeper_status', {'name': name, 'fast': True})
+                ev.json(stage + '-owner-' + name + '.json', status)
+                meta = status.get('meta', {})
+                check(stage + ' manual paused zero-turn ' + name, len(inv.get('keepers', [])) == 1
+                      and inv['keepers'][0].get('paused') is True and status.get('activation_mode') == 'manual'
+                      and meta.get('paused') is True and meta.get('total_turns') == 0 and meta.get('last_turn_ts') == 0
+                      and 'last_runtime_attempt' in meta and meta['last_runtime_attempt'] is None)
+        try:
+            check('binary hash matches verified input', provenance['executable_sha256'] == a.expected_sha256)
+            command([str(binary), 'init', '--base-path', str(base)], env)
+            fixture = git('show', a.source_commit + ':scripts/fixtures/release-evidence/runtime.toml')
+            (base / '.masc/config/runtime.toml').write_bytes(fixture)
+            provenance['runtime_fixture_sha256'] = sha(fixture)
+            command([str(binary), 'sandbox-image', 'promote', '--base-path', str(base), '--runtime', 'apple_container', 'base', a.image_reference], env)
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0))
+                port = sock.getsockname()[1]
+            check('owned port differs from primary', port != 8935)
+            url = 'http://127.0.0.1:' + str(port)
+            command([str(binary), 'login', '--base-path', str(base), '--host', '127.0.0.1', '--port', str(port),
+                     '--agent', 'audit-startup-admin', '--role', 'admin', '--client-env', 'OWNED_STARTUP_TOKEN', '--no-expiry', '--json'], env)
+            token = (base / '.masc/auth/audit-startup-admin.token').read_text().strip()
+            first, first_health = launch('A')
+            for name in names:
+                value = request('POST', '/api/v1/keepers/' + name + '/up', {'create_only': True,
+                    'sandbox_profile': 'microvm', 'sandbox_image': 'base', 'microvm_backend': 'apple_container',
+                    'network_mode': 'none', 'activation_mode': 'manual', 'runtime_id': a.runtime_id,
+                    'skills': {'names': []}, 'instructions': 'Owned paused startup-recovery observation; do not start.'}, stage='register-' + name)
+                check('create-only owner registered ' + name, value.get('ok') is True)
+                value = request('POST', '/api/v1/keepers/' + name + '/directive', {'action': 'pause'}, stage='pause-' + name)
+                check('explicit pause committed ' + name, value.get('ok') is True)
+            owner_checks('initial')
+            def create(sid, target, due):
+                response = request('POST', '/api/v1/tools/masc_schedule_create', {'schedule_id': sid, 'keeper_name': target,
+                    'message': 'Owned paused startup recovery probe; no execution requested.', 'due_in_sec': due,
+                    'recurrence_kind': 'one_shot'}, stage='create-' + sid)
+                check('canonical HTTP schedule create ' + sid, response.get('ok') is True and ev.events[-1]['status'] == 201)
+                value = json.loads(response['message'])
+                check('HTTP Admin human_operator stamp ' + sid, all(value[k]['kind'] == 'human_operator' and value[k]['id'] == 'audit-startup-admin' for k in ['requested_by', 'scheduled_by']))
+                return value
+            deadline = time.monotonic() + a.wait_seconds
+            with select.kqueue() as queue:
+                dfd, ffd, identity = os.open(primary.parent, os.O_EVTONLY), None, None
+                try:
+                    notes = select.KQ_NOTE_WRITE | select.KQ_NOTE_RENAME | select.KQ_NOTE_DELETE | select.KQ_NOTE_ATTRIB
+                    queue.control([select.kevent(dfd, filter=select.KQ_FILTER_VNODE, flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR, fflags=notes)], 0, 0)
+                    # Arm before creation; control first makes the original first in canonical store order.
+                    control = create('audit-startup-control', names[1], 16)
+                    original = create('audit-startup-original', names[0], 15)
+                    check('actual original due precedes control due', original['due_at'] < control['due_at'])
+                    while True:
+                        if first.poll() is not None or time.monotonic() >= deadline:
+                            raise Incomplete('single kqueue trial did not freeze a genuine Running occurrence')
+                        stat = primary.stat()
+                        if identity != (stat.st_dev, stat.st_ino):
+                            if ffd is not None:
+                                os.close(ffd)
+                            ffd = os.open(primary, os.O_EVTONLY)
+                            identity = (stat.st_dev, stat.st_ino)
+                            queue.control([select.kevent(ffd, filter=select.KQ_FILTER_VNODE, flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR, fflags=notes)], 0, 0)
+                        before_raw, before = read_ledger()
+                        candidate = running(before)
+                        if candidate is not None:
+                            os.kill(first.pid, signal.SIGSTOP)
+                            stopped.add(first.pid)
+                            break
+                        events = queue.control(None, 8, min(1, max(0, deadline - time.monotonic())))
+                        ev.record({'kind': 'kqueue', 'observed_at': time.time(), 'watches': {'directory_fd': dfd, 'ledger_fd': ffd, 'ledger_device_inode': identity}, 'events': [{'ident': e.ident, 'filter': e.filter, 'fflags': e.fflags} for e in events]})
+                    while True:
+                        pid, status = os.waitpid(first.pid, os.WUNTRACED | os.WNOHANG)
+                        if pid:
+                            if os.WIFSTOPPED(status):
+                                check('kernel confirms SIGSTOP', os.WSTOPSIG(status) == signal.SIGSTOP)
+                                ev.json('stopped-process.json', {'pid': pid, 'waitpid_status': status, 'stop_signal': os.WSTOPSIG(status), 'observed_at': time.time()})
+                                break
+                            first.returncode = os.waitstatus_to_exitcode(status)
+                            raise Incomplete('first process exited instead of stopping')
+                        if time.monotonic() >= deadline:
+                            raise Incomplete('SIGSTOP receipt observation incomplete')
+                        time.sleep(.01)
+                    frozen_raw, frozen = read_ledger()
+                    save_raw('before-stop-ledger.json', before_raw)
+                    save_raw('stopped-ledger.json', frozen_raw)
+                    frozen_wake = running(frozen)
+                    check('stopped process retains the exact genuine Running attempt', frozen_wake is not None and frozen_wake['attempt_id'] == candidate['attempt_id'])
+                    control_baseline = wakes(frozen, control)
+                    ev.json('frozen-running-identity.json', {'schedule': row(frozen, original['schedule_id']), 'wake': frozen_wake})
+                    check('control is not already terminal', row(frozen, control['schedule_id'])['status'] in ['scheduled', 'due'])
+                    for name in names:
+                        owned = base / '.masc/keepers' / name
+                        if owned.exists():
+                            shutil.copytree(owned, output / ('predeath-queue-' + name), symlinks=True)
+                    mirror = primary.with_name(primary.name + '.last-good')
+                    if mirror.exists():
+                        save_raw('stopped-last-good.json', mirror.read_bytes())
+                    lease_observed_at, lease_wait_started = time.time(), time.monotonic()
+                    if lease.exists():
+                        raw = lease.read_bytes()
+                        save_raw('stopped-ledger-lease.json', raw)
+                        expires = json.loads(raw).get('expires_at')
+                        check('canonical lease expiry is available', type(expires) in [int, float] and math.isfinite(expires))
+                        check('canonical lease expiry fits existing observation envelope', expires - time.time() < deadline - time.monotonic())
+                        while time.time() <= expires:
+                            if time.monotonic() >= deadline:
+                                raise Incomplete('canonical lease expiry observation incomplete')
+                            time.sleep(min(1, max(.001, expires - time.time())))
+                    ev.json('lease-expiry-observation.json', {'before_wall_clock': lease_observed_at, 'expired_or_absent_at': time.time(), 'elapsed_monotonic_sec': time.monotonic() - lease_wait_started, 'lease_changed_by_controller': False})
+                    os.kill(first.pid, signal.SIGKILL)
+                    first.wait(timeout=a.wait_seconds)
+                    stopped.discard(first.pid)
+                    intentional_death = {'pid': first.pid, 'returncode': first.returncode, 'reason': 'verified stopped genuine Running seed', 'at': time.time()}
+                    check('first owned process received intended SIGKILL', first.poll() == -signal.SIGKILL)
+                    death_raw, death = read_ledger()
+                    save_raw('after-first-death-ledger.json', death_raw)
+                    check('genuine Running survives first process death', running(death) == frozen_wake)
+                finally:
+                    if ffd is not None:
+                        os.close(ffd)
+                    os.close(dfd)
+            check('staging fault path is initially absent', not staging.exists())
+            staging.mkdir(mode=0o700)
+            fault_inode = (staging.stat().st_dev, staging.stat().st_ino)
+            ev.json('staging-fault.json', {'path': str(staging), 'kind': 'directory', 'device_inode': fault_inode, 'created_at': time.time()})
+            second, second_health = launch('B')
+            check('second is a fresh native runtime instance', second_health['build']['runtime_instance_id'] != first_health['build']['runtime_instance_id'])
+            def startup_failed(h):
+                status = h.get('schedule_runner', {})
+                return (time.time() >= control['due_at'] and (status.get('last_tick_finished_at') or 0) >= control['due_at']
+                        and status.get('failure_count', 0) > 0 and status.get('success_count') == 0 and status.get('status') == 'degraded')
+            failed = wait(lambda: request('GET', '/health?full=1', stage='startup-error-B'), startup_failed, process=second)
+            error_raw, error_state = read_ledger()
+            save_raw('startup-failed-ledger.json', error_raw)
+            ev.json('startup-failed-health.json', failed)
+            check('failed startup preserves original Running and control baseline', running(error_state) == frozen_wake and wakes(error_state, control) == control_baseline
+                  and row(error_state, control['schedule_id']) == row(death, control['schedule_id']))
+            check('remove only this owned staging directory', staging.is_dir() and (staging.stat().st_dev, staging.stat().st_ino) == fault_inode)
+            staging.rmdir()
+            fault_removed_at = time.time()
+            def recovered(h):
+                raw, state = read_ledger()
+                old = [w for w in wakes(state, original) if w.get('attempt_id') == frozen_wake['attempt_id']]
+                return (h.get('schedule_runner', {}).get('success_count', 0) > 0 and len(old) == 1
+                        and old[0]['status'] == 'failed' and old[0].get('settlement_kind') == 'process_interrupted'
+                        and row(state, original['schedule_id'])['status'] in ['due', 'succeeded']
+                        and row(state, control['schedule_id'])['status'] == 'succeeded'
+                        and any(w['status'] == 'succeeded' for w in wakes(state, control)))
+            final_health = wait(lambda: request('GET', '/health?full=1', stage='restored-health-B'), recovered, process=second)
+            final_raw, final_state = read_ledger()
+            save_raw('restored-ledger.json', final_raw)
+            ev.json('restored-health.json', final_health)
+            check('same second process recovers without restart', second.poll() is None and final_health['build']['runtime_instance_id'] == second_health['build']['runtime_instance_id'])
+            new_control = [w for w in wakes(final_state, control) if w['status'] == 'succeeded']
+            detail = new_control[-1]['detail']
+            inventory = request('GET', '/api/v1/keepers/' + names[1] + '/waiting-inventory', stage='control-accepted-queue')
+            occurrence = sha('|'.join(['schedule.due_candidate', control['schedule_instance_id'], control['schedule_id'], format(float(control['due_at']), '.17g'), control['payload_digest']]).encode())
+            pending = [r for r in inventory.get('rows', []) if r.get('source') == 'event_queue_pending'
+                       and r.get('detail', {}).get('post_id') == occurrence and r.get('detail', {}).get('payload_kind') == 'schedule_due']
+            check('control resumes normal durable enqueue', detail.get('kind') == 'masc.keeper_wake.enqueued'
+                  and detail.get('schedule_instance_id') == control['schedule_instance_id'] and detail.get('post_id') == occurrence
+                  and len(pending) == 1 and bool(pending[0]['detail'].get('source_ref')) and bool(pending[0]['detail'].get('source_incarnation')))
+            owner_checks('final')
+            outcome = 'bounded_checks_passed_requires_startup_cause_review'
+        except Exception as error:
+            ev.json('incomplete.json', {'kind': type(error).__name__, 'message': str(error), 'at': time.time()})
+        finally:
+            for label, process in reversed(list(processes.items())):
+                if process.poll() is None:
+                    if process.pid in stopped:
+                        try:
+                            os.kill(process.pid, signal.SIGCONT)
+                        except ProcessLookupError:
+                            pass
+                        stopped.discard(process.pid)
+                    process.terminate()
+                    try:
+                        process.wait(timeout=a.wait_seconds)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                        final_forced_kills.append({'label': label, 'pid': process.pid})
+            ev.json('summary.json', {'outcome': outcome, 'checks': checks, 'intentional_first_death': intentional_death,
+                'final_cleanup_forced_kills': final_forced_kills, 'process_exit_codes': {k: v.returncode for k, v in processes.items()},
+                'fault_removed_during_observation_at': fault_removed_at, 'observer_deadline_means': 'incomplete trial, not product timing defect',
+                'not_proven': provenance['not_proven']})
+            ev.json('provenance.json', provenance)
+    return 0 if outcome == 'bounded_checks_passed_requires_startup_cause_review' and not final_forced_kills else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -1,0 +1,111 @@
+{
+  "at": "2026-10-04T16:37:18.296366+00:00",
+  "base": "87123f7df94a27ded447b5b05d01c2f5178de029",
+  "issue": 41188,
+  "scope": "Fresh public CMI consumer compilation/link and two native consumers, not TUI/full suite/CI/deployment",
+  "red": {
+    "build_dir": "_build (fresh worktree)",
+    "sandbox": "copy",
+    "dune_cache": "disabled",
+    "exit": 1,
+    "errors": [
+      "missing Agent_core__Execution_tool_schedule alias",
+      "missing Agent_core__Agent_tool_pre_execution_gate alias"
+    ]
+  },
+  "green": {
+    "build_dir": "_build-public-green (absent before command)",
+    "sandbox": "copy",
+    "dune_cache": "disabled",
+    "exit": 0,
+    "native_consumers": {
+      "test_public_tool_schedule": 0,
+      "test_public_pre_execution_gate": 0
+    }
+  },
+  "source_sha256": {
+    "packages/agent_core/lib/agent_core.mli": "94dffab28e6cc275652ffae8ea4decdcd3817c0a5c219fb084d76c6fa1023dc3",
+    "packages/agent_core/lib/agent_core.ml": "91068a2f63791c163c5cd3b42ea1699173d5aa8e8caa8bde67f93047deeb4d25",
+    "packages/agent_core/lib/dune": "fbe844a6d9d23e2c212376a2c173b3b374bd8ba91be081af244b0598a9b694e5",
+    "packages/agent_core/lib/execution_tool_schedule.mli": "296c01c05c8153c7fcc1b8879ac80ebfff7dce6f199a68dcf1f27589ac4d2d17",
+    "packages/agent_core/lib/agent/agent_tool_pre_execution_gate.ml": "bbc6fd7726a2f2637acc42d3251a21b31bb864ad6afcbd69fbf003c9514fbbdf",
+    "packages/agent_core/test/dune": "961c987ef7cfc17b44c2b2ba174cd2a2e17dd9e25b3e33cb4a5f450fb54439ab",
+    "packages/agent_core/test/test_public_tool_schedule.ml": "2e966deba12d37c433213427edfdedb87ec9946fb0d6a47d79bbe14e7562f3f3",
+    "packages/agent_core/test/test_public_pre_execution_gate.ml": "41aa346e13de06c8e30da1fc3563737fa458b25cee06e21eb436ded1f1c16ef5"
+  },
+  "binary_sha256": {
+    "test_public_tool_schedule": "f5f4e5255777ea1df39491270ca7cbe5f6bbe9da43e2b5b3b753db99675c440d",
+    "test_public_pre_execution_gate": "b3f50a520d22011f97875e3fe460e284359d4a223ddcb164a02afe8654e7b85a"
+  },
+  "cmi": {
+    "_build": {
+      "agent_core": {
+        "byte": {
+          "exists": true,
+          "sha256": "0603f09aeb898c37600f93b22074c9855ef96c128d675b7280458cc5245da60e"
+        },
+        "public_cmi": {
+          "exists": true,
+          "sha256": "0603f09aeb898c37600f93b22074c9855ef96c128d675b7280458cc5245da60e"
+        }
+      },
+      "agent_core__Execution_tool_schedule": {
+        "byte": {
+          "exists": true,
+          "sha256": "64778a38042ca75a4afdff13c77ff8b6e781d5366ebf73b49154ceaa31648a20"
+        },
+        "public_cmi": {
+          "exists": false,
+          "sha256": null
+        }
+      },
+      "agent_core__Agent_tool_pre_execution_gate": {
+        "byte": {
+          "exists": true,
+          "sha256": "c0a2301262abc34ff117d74df505bf739fabf914c2a5ce6112654b2c7ed66f8f"
+        },
+        "public_cmi": {
+          "exists": false,
+          "sha256": null
+        }
+      }
+    },
+    "_build-public-green": {
+      "agent_core": {
+        "byte": {
+          "exists": true,
+          "sha256": "a81070461cf7966ecf15e29e18b1b8646aef235c492aef7b6ce0d6e66b9e3323"
+        },
+        "public_cmi": {
+          "exists": true,
+          "sha256": "a81070461cf7966ecf15e29e18b1b8646aef235c492aef7b6ce0d6e66b9e3323"
+        }
+      },
+      "agent_core__Execution_tool_schedule": {
+        "byte": {
+          "exists": true,
+          "sha256": "64778a38042ca75a4afdff13c77ff8b6e781d5366ebf73b49154ceaa31648a20"
+        },
+        "public_cmi": {
+          "exists": false,
+          "sha256": null
+        }
+      },
+      "agent_core__Agent_tool_pre_execution_gate": {
+        "byte": {
+          "exists": true,
+          "sha256": "c0a2301262abc34ff117d74df505bf739fabf914c2a5ce6112654b2c7ed66f8f"
+        },
+        "public_cmi": {
+          "exists": false,
+          "sha256": null
+        }
+      }
+    }
+  },
+  "limits": [
+    "Initial test-stanza missing explicit modules was corrected before product RED; retained separately.",
+    "No private_modules or implementation changes. Public gate signature intentionally excludes internal scheduling helpers.",
+    "No TUI/PTY/full suite executed; raw logs preserved byte-for-byte."
+  ]
+}

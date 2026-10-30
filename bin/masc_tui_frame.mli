@@ -1,0 +1,52 @@
+(** The frame's geometry: the margin around every row, and the numbers that
+    follow from it.
+
+    Every helper that draws the frame and every caller that lays a row out
+    before handing it over has to agree on the same measurements. They did not
+    agree by sharing a number; they agreed by each spelling one out, fifteen
+    times for the content width alone, across three modules that could not see
+    each other's copy.
+
+    The agenda panel is what made the case. Its rows were measured against the
+    terminal's width and then cut on the way through the frame, which fits them
+    to the inner width -- the number it had to match was four lines away in
+    another module, unnamed. *)
+
+(** A row is drawn as margin, content, margin, and it spans the terminal. A
+    full-screen surface leaves the margin blank; an overlay draws its border
+    glyph in the margin's outermost cell. A caller that wants the content's
+    width asks {!inner_width} rather than assembling it from these. *)
+
+val margin_cells : int
+(** Cells between the terminal's edge and a row's content, on each side. *)
+
+val border_padding_cells : int
+(** Blank cells an overlay draws between its border glyph and the content:
+    the margin less the cell the glyph takes. *)
+
+val content_column : int
+(** Where a row's content starts, in cells from the terminal's left edge
+    (0-based): the left margin. A picture placed over body rows, and a caret
+    placed in a row's text, count from here. *)
+
+val chrome_rows : int
+(** Top border, title, divider, bottom border, footer: the rows a framed panel
+    spends on itself whatever its content holds. *)
+
+val rule_width : cols:int -> int
+(** Cells a horizontal rule fills between two corner glyphs. *)
+
+val inner_width : cols:int -> int
+(** Cells a row's content gets. Measure against this before handing a row to
+    the frame, or the frame cuts what it did not know it had to fit. *)
+
+val outer_width : inner:int -> int
+(** The other way round: the columns a framed surface needs for its content
+    to get [inner] cells, so [inner_width ~cols:(outer_width ~inner)] is
+    [inner]. For a caller that knows what a table needs inside and has to
+    decide how wide the surface around it must be. *)
+
+val content_height : rows:int -> int
+(** Rows a framed panel's content gets. [max 1] rather than [max 0]: a panel
+    drawn at all draws something. A caller that would rather show nothing than
+    one crowded row subtracts {!chrome_rows} itself and says so. *)

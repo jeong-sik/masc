@@ -1,0 +1,1022 @@
+{
+  "schema": "masc-targeted-suite-execution-proof-v1",
+  "repo": "jeong-sik/masc",
+  "run_id": 40095356149,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/40095356149",
+  "run_attempt": 1,
+  "parent_observed_completion": {
+    "run": 40095356149,
+    "head": "44b6daee827adb9ef700c29f8d221220c2024df9",
+    "conclusion": "success",
+    "attempt": 1,
+    "created_at": "2026-10-24T12:46:59Z",
+    "completed_at": "2026-10-24T12:51:50Z",
+    "provenance": "Root first observed completed run at useful work boundary; main_build does not re-query run status"
+  },
+  "job": {
+    "id": 120876318526,
+    "name": "test suite",
+    "head_sha": "44b6daee827adb9ef700c29f8d221220c2024df9",
+    "status": "completed",
+    "conclusion": "success",
+    "started_at": "2026-10-24T12:47:02Z",
+    "completed_at": "2026-10-24T12:51:50Z"
+  },
+  "actual_checkout": {
+    "sha": "44b6daee827adb9ef700c29f8d221220c2024df9",
+    "file": "checkout-step.log",
+    "requested_ref_line": 3,
+    "checkout_command_line": 80,
+    "git_log_command_line": 147,
+    "git_log_result_line": 148
+  },
+  "artifact": {
+    "id": 12560518815,
+    "name": "suite-runner-log",
+    "url": "https://github.com/jeong-sik/masc/actions/runs/40095356149/artifacts/12560518815",
+    "bytes": 23905,
+    "advertised_sha256": "8937746dd34dae50a5d4fc4bf218ec9bc970c63821eb022bc31d3bada348dcd3",
+    "download_matches_advertised_digest": true,
+    "zip_integrity_verified": true,
+    "member_bytes_match_saved_runner": true
+  },
+  "execution": {
+    "workflow": ".github/workflows/test.yml",
+    "script": "scripts/ci-run-targeted-tests.sh",
+    "minimal_check": true,
+    "target_suites": "test_goal_verifier_worker,test_goal_verification_agent,test_verifier_review_worker,test_completion_trust_harness,test_verification_run_registry",
+    "actual_build_invocation": {
+      "runner_line": 2,
+      "raw_text": "[targeted] dune build test/test_goal_verifier_worker.exe test/test_goal_verification_agent.exe test/test_verifier_review_worker.exe test/test_completion_trust_harness.exe test/test_verification_run_registry.exe test/fixtures/verifier-image-lookup.png config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md",
+      "canonical_command_from_exact_script": "opam exec -- dune build --root . -j \"${DUNE_JOBS:-2}\" \"${exes[@]}\" ${stanza_deps[@]+\"${stanza_deps[@]}\"}",
+      "DUNE_JOBS": 4,
+      "outcome": "Build returned successfully before all five suite start lines; selected executable tests then actually ran."
+    },
+    "suite_execution_from_exact_script": "Each actual ./<suite>.exe runs from _build/default/test with ALCOTEST_VERBOSE=1 and timeout -s TERM -k 30 600; original stanza env is read and applied.",
+    "test_step_env_lines": {
+      "file": "test-step.log",
+      "start": 26,
+      "end": 45
+    },
+    "toolchain": {
+      "configured_ocaml_compiler": "5.5.1",
+      "opam_switch": "ci-5-5-1",
+      "actual_version_command_not_in_saved_logs": true,
+      "cache": "Exact opam dependency cache hit restored switch and skipped repository refresh. This is toolchain/dependency reuse, not a suite/source-success reuse decision.",
+      "job_log_cache_hit_line": 241,
+      "job_log_cache_restored_line": 250,
+      "job_log_switch_reuse_line": 359
+    },
+    "source_input_reuse_skip": "No source-input equality shortcut in this targeted runner. Dune build invocation and all five executable runs are present; no claim that every compilation unit rebuilt from scratch.",
+    "proof_only_flag": "No proof_only input or source-success reuse flag is present in this test run scope.",
+    "steps": [
+      {
+        "name": "Set up job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 1,
+        "started_at": "2026-10-24T12:47:03Z",
+        "completed_at": "2026-10-24T12:47:05Z"
+      },
+      {
+        "name": "Require explicit minimal suites",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 2,
+        "started_at": "2026-10-24T12:47:05Z",
+        "completed_at": "2026-10-24T12:47:05Z"
+      },
+      {
+        "name": "Free disk space",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 3,
+        "started_at": "2026-10-24T12:47:05Z",
+        "completed_at": "2026-10-24T12:47:05Z"
+      },
+      {
+        "name": "Checkout",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 4,
+        "started_at": "2026-10-24T12:47:05Z",
+        "completed_at": "2026-10-24T12:47:16Z"
+      },
+      {
+        "name": "Setup OCaml toolchain",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 5,
+        "started_at": "2026-10-24T12:47:16Z",
+        "completed_at": "2026-10-24T12:47:40Z"
+      },
+      {
+        "name": "Pin minimal OCaml dependencies",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 6,
+        "started_at": "2026-10-24T12:47:40Z",
+        "completed_at": "2026-10-24T12:47:53Z"
+      },
+      {
+        "name": "Pin external OCaml dependencies",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 7,
+        "started_at": "2026-10-24T12:47:53Z",
+        "completed_at": "2026-10-24T12:47:53Z"
+      },
+      {
+        "name": "Install system and OCaml dependencies",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 8,
+        "started_at": "2026-10-24T12:47:53Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Install native media verification tools",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 9,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Install native media tools for selected minimal verifier checks",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 10,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Prepare managed presentation verification inputs",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 11,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Make pnpm available to the suites that read a dashboard PATH",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 12,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Prepare static shim compiler outside the test workers",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 13,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Set up image cache for targeted suites",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 14,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Prepare Keeper sandbox image",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 15,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Drop the image build cache the suite never reads",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 16,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:48:11Z"
+      },
+      {
+        "name": "Test",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 17,
+        "started_at": "2026-10-24T12:48:11Z",
+        "completed_at": "2026-10-24T12:51:46Z"
+      },
+      {
+        "name": "Upload equipped portrait HTTP evidence",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 18,
+        "started_at": "2026-10-24T12:51:46Z",
+        "completed_at": "2026-10-24T12:51:46Z"
+      },
+      {
+        "name": "Upload the full Dune suite log",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 19,
+        "started_at": "2026-10-24T12:51:46Z",
+        "completed_at": "2026-10-24T12:51:46Z"
+      },
+      {
+        "name": "Upload the Dune suite timing",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 20,
+        "started_at": "2026-10-24T12:51:46Z",
+        "completed_at": "2026-10-24T12:51:46Z"
+      },
+      {
+        "name": "Exercise creative artifacts in the built Keeper image",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 21,
+        "started_at": "2026-10-24T12:51:46Z",
+        "completed_at": "2026-10-24T12:51:46Z"
+      },
+      {
+        "name": "Upload creative artifact proof",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 22,
+        "started_at": "2026-10-24T12:51:46Z",
+        "completed_at": "2026-10-24T12:51:46Z"
+      },
+      {
+        "name": "Upload the suite runner log",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 23,
+        "started_at": "2026-10-24T12:51:46Z",
+        "completed_at": "2026-10-24T12:51:47Z"
+      },
+      {
+        "name": "File the scheduled failure as an issue",
+        "status": "completed",
+        "conclusion": "skipped",
+        "number": 24,
+        "started_at": "2026-10-24T12:51:47Z",
+        "completed_at": "2026-10-24T12:51:47Z"
+      },
+      {
+        "name": "Post Setup OCaml toolchain",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 47,
+        "started_at": "2026-10-24T12:51:47Z",
+        "completed_at": "2026-10-24T12:51:47Z"
+      },
+      {
+        "name": "Post Checkout",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 48,
+        "started_at": "2026-10-24T12:51:47Z",
+        "completed_at": "2026-10-24T12:51:47Z"
+      },
+      {
+        "name": "Complete job",
+        "status": "completed",
+        "conclusion": "success",
+        "number": 49,
+        "started_at": "2026-10-24T12:51:47Z",
+        "completed_at": "2026-10-24T12:51:47Z"
+      }
+    ],
+    "scope_of_step_skips": "Nonselected infrastructure preparation steps skipped under MINIMAL_CHECK. They are distinct from the five suite case statuses, whose SKIP/TODO counts are0."
+  },
+  "declared_and_actual_suite_ok_counts": [
+    16,
+    39,
+    18,
+    9,
+    23
+  ],
+  "actual_case_counts": {
+    "OK": 105,
+    "FAIL": 0,
+    "SKIP": 0,
+    "TODO": 0
+  },
+  "suites": [
+    {
+      "suite": "test/test_goal_verifier_worker",
+      "start_line": 6,
+      "end_line": 333,
+      "started_at": "2026-10-24T12:50:30Z",
+      "runner_terminal": "[targeted] test/test_goal_verifier_worker: OK in 1s",
+      "counts": {
+        "OK": 16,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "summary": [
+        {
+          "line": 331,
+          "text": "Test Successful in 1.252s. 16 tests run."
+        }
+      ],
+      "cases": [
+        {
+          "line": 27,
+          "status": "OK",
+          "case": "execution          0   actual retained visual lookup and rest..."
+        },
+        {
+          "line": 39,
+          "status": "OK",
+          "case": "execution          1   unknown and cancellation never redispa..."
+        },
+        {
+          "line": 50,
+          "status": "OK",
+          "case": "execution          2   same-original pre-admission repair."
+        },
+        {
+          "line": 56,
+          "status": "OK",
+          "case": "execution          3   authority destination and strict inven..."
+        },
+        {
+          "line": 83,
+          "status": "OK",
+          "case": "execution          4   linked frontier restores the original ..."
+        },
+        {
+          "line": 96,
+          "status": "OK",
+          "case": "execution          5   actual Goal proof commit reply loss an..."
+        },
+        {
+          "line": 109,
+          "status": "OK",
+          "case": "execution          6   actual integral receipt commits after ..."
+        },
+        {
+          "line": 122,
+          "status": "OK",
+          "case": "execution          7   actual agent restores before lookup an..."
+        },
+        {
+          "line": 134,
+          "status": "OK",
+          "case": "execution          8   finished publication survives registry..."
+        },
+        {
+          "line": 145,
+          "status": "OK",
+          "case": "execution          9   caught reviewer Exit retains its actua..."
+        },
+        {
+          "line": 156,
+          "status": "OK",
+          "case": "execution         10   raised review retains actual tool obse..."
+        },
+        {
+          "line": 225,
+          "status": "OK",
+          "case": "execution         11   actual proof partial write and phase-m..."
+        },
+        {
+          "line": 248,
+          "status": "OK",
+          "case": "execution         12   actual explicit retry and unknown fence."
+        },
+        {
+          "line": 295,
+          "status": "OK",
+          "case": "execution         13   reasonless Goal reply needs an explici..."
+        },
+        {
+          "line": 318,
+          "status": "OK",
+          "case": "execution         14   actual bound suspend and drop."
+        },
+        {
+          "line": 329,
+          "status": "OK",
+          "case": "execution         15   cloned workspace refuses the original ..."
+        }
+      ]
+    },
+    {
+      "suite": "test/test_goal_verification_agent",
+      "start_line": 335,
+      "end_line": 936,
+      "started_at": "2026-10-24T12:50:31Z",
+      "runner_terminal": "[targeted] test/test_goal_verification_agent: OK in 73s",
+      "counts": {
+        "OK": 39,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "summary": [
+        {
+          "line": 934,
+          "text": "Test Successful in 72.562s. 39 tests run."
+        }
+      ],
+      "cases": [
+        {
+          "line": 362,
+          "status": "OK",
+          "case": "submitted evidence                  0   pending proof binds e..."
+        },
+        {
+          "line": 378,
+          "status": "OK",
+          "case": "submitted evidence                  1   invalid evidence leav..."
+        },
+        {
+          "line": 404,
+          "status": "OK",
+          "case": "historical review evidence          0   superseded review kee..."
+        },
+        {
+          "line": 423,
+          "status": "OK",
+          "case": "drain                               0   wake after deferred p..."
+        },
+        {
+          "line": 442,
+          "status": "OK",
+          "case": "drain                               1   same-request explicit..."
+        },
+        {
+          "line": 478,
+          "status": "OK",
+          "case": "drain                               2   deferred review is an..."
+        },
+        {
+          "line": 490,
+          "status": "OK",
+          "case": "drain                               3   raised review is anno..."
+        },
+        {
+          "line": 504,
+          "status": "OK",
+          "case": "drain                               4   pending before phase ..."
+        },
+        {
+          "line": 519,
+          "status": "OK",
+          "case": "drain                               5   reopen from verifying..."
+        },
+        {
+          "line": 535,
+          "status": "OK",
+          "case": "drain                               6   new request rejects a..."
+        },
+        {
+          "line": 551,
+          "status": "OK",
+          "case": "drain                               7   proof pending drains ..."
+        },
+        {
+          "line": 568,
+          "status": "OK",
+          "case": "drain                               8   goal proof reads the ..."
+        },
+        {
+          "line": 588,
+          "status": "OK",
+          "case": "drain                               9   a refuted goal can re..."
+        },
+        {
+          "line": 600,
+          "status": "OK",
+          "case": "drain                              10   goal proof surface su..."
+        },
+        {
+          "line": 612,
+          "status": "OK",
+          "case": "drain                              11   refuted proof returns..."
+        },
+        {
+          "line": 620,
+          "status": "OK",
+          "case": "non-verdicts keep evidence          0   scan preserves source..."
+        },
+        {
+          "line": 639,
+          "status": "OK",
+          "case": "non-verdicts keep evidence          1   skipped scan records ..."
+        },
+        {
+          "line": 646,
+          "status": "OK",
+          "case": "non-verdicts keep evidence          2   healthy store scan re..."
+        },
+        {
+          "line": 656,
+          "status": "OK",
+          "case": "non-verdicts keep evidence          3   lane unavailable keep..."
+        },
+        {
+          "line": 668,
+          "status": "OK",
+          "case": "non-verdicts keep evidence          4   malformed reply fails..."
+        },
+        {
+          "line": 679,
+          "status": "OK",
+          "case": "non-verdicts keep evidence          5   all slots failed keep..."
+        },
+        {
+          "line": 688,
+          "status": "OK",
+          "case": "non-verdicts keep evidence          6   approve without a sta..."
+        },
+        {
+          "line": 701,
+          "status": "OK",
+          "case": "in-flight criterion edits           0   target edit invalidat..."
+        },
+        {
+          "line": 714,
+          "status": "OK",
+          "case": "in-flight criterion edits           1   target ABA invalidate..."
+        },
+        {
+          "line": 728,
+          "status": "OK",
+          "case": "in-flight criterion edits           2   priority edit preserv..."
+        },
+        {
+          "line": 745,
+          "status": "OK",
+          "case": "transient retry                     0   provider recovery nee..."
+        },
+        {
+          "line": 757,
+          "status": "OK",
+          "case": "transient retry                     1   drop invalidates an o..."
+        },
+        {
+          "line": 781,
+          "status": "OK",
+          "case": "transient retry                     2   a stated provider res..."
+        },
+        {
+          "line": 802,
+          "status": "OK",
+          "case": "permanent refusal                   0   retired model candida..."
+        },
+        {
+          "line": 815,
+          "status": "OK",
+          "case": "permanent refusal                   1   retired model is filt..."
+        },
+        {
+          "line": 826,
+          "status": "OK",
+          "case": "re-arm                              0   committed proven proo..."
+        },
+        {
+          "line": 837,
+          "status": "OK",
+          "case": "re-arm                              1   committed refuted pro..."
+        },
+        {
+          "line": 859,
+          "status": "OK",
+          "case": "re-arm                              2   one unreconcilable go..."
+        },
+        {
+          "line": 873,
+          "status": "OK",
+          "case": "re-arm                              3   a clean scan replaces..."
+        },
+        {
+          "line": 883,
+          "status": "OK",
+          "case": "re-arm                              4   verifying goal with a..."
+        },
+        {
+          "line": 896,
+          "status": "OK",
+          "case": "candle snapshot                     0   a passing verdict lea..."
+        },
+        {
+          "line": 907,
+          "status": "OK",
+          "case": "candle snapshot                     1   without a candle.toml..."
+        },
+        {
+          "line": 918,
+          "status": "OK",
+          "case": "candle snapshot                     2   a refutation leaves n..."
+        },
+        {
+          "line": 932,
+          "status": "OK",
+          "case": "candle snapshot                     3   a snapshot that canno..."
+        }
+      ]
+    },
+    {
+      "suite": "test/test_verifier_review_worker",
+      "start_line": 938,
+      "end_line": 1251,
+      "started_at": "2026-10-24T12:51:44Z",
+      "runner_terminal": "[targeted] test/test_verifier_review_worker: OK in 1s",
+      "counts": {
+        "OK": 18,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "summary": [
+        {
+          "line": 1249,
+          "text": "Test Successful in 0.869s. 18 tests run."
+        }
+      ],
+      "cases": [
+        {
+          "line": 953,
+          "status": "OK",
+          "case": "execution          0   frozen prompt, media, lookup and verdict."
+        },
+        {
+          "line": 959,
+          "status": "OK",
+          "case": "execution          1   missing and changed authority refuse b..."
+        },
+        {
+          "line": 972,
+          "status": "OK",
+          "case": "execution          2   retry keeps both immutable originals."
+        },
+        {
+          "line": 981,
+          "status": "OK",
+          "case": "execution          3   unknown and cancellation never redispa..."
+        },
+        {
+          "line": 991,
+          "status": "OK",
+          "case": "execution          4   actual host commit and restart."
+        },
+        {
+          "line": 1002,
+          "status": "OK",
+          "case": "execution          5   actual host recovers cancellation afte..."
+        },
+        {
+          "line": 1011,
+          "status": "OK",
+          "case": "execution          6   Judged recovery precedes actual prepar..."
+        },
+        {
+          "line": 1017,
+          "status": "OK",
+          "case": "execution          7   commit unknown recovers original."
+        },
+        {
+          "line": 1027,
+          "status": "OK",
+          "case": "execution          8   actual inner walk respects retained di..."
+        },
+        {
+          "line": 1038,
+          "status": "OK",
+          "case": "execution          9   pre-admission configuration repair reu..."
+        },
+        {
+          "line": 1041,
+          "status": "OK",
+          "case": "execution         10   invalid inventory refuses allocation."
+        },
+        {
+          "line": 1072,
+          "status": "OK",
+          "case": "execution         11   Judged boot preserves terminal operato..."
+        },
+        {
+          "line": 1097,
+          "status": "OK",
+          "case": "execution         12   actual typed refusal race never reappl..."
+        },
+        {
+          "line": 1110,
+          "status": "OK",
+          "case": "execution         13   atomic judgment observation survives u..."
+        },
+        {
+          "line": 1131,
+          "status": "OK",
+          "case": "execution         14   terminal publication cancellation reco..."
+        },
+        {
+          "line": 1143,
+          "status": "OK",
+          "case": "execution         15   post-atomic observation cancellation r..."
+        },
+        {
+          "line": 1153,
+          "status": "OK",
+          "case": "execution         16   unpublishable original cannot starve a..."
+        },
+        {
+          "line": 1247,
+          "status": "OK",
+          "case": "execution         17   missing actual observer facts refuse b..."
+        }
+      ]
+    },
+    {
+      "suite": "test/test_completion_trust_harness",
+      "start_line": 1253,
+      "end_line": 1570,
+      "started_at": "2026-10-24T12:51:45Z",
+      "runner_terminal": "[targeted] test/test_completion_trust_harness: OK in 1s",
+      "counts": {
+        "OK": 9,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "summary": [
+        {
+          "line": 1568,
+          "text": "Test Successful in 0.707s. 9 tests run."
+        }
+      ],
+      "cases": [
+        {
+          "line": 1278,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          0   non-owner compl..."
+        },
+        {
+          "line": 1295,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          1   completion of a..."
+        },
+        {
+          "line": 1325,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          2   short notes rea..."
+        },
+        {
+          "line": 1358,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          3   rendered image ..."
+        },
+        {
+          "line": 1389,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          4   submitted evide..."
+        },
+        {
+          "line": 1434,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          5   delivered rejec..."
+        },
+        {
+          "line": 1461,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          6   unavailable eva..."
+        },
+        {
+          "line": 1480,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          7   legitimate self..."
+        },
+        {
+          "line": 1566,
+          "status": "OK",
+          "case": "completion_trust_dispatch_oracle          8   late verdict re..."
+        }
+      ]
+    },
+    {
+      "suite": "test/test_verification_run_registry",
+      "start_line": 1572,
+      "end_line": 1704,
+      "started_at": "2026-10-24T12:51:46Z",
+      "runner_terminal": "[targeted] test/test_verification_run_registry: OK in 0s",
+      "counts": {
+        "OK": 23,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "summary": [
+        {
+          "line": 1702,
+          "text": "Test Successful in 0.080s. 23 tests run."
+        }
+      ],
+      "cases": [
+        {
+          "line": 1581,
+          "status": "OK",
+          "case": "rfc-0361-d4          0   running review is visible before it ..."
+        },
+        {
+          "line": 1584,
+          "status": "OK",
+          "case": "rfc-0361-d4          1   every outcome has a distinct wire la..."
+        },
+        {
+          "line": 1609,
+          "status": "OK",
+          "case": "rfc-0361-d4          2   failure outcomes carry an operator-r..."
+        },
+        {
+          "line": 1626,
+          "status": "OK",
+          "case": "rfc-0361-d4          3   every outcome survives replay."
+        },
+        {
+          "line": 1628,
+          "status": "OK",
+          "case": "rfc-0361-d4          4   an approval carries the reviewer's s..."
+        },
+        {
+          "line": 1631,
+          "status": "OK",
+          "case": "rfc-0361-d4          5   an approval written without a reason..."
+        },
+        {
+          "line": 1635,
+          "status": "OK",
+          "case": "rfc-0361-d4          6   not_reviewed wire shape is gate and ..."
+        },
+        {
+          "line": 1639,
+          "status": "OK",
+          "case": "rfc-0361-d4          7   legacy row carrying retryable is rej..."
+        },
+        {
+          "line": 1643,
+          "status": "OK",
+          "case": "rfc-0361-d4          8   replay drops running reviews."
+        },
+        {
+          "line": 1647,
+          "status": "OK",
+          "case": "rfc-0361-d4          9   a retry replaces its prior attempt."
+        },
+        {
+          "line": 1651,
+          "status": "OK",
+          "case": "rfc-0361-d4         10   unknown completion is logged without..."
+        },
+        {
+          "line": 1656,
+          "status": "OK",
+          "case": "rfc-0361-d4         11   unknown outcome label is an error."
+        },
+        {
+          "line": 1661,
+          "status": "OK",
+          "case": "rfc-0361-d4         12   rejected without a reason is an error."
+        },
+        {
+          "line": 1665,
+          "status": "OK",
+          "case": "rfc-0361-d4         13   completed runs are pruned."
+        },
+        {
+          "line": 1669,
+          "status": "OK",
+          "case": "rfc-0361-d4         14   stream replay large history."
+        },
+        {
+          "line": 1675,
+          "status": "OK",
+          "case": "rfc-0361-d4         15   stream replay retries and running ba..."
+        },
+        {
+          "line": 1679,
+          "status": "OK",
+          "case": "rfc-0361-d4         16   tool evidence keeps input and typed ..."
+        },
+        {
+          "line": 1683,
+          "status": "OK",
+          "case": "rfc-0361-d4         17   global registry has one installation..."
+        },
+        {
+          "line": 1686,
+          "status": "OK",
+          "case": "rfc-0361-d4         18   terminal publication reopens without..."
+        },
+        {
+          "line": 1691,
+          "status": "OK",
+          "case": "rfc-0361-d4         19   terminal publication preserves confl..."
+        },
+        {
+          "line": 1694,
+          "status": "OK",
+          "case": "rfc-0361-d4         20   terminal publication refuses unconfi..."
+        },
+        {
+          "line": 1696,
+          "status": "OK",
+          "case": "rfc-0361-d4         21   terminal publication decoder refuses..."
+        },
+        {
+          "line": 1700,
+          "status": "OK",
+          "case": "rfc-0361-d4         22   terminal confirmation survives displ..."
+        }
+      ]
+    }
+  ],
+  "critical_case_evidence": "critical-assertions.json",
+  "exact_source_snapshots": {
+    "lib/completion_authority_agent.ml": {
+      "snapshot_file": "lib__completion_authority_agent.ml",
+      "bytes": 83377,
+      "sha256": "86560523b2c242564e2713267c301c10bebc8a5cd8e845a7cb1fa85a41e32ad7"
+    },
+    "lib/completion_authority_agent.mli": {
+      "snapshot_file": "lib__completion_authority_agent.mli",
+      "bytes": 14520,
+      "sha256": "f21405aa170a21804b845ee7936bc1f16a6fcb08a6162acf483cb1a2e1730b6a"
+    },
+    "lib/keeper/verifier_review_publication.ml": {
+      "snapshot_file": "lib__keeper__verifier_review_publication.ml",
+      "bytes": 9053,
+      "sha256": "667e6ad3a051bb7b292a3d41aa35545c5516053287947e4153a04d3cd263016d"
+    },
+    "test/test_verifier_review_worker.ml": {
+      "snapshot_file": "test__test_verifier_review_worker.ml",
+      "bytes": 62181,
+      "sha256": "6ce0b54dc1f259c9052d3b525327d19e419766538339e91225ed01885e61fa90"
+    },
+    "scripts/ci-run-targeted-tests.sh": {
+      "snapshot_file": "scripts__ci-run-targeted-tests.sh",
+      "bytes": 9352,
+      "sha256": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+    },
+    ".github/workflows/test.yml": {
+      "snapshot_file": ".github__workflows__test.yml",
+      "bytes": 19283,
+      "sha256": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191"
+    }
+  },
+  "files": {
+    "suite-runner-log.zip": {
+      "bytes": 23905,
+      "sha256": "8937746dd34dae50a5d4fc4bf218ec9bc970c63821eb022bc31d3bada348dcd3"
+    },
+    "ci-run-tests.log": {
+      "bytes": 172665,
+      "sha256": "656f84ac3f1346832135c63fc7d809a40a229e8dcfcb8811b901b41a2abdc9c7"
+    },
+    "workflow-logs.zip": {
+      "bytes": 109269,
+      "sha256": "5062c8d2fce014a21bf683846a0482ae60cb78dbb8e3d8fdb268585164d9b381"
+    },
+    "checkout-step.log": {
+      "bytes": 11298,
+      "sha256": "dc13261b662b1ce07bdf1f25105ee4e71026703550b19ebe585cbb0eff66abbf"
+    },
+    "test-step.log": {
+      "bytes": 225453,
+      "sha256": "0711f098e5d7e1cdcbfa9cf93fe2a6a3be5354bc4f8757b4620fbc342d07bd46"
+    },
+    "job-120876318526.log": {
+      "bytes": 292488,
+      "sha256": "2fe05dc8b4568cc6d0a051f4179470f25f8e18d6ada6907840c7806c2d1c26a7"
+    },
+    "jobs-raw.json": {
+      "bytes": 5608,
+      "sha256": "2043c9862746e6edf5ab4a20e38fe0792d298f9d04c7669167a34f32e1fa880e"
+    },
+    "artifacts-plugin.json": {
+      "bytes": 1024,
+      "sha256": "63f2d0c0505914daa8d0b2582dac3d3161dde55db060041f465dc8172accd6c6"
+    },
+    "missing-observer-case.log": {
+      "bytes": 8133,
+      "sha256": "3ee58262bd3a201dd2c883656f523c3755e87e38c1bb6ff8617665cf3cab3191"
+    },
+    "critical-assertions.json": {
+      "bytes": 7232,
+      "sha256": "b1b4f73558179f212454894b4d915853c9ca3b17106c795ea6ea52ec0f0bb9eb"
+    }
+  },
+  "claims": [
+    "Actual selected five-executable build invocation and 105 passing Alcotest cases at checkout44b6, with each suite terminal OK and successful summary.",
+    "Existing missing-observer case includes all three phase negatives and actual observed positive siblings through the same real host effect runner. Numeric counter expectations are bound to frozen source and printed assertions plus enclosing case PASS."
+  ],
+  "limits": [
+    "Not a full regression run, four-product operator build, installed binary/runtime result, production/provider action, or merge proof.",
+    "Historical 55PASS at cd155 and failed run40078689529 at6c9 (compile failure/zero suites) remain separate and are not added to105.",
+    "Archive/log SHA values identify preserved evidence, not executable binary hashes.",
+    "No source edit, local Dune run, CI rerun/watch/status poll, or remote write was performed for this readback."
+  ]
+}

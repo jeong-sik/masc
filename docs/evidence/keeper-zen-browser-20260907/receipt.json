@@ -1,0 +1,117 @@
+{
+  "schema": "masc.keeper_browser_proof.public.v1",
+  "result": "passed",
+  "server_source": "3f80b0bef240373abdcbef8e0a668e8130b5fbbe",
+  "server_binary_sha256": "3fe98ff8b1a742ebfc6dc19ed4c66e58d0b6c7d9f977d69e6dd71bf3958e5a5b",
+  "keeper": "zen-browser-proof-1f7d3d66",
+  "operation_id": "kmsg-895b742dc9a5a842d3e582464a0c547d",
+  "operation_state": "Succeeded",
+  "elapsed_s": 41.751286029815674,
+  "runtime": {
+    "observed_id": "ollama_cloud.ollama-cloud-glm-5-3-flash",
+    "observed_id_basis": "all seven recorded tool runtime_profile fields",
+    "observed_model": "glm-5.3-flash",
+    "observed_model_basis": "completed Keeper agent-core snapshot model field",
+    "provider_id": "ollama_cloud",
+    "provider_id_basis": "configured runtime provider identifier; no separately captured provider wire receipt",
+    "vision_model": null,
+    "vision_model_basis": "not recorded in the scoped tool receipt; parent runtime profile is not evidence of vision subcall model",
+    "model_snapshot_sha256": "f2c25d4ef0b3eb50279973ed4de3cc63e1d86377cc15db25aaa011ff406d4ac4"
+  },
+  "declared_sandbox": {
+    "profile": "microvm",
+    "backend": "apple_container",
+    "image": "masc-keeper-sandbox:local",
+    "network_mode": "inherit",
+    "browser_execution": "in_process/ocaml_runtime/No_sandbox by descriptor; no VM shell execution measured"
+  },
+  "fixture": {
+    "tag": "ZEN_KEEPER_PROOF_b24faef2",
+    "url": "http://127.0.0.1:56065/fixture/ZEN_KEEPER_PROOF_b24faef2",
+    "scope": "generated local disposable page only",
+    "browser": {
+      "clientId": "0bd8e27d-9669-44d8-9602-702f7648e013",
+      "browser": "zen",
+      "version": "1.22b",
+      "engineVersion": "155.0.1"
+    },
+    "tab_id": 1,
+    "multiple_live_clients_in_this_keeper_test": false
+  },
+  "checks": {
+    "seven_expected_tool_calls": true,
+    "all_tool_calls_success": true,
+    "only_fixture_url_in_mutations": true,
+    "all_post_discovery_calls_pinned": true,
+    "keeper_artifact_exists": true,
+    "artifact_sha_matches_handle": true,
+    "artifact_bytes_equal_independent_screenshot": true,
+    "vision_tool_actually_called": true,
+    "vision_result": "Visual check: violet comet 731"
+  },
+  "vision_scope": {
+    "actual_vision_tool_invoked": true,
+    "phrase_present_in_prior_browser_text": true,
+    "phrase_given_in_operator_prompt": false,
+    "full_phrase_given_in_vision_query": false,
+    "blind_visual_recognition_benchmark": false
+  },
+  "png": {
+    "bytes": 50048,
+    "sha256": "8301d5aede15365fbd40926dbf3c1f1d7b541e627edeac2f72bb25ad09353fff"
+  },
+  "cleanup": {
+    "keeper_down_admitted": true,
+    "shutdown_operation_id": "shutdown-f97e0a40-311e-40eb-9ded-af2b6d2677e7",
+    "shutdown_final_phase": {
+      "kind": "finalized",
+      "evidence": {
+        "cleanup": {
+          "settled_task_ids": [],
+          "pending_confirms_removed": 0,
+          "meta_snapshot_digest": "ddf47fbeff1790e0882044926e1da2b7f78c2cb3818e2c72c647fec3ba350af6"
+        },
+        "meta_removed": false,
+        "session_removed": false,
+        "registry_unregistered": true,
+        "accumulator_dropped": true,
+        "completion": {
+          "kind": "not_requested"
+        }
+      }
+    },
+    "owned_zen_closed": true,
+    "owned_driver_exited": true,
+    "unique_manifest_removed": true,
+    "native_clients_remaining": 0,
+    "owned_webdriver_profile_removed": true,
+    "owned_microvm_count": 0,
+    "keeper_paused": true,
+    "autoboot_enabled": false,
+    "proactive_enabled": false,
+    "observed_at": "2026-09-07T14:11:15.277539+00:00",
+    "total_keeper_turns": 1
+  },
+  "raw_receipt_hashes": {
+    "01-keeper-up.json": "9df8b7124d098989dedacd6f8363201fd903c48f3795ea95d9803b8e4f53d39c",
+    "03-message-receipt.json": "41831a35a37ce4fce2281a993f6c180969bc20713eb9720b339653b7977bf5db",
+    "04-operation-status.json": "9053b5f272adfd8918fd6946aec1926869bf4a3f3dbf10c3282729655d491ef5",
+    "live-tool-trace.json": "45e5b2af97a1141848dd4914bc4ae7b4e15b2d23001ea5421c811ee97b9ef9e5",
+    "06-independent-page.json": "5ba5c4e866ed4d28a506f5fb9a1f6d487e377150184b3c609adb11d6e41cd71a",
+    "07-keeper-down.json": "5d39d7afd5b62036e9b0c1a338a20f03194db223bfc28d65b22fe6f851e0192e",
+    "08-shutdown-final.json": "ae679dc22fe6eeb17b1806fc562a10df2e86833179a5cdb21d622281702b9417"
+  },
+  "redaction": {
+    "method": "select explicit evidence fields; parse tool output JSON; omit all other metadata",
+    "excluded": [
+      "full operator prompt",
+      "system instructions",
+      "agent snapshots and conversation messages",
+      "provider configuration and credentials",
+      "HTTP authentication headers",
+      "runtime paths",
+      "unrelated Keeper and production state"
+    ],
+    "raw_receipts_published": false
+  }
+}

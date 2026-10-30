@@ -1,0 +1,42 @@
+name = "keeper_code_query"
+description = """
+Ask the language server about a symbol: definition, type/docs, or references.
+
+Give it the file and the line the symbol appears on. Locate them with Grep first. Answers reflect the compiler index."""
+additional_properties = false
+
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 28 times in 11 turns, 1777 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 11 extra requests over the same week.
+defer_loading = true
+
+[[params]]
+name = "question"
+type = "string"
+enum = ["definition", "hover", "references"]
+required = true
+description = "Query type: definition for where defined, hover for type and docs, references for usages across project."
+
+[[params]]
+name = "path"
+type = "string"
+required = true
+description = "File path within the keeper workspace to query."
+
+[[params]]
+name = "line"
+type = "integer"
+required = true
+description = "1-based line number where the symbol appears."
+
+[[params]]
+name = "symbol"
+type = "string"
+required = true
+description = "Literal symbol name on that line (e.g. function or variable name)."
+
+[[params]]
+name = "occurrence"
+type = "integer"
+description = "1-based occurrence index if the symbol appears multiple times on the line. Defaults to 1."

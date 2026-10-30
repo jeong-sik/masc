@@ -1,0 +1,75 @@
+{
+  "source": "3b69416ac155b423806c7c81f2dc3d129be328ae",
+  "base": "ea2a60e467e6b2ac1761dba75b21da3e4fb582e2",
+  "product_layer": "326085874f6785c91bde9a41108a6ea5b02fd793",
+  "recorded_at_utc": "2026-10-21T12:59:21.032037+00:00",
+  "scope": "Existing focused Dashboard checks following the G01/G03 API conflict resolution; not an OCaml, native, installed or visible UI execution.",
+  "source_blobs": {
+    "dashboard/src/api/lane-addon-host-requests.test.ts": "8fd515276e5dc6e26c64e1e69113c3407f832ad2",
+    "dashboard/src/api/lane-addon-host-requests.ts": "42aeedb47a9be138d6b5311803ff424c4d191f03",
+    "dashboard/src/api/lane-addons.ts": "137805790e52424fb1ec88dc7dcfb44f48828954",
+    "dashboard/src/api/lane-inventory.test.ts": "c49d5cc296ad84c6e652cd316ac817ba73a0d84a",
+    "dashboard/src/components/lane-addon-connection.test.ts": "c7592405293fecc158b25e9eaff515e2d1875d91",
+    "dashboard/src/components/lane-addons-panel.test.ts": "2948ed987a7e72dc91c53dcafb9461a4d694397f",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "12b1f06846029cc77f6da8b304a0a909b0e86235"
+  },
+  "commands": [
+    {
+      "command": "pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 --reporter=verbose src/api/lane-inventory.test.ts src/api/lane-addon-host-requests.test.ts src/components/lane-inventory-panel.test.ts src/components/lane-addon-connection.test.ts",
+      "log": "restack-dashboard-vitest.txt",
+      "exit_code": 0,
+      "suite_files": 4,
+      "passing_cases": 48,
+      "log_sha256": "8c4c467c55a4b7e5616d9a7f1eb47f6573adc2fea96f23019a310680ca598186",
+      "log_bytes": 9717,
+      "original_log_sha256": "9eba0edefcbe1348666bcd7b412194ad40b512e070e643dbbe4b81b92c9b52ad",
+      "original_log_bytes": 9718,
+      "normalization": "Only trailing blank lines removed; no other bytes changed."
+    },
+    {
+      "command": "pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 --reporter=verbose src/components/lane-addons-panel.test.ts",
+      "log": "restack-dashboard-panel-vitest.txt",
+      "exit_code": 0,
+      "suite_files": 1,
+      "passing_cases": 44,
+      "log_sha256": "a80494792c710c2aeb1b1672b888839fab36d6130a180588de1a3fa46e66e043",
+      "log_bytes": 7514,
+      "original_log_sha256": "187cf57beb2008a1ad7e965e6517322b7ad292714b98fd3563d1b40e571493c3",
+      "original_log_bytes": 7515,
+      "normalization": "Only trailing blank lines removed; no other bytes changed."
+    },
+    {
+      "command": "pnpm exec tsc --noEmit",
+      "log": "restack-dashboard-tsc.txt",
+      "exit_code": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log_bytes": 0,
+      "original_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_log_bytes": 0,
+      "normalization": "No changes."
+    }
+  ],
+  "total_unique_suite_files": 5,
+  "total_passing_cases": 92,
+  "historical_receipt_source": "9c294b7d9d345a295c49c50995ccdd53de38d1cb",
+  "api_blob_change": {
+    "path": "dashboard/src/api/lane-addons.ts",
+    "historical": "26c20281022afaa57161127dd2c0e9fa14a171f4",
+    "restacked": "137805790e52424fb1ec88dc7dcfb44f48828954",
+    "reason": "Merged main G03 host_requests typed parser/import and instance/snapshot types."
+  },
+  "historical_execution_not_relabelled": {
+    "source": "7b16a9175711aefe744c5c704e038a42fd5b6b7b",
+    "direct_run": 39594048964,
+    "native_run": 39595834943,
+    "note": "Neither these executions nor the original 9c294 Dashboard checks are executions of the later restacked source."
+  },
+  "evidence_origin": "Copied from the existing restack execution logs and exit-code receipt, with only trailing blank lines removed from Vitest logs. Original and retained byte lengths/hashes are recorded separately. No check was rerun for this documentation repair.",
+  "not_run_for_restack": [
+    "OCaml parser/type/build/test",
+    "native artifact build",
+    "runtime/server/browser/TUI/UI execution",
+    "installed binary change"
+  ],
+  "dashboard_tree": "99eb3044c97ac7458197ec1c9faab2e9570f0563"
+}

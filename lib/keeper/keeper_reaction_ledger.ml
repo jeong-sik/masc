@@ -1,0 +1,1916 @@
+include Keeper_reaction_ledger_wire
+
+module Event_id_set = Set.Make (String)
+
+let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let install_state_change_observer observer = Atomic.set state_change_observer observer
+
+let notify_state_change_observer ~keeper_name =
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "reaction ledger state-change observer failed keeper=%s: %s"
+        keeper_name
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ())
+;;
+
+let board_stimulus_id ~post_id = "board:" ^ post_id
+
+let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
+  match stimulus.payload with
+  | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
+    Board_signal
+  | Keeper_event_queue.Bootstrap -> Bootstrap
+  | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
+  | Keeper_event_queue.Schedule_due _ -> Schedule_due
+  | Keeper_event_queue.Connector_attention _ -> Connector_attention
+  | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
+  | Keeper_event_queue.Ask_answered _ -> Ask_answered
+  | Keeper_event_queue.Completion_authority_rejected _ ->
+    Completion_authority_rejected
+  | Keeper_event_queue.Task_outcome _ -> Task_outcome
+  | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
+  | Keeper_event_queue.Workspace_message _ -> Workspace_message
+  | Keeper_event_queue.Delegate_completed _ -> Delegate_completed
+  | Keeper_event_queue.Composition_completed _ -> Composition_completed
+  | Keeper_event_queue.Tool_result_ready _ -> Tool_result_ready
+  | Keeper_event_queue.Owned_job_completed _ -> Owned_job_completed
+  | Keeper_event_queue.Addon_operation_changed _ -> Addon_operation_changed
+;;
+
+let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
+  match stimulus.payload, stimulus_kind_of_event_queue stimulus with
+  | Keeper_event_queue.Board_attention attention, Board_signal ->
+    "board-attention:" ^ attention.candidate_id
+  | Keeper_event_queue.Board_signal _, Board_signal ->
+    board_stimulus_id ~post_id:stimulus.post_id
+  | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
+  | Keeper_event_queue.Completion_authority_rejected _, Completion_authority_rejected ->
+    stimulus.post_id
+  | ( ( Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Bootstrap
+      | Keeper_event_queue.Fusion_completed _
+      | Keeper_event_queue.Schedule_due _
+      | Keeper_event_queue.Connector_attention _
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Ask_answered _
+      | Keeper_event_queue.Completion_authority_rejected _
+      | Keeper_event_queue.Task_cancelled _
+      | Keeper_event_queue.Workspace_message _
+      | Keeper_event_queue.Delegate_completed _
+      | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+      | Keeper_event_queue.Task_outcome _ )
+    , (( Board_signal
+       | Bootstrap
+       | Fusion_completed
+       | Schedule_due
+       | Connector_attention
+       | Hitl_resolved
+       | Ask_answered
+       | Completion_authority_rejected
+       | Task_outcome
+       | Task_cancelled
+       | Workspace_message
+       | Delegate_completed
+       | Composition_completed
+       | Owned_job_completed | Addon_operation_changed | Tool_result_ready ) as kind) ) ->
+    digest_id
+      "stimulus"
+      (String.concat
+         "|"
+         [ stimulus.post_id
+         ; stimulus_kind_to_string kind
+         ; Printf.sprintf "%.6f" stimulus.arrived_at
+         ])
+;;
+
+let location ~base_path ~keeper_name =
+  Dated_jsonl.Store.reaction_ledger
+    (Dated_jsonl.Store.root_of_base_path ~base_path)
+    ~keeper:keeper_name
+    ~generation:storage_generation
+;;
+
+let store_dir ~base_path ~keeper_name =
+  Dated_jsonl.Store.dir (location ~base_path ~keeper_name)
+;;
+
+let store_for_base_path ~base_path ~keeper_name =
+  Dated_jsonl.open_store (location ~base_path ~keeper_name)
+;;
+
+(* An occurrence whose queue witness was retired needs an exact, bounded
+   lookup. A new occurrence must not register itself in the dashboard's
+   per-identity ledger cache and rescan the whole append-only ledger. The
+   owner lock serializes writes; the hash is only a safe file name, while the
+   decoded receipt still has to name the requested occurrence. *)
+let schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id =
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let owner_dir =
+    Filename.concat
+      (Filename.concat masc_root Common.keepers_runtime_dirname)
+      keeper_name
+  in
+  let digest =
+    Agent_core_sha256.(digest_string occurrence_id |> to_hex)
+  in
+  Filename.concat
+    (Filename.concat owner_dir "consumed-schedule-occurrences-v1")
+    ("occurrence-" ^ digest ^ ".json")
+;;
+
+let schedule_occurrence_receipt_result ~base_path ~keeper_name ~occurrence_id =
+  let path =
+    schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id
+  in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  match Fs_compat.load_owned_regular_file ~ownership_root:masc_root path with
+  | Error error ->
+    Error
+      (Printf.sprintf "schedule occurrence receipt unreadable at %s: %s"
+         path (Fs_compat.owned_regular_file_read_error_to_string error))
+  | Ok None -> Ok None
+  | Ok (Some text) ->
+    let parsed =
+      try Ok (Yojson.Safe.from_string text) with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    (match parsed with
+     | Error detail -> Error (Printf.sprintf "schedule occurrence receipt malformed at %s: %s" path detail)
+     | Ok json ->
+       (match Keeper_event_queue_state.durable_disposition_of_yojson json with
+        | Error detail -> Error (Printf.sprintf "schedule occurrence receipt invalid at %s: %s" path detail)
+        | Ok (Keeper_event_queue_state.Projected_witness witness)
+          when String.equal witness.post_id occurrence_id
+               && witness.source_kind = Keeper_event_queue_state.Source_schedule_due ->
+          Ok (Some witness)
+        | Ok (Keeper_event_queue_state.Projected_witness _
+             | Keeper_event_queue_state.Current_receipt _) ->
+          Error (Printf.sprintf "schedule occurrence receipt identity mismatch at %s" path)))
+;;
+
+let save_schedule_occurrence_receipt ~base_path ~keeper_name
+      (receipt : Keeper_event_queue_state.transition_receipt) =
+  let source = Keeper_event_queue_state.transition_source receipt.Keeper_event_queue_state.transition in
+  match source.Keeper_event_queue.payload with
+  | Keeper_event_queue.Schedule_due _ ->
+    let occurrence_id = source.post_id in
+    let path = schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id in
+    let open Result.Syntax in
+    let* previous =
+      schedule_occurrence_receipt_result ~base_path ~keeper_name ~occurrence_id
+    in
+    let compact = Keeper_event_queue_state.durable_of_projected_receipt receipt in
+    (match previous with
+     | Some previous ->
+       (match compact with
+        | Keeper_event_queue_state.Projected_witness witness when previous = witness -> Ok ()
+        | Keeper_event_queue_state.Projected_witness _
+        | Keeper_event_queue_state.Current_receipt _ ->
+          Error (Printf.sprintf "schedule occurrence receipt conflicts at %s" path))
+     | None ->
+       let* () =
+         try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (Printf.sprintf "schedule occurrence receipt directory failed at %s: %s" path (Printexc.to_string exn))
+       in
+       let text =
+         Keeper_event_queue_state.durable_disposition_to_yojson compact
+         |> Yojson.Safe.to_string
+       in
+       (match Fs_compat.save_file_atomic_strict_staged path text with
+        | Ok () -> Ok ()
+        | Error error ->
+          let detail = Fs_compat.atomic_replace_failure_to_string error in
+          (match error.stage with
+           | Fs_compat.Before_rename ->
+             Error (Printf.sprintf "schedule occurrence receipt write failed at %s: %s" path detail)
+           | Fs_compat.After_rename ->
+             Error (Printf.sprintf "schedule occurrence receipt may be written at %s; inspect before retry: %s" path detail))))
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_outcome _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ -> Ok ()
+;;
+
+let base_fields ~record_kind ~event_id ~keeper_name ~recorded_at =
+  [ "schema", `String schema
+  ; "record_kind", `String record_kind
+  ; "event_id", `String event_id
+  ; "keeper_name", `String keeper_name
+  ; "recorded_at_unix", `Float recorded_at
+  ]
+;;
+
+let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
+  match payload with
+  | Keeper_event_queue.Board_signal bs
+  | Keeper_event_queue.Board_attention { signal = bs; _ } ->
+    let limit = 256 in
+    let title =
+      if String.length bs.title <= limit
+      then bs.title
+      else String_util.utf8_prefix ~max_bytes:limit bs.title ^ "...[truncated]"
+    in
+    Printf.sprintf
+      "board_signal kind=%s author=%s title=%s"
+      (match bs.kind with
+       | Keeper_event_queue.Post_created -> "post_created"
+       | Keeper_event_queue.Post_updated _ -> "post_updated"
+       | Keeper_event_queue.Comment_added _ -> "comment_added"
+       | Keeper_event_queue.Reaction_changed reaction ->
+         Printf.sprintf
+           "reaction_changed target=%s:%s user=%s emoji=%s active=%b"
+           (match reaction.target_type with
+            | Keeper_event_queue.Reaction_post -> "post"
+            | Keeper_event_queue.Reaction_comment -> "comment")
+           reaction.target_id
+           reaction.user_id
+           reaction.emoji
+           reaction.reacted
+       | Keeper_event_queue.Vote_cast vote ->
+         Printf.sprintf
+           "vote_cast target=%s target_author=%s voter=%s direction=%s"
+           (match vote.target with
+            | Keeper_event_queue.Vote_on_post post_id -> "post:" ^ post_id
+            | Keeper_event_queue.Vote_on_comment comment_id -> "comment:" ^ comment_id)
+           vote.target_author
+           vote.voter
+           (match vote.direction with
+            | Keeper_event_queue.Vote_up -> "up"
+            | Keeper_event_queue.Vote_down -> "down"))
+      bs.author
+      title
+  | Keeper_event_queue.Bootstrap -> "bootstrap"
+  | Keeper_event_queue.Fusion_completed fc ->
+    let terminal =
+      match fc.terminal with
+      | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
+      | Keeper_event_queue.Fusion_failed _ -> "failed"
+      | Keeper_event_queue.Fusion_cancelled -> "cancelled"
+    in
+    Printf.sprintf "fusion_completed run_id=%s terminal=%s" fc.run_id terminal
+  | Keeper_event_queue.Schedule_due sw ->
+    Printf.sprintf "schedule_due schedule_id=%s due_at=%.3f" sw.schedule_id sw.due_at
+  | Keeper_event_queue.Connector_attention ca ->
+    Printf.sprintf "connector_attention event_id=%s" ca.event_id
+  | Keeper_event_queue.Ask_answered a ->
+    Printf.sprintf "ask_answered ask_id=%s" a.ask_id
+  | Keeper_event_queue.Hitl_resolved r ->
+    Printf.sprintf
+      "hitl_resolved approval=%s decision=%s"
+      r.approval_id
+      (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
+  | Keeper_event_queue.Completion_authority_rejected rejection ->
+    Printf.sprintf
+      "completion_authority_rejected task_id=%s verification_id=%s"
+      rejection.car_task_id
+      rejection.car_verification_id
+  | Keeper_event_queue.Task_outcome outcome ->
+    Printf.sprintf
+      "task_outcome task_id=%s verification_id=%s authority_kind=%s"
+      outcome.to_task_id
+      outcome.to_verification_id
+      (Masc_domain.completion_authority_kind outcome.to_authority)
+  | Keeper_event_queue.Task_cancelled cancellation ->
+    Printf.sprintf
+      "task_cancelled task_id=%s cancelled_by=%s"
+      cancellation.tc_task_id
+      cancellation.tc_cancelled_by
+  | Keeper_event_queue.Workspace_message message ->
+    Printf.sprintf
+      "workspace_message request_id=%s from=%s"
+      message.wmsg_request_id
+      message.wmsg_from
+  | Keeper_event_queue.Delegate_completed dc ->
+    Printf.sprintf
+      "keeper_delegate_completed operation_id=%s keeper=%s outcome=%s"
+      dc.dc_operation_id
+      dc.dc_keeper
+      (match dc.dc_terminal with
+       | Keeper_event_queue.Delegate_replied _ -> "replied"
+       | Keeper_event_queue.Delegate_no_reply -> "no_reply"
+       | Keeper_event_queue.Delegate_failed _ -> "failed")
+  | Keeper_event_queue.Composition_completed cc ->
+    Printf.sprintf
+      "keeper_composition_completed request_id=%s tool=%s outcome=%s"
+      cc.cc_request_id
+      cc.cc_tool
+      (match cc.cc_terminal with
+       | Keeper_event_queue.Composition_succeeded -> "succeeded"
+       | Keeper_event_queue.Composition_failed _ -> "failed"
+       | Keeper_event_queue.Composition_cancelled _ -> "cancelled")
+  | Keeper_event_queue.Tool_result_ready receipt_id -> "tool_result_ready receipt_id=" ^ receipt_id
+  | Keeper_event_queue.Owned_job_completed completion ->
+    "owned_job_completed job_id=" ^ Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id
+    ^ " source=" ^ Yojson.Safe.to_string (Keeper_owned_job_identity.source_to_json completion.oj_source)
+  | Keeper_event_queue.Addon_operation_changed change ->
+    "addon_operation_changed origin_id=" ^ change.ao_origin_id
+    ^ " publication_id=" ^ change.ao_publication_id
+    ^ " source=" ^ Yojson.Safe.to_string (Keeper_owned_job_identity.source_to_json change.ao_source)
+
+;;
+
+let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
+  let kind = stimulus_kind_of_event_queue stimulus in
+  let stimulus_id = stimulus_id_of_event_queue stimulus in
+  let recorded_at = Time_compat.now () in
+  let board_updated_at =
+    match stimulus.payload with
+    | Keeper_event_queue.Board_signal bs
+    | Keeper_event_queue.Board_attention { signal = bs; _ } -> bs.updated_at
+    | Keeper_event_queue.Bootstrap
+    | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Schedule_due _
+    | Keeper_event_queue.Connector_attention _
+    | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Ask_answered _
+    | Keeper_event_queue.Completion_authority_rejected _ -> None
+    | Keeper_event_queue.Task_outcome _ -> None
+    | Keeper_event_queue.Task_cancelled _ -> None
+    | Keeper_event_queue.Workspace_message _ -> None
+    | Keeper_event_queue.Delegate_completed _ -> None
+    | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ -> None
+  in
+  `Assoc
+    (base_fields
+       ~record_kind:"stimulus"
+       ~event_id:(digest_id "krl" (stimulus_id ^ "|stimulus"))
+       ~keeper_name
+       ~recorded_at
+     @ [ "stimulus_id", `String stimulus_id
+       ; ( "stimulus"
+         , `Assoc
+             [ "kind", `String (stimulus_kind_to_string kind)
+             ; "source", `String "keeper_event_queue"
+             ; "post_id", `String stimulus.post_id
+             ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
+             ; "arrived_at_unix", `Float stimulus.arrived_at
+             ; "board_updated_at_unix", Json_util.option_to_yojson (fun value -> `Float value) board_updated_at
+             ; "payload_preview", `String (stimulus_payload_preview stimulus.payload)
+             ] )
+       ])
+;;
+
+let record_event_queue_stimulus ~base_path ~keeper_name stimulus =
+  Dated_jsonl.append
+    (store_for_base_path ~base_path ~keeper_name)
+    (stimulus_json ~keeper_name stimulus);
+  notify_state_change_observer ~keeper_name
+;;
+
+let event_queue_turn_started_json ~keeper_name stimulus =
+  let stimulus_id = stimulus_id_of_event_queue stimulus in
+  let recorded_at = Time_compat.now () in
+  `Assoc
+    (base_fields
+       ~record_kind:"reaction"
+       ~event_id:(stimulus_id ^ ":reaction:turn_started")
+       ~keeper_name
+       ~recorded_at
+     @ [ "stimulus_id", `String stimulus_id
+       ; ( "reaction"
+         , `Assoc
+             [ "kind", `String (reaction_kind_to_string Turn_started)
+             ; "source", `String "keeper_event_queue"
+             ; "post_id", `String stimulus.post_id
+             ; "stimulus_kind", `String (stimulus_kind_to_string (stimulus_kind_of_event_queue stimulus))
+             ] )
+       ])
+;;
+
+let event_queue_turn_finished_json ~keeper_name ~disposition stimulus =
+  let stimulus_id = stimulus_id_of_event_queue stimulus in
+  let recorded_at = Time_compat.now () in
+  `Assoc
+    (base_fields
+       ~record_kind:"reaction"
+       ~event_id:(stimulus_id ^ ":reaction:turn_finished")
+       ~keeper_name
+       ~recorded_at
+     @ [ "stimulus_id", `String stimulus_id
+       ; ( "reaction"
+         , `Assoc
+             [ "kind", `String (reaction_kind_to_string Turn_finished)
+             ; "source", `String "keeper_event_queue"
+             ; "post_id", `String stimulus.post_id
+             ; "stimulus_kind", `String (stimulus_kind_to_string (stimulus_kind_of_event_queue stimulus))
+             ; "disposition", `String disposition
+             ] )
+       ])
+;;
+
+let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
+  Dated_jsonl.append
+    (store_for_base_path ~base_path ~keeper_name)
+    (event_queue_turn_started_json ~keeper_name stimulus);
+  notify_state_change_observer ~keeper_name
+;;
+
+(* The other end of the turn the stimulus opened. Without it a schedule's
+   evidence stops at "a turn started at T" and the operator joins the rest by
+   comparing that clock against Keeper Calls -- a reconstruction, not evidence.
+   [disposition] is the turn boundary's own typed outcome rendered as its
+   canonical token; this ledger never decides what a turn did. *)
+let record_event_queue_turn_finished ~base_path ~keeper_name ~disposition stimulus =
+  Dated_jsonl.append
+    (store_for_base_path ~base_path ~keeper_name)
+    (event_queue_turn_finished_json ~keeper_name ~disposition stimulus);
+  notify_state_change_observer ~keeper_name
+;;
+
+let reaction_kind_of_transition = function
+  | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
+  | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
+  | Keeper_event_queue_state.Ack_source_terminal _ -> Event_queue_ack
+;;
+
+let transition_source_of_stimulus stimulus =
+  { stimulus_id = stimulus_id_of_event_queue stimulus
+  ; post_id = stimulus.Keeper_event_queue.post_id
+  ; stimulus_kind = stimulus_kind_of_event_queue stimulus
+  }
+;;
+
+let transition_source_json (source : transition_source) =
+  `Assoc
+    [ "stimulus_id", `String source.stimulus_id
+    ; "post_id", `String source.post_id
+    ; "stimulus_kind", `String (stimulus_kind_to_string source.stimulus_kind)
+    ]
+;;
+
+let event_queue_transition_reaction_json
+      ~keeper_name
+      ~source_index
+      ~source_count
+      ~transition_source
+      (receipt : Keeper_event_queue_state.transition_receipt)
+      stimulus
+  =
+  let reaction_kind = reaction_kind_of_transition receipt.transition in
+  let stimulus_id = stimulus_id_of_event_queue stimulus in
+  let event_id = event_queue_transition_event_id receipt source_index in
+  `Assoc
+    (base_fields
+       ~record_kind:"reaction"
+       ~event_id
+       ~keeper_name
+       ~recorded_at:receipt.applied_at
+     @ [ "stimulus_id", `String stimulus_id
+       ; ( "reaction"
+         , `Assoc
+             [ "kind", `String (reaction_kind_to_string reaction_kind)
+            ; "source", `String "keeper_event_queue_transition"
+             ; "post_id", `String stimulus.post_id
+             ; ( "stimulus_kind"
+               , `String
+                   (stimulus_kind_to_string (stimulus_kind_of_event_queue stimulus)) )
+             ; "source_index", `Int source_index
+             ; "source_count", `Int source_count
+             ; "transition_source", transition_source_json transition_source
+             ; "transition_id", `String receipt.transition_id
+             ; ( "transition_receipt"
+               , Keeper_event_queue_state.transition_receipt_to_yojson receipt )
+             ] )
+       ])
+;;
+
+let after_ledger_append_hook :
+  (unit -> (unit, string) result) option Atomic.t
+  =
+  Atomic.make None
+;;
+
+let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
+
+(* #38527: the retention predicate for a retiring transition's prior receipt.
+   A durable paused-work disposition receipt keyed by the same operation id is
+   the standing asker that can still re-ask it by
+   [prior_disposition_by_operation_id]; anything else (every turn-completion
+   ack, every superseded-occurrence cancellation) has no asker and is dropped.
+   One existence stat per transition, under the owner lock, in the same layer
+   that already owns the outbox append -- the reaction ledger this module
+   writes is where a dropped receipt's delivery stays answerable. *)
+let transition_prior_receipt_has_standing_asker
+      ~base_path
+      ~keeper_name
+      (receipt : Keeper_event_queue_state.transition_receipt)
+  =
+  let operator_operation_id =
+    match receipt.transition with
+    | Keeper_event_queue_state.Cancel_accepted cancellation ->
+        cancellation.operator_operation_id
+    | Transfer_accepted transfer -> transfer.operator_operation_id
+    | Ack_source_terminal terminal -> terminal.operator_operation_id
+  in
+  Keeper_paused_work_disposition_receipt.durable_receipt_exists
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+    ~keeper_name
+    ~operator_operation_id
+;;
+
+let project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+      ~expected_transition_id
+  =
+  let open Result.Syntax in
+  Keeper_event_queue_persistence.project_transition_outbox_result
+    ~retain_previous:(transition_prior_receipt_has_standing_asker
+                       ~base_path
+                       ~keeper_name)
+    ~append_before_retire:(fun
+        (state : Keeper_event_queue_state.t)
+        (entry : Keeper_event_queue_state.outbox_entry)
+      ->
+      let* () =
+        if String.equal expected_transition_id entry.receipt.transition_id
+        then Ok ()
+        else
+          Error
+            (Printf.sprintf
+               "event queue transition changed before ledger projection keeper=%s expected_transition_id=%s current_transition_id=%s"
+               keeper_name
+               expected_transition_id
+               entry.receipt.transition_id)
+      in
+      match entry.stimuli with
+      | [] ->
+        Error
+          (Printf.sprintf
+             "event queue transition outbox has no sources keeper=%s transition_id=%s"
+             keeper_name
+             entry.receipt.transition_id)
+      | stimuli ->
+        let store = store_for_base_path ~base_path ~keeper_name in
+        let source_count = List.length stimuli in
+        let rec append_sources source_index = function
+          | [] -> Ok ()
+          | stimulus :: rest ->
+            let event_id =
+              event_queue_transition_event_id entry.receipt source_index
+            in
+            (try
+               Dated_jsonl.append
+                 store
+                 (event_queue_transition_reaction_json
+                    ~keeper_name
+                    ~source_index
+                    ~source_count
+                    ~transition_source:(transition_source_of_stimulus stimulus)
+                    entry.receipt
+                    stimulus);
+               append_sources (source_index + 1) rest
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Error
+                 (Printf.sprintf
+                    "event queue transition ledger append failed keeper=%s event_id=%s: %s"
+                    keeper_name
+                    event_id
+                    (Printexc.to_string exn)))
+        in
+        let* () = append_sources 0 stimuli in
+        let* () =
+          match Atomic.get after_ledger_append_hook with
+          | None -> Ok ()
+          | Some hook -> hook ()
+        in
+        (* The prior receipt is about to leave [last_transition]. Its ledger
+           append already succeeded in an earlier projection; commit a small
+           exact-id receipt before this owner snapshot can forget it. A
+           failed write keeps the outbox, so replay can finish this step. *)
+        match Keeper_event_queue_state.last_transition state with
+        | None -> Ok ()
+        | Some previous ->
+          save_schedule_occurrence_receipt ~base_path ~keeper_name previous)
+    ~base_path
+    ~keeper_name
+
+module For_testing = struct
+  let schedule_occurrence_receipt_path = schedule_occurrence_receipt_path
+
+  let with_after_ledger_append ~after_ledger_append f =
+    Stdlib.Mutex.lock after_ledger_append_hook_mutex;
+    let previous =
+      Atomic.exchange after_ledger_append_hook (Some after_ledger_append)
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set after_ledger_append_hook previous;
+        Stdlib.Mutex.unlock after_ledger_append_hook_mutex)
+      f
+  ;;
+end
+
+type event_queue_reaction_evidence =
+  { keeper_name : string
+  ; stimulus_id : string
+  ; stimulus_seen : bool
+  ; turn_started_seen : bool
+  ; turn_finished_seen : bool
+  ; event_queue_ack_seen : bool
+  ; event_queue_cancelled_seen : bool
+  ; stimulus_recorded_at : float option
+  ; turn_started_recorded_at : float option
+  ; turn_finished_recorded_at : float option
+  ; event_queue_ack_recorded_at : float option
+  ; event_queue_cancelled_recorded_at : float option
+  ; latest_recorded_at : float option
+  ; matched_record_count : int
+  ; quarantined_record_count : int
+  }
+
+type event_queue_reaction_evidence_outcome =
+  | Evidence_complete of event_queue_reaction_evidence
+  | Evidence_quarantined of
+      { evidence : event_queue_reaction_evidence
+      ; first_reason : row_quarantine_reason
+      }
+
+type event_queue_reaction_evidence_error =
+  | Evidence_invalid_stimulus_id
+  | Evidence_read_error of Dated_jsonl.read_error
+
+let event_queue_reaction_evidence_error_to_string = function
+  | Evidence_invalid_stimulus_id ->
+    "reaction ledger evidence stimulus_id must be non-empty"
+  | Evidence_read_error error -> Dated_jsonl.read_error_to_string error
+;;
+
+let max_recorded_at current candidate =
+  match current, candidate with
+  | None, None -> None
+  | Some value, None | None, Some value -> Some value
+  | Some left, Some right -> Some (Float.max left right)
+;;
+
+type event_queue_reaction_evidence_accumulator =
+  { mutable stimulus_recorded_at : float option
+  ; mutable turn_started_recorded_at : float option
+  ; mutable turn_finished_recorded_at : float option
+  ; mutable event_queue_ack_recorded_at : float option
+  ; mutable event_queue_cancelled_recorded_at : float option
+  ; mutable latest_recorded_at : float option
+  ; mutable matched_record_count : int
+  ; mutable quarantined_record_count : int
+  ; mutable first_matching_quarantine_reason : row_quarantine_reason option
+  ; mutable seen_event_ids : Event_id_set.t
+  }
+
+let empty_event_queue_reaction_evidence_accumulator () =
+  { stimulus_recorded_at = None
+  ; turn_started_recorded_at = None
+  ; turn_finished_recorded_at = None
+  ; event_queue_ack_recorded_at = None
+  ; event_queue_cancelled_recorded_at = None
+  ; latest_recorded_at = None
+  ; matched_record_count = 0
+  ; quarantined_record_count = 0
+  ; first_matching_quarantine_reason = None
+  ; seen_event_ids = Event_id_set.empty
+  }
+;;
+
+let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
+  match decode_current_row ~keeper_name row with
+  | Error reason ->
+    accumulator.quarantined_record_count
+      <- accumulator.quarantined_record_count + 1;
+    (match accumulator.first_matching_quarantine_reason with
+     | Some _ -> ()
+     | None -> accumulator.first_matching_quarantine_reason <- Some reason)
+  | Ok current_row ->
+    let metadata =
+      match current_row with
+      | Current_stimulus { metadata; _ }
+      | Current_reaction { metadata; _ } -> metadata
+    in
+    if Event_id_set.mem metadata.event_id accumulator.seen_event_ids
+    then ()
+    else (
+      (* Only a decoded record owns an event identity. A damaged append must
+         remain visible without shadowing a later valid replay of that event. *)
+      accumulator.seen_event_ids
+        <- Event_id_set.add metadata.event_id accumulator.seen_event_ids;
+      accumulator.matched_record_count <- accumulator.matched_record_count + 1;
+      let recorded_at = Some metadata.recorded_at in
+      accumulator.latest_recorded_at
+        <- max_recorded_at accumulator.latest_recorded_at recorded_at;
+      (match current_row with
+       | Current_stimulus _ ->
+         accumulator.stimulus_recorded_at
+           <- max_recorded_at accumulator.stimulus_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Turn_started; _ } ->
+         accumulator.turn_started_recorded_at
+           <- max_recorded_at accumulator.turn_started_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Turn_finished; _ } ->
+         accumulator.turn_finished_recorded_at
+           <- max_recorded_at accumulator.turn_finished_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
+         accumulator.event_queue_ack_recorded_at
+           <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
+         accumulator.event_queue_cancelled_recorded_at
+           <- max_recorded_at
+                accumulator.event_queue_cancelled_recorded_at
+                recorded_at))
+;;
+
+let event_queue_reaction_evidence_of_accumulator
+      ~keeper_name
+      ~stimulus_id
+      accumulator
+  =
+  let evidence =
+    { keeper_name
+    ; stimulus_id
+    ; stimulus_seen = Option.is_some accumulator.stimulus_recorded_at
+    ; turn_started_seen = Option.is_some accumulator.turn_started_recorded_at
+    ; turn_finished_seen = Option.is_some accumulator.turn_finished_recorded_at
+    ; event_queue_ack_seen = Option.is_some accumulator.event_queue_ack_recorded_at
+    ; event_queue_cancelled_seen = Option.is_some accumulator.event_queue_cancelled_recorded_at
+    ; stimulus_recorded_at = accumulator.stimulus_recorded_at
+    ; turn_started_recorded_at = accumulator.turn_started_recorded_at
+    ; turn_finished_recorded_at = accumulator.turn_finished_recorded_at
+    ; event_queue_ack_recorded_at = accumulator.event_queue_ack_recorded_at
+    ; event_queue_cancelled_recorded_at =
+        accumulator.event_queue_cancelled_recorded_at
+    ; latest_recorded_at = accumulator.latest_recorded_at
+    ; matched_record_count = accumulator.matched_record_count
+    ; quarantined_record_count = accumulator.quarantined_record_count
+    }
+  in
+  match accumulator.first_matching_quarantine_reason with
+  | Some first_reason -> Evidence_quarantined { evidence; first_reason }
+  | None -> Evidence_complete evidence
+;;
+
+let unique_stimulus_ids stimulus_ids =
+  let seen = Hashtbl.create (List.length stimulus_ids) in
+  List.fold_left
+    (fun unique stimulus_id ->
+       if Hashtbl.mem seen stimulus_id
+       then unique
+       else (
+         Hashtbl.add seen stimulus_id ();
+         stimulus_id :: unique))
+    []
+    stimulus_ids
+  |> List.rev
+;;
+
+(* The dashboard asks this on every refresh, for every Keeper with a wake,
+   and the answer used to come from a full scan of that Keeper's ledger.
+   Measured 2026-09-07: 22 Keepers hold about 100 MB of reaction ledger, the
+   largest 33 MB, and the scan was 4.1% of the process's allocation - a share
+   that grows with the ledger, because a ledger only gets longer.
+
+   A day file is append-only, so an answer can be kept and advanced.
+   [Dated_jsonl.fold_range_appended_result] folds only what each file gained since
+   the cursor says it was read to. Unlike a byte-only cursor, it verifies
+   file identities and surfaces strict directory/open/read failures.
+
+   What is kept per Keeper: the cursors, and one accumulator per stimulus the
+   dashboard has asked about. Not the ledger, and not every stimulus in it -
+   an id nobody asks about is never tracked. An accumulator keeps six
+   timestamps, two counts, a reason and the event ids seen for that one
+   stimulus. Each observed kind is determined by its recorded timestamp.
+
+   A stimulus asked about for the first time cannot be answered from a
+   partial read, so it clears the cursors and every tracked accumulator
+   restarts from an empty ledger read. That is the same full scan as before,
+   once per stimulus rather than once per refresh.
+
+   Bounding the scan by the wake's [started_at] would be wrong, and the
+   reason is not obvious: [Keeper_wake_enqueued] carries an
+   [occurrence_status], and [Keeper_wake_already_acked] means the wake is a
+   repeat for a stimulus enqueued much earlier. Starting the read there drops
+   that stimulus's evidence and the dashboard shows "no evidence" for a
+   reaction that happened (issue #33798). *)
+(* The read covers the whole ledger, so the range starts before any month
+   directory could exist. [Dated_jsonl] lists the month directories that are
+   there and ignores the rest of the range, so an early date costs nothing. *)
+let event_queue_reaction_evidence_epoch = "1970-01-01"
+
+type event_queue_reaction_evidence_cache =
+  { mutable cursor : Dated_jsonl.append_cursor option
+  ; tracked : (string, event_queue_reaction_evidence_accumulator) Hashtbl.t
+  }
+
+(* Keyed by the store directory, so two base paths never share an entry and a
+   test working in its own directory starts with an empty cache. *)
+let event_queue_reaction_evidence_caches
+  : (string, event_queue_reaction_evidence_cache) Hashtbl.t
+  =
+  Hashtbl.create 8
+;;
+
+let event_queue_reaction_evidence_cache_mu = Stdlib.Mutex.create ()
+
+let restart_tracked_accumulators cache =
+  let ids = Hashtbl.fold (fun id _ ids -> id :: ids) cache.tracked [] in
+  List.iter
+    (fun id ->
+       Hashtbl.replace cache.tracked id (empty_event_queue_reaction_evidence_accumulator ()))
+    ids;
+  cache.cursor <- None
+;;
+
+let event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids
+  =
+  if List.exists (String.equal "") stimulus_ids
+  then Error Evidence_invalid_stimulus_id
+  else
+    let stimulus_ids = unique_stimulus_ids stimulus_ids in
+    match stimulus_ids with
+    | [] -> Ok []
+    | _ ->
+      let store = store_for_base_path ~base_path ~keeper_name in
+      let base_dir = Dated_jsonl.base_dir store in
+      let until = Jsonl_writer.day_key ~ts:(Time_compat.now ()) in
+      (* The incremental reader uses native channels/stat. Keep that I/O and
+         waiting for the native cache mutex off the caller's Eio domain. *)
+      Eio_guard.run_in_systhread ~label:"keeper-reaction-evidence" (fun () ->
+      Stdlib.Mutex.protect event_queue_reaction_evidence_cache_mu (fun () ->
+        let cache =
+          match Hashtbl.find_opt event_queue_reaction_evidence_caches base_dir with
+          | Some cache -> cache
+          | None ->
+            let cache = { cursor = None; tracked = Hashtbl.create 8 } in
+            Hashtbl.replace event_queue_reaction_evidence_caches base_dir cache;
+            cache
+        in
+        let untracked =
+          List.filter (fun id -> not (Hashtbl.mem cache.tracked id)) stimulus_ids
+        in
+        if untracked <> []
+        then begin
+          List.iter
+            (fun id ->
+               Hashtbl.replace
+                 cache.tracked
+                 id
+                 (empty_event_queue_reaction_evidence_accumulator ()))
+            untracked;
+          restart_tracked_accumulators cache
+        end;
+        let advance () =
+          Dated_jsonl.fold_range_appended_result
+            store
+            ~since:event_queue_reaction_evidence_epoch
+            ~until
+            ~cursor:cache.cursor
+            ~init:()
+            ~f:(fun () row ->
+              match string_field "stimulus_id" row with
+              | Some stimulus_id ->
+                (match Hashtbl.find_opt cache.tracked stimulus_id with
+                 | Some accumulator ->
+                   note_event_queue_reaction_evidence_row ~keeper_name accumulator row
+                 | None -> ())
+              | None -> ())
+        in
+        let refresh () =
+          match advance () with
+          | Error _ as error -> error
+          | Ok (Dated_jsonl.Appended _ as value) -> Ok value
+          | Ok Dated_jsonl.Cursor_invalidated ->
+            restart_tracked_accumulators cache;
+            advance ()
+        in
+        match refresh () with
+        | exception exn ->
+          (* A callback/cancellation may interrupt a partially advanced mutable
+             accumulator. Never retain it with the old cursor for a retry. *)
+          let backtrace = Printexc.get_raw_backtrace () in
+          Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+          Printexc.raise_with_backtrace exn backtrace
+        | Error error ->
+          Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+          Error (Evidence_read_error error)
+        | Ok Dated_jsonl.Cursor_invalidated ->
+          Hashtbl.remove event_queue_reaction_evidence_caches base_dir;
+          Error
+            (Evidence_read_error
+               (Dated_jsonl.Io_error
+                  { operation = Dated_jsonl.Read_file; path = base_dir;
+                    detail = "fresh reaction evidence cursor was invalidated" }))
+        | Ok (Dated_jsonl.Appended ((), cursor)) ->
+          cache.cursor <- Some cursor;
+          Ok
+            (List.map
+               (fun stimulus_id ->
+                  ( stimulus_id
+                  , event_queue_reaction_evidence_of_accumulator
+                      ~keeper_name
+                      ~stimulus_id
+                      (Hashtbl.find cache.tracked stimulus_id) ))
+               stimulus_ids)))
+
+;;
+
+let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
+  match
+    event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids:[ stimulus_id ]
+  with
+  | Error _ as error -> error
+  | Ok [ (_, evidence) ] -> Ok evidence
+  | Ok _ -> Error Evidence_invalid_stimulus_id
+;;
+
+let current_row_matches_source_reaction ~reaction_matches ~post_id ~expected_stimulus_kind = function
+  | Current_reaction { metadata; reaction_kind; transition_receipt }
+    when reaction_matches reaction_kind transition_receipt ->
+    (match assoc_field "reaction" metadata.raw with
+     | Some reaction ->
+       string_field "post_id" reaction = Some post_id
+       && string_field "stimulus_kind" reaction = Some expected_stimulus_kind
+     | None -> false)
+  | Current_stimulus _ | Current_reaction _ -> false
+;;
+
+let event_queue_reaction_seen_for_source_result
+    ~reaction_matches
+    ~base_path
+    ~keeper_name
+    ~post_id
+    ~stimulus_kind
+  =
+  if String.equal post_id ""
+  then Error Evidence_invalid_stimulus_id
+  else
+    let reaction_seen = ref false in
+    let expected_stimulus_kind = stimulus_kind_to_string stimulus_kind in
+    let note_parsed_row row =
+      match decode_current_row ~keeper_name row with
+      | Ok row ->
+        if current_row_matches_source_reaction ~reaction_matches ~post_id
+             ~expected_stimulus_kind row then reaction_seen := true
+      | Error _ -> ()
+    in
+    let store = store_for_base_path ~base_path ~keeper_name in
+    match
+      Dated_jsonl.iter_all_entries_result store (function
+        | Dated_jsonl.Parsed row -> note_parsed_row row
+        | Dated_jsonl.Malformed_json _ -> ())
+    with
+    | Error error -> Error (Evidence_read_error error)
+    | Ok () -> Ok !reaction_seen
+;;
+
+let delivery_reaction_matches reaction_kind transition_receipt =
+  match reaction_kind, transition_receipt with
+  | Turn_started, None
+  | (Event_queue_ack | Event_queue_cancelled), Some _ -> true
+  (* A finished row is the turn's outcome, not its delivery: delivery is
+     proven by entry and by the queue transitions. *)
+  | Turn_finished, _
+  | Turn_started, Some _
+  | (Event_queue_ack | Event_queue_cancelled), None -> false
+;;
+
+let event_queue_delivery_seen_for_source_result =
+  event_queue_reaction_seen_for_source_result ~reaction_matches:delivery_reaction_matches
+;;
+
+type strict_delivery_evidence_error =
+  | Delivery_evidence_unavailable of event_queue_reaction_evidence_error
+  | Evidence_incomplete of
+      { malformed_row_count : int
+      ; semantic_invalid_row_count : int
+      ; first_reason : row_quarantine_reason
+      }
+
+let strict_delivery_evidence_error_to_string = function
+  | Delivery_evidence_unavailable error -> event_queue_reaction_evidence_error_to_string error
+  | Evidence_incomplete { malformed_row_count; semantic_invalid_row_count; first_reason } ->
+    Printf.sprintf
+      "reaction ledger delivery evidence incomplete: malformed_rows=%d semantic_invalid_rows=%d first_reason=%s"
+      malformed_row_count semantic_invalid_row_count (row_quarantine_reason_to_string first_reason)
+;;
+
+(* What the rows of some day files say about delivery. [proven] holds the
+   [(post_id, stimulus_kind)] of every row that proves a delivery; the other
+   fields count the rows that could not be read as evidence, with the reason
+   of the first one. The value is a pure function of the rows and
+   [keeper_name], which lets a day file's part be kept while the file only
+   grows. *)
+module Delivery_source_set = Set.Make (struct
+  type t = string * stimulus_kind
+
+  let compare = Stdlib.compare
+end)
+
+type delivery_evidence =
+  { proven : Delivery_source_set.t
+  ; malformed_rows : int
+  ; semantic_invalid_rows : int
+  ; first_invalid : row_quarantine_reason option
+  }
+
+let no_delivery_evidence =
+  { proven = Delivery_source_set.empty
+  ; malformed_rows = 0
+  ; semantic_invalid_rows = 0
+  ; first_invalid = None
+  }
+;;
+
+let note_first_invalid evidence reason =
+  match evidence.first_invalid with
+  | None -> Some reason
+  | Some _ as first -> first
+;;
+
+let add_delivery_evidence ~keeper_name evidence = function
+  | Dated_jsonl.Malformed_json _ ->
+    { evidence with
+      malformed_rows = evidence.malformed_rows + 1
+    ; first_invalid = note_first_invalid evidence Malformed_json_row
+    }
+  | Dated_jsonl.Parsed row ->
+    (match decode_current_row ~keeper_name row with
+     | Error reason ->
+       { evidence with
+         semantic_invalid_rows = evidence.semantic_invalid_rows + 1
+       ; first_invalid = note_first_invalid evidence reason
+       }
+     | Ok (Current_stimulus _) -> evidence
+     | Ok (Current_reaction { metadata; reaction_kind; transition_receipt }) ->
+       if not (delivery_reaction_matches reaction_kind transition_receipt)
+       then evidence
+       else
+         let reference = match assoc_field "reaction" metadata.raw with
+           | None -> Error Missing_reaction
+           | Some reaction -> decode_reaction_stimulus_reference reaction in
+         match reference with
+         | Ok source ->
+             { evidence with proven = Delivery_source_set.add source evidence.proven }
+         | Error reason ->
+             { evidence with semantic_invalid_rows = evidence.semantic_invalid_rows + 1;
+               first_invalid = note_first_invalid evidence reason })
+;;
+
+(* [later] holds the rows of files after the ones [earlier] holds, so the
+   first invalid row of the pair is the earlier one's when it has any. *)
+let append_delivery_evidence earlier later =
+  { proven = Delivery_source_set.union earlier.proven later.proven
+  ; malformed_rows = earlier.malformed_rows + later.malformed_rows
+  ; semantic_invalid_rows = earlier.semantic_invalid_rows + later.semantic_invalid_rows
+  ; first_invalid =
+      (match earlier.first_invalid with
+       | Some _ as first -> first
+       | None -> later.first_invalid)
+  }
+;;
+
+(* One pass over [store] from the day of [not_before] on. [0.] means no
+   floor: the whole ledger, as before. *)
+let read_delivery_evidence_uncached ~keeper_name store ~not_before =
+  let evidence = ref no_delivery_evidence in
+  let visit entry = evidence := add_delivery_evidence ~keeper_name !evidence entry in
+  let read_result =
+    if not_before <= 0.
+    then Dated_jsonl.iter_all_entries_result store visit
+    else
+      Dated_jsonl.iter_range_entries_result store
+        ~since:(Jsonl_writer.day_key ~ts:not_before) ~until:"9999-12-31"
+        visit
+  in
+  Result.map (fun () -> !evidence) read_result
+;;
+
+(* A day file is append-only and a day behind the clock gets no more rows, so
+   the evidence a file gave stays right and only the rows it gained since are
+   read. Without this every ask the wake pass inspects read the whole ledger
+   again, and the pass held the server for over a minute (#43299).
+
+   Each entry keeps the cursor [Dated_jsonl] issued for that file with the
+   evidence read up to it. Rotation, shrinkage and same-size edits invalidate
+   the cursor and the file is read again from its start. A file that cannot be
+   read incrementally (a torn trailing row, say) is read by
+   [read_delivery_evidence_uncached] instead, which judges it as before.
+   Keyed by file path, so two base paths never share an entry. *)
+type delivery_evidence_file =
+  { cursor : Dated_jsonl.append_cursor
+  ; read_through_bytes : int
+  ; file_evidence : delivery_evidence
+  }
+
+let delivery_evidence_files : (string, delivery_evidence_file) Hashtbl.t = Hashtbl.create 64
+let delivery_evidence_files_mu = Stdlib.Mutex.create ()
+
+let delivery_evidence_scan_store_label = "reaction_ledger_delivery"
+
+let file_size path =
+  match Unix.stat path with
+  | stats -> stats.Unix.st_size
+  | exception Unix.Unix_error _ -> 0
+;;
+
+(* Called with [delivery_evidence_files_mu] held. *)
+let read_delivery_evidence_file ~keeper_name path =
+  let read ~cursor ~init =
+    Dated_jsonl.fold_file_appended_entries_result path ~cursor ~init
+      ~f:(add_delivery_evidence ~keeper_name)
+  in
+  let keep ~scanned_from (file_evidence, cursor) =
+    let read_through_bytes = file_size path in
+    Otel_metric_store_core.inc_counter
+      Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+      ~labels:[ ("store", delivery_evidence_scan_store_label) ]
+      ~delta:(Float.of_int (max 0 (read_through_bytes - scanned_from)))
+      ();
+    Hashtbl.replace delivery_evidence_files path { cursor; read_through_bytes; file_evidence };
+    Ok file_evidence
+  in
+  let from_start () =
+    match read ~cursor:None ~init:no_delivery_evidence with
+    | Error _ as error -> error
+    | Ok (Dated_jsonl.Appended (evidence, cursor)) -> keep ~scanned_from:0 (evidence, cursor)
+    | Ok Dated_jsonl.Cursor_invalidated ->
+      Error
+        (Dated_jsonl.Io_error
+           { operation = Dated_jsonl.Read_file
+           ; path
+           ; detail = "a delivery evidence read without a cursor was invalidated"
+           })
+  in
+  match Hashtbl.find_opt delivery_evidence_files path with
+  | None -> from_start ()
+  | Some previous ->
+    (match read ~cursor:(Some previous.cursor) ~init:previous.file_evidence with
+     | Error _ as error -> error
+     | Ok (Dated_jsonl.Appended (evidence, cursor)) ->
+       keep ~scanned_from:previous.read_through_bytes (evidence, cursor)
+     | Ok Dated_jsonl.Cursor_invalidated ->
+       Hashtbl.remove delivery_evidence_files path;
+       from_start ())
+;;
+
+let read_delivery_evidence_cached ~keeper_name store ~not_before =
+  let open Result.Syntax in
+  let* paths =
+    Dated_jsonl.range_day_file_paths_result store
+      ~since:(Jsonl_writer.day_key ~ts:not_before) ~until:"9999-12-31"
+  in
+  Stdlib.Mutex.protect delivery_evidence_files_mu (fun () ->
+    List.fold_left
+      (fun acc path ->
+         let* acc = acc in
+         let* file_evidence = read_delivery_evidence_file ~keeper_name path in
+         Ok (append_delivery_evidence acc file_evidence))
+      (Ok no_delivery_evidence)
+      paths)
+;;
+
+let read_delivery_evidence ~keeper_name store ~not_before =
+  (* Move the complete read before acquiring its native cache mutex. Keeping
+     open/read/close inside the job avoids transferring a live channel across
+     cancellation. Its system thread belongs to the worker domain, so set
+     unions do not share the main scheduler's runtime lock. Queue ownership
+     and the durable enqueue transaction remain on the calling fiber. *)
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+    Eio_guard.run_in_systhread ~label:"keeper-delivery-evidence" (fun () ->
+      if not_before <= 0.
+      then read_delivery_evidence_uncached ~keeper_name store ~not_before
+      else
+        match read_delivery_evidence_cached ~keeper_name store ~not_before with
+        | Ok _ as evidence -> evidence
+        | Error _ -> read_delivery_evidence_uncached ~keeper_name store ~not_before))
+;;
+
+type strict_source_delivery_snapshot = delivery_evidence
+
+let strict_source_delivery_snapshot_result ~base_path ~keeper_name ~since =
+  let store = store_for_base_path ~base_path ~keeper_name in
+  read_delivery_evidence ~keeper_name store ~not_before:since
+  |> Result.map_error (fun error -> Delivery_evidence_unavailable (Evidence_read_error error))
+;;
+
+let source_delivery_seen_in_snapshot snapshot ~post_id ~stimulus_kind =
+  if String.equal post_id "" then
+    Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
+  else if Delivery_source_set.mem (post_id, stimulus_kind) snapshot.proven then Ok true
+  else match snapshot.first_invalid with
+    | None -> Ok false
+    | Some first_reason ->
+        Error (Evidence_incomplete
+          { malformed_row_count = snapshot.malformed_rows
+          ; semantic_invalid_row_count = snapshot.semantic_invalid_rows
+          ; first_reason })
+;;
+
+let event_queue_delivery_seen_for_source_strict_result
+      ~not_before ~base_path ~keeper_name ~post_id ~stimulus_kind =
+  if String.equal post_id "" then
+    Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
+  else
+    Result.bind
+      (strict_source_delivery_snapshot_result ~base_path ~keeper_name ~since:not_before)
+      (fun snapshot -> source_delivery_seen_in_snapshot snapshot ~post_id ~stimulus_kind)
+;;
+
+let nested_string_field outer inner json =
+  match assoc_field outer json with
+  | Some nested -> string_field inner nested
+  | None -> None
+;;
+
+let nested_float_field outer inner json =
+  match assoc_field outer json with
+  | Some nested -> float_field inner nested
+  | None -> None
+;;
+
+let summary_schema = "keeper.reaction_ledger.summary.v2"
+let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v3"
+
+let cap_list limit values =
+  let rec loop remaining acc = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | value :: rest -> loop (remaining - 1) (value :: acc) rest
+  in
+  loop limit [] values
+;;
+
+let increment_count tbl key =
+  let current =
+    match Hashtbl.find_opt tbl key with
+    | Some value -> value
+    | None -> 0
+  in
+  Hashtbl.replace tbl key (current + 1)
+;;
+
+let string_count_table_json ~field tbl =
+  Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []
+  |> List.sort (fun (left_name, left_count) (right_name, right_count) ->
+    let count_cmp = Int.compare right_count left_count in
+    if count_cmp <> 0 then count_cmp else String.compare left_name right_name)
+  |> List.map (fun (name, count) ->
+    `Assoc [ field, `String name; "count", `Int count ])
+  |> fun values -> `List values
+;;
+
+type durable_event_queue_health =
+  { keeper_name : string
+  ; durable_event_queue_count : int
+  ; durable_event_queue_pending_count : int
+  ; immediate_count : int
+  ; oldest_source_arrived_at : float option
+  ; newest_source_arrived_at : float option
+  ; selections : Keeper_event_queue_state.pending_selection list
+  ; payload_kind_counts : (string * int) list
+  ; read_errors : Keeper_event_queue_persistence.snapshot_read_error list
+  }
+
+let payload_kind_count_pairs stimuli =
+  let tbl = Hashtbl.create 8 in
+  List.iter
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+      increment_count tbl (Keeper_event_queue.payload_kind_label stimulus.payload))
+    stimuli;
+  Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []
+  |> List.sort (fun (left_name, left_count) (right_name, right_count) ->
+    let count_cmp = Int.compare right_count left_count in
+    if count_cmp <> 0 then count_cmp else String.compare left_name right_name)
+;;
+
+let durable_event_queue_health ~base_path ~keeper_name =
+  let snapshot =
+    Keeper_event_queue_persistence.load_selections_with_errors ~base_path ~keeper_name
+  in
+  let stimuli = List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
+    selection.source) snapshot.pending in
+  let oldest_source_arrived_at, newest_source_arrived_at =
+    List.fold_left
+      (fun (oldest, newest) (stimulus : Keeper_event_queue.stimulus) ->
+        let arrived_at = stimulus.arrived_at in
+        ( (match oldest with
+           | None -> Some arrived_at
+           | Some value -> Some (Float.min value arrived_at))
+        , match newest with
+          | None -> Some arrived_at
+          | Some value -> Some (Float.max value arrived_at) ))
+      (None, None)
+      stimuli
+  in
+  let immediate_count =
+    List.fold_left
+      (fun acc (stimulus : Keeper_event_queue.stimulus) ->
+        match stimulus.urgency with
+        | Keeper_event_queue.Immediate -> acc + 1
+        | Normal | Low -> acc)
+      0
+      stimuli
+  in
+  { keeper_name
+  ; durable_event_queue_count = List.length stimuli
+  ; durable_event_queue_pending_count = List.length snapshot.pending
+  ; immediate_count
+  ; oldest_source_arrived_at
+  ; newest_source_arrived_at
+  ; selections = snapshot.pending
+  ; payload_kind_counts = payload_kind_count_pairs stimuli
+  ; read_errors = snapshot.read_errors
+  }
+;;
+
+let durable_event_queue_health_json ~now health =
+  let float_opt_to_json = function
+    | None -> `Null
+    | Some value -> `Float value
+  in
+  let age_opt_to_json = function
+    | None -> `Null
+    | Some value -> `Int (int_of_float (max 0.0 (now -. value)))
+  in
+  let read_errors_json =
+    List.map
+      (fun (error : Keeper_event_queue_persistence.snapshot_read_error) ->
+        `Assoc
+          [ ( "kind"
+            , `String
+                (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string
+                   error.kind) )
+          ; ( "path"
+            , match error.path with
+              | Some path -> `String path
+              | None -> `Null )
+          ; "message", `String error.message
+          ])
+      health.read_errors
+  in
+  `Assoc
+    [ "keeper_name", `String health.keeper_name
+    ; "durable_event_queue_count", `Int health.durable_event_queue_count
+    ; ( "durable_event_queue_pending_count"
+      , `Int health.durable_event_queue_pending_count )
+    ; "immediate_count", `Int health.immediate_count
+    ; "oldest_source_arrived_at_unix", float_opt_to_json health.oldest_source_arrived_at
+    ; "oldest_source_age_seconds", age_opt_to_json health.oldest_source_arrived_at
+    ; "newest_source_arrived_at_unix", float_opt_to_json health.newest_source_arrived_at
+    ; "newest_source_age_seconds", age_opt_to_json health.newest_source_arrived_at
+    ; "queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
+        (queue_residence_of_selections ~now ~complete:(health.read_errors = []) health.selections))
+    ; "read_error_count", `Int (List.length health.read_errors)
+    ; "read_errors", `List read_errors_json
+    ; ( "payload_kind_counts"
+      , `List
+          (List.map
+             (fun (payload_kind, count) ->
+               `Assoc [ "payload_kind", `String payload_kind; "count", `Int count ])
+             health.payload_kind_counts) )
+    ]
+;;
+
+let compare_board_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
+  let cmp = Float.compare ts_a ts_b in
+  if cmp <> 0 then cmp else Option.compare String.compare post_id_a post_id_b
+;;
+
+let board_stimulus_token metadata stimulus_kind =
+  match stimulus_kind with
+  | Board_signal ->
+    let updated_at =
+      nested_float_field "stimulus" "board_updated_at_unix" metadata.raw
+    in
+    let post_id = nested_string_field "stimulus" "post_id" metadata.raw in
+    Option.map (fun timestamp -> timestamp, post_id) updated_at
+  | Bootstrap | Fusion_completed | Schedule_due
+  | Connector_attention | Hitl_resolved | Ask_answered
+  | Completion_authority_rejected
+  | Task_outcome
+  | Task_cancelled
+  | Workspace_message
+  | Delegate_completed
+  | Composition_completed | Owned_job_completed | Addon_operation_changed | Tool_result_ready -> None
+;;
+
+(* The per-keeper status this module publishes. The fleet roll-up used to
+   recover it by reading back the JSON it had just written and comparing the
+   string, so a renamed value or a missing field read as "not degraded" with
+   nothing to fail the build (#27560). The value travels beside the JSON now
+   and the string exists only at the boundary. *)
+type keeper_summary_status =
+  | Summary_empty
+  | Summary_ok
+  | Summary_degraded
+  | Summary_unknown
+  | Summary_unavailable
+      (** The store could not be reached at all, which is not the same as
+          reaching it and finding nothing ([Summary_empty]) or reading it and
+          finding trouble ([Summary_degraded]). It was emitted as a bare
+          string beside a four-case type, so the vocabulary a reader had to
+          handle was one wider than anything in the code said (#27560). *)
+
+let keeper_summary_status_to_string = function
+  | Summary_empty -> "empty"
+  | Summary_ok -> "ok"
+  | Summary_degraded -> "degraded"
+  | Summary_unknown -> "unknown"
+  | Summary_unavailable -> "unavailable"
+;;
+
+let summarize_rows ~keeper_name rows =
+  let scanned_row_count = List.length rows in
+  let current_event_ids = ref Event_id_set.empty in
+  let row_count = ref 0 in
+  let stimulus_count = ref 0 in
+  let reaction_count = ref 0 in
+  let turn_started_count = ref 0 in
+  let turn_finished_count = ref 0 in
+  let event_queue_ack_count = ref 0 in
+  let event_queue_cancelled_count = ref 0 in
+  let quarantined_row_count = ref 0 in
+  let quarantine_reason_counts = Hashtbl.create 8 in
+  let latest_recorded_at = ref None in
+  let latest_stimulus_id = ref None in
+  let stimulus_seen = Hashtbl.create 16 in
+  let reacted_stimulus_ids = ref Event_id_set.empty in
+  let board_stimulus_tokens = Hashtbl.create 16 in
+  let stimulus_order = ref [] in
+  let latest_board_cursor = ref None in
+  let cursor_swept_stimulus_count = ref 0 in
+  let note_quarantine reason =
+    incr quarantined_row_count;
+    increment_count quarantine_reason_counts (row_quarantine_reason_to_string reason)
+  in
+  let remember_stimulus stimulus_id =
+    if not (Hashtbl.mem stimulus_seen stimulus_id) then begin
+      Hashtbl.add stimulus_seen stimulus_id
+        (Event_id_set.mem stimulus_id !reacted_stimulus_ids);
+      stimulus_order := stimulus_id :: !stimulus_order
+    end
+  in
+  let mark_reacted stimulus_id =
+    (* Recovery may append a stimulus observation after its reaction receipt.
+       Both rows identify the same occurrence; append order cannot undo proof
+       that it reacted. Keep reaction-only identities until their stimulus is
+       encountered in this observation window. *)
+    reacted_stimulus_ids := Event_id_set.add stimulus_id !reacted_stimulus_ids;
+    match Hashtbl.find_opt stimulus_seen stimulus_id with
+    | Some _ -> Hashtbl.replace stimulus_seen stimulus_id true
+    | None -> ()
+  in
+  let mark_cursor_swept stimulus_id =
+    match Hashtbl.find_opt stimulus_seen stimulus_id with
+    | Some false ->
+      Hashtbl.replace stimulus_seen stimulus_id true;
+      incr cursor_swept_stimulus_count
+    | Some true | None -> ()
+  in
+  let remember_board_stimulus metadata stimulus_kind =
+    match board_stimulus_token metadata stimulus_kind with
+    | Some stimulus_token ->
+      Hashtbl.replace board_stimulus_tokens metadata.stimulus_id stimulus_token;
+      (match !latest_board_cursor with
+       | Some cursor_token
+         when compare_board_cursor_token stimulus_token cursor_token <= 0 ->
+         mark_cursor_swept metadata.stimulus_id
+       | _ -> ())
+    | None -> ()
+  in
+  let note_reaction_kind reaction_kind transition_receipt =
+    match reaction_kind, transition_receipt with
+    | Turn_started, None -> incr turn_started_count
+    | Turn_finished, None -> incr turn_finished_count
+    | Event_queue_ack, Some _ -> incr event_queue_ack_count
+    | Event_queue_cancelled, Some _ -> incr event_queue_cancelled_count
+    | Turn_finished, Some _
+    | Turn_started, Some _
+    | (Event_queue_ack | Event_queue_cancelled), None -> ()
+  in
+  let note_current_row current_row =
+    let metadata =
+      match current_row with
+      | Current_stimulus { metadata; _ }
+      | Current_reaction { metadata; _ } -> metadata
+    in
+    if Event_id_set.mem metadata.event_id !current_event_ids
+    then ()
+    else begin
+      current_event_ids := Event_id_set.add metadata.event_id !current_event_ids;
+      incr row_count;
+      latest_recorded_at := Some metadata.recorded_at;
+      latest_stimulus_id := Some metadata.stimulus_id;
+      match current_row with
+      | Current_stimulus { metadata; stimulus_kind } ->
+        incr stimulus_count;
+        remember_stimulus metadata.stimulus_id;
+        remember_board_stimulus metadata stimulus_kind
+      | Current_reaction { metadata; reaction_kind; transition_receipt } ->
+        incr reaction_count;
+        note_reaction_kind reaction_kind transition_receipt;
+        mark_reacted metadata.stimulus_id
+    end
+  in
+  List.iter
+    (function
+      | Dated_jsonl.Malformed_json _ -> note_quarantine Malformed_json_row
+      | Dated_jsonl.Parsed row ->
+        (match decode_current_row ~keeper_name row with
+         | Error reason -> note_quarantine reason
+         | Ok current_row -> note_current_row current_row))
+    rows;
+  let pending_stimulus_ids =
+    !stimulus_order
+    |> List.rev
+    |> List.filter (fun id ->
+      match Hashtbl.find_opt stimulus_seen id with
+      | Some false -> true
+      | Some true | None -> false)
+  in
+  let pending_stimulus_count = List.length pending_stimulus_ids in
+  let degraded_signal_count = pending_stimulus_count + !quarantined_row_count in
+  let status =
+    if !row_count = 0 && !quarantined_row_count = 0 then Summary_empty
+    else if degraded_signal_count = 0 then Summary_ok
+    else Summary_degraded
+  in
+  ( status
+  , `Assoc
+    [ "schema", `String summary_schema
+    ; "keeper_name", `String keeper_name
+    ; "status", `String (keeper_summary_status_to_string status)
+    ; "operator_action_required", `Bool (degraded_signal_count > 0)
+    ; "scanned_row_count", `Int scanned_row_count
+    ; "row_count", `Int !row_count
+    ; "stimulus_count", `Int !stimulus_count
+    ; "reaction_count", `Int !reaction_count
+    ; "turn_started_count", `Int !turn_started_count
+    ; "turn_finished_count", `Int !turn_finished_count
+    ; "event_queue_ack_count", `Int !event_queue_ack_count
+    ; "event_queue_cancelled_count", `Int !event_queue_cancelled_count
+    ; "quarantined_row_count", `Int !quarantined_row_count
+    ; ( "quarantine_reason_counts"
+      , string_count_table_json ~field:"reason" quarantine_reason_counts )
+    ; "cursor_swept_stimulus_count", `Int !cursor_swept_stimulus_count
+    ; "pending_stimulus_count", `Int pending_stimulus_count
+    ; ( "pending_stimulus_ids"
+      , `List
+          (List.map
+             (fun value -> `String value)
+             (cap_list 8 pending_stimulus_ids)) )
+    ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
+    ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
+    ; "read_error", `Null
+    ] )
+;;
+
+let error_summary ~keeper_name error =
+  ( Summary_unknown
+  , `Assoc
+    [ "schema", `String summary_schema
+    ; "keeper_name", `String keeper_name
+    ; "status", `String (keeper_summary_status_to_string Summary_unknown)
+    ; "operator_action_required", `Bool true
+    ; "scanned_row_count", `Int 0
+    ; "row_count", `Int 0
+    ; "stimulus_count", `Int 0
+    ; "reaction_count", `Int 0
+    ; "turn_started_count", `Int 0
+    ; "turn_finished_count", `Int 0
+    ; "event_queue_ack_count", `Int 0
+    ; "event_queue_cancelled_count", `Int 0
+    ; "quarantined_row_count", `Int 0
+    ; "quarantine_reason_counts", `List []
+    ; "cursor_swept_stimulus_count", `Int 0
+    ; "pending_stimulus_count", `Int 0
+    ; "pending_stimulus_ids", `List []
+    ; "latest_recorded_at_unix", `Null
+    ; "latest_stimulus_id", `Null
+    ; "read_error", `String error
+    ] )
+;;
+
+(* The status travels with the JSON so the fleet roll-up can read it without
+   parsing what this module just wrote. *)
+let summary_with_status ~base_path ~keeper_name ~limit =
+  try
+    match
+      Dated_jsonl.read_recent_result
+        (store_for_base_path ~base_path ~keeper_name)
+        limit
+    with
+    | Ok rows -> summarize_rows ~keeper_name rows
+    | Error error ->
+      error_summary
+        ~keeper_name
+        (Dated_jsonl.read_error_to_string error)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> error_summary ~keeper_name (Printexc.to_string exn)
+;;
+
+let summary_for_keeper ~base_path ~keeper_name ~limit =
+  snd (summary_with_status ~base_path ~keeper_name ~limit)
+;;
+
+let summary_read_error_count json =
+  match assoc_field "read_error" json with
+  | Some (`String _) -> 1
+  | _ -> 0
+;;
+
+(* Written out so the exhaustive match is what fails when a case is added,
+   rather than a caller quietly missing the new string. *)
+let fleet_summary_status_strings =
+  List.map
+    keeper_summary_status_to_string
+    [ Summary_empty; Summary_ok; Summary_degraded; Summary_unknown; Summary_unavailable ]
+;;
+
+let unavailable_fleet_summary_json () =
+  `Assoc
+    [ "schema", `String fleet_summary_schema
+    ; "status", `String (keeper_summary_status_to_string Summary_unavailable)
+    ; "status_reasons", `List []
+    ; "operator_action_required", `Bool false
+    ; "keeper_count", `Int 0
+    ; "keeper_names", `List []
+    ; "scanned_row_count", `Int 0
+    ; "row_count", `Int 0
+    ; "stimulus_count", `Int 0
+    ; "reaction_count", `Int 0
+    ; "turn_started_count", `Int 0
+    ; "turn_finished_count", `Int 0
+    ; "event_queue_ack_count", `Int 0
+    ; "event_queue_cancelled_count", `Int 0
+    ; "quarantined_row_count", `Int 0
+    ; "quarantine_reason_counts", `List []
+    ; "quarantined_rows_by_keeper", `List []
+    ; "cursor_swept_stimulus_count", `Int 0
+    ; "pending_stimulus_count", `Int 0
+    ; "durable_event_queue_count", `Int 0
+    ; "durable_event_queue_pending_count", `Int 0
+    ; "durable_event_queue_discovered_keeper_count", `Int 0
+    ; "durable_event_queue_discovered_keeper_names", `List []
+    ; "durable_event_queue_discovery_error", `Null
+    ; "durable_event_queue_discovery_error_count", `Int 0
+    ; "durable_event_queue_residence", Keeper_event_queue_persistence.(
+        queue_residence_to_yojson (Unknown Queue_observation_incomplete))
+    ; "durable_event_queue_read_error_count", `Int 0
+    ; "durable_event_queue_read_errors_by_keeper", `List []
+    ; "durable_event_queue_by_keeper", `List []
+    ; "durable_event_queue_payload_counts", `List []
+    ; "pending_by_keeper", `List []
+    ; "read_error_count", `Int 0
+    ; "keepers", `List []
+    ]
+;;
+
+let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
+  let durable_event_queue_discovery =
+    Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
+      ~base_path
+  in
+  let keeper_names =
+    List.sort_uniq
+      String.compare
+      (keeper_names @ durable_event_queue_discovery.keeper_names)
+  in
+  (* NDT-OK: fleet summary health renders source-age telemetry at the read
+     boundary; keeper control flow never branches on this timestamp. *)
+  let now = Unix.gettimeofday () in
+  let summaries_with_status =
+    List.map
+      (fun keeper_name ->
+        summary_with_status ~base_path ~keeper_name ~limit:limit_per_keeper)
+      keeper_names
+  in
+  let summaries = List.map snd summaries_with_status in
+  let durable_event_queue_summaries =
+    List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
+  in
+  let total_int name =
+    List.fold_left (fun acc summary -> acc + int_field name summary) 0 summaries
+  in
+  let durable_event_queue_count =
+    List.fold_left
+      (fun acc summary -> acc + summary.durable_event_queue_count)
+      0
+      durable_event_queue_summaries
+  in
+  let durable_event_queue_pending_count =
+    List.fold_left
+      (fun acc summary -> acc + summary.durable_event_queue_pending_count)
+      0
+      durable_event_queue_summaries
+  in
+  let durable_event_queue_by_keeper =
+    durable_event_queue_summaries
+    |> List.filter (fun summary -> summary.durable_event_queue_count > 0)
+    |> List.map
+         (durable_event_queue_health_json ~now)
+  in
+  let durable_event_queue_read_error_count =
+    List.fold_left
+      (fun acc summary -> acc + List.length summary.read_errors)
+      0
+      durable_event_queue_summaries
+  in
+  let durable_event_queue_read_errors_by_keeper =
+    durable_event_queue_summaries
+    |> List.filter (fun summary -> summary.read_errors <> [])
+    |> List.map
+         (durable_event_queue_health_json ~now)
+  in
+  let durable_event_queue_payload_counts =
+    let tbl = Hashtbl.create 8 in
+    List.iter
+      (fun summary ->
+        List.iter
+          (fun (payload_kind, count) ->
+            let current =
+              match Hashtbl.find_opt tbl payload_kind with
+              | Some value -> value
+              | None -> 0
+            in
+            Hashtbl.replace tbl payload_kind (current + count))
+          summary.payload_kind_counts)
+      durable_event_queue_summaries;
+    string_count_table_json ~field:"payload_kind" tbl
+  in
+  let pending_by_keeper =
+    List.filter_map
+      (fun summary ->
+        let pending_count = int_field "pending_stimulus_count" summary in
+        if pending_count = 0
+        then None
+        else
+          Some
+            (`Assoc
+               [ "keeper_name"
+               , (match string_field "keeper_name" summary with
+                  | Some value -> `String value
+                  | None -> `String "unknown")
+               ; "pending_stimulus_count", `Int pending_count
+               ; ( "pending_stimulus_ids"
+                 , match assoc_field "pending_stimulus_ids" summary with
+                   | Some value -> value
+                   | None -> `List [] )
+               ]))
+      summaries
+  in
+  let quarantined_rows_by_keeper =
+    List.filter_map
+      (fun summary ->
+        let quarantined_count = int_field "quarantined_row_count" summary in
+        if quarantined_count = 0
+        then None
+        else
+          Some
+            (`Assoc
+               [ "keeper_name"
+               , (match string_field "keeper_name" summary with
+                  | Some value -> `String value
+                  | None -> `String "unknown")
+               ; "quarantined_row_count", `Int quarantined_count
+               ; ( "quarantine_reason_counts"
+                 , `List (list_field "quarantine_reason_counts" summary) )
+               ]))
+      summaries
+  in
+  let quarantine_reason_counts =
+    let tbl = Hashtbl.create 8 in
+    List.iter
+      (fun summary ->
+        List.iter
+          (fun item ->
+            match string_field "reason" item with
+            | Some reason ->
+              let count = int_field "count" item in
+              (match Hashtbl.find_opt tbl reason with
+               | Some prior -> Hashtbl.replace tbl reason (prior + count)
+               | None -> Hashtbl.add tbl reason count)
+            | None -> ())
+          (list_field "quarantine_reason_counts" summary))
+      summaries;
+    string_count_table_json ~field:"reason" tbl
+  in
+  let read_error_count =
+    List.fold_left
+      (fun acc summary -> acc + summary_read_error_count summary)
+      0
+      summaries
+  in
+  let pending_count = total_int "pending_stimulus_count" in
+  let quarantined_row_count = total_int "quarantined_row_count" in
+  let row_count = total_int "row_count" in
+  let durable_event_queue_discovery_error_count =
+    match durable_event_queue_discovery.read_error with
+    | Some _ -> 1
+    | None -> 0
+  in
+  let status_reasons =
+    []
+    |> (fun reasons -> if read_error_count > 0 then "read_error" :: reasons else reasons)
+    |> (fun reasons ->
+      if durable_event_queue_discovery_error_count > 0
+      then "durable_event_queue_discovery_error" :: reasons
+      else reasons)
+    |> (fun reasons ->
+      if durable_event_queue_read_error_count > 0
+      then "durable_event_queue_read_error" :: reasons
+      else reasons)
+    |> (fun reasons ->
+      if pending_count > 0 then "reaction_ledger_pending_stimulus" :: reasons else reasons)
+    |> (fun reasons ->
+      if quarantined_row_count > 0
+      then "reaction_ledger_quarantined_row" :: reasons
+      else reasons)
+    |> List.rev
+  in
+  let status =
+    if
+      read_error_count > 0
+      || durable_event_queue_discovery_error_count > 0
+      || durable_event_queue_read_error_count > 0
+    then Summary_unknown
+    else if
+      List.exists
+        (fun (status, _) -> status = Summary_degraded)
+        summaries_with_status
+    then Summary_degraded
+    else if row_count = 0 && durable_event_queue_count = 0 then Summary_empty
+    else Summary_ok
+  in
+  `Assoc
+    [ "schema", `String fleet_summary_schema
+    ; "status", `String (keeper_summary_status_to_string status)
+    ; "status_reasons", `List (List.map (fun value -> `String value) status_reasons)
+    ; ( "operator_action_required"
+      , `Bool
+          (status_reasons <> []) )
+    ; "keeper_count", `Int (List.length keeper_names)
+    ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
+    ; "scanned_row_count", `Int (total_int "scanned_row_count")
+    ; "row_count", `Int row_count
+    ; "stimulus_count", `Int (total_int "stimulus_count")
+    ; "reaction_count", `Int (total_int "reaction_count")
+    ; "turn_started_count", `Int (total_int "turn_started_count")
+    ; "turn_finished_count", `Int (total_int "turn_finished_count")
+    ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
+    ; ( "event_queue_cancelled_count"
+      , `Int (total_int "event_queue_cancelled_count") )
+    ; "quarantined_row_count", `Int quarantined_row_count
+    ; "quarantine_reason_counts", quarantine_reason_counts
+    ; "quarantined_rows_by_keeper", `List quarantined_rows_by_keeper
+    ; "cursor_swept_stimulus_count", `Int (total_int "cursor_swept_stimulus_count")
+    ; "pending_stimulus_count", `Int pending_count
+    ; "durable_event_queue_count", `Int durable_event_queue_count
+    ; "durable_event_queue_pending_count", `Int durable_event_queue_pending_count
+    ; ( "durable_event_queue_discovered_keeper_count"
+      , `Int (List.length durable_event_queue_discovery.keeper_names) )
+    ; ( "durable_event_queue_discovered_keeper_names"
+      , `List
+          (List.map
+             (fun value -> `String value)
+             durable_event_queue_discovery.keeper_names) )
+    ; ( "durable_event_queue_discovery_error"
+      , match durable_event_queue_discovery.read_error with
+        | Some error -> `String error
+        | None -> `Null )
+    ; ( "durable_event_queue_discovery_error_count"
+      , `Int durable_event_queue_discovery_error_count )
+    ; "durable_event_queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
+        (queue_residence_of_selections ~now
+           ~complete:(durable_event_queue_discovery_error_count = 0
+                      && durable_event_queue_read_error_count = 0)
+           (List.concat_map (fun health -> health.selections) durable_event_queue_summaries)))
+    ; "durable_event_queue_read_error_count", `Int durable_event_queue_read_error_count
+    ; ( "durable_event_queue_read_errors_by_keeper"
+      , `List durable_event_queue_read_errors_by_keeper )
+    ; "durable_event_queue_by_keeper", `List durable_event_queue_by_keeper
+    ; "durable_event_queue_payload_counts", durable_event_queue_payload_counts
+    ; "pending_by_keeper", `List pending_by_keeper
+    ; "read_error_count", `Int read_error_count
+    ; "keepers", `List summaries
+    ]
+;;

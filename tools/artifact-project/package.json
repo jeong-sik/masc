@@ -1,0 +1,25 @@
+{
+  "name": "@masc/artifact-project",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --experimental-vm-modules --test test/*.test.ts",
+    "start": "node --experimental-strip-types src/cli.ts"
+  },
+  "dependencies": {
+    "css-tree": "3.2.1",
+    "esbuild": "0.28.2",
+    "parse5": "8.0.1"
+  },
+  "devDependencies": {
+    "@types/css-tree": "3.2.0",
+    "@types/node": "22.19.17",
+    "happy-dom": "21.0.4",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "README.md": "27a1f2828f89695ebd84fad6b184cec6ce00bdd1f7aaac29298eb0676a8e2a07",
+  "actual-task004-parser.json": "65f4c263902b6c675af349fdcc8e3fd179d960f86d5dbccd86b930f7762894db",
+  "broken-parser.json": "0714455d95ed8d125279b61a99dd395e0e0a80195584fdafa03f59a0d8ea2aad",
+  "broken.pptx": "d7b00ec41e98c6a427dac39da2486212662cf5c096786b42ae43459e8483b110",
+  "expected.json": "baf2c815e5b1c92fcb5c8c45f319ad44f649d1a974e03c063e6c24b3b26821c5",
+  "external-parser.json": "91165c57fba1fa36c82124908970e8fddd5ef1e74ad03cfda9024c6067031207",
+  "external.pptx": "6ab5c5d4e4f67c46bd8de6cc4e51fbdbd7aaa044c94d5d39fda0bbe7bf79e457",
+  "parser-checks.json": "714f07029b02a6f13f0c8315df69f678dc445f7578058355b6bb89adf50c0d7b",
+  "presentation.pptx": "0ba02098db91d617b43d837457bbf48db5af75cbe4226e747da4c4ba181e1daa",
+  "valid-parser.json": "4496d811e57321dc08577f53b65bba8a7d8934efa8acf095ae94dff11b5bb21f"
+}

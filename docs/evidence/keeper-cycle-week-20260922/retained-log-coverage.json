@@ -1,0 +1,137 @@
+{
+  "timezone": "Asia/Seoul",
+  "window": "2026-09-12..19 calendar dates",
+  "files": [
+    {
+      "file": "system_log_2026-09-11.jsonl",
+      "present": false
+    },
+    {
+      "file": "system_log_2026-09-12.jsonl",
+      "present": false
+    },
+    {
+      "file": "system_log_2026-09-13.jsonl",
+      "present": false
+    },
+    {
+      "file": "system_log_2026-09-14.jsonl",
+      "present": true,
+      "bytes": 40514611,
+      "sha256": "e5055082463e6815ca06c466b5b6489adaa5b31497d653d2d92c7e3821bfea6e",
+      "invalid_lines": 0
+    },
+    {
+      "file": "system_log_2026-09-15.jsonl",
+      "present": true,
+      "bytes": 49977216,
+      "sha256": "33a81921bd39c7be232034b63880e335a3f7347b0933cf4bef9b3140f0d6040d",
+      "invalid_lines": 0
+    },
+    {
+      "file": "system_log_2026-09-16.jsonl",
+      "present": true,
+      "bytes": 50805287,
+      "sha256": "bd7970fbed03b55eda651113d1203ba640dc1edf90d4130d01d349ce78d83e0f",
+      "invalid_lines": 0
+    },
+    {
+      "file": "system_log_2026-09-17.jsonl",
+      "present": true,
+      "bytes": 41436545,
+      "sha256": "7bf2ce284d94cf44925862e98a4ef5ac34247c5a2114f8aab8543b18bccba8e7",
+      "invalid_lines": 0
+    },
+    {
+      "file": "system_log_2026-09-18.jsonl",
+      "present": true,
+      "bytes": 40806235,
+      "sha256": "5512c4c5c1e875b72b00b229aa024b46f86823a24a0bf507baa54d3bb6f0f6b4",
+      "invalid_lines": 0
+    },
+    {
+      "file": "system_log_2026-09-19.jsonl",
+      "present": true,
+      "bytes": 46433379,
+      "sha256": "7b6dcd68cff59b2bc9784d24a483e8363f4d16de08960e6eb39dc93ced0ad6c7",
+      "invalid_lines": 0
+    }
+  ],
+  "days": {
+    "2026-09-12": {
+      "rows": 0,
+      "first": null,
+      "last": null,
+      "levels": {}
+    },
+    "2026-09-13": {
+      "rows": 0,
+      "first": null,
+      "last": null,
+      "levels": {}
+    },
+    "2026-09-14": {
+      "rows": 78842,
+      "first": "2026-09-14T00:00:01Z",
+      "last": "2026-09-14T14:59:59Z",
+      "levels": {
+        "INFO": 66955,
+        "WARN": 3382,
+        "ERROR": 8505
+      }
+    },
+    "2026-09-15": {
+      "rows": 134534,
+      "first": "2026-09-14T15:00:00Z",
+      "last": "2026-09-15T14:59:55Z",
+      "levels": {
+        "INFO": 121252,
+        "ERROR": 8821,
+        "WARN": 4461
+      }
+    },
+    "2026-09-16": {
+      "rows": 136403,
+      "first": "2026-09-15T15:00:05Z",
+      "last": "2026-09-16T14:59:57Z",
+      "levels": {
+        "INFO": 130582,
+        "WARN": 4517,
+        "ERROR": 1304
+      }
+    },
+    "2026-09-17": {
+      "rows": 137547,
+      "first": "2026-09-16T15:00:02Z",
+      "last": "2026-09-17T14:59:59Z",
+      "levels": {
+        "INFO": 130929,
+        "WARN": 5361,
+        "ERROR": 1257
+      }
+    },
+    "2026-09-18": {
+      "rows": 103668,
+      "first": "2026-09-17T15:00:00Z",
+      "last": "2026-09-18T14:59:59Z",
+      "levels": {
+        "INFO": 79812,
+        "WARN": 23019,
+        "ERROR": 837
+      }
+    },
+    "2026-09-19": {
+      "rows": 135062,
+      "first": "2026-09-18T15:00:00Z",
+      "last": "2026-09-19T14:59:54Z",
+      "levels": {
+        "INFO": 122465,
+        "WARN": 10871,
+        "ERROR": 1726
+      }
+    }
+  },
+  "limitation": "retained system-log coverage only; levels/counts are not runtime completion or deployed-commit proof",
+  "observed_at": "2026-09-22T01:37:36+09:00",
+  "source_commit": "a90400b25f77f08ce51e159b5df81efe054c14b7"
+}

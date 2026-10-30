@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│?:help  Esc:back  Tab:section  j/k:move  D:raw                                                                                                                │
+│native-ui-proof · Native MIDI phrase playback · detached                                                                                                      │
+│[1 Results]  2 Links  3 Installation  4 Records                                                                                                               │
+│                                                                                                                                                              │
+│Input: Select an active worker to observe; D shows retained state.                                                                                            │
+│Latest native phrase render and local player process state                                                                                                    │
+│No result rows in this received view.                                                                                                                         │
+│r:refresh · D:raw details                                                                                                                                     │
+│                                                                                                                                                              │
+│Received snapshot coverage · all Add-ons                                                                                                                      │
+│01a15e78-1615-7000-b53a-3ae8691b7b31 · complete · cursor 1                                                                                                    │
+│vst-phrase · complete · cursor 2 · Synthetic input for native TUI lifecycle qualification; no audio                                                           │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  retained history · D:details  D:raw  J/K:scroll  r:refresh
+ Choose a Keeper before writing · i:choose

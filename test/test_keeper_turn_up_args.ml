@@ -1,0 +1,3455 @@
+open Alcotest
+open Masc
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+    f
+;;
+
+let test_resolve_mention_targets_uses_fallback_when_absent () =
+  check
+    (list string)
+    "fallback targets"
+    [ "existing" ]
+    (Keeper_turn_up_args.resolve_mention_targets
+       ~mention_targets_opt:None
+       ~fallback_targets:[ "existing" ]
+       ~name:"keeper-a")
+
+let test_resolve_mention_targets_preserves_explicit_clear () =
+  check
+    (list string)
+    "explicit clear"
+    []
+    (Keeper_turn_up_args.resolve_mention_targets
+       ~mention_targets_opt:(Some [])
+       ~fallback_targets:[ "existing" ]
+       ~name:"keeper-a")
+
+let test_resolve_mention_targets_normalizes_explicit_values () =
+  check
+    (list string)
+    "deduped explicit targets"
+    [ "alpha"; "beta" ]
+    (Keeper_turn_up_args.resolve_mention_targets
+       ~mention_targets_opt:(Some [ " alpha "; ""; "beta"; "alpha" ])
+       ~fallback_targets:[ "existing" ]
+       ~name:"keeper-a")
+
+let test_resolve_board_interests_uses_fallback_when_absent () =
+  check
+    (list string)
+    "fallback interests"
+    [ "MASC runtime" ]
+    (Keeper_turn_up_args.resolve_board_interests
+       ~board_interests_opt:None
+       ~fallback_interests:[ " MASC runtime "; "MASC runtime" ])
+
+let test_resolve_board_interests_preserves_explicit_clear () =
+  check
+    (list string)
+    "explicit clear"
+    []
+    (Keeper_turn_up_args.resolve_board_interests
+       ~board_interests_opt:(Some [])
+       ~fallback_interests:[ "MASC runtime" ])
+
+let test_resolve_board_interests_normalizes_explicit_values () =
+  check
+    (list string)
+    "canonical interests"
+    [ "Board"; "Memory" ]
+    (Keeper_turn_up_args.resolve_board_interests
+       ~board_interests_opt:(Some [ " Memory "; ""; "Board"; "Memory" ])
+       ~fallback_interests:[ "ignored" ])
+
+let override_json value = `Assoc [ "max_context_override", value ]
+
+let rec rm_rf path =
+  if Sys.is_directory path
+  then (
+    Array.iter (fun entry -> rm_rf (Filename.concat path entry)) (Sys.readdir path);
+    Unix.rmdir path)
+  else Sys.remove path
+
+(* Recursive, not [Unix.rmdir]: once any test in this binary has installed the
+   process-global Eio fs (the persist round-trip below), later contexts can
+   materialize files under their base, and an empty-dir-only cleanup fails the
+   wrong test. *)
+(* The preflight probes the build a docker keeper's [sandbox_image] names in
+   the host catalog, so every context promotes one for each shipped name. *)
+let catalog_images =
+  [ "base", "masc-sandbox-base:test"
+  ; "ocaml", "masc-sandbox-ocaml:t1"
+  ]
+
+let with_test_context f =
+  let base = Filename.temp_file "keeper-turn-up-args-" "" in
+  Sys.remove base;
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base catalog_images;
+      let ctx : _ Keeper_types_profile.context =
+        { config = Workspace.default_config base
+        ; agent_name = "test-agent"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      f ctx)
+
+(* Every case below is about some other argument, and [parse] refuses a call
+   that states no [sandbox_profile], so the fixture states one rather than
+   leaving it out. That the argument is required at all is pinned once, by
+   [test_parse_requires_a_sandbox_profile], instead of being restated in each
+   case. *)
+(* This suite runs on hosts without a Docker daemon, and the profile the
+   fixture states is [docker], so [parse] would otherwise shell out to
+   [docker info] on every case. [None] is what the real probe answers when
+   the preflight master switch is off. The cases that pin the probe itself
+   pass their own. *)
+let no_daemon_in_this_suite ~image:_ ~timeout_sec:_ () = None
+
+let parse_stating_a_profile ctx json =
+  let json =
+    match json with
+    | `Assoc fields when not (List.mem_assoc "sandbox_profile" fields) ->
+      let image =
+        if List.mem_assoc "sandbox_image" fields then []
+        else [ "sandbox_image", `String "base" ]
+      in
+      `Assoc (fields @ ("sandbox_profile", `String "docker") :: image)
+    | other -> other
+  in
+  Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx json
+;;
+let test_remote_endpoint_validation () =
+  with_test_context @@ fun ctx ->
+  let preflight_key = "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" in
+  let previous_preflight = Sys.getenv_opt preflight_key in
+  Unix.putenv preflight_key "false";
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv preflight_key (Option.value previous_preflight ~default:""))
+  @@ fun () ->
+  (* RFC-0121: the resolver reads .masc/config/runtime.toml — the path the
+     live layout uses — not the .masc root this fixture used to write to. *)
+  let masc_dir = Filename.concat ctx.config.base_path ".masc" in
+  let config_dir = Filename.concat masc_dir "config" in
+  Fs_compat.mkdir_p config_dir;
+  let runtime_path = Filename.concat config_dir "runtime.toml" in
+  let oc = open_out_bin runtime_path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc
+      {|[exec.ssh.endpoints.fixture]
+host = "fixture.invalid"
+user = "masc"
+remote_root = "/srv/masc/playground"
+|});
+  let parse fields =
+    parse_stating_a_profile ctx (`Assoc (("name", `String "remote-new") :: fields))
+  in
+  (match parse [ "sandbox_profile", `String "remote_ssh" ] with
+   | Ok _ -> fail "remote_ssh without endpoint was accepted"
+   | Error result ->
+     check bool "missing endpoint named" true
+       (String.starts_with
+          ~prefix:"remote_ssh_endpoint_missing:"
+          (Keeper_types_profile.tool_result_body result)));
+  (match
+     parse
+       [ "sandbox_profile", `String "remote_ssh"
+       ; "remote_endpoint", `String "ghost"
+       ]
+   with
+   | Ok _ -> fail "unknown endpoint was accepted"
+   | Error result ->
+     check bool "unknown endpoint named" true
+       (String.starts_with
+          ~prefix:"remote_ssh_endpoint_unknown:"
+          (Keeper_types_profile.tool_result_body result)));
+  (match
+     parse
+       [ "sandbox_profile", `String "remote_ssh"
+       ; "remote_endpoint", `String "fixture"
+       ]
+   with
+   | Error result ->
+     failf "known endpoint rejected: %s"
+       (Keeper_types_profile.tool_result_body result)
+   | Ok parsed ->
+     check bool "endpoint patch present" true parsed.remote_endpoint_present;
+     check (option string) "endpoint carried" (Some "fixture")
+       parsed.remote_endpoint_opt);
+  (match
+     parse
+       [ "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
+       ; "remote_endpoint", `String "fixture"
+       ]
+   with
+   | Ok _ -> fail "docker endpoint was accepted"
+   | Error result ->
+     check bool "endpoint/profile mismatch named" true
+       (String.starts_with
+          ~prefix:"remote_endpoint_requires_remote_ssh:"
+          (Keeper_types_profile.tool_result_body result)))
+
+let test_parse_max_context_override () =
+  let check_ok label expected value =
+    match Keeper_turn_up_args.parse_max_context_override (override_json value) with
+    | Ok actual -> check (pair bool (option int)) label expected actual
+    | Error error -> failf "%s: %s" label error
+  in
+  let check_error label value =
+    match Keeper_turn_up_args.parse_max_context_override (override_json value) with
+    | Error _ -> ()
+    | Ok _ -> failf "%s unexpectedly accepted" label
+  in
+  check_ok "positive exact" (true, Some 128_001) (`Int 128_001);
+  check_ok "zero clears" (true, None) (`Int 0);
+  check_ok "null clears" (true, None) `Null;
+  check_error "negative" (`Int (-1));
+  check_error "fraction" (`Float 3.9);
+  check_error "overflow" (`Intlit "999999999999999999999999")
+
+let test_runtime_json_rejects_toml_owned_max_context_override () =
+  let parse value =
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "override-fixture"; "max_context_override", value ])
+  in
+  List.iter
+    (fun value ->
+      match parse value with
+      | Error _ -> ()
+      | Ok _ -> fail "TOML-owned max_context_override leaked into runtime JSON")
+    [ `Int 128_001
+    ; `Null
+    ; `Int 0
+    ; `Int (-1)
+    ; `Float 3.9
+    ; `Intlit "999999999999999999999999"
+    ]
+
+(* Unlike [with_test_context], persist writes the keeper TOML under the
+   base, so cleanup must be recursive. *)
+let with_persisting_context f =
+  let base = Filename.temp_file "keeper-turn-up-persist-" "" in
+  Sys.remove base;
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base catalog_images;
+      let ctx : _ Keeper_types_profile.context =
+        { config = Workspace.default_config base
+        ; agent_name = "test-agent"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      f ctx)
+
+let current_revision_exn config keeper_name =
+  match
+    Keeper_turn_up_config_persistence.current_config_revision ~config ~keeper_name
+  with
+  | Ok revision -> revision
+  | Error error -> failf "current revision: %s" error
+
+let missing_config_revision :
+    Keeper_turn_up_config_persistence.config_revision =
+  { manifest = Keeper_turn_up_config_persistence.Missing
+  ; runtime_assignment = Runtime.Runtime_config_missing
+  }
+
+let config_revision_with_manifest manifest :
+    Keeper_turn_up_config_persistence.config_revision =
+  { manifest; runtime_assignment = Runtime.Runtime_config_missing }
+
+let test_remote_endpoint_persistence_round_trip () =
+  with_persisting_context @@ fun ctx ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let masc_dir = Filename.concat ctx.config.base_path ".masc" in
+  if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
+  (* RFC-0121: the resolver reads .masc/config/runtime.toml. *)
+  let config_dir = Filename.concat masc_dir "config" in
+  if not (Sys.file_exists config_dir) then Unix.mkdir config_dir 0o700;
+  let runtime_oc = open_out_bin (Filename.concat config_dir "runtime.toml") in
+  Fun.protect ~finally:(fun () -> close_out runtime_oc) (fun () ->
+    output_string runtime_oc
+      {|[exec.ssh.endpoints.fixture]
+host = "fixture.invalid"
+user = "masc"
+remote_root = "/srv/masc/playground"
+|});
+  let name = "remote-persist-fixture" in
+  let base_meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse_or_fail json =
+    match parse_stating_a_profile ctx json with
+    | Ok parsed -> parsed
+    | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist parsed meta =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config name)
+        ~config:ctx.config ~parsed ~meta ()
+    with
+    | Ok _ -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path name
+    with
+    | Ok defaults -> defaults.Keeper_types_profile.remote_endpoint
+    | Error error ->
+      failf "read back: %s"
+        (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  let create =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "instructions", `String "fixture instructions"
+         ; "sandbox_profile", `String "remote_ssh"
+         ; "remote_endpoint", `String "fixture"
+         ])
+  in
+  persist create
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh };
+  check (option string) "remote endpoint persisted" (Some "fixture") (read_back ());
+  let clear =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
+         ; "remote_endpoint", `Null
+         ])
+  in
+  persist clear
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Docker };
+  check (option string) "remote endpoint null removes key" None (read_back ())
+;;
+
+let test_microvm_backend_persistence_round_trip () =
+  with_persisting_context @@ fun ctx ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  (* The fixture starts with Docker's promoted builds. Add both microVM
+     stores to that same catalog: the test writer replaces the file on each
+     call, which would erase the first backend before [parse] sees it. *)
+  let module Catalog = Keeper_sandbox_image_catalog in
+  let config_root =
+    (Config_dir_resolver.resolve_for_base_path ~base_path:ctx.config.base_path)
+      .config_root.path
+  in
+  let shipped =
+    match Embedded_config.read Catalog.shipped_file_name with
+    | Some text -> text
+    | None -> fail "shipped sandbox image catalog missing"
+  in
+  let catalog, expected =
+    match Catalog.load_for_change ~config_root ~shipped with
+    | Ok value -> value
+    | Error error -> fail (Catalog.load_error_to_string error)
+  in
+  let catalog =
+    List.fold_left
+      (fun catalog backend ->
+         match
+           Catalog.promote catalog ~name:"base" ~reference:"masc-sandbox-base:test"
+             ~store:(Catalog.Microvm backend)
+         with
+         | Ok catalog -> catalog
+         | Error error -> fail (Catalog.change_error_to_string error))
+      catalog
+      [ Keeper_microvm_backend.Nerdctl_kata; Keeper_microvm_backend.Apple_container ]
+  in
+  (match Catalog.save ~config_root ~expected catalog with
+   | Ok () -> ()
+   | Error error -> fail (Catalog.save_error_to_string error));
+  let masc_dir = Filename.concat ctx.config.base_path ".masc" in
+  if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
+  (* RFC-0121: the resolver reads .masc/config/runtime.toml. *)
+  let config_dir = Filename.concat masc_dir "config" in
+  if not (Sys.file_exists config_dir) then Unix.mkdir config_dir 0o700;
+  let name = "microvm-persist-fixture" in
+  let base_meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse_or_fail json =
+    match parse_stating_a_profile ctx json with
+    | Ok parsed -> parsed
+    | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist parsed meta =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config name)
+        ~config:ctx.config ~parsed ~meta ()
+    with
+    | Ok _ -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path name
+    with
+    | Ok defaults -> Option.map Keeper_microvm_backend.to_string defaults.Keeper_types_profile.microvm_backend
+    | Error error ->
+      failf "read back: %s"
+        (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  let create =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "instructions", `String "fixture instructions"
+         ; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "base"
+         ; "microvm_backend", `String "nerdctl_kata"
+         ])
+  in
+  persist create
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm; microvm_backend = create.profile_defaults.microvm_backend };
+  check (option string) "backend persisted" (Some "nerdctl_kata") (read_back ());
+  let omitted = parse_or_fail (`Assoc
+      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "base"
+      ; "instructions", `String "updated instructions" ]) in
+  persist omitted
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
+                     microvm_backend = omitted.profile_defaults.microvm_backend };
+  check (option string) "omitted backend survives update" (Some "nerdctl_kata") (read_back ());
+  let changed = parse_or_fail (`Assoc
+      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "base"
+      ; "microvm_backend", `String "apple_container" ]) in
+  persist changed
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
+                     microvm_backend = changed.profile_defaults.microvm_backend };
+  check (option string) "explicit backend update persists" (Some "apple_container") (read_back ());
+  let clear =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
+         ; "microvm_backend", `Null
+         ])
+  in
+  persist clear
+    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
+                     microvm_backend = clear.profile_defaults.microvm_backend };
+  check (option string) "backend clear permits Docker transition" None (read_back ())
+;;
+
+let test_microvm_backend_rejects_invalid_declarations () =
+  with_test_context @@ fun ctx ->
+  List.iter
+    (fun (profile, backend) ->
+      match parse_stating_a_profile ctx (`Assoc
+          [ "name", `String "backend-validation"
+          ; "sandbox_profile", `String profile
+          ; "microvm_backend", backend ]) with
+      | Error _ -> ()
+      | Ok _ -> fail "invalid backend/profile declaration was admitted")
+    [ "docker", `String "nerdctl_kata"
+    ; "microvm", `String "unknown"
+    ; "microvm", `Bool true ]
+;;
+
+
+let test_tools_patch_round_trips_and_rejects_invalid_values () =
+  with_persisting_context @@ fun ctx ->
+  let name = "tools-persist-fixture" in
+  let base_meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse json = parse_stating_a_profile ctx json in
+  let parse_or_fail json =
+    match parse json with
+    | Ok parsed -> parsed
+    | Error result ->
+      failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist parsed (meta : Keeper_meta_contract.keeper_meta) =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config meta.name)
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok { value = (_ : Keeper_turn_up_config_persistence.outcome); _ } -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path
+        name
+    with
+    | Ok defaults -> defaults
+    | Error error ->
+      failf "read back: %s"
+        (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  List.iter
+    (fun posture ->
+       let parsed =
+         parse_or_fail
+           (`Assoc
+              [ "name", `String name
+              ; "instructions", `String "fixture instructions"
+              ; ( "tools"
+                , `Assoc
+                    [ "native", `String posture ] )
+              ])
+       in
+       let meta = base_meta in
+       persist parsed meta;
+       let defaults = read_back () in
+       check (option string)
+         (Printf.sprintf "native %s round-trip" posture)
+         (Some posture)
+         (Option.map Runtime_native_tools.to_string
+            defaults.native_tool_posture))
+    [ "none"; "read"; "full" ];
+  let clear =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "tools", `Assoc [ "native", `Null ]
+         ])
+  in
+  persist clear base_meta;
+  let cleared = read_back () in
+  check (option string) "native null clears" None
+    (Option.map Runtime_native_tools.to_string cleared.native_tool_posture);
+  List.iter
+    (fun (label, tools) ->
+       match parse (`Assoc [ "name", `String name; "tools", tools ]) with
+       | Error _ -> ()
+       | Ok _ -> failf "%s was accepted" label)
+    [ "invalid native", `Assoc [ "native", `String "yolo" ]
+    ; "unknown group", `Assoc [ "groups", `List [ `String "filesystem" ] ]
+    ; "unknown tools field", `Assoc [ "posture", `String "read" ]
+    ]
+;;
+
+let test_skills_names_patch_round_trips_three_states () =
+  with_persisting_context @@ fun ctx ->
+  let name = "skills-persist-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse_or_fail json =
+    match parse_stating_a_profile ctx json with
+    | Ok parsed -> parsed
+    | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist parsed =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config meta.name)
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok { value = (_ : Keeper_turn_up_config_persistence.outcome); _ } -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path
+        name
+    with
+    | Ok defaults -> defaults.skill_names
+    | Error error ->
+      failf "read back: %s" (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  persist
+    (parse_or_fail
+       (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ; ( "skills"
+            , `Assoc
+                [ "names", `List [ `String "guide"; `String "Guide"; `String "guide" ] ] )
+          ]));
+  check (option (list string)) "exact names round-trip" (Some [ "guide"; "Guide" ]) (read_back ());
+  persist
+    (parse_or_fail
+       (`Assoc [ "name", `String name; "skills", `Assoc [ "names", `List [] ] ]));
+  check (option (list string)) "explicit empty round-trips" (Some []) (read_back ());
+  persist
+    (parse_or_fail
+       (`Assoc [ "name", `String name; "skills", `Assoc [] ]));
+  check (option (list string)) "empty skills patch clears to absent" None (read_back ())
+;;
+
+let test_manifest_revision_allows_only_one_stale_writer () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-cas-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse instructions =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc
+          [ "name", `String name
+          ; "instructions", `String instructions
+          ])
+    with
+    | Ok parsed -> parsed
+    | Error result ->
+      failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed:(parse "initial")
+        ~meta
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      failf "initial persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let first =
+    Keeper_turn_up_config_persistence.persist
+      ~expected_revision:initial
+      ~config:ctx.config
+      ~parsed:(parse "first writer")
+      ~meta:{ meta with instructions = "first writer" }
+      ()
+  in
+  let first_revision =
+    match first with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      failf "first writer: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:first_revision
+       ~config:ctx.config
+       ~parsed:(parse "publication rejected")
+       ~meta:{ meta with instructions = "publication rejected" }
+       ~publish:(fun _runtime_transaction _ ->
+         Keeper_turn_up_config_persistence.Rollback `Rejected)
+       ()
+   with
+   | Ok { value = `Rejected; _ } -> ()
+   | Ok _ -> fail "unexpected publication result"
+   | Error error ->
+     failf "publication rollback: %s"
+       (Keeper_turn_up_config_persistence.error_to_string error));
+  let after_rollback =
+    match
+      Keeper_turn_up_config_persistence.current_config_revision
+        ~config:ctx.config
+        ~keeper_name:name
+    with
+    | Ok revision -> revision
+    | Error error -> failf "revision after rollback: %s" error
+  in
+  check bool "publication rejection restores exact authority bytes" true
+    (after_rollback = first_revision);
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed:(parse "stale writer")
+       ~meta:{ meta with instructions = "stale writer" }
+       ()
+   with
+   | Error
+       (Keeper_turn_up_config_persistence.Revision_conflict
+          { expected; observed }) ->
+     check bool "loser carries expected revision" true (expected = initial);
+     check bool "loser observes winner revision" true (observed = first_revision)
+   | Error error ->
+     failf "unexpected loser error: %s"
+       (Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "stale writer overwrote the winner");
+  let path =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.Workspace.base_path
+    |> fun dir -> Filename.concat dir (name ^ ".toml")
+  in
+  let doc =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> fail error
+  in
+  check (option string) "winner bytes remain authoritative"
+    (Some "first writer")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.instructions")
+;;
+
+let test_rejected_create_publication_removes_manifest () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-create-rollback-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ])
+    with
+    | Ok parsed -> parsed
+    | Error result ->
+      failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:missing_config_revision
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ~publish:(fun _runtime_transaction _ ->
+         Keeper_turn_up_config_persistence.Rollback ())
+       ()
+   with
+   | Ok { value = (); _ } -> ()
+   | Error error ->
+     failf "create rollback: %s"
+       (Keeper_turn_up_config_persistence.error_to_string error));
+  match
+    Keeper_turn_up_config_persistence.current_config_revision
+      ~config:ctx.config
+      ~keeper_name:name
+  with
+  | Ok { manifest = Keeper_turn_up_config_persistence.Missing; _ } -> ()
+  | Ok { manifest = Keeper_turn_up_config_persistence.Sha256 _; _ } ->
+    fail "rejected create left a manifest behind"
+  | Error error -> failf "revision after create rollback: %s" error
+;;
+
+let test_publication_rollback_restores_manifest_and_runtime_bytes () =
+  with_persisting_context @@ fun ctx ->
+  let name = "composite-rollback-fixture" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:ctx.config.base_path
+  in
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  let runtime_source =
+    Fs_compat.load_file (Masc_test_deps.source_path "config/runtime.toml")
+  in
+  Fs_compat.save_file runtime_path runtime_source;
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parse instructions =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial_revision = current_revision_exn ctx.config name in
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:initial_revision
+       ~config:ctx.config
+       ~parsed:(parse "initial")
+       ~meta
+       ()
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Keeper_turn_up_config_persistence.error_to_string error));
+  let manifest_path =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.base_path
+    |> fun dir -> Filename.concat dir (name ^ ".toml")
+  in
+  let manifest_before = Fs_compat.load_file manifest_path in
+  let runtime_before = Fs_compat.load_file runtime_path in
+  let revision = current_revision_exn ctx.config name in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:revision
+       ~config:ctx.config
+       ~parsed:(parse "rejected")
+       ~meta:{ meta with instructions = "rejected" }
+       ~publish:(fun runtime_transaction _ ->
+         match
+           Runtime.commit_keeper_assignment runtime_transaction
+             ~runtime_id:(Some "ollama_cloud.ollama-cloud-deepseek-v4-1-flash")
+         with
+         | Error detail -> fail detail
+         | Ok _ -> Keeper_turn_up_config_persistence.Rollback ())
+       ()
+   with
+   | Ok { value = (); _ } -> ()
+   | Error error ->
+     fail (Keeper_turn_up_config_persistence.error_to_string error));
+  check string "Rollback restores exact manifest bytes"
+    manifest_before (Fs_compat.load_file manifest_path);
+  check string "Rollback restores exact runtime.toml bytes"
+    runtime_before (Fs_compat.load_file runtime_path)
+  ;
+  let replace_file_with_parent_sync_failure path content =
+    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun _ -> raise (Failure "injected runtime parent sync"))
+      path content
+  in
+  let commit_revision = current_revision_exn ctx.config name in
+  let actor_published = ref false in
+  let uncertain_commit =
+    Keeper_turn_up_config_persistence.persist_with_publication
+      ~expected_revision:commit_revision
+      ~config:ctx.config
+      ~parsed:(parse "uncertain runtime commit")
+      ~meta:{ meta with instructions = "uncertain runtime commit" }
+      ~publish:(fun runtime_transaction _ ->
+        match
+          Runtime.Assignment_for_testing.commit_with_replace_file
+            ~replace_file:replace_file_with_parent_sync_failure
+            runtime_transaction
+            ~runtime_id:(Some "ollama_cloud.ollama-cloud-deepseek-v4-1-flash")
+        with
+        | Error detail -> fail detail
+        | Ok runtime_write ->
+          Keeper_turn_up_config_persistence.Commit_then_publish
+            (Keeper_turn_up_config_persistence.warnings_of_runtime_assignment_write runtime_write,
+             fun () -> actor_published := true))
+      ()
+  in
+  (match uncertain_commit with
+   | Error (Keeper_turn_up_config_persistence.Io_error _) -> ()
+   | Error error -> fail (Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "unconfirmed runtime durability was reported committed");
+  check bool "unconfirmed configuration never publishes actor state" false !actor_published;
+  check string "unconfirmed commit restores manifest before-image"
+    manifest_before (Fs_compat.load_file manifest_path);
+  check string "unconfirmed commit restores runtime before-image"
+    runtime_before (Fs_compat.load_file runtime_path);
+  check bool "confirmed compensation retires journal" false
+    (Sys.file_exists (Keeper_config_journal.journal_path_for_base_path
+       ~base_path:ctx.config.base_path));
+  let manifest_before_uncertain_restore = Fs_compat.load_file manifest_path in
+  let runtime_before_uncertain_restore = Fs_compat.load_file runtime_path in
+  let restore_revision = current_revision_exn ctx.config name in
+  let restore_attempted = ref false in
+  (match
+     Keeper_turn_up_config_persistence.For_testing
+     .persist_with_runtime_restore_replace_file
+       ~replace_file:(fun path content ->
+         restore_attempted := true;
+         replace_file_with_parent_sync_failure path content)
+       ~expected_revision:restore_revision
+       ~config:ctx.config
+       ~parsed:(parse "uncertain runtime restore")
+       ~meta:{ meta with instructions = "uncertain runtime restore" }
+       ~publish:(fun runtime_transaction _ ->
+         match
+           Runtime.commit_keeper_assignment runtime_transaction
+             ~runtime_id:(Some "ollama_cloud.ollama-cloud-deepseek-v4-1-flash")
+         with
+         | Error detail -> fail detail
+         | Ok _ -> Keeper_turn_up_config_persistence.Rollback ())
+       ()
+   with
+   | Error
+       (Keeper_turn_up_config_persistence.Composite_reconciliation_required
+         { manifest = None; runtime_assignment = Some state }) ->
+     check bool "runtime restore uncertainty is explicit" true
+       (String.length state.detail > 0)
+   | Error error ->
+     fail
+       ("unexpected uncertain restore result: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "uncertain runtime restore was reported as exact");
+  check bool "uncertain restore exercised the replacement writer" true !restore_attempted;
+  check string "uncertain restore still restores visible manifest bytes"
+    manifest_before_uncertain_restore (Fs_compat.load_file manifest_path);
+  check string "uncertain restore still restores visible runtime bytes"
+    runtime_before_uncertain_restore (Fs_compat.load_file runtime_path)
+;;
+
+let run_cas_child base name expected_hex instructions ready_path start_path =
+  let ready = Unix.openfile ready_path [ Unix.O_WRONLY ] 0 in
+  let start = Unix.openfile start_path [ Unix.O_RDONLY ] 0 in
+  ignore (Unix.write_substring ready "r" 0 1);
+  let token = Bytes.create 1 in
+  ignore (Unix.read start token 0 1);
+  Unix.close ready;
+  Unix.close start;
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let ctx : _ Keeper_types_profile.context =
+    { config = Workspace.default_config base
+    ; agent_name = "cas-child"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc
+           [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok parsed -> parsed
+    | Error _ -> exit 3
+  in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok meta -> meta
+    | Error _ -> exit 3
+  in
+  match
+    Keeper_turn_up_config_persistence.persist
+      ~expected_revision:
+        (config_revision_with_manifest
+           (Keeper_turn_up_config_persistence.Sha256 expected_hex))
+      ~config:ctx.config
+      ~parsed
+      ~meta
+      ()
+  with
+  | Ok _ -> exit 0
+  | Error (Keeper_turn_up_config_persistence.Revision_conflict _) -> exit 2
+  | Error _ -> exit 3
+;;
+
+let test_two_processes_same_revision_have_one_winner () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-two-process-cas-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc
+           [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let expected =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok
+        { value =
+            { revision = Keeper_turn_up_config_persistence.Sha256 value; _ }
+        ; _
+        } -> value
+    | Ok _ -> fail "initial manifest did not produce a sha256 revision"
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let ready_path = Filename.concat ctx.config.base_path "cas-ready.fifo" in
+  let start_path = Filename.concat ctx.config.base_path "cas-start.fifo" in
+  Unix.mkfifo ready_path 0o600;
+  Unix.mkfifo start_path 0o600;
+  let ready = Unix.openfile ready_path [ Unix.O_RDWR ] 0o600 in
+  let start = Unix.openfile start_path [ Unix.O_RDWR ] 0o600 in
+  let spawn instructions =
+    Unix.create_process
+      Sys.executable_name
+      [| Sys.executable_name
+       ; "--keeper-manifest-cas-child"
+       ; ctx.config.base_path
+       ; name
+       ; expected
+       ; instructions
+       ; ready_path
+       ; start_path
+      |]
+      Unix.stdin
+      Unix.stdout
+      Unix.stderr
+  in
+  let read_two_ready_bytes () =
+    let bytes = Bytes.create 2 in
+    let rec loop offset =
+      if offset < 2
+      then loop (offset + Unix.read ready bytes offset (2 - offset))
+    in
+    loop 0
+  in
+  let first = spawn "first process" in
+  let second = spawn "second process" in
+  read_two_ready_bytes ();
+  ignore (Unix.write_substring start "ss" 0 2);
+  Unix.close ready;
+  Unix.close start;
+  let rec status pid =
+    match Unix.waitpid [] pid with
+    | _, status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> status pid
+  in
+  let statuses = [ status first; status second ] in
+  check int "one process commits" 1
+    (List.length (List.filter (( = ) (Unix.WEXITED 0)) statuses));
+  check int "one stale process conflicts" 1
+    (List.length (List.filter (( = ) (Unix.WEXITED 2)) statuses))
+;;
+
+let test_revision_projection_holds_manifest_lock () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-projection-lock-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parse instructions =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc
+           [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed:(parse "initial")
+        ~meta
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let writer_started, resolve_writer_started = Eio.Promise.create () in
+  let writer_done, resolve_writer_done = Eio.Promise.create () in
+  let runtime_reader_started, resolve_runtime_reader_started = Eio.Promise.create () in
+  let runtime_reader_done, resolve_runtime_reader_done = Eio.Promise.create () in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:ctx.config.base_path
+  in
+  let projected =
+    Keeper_turn_up_config_persistence.with_current_config_revision
+      ~config:ctx.config
+      ~keeper_name:name
+      (fun revision ->
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+          Eio.Promise.resolve resolve_writer_started ();
+          let result =
+            Keeper_turn_up_config_persistence.persist
+              ~expected_revision:revision
+              ~config:ctx.config
+              ~parsed:(parse "writer")
+              ~meta:{ meta with instructions = "writer" }
+              ()
+          in
+          Eio.Promise.resolve resolve_writer_done result);
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+          Eio.Promise.resolve resolve_runtime_reader_started ();
+          let result =
+            Runtime.observe_keeper_assignment ~runtime_config_path:runtime_path
+              ~keeper_name:name ()
+          in
+          Eio.Promise.resolve resolve_runtime_reader_done result);
+        Eio.Promise.await writer_started;
+        Eio.Promise.await runtime_reader_started;
+        Eio.Fiber.yield ();
+        check bool "writer is fenced during projection" true
+          (Option.is_none (Eio.Promise.peek writer_done));
+        check bool "runtime projection is fenced during paired GET" true
+          (Option.is_none (Eio.Promise.peek runtime_reader_done));
+        revision)
+  in
+  (match projected with
+   | Ok { value; _ } ->
+     check bool "projection observed initial revision" true (value = initial)
+   | Error error -> fail error);
+  (match Eio.Promise.await writer_done with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Keeper_turn_up_config_persistence.error_to_string error))
+  ;
+  (match Eio.Promise.await runtime_reader_done with
+   | Ok _ -> ()
+   | Error error -> fail error)
+;;
+
+let test_release_failure_preserves_committed_receipt () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-release-receipt-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String "committed" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc
+           [ "name", `String name; "instructions", `String "committed" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let lock_path =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.Workspace.base_path
+    |> fun dir -> Filename.concat dir (name ^ ".toml.lock")
+  in
+  let release_failure =
+    { File_lock_eio.lock_path
+    ; phase = File_lock_eio.Release_process_lock
+    ; cause =
+        { File_lock_eio.error = Unix.EIO
+        ; operation = "injected_release_after_commit"
+        ; argument = lock_path
+        }
+    ; cleanup_failure = None
+    }
+  in
+  match
+    Keeper_turn_up_config_persistence.For_testing.persist_with_release_failure
+      ~release_failure
+      ~expected_revision:missing_config_revision
+      ~config:ctx.config
+      ~parsed
+      ~meta
+      ()
+  with
+  | Error error ->
+    fail (Keeper_turn_up_config_persistence.error_to_string error)
+  | Ok
+      { value =
+          { revision = Keeper_turn_up_config_persistence.Sha256 _; _ }
+      ; warnings
+      } ->
+    check int "commit returns one typed release warning" 1 (List.length warnings);
+    check bool "warning is lock release uncertainty" true
+      (match warnings with
+       | [ Keeper_turn_up_config_persistence.Lock_release_unconfirmed _ ] -> true
+       | _ -> false)
+  | Ok _ -> fail "commit receipt did not carry a sha256 revision"
+;;
+
+let test_rollback_after_rename_failure_requires_reconciliation () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-rollback-reconciliation-fixture" in
+  let meta instructions =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parse instructions =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed:(parse "initial")
+        ~meta:(meta "initial")
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  (match
+     Keeper_turn_up_config_persistence.For_testing.persist_with_rollback_parent_sync_failure
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed:(parse "rejected")
+       ~meta:(meta "rejected")
+       ()
+   with
+   | Error
+       (Keeper_turn_up_config_persistence.Composite_reconciliation_required
+          { manifest = Some state; runtime_assignment = None }) ->
+     check bool "observed authority is the restored snapshot" true
+       (state.observed
+        = Keeper_turn_up_config_persistence.Observed_revision initial.manifest)
+   | Error error ->
+     fail
+       ("unexpected rollback error: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "after-rename rollback failure was reported as committed");
+  check bool "cache-invalidated read sees restored bytes" true
+    (current_revision_exn ctx.config name = initial)
+;;
+
+(* Regression for the review finding on #35366: a successful
+   compensating rollback used to leave the crash journal in place, so
+   the next boot's recovery could re-apply this request's stale
+   before-images over LATER successful writes. Pins the Ok branch of
+   rollback clearing the journal, and the production startup recovery
+   entry point answering No_journal afterwards. *)
+let test_compensated_rollback_clears_crash_journal () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let journal_path =
+    Keeper_config_journal.journal_path_for_base_path ~base_path
+  in
+  let name = "manifest-rollback-journal-clear-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ~publish:(fun _runtime_transaction _ -> Rollback ())
+       ()
+   with
+   | Ok _ ->
+     check bool "successful compensation cleared the crash journal" false
+       (Sys.file_exists journal_path);
+     let report =
+       Server_bootstrap_maintenance
+       .recover_keeper_config_journal_on_startup ~base_path
+     in
+     (match report.Keeper_config_journal.outcome with
+      | Keeper_config_journal.No_journal -> ()
+      | _ -> fail "startup recovery found a journal after compensated rollback")
+   | Error error ->
+     fail
+       ("unexpected rollback error: "
+       ^ Keeper_turn_up_config_persistence.error_to_string error));
+  check bool "compensated rollback kept the pre-request state" true
+    (current_revision_exn ctx.config name = initial)
+;;
+
+let test_publication_exception_restores_missing_manifest () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-publication-exception-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:missing_config_revision
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ~publish:(fun _runtime_transaction _ ->
+         raise (Failure "injected publication exception"))
+       ()
+   with
+   | Error (Keeper_turn_up_config_persistence.Publication_exception _) -> ()
+   | Error error ->
+     fail
+       ("unexpected publication error: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "raising publication was reported as committed");
+  check bool "publication exception leaves no orphan manifest" true
+    (current_revision_exn ctx.config name
+     = missing_config_revision)
+;;
+
+let test_post_write_revision_failure_restores_missing_manifest () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-post-write-read-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.For_testing
+     .persist_with_post_write_revision_failure
+       ~expected_revision:missing_config_revision
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ()
+   with
+   | Error (Keeper_turn_up_config_persistence.Io_error _) -> ()
+   | Error error ->
+     fail
+       ("unexpected post-write read error: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "post-write revision failure was reported as committed");
+  check bool "post-write revision failure leaves no orphan manifest" true
+    (current_revision_exn ctx.config name
+     = missing_config_revision)
+;;
+
+let test_config_journal_recovery_recovers_composite_write () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let name = "journal-recovery-composite-fixture" in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir (name ^ ".toml") in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let manifest_before = "[keeper]\nname = \"journal-recovery-composite-fixture\"\n" in
+  let runtime_before =
+    "[exec.test]\nruntime = \"before\"\n"
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path manifest_before;
+  Fs_compat.save_file runtime_path runtime_before;
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
+  in
+  let journal_record : Keeper_config_journal.record =
+    { tx_id = "journal-recovery-composite"
+    ; keeper_name = name
+    ; manifest_before = Keeper_config_journal.Manifest_bytes manifest_before
+    ; runtime_before = Some (Keeper_config_journal.Runtime_bytes runtime_before)
+    ; manifest_path
+    ; runtime_path = Some runtime_path
+    ; started_at_unix = Time_compat.now ()
+    ; phase = Keeper_config_journal.Prepared
+    }
+  in
+  (match Keeper_config_journal.stage ~base_path journal_record with
+   | Ok () -> ()
+   | Error error ->
+     fail ("journal stage failed: " ^ error));
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  check int "secret before-images are private" 0o600
+    ((Unix.stat journal_path).Unix.st_perm land 0o777);
+  let staged_bytes = Fs_compat.load_file journal_path in
+  (match Keeper_config_journal.stage ~base_path { journal_record with tx_id = "replacement" } with
+   | Error _ -> ()
+   | Ok () -> fail "unresolved before-images were overwritten");
+  check string "a rejected stage preserves the exact journal" staged_bytes
+    (Fs_compat.load_file journal_path);
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"changed\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"changed\"\n";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  let manifest_restored, runtime_restored =
+    match report.outcome with
+    | Keeper_config_journal.Recovered_rolled_back
+        { manifest_restored; runtime_restored } ->
+      manifest_restored, runtime_restored
+    | _ ->
+      fail
+        ("expected composite recovery to succeed, got: "
+         ^ "unexpected recovery outcome")
+  in
+  check bool "manifest restored by recovery" true manifest_restored;
+  check bool "runtime restored by recovery" true runtime_restored;
+  check string "manifest bytes restored" manifest_before (Fs_compat.load_file manifest_path);
+  check string "runtime bytes restored" runtime_before (Fs_compat.load_file runtime_path);
+  check bool "journal was cleared" false (Sys.file_exists report.journal_path)
+;;
+
+(* Operator re-review 2026-09-12 (#35366, #2-a): a request-scoped write
+   used to stage a fresh journal over an unresolved one, silently
+   destroying the earlier write's before-images. Pins that persist
+   refuses to run while an unresolved journal exists. *)
+let test_publish_rejected_while_unresolved_journal_exists () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let name = "unresolved-journal-guard-fixture" in
+  let manifest_path =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      (name ^ ".toml")
+  in
+  let journal_record : Keeper_config_journal.record =
+    { tx_id = "unresolved-guard-tx"
+    ; keeper_name = name
+    ; manifest_before = Keeper_config_journal.Manifest_absent
+    ; runtime_before = None
+    ; manifest_path
+    ; runtime_path = None
+    ; started_at_unix = Time_compat.now ()
+    ; phase = Keeper_config_journal.Prepared
+    }
+  in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let manifest_path =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      (name ^ ".toml")
+  in
+  (match Keeper_config_journal.stage ~base_path journal_record with
+   | Ok () -> ()
+   | Error error -> fail ("journal stage failed: " ^ error));
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "next" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "next" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ()
+   with
+   | Ok _ -> fail "expected persist to be rejected while an unresolved journal exists"
+   | Error (Keeper_turn_up_config_persistence.Io_error detail) as outcome ->
+     if
+       try
+         ignore (Str.search_forward (Str.regexp "configuration recovery required") detail 0);
+         true
+       with Not_found -> false
+     then ignore outcome
+     else
+       fail ("expected stale-journal rejection, got: " ^ detail)
+   | Error other ->
+     fail
+       ("expected Io_error, got: "
+       ^ Keeper_turn_up_config_persistence.error_to_string other));
+  check bool "manifest untouched by the rejected write" true
+    (let bytes = Fs_compat.load_file manifest_path in
+     try
+       ignore
+         (Str.search_forward
+            (Str.regexp "instructions = \"initial\"")
+            bytes
+            0);
+       true
+     with Not_found -> false)
+;;
+
+let test_config_journal_recovery_ignores_missing_journal () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir "no-journal.toml" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"no-journal\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"before\"\n";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | _ ->
+     fail
+       ("expected no_journal when no marker exists, got: "
+        ^ "unexpected recovery outcome"));
+  check bool "journal file absent" false (Sys.file_exists report.journal_path);
+  check string "manifest untouched without recovery" "[keeper]\nname = \"no-journal\"\n"
+    (Fs_compat.load_file manifest_path);
+  check string "runtime untouched without recovery" "[exec.test]\nruntime = \"before\"\n"
+    (Fs_compat.load_file runtime_path)
+;;
+
+let test_config_write_failures_compensate_once () =
+  with_persisting_context @@ fun ctx ->
+  let module P = Keeper_turn_up_config_persistence in
+  let name = "journal-write-failure-fixture" in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String name; "instructions", `String "initial"]) with
+    | Ok meta -> meta | Error error -> fail error in
+  let parsed = match parse_stating_a_profile ctx
+      (`Assoc ["name", `String name; "instructions", `String "initial"]) with
+    | Ok parsed -> parsed
+    | Error error -> fail (Keeper_types_profile.tool_result_body error) in
+  let path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path:ctx.config.base_path)
+      (name ^ ".toml") in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path
+      ~base_path:ctx.config.base_path in
+  let run ?write_manifest ~raises () =
+    let restores = ref 0 and publications = ref 0 in
+    let result = P.For_testing.persist_with_faults ?write_manifest
+        ~on_restore:(fun () -> incr restores)
+        ~expected_revision:missing_config_revision ~config:ctx.config ~parsed ~meta
+        ~publish:(fun _ _ ->
+          incr publications;
+          if raises then raise (Failure "injected publish failure");
+          P.Commit ()) () in
+    (match result with
+     | Error (P.Publication_exception _) when raises -> ()
+     | Error (P.Io_error _) when not raises -> ()
+     | Error error -> fail (P.error_to_string error)
+     | Ok _ -> fail "failed write was reported as committed");
+    check int "compensation runs once" 1 !restores;
+    check int "write failure does not publish" (if raises then 1 else 0) !publications;
+    check bool "no orphan manifest remains" false (Sys.file_exists path);
+    check bool "completed compensation clears recovery authority" false
+      (Sys.file_exists journal_path)
+  in
+  List.iter (fun after_rename ->
+    let sync_file _ = if not after_rename then raise (Failure "payload sync failed") in
+    let sync_parent _ = if after_rename then raise (Failure "parent sync failed") in
+    let write_manifest path =
+      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_file ~sync_parent path "new manifest bytes" in
+    run ~write_manifest ~raises:false ()) [false; true];
+  run ~raises:true ()
+;;
+
+let test_journal_rejects_foreign_paths_and_unreadable_files () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  Fs_compat.mkdir_p (Filename.dirname journal_path);
+  let record : Keeper_config_journal.record =
+    { tx_id = "foreign"; keeper_name = "journal-boundary-fixture"
+    ; manifest_before = Manifest_absent; runtime_before = None
+    ; manifest_path = Filename.concat base_path "unrelated.toml"
+    ; runtime_path = None; started_at_unix = 0.; phase = Prepared } in
+  let json = Keeper_config_journal.record_to_yojson record in
+  Fs_compat.save_file journal_path (Yojson.Safe.to_string json);
+  let restores = ref 0 in
+  let report = Keeper_config_journal.recover_interrupted ~base_path
+      ~manifest_restore:(fun _ _ -> incr restores; Ok ())
+      ~runtime_restore:(fun _ _ -> incr restores; Ok ()) in
+  (match report.outcome with
+   | Journal_corrupt _ -> () | _ -> fail "foreign recovery target was accepted");
+  check int "validation precedes every restore" 0 !restores;
+  check bool "invalid evidence remains available" true (Sys.file_exists journal_path);
+  (match Keeper_config_journal.load ~journal_path:(Filename.concat journal_path "child") with
+   | Error _ -> () | Ok _ -> fail "ENOTDIR was misreported as a missing journal");
+  let sentinel = { record with runtime_before = Some (Runtime_bytes "absent") } in
+  match Keeper_config_journal.record_of_yojson
+          (Keeper_config_journal.record_to_yojson sentinel) with
+  | Ok decoded -> check bool "literal bytes do not decode as file absence" true
+      (decoded.runtime_before = Some (Runtime_bytes "absent"))
+  | Error detail -> fail detail
+;;
+
+let test_retained_journal_protects_all_config_writers () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let manifest_path = Filename.concat
+    (Config_dir_resolver.keepers_dir_for_base_path ~base_path) "guarded.toml" in
+  Fs_compat.mkdir_p (Filename.dirname manifest_path);
+  let source = Fs_compat.load_file (Masc_test_deps.source_path "config/runtime.toml") in
+  Fs_compat.save_file runtime_config_path source;
+  Fs_compat.save_file manifest_path "before";
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  let record : Keeper_config_journal.record =
+    { tx_id = "retained"; keeper_name = "guarded";
+      manifest_before = Manifest_bytes "before"; runtime_before = Some (Runtime_bytes source);
+      manifest_path; runtime_path = Some runtime_config_path;
+      started_at_unix = 0.; phase = Prepared } in
+  let calls = ref 0 in
+  let writers =
+    [ "save", (fun () -> Runtime.save_config_text ~runtime_config_path source |> Result.map ignore)
+    ; "edit", (fun () -> Runtime.edit_config_text ~runtime_config_path
+        (fun text -> incr calls; text) |> Result.map ignore)
+    ; "assignment removal", (fun () -> Runtime.with_keeper_assignment_transaction
+        ~runtime_config_path ~keeper_name:"guarded"
+        (fun transaction -> incr calls; Runtime.commit_keeper_removal transaction)
+        |> function Error detail -> Error detail
+           | Ok receipt -> Result.map ignore receipt.Runtime.value)
+    ; "setup activation", (fun () -> Runtime.with_config_lock ~runtime_config_path
+        (fun () -> incr calls; Ok ()))
+    ; "manifest", (fun () -> Runtime.with_manifest_config_lock ~runtime_config_path ~manifest_path
+        (fun () -> incr calls; Fs_compat.save_file manifest_path "after"; Ok ())) ] in
+  let check_blocked label =
+    let journal_before = Fs_compat.load_file journal_path in
+    List.iter (fun (name, write) ->
+      match write () with
+      | Error detail -> check bool (label ^ " " ^ name ^ " reports recovery authority") true
+          (String.starts_with ~prefix:"configuration recovery required" detail)
+      | Ok () -> fail (label ^ " admitted " ^ name)) writers;
+    check int (label ^ " never entered edit bodies") 0 !calls;
+    check string (label ^ " preserves runtime") source (Fs_compat.load_file runtime_config_path);
+    check string (label ^ " preserves manifest") "before" (Fs_compat.load_file manifest_path);
+    check string (label ^ " preserves journal") journal_before (Fs_compat.load_file journal_path)
+  in
+  (match Keeper_config_journal.stage ~base_path record with Ok () -> () | Error detail -> fail detail);
+  check_blocked "retained";
+  Fs_compat.save_file journal_path "{corrupt";
+  check_blocked "corrupt";
+  (match Keeper_config_journal.clear ~journal_path with Ok () -> () | Error detail -> fail detail);
+  let synced = ref false in
+  (match Runtime.For_testing.with_config_lock_with_journal_sync_parent
+      ~runtime_config_path
+      ~sync_parent:(fun directory ->
+        synced := true;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", directory)))
+      (fun () -> incr calls) with
+   | Error detail -> check bool "failed retirement sync is explicit" true
+       (String.starts_with ~prefix:"configuration journal retirement unconfirmed" detail)
+   | Ok () -> fail "unconfirmed journal retirement admitted a writer");
+  check bool "absence still confirms durable retirement" true !synced;
+  check int "failed retirement sync does not enter writer" 0 !calls;
+  List.iter (fun (name, write) -> match write () with
+    | Ok () -> () | Error detail -> fail (name ^ ": " ^ detail)) writers;
+  check int "absent journal admits all callback bodies" 4 !calls;
+  check string "manifest writer applied after retirement" "after" (Fs_compat.load_file manifest_path)
+;;
+
+let test_actor_publication_starts_after_config_commit () =
+  let exception Interrupted_publication in
+  with_persisting_context @@ fun ctx ->
+  let module P = Keeper_turn_up_config_persistence in
+  let name = "journal-post-commit-fixture" in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String name; "instructions", `String "committed"]) with
+    | Ok meta -> meta | Error error -> fail error in
+  let parsed = match parse_stating_a_profile ctx
+      (`Assoc ["name", `String name; "instructions", `String "committed"]) with
+    | Ok parsed -> parsed
+    | Error error -> fail (Keeper_types_profile.tool_result_body error) in
+  let meta = { meta with sandbox_image = parsed.profile_defaults.sandbox_image } in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path
+      ~base_path:ctx.config.base_path in
+  let published = ref false in
+  (match P.commit_configuration ~expected_revision:missing_config_revision
+      ~config:ctx.config ~parsed ~meta
+      ~publish:(fun outcome _revision ->
+        check bool "declaration is visible before actor publication" true
+          (Sys.file_exists outcome.path);
+        check bool "journal retired before actor publication" false
+          (Sys.file_exists journal_path);
+        published := true;
+        raise Interrupted_publication) () with
+   | exception Interrupted_publication -> ()
+   | exception exn -> fail (Printexc.to_string exn)
+   | Error error -> fail (P.error_to_string error)
+   | Ok _ -> fail "injected interruption did not propagate");
+  check bool "actor publication was reached" true !published;
+  let committed_revision = current_revision_exn ctx.config name in
+  check bool "interrupted publication preserves committed configuration" false
+    (committed_revision = missing_config_revision);
+  (match Keeper_config_journal.load ~journal_path with
+   | Ok None -> () | _ -> fail "restart would roll back committed actor configuration");
+  match P.commit_configuration ~expected_revision:committed_revision
+      ~config:ctx.config ~parsed ~meta ~publish:(fun _ revision -> revision) () with
+  | Ok {value; _} -> check bool "retry observes committed revision" true
+      (value = committed_revision)
+  | Error error -> fail (P.error_to_string error)
+;;
+
+let test_initial_configuration_rechecks_journal_after_early_recovery () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let manifest_path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path) "boot-race.toml" in
+  Fs_compat.mkdir_p (Filename.dirname manifest_path);
+  Fs_compat.save_file runtime_path "before-runtime";
+  Fs_compat.save_file manifest_path "before-manifest";
+  let early = Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path in
+  (match early.outcome with No_journal -> () | _ -> fail "expected initial no-journal observation");
+  let record : Keeper_config_journal.record =
+    {tx_id="boot-race"; keeper_name="boot-race";
+     manifest_before=Manifest_bytes "before-manifest";
+     runtime_before=Some (Runtime_bytes "before-runtime");
+     manifest_path; runtime_path=Some runtime_path; started_at_unix=0.; phase=Prepared} in
+  (* A writer acquires the same lock after the early check, then crashes
+     after the first file replacement, before startup's actual read. *)
+  (match Runtime.with_config_lock ~runtime_config_path:runtime_path (fun () ->
+     match Keeper_config_journal.stage ~base_path record with
+     | Error detail -> Error detail
+     | Ok () -> Fs_compat.save_file manifest_path "interrupted-manifest"; Ok ()) with
+   | Ok () -> () | Error detail -> fail detail);
+  let constructed = ref false in
+  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+     (fun ~runtime_config_path ->
+       constructed := true;
+       Runtime.load_config_observation ~runtime_config_path ()) with
+   | Error detail -> check bool "late journal requires recovery" true
+       (String.starts_with ~prefix:"configuration recovery required" detail)
+   | Ok _ -> fail "initial configuration accepted an interrupted dual write");
+  check bool "constructor and publication were never entered" false !constructed;
+  check string "retained manifest remains evidence" "interrupted-manifest"
+    (Fs_compat.load_file manifest_path);
+  check bool "diagnostic configuration reads remain available" true
+    (Result.is_ok (Runtime.load_config_observation ~runtime_config_path:runtime_path ()))
+;;
+
+let test_initial_configuration_excludes_concurrent_writers () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let attempted, publish_attempt = Eio.Promise.create () in
+  let finished, publish_finished = Eio.Promise.create () in
+  let writer_entered = ref false in
+  let initialized = Server_bootstrap_maintenance.with_initial_configuration ~base_path
+    (fun ~runtime_config_path ->
+      Fs_compat.save_file runtime_config_path "before";
+      Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+        Eio.Promise.resolve publish_attempt ();
+        let result = Runtime.with_config_lock ~runtime_config_path (fun () ->
+          writer_entered := true;
+          Fs_compat.save_file runtime_config_path "after";
+          Ok ()) in
+        Eio.Promise.resolve publish_finished result);
+      Eio.Promise.await attempted;
+      check int "initial owner and blocked writer both hold lock entries" 2
+        (File_lock_eio.For_testing.holders_and_waiters ~lock_path:(runtime_config_path ^ ".lock"));
+      check bool "writer cannot enter during initial publication" false !writer_entered;
+      check string "initial readers see original bytes" "before"
+        (Fs_compat.load_file runtime_config_path);
+      runtime_config_path) in
+  let runtime_path = match initialized with Ok path -> path | Error detail -> fail detail in
+  (match Eio.Promise.await finished with Ok () -> () | Error detail -> fail detail);
+  check bool "writer proceeds after initial publication" true !writer_entered;
+  check string "subsequent reader sees completed writer" "after" (Fs_compat.load_file runtime_path)
+;;
+
+let test_initial_configuration_preserves_setup_observations () =
+  with_env "MASC_CONFIG_BOOTSTRAP" "skip" @@ fun () ->
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let observe () = Server_bootstrap_maintenance.with_initial_configuration ~base_path
+    (fun ~runtime_config_path -> Runtime.load_config_observation ~runtime_config_path ()) in
+  (match observe () with
+   | Ok (Error _) -> ()
+   | Error detail -> fail ("missing model configuration became lock failure: " ^ detail)
+   | Ok (Ok _) -> fail "missing runtime configuration was invented");
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  Fs_compat.save_file runtime_path "[invalid TOML";
+  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+     (fun ~runtime_config_path ->
+       match Runtime.load_config_observation ~runtime_config_path () with
+       | Error _ -> fail "invalid model bytes should remain observable"
+       | Ok observation -> Runtime.init_default_degraded_observation observation) with
+   | Ok (Error _) -> ()
+   | Error detail -> fail ("invalid model configuration became lock failure: " ^ detail)
+   | Ok (Ok _) -> fail "invalid model configuration initialized")
+;;
+
+let test_no_journal_startup_preserves_read_only_config () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let config_root = Filename.dirname runtime_path in
+  Fs_compat.mkdir_p config_root;
+  let permissions = (Unix.stat config_root).Unix.st_perm in
+  Eio.Switch.on_release ctx.sw (fun () -> Unix.chmod config_root permissions);
+  Unix.chmod config_root 0o500;
+  let report = Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path in
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | _ -> fail "read-only configuration without a journal requires no recovery write");
+  check bool "no transaction lock is created for a read-only no-op" false
+    (Sys.file_exists (runtime_path ^ ".lock"))
+;;
+
+let test_config_journal_recovery_corrupt_journal_flags_error () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir "corrupt-journal.toml" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"corrupt\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"before\"\n";
+  Fs_compat.save_file
+    (Keeper_config_journal.journal_path_for_base_path ~base_path)
+    "{ this is not json }";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  let _ =
+    match report.outcome with
+    | Keeper_config_journal.Journal_corrupt detail ->
+      check bool "corrupt detail is visible" true (String.length detail > 0)
+    | _ ->
+      fail
+        ("expected journal_corrupt on bad json, got: "
+         ^ "unexpected recovery outcome")
+  in
+  check bool "corrupt journal is not auto-deleted" true
+    (Sys.file_exists report.journal_path);
+  check string "manifest unchanged while journal corrupt" "[keeper]\nname = \"corrupt\"\n"
+    (Fs_compat.load_file manifest_path);
+  check string "runtime unchanged while journal corrupt" "[exec.test]\nruntime = \"before\"\n"
+    (Fs_compat.load_file runtime_path)
+;;
+
+(* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
+   while creation required a sandbox_profile readable only from a keeper TOML the tool
+   does not write. The argument was parsed and honoured on update but ignored by the
+   create gate, so a keeper that did not already exist on disk could not be created —
+   the reason the APC run's librarian role was never registered. *)
+let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
+  let module A = Keeper_turn_up_args in
+  check
+    bool
+    "an explicit request creates without a TOML default"
+    true
+    (A.resolve_sandbox_profile
+       ~requested:Keeper_types_profile_toml_io.Docker
+       ~fallback:None
+       ()
+     = Some Keeper_types_profile_toml_io.Docker);
+  check
+    bool
+    "an explicit request overrides the TOML default"
+    true
+    (A.resolve_sandbox_profile
+       ~requested:Keeper_types_profile_toml_io.Micro_vm
+       ~fallback:(Some Keeper_types_profile_toml_io.Docker)
+       ()
+     = Some Keeper_types_profile_toml_io.Micro_vm);
+  check
+    bool
+    "no request keeps the TOML default"
+    true
+    (A.resolve_sandbox_profile
+       ~fallback:(Some Keeper_types_profile_toml_io.Docker)
+       ()
+     = Some Keeper_types_profile_toml_io.Docker);
+  (* Nothing stated is not a profile: the caller reports the missing field. *)
+  check
+    bool
+    "neither stated resolves to no profile at all"
+    true
+    (A.resolve_sandbox_profile ~fallback:None () = None)
+;;
+
+let contains needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  scan 0
+
+(* The form an operator edits and the parse that answers it drifted: the stem
+   named two fields while [parse] required a third, so every keeper created
+   through the TUI came back rejected and nothing failed until a human tried
+   it. Running the stem through [parse] moves that cost here.
+
+   The stem leaves [network_mode] blank on purpose and [parse] refuses the
+   blank by name. So the check is that the blank is the only refusal: with a
+   mode filled in, [parse] accepts the rest of the stem. *)
+let test_the_creation_stem_is_refused_only_for_its_blank_network_mode () =
+  with_test_context
+  @@ fun ctx ->
+  let fields =
+    match Yojson.Safe.from_string Keeper_turn_up_args.creation_stem with
+    | `Assoc fields -> fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      failf "the stem must be a JSON object"
+    | exception Yojson.Json_error message ->
+      failf "the stem must be JSON: %s" message
+  in
+  let parse fields =
+    Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx
+      (`Assoc fields)
+  in
+  (match parse fields with
+   | Ok _ -> failf "the stem's blank network_mode must be refused"
+   | Error result ->
+     check bool "the stem is refused for its network_mode" true
+       (contains "invalid network_mode"
+          (Keeper_types_profile.tool_result_body result)));
+  let filled =
+    List.map
+      (fun (key, value) ->
+         if String.equal key "network_mode" then key, `String "none" else key, value)
+      fields
+  in
+  match parse filled with
+  | Ok _ -> ()
+  | Error result ->
+    failf
+      "the stem with a network_mode filled in must be a declaration parse accepts: %s"
+      (Keeper_types_profile.tool_result_body result)
+;;
+
+(* [network_mode] was resolved twice, and the two answers disagreed: update
+   read the caller's argument, create computed one from [profile_defaults] and
+   dropped the caller's. A keeper created for web search landed on "none" and
+   its operator edited the TOML by hand. The cases below hold the shared
+   resolver to what both branches now need. *)
+let test_a_requested_network_mode_survives_the_fallback () =
+  let module A = Keeper_turn_up_args in
+  check
+    bool
+    "the caller's inherit wins over a declared none"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:(Some Keeper_types_profile_sandbox.Network_inherit)
+       ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+       ~fallback:(Some Keeper_types_profile_sandbox.Network_none)
+     = Ok Keeper_types_profile_sandbox.Network_inherit)
+;;
+
+let test_an_absent_network_mode_takes_the_declared_fallback () =
+  let module A = Keeper_turn_up_args in
+  check
+    bool
+    "no argument takes the TOML declaration"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:None
+       ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+       ~fallback:(Some Keeper_types_profile_sandbox.Network_inherit)
+     = Ok Keeper_types_profile_sandbox.Network_inherit);
+  check
+    bool
+    "no argument and no declaration takes the docker default"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:None
+       ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+       ~fallback:None
+     = Ok Keeper_types_profile_sandbox.Network_none)
+;;
+
+(* [parse] reads the mode once and hands the typed value on, so create and
+   update never see a value it could not read. *)
+let test_a_network_mode_rejection_names_every_accepted_spelling () =
+  with_test_context
+  @@ fun ctx ->
+  let parse value =
+    parse_stating_a_profile ctx
+      (`Assoc [ "name", `String "network-mode-parse"; "network_mode", value ])
+  in
+  (match parse (`String "lan") with
+   | Ok _ -> failf "an unparseable network_mode must not resolve"
+   | Error result ->
+     let message = Keeper_types_profile.tool_result_body result in
+     check bool "the rejection says which field" true
+       (contains "invalid network_mode" message);
+     List.iter
+       (fun spelling ->
+          check
+            bool
+            (Printf.sprintf "the rejection names %s" spelling)
+            true
+            (contains spelling message))
+       Keeper_types_profile_sandbox.valid_network_mode_strings);
+  List.iter
+    (fun value ->
+       match parse value with
+       | Ok _ -> failf "a non-string network_mode must not be read as absent"
+       | Error result ->
+         check bool "the refusal says network_mode must be a string" true
+           (contains "network_mode must be a string"
+              (Keeper_types_profile.tool_result_body result)))
+    [ `Null; `Int 1 ]
+;;
+
+(* The pair that a create wrote and the next config load refused. [remote_ssh]
+   is transport-only, so it cannot cut the guest off from the network; the
+   keeper TOML parser has always said so, and the resolver did not, which let
+   a create write a file that the loader would not read back. The resolver
+   answers now, before the meta is built. *)
+(* Every profile against every mode, from the module's own enumerations.
+
+   The pairs used to be hand-picked here, and a hand-picked set is one a new
+   variant walks past: [Network_policy] arrived in #33085 while
+   [network_mode_rejection] was being written in #33092, each PR green against
+   a base without the other, and main merged with three pairs undecided. The
+   function's comment had promised that exactly this could not happen -- "a
+   new profile or a new mode fails to compile here until someone decides its
+   answer" -- and it was right about the compiler and silent about two green
+   PRs landing minutes apart.
+
+   So the table is walked rather than sampled. A new profile or mode fails
+   here until its answer is written down, whichever order the PRs land in. *)
+let test_every_profile_and_mode_pair_has_a_decided_answer () =
+  let module S = Keeper_types_profile_sandbox in
+  let expected profile mode =
+    match profile, mode with
+    (* microVM is the backend policy mode was built for. *)
+    | S.Micro_vm, _ -> `Accepted
+    | S.Docker, (S.Network_none | S.Network_inherit) -> `Accepted
+    (* RFC-0415: the Docker egress boundary is unmeasured. *)
+    | S.Docker, S.Network_policy -> `Refused
+    | S.Remote_ssh, S.Network_inherit -> `Accepted
+    (* Phase 1 is transport-only and holds no network knob. *)
+    | S.Remote_ssh, (S.Network_none | S.Network_policy) -> `Refused
+  in
+  List.iter
+    (fun profile ->
+       List.iter
+         (fun mode ->
+            let label =
+              Printf.sprintf
+                "%s + %s"
+                (S.sandbox_profile_to_string profile)
+                (S.network_mode_to_string mode)
+            in
+            match S.network_mode_rejection profile mode, expected profile mode with
+            | None, `Accepted -> ()
+            | Some _, `Refused -> ()
+            | Some message, `Accepted ->
+              failf "%s must be accepted, and was refused: %s" label message
+            | None, `Refused -> failf "%s must be refused, and was accepted" label)
+         S.all_network_modes)
+    S.all_sandbox_profiles
+;;
+
+(* A refusal an operator cannot act on is one they file a bug about, so each
+   names the profile, the mode, and what to do instead. *)
+let test_every_refusal_names_the_pair_it_refuses () =
+  let module S = Keeper_types_profile_sandbox in
+  List.iter
+    (fun profile ->
+       List.iter
+         (fun mode ->
+            match S.network_mode_rejection profile mode with
+            | None -> ()
+            | Some message ->
+              let names needle =
+                check
+                  bool
+                  (Printf.sprintf
+                     "the refusal of %s + %s names %S"
+                     (S.sandbox_profile_to_string profile)
+                     (S.network_mode_to_string mode)
+                     needle)
+                  true
+                  (contains needle message)
+              in
+              names (S.sandbox_profile_to_string profile);
+              names (S.network_mode_to_string mode))
+         S.all_network_modes)
+    S.all_sandbox_profiles
+;;
+
+let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
+  let module A = Keeper_turn_up_args in
+  (match
+     A.resolve_requested_network_mode
+       ~requested:(Some Keeper_types_profile_sandbox.Network_none)
+       ~sandbox_profile:Keeper_types_profile_sandbox.Remote_ssh
+       ~fallback:None
+   with
+   | Ok _ ->
+     failf "remote_ssh with network_mode none must not resolve: the loader refuses it"
+   | Error message ->
+     check
+       bool
+       "the refusal carries the config loader's own code"
+       true
+       (contains "remote_ssh_no_network_mode" message));
+  (* The pair remote_ssh does hold, and the docker pairs, still resolve: the
+     check refuses one combination, not the field. *)
+  check
+    bool
+    "remote_ssh with inherit resolves"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:(Some Keeper_types_profile_sandbox.Network_inherit)
+       ~sandbox_profile:Keeper_types_profile_sandbox.Remote_ssh
+       ~fallback:None
+     = Ok Keeper_types_profile_sandbox.Network_inherit);
+  check
+    bool
+    "docker with none resolves"
+    true
+    (A.resolve_requested_network_mode
+       ~requested:(Some Keeper_types_profile_sandbox.Network_none)
+       ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+       ~fallback:None
+     = Ok Keeper_types_profile_sandbox.Network_none)
+;;
+
+(* The stem carries an empty string for this one field on purpose: "none"
+   blocks the guest's network and "inherit" opens it, and a form that suggests
+   either decides for an operator who is not reading it. A value that parses
+   would restore exactly the trap the form exists to close. *)
+let test_the_creation_stem_network_mode_is_not_a_mode () =
+  let declared =
+    match Yojson.Safe.from_string Keeper_turn_up_args.creation_stem with
+    | `Assoc fields ->
+      (match List.assoc_opt "network_mode" fields with
+       | Some (`String raw) -> raw
+       | Some _ | None -> failf "the stem must carry a network_mode string")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      failf "the stem must be a JSON object"
+  in
+  check
+    bool
+    "the stem's network_mode is not a mode any parse accepts"
+    true
+    (Option.is_none (Keeper_types_profile_sandbox.network_mode_of_string declared))
+;;
+
+let preflight_fixture ~ok : Keeper_sandbox_runtime.docker_preflight =
+  { ok
+  ; image = Ok "masc-sandbox-base:test"
+  ; docker_runtime_ok = ok
+  ; docker_runtime_error =
+      (if ok
+       then None
+       else
+         Some
+           "docker info failed while validating sandbox runtime: failed to connect to \
+            the docker API at unix:///fixture/docker.sock")
+  ; hardening_ok = true
+  ; hardening_error = None
+  ; image_present = true
+  ; image_error = None
+  ; failure_classes = (if ok then [] else [ "docker_runtime_error" ])
+  ; next_actions =
+      (if ok
+       then []
+       else [ "Ensure Docker is installed and the daemon is reachable from this shell." ])
+  }
+;;
+
+let docker_args ~profile =
+  `Assoc
+    [ "name", `String "preflight-fixture"
+    ; "sandbox_profile", `String profile
+    ; "sandbox_image", `String "base"
+    ]
+;;
+
+(* #37523. A docker keeper whose call and TOML both name no image is refused
+   at admission, before any preflight, rather than admitted onto the general
+   image. The same call with an image is the control: it reaches the
+   preflight. *)
+let test_a_docker_keeper_naming_no_image_is_refused () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let docker_preflight ~image:_ ~timeout_sec:_ () =
+    incr probes;
+    None
+  in
+  (match
+     Keeper_turn_up_args.parse ~docker_preflight ctx
+       (`Assoc [ "name", `String "imageless"; "sandbox_profile", `String "docker" ])
+   with
+   | Ok _ -> fail "a docker keeper naming no image was admitted"
+   | Error result ->
+     check bool "the refusal names the missing key" true
+       (contains "sandbox_image is required"
+          (Keeper_types_profile.tool_result_body result));
+     check int "refused before the preflight" 0 !probes);
+  match Keeper_turn_up_args.parse ~docker_preflight ctx (docker_args ~profile:"docker") with
+  | Ok _ -> check int "the declared image reaches the preflight" 1 !probes
+  | Error result -> fail (Keeper_types_profile.tool_result_body result)
+;;
+
+(* new-keeper, 2026-09-02: admitted from the TUI in 33 ms on a host with no
+   daemon, then every Execute failed on docker_container_probe_failed until
+   it was purged eleven minutes later. The refusal belongs at admission. *)
+let test_docker_profile_is_refused_when_its_preflight_fails () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let docker_preflight ~image:_ ~timeout_sec:_ () =
+    incr probes;
+    Some (preflight_fixture ~ok:false)
+  in
+  match Keeper_turn_up_args.parse ~docker_preflight ctx (docker_args ~profile:"docker") with
+  | Ok _ -> fail "a docker keeper whose daemon the preflight cannot reach was admitted"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    check bool "named under the shared label" true
+      (String.starts_with
+         ~prefix:(Keeper_sandbox_runtime.docker_preflight_failed_label ^ ":")
+         body);
+    check bool "carries the probe error" true
+      (contains "failed to connect to the docker API" body);
+    check bool "carries the next action" true
+      (contains "Ensure Docker is installed" body);
+    check int "probed once" 1 !probes
+;;
+
+let test_docker_profile_is_admitted_when_its_preflight_passes () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let docker_preflight ~image:_ ~timeout_sec:_ () =
+    incr probes;
+    Some (preflight_fixture ~ok:true)
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight ctx (docker_args ~profile:"docker") with
+   | Ok _ -> ()
+   | Error result ->
+     failf
+       "a docker keeper with a passing preflight was refused: %s"
+       (Keeper_types_profile.tool_result_body result));
+  check int "probed once" 1 !probes
+;;
+
+(* The master switch off ([None]) admits without a verdict, and no other
+   profile consults the docker probe at all. *)
+let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let switched_off ~image:_ ~timeout_sec:_ () =
+    incr probes;
+    None
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight:switched_off ctx (docker_args ~profile:"docker") with
+   | Ok _ -> ()
+   | Error result ->
+     failf
+       "docker with the preflight switched off must be admitted: %s"
+       (Keeper_types_profile.tool_result_body result));
+  check int "docker consulted the probe" 1 !probes;
+  let failing ~image:_ ~timeout_sec:_ () =
+    incr probes;
+    Some (preflight_fixture ~ok:false)
+  in
+  (* A microvm keeper's image is looked up in its runtime's store, so that
+     store has the build here. *)
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
+    ~base_path:ctx.config.base_path catalog_images;
+  let microvm_args =
+    match docker_args ~profile:"microvm" with
+    | `Assoc fields -> `Assoc (fields @ [ "microvm_backend", `String "apple_container" ])
+    | other -> other
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight:failing ctx microvm_args with
+   | Ok _ -> ()
+   | Error result ->
+     failf
+       "microvm must not be judged by the docker preflight: %s"
+       (Keeper_types_profile.tool_result_body result));
+  check int "microvm never consulted the probe" 1 !probes
+;;
+
+(* A name the catalog lacks is refused before the preflight, with the names
+   the catalog has, and the preflight's switch does not change that: keeper
+   up starts the keeper it creates, and boot refuses the same name. The probe
+   here answers [None], which is the switch being off. *)
+let test_a_name_the_catalog_lacks_is_refused_before_the_preflight () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let switched_off ~image:_ ~timeout_sec:_ () =
+    incr probes;
+    None
+  in
+  match
+    Keeper_turn_up_args.parse ~docker_preflight:switched_off ctx
+      (`Assoc
+        [ "name", `String "unbuilt"
+        ; "sandbox_profile", `String "docker"
+        ; "sandbox_image", `String "rust"
+        ])
+  with
+  | Ok _ -> fail "a docker keeper naming an image the catalog lacks was admitted"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    check bool "refused as unresolved" true
+      (String.starts_with ~prefix:"sandbox_image_unresolved: " body);
+    check bool "the catalog's refusal" true
+      (contains "sandbox_image \"rust\" is not in the image catalog" body);
+    check bool "with the names it has" true (contains "base, ocaml" body);
+    check int "refused before the preflight" 0 !probes
+;;
+
+(* A microvm guest starts from its runtime's own image store, so a build
+   promoted only in Docker's does not admit it. The same name promoted in the
+   runtime's store does. *)
+let test_a_microvm_keeper_needs_its_name_promoted_in_its_runtime_store () =
+  with_test_context
+  @@ fun ctx ->
+  let args =
+    `Assoc
+      [ "name", `String "guest"
+      ; "sandbox_profile", `String "microvm"
+      ; "microvm_backend", `String "apple_container"
+      ; "sandbox_image", `String "base"
+      ]
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx args with
+   | Ok _ -> fail "a microvm keeper with nothing promoted in its runtime's store was admitted"
+   | Error result ->
+     let body = Keeper_types_profile.tool_result_body result in
+     check bool "refused as unresolved" true
+       (String.starts_with ~prefix:"sandbox_image_unresolved: " body);
+     check bool "names the runtime's store" true
+       (contains "nothing is promoted for \"base\" in the apple_container image store"
+          body));
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
+    ~base_path:ctx.config.base_path catalog_images;
+  match Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx args with
+  | Ok _ -> ()
+  | Error result ->
+    failf "a microvm keeper whose name is promoted in its runtime's store was refused: %s"
+      (Keeper_types_profile.tool_result_body result)
+;;
+
+(* With no microvm_backend declared the store is the host's default runtime,
+   which is what boot resolves too; a host with none has no store at all. *)
+let test_an_undeclared_microvm_backend_is_looked_up_in_the_host_default () =
+  with_test_context
+  @@ fun ctx ->
+  match
+    Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx
+      (`Assoc
+        [ "name", `String "guest"
+        ; "sandbox_profile", `String "microvm"
+        ; "sandbox_image", `String "base"
+        ])
+  with
+  | Ok _ -> fail "a microvm keeper with nothing promoted in any runtime store was admitted"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    let expected =
+      match Keeper_microvm_backend.default_for_host () with
+      | Some backend ->
+        Printf.sprintf "nothing is promoted for \"base\" in the %s image store"
+          (Keeper_microvm_backend.to_string backend)
+      | None -> "no microvm_backend, so there is no image store"
+    in
+    check bool "refused as unresolved" true
+      (String.starts_with ~prefix:"sandbox_image_unresolved: " body);
+    check bool "names the store it looked in" true (contains expected body)
+;;
+
+(* The rule boot applies and keeper up shares: a profile that starts a
+   container boots only on a name its own image store has a build for, and
+   remote_ssh, which starts none, is not asked. The fixture catalog promotes
+   [base] and [ocaml] in Docker's store only. *)
+let test_boot_refuses_a_name_its_store_cannot_resolve () =
+  with_test_context
+  @@ fun ctx ->
+  let module R = Keeper_sandbox_image_resolver in
+  let meta ~profile ?backend image =
+    match
+      Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "booting" ])
+    with
+    | Error detail -> fail ("meta fixture: " ^ detail)
+    | Ok meta ->
+      { meta with
+        sandbox_profile = profile
+      ; sandbox_image = image
+      ; microvm_backend = backend
+      }
+  in
+  let refusal meta =
+    Keeper_sandbox_image_admission.boot_refusal
+      ~base_path:ctx.config.Workspace.base_path meta
+  in
+  (match refusal (meta ~profile:Keeper_types_profile_sandbox.Docker (Some "base")) with
+   | None -> ()
+   | Some error -> fail ("a promoted name was refused: " ^ R.error_to_string error));
+  (match refusal (meta ~profile:Keeper_types_profile_sandbox.Docker (Some "rust")) with
+   | Some (R.Unresolved (Keeper_sandbox_image_catalog.Unknown_image _)) -> ()
+   | Some error -> fail ("an unknown name was refused for another reason: " ^ R.error_to_string error)
+   | None -> fail "a name the catalog lacks booted");
+  (match
+     refusal
+       (meta ~profile:Keeper_types_profile_sandbox.Micro_vm
+          ~backend:Keeper_microvm_backend.Apple_container (Some "base"))
+   with
+   | Some (R.Unresolved (Keeper_sandbox_image_catalog.Not_built_on_host _)) -> ()
+   | Some error -> fail ("a guest's unbuilt name was refused for another reason: " ^ R.error_to_string error)
+   | None -> fail "a guest booted on a build promoted only in Docker's store");
+  (match
+     refusal (meta ~profile:Keeper_types_profile_sandbox.Micro_vm (Some "base"))
+   with
+   | Some (R.No_image_store _) -> ()
+   | Some error -> fail ("a guest with no runtime was refused for another reason: " ^ R.error_to_string error)
+   | None -> fail "a guest with no runtime to look in booted");
+  check bool "remote_ssh is not asked" true
+    (Option.is_none (refusal (meta ~profile:Keeper_types_profile_sandbox.Remote_ssh None)))
+
+;;
+
+(* A tag where a name belongs is refused where the call is read, not looked
+   up in the catalog and missed. *)
+let test_a_tag_in_sandbox_image_is_refused () =
+  with_test_context
+  @@ fun ctx ->
+  match
+    parse_stating_a_profile ctx
+      (`Assoc [ "name", `String "tagged"; "sandbox_image", `String "masc-sandbox:general" ])
+  with
+  | Ok _ -> fail "an image tag was accepted as a sandbox_image name"
+  | Error result ->
+    check bool "the refusal says it is not a catalog name" true
+      (contains "is not an image catalog name"
+         (Keeper_types_profile.tool_result_body result))
+;;
+
+let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
+  with_test_context
+  @@ fun ctx ->
+  let keeper_name = "custom-image-keeper" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+  let toml_content =
+    {|
+[keeper]
+instructions = "Exercise the declared custom sandbox image."
+sandbox_profile = "docker"
+sandbox_image = "ocaml"
+network_mode = "none"
+|}
+  in
+  Out_channel.with_open_bin toml_path (fun oc ->
+    Out_channel.output_string oc toml_content);
+  let probed_image = ref None in
+  let docker_preflight ~image ~timeout_sec:_ () =
+    probed_image := Some image;
+    Some (preflight_fixture ~ok:true)
+  in
+  let args =
+    `Assoc
+      [ "name", `String keeper_name
+      ; "sandbox_profile", `String "docker"
+      ]
+  in
+  match Keeper_turn_up_args.parse ~docker_preflight ctx args with
+  | Ok parsed ->
+    check (option string) "the preflight probes the build the TOML's name resolves to"
+      (Some "masc-sandbox-ocaml:t1")
+      !probed_image;
+    check (option string) "parsed profile_defaults keeps the name"
+      (Some "ocaml")
+      parsed.profile_defaults.sandbox_image;
+    (match Keeper_turn_up_args.parse ~docker_preflight ctx
+       (`Assoc ["name", `String keeper_name; "sandbox_profile", `String "docker";
+                "sandbox_image", `String "base"]) with
+     | Ok parsed ->
+       check (option string) "explicit image is preflighted instead of old TOML"
+         (Some "masc-sandbox-base:test") !probed_image;
+       check (option string) "requested image materializes"
+         (Some "base") parsed.profile_defaults.sandbox_image
+     | Error result -> fail (Keeper_types_profile.tool_result_body result));
+    let failing_docker_preflight ~image ~timeout_sec:_ () =
+      probed_image := Some image;
+      Some (preflight_fixture ~ok:false)
+    in
+    (match Keeper_turn_up_args.parse ~docker_preflight:failing_docker_preflight ctx args with
+     | Ok _ -> fail "admission should fail when custom image preflight fails"
+     | Error result ->
+       let body = Keeper_types_profile.tool_result_body result in
+       check bool "rejected under docker_preflight_failed" true
+         (String.starts_with
+            ~prefix:(Keeper_sandbox_runtime.docker_preflight_failed_label ^ ":")
+            body))
+  | Error result ->
+    failf "unexpected parse error: %s"
+      (Keeper_types_profile.tool_result_body result)
+;;
+
+(* The schema the model reads and the parse that answers it have to say the
+   same thing about [sandbox_profile]. They did not: the schema advertised
+   [default = "docker"] -- nothing in masc applies it, it is a statement to
+   the caller that omitting the field is safe -- while [parse] rejects the
+   omission and the same param's own description says "Pass explicitly".
+   #32078 settled which one is right: absence is an error, because "execution
+   outside a boundary is not a profile the fleet offers".
+
+   Pinned from both sides so removing either half fails: the schema must not
+   offer a default, and the parse must still refuse the omission. A later
+   change that re-adds the default has to delete this test to do it. *)
+let test_the_schema_does_not_promise_a_default_parse_refuses () =
+  let schema =
+    match
+      List.find_opt
+        (fun (schema : Masc_domain.tool_schema) ->
+           String.equal schema.name "masc_keeper_up")
+        Masc.Keeper_schema.schemas
+    with
+    | Some schema -> schema.input_schema
+    | None -> fail "masc_keeper_up must have a schema"
+  in
+  let advertised_default =
+    Yojson.Safe.Util.(
+      schema
+      |> member "properties"
+      |> member "sandbox_profile"
+      |> member "default")
+  in
+  check
+    bool
+    "the schema offers no default for sandbox_profile"
+    true
+    (advertised_default = `Null);
+  with_test_context
+  @@ fun ctx ->
+  match
+    Keeper_turn_up_args.parse ctx (`Assoc [ "name", `String "no-default-fixture" ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "omitting sandbox_profile must stay an error"
+;;
+
+let write_keeper_toml (ctx : _ Keeper_types_profile.context) name content =
+  let dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:ctx.config.base_path
+  in
+  Fs_compat.mkdir_p dir;
+  let path = Filename.concat dir (name ^ ".toml") in
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc content);
+  path
+;;
+
+(* #39373: a keeper TOML the current build refuses (here: a pre-hard-cut
+   sandbox_image) must stay repairable through the API. A patch carrying a
+   valid replacement proceeds on the merged file instead of being refused
+   with the current file's defect. The patch states no profile: the merged
+   defaults still carry the file's unpatched fields. *)
+let test_parse_repairs_a_broken_toml_image () =
+  with_test_context @@ fun ctx ->
+  let name = "repair-me" in
+  let _path =
+    write_keeper_toml ctx name
+      {|[keeper]
+name = "repair-me"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  match
+    Keeper_turn_up_args.parse
+      ~docker_preflight:no_daemon_in_this_suite
+      ctx
+      (`Assoc [ "name", `String name; "sandbox_image", `String "ocaml" ])
+  with
+  | Error result ->
+    failf "repairing patch was refused: %s" (Keeper_types_profile.tool_result_body result)
+  | Ok parsed ->
+    check bool "merged image is the patch" true
+      (parsed.profile_defaults.sandbox_image = Some "ocaml");
+    check bool "merged profile comes from the file" true
+      (parsed.profile_defaults.sandbox_profile = Some Keeper_types_profile_sandbox.Docker);
+    check bool "patch stated no profile" true (parsed.sandbox_profile_opt = None)
+;;
+
+(* The same broken file with a patch that repairs nothing is still refused,
+   naming the file's defect -- recovery changes nothing when the end state
+   is still broken. *)
+let test_parse_still_refuses_an_unrepaired_toml () =
+  with_test_context @@ fun ctx ->
+  let name = "unrepaired" in
+  let _path =
+    write_keeper_toml ctx name
+      {|[keeper]
+name = "unrepaired"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  match
+    Keeper_turn_up_args.parse
+      ~docker_preflight:no_daemon_in_this_suite
+      ctx
+      (`Assoc [ "name", `String name ])
+  with
+  | Ok _ -> fail "an unrepaired broken TOML must still be refused"
+  | Error result ->
+    check bool "refusal names the file defect" true
+      (contains "sandbox_image" (Keeper_types_profile.tool_result_body result))
+;;
+
+(* A patch that repairs one of two broken fields is refused naming the
+   remaining defect -- never the stale defect it already repairs -- so
+   iterative repair converges instead of repeating the same refusal. *)
+let test_parse_names_the_remaining_defect () =
+  with_test_context @@ fun ctx ->
+  let name = "two-defects" in
+  let _path =
+    write_keeper_toml ctx name
+      {|[keeper]
+name = "two-defects"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+network_mode = "bogus"
+|}
+  in
+  match
+    Keeper_turn_up_args.parse
+      ~docker_preflight:no_daemon_in_this_suite
+      ctx
+      (`Assoc [ "name", `String name; "sandbox_image", `String "ocaml" ])
+  with
+  | Ok _ -> fail "a still-broken merged file must be refused"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    check bool "refusal names the remaining defect" true (contains "network_mode" body);
+    check bool "refusal no longer names the repaired image" true
+      (not (contains "masc-keeper-sandbox:local" body))
+;;
+
+(* Unit level: the merged assessment returns repaired defaults while its
+   snapshot still hashes the bytes on disk, and an empty edit list behaves
+   exactly like the strict load. *)
+let test_or_merged_assesses_the_patch () =
+  with_test_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let name = "or-merged" in
+  let current =
+    {|[keeper]
+name = "or-merged"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  let _path = write_keeper_toml ctx name current in
+  let edits =
+    [ "sandbox_image"
+    , Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string "ocaml")
+    ]
+  in
+  (match
+     Keeper_types_profile.load_declarative_materialization_defaults_or_merged
+       ~base_path
+       ~name
+       ~toml_edits:edits
+   with
+   | Error error ->
+     failf "merged assessment failed: %s"
+       (Keeper_types_profile.keeper_toml_load_error_to_string error)
+   | Ok { profile_defaults; manifest_snapshot } ->
+     check bool "merged image repaired" true
+       (profile_defaults.sandbox_image = Some "ocaml");
+     check bool "merged profile intact" true
+       (profile_defaults.sandbox_profile = Some Keeper_types_profile_sandbox.Docker);
+     (match manifest_snapshot with
+      | Keeper_types_profile.Declarative_manifest_missing ->
+        fail "merged snapshot must record the manifest on disk"
+      | Keeper_types_profile.Declarative_manifest_present { sha256; _ } ->
+        check string "snapshot hashes the disk bytes"
+          Agent_core_sha256.(digest_string current |> to_hex)
+          sha256));
+  match
+    Keeper_types_profile.load_declarative_materialization_defaults_or_merged
+      ~base_path
+      ~name
+      ~toml_edits:[]
+  with
+  | Ok _ -> fail "an empty edit list must not repair a broken file"
+  | Error _ -> ()
+;;
+
+(* End to end: the commit writes the assessed merge -- the repaired bytes on
+   disk pass the same strict load, so assessment and write cannot disagree. *)
+let test_commit_writes_the_assessed_merge () =
+  with_persisting_context @@ fun ctx ->
+  let name = "commit-merge" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:ctx.config.base_path
+  in
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file runtime_path
+    (Fs_compat.load_file (Masc_test_deps.source_path "config/runtime.toml"));
+  let path =
+    write_keeper_toml ctx name
+      {|[keeper]
+name = "commit-merge"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "fixture instructions" ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parsed =
+    match
+      Keeper_turn_up_args.parse
+        ~docker_preflight:no_daemon_in_this_suite
+        ctx
+        (`Assoc [ "name", `String name; "sandbox_image", `String "ocaml" ])
+    with
+    | Ok parsed -> parsed
+    | Error result ->
+      failf "repairing patch was refused: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:(current_revision_exn ctx.config name)
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ()
+   with
+   | Ok _ -> ()
+   | Error error ->
+     failf "commit: %s" (Keeper_turn_up_config_persistence.error_to_string error));
+  let written = Fs_compat.load_file path in
+  (match Keeper_types_profile.materialization_defaults_of_content ~path written with
+   | Error error ->
+     failf "written file fails strict load: %s"
+       (Keeper_types_profile.keeper_toml_load_error_to_string error)
+   | Ok defaults ->
+     check bool "written image repaired" true
+       (defaults.sandbox_image = Some "ocaml");
+     check bool "written profile intact" true
+       (defaults.sandbox_profile = Some Keeper_types_profile_sandbox.Docker))
+;;
+
+let test_parse_requires_a_sandbox_profile () =
+  with_test_context @@ fun ctx ->
+  match
+    Keeper_turn_up_args.parse ctx (`Assoc [ "name", `String "no-profile-fixture" ])
+  with
+  | Error result ->
+    check
+      bool
+      "the rejection names the three profiles"
+      true
+      (contains
+         "docker, microvm, remote_ssh"
+         (Keeper_types_profile.tool_result_body result))
+  | Ok _ ->
+    fail "a keeper_up call that states no sandbox_profile must be rejected"
+;;
+
+(* task-895: parse used to read its fields and silently drop the rest — a
+   caller sending merge_existing / keep_warm / stash_untracked watched the
+   field vanish with no error. The gate must reject every key the parse body
+   does not consume, and the known set must stay derived from that body,
+   not from a stale schema list. *)
+let test_input_policy () =
+  with_test_context @@ fun ctx ->
+  List.iter (fun (wire, expected) ->
+    match parse_stating_a_profile ctx (`Assoc ["name", `String "input-policy"; "input_policy", `String wire]) with
+    | Ok parsed -> check bool "typed input policy" true (parsed.input_policy_opt = Some expected)
+    | Error result -> fail (Keeper_types_profile.tool_result_body result))
+    ["small", Masc.Keeper_input_policy.Small; "wide", Masc.Keeper_input_policy.Wide];
+  List.iter (fun value ->
+    match parse_stating_a_profile ctx (`Assoc ["name", `String "input-policy"; "input_policy", value]) with
+    | Error _ -> () | Ok _ -> fail "invalid input policy accepted")
+    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
+;;
+
+(* [parse] reads the profile once and hands the typed value on, so a value it
+   cannot read is refused here; create and update never see one. *)
+let test_parse_types_the_sandbox_profile () =
+  with_test_context @@ fun ctx ->
+  let parse profile =
+    parse_stating_a_profile ctx
+      (`Assoc
+         [ "name", `String "profile-parse"
+         ; "sandbox_profile", profile
+         ; "sandbox_image", `String "base"
+         ])
+  in
+  (match parse (`String "docker") with
+   | Ok parsed ->
+     check bool "typed sandbox profile" true
+       (parsed.sandbox_profile_opt = Some Keeper_types_profile_toml_io.Docker)
+   | Error result -> fail (Keeper_types_profile.tool_result_body result));
+  List.iter
+    (fun (value, refusal) ->
+       match parse value with
+       | Error result ->
+         check bool
+           (Printf.sprintf "the refusal says %S" refusal)
+           true
+           (contains refusal (Keeper_types_profile.tool_result_body result))
+       | Ok _ -> fail "an unreadable sandbox_profile was admitted")
+    [ `String "chroot", "invalid sandbox_profile"
+    ; `String "local", "invalid sandbox_profile"
+    ; `Null, "sandbox_profile must be a string"
+    ; `Int 1, "sandbox_profile must be a string"
+    ]
+;;
+
+(* [instructions] is free text, so [parse] checks only its shape. A non-string
+   used to read as absent and leave the TOML's instructions in place; it is
+   refused now. The empty string still reads as absent. *)
+let test_parse_refuses_non_string_instructions () =
+  with_test_context @@ fun ctx ->
+  let parse value =
+    parse_stating_a_profile ctx
+      (`Assoc [ "name", `String "instructions-shape"; "instructions", value ])
+  in
+  List.iter
+    (fun value ->
+       match parse value with
+       | Ok _ -> fail "a non-string instructions must not be read as absent"
+       | Error result ->
+         check bool "the refusal says instructions must be a string" true
+           (contains "instructions must be a string"
+              (Keeper_types_profile.tool_result_body result)))
+    [ `Null; `Int 1; `List [] ];
+  match parse (`String "") with
+  | Ok parsed ->
+    check (option string) "the empty string reads as absent" None parsed.instructions_arg
+  | Error result -> fail (Keeper_types_profile.tool_result_body result)
+;;
+
+let test_parse_rejects_unknown_keys () =
+  with_test_context @@ fun ctx ->
+  List.iter
+    (fun (label, field) ->
+       match
+         parse_stating_a_profile ctx
+           (`Assoc [ "name", `String "unknown-args-fixture"; field ])
+       with
+       | Error result ->
+         check bool (label ^ " rejected as unknown") true
+           (contains "[turn_up_arg_unknown] unknown keeper_up argument(s):"
+              (Keeper_types_profile.tool_result_body result))
+       | Ok _ -> failf "%s was silently accepted" label)
+    [ "merge_existing", ("merge_existing", `Bool true)
+    ; "keep_warm", ("keep_warm", `Bool false)
+    ; "stash_untracked", ("stash_untracked", `String "yes")
+    ; "handler-only creation control", ("create_only", `Bool true)
+    ];
+  check (list string) "known set is exactly the parse-consumed keys"
+    (List.sort String.compare
+       [ "name"; "runtime_id"; "activation_mode"; "input_policy"; "mention_targets"
+       ; "board_interests"
+       ; "max_context_override"; "sandbox_profile"; "sandbox_image"
+       ; "microvm_backend"; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"
+       ; "instructions"
+       ])
+    (List.sort String.compare Keeper_turn_up_args.known_turn_up_args);
+  (match
+     parse_stating_a_profile ctx
+       (`Assoc
+          [ "name", `String "unknown-args-fixture"
+          ; "zzz_late", `Bool true
+          ; "aaa_early", `Bool true
+          ])
+   with
+   | Error result ->
+     let body = Keeper_types_profile.tool_result_body result in
+     check bool "every unknown key is named" true
+       (contains "aaa_early" body && contains "zzz_late" body)
+   | Ok _ -> fail "multiple unknown keys were silently accepted");
+  (match
+     parse_stating_a_profile ctx
+       (`Assoc
+          [ "name", `String "unknown-args-fixture"
+          (* The tool schema defaults this to "docker"; [parse] is called
+             directly here, so the fixture states what the schema would. *)
+          ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
+          ; "instructions", `String "still fine"
+          ])
+   with
+   | Ok _ -> ()
+   | Error result ->
+     failf "known key rejected: %s"
+       (Keeper_types_profile.tool_result_body result))
+
+let test_sandbox_image_persistence () =
+  with_persisting_context @@ fun ctx ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let name = "image-persistence" in
+  let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) with
+    | Ok meta -> { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker }
+    | Error error -> fail error in
+  let apply fields =
+    let parsed = match parse_stating_a_profile ctx
+        (`Assoc (("name", `String name) :: ("sandbox_profile", `String "docker") :: fields)) with
+      | Ok parsed -> parsed
+      | Error result -> fail (Keeper_types_profile.tool_result_body result) in
+    let instructions = match parsed.instructions_opt with
+      | Some instructions -> instructions
+      | None -> fail "image fixture did not resolve Keeper instructions" in
+    let meta = { meta with instructions;
+      sandbox_image = parsed.profile_defaults.sandbox_image } in
+    (match Keeper_turn_up_config_persistence.persist
+       ~expected_revision:(current_revision_exn ctx.config name)
+       ~config:ctx.config ~parsed ~meta () with
+     | Ok _ -> () | Error e -> fail (Keeper_turn_up_config_persistence.error_to_string e));
+    match Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path:ctx.config.base_path name with
+    | Ok defaults -> defaults.sandbox_image
+    | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e) in
+  check (option string) "image set on disk" (Some "base")
+    (apply ["instructions", `String "image fixture instructions";
+            "sandbox_image", `String "base"]);
+  check (option string) "omission retains image" (Some "base")
+    (apply ["instructions", `String "new instructions"]);
+  check (option string) "image replacement materializes" (Some "ocaml")
+    (apply ["sandbox_image", `String "ocaml"]);
+  (* A docker Keeper cannot drop its image (#37523): the explicit clear is
+     refused before anything is written, and the stored image stays. *)
+  (match parse_stating_a_profile ctx
+      (`Assoc [ "name", `String name; "sandbox_profile", `String "docker"
+              ; "sandbox_image", `Null ]) with
+   | Error result ->
+     check bool "the refusal names the missing image" true
+       (contains "sandbox_image is required"
+          (Keeper_types_profile.tool_result_body result))
+   | Ok _ -> fail "clearing a docker Keeper's image was accepted");
+  (match Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+     ~base_path:ctx.config.base_path name with
+   | Ok defaults ->
+     check (option string) "refused clear keeps the stored image"
+       (Some "ocaml") defaults.sandbox_image
+   | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e));
+  List.iter (fun image ->
+    match parse_stating_a_profile ctx (`Assoc ["name", `String name; "sandbox_image", image]) with
+    | Error _ -> () | Ok _ -> fail "invalid image accepted") [`String " "; `Int 1; `Bool true]
+;;
+
+let () =
+  match Array.to_list Sys.argv with
+  | [ _
+    ; "--keeper-manifest-cas-child"
+    ; base
+    ; name
+    ; expected
+    ; instructions
+    ; ready_path
+    ; start_path
+    ] ->
+    run_cas_child base name expected instructions ready_path start_path
+  | _ ->
+  run
+    "keeper_turn_up_args"
+    [ ( "mention_targets"
+      , [ test_case "sandbox image set omit replace and clear" `Quick test_sandbox_image_persistence
+        ; test_case
+            "absent mention_targets uses fallback"
+            `Quick
+            test_resolve_mention_targets_uses_fallback_when_absent
+        ; test_case
+            "explicit empty mention_targets clears"
+            `Quick
+            test_resolve_mention_targets_preserves_explicit_clear
+        ; test_case
+            "explicit mention_targets normalize and dedupe"
+            `Quick
+            test_resolve_mention_targets_normalizes_explicit_values
+        ; test_case
+            "absent board_interests uses fallback"
+            `Quick
+            test_resolve_board_interests_uses_fallback_when_absent
+        ; test_case
+            "explicit empty board_interests clears"
+            `Quick
+            test_resolve_board_interests_preserves_explicit_clear
+        ; test_case
+            "board_interests are canonical"
+            `Quick
+            test_resolve_board_interests_normalizes_explicit_values
+        ] )
+    ; ( "broken_toml_recovery"
+      , [ test_case
+            "a patch repairing a refused TOML proceeds on the merged file"
+            `Quick
+            test_parse_repairs_a_broken_toml_image
+        ; test_case
+            "an unrepaired TOML is still refused"
+            `Quick
+            test_parse_still_refuses_an_unrepaired_toml
+        ; test_case
+            "a partial repair names the remaining defect"
+            `Quick
+            test_parse_names_the_remaining_defect
+        ; test_case
+            "merged assessment snapshots the disk bytes"
+            `Quick
+            test_or_merged_assesses_the_patch
+        ; test_case
+            "commit writes the assessed merge"
+            `Quick
+            test_commit_writes_the_assessed_merge
+        ] )
+    ; ( "unknown_keys"
+      , [ test_case
+            "unknown arguments are rejected, not silently dropped"
+            `Quick
+            test_parse_rejects_unknown_keys
+        ; test_case "typed input policy" `Quick test_input_policy
+        ; test_case "non-string instructions are refused" `Quick
+            test_parse_refuses_non_string_instructions
+        ] )
+    ; ( "sandbox_profile"
+      , [ test_case
+            "requested profile wins over the TOML fallback"
+            `Quick
+            test_requested_sandbox_profile_wins_over_the_toml_fallback
+        ; test_case
+            "parse types the sandbox_profile once"
+            `Quick
+            test_parse_types_the_sandbox_profile
+        ; test_case
+            "a call that states no sandbox_profile is rejected"
+            `Quick
+            test_parse_requires_a_sandbox_profile
+        ; test_case
+            "the creation stem is refused only for its blank network_mode"
+            `Quick
+            test_the_creation_stem_is_refused_only_for_its_blank_network_mode
+        ; test_case
+            "the schema does not promise a default parse refuses"
+            `Quick
+            test_the_schema_does_not_promise_a_default_parse_refuses
+        ; test_case
+            "remote endpoint required and registry-resolved"
+            `Quick
+            test_remote_endpoint_validation
+        ; test_case
+            "a docker keeper naming no image is refused"
+            `Quick
+            test_a_docker_keeper_naming_no_image_is_refused
+        ; test_case
+            "docker profile is refused when its preflight fails"
+            `Quick
+            test_docker_profile_is_refused_when_its_preflight_fails
+        ; test_case
+            "docker profile is admitted when its preflight passes"
+            `Quick
+            test_docker_profile_is_admitted_when_its_preflight_passes
+        ; test_case
+            "docker preflight is consulted only for the docker profile"
+            `Quick
+            test_docker_preflight_is_consulted_only_for_the_docker_profile
+        ; test_case "a tag in sandbox_image is refused" `Quick
+            test_a_tag_in_sandbox_image_is_refused
+        ; test_case "boot refuses a name its store cannot resolve" `Quick
+            test_boot_refuses_a_name_its_store_cannot_resolve
+        ; test_case
+            "a name the catalog lacks is refused before the preflight"
+            `Quick
+            test_a_name_the_catalog_lacks_is_refused_before_the_preflight
+        ; test_case
+            "a microvm keeper needs its name promoted in its runtime's store"
+            `Quick
+            test_a_microvm_keeper_needs_its_name_promoted_in_its_runtime_store
+        ; test_case
+            "an undeclared microvm backend is looked up in the host default"
+            `Quick
+            test_an_undeclared_microvm_backend_is_looked_up_in_the_host_default
+
+        ; test_case
+            "docker preflight receives sandbox_image from profile defaults"
+            `Quick
+            test_docker_preflight_receives_sandbox_image_from_profile_defaults
+        ; test_case
+            "remote endpoint persists and null clears"
+            `Quick
+            test_remote_endpoint_persistence_round_trip
+        ; test_case "microvm backend persists and clears on profile change" `Quick
+            test_microvm_backend_persistence_round_trip
+        ; test_case "microvm backend rejects unknown type and profile combinations" `Quick
+            test_microvm_backend_rejects_invalid_declarations
+        ] )
+    ; ( "network_mode"
+      , [ test_case
+            "a requested mode survives the fallback"
+            `Quick
+            test_a_requested_network_mode_survives_the_fallback
+        ; test_case
+            "an absent mode takes the declared fallback"
+            `Quick
+            test_an_absent_network_mode_takes_the_declared_fallback
+        ; test_case
+            "a rejection names every accepted spelling"
+            `Quick
+            test_a_network_mode_rejection_names_every_accepted_spelling
+        ; test_case
+            "every profile and mode pair has a decided answer"
+            `Quick
+            test_every_profile_and_mode_pair_has_a_decided_answer
+        ; test_case
+            "every refusal names the pair it refuses"
+            `Quick
+            test_every_refusal_names_the_pair_it_refuses
+        ; test_case
+            "remote_ssh refuses a mode it cannot hold"
+            `Quick
+            test_remote_ssh_refuses_a_network_mode_it_cannot_hold
+        ; test_case
+            "the creation stem's network_mode is not a mode"
+            `Quick
+            test_the_creation_stem_network_mode_is_not_a_mode
+        ] )
+    ; ( "max_context_override"
+      , [ test_case "request values are exact or rejected" `Quick test_parse_max_context_override
+        ; test_case "runtime JSON rejects TOML-owned field" `Quick
+            test_runtime_json_rejects_toml_owned_max_context_override
+        ] )
+    ; ( "tools"
+      , [ test_case
+            "groups/native round-trip, clear, and invalid rejection"
+            `Quick
+            test_tools_patch_round_trips_and_rejects_invalid_values
+        ] )
+    ; ( "skills"
+      , [ test_case
+            "names round-trip absent, empty, and exact values"
+            `Quick
+            test_skills_names_patch_round_trips_three_states
+        ; test_case
+            "one expected revision commits exactly one writer"
+            `Quick
+            test_manifest_revision_allows_only_one_stale_writer
+        ; test_case
+            "rejected create publication leaves manifest missing"
+            `Quick
+            test_rejected_create_publication_removes_manifest
+        ; test_case
+            "publication rollback restores both config authorities"
+            `Quick
+            test_publication_rollback_restores_manifest_and_runtime_bytes
+        ; test_case
+            "two processes with one revision produce one winner"
+            `Quick
+            test_two_processes_same_revision_have_one_winner
+        ; test_case
+            "revision projection and meta read share the manifest lock"
+            `Quick
+            test_revision_projection_holds_manifest_lock
+        ; test_case
+            "release failure preserves committed receipt"
+            `Quick
+            test_release_failure_preserves_committed_receipt
+        ; test_case
+            "rollback after rename failure requires reconciliation"
+            `Quick
+            test_rollback_after_rename_failure_requires_reconciliation
+        ; test_case
+            "publication exception restores missing manifest"
+            `Quick
+            test_publication_exception_restores_missing_manifest
+        ; test_case
+            "post-write revision failure restores missing manifest"
+            `Quick
+            test_post_write_revision_failure_restores_missing_manifest
+        ; test_case
+            "publish rejected while unresolved journal exists"
+            `Quick
+            test_publish_rejected_while_unresolved_journal_exists
+        ; test_case
+            "compensated rollback clears the crash journal"
+            `Quick
+            test_compensated_rollback_clears_crash_journal
+        ; test_case "failed writes and publication compensate once" `Quick
+            test_config_write_failures_compensate_once
+        ; test_case "journal rejects foreign paths and preserves read errors" `Quick
+            test_journal_rejects_foreign_paths_and_unreadable_files
+        ; test_case "retained journal protects runtime and manifest writers" `Quick
+            test_retained_journal_protects_all_config_writers
+        ; test_case "actor publication follows durable configuration commit" `Quick
+            test_actor_publication_starts_after_config_commit
+        ; test_case "no-journal startup preserves read-only configuration" `Quick
+            test_no_journal_startup_preserves_read_only_config
+        ; test_case
+            "journal recovery recovers interrupted dual-write"
+            `Quick
+            test_config_journal_recovery_recovers_composite_write
+        ; test_case "initial configuration rechecks a journal staged after early recovery" `Quick
+            test_initial_configuration_rechecks_journal_after_early_recovery
+        ; test_case "initial configuration excludes a concurrent writer until publication" `Quick
+            test_initial_configuration_excludes_concurrent_writers
+        ; test_case "initial configuration preserves missing and invalid setup observations" `Quick
+            test_initial_configuration_preserves_setup_observations
+        ; test_case
+            "journal recovery no-op when journal missing"
+            `Quick
+            test_config_journal_recovery_ignores_missing_journal
+        ; test_case
+            "journal recovery reports corrupt manifest"
+            `Quick
+            test_config_journal_recovery_corrupt_journal_flags_error
+        ] )
+    ]
+;;

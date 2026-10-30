@@ -1,0 +1,522 @@
+{
+  "at": "2026-10-22T04:15:29.809793+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/lanes",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "schema": "masc.lane-inventory/v1",
+    "observed_at": 1792642529.809188,
+    "rows": [
+      {
+        "id": "exact/librarian_exact",
+        "label": "Librarian",
+        "purpose": "Selects the next Memory OS snapshot from immutable Keeper history.",
+        "selection": {
+          "kind": "exact",
+          "lane_id": "librarian_exact"
+        },
+        "state": {
+          "kind": "exact",
+          "configuration": {
+            "kind": "configured",
+            "admitted_slots": [
+              "glm-coding.glm-5.3-flash"
+            ],
+            "cli_slots": [],
+            "declared_slots": [
+              "glm-coding.glm-5.3-flash"
+            ],
+            "declared_cli_slots": [],
+            "dropped_slots": [],
+            "admission_error": null
+          }
+        }
+      },
+      {
+        "id": "exact/hitl_auto_judge",
+        "label": "HITL Auto Judge",
+        "purpose": "Produces the structured judgment for one held approval.",
+        "selection": {
+          "kind": "exact",
+          "lane_id": "hitl_auto_judge"
+        },
+        "state": {
+          "kind": "exact",
+          "configuration": {
+            "kind": "configured",
+            "admitted_slots": [
+              "glm-coding.glm-5.3-flash"
+            ],
+            "cli_slots": [],
+            "declared_slots": [
+              "glm-coding.glm-5.3-flash"
+            ],
+            "declared_cli_slots": [],
+            "dropped_slots": [],
+            "admission_error": null
+          }
+        }
+      },
+      {
+        "id": "exact/board_attention_exact",
+        "label": "Board Attention",
+        "purpose": "Judges one durable Board candidate for Keeper attention.",
+        "selection": {
+          "kind": "exact",
+          "lane_id": "board_attention_exact"
+        },
+        "state": {
+          "kind": "exact",
+          "configuration": {
+            "kind": "configured",
+            "admitted_slots": [
+              "glm-coding.glm-5.3-flash"
+            ],
+            "cli_slots": [],
+            "declared_slots": [
+              "glm-coding.glm-5.3-flash"
+            ],
+            "declared_cli_slots": [],
+            "dropped_slots": [],
+            "admission_error": null
+          }
+        }
+      },
+      {
+        "id": "exact/verifier_exact",
+        "label": "Verifier",
+        "purpose": "Reviews Task completion and Goal proof evidence.",
+        "selection": {
+          "kind": "exact",
+          "lane_id": "verifier_exact"
+        },
+        "state": {
+          "kind": "exact",
+          "configuration": {
+            "kind": "configured",
+            "admitted_slots": [
+              "glm-coding.glm-5.3-flash"
+            ],
+            "cli_slots": [],
+            "declared_slots": [
+              "glm-coding.glm-5.3-flash"
+            ],
+            "declared_cli_slots": [],
+            "dropped_slots": [],
+            "admission_error": null
+          }
+        }
+      },
+      {
+        "id": "exact/browser_stagehand_exact",
+        "label": "Browser Stagehand",
+        "purpose": "Answers structured model requests from the Stagehand browser lane; run records are not retained yet.",
+        "selection": {
+          "kind": "exact",
+          "lane_id": "browser_stagehand_exact"
+        },
+        "state": {
+          "kind": "exact",
+          "configuration": {
+            "kind": "off",
+            "declared_slots": [],
+            "declared_cli_slots": []
+          }
+        }
+      },
+      {
+        "id": "exact/candle_appraiser",
+        "label": "Candle Appraiser",
+        "purpose": "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
+        "selection": {
+          "kind": "exact",
+          "lane_id": "candle_appraiser"
+        },
+        "state": {
+          "kind": "exact",
+          "configuration": {
+            "kind": "off",
+            "declared_slots": [],
+            "declared_cli_slots": []
+          }
+        }
+      },
+      {
+        "id": "browser/live",
+        "label": "Browser Lane (live)",
+        "purpose": "Reads and drives tabs in the operator's own browser, through the browser-lane extension and host.",
+        "selection": {
+          "kind": "browser",
+          "lane": "live"
+        },
+        "state": {
+          "kind": "browser_clients",
+          "activity": "on",
+          "connected_clients": 0
+        }
+      },
+      {
+        "id": "browser/automation",
+        "label": "Browser Lane (automation)",
+        "purpose": "Drives a Firefox the server starts through geckodriver.",
+        "selection": {
+          "kind": "browser",
+          "lane": "automation"
+        },
+        "state": {
+          "kind": "browser_executor",
+          "activity": "on",
+          "registered": false
+        }
+      },
+      {
+        "id": "browser/stagehand",
+        "label": "Browser Lane (stagehand)",
+        "purpose": "Drives a Chromium the server starts with the Stagehand extension; sentence verbs are answered there.",
+        "selection": {
+          "kind": "browser",
+          "lane": "stagehand"
+        },
+        "state": {
+          "kind": "browser_executor",
+          "activity": "on",
+          "registered": false
+        }
+      },
+      {
+        "id": "machine/msx",
+        "label": "MSX",
+        "purpose": "The one MSX machine in the server; masc_msx_* tools put keys in and read its screen.",
+        "selection": {
+          "kind": "machine",
+          "machine": "msx"
+        },
+        "state": {
+          "kind": "machine",
+          "activity": "on",
+          "publication": "no_screen"
+        }
+      },
+      {
+        "id": "machine/dos",
+        "label": "DOS",
+        "purpose": "The one DOS machine in the server; masc_dos_* tools put keys in and read its screen.",
+        "selection": {
+          "kind": "machine",
+          "machine": "dos"
+        },
+        "state": {
+          "kind": "machine",
+          "activity": "on",
+          "publication": "no_screen"
+        }
+      },
+      {
+        "id": "declaration//private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/config/lane-addons/curator-qualification.toml",
+        "label": "curator-qualification.toml",
+        "purpose": "Package declaration and its owned observation workers.",
+        "selection": {
+          "kind": "declaration",
+          "source_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/config/lane-addons/curator-qualification.toml"
+        },
+        "state": {
+          "kind": "package",
+          "declaration": {
+            "kind": "valid",
+            "enabled": true,
+            "installation_id": "curator-qual-1196",
+            "run_id": "curator-qualification-scope",
+            "package_id": "workspace-curator",
+            "title": "Workspace Curator worker",
+            "desired_revision": "5d89cd3fcf651a9bdf6725377f3d2ff83d2e4fd748590f0b41f24d085176d12d",
+            "source_revision": "792cbe4de0e2b5a5188d2cd61f53907dc9c539d0421dc27af774374349d0477c",
+            "application": {
+              "kind": "applied",
+              "instance_id": "01a161d1-adf6-7000-a5bb-d068f198269c"
+            },
+            "exact_outputs": [
+              {
+                "output": "briefing",
+                "source": "declared",
+                "configuration": {
+                  "kind": "configured",
+                  "admitted_slots": [
+                    "glm-coding.glm-5.3-flash"
+                  ],
+                  "cli_slots": [],
+                  "declared_slots": [
+                    "glm-coding.glm-5.3-flash"
+                  ],
+                  "declared_cli_slots": [],
+                  "dropped_slots": [],
+                  "admission_error": null
+                }
+              },
+              {
+                "output": "classification",
+                "source": "declared",
+                "configuration": {
+                  "kind": "configured",
+                  "admitted_slots": [
+                    "glm-coding.glm-5.3-flash"
+                  ],
+                  "cli_slots": [],
+                  "declared_slots": [
+                    "glm-coding.glm-5.3-flash"
+                  ],
+                  "declared_cli_slots": [],
+                  "dropped_slots": [],
+                  "admission_error": null
+                }
+              }
+            ]
+          },
+          "instances": [
+            {
+              "instance_id": "01a161d1-adf6-7000-a5bb-d068f198269c",
+              "incarnation": "01a161d1-adf6-7000-a5bb-d068f198269c",
+              "run_id": "curator-qualification-scope",
+              "package_id": "workspace-curator",
+              "title": "Workspace Curator worker",
+              "package_revision": "0.1.0",
+              "presence": "live",
+              "phase": {
+                "kind": "attached"
+              },
+              "applied_revision": "5d89cd3fcf651a9bdf6725377f3d2ff83d2e4fd748590f0b41f24d085176d12d"
+            }
+          ]
+        }
+      }
+    ],
+    "exact_snapshot": {
+      "schema": "masc.standalone_llm_lanes.v2",
+      "generated_at": "2026-10-22T04:15:29Z",
+      "observed_at_unix": 1792642529.808097,
+      "observation_only": true,
+      "exact_run_projection_count": 7,
+      "exact_run_source_total": 7,
+      "exact_run_projection_truncated": false,
+      "lanes": [
+        {
+          "lane_id": "board_attention_exact",
+          "label": "Board Attention",
+          "purpose": "Judges one durable Board candidate for Keeper attention.",
+          "required": true,
+          "observation_only": true,
+          "configured": true,
+          "configuration_state": "ready",
+          "admitted_slots": [
+            "glm-coding.glm-5.3-flash"
+          ],
+          "cli_slots": [],
+          "dropped_slots": [],
+          "declared_slots": [
+            "glm-coding.glm-5.3-flash"
+          ],
+          "declared_cli_slots": [],
+          "admission_error": null,
+          "status": "no_retained_observation",
+          "retained_run_count": 0,
+          "running_count": 0,
+          "succeeded_count": 0,
+          "failed_count": 0,
+          "cancelled_count": 0,
+          "last_started_at": null,
+          "last_terminal_at": null,
+          "last_outcome": null,
+          "p50_elapsed_s": null,
+          "selected_slots": [],
+          "runs_without_slot": {
+            "vendor_system_one": 0,
+            "server_restarted": 0,
+            "no_slot": 0
+          },
+          "jev": {
+            "state": "off"
+          }
+        },
+        {
+          "lane_id": "hitl_auto_judge",
+          "label": "HITL Auto Judge",
+          "purpose": "Produces the structured judgment for one held approval.",
+          "required": true,
+          "observation_only": true,
+          "configured": true,
+          "configuration_state": "ready",
+          "admitted_slots": [
+            "glm-coding.glm-5.3-flash"
+          ],
+          "cli_slots": [],
+          "dropped_slots": [],
+          "declared_slots": [
+            "glm-coding.glm-5.3-flash"
+          ],
+          "declared_cli_slots": [],
+          "admission_error": null,
+          "status": "no_retained_observation",
+          "retained_run_count": 0,
+          "running_count": 0,
+          "succeeded_count": 0,
+          "failed_count": 0,
+          "cancelled_count": 0,
+          "last_started_at": null,
+          "last_terminal_at": null,
+          "last_outcome": null,
+          "p50_elapsed_s": null,
+          "selected_slots": [],
+          "runs_without_slot": {
+            "vendor_system_one": 0,
+            "server_restarted": 0,
+            "no_slot": 0
+          }
+        },
+        {
+          "lane_id": "librarian_exact",
+          "label": "Librarian",
+          "purpose": "Selects the next Memory OS snapshot from immutable Keeper history.",
+          "required": false,
+          "observation_only": true,
+          "configured": true,
+          "configuration_state": "ready",
+          "admitted_slots": [
+            "glm-coding.glm-5.3-flash"
+          ],
+          "cli_slots": [],
+          "dropped_slots": [],
+          "declared_slots": [
+            "glm-coding.glm-5.3-flash"
+          ],
+          "declared_cli_slots": [],
+          "admission_error": null,
+          "status": "idle",
+          "retained_run_count": 7,
+          "running_count": 0,
+          "succeeded_count": 6,
+          "failed_count": 1,
+          "cancelled_count": 0,
+          "last_started_at": 1792642280.555779,
+          "last_terminal_at": 1792642440.055807,
+          "last_outcome": "succeeded",
+          "p50_elapsed_s": 42.225833892822266,
+          "selected_slots": [
+            {
+              "slot_id": "glm-coding.glm-5.3-flash",
+              "count": 6
+            }
+          ],
+          "runs_without_slot": {
+            "vendor_system_one": 0,
+            "server_restarted": 0,
+            "no_slot": 1
+          }
+        },
+        {
+          "lane_id": "verifier_exact",
+          "label": "Verifier",
+          "purpose": "Reviews Task completion and Goal proof evidence.",
+          "required": false,
+          "observation_only": true,
+          "configured": true,
+          "configuration_state": "ready",
+          "admitted_slots": [
+            "glm-coding.glm-5.3-flash"
+          ],
+          "cli_slots": [],
+          "dropped_slots": [],
+          "declared_slots": [
+            "glm-coding.glm-5.3-flash"
+          ],
+          "declared_cli_slots": [],
+          "admission_error": null,
+          "status": "no_retained_observation",
+          "retained_run_count": 0,
+          "running_count": 0,
+          "succeeded_count": 0,
+          "failed_count": 0,
+          "cancelled_count": 0,
+          "last_started_at": null,
+          "last_terminal_at": null,
+          "last_outcome": null,
+          "p50_elapsed_s": null,
+          "selected_slots": [],
+          "runs_without_slot": {
+            "vendor_system_one": 0,
+            "server_restarted": 0,
+            "no_slot": 0
+          }
+        },
+        {
+          "lane_id": "browser_stagehand_exact",
+          "label": "Browser Stagehand",
+          "purpose": "Answers structured model requests from the Stagehand browser lane; run records are not retained yet.",
+          "required": false,
+          "observation_only": true,
+          "configured": true,
+          "configuration_state": "off",
+          "admitted_slots": [],
+          "cli_slots": [],
+          "dropped_slots": [],
+          "declared_slots": [],
+          "declared_cli_slots": [],
+          "admission_error": null,
+          "status": "off",
+          "retained_run_count": 0,
+          "running_count": 0,
+          "succeeded_count": 0,
+          "failed_count": 0,
+          "cancelled_count": 0,
+          "last_started_at": null,
+          "last_terminal_at": null,
+          "last_outcome": null,
+          "p50_elapsed_s": null,
+          "selected_slots": [],
+          "runs_without_slot": {
+            "vendor_system_one": 0,
+            "server_restarted": 0,
+            "no_slot": 0
+          }
+        },
+        {
+          "lane_id": "candle_appraiser",
+          "label": "Candle Appraiser",
+          "purpose": "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
+          "required": false,
+          "observation_only": true,
+          "configured": true,
+          "configuration_state": "off",
+          "admitted_slots": [],
+          "cli_slots": [],
+          "dropped_slots": [],
+          "declared_slots": [],
+          "declared_cli_slots": [],
+          "admission_error": null,
+          "status": "off",
+          "retained_run_count": 0,
+          "running_count": 0,
+          "succeeded_count": 0,
+          "failed_count": 0,
+          "cancelled_count": 0,
+          "last_started_at": null,
+          "last_terminal_at": null,
+          "last_outcome": null,
+          "p50_elapsed_s": null,
+          "selected_slots": [],
+          "runs_without_slot": {
+            "vendor_system_one": 0,
+            "server_restarted": 0,
+            "no_slot": 0
+          }
+        }
+      ]
+    },
+    "package_read": {
+      "directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/config/lane-addons",
+      "complete": true,
+      "owner_present": true,
+      "issues": []
+    }
+  }
+}

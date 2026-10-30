@@ -1,0 +1,18 @@
+name = "masc_agent_card"
+description = "Return the MASC server agent card and optional live agent summary."
+additional_properties = false
+
+# The enum mirrors Tool_agent.valid_agent_card_action_strings; the mirror is
+# checked by test_agent_card_action_mirror, which reads this file rather than
+# an OCaml literal.
+[[params]]
+name = "action"
+type = "string"
+enum = ["get", "refresh"]
+description = "Card action: get or refresh."
+default = "get"
+
+[[params]]
+name = "agent_name"
+type = "string"
+description = "Optional live agent name to include in the card."

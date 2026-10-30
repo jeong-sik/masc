@@ -1,0 +1,21 @@
+{"at": 1792592904.347093, "keys": ":addons\r", "settle_ms": 700, "capture": "01-open", "show": true}
+{"at": 1792593337.5099719, "keys": "h", "settle_ms": 250, "capture": "02-history", "show": true}
+{"at": 1792593351.084595, "keys": "j\r", "settle_ms": 400, "capture": "03-original-detail", "show": true}
+{"at": 1792593373.1228428, "keys": "4 ", "settle_ms": 250, "capture": "04-original-record-selected", "show": true}
+{"at": 1792593383.2635908, "keys": "r", "settle_ms": 700, "capture": "05-slice-read-failed", "show": true}
+{"at": 1792593389.764123, "keys": "e", "settle_ms": 150, "capture": "06-preserve-only-prompt", "show": true}
+{"at": 1792593395.894871, "keys": "\r", "settle_ms": 500, "capture": "07-real-receipt-during-failure", "show": true}
+{"at": 1792593402.989032, "keys": "A\u0015slice {\"run_id\":\"other-run\"}\r", "settle_ms": 250, "capture": "08-cross-run-refused", "show": true}
+{"at": 1792593412.845852, "keys": "A\u0015slice {}\r", "settle_ms": 150, "capture": "09-omitted-run-refused", "show": false}
+{"at": 1792593413.95079, "keys": "A\u0015slice {\"run_id\":\"\"}\r", "settle_ms": 150, "capture": "10-blank-run-refused", "show": false}
+{"at": 1792593415.0580978, "keys": "A\u0015slice {\"run_id\":\"native-ui-proof\",\"run_id\":\"other-run\"}\r", "settle_ms": 150, "capture": "11-duplicate-run-refused", "show": true}
+{"at": 1792593425.873757, "keys": ":addons slice {\"run_id\":\"other-run\"}\r", "settle_ms": 150, "capture": "12-palette-cross-run-refused", "show": true}
+{"at": 1792593427.125814, "keys": "\u001br", "settle_ms": 500, "capture": "13-matching-refresh-recovered", "show": true}
+{"at": 1792593438.056942, "keys": "r", "settle_ms": 200, "capture": "14-read-failure-restored", "show": false}
+{"at": 1792593439.163584, "keys": ":addons slice {\"run_id\":\"other-run\"}\r", "settle_ms": 300, "capture": "15-actual-palette-cross-run", "show": true}
+{"at": 1792593454.527765, "keys": "A\u0015slice {\"run_id\":\"native-ui-proof\",\"lane_id\":\"qualification-empty-filter\"}\r", "settle_ms": 400, "capture": "16-same-run-empty-filter", "show": true}
+{"at": 1792593481.044825, "keys": "r", "settle_ms": 400, "capture": "17-original-row-recovered", "show": false}
+{"at": 1792593482.155693, "keys": "\u001bA\u0015slice {}\r", "settle_ms": 400, "capture": "18-overview-global-slice", "show": true}
+{"at": 1792593499.1528971, "keys": "A\u0015slice {\"run_id\":\"other-run\"}\r", "settle_ms": 400, "capture": "19-overview-other-run", "show": true}
+{"at": 1792593509.075444, "settle_ms": 200, "capture": "20-overview-other-run-received", "show": false}
+{"at": 1792593591.944442, "stop": true}

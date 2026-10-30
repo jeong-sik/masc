@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# TLA+ model checking for MASC keeper state machine specs.
+# Downloads TLC if needed, runs all specs with their existing .cfg files.
+#
+# Usage:
+#   scripts/tla-check.sh           # Run all specs
+
+set -euo pipefail
+
+TLC_VERSION="1.8.0"
+TLC_DIR="${TLC_DIR:-$HOME/.local/lib/tla}"
+TLC_JAR="${TLC_DIR}/tla2tools-${TLC_VERSION}.jar"
+TLC_URL="https://github.com/tlaplus/tlaplus/releases/download/v${TLC_VERSION}/tla2tools.jar"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+KEEP_TLC_ARTIFACTS="${KEEP_TLC_ARTIFACTS:-0}"
+
+cleanup_tlc_artifacts() {
+  if [ "$KEEP_TLC_ARTIFACTS" = "1" ]; then
+    echo "KEEP_TLC_ARTIFACTS=1 -> preserving TLC artefacts"
+    return 0
+  fi
+
+  "$REPO_ROOT/scripts/cleanup-tlc-artifacts.sh" || true
+}
+
+trap 'rc=$?; trap - EXIT; cleanup_tlc_artifacts; exit "$rc"' EXIT
+
+# Download TLC if not present
+if [ ! -f "$TLC_JAR" ]; then
+  mkdir -p "$TLC_DIR"
+  echo "Downloading TLC ${TLC_VERSION}..."
+  curl -fsSL "$TLC_URL" -o "$TLC_JAR"
+  echo "TLC downloaded to $TLC_JAR"
+fi
+
+JAVA="${JAVA_HOME:+$JAVA_HOME/bin/java}"
+JAVA="${JAVA:-java}"
+
+if ! command -v "$JAVA" &>/dev/null; then
+  echo "Error: Java not found. TLC requires Java 11+."
+  exit 1
+fi
+
+run_tlc() {
+  local spec_dir="$1"
+  local tla_file="$2"
+  local cfg_file="${tla_file%.tla}.cfg"
+
+  if [ ! -f "$spec_dir/$cfg_file" ]; then
+    echo "SKIP $tla_file (no .cfg file)"
+    return 0
+  fi
+
+  echo "=== Checking $spec_dir/$tla_file ==="
+  "$JAVA" -XX:+UseParallelGC -Xmx4g \
+    -cp "$TLC_JAR" tlc2.TLC \
+    -config "$spec_dir/$cfg_file" \
+    -workers auto \
+    -deadlock \
+    -coverage 1 \
+    "$spec_dir/$tla_file"
+  echo ""
+}
+
+run_tlc_cfg() {
+  local spec_dir="$1"
+  local tla_file="$2"
+  local cfg_file="$3"
+  local label="${4:-$cfg_file}"
+
+  if [ ! -f "$spec_dir/$cfg_file" ]; then
+    echo "SKIP $tla_file $label (no $cfg_file file)"
+    return 0
+  fi
+
+  echo "=== Checking $spec_dir/$tla_file ($label) ==="
+  "$JAVA" -XX:+UseParallelGC -Xmx4g \
+    -cp "$TLC_JAR" tlc2.TLC \
+    -config "$spec_dir/$cfg_file" \
+    -workers auto \
+    -deadlock \
+    -coverage 1 \
+    "$spec_dir/$tla_file"
+  echo ""
+}
+
+# Run a buggy spec that MUST violate an invariant or property.
+# TLC exit codes: 12 = safety violation, 13 = liveness violation.
+# If TLC exits 0 (no violation), the spec is too weak and the test fails.
+run_tlc_buggy() {
+  local spec_dir="$1"
+  local tla_file="$2"
+  local cfg_file="${3:-${tla_file%.tla}-buggy.cfg}"
+  local label="${4:-buggy}"
+
+  if [ ! -f "$spec_dir/$cfg_file" ]; then
+    echo "SKIP $tla_file $label (no $cfg_file file)"
+    return 0
+  fi
+
+  echo "=== Checking $spec_dir/$tla_file ($label, expect violation) ==="
+  local rc=0
+  "$JAVA" -XX:+UseParallelGC -Xmx4g \
+    -cp "$TLC_JAR" tlc2.TLC \
+    -config "$spec_dir/$cfg_file" \
+    -workers auto \
+    -deadlock \
+    -coverage 1 \
+    "$spec_dir/$tla_file" || rc=$?
+
+  if [ "$rc" -eq 12 ] || [ "$rc" -eq 13 ]; then
+    echo "OK: buggy model correctly violated (exit $rc)."
+    echo ""
+    return 0
+  elif [ "$rc" -eq 0 ]; then
+    echo "FAIL: buggy model passed without violation. Invariant/property too weak."
+    echo ""
+    return 1
+  else
+    echo "FAIL: unexpected TLC exit code $rc."
+    echo ""
+    return 1
+  fi
+}
+
+# Run all keeper state machine specs
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperStateMachine.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperStateMachine.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperHeartbeat.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHeartbeat.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-blocking-buggy.cfg" "blocking-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-wake-buggy.cfg" "wake-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-consume-buggy.cfg" "consume-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-early-signal-buggy.cfg" "early-signal-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-restart-buggy.cfg" "restart-buggy"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperEventQueue.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperEventQueue.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperBacklogPreemption.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperBacklogPreemption.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperBacklogPreemption.tla" "KeeperBacklogPreemption-buggy-direct.cfg" "direct-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperBacklogPreemption.tla" "KeeperBacklogPreemption-buggy-successor.cfg" "successor-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperBacklogPreemption.tla" "KeeperBacklogPreemption-buggy-receipt.cfg" "receipt-buggy"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDwellMonotone.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDwellMonotone.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOutcomesConservation.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperOutcomesConservation.tla"
+run_tlc "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
+run_tlc "$REPO_ROOT/specs/keeper-switch-hierarchy" "KeeperSwitchHierarchy.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-switch-hierarchy" "KeeperSwitchHierarchy.tla"
+run_tlc "$REPO_ROOT/specs/keeper-switch-hierarchy" "KeeperFiberLocalSwitch.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-switch-hierarchy" "KeeperFiberLocalSwitch.tla"
+run_tlc "$REPO_ROOT/specs/keeper-switch-hierarchy" "Pool_no_double_close.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-switch-hierarchy" "Pool_no_double_close.tla"
+run_tlc "$REPO_ROOT/specs/boundary" "SandboxDispatch.tla"
+run_tlc_buggy "$REPO_ROOT/specs/boundary" "SandboxDispatch.tla"
+run_tlc "$REPO_ROOT/specs/boundary" "Cancellation.tla"
+run_tlc_buggy "$REPO_ROOT/specs/boundary" "Cancellation.tla"
+run_tlc "$REPO_ROOT/specs/boundary" "AuditLog.tla"
+run_tlc_buggy "$REPO_ROOT/specs/boundary" "AuditLog.tla"
+run_tlc "$REPO_ROOT/specs/boundary" "AuditLogAppendOrder.tla"
+run_tlc_buggy "$REPO_ROOT/specs/boundary" "AuditLogAppendOrder.tla"
+run_tlc "$REPO_ROOT/specs/boundary" "AuditLogDurableBeforeAck.tla"
+run_tlc_buggy "$REPO_ROOT/specs/boundary" "AuditLogDurableBeforeAck.tla"
+run_tlc "$REPO_ROOT/specs/boundary" "TurnEvidenceChain.tla"
+run_tlc_buggy "$REPO_ROOT/specs/boundary" "TurnEvidenceChain.tla"
+run_tlc "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla"
+run_tlc_buggy "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla"
+run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla" \
+  "TaskLifecycle-supersede-buggy.cfg" "supersede-buggy"
+
+# Several Tasks and several agents: who holds what, and what a verdict may
+# change. Each bug model names one property in its own cfg so that property
+# has to catch the bug alone.
+run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla"
+# One line per cfg, naming the file. A loop building the name from a label
+# reads the same but hides it: the coverage gate cannot see the cfg, and a
+# cfg whose label nobody added would run nowhere without saying so.
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-verdict-assigns-buggy.cfg" "verdict-assigns-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-cancel-request-buggy.cfg" "cancel-request-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-anyone-cancels-buggy.cfg" "anyone-cancels-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-cancel-keeps-holder-buggy.cfg" "cancel-keeps-holder-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-submit-keeps-hold-buggy.cfg" "submit-keeps-hold-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-submit-without-hold-buggy.cfg" "submit-without-hold-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-rejected-forgets-producer-buggy.cfg" "rejected-forgets-producer-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-done-without-verdict-buggy.cfg" "done-without-verdict-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-superseded-verdict-buggy.cfg" "superseded-verdict-buggy"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-claim-keeps-returned-buggy.cfg" "claim-keeps-returned-buggy"
+# Reachability guard: the clean model must be able to reach a returned Task.
+# Expects a violation, so it goes red the day that stops being true.
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-rejected-reachable-buggy.cfg" "rejected-reachable"
+# The other half: a reachable Rejected state that nobody can claim is a
+# graveyard. Expects a violation too.
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-rejected-resumable-buggy.cfg" "rejected-resumable"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
+  "TaskOwnership-done-reversed-buggy.cfg" "done-reversed"
+
+
+# Server lifecycle product invariants across lifecycle/lazy/readiness axes.
+run_tlc "$REPO_ROOT/specs/server-state" "ServerState.tla"
+run_tlc_buggy "$REPO_ROOT/specs/server-state" "ServerState.tla"
+
+# Cycle 24 — Multimodal artifact GADT well-formedness (Tier B8 catch-up).
+run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
+run_tlc_buggy "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
+
+# Cycle 27 — Multimodal hydrator provenance DAG (Tier B9 catch-up).
+run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
+run_tlc_buggy "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
+
+# Cycle 27 — Autonomous phase taxonomy + 19 transitions (Tier B5 catch-up).
+run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousPhase.tla"
+run_tlc_buggy "$REPO_ROOT/specs/autonomous" "AutonomousPhase.tla"
+
+# Cycle 27 — Autonomous loop wirein non-invasive contract (Tier A5 catch-up).
+run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousLoop.tla"
+run_tlc_buggy "$REPO_ROOT/specs/autonomous" "AutonomousLoop.tla"
+
+
+# RFC-0160 G6 — Shell IR carries decision invariant.
+run_tlc "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
+run_tlc_buggy "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
+
+# ── bug-models ─────────────────────────────────────────────────
+# Every .tla in specs/bug-models/ that has a matching .cfg and/or
+# -buggy.cfg is run automatically. Symlinks are skipped (they point
+# into specs/keeper-state-machine/ and are already run above).
+# Specs with neither cfg are reported as SKIP by the helpers, which
+# is the same behavior as the keeper-state-machine section.
+#
+# Discovered 2026-04-11: this directory had been untracked by the
+# CI harness since inception. Local sweep (scripts/tla-check.sh +
+# direct tlc) confirms all 14 bug-models with cfgs behave correctly
+# (14 clean=PASS, 14 buggy=VIOLATED). Wiring them up strengthens
+# CI without adding any new spec. Future bug-model additions are
+# picked up automatically by the glob.
+BUG_MODELS_DIR="$REPO_ROOT/specs/bug-models"
+if [ -d "$BUG_MODELS_DIR" ]; then
+  for tla_path in "$BUG_MODELS_DIR"/*.tla; do
+    [ -e "$tla_path" ] || continue              # no matches
+    [ -L "$tla_path" ] && continue              # symlink → already run
+    tla_name="$(basename "$tla_path")"
+    base="${tla_name%.tla}"
+    if [ -f "$BUG_MODELS_DIR/${base}.cfg" ]; then
+      run_tlc "$BUG_MODELS_DIR" "$tla_name"
+    fi
+    # Every buggy cfg of this spec, not only the one named <base>-buggy.cfg.
+    # A spec may state more than one way to be wrong, and the extra ones are
+    # named for what they break (KeeperWorktreeContainment-server-root-buggy).
+    # Matching only the default name skipped those without saying so, which
+    # left KeeperWorktreeContainment with no bug model running at all while
+    # the pair ratchet and the coverage gate both stayed green.
+    for bug_cfg_path in "$BUG_MODELS_DIR/${base}"-*buggy.cfg; do
+      [ -e "$bug_cfg_path" ] || continue
+      bug_cfg="$(basename "$bug_cfg_path")"
+      bug_label="${bug_cfg%.cfg}"
+      bug_label="${bug_label#"${base}"-}"
+      run_tlc_buggy "$BUG_MODELS_DIR" "$tla_name" "$bug_cfg" "$bug_label"
+    done
+  done
+fi
+
+# The loop above reaches every LibrarianRead cfg whose name ends in buggy.cfg.
+# This one names a guard that holds rather than a way to be wrong, so it ends
+# in .cfg and no glob above takes it: <spec>.cfg is already spoken for by
+# LibrarianRead.cfg. It is named here, and expects no violation.
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-purge-trim-at-end.cfg" "purge-trim-at-end"
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-live-without-bad-lines.cfg" "live-without-bad-lines"
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-purge-trim-at-end-live.cfg" "purge-trim-at-end-live"
+# The stall cfg (masc#37061) was a buggy cfg until the fix landed; it is the
+# live reader now and expects no violation.
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-stop-forever-live.cfg" "stop-forever-live"
+
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-recorded-messages.cfg" "recorded-messages"
+
+echo "All TLA+ checks passed."

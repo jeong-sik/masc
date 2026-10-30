@@ -1,0 +1,69 @@
+{
+  "schema": "browser-skill-change-evidence/v1",
+  "observed_at": "2026-09-09",
+  "baseline": {
+    "trace_id": "trace-1788930014959-00000",
+    "browser_skill_revision": "8a7e01ab34b10c1231c750b28a287c7207bf1469817edd2d2af5aa0b997dce43",
+    "scene_result": "unsupported live browser verb",
+    "elements_artifact": {
+      "sha256": "ab4c071bf1f09f08d0694172cacb8243ed89d89d20bfcf3a6c97b67c101ed94a",
+      "bytes": 72000,
+      "elements": 107,
+      "truncated": false,
+      "artifact_read_calls": 5
+    },
+    "fill_calls": 2,
+    "fill_failures": 2,
+    "fill_selectors_present_in_observed_elements": [
+      false,
+      false
+    ]
+  },
+  "publication": {
+    "browser-lanes": {
+      "status": "saved_and_published",
+      "reference": {
+        "identity": {
+          "source_id": "project-masc",
+          "package_id": "browser-lanes",
+          "name": "browser-lanes"
+        },
+        "content_revision": "7c981e7cee73a06da3b02b78955c936052fbdbf2751a7266ca53d614db3fc0c9"
+      },
+      "snapshot_revision": "988dffae37a1ae4b041f6f84d84c9720faab9e624d6edce36aab3efb789fff03",
+      "kind": "instruction",
+      "activation_tool": "keeper_skill",
+      "eager_body_bytes": 0,
+      "source_sha256": "c92637a43682a921332de4c12cf5987a6d4bf6234fb6924206ccffc3f7ac9b9a"
+    },
+    "slack-web": {
+      "status": "created_and_published",
+      "reference": {
+        "identity": {
+          "source_id": "project-masc",
+          "package_id": "slack-web",
+          "name": "slack-web"
+        },
+        "content_revision": "70af8bd20969666dff3da16022779ed42abaa87e7c8a24378e6b366877a63901"
+      },
+      "snapshot_revision": "42c1e43be22587f112f324fe5de2c49632d31ec9cfe0058902107c7ecd09e0d2",
+      "kind": "instruction",
+      "activation_tool": "keeper_skill",
+      "eager_body_bytes": 0,
+      "source_sha256": "e686d4d7db9278d8196f5ea73f3dd06b82c36c32fcec8c26f7877a6caa522e91"
+    }
+  },
+  "validation": {
+    "native_editor_preview": "valid; no diagnostics",
+    "source_bytes_equal_published_files": true,
+    "independent_review": "no outstanding findings"
+  },
+  "not_established": [
+    "new skill adoption in the active Keeper frozen snapshot",
+    "task completion with the new skills",
+    "before-after tool call or byte reduction",
+    "live scene support",
+    "scoped DOM read support",
+    "executable Browser composition"
+  ]
+}

@@ -1,0 +1,1327 @@
+open Keeper_shutdown_types
+
+module String_map = Map.Make (String)
+
+type submit_error =
+  | Prepare_error of Keeper_shutdown_prepare_join.error
+  | Existing_operation_load_error of Keeper_shutdown_store.error
+  | Existing_operation_lane_mismatch of Keeper_shutdown_types.t
+  | Existing_operation_intent_mismatch of Keeper_shutdown_types.t
+  | Worker_start_error of worker_start_error
+
+and worker_start_error =
+  | Worker_supervisor_unavailable
+  | Worker_supervisor_stopping of exn
+  | Worker_fork_failed of exn
+
+type restored_inventory =
+  { operations : Keeper_shutdown_types.t list
+  ; blocked_keeper_names : string list
+  ; corrupt_records : Keeper_shutdown_store.corrupt_record list
+  ; corrupt_owner_fences : corrupt_owner_fence list
+  }
+
+and corrupt_owner_fence =
+  { keeper_name : string
+  ; operation_id : Operation_id.t
+  }
+
+let submit_error_to_string = function
+  | Prepare_error error -> Keeper_shutdown_prepare_join.error_to_string error
+  | Existing_operation_load_error error -> Keeper_shutdown_store.error_to_string error
+  | Existing_operation_lane_mismatch operation ->
+    Printf.sprintf
+      "existing shutdown operation has incompatible lane ownership: keeper=%s operation=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+  | Existing_operation_intent_mismatch operation ->
+    Printf.sprintf
+      "existing shutdown operation has incompatible cleanup intent: keeper=%s operation=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+  | Worker_start_error Worker_supervisor_unavailable ->
+    "Keeper shutdown process supervisor is unavailable"
+  | Worker_start_error (Worker_supervisor_stopping exn) ->
+    Printf.sprintf "Keeper shutdown process supervisor is stopping: %s" (Printexc.to_string exn)
+  | Worker_start_error (Worker_fork_failed exn) ->
+    Printf.sprintf "Keeper shutdown worker fork failed: %s" (Printexc.to_string exn)
+;;
+
+let operation_requires_fence (operation : Keeper_shutdown_types.t) =
+  Keeper_shutdown_types.requires_admission_fence operation
+;;
+
+(* Where a replayable [Blocked] operation stands among its Keeper's durable
+   operations. Only the newest operation of a Keeper may replay: an older one
+   describes a Keeper that a later operation already acted on. Two operations
+   for one Keeper never both hold the boot fence, because a replay owner has no
+   sibling that holds it. *)
+type replay_standing =
+  | Replay_owner
+  | Replay_overtaken of Operation_id.t
+  | Replay_deferred of string
+
+let replay_standing (operation : Keeper_shutdown_types.t) operations =
+  let siblings =
+    List.filter
+      (fun (sibling : Keeper_shutdown_types.t) ->
+         String.equal sibling.keeper_name operation.keeper_name
+         && not (Operation_id.equal sibling.operation_id operation.operation_id))
+      operations
+  in
+  match Masc_domain.parse_iso8601_opt operation.created_at with
+  | None ->
+    Replay_deferred
+      (Printf.sprintf "created_at %S is not an ISO 8601 timestamp" operation.created_at)
+  | Some created ->
+    let created_after (sibling : Keeper_shutdown_types.t) =
+      match Masc_domain.parse_iso8601_opt sibling.created_at with
+      | Some sibling_created -> Float.compare sibling_created created > 0
+      | None -> false
+    in
+    let created_together (sibling : Keeper_shutdown_types.t) =
+      match Masc_domain.parse_iso8601_opt sibling.created_at with
+      | Some sibling_created -> Float.equal sibling_created created
+      | None -> false
+    in
+    (match List.find_opt created_after siblings with
+     | Some newer -> Replay_overtaken newer.operation_id
+     | None ->
+       (match List.find_opt created_together siblings with
+        | Some twin ->
+          Replay_deferred
+            (Printf.sprintf
+               "operation %s was created at the same instant"
+               (Operation_id.to_string twin.operation_id))
+        | None ->
+          (match List.find_opt operation_requires_fence siblings with
+           | Some holder ->
+             Replay_deferred
+               (Printf.sprintf
+                  "operation %s holds the admission fence"
+                  (Operation_id.to_string holder.operation_id))
+           | None -> Replay_owner)))
+;;
+
+(* Boot fences an operation that requires the admission fence, and a
+   replayable [Blocked] operation that will replay: the Keeper must not
+   autoboot ahead of the operator intent the replay completes. *)
+let holds_boot_fence ~operations (operation : Keeper_shutdown_types.t) =
+  operation_requires_fence operation
+  ||
+  match Keeper_shutdown_types.boot_replay operation with
+  | None -> false
+  | Some (Replay_unsettled_tasks | Replay_settled_tasks) ->
+    (match replay_standing operation operations with
+     | Replay_owner -> true
+     | Replay_overtaken _ | Replay_deferred _ -> false)
+;;
+
+(* An operator asked for this stop or purge. When the boot replay could not
+   finish it, the Keeper stays fenced for this process instead of autobooting
+   against that instruction; the WARN names the stage, and the next boot
+   replays again. A supervisor cleanup was nobody's instruction, so its
+   Keeper boots. *)
+let keeps_fence_after_unfinished_replay (operation : Keeper_shutdown_types.t) =
+  Option.is_some (Keeper_shutdown_types.boot_replay operation)
+  &&
+  match operation.cleanup_intent.reason with
+  | Operator_stop_retain_meta | Operator_stop_remove_meta | Dashboard_keeper_purge _ ->
+    true
+  | Supervisor_cleanup -> false
+;;
+
+type ownerless_restore_policy =
+  | Require_removal_evidence of Keeper_shutdown_types.t
+  | Restore_corrupt_fence
+
+let restore_admission ~config ~ownerless_policy ~keeper_name ~operation_id =
+  match
+    Keeper_owner_registry.restore_shutdown
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+      ~operation_id
+  with
+  | Ok Keeper_owner.Shutdown_restored
+  | Ok Keeper_owner.Shutdown_already_restored -> Ok ()
+  | Ok (Keeper_owner.Shutdown_restore_conflict existing) ->
+    Error
+      (Printf.sprintf
+         "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
+         keeper_name
+         (Operation_id.to_string operation_id)
+         (Operation_id.to_string existing))
+  | Error
+      (Keeper_owner_registry.Command_lookup_failed
+         (Keeper_owner_registry.Owner_not_found _) as error) ->
+    let may_restore_ownerless =
+      match ownerless_policy with
+      | Restore_corrupt_fence -> true
+      | Require_removal_evidence operation ->
+        Keeper_shutdown_finalize.admission_already_released_by_removal
+          ~config
+          operation
+          error
+    in
+    if not may_restore_ownerless
+    then Error (Keeper_owner_registry.command_error_to_string error)
+    else
+      (* [complete_cleanup] can remove both metadata and its Owner before a
+         remove-meta cleanup or pending completion is settled. The Owner-local
+         fence is gone in that state, but the independent intake fence must
+         remain until recovery reaches a durable non-fenced phase. Corrupt
+         records also remain fail-closed without readable intent evidence. *)
+      (match
+         Keeper_shutdown_intake_fence.restore_shutdown
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+           ~operation_id
+       with
+       | Keeper_shutdown_intake_fence.Restored
+       | Keeper_shutdown_intake_fence.Already_restored ->
+         Log.Keeper.info
+           "restored ownerless shutdown intake fence: keeper=%s operation=%s"
+           keeper_name
+           (Operation_id.to_string operation_id);
+         Ok ()
+       | Keeper_shutdown_intake_fence.Restore_conflict existing ->
+         Error
+           (Printf.sprintf
+              "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
+              keeper_name
+              (Operation_id.to_string operation_id)
+              (Operation_id.to_string existing)))
+  | Error
+      (( Keeper_owner_registry.Command_lookup_failed
+           ( Keeper_owner_registry.Inventory_not_installed _
+           | Keeper_owner_registry.Owner_unavailable _
+           | Keeper_owner_registry.Owner_initialization_failed _
+           | Keeper_owner_registry.Inventory_stopping )
+       | Keeper_owner_registry.Command_lifecycle_reserved _
+       | Keeper_owner_registry.Command_rejected _ ) as error) ->
+    Error (Keeper_owner_registry.command_error_to_string error)
+;;
+
+let restore_inventory_admission ~config inventory =
+  let operations =
+    List.filter_map
+      (function
+        | Keeper_shutdown_store.Operation operation -> Some operation
+        | Keeper_shutdown_store.Corrupt_record _ -> None)
+      inventory
+  in
+  let holds_boot_fence = holds_boot_fence ~operations in
+  let corrupt_fences =
+    Keeper_shutdown_store.canonical_corrupt_operation_ids inventory
+    |> List.fold_left
+         (fun fences (keeper_name, operation_id) ->
+            String_map.add keeper_name operation_id fences)
+         String_map.empty
+  in
+  let corrupt_records =
+    List.filter_map
+      (function
+        | Keeper_shutdown_store.Operation _ -> None
+        | Keeper_shutdown_store.Corrupt_record corrupt -> Some corrupt)
+      inventory
+  in
+  let current_fences_result =
+    List.fold_left
+      (fun fences -> function
+         | Keeper_shutdown_store.Corrupt_record _ -> fences
+         | Keeper_shutdown_store.Operation operation
+           when operation_requires_fence operation ->
+           (match fences with
+            | Error _ as error -> error
+            | Ok fences ->
+              (match String_map.find_opt operation.keeper_name fences with
+               | None ->
+                 Ok
+                   (String_map.add
+                      operation.keeper_name
+                      operation
+                      fences)
+               | Some existing
+                 when Operation_id.equal
+                        existing.operation_id
+                        operation.operation_id ->
+                 Ok fences
+               | Some existing ->
+                 Error
+                   (Printf.sprintf
+                      "multiple current shutdown admission owners: keeper=%s first=%s second=%s"
+                      operation.keeper_name
+                      (Operation_id.to_string existing.operation_id)
+                      (Operation_id.to_string operation.operation_id))))
+         | Keeper_shutdown_store.Operation _ -> fences)
+      (Ok String_map.empty)
+      inventory
+  in
+  match current_fences_result with
+  | Error _ as error -> error
+  | Ok current_fences ->
+    let corrupt_owner_fences =
+      String_map.bindings corrupt_fences
+      |> List.map (fun (keeper_name, operation_id) -> { keeper_name; operation_id })
+    in
+    let rec restore_corrupt_fences blocked = function
+      | [] -> Ok blocked
+      | { keeper_name; operation_id } :: rest ->
+        let operation_id, ownerless_policy =
+          match String_map.find_opt keeper_name current_fences with
+          | Some current ->
+            current.operation_id, Require_removal_evidence current
+          | None -> operation_id, Restore_corrupt_fence
+        in
+        (match
+           restore_admission
+             ~config
+             ~ownerless_policy
+             ~keeper_name
+             ~operation_id
+         with
+         | Error _ as error -> error
+         | Ok () -> restore_corrupt_fences (keeper_name :: blocked) rest)
+    in
+    let rec loop operations blocked = function
+      | [] ->
+        Ok
+          { operations = List.rev operations
+          ; blocked_keeper_names = List.sort_uniq String.compare blocked
+          ; corrupt_records
+          ; corrupt_owner_fences
+          }
+      | Keeper_shutdown_store.Operation operation :: rest ->
+        if String_map.mem operation.keeper_name corrupt_fences
+        then
+          if operation_requires_fence operation
+          then loop (operation :: operations) blocked rest
+          else loop operations blocked rest
+        else if holds_boot_fence operation
+        then
+          (match
+             restore_admission
+               ~config
+               ~ownerless_policy:(Require_removal_evidence operation)
+               ~keeper_name:operation.keeper_name
+               ~operation_id:operation.operation_id
+           with
+           | Error detail when not (operation_requires_fence operation) ->
+             (* A replay needs the fence it could not take. Leave the record
+                [Blocked] and unrecovered this boot, exactly as it was, so
+                the rest of boot restore and this Keeper's admission go on. *)
+             Log.Keeper.warn
+               "boot recovery could not fence a blocked shutdown for replay; it stays blocked until the next boot: keeper=%s operation=%s intent=%s error=%s"
+               operation.keeper_name
+               (Operation_id.to_string operation.operation_id)
+               (cleanup_reason_label operation.cleanup_intent.reason)
+               detail;
+             loop operations blocked rest
+           | Error _ as error -> error
+           | Ok () ->
+             loop
+               (operation :: operations)
+               (operation.keeper_name :: blocked)
+               rest)
+        else loop (operation :: operations) blocked rest
+      | Keeper_shutdown_store.Corrupt_record _ :: rest -> loop operations blocked rest
+    in
+    (match restore_corrupt_fences [] corrupt_owner_fences with
+     | Error _ as error -> error
+     | Ok blocked -> loop [] blocked inventory)
+;;
+
+let worker_mu = Eio.Mutex.create ()
+let active_workers : (string, unit) Hashtbl.t = Hashtbl.create 17
+
+let worker_key (operation : Keeper_shutdown_types.t) =
+  Operation_id.to_string operation.operation_id
+;;
+
+let claim_worker (operation : Keeper_shutdown_types.t) =
+  Eio.Mutex.use_rw ~protect:true worker_mu (fun () ->
+    let key = worker_key operation in
+    if Hashtbl.mem active_workers key
+    then false
+    else (
+      Hashtbl.add active_workers key ();
+      true))
+;;
+
+let release_worker (operation : Keeper_shutdown_types.t) =
+  Eio.Mutex.use_rw ~protect:true worker_mu (fun () ->
+    Hashtbl.remove active_workers (worker_key operation))
+;;
+
+let persist_unhandled_failure
+    ~now
+    ~config
+    (operation : Keeper_shutdown_types.t)
+    exn
+  =
+  let detail = Printexc.to_string exn in
+  Eio.Cancel.protect (fun () ->
+    Log.Keeper.error
+      "shutdown worker failed; persisting durable failure evidence: keeper=%s operation=%s error=%s"
+      operation.keeper_name
+      (worker_key operation)
+      detail;
+    match
+      Keeper_shutdown_store.persist_blocked_latest
+        ~config
+        ~identity:operation
+        ~failure:{ stage = Unhandled_worker; detail }
+        ~now
+    with
+    | Ok (Keeper_shutdown_store.Blocked_persisted blocked) ->
+      Log.Keeper.error
+        "shutdown worker failed; blocked state persisted: keeper=%s operation=%s revision=%d error=%s"
+        blocked.keeper_name
+        (worker_key blocked)
+        blocked.revision
+        detail
+    | Ok (Keeper_shutdown_store.State_preserved current) ->
+      Log.Keeper.error
+        "shutdown worker failed after a durable non-progress state; preserving it: keeper=%s operation=%s revision=%d error=%s"
+        current.keeper_name
+        (worker_key current)
+        current.revision
+        detail
+    | Error store_error ->
+      Log.Keeper.error
+        "shutdown operation %s failed and its blocked state could not be persisted: worker_error=%s store_error=%s"
+        (worker_key operation)
+        detail
+        (Keeper_shutdown_store.error_to_string store_error))
+;;
+
+let finalize_if_ready ~config ~entry (operation : Keeper_shutdown_types.t) =
+  match operation.phase with
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Finalized _ ->
+    (match Keeper_shutdown_finalize.run ~config ~entry operation with
+     | Ok finalized ->
+       Log.Keeper.info
+         "Keeper shutdown operation finalized: keeper=%s operation=%s"
+         finalized.keeper_name
+         (worker_key finalized)
+     | Error error ->
+       Log.Keeper.error
+         "Keeper shutdown finalization stopped: keeper=%s operation=%s error=%s"
+         operation.keeper_name
+         (worker_key operation)
+         (Keeper_shutdown_finalize.error_to_string error))
+  | Prepared
+  | Joining_lanes
+  | Reconciliation_required _
+  | Blocked _
+  | Owner_absent _
+  | Operator_absence_acknowledged _
+  | Superseded _ -> ()
+;;
+
+let run_worker ~config ~entry (operation : Keeper_shutdown_types.t) =
+  match operation.phase with
+  | Prepared
+  | Joining_lanes ->
+    (match entry with
+     | None ->
+       persist_unhandled_failure
+         ~now:Masc_domain.now_iso
+         ~config
+         operation
+         (Failure "prepared registered-lane shutdown worker lost its exact entry")
+     | Some exact_entry ->
+       (match
+          Keeper_shutdown_prepare_join.join_prepared
+            ~config
+            ~entry:exact_entry
+            ~operation
+        with
+        | Ok joined -> finalize_if_ready ~config ~entry joined
+        | Error error ->
+          Log.Keeper.error
+            "Keeper shutdown join stopped: keeper=%s operation=%s error=%s"
+            operation.keeper_name
+            (worker_key operation)
+            (Keeper_shutdown_prepare_join.error_to_string error)))
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Finalized _ -> finalize_if_ready ~config ~entry operation
+  | Reconciliation_required _
+  | Blocked _
+  | Owner_absent _
+  | Operator_absence_acknowledged _
+  | Superseded _ -> ()
+;;
+
+type worker_start_result =
+  | Worker_started
+  | Worker_already_active
+  | Worker_start_rejected of worker_start_error
+
+let fork_claimed ~config ~run (operation : Keeper_shutdown_types.t) =
+  match Keeper_process_switch.get () with
+  | None -> Worker_start_rejected Worker_supervisor_unavailable
+  | Some sw ->
+    Eio.Cancel.protect (fun () ->
+      match Eio.Switch.get_error sw with
+      | Some cause -> Worker_start_rejected (Worker_supervisor_stopping cause)
+      | None when not (claim_worker operation) -> Worker_already_active
+      | None ->
+        let started = Atomic.make false in
+        (try
+           Eio.Fiber.fork ~sw (fun () ->
+             Atomic.set started true;
+             Fun.protect
+               ~finally:(fun () -> release_worker operation)
+               (fun () ->
+                  try
+                    (* A previous worker can settle between the caller's read
+                       and our claim. Never replay its stale cleanup snapshot. *)
+                    (match Keeper_shutdown_store.load ~config
+                       ~keeper_name:operation.keeper_name operation.operation_id with
+                     | Ok current -> run current
+                     | Error error -> Log.Keeper.error
+                         "shutdown worker could not reload operation %s: %s"
+                         (worker_key operation) (Keeper_shutdown_store.error_to_string error))
+                  with
+                  | Eio.Cancel.Cancelled _ ->
+                    Log.Keeper.info
+                      "Keeper shutdown worker cancelled by server teardown; durable recovery retained: keeper=%s operation=%s"
+                      operation.keeper_name
+                      (worker_key operation)
+                  | exn ->
+                    persist_unhandled_failure
+                      ~now:Masc_domain.now_iso
+                      ~config
+                      operation
+                      exn));
+           if Atomic.get started
+           then Worker_started
+           else
+             (match Eio.Switch.get_error sw with
+              | None -> Worker_started
+              | Some cause ->
+                release_worker operation;
+                Worker_start_rejected (Worker_supervisor_stopping cause))
+         with
+         | Eio.Cancel.Cancelled _ as cancelled ->
+           Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())
+         | exn ->
+           release_worker operation;
+           Worker_start_rejected (Worker_fork_failed exn)))
+;;
+
+let start_worker ~config ~entry operation =
+  fork_claimed ~config ~run:(run_worker ~config ~entry) operation
+;;
+
+let start_or_error ~config ~entry (operation : Keeper_shutdown_types.t) =
+  match start_worker ~config ~entry operation with
+  | Worker_started | Worker_already_active -> Ok operation
+  | Worker_start_rejected error -> Error (Worker_start_error error)
+;;
+
+let existing_operation_intent ~request (operation : Keeper_shutdown_types.t) =
+  if
+    Keeper_shutdown_types.cleanup_intent_equal
+      request.Keeper_shutdown_prepare_join.cleanup_intent
+      operation.cleanup_intent
+  then Ok operation
+  else Error (Existing_operation_intent_mismatch operation)
+;;
+
+let rec retry_completion ~config ~keeper_name ~operation_id =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then Eio_context.run_on_owner_domain (fun () ->
+    retry_completion ~config ~keeper_name ~operation_id)
+  else
+    match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
+    | Error error -> Error (`Submit (Existing_operation_load_error error))
+    | Ok operation ->
+      match operation.cleanup_intent.reason, operation.phase with
+      | Dashboard_keeper_purge _, Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ } ->
+        Ok operation
+      | Dashboard_keeper_purge _, Finalized { completion =
+          (Completion_pending Dashboard_keeper_purged
+          | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } ->
+        start_or_error ~config ~entry:None operation |> Result.map_error (fun error -> `Submit error)
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_pending (Supervisor_cleaned);_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_delivery_failed { action = Supervisor_cleaned;_};_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_delivered (Supervisor_cleaned);_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_not_requested;_})
+      | (Dashboard_keeper_purge _, (Prepared | (Joining_lanes | (Joined_idle | (Finalizing_tasks _ | (Cleanup_ready _ | (Reconciliation_required _ | (Owner_absent _ | (Operator_absence_acknowledged _ | (Blocked _ | Superseded _))))))))))
+      | ((Operator_stop_retain_meta | (Operator_stop_remove_meta | Supervisor_cleanup)), _) -> Error `Not_ready
+;;
+
+let rec submit ~config ~entry ~request =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      submit ~config ~entry ~request)
+  else
+    match Keeper_shutdown_prepare_join.prepare ~config ~entry ~request with
+    | Ok operation ->
+      start_or_error ~config ~entry:(Some entry) operation
+    | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
+      (match Keeper_shutdown_store.load ~config ~keeper_name:entry.name operation_id with
+       | Error error -> Error (Existing_operation_load_error error)
+       | Ok operation ->
+         (match existing_operation_intent ~request operation with
+          | Error _ as error -> error
+          | Ok ({ lane_ownership = Registered_lane lane_id; _ } as operation)
+            when Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane) ->
+            start_or_error ~config ~entry:(Some entry) operation
+          | Ok
+              ({ lane_ownership = Registered_lane _ | Dormant_meta; _ } as operation) ->
+            Error (Existing_operation_lane_mismatch operation)))
+    | Error
+        (( Keeper_shutdown_prepare_join.Registry_lane_replaced
+         | Keeper_shutdown_prepare_join.Dormant_registry_lane_present
+         | Keeper_shutdown_prepare_join.Meta_snapshot_missing
+         | Keeper_shutdown_prepare_join.Meta_snapshot_identity_changed
+         | Keeper_shutdown_prepare_join.Meta_snapshot_read_failed _
+         | Keeper_shutdown_prepare_join.Task_discovery_failed _
+         | Keeper_shutdown_prepare_join.Owner_command_failed _
+         | Keeper_shutdown_prepare_join.Prepare_persist_failed _
+         | Keeper_shutdown_prepare_join.Cancellation_failed _
+         | Keeper_shutdown_prepare_join.Join_failed _
+         | Keeper_shutdown_prepare_join.Join_phase_mismatch _
+         | Keeper_shutdown_prepare_join.Join_record_update_failed _ ) as error) ->
+      Error (Prepare_error error)
+;;
+
+let rec submit_dormant ~config ~meta ~request =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      submit_dormant ~config ~meta ~request)
+  else
+    match Keeper_shutdown_prepare_join.prepare_dormant ~config ~meta ~request with
+    | Ok operation -> start_or_error ~config ~entry:None operation
+    | Error (Keeper_shutdown_prepare_join.Existing_operation operation_id) ->
+      (match Keeper_shutdown_store.load ~config ~keeper_name:meta.name operation_id with
+       | Error error -> Error (Existing_operation_load_error error)
+       | Ok ({ lane_ownership = Dormant_meta; _ } as operation) ->
+         (match existing_operation_intent ~request operation with
+          | Error _ as error -> error
+          | Ok operation -> start_or_error ~config ~entry:None operation)
+       | Ok ({ lane_ownership = Registered_lane _; _ } as operation) ->
+         Error (Existing_operation_lane_mismatch operation))
+    | Error
+        (( Keeper_shutdown_prepare_join.Registry_lane_replaced
+         | Keeper_shutdown_prepare_join.Dormant_registry_lane_present
+         | Keeper_shutdown_prepare_join.Meta_snapshot_missing
+         | Keeper_shutdown_prepare_join.Meta_snapshot_identity_changed
+         | Keeper_shutdown_prepare_join.Meta_snapshot_read_failed _
+         | Keeper_shutdown_prepare_join.Task_discovery_failed _
+         | Keeper_shutdown_prepare_join.Owner_command_failed _
+         | Keeper_shutdown_prepare_join.Prepare_persist_failed _
+         | Keeper_shutdown_prepare_join.Cancellation_failed _
+         | Keeper_shutdown_prepare_join.Join_failed _
+         | Keeper_shutdown_prepare_join.Join_phase_mismatch _
+         | Keeper_shutdown_prepare_join.Join_record_update_failed _ ) as error) ->
+      Error (Prepare_error error)
+;;
+
+(* Boot recovery is the reconciliation procedure for an admission-time
+   in-flight turn (#25491). Recovery runs exactly once per boot over
+   operations scanned at startup, so any turn such an operation references
+   ran inside a previous server process — a process that has terminally
+   ended. The turn therefore cannot still be executing, and the admission
+   fence has no live execution left to serialize against. What stays
+   unresolved is whether that turn's external effects completed before the
+   process died; holding the fence cannot answer that, so the question is
+   recorded durably instead: [turn_disposition] keeps the admission-time
+   observation and [join_evidence.terminal = Terminal_crashed] names the
+   process death. Cleanup then settles durable state as it exists.
+   Before this settlement existed, [Reconciliation_required] was an
+   absorbing phase — worker no-op, recovery no-op, finalize
+   [Unsupported_phase], supersession rejected — and five keepers stayed
+   unbootable across restarts (2026-07-20/21 fleet wedge). *)
+let process_boundary_evidence =
+  { lane_outcome = Lane_cancelled_by_parent "server process ended before lane receipt"
+  ; terminal = Terminal_crashed "server process ended before lane receipt"
+  ; cleanup_error = None
+  }
+
+let log_boot_settled_inflight_turn
+    (operation : Keeper_shutdown_types.t)
+    turn
+  =
+  Log.Keeper.warn
+    "boot recovery settled in-flight-turn shutdown: keeper=%s operation=%s observed_turn=%s — owning process ended, turn cannot still be executing; external-effect completion stays recorded as unknown"
+    operation.keeper_name
+    (Operation_id.to_string operation.operation_id)
+    (match turn.observed_turn_id with
+     | Some turn_id -> string_of_int turn_id
+     | None -> "id-unobserved")
+;;
+
+let recovered_join_state (operation : Keeper_shutdown_types.t) =
+  (match operation.turn_disposition with
+   | No_inflight_turn -> ()
+   | Inflight_effect_unknown turn -> log_boot_settled_inflight_turn operation turn);
+  { operation with
+    revision = operation.revision + 1
+  ; join_evidence = Some process_boundary_evidence
+  ; phase = Joined_idle
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+(* A durable [Reconciliation_required] operation reaching boot recovery was
+   written either by a previous boot's recovery (before that phase settled
+   here) or by the pre-fix live join path that derived the phase from the
+   stale admission-time snapshot. Both classes reference a turn owned by an
+   ended process; settle them identically. Join evidence already recorded by
+   a live join is preserved — it is more precise than the process-boundary
+   evidence. *)
+let settled_reconciliation_state
+    (operation : Keeper_shutdown_types.t)
+    turn
+  =
+  log_boot_settled_inflight_turn operation turn;
+  let join_evidence =
+    match operation.join_evidence with
+    | Some _ as recorded -> recorded
+    | None -> Some process_boundary_evidence
+  in
+  { operation with
+    revision = operation.revision + 1
+  ; join_evidence
+  ; phase = Joined_idle
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+let blocked_interrupted_join_state (operation : Keeper_shutdown_types.t) =
+  { operation with
+    revision = operation.revision + 1
+  ; phase =
+      Blocked
+        { stage = Lane_join
+        ; detail =
+            "server process ended while joining Keeper and Librarian lanes; Librarian completion is unknown"
+        }
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+(* Logged once the outcome is durable, so a failed write never claims it. *)
+let log_boot_replay_outcome (operation : Keeper_shutdown_types.t) =
+  match operation.phase with
+  | Blocked { stage; detail } ->
+    Log.Keeper.warn
+      "boot recovery left a shutdown blocked at a replayable stage; the next boot replays it (an operator stop or purge keeps the Keeper fenced until then): keeper=%s operation=%s intent=%s stage=%s detail=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+      (cleanup_reason_label operation.cleanup_intent.reason)
+      (failure_stage_to_string stage)
+      detail
+  | Superseded (Boot_replay_abandoned { blocked; abandonment }) ->
+    Log.Keeper.warn
+      "boot recovery closed a blocked shutdown instead of replaying it; the operator intent was not applied: keeper=%s operation=%s intent=%s stage=%s reason=%s detail=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+      (cleanup_reason_label operation.cleanup_intent.reason)
+      (failure_stage_to_string blocked.stage)
+      (boot_replay_abandonment_to_string abandonment)
+      blocked.detail
+  | Superseded
+      ( Operator_blocked_purge_released _
+      | Operator_metadata_update _
+      | Operator_reconciliation_accepted _ )
+  | Prepared
+  | Joining_lanes
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Owner_absent _
+  | Operator_absence_acknowledged _ -> ()
+;;
+
+(* The next durable state of a replayable [Blocked] operation, or [None] to
+   leave it untouched. [Finalizing_tasks] hands it to finalization in
+   [recover_operation]; a fresh [Blocked] or a [Superseded] closes it for this
+   boot. Nothing here writes Keeper state. *)
+let replayed_blocked_state
+    ~config
+    (operation : Keeper_shutdown_types.t)
+    (blocked : failure)
+    replay
+  =
+  let still_blocked detail =
+    { operation with
+      revision = operation.revision + 1
+    ; phase = Blocked { blocked with detail }
+    ; updated_at = Masc_domain.now_iso ()
+    }
+  in
+  let abandoned abandonment =
+    { operation with
+      revision = operation.revision + 1
+    ; phase = Superseded (Boot_replay_abandoned { blocked; abandonment })
+    ; updated_at = Masc_domain.now_iso ()
+    }
+  in
+  match
+    Keeper_shutdown_store.list_for_keeper ~config ~keeper_name:operation.keeper_name
+  with
+  | Error error ->
+    Some (still_blocked (Keeper_shutdown_store.error_to_string error))
+  | Ok operations ->
+    (match replay_standing operation operations with
+     | Replay_overtaken newer -> Some (abandoned (Newer_operation newer))
+     | Replay_deferred reason ->
+       Log.Keeper.warn
+         "boot recovery left a blocked shutdown unreplayed: keeper=%s operation=%s intent=%s reason=%s"
+         operation.keeper_name
+         (Operation_id.to_string operation.operation_id)
+         (cleanup_reason_label operation.cleanup_intent.reason)
+         reason;
+       None
+     | Replay_owner ->
+       (match Keeper_shutdown_finalize.plan_blocked_replay ~config operation replay with
+        | Keeper_shutdown_finalize.Replay_unavailable detail -> Some (still_blocked detail)
+        | Keeper_shutdown_finalize.Replay_abandon abandonment ->
+          Some (abandoned abandonment)
+        | Keeper_shutdown_finalize.Replay_resume settled_task_ids ->
+          Log.Keeper.info
+            "boot recovery replays a blocked shutdown: keeper=%s operation=%s intent=%s stage=%s settled_tasks=%d"
+            operation.keeper_name
+            (Operation_id.to_string operation.operation_id)
+            (cleanup_reason_label operation.cleanup_intent.reason)
+            (failure_stage_to_string blocked.stage)
+            (List.length settled_task_ids);
+          let join_evidence =
+            match operation.join_evidence with
+            | Some _ as recorded -> recorded
+            | None -> Some process_boundary_evidence
+          in
+          Some
+            { operation with
+              revision = operation.revision + 1
+            ; join_evidence
+            ; phase = Finalizing_tasks settled_task_ids
+            ; updated_at = Masc_domain.now_iso ()
+            }))
+;;
+
+let recover_operation
+    ~config
+    ?successor_operation_id
+    (operation : Keeper_shutdown_types.t)
+  =
+  let persist_recovered recovered =
+    match
+      Keeper_shutdown_store.replace
+        ~config
+        ~expected_revision:operation.revision
+        recovered
+    with
+    | Ok () -> Ok recovered
+    | Error error -> Error (Keeper_shutdown_store.error_to_string error)
+  in
+  let operation_result =
+    match operation.phase with
+    | Prepared -> persist_recovered (recovered_join_state operation)
+    | Joining_lanes -> persist_recovered (blocked_interrupted_join_state operation)
+    | Reconciliation_required turn ->
+      persist_recovered (settled_reconciliation_state operation turn)
+    | Blocked blocked ->
+      (match failure_stage_boot_replay blocked.stage with
+       | None -> Ok operation
+       | Some replay ->
+         (match replayed_blocked_state ~config operation blocked replay with
+          | None -> Ok operation
+          | Some replayed ->
+            (match persist_recovered replayed with
+             | Error _ as error -> error
+             | Ok persisted ->
+               log_boot_replay_outcome persisted;
+               Ok persisted)))
+    | Joined_idle
+    | Finalizing_tasks _
+    | Cleanup_ready _
+    | Finalized _
+    | Owner_absent _
+    | Operator_absence_acknowledged _
+    | Superseded _ -> Ok operation
+  in
+  match operation_result with
+  | Error _ as error -> error
+  | Ok recovered ->
+    (match recovered.phase with
+     | Joined_idle
+     | Finalizing_tasks _
+     | Cleanup_ready _
+     | Finalized _ ->
+       (match
+          Keeper_shutdown_finalize.run
+            ~config
+            ~entry:None
+            ?successor_operation_id
+            recovered
+        with
+        | Ok finalized -> Ok finalized
+        | Error (Keeper_shutdown_finalize.Finalization_blocked blocked)
+          when not (Keeper_shutdown_types.requires_admission_fence blocked) ->
+          (* A replayable stage: the next boot replays it. Returning it as
+             recovered lets the caller decide the fence: a supervisor cleanup
+             releases it so the Keeper boots now; an operator stop or purge
+             keeps it ([keeps_fence_after_unfinished_replay]). *)
+          log_boot_replay_outcome blocked;
+          Ok blocked
+        | Error
+            (( Keeper_shutdown_finalize.Store_error _
+             | Keeper_shutdown_finalize.Unsupported_phase
+             | Keeper_shutdown_finalize.Finalization_blocked _
+             | Keeper_shutdown_finalize.Finalization_draining _
+             | Keeper_shutdown_finalize.Completion_failed _
+             | Keeper_shutdown_finalize.Admission_release_failed _ ) as error) ->
+          Error (Keeper_shutdown_finalize.error_to_string error))
+     | Prepared
+     | Joining_lanes
+     | Reconciliation_required _
+     | Blocked _
+     | Owner_absent _
+     | Operator_absence_acknowledged _
+     | Superseded _ -> Ok recovered)
+;;
+
+(* Recovery has just confirmed the admission transition for a settled
+   operation. Reclaim its record so the next boot does not walk the same
+   settled operation again. A reclaim failure only means the record survives
+   until the next boot, so it never fails the recovery. *)
+let reclaim_settled_record ~config (recovered : Keeper_shutdown_types.t) =
+  match
+    Keeper_shutdown_store.delete_terminal
+      ~config
+      ~keeper_name:recovered.keeper_name
+      ~operation_id:recovered.operation_id
+  with
+  | Ok Keeper_shutdown_store.Terminal_deleted ->
+    Log.Keeper.info
+      "reclaimed settled shutdown record keeper=%s operation=%s"
+      recovered.keeper_name
+      (Operation_id.to_string recovered.operation_id)
+  | Ok Keeper_shutdown_store.Terminal_retained -> ()
+  | Error error ->
+    Log.Keeper.warn
+      "settled shutdown record reclaim failed keeper=%s operation=%s error=%s"
+      recovered.keeper_name
+      (Operation_id.to_string recovered.operation_id)
+      (Keeper_shutdown_store.error_to_string error)
+;;
+
+let abandoned_boot_replay (operation : Keeper_shutdown_types.t) =
+  match operation.phase with
+  | Superseded (Boot_replay_abandoned _) -> true
+  | Superseded
+      ( Operator_blocked_purge_released _
+      | Operator_metadata_update _
+      | Operator_reconciliation_accepted _ )
+  | Prepared
+  | Joining_lanes
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Owner_absent _
+  | Operator_absence_acknowledged _
+  | Blocked _ -> false
+;;
+
+let recover_claimed
+    ~config
+    ~corrupt_owner_fence
+    operation
+  =
+  let successor_operation_id =
+    Option.map (fun fence -> fence.operation_id) corrupt_owner_fence
+  in
+  (* An acknowledgement and a recorded owner absence are retained evidence.
+     In particular neither has authority over a same-name owner created after
+     the observation. Corrupt siblings are still handled by
+     restore_inventory_admission. *)
+  match operation.phase with
+  | Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ } ->
+    (* Retained deletion evidence has no authority over a new same-name Keeper. *)
+    Ok operation
+  | Superseded _ when (match operation.cleanup_intent.reason with
+      | Dashboard_keeper_purge _ -> true | Operator_stop_retain_meta | Operator_stop_remove_meta
+                                         | Supervisor_cleanup -> false) -> Ok operation
+  | Owner_absent _
+  | Operator_absence_acknowledged _ -> Ok operation
+  | Prepared
+  | Joining_lanes
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized
+      { completion =
+          ( Completion_not_requested
+          | Completion_pending _
+          | Completion_delivery_failed _
+          | Completion_delivered Supervisor_cleaned )
+      ; _
+      }
+  | Blocked _
+  | Superseded _ ->
+  match recover_operation ~config ?successor_operation_id operation with
+  | Error _ as error -> error
+  | Ok ({ phase = Owner_absent _; _ } as observed) ->
+    (* Recovery has just recorded the absence on the operation itself: the
+       owner-side fence went with the owner, and the record is retained as
+       the evidence, so neither the admission transition nor the reclaim
+       below applies to it. *)
+    Ok observed
+  | Ok
+      ({ phase =
+           ( Prepared
+           | Joining_lanes
+           | Joined_idle
+           | Finalizing_tasks _
+           | Cleanup_ready _
+           | Reconciliation_required _
+           | Finalized _
+           | Operator_absence_acknowledged _
+           | Blocked _
+           | Superseded _ )
+       ; _
+       } as recovered) ->
+    if
+      Keeper_shutdown_types.requires_admission_fence recovered
+      || keeps_fence_after_unfinished_replay recovered
+    then Ok recovered
+    else
+      let keeper_name, successor_operation_id =
+        match corrupt_owner_fence with
+        | None -> operation.keeper_name, None
+        | Some fence -> fence.keeper_name, Some fence.operation_id
+      in
+      (match
+         Keeper_owner_registry.transition_shutdown
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+           ~from_operation_id:operation.operation_id
+           ~to_operation_id:successor_operation_id
+       with
+       | Ok Keeper_owner.Shutdown_transition_applied
+       | Ok Keeper_owner.Shutdown_transition_already_applied ->
+         reclaim_settled_record ~config recovered;
+         Ok recovered
+       | Ok (Keeper_owner.Shutdown_transition_reserved_by_other existing) ->
+         if abandoned_boot_replay recovered
+         then (
+           (* The admission reservation belongs to a later operation; this
+              closed record never held it and has nothing to release. *)
+           reclaim_settled_record ~config recovered;
+           Ok recovered)
+         else
+           Error
+             (Printf.sprintf
+                "shutdown admission restore conflict: keeper=%s recovered=%s existing=%s"
+                keeper_name
+                (Operation_id.to_string operation.operation_id)
+                (Operation_id.to_string existing))
+       | Error error ->
+         if
+           Keeper_shutdown_finalize.admission_already_released_by_removal
+             ~config
+             operation
+             error
+         then
+           (match
+              Keeper_shutdown_intake_fence.transition_shutdown
+                ~base_path:config.Workspace.base_path
+                ~keeper_name
+                ~from_operation_id:operation.operation_id
+                ~to_operation_id:successor_operation_id
+            with
+            | Keeper_shutdown_intake_fence.Transition_applied
+            | Keeper_shutdown_intake_fence.Transition_already_applied ->
+              reclaim_settled_record ~config recovered;
+              Ok recovered
+            | Keeper_shutdown_intake_fence.Transition_reserved_by_other existing ->
+              Error
+                (Printf.sprintf
+                   "shutdown admission restore conflict: keeper=%s recovered=%s existing=%s"
+                   keeper_name
+                   (Operation_id.to_string operation.operation_id)
+                   (Operation_id.to_string existing)))
+         else Error (Keeper_owner_registry.command_error_to_string error))
+;;
+
+(* Boot recovery and an in-process re-drive walk the same operation through
+   the same path. Holding the worker claim keeps them, and a live submit
+   worker, from finalizing one operation twice at once. *)
+let recover_operation_with_corrupt_owner_fence
+    ~config
+    ~corrupt_owner_fence
+    (operation : Keeper_shutdown_types.t)
+  =
+  if not (claim_worker operation)
+  then
+    Error
+      (Printf.sprintf
+         "shutdown operation is being finalized by a live worker in this process: keeper=%s operation=%s"
+         operation.keeper_name
+         (worker_key operation))
+  else
+    Fun.protect
+      ~finally:(fun () -> release_worker operation)
+      (fun () -> recover_claimed ~config ~corrupt_owner_fence operation)
+;;
+
+(* Which phases a running process may walk again without the registry entry
+   the original worker held. A registered-lane operation that stopped before
+   [Finalized] would unregister nothing with [entry = None], so it waits for
+   boot recovery, where the process that held the lane has ended. *)
+type redrive_walk =
+  | Walk_recovery
+      (** The path boot recovery takes for this operation. *)
+  | Walk_admission_release
+      (** Only the fence release: the purge receipt is already delivered. *)
+
+let redrive_walk ~(config : Workspace.config) (operation : Keeper_shutdown_types.t) =
+  match operation.phase, operation.lane_ownership with
+  (* A delivered purge receipt whose release failed still holds the fence
+     (#38629). Recovery reads the receipt as retained evidence and walks
+     nothing, so only the release is retried, and only while the fence is
+     this operation's: a fence another operation holds is not its to
+     release. After a restart the fence is gone, since boot restores fences
+     only for operations that still require one. *)
+  | Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ }
+  , (Dormant_meta | Registered_lane _) ->
+    (match
+       Keeper_shutdown_intake_fence.shutdown_operation_id
+         ~base_path:config.base_path
+         ~keeper_name:operation.keeper_name
+     with
+     | Some holder when Operation_id.equal holder operation.operation_id ->
+       Some Walk_admission_release
+     | Some _ | None -> None)
+  | ( Finalized
+        { completion =
+            ( Completion_not_requested
+            | Completion_pending _
+            | Completion_delivery_failed _
+            | Completion_delivered Supervisor_cleaned )
+        ; _
+        }
+    , (Dormant_meta | Registered_lane _) ) -> Some Walk_recovery
+  | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Dormant_meta -> Some Walk_recovery
+  | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Registered_lane _ -> None
+  | ( ( Prepared
+      | Joining_lanes
+      | Reconciliation_required _
+      | Blocked _
+      | Owner_absent _
+      | Operator_absence_acknowledged _
+      | Superseded _ )
+    , (Dormant_meta | Registered_lane _) ) -> None
+;;
+
+(* What the durable record says stopped the operation. A re-drive that stops
+   again leaves either the same record or a new reason; only a new reason is
+   news. The first stop was already logged as an error by the walk that made
+   it, so a repeat of it on every held tick is logged at info.
+
+   A phase that carries no reason (a delivered purge whose release failed, a
+   walk that failed before it could record anything) is compared by its
+   durable revision: an unchanged revision means the walk left the record as
+   it found it, so the stop is the one already on record. *)
+type recorded_stop =
+  | Stopped_delivering_completion of string
+  | Stopped_blocked of string
+  | No_recorded_stop of { revision : int }
+
+let recorded_stop (operation : Keeper_shutdown_types.t) =
+  match operation.phase with
+  | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } ->
+    Stopped_delivering_completion detail
+  | Blocked { detail; _ } -> Stopped_blocked detail
+  | Finalized
+      { completion =
+          (Completion_not_requested | Completion_pending _ | Completion_delivered _)
+      ; _
+      }
+  | Prepared
+  | Joining_lanes
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Owner_absent _
+  | Operator_absence_acknowledged _
+  | Superseded _ -> No_recorded_stop { revision = operation.revision }
+;;
+
+let stop_is_on_record ~(before : Keeper_shutdown_types.t) ~(after : Keeper_shutdown_types.t) =
+  match recorded_stop before, recorded_stop after with
+  | Stopped_delivering_completion before_detail, Stopped_delivering_completion after_detail
+  | Stopped_blocked before_detail, Stopped_blocked after_detail ->
+    String.equal before_detail after_detail
+  | No_recorded_stop before_record, No_recorded_stop after_record ->
+    Int.equal before_record.revision after_record.revision
+  | Stopped_delivering_completion _, (Stopped_blocked _ | No_recorded_stop _)
+  | Stopped_blocked _, (Stopped_delivering_completion _ | No_recorded_stop _)
+  | No_recorded_stop _, (Stopped_delivering_completion _ | Stopped_blocked _) -> false
+;;
+
+let log_redrive_stop ~config (before : Keeper_shutdown_types.t) detail =
+  let same_stop =
+    match
+      Keeper_shutdown_store.load
+        ~config
+        ~keeper_name:before.keeper_name
+        before.operation_id
+    with
+    | Ok after -> stop_is_on_record ~before ~after
+    | Error _ -> false
+  in
+  if same_stop
+  then
+    Log.Keeper.info
+      "re-driven shutdown finalization stopped on its recorded reason: keeper=%s operation=%s error=%s"
+      before.keeper_name
+      (worker_key before)
+      detail
+  else
+    Log.Keeper.error
+      "re-driven shutdown finalization stopped: keeper=%s operation=%s error=%s"
+      before.keeper_name
+      (worker_key before)
+      detail
+;;
+
+let redrive_claimed ~config (operation : Keeper_shutdown_types.t) =
+  match redrive_walk ~config operation with
+  | None -> ()
+  | Some walk ->
+    (match
+       Keeper_shutdown_store.corrupt_operation_id_for_keeper
+         ~config
+         ~keeper_name:operation.keeper_name
+     with
+     | Error error ->
+       Log.Keeper.error
+         "re-driven shutdown finalization could not read corrupt siblings: keeper=%s operation=%s error=%s"
+         operation.keeper_name
+         (worker_key operation)
+         (Keeper_shutdown_store.error_to_string error)
+     | Ok corrupt_operation_id ->
+       let walked =
+         match walk with
+         | Walk_recovery ->
+           let corrupt_owner_fence =
+             Option.map
+               (fun operation_id -> { keeper_name = operation.keeper_name; operation_id })
+               corrupt_operation_id
+           in
+           recover_claimed ~config ~corrupt_owner_fence operation
+         | Walk_admission_release ->
+           Keeper_shutdown_finalize.run
+             ~config
+             ~entry:None
+             ?successor_operation_id:corrupt_operation_id
+             operation
+           |> Result.map_error Keeper_shutdown_finalize.error_to_string
+       in
+       (match walked with
+        | Ok settled ->
+          Log.Keeper.info
+            "re-driven shutdown finalization settled: keeper=%s operation=%s phase=%s"
+            settled.keeper_name
+            (worker_key settled)
+            (phase_to_string settled.phase)
+        | Error detail -> log_redrive_stop ~config operation detail))
+;;
+
+type redrive_error =
+  | Redrive_load_failed of Keeper_shutdown_store.error
+  | Redrive_start_rejected of worker_start_error
+
+type redrive_outcome =
+  | Redrive_started
+  | Redrive_already_active
+  | Redrive_not_in_process of Keeper_shutdown_types.phase
+
+let redrive_error_to_string = function
+  | Redrive_load_failed error -> Keeper_shutdown_store.error_to_string error
+  | Redrive_start_rejected error ->
+    submit_error_to_string (Worker_start_error error)
+;;
+
+let rec redrive_finalization ~config ~keeper_name ~operation_id =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      redrive_finalization ~config ~keeper_name ~operation_id)
+  else
+    match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
+    | Error error -> Error (Redrive_load_failed error)
+    (* Checked before claiming as well as after: a phase the walk refuses
+       must not hold the claim, or boot recovery of that operation, running
+       beside the first tick, finds it taken and gives up. *)
+    | Ok operation when Option.is_none (redrive_walk ~config operation) ->
+      Ok (Redrive_not_in_process operation.phase)
+    | Ok operation ->
+      (match fork_claimed ~config ~run:(redrive_claimed ~config) operation with
+       | Worker_started -> Ok Redrive_started
+       | Worker_already_active -> Ok Redrive_already_active
+       | Worker_start_rejected error -> Error (Redrive_start_rejected error))
+;;
+
+let recover_at_boot ~config =
+  match Keeper_shutdown_store.scan_inventory ~config with
+  | Error error -> [ Error (Keeper_shutdown_store.error_to_string error) ]
+  | Ok inventory ->
+    (match restore_inventory_admission ~config inventory with
+     | Error detail -> [ Error detail ]
+     | Ok restored ->
+       let corrupt_results =
+         List.map
+           (fun (corrupt : Keeper_shutdown_store.corrupt_record) ->
+              Error
+                (Printf.sprintf
+                   "corrupt shutdown operation fenced: keeper=%s operation=%s path=%s error=%s"
+                   corrupt.Keeper_shutdown_store.keeper_name
+                   (Operation_id.to_string corrupt.operation_id)
+                   corrupt.path
+                   (Keeper_shutdown_store.error_to_string corrupt.error)))
+           restored.corrupt_records
+       in
+       let recover (operation : Keeper_shutdown_types.t) =
+         let corrupt_owner_fence =
+           List.find_opt
+             (fun (fence : corrupt_owner_fence) ->
+                String.equal fence.keeper_name operation.keeper_name)
+             restored.corrupt_owner_fences
+         in
+         recover_operation_with_corrupt_owner_fence
+           ~config
+           ~corrupt_owner_fence
+           operation
+       in
+       List.map recover restored.operations @ corrupt_results)
+;;
+
+module For_testing = struct
+  let persist_unhandled_failure = persist_unhandled_failure
+  let stop_is_on_record = stop_is_on_record
+end

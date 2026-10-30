@@ -1,0 +1,103 @@
+[
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-impl",
+      "lib/goal/goal_measurement.ml"
+    ],
+    "exit": 0,
+    "output": "",
+    "source_sha256": "172f5002dcecd7faa2eeabbbf9e2aab0da0e9178cbe4e0ffbd133769a05e6d13"
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-intf",
+      "lib/goal/goal_measurement.mli"
+    ],
+    "exit": 0,
+    "output": "",
+    "source_sha256": "c79527056a14ebf4aa4f95caccb562ea0107338d6dcc1ddb9641c1e290c6d5ab"
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-impl",
+      "lib/server/server_routes_http_routes_dashboard.ml"
+    ],
+    "exit": 0,
+    "output": "",
+    "source_sha256": "d88df0328be749b351bda5aeba04315e2132e03a303cb6f6c81d5fe69b35b84d"
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-impl",
+      "lib/workspace_goals.ml"
+    ],
+    "exit": 0,
+    "output": "",
+    "source_sha256": "f76bef2f8101fd669df39dce61f2eb1dc0b89212d89f917f839ea4ff3b438727"
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-impl",
+      "test/test_goal_tool_toml_parity.ml"
+    ],
+    "exit": 0,
+    "output": "",
+    "source_sha256": "2c7def662241c117c5a1e554c30ac047ac92776f9eb577348aa2b40e446692dd"
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-impl",
+      "test/test_goal_verification_gate.ml"
+    ],
+    "exit": 0,
+    "output": "",
+    "source_sha256": "c1c41375c0315328ea42f00d8e7c7b54d855df2561414c809cf7979d0ba78a7f"
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-impl",
+      "test/test_keeper_direct_goal_provider_wire.ml"
+    ],
+    "exit": 0,
+    "output": "",
+    "source_sha256": "6fe77c4dc467aedfc99ddd564e09dea29f4509b00d88b362c332c43e056653cb"
+  },
+  {
+    "scope": "canonical TOML parses and existing native parity description pin matches",
+    "exit": 0
+  },
+  {
+    "scope": "Python probe parses without cache writes",
+    "exit": 0
+  },
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0,
+    "output": ""
+  }
+]

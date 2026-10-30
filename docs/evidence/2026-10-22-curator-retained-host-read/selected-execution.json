@@ -1,0 +1,57 @@
+{
+  "run": 39682010920,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39682010920",
+  "head": "866233b4d86f068afbbb67165ef3ea9996ccc90a",
+  "status": "completed",
+  "conclusion": "success",
+  "selection": {
+    "minimal": true,
+    "eio_backend": "posix",
+    "suites": {
+      "test_lane_addon_exact": 25,
+      "test_workspace_curator_addon_commit": 34,
+      "test_workspace_curator_addon_contract": 6,
+      "test_lane_addon_exact_runner": 31,
+      "test_workspace_memory_execution_capture": 5,
+      "test_lane_addon_request_progress": 7,
+      "test_lane_addon_request_discovery": 7,
+      "test_candle_appraiser_transport": 11
+    }
+  },
+  "tests": 126,
+  "test_source_hashes": {
+    "test_lane_addon_exact": "600d75485c8e32ee6346bd52d38c7799d379302f33219ef0bed6779a0c9961b3",
+    "test_workspace_curator_addon_commit": "440f248151293691ebce7f8e257eae7b91555c174476652435319c5bd8d0a6f7",
+    "test_workspace_curator_addon_contract": "744186bff6c99c95a87fb3db926b8c6527cd8f8561ff6f6be1eed98eeffb1e9e",
+    "test_lane_addon_exact_runner": "33110b72275afec9de7d02181c267e06b6753c6893b20fc5238ebd3de2550dae",
+    "test_workspace_memory_execution_capture": "a8a77ca92c3458aca76d13a60b22a2043ebe3d06105d581a525b81ce9da6f91e",
+    "test_lane_addon_request_progress": "7f21ba3e7e252f97283644b9a9a5adbb4412f3c27b5a620f0d5bb2d049ba40a3",
+    "test_lane_addon_request_discovery": "86c9b5fce531896503139e63f9dfb4a9a8063a24bea06d6159b815b89dfe1fb4",
+    "test_candle_appraiser_transport": "48496c3976b747bfdf71892e334420cb5ac7512ec206e70de16d8fbf09134932"
+  },
+  "full_log_sha256": "4d1dd5e0fde8b27940dafcb30fa48203031aadc089317f2eb35831acff3ac20b",
+  "extract": [
+    "test suite\tCheckout\t2026-10-21T21:50:49.9344334Z   ref: 866233b4d86f068afbbb67165ef3ea9996ccc90a",
+    "test suite\tCheckout\t2026-10-21T21:50:50.1285777Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 866233b4d86f068afbbb67165ef3ea9996ccc90a",
+    "test suite\tCheckout\t2026-10-21T21:51:00.4309568Z  * branch              866233b4d86f068afbbb67165ef3ea9996ccc90a -> FETCH_HEAD",
+    "test suite\tCheckout\t2026-10-21T21:51:00.4317185Z [command]/usr/bin/git rev-parse --verify --quiet 866233b4d86f068afbbb67165ef3ea9996ccc90a^{object}",
+    "test suite\tCheckout\t2026-10-21T21:51:00.4343363Z 866233b4d86f068afbbb67165ef3ea9996ccc90a",
+    "test suite\tCheckout\t2026-10-21T21:51:00.4420873Z [command]/usr/bin/git checkout --progress --force 866233b4d86f068afbbb67165ef3ea9996ccc90a",
+    "test suite\tCheckout\t2026-10-21T21:51:02.2233859Z Note: switching to '866233b4d86f068afbbb67165ef3ea9996ccc90a'.",
+    "test suite\tCheckout\t2026-10-21T21:51:02.2379029Z 866233b4d86f068afbbb67165ef3ea9996ccc90a",
+    "test suite\tTest\t2026-10-21T21:51:57.5722539Z [targeted] dune build test/test_lane_addon_exact.exe test/test_workspace_curator_addon_commit.exe test/test_workspace_curator_addon_contract.exe test/test_lane_addon_exact_runner.exe test/test_workspace_memory_execution_capture.exe test/test_lane_addon_request_progress.exe test/test_lane_addon_request_discovery.exe test/test_candle_appraiser_transport.exe addons/workspace-curator/lane.toml addons/workspace-curator/schemas/classification.json addons/workspace-curator/schemas/briefing.json addons/workspace-curator/Dockerfile addons/workspace-curator/README.md addons/workspace-curator/lane.toml addons/workspace-curator/schemas/briefing.json addons/workspace-curator/schemas/classification.json addons/workspace-curator/server.py addons/protocol.py addons/exact_worker.py config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md",
+    "test suite\tTest\t2026-10-21T21:54:25.4528128Z Test Successful in 0.094s. 25 tests run.",
+    "test suite\tTest\t2026-10-21T21:54:26.1667495Z Test Successful in 0.599s. 34 tests run.",
+    "test suite\tTest\t2026-10-21T21:54:27.1516766Z Test Successful in 0.863s. 6 tests run.",
+    "test suite\tTest\t2026-10-21T21:54:27.4654285Z Test Successful in 0.200s. 31 tests run.",
+    "test suite\tTest\t2026-10-21T21:54:27.5737500Z Test Successful in 0.025s. 5 tests run.",
+    "test suite\tTest\t2026-10-21T21:54:27.7175452Z Test Successful in 0.063s. 7 tests run.",
+    "test suite\tTest\t2026-10-21T21:54:27.8360842Z Test Successful in 0.038s. 7 tests run.",
+    "test suite\tTest\t2026-10-21T21:54:27.9918282Z Test Successful in 0.053s. 11 tests run."
+  ],
+  "repairs_confirmed_in_this_combined_source": [
+    "successor062 fresh/restored canonicalization recovery3 cases",
+    "typed-size805 expired/future evidence and Candle detail fixture3 failures"
+  ],
+  "limits": "Selected compiled fixture execution at866 only. New observer receipt source is excluded. Controlled provider callbacks and loopback are not live provider, actual On/Off lifecycle, production cutover, installed UI, whole-stack integration or original54-task completion."
+}

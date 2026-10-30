@@ -1,0 +1,156 @@
+{
+  "case": "1",
+  "model_state": "Succeeded",
+  "tool_calls": 59,
+  "tool_errors": 4,
+  "observed_models": [
+    "glm-5.3-flash"
+  ],
+  "runtime_manifest_ids": [
+    "ollama_cloud.ollama-cloud-glm-5-3-flash"
+  ],
+  "vision_model": null,
+  "approval_waits": [
+    {
+      "tool_call_id": "call_c8w83yzk",
+      "at_unix": 1788798005.518182,
+      "execution_started": false,
+      "execution_success": false
+    },
+    {
+      "tool_call_id": "call_j8oz0278",
+      "at_unix": 1788798225.437678,
+      "execution_started": true,
+      "execution_success": false
+    },
+    {
+      "tool_call_id": "call_wlhssa0j",
+      "at_unix": 1788798526.622213,
+      "execution_started": true,
+      "execution_success": true
+    },
+    {
+      "tool_call_id": "call_96cg0y5d",
+      "at_unix": 1788798546.147031,
+      "execution_started": true,
+      "execution_success": true
+    },
+    {
+      "tool_call_id": "call_sytssr7b",
+      "at_unix": 1788798583.362079,
+      "execution_started": true,
+      "execution_success": true
+    }
+  ],
+  "vision_model_note": "Image analysis invocation/artifact recorded; separate vision model identifier not present in tool result",
+  "coverage": {
+    "BrowserSession": true,
+    "BrowserGoto": true,
+    "BrowserTabs": true,
+    "BrowserRead": true,
+    "BrowserInteract": true,
+    "BrowserAct": true,
+    "Write": true,
+    "keeper_analyze_image": true,
+    "read_text": true,
+    "read_elements": true,
+    "read_frames": true,
+    "read_dialog": true,
+    "read_screenshot": true,
+    "selector_actions_previously_observed": false,
+    "successful_selector_actions_previously_observed": true,
+    "frame_paths_previously_observed": true,
+    "outer_frames": true,
+    "actual_upload_click": true,
+    "nested_read_text": true,
+    "nested_read_elements": true,
+    "nested_fill": true,
+    "nested_select": true,
+    "nested_press": true,
+    "nested_click": true,
+    "nested_scroll": true,
+    "interact_fill_expected_url": true,
+    "interact_click_expected_url": true,
+    "interact_scroll_expected_url": true,
+    "accept_prompt": true,
+    "dismiss_confirm": true,
+    "accept_alert": true,
+    "write_exact_synthetic": false,
+    "write_owned_synthetic": true,
+    "all_writes_synthetic": false,
+    "all_writes_owned_payloads": true,
+    "fresh_session_open": true,
+    "no_early_session_close": true,
+    "upload_owned_file": true,
+    "stored_png_analyzed": true,
+    "upload_post_after_click_before_inspection": true
+  },
+  "selector_lineage": [
+    {
+      "tab_id": 11,
+      "frame_path": [
+        "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)",
+        "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)"
+      ],
+      "outer_observation": "call_cajbo0l0",
+      "inner_observation": "call_nq14k2dh"
+    },
+    {
+      "tab_id": 11,
+      "frame_path": [
+        "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)",
+        "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)"
+      ],
+      "outer_observation": "call_cajbo0l0",
+      "inner_observation": "call_0aceo7og"
+    },
+    {
+      "tab_id": 11,
+      "frame_path": [
+        "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)",
+        "html:nth-of-type(1) > body:nth-of-type(1) > iframe:nth-of-type(1)"
+      ],
+      "outer_observation": "call_hmpfl7cx",
+      "inner_observation": "call_0aceo7og"
+    }
+  ],
+  "server_effects": {
+    "top_input": true,
+    "top_click": true,
+    "nested_input": true,
+    "nested_select": true,
+    "nested_enter": true,
+    "nested_click": true,
+    "prompt_result": true,
+    "confirm_result": true,
+    "alert_returned": true,
+    "top_scroll": true,
+    "nested_scroll": true,
+    "exact_uploaded_bytes": false
+  },
+  "artifacts": [
+    {
+      "handle": "8d363f00f5bed4f309f0ebe68e957841214e76e0effd51ae607df0b97f5d2454",
+      "bytes": 53431,
+      "sha256": "8d363f00f5bed4f309f0ebe68e957841214e76e0effd51ae607df0b97f5d2454",
+      "analyzed": true
+    },
+    {
+      "handle": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6",
+      "bytes": 53761,
+      "sha256": "15c6c9272c25f82fc52d5948814168e040275ac304dccf7c75bb571ff99099f6",
+      "analyzed": true
+    }
+  ],
+  "passed": false,
+  "raw_trace_sha256": {
+    "turn-1788797686283-429e-000016.jsonl": "561333d4eec4f460fcd3123962d5b858bb9cf9ec3fa3adc9a7204dfa767a7f2b",
+    "turn-1788797898512-429e-000017.jsonl": "0fdc9571454fa71c70e06e6ca7fca9f78b433a5fe5e6ffac0670faed9822b054",
+    "turn-1788798510982-429e-000018.jsonl": "a92e52ba0caa105fe6af37262ee65861048bd9ab1f264de85f626daf4e843c0d",
+    "turn-1788798691861-429e-000019.jsonl": "1c95c3b66e0f0de354745cd0e86ff32e764b4ac5f75bf7532858de32804fd899",
+    "turn-1788798772670-429e-000020.jsonl": "d032a8689c7a4a24cf4e9ac239b4d3653e6cf1c4f13e6883d90bf654498dcdfd",
+    "turn-1788798797278-429e-000021.jsonl": "25d63f1d5bcdd59d0a9106b762e495943165a5d00c88a70bfde89921e879c40b",
+    "turn-1788799015031-429e-000022.jsonl": "def9a15bfcb7e9b85de3002f9177a1b460a38a1a48355eec9f4ee8795440f866"
+  },
+  "scope": "Model calls plus fixture bytes/effects; expected dialog-opening errors remain in trace, no TUI/cleanup claim"
+}

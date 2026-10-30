@@ -1,0 +1,46 @@
+{
+  "harness_sha256": "16bad59b5294ab7ec4ca1cf773e683e2f27985c08cd7fccf1d65dfde7be9150e",
+  "scope": "fake HTTP server and fake executable only; not MASC performance",
+  "cases": [
+    {
+      "scenario": "missing_base",
+      "returncode": 2,
+      "launched": false,
+      "result_retained": false,
+      "timing_retained": false,
+      "expected_failure_verified": true
+    },
+    {
+      "scenario": "empty_base",
+      "returncode": 2,
+      "launched": false,
+      "result_retained": false,
+      "timing_retained": false,
+      "expected_failure_verified": true
+    },
+    {
+      "scenario": "blank_base",
+      "returncode": 2,
+      "launched": false,
+      "result_retained": false,
+      "timing_retained": false,
+      "expected_failure_verified": true
+    },
+    {
+      "scenario": "final_binary_removal",
+      "returncode": 1,
+      "launched": true,
+      "result_retained": true,
+      "timing_retained": true,
+      "expected_failure_verified": true
+    },
+    {
+      "scenario": "after_build_null",
+      "returncode": 1,
+      "launched": true,
+      "result_retained": true,
+      "timing_retained": true,
+      "expected_failure_verified": true
+    }
+  ]
+}

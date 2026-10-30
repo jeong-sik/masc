@@ -1,0 +1,356 @@
+{
+  "returncode": 0,
+  "started_at_utc": "2026-10-26T18:33:44.039717+00:00",
+  "returned_at_utc": "2026-10-26T18:33:50.553703+00:00",
+  "parent_requested_ns": 200473933230791,
+  "parent_returned_ns": 200480447339291,
+  "semantics": [
+    {
+      "kind": "semantics",
+      "checks": 40014,
+      "random_steps": 20000
+    },
+    {
+      "kind": "final_checks",
+      "checks": 45326
+    }
+  ],
+  "measurement_rows": 72,
+  "derived": [
+    {
+      "population": 2,
+      "phase": "install",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 2,
+          "median_elapsed_ms": 0.0042715,
+          "median_allocated_bytes": 664.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 2,
+          "median_elapsed_ms": 0.0025415,
+          "median_allocated_bytes": 640.0
+        }
+      }
+    },
+    {
+      "population": 2,
+      "phase": "lookup_sweep",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 2000,
+          "median_elapsed_ms": 0.47379150000000003,
+          "median_allocated_bytes": 256208.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 2000,
+          "median_elapsed_ms": 0.459,
+          "median_allocated_bytes": 256208.0
+        }
+      }
+    },
+    {
+      "population": 2,
+      "phase": "lookup_miss",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 2000,
+          "median_elapsed_ms": 0.3755,
+          "median_allocated_bytes": 160208.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 2000,
+          "median_elapsed_ms": 0.34975,
+          "median_allocated_bytes": 160208.0
+        }
+      }
+    },
+    {
+      "population": 2,
+      "phase": "replace",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 2,
+          "median_elapsed_ms": 0.004646,
+          "median_allocated_bytes": 688.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 2,
+          "median_elapsed_ms": 0.003917,
+          "median_allocated_bytes": 640.0
+        }
+      }
+    },
+    {
+      "population": 2,
+      "phase": "stale_remove",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 2,
+          "median_elapsed_ms": 0.004271,
+          "median_allocated_bytes": 656.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 2,
+          "median_elapsed_ms": 0.0024795,
+          "median_allocated_bytes": 528.0
+        }
+      }
+    },
+    {
+      "population": 2,
+      "phase": "current_remove",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 2,
+          "median_elapsed_ms": 0.002,
+          "median_allocated_bytes": 584.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 2,
+          "median_elapsed_ms": 0.0017499999999999998,
+          "median_allocated_bytes": 528.0
+        }
+      }
+    },
+    {
+      "population": 30,
+      "phase": "install",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 30,
+          "median_elapsed_ms": 0.0225005,
+          "median_allocated_bytes": 16680.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 30,
+          "median_elapsed_ms": 0.024292,
+          "median_allocated_bytes": 13488.0
+        }
+      }
+    },
+    {
+      "population": 30,
+      "phase": "lookup_sweep",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 30000,
+          "median_elapsed_ms": 15.138333,
+          "median_allocated_bytes": 3168208.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 30000,
+          "median_elapsed_ms": 9.4549165,
+          "median_allocated_bytes": 3168208.0
+        }
+      }
+    },
+    {
+      "population": 30,
+      "phase": "lookup_miss",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 30000,
+          "median_elapsed_ms": 20.394209,
+          "median_allocated_bytes": 2400208.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 30000,
+          "median_elapsed_ms": 8.808666,
+          "median_allocated_bytes": 2400208.0
+        }
+      }
+    },
+    {
+      "population": 30,
+      "phase": "replace",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 30,
+          "median_elapsed_ms": 0.0394995,
+          "median_allocated_bytes": 27120.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 30,
+          "median_elapsed_ms": 0.0199375,
+          "median_allocated_bytes": 10560.0
+        }
+      }
+    },
+    {
+      "population": 30,
+      "phase": "stale_remove",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 30,
+          "median_elapsed_ms": 0.051813,
+          "median_allocated_bytes": 26640.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 30,
+          "median_elapsed_ms": 0.017728999999999998,
+          "median_allocated_bytes": 4560.0
+        }
+      }
+    },
+    {
+      "population": 30,
+      "phase": "current_remove",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 30,
+          "median_elapsed_ms": 0.025833500000000002,
+          "median_allocated_bytes": 15480.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 30,
+          "median_elapsed_ms": 0.0228955,
+          "median_allocated_bytes": 8280.0
+        }
+      }
+    },
+    {
+      "population": 300,
+      "phase": "install",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 300,
+          "median_elapsed_ms": 1.536437,
+          "median_allocated_bytes": 1136640.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 300,
+          "median_elapsed_ms": 0.2865835,
+          "median_allocated_bytes": 195024.0
+        }
+      }
+    },
+    {
+      "population": 300,
+      "phase": "lookup_sweep",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 300000,
+          "median_elapsed_ms": 882.4282295,
+          "median_allocated_bytes": 31248208.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 300000,
+          "median_elapsed_ms": 117.79010450000001,
+          "median_allocated_bytes": 31248208.0
+        }
+      }
+    },
+    {
+      "population": 300,
+      "phase": "lookup_miss",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 300000,
+          "median_elapsed_ms": 1671.3175835,
+          "median_allocated_bytes": 24000208.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 300000,
+          "median_elapsed_ms": 107.3883125,
+          "median_allocated_bytes": 24000208.0
+        }
+      }
+    },
+    {
+      "population": 300,
+      "phase": "replace",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 300,
+          "median_elapsed_ms": 2.963979,
+          "median_allocated_bytes": 2213040.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 300,
+          "median_elapsed_ms": 0.23431249999999998,
+          "median_allocated_bytes": 148464.0
+        }
+      }
+    },
+    {
+      "population": 300,
+      "phase": "stale_remove",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 300,
+          "median_elapsed_ms": 3.158979,
+          "median_allocated_bytes": 2208240.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 300,
+          "median_elapsed_ms": 0.12443749999999999,
+          "median_allocated_bytes": 43440.0
+        }
+      }
+    },
+    {
+      "population": 300,
+      "phase": "current_remove",
+      "roles": {
+        "baseline": {
+          "cells": 2,
+          "calls_per_cell": 300,
+          "median_elapsed_ms": 1.6133335,
+          "median_allocated_bytes": 1124640.0
+        },
+        "candidate": {
+          "cells": 2,
+          "calls_per_cell": 300,
+          "median_elapsed_ms": 0.219729,
+          "median_allocated_bytes": 115080.0
+        }
+      }
+    }
+  ],
+  "scope": "Exact complete inventory modules in OCaml interpreter, injected Owner/projection and identity canonicalizer; not actual Owner actors, production path normalization, native server or Keeper population",
+  "hashes": {
+    "probe.ml": "26f0c68cc3a6b0681221c4e7b332f680936a16e08ab1feb8475cb7efb4e0c0bb",
+    "plan.json": "5fa06bd0ec1f179f7b03923d0b25715463f2cb79beed999400d66cc24be4463e",
+    "candidate-keeper_owner_projection.ml": "f625a542b4aaced6974093660b85976f8d9fdd7f32effa30ce9291777572b445",
+    "baseline-keeper_owner_projection.ml": "75081348d96afa2d7c9e9d5c05a74cb95063e4110d713775a729f77892b380c8",
+    "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout.jsonl": "cfe8cdb1bfeb189896ae352a126eac3bb6c114979c05d454e0981e6ff89b7ca9",
+    "execution.json": "e0467bbebf3e892e69188cc66c275c4c8e1a8e123201247ec0080c25467a9b17"
+  },
+  "source_unchanged": true
+}

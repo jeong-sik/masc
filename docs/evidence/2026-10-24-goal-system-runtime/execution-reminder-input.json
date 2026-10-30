@@ -1,0 +1,4 @@
+{
+  "name": "goal-canary",
+  "message": "앞서 맡긴 전체 목표를 계속 진행해 주세요. 이미 만든 task-001을 중복 생성하지 말고 실제로 claim한 뒤, workspace/acceptance.json의 alpha만 true로 바꾸세요. beta와 gamma는 false로 유지하고, 파일을 다시 읽어 artifact:workspace/acceptance.json을 증거로 검증 제출하세요. 첫 Task가 승인되기 전에는 beta/gamma를 바꾸지 말고, 승인된 뒤에는 앞서 요청한 전체 달성 상태 측정과 나머지 작업을 이어가세요."
+}

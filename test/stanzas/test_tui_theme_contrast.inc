@@ -1,0 +1,13 @@
+(test
+ (name test_tui_theme_contrast)
+ (modules test_tui_theme_contrast)
+ (libraries
+  alcotest
+  masc.embedded_config
+  masc_tui_ansi
+  masc_tui_color
+  masc_tui_terminal_palette
+  masc_tui_theme
+  masc_tui_theme_catalog
+  masc_tui_theme_choice)
+ (deps (source_tree %{workspace_root}/config/themes)))

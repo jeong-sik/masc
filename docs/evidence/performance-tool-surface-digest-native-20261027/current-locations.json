@@ -1,0 +1,92 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Newly authored selected staging capture byte manifest, not original raw-run manifest; original/transformed authority remains in capture-locations.json.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "recorded-capture-hashes.json",
+    "sha256": "7ba012543cbc32d1e5fc23c0fe4eb31b790e1b4ef3a31a53361a951ce307b4e1"
+  },
+  "files": {
+    "docs/evidence/performance-tool-surface-digest-native-20261027/observations.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/observations.json",
+      "recorded_sha256": "7f88403161d2e5be007a284508f895fdc489d15ad4f8cf7e63668b65adbe95f5",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/comparison-summary.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/comparison-summary.json",
+      "recorded_sha256": "9f52245be41f9394f3794c2ac9463da0a02b34298973d7cbcf3975579d89c6bc",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/native/candidate-receipt.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/native/candidate-receipt.json",
+      "recorded_sha256": "d291d4156ec47da2591da3f982f6820a4fba6e7606636b9e461a31f5add438b3",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/native/candidate-qualification.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/native/candidate-qualification.json",
+      "recorded_sha256": "fa16036d12d608ee09339f26f749fdb9fc738fff2c921661e78d755813ba10f0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/native/control-receipt.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/native/control-receipt.json",
+      "recorded_sha256": "6401c99a60589b706675a002e13679c6a74e9d6171493e0819bf0d8a5ea368f2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/native/control-qualification.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/native/control-qualification.json",
+      "recorded_sha256": "e824426b24974b08f65b3307be4b6321606f1b14086dfba36966b6f9c3ff3ed6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/reproduction/plan.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/reproduction/plan.json",
+      "recorded_sha256": "9a550effd9a218fb27430df13ebe48edbbad8b189cf69e75e278ba6829e6a41a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/reproduction/execution-qualification.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/reproduction/execution-qualification.json",
+      "recorded_sha256": "14c304cd3fa4c3635bc6792219a26ba133fa545ca7485a40080635bf40585f73",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/historical-source/run_native.py.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/historical-source/run_native.py.txt",
+      "recorded_sha256": "c7f2de2efba3c687a1444a37e624a48f8cecda68534e3de77dc5bf12d158475f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/historical-source/derive_observations.py.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/historical-source/derive_observations.py.txt",
+      "recorded_sha256": "15dd208f7dc1a96a066c06d550e2a854ec9dc6db595afefa5b8a033ef3e141ce",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/historical-source/validator_execution.py.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/historical-source/validator_execution.py.txt",
+      "recorded_sha256": "6b669783616575cbf31becb7950947a932b92c5d0a7dbcb1cc2c3206a4ccf029",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/historical-source/production-build-config-diff.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/historical-source/production-build-config-diff.json",
+      "recorded_sha256": "c5199a69c89c5ce31a2f7c9603588ff8294e8a03b0eaabee6449c1b4c996d73b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/reviews/raw-evidence.md.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/reviews/raw-evidence.md.txt",
+      "recorded_sha256": "830dcbaf4a4fab313693679f03d6d6c2782a6781c2bbfd48b759300a54c32a04",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/reviews/descriptor.md.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/reviews/descriptor.md.txt",
+      "recorded_sha256": "1ad10442ca0bc230e58e60e6c7da3ab589bf38ce0248556af9188f77ae54ce87",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/reviews/source-gate.md.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/reviews/source-gate.md.txt",
+      "recorded_sha256": "401eafe2b8d4b94ac43c7630470c6f1a790c2023d46c239721466dbe015015bd",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-tool-surface-digest-native-20261027/root-admission.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/digest-native-evidence-curation-v1/bundle-v2/root-admission.json",
+      "recorded_sha256": "dba7f8682b043ed0d7bb4c0eac9c24ad12a1e716296db38193b249e97ca7127f",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

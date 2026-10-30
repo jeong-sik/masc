@@ -1,0 +1,91 @@
+(** Workspace_task_create — add_task, batch_add_tasks.
+
+    This module is [include]d by {!Workspace_task}; all bindings are part of
+    the public Workspace interface.  Re-exports {!Workspace_utils} and
+    {!Workspace_state}. *)
+
+include module type of Workspace_utils
+include module type of Workspace_state
+
+(** {1 Task creation} *)
+
+type add_task_success =
+  { task_id : string
+  ; summary : string
+  ; title : string
+  ; priority : int
+  ; description : string
+  ; goal_id : string option
+  }
+
+type add_task_error =
+  | Goal_source_unavailable of Goal_store_unavailable.t
+      (** RFC-0444: the goal store this build cannot read, as its own value. *)
+  | Goal_lock_failed of string
+      (** The goal file lock could not be taken; no goal was read. *)
+  | Unknown_goal of string
+  | Backlog_read_failed of string
+  | Goal_link_write_failed of string
+  | Backlog_write_failed of string
+  | Unexpected_error of string
+  | Unknown_predecessor of string
+      (** RFC-0323 W2: [predecessor_task_id] does not exist in the backlog *)
+  | Predecessor_not_terminal of { predecessor_task_id : string; status : string }
+      (** RFC-0323 W2: a re-run link requires a terminal (Done/Cancelled)
+          predecessor *)
+
+type batch_add_tasks_success =
+  { task_ids : string list
+  ; summary : string
+  ; count : int
+  }
+
+type batch_add_tasks_error =
+  | Batch_goal_source_unavailable of Goal_store_unavailable.t
+  | Batch_goal_lock_failed of string
+  | Batch_unknown_goal of string
+  | Batch_backlog_read_failed of string
+  | Batch_goal_link_write_failed of string
+  | Batch_backlog_write_failed of string
+  | Batch_unexpected_error of string
+
+val add_task_error_to_string : add_task_error -> string
+
+val batch_add_tasks_error_to_string : batch_add_tasks_error -> string
+
+(** Creates one new task identity per successful call. Titles are opaque display
+    content; equal titles are valid and receive distinct IDs. Semantic duplicate
+    judgment belongs to an explicit LLM workflow before submission, not this
+    storage boundary. [creation_request_id] records attribution atomically with
+    the Task; it never deduplicates or makes replay safe. Its receipt survives
+    Task archival/deletion and is not a statement about current Task status. *)
+val add_task_with_result :
+  ?contract:Masc_domain.task_contract ->
+  ?goal_id:string ->
+  ?created_by:string ->
+  ?creation_request_id:Masc_domain.task_creation_request_id ->
+  ?predecessor_task_id:string ->
+  ?skills:Skill_reference.t list ->
+  config ->
+  title:string ->
+  priority:int ->
+  description:string ->
+  (add_task_success, add_task_error) result
+(** [skills] stores exact immutable Skill references without resolving paths or
+    consulting the live catalog. Absent means the Task declares none. *)
+
+val add_task :
+  ?contract:Masc_domain.task_contract ->
+  ?goal_id:string ->
+  ?created_by:string ->
+  config -> title:string -> priority:int -> description:string -> string
+
+val batch_add_tasks :
+  ?created_by:string ->
+  config -> (string * int * string * string option) list -> string
+
+val batch_add_tasks_with_contracts_result :
+  ?created_by:string ->
+  config ->
+  (string * int * string * Masc_domain.task_contract option * string option) list ->
+  (batch_add_tasks_success, batch_add_tasks_error) result

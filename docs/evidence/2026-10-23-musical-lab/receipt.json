@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-23T07:05:35.107262+00:00",
+  "goalComplete": false,
+  "sourceHead": "b80f2e910a25353bd9ba8434973d50b7e67a099b",
+  "runtimeRevision": "24b1561629b6a78452e164bdc696a75eaa7ca2904d00c6bb11861f55ff1899be",
+  "scope": "Actual private installed candidate PTY musical composition, export and separate reopen/Space playback; no screen assertions",
+  "repair": "Allow :phrase without a selected clip",
+  "initialFailureRetained": true,
+  "tempo": 96,
+  "meter": [
+    4,
+    4
+  ],
+  "bars": 8,
+  "quarterNoteBeats": 32,
+  "lanes": [
+    {
+      "name": "Keys - drop2",
+      "kind": "midi",
+      "muted": false
+    },
+    {
+      "name": "Bass",
+      "kind": "midi",
+      "muted": false
+    },
+    {
+      "name": "Drums",
+      "kind": "midi",
+      "muted": false
+    }
+  ],
+  "regions": 3,
+  "assets": [
+    {
+      "id": "asset-1",
+      "name": "Keys - close and drop2",
+      "tempo": 96,
+      "lengthTicks": 30720,
+      "parts": [
+        {
+          "name": "Keys",
+          "channel": 1,
+          "program": 4,
+          "muted": false,
+          "notes": 32
+        }
+      ],
+      "sound": {
+        "kind": "soundfont",
+        "engine": {
+          "kind": "fluidsynth",
+          "version": "2.6.0",
+          "controlFrames": 64
+        },
+        "bankStyle": "mma"
+      },
+      "fontSha256": "4978cf37e7164206f2d22dc4fdf4020ffe040787210bf781e31bdc79961f59ef"
+    },
+    {
+      "id": "asset-2",
+      "name": "Bass - walking roots",
+      "tempo": 96,
+      "lengthTicks": 30720,
+      "parts": [
+        {
+          "name": "Piano",
+          "channel": 1,
+          "program": 0,
+          "muted": true,
+          "notes": 0
+        },
+        {
+          "name": "Bass",
+          "channel": 2,
+          "program": 33,
+          "muted": false,
+          "notes": 32
+        }
+      ],
+      "sound": {
+        "kind": "soundfont",
+        "engine": {
+          "kind": "fluidsynth",
+          "version": "2.6.0",
+          "controlFrames": 64
+        },
+        "bankStyle": "mma"
+      },
+      "fontSha256": "4978cf37e7164206f2d22dc4fdf4020ffe040787210bf781e31bdc79961f59ef"
+    },
+    {
+      "id": "asset-3",
+      "name": "Drums - backbeat",
+      "tempo": 96,
+      "lengthTicks": 30720,
+      "parts": [
+        {
+          "name": "Piano",
+          "channel": 1,
+          "program": 0,
+          "muted": true,
+          "notes": 0
+        },
+        {
+          "name": "Drums",
+          "channel": 10,
+          "program": 0,
+          "muted": false,
+          "notes": 96
+        }
+      ],
+      "sound": {
+        "kind": "soundfont",
+        "engine": {
+          "kind": "fluidsynth",
+          "version": "2.6.0",
+          "controlFrames": 64
+        },
+        "bankStyle": "mma"
+      },
+      "fontSha256": "4978cf37e7164206f2d22dc4fdf4020ffe040787210bf781e31bdc79961f59ef"
+    }
+  ],
+  "harmonyRows": 7,
+  "history": {
+    "closeEqualsUndo": true,
+    "drop2EqualsRedo": true
+  },
+  "wave": {
+    "eight-bar-lab.wav": {
+      "rate": 44100,
+      "channels": 2,
+      "frames": 882000,
+      "seconds": 20.0,
+      "peak": 0.08877722918987274,
+      "rms": 0.016656533356705704,
+      "lastFrame": [
+        0.0015808211173862219,
+        0.0012131439289078116
+      ],
+      "sha256": "264b4dffed3ffb944669b653613f23e90b47b28939775ac0df64df00f5209204"
+    },
+    "stems/bass.wav": {
+      "rate": 44100,
+      "channels": 2,
+      "frames": 882000,
+      "seconds": 20.0,
+      "peak": 0.03710777312517166,
+      "rms": 0.012882949544734096,
+      "lastFrame": [
+        -9.5119044999592e-05,
+        -9.5119044999592e-05
+      ],
+      "sha256": "82545b3ffed4dab3896ff4416c6a08628e2d75da8b98c65576b7cf5b8e19e244"
+    },
+    "stems/drums.wav": {
+      "rate": 44100,
+      "channels": 2,
+      "frames": 882000,
+      "seconds": 20.0,
+      "peak": 0.03296826034784317,
+      "rms": 0.0029544680307101697,
+      "lastFrame": [
+        0.0,
+        0.0
+      ],
+      "sha256": "c13b4b201325b18175e089a42a6fe665dce61fd748f490be4d1f28daf73e2eaf"
+    },
+    "stems/keys.wav": {
+      "rate": 44100,
+      "channels": 2,
+      "frames": 882000,
+      "seconds": 20.0,
+      "peak": 0.07909292727708817,
+      "rms": 0.011534432475441635,
+      "lastFrame": [
+        0.0016759401187300682,
+        0.001308262930251658
+      ],
+      "sha256": "a6577b5f6570bdd1e034bb2055d14c0cf9503e0d6b4d53324e51cf5ea86aa8a1"
+    }
+  },
+  "artifacts": {
+    "arrangement.json": {
+      "bytes": 10854561,
+      "sha256": "ac1e6df0e46ae498a3708e0d5951c1c173e53a9017cd4b1e44a28f2049f0c403"
+    },
+    "eight-bar-lab.mid": {
+      "bytes": 10834709,
+      "sha256": "1528fe37774c26e63988837324aad47b1e148da02daae2d4b15c29d619c6ee4e"
+    },
+    "eight-bar-lab.wav": {
+      "bytes": 7060096,
+      "sha256": "264b4dffed3ffb944669b653613f23e90b47b28939775ac0df64df00f5209204"
+    },
+    "drafts/keys-close.json": {
+      "bytes": 5177,
+      "sha256": "318b0160a2f3ae184bdf8c0f3031d724d0ac923a3ac7b4d30abe714e83f0dc15"
+    },
+    "drafts/keys-drop2-before-undo.json": {
+      "bytes": 5177,
+      "sha256": "1ed504ee229ae378ba287affed498ad4597adda8868ea23c103dbd18f814b789"
+    },
+    "drafts/keys-undo.json": {
+      "bytes": 5177,
+      "sha256": "318b0160a2f3ae184bdf8c0f3031d724d0ac923a3ac7b4d30abe714e83f0dc15"
+    },
+    "drafts/keys-redo.json": {
+      "bytes": 5177,
+      "sha256": "1ed504ee229ae378ba287affed498ad4597adda8868ea23c103dbd18f814b789"
+    },
+    "analysis/keys-harmony.json": {
+      "bytes": 2211,
+      "sha256": "fb0e5ca2b8b7cec8eab9e949ba43ab2975cc817ab5aabfb070274aa524cb70aa"
+    },
+    "reopened.json": {
+      "bytes": 10854561,
+      "sha256": "ac1e6df0e46ae498a3708e0d5951c1c173e53a9017cd4b1e44a28f2049f0c403"
+    },
+    "reopened.mid": {
+      "bytes": 10834709,
+      "sha256": "1528fe37774c26e63988837324aad47b1e148da02daae2d4b15c29d619c6ee4e"
+    },
+    "reopened.wav": {
+      "bytes": 7060096,
+      "sha256": "264b4dffed3ffb944669b653613f23e90b47b28939775ac0df64df00f5209204"
+    }
+  },
+  "reopen": {
+    "result": "PASS",
+    "tuiPid": 83967,
+    "threePreparedAudioRegions": true,
+    "projectBytesEqual": true,
+    "midiBytesEqual": true,
+    "waveBytesEqual": true,
+    "nativeChildAbsent": true,
+    "tuiClosed": true,
+    "limits": [
+      "Child process absence observed; no direct native stdout/exit-code receipt",
+      "BlackHole audio graph only; no PCM receive or physical device/sample alignment measurement",
+      "No screen text/layout/order assertions"
+    ]
+  },
+  "limits": [
+    "Private source candidate, not yet merged or default-installed",
+    "BlackHole graph; no received PCM/acoustic/physical timing measurement",
+    "TUI child process disappearance observed, native stdout and exitcode not captured",
+    "WAV ends at authored horizon; no automatic release-tail extension",
+    "Artifact/font/sample results do not complete all native MIDI2/event editing/live-device requirements"
+  ]
+}

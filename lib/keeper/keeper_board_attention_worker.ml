@@ -1,0 +1,2274 @@
+module Candidate = Keeper_board_attention_candidate
+module Exact_flow = Keeper_board_attention_exact_flow
+module Partition = Keeper_board_attention_partition
+module Quarantine_pair = Keeper_board_attention_quarantine_pair
+module Rearm = Keeper_board_attention_rearm_state
+module Wake = Keeper_board_attention_worker_wake
+
+open Keeper_board_attention_worker_disposition
+
+type contention =
+  { keeper_name : string
+  ; partition_id : string
+  ; generation : Partition.Generation.t
+  }
+
+type step =
+  | Idle
+  | Contended of contention
+  | Rescan_later of contention
+  | Judgment_completed of
+      { candidate_id : string
+      ; owner_wake : Keeper_registry.exact_wakeup_outcome
+      }
+  | Candidate_already_consumed of { candidate_id : string }
+  | Partition_blocked of
+      { candidate_id : string
+      ; reason : Partition.blocked_reason
+      }
+  | Judgment_deferred of
+      { candidate_id : string
+      ; detail : string
+      }
+
+type retry_reason =
+  | Exact_claim_contended
+  | Selected_generation_changed
+
+(* What the drain loop actually did before it stopped. A wake that finds an
+   empty partition returns the same verdict as one that judged twenty
+   candidates, so without these counts the log line cannot tell an operator
+   whether the worker did any work: the two hours to 2026-08-22T02:03Z held
+   120 pairs of textually identical [outcome=drained] lines, each pair a real
+   drain followed by a wake that found nothing left. *)
+type drain_progress =
+  { judgments : int
+      (* Candidates that produced a judgment on this drain. *)
+  ; steps : int
+      (* Loop iterations, including visits that found the candidate already
+         consumed or its partition blocked. *)
+  }
+
+type drain_outcome =
+  | Drained of drain_progress
+  | Retry_later of
+      { contention : contention
+      ; reason : retry_reason
+      ; progress : drain_progress
+      }
+  | Lane_deferred of
+      { candidate_id : string
+      ; progress : drain_progress
+      }
+
+type rearm_schedule =
+  | Rearm_scheduled of { delay_s : float }
+  | Rearm_deduplicated of { delay_s : float }
+
+type rearm_entry =
+  { key : contention
+  ; mutable state : Rearm.t
+  }
+
+type rearm_scheduler =
+  { mutex : Stdlib.Mutex.t
+  ; fork : (unit -> unit) -> unit
+  ; sleep : float -> unit
+  ; request : unit -> (Wake.wake_result, string) result
+  ; mutable next_ticket_id : int
+  ; mutable entries : rearm_entry list
+  }
+
+type deferred_rearm_scheduler =
+  { mutex : Stdlib.Mutex.t
+  ; fork : (unit -> unit) -> unit
+  ; sleep : float -> unit
+  ; request : unit -> (Wake.wake_result, string) result
+  ; delay_s : float
+  ; mutable next_ticket_id : int
+  ; mutable pending : int option
+  ; mutable deferred_work : bool
+  }
+
+let contention_equal (left : contention) (right : contention) =
+  String.equal left.keeper_name right.keeper_name
+  && String.equal left.partition_id right.partition_id
+  && Partition.Generation.equal left.generation right.generation
+;;
+
+let contention_generation_label (contention : contention) =
+  contention.generation
+  |> Partition.Generation.to_yojson
+  |> Yojson.Safe.to_string
+;;
+
+type contention_rearm_outcome =
+  | Outcome_pending
+  | Outcome_inflight
+  | Outcome_scheduled
+  | Outcome_stale_ticket
+  | Outcome_signaled
+  | Outcome_coalesced
+  | Outcome_not_registered
+  | Outcome_delivery_error
+  | Outcome_delivery_reset
+  | Outcome_delivery_retry
+  | Outcome_sleep_cancelled
+  | Outcome_fork_cancelled
+  | Outcome_reset
+  | Outcome_history_removed
+
+let contention_rearm_outcome_label = function
+  | Outcome_pending -> "pending"
+  | Outcome_inflight -> "inflight"
+  | Outcome_scheduled -> "scheduled"
+  | Outcome_stale_ticket -> "stale_ticket"
+  | Outcome_signaled -> "signaled"
+  | Outcome_coalesced -> "coalesced"
+  | Outcome_not_registered -> "not_registered"
+  | Outcome_delivery_error -> "delivery_error"
+  | Outcome_delivery_reset -> "delivery_reset"
+  | Outcome_delivery_retry -> "delivery_retry"
+  | Outcome_sleep_cancelled -> "sleep_cancelled"
+  | Outcome_fork_cancelled -> "fork_cancelled"
+  | Outcome_reset -> "reset"
+  | Outcome_history_removed -> "history_removed"
+;;
+
+let log_contention_rearm event (contention : contention) ~delay_s ~outcome =
+  let write =
+    match outcome with
+    | Outcome_delivery_error
+    | Outcome_not_registered -> Log.Keeper.warn
+    | Outcome_pending
+    | Outcome_inflight
+    | Outcome_scheduled
+    | Outcome_stale_ticket
+    | Outcome_signaled
+    | Outcome_coalesced
+    | Outcome_delivery_reset
+    | Outcome_delivery_retry
+    | Outcome_sleep_cancelled
+    | Outcome_fork_cancelled
+    | Outcome_reset
+    | Outcome_history_removed -> Log.Keeper.info
+  in
+  write
+    "board_attention_claim_contention event=%s keeper=%s partition=%s generation=%s delay_ms=%d outcome=%s"
+    event
+    contention.keeper_name
+    contention.partition_id
+    (contention_generation_label contention)
+    (int_of_float (delay_s *. 1000.0))
+    (contention_rearm_outcome_label outcome)
+;;
+
+let find_rearm_entry (scheduler : rearm_scheduler) contention =
+  List.find_opt
+    (fun entry -> contention_equal entry.key contention)
+    scheduler.entries
+;;
+
+let install_rearm_reservation_locked (scheduler : rearm_scheduler) (entry : rearm_entry)
+    (reservation : Rearm.reservation) =
+  scheduler.next_ticket_id <- reservation.next_ticket_id;
+  entry.state <- reservation.state
+;;
+
+let cancel_rearm_ticket (scheduler : rearm_scheduler) contention (ticket : Rearm.ticket) outcome =
+  let cancelled =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      match find_rearm_entry scheduler contention with
+      | Some entry ->
+        (match Rearm.cancel_pending entry.state ticket with
+         | Some state ->
+           entry.state <- state;
+           true
+         | None -> false)
+      | None -> false)
+  in
+  if cancelled
+  then log_contention_rearm "cancelled" contention ~delay_s:ticket.delay_s ~outcome
+;;
+
+let wake_result_outcome = function
+  | Wake.Signaled -> Outcome_signaled
+  | Wake.Coalesced -> Outcome_coalesced
+  | Wake.Not_registered -> Outcome_not_registered
+;;
+
+let fire_rearm_ticket (scheduler : rearm_scheduler) contention (ticket : Rearm.ticket)
+    ~launch_delivery_retry =
+  let consumed =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      match find_rearm_entry scheduler contention with
+      | Some entry ->
+        (match Rearm.begin_delivery entry.state ticket with
+         | Some state ->
+           entry.state <- state;
+           true
+         | None -> false)
+      | None -> false)
+  in
+  if not consumed
+  then
+    log_contention_rearm
+      "cancelled"
+      contention
+      ~delay_s:ticket.delay_s
+      ~outcome:Outcome_stale_ticket
+  else
+    let delivery = scheduler.request () in
+    let completion =
+      Stdlib.Mutex.protect scheduler.mutex (fun () ->
+        match find_rearm_entry scheduler contention with
+        | Some entry ->
+          let completion =
+            Rearm.complete_delivery ~next_ticket_id:scheduler.next_ticket_id
+              entry.state ticket delivery
+          in
+          (match completion with
+           | Rearm.Delivered (state, _) -> entry.state <- state
+           | Rearm.Retry reservation ->
+             install_rearm_reservation_locked scheduler entry reservation
+           | Rearm.Suppressed -> ());
+          completion
+        | None -> Rearm.Suppressed)
+    in
+    match completion with
+    | Rearm.Delivered (_, wake) ->
+      log_contention_rearm
+        "fired"
+        contention
+        ~delay_s:ticket.delay_s
+        ~outcome:(wake_result_outcome wake)
+    | Rearm.Retry { ticket = next_ticket; _ } ->
+      log_contention_rearm
+        "fired"
+        contention
+        ~delay_s:ticket.delay_s
+        ~outcome:Outcome_delivery_error;
+      launch_delivery_retry next_ticket
+    | Rearm.Suppressed ->
+      log_contention_rearm
+        "cancelled"
+        contention
+        ~delay_s:ticket.delay_s
+        ~outcome:Outcome_delivery_reset
+;;
+
+let make_contention_rearm_scheduler ~fork ~sleep ~request () : rearm_scheduler =
+  { mutex = Stdlib.Mutex.create ()
+  ; fork
+  ; sleep
+  ; request
+  ; next_ticket_id = 0
+  ; entries = []
+  }
+;;
+
+let schedule_contention_rearm (scheduler : rearm_scheduler) contention =
+  let decision =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      let entry =
+        match find_rearm_entry scheduler contention with
+        | Some entry -> entry
+        | None ->
+          let entry =
+            { key = contention
+            ; state = Rearm.initial
+            }
+          in
+          scheduler.entries <- entry :: scheduler.entries;
+          entry
+      in
+      let decision = Rearm.schedule ~next_ticket_id:scheduler.next_ticket_id entry.state in
+      (match decision with
+       | Rearm.Scheduled reservation ->
+         install_rearm_reservation_locked scheduler entry reservation
+       | Rearm.Already_pending _ | Rearm.Already_inflight _ -> ());
+      decision)
+  in
+  let deduplicated (ticket : Rearm.ticket) outcome =
+    let delay_s = ticket.delay_s in
+    log_contention_rearm
+      "deduplicated"
+      contention
+      ~delay_s
+      ~outcome;
+    Rearm_deduplicated { delay_s }
+  in
+  match decision with
+  | Rearm.Already_pending ticket -> deduplicated ticket Outcome_pending
+  | Rearm.Already_inflight ticket -> deduplicated ticket Outcome_inflight
+  | Rearm.Scheduled { ticket; _ } ->
+    let rec launch (ticket : Rearm.ticket) =
+      (try
+         scheduler.fork (fun () ->
+           (try scheduler.sleep ticket.delay_s with
+            | exn ->
+              cancel_rearm_ticket
+                scheduler
+                contention
+                ticket
+                Outcome_sleep_cancelled;
+              raise exn);
+           fire_rearm_ticket
+             scheduler
+             contention
+             ticket
+             ~launch_delivery_retry:(fun (next_ticket : Rearm.ticket) ->
+               launch next_ticket;
+               log_contention_rearm
+                 "scheduled"
+                 contention
+                 ~delay_s:next_ticket.delay_s
+                 ~outcome:Outcome_delivery_retry))
+       with
+       | exn ->
+         cancel_rearm_ticket scheduler contention ticket Outcome_fork_cancelled;
+         raise exn)
+    in
+    launch ticket;
+    log_contention_rearm
+      "scheduled"
+      contention
+      ~delay_s:ticket.delay_s
+      ~outcome:Outcome_scheduled;
+    Rearm_scheduled { delay_s = ticket.delay_s }
+;;
+
+let reset_contention_rearms (scheduler : rearm_scheduler) ~keep =
+  let removed =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      let retained, removed =
+        List.partition
+          (fun entry ->
+             match keep with
+             | Some contention -> contention_equal entry.key contention
+             | None -> false)
+          scheduler.entries
+      in
+      scheduler.entries <- retained;
+      removed)
+  in
+  List.iter
+    (fun (entry : rearm_entry) ->
+       match Rearm.phase entry.state with
+       | Rearm.Pending ticket | Rearm.Inflight ticket ->
+         log_contention_rearm
+           "cancelled"
+           entry.key
+           ~delay_s:ticket.delay_s
+           ~outcome:Outcome_reset
+       | Rearm.Idle ->
+         log_contention_rearm
+           "reset"
+           entry.key
+           ~delay_s:0.0
+           ~outcome:Outcome_history_removed)
+    removed
+;;
+
+let make_deferred_rearm_scheduler ~fork ~sleep ~request ~delay_s :
+    deferred_rearm_scheduler =
+  { mutex = Stdlib.Mutex.create ()
+  ; fork
+  ; sleep
+  ; request
+  ; delay_s
+  ; next_ticket_id = 0
+  ; pending = None
+  ; deferred_work = false
+  }
+;;
+
+let reset_deferred_rearm (scheduler : deferred_rearm_scheduler) =
+  Stdlib.Mutex.protect scheduler.mutex (fun () ->
+    scheduler.pending <- None;
+    scheduler.deferred_work <- false)
+;;
+
+let deferred_rearm_needed (scheduler : deferred_rearm_scheduler) =
+  Stdlib.Mutex.protect scheduler.mutex (fun () -> scheduler.deferred_work)
+;;
+
+let consume_deferred_ticket (scheduler : deferred_rearm_scheduler) ticket =
+  Stdlib.Mutex.protect scheduler.mutex (fun () ->
+    match scheduler.pending with
+    | Some current when Int.equal current ticket ->
+      scheduler.pending <- None;
+      true
+    | Some _ | None -> false)
+;;
+
+(* A drain may have reset this ticket first. Either way, the sleeping fiber
+   must propagate its failure after invalidating any still-pending wake. *)
+let discard_deferred_ticket scheduler ticket =
+  match consume_deferred_ticket scheduler ticket with
+  | true | false -> ()
+;;
+
+(* The first deferred root stays Ready. Exactly one maintenance-pulse wake is
+   armed for this worker, so a quiet Board does not strand it when its account
+   becomes usable again. An earlier Board wake can drain it and cancel the
+   ticket without cancelling a fiber that is already sleeping. *)
+let rec schedule_deferred_rearm (scheduler : deferred_rearm_scheduler) =
+  let ticket =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      scheduler.deferred_work <- true;
+      match scheduler.pending with
+      | Some _ -> None
+      | None ->
+        let ticket = scheduler.next_ticket_id in
+        scheduler.next_ticket_id <- ticket + 1;
+        scheduler.pending <- Some ticket;
+        Some ticket)
+  in
+  match ticket with
+  | None -> ()
+  | Some ticket ->
+    (try
+       scheduler.fork (fun () ->
+         (try scheduler.sleep scheduler.delay_s with
+          | Eio.Cancel.Cancelled _ as exn ->
+            discard_deferred_ticket scheduler ticket;
+            raise exn
+          | exn ->
+            discard_deferred_ticket scheduler ticket;
+            raise exn);
+         if consume_deferred_ticket scheduler ticket
+         then
+           match scheduler.request () with
+           | Ok (Wake.Signaled | Wake.Coalesced | Wake.Not_registered) -> ()
+           | Error detail ->
+             Log.Keeper.error
+               "board_attention_deferred_wake_failed detail=%s"
+               detail;
+             schedule_deferred_rearm scheduler)
+     with
+     | Eio.Cancel.Cancelled _ as exn ->
+       discard_deferred_ticket scheduler ticket;
+       raise exn
+     | exn ->
+       discard_deferred_ticket scheduler ticket;
+       raise exn)
+;;
+
+(* The drain verdict as one token. Retry_later carries its reason so a stuck
+   worker is distinguishable from a contended one: Exact_claim_contended means
+   another flow holds the claim, Selected_generation_changed means the partition
+   moved under this worker. *)
+let drain_outcome_label = function
+  | Drained _ -> "drained"
+  | Retry_later { reason = Exact_claim_contended; _ } -> "retry_claim_contended"
+  | Retry_later { reason = Selected_generation_changed; _ } ->
+    "retry_generation_changed"
+  | Lane_deferred _ -> "deferred_lane_exhausted"
+;;
+
+(* The drain line derives its level from the outcome it reports. [Retry_later]
+   leaves the durable partition undrained and re-arms the same contention, so a
+   worker that keeps returning it makes no progress while its candidate ledger
+   grows; at [Info] that state reads the same as normal draining. *)
+let drain_outcome_log_level = function
+  | Drained _ -> Log.Info
+  | Retry_later _ | Lane_deferred _ -> Log.Warn
+;;
+
+let drain_outcome_progress = function
+  | Drained progress -> progress
+  | Retry_later { progress; _ } | Lane_deferred { progress; _ } -> progress
+;;
+
+(* [Lane_deferred] uses the separate maintenance-pulse rearm, not the claim
+   contention timer. *)
+let apply_drain_rearm (scheduler : rearm_scheduler) = function
+  | Drained _ | Lane_deferred _ ->
+    reset_contention_rearms scheduler ~keep:None;
+    None
+  | Retry_later { contention; reason = _ } ->
+    reset_contention_rearms scheduler ~keep:(Some contention);
+    Some (schedule_contention_rearm scheduler contention)
+;;
+
+type settlement =
+  | No_completed_partition
+  | Partition_settled of
+      { candidate_id : string
+      ; continuation_wake : Keeper_registry.wakeup_outcome option
+      }
+
+type fatal_stage =
+  | Registration
+  | Process_start_recovery
+  | Durable_drain
+  | Control_loop
+
+type fatal_error =
+  { stage : fatal_stage
+  ; detail : string
+  }
+
+let fatal_stage_to_string = function
+  | Registration -> "registration"
+  | Process_start_recovery -> "process_start_recovery"
+  | Durable_drain -> "durable_drain"
+  | Control_loop -> "control_loop"
+;;
+
+let fatal_error_to_string error =
+  Printf.sprintf
+    "Board attention worker fatal stage=%s detail=%s"
+    (fatal_stage_to_string error.stage)
+    error.detail
+;;
+
+open Result.Syntax
+
+let owner_wake ~base_path ~keeper_name =
+  Keeper_registry.wakeup_running
+    ~intent:Keeper_registry.Attention_result
+    ~base_path
+    keeper_name
+;;
+
+let exact_owner_wake ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | None -> Keeper_registry.Exact_wake_missing
+  | Some entry ->
+    Keeper_registry.wakeup_running_exact
+      ~intent:Keeper_registry.Attention_result
+      entry
+;;
+
+let candidate_by_id candidate_id candidates =
+  List.find_opt
+    (fun (candidate : Candidate.candidate) ->
+       String.equal candidate.candidate_id candidate_id)
+    candidates
+;;
+
+let validate_partition_member partition candidate =
+  if not (String.equal partition.Partition.keeper_name candidate.Candidate.keeper_name)
+  then Error "partition member Keeper identity changed"
+  else if not (Float.equal partition.created_at candidate.recorded_at)
+  then Error "partition member recorded_at changed"
+  else
+    let* context_key = Candidate.Context_key.of_candidate candidate in
+    if Candidate.Context_key.equal partition.context_key context_key
+    then Ok ()
+    else Error "partition member Keeper context changed"
+;;
+
+let confirm_blocked_transition ~base_path transition =
+  match transition.Partition.write_outcome with
+  | Partition.Fsync_completed -> Ok transition.partition
+  | Partition.Visible_sync_unconfirmed _ ->
+    let* confirmed =
+      Partition.confirm_blocked ~base_path ~partition:transition.partition
+    in
+    (match confirmed.write_outcome with
+     | Partition.Fsync_completed -> Ok confirmed.partition
+     | Partition.Visible_sync_unconfirmed detail ->
+       Error ("Blocked partition fsync remains unconfirmed: " ^ detail))
+;;
+
+let failure_category_of_reason = function
+  | Partition.Candidate_membership_conflict _ ->
+    Candidate.Candidate_membership_conflict
+  | Partition.Durable_partition_invariant _ ->
+    Candidate.Durable_partition_invariant
+  | Partition.Exact_setup_unavailable _ -> Candidate.Exact_setup_unavailable
+  | Partition.Exact_flow_replayed _ -> Candidate.Exact_flow_replayed
+  | Partition.Exact_lane_exhausted _ -> Candidate.Exact_lane_exhausted
+  | Partition.Exact_flow_bookkeeping_failed _ ->
+    Candidate.Exact_flow_bookkeeping_failed
+  | Partition.Exact_completion_failed _ -> Candidate.Exact_completion_failed
+  | Partition.Domain_output_invalid _ -> Candidate.Domain_output_invalid
+  | Partition.Execution_provenance_mismatch _ ->
+    Candidate.Execution_provenance_mismatch
+  | Partition.Unexpected_worker_failure _ ->
+    Candidate.Unexpected_worker_failure
+  | Partition.Exact_execution_quarantined _ ->
+    Candidate.Exact_execution_quarantined
+  | Partition.Exact_execution_interrupted _ ->
+    Candidate.Exact_execution_interrupted
+  | Partition.Restored_candidate_quarantine { failure_category; _ } ->
+    failure_category
+;;
+
+let candidate_provenance (provenance : Partition.exact_provenance) :
+    Candidate.attempt_provenance
+  =
+  { slot_id = provenance.slot_id
+  ; call_id = provenance.call_id
+  ; plan_fingerprint = provenance.plan_fingerprint
+  ; request_body_sha256 = provenance.request_body_sha256
+  }
+;;
+
+let attempt_provenance_of_progress = function
+  | Partition.Bound provenance ->
+    Some (candidate_provenance provenance)
+  | Partition.Advancing
+      { execution_anchor = Some failed; last_from = _; next = _ } ->
+    Some (candidate_provenance failed)
+  | Partition.Advancing
+      { execution_anchor = None; last_from = _; next = _ } ->
+    None
+  | Partition.Unbound -> None
+;;
+
+let attempt_provenance_of_reason = function
+  | Partition.Restored_candidate_quarantine { attempt_provenance; _ } ->
+    attempt_provenance
+  | Partition.Exact_execution_quarantined progress
+  | Partition.Exact_execution_interrupted progress
+  | Partition.Exact_flow_replayed (Some progress)
+  | Partition.Exact_lane_exhausted { progress = Some progress; _ }
+  | Partition.Exact_flow_bookkeeping_failed { progress = Some progress; _ }
+  | Partition.Exact_completion_failed { progress = Some progress; _ }
+  | Partition.Domain_output_invalid { progress = Some progress; _ }
+  | Partition.Execution_provenance_mismatch { progress = Some progress; _ }
+  | Partition.Unexpected_worker_failure { progress = Some progress; _ } ->
+    attempt_provenance_of_progress progress
+  | Partition.Candidate_membership_conflict _
+  | Partition.Durable_partition_invariant _
+  | Partition.Exact_setup_unavailable _
+  | Partition.Exact_flow_replayed None
+  | Partition.Exact_lane_exhausted { progress = None; _ }
+  | Partition.Exact_flow_bookkeeping_failed { progress = None; _ }
+  | Partition.Exact_completion_failed { progress = None; _ }
+  | Partition.Domain_output_invalid { progress = None; _ }
+  | Partition.Execution_provenance_mismatch { progress = None; _ }
+  | Partition.Unexpected_worker_failure { progress = None; _ } -> None
+;;
+
+let quarantine_blocked_partition ~base_path partition =
+  match partition.Partition.state with
+  | Partition.Blocked { reason; blocked_at } ->
+    let* candidates =
+      Candidate.load_candidates
+        ~base_path
+        ~keeper_name:partition.keeper_name
+    in
+    let* candidate =
+      match
+        List.find_opt
+          (fun candidate ->
+             String.equal candidate.Candidate.candidate_id partition.candidate_id)
+          candidates
+      with
+      | Some candidate -> Ok candidate
+      | None ->
+        Error
+          ("Blocked partition candidate is absent: "
+           ^ partition.candidate_id)
+    in
+    Candidate.quarantine
+      ~base_path
+      ~candidate
+      ~partition_id:partition.partition_id
+      ~partition_generation:partition.generation
+      ~failure_category:(failure_category_of_reason reason)
+      ~attempt_provenance:(attempt_provenance_of_reason reason)
+      ~quarantined_at:blocked_at
+    |> Result.map ignore
+  | Partition.Ready
+  | Partition.Running _
+  | Partition.Completed _
+  | Partition.Settled _
+  | Partition.Abandoned _ ->
+    Error ("partition is not Blocked: " ^ partition.partition_id)
+;;
+
+let blocked_step ~now ~worker_epoch ~base_path partition reason =
+  let* transition =
+    Partition.block
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~partition
+      reason
+  in
+  let* blocked = confirm_blocked_transition ~base_path transition in
+  let* () = quarantine_blocked_partition ~base_path blocked in
+  Ok (Partition_blocked { candidate_id = blocked.candidate_id; reason })
+;;
+
+let confirm_completed_transition
+      ~base_path
+      latest_partition
+      operation
+      (transition : Partition.exact_transition)
+  =
+  latest_partition := transition.partition;
+  match transition.write_outcome with
+  | Partition.Fsync_completed -> Ok transition.partition
+  | Partition.Visible_sync_unconfirmed _ ->
+    (match
+       Partition.confirm_completed
+         ~base_path
+         ~partition:transition.partition
+     with
+     | Error detail -> Error (operation ^ " confirmation failed: " ^ detail)
+     | Ok confirmed ->
+       latest_partition := confirmed.partition;
+       (match confirmed.write_outcome with
+        | Partition.Fsync_completed -> Ok confirmed.partition
+        | Partition.Visible_sync_unconfirmed detail ->
+          Error
+            (operation
+             ^ " remained visible but fsync is unconfirmed after confirmation: "
+             ^ detail)))
+;;
+
+let complete_partition ~now ~worker_epoch ~base_path latest_partition judgment =
+  let item : Partition.completed_item =
+    { candidate_id = (!latest_partition).Partition.candidate_id; judgment }
+  in
+  Partition.complete
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~partition:!latest_partition
+    ~item
+;;
+
+type completion_projection =
+  | Completion_projected of Partition.t * Keeper_registry.registry_entry
+  | Completion_blocked of step
+
+let complete_projection
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
+  =
+  match
+    complete_partition
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
+  with
+  | Ok transition ->
+    let* completed =
+      confirm_completed_transition
+        ~base_path
+        latest_partition
+        "exact completion"
+        transition
+    in
+    (match
+       Keeper_registry.get
+         ~base_path
+         completed.Partition.keeper_name
+     with
+     | Some owner -> Ok (Completion_projected (completed, owner))
+     | None ->
+       Error
+         ("exact completion lost its registered owner before projection: "
+          ^ completed.keeper_name))
+  | Error detail ->
+    let reason =
+      Partition.Exact_completion_failed
+        { detail; progress = classified_progress !latest_partition }
+    in
+    blocked_step
+      ~now
+      ~worker_epoch
+      ~base_path
+      !latest_partition
+      reason
+    |> Result.map (fun step -> Completion_blocked step)
+;;
+
+let is_not_relevant_completion partition =
+  match partition.Partition.state with
+  | Partition.Completed { item; _ } ->
+    (match item.judgment.verdict.decision with
+     | Keeper_board_attention_judgment.Not_relevant -> true
+     | Keeper_board_attention_judgment.Relevant -> false)
+  | Partition.Ready
+  | Partition.Running _
+  | Partition.Settled _
+  | Partition.Abandoned _
+  | Partition.Blocked _ -> false
+;;
+
+(* [Candidate_absent] means the candidate this partition's [Completed] item
+   names is not in the live ledger. A retire moves the whole candidate store
+   aside as one directory (scripts/check-runtime-deployment-preflight.sh); it
+   never leaves a tombstone the live ledger can read back, so this cannot
+   distinguish "retired" from any other cause a candidate is gone -- both
+   mean the same thing for this delivery: it cannot succeed on a retry of the
+   identical request, because the row it would update no longer exists.
+   Settling the partition here without one is the terminal outcome, not a
+   fallback (masc, board attention finalizer, 2026-08-16). *)
+let deliver_and_settle_completed ~base_path ~keeper_name partition =
+  match partition.Partition.state with
+  | Partition.Completed { item; _ } ->
+    let* delivery =
+      Candidate.apply_judgment_and_deliver
+        ~base_path
+        ~keeper_name
+        ~candidate_id:item.candidate_id
+        ~judgment:item.judgment
+    in
+    (match delivery with
+     | Candidate.Candidate_absent ->
+       Log.Keeper.error
+         "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
+         keeper_name
+         partition.partition_id
+         item.candidate_id
+     | Candidate.Delivered (_ : Candidate.candidate) -> ());
+    let* settled =
+      Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
+    in
+    Ok settled
+  | Partition.Ready
+  | Partition.Running _
+  | Partition.Settled _
+  | Partition.Abandoned _
+  | Partition.Blocked _ ->
+    Error
+      ("completed partition query returned non-Completed state: "
+       ^ partition.partition_id)
+;;
+
+(* [Not_relevant] carries nothing across the owner lane: no event is
+   enqueued for the owner to consume (keeper_board_attention_candidate.mli:
+   "Relevant judgments cross the owner lane only when the owner durably
+   applies and consumes the exact candidate judgment"). Waiting for the
+   owner's own heartbeat to run [settle_completed_snapshot] orphans the
+   candidate whenever that specific owner is not currently ticking
+   (task-1666's measured 98 live cases); the worker settles it here
+   instead, independent of the owner. *)
+let settle_if_not_relevant ~base_path completed =
+  if is_not_relevant_completion completed
+  then (
+    let* (_ : Partition.t) =
+      deliver_and_settle_completed
+        ~base_path
+        ~keeper_name:completed.Partition.keeper_name
+        completed
+    in
+    Ok ())
+  else Ok ()
+;;
+
+let signal_completion ~base_path = function
+  | Completion_blocked step -> Ok step
+  | Completion_projected (completed, owner) ->
+    let* () = settle_if_not_relevant ~base_path completed in
+    let owner_wake =
+      Keeper_registry.wakeup_running_exact
+        ~intent:Keeper_registry.Attention_result
+        owner
+    in
+    Ok
+      (Judgment_completed
+         { candidate_id = completed.candidate_id; owner_wake })
+;;
+
+type exact_callback = Before_dispatch | Before_advance
+
+let unchanged_write_outcome _ outcome = outcome
+
+let map_transition_write_outcome map_write_outcome callback result =
+  Result.map
+    (fun (transition : Partition.exact_transition) ->
+       { transition with
+         write_outcome = map_write_outcome callback transition.write_outcome })
+    result
+;;
+
+let confirm_exact_transition latest_partition operation = function
+  | Error detail -> Error (operation ^ " failed: " ^ detail)
+  | Ok transition ->
+    latest_partition := transition.Partition.partition;
+    (match transition.write_outcome with
+     | Partition.Fsync_completed -> Ok ()
+     | Partition.Visible_sync_unconfirmed detail ->
+       Error (operation ^ " visible but fsync is unconfirmed: " ^ detail))
+;;
+
+let before_dispatch
+      ~map_write_outcome
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      provenance
+  =
+  let provenance = partition_provenance provenance in
+  Partition.bind_before_dispatch
+    ~worker_epoch
+    ~base_path
+    ~partition:!latest_partition
+    ~provenance
+  |> map_transition_write_outcome map_write_outcome Before_dispatch
+  |> confirm_exact_transition latest_partition "exact before-dispatch bind"
+;;
+
+let before_advance
+      ~map_write_outcome
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      ~failed
+      ~next
+  =
+  let source = partition_advance_source failed in
+  let next = partition_candidate_visit next in
+  Partition.record_before_advance
+    ~worker_epoch
+    ~base_path
+    ~partition:!latest_partition
+    ~source
+    ~next
+  |> map_transition_write_outcome map_write_outcome Before_advance
+  |> confirm_exact_transition latest_partition "exact before-advance record"
+;;
+
+let complete_existing_judgment
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
+  =
+  let item : Partition.completed_item =
+    { Partition.candidate_id = (!latest_partition).Partition.candidate_id; judgment }
+  in
+  match
+    Partition.complete_existing_judgment
+      ~now:(now ())
+      ~worker_epoch
+      ~base_path
+      ~partition:!latest_partition
+      ~item
+  with
+  | Ok transition ->
+    let* completed =
+      confirm_completed_transition
+        ~base_path
+        latest_partition
+        "existing judgment completion"
+        transition
+    in
+    let* () = settle_if_not_relevant ~base_path completed in
+    let owner_wake =
+      exact_owner_wake
+        ~base_path
+        ~keeper_name:completed.Partition.keeper_name
+    in
+    Ok
+      (Judgment_completed
+         { candidate_id = completed.candidate_id; owner_wake })
+  | Error detail ->
+    blocked_step
+      ~now:(now ())
+      ~worker_epoch
+      ~base_path
+      !latest_partition
+      (Partition.Durable_partition_invariant
+         ("existing judgment completion failed: " ^ detail))
+;;
+
+let settle_existing_consumed
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
+  =
+  let item : Partition.completed_item =
+    { Partition.candidate_id = (!latest_partition).Partition.candidate_id; judgment }
+  in
+  match
+    Partition.complete_existing_judgment
+      ~now:(now ())
+      ~worker_epoch
+      ~base_path
+      ~partition:!latest_partition
+      ~item
+  with
+  | Error detail ->
+    blocked_step
+      ~now:(now ())
+      ~worker_epoch
+      ~base_path
+      !latest_partition
+      (Partition.Durable_partition_invariant
+         ("existing consumed completion failed: " ^ detail))
+  | Ok transition ->
+    let* completed =
+      confirm_completed_transition
+        ~base_path
+        latest_partition
+        "existing consumed completion"
+        transition
+    in
+    let* (_ : Candidate.candidate) =
+      Candidate.normalize_requeued_consumed
+        ~base_path
+        ~keeper_name:completed.keeper_name
+        ~candidate_id:completed.candidate_id
+    in
+    let* settled =
+      Partition.settle ~now:(now ()) ~base_path ~partition:completed
+    in
+    Ok (Candidate_already_consumed { candidate_id = settled.candidate_id })
+;;
+
+(* The lane's own failure stays where the run already wrote it: the
+   exact-lane run record closes with the same sentence as [detail]. The
+   candidate keeps its Pending status and gains nothing here. *)
+let deferred_step ~worker_epoch ~base_path latest_partition ~detail =
+  let* transition =
+    Partition.defer ~worker_epoch ~base_path ~partition:!latest_partition
+  in
+  let* ready =
+    match transition.Partition.write_outcome with
+    | Partition.Fsync_completed -> Ok transition.partition
+    | Partition.Visible_sync_unconfirmed _ ->
+      let* confirmed =
+        Partition.confirm_ready ~base_path ~partition:transition.partition
+      in
+      (match confirmed.write_outcome with
+       | Partition.Fsync_completed -> Ok confirmed.partition
+       | Partition.Visible_sync_unconfirmed detail ->
+         Error ("deferred partition fsync remains unconfirmed: " ^ detail))
+  in
+  latest_partition := ready;
+  Log.Keeper.warn
+    ~keeper_name:ready.keeper_name
+    "board_attention_lane_deferred keeper=%s candidate=%s partition=%s detail=%s"
+    ready.keeper_name
+    ready.candidate_id
+    ready.partition_id
+    detail;
+  Ok (Judgment_deferred { candidate_id = ready.candidate_id; detail })
+;;
+
+let process_pending
+      ~map_write_outcome
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~execute
+      latest_partition
+      prepared
+  =
+  match
+    execute
+      ~before_dispatch:
+        (before_dispatch ~map_write_outcome ~worker_epoch ~base_path latest_partition)
+      ~before_advance:
+        (before_advance ~map_write_outcome ~worker_epoch ~base_path latest_partition)
+      prepared
+  with
+  | Error error ->
+    (match execution_disposition !latest_partition error with
+     | Execution_blocked reason ->
+       blocked_step
+         ~now:(now ())
+         ~worker_epoch
+         ~base_path
+         !latest_partition
+         reason
+     | Execution_deferred { detail } ->
+       deferred_step ~worker_epoch ~base_path latest_partition ~detail)
+  | Ok judgment ->
+    let* projection =
+      complete_projection
+        ~now:(now ())
+        ~worker_epoch
+        ~base_path
+        latest_partition
+        judgment
+    in
+    signal_completion ~base_path projection
+;;
+
+let process_claimed
+      ~map_write_outcome
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~prepared
+      ~execute
+      latest_partition
+      candidates
+  =
+  let partition = !latest_partition in
+  match candidate_by_id partition.Partition.candidate_id candidates with
+  | None ->
+    blocked_step
+      ~now:(now ())
+      ~worker_epoch
+      ~base_path
+      partition
+      (Partition.Candidate_membership_conflict
+         ("candidate ledger lacks partition member " ^ partition.candidate_id))
+  | Some candidate ->
+    (match validate_partition_member partition candidate with
+     | Error detail ->
+       blocked_step
+         ~now:(now ())
+         ~worker_epoch
+         ~base_path
+         partition
+         (Partition.Candidate_membership_conflict detail)
+     | Ok () ->
+       (match Candidate.status_view candidate.status with
+        | Candidate.Direct_resumable (Candidate.Resumable_pending _)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_pending _; _ } ->
+          (match prepared with
+           | Some (candidate_id, prepared)
+             when String.equal candidate_id candidate.candidate_id ->
+             process_pending
+               ~map_write_outcome
+               ~now
+               ~worker_epoch
+               ~base_path
+               ~execute
+               latest_partition
+               prepared
+           | Some _ | None ->
+             Error
+               ("Board attention claimed Pending candidate without successful "
+                ^ "pre-claim exact setup: "
+                ^ candidate.candidate_id))
+        | Candidate.Direct_resumable (Candidate.Resumable_judged judged)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_judged judged; _ } ->
+          complete_existing_judgment
+            ~now
+            ~worker_epoch
+            ~base_path
+            latest_partition
+            judged.judgment
+        | Candidate.Direct_resumable (Candidate.Resumable_consumed consumed)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_consumed consumed; _ } ->
+          settle_existing_consumed
+            ~now
+            ~worker_epoch
+            ~base_path
+            latest_partition
+            consumed.judgment
+        | Candidate.Suspended_quarantine _ ->
+          blocked_step
+            ~now:(now ())
+            ~worker_epoch
+            ~base_path
+            partition
+            (Partition.Durable_partition_invariant
+               ("Quarantined Board attention candidate became claimable: "
+                ^ candidate.candidate_id))))
+;;
+
+type ready_root_work =
+  | Needs_lane of Candidate.candidate
+  | Lane_free
+
+(* A Ready root whose candidate is already judged, consumed, quarantined,
+   absent or mismatched is finished without a lane call. *)
+let ready_root_work candidates (partition : Partition.t) =
+  match candidate_by_id partition.candidate_id candidates with
+  | None -> Lane_free
+  | Some candidate ->
+    (match validate_partition_member partition candidate with
+     | Error _ -> Lane_free
+     | Ok () ->
+       (match Candidate.status_view candidate.status with
+        | Candidate.Direct_resumable (Candidate.Resumable_pending _)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_pending _; _ } -> Needs_lane candidate
+        | Candidate.Direct_resumable
+            (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
+        | Candidate.Requeued_resumable
+            { resumable =
+                (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
+            ; _
+            }
+        | Candidate.Suspended_quarantine _ -> Lane_free))
+;;
+
+(* Lane-free roots go first. A root whose lane is resting is Ready again and
+   the oldest, so claiming strictly oldest first would put every lane-free
+   root behind it until a slot frees; a restart that returns cut runs to
+   Ready makes exactly such roots. *)
+let prepare_next_ready
+      ~base_path
+      ~keeper_name
+      ~prepare
+      candidates
+  =
+  let* partitions = Partition.load ~base_path ~keeper_name in
+  let ready =
+    List.filter
+      (fun (partition : Partition.t) ->
+         match partition.state with
+         | Partition.Ready ->
+             not (Keeper_board_attention_admission.blocked ~base_path
+                    ~candidate_id:partition.candidate_id)
+         | Partition.Running _
+         | Partition.Completed _
+         | Partition.Settled _
+         | Partition.Abandoned _
+         | Partition.Blocked _ -> false)
+      partitions
+    |> List.partition_map (fun partition ->
+      match ready_root_work candidates partition with
+      | Lane_free -> Either.Left partition
+      | Needs_lane candidate -> Either.Right (partition, candidate))
+  in
+  let selected (partition : Partition.t) prepared =
+    Ok (Some (partition.partition_id, partition.generation, partition.candidate_id, prepared))
+  in
+  match ready with
+  | partition :: _, _ -> selected partition None
+  | [], (partition, candidate) :: _ ->
+    (match prepare candidate with
+     | Ok prepared -> selected partition (Some (candidate.Candidate.candidate_id, prepared))
+     | Error error ->
+       Error
+         ("Board attention exact setup unavailable before claim: "
+          ^ setup_error_detail error))
+  | [], [] -> Ok None
+;;
+
+let confirm_requeue_transition ~base_path transition =
+  match transition.Partition.write_outcome with
+  | Partition.Fsync_completed -> Ok transition
+  | Partition.Visible_sync_unconfirmed _ ->
+    let* confirmed =
+      Partition.confirm_ready
+        ~base_path
+        ~partition:transition.partition
+    in
+    (match confirmed.write_outcome with
+     | Partition.Fsync_completed -> Ok confirmed
+     | Partition.Visible_sync_unconfirmed detail ->
+       Error ("requeued partition fsync remains unconfirmed: " ^ detail))
+;;
+
+let rec converge_requeue_conflict
+    ?(remaining_cursor_retries = 2)
+    ~base_path
+    ~keeper_name
+    ~partition
+    ~expected_quarantine_id
+    ()
+  =
+  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+  let* candidate =
+    match
+      List.find_opt
+        (fun candidate ->
+           String.equal
+             candidate.Candidate.candidate_id
+             partition.Partition.candidate_id)
+        candidates
+    with
+    | Some candidate -> Ok candidate
+    | None ->
+      Error
+        ("partition candidate disappeared during requeue convergence: "
+         ^ partition.candidate_id)
+  in
+  let* () =
+    match Candidate.status_view candidate.status with
+    | Candidate.Requeued_resumable
+        { quarantine =
+            { quarantine
+            ; phase = Candidate.Requeued _
+            }
+        ; _
+        }
+      when String.equal quarantine.partition_id partition.partition_id
+           && String.equal quarantine.quarantine_id expected_quarantine_id
+           && Partition.Generation.equal
+                quarantine.partition_generation
+                partition.generation ->
+      Ok ()
+    | Candidate.Direct_resumable _
+    | Candidate.Requeued_resumable
+        { quarantine =
+            { phase = Candidate.Quarantined | Candidate.Requeue_requested _ | Candidate.Requeued _
+            ; _
+            }
+        ; _
+        }
+    | Candidate.Suspended_quarantine _ ->
+      Error
+        ("candidate quarantine generation changed during requeue convergence: "
+         ^ partition.partition_id)
+  in
+  let* partitions = Partition.load ~base_path ~keeper_name in
+  let* current =
+    match
+      List.find_opt
+        (fun current ->
+           String.equal current.Partition.partition_id partition.partition_id)
+        partitions
+    with
+    | Some current -> Ok current
+    | None ->
+      Error
+        ("partition disappeared during requeue convergence: "
+         ^ partition.partition_id)
+  in
+  match current.state with
+  | Partition.Ready
+    when Partition.Generation.is_direct_successor
+           ~previous:partition.generation
+           current.generation ->
+    let* confirmation = Partition.confirm_ready ~base_path ~partition:current in
+    confirm_requeue_transition ~base_path confirmation
+  | Partition.Blocked _ when current = partition ->
+    if remaining_cursor_retries <= 0
+    then
+      Error
+        ("partition ledger cursor remained conflicted after bounded requeue retries: "
+         ^ partition.partition_id)
+    else
+      let* outcome = Partition.requeue_blocked ~base_path ~partition:current in
+      (match outcome with
+       | Partition.Requeued transition ->
+         confirm_requeue_transition ~base_path transition
+       | Partition.Cursor_conflict _ ->
+         converge_requeue_conflict
+           ~remaining_cursor_retries:(remaining_cursor_retries - 1)
+           ~base_path
+           ~keeper_name
+           ~partition
+           ~expected_quarantine_id
+           ()
+       | Partition.Generation_conflict detail ->
+         Error ("partition target generation changed during requeue: " ^ detail))
+  | Partition.Ready
+  | Partition.Blocked _
+  | Partition.Running _
+  | Partition.Completed _
+  | Partition.Settled _
+  | Partition.Abandoned _ ->
+    Error
+      ("partition generation changed during requeue convergence: "
+       ^ partition.partition_id)
+;;
+
+let confirm_requeue_outcome
+      ~base_path
+      ~keeper_name
+      ~partition
+      ~expected_quarantine_id
+  = function
+  | Partition.Requeued transition ->
+    confirm_requeue_transition ~base_path transition
+  | Partition.Cursor_conflict _ ->
+    converge_requeue_conflict
+      ~base_path
+      ~keeper_name
+      ~partition
+      ~expected_quarantine_id
+      ()
+  | Partition.Generation_conflict detail ->
+    Error ("partition target generation changed during requeue: " ^ detail)
+;;
+
+(* A Ready partition that its candidate's quarantine contradicts is taken out
+   of Ready on its own, the way a failed run is: claimed under this worker's
+   epoch and blocked with a durable-invariant reason. Blocking it projects a
+   new quarantine at that Blocked generation onto the candidate, so the
+   operator requeue applies to it and the other partitions keep draining. *)
+let block_inconsistent_ready
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      (partition : Partition.t)
+      (state : Candidate.quarantine_state)
+      inconsistency
+  =
+  let detail =
+    Printf.sprintf
+      "%s: quarantine=%s"
+      (Quarantine_pair.inconsistency_to_string inconsistency)
+      state.quarantine.quarantine_id
+  in
+  Log.Keeper.error
+    ~keeper_name
+    "Board attention quarantine contradicts its Ready partition; blocking that partition keeper=%s partition=%s candidate=%s detail=%s"
+    keeper_name
+    partition.partition_id
+    partition.candidate_id
+    detail;
+  let* claimed =
+    Partition.claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~partition_id:partition.partition_id
+      ~generation:partition.generation
+  in
+  match claimed with
+  | Some running ->
+    let* (_ : step) =
+      blocked_step
+        ~now
+        ~worker_epoch
+        ~base_path
+        running
+        (Partition.Durable_partition_invariant detail)
+    in
+    Ok ()
+  | None ->
+    (* The row, or the ledger cursor, moved after this pass read it. The
+       drain claims a row that is still Ready: a quarantined or
+       requeue-requested candidate is blocked there the same way, and a
+       requeued one is judged under the operator's authorization. *)
+    Log.Keeper.warn
+      ~keeper_name
+      "Board attention Ready partition moved before process-start recovery could block it keeper=%s partition=%s"
+      keeper_name
+      partition.partition_id;
+    Ok ()
+;;
+
+let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
+  (* The candidate store is read once and carried, not re-read per partition.
+     Finishing a requeue and blocking a contradicted Ready row write a
+     candidate, and those branches re-read the store for the rest of the
+     pass. Projecting a Blocked row writes only that row's own candidate,
+     which no later iteration reads, so it carries the list on.
+
+     Measured 2026-09-05 on this fleet: one keeper carries 1,219 partitions
+     against 1,216 candidates, so the loop parsed a 27 MB ledger 1,219 times
+     in a pass. That site allocated 2.1 GB in twenty-five seconds, the
+     largest single source in an otherwise idle server. *)
+  let* initial_candidates = Candidate.load_candidates ~base_path ~keeper_name in
+  let* (_ : int) =
+    Partition.ensure_roots ~base_path ~keeper_name initial_candidates
+  in
+  let* partitions = Partition.load ~base_path ~keeper_name in
+  let rec loop candidates = function
+    | [] -> Ok ()
+    | partition :: rest ->
+      let loop_reloaded rest =
+        let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+        loop candidates rest
+      in
+      (* Shadowed so a branch that carries the list on calls [loop], and a
+         branch that must re-read calls or re-binds [loop_reloaded]. *)
+      let loop rest = loop candidates rest in
+      (match
+         List.find_opt
+           (fun candidate ->
+              String.equal
+                candidate.Candidate.candidate_id
+                partition.Partition.candidate_id)
+           candidates
+       with
+       | None ->
+         (* Mirror of the Completed finalizer's [Candidate_absent] outcome
+            (#28770): a retire moves the whole candidate store aside and
+            leaves no tombstone, so a quarantine naming a retired candidate
+            can never be acknowledged or requeued. Erroring here fataled the
+            whole worker at every process start (stage=process_recovery,
+            2026-08-16, three fleet keepers), which is exactly the permanent
+            re-encounter the finalizer branch exists to stop. Terminal
+            Blocked settles; every other state passes through the same way a
+            present candidate with a non-quarantine status does below. *)
+         (match partition.state with
+          | Partition.Blocked _ ->
+            Log.Keeper.error
+              "Board attention candidate permanently absent during quarantine reconciliation; abandoning blocked partition keeper=%s partition=%s candidate=%s"
+              keeper_name
+              partition.partition_id
+              partition.candidate_id;
+            let* (_ : Partition.t) = Partition.abandon ~now ~base_path ~partition in
+            loop rest
+          | Partition.Ready | Partition.Running _ | Partition.Completed _
+          | Partition.Settled _ | Partition.Abandoned _ -> loop rest)
+       | Some candidate ->
+         (match Candidate.status_view candidate.status with
+          | Candidate.Direct_resumable _ ->
+            (match partition.state with
+             | Partition.Blocked _ ->
+               let* () = quarantine_blocked_partition ~base_path partition in
+               loop rest
+             | Partition.Ready
+             | Partition.Running _
+             | Partition.Completed _
+             | Partition.Settled _
+             | Partition.Abandoned _ -> loop rest)
+          | Candidate.Suspended_quarantine state
+          | Candidate.Requeued_resumable { quarantine = state; _ } ->
+            (match Quarantine_pair.classify partition state with
+             | Quarantine_pair.Blocked_requeue_requested ->
+               let* (_ : Candidate.candidate) =
+                 Candidate.finish_quarantine_requeue
+                   ~base_path
+                   ~candidate
+                   ~partition_id:partition.partition_id
+                   ~expected_quarantine_id:state.quarantine.quarantine_id
+                   ~requeued_at:now
+               in
+               (* This branch wrote a candidate; the rest of the pass reads the
+                  store again rather than the copy taken before it. *)
+               let loop rest = loop_reloaded rest in
+               let* (_ : Partition.exact_transition) =
+                 let* outcome = Partition.requeue_blocked ~base_path ~partition in
+                 confirm_requeue_outcome
+                   ~base_path
+                   ~keeper_name
+                   ~partition
+                   ~expected_quarantine_id:state.quarantine.quarantine_id
+                   outcome
+               in
+               loop rest
+             | Quarantine_pair.Blocked_awaiting_request -> loop rest
+             | Quarantine_pair.Blocked_requeued ->
+               let* (_ : Partition.exact_transition) =
+                 let* outcome = Partition.requeue_blocked ~base_path ~partition in
+                 confirm_requeue_outcome
+                   ~base_path
+                   ~keeper_name
+                   ~partition
+                   ~expected_quarantine_id:state.quarantine.quarantine_id
+                   outcome
+               in
+               loop rest
+             | Quarantine_pair.Blocked_unrecorded ->
+               let* () = quarantine_blocked_partition ~base_path partition in
+               loop rest
+             | Quarantine_pair.Ready_requeued ->
+               (* Authorization survives subsequent execution/deferral cycles.
+                  A spent lane returns Running to Ready at a later generation,
+                  while the candidate retains the original quarantine as
+                  evidence. *)
+               let* confirmation = Partition.confirm_ready ~base_path ~partition in
+               let* (_ : Partition.exact_transition) =
+                 confirm_requeue_transition ~base_path confirmation
+               in
+               loop rest
+             | Quarantine_pair.Inconsistent inconsistency ->
+               let* () =
+                 block_inconsistent_ready
+                   ~now
+                   ~worker_epoch
+                   ~base_path
+                   ~keeper_name
+                   partition
+                   state
+                   inconsistency
+               in
+               loop_reloaded rest
+             | Quarantine_pair.Advanced_requeued
+             | Quarantine_pair.Advanced_without_requeue
+             | Quarantine_pair.Other_partition -> loop rest)))
+  in
+  loop initial_candidates partitions
+;;
+
+(* The prunes-plus-read body the wake shares, so a test can re-run the
+   whole seam while landing an owner settlement in the overlap through
+   [?hook]. The hook fires on the line immediately above the first prune —
+   not earlier: leaving even the cursor read between the hook and the prune
+   lets a refactor move the candidate read below the hook (and above the
+   prunes) while the test stays green, which would pin nothing. Production
+   leaves the hook as no-op. *)
+let prunes_and_read ~base_path ~keeper_name ?hook ?before_receipt_prune () =
+  let cursor_ts, cursor_post_id =
+    Keeper_registry.get_board_cursor ~base_path keeper_name
+  in
+  (match hook with Some hook -> hook () | None -> ());
+  (* #41422: drop consumed rows the replay gate can never re-mint before
+     roots are ensured, so a long-lived keeper's candidate ledger stays
+     bounded by its unresolved attention instead of its board history. The
+     cursor is the same coordinate the world-observation scanner replays
+     against; the default (0.0, None) of an unregistered keeper keeps every
+     row. A prune failure must not stop judgment work, so it is observed and
+     retried on the next wake. *)
+  (match
+     Candidate.prune_consumed_behind_cursor
+       ~base_path
+       ~keeper_name
+       (cursor_ts, cursor_post_id)
+   with
+   | Ok 0 -> ()
+   | Ok removed ->
+     Log.Keeper.info
+       "board_attention_candidate_pruned keeper=%s removed=%d"
+       keeper_name
+       removed
+   | Error detail ->
+     Log.Keeper.warn
+       "board_attention_candidate_prune_failed keeper=%s detail=%s"
+       keeper_name
+       detail);
+  (* The settled receipts of consumed candidates go on the same wake, so the
+     partition ledger of a Keeper that never restarts stays bounded too. Like
+     the candidate prune, a failure is observed and retried on the next wake.
+     [?before_receipt_prune] fires on the line immediately above this prune,
+     so a test can land a settlement in the gap a candidate read placed
+     between the two prunes defines. Production leaves it as no-op. *)
+  (match before_receipt_prune with Some hook -> hook () | None -> ());
+  (match Partition.prune_settled_receipts ~base_path ~keeper_name with
+   | Ok 0 -> ()
+   | Ok removed ->
+     Log.Keeper.info
+       "board_attention_settled_receipts_pruned keeper=%s removed=%d"
+       keeper_name
+       removed
+   | Error detail ->
+     Log.Keeper.warn
+       "board_attention_settled_receipt_prune_failed keeper=%s detail=%s"
+       keeper_name
+       detail);
+  (* The candidate list is read only after both prunes. A list read before
+     them can still hold a candidate that an owner settlement (which runs
+     without this lock) consumed meanwhile; once the prune dropped that
+     candidate's settled receipt, [ensure_roots] would mint a fresh [Ready]
+     root that no candidate row backs, and the worker would block on
+     "candidate ledger lacks partition member" forever because only [Settled]
+     receipts are pruned. Receipts are dropped only above this read, so a
+     candidate consumed after it still has its [Settled] receipt. *)
+  Candidate.load_candidates ~base_path ~keeper_name
+;;
+
+let process_next_with_claim_ready_exact_current
+      ~map_write_outcome
+      ~claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  (* The prunes and the candidate read run as one seam; a test can install
+     a hook that fires immediately before the first prune, landing an owner
+     settlement in exactly the gap the read position defines. *)
+  let* candidates = prunes_and_read ~base_path ~keeper_name () in
+  let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
+  let selected_generation_is_ready ~partition_id ~generation =
+    let* partitions = Partition.load ~base_path ~keeper_name in
+    Ok
+      (List.exists
+        (fun (partition : Partition.t) ->
+           String.equal partition.partition_id partition_id
+           && Partition.Generation.equal partition.generation generation
+           &&
+           match partition.state with
+           | Partition.Ready -> true
+           | Partition.Running _
+           | Partition.Completed _
+           | Partition.Settled _
+           | Partition.Abandoned _
+           | Partition.Blocked _ -> false)
+        partitions)
+  in
+  let process_selected prepared partition =
+    let latest_partition : Partition.t ref = ref partition in
+    try
+      let* current_candidates =
+        Candidate.load_candidates ~base_path ~keeper_name
+      in
+      process_claimed
+        ~map_write_outcome
+        ~now
+        ~worker_epoch
+        ~base_path
+        ~prepared
+        ~execute
+        latest_partition
+        current_candidates
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Keeper.error
+        "Board attention worker raised unexpectedly keeper=%s partition=%s: %s"
+        keeper_name
+        (!latest_partition).partition_id
+        (Printexc.to_string exn);
+      let reason =
+        Partition.Unexpected_worker_failure
+          { detail = Printexc.to_string exn
+          ; progress = classified_progress !latest_partition
+          }
+      in
+      blocked_step
+        ~now:(now ())
+        ~worker_epoch
+        ~base_path
+        !latest_partition
+        reason
+  in
+  let* selected =
+    prepare_next_ready ~base_path ~keeper_name ~prepare candidates
+  in
+  match selected with
+  | None -> Ok Idle
+  | Some (partition_id, generation, candidate_id, prepared) ->
+    let rec claim_selected attempts_remaining =
+      let* claimed =
+        claim_ready_exact
+          ~now:(now ())
+          ~worker_epoch
+          ~base_path
+          ~keeper_name
+          ~partition_id
+          ~generation
+      in
+      match claimed with
+      | Some partition -> process_selected prepared partition
+      | None ->
+        let* remains_ready =
+          selected_generation_is_ready ~partition_id ~generation
+        in
+        if not remains_ready
+        then Ok (Rescan_later { keeper_name; partition_id; generation })
+        else if attempts_remaining > 1
+        then claim_selected (attempts_remaining - 1)
+        else Ok (Contended { keeper_name; partition_id; generation })
+    in
+    (match Keeper_board_attention_admission.acquire_singleton ~base_path ~candidate_id with
+     | None -> Ok (Rescan_later { keeper_name; partition_id; generation })
+     | Some token ->
+         Fun.protect ~finally:(fun () -> Keeper_board_attention_admission.release token)
+           (fun () -> claim_selected 3))
+;;
+
+let process_next_with_claim_ready_exact
+      ~claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  process_next_with_claim_ready_exact_current
+    ~map_write_outcome:unchanged_write_outcome
+    ~claim_ready_exact
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+;;
+
+let process_next_current
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  process_next_with_claim_ready_exact_current
+    ~map_write_outcome:unchanged_write_outcome
+    ~claim_ready_exact:Partition.claim_ready_exact
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+;;
+
+let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
+  process_next_current
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+;;
+
+let prepare_exact ~base_path ~keeper_name ~net =
+  Exact_flow.prepare ~base_path ~keeper_name ~net
+;;
+
+(* The worker's durable callbacks fail with the partition transition's own
+   sentence, so the flow renderer prints that sentence as the cause. *)
+let execute_exact ~clock ~before_dispatch ~before_advance prepared =
+  Exact_flow.execute
+    ~clock
+    ~callback_error_to_string:Fun.id
+    ~before_dispatch
+    ~before_advance
+    prepared
+;;
+
+let process_next_exact_with_write_outcome
+      ~map_write_outcome ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
+  process_next_with_claim_ready_exact_current
+    ~map_write_outcome
+    ~claim_ready_exact:Partition.claim_ready_exact
+    ~now ~worker_epoch ~base_path ~keeper_name
+    ~prepare:(prepare_exact ~base_path ~keeper_name ~net)
+    ~execute:(execute_exact ~clock)
+;;
+
+let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
+  process_next_current
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare:(prepare_exact ~base_path ~keeper_name ~net)
+    ~execute:(execute_exact ~clock)
+;;
+
+let completed_in_order ~base_path ~keeper_name =
+  let* completed = Partition.completed ~base_path ~keeper_name in
+  Ok
+    (List.sort
+       (fun left right ->
+          match Float.compare left.Partition.created_at right.Partition.created_at with
+          | 0 -> String.compare left.partition_id right.partition_id
+          | order -> order)
+       completed)
+;;
+
+let confirm_loaded_completed
+      ~base_path
+      operation
+      partition
+  =
+  match Partition.confirm_completed ~base_path ~partition with
+  | Error detail -> Error (operation ^ " confirmation failed: " ^ detail)
+  | Ok transition ->
+    (match transition.write_outcome with
+     | Partition.Fsync_completed -> Ok transition.partition
+     | Partition.Visible_sync_unconfirmed detail ->
+       Error
+         (operation
+          ^ " remained visible but fsync is unconfirmed after confirmation: "
+          ^ detail))
+;;
+
+let replay_completed_owner_wake
+      ~base_path
+      ~keeper_name
+      ~wake_owner
+  =
+  let* completed = completed_in_order ~base_path ~keeper_name in
+  match completed with
+  | [] -> Ok None
+  | partition :: _ ->
+    let* (_ : Partition.t) =
+      confirm_loaded_completed
+        ~base_path
+        "completed owner-wake replay"
+        partition
+    in
+    Ok (Some (wake_owner ~base_path ~keeper_name))
+;;
+
+(* Only the captured list is drained: workers may complete more partitions
+   while this owner yields, but those belong to the next admission snapshot.
+   Yield outside each durable transaction so other fibers remain runnable. *)
+let settle_completed_snapshot ~base_path ~keeper_name
+      ?on_captured
+      ?yield
+      () =
+  let yield = match yield with Some yield -> yield | None -> Eio_guard.fair_yield in
+  let settle_head partition =
+    let* partition =
+      confirm_loaded_completed
+        ~base_path
+        "completed owner settlement"
+        partition
+    in
+    deliver_and_settle_completed ~base_path ~keeper_name partition
+  in
+  let rec settle_snapshot last_settled = function
+    | [] -> Ok last_settled
+    | partition :: rest ->
+      let* settled = settle_head partition in
+      (match rest with
+       | [] -> ()
+       | _ :: _ -> yield ());
+      settle_snapshot settled rest
+  in
+  let* completed = completed_in_order ~base_path ~keeper_name in
+  (* Test seam for the snapshot-capture boundary: fires exactly after the
+     capture, before any member is settled, so a test hook can land a new
+     completion deterministically in that gap. Production passes no hook. *)
+  (match on_captured with
+   | Some hook -> hook ~base_path ~keeper_name ~completed
+   | None -> ());
+  match completed with
+  | [] -> Ok No_completed_partition
+  | first :: _ ->
+    let* settled = settle_snapshot first completed in
+    Log.Keeper.info
+      "board_attention_completed_snapshot_settled keeper=%s count=%d"
+      keeper_name
+      (List.length completed);
+    let* remaining = completed_in_order ~base_path ~keeper_name in
+    let continuation_wake =
+      match remaining with
+      | [] -> None
+      | _ :: _ -> Some (owner_wake ~base_path ~keeper_name)
+    in
+    Ok
+      (Partition_settled
+         { candidate_id = settled.Partition.candidate_id; continuation_wake })
+;;
+
+let recovered_mutex = Stdlib.Mutex.create ()
+let recovered_process_keys : (string, unit) Hashtbl.t = Hashtbl.create 16
+
+let claim_process_recovery ~base_path ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  Stdlib.Mutex.protect recovered_mutex (fun () ->
+    if Hashtbl.mem recovered_process_keys key
+    then false
+    else (
+      Hashtbl.add recovered_process_keys key ();
+      true))
+;;
+
+let release_process_recovery ~base_path ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  Stdlib.Mutex.protect recovered_mutex (fun () ->
+    Hashtbl.remove recovered_process_keys key)
+;;
+
+let protect_process_recovery_release release =
+  try ignore (Eio.Fiber.is_cancelled ()); Eio.Cancel.protect release
+  with Effect.Unhandled _ -> release ()
+;;
+
+let with_process_recovery_claim ~base_path ~keeper_name run =
+  let claimed = claim_process_recovery ~base_path ~keeper_name in
+  Fun.protect
+    ~finally:(fun () ->
+      if claimed
+      then
+        protect_process_recovery_release (fun () ->
+          release_process_recovery ~base_path ~keeper_name))
+    (fun () -> run claimed)
+;;
+
+let observe_error ~base_path ~keeper_name detail =
+  (try Keeper_registry_error_recording.record ~base_path keeper_name detail with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Keeper.error
+       "Board attention worker failure observation also failed keeper=%s worker_error=%s observer_error=%s"
+       keeper_name
+       detail
+       (Printexc.to_string exn));
+  Log.Keeper.error "Board attention worker failed keeper=%s: %s" keeper_name detail
+;;
+
+let drain_available_with_process ~yield ~process =
+  let rec loop progress =
+    match process () with
+    | Ok Idle -> Ok (Drained progress)
+    | Ok (Contended contention) ->
+      Ok (Retry_later { contention; reason = Exact_claim_contended; progress })
+    | Ok (Rescan_later contention) ->
+      Ok
+        (Retry_later
+           { contention; reason = Selected_generation_changed; progress })
+    | Ok (Judgment_completed _) ->
+      yield ();
+      loop
+        { judgments = progress.judgments + 1; steps = progress.steps + 1 }
+    | Ok (Candidate_already_consumed _ | Partition_blocked _) ->
+      yield ();
+      loop { progress with steps = progress.steps + 1 }
+    (* Stop here. The deferred root is Ready again and the oldest root that
+       needs the lane, so another iteration would claim it straight back into
+       the same exhausted lane. *)
+    | Ok (Judgment_deferred { candidate_id; detail = _ }) ->
+      Ok
+        (Lane_deferred
+           { candidate_id; progress = { progress with steps = progress.steps + 1 } })
+    | Error detail -> Error detail
+  in
+  loop { judgments = 0; steps = 0 }
+;;
+
+let drain_available_current
+      ~yield
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  drain_available_with_process
+    ~yield
+    ~process:(fun () ->
+      process_next_current
+        ~now
+        ~worker_epoch
+        ~base_path
+        ~keeper_name
+        ~prepare
+        ~execute)
+;;
+
+let drain_available
+      ~yield
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  drain_available_current
+    ~yield
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+;;
+
+(* Pause is read once per wake, before any partition I/O, from the same
+   TOML-overlaid meta the heartbeat reads before it dispatches a turn
+   ([Keeper_heartbeat_loop] selected_source_authority). The heartbeat refuses
+   to act on a read failure, an absent meta, or [paused]; the worker skips the
+   wake for the same three facts. A skipped wake leaves every candidate and
+   partition untouched, so the ledger still holds the work for the next wake. *)
+type wake_skip_reason =
+  | Keeper_paused
+  | Keeper_meta_absent
+  | Keeper_meta_read_failed of string
+
+type wake_admission =
+  | Wake_admitted
+  | Wake_skipped of wake_skip_reason
+
+let wake_admission_of_meta_read = function
+  | Error detail -> Wake_skipped (Keeper_meta_read_failed detail)
+  | Ok None -> Wake_skipped Keeper_meta_absent
+  | Ok (Some (meta : Keeper_meta_contract.keeper_meta)) ->
+    if meta.paused then Wake_skipped Keeper_paused else Wake_admitted
+;;
+
+let rearm_deferred_after_skipped_wake scheduler = function
+  | Keeper_paused -> ()
+  | Keeper_meta_absent | Keeper_meta_read_failed _ ->
+    if deferred_rearm_needed scheduler then schedule_deferred_rearm scheduler
+;;
+
+let read_wake_admission ~base_path ~keeper_name =
+  wake_admission_of_meta_read
+    (Keeper_meta_store.read_effective_meta
+       (Workspace.default_config base_path)
+       keeper_name)
+;;
+
+let wake_skip_reason_label = function
+  | Keeper_paused -> "keeper_paused"
+  | Keeper_meta_absent -> "keeper_meta_absent"
+  | Keeper_meta_read_failed _ -> "keeper_meta_read_failed"
+;;
+
+(* Pause is an operator state, so skipping for it is routine. An absent or
+   unreadable meta means the worker cannot see its owner at all. *)
+let wake_skip_log_level = function
+  | Keeper_paused -> Log.Info
+  | Keeper_meta_absent -> Log.Warn
+  | Keeper_meta_read_failed _ -> Log.Error
+;;
+
+let log_wake_skipped ~keeper_name reason =
+  let detail =
+    match reason with
+    | Keeper_paused | Keeper_meta_absent -> ""
+    | Keeper_meta_read_failed detail -> " detail=" ^ detail
+  in
+  Log.Keeper.emit
+    (wake_skip_log_level reason)
+    ~keeper_name
+    (Printf.sprintf
+       "board_attention_worker_wake_skipped keeper=%s reason=%s%s"
+       keeper_name
+       (wake_skip_reason_label reason)
+       detail)
+;;
+
+let run
+      ~sw
+      ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
+      ~net
+      ~base_path
+      ~keeper_name
+  =
+  match Wake.register ~sw ~base_path ~keeper_name with
+  | Error detail ->
+    observe_error ~base_path ~keeper_name detail;
+    Error { stage = Registration; detail }
+  | Ok registration ->
+    Fun.protect
+      ~finally:(fun () ->
+        protect_process_recovery_release (fun () -> Wake.unregister registration))
+      (fun () ->
+         with_process_recovery_claim ~base_path ~keeper_name
+         @@ fun owns_process_recovery ->
+         let worker_epoch = Partition.Worker_epoch.generate () in
+         (* Until this line existed, three states were byte-identical from
+            outside: the worker was never forked, it was forked and never
+            inspected the ledger, or it inspected and found nothing. Measured
+            2026-08-05 while pending grew 425 -> 1031 with zero contention
+            lines and zero worker failures, so the logs that did exist could
+            not tell them apart. *)
+         Log.Keeper.info
+           "board_attention_worker_start keeper=%s epoch=%s"
+           keeper_name
+           (Partition.Worker_epoch.to_string worker_epoch);
+         let fail stage detail =
+           observe_error ~base_path ~keeper_name detail;
+           Error { stage; detail }
+         in
+         let startup =
+           if not owns_process_recovery
+           then Ok ()
+           else
+             let now = Time_compat.now () in
+             let* (_ : int) =
+               Partition.recover_for_process_start
+                 ~now
+                 ~base_path
+                 ~keeper_name
+             in
+             let* () =
+               reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name
+             in
+             let* (_ : Keeper_registry.wakeup_outcome option) =
+               replay_completed_owner_wake
+                 ~base_path
+                 ~keeper_name
+                 ~wake_owner:owner_wake
+             in
+             Ok ()
+         in
+         match startup with
+         | Error detail -> fail Process_start_recovery detail
+         | Ok () ->
+           let prepare =
+             prepare_exact ~base_path ~keeper_name ~net
+           in
+           let execute = execute_exact ~clock in
+           let contention_rearms =
+             make_contention_rearm_scheduler
+               ~fork:(fun task -> Eio.Fiber.fork ~sw task)
+               ~sleep:(Eio.Time.sleep clock)
+               ~request:(fun () -> Wake.request ~base_path ~keeper_name)
+               ()
+           in
+           let deferred_rearm =
+             make_deferred_rearm_scheduler
+               ~fork:(fun task -> Eio.Fiber.fork ~sw task)
+               ~sleep:(Eio.Time.sleep clock)
+               ~request:(fun () -> Wake.request ~base_path ~keeper_name)
+               ~delay_s:
+                 Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec
+           in
+           let rec await () =
+             match Wake.await registration with
+             | Wake.Registration_closed -> Ok ()
+             | Wake.Wake -> drain ()
+           and drain () =
+             match read_wake_admission ~base_path ~keeper_name with
+             | Wake_skipped reason ->
+               log_wake_skipped ~keeper_name reason;
+               rearm_deferred_after_skipped_wake deferred_rearm reason;
+               await ()
+             | Wake_admitted -> drain_admitted ()
+           and drain_admitted () =
+             match
+               drain_available_current
+                 ~yield:Eio.Fiber.yield
+                 ~now:Time_compat.now
+                 ~worker_epoch
+                 ~base_path
+                 ~keeper_name
+                 ~prepare
+                 ~execute
+             with
+             | Ok outcome ->
+               (match outcome with
+                | Lane_deferred _ -> schedule_deferred_rearm deferred_rearm
+                | Drained _ | Retry_later _ -> reset_deferred_rearm deferred_rearm);
+               let progress = drain_outcome_progress outcome in
+               Log.Keeper.emit
+                 (drain_outcome_log_level outcome)
+                 (Printf.sprintf
+                    "board_attention_worker_drain keeper=%s outcome=%s \
+                     judgments=%d steps=%d"
+                    keeper_name
+                    (drain_outcome_label outcome)
+                    progress.judgments
+                    progress.steps);
+               ignore
+                 (apply_drain_rearm contention_rearms outcome
+                  : rearm_schedule option);
+               await ()
+             | Error detail -> fail Durable_drain detail
+           in
+           (try drain () with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              fail
+                Control_loop
+                ("Board attention worker control loop raised: "
+                 ^ Printexc.to_string exn)))
+;;
+
+module For_testing = struct
+  type nonrec exact_callback = exact_callback = Before_dispatch | Before_advance
+  let process_next_exact_with_write_outcome = process_next_exact_with_write_outcome
+  type nonrec rearm_scheduler = rearm_scheduler
+  type nonrec deferred_rearm_scheduler = deferred_rearm_scheduler
+
+  let deliver_and_settle_completed = deliver_and_settle_completed
+  let prunes_and_read = prunes_and_read
+
+  let reconcile_quarantines = reconcile_quarantines
+  let process_next = process_next
+  let process_next_exact = process_next_exact
+  let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
+  let drain_available = drain_available
+  let drain_available_with_process = drain_available_with_process
+  let make_contention_rearm_scheduler = make_contention_rearm_scheduler
+  let schedule_contention_rearm = schedule_contention_rearm
+  let reset_contention_rearms = reset_contention_rearms
+  let make_deferred_rearm_scheduler = make_deferred_rearm_scheduler
+  let schedule_deferred_rearm = schedule_deferred_rearm
+  let reset_deferred_rearm = reset_deferred_rearm
+  let rearm_deferred_after_skipped_wake = rearm_deferred_after_skipped_wake
+  let drain_outcome_label = drain_outcome_label
+  let drain_outcome_progress = drain_outcome_progress
+  let drain_outcome_log_level = drain_outcome_log_level
+  let apply_drain_rearm = apply_drain_rearm
+  let replay_completed_owner_wake = replay_completed_owner_wake
+  let with_process_recovery_claim = with_process_recovery_claim
+  let wake_admission_of_meta_read = wake_admission_of_meta_read
+end
+;;

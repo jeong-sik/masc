@@ -1,0 +1,1022 @@
+type pass_end =
+  | Off
+  | Lane_unconfigured
+  | Drained
+  | Yielded_to_waiting_unit
+  | Not_committed
+  | Pending
+  | Stopped of Keeper_librarian_durable_consumer.error
+  | Raised of string
+
+type measurement =
+  { measured_at : float
+  ; last_pass : pass_end
+  ; unread : Keeper_librarian_durable_consumer.unread option
+  }
+
+let measurements : ((string * string), measurement) Hashtbl.t = Hashtbl.create 16
+let input_capacities :
+    ((string * string), Keeper_lane_cli_oneshot.input_capacity) Hashtbl.t =
+  Hashtbl.create 16
+
+(* How many atoms one continuity pass may read for a Keeper, with the trace
+   the width was measured in. Absent means the pass reads the whole backlog.
+
+   RFC-librarian-lifecycle §4.3: a pass that failed while reading more than
+   one unit reads the oldest unit at a time until the backlog is empty, and
+   the marker lives in the loop's memory only. A width is kept rather than an
+   end atom so the pass that follows a committed unit reads the next one at
+   the same width instead of stopping where the last one did.
+
+   Without the marker every pass prepares the whole backlog again: a Keeper
+   whose snapshot no longer fits its history prepares from atom 0, and on
+   2026-09-22 one walked 12756 -> 6378 -> 3189 ninety-six times and committed
+   nothing, because a pass holds as many attempts as the walk has slots
+   (#37793). *)
+type problem_site =
+  | Durable_drain
+  | Unread_count
+  | Explicit_admission
+  | Memory_cleanup
+
+let all_problem_sites =
+  [ Durable_drain; Unread_count; Explicit_admission; Memory_cleanup ]
+;;
+
+let limited_widths : ((string * string), (string * int)) Hashtbl.t = Hashtbl.create 16
+let reported_problems : (((string * string) * problem_site), string) Hashtbl.t =
+  Hashtbl.create 16
+let measurements_mu = Stdlib.Mutex.create ()
+
+let measurement_key ~config ~keeper_name =
+  Workspace.keepers_runtime_dir config, keeper_name
+;;
+
+let should_report_problem ~config ~keeper_name ~site detail =
+  let key = measurement_key ~config ~keeper_name, site in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    match Hashtbl.find_opt reported_problems key with
+    | Some previous when String.equal previous detail -> false
+    | Some _ | None ->
+      Hashtbl.replace reported_problems key detail;
+      true)
+;;
+
+let clear_reported_problem ~config ~keeper_name ~site =
+  let key = measurement_key ~config ~keeper_name, site in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    Hashtbl.remove reported_problems key)
+;;
+
+let last_measurement ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt measurements key)
+;;
+
+let forget_measurement ~config ~keeper_name =
+  Keeper_memory_cleanup.forget ~base_path:config.Workspace.base_path ~keeper_name;
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    Hashtbl.remove measurements key;
+    Hashtbl.remove input_capacities key;
+    Hashtbl.remove limited_widths key;
+    List.iter
+      (fun site -> Hashtbl.remove reported_problems (key, site))
+      all_problem_sites)
+;;
+
+let limited_width ~config ~keeper_name ~trace_id =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    match Hashtbl.find_opt limited_widths key with
+    | Some (measured_in, width) when String.equal measured_in trace_id -> Some width
+    | Some _ | None -> None)
+;;
+
+(* A trace change renumbers the atoms, so a width measured in another trace
+   is replaced rather than compared. Within one trace only a narrower width
+   is news: a pass that already read a wider unit says nothing about the one
+   that refused. *)
+let limit_width ~config ~keeper_name ~trace_id width =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    match Hashtbl.find_opt limited_widths key with
+    | Some (measured_in, narrowest)
+      when String.equal measured_in trace_id && narrowest <= width -> ()
+    | Some _ | None -> Hashtbl.replace limited_widths key (trace_id, width))
+;;
+
+let release_width ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove limited_widths key)
+;;
+
+(* A pass can report more than once: the walk fails, then recording that
+   failure raises and the handler around it reports the raise. Evidence of
+   size from any report stands; the latest cause is the one logged. The
+   separate message-descent policy also retains any invalid-output veto. *)
+let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committed) =
+  match earlier with
+  | None -> outcome
+  | Some (earlier : Keeper_librarian_runtime.not_committed) ->
+    { outcome with
+      Keeper_librarian_runtime.message_descent =
+        Keeper_librarian_runtime.merge_message_descent earlier.message_descent outcome.message_descent
+    ; Keeper_librarian_runtime.walk_shows_size =
+        earlier.Keeper_librarian_runtime.walk_shows_size
+        || outcome.Keeper_librarian_runtime.walk_shows_size
+    ; smaller_range_meets_same_failure =
+        earlier.Keeper_librarian_runtime.smaller_range_meets_same_failure
+        || outcome.Keeper_librarian_runtime.smaller_range_meets_same_failure
+    ; provider_input_refusals =
+        Keeper_librarian_input_refusal.union earlier.provider_input_refusals outcome.provider_input_refusals
+    }
+;;
+
+let last_input_capacity ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt input_capacities key)
+;;
+
+let remember_input_capacity ~config ~keeper_name capacity =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace input_capacities key capacity)
+;;
+
+let forget_input_capacity ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove input_capacities key)
+;;
+
+let publish_measurement ~config ~keeper_name ~last_pass ~unread =
+  let key = measurement_key ~config ~keeper_name in
+  let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace measurements key measurement)
+;;
+
+let measure_unread ~config ~keeper_name =
+  try
+    match Keeper_librarian_durable_consumer.unread_turns ~config ~keeper_name with
+    | Ok unread ->
+      clear_reported_problem ~config ~keeper_name ~site:Unread_count;
+      Some unread
+    | Error error ->
+      let detail = Keeper_librarian_durable_consumer.error_to_string error in
+      if should_report_problem ~config ~keeper_name ~site:Unread_count detail
+      then
+        Log.Keeper.warn ~keeper_name "Librarian unread count unavailable: %s" detail;
+      None
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    (* Observation failure must not change the durable drain's result. *)
+    let detail = Printexc.to_string exn in
+    if should_report_problem ~config ~keeper_name ~site:Unread_count ("raised:" ^ detail)
+    then
+      Log.Keeper.warn ~keeper_name "Librarian unread count raised: %s" detail;
+    None
+;;
+
+let uncommitted_pass () =
+  match Runtime_exact_output_registry.current () with
+  | Error _ -> Lane_unconfigured
+  | Ok registry ->
+    let lane_id = Standalone_lane.to_id Standalone_lane.Librarian in
+    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+    | Error (Runtime_exact_output_registry.Exact_lane_off _) -> Off
+    | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> Lane_unconfigured
+    | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> Not_committed
+;;
+
+let run_durable_with_consumer ~config ~keeper_name ~consume =
+  let rec drain () =
+    match Env_config.KeeperMemoryOs.librarian_config_state () with
+    | Disabled | Invalid ->
+      clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+      Off
+    | Enabled ->
+      match consume () with
+      | Ok Keeper_librarian_durable_consumer.Nothing_to_read ->
+        clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+        Drained
+      | Ok Keeper_librarian_durable_consumer.Pending ->
+        clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+        Pending
+      | Ok (Memory_not_committed reports) ->
+        (match reports with
+         | [] -> clear_reported_problem ~config ~keeper_name ~site:Durable_drain
+         | _ :: _ ->
+           let detail = String.concat "; " (List.map
+             (fun (report : Keeper_librarian_runtime.not_committed) ->
+               Printf.sprintf "%s; provider_input_refusals=[%s]" report.detail
+                 (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
+                   report.provider_input_refusals))) reports) in
+           if should_report_problem ~config ~keeper_name ~site:Durable_drain detail then
+             Log.Keeper.warn ~keeper_name "durable Librarian pass not committed: %s" detail);
+        uncommitted_pass ()
+      | Ok (Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+        clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
+        (* A committed range is the boundary at which later phases and a
+           waiting unit can run. New completed turns may arrive faster than
+           Memory reads them; draining until empty would then never reach
+           continuity or the Goal-enriched queue pass. The next unit resumes
+           the stored cursor, so yielding discards no source. *)
+        if Keeper_memory_lane.has_waiting ~base_path:config.Workspace.base_path ~keeper_name
+        then Yielded_to_waiting_unit
+        else drain ()
+      | Error error ->
+        let detail = Keeper_librarian_durable_consumer.error_to_string error in
+        if should_report_problem ~config ~keeper_name ~site:Durable_drain detail
+        then
+          Log.Keeper.warn ~keeper_name "durable Librarian range not consumed: %s" detail;
+        Stopped error
+  in
+  try
+    let last_pass = drain () in
+    let unread =
+      match last_pass with
+      | Off | Stopped Keeper_librarian_durable_consumer.Keeper_meta_absent ->
+        clear_reported_problem ~config ~keeper_name ~site:Unread_count;
+        None
+      (* Any other stop reason still leaves the current unread count
+         readable, so it is measured rather than reported as a problem.
+         Every error constructor is named so a new one fails this match
+         instead of silently counting as measurable. *)
+      | Lane_unconfigured
+      | Drained
+      | Yielded_to_waiting_unit
+      | Not_committed
+      | Pending
+      | Stopped
+          (Keeper_librarian_durable_consumer.
+             ( Keeper_meta_unreadable _
+             | Boundary_log_unreadable _
+             | Progress_unreadable _
+             | Checkpoint_unreadable _
+             | Original_publication_blocked _
+             | Source_capture_failed _
+             | Position_in_other_trace _
+             | Position_not_in_history _
+             | Range_stopped _
+             | Range_end_boundary_missing _
+             | Progress_boundary_missing _
+             | Memory_snapshot_unreadable _
+             | Counterpart_interval_non_monotone _
+             | Counterpart_observations_unreadable _
+             | Progress_write_failed _
+             | Official_progress_unreadable _
+             | Official_progress_write_failed _
+             | Official_progress_boundary_missing _
+             | Committed_official_range_mismatch
+             | Official_range_stopped _
+             | Fragment_store_unreadable _
+             | Fragment_line_unreadable _ ))
+      | Raised _ ->
+        measure_unread ~config ~keeper_name
+    in
+    publish_measurement ~config ~keeper_name ~last_pass ~unread;
+    last_pass
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    (* Do not run another filesystem read in the cancelled context. Replace
+       any older success observation before preserving cancellation. *)
+    publish_measurement ~config ~keeper_name ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None;
+    raise exn
+  | exn ->
+    publish_measurement ~config ~keeper_name ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None;
+    raise exn
+;;
+
+let run_durable_with_commit ~config ~keeper_name ~commit =
+  run_durable_with_consumer ~config ~keeper_name ~consume:(fun () ->
+    Keeper_librarian_durable_consumer.consume_one ~config ~keeper_name ~commit)
+;;
+
+let run_durable ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
+  run_durable_with_consumer ~config ~keeper_name ~consume:(fun () ->
+    Keeper_librarian_durable_execution.consume_one ~config ~keeper_name
+      ~wake:(fun () -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name))
+;;
+
+(* Continuity has its own exact source position. A Memory baseline does not
+   claim the earlier checkpoint was summarized. Work stays in this Keeper's
+   existing serial Librarian lane. *)
+let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
+  let module P = Keeper_librarian_continuity in
+  let module Runtime = Keeper_librarian_runtime in
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let module O = Keeper_continuity_observation in
+  let trace_id = ref None and selected_range = ref None in
+  let observe ?stop_reason state = O.record_synthesis ~config ~keeper_name
+      {O.observed_at=Time_compat.now (); trace_id= !trace_id;
+       state; stop_reason; range= !selected_range} in
+  let select prepared =
+    trace_id := Some (Ids.Turn_ref.trace_id (P.turn_ref prepared));
+    selected_range := Some {O.start_atom=P.start_atom prepared;
+      end_atom=P.end_atom prepared; completed_end_atom=P.completed_end_atom prepared} in
+  let report state reason detail =
+    observe ~stop_reason:reason state;
+    Log.Keeper.warn ~keeper_name "continuity pass stopped: %s" detail in
+  (* Keep the server's measured character limit across wakes in this process.
+     A domain-output failure must not make the next drain rediscover it with
+     another oversized request. Fitting still checks the runtime is selected
+     and re-renders every chunk; neither an atom count nor a prompt is cached. *)
+  let capacity = ref (last_input_capacity ~config ~keeper_name) in
+  (* RFC-0467: a committed round loops only while nothing waits on the lane.
+     A waiting unit starts with the durable pass for the turns that ended
+     meanwhile, then resumes continuity at the same position and width, so
+     ending here loses no progress and keeps Memory following the turns. *)
+  let has_waiting = match has_waiting with
+    | Some has_waiting -> has_waiting
+    | None -> fun () -> Keeper_memory_lane.has_waiting ~base_path ~keeper_name in
+  (* What a Memory pass over [unit] carries, as the durable pass would for the
+     same atoms: their messages, the tool calls in them, and the counterpart
+     observations of the turn they finish (none for a unit that stops inside
+     its turn; the unit that finishes it carries the turn's). *)
+  let source_input ~include_observations (base : Keeper_librarian.input) unit =
+    let module H = Keeper_librarian_task_context in
+    let _, _, messages, observations, contexts = List.fold_left
+      (fun (message_count, tool_count, messages, observations, contexts) (scope, slice) ->
+        let tools = if include_observations then
+          Keeper_librarian_durable_consumer.tool_observations slice else [] in
+        let after_message = message_count + List.length slice in
+        let after_tool_observation = tool_count + List.length tools in
+        let context : H.t = {scope;first_message=message_count;after_message;
+          first_tool_observation=tool_count;after_tool_observation} in
+        after_message, after_tool_observation, List.rev_append slice messages,
+        List.rev_append tools observations, context :: contexts)
+      (0, 0, [], [], []) (P.source_spans ~include_unread:include_observations unit) in
+    {base with messages=List.rev messages; tool_observations=List.rev observations;
+      historical_task_contexts=List.rev contexts} in
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let external_capture = ref None in
+  let memory_input (base : Keeper_librarian.input) unit =
+    let open Result.Syntax in
+    let input = source_input ~include_observations:true base unit in
+    let* counterpart_observations = match P.turn_window unit with
+      | None -> external_capture := None; Ok []
+      | Some { P.after; through } ->
+        let* cursor = Keeper_external_read_cursor.read ~memory_keepers_dir:keepers_dir
+          ~runtime_keepers_dir ~keeper_name in
+        let* observations, through = Keeper_librarian_input_sources.counterpart_observations_from
+          ~external_after:(Keeper_external_read_cursor.offset cursor)
+          ~base_dir:base_path ~keeper_name ~after ~before:through
+          |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
+        external_capture := Some (cursor,through);
+        Ok observations in
+    Ok { input with counterpart_observations } in
+  (* [previous] is the unit this walk's last round committed: the next round
+     reuses its checkpoint read and prefix digest while the checkpoint file
+     holds the same bytes. A new walk starts without one. *)
+  let rec next ?previous () =
+    observe O.Checking;
+    match Env_config.KeeperMemoryOs.librarian_config_state () with
+    | Disabled | Invalid -> observe O.Disabled
+    | Enabled ->
+      match Keeper_meta_store.read_effective_meta_presence_named config keeper_name with
+      | Error detail | Ok (_, Keeper_meta_store.Meta_not_current detail) -> report O.Source_unavailable O.Source_read_failed detail
+      | Ok (_, Keeper_meta_store.Meta_absent) -> observe O.Source_unavailable
+      | Ok (keeper_id, Keeper_meta_store.Meta_present meta) ->
+        let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+        if !trace_id <> Some current_trace then selected_range := None;
+        trace_id := Some current_trace;
+        let settle_no_source = function
+          | P.Drained ->
+            (* §4.3 releases the limit when the backlog is read to its end, and
+               on no other outcome: one narrowed commit does not show that the
+               range which refused now fits. A superseded checkpoint has no
+               backlog left, and the width was measured on atoms no pass
+               reads again. *)
+            release_width ~config ~keeper_name;
+            observe O.No_source
+          | P.Source_unreadable | P.Empty_range ->
+            (* Not evidence that the backlog was read. The checkpoint this
+               trace names is absent, or the prefix asked for sits at the
+               start. Releasing the width here would send the next pass back
+               at the whole backlog, which is the loop this limit exists to
+               stop. *)
+            observe O.No_source
+        in
+        (* A worker pool keeps the job closure until the job returns, so the
+           closure takes [previous] out of a cell rather than capturing it:
+           the source then drops the round before's checkpoint once it knows
+           the file changed, before decoding the new one. *)
+        let handed = ref previous in
+        match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+          let previous = !handed in
+          handed := None;
+          P.prepare_source ?previous ~config ~keeper_name ~trace_id:current_trace ()) with
+        | Error detail -> report O.Source_unavailable O.Source_read_failed detail
+        | Ok (P.No_source no_source) -> settle_no_source no_source
+        | Ok (P.Ready prepared) ->
+          (match limited_width ~config ~keeper_name ~trace_id:current_trace with
+           | None -> attempt ~keeper_id meta prepared
+           | Some width when P.end_atom prepared - P.start_atom prepared <= width ->
+             attempt ~keeper_id meta prepared
+           | Some width ->
+             (* Cut at the width: the unit read is then the width the last
+                refusal left, and the logged number is the number of atoms
+                this pass sends. *)
+             let end_atom = P.start_atom prepared + width in
+             (* The prepared source already owns the exact checkpoint and
+                validated boundaries. Re-reading it here decoded and hashed
+                the whole history again just to choose a smaller endpoint. *)
+             (match Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+                P.select_prefix ~end_atom prepared) with
+              | Error detail -> report O.Input_unavailable O.Input_build_failed detail
+              | Ok one_unit ->
+                (* completed_end_atom names the last completed turn inside the
+                   prepared range: when it equals start_atom the range holds no
+                   turn cut, and the unit is an atom cut rather than a turn. *)
+                Log.Keeper.info ~keeper_name
+                  "continuity pass reads one unit; width=%d start_atom=%d completed_end_atom=%d \
+                   end_atom=%d -> %d"
+                  width (P.start_atom prepared) (P.completed_end_atom prepared)
+                  (P.end_atom prepared) (P.end_atom one_unit);
+                attempt ~keeper_id meta one_unit))
+  and attempt ~keeper_id meta prepared =
+    select prepared;
+    let inputs = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      let open Result.Syntax in
+      let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+      let input : Keeper_librarian.input =
+        { turn_ref = P.turn_ref prepared; historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
+          keeper_id;
+          keeper_instructions = meta.Keeper_meta_contract.instructions;
+          current = Option.map (fun (value : Keeper_memory_os_current.t) ->
+            {Keeper_librarian.facts = value.facts}) current;
+          working_context = Keeper_librarian_context.empty;
+          messages = P.messages prepared;
+          tool_observations = []; counterpart_observations = [] } in
+      let* fitted = match !capacity with
+        | None -> Ok (Some prepared)
+        | Some capacity -> Runtime.fit_continuity ~capacity ~base_path
+            ~keeper_id:keeper_name ~input_for:(memory_input input) prepared in
+      let selected = match fitted with
+        | Some fitted -> fitted
+        | None ->
+          (* One fallback's limit cannot prohibit other providers. If no
+             indivisible range fits it, keep the source for the normal lane
+             walk; only a real final refusal may stop this attempt. *)
+          prepared in
+      let* memory_committed = P.memory_committed ~config ~keeper_name selected in
+      let* range_id = P.memory_range_id ~config ~keeper_name selected in
+      (* A pass that saves Memory for these atoms is the only one that will:
+         the durable pass moves past them without reading them again. So it
+         carries what the durable pass would have. A pass whose Memory is
+         already saved needs neither observation. *)
+      let* input =
+        if memory_committed then Ok (source_input ~include_observations:false input selected)
+        else memory_input input selected in
+      let* () = if memory_committed then Ok () else
+        match !external_capture with
+        | None -> Ok ()
+        | Some (cursor,through) ->
+          Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir ~runtime_keepers_dir ~keeper_name cursor
+            ~through ~atom:(Some range_id) ~official:None in
+      Ok (current, memory_committed, range_id, selected, input)) in
+    match inputs with
+    | Error detail -> report O.Input_unavailable O.Input_build_failed detail
+    | Ok (current, memory_committed, range_id, selected, input) ->
+      if P.end_atom selected <> P.end_atom prepared then
+        Log.Keeper.info ~keeper_name
+          "continuity input fitted before dispatch; end_atom=%d -> %d"
+          (P.end_atom prepared) (P.end_atom selected);
+      select selected;
+      observe O.Running;
+      let saved = ref false and cli_limit = ref None and cause = ref None in
+      Runtime.run_best_effort ?cli_runner
+        ~write_scope:(if memory_committed then Runtime.Context_only else Context_and_memory)
+        ~continuity:selected
+        ?durable_range_id:(if memory_committed then None else Some range_id)
+        ~on_cli_input_limit:(fun observed ->
+          (* Do not cache a failed walk's measurement until its complete
+             descent policy settles. An invalid-output veto must also hold
+             on the next wake, before pre-dispatch fitting. *)
+          cli_limit := Some observed)
+        ~on_not_committed:(fun outcome -> cause := Some (merge_not_committed !cause outcome))
+        ~on_continuity_committed:(fun ~served_by _ ->
+          (* A CLI's reported limit is a fact about the CLI transport. The
+             walk sends one prompt to every slot, so the range is fitted to
+             it before dispatch whenever a CLI slot may be reached. An API
+             slot that committed took the range without that limit, so the
+             next attempt goes out whole again; if the walk reaches a CLI
+             again, that CLI measures anew. A CLI slot that committed, the
+             one that measured or another, answered inside the limit, so
+             the limit stands (#37625). *)
+          (match served_by with
+           | Runtime.Api_slot _ ->
+             forget_input_capacity ~config ~keeper_name;
+             capacity := None
+           | Runtime.Cli_slot _ -> ());
+          saved := true; observe O.Committed)
+        ~base_path ~keepers_dir ~keeper_id:keeper_name
+        ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
+        input;
+      if !saved && not (has_waiting ()) then next ~previous:selected ()
+      else if !saved then Log.Keeper.info ~keeper_name
+        "continuity round committed; yielding to the waiting Librarian unit"
+      else
+      let cause_detail () =
+        match !cause with
+        | Some outcome ->
+          Printf.sprintf "%s; provider_input_refusals=[%s]" outcome.Runtime.detail
+            (String.concat "," (List.map
+              Keeper_librarian_input_refusal.to_string
+              outcome.provider_input_refusals))
+        | None -> "no provider attempt settled the pass" in
+      (* No verdict at all means nothing said the size was the problem, so
+         the width stands. A pass can end without one -- a snapshot commit
+         that failed on disk, a raise before any request was composed -- and
+         reading less would answer a local failure by shrinking the source. *)
+      let may_descend = Runtime.may_descend_messages (Option.to_list !cause) in
+      match !cli_limit with
+      | (None | Some _) when not may_descend ->
+        (* The complete walk either has no descent evidence or contains an
+           invalid-output veto. Keep the source width unchanged for the next
+           signal rather than treating a quota or malformed output as a reason
+           to walk down toward one atom. *)
+        report O.Not_committed O.No_smaller_range_evidence
+          (Printf.sprintf "failed walk does not permit reading less; the width stands; cause=%s"
+             (cause_detail ()))
+      | None ->
+        (* Something the walk met could have been answered by sending less, so
+           §4.3 applies: a pass that failed while reading more than one unit
+           reads the oldest unit at a time from then on. The refusals this
+           answers (model limit, timeout, refused output) do not announce
+           themselves in one shape, which is why the question asked above is
+           the narrower one -- whether a smaller request would have met the
+           same wall -- and why it is asked of every failure in the walk. The
+           verdict used to come from the slot the walk happened to end on, so
+           the same set of causes answered differently depending on the order
+           the slots were tried. *)
+        (match P.narrow selected with
+         | Some smaller ->
+           (* §4.3 again: a failed pass does not retry here and sets no timer.
+              It records the narrower unit and waits for the next signal, so a
+              failure that is not about size costs one provider call rather
+              than one per step down to a single atom. *)
+           limit_width ~config ~keeper_name
+             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+             (P.end_atom smaller - P.start_atom smaller);
+           report O.Not_committed O.Narrowed_for_next_signal
+             (Printf.sprintf
+                "the next pass reads %d atoms instead of %d; cause=%s"
+                (P.end_atom smaller - P.start_atom smaller)
+                (P.end_atom selected - P.start_atom selected)
+                (cause_detail ()))
+         | None ->
+           (* An existing Memory receipt can cover several atoms and cannot be
+              split. Infer the continuation without publishing partial state;
+              the original prepared range remains the sole commit boundary. *)
+           (match memory_committed, input.messages with
+            | true, _ :: _ -> message_floor ~selected ~input
+            | false, _ :: _ -> memory_message_floor ~selected ~input
+            | false, [] | true, [] ->
+              report O.Not_committed O.Indivisible_unit_uncommitted
+                (Printf.sprintf "one unit remains and the pass did not commit; cause=%s" (cause_detail ()))))
+      | Some observed ->
+        remember_input_capacity ~config ~keeper_name observed;
+        capacity := Some observed;
+        (* A CLI slot named the character limit it refused at, so the size
+           that fits is computed rather than searched: this arm retries inside
+           the pass and records no width, where the arm above, which only
+           knows that something was too large, steps down once and waits. *)
+        let fitted = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+          Runtime.fit_continuity ~capacity:observed ~base_path
+            ~keeper_id:keeper_name ~input_for:(memory_input input) selected) in
+        (match fitted with
+         | Error detail -> report O.Input_unavailable O.Input_build_failed detail
+         | Ok None when not memory_committed ->
+           (match P.narrow selected with
+            | Some smaller -> attempt ~keeper_id meta smaller
+            | None -> memory_message_floor ~selected ~input)
+         | Ok None ->
+           (match input.messages with
+            | _ :: _ -> message_floor ~selected ~input
+            | [] -> report O.Capacity_refused O.Observed_capacity_unfit
+                "source cannot fit the reported CLI input capacity")
+         | Ok (Some smaller) when P.end_atom smaller < P.end_atom selected ->
+           Log.Keeper.info ~keeper_name
+             "continuity input fitted to reported capacity; runtime=%s max_chars=%d end_atom=%d -> %d"
+             observed.runtime_id observed.capacity.max_chars
+             (P.end_atom selected) (P.end_atom smaller);
+           attempt ~keeper_id meta smaller
+         | Ok (Some _) ->
+           report O.Capacity_refused O.Observed_capacity_disagrees "provider capacity refusal disagrees with local prompt measurement")
+  and memory_message_floor ~selected ~(input : Keeper_librarian.input) =
+    let module Current = Keeper_memory_os_current in
+    let module Floor = Keeper_librarian_message_floor in
+    let module Unread = Keeper_librarian_unread in
+    let open Result.Syntax in
+    let refusal_detail reports = String.concat "; " (List.map
+      (fun (outcome : Runtime.not_committed) -> Printf.sprintf "%s; provider_input_refusals=[%s]"
+        outcome.detail (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
+          outcome.provider_input_refusals))) reports) in
+    let inferred =
+      let* sources = P.memory_sources selected in
+      let* archived = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name) in
+      let* unread_messages = Unread.merge (P.previous_unread_messages selected) archived in
+      let* inferred = Floor.infer ?cli_runner ~base_path ~keepers_dir ~keeper_name ~sources
+        ~unread_message:(fun source ~reasons -> P.unread_message selected ~source ~reasons)
+        ~previous_state:(P.previous_working_state selected) ~unread_messages input
+        |> Result.map_error (fun (error : Floor.error) ->
+          error.detail ^ "; " ^ refusal_detail error.reports) in
+      let* working_state, served_by = match inferred.working_state with
+        | Some working_state -> Ok (working_state,inferred.served_by)
+        | None ->
+          (* A continuation needs a real state even when every original
+             message is a hole and there were no host observations. *)
+          let* unread_messages = Unread.merge unread_messages inferred.program.unread in
+          let current : Keeper_librarian.current_selection option =
+            Current.program_anchor_snapshot inferred.anchor |> Option.map
+              (fun (snapshot : Current.t) -> {Keeper_librarian.facts=snapshot.facts}) in
+          let empty = {input with current;messages=[];
+            historical_task_contexts=[];tool_observations=[];counterpart_observations=[]} in
+          (match (Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+            ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty).outcome with
+           | Runtime.Inferred {working_state;served_by} -> Ok (working_state,Some served_by)
+           | Runtime.Not_inferred failure -> Error (refusal_detail failure.reports)) in
+      Ok (inferred.anchor,inferred.program,working_state,served_by) in
+    match inferred with
+    | Error detail -> report O.Not_committed O.Indivisible_unit_uncommitted
+        (detail ^ "; volatile Memory and working state discarded")
+    | Ok (anchor,program,working_state,served_by) ->
+      let published_memory = ref false in
+      let published = Eio.Cancel.protect (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+          let* range = P.memory_range_id ~config ~keeper_name selected in
+          let range = {range with Current.unread_messages=program.Keeper_memory_os_program.unread} in
+          let* () = match !external_capture with
+            | None -> Ok ()
+            | Some (cursor,through) ->
+              Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir
+                ~runtime_keepers_dir ~keeper_name cursor ~through ~atom:(Some range) ~official:None in
+          let* snapshot = P.apply_memory_program ~config ~keeper_name ~prepared:selected ~anchor
+            ~program ~working_state ~on_memory_committed:(fun () -> published_memory := true) () in
+          let* () = Keeper_external_read_cursor.acknowledge ~runtime_keepers_dir ~keeper_name in
+          Ok snapshot)) in
+      Eio.Fiber.check ();
+      (match published with
+       | Error detail -> report O.Not_committed O.Input_build_failed
+           (Printf.sprintf "message floor publication stopped; Memory committed=%b; %s"
+              !published_memory detail)
+       | Ok _ ->
+         (match served_by with
+          | Some (Runtime.Api_slot _) ->
+            forget_input_capacity ~config ~keeper_name; capacity := None
+          | Some (Runtime.Cli_slot _) | None -> ());
+         observe O.Committed;
+         if not (has_waiting ()) then next ~previous:selected ())
+  and message_floor ~selected ~(input : Keeper_librarian.input) =
+    let module H = Keeper_librarian_task_context in
+    let module Unread = Keeper_librarian_unread in
+    let open Result.Syntax in
+    let refusal_detail position (failure : Runtime.inference_failure) =
+      let detail = match failure.reports with
+        | [] -> "no classified provider outcome"
+        | reports -> String.concat "; " (List.map
+            (fun (outcome : Runtime.not_committed) -> Printf.sprintf
+              "%s; provider_input_refusals=[%s]" outcome.detail
+              (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
+                outcome.provider_input_refusals))) reports) in
+      Printf.sprintf "message %d did not read; cause=%s" position detail in
+    let known = P.previous_unread_messages selected in
+    let inferred =
+      let* sources = P.memory_sources selected in
+      (* Context-only input already excludes exact holes from Memory recovery.
+         Keep the original coordinates, rather than renumbering the retained
+         input's messages inside their atoms. *)
+      let sources = List.filter (fun source -> not (List.exists
+        (fun (hole : Unread.t) -> hole.source=source) known)) sources in
+      let rec bind sources messages = match sources,messages with
+        | [],[] -> Ok ()
+        | source::sources,message::messages ->
+          let digest = match source with
+            | Unread.Atom source -> source.message_sha256
+            | Unread.Official_turn source -> source.message_sha256 in
+          if digest=Unread.message_digest message then bind sources messages
+          else Error "continuity message differs from its original source"
+        | [],_::_ | _::_,[] -> Error "continuity message source manifest differs" in
+      let* () = bind sources input.messages in
+      let rec read state served position holes sources messages =
+        let* unread_messages = Unread.merge known holes in
+        match sources,messages with
+        | [],[] ->
+          (match state with
+           | Some state -> Ok (state,served,holes)
+           | None ->
+             let empty = {input with messages=[];historical_task_contexts=[];
+               tool_observations=[];counterpart_observations=[]} in
+             (match (Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+               ~keeper_id:keeper_name ~previous_state:None ~unread_messages empty).outcome with
+              | Runtime.Inferred {working_state;served_by} -> Ok (working_state,Some served_by,holes)
+              | Runtime.Not_inferred failure -> Error (refusal_detail position failure)))
+        | source::sources,message::remaining ->
+          let historical_task_contexts = List.filter_map (fun (context : H.t) ->
+            if context.first_message <= position && position < context.after_message then
+              Some {context with first_message=0;after_message=1;
+                first_tool_observation=0;after_tool_observation=0}
+            else None) input.historical_task_contexts in
+          let selected_input = {input with messages=[message]; historical_task_contexts;
+            tool_observations=[];counterpart_observations=[]} in
+          (match (Runtime.infer_working_state ?cli_runner ~base_path ~keepers_dir
+            ~keeper_id:keeper_name ~previous_state:state ~unread_messages selected_input).outcome with
+           | Runtime.Inferred {working_state;served_by} ->
+             read (Some working_state) (Some served_by) (position + 1) holes sources remaining
+           | Runtime.Not_inferred failure ->
+             (match failure.exhausted_input_refusals with
+              | Some (_::_ as reasons) ->
+                let* hole = P.unread_message selected ~source ~reasons in
+                let* holes = Unread.merge holes [hole] in
+                read state served (position+1) holes sources remaining
+              | None | Some [] -> Error (refusal_detail position failure)))
+        | [],_::_ | _::_,[] -> Error "continuity message source manifest differs"
+      in
+      read (P.previous_working_state selected) None 0 [] sources input.messages in
+    match inferred with
+    | Error detail ->
+      (* A later signal starts at the unchanged snapshot. Neither a partial
+         inferred state nor a failed message is published as consumed. *)
+      report O.Not_committed O.Indivisible_unit_uncommitted
+        (detail ^ "; volatile state and new unread records discarded")
+    | Ok (working_state, served_by, new_unread_messages) ->
+      let published = Eio.Cancel.protect (fun () ->
+        let result = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+          P.commit ~config ~keeper_name ~prepared:selected ~new_unread_messages ~working_state) in
+        (match result with
+         | Error detail -> report O.Not_committed O.Input_build_failed detail
+         | Ok _ ->
+           (match served_by with
+            | Some (Runtime.Api_slot _) ->
+              forget_input_capacity ~config ~keeper_name; capacity := None
+            | Some (Runtime.Cli_slot _) | None -> ());
+           observe O.Committed);
+        result) in
+      Eio.Fiber.check ();
+      (match published with
+       | Error _ -> ()
+       | Ok _ -> if not (has_waiting ()) then next ~previous:selected ())
+  in
+  try next () with
+  | Eio.Cancel.Cancelled _ as exn -> observe O.Cancelled; raise exn
+  | exn -> observe ~stop_reason:O.Raised_during_pass O.Not_committed; raise exn
+;;
+
+(* The pending inputs the last committed queue pass was shown, beside the
+   working-context version that pass wrote and how many stores it could not read.
+   A snapshot stores only the sources its pockets reference, and a pass that
+   could not read one store keeps history it cannot confirm settled, so the
+   stored references can differ from the pending ones on every capture while
+   nothing changed. Compared against this record instead, an unchanged
+   capture ends without a model call; a pass is still needed once the
+   inputs change, a pocket needs reconsideration, or a store unread at the
+   last pass can be read. The record lives in this process's memory only,
+   like [limited_widths]: another writer's version or a restart falls back
+   to the stored references, at the cost of at most one pass. *)
+type observed_inputs =
+  { version : Keeper_librarian_context.version
+  ; references : string list
+  ; unreadable_stores : int
+      (** How many stores the capture could not read. A store read again
+          may settle sources the snapshot still holds, so fewer unreadable
+          stores than last time asks for a pass. Counted, not compared by
+          their failure text. *)
+  }
+
+let observed_inputs : ((string * string), observed_inputs) Hashtbl.t = Hashtbl.create 16
+
+let context_references (sources : Keeper_librarian_context.source list) =
+  List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
+  |> List.sort String.compare
+;;
+
+let remember_context_pass ~keepers_dir ~keeper_name
+    (working_context : Keeper_librarian_context.input) version =
+  let observed =
+    { version
+    ; references = context_references working_context.sources
+    ; unreadable_stores = List.length working_context.unavailable
+    }
+  in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    Hashtbl.replace observed_inputs (keepers_dir, keeper_name) observed)
+;;
+
+let context_pass_needed ~keepers_dir ~keeper_name
+    (working_context : Keeper_librarian_context.input) =
+  let references = context_references working_context.sources in
+  match working_context.previous with
+  | None -> references <> []
+  | Some snapshot ->
+    let needs_reconsideration = List.exists (fun (p : Keeper_librarian_context.pocket) ->
+      p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
+    let observed = Stdlib.Mutex.protect measurements_mu (fun () ->
+      Hashtbl.find_opt observed_inputs (keepers_dir, keeper_name)) in
+    let changed = match observed with
+      | Some observed when observed.version = Keeper_librarian_context.version snapshot ->
+        references <> observed.references
+        || List.length working_context.unavailable < observed.unreadable_stores
+      | Some _ | None -> references <> context_references snapshot.sources in
+    changed || needs_reconsideration
+;;
+
+(* The queue pass organizes the inputs pending now, with no turn range, so
+   the Keeper's current task is the task these inputs belong to. The durable
+   and continuity passes read turns that may predate that task, so their
+   current Goal context stays [No_task]. Historical durable context is separate;
+   continuity admission provenance is not yet transported. *)
+(* The working-context pass organizes pending sources only and reads no
+   Memory, so its input carries no current selection. *)
+let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
+    ~working_context : Keeper_librarian.input =
+  { keeper_id
+  ; turn_ref = Ids.Turn_ref.make
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~absolute_turn:meta.runtime.usage.total_turns
+  ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
+  ; keeper_instructions = meta.instructions
+  ; current = None
+  ; working_context
+  ; messages = []; tool_observations = []; counterpart_observations = [] }
+
+(* The queue signal hands this unit a bare name, and the queue pass reads the
+   Owner's meta, not the store read that refuses a blank name for the durable
+   and continuity passes. So the name is parsed here, once, before any pass
+   runs. A blank one names no Keeper the Librarian could be told about
+   (RFC-0468 §3.1): the unit raises, and the memory lane logs and counts it
+   as a failed unit. *)
+exception Blank_keeper_name
+
+let after_durable ~durable ~following =
+  match durable () with
+  | Pending -> ()
+  | Stopped error ->
+    if not (Keeper_librarian_durable_consumer.publication_unfinished error) then following ()
+  | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+  | Not_committed | Raised _ -> following ()
+;;
+
+let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =
+  let keeper_id =
+    match Keeper_identity.Keeper_id.of_string keeper_name with
+    | Some keeper_id -> keeper_id
+    | None -> raise Blank_keeper_name
+  in
+  after_durable ~durable ~following:(fun () ->
+    continuity ();
+    (match Env_config.KeeperMemoryOs.librarian_config_state (),
+          Keeper_owner_projection.lookup ~base_path ~keeper_name with
+    | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+      let working_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
+      if context_pass_needed ~keepers_dir ~keeper_name working_context then (
+        let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
+            ~working_context in
+        Keeper_librarian_runtime.run_best_effort
+          ~write_scope:Keeper_librarian_runtime.Context_only
+          ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
+          ~base_path ~keepers_dir ~keeper_id:keeper_name
+          ~expected_revision:None inp)
+    | (Disabled | Invalid), _
+    | Enabled, (Owner_absent | Owner_projection {meta = None; _}
+               | Owner_projection {stopping = true; _}) -> ());
+    cleanup ())
+
+let run_memory_cleanup ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
+  match Keeper_memory_cleanup.run ~base_path ~keeper_name with
+  | Disabled | Within_limits | Already_reviewed ->
+    clear_reported_problem ~config ~keeper_name ~site:Memory_cleanup
+  | Reviewed Limits_reached ->
+    clear_reported_problem ~config ~keeper_name ~site:Memory_cleanup;
+    Log.Keeper.info ~keeper_name
+      "Librarian memory count cleanup reached the configured limits"
+  | Reviewed Progress_with_excess ->
+    clear_reported_problem ~config ~keeper_name ~site:Memory_cleanup;
+    Log.Keeper.info ~keeper_name
+      "Librarian memory count cleanup reduced excess; next pass requested"
+  | Reviewed Excess_retained ->
+    clear_reported_problem ~config ~keeper_name ~site:Memory_cleanup;
+    Log.Keeper.info ~keeper_name
+      "Librarian memory count cleanup retained excess; awaiting a later wake"
+  | Unavailable detail ->
+    if should_report_problem ~config ~keeper_name ~site:Memory_cleanup detail then
+      Log.Keeper.warn ~keeper_name "Librarian memory count cleanup unavailable: %s" detail
+;;
+
+let run_explicit_admission ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
+  match Keeper_memory_admission_worker.run ~base_path ~keeper_name with
+  | Disabled | Idle ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission
+  | Recheck_new_input ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
+    Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending; new input arrived during judgment";
+    Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+  | Settled {has_more} ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
+    Log.Keeper.info ~keeper_name "Librarian explicit admission committed and acknowledged";
+    if has_more then Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+  | Pending detail ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
+    Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending: %s" detail
+  | Addon_unattached {pending} ->
+    (* Off by configuration, not a failure. Say it once per waiting count, so
+       the operator sees the queue grow without a line every pass. *)
+    let detail = Printf.sprintf "addon_unattached:%d" pending in
+    if should_report_problem ~config ~keeper_name ~site:Explicit_admission detail then
+      Log.Keeper.warn ~keeper_name
+        "Librarian explicit admission is off: no keeper-librarian Add-on is attached; %d candidates wait"
+        pending
+  | Unavailable detail ->
+    if should_report_problem ~config ~keeper_name ~site:Explicit_admission detail then
+      Log.Keeper.warn ~keeper_name "Librarian explicit admission unavailable: %s" detail
+;;
+
+let run ~base_path ~keeper_name =
+  run_explicit_admission ~base_path ~keeper_name;
+  run_with_readers
+    ~durable:(fun () -> run_durable ~base_path ~keeper_name)
+    ~continuity:(fun () -> run_continuity ~base_path ~keeper_name ())
+    ~cleanup:(fun () -> run_memory_cleanup ~base_path ~keeper_name)
+    ~base_path ~keeper_name
+;;
+
+let install () =
+  Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+    match Env_config.KeeperMemoryOs.librarian_config_state () with
+    | Disabled | Invalid -> ()
+    | Enabled ->
+      (* Queue commits can originate in HTTP/IO domains. Only the short
+         submission crosses to the root switch owner; model work is detached. *)
+      Eio_context.run_on_owner_domain (fun () ->
+        let (_ : Keeper_memory_lane.outcome) =
+          Keeper_memory_lane.submit ~base_path ~keeper_name
+            (fun () -> run ~base_path ~keeper_name)
+        in ()))
+
+let submit_durable ~base_path ~keeper_name =
+  let (_ : Keeper_memory_lane.outcome) =
+    Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
+      run_explicit_admission ~base_path ~keeper_name;
+      after_durable
+        ~durable:(fun () -> run_durable ~base_path ~keeper_name)
+        ~following:(fun () ->
+          run_continuity ~base_path ~keeper_name ();
+          run_memory_cleanup ~base_path ~keeper_name))
+  in
+  ()
+;;
+
+let with_purge_then_catch_up ~base_path ~keeper_name action =
+  (* The purge cancels the running unit and discards wakes while it holds
+     the Keeper's files, so nothing else puts the unread backlog back on the
+     lane. A stopped Keeper ends no turn, and a purge refused for unread
+     atoms would stay refused. The lane is serial and coalesces, so a
+     submission with nothing unread ends at once. *)
+  match Keeper_memory_lane.with_librarian_purge ~base_path ~keeper_name action with
+  | result ->
+    submit_durable ~base_path ~keeper_name;
+    result
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    submit_durable ~base_path ~keeper_name;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+let unlaunched_keeper_names ~persisted ~launched =
+  List.filter (fun name -> not (List.mem name launched)) persisted
+;;
+
+let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let queued = match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir) with
+    | Ok names -> names
+    | Error detail ->
+      Log.Keeper.warn "explicit admission startup discovery failed: %s" detail;
+      [] in
+  let persisted = List.sort_uniq String.compare (persisted @ queued) in
+  let names = unlaunched_keeper_names ~persisted ~launched in
+  List.iter (fun keeper_name -> submit_durable ~base_path ~keeper_name) names;
+  names
+;;
+
+module For_testing = struct
+  let limited_width = limited_width
+  let last_input_capacity = last_input_capacity
+  let merge_not_committed = merge_not_committed
+  let run_continuity = run_continuity
+  let run_with_readers = run_with_readers
+  let run_durable_with_commit = run_durable_with_commit
+  let queue_input = queue_input
+  let context_pass_needed = context_pass_needed
+  let remember_context_pass = remember_context_pass
+end

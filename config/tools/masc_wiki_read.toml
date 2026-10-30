@@ -1,0 +1,11 @@
+name = "masc_wiki_read"
+description = """
+Read one wiki page by topic name or partial match. Use when \
+you need the full content of a known page. After \
+masc_wiki_list or masc_wiki_search to find the topic name."""
+
+[[params]]
+name = "topic"
+type = "string"
+required = true
+description = "Topic name or partial match (e.g., 'eio-mutex')"

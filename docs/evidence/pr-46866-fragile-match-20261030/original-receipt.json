@@ -1,0 +1,99 @@
+{
+  "scope": "Exact extracted runtime branches and CLI error definitions with stubbed external effects; not a MASC build, fake-provider test, CI or guest measurement.",
+  "head": "b271cc4590b2841d0099f54851752955c94f9906",
+  "ocaml": "5.5.1",
+  "diff_sha256": "f3f01155b0f6906d92f91050fb9237dfb40d285efab27525b43d4eeff6ac66c1",
+  "runtime_source_sha256": "d9feaf1bceea9ac40f2c27cf5d16abb4cc6a7acc4503696b0a5f58fe2390f707",
+  "harness_sha256": {
+    "before": "aaf3c51feb86d89017a9c3738493c53df3e481f05fc3fc6191fe1e1eaec1174d",
+    "after": "4bc4493b4044bf08c3113e05c7ced1b6819da5d9b5ac7451d433caf85304cdbd",
+    "future_state": "36197dca749e7ad73d1df90208fa6c7d453874d6b8995f48fdaf9031fb46937c",
+    "future_capture": "fc22e422686e677682554efabc26716db0d418f3696d992f7f45999987fa0bce"
+  },
+  "results": {
+    "before": {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "-a+4+8",
+        "-warn-error",
+        "+4+8",
+        "-package",
+        "unix,astring",
+        "-linkpkg",
+        "-o",
+        "before",
+        "before.ml"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "File \"before.ml\", lines 120-122, characters 4-28:\n120 | ....match microvm_work_root_entry container_name with\n121 |     | Some { build_links_state = Build_links_prepared; _ } -> true\n122 |     | Some _ | None -> false\nError (warning 4 [fragile-match]): this pattern-matching is fragile.\n  It will remain exhaustive when constructors are added to type microvm_build_links_state.\n\nFile \"before.ml\", lines 157-218, characters 4-57:\n157 | ....(match scanned with\n158 |      | Ok (Unix.WEXITED 0, stdout, _) ->\n159 |        (match Keeper_sandbox_microvm.build_scan_rows_of_output stdout with\n160 |         | Error detail ->\n161 |           Log.Keeper.warn ~keeper_name:t.meta.name \"microvm_build_scan_failed: %s\" detail\n...\n215 |      | Error error ->\n216 |        Log.Keeper.warn ~keeper_name:t.meta.name\n217 |          \"microvm_build_scan_failed: %s\"\n218 |          (Keeper_microvm_cli_output.error_message error))\nError (warning 4 [fragile-match]): this pattern-matching is fragile.\n  It will remain exhaustive when constructors are added to type Keeper_microvm_cli_output.unavailable_output.\n"
+    },
+    "after": {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "-a+4+8",
+        "-warn-error",
+        "+4+8",
+        "-package",
+        "unix,astring",
+        "-linkpkg",
+        "-o",
+        "after",
+        "after.ml"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "future_state": {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "-a+4+8",
+        "-warn-error",
+        "+4+8",
+        "-package",
+        "unix,astring",
+        "-linkpkg",
+        "-o",
+        "future_state",
+        "future_state.ml"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "File \"future_state.ml\", lines 121-124, characters 4-19:\n121 | ....match microvm_work_root_entry container_name with\n122 |     | Some { build_links_state = Build_links_prepared; _ } -> true\n123 |     | Some { build_links_state = (Build_links_not_prepared | Build_links_effect_unverified); _ }\n124 |     | None -> false\nError (warning 8 [partial-match]): this pattern-matching is not exhaustive.\n  Here is an example of a case that is not matched:\n    Some {build_links_state=Synthetic_future_state; _ }\n"
+    },
+    "future_capture": {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-w",
+        "-a+4+8",
+        "-warn-error",
+        "+4+8",
+        "-package",
+        "unix,astring",
+        "-linkpkg",
+        "-o",
+        "future_capture",
+        "future_capture.ml"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "File \"future_capture.ml\", lines 34-42, characters 26-62:\n34 | ..........................function\n35 |   | Capture_directory_unavailable -> \"private capture directory unavailable\"\n36 |   | Capture_incomplete -> \"stdout EOF was not established\"\n37 |   | Capture_failed -> \"complete stdout capture unavailable\"\n38 |   | Capture_limit_exceeded -> \"stdout exceeded the capture byte limit\"\n39 |   | Capture_unreadable -> \"owned capture could not be read\"\n40 |   | Capture_permissions_invalid -> \"capture permissions are not private\"\n41 |   | Capture_length_mismatch -> \"capture byte length changed\"\n42 |   | Capture_cleanup_failed -> \"private capture cleanup failed\"\nError (warning 8 [partial-match]): this pattern-matching is not exhaustive.\n  Here is an example of a case that is not matched: Synthetic_future_capture\n\nFile \"future_capture.ml\", lines 159-227, characters 4-57:\n159 | ....(match scanned with\n160 |      | Ok (Unix.WEXITED 0, stdout, _) ->\n161 |        (match Keeper_sandbox_microvm.build_scan_rows_of_output stdout with\n162 |         | Error detail ->\n163 |           Log.Keeper.warn ~keeper_name:t.meta.name \"microvm_build_scan_failed: %s\" detail\n...\n224 |                   | Keeper_microvm_cli_output.Capture_cleanup_failed ); _ } as error) ->\n225 |        Log.Keeper.warn ~keeper_name:t.meta.name\n226 |          \"microvm_build_scan_failed: %s\"\n227 |          (Keeper_microvm_cli_output.error_message error))\nError (warning 8 [partial-match]): this pattern-matching is not exhaustive.\n  Here is an example of a case that is not matched:\n    Error {reason=Synthetic_future_capture; _ }\n"
+    },
+    "after_execution": {
+      "argv": [
+        "./after"
+      ],
+      "exit": 0,
+      "stdout": "PASS: extracted real pattern paths; 8 capture reasons and 3 readiness states\n",
+      "stderr": ""
+    }
+  }
+}

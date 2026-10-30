@@ -1,0 +1,40 @@
+{
+  "schema": "masc.remote_ssh_keeper_files.v1",
+  "result": "PASS",
+  "keeper": "ssh-proof-20261025-a",
+  "expected_binary_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+  "binary_sha256": "d27fb1565ca8eb220cd751edb83ab193cb43932d8b9ec50fa9ae25067b38a669",
+  "model": "scripted loopback fixture",
+  "claims": [
+    "actual Keeper Execute/Write/Read/Edit/Grep over SSH",
+    "endpoint bytes match tool results",
+    "canonical final checkpoint",
+    "endpoint bytes survive server shutdown",
+    "same manual Keeper explicitly started and resumed after server restart",
+    "canonical ledger records completed SSH tools",
+    "same-path pin replacement denied Execute; explicit restoration recovered"
+  ],
+  "identity_sha256": "f296e524ceaa7a66c6da1853fdde526f9f34e2e8af54ceb3e145c3ac0ef805a5",
+  "known_hosts_sha256": "b128384357469d76d39eadc4e2823fad5b9bd36425dc7d0864ebbf11336195ab",
+  "not_measured": [
+    "model quality",
+    "sustained continuity",
+    "GitHub authentication",
+    "bootstrap CLI",
+    "redirects and long jobs",
+    "candidate source unless commit matches",
+    "shim sandbox application receipt when peer omits it"
+  ],
+  "binary_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+  "model_requests": 14,
+  "tool_calls": 10,
+  "runtime_instances": [
+    "01a16e85-9043-7000-a227-19b44b701343",
+    "01a16e85-ce74-7000-ad5d-0b6fe25fd772"
+  ],
+  "checkpoint_relative_path": ".masc/traces/trace-1792855613805-00000/trace-1792855613805-00000.json",
+  "actual_remote_cwd": "/srv/masc/playground/ssh-proof-20261025-a",
+  "model_projected_cwd": "/private/tmp/mssh-keeper-proof-candidate-long-base-a317/.workspace/.masc/playground/ssh-proof-20261025-a",
+  "successful_tools": 9,
+  "expected_refusals": 1
+}

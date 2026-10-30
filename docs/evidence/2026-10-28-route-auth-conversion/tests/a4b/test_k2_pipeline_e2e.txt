@@ -1,0 +1,17 @@
+=== K2 e2e pipeline (Cycle 27 Tier K2 — production loop) ===
+── Phase 1: producer side ──
+  emit_many ok (3 entries)
+── Phase 2: consumer side ──
+  extract_raw_artifacts ok (3 raws, key drained)
+── Phase 3: hydrate + workspace ──
+  hydrate_batch + holder update ok (3 typed artifacts)
+── Phase 4: D1 HTTP surface ──
+  list_response ok (3 artifacts visible to dashboard)
+── Phase 5: incremental turn ──
+  turn-2 emission flows through to dashboard (4 total)
+── Phase 6: kind filter ──
+  per-kind filter ok (1 each across 4 kinds)
+=== K2 e2e: 6/6 phases passed (production loop closed) ===
+    K1 wire-in seam is now provably live: producer → consumer
+    → workspace → HTTP surface chain GREEN end-to-end.
+exit=0

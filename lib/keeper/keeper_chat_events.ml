@@ -1,0 +1,685 @@
+type response_identity = Ag_ui.response_identity = { response_generation : int; response_scope : int }
+
+type generated_media =
+  { index : int
+  ; media_type : string
+  ; source_type : Agent_core.Types.media_source_kind
+  ; media_ref : string
+  ; response : response_identity
+  }
+
+type text_response = Ag_ui.text_response =
+  | Unobserved_scope of int option
+  | Observed_response of response_identity
+
+type role = User | Assistant
+
+type stream_protocol_error_kind =
+  | Tool_start_duplicate_index
+  | Tool_start_missing_identity
+  | Tool_args_without_start
+  | Tool_stop_without_start
+  | Tool_replay_mismatch
+  | Tool_delta_invalid_kind
+  | Tool_attempt_superseded
+  | Tool_message_start_conflict
+  | Stream_event_after_terminal
+  | Tool_occurrence_mapping_invalid
+  | Media_delta_invalid_block
+  | Media_source_unsupported
+  | Media_decode_failed
+  | Media_payload_too_large
+  | Media_persist_failed
+  | Sse_error
+  | Ndjson_error
+  | Sse_parse_failed
+  | Ndjson_parse_failed
+  | Sse_unknown_event_type
+  | Sse_unsupported_part
+  | Sse_unsupported_response
+  | Sse_stream_incomplete
+  | Sse_timeout
+[@@deriving enumerate]
+
+type runtime_attempt_scope_disposition =
+  | Preserve_previous_scope
+  | Abandon_previous_scope
+
+type tool_stream_occurrence =
+  { stream_scope : int
+  ; provider_message_id : string option
+  ; block_index : int
+  }
+
+type model_content_channel = Model_text | Model_thinking
+
+type model_content_state = Content_observed | Content_ended
+
+type model_content_activity =
+  { content_generation : int
+  ; content_scope : int
+  ; content_index : int
+  ; content_provider_message_id : string option
+  ; channel : model_content_channel
+  ; state : model_content_state
+  }
+
+type stream_protocol_error = {
+  kind : stream_protocol_error_kind;
+  quarantined_occurrence : tool_stream_occurrence option;
+  index : int option;
+  tool_call_id : string option;
+  event_type : string option;
+  reason : string option;
+  raw_bytes : int option;
+}
+
+type reply_details =
+  { reply : string
+  ; turn_outcome : Keeper_turn_outcome.t
+  ; turn_ref : Ids.Turn_ref.t
+  ; terminal_stream_scope : int option
+  }
+
+type continuation_checkpoint =
+  { message : string
+  ; request_id : string option
+  }
+
+type native_tool =
+  { occurrence : tool_stream_occurrence
+  ; tool_call_id : string option
+  ; tool_call_name : string option
+  }
+
+type keeper_chat_event =
+  | Run_started of { run_id : string; thread_id : string }
+  | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
+  | Text_message_start of { message_id : string; role : role }
+  | Text_delta of { text : string; response : text_response }
+  | Text_message_end
+  | External_effect_completed of
+      { target : Keeper_surface_post.delivery_target }
+  | Run_finished of { run_id : string }
+  | Event_error of { message : string }
+  | Reply_details of reply_details
+  | Continuation_checkpoint of continuation_checkpoint
+  | Agent_core_stream_connected
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt; retry : Runtime_claude_api_retry.t }
+  | Agent_core_runtime_attempt_started of
+      { runtime_id : string option
+      ; attempt_index : int option
+      }
+  | Agent_core_stream_message_start of
+      { content_generation : int option
+      ; stream_scope : int
+      ; provider_message_id : string
+      ; model : string
+      ; usage : Agent_core.Types.api_usage option
+      }
+  | Agent_core_stream_message_delta of
+      { content_generation : int option
+      ; stream_scope : int
+      ; stop_reason : Agent_core.Types.stop_reason option
+      ; usage : Agent_core.Types.delta_usage option
+      }
+  | Agent_core_stream_message_stop of response_identity option
+  | Agent_core_stream_ping
+  | Agent_core_content_block_start of
+      { index : int
+      ; content_type : string
+      ; tool_call_id : string option
+      ; tool_call_name : string option
+      }
+  | Agent_core_content_block_stop of { index : int }
+  | Model_content_activity of model_content_activity
+  | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
+  | Agent_core_thinking_snapshot of { index : int; snapshot : string; response : response_identity }
+  | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
+  | Agent_core_media_delta of generated_media
+  | Agent_core_stream_protocol_error of stream_protocol_error
+  | Tool_call_start of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; tool_call_name : string
+      }
+  | Tool_call_admitted of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; provider_tool_name : string
+      ; tool_call_name : string
+      }
+  | Tool_call_args of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; delta : string
+      }
+  | Tool_call_args_snapshot of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; snapshot : string
+      }
+  | Tool_call_end of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      }
+  | Native_tool_start of native_tool
+  | Native_tool_end of native_tool * Runtime_native_tools.completion
+  | Native_tool_progress of native_tool * Runtime_native_tools.progress
+  | Tool_approval_requested of
+      { tool_call_id : string
+      ; tool_call_name : string
+      ; args : string
+      ; question : string
+      ; because : string
+      }
+  | Tool_approval_settled of
+      { tool_call_id : string
+      ; outcome : string
+      }
+  | Tool_result_ready of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; execution_id : Ids.Execution_id.t
+      }
+  | Tool_transcript_committed of
+      { delivery_key : Keeper_chat_delivery_identity.delivery_key
+      ; execution_id : Ids.Execution_id.t
+      ; ordinal : int
+      }
+  | Link_block of
+      { url : string
+      ; title : string
+      ; description : string option
+      ; image : string option
+      }
+  | Image_block of { url : string; caption : string option }
+  | Status_block of Keeper_chat_blocks.status_block
+  | Audio_block of
+      { token : string
+      ; mime : string
+      ; message_text : string
+      ; duration_sec : float option
+      }
+  | Tool_context_block of
+      { tool_call_id : string
+      ; name : string
+      ; args_summary : string
+      ; result_summary : string option
+      }
+
+let public_error_code = "event_error"
+let public_error_message = "The Keeper turn failed."
+let public_protocol_error_message = "The stream event could not be used."
+
+let map_content ~public_errors ~redact_text = function
+  | Text_delta delta -> Text_delta {delta with text = redact_text delta.text}
+  | Event_error event ->
+      Event_error {message = if public_errors then public_error_message else redact_text event.message}
+  | Reply_details event -> Reply_details {event with reply=redact_text event.reply}
+  | Continuation_checkpoint event ->
+      Continuation_checkpoint {event with message=redact_text event.message}
+  | Agent_core_thinking_snapshot event ->
+      Agent_core_thinking_snapshot {event with snapshot=redact_text event.snapshot}
+  | Agent_core_thinking_delta event ->
+      Agent_core_thinking_delta {event with delta=redact_text event.delta}
+  | Agent_core_media_delta event ->
+      Agent_core_media_delta {event with media_ref=redact_text event.media_ref}
+  | Agent_core_stream_protocol_error event ->
+      Agent_core_stream_protocol_error {event with
+        reason = if public_errors then Some public_protocol_error_message
+          else Option.map redact_text event.reason;
+        event_type = if public_errors then None else Option.map redact_text event.event_type}
+  | Tool_call_args event -> Tool_call_args {event with delta=redact_text event.delta}
+  | Tool_call_args_snapshot event ->
+      Tool_call_args_snapshot {event with snapshot=redact_text event.snapshot}
+  | Native_tool_end (tool, completion) ->
+      Native_tool_end (tool, Runtime_native_tools.redact_completion redact_text completion)
+  | Native_tool_progress (tool, progress) ->
+      Native_tool_progress (tool, Runtime_native_tools.redact_progress redact_text progress)
+  | Tool_approval_requested event ->
+      Tool_approval_requested {event with args=redact_text event.args;
+        question=redact_text event.question; because=redact_text event.because}
+  | Link_block event -> Link_block {url=redact_text event.url; title=redact_text event.title;
+      description=Option.map redact_text event.description; image=Option.map redact_text event.image}
+  | Image_block event ->
+      Image_block {url=redact_text event.url; caption=Option.map redact_text event.caption}
+  | Audio_block event -> Audio_block {event with message_text=redact_text event.message_text}
+  | Tool_context_block event -> Tool_context_block {event with
+      args_summary=redact_text event.args_summary; result_summary=Option.map redact_text event.result_summary}
+  | (Run_started _ | Batch_bound _ | Text_message_start _ | Text_message_end
+    | External_effect_completed _ | Run_finished _ | Agent_core_stream_connected
+    | Provider_retry_observed _ | Agent_core_runtime_attempt_started _ | Agent_core_stream_message_start _
+    | Agent_core_stream_message_delta _ | Agent_core_stream_message_stop _
+    | Agent_core_stream_ping | Agent_core_content_block_start _
+    | Agent_core_content_block_stop _ | Model_content_activity _
+    | Agent_core_thinking_signature_delta _ | Tool_call_start _ | Tool_call_admitted _ | Tool_call_end _
+    | Native_tool_start _ | Tool_approval_settled _ | Tool_result_ready _ | Tool_transcript_committed _ | Status_block _) as event -> event
+;;
+
+let redact_content ~redact_text event =
+  map_content ~public_errors:false ~redact_text event
+;;
+
+let public_content ~redact_text event =
+  map_content ~public_errors:true ~redact_text event
+;;
+
+type published =
+  { seq : int
+  ; ts : float
+  ; event : keeper_chat_event
+  }
+
+type 'a next =
+  | Next of 'a
+  | Closed
+
+(* The bus carries the turn's events and, last, the publisher's declaration
+   that no event follows. *)
+type item =
+  | Item of published
+  | End_of_turn
+
+(* Where the bus's one consumer stands. The backpressure window below only
+   means something while someone still takes: once the reader is gone,
+   suspending the publisher buys nothing and costs the turn — the
+   departed-consumer wedge (2026-09-13, msx-retro-mania: a mid-turn
+   [Event_error] ended the Dashboard adapter, 512 thinking deltas later the
+   single publisher fiber suspended forever in [Eio.Stream.add], and the
+   Owner turn slot was never released). *)
+type reader =
+  | Reading
+  (* Took [End_of_turn], so it saw every event the turn produced. *)
+  | Ended
+  (* Left before [End_of_turn]. What the turn publishes from here reaches the
+     journal through [on_publish] and goes no further. *)
+  | Gone
+
+type t =
+  { stream : item Eio.Stream.t
+  ; on_publish : (seq:int -> ts:float -> keeper_chat_event -> unit) option
+  ; now : unit -> float
+  ; mutable next_seq : int
+  ; mutable closed : bool
+  ; mutable reader : reader
+  }
+
+(* Backpressure window between the single publisher fiber and the turn's
+   adapter. A slow adapter suspends the publisher once this many events wait;
+   the journal hook has already recorded each of them. *)
+let bus_capacity = 512
+
+let create ?(first_seq = 0) ?(now = Time_compat.now) ?on_publish () =
+  if first_seq < 0 then invalid_arg "Keeper_chat_events.create: negative journal sequence";
+  { stream = Eio.Stream.create bus_capacity
+  ; on_publish
+  ; now
+  ; next_seq = first_seq
+  ; closed = false
+  ; reader = Reading
+  }
+;;
+
+(* [publish] is the single choke point every turn event passes through — route
+   lifecycle, bridge-translated deltas, and terminal paths all call it. The
+   hook runs BEFORE the bus add so the canonical journal records what the turn
+   produced even when a full bus suspends the add. The ordering guarantee rests
+   on one invariant: every [publish] for a given bus runs in the single
+   publisher fiber (the process_single_turn / consume_worker_events call tree
+   in server_routes_http_keeper_stream.ml), so seq assignment → hook → bus add
+   executes sequentially within that fiber and journal order == seq order ==
+   bus order with no extra lock. The journal hook's blocking Unix I/O is
+   offloaded via Fs_compat.run_blocking_private_file_transaction
+   (Eio_unix.run_in_systhread when called from an Eio fiber), which suspends
+   only the calling fiber — that keeps sibling fibers responsive but is not
+   what makes the ordering safe. *)
+let publish_with_sequence t event =
+  if t.closed
+  then invalid_arg "Keeper_chat_events.publish: the turn's event bus is closed";
+  let seq = t.next_seq in
+  t.next_seq <- seq + 1;
+  (* One clock reading per event. The journal line and every live projection
+     of this event carry this same [ts], which is what lets a replay from the
+     journal reproduce the live frames byte for byte. The clock is either the
+     default [Time_compat.now] or the one a test injected through [create];
+     a raising clock is a defect in the caller and propagates. Substituting
+     the real clock here would hand the journal and the live frame a [ts] the
+     injected clock never produced, which is the contract this line exists
+     to keep. *)
+  let ts = t.now () in
+  (match t.on_publish with
+   | None -> ()
+   | Some hook ->
+     (try hook ~seq ~ts event with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Keeper.error
+          "keeper_chat_events: on_publish hook failed seq=%d: %s"
+          seq
+          (Printexc.to_string exn)));
+  (match t.reader with
+  (* The hook above already recorded this event and the bus is only the live
+     projection, so a departed reader costs the turn nothing from here. *)
+  | Ended | Gone -> ()
+  | Reading -> Eio.Stream.add t.stream (Item { seq; ts; event }));
+  seq
+;;
+
+let publish t event = ignore (publish_with_sequence t event : int)
+;;
+
+let close t =
+  if not t.closed
+  then (
+    (match t.reader with
+     (* Nobody to tell, and a full bus would suspend this add with no take
+        left to release it. *)
+     | Ended | Gone -> ()
+     (* The flag follows the sentinel. A close cancelled while the bus is full
+        has delivered nothing, so a later close must still add the sentinel;
+        a flag set first would make that retry a no-op and leave the reader
+        parked in [take] with nothing left to wake it. *)
+     | Reading -> Eio.Stream.add t.stream End_of_turn);
+    t.closed <- true)
+;;
+
+let reader_gone t =
+  match t.reader with
+  | Ended | Gone -> ()
+  | Reading ->
+    t.reader <- Gone;
+    (* A publisher already suspended in [Eio.Stream.add] does not see the
+       field change: a parked writer wakes only from a take, which is where
+       eio calls [Waiters.wake_one t.writers] (eio 1.3 stream.ml, in [take]
+       and [take_nonblocking] alike). Emptying the bus releases all of them
+       without assuming how many there are. It terminates: waking a writer
+       re-queues its item inside [wake_one] while the lock is held, so that
+       writer cannot add a second one before this loop ends, and every
+       iteration drops one item for good. Nothing here suspends, so a reader
+       leaving under cancellation still gets through. The items go nowhere;
+       the journal already has them and this bus has no reader. *)
+    let rec release_every_parked_writer () =
+      match Eio.Stream.take_nonblocking t.stream with
+      | Some _ -> release_every_parked_writer ()
+      | None -> ()
+    in
+    release_every_parked_writer ()
+;;
+
+let subscribe_published t =
+  match t.reader with
+  | Ended | Gone -> Closed
+  | Reading ->
+    (match Eio.Stream.take t.stream with
+     | Item published -> Next published
+     | End_of_turn ->
+       t.reader <- Ended;
+       Closed)
+;;
+
+let subscribe t =
+  match subscribe_published t with
+  | Next published -> Next published.event
+  | Closed -> Closed
+;;
+
+let take_nonblocking t =
+  match t.reader with
+  | Ended | Gone -> None
+  | Reading ->
+    (match Eio.Stream.take_nonblocking t.stream with
+     | Some (Item published) -> Some published.event
+     | Some End_of_turn ->
+       t.reader <- Ended;
+       None
+     | None -> None)
+;;
+
+let json_opt key value =
+  match value with
+  | None -> []
+  | Some value -> [ (key, value) ]
+
+let api_usage_to_json (usage : Agent_core.Types.api_usage) =
+  `Assoc
+    ([
+       ("input_tokens", `Int usage.input_tokens);
+       ("output_tokens", `Int usage.output_tokens);
+       ("total_tokens", `Int (Agent_core.Types.total_tokens usage));
+       ("cache_creation_input_tokens", `Int usage.cache_creation_input_tokens);
+       ("cache_read_input_tokens", `Int usage.cache_read_input_tokens);
+     ]
+     @ json_opt "cost_usd"
+         (Option.map (fun value -> `Float value) usage.cost_usd))
+
+(* Cumulative mid-stream counters and provider-reported charge: only fields
+   the delta actually reported appear, so "not reported" remains distinct from 0.
+   Non-finite charges are unavailable on live projections; never emit invalid JSON. *)
+let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
+  `Assoc
+    (json_opt "input_tokens" (Option.map (fun v -> `Int v) usage.input_tokens)
+    @ json_opt "output_tokens" (Option.map (fun v -> `Int v) usage.output_tokens)
+    @ json_opt "cache_creation_input_tokens"
+        (Option.map (fun v -> `Int v) usage.cache_creation_input_tokens)
+    @ json_opt "cache_read_input_tokens"
+        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens)
+    @ json_opt "cost_usd"
+        (Option.bind usage.cost_usd (fun amount ->
+             if Float.is_finite amount then Some (`Float amount) else None)))
+
+(* One owner for the stop-reason word. The journal and the AGUI projection
+   both write [Agent_core.Types.stop_reason_to_string]; re-exporting it here
+   lets a reader that cannot link agent_core read back exactly what was
+   written instead of keeping a second spelling. *)
+let stop_reason_to_string = Agent_core.Types.stop_reason_to_string
+
+let stream_protocol_error_kind_to_string = function
+  | Tool_start_duplicate_index -> "tool_start_duplicate_index"
+  | Tool_start_missing_identity -> "tool_start_missing_identity"
+  | Tool_args_without_start -> "tool_args_without_start"
+  | Tool_stop_without_start -> "tool_stop_without_start"
+  | Tool_replay_mismatch -> "tool_replay_mismatch"
+  | Tool_delta_invalid_kind -> "tool_delta_invalid_kind"
+  | Tool_attempt_superseded -> "tool_attempt_superseded"
+  | Tool_message_start_conflict -> "tool_message_start_conflict"
+  | Stream_event_after_terminal -> "stream_event_after_terminal"
+  | Tool_occurrence_mapping_invalid -> "tool_occurrence_mapping_invalid"
+  | Media_delta_invalid_block -> "media_delta_invalid_block"
+  | Media_source_unsupported -> "media_source_unsupported"
+  | Media_decode_failed -> "media_decode_failed"
+  | Media_payload_too_large -> "media_payload_too_large"
+  | Media_persist_failed -> "media_persist_failed"
+  | Sse_error -> "sse_error"
+  | Ndjson_error -> "ndjson_error"
+  | Sse_parse_failed -> "sse_parse_failed"
+  | Ndjson_parse_failed -> "ndjson_parse_failed"
+  | Sse_unknown_event_type -> "sse_unknown_event_type"
+  | Sse_unsupported_part -> "sse_unsupported_part"
+  | Sse_unsupported_response -> "sse_unsupported_response"
+  | Sse_stream_incomplete -> "sse_stream_incomplete"
+  | Sse_timeout -> "sse_timeout"
+
+let stream_protocol_error_kind_of_string s = List.find_opt (fun v -> String.equal (stream_protocol_error_kind_to_string v) s) all_of_stream_protocol_error_kind
+
+let stream_protocol_error_summary error =
+  let parts =
+    [
+      Some (stream_protocol_error_kind_to_string error.kind);
+      Option.map
+        (fun occurrence ->
+           Printf.sprintf "quarantined_occurrence=%d/%d"
+             occurrence.stream_scope occurrence.block_index)
+        error.quarantined_occurrence;
+      Option.map (Printf.sprintf "index=%d") error.index;
+      Option.map (Printf.sprintf "tool_call_id=%s") error.tool_call_id;
+      Option.map (Printf.sprintf "event_type=%s") error.event_type;
+      error.reason;
+      Option.map (Printf.sprintf "raw_bytes=%d") error.raw_bytes;
+    ]
+    |> List.filter_map Fun.id
+  in
+  String.concat " | " parts
+
+let stream_protocol_error_to_json error =
+  let quarantined_occurrence =
+    Option.map
+      (fun occurrence ->
+         `Assoc
+           ([ "toolStreamScope", `Int occurrence.stream_scope
+            ; "toolCallBlockIndex", `Int occurrence.block_index
+            ]
+            @ json_opt "providerMessageId"
+                (Option.map
+                   (fun value -> `String value)
+                   occurrence.provider_message_id)))
+      error.quarantined_occurrence
+  in
+  let fields =
+    [
+      ( "kind",
+        `String (stream_protocol_error_kind_to_string error.kind) );
+    ]
+    @ json_opt "quarantined_occurrence" quarantined_occurrence
+    @ json_opt "index" (Option.map (fun value -> `Int value) error.index)
+    @ json_opt "tool_call_id"
+        (Option.map (fun value -> `String value) error.tool_call_id)
+    @ json_opt "event_type"
+        (Option.map (fun value -> `String value) error.event_type)
+    @ json_opt "reason" (Option.map (fun value -> `String value) error.reason)
+    @ json_opt "raw_bytes" (Option.map (fun value -> `Int value) error.raw_bytes)
+  in
+  `Assoc fields
+
+let model_content_activity_to_json (activity : model_content_activity) =
+  `Assoc
+    ([ "generation", `Int activity.content_generation
+     ; "stream_scope", `Int activity.content_scope
+     ; "block_index", `Int activity.content_index
+     ; "channel", `String (match activity.channel with Model_text -> "text" | Model_thinking -> "thinking")
+     ; "state", `String (match activity.state with Content_observed -> "observed" | Content_ended -> "ended")
+     ] @ match activity.content_provider_message_id with
+       | None -> []
+       | Some id -> ["provider_message_id", `String id])
+;;
+
+let model_content_activity_of_json json =
+  let error detail = Error ("model content activity: " ^ detail) in
+  match json with
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    let allowed = ["generation"; "stream_scope"; "block_index"; "provider_message_id"; "channel"; "state"] in
+    if List.length (List.sort_uniq String.compare keys) <> List.length keys then
+      error "duplicate field"
+    else if List.exists (fun key -> not (List.mem key allowed)) keys then
+      error "unknown field"
+    else
+      let open Result.Syntax in
+      let index key = match List.assoc_opt key fields with
+        | Some json ->
+            (match Runtime_json_integer.of_json json with
+             | Ok value when value >= 0 -> Ok value
+             | Ok _ | Error _ -> error (key ^ " must be a nonnegative safe integer"))
+        | None -> error (key ^ " must be a nonnegative safe integer") in
+      let* content_generation = index "generation" in
+      let* stream_scope = index "stream_scope" in
+      let* block_index = index "block_index" in
+      let* provider_message_id = match List.assoc_opt "provider_message_id" fields with
+        | None -> Ok None
+        | Some (`String id) when String.trim id <> "" -> Ok (Some id)
+        | _ -> error "provider_message_id must be a nonblank string when present" in
+      let* channel = match List.assoc_opt "channel" fields with
+        | Some (`String "text") -> Ok Model_text
+        | Some (`String "thinking") -> Ok Model_thinking
+        | _ -> error "unknown channel" in
+      let* state = match List.assoc_opt "state" fields with
+        | Some (`String "observed") -> Ok Content_observed
+        | Some (`String "ended") -> Ok Content_ended
+        | _ -> error "unknown state" in
+      Ok {content_generation; content_scope=stream_scope; content_index=block_index; content_provider_message_id=provider_message_id; channel; state}
+  | _ -> error "expected object"
+;;
+
+let response_identity_to_json owner =
+  `Assoc ["content_generation", `Int owner.response_generation;
+          "stream_scope", `Int owner.response_scope]
+
+let response_identity_of_json = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    if List.sort String.compare keys <> ["content_generation"; "stream_scope"] then
+      Error "response identity requires exactly content_generation and stream_scope"
+    else
+      let open Result.Syntax in
+      let index key = match List.assoc_opt key fields with
+        | Some json ->
+          (match Runtime_json_integer.of_json json with
+           | Ok n when n >= 0 -> Ok n
+           | Ok _ | Error _ -> Error (key ^ " must be a nonnegative safe integer"))
+        | None -> Error ("missing " ^ key) in
+      let* response_generation = index "content_generation" in
+      let* response_scope = index "stream_scope" in
+      Ok {response_generation; response_scope}
+  | _ -> Error "response identity must be an object"
+
+let generated_media_to_json (media : generated_media) =
+  `Assoc
+    [ "index", `Int media.index
+    ; "media_type", `String media.media_type
+    ; "source_type", `String (Agent_core.Types.media_source_kind_to_string media.source_type)
+    ; "media_ref", `String media.media_ref
+    ; "response", response_identity_to_json media.response
+    ]
+
+let generated_media_of_json = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let keys = List.sort String.compare (List.map fst fields) in
+    if keys <> ["index"; "media_ref"; "media_type"; "response"; "source_type"] then
+      Error "generated media requires exactly index, media_ref, media_type, response and source_type"
+    else
+      let nonblank key = match List.assoc_opt key fields with
+        | Some (`String value) when String.trim value <> "" -> Ok value
+        | Some _ | None -> Error ("generated media " ^ key ^ " must be a nonblank string") in
+      let* index = match List.assoc_opt "index" fields with
+        | Some (`Int n) when n >= 0 ->
+          Runtime_json_integer.of_json (`Int n)
+          |> Result.map_error (fun _ -> "generated media index must be a nonnegative safe integer")
+        | Some _ | None -> Error "generated media index must be a nonnegative safe integer" in
+      let* media_type = nonblank "media_type" in
+      let* media_ref = nonblank "media_ref" in
+      let* source_raw = nonblank "source_type" in
+      let* source_type = match Agent_core.Types.media_source_kind_of_string source_raw with
+        | Some kind -> Ok kind
+        | None -> Error "generated media source_type is unknown" in
+      let* response = match List.assoc_opt "response" fields with
+        | Some json -> response_identity_of_json json
+        | None -> Error "generated media response is required" in
+      Ok {index; media_type; source_type; media_ref; response}
+  | _ -> Error "generated media must be an object"
+
+let optional_response_identity_of_fields fields =
+  match List.filter (fun (key, _) -> key = "response") fields with
+  | [] -> Ok None
+  | [(_, value)] -> Result.map (fun owner -> Some owner) (response_identity_of_json value)
+  | _ -> Error "duplicate response identity"
+
+let text_response_of_fields ~owner_field ~scope_field fields =
+  let owners = List.filter (fun (key, _) -> key = owner_field) fields in
+  let scopes = List.filter (fun (key, _) -> key = scope_field) fields in
+  match owners, scopes with
+  | [], [] -> Ok (Unobserved_scope None)
+  | [(_, value)], [] -> Result.map (fun owner -> Observed_response owner) (response_identity_of_json value)
+  | [], [(_, value)] ->
+    (* A scope is a JSON integer on the wire; an integral float is malformed
+       here even when it names a safe value, so it must not downgrade to an
+       unknown or accepted scope. The integer decoder still enforces the
+       safe-integer range once the shape is established. *)
+    (match value with
+     | `Int _ ->
+       (match Runtime_json_integer.of_json value with
+        | Ok scope when scope >= 0 -> Ok (Unobserved_scope (Some scope))
+        | Ok _ | Error _ -> Error "text scope must be a nonnegative safe integer")
+     | _ -> Error "text scope must be a nonnegative safe integer")
+  | _ -> Error "text response has conflicting or duplicate ownership fields"

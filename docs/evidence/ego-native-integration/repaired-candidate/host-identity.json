@@ -1,0 +1,45 @@
+{
+  "status": "ok",
+  "build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "repo_version": "0.64.0",
+    "commit": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+    "commit_source": "embedded",
+    "binary_commit": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "fc5dbc36e2a2c3f1ea5fff144393df25de029b7fda47a3e4564c0db9a30bf2ae",
+    "binary_commit_unix_ts": 1792829975.0,
+    "binary_commit_age_seconds": 1406,
+    "repo_head_commit": "c4ebef77700",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1792831230.0,
+    "repo_head_commit_age_seconds": 151,
+    "executable_path": "/private/tmp/masc-ego-runtime-7ee0dd6e/masc",
+    "executable_dir": "/private/tmp/masc-ego-runtime-7ee0dd6e",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-isolated",
+    "runtime_instance_id": "01a16d13-7932-7000-9a0c-2a7a4fb8e024",
+    "started_at": "2026-10-24T08:42:35Z",
+    "uptime_seconds": 26
+  },
+  "paths": {
+    "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-native-isolated",
+    "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-7ee0dd6e",
+    "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-7ee0dd6e/.masc",
+    "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-7ee0dd6e/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": true,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-7ee0dd6e",
+    "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-integration-7ee0dd6e",
+    "resolution_source": "explicit_cli"
+  },
+  "overall_status": "degraded",
+  "operator_action_reasons": [
+    "keeper_memory_execution:addon_unattached"
+  ]
+}

@@ -1,0 +1,34 @@
+[
+  {
+    "name": "server serves the owned base",
+    "passed": true
+  },
+  {
+    "name": "binary identity is measured",
+    "passed": true
+  },
+  {
+    "name": "owned workspace gate accepts setting",
+    "passed": true
+  },
+  {
+    "name": "owned Keeper tool approval accepts setting",
+    "passed": true
+  },
+  {
+    "name": "schedule was created for the exact Keeper",
+    "passed": true
+  },
+  {
+    "name": "exact scheduled effect is present once",
+    "passed": true
+  },
+  {
+    "name": "effect is authored by the scheduled Keeper",
+    "passed": true
+  },
+  {
+    "name": "exact occurrence has durable completed evidence",
+    "passed": true
+  }
+]

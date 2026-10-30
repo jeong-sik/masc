@@ -1,0 +1,53 @@
+{
+  "is_derivative": true,
+  "turns": [
+    {
+      "keeper": "audit-live-glm",
+      "trace_id": "trace-1793048013383-00000",
+      "absolute_turn": 1,
+      "turn_ref": "trace-1793048013383-00000#1",
+      "turn_kind": "autonomous",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "request_runtime_profile": "glm-coding.glm-5-3",
+      "execution_ids": [
+        "execution-node-9035ac31cb23298e96ec8cf47b7ca434",
+        "execution-node-e2670fec6758d0bb60ee78a27c4d8fa6",
+        "execution-node-93c346aee33606e7805e2ff2df379411"
+      ],
+      "finish_reason": "yielded_to_durable_stimulus:3",
+      "ts": 1793048036.177773
+    },
+    {
+      "keeper": "audit-live-glm",
+      "trace_id": "trace-1793048013383-00000",
+      "absolute_turn": 2,
+      "turn_ref": "trace-1793048013383-00000#2",
+      "turn_kind": "autonomous",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "request_runtime_profile": "glm-coding.glm-5-3",
+      "execution_ids": [
+        "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+        "execution-node-36f97db9933a2094327a71b94cb8d8f2"
+      ],
+      "finish_reason": "completed",
+      "ts": 1793048059.459654
+    },
+    {
+      "keeper": "audit-live-glm",
+      "trace_id": "trace-1793048013383-00000",
+      "absolute_turn": 3,
+      "turn_ref": "trace-1793048013383-00000#3",
+      "turn_kind": "autonomous",
+      "runtime_profile": "glm-coding.glm-5-3",
+      "request_runtime_profile": "glm-coding.glm-5-3",
+      "execution_ids": [
+        "execution-node-24da7d98da52fdfb2430c9394deb36be",
+        "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+        "execution-node-9432e4ba57a41710e0c896889d25adae"
+      ],
+      "finish_reason": "completed",
+      "ts": 1793048084.003454
+    }
+  ],
+  "scope": "Exact turn/source execution memberships and finish reasons; no response text, reasoning or input blocks retained."
+}

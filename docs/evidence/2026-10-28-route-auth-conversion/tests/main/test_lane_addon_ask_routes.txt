@@ -1,0 +1,10 @@
+Testing `Lane_addon_ask_routes'.
+This run has ID `SVXS6KK9'.
+
+  [OK]          routes          0   the list shows open questions in the Keep...
+  [OK]          routes          1   the operator answers once.
+  [OK]          routes          2   a withdrawn question refuses its answer.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/Lane_addon_ask_routes'.
+Test Successful in 0.099s. 3 tests run.
+exit=0

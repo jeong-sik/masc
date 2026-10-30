@@ -1,0 +1,12 @@
+{
+  "old_candidate": "4219c3074e281940ffec9c0d0b12db6f04a0d296",
+  "stopped_pids": [
+    12708,
+    12814,
+    12817
+  ],
+  "keeper_shutdown_finalized": true,
+  "queued_operations": 0,
+  "browser_host_requests_waiting": 0,
+  "purpose": "replace idle isolated candidate while preserving approved SDK TaskSpace 9; no normal Peer.finish requested"
+}

@@ -1,0 +1,49 @@
+run: 40203916694
+head: 3894446330521bf73b90468c0894da4afc918ecb
+raw_sha256: 0f66ed2f978d457b88e6ed6cb50cb6273caf295da0e54ba74448514a40dbbe67
+raw_bytes: 116081
+
+test suite	Checkout	2026-10-25T14:48:12.7141257Z HEAD is now at 38944463 test(runtime): reproduce ambient custom endpoint selection
+test suite	Test	2026-10-25T14:49:48.4862845Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:49:48.4863390Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T14:49:48.4864197Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:49:48.4864725Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T14:49:48.4865154Z   [OK]          provider authority          0   identity.
+test suite	Test	2026-10-25T14:49:48.4865616Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:49:48.4866052Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T14:49:48.4866479Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:49:48.4866923Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T14:49:48.4867324Z   [OK]          provider authority          1   context.
+test suite	Test	2026-10-25T14:49:48.4868385Z ASSERT A rejects forcing despite the bare row allowing it
+test suite	Test	2026-10-25T14:49:48.4868832Z ASSERT B retains its separate forcing declaration
+test suite	Test	2026-10-25T14:49:48.4869271Z ASSERT endpoint override preserves selected provider
+test suite	Test	2026-10-25T14:49:48.4869697Z ASSERT endpoint override cannot borrow B's policy
+test suite	Test	2026-10-25T14:49:48.4870127Z ASSERT A rejects required choice before dispatch
+test suite	Test	2026-10-25T14:49:48.4870500Z ASSERT B admits required choice
+test suite	Test	2026-10-25T14:49:48.4870833Z ASSERT B forcing reaches final Chat body
+test suite	Test	2026-10-25T14:49:48.4871231Z   [OK]          provider authority          2   policy and wire.
+test suite	Test	2026-10-25T14:49:48.4871683Z ASSERT custom label cannot borrow discovery endpoint
+test suite	Test	2026-10-25T14:49:48.4872097Z   [FAIL]        custom endpoint             0   missing.
+test suite	Test	2026-10-25T14:49:48.4878650Z ASSERT custom label cannot borrow environment endpoint
+test suite	Test	2026-10-25T14:49:48.4879105Z   [FAIL]        custom endpoint             1   ambient.
+test suite	Test	2026-10-25T14:49:48.4879597Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:49:48.4880090Z   [FAIL]        custom endpoint             2   invalid.
+test suite	Test	2026-10-25T14:49:48.4880501Z ASSERT custom classification retains explicit model
+test suite	Test	2026-10-25T14:49:48.4880936Z ASSERT custom classification retains explicit endpoint
+test suite	Test	2026-10-25T14:49:48.4881358Z ASSERT custom config retains explicit endpoint
+test suite	Test	2026-10-25T14:49:48.4881780Z ASSERT custom wire retains explicitly selected model
+test suite	Test	2026-10-25T14:49:48.4882190Z   [OK]          custom endpoint             3   explicit.
+test suite	Test	2026-10-25T14:49:48.4883529Z │ [FAIL]        custom endpoint             0   missing.                       │
+test suite	Test	2026-10-25T14:49:48.4884676Z FAIL custom label cannot borrow discovery endpoint
+test suite	Test	2026-10-25T14:49:48.4885029Z    Expected: `true'
+test suite	Test	2026-10-25T14:49:48.4885296Z    Received: `false'
+test suite	Test	2026-10-25T14:49:48.4889966Z │ [FAIL]        custom endpoint             1   ambient.                       │
+test suite	Test	2026-10-25T14:49:48.4891201Z FAIL custom label cannot borrow environment endpoint
+test suite	Test	2026-10-25T14:49:48.4891452Z    Expected: `true'
+test suite	Test	2026-10-25T14:49:48.4891620Z    Received: `false'
+test suite	Test	2026-10-25T14:49:48.4896153Z │ [FAIL]        custom endpoint             2   invalid.                       │
+test suite	Test	2026-10-25T14:49:48.4897433Z FAIL invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:49:48.4897924Z    Expected: `true'
+test suite	Test	2026-10-25T14:49:48.4898176Z    Received: `false'
+test suite	Test	2026-10-25T14:49:48.4902423Z 3 failures! in 0.021s. 7 tests run.
+test suite	Test	2026-10-25T14:49:48.4908063Z [targeted] test/test_runtime_model_label_binding: FAIL exit 1 in 0s

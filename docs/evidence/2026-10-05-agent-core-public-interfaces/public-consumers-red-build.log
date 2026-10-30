@@ -1,0 +1,12 @@
+[dune-local] waiting for lock /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//masc-dune-502-1723684442.lock
+[dune-local] removing stale _build/.lock (no dune process running)
+[dune-local] DUNE_JOBS=2 DUNE_BUILD_DIR=/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-41188-public-interfaces-20261005/_build DUNE_CACHE=disabled
+[dune-local] command: dune build --root /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-41188-public-interfaces-20261005 --sandbox=copy packages/agent_core/test/test_public_tool_schedule.exe packages/agent_core/test/test_public_pre_execution_gate.exe
+File "packages/agent_core/test/test_public_pre_execution_gate.ml", line 11, characters 4-8:
+11 |     Gate.settle ?tool_approval ~event_bus:None ~agent_name:"public-consumer"
+         ^^^^
+Error: The module Gate is an alias for module Agent_core__Agent_tool_pre_execution_gate, which is missing
+File "packages/agent_core/test/test_public_tool_schedule.ml", line 10, characters 9-17:
+10 |   (match Schedule.of_yojson (Schedule.to_yojson schedule) with
+              ^^^^^^^^
+Error: The module Schedule is an alias for module Agent_core__Execution_tool_schedule, which is missing

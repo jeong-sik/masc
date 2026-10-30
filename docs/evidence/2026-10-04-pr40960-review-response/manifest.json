@@ -1,0 +1,17 @@
+{
+  "source_head_before_response": "bccd31b2e30186dfdd6f0429db40ed03d72f6572",
+  "source_and_binary_sha256": {
+    "lib/lane_addon/lane_addon_store.ml": "be98dcdb5943829c62be48d543df0e0dfae4a417f5a709af7ba0625a34271c62",
+    "lib/lane_addon/lane_addon_sampling.ml": "1ef6ccd184b9853449e9b6b901e216f861665018d5a3da6549de23fff45af6ff",
+    "test/test_lane_addon_worker.ml": "eedbe1f489c46cac83585f81db49a6cf16db63bad72bef7205eb16d653d9a634",
+    "_build/default/test/test_lane_addon_worker.exe": "a8b5398fdcf211c597989f1662cd00815a8ba31c47079c8256481f712ab4ef3e"
+  },
+  "files": {
+    "README.md": "60f2c327be983f3ca1ad195aaa6470186e845da090c3661e0e3bf7f0daef35d8",
+    "green-build.txt": "d337f720fcba26533768d67938199f48dab8aecb20b43a0467fe946b845f6d23",
+    "green-test.txt": "2a1040afa6ce49afe0b79758b0ce492e023d7ba98fb47f924db3d43d94966462",
+    "red-build.txt": "d337f720fcba26533768d67938199f48dab8aecb20b43a0467fe946b845f6d23",
+    "red-recovery.txt": "25617690283237a21eedd8cbbbb479a761cabd486bd9d2482c3db338ad96f1f5",
+    "red-test.txt": "4fd046639533d0b446dd2e956341da83f136d1b13c1281c3c6cc4a26746ddf0f"
+  }
+}

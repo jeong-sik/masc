@@ -1,0 +1,30 @@
+{
+  "id": "task-001",
+  "title": "Independent review of current three-page memory proposal PDF",
+  "description": "Inspect the copied PDF, its current renderings and measured summary against the original completion criteria. Do not assume acceptance from the submitter.",
+  "priority": 1,
+  "files": [],
+  "created_at": "2026-09-10T00:19:43Z",
+  "created_by": "admin",
+  "contract": {
+    "strict": true,
+    "completion_contract": [
+      "PDF 정확히 3페이지",
+      "본문과 흐름도 모든 한글이 누락 glyph 없이 읽힘",
+      "텍스트 겹침과 잘림 없음",
+      "synthetic 예시와 실제 검증의 구분 유지"
+    ],
+    "required_evidence": [
+      "artifact:renders/page1.png",
+      "artifact:renders/page2.png",
+      "artifact:renders/page3.png",
+      "artifact:memory_proposal_guide.pdf",
+      "artifact:verify_summary.txt",
+      "artifact:source-receipt.json"
+    ]
+  },
+  "status": "done",
+  "assignee": "pdf-proof-producer",
+  "completed_at": "2026-09-10T00:21:38Z",
+  "notes": "{\n  \"verification_request\": {\n    \"id\": \"vrf-e98a49e8b919f2e8d0b3b7d180861d83\",\n    \"task_id\": \"task-001\",\n    \"worker\": \"pdf-proof-producer\",\n    \"created_at\": 1788999584.118193\n  },\n  \"submitted_evidence_metadata\": {\n    \"access\": \"available\",\n    \"request_id\": \"vrf-e98a49e8b919f2e8d0b3b7d180861d83\",\n    \"task_id\": \"task-001\",\n    \"worker\": \"pdf-proof-producer\",\n    \"created_at\": 1788999584.118193,\n    \"items\": [\n      {\n        \"kind\": \"artifact_unreadable\",\n        \"reference\": \"artifact:memory_proposal_guide.pdf\",\n        \"reason\": \"invalid_utf8\"\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:renders/page1.png\",\n        \"bytes\": 166776,\n        \"sha256\": \"cb86b584fcec6683b8173cd477fabbd97872de7971261644b0902506057b45af\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-e98a49e8b919f2e8d0b3b7d180861d83/1.bin\"\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:renders/page2.png\",\n        \"bytes\": 190109,\n        \"sha256\": \"b4b760023c0c7f05575bfe1c0d2f84a700c00f3b6b1fd415efc8275761cbdbe2\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-e98a49e8b919f2e8d0b3b7d180861d83/2.bin\"\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:renders/page3.png\",\n        \"bytes\": 134793,\n        \"sha256\": \"38719d7b049d52aacd18a62befa5a8c512b28db86e81d39bca6df8e4a488195d\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-e98a49e8b919f2e8d0b3b7d180861d83/3.bin\"\n      },\n      {\n        \"kind\": \"artifact\",\n        \"reference\": \"artifact:source-receipt.json\",\n        \"bytes\": 904,\n        \"truncated\": false\n      },\n      {\n        \"kind\": \"artifact\",\n        \"reference\": \"artifact:verify_summary.txt\",\n        \"bytes\": 6115,\n        \"truncated\": false\n      },\n      { \"kind\": \"note\", \"bytes\": 166 }\n    ]\n  },\n  \"review\": {\n    \"evaluator_runtime\": \"kimi_coding.kimi-for-coding\",\n    \"generator_runtime\": null,\n    \"gate\": \"structured_tool\",\n    \"verdict\": \"approve\",\n    \"authority_kind\": \"system_llm_agent\",\n    \"authority_actor\": \"verifier_exact\"\n  }\n}"
+}

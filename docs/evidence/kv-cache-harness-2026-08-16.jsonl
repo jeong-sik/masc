@@ -1,0 +1,16 @@
+{"scenario": "preserve", "turn": 1, "cache_n": 68, "prompt_n": 516, "prompt_ms": 5495.9, "predicted_n": 295, "predicted_ms": 34996.2, "wall_s": 40.58, "reasoning_chars": 968, "content_chars": 433}
+{"scenario": "preserve", "turn": 2, "cache_n": 878, "prompt_n": 29, "prompt_ms": 879.2, "predicted_n": 419, "predicted_ms": 39239.2, "wall_s": 40.14, "reasoning_chars": 1528, "content_chars": 390}
+{"scenario": "preserve", "turn": 3, "cache_n": 1325, "prompt_n": 34, "prompt_ms": 617.8, "predicted_n": 383, "predicted_ms": 38503.1, "wall_s": 39.14, "reasoning_chars": 1415, "content_chars": 418}
+{"scenario": "preserve", "turn": 4, "cache_n": 1741, "prompt_n": 26, "prompt_ms": 709.5, "predicted_n": 512, "predicted_ms": 54893.4, "wall_s": 55.62, "reasoning_chars": 2007, "content_chars": 342}
+{"scenario": "strip", "turn": 1, "cache_n": 68, "prompt_n": 516, "prompt_ms": 4307.8, "predicted_n": 469, "predicted_ms": 56790.9, "wall_s": 61.18, "reasoning_chars": 1445, "content_chars": 331}
+{"scenario": "strip", "turn": 2, "cache_n": 580, "prompt_n": 122, "prompt_ms": 1445.3, "predicted_n": 512, "predicted_ms": 66175.9, "wall_s": 68.43, "reasoning_chars": 1840, "content_chars": 191}
+{"scenario": "strip", "turn": 3, "cache_n": 698, "prompt_n": 86, "prompt_ms": 1199.5, "predicted_n": 512, "predicted_ms": 65593.5, "wall_s": 66.81, "reasoning_chars": 2098, "content_chars": 0}
+{"scenario": "strip", "turn": 4, "cache_n": 780, "prompt_n": 32, "prompt_ms": 1156.6, "predicted_n": 512, "predicted_ms": 76801.4, "wall_s": 77.99, "reasoning_chars": 2465, "content_chars": 0}
+{"scenario": "volatile", "turn": 1, "cache_n": 559, "prompt_n": 58, "prompt_ms": 1716.7, "predicted_n": 228, "predicted_ms": 50918.2, "wall_s": 52.71, "reasoning_chars": 707, "content_chars": 377}
+{"scenario": "volatile", "turn": 2, "cache_n": 559, "prompt_n": 314, "prompt_ms": 4032.4, "predicted_n": 512, "predicted_ms": 70754.3, "wall_s": 74.8, "reasoning_chars": 2166, "content_chars": 0}
+{"scenario": "volatile", "turn": 3, "cache_n": 559, "prompt_n": 863, "prompt_ms": 7091.8, "predicted_n": 512, "predicted_ms": 57940.1, "wall_s": 65.12, "reasoning_chars": 2019, "content_chars": 131}
+{"scenario": "volatile", "turn": 4, "cache_n": 68, "prompt_n": 1892, "prompt_ms": 14401.2, "predicted_n": 483, "predicted_ms": 57479.3, "wall_s": 72.02, "reasoning_chars": 2402, "content_chars": 0}
+{"scenario": "volatile_tail", "turn": 1, "cache_n": 68, "prompt_n": 551, "prompt_ms": 4869.7, "predicted_n": 187, "predicted_ms": 22377.1, "wall_s": 27.44, "reasoning_chars": 490, "content_chars": 380}
+{"scenario": "volatile_tail", "turn": 2, "cache_n": 805, "prompt_n": 64, "prompt_ms": 991.0, "predicted_n": 187, "predicted_ms": 22654.9, "wall_s": 23.68, "reasoning_chars": 508, "content_chars": 365}
+{"scenario": "volatile_tail", "turn": 3, "cache_n": 1055, "prompt_n": 69, "prompt_ms": 1117.4, "predicted_n": 253, "predicted_ms": 31391.5, "wall_s": 32.55, "reasoning_chars": 854, "content_chars": 349}
+{"scenario": "volatile_tail", "turn": 4, "cache_n": 1376, "prompt_n": 61, "prompt_ms": 1033.2, "predicted_n": 304, "predicted_ms": 38174.4, "wall_s": 39.25, "reasoning_chars": 1172, "content_chars": 325}

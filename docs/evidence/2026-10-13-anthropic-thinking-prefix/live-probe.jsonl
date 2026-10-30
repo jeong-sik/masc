@@ -1,0 +1,5 @@
+{"scenario": "first_response", "status": 200, "stop_reason": "tool_use", "block_types": ["thinking", "tool_use"]}
+{"scenario": "preserved_context", "status": 200, "thinking_blocks": 1, "transformations": []}
+{"scenario": "missing_context", "status": 400, "error_type": "invalid_request_error"}
+{"scenario": "missing_context_recovery", "status": 200, "transformations": [{"type": "thinking_dropped", "path": "messages.1.content.0", "reason": "prefix_binding_mismatch"}]}
+{"scenario": "streamed_missing_context_recovery", "status": 200, "stream_completed": true, "transformations": [{"type": "thinking_dropped", "path": "messages.1.content.0", "reason": "prefix_binding_mismatch"}]}

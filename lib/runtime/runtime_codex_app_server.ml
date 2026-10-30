@@ -1,0 +1,3345 @@
+(** Native Codex app-server single-turn execution.
+
+    The official CLI owns credential selection and provider routing. MASC
+    preserves supported authentication inputs and parses the reported auth mode
+    before starting a thread; configured provider auth is verified by the turn. *)
+
+type subscription =
+  | Chatgpt of { plan_type : string; email : string option }
+  | Api_key
+  | Provider_managed
+  | Amazon_bedrock
+
+let authentication_to_string = function
+  | Chatgpt _ -> "chatgpt" | Api_key -> "api_key"
+  | Provider_managed -> "provider_managed" | Amazon_bedrock -> "amazon_bedrock"
+
+type probe_result =
+  { subscription : subscription
+  ; user_agent : string option
+  }
+
+type config =
+  { cli_path : string
+  ; account_home : string option
+  ; isolated_home : string option
+  ; model : string option
+  ; context_window : int option
+  ; developer_instructions : string option
+  ; native : Runtime_native_tools.posture
+  ; admission_timeout_s : float
+  ; timeout_s : float option
+  ; output_schema : Yojson.Safe.t option
+  }
+
+let default_timeout_s = 300.0
+
+(* [None] installs no deadline. The vendor client owns when its own turn ends;
+   a declared bound is the operator's optional liveness guard over a silent
+   client, not a limit on how long legitimate work may take. *)
+let stderr_chunk_bytes = 4096
+let stderr_tail_bytes = 4096
+let max_wire_line_bytes = 8 * 1024 * 1024
+let approval_policy = "never"
+let thread_is_ephemeral = false
+
+let client_version = Runtime_build_version.current
+
+let default_config () =
+  { cli_path = "codex"
+  ; account_home = None
+  ; isolated_home = None
+  ; model = None
+  ; context_window = None
+  ; developer_instructions = None
+  ; native = Runtime_native_tools.codex_default
+  ; admission_timeout_s = default_timeout_s
+  ; timeout_s = Some default_timeout_s
+  ; output_schema = None
+  }
+;;
+
+(* The window one [receive] waits under follows where the turn is rather than
+   a value set once after dispatch. Before the [turn/start] reply the client
+   is being admitted. During the model turn a client that has gone silent is
+   the fault the idle window exists to notice. While the model is waiting on
+   an item the app-server runs outside the model stream (a command, an MCP
+   call, a sleep) the app-server may write nothing until the item completes,
+   so that silence has no idle timer; the owner can still cancel the turn.
+   The model speaking again (an item of the model stream, a message or plan
+   delta) ends that wait even if the item stays open: a background command
+   under unified exec keeps its item open until its process exits while the
+   turn goes on. *)
+type receive_phase =
+  | Awaiting_admission
+  | Model_turn
+  | Tool_item_running
+
+let window_for_phase config = function
+  | Awaiting_admission -> Some config.admission_timeout_s
+  | Model_turn -> config.timeout_s
+  | Tool_item_running -> None
+;;
+
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
+type thread_mode =
+  | Start
+  | Resume of { thread_id : string }
+
+(* The per-turn counts the app-server reports on thread/tokenUsage/updated,
+   its [last] breakdown. OpenAI counting: [input_tokens] already includes the
+   cached prefix and [output_tokens] already includes reasoning, the same
+   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
+   defaults to 0 on the wire. *)
+type token_usage =
+  { input_tokens : int
+  ; cached_input_tokens : int
+  ; cache_write_input_tokens : int
+  ; output_tokens : int
+  ; reasoning_output_tokens : int
+  ; total_tokens : int
+  }
+
+type last_usage =
+  | Request_usage of token_usage
+  | Context_estimate of { estimated_tokens : int }
+
+type frame_usage =
+  | Counted of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Context_window_filled of { context_window : int }
+
+type turn_usage =
+  | Thread_count of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Thread_count_replaced
+
+(* Both zero-count shapes are the whole breakdown Codex writes by name
+   (rust-v0.156.1): [TokenUsage { total_tokens: n, ..TokenUsage::default() }]
+   in recompute_token_usage for [last] and in fill_to_context_window for
+   [total]. A response's counts always carry input, so a breakdown with no
+   counts but a total is one of those two and never a request. Measured
+   2026-09-25 over 29,088 Keeper and interactive frames: 266 estimates and
+   332 fills, each fill its thread's final frame. *)
+let only_total_tokens (usage : token_usage) =
+  usage.input_tokens = 0
+  && usage.cached_input_tokens = 0
+  && usage.cache_write_input_tokens = 0
+  && usage.output_tokens = 0
+  && usage.reasoning_output_tokens = 0
+  && usage.total_tokens > 0
+;;
+
+let frame_usage_of_breakdowns ~last ~thread_total =
+  if only_total_tokens thread_total
+  then Context_window_filled { context_window = thread_total.total_tokens }
+  else
+    let last =
+      if only_total_tokens last
+      then Context_estimate { estimated_tokens = last.total_tokens }
+      else Request_usage last
+    in
+    Counted { last; thread_total }
+;;
+
+(* A fill replaces the running count for the rest of the turn: a count read
+   after it starts from zero again, so it cannot stand for the turn. *)
+let fold_turn_usage seen frame =
+  match seen, frame with
+  | Some Thread_count_replaced, (Counted _ | Context_window_filled _)
+  | (None | Some (Thread_count _)), Context_window_filled _ -> Thread_count_replaced
+  | (None | Some (Thread_count _)), Counted { last; thread_total } ->
+    Thread_count { last; thread_total }
+;;
+
+type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
+
+type turn_result =
+  { thread_id : string
+  ; turn_id : string
+  ; model : string
+  ; text : string
+  ; dynamic_tool_calls : int
+  ; scheduling_handoff : handoff_state
+  ; subscription : subscription
+  ; user_agent : string option
+  ; resumed : bool
+  ; usage : turn_usage option
+    (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
+       arrived before turn/completed. *)
+  ; model_context_window : int option
+  }
+
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; detail : Keeper_terminal_effect_detail.t
+      }
+
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
+
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
+  { success : bool
+  ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
+  }
+
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
+
+type elicitation_mode = Form | Openai_form | Url
+
+type elicitation_cancel_reason = Host_input_unavailable
+
+type reasoning_part = Summary of int | Content of int
+
+type text_completion_source = Item_content | Adopted_anonymous_content
+
+type undelivered_tool_result =
+  { thread_id : string
+  ; turn_id : string
+  ; call_id : string
+  ; tool_name : string
+  ; arguments : Yojson.Safe.t
+  ; response : Yojson.Safe.t
+  }
+
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
+  | Thinking_delta of
+      { item_id : string
+      ; part : reasoning_part
+      ; delta : string
+      }
+  | Text_completed of { item_id : string option; source : text_completion_source }
+  | Thinking_completed of { item_id : string; part : reasoning_part }
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Tool_delivery_closed of { pending_tool_calls : int }
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of { item_id : string; progress : Runtime_native_tools.progress }
+  | Compaction_observed
+  | Elicitation_cancelled of
+      { server_name : string
+      ; mode : elicitation_mode
+      ; reason : elicitation_cancel_reason
+      }
+  | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Usage_reported of
+      { thread_id : string
+      ; turn_id : string
+      ; model : string
+      ; frame : frame_usage
+      }
+  | Turn_finished of { text : string }
+
+let emit_stream_event on_stream_event event =
+  match on_stream_event with
+  | None -> ()
+  | Some callback ->
+    (try callback event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Runtime_agent.warn
+         "Codex app-server stream callback raised: %s"
+         (Printexc.to_string exn))
+
+type history_role =
+  | User
+  | Assistant
+  | Developer
+
+type history_message =
+  { role : history_role
+  ; text : string
+  }
+
+let history_bytes messages =
+  List.fold_left (fun acc message -> acc + String.length message.text) 0 messages
+;;
+
+let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
+
+(* [CodexErrorInfo] from the app-server's generated protocol schema
+   (codex-cli 0.156.0, [codex app-server generate-json-schema],
+   v2/ErrorNotification.json, definitions.CodexErrorInfo), without
+   [contextWindowExceeded]: that value is read into
+   {!error.Context_window_exceeded}, so a failed turn never carries it.
+   A value the schema does not name is kept whole in [Unrecognized]. *)
+module Codex_error_info = struct
+  type non_steerable_turn_kind =
+    | Review
+    | Compact
+
+  type t =
+    | Session_budget_exceeded
+    | Usage_limit_exceeded
+    | Rate_limit_exceeded
+    | Server_overloaded
+    | Cyber_policy
+    | Misalignment_policy_violation
+    | Internal_server_error
+    | Unauthorized
+    | Bad_request
+    | Thread_rollback_failed
+    | Sandbox_error
+    | Other
+    | Http_connection_failed of { http_status_code : int option }
+    | Response_stream_connection_failed of { http_status_code : int option }
+    | Response_stream_disconnected of { http_status_code : int option }
+    | Response_too_many_failed_attempts of { http_status_code : int option }
+    | Active_turn_not_steerable of { turn_kind : non_steerable_turn_kind }
+    | Unrecognized of Yojson.Safe.t
+end
+
+type error =
+  | Invalid_config of string
+  | Spawn_failed of string
+  | Reasoning_effort_admission_failed of { model : string; detail : string }
+  | Turn_input_write_failed of string
+      (* The client and thread were initialized, but complete turn-input
+         transmission is unconfirmed. Partial delivery must not be replayed
+         as a proven pre-spawn failure. *)
+  | Protocol_error of
+      { stage : string
+      ; detail : string
+      }
+  | Rpc_error of
+      { method_ : string
+      ; code : int option
+      ; message : string
+      ; data : Yojson.Safe.t option
+      }
+  | Subscription_required of string
+  | Unsupported_server_request of string
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      }
+  | Turn_failed of
+      { detail : string
+      ; codex_error_info : Codex_error_info.t option
+      }
+  | Stopped_by_host of host_stop
+  | Turn_interrupted
+  | Runtime_shutting_down
+  | Process_exited of
+      { detail : string
+      ; turn_accepted : bool
+      }
+  | Timeout of
+      { seconds : float
+      ; turn_accepted : bool
+      }
+
+(* These are named permissions profile ids, which the app-server keeps in a
+   different value space from sandbox modes. [ThreadStartParams] carries both
+   and admits only one: [permissions] is "Named profile id for this thread.
+   Cannot be combined with `sandbox`." The field list below writes
+   [permissions], so a [SandboxMode] value here names nothing.
+
+   The ids are read off the app-server rather than guessed. codex-cli 0.153.2,
+   [permissionProfile/list] over stdio (initialize, initialized, list — no
+   thread and no prompt) answers with exactly three:
+     ":read-only", ":workspace", ":danger-full-access".
+   The CLI's -s read-only|workspace-write|danger-full-access is [SandboxMode],
+   the [sandbox] field's vocabulary; "workspace-write" is absent from the
+   profile list and from the binary's own profile table. [Native_full] takes
+   ":workspace", which the vendor describes as allowing "writes inside the
+   active workspace roots and system temp directories"
+   (https://learn.chatgpt.com/docs/permissions).
+
+   [Native_none] never reaches here: neither Codex nor its caller can disable
+   the built-in tools, so the keeper layer rejects it first and this function
+   refuses it as config. *)
+let permissions_profile_of_posture = function
+  | Runtime_native_tools.Native_read -> Ok ":read-only"
+  | Runtime_native_tools.Native_full -> Ok ":workspace"
+  | Runtime_native_tools.Native_none ->
+    Error
+      (Invalid_config
+         "Codex cannot disable its built-in tools; use native read or full")
+;;
+
+(* Match Codex UserInput::Text.text.chars().count(), not UTF-8 bytes or
+   grapheme clusters. Source: openai/codex 8f2c15c39871c0698cd76a22ae239d36f7e8c9b8,
+   codex-rs/app-server-protocol/src/protocol/v2/turn.rs, text_char_count.
+   Our turn/start sends one text input containing exactly [prompt]. *)
+let prompt_char_count prompt =
+  let length = String.length prompt in
+  let rec count offset chars =
+    if offset = length then Ok chars
+    else
+      let decoded = String.get_utf_8_uchar prompt offset in
+      if Uchar.utf_decode_is_valid decoded then
+        count (offset + Uchar.utf_decode_length decoded) (chars + 1)
+      else Error "Codex prompt contains malformed UTF-8"
+  in
+  count 0 0
+;;
+
+type input_capacity = { actual_chars : int; max_chars : int }
+
+(* Codex app-server reports this typed data independently of its human message:
+   openai/codex 8f2c15c39871c0698cd76a22ae239d36f7e8c9b8,
+   codex-rs/app-server/src/request_processors/turn_processor.rs, input_too_large_error.
+   A generic invalid-params error never authorizes shrinking conversation input. *)
+let input_capacity_refusal = function
+  | Rpc_error { method_ = "turn/start"; code = Some (-32602);
+                data = Some (`Assoc fields); _ } ->
+    let unique key =
+      match List.filter (fun (name, _) -> String.equal name key) fields with
+      | [(_, value)] -> Some value
+      | _ -> None
+    in
+    (match unique "input_error_code", unique "actual_chars", unique "max_chars" with
+     | Some (`String "input_too_large"), Some (`Int actual_chars), Some (`Int max_chars)
+       when max_chars > 0 && actual_chars > max_chars -> Some {actual_chars; max_chars}
+     | _ -> None)
+  | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+  | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Subscription_required _
+  | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _
+  | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down | Process_exited _
+  | Timeout _ -> None
+;;
+
+let error_to_string = function
+  | Invalid_config detail -> "invalid Codex app-server config: " ^ detail
+  | Spawn_failed detail -> "failed to start Codex app-server: " ^ detail
+  | Turn_input_write_failed detail -> "Codex turn/start input write failed: " ^ detail
+  | Reasoning_effort_admission_failed { model; detail } ->
+    Printf.sprintf "Codex reasoning effort admission failed for %s: %s" model detail
+  | Protocol_error { stage; detail } ->
+    Printf.sprintf "Codex app-server protocol error during %s: %s" stage detail
+  | Rpc_error { method_; code; message; _ } ->
+    let code = Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code in
+    Printf.sprintf "Codex app-server RPC %s failed%s: %s" method_ code message
+  | Subscription_required detail ->
+    "Codex authentication required: " ^ detail
+  | Unsupported_server_request method_ ->
+    "Codex app-server requested unsupported host action: " ^ method_
+  | Context_window_exceeded { message; tool_effect_attempted } ->
+    Printf.sprintf
+      "Codex app-server context window exceeded (tool_effect_attempted=%b): %s"
+      tool_effect_attempted
+      message
+  | Turn_failed { detail; codex_error_info = _ } ->
+    "Codex app-server turn failed: " ^ detail
+  | Stopped_by_host (Repeated_tool_call { tool_name; repeated_count }) ->
+    Printf.sprintf
+      "Codex app-server stopped after repeated tool call: tool=%s count=%d"
+      tool_name
+      repeated_count
+  | Stopped_by_host (Terminal_tool_boundary { tool_name; _ }) ->
+    Printf.sprintf "Codex app-server stopped at terminal tool boundary: tool=%s" tool_name
+  | Turn_interrupted -> "Codex app-server turn was interrupted"
+  | Runtime_shutting_down ->
+    "MASC runtime shutdown interrupted the active Codex turn"
+  | Process_exited { detail; turn_accepted } ->
+    Printf.sprintf "Codex app-server exited before completion (turn_accepted=%b): %s"
+      turn_accepted detail
+  | Timeout { seconds; turn_accepted } ->
+    if turn_accepted
+    then
+      Printf.sprintf
+        "Codex app-server stream was idle for %.3fs after turn/start was accepted"
+        seconds
+    else Printf.sprintf "Codex app-server stream was idle for %.3fs" seconds
+;;
+
+(* Every constructor is listed so a new [codexErrorInfo] value or a new
+   failure stops compilation here until someone decides whether it spends
+   the account. *)
+let refused_for_spent_usage = function
+  | Turn_failed { codex_error_info = Some info; detail = _ } ->
+    (match info with
+     | Codex_error_info.Usage_limit_exceeded | Codex_error_info.Session_budget_exceeded -> true
+     | Codex_error_info.Rate_limit_exceeded
+     | Codex_error_info.Server_overloaded
+     | Codex_error_info.Cyber_policy
+     | Codex_error_info.Misalignment_policy_violation
+     | Codex_error_info.Internal_server_error
+     | Codex_error_info.Unauthorized
+     | Codex_error_info.Bad_request
+     | Codex_error_info.Thread_rollback_failed
+     | Codex_error_info.Sandbox_error
+     | Codex_error_info.Other
+     | Codex_error_info.Http_connection_failed _
+     | Codex_error_info.Response_stream_connection_failed _
+     | Codex_error_info.Response_stream_disconnected _
+     | Codex_error_info.Response_too_many_failed_attempts _
+     | Codex_error_info.Active_turn_not_steerable _
+     | Codex_error_info.Unrecognized _ -> false)
+  | Turn_failed { codex_error_info = None; detail = _ }
+  | Invalid_config _
+  | Spawn_failed _
+  | Reasoning_effort_admission_failed _
+  | Turn_input_write_failed _
+  | Protocol_error _
+  | Rpc_error _
+  | Subscription_required _
+  | Unsupported_server_request _
+  | Context_window_exceeded _
+  | Stopped_by_host _
+  | Turn_interrupted
+  | Runtime_shutting_down
+  | Process_exited _
+  | Timeout _ -> false
+;;
+
+let error_kind = function
+  | Invalid_config _ -> "invalid_config"
+  | Spawn_failed _ -> "spawn_failed"
+  | Reasoning_effort_admission_failed _ -> "reasoning_effort_admission_failed"
+  | Turn_input_write_failed _ -> "turn_input_write_failed"
+  | Protocol_error _ -> "protocol_error"
+  | Rpc_error _ -> "rpc_error"
+  | Subscription_required _ -> "subscription_required"
+  | Unsupported_server_request _ -> "unsupported_server_request"
+  | Context_window_exceeded _ -> "context_window_exceeded"
+  | Turn_failed _ -> "turn_failed"
+  | Stopped_by_host _ -> "stopped_by_host"
+  | Turn_interrupted -> "turn_interrupted"
+  | Runtime_shutting_down -> "runtime_shutting_down"
+  | Process_exited _ -> "process_exited"
+  | Timeout _ -> "timeout"
+;;
+
+let protocol_error stage detail = Error (Protocol_error { stage; detail })
+let ( let* ) result f = Result.bind result f
+
+(* The three official-client runtimes speak the same line-delimited JSON
+   protocol and differ only in the error constructor they fail with. The shape
+   checks live once in {!Runtime_official_client_json}; this instantiates them
+   against this runtime's own [error]. *)
+module Shared_json = Runtime_official_client_json.Make (struct
+  type t = error
+
+  let protocol ~stage ~detail = Protocol_error { stage; detail }
+end)
+
+open Shared_json
+
+module Stderr = Runtime_official_client_json.Stderr
+
+(* Names the first field carrying invalid UTF-8 so a refused write points at
+   its producer rather than at a byte offset. *)
+let invalid_utf8_field json =
+  let rec walk path json =
+    match json with
+    | `String s when not (String_util.is_valid_utf8 s) ->
+      Some (if path = "" then "<root>" else path)
+    | `Assoc fields ->
+      List.find_map
+        (fun (k, v) -> walk (if path = "" then k else path ^ "." ^ k) v)
+        fields
+    | `List items -> List.find_map (walk (path ^ "[]")) items
+    | _ -> None
+  in
+  walk "" json
+;;
+
+(* Present and a string, with no constraint on its contents. For payload
+   fields whose value this decoder does not read: an emptiness rule there
+   ends the turn over a byte nobody looks at. *)
+let required_string_any stage name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a string" name)
+  | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
+;;
+
+let required_int stage name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Ok value
+  | Some _ -> protocol_error stage (Printf.sprintf "field %S must be an integer" name)
+  | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
+;;
+
+(* A token count: an integer that is not negative. *)
+let required_count stage name fields =
+  let* value = required_int stage name fields in
+  if value < 0
+  then protocol_error stage (Printf.sprintf "field %S must not be negative" name)
+  else Ok value
+;;
+
+type wire_message =
+  | Response of
+      { id : int
+      ; result : Yojson.Safe.t
+      }
+  | Response_error of
+      { id : int
+      ; code : int option
+      ; message : string
+      ; data : Yojson.Safe.t option
+      }
+  | Notification of
+      { method_ : string
+      ; params : Yojson.Safe.t
+      }
+  | Server_request of
+      { id : Yojson.Safe.t
+      ; method_ : string
+      ; params : Yojson.Safe.t
+      }
+
+let parse_rpc_error id fields =
+  let stage = "JSON-RPC error" in
+  let* error_json = required_member stage "error" fields in
+  let* error_fields = assoc_at stage error_json in
+  let* message = required_string stage "message" error_fields in
+  let* code = required_int stage "code" error_fields in
+  let data = List.assoc_opt "data" error_fields in
+  Ok (Response_error { id; code = Some code; message; data })
+;;
+
+let parse_wire_line line =
+  let stage = "JSON-RPC message" in
+  let json_result =
+    try Ok (Yojson.Safe.from_string line) with
+    | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
+  in
+  let* json = json_result in
+  let* () = validate_unique_object_keys ~stage ~path:"$" json in
+  let* fields = assoc_at stage json in
+  match List.assoc_opt "id" fields, List.assoc_opt "method" fields with
+  | Some id, Some (`String method_) ->
+    let* params = required_member stage "params" fields in
+    Ok (Server_request { id; method_; params })
+  | Some (`Int id), None ->
+    (match List.assoc_opt "error" fields with
+     | Some _ -> parse_rpc_error id fields
+     | None ->
+       let* result = required_member stage "result" fields in
+       Ok (Response { id; result }))
+  | Some _, None -> protocol_error stage "response id must be an integer"
+  | None, Some (`String method_) ->
+    let* params = required_member stage "params" fields in
+    Ok (Notification { method_; params })
+  | Some _, Some _ | None, Some _ -> protocol_error stage "method must be a string"
+  | None, None -> protocol_error stage "message has neither id nor method"
+;;
+
+(* The context-bearing frames MASC writes to Codex stdin. The site that builds
+   a frame names it here; nothing re-reads the serialized JSON to decide. A
+   [Dynamic_tool_response] answers the app-server's [item/tool/call] with the
+   tool's content items. *)
+type context_submission_method =
+  | Thread_start
+  | Thread_resume
+  | Thread_inject_items
+  | Turn_start
+  | Turn_steer
+  | Dynamic_tool_response
+
+let context_submission_method_label = function
+  | Thread_start -> "thread/start"
+  | Thread_resume -> "thread/resume"
+  | Thread_inject_items -> "thread/inject_items"
+  | Turn_start -> "turn/start"
+  | Turn_steer -> "turn/steer"
+  | Dynamic_tool_response -> "item/tool/call"
+;;
+
+(* A request MASC numbers itself, or the app-server's request id that a
+   response echoes. The echoed id stays the JSON value the server sent. *)
+type context_frame_id =
+  | Request_id of int
+  | Answered_request_id of Yojson.Safe.t
+
+let context_frame_id_to_json = function
+  | Request_id id -> `Int id
+  | Answered_request_id id -> id
+;;
+
+type outbound_frame =
+  | Control
+  | Context of
+      { method_ : context_submission_method
+      ; id : context_frame_id
+      ; thread_id : string option
+      }
+
+type io =
+  { send : ?on_response_sent:(unit -> unit) -> outbound_frame -> Yojson.Safe.t -> unit
+  ; receive : unit -> (wire_message, error) result
+  ; set_receive_phase : receive_phase -> unit
+  }
+
+(* Requests that carry model context. The wire method comes from the
+   constructor, so a frame and its observation cannot name different methods. *)
+type context_request = Start_thread | Resume_thread | Inject_items | Start_turn | Steer_turn
+
+let context_request_method = function
+  | Start_thread -> Thread_start
+  | Resume_thread -> Thread_resume
+  | Inject_items -> Thread_inject_items
+  | Start_turn -> Turn_start
+  | Steer_turn -> Turn_steer
+;;
+
+let send_control_request io ~id ~method_ ~params =
+  io.send Control (`Assoc [ "id", `Int id; "method", `String method_; "params", params ])
+;;
+
+let send_context_request io request ~id ~thread_id ~params =
+  let method_ = context_request_method request in
+  io.send
+    (Context { method_; id = Request_id id; thread_id })
+    (`Assoc
+       [ "id", `Int id
+       ; "method", `String (context_submission_method_label method_)
+       ; "params", params
+       ])
+;;
+
+let send_notification io method_ = io.send Control (`Assoc [ "method", `String method_ ])
+
+let reject_server_request io id =
+  io.send
+    Control
+    (`Assoc
+       [ "id", id
+       ; ( "error"
+         , `Assoc
+             [ "code", `Int (-32601)
+             ; "message", `String "MASC does not support this app-server host request"
+             ] )
+       ])
+;;
+
+(* Every Keeper tool is declared once, deferred unless its declaration
+   loads it upfront ([tool.loading]; the server's own default for an absent
+   [deferLoading] is false -- openai/codex codex-rs/protocol/src/dynamic_tools.rs).
+
+   The app-server takes two encodings of [dynamicTools] and refuses a mix
+   ("dynamic tools must use either canonical or legacy format consistently").
+   The legacy one is tagged ["type": "function"] and cannot defer, so the
+   canonical one -- no type tag -- is written here.
+
+   Deferring means the app-server holds the schema until the model reaches
+   for that tool, instead of every schema riding in the model's context from
+   the first token of every turn. Measured 2026-09-16 by driving this
+   protocol with 203 probe tools of about 2.7 KB each, reading one request's
+   input count (the [total] in thread/tokenUsage/updated sums a turn's
+   requests, so reading that inflates every figure by the request count):
+   120,205 tokens undeferred against 24,829 deferred, and a tool the model
+   calls brings its own schema and nothing else -- +625 for one, +1,680 for
+   three.
+
+   The server will not defer a tool whose [namespace] is missing or empty
+   ("deferred dynamic tool must include a namespace", "dynamic tool namespace
+   must not be empty"), so the word below is written to satisfy that and for
+   no other reason. Nothing reads it: dispatch is the tool table in
+   [handle_dynamic_tool_call], and giving every tool its own word was
+   measured to change nothing. It is not a grouping axis, and masc keeps no
+   concept behind it -- RFC-0451 §7. *)
+let dynamic_tool_spec (tool : dynamic_tool) =
+  `Assoc
+    [ "name", `String tool.name
+    ; "description", `String tool.description
+    ; "inputSchema", tool.input_schema
+    ; "namespace", `String "masc"
+    ; ( "deferLoading"
+      , `Bool
+          (match tool.loading with
+           | Runtime_official_client_tool.On_demand -> true
+           | Runtime_official_client_tool.Upfront -> false) )
+    ]
+;;
+let find_dynamic_tool tools name =
+  List.find_opt (fun (tool : dynamic_tool) -> String.equal tool.name name) tools
+;;
+
+let send_dynamic_tool_response io ~thread_id ~id (result : dynamic_tool_result) =
+  let success, content_items =
+    match Runtime_official_client_tool.codex_content_items
+      ~content:result.content ~content_blocks:result.content_blocks with
+    | Ok items -> result.success, items
+    | Error detail -> false,
+        [ `Assoc [ "type", `String "inputText"; "text", `String detail ]
+        ; `Assoc [ "type", `String "inputText"; "text",
+            `String (Llm_provider.Utf8_sanitize.sanitize result.content) ] ]
+  in
+  io.send
+    ?on_response_sent:(Runtime_official_client_tool.response_observer Codex result)
+    (Context
+       { method_ = Dynamic_tool_response; id = Answered_request_id id; thread_id = Some thread_id })
+    (`Assoc
+       [ "id", id
+       ; "result", `Assoc
+           [ "success", `Bool success; "contentItems", `List content_items ]
+       ])
+;;
+
+let handle_dynamic_tool_call io ~tools ~terminal_tools_closed ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
+    ~on_stream_event ~id params =
+  let stage = "item/tool/call" in
+  let* fields = assoc_at stage params in
+  let* request_thread_id = required_string stage "threadId" fields in
+  let* request_turn_id = required_string stage "turnId" fields in
+  let* call_id = required_string stage "callId" fields in
+  let* tool_name = required_string stage "tool" fields in
+  let* arguments = required_member stage "arguments" fields in
+  (* The call's [namespace] field is read by nothing here. What decides
+     whether this host answers is the tool table below: a name it does not
+     hold is refused, and a name it holds is one it declared itself. The
+     namespace could only ever repeat that answer, because this host declares
+     one namespace and every call names it back. *)
+  if request_thread_id <> thread_id || request_turn_id <> turn_id
+  then protocol_error stage "tool call identity does not match the active turn"
+  else if !terminal_tools_closed then (
+    (* A terminal tool already completed during scheduling handoff. Preserve
+       that result while the vendor settles the turn, without admitting another
+       host effect or killing the client before it records the returned result. *)
+    send_dynamic_tool_response io ~thread_id ~id
+      { success = false; content = "A terminal tool already completed. No further tools are admitted in this turn. Preserve its result and finish with your progress reply.";
+        content_blocks = None; abort_turn = None; on_response_sent = None };
+    Ok ())
+  else
+    match find_dynamic_tool tools tool_name with
+    | None -> protocol_error stage (Printf.sprintf "unknown dynamic tool %S" tool_name)
+    | Some tool ->
+      emit_stream_event
+        on_stream_event
+        (Dynamic_tool_started { call_id; tool_name; arguments });
+      (match tool.call_effect arguments with
+       | Agent_core.Tool.Read_only -> ()
+       | Agent_core.Tool.Effect_possible -> tool_effect_attempted := true);
+      let result =
+        try tool.call ~call_id arguments with
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Runtime_agent.warn
+            "Codex dynamic tool handler raised (tool=%s error=%s)"
+            tool_name
+            (Printexc.to_string exn);
+          { success = false
+          ; content = "dynamic tool handler raised"
+          ; content_blocks = None; abort_turn = None; on_response_sent = None
+          }
+      in
+      incr tool_call_count;
+      emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
+      send_dynamic_tool_response io ~thread_id ~id result;
+      (match result.abort_turn with
+       | None -> Ok ()
+       | Some stop -> Error (Stopped_by_host stop))
+;;
+
+let rec await_response io ~id ~method_ =
+  let* message = io.receive () in
+  match message with
+  | Response { id = response_id; result } when response_id = id -> Ok result
+  | Response { id = response_id; _ } ->
+    protocol_error method_
+      (Printf.sprintf "received response id %d while waiting for %d" response_id id)
+  | Response_error { id = response_id; code; message; data } when response_id = id ->
+    Error (Rpc_error { method_; code; message; data })
+  | Response_error { id = response_id; _ } ->
+    protocol_error method_
+      (Printf.sprintf "received error response id %d while waiting for %d" response_id id)
+  | Notification _ -> await_response io ~id ~method_
+  | Server_request { id; method_ = requested_method; _ } ->
+    reject_server_request io id;
+    Error (Unsupported_server_request requested_method)
+;;
+
+let parse_initialize result =
+  let stage = "initialize" in
+  let* fields = assoc_at stage result in
+  optional_string stage "userAgent" fields
+;;
+
+let parse_subscription result =
+  let stage = "account/read" in
+  let* fields = assoc_at stage result in
+  match List.assoc_opt "requiresOpenaiAuth" fields with
+  | Some (`Bool false) -> Ok Provider_managed
+  | _ ->
+    let* account = required_member stage "account" fields in
+    match account with
+    | `Null -> Error (Subscription_required "the official CLI has no active account")
+    | `Assoc account_fields ->
+      let* account_type = required_string stage "type" account_fields in
+      (match account_type with
+       | "apiKey" -> Ok Api_key
+       | "amazonBedrock" -> Ok Amazon_bedrock
+       | "chatgpt" ->
+         let* plan_type = required_string stage "planType" account_fields in
+         let* email = optional_string stage "email" account_fields in
+         Ok (Chatgpt { plan_type; email })
+       | _ -> protocol_error stage "unsupported account type reported by Codex")
+    | _ -> protocol_error stage "account must be an object or null"
+;;
+
+let probe_protocol io =
+  send_control_request
+    io
+    ~id:1
+    ~method_:"initialize"
+    ~params:
+      (`Assoc
+         [ ( "clientInfo"
+           , `Assoc
+               [ "name", `String "masc"
+               ; "title", `String "MASC"
+               ; "version", `String Runtime_build_version.current
+               ] )
+         ; "capabilities", `Assoc [ "experimentalApi", `Bool true ]
+         ]);
+  let* initialize = await_response io ~id:1 ~method_:"initialize" in
+  let* user_agent = parse_initialize initialize in
+  send_notification io "initialized";
+  send_control_request
+    io
+    ~id:2
+    ~method_:"account/read"
+    ~params:(`Assoc [ "refreshToken", `Bool false ]);
+  let* account = await_response io ~id:2 ~method_:"account/read" in
+  let* subscription = parse_subscription account in
+  Ok { subscription; user_agent }
+;;
+
+type listed_model = {
+  id : string; model : string; display_name : string; is_default : bool;
+  supported_reasoning_efforts : string list;
+  default_reasoning_effort : string;
+}
+
+let read_model_pages io ~include_hidden ~request_id =
+  let stage = "model/list" in
+  let parse_model json =
+    let* fields = assoc_at stage json in
+    let* id = required_string stage "id" fields in
+    let* model = required_string stage "model" fields in
+    let* display_name = required_string stage "displayName" fields in
+    let* default_reasoning_effort = required_string stage "defaultReasoningEffort" fields in
+    let* supported_reasoning_efforts =
+      match List.assoc_opt "supportedReasoningEfforts" fields with
+      | Some (`List items) ->
+        let* reversed = List.fold_left (fun acc item ->
+          let* efforts = acc in
+          let* fields = assoc_at stage item in
+          let* effort = required_string stage "reasoningEffort" fields in
+          if List.mem effort efforts then protocol_error stage "duplicate reasoning effort"
+          else Ok (effort :: efforts)) (Ok []) items in
+        Ok (List.rev reversed)
+      | _ -> protocol_error stage "missing or invalid reasoning efforts"
+    in
+    match List.assoc_opt "isDefault" fields with
+    | Some (`Bool is_default) ->
+      Ok {id; model; display_name; is_default; supported_reasoning_efforts; default_reasoning_effort}
+    | _ -> protocol_error stage "invalid default marker"
+  in
+  let rec page request_id cursor seen rows =
+    let params = ["includeHidden", `Bool include_hidden] @
+      (match cursor with None -> [] | Some value -> ["cursor", `String value]) in
+    send_control_request io ~id:request_id ~method_:stage ~params:(`Assoc params);
+    let* response = await_response io ~id:request_id ~method_:stage in
+    let* fields = assoc_at stage response in
+    let* items = match List.assoc_opt "data" fields with
+      | Some (`List items) -> Ok items | _ -> protocol_error stage "missing model data" in
+    let* rows = List.fold_left (fun acc item ->
+      let* rows = acc in let* row = parse_model item in
+      if List.exists (fun existing -> existing.id = row.id || existing.model = row.model) rows
+      then protocol_error stage "duplicate model identity" else Ok (row :: rows)) (Ok rows) items in
+    match List.assoc_opt "nextCursor" fields with
+    | None | Some `Null -> Ok (List.rev rows, request_id + 1)
+    | Some (`String next) when next <> "" && not (List.mem next seen) ->
+      page (request_id + 1) (Some next) (next :: seen) rows
+    | _ -> protocol_error stage "invalid or repeated model cursor"
+  in
+  page request_id None [] []
+;;
+
+let model_list_protocol io =
+  let* _ = probe_protocol io in
+  let* rows, _ = read_model_pages io ~include_hidden:false ~request_id:3 in
+  Ok rows
+;;
+
+let resolve_reasoning_effort row effort =
+  let accepted = List.filter_map (fun wire ->
+    match Llm_provider.Reasoning_effort.of_string wire with
+    | Some effort when String.equal wire (Llm_provider.Reasoning_effort.to_string effort) -> Some effort
+    | Some _ | None -> None) row.supported_reasoning_efforts in
+  match accepted with
+  | [] -> protocol_error "model/list" "selected model advertises no known reasoning effort"
+  | first :: rest ->
+    let compare = Llm_provider.Reasoning_effort.compare in
+    let below = List.filter (fun candidate -> compare candidate effort <= 0) accepted in
+    let minimum a b = if compare a b <= 0 then a else b in
+    let maximum a b = if compare a b >= 0 then a else b in
+    Ok (match below with
+      | [] -> List.fold_left minimum first rest
+      | first :: rest -> List.fold_left maximum first rest)
+;;
+
+let admit_reasoning_effort io ~model ~requested ~request_id =
+  match requested with
+  | None -> Ok (None, request_id)
+  | Some effort ->
+    let* rows, next_request_id = read_model_pages io ~include_hidden:true ~request_id in
+    let* row = match List.find_opt (fun row -> String.equal row.model model) rows with
+      | Some row -> Ok row
+      | None -> protocol_error "model/list" "selected model has no advertised reasoning metadata" in
+    let* effective = resolve_reasoning_effort row effort in
+    Ok (Some effective, next_request_id)
+;;
+
+(* [account/rateLimits/read] after account admission: the account's usage
+   windows without a thread or a turn, so an account the router no longer
+   picks (because it is spent) can still say when it resets. Reset-credit
+   details are a separate backend lookup this read has no use for. *)
+let rate_limits_read_protocol io =
+  let* _ = probe_protocol io in
+  let stage = "account/rateLimits/read" in
+  send_control_request
+    io
+    ~id:3
+    ~method_:stage
+    ~params:(`Assoc [ "excludeResetCreditDetails", `Bool true ]);
+  let* response = await_response io ~id:3 ~method_:stage in
+  match Runtime_provider_usage_window.decode_codex_rate_limits_read response with
+  | Ok report -> Ok report
+  | Error error ->
+    protocol_error stage (Runtime_provider_usage_window.decode_error_to_string error)
+;;
+
+let parse_thread_response ~stage result =
+  let* fields = assoc_at stage result in
+  let* thread_json = required_member stage "thread" fields in
+  let* thread_fields = assoc_at stage thread_json in
+  let* thread_id = required_string stage "id" thread_fields in
+  let* model = required_string stage "model" fields in
+  Ok (thread_id, model)
+;;
+
+let parse_turn_start result =
+  let stage = "turn/start" in
+  let* fields = assoc_at stage result in
+  let* turn_json = required_member stage "turn" fields in
+  let* turn_fields = assoc_at stage turn_json in
+  required_string stage "id" turn_fields
+;;
+
+(* [MessagePhase] of an agentMessage item (codex-cli 0.163.0,
+   [codex app-server generate-json-schema], v2/ItemCompletedNotification.json):
+   [commentary] is mid-turn narration that tools or more output may follow,
+   [partial_answer] is answer text that more output may follow, and
+   [final_answer] is the turn's declared answer. The member is optional and
+   nullable; the schema says providers do not send it consistently, so an
+   absent or null phase reads as phase unknown and keeps the reading from
+   before the member existed. A value the schema does not name is kept whole. *)
+type message_phase =
+  | Commentary
+  | Partial_answer
+  | Final_answer
+  | Unrecognized_phase of string
+
+let message_phase_of_string = function
+  | "commentary" -> Commentary
+  | "partial_answer" -> Partial_answer
+  | "final_answer" -> Final_answer
+  | other -> Unrecognized_phase other
+;;
+
+(* What a message can be for the turn's reply. A final answer is the reply.
+   Commentary still streams but is never the reply, so a turn whose only
+   messages are commentary has none. A partial answer, an absent or null
+   phase and an unrecognized one are fallbacks, as every message was before
+   the member existed: {!terminal_result} takes the newest fallback when no
+   final answer came. *)
+type reply_candidacy =
+  | Final_reply
+  | Fallback_reply
+  | Not_a_reply
+
+let reply_candidacy = function
+  | Some Final_answer -> Final_reply
+  | Some Commentary -> Not_a_reply
+  | Some (Partial_answer | Unrecognized_phase _) | None -> Fallback_reply
+;;
+
+(* The id and declared phase of an agentMessage item. [item/started] reads
+   only these: the message's text is not final until it completes. *)
+let agent_message_phase_of_item ~stage item =
+  let* fields = assoc_at stage item in
+  match List.assoc_opt "type" fields with
+  | Some (`String "agentMessage") ->
+    let* item_id = optional_string stage "id" fields in
+    let* phase = optional_string stage "phase" fields in
+    Ok (Some (item_id, Option.map message_phase_of_string phase))
+  | Some (`String _) -> Ok None
+  | Some _ -> protocol_error stage "item type must be a string"
+  | None -> protocol_error stage "item is missing type"
+;;
+
+type agent_message =
+  { message_id : string option
+  ; declared_phase : message_phase option
+  ; message_text : string
+  }
+
+let agent_message_content_of_item ~stage item =
+  let* identity = agent_message_phase_of_item ~stage item in
+  match identity with
+  | None -> Ok None
+  | Some (message_id, declared_phase) ->
+    let* fields = assoc_at stage item in
+    (* The app-server schema requires [text] to be a string, not a non-empty
+       string. In particular, a tool-only turn may complete an agent-message
+       item with empty text after the tool result has been committed. Such an
+       item is valid protocol but is not a visible assistant-message candidate. *)
+    let* message_text = required_string_any stage "text" fields in
+    Ok (Some { message_id; declared_phase; message_text })
+;;
+
+(* Model items and host-owned dynamic calls do not prove a native effect.
+   Every other item remains effect-possible, including protocol additions.
+   The installed 0.156.1 ThreadItem schema also names collabAgentToolCall and
+   imageGeneration: treating an unmodelled type as model text would authorize
+   replay after those actions. Unknown items are observed, not rejected. *)
+type item_kind =
+  | Command_execution
+  | File_change
+  | Mcp_tool_call
+  | Sleep
+  | Model_item
+  | Reasoning_item
+  | Compaction_item
+  | Dynamic_tool_item
+  | Unclassified_item of string
+
+let item_kind_of_item ~stage item =
+  let* fields = assoc_at stage item in
+  match List.assoc_opt "type" fields with
+  | Some (`String "commandExecution") -> Ok Command_execution
+  | Some (`String "fileChange") -> Ok File_change
+  | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
+  | Some (`String "sleep") -> Ok Sleep
+  | Some (`String "contextCompaction") -> Ok Compaction_item
+  | Some (`String ("userMessage" | "agentMessage" | "plan")) -> Ok Model_item
+  | Some (`String "reasoning") -> Ok Reasoning_item
+  | Some (`String "dynamicToolCall") -> Ok Dynamic_tool_item
+  | Some (`String kind) -> Ok (Unclassified_item kind)
+  | Some _ -> protocol_error stage "item type must be a string"
+  | None -> protocol_error stage "item is missing type"
+;;
+
+(* An item the app-server executes outside the model stream: it opens with
+   [item/started], may write nothing while it runs, and closes with
+   [item/completed] carrying the same [id]. [observation] is [None] for a
+   wait the model asked for (the interruptible [clock.sleep] tool, up to
+   twelve hours upstream): not a tool effect, so nothing is projected, but the
+   wire is silent for the declared duration all the same. *)
+type tool_item =
+  { call_id : string
+  ; observation : Runtime_native_tools.observation option
+  }
+
+let tool_item_of_item ~stage item =
+  let* kind = item_kind_of_item ~stage item in
+  let* fields = assoc_at stage item in
+  let tool_item ~observation =
+    let* call_id = required_string stage "id" fields in
+    Ok (Some { call_id; observation = observation call_id })
+  in
+  let built_in tool_name call_id =
+    Some
+      { Runtime_native_tools.identity = Some (Call_id call_id)
+      ; tool_name = Some tool_name
+      ; origin = Runtime_native_tools.Built_in
+      }
+  in
+  match kind with
+  | Command_execution -> tool_item ~observation:(built_in "commandExecution")
+  | File_change -> tool_item ~observation:(built_in "fileChange")
+  | Mcp_tool_call ->
+    (* The item names the server and the tool; the observation keeps both,
+       as the Claude Code runtime keeps an MCP tool's own name. *)
+    let* server = required_string stage "server" fields in
+    let* tool = required_string stage "tool" fields in
+    tool_item ~observation:(fun call_id ->
+      Some
+        { Runtime_native_tools.identity = Some (Call_id call_id)
+        ; tool_name = Some (server ^ "/" ^ tool)
+        ; origin = Runtime_native_tools.Mcp_wrapper
+        })
+  | Sleep -> tool_item ~observation:(fun _ -> None)
+  | Model_item | Reasoning_item | Compaction_item | Dynamic_tool_item -> Ok None
+  | Unclassified_item kind -> tool_item ~observation:(built_in kind)
+;;
+
+let active_turn_item ~stage ~thread_id ~turn_id params =
+  let* fields = assoc_at stage params in
+  let* item_thread_id = required_string stage "threadId" fields in
+  let* item_turn_id = required_string stage "turnId" fields in
+  if item_thread_id <> thread_id || item_turn_id <> turn_id
+  then protocol_error stage "item identity does not match the active turn"
+  else required_member stage "item" fields
+;;
+
+let native_completion_of_item ~stage ~kind item =
+  let* fields = assoc_at stage item in
+  let* outcome = match kind with
+    (* [tool_item_of_item] projects an unclassified item as a native tool, so
+       the status the provider reports for it is read like a modelled one. *)
+    | Command_execution | File_change | Mcp_tool_call | Unclassified_item _ ->
+        (match List.assoc_opt "status" fields with
+         | None | Some `Null -> Ok Runtime_native_tools.End_observed
+         | Some (`String "completed") -> Ok Runtime_native_tools.Completion_reported
+         | Some (`String "failed") -> Ok Runtime_native_tools.Error_reported
+         | Some (`String "declined") -> Ok Runtime_native_tools.Decline_reported
+         (* Codex reports an interrupted collaboration as a terminal status;
+            it did not complete, so it is a failure, not a neutral end. *)
+         | Some (`String "interrupted") -> Ok Runtime_native_tools.Error_reported
+         | Some (`String status) -> Ok (Runtime_native_tools.Unrecognized_status status)
+         | Some _ -> protocol_error stage "native item status must be a string")
+    | Sleep | Model_item | Reasoning_item | Compaction_item | Dynamic_tool_item ->
+        Ok Runtime_native_tools.End_observed
+  in
+  let* exit_code = match kind, List.assoc_opt "exitCode" fields with
+    | Command_execution, Some (`Int code) -> Ok (Some code)
+    | Command_execution, (None | Some `Null) -> Ok None
+    | Command_execution, Some _ -> protocol_error stage "command exitCode must be an integer or null"
+    | (File_change | Mcp_tool_call | Sleep | Model_item | Reasoning_item
+      | Compaction_item | Dynamic_tool_item | Unclassified_item _), _ -> Ok None
+  in
+  Ok ({outcome; exit_code} : Runtime_native_tools.completion)
+;;
+
+(* The terminal list's newest final answer and newest fallback, whether it
+   lists an agent message, and whether it lists one that no [item/completed]
+   in [notified] reported: such a message completed at a point this client
+   never saw. *)
+let messages_of_items ~stage ~notified = function
+  | `List items ->
+    let rec loop final fallback completed unnotified = function
+      | [] -> Ok (final, fallback, completed, unnotified)
+      | item :: rest ->
+        let* message = agent_message_content_of_item ~stage item in
+        (match message with
+         | None -> loop final fallback completed unnotified rest
+         | Some { message_id; declared_phase; message_text } ->
+           let unnotified =
+             unnotified
+             || (match message_id with
+                 | Some item_id -> not (Hashtbl.mem notified item_id)
+                 | None -> true)
+           in
+           if String.trim message_text = ""
+           then loop final fallback true unnotified rest
+           else (
+             match reply_candidacy declared_phase with
+             | Final_reply -> loop (Some message_text) fallback true unnotified rest
+             | Fallback_reply -> loop final (Some message_text) true unnotified rest
+             | Not_a_reply -> loop final fallback true unnotified rest))
+    in
+    loop None None false false items
+  | _ -> protocol_error stage "turn items must be an array"
+;;
+
+(* Human prose and ad-hoc scalar fields are observational detail only; the
+   provider-owned classification is [codexErrorInfo], read below. *)
+let turn_error_detail ~message error_fields =
+  let annotation (name, value) =
+    if String.equal name "message"
+    then None
+    else (
+      match value with
+      | `String value when String.trim value <> "" ->
+        Some (name ^ "=" ^ String.trim value)
+      | `Int value -> Some (name ^ "=" ^ string_of_int value)
+      | `Intlit value -> Some (name ^ "=" ^ value)
+      | `Bool value -> Some (name ^ "=" ^ string_of_bool value)
+      | `Float value -> Some (name ^ "=" ^ Printf.sprintf "%g" value)
+      | `String _ | `Null | `Assoc _ | `List _ -> None)
+  in
+  match List.filter_map annotation error_fields with
+  | [] -> message
+  | annotations -> message ^ " (" ^ String.concat " " annotations ^ ")"
+;;
+
+type codex_error_info_reading =
+  | Context_window
+  | Turn_failure of Codex_error_info.t
+
+let codex_error_info_of_json json =
+  let open Codex_error_info in
+  let unrecognized = Turn_failure (Unrecognized json) in
+  let http_status_code fields =
+    match List.assoc_opt "httpStatusCode" fields with
+    | None | Some `Null -> Some None
+    | Some (`Int code) -> Some (Some code)
+    | Some _ -> None
+  in
+  let with_status constructor = function
+    | `Assoc fields ->
+      (match http_status_code fields with
+       | Some http_status_code -> Turn_failure (constructor http_status_code)
+       | None -> unrecognized)
+    | _ -> unrecognized
+  in
+  match json with
+  | `String "contextWindowExceeded" -> Context_window
+  | `String "sessionBudgetExceeded" -> Turn_failure Session_budget_exceeded
+  | `String "usageLimitExceeded" -> Turn_failure Usage_limit_exceeded
+  | `String "rateLimitExceeded" -> Turn_failure Rate_limit_exceeded
+  | `String "serverOverloaded" -> Turn_failure Server_overloaded
+  | `String "cyberPolicy" -> Turn_failure Cyber_policy
+  | `String "misalignmentPolicyViolation" ->
+    Turn_failure Misalignment_policy_violation
+  | `String "internalServerError" -> Turn_failure Internal_server_error
+  | `String "unauthorized" -> Turn_failure Unauthorized
+  | `String "badRequest" -> Turn_failure Bad_request
+  | `String "threadRollbackFailed" -> Turn_failure Thread_rollback_failed
+  | `String "sandboxError" -> Turn_failure Sandbox_error
+  | `String "other" -> Turn_failure Other
+  | `Assoc [ ("httpConnectionFailed", payload) ] ->
+    with_status
+      (fun http_status_code ->
+        Http_connection_failed { http_status_code })
+      payload
+  | `Assoc [ ("responseStreamConnectionFailed", payload) ] ->
+    with_status
+      (fun http_status_code ->
+        Response_stream_connection_failed { http_status_code })
+      payload
+  | `Assoc [ ("responseStreamDisconnected", payload) ] ->
+    with_status
+      (fun http_status_code ->
+        Response_stream_disconnected { http_status_code })
+      payload
+  | `Assoc [ ("responseTooManyFailedAttempts", payload) ] ->
+    with_status
+      (fun http_status_code ->
+        Response_too_many_failed_attempts { http_status_code })
+      payload
+  | `Assoc [ ("activeTurnNotSteerable", `Assoc fields) ] ->
+    (match List.assoc_opt "turnKind" fields with
+     | Some (`String "review") ->
+       Turn_failure (Active_turn_not_steerable { turn_kind = Review })
+     | Some (`String "compact") ->
+       Turn_failure (Active_turn_not_steerable { turn_kind = Compact })
+     | Some _ | None -> unrecognized)
+  | `String _ | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+  | `List _ ->
+    unrecognized
+;;
+
+let turn_error_of_fields ~tool_effect_attempted ~message error_fields =
+  let detail = turn_error_detail ~message error_fields in
+  match List.assoc_opt "codexErrorInfo" error_fields with
+  | None | Some `Null -> Turn_failed { detail; codex_error_info = None }
+  | Some json ->
+    (match codex_error_info_of_json json with
+     | Context_window -> Context_window_exceeded { message; tool_effect_attempted }
+     | Turn_failure info -> Turn_failed { detail; codex_error_info = Some info })
+;;
+
+let turn_error ~tool_effect_attempted fields =
+  match List.assoc_opt "error" fields with
+  | Some (`Assoc error_fields) ->
+    let message =
+      match List.assoc_opt "message" error_fields with
+      | Some (`String message) when String.trim message <> "" ->
+        String.trim message
+      | _ -> "turn failed without a typed error message"
+    in
+    turn_error_of_fields ~tool_effect_attempted ~message error_fields
+  | Some _ | None ->
+    Turn_failed
+      { detail = "turn failed without an error object"; codex_error_info = None }
+;;
+
+type streamed_texts =
+  { buffers : (string option, Buffer.t) Hashtbl.t
+  ; reasoning_buffers : (string * reasoning_part, Buffer.t) Hashtbl.t
+  ; completed_texts : (string, unit) Hashtbl.t
+  ; completed_reasoning : (string * reasoning_part, unit) Hashtbl.t
+  ; completed_reasoning_items : (string, unit) Hashtbl.t
+  ; native_items : (string, item_kind) Hashtbl.t
+      (* Native start/completion lifetime, independent of [open_tool_call_ids]
+         which tracks the idle receive phase and clears when the model speaks. *)
+  ; declared_phases : (string, message_phase) Hashtbl.t
+      (* The phase [item/started] declared for an agent message, read while
+         the message has not completed. *)
+  ; mutable current_item : string option
+  ; mutable unfinished_messages : string option list
+      (* Agent messages that streamed since the last completed agent message,
+         newest delta first. A completed message empties it, so a message
+         that streamed before a later completion and never completed itself
+         is not read as the reply. *)
+  ; mutable assistant_message_completed : bool
+  }
+
+(* What an unfinished message offers as the reply: its streamed text, unless
+   [item/started] declared it commentary. It never completed, so it is a
+   fallback even when it was declared the final answer. *)
+let unfinished_message_text streamed_texts key =
+  let declared =
+    match key with
+    | Some item_id -> Hashtbl.find_opt streamed_texts.declared_phases item_id
+    | None -> None
+  in
+  match reply_candidacy declared with
+  | Not_a_reply -> None
+  | Final_reply | Fallback_reply ->
+    Option.map Buffer.contents (Hashtbl.find_opt streamed_texts.buffers key)
+;;
+
+(* The reply. A final answer comes first: the terminal list's newest, then
+   [seen_final], the newest [item/completed] one. Otherwise the newest message
+   that is not commentary and not blank is the reply, completed or not:
+   - an unfinished message, the newest delta first: it streamed after every
+     completion this turn saw;
+   - then the terminal list's newest fallback, which repeats or extends the
+     notified completions;
+   - then [seen_fallback], the newest notified one.
+   Two messages are never joined into one reply. A terminal list that names
+   a message no [item/completed] reported completed it at a point this client
+   never saw, which ends every unfinished message.
+
+   With no reply, a turn that ran a MASC tool, completed an agent message or
+   streamed visible text completes with empty text, and the Keeper's
+   acceptance decides it. A turn with none of them carried no assistant
+   message. *)
+let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback ~streamed_texts
+    ~tool_calls_observed ~tool_effect_attempted params =
+  let stage = "turn/completed" in
+  let* fields = assoc_at stage params in
+  let* terminal_thread_id = required_string stage "threadId" fields in
+  if terminal_thread_id <> thread_id
+  then protocol_error stage "terminal threadId does not match thread/start"
+  else
+    let* turn_json = required_member stage "turn" fields in
+    let* turn_fields = assoc_at stage turn_json in
+    let* terminal_turn_id = required_string stage "id" turn_fields in
+    if terminal_turn_id <> turn_id
+    then protocol_error stage "terminal turn id does not match turn/start"
+    else
+      let* status = required_string stage "status" turn_fields in
+      match status with
+      | "failed" -> Error (turn_error ~tool_effect_attempted turn_fields)
+      | "interrupted" -> Error Turn_interrupted
+      | "inProgress" -> protocol_error stage "terminal notification carried inProgress status"
+      | "completed" ->
+        let* items = required_member stage "items" turn_fields in
+        let* terminal_final, terminal_fallback, terminal_message_completed,
+             terminal_completion_unnotified =
+          messages_of_items ~stage ~notified:streamed_texts.completed_texts items in
+        let visible_text = function
+          | Some text when String.trim text <> "" -> Some text
+          | Some _ | None -> None
+        in
+        let unfinished =
+          if terminal_completion_unnotified then None
+          else
+            List.find_map
+              (fun key -> visible_text (unfinished_message_text streamed_texts key))
+              streamed_texts.unfinished_messages
+        in
+        let text =
+          match
+            visible_text terminal_final,
+            visible_text seen_final,
+            unfinished,
+            visible_text terminal_fallback,
+            visible_text seen_fallback
+          with
+          | Some text, _, _, _, _ | None, Some text, _, _, _
+          | None, None, Some text, _, _ | None, None, None, Some text, _
+          | None, None, None, None, Some text -> Some text
+          | None, None, None, None, None -> None
+        in
+        let streamed_visible_text () =
+          Hashtbl.to_seq_values streamed_texts.buffers
+          |> Seq.exists (fun buffer -> String.trim (Buffer.contents buffer) <> "")
+        in
+        (match text with
+         | Some text -> Ok text
+         | None when tool_calls_observed || streamed_texts.assistant_message_completed
+                     || terminal_message_completed || streamed_visible_text () -> Ok ""
+         | None -> protocol_error stage "completed turn has no assistant message")
+      | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
+;;
+
+(* What this decides is identity: does this delta belong to the turn we are
+   awaiting. threadId, turnId and itemId are identifiers, so emptiness in one
+   of them is malformed and stays rejected.
+
+   delta carries stream payload forwarded to the turn's typed stream callback,
+   and an empty or whitespace chunk is ordinary in a streaming protocol. Requiring it to be
+   non-empty turned such a chunk into a terminal protocol error, which put the
+   official-client session into Recovery_required and made every later turn for
+   that keeper fail closed on `official_client_session.claim` until an operator
+   resolved it by hand. Three such chunks accounted for 3,236 rejected turns
+   across three Keepers in one retained log window (#27967). *)
+let item_delta_notification ~method_ ~thread_id ~turn_id params =
+  let* fields = assoc_at method_ params in
+  let* notification_thread_id = required_string method_ "threadId" fields in
+  let* notification_turn_id = required_string method_ "turnId" fields in
+  (* [delta] stays required: its presence is what makes this frame an item
+     delta, and the identity check below is only meaningful on one. Its
+     *content* is forwarded without non-empty validation -- #27967 rejected empty chunks a provider
+     legitimately sends. [itemId] carries neither role. Nothing here reads it,
+     so a frame that omits it or sends it empty changes nothing this function
+     decides, while requiring it adds one more way to end a turn (#28010). *)
+  let* delta = required_string_any method_ "delta" fields in
+  if notification_thread_id <> thread_id || notification_turn_id <> turn_id
+  then protocol_error method_ "item delta identity does not match the active turn"
+  else Ok delta
+;;
+
+(* Optional item correlation at the notification boundary. Assistant deltas
+   may still stream without it (#28010); native progress cannot attach to a
+   tool without an exact item id and matching active item kind. *)
+let notification_item_id params =
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "itemId" fields with
+     | Some (`String item_id) when String.trim item_id <> "" -> Some item_id
+     | Some _ | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
+(* One [TokenUsageBreakdown] of a [thread/tokenUsage/updated] frame. Codex
+   copies the provider's Responses usage into it unchanged (rust-v0.156.1,
+   codex-api/src/sse/responses.rs), and masc reads it as an
+   [Agent_core.Types.api_usage], whose [input_tokens] includes the cache
+   reads and writes. So its counts must nest: cache reads and writes are
+   part of the input, reasoning is part of the output, and nothing is output
+   without input. Measured 2026-09-25 over 64,410 breakdowns (62,946 with
+   cache reads, 60,187 with reasoning, none with cache writes): none broke
+   these. A breakdown that breaks them is a shape this reading does not know:
+   an estimate or a fill that gained a count besides its total, or a provider
+   that counts input apart from its cache. Read on, it would put a count
+   nobody sent in the usage ledger. The whole frame is refused: its [total]
+   was counted the same way. *)
+let token_usage_breakdown stage usage_fields name =
+  let* breakdown_json = required_member stage name usage_fields in
+  let* breakdown = assoc_at stage breakdown_json in
+  let* input_tokens = required_count stage "inputTokens" breakdown in
+  let* cached_input_tokens = required_count stage "cachedInputTokens" breakdown in
+  let* output_tokens = required_count stage "outputTokens" breakdown in
+  let* reasoning_output_tokens = required_count stage "reasoningOutputTokens" breakdown in
+  let* total_tokens = required_count stage "totalTokens" breakdown in
+  let* cache_write_input_tokens =
+    match List.assoc_opt "cacheWriteInputTokens" breakdown with
+    | None -> Ok 0
+    | Some _ -> required_count stage "cacheWriteInputTokens" breakdown
+  in
+  let* () =
+    if cached_input_tokens + cache_write_input_tokens > input_tokens
+    then
+      protocol_error
+        stage
+        (Printf.sprintf "%S counts more cache reads and writes than input" name)
+    else if reasoning_output_tokens > output_tokens
+    then protocol_error stage (Printf.sprintf "%S counts more reasoning than output" name)
+    else if input_tokens = 0 && output_tokens > 0
+    then protocol_error stage (Printf.sprintf "%S counts output without input" name)
+    else Ok ()
+  in
+  Ok
+    { input_tokens
+    ; cached_input_tokens
+    ; cache_write_input_tokens
+    ; output_tokens
+    ; reasoning_output_tokens
+    ; total_tokens
+    }
+;;
+
+(* thread/tokenUsage/updated carries the thread's running totals and the
+   [last] breakdown of the turn it names. Identity decides whether the frame
+   is about the turn this call awaits: one for another thread or turn is an
+   observation about work nobody here is waiting on, so it changes nothing
+   rather than ending the turn (#27967 is what a needless identity failure
+   costs). A frame that is ours but malformed is a protocol error: these
+   counts reach the usage ledger, and a half-read breakdown would be a number
+   nobody sent. *)
+let token_usage_notification ~thread_id ~turn_id params =
+  let stage = "thread/tokenUsage/updated" in
+  let* fields = assoc_at stage params in
+  let* notification_thread_id = required_string stage "threadId" fields in
+  let* notification_turn_id = required_string stage "turnId" fields in
+  if notification_thread_id <> thread_id || notification_turn_id <> turn_id
+  then Ok None
+  else
+    let* usage_json = required_member stage "tokenUsage" fields in
+    let* usage_fields = assoc_at stage usage_json in
+    let* last = token_usage_breakdown stage usage_fields "last" in
+    let* thread_total = token_usage_breakdown stage usage_fields "total" in
+    let* model_context_window =
+      match List.assoc_opt "modelContextWindow" usage_fields with
+      | None | Some `Null -> Ok None
+      | Some (`Int window) when window > 0 -> Ok (Some window)
+      | Some _ ->
+        protocol_error stage "field \"modelContextWindow\" must be a positive integer or null"
+    in
+    Ok (Some (last, thread_total, model_context_window))
+;;
+
+(* Codex MCP requests include approvals and forms, independently of shell
+   approvalPolicy. This host cannot collect their input. Cancel that request,
+   never grant permission or attribute a denial to the user, and let Codex
+   continue with the MASC dynamic tools whose own gates remain authoritative.
+   Schema: codex app-server generate-json-schema (0.153.4),
+   McpServerElicitationRequestParams / McpServerElicitationRequestResponse. *)
+let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params =
+  let stage = "mcpServer/elicitation/request" in
+  let* fields = assoc_at stage params in
+  let* request_thread = required_string stage "threadId" fields in
+  let* request_turn = optional_string stage "turnId" fields in
+  let* server_name = required_string stage "serverName" fields in
+  let* _message = required_string_any stage "message" fields in
+  let* mode_name = required_string stage "mode" fields in
+  let* mode =
+    match mode_name with
+    | "form" ->
+      let* schema = required_member stage "requestedSchema" fields in
+      let* schema_fields = assoc_at stage schema in
+      let* schema_type = required_string stage "type" schema_fields in
+      let* properties = required_member stage "properties" schema_fields in
+      let* _properties = assoc_at stage properties in
+      if String.equal schema_type "object" then Ok Form
+      else protocol_error stage "form requestedSchema.type must be object"
+    | "openai/form" | "openaiForm" ->
+      let* _schema = required_member stage "requestedSchema" fields in
+      Ok Openai_form
+    | "url" ->
+      let* _url = required_string stage "url" fields in
+      let* _elicitation_id = required_string stage "elicitationId" fields in
+      Ok Url
+    | _ -> protocol_error stage "unknown elicitation mode"
+  in
+  if not (String.equal request_thread thread_id)
+     || (match request_turn with Some value -> not (String.equal value turn_id) | None -> false)
+  then protocol_error stage "elicitation identity does not match the active thread/turn"
+  else (
+    io.send Control (`Assoc [ "id", id; "result", `Assoc ["action", `String "cancel"; "content", `Null] ]);
+    Log.Runtime_agent.info
+      "Codex MCP elicitation cancelled because host input is unavailable (server=%s)" server_name;
+    emit_stream_event on_stream_event
+      (Elicitation_cancelled { server_name; mode; reason = Host_input_unavailable });
+    Ok ())
+;;
+
+let request_scheduling_handoff io ~thread_id ~turn_id =
+  send_context_request io Steer_turn ~id:6 ~thread_id:(Some thread_id)
+    ~params:(`Assoc
+      [ "threadId", `String thread_id
+      ; "expectedTurnId", `String turn_id
+      ; "input", `List [`Assoc
+          [ "type", `String "text"
+          ; "text", `String
+              "Host scheduling notice: a direct message is waiting for this Keeper. Preserve completed work and any unfinished next step in a concise progress reply, then finish this turn so the host can deliver the waiting message. Do not start unrelated work. This notice does not contain that message and does not acknowledge or answer it. Do not claim unfinished work is complete."
+          ]]
+      ]);
+  Log.Runtime_agent.info "Codex scheduling handoff requested thread=%s turn=%s" thread_id turn_id
+;;
+
+type turn_input =
+  | Provider_message of (wire_message, error) result
+  | Scheduling_handoff
+  | Tool_settled of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      ; response : (outbound_frame * Yojson.Safe.t * (unit -> unit) option) option
+      ; outcome : (unit, error) result
+      }
+
+type turn_reader_state = Reader_ready | Reader_inflight | Reader_closed
+
+let host_stop_of_error = function
+  | Stopped_by_host stop -> Some stop
+  | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+  | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+  | Subscription_required _ | Unsupported_server_request _
+  | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted
+  | Runtime_shutting_down | Process_exited _ | Timeout _ -> None
+;;
+
+(* Keep the RPC reader alive while tools execute. Codex's functions.exec can
+   yield a cell and issue another dynamic call before the first one returns.
+   Running a handler in the reader serialized even Concurrent tools, and a
+   turn/completed already written by Codex was read only after its cancelled
+   tool calls had finished on the host. *)
+let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
+    ~tools ~tool_call_count ~tool_effect_attempted ~on_stream_event
+    ~on_undelivered_tool_result ~on_tool_response_confirmed ~thread_id ~turn_id run =
+    Eio.Switch.run (fun sw ->
+      let incoming = Eio.Stream.create max_int in
+      let pending = ref 0 in
+      let barrier = ref None in
+      let concurrent = ref [] in
+      let calls = Hashtbl.create 8 in
+      let written_responses = Hashtbl.create 8 in
+      let completed_calls = Hashtbl.create 8 in
+      let reader_state = ref Reader_ready in
+      let vendor_terminal = ref None in
+      let vendor_closed = ref false in
+      let stopped = ref None in
+      let close_delivery () =
+        if not !vendor_closed then begin
+          vendor_closed := true;
+          if !pending > 0 then emit_stream_event on_stream_event
+            (Tool_delivery_closed {pending_tool_calls = !pending})
+        end in
+      let handoff_waiting = ref false in
+      let send_handoff () =
+        match !handoff, !vendor_closed, !handoff_waiting with
+        | Handoff_unrequested, false, true ->
+          request_scheduling_handoff io ~thread_id ~turn_id;
+          handoff := Handoff_pending;
+          handoff_waiting := false
+        | (Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected), _, _ -> () in
+      let take_input () =
+        (* One demand owns one stdout read, including its queued frame. The
+           consumer must apply an item's native/model idle phase before the
+           next read samples it. A worker settlement or scheduling wake does
+           not consume that demand: the existing partial read stays alive. *)
+        (match !reader_state with
+         | Reader_ready ->
+           reader_state := Reader_inflight;
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+             let message = io.receive () in
+             Eio.Stream.add incoming (Provider_message message);
+             `Stop_daemon)
+         | Reader_inflight | Reader_closed -> ());
+        let input = Eio.Stream.take incoming in
+        (match input with
+         | Provider_message (Ok _) -> reader_state := Reader_ready
+         | Provider_message (Error _) -> reader_state := Reader_closed
+         | Tool_settled _ | Scheduling_handoff -> ());
+        input
+      in
+      Option.iter (fun await ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+          if await () then Eio.Stream.add incoming Scheduling_handoff;
+          `Stop_daemon)) await_handoff;
+      let dispatch ~id params =
+        let stage = "item/tool/call" in
+        let* fields = assoc_at stage params in
+        let* request_thread = required_string stage "threadId" fields in
+        let* request_turn = required_string stage "turnId" fields in
+        let* call_id = required_string stage "callId" fields in
+        let* tool_name = required_string stage "tool" fields in
+        let* arguments = required_member stage "arguments" fields in
+        let* tool = match find_dynamic_tool tools tool_name with
+          | Some tool -> Ok tool
+          | None -> protocol_error stage (Printf.sprintf "unknown dynamic tool %S" tool_name) in
+        if request_thread <> thread_id || request_turn <> turn_id then
+          protocol_error stage "tool call identity does not match the active turn"
+        else if Hashtbl.mem calls call_id then
+          protocol_error stage "duplicate dynamic tool call id"
+        else begin
+          let settled, resolve = Eio.Promise.create () in
+          let predecessors = match tool.execution_mode arguments with
+            | Agent_core.Tool_contract.Concurrent ->
+              concurrent := settled :: !concurrent;
+              Option.to_list !barrier
+            | Agent_core.Tool_contract.Serial ->
+              let preceding = Option.to_list !barrier @ !concurrent in
+              concurrent := [];
+              barrier := Some settled;
+              preceding in
+          Hashtbl.add calls call_id ();
+          incr pending;
+          Eio.Fiber.fork ~sw (fun () ->
+            Eio.Fiber.yield ();
+            List.iter Eio.Promise.await predecessors;
+            let response = ref None in
+            (* Only the consumer writes stdin and its context receipts. The
+               worker retains the exact response until that consumer can
+               decide whether the vendor turn still exists. *)
+            let tool_io = { io with send = (fun ?on_response_sent frame json -> response := Some (frame, json, on_response_sent)) } in
+            let outcome =
+              if !vendor_closed && tool.call_effect arguments = Agent_core.Tool.Effect_possible then begin
+                send_dynamic_tool_response tool_io ~thread_id ~id
+                  {success = false; content = "The vendor turn ended before this call started. No execution was attempted. Reassess the request in the next turn.";
+                   content_blocks = None; abort_turn = None; on_response_sent = None};
+                Ok ()
+              end else
+                handle_dynamic_tool_call tool_io ~tools ~terminal_tools_closed
+                  ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
+                  ~on_stream_event ~id params in
+            (match outcome with
+             | Error error ->
+               Option.iter (fun _ -> terminal_tools_closed := true)
+                 (host_stop_of_error error)
+             | Ok () -> ());
+            Eio.Stream.add incoming
+              (Tool_settled {call_id; tool_name; arguments; response = !response; outcome});
+            Eio.Promise.resolve resolve ());
+          Ok ()
+        end
+      in
+      let settle ~call_id ~tool_name ~arguments ~response ~outcome =
+        decr pending;
+        let delivery = match response with
+         | None -> Ok ()
+         | Some (frame, json, on_response_sent) ->
+           let retain () =
+             on_undelivered_tool_result
+               {thread_id; turn_id; call_id; tool_name; arguments; response = json}
+             |> Result.map_error (fun detail -> Protocol_error
+                  {stage = "undelivered tool result"; detail}) in
+           if !vendor_closed then retain ()
+           else
+             (try
+                io.send ?on_response_sent frame json;
+                (* A complete pipe write is not provider receipt. Track the
+                   written success and wait for the matching server item. *)
+                (match json with
+                 | `Assoc fields ->
+                   (match List.assoc_opt "result" fields with
+                    | Some (`Assoc result) ->
+                      (match List.assoc_opt "success" result, List.assoc_opt "contentItems" result with
+                       | Some (`Bool true), Some (`List _ as content) ->
+                         if not (Hashtbl.mem completed_calls call_id) then
+                           Hashtbl.replace written_responses call_id (tool_name, arguments, content)
+                       | _ -> ())
+                    | _ -> ())
+                 | _ -> ());
+                Ok () with
+              | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+              | Idle_timeout seconds ->
+                close_delivery ();
+                stopped := Some (Timeout {seconds; turn_accepted = true});
+                retain ()
+              | exn ->
+                Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                close_delivery ();
+                stopped := Some (Turn_input_write_failed (Printexc.to_string exn));
+                retain ()) in
+        (match delivery with
+         | Ok () -> ()
+         | Error error -> stopped := Some error);
+        send_handoff ();
+        (match outcome with
+         | Error error ->
+           let scheduling_terminal = match host_stop_of_error error with
+             | Some (Terminal_tool_boundary {outcome = Terminal_completed; _}) ->
+               !handoff = Handoff_pending || !handoff = Handoff_accepted
+             | Some (Terminal_tool_boundary
+                 {outcome = Durable_stimulus_deferred | Terminal_failed _; _})
+             | Some (Repeated_tool_call _) | None -> false in
+           if not scheduling_terminal && Option.is_none !stopped then
+             stopped := Some error
+         | Ok () -> ())
+      in
+      let rec receive () =
+        match !vendor_terminal, !pending, !stopped with
+        | Some terminal, 0, _ ->
+          vendor_terminal := None;
+          (match !stopped with None -> Ok terminal | Some error -> Error error)
+        | None, 0, Some error -> Error error
+        | (Some _ | None), _, (Some _ | None) ->
+          match take_input () with
+          | Provider_message (Ok (Server_request {id; method_ = "item/tool/call"; params})) ->
+            let* () = dispatch ~id params in
+            receive ()
+          | Provider_message (Ok (Notification {method_ = "turn/completed"; params} as terminal)) ->
+            (* Only the exact active terminal closes this dispatch scope. A
+               foreign or malformed terminal remains the protocol reader's
+               responsibility and cannot cancel this Keeper's tools. *)
+            let* fields = assoc_at "turn/completed" params in
+            let* terminal_thread = required_string "turn/completed" "threadId" fields in
+            let* turn = required_member "turn/completed" "turn" fields in
+            let* turn_fields = assoc_at "turn/completed.turn" turn in
+            let* terminal_turn = required_string "turn/completed.turn" "id" turn_fields in
+            if terminal_thread = thread_id && terminal_turn = turn_id then begin
+              close_delivery ();
+              vendor_terminal := Some terminal;
+              receive ()
+            end else Ok terminal
+          | Provider_message (Ok (Notification {method_ = "error"; params} as terminal)) ->
+            let* fields = assoc_at "error notification" params in
+            let* will_retry = required_bool "error notification" "willRetry" fields in
+            if will_retry then Ok terminal
+            else begin
+              close_delivery ();
+              vendor_terminal := Some terminal;
+              receive ()
+            end
+          | Provider_message (Ok (Notification {method_ = "item/completed"; params} as message)) ->
+            let field key fields =
+              match List.filter (fun (name, _) -> String.equal name key) fields with
+              | [(_, value)] -> Some value
+              | [] | _ :: _ -> None in
+            (match params with
+             | `Assoc fields
+               when field "threadId" fields = Some (`String thread_id)
+                    && field "turnId" fields = Some (`String turn_id) ->
+               (match field "item" fields with
+                | Some (`Assoc item) when field "type" item = Some (`String "dynamicToolCall") ->
+                  (match field "id" item with
+                   | Some (`String call_id) when not (Hashtbl.mem completed_calls call_id) ->
+                     Hashtbl.add completed_calls call_id ();
+                     (match Hashtbl.find_opt written_responses call_id with
+                      | Some (tool_name, arguments, content) ->
+                        Hashtbl.remove written_responses call_id;
+                        (match field "arguments" item, field "contentItems" item with
+                         | Some returned_arguments, Some returned_content
+                           when field "tool" item = Some (`String tool_name)
+                                && field "status" item = Some (`String "completed")
+                                && field "success" item = Some (`Bool true)
+                                && Yojson.Safe.equal (Yojson.Safe.sort arguments) (Yojson.Safe.sort returned_arguments)
+                                && Yojson.Safe.equal (Yojson.Safe.sort content) (Yojson.Safe.sort returned_content) ->
+                           on_tool_response_confirmed ~call_id
+                         | _ -> ())
+                      | None -> ())
+                   | _ -> ())
+                | _ -> ())
+             | _ -> ());
+            Ok message
+          | Provider_message (Error error) ->
+            if !pending > 0 then begin
+              close_delivery ();
+              if Option.is_none !vendor_terminal then stopped := Some error;
+              receive ()
+            end else Error error
+          | Provider_message (Ok ((Response _ | Response_error _
+              | Notification _ | Server_request _) as message)) -> Ok message
+          | Tool_settled {call_id; tool_name; arguments; response; outcome} ->
+            settle ~call_id ~tool_name ~arguments ~response ~outcome;
+            receive ()
+          | Scheduling_handoff ->
+            handoff_waiting := true;
+            if !pending = 0 then send_handoff ();
+            receive ()
+      in
+      let result = run { io with receive } in
+      (* Any protocol terminal can return from the outer consumer, including
+         a malformed frame or unsupported request. Settle admitted workers
+         before releasing their turn scope, retaining results on every such
+         exit rather than only on a successful turn/completed. *)
+      if !pending > 0 then begin
+        close_delivery ();
+        let rec drain () =
+          if !pending > 0 then begin
+            (match take_input () with
+             | Tool_settled {call_id; tool_name; arguments; response; outcome} ->
+               settle ~call_id ~tool_name ~arguments ~response ~outcome
+             | Provider_message _ | Scheduling_handoff -> ());
+            drain ()
+          end in
+        drain ()
+      end;
+      match !stopped with Some error -> Error error | None -> result)
+;;
+
+let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
+  let* fields = assoc_at stage item in
+  let* item_id = required_string stage "id" fields in
+  let complete_parts field part =
+    let* parts = match List.assoc_opt field fields with
+      | None -> Ok []
+      | Some (`List values) -> Ok values
+      | Some _ -> protocol_error stage (field ^ " must be an array") in
+    List.fold_left (fun result (index, value) ->
+      let* () = result in
+      let* text = match value with
+        | `String text -> Ok text
+        | _ -> protocol_error stage (field ^ " entries must be strings") in
+      let part = part index in
+      let key = item_id, part in
+      let buffer = match Hashtbl.find_opt streamed_texts.reasoning_buffers key with
+        | Some buffer -> buffer
+        | None -> let buffer = Buffer.create 256 in
+            Hashtbl.add streamed_texts.reasoning_buffers key buffer; buffer in
+      let prefix = Buffer.contents buffer in
+      if String.starts_with ~prefix text then begin
+        let delta = String.sub text (String.length prefix) (String.length text - String.length prefix) in
+        if (Hashtbl.mem streamed_texts.completed_reasoning key
+            || Hashtbl.mem streamed_texts.completed_reasoning_items item_id) && delta <> "" then
+          protocol_error stage "completed reasoning changed after its content boundary"
+        else begin
+        Buffer.add_string buffer delta;
+        if delta <> "" then emit_stream_event on_stream_event (Thinking_delta {item_id; part; delta});
+        if not (Hashtbl.mem streamed_texts.completed_reasoning key) then begin
+          Hashtbl.add streamed_texts.completed_reasoning key ();
+          emit_stream_event on_stream_event (Thinking_completed {item_id; part})
+        end;
+        Ok ()
+        end
+      end else protocol_error stage "completed reasoning conflicts with streamed content")
+      (Ok ()) (List.mapi (fun index value -> index, value) parts)
+  in
+  let* () = complete_parts "summary" (fun index -> Summary index) in
+  let* () = complete_parts "content" (fun index -> Content index) in
+  (* The item closes every observed part, including one whose full text the
+     completion payload does not restate. Sort to keep closure deterministic. *)
+  Hashtbl.to_seq_keys streamed_texts.reasoning_buffers |> List.of_seq
+  |> List.filter (fun (id, _) -> id = item_id)
+  |> List.sort compare
+  |> List.iter (fun ((_, part) as key) ->
+       if not (Hashtbl.mem streamed_texts.completed_reasoning key) then begin
+         Hashtbl.add streamed_texts.completed_reasoning key ();
+         emit_stream_event on_stream_event (Thinking_completed {item_id; part})
+       end);
+  Hashtbl.replace streamed_texts.completed_reasoning_items item_id ();
+  Ok ()
+;;
+
+let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
+    ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event =
+  let continue () = await_turn_terminal io ~handoff ~terminal_tools_closed ~tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id
+      ~model ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event in
+  let* message = io.receive () in
+  match message with
+  | Response { id = 6; result } when !handoff = Handoff_pending ->
+    let* fields = assoc_at "turn/steer" result in
+    let* accepted_turn = required_string "turn/steer" "turnId" fields in
+    if accepted_turn <> turn_id then protocol_error "turn/steer" "accepted turn does not match active turn"
+    else (
+      handoff := Handoff_accepted;
+      Log.Runtime_agent.info "Codex scheduling handoff accepted thread=%s turn=%s" thread_id turn_id;
+      continue ())
+  | Response_error { id = 6; code; message; _ } when !handoff = Handoff_pending ->
+    handoff := Handoff_rejected;
+    Log.Runtime_agent.warn "Codex scheduling handoff refused thread=%s turn=%s code=%s detail=%s"
+      thread_id turn_id (Option.fold ~none:"absent" ~some:string_of_int code) message;
+    continue ()
+  | Response _ | Response_error _ ->
+    protocol_error "turn" "received an unsolicited JSON-RPC response"
+  | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
+    let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
+    await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
+      ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event
+  | Server_request { id; method_; _ } ->
+    reject_server_request io id;
+    Error (Unsupported_server_request method_)
+  | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    let item_id = notification_item_id params in
+    let key = match item_id with
+      | Some _ -> item_id
+      | None -> streamed_texts.current_item in
+    let* () = match key with
+      | Some id when Hashtbl.mem streamed_texts.completed_texts id ->
+          protocol_error method_ "text delta arrived after item completion"
+      | Some _ | None -> Ok () in
+    let buffer = match Hashtbl.find_opt streamed_texts.buffers key with
+      | Some buffer -> buffer
+      | None ->
+          let buffer = match key, Hashtbl.find_opt streamed_texts.buffers None with
+            | Some _, Some unnamed ->
+                Hashtbl.remove streamed_texts.buffers None; unnamed
+            | _ -> Buffer.create 256 in
+          Hashtbl.add streamed_texts.buffers key buffer; buffer in
+    streamed_texts.current_item <- key;
+    streamed_texts.unfinished_messages <-
+      key
+      :: List.filter (fun other -> not (Option.equal String.equal other key))
+           streamed_texts.unfinished_messages;
+    Buffer.add_string buffer delta;
+    emit_stream_event on_stream_event (Text_delta {item_id; delta});
+    (* The model is speaking: its window applies again, whatever tool items
+       are still open in the background. *)
+    io.set_receive_phase Model_turn;
+    await_turn_terminal
+      io ~handoff ~terminal_tools_closed
+      ~tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
+      ~thread_id
+      ~turn_id
+      ~model
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids:[]
+      ~streamed_texts ~on_stream_event
+  | Notification
+      { method_ = (("item/reasoning/summaryTextDelta" | "item/reasoning/textDelta") as method_)
+      ; params
+      } ->
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    let* fields = assoc_at method_ params in
+    let* item_id = required_string method_ "itemId" fields in
+    let* part = match method_ with
+      | "item/reasoning/summaryTextDelta" ->
+          let* index = required_count method_ "summaryIndex" fields in Ok (Summary index)
+      | _ -> let* index = required_count method_ "contentIndex" fields in Ok (Content index) in
+    let key = item_id, part in
+    let* () = if Hashtbl.mem streamed_texts.completed_reasoning_items item_id then
+      protocol_error method_ "reasoning delta arrived after item completion"
+      else Ok () in
+    let buffer = match Hashtbl.find_opt streamed_texts.reasoning_buffers key with
+      | Some buffer -> buffer
+      | None -> let buffer = Buffer.create 256 in
+          Hashtbl.add streamed_texts.reasoning_buffers key buffer; buffer in
+    Buffer.add_string buffer delta;
+    if delta <> "" then emit_stream_event on_stream_event (Thinking_delta {item_id; part; delta});
+    io.set_receive_phase Model_turn;
+    continue ()
+  | Notification { method_ = "item/plan/delta" as method_; params } ->
+    let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    io.set_receive_phase Model_turn;
+    await_turn_terminal
+      io ~handoff ~terminal_tools_closed
+      ~tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
+      ~thread_id
+      ~turn_id
+      ~model
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids:[]
+      ~streamed_texts ~on_stream_event
+  | Notification {method_="item/commandExecution/outputDelta" as method_; params} ->
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    (match notification_item_id params with
+     | Some item_id when Hashtbl.find_opt streamed_texts.native_items item_id = Some Command_execution
+                         && delta <> "" ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {item_id; progress=Runtime_native_tools.Output_observed {byte_count=String.length delta}})
+     | Some _ | None -> ());
+    continue ()
+  | Notification {method_="item/mcpToolCall/progress" as method_; params} ->
+    let* fields = assoc_at method_ params in
+    let* notification_thread = required_string method_ "threadId" fields in
+    let* notification_turn = required_string method_ "turnId" fields in
+    let* message = required_string_any method_ "message" fields in
+    let* () = if notification_thread <> thread_id || notification_turn <> turn_id
+      then protocol_error method_ "MCP progress identity does not match the active turn" else Ok () in
+    (match notification_item_id params with
+     | Some item_id when Hashtbl.find_opt streamed_texts.native_items item_id = Some Mcp_tool_call ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {item_id; progress=Runtime_native_tools.Message_reported {message}})
+     | Some _ | None -> ());
+    continue ()
+  | Notification {method_="item/fileChange/outputDelta" as method_; params} ->
+    let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    continue ()
+  | Notification { method_ = "item/started"; params } ->
+    let stage = "item/started" in
+    let* item = active_turn_item ~stage ~thread_id ~turn_id params in
+    let* tool_item = tool_item_of_item ~stage item in
+    let* kind = item_kind_of_item ~stage item in
+    let* message = agent_message_phase_of_item ~stage item in
+    (match message with
+     | Some (Some item_id, Some phase) ->
+       Hashtbl.replace streamed_texts.declared_phases item_id phase
+     | Some (Some _, None) | Some (None, (Some _ | None)) | None -> ());
+    let open_tool_call_ids =
+      match tool_item with
+      | None ->
+        (* An item of the model stream: the model is speaking again, so the
+           tool items still open run in the background and the model turn's
+           window applies until the next tool item starts. *)
+        io.set_receive_phase Model_turn;
+        []
+      | Some { call_id; observation } ->
+        if not (Hashtbl.mem streamed_texts.native_items call_id) then
+          Hashtbl.add streamed_texts.native_items call_id kind;
+        Option.iter
+          (fun observation ->
+             tool_effect_attempted := true;
+             emit_stream_event on_stream_event (Native_tool_started observation))
+          observation;
+        (* Every receive until this item completes waits under no idle
+           window: the app-server may write nothing while the item runs. *)
+        io.set_receive_phase Tool_item_running;
+        call_id
+        :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
+    in
+    await_turn_terminal
+      io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
+      ~seen_usage ~open_tool_call_ids ~streamed_texts ~on_stream_event
+  | Notification { method_ = "item/completed"; params } ->
+    let stage = "item/completed" in
+    let* item = active_turn_item ~stage ~thread_id ~turn_id params in
+    let* kind = item_kind_of_item ~stage item in
+    let* () = match kind with
+     | Compaction_item -> emit_stream_event on_stream_event Compaction_observed; Ok ()
+     | Reasoning_item -> complete_reasoning_item ~stage ~on_stream_event streamed_texts item
+     | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
+     | Dynamic_tool_item | Unclassified_item _ -> Ok () in
+    let* tool_item = tool_item_of_item ~stage item in
+    let* completion = native_completion_of_item ~stage ~kind item in
+    let open_tool_call_ids =
+      match tool_item with
+      | None ->
+        io.set_receive_phase Model_turn;
+        []
+      | Some { call_id; observation } ->
+        Hashtbl.remove streamed_texts.native_items call_id;
+        Option.iter
+          (fun observation ->
+             tool_effect_attempted := true;
+             emit_stream_event on_stream_event (Native_tool_finished {observation; completion}))
+          observation;
+        let still_open =
+          List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
+        in
+        (match still_open with
+         | [] -> io.set_receive_phase Model_turn
+         | _ :: _ -> ());
+        still_open
+    in
+    (* Blank messages still close their stream identity, even though they
+       cannot become the turn's final/fallback answer. *)
+    let* message = agent_message_content_of_item ~stage item in
+    let* () = match message with
+      | None -> Ok ()
+      | Some { message_id = item_id; message_text = text; declared_phase = _ } ->
+          let key = match item_id with Some _ -> item_id | None -> streamed_texts.current_item in
+          let prefix, source = match Hashtbl.find_opt streamed_texts.buffers key with
+            | Some buffer -> Buffer.contents buffer, Item_content
+            | None ->
+                (* A wire delta may omit itemId; the completed item supplies
+                   it. Consume that unnamed prefix once at this boundary. *)
+                (match Hashtbl.find_opt streamed_texts.buffers None with
+                 | Some buffer ->
+                     Hashtbl.remove streamed_texts.buffers None;
+                     Buffer.contents buffer, Adopted_anonymous_content
+                 | None -> "", Item_content) in
+          if String.starts_with ~prefix text then begin
+            let delta = String.sub text (String.length prefix)
+                (String.length text - String.length prefix) in
+            let already_completed = match key with
+              | Some id -> Hashtbl.mem streamed_texts.completed_texts id
+              | None -> false in
+            let* () = if already_completed && delta <> "" then
+              protocol_error stage "completed text changed after its content boundary"
+              else Ok () in
+            if delta <> "" then emit_stream_event on_stream_event (Text_delta {item_id; delta});
+            if not already_completed then begin
+              Option.iter (fun id -> Hashtbl.replace streamed_texts.completed_texts id ()) key;
+              emit_stream_event on_stream_event (Text_completed {item_id=key; source})
+            end;
+            if streamed_texts.current_item = key then streamed_texts.current_item <- None;
+            (match key with
+             | None -> Hashtbl.remove streamed_texts.buffers None
+             | Some _ ->
+                 let buffer = Buffer.create (String.length text) in
+                 Buffer.add_string buffer text;
+                 Hashtbl.replace streamed_texts.buffers key buffer);
+            Ok ()
+          end else protocol_error stage "completed agent message conflicts with streamed text"
+    in
+    (* A completed blank message is valid transport evidence, not visible
+       progress. Keep it separate from deltas and final-answer selection so
+       ordinary Keeper acceptance rejects the turn without discarding its
+       resumable provider session. *)
+    if Option.is_some message then begin
+      streamed_texts.assistant_message_completed <- true;
+      streamed_texts.unfinished_messages <- []
+    end;
+    let message = match message with
+      | Some { message_text; _ } when String.trim message_text = "" -> None
+      | _ -> message in
+    let seen_final, seen_fallback =
+      match message with
+      | Some { declared_phase; message_text; message_id = _ } ->
+        (match reply_candidacy declared_phase with
+         | Final_reply -> Some message_text, seen_fallback
+         | Fallback_reply -> seen_final, Some message_text
+         | Not_a_reply -> seen_final, seen_fallback)
+      | None -> seen_final, seen_fallback
+    in
+    await_turn_terminal
+      io ~handoff ~terminal_tools_closed
+      ~tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
+      ~thread_id
+      ~turn_id
+      ~model
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids
+      ~streamed_texts ~on_stream_event
+  | Notification { method_ = "error"; params } ->
+    (* willRetry:true is a progress signal — the app-server itself is retrying
+       upstream, so the turn is alive. Counting these and failing the turn at a
+       cap preempted the declared liveness boundary below and, under one
+       upstream degradation window, drove three keepers into
+       Recovery_required twice in two hours. The per-message stream idle
+       timeout remains the only liveness boundary; willRetry:false still
+       carries the provider's terminal error. *)
+    let stage = "error notification" in
+    let* fields = assoc_at stage params in
+    let* will_retry = required_bool stage "willRetry" fields in
+    if will_retry
+    then
+      await_turn_terminal
+        io ~handoff ~terminal_tools_closed
+        ~tools
+        ~tool_call_count ~tool_effect_attempted ~model_context_window
+        ~thread_id
+        ~turn_id
+        ~model
+        ~seen_final
+        ~seen_fallback
+        ~seen_usage
+        ~open_tool_call_ids
+        ~streamed_texts ~on_stream_event
+    else
+      let* error_json = required_member stage "error" fields in
+      let* error_fields = assoc_at stage error_json in
+      let* message = required_string stage "message" error_fields in
+      Error
+        (turn_error_of_fields
+           ~tool_effect_attempted:!tool_effect_attempted
+           ~message
+           error_fields)
+  | Notification { method_ = "turn/completed"; params } ->
+    let* text =
+      terminal_result
+        ~thread_id
+        ~turn_id
+        ~seen_final
+        ~seen_fallback
+        ~streamed_texts
+        ~tool_calls_observed:(!tool_call_count > 0)
+        ~tool_effect_attempted:!tool_effect_attempted
+        params
+    in
+    (match !handoff with
+     | Handoff_unrequested -> ()
+     | Handoff_pending | Handoff_accepted | Handoff_rejected ->
+       Log.Runtime_agent.info "Codex turn completed after scheduling handoff thread=%s turn=%s"
+         thread_id turn_id);
+    Ok (text, seen_usage)
+  | Notification { method_ = "thread/tokenUsage/updated"; params } ->
+    let* frame = token_usage_notification ~thread_id ~turn_id params in
+    (* A frame is not one response. Codex core sends it after a response and
+       again on a rate-limit update, a usage-limit refusal, a compaction or a
+       retried request, carrying the unchanged [last] (rust-v0.156.1;
+       measured 2026-09-25: 211 repeats in 11,815 Keeper frames). [total] is
+       the thread's running count, so a repeat reports the same count and
+       adds nothing to a spend resolved from it. That count is reported
+       here, where it is read, so a turn that later fails still leaves what
+       it spent. [seen_usage] folds the turn's frames: the newest [last]
+       for the turn result's context occupancy, [total] for its spend. *)
+    let frame =
+      Option.map
+        (fun (last, thread_total, window) ->
+           Option.iter (fun window -> model_context_window := Some window) window;
+           frame_usage_of_breakdowns ~last ~thread_total)
+        frame
+    in
+    Option.iter
+      (fun frame ->
+         emit_stream_event on_stream_event (Usage_reported { thread_id; turn_id; model; frame }))
+      frame;
+    let seen_usage =
+      match frame with
+      | Some frame -> Some (fold_turn_usage seen_usage frame)
+      | None -> seen_usage
+    in
+    await_turn_terminal
+      io ~handoff ~terminal_tools_closed
+      ~tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
+      ~thread_id
+      ~turn_id
+      ~model
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids
+      ~streamed_texts ~on_stream_event
+  (* Account-wide usage windows, for the operator projection only. An update
+     this client cannot read is logged and does not fail the turn. *)
+  | Notification { method_ = "account/rateLimits/updated"; params } ->
+    (match Runtime_provider_usage_window.decode_codex_rate_limits_updated params with
+     | Ok { Runtime_provider_usage_window.windows = []; _ } -> ()
+     | Ok report -> emit_stream_event on_stream_event (Usage_windows_reported report)
+     | Error error ->
+       Log.Runtime_agent.warn
+         "Codex app-server rate-limit update not read: %s"
+         (Runtime_provider_usage_window.decode_error_to_string error));
+    await_turn_terminal
+      io ~handoff ~terminal_tools_closed
+      ~tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
+      ~thread_id
+      ~turn_id
+      ~model
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids
+      ~streamed_texts ~on_stream_event
+  (* App-server progress and account notifications are observational. Protocol
+     evolution must not turn them into a computation failure; each valid wire
+     message resets the stream-idle liveness boundary. *)
+  | Notification _ ->
+    await_turn_terminal
+      io ~handoff ~terminal_tools_closed
+      ~tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
+      ~thread_id
+      ~turn_id
+      ~model
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids
+      ~streamed_texts ~on_stream_event
+;;
+
+(* Media types the app-server image item accepts, mirroring the closed set the
+   analyze_image tool and the dashboard composer already use. Defined next to
+   the tool-result projection that applies the same set, so the two paths into
+   the same wire item cannot drift. *)
+let supported_image_media_types =
+  Runtime_official_client_tool.official_client_image_media_types
+;;
+
+(* The app-server README is explicit: the [image] input variant takes an inline
+   data URL and rejects remote HTTP(S) URLs, so the payload is inlined here
+   rather than handed over as a link the server would refuse. *)
+let image_input_item (image : image_input) =
+  `Assoc
+    [ "type", `String "image"
+    ; ( "url"
+      , `String
+          (Printf.sprintf "data:%s;base64,%s" image.media_type image.base64_data) )
+    ]
+;;
+
+(* Fail closed before the process boundary. A malformed data URL comes back as a
+   turn rejection several seconds later, attributed to the thread rather than to
+   the caller that built it. *)
+let validate_images images =
+  let rec loop index = function
+    | [] -> Ok ()
+    | image :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      if not (List.mem image.media_type supported_image_media_types)
+      then
+        Error
+          (Invalid_config
+             (Printf.sprintf
+                "%s.media_type %S is not one of %s"
+                where
+                image.media_type
+                (String.concat ", " supported_image_media_types)))
+      else match Runtime_official_client_tool.validate_base64_image_data image.base64_data with
+        | Error detail -> Error (Invalid_config (where ^ ".base64_data " ^ detail))
+        | Ok () -> loop (index + 1) rest
+  in
+  loop 0 images
+;;
+
+let optional_field name = function
+  | None -> []
+  | Some value -> [ name, `String value ]
+;;
+
+let history_item (message : history_message) =
+  let role, content_type =
+    match message.role with
+    | User -> "user", "input_text"
+    | Assistant -> "assistant", "output_text"
+    | Developer -> "developer", "input_text"
+  in
+  `Assoc
+    [ "type", `String "message"
+    ; "role", `String role
+    ; ( "content"
+      , `List
+          [ `Assoc
+              [ "type", `String content_type
+              ; "text", `String message.text
+              ]
+          ] )
+    ]
+;;
+
+let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result ~on_tool_response_confirmed ~protocol_cwd ~dynamic_tools ~reasoning_effort
+    ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
+    ~on_turn_started ~on_stream_event ~on_reasoning_effort_resolved =
+  send_control_request io ~id:1 ~method_:"initialize"
+    ~params:
+      (`Assoc
+         [ ( "clientInfo"
+           , `Assoc
+               [ "name", `String "masc"
+               ; "title", `String "MASC"
+               ; "version", `String client_version
+               ] )
+         ; "capabilities", `Assoc [ "experimentalApi", `Bool true ]
+         ]);
+  let* initialize = await_response io ~id:1 ~method_:"initialize" in
+  let* user_agent = parse_initialize initialize in
+  send_notification io "initialized";
+  send_control_request io ~id:2 ~method_:"account/read"
+    ~params:(`Assoc [ "refreshToken", `Bool false ]);
+  let* account = await_response io ~id:2 ~method_:"account/read" in
+  let* subscription = parse_subscription account in
+  let* permissions_profile = permissions_profile_of_posture config.native in
+  let requested = reasoning_effort in
+  let admission ~model f =
+    (try f () with Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false }))
+    |> Result.map_error (function
+      | (Runtime_shutting_down | Turn_interrupted | Stopped_by_host _) as stop -> stop
+      | (Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _ | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Subscription_required _ | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _ | Process_exited _ | Timeout _) as error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
+  (* New persistent threads are created only after explicit effort is admitted.
+     Pin the advertised default when no model was configured, so thread/start
+     and the admitted account metadata name the same model. Resume creates no
+     new thread and still admits against the model returned by thread/resume. *)
+  let* start_admission = match thread_mode, requested with
+    | Start, Some effort ->
+        admission ~model:(Option.value ~default:"<account default>" config.model) (fun () ->
+          let* rows, next_request_id = read_model_pages io ~include_hidden:true ~request_id:4 in
+          let selected = List.filter (fun row -> match config.model with
+            | Some model -> String.equal row.model model || String.equal row.id model
+            | None -> row.is_default) rows in
+          let* row = match selected with
+            | [row] -> Ok row
+            | [] | _::_ -> protocol_error "model/list" "selected model has no unique advertised reasoning metadata" in
+          let* effective = resolve_reasoning_effort row effort in
+          Ok (Some (row.model, effective, next_request_id)))
+    | Start, None | Resume _, _ -> Ok None in
+  let selected_model = match start_admission with
+    | Some (model,_,_) -> Some model | None -> config.model in
+  let thread_request, thread_fields, resumed =
+    match thread_mode with
+    | Start ->
+      ( Start_thread
+      , ([ "cwd", `String protocol_cwd
+         ; "approvalPolicy", `String approval_policy
+         ; "permissions", `String permissions_profile
+         ; "ephemeral", `Bool thread_is_ephemeral
+         ]
+         @ optional_field "model" selected_model
+         @ optional_field "developerInstructions" config.developer_instructions
+         @
+         match dynamic_tools with
+         | [] -> []
+         | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ])
+      , false )
+    | Resume { thread_id } ->
+      ( Resume_thread
+      (* [excludeTurns]: the reply is read for the thread id and the model only
+         (parse_thread_response). Without it Codex returns every past turn in
+         [thread.turns], and a long thread's reply outgrew the 8 MiB line limit
+         (masc-pro-builder, 2026-09-20 13:11Z: Buffer_limit_exceeded on
+         resume); the next turn started a fresh thread. The flag changes the
+         reply, not the history the model sees. *)
+      , [ "threadId", `String thread_id
+        ; "cwd", `String protocol_cwd
+        ; "approvalPolicy", `String approval_policy
+        ; "permissions", `String permissions_profile
+        ; "excludeTurns", `Bool true
+        ]
+        @ optional_field "model" selected_model
+        @ optional_field "developerInstructions" config.developer_instructions
+        @
+        (match dynamic_tools with
+         | [] -> []
+         | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ])
+      , true )
+  in
+  let thread_method = context_submission_method_label (context_request_method thread_request) in
+  send_context_request io thread_request ~id:3
+    ~thread_id:(match thread_mode with Start -> None | Resume { thread_id } -> Some thread_id)
+    ~params:(`Assoc thread_fields);
+  let* thread = await_response io ~id:3 ~method_:thread_method in
+  let* thread_id, model = parse_thread_response ~stage:thread_method thread in
+  let* () =
+    match thread_mode with
+    | Start -> Ok ()
+    | Resume { thread_id = expected } when String.equal expected thread_id -> Ok ()
+    | Resume { thread_id = expected } ->
+      protocol_error
+        thread_method
+        (Printf.sprintf
+           "resumed thread id mismatch: requested %S but server returned %S"
+           expected
+           thread_id)
+  in
+  (* Record the returned thread before checking server adherence to the
+     admitted model or injecting history. Unexpected post-create failures
+     must leave a thread identity for protocol recovery. *)
+  let* () =
+    invoke_state_callback ~stage:"thread ready callback" (fun () ->
+      on_thread_ready ~thread_id)
+  in
+  let* reasoning_effort, next_request_id = match start_admission with
+    | Some (admitted_model,effective,next_request_id) when String.equal admitted_model model ->
+        Ok (Some effective,next_request_id)
+    | Some _ -> protocol_error thread_method "created thread model differs from admitted account model"
+    | None -> admission ~model (fun () -> admit_reasoning_effort io ~model ~requested ~request_id:4) in
+  let* () = invoke_state_callback ~stage:"reasoning effort callback" (fun () ->
+    on_reasoning_effort_resolved ~model ~requested ~effective:reasoning_effort;
+    Ok ()) in
+  let messages_to_inject =
+    (match thread_mode with Start -> history | Resume _ -> [])
+    @ List.map (fun text -> { role = Developer; text }) developer_context
+  in
+  let turn_request_id =
+    match messages_to_inject with
+    | [] -> Ok next_request_id
+    | messages ->
+      send_context_request io Inject_items ~id:next_request_id ~thread_id:(Some thread_id)
+        ~params:
+          (`Assoc
+             [ "threadId", `String thread_id
+             ; "items", `List (List.map history_item messages)
+             ]);
+      let* _ = await_response io ~id:next_request_id ~method_:"thread/inject_items" in
+      Ok (next_request_id + 1)
+  in
+  let* turn_request_id = turn_request_id in
+  let* () =
+    invoke_state_callback ~stage:"turn starting callback" (fun () ->
+      on_turn_starting ~thread_id)
+  in
+  let* () =
+    try
+      send_context_request io Start_turn ~id:turn_request_id ~thread_id:(Some thread_id)
+        ~params:
+          (`Assoc
+             ([ "threadId", `String thread_id
+              ; ( "input"
+                , `List
+                    (List.map image_input_item images
+                     @ [ `Assoc [ "type", `String "text"; "text", `String prompt ] ]) )
+              ]
+              @ optional_field
+                  "effort"
+                  (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)
+              @ (match config.output_schema with
+                 | None -> []
+                 (* v2 TurnStartParams.outputSchema: "Optional JSON Schema used to
+                    constrain the final assistant message for this turn." Unlike the
+                    Antigravity CLI there is no second field to read -- the schema
+                    binds the message itself, so the existing text path already
+                    carries the constrained answer. *)
+                 | Some schema -> [ "outputSchema", schema ])));
+      Ok ()
+    with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
+    | exn ->
+      Llm_provider.Reserved_exn.reraise_if_reserved exn;
+      Error (Turn_input_write_failed (Printexc.to_string exn))
+  in
+  on_turn_dispatched ();
+  let* () = invoke_state_callback ~stage:"prompt sent callback" (fun () ->
+    on_prompt_sent (); Ok ()) in
+  (* The complete request is now outside this process. Admission stays finite
+     through dispatch; only the subsequent model turn adopts its declared
+     idle policy, including [None]. *)
+  io.set_receive_phase Model_turn;
+  let* turn =
+    match await_response io ~id:turn_request_id ~method_:"turn/start" with
+    | Error (Timeout { seconds; turn_accepted = _ }) ->
+      (* The request has been written. A missing response cannot prove that
+         the app-server rejected it, so rotating here could duplicate a turn
+         that is already executing upstream. *)
+      Error (Timeout { seconds; turn_accepted = true })
+    | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Stopped_by_host _ | Process_exited _))))))))))))) | Ok _) as response -> response
+  in
+  let* turn_id = parse_turn_start turn in
+  let* () =
+    invoke_state_callback ~stage:"turn started callback" (fun () ->
+      on_turn_started ~thread_id ~turn_id)
+  in
+  emit_stream_event on_stream_event (Turn_started { turn_id; model });
+  let tool_call_count = ref 0 in
+  let tool_effect_attempted = ref false in
+  let model_context_window = ref None in
+  let handoff = ref Handoff_unrequested in
+  let terminal_tools_closed = ref false in
+  let* text, turn_usage =
+    with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
+      ~tools:dynamic_tools ~tool_call_count ~tool_effect_attempted ~on_stream_event
+      ~on_undelivered_tool_result ~on_tool_response_confirmed ~thread_id ~turn_id (fun io ->
+    await_turn_terminal
+      io ~handoff ~terminal_tools_closed
+      ~tools:dynamic_tools
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
+      ~thread_id
+      ~turn_id
+      ~model
+      ~seen_final:None
+      ~seen_fallback:None
+      ~seen_usage:None
+      ~open_tool_call_ids:[]
+      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8;
+        completed_texts=Hashtbl.create 8; completed_reasoning=Hashtbl.create 8;
+        completed_reasoning_items=Hashtbl.create 8;
+        native_items=Hashtbl.create 8; declared_phases=Hashtbl.create 8;
+        current_item=None; unfinished_messages=[]; assistant_message_completed=false}
+      ~on_stream_event)
+  in
+  emit_stream_event on_stream_event (Turn_finished { text });
+  Ok
+    { thread_id
+    ; turn_id
+    ; model
+    ; text
+    ; dynamic_tool_calls = !tool_call_count
+    ; scheduling_handoff = !handoff
+    ; subscription
+    ; user_agent
+    ; resumed
+    ; usage = turn_usage
+    ; model_context_window = !model_context_window
+    }
+;;
+
+let resolved_codex_home () =
+  let home = match Sys.getenv_opt "CODEX_HOME" with
+    | Some path when path <> "" -> Some path
+    | _ ->
+      (match Sys.getenv_opt "HOME" with
+       | Some home when home <> "" -> Some (Filename.concat home ".codex")
+       | Some _ | None -> None) in
+  Option.map (fun path ->
+    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path) home
+;;
+
+let effective_account_home = function
+  | Some path -> Some path
+  | None -> resolved_codex_home ()
+;;
+
+let configured_auth_environment_keys home =
+  match home with
+  | None -> Ok []
+  | Some home ->
+    let path = Filename.concat home "config.toml" in
+    if not (Sys.file_exists path) then Ok [] else
+    try
+      let toml = Otoml.Parser.from_file path in
+      let table = function
+        | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> fields
+        | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> raise (Invalid_argument "table") in
+      let env_name = function
+        | Otoml.TomlString name when String.length name > 0 ->
+          let initial = function 'a'..'z' | 'A'..'Z' | '_' -> true | _ -> false in
+          if initial name.[0] && String.for_all (function 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' -> true | _ -> false) name
+          then name else raise (Invalid_argument "environment name")
+        | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+        | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+        | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _
+        | TomlString _ -> raise (Invalid_argument "environment name") in
+      let providers = match Otoml.find_opt toml Fun.id [ "model_providers" ] with
+        | None -> [] | Some value -> table value in
+      let names = List.concat_map (fun (_, value) ->
+        let fields = table value in
+        let key = match List.assoc_opt "env_key" fields with
+          | None -> [] | Some value -> [ env_name value ] in
+        let headers = match List.assoc_opt "env_http_headers" fields with
+          | None -> [] | Some value -> List.map (fun (_, value) -> env_name value) (table value) in
+        key @ headers) providers in
+      Ok (List.sort_uniq String.compare names)
+    with
+    | Otoml.Parse_error _ | Otoml.Type_error _ | Sys_error _ | Invalid_argument _ ->
+      Error (Invalid_config "Cannot read declared Codex provider credential environment names from the user config; inspect config.toml")
+;;
+
+let client_environment account_home =
+  (* Resolve before the child changes cwd; admission and execution must read
+     the same credential declarations and CLI store. *)
+  let home = effective_account_home account_home in
+  let* configured = configured_auth_environment_keys home in
+  Ok
+    (Runtime_codex_environment_projection.project
+       ~explicit_account:(Option.is_some account_home) ~home ~configured (Unix.environment ()))
+;;
+
+let drain_stderr flow tail =
+  let chunk = Cstruct.create stderr_chunk_bytes in
+  try
+    while true do
+      let count = Eio.Flow.single_read flow chunk in
+      let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
+      Stderr.append tail text
+    done
+  with
+  | End_of_file -> ()
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Runtime_agent.debug
+      "Codex app-server stderr drain failed: %s"
+      (Printexc.to_string exn)
+;;
+
+(* The host is asked to stop and given the shared grace to exit before it is
+   killed. A cancelled owner only asks: the switch's release hook kills and
+   reaps the host, and [Eio.Process.await] cannot finish once the switch that
+   owns the host is cancelled. *)
+let terminate_spawned_process ~sw ~clock proc stdin_w =
+  let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
+  Eio.Cancel.protect (fun () ->
+    (try Eio.Flow.close stdin_w with
+     | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
+       Log.Runtime_agent.debug
+         "Codex app-server stdin close failed: %s"
+         (Printexc.to_string exn));
+    if owning_switch_cancelled
+    then (
+      try Eio.Process.signal proc Sys.sigterm with
+      | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
+        Log.Runtime_agent.debug
+          "Codex app-server termination signal failed: %s"
+          (Printexc.to_string exn))
+    else
+      Eio_process_capture.reap_proc_with_clock
+        ~sw
+        (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        proc)
+;;
+
+(* A Codex sub-agent is a separate thread. Its item frames reach this
+   connection under another threadId, and [active_turn_item] ends the turn on
+   the first one. In the 12 rollouts of 2026-09-30 that hold a sub-agent spawn
+   matched to a failed turn, the turn ended that way within 20 seconds. MASC
+   records none of the child's frames, tool calls or token use, so no client
+   this module spawns may create one, whatever the posture.
+   Codex picks the version in this order: [features.multi_agent_v2] (V2), then
+   [agents] enabled=false (disabled), then the model catalog's own
+   multi_agent_version, then [features.multi_agent]. gpt-6.1-sol declares v2 in
+   the catalog, so [features.multi_agent=false] alone leaves its sub-agent tools
+   on: `codex debug prompt-input` (0.159.1) renders the same prompt with and
+   without it, and no sub-agent text once [agents.enabled=false] is set.
+   Upstream: codex-rs/core/src/config/mod.rs (multi_agent_version_for_model),
+   codex-rs/core/src/tools/spec_plan.rs (collab_tools_enabled). *)
+let sub_agent_overrides =
+  [ "-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false" ]
+;;
+
+(* A read posture keeps Codex's permissions read-only, but shell execution
+   would still run in the host cwd rather than the Keeper's Docker sandbox.
+   Supported app-server CLI overrides outrank inherited config. ShellTool=false
+   suppresses both shell and unified exec registration; disable both explicitly.
+   Native_full retains its explicitly selected vendor execution surface.
+   Upstream: codex-rs/core/src/tools/spec_plan.rs (register_shell_tools). *)
+let client_argv (config : config) =
+  [ config.cli_path; "app-server"; "--stdio" ]
+  @ (match config.context_window with
+     | None -> []
+     | Some tokens -> [ "-c"; Printf.sprintf "model_context_window=%d" tokens ])
+  @ (match config.isolated_home with
+     | None -> []
+     | Some home ->
+       Runtime_verification_codex_home.cli_overrides ~home
+       |> List.concat_map (fun override -> [ "-c"; override ]))
+  @ (match config.native with
+     | Runtime_native_tools.Native_read ->
+       [ "-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false" ]
+     | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> [])
+  @ sub_agent_overrides
+;;
+
+module Write = Runtime_official_client_write
+
+type context_submission =
+  { method_ : context_submission_method
+  ; request_id : context_frame_id
+  ; thread_id : string option
+  ; write : Write.t
+  }
+
+(* Which values of a frame are context slots. Start and resume carry the
+   developer instructions and the dynamic tools; inject_items carries each
+   history item; turn/start and turn/steer carry the input texts. A tool
+   response selects nothing: its content items are counted in the carrier. *)
+let context_selection = function
+  | Thread_start | Thread_resume ->
+    Write.Fields
+      [ "params"
+      , Fields
+          [ "developerInstructions", Select Developer_instructions
+          ; "dynamicTools", Select Dynamic_tools
+          ] ]
+  | Thread_inject_items ->
+    Fields [ "params", Fields [ "items", Elements (fun index _ -> Select (Injected_item index)) ] ]
+  | Turn_start | Turn_steer -> Fields [ "params", Fields [ "input", Write.turn_input ] ]
+  | Dynamic_tool_response -> Carry
+;;
+
+let context_submission_to_json observation =
+  let frame = match observation.request_id with
+    | Request_id _ -> "request" | Answered_request_id _ -> "response" in
+  `Assoc ["schema",`String "masc.codex-context-submission.v4";
+    "phase",`String "stdin_write_completed";"frame",`String frame;
+    "method",`String (context_submission_method_label observation.method_);
+    "request_id",context_frame_id_to_json observation.request_id;
+    "thread_id",(match observation.thread_id with None -> `Null | Some id -> `String id);
+    "write",Write.to_json observation.write;
+    "logical_memory_partition",`String "unknown";
+    "server_acceptance",`String "not_observed_by_this_event";
+    "remote_history",`String "unknown"]
+;;
+
+let context_submission frame json payload =
+  match frame with
+  | Control -> None
+  | Context { method_; id; thread_id } ->
+    Some {method_;request_id=id;thread_id;
+      write=Write.json_line (context_selection method_) json payload}
+;;
+
+let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd config run =
+  let selected_home = match config.isolated_home with
+    | Some home -> Some home
+    | None -> config.account_home in
+  let* environment = client_environment selected_home in
+  Eio.Switch.run (fun sw ->
+    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
+    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
+    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
+    let proc =
+      Eio.Process.spawn ~sw mgr ~cwd
+        ~env:(match config.isolated_home with
+          | None -> environment
+          | Some path ->
+            environment |> Array.to_list
+            |> List.filter (fun entry -> Runtime_codex_environment_projection.env_key entry <> "CODEX_HOME")
+            |> fun entries -> Array.of_list (("CODEX_HOME=" ^ path) :: entries))
+        ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
+        (client_argv config)
+    in
+    Eio.Flow.close stdin_r;
+    Eio.Flow.close stdout_w;
+    Eio.Flow.close stderr_w;
+    (* Diagnostics only, so a daemon: the switch cancels it once the body
+       returns. A grandchild the CLI leaves behind (an MCP server orphaned
+       when the CLI is reaped) inherits this pipe's write end, so EOF may
+       never come, and a joined fiber would hold the switch open after the
+       turn was served. *)
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      drain_stderr stderr_r stderr_tail;
+      `Stop_daemon);
+    let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
+    let receive_phase = ref Awaiting_admission in
+    let send ?on_response_sent frame json =
+      let observation = with_idle_timeout clock
+        config.admission_timeout_s
+        (fun () ->
+          (* Encoding and its worker queue wait share the write's admission
+             bound. Await the immutable payload before the
+             owner writes, preserving protocol order and callback ownership. *)
+          let payload, observation =
+            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+              let payload = Yojson.Safe.to_string json in
+              (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
+                 which loses every in-flight turn and leaves the producer unnamed.
+                 Refuse the write instead: the child survives and the field is named. *)
+              if not (String_util.is_valid_utf8 payload)
+              then
+                failwith
+                  (Printf.sprintf
+                     "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
+                     (match invalid_utf8_field json with
+                      | Some field -> field
+                      | None -> "<unknown>"));
+              payload, context_submission frame json payload)
+          in
+          Eio.Flow.copy_string payload stdin_w;
+          Eio.Flow.copy_string "\n" stdin_w;
+          observation)
+      in
+      Runtime_official_client_tool.notify_response_sent on_response_sent;
+      (* Persistence is outside the write deadline. A completed frame must not
+         become an input-write failure because its observer is slow. A deadline
+         the observer raises itself ([Eio.Time.Timeout] from its own
+         [with_timeout_exn], or an [Idle_timeout]) is that observer giving up:
+         the frame is already outside this process, so the turn continues and a
+         written turn/start keeps its dispatch fence. An enclosing deadline
+         reaches this code as [Eio.Cancel.Cancelled], which still propagates. *)
+      Option.iter (fun observation ->
+        Write.report
+          ~label:(Printf.sprintf "Codex request_id=%s"
+            (Yojson.Safe.to_string (context_frame_id_to_json observation.request_id)))
+          on_context_submission observation) observation
+    in
+    let receive () =
+      try
+        with_optional_idle_timeout clock
+          (window_for_phase config !receive_phase)
+          (fun () -> Eio.Buf_read.line reader)
+        |> parse_wire_line
+      with
+      | End_of_file ->
+        if Runtime_host_lifecycle.is_shutting_down ()
+        then Error Runtime_shutting_down
+        else
+          let detail = String.trim (Stderr.contents stderr_tail) in
+          (* Same rule as the timeout above: the transport cannot know
+             whether turn/start was accepted, so it reports the conservative
+             answer and the entry point rewraps it with what it observed. *)
+          Error
+            (Process_exited
+               { detail = (if detail = "" then "stdout closed" else detail)
+               ; turn_accepted = false
+               })
+      | Idle_timeout seconds ->
+        (* The transport cannot know whether turn/start was already accepted;
+           the entry points rewrap with the observed turn state. *)
+        Error (Timeout { seconds; turn_accepted = false })
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Eio.Time.Timeout as exn -> raise exn
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+      | exn -> protocol_error "stdout read" (Printexc.to_string exn)
+    in
+    (* Terminate inside the body: the child can be waiting for more stdin on
+       typed early returns, and only here does it get SIGTERM and a bounded
+       reap before the switch's release hook kills whatever is left.
+       [Eio.Cancel.protect] inside the finalizer preserves cleanup across
+       fiber cancellation. *)
+    Fun.protect
+      ~finally:(fun () -> terminate_spawned_process ~sw ~clock proc stdin_w)
+      (fun () ->
+         run
+           { send
+           ; receive
+           ; set_receive_phase = (fun phase -> receive_phase := phase)
+           }))
+;;
+
+let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~on_undelivered_tool_result ~on_tool_response_confirmed ~dynamic_tools ~on_context_submission
+    ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
+    ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event
+    ~on_reasoning_effort_resolved =
+  with_spawned_client ~on_context_submission
+    ~mgr
+    ~clock
+    ~cwd
+    config
+    (fun io ->
+    let with_admission_timeout callback =
+      with_idle_timeout clock config.admission_timeout_s callback
+    in
+    run_protocol
+      io
+      config
+      ~await_handoff
+      ~on_undelivered_tool_result
+      ~on_tool_response_confirmed
+      ~protocol_cwd
+      ~dynamic_tools
+      ~reasoning_effort
+      ~on_reasoning_effort_resolved
+      ~thread_mode
+      ~history
+      ~developer_context
+      ~prompt
+      ~images
+      ~on_thread_ready:(fun ~thread_id ->
+        with_admission_timeout (fun () -> on_thread_ready ~thread_id))
+      ~on_turn_starting:(fun ~thread_id ->
+        with_admission_timeout (fun () -> on_turn_starting ~thread_id))
+      ~on_turn_dispatched
+      ~on_prompt_sent
+      ~on_turn_started:(fun ~thread_id ~turn_id ->
+        with_admission_timeout (fun () -> on_turn_started ~thread_id ~turn_id))
+      ~on_stream_event)
+;;
+
+let native_cwd cwd =
+  try
+    let cwd = Eio.Path.native_exn cwd in
+    if String.trim cwd = "" || Filename.is_relative cwd
+    then Error (Invalid_config "cwd must be an absolute native path")
+    else Ok cwd
+  with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Invalid_config
+         ("cwd must be a native filesystem path: " ^ Printexc.to_string exn))
+;;
+
+let validate_process_config config =
+  if String.trim config.cli_path = ""
+  then Error (Invalid_config "cli_path must not be empty")
+  else if Option.fold ~none:false ~some:(fun tokens -> tokens <= 0) config.context_window
+  then Error (Invalid_config "context_window must be positive")
+  else if Option.is_some config.account_home && Option.is_some config.isolated_home
+  then Error (Invalid_config "account_home and isolated_home cannot both be selected")
+  else if (match config.account_home with
+      | None -> false
+      | Some home -> not (Runtime_account_home.is_valid home))
+  then Error (Invalid_config "account_home must be a non-empty absolute path")
+  else if (match config.isolated_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None ->
+        (match effective_account_home config.account_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None -> true))
+  then Error (Invalid_config "Codex needs an absolute isolated_home, account_home, CODEX_HOME, or HOME")
+  else if
+    not (Float.is_finite config.admission_timeout_s)
+    || config.admission_timeout_s <= 0.0
+  then Error (Invalid_config "admission_timeout_s must be positive and finite")
+  else if
+    (match config.timeout_s with
+     | None -> false
+     | Some seconds -> not (Float.is_finite seconds) || seconds <= 0.0)
+  then Error (Invalid_config "a declared timeout_s must be positive and finite")
+  else Ok ()
+;;
+
+let validate_config config ~cwd ~thread_mode ~prompt =
+  let* () = validate_process_config config in
+  if String.trim prompt = ""
+  then Error (Invalid_config "prompt must not be empty")
+  else
+    let* cwd = native_cwd cwd in
+    match thread_mode with
+    | Resume { thread_id } when String.equal (String.trim thread_id) "" ->
+      Error (Invalid_config "resume thread_id must not be empty")
+    | Start | Resume _ -> Ok cwd
+;;
+
+let validate_dynamic_tools tools =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (tool : dynamic_tool) :: rest ->
+      let name = String.trim tool.name in
+      if name = ""
+      then Error (Invalid_config "dynamic tool name must not be empty")
+      else if List.mem name seen
+      then Error (Invalid_config (Printf.sprintf "duplicate dynamic tool name %S" name))
+      else loop (name :: seen) rest
+  in
+  loop [] tools
+;;
+
+let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images =
+  match validate_images images with
+  | Error _ as invalid -> invalid
+  | Ok () ->
+  match validate_config config ~cwd ~thread_mode ~prompt with
+  | Error _ as error -> error
+  | Ok protocol_cwd ->
+    (match validate_dynamic_tools dynamic_tools with
+     | Error _ as error -> error
+     | Ok () -> Ok protocol_cwd)
+;;
+
+let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) ~cwd config ~prompt ~images =
+  validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images
+  |> Result.map (fun _ -> ())
+;;
+
+let probe_metadata ~mgr ~clock ~cwd config protocol =
+  let result =
+    let* () = validate_process_config config in
+    let* _ = native_cwd cwd in
+    try
+      with_spawned_client
+        ~mgr
+        ~clock
+        ~cwd
+        config
+        protocol
+    with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Idle_timeout seconds ->
+      (* The probe never starts a turn. *)
+      Error (Timeout { seconds; turn_accepted = false })
+    | Eio.Time.Timeout as exn -> raise exn
+    | exn -> Error (Spawn_failed (Printexc.to_string exn))
+  in
+  (match result with
+   | Ok _ -> Log.Runtime_agent.info "Codex app-server subscription probe completed"
+   | Error error ->
+     Log.Runtime_agent.warn
+       "Codex app-server subscription probe failed (kind=%s)"
+       (error_kind error));
+  result
+;;
+
+let probe_subscription ~mgr ~clock ~cwd config =
+  probe_metadata ~mgr ~clock ~cwd config probe_protocol
+;;
+
+let list_models ~mgr ~clock ~cwd config =
+  probe_metadata ~mgr ~clock ~cwd config model_list_protocol
+;;
+
+let read_rate_limits ~mgr ~clock ~cwd config =
+  probe_metadata ~mgr ~clock ~cwd config rate_limits_read_protocol
+;;
+
+let run_turn ?await_handoff ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?(on_tool_response_confirmed = fun ~call_id:_ -> ()) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
+    ?(history = [])
+    ?(developer_context = [])
+    ?(on_context_submission = fun _ -> ())
+    ?(on_prompt_sent = fun () -> ())
+    ?(on_reasoning_effort_resolved = fun ~model:_ ~requested:_ ~effective:_ -> ())
+    ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
+    ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
+    ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
+    config ~prompt ~images =
+  (* A complete [turn/start] write already makes a later timeout ambiguous:
+     the upstream may accept and execute it without returning an acknowledgement.
+     The legacy [turn_accepted] flag is this conservative dispatch fence, not
+     proof of server acceptance. Set it before any post-write observer; the
+     separate [on_turn_started] callback witnesses the server's acceptance. *)
+  let turn_accepted = ref false in
+  let on_context_submission observation =
+    (match observation.method_ with Turn_start -> turn_accepted := true
+     | Thread_start | Thread_resume | Thread_inject_items | Turn_steer | Dynamic_tool_response -> ());
+    on_context_submission observation in
+  let on_turn_started ~thread_id ~turn_id =
+    turn_accepted := true;
+    on_turn_started ~thread_id ~turn_id
+  in
+  let result =
+    match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images with
+    | Error _ as error -> error
+    | Ok protocol_cwd ->
+      (* Eight keepers starting a turn in the same second produced eight
+         identical lines with nothing to tell them apart (2026-08-22
+         01:36:25Z, seven within one second). The thread is the only identity
+         this entry point holds before [on_thread_ready] fires. *)
+      Log.Runtime_agent.info
+        "Codex app-server subscription turn starting thread=%s model=%s"
+        (match thread_mode with
+         | Start -> "new"
+         | Resume { thread_id } -> thread_id)
+        (match config.model with
+         | Some model -> model
+         | None -> "-");
+      (match
+         (try
+            run_spawned
+              ~mgr
+              ~clock
+              ~cwd
+              ~protocol_cwd
+              config
+              ~await_handoff
+              ~on_undelivered_tool_result
+              ~on_tool_response_confirmed
+              ~dynamic_tools
+              ~on_context_submission
+              ~reasoning_effort
+              ~on_reasoning_effort_resolved
+              ~thread_mode
+              ~history
+              ~developer_context
+              ~prompt
+              ~images
+              ~on_thread_ready
+              ~on_turn_starting
+              ~on_turn_dispatched:(fun () -> turn_accepted := true)
+              ~on_prompt_sent
+              ~on_turn_started
+              ~on_stream_event
+          with
+          | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Idle_timeout seconds ->
+            Error (Timeout { seconds; turn_accepted = !turn_accepted })
+          | Eio.Time.Timeout as exn -> raise exn
+          | exn ->
+            Llm_provider.Reserved_exn.reraise_if_reserved exn;
+            Error (Spawn_failed (Printexc.to_string exn)))
+       with
+       | Error (Timeout { seconds; turn_accepted = dispatch_ambiguous }) ->
+         Error
+           (Timeout
+              { seconds
+              ; turn_accepted = dispatch_ambiguous || !turn_accepted
+              })
+       (* A client that dies during initialize, account/read or thread/start
+          submitted no turn, so the next candidate may still be tried. Only
+          the entry point knows which of the two happened. *)
+       | Error (Process_exited { detail; turn_accepted = dispatch_ambiguous }) ->
+         Error
+           (Process_exited
+              { detail
+              ; turn_accepted = dispatch_ambiguous || !turn_accepted
+              })
+       | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | Stopped_by_host _)))))))))))) | Ok _) as other -> other)
+  in
+  (match result with
+   | Ok turn ->
+     Log.Runtime_agent.info
+       "Codex app-server subscription turn completed (thread_id=%s turn_id=%s model=%s)"
+       turn.thread_id
+       turn.turn_id
+       turn.model
+   | Error (Stopped_by_host stop as stopped)
+     when not (Runtime_official_client_tool.host_stop_failed stop) ->
+     (* The Keeper settles this stop as a completed or yielded turn
+        ({!Keeper_official_client_host}). Logged as a failure it made 123
+        WARN lines on 2026-09-29 for turns that ended as designed. *)
+     Log.Runtime_agent.info
+       "Codex app-server turn stopped by host: %s"
+       (error_to_string stopped)
+   | Error
+       (( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+        | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+        | Subscription_required _ | Unsupported_server_request _
+        | Context_window_exceeded _ | Turn_failed _ | Stopped_by_host _
+        | Turn_interrupted | Runtime_shutting_down | Process_exited _ | Timeout _ ) as error) ->
+     Log.Runtime_agent.warn
+       "Codex app-server subscription turn failed (kind=%s): %s"
+       (error_kind error)
+       (error_to_string error));
+  result
+;;

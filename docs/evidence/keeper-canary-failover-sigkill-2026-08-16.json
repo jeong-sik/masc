@@ -1,0 +1,135 @@
+{
+  "schema": "masc.keeper_canary_run.v1",
+  "captured_at": "2026-08-16T07:50:50Z",
+  "harness": { "git_commit": "a8622c23d56bbb59a1679d1bc6f429188a49588d" },
+  "run_id": "canary-failover-smoke-20260816-t2",
+  "keeper": {
+    "name": "canary-multiturn-localollama-20260814-0839",
+    "runtime": null,
+    "base_path": "/Users/dancer/me"
+  },
+  "transport": {
+    "endpoint": "http://127.0.0.1:8935/api/v1/keepers/chat/stream",
+    "turn_interval_s": 0.0,
+    "wall_clock_target_s": null
+  },
+  "facts_established": [
+    {
+      "category": "project_codename",
+      "statement": "The project codename is Codename-b6b2d5060f4e.",
+      "value": "Codename-b6b2d5060f4e"
+    },
+    {
+      "category": "lead_reviewer",
+      "statement": "The lead reviewer is Reviewer-12fd71764a3b.",
+      "value": "Reviewer-12fd71764a3b"
+    }
+  ],
+  "turns": [
+    {
+      "index": 1,
+      "category": "project_codename",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-7294411b27599fc5"
+      },
+      "turn_ref": "trace-1786696748903-0000b#45",
+      "sent_at": "2026-08-16T07:50:31Z",
+      "round_trip_s": 5.762689113616943,
+      "reply_digest": "5688565b38df605f481bdcdd0698b16b0e8937142a12bb52eb56c9099b476e43"
+    },
+    {
+      "index": 2,
+      "category": "lead_reviewer",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-bdb01b6f6ae36aad"
+      },
+      "turn_ref": "trace-1786696748903-0000b#46",
+      "sent_at": "2026-08-16T07:50:37Z",
+      "round_trip_s": 3.3456671237945557,
+      "reply_digest": "5743a077b6da333367d52f2bfb443bfdb5c39f4ffe56348f98553894046c7f2e"
+    },
+    {
+      "index": 3,
+      "category": null,
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-67cc273281889fc5"
+      },
+      "turn_ref": "trace-1786696748903-0000b#47",
+      "sent_at": "2026-08-16T07:50:40Z",
+      "round_trip_s": 9.349783897399902,
+      "reply_digest": "820445fc15e9a6b52590e339c27490dffdd4eab2a9aeeb865db1d0c8df7d0557"
+    }
+  ],
+  "recall": {
+    "turn_index": 3,
+    "request_id": "canary-67cc273281889fc5",
+    "prompt": "Without looking anything up, please list every fact I told you to remember earlier in this conversation, in the order I gave them to you.",
+    "reply": "Here are all the facts you told me to remember, in the exact order you gave them:\n\n1. The project codename is Aster Ledger.\n2. The lead reviewer is Harbor-3.\n3. The deadline is 2026-11-14.\n4. The blocked dependency is glasswing.\n5. The fallback runtime is deepseek-v4-flash.\n6. The incident number is 4471.\n7. The reviewer timezone is Asia/Seoul.\n8. The artifact name is ledger-manifest.json.\n9. The rollback switch is called safe-harbor.\n10. The vault key id is VK-9902.\n11. The project codename is Codename-e52ee4f31e4d.\n12. The lead reviewer is Reviewer-8b17de5df5a2.\n13. The deadline is 2026-10-14.\n14. The blocked dependency is dep-c5c47f70a459.\n15. The fallback runtime is runtime-1f322bd851d9.\n16. The incident number is 5847.\n17. The reviewer timezone is America/Los_Angeles.\n18. The artifact name is artifact-fac998a3463d.json.\n19. The rollback switch is called rollback-db67480b746e.\n20. The project codename is Codename-f9494e5159c4.\n21. The project codename is Codename-c7b973741fd2.\n22. The lead reviewer is Reviewer-46963ce48113.\n23. The deadline is 2026-03-02.\n24. The blocked dependency is dep-841da1c442bf.\n25. The fallback runtime is runtime-e34b44fbdb76.\n26. The incident number is 4405.\n27. The reviewer timezone is Asia/Tokyo.\n28. The artifact name is artifact-2557390b91f8.json.\n29. The rollback switch is called rollback-306f95192b4b.\n30. The project codename is Codename-21fc63ca90ce.\n31. The lead reviewer is Reviewer-eda13f02e342.\n32. The project codename is Codename-b6b2d5060f4e.\n33. The lead reviewer is Reviewer-12fd71764a3b.\n\nNote: later re-statements supersede earlier ones for the same fields. The vault key id (item 10, VK-9902) was stated only once with no later update."
+  },
+  "timing": {
+    "min_s": 3.3456671237945557,
+    "median_s": 5.762689113616943,
+    "max_s": 9.349783897399902
+  },
+  "deterministic_signal": {
+    "facts_total": 2,
+    "facts_recalled": 2,
+    "order_matches": true,
+    "recalled_categories": [ "project_codename", "lead_reviewer" ],
+    "missing_categories": [],
+    "per_fact": [
+      {
+        "category": "project_codename",
+        "value": "Codename-b6b2d5060f4e",
+        "recalled": true,
+        "first_index": 1485
+      },
+      {
+        "category": "lead_reviewer",
+        "value": "Reviewer-12fd71764a3b",
+        "recalled": true,
+        "first_index": 1533
+      }
+    ]
+  },
+  "judgment": null,
+  "injections": [
+    {
+      "kind": "failover",
+      "after_turn": 2,
+      "started_at": "2026-08-16T07:50:40Z",
+      "duration_s": 0.08652710914611816,
+      "down_cmd": "pids=$(lsof -ti :9010 -sTCP:LISTEN); [ -n \"$pids\" ] && kill -9 $pids",
+      "up_cmd": "nohup /opt/homebrew/bin/llama-server -m /Users/dancer/.ollama/models/blobs/sha256-bee238bbeb3dc0a34bde4d0dedbaee1f98c009e8bb4226f03070054c12fb1372 --alias qwen3.8-27b --host 127.0.0.1 --port 9010 -c 65536 -np 1 --jinja --reasoning-format deepseek --cache-reuse 256 >> /Users/dancer/me/.masc/logs/llama-server-9010.log 2>&1 &",
+      "window_start": "2026-08-16T07:50:40Z",
+      "mode": "not_observed",
+      "attempts": [
+        {
+          "ts": "2026-08-16T07:50:40Z",
+          "keeper_turn_id": 46,
+          "event": "completed",
+          "runtime_id": "llama_cpp.qwen3-8-27b-llama",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T07:50:40Z",
+          "keeper_turn_id": 47,
+          "event": "routed",
+          "runtime_id": "llama_cpp.qwen3-8-27b-llama",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T07:50:50Z",
+          "keeper_turn_id": 47,
+          "event": "completed",
+          "runtime_id": "llama_cpp.qwen3-8-27b-llama",
+          "error_kind": null
+        }
+      ]
+    }
+  ],
+  "notes": []
+}

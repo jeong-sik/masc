@@ -1,0 +1,1000 @@
+open Alcotest
+open Llm_provider
+module EO = Agent_core.Exact_output
+
+let _load_resolver_snapshot_contract
+  :  ?target_binding_policy:EO.target_binding_policy
+  -> ?catalog:EO.resolver_catalog_input
+  -> unit
+  -> (EO.resolver_snapshot, EO.resolver_snapshot_error) result
+  =
+  EO.load_resolver_snapshot
+;;
+
+let _catalog_input_contract : EO.resolver_catalog_input -> unit = function
+  | EO.Embedded_default
+  | EO.Embedded_with_targets _
+  | EO.Full_replacement _
+  | EO.Full_replacement_file _ -> ()
+[@@warning "+8"]
+;;
+
+let schema =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc [ "name", `Assoc [ "type", `String "string" ] ]
+    ; "required", `List [ `String "name" ]
+    ]
+;;
+
+let message : Types.message =
+  { origin = Llm_provider.Types.Conversation;  role = Types.User
+  ; content = [ Types.Text "return one object" ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let aliases_line = function
+  | [] -> ""
+  | aliases ->
+    Printf.sprintf
+      "aliases = [%s]\n"
+      (String.concat ", " (List.map (Printf.sprintf "%S") aliases))
+;;
+
+let option_line key show = function
+  | None -> ""
+  | Some value -> Printf.sprintf "%s = %s\n" key (show value)
+;;
+
+let toml_float value =
+  let rendered = Printf.sprintf "%.17g" value in
+  if
+    String.contains rendered '.'
+    || String.contains rendered 'e'
+    || String.contains rendered 'E'
+  then rendered
+  else rendered ^ ".0"
+;;
+
+let target_catalog
+      ?(provider = "snapshot-fixture")
+      ?(aliases = [])
+      ?(kind = "openai_compat")
+      ?(base_url = "https://snapshot.example")
+            ?(request_path = "/v1/chat/completions")
+            ?default_model
+      ?(model = "snapshot-model")
+      ?(target = "snapshot-target")
+      ?enable_thinking
+      ?connect_timeout_s
+      ?body_timeout_s
+      ?(json = true)
+      ?(structured = false)
+      ?(price = 1.0)
+      ?(model_extra = "")
+      ()
+  =
+  Printf.sprintf
+    "[[providers]]\n\
+     id = %S\n\
+     %skind = %S\n\
+     base_url = %S\n\
+     request_path = %S\n\
+     auth = \"none\"\n\
+     %s\n\
+     [[models]]\n\
+     model_id = %S\n\
+     provider_name = %S\n\
+     max_context_tokens = 8192\n\
+     max_output_tokens = 1024\n\
+     supports_response_format_json = %b\n\
+     supports_structured_output = %b\n\
+     input_per_million = %s\n\
+     %s\n\
+     [[targets]]\n\
+     id = %S\n\
+     provider_ref = %S\n\
+     model_id = %S\n\
+     %s%s%s"
+    provider
+    (aliases_line aliases)
+    kind
+    base_url
+    request_path
+    (option_line "default_model" (Printf.sprintf "%S") default_model)
+    model
+    provider
+    json
+    structured
+    (toml_float price)
+    model_extra
+    target
+    provider
+    model
+    (option_line "enable_thinking" string_of_bool enable_thinking)
+    (* Every admission-expecting case here reaches [ready] -> [EO.admit], and
+       admission rejects a plan without a body budget (Missing_deadline).
+       Default both budgets the way the flow suite does
+       (test_exact_output_flow.ml), while callers still pass a bare float. *)
+    (option_line "connect_timeout_s" toml_float
+       (Some (Option.value connect_timeout_s ~default:30.0)))
+    (option_line "body_timeout_s" toml_float
+       (Some (Option.value body_timeout_s ~default:30.0)))
+;;
+
+let snapshot contents =
+
+  let overlay : EO.catalog_document =
+    { source = "resolver snapshot fixture"; contents }
+  in
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
+  | Ok snapshot -> snapshot
+  | Error _ -> fail "snapshot should load"
+;;
+
+let admit snapshot id =
+  match EO.admit_target_ref snapshot id with
+  | Ok admitted -> admitted
+  | Error _ -> failf "target ref %S should be admitted" id
+;;
+
+let resolve_admitted admitted =
+  match EO.resolve_target admitted with
+  | Ok target -> target
+  | Error _ -> fail "admitted target should resolve"
+;;
+
+let resolve snapshot id = resolve_admitted (admit snapshot id)
+
+let ready target =
+  let requirement =
+    EO.make_output_requirement ~schema ~minimum_guarantee:EO.Json_syntax
+  in
+  match EO.admit ~target ~messages:[ message ] requirement with
+  | Ok ready -> ready
+  | Error _ -> fail "exact target should admit"
+;;
+
+let attempt ready =
+  match EO.start_attempt ready with
+  | Ok attempt -> attempt
+  | Error (EO.Call_id_generation_failed detail) ->
+    failf "exact attempt identity allocation failed: %s" detail
+;;
+
+let generation snapshot =
+  EO.resolver_catalog_generation snapshot |> EO.catalog_generation_fingerprint
+;;
+
+let evidence snapshot =
+  EO.resolver_catalog_evidence snapshot |> EO.catalog_evidence_sha256
+;;
+
+let identity target = EO.selected_target_identity target |> EO.target_identity_fingerprint
+
+type frozen_observation =
+  { snapshot_generation : string
+  ; snapshot_evidence : string
+  ; selected_generation : string
+  ; selected_evidence : string
+  ; selected_identity : string
+  ; provenance_generation : string
+  ; provenance_evidence : string
+  ; provenance_identity : string
+  ; receipt_generation : string
+  ; receipt_evidence : string
+  ; receipt_identity : string
+  ; plan_fingerprint : string
+  }
+
+let frozen_observation snapshot target =
+  let plan = ready target in
+  let provenance = EO.plan_provenance plan in
+  let receipt = EO.attempt_receipt (attempt plan) in
+  { snapshot_generation = generation snapshot
+  ; snapshot_evidence = evidence snapshot
+  ; selected_generation =
+      EO.selected_target_catalog_generation target |> EO.catalog_generation_fingerprint
+  ; selected_evidence =
+      EO.selected_target_catalog_evidence target |> EO.catalog_evidence_sha256
+  ; selected_identity = identity target
+  ; provenance_generation =
+      EO.plan_provenance_catalog_generation provenance
+      |> EO.catalog_generation_fingerprint
+  ; provenance_evidence =
+      EO.plan_provenance_catalog_evidence provenance |> EO.catalog_evidence_sha256
+  ; provenance_identity =
+      EO.plan_provenance_target_identity provenance |> EO.target_identity_fingerprint
+  ; receipt_generation =
+      EO.receipt_catalog_generation receipt |> EO.catalog_generation_fingerprint
+  ; receipt_evidence = EO.receipt_catalog_evidence receipt |> EO.catalog_evidence_sha256
+  ; receipt_identity =
+      EO.receipt_target_identity receipt |> EO.target_identity_fingerprint
+  ; plan_fingerprint = EO.plan_fingerprint plan
+  }
+;;
+
+let check_observation_is_coherent label observation =
+  check
+    string
+    (label ^ " selected generation")
+    observation.snapshot_generation
+    observation.selected_generation;
+  check
+    string
+    (label ^ " provenance generation")
+    observation.snapshot_generation
+    observation.provenance_generation;
+  check
+    string
+    (label ^ " receipt generation")
+    observation.snapshot_generation
+    observation.receipt_generation;
+  check
+    string
+    (label ^ " selected evidence")
+    observation.snapshot_evidence
+    observation.selected_evidence;
+  check
+    string
+    (label ^ " provenance evidence")
+    observation.snapshot_evidence
+    observation.provenance_evidence;
+  check
+    string
+    (label ^ " receipt evidence")
+    observation.snapshot_evidence
+    observation.receipt_evidence;
+  check
+    string
+    (label ^ " provenance identity")
+    observation.selected_identity
+    observation.provenance_identity;
+  check
+    string
+    (label ^ " receipt identity")
+    observation.selected_identity
+    observation.receipt_identity
+;;
+
+let functional_observation observation =
+  ( observation.snapshot_generation
+  , observation.selected_generation
+  , observation.selected_identity
+  , observation.provenance_generation
+  , observation.provenance_identity
+  , observation.receipt_generation
+  , observation.receipt_identity
+  , observation.plan_fingerprint )
+;;
+
+let string_contains ~haystack ~needle =
+  let haystack_length = String.length haystack in
+  let needle_length = String.length needle in
+  let rec loop offset =
+    offset + needle_length <= haystack_length
+    && (String.sub haystack offset needle_length = needle || loop (offset + 1))
+  in
+  needle_length = 0 || loop 0
+;;
+
+let test_target_enable_thinking_is_typed_frozen_functional_identity () =
+  let absent = snapshot (target_catalog ()) in
+  let disabled = snapshot (target_catalog ~enable_thinking:false ()) in
+  let enabled = snapshot (target_catalog ~enable_thinking:true ()) in
+  let observations =
+    [ "absent", absent, resolve absent "snapshot-target"
+    ; "disabled", disabled, resolve disabled "snapshot-target"
+    ; "enabled", enabled, resolve enabled "snapshot-target"
+    ]
+  in
+  let pairs =
+    [ List.nth observations 0, List.nth observations 1
+    ; List.nth observations 0, List.nth observations 2
+    ; List.nth observations 1, List.nth observations 2
+    ]
+  in
+  List.iter
+    (fun ( (left_label, left_snapshot, left_target)
+         , (right_label, right_snapshot, right_target) ) ->
+       let label = left_label ^ "/" ^ right_label in
+       check
+         bool
+         (label ^ " changes catalog evidence")
+         true
+         (evidence left_snapshot <> evidence right_snapshot);
+       check
+         bool
+         (label ^ " changes target identity")
+         true
+         (identity left_target <> identity right_target);
+       check
+         bool
+         (label ^ " changes catalog generation")
+         true
+         (generation left_snapshot <> generation right_snapshot))
+    pairs;
+  let absent_before =
+    generation absent, evidence absent, identity (resolve absent "snapshot-target")
+  in
+  ignore (resolve disabled "snapshot-target" : EO.selected_target);
+  ignore (resolve enabled "snapshot-target" : EO.selected_target);
+  let absent_after =
+    generation absent, evidence absent, identity (resolve absent "snapshot-target")
+  in
+  check
+    bool
+    "later target-policy snapshots do not mutate the old snapshot"
+    true
+    (absent_before = absent_after);
+
+  let overlay : EO.catalog_document =
+    { source = "non-boolean target enable_thinking"
+    ; contents = target_catalog () ^ "enable_thinking = \"true\"\n"
+    }
+  in
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
+  | Error (EO.Target_catalog_invalid { detail; _ }) ->
+    check
+      bool
+      "non-boolean target enable_thinking is rejected exactly"
+      true
+      (string_contains ~haystack:detail ~needle:"non-boolean enable_thinking")
+  | Ok _ | Error _ -> fail "non-boolean target enable_thinking must fail closed"
+;;
+
+let test_exact_target_id_has_no_alias_or_default () =
+  let snapshot =
+    snapshot
+      (target_catalog ~aliases:[ "snapshot-alias" ] ~default_model:"different-default" ())
+  in
+  ignore (resolve snapshot "snapshot-target" : EO.selected_target);
+  List.iter
+    (fun id ->
+       match EO.admit_target_ref snapshot id with
+       | Error (EO.Target_not_in_catalog unknown) -> check string "exact miss" id unknown
+       | Ok _ | Error _ -> failf "%S must not alias or default to a target" id)
+    [ "snapshot-alias"; "snapshot-fixture"; "different-default" ]
+;;
+
+
+
+let with_temp_catalog contents f =
+  let path = Filename.temp_file "exact-output-full-replacement-" ".toml" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+       Out_channel.with_open_bin path (fun channel ->
+         Out_channel.output_string channel contents);
+       f path)
+;;
+
+let replacement_snapshot contents =
+
+  let document : EO.catalog_document =
+    { source = "in-memory full replacement"; contents }
+  in
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement document) () with
+  | Ok snapshot -> snapshot
+  | Error _ -> fail "full replacement snapshot should load"
+;;
+
+let test_full_replacement_path_is_frozen_and_suppresses_embedded () =
+  let first_contents =
+    target_catalog
+      ~provider:"replacement-a-provider"
+      ~base_url:"https://replacement-a.example"
+      ~model:"replacement-a-model"
+      ~target:"replacement-a-target"
+      ()
+  in
+  let second_contents =
+    target_catalog
+      ~provider:"replacement-b-provider"
+      ~base_url:"https://replacement-b.example"
+      ~model:"replacement-b-model"
+      ~target:"replacement-b-target"
+      ()
+  in
+  with_temp_catalog first_contents
+  @@ fun path ->
+
+  let load () =
+    match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement_file path) () with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "full replacement path should load"
+  in
+  let first_snapshot = load () in
+  let first_handle = admit first_snapshot "replacement-a-target" in
+  let first_expected =
+    frozen_observation first_snapshot (resolve_admitted first_handle)
+  in
+  Out_channel.with_open_bin path (fun channel ->
+    Out_channel.output_string channel second_contents);
+  check
+    bool
+    "first handle remains coherent after source overwrite"
+    true
+    (first_expected = frozen_observation first_snapshot (resolve_admitted first_handle));
+  let second_snapshot = load () in
+  let second_handle = admit second_snapshot "replacement-b-target" in
+  let second_expected =
+    frozen_observation second_snapshot (resolve_admitted second_handle)
+  in
+  Sys.remove path;
+  check
+    bool
+    "first handle remains coherent after source deletion"
+    true
+    (first_expected = frozen_observation first_snapshot (resolve_admitted first_handle));
+  check
+    bool
+    "second handle remains coherent after source deletion"
+    true
+    (second_expected = frozen_observation second_snapshot (resolve_admitted second_handle));
+  check
+    bool
+    "separately loaded file snapshots remain distinct"
+    true
+    (first_expected <> second_expected);
+  let expect_absent snapshot id =
+    match EO.admit_target_ref snapshot id with
+    | Error (EO.Target_not_in_catalog actual) -> check string "exact absence" id actual
+    | Ok _ | Error _ -> failf "%S must not belong to this frozen snapshot" id
+  in
+  expect_absent first_snapshot "replacement-b-target";
+  expect_absent second_snapshot "replacement-a-target";
+  expect_absent first_snapshot "ollama-cloud-minimax-m3-json";
+  expect_absent second_snapshot "ollama-cloud-minimax-m3-json"
+;;
+
+let test_invalid_full_replacement_inputs_fail_without_fallback () =
+
+  let invalid : EO.catalog_document =
+    { source = "invalid full replacement"; contents = "[[providers]" }
+  in
+  (match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement invalid) () with
+   | Error (EO.Catalog_parse_failed { source = EO.Full_replacement_catalog; _ }) -> ()
+   | Ok _ | Error _ -> fail "invalid replacement must not fall back to embedded");
+  let missing_path = Filename.temp_file "missing-exact-output-catalog-" ".toml" in
+  Sys.remove missing_path;
+  match
+    EO.load_resolver_snapshot ~catalog:(EO.Full_replacement_file missing_path) ()
+  with
+  | Error (EO.Catalog_read_failed { path; _ }) ->
+    check string "missing replacement path is preserved" missing_path path
+  | Ok _ | Error _ -> fail "missing replacement file must fail without fallback"
+;;
+
+let test_unbound_target_policy_is_explicit_and_observable () =
+  let valid_target = "bound-target" in
+  let unbound_target = "unbound-target" in
+  let contents =
+    target_catalog ~target:valid_target ()
+    ^ Printf.sprintf
+        "\n[[targets]]\nid = %S\nprovider_ref = \"missing-provider\"\nmodel_id = \"missing-model\"\n"
+        unbound_target
+  in
+
+  let catalog : EO.resolver_catalog_input =
+    EO.Full_replacement
+      { source = "unbound target policy fixture"; contents }
+  in
+  (match EO.load_resolver_snapshot ~catalog () with
+   | Error
+       (EO.Target_binding_missing
+          { target_ref; component = EO.Target_provider }) ->
+     check string "strict target identity" unbound_target target_ref
+   | Error _ -> fail "strict mode returned the wrong target binding failure"
+   | Ok _ -> fail "strict mode must reject an unbound target");
+  let degraded =
+    match
+      EO.load_resolver_snapshot
+        ~target_binding_policy:EO.Exclude_unbound_targets
+        ~catalog
+        ()
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "explicit exclusion mode must preserve bound targets"
+  in
+  ignore (admit degraded valid_target);
+  (match EO.admit_target_ref degraded unbound_target with
+   | Error (EO.Target_not_in_catalog target_ref) ->
+     check string "excluded target is absent" unbound_target target_ref
+   | Error _ -> fail "excluded target returned the wrong admission error"
+   | Ok _ -> fail "unbound target must not be admitted");
+  match EO.resolver_rejected_target_bindings degraded with
+  | [ { target_ref; component = EO.Target_provider } ] ->
+    check string "typed rejected target" unbound_target target_ref
+  | _ -> fail "degraded snapshot must retain one typed binding rejection"
+;;
+
+
+let test_pricing_and_formatting_are_nonfunctional () =
+  let first_contents = target_catalog ~price:1.0 () in
+  let second_contents = target_catalog ~price:999999.0 () in
+  let formatted_contents = "# formatting-only overlay\n\n" ^ first_contents ^ "\n" in
+  let first = snapshot first_contents in
+  let second = snapshot second_contents in
+  let formatted = snapshot formatted_contents in
+  let first_target = resolve first "snapshot-target" in
+  let second_target = resolve second "snapshot-target" in
+  let formatted_target = resolve formatted "snapshot-target" in
+  check
+    string
+    "pricing leaves generation unchanged"
+    (generation first)
+    (generation second);
+  check
+    string
+    "pricing leaves identity unchanged"
+    (identity first_target)
+    (identity second_target);
+  check
+    string
+    "pricing leaves plan fingerprint unchanged"
+    (ready first_target |> EO.plan_fingerprint)
+    (ready second_target |> EO.plan_fingerprint);
+  check bool "pricing remains auditable evidence" true (evidence first <> evidence second);
+  check
+    string
+    "TOML formatting leaves generation unchanged"
+    (generation first)
+    (generation formatted);
+  check
+    string
+    "TOML formatting leaves identity unchanged"
+    (identity first_target)
+    (identity formatted_target);
+  check
+    bool
+    "TOML formatting preserves canonical evidence"
+    true
+    (evidence first = evidence formatted)
+;;
+
+let test_supported_models_order_is_canonical () =
+  let first =
+    snapshot
+      (target_catalog
+         ~model_extra:"supported_models = [\"snapshot-model\", \"secondary-model\"]\n"
+         ())
+  in
+  let reordered =
+    snapshot
+      (target_catalog
+         ~model_extra:"supported_models = [\"secondary-model\", \"snapshot-model\"]\n"
+         ())
+  in
+  let changed =
+    snapshot
+      (target_catalog
+         ~model_extra:"supported_models = [\"snapshot-model\", \"different-model\"]\n"
+         ())
+  in
+  check
+    string
+    "supported_models order leaves generation unchanged"
+    (generation first)
+    (generation reordered);
+  check
+    string
+    "supported_models order leaves canonical evidence unchanged"
+    (evidence first)
+    (evidence reordered);
+  check
+    bool
+    "supported_models value changes canonical evidence"
+    true
+    (evidence first <> evidence changed)
+;;
+
+let test_every_functional_projection_field_changes_generation () =
+  let base = snapshot (target_catalog ()) in
+  let variants =
+    [ "base URL", target_catalog ~base_url:"https://other.example" ()
+    ; "request path", target_catalog ~request_path:"/v1/other" ()
+    ; "connect timeout", target_catalog ~connect_timeout_s:3.5 ()
+    ; "body timeout", target_catalog ~body_timeout_s:9.5 ()
+    ; "capability", target_catalog ~structured:true ()
+    ; ( "document capability"
+      , target_catalog ~model_extra:"supports_document_input = true\n" () )
+    ; "audio capability", target_catalog ~model_extra:"supports_audio_input = true\n" ()
+    ; "assistant prefill admission", target_catalog ~model_extra:"supports_assistant_prefill = false\n" ()
+    ; ( "supported models"
+      , target_catalog ~model_extra:"supported_models = [\"snapshot-model\"]\n" () )
+    ; "codec", target_catalog ~kind:"ollama" ~request_path:"/api/chat" ()
+    ]
+  in
+  List.iter
+    (fun (label, contents) ->
+       let changed = snapshot contents in
+       check
+         bool
+         (label ^ " changes functional generation")
+         true
+         (generation base <> generation changed))
+    variants;
+  let prefill_changed =
+    snapshot (target_catalog ~model_extra:"supports_assistant_prefill = false\n" ()) in
+  check bool "prefill admission changes canonical catalog evidence" true
+    (evidence base <> evidence prefill_changed);
+  check bool "prefill admission changes selected target identity" true
+    (identity (resolve base "snapshot-target")
+     <> identity (resolve prefill_changed "snapshot-target"));
+  check bool "prefill admission change reaches plan fingerprint" true
+    (EO.plan_fingerprint (ready (resolve base "snapshot-target"))
+     <> EO.plan_fingerprint (ready (resolve prefill_changed "snapshot-target")));
+  let endpoint_changed = snapshot (target_catalog ~base_url:"https://other.example" ()) in
+  check
+    bool
+    "functional target change reaches plan fingerprint"
+    true
+    (ready (resolve base "snapshot-target")
+     |> EO.plan_fingerprint
+     <> (ready (resolve endpoint_changed "snapshot-target") |> EO.plan_fingerprint))
+;;
+
+let test_one_fresh_handle_is_immutably_shareable_across_domains () =
+  let snapshot = snapshot (target_catalog ~base_url:"https://shared.example" ()) in
+  let handle = admit snapshot "snapshot-target" in
+  let first_domain =
+    Domain.spawn (fun () -> frozen_observation snapshot (resolve_admitted handle))
+  in
+  let second_domain =
+    Domain.spawn (fun () -> frozen_observation snapshot (resolve_admitted handle))
+  in
+  let first_observation = Domain.join first_domain in
+  let second_observation = Domain.join second_domain in
+  check_observation_is_coherent "shared handle first Domain" first_observation;
+  check_observation_is_coherent "shared handle second Domain" second_observation;
+  check
+    bool
+    "one freshly admitted handle yields identical immutable Domain observations"
+    true
+    (first_observation = second_observation)
+;;
+
+let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
+  let old_snapshot = snapshot (target_catalog ~base_url:"https://old.example" ()) in
+  let new_snapshot = snapshot (target_catalog ~base_url:"https://new.example" ()) in
+  let old_handle = admit old_snapshot "snapshot-target" in
+  let new_handle = admit new_snapshot "snapshot-target" in
+  let expected_old = frozen_observation old_snapshot (resolve_admitted old_handle) in
+  let expected_new = frozen_observation new_snapshot (resolve_admitted new_handle) in
+  let old_domain =
+    Domain.spawn (fun () -> frozen_observation old_snapshot (resolve_admitted old_handle))
+  in
+  let new_domain =
+    Domain.spawn (fun () -> frozen_observation new_snapshot (resolve_admitted new_handle))
+  in
+  let old_domain_observation = Domain.join old_domain in
+  let new_domain_observation = Domain.join new_domain in
+  check
+    bool
+    "immutable handle A crosses a Domain without rebinding"
+    true
+    (old_domain_observation = expected_old);
+  check
+    bool
+    "immutable handle B crosses a Domain without rebinding"
+    true
+    (new_domain_observation = expected_new);
+  check
+    bool
+    "cross-Domain handles preserve distinct whole tuples"
+    true
+    (old_domain_observation <> new_domain_observation);
+  let observe snapshot admitted signal_arrived gate =
+    let target = resolve_admitted admitted in
+    Eio.Promise.resolve signal_arrived ();
+    Eio.Promise.await gate;
+    frozen_observation snapshot target
+  in
+  let old_observation, new_observation =
+    Fun.protect ~finally:(fun () ->
+      Model_catalog.clear_global ();
+      Provider_catalog.clear_global ())
+    @@ fun () ->
+    Eio_main.run
+    @@ fun _env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let old_arrived, signal_old_arrived = Eio.Promise.create () in
+    let new_arrived, signal_new_arrived = Eio.Promise.create () in
+    let gate, open_gate = Eio.Promise.create () in
+    let old_result, resolve_old_result = Eio.Promise.create () in
+    let new_result, resolve_new_result = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      observe old_snapshot old_handle signal_old_arrived gate
+      |> Eio.Promise.resolve resolve_old_result);
+    Eio.Fiber.fork ~sw (fun () ->
+      observe new_snapshot new_handle signal_new_arrived gate
+      |> Eio.Promise.resolve resolve_new_result);
+    Eio.Promise.await old_arrived;
+    Eio.Promise.await new_arrived;
+    Model_catalog.set_global Model_catalog.empty;
+    Provider_catalog.clear_global ();
+    Eio.Promise.resolve open_gate ();
+    Eio.Promise.await old_result, Eio.Promise.await new_result
+  in
+  check_observation_is_coherent "concurrent old" old_observation;
+  check_observation_is_coherent "concurrent new" new_observation;
+  check
+    bool
+    "old selected/provenance/receipt tuple is exactly snapshot A"
+    true
+    (old_observation = expected_old);
+  check
+    bool
+    "new selected/provenance/receipt tuple is exactly snapshot B"
+    true
+    (new_observation = expected_new);
+  check bool "A and B whole tuples differ" true (old_observation <> new_observation)
+;;
+
+let expect_endpoint_error label expected_cause contents =
+
+  let overlay : EO.catalog_document = { source = label; contents } in
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
+  | Error (EO.Target_endpoint_invalid { cause; _ }) ->
+    check bool (label ^ " exact typed cause") true (cause = expected_cause)
+  | Error _ -> fail (label ^ " returned the wrong resolver error class")
+  | Ok _ -> fail (label ^ " must fail closed")
+;;
+
+let test_endpoint_error_cause_table () =
+  let cases =
+    [ "malformed URL", EO.Malformed_base_url, target_catalog ~base_url:"not-a-url" ()
+    ; ( "URL control"
+      , EO.Malformed_base_url
+      , target_catalog ~base_url:"https://snapshot.example\r\nX-Secret: hidden" () )
+    ; ( "URL userinfo"
+      , EO.Base_url_userinfo_not_allowed
+      , target_catalog ~base_url:"https://user:secret@snapshot.example" () )
+    ; ( "URL query"
+      , EO.Base_url_query_not_allowed
+      , target_catalog ~base_url:"https://snapshot.example?token=secret" () )
+    ; ( "URL fragment"
+      , EO.Base_url_fragment_not_allowed
+      , target_catalog ~base_url:"https://snapshot.example#secret" () )
+    ; ( "path dot traversal"
+      , EO.Invalid_request_path
+      , target_catalog ~request_path:"/v1/../secret" () )
+    ; ( "path encoded traversal"
+      , EO.Invalid_request_path
+      , target_catalog ~request_path:"/v1/%2e%2e/secret" () )
+    ; ( "path backslash"
+      , EO.Invalid_request_path
+      , target_catalog ~request_path:"/v1\\secret" () )
+    ; ( "path repeated slash"
+      , EO.Invalid_request_path
+      , target_catalog ~request_path:"/v1//chat" () )
+    ; ( "path query"
+      , EO.Invalid_request_path
+      , target_catalog ~request_path:"/v1/chat?secret=1" () )
+    ; ( "path fragment"
+      , EO.Invalid_request_path
+      , target_catalog ~request_path:"/v1/chat#secret" () )
+    ; ( "path control"
+      , EO.Invalid_request_path
+      , target_catalog ~request_path:"/v1/chat\r\nX-Secret: hidden" () )
+    ; ( "Gemini slash segment"
+      , EO.Invalid_gemini_model_path
+      , target_catalog ~kind:"gemini" ~request_path:"" ~model:"bad/model" () )
+    ; ( "Gemini encoded segment"
+      , EO.Invalid_gemini_model_path
+      , target_catalog ~kind:"gemini" ~request_path:"" ~model:"bad%2Fmodel" () )
+    ]
+  in
+  List.iter
+    (fun (label, cause, contents) -> expect_endpoint_error label cause contents)
+    cases
+;;
+
+let test_caller_headers_fail_closed () =
+  let header_secret = "must-not-appear-in-diagnostic" in
+  let contents =
+    target_catalog () ^ Printf.sprintf "headers = [\"Authorization: %s\"]\n" header_secret
+  in
+
+  let overlay : EO.catalog_document = { source = "caller header"; contents } in
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
+  | Error (EO.Target_catalog_invalid { detail; _ }) ->
+    check
+      bool
+      "rejected caller-header diagnostic omits its value"
+      false
+      (string_contains ~haystack:detail ~needle:header_secret)
+  | Error _ -> fail "caller target headers returned the wrong resolver error class"
+  | Ok _ -> fail "caller target headers must be rejected"
+;;
+
+let expect_collision_error label expected contents =
+
+  let overlay : EO.catalog_document = { source = label; contents } in
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
+  | Error (EO.Catalog_collision collision) ->
+    check bool (label ^ " exact collision") true (collision = expected)
+  | Error _ -> fail (label ^ " returned the wrong resolver error class")
+  | Ok _ -> fail (label ^ " must fail closed")
+;;
+
+let test_collision_and_input_hardening () =
+  let duplicate_target =
+    target_catalog ~provider:"case-provider" ~model:"case-model" ~target:"case-target" ()
+    ^ "\n\
+       [[targets]]\n\
+       id = \"CASE-TARGET\"\n\
+       provider_ref = \"case-provider\"\n\
+       model_id = \"case-model\"\n"
+  in
+  expect_collision_error
+    "target case shadow"
+    EO.Duplicate_target_identity
+    duplicate_target;
+  let hardening_snapshot = snapshot (target_catalog ()) in
+  List.iter
+    (fun malicious ->
+       match EO.admit_target_ref hardening_snapshot malicious with
+       | Error (EO.Target_ref_rejected EO.Invalid_target_ref) -> ()
+       | Ok _ | Error _ ->
+         failf "malicious target ref %S must have the exact typed rejection" malicious)
+    [ "../target"; "target?key=secret"; "target\nheader"; "target/child" ]
+;;
+
+let bare_target_catalog ~serves ~model_id ~scoped ~row_base =
+  Printf.sprintf {|[[providers]]
+id = "native"
+kind = "anthropic"
+base_url = "https://example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+capabilities_base = "anthropic"
+capabilities_base_by_identity_kind = { anthropic = "openai_chat_extended" }
+serves_bare_models = %s
+[[models]]
+model_id = "shared"
+%s
+max_context_tokens = 8192
+max_output_tokens = 1024
+anthropic_thinking_control = "always_adaptive"
+input_per_million = 10.0
+output_per_million = 50.0
+%s
+[[models]]
+model_id = "gpt-foreign"
+base = "openai_chat_extended"
+max_context_tokens = 8192
+max_output_tokens = 1024
+[[targets]]
+id = "bare-target"
+provider_ref = "native"
+model_id = %S
+connect_timeout_s = 30.0
+body_timeout_s = 30.0
+|} (if serves then {|["shared"]|} else "[]")
+    (if row_base then "base = \"anthropic\"" else "")
+    (if scoped then {|[[models]]
+model_id = "shared"
+provider_name = "native"
+max_context_tokens = 4096
+max_output_tokens = 1024
+|} else "") model_id
+;;
+
+let test_native_bare_target_binds_and_freezes () =
+  let frozen = snapshot (bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:false ~row_base:true) in
+  let admitted = admit frozen "bare-target" in
+  let projection = EO.projection_target admitted in
+  check (option int) "native target gets the declared bare context"
+    (Some 8192) projection.capabilities.max_context_tokens;
+  check bool "native target gets the bare thinking policy" true
+    (projection.anthropic_thinking_control = Some Capabilities.Anthropic_always_adaptive);
+  ignore (ready (resolve_admitted admitted));
+  ignore (snapshot (bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:true ~row_base:true));
+  let retained = EO.projection_target admitted in
+  check (option int) "later snapshot does not change frozen bare binding"
+    (Some 8192) retained.capabilities.max_context_tokens
+;;
+
+let test_bare_target_permission_and_exact_identity () =
+  List.iter (fun (serves, model_id) ->
+
+    let catalog = EO.Full_replacement {source = "bare target refusal";
+      contents = bare_target_catalog ~serves ~model_id ~scoped:false ~row_base:true} in
+    match EO.load_resolver_snapshot ~catalog () with
+    | Error (EO.Target_binding_missing {component = EO.Target_model; target_ref}) ->
+      check string "exact refusal target" "bare-target" target_ref
+    | Error _ -> fail "expected a typed missing-model refusal"
+    | Ok _ -> fail "unserved or prefix-only model must not bind")
+    [false, "shared"; true, "shared-undeclared-suffix"; true, "gpt-foreign"]
+;;
+
+let test_scoped_target_absence_shadows_bare_policy () =
+  let frozen = snapshot (bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:true ~row_base:true) in
+  let projection = EO.projection_target (admit frozen "bare-target") in
+  check (option int) "scoped row wins" (Some 4096)
+    projection.capabilities.max_context_tokens;
+  check bool "exact output does not borrow the shadowed bare policy" true
+    (projection.anthropic_thinking_control = None)
+;;
+
+let test_bare_target_does_not_inherit_provider_capability_base () =
+  let contents = bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:false ~row_base:false in
+  let frozen = snapshot contents in
+  let projection = EO.projection_target (admit frozen "bare-target") in
+  let previous = Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Model_catalog.set_global catalog
+    | None -> Model_catalog.clear_global ()) (fun () ->
+    Model_catalog.set_global
+      (Model_catalog.of_toml_string ~source:"same bare target" contents |> Result.get_ok);
+    let config = Provider_config.make ~kind:Anthropic ~provider_id:"native"
+      ~model_id:"shared" ~base_url:"https://example.invalid" () in
+    check bool "bare target never borrows provider tools support" false
+      projection.capabilities.supports_tools;
+    check bool "exact and ordinary request use the same bare capabilities" true
+      (Provider_config.capabilities_for_config_model config = Some projection.capabilities))
+;;
+
+let () =
+  run
+    "exact-output-resolver-snapshot"
+    [ ( "resolver"
+      , [ test_case "native bare binding is frozen" `Quick test_native_bare_target_binds_and_freezes
+        ; test_case "bare permission never relaxes exact model identity" `Quick
+            test_bare_target_permission_and_exact_identity
+        ; test_case "scoped target absence shadows bare policy" `Quick
+            test_scoped_target_absence_shadows_bare_policy
+        ; test_case "bare target does not inherit provider base" `Quick
+            test_bare_target_does_not_inherit_provider_capability_base
+        ; test_case "exact id only" `Quick test_exact_target_id_has_no_alias_or_default
+        ; test_case
+            "full replacement path suppresses embedded"
+            `Quick
+            test_full_replacement_path_is_frozen_and_suppresses_embedded
+        ; test_case
+            "invalid full replacement has no fallback"
+            `Quick
+            test_invalid_full_replacement_inputs_fail_without_fallback
+        ; test_case
+            "unbound target policy is explicit and observable"
+            `Quick
+            test_unbound_target_policy_is_explicit_and_observable
+        ; test_case
+            "pricing and formatting nonfunctional"
+            `Quick
+            test_pricing_and_formatting_are_nonfunctional
+        ; test_case
+            "supported_models canonical order"
+            `Quick
+            test_supported_models_order_is_canonical
+        ; test_case
+            "functional projection sensitivity"
+            `Quick
+            test_every_functional_projection_field_changes_generation
+        ; test_case
+            "target thinking policy is typed and frozen"
+            `Quick
+            test_target_enable_thinking_is_typed_frozen_functional_identity
+        ; test_case
+            "one fresh handle is immutable across Domains"
+            `Quick
+            test_one_fresh_handle_is_immutably_shareable_across_domains
+        ; test_case
+            "old/new whole-tuple Domain and fiber separation"
+            `Quick
+            test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers
+        ; test_case "endpoint exact-cause table" `Quick test_endpoint_error_cause_table
+        ; test_case "caller headers rejected" `Quick test_caller_headers_fail_closed
+        ; test_case
+            "collision and input hardening"
+            `Quick
+            test_collision_and_input_hardening
+        ] )
+    ]
+;;

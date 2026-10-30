@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41172-retry-result-20261005/dashboard
+
+
+ Test Files  4 passed (4)
+      Tests  198 passed (198)
+   Start at  06:27:32
+   Duration  6.30s (tests 51%, import 20%, transform 15%, environment 8%, setup 6%)
+
+    Isolate  4 workers spawned · ~212ms startup each (spawn + environment, per file)
+             at least ~636ms faster with isolate: false — reuses workers across files instead of one per file
+

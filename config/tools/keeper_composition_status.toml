@@ -1,0 +1,42 @@
+name = "keeper_composition_status"
+description = """
+Read the status and structured result of one async Keeper composition.
+
+Use the exact request id when a completion references its result or when more
+detail is needed. A completion that already carries usable selected exports
+does not require another status read. Submission and cancellation requests are
+distinct from completed and cancelled states.
+The top-level status and ok are the original physical worker outcome.
+Read continuation separately for the logical run: observed includes its original
+owner, source Task, journal version and observation time. A non-null resolution
+is an explicit terminal rejection/cancellation of further continuation. Preserve
+the original physical result and do not resume that resolved run. unavailable
+means the logical state could not be confirmed; it is not an unresolved run or
+permission to submit replacement work. not_composition carries no run claim.
+
+waiting_for_dependencies names original typed dependencies (owned_job or
+composition_result) and the retained execution result. Wait for the original
+completion, then use the same prepared draft and composition_run_id only while
+its original logical run remains unresolved and normal admission succeeds.
+The released physical attempt is waiting and has not failed; an explicit logical
+resolution may subsequently terminate its continuation. A successful status read
+is not effect success or Task completion."""
+additional_properties = false
+
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 5 turns needed it across 6317 provider requests, and its
+# 293 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 5 turns and saves the 293 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
+defer_loading = true
+[[params]]
+name = "request_id"
+type = "string"
+required = true
+min_length = 1
+# The request_id param carries no description ON PURPOSE: its input schema
+# must stay byte-identical to the request_id_input_schema this tool built
+# inline before externalization, which test_composition_control_tool_toml
+# pins. Adding `description = "..."` here would put a description in the
+# property and break that pin — revert the addition, do not edit the test.

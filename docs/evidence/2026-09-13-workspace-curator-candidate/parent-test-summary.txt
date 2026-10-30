@@ -1,0 +1,183 @@
+2026-09-12T20:00:32.9763282Z [targeted] test/test_workspace_memory_curator_lane: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:32.9788720Z [targeted] test/test_workspace_memory_curator_lane: start 2026-09-12T20:00:32Z
+2026-09-12T20:00:36.1216764Z Test Successful in 3.111s. 4 tests run.
+2026-09-12T20:00:36.1269347Z [targeted] test/test_workspace_memory_curator_lane: OK in 4s
+2026-09-12T20:00:36.2185767Z [targeted] test/test_server_dashboard_http_keeper_memory_health: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:36.2213712Z [targeted] test/test_server_dashboard_http_keeper_memory_health: start 2026-09-12T20:00:36Z
+2026-09-12T20:00:36.2870040Z Test Successful in 0.031s. 18 tests run.
+2026-09-12T20:00:36.2924228Z [targeted] test/test_server_dashboard_http_keeper_memory_health: OK in 0s
+2026-09-12T20:00:36.3842778Z [targeted] test/test_keeper_memory_os_current: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:36.3869516Z [targeted] test/test_keeper_memory_os_current: start 2026-09-12T20:00:36Z
+2026-09-12T20:00:36.5286004Z Test Successful in 0.110s. 50 tests run.
+2026-09-12T20:00:36.5336667Z [targeted] test/test_keeper_memory_os_current: OK in 0s
+2026-09-12T20:00:36.5903318Z [targeted] test/test_keeper_memory_write: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:36.5928459Z [targeted] test/test_keeper_memory_write: start 2026-09-12T20:00:36Z
+2026-09-12T20:00:36.7217097Z Test Successful in 0.082s. 25 tests run.
+2026-09-12T20:00:36.7272596Z [targeted] test/test_keeper_memory_write: OK in 0s
+2026-09-12T20:00:36.8198204Z [targeted] test/test_workspace_memory_proposals: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:36.8228348Z [targeted] test/test_workspace_memory_proposals: start 2026-09-12T20:00:36Z
+2026-09-12T20:00:36.8382520Z Test Successful in 0.008s. 6 tests run.
+2026-09-12T20:00:36.8409721Z [targeted] test/test_workspace_memory_proposals: OK in 0s
+2026-09-12T20:00:36.8966409Z [targeted] test/test_exact_lane_run_registry: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:36.8993566Z [targeted] test/test_exact_lane_run_registry: start 2026-09-12T20:00:36Z
+2026-09-12T20:00:41.7563469Z Test Successful in 4.800s. 27 tests run.
+2026-09-12T20:00:41.7641410Z [targeted] test/test_exact_lane_run_registry: OK in 5s
+2026-09-12T20:00:41.8578783Z [targeted] test/test_server_standalone_lane_projection: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:41.8607730Z [targeted] test/test_server_standalone_lane_projection: start 2026-09-12T20:00:41Z
+2026-09-12T20:00:41.8964819Z Test Successful in 0.002s. 11 tests run.
+2026-09-12T20:00:41.9001416Z [targeted] test/test_server_standalone_lane_projection: OK in 0s
+2026-09-12T20:00:41.9937025Z [targeted] test/test_runtime_per_keeper_routing: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:41.9965937Z [targeted] test/test_runtime_per_keeper_routing: start 2026-09-12T20:00:41Z
+2026-09-12T20:00:42.2025442Z Test Successful in 0.131s. 56 tests run.
+2026-09-12T20:00:42.2094300Z [targeted] test/test_runtime_per_keeper_routing: OK in 1s
+2026-09-12T20:00:42.3023205Z [targeted] test/test_prompt_registry_defaults: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T20:00:42.3052545Z [targeted] test/test_prompt_registry_defaults: start 2026-09-12T20:00:42Z
+2026-09-12T20:00:42.3677827Z Test Successful in 0.052s. 35 tests run.
+2026-09-12T20:00:42.3720332Z [targeted] test/test_prompt_registry_defaults: OK in 0s
+2026-09-12T20:05:20.6433813Z ok    test_alloc_profile: Test Successful in 0.211s. 9 tests run.
+2026-09-12T20:05:20.6434870Z ok    test_cancel_safe: Test Successful in 0.001s. 5 tests run.
+2026-09-12T20:05:20.6436442Z ok    test_chat_send_checks_the_registry: Test Successful in 0.029s. 2 tests run.
+2026-09-12T20:05:20.6437738Z ok    test_ci_run_tests_script: Test Successful in 14.346s. 6 tests run.
+2026-09-12T20:05:20.6438896Z ok    test_code_address: Test Successful in 0.001s. 19 tests run.
+2026-09-12T20:05:20.6440141Z ok    test_completion_authority_records_verdicts: Test Successful in 0.009s. 2 tests run.
+2026-09-12T20:05:20.6442619Z ok    test_contract_harness_auth_script: Test Successful in 0.040s. 6 tests run.
+2026-09-12T20:05:20.6443540Z ok    test_dispatch_telemetry_gap: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:05:20.6444458Z ok    test_docker_playground_gc_script: Test Successful in 0.862s. 9 tests run.
+2026-09-12T20:05:20.6445423Z ok    test_dune_local_script: Test Successful in 4.195s. 29 tests run.
+2026-09-12T20:05:20.6446195Z ok    test_egress_host: Test Successful in 0.001s. 19 tests run.
+2026-09-12T20:05:20.6446982Z ok    test_egress_proxy_decision: Test Successful in 0.001s. 12 tests run.
+2026-09-12T20:05:20.6447789Z ok    test_egress_proxy_net: Test Successful in 1.590s. 12 tests run.
+2026-09-12T20:05:20.6448586Z ok    test_eio_resource_scope: Test Successful in 0.001s. 4 tests run.
+2026-09-12T20:05:20.6449439Z ok    test_eval_tool_selector_boundary: Test Successful in 0.049s. 3 tests run.
+2026-09-12T20:05:20.6450299Z ok    test_exec_ssh_bootstrap: Test Successful in 0.003s. 3 tests run.
+2026-09-12T20:05:20.6451111Z ok    test_execute_file_artifact: Test Successful in 1.524s. 6 tests run.
+2026-09-12T20:05:20.6451852Z ok    test_file_kind_vocabulary: Test Successful in 0.000s. 3 tests run.
+2026-09-12T20:05:20.6452854Z ok    test_front_door: Test Successful in 0.000s. 8 tests run.
+2026-09-12T20:05:20.6453649Z ok    test_fs_atomic_orphan_sweep_10130: Test Successful in 0.019s. 14 tests run.
+2026-09-12T20:05:20.6454602Z ok    test_fs_compat_append_jsonl_atomicity: Test Successful in 0.071s. 2 tests run.
+2026-09-12T20:05:20.6455572Z ok    test_fs_compat_capability_exact_read: Test Successful in 0.020s. 18 tests run.
+2026-09-12T20:05:20.6456524Z ok    test_fs_compat_capability_write: Test Successful in 0.290s. 50 tests run.
+2026-09-12T20:05:20.6457443Z ok    test_fs_compat_durable_append: Test Successful in 0.037s. 37 tests run.
+2026-09-12T20:05:20.6458255Z ok    test_fs_compat_fd_cache: Test Successful in 0.114s. 8 tests run.
+2026-09-12T20:05:20.6459039Z ok    test_fs_compat_mkdir_memo: Test Successful in 0.002s. 4 tests run.
+2026-09-12T20:05:20.6459963Z ok    test_fs_compat_publication_reconciliation: Test Successful in 0.177s. 29 tests run.
+2026-09-12T20:05:20.6460909Z ok    test_git_fetch_retry_script: Test Successful in 0.019s. 2 tests run.
+2026-09-12T20:05:20.6461695Z ok    test_heap_roots: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:05:20.6462847Z ok    test_ide_memo: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:05:20.6463533Z ok    test_json_field: Test Successful in 0.001s. 14 tests run.
+2026-09-12T20:05:20.6464537Z ok    test_jsonl_day_key: Test Successful in 0.000s. 3 tests run.
+2026-09-12T20:05:20.6465395Z ok    test_keeper_agent_run_sandbox_source: Test Successful in 0.017s. 5 tests run.
+2026-09-12T20:05:20.6466894Z ok    test_keeper_keepalive_launch_order_ast: Test Successful in 0.049s. 6 tests run.
+2026-09-12T20:05:20.6467456Z ok    test_keeper_sandbox_image_contract: Test Successful in 0.003s. 8 tests run.
+2026-09-12T20:05:20.6467975Z ok    test_keeper_toml_accessor_matrix: Test Successful in 0.000s. 7 tests run.
+2026-09-12T20:05:20.6468450Z ok    test_keeper_toml_loader: Test Successful in 0.022s. 4 tests run.
+2026-09-12T20:05:20.6468930Z ok    test_keeper_toml_parser: Test Successful in 0.000s. 2 tests run.
+2026-09-12T20:05:20.6469423Z ok    test_keeper_turn_finish_cancel_protect: Test Successful in 0.011s. 3 tests run.
+2026-09-12T20:05:20.6469944Z ok    test_local_review_script: Test Successful in 3.461s. 4 tests run.
+2026-09-12T20:05:20.6470388Z ok    test_lockfree_atomic: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:05:20.6470792Z ok    test_log_kv: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:05:20.6471190Z ok    test_lsp_position: Test Successful in 0.001s. 3 tests run.
+2026-09-12T20:05:20.6471613Z ok    test_masc_test_runtime: Test Successful in 0.001s. 4 tests run.
+2026-09-12T20:05:20.6472038Z ok    test_mcp_telemetry: Test Successful in 0.000s. 4 tests run.
+2026-09-12T20:05:20.6472845Z ok    test_metric_zero_cell_declaration: Test Successful in 0.000s. 3 tests run.
+2026-09-12T20:05:20.6473323Z ok    test_monotonic_deadline: Test Successful in 0.251s. 7 tests run.
+2026-09-12T20:05:20.6473798Z ok    test_otel_histogram_bucket_labels: Test Successful in 0.000s. 3 tests run.
+2026-09-12T20:05:20.6474544Z ok    test_parse_outcome: Test Successful in 0.001s. 6 tests run.
+2026-09-12T20:05:20.6474995Z ok    test_posix_spawn_process_mgr: Test Successful in 8.192s. 12 tests run.
+2026-09-12T20:05:20.6475451Z ok    test_pr_hygiene_range: Test Successful in 0.760s. 4 tests run.
+2026-09-12T20:05:20.6475873Z ok    test_pr_open_script: Test Successful in 0.484s. 6 tests run.
+2026-09-12T20:05:20.6476292Z ok    test_pr_sync_script: Test Successful in 0.241s. 3 tests run.
+2026-09-12T20:05:20.6477230Z ok    test_release_train_guard_script: Test Successful in 0.590s. 13 tests run.
+2026-09-12T20:05:20.6477703Z ok    test_remote_url_syntax: Test Successful in 0.001s. 14 tests run.
+2026-09-12T20:05:20.6478179Z ok    test_rfc_0085_pr11_deprecation_purge: Test Successful in 12.592s. 6 tests run.
+2026-09-12T20:05:20.6478705Z ok    test_rfc_0085_pr13_underscore_rename: Test Successful in 0.010s. 2 tests run.
+2026-09-12T20:05:20.6479219Z ok    test_rfc_0085_pr14_dispatch_inline: Test Successful in 0.003s. 4 tests run.
+2026-09-12T20:05:20.6479757Z ok    test_rfc_0085_pr16_dashboard_http_core_rename: Test Successful in 0.055s. 2 tests run.
+2026-09-12T20:05:20.6480316Z ok    test_rfc_0085_pr17_dead_purge_and_rename: Test Successful in 0.011s. 4 tests run.
+2026-09-12T20:05:20.6480879Z ok    test_rfc_0085_pr18_execution_surfaces_rename: Test Successful in 0.052s. 2 tests run.
+2026-09-12T20:05:20.6481428Z ok    test_rfc_0085_pr3_server_runtime_paths: Test Successful in 0.024s. 4 tests run.
+2026-09-12T20:05:20.6481962Z ok    test_rfc_0085_pr4_tool_library_proof_store: Test Successful in 0.003s. 2 tests run.
+2026-09-12T20:05:20.6482865Z ok    test_rfc_0085_pr8_config_dir_resolver_host_config: Test Successful in 2.196s. 2 tests run.
+2026-09-12T20:05:20.6483421Z ok    test_rfc_0085_pr9_base_path_opt_purge: Test Successful in 6.479s. 3 tests run.
+2026-09-12T20:05:20.6484951Z ok    test_scheduler_lag: Test Successful in 0.021s. 5 tests run.
+2026-09-12T20:05:20.6485370Z ok    test_shim_clock: Test Successful in 0.051s. 3 tests run.
+2026-09-12T20:05:20.6485900Z ok    test_skill_reference: Test Successful in 0.000s. 8 tests run.
+2026-09-12T20:05:20.6486345Z ok    test_skill_source_config: Test Successful in 0.005s. 11 tests run.
+2026-09-12T20:05:20.6486800Z ok    test_start_masc_script: Test Successful in 14.241s. 37 tests run.
+2026-09-12T20:05:20.6487695Z ok    test_tag_dispatch_typed: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:05:20.6488189Z ok    test_telemetry_gate_handler_detection: Test Successful in 0.224s. 3 tests run.
+2026-09-12T20:05:20.6488657Z ok    test_time_codec: Test Successful in 0.001s. 10 tests run.
+2026-09-12T20:05:20.6489101Z ok    test_tool_call_id_is_not_invented: Test Successful in 0.073s. 6 tests run.
+2026-09-12T20:05:20.6489607Z ok    test_tool_call_log_requeue_on_failure: Test Successful in 0.014s. 2 tests run.
+2026-09-12T20:05:20.6490132Z ok    test_tool_failure_logs_its_arguments: Test Successful in 0.005s. 2 tests run.
+2026-09-12T20:05:20.6490645Z ok    test_tool_name_prefix_boundary: Test Successful in 0.002s. 4 tests run.
+2026-09-12T20:05:20.6491113Z ok    test_tui_approval_detail: Test Successful in 0.001s. 7 tests run.
+2026-09-12T20:05:20.6491548Z ok    test_tui_ask_layout: Test Successful in 0.002s. 13 tests run.
+2026-09-12T20:05:20.6491994Z ok    test_tui_ask_selection_wiring: Test Successful in 2.025s. 11 tests run.
+2026-09-12T20:05:20.6492697Z ok    test_tui_audio_device: Test Successful in 0.004s. 7 tests run.
+2026-09-12T20:05:20.6493116Z ok    test_tui_board_detail: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:05:20.6493979Z ok    test_tui_board_score: Test Successful in 0.000s. 3 tests run.
+2026-09-12T20:05:20.6494411Z ok    test_tui_board_selection: Test Successful in 0.000s. 3 tests run.
+2026-09-12T20:05:20.6494829Z ok    test_tui_browser: Test Successful in 0.001s. 4 tests run.
+2026-09-12T20:05:20.6495230Z ok    test_tui_chart: Test Successful in 0.001s. 9 tests run.
+2026-09-12T20:05:20.6495629Z ok    test_tui_clipboard: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:05:20.6496039Z ok    test_tui_code_lexer: Test Successful in 0.002s. 26 tests run.
+2026-09-12T20:05:20.6496451Z ok    test_tui_composer: Test Successful in 0.001s. 18 tests run.
+2026-09-12T20:05:20.6496905Z ok    test_tui_config_highlight_wiring: Test Successful in 0.134s. 2 tests run.
+2026-09-12T20:05:20.6497397Z ok    test_tui_context_bars: Test Successful in 0.004s. 18 tests run.
+2026-09-12T20:05:20.6497824Z ok    test_tui_credential: Test Successful in 0.001s. 9 tests run.
+2026-09-12T20:05:20.6498232Z ok    test_tui_csi: Test Successful in 0.001s. 16 tests run.
+2026-09-12T20:05:20.6498614Z ok    test_tui_diff: Test Successful in 0.001s. 13 tests run.
+2026-09-12T20:05:20.6499008Z ok    test_tui_editor: Test Successful in 0.004s. 6 tests run.
+2026-09-12T20:05:20.6499404Z ok    test_tui_editor_jump: Test Successful in 0.000s. 7 tests run.
+2026-09-12T20:05:20.6499831Z ok    test_tui_exit_signals: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:05:20.6500244Z ok    test_tui_fetched: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:05:20.6500650Z ok    test_tui_file_icon: Test Successful in 0.001s. 26 tests run.
+2026-09-12T20:05:20.6501056Z ok    test_tui_fit_middle: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:05:20.6501488Z ok    test_tui_footer_status_items: Test Successful in 0.005s. 30 tests run.
+2026-09-12T20:05:20.6501924Z ok    test_tui_frame: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:05:20.6502651Z ok    test_tui_frame_presenter: Test Successful in 0.002s. 21 tests run.
+2026-09-12T20:06:41.9924731Z ok    test_tui_frame_timing: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:06:41.9925871Z ok    test_tui_graphics: Test Successful in 0.002s. 13 tests run.
+2026-09-12T20:06:41.9926608Z ok    test_tui_http_ast: Test Successful in 28.720s. 33 tests run.
+2026-09-12T20:06:41.9927283Z ok    test_tui_image_mosaic: Test Successful in 0.001s. 12 tests run.
+2026-09-12T20:06:41.9928247Z ok    test_tui_image_ref: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:06:41.9928966Z ok    test_tui_keeper_config: Test Successful in 0.002s. 23 tests run.
+2026-09-12T20:06:41.9929697Z ok    test_tui_keeper_selection: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:06:41.9930358Z ok    test_tui_link: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:06:41.9930986Z ok    test_tui_link_label: Test Successful in 0.001s. 9 tests run.
+2026-09-12T20:06:41.9931646Z ok    test_tui_link_preview: Test Successful in 0.017s. 27 tests run.
+2026-09-12T20:06:41.9932510Z ok    test_tui_lru: Test Successful in 0.001s. 9 tests run.
+2026-09-12T20:06:41.9933134Z ok    test_tui_magnitude: Test Successful in 0.000s. 4 tests run.
+2026-09-12T20:06:41.9933774Z ok    test_tui_markdown: Test Successful in 0.004s. 49 tests run.
+2026-09-12T20:06:41.9934510Z ok    test_tui_markdown_render_cache: Test Successful in 0.034s. 11 tests run.
+2026-09-12T20:06:41.9935220Z ok    test_tui_memo: Test Successful in 0.001s. 12 tests run.
+2026-09-12T20:06:41.9935870Z ok    test_tui_mermaid: Test Successful in 0.003s. 38 tests run.
+2026-09-12T20:06:41.9936533Z ok    test_tui_message_layout: Test Successful in 0.030s. 84 tests run.
+2026-09-12T20:06:41.9937297Z ok    test_tui_model_runtime_table: Test Successful in 0.001s. 12 tests run.
+2026-09-12T20:06:41.9937975Z ok    test_tui_paste: Test Successful in 0.159s. 17 tests run.
+2026-09-12T20:06:41.9938740Z ok    test_tui_paste_spill: Test Successful in 0.001s. 9 tests run.
+2026-09-12T20:06:41.9939581Z ok    test_tui_planning_selection: Test Successful in 0.000s. 4 tests run.
+2026-09-12T20:06:41.9940387Z ok    test_tui_pr_ref: Test Successful in 0.000s. 8 tests run.
+2026-09-12T20:06:41.9941172Z ok    test_tui_render_schedule: Test Successful in 0.385s. 58 tests run.
+2026-09-12T20:06:41.9942023Z ok    test_tui_role_label_boundary: Test Successful in 0.001s. 5 tests run.
+2026-09-12T20:06:41.9943492Z ok    test_tui_roster_pane: Test Successful in 0.001s. 17 tests run.
+2026-09-12T20:06:41.9944237Z ok    test_tui_row_wiring: Test Successful in 4.399s. 23 tests run.
+2026-09-12T20:06:41.9944945Z ok    test_tui_rows: Test Successful in 0.009s. 6 tests run.
+2026-09-12T20:06:41.9945710Z ok    test_tui_runtime_config_receipt: Test Successful in 0.000s. 5 tests run.
+2026-09-12T20:06:41.9946444Z ok    test_tui_runtime_config_summary: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:06:41.9947698Z ok    test_tui_scroll: Test Successful in 0.001s. 12 tests run.
+2026-09-12T20:06:41.9948392Z ok    test_tui_send_disposition: Test Successful in 0.000s. 4 tests run.
+2026-09-12T20:06:41.9949142Z ok    test_tui_server_lifecycle: Test Successful in 0.302s. 12 tests run.
+2026-09-12T20:06:41.9949894Z ok    test_tui_shade_layers: Test Successful in 0.000s. 4 tests run.
+2026-09-12T20:06:41.9950611Z ok    test_tui_span: Test Successful in 0.001s. 10 tests run.
+2026-09-12T20:06:41.9951310Z ok    test_tui_table: Test Successful in 0.001s. 9 tests run.
+2026-09-12T20:06:41.9952332Z ok    test_tui_terminal_palette: Test Successful in 0.001s. 8 tests run.
+2026-09-12T20:06:41.9953192Z ok    test_tui_terminal_probe: Test Successful in 0.001s. 20 tests run.
+2026-09-12T20:06:41.9954042Z ok    test_tui_terminal_profile: Test Successful in 0.000s. 3 tests run.
+2026-09-12T20:06:41.9954910Z ok    test_tui_terminal_restore: Test Successful in 0.001s. 10 tests run.
+2026-09-12T20:06:41.9955807Z ok    test_tui_terminal_write_repair: Test Successful in 0.000s. 2 tests run.
+2026-09-12T20:06:41.9956587Z ok    test_tui_theme: Test Successful in 0.001s. 17 tests run.
+2026-09-12T20:06:41.9957313Z ok    test_tui_tool_table: Test Successful in 0.000s. 6 tests run.
+2026-09-12T20:06:41.9958251Z ok    test_tui_turn_rail: Test Successful in 0.002s. 17 tests run.
+2026-09-12T20:06:41.9959056Z ok    test_tui_utf8_input: Test Successful in 0.000s. 7 tests run.

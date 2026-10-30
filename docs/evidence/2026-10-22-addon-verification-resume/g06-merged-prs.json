@@ -1,0 +1,56 @@
+[
+  {
+    "pr": 44838,
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-21T15:01:05Z",
+    "merge_commit_sha": "a12929c8e2016a9cea4b3ba181e6b846391369d3",
+    "head": "4e4ca6a59da720c1e93779aa9d4ae0346e943481",
+    "merged_by": "jeong-sik"
+  },
+  {
+    "pr": 44839,
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-21T15:01:06Z",
+    "merge_commit_sha": "a97350b872928d05d6576ac2fef28b314f9387a3",
+    "head": "8330d3d7890448ec553a606ae8d5df87cbbee563",
+    "merged_by": "jeong-sik"
+  },
+  {
+    "pr": 44843,
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-21T15:01:08Z",
+    "merge_commit_sha": "32bd2c0a163b76fced45c5396dadcb95dd4c3993",
+    "head": "dd89edad4d374db00a1ead5718448abc106293b7",
+    "merged_by": "jeong-sik"
+  },
+  {
+    "pr": 44852,
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-21T15:01:09Z",
+    "merge_commit_sha": "3bccc851a81580b9845bd67fd622952ed93807f4",
+    "head": "8928c34b188f2580a57cd3355fe978e2ff91d047",
+    "merged_by": "jeong-sik"
+  },
+  {
+    "pr": 44868,
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-21T15:01:10Z",
+    "merge_commit_sha": "04d83d06d0f50e57430e4759945e6ff4307c728b",
+    "head": "e6c7521a0b709de79ed8997d204cd5924f395dbb",
+    "merged_by": "jeong-sik"
+  },
+  {
+    "pr": 44869,
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-10-21T15:01:11Z",
+    "merge_commit_sha": "80b7c0b461ac5d708ea03eea0c7ded0871dc3c36",
+    "head": "6716b35d05b242be6c361ba7d5d55146bd407f67",
+    "merged_by": "jeong-sik"
+  }
+]

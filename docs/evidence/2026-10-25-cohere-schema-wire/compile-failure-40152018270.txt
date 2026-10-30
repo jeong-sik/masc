@@ -1,0 +1,21 @@
+Run https://github.com/jeong-sik/masc/actions/runs/40152018270
+Actualbf3f2b64469bf3951bcc54d7fb8538e4044a7d1a; FAILURE beforetests.
+
+test suite	Checkout	2026-10-25T01:48:09.1984027Z
+test suite	Checkout	2026-10-25T01:48:09.1984179Z HEAD is now at bf3f2b64 docs: identify Cohere schema wire repair
+test suite	Test	2026-10-25T01:49:29.2856001Z 203 |       ]
+test suite	Test	2026-10-25T01:49:29.2856276Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T01:49:29.2856276Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T01:49:29.2856786Z   It will remain exhaustive when constructors are added to type Llm_provider__Provider_http_codec.t.
+test suite	Test	2026-10-25T01:49:29.2860937Z 203 |       ]
+test suite	Test	2026-10-25T01:49:29.2861205Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T01:49:29.2861205Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T01:49:29.2861758Z   It will remain exhaustive when constructors are added to type Llm_provider__Capability_vocab.json_schema_dialect.
+test suite	Test	2026-10-25T01:49:39.5196669Z 203 |       ]
+test suite	Test	2026-10-25T01:49:39.5196961Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T01:49:39.5196961Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T01:49:39.5197527Z   It will remain exhaustive when constructors are added to type Llm_provider__Provider_http_codec.t.
+test suite	Test	2026-10-25T01:49:39.5202292Z 203 |       ]
+test suite	Test	2026-10-25T01:49:39.5202555Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T01:49:39.5202555Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T01:49:39.5203138Z   It will remain exhaustive when constructors are added to type Llm_provider__Capability_vocab.json_schema_dialect.

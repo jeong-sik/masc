@@ -1,0 +1,26 @@
+{
+  "head": "aad94bbf3fb90a4600496bf56d7590f02ff385ad",
+  "pr": 35515,
+  "base_pr": 35462,
+  "base_head": "2855bbad1d0775f8f5ee4abfa75331852662b47b",
+  "components": [
+    35501,
+    35511,
+    35510,
+    35516
+  ],
+  "test_run": 34697880885,
+  "release_run": 34697882117,
+  "test_status_at_dispatch_check": "queued",
+  "release_status_at_dispatch_check": "in_progress",
+  "suite_count": 18,
+  "installed_in_live_runtime": true,
+  "review": "direct and independent review; combined capture/retrieval cases preserved",
+  "local_build": false,
+  "test_conclusion": "success",
+  "release_conclusion": "success",
+  "runtime_evidence": "reassessment-aad94/runtime.json",
+  "remote_pr_head_at_reassessment": "3d3c094ab7e83f8985c61a185f6a1052462ae16b",
+  "remote_pr_base_at_reassessment": "main",
+  "note": "Dispatch fields are historical. Installed aad94 and current remote PR head are different; CI evidence is commit-specific."
+}

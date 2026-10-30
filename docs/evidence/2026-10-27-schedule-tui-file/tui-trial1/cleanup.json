@@ -1,0 +1,167 @@
+{
+  "normal_signals_only": true,
+  "forced_kill": false,
+  "errors": [],
+  "tui_pid": 30953,
+  "tui_exit_status": 0,
+  "server_signals": [
+    {
+      "identity": {
+        "pid": 30781,
+        "ppid": 30753,
+        "uid": 502,
+        "start_sec": 1793054362,
+        "start_usec": 535214,
+        "executable": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+        "argv": [
+          "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+          "start",
+          "--base-path",
+          "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-1/workspace",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "58244"
+        ]
+      },
+      "signal_sent": true,
+      "signal": "SIGTERM",
+      "exit_status": null,
+      "scope": "Non-child disappearance cannot establish exit status."
+    }
+  ],
+  "server_pid": 30781,
+  "server_exit_status": 0,
+  "remaining_owned_servers": [],
+  "setup_cli_handles": [
+    {
+      "stage": "init",
+      "pid": 30772,
+      "argv": [
+        "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+        "init",
+        "--base-path",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-1/workspace"
+      ],
+      "started_at": 1793054361.773921,
+      "observation_deadline_unix": 1793054961.293945,
+      "returncode": 0,
+      "timed_out": false,
+      "stdout_stderr_retained": false,
+      "scope": "Owned canonical setup CLI; output withheld including login output.",
+      "observed_at": 1793054362.019619,
+      "current_returncode": 0
+    },
+    {
+      "stage": "promote-owned-image",
+      "pid": 30773,
+      "argv": [
+        "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+        "sandbox-image",
+        "promote",
+        "--base-path",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-1/workspace",
+        "--runtime",
+        "apple_container",
+        "base",
+        "masc-sandbox:general"
+      ],
+      "started_at": 1793054362.022903,
+      "observation_deadline_unix": 1793054961.293945,
+      "returncode": 0,
+      "timed_out": false,
+      "stdout_stderr_retained": false,
+      "scope": "Owned canonical setup CLI; output withheld including login output.",
+      "observed_at": 1793054362.3798149,
+      "current_returncode": 0
+    },
+    {
+      "stage": "mint-owned-admin",
+      "pid": 30780,
+      "argv": [
+        "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+        "login",
+        "--base-path",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-1/workspace",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "58244",
+        "--agent",
+        "tui-probe-admin",
+        "--role",
+        "admin",
+        "--client-env",
+        "TUI_PROBE_ADMIN_TOKEN",
+        "--no-expiry",
+        "--json"
+      ],
+      "started_at": 1793054362.3857448,
+      "observation_deadline_unix": 1793054961.293945,
+      "returncode": 0,
+      "timed_out": false,
+      "stdout_stderr_retained": false,
+      "scope": "Owned canonical setup CLI; output withheld including login output.",
+      "observed_at": 1793054362.524085,
+      "current_returncode": 0
+    }
+  ],
+  "inventory_cli_handles": [
+    {
+      "pid": 30771,
+      "stage": "before-setup",
+      "argv": [
+        "/bin/ps",
+        "-axo",
+        "pid=,uid="
+      ],
+      "returncode": 0,
+      "current_returncode": 0
+    },
+    {
+      "pid": 30950,
+      "stage": "before-TUI",
+      "argv": [
+        "/bin/ps",
+        "-axo",
+        "pid=,uid="
+      ],
+      "returncode": 0,
+      "current_returncode": 0
+    },
+    {
+      "pid": 38250,
+      "stage": "cleanup-before",
+      "argv": [
+        "/bin/ps",
+        "-axo",
+        "pid=,uid="
+      ],
+      "returncode": 0,
+      "current_returncode": 0
+    },
+    {
+      "pid": 38255,
+      "stage": "after-TUI-stop",
+      "argv": [
+        "/bin/ps",
+        "-axo",
+        "pid=,uid="
+      ],
+      "returncode": 0,
+      "current_returncode": 0
+    },
+    {
+      "pid": 38287,
+      "stage": "cleanup-after",
+      "argv": [
+        "/bin/ps",
+        "-axo",
+        "pid=,uid="
+      ],
+      "returncode": 0,
+      "current_returncode": 0
+    }
+  ],
+  "lingering_setup_or_inventory_cli": false
+}

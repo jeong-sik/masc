@@ -1,0 +1,22 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_schedule_tool_wiring.exe test/test_schedule_store.exe test/test_schedule_interval_runner_tick.exe test/test_server_dashboard_http_schedule_actions.exe
+[targeted] test/test_schedule_tool_wiring: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_schedule_tool_wiring: start 2026-10-26T13:33:43Z
+Testing `Schedule_tool_wiring'.
+Test Successful in 0.894s. 55 tests run.
+[targeted] test/test_schedule_tool_wiring: OK in 1s
+[targeted] test/test_schedule_store: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_schedule_store: start 2026-10-26T13:33:44Z
+Testing `Schedule_store'.
+Test Successful in 3.493s. 58 tests run.
+[targeted] test/test_schedule_store: OK in 3s
+[targeted] test/test_schedule_interval_runner_tick: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_schedule_interval_runner_tick: start 2026-10-26T13:33:47Z
+Testing `schedule_interval_runner_tick'.
+Test Successful in 0.033s. 9 tests run.
+[targeted] test/test_schedule_interval_runner_tick: OK in 0s
+[targeted] test/test_server_dashboard_http_schedule_actions: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_server_dashboard_http_schedule_actions: start 2026-10-26T13:33:47Z
+Testing `Server_dashboard_http_schedule_actions'.
+Test Successful in 0.072s. 2 tests run.
+[targeted] test/test_server_dashboard_http_schedule_actions: OK in 1s

@@ -1,0 +1,94 @@
+---
+title: Local AI models
+description: Uncomment the self-hosted provider the seed already ships, and run Keepers, the verifier and the librarian without a cloud key.
+---
+
+A local model server runs Keepers, the verifier and the librarian with no cloud
+token at all.
+
+**This is uncommenting, not authoring.** The `runtime.toml` that `masc init`
+seeds already carries three self-hosted servers, commented out.
+
+| Server | Provider id | In the seed |
+| --- | --- | --- |
+| llama.cpp `llama-server` | `llama_server` | commented, with a measured capability table |
+| vLLM | `vllm` | commented, from the official docs |
+| MLX | `mlx_server` | commented |
+| Ollama (local) | `ollama` | **already live** at `http://localhost:11434` |
+
+If local Ollama is all you want, there is nothing to do: it is the seeded local
+HTTP provider that needs no API key.
+
+The other three are commented for a reason the seed states itself — none of
+those servers exists on a fresh machine, and `enabled = false` is not an option
+here, because the setup wizard walks every declared provider and refuses one
+whose bindings are all disabled ("has no concrete runtime binding").
+
+## Run llama-server
+
+```bash
+llama-server \
+  -m models/qwen-2.5-coder-32b-instruct-q4_k_m.gguf \
+  --port 8080 \
+  --ctx-size 16384 \
+  --n-gpu-layers 99
+```
+
+## Uncomment the block
+
+Find this in `<base-path>/.masc/config/runtime.toml`, drop the `#`, and point
+`endpoint` at the real address. A local server has no API key, so there is no
+`credentials` block.
+
+```toml
+[providers.llama_server]
+display-name = "llama.cpp llama-server"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:8080/v1"
+# An exact-output lane slot on this provider needs a whole-request deadline.
+# connect-timeout-s stops at the response headers, so it does not count.
+exact-body-timeout-s = 1200.0
+
+[providers.llama_server.healthcheck]
+path = "/models"
+```
+
+Set `api-name` to whatever that server reports at `/v1/models`.
+
+## Declare the model, then bind it
+
+Two places. `[models.*]` says what the model is; `[<provider>.<model>]` attaches
+it to this server.
+
+```toml
+[models.qwen-2-5-coder-32b]
+api-name = "qwen-2.5-coder-32b-instruct"
+max-context = 16384
+tools-support = true
+
+[llama_server.qwen-2-5-coder-32b]
+```
+
+The binding table can stay empty. Whether a request is too large for the
+server is the server's verdict; masc sends the composed request and, on a
+refusal, evicts the oldest carried history and asks again.
+
+## Point a role at it
+
+```toml
+# as the workspace default
+[runtime]
+default = "llama_server.qwen-2-5-coder-32b"
+
+# or on the verifier lane alone
+[runtime.exact_output_lanes.verifier_exact]
+slots = ["llama_server.qwen-2-5-coder-32b"]
+```
+
+A slot's provider must declare `exact-body-timeout-s`. A save that adds a slot
+without it is refused; at boot such a slot is left out of its lane and the
+runtime startup report names the lane, the slot and the provider.
+
+The installer probes `healthcheck.path` while configuring, so a server that is
+not up shows as `not running` in the wizard rather than failing quietly later.
+The full schema is in [Configuration](/reference/config/).

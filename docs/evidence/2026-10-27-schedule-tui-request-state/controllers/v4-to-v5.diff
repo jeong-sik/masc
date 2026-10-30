@@ -1,0 +1,136 @@
+--- owned_tui_request_state_v4.py
++++ owned_tui_request_state_v5.py
+@@ -41,6 +41,7 @@
+ FIXTURE_SHA = 'ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd'
+ AUTHORITY_SOURCE_BINDINGS = {'bin/main_eio.ml': {'bytes': 220221, 'sha256': '107443640cec4d076a9c67d33c8ef4207fd94ab95b024fb27a60a0952e6d6ae3'}, 'lib/server/server_runtime_bootstrap.ml': {'bytes': 95871, 'sha256': '70b89b1637c5a57425626d89746279ad6bb9c6c1905ca3bada6efbe6813ddcd1'}, 'lib/server/server_bootstrap_http.ml': {'bytes': 16029, 'sha256': '003594554846ddd2c7f293aaff6531c8512ea910ad27f99ed2d96b6b71056057'}, 'lib/server/server_request_authority.ml': {'bytes': 16197, 'sha256': '46644bc6bf21f338c5a0585b01432c13e5037b990a35ffbbf507892d020eecfb'}, 'lib/config/env_config_core.ml': {'bytes': 29711, 'sha256': '550081ed2f0279101b53faf2740afd2435f5b333c556bccda9dd3a51dfa28026'}, 'lib/config/config_boot_overrides.ml': {'bytes': 1297, 'sha256': 'ae3c03ea7dd01e9273d0f89d50c6dd2ac6277465b73698636c4947ef917996df'}, 'lib/config/keeper_runtime_setting_registry.ml': {'bytes': 42929, 'sha256': 'b55309eb63365d9ab20b34588037e94f8593e3c1411ebada8eb092024c82062e'}, 'lib/keeper_runtime/keeper_runtime_config.ml': {'bytes': 23229, 'sha256': '5f7f7da0bec077867674d6824cb7b621e91485897e39b7098bdcab4b3bd4d884'}, 'docs/KEEPER-IDENTITY-MANUAL.md': {'bytes': 9394, 'sha256': '5bac70fe374820f52a4dab4dcaf226ef9c11a9aa0156186f33400716083f06b0'}}
+ AUTHORITY_SOURCE_BINDINGS['lib/server/server_routes_http_runtime.ml'] = {'bytes': 72498, 'sha256': '0019203a8e2ccf44768aed74fe65bcf56c9728a299b3e631cf715bec206d9d74'}
++READINESS_SOURCE_BINDINGS = {'bin/masc_tui_local_read_observation.ml': {'bytes': 10608, 'sha256': 'af1b7b6e59af6933226c756ac0ff0baaf8f8c42cfff802bfa5beeef957260857'}, 'bin/masc_tui_local_read_observation.mli': {'bytes': 3991, 'sha256': '9a6edeaaaaa44e18089ed3b7708274cf027e51d3fce488c52e65bc6947370e99'}, 'bin/masc_tui_observation_store.ml': {'bytes': 4290, 'sha256': 'e359407b0ee3c19cb8680ea6422f4a1deb6cd2db775bfb107b2ffa2836207492'}, 'bin/masc_tui_startup_observation.ml': {'bytes': 6455, 'sha256': '9cc84b1f1ff262e28d628c26470c9e7fb5eb3e777dd6ff568c3568594256a61b'}, 'bin/masc_tui_input_reader.ml': {'bytes': 28456, 'sha256': '4a9939b715ee4518e48a3b4155c321250843c9edb212de7ab4769488c919092d'}, 'bin/masc_tui_loader.ml': {'bytes': 85699, 'sha256': 'cce541a19ce37d5c74a1186fccc5359c1994ad723b20c8f5179b6128b2adc88d'}, 'bin/masc_tui_palette.ml': {'bytes': 22083, 'sha256': 'ba5d899a043ed97f74e7d71fb6bebc63c769c4bb90345c05965f15130e5093f6'}, 'bin/masc_tui.ml': {'bytes': 1857848, 'sha256': '0b23150f665b9f0831332019abcb6b6ff67650e8186a68265b3d6cfa06f0c90b'}, 'bin/masc_tui_types.ml': {'bytes': 1024106, 'sha256': '481643071b300594df770385095b02946cfc09f40becdcb69c5cc821c05c1ade'}, 'lib/masc_log/log.ml': {'bytes': 44269, 'sha256': 'dd15b0fcbc4243bbeec4ff4856cb75827f4e3e9c9483debd9a22094ab0043853'}}
+ MAX_CAPTURE = 8 * 1024 * 1024  # existing qualify.py measurement envelope, not a runtime gate
+ DROP = {'authorization','cookie','set-cookie','token','access_token','refresh_token',
+         'chat_control_token','interrupt_token','mcp_session_id','bearer_token'}
+@@ -297,6 +298,91 @@
+             sock.close()
+ 
+ 
++def initial_input_readiness(base, tui_pid):
++    """Existing structured state-application facts, never terminal text/paint."""
++    log_root=base/'.masc/logs/tui'
++    if not log_root.exists():return None
++    sessions=[p for p in log_root.iterdir() if p.name.startswith('session-'+str(tui_pid)+'-')]
++    if not sessions:return None
++    if len(sessions)!=1 or sessions[0].is_symlink() or not sessions[0].is_dir():
++        raise Incomplete('owned TUI structured session identity ambiguous')
++    session=sessions[0];records=[];inputs=[]
++    for path in sorted(session.glob('system_log_*.jsonl')):
++        if path.is_symlink() or not path.is_file():raise Incomplete('TUI log is not an owned regular file')
++        raw=path.read_bytes();complete=raw.rsplit(b'\n',1)[0] if b'\n' in raw else b''
++        inputs.append({'path':str(path),'observed_prefix_bytes':len(raw),
++            'observed_prefix_sha256':hashlib.sha256(raw).hexdigest(),
++            'scope':'Snapshot prefix of live append-only log; full private log not copied.'})
++        for line_no,line in enumerate(complete.splitlines(),1):
++            try:record=json.loads(line)
++            except (ValueError,UnicodeError):raise Incomplete('complete structured TUI log line malformed')
++            if not isinstance(record,dict) or type(record.get('seq')) is not int:
++                raise Incomplete('structured TUI log sequence unavailable')
++            records.append((record['seq'],path,line_no,record))
++    records.sort(key=lambda row:row[0])
++    if len({row[0] for row in records})!=len(records):raise Incomplete('structured TUI sequence duplicated')
++    initialized=False;captures={};startup=None
++    def selected(seq,path,line_no,event):
++        return {'seq':seq,'path':str(path),'line':line_no,'event':event}
++    def nanoseconds(value):
++        if not isinstance(value,str) or not value.isascii() or not value.isdigit():
++            raise Incomplete('TUI semantic timestamp malformed')
++        return int(value)
++    for seq,path,line_no,record in records:
++        if record.get('source')!='structured':continue
++        details=record.get('details')
++        if isinstance(details,dict) and details.get('event')=='tui_observation_store':
++            if details.get('phase')=='initialized' and details.get('pid')==tui_pid and details.get('directory')==str(session):
++                initialized=True
++        if record.get('module')!='Transport':continue
++        message=record.get('message')
++        if not isinstance(message,str):continue
++        if message.startswith('tui_local_read='):
++            try:event=json.loads(message[len('tui_local_read='):])
++            except ValueError:raise Incomplete('local-read semantic JSON malformed')
++            if not isinstance(event,dict) or event.get('schema')!='masc.tui-local-read-observation/v2':
++                raise Incomplete('local-read semantic schema unavailable')
++            capture=event.get('capture_id');phase=event.get('phase')
++            if not isinstance(capture,str):raise Incomplete('local-read capture identity unavailable')
++            if phase=='requested' and event.get('pid')==tui_pid and event.get('source')=='keepers':
++                if capture in captures:raise Incomplete('local-read requested identity duplicated')
++                captures[capture]={'requested':selected(seq,path,line_no,event)}
++            elif capture in captures and phase in ['ui_admission','ui_application','retired']:
++                if phase=='retired':raise Incomplete('initial Keeper application was retired before readiness')
++                expected='accepted' if phase=='ui_admission' else 'applied'
++                if event.get('outcome')!=expected:raise Incomplete('initial Keeper admission/application not successful')
++                if phase in captures[capture]:raise Incomplete('local-read semantic phase duplicated')
++                captures[capture][phase]=selected(seq,path,line_no,event)
++        elif message.startswith('tui_startup_observation='):
++            try:event=json.loads(message[len('tui_startup_observation='):])
++            except ValueError:raise Incomplete('startup semantic JSON malformed')
++            if not isinstance(event,dict) or event.get('pid')!=tui_pid:continue
++            caller=event.get('caller_observed')
++            if isinstance(caller,dict) and caller.get('value')!='returned':
++                raise Incomplete('initial terminal capture did not return successfully')
++            if event.get('phase')=='capabilities_applied':
++                applied=event.get('capabilities_applied');decoder=event.get('decoder_installed_ns')
++                if not isinstance(applied,dict) or not isinstance(caller,dict):
++                    raise Incomplete('startup application lacks decoder/caller facts')
++                if not (nanoseconds(event.get('dispatched_ns'))<=nanoseconds(decoder)<=
++                        nanoseconds(applied.get('at_ns'))<=nanoseconds(event.get('observed_ns'))):
++                    raise Incomplete('startup semantic ordering mismatch')
++                startup=selected(seq,path,line_no,{k:event[k] for k in
++                    ['phase','pid','dispatched_ns','observed_ns','decoder_installed_ns','capabilities_applied','caller_observed']})
++    if not initialized or startup is None:return None
++    for capture,facts in captures.items():
++        if 'ui_admission' not in facts or 'ui_application' not in facts:continue
++        ordered=[facts[key] for key in ['requested','ui_admission','ui_application']]
++        if not (ordered[0]['seq']<ordered[1]['seq']<ordered[2]['seq']):
++            raise Incomplete('Keeper application semantic sequence mismatch')
++        stamps=[nanoseconds(row['event'].get('at_ns')) for row in ordered]
++        if stamps!=sorted(stamps):raise Incomplete('Keeper application semantic time ordering mismatch')
++        return {'tui_pid':tui_pid,'session':str(session),'capture_id':capture,
++            'keeper_read':ordered,'startup':startup,'inputs':inputs,'observed_at':time.time(),
++            'scope':'Existing same-PID Keeper state apply and terminal decoder/capability apply before first key; not specific Keeper membership, usable input or paint proof. Later target GET remains required.'}
++    return None
++
++
+ def main():
+     parser=argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--source-root',type=Path,required=True)
+@@ -319,10 +405,10 @@
+     if output.exists() or not output.is_relative_to(repo/'artifacts'):raise Incomplete('new owned artifact output required')
+     if not math.isfinite(args.observation_deadline_unix) or args.observation_deadline_unix<=time.time():raise Incomplete('finite future observation deadline required')
+     inputs=[server_bin,tui_bin,native/'artifact.zip',native/'artifact/receipt.json',native/'identity-verification.json',repo/'scripts/lane-addons/qualify.py',repo/'scripts/fixtures/release-evidence/runtime.toml']
+-    for relative,bound in AUTHORITY_SOURCE_BINDINGS.items():
++    for relative,bound in {**AUTHORITY_SOURCE_BINDINGS,**READINESS_SOURCE_BINDINGS}.items():
+         path=repo/relative
+         if path.stat().st_size!=bound['bytes'] or sha(path)!=bound['sha256']:
+-            raise Incomplete('frozen request-identity source binding mismatch: '+relative)
++            raise Incomplete('frozen controller prerequisite source binding mismatch: '+relative)
+         inputs.append(path)
+     bindings=[file_identity(p) for p in inputs]
+     if sha(repo/'scripts/lane-addons/qualify.py')!=QQUALIFY_SHA or sha(repo/'scripts/fixtures/release-evidence/runtime.toml')!=FIXTURE_SHA:raise Incomplete('canonical helper or boot fixture changed')
+@@ -645,9 +731,10 @@
+         lifecycle_boundary('before-TUI')
+         tui_args=[str(tui_bin),'--base-path',str(base),'--port',str(relay.port),'--workspace','owned-tui-'+uuid.uuid4().hex,'--refresh','2','--reasoning','hidden']
+         remaining()
++        tui_env={**env,'MASC_LOG_ROUTINE_LEVEL':'info'} # existing routine diagnostics; only TUI child
+         tui_pid,master=pty.fork()
+         if tui_pid==0:
+-            try:os.chdir(base);os.execve(str(tui_bin),tui_args,env)
++            try:os.chdir(base);os.execve(str(tui_bin),tui_args,tui_env)
+             except BaseException:os._exit(127) # child cannot enter parent cleanup
+         resize(120,40)
+         drained={'bytes':0};hasher=hashlib.sha256()
+@@ -663,6 +750,8 @@
+         drain_thread=threading.Thread(target=drain,daemon=True);drain_thread.start()
+         save('tui-process.json',{'pid':tui_pid,'argv':tui_args,'relay_port':relay.port,'pty_output':'drained without storing/parsing text; byte/hash diagnostic only'})
+         wait_for(initial_tui_health)
++        readiness=wait_for(lambda:initial_input_readiness(base,tui_pid))
++        save('first-input-readiness.json',readiness)
+         first_input=input_bytes('palette-select-A',(':keeper '+names[0]+'\r').encode());first_page=target(names[0],first_input)
+         check('TUI received accepted one-shot whose exact occurrence remains pending',
+               any(row['schedule_id']==pending_id and (row.get('keeper_queue_evidence') or {}).get('projection_status')=='matched_pending'

@@ -1,0 +1,236 @@
+{
+  "schema": "masc.goal.read-scope.controls-preparation.review-response.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T19:53:49.722281+00:00",
+  "verdict": "AGREE_PASS_SCOPED_PREPARATION_SOURCE_AND_RECORDED_INPUTS_RESULTS_SEPARATE",
+  "scope": "Bounded response to the full14401B preparation review, complete9665B driver/plan/launch manifest, exact candidate and selected recorded inputs. No actual109-original outcome audit, effect verdict, application or new execution is performed.",
+  "review_input": {
+    "label": "../masc-goal-read-scope-controls-preparation-review-20261026-v1/review.json",
+    "bytes": 14401,
+    "sha256": "47768658d8ed8f6b1e27ec1ea4a8b7120562ea7e3e49d096607369864605658d",
+    "read_in_full": true
+  },
+  "identity": {
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "managed_source_baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "candidate_bytes": 9182,
+    "candidate_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "worktree_head_before_overlay_commit": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+    "candidate_binding": "Exact uncommitted0dc overlay9182B, not committed577/428e bytes and not a new native build. Frozen3e/75c identity is a prepared binding, not this reviewer’s fresh runtime health observation.",
+    "configured_slot": "glm-coding.glm-5.3-flash",
+    "requested_API_model": "glm-5.3-flash",
+    "reported_model_unverified_here": true,
+    "launch_six_sources_bytes_and_hashes_match": true
+  },
+  "adjudication": [
+    {
+      "axis": "Actual recorded inputs",
+      "decision": "AGREE_PASS_PREPARATION",
+      "basis": "Both65-line JSONL files decode completely. Their two actual-command rows equal the saved subprocess receipts, at lines1 and65 with exitsN0/7 andP0/0. The other63 rows are explicitly excluded diagnostic padding, not fabricated command executions. Four small Python commands are recorded; this response does not rerun or independently witness those processes."
+    },
+    {
+      "axis": "Page-boundary layout",
+      "decision": "AGREE_PASS_LAYOUT_ONLY",
+      "basis": "The judge-labelled record starts at byte20436, beyond the source-derived default20000-byte ceiling. This proves prepared placement, not that an eventual model uses the default request, sees a clipped body or reads the tail. A targeted range or sufficiently large actual reply could validly contain both records; no full-file requirement is introduced."
+    },
+    {
+      "axis": "N/P/R declared metrics",
+      "decision": "AGREE_PRESERVED",
+      "basis": "N/P count the two actual recipient-labelled records with exit0; both indexes deliberately claim2 and can disagree withN raw data. R explicitly measures that reported integer2 itself and excludes raw exits/tail/reruns. N raw7 therefore is not a reason to rejectR. The labels are unblinded finite fixtures, not real image-delivery or external-acceptance behavior."
+    },
+    {
+      "axis": "No oracle verdict or new product gate",
+      "decision": "AGREE",
+      "basis": "The selected submit source sends only title/metric/target through normal Goal upsert and reported_value/evidence through measurement, then normal request_complete. Expected outcomes stay in private dispatch/correlation diagnostics, not a fake verdict or lookup response. Two recipients and2of2 are fixture declarations, not a Keeper call budget or generic acceptance gate."
+    },
+    {
+      "axis": "Mutation ownership and inherited helpers",
+      "decision": "AGREE_STATIC_SELECTED_PATH",
+      "basis": "Driver roots/operators are rebound to the fresh private run. Exclusive output/source directories and one normal request per newN/P/R Goal prevent a silent whole-submit replay. The selected submit path does not change primary Goal/Task/Board, old76 inputs or the159 replay. All six launch sources match their frozen hashes; selected apply_prompts and checked_health definitions were read without importing or invoking them."
+    },
+    {
+      "axis": "Normal overlay and runtime identity",
+      "decision": "DESIGN_CHECK_ONLY",
+      "basis": "Existing helper source applies the two sections through the normal authenticated isolated prompt API and later checks effective sections, exact base/binary and singleton admitted Flash lane. These are designed checks, not live results of this response. Source files, managed75c baseline, uncommitted0dc prompt and frozen3e executable remain distinct."
+    }
+  ],
+  "recorded_input_checks": [
+    {
+      "control": "N",
+      "file_bytes": 20763,
+      "sha256": "257d56f1da94b08f311be41588e8068f6b772bccb428a34a953bd9c78dc3f387",
+      "total_lines": 65,
+      "actual_record_lines": [
+        1,
+        65
+      ],
+      "second_record_offset_0_based": 20436,
+      "diagnostic_padding_rows": 63,
+      "command_receipt_equal": true,
+      "recorded_exits": [
+        0,
+        7
+      ],
+      "reported_passed": 2,
+      "expected_only": "proof_refuted"
+    },
+    {
+      "control": "P",
+      "file_bytes": 20763,
+      "sha256": "acb9492e80948b81fd24d5601013f33593169f915c7b950601cd97612dbc9832",
+      "total_lines": 65,
+      "actual_record_lines": [
+        1,
+        65
+      ],
+      "second_record_offset_0_based": 20436,
+      "diagnostic_padding_rows": 63,
+      "command_receipt_equal": true,
+      "recorded_exits": [
+        0,
+        0
+      ],
+      "reported_passed": 2,
+      "expected_only": "proof_proven"
+    }
+  ],
+  "R_boundary": {
+    "metric": "공유 Goal playground 상대 read-scope-data/N/index.json의 reported_passed 정수 자체를 측정한다. 보고값 자체가 측정 대상이며 연결된 실제 명령의 exit_code나 파일 뒷부분 관측 확인 또는 재실행은 이 metric의 조건이 아니다.",
+    "target": "정확히 2",
+    "observed_reported_value": "2",
+    "expected_only": "proof_proven",
+    "no_outcome_inferred": true
+  },
+  "preserved_properties": [
+    "One common returned source may support multiple declared observations; no separate-file or separate-call requirement.",
+    "Partial reading may suffice when the necessary observations are in the returned portion.",
+    "Reported-value metrics retain their exception from undeclared raw-proof/rerun requirements.",
+    "Declared aggregation remains allowed; this finite preparation is not a new arbitrary multi-run arithmetic audit.",
+    "No timeout/cap, permission/schema change, lifecycle gate or additional human approval is introduced."
+  ],
+  "readiness_failure_and_reconciliation": {
+    "recorded_history": "The later operator reconciliation records an initial health GET refusal, apply-prompts failing on its first catalog GET before any prompt POST, and submit failing in pre-submit health before submission-directory/Goal mutation. It explicitly names the parent dependency-ordering error.",
+    "source_consistency": "The selected source orders catalog GET before prompt writes and checked_health before submit directory/source copies or Goal calls, consistent with those recorded early exits.",
+    "evidence_limit": "This response reads the saved operator recovery/reconciliation records. Initial stderr was observed in conversation output and not separately frozen as an original file; zero earlier POST/mutation and same-process recovery are not independently re-observed here.",
+    "phase_separation": "These setup failures are not model judgment failures. The later normal API application/submission and109-original actual cohort are separate phases; neither clean readiness nor actual outcomes are inferred from preparation PASS.",
+    "input_bindings": [
+      {
+        "label": "controls/startup-readiness-recovery.json",
+        "bytes": 302,
+        "sha256": "3309caeedee227310d622266666741d33c47e2b40295104151a8080df5707131"
+      },
+      {
+        "label": "controls/parent-readiness-reconciliation.json",
+        "bytes": 951,
+        "sha256": "f1eba8757a3f2fab202a359fe432d1f602cc4c49f653db39e25799ba8218f02d"
+      }
+    ]
+  },
+  "honesty_and_remaining_limits": [
+    "Plan prepared_unexecuted describes preparation time, not a claim that no later cohort occurred. Parent reports a later109-original run under separate audit; this response does not open or judge that result.",
+    "The actual cohort must independently bind copied current fixture bytes, effective prompt, provider inputs, returned Tool content/ranges, structured verdict/ACK and persisted states. The submit function does not freshly compare copied files against plan hashes; current prepared bytes matched here, but future/current wire binding is not inferred.",
+    "A correct expected verdict alone would not prove that the necessary second record was actually seen. Actor/state/delivery-path general sufficiency is not established by this preparation.",
+    "Operator/judge are labels on small Python command records. These controls do not execute actual image delivery, external fitness acceptance, project build or Docker grading and cannot by themselves resolve the originalA3/A7 behavior/proof gaps.",
+    "The earlier159 replay’s actual APPROVE and independent A3/A7 proof-sufficiency FAIL remain immutable; no retrospective improvement is credited.",
+    "No new full original11 behavior proof, primary3067 Goal update/confirmation, model-weight independence, causal A/B, reliability rate, current-head build, formal GitHub approval, whole-stack admission, merge or production installation is established."
+  ],
+  "selected_input_receipts": [
+    {
+      "label": "masc-goal-read-scope-controls-20261026.py",
+      "bytes": 9665,
+      "sha256": "023cd80b386536e719e929845864c7e7bd0c55b9a31af2837f44927cb069797a"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/plan-private.json",
+      "bytes": 5071,
+      "sha256": "65e1ff9ef3bd02672535dbe308f2c5c6083233151bef1012033d05987fe88beb"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/launch-inputs-private.json",
+      "bytes": 1039,
+      "sha256": "ffda570c3408c36e6fe0c00169623199fc52e278aadb8e17fe0843cd4e32e388"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/candidate-prompt.md",
+      "bytes": 9182,
+      "sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/N-recorded-observations.jsonl",
+      "bytes": 20763,
+      "sha256": "257d56f1da94b08f311be41588e8068f6b772bccb428a34a953bd9c78dc3f387"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/P-recorded-observations.jsonl",
+      "bytes": 20763,
+      "sha256": "acb9492e80948b81fd24d5601013f33593169f915c7b950601cd97612dbc9832"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/N-recorded-commands-private.json",
+      "bytes": 1045,
+      "sha256": "7a3c153429f9094909a3e7a3ceb814ac60de7574f2eeefeb8979f1f806a70f7c"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/P-recorded-commands-private.json",
+      "bytes": 1045,
+      "sha256": "e17893493c7cc9bcbe6bd2ee6f9df0670463a6790d4edcc80aa4889434338ed7"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/N-producer-index.json",
+      "bytes": 215,
+      "sha256": "73ae0374c18fec667b1876a4f8746b0342a1c06a29623a3877d3833280492bd9"
+    },
+    {
+      "label": "masc-goal-read-scope-controls-3e0d-20261026/P-producer-index.json",
+      "bytes": 215,
+      "sha256": "306f8af48f5cf437e9aed7664492fc1e5639db36b88265553ac96c99c767a237"
+    }
+  ],
+  "launch_source_bindings": [
+    {
+      "name": "masc-goal-read-scope-controls-20261026.py",
+      "bytes": 9665,
+      "sha256": "023cd80b386536e719e929845864c7e7bd0c55b9a31af2837f44927cb069797a"
+    },
+    {
+      "name": "masc-goal-declared-aggregate-control-20261026.py",
+      "bytes": 8191,
+      "sha256": "f169f09d39825acca30f7179d8dab8d1fb17cc87fc1dae35e6e1d66ef2d44b21"
+    },
+    {
+      "name": "masc-goal-proof-provenance-controls-20261026.py",
+      "bytes": 13498,
+      "sha256": "27eddedaa65bede3cd6b9e6bc13404f420db6a00ccf81e1c6d8ef3b5e1c09b98"
+    },
+    {
+      "name": "masc-goal-required-originals-negative-20261026.py",
+      "bytes": 8813,
+      "sha256": "0f541215675151c4efa45b2c271417aaee30e854289d38b41a5fee49a87c33d9"
+    },
+    {
+      "name": "canary.py",
+      "bytes": 23079,
+      "sha256": "a60067e9d5d3ba8c6ce194056db0754f49171a68b4715d821f9c7193fab89830"
+    },
+    {
+      "name": "wire_proxy.py",
+      "bytes": 5021,
+      "sha256": "9ec19df518e28d16cb0bfb42a843115b4b820db4384a7787cd8ab517eca3bf60"
+    }
+  ],
+  "findings": {
+    "new_P0": [],
+    "new_P1": [],
+    "new_P2": [],
+    "decision": "Agree with the preparation review within its stated source/recorded-input boundary; actual109 outcomes remain outside this response."
+  },
+  "effects": {
+    "API_Git_model_test_process_CI_build_Docker_Board_calls": 0,
+    "Task_Goal_source_PR_runtime_existing_artifact_mutations": 0,
+    "driver_helper_import_or_execution": 0,
+    "new_agents": 0,
+    "formal_review_or_merge_posts": 0,
+    "only_new_output": "response.json in the requested external response directory"
+  }
+}

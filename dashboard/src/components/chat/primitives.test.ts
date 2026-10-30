@@ -1,0 +1,4768 @@
+// @vitest-environment jsdom
+
+import { html } from 'htm/preact'
+import { render, options } from 'preact'
+import { useContext } from 'preact/hooks'
+import { fireEvent, waitFor } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ChatBlock, KeeperByteAttachment, KeeperConversationEntry } from '../../types'
+import type { ToolCallEntry } from '../../api/dashboard'
+import {
+  CHAT_COMPOSER_COMMAND_HEADER_SUFFIX,
+  CHAT_COMPOSER_DROP_PLACEHOLDER,
+  ChatComposer,
+  ChatTranscript,
+  THINKING_TRACE_PREVIEW_CHARS,
+  autonomousToolSummary,
+  _resetTraceCardOpenChoicesForTests,
+  type ChatComposerSendPayload,
+} from './primitives'
+import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
+import { chatHistoryEntriesFromRest, appendThreadEntry, mergeServerHistoryEntries, keeperThreads, isDefaultVisibleConversationEntry } from '../../keeper-state'
+import { parseTextToChatBlocks } from '../../lib/chat-blocks'
+import { operationDeliveryProvenance } from '../../keeper-delivery-provenance'
+import { collectAttachments } from './attachments'
+import { lookupExactToolOutput, recordToolCallOutputs as recordBulkToolCallOutputs, resetToolCallOutputs, type ExactToolOutputState } from '../../tool-call-output-store'
+import { fetchBoardPost } from '../../api/board'
+import { normalizeFusionPanel } from '../../lib/fusion-meta'
+
+const { exactFixtureOutputs } = vi.hoisted(() => ({ exactFixtureOutputs: new Map<string, ExactToolOutputState>() }))
+vi.mock('../../tool-call-output-store', async importOriginal => {
+  const original = await importOriginal<typeof import('../../tool-call-output-store')>()
+  return { ...original,
+    lookupExactToolOutput: (keeper: string | null | undefined, executionId: string | null | undefined): ExactToolOutputState => {
+      // The fixture publisher updates this signal with its exact evidence.
+      // Reading it preserves the real store's reactive subscription contract.
+      void original.toolCallOutputsByIdentity.value
+      return exactFixtureOutputs.get(JSON.stringify([keeper, executionId])) ?? { kind: 'idle' }
+    },
+    resetToolCallOutputs: () => { exactFixtureOutputs.clear(); original.resetToolCallOutputs() },
+  }
+})
+function recordVerifiedToolCallOutputs(entries: ToolCallEntry[]): void {
+  for (const entry of entries) exactFixtureOutputs.set(JSON.stringify([entry.keeper, entry.execution_id]), { kind: 'loaded', entry })
+  recordBulkToolCallOutputs(entries)
+}
+
+// Renderer fixtures explicitly supply already-resolved exact evidence. The real lookup's
+// authorization, duplicate and async races run in tool-output-lookup.test.ts.
+vi.mock('./tool-output-lookup', async importOriginal => {
+  const original = await importOriginal<typeof import('./tool-output-lookup')>()
+  return { ...original, useToolOutputLookup: (executionId: string | null | undefined) => {
+    const keeper = useContext(original.KeeperToolOutputScope)
+    const state = lookupExactToolOutput(keeper, executionId)
+    const output = state.kind === 'loaded' ? state.entry : null
+    return { ref: { current: null }, output, state,
+      retry: () => {},
+    }
+  } }
+})
+
+vi.mock('./attachments', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./attachments')>(),
+  collectAttachments: vi.fn(),
+}))
+
+vi.mock('../../api/board', () => ({
+  fetchBoardPost: vi.fn(),
+}))
+
+export let mockTranscribeCallback: ((text: string) => void) | null = null
+vi.mock('./voice-input', () => ({
+  voiceInputSupported: () => true,
+  useVoiceInput: ({ onTranscribed }: any) => {
+    mockTranscribeCallback = onTranscribed
+    return {
+      state: 'idle',
+      supported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+    }
+  },
+}))
+
+// Macrotask turns with the microtask queue drained between them, rather than a
+// fixed window. A render scheduled from an effect scheduled from a render has
+// landed by then, and none of it is a bet on how much CPU this worker got --
+// which is what the fixed window was, and what lost one run in three under the
+// full parallel suite (#35032).
+//
+// Three, because two is what these files need: measured over the seven files
+// this shape appears in, one turn leaves two cases failing and two turns pass
+// all 202. The third is the margin.
+const flushUi = (): Promise<void> =>
+  (async () => {
+    for (let turn = 0; turn < 3; turn += 1) {
+      await new Promise((resolve) => { setTimeout(resolve, 0) })
+    }
+  })()
+
+
+function makeFileList(files: File[]): FileList {
+  const list = [...files] as unknown as FileList
+  Object.defineProperties(list, {
+    length: { value: files.length },
+    item: { value: (index: number) => files[index] ?? null },
+  })
+  return list
+}
+
+function setInputFiles(input: HTMLInputElement, files: File[]): void {
+  Object.defineProperty(input, 'files', {
+    configurable: true,
+    value: makeFileList(files),
+  })
+}
+
+function dataTransferWith(files: File[]): DataTransfer {
+  return { files: makeFileList(files) } as DataTransfer
+}
+
+function toolEntry(
+  overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id'>,
+): KeeperConversationEntry {
+  const providerId = overrides.toolCallId
+    ?? (overrides.id.startsWith('tool-') ? overrides.id.slice('tool-'.length) : null)
+  return {
+    role: 'tool',
+    source: 'tool_result',
+    label: 'keeper_context_status',
+    text: '{}',
+    rawText: '{}',
+    timestamp: '2026-03-24T00:00:00.000Z',
+    delivery: 'history',
+    streamState: null,
+    details: null,
+    error: null,
+    toolCallId: providerId,
+    executionId: overrides.executionId ?? (providerId ? `exec-${providerId}` : null),
+    ...overrides,
+  }
+}
+
+function toolCallOutput(overrides: Partial<ToolCallEntry> & Pick<ToolCallEntry, 'tool_use_id'>): ToolCallEntry {
+  return {
+    ts: 0,
+    keeper: 'sangsu',
+    tool: 'keeper_context_status',
+    input: {},
+    output: 'context window ok',
+    wire_outcome: 'ok',
+    duration_ms: 12,
+    execution_id: overrides.execution_id ?? `exec-${overrides.tool_use_id}`,
+    ...overrides,
+  }
+}
+
+function entry(
+  overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id' | 'text'>,
+): KeeperConversationEntry {
+  const { id, text, ...rest } = overrides
+  return {
+    id,
+    role: 'user',
+    source: 'direct_user',
+    label: '사용자',
+    text,
+    rawText: rest.rawText ?? text,
+    timestamp: '2026-03-24T00:00:00.000Z',
+    delivery: 'history',
+    streamState: null,
+    details: null,
+    error: null,
+    ...rest,
+  }
+}
+
+// Turn-timeline collapse choices are module state by design: they outlive
+// the transcript unmount that switching keepers causes. Clear them between
+// cases so no test inherits another's toggle.
+beforeEach(() => {
+  _resetTraceCardOpenChoicesForTests()
+})
+
+describe('ChatTranscript', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    resetToolCallOutputs()
+  })
+
+  it('renders a loading state instead of the empty card while hydrating with zero entries', () => {
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${[]} emptyText="empty" hydrating=${true} />`, container)
+    expect(container.querySelector('[data-chat-transcript-loading]')?.getAttribute('aria-busy')).toBe('true')
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${[]} emptyText="empty" hydrating=${false} />`, container)
+    expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+    expect(container.querySelector('[data-chat-transcript-empty]')?.textContent).toContain('empty')
+  })
+
+  it('surfaces tool output joined by execution_id in the collapsed preview', () => {
+    recordVerifiedToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_x', output: 'context window 42%' })])
+    render(
+      html`<${ChatTranscript} keeperName="sangsu"
+        entries=${[toolEntry({ id: 'tool-toolu_x' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble).not.toBeNull()
+    // No-argument tool (`{}`): the collapsed glance shows the result, not args.
+    expect(bubble?.textContent).toContain('context window 42%')
+    // Success status marker is rendered in the header.
+    expect(bubble?.textContent).toContain('✓')
+  })
+
+  it('renders a typed external-effect wait as an actionable status, not assistant prose', () => {
+    const originalHash = window.location.hash
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'gate-wait-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            blocks: [{ t: 'status', kind: 'external_effect_pending' }],
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_pending"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('승인 요청됨')
+    expect(status?.textContent).toContain('승인 요청 ID가 없어')
+    expect(status?.textContent).not.toContain('External effect is awaiting')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
+
+    const openGate = Array.from(status?.querySelectorAll('button') ?? [])
+      .find(button => button.textContent?.includes('전체 승인 목록'))
+    expect(openGate).toBeDefined()
+    fireEvent.click(openGate!)
+    expect(window.location.hash).toBe('#approvals')
+    window.location.hash = originalHash
+  })
+
+  it('renders the live turn outcome before the persisted status block arrives', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'gate-wait-live',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: { turnOutcome: 'external_effect_pending' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_pending"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('승인 요청됨')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
+  })
+
+  it('renders a connector-delivered outcome as a terminal status, not assistant prose', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'connector-done-live',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: { turnOutcome: 'external_effect_completed' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('커넥터로 답변 완료')
+    expect(status?.textContent).toContain('해당 채널에서 확인')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
+  })
+
+  it('names the dashboard as the delivery target instead of claiming a connector', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'dashboard-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'analyst',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: { kind: 'dashboard' },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('dashboard')
+    expect(status?.textContent).toContain('대시보드에 게시 완료')
+    expect(status?.textContent).not.toContain('Slack/Discord')
+  })
+
+  it('names the Slack thread destination on a threaded delivery target', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'slack-thread-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'exampleorg',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: {
+                kind: 'slack',
+                channelId: 'C09TK9L4DV4',
+                threadTs: '1786524720.554309',
+              },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('slack')
+    expect(status?.textContent).toContain('Slack으로 답변 완료')
+    expect(status?.textContent).toContain('C09TK9L4DV4')
+    expect(status?.textContent).toContain('스레드로 전송')
+  })
+
+  it('names the Discord channel destination on a discord delivery target', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'discord-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: { kind: 'discord', channelId: 'D-123' },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('discord')
+    expect(status?.textContent).toContain('Discord로 답변 완료')
+    expect(status?.textContent).toContain('D-123')
+  })
+
+  it('renders a typed continuation checkpoint as durable status, not assistant prose', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'continuation-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            blocks: [{ t: 'status', kind: 'continuation_checkpoint' }],
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="continuation_checkpoint"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('이어가기 예약됨')
+    expect(status?.textContent).toContain('다음 주기에 이어서')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
+  })
+
+  it('keeps the exact approval destination through persisted history hydration', () => {
+    const approvalId = 'appr_01exact'
+    const restored = chatHistoryEntriesFromRest('echo', [{
+      id: 'durable-approval-request', role: 'system', content: '', ts: 1_780_000_000,
+      delivery_provenance: {
+        delivery_key: { kind: 'approval_lifecycle', approval_id: approvalId },
+        transcript_slot: { kind: 'approval_request' },
+      },
+      delivery_provenance_status: 'valid',
+      approval_lifecycle: { approval_id: approvalId, phase: 'requested', tool_name: 'Execute' },
+    }])
+    const live = entry({
+      id: 'live-approval', role: 'system', text: '',
+      approvalLifecycle: { approvalId, phase: 'requested', toolName: 'Execute', artifactSha256: null },
+    })
+    for (const entries of [[live], restored]) {
+      render(html`<${ChatTranscript} entries=${entries} emptyText="empty" variant="messenger" />`, container)
+      const link = container.querySelector<HTMLAnchorElement>('[data-chat-approval-id] a')
+      expect(link?.getAttribute('href')).toBe('#approvals?approval=appr_01exact')
+      expect(new URL(link!.href).hash).toBe('#approvals?approval=appr_01exact')
+      render(null, container)
+    }
+  })
+
+  it('renders approval resolution, replay, and continuation as distinct typed cards', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'approval-resolved',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '승인됨 · Execute',
+            approvalLifecycle: {
+              approvalId: 'appr_01typed',
+              toolName: 'Execute',
+              phase: 'resolved_approved',
+              artifactSha256: null,
+            },
+          }),
+          entry({
+            id: 'approval-continuation',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '승인 후 후속 작업 이어가기 기록됨 · Execute',
+            approvalLifecycle: {
+              approvalId: 'appr_01typed',
+              toolName: 'Execute',
+              phase: 'continuation_recorded',
+              artifactSha256: null,
+            },
+          }),
+          entry({
+            id: 'approval-replayed',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '승인 작업 적용 완료 · Execute',
+            approvalLifecycle: {
+              approvalId: 'appr_01typed',
+              toolName: 'Execute',
+              phase: 'replay_applied',
+              artifactSha256: 'a'.repeat(64),
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const resolved = container.querySelector('[data-chat-approval-lifecycle="resolved_approved"]')
+    const replayed = container.querySelector('[data-chat-approval-lifecycle="replay_applied"]')
+    const continued = container.querySelector('[data-chat-approval-lifecycle="continuation_recorded"]')
+    expect(resolved?.textContent).toContain('외부 효과는 아직 적용 확인 전')
+    expect(replayed?.textContent).toContain('승인된 작업이 적용')
+    expect(replayed?.textContent).toContain('aaaaaaaaaaaa')
+    expect(continued?.textContent).toContain('후속 작업을 이어갔습니다')
+    expect(container.querySelectorAll('[data-chat-approval-id="appr_01typed"]')).toHaveLength(3)
+  })
+
+  it('renders a failed continuation as its own typed card', () => {
+    // #32956: the turn that received the replay failed after the provider
+    // answered. The card says so and says the approval is not re-delivered.
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'approval-continuation-failed',
+            role: 'system',
+            source: 'system',
+            label: 'System',
+            text: '',
+            approvalLifecycle: {
+              approvalId: 'appr_02failed',
+              toolName: 'Execute',
+              phase: 'continuation_failed',
+              artifactSha256: null,
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const failed = container.querySelector('[data-chat-approval-lifecycle="continuation_failed"]')
+    expect(failed).not.toBeNull()
+    expect(failed?.textContent).toContain('이어가기 실패')
+    expect(failed?.textContent).toContain('승인 결과를 받은 턴이 실패')
+    expect(failed?.textContent).toContain('다시 전달하지 않습니다')
+    expect(failed?.textContent).toContain('appr_02failed')
+  })
+
+  it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
+    const text = 'Keeper request failed: Internal error: [masc_agent_core_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'err-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '응답을 만들지 못했습니다',
+            rawText: '응답을 만들지 못했습니다',
+            delivery: 'request_failure',
+            error: text,
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    // Typed failure card: discriminated by the row's delivery/kind signal,
+    // never by matching the content string.
+    const card = container.querySelector('[data-chat-failure-card]')
+    expect(card).not.toBeNull()
+    // The raw internal error no longer replaces the reply: the card leads
+    // with the reassurance that the pending message survives the failure.
+    expect(card?.querySelector('[data-chat-failure-reassurance]')?.textContent)
+      .toContain('정상 응답하기 전까지')
+    // Diagnostic detail is collapsed by default…
+    expect(container.querySelector('[data-chat-failure-detail]')).toBeNull()
+    expect(card?.textContent).not.toContain('no_usable_progress')
+    // …and expands to the preformatted token view on demand.
+    const toggle = card?.querySelector('[data-chat-failure-detail-toggle]') as HTMLButtonElement
+    toggle.click()
+    await flushUi()
+    const pre = container.querySelector('[data-chat-failure-detail]')
+    expect(pre?.tagName).toBe('PRE')
+    expect(pre?.classList.contains('chat-error-text')).toBe(true)
+    expect(pre?.textContent).toContain('ollama_cloud.deepseek-v4-flash')
+    expect(Array.from(pre?.querySelectorAll('.chat-error-token') ?? []).some(node =>
+      node.textContent?.includes('ollama_cloud.deepseek-v4-flash'),
+    )).toBe(true)
+    expect(container.querySelector('[data-chat-blocks]')).toBeNull()
+  })
+
+  it('keeps generic client errors distinct from durable transport failures', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'client-error-user',
+            text: '내 질문은 계속 보여야 해',
+            delivery: 'error',
+            error: 'queue poll lost its delivery receipt',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="client-error-user"]')
+    expect(bubble?.textContent).toContain('내 질문은 계속 보여야 해')
+    expect(bubble?.textContent).toContain('queue poll lost its delivery receipt')
+    expect(bubble?.querySelector('[data-chat-failure-card]')).toBeNull()
+  })
+
+  it('exposes entry provenance as rendered attributes and surface links', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'discord-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'channel reply',
+            rawText: 'channel reply',
+            turnRef: 'trace-ui#9',
+            streamContract: {
+              source: 'backend_stream_lifecycle',
+              status: 'backend_lifecycle_replay',
+              turnRef: 'trace-ui#9',
+              eventName: 'RUN_FINISHED',
+              lifecycleEvents: [
+                'RUN_STARTED',
+                'TEXT_MESSAGE_START',
+                'TEXT_MESSAGE_END',
+                'RUN_FINISHED',
+              ],
+              reason: 'history row records durable server stream lifecycle replay',
+            },
+            surface: {
+              kind: 'discord',
+              guild_id: 'guild-1',
+              channel_id: 'channel-1',
+              thread_id: 'thread-1',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="discord-1"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-source')).toBe('direct_assistant')
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('discord')
+    expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-ui#9')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
+    expect(bubble.getAttribute('data-chat-stream-contract-turn-ref')).toBe('trace-ui#9')
+    expect(bubble.getAttribute('data-chat-stream-contract-event')).toBe('RUN_FINISHED')
+    expect(bubble.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe(
+      'RUN_STARTED,TEXT_MESSAGE_START,TEXT_MESSAGE_END,RUN_FINISHED',
+    )
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      'history row records durable server stream lifecycle replay',
+    )
+    const surfaceLink = bubble.querySelector('a[href="https://discord.com/channels/guild-1/thread-1"]')
+    expect(surfaceLink?.textContent).toContain('Discord Thread')
+    expect(surfaceLink?.getAttribute('title')).toContain('guild_id=guild-1')
+    expect(surfaceLink?.getAttribute('title')).toContain('thread_id=thread-1')
+  })
+
+  it('badges the agent surface with the sender, never the viewer', () => {
+    // A row projected into another keeper's transcript carries the agent
+    // surface. The origin badge must name the keeper that actually spoke
+    // (speaker_name), never assert the row is the viewer's own (#28813).
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'projected-1',
+            role: 'user',
+            source: 'direct_user',
+            speakerName: 'keeper-code-reviewer-agent',
+            speakerAuthority: 'external',
+            text: 'fleet announcement',
+            rawText: 'fleet announcement',
+            surface: { kind: 'agent' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="projected-1"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('agent')
+
+    // Pin the origin badge by class so the assertion fails when the badge
+    // disappears and cannot be perturbed by message content that happens to
+    // contain the same words.
+    const badge = bubble.querySelector('.kw-src-badge.origin-agent')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toBe('keeper-code-reviewer-agent')
+  })
+
+  it('renders connector speaker and route context for gate history rows', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'gate-user',
+            text: 'hello from discord',
+            speakerId: '98791450001',
+            speakerName: 'Minsu',
+            speakerAuthority: 'external',
+            conversationId: 'discord:guild-1:channel:1514586257706061834',
+            externalMessageId: '1498985300729172039',
+            surface: {
+              kind: 'gate',
+              label: 'discord',
+              address: {
+                connector: 'discord',
+                workspace_id: '1514586257706061834',
+                external_message_id: '1498985300729172039',
+              },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="gate-user"]') as HTMLElement
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('gate')
+    expect(bubble.getAttribute('data-chat-speaker-id')).toBe('98791450001')
+    expect(bubble.getAttribute('data-chat-speaker-name')).toBe('Minsu')
+    expect(bubble.getAttribute('data-chat-conversation-id')).toBe(
+      'discord:guild-1:channel:1514586257706061834',
+    )
+    expect(bubble.getAttribute('data-chat-external-message-id')).toBe('1498985300729172039')
+    expect(bubble.textContent).toContain('Gate: discord')
+    expect(bubble.textContent).toContain('Minsu')
+    const chips = [...bubble.querySelectorAll('[data-chat-meta-chip]')]
+    expect(chips.some(chip => chip.getAttribute('title')?.includes('workspace_id=1514586257706061834'))).toBe(true)
+    expect(chips.some(chip => chip.getAttribute('title')?.includes('speaker_id=98791450001'))).toBe(true)
+    expect(chips.some(chip => chip.getAttribute('title')?.includes('external_message_id=1498985300729172039'))).toBe(true)
+  })
+
+  it('exposes interrupted stream reconciliation as a no-receipt contract gap', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'assistant-interrupted',
+            text: 'partial answer',
+            role: 'assistant',
+            source: 'direct_assistant',
+            delivery: 'interrupted',
+            streamState: null,
+            error: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+            streamContract: {
+              source: 'client_stream_failure',
+              status: 'contract_gap',
+              reason: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="assistant-interrupted"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('interrupted')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('client_stream_failure')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('contract_gap')
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
+    )
+  })
+
+  it('renders REST replay failure and no-turn-ref gaps as visible stream contract badges', async () => {
+    const entries = chatHistoryEntriesFromRest('sangsu', [
+      {
+        id: 'smoke-legacy-user',
+        role: 'user',
+        content: 'legacy row without turn ref',
+        ts: 1_780_000_000,
+        source: 'discord',
+        surface: { kind: 'gate', label: 'discord', address: { workspace_id: 'chan-1' } },
+        conversation_id: 'discord:guild-1:channel:chan-1',
+        external_message_id: 'msg-1',
+        speaker_id: 'user-1',
+        speaker_name: 'Minsu',
+        speaker_authority: 'external',
+        stream_contract: {
+          source: 'keeper_chat_store',
+          status: 'history_without_turn_ref',
+          reason: 'history row has no durable turn_ref; cannot join stream events',
+        },
+      },
+      {
+        id: 'smoke-legacy-assistant-no-turn',
+        role: 'assistant',
+        content: 'assistant row without turn ref',
+        ts: 1_780_000_002,
+        source: 'direct_assistant',
+        conversation_id: 'discord:guild-1:channel:chan-1',
+        speaker_name: 'sangsu',
+        stream_contract: {
+          source: 'keeper_chat_store',
+          status: 'history_without_turn_ref',
+          reason: 'history row has no durable turn_ref; cannot join stream events',
+        },
+      },
+      {
+        id: 'smoke-error-assistant',
+        role: 'request_failure',
+        content: 'Keeper request failed: Timeout after 630.0s',
+        ts: 1_780_000_001,
+        turn_ref: 'trace-chat-contract-smoke#8',
+        stream_contract: {
+          source: 'backend_stream_lifecycle',
+          status: 'backend_lifecycle_replay',
+          turn_ref: 'trace-chat-contract-smoke#8',
+          event_name: 'RUN_ERROR',
+          lifecycle_events: [
+            'RUN_STARTED',
+            'RUN_ERROR',
+          ],
+          reason: 'history row records durable server stream lifecycle replay',
+        },
+      },
+    ])
+
+    render(
+      html`<${ChatTranscript}
+        entries=${entries}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const legacy = container.querySelector('[data-chat-entry-id="smoke-legacy-user"]') as HTMLElement
+    expect(legacy).not.toBeNull()
+    expect(legacy.getAttribute('data-chat-stream-contract-source')).toBe('keeper_chat_store')
+    expect(legacy.getAttribute('data-chat-stream-contract-status')).toBe('history_without_turn_ref')
+    // A missing turn_ref is the normal state of every user row (persisted at
+    // request-accept time, before the turn exists), so the badge is
+    // suppressed there — the contract attributes still render for debugging.
+    expect(legacy.getAttribute('data-chat-stream-contract-badge-state')).toBeNull()
+    expect(legacy.querySelector('[data-chat-stream-contract-badge]')).toBeNull()
+
+    // On assistant rows the same status still marks a real join gap and
+    // renders the badge.
+    const legacyAssistant = container.querySelector('[data-chat-entry-id="smoke-legacy-assistant-no-turn"]') as HTMLElement
+    expect(legacyAssistant).not.toBeNull()
+    expect(legacyAssistant.getAttribute('data-chat-stream-contract-badge-state')).toBe('no-turn-ref')
+    const noTurnBadge = legacyAssistant.querySelector('[data-chat-stream-contract-badge]')
+    expect(noTurnBadge?.textContent).toContain('턴 연결 없음')
+    expect(noTurnBadge?.getAttribute('title')).toContain('conversation_id=discord:guild-1:channel:chan-1')
+    expect(noTurnBadge?.getAttribute('title')).toContain('speaker_name=sangsu')
+
+    const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
+    expect(failure).not.toBeNull()
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('request_failure')
+    expect(failure.getAttribute('data-chat-turn-ref')).toBe('trace-chat-contract-smoke#8')
+    expect(failure.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
+    expect(failure.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
+    expect(failure.getAttribute('data-chat-stream-contract-event')).toBe('RUN_ERROR')
+    expect(failure.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe('RUN_STARTED,RUN_ERROR')
+    expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
+    expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 replay')
+    // transport_failure renders the typed card, so the raw diagnostic is
+    // collapsed by default (the legacy banner is suppressed for card rows)
+    // and surfaces only on expand.
+    const errCard = failure.querySelector('[data-chat-failure-card]')
+    expect(errCard).not.toBeNull()
+    expect(failure.textContent).not.toContain('Timeout after 630.0s')
+    const errToggle = errCard?.querySelector('[data-chat-failure-detail-toggle]') as HTMLButtonElement
+    errToggle.click()
+    await flushUi()
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent).toContain('Timeout after 630.0s')
+  })
+
+  it('keeps completed media visible when failed history is reloaded', async () => {
+    const imageSrc = '/api/v1/media/retained-image';
+    const audioSrc = '/api/v1/voice/audio/retained-audio';
+    const entries = chatHistoryEntriesFromRest('sangsu', [{
+      id: 'failed-with-output',
+      role: 'request_failure',
+      content: 'Keeper request failed: provider disconnected after media',
+      ts: 1_780_000_001,
+      turn_ref: 'trace-retained-media#1',
+      delivery_provenance_status: 'valid',
+      delivery_provenance: {
+        delivery_key: { kind: 'operation', operation_id: 'retained-media-operation' },
+        transcript_slot: { kind: 'terminal_result' },
+      },
+      blocks: [
+        { t: 'image', src: imageSrc, cap: 'completed image' },
+        { t: 'voice', src: audioSrc, transcript: 'completed audio', secs: 2 },
+      ],
+    }]);
+
+    render(html`<${ChatTranscript} entries=${entries} variant="messenger" />`, container);
+    await flushUi();
+    const failure = container.querySelector('[data-chat-entry-id="failed-with-output"]')!;
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('request_failure');
+    expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
+    expect(failure.querySelector('[data-chat-block="image"] img')?.getAttribute('src')).toBe(imageSrc);
+    expect(failure.querySelector('[data-chat-block="voice"] audio')?.getAttribute('src')).toBe(audioSrc);
+    expect(failure.textContent).toContain('completed image');
+    expect(failure.textContent).toContain('completed audio');
+    expect(failure.textContent).toContain('처리 완료로 간주되지 않으며');
+    expect(failure.textContent).not.toContain('provider disconnected after media');
+    fireEvent.click(failure.querySelector('[data-chat-failure-detail-toggle]')!);
+    await flushUi();
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent)
+      .toContain('provider disconnected after media');
+  });
+
+  it('renders a legacy diagnostic-derived block projection as the failure detail, not completed output', async () => {
+    // The old writer stored parse_text_to_blocks(diagnostic) when a failure
+    // row arrived without blocks, so a reload can hand the
+    // dashboard a persisted projection of the diagnostic itself.
+    const diagnostic = 'Keeper request failed: provider disconnected before any media';
+    const entries = chatHistoryEntriesFromRest('sangsu', [{
+      id: 'failed-legacy-diagnostic',
+      role: 'request_failure',
+      content: diagnostic,
+      ts: 1_780_000_002,
+      turn_ref: 'trace-legacy-diagnostic#1',
+      delivery_provenance_status: 'valid',
+      delivery_provenance: {
+        delivery_key: { kind: 'operation', operation_id: 'legacy-diagnostic-operation' },
+        transcript_slot: { kind: 'terminal_result' },
+      },
+      blocks: parseTextToChatBlocks(diagnostic),
+    }]);
+
+    render(html`<${ChatTranscript} entries=${entries} variant="messenger" />`, container);
+    await flushUi();
+    const failure = container.querySelector('[data-chat-entry-id="failed-legacy-diagnostic"]')!;
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('request_failure');
+    expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
+    // The persisted blocks are the diagnostic again, so no completed output
+    // is claimed and none renders above the folded detail.
+    expect(failure.querySelector('[data-chat-retained-output]')).toBeNull();
+    expect(failure.textContent).toContain('처리 완료로 간주되지 않으며');
+    fireEvent.click(failure.querySelector('[data-chat-failure-detail-toggle]')!);
+    await flushUi();
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent)
+      .toContain('provider disconnected before any media');
+  });
+
+  it.each(['none', 'same', 'different'] as const)('renders reconciled failure work without quoting its diagnostic (%s tool turn)', async (toolTurn) => {
+    const keeper = `failed-work-${toolTurn}`;
+    const provenance = operationDeliveryProvenance(`failed-work-operation-${toolTurn}`, 'terminal_result');
+    appendThreadEntry(keeper, entry({
+      id: 'live-before-failure', role: 'assistant', source: 'direct_assistant',
+      delivery: 'streaming', text: '', deliveryProvenance: provenance,
+      traceSteps: [{ kind: 'think', text: 'completed thought before failure' }],
+    }));
+    const failed = chatHistoryEntriesFromRest(keeper, [{
+      id: 'server-work-failure', role: 'request_failure', content: 'REQUEST_FAILURE_DIAGNOSTIC', ts: 1780000001,
+      turn_ref: 'failed-work-trace#1', delivery_provenance_status: 'valid', delivery_provenance: provenance,
+    }]);
+    const tools = toolTurn === 'none' ? [] : [toolEntry({
+      id: 'tool-failed-work', label: 'Read', delivery: 'history',
+      turnRef: toolTurn === 'same' ? 'failed-work-trace#1' : 'different-work-trace#2',
+    })];
+    mergeServerHistoryEntries(keeper, [...tools, ...failed]);
+    const visible = keeperThreads.value[keeper]!.filter(isDefaultVisibleConversationEntry);
+    render(html`<${ChatTranscript} entries=${visible} emptyText="empty" groupToolCalls=${true} variant="messenger" />`, container);
+    await flushUi();
+    const failure = container.querySelector('[data-chat-entry-id="server-work-failure"]')!;
+    expect(failure.getAttribute('data-chat-role')).toBe('system');
+    expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
+    const bundle = failure.closest('[data-chat-turn-bundle]')!;
+    expect(bundle).not.toBeNull();
+    const toggle = bundle.querySelector('.chat-block-trace-hd')!;
+    if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+    await flushUi();
+    expect(bundle.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain('completed thought before failure');
+    expect(bundle.querySelector('[data-chat-trace-step="chat"]')).toBeNull();
+    expect(bundle.querySelectorAll('[data-chat-trace-step="tool"]')).toHaveLength(toolTurn === 'same' ? 1 : 0);
+    expect(container.querySelectorAll('[data-chat-tool-trace]')).toHaveLength(toolTurn === 'different' ? 2 : 1);
+    expect(container.textContent).not.toContain('REQUEST_FAILURE_DIAGNOSTIC');
+    fireEvent.click(failure.querySelector('[data-chat-failure-detail-toggle]')!);
+    await flushUi();
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent).toContain('REQUEST_FAILURE_DIAGNOSTIC');
+  });
+
+  it('keeps failure semantics when its only readable payload is completed media', async () => {
+    const entries = chatHistoryEntriesFromRest('sangsu', [{
+      id: 'failed-media-only', role: 'request_failure', content: '', ts: 1780000001,
+      blocks: [{ t: 'image', src: '/api/v1/media/finished', cap: 'finished image' }],
+    }]);
+    render(html`<${ChatTranscript} entries=${entries} variant="messenger" />`, container);
+    await flushUi();
+    const failure = container.querySelector('[data-chat-entry-id="failed-media-only"]')!;
+    expect(failure.getAttribute('data-chat-role')).toBe('system');
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('request_failure');
+    expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
+    expect(failure.querySelector('[data-chat-block="image"] img')).not.toBeNull();
+    expect(failure.textContent).toContain('처리 완료로 간주되지 않으며');
+  });
+
+  it('exposes tool-call transcript provenance as rendered attributes', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-toolu_prov',
+            label: 'keeper_context_status',
+            turnRef: 'trace-tool#3',
+            delivery: 'history',
+            streamContract: {
+              source: 'rest_history',
+              status: 'history_without_stream_events',
+              reason: 'tool history rows carry arguments, not live stream lifecycle',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${false}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-entry-id')).toBe('tool-toolu_prov')
+    expect(bubble.getAttribute('data-chat-role')).toBe('tool')
+    expect(bubble.getAttribute('data-chat-source')).toBe('tool_result')
+    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('history')
+    expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('rest_history')
+    expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('history_without_stream_events')
+    expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
+      'tool history rows carry arguments, not live stream lifecycle',
+    )
+    expect(bubble.getAttribute('data-chat-turn-ref')).toBe('trace-tool#3')
+    expect(bubble.getAttribute('data-chat-tool-call-id')).toBe('toolu_prov')
+  })
+
+  it('shows edit evidence for its execution without opening raw tool arguments', () => {
+    recordVerifiedToolCallOutputs([toolCallOutput({
+      tool_use_id: 'edit-proof', tool: 'Edit',
+      input: { old_string: 'before edit', new_string: 'after edit' },
+      output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 1 }),
+      route_evidence: { descriptor_id: 'agent.edit_file' },
+    })])
+    render(html`<${ChatTranscript} keeperName="sangsu"
+      entries=${[toolEntry({ id: 'tool-edit-proof', label: 'Edit' }),
+        toolEntry({ id: 'tool-other-execution', label: 'Edit' })]}
+      emptyText="empty" />`, container)
+    const first = container.querySelector('[data-chat-entry-id="tool-edit-proof"]')
+    const other = container.querySelector('[data-chat-entry-id="tool-other-execution"]')
+    expect(first?.querySelector('[data-chat-edit-evidence]')?.textContent).toContain('after edit')
+    expect(first?.querySelector('button')?.getAttribute('aria-expanded')).toBe('false')
+    expect(other?.querySelector('[data-chat-edit-evidence]')).toBeNull()
+  })
+
+  it('joins stored originals by execution even when provider call IDs repeat', () => {
+    const blob = { _blob: { sha256: 'a'.repeat(64), bytes: 3, mime: 'application/octet-stream', preview: '' } }
+    recordVerifiedToolCallOutputs([toolCallOutput({
+      execution_id: 'execution-snapshot', tool_use_id: 'repeated-provider-id', tool: 'Edit', input: {},
+      output: JSON.stringify({ ok: true, mode: 'patch', path: 'original.md', occurrences: 1,
+        edit_snapshots: { status: 'stored', before: blob, after: blob } }),
+      route_evidence: { descriptor_id: 'agent.edit_file' },
+    })])
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${[
+      toolEntry({ id: 'snapshot-row', executionId: 'execution-snapshot', toolCallId: 'repeated-provider-id', label: 'Edit' }),
+      toolEntry({ id: 'other-row', executionId: 'execution-other', toolCallId: 'repeated-provider-id', label: 'Edit' }),
+    ]} emptyText="empty" />`, container)
+    const first = container.querySelector('[data-chat-entry-id="snapshot-row"]')
+    const other = container.querySelector('[data-chat-entry-id="other-row"]')
+    expect(first?.querySelector('[data-edit-snapshot-view]')?.textContent).toContain('편집 전후 원본 보기')
+    expect(other?.querySelector('[data-edit-snapshot-view]')).toBeNull()
+  })
+
+  it('opens an autonomous Edit and joins original snapshots by its canonical execution', () => {
+    const blob = { _blob: { sha256: 'a'.repeat(64), bytes: 3, mime: 'application/octet-stream', preview: '' } }
+    recordVerifiedToolCallOutputs([toolCallOutput({
+      execution_id: 'autonomous-edit-execution', tool_use_id: 'same-provider-id', tool: 'Edit', input: {},
+      output: JSON.stringify({ ok: true, mode: 'patch', path: 'story.md', occurrences: 1,
+        edit_snapshots: { status: 'stored', before: blob, after: blob } }),
+      route_evidence: { descriptor_id: 'agent.edit_file' },
+    })])
+    const entries = chatHistoryEntriesFromRest('writer', [{
+      id: 'autonomous:trace-writer#428', role: 'assistant', ts: 1789223399, content: null,
+      autonomous_turn: { turn_id: 'trace-writer#428' },
+      blocks: [{ t: 'trace', trace: [
+        { kind: 'tool', name: 'Edit', status: 'ok', execution_id: 'autonomous-edit-execution' },
+        { kind: 'tool', name: 'Edit', status: 'ok', execution_id: 'another-execution' },
+      ] }],
+    }])
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${entries} emptyText="empty" />`, container)
+    const toggle = container.querySelector<HTMLButtonElement>('.chat-block-trace-hd')
+    expect(toggle).not.toBeNull()
+    fireEvent.click(toggle!)
+    const first = container.querySelector('[data-chat-trace-execution-id="autonomous-edit-execution"]')
+    const second = container.querySelector('[data-chat-trace-execution-id="another-execution"]')
+    expect(first?.querySelector('[data-edit-snapshot-view]')?.textContent).toContain('편집 전후 원본 보기')
+    expect(first?.getAttribute('data-chat-trace-provenance')).not.toBe('activity')
+    fireEvent.click(first!.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+    expect(first?.querySelector('.chat-block-tool-body')).toBeNull()
+    expect(first?.textContent).not.toContain('"edit_snapshots"')
+    expect(first?.querySelector('[data-edit-snapshot-view]')).not.toBeNull()
+    expect(second?.querySelector('[data-edit-snapshot-view]')).toBeNull()
+    expect(container.querySelectorAll('[data-edit-snapshot-view]')).toHaveLength(1)
+  })
+
+  it('marks a failed tool call with the error status glyph', () => {
+    recordVerifiedToolCallOutputs([
+      toolCallOutput({ tool_use_id: 'toolu_y', wire_outcome: 'error', output: 'boom' }),
+    ])
+    render(
+      html`<${ChatTranscript} keeperName="sangsu"
+        entries=${[toolEntry({ id: 'tool-toolu_y' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('✗')
+  })
+
+  it('falls back to arguments and shows no status until output arrives', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-toolu_pending', text: '{"path":"a.ml"}' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('a.ml')
+    expect(bubble?.textContent).not.toContain('✓')
+    expect(bubble?.textContent).not.toContain('✗')
+  })
+
+  it('renders args and output in labelled sections when expanded', async () => {
+    recordVerifiedToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_z', output: 'EXPANDED OUTPUT' })])
+    render(
+      html`<${ChatTranscript} keeperName="sangsu"
+        entries=${[toolEntry({ id: 'tool-toolu_z', text: '{"k":"v"}' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const toggle = container.querySelector('[data-chat-variant="tool-call"] button') as HTMLButtonElement
+    toggle.click()
+    await flushUi()
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('arguments')
+    expect(bubble?.textContent).toContain('output')
+    expect(bubble?.textContent).toContain('EXPANDED OUTPUT')
+  })
+
+  it('shows a waiting hint for a no-arg tool whose output has not landed, when expanded', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-toolu_wait' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const toggle = container.querySelector('[data-chat-variant="tool-call"] button') as HTMLButtonElement
+    toggle.click()
+    await flushUi()
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('출력 대기 중')
+  })
+
+  it('re-renders to show output when it arrives after the bubble mounted', async () => {
+    // Real-world path: the bubble renders before the tool-call hydration
+    // lands (output is always late). Reading the store signal during render
+    // subscribes the bubble, so a later record() must update it.
+    render(
+      html`<${ChatTranscript} keeperName="sangsu"
+        entries=${[toolEntry({ id: 'tool-toolu_late' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    let bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).not.toContain('late output here')
+
+    recordVerifiedToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_late', output: 'late output here' })])
+    await flushUi()
+
+    bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('late output here')
+    expect(bubble?.textContent).toContain('✓')
+  })
+
+  it('keeps saved delivery badges in the default transcript', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'u1', text: 'ping' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[data-chat-delivery="saved"]')).not.toBeNull()
+  })
+
+  it('renders no-argument tool call (args "{}") as "입력 없음", not a bare {}', () => {
+    // Regression: keeper_tools_list streams args `{}` (no params). The old
+    // ToolCallBubble rendered `T keeper_tools_list ▸ {}`, which read as an
+    // empty RESULT. The fix labels args as "입력" and renders `{}` as
+    // "입력 없음" so operators do not mistake a no-arg call for a no-result call.
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'tool-1',
+          role: 'tool',
+          source: 'tool_result',
+          label: 'keeper_tools_list',
+          text: '{}',
+        })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    expect(container.textContent).toContain('keeper_tools_list')
+    expect(container.textContent).toContain('입력')
+    expect(container.textContent).toContain('입력 없음')
+  })
+
+  it('labels tool-call arguments as "입력" and shows the arg JSON', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'tool-2',
+          role: 'tool',
+          source: 'tool_result',
+          label: 'masc_board_post',
+          text: '{"title":"hi"}',
+        })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    expect(container.textContent).toContain('입력')
+    expect(container.textContent).toContain('masc_board_post')
+    expect(container.textContent).toContain('"title"')
+  })
+
+  it('hides saved badges in messenger mode but keeps live state badges', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'pong',
+            delivery: 'streaming',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-delivery="saved"]')).toBeNull()
+    expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
+  })
+
+  it('renders a live placeholder for empty streaming text', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            delivery: 'streaming',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const placeholder = container.querySelector('[data-chat-stream-placeholder]')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder?.textContent).toContain('응답 작성 중...')
+    expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
+  })
+
+  it('renders an optional message action and passes the clicked entry', () => {
+    const onClick = vi.fn()
+    const target = entry({
+      id: 'a1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '검사할 응답',
+    })
+
+    render(
+      html`<${ChatTranscript}
+        entries=${[target]}
+        emptyText="empty"
+        variant="messenger"
+        action=${{ label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick }}
+      />`,
+      container,
+    )
+
+    const action = container.querySelector('[data-testid="chat-message-action"]') as HTMLButtonElement
+    expect(action).not.toBeNull()
+    expect(action.textContent).toBe('턴 상세')
+
+    fireEvent.click(action)
+
+    expect(onClick).toHaveBeenCalledTimes(1)
+    expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
+  })
+
+  it('copies the message text from an assistant message copy button', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(globalThis.navigator, { clipboard: { writeText } })
+    const target = entry({
+      id: 'a1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '복사할 응답 본문',
+    })
+
+    render(
+      html`<${ChatTranscript} entries=${[target]} emptyText="empty" variant="messenger" />`,
+      container,
+    )
+
+    const copy = container.querySelector('[data-testid="chat-message-copy"]') as HTMLButtonElement
+    expect(copy).not.toBeNull()
+    fireEvent.click(copy)
+    expect(writeText).toHaveBeenCalledWith('복사할 응답 본문')
+  })
+
+  it('does not render a copy button on user messages', () => {
+    const target = entry({ id: 'u1', role: 'user', text: '내 질문' })
+    render(
+      html`<${ChatTranscript} entries=${[target]} emptyText="empty" variant="messenger" />`,
+      container,
+    )
+    expect(container.querySelector('[data-testid="chat-message-copy"]')).toBeNull()
+  })
+
+  it('renders a thinking placeholder when the model is reasoning', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            delivery: 'streaming',
+            streamState: 'thinking',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const placeholder = container.querySelector('[data-chat-stream-placeholder]')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder?.textContent).toContain('생각 중...')
+    expect(container.querySelector('[data-chat-delivery="thinking"]')).not.toBeNull()
+  })
+
+  it('shows a streaming cursor while content is streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '안녕하세요',
+            delivery: 'streaming',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('안녕하세요')
+    const cursor = container.querySelector('.animate-pulse')
+    expect(cursor).not.toBeNull()
+  })
+
+  it('hides the streaming cursor when delivery is not streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '완료된 응답',
+            delivery: 'delivered',
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const cursor = container.querySelector('.animate-pulse')
+    expect(cursor).toBeNull()
+  })
+
+  it('uses a parent-bounded flexible transcript in primary mode', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'u1', text: 'ping' })]}
+        emptyText="empty"
+        variant="messenger"
+        size="primary"
+      />`,
+      container,
+    )
+
+    const transcript = container.querySelector('[data-chat-variant="messenger"]')
+    expect(transcript?.getAttribute('data-chat-size')).toBe('primary')
+    expect(transcript?.classList.contains('min-h-0')).toBe(true)
+    expect(transcript?.classList.contains('flex-1')).toBe(true)
+    expect(transcript?.classList.contains('max-h-[42vh]')).toBe(false)
+    expect(transcript?.classList.contains('chat-transcript-airy')).toBe(true)
+  })
+
+  it('renders attachments even when metadata is hidden', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'u1',
+            text: '첨부 확인',
+            attachments: [
+              {
+                id: 'att-1',
+                type: 'image',
+                name: 'screenshot.png',
+                size: 1024,
+                mimeType: 'image/png',
+                data: 'data:image/png;base64,abc123',
+              },
+              {
+                id: 'att-2',
+                type: 'file',
+                name: 'log.txt',
+                size: 512,
+                mimeType: 'text/plain',
+                data: 'data:text/plain;base64,bG9n',
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        showMetadata=${false}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('img[alt="screenshot.png"]')).not.toBeNull()
+    expect(container.textContent).toContain('log.txt')
+    expect(container.textContent).not.toContain('상세 보기')
+    const bubble = container.querySelector('[data-chat-entry-id="u1"]')
+    expect(bubble?.getAttribute('data-chat-attachment-count')).toBe('2')
+    expect(bubble?.getAttribute('data-chat-server-attach-block-count')).toBe('0')
+    expect(bubble?.getAttribute('data-chat-multimodal-sources')).toBe('persisted_attachment')
+    expect(bubble?.getAttribute('data-chat-multimodal-kinds')).toBe('image,document')
+    const imageCard = container.querySelector('[data-chat-attachment-card="att-1"]')
+    expect(imageCard?.getAttribute('data-chat-multimodal-source')).toBe('persisted_attachment')
+    expect(imageCard?.getAttribute('data-chat-multimodal-kind')).toBe('image')
+    expect(imageCard?.getAttribute('data-chat-multimodal-mime')).toBe('image/png')
+    expect(imageCard?.getAttribute('data-chat-multimodal-size-bytes')).toBe('1024')
+    const fileCard = container.querySelector('[data-chat-attachment-card="att-2"]')
+    expect(fileCard?.getAttribute('data-chat-multimodal-kind')).toBe('document')
+    expect(fileCard?.getAttribute('data-chat-multimodal-mime')).toBe('text/plain')
+  })
+
+  it('does not show streaming ellipsis before elapsed time starts', () => {
+    render(
+      html`<${ChatComposer}
+        draft="안녕"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    const buttons = [...container.querySelectorAll('button')]
+    const sendButton = buttons.find(button => button.textContent?.includes('보내기') || button.textContent?.includes('응답 중'))
+    expect(sendButton).not.toBeUndefined()
+    const label = sendButton?.textContent ?? ''
+    expect(label).toContain('응답 중')
+    expect(label).not.toContain('...')
+  })
+
+  it('renders an audio player for assistant entries with an RFC-0235 clip', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'hello operator',
+            audio: {
+              token: 'clip-1',
+              audioUrl: '/api/v1/voice/audio/clip-1',
+              mime: 'audio/mpeg',
+              durationSec: 5,
+              messageText: 'hello operator',
+              deviceId: null,
+            },
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const player = container.querySelector('[data-chat-audio-clip]')
+    expect(player).not.toBeNull()
+    const audio = container.querySelector('audio')
+    expect(audio).not.toBeNull()
+    expect(audio?.getAttribute('src')).toBe('/api/v1/voice/audio/clip-1')
+    expect(container.textContent).toContain('0:05')
+  })
+
+  it('shows the audio caption and a load-error fallback', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'hello operator',
+            audio: {
+              token: 'clip-1',
+              audioUrl: null,
+              mime: 'audio/mpeg',
+              durationSec: null,
+              messageText: 'hello operator',
+              deviceId: null,
+            },
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const audio = container.querySelector('audio') as HTMLAudioElement | null
+    expect(audio).not.toBeNull()
+    expect(audio?.getAttribute('src')).toContain('/api/v1/voice/audio/clip-1')
+    expect(container.textContent).toContain('hello operator')
+    audio?.dispatchEvent(new Event('error', { bubbles: true }))
+    await flushUi()
+    expect(container.textContent).toContain('음성을 불러올 수 없습니다')
+  })
+
+  it('shows an expired placeholder instead of the native player', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'hello operator',
+            audio: {
+              token: 'clip-expired',
+              audioUrl: '/api/v1/voice/audio/clip-expired',
+              mime: 'audio/mpeg',
+              durationSec: 5,
+              messageText: 'hello operator',
+              deviceId: null,
+              expired: true,
+            },
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const player = container.querySelector('[data-chat-audio-clip]')
+    expect(player).not.toBeNull()
+    expect(container.querySelector('audio')).toBeNull()
+    expect(container.textContent).toContain('음성이 만료되었습니다.')
+    expect(container.textContent).toContain('hello operator')
+  })
+
+  it('renders a real audio element inside a voice block when src is provided', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            blocks: [
+              { t: 'voice', secs: 5, wave: [0.2, 0.5], src: 'https://example.com/voice.mp3', transcript: 'note' },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const voice = container.querySelector('[data-chat-block="voice"]')
+    expect(voice).not.toBeNull()
+    const audio = voice?.querySelector('audio')
+    expect(audio).not.toBeNull()
+    expect(audio?.getAttribute('src')).toBe('https://example.com/voice.mp3')
+    expect(voice?.querySelectorAll('.chat-block-vbar').length).toBe(2)
+  })
+})
+
+describe('ChatComposer concurrent submit & stall', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('keeps durable operation submit enabled during streaming', () => {
+    render(
+      html`<${ChatComposer}
+        draft="다음 질문"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        allowSendWhileStreaming=${true}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    const buttons = [...container.querySelectorAll('button')]
+    const submitButton = buttons.find(button => button.textContent?.includes('새 작업 접수'))
+    expect(submitButton).not.toBeUndefined()
+    expect(submitButton?.hasAttribute('disabled')).toBe(false)
+  })
+
+  it('blocks send during streaming when concurrent submit is off', () => {
+    render(
+      html`<${ChatComposer}
+        draft="다음 질문"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        allowSendWhileStreaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    const buttons = [...container.querySelectorAll('button')]
+    const sendButton = buttons.find(button => button.textContent?.includes('응답 중'))
+    expect(sendButton?.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('surfaces a stall hint when no stream event arrived recently', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        lastEventAt=${Date.now() - 30_000}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    const hint = container.querySelector('[data-chat-stall-hint]')
+    expect(hint).not.toBeNull()
+    expect(hint?.textContent).toContain('지연')
+  })
+
+  it('shows no stall hint while events are flowing', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        lastEventAt=${Date.now() - 1_000}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[data-chat-stall-hint]')).toBeNull()
+  })
+
+  it('labels the idle send button 전송 (regression: corrupted 볂이기 literal)', () => {
+    render(
+      html`<${ChatComposer}
+        draft="보낼 메시지"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    const sendButton = [...container.querySelectorAll('button')].find((b) => b.classList.contains('send'))
+    expect(sendButton?.textContent?.trim()).toBe('전송')
+    expect(container.textContent).not.toContain('볂이기')
+  })
+})
+
+describe('ChatComposer IME composition guard', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderComposer(onSend: () => void) {
+    render(
+      html`<${ChatComposer}
+        draft="소주에 갑오징어 먹었닭"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    return textarea as HTMLTextAreaElement
+  }
+
+  it('ignores Enter fired while the last Hangul syllable is composing', () => {
+    // Regression: the composition-commit Enter used to send the message,
+    // the IME flushed the trailing syllable back into the cleared input,
+    // and the queue re-sent that single character after the reply arrived.
+    let sent = 0
+    const textarea = renderComposer(() => { sent += 1 })
+
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }),
+    )
+    expect(sent).toBe(0)
+
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(sent).toBe(1)
+  })
+
+  it('keeps Shift+Enter as newline (no send)', () => {
+    let sent = 0
+    const textarea = renderComposer(() => { sent += 1 })
+
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
+    )
+    expect(sent).toBe(0)
+  })
+
+  it('keeps its own draft when uncontrolled and surfaces the typed text on send', () => {
+    // The keeper-workspace chat omits onDraftChange so a keystroke updates the
+    // composer's internal draft instead of the host panel — that is what stops
+    // the transcript from re-rendering on every character. The composer must
+    // still capture the text and carry it on the send payload (`text`).
+    const onSend = vi.fn()
+    render(
+      html`<${ChatComposer}
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(textarea).not.toBeNull()
+
+    const text = '    소주에 갑오징어\nSKILL.md 설명\n\n\n끝  \n'
+    fireEvent.input(textarea, { target: { value: text } })
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    const sent = onSend.mock.calls[0]?.[0] as ChatComposerSendPayload | undefined
+    expect(sent?.text).toBe(text)
+    expect(sent?.userBlocks).toEqual([{ type: 'text', text }])
+    expect(sent?.blocks).toEqual([{ t: 'p', html: text }])
+  })
+})
+
+describe('ChatComposer draft persistence (uncontrolled, per-keeper)', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    _resetChatStoreForTests()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    _resetChatStoreForTests()
+  })
+
+  function mountComposer(draftPersistKey: string, onSend: () => void = () => {}) {
+    render(
+      html`<${ChatComposer}
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        draftPersistKey=${draftPersistKey}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    return container.querySelector('textarea') as HTMLTextAreaElement
+  }
+
+  it('restores a keeper draft across remount and never leaks across keepers', () => {
+    // Type for keeper 'rondo', then switch away (unmount — the key=keeperName
+    // remount in the app).
+    let textarea = mountComposer('rondo')
+    fireEvent.input(textarea, { target: { value: '소주에 갑오징어' } })
+    render(null, container)
+
+    // Switch to a different keeper → fresh, empty composer (no cross-keeper leak).
+    textarea = mountComposer('qa-king')
+    expect(textarea.value).toBe('')
+
+    // Switch back to 'rondo' → the half-typed draft is restored.
+    render(null, container)
+    textarea = mountComposer('rondo')
+    expect(textarea.value).toBe('소주에 갑오징어')
+  })
+
+  it('resyncs immediately when the draft key changes without a remount', () => {
+    let textarea = mountComposer('rondo')
+    fireEvent.input(textarea, { target: { value: 'rondo draft' } })
+
+    // Defensive path for future callers: even without key=${keeperName}
+    // remounting the composer, the new keeper must not briefly inherit the old
+    // keeper's visible buffer or write subsequent input under the wrong key.
+    textarea = mountComposer('qa-king')
+    expect(textarea.value).toBe('')
+
+    fireEvent.input(textarea, { target: { value: 'qa draft' } })
+    expect(readKeeperDraft('rondo')).toBe('rondo draft')
+    expect(readKeeperDraft('qa-king')).toBe('qa draft')
+
+    textarea = mountComposer('rondo')
+    expect(textarea.value).toBe('rondo draft')
+  })
+
+  it('clears the persisted draft after a send', () => {
+    const onSend = vi.fn()
+    const textarea = mountComposer('rondo', onSend)
+    fireEvent.input(textarea, { target: { value: 'send me' } })
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(readKeeperDraft('rondo')).toBe('')
+  })
+})
+
+describe('ChatMessageBubble memoization', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  // Simulates a stream chunk: render a 2-message transcript, then re-render with
+  // the SAME settled entry reference but a fresh streaming entry (new array), the
+  // way a reconcile preserves settled refs. Returns how many message-bubble
+  // bodies re-ran on the second render. `action` reference stability is the
+  // variable under test (the inline `{ ...onClick }` literal in
+  // KeeperConversationPanel is hoisted to a useMemo so it stays referentially
+  // stable across stream re-renders).
+  function bubbleRerendersOnStream(actionFor: () => unknown): number {
+    type RenderHook = { __r?: (v: unknown) => void }
+    let renders = 0
+    const prev = (options as unknown as RenderHook).__r
+    ;(options as unknown as RenderHook).__r = (vnode) => {
+      const t = (vnode as { type?: { displayName?: string; name?: string } })?.type
+      const label = t?.displayName ?? t?.name ?? ''
+      // Count the inner component body, not the memo wrapper ('Memo(...)').
+      if (label.includes('ChatMessageBubble') && !label.startsWith('Memo(')) renders++
+      prev?.(vnode)
+    }
+    try {
+      const settled = entry({ id: 'a', role: 'assistant', source: 'direct_assistant', text: 'settled reply' })
+      const s1 = entry({ id: 'b', role: 'assistant', source: 'direct_assistant', text: 'partial' })
+      render(html`<${ChatTranscript} entries=${[settled, s1]} emptyText="x" action=${actionFor()} />`, container)
+      const initial = renders
+      expect(initial).toBe(2) // both bubbles paint on first render
+      const s2 = entry({ id: 'b', role: 'assistant', source: 'direct_assistant', text: 'partial reply' })
+      render(html`<${ChatTranscript} entries=${[settled, s2]} emptyText="x" action=${actionFor()} />`, container)
+      return renders - initial
+    } finally {
+      ;(options as unknown as RenderHook).__r = prev
+    }
+  }
+
+  it('skips the settled bubble on a stream update when the action prop is referentially stable', () => {
+    const stable = { label: '턴 상세', title: 't', onClick: () => {} }
+    // Only the streaming bubble re-runs; the settled one is skipped.
+    expect(bubbleRerendersOnStream(() => stable)).toBe(1)
+  })
+
+  it('re-renders the settled bubble when action is a new object each render (why the useMemo matters)', () => {
+    // A fresh action object every render — the pre-fix behaviour — defeats the
+    // shallow-equal skip, so the settled bubble re-runs on every stream chunk.
+    expect(bubbleRerendersOnStream(() => ({ label: '턴 상세', title: 't', onClick: () => {} }))).toBe(2)
+  })
+})
+
+describe('Keeper v2 chat blocks', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderBlocks(blocks: ChatBlock[]) {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'b1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            blocks,
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+  }
+
+  it('renders a callout block', () => {
+    renderBlocks([{ t: 'callout', severity: 'warn', html: '<strong>주의</strong>' }])
+
+    const callout = container.querySelector('[data-chat-block="callout"]')
+    expect(callout).not.toBeNull()
+    expect(callout?.classList.contains('warn')).toBe(true)
+    expect(callout?.textContent).toContain('주의')
+  })
+
+  it('renders a markdown table with numeric and muted cell flags', () => {
+    renderBlocks([
+      {
+        t: 'table',
+        head: ['name', { v: 'count', num: true }],
+        rows: [['a', { v: '42', num: true }], ['b', { v: 'n/a', muted: true }]],
+      },
+    ])
+
+    const table = container.querySelector('[data-chat-block="table"]')
+    expect(table).not.toBeNull()
+    const nums = [...container.querySelectorAll('.chat-block-cell-num')].map((el) => el.textContent)
+    expect(nums).toContain('count')
+    expect(nums).toContain('42')
+    const muted = container.querySelector('.chat-block-cell-muted')
+    expect(muted?.textContent).toBe('n/a')
+  })
+
+  it('renders a code block with caption', () => {
+    renderBlocks([{ t: 'code', cap: 'config.ml', html: 'let x = 1' }])
+
+    const code = container.querySelector('[data-chat-block="code"]')
+    expect(code).not.toBeNull()
+    expect(code?.textContent).toContain('config.ml')
+    expect(code?.textContent).toContain('let x = 1')
+  })
+
+  it('renders a shell block with prompt and exit status', () => {
+    renderBlocks([
+      {
+        t: 'shell',
+        title: 'keeper@worktree',
+        lines: [
+          { t: 'cmd', v: 'ls' },
+          { t: 'out', v: 'file.txt' },
+        ],
+        exit: 1,
+        dur: '0.3s',
+      },
+    ])
+
+    const shell = container.querySelector('[data-chat-block="shell"]')
+    expect(shell).not.toBeNull()
+    expect(shell?.textContent).toContain('keeper@worktree')
+    expect(shell?.textContent).toContain('$ ls')
+    expect(shell?.textContent).toContain('file.txt')
+    expect(shell?.textContent).toContain('exit 1')
+  })
+
+  it('renders an artifact card with open/download buttons', () => {
+    renderBlocks([{ t: 'artifact', kind: 'json', name: 'report.json', size: '12 KB', note: '3 items' }])
+
+    const artifact = container.querySelector('[data-chat-block="artifact"]')
+    expect(artifact).not.toBeNull()
+    expect(artifact?.textContent).toContain('report.json')
+    expect(artifact?.textContent).toContain('JSON')
+    const buttons = [...(artifact?.querySelectorAll('button') ?? [])].map((b) => b.textContent)
+    expect(buttons).toContain('열기')
+    expect(buttons).toContain('다운로드')
+  })
+
+  it('renders an attach card with inline svg', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'shape.svg',
+        dims: '64×64',
+        svg: '<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></svg>',
+        via: 'vision',
+        size: '1 KB',
+      },
+    ])
+
+    const attach = container.querySelector('[data-chat-block="attach"]')
+    expect(attach).not.toBeNull()
+    expect(attach?.textContent).toContain('shape.svg')
+    expect(attach?.textContent).toContain('64×64')
+    expect(attach?.querySelector('svg')).not.toBeNull()
+  })
+
+  it('renders a safe attach image src', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'screen.png',
+        dims: '100×100',
+        src: 'https://example.com/screen.png',
+        via: 'vision',
+        size: '12 KB',
+      },
+    ])
+
+    const img = container.querySelector('[data-chat-block="attach"] img')
+    expect(img?.getAttribute('src')).toBe('https://example.com/screen.png')
+  })
+
+  it('renders a data-url attach image src', () => {
+    const src = 'data:image/png;base64,aGVsbG8='
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'screen.png',
+        dims: '100×100',
+        src,
+        via: 'vision',
+        size: '12 KB',
+      },
+    ])
+
+    const img = container.querySelector('[data-chat-block="attach"] img')
+    expect(img?.getAttribute('src')).toBe(src)
+  })
+
+  it('renders server-provided media blocks on user rows', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'u-rich',
+            role: 'user',
+            label: '사용자',
+            text: 'uploaded',
+            blocks: [
+              {
+                t: 'attach',
+                id: 'srv-att-1',
+                name: 'screen.png',
+                kind: 'image',
+                dims: '100×100',
+                src: 'https://example.com/screen.png',
+                via: 'vision',
+                size: '12 KB',
+                mimeType: 'image/png',
+                sizeBytes: 12_288,
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const blocks = container.querySelector('[data-chat-blocks]')
+    const attach = container.querySelector('[data-chat-block="attach"]')
+    const bubble = container.querySelector('[data-chat-entry-id="u-rich"]')
+    expect(blocks).not.toBeNull()
+    expect(attach?.textContent).toContain('screen.png')
+    expect(attach?.querySelector('img')?.getAttribute('src')).toBe('https://example.com/screen.png')
+    expect(bubble?.getAttribute('data-chat-attachment-count')).toBe('0')
+    expect(bubble?.getAttribute('data-chat-server-attach-block-count')).toBe('1')
+    expect(bubble?.getAttribute('data-chat-multimodal-sources')).toBe('server_block')
+    expect(bubble?.getAttribute('data-chat-multimodal-kinds')).toBe('image')
+    expect(attach?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
+    expect(attach?.getAttribute('data-chat-multimodal-kind')).toBe('image')
+    expect(attach?.getAttribute('data-chat-multimodal-attachment-id')).toBe('srv-att-1')
+    expect(attach?.getAttribute('data-chat-multimodal-mime')).toBe('image/png')
+    expect(attach?.getAttribute('data-chat-multimodal-size-bytes')).toBe('12288')
+    expect(attach?.getAttribute('data-chat-attach-via')).toBe('vision')
+  })
+
+  it('blocks unsafe attach image src and falls back to placeholder', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'bad.png',
+        dims: '100×100',
+        src: 'javascript:alert(1)',
+        via: 'vision',
+        size: '12 KB',
+      },
+    ])
+
+    expect(container.querySelector('[data-chat-block="attach"] img')).toBeNull()
+    expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-source')).toBe('server_block')
+    expect(container.querySelector('[data-chat-block="attach"]')?.getAttribute('data-chat-multimodal-kind')).toBeNull()
+    expect(container.textContent).toContain('unsafe URL')
+  })
+
+  it('renders a server-provided attachment failure without claiming it is an image', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'generated media unavailable: storage write failed',
+        ph: 'Generated media is unavailable.',
+        mimeType: 'audio/mpeg',
+        size: '128 wire-carrier bytes observed',
+        sizeBytes: 128,
+      },
+    ])
+
+    const attach = container.querySelector('[data-chat-block="attach"]')
+    expect(attach?.textContent).toContain('Generated media is unavailable.')
+    expect(attach?.querySelector('.chat-block-attach-cap')?.textContent)
+      .toBe('첨부 · 128 wire-carrier bytes observed')
+  })
+
+  it('renders a voice memo with waveform bars and transcript', () => {
+    renderBlocks([
+      {
+        t: 'voice',
+        secs: 14,
+        wave: [0.2, 0.5, 0.8, 0.3, 0.6],
+        via: 'whisper',
+        size: '24 KB',
+        transcript: 'hello world',
+      },
+    ])
+
+    const voice = container.querySelector('[data-chat-block="voice"]')
+    expect(voice).not.toBeNull()
+    expect(voice?.querySelectorAll('.chat-block-vbar').length).toBe(5)
+    expect(voice?.textContent).toContain('hello world')
+    expect(voice?.textContent).toContain('whisper')
+  })
+
+  it('does not render a synthetic voice play button without a safe audio source', () => {
+    renderBlocks([{ t: 'voice', secs: 2, wave: [0.2, 0.5] }])
+
+    expect(container.querySelector('[data-chat-block="voice"] button')).toBeNull()
+    expect(container.querySelector('[data-chat-block="voice"] audio')).toBeNull()
+    expect(container.querySelectorAll('.chat-block-vbar').length).toBe(2)
+  })
+
+  it('renders an image block', () => {
+    renderBlocks([{ t: 'image', src: '/img/screen.png', cap: '실행 화면' }])
+
+    const img = container.querySelector('[data-chat-block="image"] img') as HTMLImageElement | null
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe('/img/screen.png')
+    expect(container.textContent).toContain('실행 화면')
+  })
+
+  it('renders an svg block', () => {
+    renderBlocks([{ t: 'svg', svg: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="5"/></svg>', cap: 'diagram' }])
+
+    const svg = container.querySelector('[data-chat-block="svg"] svg')
+    expect(svg).not.toBeNull()
+    expect(container.textContent).toContain('diagram')
+  })
+
+  it('renders a trace block and expands a tool step', async () => {
+    renderBlocks([
+      {
+        t: 'trace',
+        trace: [
+          { kind: 'think', text: 'planning' },
+          { kind: 'tool', name: 'keeper_context_status', status: 'ok', dur: '0.2s', args: '{"path":"a"}', result: '{"ok":true}' },
+        ],
+      },
+    ])
+
+    const trace = container.querySelector('[data-chat-block="trace"]')
+    expect(trace).not.toBeNull()
+    expect(trace?.textContent).toContain('planning')
+    expect(trace?.textContent).toContain('keeper_context_status')
+
+    const toolRow = container.querySelector('[data-chat-trace-step="tool"] .chat-block-tstep-row.click') as HTMLElement | null
+    expect(toolRow).not.toBeNull()
+    toolRow?.click()
+    await flushUi()
+
+    expect(trace?.textContent).toContain('args')
+    expect(trace?.textContent).toContain('"path"')
+    expect(trace?.textContent).toContain('result')
+  })
+
+  it('renders an explicit placeholder for a redacted persisted thinking block', () => {
+    renderBlocks([{ t: 'thinking', content: '', redacted: true }])
+
+    const thinking = container.querySelector('[data-chat-block="thinking"]')
+    expect(thinking).not.toBeNull()
+    expect(thinking?.getAttribute('data-chat-thinking-redacted')).toBe('true')
+    expect(thinking?.textContent).toContain('provider 서명')
+  })
+
+  it('renders persisted non-redacted thinking content', () => {
+    renderBlocks([{ t: 'thinking', content: 'checking state', redacted: false }])
+
+    const thinking = container.querySelector('[data-chat-block="thinking"]')
+    expect(thinking).not.toBeNull()
+    expect(thinking?.getAttribute('data-chat-thinking-redacted')).toBe('false')
+    expect(thinking?.textContent).toContain('checking state')
+  })
+
+  it('renders a link unfurl card with extracted hostname', () => {
+    renderBlocks([
+      {
+        t: 'link',
+        url: 'https://example.com/post',
+        title: 'Example post',
+        desc: 'A useful article',
+      },
+    ])
+
+    const link = container.querySelector('[data-chat-block="link"]') as HTMLAnchorElement | null
+    expect(link).not.toBeNull()
+    expect(link?.getAttribute('href')).toBe('https://example.com/post')
+    expect(link?.textContent).toContain('Example post')
+    expect(link?.textContent).toContain('example.com')
+  })
+
+  it('renders a broadcast card with recipient ack labels', () => {
+    renderBlocks([
+      {
+        t: 'broadcast',
+        scope: '@fleet',
+        via: 'keeper-net',
+        note: 'standby',
+        recipients: [
+          { id: 'masc', ack: 'acked', at: '12:00' },
+          { id: 'sangsu', ack: 'delivered' },
+        ],
+      },
+    ])
+
+    const bcast = container.querySelector('[data-chat-block="broadcast"]')
+    expect(bcast).not.toBeNull()
+    expect(bcast?.textContent).toContain('브로드캐스트')
+    expect(bcast?.textContent).toContain('standby')
+    expect(bcast?.textContent).toContain('확인함')
+    expect(bcast?.textContent).toContain('전달됨')
+    expect(bcast?.textContent).toContain('1/2 확인')
+  })
+
+  it('falls back to markdown text when blocks are not provided', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'm1', text: 'plain markdown reply' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('plain markdown reply')
+    expect(container.querySelector('[data-chat-blocks]')).toBeNull()
+  })
+})
+
+
+describe('ChatComposer multimodal', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.mocked(collectAttachments).mockReset()
+  })
+
+  afterEach(() => {
+    render(null, container)
+    vi.runAllTimers()
+    container.remove()
+    vi.useRealTimers()
+  })
+
+  function renderComposer(props: {
+    draft?: string
+    onSend?: (payload: ChatComposerSendPayload) => void
+    disabled?: boolean
+    streaming?: boolean
+  } = {}) {
+    render(
+      html`<${ChatComposer}
+        draft=${props.draft ?? ''}
+        placeholder="메시지 입력..."
+        disabled=${props.disabled ?? false}
+        streaming=${props.streaming ?? false}
+        onDraftChange=${() => {}}
+        onSend=${props.onSend ?? (() => {})}
+      />`,
+      container,
+    )
+  }
+
+  it('adds a URL reference chip from the 🔗 input and sends its carrier block', async () => {
+    const onSend = vi.fn()
+    renderComposer({ draft: '이 그림 어때?', onSend })
+
+    const refButton = container.querySelector('[title="이미지 참조 첨부 (URL · file_id)"]') as HTMLButtonElement
+    refButton.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    const refInput = container.querySelector('[data-testid="composer-ref-input"] input') as HTMLInputElement
+    expect(refInput).not.toBeNull()
+    fireEvent.input(refInput, { target: { value: 'https://example.test/a.png' } })
+    fireEvent.keyDown(refInput, { key: 'Enter' })
+    await new Promise((r) => setTimeout(r, 10))
+
+    // The input row closes and a reference chip with the URL stays.
+    expect(container.querySelector('[data-testid="composer-ref-input"]')).toBeNull()
+    const chip = container.querySelector('[data-chat-attachment-draft^="ref-url-"]')
+    expect(chip).not.toBeNull()
+    expect(chip?.textContent).toContain('https://example.test/a.png')
+    expect(chip?.textContent).toContain('URL 참조')
+
+    const sendButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent === '전송') as HTMLButtonElement
+    sendButton.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    const payload = onSend.mock.calls[0]?.[0] as ChatComposerSendPayload | undefined
+    expect(payload?.userBlocks).toEqual([
+      { type: 'image', url: 'https://example.test/a.png' },
+      { type: 'text', text: '이 그림 어때?' },
+    ])
+    const attachBlock = payload?.blocks.find(block => block.t === 'attach') as { ref?: unknown; via?: string } | undefined
+    expect(attachBlock?.ref).toEqual({ kind: 'url', url: 'https://example.test/a.png' })
+    expect(attachBlock?.via).toBe('URL 참조')
+  })
+
+  it('turns a pasted bare image URL into a reference chip, and leaves prose URLs as text', async () => {
+    renderComposer()
+    const textarea = container.querySelector('.composer-textarea') as HTMLTextAreaElement
+
+    // Bare image URL: becomes a chip, and no text lands in the draft.
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [],
+        getData: () => 'https://example.test/shot.png',
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(container.querySelector('[data-chat-attachment-draft^="ref-url-"]')).not.toBeNull()
+    expect((container.querySelector('.composer-textarea') as HTMLTextAreaElement).value).toBe('')
+
+    // A URL inside prose pastes as text, not as a chip.
+    fireEvent.paste(container.querySelector('.composer-textarea') as HTMLTextAreaElement, {
+      clipboardData: {
+        items: [],
+        getData: () => '문서는 https://example.test/doc.html 를 봐',
+      },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    const chips = container.querySelectorAll('[data-chat-attachment-draft^="ref-url-"]')
+    expect(chips.length).toBe(1)
+  })
+
+  it('renders attachment and voice buttons', () => {
+    Object.assign(globalThis.navigator, { mediaDevices: { getUserMedia: vi.fn() } })
+    Object.assign(globalThis, { MediaRecorder: vi.fn() })
+    renderComposer()
+    expect(container.querySelector('[title="이미지·파일 첨부"]')).not.toBeNull()
+    expect(container.querySelector('[title="음성으로 입력"]')).not.toBeNull()
+  })
+
+  it('adds attachment chips from file input and removes them', async () => {
+    vi.mocked(collectAttachments).mockResolvedValue({
+      attachments: [
+        {
+          id: 'att-1',
+          type: 'image',
+          name: 'screen.png',
+          size: 1024,
+          mimeType: 'image/png',
+          data: 'data:image/png;base64,abc123',
+          dims: '100×100',
+        },
+        {
+          id: 'att-2',
+          type: 'file',
+          name: 'log.txt',
+          size: 512,
+          mimeType: 'text/plain',
+          data: 'data:text/plain;base64,bG9n',
+        },
+      ],
+      errors: [],
+    })
+
+    renderComposer()
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['x'], 'screen.png', { type: 'image/png' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(container.querySelector('[data-chat-attachment-draft="att-1"]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-attachment-draft="att-2"]')).not.toBeNull()
+    expect(container.textContent).toContain('screen.png')
+    expect(container.textContent).toContain('log.txt')
+
+    const removeBtn = container.querySelector('[data-chat-attachment-draft="att-1"] .cdraft-x') as HTMLButtonElement
+    removeBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(container.querySelector('[data-chat-attachment-draft="att-1"]')).toBeNull()
+    expect(container.querySelector('[data-chat-attachment-draft="att-2"]')).not.toBeNull()
+  })
+
+  it('highlights drag-over state and ingests dropped files', async () => {
+    vi.mocked(collectAttachments).mockResolvedValue({
+      attachments: [
+        {
+          id: 'att-drop',
+          type: 'file',
+          name: 'drop.json',
+          size: 128,
+          mimeType: 'application/json',
+          data: 'data:application/json;base64,e30=',
+        },
+      ],
+      errors: [],
+    })
+
+    renderComposer()
+    const composer = container.querySelector('.composer') as HTMLDivElement
+
+    fireEvent.dragOver(composer)
+    expect(composer.querySelector('.composer-box')?.classList.contains('drag')).toBe(true)
+
+    fireEvent.drop(composer, {
+      dataTransfer: dataTransferWith([new File(['{}'], 'drop.json', { type: 'application/json' })]),
+    })
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(composer.querySelector('.composer-box')?.classList.contains('drag')).toBe(false)
+    expect(container.querySelector('[data-chat-attachment-draft="att-drop"]')).not.toBeNull()
+  })
+
+  it('composes ordered blocks on send: attach, text', async () => {
+    vi.mocked(collectAttachments).mockResolvedValue({
+      attachments: [
+        {
+          id: 'att-img',
+          type: 'image',
+          name: 'screen.png',
+          size: 1024,
+          mimeType: 'image/png',
+          data: 'data:image/png;base64,abc123',
+          dims: '100×100',
+        },
+      ],
+      errors: [],
+    })
+
+    const onSend = vi.fn()
+    renderComposer({ draft: 'check this <tag>', onSend })
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['x'], 'screen.png', { type: 'image/png' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledOnce()
+    const blocks = onSend.mock.calls[0]?.[0].blocks as ChatBlock[]
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toMatchObject({ t: 'attach', name: 'screen.png', kind: 'image' })
+    expect(blocks[1]).toMatchObject({ t: 'p', html: 'check this &lt;tag&gt;' })
+    expect(onSend.mock.calls[0]?.[0].userBlocks).toEqual([
+      {
+        type: 'image',
+        attachmentId: 'att-img',
+        name: 'screen.png',
+        mimeType: 'image/png',
+        size: 1024,
+      },
+      { type: 'text', text: 'check this <tag>' },
+    ])
+    const clientActionId = onSend.mock.calls[0]?.[0].clientActionId
+    expect(clientActionId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(clientActionId).not.toContain('check this <tag>')
+    expect(clientActionId).not.toContain('att-img')
+  })
+
+  it('mints content-independent client action ids for repeated sends', async () => {
+    const onSend = vi.fn()
+    renderComposer({ draft: 'same text', onSend })
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(2)
+    const firstId = onSend.mock.calls[0]?.[0].clientActionId
+    const secondId = onSend.mock.calls[1]?.[0].clientActionId
+    expect(firstId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(secondId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(firstId).not.toBe(secondId)
+    expect(firstId).not.toContain('same text')
+    expect(secondId).not.toContain('same text')
+  })
+
+  it('does not derive client action ids from attachment payloads', async () => {
+    const baseAttachment: Omit<KeeperByteAttachment, 'data'> = {
+      id: 'att-same',
+      type: 'image',
+      name: 'screen.png',
+      size: 1024,
+      mimeType: 'image/png',
+      dims: '100×100',
+    }
+    vi.mocked(collectAttachments)
+      .mockResolvedValueOnce({
+        attachments: [{ ...baseAttachment, data: 'data:image/png;base64,AAAA' }],
+        errors: [],
+      })
+      .mockResolvedValueOnce({
+        attachments: [{ ...baseAttachment, data: 'data:image/png;base64,BBBB' }],
+        errors: [],
+      })
+
+    const onSend = vi.fn()
+    renderComposer({ draft: 'same text', onSend })
+
+    let fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['a'], 'screen.png', { type: 'image/png' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    let sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['b'], 'screen.png', { type: 'image/png' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(2)
+    const firstId = onSend.mock.calls[0]?.[0].clientActionId
+    const secondId = onSend.mock.calls[1]?.[0].clientActionId
+    expect(firstId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(secondId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(firstId).not.toBe(secondId)
+    expect(firstId).not.toContain('same text')
+    expect(firstId).not.toContain('att-same')
+    expect(firstId).not.toContain('AAAA')
+    expect(secondId).not.toContain('BBBB')
+  })
+
+  it('preserves audio attachments as audio user blocks', async () => {
+    vi.mocked(collectAttachments).mockResolvedValue({
+      attachments: [
+        {
+          id: 'att-audio',
+          type: 'file',
+          name: 'voice.webm',
+          size: 2048,
+          mimeType: 'audio/webm',
+          data: 'data:audio/webm;base64,AAAA',
+        },
+      ],
+      errors: [],
+    })
+
+    const onSend = vi.fn()
+    renderComposer({ onSend })
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['x'], 'voice.webm', { type: 'audio/webm' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledOnce()
+    expect(onSend.mock.calls[0]?.[0].userBlocks).toEqual([
+      {
+        type: 'audio',
+        attachmentId: 'att-audio',
+        name: 'voice.webm',
+        mimeType: 'audio/webm',
+        size: 2048,
+      },
+    ])
+    expect(onSend.mock.calls[0]?.[0].clientActionId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(onSend.mock.calls[0]?.[0].clientActionId).not.toContain('att-audio')
+  })
+
+  it('keeps send disabled until there is content', () => {
+    renderComposer()
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    expect(sendBtn.disabled).toBe(true)
+  })
+
+  it('handles voice draft transcription, rendering, removal, and serialization on send', async () => {
+    const onSend = vi.fn()
+    renderComposer({ onSend })
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    expect(sendBtn.disabled).toBe(true)
+
+    // Simulate the capture/transcribe boundary completing transcription.
+    if (mockTranscribeCallback) {
+      mockTranscribeCallback('스케줄러 결과 확인 바람')
+    }
+    await new Promise((r) => setTimeout(r, 10))
+
+    // 1. Voice draft should be rendered
+    const voiceDraftEl = container.querySelector('[data-testid="composer-voice-draft"]')
+    expect(voiceDraftEl).not.toBeNull()
+    expect(voiceDraftEl?.textContent).toContain('스케줄러 결과 확인 바람')
+
+    // 2. Send button should be enabled because we have content
+    expect(sendBtn.disabled).toBe(false)
+
+    // 3. Click send button and verify text-only STT serialization.
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledOnce()
+    const payload = onSend.mock.calls[0]?.[0]
+    expect(payload.text).toContain('스케줄러 결과 확인 바람')
+    expect(payload.blocks).toHaveLength(1)
+    expect(payload.blocks[0]).toMatchObject({ t: 'p' })
+    expect(payload.blocks.some((block: ChatBlock) => block.t === 'voice')).toBe(false)
+
+    // 4. Voice draft should be cleared after send
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).toBeNull()
+  })
+
+  it('allows removing voice draft before send', async () => {
+    renderComposer()
+
+    if (mockTranscribeCallback) {
+      mockTranscribeCallback('임시 받아쓰기')
+    }
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).not.toBeNull()
+
+    const removeBtn = container.querySelector('[data-testid="composer-voice-draft"] .cdraft-x') as HTMLButtonElement
+    removeBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(container.querySelector('[data-testid="composer-voice-draft"]')).toBeNull()
+  })
+})
+
+describe('rich block URL safety', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders safe image block src', () => {
+    const blocks: ChatBlock[] = [{ t: 'image', src: 'https://example.com/x.png' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const img = container.querySelector('img')
+    expect(img?.getAttribute('src')).toBe('https://example.com/x.png')
+  })
+
+  it('renders data-url image and audio block sources', () => {
+    const imageSrc = 'data:image/png;base64,aGVsbG8='
+    const audioSrc = 'data:audio/webm;base64,aGVsbG8='
+    const blocks: ChatBlock[] = [
+      { t: 'image', src: imageSrc },
+      { t: 'voice', src: audioSrc, transcript: 'voice memo' },
+    ]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-chat-block="image"] img')?.getAttribute('src')).toBe(imageSrc)
+    expect(container.querySelector('[data-chat-block="voice"] audio')?.getAttribute('src')).toBe(audioSrc)
+  })
+
+  it('blocks javascript: image src and shows placeholder', () => {
+    const blocks: ChatBlock[] = [{ t: 'image', src: 'javascript:alert(1)' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toContain('unsafe URL')
+  })
+
+  it('renders safe link block href', () => {
+    const blocks: ChatBlock[] = [{ t: 'link', url: 'https://example.com', title: 'Example' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const a = container.querySelector('a')
+    expect(a?.getAttribute('href')).toBe('https://example.com')
+  })
+
+  it('blocks javascript: link href', () => {
+    const blocks: ChatBlock[] = [{ t: 'link', url: 'javascript:alert(1)', title: 'Bad' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const a = container.querySelector('a')
+    expect(a?.getAttribute('href')).toBe('#')
+    expect(container.textContent).toContain('unsafe URL')
+  })
+})
+
+describe('ChatTranscript — workspace day dividers (C1)', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('inserts one divider before the first message of each calendar day', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'a', text: 'day one', timestamp: '2026-03-24T12:00:00.000Z' }),
+          entry({ id: 'b', text: 'same day', timestamp: '2026-03-24T13:00:00.000Z' }),
+          entry({ id: 'c', text: 'two days later', timestamp: '2026-03-26T12:00:00.000Z' }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showDayDividers=${true}
+      />`,
+      container,
+    )
+    // Two distinct days (a/b share one) → two dividers, not three.
+    const dividers = container.querySelectorAll('.kw-daydiv')
+    expect(dividers.length).toBe(2)
+    // Absolute "M월 D일" label (timezone-independent shape assertion).
+    expect(dividers[0]?.textContent ?? '').toMatch(/\d+월 \d+일/)
+  })
+
+  it('renders no dividers when the flag is off (every non-workspace surface)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'a', text: 'one', timestamp: '2026-03-24T12:00:00.000Z' }),
+          entry({ id: 'c', text: 'two', timestamp: '2026-03-26T12:00:00.000Z' }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+    expect(container.querySelectorAll('.kw-daydiv').length).toBe(0)
+  })
+
+  it('does not duplicate a day divider when a null-timestamp entry splits a day', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          // Both timestamps are midday UTC so they land on one calendar day in
+          // any plausible test TZ (the C1 baseline test uses the same window).
+          entry({ id: 'a', text: 'morning', timestamp: '2026-03-24T12:00:00.000Z' }),
+          // live placeholder with no timestamp, mid-day
+          entry({ id: 'live', text: '응답 연결 중', role: 'assistant', source: 'direct_assistant', timestamp: null, delivery: 'sending' }),
+          entry({ id: 'b', text: 'evening', timestamp: '2026-03-24T13:00:00.000Z' }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showDayDividers=${true}
+      />`,
+      container,
+    )
+    // One calendar day → exactly one divider. Adjacent-only comparison would
+    // let the null-ts entry reset the previous key and re-emit a second one.
+    expect(container.querySelectorAll('.kw-daydiv').length).toBe(1)
+  })
+})
+
+describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    resetToolCallOutputs()
+  })
+
+  it('folds consecutive tool calls into one turn timeline card when grouping is on', () => {
+    recordVerifiedToolCallOutputs([
+      toolCallOutput({ tool_use_id: 't1', output: 'r1' }),
+      toolCallOutput({ tool_use_id: 't2', output: 'r2' }),
+    ])
+    render(
+      html`<${ChatTranscript} keeperName="sangsu"
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'masc_board_list' }),
+          toolEntry({ id: 'tool-t2', label: 'keeper_tasks_list' }),
+          entry({ id: 'a', text: '답변', role: 'assistant', source: 'direct_assistant' }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+    const cards = container.querySelectorAll('[data-chat-tool-trace]')
+    expect(cards.length).toBe(1)
+    expect(cards[0]?.textContent).toContain('턴 타임라인')
+    expect(cards[0]?.textContent).toContain('3단계')
+    expect(cards[0]?.textContent).toContain('도구 2')
+    expect(cards[0]?.textContent).toContain('Chat 1')
+    expect(cards[0]?.textContent).toContain('masc_board_list')
+    expect(cards[0]?.textContent).toContain('keeper_tasks_list')
+    expect(cards[0]?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('답변')
+    // Grouped surface keeps no standalone per-row tool bubbles.
+    expect(container.querySelectorAll('[data-chat-variant="tool-call"]').length).toBe(0)
+  })
+
+  it('keeps grouped tool calls connected to the following assistant answer', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'masc_board_list', turnRef: 'trace-a#1' }),
+          entry({
+            id: 'a',
+            text: '도구 결과로 답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-a#1',
+            traceSteps: [{ kind: 'think', text: 'reading tool output' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    expect(bundle?.querySelector('[data-chat-work-trace]')).not.toBeNull()
+    expect(bundle?.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
+    expect(bundle?.textContent).toContain('Thinking')
+    expect(bundle?.textContent).toContain('reading tool output')
+    expect(bundle?.textContent).toContain('masc_board_list')
+    expect(bundle?.textContent).toContain('도구 결과로 답합니다')
+  })
+
+  it('does not attach a turn_ref-mismatched tool run to the following assistant', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'masc_board_list', turnRef: 'trace-a#1' }),
+          entry({
+            id: 'a',
+            text: '다른 턴 답변',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-b#2',
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-tool-trace]')
+    expect(container.querySelector('[data-chat-turn-bundle]')).toBeNull()
+    expect(trace?.textContent).toContain('masc_board_list')
+    expect(trace?.textContent).not.toContain('다른 턴 답변')
+  })
+
+  it('renders assistant thinking as a turn timeline even without tool calls', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '곧 답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: 'checking context' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    expect(bundle?.textContent).toContain('턴 타임라인')
+    expect(bundle?.textContent).toContain('2단계')
+    expect(bundle?.textContent).toContain('Think 1')
+    expect(bundle?.textContent).toContain('Chat 1')
+    expect(bundle?.textContent).toContain('Thinking')
+    expect(bundle?.textContent).toContain('checking context')
+    expect(bundle?.textContent).toContain('곧 답합니다')
+    expect(bundle?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('곧 답합니다')
+  })
+
+  it('renders intermediate assistant text as compact progress without fabricating Chat', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'assistant-progress',
+            text: '',
+            role: 'assistant',
+            source: 'direct_assistant',
+            delivery: 'error',
+            traceSteps: [
+              {
+                kind: 'progress',
+                text: 'PR 목록을 확인하고 리뷰 상태를 보겠다.',
+                agentCoreBlockIndex: 2,
+              },
+              {
+                kind: 'tool',
+                name: 'Execute',
+                toolCallId: 'tc-progress',
+                status: 'err',
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-work-trace]')
+    expect(trace?.textContent).toContain('Progress 1')
+    expect(trace?.textContent).not.toContain('Chat 1')
+    expect(container.textContent).not.toContain('(empty reply)')
+    expect(trace?.querySelector('[data-chat-trace-step="chat"]')).toBeNull()
+    const progress = trace?.querySelector('[data-chat-trace-step="progress"]') as HTMLElement
+    expect(progress.getAttribute('data-chat-trace-provenance')).toBe('intermediate_text')
+    expect(progress.getAttribute('data-chat-trace-agent-core-block-index')).toBe('2')
+    expect(progress.textContent).toContain('PR 목록을 확인하고 리뷰 상태를 보겠다.')
+  })
+
+  it('badges turn timeline rows with field-level provenance', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-provenance',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-prov#7',
+            traceSteps: [
+              { kind: 'think', text: 'checking context', agentCoreBlockIndex: 3 },
+              {
+                kind: 'tool',
+                name: 'masc_board_list',
+                toolCallId: 'tc-prov',
+                executionId: 'exec-prov',
+                status: 'ok',
+                args: '{"limit":1}',
+                agentCoreBlockIndex: 4,
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const badges = [...container.querySelectorAll('[data-chat-trace-provenance]')]
+      .map(node => node.getAttribute('data-chat-trace-provenance'))
+    expect(badges).toContain('thinking_delta')
+    expect(badges).toContain('tool_call_id')
+    expect(badges).toContain('reply')
+
+    // Bug #11: the visible label stays the stable channel name; the stream
+    // content-block index is provenance detail carried by the hover title and
+    // the data attribute, never the label.
+    const think = container.querySelector('[data-chat-trace-step="think"]') as HTMLElement
+    expect(think.getAttribute('data-chat-trace-provenance')).toBe('thinking_delta')
+    expect(think.getAttribute('data-chat-trace-agent-core-block-index')).toBe('3')
+    expect(think.querySelector('.chat-block-source-badge')?.getAttribute('title'))
+      .toBe('source: KEEPER_THINKING_DELTA, content block 3')
+
+    const tool = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
+    expect(tool.getAttribute('data-chat-trace-provenance')).toBe('tool_call_id')
+    expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-prov')
+    expect(tool.getAttribute('data-chat-trace-agent-core-block-index')).toBe('4')
+    expect(tool.querySelector('.chat-block-source-badge')?.getAttribute('title'))
+      .toBe('source: TOOL_CALL_*, tool_call_id=tc-prov, content block 4')
+    expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
+    expect(tool.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(tool.getAttribute('data-chat-trace-entry-id')).toBeNull()
+
+    const chat = container.querySelector('[data-chat-trace-step="chat"]') as HTMLElement
+    expect(chat.getAttribute('data-chat-trace-provenance')).toBe('reply')
+    expect(chat.getAttribute('data-chat-trace-entry-id')).toBe('a-provenance')
+    expect(chat.getAttribute('data-chat-trace-source')).toBe('direct_assistant')
+    expect(chat.getAttribute('data-chat-trace-turn-ref')).toBe('trace-prov#7')
+  })
+
+  it('exposes structural turn order without timestamp sorting', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-t-order',
+            label: 'keeper_context_status',
+            text: '{"ok":true}',
+            timestamp: '2026-03-24T00:00:01.000Z',
+            turnRef: 'trace-order#1',
+          }),
+          entry({
+            id: 'assistant-order',
+            text: '완료했습니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            timestamp: '2026-03-24T00:00:00.000Z',
+            turnRef: 'trace-order#1',
+            traceSteps: [
+              { kind: 'think', text: 'first structural thought', ts: '2026-03-24T00:00:04.000Z' },
+              {
+                kind: 'tool',
+                name: 'keeper_context_status',
+                toolCallId: 't-order',
+                executionId: 'exec-t-order',
+                status: 'ok',
+                ts: '2026-03-24T00:00:02.000Z',
+              },
+              { kind: 'think', text: 'second structural thought', ts: '2026-03-24T00:00:03.000Z' },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-work-trace]') as HTMLElement
+    expect(trace.getAttribute('data-chat-turn-order-signature')).toBe(
+      'trace:think|tool:t-order|trace:think|chat:assistant-order',
+    )
+
+    const ordered = [...trace.querySelectorAll('[data-chat-turn-order-index]')] as HTMLElement[]
+    expect(ordered).toHaveLength(4)
+    expect(ordered.map(node => node.getAttribute('data-chat-turn-order-index'))).toEqual(['0', '1', '2', '3'])
+    expect(ordered.map(node => node.getAttribute('data-chat-turn-order-kind'))).toEqual(['trace', 'tool', 'trace', 'chat'])
+
+    const tool = ordered[1] as HTMLElement
+    expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('t-order')
+    expect(tool.getAttribute('data-chat-trace-entry-id')).toBe('tool-t-order')
+    expect(tool.getAttribute('data-chat-trace-link-state')).toBe('joined')
+  })
+
+  it('renders thinking text as sanitized markdown with newlines preserved', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: '첫째 줄 **강조**\n둘째 줄\n\n<script>alert(1)</script>' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const findThink = () =>
+      container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement | null
+    const think = findThink()
+    expect(think).not.toBeNull()
+    // Newline-preserving container (raw interpolation folded these to one line).
+    expect(think?.className).toContain('whitespace-pre-wrap')
+    expect(think?.className).toContain('markdown-body')
+    // Markdown is rendered, not shown as literal `**강조**`.
+    await waitFor(
+      () => expect(findThink()?.querySelector('strong')?.textContent).toBe('강조'),
+      { timeout: 3000 },
+    )
+    const renderedThink = findThink()
+    // Both source lines survive the round-trip.
+    expect(renderedThink?.textContent).toContain('첫째 줄')
+    expect(renderedThink?.textContent).toContain('둘째 줄')
+    // Untrusted model markup is stripped (no executable script element).
+    expect(renderedThink?.querySelector('script')).toBeNull()
+  })
+
+  it('keeps long thinking traces collapsed until the operator expands them', () => {
+    const hiddenTail = 'TAIL-MARKER-KEEPER-THINKING'
+    const longThinking = `${'reasoning '.repeat(Math.ceil(THINKING_TRACE_PREVIEW_CHARS / 10) + 20)}${hiddenTail}`
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: longThinking }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const think = container.querySelector('[data-chat-trace-step="think"]') as HTMLElement | null
+    expect(think).not.toBeNull()
+    expect(think?.textContent).toContain('chars hidden')
+    expect(think?.textContent).not.toContain(hiddenTail)
+
+    const expand = think?.querySelector('button') as HTMLButtonElement | null
+    expect(expand).not.toBeNull()
+    fireEvent.click(expand!)
+
+    expect(think?.textContent).toContain(hiddenTail)
+  })
+
+  it('bounds live thinking preview without parsing markdown on every stream chunk', () => {
+    const longThinking = `old heading **gone**\n${'x'.repeat(6_500)}\nlatest **tail**`
+
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '응답 작성 중',
+            role: 'assistant',
+            source: 'direct_assistant',
+            streamState: 'streaming',
+            delivery: 'streaming',
+            traceSteps: [{ kind: 'think', text: longThinking }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    const traceToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+    expect(trace).not.toBeNull()
+    expect(traceToggle).not.toBeNull()
+    expect(trace?.getAttribute('data-chat-turn-stream-state')).toBe('streaming')
+    expect(trace?.getAttribute('data-chat-turn-complete')).toBe('false')
+    expect(traceToggle?.getAttribute('aria-expanded')).toBe('false')
+    expect(trace?.textContent).toContain('턴 타임라인')
+    expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
+    expect(trace?.textContent).not.toContain('latest **tail**')
+
+    fireEvent.click(traceToggle!)
+
+    const think = container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement | null
+    expect(think).not.toBeNull()
+    expect(traceToggle?.getAttribute('aria-expanded')).toBe('true')
+    expect(think?.getAttribute('data-chat-thinking-preview')).toBe('truncated')
+    expect(think?.textContent).not.toContain('old heading')
+    expect(think?.textContent).toContain('latest **tail**')
+    expect(think?.querySelector('strong')).toBeNull()
+    expect((think?.textContent ?? '').length).toBeLessThan(longThinking.length)
+  })
+
+  it('auto-opens a live thinking timeline when the assistant turn settles', async () => {
+    const thinking = 'checked context and selected the final answer'
+    const renderTurn = (assistant: KeeperConversationEntry): void => {
+      render(
+        html`<${ChatTranscript}
+          entries=${[assistant]}
+          emptyText="empty"
+          groupToolCalls=${true}
+          variant="messenger"
+        />`,
+        container,
+      )
+    }
+
+    renderTurn(entry({
+      id: 'a',
+      text: '응답 작성 중',
+      role: 'assistant',
+      source: 'direct_assistant',
+      streamState: 'streaming',
+      delivery: 'streaming',
+      traceSteps: [{ kind: 'think', text: thinking }],
+    }))
+
+    const initialToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+    expect(initialToggle).not.toBeNull()
+    expect(initialToggle?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
+
+    renderTurn(entry({
+      id: 'a',
+      text: '완료된 응답',
+      role: 'assistant',
+      source: 'direct_assistant',
+      streamState: null,
+      delivery: 'history',
+      traceSteps: [{ kind: 'think', text: thinking }],
+    }))
+
+    await waitFor(() => {
+      const settledToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+      expect(settledToggle?.getAttribute('aria-expanded')).toBe('true')
+    })
+    const settledTrace = container.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(settledTrace?.getAttribute('data-chat-turn-stream-state')).toBe('complete')
+    expect(settledTrace?.getAttribute('data-chat-turn-complete')).toBe('true')
+    expect(container.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain(thinking)
+    expect(container.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('완료된 응답')
+  })
+
+  // Switching keepers unmounts the whole transcript. The operator's collapse
+  // choice is addressed by turn id, not by component instance, so it has to
+  // survive that unmount — otherwise every timeline the operator folded away
+  // springs back open on return.
+  it('keeps a collapsed turn timeline collapsed across a transcript remount', async () => {
+    const settled = entry({
+      id: 'turn-collapse',
+      text: '완료된 응답',
+      role: 'assistant',
+      source: 'direct_assistant',
+      streamState: null,
+      delivery: 'history',
+      traceSteps: [{ kind: 'think', text: 'considered the options' }],
+    })
+    const renderTurn = (): void => {
+      render(
+        html`<${ChatTranscript}
+          entries=${[settled]}
+          emptyText="empty"
+          groupToolCalls=${true}
+          variant="messenger"
+        />`,
+        container,
+      )
+    }
+    const toggleEl = (): HTMLButtonElement | null =>
+      container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+
+    renderTurn()
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.click(toggleEl() as HTMLButtonElement)
+    await waitFor(() => {
+      expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+    })
+
+    // The keeper switch: transcript unmounted, then mounted again.
+    render(null, container)
+    renderTurn()
+
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
+  })
+
+  it('re-opens a turn timeline the operator expanded after a remount', async () => {
+    const live = (streaming: boolean): KeeperConversationEntry =>
+      entry({
+        id: 'turn-expand',
+        text: streaming ? '응답 작성 중' : '완료된 응답',
+        role: 'assistant',
+        source: 'direct_assistant',
+        streamState: streaming ? 'streaming' : null,
+        delivery: streaming ? 'streaming' : 'history',
+        traceSteps: [{ kind: 'think', text: 'considered the options' }],
+      })
+    const renderTurn = (streaming: boolean): void => {
+      render(
+        html`<${ChatTranscript}
+          entries=${[live(streaming)]}
+          emptyText="empty"
+          groupToolCalls=${true}
+          variant="messenger"
+        />`,
+        container,
+      )
+    }
+    const toggleEl = (): HTMLButtonElement | null =>
+      container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+
+    renderTurn(true)
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(toggleEl() as HTMLButtonElement)
+    await waitFor(() => {
+      expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
+    })
+
+    render(null, container)
+    renderTurn(true)
+
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('renders board post ids in assistant prose as board detail links', () => {
+    const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
+    const label = postId.slice(0, 8)
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-board-link',
+            text: `올렸다. 보드에 ${postId}.`,
+            role: 'assistant',
+            source: 'direct_assistant',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const link = container.querySelector(`a[href="#board?post=${postId}"]`) as HTMLAnchorElement | null
+    expect(link).not.toBeNull()
+    expect(link?.classList.contains('chat-board-post-link')).toBe(true)
+    expect(link?.getAttribute('data-board-post-id')).toBe(postId)
+    expect(link?.getAttribute('aria-label')).toBe(`보드 글 ${postId} 열기`)
+    expect(link?.getAttribute('title')).toBe(`보드 글 ${postId} 열기`)
+    expect(link?.textContent).toContain('보드 글')
+    expect(link?.textContent).toContain(label)
+  })
+
+  it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'masc_board_list' }),
+          toolEntry({ id: 'tool-t2', label: 'keeper_tasks_list' }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    expect(container.querySelectorAll('[data-chat-tool-trace]').length).toBe(0)
+    expect(container.querySelectorAll('[data-chat-variant="tool-call"]').length).toBe(2)
+  })
+
+  it('surfaces real failure status and result inside the card when expanded', async () => {
+    recordVerifiedToolCallOutputs([
+      toolCallOutput({ tool_use_id: 't1', wire_outcome: 'error', output: 'BOOM' }),
+    ])
+    render(
+      html`<${ChatTranscript} keeperName="sangsu"
+        entries=${[toolEntry({ id: 'tool-t1', label: 'masc_board_post', text: '{"k":"v"}' })]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-chat-tool-trace]')?.textContent).toContain('실패 1')
+    const step = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
+    expect(step.querySelector('.chat-block-tstep-status.bad')).not.toBeNull()
+    ;(step.querySelector('.chat-block-tstep-row') as HTMLElement).click()
+    await flushUi()
+    expect(step.textContent).toContain('BOOM')
+  })
+
+  it('marks a tool step pending until its output is joined', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-unjoined', label: 'keeper_context_status' })]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+    ;(container.querySelector('.chat-block-trace-hd') as HTMLButtonElement).click()
+    await flushUi()
+    const step = container.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+  })
+
+  it('marks trace-only tool steps without execution_id as unlinked, not pending', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-unlinked-trace-tool',
+            text: 'legacy trace',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{
+              kind: 'tool',
+              name: 'legacy_tool_without_id',
+              toolCallId: 'provider-only-call',
+            }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle?.textContent).toContain('조인 불가 1')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
+    expect(step?.querySelector('.chat-block-tstep-status.unlinked')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(step?.querySelector('[data-chat-trace-provenance]')?.getAttribute('data-chat-trace-provenance')).toBe('tool_call_id')
+    expect(step?.getAttribute('data-chat-trace-link-state')).toBe('unlinked')
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('unlinked')
+    expect(step?.getAttribute('data-chat-trace-tool-call-id')).toBe('provider-only-call')
+    expect(step?.getAttribute('data-chat-trace-entry-id')).toBeNull()
+
+    ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
+    await flushUi()
+
+    expect(step?.textContent).toContain('실행 ID 없음')
+    expect(step?.textContent).not.toContain('출력 대기 중')
+  })
+
+  it('keeps a settled tool pending when only bulk coverage is known', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-settled', label: 'masc_board_comment', turnRef: 'trace-s#1' }),
+          entry({
+            id: 'a-settled',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-s#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredSinceMs=${Date.parse('2026-03-24T00:00:00.000Z')}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    const trace = bundle?.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(trace?.getAttribute('data-chat-tool-output-covered-since')).toBe(`${Date.parse('2026-03-24T00:00:00.000Z')}`)
+    expect(trace?.getAttribute('data-chat-tool-output-covered-through')).toBe(`${Date.parse('2026-03-24T00:00:01.000Z')}`)
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    // Settled bulk coverage is not evidence of an exact 404.
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
+    // The summary cannot invent a missing result from an unverified row.
+    expect(bundle?.textContent).not.toContain('결과 누락')
+  })
+
+  it.each([
+    { executionId: null, streamState: null, status: 'unlinked', summary: '조인 불가 1' },
+    { executionId: 'exec-canonical', streamState: null, status: 'pending', summary: null },
+    { executionId: null, streamState: 'streaming' as const, status: 'pending', summary: null },
+  ])('classifies provider delivery output as $status without inventing a result', ({ executionId, streamState, status, summary }) => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'codex-delivery-row', label: 'WebFetch', turnRef: 'trace-codex#4',
+            toolCallId: 'exec-provider-uuid', executionId, toolCallEnded: true,
+            text: '{"url":"https://example.com"}',
+          }),
+          entry({
+            id: 'codex-assistant', role: 'assistant', source: 'direct_assistant',
+            turnRef: 'trace-codex#4', text: 'HTTP 200', streamState,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredSinceMs=${Date.parse('2026-03-24T00:00:00.000Z')}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
+      />`, container,
+    )
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    if (streamState === 'streaming') {
+      const toggle = bundle?.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+      expect(toggle).not.toBeNull()
+      fireEvent.click(toggle!)
+    }
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe(status)
+    expect(step?.querySelector('.chat-block-tstep-status.ok')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.bad')).toBeNull()
+    if (summary) expect(bundle?.textContent).toContain(summary)
+    if (status !== 'missing') expect(bundle?.textContent).not.toContain('결과 누락')
+    if (status !== 'unlinked') expect(bundle?.textContent).not.toContain('조인 불가')
+  })
+
+  it('keeps a settled unjoined tool step pending until tool outputs hydrate', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-before-hydration', label: 'masc_board_comment', turnRef: 'trace-h#1' }),
+          entry({
+            id: 'a-before-hydration',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-h#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('not-hydrated')
+    expect(bundle?.textContent).not.toContain('결과 누락')
+  })
+
+  it('marks settled unjoined tool steps as hydration-failed when the output surface failed', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-hydration-failed', label: 'keeper_context_status', turnRef: 'trace-f#1' }),
+          entry({
+            id: 'a-hydration-failed',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-f#1',
+            streamState: null,
+            streamContract: {
+              source: 'sse_event',
+              status: 'backend_terminal_event',
+              eventName: 'RUN_FINISHED',
+            },
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputHydrationContract=${{
+          source: 'tool_calls_endpoint',
+          status: 'failed',
+          failureReason: 'HTTP 502',
+          startedAtMs: 1_000,
+          completedAtMs: 1_500,
+          coveredSinceMs: null,
+          coveredThroughMs: null,
+        }}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const trace = bundle?.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-source')).toBe('tool_calls_endpoint')
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('failed')
+    expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBe('HTTP 502')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-source')).toBe('sse_event')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-status')).toBe('backend_terminal_event')
+    expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
+    expect(step?.querySelector('.chat-block-tstep-status.hydration-failed')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+    expect(bundle?.textContent).toContain('출력 hydration 실패 1')
+
+    ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
+    await flushUi()
+    expect(step?.textContent).toContain('출력 hydration 실패 — HTTP 502')
+  })
+
+  it('marks a settled unjoined tool step as coverage-gap when only older output hydration completed', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-unjoined-after-old-hydration',
+            label: 'masc_board_comment',
+            timestamp: '2026-03-24T00:00:10.000Z',
+            turnRef: 'trace-old#1',
+          }),
+          entry({
+            id: 'a-after-old-hydration',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-old#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
+    expect(bundle?.textContent).not.toContain('결과 누락')
+    expect(bundle?.textContent).toContain('출력 범위 밖 1')
+  })
+
+  it('marks a settled unjoined tool step as coverage-gap when it predates the hydrated tool-output tail', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-unjoined-before-covered-tail',
+            label: 'masc_board_comment',
+            timestamp: '2026-03-24T00:00:05.000Z',
+            turnRef: 'trace-tail#1',
+          }),
+          entry({
+            id: 'a-before-covered-tail',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-tail#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredSinceMs=${Date.parse('2026-03-24T00:00:10.000Z')}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:20.000Z')}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.coverage-gap')).toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(step?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
+    expect(bundle?.textContent).not.toContain('결과 누락')
+    expect(bundle?.textContent).toContain('출력 범위 밖 1')
+  })
+
+  it('keeps an unjoined tool step pending while the owning turn is still streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-live', label: 'masc_board_comment', turnRef: 'trace-l#1' }),
+          entry({
+            id: 'a-live',
+            text: '응답 작성 중',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-l#1',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const traceToggle = bundle?.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+    expect(traceToggle).not.toBeNull()
+    fireEvent.click(traceToggle!)
+
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    // Output may still arrive while the turn streams, so keep it pending.
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
+  })
+})
+
+describe('ChatMessageBubble — workspace source badge (C2)', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('badges a non-obvious provenance (world-state) when enabled', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'w', text: 'injected context', role: 'system', source: 'world_state_prompt' })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.world')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('월드')
+  })
+
+  it('leaves an ordinary user turn unbadged', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'u', text: 'hi', role: 'user', source: 'direct_user' })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge')).toBeNull()
+  })
+
+  it('badges a dashboard-surface row as the operator (사람)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'd',
+          text: 'from the dashboard',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'dashboard' },
+          speakerAuthority: 'owner',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-dashboard')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('사람')
+    expect(badge?.getAttribute('title')).toContain('surface=dashboard')
+    expect(badge?.getAttribute('title')).toContain('speaker_authority=owner')
+  })
+
+  it('badges a discord connector row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'dc',
+          text: 'from discord',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'discord', channel_id: 'c1' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-discord')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('Discord')
+  })
+
+  it('badges a slack connector row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'sl',
+          text: 'from slack',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'slack', channel_id: 'C9' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge.origin-slack')?.textContent).toContain('Slack')
+  })
+
+  it('badges a workspace fleet broadcast row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'b',
+          text: 'fleet announcement',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'broadcast' },
+          speakerName: 'keeper-taskmaster-agent',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-broadcast')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('브로드캐스트')
+    expect(badge?.getAttribute('title')).toContain('speaker_name=keeper-taskmaster-agent')
+  })
+
+  it('badges an agent-surface row with the sending keeper name', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'a',
+          text: 'direct keeper message',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'agent' },
+          speakerName: 'keeper-lane-smith-agent',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-agent')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('keeper-lane-smith-agent')
+  })
+
+  it('keeps the semantic badge when a surface is also present', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'ws',
+          text: 'world snapshot',
+          role: 'system',
+          source: 'world_state_prompt',
+          surface: { kind: 'discord', channel_id: 'c1' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge.world')).not.toBeNull()
+    expect(container.querySelector('.kw-src-badge.origin-discord')).toBeNull()
+  })
+
+  it('renders no badge when the flag is off', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'w', text: 'injected', role: 'system', source: 'world_state_prompt' })]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge')).toBeNull()
+  })
+})
+
+describe('fusion chat card', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    window.location.hash = '#workspace'
+    vi.mocked(fetchBoardPost).mockReset()
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function fusionEntry(): KeeperConversationEntry {
+    return {
+      id: 'fusion-1',
+      role: 'assistant',
+      source: 'internal_assistant',
+      label: 'sangsu',
+      text: 'Fusion deliberation (run fus-1) — answer — done',
+      rawText: 'Fusion deliberation (run fus-1) — answer — done',
+      timestamp: '2026-06-19T00:00:00.000Z',
+      delivery: 'history',
+      streamState: null,
+      details: null,
+      error: null,
+      blocks: [{ t: 'fusion', board_post_id: 'p-1', run_id: 'fus-1' }],
+    }
+  }
+
+  it('renders a collapsed fusion card without fetching the board post', () => {
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    const card = container.querySelector('[data-fusion-card]')
+    expect(card).not.toBeNull()
+    expect(card?.textContent).toContain('Fusion 심의')
+    // Collapsed: no detail rendered and no network call yet.
+    expect(container.querySelector('[data-fusion-detail]')).toBeNull()
+    expect(fetchBoardPost).not.toHaveBeenCalled()
+    // Focus ring must be the resolved CHAT_FOCUS_RING string, not the stringified
+    // ringFocusClasses function (a bare `${ringFocusClasses}` interpolation regression).
+    const expandButton = card?.querySelector('button')
+    expect(expandButton?.className).toContain('focus-visible:outline-none')
+    expect(expandButton?.className).not.toContain('opts')
+  })
+
+  it('routes from the collapsed fusion card to the run and source board post', () => {
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+
+    const openRun = container.querySelector('[data-testid="fusion-chat-open-run"]') as HTMLButtonElement | null
+    const openBoard = container.querySelector('[data-testid="fusion-chat-open-board"]') as HTMLButtonElement | null
+    expect(openRun).not.toBeNull()
+    expect(openBoard).not.toBeNull()
+
+    fireEvent.click(openRun as HTMLButtonElement)
+    expect(window.location.hash).toBe('#fusion?run_id=fus-1')
+    expect(container.querySelector('[data-fusion-detail]')).toBeNull()
+    expect(fetchBoardPost).not.toHaveBeenCalled()
+
+    fireEvent.click(openBoard as HTMLButtonElement)
+    expect(window.location.hash).toBe('#board?post=p-1')
+    expect(container.querySelector('[data-fusion-detail]')).toBeNull()
+    expect(fetchBoardPost).not.toHaveBeenCalled()
+  })
+
+  it('lazy-fetches the board post and renders panel answers + judge on expand', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [
+          { model: 'ollama_cloud.kimi-k2-6', status: 'answered', answer: 'PANEL ONE ANSWER' },
+          { model: 'ollama_cloud.minimax-m3', status: 'failed', reason_detail: 'timeout' },
+        ],
+        judge: { status: 'synthesized', decision: 'answer — ok', resolved_answer: 'JUDGE RESOLVED ANSWER' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    const toggle = container.querySelector('[data-fusion-card] button') as HTMLButtonElement | null
+    expect(toggle).not.toBeNull()
+    fireEvent.click(toggle as HTMLButtonElement)
+    await flushUi()
+
+    expect(fetchBoardPost).toHaveBeenCalledWith('p-1')
+    const detail = container.querySelector('[data-fusion-detail]')
+    // Judge conclusion + failed-panel reason are visible immediately.
+    expect(detail?.textContent).toContain('JUDGE RESOLVED ANSWER')
+    expect(detail?.textContent).toContain('timeout')
+    // Answered panel answers are collapsed by default — open the panel to read.
+    expect(detail?.textContent).not.toContain('PANEL ONE ANSWER')
+    const panelToggle = container.querySelector('[data-fusion-panel] button') as HTMLButtonElement | null
+    expect(panelToggle).not.toBeNull()
+    // Panel toggle carries the resolved focus ring, not a stringified function.
+    expect(panelToggle?.className).toContain('focus-visible:outline-none')
+    expect(panelToggle?.className).not.toContain('opts')
+    fireEvent.click(panelToggle as HTMLButtonElement)
+    await flushUi()
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('PANEL ONE ANSWER')
+  })
+
+  it('normalizes live fusion failure reasons and renders judge errors', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [
+          {
+            model: 'ollama_cloud.kimi-k2-6',
+            status: 'failed',
+            reason_detail: "Provider 'unknown' timeout phase=http_operation",
+            reason_code: 'provider_error',
+          },
+          {
+            model: 'ollama_cloud.minimax-m3',
+            status: 'failed',
+            reason_detail: "Provider 'unknown' bad gateway",
+          },
+          {
+            model: 'ollama_cloud.deepseek-v4-flash',
+            status: 'failed',
+            reason_detail: 'timeout',
+          },
+        ],
+        judge: { status: 'failed', decision: 'blocked', error: 'judge failed hard' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] > button') as HTMLButtonElement)
+    await flushUi()
+
+    const detail = container.querySelector('[data-fusion-detail]')
+    expect(detail?.textContent).toContain("Provider 'ollama_cloud.kimi-k2-6' timeout phase=http_operation")
+    expect(detail?.textContent).toContain("Provider 'ollama_cloud.minimax-m3' bad gateway")
+    expect(detail?.textContent).toContain('timeout')
+    expect(detail?.textContent).toContain('judge failed hard')
+    expect(detail?.textContent).not.toContain("Provider 'unknown'")
+  })
+
+  it('shows an error message when the board post fetch fails', async () => {
+    vi.mocked(fetchBoardPost).mockRejectedValue(new Error('boom'))
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('불러오지 못했습니다')
+  })
+
+  it('falls back to the persisted conclusion text when the board fetch fails', async () => {
+    vi.mocked(fetchBoardPost).mockRejectedValue(new Error('boom'))
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const fallback = container.querySelector('[data-fusion-fallback]')
+    expect(fallback).not.toBeNull()
+    expect(fallback?.textContent).toContain('answer — done')
+  })
+
+  it('falls back to the persisted conclusion text when the board post has no panel/judge', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: { source: 'fusion', panel: [], judge: null },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const fallback = container.querySelector('[data-fusion-fallback]')
+    expect(fallback).not.toBeNull()
+    expect(fallback?.textContent).toContain('answer — done')
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).not.toContain('비어 있습니다')
+  })
+
+  it('does not show the fallback conclusion when panel/judge load successfully', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [{ model: 'm1', status: 'answered', answer: 'A' }],
+        judge: { status: 'synthesized', decision: 'd', resolved_answer: 'R' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    expect(container.querySelector('[data-fusion-fallback]')).toBeNull()
+  })
+
+  it('shows a retention note in the expanded detail', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [],
+        judge: { status: 'synthesized', decision: 'd', resolved_answer: 'R' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const retention = container.querySelector('[data-fusion-retention]')
+    expect(retention).not.toBeNull()
+    expect(retention?.textContent).toContain('만료')
+  })
+
+  it('renders judge.synthesis as markdown (not the raw resolved_answer dump)', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [{ model: 'm1', status: 'answered', answer: '## Heading One\n\n- bullet item', output_tokens: 100 }],
+        judge: {
+          status: 'synthesized',
+          decision: 'answer — ok',
+          synthesis: '**Consensus**\n\n- agreed point',
+          resolved_answer: 'PLAIN RESOLVED',
+        },
+        observed_usage: { input_tokens: 712, output_tokens: 3432 },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+
+    // Judge synthesis renders to real markdown elements, not a collapsed dump.
+    // AsyncMarkdownDiv reaches those elements through a dynamic import of the
+    // markdown renderer, so this waits on the elements rather than on a fixed
+    // 30ms: that sleep passed on an idle machine and, under a full-suite run,
+    // delivered fewer scheduler turns than the import needed.
+    const judge = await waitFor(() => {
+      const el = container.querySelector('[data-fusion-judge]')
+      expect(el?.querySelector('strong')?.textContent).toBe('Consensus')
+      return el
+    })
+    // synthesis takes precedence over resolved_answer when both present.
+    expect(judge?.textContent).toContain('agreed point')
+    expect(judge?.textContent).not.toContain('PLAIN RESOLVED')
+    // Panel answer markdown renders to real elements once its row is opened.
+    // Scope to the panel — the judge synthesis above also contains an <li>.
+    fireEvent.click(container.querySelector('[data-fusion-panel] button') as HTMLButtonElement)
+    const panel = await waitFor(() => {
+      const el = container.querySelector('[data-fusion-panel]')
+      expect(el?.querySelector('h2')?.textContent).toBe('Heading One')
+      return el
+    })
+    expect(panel?.querySelector('li')?.textContent).toContain('bullet item')
+  })
+
+  it('sanitizes untrusted model markup in judge synthesis and panel answers', async () => {
+    const xss = '**ok**\n\n<script>alert(1)</script>\n\n<img src=x onerror=alert(2)>\n\n[click](javascript:alert(3))'
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [{ model: 'm1', status: 'answered', answer: xss, output_tokens: 10 }],
+        judge: { status: 'synthesized', decision: 'answer', synthesis: xss },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    fireEvent.click(container.querySelector('[data-fusion-panel] button') as HTMLButtonElement)
+    await flushUi()
+
+    // Benign markdown still renders, but every executable vector is stripped by purifyHtml.
+    const detail = container.querySelector('[data-fusion-detail]')
+    expect(detail?.querySelector('strong')?.textContent).toBe('ok')
+    expect(container.querySelector('[data-fusion-detail] script')).toBeNull()
+    const html_ = detail?.innerHTML ?? ''
+    expect(html_).not.toContain('onerror')
+    expect(html_.toLowerCase()).not.toContain('javascript:')
+  })
+
+  it('surfaces token usage and answered count in the header', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [
+          { model: 'm1', status: 'answered', answer: 'a', output_tokens: 1200 },
+          { model: 'm2', status: 'failed', reason_detail: 'timeout' },
+        ],
+        judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'r' },
+        observed_usage: { input_tokens: 712, output_tokens: 3432 },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+
+    const card = container.querySelector('[data-fusion-card]')
+    // 1 of 2 answered, total output tokens formatted with separators.
+    expect(card?.textContent).toContain('패널 1/2 합의')
+    expect(card?.textContent).toContain('3,432 tok')
+    // Per-panel token count present.
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('1,200 tok')
+  })
+
+  it('reads panel entries through the shared Fusion panel reader', async () => {
+    const meta = {
+      source: 'fusion',
+      // `Fusion_sink.panel_meta` (lib/fusion/fusion_sink.ml) writes the token
+      // counts flat on the panel entry, not under a nested `usage` object, and
+      // the shared reader reads exactly those keys.
+      panel: [
+        { model: 'm1', status: 'answered', answer: 'a', output_tokens: 1200 },
+        { model: 'm2', status: 'failed', reason_detail: "Provider 'unknown' timeout", reason: 'stale copy' },
+      ],
+      judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'r' },
+    }
+    vi.mocked(fetchBoardPost).mockResolvedValue({ meta } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+
+    const shared = normalizeFusionPanel(meta.panel)
+    const detail = container.querySelector('[data-fusion-detail]')
+    // Nested usage is read by the shared reader only; the card shows it too.
+    expect(shared[0]?.outputTokens).toBe(1200)
+    expect(detail?.textContent).toContain('1,200 tok')
+    // Same failure line as Board evidence: reason_detail, provider attributed.
+    expect(shared[1]?.reason).toBe("Provider 'm2' timeout")
+    expect(detail?.textContent).toContain("Provider 'm2' timeout")
+    expect(detail?.textContent).not.toContain('stale copy')
+  })
+})
+
+describe('ChatMessageBubble — rich markdown rendering of assistant prose', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderEntries(entries: KeeperConversationEntry[]) {
+    render(html`<${ChatTranscript} entries=${entries} emptyText="empty" />`, container)
+  }
+
+  it('renders a code fence in assistant prose as a code block', async () => {
+    renderEntries([
+      entry({
+        id: 'a1',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'Here you go:\n\n```ts\nconst x = 1\n```',
+      }),
+    ])
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull())
+    const code = container.querySelector('[data-chat-block="code"]')
+    expect(code).not.toBeNull()
+    expect(code?.textContent).toContain('const x = 1')
+  })
+
+  it('routes inline markdown and lists through the rich parser', async () => {
+    renderEntries([
+      entry({
+        id: 'a-inline',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'Summary with **bold** and `code`.\n\n- first\n- second',
+      }),
+    ])
+
+    await waitFor(() => expect(container.querySelector('[data-chat-blocks] strong')?.textContent).toBe('bold'))
+    expect(container.querySelector('[data-chat-blocks] code')?.textContent).toBe('code')
+    const items = Array.from(container.querySelectorAll('[data-chat-blocks] li')).map((node) => node.textContent)
+    expect(items).toEqual(['first', 'second'])
+  })
+
+  it('keeps prior rich blocks visible while streaming text is re-parsed', async () => {
+    renderEntries([
+      entry({
+        id: 'a-stream',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: '```ts\nconst before = 1\n```',
+      }),
+    ])
+
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')?.textContent).toContain('before'))
+
+    renderEntries([
+      entry({
+        id: 'a-stream',
+        role: 'assistant',
+        source: 'direct_assistant',
+        delivery: 'streaming',
+        text: '```ts\nconst after = 2\n```',
+      }),
+    ])
+
+    expect(container.querySelector('[data-chat-block="code"]')?.textContent).toContain('before')
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')?.textContent).toContain('after'))
+  })
+
+  it('re-parses richly even when the backend supplied a degraded p-only block', async () => {
+    // The backend persists a line-based parse (escaped <p>); the render path
+    // must still recover the structured code block from the message text.
+    renderEntries([
+      entry({
+        id: 'a2',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: '```sh\nls -la\n```',
+        blocks: [
+          { t: 'p', html: '```sh' },
+          { t: 'p', html: 'ls -la' },
+          { t: 'p', html: '```' },
+        ],
+      }),
+    ])
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull())
+  })
+
+  it('keeps server blocks as-is when the message carries a non-text card/clip', () => {
+    // A voice clip cannot be reconstructed from text, so the message renders its
+    // server block and does not re-parse the (secondary) transcript prose.
+    renderEntries([
+      entry({
+        id: 'a3',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'transcript mentioning ```code``` inline',
+        blocks: [
+          { t: 'voice', secs: 3, wave: [0.2, 0.4], src: 'https://example.com/v.mp3', transcript: 'note' },
+        ],
+      }),
+    ])
+    expect(container.querySelector('[data-chat-block="voice"]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-block="code"]')).toBeNull()
+  })
+
+  it('does not replace persisted thinking with a markdown reparse', async () => {
+    renderEntries([
+      entry({
+        id: 'a-thinking',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'secondary prose with ```code``` inline',
+        blocks: [{ t: 'thinking', content: 'checked source state', redacted: false }],
+      }),
+    ])
+
+    await flushUi()
+    expect(container.querySelector('[data-chat-block="thinking"]')?.textContent).toContain('checked source state')
+    expect(container.textContent).toContain('secondary prose')
+  })
+})
+
+// Pixel-match of the v2 composer to the Claude-Design prototype (composer.jsx /
+// styles/v2.css). jsdom does not apply the .css files, so these assert the
+// markup contract the CSS depends on: the textarea must be a flush, borderless
+// element with NO inline Tailwind box styling (border/rounded/padding/bg/
+// control-textarea) — all box styling lives in .composer textarea (chat.css).
+describe('ChatComposer v2 prototype surface', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderComposer() {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+  }
+
+  it('renders the composer box, tools, and send button structure', () => {
+    renderComposer()
+    expect(container.querySelector('.composer')).not.toBeNull()
+    expect(container.querySelector('.composer-box')).not.toBeNull()
+    expect(container.querySelector('.composer-tools')).not.toBeNull()
+    expect(container.querySelector('.composer-tools .send')).not.toBeNull()
+    // attachment ctool always present
+    expect(container.querySelector('.composer-tools .ctool')).not.toBeNull()
+  })
+
+  it('renders a flush borderless textarea with no inline box styling', () => {
+    renderComposer()
+    const textarea = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    expect(textarea).not.toBeNull()
+    const cls = textarea.className
+    // flush class hook present
+    expect(cls).toContain('composer-textarea')
+    // no inline Tailwind border / radius / padding / background / utility that
+    // would draw a nested box inside .composer-box (prototype has none).
+    expect(cls).not.toContain('control-textarea')
+    expect(cls).not.toMatch(/\bborder\b/)
+    expect(cls).not.toMatch(/\brounded/)
+    expect(cls).not.toMatch(/\bpx-/)
+    expect(cls).not.toMatch(/\bpy-/)
+    expect(cls).not.toMatch(/\bbg-\[/)
+  })
+
+  it('uses the single-row prototype composer and can omit the redundant workspace footer', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        layout="primary"
+        footerMode="activity"
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    expect((container.querySelector('.composer-textarea') as HTMLTextAreaElement).rows).toBe(1)
+    expect(container.querySelector('.composer-foot')).toBeNull()
+  })
+
+  it('keeps send and attach controls operational', () => {
+    const onSend = vi.fn()
+    render(
+      html`<${ChatComposer}
+        draft="hello"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    const send = container.querySelector('.composer-tools .send') as HTMLButtonElement
+    expect(send).not.toBeNull()
+    expect(send.disabled).toBe(false)
+    send.click()
+    expect(onSend).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([{ isComposing: true }, { keyCode: 229 }])('does not run a slash command or send on composition Enter (%o)', (composition) => {
+    const run = vi.fn()
+    const onSend = vi.fn()
+    const onDraftChange = vi.fn()
+    render(html`<${ChatComposer}
+      draft="/일시"
+      disabled=${false}
+      streaming=${false}
+      commands=${[{ id: 'pause', group: 'lifecycle', label: '일시정지', run }]}
+      onDraftChange=${onDraftChange}
+      onSend=${onSend}
+    />`, container)
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...composition })
+    fireEvent(textarea, event)
+    expect(run).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onDraftChange).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs the active slash command from the strict-index-safe menu selection', () => {
+    const run = vi.fn()
+    render(
+      html`<${ChatComposer}
+        draft="/res"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        commands=${[
+          {
+            id: 'restart',
+            group: 'lifecycle',
+            label: 'Restart keeper',
+            run,
+          },
+        ]}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('.slashmenu')).not.toBeNull()
+    const textarea = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the keeper label in the slash menu header', () => {
+    const keeperLabel = 'ocaml-multicore/eio'
+    render(
+      html`<${ChatComposer}
+        draft="/res"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        draftPersistKey="draft:v1:internal:opaque"
+        keeperLabel=${keeperLabel}
+        commands=${[
+          { id: 'restart', group: 'lifecycle', label: 'Restart keeper', run: () => {} },
+        ]}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    const header = container.querySelector('.slashmenu-h')
+    expect(header?.textContent).toBe(`${keeperLabel} · ${CHAT_COMPOSER_COMMAND_HEADER_SUFFIX}`)
+  })
+
+  it('switches the textarea placeholder to the drop cue while files are dragged over', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="ocaml-multicore/eio 에게 메시지…  (/ 명령 · ⌘+Enter 전송)"
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    expect(textarea.placeholder).toBe('ocaml-multicore/eio 에게 메시지…  (/ 명령 · ⌘+Enter 전송)')
+
+    const composer = container.querySelector('.composer') as HTMLDivElement
+    fireEvent.dragOver(composer)
+    const textareaAfterDrag = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    expect(textareaAfterDrag.placeholder).toBe(CHAT_COMPOSER_DROP_PLACEHOLDER)
+  })
+})
+
+// ================================================================
+// autonomousToolSummary
+// ================================================================
+// A collapsed run's header is the only thing a reader sees without clicking, so
+// it has to say what the run did, not just how many wakes it held.
+
+describe('autonomousToolSummary', () => {
+  const withTools = (id: string, names: string[]): KeeperConversationEntry =>
+    entry({
+      id,
+      text: '',
+      traceSteps: names.map((name) => ({ kind: 'tool' as const, name })),
+    })
+
+  it('returns null when the run called no tools', () => {
+    expect(autonomousToolSummary([entry({ id: 'a', text: 'hi' })])).toBeNull()
+    expect(
+      autonomousToolSummary([
+        entry({ id: 'b', text: '', traceSteps: [{ kind: 'think', text: 'thinking' }] }),
+      ]),
+    ).toBeNull()
+    expect(autonomousToolSummary([])).toBeNull()
+  })
+
+  it('folds consecutive repeats into a count', () => {
+    expect(autonomousToolSummary([withTools('a', ['Execute', 'Execute', 'Execute'])]))
+      .toBe('Execute×3')
+  })
+
+  it('keeps the order the tools ran in', () => {
+    expect(autonomousToolSummary([withTools('a', ['Read', 'Execute', 'Execute', 'Read'])]))
+      .toBe('Read Execute×2 Read')
+  })
+
+  it('spans every turn in the run', () => {
+    expect(autonomousToolSummary([withTools('a', ['Read']), withTools('b', ['Grep'])]))
+      .toBe('Read Grep')
+  })
+
+  it('strips the keeper_ and masc_ prefixes the rows already hide', () => {
+    expect(autonomousToolSummary([withTools('a', ['keeper_tasks_list', 'masc_board_search'])]))
+      .toBe('tasks_list board_search')
+  })
+
+  it('counts the groups it did not show', () => {
+    const out = autonomousToolSummary([withTools('a', ['A', 'B', 'C', 'D', 'E', 'F'])])
+    expect(out).toBe('A B C D +2')
+  })
+
+  it('marks a scan it cut short rather than reporting a short run', () => {
+    const many = Array.from({ length: 2100 }, (_, i) => (i % 2 === 0 ? 'Read' : 'Execute'))
+    const out = autonomousToolSummary([withTools('a', many)])
+    expect(out).not.toBeNull()
+    expect(out!.endsWith('…')).toBe(true)
+  })
+})

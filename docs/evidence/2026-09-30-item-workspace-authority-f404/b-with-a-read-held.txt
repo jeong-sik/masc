@@ -1,0 +1,34 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   MASC Keepers (2)   1 healthy · 1 idle                                     01:19:29  HTTP [connected] [workspace mismatch]  
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    fleet ok   running 0/0   turn capacity 0/0                                                                                
+     HEALTH     KEEPER                           Mode S   TURN LIFECYCLE / RUNTIME              TASK                          
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     ●          alpha                            A D      — b.current                        not observed                     
+     ○ idle     beta                             D D      — paused anthropic.claude-sonnet-4 not observed                     
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+                                                                                                                              
+    OPERATIONS unavailable · keeper lanes load failed: HTTP 503: fixture endpoint unavailable                                 
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+  MISMATCH local /tmp/build_adbe2c_dune/masc-tui-keyboard-rchzhvz9 (r:retry)  j/k:move  p:pause  w:wake  q:quit  …?
+ › alpha — chat needs the server workspace for attachments and pasted files                                                   

@@ -1,0 +1,7 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41180-current-file-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/settings-surface.test.ts src/components/runtime-toml-editor.test.ts src/components/exact-lane-activity-panel.test.ts src/components/browser-lane-activity-panel.test.ts src/components/lane-inventory-panel.test.ts src/components/lane-addons-panel.test.ts src/components/lane-declaration-editor.test.ts
+
+sh: vitest: command not found
+ ELIFECYCLE  Test failed. See above for more details.
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?

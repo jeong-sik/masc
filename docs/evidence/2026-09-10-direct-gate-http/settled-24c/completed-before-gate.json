@@ -1,0 +1,115 @@
+{
+  "ts": 1788995287.546269,
+  "record_kind": "tool_call",
+  "keeper": "direct-gate-http-proof",
+  "tool": "Write",
+  "input": {
+    "file_path": "pre-gate-effect.txt",
+    "content": "completed before Gate approval"
+  },
+  "output": "{\"ok\":true,\"path\":\"/Users/dancer/.masc-integration/direct-gate-24c-1/.masc/playground/docker/direct-gate-http-proof/pre-gate-effect.txt\",\"mode\":\"overwrite\",\"bytes_written\":31,\"via\":\"docker\"}",
+  "success": true,
+  "duration_ms": 5.011081695556641,
+  "runtime_contract": {
+    "keeper_name": "direct-gate-http-proof",
+    "trace_id": "trace-1788995287448-00000",
+    "session_id": "trace-1788995287448-00000",
+    "generation": null,
+    "keeper_turn_id": 1,
+    "task_id": null,
+    "goal_ids": [],
+    "sandbox_profile": "docker",
+    "sandbox_root": "/home/keeper/playground/direct-gate-http-proof",
+    "sandbox_roots": [
+      ".masc/playground/docker/direct-gate-http-proof/"
+    ],
+    "path_resolution": {
+      "read_implicit_cwd": false,
+      "read_explicit_cwd_supported": true,
+      "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+      "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+      "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+      "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+    },
+    "network_mode": "none",
+    "runtime_profile": "primary.sample"
+  },
+  "action_radius": {
+    "tool_name": "Write",
+    "action_key": "Write",
+    "target_kind": "path",
+    "target_path": "pre-gate-effect.txt",
+    "sandbox_target": "docker",
+    "observed_paths": [
+      "pre-gate-effect.txt"
+    ],
+    "success": true,
+    "duration_ms": 5.011081695556641,
+    "error": null
+  },
+  "route_evidence": {
+    "descriptor_id": "agent.write_file",
+    "capability_id": "tool_write_file",
+    "keeper_model_projection": "preferred_public_name",
+    "public_name": "Write",
+    "canonical_name": "tool_write_file",
+    "description": "Write full file content into the keeper sandbox or an allowed path. Missing parent directories are created safely; call Write directly instead of using Execute mkdir.",
+    "executor": "filesystem",
+    "backend": "sandbox_process",
+    "sandbox": "backend_selected",
+    "runtime_handler": "tool_write_file",
+    "execution": "serial",
+    "tool_kind": "atomic",
+    "composable_output": {
+      "kind": "opaque"
+    },
+    "receipt_labels": {
+      "descriptor_id": "agent.write_file",
+      "capability_id": "tool_write_file",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Write",
+      "canonical_name": "tool_write_file",
+      "executor": "filesystem",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_write_file",
+      "execution": "serial",
+      "composable_output": "opaque",
+      "input_schema_source": "canonical_registry"
+    },
+    "eval_tags": [],
+    "readonly": false,
+    "cwd_scope": "keeper_sandbox",
+    "polling_read": false,
+    "via": "docker",
+    "tool_name": "Write"
+  },
+  "agent_name": "direct-gate-http-proof",
+  "model": "runtime",
+  "runtime_profile": "primary.sample",
+  "turn_kind": "direct",
+  "lane": "tool_optional",
+  "thinking_enabled": false,
+  "prompt_fingerprint": "78ebf4a7be56e3aeb025b173824b593a9d529dbd53c733b788a684972c2c9060",
+  "execution_id": "exec-1788995287546-0001",
+  "tool_use_id": "completed-before-gate",
+  "planned_index": 0,
+  "batch_index": 0,
+  "batch_size": 1,
+  "execution_mode": "serial",
+  "disposition": "completed",
+  "file_change_evidence": {
+    "kind": "write",
+    "new_range": {
+      "start_line": 1,
+      "end_line": 1
+    }
+  },
+  "trace_id": "trace-1788995287448-00000",
+  "session_id": "trace-1788995287448-00000",
+  "turn": 0,
+  "keeper_turn_id": 1,
+  "sandbox_profile": "docker",
+  "network_mode": "none",
+  "result_bytes": 190
+}

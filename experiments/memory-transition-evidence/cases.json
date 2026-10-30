@@ -1,0 +1,74 @@
+[
+  {
+    "id": "same_incident_fix",
+    "source_memory": "Incident A17: deployment failed because of a stale migration lock. Deployment was disabled while investigating.",
+    "proposed_memory": "Incident A17 progressed from a deployment freeze to a verified fix: a stale migration lock caused the failure; clearing it restored deployment.",
+    "new_observations": [
+      {
+        "id": "obs-a17",
+        "text": "A17: the operator removed the stale migration lock, reran deployment, and verified successful deployment."
+      }
+    ],
+    "expected_mergeable": true
+  },
+  {
+    "id": "same_incident_restoration",
+    "source_memory": "Incident W3: expired TLS credentials interrupted checkout. Checkout was unavailable during renewal.",
+    "proposed_memory": "Incident W3: checkout was unavailable while expired TLS credentials were renewed; after renewal the team verified checkout recovered.",
+    "new_observations": [
+      {
+        "id": "obs-w3",
+        "text": "W3: credential renewal completed and a checkout probe succeeded afterwards."
+      }
+    ],
+    "expected_mergeable": true
+  },
+  {
+    "id": "other_incident_fix",
+    "source_memory": "Incident A17: deployment is disabled pending resolution of a stale migration lock.",
+    "proposed_memory": "Incident A17 is resolved and deployment restored.",
+    "new_observations": [
+      {
+        "id": "obs-a18",
+        "text": "A18 is a separate incident on another cluster. Its stale migration lock was cleared and deployment succeeded. A17 is still unresolved."
+      }
+    ],
+    "expected_mergeable": false
+  },
+  {
+    "id": "planned_not_observed",
+    "source_memory": "Incident W3: checkout is unavailable due to expired credentials.",
+    "proposed_memory": "Incident W3: credentials were renewed and checkout recovery was verified.",
+    "new_observations": [
+      {
+        "id": "obs-plan",
+        "text": "The operator plans to renew W3 credentials tomorrow. No renewal or recovery probe has run yet."
+      }
+    ],
+    "expected_mergeable": false
+  },
+  {
+    "id": "lost_condition",
+    "source_memory": "Incident A17: recovery requires clearing the lock while deployment is disabled; never remove it during an active migration.",
+    "proposed_memory": "Incident A17 is fixed by removing migration locks at any time.",
+    "new_observations": [
+      {
+        "id": "obs-fix",
+        "text": "The operator disabled deployment, cleared the lock, and verified recovery. The active-migration restriction remains required."
+      }
+    ],
+    "expected_mergeable": false
+  },
+  {
+    "id": "contradicted_resolution",
+    "source_memory": "Incident A17: deployment is disabled pending investigation.",
+    "proposed_memory": "Incident A17 was fixed and deployment is healthy.",
+    "new_observations": [
+      {
+        "id": "obs-check",
+        "text": "The latest A17 recovery attempt failed; deployment remains disabled."
+      }
+    ],
+    "expected_mergeable": false
+  }
+]

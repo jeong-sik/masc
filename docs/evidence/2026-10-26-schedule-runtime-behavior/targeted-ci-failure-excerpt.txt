@@ -1,0 +1,7 @@
+test suite	Test	2026-10-26T12:33:32.0091292Z   TARGET_SUITES: test_schedule_tool_wiring,test_schedule_store,test_schedule_runner,test_schedule_consumer_dispatch,test_lane_addon_scheduled_act
+test suite	Test	2026-10-26T12:33:32.3739020Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-26T12:33:32.6975636Z [targeted] dune build test/test_schedule_tool_wiring.exe test/test_schedule_store.exe test/test_schedule_runner.exe test/test_schedule_consumer_dispatch.exe test/test_lane_addon_scheduled_act.exe
+test suite	Test	2026-10-26T12:36:28.9122264Z File "lib/keeper/keeper_unified_turn.ml", line 508, characters 4-37:
+test suite	Test	2026-10-26T12:36:28.9123170Z 508 | let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
+test suite	Test	2026-10-26T12:36:28.9124890Z Error (warning 32 [unused-value-declaration]): unused value autonomous_yield_request_for_wake.
+test suite	Test	2026-10-26T12:37:05.2423235Z ##[error]Process completed with exit code 1.

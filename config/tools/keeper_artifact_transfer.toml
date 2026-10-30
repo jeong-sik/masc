@@ -1,0 +1,70 @@
+name = "keeper_artifact_transfer"
+description = """
+Export your sandbox file as a durable binary artifact, or materialize one back.
+
+Pass exported references through masc_keeper_delegate artifacts. Bytes move inside the runtime, never through model base64. Materialize uses the existing filesystem write authority."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "action"
+type = "string"
+required = true
+enum = ["export", "materialize"]
+[[params]]
+name = "path"
+type = "string"
+required = true
+[[params]]
+name = "artifact"
+type = "object"
+description = "Required for materialize: copy structured_content.artifact from the export result manifest, without the outer artifact key or the manifest reference itself. Preserve blob._blob.preview, including an empty string."
+additional_properties = false
+
+[[params.params]]
+name = "blob"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params.params]]
+name = "_blob"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params.params.params]]
+name = "sha256"
+type = "string"
+required = true
+
+[[params.params.params.params]]
+name = "bytes"
+type = "integer"
+required = true
+
+[[params.params.params.params]]
+name = "mime"
+type = "string"
+required = true
+
+[[params.params.params.params]]
+name = "preview"
+type = "string"
+required = true
+
+[[params.params]]
+name = "filename"
+type = "string"
+required = true
+
+[[params.params]]
+name = "purpose"
+type = "string"
+required = true
+
+[[params]]
+name = "purpose"
+type = "string"
+description = "Required for export: explain what the receiving Keeper should use this file for."

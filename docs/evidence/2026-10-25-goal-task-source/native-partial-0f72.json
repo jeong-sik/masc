@@ -1,0 +1,54 @@
+{
+  "schema": "masc.task-source.native-partial.v1",
+  "source": "0f72a33d9530195a2a3e721ed375974cc7952266",
+  "run": 40195449903,
+  "job": 121175192827,
+  "result": "PARTIAL_FAILURE",
+  "executed_cases": 65,
+  "passed_cases": 62,
+  "failed_cases": 3,
+  "suites": {
+    "test_verification_collaboration_evidence": {
+      "cases": 9,
+      "passed": 6,
+      "failed": 3
+    },
+    "test_verification_authority_tools": {
+      "cases": 30,
+      "passed": 30,
+      "failed": 0
+    },
+    "test_goal_verifier_original": {
+      "cases": 8,
+      "passed": 8,
+      "failed": 0
+    },
+    "test_verifier_review_worker": {
+      "cases": 18,
+      "passed": 18,
+      "failed": 0
+    }
+  },
+  "failures": [
+    {
+      "case": "submission0",
+      "observed": "FAIL prior transition",
+      "source_diagnosis": "Fixture omitted explicit Verification_protocol submission adapter; the default workspace hook is uninstalled. Error details were not retained by the old fixture require helper; new fixture reports the typed error."
+    },
+    {
+      "case": "submission3",
+      "observed": "Direct Board posts require explicit targets",
+      "repair": "Use addressed Human_post instead of System_post for the existing Direct fixture."
+    },
+    {
+      "case": "submission8",
+      "observed": "Direct Board posts require explicit targets",
+      "repair": "Same addressed Direct fixture correction; do not weaken Board audience validation."
+    }
+  ],
+  "raw": {
+    "bytes": 293142,
+    "sha256": "14fed94bae852047ac2b6fe0261c3eea3a7a3e27eceb697c4554145e5f4c9e36"
+  },
+  "current_product_or_full_regression_success": false
+}

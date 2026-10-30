@@ -1,0 +1,4 @@
+File "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schema-api-fst_nhzx/fabricated.ml", line 1, characters 46-125:
+1 | let schema : Llm_provider.Types.tool_schema = { name="probe"; description=""; parameters=[]; strict=None; input_schema=None }
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Cannot create values of the private type Llm_provider.Types.tool_schema

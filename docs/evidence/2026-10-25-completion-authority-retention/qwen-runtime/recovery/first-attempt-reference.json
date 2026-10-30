@@ -1,0 +1,10 @@
+{
+  "stage": "Initial owner operation; remains FAILED despite later controlled recovery.",
+  "diagnosis_path": "/tmp/masc-goal-2be9-qwen-preapproval/diagnosis.json",
+  "diagnosis_sha256": "824311b801867ab39989c2b3389ed229be5e2a7326ad97de685a86b6615977a8",
+  "snapshot_sha256": "8ca8b0a73c7d2fead78c240e4571a4857cc6996afcd201424848a3aa4dc2b4ed",
+  "verification_id": "vrf-5dd15968c9ec601c495335d00cc7b471",
+  "all_true_artifact_sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+  "G2_association": "PASS in this cohort",
+  "initial_alpha_only_execution": "FAIL; beta/gamma changed before first Task approval."
+}

@@ -1,0 +1,99 @@
+{
+  "scope": "syntax only; no native/full typing",
+  "parent_head": "979661caddeb7acf3524858be0852fd6c12480be",
+  "source_state": "working tree; exact file hashes bind this check",
+  "passed": 15,
+  "total": 15,
+  "results": [
+    {
+      "path": "bin/masc_tui_context_inspector.ml",
+      "sha256": "0f8daf883ef3da31d10b7e9d070d9c5e8905d8a327908ca9823caaac9f0b1316",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_context_inspector.mli",
+      "sha256": "d2dc351e28d9eb7eb1d3621d2eef0cc1f237b37e750de1f6bba85aea546d3316",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "bin/masc_tui_next_request_band.ml",
+      "sha256": "dbaf24860db734a4ffe1de834aacf6bda2c45d0935ece01357f0435c5a4fbf49",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_carried_front.ml",
+      "sha256": "28581f0a7d247069bfc7c2ed30494edb67b31ccb2b02bf1080ddf6147c80b521",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_carried_front.mli",
+      "sha256": "e86a94fc6e81b02963b9462597909071673c345eaaff08a25cdb7622bd404449",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_model_input_ledger.ml",
+      "sha256": "87a7b92cb9122da35f8e1e2fe98763e78157729dd3de8e87c29ee4aed3533141",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_model_input_ledger.mli",
+      "sha256": "a4de9c55599243845b8f1da97901e00f295454716acacd74b9fe4888d907239c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver_try_provider.ml",
+      "sha256": "785236ef50ba080cf0d0f57a48ba3f7ff00bd9ccc941bd32fbe4beca9647a4ec",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_turn_driver_try_provider.mli",
+      "sha256": "d77be4f1618523456308793d28b91eca44e3d41e3fe65bb04339cebfb674ec95",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_carried_front.ml",
+      "sha256": "bddadd8504ec51bf604d1e5a9fe8c9f4d63c53d16dfb4a8494a35628b7d88244",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_carried_range_eviction.ml",
+      "sha256": "dd13f8cbf9592d3c0fa4c592a5c86c5862b085e8482e9c93f10a5d087c331dbc",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_context_overflow_shrink.ml",
+      "sha256": "892587c5c974dbaa5fb5322d8e393d92e66d01e8c47727be69fac60c4817b645",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_model_input_ledger.ml",
+      "sha256": "57b1bd0c2a93c83e410abaaf64e8d330001665c9ccd61637ba408331098d774e",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_next_request_forecast.ml",
+      "sha256": "ff1ddf55adf2a4567bced72352e98262a15f90dae4ae7ad9d4225fe81ee459de",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_tui_next_request_band.ml",
+      "sha256": "22872ed70a31b259050a951e48384d49c878f9238055b2ba138365718e1ab82e",
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+[2026-10-29 00:26:41] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `mcp_seat_profile'.
+This run has ID `7RPPSLDP'.
+
+  [OK]          protocol          0   the seat lists only the play tools.
+  [OK]          protocol          1   the handshake advertises tools only.
+  [OK]          protocol          2   the seat refuses every other method.
+  [OK]          protocol          3   the seat refuses a tool it does not list.
+  [OK]          protocol          4   an invite plays through the seat with a...
+  [OK]          protocol          5   an invite chats through the seat with a...
+  [OK]          protocol          6   an invite passes only to someone at the...
+  [OK]          protocol          7   an invite recovers only a stopped Keepe...
+  [OK]          http              0   an invite opens the seat door, not /mcp.
+  [OK]          http              1   POST and DELETE are routed, GET is 405.
+  [OK]          http              2   the seat opens no stream.
+  [OK]          http              3   the seat ends only its own sessions.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/mcp_seat_profile'.
+Test Successful in 4.084s. 12 tests run.
+exit=0

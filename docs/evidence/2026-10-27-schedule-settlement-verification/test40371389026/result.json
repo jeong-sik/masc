@@ -1,0 +1,56 @@
+{
+  "workflow": "Test",
+  "workflow_path": ".github/workflows/test.yml",
+  "run_id": 40371389026,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40371389026",
+  "head": "2861571c6fa3b6403cf12980feea3a109dabca71",
+  "ref": "fix/schedule-pending-settlement-20261027",
+  "status": "completed",
+  "conclusion": "failure",
+  "created_at": "2026-10-26T17:44:09Z",
+  "updated_at": "2026-10-26T17:49:19Z",
+  "scope": "Compilation stopped before all four requested suites. No case verdicts; this is not a behavior assertion failure.",
+  "diagnostic": "Warning4 fragile-match is an error: generic failure branch hid future settlement_failure and store_error variants. Closed constructor enumeration, including regression matches, replaces that branch without changing settlement decisions.",
+  "remediation_commit": "4c94fcce84f59c751ebd4867a2f0dee0e3abb188",
+  "source": {
+    "command": [
+      "gh",
+      "run",
+      "view",
+      "40371389026",
+      "--log-failed"
+    ],
+    "sha256": "ac118b4ce9c563cd2cd4a9e7be847705c1562553a8ff093be1f67cbbe4528d7a",
+    "bytes": 17368,
+    "lines": 69,
+    "digest_semantics": "Original gh-rendered capture snapshot; recollection not promised byte-identical."
+  },
+  "selection": {
+    "path": "compile-failure-selected.json",
+    "source_ranges": [
+      [
+        52,
+        59
+      ],
+      [
+        61,
+        68
+      ]
+    ],
+    "rows": 16,
+    "sha256": "8ae4c914cf17da46a47cc191cecd868969f76e0ea6360f98e31fe56a8e1914ab",
+    "bytes": 2681,
+    "method": "Exact source ranges with JSON escaping and added source_line field only."
+  },
+  "api_source": {
+    "command": [
+      "gh",
+      "api",
+      "repos/jeong-sik/masc/actions/runs/40371389026"
+    ],
+    "observed_at": "2026-10-26T17:57:34.264798+00:00",
+    "stdout_sha256": "7226c93ed97760589dd4b760b3581c8c71c0bf2a4fb43a99c4a2343994210ac5",
+    "stdout_bytes": 12167,
+    "semantics": "New terminal REST read, complete stdout retained in ignored evidence work output."
+  }
+}

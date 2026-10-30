@@ -1,0 +1,67 @@
+(** Keeper turn-lane telemetry and backlog task reconciliation. *)
+
+(* Closed sum type for turn_lane.  Two producers emit values:
+   - keeper_run_tools.ml emits the per-turn lanes
+     (text_only, tool_optional, tool_disabled).
+   - keeper_turn_helpers.pre_dispatch_tool_surface emits the
+     [Lane_pre_dispatch] placeholder before the per-turn lane logic
+     runs.
+   No [@@deriving tla] because this is a small runtime-local lane
+   label, not a spec catalog. *)
+type turn_lane =
+  | Lane_pre_dispatch
+  | Lane_text_only
+  | Lane_tool_optional
+  | Lane_tool_disabled
+
+let turn_lane_to_string = function
+  | Lane_pre_dispatch -> "pre_dispatch"
+  | Lane_text_only -> "text_only"
+  | Lane_tool_optional -> "tool_optional"
+  | Lane_tool_disabled -> "tool_disabled"
+
+let turn_lane_to_yojson lane = `String (turn_lane_to_string lane)
+
+type tool_surface_metrics =
+  { turn_lane : turn_lane
+  ; config_root : string
+  ; runtime_config_path : string option
+  }
+
+let owned_active_task_id_for_meta =
+  Keeper_current_task_reconcile.owned_active_task_id_for_meta
+
+let sync_current_task_id_from_backlog =
+  Keeper_current_task_reconcile.sync_current_task_id_from_backlog
+
+let sync_current_task_id_for_agent_name =
+  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
+
+let on_the_wire ~agent_cell ~built =
+  match !agent_cell with
+  | Some agent -> Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent)
+  | None -> built
+;;
+
+type attempt_surface =
+  { tools : Agent_core.Tool.t list
+  ; loader_alive : bool
+  }
+
+let for_attempt ~checkpoint_owner ~agent_cell ~built =
+  match checkpoint_owner, !agent_cell with
+  | Some Runtime_execution.Masc_agent_core, Some agent ->
+    { tools = Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent)
+    ; loader_alive = true }
+  | Some Runtime_execution.Masc_agent_core, None
+  | (Some Runtime_execution.Official_client | None), _ ->
+    { tools = built; loader_alive = false }
+;;
+
+let for_request ~checkpoint_owner ~enabled ~tool_choice ~schema_names ~agent_cell ~built =
+  match enabled, tool_choice with
+  | false, _ | true, Some Agent_core.Types.None_ -> []
+  | true, (None | Some (Agent_core.Types.Auto | Any | Tool _)) ->
+    (for_attempt ~checkpoint_owner ~agent_cell ~built).tools
+    |> List.filter (fun (tool : Agent_core.Tool.t) -> List.mem tool.schema.name schema_names)
+;;

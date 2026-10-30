@@ -1,0 +1,24 @@
+Testing `Librarian capacity callbacks'.
+This run has ID `G9G9Q7MY'.
+
+  [OK]          size verdict                  0   every provider cause, one r...
+  [OK]          size verdict                  1   every official-client failu...
+  [OK]          size verdict                  2   every pre-dispatch rejectio...
+  [OK]          continuity prefit             0   atom groups commit and prod...
+  [OK]          continuity prefit             1   a continuity-only run whose...
+  [OK]          actual HTTP outcomes          0   capacity-final.
+  [OK]          actual HTTP outcomes          1   quota-final.
+  [OK]          actual HTTP outcomes          2   capacity-then-quota.
+  [OK]          actual HTTP outcomes          3   capacity-then-auth.
+  [OK]          actual HTTP outcomes          4   empty-completion-final.
+  [OK]          HTTP to CLI outcomes          0   quota-then-cli-capacity.
+  [OK]          HTTP to CLI outcomes          1   quota-then-cli-generic-rpc.
+  [OK]          HTTP to CLI outcomes          2   cli-capacity-then-quota.
+  [OK]          HTTP to CLI outcomes          3   cli-capacity-then-generic-rpc.
+  [OK]          HTTP to CLI outcomes          4   cli-quota-then-capacity.
+  [OK]          HTTP to CLI outcomes          5   cli-two-capacities.
+  [OK]          HTTP to CLI outcomes          6   cli-two-capacities-reversed.
+  [OK]          HTTP to CLI outcomes          7   capacity-then-quota-then-cl...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build/_tests/Librarian capacity callbacks'.
+Test Successful in 0.116s. 18 tests run.

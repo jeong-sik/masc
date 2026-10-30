@@ -1,0 +1,41 @@
+{
+  "original_head": "a48463a674d43ac4658488eb44f234baa9399756",
+  "merge_parent": "bfe316005dabbf71a45316ec1b64a70aa8db9931",
+  "reviewed_before_repair_tree": "15f212d709fbb7492556fe33e5c10622e2ae4c48",
+  "red": {
+    "handle": 30607,
+    "exit": 1,
+    "failed": 1,
+    "reason": "uncertain true after typed known refusal"
+  },
+  "final": {
+    "handle": 40755,
+    "exit": 0,
+    "tests": 264,
+    "suites": 5,
+    "tsc_exit": 0,
+    "eslint_exit": 0
+  },
+  "source_sha256": {
+    "dashboard/src/lib/machine-lane-activity-session.ts": "37686a70a56c314d599f31a91548847960bf66a579a6be25c7f1d236f5f89be2",
+    "dashboard/src/components/machine-lane-activity-panel.test.ts": "d4ad5121e044402ea16171e5ae0a731b967efac40a6e89c8e936a02b7145dd95"
+  },
+  "logs": {
+    "red.log": {
+      "source": "/tmp/pr41203-known-refusal-red.log",
+      "sha256": "aa06ae7d652079bd0ddd1872e64a8e367ba1f04d88366080b00eb917af2140fb"
+    },
+    "green.log": {
+      "source": "/tmp/pr41203-known-refusal-green.log",
+      "sha256": "748520b279237bd3722413b7c07dc690a55c12334eb832971c2f824f8bb59865"
+    },
+    "tsc.log": {
+      "source": "/tmp/pr41203-known-refusal-tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint.log": {
+      "source": "/tmp/pr41203-known-refusal-eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

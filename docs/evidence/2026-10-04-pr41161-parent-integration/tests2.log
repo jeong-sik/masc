@@ -1,0 +1,17 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41161-runtime-cache-integration-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/lib/runtime-workspace-resource.test.ts src/lib/runtime-catalog-resource.test.ts src/lib/runtime-config-refresh.test.ts src/components/keeper-runtime-model-editor.test.ts src/components/keeper-config-panel.test.ts src/components/keeper-detail-runtime.test.ts src/components/keeper-workspace/keeper-workspace-rail.test.ts src/components/tools/config-resolution-panel.test.ts src/components/fleet-aside-extras.test.ts src/components/overview/runtime-stats.test.ts src/components/runtime-environment-editor.test.ts src/components/agent-monitor/runtime-strip.test.ts src/components/runtime-toml-editor.test.ts src/components/settings-surface.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41161-runtime-cache-integration-20261004/dashboard
+
+
+ Test Files  14 passed (14)
+      Tests  440 passed (440)
+   Start at  23:21:38
+   Duration  13.96s (tests 36%, import 25%, environment 15%, transform 12%, setup 11%)
+
+     Import  326 modules were evaluated 1476 times · 3.15s total, 25% of tracked time
+             ~2.45s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+

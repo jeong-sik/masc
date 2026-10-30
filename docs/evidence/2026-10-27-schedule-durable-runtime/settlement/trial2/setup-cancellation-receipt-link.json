@@ -1,0 +1,35 @@
+{
+  "source_ref": "35020db5088fe40819c41ad4e7cd7daab57aae30fe4c702d01ace4ffd5b5b30e",
+  "source_bytes": 568,
+  "source_incarnation": 0,
+  "expected_operation_id": "schedule-cancel:audit-settle-a:35020db5088fe40819c41ad4e7cd7daab57aae30fe4c702d01ace4ffd5b5b30e:0",
+  "expected_receipt_id": "pending-cancel:schedule-cancel:audit-settle-a:35020db5088fe40819c41ad4e7cd7daab57aae30fe4c702d01ace4ffd5b5b30e:0",
+  "actual_receipt": {
+    "transition_id": "pending-cancel:schedule-cancel:audit-settle-a:35020db5088fe40819c41ad4e7cd7daab57aae30fe4c702d01ace4ffd5b5b30e:0",
+    "event_id": "keeper-event-queue-transition:pending-cancel:schedule-cancel:audit-settle-a:35020db5088fe40819c41ad4e7cd7daab57aae30fe4c702d01ace4ffd5b5b30e:0",
+    "applied_at_unix": 1793049137.293953,
+    "transition": {
+      "kind": "cancel_accepted",
+      "source": {
+        "post_id": "89d519eba0d400750ff73221db71e63c81ae2a1c4c62a0de2a06e6dacef163d3",
+        "urgency": "normal",
+        "arrived_at_unix": 1793049137.201406,
+        "payload": {
+          "kind": "schedule_due",
+          "occurrence_id": "89d519eba0d400750ff73221db71e63c81ae2a1c4c62a0de2a06e6dacef163d3",
+          "schedule_instance_id": "01a17a0e-5717-7000-9650-df1fe031b26a",
+          "schedule_id": "audit-settle-wal-setup",
+          "due_at_unix": 1793049123.583034,
+          "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+          "title": null,
+          "message": "Owned paused settlement observation; do not execute.",
+          "result_delivery": null
+        }
+      },
+      "source_incarnation": 0,
+      "operator_operation_id": "schedule-cancel:audit-settle-a:35020db5088fe40819c41ad4e7cd7daab57aae30fe4c702d01ace4ffd5b5b30e:0",
+      "reason": "schedule audit-settle-wal-setup cancelled by audit-settle-admin: Remove only the public setup source before the settlement trial."
+    }
+  },
+  "basis": "Newest canonical cancellation is stored in raw last_transition; projected_dispositions contains prior receipts."
+}

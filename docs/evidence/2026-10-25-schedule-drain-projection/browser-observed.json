@@ -1,0 +1,54 @@
+[
+  {
+    "case": "completed:unprojected",
+    "scheduleId": "keeper-wake-sched-1",
+    "postId": "38fe9e6e101e3356369f107a6d12a856b2c3288c0c31219e4fc5c5dfa88f832a",
+    "queue": "terminal_projection_pending",
+    "reaction": "matched_stimulus",
+    "state": "settling",
+    "misses": 0,
+    "kpi": "큐 누락0",
+    "exact": "post_id38fe9e6e101e3356369f107a6d12a856b2c3288c0c31219e4fc5c5dfa88f832a",
+    "queueVisible": true,
+    "screenshot": "completed-unprojected.png"
+  },
+  {
+    "case": "failed:projected",
+    "scheduleId": "keeper-wake-sched-1",
+    "postId": "112f792cadd69e4f07175e3dc15812f6322ab9ab91b8ea711903d3f0e51ac54f",
+    "queue": "matched_terminal_failed",
+    "reaction": "matched_consumed_ack",
+    "state": "failed",
+    "misses": 0,
+    "kpi": "큐 누락0",
+    "exact": "post_id112f792cadd69e4f07175e3dc15812f6322ab9ab91b8ea711903d3f0e51ac54f",
+    "queueVisible": true,
+    "screenshot": "failed-projected.png"
+  },
+  {
+    "case": "completed:unreadable_receipt",
+    "scheduleId": "keeper-wake-sched-1",
+    "postId": "38fe9e6e101e3356369f107a6d12a856b2c3288c0c31219e4fc5c5dfa88f832a",
+    "queue": "read_error",
+    "reaction": "matched_consumed_ack",
+    "state": "read_error",
+    "misses": 0,
+    "kpi": "큐 누락0",
+    "exact": "post_id38fe9e6e101e3356369f107a6d12a856b2c3288c0c31219e4fc5c5dfa88f832a",
+    "queueVisible": true,
+    "screenshot": "unreadable-receipt.png"
+  },
+  {
+    "case": "transferred:projected",
+    "scheduleId": "keeper-wake-sched-1",
+    "postId": "20867af45c2d137bfb84cef74ec0436d9583ac0997c9b1d7cc65059d56bf951e",
+    "queue": "matched_pending",
+    "reaction": "matched_consumed_ack",
+    "state": "pending",
+    "misses": 0,
+    "kpi": "큐 누락0",
+    "exact": "post_id20867af45c2d137bfb84cef74ec0436d9583ac0997c9b1d7cc65059d56bf951e",
+    "queueVisible": true,
+    "screenshot": "transferred-projected.png"
+  }
+]

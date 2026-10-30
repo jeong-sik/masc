@@ -1,0 +1,333 @@
+(** Coverage tests for Tool_agent — Agent metrics, fitness, and card
+
+    Tests dispatch routing, handler execution, helper functions for:
+    masc_get_metrics, masc_agent_fitness, masc_agent_card
+*)
+module Tool_args = Tool_args
+module Tool_result = Tool_result
+module Tool_agent = Masc.Tool_agent
+module Metrics_store_eio = Masc.Metrics_store_eio
+module Workspace = Masc.Workspace
+
+(* The tool-result guidance this suite asserts (the "no metrics found"
+   message) moved out of the .ml sources into config/prompts/*.md group
+   files, rendered through the prompt registry at result-construction time. *)
+let () =
+  Masc.Prompt_defaults.init ()
+;;
+
+let record_ok config metric =
+  match Metrics_store_eio.record config metric with
+  | Ok Metrics_store_eio.Written -> ()
+  | Ok Enqueued -> Metrics_store_eio.flush_pending ()
+  | Error error -> failwith (Metrics_store_eio.record_error_to_string error)
+
+let test_counter = ref 0
+
+let temp_dir () =
+  incr test_counter;
+  let dir = Filename.temp_file
+    (Printf.sprintf "test_agent_%d_" !test_counter) "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let with_ctx f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_agent.context = { config; agent_name = "test-agent" } in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () -> f ctx)
+
+let dispatch_exn ctx ~name ~args =
+  match Tool_agent.dispatch ctx ~name ~args with
+  | Some result -> result
+  | None -> failwith ("dispatch returned None for " ^ name)
+
+(* ============================================================
+   Dispatch routing tests
+   ============================================================ *)
+
+let test_dispatch_unknown () =
+  with_ctx (fun ctx ->
+  let result = Tool_agent.dispatch ctx ~name:"unknown_tool" ~args:(`Assoc []) in
+  Alcotest.(check bool) "unknown returns None" true (result = None);
+  )
+
+let test_dispatch_agent_card () =
+  with_ctx (fun ctx ->
+  let result = Tool_agent.dispatch ctx ~name:"masc_agent_card" ~args:(`Assoc []) in
+  Alcotest.(check bool) "agent_card dispatches" true (result <> None);
+  )
+
+
+let test_handle_agent_card () =
+  with_ctx (fun ctx ->
+  let result = Tool_agent.handle_agent_card ~start_time:(Tool_timing.start ()) ctx (`Assoc []) in
+  Alcotest.(check bool) "agent card succeeds" true (Tool_result.is_success result);
+  let json = Yojson.Safe.from_string (Tool_result.message result) in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "card name" "MASC"
+    (json |> member "name" |> to_string);
+  Alcotest.(check string) "card schema" "masc.agent_card.v1"
+    (json |> member "schema" |> to_string);
+  )
+
+let test_handle_agent_card_rejects_unknown_action () =
+  with_ctx (fun ctx ->
+  let result =
+    Tool_agent.handle_agent_card ~start_time:(Tool_timing.start ()) ctx (`Assoc [("action", `String "bogus")])
+  in
+  Alcotest.(check bool) "agent card rejects" false (Tool_result.is_success result);
+  Alcotest.(check bool) "mentions invalid action" true
+    (String.contains (Tool_result.message result) 'b');
+  )
+
+(* ============================================================
+   Handler tests — get_metrics
+   ============================================================ *)
+
+let test_get_metrics_no_data () =
+  with_ctx (fun ctx ->
+  let args = `Assoc [("agent_name", `String "nonexistent"); ("days", `Int 7)] in
+  let result = dispatch_exn ctx ~name:"masc_get_metrics" ~args in
+  Alcotest.(check bool) "no data fails" false (Tool_result.is_success result);
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string (Tool_result.message result) in
+  Alcotest.(check string) "error_code" "not_found"
+    (json |> member "error_code" |> to_string);
+  Alcotest.(check string) "message" "no metrics found for agent: nonexistent"
+    (json |> member "message" |> to_string);
+  )
+
+let test_get_metrics_missing_agent_name () =
+  with_ctx (fun ctx ->
+  let result = dispatch_exn ctx ~name:"masc_get_metrics" ~args:(`Assoc []) in
+  Alcotest.(check bool) "missing agent_name fails" false (Tool_result.is_success result);
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string (Tool_result.message result) in
+  Alcotest.(check string) "status" "error"
+    (json |> member "status" |> to_string);
+  Alcotest.(check string) "message" "agent_name is required"
+    (json |> member "message" |> to_string);
+  )
+
+(* ============================================================
+   Handler tests — agent_fitness
+   ============================================================ *)
+
+let test_agent_fitness_no_agents () =
+  with_ctx (fun ctx ->
+  let result = Tool_agent.handle_agent_fitness ~start_time:(Tool_timing.start ()) ctx (`Assoc []) in
+  Alcotest.(check bool) "fitness succeeds" true (Tool_result.is_success result);
+  Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
+  )
+
+let test_agent_fitness_specific () =
+  with_ctx (fun ctx ->
+  let args = `Assoc [("agent_name", `String "test-agent"); ("days", `Int 7)] in
+  let result = Tool_agent.handle_agent_fitness ~start_time:(Tool_timing.start ()) ctx args in
+  Alcotest.(check bool) "fitness with agent" true (Tool_result.is_success result);
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string (Tool_result.message result) in
+  Alcotest.(check int) "named observation retained" 1 (json |> member "count" |> to_int);
+  let row = json |> member "agents" |> to_list |> List.hd in
+  Alcotest.(check string) "exact identity" "test-agent" (row |> member "agent_id" |> to_string);
+  Alcotest.(check bool) "no synthetic metrics or scores" true
+    (member "metrics" row = `Null && member "components" row = `Null);
+  )
+
+let test_metric_nullable_outcomes () =
+  with_ctx (fun ctx ->
+    let metric = Metrics_store_eio.create_metric ~agent_id:"Pending" ~task_id:"observed" () in
+    record_ok ctx.config metric;
+    let args = `Assoc ["agent_name", `String "Pending"] in
+    let fitness () =
+      let result = dispatch_exn ctx ~name:"masc_agent_fitness" ~args in
+      Alcotest.(check bool) "fitness succeeds" true (Tool_result.is_success result);
+      let open Yojson.Safe.Util in
+      Yojson.Safe.from_string (Tool_result.message result) |> member "agents" |> to_list |> List.hd in
+    let open Yojson.Safe.Util in
+    let row = fitness () in
+    let components = member "components" row in
+    Alcotest.(check bool) "pending completion is a measured zero" true (member "completion" components = `Float 0.0);
+    List.iter (fun key -> Alcotest.(check bool) (key ^ " is unobserved") true
+      (member key components = `Null)) ["task_lifecycle_success"; "speed"; "handoff_task_success"];
+    let completed = { metric with completed_at = Some metric.started_at; handoff_to = Some "next" } in
+    record_ok ctx.config completed;
+    let row = fitness () in
+    let components = member "components" row in
+    Alcotest.(check bool) "failure is a measured zero" true
+      (member "task_lifecycle_success" components = `Float 0.0 && member "handoff_task_success" components = `Float 0.0);
+    Alcotest.(check bool) "real zero duration has no defined speed ratio" true (member "speed" components = `Null);
+    let metrics = member "metrics" row in
+    Alcotest.(check int) "raw observations" 2 (member "record_count" metrics |> to_int);
+    Alcotest.(check int) "distinct Task" 1 (member "total_tasks" metrics |> to_int);
+    Alcotest.(check bool) "real zero duration is retained" true (member "avg_completion_time_s" metrics = `Float 0.0);
+    record_ok ctx.config { completed with success = true };
+    List.iter (fun name ->
+      let result = dispatch_exn ctx ~name ~args in
+      Alcotest.(check bool) "Task contradiction remains observable" true (Tool_result.is_success result))
+      ["masc_get_metrics"; "masc_agent_fitness"];
+    let row = fitness () in
+    let metrics = member "metrics" row in
+    Alcotest.(check int) "conflicting Task is explicit" 1 (member "conflicting_tasks" metrics |> to_int);
+    Alcotest.(check int) "conflict fabricates no completed outcome" 0 (member "completed_tasks" metrics |> to_int);
+    Alcotest.(check bool) "conflict leaves outcome and duration unknown" true
+      (member "task_lifecycle_success" (member "components" row) = `Null && member "avg_completion_time_s" metrics = `Null);
+    let healthy = { completed with agent_id = "Healthy"; task_id = "healthy"; success = true } in
+    record_ok ctx.config healthy;
+    let pool = dispatch_exn ctx ~name:"masc_agent_fitness" ~args:(`Assoc []) in
+    Alcotest.(check bool) "one Task cannot block the agent pool" true (Tool_result.is_success pool);
+    let rows = Yojson.Safe.from_string (Tool_result.message pool) |> member "agents" |> to_list in
+    let healthy_row = List.find (fun row -> member "agent_id" row = `String "Healthy") rows in
+    Alcotest.(check int) "unrelated agent keeps its observed completion" 1
+      (member "completed_tasks" (member "metrics" healthy_row) |> to_int);
+    let metrics = member "metrics" healthy_row in
+    Alcotest.(check string) "success is scoped to the Task lifecycle" "task_lifecycle"
+      (member "outcome_basis" metrics |> to_string);
+    Alcotest.(check bool) "Task approval provides no external acceptance observation" true
+      (member "external_acceptance" metrics
+       = `Assoc [ "kind", `String "unobserved"; "completed_tasks", `Int 1 ]);
+    Alcotest.(check bool) "the ambiguous reliability claim is absent" true
+      (member "reliability" (member "components" healthy_row) = `Null))
+
+let test_metric_source_failure () =
+  with_ctx (fun ctx ->
+    let metric = Metrics_store_eio.create_metric ~agent_id:"Exact" ~task_id:"task" () in
+    record_ok ctx.config metric;
+    let file = Filename.concat (Metrics_store_eio.agent_metrics_dir ctx.config "Exact") "bad.jsonl" in
+    Fs_compat.save_file file "not-json\n";
+    List.iter (fun name ->
+      let result = dispatch_exn ctx ~name ~args:(`Assoc ["agent_name", `String "Exact"]) in
+      Alcotest.(check bool) "source failure is not success" false (Tool_result.is_success result);
+      let open Yojson.Safe.Util in
+      let json = Yojson.Safe.from_string (Tool_result.message result) in
+      Alcotest.(check string) "not misreported as absence" "internal_error"
+        (json |> member "error_code" |> to_string)
+    ) ["masc_get_metrics"; "masc_agent_fitness"])
+
+let test_metric_exact_identity_and_query () =
+  with_ctx (fun ctx ->
+    let metric = Metrics_store_eio.create_metric ~agent_id:"Exact" ~task_id:"task" () in
+    record_ok ctx.config metric;
+    let result = dispatch_exn ctx ~name:"masc_agent_fitness"
+      ~args:(`Assoc ["agent_name", `String " Exact "]) in
+    let open Yojson.Safe.Util in
+    let row = Yojson.Safe.from_string (Tool_result.message result) |> member "agents" |> to_list |> List.hd in
+    Alcotest.(check string) "no trim alias" " Exact " (row |> member "agent_id" |> to_string);
+    Alcotest.(check bool) "other exact identity has no record" true (member "metrics" row = `Null);
+    let invalid = dispatch_exn ctx ~name:"masc_agent_fitness"
+      ~args:(`Assoc ["agent_name", `String "Exact"; "days", `String "7"]) in
+    Alcotest.(check bool) "malformed query has no silent default" false (Tool_result.is_success invalid))
+
+let test_metric_named_and_pool_storage_identity () =
+  with_ctx (fun ctx ->
+    let target = "team/agent" in
+    record_ok ctx.config (Metrics_store_eio.create_metric ~agent_id:target ~task_id:"real-task" ());
+    List.iter (fun args ->
+      let result = dispatch_exn ctx ~name:"masc_agent_fitness" ~args in
+      Alcotest.(check bool) "valid exact identity succeeds" true (Tool_result.is_success result);
+      let open Yojson.Safe.Util in
+      let rows = Yojson.Safe.from_string (Tool_result.message result) |> member "agents" |> to_list in
+      let matching = List.filter (fun row -> row |> member "agent_id" |> to_string = target) rows in
+      Alcotest.(check int) "exact identity once" 1 (List.length matching);
+      Alcotest.(check bool) "actual metric retained" true (member "metrics" (List.hd matching) <> `Null)
+    ) [`Assoc ["agent_name", `String target]; `Assoc []])
+
+(* ============================================================
+   Helper function tests
+   ============================================================ *)
+
+let test_get_string_present () =
+  let args = `Assoc [("key", `String "value")] in
+  Alcotest.(check string) "extracts string" "value"
+    (Tool_args.get_string args "key" "default")
+
+let test_get_string_missing () =
+  let args = `Assoc [] in
+  Alcotest.(check string) "uses default" "default"
+    (Tool_args.get_string args "key" "default")
+
+let test_get_string_opt_present () =
+  let args = `Assoc [("key", `String "value")] in
+  Alcotest.(check (option string)) "extracts Some" (Some "value")
+    (Tool_args.get_string_opt args "key")
+
+let test_get_string_opt_missing () =
+  let args = `Assoc [] in
+  Alcotest.(check (option string)) "returns None" None
+    (Tool_args.get_string_opt args "key")
+
+let test_get_int_present () =
+  let args = `Assoc [("key", `Int 42)] in
+  Alcotest.(check int) "extracts int" 42
+    (Tool_args.get_int args "key" 0)
+
+let test_get_int_missing () =
+  let args = `Assoc [] in
+  Alcotest.(check int) "uses default" 99
+    (Tool_args.get_int args "key" 99)
+
+let test_get_string_list_present () =
+  let args = `Assoc [("key", `List [`String "a"; `String "b"])] in
+  Alcotest.(check (list string)) "extracts list" ["a"; "b"]
+    (Tool_args.get_string_list args "key")
+
+let test_get_string_list_missing () =
+  let args = `Assoc [] in
+  Alcotest.(check (list string)) "empty list" []
+    (Tool_args.get_string_list args "key")
+
+(* ============================================================
+   Test runner
+   ============================================================ *)
+
+let () =
+  Alcotest.run "Tool_agent" [
+    ("dispatch", [
+      Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown;
+      Alcotest.test_case "agent_card dispatches" `Quick test_dispatch_agent_card;
+    ]);
+    ("agents", [
+      Alcotest.test_case "handle_agent_card" `Quick test_handle_agent_card;
+      Alcotest.test_case "handle_agent_card rejects unknown action" `Quick
+        test_handle_agent_card_rejects_unknown_action;
+    ]);
+    ("agent_update", [
+      Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
+      Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
+      Alcotest.test_case "nullable Task outcomes" `Quick test_metric_nullable_outcomes;
+      Alcotest.test_case "failed source is not absence" `Quick test_metric_source_failure;
+      Alcotest.test_case "exact identity and query" `Quick test_metric_exact_identity_and_query;
+      Alcotest.test_case "named and pool storage identity" `Quick test_metric_named_and_pool_storage_identity;
+    ]);
+    ("get_metrics", [
+      Alcotest.test_case "no data returns not_found" `Quick test_get_metrics_no_data;
+      Alcotest.test_case "missing agent_name fails" `Quick test_get_metrics_missing_agent_name;
+    ]);
+    ("helpers", [
+      Alcotest.test_case "get_string present" `Quick test_get_string_present;
+      Alcotest.test_case "get_string missing" `Quick test_get_string_missing;
+      Alcotest.test_case "get_string_opt present" `Quick test_get_string_opt_present;
+      Alcotest.test_case "get_string_opt missing" `Quick test_get_string_opt_missing;
+      Alcotest.test_case "get_int present" `Quick test_get_int_present;
+      Alcotest.test_case "get_int missing" `Quick test_get_int_missing;
+      Alcotest.test_case "get_string_list present" `Quick test_get_string_list_present;
+      Alcotest.test_case "get_string_list missing" `Quick test_get_string_list_missing;
+    ]);
+  ]

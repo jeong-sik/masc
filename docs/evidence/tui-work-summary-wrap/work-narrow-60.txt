@@ -1,0 +1,24 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System
+
+   MASC Work  ▸Goals  2›  15:50:06  HTTP [connected]        
+    sort:phase/P1-P5  filter:active                         
+    No longer listed: 1                                     
+    earlier-plan-29424 24.0h                                
+ ────────────────────────────────────────────────────────── 
+  Goals: 3 [░░░░░░░░]  0% (0/3)  │  ◐ Exec: 3               
+  Backlog: ○ todo=11 · ◐ claimed=12 · ◐ in_progress=13 · ◐  
+  awaiting_verification=14 · ● done=15 · × cancelled=16     
+  Net change since this TUI's first reading 42d06h ago:     
+  Goals done +0 · Tasks done +0 · Goal reviews pending +0   
+ ────────────────────────────────────────────────────────── 
+    PHASE        JUDGE PRI OPEN             TITLE           
+ ────────────────────────────────────────────────────────── 
+  > [executing]        P1                   plan-alpha-29…  
+    [executing]        P1                   plan-beta-294…  
+    [executing]        P1                   plan-charlie-…  
+                                                            
+                                                            
+    goal-a-29424 · metric: metric-goal-a-29424 → 100%       
+
+  Right / Enter:detail  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)                                  

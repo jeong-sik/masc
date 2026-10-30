@@ -1,0 +1,5 @@
+{
+  "request_id": "ego-native-proof-a96d-navigation-1",
+  "name": "ego-native-proof",
+  "message": "같은 Ego 공간 25의 기존 p1을 사용하세요. 현재 검증 중인 페이지에서 새 탭이나 공간을 만들지 마세요. 먼저 제공된 브라우저 스킬과 BrowserTabs로 같은 연결을 관측한 뒤, 일반 BrowserGoto 도구로 제가 소유한 http://127.0.0.1:9449/ 으로 이동하세요. 이어 일반 BrowserAct reload로 그 탭을 새로고침하고 native snapshot을 관측해 제목과 양식의 항목을 알려주세요. 이 목표는 일반 이동과 새로고침 경로 검증이므로 이 두 동작을 workflow 안의 다른 동작으로 대체하지 마세요. 양식을 입력하거나 신청 버튼을 누르지 마세요. 앱 서버의 기존 신청 EGO-001은 보존합니다. 처음 관측한 같은 clientId/tabId를 계속 사용하세요."
+}

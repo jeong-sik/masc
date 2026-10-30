@@ -1,0 +1,136 @@
+{
+  "scope": "Execute actual measurement source with named in-memory effect ports; no Dune.\n\nThis is not native Goal-store locking, HTTP transport, SDK, or model evidence.\nAn optional frozen canary snapshot emits the new actual MCP success payload\nwhile retaining the original measurement bytes/identity for inference pairing.\n",
+  "base": "895df663fb303ee2fa95c38bbd28b571db9abb62",
+  "source_inputs": [
+    {
+      "compiled": "json_util.ml",
+      "scope": "exact JSON helpers",
+      "sha256": "b0c421c9b33db5d40523047366395d36284df6721c4650a68778bae559149802"
+    },
+    {
+      "compiled": "goal_phase.mli",
+      "scope": "full actual lifecycle source/interface",
+      "sha256": "b64db7d15af3156d68e0aaa811e2621ed1f0530f621207f3dcad2936828358d2"
+    },
+    {
+      "compiled": "goal_phase.ml",
+      "scope": "full actual lifecycle source/interface",
+      "sha256": "21a33ab97f9dc0dc00e04d5e7f44c1ddc5b12e10e23788def332447152594f1b"
+    },
+    {
+      "compiled": "backend_types.ml",
+      "scope": "backend error effect port",
+      "sha256": "72286e20068ef4f739a8c0ef050d59211a13a5de63022a4d24ffc21780bd7b2d"
+    },
+    {
+      "compiled": "workspace_utils.ml",
+      "scope": "in-memory backend/write/lock effect port; no real lock or filesystem proof",
+      "sha256": "85403e47573056e188bb17c5ab8b9bb40cddc4c1d7839b3e0823e5ce29e4f047"
+    },
+    {
+      "compiled": "goal_store.ml",
+      "scope": "exact Goal record/serializer; named transaction result/read-count/interleaving effect port",
+      "sha256": "832a874f9b23492aed66d68543077bd29d42764cb08303151833f975fa1a91c3"
+    },
+    {
+      "compiled": "workspace_verification_store.ml",
+      "scope": "exact pure Evidence Reference grammar and relative path check",
+      "sha256": "f1a13f6bcf43a5e0c3f5ae5f392059c02c4dc370207a72fc8b83abeb780c35f4"
+    },
+    {
+      "compiled": "log.ml",
+      "scope": "logging effect port",
+      "sha256": "b8936a01d57f6e32daf85c612e1c3673acdd8f453dba11904fb5ef8a125f67e1"
+    },
+    {
+      "compiled": "random_id.ml",
+      "scope": "identifier effect port",
+      "sha256": "11c8e0e305da6a90b4ae6207a3725612420389b7bb11af621fd7fc6fde057787"
+    },
+    {
+      "compiled": "masc_domain.ml",
+      "scope": "clock effect port",
+      "sha256": "4aa6788ea7effe705a3179b8d5acf8db41b39a6d8cf1a00d1ca4cab42c51052e"
+    },
+    {
+      "compiled": "goal_projection_generation.mli",
+      "scope": "full actual source/interface",
+      "sha256": "99c4ddb69ea10f85f3a6c051d87db34c84a92264ff252c6fa391e25dea5de34d"
+    },
+    {
+      "compiled": "goal_projection_generation.ml",
+      "scope": "full actual source/interface",
+      "sha256": "8852f1d556cbaa5291e047c7cb597d660dac4d1241dbd5ecf707bf4510abd9e2"
+    },
+    {
+      "compiled": "goal_measurement.mli",
+      "scope": "full actual source/interface",
+      "sha256": "c79527056a14ebf4aa4f95caccb562ea0107338d6dcc1ddb9641c1e290c6d5ab"
+    },
+    {
+      "compiled": "goal_measurement.ml",
+      "scope": "full actual source/interface",
+      "sha256": "172f5002dcecd7faa2eeabbbf9e2aab0da0e9178cbe4e0ffbd133769a05e6d13"
+    },
+    {
+      "compiled": "baseline.ml",
+      "scope": "exact baseline MCP success fields with envelope port",
+      "sha256": "01fa3516864dec69ebefdea3ac75d3346dc693140e63183ed5fad3ddd89f7948"
+    },
+    {
+      "compiled": "mcp.ml",
+      "scope": "full actual MCP measurement handler; context/Tool_result/envelope effect ports",
+      "sha256": "1af19c8066b8f81f13ac98c87939b14d61d13f1829c5a46b67dabc07e839d0b9"
+    },
+    {
+      "compiled": "http_payload.ml",
+      "scope": "exact HTTP success payload expression; not HTTP transport/auth",
+      "sha256": "de5d72870afeee201208e8a3e6438e5ba3d66a1dc10991cd5b742a1313715233"
+    },
+    {
+      "compiled": "probe.ml",
+      "scope": "receipt behavior driver",
+      "sha256": "1ad34e2b4ab22acfbd6aec548dfd9cb0211d946efa0722e31e42efc81539feda"
+    }
+  ],
+  "compile": {
+    "command": [
+      "ocamlfind",
+      "ocamlc",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+4+32+69",
+      "-package",
+      "yojson",
+      "-linkpkg",
+      "json_util.ml",
+      "goal_phase.mli",
+      "goal_phase.ml",
+      "backend_types.ml",
+      "workspace_utils.ml",
+      "goal_store.ml",
+      "workspace_verification_store.ml",
+      "log.ml",
+      "random_id.ml",
+      "masc_domain.ml",
+      "goal_projection_generation.mli",
+      "goal_projection_generation.ml",
+      "goal_measurement.mli",
+      "goal_measurement.ml",
+      "baseline.ml",
+      "mcp.ml",
+      "http_payload.ml",
+      "probe.ml",
+      "-o",
+      "probe"
+    ],
+    "exit": 0,
+    "output": ""
+  },
+  "execution": {
+    "exit": 0,
+    "output": "PASS baseline names reported_only as verification without lifecycle\nPASS actual receipt preserves \"executing\"\nPASS actual receipt preserves \"verifying\"\nPASS actual receipt preserves \"awaiting_confirmation\"\nPASS actual receipt preserves \"completed\"\nPASS actual receipt preserves \"dropped\"\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"executing\"}\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"verifying\"}\nPASS actual receipt preserves {\"state\":\"paused\",\"resume_phase\":\"awaiting_confirmation\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"executing\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"verifying\"}\nPASS actual receipt preserves {\"state\":\"blocked\",\"resume_phase\":\"awaiting_confirmation\"}\nPASS issued receipt remains bound when a later Goal changes\nPASS receipt serialization performs no later authoritative read\nPASS stale criterion produces no receipt\nPASS record uses returned transaction Goal rather than post-unlock state\nPASS durable schema stores only the observation\nPASS invalid request cannot issue a receipt\nPASS a rejected request does not advance observation generation\nPASS paired receipt retains actual captured measurement identity and bytes\nPASS paired receipt names the actual captured lifecycle\n21 exact-source receipt checks passed\n"
+  },
+  "emitted_receipt_sha256": "d8d17bce7874e9b1449e51a4851b4e667c62397d43643f9045877702532483b8"
+}

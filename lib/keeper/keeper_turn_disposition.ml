@@ -1,0 +1,131 @@
+(* Operator-facing disposition closed sum.
+
+   See [.mli] for the public contract. This file holds the type
+   definition, the canonical projection from
+   [Keeper_turn_terminal_code], and the wire-format serialisation
+   chosen to be byte-for-byte compatible with the strings emitted
+   today by [Keeper_turn_terminal.t.code]. *)
+
+module Code = Keeper_turn_terminal_code
+
+type t =
+  | Success
+  | Checkpoint
+  | External_cancel
+  | Input_required
+  | Runtime_attempts_exhausted
+  | Provider_error of Code.t
+  | Unknown of { raw_error : string }
+
+type severity =
+  | Ok
+  | Warn
+  | Bad
+  | Unknown_bad
+
+let severity = function
+  | Success | Checkpoint -> Ok
+  | Input_required -> Ok
+  | External_cancel
+  | Runtime_attempts_exhausted -> Warn
+  | Provider_error _ -> Bad
+  | Unknown _ -> Unknown_bad
+;;
+
+let summary = function
+  | Success -> "turn completed"
+  | Checkpoint -> "continuation checkpoint"
+  | Input_required -> "agent paused to request human input"
+  | External_cancel -> "keeper turn was cancelled before completion"
+  | Runtime_attempts_exhausted ->
+    "runtime attempts exhausted; inspect per-attempt root causes"
+  | Provider_error code -> Printf.sprintf "keeper turn ended with %s" (Code.to_wire code)
+  | Unknown { raw_error = "" } ->
+    "keeper turn failed without a classified terminal reason"
+  | Unknown { raw_error } -> Printf.sprintf "keeper turn ended with %s" raw_error
+;;
+
+let next_action = function
+  | Success | Checkpoint -> None
+  | Input_required -> Some "provide_input_or_decline"
+  | External_cancel -> Some "rerun_if_still_relevant"
+  | Runtime_attempts_exhausted -> Some "inspect_runtime_attempts"
+  | Provider_error _ | Unknown _ -> Some "inspect_latest_error"
+;;
+
+let to_wire = function
+  | Success -> "success"
+  | Checkpoint -> "checkpoint"
+  | Input_required -> "input_required"
+  | External_cancel -> "external_cancel"
+  | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
+  | Provider_error code -> Code.to_wire code
+  | Unknown { raw_error } -> raw_error
+;;
+
+(* Projection from runtime layer to operator layer.
+
+   A runtime cause maps directly to a non-[Provider_error] arm only
+   when the runtime classification fully determines the operator
+   action. All other runtime causes are wrapped so the typed cause is
+   preserved for diagnostics. *)
+let of_termination_code (c : Code.t) : t =
+  match c with
+  | Code.Healthy -> Success
+  | Code.Operator_interrupt
+  | Code.Provider_runtime_error _
+  | Code.Fiber_unresolved
+  | Code.Agent_core_error _ -> Provider_error c
+;;
+
+let of_wire wire =
+  match wire with
+  | "success" -> Success
+  | "checkpoint" -> Checkpoint
+  | "input_required" -> Input_required
+  | "external_cancel" -> External_cancel
+  | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
+  | other ->
+    (match Code.of_wire_exact other with
+     | Some c -> of_termination_code c
+     | None -> Unknown { raw_error = other })
+;;
+
+let is_success = function
+  | Success -> true
+  | Checkpoint
+  | External_cancel
+  | Input_required
+  | Runtime_attempts_exhausted
+  | Provider_error _
+  | Unknown _ -> false
+;;
+
+let requires_attention = function
+  | Success | Checkpoint -> false
+  | External_cancel
+  | Input_required
+  | Runtime_attempts_exhausted
+  | Provider_error _
+  | Unknown _ -> true
+;;
+
+let equal a b =
+  match a, b with
+  | Success, Success
+  | Checkpoint, Checkpoint
+  | Input_required, Input_required
+  | External_cancel, External_cancel
+  | Runtime_attempts_exhausted, Runtime_attempts_exhausted -> true
+  | Provider_error a, Provider_error b -> String.equal (Code.to_wire a) (Code.to_wire b)
+  | Unknown a, Unknown b -> String.equal a.raw_error b.raw_error
+  | ( Success
+    | Checkpoint
+    | Input_required
+    | External_cancel
+    | Runtime_attempts_exhausted
+    | Provider_error _
+    | Unknown _ ), _ -> false
+;;
+
+let pp fmt t = Format.pp_print_string fmt (to_wire t)

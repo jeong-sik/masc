@@ -1,0 +1,88 @@
+{
+  "pending_file": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/gate/pending.json",
+  "pending_file_sha256": "211aa3a848c1aba72f23457883bb20cc1fce99cc8cecfe4da975963fd8ace6b5",
+  "observed_at_utc": "2026-10-24T18:10:43.624750+00:00",
+  "scope": "Field allowlist only; no exact-attempt/thinking/private verdict fields selected",
+  "pending_gate": {
+    "id": "appr_01a16f14-f0fb-7000-8760-679a7fc70346",
+    "keeper_name": "goal-canary",
+    "tool_name": "tool_execute",
+    "input_hash": "3d57ebdef6c7dcbbc8890bb05d70a4572c81128b44a540c1f7de8f717a384a22",
+    "requested_at": 1792865005.820213,
+    "turn_id": 1,
+    "task_id": null,
+    "goal_id": null,
+    "summary_status": "pending"
+  },
+  "actual_input_allowed_fields": {
+    "cwd": "/private/tmp/masc-goal-canary-32805eb7-glm53/.masc/playground/docker/goal-canary/",
+    "sandbox_profile": "docker",
+    "typed_command": {
+      "cwd": "/private/tmp/masc-goal-canary-32805eb7-glm53/.masc/playground/docker/goal-canary/",
+      "argv": [
+        "sleep",
+        "20"
+      ]
+    },
+    "sandbox_target": "docker:sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d"
+  },
+  "request_context_allowed_fields": {},
+  "semantic_execution": [
+    {
+      "scope_key": {
+        "kind": "direct_operation",
+        "id": "kmsg-12a71072e1802b4f3da8223986bbfefd"
+      },
+      "revision": 58,
+      "phase": "recovering",
+      "updated_at": 1792865170.554409,
+      "phase_detail": "waiting for durable Gate resolution",
+      "origin_kind": "gate_wait",
+      "gate_obligations": [
+        {
+          "approval_id": "appr_01a16f14-f0fb-7000-8760-679a7fc70346",
+          "input_hash": "3d57ebdef6c7dcbbc8890bb05d70a4572c81128b44a540c1f7de8f717a384a22",
+          "tool_name": "tool_execute"
+        }
+      ]
+    }
+  ],
+  "boundary_events": [
+    {
+      "ts": 1792864933.352882,
+      "event": {
+        "type": "run_started",
+        "run_id": "keeper-operation-run-kmsg-12a71072e1802b4f3da8223986bbfefd"
+      }
+    },
+    {
+      "ts": 1792865175.391632,
+      "event": {
+        "type": "reply_details",
+        "turn_outcome": "continuation_checkpoint",
+        "turn_ref": "trace-1792864933263-00000#1"
+      }
+    },
+    {
+      "ts": 1792865175.42205,
+      "event": {
+        "type": "status_block",
+        "kind": "continuation_checkpoint"
+      }
+    },
+    {
+      "ts": 1792865175.451694,
+      "event": {
+        "type": "continuation_checkpoint",
+        "request_id": "kmsg-12a71072e1802b4f3da8223986bbfefd"
+      }
+    },
+    {
+      "ts": 1792865175.76669,
+      "event": {
+        "type": "run_finished",
+        "run_id": "keeper-operation-run-kmsg-12a71072e1802b4f3da8223986bbfefd"
+      }
+    }
+  ]
+}

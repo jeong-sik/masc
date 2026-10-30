@@ -1,0 +1,127 @@
+(** Typed authority for Keeper-owned runtime settings.
+
+    A setting is public only when this registry names its environment variable,
+    optional [runtime.toml] key, value contract, default, effect boundary, and
+    concrete runtime consumers.  Runtime loaders, operator JSON, documentation,
+    and census tests project this data instead of maintaining parallel lists. *)
+
+type value_kind =
+  | Boolean
+  | Integer
+  | Float
+  | String
+
+type value_range =
+  | Unbounded
+  | Integer_range of
+      { min_inclusive : int option
+      ; max_inclusive : int option
+      }
+  | Float_range of
+      { min_inclusive : float option
+      ; min_exclusive : float option
+      ; max_inclusive : float option
+      }
+
+type reload_class =
+  | Next_turn
+  | Process_restart
+
+(** How a row is fed. [Toml_and_env key]: the TOML key seeds the variable, and a
+    variable set in the process environment is a caller override that wins.
+    [Toml_only key]: the TOML key is the only input and the process environment
+    is never read, so the shell that started the server cannot change what the
+    file says; [env_name] is then only the key the boot load stores the value
+    under. [Env_only]: no TOML key. *)
+type exposure =
+  | Toml_and_env of string
+  | Toml_only of string
+  | Env_only
+
+(** How {!effective_value} reads a row: [Reader] renders the owning typed
+    accessor the runtime consumer calls; [Credential_presence] reports only
+    whether the variable holds a non-blank value. *)
+type effective =
+  | Reader of (unit -> string)
+  | Credential_presence
+
+(** The operator-facing group a row is listed under. *)
+type category =
+  | Spawn
+  | Turn
+  | Bootstrap
+  | Lifecycle
+  | Heartbeat
+  | Diagnostics
+  | Supervisor
+  | Metrics
+  | Memory
+  | Media
+  | Transport
+  | Sandbox
+  | Web_search
+  | Otel
+
+type setting =
+  { env_name : string
+  ; exposure : exposure
+  ; effective : effective
+  ; value_kind : value_kind
+  ; value_range : value_range
+  ; default_display : string
+  ; reload_class : reload_class
+  ; consumers : string list
+  ; category : category
+  ; description : string
+  }
+
+val all : setting list
+(** Complete registry, including explicitly environment-only rows. *)
+
+val toml_settings : setting list
+(** The rows that own a TOML key. *)
+
+val file_owned_env_names : string list
+(** The [env_name] of every row whose only input is its TOML key ([Toml_only]).
+    The loader declares these to {!Config_boot_overrides} before it applies the
+    file; the process environment is not read for them from then on. *)
+
+val toml_env_mappings : (string * string) list
+(** TOML key to environment name, one pair per row of [toml_settings]. *)
+
+val toml_key_opt : setting -> string option
+val find_by_toml_key : string -> setting option
+
+val reads_process_env : setting -> bool
+(** [false] only for a [Toml_only] row: the process environment does not feed
+    it, so a variable of the same name is not a caller override. *)
+
+val provider_default_display : string
+(** Rendering of a setting left unset so the selected runtime keeps its
+    provider default (the thinking request). *)
+
+val display_file_float : float -> string
+(** Render a file-backed float with enough digits to recover the same value.
+    The existing [%g] spelling is preserved when it already round-trips. *)
+
+val effective_value : setting -> string
+(** The value the row's runtime consumer reads, rendered for operators. Never
+    echoes raw process input: a malformed or clamped value shows as its owner
+    resolves it, and a credential only as ["(set)"] or ["(none)"].
+    @raise Env_config_core.Config_error when the owner rejects the input. *)
+
+val value_kind_label : value_kind -> string
+val value_range_label : value_range -> string
+val reload_class_label : reload_class -> string
+val category_label : category -> string
+
+val requires_restart : setting -> bool
+(** [true] for settings whose next effect boundary requires a fiber or process
+    restart. *)
+
+val validate_registry : unit -> (unit, string list) result
+(** Rejects duplicate environment/TOML identities, malformed exposure, and
+    TOML settings without a concrete consumer. *)
+
+val schema_to_yojson : unit -> Yojson.Safe.t
+(** Machine-readable catalog used by operator surfaces and generated docs. *)

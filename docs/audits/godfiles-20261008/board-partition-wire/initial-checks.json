@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-09",
+  "parent": "a5492cf76875b885386181a23069dd73ff1acd7f",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/test_keeper_board_attention_partition.exe test/test_keeper_board_attention_exact_flow.exe",
+    "exit_code": 0,
+    "log": "initial-build.log"
+  },
+  "tests": [
+    {
+      "command": "_build/default/test/test_keeper_board_attention_partition.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 21,
+      "log": "initial-partition.log"
+    }
+  ],
+  "compiled_only": {
+    "target": "_build/default/test/test_keeper_board_attention_exact_flow.exe",
+    "reason": "Compile direct exact-flow/worker consumer types without claiming execution of adapter/provider-flow scenarios."
+  },
+  "compiler_probes": "api-probes/initial-checks.json",
+  "scope": "Focused macOS compilation, existing isolated real ledger/restart/codec scenarios and compiler API-boundary probes; no provider/live Keeper/UI/CI/installation/deployment or whole-stack proof."
+}

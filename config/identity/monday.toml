@@ -1,0 +1,21 @@
+# monday.com's remote MCP server.
+#
+# Only the server is named. Its endpoints and the scopes it publishes come
+# from the two well-known documents it serves, so none of that can go stale
+# here.
+#
+# Measured 2026-08-27: registration answers with a client secret, so this one is confidential:
+# the secret is kept 0600 beside the client id and sent on every exchange.
+# An MCP initialize is refused with 401.
+
+id = "monday"
+label = "monday.com"
+mcp_url = "https://mcp.monday.com/mcp"
+
+access_token_env = "MONDAY_ACCESS_TOKEN"
+expires_at_env = "MONDAY_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.monday/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

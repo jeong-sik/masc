@@ -1,0 +1,12 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40210199786
+Complete raw log SHA256: 499356a11897fd5cb02b0d2b3bc76712e104f83959000e7620c0bdc04cc04f68
+Complete raw log bytes: 139909
+Selected checkout, changed assertions, failures and summaries only; omitted assertions are not claimed by this excerpt.
+
+test suite	Checkout	2026-10-25T16:08:12.9794549Z HEAD is now at acbe6a52 feat(agent): project durable tool events from committed journal facts
+test suite	Test	2026-10-25T16:09:56.9728250Z File "packages/agent_core/lib/execution_tool_observation.ml", lines 34-43, characters 4-88:
+test suite	Test	2026-10-25T16:09:56.9975396Z File "packages/agent_core/lib/.agent_core.objs/native/_unknown_", line 1, characters 0-0:
+test suite	Test	2026-10-25T16:09:56.9738571Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T16:10:00.6544805Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T16:10:01.5998388Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T16:10:02.6170542Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.

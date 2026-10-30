@@ -1,0 +1,2520 @@
+open Alcotest
+open Masc
+open Keeper_official_client_session_store
+
+let temp_workspace prefix =
+  let path = Filename.temp_file prefix "" in
+  Unix.unlink path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let cleanup_tree root =
+  let rec remove path =
+    if Sys.file_exists path
+    then if Sys.is_directory path
+      then (
+        Sys.readdir path |> Array.iter (fun name -> remove (Filename.concat path name));
+        Unix.rmdir path)
+      else Unix.unlink path
+  in
+  try remove root with
+  | _ -> ()
+;;
+
+let with_workspace prefix f =
+  let base_path = temp_workspace prefix in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () -> f base_path)
+;;
+
+let owner_epoch = "11111111-1111-4111-8111-111111111111"
+let next_owner_epoch = "22222222-2222-4222-8222-222222222222"
+let empty_surface =
+  tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none []
+
+let test_context_message_schema_is_part_of_the_resume_digest () =
+  let expected =
+    `Assoc
+      [ ( "context_message_schema"
+        , `String Keeper_official_client_context_codec.schema )
+      ; "native_posture", `String "none"
+      ; "tools", `List []
+      ]
+    |> Yojson.Safe.to_string
+    |> Agent_core_sha256.digest_string
+    |> Agent_core_sha256.to_hex
+  in
+  Alcotest.(check string)
+    "context projection participates in the durable digest"
+    expected
+    empty_surface;
+  let bare_tool_list =
+    Agent_core_sha256.digest_string "[]" |> Agent_core_sha256.to_hex
+  in
+  Alcotest.(check bool)
+    "a tools-only digest cannot resume the new projection"
+    false
+    (String.equal bare_tool_list empty_surface);
+  let full_surface =
+    tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_full []
+  in
+  Alcotest.(check bool)
+    "native posture participates in the durable digest"
+    false
+    (String.equal full_surface empty_surface)
+;;
+
+let claim_new ~base_path ~keeper_name ~client_kind ~runtime_id ~owner_epoch ~at =
+  claim
+    ~base_path
+    ~keeper_name
+    ~expected:None
+    ~client_kind
+    ~owner_epoch
+    ~runtime_id
+    ~tool_surface_sha256:empty_surface
+    ~updated_at:at
+  |> Result.get_ok
+;;
+
+let test_clear_missing_state_does_not_create_store () =
+  with_workspace "masc-clear-missing-session-" (fun base_path ->
+    let keeper_name = "missing-session" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let keeper_dir = Filename.dirname (Filename.dirname state_path) in
+    Fs_compat.mkdir_p keeper_dir;
+    Unix.chmod keeper_dir 0o500;
+    check bool "store starts absent" false (Sys.file_exists (Filename.dirname state_path));
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod keeper_dir 0o700)
+      (fun () ->
+         match clear_then ~base_path ~keeper_name Fun.id with
+         | Ok () -> ()
+         | Error detail -> fail detail);
+    check bool
+      "clear does not create an absent store"
+      false
+      (Sys.file_exists (Filename.dirname state_path));
+    check bool
+      "clear does not create an absent store lock"
+      false
+      (Sys.file_exists (Filename.dirname state_path ^ ".lock")))
+;;
+
+let test_clear_removes_stale_epoch_claim () =
+  with_workspace "masc-clear-stale-session-" (fun base_path ->
+    let keeper_name = "stale-session" in
+    let _claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.
+    in
+    (match clear_then ~base_path ~keeper_name Fun.id with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    check bool
+      "stale process epoch is not treated as live ownership"
+      true
+      (load ~base_path ~keeper_name = Ok None))
+;;
+
+let test_clear_then_removes_an_undecodable_binding () =
+  with_workspace "masc-clear-undecodable-session-" (fun base_path ->
+    let keeper_name = "undecodable-session" in
+    let _claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.
+    in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let output = open_out state_path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr output)
+      (fun () -> output_string output "{not-json\n");
+    check bool "the corrupted binding cannot resume" true
+      (Result.is_error (load ~base_path ~keeper_name));
+    let callback_ran =
+      clear_then ~base_path ~keeper_name (fun () -> true) |> Result.get_ok
+    in
+    check bool "paired clear still runs" true callback_ran;
+    check bool "the corrupted binding is removed" false (Sys.file_exists state_path))
+;;
+
+let test_clear_then_preserves_callback_result_after_release_failure () =
+  with_workspace "masc-clear-release-failure-" (fun base_path ->
+    let keeper_name = "release-failure" in
+    let _claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.
+    in
+    let lock_path =
+      path ~base_path ~keeper_name
+      |> Result.get_ok
+      |> Filename.dirname
+      |> fun directory -> directory ^ ".lock"
+    in
+    let release_failure =
+      { File_lock_eio.lock_path
+      ; phase = File_lock_eio.Release_process_lock
+      ; cause =
+          { File_lock_eio.error = Unix.EIO
+          ; operation = "injected_release_after_clear"
+          ; argument = lock_path
+          }
+      ; cleanup_failure = None
+      }
+    in
+    let result =
+      Keeper_official_client_session_store.For_testing.clear_then_with_release_failure
+        ~release_failure
+        ~base_path
+        ~keeper_name
+        (fun () -> "history-cleared")
+      |> Result.get_ok
+    in
+    check string "completed paired clear result survives" "history-cleared" result;
+    check bool "the binding was removed before release failed" true
+      (load ~base_path ~keeper_name = Ok None))
+;;
+
+let test_clear_then_fences_new_claim_until_callback_finishes () =
+  with_workspace "masc-clear-claim-fence-" (fun base_path ->
+    Eio_main.run @@ fun _env ->
+    Eio.Switch.run @@ fun sw ->
+    let keeper_name = "claim-fence" in
+    let _claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.
+    in
+    let claim_started, resolve_claim_started = Eio.Promise.create () in
+    let claim_done, resolve_claim_done = Eio.Promise.create () in
+    let callback_ran =
+      clear_then ~base_path ~keeper_name (fun () ->
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve resolve_claim_started ();
+          Eio.Promise.resolve
+            resolve_claim_done
+            (claim
+               ~base_path
+               ~keeper_name
+               ~expected:None
+               ~client_kind:Codex
+               ~owner_epoch:next_owner_epoch
+               ~runtime_id:"codex.default"
+               ~tool_surface_sha256:empty_surface
+               ~updated_at:2.));
+        Eio.Promise.await claim_started;
+        Eio.Fiber.yield ();
+        check bool
+          "new claim stays fenced during paired mutation"
+          false
+          (Eio.Promise.is_resolved claim_done);
+        true)
+      |> Result.get_ok
+    in
+    check bool "paired mutation ran" true callback_ran;
+    match Eio.Promise.await claim_done with
+    | Ok claimed ->
+      check bool
+        "claim starts only after the clear transaction"
+        true
+        (load ~base_path ~keeper_name = Ok (Some claimed))
+    | Error detail -> fail detail)
+;;
+
+let test_roundtrip_and_settlement () =
+  with_workspace "masc-official-client-store-roundtrip-" (fun base_path ->
+    let keeper_name = "roundtrip" in
+    check bool "missing" true (load ~base_path ~keeper_name = Ok None);
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    (match
+       claim
+         ~base_path
+         ~keeper_name
+         ~expected:(Some claimed)
+         ~client_kind:Claude_code
+         ~owner_epoch
+         ~runtime_id:"claude-code.default"
+         ~tool_surface_sha256:empty_surface
+         ~updated_at:1.5
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "incomplete claim changed official client identity");
+    let active =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+    in
+    (match
+       mark_turn_started
+         ~base_path
+         ~keeper_name
+         ~expected:starting
+         ~session_id:"session-1"
+         ~turn_id:"turn-regressed"
+         ~turn_count:(starting.turn_count - 1)
+         ~updated_at:3.5
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "a regressed provider turn count mutated the durable claim");
+    let inflight =
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~turn_count:starting.turn_count
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let resume_plan =
+      plan_claim
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+      |> Result.get_ok
+    in
+    check int "resume ordinal" 2 resume_plan.turn_count;
+    check bool
+      "resume settlement"
+      true
+      (resume_plan.previous_settlement
+       = Some { session_id = "session-1"; turn_id = "turn-1" });
+    check
+      (option string)
+      "resume surface requirement"
+      (Some empty_surface)
+      resume_plan.required_tool_surface_sha256;
+    let changed_client_plan =
+      plan_claim
+        ~expected:(Some settled)
+        ~client_kind:Claude_code
+        ~runtime_id:"claude-code.default"
+      |> Result.get_ok
+    in
+    check int "cross-client failover starts at turn one" 1 changed_client_plan.turn_count;
+    check bool "cross-client failover never resumes old session" true
+      (Option.is_none changed_client_plan.previous_settlement);
+    check (option string) "cross-client failover has no stale tool-surface requirement"
+      None changed_client_plan.required_tool_surface_sha256;
+    let changed_runtime_plan =
+      plan_claim
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~runtime_id:"codex.fallback"
+      |> Result.get_ok
+    in
+    check int "cross-runtime failover starts at turn one" 1 changed_runtime_plan.turn_count;
+    check bool "cross-runtime failover never resumes old session" true
+      (Option.is_none changed_runtime_plan.previous_settlement);
+    match load ~base_path ~keeper_name |> Result.map_error read_error_to_string with
+    | Error detail -> fail detail
+    | Ok None -> fail "durable session disappeared"
+    | Ok (Some loaded) ->
+      check bool "exact read-back" true (loaded = settled);
+      check bool "client kind" true (loaded.client_kind = Codex);
+      check int "completed turns" 1 loaded.turn_count;
+      (match loaded.phase with
+       | Settled { session_id; turn_id } ->
+         check string "session" "session-1" session_id;
+         check string "turn" "turn-1" turn_id
+       | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+         fail "terminal turn was not settled"))
+;;
+
+let test_duplicate_claim_and_cas_are_fail_closed () =
+  with_workspace "masc-official-client-store-cas-" (fun base_path ->
+    let keeper_name = "cas" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    (match
+       claim
+         ~base_path
+         ~keeper_name
+         ~expected:(Some claimed)
+         ~client_kind:Codex
+         ~owner_epoch
+         ~runtime_id:"codex.default"
+         ~tool_surface_sha256:empty_surface
+         ~updated_at:2.0
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "incomplete claim admitted duplicate execution");
+    let active =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-cas"
+        ~updated_at:3.0
+      |> Result.get_ok
+    in
+    (match
+       mark_turn_starting
+         ~base_path
+         ~keeper_name
+         ~expected:claimed
+         ~session_id:"session-cas"
+         ~updated_at:4.0
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "stale expected state bypassed compare-and-swap");
+    match load ~base_path ~keeper_name |> Result.map_error read_error_to_string with
+    | Ok (Some loaded) -> check bool "active preserved" true (loaded = active)
+    | Error detail -> fail detail
+    | Ok None -> fail "CAS failure removed durable state")
+;;
+
+(* A deployment that adds a tool or edits a descriptor moves the surface
+   digest. Before this, a settled session then refused every turn with
+   "tool surface changed before session resume", and had no way out: [Settled]
+   never becomes [Recovery_required], so the resolve endpoint had no id to act
+   on. Live fleet went 99.0% -> 71.4% on one such deploy (#27992). *)
+let test_moved_tool_surface_starts_fresh () =
+  with_workspace "masc-official-client-store-surface-" (fun base_path ->
+    let keeper_name = "surface" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let active =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~turn_count:inflight.turn_count
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let plan =
+      plan_claim
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+      |> Result.get_ok
+    in
+    (* Control: an unchanged surface still resumes, so the case below cannot
+       pass by making every plan fresh. *)
+    let same = reconcile_tool_surface plan ~tool_surface_sha256:empty_surface in
+    check int "unchanged surface resumes" 2 same.turn_count;
+    check bool
+      "unchanged surface keeps the settlement"
+      true
+      (same.previous_settlement <> None);
+    (* A real digest of a different surface, not a decorated string: the store
+       validates the format, so a synthetic value would fail for that reason
+       instead of exercising the mismatch. *)
+    let moved_surface =
+      String.map (fun c -> if c = 'a' then 'b' else c) empty_surface
+    in
+    check bool "moved digest differs" true (moved_surface <> empty_surface);
+    let moved = reconcile_tool_surface plan ~tool_surface_sha256:moved_surface in
+    check int "moved surface starts at ordinal 1" 1 moved.turn_count;
+    check bool
+      "moved surface drops the settlement"
+      true
+      (moved.previous_settlement = None);
+    check
+      (option string)
+      "moved surface requires nothing"
+      None
+      moved.required_tool_surface_sha256;
+    (* And the claim itself goes through rather than erroring. *)
+    match
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:moved_surface
+        ~updated_at:6.0
+    with
+    | Ok _ -> ()
+    | Error detail -> fail ("claim after a moved surface must succeed: " ^ detail))
+;;
+
+(* A stop the owner raised is not an ambiguity. Recovery exists to get an
+   operator's judgement on what a crash left behind; the owner knows the turn
+   did not finish and why, and already classifies the operation as
+   Turn_cancelled. Routing it to Recovery_required blocked every later turn for
+   that keeper until someone resolved it by hand -- gamma re-entered three
+   minutes after being cleared (#28012). *)
+let test_owner_stop_releases_without_recovery () =
+  check bool
+    "owner stop is transient"
+    true
+    (failure_disposition Owner_stopped_turn = Transient);
+  (* Control: an unexplained cancellation still needs an operator, so this
+     cannot pass by making every failure transient. *)
+  check bool
+    "unexplained transport interruption stays ambiguous"
+    true
+    (failure_disposition Transport_interrupted = Ambiguous);
+  (* The wire codec is not exported, so the round trip is covered where it is
+     reachable rather than asserted here. *)
+  ()
+;;
+
+let test_terminal_identity_switch_starts_fresh () =
+  with_workspace "masc-official-client-store-switch-" (fun base_path ->
+    let keeper_name = "switch" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let active =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"codex-session"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"codex-session"
+        ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"codex-session"
+        ~turn_id:"codex-turn"
+        ~turn_count:starting.turn_count
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"codex-session"
+        ~turn_id:"codex-turn"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let switched =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some settled)
+        ~client_kind:Claude_code
+        ~owner_epoch
+        ~runtime_id:"claude-code.sonnet"
+        ~tool_surface_sha256:(String.make 64 'b')
+        ~updated_at:7.0
+      |> Result.get_ok
+    in
+    check bool "new client" true (switched.client_kind = Claude_code);
+    check string "new runtime" "claude-code.sonnet" switched.runtime_id;
+    check int "fresh ordinal" 1 switched.turn_count;
+    match switched.phase with
+    | Start { previous_settlement = None; _ } -> ()
+    | Start { previous_settlement = Some _; _ }
+    | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+      fail "terminal client switch inherited the old external session")
+;;
+
+let test_restart_recovery_and_transient_release () =
+  List.iter (fun failure ->
+  check bool "release classification is transient" true (failure_disposition failure = Transient);
+  with_workspace "masc-official-client-store-restart-" (fun base_path ->
+    let keeper_name = "restart" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Antigravity
+        ~runtime_id:"antigravity.gemini"
+        ~owner_epoch
+        ~at:1.0
+    in
+    (match
+       reconcile_process_restart
+         ~base_path
+         ~keeper_name
+         ~expected:claimed
+         ~current_owner_epoch:owner_epoch
+         ~required_at:2.0
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "same process epoch was classified as a restart");
+    let recovery =
+      reconcile_process_restart
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~current_owner_epoch:next_owner_epoch
+        ~required_at:3.0
+      |> Result.get_ok
+    in
+    (match recovery.phase with
+     | Recovery_required required ->
+       check bool "restart class" true (required.failure = Process_restarted);
+       check bool "ambiguous" true (failure_disposition required.failure = Ambiguous);
+       check string "claim epoch" owner_epoch required.owner_epoch
+     | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+       fail "old process claim did not enter recovery");
+    let reclaimed =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some recovery)
+        ~client_kind:Antigravity
+        ~owner_epoch:next_owner_epoch
+        ~runtime_id:"antigravity.gemini"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    check int "recovery claim reuses failed turn ordinal" 1 reclaimed.turn_count;
+    let released =
+      release_transient
+        ~base_path
+        ~keeper_name
+        ~expected:reclaimed
+        ~failure
+        ~released_at:5.0
+      |> Result.get_ok
+    in
+    check int "transient does not count" 0 released.turn_count;
+    (match released.phase with
+     | Ready -> ()
+     | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+       fail "transient failure did not release the claim");
+    match released.last_transient_release with
+    | Some record ->
+      check bool "transient evidence" true (record.failure = failure);
+      check string "release epoch" next_owner_epoch record.owner_epoch
+    | None -> fail "transient release evidence was not persisted"))
+    [Pre_dispatch_failed; Transient_spawn_failed]
+;;
+
+let test_exact_recovery_restart () =
+  with_workspace "masc-official-client-store-resolution-" (fun base_path ->
+    let keeper_name = "resolution" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Claude_code
+        ~runtime_id:"claude-code.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~failure:Protocol_failed
+        ~detail:"ambiguous client protocol failure"
+        ~required_at:2.0
+      |> Result.get_ok
+    in
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "ambiguous failure did not require recovery"
+    in
+    (match
+       resolve_recovery
+         ~base_path
+         ~keeper_name
+         ~expected:recovery
+         ~recovery_id:"33333333-3333-4333-8333-333333333333"
+         ~resolution:Restart_fresh
+         ~resolved_by:"operator"
+         ~resolved_at:3.0
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "wrong recovery fence was accepted");
+    let restarted, application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator"
+        ~resolved_at:4.0
+      |> Result.get_ok
+    in
+    check bool "recovery applied" true (application = Applied);
+    check int "restart drops incomplete turn" 0 restarted.turn_count;
+    (match restarted.phase with
+     | Ready -> ()
+     | Settled _ | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+       fail "fresh restart did not return the binding to Ready");
+    let replayed, replay_application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator-retry"
+        ~resolved_at:5.0
+      |> Result.get_ok
+    in
+    check bool "recovery replayed" true (replay_application = Replayed);
+    check bool "replay returns committed binding" true (restarted = replayed);
+    (match
+       resolve_recovery
+         ~base_path
+         ~keeper_name
+         ~expected:recovery
+         ~recovery_id
+         ~resolution:Retry_previous
+         ~resolved_by:"operator"
+         ~resolved_at:6.0
+     with
+     | Error Resolution_conflict -> ()
+     | Error _ -> fail "different replay decision returned the wrong conflict"
+     | Ok _ -> fail "different replay decision replaced committed recovery");
+    match restarted.last_recovery_resolution with
+    | Some record ->
+      check string "durable actor" "operator" record.resolved_by;
+      check string "recovery fence" recovery_id record.recovery_id
+    | None -> fail "recovery resolution evidence was not persisted")
+;;
+
+(* A Gate continuation whose resume was refused as full cannot continue: the
+   continuation may only resume that session, and resending the resume meets
+   the same refusal. The record ends it and frees the Keeper for a new
+   session. *)
+let test_vendor_session_full_ends_the_continuation_and_frees_the_session () =
+  with_workspace "masc-official-client-store-full-" (fun base_path ->
+    let keeper_name = "full" in
+    let runtime_id = "claude-code.default" in
+    let claimed =
+      claim_new ~base_path ~keeper_name ~client_kind:Claude_code ~runtime_id
+        ~owner_epoch ~at:1.0
+    in
+    let active =
+      mark_active ~base_path ~keeper_name ~expected:claimed ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"session-1" ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"session-1" ~turn_id:"turn-1" ~turn_count:starting.turn_count
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle ~base_path ~keeper_name ~expected:inflight ~session_id:"session-1"
+        ~turn_id:"turn-1" ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Claude_code; runtime_id; session_id = "session-1"
+      ; turn_id = "turn-1"; tool_surface_sha256 = empty_surface
+      ; frame = Keeper_repetition_snapshot.empty }
+    in
+    check bool "the Gate session admits its continuation before the refusal" true
+      (validate_continuation ~checkpoint ~expected:(Some settled)
+         ~client_kind:Claude_code ~runtime_id ~tool_surface_sha256:empty_surface
+       = Ok ());
+    let resumed_claim =
+      claim ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Claude_code
+        ~owner_epoch ~runtime_id ~tool_surface_sha256:empty_surface ~updated_at:6.0
+      |> Result.get_ok
+    in
+    let full =
+      require_recovery ~base_path ~keeper_name ~expected:resumed_claim
+        ~failure:(Vendor_session_full No_activity_observed)
+        ~detail:"the resumed session is full"
+        ~required_at:7.0
+      |> Result.get_ok
+    in
+    let reloaded =
+      match load ~base_path ~keeper_name with
+      | Ok (Some state) -> state
+      | Ok None | Error _ -> fail "the full-session record did not load back"
+    in
+    let recovery_id =
+      match reloaded.phase with
+      | Recovery_required
+          { failure = Vendor_session_full No_activity_observed; recovery_id; _ } -> recovery_id
+      | Recovery_required _ | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "the full-session record did not keep its failure"
+    in
+    check bool "the record ends this Gate" true
+      (Option.is_some
+         (Keeper_direct_gate_continuation.session_full_cause ~checkpoint
+            ~approval_id:"approval-1" (Some reloaded)));
+    check bool "another Gate's full session is not blamed on this one" true
+      (Option.is_none
+         (Keeper_direct_gate_continuation.session_full_cause
+            ~checkpoint:{ checkpoint with turn_id = "turn-0" }
+            ~approval_id:"approval-2" (Some reloaded)));
+    check bool "the continuation is refused once its session is full" true
+      (Result.is_error
+         (validate_continuation ~checkpoint ~expected:(Some reloaded)
+            ~client_kind:Claude_code ~runtime_id ~tool_surface_sha256:empty_surface));
+    (match
+       resolve_recovery ~base_path ~keeper_name ~expected:full ~recovery_id
+         ~resolution:Retry_previous ~resolved_by:"operator" ~resolved_at:8.0
+     with
+     | Error Retry_previous_unavailable -> ()
+     | Error _ | Ok _ -> fail "a full session offered to resend the same resume");
+    let plan =
+      plan_claim ~expected:(Some reloaded) ~client_kind:Claude_code ~runtime_id
+      |> Result.get_ok
+    in
+    check bool "the next ordinary turn starts a new session" true
+      (Option.is_none plan.previous_settlement);
+    check int "the new session restarts the ordinal" 1 plan.turn_count;
+    let fresh =
+      claim ~base_path ~keeper_name ~expected:(Some reloaded) ~client_kind:Claude_code
+        ~owner_epoch ~runtime_id ~tool_surface_sha256:empty_surface ~updated_at:9.0
+      |> Result.get_ok
+    in
+    match fresh.phase with
+    | Start { previous_settlement = None; _ } -> ()
+    | Start _ | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+      fail "the claim after a full session was not a fresh start")
+;;
+
+let test_retry_previous_restores_exact_settlement () =
+  with_workspace "masc-official-client-store-retry-" (fun base_path ->
+    let keeper_name = "retry" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let active =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~turn_count:starting.turn_count
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let resumed_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:6.0
+      |> Result.get_ok
+    in
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:resumed_claim
+        ~failure:Protocol_failed
+        ~detail:"resume transport ended before the next turn started"
+        ~required_at:7.0
+      |> Result.get_ok
+    in
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required ->
+        check bool
+          "retry retains exact previous settlement"
+          true
+          (required.previous_settlement
+           = Some { session_id = "session-1"; turn_id = "turn-1" });
+        required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "resumed claim did not enter recovery"
+    in
+    let automatic_plan =
+      plan_claim
+        ~expected:(Some recovery)
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+      |> Result.get_ok
+    in
+    check int "automatic recovery restarts ordinal" 1 automatic_plan.turn_count;
+    check
+      (option string)
+      "automatic recovery drops surface requirement"
+      None
+      automatic_plan.required_tool_surface_sha256;
+    check
+      bool
+      "automatic recovery does not resume an ambiguous provider conversation"
+      true
+      (Option.is_none automatic_plan.previous_settlement);
+    let restored, application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Retry_previous
+        ~resolved_by:"operator"
+        ~resolved_at:8.0
+      |> Result.get_ok
+    in
+    check bool "retry decision applied" true (application = Applied);
+    check int "failed retry does not count" 1 restored.turn_count;
+    (match restored.phase with
+     | Settled { session_id; turn_id } ->
+       check string "restored session" "session-1" session_id;
+       check string "restored turn" "turn-1" turn_id
+     | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+       fail "retry_previous did not restore the exact settlement");
+    let next_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some restored)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:9.0
+      |> Result.get_ok
+    in
+    match next_claim.phase with
+    | Start { previous_settlement; _ } ->
+      check bool
+        "next claim resumes restored session"
+        true
+        (previous_settlement
+         = Some { session_id = "session-1"; turn_id = "turn-1" })
+    | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+      fail "restored settlement did not drive the next resume claim")
+;;
+
+(* The sibling restart case starts at turn_count = 1, where [turn_count - 1] and
+   a true reset are the same number, so it cannot see the ordinal carry across a
+   discarded conversation. This one reaches turn_count = 2 first and then runs
+   the next turn far enough to reach [mark_turn_started], which is where the
+   carried ordinal becomes a failure: a restart opens a fresh provider
+   conversation, that conversation reports ordinal 1, and the regression guard
+   rejects any observed count below the durable one. *)
+let test_restart_fresh_lets_the_next_fresh_turn_start () =
+  with_workspace "masc-official-client-store-restart-ordinal-" (fun base_path ->
+    let keeper_name = "restart-ordinal" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let settled =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+      |> fun active ->
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+      |> fun starting ->
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"session-1"
+        ~turn_id:"session-1:ordinal:1"
+        ~turn_count:1
+        ~updated_at:4.0
+      |> Result.get_ok
+      |> fun inflight ->
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"session-1:ordinal:1"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let second_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:6.0
+      |> Result.get_ok
+    in
+    check int "second claim is ordinal two" 2 second_claim.turn_count;
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:second_claim
+        ~failure:Protocol_failed
+        ~detail:"second turn ended ambiguously"
+        ~required_at:7.0
+      |> Result.get_ok
+    in
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "second turn did not enter recovery"
+    in
+    let restarted, application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator"
+        ~resolved_at:8.0
+      |> Result.get_ok
+    in
+    check bool "restart applied" true (application = Applied);
+    check int "restart resets the ordinal" 0 restarted.turn_count;
+    (match restarted.phase with
+     | Ready -> ()
+     | Settled _ | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+       fail "fresh restart did not return the binding to Ready");
+    let next_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some restarted)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:9.0
+      |> Result.get_ok
+    in
+    check int "claim after restart asks for ordinal one" 1 next_claim.turn_count;
+    (match next_claim.phase with
+     | Start { previous_settlement = None; _ } -> ()
+     | Start { previous_settlement = Some _; _ } ->
+       fail "restart carried a settlement into the next claim"
+     | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+       fail "claim after restart did not open a turn");
+    let starting =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:next_claim
+        ~session_id:"session-2"
+        ~updated_at:10.0
+      |> Result.get_ok
+      |> fun active ->
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-2"
+        ~updated_at:11.0
+      |> Result.get_ok
+    in
+    match
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"session-2"
+        ~turn_id:"session-2:ordinal:1"
+        ~turn_count:1
+        ~updated_at:12.0
+    with
+    | Ok inflight ->
+      check int "fresh conversation ordinal is accepted" 1 inflight.turn_count
+    | Error detail ->
+      fail ("a fresh conversation after restart was rejected: " ^ detail))
+;;
+
+(* RFC claude-code-context-overflow-bounded-restart §6.2 admission rules: a
+   typed input rejection must not be auto-superseded by the next claim on the
+   same runtime, while every other recovery keeps the supersede and the
+   operator resolution path stays the only way back in. *)
+let test_input_rejected_recovery_is_not_auto_superseded () =
+  with_workspace "masc-official-client-store-input-rejected-" (fun base_path ->
+    let keeper_name = "input-rejected" in
+    check string
+      "effect-fenced wire label"
+      "input_rejected_effect_fenced"
+      (recovery_failure_to_string (Input_rejected Effect_fenced));
+    check string
+      "floor wire label"
+      "input_rejected_bootstrap_floor_exceeded"
+      (recovery_failure_to_string (Input_rejected Bootstrap_floor_exceeded));
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Claude_code
+        ~runtime_id:"claude_code.claude-sonnet-5"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~failure:(Input_rejected Effect_fenced)
+        ~detail:
+          "Claude Code context window exceeded (response_emitted=true): \
+           terminal subtype=success api_status=400: Prompt is too long"
+        ~required_at:2.0
+      |> Result.get_ok
+    in
+    (* The durable write already encodes the new failure; loading it back
+       proves the decoder admits the same label the encoder produced. *)
+    (match load ~base_path ~keeper_name with
+     | Ok (Some { phase = Recovery_required required; _ }) ->
+       check bool
+         "durable failure decodes as the same typed rejection"
+         true
+         (required.failure = Input_rejected Effect_fenced);
+       check bool
+         "input rejection is fatal"
+         true
+         (failure_disposition required.failure = Fatal)
+     | Ok None | Ok (Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ })
+     | Error _ ->
+       fail "input-rejected recovery did not survive the durable round-trip");
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "input rejection did not enter recovery"
+    in
+    (* Same runtime: the heartbeat replay path must retain its typed cause. *)
+    (match plan_claim ~expected:(Some recovery) ~client_kind:Claude_code ~runtime_id:"claude_code.claude-sonnet-5" with
+     | Error (Input_recovery_required payload as error) ->
+       check string "typed refusal retains runtime" recovery.runtime_id payload.runtime_id;
+       check string "typed refusal retains recovery ID" recovery_id payload.recovery_id;
+       check bool "typed refusal retains effect fence" true (payload.reason = Effect_fenced);
+       (match Keeper_internal_error.classify_masc_internal_error
+                (core_error_of_claim_error error) with
+        | Some (Keeper_internal_error.Official_client_recovery_required carried) ->
+          check bool "core carrier preserves exact recovery payload" true (carried = payload)
+        | _ -> fail "input refusal became a generic core error")
+     | Error error -> fail (claim_error_to_string error)
+     | Ok _ -> fail "same-runtime claim auto-superseded an input rejection");
+    (* A different runtime is an operator-driven change and still starts fresh. *)
+    (match
+       plan_claim
+         ~expected:(Some recovery)
+         ~client_kind:Claude_code
+         ~runtime_id:"claude_code.claude-opus-5-5"
+     with
+     | Ok _ -> ()
+     | Error detail -> fail ("cross-runtime claim was refused: " ^ claim_error_to_string detail));
+    (* Contrast: a generic provider rejection keeps the automatic supersede. *)
+    let other =
+      claim_new
+        ~base_path
+        ~keeper_name:"generic-rejected"
+        ~client_kind:Claude_code
+        ~runtime_id:"claude_code.claude-sonnet-5"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let generic =
+      require_recovery
+        ~base_path
+        ~keeper_name:"generic-rejected"
+        ~expected:other
+        ~failure:Provider_rejected
+        ~detail:"subscription required"
+        ~required_at:2.0
+      |> Result.get_ok
+    in
+    (match
+       plan_claim
+         ~expected:(Some generic)
+         ~client_kind:Claude_code
+         ~runtime_id:"claude_code.claude-sonnet-5"
+     with
+     | Ok _ -> ()
+     | Error detail -> fail ("generic rejection lost its automatic supersede: " ^ claim_error_to_string detail));
+    (* The only way back on the same runtime is the operator resolution. *)
+    let restarted, application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator"
+        ~resolved_at:3.0
+      |> Result.get_ok
+    in
+    check bool "restart applied" true (application = Applied);
+    (match
+       plan_claim
+         ~expected:(Some restarted)
+         ~client_kind:Claude_code
+         ~runtime_id:"claude_code.claude-sonnet-5"
+     with
+     | Ok plan -> check int "resolved session claims ordinal one" 1 plan.turn_count
+     | Error detail -> fail ("resolved session was still fenced: " ^ claim_error_to_string detail)))
+;;
+
+let test_other_claim_refusals_remain_configuration_errors () =
+  with_workspace "masc-official-client-claim-categories-" (fun base_path ->
+    let claimed = claim_new ~base_path ~keeper_name:"claim-categories"
+        ~client_kind:Codex ~runtime_id:"codex.default" ~owner_epoch ~at:1. in
+    let check_refusal expected result =
+      match result with
+      | Ok _ -> fail "invalid claim was accepted"
+      | Error error ->
+        check bool "exact typed refusal category" true (error = expected);
+        (match core_error_of_claim_error error with
+         | Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail }) ->
+           check string "existing claim field" "official_client_session.claim" field;
+           check string "canonical refusal detail" (claim_error_to_string error) detail
+         | _ -> fail "ordinary claim refusal became a recovery carrier") in
+    check_refusal Invalid_runtime_id
+      (plan_claim ~expected:None ~client_kind:Codex ~runtime_id:"  ");
+    List.iter (fun (expected, binding) ->
+        check_refusal expected
+          (plan_claim ~expected:(Some binding) ~client_kind:Codex
+             ~runtime_id:"codex.default"))
+      [ Start_incomplete, claimed
+      ; Active_unsettled,
+        { claimed with phase = Active
+            { owner_epoch; session_id = "session"; previous_settlement = None } }
+      ; Turn_already_inflight,
+        { claimed with phase = Turn_inflight
+            { owner_epoch; session_id = "session"; turn_id = Some "turn";
+              previous_settlement = None } }
+      ; Turn_count_exhausted,
+        { claimed with phase = Ready; turn_count = Int.max_int }
+      ])
+;;
+
+let write_file path content =
+  let output = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output content)
+;;
+
+let test_input_rejection_codec_keeps_exact_wire_domain () =
+  with_workspace "masc-official-client-rejection-codec-" (fun base_path ->
+    let keeper_name = "rejection-codec" in
+    let runtime_id = "codex.default" in
+    let claimed = claim_new ~base_path ~keeper_name ~client_kind:Codex
+        ~runtime_id ~owner_epoch ~at:1. in
+    let recovery = require_recovery ~base_path ~keeper_name ~expected:claimed
+        ~failure:(Input_rejected Bootstrap_floor_exceeded)
+        ~detail:"fixture bootstrap floor rejection" ~required_at:2. |> Result.get_ok in
+    let recovery_id = match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "fixture recovery was not stored" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let original = Yojson.Safe.from_file state_path in
+    let write_failure wire =
+      let json = match original with
+        | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+            if String.equal key "phase" then
+              match value with
+              | `Assoc phase -> key, `Assoc
+                  (("failure", `String wire) :: List.remove_assoc "failure" phase)
+              | _ -> fail "fixture phase is not an object"
+            else key, value) fields)
+        | _ -> fail "fixture store is not an object" in
+      write_file state_path (Yojson.Safe.to_string json) in
+    List.iter (fun reason ->
+        write_failure (recovery_failure_to_string (Input_rejected reason));
+        let loaded = load ~base_path ~keeper_name |> Result.get_ok in
+        match plan_claim ~expected:loaded ~client_kind:Codex ~runtime_id with
+        | Error (Input_recovery_required payload) ->
+          check string "wire retains runtime" runtime_id payload.runtime_id;
+          check string "wire retains recovery ID" recovery_id payload.recovery_id;
+          check bool "wire retains typed reason" true (payload.reason = reason)
+        | Error error -> fail (claim_error_to_string error)
+        | Ok _ -> fail "loaded input rejection was auto-superseded")
+      [Bootstrap_floor_exceeded; Effect_fenced];
+    List.iter (fun wire ->
+        write_failure wire;
+        match load ~base_path ~keeper_name with
+        | Error _ -> ()
+        | Ok _ -> fail "unknown input-rejection wire was accepted")
+      ["input_rejected"; "input_rejected_"; "input_rejected_other";
+       "input_rejected_effect_fenced_extra"])
+
+;;
+
+let test_ambiguous_json_is_rejected () =
+  with_workspace "masc-official-client-store-json-" (fun base_path ->
+    let keeper_name = "ambiguous-json" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname state_path) in
+    write_file
+      state_path
+      {|{"client_kind":"codex","last_recovery_resolution":null,"last_transient_release":null,"phase":{"kind":"settled","session_id":"session-1","turn_id":"turn-1"},"runtime_id":"codex.default","runtime_id":"codex.other","schema":"masc.keeper.official-client-session.v2","tool_surface_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","turn_count":1,"updated_at":1.0}|};
+    match load ~base_path ~keeper_name with
+    | Error _ -> ()
+    | Ok _ -> fail "duplicate JSON keys were accepted")
+;;
+
+let fixture_tool ?(parameters = []) ~name ~description () =
+  Agent_core.Tool.create
+    ~name
+    ~description
+    ~parameters
+    (fun _ -> Ok { Agent_core.Types.content = "fixture"; content_blocks = None; _meta = None })
+;;
+
+(* A per-Keeper session outlives the turn that opened a Gate. A queued
+   operation running meanwhile settles that same session on a later turn, and
+   admitting the continuation on the session alone accepted that state -- the
+   resumed work was then appended after turns it never saw. *)
+let test_a_continuation_is_admitted_only_for_the_turn_it_left () =
+  with_workspace "masc-official-client-store-continuation-" (fun base_path ->
+    let keeper_name = "continuation" in
+    let claimed =
+      claim_new ~base_path ~keeper_name ~client_kind:Codex
+        ~runtime_id:"codex.default" ~owner_epoch ~at:1.0
+    in
+    let active =
+      mark_active ~base_path ~keeper_name ~expected:claimed
+        ~session_id:"session-1" ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"session-1" ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"session-1" ~turn_id:"turn-1"
+        ~turn_count:starting.turn_count ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle ~base_path ~keeper_name ~expected:inflight
+        ~session_id:"session-1" ~turn_id:"turn-1" ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let checkpoint turn_id : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Codex
+      ; runtime_id = "codex.default"
+      ; session_id = "session-1"
+      ; turn_id
+      ; tool_surface_sha256 = empty_surface
+      ; frame = Keeper_repetition_snapshot.empty
+      }
+    in
+    let admit turn_id =
+      validate_continuation ~checkpoint:(checkpoint turn_id) ~expected:(Some settled)
+        ~client_kind:Codex ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+    in
+    check bool "the turn it left resumes" true (admit "turn-1" = Ok ());
+    check bool "the same session settled on a later turn does not" true
+      (Result.is_error (admit "turn-2"));
+    let captured = checkpoint "turn-1" in
+    let complete expected = validate_completed_continuation ~checkpoint:captured ~expected in
+    check bool "original settlement cannot prove delivery" true
+      (Result.is_error (complete (Some settled)));
+    let resumed = claim ~base_path ~keeper_name ~expected:(Some settled)
+      ~client_kind:Codex ~runtime_id:"codex.default" ~owner_epoch:next_owner_epoch
+      ~tool_surface_sha256:empty_surface ~updated_at:6.0 |> Result.get_ok in
+    let resumed = mark_active ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~updated_at:7.0 |> Result.get_ok in
+    let resumed = mark_turn_starting ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~updated_at:8.0 |> Result.get_ok in
+    let resumed = mark_turn_started ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~turn_id:"turn-2" ~turn_count:resumed.turn_count
+      ~updated_at:9.0 |> Result.get_ok in
+    check bool "inflight continuation cannot prove settlement" true
+      (Result.is_error (complete (Some resumed)));
+    let resumed = settle ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~turn_id:"turn-2" ~updated_at:10.0 |> Result.get_ok in
+    check bool "later settled turn completes admitted continuation" true
+      (complete (Some resumed) = Ok ());
+    check bool "later settlement is not a fresh admission" true
+      (Result.is_error (validate_continuation ~checkpoint:captured ~expected:(Some resumed)
+        ~client_kind:Codex ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface));
+    List.iter (fun (label, changed) ->
+      check bool label true (Result.is_error (complete (Some changed))))
+      [ "changed session cannot complete", {resumed with phase=Settled {session_id="another-session"; turn_id="turn-2"}}
+      ; "changed runtime cannot complete", {resumed with runtime_id="another.runtime"}
+      ; "changed client cannot complete", {resumed with client_kind=Claude_code}
+      ; "changed tools cannot complete", {resumed with tool_surface_sha256=String.make 64 'f'} ];
+    check bool "missing binding cannot complete" true (Result.is_error (complete None)))
+;;
+
+let test_tool_surface_fingerprint_is_canonical () =
+  let alpha = fixture_tool ~name:"alpha" ~description:"first" () in
+  let beta = fixture_tool ~name:"beta" ~description:"second" () in
+  let changed = fixture_tool ~name:"alpha" ~description:"changed" () in
+  let first : Agent_core.Types.tool_param =
+    { name = "first"; description = "first"; param_type = String; required = true }
+  in
+  let second : Agent_core.Types.tool_param =
+    { name = "second"; description = "second"; param_type = Integer; required = true }
+  in
+  let ordered =
+    fixture_tool
+      ~parameters:[ first; second ]
+      ~name:"ordered"
+      ~description:"same"
+      ()
+  in
+  let reordered =
+    fixture_tool
+      ~parameters:[ second; first ]
+      ~name:"ordered"
+      ~description:"same"
+      ()
+  in
+  check string
+    "tool order"
+    (tool_surface_sha256
+       ~native_posture:Runtime_native_tools.Native_none
+       [ alpha; beta ])
+    (tool_surface_sha256
+       ~native_posture:Runtime_native_tools.Native_none
+       [ beta; alpha ]);
+  check string
+    "parameter order"
+    (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ ordered ])
+    (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ reordered ]);
+  check bool
+    "description participates"
+    true
+    (not
+       (String.equal
+          (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ alpha ])
+          (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ changed ])));
+  check bool "changing the selected account starts a new vendor session" true
+    (not (String.equal
+      (tool_surface_sha256 ~account_home:"/tmp/one"
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])
+      (tool_surface_sha256 ~account_home:"/tmp/two"
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])));
+  let inherited_home value =
+    Masc_test_deps.with_process_env "CLAUDE_CONFIG_DIR" (Some value) (fun () ->
+      Runtime_claude_code.effective_account_home None)
+  in
+  let first = inherited_home "relative-claude-one" in
+  let second = inherited_home "relative-claude-two" in
+  check bool "changing the inherited CLI home starts a new vendor session" true
+    (not (String.equal
+      (tool_surface_sha256 ?account_home:first
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])
+      (tool_surface_sha256 ?account_home:second
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])))
+;;
+
+let test_cooperative_resume_preserves_thread_after_newer_steering () =
+  let module Semantic = Keeper_semantic_execution in
+  let module Cooperative = Keeper_direct_checkpoint_continuation in
+  let operation_id = match Keeper_chat_operation.Operation_id.of_string "cooperative-original" with
+    | Ok id -> id | Error detail -> fail detail in
+  let seed = match Semantic.create ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+      ~input:(`String "original request with completed effects") ~sources:[] ~now:1. with
+    | Ok value -> value | Error error -> fail (Semantic.error_to_string error) in
+  let observed : Semantic.official_client_checkpoint =
+    { client_kind = Codex; runtime_id = "codex.original"; session_id = "thread-original";
+      turn_id = "old-turn"; tool_surface_sha256 = empty_surface; frame = seed.frame } in
+  let latest : t = { client_kind = Codex; runtime_id = observed.runtime_id;
+    phase = Settled { session_id = observed.session_id; turn_id = "steering-turn" };
+    turn_count = 2; host_turns = Not_reported; tool_surface_sha256 = empty_surface;
+    last_recovery_resolution = None; last_transient_release = None; context_frontier = None;
+    updated_at = 2. } in
+  let resumed = match Cooperative.For_testing.prepare_official_resume ~observed ~expected:(Some latest) with
+    | Ok resumed -> resumed | Error detail -> fail detail in
+  check string "resume includes newer steering in the same thread" "steering-turn" resumed.turn_id;
+  check bool "original effect scope remains intact" true
+    (Keeper_repetition_snapshot.equal observed.frame resumed.frame);
+  let reject expected = match Cooperative.For_testing.prepare_official_resume ~observed ~expected with
+    | Error _ -> () | Ok _ -> fail "cooperative continuation admitted unrelated authority" in
+  reject None;
+  reject (Some {latest with phase = Settled {session_id="replacement-thread";turn_id="steering-turn"}});
+  reject (Some {latest with tool_surface_sha256=String.make 64 'b'});
+  reject (Some {latest with runtime_id="codex.other"});
+  check bool "resume instruction contains no original input replay" false
+    (String_util.contains_substring (Cooperative.official_resume_message ~operation_id)
+       "original request with completed effects")
+;;
+
+let test_operator_interrupt_preserves_older_cooperative_turn () =
+  with_workspace "masc-official-operator-continuation-" (fun base_path ->
+    let keeper_name = "operator-continuation" in
+    let claimed =
+      claim_new ~base_path ~keeper_name ~client_kind:Codex
+        ~runtime_id:"codex.default" ~owner_epoch ~at:1.0 in
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session-1" ~updated_at:2.0 |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session-1" ~updated_at:3.0 |> Result.get_ok in
+    let inflight = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session-1" ~turn_id:"original-turn"
+      ~turn_count:starting.turn_count ~updated_at:4.0 |> Result.get_ok in
+    let settled = settle ~base_path ~keeper_name ~expected:inflight
+      ~session_id:"session-1" ~turn_id:"original-turn" ~updated_at:5.0
+      |> Result.get_ok in
+    let observed : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Codex; runtime_id = "codex.default";
+        session_id = "session-1"; turn_id = "original-turn";
+        tool_surface_sha256 = empty_surface;
+        frame = Keeper_repetition_snapshot.empty } in
+    let newer = claim ~base_path ~keeper_name ~expected:(Some settled)
+      ~client_kind:Codex ~runtime_id:"codex.default" ~owner_epoch:next_owner_epoch
+      ~tool_surface_sha256:empty_surface ~updated_at:6.0 |> Result.get_ok in
+    let newer = mark_active ~base_path ~keeper_name ~expected:newer
+      ~session_id:"session-1" ~updated_at:7.0 |> Result.get_ok in
+    let newer = mark_turn_starting ~base_path ~keeper_name ~expected:newer
+      ~session_id:"session-1" ~updated_at:8.0 |> Result.get_ok in
+    let newer = mark_turn_started ~base_path ~keeper_name ~expected:newer
+      ~session_id:"session-1" ~turn_id:"interrupted-turn"
+      ~turn_count:newer.turn_count ~updated_at:9.0 |> Result.get_ok in
+    check bool "operator signal is an owner stop" true
+      (Keeper_owner_signals.is_owner_cancel_reason
+         Keeper_registry_types.Operator_interrupt);
+    let backtrace = Printexc.get_callstack 0 in
+    check bool "combined operator signal stays an owner stop" true
+      (Keeper_owner_signals.is_owner_cancel_reason
+         (Eio.Exn.Multiple
+            [ (Eio.Cancel.Cancelled Keeper_registry_types.Operator_interrupt, backtrace)
+            ; (Stdlib.Fun.Finally_raised Keeper_registry_types.Operator_interrupt,
+               backtrace) ]));
+    check bool "unrelated cancellation is ambiguous" false
+      (Keeper_owner_signals.is_owner_cancel_reason (Failure "transport lost"));
+    check bool "operator plus real error stays ambiguous" false
+      (Keeper_owner_signals.is_owner_cancel_reason
+         (Eio.Exn.Multiple
+            [ (Keeper_registry_types.Operator_interrupt, backtrace)
+            ; (Failure "transport lost", backtrace) ]));
+    let restored = release_transient ~base_path ~keeper_name ~expected:newer
+      ~failure:Owner_stopped_turn ~released_at:10.0 |> Result.get_ok in
+    check bool "cancelled steering restores the older settlement" true
+      (restored.phase = settled.phase);
+    let resumed =
+      Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+        ~observed ~expected:(Some restored) |> Result.get_ok in
+    check string "older turn remains resumable" "original-turn" resumed.turn_id)
+;;
+
+let test_context_frontier_is_acknowledged_only_by_settlement () =
+  with_workspace "masc-context-frontier-" (fun base_path ->
+    let keeper_name = "frontier" in
+    let snapshot_sha256 = String.make 64 'a' in
+    let frontier = {message_count=3;
+      delivery=Canonical_source_guard {snapshot_sha256};
+      acknowledged_turn=Some {session_id="fabricated";turn_id="fabricated"};
+      held_context=[]} in
+    let claimed = claim_with_context_frontier ~context_frontier:(Some frontier)
+      ~base_path ~keeper_name ~expected:None ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:1.
+      |> Result.get_ok in
+    let observed binding = match binding.context_frontier with
+      | Some value -> value | None -> fail "missing frontier" in
+    check bool "claim clears caller-supplied acknowledgement" true
+      ((observed claimed).acknowledged_turn = None);
+    check bool "intent survives reopen without acknowledgement" true
+      (load ~base_path ~keeper_name = Ok (Some claimed));
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
+    check bool "inflight does not claim acknowledged context" true
+      ((observed started).acknowledged_turn = None);
+    let settled = settle ~base_path ~keeper_name ~expected:started
+      ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+    check bool "terminal settlement records exact vendor identity" true
+      ((observed settled).acknowledged_turn = Some {session_id="session";turn_id="turn"});
+    check bool "unchanged canonical context is admitted" true
+      (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256 = Ok ());
+    check bool "changed canonical context is a typed rejection" true
+      (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256:(String.make 64 'b') = Error Canonical_context_changed);
+    check bool "inflight intent is never accepted as prior context proof" true
+      (validate_unchanged_context ~expected:(Some started) ~snapshot_sha256 = Error Context_frontier_missing);
+    check bool "acknowledged frontier survives reopen" true
+      (load ~base_path ~keeper_name = Ok (Some settled));
+    let undelivered_recall =
+      { context = Context_block Prompt_block_id.Memory_os_recall
+      ; sha256 = String.make 64 'c' } in
+    let guarded = claim_with_context_frontier
+      ~context_frontier:(Some {frontier with
+        acknowledged_turn=None; held_context=[undelivered_recall]})
+      ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:6.
+      |> Result.get_ok in
+    let released = release_transient ~base_path ~keeper_name ~expected:guarded
+      ~failure:Transient_spawn_failed ~released_at:7. |> Result.get_ok in
+    check bool "transient spawn failure preserves verified unchanged source"
+      true (validate_unchanged_context ~expected:(Some released)
+        ~snapshot_sha256 = Ok ());
+    let resumable_plan =
+      plan_claim ~expected:(Some released) ~client_kind:Codex ~runtime_id:"codex.default"
+      |> Result.get_ok in
+    check bool "control: the released session is a resume" true
+      (resumable_plan.previous_settlement <> None);
+    check bool "failed dispatch does not certify its unsent Recall" true
+      (held_context_for_resume resumable_plan ~expected:(Some released) = []);
+    let unchanged = reconcile_context resumable_plan ~expected:(Some released)
+        ~snapshot_sha256 in
+    check bool "unchanged source keeps resuming" true (unchanged.previous_settlement <> None);
+    let changed = reconcile_context resumable_plan ~expected:(Some released)
+        ~snapshot_sha256:(String.make 64 'b') in
+    check bool "changed source drops the settlement" true (changed.previous_settlement = None);
+    check int "changed source starts at ordinal 1" 1 changed.turn_count;
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let unbound_json = match Yojson.Safe.from_file state_path with
+      | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
+      | _ -> fail "binding encoding is not an object" in
+    Yojson.Safe.to_file state_path unbound_json;
+    match load ~base_path ~keeper_name |> Result.map_error read_error_to_string with
+    | Ok (Some binding) ->
+      check bool "absent optional proof preserves session without fabricating acknowledgement" true
+        (binding.context_frontier = None && binding.phase = released.phase);
+      (* Nothing shows what this session settled against, so it is not
+         resumed; a fresh session starts instead of refusing every cycle. *)
+      (match claim_with_context_frontier
+          ~context_frontier:(Some {frontier with acknowledged_turn=None})
+          ~base_path ~keeper_name ~expected:(Some binding) ~client_kind:Codex ~owner_epoch
+          ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:9. with
+       | Ok {phase=Start {previous_settlement=None; _}; turn_count=1; _} -> ()
+       | Ok _ -> fail "a session with no acknowledged frontier was resumed"
+       | Error detail -> fail ("a session with no acknowledged frontier was refused: " ^ detail))
+    | Ok None -> fail "existing vendor session disappeared with optional proof"
+    | Error detail -> fail detail)
+;;
+
+let test_context_frontier_wire_keeps_digest_authority_with_the_guard () =
+  with_workspace "masc-frontier-wire-" (fun base_path ->
+    let snapshot_sha256 = String.make 64 'a' in
+    List.iter (fun (keeper_name, delivery) ->
+      let frontier = { message_count=2; delivery; acknowledged_turn=None; held_context=[] } in
+      let claim ~expected ~at =
+        claim_with_context_frontier ~context_frontier:(Some frontier) ~base_path
+          ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
+          ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
+      let claimed = claim ~expected:None ~at:1. |> Result.get_ok in
+      let active = mark_active ~base_path ~keeper_name ~expected:claimed
+        ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+      let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+      let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count
+        ~updated_at:4. |> Result.get_ok in
+      let settled = settle ~base_path ~keeper_name ~expected:started
+        ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+      check bool "typed frontier and exact acknowledgement survive persisted reread" true
+        (load ~base_path ~keeper_name = Ok (Some settled));
+      let expected_proof = match delivery with
+        | Canonical_source_guard _ -> Ok ()
+        | Prepared_start_context | Held_by_vendor_session -> Error Context_frontier_missing in
+      check bool "only guarded provenance proves unchanged canonical source" true
+        (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256 = expected_proof);
+      let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+      let binding_fields, frontier_fields = match Yojson.Safe.from_file state_path with
+        | `Assoc fields ->
+          (match List.assoc "context_frontier" fields with
+           | `Assoc frontier_fields -> fields, frontier_fields
+           | _ -> fail "frontier is not an object")
+        | _ -> fail "binding is not an object" in
+      let expected_digest = match delivery with
+        | Canonical_source_guard {snapshot_sha256} -> Some (`String snapshot_sha256)
+        | Prepared_start_context | Held_by_vendor_session -> None in
+      check bool "wire stores a whole-history digest only for the guard" true
+        (List.assoc_opt "snapshot_sha256" frontier_fields = expected_digest);
+      let common = List.remove_assoc "delivery"
+          (List.remove_assoc "snapshot_sha256" frontier_fields) in
+      let original = `Assoc binding_fields in
+      let malformed =
+        [ "prepared digest", ["delivery", `String "prepared_start_context";
+                               "snapshot_sha256", `String snapshot_sha256]
+        ; "held digest", ["delivery", `String "held_by_vendor_session";
+                           "snapshot_sha256", `String snapshot_sha256]
+        ; "guard without digest", ["delivery", `String "canonical_source_guard"]
+        ; "guard invalid digest", ["delivery", `String "canonical_source_guard";
+                                    "snapshot_sha256", `String "invalid"]
+        ; "guard null digest", ["delivery", `String "canonical_source_guard";
+                                 "snapshot_sha256", `Null]
+        ; "guard duplicate digest", ["delivery", `String "canonical_source_guard";
+             "snapshot_sha256", `String snapshot_sha256;
+             "snapshot_sha256", `String snapshot_sha256]
+        ; "unknown delivery", ["delivery", `String "unknown"] ] in
+      List.iter (fun (label, fields) ->
+        let changed = `Assoc (("context_frontier", `Assoc (fields @ common)) ::
+          List.remove_assoc "context_frontier" binding_fields) in
+        Yojson.Safe.to_file state_path changed;
+        check bool ("strict wire refuses " ^ label) true
+          (Result.is_error (load ~base_path ~keeper_name))) malformed;
+      Yojson.Safe.to_file state_path original;
+      check bool "stale owner cannot overwrite the settled frontier" true
+        (Result.is_error (mark_active ~base_path ~keeper_name ~expected:claimed
+          ~session_id:"session" ~updated_at:6.));
+      check bool "failed CAS preserves the exact persisted settlement" true
+        (load ~base_path ~keeper_name = Ok (Some settled));
+      match claim ~expected:(Some settled) ~at:7. |> Result.get_ok with
+      | {phase=Start {previous_settlement=Some {session_id="session"; turn_id="turn"}; _}; _} -> ()
+      | _ -> fail "persisted frontier did not resume its acknowledged session")
+      [ "prepared", Prepared_start_context
+      ; "guarded", Canonical_source_guard {snapshot_sha256}
+      ; "held", Held_by_vendor_session ])
+;;
+
+(* A changed canonical source (a new system prompt at boot) used to refuse
+   every later claim, so the keeper failed each cycle forever. The claim now
+   starts a fresh vendor session; an unchanged source still resumes. *)
+(* What a resumed vendor session holds is read only from a frontier its
+   settlement acknowledged, survives a reopen, and a settlement that says the
+   session holds nothing (a compacted conversation) empties it. *)
+let test_held_context_is_read_only_from_the_acknowledged_frontier () =
+  with_workspace "masc-held-context-" (fun base_path ->
+    let keeper_name = "held" in
+    let held = [ { context = Context_block Prompt_block_id.Memory_os_recall;
+                   sha256 = String.make 64 'd' };
+                 { context = Context_section (Keeper_context_layers.Layer Keeper_context_layers.Wiki);
+                   sha256 = String.make 64 'f' };
+                 { context = Context_section (Keeper_context_layers.Unattributed Keeper_context_layers.World_frame);
+                   sha256 = String.make 64 'c' };
+                 { context = Librarian_working_state; sha256 = String.make 64 'e' } ] in
+    let frontier = Some { message_count = 1;
+      delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = held } in
+    let settle_turn ~expected ~turn_id ~at ~settle =
+      let claimed = claim_with_context_frontier ~context_frontier:frontier ~base_path
+        ~keeper_name ~expected ~client_kind:Claude_code ~owner_epoch
+        ~runtime_id:"claude.default" ~tool_surface_sha256:empty_surface ~updated_at:at
+        |> Result.get_ok in
+      let active = mark_active ~base_path ~keeper_name ~expected:claimed
+        ~session_id:"session" ~updated_at:(at +. 1.) |> Result.get_ok in
+      let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"session" ~updated_at:(at +. 2.) |> Result.get_ok in
+      let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"session" ~turn_id ~turn_count:starting.turn_count
+        ~updated_at:(at +. 3.) |> Result.get_ok in
+      claimed, settle ~expected:started ~turn_id ~updated_at:(at +. 4.) |> Result.get_ok in
+    let plain ~expected ~turn_id ~updated_at =
+      settle ~base_path ~keeper_name ~expected ~session_id:"session" ~turn_id ~updated_at in
+    let plan binding =
+      plan_claim ~expected:(Some binding) ~client_kind:Claude_code
+        ~runtime_id:"claude.default" |> Result.get_ok in
+    let _, settled = settle_turn ~expected:None ~turn_id:"turn-1" ~at:1. ~settle:plain in
+    check bool "the acknowledged frontier names what the session holds" true
+      (held_context_for_resume (plan settled) ~expected:(Some settled) = held);
+    check bool "held context survives reopen" true
+      (load ~base_path ~keeper_name = Ok (Some settled));
+    let claimed, compacted = settle_turn ~expected:(Some settled) ~turn_id:"turn-2" ~at:10.
+      ~settle:(fun ~expected ~turn_id ~updated_at ->
+        settle_holding ~held_context:[] ~base_path ~keeper_name ~expected
+          ~session_id:"session" ~turn_id ~updated_at) in
+    check bool "a frontier no settlement acknowledged shows nothing held" true
+      (held_context_for_resume (plan settled) ~expected:(Some claimed) = []);
+    check bool "a compacted session holds nothing" true
+      (held_context_for_resume (plan compacted) ~expected:(Some compacted) = []))
+
+(* The rows of a World State section are held one by one, each named by its own
+   digest (#45131). They survive reopen; a row named by a digest other than the
+   one it is held under is refused. *)
+let test_held_section_rows_are_named_by_their_own_digest () =
+  with_workspace "masc-held-rows-" (fun base_path ->
+    let section = Keeper_context_layers.Layer Keeper_context_layers.Own_recent_actions in
+    let row ~name ~sha256 =
+      { context = Context_section_row { section; row_sha256 = name }; sha256 }
+    in
+    let frontier held = Some { message_count = 1;
+      delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = held } in
+    let claim ~keeper_name held =
+      claim_with_context_frontier ~context_frontier:(frontier held) ~base_path ~keeper_name
+        ~expected:None ~client_kind:Claude_code ~owner_epoch ~runtime_id:"claude.default"
+        ~tool_surface_sha256:empty_surface ~updated_at:1.
+    in
+    let one = String.make 64 '1' and two = String.make 64 '2' in
+    let held =
+      [ { context = Context_section section; sha256 = String.make 64 'c' }
+      ; row ~name:one ~sha256:one
+      ; row ~name:two ~sha256:two ]
+    in
+    let claimed = claim ~keeper_name:"held-rows" held |> Result.get_ok in
+    check bool "held rows survive reopen" true
+      (load ~base_path ~keeper_name:"held-rows" = Ok (Some claimed));
+    check bool "a row named by another digest is refused" true
+      (Result.is_error (claim ~keeper_name:"misnamed-row" [ row ~name:one ~sha256:two ])))
+
+(* A frontier that names no held context does not load: it is not read as
+   "nothing held". *)
+let test_frontier_without_held_context_does_not_load () =
+  with_workspace "masc-held-context-required-" (fun base_path ->
+    let keeper_name = "held-required" in
+    let frontier = Some { message_count = 1;
+      delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = [] } in
+    let _claimed = claim_with_context_frontier ~context_frontier:frontier ~base_path
+      ~keeper_name ~expected:None ~client_kind:Claude_code ~owner_epoch
+      ~runtime_id:"claude.default" ~tool_surface_sha256:empty_surface ~updated_at:1.
+      |> Result.get_ok in
+    check bool "the written binding loads" true
+      (Result.is_ok (load ~base_path ~keeper_name));
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let stripped =
+      match Yojson.Safe.from_file state_path with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (name, value) ->
+                match name, value with
+                | "context_frontier", `Assoc frontier_fields ->
+                  ( name
+                  , `Assoc
+                      (List.filter
+                         (fun (field, _) -> not (String.equal field "held_context"))
+                         frontier_fields) )
+                | _ -> name, value)
+             fields)
+      | _ -> fail "session binding is not an object"
+    in
+    Yojson.Safe.to_file state_path stripped;
+    check bool "a frontier without held context is refused" true
+      (Result.is_error (load ~base_path ~keeper_name)))
+
+let test_changed_canonical_source_claims_a_fresh_session () =
+  with_workspace "masc-context-fresh-" (fun base_path ->
+    let keeper_name = "fresh" in
+    let guard snapshot_sha256 = Some {message_count=3;
+      delivery=Canonical_source_guard {snapshot_sha256}; acknowledged_turn=None; held_context=[]} in
+    let claim ~expected ~sha ~at = claim_with_context_frontier ~context_frontier:(guard sha)
+      ~base_path ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
+    let claimed = claim ~expected:None ~sha:(String.make 64 'a') ~at:1. |> Result.get_ok in
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
+    let settled = settle ~base_path ~keeper_name ~expected:started
+      ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+    match claim ~expected:(Some settled) ~sha:(String.make 64 'b') ~at:6. with
+    | Ok {phase=Start {previous_settlement=None; _}; turn_count=1; _} -> ()
+    | Ok _ -> fail "changed source claimed a resume of the old vendor session"
+    | Error detail -> fail ("changed source was refused: " ^ detail))
+
+let test_unchanged_canonical_source_still_resumes () =
+  with_workspace "masc-context-resume-" (fun base_path ->
+    let keeper_name = "resume" in
+    let guard = Some {message_count=3;
+      delivery=Canonical_source_guard {snapshot_sha256=String.make 64 'a'};
+      acknowledged_turn=None; held_context=[]} in
+    let claim ~expected ~at = claim_with_context_frontier ~context_frontier:guard
+      ~base_path ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
+    let claimed = claim ~expected:None ~at:1. |> Result.get_ok in
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
+    let settled = settle ~base_path ~keeper_name ~expected:started
+      ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+    match claim ~expected:(Some settled) ~at:6. with
+    | Ok {phase=Start {previous_settlement=Some {session_id="session"; _}; _}; _} -> ()
+    | Ok _ -> fail "unchanged source did not resume the vendor session"
+    | Error detail -> fail ("unchanged source was refused: " ^ detail))
+
+type failed_resume =
+  { claim_again : updated_at:float -> (t, string) result
+  ; recovery : t
+  ; recovery_id : string
+  ; settlement : settlement
+  ; snapshot_sha256 : string
+  }
+
+(* Settle one turn, claim a resume of it, and fail that resume into recovery.
+   [fail_from] names the phase the failure is raised from. *)
+type failure_phase = From_start | From_turn_inflight
+
+let failed_resume ~base_path ~keeper_name ~delivery ~fail_from =
+  let runtime_id = "antigravity.default" in
+  let snapshot_sha256 = String.make 64 'c' in
+  let frontier = Some { message_count = 2; delivery;
+    acknowledged_turn = None; held_context = [] } in
+  let claim_again ~expected ~updated_at =
+    claim_with_context_frontier ~context_frontier:frontier ~base_path ~keeper_name
+      ~expected ~client_kind:Antigravity ~owner_epoch ~runtime_id
+      ~tool_surface_sha256:empty_surface ~updated_at in
+  let settlement = { session_id = "conversation-1"; turn_id = "turn-1" } in
+  let run_turn ~claimed ~turn_id ~at =
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:settlement.session_id ~updated_at:at |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:settlement.session_id ~updated_at:(at +. 1.) |> Result.get_ok in
+    mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:settlement.session_id ~turn_id
+      ~turn_count:starting.turn_count ~updated_at:(at +. 2.) |> Result.get_ok in
+  let first = claim_again ~expected:None ~updated_at:1. |> Result.get_ok in
+  let started = run_turn ~claimed:first ~turn_id:settlement.turn_id ~at:2. in
+  let settled = settle ~base_path ~keeper_name ~expected:started
+    ~session_id:settlement.session_id ~turn_id:settlement.turn_id ~updated_at:5.
+    |> Result.get_ok in
+  let resumed = claim_again ~expected:(Some settled) ~updated_at:6. |> Result.get_ok in
+  let failing = match fail_from with
+    | From_start -> resumed
+    | From_turn_inflight -> run_turn ~claimed:resumed ~turn_id:"turn-2" ~at:7. in
+  let recovery = require_recovery ~base_path ~keeper_name ~expected:failing
+    ~failure:Transport_interrupted ~detail:"transport closed mid-turn"
+    ~required_at:10. |> Result.get_ok in
+  let recovery_id = match recovery.phase with
+    | Recovery_required required -> required.recovery_id
+    | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+      fail "resumed claim did not enter recovery" in
+  (* The next claim reads the binding as it is after the resolution. *)
+  { claim_again = (fun ~updated_at ->
+      claim_again ~expected:(load ~base_path ~keeper_name |> Result.get_ok) ~updated_at)
+  ; recovery; recovery_id; settlement; snapshot_sha256 }
+
+let resolve ~base_path ~keeper_name failed resolution =
+  let resolved, _ = resolve_recovery ~base_path ~keeper_name ~expected:failed.recovery
+    ~recovery_id:failed.recovery_id ~resolution ~resolved_by:"operator"
+    ~resolved_at:11. |> Result.get_ok in
+  check bool "resolved binding survives reopen" true
+    (load ~base_path ~keeper_name = Ok (Some resolved));
+  resolved
+
+let check_retry_resumes ~base_path ~keeper_name ~fail_from =
+  let failed = failed_resume ~base_path ~keeper_name
+      ~delivery:(Canonical_source_guard {snapshot_sha256=String.make 64 'c'}) ~fail_from in
+  let retried = resolve ~base_path ~keeper_name failed Retry_previous in
+  check bool "retry restores the acknowledged source" true
+    (validate_unchanged_context ~expected:(Some retried)
+       ~snapshot_sha256:failed.snapshot_sha256 = Ok ());
+  match failed.claim_again ~updated_at:12. with
+  | Ok { phase = Start { previous_settlement = Some resumed_from; _ }; _ } ->
+    check bool "retry resumes the settled conversation" true
+      (resumed_from = failed.settlement)
+  | Ok _ -> fail "Retry_previous became a fresh conversation"
+  | Error detail -> fail ("claim after Retry_previous was refused: " ^ detail)
+
+(* Retry_previous promises the same conversation. A claim clears the frontier
+   acknowledgement and only [settle] sets it, so a recovery resolved back to
+   the settlement has to restore it. Without it the next guarded claim cannot
+   show what the conversation settled against and opens a fresh one, and the
+   operator's retry quietly becomes a restart. *)
+let test_retry_previous_keeps_the_guarded_conversation () =
+  with_workspace "masc-retry-guarded-" (fun base_path ->
+    check_retry_resumes ~base_path ~keeper_name:"retry-guarded" ~fail_from:From_start)
+;;
+
+(* The same retry when the failure came from a started vendor turn. *)
+let test_retry_previous_from_an_inflight_turn_keeps_the_conversation () =
+  with_workspace "masc-retry-inflight-" (fun base_path ->
+    check_retry_resumes ~base_path ~keeper_name:"retry-inflight"
+      ~fail_from:From_turn_inflight)
+;;
+
+(* Restart_fresh abandons the conversation, so nothing is acknowledged. *)
+let test_restart_fresh_leaves_the_frontier_unacknowledged () =
+  with_workspace "masc-restart-guarded-" (fun base_path ->
+    let keeper_name = "restart-guarded" in
+    let failed = failed_resume ~base_path ~keeper_name
+        ~delivery:(Canonical_source_guard {snapshot_sha256=String.make 64 'c'}) ~fail_from:From_start in
+    let restarted = resolve ~base_path ~keeper_name failed Restart_fresh in
+    check bool "restart is ready" true (restarted.phase = Ready);
+    match restarted.context_frontier with
+    | Some { acknowledged_turn = None; _ } -> ()
+    | Some { acknowledged_turn = Some _; _ } -> fail "restart acknowledged a settlement"
+    | None -> fail "restart dropped the frontier")
+;;
+
+(* Only a guarded frontier is re-acknowledged; a session-held one is kept. *)
+let test_retry_previous_keeps_a_vendor_held_frontier () =
+  with_workspace "masc-retry-held-" (fun base_path ->
+    let keeper_name = "retry-held" in
+    let failed = failed_resume ~base_path ~keeper_name
+        ~delivery:Held_by_vendor_session ~fail_from:From_start in
+    let retried = resolve ~base_path ~keeper_name failed Retry_previous in
+    check bool "retry returns to the settlement" true
+      (retried.phase = Settled failed.settlement);
+    check bool "held frontier is unchanged" true
+      (retried.context_frontier = failed.recovery.context_frontier))
+;;
+
+let test_retryable_terminal_requires_acknowledged_identity () =
+  with_workspace "masc-retryable-terminal-" (fun base_path ->
+    let keeper_name = "retryable-terminal" in
+    let claimed = claim_new ~base_path ~keeper_name ~client_kind:Muse
+      ~runtime_id:"muse.fixture" ~owner_epoch ~at:1.0 in
+    let release expected = release_transient ~base_path ~keeper_name ~expected
+      ~failure:Retryable_turn_failed ~released_at:5.0 in
+    check bool "an unacknowledged failed attempt cannot claim a reusable terminal" true
+      (Result.is_error (release claimed));
+    check bool "rejected release preserves exact claim" true
+      (load ~base_path ~keeper_name = Ok (Some claimed));
+    let active = mark_active_reported ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session-retryable" ~reported_turns:0 ~updated_at:2.0 |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session-retryable" ~updated_at:3.0 |> Result.get_ok in
+    check bool "missing turn ID cannot be fabricated" true (Result.is_error (release starting));
+    let inflight = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session-retryable" ~turn_id:"failed-turn" ~turn_count:1 ~updated_at:4.0 |> Result.get_ok in
+    let released = release inflight |> Result.get_ok in
+    check bool "terminal session remains, despite no prior successful settlement" true
+      (released.phase = Settled {session_id="session-retryable"; turn_id="failed-turn"});
+    check int "observed failed turn ordinal retained" 1 released.turn_count;
+    check bool "failure survives durable roundtrip" true
+      (match load ~base_path ~keeper_name with
+       | Ok (Some {last_transient_release=Some {failure=Retryable_turn_failed; _}; _}) -> true
+       | _ -> false))
+;;
+
+(* ── The host's own completed-turn count (Muse) ─────────────────────── *)
+
+let host_turns_testable =
+  testable
+    (fun ppf -> function
+       | Not_reported -> Format.pp_print_string ppf "Not_reported"
+       | Reported turns -> Format.fprintf ppf "Reported %d" turns
+       | Unobserved_after turns -> Format.fprintf ppf "Unobserved_after %d" turns)
+    ( = )
+;;
+
+let muse_runtime = "muse.fixture"
+let muse_session = "session-muse"
+
+let claim_muse ~base_path ~keeper_name ~expected ~at =
+  claim ~base_path ~keeper_name ~expected ~client_kind:Muse ~owner_epoch
+    ~runtime_id:muse_runtime ~tool_surface_sha256:empty_surface ~updated_at:at
+  |> Result.get_ok
+;;
+
+(* Open the claimed session with the host's reported count and dispatch one
+   turn, returning the in-flight binding. *)
+let dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns ~turn_id ~at =
+  let active = mark_active_reported ~base_path ~keeper_name ~expected:claimed
+      ~session_id:muse_session ~reported_turns ~updated_at:at |> Result.get_ok in
+  check host_turns_testable "an opened session holds the reported count"
+    (Reported reported_turns) active.host_turns;
+  let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:muse_session ~updated_at:(at +. 0.1) |> Result.get_ok in
+  check host_turns_testable "a dispatched turn's ending is unobserved"
+    (Unobserved_after reported_turns) starting.host_turns;
+  mark_turn_started ~base_path ~keeper_name ~expected:starting ~session_id:muse_session
+    ~turn_id ~turn_count:starting.turn_count ~updated_at:(at +. 0.2) |> Result.get_ok
+;;
+
+let check_resume_expects ~base_path ~keeper_name label expected_turns =
+  let stored = load ~base_path ~keeper_name |> Result.get_ok in
+  let plan = plan_claim ~expected:stored ~client_kind:Muse ~runtime_id:muse_runtime
+    |> Result.get_ok in
+  check bool (label ^ ": the plan resumes") true (Option.is_some plan.previous_settlement);
+  check host_turns_testable label expected_turns (resume_host_turns plan ~expected:stored);
+  stored
+;;
+
+let test_muse_host_turns_follow_observed_turn_endings () =
+  with_workspace "masc-muse-host-turns-" (fun base_path ->
+    let keeper_name = "muse-host-turns" in
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:None ~at:1. in
+    check host_turns_testable "a fresh claim knows no host count" Not_reported
+      claimed.host_turns;
+    check bool "a Muse session cannot open without the host's count" true
+      (Result.is_error
+         (mark_active ~base_path ~keeper_name ~expected:claimed ~session_id:muse_session
+            ~updated_at:1.5));
+    (* Completed: the host reported the terminal, so it counts the turn. *)
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:0
+        ~turn_id:"turn-1" ~at:2. in
+    let settled = settle_completed_holding ~held_context:[] ~base_path ~keeper_name
+        ~expected:inflight ~session_id:muse_session ~turn_id:"turn-1" ~updated_at:3.
+      |> Result.get_ok in
+    check host_turns_testable "a completed turn is counted" (Reported 1) settled.host_turns;
+    let stored = check_resume_expects ~base_path ~keeper_name
+        "the next resume expects the counted turn" (Reported 1) in
+    (* Retryable failure: the host reported a failed terminal, which it does
+       not count, while the claim ordinal keeps the failed turn. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:stored ~at:4. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:1
+        ~turn_id:"turn-2" ~at:5. in
+    let released = release_transient ~base_path ~keeper_name ~expected:inflight
+        ~failure:Retryable_turn_failed ~released_at:6. |> Result.get_ok in
+    check bool "the failed terminal is the settlement" true
+      (released.phase = Settled { session_id = muse_session; turn_id = "turn-2" });
+    check int "the ordinal keeps the failed turn" 2 released.turn_count;
+    check host_turns_testable "a failed turn is not counted" (Reported 1) released.host_turns;
+    let stored = check_resume_expects ~base_path ~keeper_name
+        "the resume after a failed turn expects the count before it" (Reported 1) in
+    (* Owner stop after dispatch: MASC never saw how the turn ended. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:stored ~at:7. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:1
+        ~turn_id:"turn-3" ~at:8. in
+    let released = release_transient ~base_path ~keeper_name ~expected:inflight
+        ~failure:Owner_stopped_turn ~released_at:9. |> Result.get_ok in
+    check bool "the earlier settlement is restored" true
+      (Option.map (fun (stored : t) -> stored.phase) stored = Some released.phase);
+    check host_turns_testable "an owner stop leaves the ending unobserved"
+      (Unobserved_after 1) released.host_turns;
+    let stored = check_resume_expects ~base_path ~keeper_name
+        "the resume after an owner stop admits either ending" (Unobserved_after 1) in
+    (* The host had counted it; the session opens with that count. An owner
+       stop before the next dispatch keeps the count exact. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:stored ~at:10. in
+    let active = mark_active_reported ~base_path ~keeper_name ~expected:claimed
+        ~session_id:muse_session ~reported_turns:2 ~updated_at:11. |> Result.get_ok in
+    let released = release_transient ~base_path ~keeper_name ~expected:active
+        ~failure:Owner_stopped_turn ~released_at:12. |> Result.get_ok in
+    check host_turns_testable "a stop before dispatch keeps the reported count"
+      (Reported 2) released.host_turns;
+    (* A failure before the turn reached the host restores the exact count. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some released) ~at:13. in
+    let active = mark_active_reported ~base_path ~keeper_name ~expected:claimed
+        ~session_id:muse_session ~reported_turns:2 ~updated_at:14. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:muse_session ~updated_at:15. |> Result.get_ok in
+    let released = release_transient ~base_path ~keeper_name ~expected:starting
+        ~failure:Pre_dispatch_failed ~released_at:16. |> Result.get_ok in
+    check host_turns_testable "an undispatched turn is not counted" (Reported 2)
+      released.host_turns;
+    (* A host stop settles the turn before the host reports its terminal. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some released) ~at:17. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:2
+        ~turn_id:"turn-6" ~at:18. in
+    let stopped = settle_holding ~held_context:[] ~base_path ~keeper_name ~expected:inflight
+        ~session_id:muse_session ~turn_id:"turn-6" ~updated_at:19. |> Result.get_ok in
+    check host_turns_testable "a host stop leaves the ending unobserved"
+      (Unobserved_after 2) stopped.host_turns;
+    check bool "the count survives a reload" true
+      (load ~base_path ~keeper_name = Ok (Some stopped));
+    (* A release to Ready names no session, so it keeps no count. *)
+    let fresh_keeper = "muse-host-turns-fresh" in
+    let claimed = claim_muse ~base_path ~keeper_name:fresh_keeper ~expected:None ~at:20. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name:fresh_keeper ~claimed
+        ~reported_turns:0 ~turn_id:"fresh-turn" ~at:21. in
+    let released = release_transient ~base_path ~keeper_name:fresh_keeper ~expected:inflight
+        ~failure:Owner_stopped_turn ~released_at:22. |> Result.get_ok in
+    check bool "a fresh claim releases to Ready" true (released.phase = Ready);
+    check host_turns_testable "Ready records no count" Not_reported released.host_turns)
+;;
+
+(* Retry_previous re-sends the failed turn's work, so it expects the count the
+   host reported before that turn; a claim that opened no session leaves the
+   inherited count as it was. *)
+let test_retry_previous_expects_the_count_before_the_failed_turn () =
+  with_workspace "masc-muse-retry-host-turns-" (fun base_path ->
+    let keeper_name = "muse-retry-host-turns" in
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:None ~at:1. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:0
+        ~turn_id:"turn-1" ~at:2. in
+    let settled = settle_completed_holding ~held_context:[] ~base_path ~keeper_name
+        ~expected:inflight ~session_id:muse_session ~turn_id:"turn-1" ~updated_at:3.
+      |> Result.get_ok in
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some settled) ~at:4. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:1
+        ~turn_id:"turn-2" ~at:5. in
+    let recovery = require_recovery ~base_path ~keeper_name ~expected:inflight
+        ~failure:Transport_interrupted ~detail:"fixture transport loss" ~required_at:6.
+      |> Result.get_ok in
+    check host_turns_testable "recovery keeps the unobserved ending" (Unobserved_after 1)
+      recovery.host_turns;
+    let recovery_id = match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "fixture recovery was not stored" in
+    let retried, _ = resolve_recovery ~base_path ~keeper_name ~expected:recovery ~recovery_id
+        ~resolution:Retry_previous ~resolved_by:"operator" ~resolved_at:7. |> Result.get_ok in
+    check bool "the earlier settlement is restored" true (retried.phase = settled.phase);
+    check host_turns_testable "the retry expects the count before the failed turn"
+      (Reported 1) retried.host_turns;
+    (* The retried resume is refused before the session opens; a second retry
+       expects the same count. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some retried) ~at:7.1 in
+    let refused = require_recovery ~base_path ~keeper_name ~expected:claimed
+        ~failure:Protocol_failed ~detail:"fixture count mismatch" ~required_at:7.2
+      |> Result.get_ok in
+    let recovery_id = match refused.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "fixture recovery was not stored" in
+    let retried, _ = resolve_recovery ~base_path ~keeper_name ~expected:refused ~recovery_id
+        ~resolution:Retry_previous ~resolved_by:"operator" ~resolved_at:7.3 |> Result.get_ok in
+    check host_turns_testable "a repeated retry expects the same count" (Reported 1)
+      retried.host_turns;
+    (* A host stop leaves the count unobserved; a claim that fails before it
+       opens the session ran nothing, so the retry keeps both endings open. *)
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some retried) ~at:8. in
+    let inflight = dispatch_muse_turn ~base_path ~keeper_name ~claimed ~reported_turns:1
+        ~turn_id:"turn-3" ~at:9. in
+    let stopped = settle_holding ~held_context:[] ~base_path ~keeper_name ~expected:inflight
+        ~session_id:muse_session ~turn_id:"turn-3" ~updated_at:10. |> Result.get_ok in
+    let claimed = claim_muse ~base_path ~keeper_name ~expected:(Some stopped) ~at:11. in
+    let recovery = require_recovery ~base_path ~keeper_name ~expected:claimed
+        ~failure:Protocol_failed ~detail:"fixture refusal before open" ~required_at:12.
+      |> Result.get_ok in
+    let recovery_id = match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | _ -> fail "fixture recovery was not stored" in
+    let retried, _ = resolve_recovery ~base_path ~keeper_name ~expected:recovery ~recovery_id
+        ~resolution:Retry_previous ~resolved_by:"operator" ~resolved_at:13. |> Result.get_ok in
+    check host_turns_testable "an unopened claim keeps the inherited count"
+      (Unobserved_after 1) retried.host_turns)
+;;
+
+(* A Muse binding that names a session but carries no host count cannot say
+   what its host counts, so it does not load, and boot moves it aside like
+   any binding this build cannot decode; the next claim then opens a fresh
+   session. Another client's binding never records the count and loads
+   without it. *)
+let test_a_muse_binding_without_the_host_count_does_not_load () =
+  with_workspace "masc-muse-host-turns-wire-" (fun base_path ->
+    let keeper_name = "muse-host-turns-wire" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname state_path) in
+    let binding ~client_kind ~phase ~host_turns =
+      Printf.sprintf
+        {|{"client_kind":%S,"context_frontier":null,"last_recovery_resolution":null,"last_transient_release":null,"phase":%s,"runtime_id":"fixture.runtime","schema":"masc.keeper.official-client-session.v2","tool_surface_sha256":"%s","turn_count":%d,"updated_at":1.0%s}|}
+        client_kind phase empty_surface
+        (if String.equal phase {|{"kind":"ready"}|} then 0 else 1)
+        (match host_turns with None -> "" | Some json -> {|,"host_turns":|} ^ json) in
+    let settled = {|{"kind":"settled","session_id":"session-1","turn_id":"turn-1"}|} in
+    let loads label content =
+      write_file state_path content;
+      match load ~base_path ~keeper_name with
+      | Ok (Some binding) -> Some binding.host_turns
+      | Ok None -> fail (label ^ ": the binding vanished")
+      | Error _ -> None in
+    check (option host_turns_testable) "a settled Muse binding without the count is refused"
+      None (loads "muse" (binding ~client_kind:"muse" ~phase:settled ~host_turns:None));
+    check (option host_turns_testable) "a settled Muse binding with a reported count loads"
+      (Some (Reported 2))
+      (loads "muse" (binding ~client_kind:"muse" ~phase:settled
+        ~host_turns:(Some {|{"kind":"reported","turns":2}|})));
+    check (option host_turns_testable) "a settled Muse binding with an unobserved ending loads"
+      (Some (Unobserved_after 3))
+      (loads "muse" (binding ~client_kind:"muse" ~phase:settled
+        ~host_turns:(Some {|{"kind":"unobserved_after","turns":3}|})));
+    let in_flight = Printf.sprintf
+        {|{"kind":"turn_inflight","owner_epoch":"%s","previous_settlement":null,"session_id":"session-1","turn_id":"turn-2"}|}
+        owner_epoch in
+    let recovery previous = Printf.sprintf
+        {|{"detail":"fixture","failure":"provider_rejected","kind":"recovery_required","observed_session_id":"session-1","observed_turn_id":null,"owner_epoch":"%s","previous_settlement":%s,"recovery_id":"33333333-3333-4333-8333-333333333333","required_at":1.0}|}
+        owner_epoch previous in
+    check (option host_turns_testable) "an in-flight Muse claim without the count is refused"
+      None (loads "muse" (binding ~client_kind:"muse" ~phase:in_flight ~host_turns:None));
+    check (option host_turns_testable)
+      "a Muse recovery that would resume an earlier settlement without the count is refused"
+      None (loads "muse" (binding ~client_kind:"muse"
+        ~phase:(recovery {|{"session_id":"session-0","turn_id":"turn-0"}|}) ~host_turns:None));
+    check (option host_turns_testable) "a Muse recovery with no earlier settlement loads"
+      (Some Not_reported)
+      (loads "muse" (binding ~client_kind:"muse" ~phase:(recovery "null") ~host_turns:None));
+    check (option host_turns_testable) "a ready Muse binding names no session"
+      (Some Not_reported)
+      (loads "muse" (binding ~client_kind:"muse" ~phase:{|{"kind":"ready"}|} ~host_turns:None));
+    check (option host_turns_testable) "another client's binding loads without the count"
+      (Some Not_reported)
+      (loads "codex" (binding ~client_kind:"codex" ~phase:settled ~host_turns:None));
+    check (option host_turns_testable) "another client never records the count" None
+      (loads "codex" (binding ~client_kind:"codex" ~phase:settled
+        ~host_turns:(Some {|{"kind":"reported","turns":1}|})));
+    List.iter (fun json ->
+      check (option host_turns_testable) ("malformed count " ^ json) None
+        (loads "muse" (binding ~client_kind:"muse" ~phase:settled ~host_turns:(Some json))))
+      [ {|null|}; {|{"kind":"reported","turns":-1}|}; {|{"kind":"reported"}|};
+        {|{"kind":"reported","turns":1,"extra":true}|}; {|{"kind":"other","turns":1}|} ])
+;;
+
+let test_typed_read_preserves_lookup_and_content_failures () =
+  with_workspace "masc-session-read-causes-" (fun base_path ->
+    let keeper_name = "read-causes" in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    check bool "verified absence is optional state" true
+      (load ~base_path ~keeper_name = Ok None);
+    let directory = Filename.dirname state_path in
+    Fs_compat.mkdir_p (Filename.dirname directory);
+    let retained = "a file cannot be a session directory" in
+    write_file directory retained;
+    (match load ~base_path ~keeper_name with
+     | Error (Unreadable failure) ->
+       check string "the failed lookup retains its path" state_path failure.path
+     | Error (Invalid_path _ | Invalid_json _ | Not_current _)
+     | Ok _ -> fail "a non-directory parent did not remain an I/O failure");
+    check string "lookup does not change the obstruction" retained
+      (Fs_compat.load_file directory);
+    Unix.unlink directory;
+    Fs_compat.mkdir_p directory;
+    let malformed = "{invalid-session" in
+    write_file state_path malformed;
+    (match load ~base_path ~keeper_name with
+     | Error (Invalid_json failure) ->
+       check string "the parse failure retains its path" state_path failure.path
+     | Error (Invalid_path _ | Unreadable _ | Not_current _)
+     | Ok _ -> fail "readable malformed JSON lost its parse failure");
+    check string "the malformed bytes are untouched" malformed (Fs_compat.load_file state_path);
+    let rejected = "{}" in
+    write_file state_path rejected;
+    (match load ~base_path ~keeper_name with
+     | Error (Not_current failure) ->
+       check string "the schema failure retains its path" state_path failure.path
+     | Error (Invalid_path _ | Unreadable _ | Invalid_json _)
+     | Ok _ -> fail "parsed rejected content lost its schema failure");
+    check string "the rejected object is untouched" rejected (Fs_compat.load_file state_path))
+;;
+
+let () =
+  run
+    "official client session store"
+    [ ( "durable owner"
+      , [ test_case "typed read preserves lookup and content failures" `Quick
+            test_typed_read_preserves_lookup_and_content_failures
+        ; test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+        ; test_case "context frontier wire keeps digest authority with the guard" `Quick
+            test_context_frontier_wire_keeps_digest_authority_with_the_guard
+        ; test_case "held context from the acknowledged frontier" `Quick
+            test_held_context_is_read_only_from_the_acknowledged_frontier
+        ; test_case "held section rows are named by their own digest" `Quick
+            test_held_section_rows_are_named_by_their_own_digest
+        ; test_case "frontier without held context does not load" `Quick
+            test_frontier_without_held_context_does_not_load
+        ; test_case "retry previous keeps the guarded conversation" `Quick
+            test_retry_previous_keeps_the_guarded_conversation
+        ; test_case "retry previous from an in-flight turn keeps the conversation" `Quick
+            test_retry_previous_from_an_inflight_turn_keeps_the_conversation
+        ; test_case "restart fresh leaves the frontier unacknowledged" `Quick
+            test_restart_fresh_leaves_the_frontier_unacknowledged
+        ; test_case "retry previous keeps a vendor-held frontier" `Quick
+            test_retry_previous_keeps_a_vendor_held_frontier
+        ; test_case "changed canonical source claims a fresh session" `Quick
+            test_changed_canonical_source_claims_a_fresh_session
+        ; test_case "unchanged canonical source still resumes" `Quick
+            test_unchanged_canonical_source_still_resumes
+        ; test_case "clear missing state without creating store" `Quick
+            test_clear_missing_state_does_not_create_store
+        ; test_case "clear removes stale epoch claim" `Quick
+            test_clear_removes_stale_epoch_claim
+        ; test_case "clear removes an undecodable binding" `Quick
+            test_clear_then_removes_an_undecodable_binding
+        ; test_case "clear result survives lock-release failure" `Quick
+            test_clear_then_preserves_callback_result_after_release_failure
+        ; test_case "clear fences claim through paired mutation" `Quick
+            test_clear_then_fences_new_claim_until_callback_finishes
+        ; test_case "roundtrip and settlement" `Quick test_roundtrip_and_settlement
+        ; test_case
+            "duplicate claim and CAS fail closed"
+            `Quick
+            test_duplicate_claim_and_cas_are_fail_closed
+        ; test_case "retryable terminal retains only acknowledged history" `Quick
+            test_retryable_terminal_requires_acknowledged_identity
+        ; test_case "Muse host turns follow observed turn endings" `Quick
+            test_muse_host_turns_follow_observed_turn_endings
+        ; test_case "retry previous expects the count before the failed turn" `Quick
+            test_retry_previous_expects_the_count_before_the_failed_turn
+        ; test_case "a Muse binding without the host count does not load" `Quick
+            test_a_muse_binding_without_the_host_count_does_not_load
+        ; test_case
+            "owner stop releases without recovery"
+            `Quick
+            test_owner_stop_releases_without_recovery
+        ; test_case
+            "moved tool surface starts fresh"
+            `Quick
+            test_moved_tool_surface_starts_fresh
+        ; test_case
+            "terminal identity switch starts fresh"
+            `Quick
+            test_terminal_identity_switch_starts_fresh
+        ; test_case
+            "restart recovery and transient release"
+            `Quick
+            test_restart_recovery_and_transient_release
+        ; test_case "exact recovery restart" `Quick test_exact_recovery_restart
+        ; test_case "vendor session full ends the continuation and frees the session" `Quick
+            test_vendor_session_full_ends_the_continuation_and_frees_the_session
+        ; test_case
+            "retry previous restores exact settlement"
+            `Quick
+            test_retry_previous_restores_exact_settlement
+        ; test_case
+            "restart fresh lets the next fresh turn start"
+            `Quick
+            test_restart_fresh_lets_the_next_fresh_turn_start
+        ; test_case
+            "input-rejected recovery is not auto-superseded"
+            `Quick
+            test_input_rejected_recovery_is_not_auto_superseded
+        ; test_case "other claim refusals remain configuration errors" `Quick
+            test_other_claim_refusals_remain_configuration_errors
+        ; test_case "input rejection codec preserves exact wire domain" `Quick
+            test_input_rejection_codec_keeps_exact_wire_domain
+        ; test_case "cooperative continuation preserves its thread after steering" `Quick
+            test_cooperative_resume_preserves_thread_after_newer_steering
+        ; test_case "operator interruption preserves an older cooperative turn" `Quick
+            test_operator_interrupt_preserves_older_cooperative_turn
+        ; test_case "a continuation is admitted only for the turn it left" `Quick
+            test_a_continuation_is_admitted_only_for_the_turn_it_left
+        ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected
+        ; test_case
+            "tool surface fingerprint canonical"
+            `Quick
+            test_tool_surface_fingerprint_is_canonical
+        ; test_case
+            "context message schema participates in resume digest"
+            `Quick
+            test_context_message_schema_is_part_of_the_resume_digest
+        ] )
+    ]
+;;

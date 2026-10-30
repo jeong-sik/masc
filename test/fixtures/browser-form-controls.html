@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Browser form controls fixture</title>
+<style>
+  body { font: 18px sans-serif; margin: 32px; color: #17212f; }
+  label, [role], summary, #menu { padding: 12px; margin: 8px; display: inline-block; border: 1px solid #52657c; }
+  input[type=radio] { display: none; }
+  label:has(input:checked), [aria-checked=true] { background: #d7ecff; border-color: #1674bd; }
+  body:has(#card-b:checked) label[for=card-b] { background: #d7ecff; border-color: #1674bd; }
+  label:has(input:disabled), [aria-disabled=true] { opacity: .5; }
+  #result { margin: 20px 0; }
+</style>
+<main>
+  <h1>Observed form controls</h1>
+  <label><input id="card-a" type="radio" name="card" value="a">Card A</label>
+  <input id="card-b" type="radio" name="card" value="b"><label for="card-b">Card B</label>
+  <label><input id="locked-card" type="radio" disabled>Locked card</label>
+  <input id="aria-locked-card" type="radio"><div aria-disabled="true"><label for="aria-locked-card" onclick="document.querySelector('#result').textContent='WRONG'">Locked external label</label></div>
+  <label>Notes<textarea aria-label="Notes"></textarea></label>
+  <label>Unassociated text</label>
+  <form onclick="this.dataset.clicked='yes'"><input aria-label="Amount"><button type="button">Submit amount</button></form>
+  <div role="combobox" aria-label="Card search"><input aria-label="Search card"></div>
+  <div role="radio" aria-checked="false" onclick="this.setAttribute('aria-checked','true')">Custom card</div>
+  <div role="checkbox" aria-checked="mixed">Mixed selection</div>
+  <div role="button" aria-disabled="true" onclick="document.querySelector('#result').textContent='WRONG'">Locked action</div>
+  <div role="menuitem" onclick="document.querySelector('#result').textContent='Menu opened'">Expense menu</div>
+  <div id="menu" onclick="document.querySelector('#result').textContent='Inline opened'">Inline menu</div>
+  <details><summary>More</summary><p>Expanded content</p></details>
+  <div id="result">No action</div>
+</main>

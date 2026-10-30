@@ -1,0 +1,306 @@
+open Alcotest
+
+module Policy = Masc.Keeper_tool_approval_policy
+module Descriptor = Masc.Keeper_tool_descriptor
+
+let asks ~composition_plan_index ~tool_name ~input =
+  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input with
+  | Policy.Ask _ -> true
+  | Policy.Run _ -> false
+
+let because ~composition_plan_index ~tool_name ~input =
+  Policy.verdict_because
+    (Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input)
+
+let no_input = `Assoc []
+
+(* The catalogue itself, not a fixture. What matters is how the policy splits
+   the tools a keeper actually has: a rule that reads well but puts Read on
+   the asking side would make an operator stop reading the questions. *)
+let test_the_split_over_the_real_catalogue () =
+  let asked, ran =
+    Descriptor.public_names ()
+    |> List.partition (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
+  in
+  check (slist string String.compare) "public tools requiring this chat approval hook"
+    [] asked;
+  (* This is the chat hook's split, not a proof that every Run is a read or
+     already authorized by its executor. BrowserTabs/Read declare readonly;
+     the other Browser descriptors declare ordered mutations without
+     leaves_masc. Their handlers still validate lane, client and action
+     context. Execute delegates to its execution Gate; Write/Edit delegate to
+     their own resolved filesystem authorization. *)
+  check (slist string String.compare) "public tools with no additional chat approval"
+    [ "Execute"; "Edit"; "Write"; "Grep"; "Read"; "WebFetch"; "WebSearch"
+    ; "BrowserTabs"; "BrowserRead"; "BrowserSession"; "BrowserGoto"
+    ; "BrowserAct"; "BrowserInteract"; "BrowserInstruct" ] ran
+
+let test_reading_is_never_asked_about () =
+  (* Reading to answer a question is the bulk of what a keeper does. *)
+  check bool "reading a file" false
+    (asks ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
+  check string "and the reason says why" "this call only reads"
+    (because ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]))
+
+let test_writes_and_execute_delegate () =
+  check bool "editing delegates to its resolved filesystem boundary" false
+    (asks ~composition_plan_index:None ~tool_name:"Edit" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
+  check bool "writing delegates to its resolved filesystem boundary" false
+    (asks ~composition_plan_index:None ~tool_name:"Write" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
+  check bool "running a program delegates to its execution Gate" false
+    (asks ~composition_plan_index:None ~tool_name:"Execute" ~input:(`Assoc [ "argv", `List [ `String "rm" ] ]))
+
+let test_execute_delegation_does_not_claim_readonly () =
+  let cases =
+    [ `Assoc [ "argv", `List [ `String "ls" ]; "cwd", `String "." ]
+    ; `Assoc [ "argv", `List [ `String "rg"; `String "--pre=program"; `String "needle" ] ]
+    ; `Assoc [ "command", `String "ls > listing.txt" ] ] in
+  List.iter (fun input ->
+      List.iter (fun tool_name ->
+          check bool "one execution permission authority" false
+            (asks ~composition_plan_index:None ~tool_name ~input);
+          check string "reason names the authority, not a fabricated read proof"
+            "the execution Gate decides this call with its resolved context"
+            (because ~composition_plan_index:None ~tool_name ~input))
+        [ "Execute"; "tool_execute" ]) cases
+
+let test_an_unclassifiable_tool_is_asked_about () =
+  (* An unknown tool is not a safe tool. If it ran unasked, "no descriptor"
+     would be the quietest way past the gate. *)
+  check bool "a tool no descriptor claims" true
+    (asks ~composition_plan_index:None ~tool_name:"not-a-real-tool" ~input:no_input);
+  check string "and the reason names the gap"
+    "no descriptor declares what this tool does"
+    (because ~composition_plan_index:None ~tool_name:"not-a-real-tool" ~input:no_input)
+
+let test_the_question_names_the_call () =
+  (* Same argument the chat surfaces already show for a tool call, so the
+     prompt and the row above it agree on what the call is. *)
+  check string "a file the call would change" "Run Edit on lib/a.ml?"
+    (Policy.question_for ~tool_name:"Edit"
+       ~input:(`Assoc [ "file_path", `String "lib/a.ml" ]));
+  check string "a command it would run" "Run Execute on rm -rf build?"
+    (Policy.question_for ~tool_name:"Execute"
+       ~input:(`Assoc [ "command", `String "rm -rf build" ]));
+  check string "and a call with no argument to name is still asked"
+    "Run Execute?"
+    (Policy.question_for ~tool_name:"Execute" ~input:no_input)
+
+
+(* ── compositions ────────────────────────────────────────────────────────
+   A composition tool is materialised outside the descriptor registry, so a
+   descriptor lookup finds nothing. Before the plan index the policy read that
+   as "cannot classify" and asked about every composition, including one whose
+   whole plan is reads -- while the same tools called directly ran unasked. *)
+
+module Index = Masc.Keeper_tool_composition_plan_index
+
+let mentions haystack needle =
+  let hl = String.length haystack and nl = String.length needle in
+  let rec at i = i + nl <= hl && (String.sub haystack i nl = needle || at (i + 1)) in
+  at 0
+;;
+
+let with_index rows f =
+  let index = Index.create () in
+  List.iter
+    (fun (composition, node_tools) -> Index.record index ~composition ~node_tools)
+    rows;
+  f index
+;;
+
+let test_a_plan_of_reads_runs_unasked () =
+  with_index [ "keeper_compose_reading", [ "Read"; "Grep" ] ] (fun index ->
+    check bool "a composition that only reads is not asked about" false
+      (asks ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_reading"
+         ~input:no_input);
+    check bool "the reason counts the nodes it cleared" true
+      (String.length
+         (because ~composition_plan_index:(Some index)
+            ~tool_name:"keeper_compose_reading" ~input:no_input)
+       > 0))
+;;
+
+let test_execute_composition_delegates_to_its_node_gate () =
+  with_index [ "keeper_compose_inspect", [ "Execute"; "Grep" ] ] (fun index ->
+      check bool "composition uses the same execution authority as direct Execute" false
+        (asks ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_inspect"
+           ~input:no_input))
+;;
+
+let test_filesystem_composition_delegates_to_its_producers () =
+  with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Edit" ] ] (fun index ->
+    check bool "filesystem nodes retain their own authorization" false
+      (asks ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_mixed"
+         ~input:no_input))
+;;
+
+let test_same_name_is_isolated_between_turn_indexes () =
+  let first_turn = Index.create () in
+  let second_turn = Index.create () in
+  let composition = "keeper_compose_same-name" in
+  Index.record first_turn ~composition ~node_tools:[ "Read" ];
+  Index.record second_turn ~composition ~node_tools:[ "unclassified_fixture_tool" ];
+  check bool "first turn keeps its read-only plan" false
+    (asks ~composition_plan_index:(Some first_turn) ~tool_name:composition ~input:no_input);
+  check bool "second turn sees its unclassifiable node" true
+    (asks ~composition_plan_index:(Some second_turn) ~tool_name:composition ~input:no_input);
+  check bool "second writer did not mutate the first turn" false
+    (asks ~composition_plan_index:(Some first_turn) ~tool_name:composition ~input:no_input)
+;;
+
+let test_an_unrecorded_name_is_still_unclassifiable () =
+  with_index [] (fun index ->
+    check bool "a name that is not a composition keeps the old answer" true
+      (asks ~composition_plan_index:(Some index)
+         ~tool_name:"keeper_compose_never_declared" ~input:no_input);
+    check string "and keeps the old reason"
+      "no descriptor declares what this tool does"
+      (because ~composition_plan_index:(Some index)
+         ~tool_name:"keeper_compose_never_declared" ~input:no_input))
+;;
+
+(* The invariant every task in this goal is checked against: nothing that runs
+   unasked today may start asking. Read directly and Read inside a plan must
+   give the same answer. *)
+let test_no_direct_call_became_asked () =
+  with_index [] (fun _ ->
+    let asked_now =
+      Descriptor.public_names ()
+      |> List.filter (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
+    in
+    check (slist string String.compare) "the asked set is unchanged"
+      [] asked_now)
+;;
+
+
+(* The two control tools that ride beside an async composition. They are
+   Agent-Core tools like a composition, so no descriptor owns them, but they
+   carry no plan either -- the fold has nothing to read and would ask. *)
+module Catalog = Masc.Keeper_tool_composition_catalog
+
+let test_reading_a_request_status_runs_unasked () =
+  with_index [] (fun _ ->
+    check bool "reading the status of a request this keeper made is not asked about"
+      false (asks ~composition_plan_index:None ~tool_name:Catalog.status_tool_name ~input:no_input))
+;;
+
+let test_cancelling_a_request_runs_unasked () =
+  with_index [] (fun _ ->
+    check bool "cancelling a request inside masc is not asked about" false
+      (asks ~composition_plan_index:None ~tool_name:Catalog.cancel_tool_name ~input:no_input))
+;;
+
+(* The names come from the catalog the surface builds these tools from, so a
+   rename cannot leave the policy answering about a name nobody calls. *)
+let test_the_control_names_are_the_catalogue_s () =
+  check bool "status and cancel are distinct names" true
+    (not (String.equal Catalog.status_tool_name Catalog.cancel_tool_name));
+  check bool "neither is a composition tool name" true
+    (not (mentions Catalog.status_tool_name "keeper_compose_")
+     && not (mentions Catalog.cancel_tool_name "keeper_compose_"))
+;;
+
+(* #31728 removed the tool group, and with it the split between a write that
+   moves masc's own rows and one that leaves. Every non-read became Ask, which
+   would have put keeper_memory_write — 230 calls on 2026-08-29 alone — behind
+   an operator prompt. These pin the split on its own axis so the next sweep
+   has to see it. *)
+let test_an_in_process_write_runs () =
+  List.iter
+    (fun tool_name ->
+       match
+         Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
+           ~composition_plan_index:None
+           ~tool_name
+           ~input:no_input
+       with
+       | Policy.Run _ -> ()
+       | Policy.Ask { because } ->
+         failf "%s must run without asking, got Ask: %s" tool_name because)
+    [ "keeper_memory_retract"; "keeper_memory_write" ]
+;;
+
+let test_internal_filesystem_name_delegates () =
+  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None
+          ~tool_name:"tool_edit_file"
+          ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])
+  with
+  | Policy.Run _ -> ()
+  | Policy.Ask { because } ->
+    failf "tool_edit_file must reach its producer, got Ask: %s" because
+;;
+
+let test_addon_approval_uses_frozen_turn_descriptor () =
+  let module Index = Masc.Keeper_tool_composition_plan_index in
+  let index = Index.create () in
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+      "name", `String "machine_press"; "inputSchema", `Assoc ["type", `String "object"];
+      "annotations", `Assoc ["readOnlyHint", `Bool true]]) with
+    | Ok tool -> tool | Error detail -> fail detail in
+  let descriptor = Masc.Keeper_lane_addon_descriptor.create
+    (Masc.Lane_addon_tool_export.create
+      ~owner:(Masc.Lane_addon_tool_export.create_owner ~instance_id:"first") ~tool) in
+  Index.bind_descriptors index [descriptor];
+  check bool "export is classified by its frozen descriptor" true
+    (Policy.classifies ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
+       ~composition_plan_index:(Some index) ~tool_name:"machine_press");
+  check bool "worker readOnlyHint grants no approval bypass" true
+    (asks ~composition_plan_index:(Some index) ~tool_name:"machine_press" ~input:no_input);
+  let empty = Index.create () in
+  Index.bind_descriptors empty [];
+  check bool "frozen empty turn does not regain static Read" true
+    (asks ~composition_plan_index:(Some empty) ~tool_name:"Read" ~input:no_input);
+  let rejected = try Index.bind_descriptors index []; false with Invalid_argument _ -> true in
+  check bool "a later surface cannot replace this turn's authority" true rejected
+
+let () =
+  run "keeper_tool_approval_policy"
+    [ ( "the split"
+      , [ test_case "over the real catalogue" `Quick
+            test_the_split_over_the_real_catalogue
+        ; test_case "reading is never asked about" `Quick
+            test_reading_is_never_asked_about
+        ; test_case "filesystem writes and Execute delegate" `Quick
+            test_writes_and_execute_delegate
+        ; test_case "Execute delegates rather than claiming read-only" `Quick
+            test_execute_delegation_does_not_claim_readonly
+        ] )
+    ; ( "unknowns"
+      , [ test_case "an unclassifiable tool is asked about" `Quick
+            test_an_unclassifiable_tool_is_asked_about
+        ] )
+    ; ( "in-process writes"
+      , [ test_case "a write inside masc runs" `Quick
+            test_an_in_process_write_runs
+        ; test_case "internal filesystem alias delegates" `Quick
+            test_internal_filesystem_name_delegates
+        ] )
+    ; ( "compositions"
+      , [ test_case "a plan of reads runs unasked" `Quick
+            test_a_plan_of_reads_runs_unasked
+        ; test_case "Execute composition delegates to node Gate" `Quick
+            test_execute_composition_delegates_to_its_node_gate
+        ; test_case "filesystem composition delegates to producers" `Quick
+            test_filesystem_composition_delegates_to_its_producers
+        ; test_case "same name is isolated between turn indexes" `Quick
+            test_same_name_is_isolated_between_turn_indexes
+        ; test_case "an unrecorded name is still unclassifiable" `Quick
+            test_an_unrecorded_name_is_still_unclassifiable
+        ; test_case "no direct call became asked" `Quick
+            test_no_direct_call_became_asked
+        ] )
+    ; ( "composition control tools"
+      , [ test_case "reading a request status runs unasked" `Quick
+            test_reading_a_request_status_runs_unasked
+        ; test_case "cancelling a request runs unasked" `Quick
+            test_cancelling_a_request_runs_unasked
+        ; test_case "the control names are the catalogue's" `Quick
+            test_the_control_names_are_the_catalogue_s
+        ] )
+    ; ( "Lane Add-ons"
+      , [test_case "approval uses the frozen descriptor" `Quick
+           test_addon_approval_uses_frozen_turn_descriptor] )
+    ; ( "the question"
+      , [ test_case "names the call" `Quick test_the_question_names_the_call ] )
+    ]

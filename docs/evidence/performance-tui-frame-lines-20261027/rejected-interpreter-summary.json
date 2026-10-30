@@ -1,0 +1,101 @@
+{
+  "schema": "masc.frame-lines-interpreter-descriptive-summary.v1",
+  "correctness": {
+    "kind": "correctness",
+    "cases": 5473,
+    "roles": 2,
+    "input_unchanged_and_outputs_survive_mutation": true
+  },
+  "environment": {
+    "kind": "environment",
+    "ocaml_version": "5.5.1",
+    "word_size": 64,
+    "backend": "bytecode interpreter; native integration not run",
+    "wall_clock": "Unix.gettimeofday not monotonic",
+    "allocation": "Gc.allocated_bytes counter delta includes measurement overhead"
+  },
+  "raw_records": 32,
+  "rows": [
+    {
+      "stratum": "empty",
+      "mean_allocated_bytes_per_call": {
+        "baseline": 16.0288,
+        "candidate": 0.0288
+      },
+      "allocation_change_percent": -99.82032341784787,
+      "CPU_change_percent": -73.87005649717514,
+      "wall_change_percent": -73.7755902703474
+    },
+    {
+      "stratum": "LF",
+      "mean_allocated_bytes_per_call": {
+        "baseline": 120.0288,
+        "candidate": 104.0288
+      },
+      "allocation_change_percent": -13.33013410114906,
+      "CPU_change_percent": -16.051948051948052,
+      "wall_change_percent": -15.514701703323386
+    },
+    {
+      "stratum": "row120",
+      "mean_allocated_bytes_per_call": {
+        "baseline": 360.072,
+        "candidate": 224.072
+      },
+      "allocation_change_percent": -37.77022373303117,
+      "CPU_change_percent": 127.56218905472636,
+      "wall_change_percent": 127.05751408710722
+    },
+    {
+      "stratum": "screen40x120",
+      "mean_allocated_bytes_per_call": {
+        "baseline": 12256.288,
+        "candidate": 7400.288
+      },
+      "allocation_change_percent": -39.62047889214092,
+      "CPU_change_percent": 126.26368650695645,
+      "wall_change_percent": 126.61158166408714
+    },
+    {
+      "stratum": "blank40x120",
+      "mean_allocated_bytes_per_call": {
+        "baseline": 12256.288,
+        "candidate": 7400.288
+      },
+      "allocation_change_percent": -39.62047889214092,
+      "CPU_change_percent": 128.45900133600531,
+      "wall_change_percent": 128.4783397871164
+    },
+    {
+      "stratum": "unicode40",
+      "mean_allocated_bytes_per_call": {
+        "baseline": 16376.288,
+        "candidate": 9320.288
+      },
+      "allocation_change_percent": -43.08668728835252,
+      "CPU_change_percent": 120.35843649535227,
+      "wall_change_percent": 120.55437014796522
+    },
+    {
+      "stratum": "ANSI40",
+      "mean_allocated_bytes_per_call": {
+        "baseline": 13016.288,
+        "candidate": 7720.288
+      },
+      "allocation_change_percent": -40.6874832517535,
+      "CPU_change_percent": 124.91715863645024,
+      "wall_change_percent": 125.1843022396895
+    },
+    {
+      "stratum": "tall300x120",
+      "mean_allocated_bytes_per_call": {
+        "baseline": 91553.44,
+        "candidate": 55241.44
+      },
+      "allocation_change_percent": -39.66208151217475,
+      "CPU_change_percent": 126.94722318040705,
+      "wall_change_percent": 127.41794498089716
+    }
+  ],
+  "scope": "Two phases/role/stratum; extracted bytecode helper only; includes probes/sharedhost/order/clock limitations, not native/renderer/SLO."
+}

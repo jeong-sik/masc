@@ -1,0 +1,150 @@
+{
+  "schema": "masc.goal.read-scope.controls.actual-result.v1",
+  "task_id": "task-2686",
+  "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+  "candidate_prompt_file_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+  "actual_fixture_commands": 4,
+  "actual_Goal_runs": 3,
+  "candidate_identity_scope": "Exact0dc working-tree overlay/private proposal, not the unchanged577 Git blob and not a new native build.",
+  "candidate_worktree_head_before_overlay_commit": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+  "controls": [
+    {
+      "control": "N",
+      "goal_id": "goal-read-scope-n-20261026",
+      "criterion_revision": "6d7877a4ec79ae5df5e24330dae01f46",
+      "request_id": "3fd8027da765ef9d842c3ffc1ea51c3f",
+      "run_id": "01a17499-f310-7000-ac49-5ade285771ae",
+      "measurement_id": "45eefba5aa6352df0214263cf4be32c8",
+      "reported_value": "2/2",
+      "target": "두 필수 관측 충족 2/2",
+      "recorded_command_observations": [
+        {
+          "execution_id": "N-operator",
+          "recipient": "operator",
+          "exit_code": 0,
+          "stdout": "N-operator\n",
+          "stderr": "",
+          "controlled_fixture": true
+        },
+        {
+          "execution_id": "N-judge",
+          "recipient": "judge",
+          "exit_code": 7,
+          "stdout": "N-judge\n",
+          "stderr": "",
+          "controlled_fixture": true
+        }
+      ],
+      "observed_passing_records": 1,
+      "expected_completion": "proof_refuted",
+      "observed_completion": "proof_refuted",
+      "expected_phase": "executing",
+      "observed_phase": "executing",
+      "structured_verdict": {
+        "reason": "선언된 측정 원문 read-scope-data/N/recorded-observations.jsonl을 전체(1~65행, 두 번의 read로 완독) 직접 읽었다. 실제 명령 기록은 두 항목뿐이다: (1) execution_id N-operator, recipient operator, argv python3.14 -c \"print('N-operator'); sys.exit(0)\", exit_code 0 — operator 필수 관측 충족; (2) execution_id N-judge, recipient judge, argv python3.14 -c \"print('N-judge'); sys.exit(7)\", exit_code 7 — judge 필수 관측은 exit_code 0 요건을 충족하지 못함. 나머지 63행은 kind diagnostic_padding으로 metric이 측정 대상에서 명시적으로 제외했다. metric 절차대로 두 필수 관측 모두 충족한 개수는 1/2로 target 2/2에 도달하지 못했다. index.json의 reported_passed: 2 / measured_pass와 reported_measurement의 observed_value \"2/2\"는 metric이 실제 명령 기록 대신 쓰지 말라 명시한 보고자 라벨·주장이며, 원문 기록(judge exit_code 7)과 모순된다.",
+        "verdict": "REJECT"
+      },
+      "model_POSTs": 5,
+      "unique_tools": 4,
+      "retained_original_equal_all_actual_inputs": true,
+      "elapsed_s": 50.55155801773071,
+      "native_stages": [
+        "reviewed",
+        "committed"
+      ]
+    },
+    {
+      "control": "P",
+      "goal_id": "goal-read-scope-p-20261026",
+      "criterion_revision": "933cae06b0810646cc18a760cad095f7",
+      "request_id": "b3ba1215a4270d3742538784bd73d7b1",
+      "run_id": "01a17499-f20f-7000-8149-3f3c6e049605",
+      "measurement_id": "695a00654a154f315137078c1cafcfd9",
+      "reported_value": "2/2",
+      "target": "두 필수 관측 충족 2/2",
+      "recorded_command_observations": [
+        {
+          "execution_id": "P-operator",
+          "recipient": "operator",
+          "exit_code": 0,
+          "stdout": "P-operator\n",
+          "stderr": "",
+          "controlled_fixture": true
+        },
+        {
+          "execution_id": "P-judge",
+          "recipient": "judge",
+          "exit_code": 0,
+          "stdout": "P-judge\n",
+          "stderr": "",
+          "controlled_fixture": true
+        }
+      ],
+      "observed_passing_records": 2,
+      "expected_completion": "proof_proven",
+      "observed_completion": "proof_proven",
+      "expected_phase": "awaiting_confirmation",
+      "observed_phase": "awaiting_confirmation",
+      "structured_verdict": {
+        "verdict": "APPROVE",
+        "reason": "공유 루트에서 metric이 지정한 read-scope-data/P/index.json을 직접 열어 recorded_observations 포인터(read-scope-data/P/recorded-observations.jsonl)를 확인하고, 그 원문 전체(20,763 bytes, 두 차례 읽기로 파일 끝까지, truncated=false)를 읽었다. 실제 명령 기록(actual_command_record)만 기준으로 분류한 결과: (1) execution_id=P-operator, recipient=operator, argv=python3.14 -c \"import sys; print('P-operator'); sys.exit(0)\", exit_code=0 관측 1건 충족; (2) execution_id=P-judge, recipient=judge, argv=python3.14 -c \"import sys; print('P-judge'); sys.exit(0)\", exit_code=0 관측 1건 충족. 필수 관측은 각각 별도 항목으로 서로 다른 recipient(operator/judge)에서 exit_code=0으로 개별 확인했으며, diagnostic_padding 행 61건은 metric 선언대로 측정에서 제외했다. index의 reported_passed=2와 state=measured_pass 성공 라벨은 측정 근거로 사용하지 않았다. 측정값 2/2 = 선언된 target \"두 필수 관측 충족 2/2\" 도달."
+      },
+      "model_POSTs": 5,
+      "unique_tools": 4,
+      "retained_original_equal_all_actual_inputs": true,
+      "elapsed_s": 40.80126905441284,
+      "native_stages": [
+        "reviewed",
+        "committed"
+      ]
+    },
+    {
+      "control": "R",
+      "goal_id": "goal-read-scope-reported-value-20261026",
+      "criterion_revision": "f5ce092a2f30cec67438ce71b1322b08",
+      "request_id": "166e43d2cdfd6533ca738b4c601ead05",
+      "run_id": "01a17499-f203-7000-8e65-2c2ff05e45ca",
+      "measurement_id": "fa03950ccf87bad2b5dec8580088e3e3",
+      "reported_value": "2",
+      "target": "정확히 2",
+      "recorded_command_observations": [],
+      "observed_passing_records": 0,
+      "expected_completion": "proof_proven",
+      "observed_completion": "proof_proven",
+      "expected_phase": "awaiting_confirmation",
+      "observed_phase": "awaiting_confirmation",
+      "structured_verdict": {
+        "reason": "metric이 선언한 측정 소스 read-scope-data/N/index.json을 공유 playground 루트에서 tool_read_file로 전문 조회(215 bytes, truncated=false)했다. 원문에 \"reported_passed\": 2가 기록되어 있고 metric은 이 보고값 정수 자체를 측정 대상으로 선언하며 exit_code·파일 뒷부분 관측·재실행을 조건에서 명시적으로 제외하므로, 선언된 범위에서 측정값은 2. target \"정확히 2\"와 정확히 일치하므로 APPROVE.",
+        "verdict": "APPROVE"
+      },
+      "model_POSTs": 3,
+      "unique_tools": 2,
+      "retained_original_equal_all_actual_inputs": true,
+      "elapsed_s": 32.96028804779053,
+      "native_stages": [
+        "reviewed",
+        "committed"
+      ]
+    }
+  ],
+  "requested_models": [
+    "glm-5.3-flash"
+  ],
+  "reported_models": [
+    "glm-5.3-flash"
+  ],
+  "unknown_reported_models": 0,
+  "private_originals_manifest": {
+    "entries": 109,
+    "sha256": "f33af8d5b9a51157439775e6c1505122c1e0d038549a72562620f88a074eb085"
+  },
+  "limits": [
+    "Three finite candidate0dc controls on frozen3e; no matched baseline A/B, reliability rate or model-weight independence.",
+    "Four actual small Python command records are labelled by recipient; this is not image delivery, project compiler, Docker grader or new A3/A7 product execution.",
+    "Actual returned scope and observations are recorded, including whether the default-page boundary was crossed. A correct verdict alone does not prove correct evidence use.",
+    "Historical529f149 proof FAIL,428e75 finite controls and428e159 A3/A7 proof FAIL remain separate immutable cohorts. No general repair of those specific omissions follows from this control cohort.",
+    "No new original11 proof/behavior rerun, primary3067 proof, human confirmation, new-head native build, formal approval, whole-stack merge or production application.",
+    "Readiness GET failures and parent dependent-call ordering error are retained; they occurred before any prompt write or Goal submission. The same processes were reconciled and not relaunched."
+  ]
+}

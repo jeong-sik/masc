@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System                     
+                                                                                
+   MASC Keepers (3)                                           HTTP [connected]  
+                                                                                
+    fleet ok   running 0/0   turn capacity 0/0                                  
+     KEEPER                           HEALTH       TURN TASK                    
+     imp                              - unread        — not observed            
+     probe-one                        ! failing       — —                       
+     probe-two                        ! failing       — —                       
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+ ────────────────────────────────────────────────────────────────────────────── 
+  TUI f7632e7 ≠ server 683c795 (server is older — redeploy)  q:quit  …?         
+ › to imp   (i to write)                                                        

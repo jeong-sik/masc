@@ -1,0 +1,72 @@
+{
+  "model": "qwen3:8b",
+  "stream": false,
+  "format": {
+    "type": "object",
+    "properties": {
+      "decisions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "not_proven",
+                "corrected",
+                "unresolved_conflict"
+              ]
+            },
+            "value": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "unit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "explanation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "verdict",
+            "value",
+            "unit",
+            "source_ids",
+            "explanation"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "decisions"
+    ],
+    "additionalProperties": false
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "Evaluate synthetic shared-memory evidence. Do not invent facts or resolve unsupported conflicts by voting. Return exactly one decision per case with every relevant source ID. Verdicts: not_proven, corrected, unresolved_conflict. For corrected measurements return the numerical value and the unit as written in the source; otherwise value and unit must be null. Explanations must preserve provenance. Evidence order does not establish chronology. This is evaluation only; no memory is stored."
+    },
+    {
+      "role": "user",
+      "content": "[{\"id\": \"artifact\", \"records\": [{\"id\": \"a2\", \"keeper\": \"verifier\", \"text\": \"Read report.pdf: bytes begin with plain markdown, not PDF. PDF rendering failed.\"}, {\"id\": \"a1\", \"keeper\": \"writer\", \"text\": \"I generated report.pdf; it is ready.\"}], \"question\": \"Does the supplied evidence establish a valid rendered PDF?\"}, {\"id\": \"revision\", \"records\": [{\"id\": \"r1\", \"keeper\": \"analyst\", \"text\": \"Measurement run M1: 12 seconds.\"}, {\"id\": \"r2\", \"keeper\": \"analyst\", \"text\": \"Correction of M1 after checking the original log: 21 seconds. Retract the 12-second claim.\"}], \"question\": \"What is the corrected measurement, preserving attribution?\"}, {\"id\": \"conflict\", \"records\": [{\"id\": \"c2\", \"keeper\": \"beta\", \"text\": \"Dataset D contains 15 samples. No underlying file supplied.\"}, {\"id\": \"c1\", \"keeper\": \"alpha\", \"text\": \"Dataset D contains 10 samples. No underlying file supplied.\"}], \"question\": \"Can a single verified sample count be consolidated?\"}, {\"id\": \"revision_heldout\", \"records\": [{\"id\": \"h2\", \"keeper\": \"researcher\", \"text\": \"Correction of M2 from the source log: 37 milliseconds. Retract the 43-millisecond claim.\"}, {\"id\": \"h1\", \"keeper\": \"researcher\", \"text\": \"Measurement run M2: 43 milliseconds.\"}], \"question\": \"What is the corrected measurement, preserving attribution?\"}]"
+    }
+  ]
+}

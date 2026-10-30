@@ -1,0 +1,612 @@
+{
+  "scope": "Read-only actual candidate canary observation; no raw thinking copied, no Keeper messages/tools mutations, no source edits or model inference replay. Source identity from existing identity record; no independent binary embedded-SHA check in this diagnostic.",
+  "observed_at_utc": "2026-10-24T14:47:12.718059+00:00",
+  "identity_record": {
+    "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+    "binary": "/tmp/masc-goal-runtime-3badb881/masc",
+    "base_path": "/private/tmp/masc-goal-canary-3badb881",
+    "pid": 19960,
+    "port": 61867,
+    "provider_proxy_port": 58102,
+    "model": "gemma4:e2b",
+    "production_deployment": false
+  },
+  "operator_approval": {
+    "source_event_timestamp": "2026-10-24T14:36:06Z",
+    "receipt": {
+      "ok": true,
+      "message": "task-001 awaiting_verification → done (verdict by human_operator)",
+      "noop": false
+    },
+    "provenance": "controlled operator proxy; no independent LLM verdict or human Goal confirmation"
+  },
+  "approval_log": [
+    {
+      "line": 303,
+      "text": "[2026-10-24 23:36:06] [INFO] [Misc] completion approval delivered task_id=task-001 verification_id=vrf-c6c42865031b8d50dce397b39f68ecfc producer=goal-canary"
+    },
+    {
+      "line": 307,
+      "text": "[2026-10-24 23:36:06] [INFO] [Keeper] turn entry: task outcome delivered task_id=task-001 verification_id=vrf-c6c42865031b8d50dce397b39f68ecfc authority_kind=human_operator (keeper=goal-canary)"
+    },
+    {
+      "line": 308,
+      "text": "[2026-10-24 23:36:06] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=task-outcome:task-001 urgency=immediate class=task_outcome (keeper=goal-canary)"
+    },
+    {
+      "line": 310,
+      "text": "[2026-10-24 23:36:06] [INFO] [Keeper] keepalive turn scheduled for goal-canary: channel=turn reasons=task_outcome_pending"
+    }
+  ],
+  "wire": [
+    {
+      "id": 14,
+      "request_sha256": "aa0871aad3cc5b00ffbd7c9474c2fc7f3df76a45776d6347338563658f4c5112",
+      "request_bytes": 90809,
+      "request_file_mtime_utc": "2026-10-24T14:34:13.313740+00:00",
+      "response_sha256": "b37e66b70415df39a6ba363424cbefb9cd5e1adf073d89d095004ec7737674b6",
+      "response_bytes": 26689,
+      "model_alias": "gemma4:e2b",
+      "options": {
+        "temperature": 0.4
+      },
+      "think_enabled": true,
+      "offered_tool_count": 33,
+      "goal_measure_offered": true,
+      "system_sha256": "0843cd91a6d874e10ce9d693012fc2fbca0f19e1b9933f9edb2e0e54e248adf5",
+      "system_goal_id_present": true,
+      "system_criterion_revision_present": true,
+      "system_measurement_id_present": true,
+      "approved_task_outcome_section": null,
+      "fresh_extra_user_sha256": null,
+      "response_public_text": "",
+      "response_thinking_codepoints_count_only": 803,
+      "response_tool_call_count": 0,
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T14:34:16.094698Z",
+          "done": true,
+          "done_reason": "stop",
+          "eval_count": 193,
+          "prompt_eval_count": 20898
+        }
+      ],
+      "phase": "pre_approval"
+    },
+    {
+      "id": 15,
+      "request_sha256": "22cb0c419a3a7a15c908737e4befdf4f7cce5c5eaf5da90abed0dcbfb9330178",
+      "request_bytes": 93725,
+      "request_file_mtime_utc": "2026-10-24T14:34:16.601200+00:00",
+      "response_sha256": "cc057e8a174592c77a2341cc3ac55887736211d88c5db394e172ad5d26ef4ea8",
+      "response_bytes": 135114,
+      "model_alias": "gemma4:e2b",
+      "options": {
+        "temperature": 0.4
+      },
+      "think_enabled": true,
+      "offered_tool_count": 33,
+      "goal_measure_offered": true,
+      "system_sha256": "0843cd91a6d874e10ce9d693012fc2fbca0f19e1b9933f9edb2e0e54e248adf5",
+      "system_goal_id_present": true,
+      "system_criterion_revision_present": true,
+      "system_measurement_id_present": true,
+      "approved_task_outcome_section": null,
+      "fresh_extra_user_sha256": "e4acf2d67c3532b3dfe2e3959eadb3c919e365c59f08880af2399a4085951f72",
+      "response_public_text": "현재 작업은 `task-001`에 대한 검증 대기 상태(`awaiting_verification`)로 종료되었습니다.\n\n사용자님의 지시에 따라, 첫 번째 작업이 승인될 때까지 `beta`와 `gamma`를 수정하지 않고 기다려야 합니다. 현재는 시스템의 검증 결과를 기다리는 상태이므로, 추가적인 작업은 보류합니다.\n\n**현재 상태 요약:**\n*   **Task:** `task-001` (Set alpha to true in acceptance.json)이 완료 처리되었으며, 검증을 기다리는 중입니다.\n*   **Goal:** `goal-canary-three-results`의 전체 달성 상태를 확인하고 나머지 작업을 이어가야 합니다.\n\n검증이 완료되면 전체 달성 상태를 확인하고 나머지 작업을 진행하겠습니다.",
+      "response_thinking_codepoints_count_only": 3525,
+      "response_tool_call_count": 0,
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T14:34:35.052003Z",
+          "done": true,
+          "done_reason": "stop",
+          "eval_count": 1046,
+          "prompt_eval_count": 21931
+        }
+      ],
+      "phase": "pre_approval"
+    },
+    {
+      "id": 19,
+      "request_sha256": "79c160e303e8cbead51cb69235f72d4dcc256dce25836267e3b9a370fd83b137",
+      "request_bytes": 92511,
+      "request_file_mtime_utc": "2026-10-24T14:36:06.890657+00:00",
+      "response_sha256": "9e5b2fd0dbc4f7064c7545457c882c62023bc609c1af539268af8a250396e184",
+      "response_bytes": 143973,
+      "model_alias": "gemma4:e2b",
+      "options": {
+        "temperature": 0.4
+      },
+      "think_enabled": true,
+      "offered_tool_count": 33,
+      "goal_measure_offered": true,
+      "system_sha256": "0843cd91a6d874e10ce9d693012fc2fbca0f19e1b9933f9edb2e0e54e248adf5",
+      "system_goal_id_present": true,
+      "system_criterion_revision_present": true,
+      "system_measurement_id_present": true,
+      "approved_task_outcome_section": "### Approved Task Outcomes (1)\nRows below record evidence you submitted for a Task that a completion authority approved. task_id and verification_id are correlation keys; the approval is final, so do not resubmit the Task or redo the work. Read that Task's current goal link when it is needed: if linked, inspect the Goal's declared metric, record any actually observed change with evidence, and continue its unmet success conditions. Task approval alone does not complete or increment a Goal. An independent Task needs no invented Goal. A rejected verdict arrives as a separate Completion Authority Decisions row.\n- post_id=\"task-outcome:task-001\" task_id=\"task-001\" verification_id=\"vrf-c6c42865031b8d50dce397b39f68ecfc\" authority_kind=\"human_operator\" authority_actor=\"goal-canary-operator\"\n\n",
+      "fresh_extra_user_sha256": "0e2191bea1a752a7d35b00c66445919d08ab5ab7e761418c0fd475c8f64338af",
+      "response_public_text": "현재 작업은 `task-001`에 대한 검증을 기다리고 있습니다. 이전 단계에서 `workspace/acceptance.json` 파일의 `alpha` 값을 `true`로 설정하는 작업이 완료되었으며, 이 결과는 `keeper_task_done`을 통해 검증을 위해 제출되었습니다.\n\n현재 상태는 **`awaiting_verification`** 상태이며, 최종 목표인 `alpha`, `beta`, `gamma` 모두 `true`로 설정되었는지에 대한 최종 확인이 필요합니다.\n\n추가적인 입력이 없으므로, 현재 상태를 보고하며 이 턴을 종료합니다.",
+      "response_thinking_codepoints_count_only": 3990,
+      "response_tool_call_count": 0,
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T14:36:23.32341Z",
+          "done": true,
+          "done_reason": "stop",
+          "eval_count": 1110,
+          "prompt_eval_count": 21888
+        }
+      ],
+      "phase": "post_approval"
+    }
+  ],
+  "execution_receipts": [
+    {
+      "schema": "keeper.execution_receipt.v1",
+      "recorded_at": "2026-10-24T14:29:29Z",
+      "turn_count": 1,
+      "agent_core_turn_count": null,
+      "outcome": "receipt_failed",
+      "terminal_reason_code": "accept_rejected",
+      "operator_disposition": "fail_open_next_runtime",
+      "response_text_present": false,
+      "completion_contract_result": "unknown",
+      "actionable_signal": null,
+      "stop_reason": null,
+      "started_at": "2026-10-24T14:28:54Z",
+      "ended_at": "2026-10-24T14:29:29Z"
+    },
+    {
+      "schema": "keeper.execution_receipt.v1",
+      "recorded_at": "2026-10-24T14:34:16Z",
+      "turn_count": 2,
+      "agent_core_turn_count": null,
+      "outcome": "receipt_failed",
+      "terminal_reason_code": "accept_rejected",
+      "operator_disposition": "fail_open_next_runtime",
+      "response_text_present": false,
+      "completion_contract_result": "unknown",
+      "actionable_signal": null,
+      "stop_reason": null,
+      "started_at": "2026-10-24T14:33:39Z",
+      "ended_at": "2026-10-24T14:34:16Z"
+    },
+    {
+      "schema": "keeper.execution_receipt.v1",
+      "recorded_at": "2026-10-24T14:34:35Z",
+      "turn_count": 3,
+      "agent_core_turn_count": 14,
+      "outcome": "receipt_done",
+      "terminal_reason_code": "success",
+      "operator_disposition": "pass",
+      "response_text_present": true,
+      "completion_contract_result": "response_observed",
+      "actionable_signal": "no_actionable_signal",
+      "stop_reason": "completed",
+      "started_at": "2026-10-24T14:34:16Z",
+      "ended_at": "2026-10-24T14:34:35Z"
+    },
+    {
+      "schema": "keeper.execution_receipt.v1",
+      "recorded_at": "2026-10-24T14:36:23Z",
+      "turn_count": 4,
+      "agent_core_turn_count": 15,
+      "outcome": "receipt_done",
+      "terminal_reason_code": "success",
+      "operator_disposition": "pass",
+      "response_text_present": true,
+      "completion_contract_result": "response_observed",
+      "actionable_signal": "no_actionable_signal",
+      "stop_reason": "completed",
+      "started_at": "2026-10-24T14:36:06Z",
+      "ended_at": "2026-10-24T14:36:23Z"
+    }
+  ],
+  "queue_state": {
+    "schema": "keeper.event_queue.state.v19",
+    "revision": 2,
+    "pending": [],
+    "last_transition": {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:0:b858de232b0d02eba29a8368fd23749d28f6700026553da0263a9a2541063b69",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:0:b858de232b0d02eba29a8368fd23749d28f6700026553da0263a9a2541063b69",
+      "applied_at_unix": 1792852583.388188,
+      "transition": {
+        "kind": "ack_source_terminal",
+        "source": {
+          "post_id": "task-outcome:task-001",
+          "urgency": "immediate",
+          "arrived_at_unix": 1792852566.504822,
+          "payload": {
+            "kind": "task_outcome",
+            "task_id": "task-001",
+            "verification_id": "vrf-c6c42865031b8d50dce397b39f68ecfc",
+            "producer": "goal-canary",
+            "authority_kind": "human_operator",
+            "authority_actor": "goal-canary-operator"
+          }
+        },
+        "source_incarnation": 0,
+        "operator_operation_id": "turn-attempt-terminal:0:b858de232b0d02eba29a8368fd23749d28f6700026553da0263a9a2541063b69",
+        "source_receipt_kind": "turn_completed"
+      }
+    },
+    "projected_dispositions": [],
+    "transition_outbox": [],
+    "accepted_transfer_projections": []
+  },
+  "queue_arrival_at_utc": "2026-10-24T14:36:06.504822+00:00",
+  "queue_ack_applied_at_utc": "2026-10-24T14:36:23.388188+00:00",
+  "keeper_state": {
+    "schema": "masc.keeper_meta.v2",
+    "name": "goal-canary",
+    "total_turns": 4,
+    "updated_at": "2026-10-24T14:36:23Z",
+    "last_turn_ts": 1792852583.385851,
+    "paused": false,
+    "latched_reason": null,
+    "current_task_id": null,
+    "last_proactive_outcome": "never_started",
+    "last_proactive_reason": ""
+  },
+  "keeper_last_turn_at_utc": "2026-10-24T14:36:23.385851+00:00",
+  "keeper_config_behavior": {
+    "activation_mode": "on_demand",
+    "sandbox_profile": "docker",
+    "network_mode": "none",
+    "input_policy": "small"
+  },
+  "goal_measurements": {
+    "version": 1,
+    "measurements": [
+      {
+        "id": "91046d8ff851d901c2618fed875f0cef",
+        "goal_id": "goal-canary-three-results",
+        "criterion_revision": "334daddc9a1cff6757982b3e90eadaac",
+        "observed_value": "0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread",
+        "evidence": "note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.",
+        "actor": "goal-canary-operator",
+        "recorded_at": "2026-10-24T14:28:54Z"
+      }
+    ]
+  },
+  "wire_methods": [
+    {
+      "id": "request-000001",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000002",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 75944
+    },
+    {
+      "id": "request-000003",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 78358
+    },
+    {
+      "id": "request-000004",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 80147
+    },
+    {
+      "id": "request-000005",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 81463
+    },
+    {
+      "id": "request-000006",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 82733
+    },
+    {
+      "id": "request-000007",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 79282
+    },
+    {
+      "id": "request-000008",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 80938
+    },
+    {
+      "id": "request-000009",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 82971
+    },
+    {
+      "id": "request-000010",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 84609
+    },
+    {
+      "id": "request-000011",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 86431
+    },
+    {
+      "id": "request-000012",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 87719
+    },
+    {
+      "id": "request-000013",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 89199
+    },
+    {
+      "id": "request-000014",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 90809
+    },
+    {
+      "id": "request-000015",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 93725
+    },
+    {
+      "id": "request-000016",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000017",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000018",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000019",
+      "method": "POST",
+      "path": "/api/chat",
+      "request_bytes": 92511
+    },
+    {
+      "id": "request-000020",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000021",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000022",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000023",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000024",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000025",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000026",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000027",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000028",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000029",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000030",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000031",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000032",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000033",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000034",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000035",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000036",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000037",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000038",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000039",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000040",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    },
+    {
+      "id": "request-000041",
+      "method": "GET",
+      "path": "/api/tags",
+      "request_bytes": 0
+    }
+  ],
+  "exact_source": [
+    {
+      "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+      "path": "lib/keeper/keeper_activation_mode.ml",
+      "sha256": "44f516053ee8dc79596a4c42e48f6547c0cd79ef415480392be0a90f5eef4e30",
+      "selected_lines": [
+        {
+          "line": 4,
+          "text": "let spontaneous = function Manual | On_demand -> false | Autonomous -> true"
+        }
+      ]
+    },
+    {
+      "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+      "path": "lib/keeper/keeper_lifecycle_gate_env.ml",
+      "sha256": "566168776518489ff85318652ab80f1d0e9769a1d3b648b5be2e61e8f0735bcd",
+      "selected_lines": [
+        {
+          "line": 23,
+          "text": "(* One declarative mode owns both spontaneous initiative and automatic owner"
+        },
+        {
+          "line": 27,
+          "text": "  ; proactive = Keeper_activation_mode.spontaneous m.activation_mode"
+        }
+      ]
+    },
+    {
+      "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+      "path": "lib/keeper/keeper_status_runtime.ml",
+      "sha256": "1b33c03d0e223e16d90981749a5750e624b410284804b8a8fb88555aa6050d35",
+      "selected_lines": [
+        {
+          "line": 231,
+          "text": "  if not (Keeper_activation_mode.spontaneous meta.activation_mode) then"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/identity.json",
+      "bytes": 296,
+      "sha256": "3bee4f708f606eff8a18f67af770ebe2ea1559d96138a0a732db9abfdbfe9719"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/.masc/config/keepers/goal-canary.toml",
+      "bytes": 398,
+      "sha256": "8b3b71f7b2fd589664ed7fb9292d4f17e61b198e4d262bb07d06b804cfab7c30"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/.masc/keepers/goal-canary.json",
+      "bytes": 1860,
+      "sha256": "51ab4bc8529ee8587ef3db8ef1caf9931850ca93b71088c1e417bdcb8135c42e"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/.masc/keepers/goal-canary/event-queue-v19.json",
+      "bytes": 1269,
+      "sha256": "ca4b00fc45af0c4e4e863afc8f8be7394c89863e3902ec3c0cff84d93a30a0ae"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/.masc/goal_measurements.json",
+      "bytes": 536,
+      "sha256": "445157b291902b48eb9f27653b5c1ca251b59283b4009008e8f8978a63b5623f"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/.masc/keepers/goal-canary/execution-receipts/2026-10/24.jsonl",
+      "bytes": 15152,
+      "sha256": "f7606be51929afc0e0abdee5ed6923cb1ac0f0a1e14d66d6582d7ef32531ae76"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/.masc/events/2026-10/24.jsonl",
+      "bytes": 1759,
+      "sha256": "5895e750d42dcf833243283c36e283251d8e408b5c97bbcfc059c08ac8dfc6a9"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/operator-observations/approval-receipt.json",
+      "bytes": 118,
+      "sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-3badb881/operator-observations/partial-inspection.json",
+      "bytes": 3072,
+      "sha256": "86e296d8ce7d92a8704c127896e16c1cae93f22107491871cadbba2118fe7f6f"
+    }
+  ],
+  "finding": "Task approval was delivered in actual request19 and the model returned public stale-awaiting text with zero tools. The completed-turn event acknowledgment is delivery/lifecycle observation, not Goal achievement.",
+  "cause_hypothesis": "Model fails to use the delivered latest approval; stale-state anchoring is a hypothesis, not a proved causal mechanism.",
+  "scheduling_scope": "on_demand disables spontaneous initiative; after the one reactive event completes and pending becomes empty, absent idle follow-up is expected, not starvation evidence.",
+  "next_step": "Preserve failed G3. Optional paired inference-only capability comparison on frozen request19, then fresh actual Keeper cohort if warranted. No forced requeue, prompt repetition, gating or product edit justified by this observation alone."
+}

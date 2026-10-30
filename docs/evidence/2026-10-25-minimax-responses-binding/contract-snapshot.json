@@ -1,0 +1,47 @@
+{
+  "url": "https://platform.minimax.io/docs/api-reference/text/api/openapi-responses.json",
+  "sha256": "a8c51922e4530595537030fd5c0ab16a6faaf263e662bf753c588fe61169e5ea",
+  "bytes": 79832,
+  "license": {
+    "name": "MIT"
+  },
+  "request_model": {
+    "type": "string",
+    "description": "Model name to invoke, e.g. `MiniMax-M3.1-Flash`",
+    "example": "MiniMax-M3.1-Flash"
+  },
+  "request_tool_choice": {
+    "type": "string",
+    "enum": [
+      "auto"
+    ],
+    "description": "Tool selection strategy: `auto` lets the model decide whether to call tools"
+  },
+  "request_reasoning": {
+    "type": "object",
+    "description": "Reasoning control. The default depends on the model, so no schema-level default is declared.\n- `MiniMax-M3.1-Flash`: reasoning is always on, including when `reasoning` is omitted. `effort` accepts `low`, `medium`, `high`, `xhigh` or `max`, and does tune reasoning depth. When omitted, it defaults to `max`. `effort: \"none\"` returns HTTP 400.\n- `MiniMax-M3`: reasoning is off unless `effort` is set to a non-`none` value, which turns reasoning on but does not tune its depth.\n- M2.x models: reasoning cannot be disabled; `effort: \"none\"` is accepted but ignored.",
+    "properties": {
+      "effort": {
+        "type": "string",
+        "enum": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "none"
+        ]
+      }
+    },
+    "required": []
+  },
+  "interpretation": {
+    "direct_model_names": [
+      "MiniMax-M3",
+      "MiniMax-M3.1-Flash"
+    ],
+    "M2_exact_ids": "not enumerated; family semantics alone do not establish exact Responses availability",
+    "HTTP": "not exercised; schema is not an actual acceptance/rejection receipt"
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "observed_at": "2026-09-07T14:05:26Z",
+  "window_start": "2026-09-07T13:05:26Z",
+  "window_end": "2026-09-07T14:05:26Z",
+  "records": 13065,
+  "levels": {
+    "INFO": 11805,
+    "WARN": 1094,
+    "ERROR": 166
+  },
+  "error_modules": {
+    "Keeper": 164,
+    "Misc": 2
+  },
+  "patterns": {
+    "repeated_exact_tool_loop": {
+      "literal": "yielding repeated exact tool loop",
+      "count": 21,
+      "first": "2026-09-07T13:17:05Z",
+      "last": "2026-09-07T14:04:47Z"
+    },
+    "missing_tool_results": {
+      "literal": "insufficient tool messages following tool_calls",
+      "count": 0
+    },
+    "overlapping_checkpoint": {
+      "literal": "Overlapping_tool_cycle",
+      "count": 0
+    },
+    "composition_publication_failure": {
+      "literal": "Skill composition evidence publication failed",
+      "count": 0
+    },
+    "new_keeper_shutdown_recovery": {
+      "literal": "shutdown recovery failed keeper=new-keeper",
+      "count": 0
+    },
+    "browser_lane_absent": {
+      "literal": "no browser lane connected",
+      "count": 0
+    },
+    "librarian_failure": {
+      "literal": "memory os librarian failed",
+      "count": 0
+    },
+    "claude_quota": {
+      "literal": "Claude Code subscription turn failed (kind=quota_blocked)",
+      "count": 0
+    },
+    "glm429_header_profile": {
+      "literal": "http_client_4xx_request_header_profile",
+      "count": 87,
+      "first": "2026-09-07T13:05:28Z",
+      "last": "2026-09-07T14:04:16Z"
+    }
+  },
+  "last_record": "2026-09-07T14:05:26Z",
+  "unparseable_lines_in_selected_daily_files": 0,
+  "health": {
+    "status": "ok",
+    "overall_status": "warning",
+    "build": {
+      "release_version": "0.33.0",
+      "binary_version": "0.33.0",
+      "repo_version": "0.33.0",
+      "commit": "116b6d13f280c0701ac172ecc2c8e7b66e32037f",
+      "commit_source": "embedded",
+      "binary_commit": "116b6d13f280c0701ac172ecc2c8e7b66e32037f",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "52453ac8fac87c3142ac9b8c25573c4d3124bb72de70459f72abefcb590b57c3",
+      "binary_commit_unix_ts": 1788787879.0,
+      "binary_commit_age_seconds": 2048,
+      "repo_head_commit": "116b6d13f2",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1788787879.0,
+      "repo_head_commit_age_seconds": 2048,
+      "executable_path": "/Users/dancer/.local/bin/masc",
+      "executable_dir": "/Users/dancer/.local/bin",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "runtime_instance_id": "01a07c1c-e4e3-7000-82c3-4b22560bdbdf",
+      "started_at": "2026-09-07T13:44:23Z",
+      "uptime_seconds": 1263
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": true,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me",
+      "env_masc_base_path": "/Users/dancer/me",
+      "resolution_source": "explicit_env"
+    },
+    "dashboard_surface": {
+      "schema": "masc.dashboard_surface.v1",
+      "installed_release": null,
+      "status": "ok",
+      "index_present": true,
+      "assets_root": "/Users/dancer/me/workspace/yousleepwhen/masc/assets",
+      "dashboard_asset_root": "/Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard",
+      "dashboard_manifest_root": null,
+      "build_stamp_path": "/Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard/.build-stamp",
+      "index_sha256": "88f9f3310c5da16202532fd9a854448abcbfffe9e202b5f1fe9d36aca9ef0ff1",
+      "asset_tree_sha256": null,
+      "asset_file_count": null,
+      "build_input_sha256": null,
+      "build_source_commit": null,
+      "build_head_tree": null,
+      "build_index_tree": null,
+      "build_input_file_count": null,
+      "build_input_matches_head": null,
+      "build_lock_sha256": null,
+      "build_environment_profile_sha256": null,
+      "build_environment_path_identity_sha256": null,
+      "build_environment_path_executable_sha256": null,
+      "build_environment_path_executable_count": null,
+      "build_producer": null,
+      "build_runtime": null,
+      "recovery": {
+        "kind": "none",
+        "reason": "surface_ready",
+        "restart_required": false
+      },
+      "build_stamp_at": "2026-09-07T13:55:26Z"
+    }
+  },
+  "binary_contains_merges": {
+    "semantic_journal": {
+      "merge_commit": "b388b11414ecc9a965fe9da5f5434d905e90608f",
+      "contained": true
+    },
+    "lane_fence": {
+      "merge_commit": "438689dc53b31c4eabb3f58463405a76d83881f0",
+      "contained": false
+    },
+    "admitted_input": {
+      "merge_commit": "3c353d75b53b072fb3b03c959b2d7d35de9b3a64",
+      "contained": false
+    },
+    "owned_checkpoint": {
+      "merge_commit": "521773e7e8379404a3461207b2bead36ebc8d6a8",
+      "contained": false
+    },
+    "http429": {
+      "merge_commit": "76a19882881bcc7d9a32203fe1304c8449207afb",
+      "contained": false
+    }
+  },
+  "live_mutations_performed": false,
+  "raw_messages_retained": false,
+  "limits": [
+    "Literal signal counts, not an exhaustive incident classifier.",
+    "Zero observations do not prove the triggering path ran.",
+    "Deployments and keeper workload may change within this window; no controlled before-after rate claim.",
+    "Health dashboard status does not prove an installed release binding or browser behavior.",
+    "Commit ancestry is source inclusion evidence, not execution of a changed code path."
+  ]
+}

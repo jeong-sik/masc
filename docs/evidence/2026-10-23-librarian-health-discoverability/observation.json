@@ -1,0 +1,55 @@
+{
+  "receipt_recorded_at": "2026-10-23T12:57:41.217770+00:00",
+  "source_base": "e09b9c981afb16843c071366c5d9724fd4026d96",
+  "changed_source_sha256": "a3f5965b668eeb992a87e00242799543c4e1a35cc96ee783f2054b8c7f17cf6d",
+  "installed": {
+    "server_commit": "107c58401723313611f7c599bbe15225de5910da",
+    "executable_sha256": "179f2021ecb4d56474f3fa804d332fc5330f745bc4ca66afd73d85d9da421783",
+    "dashboard": {
+      "status": "mismatched",
+      "dashboard_source_commit": "25faf14776f1115e962a4c4873e668af386211ad",
+      "binary_source_commit": "107c58401723313611f7c599bbe15225de5910da",
+      "index_sha256": "1775d2ac29e3908a53dc1458c084ae8c44b90d9732c3f9f5c51ffbf9083f26c4",
+      "source_provenance": "declared_build_source"
+    },
+    "overall_health": "degraded"
+  },
+  "api": {
+    "schema": "keeper.memory_os.current_health.v8",
+    "generated_at": 1792759125.791446,
+    "totals": {
+      "librarian_unread_turns": null,
+      "librarian_continuity_unread_atoms": 598,
+      "librarian_continuity_unmeasured": 13,
+      "librarian_failures": 4
+    },
+    "stopped_librarians": 0
+  },
+  "ui": {
+    "url": "http://127.0.0.1:8935/dashboard#lab?section=keeper-memory-health",
+    "receipt_recorded_at": "2026-10-23T12:54:21.101Z",
+    "metrics": [
+      "안 읽은 턴\n?",
+      "연속성 밀림 (ATOM)\n598 (13 못 잼)",
+      "멈춘 LIBRARIAN\n0"
+    ],
+    "capture_dimensions": {
+      "width": 1008,
+      "height": 934
+    },
+    "image_sha256": "9104265d43750128c8231a4e4e109e60b90c150c65a44006cbee9abc8797da0f",
+    "initial_page_text_chars": 2743908
+  },
+  "config_observation": {
+    "source_sha256": "5c70e1ff82972d2aab464ebbe3dea0c1e5bfda46364cfc46f429054230bafc6e",
+    "declared_mark_pairs": 49,
+    "scope": "Read-only TOML syntax/declared mark values. Not a full Runtime.load, proposed config staging test, or installed effective configuration identity."
+  },
+  "limits": [
+    "UI and API are independently timed observations",
+    "Installed pair source mismatch; not candidate-head acceptance",
+    "No controlled stop, one-turn response or TUI verification",
+    "Actual model/JEV and configuration staging not executed",
+    "No private memory contents or credentials published"
+  ]
+}

@@ -1,0 +1,12 @@
+{"at": 1793208765.8849971, "kind": "inventory_requested", "held": false}
+{"at": 1793208765.885108, "kind": "inventory_returned", "pending_events": 1}
+{"at": 1793208765.885736, "kind": "fixture_control", "pending_events": 18, "hold_inventory": true}
+{"at": 1793208765.886569, "kind": "inventory_requested", "held": true}
+{"at": 1793208765.991641, "kind": "fixture_control", "pending_events": 18, "hold_inventory": false}
+{"at": 1793208765.991821, "kind": "inventory_returned", "pending_events": 18}
+{"at": 1793208765.9925902, "kind": "fixture_control", "pending_events": 1, "hold_inventory": false}
+{"at": 1793209067.88059, "kind": "inventory_requested", "held": false}
+{"at": 1793209067.8839092, "kind": "inventory_returned", "pending_events": 1}
+{"at": 1793209112.873305, "kind": "fixture_control", "pending_events": 18, "hold_inventory": false}
+{"at": 1793209112.879468, "kind": "inventory_requested", "held": false}
+{"at": 1793209112.879549, "kind": "inventory_returned", "pending_events": 18}

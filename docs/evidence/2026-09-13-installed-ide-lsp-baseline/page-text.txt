@@ -1,0 +1,77 @@
+Skip to main content
+IDE
+2 실행 가능
+⚑ 주의
+1
+◷ 예약
+Reconnecting...
+Client WS · disconnected
+Emergency Stop
+Verified @admin · admin
+Chat
+⌘J
+v0.35.14 · 4324764e95
+Tweaks
+M
+MASC IDE
+⊟
+https://github.com/jeong-sik/masc.git
+↗
+main
+·
+2개 변경
+SOURCE
+SPLIT DIFF
+검색
+⋯
+●
+실험 · 미검증
+Installed IDE LSP acceptance fixture
+SOURCE
+lsp-acceptance-sample.ml
+rails hidden
+dashboard · reconnecting
+PRESENCE
+●
+ED
+EE
+⊢
+EXPLORER
+1/801 VISIBLE
+INSTALLED IDE LSP ACCEPTANCE FIXTURE
+Repository
+스캔
+Installed IDE LSP acceptance fixture · /private/tmp/masc-installed-ide-lsp-fixture-20260913
+lsp-acceptance-sample.ml
+🐫
+lsp-acceptance-sample.ml
+lsp-acceptance-sample.ml
+text
+SOURCE
+1 lines · 0 owned · 0 keepers · 0 layers
+LSP
+0
+Threads
+0
+Trace
+0
+Ops
+0
+Diff
+0
+Find
+1
+2
+let value =
+
+
+INTERJECT
+exhibit-designer
+CTX 2
+Telemetry
+Keeper
+Send
+Approve
+Pause
+Drain
+Chat

@@ -1,0 +1,977 @@
+{
+  "schema": "masc.goal-verifier.actual-controls/v1",
+  "verdict": "PASS_TWO_CONTROLLED_ACTUAL_VERIFIER_REVIEWS",
+  "observed_at_utc": "2026-10-25T10:01:33.097245+00:00",
+  "scope": "Two fresh isolated Goal proof controls; independent file-only reconstruction with no runtime/API/provider/process/Goal/Task mutations.",
+  "identity": {
+    "candidate_source_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+    "binary_sha256": "c1ec353779d5fff6a9da9ec4290667ab9b5e158c28c34a7094a691d5d08277a4",
+    "embedded_commit": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+    "embedded_commit_source": "embedded",
+    "runtime_instance_id": "01a17270-3722-7000-9142-b8e1768f4817",
+    "configured_slot": "glm-coding.glm-5-3",
+    "configured_api_model": "glm-5.3",
+    "declared_verifier_slots": [
+      "glm-coding.glm-5-3"
+    ],
+    "admitted_verifier_slots": [
+      "glm-coding.glm-5-3"
+    ],
+    "reported_models": [
+      "glm-5.3"
+    ]
+  },
+  "fixture": {
+    "controlled_fixture": true,
+    "immutable_public_url": "https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json",
+    "setup_readback_sha256": "4c6f6a1f7a8b2f4333a1bc4f23966b77d46042379fe32143e889e9b75c97724a",
+    "actual_value": 1,
+    "actual_web_result_semantically_matches_setup_source": true,
+    "web_extraction_text_bytes_may_differ_from_raw_setup_readback": true
+  },
+  "controls": [
+    {
+      "control": "P",
+      "goal_id": "goal-measurement-47ae0aba9d2841dc992cc49b7df0f07c-p",
+      "criterion_revision": "851a3578ebd5be695354597d962f76ce",
+      "measurement_id": "e7a08291b5262026c405b2a88b0055e4",
+      "request_id": "0dd46a72add12578871b4ee45af55a79",
+      "verification_run_id": "01a17273-83ef-7000-9c09-dd5147997aad",
+      "attempt": 0,
+      "original_digest": "02b39ac7671a7f7db3c27a08f89aec3944943e4703e7a2e5a9128d704337f6e9",
+      "criterion": {
+        "metric": "The integer actual_value in the immutable public JSON fixture identified by evidence on this Goal's latest reported measurement for its current criterion revision. Read that public source directly to measure actual_value.",
+        "revision": "851a3578ebd5be695354597d962f76ce",
+        "target_value": "1",
+        "title": "Controlled public JSON actual_value"
+      },
+      "reported_measurement": {
+        "state": "reported",
+        "record": {
+          "id": "e7a08291b5262026c405b2a88b0055e4",
+          "goal_id": "goal-measurement-47ae0aba9d2841dc992cc49b7df0f07c-p",
+          "criterion_revision": "851a3578ebd5be695354597d962f76ce",
+          "observed_value": "1",
+          "evidence": "note:https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json",
+          "actor": "measurement-canary-operator",
+          "recorded_at": "2026-10-25T09:43:03Z"
+        }
+      },
+      "reported_measurement_exact_json": "{\"state\":\"reported\",\"record\":{\"id\":\"e7a08291b5262026c405b2a88b0055e4\",\"goal_id\":\"goal-measurement-47ae0aba9d2841dc992cc49b7df0f07c-p\",\"criterion_revision\":\"851a3578ebd5be695354597d962f76ce\",\"observed_value\":\"1\",\"evidence\":\"note:https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json\",\"actor\":\"measurement-canary-operator\",\"recorded_at\":\"2026-10-25T09:43:03Z\"}}",
+      "reported_measurement_json_sha256": "49cd3649bd542ae927fc12513093f7543de3d79e8a6e76d795f20a55ff28a359",
+      "measurement_receipt": {
+        "measurement_status": "reported_only",
+        "completion_effect": "unchanged",
+        "goal_at_recording_phase": "executing"
+      },
+      "original": {
+        "prompt_bytes": 6291,
+        "prompt_sha256": "49adaa2b4c029da64b9bef41ca7f3b29cf147cee084a81d5834591a8393a6903",
+        "system_bytes": 1094,
+        "system_sha256": "93ae8047102142a637b7c15f74277dff7b8d54a059bd4460ed1ff24fea2c4340",
+        "lookup_tool_schemas": [
+          "tool_read_file",
+          "masc_web_fetch",
+          "masc_board_post_get",
+          "masc_fusion_status"
+        ],
+        "full_latest_measurement_matches": true,
+        "original_digest_independently_recomputed": true,
+        "body_request_digest_matches_owner": true
+      },
+      "wire_requests": [
+        {
+          "request_sequence": 2,
+          "method": "POST",
+          "path": "/chat/completions",
+          "request_bytes": 15506,
+          "wire_request_sha256": "df1ab7ff4b9f5d421999d6114a3e1ee27368ec8d4a6c8d7a5bfca01627d9cd1e",
+          "wire_response_sha256": "fea9233ef0789e7bb6521d031b4527264ae7fce59f285e13efdfb86444ebf364",
+          "model": "glm-5.3",
+          "reported_models": [
+            "glm-5.3"
+          ],
+          "original_user_exact": true,
+          "system_instructions_exact": true
+        },
+        {
+          "request_sequence": 3,
+          "method": "POST",
+          "path": "/chat/completions",
+          "request_bytes": 17346,
+          "wire_request_sha256": "dffb861ea07b9e54147d68b7bec6a53f533365c8c3ac9a50b8f955c9070354d8",
+          "wire_response_sha256": "5c798f7a9baa644c28b940fc000a01da0410324d7cb53f6f9fb002e4dbc487a5",
+          "model": "glm-5.3",
+          "reported_models": [
+            "glm-5.3"
+          ],
+          "original_user_exact": true,
+          "system_instructions_exact": true
+        },
+        {
+          "request_sequence": 4,
+          "method": "POST",
+          "path": "/chat/completions",
+          "request_bytes": 19336,
+          "wire_request_sha256": "55cee3be3669c794e6f178ea532700ad4f2a1190106bc0397da1640373b54e4e",
+          "wire_response_sha256": "2c395ce3f7d18155ca844a2d6b04a6aacf94ec68f0ca2534163311be8167174a",
+          "model": "glm-5.3",
+          "reported_models": [
+            "glm-5.3"
+          ],
+          "original_user_exact": true,
+          "system_instructions_exact": true
+        }
+      ],
+      "web_fetch": {
+        "new_response_tool_calls": 1,
+        "request_sequence": 2,
+        "tool_call_id": "call_-7138682528709206113",
+        "tool_name": "masc_web_fetch",
+        "parsed_arguments": {
+          "url": "https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json",
+          "extractMode": "text",
+          "maxChars": 10000
+        },
+        "evidence_url_matches_measurement": true,
+        "first_successful_result_delivery_request": 3,
+        "result_history_deliveries": [
+          {
+            "request_sequence": 3,
+            "tool_result_sha256": "8254109e6866a23b1fdd52804391e7592874f0f26be3b2ecd2270145a1783fec",
+            "lookup_result_sha256": "d5e0e9f99468110004d8ff6a831a031fe709e55671f1cde7a6d430af40b7966f",
+            "extracted_fixture_text_sha256": "3912bad64d032940c11121c7524a4c77ed0446b473612ebe2f56780045c5e06a",
+            "http_status": 200,
+            "actual_value": 1,
+            "controlled_fixture": true
+          },
+          {
+            "request_sequence": 4,
+            "tool_result_sha256": "8254109e6866a23b1fdd52804391e7592874f0f26be3b2ecd2270145a1783fec",
+            "lookup_result_sha256": "d5e0e9f99468110004d8ff6a831a031fe709e55671f1cde7a6d430af40b7966f",
+            "extracted_fixture_text_sha256": "3912bad64d032940c11121c7524a4c77ed0446b473612ebe2f56780045c5e06a",
+            "http_status": 200,
+            "actual_value": 1,
+            "controlled_fixture": true
+          }
+        ],
+        "actual_value": 1,
+        "source_tool_use_ordinal": null,
+        "ordinal_coverage": "Not present in captured typed fields; no ordinal inferred.",
+        "repeated_tool_history_is_new_execution": false
+      },
+      "structured_verdict": {
+        "request_sequence": 3,
+        "tool_call_id": "call_-7138706752324757512",
+        "tool_name": "report_review_verdict",
+        "verdict": "APPROVE",
+        "reason_sha256": "074778a06964175934826cd0815738d1353ceb826b4d6caad5f328dd03aed476",
+        "reason_nonblank": true,
+        "delivered_web_result_precedes_verdict": true
+      },
+      "typed_registry": {
+        "registration_request_and_criterion_match": true,
+        "host_outcome_sequence": [
+          "reviewed",
+          "committed"
+        ],
+        "configured_evaluator_runtime": "glm-coding.glm-5-3",
+        "evaluated_verdict_decision": "approved",
+        "reason_matches_structured_tool_and_primary_evidence": true,
+        "tools": [
+          {
+            "tool_name": "masc_web_fetch",
+            "disposition": "completed",
+            "input_arguments": {
+              "extractMode": "text",
+              "maxChars": 10000,
+              "url": "https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json"
+            },
+            "output_sha256": "8254109e6866a23b1fdd52804391e7592874f0f26be3b2ecd2270145a1783fec"
+          },
+          {
+            "tool_name": "report_review_verdict",
+            "disposition": "completed",
+            "input_arguments": {
+              "verdict": "APPROVE",
+              "reason_sha256": "074778a06964175934826cd0815738d1353ceb826b4d6caad5f328dd03aed476"
+            },
+            "output_sha256": "f0014981699addaa2496a944f476f3a05efa7f06b8263342ed3f78957c15343d"
+          }
+        ]
+      },
+      "primary": {
+        "completion_state": "proof_proven",
+        "goal_phase": "awaiting_confirmation",
+        "verdict": {
+          "outcome": "proven",
+          "request_id": "0dd46a72add12578871b4ee45af55a79",
+          "verification_run_id": "01a17273-83ef-7000-9c09-dd5147997aad",
+          "criterion": {
+            "metric": "The integer actual_value in the immutable public JSON fixture identified by evidence on this Goal's latest reported measurement for its current criterion revision. Read that public source directly to measure actual_value.",
+            "revision": "851a3578ebd5be695354597d962f76ce",
+            "target_value": "1",
+            "title": "Controlled public JSON actual_value"
+          },
+          "authority": {
+            "kind": "system_llm_agent",
+            "actor": "verifier_exact"
+          },
+          "recorded_at": "2026-10-25T09:46:17Z",
+          "rejection_reason_present": false,
+          "rejection_reason_sha256": null,
+          "evidence_reason_sha256": "074778a06964175934826cd0815738d1353ceb826b4d6caad5f328dd03aed476"
+        },
+        "human_confirmation_observed": false
+      },
+      "scoped_result": "PASS"
+    },
+    {
+      "control": "N",
+      "goal_id": "goal-measurement-47ae0aba9d2841dc992cc49b7df0f07c-n",
+      "criterion_revision": "1c87c3c11eef45081efbae9a57534903",
+      "measurement_id": "dab68d49640622d267e32f21f3633a9a",
+      "request_id": "8714234657c6e0ef957f282f0ba24345",
+      "verification_run_id": "01a17274-736e-7000-b87f-626141f3f77b",
+      "attempt": 0,
+      "original_digest": "0f4ff3e6cdc9447e4218851644aba4ce2d6d97b3cc44b32ae40a6fb9bdc42a6a",
+      "criterion": {
+        "metric": "The integer actual_value in the immutable public JSON fixture identified by evidence on this Goal's latest reported measurement for its current criterion revision. Read that public source directly to measure actual_value.",
+        "revision": "1c87c3c11eef45081efbae9a57534903",
+        "target_value": "999",
+        "title": "Controlled public JSON actual_value"
+      },
+      "reported_measurement": {
+        "state": "reported",
+        "record": {
+          "id": "dab68d49640622d267e32f21f3633a9a",
+          "goal_id": "goal-measurement-47ae0aba9d2841dc992cc49b7df0f07c-n",
+          "criterion_revision": "1c87c3c11eef45081efbae9a57534903",
+          "observed_value": "999",
+          "evidence": "note:https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json",
+          "actor": "measurement-canary-operator",
+          "recorded_at": "2026-10-25T09:46:36Z"
+        }
+      },
+      "reported_measurement_exact_json": "{\"state\":\"reported\",\"record\":{\"id\":\"dab68d49640622d267e32f21f3633a9a\",\"goal_id\":\"goal-measurement-47ae0aba9d2841dc992cc49b7df0f07c-n\",\"criterion_revision\":\"1c87c3c11eef45081efbae9a57534903\",\"observed_value\":\"999\",\"evidence\":\"note:https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json\",\"actor\":\"measurement-canary-operator\",\"recorded_at\":\"2026-10-25T09:46:36Z\"}}",
+      "reported_measurement_json_sha256": "b9ef3c6994af982bfff7116e7002621e765ccc3f55a50fe50ecd7809d6bebd0c",
+      "measurement_receipt": {
+        "measurement_status": "reported_only",
+        "completion_effect": "unchanged",
+        "goal_at_recording_phase": "executing"
+      },
+      "original": {
+        "prompt_bytes": 6295,
+        "prompt_sha256": "31885ee43391f2a066b30ddea2f9f502dcde9fe01b21ecbe4b1687dcd782dcb5",
+        "system_bytes": 1094,
+        "system_sha256": "93ae8047102142a637b7c15f74277dff7b8d54a059bd4460ed1ff24fea2c4340",
+        "lookup_tool_schemas": [
+          "tool_read_file",
+          "masc_web_fetch",
+          "masc_board_post_get",
+          "masc_fusion_status"
+        ],
+        "full_latest_measurement_matches": true,
+        "original_digest_independently_recomputed": true,
+        "body_request_digest_matches_owner": true
+      },
+      "wire_requests": [
+        {
+          "request_sequence": 5,
+          "method": "POST",
+          "path": "/chat/completions",
+          "request_bytes": 15510,
+          "wire_request_sha256": "2aea403dac9582fdecc64db5ade19d66faa259e10afdcad034527790937d3cdf",
+          "wire_response_sha256": "df78c4c1c15f8eb34cee03540d68eb18429bc72a7b4cbcffa5be1ba1d22f518f",
+          "model": "glm-5.3",
+          "reported_models": [
+            "glm-5.3"
+          ],
+          "original_user_exact": true,
+          "system_instructions_exact": true
+        },
+        {
+          "request_sequence": 6,
+          "method": "POST",
+          "path": "/chat/completions",
+          "request_bytes": 17119,
+          "wire_request_sha256": "1b80ead87b56500277fe3d672e386c03624d15f262ac4370b8be786d108afed2",
+          "wire_response_sha256": "1883d41b7b31096dc0f1c62d3d82804cbad8057ef5fa53c132d7e025e625cfc3",
+          "model": "glm-5.3",
+          "reported_models": [
+            "glm-5.3"
+          ],
+          "original_user_exact": true,
+          "system_instructions_exact": true
+        },
+        {
+          "request_sequence": 7,
+          "method": "POST",
+          "path": "/chat/completions",
+          "request_bytes": 18215,
+          "wire_request_sha256": "11ad6338da7797e149db82691e17f3d37b0c329a77ed7b28f9d2123e397f6584",
+          "wire_response_sha256": "5a75c0dc99bfc871e75d9de6b68c27e8e189e6f1ac12f0110c9b500c03a52ffe",
+          "model": "glm-5.3",
+          "reported_models": [
+            "glm-5.3"
+          ],
+          "original_user_exact": true,
+          "system_instructions_exact": true
+        }
+      ],
+      "web_fetch": {
+        "new_response_tool_calls": 1,
+        "request_sequence": 5,
+        "tool_call_id": "call_-7138684315415607659",
+        "tool_name": "masc_web_fetch",
+        "parsed_arguments": {
+          "url": "https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json",
+          "extractMode": "text",
+          "maxChars": 10000
+        },
+        "evidence_url_matches_measurement": true,
+        "first_successful_result_delivery_request": 6,
+        "result_history_deliveries": [
+          {
+            "request_sequence": 6,
+            "tool_result_sha256": "8254109e6866a23b1fdd52804391e7592874f0f26be3b2ecd2270145a1783fec",
+            "lookup_result_sha256": "d5e0e9f99468110004d8ff6a831a031fe709e55671f1cde7a6d430af40b7966f",
+            "extracted_fixture_text_sha256": "3912bad64d032940c11121c7524a4c77ed0446b473612ebe2f56780045c5e06a",
+            "http_status": 200,
+            "actual_value": 1,
+            "controlled_fixture": true
+          },
+          {
+            "request_sequence": 7,
+            "tool_result_sha256": "8254109e6866a23b1fdd52804391e7592874f0f26be3b2ecd2270145a1783fec",
+            "lookup_result_sha256": "d5e0e9f99468110004d8ff6a831a031fe709e55671f1cde7a6d430af40b7966f",
+            "extracted_fixture_text_sha256": "3912bad64d032940c11121c7524a4c77ed0446b473612ebe2f56780045c5e06a",
+            "http_status": 200,
+            "actual_value": 1,
+            "controlled_fixture": true
+          }
+        ],
+        "actual_value": 1,
+        "source_tool_use_ordinal": null,
+        "ordinal_coverage": "Not present in captured typed fields; no ordinal inferred.",
+        "repeated_tool_history_is_new_execution": false
+      },
+      "structured_verdict": {
+        "request_sequence": 6,
+        "tool_call_id": "call_-7138685277488275457",
+        "tool_name": "report_review_verdict",
+        "verdict": "REJECT",
+        "reason_sha256": "2efec197f9de13eab341b3aed6cc1a9b8db07a76349c84d91fc56bb49d327da9",
+        "reason_nonblank": true,
+        "delivered_web_result_precedes_verdict": true
+      },
+      "typed_registry": {
+        "registration_request_and_criterion_match": true,
+        "host_outcome_sequence": [
+          "reviewed",
+          "committed"
+        ],
+        "configured_evaluator_runtime": "glm-coding.glm-5-3",
+        "evaluated_verdict_decision": "rejected",
+        "reason_matches_structured_tool_and_primary_evidence": true,
+        "tools": [
+          {
+            "tool_name": "masc_web_fetch",
+            "disposition": "completed",
+            "input_arguments": {
+              "extractMode": "text",
+              "maxChars": 10000,
+              "url": "https://raw.githubusercontent.com/jeong-sik/masc/ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38/docs/evidence/2026-10-25-goal-verifier-measurement-context/public-source-fixture.json"
+            },
+            "output_sha256": "8254109e6866a23b1fdd52804391e7592874f0f26be3b2ecd2270145a1783fec"
+          },
+          {
+            "tool_name": "report_review_verdict",
+            "disposition": "completed",
+            "input_arguments": {
+              "verdict": "REJECT",
+              "reason_sha256": "2efec197f9de13eab341b3aed6cc1a9b8db07a76349c84d91fc56bb49d327da9"
+            },
+            "output_sha256": "d5a7af0d2d768a64983795195456de910d63f03699578af0b2d5cf898da7d7ee"
+          }
+        ]
+      },
+      "primary": {
+        "completion_state": "proof_refuted",
+        "goal_phase": "executing",
+        "verdict": {
+          "outcome": "refuted",
+          "request_id": "8714234657c6e0ef957f282f0ba24345",
+          "verification_run_id": "01a17274-736e-7000-b87f-626141f3f77b",
+          "criterion": {
+            "metric": "The integer actual_value in the immutable public JSON fixture identified by evidence on this Goal's latest reported measurement for its current criterion revision. Read that public source directly to measure actual_value.",
+            "revision": "1c87c3c11eef45081efbae9a57534903",
+            "target_value": "999",
+            "title": "Controlled public JSON actual_value"
+          },
+          "authority": {
+            "kind": "system_llm_agent",
+            "actor": "verifier_exact"
+          },
+          "recorded_at": "2026-10-25T09:47:00Z",
+          "rejection_reason_present": true,
+          "rejection_reason_sha256": "2efec197f9de13eab341b3aed6cc1a9b8db07a76349c84d91fc56bb49d327da9",
+          "evidence_reason_sha256": "2efec197f9de13eab341b3aed6cc1a9b8db07a76349c84d91fc56bb49d327da9"
+        },
+        "human_confirmation_observed": false
+      },
+      "scoped_result": "PASS"
+    }
+  ],
+  "P_operational_recovery": {
+    "initial_status": "pre_model_deferred",
+    "initial_requested_at": "2026-10-25T09:43:03Z",
+    "gate": "Proof_lookup_unavailable",
+    "diagnosis": "shared playground root missing",
+    "deferral_timestamp": "2026-10-25T09:43:03Z",
+    "deferral_message_sha256": "4d474d97d3a18e1933a557c048a8b922a2b828e9336c6620b17618e67a887ec6",
+    "prior_reason_sha256": "e10f4f76a8cf39ded534d84490ed5b90481c281c518a9401d580097f5ca97c6e",
+    "operational_action": "Operator created the isolated shared playground directory.",
+    "directory_mode": "0o700",
+    "recovery_at": "2026-10-25T09:45:35.432308+00:00",
+    "same_goal_request_criterion_independently_matched": true,
+    "original_request_id": "0dd46a72add12578871b4ee45af55a79",
+    "recovery_response_noop": true,
+    "requested_at_unchanged": true,
+    "operator_record_original_journals_edited": false,
+    "operator_record_main_runtime_edited": false,
+    "first_inference_response_after_recovery": true,
+    "verification_run_started_after_recovery": true,
+    "pre_recovery_provider_POST_observed": false,
+    "initial_failure_preserved_not_counted_as_model_verdict": true
+  },
+  "wire_counting": {
+    "actual_verifier_inference_requests": 6,
+    "semantic_verification_runs": 2,
+    "new_web_fetch_tool_calls": 2,
+    "new_report_verdict_tool_calls": 2,
+    "registry_complete_events": 4,
+    "registry_complete_events_are_four_reviews": false,
+    "model_listing_GETs": [
+      {
+        "request_sequence": 1,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 8,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 9,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 10,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 11,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 12,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 13,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 14,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 15,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 16,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 17,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 18,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      },
+      {
+        "request_sequence": 19,
+        "method": "GET",
+        "path": "/models",
+        "request_bytes": 0,
+        "wire_request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "wire_response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "verifier_inference": false
+      }
+    ],
+    "model_listing_GET_count": 13,
+    "model_listing_GETs_are_verifier_inference": false
+  },
+  "qualification": [
+    "P: controlled source actual_value1, reported1 and target1 produced proven/Awaiting_confirmation.",
+    "N: controlled source actual_value1, despite reported999 and target999, produced refuted/Executing.",
+    "Both are fresh Originals. Existing immutable originals and successor retries are not refreshed by this evidence.",
+    "One configured cohort and two controlled cases do not establish population/all-model reliability, main Goal success, final human confirmation, installation or whole-stack approval.",
+    "Source review, native checks, these actual model observations and Vite browser observations remain separate scopes.",
+    "No arbitrary assistant text, verdict reason text, private paths, thinking, raw outputs, headers, session IDs, secrets or signed URLs are published."
+  ],
+  "provenance": [
+    {
+      "source_id": "wire.000001.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000001.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000001.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000002.receipt",
+      "bytes": 316,
+      "sha256": "653891fda8eadf5847d4b4d57021865bc8a7ecc438459519bde7670f35ddafb6"
+    },
+    {
+      "source_id": "wire.000002.request",
+      "bytes": 15506,
+      "sha256": "df1ab7ff4b9f5d421999d6114a3e1ee27368ec8d4a6c8d7a5bfca01627d9cd1e"
+    },
+    {
+      "source_id": "wire.000002.response",
+      "bytes": 1851,
+      "sha256": "fea9233ef0789e7bb6521d031b4527264ae7fce59f285e13efdfb86444ebf364"
+    },
+    {
+      "source_id": "wire.000003.receipt",
+      "bytes": 316,
+      "sha256": "fe55750d3493cd3867a0b10c93ecc1835f87051b67f6a0cd2df8959647ab0459"
+    },
+    {
+      "source_id": "wire.000003.request",
+      "bytes": 17346,
+      "sha256": "dffb861ea07b9e54147d68b7bec6a53f533365c8c3ac9a50b8f955c9070354d8"
+    },
+    {
+      "source_id": "wire.000003.response",
+      "bytes": 3786,
+      "sha256": "5c798f7a9baa644c28b940fc000a01da0410324d7cb53f6f9fb002e4dbc487a5"
+    },
+    {
+      "source_id": "wire.000004.receipt",
+      "bytes": 316,
+      "sha256": "cb80c164a3c653ff85fca998377b4ae050c2356da342bff6417040b93bad91be"
+    },
+    {
+      "source_id": "wire.000004.request",
+      "bytes": 19336,
+      "sha256": "55cee3be3669c794e6f178ea532700ad4f2a1190106bc0397da1640373b54e4e"
+    },
+    {
+      "source_id": "wire.000004.response",
+      "bytes": 654,
+      "sha256": "2c395ce3f7d18155ca844a2d6b04a6aacf94ec68f0ca2534163311be8167174a"
+    },
+    {
+      "source_id": "wire.000005.receipt",
+      "bytes": 316,
+      "sha256": "2f1f69903942e52636f81c73914630ac6ac3261489212d8ad734e5714530511e"
+    },
+    {
+      "source_id": "wire.000005.request",
+      "bytes": 15510,
+      "sha256": "2aea403dac9582fdecc64db5ade19d66faa259e10afdcad034527790937d3cdf"
+    },
+    {
+      "source_id": "wire.000005.response",
+      "bytes": 1570,
+      "sha256": "df78c4c1c15f8eb34cee03540d68eb18429bc72a7b4cbcffa5be1ba1d22f518f"
+    },
+    {
+      "source_id": "wire.000006.receipt",
+      "bytes": 316,
+      "sha256": "6f3931c3df2de1b2dfb62f4af0369c82f12b1ad4df01682427d4ed04cbd81cfb"
+    },
+    {
+      "source_id": "wire.000006.request",
+      "bytes": 17119,
+      "sha256": "1b80ead87b56500277fe3d672e386c03624d15f262ac4370b8be786d108afed2"
+    },
+    {
+      "source_id": "wire.000006.response",
+      "bytes": 1223,
+      "sha256": "1883d41b7b31096dc0f1c62d3d82804cbad8057ef5fa53c132d7e025e625cfc3"
+    },
+    {
+      "source_id": "wire.000007.receipt",
+      "bytes": 316,
+      "sha256": "665ba9ccbcf621ba623272eafbb0ed0429a3bf640a1c1689a642a8a584cfe982"
+    },
+    {
+      "source_id": "wire.000007.request",
+      "bytes": 18215,
+      "sha256": "11ad6338da7797e149db82691e17f3d37b0c329a77ed7b28f9d2123e397f6584"
+    },
+    {
+      "source_id": "wire.000007.response",
+      "bytes": 608,
+      "sha256": "5a75c0dc99bfc871e75d9de6b68c27e8e189e6f1ac12f0110c9b500c03a52ffe"
+    },
+    {
+      "source_id": "wire.000008.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000008.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000008.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000009.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000009.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000009.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000010.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000010.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000010.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000011.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000011.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000011.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000012.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000012.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000012.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000013.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000013.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000013.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000014.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000014.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000014.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000015.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000015.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000015.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000016.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000016.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000016.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000017.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000017.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000017.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000018.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000018.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000018.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "wire.000019.receipt",
+      "bytes": 284,
+      "sha256": "2ea0afad3977bd40d0ddec91a938fdad850063ec3bb843fb3107c26af6ed659e"
+    },
+    {
+      "source_id": "wire.000019.request",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_id": "wire.000019.response",
+      "bytes": 848,
+      "sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c"
+    },
+    {
+      "source_id": "P.original-body",
+      "bytes": 8650,
+      "sha256": "90f7973934d32d163b15bef86e07e81ca8161c6b83dbe89f75f5266875dcafa2"
+    },
+    {
+      "source_id": "P.original-owner",
+      "bytes": 19850,
+      "sha256": "25dde1e32fae7973cfe99055bfc6f3f7f97fa7baf64592d636355aeeffc42e79"
+    },
+    {
+      "source_id": "P.measure-response",
+      "bytes": 4173,
+      "sha256": "7148271d537a97f4bea8a9afb82cd7a2db5cbed504c59d32d7ceb8bd147296dd"
+    },
+    {
+      "source_id": "P.correlation",
+      "bytes": 231,
+      "sha256": "485568b0a12dcef469290b849fc5804e3fa9097c1335f6711047a99f543f43d4"
+    },
+    {
+      "source_id": "N.original-body",
+      "bytes": 8656,
+      "sha256": "3d0b35166c22f91500067e0a7a1530c45a938f1018a5689a84f9a72acb945900"
+    },
+    {
+      "source_id": "N.original-owner",
+      "bytes": 20958,
+      "sha256": "093c71ee5f595ee49191d62260b38222ebeb81628ef4d83a5f738474cbf5d961"
+    },
+    {
+      "source_id": "N.measure-response",
+      "bytes": 4185,
+      "sha256": "0303db79c346f7815ce32d6449978ee769a7bd4fc26acea59e055b654f7cdd6e"
+    },
+    {
+      "source_id": "N.correlation",
+      "bytes": 231,
+      "sha256": "91018c59af942c052df9e68dd569f2c34e0fed3d092f87a108a9a88c8cf7a405"
+    },
+    {
+      "source_id": "P.initial-request-complete",
+      "bytes": 4711,
+      "sha256": "4fd0e27ef6c8b1faceee0ce48e1a87a97d956dd4f475b8bb6fcf24ccc515dba8"
+    },
+    {
+      "source_id": "P.same-request-recovery",
+      "bytes": 4823,
+      "sha256": "957fd10015cb51b1c1ec0aa7d78d8c4b64488263e739d1be36a6d8587745e3ae"
+    },
+    {
+      "source_id": "P.operational-recovery",
+      "bytes": 563,
+      "sha256": "b152d6fe518287da799241c138657029f7ef3eb118139b51b1777e2141bb71a0"
+    },
+    {
+      "source_id": "primary.measurements",
+      "bytes": 1080,
+      "sha256": "ad2af31aa089b0edeaeef83695ccc931f8fe2e50bbab709916473f35cfb2a31c"
+    },
+    {
+      "source_id": "primary.proofs",
+      "bytes": 3322,
+      "sha256": "17461fa9cc9a56570259ec356cd003ee7d46d51a6a1e212b557e172e667a00ae"
+    },
+    {
+      "source_id": "primary.goals",
+      "bytes": 1948,
+      "sha256": "7e56c855197ca4f8ab6facbb92872fb34fafa9523287c19100b42d124b4f9fbb"
+    },
+    {
+      "source_id": "typed.verification-runs",
+      "bytes": 13770,
+      "sha256": "6a1e1ebe755a931c119e7cfbe33bb37e5c205fc019e1b58718d04834d6139157"
+    },
+    {
+      "source_id": "deferral.system-log",
+      "bytes": 62574,
+      "sha256": "498174c456e0861afdb15e9527946a6cd873d4c2525c7bc915471563bdf0cc98"
+    },
+    {
+      "source_id": "identity.health",
+      "bytes": 35552,
+      "sha256": "7a9517828ad7a3df5f02be92afb3f73decb8a58f4443dbfaf0171130a34b904e"
+    },
+    {
+      "source_id": "identity.lane-admission",
+      "bytes": 6329,
+      "sha256": "92f99194071b7feae6160701a4299225ec03e7308959fe3ab2977637809a2a22"
+    },
+    {
+      "source_id": "source.fixture-readback",
+      "bytes": 255,
+      "sha256": "4c6f6a1f7a8b2f4333a1bc4f23966b77d46042379fe32143e889e9b75c97724a"
+    },
+    {
+      "source_id": "source.fixture-check",
+      "bytes": 174,
+      "sha256": "649f9a8e4b4ed131bf64ff7720e743e8a7988faef55bf1aed2c728a65f3df0b5"
+    },
+    {
+      "source_id": "public-freeze.allowlist",
+      "bytes": 2243,
+      "sha256": "0acbbba1c7375eecdcc03186c439f4417a8725e0947dd4bb97e7f243b0801891"
+    }
+  ]
+}

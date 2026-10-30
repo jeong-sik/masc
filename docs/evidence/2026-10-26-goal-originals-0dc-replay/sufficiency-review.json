@@ -1,0 +1,404 @@
+{
+  "schema": "masc.goal.originals0dc.independent-semantic-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T20:10:20.345679+00:00",
+  "verdict": "QUALIFIED_REJECT_DEFENSIBLE_ON_UNRESOLVED_IDENTITY_HARNESS_CONFOUND_FULL11_UNPROVEN",
+  "summary": "The actual REJECT is a defensible conservative response to the supplied current-revision identity condition, but its decisive uncertainty is introduced by the isolated Goal clone. It does not demonstrate A3/A7 repair or complete11-case evaluation. G2/A1/A3/A7 required observations remain unread or insufficient, despite the reason broadly claiming actual per-case originals were checked. No false-approval occurs in this run; a negative verdict is not automatically a semantic-improvement PASS.",
+  "identity": {
+    "candidate_source_head": "9099a54530edc0a6ecee98117ea1ebab02cebe2e",
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "candidate_prompt_file_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "fixture_criterion_revision": "b39a4c8dc8d4af965c4d87ef802c17db",
+    "original_main_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "canonical_acceptance_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+    "request_id": "44a299a96b28b6ff2d9bd2081ce0cfbc",
+    "run_id": "01a174a1-e0fb-7000-8c82-614a62d90870",
+    "measurement_id": "9c3a71e210ca7cf762e87f1563afdd12",
+    "requested_models": [
+      "glm-5.3-flash"
+    ],
+    "reported_models": [
+      "glm-5.3-flash"
+    ]
+  },
+  "observed_effect": {
+    "structured_verdict": "REJECT",
+    "stored_completion": "proof_refuted",
+    "stored_phase": "executing",
+    "actual_Goal_runs": 1,
+    "provider_POSTs": 12,
+    "tools": 41,
+    "Read_results": 40,
+    "nonempty_Read_results": 40,
+    "empty_EOF": 0,
+    "reason_matches_actual_structured_call_and_persisted_evidence": true,
+    "reason_sha256": "ec314464fa772304ed414c796ba5a4e5b46dbbe36e79080e37a56e1416e971a5"
+  },
+  "method_and_limits": {
+    "content_scope": "Decoded only role=tool lookup results from frozen requests, classified all40 actual returned pages by required condition and inspected selected relevant contents/retained originals. Public verdict reason is analyzed; headers, hidden assistant reasoning and full provider bodies are not reproduced.",
+    "protocol_separation": "The154-original exhaustive hash/provider/registration audit belongs to another reviewer. This report performs11 selected page/envelope/source-slice bindings and contract-content checks, not a second full inventory or protocol audit.",
+    "counts_are_not_sufficiency": "12POST/41tools/40nonempty Read replies and11 case path lookups do not establish complete behavior proof. A rejected conjunct can justify stopping without exhaustive evidence; nevertheless broad statements that all behaviors were verified must match actual returned contents.",
+    "candidate_issued_text": "The first actual user carrier contains the two distinctive0dc additions on required subject/state/path observations and actual returned content. Full effective-template/wire identity remains the separate protocol audit’s scope.",
+    "immutable_history": "The older428e159 semantic A3/A7 FAIL remains unchanged. No new read is retroactively credited to it, and its successful A1 read is not credited forward to0dc."
+  },
+  "revision_ground_adjudication": {
+    "supplied_contract": {
+      "metric": "MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.",
+      "target": "G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다."
+    },
+    "actual_input_facts": [
+      "The actual first user reported_measurement binds record9c3a71… to current fixture revisionb39a4c8dc8d4af965c4d87ef802c17db.",
+      "That same evidence string says original criterion306708facbfb9379a9e51b8f7c815678 is unchanged; the actually read index and manifest preserve3067.",
+      "The target explicitly requires zero current-Goal-revision/evidence-identity mismatches.",
+      "The private plan records a new isolated fixture with identical semantic fields, and its title/metric/target match the created fixture, but that private equivalence statement is not present as an authoritative mapping in the actual first user input or queried sources."
+    ],
+    "verdict_reason_is_defensible": "Given those inputs, the model can honestly decline to establish zero identity mismatches. REJECT for unresolved required identity is supported; it need not invent a revision relation or read every other condition to refuse approval.",
+    "not_proved": "The model does not establish that the underlying historical behavior evidence is corrupted, or that the original primary3067 Goal actually mismatches its own evidence. The fixture measurement itself is correctly bound tob39a. The safest characterization is unreconciled/unknown identity, not an independently established stale-measurement or source-tampering defect.",
+    "harness_confound": "The new revision is a deliberate consequence of normal new-Goal creation in a fresh workspace, while76 historical inputs remain byte-preserved at3067 provenance. Thus the rejection is confounded by the cloned fixture’s identity clause, rather than isolating the proposed read-scope instruction’s effect.",
+    "hash_tool_auxiliary_claim": "The reason also notes it cannot independently recompute canonical SHA without a hash tool. This is an epistemic limit, not evidence of a digest mismatch or a new universal hash-calculator requirement. This reviewer checks actual canonical bytes equal4fdd, without backfilling the model’s knowledge.",
+    "current_primary_boundary": "An isolatedb39a refutation does not refute or update the original3067 Goal. This reviewer makes no new live primary observation or mutation."
+  },
+  "case_assessments": [
+    {
+      "case_id": "G1",
+      "requirement": "Keeper receives current-revision Goal criterion, measurement, evidence and explicit missing/unavailable state",
+      "assessment": "SUPPORTED_RETAINED_INPUT_AND_NATIVE_SCOPE",
+      "actual_read_steps_0_based": [
+        4,
+        17,
+        18,
+        33,
+        36
+      ],
+      "basis": "825B metadata plus1079B actual Goal slice contain the historical current Goal/revision/measurement/value/evidence, and the full7707B direct-wire log has five current/stale/unavailable/independent-work checks.",
+      "limit": "73127B is raw-request provenance, not the bytes read here. Local Ollama input and deterministic native HTTP cases remain separate historical scopes, not new live implementation success."
+    },
+    {
+      "case_id": "G2",
+      "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
+      "assessment": "NOT_ESTABLISHED_MODEL_SELECTED_CREATE_AND_LINK_UNREAD",
+      "actual_read_steps_0_based": [
+        5,
+        22,
+        23
+      ],
+      "basis": "The case/README claim a matching model-selected association; the selected postapproval Tool sequence contains measures/edits/submission but no keeper_task_create arguments or authoritative Goal-link index.",
+      "limit": "The available alpha checkpoint containing the actual no-hint owner request, chosen goal_id, contract and authoritative link was not read. A narrative readiness conclusion does not replace those observations. Earlier428e reading cannot be backfilled into this run."
+    },
+    {
+      "case_id": "G3",
+      "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+      "assessment": "SUPPORTED_SELECTED_POSTAPPROVAL_ACTION_SEQUENCE_WITH_SCOPE_LIMIT",
+      "actual_read_steps_0_based": [
+        6,
+        22,
+        23
+      ],
+      "basis": "Actual sequence records Read(alpha-only55B),1/3 measure, beta/gamma Edit, Read(alltrue53B),3/3 measure, Task002 AwaitingVerification and Goal request_complete/proof_pending. Receipts say reported_only and completion unchanged while Executing; the read README records the inspected operator approval timing and pending human/proof distinction.",
+      "limit": "The full diagnosis/source ACK/final raw public response were not read in this run. Credit the selected retained continuation behavior and its recorded narrative timing, not a fresh full-event audit, causal comparison or verified Goal completion."
+    },
+    {
+      "case_id": "G4",
+      "requirement": "Independent goalless Task creation and execution remain supported",
+      "assessment": "SUPPORTED_EXTERNAL_GOALLESS_TASK_CONTROL",
+      "actual_read_steps_0_based": [
+        7,
+        9,
+        10,
+        11,
+        12
+      ],
+      "basis": "Actual goalless create returns goal_id null, real pinned Node Docker command returns4/exit0, submission reaches AwaitingVerification and controlled human_operator verdict reaches Done.",
+      "limit": "External-agent finite control, not Keeper inference or independent LLM acceptance."
+    },
+    {
+      "case_id": "A1",
+      "requirement": "Coding verify, regression and build execute inside the declared supported grading sandbox; Docker and microVM support boundaries are explicit",
+      "assessment": "NOT_ESTABLISHED_VERIFY_REGRESSION_BUILD_ORIGINAL_UNREAD",
+      "actual_read_steps_0_based": [
+        8,
+        16,
+        35
+      ],
+      "basis": "The read boundary README and four Node verify observations establish protected Node oracle controls and explicit Docker/microVM scope. They do not show actual regression/build on the frozen Python snapshot.",
+      "limit": "The29007B3228 actual-coding-boundary record with all three stage receipts was not read at all. The README command and case statement are not its execution. Previous428e did read the necessary first537 lines; that earlier observation is not a read by0dc."
+    },
+    {
+      "case_id": "A2",
+      "requirement": "Changing only Node oracle code with broken solution unchanged cannot pass protected grading",
+      "assessment": "SUPPORTED_FINITE_NODE_ORACLE_CONTROLS",
+      "actual_read_steps_0_based": [
+        13,
+        16,
+        35
+      ],
+      "basis": "Two actual Docker oracle-only controls exit1 with unchanged broken implementations; corresponding reference controls exit0.",
+      "limit": "Finite Node grading controls; no arbitrary solution/population or host-Node substitution claim."
+    },
+    {
+      "case_id": "A3",
+      "requirement": "Image bytes and length must match stored identity before judge or operator delivery",
+      "assessment": "NOT_ESTABLISHED_JUDGE_DELIVERY_BRANCH_UNREAD",
+      "actual_read_steps_0_based": [
+        14,
+        37
+      ],
+      "basis": "The actual2212B operator evidence log supports changed-body withholding and retained sizes/digests through operator/TUI.",
+      "limit": "No judge-side verification log was queried. Available judge image-attachment guard assertions remain unread; readiness/case summaries do not prove the separate declared recipient branch."
+    },
+    {
+      "case_id": "A4",
+      "requirement": "Model and experiment cohorts retain distinct pass@k, cost and unknown coverage",
+      "assessment": "SUPPORTED_BOUNDED_REPORT_COLLECTOR_AND_TRANSPORT_OBSERVATIONS",
+      "actual_read_steps_0_based": [
+        15,
+        24,
+        25,
+        26,
+        27,
+        28,
+        38
+      ],
+      "basis": "Read source-probe results split model1/0 versus pooled0.5, preserve null/unreported cost, failed spend and experiment cohorts. Duplicate JSON controls reject, after.json preserves four shell transport checks, and the shared root log names actual original-cohort/run-field tests.",
+      "limit": "Report/helper/controlled transport scopes, not a live multi-provider coding episode, all-stage grading or population reliability. Docker test skip remains explicit."
+    },
+    {
+      "case_id": "A5",
+      "requirement": "Changed experiment inputs cannot reuse stale resume evidence",
+      "assessment": "SUPPORTED_SHARED_BYTE_IDENTICAL_RESUME_ORIGINAL",
+      "actual_read_steps_0_based": [
+        19,
+        26,
+        27,
+        28
+      ],
+      "basis": "Actual1276B A4 root-check content includes passing changed-input and full-original-run-field resume tests. It is byte-identical to the preserved A5 mirror, so the same content can support both without duplicate-path reading.",
+      "limit": "Seven listed tests are six executed plus one explicit Docker skip. No full live resume claim or extra file/read gate."
+    },
+    {
+      "case_id": "A6",
+      "requirement": "Actual producer and judge identity coverage is represented honestly; unknown is not claimed independent",
+      "assessment": "SUPPORTED_UNKNOWN_IDENTITY_NATIVE_CALIBRATION_SCOPE",
+      "actual_read_steps_0_based": [
+        20,
+        29,
+        30
+      ],
+      "basis": "Full calibration log contains22 tests for unknown/null coverage, alias-only identity limits, actual pairs and producer/evaluator capture gaps; response identity log reports18 actual-source checks.",
+      "limit": "Complete streaming/persistence controlled-HTTP pipeline branches were not read and are not independently credited. Controlled native observations do not establish weight identity or cloud-model independence."
+    },
+    {
+      "case_id": "A7",
+      "requirement": "LLM approval, observed external acceptance and human Goal confirmation remain distinct facts",
+      "assessment": "NOT_ESTABLISHED_POST_RECORDING_METRIC_OBSERVATION_UNREAD",
+      "actual_read_steps_0_based": [
+        21,
+        31,
+        32,
+        39
+      ],
+      "basis": "Actual Goal readback shows Executing/Idle0/3. The actual fitness body read is the early API query with components=null and metrics=null. The README explicitly distinguishes this from a later persisted/reread record.",
+      "limit": "The later a7-fitness-reread carrying task_lifecycle_success1.0/outcome_basis task_lifecycle/external_acceptance kind unobserved was not read. Initial unavailable/null metric is not that typed unobserved category; README’s later-result narrative cannot make the missing fields observed."
+    }
+  ],
+  "remaining_behavior_proof_gaps": [
+    "G2 model-selected create arguments and authoritative link were not read.",
+    "A1 actual same-snapshot verify/regression/build record was not read.",
+    "A3 judge image-delivery guard observations were not read.",
+    "A7 later lifecycle/external-acceptance metric record was not read; the returned early record is null."
+  ],
+  "reason_scope_adjudication": {
+    "accurate": "The reason preserves mixed source/runtime scopes, no human completion and the actual current-vs-historical revision uncertainty. Many finite observations are genuinely read.",
+    "overreach": "Its statement that actual behavior originals for each of11 cases were directly checked is broader than the returned content forG2/A1/A3/A7. Naming a test, source file, README conclusion or early null metric cannot establish the missing observation.",
+    "effect": "This is supporting-claim overreach and incomplete behavior coverage. Because the actual verdict is REJECT on another unresolved mandatory condition, these gaps are not a false-positive approval in this run. They also cannot be reported as proof that0dc resolved A3/A7 or the original11 target."
+  },
+  "A7_null_vs_unobserved": {
+    "actually_read_source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness.json",
+    "actual_bytes": 1165,
+    "returned_record": {
+      "components": null,
+      "metrics": null
+    },
+    "unread_source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness-reread.json",
+    "unread_observation": "task_lifecycle_success1.0, outcome_basis task_lifecycle, external_acceptance kind unobserved/completed_tasks1",
+    "distinction": "Null at the initial asynchronous read is not proof that a later stored metric expresses the intended external-acceptance taxonomy."
+  },
+  "findings_and_disposition": {
+    "false_approval_observed": false,
+    "unqualified_semantic_improvement_PASS": false,
+    "new_underlying_behavior_failures_inferred": false,
+    "declared_identity_condition_unresolved_in_model_visible_fixture": true,
+    "supporting_claim_overreach_cases": [
+      "G2",
+      "A1",
+      "A3",
+      "A7"
+    ],
+    "disposition": "Preserve finite REJECT and its recorded grounds, harness identity confound and unobserved behavior subconditions. Do not relabel this as full11PASS, A3/A7 resolution, generic reliability, source-only causal A/B or a primary Goal proof. No new replay, source change or extra acceptance requirement is prescribed by this audit."
+  },
+  "selected_byte_bindings": [
+    {
+      "step": 2,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/index.json",
+      "actual_next_request": "request-000003.request",
+      "offset": 1,
+      "returned_lines": 116,
+      "returned_bytes": 5086,
+      "truncated": false,
+      "page_sha256": "0e52042fcd450c08024b068a6b139516b2cef8e26dceb9d4d7bf04772086d3c7",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 23,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json",
+      "actual_next_request": "request-000009.request",
+      "offset": 1,
+      "returned_lines": 249,
+      "returned_bytes": 10317,
+      "truncated": false,
+      "page_sha256": "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 27,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-cohort-identities/after.json",
+      "actual_next_request": "request-000010.request",
+      "offset": 1,
+      "returned_lines": 63,
+      "returned_bytes": 1839,
+      "truncated": false,
+      "page_sha256": "1a6aac0af249276d143a0997a561de46e064084837e34785a32c489b63934164",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 28,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/A4/masc-goal-cohort-identities-root-check.txt",
+      "actual_next_request": "request-000010.request",
+      "offset": 1,
+      "returned_lines": 14,
+      "returned_bytes": 1276,
+      "truncated": false,
+      "page_sha256": "b00ddc965bf4bcd8fc83ea1175d07aa2f9386fa73d6ee50da111a58621cc5db1",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 30,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_eval_calibration.log",
+      "actual_next_request": "request-000011.request",
+      "offset": 1,
+      "returned_lines": 81,
+      "returned_bytes": 3520,
+      "truncated": false,
+      "page_sha256": "23637f87ab7018e2deaa9ef07c5124827b551ace922ca4189947eef6e6e891f2",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 32,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-goal-readback.json",
+      "actual_next_request": "request-000011.request",
+      "offset": 1,
+      "returned_lines": 1,
+      "returned_bytes": 5063,
+      "truncated": false,
+      "page_sha256": "90c42f9359b03096742c84387846247027103ea4e9d2185ba7df137a7d1be79c",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 33,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/projections/G1-provider-goal-context.txt",
+      "actual_next_request": "request-000011.request",
+      "offset": 1,
+      "returned_lines": 7,
+      "returned_bytes": 1079,
+      "truncated": false,
+      "page_sha256": "6bcf4c44627f91933e38040851a9bf7f66b738e703ea1ee4f4d23bc282ad0817",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 35,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/README.md",
+      "actual_next_request": "request-000012.request",
+      "offset": 1,
+      "returned_lines": 25,
+      "returned_bytes": 1380,
+      "truncated": false,
+      "page_sha256": "8f5ec6dcb340496cede1203690fc3dc4078c99ef8270088fa6acf9d1b511ffcd",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 36,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/G1/test_keeper_direct_goal_provider_wire.log",
+      "actual_next_request": "request-000012.request",
+      "offset": 1,
+      "returned_lines": 89,
+      "returned_bytes": 7707,
+      "truncated": false,
+      "page_sha256": "f8c42c39b2645ce8f8d1f4516b20711b37d816c2b27402228e81bbf4d05fddab",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 37,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification_operator_evidence.log",
+      "actual_next_request": "request-000012.request",
+      "offset": 1,
+      "returned_lines": 44,
+      "returned_bytes": 2212,
+      "truncated": false,
+      "page_sha256": "1391f0eb56991349238cc8ef74eba40b05c22a7c6fe0024144154010f07b9d0f",
+      "actual_page_equals_retained_slice": true
+    },
+    {
+      "step": 39,
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness.json",
+      "actual_next_request": "request-000012.request",
+      "offset": 1,
+      "returned_lines": 45,
+      "returned_bytes": 1165,
+      "truncated": false,
+      "page_sha256": "032a86ca7fbdf1031d0292ce4d76416de8b503935d1bf562dc5e76bc384eb98f",
+      "actual_page_equals_retained_slice": true
+    }
+  ],
+  "input_receipts": [
+    {
+      "label": "safe-results/result.json",
+      "bytes": 11417,
+      "sha256": "d96feffb77962c6c08885c005c0f7be465c90479b1476ec04e30e741b8b00f71"
+    },
+    {
+      "label": "safe-results/actual-tool-sequence.json",
+      "bytes": 43738,
+      "sha256": "df317d1631de7714c6ffb4c212d876f2b141777ff83e35e6c329f925a1121157"
+    },
+    {
+      "label": "safe-results/persisted-outcome.json",
+      "bytes": 11185,
+      "sha256": "604e191251093669c5e674fbe6923a885846ed867d3774572c64413b55346e19"
+    },
+    {
+      "label": "terminal-originals-private/manifest.json",
+      "bytes": 32204,
+      "sha256": "64bc1ecaf8fe34214aea02aab7696a6e7175f5b4d7459e05d18b7929fdacad41"
+    },
+    {
+      "label": "terminal-originals-private/setup/plan-private.json",
+      "bytes": 4183,
+      "sha256": "abaac7e85c1e6fa922cefaa9f54d21d0b7d066a8d30532bb5a41d754a154c29d"
+    }
+  ],
+  "nonclaims": [
+    "No rerun of the11 historical behaviors, original Goal proof, human final confirmation or operational application.",
+    "No current9099 native build, installed runtime or formal GitHub/whole-stack admission is established.",
+    "No model-weight identity/independence, reliability estimate or pooling with prior428e159/0dc109 controls.",
+    "No full154 inventory or provider protocol audit repeated; no old source/artifact overwritten."
+  ],
+  "effects": {
+    "API_Git_model_test_process_build_CI_Docker_Board_calls": 0,
+    "Task_Goal_source_PR_runtime_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "formal_review_or_merge_posts": 0,
+    "only_new_output": "review.json in the requested external semantic-review directory"
+  }
+}

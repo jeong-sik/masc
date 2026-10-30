@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│?:help  Esc:back  J/K:scroll                                                                                                                                  │
+│Raw details                                                                                                                                                   │
+│Snapshot unknown                                                                                                                                              │
+│Records                                                                                                                                                       │
+│SoundFont: stop_requested                                                                                                                                     │
+│Row 01a15e9c-7fad-7000-937e-b01fd76c5e1c/1/844d6630bc51c89a074c348d52c9ab2357909571702d044a791af8b712207084                                                   │
+│Lane 01a15e9c-7fad-7000-937e-b01fd76c5e1c/phrase                                                                                                              │
+│Observed 2026-10-21 12:37:16.674 UTC                                                                                                                          │
+│Subject repaired-input-1                                                                                                                                      │
+│{                                                                                                                                                             │
+│  "source_id": "vst-phrase",                                                                                                                                  │
+│  "incarnation": "repaired-native-source",                                                                                                                    │
+│  "source_event_id": "repaired-input-1",                                                                                                                      │
+│  "state": "stop_requested",                                                                                                                                  │
+│  "scope": "latest_local_phrase_state",                                                                                                                       │
+│  "playback_evidence": "local player process events; device audibility is not measured",                                                                      │
+│  "action_receipt": false                                                                                                                                     │
+│}                                                                                                                                                             │
+│Evidence lane-evidence:231943b63042b6b0666ce8d6051dd6d32ca391342a7492af3c772fc0c49858b6 · sha256 231943b63042b6b0666ce8d6051dd6d32ca391342a7492af3c772fc0c4985│
+│8b6                                                                                                                                                           │
+│> 01a15e9c-7fad-7000-937e-b01fd76c5e1c · Native MIDI phrase playback · attached · run native-ui-proof · rev 0.1.0 · seq 1 · rows 1                            │
+│   TOML /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc/config/lane-addons/native-ui.toml             │
+│   binding                                                                                                                                                    │
+│     {                                                                                                                                                        │
+│       "sources": [                                                                                                                                           │
+│         {                                                                                                                                                    │
+│           "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/source.json",                                   │
+│           "source_id": "vst-phrase",                                                                                                                         │
+│           "kind": "snapshot_file"                                                                                                                            │
+│         }                                                                                                                                                    │
+│       ]                                                                                                                                                      │
+│     }                                                                                                                                                        │
+│   output phrase → phrase                                                                                                                                     │
+│Coverage                                                                                                                                                      │
+│01a15e9c-7fad-7000-937e-b01fd76c5e1c · complete · incarnation 01a15e9c-7fad-7000-937e-b01fd76c5e1c · cursor 1                                                 │
+│vst-phrase · complete · incarnation repaired-native-source · cursor 1 · Synthetic input for repaired native lifecycle; no audio                               │
+│Accepted file application · Applied · worker 01a15e9c-7fad-7000-937e-b01fd76c5e1c                                                                             │
+│Application follows visible-pane refresh · r:read now                                                                                                         │
+│TOML draft native-ui.toml                                                                                                                                     │
+│Draft: disabled · save requests worker cleanup and keeps this file                                                                                            │
+│ Space:on/off draft  E:edit  s:save  l:read current  u:use current revision  U:replace draft  Esc:back (draft kept)                                           │
+│Base 4a1606bbe6b46000f79243a526991e9bbcec49284c093f2b43cbb272cb5fc1d8 · /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-202610│
+│21-fx3087s5/.masc/config/lane-addons/native-ui.toml                                                                                                           │
+│Disable staged in draft; s saves. Worker application refreshes separately.                                                                                    │
+│Current 4a1606bbe6b46000f79243a526991e9bbcec49284c093f2b43cbb272cb5fc1d8 · valid TOML declaration                                                             │
+│Current file text (u keeps the draft; U replaces it)                                                                                                          │
+│id = "native-ui-proof"                                                                                                                                        │
+│enabled = true                                                                                                                                                │
+│run_id = "native-ui-proof"                                                                                                                                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Esc:back  Space:on/off draft  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command
+ Choose a Keeper before writing · i:choose

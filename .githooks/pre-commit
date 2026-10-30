@@ -1,0 +1,14 @@
+#!/bin/bash
+# Block direct commits on protected branches (main/master/develop).
+# Defense-in-depth alongside Claude Code OCaml Tier 1 hooks.
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$branch" =~ ^(main|master|develop)$ ]]; then
+  echo "ERROR: Direct commit to '$branch' is blocked."
+  echo ""
+  echo "Use a worktree:"
+  echo "  git worktree add .worktrees/<branch-name> -b <branch-name>"
+  echo "  cd .worktrees/<branch-name>"
+  echo ""
+  echo "Then commit there and create a PR."
+  exit 1
+fi

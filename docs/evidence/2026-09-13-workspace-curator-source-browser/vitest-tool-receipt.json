@@ -1,0 +1,7 @@
+{
+  "session_id": 71532,
+  "exit_code": 0,
+  "capture": "tool completion summary; shell stdout was not separately redirected",
+  "output": "Test Files  3 passed (3)\nTests  38 passed (38)\nStart at  04:17:06\nDuration  66.78s (transform 12.87s, setup 12.31s, import 24.00s, tests 7.36s, environment 13.62s)\n",
+  "stderr_note": "Node ExperimentalWarning: localStorage is not available because --localstorage-file was not provided."
+}

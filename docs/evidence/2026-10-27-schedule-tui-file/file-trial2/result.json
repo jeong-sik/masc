@@ -1,0 +1,17 @@
+{
+  "verdict": "PASS",
+  "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "binary_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+  "checks": 88,
+  "scope": "One scheduled job, actual MicroVM Write then full backend Read and marker note; no host-file/export/delivery claim.",
+  "not_proven": [
+    "full provider wire bodies or first request body",
+    "external delivery",
+    "host-file export",
+    "two-job DeepSeek scope correctness",
+    "restart",
+    "provider failover",
+    "installation",
+    "multi-account or complete feature correctness"
+  ]
+}

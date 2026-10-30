@@ -1,0 +1,32 @@
+{
+  "head": "47d9f1c8346062650464c48915c8485a4b9b6e1f",
+  "scope": "Exact production exception guard and exact new fixture callback with minimal Task/Workspace hook/log DTO ports; actual Alcotest/eio libraries. Not the full native transaction suite.",
+  "source_fragments": [
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "sha256": "16664ad2428eeb4b6e23cfba87352909fb31238decb565a89fee89c408cbfd15"
+    },
+    {
+      "path": "test/test_verification.ml",
+      "sha256": "02e2125a2ba245a594cd64d3c67653f2b04ae5b7e78778850d0f82d9888588b6"
+    }
+  ],
+  "compile": {
+    "command": [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "alcotest,eio",
+      "-linkpkg",
+      "probe.ml",
+      "-o",
+      "probe"
+    ],
+    "exit": 0,
+    "output": ""
+  },
+  "execution": {
+    "exit": 0,
+    "output": "correct_snapshot_returned; logged_errors=0\nmismatched_snapshot_also_returned; logged_errors=1\n2 exact-source guard controls passed; scheduling regression remains invisible without an outer assertion\nASSERT capture and authority scheduling share one immutable Task\nASSERT scheduled Task includes the committed handoff\nASSERT capture and authority scheduling share one immutable Task\n"
+  }
+}

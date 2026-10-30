@@ -1,0 +1,12 @@
+{
+  "path": "/api/v1/goals/confirmation",
+  "request": {
+    "goal_id": "goal-1788997671212-26ab4dbe",
+    "criterion_revision": "95900b5bd1b99ccad5a0b6d790be239b",
+    "request_id": "0ae53afb9d539bb17227bea88e3a0b26",
+    "verification_run_id": "wrong-run"
+  },
+  "authenticated": true,
+  "status": 400,
+  "raw": "{\"ok\":false,\"error\":\"confirmation must name the current proven criterion, request and verifier run\"}"
+}

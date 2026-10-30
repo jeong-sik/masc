@@ -1,0 +1,17 @@
+{
+  "observed_at": "2026-09-09T18:22:54.022887+00:00",
+  "keeper": "code-reviewer",
+  "snapshot_file": "agent-core-snapshot-1788977854194.json",
+  "snapshot_session_id": "trace-1788312311286-00006",
+  "record_trace_id": "trace-1788312311286-00006",
+  "record_latest_ts": "2026-09-09T18:17:34Z",
+  "record_block": {
+    "block": "keeper_instructions",
+    "bytes": 9128,
+    "digest": "64f051a424f765fa7880eb3793fb83db72cbb277022efa3fd032f060c6f71372"
+  },
+  "snapshot_prompt_bytes": 9128,
+  "snapshot_prompt_sha256": "64f051a424f765fa7880eb3793fb83db72cbb277022efa3fd032f060c6f71372",
+  "contains_exact_inserted_section": true,
+  "scope": "Saved agent system prompt matches measured turn instruction block; no behavioral success assertion"
+}

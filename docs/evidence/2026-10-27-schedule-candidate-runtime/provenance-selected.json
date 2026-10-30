@@ -1,0 +1,63 @@
+{
+  "requested_source": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "requested_source_meaning": "explicit expected candidate binary_commit, not checkout HEAD",
+  "harness_checkout_head": "1b945757f5499360ebe0f301c2c470a9e4166896",
+  "controller_sha256": "7e4647868f2da37aaabceb769c14f0ec1443ef41e19e5e9539ed6cedad6af3d1",
+  "executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "expected_executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "scope": "isolated candidate, not operating installation",
+  "producer": {
+    "workflow": "Minimal manual checks",
+    "run_id": "40374265429",
+    "execution_head": "9377c7f3025d68e3856d2afd3762468dabc77813",
+    "ref": "main",
+    "source_input": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "basis": "caller-provided; this probe never queries CI"
+  },
+  "source_check_receipt": null,
+  "runtime_fixture": {
+    "source_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "path": "scripts/fixtures/release-evidence/runtime.toml",
+    "sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+  },
+  "model_provider": "source-bound dead loopback fixture, autonomous disabled, manual/create_only/paused owners",
+  "actor_scope": "one named authenticated admin (automated actor), not Operator_caller or named non-admin ownership proof",
+  "not_proven": [
+    "real model execution",
+    "destination delivery",
+    "TUI execution",
+    "fault recovery",
+    "multi-hop transfer cancellation",
+    "all possible owners/races",
+    "production installation"
+  ],
+  "existing_image_reference": "masc-sandbox:general",
+  "observed_build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "repo_version": "0.64.0",
+    "commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "commit_source": "embedded",
+    "binary_commit": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+    "binary_commit_unix_ts": 1793037407.0,
+    "binary_commit_age_seconds": 1832,
+    "repo_head_commit": "1b945757f54",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1793037973.0,
+    "repo_head_commit_age_seconds": 1266,
+    "runtime_instance_id": "01a17977-838b-7000-82d6-bc34b84a2280",
+    "started_at": "2026-10-26T18:27:18Z",
+    "uptime_seconds": 1
+  },
+  "runtime_instance_id": "01a17977-838b-7000-82d6-bc34b84a2280",
+  "is_derivative": true,
+  "derivation": "Absolute host paths omitted; all source/hash/workflow identities preserved.",
+  "original_provenance": {
+    "sha256": "863b57bd622b1136622c151ffb8a31a6a8933338250b11f104487761ce15dbe0",
+    "bytes": 3277,
+    "path": "artifacts/schedule-actual-repair-20261027/runs/f1-fixed-1/provenance.json"
+  }
+}

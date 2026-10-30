@@ -1,0 +1,46 @@
+{
+  "baseline_request_sha256": "79c160e303e8cbead51cb69235f72d4dcc256dce25836267e3b9a370fd83b137",
+  "scope": "Single frozen approval request, same tools/messages/options/seed; model changed. Inference only, no returned tool executed; not actual G3 execution or population comparison.",
+  "changed": [
+    "model",
+    "options.seed (both arms 20261024)"
+  ],
+  "models": [
+    {
+      "name": "gemma4:e2b",
+      "digest": "7fbdbf8f5e45a75bb122155ed546e765b4d9c53a1285f62fd9f506baa1c5a47e",
+      "size": 7162405886,
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "gemma4",
+        "families": [
+          "gemma4"
+        ],
+        "parameter_size": "5.1B",
+        "quantization_level": "Q4_K_M",
+        "context_length": 131072,
+        "embedding_length": 1536,
+        "runner": "ggml"
+      }
+    },
+    {
+      "name": "qwen3:8b",
+      "digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+      "size": 5225388164,
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "qwen3",
+        "families": [
+          "qwen3"
+        ],
+        "parameter_size": "8.2B",
+        "quantization_level": "Q4_K_M",
+        "context_length": 40960,
+        "embedding_length": 4096,
+        "runner": "ggml"
+      }
+    }
+  ]
+}

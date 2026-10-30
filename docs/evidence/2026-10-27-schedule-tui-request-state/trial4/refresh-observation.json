@@ -1,0 +1,427 @@
+{
+  "receipt": {
+    "method": "GET",
+    "path": "/api/v1/dashboard/scheduled-automation",
+    "agent": "masc-tui",
+    "request_started_at": 1793056659.35685,
+    "response_completed_at": 1793056659.362912,
+    "request_body": null,
+    "status": 200,
+    "response": {
+      "schema": "masc.dashboard.scheduled_automation.v1",
+      "source": "schedule_store",
+      "payload_target_selector": null,
+      "generated_at": "2026-10-26T23:17:39Z",
+      "schedule_runner": {
+        "schema": "masc.dashboard.scheduled_automation.schedule_runner.v1",
+        "status": "ok"
+      },
+      "signal_source": "schedule_runner_signals",
+      "signal_count": 1,
+      "signal_limit": 20,
+      "signals": [
+        {
+          "occurrence_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+          "kind": "schedule.due_candidate",
+          "event_type": "schedule.due_candidate",
+          "schedule_instance_id": "01a17a81-4631-7000-9816-e59e1b406d7f",
+          "schedule_id": "tui-pending-adb62b24bf91464bb6530bcada9b3788",
+          "emitted_at": 1793056656.598945,
+          "emitted_at_iso": "2026-10-26T23:17:36Z",
+          "due_at": 1793056655.897581,
+          "due_at_iso": "2026-10-26T23:17:35Z",
+          "payload_digest": "5754087bb5091b7bd1ac21df4c04536aa0603609a4d483a7d557ee6efdeabf07",
+          "payload_kind": "masc.keeper_wake"
+        }
+      ],
+      "signal_errors": [],
+      "status": "ok",
+      "schedule_store_known": true,
+      "schedule_store_read_error": null,
+      "request_count": 4,
+      "request_limit": 20,
+      "truncated": false,
+      "counts": {
+        "scheduled": 3,
+        "due": 0,
+        "running": 0,
+        "succeeded": 1,
+        "failed": 0,
+        "cancelled": 0,
+        "expired": 0
+      },
+      "wake_counts": {
+        "retained": 1,
+        "running": 0,
+        "succeeded": 1,
+        "failed": 0,
+        "active_with_failed_newest_wake": 0,
+        "retention_per_schedule": 32
+      },
+      "payload_support": {
+        "supported_kinds": [
+          "masc.keeper_wake",
+          "masc.lane_act"
+        ],
+        "supported_contracts": [
+          {
+            "kind": "masc.keeper_wake",
+            "creation_contract": "per_kind_validator_required",
+            "dispatch_contract": "consumer_supported"
+          },
+          {
+            "kind": "masc.lane_act",
+            "creation_contract": "per_kind_validator_required",
+            "dispatch_contract": "consumer_supported"
+          }
+        ],
+        "unsupported_request_count": 0,
+        "unsupported_kinds": [],
+        "unknown_request_count": 0
+      },
+      "live_supported_non_terminal_evidence": {
+        "schema": "masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1",
+        "source": "schedule_store",
+        "projection_status": "matched_supported_non_terminal",
+        "criteria": "payload_support=supported && status is non-terminal",
+        "reason": "live schedule_store contains supported non-terminal rows",
+        "request_count": 4,
+        "supported_request_count": 4,
+        "supported_non_terminal_count": 3,
+        "supported_live_count": 3,
+        "supported_terminal_or_expired_count": 1,
+        "unsupported_request_count": 0,
+        "unknown_request_count": 0,
+        "terminal_or_expired_count": 1,
+        "matched_schedule_ids": [
+          "tui-refresh-2c535fe3927d4fe5b90e016dd331da69",
+          "tui-schedule-e95b910a17da46c28d12835cf2b0a7b8",
+          "tui-schedule-8b4b07fa6a1447db8571210085f54191"
+        ],
+        "matched_schedule_id_limit": 8
+      },
+      "fsm": {
+        "state": "scheduled",
+        "active_count": 3,
+        "terminal_count": 1,
+        "next_due_at": "2026-10-27T23:17:34Z"
+      },
+      "requests": [
+        {
+          "schedule_instance_id": "01a17a81-4627-7000-a6b4-e8a295e9c3d0",
+          "schedule_id": "tui-schedule-8b4b07fa6a1447db8571210085f54191",
+          "status": "scheduled",
+          "source": "operator_request",
+          "requested_by": {
+            "id": "tui-probe-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "tui-probe-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793056654.887071,
+          "requested_at_iso": "2026-10-26T23:17:34Z",
+          "due_at": 1793143054.887071,
+          "due_at_iso": "2026-10-27T23:17:34Z",
+          "next_due_at": 1793143054.887071,
+          "next_due_at_iso": "2026-10-27T23:17:34Z",
+          "expires_at": null,
+          "expires_at_iso": null,
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "33c4ee968881a3ce9a4f2f3ac8855c955462e3c0d82cc830422dd0475ef0c608",
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-tui-a",
+              "message": "Owned future schedule audit-tui-a"
+            }
+          },
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-tui-a",
+          "payload_keeper_name": "audit-tui-a",
+          "payload_summary": "Owned future schedule audit-tui-a",
+          "last_wake": null,
+          "dispatch_receipt": null,
+          "keeper_queue_evidence": null,
+          "keeper_reaction_evidence": null,
+          "runner_hold": null
+        },
+        {
+          "schedule_instance_id": "01a17a81-462c-7000-ae8a-2fde5870cf26",
+          "schedule_id": "tui-schedule-e95b910a17da46c28d12835cf2b0a7b8",
+          "status": "scheduled",
+          "source": "operator_request",
+          "requested_by": {
+            "id": "tui-probe-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "tui-probe-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793056654.892361,
+          "requested_at_iso": "2026-10-26T23:17:34Z",
+          "due_at": 1793143054.892361,
+          "due_at_iso": "2026-10-27T23:17:34Z",
+          "next_due_at": 1793143054.892361,
+          "next_due_at_iso": "2026-10-27T23:17:34Z",
+          "expires_at": null,
+          "expires_at_iso": null,
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "f50e67506f22376238eeb575afd7757dd2ef31a31e553568af501399e50f863e",
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-tui-b",
+              "message": "Owned future schedule audit-tui-b"
+            }
+          },
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-tui-b",
+          "payload_keeper_name": "audit-tui-b",
+          "payload_summary": "Owned future schedule audit-tui-b",
+          "last_wake": null,
+          "dispatch_receipt": null,
+          "keeper_queue_evidence": null,
+          "keeper_reaction_evidence": null,
+          "runner_hold": null
+        },
+        {
+          "schedule_instance_id": "01a17a81-53e5-7000-a7ba-56061b0a009d",
+          "schedule_id": "tui-refresh-2c535fe3927d4fe5b90e016dd331da69",
+          "status": "scheduled",
+          "source": "operator_request",
+          "requested_by": {
+            "id": "tui-probe-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "tui-probe-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793056658.405606,
+          "requested_at_iso": "2026-10-26T23:17:38Z",
+          "due_at": 1793143058.405606,
+          "due_at_iso": "2026-10-27T23:17:38Z",
+          "next_due_at": 1793143058.405606,
+          "next_due_at_iso": "2026-10-27T23:17:38Z",
+          "expires_at": null,
+          "expires_at_iso": null,
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "9dc88cd361ac8438494be1970124f91ebd919aefbb20a2043e204a518e61a6fc",
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-tui-b",
+              "message": "Owned explicit refresh state marker"
+            }
+          },
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-tui-b",
+          "payload_keeper_name": "audit-tui-b",
+          "payload_summary": "Owned explicit refresh state marker",
+          "last_wake": null,
+          "dispatch_receipt": null,
+          "keeper_queue_evidence": null,
+          "keeper_reaction_evidence": null,
+          "runner_hold": null
+        },
+        {
+          "schedule_instance_id": "01a17a81-4631-7000-9816-e59e1b406d7f",
+          "schedule_id": "tui-pending-adb62b24bf91464bb6530bcada9b3788",
+          "status": "succeeded",
+          "source": "operator_request",
+          "requested_by": {
+            "id": "tui-probe-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "scheduled_by": {
+            "id": "tui-probe-admin",
+            "kind": "automated_actor",
+            "display_name": null
+          },
+          "requested_at": 1793056654.897581,
+          "requested_at_iso": "2026-10-26T23:17:34Z",
+          "due_at": 1793056655.897581,
+          "due_at_iso": "2026-10-26T23:17:35Z",
+          "next_due_at": null,
+          "next_due_at_iso": null,
+          "expires_at": null,
+          "expires_at_iso": null,
+          "recurrence": {
+            "kind": "one_shot"
+          },
+          "recurrence_kind": "one_shot",
+          "recurrence_summary": "one_shot",
+          "payload_digest": "5754087bb5091b7bd1ac21df4c04536aa0603609a4d483a7d557ee6efdeabf07",
+          "payload": {
+            "kind": "masc.keeper_wake",
+            "body": {
+              "result_delivery": {
+                "policy": "none"
+              },
+              "keeper_name": "audit-tui-a",
+              "message": "Owned due work held by paused owner; do not execute."
+            }
+          },
+          "payload_kind": "masc.keeper_wake",
+          "payload_support": "supported",
+          "payload_dispatch_tool": "masc.keeper_wake",
+          "payload_target": "keeper:audit-tui-a",
+          "payload_keeper_name": "audit-tui-a",
+          "payload_summary": "Owned due work held by paused owner; do not execute.",
+          "last_wake": {
+            "attempt_id": "01a17a81-4cdb-7000-a5e9-5358b8d72347",
+            "settlement_kind": "accepted",
+            "schedule_instance_id": "01a17a81-4631-7000-9816-e59e1b406d7f",
+            "schedule_id": "tui-pending-adb62b24bf91464bb6530bcada9b3788",
+            "started_at": 1793056656.602345,
+            "finished_at": 1793056656.606685,
+            "due_at": 1793056655.897581,
+            "payload_digest": "5754087bb5091b7bd1ac21df4c04536aa0603609a4d483a7d557ee6efdeabf07",
+            "status": "succeeded",
+            "detail": {
+              "kind": "masc.keeper_wake.enqueued",
+              "queue": "keeper_event_queue",
+              "stimulus": "schedule_due",
+              "stimulus_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+              "keeper_name": "audit-tui-a",
+              "schedule_instance_id": "01a17a81-4631-7000-9816-e59e1b406d7f",
+              "schedule_id": "tui-pending-adb62b24bf91464bb6530bcada9b3788",
+              "urgency": "normal",
+              "post_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+              "result_delivery_policy": "none",
+              "occurrence_status": "awaiting_ack",
+              "activation_status": "deferred",
+              "activation_reason": "lifecycle_denied",
+              "activation_detail": "paused",
+              "reaction_ledger_status": "recorded",
+              "reaction_ledger_error": null
+            },
+            "error": null,
+            "started_at_iso": "2026-10-26T23:17:36Z",
+            "finished_at_iso": "2026-10-26T23:17:36Z"
+          },
+          "dispatch_receipt": {
+            "projection_status": "recognized",
+            "kind": "masc.keeper_wake.enqueued",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "stimulus_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+            "keeper_name": "audit-tui-a",
+            "schedule_instance_id": "01a17a81-4631-7000-9816-e59e1b406d7f",
+            "schedule_id": "tui-pending-adb62b24bf91464bb6530bcada9b3788",
+            "urgency": "normal",
+            "post_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+            "result_delivery_policy": "none",
+            "occurrence_status": "awaiting_ack",
+            "activation_status": "deferred",
+            "activation_reason": "lifecycle_denied",
+            "activation_detail": "paused",
+            "reaction_ledger_status": "recorded",
+            "reaction_ledger_error": null
+          },
+          "keeper_queue_evidence": {
+            "projection_status": "matched_pending",
+            "source": "durable_event_queue_snapshot",
+            "queue": "keeper_event_queue",
+            "stimulus": "schedule_due",
+            "keeper_name": "audit-tui-a",
+            "schedule_instance_id": "01a17a81-4631-7000-9816-e59e1b406d7f",
+            "schedule_id": "tui-pending-adb62b24bf91464bb6530bcada9b3788",
+            "post_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+            "wake_due_at": 1793056655.897581,
+            "wake_due_at_iso": "2026-10-26T23:17:35Z",
+            "wake_payload_digest": "5754087bb5091b7bd1ac21df4c04536aa0603609a4d483a7d557ee6efdeabf07",
+            "schedule_status": "succeeded",
+            "pending_count": 1,
+            "read_errors": [],
+            "resolved_owner": "audit-tui-a",
+            "matched_bucket": "pending",
+            "matched_post_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+            "matched_payload_kind": "schedule_due",
+            "matched_arrived_at": 1793056656.598945,
+            "matched_arrived_at_iso": "2026-10-26T23:17:36Z",
+            "matched_schedule_id": "tui-pending-adb62b24bf91464bb6530bcada9b3788",
+            "matched_schedule_instance_id": "01a17a81-4631-7000-9816-e59e1b406d7f",
+            "matched_due_at": 1793056655.897581,
+            "matched_due_at_iso": "2026-10-26T23:17:35Z",
+            "matched_payload_digest": "5754087bb5091b7bd1ac21df4c04536aa0603609a4d483a7d557ee6efdeabf07",
+            "matched_age_seconds": 2.7591941356658936
+          },
+          "keeper_reaction_evidence": {
+            "projection_status": "matched_stimulus",
+            "source": "keeper_reaction_ledger",
+            "keeper_name": "audit-tui-a",
+            "schedule_instance_id": "01a17a81-4631-7000-9816-e59e1b406d7f",
+            "schedule_id": "tui-pending-adb62b24bf91464bb6530bcada9b3788",
+            "post_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+            "stimulus": "schedule_due",
+            "reaction_kind": "turn_started",
+            "stimulus_kind": "schedule_due",
+            "stimulus_id": "d1b757bafdaebf0b1e58e828d01fc2861cd94f57f890a21eac5041067987492c",
+            "stimulus_seen": true,
+            "turn_started_seen": false,
+            "turn_finished_seen": false,
+            "event_queue_ack_seen": false,
+            "event_queue_cancelled_seen": false,
+            "matched_record_count": 1,
+            "quarantined_record_count": 0,
+            "stimulus_recorded_at": 1793056656.606085,
+            "stimulus_recorded_at_iso": "2026-10-26T23:17:36Z",
+            "turn_finished_recorded_at": null,
+            "turn_finished_recorded_at_iso": null,
+            "turn_started_recorded_at": null,
+            "turn_started_recorded_at_iso": null,
+            "event_queue_ack_recorded_at": null,
+            "event_queue_ack_recorded_at_iso": null,
+            "event_queue_cancelled_recorded_at": null,
+            "event_queue_cancelled_recorded_at_iso": null,
+            "latest_recorded_at": 1793056656.606085,
+            "latest_recorded_at_iso": "2026-10-26T23:17:36Z"
+          },
+          "runner_hold": null
+        }
+      ]
+    },
+    "response_entity_sha256": "94b4f1fa53c6a8c0de0b44be345cf503fd249834cd642f25ec0fc64bb27fcab3",
+    "response_entity_bytes": 11859,
+    "scope": "Selected decoded entity; auth/cookie/session headers never retained; raw forwarding unchanged."
+  },
+  "scope": "Fresh request/response after refresh input; cadence may share demand. No exact request-count or painted-row claim."
+}

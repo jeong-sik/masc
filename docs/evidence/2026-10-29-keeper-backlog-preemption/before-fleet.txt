@@ -1,0 +1,195 @@
+# captured 2026-10-29T05:01:30Z from the server at ~/me/.masc (binary_commit 3e41385b549 until 2026-10-29T03:07Z, 216f7ab8456 after)
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --since 2026-10-26 --until 2026-10-29T02:54:34Z
+2. Turn endings per Keeper and UTC day (window 2026-10-26T00:00:00Z .. 2026-10-29T02:54:34Z; ckpt_t01 = checkpoint turns with 0 or 1 tool calls)
+keeper                     day         turns   ckpt durable    op_q   done done+tool ckpt_t01 ckpt_share
+code-reviewer              2026-10-26    309    141      73      68    159       155       44      45.6%
+code-reviewer              2026-10-27    395    303     151     152     86        86      163      76.7%
+code-reviewer              2026-10-28    546    164     160       4    346       176      102      30.0%
+code-reviewer              2026-10-29     76     52      51       1     18         4       49      68.4%
+code-reviewer-brother      2026-10-26    182     30       7      23    141       119       16      16.5%
+code-reviewer-brother      2026-10-27    254     35      35       0    210       154       14      13.8%
+code-reviewer-brother      2026-10-28    257     31      21      10    137       117        3      12.1%
+code-reviewer-brother      2026-10-29     15      9       1       8      5         5        1      60.0%
+code-reviewer-father       2026-10-26     20      0       0       0     20        19        0       0.0%
+code-reviewer-father       2026-10-27     26     11       1      10     15        14        2      42.3%
+code-reviewer-father       2026-10-28     94     14       6       8     72        66        2      14.9%
+code-reviewer-father       2026-10-29      7      1       1       0      5         5        0      14.3%
+code-reviewer-mother       2026-10-26     30      0       0       0     30        30        0       0.0%
+code-reviewer-mother       2026-10-27    106     21       2      19     76        75        4      19.8%
+code-reviewer-mother       2026-10-28    233     11       8       3    195       133        3       4.7%
+code-reviewer-mother       2026-10-29     11      1       0       1      4         3        0       9.1%
+code-reviewer-sister       2026-10-26    142     32       2      30    103       103        8      22.5%
+code-reviewer-sister       2026-10-27    173     58       0      58    105       104       19      33.5%
+code-reviewer-sister       2026-10-28    248     30      17      13    191       144       14      12.1%
+code-reviewer-sister       2026-10-29     22      5       4       1     11        11        3      22.7%
+code-reviewer-uncle        2026-10-26     18      0       0       0     18        17        0       0.0%
+code-reviewer-uncle        2026-10-27     28      6       1       5     18        17        0      21.4%
+code-reviewer-uncle        2026-10-28     94      8       2       6     63        48        1       8.5%
+code-reviewer-uncle        2026-10-29     12      1       0       1      5         5        0       8.3%
+context-reviewer           2026-10-26    479    200     105      95    123       111       32      41.8%
+context-reviewer           2026-10-27    542    343     194     149    186       142      150      63.3%
+context-reviewer           2026-10-28    461    161     138      23    270       169       93      34.9%
+context-reviewer           2026-10-29     32     14      13       1     12        10       13      43.8%
+e-masc-the-leader          2026-10-26    181      7       2       5    132        61        4       3.9%
+e-masc-the-leader          2026-10-27    269      4       4       0    256       166        1       1.5%
+e-masc-the-leader          2026-10-28    148      4       3       1    120        53        1       2.7%
+e-masc-the-leader          2026-10-29     12      0       0       0      5         5        0       0.0%
+goo-yang-bong              2026-10-26     40      1       1       0     34        34        0       2.5%
+goo-yang-bong              2026-10-27     19      9       9       0      6         6        1      47.4%
+goo-yang-bong              2026-10-28     26      8       8       0      6         5        0      30.8%
+goo-yang-bong              2026-10-29      6      1       1       0      5         4        0      16.7%
+kidsnote-incoming-dd-manager 2026-10-26     68      1       0       1     64        51        1       1.5%
+kidsnote-incoming-dd-manager 2026-10-27     71      3       3       0     60        39        2       4.2%
+kidsnote-incoming-dd-manager 2026-10-28     71      1       1       0     54        24        0       1.4%
+kidsnote-incoming-dd-manager 2026-10-29     11      0       0       0      0         0        0       0.0%
+kidsnote-job-manager       2026-10-26     62      1       1       0     58        17        1       1.6%
+kidsnote-job-manager       2026-10-27     59      0       0       0     55        47        0       0.0%
+kidsnote-job-manager       2026-10-28     19      0       0       0      6         6        0       0.0%
+kidsnote-qa-hub-manager    2026-10-26     82      0       0       0     80        41        0       0.0%
+kidsnote-qa-hub-manager    2026-10-27     34      7       7       0     23        23        0      20.6%
+kidsnote-qa-hub-manager    2026-10-28     52     10      10       0     35        33        0      19.2%
+kidsnote-qa-hub-manager    2026-10-29      5      0       0       0      5         4        0       0.0%
+kidsnote-slack-reader      2026-10-26     61      1       0       1     54        33        1       1.6%
+kidsnote-slack-reader      2026-10-27     59      4       4       0     42        39        1       6.8%
+kidsnote-slack-reader      2026-10-28    128     16      16       0     84        41       12      12.5%
+kidsnote-slack-reader      2026-10-29     11      0       0       0      2         2        0       0.0%
+mad-scientist              2026-10-26     74      0       0       0     73        54        0       0.0%
+mad-scientist              2026-10-27     72      0       0       0     71        53        0       0.0%
+mad-scientist              2026-10-28     73      0       0       0     70        64        0       0.0%
+mad-scientist              2026-10-29      6      0       0       0      5         5        0       0.0%
+masc-pro-builder           2026-10-26     64      6       1       5     53        51        0       9.4%
+masc-pro-builder           2026-10-27     24     10       5       5     12        11        4      41.7%
+masc-pro-builder           2026-10-28     69      8       5       3     57        53        1      11.6%
+masc-pro-builder           2026-10-29      7      1       1       0      5         5        1      14.3%
+masc-productor-owner       2026-10-26     30      1       1       0     19        19        0       3.3%
+masc-productor-owner       2026-10-27     40      3       3       0     25        25        0       7.5%
+masc-productor-owner       2026-10-28     56     22      16       6     28        26        3      39.3%
+msx-retro-mania            2026-10-26    229     48      29      19    173       118       36      21.0%
+msx-retro-mania            2026-10-27     95     14      14       0     73        68       12      14.7%
+msx-retro-mania            2026-10-28    128      6       6       0    104        30        4       4.7%
+msx-retro-mania            2026-10-29     21      0       0       0      0         0        0       0.0%
+music-sensei               2026-10-26     60      0       0       0     58        18        0       0.0%
+music-sensei               2026-10-27     50      0       0       0     49        21        0       0.0%
+music-sensei               2026-10-28     54      0       0       0     52        25        0       0.0%
+music-sensei               2026-10-29      5      0       0       0      5         3        0       0.0%
+ocaml-agent-ic             2026-10-26    366     69      69       0    272       257        5      18.9%
+ocaml-agent-ic             2026-10-27    200    168     168       0     25        22       26      84.0%
+ocaml-agent-ic             2026-10-28    436    408     252     156     15        10      209      93.6%
+ocaml-agent-ic             2026-10-29     63     63      31      32      0         0       49     100.0%
+ocaml-refactor-woman       2026-10-26     92     41      33       8     37        34        6      44.6%
+ocaml-refactor-woman       2026-10-27    153    141      82      59      8         7       22      92.2%
+ocaml-refactor-woman       2026-10-28    489    478     246     232      6         4      112      97.8%
+ocaml-refactor-woman       2026-10-29     44     34      17      17      9         9        9      77.3%
+polisher                   2026-10-26     88      0       0       0     84        56        0       0.0%
+polisher                   2026-10-27    110      9       9       0     95        76        6       8.2%
+polisher                   2026-10-28     85      6       6       0     73        57        2       7.1%
+polisher                   2026-10-29     10      2       2       0      8         4        1      20.0%
+pr-updater                 2026-10-26    402      8       8       0    381       283        5       2.0%
+pr-updater                 2026-10-27    404     58      58       0    329       216       28      14.4%
+pr-updater                 2026-10-28    494    169     169       0    280       233       81      34.2%
+pr-updater                 2026-10-29     59     16      16       0     39        22        5      27.1%
+sangsu                     2026-10-26     95      1       1       0     75        69        0       1.1%
+sangsu                     2026-10-27    109      4       4       0    103        56        2       3.7%
+sangsu                     2026-10-28     91      2       2       0     84        69        2       2.2%
+sangsu                     2026-10-29     10      0       0       0     10        10        0       0.0%
+simplifyer                 2026-10-26     60      0       0       0     58        31        0       0.0%
+simplifyer                 2026-10-27     51      0       0       0     50        31        0       0.0%
+simplifyer                 2026-10-28     34      1       1       0     31        23        0       2.9%
+tui-developer              2026-10-26     18      1       0       1     12        11        0       5.6%
+wkbl-data                  2026-10-26     87      0       0       0     85        57        0       0.0%
+wkbl-data                  2026-10-27     55      0       0       0     54        32        0       0.0%
+wkbl-data                  2026-10-28     64      1       1       0     61        35        1       1.6%
+wkbl-data                  2026-10-29      8      0       0       0      8         4        0       0.0%
+wkbl-front                 2026-10-26    103      8       8       0     90        85        0       7.8%
+wkbl-front                 2026-10-27     68      9       9       0     53        52        1      13.2%
+wkbl-front                 2026-10-28     86      4       4       0     58        27        1       4.7%
+wkbl-front                 2026-10-29     10      0       0       0      0         0        0       0.0%
+wkbl-growth                2026-10-26     57      1       1       0     54        50        0       1.8%
+wkbl-growth                2026-10-27     19      5       4       1     11        10        1      26.3%
+wkbl-growth                2026-10-28     54      0       0       0     24        23        0       0.0%
+wkbl-growth                2026-10-29      6      0       0       0      0         0        0       0.0%
+wkbl-web-leader            2026-10-26     97      4       4       0     61        59        1       4.1%
+wkbl-web-leader            2026-10-27     30      1       1       0     26        25        0       3.3%
+wkbl-web-leader            2026-10-28     46      6       4       2     34        33        2      13.0%
+wkbl-web-leader            2026-10-29      9      1       1       0      8         6        0      11.1%
+you-never-change           2026-10-26    657    181     179       2    469       422       48      27.5%
+you-never-change           2026-10-27    278     25      25       0    248       188        5       9.0%
+you-never-change           2026-10-28    147     11      11       0    132       119        6       7.5%
+you-never-change           2026-10-29     12      0       0       0     12        10        0       0.0%
+fleet                      all         13319   3815    2570    1245   8314      6252     1458      28.6%
+
+3. Checkpoint turns by tool calls made (window 2026-10-26T00:00:00Z .. 2026-10-29T02:54:34Z)
+tools      turns    share
+0             45     1.2%
+1           1413    37.0%
+2            670    17.6%
+3-5          706    18.5%
+6+           981    25.7%
+all         3815
+
+4. Turn endings by execution path and runtime family (window 2026-10-26T00:00:00Z .. 2026-10-29T02:54:34Z)
+path               family        turns   ckpt durable    op_q   done
+autonomous_cycle   agent_core     3824   1579     584     995   1713
+autonomous_cycle   antigravity     168      0       0       0    124
+autonomous_cycle   claude_code    1380    184     180       4   1070
+autonomous_cycle   codex          2791    398     398       0   2033
+autonomous_cycle   muse           2866    282     282       0   2456
+direct_turn        agent_core     1418   1118     895     223    300
+direct_turn        claude_code     464    160     158       2    304
+direct_turn        codex           297     76      55      21    221
+direct_turn        muse            111     18      18       0     93
+
+5. Length of completed turns in seconds, nearest rank (window 2026-10-26T00:00:00Z .. 2026-10-29T02:54:34Z)
+path                 turns      p50      p90      p99       max
+(all paths)           8314       46      356     2086     10002
+autonomous_cycle      7396       41      340     2116     10002
+direct_turn            918      107      482     1374      5419
+
+6. Longest run of consecutive turns ended on a durable stimulus (window 2026-10-26T00:00:00Z .. 2026-10-29T02:54:34Z)
+keeper                          turns from_utc             to_utc              
+ocaml-agent-ic                    120 2026-10-27T12:49:15Z 2026-10-28T00:39:54Z
+code-reviewer                      18 2026-10-28T05:23:32Z 2026-10-28T05:28:26Z
+context-reviewer                   15 2026-10-28T13:09:53Z 2026-10-28T13:40:22Z
+ocaml-refactor-woman               13 2026-10-27T12:50:05Z 2026-10-27T16:05:01Z
+you-never-change                   12 2026-10-26T17:32:30Z 2026-10-26T17:42:55Z
+pr-updater                         11 2026-10-28T13:06:14Z 2026-10-28T13:23:17Z
+kidsnote-slack-reader              10 2026-10-28T03:23:15Z 2026-10-28T03:25:36Z
+goo-yang-bong                       4 2026-10-27T01:48:25Z 2026-10-27T07:49:02Z
+sangsu                              3 2026-10-27T12:49:46Z 2026-10-27T12:50:33Z
+masc-productor-owner                3 2026-10-28T10:06:10Z 2026-10-28T10:13:13Z
+
+7. System log lines per Keeper (window 2026-10-26T00:00:00Z .. 2026-10-29T02:54:34Z)
+keeper                       busy  consumed    again  yield probe and head kind
+code-reviewer                 654      2537     1128  new durable successor head=tool_result_ready=53; any pending stimulus head=schedule_due=3; new durable successor head=ask_answered=2; any pending stimulus head=board_signal=1; new durable successor head=task_outcome=1; any pending stimulus head=tool_result_ready=1
+code-reviewer-brother         216      3699     2993  new durable successor head=tool_result_ready=12; new durable successor head=keeper_delegate_completed=4; any pending stimulus head=tool_result_ready=1; any pending stimulus head=completion_authority_rejected=1; new durable successor head=ask_answered=1
+code-reviewer-father          206       697      531  any pending stimulus head=board_signal=3; new durable successor head=keeper_delegate_completed=2; new durable successor head=ask_answered=1
+code-reviewer-mother          167      1525      649  new durable successor head=tool_result_ready=6; any pending stimulus head=board_signal=2; any pending stimulus head=tool_result_ready=2
+code-reviewer-sister          347      1744      643  new durable successor head=tool_result_ready=11; any pending stimulus head=board_signal=2; any pending stimulus head=tool_result_ready=2
+code-reviewer-uncle            94       645      494  any pending stimulus head=board_signal=1
+context-reviewer              642      6159     4665  new durable successor head=tool_result_ready=34; any pending stimulus head=schedule_due=5; any pending stimulus head=board_signal=1; any pending stimulus head=tool_result_ready=1
+e-masc-the-leader             105      1676     1283  new durable successor head=tool_result_ready=8; new durable successor head=keeper_delegate_completed=2
+goo-yang-bong                   0       558      432  any pending stimulus head=schedule_due=1; new durable successor head=ask_answered=1
+kidsnote-incoming-dd-manager      2       170       24  any pending stimulus head=board_signal=1
+kidsnote-job-manager            1        80       45  any pending stimulus head=schedule_due=1
+kidsnote-qa-hub-manager         0       320      211  new durable successor head=ask_answered=5; any pending stimulus head=board_signal=1; any pending stimulus head=schedule_due=1
+kidsnote-slack-reader           4       587       84  new durable successor head=tool_result_ready=5; any pending stimulus head=schedule_due=4; any pending stimulus head=tool_result_ready=1
+mad-scientist                   1       148       65  
+masc-pro-builder              104       736      583  any pending stimulus head=board_signal=3; new durable successor head=completion_authority_rejected=1; new durable successor head=task_outcome=1; new durable successor head=ask_answered=1
+masc-productor-owner            3       608      499  any pending stimulus head=board_signal=3; new durable successor head=task_cancelled=2; any pending stimulus head=schedule_due=1; new durable successor head=task_outcome=1
+msx-retro-mania                25       464       95  any pending stimulus head=schedule_due=15
+music-sensei                    0        25        7  
+ocaml-agent-ic                273      1575      543  any pending stimulus head=schedule_due=13; new durable successor head=completion_authority_rejected=2
+ocaml-refactor-woman          215       585      286  any pending stimulus head=schedule_due=2; any pending stimulus head=board_signal=1
+polisher                       18       169       47  new durable successor head=tool_result_ready=3; any pending stimulus head=tool_result_ready=1; any pending stimulus head=board_signal=1; new durable successor head=ask_answered=1
+pr-updater                     15      4963     2492  new durable successor head=tool_result_ready=100; any pending stimulus head=schedule_due=3
+sangsu                          1       258      100  any pending stimulus head=schedule_due=7; new durable successor head=tool_result_ready=1
+simplifyer                      6        76       10  
+tui-developer                   7        55       39  
+wkbl-data                       0        83       52  any pending stimulus head=board_signal=1
+wkbl-front                      1       425      258  new durable successor head=tool_result_ready=4; any pending stimulus head=board_signal=3; any pending stimulus head=tool_result_ready=3; any pending stimulus head=schedule_due=2; new durable successor head=ask_answered=1
+wkbl-growth                     2       170      118  any pending stimulus head=board_signal=2; any pending stimulus head=completion_authority_rejected=1
+wkbl-web-leader                 7       765      706  any pending stimulus head=board_signal=5
+you-never-change               31      1255      262  new durable successor head=tool_result_ready=6; any pending stimulus head=schedule_due=4; any pending stimulus head=tool_result_ready=1
+fleet                        3147     32757    19344  new durable successor head=tool_result_ready=243; any pending stimulus head=schedule_due=62; any pending stimulus head=board_signal=31; any pending stimulus head=tool_result_ready=13; new durable successor head=ask_answered=13; new durable successor head=keeper_delegate_completed=8; new durable successor head=completion_authority_rejected=3; new durable successor head=task_outcome=3; any pending stimulus head=completion_authority_rejected=2; new durable successor head=task_cancelled=2
+again = consumed a stimulus that an earlier turn of the same Keeper had consumed in the window; by class: board_attention=8320, tool_result_ready=6008, board_signal=3390, schedule_due=1018, ask_answered=430, completion_authority_rejected=104, task_outcome=41, task_cancelled=20, keeper_delegate_completed=9, workspace_message=4
+

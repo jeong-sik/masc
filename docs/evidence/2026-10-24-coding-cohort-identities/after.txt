@@ -1,0 +1,14 @@
+b96b93b0df5f7ff70ff732ad1a615d8da0ad68a7792455f6118ed4004c2eb5a5
+b96b93b0df5f7ff70ff732ad1a615d8da0ad68a7792455f6118ed4004c2eb5a5
+test_actual_docker_grading_keeps_host_inputs_outside (__main__.CodingBoundary.test_actual_docker_grading_keeps_host_inputs_outside) ... skipped 'pass --docker-image for actual Docker grading'
+test_candidate_link_is_refused_before_host_oracle_restoration (__main__.CodingBoundary.test_candidate_link_is_refused_before_host_oracle_restoration) ... ok
+test_collect_refuses_duplicate_json_before_replacing_the_index (__main__.CodingBoundary.test_collect_refuses_duplicate_json_before_replacing_the_index) ... ok
+test_frozen_resume_rejects_changed_inputs (__main__.CodingBoundary.test_frozen_resume_rejects_changed_inputs) ... ok
+test_node_oracle_edit_does_not_fix_the_candidate (__main__.CodingBoundary.test_node_oracle_edit_does_not_fix_the_candidate) ... ok
+test_original_cohorts_have_separate_runtime_and_run_identities (__main__.CodingBoundary.test_original_cohorts_have_separate_runtime_and_run_identities) ... ok
+test_resume_checks_every_original_run_field (__main__.CodingBoundary.test_resume_checks_every_original_run_field) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 2.896s
+
+OK (skipped=1)

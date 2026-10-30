@@ -1,0 +1,16 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40214984887
+Complete raw log SHA256: 609b0059bc933ef73d9c7c5f7d8fb13241ad9beb394e9ff58613372b30c4e994
+Complete raw log bytes: 190890
+Selected checkout, relevant assertions, failures and suite summaries.
+
+test suite	Checkout	2026-10-25T17:08:21.7317805Z HEAD is now at 06a6de82 test(execution): qualify checkpoint regression registrations
+test suite	Test	2026-10-25T17:09:58.4036582Z ASSERT checkpoint retains actual source
+test suite	Test	2026-10-25T17:09:58.9494442Z ASSERT checkpoint persisted
+test suite	Test	2026-10-25T17:09:59.1638907Z ASSERT effect committed before checkpoint observer failure
+test suite	Test	2026-10-25T17:09:59.1655958Z ASSERT Internal error: checkpoint sink failed at after_tool_results_appended: checkpoint delivery refused
+test suite	Test	2026-10-25T17:09:59.1672827Z   [FAIL]        provider_mock_extra         25   checkpoint sink Error preser...
+test suite	Test	2026-10-25T17:09:59.1844460Z   [FAIL]        provider_mock_extra         26   checkpoint sink exception pr...
+test suite	Test	2026-10-25T17:09:59.5723681Z │ [FAIL]        provider_mock_extra         25   checkpoint sink Error pre...  │
+test suite	Test	2026-10-25T17:09:59.5725924Z FAIL Internal error: checkpoint sink failed at after_tool_results_appended: checkpoint delivery refused
+test suite	Test	2026-10-25T17:09:59.5743112Z │ [FAIL]        provider_mock_extra         26   checkpoint sink exception...  │
+test suite	Test	2026-10-25T17:09:59.5785926Z 2 failures! in 1.195s. 81 tests run.

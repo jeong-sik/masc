@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T13:52:58+09:00",
+  "source_commit": "cadfbc6b47d7ea646c29df7f4d8eef82b9478f95",
+  "binary_sha256": "f527230f8c0a5e93880d7507e96660df9cf9673d4d72c88da969f34b5080e472",
+  "pre_purge_seed": {
+    "case_id": "p",
+    "keeper_name": "coding-eval-ollama-qwen3-8b-p-source-bound-r1",
+    "keeper_name_length": 45,
+    "provider": "ollama",
+    "model": "qwen3:8b",
+    "port": 9507,
+    "status": "provider_error",
+    "expected_missing_recreation": true,
+    "verify_exit": 0,
+    "duration_ms": 34000,
+    "tool_call_count": 0,
+    "last_prompt_assembled_bytes": 315,
+    "source_revision": 2,
+    "source_fact_count": 0,
+    "source_invalidation_count": 1,
+    "source_invalidation_reason": "source_changed",
+    "artifact_sha256": {
+      "evidence.json": "640427b64ef248479c271f9944fdd9ad6f6fc8a8c7bfd79e122dacae4a50ca04",
+      "last-prompt.json": "cdbf707f0fd24dc83b39c2dbbe5eae8ec5d8ea294ca98fff2dae4f772daf2d06",
+      "memory-source-seed.json": "ec6ac62f0ae8a466712ae789368213e169b046c869f39f78cd18b346b66fb92c",
+      "memory-source-final.json": "707c2cd9311a16a7f8d3fc30f5050607cece226bca436d04789dff50fe099ea8"
+    }
+  },
+  "dashboard_purge": {
+    "port": 9508,
+    "http_status": 202,
+    "accepted": true,
+    "operation_id": "shutdown-acd27bef-93c7-422b-a3e1-cfe27d8547bc",
+    "source_snapshot_present_after": false,
+    "keeper_config_present_after": false,
+    "runtime_directory_present_after": false,
+    "keeper_meta_present_after": false,
+    "artifact_sha256": {
+      "memory-source-before-purge.json": "707c2cd9311a16a7f8d3fc30f5050607cece226bca436d04789dff50fe099ea8",
+      "purge-response.json": "350035e19aad8442704d1e442d29c8834c11da738930182c2f66d0193063998f",
+      "post-purge-state.json": "fbbaed6788ac64e9c9a7304af6f3d1a654d247ffefc7a2f8b1acb1bf8b167b10"
+    }
+  },
+  "same_name_recreate": {
+    "create_port": 9510,
+    "empty_prompt_restart_port": 9511,
+    "fresh_profile_supplied": true,
+    "operation_state": "Succeeded",
+    "operation_id": "kmsg-a7be4b8867025bb6bb415859d258ce9f",
+    "outcome_ref": "trace-1788065461314-00000#1",
+    "latency_ms": 33511,
+    "tool_call_count": 0,
+    "assistant_response": "AFTER_PURGE_OK",
+    "dynamic_context_bytes": 0,
+    "last_prompt_http_status": 404,
+    "last_prompt_error": "this keeper has not assembled a turn since prompt capture existed",
+    "source_snapshot_present": false,
+    "artifact_sha256": {
+      "operation-final.json": "1e74a1a812b981d583c96375f61cbf8258f43bc530eb1b9083a0440ecad30fb7",
+      "keeper-metrics.jsonl": "8d851e9baeabbff873a04726873ed933fb4a65b8c4c3568126e6222f9d4a60d4",
+      "keeper-chat.jsonl": "50d0f5feaaec9132f6bf409ad146fe127f90e1093fb78aa44615b6d15f12ea4f",
+      "post-recreate-state.json": "4e077270b83550509bd9f1c3b75bc67fca1aa1d0b41457d41f26292072d2c9f9",
+      "last-prompt-empty-response.json": "ff75bf4b7b7ec6abca4bea7d02b5a1e94b6ff5223dbba5a22915bfaee69f8338"
+    }
+  },
+  "failed_boundary_probe": {
+    "port": 9506,
+    "keeper_name_length": 75,
+    "http_status": 400,
+    "error": "identifier too long: 75 chars (max 64)",
+    "issue": 31919
+  },
+  "focused_checks": {
+    "test_keeper_memory_os_current": "22/22",
+    "focused_build": [
+      "bin/main_eio.exe",
+      "test/test_keeper_memory_os_current.exe"
+    ]
+  },
+  "shutdown_check": {
+    "isolated_ports": [9505, 9506, 9507, 9508, 9509, 9510, 9511],
+    "listeners_after_runs": [],
+    "operating_8935_status": "ok",
+    "operating_effective_base_path": "/Users/dancer/me",
+    "operating_effective_masc_root": "/Users/dancer/me/.masc",
+    "operating_roots_diverge": false
+  },
+  "performance_claim": false
+}

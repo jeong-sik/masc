@@ -1,0 +1,54 @@
+(** Prompt_defaults — auto-discover prompt metadata from markdown
+    frontmatter and register it with {!Prompt_registry}.
+
+    [bootstrap_runtime] is called once during server startup; it
+    resolves the prompt markdown directory, points
+    {!Prompt_registry} at it, loads every markdown file with YAML
+    frontmatter ([description] / [category] / [operator_surface] /
+    [template_variables]), and replays any persisted operator
+    overrides. The signature is memoised so a re-call with the
+    same [(workspace_path, prompt_markdown_dir)] pair is a no-op
+    — useful when the bootstrap is wired into multiple lifecycle
+    points.
+
+    Converging the directory's contents onto the binary-embedded
+    assets is {!Managed_asset_sync}'s job, run by the server
+    bootstrap before this module scans the directory.
+
+    Internal helpers (the [bootstrapped_signature] memo ref and
+    the registry observers) are hidden — callers consume only the
+    entry points below. *)
+
+val resolve_prompt_markdown_dir : base_path:string -> string
+(** Return the prompt markdown directory for [base_path],
+    {!Config_dir_resolver.prompts_dir_for_base_path}. Explicit
+    [MASC_CONFIG_DIR] still overrides; the process cwd does not. *)
+
+val bootstrap_runtime :
+  workspace_path:string ->
+  base_path:string ->
+  string
+(** Resolve the markdown directory, point {!Prompt_registry} at
+    it, load every prompt file, and restore persisted operator
+    overrides. Returns the resolved directory path.
+
+    Idempotent on the [(workspace_path, prompt_markdown_dir)]
+    pair — repeated calls with the same arguments skip the
+    registry mutation and override replay. [Eio.Cancel.Cancelled]
+    is propagated; any other exception during override restore
+    is logged via [Log.Misc.error] and swallowed so a corrupt
+    override file cannot bring the boot path down. *)
+
+val bootstrap_markdown_dir :
+  workspace_path:string -> prompt_markdown_dir:string -> unit
+(** What {!bootstrap_runtime} does once the directory is resolved: point
+    {!Prompt_registry} at [prompt_markdown_dir], load it, and restore the
+    overrides saved under [workspace_path]. Idempotent on the same pair. *)
+
+val init : unit -> unit
+(** Install prompt-registry observers and re-scan the currently
+    configured markdown directory.  Used by [bootstrap_runtime]
+    internally; also exposed for tests that have already set the
+    markdown dir via [Prompt_registry.set_markdown_dir] and just
+    need to (re)load prompts.  No-op when no markdown dir is
+    configured. *)

@@ -1,0 +1,402 @@
+type preview_extract = {
+  title : string option;
+  description : string option;
+  site_name : string option;
+  image_url : string option;
+  canonical_url : string option;
+  favicon_url : string option;
+}
+
+type cache_payload = {
+  preview : Yojson.Safe.t;
+  expires_at : float;
+}
+
+type preview_result =
+  | Preview of Yojson.Safe.t
+  | Preview_error of string
+
+let cache_ttl_sec = Masc_time_constants.hour
+let error_ttl_sec = 300.0
+let max_preview_urls = 4
+let preview_timeout_sec = 0.25
+let max_html_chars = 262_144
+
+let preview_cache_mu = Stdlib.Mutex.create ()
+let preview_cache : (string, cache_payload) Hashtbl.t = Hashtbl.create 128
+
+
+let lower_trim value = String.lowercase_ascii (String.trim value)
+
+let cache_lookup key =
+  Stdlib.Mutex.protect preview_cache_mu (fun () ->
+      match Hashtbl.find_opt preview_cache key with
+      | Some entry when entry.expires_at > Time_compat.now () -> Some entry.preview
+      | Some _ ->
+          Hashtbl.remove preview_cache key;
+          None
+      | None -> None)
+
+let cache_store ~ttl key preview =
+  Stdlib.Mutex.protect preview_cache_mu (fun () ->
+      Hashtbl.replace preview_cache key
+        { preview; expires_at = Time_compat.now () +. ttl })
+
+let error_reason_of_json = function
+  | `Assoc _ as json -> Json_util.assoc_string_opt "error" json
+  | _ -> None
+
+let assoc_upsert fields key value =
+  (key, value) :: List.remove_assoc key fields
+
+let with_cache_state preview cache_state =
+  match preview with
+  | `Assoc fields -> `Assoc (assoc_upsert fields "cache_state" (`String cache_state))
+  | _ -> preview
+
+(* Static whitespace-collapse PCRE, hoisted out of the per-call hot
+   path that runs once per normalised meta value. *)
+let whitespace_collapse_re =
+  Re.Pcre.re "[ \t\r\n]+" |> Re.compile
+
+let collapse_whitespace value =
+  value
+  |> Re.replace_string whitespace_collapse_re ~all:true ~by:" "
+  |> String.trim
+
+let normalize_text value =
+  value |> collapse_whitespace |> String_util.trim_nonempty
+
+let is_http_scheme = function
+  | Some "http" | Some "https" -> true
+  | _ -> false
+
+let normalize_request_url raw =
+  let trimmed = String.trim raw in
+  if trimmed = "" then Error "url is empty"
+  else
+    let uri = Uri.of_string trimmed in
+    if not (is_http_scheme (Uri.scheme uri)) then
+      Error "only http/https URLs are allowed"
+    else if Uri.userinfo uri <> None then
+      Error "userinfo in URL is not allowed"
+    else if Uri.host uri = None then
+      Error "missing host"
+    else
+      Ok (Uri.with_fragment uri None |> Uri.to_string)
+
+let image_extensions =
+  [ ".png"; ".jpg"; ".jpeg"; ".gif"; ".webp"; ".svg"; ".avif"; ".bmp" ]
+
+let infer_image_url url =
+  let lower = String.lowercase_ascii url in
+  List.exists (fun ext -> Filename.check_suffix lower ext) image_extensions
+
+let meta_content nodes attr key =
+  Markup_document.elements_named "meta" nodes
+  |> List.find_map (fun node ->
+         match
+           Markup_document.attribute attr node,
+           Markup_document.attribute "content" node
+         with
+         | Some actual, Some content when String.equal (lower_trim actual) key ->
+           normalize_text content
+         | _ -> None)
+
+let link_href nodes rel_value =
+  Markup_document.elements_named "link" nodes
+  |> List.find_map (fun node ->
+         match
+           Markup_document.attribute "rel" node,
+           Markup_document.attribute "href" node
+         with
+         | Some rel, Some href
+           when rel |> Markup_document.html_space_tokens
+                |> List.exists (fun value -> String.equal (lower_trim value) rel_value) ->
+           normalize_text href
+         | _ -> None)
+
+let title_tag nodes =
+  let title =
+    Markup_document.first_element_named "title" nodes
+    |> Option.map Markup_document.text_content
+  in
+  Option.bind title normalize_text
+
+let resolve_relative_url ~base_url value =
+  let base_uri = Uri.of_string base_url in
+  Uri.resolve "" base_uri (Uri.of_string value) |> Uri.to_string
+
+let default_favicon_url url =
+  let uri = Uri.of_string url in
+  Uri.make ?scheme:(Uri.scheme uri) ?host:(Uri.host uri) ?port:(Uri.port uri)
+    ~path:"/favicon.ico" ()
+  |> Uri.to_string
+
+let extract_html_preview_fields ~url body =
+  (* Byte slicing here splits multibyte characters at max_html_chars —
+     the #7690 shape. utf8_prefix clamps to the previous character
+     boundary instead; parsing tolerates the shortened tail. *)
+  let head =
+    String_util.utf8_prefix ~max_bytes:max_html_chars body
+    |> Markup_document.parse_html
+  in
+  let title =
+    match meta_content head "property" "og:title" with
+    | Some _ as value -> value
+    | None -> (
+        match meta_content head "name" "twitter:title" with
+        | Some _ as value -> value
+        | None -> title_tag head)
+  in
+  let description =
+    match meta_content head "property" "og:description" with
+    | Some _ as value -> value
+    | None -> (
+        match meta_content head "name" "twitter:description" with
+        | Some _ as value -> value
+        | None -> meta_content head "name" "description")
+  in
+  let site_name =
+    match meta_content head "property" "og:site_name" with
+    | Some _ as value -> value
+    | None -> Uri.host (Uri.of_string url)
+  in
+  let image_url =
+    match meta_content head "property" "og:image" with
+    | Some raw -> Some (resolve_relative_url ~base_url:url raw)
+    | None -> (
+        match meta_content head "name" "twitter:image" with
+        | Some raw -> Some (resolve_relative_url ~base_url:url raw)
+        | None -> None)
+  in
+  let canonical_url =
+    match link_href head "canonical" with
+    | Some raw -> Some (resolve_relative_url ~base_url:url raw)
+    | None -> None
+  in
+  let favicon_url =
+    match link_href head "icon" with
+    | Some raw -> Some (resolve_relative_url ~base_url:url raw)
+    | None -> Some (default_favicon_url url)
+  in
+  { title; description; site_name; image_url; canonical_url; favicon_url }
+
+let list_header_ci headers name =
+  let target = String.lowercase_ascii name in
+  headers
+  |> List.find_map (fun (key, value) ->
+         if String.equal (String.lowercase_ascii key) target then Some value
+         else None)
+
+let is_success_status code = code >= 200 && code < 300
+
+let is_redirect_status code =
+  code = 301 || code = 302 || code = 303 || code = 307 || code = 308
+
+let fetch_response ~net:_ ~url =
+  Masc_http_client.get_response_sync ~url
+    ~headers:
+      [
+        ("Accept", "text/html,application/xhtml+xml,image/*;q=0.9,*/*;q=0.1");
+        ("Accept-Encoding", "identity");
+        ("User-Agent", "MASC-Dashboard-LinkPreview/1.0");
+      ]
+    ()
+
+let rec fetch_response_following_redirects ~net ~url ~remaining_redirects =
+  match fetch_response ~net ~url with
+  | Error _ as error -> error
+  | Ok response when is_redirect_status response.status && remaining_redirects > 0
+    ->
+      (match list_header_ci response.headers "location" with
+       | Some location when Option.is_some (String_util.trim_nonempty location) ->
+           let next_url = resolve_relative_url ~base_url:url location in
+           fetch_response_following_redirects ~net ~url:next_url
+             ~remaining_redirects:(remaining_redirects - 1)
+       | _ -> Ok response)
+  | Ok response -> Ok response
+
+let build_preview_json ~url ~kind ?canonical_url ?title ?description ?site_name
+    ?image_url ?favicon_url ?content_type ~cache_state () =
+  let fields =
+    [
+      ("url", `String url);
+      ("kind", `String kind);
+      ("canonical_url", Json_util.string_opt_to_json canonical_url);
+      ("title", Json_util.string_opt_to_json title);
+      ("description", Json_util.string_opt_to_json description);
+      ("site_name", Json_util.string_opt_to_json site_name);
+      ("image_url", Json_util.string_opt_to_json image_url);
+      ("favicon_url", Json_util.string_opt_to_json favicon_url);
+      ("content_type", Json_util.string_opt_to_json content_type);
+      ("fetched_at", `String (Masc_domain.now_iso ()));
+      ("cache_state", `String cache_state);
+    ]
+  in
+  `Assoc fields
+
+let error_json ~url ~reason ~cache_state () =
+  `Assoc
+    [
+      ("url", `String url);
+      ("error", `String reason);
+      ("cache_state", `String cache_state);
+    ]
+
+let fetch_preview ~clock ~net url =
+  match normalize_request_url url with
+  | Error reason -> Error reason
+  | Ok normalized_url -> (
+      match Server_outbound_address.validate_resolved_host ~net (Uri.of_string normalized_url) with
+      | Error reason -> Error reason
+      | Ok () ->
+          if infer_image_url normalized_url then
+            Ok
+              (build_preview_json ~url:normalized_url ~kind:"image"
+                 ~image_url:normalized_url
+                 ~favicon_url:(default_favicon_url normalized_url)
+                 ~cache_state:"miss" ())
+          else
+            let run () =
+              match
+                fetch_response_following_redirects ~net ~url:normalized_url
+                  ~remaining_redirects:2
+              with
+              | Error message -> Error message
+              | Ok response ->
+                  if not (is_success_status response.status) then
+                    Error (Printf.sprintf "HTTP %d" response.status)
+                  else
+                    let content_type = list_header_ci response.headers "content-type" in
+                    if
+                      Option.value ~default:false
+                        (Option.map
+                           (fun value ->
+                             match String.split_on_char ';' value with
+                             | head :: _ ->
+                                 String.starts_with ~prefix:"image/"
+                                   (lower_trim head)
+                             | [] -> false)
+                           content_type)
+                    then
+                      Ok
+                        (build_preview_json ~url:normalized_url ~kind:"image"
+                           ~image_url:normalized_url
+                           ?content_type
+                           ~favicon_url:(default_favicon_url normalized_url)
+                           ~cache_state:"miss" ())
+                    else
+                      (* Byte slicing a UTF-8 body can split a multibyte
+                         character at max_html_chars, and the partial byte
+                         kills downstream decoding (#7690 shape). utf8_prefix
+                         clamps to the previous character boundary and passes
+                         shorter bodies through unchanged. *)
+                      let body =
+                        String_util.utf8_prefix ~max_bytes:max_html_chars
+                          response.body
+                      in
+                      let extracted =
+                        extract_html_preview_fields ~url:normalized_url body
+                      in
+                      let canonical_url =
+                        match extracted.canonical_url with
+                        | Some value -> Some value
+                        | None -> Some normalized_url
+                      in
+                      Ok
+                        (build_preview_json ~url:normalized_url ~kind:"link"
+                           ?canonical_url
+                           ?title:extracted.title
+                           ?description:extracted.description
+                           ?site_name:extracted.site_name
+                           ?image_url:extracted.image_url
+                           ?favicon_url:extracted.favicon_url
+                           ?content_type
+                           ~cache_state:"miss" ())
+            in
+            (* A preview that finished as its window closed is the preview. *)
+            try
+              Watched_work.run
+                ~watcher:(fun () ->
+                  Eio.Time.sleep clock preview_timeout_sec;
+                  Error (Printexc.to_string Eio.Time.Timeout))
+                run
+            with Eio.Cancel.Cancelled _ as e -> raise e
+               | exn -> Error (Printexc.to_string exn))
+
+let urls_of_request args =
+  match Json_util.assoc_member_opt "urls" args with
+  | Some (`List items) ->
+      let urls =
+        items
+        |> List.filter_map (function
+             | `String value ->
+                 let trimmed = String.trim value in
+                 if trimmed = "" then None else Some trimmed
+             | _ -> None)
+        |> List.sort_uniq String.compare
+      in
+      if urls = [] then Error "urls must contain at least one non-empty string"
+      else Ok (List.take max_preview_urls urls)
+  | _ -> Error "urls must be an array of strings"
+
+let dashboard_link_previews_http_json ~state ~(args : Yojson.Safe.t) :
+    (Yojson.Safe.t, string) result =
+  let clock_opt =
+    match state.Mcp_server.clock with
+    | Some _ as clock -> clock
+    | None -> Eio_context.get_clock_opt ()
+  in
+  let net_opt =
+    match state.Mcp_server.net with
+    | Some _ as net -> net
+    | None -> Eio_context.get_net_opt ()
+  in
+  match clock_opt, net_opt, urls_of_request args with
+  | None, _, _ -> Error "dashboard link preview clock unavailable"
+  | _, None, _ -> Error "dashboard link preview net unavailable"
+  | _, _, (Error _ as error) -> error
+  | Some clock, Some net, Ok urls ->
+      let preview_for_url url =
+        try
+          match cache_lookup url with
+          | Some cached -> (
+            match error_reason_of_json cached with
+            | Some reason -> Preview_error reason
+            | None -> Preview (with_cache_state cached "hit"))
+          | None -> (
+            match fetch_preview ~clock ~net url with
+            | Ok preview ->
+              let persisted = with_cache_state preview "miss" in
+              cache_store ~ttl:cache_ttl_sec url persisted;
+              Preview persisted
+            | Error reason ->
+              let error_preview = error_json ~url ~reason ~cache_state:"miss" () in
+              cache_store ~ttl:error_ttl_sec url error_preview;
+              Preview_error reason)
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Preview_error (Printexc.to_string exn)
+      in
+      let results =
+        Eio.Fiber.List.map
+          ~max_fibers:(min max_preview_urls (List.length urls))
+          (fun url -> url, preview_for_url url)
+          urls
+      in
+      let preview_fields, error_fields =
+        List.fold_left
+          (fun (previews, errors) (url, result) ->
+             match result with
+             | Preview preview -> (url, preview) :: previews, errors
+             | Preview_error reason -> previews, (url, `String reason) :: errors)
+          ([], [])
+          results
+      in
+      Ok
+        (`Assoc
+          [
+            ("previews", `Assoc (List.rev preview_fields));
+            ("errors", `Assoc (List.rev error_fields));
+          ])

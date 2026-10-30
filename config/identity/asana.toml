@@ -1,0 +1,23 @@
+# Asana's remote MCP server.
+#
+# Only the server is named. Where its metadata lives, its endpoints and the
+# scopes it publishes all come from the server itself, so none of that can go
+# stale here.
+#
+# Measured 2026-08-27: this one publishes its protected-resource document at
+# the origin while serving MCP below it, so the URL RFC 9728 3 computes
+# misses it and the location comes from the 401's WWW-Authenticate header
+# instead. The authorization server it names offers S256 and a registration
+# endpoint, and accepts a client that authenticates with nothing. It names one scope.
+
+id = "asana"
+label = "Asana"
+mcp_url = "https://mcp.asana.com/mcp"
+
+access_token_env = "ASANA_ACCESS_TOKEN"
+expires_at_env = "ASANA_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.asana/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

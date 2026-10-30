@@ -1,0 +1,525 @@
+[p1 "MASC · Lane Add-ons" | space "MASC Addon full54 verification 20261022"(29): 1 managed, 0 untracked — p1* "MASC · Lane Add-ons"]
+root
+  anchor [ref=67, loc=href:/dashboard/#main-content, url=http://127.0.0.1:49436/dashboard/#main-content]
+    text "Skip to main content"
+  container
+    text "MONITOR"
+    group "Fleet 상태와 작업"
+      container
+        text "0"
+        text "실행 가능"
+      container
+        text "✓"
+        text "정상"
+      button [ref=1]
+        text "◷"
+        text "예약"
+      button "Toggle Chat Dock" [ref=2, loc=css:button[aria-label="Toggle Chat Dock"]]
+        svg_root
+        text "Chat"
+        text "⌘J"
+    group "연결과 운영 도구"
+      status
+        text "연결됨"
+      group "Namespace pause control"
+        button [ref=3]
+          svg_root
+          text "Emergency Stop"
+      status
+        button "오류 콘솔 · 대시보드 오류 없음" [ref=4, loc=css:button[aria-label="오류 콘솔 · 대시보드 오류 없음"]]
+          svg_root
+          text "오류 콘솔"
+      button "Auth status" [ref=5, loc=css:button[aria-label="Auth status"]]
+        text "Verified @dashboard · admin"
+      button "Server build v0.60.0 · 6f68dbc38d" [ref=6, loc=css:button[aria-label="Server build v0.60.0 · 6f68dbc38d"]]
+        text "v0.60.0 · 6f68dbc38d"
+      button "Open display tweaks (density, motion, bubbles, font scale, voltage, theme)" [ref=7, loc=css:button[aria-label="Open display tweaks (density, motion, bubbles, font scale, voltage, theme)"]]
+        svg_root
+        text "Tweaks"
+  container
+    container
+      button [ref=8]
+        text "M"
+      button [ref=9]
+        svg_root
+      button [ref=10]
+        svg_root
+      button [ref=11]
+        svg_root
+      button [ref=12]
+        svg_root
+      button [ref=13]
+        svg_root
+      button [ref=14]
+        svg_root
+      button [ref=15]
+        svg_root
+      button [ref=16]
+        svg_root
+      button [ref=17]
+        svg_root
+      button [ref=18]
+        svg_root
+      button [ref=19]
+        svg_root
+      button [ref=20]
+        svg_root
+      button [ref=21]
+        svg_root
+      button [ref=22]
+        svg_root
+      button [ref=23]
+        svg_root
+    container [ref=24]
+      container [ref=25]
+        container "Monitor sections"
+          anchor [ref=38, url=http://127.0.0.1:49436/dashboard/#monitoring?section=agents]
+            text "KEEPER FLEET"
+          anchor [ref=39, loc=href:/dashboard/#monitoring?section=internal-agents, url=http://127.0.0.1:49436/dashboard/#monitoring?section=internal-agents]
+            text "INTERNAL AGENTS"
+          anchor [ref=40, loc=href:/dashboard/#monitoring?section=fleet-health, url=http://127.0.0.1:49436/dashboard/#monitoring?section=fleet-health]
+            text "TOOL MONITOR"
+          anchor [ref=41, loc=href:/dashboard/#monitoring?section=runtime, url=http://127.0.0.1:49436/dashboard/#monitoring?section=runtime]
+            text "RUNTIME"
+          anchor [ref=42, loc=href:/dashboard/#monitoring?section=observatory, url=http://127.0.0.1:49436/dashboard/#monitoring?section=observatory]
+            text "OBSERVATORY"
+          anchor [ref=43, loc=href:/dashboard/#monitoring?section=skills, url=http://127.0.0.1:49436/dashboard/#monitoring?section=skills]
+            text "SKILLS"
+          anchor [ref=44, loc=href:/dashboard/#monitoring?section=lane-inventory, url=http://127.0.0.1:49436/dashboard/#monitoring?section=lane-inventory]
+            text "ALL LANES"
+          anchor [ref=45, loc=href:/dashboard/#monitoring?section=lane-addons, url=http://127.0.0.1:49436/dashboard/#monitoring?section=lane-addons]
+            text "LANE ADD-ONS"
+          anchor [ref=46, loc=href:/dashboard/#monitoring?section=lanes, url=http://127.0.0.1:49436/dashboard/#monitoring?section=lanes]
+            text "LANE · QUEUE"
+        container
+          container "Breadcrumb"
+            ordered_list
+              list_item
+                anchor [ref=47, url=http://127.0.0.1:49436/dashboard/#monitoring?section=agents]
+                  text "MONITOR"
+                text "›"
+              list_item
+                text "LANE ADD-ONS"
+          heading
+            text "Lane Add-ons"
+          button "Copy current section URL" [ref=48, loc=css:button[aria-label="Copy current section URL"]]
+            svg_root
+          anchor "Open this surface in a solo view" [ref=49, loc=css:a[aria-label="Open this surface in a solo view"], url=http://127.0.0.1:49436/dashboard/#monitoring?section=lane-addons&solo=1]
+            svg_root
+          paragraph
+            text "Optional cross-lane observations and relationships."
+        container "Lane Add-ons"
+          container
+            heading
+              text "LANE ADD-ONS"
+            paragraph
+              text "Optional observations and relationships. Keeper work continues independently."
+            button [ref=50]
+              text "New TOML"
+            button [ref=51]
+              text "Refresh"
+          status
+            text "Frozen slice: Refresh updates installation status only. Use Slice to query again, or Clear slice to show the latest snapshot."
+          container "TOML configuration"
+            heading
+              text "INSTALLED PACKAGES"
+            paragraph
+              text "Directory:"
+              text "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons"
+            paragraph
+              text "Configuration read:"
+              text "complete"
+            container "Installed package manager"
+              paragraph
+                text "Find an installation, edit its settings, then check its applied revision and worker observation. Saving TOML and applying it are separate steps."
+              button [ref=52]
+                text "All installations"
+                text ":"
+                text "1"
+              button [ref=53]
+                text "Needs attention"
+                text ":"
+                text "0"
+              button [ref=54]
+                text "Pending changes"
+                text ":"
+                text "0"
+              button [ref=55]
+                text "Configured off"
+                text ":"
+                text "1"
+              button [ref=56]
+                text "Worker available"
+                text ":"
+                text "0"
+              container
+                text "Search installations"
+                searchbox [ref=57, loc=css:input[placeholder="Installation, package, run or file"]]
+                  text "Installation, package, run or file"
+              status
+                text "Showing"
+                text "1"
+                text "of"
+                text "1"
+                text "readable installations. Worker state is the last inventory reading, not a live health check."
+              table "TOML declarations"
+                table_row
+                  table_cell
+                    text "INSTALLATION / PACKAGE"
+                  table_cell
+                    text "REQUESTED ACTIVITY"
+                  table_cell
+                    text "APPLICATION / WORKER STATUS"
+                  table_cell
+                    text "SETTINGS AND OBSERVATION"
+                table_row "Installation native-current-ui-proof"
+                  table_cell
+                    text "native-current-ui-proof"
+                    container
+                      container [ref=58]
+                        text "File and revisions"
+                      container
+                        paragraph
+                          text "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml"
+                        paragraph
+                          text "File revision:"
+                          text "244f75ae3ab67c5c917825083c7446b6bf83a24187774062d3e6e62a96d34cf1"
+                        paragraph
+                          text "Desired revision:"
+                          text "55bcb1596678a58131f7bf0c223123f0ad88e464447ba6d48145cf5fcdb82931"
+                        paragraph
+                          text "Applied revision:"
+                          text "None"
+                        paragraph
+                          text "Instance:"
+                          text "No instance"
+                  table_cell
+                    text "Requested: Off"
+                  table_cell
+                    status
+                      text "Configured off"
+                    container "Connection lifecycle native-current-ui-proof"
+                      status
+                        text "Off · worker cleanup confirmed"
+                      paragraph
+                        text "Startup and cleanup describe the worker. Completed observations and action results remain separate evidence."
+                      container "Workers with this installation ID"
+                        container [ref=59]
+                          text "Workers with this installation ID ·"
+                          text "1"
+                        container "Worker 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad · incarnation 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+                          paragraph
+                            text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+                            text "·"
+                            text "retained"
+                            text "·"
+                            text "detached"
+                          paragraph
+                            text "Installation:"
+                            text "native-current-ui-proof"
+                          paragraph
+                            text "Incarnation:"
+                            text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+                          paragraph
+                            text "TOML:"
+                            text "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml"
+                          paragraph
+                            text "Installed revision:"
+                            text "55bcb1596678a58131f7bf0c223123f0ad88e464447ba6d48145cf5fcdb82931"
+                          paragraph
+                            text "Completed observation sequence:"
+                            text "1"
+                            text "· retained rows:"
+                            text "1"
+                  table_cell
+                    button "Edit TOML /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml" [ref=60]
+                      text "Edit TOML"
+                    button "Configure activity for native-current-ui-proof" [ref=61, loc=css:button[aria-label="Configure activity for native-current-ui-proof"]]
+                      text "On / off"
+                    button "Observe installation native-current-ui-proof" [ref=62, loc=css:button[aria-label="Observe installation native-current-ui-proof"]]
+                      text "Check observation"
+          container "Package activity native-current-ui-proof"
+            container
+              heading [ref=65]
+                text "PACKAGE ON/OFF ·"
+                text "NATIVE-CURRENT-UI-PROOF"
+              button [ref=66]
+                text "Close activity"
+            paragraph
+              text "Off keeps this declaration and retained observations, and asks the server to clean up its worker. On makes it eligible for reconciliation again. Existing TOML editor drafts are unchanged."
+            status
+              text "File activity (last read):"
+              text "On"
+            container "Connection lifecycle native-current-ui-proof"
+              status
+                text "Different TOML revision observed · this file’s application is not confirmed"
+              paragraph
+                text "Startup and cleanup describe the worker. Completed observations and action results remain separate evidence."
+              container "Workers with this installation ID"
+                container [ref=68]
+                  text "Workers with this installation ID ·"
+                  text "1"
+                container "Worker 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad · incarnation 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+                  paragraph
+                    text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+                    text "·"
+                    text "retained"
+                    text "·"
+                    text "detached"
+                  paragraph
+                    text "Installation:"
+                    text "native-current-ui-proof"
+                  paragraph
+                    text "Incarnation:"
+                    text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+                  paragraph
+                    text "TOML:"
+                    text "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml"
+                  paragraph
+                    text "Installed revision:"
+                    text "55bcb1596678a58131f7bf0c223123f0ad88e464447ba6d48145cf5fcdb82931"
+                  paragraph
+                    text "Completed observation sequence:"
+                    text "1"
+                    text "· retained rows:"
+                    text "1"
+            status
+              text "The file activity differs from the last inventory observation. Read current activity to refresh both; worker completion is tracked separately."
+            switch "Activity draft for native-current-ui-proof" [ref=69, loc=css:button[aria-label="Activity draft for native-current-ui-proof"]]
+              text "Draft:"
+              text "On"
+              text "·"
+              text "Turn off"
+            container
+              button [ref=70]
+                text "Save activity"
+              button [ref=71]
+                text "Read current activity"
+              button [ref=72]
+                text "Discard activity draft"
+              button [ref=73]
+                text "Edit original TOML"
+            status
+              text "Activity configuration saved. Worker application or cleanup is still pending reconciliation."
+            status
+              text "Last save response:"
+              text "saved"
+              text "· durability"
+              text "durable"
+              text "."
+            container
+              container [ref=74]
+                text "File and save revisions"
+              container
+                paragraph
+                  text "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml"
+                paragraph
+                  text "Draft base:"
+                  text "c9544a80b5b6b7f70f485fa6eedcedaf7db4234ea013161d661387beaf77b09f"
+                paragraph
+                  text "Last read:"
+                  text "c9544a80b5b6b7f70f485fa6eedcedaf7db4234ea013161d661387beaf77b09f"
+          button [ref=63]
+            text "Install package"
+          container "Selected declaration settings" [ref=75]
+          container "Lane by time"
+            text "Lane × wall time · Select an event to inspect its evidence. Drag empty plot space to set a slice window."
+            paragraph
+              text "Each row is a declared or observed Lane. Dotted links are recorded relationships; spacing does not imply causation."
+            paragraph
+              text "2026-10-21T15:40:32.266Z → 2026-10-21T15:40:32.266Z"
+            group "phrase · c9cc5fad Native MIDI phrase playback · detached"
+              text "phrase · c9cc5fad"
+              text "Native MIDI phrase playback · detached"
+            container [ref=98]
+              text "Event list ·"
+              text "1"
+              text "observations, including overlapping points"
+            unordered_list
+              list_item
+                button [ref=99]
+                  text "Inspect event:"
+                  text "SoundFont: pause_requested"
+                  text "·"
+                  text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/1/e8e8b75037064ace8cb1bde36d94521f726b782d9295136ffc7e04d0f326da1d"
+          container [ref=64]
+            text "Attach a package"
+          form
+            container
+              text "Manifest path"
+              textbox [ref=76]
+            container
+              text "Run ID"
+              textbox [ref=77]
+                text "native-current-ui-proof"
+            container
+              text "Binding JSON"
+              textbox [ref=78]
+                text "{}"
+            button [ref=79]
+              text "Attach"
+          table
+            table_row
+              table_cell
+                text "INSTANCE / PACKAGE"
+              table_cell
+                text "RUN / REVISION"
+              table_cell
+                text "STATUS"
+              table_cell
+                text "CURSOR / ROWS"
+              table_cell
+                text "ACTIONS"
+            table_row "Worker 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad · incarnation 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+              table_cell
+                container
+                  radio [ref=90, loc=css:input[name="addon-instance"]]
+                  text "Native MIDI phrase playback"
+                text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+                text "·"
+                text "vst-phrase"
+                paragraph
+                  text "TOML:"
+                  text "native-current-ui-proof"
+                paragraph
+                  text "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml"
+                paragraph
+                  text "Installed configuration:"
+                  text "55bcb1596678a58131f7bf0c223123f0ad88e464447ba6d48145cf5fcdb82931"
+                button "Edit TOML for 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad" [ref=91, loc=css:button[aria-label="Edit TOML for 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"]]
+                  text "Edit TOML"
+                paragraph
+                  text "Latest native phrase render and local player process state"
+                container [ref=92]
+                  text "Package input and display contracts"
+                text "{ "binding_schema": { "type": "object", "properties": { "sources": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": { "source_id": { "type": "string", "const": "vst-phrase"..."
+                paragraph
+                  text "Output"
+                  text "phrase"
+                  text ":"
+                  text "phrase"
+              table_cell
+                text "native-current-ui-proof"
+                text "0.1.0"
+              table_cell
+                text "detached"
+              table_cell
+                text "1"
+                text "/"
+                text "1"
+              table_cell
+                button [ref=94]
+                  text "Observe"
+                button [ref=95]
+                  text "Remove TOML + worker"
+                paragraph
+                  text "Deletes the matching installation TOML from disk and cleans up its worker. Retained observations and evidence remain."
+          form
+            container
+              text "Run filter"
+              textbox [ref=80]
+                text "native-current-ui-proof"
+            container
+              text "Lane filter"
+              textbox [ref=81]
+            container
+              text "Since (Unix seconds)"
+              textbox [ref=82]
+            container
+              text "Until (Unix seconds)"
+              textbox [ref=83]
+            button [ref=84]
+              text "Slice"
+            button [ref=85]
+              text "Clear slice"
+          paragraph
+            text "vst-phrase"
+            text "·"
+            text "current-native-synthetic-source"
+            text "· cursor"
+            text "1"
+            text "·"
+            text "complete"
+            text "Synthetic source for corrected native lifecycle; no model/audio"
+          paragraph
+            text "retained:01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+            text "·"
+            text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+            text "· cursor"
+            text "scanned:1/of:1"
+            text "·"
+            text "complete"
+            text "window [unbounded, unbounded]; rows and source coverage inspected through 1/of:1; no matching row records omitted; all inspected source coverage returned; retained observations readable"
+          paragraph
+            text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+            text "·"
+            text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad"
+            text "· cursor"
+            text "1"
+            text "·"
+            text "complete"
+            text "detached; retained range only"
+          paragraph
+            text "Slice:"
+            text "complete within reported coverage"
+          container
+            container
+              checkbox [ref=100]
+              text "SoundFont: pause_requested"
+              text "·"
+              text "value"
+              text "·"
+              text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/phrase"
+            paragraph
+              text "2026-10-21T15:40:32.266Z"
+              text "·"
+              text "current-input-1"
+              text "· actor"
+              text "unknown"
+            unordered_list "Package readings for 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/1/e8e8b75037064ace8cb1bde36d94521f726b782d9295136ffc7e04d0f326da1d"
+              list_item
+                text "State"
+              list_item
+                text "pause_requested"
+              list_item
+                text "Instrument"
+              list_item
+                text "Unavailable ·"
+                text "field unavailable"
+              list_item
+                text "Preset"
+              list_item
+                text "Unavailable ·"
+                text "field unavailable"
+              list_item
+                text "MIDI SHA-256"
+              list_item
+                text "Unavailable ·"
+                text "field unavailable"
+              list_item
+                text "Rendered audio"
+              list_item
+                text "Unavailable ·"
+                text "field unavailable"
+              list_item
+                text "Failure"
+              list_item
+                text "Unavailable ·"
+                text "field unavailable"
+            container [ref=101]
+              text "Fields and original evidence ·"
+              text "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/1/e8e8b75037064ace8cb1bde36d94521f726b782d9295136ffc7e04d0f326da1d"
+            container
+              text "{ "source_id": "vst-phrase", "incarnation": "current-native-synthetic-source", "source_event_id": "current-input-1", "state": "pause_requested", "scope": "latest_local_phrase_state", "playback_evidenc..."
+              paragraph
+                text "lane-evidence:f4b0126b1650985e6d1aaba6167d8a907c9abb52661466b93bf426d5a8503621"
+                text "· sha256"
+                text "f4b0126b1650985e6d1aaba6167d8a907c9abb52661466b93bf426d5a8503621"
+          container
+            text "Keeper (optional)"
+            textbox [ref=86]
+          button [ref=87]
+            text "Preserve selected evidence"
+  button "Open Chat Dock" [ref=37, loc=css:button[aria-label="Open Chat Dock"]]
+    svg_root
+    text "Chat"

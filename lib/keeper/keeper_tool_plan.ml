@@ -1,0 +1,1753 @@
+module Node_id = struct
+  type t = string
+
+  type error = Empty
+
+  let make = function
+    | "" -> Error Empty
+    | value -> Ok value
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+  let compare = String.compare
+end
+
+module Node_map = Map.Make (Node_id)
+
+(* The composable subset supports an explicit nullable type pair. Normalize
+   only a known non-null type plus null; other unions remain unsupported.
+   Contract validation, value validation and pointer traversal share this
+   interpretation so an accepted status schema remains usable downstream. *)
+let nullable_schema_type = function
+  | `List [ `String "null"; (`String ("boolean" | "integer" | "number" | "string" | "array" | "object") as kind) ]
+  | `List [ (`String ("boolean" | "integer" | "number" | "string" | "array" | "object") as kind); `String "null" ] ->
+    Some kind
+  | _ -> None
+;;
+
+module Json_pointer = struct
+  type t = string list
+
+  type syntax_error =
+    | Missing_initial_slash
+    | Dangling_escape of { segment : string }
+    | Invalid_escape of
+        { segment : string
+        ; found : char
+        }
+
+  type resolution_error =
+    | Missing_object_field of string
+    | Ambiguous_object_field of string
+    | Invalid_array_index of string
+    | Array_index_out_of_bounds of int
+    | Expected_container of string
+
+  type schema_error =
+    | Missing_properties of string
+    | Missing_property_schema of string
+    | Ambiguous_property_schema of string
+    | Missing_items_schema of string
+    | Expected_schema_container of string
+
+  let root = []
+  let of_segments segments = segments
+
+  let uncons = function [] -> None | segment :: rest -> Some (segment, rest)
+  let append prefix suffix = prefix @ suffix
+
+  let decode_segment segment =
+    let length = String.length segment in
+    let buffer = Buffer.create length in
+    let rec decode index =
+      if index = length
+      then Ok (Buffer.contents buffer)
+      else
+        match String.unsafe_get segment index with
+        | '~' when index + 1 = length -> Error (Dangling_escape { segment })
+        | '~' ->
+          let escaped = String.unsafe_get segment (index + 1) in
+          (match escaped with
+           | '0' ->
+             Buffer.add_char buffer '~';
+             decode (index + 2)
+           | '1' ->
+             Buffer.add_char buffer '/';
+             decode (index + 2)
+           | found -> Error (Invalid_escape { segment; found }))
+        | character ->
+          Buffer.add_char buffer character;
+          decode (index + 1)
+    in
+    decode 0
+  ;;
+
+  let of_string = function
+    | "" -> Ok root
+    | pointer when String.unsafe_get pointer 0 <> '/' -> Error Missing_initial_slash
+    | pointer ->
+      let encoded = String.sub pointer 1 (String.length pointer - 1) in
+      let rec decode_all decoded = function
+        | [] -> Ok (List.rev decoded)
+        | segment :: rest ->
+          (match decode_segment segment with
+           | Ok segment -> decode_all (segment :: decoded) rest
+           | Error _ as error -> error)
+      in
+      decode_all [] (String.split_on_char '/' encoded)
+  ;;
+
+  let segments pointer = pointer
+
+  let encode_segment segment =
+    let buffer = Buffer.create (String.length segment) in
+    String.iter
+      (function
+        | '~' -> Buffer.add_string buffer "~0"
+        | '/' -> Buffer.add_string buffer "~1"
+        | character -> Buffer.add_char buffer character)
+      segment;
+    Buffer.contents buffer
+  ;;
+
+  let to_string = function
+    | [] -> ""
+    | segments -> "/" ^ String.concat "/" (List.map encode_segment segments)
+  ;;
+
+  let unique_object_field name fields =
+    match
+      List.filter_map
+        (fun (field, value) -> if String.equal field name then Some value else None)
+        fields
+    with
+    | [ value ] -> Ok value
+    | [] -> Error (Missing_object_field name)
+    | _ -> Error (Ambiguous_object_field name)
+  ;;
+
+  let array_index segment =
+    let length = String.length segment in
+    let rec all_digits index =
+      if index = length
+      then true
+      else
+        match String.unsafe_get segment index with
+        | '0' .. '9' -> all_digits (index + 1)
+        | _ -> false
+    in
+    if length = 0
+       || (length > 1 && Char.equal (String.unsafe_get segment 0) '0')
+       || not (all_digits 0)
+    then Error (Invalid_array_index segment)
+    else
+      match int_of_string_opt segment with
+      | Some index -> Ok index
+      | None -> Error (Invalid_array_index segment)
+  ;;
+
+  let resolve pointer json =
+    let rec descend value = function
+      | [] -> Ok value
+      | segment :: rest ->
+        (match value with
+         | `Assoc fields ->
+           (match unique_object_field segment fields with
+            | Ok value -> descend value rest
+            | Error _ as error -> error)
+         | `List values ->
+           (match array_index segment with
+            | Error _ as error -> error
+            | Ok index ->
+              (match List.nth_opt values index with
+               | Some value -> descend value rest
+               | None -> Error (Array_index_out_of_bounds index)))
+         | `Null
+         | `Bool _
+         | `Int _
+         | `Intlit _
+         | `Float _
+         | `String _ -> Error (Expected_container segment))
+    in
+    descend json pointer
+  ;;
+
+  let unique_schema_property name fields =
+    match List.assoc_opt "properties" fields with
+    | None -> Error (Missing_properties name)
+    | Some (`Assoc properties) ->
+      (match
+         List.filter_map
+           (fun (field, schema) -> if String.equal field name then Some schema else None)
+           properties
+       with
+       | [ schema ] -> Ok schema
+       | [] -> Error (Missing_property_schema name)
+       | _ -> Error (Ambiguous_property_schema name))
+    | Some _ -> Error (Missing_properties name)
+  ;;
+
+  let resolve_schema pointer schema =
+    let rec descend schema = function
+      | [] -> Ok schema
+      | segment :: rest ->
+        (match schema with
+         | `Assoc fields ->
+           (match
+              Option.map
+                (fun kind ->
+                   match nullable_schema_type kind with
+                   | Some non_null_kind -> non_null_kind
+                   | None -> kind)
+                (List.assoc_opt "type" fields)
+            with
+            | Some (`String "object") ->
+              (match unique_schema_property segment fields with
+               | Ok schema -> descend schema rest
+               | Error _ as error -> error)
+            | Some (`String "array") ->
+              (match array_index segment with
+               | Error _ -> Error (Expected_schema_container segment)
+               | Ok _ ->
+                 (match List.assoc_opt "items" fields with
+                  | Some item_schema -> descend item_schema rest
+                  | None -> Error (Missing_items_schema segment)))
+            | Some _ | None -> Error (Expected_schema_container segment))
+         | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+           Error (Expected_schema_container segment))
+    in
+    descend schema pointer
+  ;;
+end
+
+module Json_template = struct
+  type t =
+    | Literal of Yojson.Safe.t
+    | Output of
+        { node_id : Node_id.t
+        ; pointer : Json_pointer.t
+        }
+    | Param of { name : string }
+    | Object of (string * t) list
+    | Array of t list
+
+  type object_error = Duplicate_field of string
+
+  type resolution_error =
+    | Missing_output of Node_id.t
+    | Pointer_resolution_failed of
+        { node_id : Node_id.t
+        ; error : Json_pointer.resolution_error
+        }
+    | Param_not_substituted of string
+
+  type substitution_error = Missing_param of string
+
+  let literal value = Literal value
+  let output ~node_id ~pointer = Output { node_id; pointer }
+  let param ~name = Param { name }
+  let array values = Array values
+
+  let object_ fields =
+    let rec first_duplicate seen = function
+      | [] -> None
+      | (name, _) :: rest ->
+        if List.mem name seen then Some name else first_duplicate (name :: seen) rest
+    in
+    match first_duplicate [] fields with
+    | None -> Ok (Object fields)
+    | Some name -> Error (Duplicate_field name)
+  ;;
+
+  let dependencies template =
+    let rec collect acc = function
+      | Literal _ | Param _ -> acc
+      | Output { node_id; _ } ->
+        if List.exists (Node_id.equal node_id) acc then acc else node_id :: acc
+      | Object fields ->
+        List.fold_left (fun acc (_, value) -> collect acc value) acc fields
+      | Array values -> List.fold_left collect acc values
+    in
+    collect [] template |> List.rev
+  ;;
+
+  let references template =
+    let rec collect acc = function
+      | Literal _ | Param _ -> acc
+      | Output { node_id; pointer } -> (node_id, pointer) :: acc
+      | Object fields ->
+        List.fold_left (fun acc (_, value) -> collect acc value) acc fields
+      | Array values -> List.fold_left collect acc values
+    in
+    collect [] template |> List.rev
+  ;;
+
+  let param_names template =
+    let rec collect acc = function
+      | Literal _ | Output _ -> acc
+      | Param { name } -> if List.mem name acc then acc else name :: acc
+      | Object fields ->
+        List.fold_left (fun acc (_, value) -> collect acc value) acc fields
+      | Array values -> List.fold_left collect acc values
+    in
+    collect [] template |> List.rev
+  ;;
+
+  (* Substitution rebuilds the template with every [Param] replaced by the
+     caller's value, so a plan created from the result is param-free and the
+     executor never meets an unbound name. Structure is preserved exactly:
+     no field is added or removed, so [Object] duplicate-field validity
+     carries over from the input template. *)
+  let substitute_params ~lookup template =
+    let rec substitute = function
+      | Literal _ as value -> Ok value
+      | Output _ as value -> Ok value
+      | Param { name } ->
+        (match lookup name with
+         | Some value -> Ok (Literal value)
+         | None -> Error (Missing_param name))
+      | Object fields ->
+        let rec substitute_all rebuilt = function
+          | [] -> Ok (Object (List.rev rebuilt))
+          | (name, value) :: rest ->
+            (match substitute value with
+             | Ok value -> substitute_all ((name, value) :: rebuilt) rest
+             | Error _ as error -> error)
+        in
+        substitute_all [] fields
+      | Array values ->
+        let rec substitute_all rebuilt = function
+          | [] -> Ok (Array (List.rev rebuilt))
+          | value :: rest ->
+            (match substitute value with
+             | Ok value -> substitute_all (value :: rebuilt) rest
+             | Error _ as error -> error)
+        in
+        substitute_all [] values
+    in
+    substitute template
+  ;;
+
+  let resolve ~lookup template =
+    let rec resolve_value = function
+      | Literal value -> Ok value
+      | Param { name } -> Error (Param_not_substituted name)
+      | Output { node_id; pointer } ->
+        (match lookup node_id with
+         | None -> Error (Missing_output node_id)
+         | Some output ->
+           (match Json_pointer.resolve pointer output with
+            | Ok value -> Ok value
+            | Error error -> Error (Pointer_resolution_failed { node_id; error })))
+      | Array values ->
+        let rec resolve_all resolved = function
+          | [] -> Ok (`List (List.rev resolved))
+          | value :: rest ->
+            (match resolve_value value with
+             | Ok value -> resolve_all (value :: resolved) rest
+             | Error _ as error -> error)
+        in
+        resolve_all [] values
+      | Object fields ->
+        let rec resolve_all resolved = function
+          | [] -> Ok (`Assoc (List.rev resolved))
+          | (name, value) :: rest ->
+            (match resolve_value value with
+             | Ok value -> resolve_all ((name, value) :: resolved) rest
+             | Error _ as error -> error)
+        in
+        resolve_all [] fields
+    in
+    resolve_value template
+  ;;
+end
+
+module Run_id = struct
+  type t = int
+
+  let next = Atomic.make 0
+  let fresh () = Atomic.fetch_and_add next 1
+  let equal = Int.equal
+end
+
+module Composition_run_id = struct
+  type t = string
+
+  type error = Invalid_uuid_v7 of string
+
+  let fresh = Random_id.uuid_v7
+  let of_string value =
+    Random_id.parse_uuid_v7 value
+    |> Result.map_error (fun reason -> Invalid_uuid_v7 reason)
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+  let result_receipt_id identity = "composition-result:" ^ identity
+  let child_tool_use_id identity ~parent_tool_use_id ~alias =
+    "composition-skill:" ^ Yojson.Safe.to_string
+      (`List [`String identity;`String parent_tool_use_id;`String (Node_id.to_string alias)])
+end
+
+type json_type =
+  | Null_type
+  | Boolean_type
+  | Integer_type
+  | Number_type
+  | String_type
+  | Array_type
+  | Object_type
+
+type schema_value_error =
+  | Unsupported_schema_type of Yojson.Safe.t
+  | Missing_required_field of
+      { path : string list
+      ; field : string
+      }
+  | Unexpected_field of
+      { path : string list
+      ; field : string
+      }
+  | Duplicate_value_field of
+      { path : string list
+      ; field : string
+      }
+  | Type_mismatch of
+      { path : string list
+      ; expected : json_type
+      ; actual : json_type
+      }
+
+type schema_contract_error =
+  | Expected_schema_object of
+      { path : string list
+      ; schema : Yojson.Safe.t
+      }
+  | Duplicate_schema_keyword of
+      { path : string list
+      ; keyword : string
+      }
+  | Missing_schema_type of { path : string list }
+  | Unsupported_contract_type of
+      { path : string list
+      ; value : Yojson.Safe.t
+      }
+  | Unsupported_schema_keyword of
+      { path : string list
+      ; keyword : string
+      }
+  | Invalid_schema_keyword_value of
+      { path : string list
+      ; keyword : string
+      ; value : Yojson.Safe.t
+      }
+  | Duplicate_required_field of
+      { path : string list
+      ; field : string
+      }
+  | Unknown_required_property of
+      { path : string list
+      ; field : string
+      }
+
+let json_type = function
+  | `Null -> Null_type
+  | `Bool _ -> Boolean_type
+  | `Int _ | `Intlit _ -> Integer_type
+  | `Float _ -> Number_type
+  | `String _ -> String_type
+  | `List _ -> Array_type
+  | `Assoc _ -> Object_type
+;;
+
+let first_duplicate_field fields =
+  let rec find seen = function
+    | [] -> None
+    | (name, _) :: rest ->
+      if List.mem name seen then Some name else find (name :: seen) rest
+  in
+  find [] fields
+;;
+
+let first_duplicate_name names =
+  let rec find seen = function
+    | [] -> None
+    | name :: rest ->
+      if List.mem name seen then Some name else find (name :: seen) rest
+  in
+  find [] names
+;;
+
+let schema_type fields = List.assoc_opt "type" fields
+
+let rec validate_schema_contract ~path schema =
+  match schema with
+  | `Assoc fields ->
+    (match first_duplicate_field fields with
+     | Some keyword -> Error (Duplicate_schema_keyword { path; keyword })
+     | None ->
+       (match schema_type fields with
+        | None -> Error (Missing_schema_type { path })
+        | Some (`String schema_type) ->
+          let allowed_keywords =
+            match schema_type with
+            | "object" ->
+              Ok [ "type"; "properties"; "required"; "additionalProperties" ]
+            | "array" -> Ok [ "type"; "items" ]
+            | "null" | "boolean" | "integer" | "number" | "string" -> Ok [ "type" ]
+            | _ -> Error (Unsupported_contract_type { path; value = `String schema_type })
+          in
+          (match allowed_keywords with
+           | Error _ as error -> error
+           | Ok allowed_keywords ->
+             (match
+                List.find_opt
+                  (fun (keyword, _) -> not (List.mem keyword allowed_keywords))
+                  fields
+              with
+              | Some (keyword, _) -> Error (Unsupported_schema_keyword { path; keyword })
+              | None -> validate_schema_keywords ~path ~schema_type fields))
+        | Some value ->
+          (match nullable_schema_type value with
+           | Some kind ->
+             validate_schema_contract ~path
+               (`Assoc (("type", kind) :: List.remove_assoc "type" fields))
+           | None -> Error (Unsupported_contract_type { path; value }))))
+  | schema -> Error (Expected_schema_object { path; schema })
+
+and validate_schema_keywords ~path ~schema_type fields =
+  match schema_type with
+  | "object" -> validate_object_schema_contract ~path fields
+  | "array" ->
+    (match List.assoc_opt "items" fields with
+     | None -> Ok ()
+     | Some item_schema -> validate_schema_contract ~path:(path @ [ "items" ]) item_schema)
+  | "null" | "boolean" | "integer" | "number" | "string" -> Ok ()
+  | _ -> assert false
+
+and validate_object_schema_contract ~path fields =
+  let properties_result =
+    match List.assoc_opt "properties" fields with
+    | None -> Ok []
+    | Some (`Assoc properties) ->
+      (match first_duplicate_field properties with
+       | Some keyword ->
+         Error (Duplicate_schema_keyword { path = path @ [ "properties" ]; keyword })
+       | None ->
+         let rec validate_properties = function
+           | [] -> Ok properties
+           | (name, schema) :: rest ->
+             (match validate_schema_contract ~path:(path @ [ "properties"; name ]) schema with
+              | Ok () -> validate_properties rest
+              | Error _ as error -> error)
+         in
+         validate_properties properties)
+    | Some value ->
+      Error (Invalid_schema_keyword_value { path; keyword = "properties"; value })
+  in
+  match properties_result with
+  | Error _ as error -> error
+  | Ok properties ->
+    let required_result =
+      match List.assoc_opt "required" fields with
+      | None -> Ok []
+      | Some (`List values) ->
+        let rec strings acc = function
+          | [] -> Ok (List.rev acc)
+          | `String field :: rest -> strings (field :: acc) rest
+          | value :: _ ->
+            Error (Invalid_schema_keyword_value { path; keyword = "required"; value })
+        in
+        strings [] values
+      | Some value ->
+        Error (Invalid_schema_keyword_value { path; keyword = "required"; value })
+    in
+    (match required_result with
+     | Error _ as error -> error
+     | Ok required ->
+       (match first_duplicate_name required with
+        | Some field -> Error (Duplicate_required_field { path; field })
+        | None ->
+          (match List.find_opt (fun field -> not (List.mem_assoc field properties)) required with
+           | Some field -> Error (Unknown_required_property { path; field })
+           | None ->
+             (match List.assoc_opt "additionalProperties" fields with
+              | None | Some (`Bool _) -> Ok ()
+              | Some value ->
+                Error
+                  (Invalid_schema_keyword_value
+                     { path; keyword = "additionalProperties"; value })))))
+
+let rec validate_schema_value ~path schema value =
+  match schema with
+  | `Assoc schema_fields ->
+    (match schema_type schema_fields with
+     | Some (`String "object") -> validate_schema_object ~path schema_fields value
+     | Some (`String "array") -> validate_schema_array ~path schema_fields value
+     | Some (`String "null") -> validate_schema_scalar ~path Null_type value
+     | Some (`String "string") -> validate_schema_scalar ~path String_type value
+     | Some (`String "integer") -> validate_schema_scalar ~path Integer_type value
+     | Some (`String "number") ->
+       (match json_type value with
+        | Integer_type | Number_type -> Ok ()
+        | (Null_type | Boolean_type | String_type | Array_type | Object_type) as actual ->
+          Error (Type_mismatch { path; expected = Number_type; actual }))
+     | Some (`String "boolean") -> validate_schema_scalar ~path Boolean_type value
+     | Some unsupported ->
+       (match nullable_schema_type unsupported, value with
+        | Some _, `Null -> Ok ()
+        | Some kind, _ ->
+          validate_schema_value ~path
+            (`Assoc (("type", kind) :: List.remove_assoc "type" schema_fields))
+            value
+        | None, _ -> Error (Unsupported_schema_type unsupported))
+     | None -> Error (Unsupported_schema_type `Null))
+  | unsupported -> Error (Unsupported_schema_type unsupported)
+
+and validate_schema_scalar ~path expected value =
+  let actual = json_type value in
+  if actual = expected then Ok () else Error (Type_mismatch { path; expected; actual })
+
+and validate_schema_object ~path schema_fields value =
+  match value with
+  | `Assoc fields ->
+    (match first_duplicate_field fields with
+     | Some field -> Error (Duplicate_value_field { path; field })
+     | None ->
+       let properties =
+         match List.assoc_opt "properties" schema_fields with
+         | Some (`Assoc properties) -> properties
+         | None | Some _ -> []
+       in
+       let required =
+         match List.assoc_opt "required" schema_fields with
+         | Some (`List values) ->
+           List.filter_map (function `String name -> Some name | _ -> None) values
+         | None | Some _ -> []
+       in
+       (match List.find_opt (fun name -> not (List.mem_assoc name fields)) required with
+        | Some field -> Error (Missing_required_field { path; field })
+        | None ->
+          let additional_forbidden =
+            match List.assoc_opt "additionalProperties" schema_fields with
+            | Some (`Bool false) -> true
+            | None | Some _ -> false
+          in
+          (match
+             if additional_forbidden
+             then List.find_opt (fun (name, _) -> not (List.mem_assoc name properties)) fields
+             else None
+           with
+           | Some (field, _) -> Error (Unexpected_field { path; field })
+           | None ->
+             let rec validate_fields = function
+               | [] -> Ok ()
+               | (name, property_schema) :: rest ->
+                 (match List.assoc_opt name fields with
+                  | None -> validate_fields rest
+                  | Some property_value ->
+                    (match
+                       validate_schema_value
+                         ~path:(path @ [ name ])
+                         property_schema
+                         property_value
+                     with
+                     | Ok () -> validate_fields rest
+                     | Error _ as error -> error))
+             in
+             validate_fields properties)))
+  | other ->
+    Error (Type_mismatch { path; expected = Object_type; actual = json_type other })
+
+and validate_schema_array ~path schema_fields value =
+  match value with
+  | `List values ->
+    (match List.assoc_opt "items" schema_fields with
+     | None -> Ok ()
+     | Some item_schema ->
+       let rec validate_items index = function
+         | [] -> Ok ()
+         | item :: rest ->
+           (match
+              validate_schema_value
+                ~path:(path @ [ string_of_int index ])
+                item_schema
+                item
+            with
+            | Ok () -> validate_items (index + 1) rest
+            | Error _ as error -> error)
+       in
+       validate_items 0 values)
+  | other ->
+    Error (Type_mismatch { path; expected = Array_type; actual = json_type other })
+;;
+
+let validate_composable_schema schema = validate_schema_contract ~path:[] schema
+
+type node =
+  { id : Node_id.t
+  ; tool_name : string
+  ; input : Json_template.t
+  ; after : Node_id.t list
+  }
+
+let node ~id ~tool_name ?(after = []) ~input () = { id; tool_name; input; after }
+
+type export =
+  { name : string
+  ; node_id : Node_id.t
+  ; pointer : Json_pointer.t
+  }
+
+let export ~name ~node_id ~pointer = { name; node_id; pointer }
+
+(* Why a real descriptor is absent from the Keeper model surface. Kept apart
+   from [Unknown_tool] because the two need opposite answers: a misspelled name
+   is fixed by correcting it, while an off-surface name is spelled correctly and
+   is reached through the operator entrypoint or the descriptor that projects
+   it. #29681 moved 13 descriptors to Operator_only/Transport_alias, and with
+   only [Unknown_tool] to report, every one of them told the plan author to hunt
+   for a typo that was not there. *)
+type off_surface_reason =
+  | Operator_only_tool
+  | Aliased_by of { projected_by : string }
+  | Unresolved_schema
+
+type error =
+  | Empty_plan
+  | Empty_export_name
+  | Duplicate_export_name of string
+  | Unknown_export_node of { name : string; node_id : Node_id.t }
+  | Opaque_export of { name : string; node_id : Node_id.t; tool_name : string }
+  | Invalid_export_pointer of
+      { name : string
+      ; node_id : Node_id.t
+      ; pointer : Json_pointer.t
+      ; error : Json_pointer.schema_error
+      }
+  | Unknown_descriptor_id of string
+  | Compiled_child_conflict of Node_id.t
+  | Duplicate_node_id of Node_id.t
+  | Duplicate_tool_name of string
+  | Unknown_tool of
+      { node_id : Node_id.t
+      ; tool_name : string
+      }
+  | Tool_off_keeper_surface of
+      { node_id : Node_id.t
+      ; tool_name : string
+      ; reason : off_surface_reason
+      }
+  | Missing_dependency of
+      { node_id : Node_id.t
+      ; dependency : Node_id.t
+      }
+  | Opaque_output_reference of
+      { node_id : Node_id.t
+      ; source_node_id : Node_id.t
+      ; source_tool_name : string
+      }
+  | Invalid_output_pointer of
+      { node_id : Node_id.t
+      ; source_node_id : Node_id.t
+      ; pointer : Json_pointer.t
+      ; error : Json_pointer.schema_error
+      }
+  | Invalid_output_schema of
+      { node_id : Node_id.t
+      ; tool_name : string
+      ; error : schema_contract_error
+      }
+  | Multiple_terminal_nodes of Node_id.t list
+  | Terminal_node_missing_dependency of
+      { terminal_node_id : Node_id.t
+      ; node_id : Node_id.t
+      }
+  | Dependency_cycle of Node_id.t list
+
+let error_to_string = function
+  | Empty_plan -> "plan has no nodes"
+  | Empty_export_name -> "export name is empty"
+  | Duplicate_export_name name -> Printf.sprintf "duplicate export name %S" name
+  | Unknown_export_node { name; node_id } ->
+    Printf.sprintf "export %S names missing node %S" name (Node_id.to_string node_id)
+  | Opaque_export { name; node_id; tool_name } ->
+    Printf.sprintf "export %S references opaque output from node %S (%s)"
+      name (Node_id.to_string node_id) tool_name
+  | Invalid_export_pointer { name; node_id; pointer; _ } ->
+    Printf.sprintf "export %S has invalid pointer %s for node %S"
+      name (Json_pointer.to_string pointer) (Node_id.to_string node_id)
+  | Unknown_descriptor_id id -> Printf.sprintf "descriptor id %S is not canonical" id
+  | Compiled_child_conflict id -> Printf.sprintf "compiled child node %S differs from its fixed operand" (Node_id.to_string id)
+  | Duplicate_node_id node_id ->
+    Printf.sprintf "duplicate node id %S" (Node_id.to_string node_id)
+  | Duplicate_tool_name tool_name ->
+    Printf.sprintf "descriptor tool name %S is ambiguous" tool_name
+  | Unknown_tool { node_id; tool_name } ->
+    Printf.sprintf "node %S names unknown tool %S" (Node_id.to_string node_id) tool_name
+  | Tool_off_keeper_surface { node_id; tool_name; reason } ->
+    Printf.sprintf
+      "node %S names tool %S, which exists but is not on the Keeper model surface (%s)"
+      (Node_id.to_string node_id)
+      tool_name
+      (match reason with
+       | Operator_only_tool -> "operator-only"
+       | Aliased_by { projected_by } -> Printf.sprintf "projected by %S" projected_by
+       | Unresolved_schema -> "no resolved schema")
+  | Missing_dependency { node_id; dependency } ->
+    Printf.sprintf
+      "node %S depends on missing node %S"
+      (Node_id.to_string node_id)
+      (Node_id.to_string dependency)
+  | Opaque_output_reference { node_id; source_node_id; source_tool_name } ->
+    Printf.sprintf
+      "node %S references opaque output from node %S (%s)"
+      (Node_id.to_string node_id)
+      (Node_id.to_string source_node_id)
+      source_tool_name
+  | Invalid_output_pointer { node_id; source_node_id; pointer; _ } ->
+    Printf.sprintf
+      "node %S has invalid output pointer %s for node %S"
+      (Node_id.to_string node_id)
+      (Json_pointer.to_string pointer)
+      (Node_id.to_string source_node_id)
+  | Invalid_output_schema { node_id; tool_name; _ } ->
+    Printf.sprintf
+      "node %S tool %S declares an invalid composable output schema"
+      (Node_id.to_string node_id)
+      tool_name
+  | Multiple_terminal_nodes node_ids ->
+    Printf.sprintf
+      "plan has multiple terminal nodes: %s"
+      (node_ids |> List.map Node_id.to_string |> String.concat ", ")
+  | Terminal_node_missing_dependency { terminal_node_id; node_id } ->
+    Printf.sprintf
+      "terminal node %S does not depend on node %S"
+      (Node_id.to_string terminal_node_id)
+      (Node_id.to_string node_id)
+  | Dependency_cycle node_ids ->
+    Printf.sprintf
+      "plan dependency cycle: %s"
+      (node_ids |> List.map Node_id.to_string |> String.concat " -> ")
+;;
+
+let json_strings values =
+  `List (List.map (fun value -> `String value) values)
+;;
+
+let node_id_to_json node_id = `String (Node_id.to_string node_id)
+
+let node_ids_to_json node_ids =
+  `List (List.map node_id_to_json node_ids)
+;;
+
+let pointer_schema_error_to_json error =
+  let tag kind fields = `Assoc (("kind", `String kind) :: fields) in
+  match error with
+  | Json_pointer.Missing_properties property ->
+    tag "missing_properties" [ "property", `String property ]
+  | Json_pointer.Missing_property_schema property ->
+    tag "missing_property_schema" [ "property", `String property ]
+  | Json_pointer.Ambiguous_property_schema property ->
+    tag "ambiguous_property_schema" [ "property", `String property ]
+  | Json_pointer.Missing_items_schema segment ->
+    tag "missing_items_schema" [ "segment", `String segment ]
+  | Json_pointer.Expected_schema_container segment ->
+    tag "expected_schema_container" [ "segment", `String segment ]
+;;
+
+let schema_contract_error_to_json error =
+  let tag kind fields = `Assoc (("kind", `String kind) :: fields) in
+  let path segments = "path", json_strings segments in
+  match error with
+  | Expected_schema_object { path = segments; schema } ->
+    tag "expected_schema_object" [ path segments; "schema", schema ]
+  | Duplicate_schema_keyword { path = segments; keyword } ->
+    tag
+      "duplicate_schema_keyword"
+      [ path segments; "keyword", `String keyword ]
+  | Missing_schema_type { path = segments } ->
+    tag "missing_schema_type" [ path segments ]
+  | Unsupported_contract_type { path = segments; value } ->
+    tag "unsupported_contract_type" [ path segments; "value", value ]
+  | Unsupported_schema_keyword { path = segments; keyword } ->
+    tag
+      "unsupported_schema_keyword"
+      [ path segments; "keyword", `String keyword ]
+  | Invalid_schema_keyword_value { path = segments; keyword; value } ->
+    tag
+      "invalid_schema_keyword_value"
+      [ path segments; "keyword", `String keyword; "value", value ]
+  | Duplicate_required_field { path = segments; field } ->
+    tag
+      "duplicate_required_field"
+      [ path segments; "field", `String field ]
+  | Unknown_required_property { path = segments; field } ->
+    tag
+      "unknown_required_property"
+      [ path segments; "field", `String field ]
+;;
+
+let off_surface_reason_to_json = function
+  | Operator_only_tool -> `Assoc [ "kind", `String "operator_only" ]
+  | Aliased_by { projected_by } ->
+    `Assoc
+      [ "kind", `String "aliased_by"; "projected_by", `String projected_by ]
+  | Unresolved_schema -> `Assoc [ "kind", `String "unresolved_schema" ]
+;;
+
+let error_to_json error =
+  let tag kind fields = `Assoc (("kind", `String kind) :: fields) in
+  match error with
+  | Empty_plan -> tag "empty_plan" []
+  | Empty_export_name -> tag "empty_export_name" []
+  | Duplicate_export_name name -> tag "duplicate_export_name" [ "name", `String name ]
+  | Unknown_export_node { name; node_id } ->
+    tag "unknown_export_node" [ "name", `String name; "node_id", node_id_to_json node_id ]
+  | Opaque_export { name; node_id; tool_name } ->
+    tag "opaque_export"
+      [ "name", `String name; "node_id", node_id_to_json node_id; "tool_name", `String tool_name ]
+  | Invalid_export_pointer { name; node_id; pointer; error } ->
+    tag "invalid_export_pointer"
+      [ "name", `String name; "node_id", node_id_to_json node_id
+      ; "pointer", `String (Json_pointer.to_string pointer)
+      ; "error", pointer_schema_error_to_json error ]
+  | Compiled_child_conflict node_id ->
+    tag "compiled_child_conflict" [ "node_id", node_id_to_json node_id ]
+  | Unknown_descriptor_id descriptor_id ->
+    tag "unknown_descriptor_id" [ "descriptor_id", `String descriptor_id ]
+  | Duplicate_node_id node_id ->
+    tag "duplicate_node_id" [ "node_id", node_id_to_json node_id ]
+  | Duplicate_tool_name tool_name ->
+    tag "duplicate_tool_name" [ "tool_name", `String tool_name ]
+  | Unknown_tool { node_id; tool_name } ->
+    tag
+      "unknown_tool"
+      [ "node_id", node_id_to_json node_id; "tool_name", `String tool_name ]
+  | Tool_off_keeper_surface { node_id; tool_name; reason } ->
+    tag
+      "tool_off_keeper_surface"
+      [ "node_id", node_id_to_json node_id
+      ; "tool_name", `String tool_name
+      ; "reason", off_surface_reason_to_json reason
+      ]
+  | Missing_dependency { node_id; dependency } ->
+    tag
+      "missing_dependency"
+      [ "node_id", node_id_to_json node_id
+      ; "dependency", node_id_to_json dependency
+      ]
+  | Opaque_output_reference { node_id; source_node_id; source_tool_name } ->
+    tag
+      "opaque_output_reference"
+      [ "node_id", node_id_to_json node_id
+      ; "source_node_id", node_id_to_json source_node_id
+      ; "source_tool_name", `String source_tool_name
+      ]
+  | Invalid_output_pointer { node_id; source_node_id; pointer; error } ->
+    tag
+      "invalid_output_pointer"
+      [ "node_id", node_id_to_json node_id
+      ; "source_node_id", node_id_to_json source_node_id
+      ; "pointer", `String (Json_pointer.to_string pointer)
+      ; "pointer_segments", json_strings (Json_pointer.segments pointer)
+      ; "error", pointer_schema_error_to_json error
+      ]
+  | Invalid_output_schema { node_id; tool_name; error } ->
+    tag
+      "invalid_output_schema"
+      [ "node_id", node_id_to_json node_id
+      ; "tool_name", `String tool_name
+      ; "error", schema_contract_error_to_json error
+      ]
+  | Multiple_terminal_nodes node_ids ->
+    tag "multiple_terminal_nodes" [ "node_ids", node_ids_to_json node_ids ]
+  | Terminal_node_missing_dependency { terminal_node_id; node_id } ->
+    tag
+      "terminal_node_missing_dependency"
+      [ "terminal_node_id", node_id_to_json terminal_node_id
+      ; "node_id", node_id_to_json node_id
+      ]
+  | Dependency_cycle node_ids ->
+    tag "dependency_cycle" [ "node_ids", node_ids_to_json node_ids ]
+;;
+
+type branch_failure_policy =
+  | Fail_fast
+  | Continue_independent
+[@@deriving enumerate]
+
+let default_branch_failure_policy = Fail_fast
+
+let branch_failure_policy_to_string = function
+  | Fail_fast -> "fail_fast"
+  | Continue_independent -> "continue_independent"
+;;
+
+let branch_failure_policy_of_string s = List.find_opt (fun v -> String.equal (branch_failure_policy_to_string v) s) all_of_branch_failure_policy
+;;
+
+type inline_arguments =
+  { alias : Node_id.t
+  ; reference : Skill_reference.t
+  ; node : node
+  ; input_schema : Yojson.Safe.t
+  ; output_schema : Yojson.Safe.t
+  }
+
+type t =
+  { identity : int
+  ; nodes : node list
+  ; operands : (node * contract) Node_map.t
+  ; descriptors : (string * Keeper_tool_descriptor.t) list
+  ; children : child_nodes list
+  ; arguments : inline_arguments list
+  ; branch_failure_policy : branch_failure_policy
+  ; exports : export list
+  }
+and async_child =
+  { alias : Node_id.t
+  ; reference : Skill_reference.t
+  ; tool_name : string
+  ; input : Json_template.t
+  ; input_schema : Yojson.Safe.t
+  ; declared_plan : t
+  }
+and child_nodes =
+  { child : async_child
+  ; submission : node
+  ; result : node
+  ; output_schema : Yojson.Safe.t
+  }
+
+and execution_target =
+  | Descriptor_target of Keeper_tool_descriptor.t
+  | Child_arguments of inline_arguments
+  | Child_submission of child_nodes
+  | Child_result of child_nodes
+
+and contract =
+  { target : execution_target
+  ; input_schema : Yojson.Safe.t
+  ; composable_output : Keeper_tool_descriptor.composable_output
+  ; execution : Keeper_tool_descriptor.execution
+  }
+
+let fixed_async_child ~alias ~reference ~tool_name ~args ~input_schema ~bound_plan : async_child =
+  {alias;reference;tool_name;input=Json_template.literal args;input_schema;declared_plan=bound_plan}
+let dynamic_async_child ~alias ~reference ~tool_name ~input ~input_schema ~declared_plan : async_child =
+  {alias;reference;tool_name;input;input_schema;declared_plan}
+let child_alias (child : async_child) = child.alias
+let child_reference (child : async_child) = child.reference
+let child_tool_name (child : async_child) = child.tool_name
+let child_input (child : async_child) = child.input
+let child_input_schema (child : async_child) = child.input_schema
+let child_plan child = child.declared_plan
+let compiled_children plan = plan.children
+
+let next_plan_identity = Atomic.make 0
+
+let nodes plan = plan.nodes
+
+let exports plan = plan.exports
+
+let branch_failure_policy plan = plan.branch_failure_policy
+
+let stable_unique_node_ids ids =
+  List.fold_left
+    (fun unique id ->
+       if List.exists (Node_id.equal id) unique then unique else unique @ [ id ])
+    []
+    ids
+;;
+
+let dependencies node =
+  stable_unique_node_ids (node.after @ Json_template.dependencies node.input)
+;;
+
+(* Each registered descriptor with the names the Keeper model calls it by.
+   The table and the names are fixed when the program starts, and deriving
+   the names walks the descriptor's input schema, so this is done once here
+   instead of in every [create]. The first descriptor registered under an
+   id is the one that id names. *)
+type registered_descriptor =
+  { descriptor : Keeper_tool_descriptor.t
+  ; model_names : string list
+  }
+
+let registered_by_id : (string, registered_descriptor) Hashtbl.t =
+  let registered = Keeper_tool_descriptor.all_descriptors () in
+  let table = Hashtbl.create (List.length registered) in
+  List.iter
+    (fun (descriptor : Keeper_tool_descriptor.t) ->
+       if not (Hashtbl.mem table descriptor.id)
+       then
+         Hashtbl.add
+           table
+           descriptor.id
+           { descriptor
+           ; model_names = Keeper_tool_descriptor.keeper_model_names descriptor
+           })
+    registered;
+  table
+;;
+
+let descriptor_entries registered =
+  List.concat_map
+    (fun { descriptor; model_names } ->
+       List.map (fun name -> name, descriptor) model_names)
+    registered
+;;
+
+(* Names owned by descriptors the Keeper model cannot call. [registered_names]
+   is the name-integrity view, so it still carries transport-alias names after
+   [keeper_model_names] has gone empty — which is exactly what tells an
+   off-surface name apart from one nothing owns. This index never admits
+   execution; it only names the rejection. *)
+let off_surface_entries registered =
+  List.concat_map
+    (fun { descriptor; model_names } ->
+       match model_names with
+       | _ :: _ -> []
+       | [] ->
+         let reason =
+           match descriptor.Keeper_tool_descriptor.keeper_model_projection with
+           | Keeper_tool_descriptor.Operator_only -> Operator_only_tool
+           | Keeper_tool_descriptor.Transport_alias { projected_by } ->
+             Aliased_by { projected_by }
+           | Keeper_tool_descriptor.Preferred_public_name
+           | Keeper_tool_descriptor.Internal_name -> Unresolved_schema
+         in
+         Keeper_tool_descriptor.registered_names descriptor
+         |> List.map (fun name -> name, reason))
+    registered
+;;
+
+let canonicalize_descriptors descriptors =
+  let rec canonicalize resolved = function
+    | [] -> Ok (List.rev resolved)
+    | (descriptor : Keeper_tool_descriptor.t) :: rest ->
+      (match Hashtbl.find_opt registered_by_id descriptor.id with
+       | None ->
+         if not (Keeper_lane_addon_descriptor.is_canonical descriptor)
+         then Error (Unknown_descriptor_id descriptor.id)
+         else
+           let names = Keeper_tool_descriptor.registered_names descriptor in
+           let collision = Hashtbl.fold
+             (fun _ registered collision -> match collision with
+                | Some _ -> collision
+                | None -> List.find_opt
+                    (fun name -> List.mem name
+                       (Keeper_tool_descriptor.registered_names registered.descriptor))
+                    names)
+             registered_by_id None in
+           (match collision with
+            | Some name -> Error (Duplicate_tool_name name)
+            | None -> canonicalize
+                ({ descriptor
+                 ; model_names = Keeper_tool_descriptor.keeper_model_names descriptor
+                 } :: resolved) rest)
+       | Some registered -> canonicalize (registered :: resolved) rest)
+  in
+  canonicalize [] descriptors
+;;
+
+module Name_set = Set.Make (String)
+
+(* The first name that repeats an earlier one, in one pass over [names]. *)
+let first_repeated_name names =
+  let rec find seen = function
+    | [] -> None
+    | name :: rest ->
+      if Name_set.mem name seen then Some name else find (Name_set.add name seen) rest
+  in
+  find Name_set.empty names
+;;
+
+let first_duplicate equal values =
+  let rec find seen = function
+    | [] -> None
+    | value :: rest ->
+      if List.exists (equal value) seen then Some value else find (value :: seen) rest
+  in
+  find [] values
+;;
+
+let descriptor_for_name descriptors name =
+  List.find_map
+    (fun (candidate, descriptor) ->
+       if String.equal candidate name then Some descriptor else None)
+    descriptors
+;;
+
+let node_for_id nodes id =
+  List.find_opt (fun node -> Node_id.equal node.id id) nodes
+;;
+
+let empty_object_schema = `Assoc
+  ["type",`String "object";"properties",`Assoc [];"required",`List [];"additionalProperties",`Bool false]
+
+let contract_for_node descriptors children arguments (node : node) =
+  let target = match List.find_opt (fun (arguments : inline_arguments) ->
+      Node_id.equal arguments.node.id node.id) arguments with
+    | Some arguments -> Some (Child_arguments arguments)
+    | None -> List.find_map (fun child ->
+    if Node_id.equal child.submission.id node.id then Some (Child_submission child)
+    else if Node_id.equal child.result.id node.id then Some (Child_result child)
+    else None) children in
+  match target with
+  | Some (Child_arguments arguments as target) -> Some
+      {target;input_schema=arguments.input_schema;
+       composable_output=Keeper_tool_descriptor.Json_output {schema=arguments.output_schema};
+       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
+  | Some (Child_submission child as target) -> Some
+      {target;input_schema=child.child.input_schema;composable_output=Keeper_tool_descriptor.Opaque_output;
+       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial}
+  | Some (Child_result child as target) -> Some
+      {target;input_schema=empty_object_schema;
+       composable_output=Keeper_tool_descriptor.Json_output {schema=child.output_schema};
+       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
+  | Some (Descriptor_target _) -> invalid_arg "compiled target cannot own an ordinary descriptor"
+  | None -> Option.map (fun (descriptor : Keeper_tool_descriptor.t) ->
+      {target=Descriptor_target descriptor;input_schema=descriptor.input_schema;
+       composable_output=descriptor.composable_output;execution=descriptor.execution})
+      (descriptor_for_name descriptors node.tool_name)
+
+let node_in_plan plan node_id =
+  Option.map fst (Node_map.find_opt node_id plan.operands)
+
+let contract plan node_id =
+  Option.map snd (Node_map.find_opt node_id plan.operands)
+
+let child_exports_schema plan =
+  let properties = List.map (fun (export : export) ->
+    let producer = match node_in_plan plan export.node_id with
+      | Some node -> node | None -> invalid_arg "validated child export lost its producer" in
+    let schema = match contract plan producer.id with
+      | Some {composable_output=Keeper_tool_descriptor.Json_output {schema};_} -> schema
+      | Some {composable_output=Keeper_tool_descriptor.Opaque_output;_} | None ->
+        invalid_arg "validated child export lost its output contract" in
+    let selected = match Json_pointer.resolve_schema export.pointer schema with
+      | Ok schema -> schema | Error _ -> invalid_arg "validated child export lost its pointer contract" in
+    export.name,selected) plan.exports in
+  `Assoc ["type",`String "object";"properties",`Assoc properties;
+    "required",`List (List.map (fun (name,_) -> `String name) properties);"additionalProperties",`Bool false]
+
+let child_nodes ~child ~submission_id ~result_id ?(after=[]) () =
+  { child
+  ; submission = node ~id:submission_id ~tool_name:child.tool_name ~after
+      ~input:child.input ()
+  ; result = node ~id:result_id ~tool_name:Tool_schemas_composition_control.result_schema.name
+      ~after:[submission_id] ~input:(Json_template.literal (`Assoc [])) ()
+  ; output_schema = child_exports_schema child.declared_plan
+  }
+
+let inline_arguments ~alias ~reference ~id ~tool_name ~input ~input_schema ~output_schema ?(after=[]) () =
+  {alias;reference;node=node ~id ~tool_name ~input ~after ();input_schema;output_schema}
+
+let readonly_for_input plan ~node_id ~input =
+  match contract plan node_id with
+  | None -> None
+  | Some {target=Descriptor_target descriptor;_} -> Keeper_tool_descriptor.readonly_for_input descriptor ~input
+  | Some {target=Child_submission _;_} -> Some false
+  | Some {target=(Child_arguments _ | Child_result _);_} -> Some true
+
+let bind_known_tools (resolve : node -> contract option) off_surface nodes =
+  let rec bind operands = function
+    | [] -> Ok operands
+    | node :: rest ->
+      match resolve node with
+      | Some contract -> bind (Node_map.add node.id (node,contract) operands) rest
+      | None ->
+        Error (match List.assoc_opt node.tool_name off_surface with
+          | Some reason ->
+            Tool_off_keeper_surface { node_id = node.id; tool_name = node.tool_name; reason }
+          | None -> Unknown_tool { node_id = node.id; tool_name = node.tool_name })
+  in
+  bind Node_map.empty nodes
+;;
+
+let validate_dependencies nodes =
+  List.find_map
+    (fun node ->
+       dependencies node
+       |> List.find_map (fun dependency ->
+         match node_for_id nodes dependency with
+         | Some _ -> None
+         | None -> Some (Missing_dependency { node_id = node.id; dependency })))
+    nodes
+;;
+
+let validate_output_references (resolve : node -> contract option) nodes =
+  List.find_map
+    (fun node ->
+       Json_template.references node.input
+       |> List.find_map (fun (source_node_id, pointer) ->
+         match node_for_id nodes source_node_id with
+         | None -> Some (Missing_dependency { node_id = node.id; dependency = source_node_id })
+         | Some source_node ->
+           (match resolve source_node with
+            | None ->
+              Some
+                (Unknown_tool
+                   { node_id = source_node.id; tool_name = source_node.tool_name })
+            | Some source_descriptor ->
+              (match source_descriptor.composable_output with
+               | Keeper_tool_descriptor.Json_output { schema } ->
+                 (match Json_pointer.resolve_schema pointer schema with
+                  | Ok _ -> None
+                  | Error error ->
+                    Some
+                      (Invalid_output_pointer
+                         { node_id = node.id; source_node_id; pointer; error }))
+               | Keeper_tool_descriptor.Opaque_output ->
+                 Some
+                   (Opaque_output_reference
+                      { node_id = node.id
+                      ; source_node_id
+                      ; source_tool_name = source_node.tool_name
+                      })))))
+    nodes
+;;
+
+let validate_output_schemas (resolve : node -> contract option) nodes =
+  List.find_map
+    (fun node ->
+       match resolve node with
+       | None -> Some (Unknown_tool { node_id = node.id; tool_name = node.tool_name })
+       | Some descriptor ->
+         (match descriptor.composable_output with
+          | Keeper_tool_descriptor.Opaque_output -> None
+          | Keeper_tool_descriptor.Json_output { schema } ->
+            (match validate_composable_schema schema with
+             | Ok () -> None
+             | Error error ->
+               Some
+                 (Invalid_output_schema
+                    { node_id = node.id; tool_name = node.tool_name; error }))))
+    nodes
+;;
+
+let validate_exports (resolve : node -> contract option) nodes exports =
+  match first_duplicate String.equal (List.map (fun (export : export) -> export.name) exports) with
+  | Some name -> Some (Duplicate_export_name name)
+  | None ->
+    List.find_map
+      (fun (export : export) ->
+         if String.equal export.name "" then Some Empty_export_name
+         else
+           match node_for_id nodes export.node_id with
+           | None -> Some (Unknown_export_node { name = export.name; node_id = export.node_id })
+           | Some node ->
+             match resolve node with
+             | None -> Some (Unknown_tool { node_id = node.id; tool_name = node.tool_name })
+             | Some descriptor ->
+               match descriptor.composable_output with
+               | Keeper_tool_descriptor.Opaque_output ->
+                 Some (Opaque_export
+                   { name = export.name; node_id = node.id; tool_name = node.tool_name })
+               | Keeper_tool_descriptor.Json_output { schema } ->
+                 match Json_pointer.resolve_schema export.pointer schema with
+                 | Ok _ -> None
+                 | Error error -> Some (Invalid_export_pointer
+                     { name = export.name; node_id = node.id; pointer = export.pointer; error }))
+      exports
+;;
+
+let dependency_cycle nodes =
+  let rec cycle_members target = function
+    | [] -> []
+    | id :: rest ->
+      if Node_id.equal id target then [ id ] else id :: cycle_members target rest
+  in
+  let rec visit path visited id =
+    if List.exists (Node_id.equal id) path
+    then Error (List.rev (cycle_members id path))
+    else if List.exists (Node_id.equal id) visited
+    then Ok visited
+    else
+      match node_for_id nodes id with
+      | None -> Ok visited
+      | Some node ->
+        let rec visit_dependencies visited = function
+          | [] -> Ok (id :: visited)
+          | dependency :: rest ->
+            (match visit (id :: path) visited dependency with
+             | Error _ as error -> error
+             | Ok visited -> visit_dependencies visited rest)
+        in
+        visit_dependencies visited (dependencies node)
+  in
+  let rec visit_all visited = function
+    | [] -> None
+    | node :: rest ->
+      (match visit [] visited node.id with
+       | Error cycle -> Some cycle
+       | Ok visited -> visit_all visited rest)
+  in
+  visit_all [] nodes
+;;
+
+let validate_terminal_dependency_boundary (resolve : node -> contract option) nodes =
+  let terminal_nodes =
+    List.filter
+      (fun node ->
+         match resolve node with
+         | Some { execution = Keeper_tool_descriptor.Terminal; _ } ->
+           true
+         | Some
+             { execution =
+                 Keeper_tool_descriptor.Ordinary
+                   (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
+             ; _
+             }
+         | None -> false)
+      nodes
+  in
+  match terminal_nodes with
+  | [] -> None
+  | _ :: _ :: _ -> Some (Multiple_terminal_nodes (List.map (fun node -> node.id) terminal_nodes))
+  | [ terminal ] ->
+    let rec ancestors visited node_id =
+      if List.exists (Node_id.equal node_id) visited
+      then visited
+      else
+        match node_for_id nodes node_id with
+        | None -> visited
+        | Some node ->
+          List.fold_left ancestors (node_id :: visited) (dependencies node)
+    in
+    let terminal_ancestors = ancestors [] terminal.id in
+    List.find_map
+      (fun node ->
+         if Node_id.equal node.id terminal.id
+            || List.exists (Node_id.equal node.id) terminal_ancestors
+         then None
+         else
+           Some
+             (Terminal_node_missing_dependency
+                { terminal_node_id = terminal.id; node_id = node.id }))
+      nodes
+;;
+
+let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
+  match nodes with
+  | [] -> Error Empty_plan
+  | _ ->
+    let fixed_nodes = List.map (fun (arguments : inline_arguments) -> arguments.node) arguments
+      @ List.concat_map (fun child -> [child.submission;child.result]) children in
+    let aliases = List.map (fun child -> child.child.alias) children
+      @ List.map (fun (arguments : inline_arguments) -> arguments.alias) arguments in
+    let conflict = match first_duplicate Node_id.equal aliases with
+      | Some id -> Some id
+      | None -> match first_duplicate Node_id.equal (List.map (fun node -> node.id) fixed_nodes) with
+      | Some id -> Some id
+      | None -> List.find_map (fun expected ->
+          match node_for_id nodes expected.id with
+          | Some actual when actual = expected -> None
+          | Some _ | None -> Some expected.id) fixed_nodes in
+    (match conflict with
+     | Some id -> Error (Compiled_child_conflict id)
+     | None ->
+    match canonicalize_descriptors descriptors with
+     | Error _ as error -> error
+     | Ok canonical_descriptors ->
+       (match first_duplicate Node_id.equal (List.map (fun node -> node.id) nodes) with
+        | Some id -> Error (Duplicate_node_id id)
+        | None ->
+          let descriptors = descriptor_entries canonical_descriptors in
+          let off_surface = off_surface_entries canonical_descriptors in
+          (match first_repeated_name (List.map fst descriptors) with
+           | Some name -> Error (Duplicate_tool_name name)
+           | None ->
+             (* Bind during the original first validation phase, stopping at
+                the same unknown/off-surface node. Later validators request
+                only these original nodes, directly or through [node_for_id].
+                Keep phase/error order list-driven and retain the contracts. *)
+             (match bind_known_tools (contract_for_node descriptors children arguments) off_surface nodes with
+              | Error error -> Error error
+              | Ok operands ->
+                let resolve (node : node) = Option.map snd (Node_map.find_opt node.id operands) in
+                (match validate_output_schemas resolve nodes with
+                 | Some error -> Error error
+                 | None ->
+                   (match validate_dependencies nodes with
+                    | Some error -> Error error
+                    | None ->
+                      (match validate_output_references resolve nodes with
+                       | Some error -> Error error
+                       | None ->
+                         (match dependency_cycle nodes with
+                          | Some cycle -> Error (Dependency_cycle cycle)
+                          | None ->
+                            (match
+                               validate_terminal_dependency_boundary resolve nodes
+                             with
+                             | Some error -> Error error
+                             | None ->
+                               (match validate_exports resolve nodes exports with
+                                | Some error -> Error error
+                                | None ->
+                                  Ok
+                                    { identity = Atomic.fetch_and_add next_plan_identity 1
+                                    ; nodes
+                                    ; operands
+                                    ; descriptors
+                                    ; children
+                                    ; arguments
+                                    ; branch_failure_policy
+                                    ; exports
+                                    }))))))))))
+;;
+
+let create ~descriptors ?branch_failure_policy ?exports nodes =
+  create_compiled ~descriptors ~children:[] ?branch_failure_policy ?exports nodes
+;;
+
+type parameter_binding_error =
+  | Missing_argument of string
+  | Instantiated_plan_rejected of error
+
+let instantiate_params ~descriptors ~args plan =
+  let lookup name = match (args : Yojson.Safe.t) with
+    | `Assoc fields -> List.assoc_opt name fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None in
+  let rec rebuild rebuilt = function
+    | [] -> create_compiled ~descriptors ~children:plan.children ~arguments:plan.arguments
+        ~branch_failure_policy:plan.branch_failure_policy ~exports:plan.exports (List.rev rebuilt)
+      |> Result.map_error (fun error -> Instantiated_plan_rejected error)
+    | (node : node) :: rest ->
+      match Json_template.substitute_params ~lookup node.input with
+      | Error (Json_template.Missing_param name) -> Error (Missing_argument name)
+      | Ok input -> rebuild ({node with input} :: rebuilt) rest in
+  rebuild [] plan.nodes
+;;
+
+type child_binding_error =
+  | Child_arguments_rejected of Tool_input_validation.rejection
+  | Fixed_child_input_mismatch
+  | Child_plan_rejected of parameter_binding_error
+
+let child_binding_error_to_string = function
+  | Child_arguments_rejected rejection -> rejection.Tool_input_validation.message
+  | Fixed_child_input_mismatch -> "child arguments differ from the original fixed input"
+  | Child_plan_rejected (Missing_argument name) -> Printf.sprintf "missing child argument %S" name
+  | Child_plan_rejected (Instantiated_plan_rejected error) -> error_to_string error
+;;
+
+let bind_child_plan ~input (child : async_child) =
+  let open Result.Syntax in
+  let* args = Tool_input_validation.validate ~schema:child.input_schema ~name:child.tool_name ~args:input ()
+    |> Result.map_error (fun error -> Child_arguments_rejected error) in
+  let* () = match Json_template.dependencies child.input with
+    | _::_ -> Ok ()
+    | [] ->
+      (match Json_template.resolve ~lookup:(fun _ -> None) child.input with
+       | Ok original when Yojson.Safe.equal (Yojson.Safe.sort original) (Yojson.Safe.sort args) -> Ok ()
+       | Ok _ | Error _ -> Error Fixed_child_input_mismatch) in
+  let descriptors = List.map snd child.declared_plan.descriptors
+    |> List.sort_uniq (fun (left : Keeper_tool_descriptor.t) (right : Keeper_tool_descriptor.t) -> String.compare left.id right.id) in
+  instantiate_params ~descriptors ~args child.declared_plan
+  |> Result.map_error (fun error -> Child_plan_rejected error)
+;;
+
+let dependency_layers plan =
+  let module Ready_map = Map.Make (Int) in
+  (* [t] is abstract and every constructor validates unique IDs, closed edges
+     and acyclicity. Count each semantic dependency once, retaining the exact
+     node operands and their original ordinal independently of ID ordering. *)
+  let pending, successors, roots =
+    plan.nodes
+    |> List.mapi (fun ordinal node -> ordinal, node)
+    |> List.fold_left
+      (fun (pending, successors, roots) (ordinal, (node : node)) ->
+         let required = dependencies node in
+         let pending = Node_map.add node.id (ordinal, node, List.length required) pending in
+         let successors = List.fold_left
+             (fun successors dependency -> Node_map.add_to_list dependency node.id successors)
+             successors required in
+         let roots = match required with
+           | [] -> Ready_map.add ordinal node roots
+           | _ :: _ -> roots in
+         pending, successors, roots)
+      (Node_map.empty, Node_map.empty, Ready_map.empty)
+  in
+  let release (pending, ready) (node : node) =
+    (* A missing adjacency entry means this validated node has no successors. *)
+    let dependents = match Node_map.find_opt node.id successors with
+      | None -> []
+      | Some dependents -> dependents in
+    List.fold_left
+      (fun (pending, ready) id ->
+         let ordinal, dependent, required = Node_map.find id pending in
+         let required = required - 1 in
+         let pending = Node_map.add id (ordinal, dependent, required) pending in
+         let ready = if required = 0 then Ready_map.add ordinal dependent ready else ready in
+         pending, ready)
+      (pending, ready) dependents
+  in
+  let rec build pending ready acc =
+    if Ready_map.is_empty ready then List.rev acc
+    else
+      let layer = Ready_map.bindings ready |> List.map snd in
+      let pending, next = List.fold_left release (pending, Ready_map.empty) layer in
+      build pending next (layer :: acc)
+  in
+  build pending roots []
+;;
+
+let descriptor plan node_id =
+  match contract plan node_id with
+  | Some {target=Descriptor_target descriptor;_} -> Some descriptor
+  | Some {target=(Child_arguments _ | Child_submission _ | Child_result _);_} | None -> None
+;;
+
+type output =
+  { plan_identity : int
+  ; run_id : Run_id.t
+  ; node_id : Node_id.t
+  ; tool_name : string
+  ; value : Yojson.Safe.t
+  }
+
+type execution_error =
+  | Unknown_node_id of Node_id.t
+  | Input_template_resolution_failed of
+      { node_id : Node_id.t
+      ; error : Json_template.resolution_error
+      }
+  | Input_validation_failed of
+      { node_id : Node_id.t
+      ; tool_name : string
+      ; rejection : Tool_input_validation.rejection
+      }
+  | Output_validation_failed of
+      { node_id : Node_id.t
+      ; tool_name : string
+      ; error : schema_value_error
+      }
+  | Output_not_composable of
+      { node_id : Node_id.t
+      ; tool_name : string
+      }
+
+let output_node_id output = output.node_id
+
+let validate_output plan ~run_id ~node_id value =
+  match node_in_plan plan node_id with
+  | None -> Error (Unknown_node_id node_id)
+  | Some node ->
+    (match contract plan node.id with
+     | None -> Error (Unknown_node_id node_id)
+     | Some descriptor ->
+       (match descriptor.composable_output with
+        | Keeper_tool_descriptor.Opaque_output ->
+          Error (Output_not_composable { node_id; tool_name = node.tool_name })
+        | Keeper_tool_descriptor.Json_output { schema } ->
+          (match validate_schema_value ~path:[] schema value with
+           | Ok () ->
+             Ok
+               { plan_identity = plan.identity
+               ; run_id
+               ; node_id
+               ; tool_name = node.tool_name
+               ; value
+               }
+           | Error error ->
+             Error
+               (Output_validation_failed
+                  { node_id; tool_name = node.tool_name; error }))))
+;;
+
+type export_resolution_error =
+  | Producer_unavailable of Node_id.t
+  | Producer_invalid of execution_error
+  | Export_pointer_unavailable of Json_pointer.resolution_error
+
+let resolve_export_with_run_id plan ~run_id ~lookup (export : export) =
+  match lookup export.node_id with
+  | None -> Error (Producer_unavailable export.node_id)
+  | Some value ->
+    match validate_output plan ~run_id ~node_id:export.node_id value with
+    | Error error -> Error (Producer_invalid error)
+    | Ok output ->
+      match Json_pointer.resolve export.pointer output.value with
+      | Ok value -> Ok value
+      | Error error -> Error (Export_pointer_unavailable error)
+;;
+
+let resolve_export plan ~lookup export =
+  resolve_export_with_run_id plan ~run_id:(Run_id.fresh ()) ~lookup export
+;;
+
+let resolve_exports plan ~lookup =
+  let run_id = Run_id.fresh () in
+  List.map (fun export -> export, resolve_export_with_run_id plan ~run_id ~lookup export) plan.exports
+;;
+
+let validate_node_input plan (node : node) input =
+  match contract plan node.id with
+  | None -> Error (Unknown_node_id node.id)
+  | Some descriptor ->
+    (match
+       Tool_input_validation.validate
+         ~schema:descriptor.input_schema
+         ~name:node.tool_name
+         ~args:input
+         ()
+     with
+     | Ok input -> Ok input
+     | Error rejection ->
+       Error
+         (Input_validation_failed
+            { node_id = node.id; tool_name = node.tool_name; rejection }))
+;;
+
+let resolve_input plan ~run_id ~node_id ~lookup =
+  match node_in_plan plan node_id with
+  | None -> Error (Unknown_node_id node_id)
+  | Some node ->
+    let lookup_value dependency =
+      match node_in_plan plan dependency, lookup dependency with
+      | Some source_node, Some output
+        when Int.equal output.plan_identity plan.identity
+             && Run_id.equal output.run_id run_id
+             && Node_id.equal output.node_id dependency
+             && String.equal output.tool_name source_node.tool_name -> Some output.value
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
+    in
+    (match Json_template.resolve ~lookup:lookup_value node.input with
+     | Error error -> Error (Input_template_resolution_failed { node_id; error })
+     | Ok input -> validate_node_input plan node input)
+;;
+
+type prepared_input =
+  | Checked_before_run of Yojson.Safe.t
+  | Checked_when_node_runs
+
+let prepare_inputs_with_params ~allow_params plan =
+  let no_output _ = None in
+  let rec prepare prepared : node list -> _ = function
+    | [] -> Ok (List.rev prepared)
+    | node :: rest when allow_params && Json_template.param_names node.input <> [] ->
+      prepare ((node.id, Checked_when_node_runs) :: prepared) rest
+    | node :: rest ->
+      (match Json_template.dependencies node.input with
+       | _ :: _ -> prepare ((node.id, Checked_when_node_runs) :: prepared) rest
+       | [] ->
+         (match Json_template.resolve ~lookup:no_output node.input with
+          | Error error ->
+            Error (node.id, Input_template_resolution_failed { node_id = node.id; error })
+          | Ok input ->
+            (match validate_node_input plan node input with
+             | Error error -> Error (node.id, error)
+             | Ok input -> prepare ((node.id, Checked_before_run input) :: prepared) rest)))
+  in
+  prepare [] plan.nodes
+;;
+
+let prepare_inputs = prepare_inputs_with_params ~allow_params:false
+
+let validate_parameterized_inputs plan =
+  prepare_inputs_with_params ~allow_params:true plan |> Result.map (fun _ -> ())

@@ -1,0 +1,59 @@
+/* ══════════════════════════════════════════════════════════════════
+   MASC COCKPIT — Type Layer
+   ──────────────────────────────────────────────────────────────────
+   `.masc-ds` scoped element defaults + color utility classes.
+   No token definitions — depends entirely on source_styles/tokens.css
+   (must be imported BEFORE this file).
+
+   Previously merged with token defs in colors_and_type.css; split out
+   per SPEC §7.1.4 to make tokens.css the single source of truth.
+   ══════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Semantic type tier — composes type ROLE tokens from tokens.css
+     into element-shaped fonts. Belongs here (not tokens.css) because
+     these encode element semantics (h1 = display@600), not raw tokens. */
+  --h1: 600 var(--type-display);
+  --h2: 600 var(--type-hero);
+  --h3: 600 var(--type-kpi-l);
+  --h4: 600 var(--type-title);
+  --p:  var(--type-body);
+  --code: var(--type-code);
+  --caption: var(--type-caption);
+  --label: 600 var(--type-label);
+}
+
+.masc-ds {
+  color: var(--fg-1);
+  background: var(--bg-0);
+  font: var(--type-body);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv08", "ss01";
+}
+.masc-ds code, .masc-ds kbd, .masc-ds samp, .masc-ds pre, .masc-ds .mono {
+  font-family: var(--font-mono);
+}
+
+.masc-ds h1 { font: var(--h1); color: var(--fg-1); letter-spacing: var(--track-tight); font-variant-numeric: tabular-nums; margin: 0; }
+.masc-ds h2 { font: var(--h2); color: var(--fg-1); letter-spacing: var(--track-tight); font-variant-numeric: tabular-nums; margin: 0; }
+.masc-ds h3 { font: var(--h3); color: var(--fg-1); font-variant-numeric: tabular-nums; margin: 0; }
+.masc-ds h4 { font: var(--h4); color: var(--fg-1); letter-spacing: var(--track-tight); margin: 0; }
+.masc-ds p  { font: var(--p); color: var(--fg-1); margin: 0; }
+.masc-ds .label,
+.masc-ds label {
+  font: var(--label); color: var(--fg-3);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+.masc-ds .caption { font: var(--caption); color: var(--fg-3); letter-spacing: var(--track-wide); }
+.masc-ds .mono    { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* color utility classes */
+.masc-ds .t-brass   { color: var(--brass-1); }
+.masc-ds .t-ok      { color: var(--ok-fg); }
+.masc-ds .t-warn    { color: var(--warn-fg); }
+.masc-ds .t-err     { color: var(--err-fg); }
+.masc-ds .t-info    { color: var(--info-fg); }
+.masc-ds .t-stalled { color: var(--stalled-fg); }
+.masc-ds .t-dim     { color: var(--fg-3); }
+.masc-ds .t-mute    { color: var(--fg-4); }

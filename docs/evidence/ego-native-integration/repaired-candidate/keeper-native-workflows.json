@@ -1,0 +1,61 @@
+[
+  {
+    "source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+    "tool_input": {
+      "action": "workflow",
+      "clientId": "4c9d780e-d3d1-4905-b539-0ed12f26a734",
+      "expectedUrl": "http://127.0.0.1:9448/",
+      "lane": "live",
+      "snapshotScope": "full_page",
+      "steps": [
+        {
+          "method": "fill",
+          "selector": "input[name=\"name\"]",
+          "text": "Ego Native 검증"
+        },
+        {
+          "method": "selectOption",
+          "selector": "select[name=\"delivery\"]",
+          "value": "shipping"
+        },
+        {
+          "method": "selectOption",
+          "selector": "select[name=\"notifications\"]",
+          "values": [
+            "email",
+            "sms"
+          ]
+        }
+      ],
+      "tabId": 1
+    },
+    "tool_result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"4c9d780e-d3d1-4905-b539-0ed12f26a734\",\"reason\":\"explicit_browser\"},\"clientId\":\"4c9d780e-d3d1-4905-b539-0ed12f26a734\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"fill\",\"receipt\":{}},{\"index\":1,\"method\":\"selectOption\",\"receipt\":[\"shipping\"]},{\"index\":2,\"method\":\"selectOption\",\"receipt\":[\"email\",\"sms\"]}],\"effectStarted\":true,\"completedEffect\":true,\"failure\":null,\"urlBefore\":\"http://127.0.0.1:9448/\",\"url\":\"http://127.0.0.1:9448/\",\"title\":\"Ego 배송 신청 검증\",\"snapshot\":\"[p1 \\\"Ego 배송 신청 검증\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(14): 1 managed, 0 untracked — p1* \\\"Ego 배송 신청 검증\\\"]\\nroot\\n  heading\\n    text \\\"배송 신청\\\"\\n  paragraph\\n    text \\\"필수 항목을 입력하고 신청하세요. 완료 후 신청 번호가 표시됩니다.\\\"\\n  form\\n    container\\n      text \\\"신청인 이름\\\"\\n      textbox [ref=1, loc=css:input[name=\\\"name\\\"]]\\n        text \\\"Ego Native 검증\\\"\\n    container\\n      text \\\"수령 방법\\\"\\n      combobox [ref=2, loc=css:select[name=\\\"delivery\\\"]]\\n        text \\\"택배 배송\\\"\\n    container\\n      text \\\"배송 주소\\\"\\n      textbox [ref=5, loc=css:input[name=\\\"address\\\"]]\\n    container\\n      text \\\"알림 수단 (복수 선택 가능)\\\"\\n      listbox [ref=3, loc=css:select[name=\\\"notifications\\\"]]\\n        text \\\"이메일\\\"\\n        text \\\"문자 메시지\\\"\\n        text \\\"전화\\\"\\n    button [ref=4]\\n      text \\\"배송 신청하기\\\"\\n  status\\n\",\"truncated\":false,\"chars\":729}",
+    "tool_error": false,
+    "ts": 1792845899.197994
+  },
+  {
+    "source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+    "tool_input": {
+      "action": "workflow",
+      "clientId": "4c9d780e-d3d1-4905-b539-0ed12f26a734",
+      "expectedUrl": "http://127.0.0.1:9448/",
+      "lane": "live",
+      "snapshotScope": "viewport",
+      "steps": [
+        {
+          "method": "fill",
+          "selector": "@5",
+          "text": "서울시 테스트로 42"
+        },
+        {
+          "method": "click",
+          "selector": "@4"
+        }
+      ],
+      "tabId": 1
+    },
+    "tool_result": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"4c9d780e-d3d1-4905-b539-0ed12f26a734\",\"reason\":\"explicit_browser\"},\"clientId\":\"4c9d780e-d3d1-4905-b539-0ed12f26a734\",\"transport\":\"ego_task_space\",\"tabId\":1,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"fill\",\"receipt\":{}},{\"index\":1,\"method\":\"click\",\"receipt\":{}}],\"effectStarted\":true,\"completedEffect\":true,\"failure\":null,\"urlBefore\":\"http://127.0.0.1:9448/\",\"url\":\"http://127.0.0.1:9448/confirmation\",\"title\":\"배송 신청 완료\",\"snapshot\":\"[p1 \\\"배송 신청 완료\\\" | space \\\"masc-ego-native-sdk-20261024\\\"(14): 1 managed, 0 untracked — p1* \\\"배송 신청 완료\\\"]\\nroot\\n  heading\\n    text \\\"배송 신청 완료\\\"\\n  status\\n    text \\\"신청 번호 EGO-001\\\"\\n\",\"truncated\":false,\"chars\":169}",
+    "tool_error": false,
+    "ts": 1792845934.12404
+  }
+]

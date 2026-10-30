@@ -1,0 +1,14 @@
+commit 4d08a99960bcebd416f0131bd7dc0adde8de23e3
+Author: edgar.a.poe <edgar.a.poe@keepers.masc.local>
+Date:   Fri Sep 4 14:34:58 2026 +0100
+
+    lifecycle: name the double lock RFC-0415 4.3 and write it into the RFC
+    
+    The first review rejected 4.4 as an invented section: the prose stopped at 4.2 while the code cited 4.4. Fix both ends: add section 4.3 (commit-funnel double lock) to the RFC prose and the 6 proof table, and move all code citations from 4.4 to 4.3.
+
+ ...C-0415-cancel-verdicts-belong-to-the-operator.md | 21 +++++++++++++++++++--
+ lib/workspace/workspace_task_lifecycle.ml           |  2 +-
+ lib/workspace/workspace_task_lifecycle.mli          |  2 +-
+ lib/workspace/workspace_task_transitions.ml         |  4 ++--
+ test/test_workspace_task_lifecycle.ml               |  2 +-
+ 5 files changed, 24 insertions(+), 7 deletions(-)

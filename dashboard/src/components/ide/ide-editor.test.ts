@@ -1,0 +1,661 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { h } from 'preact'
+import { render } from 'preact'
+import { act } from 'preact/test-utils'
+import { fireEvent, waitFor } from '@testing-library/preact'
+import { EditorView } from '@codemirror/view'
+import { currentFileFindMatches, IdeEditor } from './ide-editor'
+import { createCodeDocumentStore } from './code-document-store'
+import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
+import { focusIdeContextAnchor, focusIdeFile, ideContextFocus } from './ide-state'
+import { ideConversationThreadSnapshot } from './ide-context-bridge'
+import { lspDiagnosticSnapshot } from './ide-lsp-client'
+import { clearTraces, pushTrace } from './keeper-trace-store'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
+
+describe('IdeEditor', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    focusIdeFile({
+      path: 'package.json',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
+    ideContextFocus.value = null
+    setIdeReplayUntilMs(null)
+    clearTraces()
+  })
+
+  afterEach(() => {
+    render(null, container)
+    ideContextFocus.value = null
+    setIdeReplayUntilMs(null)
+    clearTraces()
+    lspDiagnosticSnapshot.value = new Map()
+    ideConversationThreadSnapshot.value = { filePath: '', threads: [] }
+    window.location.hash = ''
+  })
+
+  it('syncs CodeMirror when file content loads after initial mount', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'package.json',
+      language: 'json',
+      content: '',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('package.json')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-content')).not.toBeNull()
+    })
+    expect(container.querySelector('.cm-lineNumbers')).not.toBeNull()
+    expect(container.querySelector('.cm-content')?.textContent).toBe('')
+
+    documentStore.load({
+      file_path: 'package.json',
+      language: 'json',
+      content: '{\n  "name": "masc"\n}\n',
+    })
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('3 lines')
+      expect(container.querySelector('.cm-content')?.textContent).toContain('masc')
+    })
+  })
+
+  it('shows observed keeper ownership in Source view, not only Blame view', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    ownershipStore.ingest({
+      file_path: 'runtime.ts',
+      line_start: 1,
+      line_end: 1,
+      keeper_id: 'sangsu',
+      timestamp_ms: 1,
+      kind: 'observed',
+    })
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-blame-gutter')).not.toBeNull()
+      expect(container.querySelector('[data-testid="ide-observation-summary"]')?.textContent)
+        .toContain('1 owned')
+    })
+    expect(container.querySelector('.ide-codemirror-shell')?.getAttribute('data-view'))
+      .toBe('source-ownership')
+  })
+
+  it('finds current-file matches with case and whole-word options', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst RuntimeValue = runtime + 1\n',
+    })
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'runtime',
+        { caseSensitive: false, wholeWord: false },
+      ).map(match => match.line),
+    ).toEqual([1, 2, 2])
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'runtime',
+        { caseSensitive: true, wholeWord: false },
+      ).map(match => match.line),
+    ).toEqual([1, 2])
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'Runtime',
+        { caseSensitive: true, wholeWord: false },
+      ).map(match => match.line),
+    ).toEqual([2])
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'runtime',
+        { caseSensitive: false, wholeWord: true },
+      ).map(match => match.line),
+    ).toEqual([1, 2])
+  })
+
+  it('renders the current-file find panel and cycles matches', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst other = 2\nreturn runtime\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        findOpen: true,
+      }),
+      container,
+    )
+
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Find query"]')
+    expect(input).not.toBeNull()
+    fireEvent.input(input!, { target: { value: 'runtime' } })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+        .toContain('1 of 2 matches')
+    })
+    expect(container.querySelector('[data-testid="ide-find-results"]')?.textContent)
+      .toContain('return runtime')
+
+    const next = container.querySelector<HTMLButtonElement>('[aria-label="Next match"]')
+    expect(next).not.toBeNull()
+    fireEvent.click(next!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+        .toContain('2 of 2 matches')
+    })
+  })
+
+  it('stops at every occurrence on a line, not only the first', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'runtime(runtime)\nother\n',
+    })
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'runtime',
+        { caseSensitive: false, wholeWord: false },
+      ).map(match => [match.line, match.column]),
+    ).toEqual([[1, 0], [1, 8]])
+  })
+
+  // Find used to cycle a highlight inside its own list while the editor
+  // stayed where it was. The current match is now the editor's selection,
+  // Enter and Shift+Enter walk the matches, and Escape closes the panel.
+  it('moves the editor selection to the current match from the keyboard', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst other = 2\nreturn runtime\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    let closed = 0
+    document.body.appendChild(container)
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        findOpen: true,
+        onFindClose: () => { closed += 1 },
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-content')).not.toBeNull()
+    })
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Find query"]')!
+    expect(document.activeElement).toBe(input)
+    fireEvent.input(input, { target: { value: 'runtime' } })
+
+    const selectedText = (): string => {
+      const view = EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)!
+      const { from, to } = view.state.selection.main
+      return `${view.state.doc.lineAt(from).number}:${view.state.sliceDoc(from, to)}`
+    }
+
+    await waitFor(() => expect(selectedText()).toBe('1:runtime'))
+
+    // Enter that commits an IME composition belongs to the query, not Next:
+    // Chrome reports it with isComposing, Safari with keyCode 229.
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+      fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })
+    })
+    expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+      .toContain('1 of 2 matches')
+    expect(selectedText()).toBe('1:runtime')
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+        .toContain('2 of 2 matches')
+      expect(selectedText()).toBe('3:runtime')
+    })
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    await waitFor(() => expect(selectedText()).toBe('1:runtime'))
+
+    const rows = container.querySelectorAll<HTMLElement>('[data-testid="ide-find-results"] li')
+    fireEvent.click(rows[1]!)
+    await waitFor(() => expect(selectedText()).toBe('3:runtime'))
+
+    // The theme hides the native selection, so the match carries a mark.
+    expect(container.querySelector('.cm-masc-find-match')?.textContent).toBe('runtime')
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(closed).toBe(1)
+    container.remove()
+  })
+
+  it('keeps the find mark when a layer remounts CodeMirror for the same file', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    const props = {
+      documentStore,
+      ownershipStore,
+      diffRows: () => [],
+      findOpen: true,
+    }
+
+    render(h(IdeEditor, props), container)
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Find query"]')!
+    fireEvent.input(input, { target: { value: 'runtime' } })
+    await waitFor(() => {
+      expect(container.querySelector('.cm-masc-find-match')?.textContent).toBe('runtime')
+    })
+    const firstView = EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)
+
+    render(h(IdeEditor, { ...props, activeLayers: new Set(['keeper-trace']) }), container)
+    await waitFor(() => {
+      const nextView = EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)
+      expect(nextView).not.toBe(firstView)
+      expect(container.querySelector('.cm-masc-find-match')?.textContent).toBe('runtime')
+    })
+  })
+
+  it('includes keeper trace in active layer summary and count', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['time', 'keeper-trace']),
+      }),
+      container,
+    )
+
+    expect(container.textContent).toContain('2 layers')
+    expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
+      .toContain('Trace')
+  })
+
+  it('renders keeper trace line dots only for the active file when the trace layer is on', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst task = runtime + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    pushTrace({
+      id: 'thread-runtime',
+      tsMs: 2000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'thread-runtime',
+      filePath: 'runtime.ts',
+      line: 2,
+    })
+    pushTrace({
+      id: 'thread-other',
+      tsMs: 3000,
+      keeperName: 'moth',
+      source: 'anchored-thread',
+      threadId: 'thread-other',
+      filePath: 'other.ts',
+      line: 1,
+    })
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['keeper-trace']),
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-trace-gutter')).not.toBeNull()
+      expect(container.querySelector('.cm-trace-dot')?.getAttribute('aria-label'))
+        .toBe('thread scholar')
+      expect(container.querySelector('.cm-masc-trace-chip')?.textContent)
+        .toBe('Trace · Thread · thread thread-runtime · keeper scholar')
+    })
+    expect(container.querySelectorAll('.cm-trace-dot')).toHaveLength(1)
+  })
+
+  it('filters keeper trace gutter dots through the shared replay cursor', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const oldTrace = 1\nconst replayTrace = oldTrace + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    pushTrace({
+      id: 'thread-old',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'thread-old',
+      filePath: 'runtime.ts',
+      line: 2,
+    })
+    pushTrace({
+      id: 'thread-future',
+      tsMs: 3000,
+      keeperName: 'moth',
+      source: 'anchored-thread',
+      threadId: 'thread-future',
+      filePath: 'runtime.ts',
+      line: 1,
+    })
+    setIdeReplayUntilMs(1500)
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['keeper-trace']),
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('button.cm-trace-stack[data-line="2"]')).not.toBeNull()
+    })
+    expect(container.querySelector('button.cm-trace-stack[data-line="1"]')).toBeNull()
+    expect(container.querySelectorAll('.cm-trace-dot')).toHaveLength(1)
+  })
+
+  it('summarizes current-file operational signals in the editor header', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst other = 2\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    lspDiagnosticSnapshot.value = new Map([[
+      'runtime.ts',
+      [{
+        file_path: 'runtime.ts',
+        line: 1,
+        severity: 2,
+        source: 'tsserver',
+        message: 'runtime is never reassigned',
+      }],
+    ]])
+    ideConversationThreadSnapshot.value = {
+      filePath: 'runtime.ts',
+      threads: [{
+        id: 'thread-1',
+        kind: 'question',
+        author_keeper_id: 'sangsu',
+        anchor: {
+          file_path: 'runtime.ts',
+          line_start: 2,
+          line_end: 2,
+          symbol_hint: 'runtime',
+        },
+        body: 'Is this task still tied to the active goal?',
+        created_ms: 1,
+        resolved: false,
+        reply_count: 1,
+      }],
+    }
+    pushTrace({
+      id: 'activity-runtime',
+      tsMs: 3000,
+      keeperName: 'sangsu',
+      source: 'activity-event',
+      eventId: 'evt-1',
+      filePath: 'runtime.ts',
+      line: 1,
+      surface: 'PR',
+    })
+    pushTrace({
+      id: 'thread-runtime',
+      tsMs: 2000,
+      keeperName: 'sangsu',
+      source: 'anchored-thread',
+      threadId: 'thread-1',
+      filePath: 'runtime.ts',
+      line: 2,
+    })
+    pushTrace({
+      id: 'activity-other',
+      tsMs: 4000,
+      keeperName: 'moth',
+      source: 'activity-event',
+      eventId: 'evt-other',
+      filePath: 'other.ts',
+      line: 1,
+      surface: 'Task',
+    })
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [
+          { kind: 'add', oldLine: null, newLine: 1, text: '+const runtime = 1' },
+          { kind: 'delete', oldLine: 2, newLine: null, text: '-const old = 1' },
+        ] as const,
+      }),
+      container,
+    )
+
+    const signals = [...container.querySelectorAll<HTMLLIElement>('.ide-editor-file-signals > li')]
+    expect(signals.map(item => item.textContent)).toEqual([
+      'LSP1',
+      'Threads1',
+      'Trace2',
+      'Ops1',
+      'Diff2',
+    ])
+    expect(signals.every(item => item.getAttribute('data-active') === 'true')).toBe(true)
+    expect(signals.map(item => item.title)).toEqual([
+      '1 current-file diagnostic',
+      '1 current-file anchored thread',
+      '2 current-file trace events',
+      '1 current-file operational surface link',
+      '2 current-file changed rows',
+    ])
+  })
+
+  it('focuses operational route context when a keeper trace gutter stack is clicked', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst task = runtime + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    pushTrace({
+      id: 'activity-runtime',
+      tsMs: 3000,
+      keeperName: 'sangsu',
+      source: 'activity-event',
+      eventId: 'evt-1',
+      filePath: 'runtime.ts',
+      line: 2,
+      surface: 'PR',
+      goalId: 'goal-runtime',
+      taskId: 'task-runtime',
+      boardPostId: 'post-runtime',
+      commentId: 'comment-runtime',
+      prId: '15035',
+      gitRef: 'refs/heads/review-response',
+      logId: 'turn-2',
+      sessionId: 'sess-runtime',
+      operationId: 'op-runtime',
+      workerRunId: 'worker-runtime',
+    })
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['keeper-trace']),
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('button.cm-trace-stack')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector<HTMLButtonElement>('button.cm-trace-stack')!)
+
+    expect(ideReplayUntilMs.value).toBe(3000)
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'runtime.ts',
+      line: 2,
+      surface: 'PR',
+      label: 'PR activity evt-1',
+      source_id: 'trace:activity-runtime',
+      keeper_id: 'sangsu',
+    })
+    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+    expect(ideContextFocus.value?.route_links?.find(link => link.label === 'Telemetry')?.params)
+      .toMatchObject({
+        section: 'fleet-health',
+        view: 'event-log',
+        session_id: 'sess-runtime',
+        operation_id: 'op-runtime',
+        worker_run_id: 'worker-runtime',
+        q: 'turn-2',
+      })
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-context-focus-status"]')?.textContent)
+        .toContain('Focused L2')
+      expect(container.querySelectorAll('.ide-editor-context-route-link')).toHaveLength(10)
+    })
+  })
+
+  it('shows and highlights the focused context line from the shared IDE signal', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst task = runtime + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-content')).not.toBeNull()
+    })
+
+    focusIdeContextAnchor({
+      file_path: 'runtime.ts',
+      line: 2,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      keeper_id: 'sangsu',
+      route_links: [
+        {
+          id: 'task:task-runtime',
+          label: 'Task',
+          tab: 'workspace',
+          params: { section: 'planning', view: 'default', task: 'task-runtime' },
+          evidence: 'Task task-runtime',
+        },
+        {
+          id: 'telemetry:turn-9',
+          label: 'Telemetry',
+          tab: 'monitoring',
+          params: { section: 'fleet-health', view: 'event-log', q: 'turn-9' },
+          evidence: 'Fleet telemetry event log · query turn-9',
+        },
+      ],
+    }, 'operator')
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-context-focus-status"]')?.textContent)
+        .toContain('Focused L2')
+      expect(container.querySelector('.cm-masc-context-focus')).not.toBeNull()
+      expect(container.querySelector('.cm-masc-context-focus-chip')?.textContent)
+        .toContain('Task · task task-runtime · keeper sangsu · 2 links')
+    })
+    expect(container.querySelector('.cm-masc-context-focus-chip')?.getAttribute('aria-label'))
+      .toBe('Focused context on line 2: Task, task task-runtime, keeper sangsu, 2 links')
+    const focusMeta = [...container.querySelectorAll('.ide-editor-context-focus-meta > span')]
+      .map(node => node.textContent)
+    expect(focusMeta).toEqual(['Task', 'keeper sangsu', 'source event-1', '2 links'])
+    expect(container.querySelector('.ide-editor-context-route-count')?.textContent).toBe('CTX 2')
+    const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-editor-context-route-link')]
+    expect(routeLinks.map(link => link.textContent)).toEqual(['Task', 'Telemetry'])
+    fireEvent.click(routeLinks.find(link => link.textContent === 'Telemetry')!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
+  })
+})

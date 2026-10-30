@@ -1,0 +1,27 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import test_tui_remote_workspace_history_pty as t; t.scoped_roster_authority("/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-lane-editor-release-fixtures-main-20261004/_build/default/bin/masc_tui.exe"); print("scoped matching-C roster: PASS")
+                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py", line 405, in scoped_roster_authority
+    _keyboard_harness.run_terminal_scenario(binary,
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+        description="superseded scoped roster cannot replace a newer full workspace reading",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        refresh=30.0, terminal_cols=80)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/tui_keyboard_harness.py", line 2408, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py", line 376, in interact
+    await_screen(lambda text: b"[workspace mismatch]" in text,
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                 "foreign B identity was not applied before holding its scoped roster")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-scoped-roster-matching-c-20261005/test/test_tui_remote_workspace_history_pty.py", line 367, in await_screen
+    assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+        lambda: predicate(screen(output)), timeout=WAIT_SECONDS), label
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: foreign B identity was not applied before holding its scoped roster

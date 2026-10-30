@@ -1,0 +1,7 @@
+{
+  "scope": "synthetic Item account HTTP responses through the real TUI in a PTY",
+  "binary_sha256": "39b8a9edcaab978775449d4184cd806fba6a8ebc3d1e6e949c3376e62fdb4be5",
+  "source_sha": "29571dc38684434139f1baeb054e0d885599a72f",
+  "columns": 100,
+  "item_rows": 24
+}

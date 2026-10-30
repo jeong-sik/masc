@@ -1,0 +1,784 @@
+(* Types, classification, and JSON helpers extracted to
+   [Keeper_execution_receipt_types] (godfile decomp). *)
+include Keeper_execution_receipt_types
+
+
+let receipt_duration_ms receipt =
+  match
+    ( Masc_domain.parse_iso8601_opt receipt.started_at
+    , Masc_domain.parse_iso8601_opt receipt.ended_at )
+  with
+  | Some started_at, Some ended_at -> max 0.0 ((ended_at -. started_at) *. 1000.0)
+  | _ -> 0.0
+;;
+
+(* Cycle 51 observability: alert when [operator_disposition] cannot
+   classify a receipt and falls through to the catch-all
+   [(Disp_unknown, Reason_unmapped_runtime_state)].
+
+   This counter alerts operators if a future refactor leaves a receipt
+   tuple outside the typed classification below. *)
+let () =
+  Otel_metric_store.register_counter
+    ~name:Keeper_metrics.(to_string ReceiptUnmappedDisposition)
+    ~help:
+      "Total receipts whose (outcome, runtime_outcome) tuple did not match any branch of \
+       operator_disposition and fell through to the typed catch-all \
+       (Disp_unknown, Reason_unmapped_runtime_state).  PR #11651 fixed the historical \
+       'blocked' -> 'unknown' silent path; this counter alerts operators if a future \
+       refactor reintroduces such a path. A non-zero rate is a regression signal — \
+       investigate which receipt.outcome / runtime_outcome / terminal_reason_code \
+       combination is unclassified.  Labels are intentionally omitted: receipt fields \
+       are high-cardinality free-form strings; structured detail goes to the WARN log \
+       line at the firing site."
+    ()
+;;
+
+type operator_disposition_kind =
+  | Disp_pass
+  | Disp_fail_open_next_runtime
+  | Disp_retry_later
+  | Disp_pass_next_model
+  | Disp_operator_action_required
+  | Disp_effect_review_required
+  | Disp_user_cancelled
+  | Disp_skipped
+  | Disp_unknown
+[@@deriving enumerate]
+
+let operator_disposition_kind_to_string = function
+  | Disp_pass -> "pass"
+  | Disp_fail_open_next_runtime -> "fail_open_next_runtime"
+  | Disp_retry_later -> "retry_later"
+  | Disp_pass_next_model -> "pass_next_model"
+  | Disp_operator_action_required -> "operator_action_required"
+  | Disp_effect_review_required -> "effect_review_required"
+  | Disp_user_cancelled -> "user_cancelled"
+  | Disp_skipped -> "skipped"
+  | Disp_unknown -> "unknown"
+;;
+
+let operator_disposition_kind_of_string s = List.find_opt (fun v -> String.equal (operator_disposition_kind_to_string v) s) all_of_operator_disposition_kind
+;;
+
+type operator_disposition_reason =
+  | Reason_healthy
+  | Reason_runtime_exhausted
+  | Reason_config_invalid
+  | Reason_authorization_refused
+  | Reason_degraded_retry
+  | Reason_runtime_fallback
+  | Reason_transient_runtime_retry
+  | Reason_provider_runtime_error
+  | Reason_internal_error
+  | Reason_input_required
+  | Reason_cancelled
+  | Reason_phase_skipped
+  | Reason_transcript_corruption
+  | Reason_official_client_recovery_required
+  | Reason_provider_attempt_effect_fenced
+  | Reason_tool_correction_lost
+  | Reason_accept_rejected
+  | Reason_terminal_effect_failed
+  | Reason_unmapped_runtime_state
+[@@deriving enumerate]
+
+let operator_disposition_reason_to_string = function
+  | Reason_healthy -> "healthy"
+  | Reason_runtime_exhausted -> "runtime_exhausted"
+  | Reason_config_invalid -> "config_invalid"
+  | Reason_authorization_refused -> "authorization_refused"
+  | Reason_degraded_retry -> "degraded_retry"
+  | Reason_runtime_fallback -> "runtime_fallback"
+  | Reason_transient_runtime_retry -> "transient_runtime_retry"
+  | Reason_provider_runtime_error -> "provider_runtime_error"
+  | Reason_internal_error -> "internal_error"
+  | Reason_input_required -> "input_required"
+  | Reason_cancelled -> "cancelled"
+  | Reason_phase_skipped -> "phase_skipped"
+  | Reason_transcript_corruption -> "transcript_corruption"
+  | Reason_official_client_recovery_required ->
+    Keeper_internal_error.official_client_recovery_required_kind
+  | Reason_provider_attempt_effect_fenced ->
+    Keeper_internal_error.provider_attempt_effect_fenced_kind
+  | Reason_tool_correction_lost -> Keeper_internal_error.tool_correction_lost_kind
+  | Reason_accept_rejected -> Keeper_internal_error.accept_rejected_kind
+  | Reason_terminal_effect_failed -> Keeper_internal_error.terminal_effect_failed_kind
+  | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
+;;
+
+let operator_disposition_reason_of_string value =
+  List.find_opt
+    (fun reason -> String.equal (operator_disposition_reason_to_string reason) value)
+    all_of_operator_disposition_reason
+;;
+
+let operator_disposition (receipt : t)
+  : operator_disposition_kind * operator_disposition_reason
+  =
+  (* Parse the wire string ONCE into the typed classification
+     ([Keeper_terminal_reason]). Each branch below is a variant test in
+     priority order. The error_kind sub-predicates read the receipt record,
+     not the wire string, and are OR'd with the variant test at the same
+     branch. *)
+  let terminal_reason = Keeper_terminal_reason.of_wire receipt.terminal_reason_code in
+  let input_required =
+    let open Keeper_turn_disposition in
+    match Keeper_turn_disposition.of_wire receipt.terminal_reason_code with
+    | Input_required -> true
+    | Success
+    | Checkpoint
+    | External_cancel
+    | Runtime_attempts_exhausted
+    | Provider_error _
+    | Unknown _ -> false
+  in
+  let provider_runtime_failure =
+    match terminal_reason with
+    | Keeper_terminal_reason.Provider_runtime_failure _ -> true
+    | Keeper_terminal_reason.Runtime_exhausted _ | Keeper_terminal_reason.Config_invalid _
+    | Keeper_terminal_reason.Authorization_refused _
+    | Keeper_terminal_reason.Transcript_corruption _
+    | Keeper_terminal_reason.Official_client_recovery_required _
+    | Keeper_terminal_reason.Provider_attempt_effect_fenced _
+    | Keeper_terminal_reason.Tool_correction_lost _ | Keeper_terminal_reason.Accept_rejected _
+    | Keeper_terminal_reason.Terminal_effect_failed _ | Keeper_terminal_reason.Internal_error _
+    | Keeper_terminal_reason.Pre_dispatch_success _ | Keeper_terminal_reason.Unknown _ -> false
+  in
+  (* Either half puts this turn on a degraded-retry lane: it dispatched on a
+     lane an earlier turn deferred to, or it deferred one itself. The
+     disposition is the same for both; only the receipt's label distinguishes
+     which happened. *)
+  let degraded_retry_on_the_receipt =
+    Option.is_some receipt.degraded_retry_applied
+    || Option.is_some receipt.degraded_retry_deferred
+  in
+  (* Runtime exhaustion reaches this branch via
+     [terminal_reason="runtime_exhausted"]; the closed [runtime_outcome] set
+     has no exhaustion value. *)
+  match terminal_reason with
+  | _ when input_required -> Disp_pass, Reason_input_required
+  | Keeper_terminal_reason.Transcript_corruption _ ->
+    (* Admission refused the stored history before provider dispatch, so
+       nothing left the process. What reaches this arm is a break no
+       synthesized tool result repairs: the Keeper cannot save a checkpoint
+       and fails every later turn at the same message, and boot recovery
+       leaves that latch standing. An operator repairs the history with a
+       checkpoint purge. *)
+    Disp_operator_action_required, Reason_transcript_corruption
+  | Keeper_terminal_reason.Official_client_recovery_required _ ->
+    (* The refusal happened while claiming the local durable session, before
+       provider dispatch. The same session remains held until an operator
+       resolves its recovery, so the receipt must not claim a runtime
+       continuation. *)
+    Disp_operator_action_required, Reason_official_client_recovery_required
+  | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
+    (* Same-turn replay stays forbidden, and the runtime lifecycle selects a
+       later turn, so the Keeper keeps running. Nothing proves whether the
+       attempt changed anything outside, so a person checks the effect. *)
+    Disp_effect_review_required, Reason_provider_attempt_effect_fenced
+  | Keeper_terminal_reason.Tool_correction_lost _ ->
+    (* Identical disposition to the fence above; only the label differs so a
+       lost correction (masc#28885) is countable apart from an ordinary
+       fenced provider failure. *)
+    Disp_effect_review_required, Reason_tool_correction_lost
+  | Keeper_terminal_reason.Terminal_effect_failed _ ->
+    (* Third member of the same family: the turn's closing tool may or may not
+       have put something outside the process, so the turn is never replayed
+       and the stimulus behind it is retired rather than requeued. A human
+       decides what happened, which is why this sits with its siblings above
+       the retry-label guards — a degraded retry elsewhere in the turn must
+       not relabel an alert this one earns on its own. Until now it reached
+       the operator as an unmapped state (#29929). *)
+    Disp_effect_review_required, Reason_terminal_effect_failed
+  | Keeper_terminal_reason.Runtime_exhausted _ ->
+    Disp_fail_open_next_runtime, Reason_runtime_exhausted
+  (* Two refusals that both stop the turn before dispatch and both need a
+     human, but need different things from that human. They are constructor
+     arms rather than a boolean guard, so a third pre-dispatch refusal added
+     later cannot silently inherit either label. *)
+  | Keeper_terminal_reason.Config_invalid _ ->
+    Disp_operator_action_required, Reason_config_invalid
+  | Keeper_terminal_reason.Authorization_refused _ ->
+    (* The wire says the provider refused under authorization and nothing
+       more. In September every one of these 852 turns was a usage limit
+       (838 weekly, 14 five-hour), which holds that runtime for days, so
+       [Disp_retry_later] would put the keeper against the same wall on every
+       later cycle. The operator moves the slot instead, and the audit log
+       records that they do: all 316 [runtime_config_write] entries came from
+       operator surfaces, none from a keeper. Short-period limits arrive as
+       [api_error_rate_limited] and never reach this arm. *)
+    Disp_operator_action_required, Reason_authorization_refused
+  | _ when provider_runtime_failure && degraded_retry_on_the_receipt ->
+    Disp_fail_open_next_runtime, Reason_degraded_retry
+  | _
+    when provider_runtime_failure
+         && (receipt.runtime_fallback_applied
+             || receipt.runtime_outcome = Runtime_passed_to_next_model) ->
+    Disp_pass_next_model, Reason_runtime_fallback
+  | _
+    when provider_runtime_failure
+         && Keeper_terminal_reason.is_transient_provider_runtime_failure
+              terminal_reason ->
+    (* This terminal receipt has already excluded both same-turn degraded retry
+       and cross-runtime fallback.  The Keeper remains live and its keepalive
+       cadence may run another turn later, but this turn did not move to a next
+       runtime.  Keep that future scheduling contract distinct from observed
+       same-turn routing. *)
+    Disp_retry_later, Reason_transient_runtime_retry
+  | _ when provider_runtime_failure ->
+    (* No degraded retry or cross-runtime fallback was observed above.  The
+       Keeper remains live and may try another turn later, but this terminal
+       receipt cannot claim a same-turn lane transition. *)
+    Disp_retry_later, Reason_provider_runtime_error
+  | Keeper_terminal_reason.Internal_error _ ->
+    Disp_fail_open_next_runtime, Reason_internal_error
+  | Provider_runtime_failure _
+  | Accept_rejected _
+  | Pre_dispatch_success _
+  | Unknown _ ->
+    (* Generic fall-through. [Provider_runtime_failure] is caught by the
+       guarded branches above (its constructor forces
+       [provider_runtime_failure] true), so only [Pre_dispatch_success] and
+       [Unknown] reach here in practice; it is listed to keep the match
+       exhaustive without a wildcard. [Config_invalid] and
+       [Authorization_refused] are absent because they now have unguarded
+       constructor arms above, which OCaml counts towards exhaustiveness —
+       listing them here would be a dead branch. *)
+    if degraded_retry_on_the_receipt
+    then Disp_fail_open_next_runtime, Reason_degraded_retry
+    else if
+      receipt.runtime_fallback_applied
+      || receipt.runtime_outcome = Runtime_passed_to_next_model
+    then Disp_pass_next_model, Reason_runtime_fallback
+    else if
+      receipt.outcome = `Ok
+      && receipt.runtime_outcome = Runtime_not_dispatched
+      &&
+      (match terminal_reason with
+       | Keeper_terminal_reason.Pre_dispatch_success _ -> true
+       | Runtime_exhausted _
+       | Config_invalid _
+       | Authorization_refused _
+       | Provider_runtime_failure _
+       | Transcript_corruption _
+       | Official_client_recovery_required _
+       | Provider_attempt_effect_fenced _
+       | Tool_correction_lost _
+       | Accept_rejected _
+       | Terminal_effect_failed _
+       | Internal_error _
+       | Unknown _ -> false)
+    then Disp_pass, Reason_healthy
+    (* "healthy" requires an explicit success signal: turn completed without
+       error AND runtime reached the configured terminal. Any other fallthrough
+       is an unmapped state — surface it as "unknown" so a new runtime_outcome
+       or terminal_reason_code does not silently display as "healthy" on the
+       dashboard. See #9900 and CLAUDE.md anti-pattern #2.
+
+       Cancelled is split out from the legacy binary outcome so dashboards
+       and replay decoders can distinguish a user-initiated cancellation
+       from a true failure. Skipped corresponds to the TLA+ [PhaseGateSkip]
+       action: a turn that intentionally never dispatched, so runtime
+       never engaged. It is a successful no-op rather than a failure or
+       an unmapped state. Spec parity with [ReceiptOutcomeSet] in
+       [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
+    else (
+      match receipt.outcome with
+      | `Cancelled -> Disp_user_cancelled, Reason_cancelled
+      | `Skipped -> Disp_skipped, Reason_phase_skipped
+      | `Ok when receipt.runtime_outcome = Runtime_completed -> Disp_pass, Reason_healthy
+      | `Ok when receipt.runtime_outcome = Runtime_not_dispatched ->
+        (* Pre-dispatch shortcut: the turn completed successfully without
+           dispatching to the LLM (cached response, immediate tool result,
+           or pre-dispatch check resolved the turn).  Treated as healthy
+           because the outcome is success — the runtime was simply not
+           needed. *)
+        Disp_pass, Reason_healthy
+      (* The official-client host-stop path writes a one-attempt runtime
+         observation (masc#31312), so a successful turn does not arrive as
+         [Runtime_not_observed]. A receipt that does is a producer hole and
+         belongs in unmapped, per the contract above. *)
+      | _
+        when (match terminal_reason with
+              | Keeper_terminal_reason.Accept_rejected _ -> true
+              | Runtime_exhausted _
+              | Config_invalid _
+              | Authorization_refused _
+              | Provider_runtime_failure _
+              | Transcript_corruption _
+              | Official_client_recovery_required _
+              | Provider_attempt_effect_fenced _
+              | Tool_correction_lost _
+              | Terminal_effect_failed _
+              | Internal_error _
+              | Pre_dispatch_success _
+              | Unknown _ -> false) ->
+        (* Last, not first: the degraded-retry and fallback labels above say
+           what the system DID about the rejection, which is the more useful
+           fact when one of them applies — and today they claim 41 of the 42
+           accept rejections on record. This arm names the remaining case
+           instead of calling it an unclassified state. Not pageable: the
+           provider was healthy, MASC's own accept contract refused the
+           answer, and the keeper takes its next turn. *)
+        Disp_fail_open_next_runtime, Reason_accept_rejected
+      | _ ->
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string ReceiptUnmappedDisposition) ();
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string ExecutionReceiptFailures)
+          ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Unmapped_disposition) ]
+          ();
+        Log.Keeper.warn
+          ~keeper_name:receipt.keeper_name
+          "operator_disposition: unmapped (outcome=%s runtime_outcome=%s \
+           terminal_reason=%s completion_contract_result=%s error_kind=%s) — investigate \
+           regression of #11651 silent-path fix"
+          (outcome_kind_to_string receipt.outcome)
+          (runtime_outcome_to_string receipt.runtime_outcome)
+          receipt.terminal_reason_code
+          (completion_contract_result_to_string receipt.completion_contract_result)
+          (Option.value
+             (Option.map error_kind_to_string receipt.error_kind)
+             ~default:"<none>");
+        Disp_unknown, Reason_unmapped_runtime_state)
+;;
+
+let to_json_with_operator_disposition
+      (receipt : t)
+      ~disposition
+      ~disposition_reason
+  =
+  let terminal_reason_code = receipt.terminal_reason_code in
+  let operator_disposition = operator_disposition_kind_to_string disposition in
+  let operator_disposition_reason =
+    operator_disposition_reason_to_string disposition_reason
+  in
+  let error_json =
+    match receipt.error_kind, receipt.error_message with
+    | None, None -> `Null
+    | error_kind, error_message ->
+      `Assoc
+        [ ( "kind"
+          , string_opt_json (Option.map error_kind_to_string error_kind) )
+        ; ( "message", string_opt_json error_message )
+        ]
+  in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
+      ~keeper_name:receipt.keeper_name
+      ~trace_id:receipt.trace_id
+      ~session_id:receipt.trace_id
+      ?keeper_turn_id:receipt.turn_count
+      ?task_id:receipt.current_task_id
+      ~sandbox_profile:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
+      ?sandbox_root:receipt.sandbox_root
+      ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode)
+      ~runtime_profile:(receipt.runtime_id)
+      ()
+  in
+  let action_radius =
+    Keeper_runtime_contract.action_radius_json
+      ~tool_name:"keeper_turn"
+      ~input:
+        (`Assoc
+            [ "action", `String "run_turn"
+            ; "target_kind", `String "keeper"
+            ; "target_path", string_opt_json receipt.sandbox_root
+            ])
+      ~duration_ms:(receipt_duration_ms receipt)
+      ?error:receipt.error_message
+      ~sandbox_target:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
+      ()
+  in
+  `Assoc
+    [ "schema", `String Keeper_types_support.execution_receipt_schema
+    ; "recorded_at", `String receipt.ended_at
+    ; "keeper_name", `String receipt.keeper_name
+    ; "trace_id", `String receipt.trace_id
+    ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
+    ; ( "agent_core_turn_count", Json_util.int_opt_to_json receipt.agent_core_turn_count )
+    ; ( "current_task_id", string_opt_json receipt.current_task_id )
+    ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
+    ; "terminal_reason_code", `String terminal_reason_code
+    ; "operator_disposition", `String operator_disposition
+    ; "operator_disposition_reason", `String operator_disposition_reason
+    ; "runtime_contract", runtime_contract
+    ; "action_radius", action_radius
+    ; "response_text_present", `Bool receipt.response_text_present
+    ; ( "completion_contract_result"
+      , `String (completion_contract_result_to_string receipt.completion_contract_result) )
+    ; ( "actionable_signal"
+      , match receipt.actionable_signal with
+        | Some signal -> `String (Keeper_contract_classifier.actionable_signal_label signal)
+        | None -> `Null )
+    ; ( "tool_surface"
+      , `Assoc
+          [ ( "turn_lane"
+            , Keeper_agent_tool_surface.turn_lane_to_yojson receipt.tool_surface.turn_lane
+            )
+          ] )
+    ; ( "sandbox"
+      , `Assoc
+          [ "kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
+          ; ( "sandbox_root", string_opt_json receipt.sandbox_root )
+          ; ( "network_mode"
+            , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
+          ] )
+    ; ( "runtime"
+      , `Assoc
+          [ "name", `String (receipt.runtime_id)
+          ; "selected_model", string_opt_json receipt.runtime_selected_model
+          ; "attempt_count", `Int receipt.runtime_attempt_count
+          ; "lane_attempt_count", `Int receipt.runtime_lane_attempt_count
+          ; "lane_evidence", (match receipt.runtime_lane_evidence with
+              | Some evidence -> Keeper_runtime_walk_evidence.to_yojson evidence
+              | None -> `Null)
+          ; "fallback_applied", `Bool receipt.runtime_fallback_applied
+          ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
+          ; "agent_core_internal_runtime_allowed", `Bool receipt.agent_core_internal_runtime_allowed
+          ; "degraded_retry_applied", degraded_retry_json receipt.degraded_retry_applied
+          ; "degraded_retry_deferred", degraded_retry_json receipt.degraded_retry_deferred
+          ] )
+    ; ( "stop_reason"
+      , match receipt.stop_reason with
+        | Some value -> `String (stop_reason_to_string value)
+        | None -> `Null )
+    ; "error", error_json
+    ; "started_at", `String receipt.started_at
+    ; "ended_at", `String receipt.ended_at
+    ; ( "extra_system_context_digest"
+      , string_opt_json receipt.extra_system_context_digest )
+    ; ( "extra_system_context_injected_size"
+      , Json_util.int_opt_to_json receipt.extra_system_context_injected_size )
+    ; ( "extra_system_context_computed_size"
+      , Json_util.int_opt_to_json receipt.extra_system_context_computed_size )
+    ]
+;;
+
+let to_json receipt =
+  let disposition, disposition_reason = operator_disposition receipt in
+  to_json_with_operator_disposition receipt ~disposition ~disposition_reason
+;;
+
+(* Receipt-local operator notification. [append] emits only from durable
+   receipt evidence; it makes no watchdog or liveness claim for a keeper that
+   did not produce a receipt. *)
+let needs_operator_broadcast = function
+  | Disp_operator_action_required
+  | Disp_effect_review_required
+  | Disp_unknown -> true
+  | Disp_pass
+  | Disp_fail_open_next_runtime
+  | Disp_retry_later
+  | Disp_pass_next_model
+  | Disp_user_cancelled
+  | Disp_skipped -> false
+;;
+
+let operator_broadcast_payload (receipt : t) ~disposition ~reason =
+  let terminal_reason_code = receipt.terminal_reason_code in
+  let disposition_s = operator_disposition_kind_to_string disposition in
+  let reason_s = operator_disposition_reason_to_string reason in
+  `Assoc
+    [ "schema", `String "keeper.operator_broadcast_required.v1"
+    ; "keeper_name", `String receipt.keeper_name
+    ; "trace_id", `String receipt.trace_id
+    ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
+    ; "disposition", `String disposition_s
+    ; "disposition_reason", `String reason_s
+    ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
+    ; "terminal_reason_code", `String terminal_reason_code
+    ; ( "current_task_id", string_opt_json receipt.current_task_id )
+    ; "response_text_present", `Bool receipt.response_text_present
+    ; "runtime_id", `String (receipt.runtime_id)
+    ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
+    ; ( "completion_contract_result"
+      , `String (completion_contract_result_to_string receipt.completion_contract_result) )
+    ; ( "actionable_signal"
+      , match receipt.actionable_signal with
+        | Some signal -> `String (Keeper_contract_classifier.actionable_signal_label signal)
+        | None -> `Null )
+    ; ( "sandbox"
+      , `Assoc
+          [ "kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
+          ; "sandbox_root", string_opt_json receipt.sandbox_root
+          ; ( "network_mode"
+            , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
+          ] )
+    ; ( "stop_reason"
+      , match receipt.stop_reason with
+        | Some value -> `String (stop_reason_to_string value)
+        | None -> `Null )
+    ; ( "error_kind"
+      , match receipt.error_kind with
+        | Some v -> `String (error_kind_to_string v)
+        | None -> `Null )
+    ; ( "error_message", string_opt_json receipt.error_message )
+    ; "ended_at", `String receipt.ended_at
+    ]
+;;
+
+let emit_operator_broadcast_event config (receipt : t) ~disposition ~reason =
+  let payload = operator_broadcast_payload receipt ~disposition ~reason in
+  let event =
+    Activity_graph.emit
+      config
+      ~actor:{ Activity_graph.kind = "agent"; id = receipt.keeper_name }
+      ~kind:"keeper.operator_broadcast_required"
+      ~payload
+      ()
+  in
+  Log.Keeper.warn
+    ~keeper_name:receipt.keeper_name
+    "%s: operator_broadcast_required emitted disposition=%s reason=%s seq=%d"
+    receipt.keeper_name
+    (operator_disposition_kind_to_string disposition)
+    (operator_disposition_reason_to_string reason)
+    event.seq
+;;
+
+let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
+  emit_operator_broadcast_event config receipt ~disposition ~reason
+;;
+
+let append (config : Workspace.config) (receipt : t) =
+  let store =
+    Keeper_types_support.keeper_execution_receipt_store config receipt.keeper_name
+  in
+  let disposition, reason = operator_disposition receipt in
+  let receipt_json =
+    to_json_with_operator_disposition
+      receipt
+      ~disposition
+      ~disposition_reason:reason
+  in
+  Dated_jsonl.append store receipt_json;
+  if needs_operator_broadcast disposition
+  then (
+    let disposition_label = operator_disposition_kind_to_string disposition in
+    let reason_label = operator_disposition_reason_to_string reason in
+    (try
+       emit_operator_broadcast config receipt ~disposition ~reason
+     with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        (* fail-closed: log loud, do not silently swallow. The append itself
+           has already persisted the receipt; the broadcast failure is its
+           own diagnostic that watchdogs/log alerts will pick up. *)
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string ExecutionReceiptFailures)
+          ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
+          ();
+        Log.Keeper.error
+          ~keeper_name:receipt.keeper_name
+          "%s: operator_broadcast_required EMIT FAILED disposition=%s reason=%s exn=%s"
+          receipt.keeper_name
+          disposition_label
+          reason_label
+          (Printexc.to_string exn)))
+;;
+
+let latest_json (config : Workspace.config) keeper_name =
+  let store = Keeper_types_support.keeper_execution_receipt_store config keeper_name in
+  match Dated_jsonl.read_recent store 1 with
+  | [ json ] -> Some json
+  | _ -> None
+;;
+
+type receipt_turn =
+  { receipt_trace_id : string
+  ; receipt_turn_count : int option
+  ; receipt_ended_at : string
+  }
+
+type runtime_lane_observation =
+  | Runtime_lane_observed of
+      { turn : receipt_turn; evidence : Keeper_runtime_walk_evidence.t }
+  | Runtime_lane_not_observed of receipt_turn
+  | Runtime_lane_unreadable of { turn : receipt_turn option; field : string }
+
+let runtime_lane_observation_of_receipt_json json =
+  let open Result.Syntax in
+  let member path key = function
+    | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name key) fields with
+       | [_, value] -> Ok value
+       | [] | _ :: _ -> Error path)
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error path
+  in
+  let string path key json =
+    let* value = member path key json in
+    match value with
+    | `String value -> Ok value
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> Error path
+  in
+  let identity =
+    let* receipt_trace_id = string "trace_id" "trace_id" json in
+    let* turn_count = member "turn_count" "turn_count" json in
+    let* receipt_turn_count = match turn_count with
+      | `Int value -> Ok (Some value)
+      | `Null -> Ok None
+      | `Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `String _ -> Error "turn_count" in
+    let* receipt_ended_at = string "ended_at" "ended_at" json in
+    Ok { receipt_trace_id; receipt_turn_count; receipt_ended_at }
+  in
+  match identity with
+  | Error field -> Runtime_lane_unreadable { turn = None; field }
+  | Ok turn ->
+    let evidence =
+      let* runtime = member "runtime" "runtime" json in
+      let* evidence = member "runtime.lane_evidence" "lane_evidence" runtime in
+      match evidence with
+      | `Null -> Ok None
+      | (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) as evidence ->
+        Keeper_runtime_walk_evidence.of_yojson evidence
+        |> Result.map Option.some
+        |> Result.map_error (fun _ -> "runtime.lane_evidence")
+    in
+    (match evidence with
+     | Ok (Some evidence) -> Runtime_lane_observed { turn; evidence }
+     | Ok None -> Runtime_lane_not_observed turn
+     | Error field -> Runtime_lane_unreadable { turn = Some turn; field })
+;;
+
+let runtime_lane_observation_to_yojson observation =
+  let state, turn, evidence, error = match observation with
+    | Runtime_lane_observed { turn; evidence } ->
+      "observed", Some turn, Keeper_runtime_walk_evidence.to_observation_yojson evidence, `Null
+    | Runtime_lane_not_observed turn -> "not_observed", Some turn, `Null, `Null
+    | Runtime_lane_unreadable { turn; field } -> "unreadable", turn, `Null, `String field
+  in
+  let turn = match turn with
+    | None -> `Null
+    | Some turn ->
+      `Assoc [ "trace_id", `String turn.receipt_trace_id
+             ; "turn_count", Json_util.int_opt_to_json turn.receipt_turn_count
+             ; "ended_at", `String turn.receipt_ended_at ]
+  in
+  `Assoc [ "state", `String state; "turn", turn; "evidence", evidence; "error", error ]
+;;
+
+let runtime_lane_observation_of_yojson json =
+  let open Result.Syntax in
+  let fields expected = function
+    | `Assoc values when List.equal String.equal (List.sort String.compare expected)
+        (List.sort String.compare (List.map fst values)) -> Ok values
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "runtime_lane_observation fields"
+  in
+  let string key values = match List.assoc key values with
+    | `String value -> Ok value
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> Error key in
+  let null key values = match List.assoc key values with
+    | `Null -> Ok ()
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ -> Error key in
+  let source_turn json =
+    let* values=fields ["trace_id";"turn_count";"ended_at"] json in
+    let* receipt_trace_id=string "trace_id" values in
+    let* receipt_ended_at=string "ended_at" values in
+    let* receipt_turn_count=match List.assoc "turn_count" values with
+      | `Null -> Ok None
+      | `Int value -> Ok (Some value)
+      | `Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `String _ -> Error "turn_count" in
+    Ok {receipt_trace_id;receipt_turn_count;receipt_ended_at}
+  in
+  (* Independently recover a unique valid source identity even if another
+     field is corrupt. Never substitute the roster's current trace. *)
+  let turn=match json with
+    | `Assoc values ->
+      (match List.filter (fun (key, _) -> String.equal key "turn") values with
+       | [_, value] -> Result.to_option (source_turn value)
+       | [] | _ :: _ -> None)
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None in
+  let decode () =
+    let* values=fields ["state";"turn";"evidence";"error"] json in
+    let* state=string "state" values in
+    match state with
+    | "observed" ->
+      let* ()=null "error" values in
+      let* turn=source_turn (List.assoc "turn" values) in
+      let* evidence=Keeper_runtime_walk_evidence.of_observation_yojson
+        (List.assoc "evidence" values) in
+      Ok (Runtime_lane_observed {turn;evidence})
+    | "not_observed" ->
+      let* ()=null "error" values in
+      let* ()=null "evidence" values in
+      let* turn=source_turn (List.assoc "turn" values) in
+      Ok (Runtime_lane_not_observed turn)
+    | "unreadable" ->
+      let* ()=null "evidence" values in
+      let* field=string "error" values in
+      let* turn=match List.assoc "turn" values with
+        | `Null -> Ok None
+        | (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) as value ->
+          Result.map Option.some (source_turn value) in
+      Ok (Runtime_lane_unreadable {turn;field})
+    | _ -> Error "runtime_lane_observation.state"
+  in
+  match json with
+  | `Null -> None
+  | (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) ->
+    Some (match decode () with
+      | Ok observation -> observation
+      | Error field -> Runtime_lane_unreadable {turn;field})
+;;
+
+type latest_receipt_summary =
+  { latest_outcome : outcome_kind
+  ; latest_terminal_reason_code : string
+  ; latest_error_message : string option
+  ; latest_ended_at : string
+  }
+
+type latest_receipt_reading =
+  | No_receipt
+  | Latest_receipt of latest_receipt_summary
+  | Latest_receipt_undecodable of { field : string }
+  | Receipt_store_unreadable of Dated_jsonl.read_error
+
+let latest_receipt_reading_of_json json =
+  match
+    Option.bind
+      (Json_util.assoc_string_opt "outcome" json)
+      Keeper_execution_receipt_outcome_kind.outcome_kind_of_tla_receipt
+  with
+  | None -> Latest_receipt_undecodable { field = "outcome" }
+  | Some latest_outcome ->
+    (match
+       ( Json_util.assoc_string_opt "terminal_reason_code" json
+       , Json_util.assoc_string_opt "ended_at" json )
+     with
+     | None, _ -> Latest_receipt_undecodable { field = "terminal_reason_code" }
+     | _, None -> Latest_receipt_undecodable { field = "ended_at" }
+     | Some latest_terminal_reason_code, Some latest_ended_at ->
+       Latest_receipt
+         { latest_outcome
+         ; latest_terminal_reason_code
+         ; latest_error_message =
+             Option.bind
+               (Json_util.assoc_member_opt "error" json)
+               (Json_util.assoc_string_opt "message")
+         ; latest_ended_at
+         })
+;;
+
+let read_latest_receipt (config : Workspace.config) keeper_name =
+  let store = Keeper_types_support.keeper_execution_receipt_store config keeper_name in
+  match
+    Dated_jsonl.find_latest_entry_result store (function
+      | Dated_jsonl.Parsed json -> Some json
+      | Dated_jsonl.Malformed_json _ -> None)
+  with
+  | Error err -> Receipt_store_unreadable err
+  | Ok None -> No_receipt
+  | Ok (Some json) -> latest_receipt_reading_of_json json
+;;
+
+let latest_json_by_keeper (config : Workspace.config) keeper_names =
+  keeper_names
+  |> List.filter_map (fun keeper_name ->
+    match latest_json config keeper_name with
+    | Some json -> Some (keeper_name, json)
+    | None -> None)
+;;

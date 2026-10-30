@@ -1,0 +1,12 @@
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "docker"
+sandbox_image = "base"
+network_mode = "inherit"
+
+instructions = """
+미배정 작업과 진행이 멈춘 작업을 확인하고, Keeper의 역량과 우선순위·마감에 맞춰 담당자를 조율하세요.
+
+기존 task를 배정할 때는 그 task의 상태를 갱신하세요. 새 task는 실제 구현·문서·조사 작업이 생길 때만 만드세요. 배정·추적·보고를 위한 task는 만들지 마세요.
+"""
+

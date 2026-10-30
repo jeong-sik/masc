@@ -1,0 +1,277 @@
+open Workspace_utils_backend_setup
+
+(* The workspace's state root, [<base>/.masc]. *)
+let masc_dir config = Common.masc_dir_from_base_path ~base_path:config.base_path
+
+type expected_workspace_error =
+  | Invalid_workspace_precondition
+  | Workspace_precondition_failed
+
+let read_precondition_admission_header = "x-masc-workspace-read", "matched-v1"
+
+(* The same admission check is used by HTTP operator writes and the TUI's
+   task cancellation. Compare canonical roots against the config captured
+   by the receiving request, before any durable operation is dispatched. *)
+let validate_expected_workspace ~config args =
+  match args with
+  | `Assoc fields ->
+    (match List.filter (fun (key, _) -> String.equal key "expected_workspace") fields with
+     | [] -> Ok args
+     | [_, `Assoc expected] when List.length expected = 2 ->
+       (match List.assoc_opt "base_path" expected, List.assoc_opt "masc_root" expected with
+        | Some (`String base), Some (`String root)
+          when base <> "" && root <> ""
+               && not (Filename.is_relative base) && not (Filename.is_relative root) ->
+          let matches =
+            try String.equal base (Unix.realpath config.base_path)
+                && String.equal root (Unix.realpath (masc_dir config))
+            with Unix.Unix_error _ -> false
+          in
+          if matches then Ok (`Assoc (List.remove_assoc "expected_workspace" fields))
+          else Error Workspace_precondition_failed
+        | _ -> Error Invalid_workspace_precondition)
+     | _ -> Error Invalid_workspace_precondition)
+  | _ -> Error Invalid_workspace_precondition
+
+let agents_dir config = Filename.concat (masc_dir config) "agents"
+(* Segment names for the task store, exposed so a reader holding only a
+   masc_dir string composes the same path this accessor does. *)
+let tasks_dirname = "tasks"
+let backlog_filename = "backlog.json"
+let tasks_dir config = Filename.concat (masc_dir config) tasks_dirname
+let messages_dir config = Filename.concat (masc_dir config) "messages"
+let state_path config = Filename.concat (masc_dir config) "state.json"
+
+(* A committed message is filed as "<seq>_<agent>_<request-id>_broadcast.json",
+   the sequence zero-padded to nine digits by the one site that writes it
+   ([Workspace_broadcast.message_file]).
+
+   The sequence is the order readers page through, so the reader that sorts by
+   it and the bootstrap that resumes it read the name the same way. A name
+   that does not open with digits is not one of ours and carries no sequence.
+
+   Leading digits are read whatever their width. Not to support an older
+   shape -- the store holds none, and the writer has padded since 2026-08-14
+   -- but because a number is what the field means, and a parser that
+   demanded exactly nine digits would silently skip a message the day the
+   width changed, which is the failure this whole path exists to prevent. *)
+let message_seq_of_filename name =
+  match String.index_opt name '_' with
+  | None -> 0
+  | Some at -> (
+      match int_of_string_opt (String.sub name 0 at) with
+      | Some seq when seq > 0 -> seq
+      | Some _ | None -> 0)
+let backlog_path config = Filename.concat (tasks_dir config) backlog_filename
+let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
+
+(* Keeper OUTPUT directory (server-written state + sidecars). The
+   trailing segment is [Common.keepers_runtime_dirname] — the single literal,
+   shared with [Common.keepers_runtime_dir_of_base] — so the input/output
+   relocation flips one constant, not a call-site sweep. Callers holding only a
+   base_path, and workspace-internal / accountability modules that cannot depend
+   on Workspace without a cycle, use the Common variant instead. *)
+let keepers_runtime_dir config =
+  Filename.concat (masc_dir config) Common.keepers_runtime_dirname
+
+(* The workspace's state root as [Dated_jsonl.Store] takes it. Made here so
+   a caller with a config does not spell the directory itself. *)
+let dated_store_root config = Dated_jsonl.Store.root_of_base_path ~base_path:config.base_path
+
+(** Shared in-memory pubsub for FileSystem and Memory backends.
+    All supported backends now share the same in-memory pubsub. *)
+let shared_pubsub = Backend_types.Pubsub_mem.create ()
+
+(** Adapt Backend get (returns Ok string | Error NotFound) to
+    the (string option, error) result shape used by all callers. *)
+let backend_get config ~key =
+  let result = match config.backend with
+    | Memory t -> Backend.Memory.get t key
+    | FileSystem t -> Backend.FileSystem.get t key
+  in
+  (match result with
+   | Ok v -> Ok (Some v)
+   | Error (Backend_types.NotFound _) -> Ok None
+   | Error (Backend_types.AlreadyExists _ | Backend_types.IOError _
+           | Backend_types.InvalidKey _) as err -> err)
+
+let backend_set config ~key ~value =
+  match config.backend with
+  | Memory t -> Backend.Memory.set t key value
+  | FileSystem t -> Backend.FileSystem.set t key value
+
+(** Adapt Backend delete (returns Ok unit | Error NotFound) to
+    the (bool, error) result shape. *)
+let backend_delete config ~key =
+  let result = match config.backend with
+    | Memory t -> Backend.Memory.delete t key
+    | FileSystem t -> Backend.FileSystem.delete t key
+  in
+  (match result with
+   | Ok () -> Ok true
+   | Error (Backend_types.NotFound _) -> Ok false
+   | Error (Backend_types.AlreadyExists _ | Backend_types.IOError _
+           | Backend_types.InvalidKey _) as err -> err)
+
+let backend_exists config ~key =
+  match config.backend with
+  | Memory t -> Backend.Memory.exists t key
+  | FileSystem t -> Backend.FileSystem.exists t key
+
+let backend_list_keys config ~prefix =
+  match config.backend with
+  | Memory t -> Backend.Memory.list_keys t ~prefix
+  | FileSystem t -> Backend.FileSystem.list_keys t ~prefix
+
+(** get_all: Memory uses native Hashtbl fold, FileSystem uses list_keys + get. *)
+let backend_acquire_lock config ~key ~ttl_seconds ~owner =
+  match config.backend with
+  | Memory _ -> Ok true  (* In-memory is single-process *)
+  | FileSystem t -> Backend.FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
+
+let backend_release_lock config ~key ~owner =
+  match config.backend with
+  | Memory _ -> Ok true
+  | FileSystem t -> Backend.FileSystem.release_lock t ~key ~owner
+
+let backend_commit_under_lease config ~key ~ttl_seconds ~owner publish =
+  match config.backend with
+  | Memory _ -> Ok (Ok (publish ()))
+  | FileSystem t ->
+      Backend.FileSystem.commit_under_lease t ~key ~owner ~ttl_seconds publish
+
+let backend_publish config ~channel ~message =
+  match config.backend with
+  | Memory _ | FileSystem _ ->
+      Backend_types.Pubsub_mem.publish (shared_pubsub) ~channel ~message
+
+let backend_subscribe config ~channel ~callback =
+  match config.backend with
+  | Memory _ | FileSystem _ ->
+      Backend_types.Pubsub_mem.subscribe (shared_pubsub) ~channel ~callback
+
+let backend_name config =
+  match config.backend with
+  | Memory _ -> "memory"
+  | FileSystem _ -> "filesystem"
+
+let backend_supports_local_dir = function
+  | FileSystem _ -> true
+  | Memory _ -> false
+
+let backend_cleanup_pubsub config ~days ~max_messages =
+  let _ = config, days, max_messages in
+  Ok 0
+
+(* ============================================ *)
+(* Key/path conversion                          *)
+(* ============================================ *)
+
+(** Generate a short hash prefix for project isolation.
+    Uses first 8 chars of MD5 hash of base_path.
+    This ensures different test directories get different keys. *)
+let project_prefix config =
+  let hash = Digest.string config.base_path |> Digest.to_hex in
+  String.sub hash 0 8
+
+(** Convert absolute path to backend key.
+    For distributed backends: includes project hash prefix for isolation.
+    Example: /tmp/test-abc/.masc/state.json -> "a1b2c3d4:state.json"
+    For filesystem: returns relative path without prefix. *)
+let key_of_path_from_root config ~root path =
+  let prefix = root ^ "/" in
+  if String.starts_with path ~prefix then
+    let rel =
+      String.sub path (String.length prefix) (String.length path - String.length prefix)
+    in
+    let key = String.map (fun c -> if c = '/' then ':' else c) rel in
+    match config.backend with
+    | Memory _ -> Some (project_prefix config ^ ":" ^ key)
+    | FileSystem _ -> Some key
+  else
+    None
+
+(* Key mapping is always relative to the .masc root so workspace paths
+   are preserved in the backend key (e.g., workspace:state.json). *)
+let key_of_path config path = key_of_path_from_root config ~root:(masc_dir config) path
+
+let strip_prefix prefix s =
+  if String.length s >= String.length prefix then
+    String.sub s (String.length prefix) (String.length s - String.length prefix)
+  else
+    s
+
+let list_dir config path =
+  match key_of_path config path with
+  | None ->
+      if Sys.file_exists path && Sys.is_directory path then
+        Sys.readdir path |> Array.to_list
+      else
+        []
+  | Some _ when
+      backend_supports_local_dir config.backend
+      && Sys.file_exists path && Sys.is_directory path ->
+      Sys.readdir path |> Array.to_list
+  | Some key_prefix ->
+      let prefix = key_prefix ^ ":" in
+      (match backend_list_keys config ~prefix with
+       | Ok keys ->
+           List.map (fun key ->
+             let rest = strip_prefix prefix key in
+             String.map (fun c -> if c = ':' then '/' else c) rest
+           ) keys
+       | Error _ -> [])
+
+(* ============================================ *)
+(* Initialization check                         *)
+(* ============================================ *)
+
+(* Server-level filesystem cache for is_initialized — avoids 3 syscalls per
+   request. Memory backends have independent state even at the same path and
+   perform an inexpensive key lookup instead of using this cache. *)
+type init_cache_entry = {
+  cache_key : string;
+  cached_result : bool;
+  cached_at : float;
+}
+
+let initialized_cache : init_cache_entry option Atomic.t = Atomic.make None
+let initialized_cache_ttl = 1.0  (* seconds *)
+
+let init_cache_key config = config.base_path
+
+(** Check the selected backend; only filesystem checks use the TTL cache. *)
+let is_initialized config =
+  match config.backend with
+  | Memory _ ->
+      let state_key =
+        match key_of_path config (state_path config) with
+        | Some k -> k
+        | None -> "state.json"
+      in
+      backend_exists config ~key:state_key
+  | FileSystem _ ->
+      let now = Time_compat.now () in
+      let cache_key = init_cache_key config in
+      match Atomic.get initialized_cache with
+      | Some entry
+        when entry.cache_key = cache_key
+             && now -. entry.cached_at < initialized_cache_ttl ->
+          entry.cached_result
+      | _ ->
+          let result =
+            Sys.file_exists (masc_dir config) &&
+            Sys.is_directory (masc_dir config) &&
+            Sys.file_exists (state_path config)
+          in
+          Atomic.set initialized_cache
+            (Some { cache_key; cached_result = result; cached_at = now });
+          result
+
+(** Invalidate the is_initialized cache. Call this when workspace state
+    changes (e.g., after init, reset, or cleanup operations). *)
+let invalidate_initialized_cache () =
+  Atomic.set initialized_cache None
+
+(* ============================================ *)
+(* Validation helpers                           *)

@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_ide_memo)
+ (public_name masc.ide_memo)
+ (wrapped false)
+ (modules ide_memo)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries masc.agent_observation))

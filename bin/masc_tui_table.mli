@@ -1,0 +1,107 @@
+(** Column layout for a plain-text table.
+
+    A screen describes its columns once and draws both its header and its rows
+    from that description, so the two cannot place a column differently. This
+    replaces a pair of format strings per screen, where the widths were written
+    twice and printf's width was a floor: a reading longer than its field was
+    printed whole and pushed every cell after it out of its column. *)
+
+type align =
+  | Left
+  | Right
+
+type fold =
+  | Fold_middle
+  | Fold_tail
+      (** Which part of a reading gives way when it is wider than its column.
+          {!Fold_middle} keeps both ends -- an identifier cut at the head reads
+          as a different identifier, and a number cut at either end is a wrong
+          number. {!Fold_tail} keeps the head, the way a sentence is read. *)
+
+type cell = private {
+  header : string;
+  width : int;
+  align : align;
+  fold : fold;
+  value : string;
+  style : string;
+}
+(** One column at one row: what it is called, how many cells it may occupy, how
+    it sits in them, and what this row puts there. Private so a cell cannot be
+    assembled without a header and a width -- the pairing is the point. *)
+
+val cell :
+  ?align:align ->
+  ?fold:fold ->
+  ?style:string ->
+  header:string ->
+  width:int ->
+  string ->
+  cell
+(** [cell ~header ~width value] describes one column carrying [value].
+    [align] defaults to {!Left}; numbers usually want {!Right}. [fold] defaults
+    to {!Fold_middle}; a column carrying a sentence wants {!Fold_tail}.
+
+    [style] dresses this cell's reading and nothing else -- an ANSI prefix the
+    caller owns, closed after the cell. It is how one deviating reading is
+    coloured without colouring the row: a keeper that is late says so in its
+    state cell and in the reading that measures how late, while the rest of
+    the row stays the colour the caller gave the line. Column names never take
+    it; a header is not a reading. *)
+
+val cell_gap : int
+(** Cells between one column and the next, the same on every table on every
+    screen. Exported for a table whose last column has no widest form and is
+    appended after the cells rather than laid out as one: it spaces that
+    column the way the contract spaces the rest.
+
+    It was each table's own number. Nine of the ten chose one and the Memory
+    table chose two, recording no reason, so moving between two screens moved
+    the columns under the reader's eye. There is nothing to pass now. *)
+
+val used_width : cell list -> int
+(** Cells the row occupies, the gaps between columns included. *)
+
+type 'col layout = private {
+  shown : 'col list;  (** The columns drawn, in display order. *)
+  flex_width : int;  (** What the flexible column gets. *)
+}
+(** Which of a table's columns fit a width, and the flexible column's share.
+    Private so a layout comes only from {!fit}. *)
+
+val fit :
+  inner_width:int ->
+  width:('col -> int) ->
+  flex:'col ->
+  drop_order:'col list ->
+  'col list ->
+  'col layout
+(** [fit ~inner_width ~width ~flex ~drop_order columns] decides what a table
+    draws in [inner_width] cells. [columns] is every column in display order,
+    named by the table's own closed variant; [width] is each column's fixed
+    width, and for [flex] its floor. While the columns still shown need more
+    than [inner_width] -- gaps included, at {!cell_gap} -- the next column of
+    [drop_order] that is still shown goes. Columns [drop_order] does not name,
+    and [flex], never go. [flex] then takes every cell the others leave, never
+    below its floor: when all that may go has gone and the rest still does not
+    fit, the row is wider than [inner_width] and the frame cuts it, as before
+    a table named what it could spare.
+
+    Columns compare with structural equality, so ['col] must be a closed
+    variant of constant constructors. [flex] must appear in [columns] exactly
+    once.
+    @raise Invalid_argument when [flex] is absent from [columns] or listed
+    more than once. *)
+
+val header_row : cell list -> string
+(** The column names, laid out on the given cells. *)
+
+val row : ?close:string -> cell list -> string
+(** One row's readings, laid out on the same cells as {!header_row}. A reading
+    past its width folds where its column says; it never widens its column, so a row is
+    exactly as wide as the header above it whatever it carries -- styled cells
+    included, since the escapes occupy no display cells.
+
+    [close] ends a styled cell and defaults to a plain reset. Pass the line's
+    own dress when the row sits inside one, or the cells after a coloured one
+    come out undressed. *)

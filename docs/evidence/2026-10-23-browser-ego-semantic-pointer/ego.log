@@ -1,0 +1,62 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.0.16). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+MASC_SPACE {"spaceId":66,"info":{"url":"http://localhost:62714/","title":"Semantic pointer cross-origin proof","w":1020,"h":946,"sx":0,"sy":0,"pw":1020,"ph":946}}
+MASC_SNAPSHOT [p1 "Semantic pointer cross-origin proof" | space "masc browser parity 20261023 continuation"(66): 1 managed, 0 untracked — p1* "Semantic pointer cross-origin proof"]
+root
+  heading
+    text "Owned iframe fixture"
+  button [ref=7]
+    text "Frame action"
+  iframe [ref=8]
+    root
+      button [ref=9]
+        text "Frame action"
+
+MASC_SNAPSHOT [p1 "Semantic pointer cross-origin proof" | space "masc browser parity 20261023 continuation"(66): 1 managed, 0 untracked — p1* "Semantic pointer cross-origin proof"]
+root
+  heading
+    text "Owned iframe fixture"
+  button [ref=7]
+    text "Frame action"
+  iframe [ref=8]
+    root
+      button [ref=9]
+        text "Frame action"
+  text "{ "inner": [ { "type": "mouseenter", "trusted": true } ], "outer": [] }"
+
+MASC_SNAPSHOT [p1 "Semantic pointer cross-origin proof" | space "masc browser parity 20261023 continuation"(66): 1 managed, 0 untracked — p1* "Semantic pointer cross-origin proof"]
+root
+  heading
+    text "Owned iframe fixture"
+  button [ref=7]
+    text "Frame action"
+  iframe [ref=8]
+    root
+      button [ref=9]
+        text "Frame action"
+  text "{ "inner": [ { "type": "mouseenter", "trusted": true }, { "type": "dblclick", "trusted": true } ], "outer": [] }"
+
+MASC_SNAPSHOT [p1 "Semantic pointer cross-origin proof" | space "masc browser parity 20261023 continuation"(66): 1 managed, 0 untracked — p1* "Semantic pointer cross-origin proof"]
+root
+  heading
+    text "Owned iframe fixture"
+  button [ref=7]
+    text "Frame action"
+  iframe [ref=8]
+    root
+      button [ref=9]
+        text "Frame action"
+  text "{ "inner": [ { "type": "mouseenter", "trusted": true }, { "type": "dblclick", "trusted": true } ], "outer": [ { "type": "mouseenter", "trusted": true } ] }"
+
+MASC_SNAPSHOT [p1 "Semantic pointer cross-origin proof" | space "masc browser parity 20261023 continuation"(66): 1 managed, 0 untracked — p1* "Semantic pointer cross-origin proof"]
+root
+  heading
+    text "Owned iframe fixture"
+  button [ref=7]
+    text "Frame action"
+  iframe [ref=8]
+    root
+      button [ref=9]
+        text "Frame action"
+  text "{ "inner": [ { "type": "mouseenter", "trusted": true }, { "type": "dblclick", "trusted": true } ], "outer": [ { "type": "mouseenter", "trusted": true }, { "type": "dblclick", "trusted": true } ] }"
+
+MASC_PROOF {"spaceId":66,"finished":false,"url":"http://localhost:63664/","frameOrigin":"http://127.0.0.1:63663","observations":[{"action":"hover","target":"@9","result":{"urlBefore":"http://localhost:63664/","receipt":{},"error":null},"observed":{"inner":[{"type":"mouseenter","trusted":true}],"outer":[]}},{"action":"double_click","target":"@9","result":{"urlBefore":"http://localhost:63664/","receipt":{},"error":null},"observed":{"inner":[{"type":"mouseenter","trusted":true},{"type":"dblclick","trusted":true}],"outer":[]}},{"action":"hover","target":"loc=role:button[name=\"Frame action\"]","result":{"urlBefore":"http://localhost:63664/","receipt":{},"error":null},"observed":{"inner":[{"type":"mouseenter","trusted":true},{"type":"dblclick","trusted":true}],"outer":[{"type":"mouseenter","trusted":true}]}},{"action":"double_click","target":"text=\"Frame action\"","result":{"urlBefore":"http://localhost:63664/","receipt":{},"error":null},"observed":{"inner":[{"type":"mouseenter","trusted":true},{"type":"dblclick","trusted":true}],"outer":[{"type":"mouseenter","trusted":true},{"type":"dblclick","trusted":true}]}},{"action":"wrong_url","result":{"before":true,"error":"the tab is at http://localhost:63664/, not at expectedUrl; read it again"},"observed":{"inner":[{"type":"mouseenter","trusted":true},{"type":"dblclick","trusted":true}],"outer":[{"type":"mouseenter","trusted":true},{"type":"dblclick","trusted":true}]}},{"action":"removed_frame_ref","target":"@9","result":{"before":true,"error":"Stale ref: @9; take a new snapshot"},"observed":{"inner":[{"type":"mouseenter","trusted":true},{"type":"dblclick","trusted":true}],"outer":[{"type":"mouseenter","trusted":true},{"type":"dblclick","trusted":true}]}}]}

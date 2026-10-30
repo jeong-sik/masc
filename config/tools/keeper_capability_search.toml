@@ -1,0 +1,32 @@
+name = "keeper_capability_search"
+description = """
+Find a Tool or Skill for the task when you do not know its exact name. Search \
+the names and descriptions in this turn's frozen capability inventory. Inspect \
+each match's availability, description and invocation_name before choosing it. \
+For an Instruction Skill, pass reference.identity as keeper_skill identity; \
+optionally pass reference.content_revision as content_revision to pin the revision. \
+Do not pass a reference argument. A Composition Skill runs its declared sequence \
+through the returned invocation_name. An async call returns a submission receipt; \
+after the completion notification, read keeper_composition_status with its \
+request_id to verify completion and node results. Search does not load schemas or execute candidates. If a chosen \
+name is advertised by keeper_tool_search but absent from your callable tools, \
+load that exact name there before calling it. Unavailable candidates cannot be \
+invoked through this search."""
+additional_properties = false
+
+[[params]]
+name = "query"
+type = "string"
+required = true
+description = """
+Literal phrase from the task, capability name or description. Names such as \
+browser-navigate-read need no query-language quoting. SQLite tokenization and \
+ranking still apply; no match is not evidence that the capability is absent. \
+For boolean, prefix or column expressions, select syntax=fts5 explicitly."""
+
+[[params]]
+name = "syntax"
+type = "string"
+enum = ["literal", "fts5"]
+default = "literal"
+description = "literal (default) searches one phrase and treats punctuation/operators as text. fts5 uses the explicit FTS5 expression grammar; for alternatives use query='browser OR screenshot'."

@@ -1,0 +1,35 @@
+{
+  "base": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+  "checks": [
+    "ocamlc -stop-after parsing",
+    "git diff --check"
+  ],
+  "typecheck": false,
+  "executed_tests": false,
+  "files": {
+    "lib/config/env_config_keeper.ml": "1e6594542acc510d059e8b319d4eba2d87f0df8e2415285fe7640982548770c0",
+    "lib/config/env_config_keeper.mli": "4c6a732a4d6d9e2258cacf726a55a5fa29cf41c62cf9b91274c2e43af82bfe9d",
+    "lib/config/env_setting.ml": "40e7723c5456c9b67d78665f1c991e45de112621f046ba6c71a918a00a52849b",
+    "lib/config/env_setting.mli": "6b9a13346287ec5873c9b374d2e3a53220bb0e5c27d597c45b8eb94198d6be3c",
+    "lib/config/keeper_runtime_setting_registry.ml": "b55309eb63365d9ab20b34588037e94f8593e3c1411ebada8eb092024c82062e",
+    "lib/server/server_bootstrap_loops.ml": "96988ebc64b8abc6c128dbe5de2313d778e743e89500b3d9d3077c981fdf1c40",
+    "lib/server/server_bootstrap_loops.mli": "9835f52348df186be43770dce80bcf5b1be0a738cc96696ff3651b16bde01023",
+    "lib/server/server_health_rollup.ml": "b96b2519b8c8b75455d22df5f811f14166d9c4af790606ca2f5fa5b9c9320a29",
+    "lib/server/server_health_rollup.mli": "41c4f810ff1b292919fea7f1146e05e3c4d9e5df9ed6f96b5a2c1a305706590a",
+    "lib/server/server_routes_http_runtime.ml": "c7349d28464e3f177b19372f331c14a34c31a34105480d4eca300ee30440e0fc",
+    "lib/server/server_routes_http_runtime.mli": "0e735afb27c8b9afb740b879e99bb48c9040f244cecd4030ead833408f72926f",
+    "test/test_env_config_keeper_bootstrap_intervals.ml": "adda39f026ad6604426d68d41e195cb4764066a7065d6f212730df1246ab63ba",
+    "test/test_runtime_config_validity.ml": "811080dd71e0c6d6c5892affbb3953b6c86afc91a18ae5e750bac68414e00f74",
+    "test/test_server_health_rollup.ml": "e51e011757d3c71a5c341f18a6cefc66d8e25069510cdeca382a5ab6fc7681c7",
+    "test/test_server_runtime_bootstrap.ml": "18aa07941c92e315b2ed9f96c730acfecf521e5467d6f56dd191602c68f9055c",
+    "test/test_server_skill_catalog_health.ml": "0bed9b8768679feac85843c92d6c60d23caca49c54ae7f07a7ffd9bc16c9268e"
+  },
+  "requested_suites": [
+    "test/test_session_restore",
+    "test/test_env_config_keeper_bootstrap_intervals",
+    "test/test_server_health_rollup",
+    "test/test_server_skill_catalog_health"
+  ],
+  "full_regression": "not run on this candidate",
+  "blocked_restore_and_keeper_bootstrap_integration": "not executed"
+}

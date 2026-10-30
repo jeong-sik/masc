@@ -1,0 +1,19 @@
+name = "masc_dos_save"
+description = """
+Save the whole DOS machine under a name, without advancing it.
+
+Keeps CPU, memory, screen, open files, step count and key ledger; survives \
+a server restart. Replaces the named slot and says what it held under \
+replaced (program, steps, who saved it, when). autosave and autosave-prev \
+are written by the lane itself, so a save to either is refused. Needs no \
+controller. Restore with masc_dos_restore. A game's own save menu is \
+separate."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "slot"
+type = "string"
+description = "1..64 letters, digits, _ or -, but not autosave or autosave-prev. Default quick."
+default = "quick"

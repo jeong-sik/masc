@@ -1,0 +1,20 @@
+# Make's remote MCP server.
+#
+# Only the server is named. Its endpoints, the scopes it publishes and whether
+# a client has to be registered by hand come from the two well-known documents
+# it serves, so none of that can go stale here.
+#
+# Measured 2026-09-05: unauthenticated requests answer 401 with WWW-Authenticate
+# naming https://mcp.make.com/.well-known/oauth-protected-resource,
+# authorization server (https://www.make.com/mcp) offers S256 PKCE and dynamic
+# client registration (HTTP 201).
+
+id = "make"
+label = "Make"
+mcp_url = "https://mcp.make.com"
+
+access_token_env = "MAKE_ACCESS_TOKEN"
+expires_at_env = "MAKE_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.make/refresh_token"
+
+renew_before_sec = 600

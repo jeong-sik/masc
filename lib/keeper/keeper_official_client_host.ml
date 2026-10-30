@@ -1,0 +1,2411 @@
+open Result.Syntax
+
+let internal_error detail = Agent_core.Error.Internal detail
+
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; detail : Keeper_terminal_effect_detail.t
+      }
+
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
+
+type image_block = Keeper_official_client_context_projection.image_block =
+  { media_type : string
+  ; base64_data : string
+  }
+
+type composed_context = Keeper_official_client_context_projection.composed_context
+
+type resume_delivery = Keeper_official_client_context_projection.resume_delivery =
+  { prompt : string
+  ; context_projection : Keeper_context_submission_link.t
+  ; held_context : Keeper_official_client_session_store.held_context list
+  ; unchanged_sections : Keeper_context_layers.source list
+  ; partly_held_sections : Keeper_context_layers.source list
+  }
+
+type carried_summary = Keeper_official_client_context_projection.carried_summary =
+  { label : string
+  ; bytes : int
+  ; sha256_prefix : string
+  ; resent_every_resume : bool
+  }
+
+include
+  (Keeper_official_client_context_projection :
+    module type of Keeper_official_client_context_projection
+      with type image_block := image_block
+       and type composed_context := composed_context
+       and type resume_delivery := resume_delivery
+       and type carried_summary := carried_summary
+)
+
+let hook_error ~runtime_label ~hook_name ~stage detail =
+  internal_error
+    (Printf.sprintf
+       "%s runtime %s hook failed at %s: %s"
+       runtime_label
+       hook_name
+       (Agent_core.Hooks.hook_stage_to_string stage)
+       detail)
+;;
+
+let illegal_hook_decision ~runtime_label ~hook_name decision =
+  config_error
+    ~field:"hooks"
+    (Printf.sprintf
+       "%s runtime %s hook returned unsupported decision %s"
+       runtime_label
+       hook_name
+       (Agent_core.Hooks.decision_kind_to_string
+          (Agent_core.Hooks.classify_decision decision)))
+;;
+
+let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
+  Agent_core.Agent_tools.invoke_hook
+    ~tracer:Agent_core.Tracing.null
+    ~agent_name:keeper_name
+    ~turn_count
+    ~hook_name
+    hook
+    event
+;;
+
+let invoke_turn_completion_hooks ~runtime_label ~keeper_name ~turn_count ~hooks
+    (response : Agent_core.Types.api_response) =
+  let* () =
+    match
+      invoke_turn_hook
+        ~keeper_name
+        ~turn_count
+        ~hook_name:"after_turn"
+        hooks.Agent_core.Hooks.after_turn
+        (Agent_core.Hooks.AfterTurn
+           { turn = turn_count; response; tool_source_map = None })
+    with
+    | Continue -> Ok ()
+    | HookFailed { stage; detail } ->
+      Error (hook_error ~runtime_label ~hook_name:"after_turn" ~stage detail)
+    | (Agent_core.Hooks.AdjustParams _ | Agent_core.Hooks.ElicitInput _ | Agent_core.Hooks.ElicitToolApproval _ | Agent_core.Hooks.Nudge _ | Agent_core.Hooks.Block _) as decision -> Error (illegal_hook_decision ~runtime_label ~hook_name:"after_turn" decision)
+  in
+  match
+    invoke_turn_hook
+      ~keeper_name
+      ~turn_count
+      ~hook_name:"on_stop"
+      hooks.on_stop
+      (Agent_core.Hooks.OnStop { reason = response.stop_reason; response })
+  with
+  | Continue -> Ok ()
+  | HookFailed { stage; detail } ->
+    Error (hook_error ~runtime_label ~hook_name:"on_stop" ~stage detail)
+  | (Agent_core.Hooks.AdjustParams _ | Agent_core.Hooks.ElicitInput _ | Agent_core.Hooks.ElicitToolApproval _ | Agent_core.Hooks.Nudge _ | Agent_core.Hooks.Block _) as decision -> Error (illegal_hook_decision ~runtime_label ~hook_name:"on_stop" decision)
+;;
+
+let lifecycle_outcome = function
+  | Error error -> Agent_core.Agent_lifecycle_events.Failed error
+  | Ok ({ response; stop_reason; _ } : Runtime_agent.run_result) ->
+    (match stop_reason with
+     | Runtime_agent.Completed _ ->
+       Agent_core.Agent_lifecycle_events.Completed response
+     | Runtime_agent.InputRequired { request; _ } ->
+       Agent_core.Agent_lifecycle_events.Input_required request
+     | Runtime_agent.Yielded_to_operation_queued { turns_used; _ }
+     | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ }
+     | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; _ }
+     | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; _ } ->
+       Agent_core.Agent_lifecycle_events.Yielded { turn = turns_used })
+;;
+
+let with_run_lifecycle_events ~event_bus ~keeper_name run =
+  Agent_core.Agent_lifecycle_events.with_run_lifecycle_events
+    ~event_bus
+    ~agent_name:keeper_name
+    ~raw_trace:None
+    ~current_run_id:(fun () -> None)
+    ~classify:lifecycle_outcome
+    run
+;;
+
+(* Snap a requested reasoning effort into the catalog's accepted set: the
+   requested effort when it is accepted, otherwise the nearest accepted effort
+   (highest below; lowest when every accepted effort is higher). The catalog
+   ([models.toml] [accepted_reasoning_efforts]) is the SSOT, so an operator
+   controls the effective effort by editing that row.
+
+   Shared by the Codex and Claude Code lanes: before this lived here, the
+   same operator-declared effort was clamped on Codex but failed the whole
+   turn on Claude Code ([reasoning_args] rejects [Minimal]), so which lane a
+   keeper ran on decided whether a config value was survivable. *)
+let clamp_reasoning_effort_to_catalog = Runtime_inference.clamp_reasoning_effort_to_catalog
+;;
+
+let effective_reasoning_effort
+    ~runtime_label ~keeper_name ~runtime_id ~model_id ~requested =
+  let effective = clamp_reasoning_effort_to_catalog ~model_id ~requested in
+  (match requested, effective with
+   | Some asked, Some snapped
+     when Llm_provider.Reasoning_effort.compare asked snapped <> 0 ->
+     Log.Keeper.info
+       ~keeper_name
+       "%s reasoning effort clamped to catalog: model=%s asked=%s effective=%s"
+       runtime_label
+       (Option.value model_id ~default:runtime_id)
+       (Llm_provider.Reasoning_effort.to_string asked)
+       (Llm_provider.Reasoning_effort.to_string snapped)
+   | _ -> ());
+  effective
+;;
+
+let host_stop_result
+      ~runtime_id
+      ~model
+      ~session_id
+      ~turn_id
+      ~provider_turn_ordinal
+      ~turns_used
+      ~latency_ms
+      ~request_context
+    stop =
+  match stop with
+  | Terminal_tool_boundary
+      { outcome = Terminal_failed { failure_class; effect_disposition; detail }
+      ; _
+      } ->
+    Error
+      (Keeper_internal_error.core_error_of_masc_internal_error
+         (Keeper_internal_error.Terminal_effect_failed
+            { failure_class; effect_disposition; detail }))
+  | ( Repeated_tool_call _
+    | Terminal_tool_boundary
+        { outcome =
+            (Terminal_completed | Durable_stimulus_deferred)
+        ; _
+        } ) ->
+    let response : Agent_core.Types.api_response =
+      { id = turn_id
+      ; model
+      ; stop_reason = Agent_core.Types.EndTurn
+      ; content = []
+      ; usage = None
+      ; telemetry =
+          Some
+            { Agent_core.Types.default_inference_telemetry with
+              canonical_model_id = Some model
+            }
+      }
+    in
+    let stop_reason =
+      match stop with
+      | Repeated_tool_call { tool_name; repeated_count } ->
+        Runtime_agent.Yielded_after_repeated_tool_call
+          { turns_used; provider_turn_ordinal; tool_name; repeated_count }
+      | Terminal_tool_boundary { outcome = Terminal_completed; _ } ->
+        Runtime_agent.Completed { provider_turn_ordinal }
+      | Terminal_tool_boundary { outcome = Durable_stimulus_deferred; _ } ->
+        Runtime_agent.Yielded_to_durable_stimulus { turns_used; provider_turn_ordinal }
+      | Terminal_tool_boundary { outcome = Terminal_failed _; _ } -> assert false
+    in
+    (* masc#31312: this host-stop path was the one producer that returned
+       [runtime_observation = None] on a successful or yielded turn, so every
+       tool-boundary stop (completed, deferred stimulus, external effect,
+       repeated tool call) reached the execution receipt as
+       [Runtime_not_observed] and the operator disposition fell to
+       "unmapped_runtime_state". The vendor loop ran exactly one attempt to
+       get here, so record that attempt the same way the in-loop terminal
+       does. *)
+    let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates ~runtime_id () in
+    Runtime_observation.record_attempt_terminal
+      capture
+      ~model_id:model
+      ~latency_ms
+      ~error:None;
+    let runtime_observation =
+      Runtime_observation.runtime_observation_with_metrics
+        ~selected_model:(Some model)
+        ~capture
+        ~attempt_details_source:"official_client_host_stop"
+        ~agent_core_internal_runtime_allowed:false
+        ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
+        ?request_context
+        ()
+    in
+    Ok
+      { Runtime_agent.response
+      ; checkpoint = None
+      ; session_id
+      ; session_resumed = None
+      ; turns = turns_used
+      ; trace_ref = None
+      ; run_validation = None
+      ; runtime_observation = Some runtime_observation
+      ; cooperative_boundary = None
+      ; stop_reason
+      }
+;;
+
+type prepared_turn =
+  { messages : Agent_core.Types.message list
+  ; system_prompt : string
+  ; start_context : Keeper_context_submission_link.t
+  ; composed_context : Keeper_context_assembly.t option
+  ; tools : Agent_core.Tool.t list
+  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
+  }
+
+let start_prompt prepared prompt =
+  if Keeper_context_submission_link.text prepared.start_context = ""
+  then Keeper_context_submission_link.literal prompt
+  else Keeper_context_submission_link.concat ~separator:"\n\n"
+      [prepared.start_context; Keeper_context_submission_link.literal prompt]
+;;
+
+type transmitted_model_input =
+  | Whole_input_transmitted of Agent_core.Types.message list
+  | Held_by_client_session
+
+let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
+  match enable_thinking with
+  | Some _ ->
+    Error
+      (config_error
+         ~field:"enable_thinking"
+         "official-client runtimes do not project enable_thinking; use reasoning_effort for explicit control")
+  | None -> Ok reasoning_effort
+;;
+
+(* Measure the shared, content-dependent envelope. Each adapter may add a fixed
+   role prefix or protocol framing around it. *)
+let measure_message_bytes message = String.length (encode_history_message message)
+;;
+
+type carried_start_front =
+  | Carried_seed of Keeper_carried_front.source
+      (** The seed named the front: the ledger of an Agent Core pair, the
+          newest completed turn record on this history, or the narrowest
+          range an unfinished turn reached. *)
+  | Lane_cut
+      (** The lane's own cut sits at or past the seed's position, so it named
+          the front. *)
+  | Turn_start
+      (** No seed held and the lane cut nothing later: the range starts
+          where the last completed turn on this history ended, this turn's
+          own atoms (RFC keeper-context-window-in-tokens §13.4). *)
+  | Turn_start_unknown of { reason : string }
+      (** No seed, no lane cut, and the turn start could not be read: the
+          range opened on the newest atom alone. *)
+  | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
+      (** The Librarian absorbed the history through [absorbed_through] and
+          wrote what the keeper was in the middle of; the range starts there
+          and carries that working state instead of the atoms it summarises. *)
+  | Librarian_progress of { end_atom : int }
+      (** The Librarian read the history through [end_atom] and no working
+          state fits it; the range starts there, and the atoms before it are
+          in the keeper's memory. *)
+
+type carried_start =
+  { messages : Agent_core.Types.message list
+  ; projection : Runtime_model_input_tail_window.projection
+  ; history_atom_count : int
+  ; first_atom : int
+  ; transmitted_bytes : int
+  ; front : carried_start_front
+  ; accepted_front : Keeper_carried_front.seed option
+  }
+
+type librarian_position = Keeper_turn_driver_try_provider.librarian_position
+
+let project_source ~unread source_projection messages =
+  let result=match source_projection with None -> Ok messages | Some project -> project messages in
+  Result.map (Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System unread) result
+
+type librarian_front_reader =
+  Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
+
+(* Every official lane takes the reader as an optional argument and applies
+   it to the list it is about to cut; this turns "the caller named none" into
+   "no position for these messages" once, here, rather than in each lane. *)
+let read_librarian_front reader messages =
+  match reader with
+  | None -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+  | Some read -> read messages
+;;
+
+let carried_start_front_to_string = function
+  | Carried_seed source ->
+    Printf.sprintf "carried:%s" (Keeper_carried_front.source_to_string source)
+  | Lane_cut -> "lane_cut"
+  | Turn_start -> "turn_start"
+  | Turn_start_unknown _ -> "turn_start_unknown"
+  (* The same word the Agent Core lane logs for this front
+     ([Keeper_carried_front.origin_to_string]), so one search finds both. *)
+  | Librarian_snapshot _ -> "librarian_snapshot"
+  | Librarian_progress _ -> "librarian_progress"
+;;
+
+let warn_if_sent_on_unknown_start ~keeper_name = function
+  | Turn_start_unknown { reason } ->
+    Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
+  | Carried_seed _ | Lane_cut | Turn_start | Librarian_snapshot _ | Librarian_progress _ ->
+    ()
+;;
+
+let continuity_observation_input ~trace_id ~continuity front =
+  match front, continuity with
+  | Librarian_snapshot { absorbed_through; boundary_line }, _ ->
+    Keeper_continuity_observation.Summarized
+      { trace_id; end_atom = absorbed_through; boundary_line }
+  | Librarian_progress { end_atom }, _ -> Keeper_continuity_observation.Absorbed { trace_id; end_atom }
+  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _), None ->
+    Keeper_continuity_observation.Not_applied
+  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _), Some chosen ->
+    (match Keeper_turn_driver_try_provider.continuity_choice chosen with
+     | Keeper_turn_driver_try_provider.Chose_no_point ->
+       Keeper_continuity_observation.Without_snapshot
+     | Keeper_turn_driver_try_provider.Chose_a_librarian_point ->
+       (* The turn chose a Librarian point and this request did not start
+          there: the seed or the lane's own cut sat past it. *)
+       Keeper_continuity_observation.Not_applied)
+;;
+
+(* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The
+   front is a position in the keeper's checkpoint history, and an official
+   client cuts from that same history: masc composes the list here and the
+   client assembles the request from it
+   ([Keeper_carried_front.Hands_over_its_own_list]). So a range measured by an
+   Agent Core turn names the same atoms on this lane, and a lane walking to
+   this candidate starts where the last completed turn ended rather than at
+   the oldest atom.
+
+   These lanes hold no ledger: the ledger is written from the usage of a
+   request this process composed ([Keeper_turn_driver_try_provider]), and an
+   official client composes its own. The seed the caller reads is therefore
+   the whole answer, and with no seed the range starts at [turn_start]: the
+   end of the last completed turn on this history, where the Agent Core path
+   starts without a ledger too (RFC keeper-context-window-in-tokens §13.4).
+
+   [own_first_atom] is the front the calling lane already chose for its own
+   reason — Claude Code and Codex cut their start seed to the capacity a typed
+   overflow narrowed the turn to. A seed at or past that cut decides, even
+   when it is older than [turn_start]: the range the last answered request
+   carried is this lane's continuity, and the turn start is only where a lane
+   with no seed begins. Without a seed the range starts at the later of the
+   lane's cut and [turn_start]. A lane with no cut of its own passes 0; a
+   history with no completed turn has [turn_start] 0. The first request after
+   a new keeper or a purge therefore starts at the turn start, and its record
+   seeds the requests after it from that same atom.
+
+   Runs on the calling fiber: reading the seed opens the keeper's turn-record
+   store, which takes an [Eio.Mutex], so it cannot run on a CPU-pool domain.
+   The composition it drives is a walk over the whole history, so that part is
+   offloaded. *)
+(* What a range carries, named where it is decided. [Absorbed_through] holds
+   the working-state text the request sends, so the composition below cannot
+   reach a Librarian front without it. *)
+type range_plan =
+  | Plain of int * carried_start_front
+  | Absorbed_through of
+      { first_atom : int
+      ; absorbed_through : int
+      ; boundary_line : int
+      ; working_state : string
+      }
+
+let carried_start_range_on_source
+      ~source_messages
+      ~keeper_name
+      ~runtime_id
+      ~carried_front_seed
+      ~librarian_front
+      ~own_first_atom
+      ~turn_start
+      messages
+  =
+  let seed_read =
+    match carried_front_seed with
+    | None -> Keeper_carried_front.no_seed_read
+    | Some read -> read ()
+  in
+  let digest_at, history_atom_count =
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      ( Runtime_model_input_tail_window.atom_opening_digest source_messages
+      , snd (Runtime_model_input_tail_window.annotate source_messages) ))
+  in
+  Keeper_carried_front.warn_seed_read_failures ~keeper_name ~runtime_id seed_read;
+  let admitted_seed =
+    match seed_read.Keeper_carried_front.seed with
+    | None -> None
+    | Some seed ->
+      (match Keeper_carried_front.for_history ~digest_at seed with
+       | Ok admitted -> Some admitted
+       | Error dropped ->
+         (* The position names no atom of this history: it is shorter than the
+            front, or a purge put another message under that index. Carrying
+            the newest atom alone from there would never widen again, so the
+            range starts over as with no seed. *)
+         Log.Keeper.warn
+           ~keeper_name
+           "model input carried range dropped its front runtime=%s seed=%s reason=%s \
+            history_atoms=%d: the history does not open that atom with the same \
+            message, and the start seed starts at the turn's own boundary"
+           runtime_id
+           (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed))
+           (Keeper_carried_front.dropped_front_to_string dropped)
+           history_atom_count;
+         None)
+  in
+  let seedless =
+    match turn_start with
+    | Keeper_carried_front.Turn_boundary { end_atom } ->
+      let turn_start = Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom in
+      if own_first_atom > turn_start then own_first_atom, Lane_cut
+      else turn_start, Turn_start
+    | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+      (* The lane's own cut is a position this lane reached; without one
+         the range opens on the newest atom alone, not on the whole
+         history under a boundary that was never read. *)
+      if own_first_atom > 0 then own_first_atom, Lane_cut
+      else
+        ( Keeper_carried_front.newest_atom ~atom_count:history_atom_count
+        , Turn_start_unknown { reason } )
+  in
+  let accepted_front =
+    match admitted_seed with
+    | Some seed when seed.Keeper_carried_front.first_atom >= own_first_atom -> Some seed
+    | Some _ | None -> None
+  in
+  let seed_held =
+    Option.map
+      (fun (seed : Keeper_carried_front.seed) ->
+         Keeper_carried_front.clamp_seed ~atom_count:history_atom_count seed,
+         Carried_seed seed.source)
+      accepted_front
+  in
+  let seed_or_lane =
+    match seed_held with
+    | Some held -> held
+    | None -> seedless
+  in
+  (* What a Librarian position has to reach to win: the seed that holds, else
+     the lane's own cut. The turn start is not weighed against it. It is where
+     a request with no absorbed point begins (RFC
+     keeper-context-window-in-tokens §13.4), so a Librarian position behind it
+     still names atoms that nothing else carries or summarises, and they go
+     out. *)
+  let librarian_must_reach =
+    match seed_held with
+    | Some (first_atom, _) -> first_atom
+    | None -> own_first_atom
+  in
+  let librarian_first_atom end_atom =
+    let first = Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom in
+    match seed_held with
+    | Some (accepted, _) -> max accepted first
+    | None -> first
+  in
+  let absorbed = librarian_front.Keeper_turn_driver_try_provider.point in
+  (* The range and what it must carry, decided together: a front that stands
+     for absorbed atoms cannot be composed without the working state that
+     stands for them. *)
+  let plan =
+    match absorbed with
+    | Keeper_turn_driver_try_provider.Librarian_snapshot
+        (snapshot : Librarian_continuity_snapshot.t)
+      when snapshot.end_atom >= librarian_must_reach ->
+      (* Without an accepted empty boundary, keep the newest atom so a
+         snapshot alone cannot remove the turn being answered. A provider-
+         accepted empty range keeps its witnessed end instead: the official
+         client receives the current goal separately. *)
+      Absorbed_through
+        { first_atom =
+            librarian_first_atom snapshot.end_atom
+        ; absorbed_through = snapshot.end_atom
+        ; boundary_line = snapshot.end_boundary_line
+        ; working_state = Keeper_turn_driver_try_provider.working_state_text snapshot
+        }
+    | Keeper_turn_driver_try_provider.Librarian_progress { end_atom }
+      when end_atom >= librarian_must_reach ->
+      (* The Librarian read through [end_atom] and no working state fits: the
+         atoms before it are in the keeper's memory and nothing stands in for
+         them, as on the Agent Core lane
+         ([Keeper_carried_front.Librarian_progress]). Keep the newest atom
+         unless an accepted empty boundary already permits omitting it. *)
+      Plain
+        ( librarian_first_atom end_atom
+        , Librarian_progress { end_atom } )
+    | Keeper_turn_driver_try_provider.Librarian_snapshot _
+    | Keeper_turn_driver_try_provider.Librarian_progress _
+    | Keeper_turn_driver_try_provider.No_position ->
+      let first_atom, front = seed_or_lane in
+      Plain (first_atom, front)
+  in
+  let carried_messages, first_atom, front =
+    match plan with
+    | Absorbed_through { first_atom; absorbed_through; boundary_line; working_state } ->
+      (* The working state stands in front of the range, in the same System
+         place this lane puts every other piece of context it composes; see
+         [working_state_message] for what that place is on each client. *)
+      ( working_state_message working_state :: messages
+      , first_atom
+      , Librarian_snapshot { absorbed_through; boundary_line } )
+    | Plain (first_atom, front) -> messages, first_atom, front
+  in
+  let carried_messages=Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System
+    librarian_front.Keeper_turn_driver_try_provider.unread carried_messages in
+  (* The cut is the same for every front. The window's omission preamble
+     goes in whenever the first kept atom cannot open a conversation, working
+     state or not: the working state says what the atoms before the range
+     held, and the preamble says the range opens mid-conversation, which is
+     still true. The Agent Core lane sends both as well. *)
+  let projection, transmitted_bytes =
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      Runtime_model_input_tail_window.project_from_atom
+        ~allow_empty_history:(first_atom = history_atom_count)
+        ~measure_message_bytes
+        ~first_atom
+        carried_messages)
+  in
+  (match plan with
+   | Absorbed_through { first_atom; absorbed_through = librarian_end; _ }
+   | Plain (first_atom, Librarian_progress { end_atom = librarian_end })
+     when librarian_end > first_atom ->
+     (* The Librarian read through the turn this request answers, with or
+        without a working state to show for it. The atom is sent again, so
+        the request repeats one turn rather than arriving with nothing to
+        answer; the front keeps the Librarian's own position, so this line
+        is where the clamp is visible. *)
+     Log.Keeper.info
+       ~keeper_name
+       "model input carried range keeps the newest atom runtime=%s librarian_end=%d first_atom=%d"
+       runtime_id
+       librarian_end
+       first_atom
+   | Absorbed_through _
+   | Plain
+       ( _
+       , ( Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _
+         | Librarian_snapshot _ | Librarian_progress _ ) ) -> ());
+  Log.Keeper.info
+    ~keeper_name
+    "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
+     transmitted_bytes=%d lane_first_atom=%d"
+    runtime_id
+    (carried_start_front_to_string front)
+    projection.Runtime_model_input_tail_window.dropped_atoms
+    (history_atom_count - projection.Runtime_model_input_tail_window.dropped_atoms)
+    history_atom_count
+    transmitted_bytes
+    own_first_atom;
+  { messages = projection.Runtime_model_input_tail_window.messages
+  ; projection
+  ; history_atom_count
+  ; first_atom
+  ; transmitted_bytes
+  ; front
+  ; accepted_front
+  }
+;;
+
+let carried_start_range ~keeper_name ~runtime_id ~carried_front_seed
+    ~librarian_front ~own_first_atom ~turn_start messages =
+  carried_start_range_on_source ~source_messages:messages ~keeper_name ~runtime_id
+    ~carried_front_seed ~librarian_front ~own_first_atom ~turn_start messages
+;;
+
+(* A carried range as a lane's declared window left it: the list that goes
+   out, and how many of the range's durable atoms are in it. *)
+type windowed_range =
+  { carried : carried_start
+  ; sent : Agent_core.Types.message list
+  ; atoms_kept : int
+  }
+
+let carried_atoms (carried : carried_start) =
+  carried.projection.Runtime_model_input_tail_window.atom_count
+  - carried.projection.Runtime_model_input_tail_window.dropped_atoms
+;;
+
+(* A carried range windowed at a capacity.
+   [Runtime_model_input_tail_window.project_with_drop] charges the omission
+   preamble up front, as the message it puts back whenever a cut lands on a
+   non-[User] head. A range that already opens with one would pay for it
+   twice -- there and again as its first atom -- and a range that fit would
+   fail at no drop and lose a whole quantum of atoms. So the preamble comes
+   off before the window and goes back when the window dropped nothing: a
+   range that fit goes exactly as it was cut, and a cut that did land puts
+   back its own. *)
+let window_carried_range
+      ~measure_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      (carried : carried_start)
+  =
+  let opened_with, input =
+    match carried.messages with
+    | head :: rest when Runtime_model_input_tail_window.is_synthetic_preamble head ->
+      Some head, rest
+    | _ :: _ | [] -> None, carried.messages
+  in
+  let* projection =
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      Runtime_model_input_tail_window.project_with_drop
+        ~allow_empty_history:true
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes
+        input)
+    |> Result.map_error Runtime_model_input_tail_window.budget_error_to_core_error
+  in
+  let sent =
+    match opened_with, projection.Runtime_model_input_tail_window.dropped_atoms with
+    | Some preamble, 0 -> preamble :: projection.Runtime_model_input_tail_window.messages
+    | Some _, _ | None, _ -> projection.Runtime_model_input_tail_window.messages
+  in
+  let range = carried_atoms carried in
+  Ok
+    { carried
+    ; sent
+    ; atoms_kept =
+        range - Int.min range projection.Runtime_model_input_tail_window.dropped_atoms
+    }
+;;
+
+(* A seed read taken once however many times a composition asks for it.
+   [compose_librarian_range] may compose a range twice; the second must start
+   from the same seed, and the turn-record read, and whatever it reports on
+   records it could not parse, should happen once. The compositions run one
+   after the other on the caller's fiber. *)
+let read_seed_once = function
+  | None -> None
+  | Some read ->
+    let taken = ref None in
+    Some
+      (fun () ->
+         match !taken with
+         | Some seed -> seed
+         | None ->
+           let seed = read () in
+           taken := Some seed;
+           seed)
+;;
+
+(* The window reading in the history's own vocabulary: the atoms the range
+   kept, counted against the whole history, so the front it names is an atom
+   a later seed can reopen, or the witnessed end of an omitted history. *)
+let windowed_projection (windowed : windowed_range) : Runtime_model_input_tail_window.projection =
+  { messages = windowed.sent
+  ; dropped_atoms = windowed.carried.history_atom_count - windowed.atoms_kept
+  ; atom_count = windowed.carried.history_atom_count
+  }
+;;
+
+(* Why a working state stayed out of a request. *)
+type working_state_left_out =
+  | Displaces_atoms of { kept_with : int; kept_without : int }
+      (** Carried, it would have pushed out atoms after the range it covers:
+          the window kept [kept_with] of them with it, [kept_without] alone. *)
+  | Leaves_no_turn
+      (** Carried, the window would have kept no atom: a summary with no turn
+          to answer. *)
+  | Does_not_fit of Agent_core.Error.t
+      (** The working state and the messages no cut removes exceed the
+          ceiling on their own. *)
+
+let working_state_left_out_label = function
+  | Displaces_atoms _ -> "displaces_atoms"
+  | Leaves_no_turn -> "leaves_no_turn"
+  | Does_not_fit _ -> "does_not_fit"
+;;
+
+let working_state_left_out_detail = function
+  | Displaces_atoms { kept_with; kept_without } ->
+    Printf.sprintf "atoms_kept_with=%d atoms_kept_without=%d" kept_with kept_without
+  | Leaves_no_turn -> "atoms_kept_with=0"
+  | Does_not_fit error -> Agent_core.Error.to_string error
+;;
+
+let carries_working_state (windowed : windowed_range) =
+  match windowed.carried.front with
+  | Librarian_snapshot _ -> true
+  | Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Librarian_progress _ ->
+    false
+;;
+
+(* A zero-width range can already be the request the provider accepted.
+   Its witness survived admission and the lane's own cut; retain that fact
+   when a Librarian snapshot replaces the range's presentation. A later
+   capacity cut that removes a nonempty range has no such authority. *)
+let has_accepted_empty_range (carried : carried_start) =
+  match carried.accepted_front with
+  | Some { Keeper_carried_front.front =
+             (Model_input_front.After_history _ | Model_input_front.Empty_history)
+         ; first_atom; source = _ } ->
+    first_atom = carried.first_atom && first_atom = carried.history_atom_count
+  | Some { Keeper_carried_front.front = Model_input_front.At_atom _; _ }
+  | None -> false
+;;
+
+(* RFC-0460. A working state stands in for the atoms before the range it
+   leads, so it goes out only where it displaces none of the atoms after it.
+   Pinned in front of a range the window then has to cut, it would leave
+   atoms that the summary does not cover and the request does not hold -- the
+   gap the lane's own cut exists to keep out of the range. So the range is
+   composed with it first; when that window kept every atom of the range, it
+   goes. Otherwise the same position is composed alone
+   ([Librarian_progress] at the snapshot's end: the atoms before it are in
+   the keeper's memory, and nothing stands in for them), and the working
+   state goes only if the window kept as many atoms with it as without it
+   and at least the newest one. An explicitly accepted empty range also
+   keeps a fitting working state: its current goal is delivered separately.
+
+   Leaving it out is not a refusal. The band where it does not fit is
+   usually the Librarian not having caught up with a long history, which
+   clears as it reads on, and a refused turn there would stop a keeper for
+   nothing an operator can fix. The turn goes out, and the counter and the
+   line below say that it went without its summary and by how much. A
+   request the position alone cannot carry is still refused, with the error
+   of that composition. *)
+let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
+  match librarian_front.Keeper_turn_driver_try_provider.point with
+  | Keeper_turn_driver_try_provider.Librarian_progress _
+  | Keeper_turn_driver_try_provider.No_position -> compose librarian_front
+  | Keeper_turn_driver_try_provider.Librarian_snapshot
+      (snapshot : Librarian_continuity_snapshot.t) ->
+    let with_state = compose librarian_front in
+    (match with_state with
+     | Ok windowed when not (carries_working_state windowed) ->
+       (* The snapshot did not win the range -- the seed or the lane's own
+          cut sat past it -- so nothing was pinned, and the position alone
+          would be this same range. *)
+       with_state
+     | Ok windowed
+       when windowed.atoms_kept = carried_atoms windowed.carried
+            && (windowed.atoms_kept >= 1 || has_accepted_empty_range windowed.carried) ->
+       with_state
+     | Ok _ | Error _ ->
+       let* alone =
+         compose
+           {librarian_front with Keeper_turn_driver_try_provider.point=
+             Keeper_turn_driver_try_provider.Librarian_progress {end_atom=snapshot.end_atom}}
+       in
+       let leave_out reason =
+         Log.Keeper.warn
+           ~keeper_name
+           "model input working state not carried runtime=%s reason=%s \
+            summary_end=%d first_atom=%s %s: the Librarian position goes \
+            alone until it has read far enough for its summary to fit"
+           runtime_id
+           (working_state_left_out_label reason)
+           snapshot.end_atom
+           (match alone.atoms_kept with
+            | 0 -> "none"
+            | kept -> string_of_int (alone.carried.history_atom_count - kept))
+           (working_state_left_out_detail reason);
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string WorkingStateNotCarried)
+           ~labels:
+             [ "keeper", keeper_name
+             ; "runtime", runtime_id
+             ; "reason", working_state_left_out_label reason
+             ]
+           ();
+         Ok alone
+       in
+       (match with_state with
+        | Ok windowed
+          when windowed.atoms_kept >= 1 && windowed.atoms_kept >= alone.atoms_kept ->
+          (* The ceiling cut both compositions alike: the working state
+             displaced nothing, and it carries more than the position
+             alone. *)
+          with_state
+        | Ok windowed when windowed.atoms_kept = 0 -> leave_out Leaves_no_turn
+        | Ok windowed ->
+          leave_out
+            (Displaces_atoms
+               { kept_with = windowed.atoms_kept; kept_without = alone.atoms_kept })
+        | Error error -> leave_out (Does_not_fit error)))
+;;
+
+type argument_binding =
+  | Arguments_unbound
+  | Arguments_bound of Keeper_model_input_demotion.completed_arguments option
+
+type argument_source =
+  { base_path : string
+  ; keeper_name : string
+  ; raw_seed : Agent_core.Types.message list
+  ; replay_prefix : Keeper_replay_prefix.projection
+  ; completed_before : int
+  ; addresses : Keeper_model_input_demotion.address_memo
+  ; mutable binding : argument_binding
+  }
+
+let create_argument_source ~input_policy ~base_path ~keeper_name ~seed
+    ~replay_prefix ~turn_start =
+  match input_policy with
+  | Keeper_input_policy.Wide -> None
+  | Keeper_input_policy.Small ->
+    match seed,turn_start with
+    | Some raw_seed,Keeper_carried_front.Turn_boundary {end_atom}
+      when base_path<>"" && end_atom>0 ->
+      Some {base_path;keeper_name;raw_seed;
+            replay_prefix=Keeper_replay_prefix.history_only replay_prefix;completed_before=end_atom;
+            addresses=Keeper_model_input_demotion.create_address_memo ();
+            binding=Arguments_unbound}
+    | None,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _)
+    | Some _,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _) -> None
+;;
+
+type argument_projection =
+  { source : argument_source
+  ; history_prefix : Agent_core.Types.message list
+  }
+
+let argument_projection source ~tools ~history_prefix =
+  let _, prefix_atoms = Runtime_model_input_tail_window.annotate history_prefix in
+  if prefix_atoms<>0 || Result.is_error (Keeper_recovery_transmission.require_reader tools)
+  then None
+  else Some {source;history_prefix}
+;;
+
+let plan_arguments argument_projection ~measure_message_bytes messages =
+  let no_plan () : Keeper_model_input_demotion.plan_result = {messages;pending=[]} in
+  match argument_projection with
+  | None -> no_plan ()
+  | Some {source;history_prefix} ->
+    (* The prefix is supplied by its producer, never discovered by text, tool
+       ID or metadata scanning. Only pinned messages may shift coordinates. *)
+    match Keeper_replay_prefix.split ~prefix:history_prefix messages with
+    | Error _ -> no_plan ()
+    | Ok history ->
+      let arguments = match source.binding with
+        | Arguments_bound arguments -> arguments
+        | Arguments_unbound ->
+          let arguments = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            Keeper_model_input_demotion.bind_completed_arguments
+              ~completed_before:source.completed_before ~seed:source.raw_seed
+              ~replay_prefix:source.replay_prefix history) in
+          let arguments = match arguments with
+            | Ok arguments -> Some arguments
+            | Error _ ->
+              Log.Keeper.warn ~keeper_name:source.keeper_name
+                "official input kept original arguments: completed raw source did not bind";
+              None in
+          source.binding <- Arguments_bound arguments;
+          arguments in
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        let completed_arguments = Option.map
+          (Keeper_model_input_demotion.prepend_argument_messages ~prefix:history_prefix) arguments in
+        Keeper_model_input_demotion.plan ?completed_arguments
+          ~measure_message_bytes ~demote_before:0 messages)
+;;
+
+type selected_start_range =
+  { selected_messages : Agent_core.Types.message list
+  ; selected_projection : Runtime_model_input_tail_window.projection
+  ; selected_front : carried_start_front option
+  }
+
+(* Claude Code and a fresh Codex thread apply their capacity before choosing
+   a carried front. The zero-history floor must survive that choice: a seed
+   would otherwise restore an atom the provider just refused. Antigravity and
+   Muse Code use the same composition with unbounded capacity. Codex/Claude
+   Resume may compose per-turn context here, but send no history and must
+   omit [argument_projection]. *)
+let start_range_projection ~input_source ?argument_projection
+    ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
+    ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
+    ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
+    messages =
+  match input_source with
+  | Keeper_request_source.Completion_review -> Ok messages
+  | Keeper_request_source.Keeper_history _ ->
+  let* librarian_front = read_librarian_front librarian_front messages in
+  let plan = plan_arguments argument_projection ~measure_message_bytes messages in
+  let attach messages = Keeper_librarian_request_unread.attach ~include_empty:true
+    ~role:Agent_core.Types.System librarian_front.Keeper_turn_driver_try_provider.unread messages in
+  let source_messages = attach messages in
+  let planned_messages = attach plan.messages in
+  let _, history_atom_count = Runtime_model_input_tail_window.annotate source_messages in
+  let observe_window projection =
+    Option.iter
+      (fun observe ->
+         Option.iter observe
+           (Runtime_model_input_tail_window.observe
+              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest source_messages)
+              ~history_atom_count projection))
+      on_model_input_window_observation
+  in
+  let carried_front_seed = read_seed_once carried_front_seed in
+  let select messages =
+    let* capacity_cut =
+    if capacity_bytes = unbounded_capacity_bytes then Ok None
+    else
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        Runtime_model_input_tail_window.project_with_drop
+          ~allow_empty_history:true ~measure_message_bytes ~capacity_bytes
+          ~reserved_bytes messages)
+      |> Result.map (fun projection -> Some projection)
+      |> Result.map_error Runtime_model_input_tail_window.budget_error_to_core_error
+  in
+  match capacity_cut with
+  | Some projection
+    when projection.Runtime_model_input_tail_window.dropped_atoms >= history_atom_count ->
+    Ok {selected_messages=projection.Runtime_model_input_tail_window.messages;
+        selected_projection=projection;selected_front=None}
+  | Some _ | None ->
+    let own_first_atom =
+      match capacity_cut with
+      | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
+      | None -> 0
+    in
+    let compose librarian_front =
+      let carried =
+        carried_start_range_on_source ~source_messages ~keeper_name ~runtime_id ~carried_front_seed
+          ~librarian_front ~own_first_atom ~turn_start messages
+      in
+      match capacity_cut with
+      | None ->
+        Ok { carried; sent = carried.messages; atoms_kept = carried_atoms carried }
+      | Some _ ->
+        window_carried_range ~measure_message_bytes ~capacity_bytes
+          ~reserved_bytes carried
+    in
+    let* windowed =
+      compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
+    in
+    Ok {selected_messages=windowed.sent;selected_projection=windowed_projection windowed;
+        selected_front=Some windowed.carried.front}
+  in
+  let* selected = select planned_messages in
+  let* selected = match argument_projection,plan.pending with
+    | None,_ | Some _,[] -> Ok selected
+    | Some {source;history_prefix=_},_::_ ->
+      let outcome = Keeper_model_input_demotion.materialize
+        ~store:(Tool_blob_store.create ~base_path:source.base_path)
+        ~addresses:source.addresses ~pending:plan.pending selected.selected_messages in
+      if outcome.reverted>0 then
+        Log.Keeper.warn ~keeper_name:source.keeper_name
+          "official input restored %d arguments after blob storage failure" outcome.reverted;
+      let actual_messages = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        let captured = Keeper_model_input_demotion.capture_materialized
+          ~pending:plan.pending ~before:selected.selected_messages ~after:outcome.messages in
+        Keeper_model_input_demotion.replay_materialized captured
+          ~pending:plan.pending planned_messages) in
+      (* Failed and unselected slots are raw again. Repeat the whole summary
+         and range decision, with no second materialization or invented refs. *)
+      select actual_messages in
+  observe_window selected.selected_projection;
+  Option.iter (fun front ->
+    Option.iter
+      (fun observe ->
+         observe front
+           ~transmitted_bytes:
+             (List.fold_left
+                (fun total message -> total + measure_message_bytes message)
+                0 selected.selected_messages))
+      on_carried_front) selected.selected_front;
+  Ok selected.selected_messages
+;;
+
+let carried_history_projection ~input_source
+    ?argument_projection
+    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
+    ~turn_start ~keeper_name ~runtime_id source_projection
+  : Keeper_history_projection.t
+  =
+  fun history_messages ->
+  let* frozen = match input_source with
+    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+    | Keeper_request_source.Keeper_history _ -> read_librarian_front librarian_front history_messages in
+  let window = ref None and front = ref None in
+  let* sent = start_range_projection
+      ~input_source
+    ?argument_projection
+    ~measure_message_bytes
+    ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
+    ?on_model_input_window_observation:(Option.map
+      (fun _ observation -> window := Some observation) on_model_input_window_observation)
+    ?carried_front_seed
+    ~librarian_front:(fun _ -> Ok frozen)
+    ?on_carried_front:(Option.map
+      (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
+      on_carried_front)
+    ~turn_start ~keeper_name ~runtime_id history_messages in
+  let* sent = project_source
+    ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent in
+  (* A refused custom projection returned no range. Publish the buffered
+     raw-source observations only after the final transmitted copy exists. *)
+  Option.iter (fun (front,transmitted_bytes) ->
+    Option.iter (fun observe -> observe front ~transmitted_bytes) on_carried_front) !front;
+  Option.iter (fun observation ->
+    Option.iter (fun observe -> observe observation) on_model_input_window_observation) !window;
+  Ok sent
+;;
+
+let render_message (message : Agent_core.Types.message) =
+  Ok (history_role_label message.role ^ encode_history_message message)
+;;
+
+let render_messages messages =
+  let rec loop rendered = function
+    | [] -> Ok (String.concat "\n\n" (List.rev rendered))
+    | message :: rest ->
+      let* rendered_message = render_message message in
+      loop (rendered_message :: rendered) rest
+  in
+  loop [] messages
+;;
+
+let required_frame_label = function
+  | Ok label -> label
+  | Error message -> invalid_arg message
+;;
+
+let framed_prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : prepared_turn) =
+  if is_resume
+  then Ok (resume_prompt ~goal ~held ?composed_context prepared.messages).prompt
+  else
+    let* history = render_messages prepared.messages in
+    Ok (start_prompt prepared
+      ([ String_util.trim_nonempty prepared.system_prompt
+         |> Option.map (fun value ->
+           required_frame_label (Antigravity_input_frame.system_instructions_label ()) ^ value)
+       ; String_util.trim_nonempty history
+       ; Some (required_frame_label (Antigravity_input_frame.current_goal_label ()) ^ goal)
+       ]
+       |> List.filter_map Fun.id
+       |> String.concat Antigravity_input_frame.section_separator)
+      |> Keeper_context_submission_link.text)
+;;
+
+let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
+    ~initial_messages ~model_input_projection ~hooks ~composed_context ~configured_reasoning_effort
+    =
+  let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
+  let before_turn =
+    invoke_turn_hook
+      ~keeper_name
+      ~turn_count
+      ~hook_name:"before_turn"
+      hooks.before_turn
+      (Agent_core.Hooks.BeforeTurn { turn = turn_count; messages = initial_messages })
+  in
+  let* messages =
+    match before_turn with
+    | Continue -> Ok initial_messages
+    | Nudge text -> Ok (initial_messages @ [ user_message text ])
+    | HookFailed { stage; detail } ->
+      Error (hook_error ~runtime_label ~hook_name:"before_turn" ~stage detail)
+    | (Agent_core.Hooks.AdjustParams _ | Agent_core.Hooks.ElicitInput _ | Agent_core.Hooks.ElicitToolApproval _ | Agent_core.Hooks.Block _) as decision -> Error (illegal_hook_decision ~runtime_label ~hook_name:"before_turn" decision)
+  in
+  (* Seed the params the hook sees rather than overwriting its answer: an
+     operator declaration is a default for the turn, not an override of a
+     hook that deliberately chose a different effort. *)
+  let current_params =
+    match configured_reasoning_effort with
+    | None -> Agent_core.Hooks.default_turn_params
+    | Some _ ->
+      { Agent_core.Hooks.default_turn_params with
+        reasoning_effort = configured_reasoning_effort
+      }
+  in
+  let before_turn_params =
+    invoke_turn_hook
+      ~keeper_name
+      ~turn_count
+      ~hook_name:"before_turn_params"
+      hooks.before_turn_params
+      (Agent_core.Hooks.BeforeTurnParams
+         { turn = turn_count
+         ; messages
+         ; last_tool_results = last_tool_results messages
+         ; current_params
+         ; reasoning = Agent_core.Hooks.empty_reasoning_summary
+         })
+  in
+  let* turn_params =
+    match before_turn_params with
+    | Continue -> Ok current_params
+    | AdjustParams params -> Ok params
+    | HookFailed { stage; detail } ->
+      Error (hook_error ~runtime_label ~hook_name:"before_turn_params" ~stage detail)
+    | (Agent_core.Hooks.ElicitInput _ | Agent_core.Hooks.ElicitToolApproval _ | Agent_core.Hooks.Nudge _ | Agent_core.Hooks.Block _) as decision -> Error
+        (illegal_hook_decision
+           ~runtime_label
+           ~hook_name:"before_turn_params"
+           decision)
+  in
+  let messages =
+    match turn_params.extra_system_context with
+    | None -> messages
+    | Some text -> messages @ [ extra_system_context_message text ]
+  in
+  let* tools =
+    match turn_params.tool_choice with
+    | None | Some Auto -> Ok tools
+    | Some None_ -> Ok []
+    | Some ((Any | Tool _) as choice) ->
+      Error
+        (config_error
+           ~field:"tool_choice"
+           (Printf.sprintf
+              "%s official-client tools do not support forced tool choice %s"
+              runtime_label
+              (Yojson.Safe.to_string
+                 (Agent_core.Types.tool_choice_to_json choice))))
+  in
+  let* messages =
+    match model_input_projection with
+    | None -> Ok messages
+    | Some project ->
+      (try
+         (* The projection names its own failure. Wrapping it as
+            [InvalidConfig { field = "model_input_projection" }] renamed a
+            per-candidate capacity bound into a request defect, and no reader
+            of that field ever existed. *)
+         project ~tools messages
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+       | exn ->
+         Error
+           (internal_error
+              (runtime_label
+               ^ " runtime model input projection raised: "
+               ^ Printexc.to_string exn)))
+  in
+  let system_prompt =
+    Option.value turn_params.system_prompt_override ~default:system_prompt
+  in
+  let composed_context = Option.bind composed_context (fun read -> read ()) in
+  let keeper_instructions =
+    match Option.bind composed_context (fun assembly -> assembly.Keeper_context_assembly.system_prompt) with
+    | Some issued when String.equal issued.text system_prompt -> issued.base_text
+    | Some _ | None -> system_prompt
+  in
+  (* Every official client runs its own built-in instructions when masc names
+     none: Codex omits developerInstructions, Claude Code has taken its
+     coding-agent prompt since #33072, Antigravity renders the goal alone. A
+     blank composition would run the turn under that vendor default with
+     masc's tool surface still attached, a failure that looks like it is
+     working. It is refused here, once, after a hook override has been
+     applied. A check inside a lane, on the text it has already joined with
+     its own notes, cannot see a blank keeper prompt behind them: Codex's
+     default posture note is never blank (#33165). *)
+  let* () =
+    match String_util.trim_nonempty keeper_instructions, String_util.trim_nonempty system_prompt with
+    | Some _, Some _ -> Ok ()
+    | None, _ | _, None ->
+      Error
+        (config_error
+           ~field:"system_prompt"
+           "the composed keeper system prompt is empty; the turn would run \
+            under the client's built-in instructions")
+  in
+  (* No preemptive cut of the seed. The provider owns its own window and says
+     so in a typed terminal — glm code 1261, Codex "Context overflow" — which
+     [Keeper_turn_driver_try_provider.context_overflow_shrink_sequence] already
+     consumes to shrink and retry, starting from
+     [unbounded_model_input_capacity_bytes]. Cutting here as well meant two
+     authorities over the same window, and the one that ran first measured in
+     wire bytes rather than tokens and discarded the oldest atoms outright.
+
+     The discard was the part that could not be justified: it removed
+     conversation the keeper had already committed to, kept no copy, and its
+     [seed_dropped_atoms] receipt had no reader anywhere in the tree — the loss
+     was reported to nobody. Reactive shrink loses nothing the provider has not
+     already refused to accept. *)
+  let unsupported_parameter field value =
+    match value with
+    | None -> Ok ()
+    | Some _ ->
+      Error
+        (config_error
+           ~field
+           (runtime_label
+            ^ " official-client runtime does not project this turn parameter"))
+  in
+  let* () = unsupported_parameter "temperature" turn_params.temperature in
+  let* () = unsupported_parameter "preserve_thinking" turn_params.preserve_thinking in
+  let* reasoning_effort =
+    resolve_reasoning_effort
+      ~enable_thinking:turn_params.enable_thinking
+      ~reasoning_effort:turn_params.reasoning_effort
+  in
+  let system_prompt, start_context, composed_context = project_start_system ~system_prompt ~composed_context in
+  Ok
+    { messages
+    ; system_prompt
+    ; start_context
+    ; composed_context
+    ; tools
+    ; reasoning_effort
+    }
+;;
+
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
+  { success : bool
+  ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
+  }
+
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
+
+type loading_plan =
+  | All_on_demand
+  | Declared of
+      { on_demand : string list
+      ; result_bounds : (string * int) list
+      }
+
+let loading_of_plan plan name : Runtime_official_client_tool.loading =
+  match plan with
+  | All_on_demand -> Runtime_official_client_tool.On_demand
+  | Declared { on_demand; result_bounds = _ } ->
+    if List.mem name on_demand
+    then Runtime_official_client_tool.On_demand
+    else Runtime_official_client_tool.Upfront
+;;
+
+let result_bound_of_plan plan name : Runtime_official_client_tool.result_bound =
+  match plan with
+  | All_on_demand -> Runtime_official_client_tool.Unbounded
+  | Declared { on_demand = _; result_bounds } ->
+    (match List.assoc_opt name result_bounds with
+     | Some bytes -> Runtime_official_client_tool.Bounded_bytes bytes
+     | None -> Runtime_official_client_tool.Unbounded)
+;;
+
+(* One pre_tool_use rejection the model must be able to repair from
+   (masc#28885). The official-client CLI owns the live conversation, so
+   when it escalates the reject to a dead turn, this record is the only
+   surviving typed copy of the round-trip masc produced. *)
+type rejected_tool_call =
+  { call_id : string
+  ; tool_name : string
+  ; input : Yojson.Safe.t
+  ; detail : string
+  }
+
+let tool_hook_error_to_string = function
+  | Agent_core.Agent_tools.Hook_execution_failed
+      { hook_name; stage; tool_name; detail; _ } ->
+    Printf.sprintf
+      "%s hook failed at %s for tool %s: %s"
+      hook_name
+      (Agent_core.Hooks.hook_stage_to_string stage)
+      tool_name
+      detail
+;;
+
+(* The model declaration is the MASC SSOT for media input, and dispatch fails
+   closed on it before a turn starts
+   ([Runtime_agent.apply_runtime_model_input_capabilities]). A tool result is
+   model input too, but it is built mid-turn, after that check has run. Without
+   this the Codex, Claude Code and Antigravity hosts would hand an image to a
+   text-only model and collect the provider's rejection seconds later — losing
+   a textual receipt that was usable, with the tool's effect already applied.
+   Antigravity answers [false] for every model: its transport carries text. *)
+let image_capability_error ~accepts_image_input content_blocks =
+  if accepts_image_input
+  then None
+  else
+    match content_blocks with
+    | None -> None
+    | Some blocks ->
+      if List.exists
+           (function
+             | Llm_provider.Types.Image _ -> true
+             (* Every other block is named so a new media kind has to decide
+                here. A nested ToolResult can carry blocks of its own, but
+                [Runtime_official_client_tool.project_content] refuses nested
+                tool-call content before anything is delivered. *)
+             | Llm_provider.Types.Text _
+             | Llm_provider.Types.Thinking _
+             | Llm_provider.Types.ReasoningDetails _
+             | Llm_provider.Types.RedactedThinking _
+             | Llm_provider.Types.ToolUse _
+             | Llm_provider.Types.ToolResult _
+             | Llm_provider.Types.Document _
+             | Llm_provider.Types.Audio _ -> false)
+           blocks
+      then
+        Some
+          "official-client tool result cannot deliver image content to a \
+           runtime whose model does not accept image input"
+      else None
+;;
+
+let record_terminal_error terminal_error detail =
+  if Option.is_none !terminal_error then terminal_error := Some detail
+;;
+
+type raw_trace_stage =
+  | Run_start
+  | Reasoning_effort
+  | Context_submission
+  | Assistant_block
+  | Tool_start
+  | Tool_finish
+  | Native_tool_start
+  | Native_tool_finish
+  | Context_compaction
+  | Run_finish
+
+let raw_trace_stage_label = function
+  | Run_start -> "run_start"
+  | Reasoning_effort -> "reasoning_effort"
+  | Context_submission -> "context_submission"
+  | Assistant_block -> "assistant_block"
+  | Tool_start -> "tool_start"
+  | Tool_finish -> "tool_finish"
+  | Native_tool_start -> "native_tool_start"
+  | Native_tool_finish -> "native_tool_finish"
+  | Context_compaction -> "context_compaction"
+  | Run_finish -> "run_finish"
+;;
+
+let observe_raw_trace ~keeper_name ~stage observe =
+  match
+    try observe () with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
+    | exn -> Error (Agent_core.Error.Internal (Printexc.to_string exn))
+  with
+  | Ok value -> Some value
+  | Error error ->
+    let stage = raw_trace_stage_label stage in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string TraceEmitFailures)
+      ~labels:[ "keeper", keeper_name; "source", "official_client_raw"; "stage", stage ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name
+      "official-client RAW trace observation failed at %s; authoritative execution continues: %s"
+      stage
+      (Agent_core.Error.to_string error);
+    None
+;;
+
+let record_context_submission
+      ~keeper_name
+      ~raw_trace_run
+      ~runtime_profile
+      ~client_turn_ordinal
+      ~submission
+      ?logical_context_bindings
+      ()
+  =
+  let detail =
+    `Assoc
+      ([ "keeper", `String keeper_name
+       ; "runtime_profile", `String runtime_profile
+       ; "client_turn_ordinal", `Int client_turn_ordinal
+       ; "submission", submission
+       ]
+       @
+       match logical_context_bindings with
+       | None -> []
+       | Some bindings -> [ "logical_context_bindings", bindings ])
+  in
+  match raw_trace_run with
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name
+      "context submission measurement unavailable: no raw-trace attempt binding"
+  | Some active ->
+    ignore
+      (observe_raw_trace ~keeper_name ~stage:Context_submission (fun () ->
+         Agent_core.Raw_trace.record_hook_invoked
+           active
+           ~hook_name:"client_context_submission"
+           ~hook_decision:"write_completed"
+           ~hook_detail:(Yojson.Safe.to_string detail)
+           ()))
+;;
+
+let start_raw_trace ~keeper_name ~raw_trace ~prompt ?model ?reasoning_effort () =
+  match raw_trace with
+  | None -> None
+  | Some sink ->
+    observe_raw_trace ~keeper_name ~stage:Run_start (fun () ->
+      Agent_core.Raw_trace.start_run
+        sink
+        ~agent_name:keeper_name
+        ~prompt
+        ?model
+        ?reasoning_effort
+        ())
+;;
+
+let finish_raw_error ~keeper_name raw_trace_run error =
+  match raw_trace_run with
+  | None -> ()
+  | Some active ->
+    ignore
+      (observe_raw_trace ~keeper_name ~stage:Run_finish (fun () ->
+         Agent_core.Raw_trace.finish_run
+           active
+           ~final_text:None
+           ~stop_reason:None
+           ~error:(Some (Agent_core.Error.to_string error))))
+;;
+
+let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_result) =
+  match raw_trace_run with
+  | None -> result
+  | Some active ->
+    let all_blocks_recorded = ref true in
+    result.response.content
+    |> List.iteri (fun block_index block ->
+      if
+        Option.is_none
+          (observe_raw_trace ~keeper_name ~stage:Assistant_block (fun () ->
+             Agent_core.Raw_trace.record_assistant_block active ~block_index block))
+      then all_blocks_recorded := false);
+    let finished =
+      observe_raw_trace ~keeper_name ~stage:Run_finish (fun () ->
+        Agent_core.Raw_trace.finish_run
+          active
+          ~final_text:
+            (Agent_core.Types.text_of_response result.response
+             |> String_util.trim_nonempty)
+          ~stop_reason:
+            (Some
+               (Agent_core.Types.stop_reason_to_string
+                  result.response.stop_reason))
+          ~error:None)
+    in
+    (match !all_blocks_recorded, finished with
+     | true, Some trace_ref -> { result with trace_ref = Some trace_ref }
+     | false, _ | _, None -> result)
+;;
+
+let record_raw_native_tool ~keeper_name ~raw_trace_run ~phase observation =
+  match raw_trace_run with
+  | None -> ()
+  | Some active ->
+    let stage, record =
+      match phase with
+      | `Started ->
+        Native_tool_start,
+        Agent_core.Raw_trace.record_native_tool_started
+      | `Finished ->
+        Native_tool_finish,
+        Agent_core.Raw_trace.record_native_tool_finished
+    in
+    let identity =
+      match observation.Runtime_native_tools.identity with
+      | Some (Runtime_native_tools.Call_id call_id) ->
+        Some (Agent_core.Raw_trace.Call_id call_id)
+      | Some (Runtime_native_tools.Provider_step { conversation_id; step_index }) ->
+        Some (Agent_core.Raw_trace.Provider_step { conversation_id; step_index })
+      | None -> None
+    in
+    let origin =
+      match observation.origin with
+      | Runtime_native_tools.Built_in -> Agent_core.Raw_trace.Built_in
+      | Runtime_native_tools.Mcp_wrapper -> Agent_core.Raw_trace.Mcp_wrapper
+    in
+    ignore
+      (observe_raw_trace ~keeper_name ~stage (fun () ->
+         record
+           active
+           ~identity
+           ~origin
+           ~tool_name:observation.tool_name))
+;;
+
+let record_raw_tool_started ~keeper_name ~raw_trace_run ~invocation ~tool_name ~input =
+  match raw_trace_run with
+  | None -> false
+  | Some active ->
+    Option.is_some
+      (observe_raw_trace ~keeper_name ~stage:Tool_start (fun () ->
+         Agent_core.Raw_trace.record_tool_execution_started
+           active
+           ~invocation
+           ~tool_name
+           ~tool_input:input))
+;;
+
+let finish_dynamic_tool_raw
+      ~keeper_name
+      ~raw_trace_started
+      ~raw_trace_run
+      ~invocation
+      ~tool_name
+      result
+  =
+  match raw_trace_started, raw_trace_run with
+  | false, _ | _, None -> result
+  | true, Some active ->
+    ignore
+      (observe_raw_trace ~keeper_name ~stage:Tool_finish (fun () ->
+         Agent_core.Raw_trace.record_tool_execution_finished
+           active
+           ~invocation
+           ~tool_name
+           ~tool_result:result.content
+           ~tool_error:(not result.success)
+           ()));
+    result
+;;
+
+let apply_context_injection ~runtime_label ~terminal_error ~context
+    ~context_injector ~tool_name ~input ~content ~outcome =
+  match context_injector with
+  | None -> ()
+  | Some inject ->
+    let output = Agent_core.Types.tool_result_of_outcome ~content outcome in
+    (try
+       match inject ~tool_name ~input ~output with
+       | None -> ()
+       | Some (injection : Agent_core.Hooks.injection) ->
+         List.iter
+           (fun (key, value) -> Agent_core.Context.set context key value)
+           injection.context_updates;
+         if injection.extra_messages <> []
+         then
+           record_terminal_error
+             terminal_error
+             (runtime_label
+              ^ " dynamic tool context injection produced extra_messages, which cannot be projected into an active official-client turn")
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       record_terminal_error
+         terminal_error
+         (runtime_label
+          ^ " dynamic tool context injection raised after execution: "
+          ^ Printexc.to_string exn))
+;;
+
+(* The two runtime stops answer [None] to [summary_of_masc_internal_error] on
+   purpose: a chat row's only carrier for the cause is its text, so the keeper
+   leaves the [masc_agent_core_error] envelope there for the pane to parse
+   (RFC-0454 P2). This consumer has no envelope to fall back on -- the
+   sentence is everything it keeps -- so it says what happened instead of
+   printing the wire label, which is all an operator got from
+   ["runtime_connection_closed"], the client's own exit reason included.
+
+   The wording moves into [summary_of_masc_internal_error] at P3, when the row
+   carries the failure as a field and no longer needs it in the text.
+
+   No catch-all: a new MASC kind decides here at compile time whether it has a
+   sentence or falls back to its kind. *)
+let masc_observation_sentence masc =
+  match Keeper_internal_error.summary_of_masc_internal_error masc with
+  | Some summary -> summary
+  | None ->
+    (match masc with
+     | Keeper_internal_error.Host_stopped_turn { runtime_id; stop } ->
+       Printf.sprintf
+         "runtime %s %s"
+         runtime_id
+         (match stop with
+          | Keeper_internal_error.Host_graceful_shutdown ->
+            "was running this turn when MASC shut down"
+          | Keeper_internal_error.Runtime_reported_interrupt ->
+            "reported this turn as interrupted"
+          | Keeper_internal_error.Repeated_tool_call ->
+            "reported a repeated-tool stop; completed effects were not replayed"
+          | Keeper_internal_error.Repeated_assistant_text ->
+            "reported a repeated-text stop; completed effects were not replayed")
+     | Keeper_internal_error.Runtime_connection_closed
+         { runtime_id; detail; turn_accepted } ->
+       Printf.sprintf
+         "runtime %s closed its connection %s the turn was submitted: %s"
+         runtime_id
+         (if turn_accepted then "after" else "before")
+         detail
+     | Keeper_internal_error.Runtime_exhausted _
+     | Keeper_internal_error.Resumable_cli_session _
+     | Keeper_internal_error.Accept_rejected _
+     | Keeper_internal_error.Internal_unhandled_exception _
+     | Keeper_internal_error.Internal_bridge_exception _
+     | Keeper_internal_error.Internal_contract_rejected _
+     | Keeper_internal_error.Incomplete_tool_transcript _
+     | Keeper_internal_error.Terminal_effect_failed _
+     | Keeper_internal_error.Official_client_recovery_required _
+     | Keeper_internal_error.Provider_attempt_effect_fenced _
+     | Keeper_internal_error.Tool_correction_lost _
+     | Keeper_internal_error.Receipt_persistence_failed _
+     | Keeper_internal_error.Gate_replay_repair_required _ ->
+       Keeper_internal_error.kind_of_masc_internal_error masc)
+;;
+
+(* [Keeper_request_failure_core.message] is a sentence for people, and the
+   module's contract is that a carried MASC error stays typed instead. The
+   boundary observation hands back an [Agent_core.Error.t] and today that is
+   always an [Internal] string, but [classify_masc_internal_error] also reads
+   the [masc_agent_core_error] prefix out of one, so a MASC error could arrive
+   here as prefixed JSON. Keep a sentence, and never the JSON. *)
+let boundary_observation_cause error =
+  match Keeper_internal_error.classify_masc_internal_error error with
+  | None -> Keeper_request_failure_core.of_core_error error
+  | Some masc ->
+    { Keeper_request_failure_core.category = Agent_core.Error.category error
+    ; message = masc_observation_sentence masc
+    }
+;;
+
+type original_capture =
+  | Original_unseen
+  | Original_retained of dynamic_tool_result * Keeper_client_tool_outbox.host_delivery
+  | Original_unavailable of { original : dynamic_tool_result; detail : string }
+
+let retain_original_result producer ~invocation ~call_id ~tool_name ~input
+    (original : dynamic_tool_result) =
+  let* content_blocks = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+    match original.content_blocks with
+    | None -> Ok `Null
+    | Some blocks ->
+      List.fold_left (fun acc block ->
+        let* encoded = acc in
+        let* block = Agent_core.Checkpoint.wire_content_block_to_json_result
+            ~scope:"official_client_original_tool_result" block
+          |> Result.map_error Agent_core.Error.to_string in
+        Ok (block :: encoded)) (Ok []) blocks
+      |> Result.map (fun blocks -> `List (List.rev blocks))) in
+  let response = `Assoc ["success",`Bool original.success;
+    "content",`String original.content;"content_blocks",content_blocks] in
+  Keeper_client_tool_outbox.retain_host_result_with_delivery producer
+    ~invocation_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
+    ~call_id ~tool_name ~arguments:input ~response
+
+let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
+    ~runtime_label ~keeper_name
+    ~turn_count ~context ~tools ~loading_plan
+    ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
+    ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
+    ~next_dynamic_invocation_index ~on_tool_boundary ~on_result_handoff ~result_producer
+    (tool : Agent_core.Tool.t) =
+  { name = tool.schema.name
+  ; description = tool.schema.description
+  ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
+  ; loading = loading_of_plan loading_plan tool.schema.name
+  ; result_bound = result_bound_of_plan loading_plan tool.schema.name
+  ; execution_mode = (fun input -> Agent_core.Tool.execution_mode tool ~input)
+  ; call_effect = Agent_core.Tool.call_effect tool
+  ; call =
+      (fun ~call_id input ->
+        let schedule : Agent_core.Tool_contract.schedule =
+          { planned_index = Atomic.fetch_and_add next_dynamic_invocation_index 1
+          ; batch_index = 0
+          ; batch_size = 1
+          ; execution_mode = Agent_core.Tool.execution_mode tool ~input
+          }
+        in
+        let invocation =
+          Agent_core.Tool_contract.Invocation.create
+            ~tool_use_id:call_id
+            ~turn:turn_count
+            ~schedule
+            ~completion:(Agent_core.Tool.completion tool)
+        in
+        let raw_trace_started =
+          record_raw_tool_started
+            ~keeper_name
+            ~raw_trace_run
+            ~invocation
+            ~tool_name:tool.schema.name
+            ~input
+        in
+        let settle =
+          finish_dynamic_tool_raw
+            ~keeper_name
+            ~raw_trace_started
+            ~raw_trace_run
+            ~invocation
+            ~tool_name:tool.schema.name
+        in
+        let captured_original = ref Original_unseen in
+        let capture original =
+          match !captured_original, result_producer with
+          | (Original_retained _ | Original_unavailable _), _ | Original_unseen, None -> ()
+          | Original_unseen, Some producer ->
+            Eio.Cancel.protect (fun () ->
+              let saved = try
+                  retain_original_result producer ~invocation ~call_id
+                    ~tool_name:tool.schema.name ~input original
+                with exn ->
+                  if Keeper_operator_interrupt.is_operator_interrupt exn then raise exn;
+                  Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                  Error (Printexc.to_string exn) in
+              captured_original := match saved with
+                | Ok delivery -> Original_retained (original, delivery)
+                | Error detail -> Original_unavailable {original;detail}) in
+        let post_tool_use event =
+          (match event with
+           | Agent_core.Hooks.PostToolUse {invocation=source;output;_}
+             when source == invocation ->
+             let original : dynamic_tool_result = match output with
+               | Ok output -> {success=true;content=output.content;
+                   content_blocks=output.content_blocks;abort_turn=None;on_response_sent=None}
+               | Error error -> {success=false;content=error.message;
+                   content_blocks=None;abort_turn=None;on_response_sent=None} in
+             capture original
+           | PostToolUse _ | PostToolUseFailure _ | BeforeTurn _ | BeforeTurnParams _
+           | AfterTurn _ | PreToolUse _ | OnStop _ | OnError _ | OnToolError _ -> ());
+          match hooks.post_tool_use with
+          | None -> Agent_core.Hooks.Continue
+          | Some hook -> hook event in
+        let execution_hooks = {hooks with post_tool_use=Some post_tool_use} in
+        let execute () =
+          let pre_tool_use =
+            invoke_turn_hook
+              ~keeper_name
+              ~turn_count
+              ~hook_name:"pre_tool_use"
+              hooks.pre_tool_use
+              (Agent_core.Hooks.PreToolUse
+                 { invocation
+                 ; tool_name = tool.schema.name
+                 ; input
+                 ; usage = None
+                 })
+          in
+          (* Settled by the same gate AGENT_CORE's own tool loop uses, so one
+             pre_tool_use decision cannot mean two different things depending
+             on which runtime the keeper is bound to. This host used to decide
+             it here, and disagreed in two places: a failed hook came back as
+             an ordinary tool failure rather than a turn-level reject, and
+             ElicitToolApproval was refused outright instead of being offered
+             to a caller-supplied approval callback. *)
+          let settlement =
+            Agent_core.Agent_tool_pre_execution_gate.settle
+              ?tool_approval
+              ~event_bus
+              ~agent_name:keeper_name
+              ~invocation
+              ~tool_name:tool.schema.name
+              ~input
+              pre_tool_use
+          in
+          match settlement with
+          | Agent_core.Agent_tool_pre_execution_gate.Block detail ->
+            (* The corrective error result goes back to the CLI, and the
+               same round-trip is kept here so a CLI that kills the turn
+               instead of retrying cannot erase it (masc#28885). *)
+            pre_tool_rejects
+            := { call_id; tool_name = tool.schema.name; input; detail }
+               :: !pre_tool_rejects;
+            { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }
+          | Agent_core.Agent_tool_pre_execution_gate.Reject { stage; detail } ->
+            (* A hook that failed, or a decision illegal at this stage. Both
+               are turn-level faults rather than something the model can
+               repair, so the terminal error records why the turn stopped. *)
+            let detail =
+              Printf.sprintf
+                "%s pre_tool_use rejected at %s: %s"
+                runtime_label
+                (Agent_core.Hooks.hook_stage_to_string stage)
+                detail
+            in
+            record_terminal_error terminal_error detail;
+            { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }
+          | Agent_core.Agent_tool_pre_execution_gate.Admit ->
+            (match
+               Agent_core.Agent_tools.find_and_execute_tool
+                 ~context
+                 ~tools
+                 ~hooks:execution_hooks
+                 ~event_bus
+                 ~tracer:Agent_core.Tracing.null
+                 ~agent_name:keeper_name
+                 ~invocation
+                 tool.schema.name
+                 input
+             with
+             | Ok result ->
+               apply_context_injection
+                 ~runtime_label
+                 ~terminal_error
+                 ~context
+                 ~context_injector
+                 ~tool_name:result.tool_name
+                 ~input:result.input
+                 ~content:result.content
+                 ~outcome:result.outcome;
+               { success =
+                   not (Agent_core.Types.tool_result_outcome_is_error result.outcome)
+               ; content = result.content
+               ; content_blocks = result.content_blocks
+               ; abort_turn = None; on_response_sent = None
+               }
+             | Error error ->
+               let detail = tool_hook_error_to_string error in
+               (match error with
+                | Agent_core.Agent_tools.Hook_execution_failed
+                    { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
+                  record_terminal_error terminal_error detail;
+                  { success = true
+                  ; content =
+                      Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
+                  ; content_blocks = None; abort_turn = None; on_response_sent = None
+                  }
+                | Agent_core.Agent_tools.Hook_execution_failed
+                    { stage =
+                        ( Before_turn | Before_turn_params | After_turn
+                        | Pre_tool_use | On_stop | On_error | On_tool_error )
+                    ; _
+                    } ->
+                  { success = false; content = detail; content_blocks = None; abort_turn = None; on_response_sent = None }))
+        in
+        match execute () with
+        | result ->
+          let original_result = match !captured_original with
+            | Original_unseen -> result
+            | Original_retained (original, _) | Original_unavailable {original;_} -> original in
+          (* Pre-execution refusals have no PostToolUse output. They are exact
+             no-execution results, retained at the same boundary here. *)
+          capture original_result;
+          let delivery =
+            match image_capability_error ~accepts_image_input result.content_blocks with
+            | Some detail -> Error detail
+            | None ->
+              (match
+                 Runtime_official_client_tool.project_content content_transport
+                   ~content:result.content ~content_blocks:result.content_blocks
+               with
+               | Ok _items -> Ok ()
+               | Error detail -> Error detail)
+          in
+          let result, delivery_error =
+            match delivery with
+            | Ok () -> result, None
+            | Error detail ->
+              (* Execution may already have committed. Delivery failure must
+                 reach settlement and the terminal outcome while retaining the
+                 producer's receipt; never present missing media as success. *)
+              { result with success = false; content_blocks = None
+              ; content = detail ^ "\n" ^ result.content }, Some detail
+          in
+          let result = settle result in
+          let producer_effect_state = terminal_effect_state () in
+          let terminal_boundary =
+            match producer_effect_state with
+            | Keeper_tools_agent_core.Terminal_effect_failed
+                ({ effect_disposition =
+                     ( Tool_result.Proven_post_effect
+                     | Tool_result.Effect_outcome_unknown )
+                 ; _
+                 } as failure) ->
+              (* A composition may be statically ordinary yet fail after a
+                 nested effect.  Producer-owned aggregate evidence outranks
+                 the outer success-completion declaration: allowing the
+                 provider to retry would repeat an already-applied or
+                 indeterminate effect. *)
+              Some
+                (Terminal_tool_boundary
+                   { tool_name = tool.schema.name
+                   ; outcome =
+                       Terminal_failed
+                         { failure_class = failure.failure_class
+                         ; effect_disposition = failure.effect_disposition
+                         ; detail = failure.detail
+                         }
+                   })
+            | ( Keeper_tools_agent_core.Terminal_effect_open
+              | Keeper_tools_agent_core.Deferred_tool_result
+              | Keeper_tools_agent_core.External_effect_deferred
+              | Keeper_tools_agent_core.Terminal_effect_completed _
+              | Keeper_tools_agent_core.Terminal_effect_failed
+                  { effect_disposition = Tool_result.Proven_pre_effect; _ } ) as state ->
+              (match Agent_core.Tool.completion tool with
+               | Agent_core.Tool_contract.Continue_after_success -> None
+               | Agent_core.Tool_contract.Terminal_after_success _ ->
+                 (match state with
+               | Keeper_tools_agent_core.Terminal_effect_completed _
+                 ->
+                 Some
+                   (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = Terminal_completed
+                      })
+               (* A Gate deferral parks one call and nothing has happened
+                  yet, so a terminal tool is no exception: the turn keeps
+                  going and the host replays the call once the approval
+                  resolves. See Keeper_tool_terminal_boundary, which makes
+                  the same decision for the native loop. *)
+               | Keeper_tools_agent_core.External_effect_deferred -> None
+               | Keeper_tools_agent_core.Deferred_tool_result ->
+                 Some
+                   (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = Durable_stimulus_deferred
+                      })
+               | Keeper_tools_agent_core.Terminal_effect_failed
+                   { effect_disposition = Tool_result.Proven_pre_effect; _ }
+               | Keeper_tools_agent_core.Terminal_effect_open ->
+                 None
+               | Keeper_tools_agent_core.Terminal_effect_failed
+                   { effect_disposition =
+                       ( Tool_result.Proven_post_effect
+                       | Tool_result.Effect_outcome_unknown )
+                   ; _
+                   } ->
+                 assert false))
+          in
+          let terminal_boundary =
+            match delivery_error, terminal_boundary with
+            | Some message,
+              Some (Terminal_tool_boundary {tool_name; outcome = Terminal_completed}) ->
+              Some (Terminal_tool_boundary
+                { tool_name
+                ; outcome = Terminal_failed
+                    { failure_class = Tool_result.Runtime_failure
+                    ; effect_disposition = Tool_result.Proven_post_effect
+                    ; detail =
+                        Keeper_terminal_effect_detail.Result_delivery_failed
+                          { model_tool_name = tool_name; message }
+                    }
+                })
+            | None, _
+            | Some _,
+              ( None
+              | Some
+                  ( Repeated_tool_call _
+                  | Terminal_tool_boundary
+                      { outcome = Durable_stimulus_deferred | Terminal_failed _; _ }
+                  ) ) -> terminal_boundary
+          in
+          let result =
+            match terminal_boundary with
+            | Some
+                (Terminal_tool_boundary
+                  { outcome = Terminal_failed _; _ } as abort_turn) ->
+              { result with success = false; abort_turn = Some abort_turn }
+            | Some
+                (( Repeated_tool_call _
+                 | Terminal_tool_boundary
+                     { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
+                 as abort_turn) -> { result with abort_turn = Some abort_turn }
+            | None -> result
+          in
+          let final_result = result in
+          (try on_result_handoff ~invocation ~content:final_result.content with
+           | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
+             Llm_provider.Reserved_exn.reraise_if_reserved exn;
+             Log.Keeper.warn
+               ~keeper_name
+               "official-client result handoff observation failed: tool=%s call_id=%s error=%s"
+               tool.schema.name
+               (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+               (Printexc.to_string exn));
+          (* The caller observes the settled call, including result handoff.
+             Its scope spans provider attempts; a new client-local counter must
+             not replace it. Existing exact terminal evidence has priority. *)
+          let result = (match on_tool_boundary with
+           | None -> final_result
+           | Some observe ->
+             let boundary =
+               try observe ~tool_name:tool.schema.name with
+               | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
+                 Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                 Error (Agent_core.Error.Internal (Printexc.to_string exn))
+             in
+             let boundary =
+               match boundary with
+               | Ok stop -> stop
+               | Error error ->
+                 let detail = Agent_core.Error.to_string error in
+                 record_terminal_error terminal_error detail;
+                 Some (Terminal_tool_boundary
+                   { tool_name = tool.schema.name
+                   ; outcome = Terminal_failed
+                       { failure_class = Tool_result.Runtime_failure
+                       ; effect_disposition = Tool_result.Effect_outcome_unknown
+                       ; detail =
+                           Keeper_terminal_effect_detail.Boundary_observation_failed
+                             { model_tool_name = tool.schema.name
+                             ; cause = boundary_observation_cause error
+                             }
+                       }
+                   })
+             in
+             match final_result.abort_turn, boundary with
+             | (Some (Repeated_tool_call _), _) | (None, None)
+             | (Some (Terminal_tool_boundary _), _) -> final_result
+             | None, Some (Terminal_tool_boundary
+                 { outcome = Terminal_failed _; _ } as stop) ->
+               { final_result with success = false; abort_turn = Some stop }
+             | None,
+               Some
+                 (( Repeated_tool_call _
+                  | Terminal_tool_boundary
+                      { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
+                  as stop) -> { final_result with abort_turn = Some stop }) in
+          (match !captured_original with
+           | Original_unseen -> result
+           | Original_retained (original, delivery) ->
+             if result.success=original.success && result.content=original.content
+                && result.content_blocks=original.content_blocks then
+               {result with on_response_sent=Some (fun () ->
+                  Keeper_client_tool_outbox.mark_response_sent delivery)}
+             else result
+           | Original_unavailable {detail=message;_} ->
+
+                let detail = Keeper_terminal_effect_detail.Tool_result_retention_failed
+                    { model_tool_name = tool.schema.name; message } in
+                let diagnostic = Keeper_terminal_effect_detail.summary detail in
+                record_terminal_error terminal_error diagnostic;
+                Log.emit Log.Error ~module_name:"Keeper"
+                  ~details:(`Assoc ["keeper_name", `String keeper_name;
+                    "detail", Keeper_terminal_effect_detail.to_yojson detail]) diagnostic;
+                match result.abort_turn with
+                | Some (Terminal_tool_boundary { outcome = Terminal_failed _; _ }) ->
+                  (* Preserve the producer's authoritative failure. The separate
+                     diagnostic records that its original result was also lost. *)
+                  result
+                | None | Some (Repeated_tool_call _)
+                | Some (Terminal_tool_boundary
+                    { outcome = Terminal_completed | Durable_stimulus_deferred; _ }) ->
+                  let effect_disposition =
+                    match producer_effect_state with
+                    | Keeper_tools_agent_core.Terminal_effect_completed _ -> Tool_result.Proven_post_effect
+                    | Keeper_tools_agent_core.Terminal_effect_failed failure -> failure.effect_disposition
+                    | Keeper_tools_agent_core.Terminal_effect_open
+                    | Keeper_tools_agent_core.Deferred_tool_result
+                    | Keeper_tools_agent_core.External_effect_deferred -> Tool_result.Effect_outcome_unknown
+                  in
+                  { result with success = false
+                  ; abort_turn = Some (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = Terminal_failed
+                          { failure_class = Tool_result.Runtime_failure; effect_disposition; detail }
+                      }) })
+        | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm ends by re-throwing with the original backtrace nine lines down. The site is correct; the marker exists only because the guard reads eight lines. *)
+          let backtrace = Printexc.get_raw_backtrace () in
+          Eio.Cancel.protect (fun () ->
+            ignore
+              (settle
+                 { success = false
+                 ; content = "dynamic tool call exited without an authoritative result"
+                 ; content_blocks = None; abort_turn = None; on_response_sent = None
+                 }));
+          Printexc.raise_with_backtrace exn backtrace)
+  }
+;;
+
+let dynamic_tools ~result_scope ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
+    ~keeper_name ~turn_count ~tools ~loading_plan
+    ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
+    ~terminal_error ~pre_tool_rejects
+    ?on_tool_boundary
+    ?(on_result_handoff = fun ~invocation:_ ~content:_ -> ()) ~raw_trace_run () =
+  match tools, context with
+  | [], _ -> Ok ([], None)
+  | _ :: _, None ->
+    Error
+      (config_error
+         ~field:"context"
+         (runtime_label ^ " dynamic tools require the Keeper shared context"))
+  | tools, Some context ->
+    let* result_producer = match base_path, result_scope with
+      | None, None -> Ok None
+      | None, Some _ -> Error (config_error ~field:"base_path"
+          "a running tool result producer requires its workspace authority")
+      | Some base_path, scope ->
+        let producer = match scope with
+          | None -> Keeper_client_tool_outbox.host_producer
+              ~base_path ~keeper_name ~runtime_label ~turn_count
+          | Some sw -> Keeper_client_tool_outbox.start_host_producer
+              ~sw ~base_path ~keeper_name ~runtime_label ~turn_count in
+        producer |> Result.map Option.some
+        |> Result.map_error (config_error ~field:"tool_result_producer") in
+    let next_dynamic_invocation_index = Atomic.make 0 in
+    Ok
+      (List.map
+         (dynamic_tool_of_agent_core
+            ~content_transport
+            ~accepts_image_input
+            ~tool_approval
+            ~runtime_label
+            ~keeper_name
+            ~turn_count
+            ~context
+            ~tools
+            ~loading_plan
+            ~hooks
+            ~event_bus
+            ~context_injector
+            ~terminal_effect_state
+            ~terminal_error
+            ~pre_tool_rejects
+            ~raw_trace_run
+            ~next_dynamic_invocation_index
+            ~on_tool_boundary
+            ~on_result_handoff
+            ~result_producer)
+         tools, result_producer)
+;;
+
+(* Append the reject round-trips of a dead turn to the canonical
+   checkpoint so the next turn's replay carries the corrective text
+   (masc#28885: 14,466 persisted messages held exactly one reject
+   round-trip — the one from a turn that survived; every escalated turn
+   lost its correction and the model resent the same broken call).
+   Message shape mirrors what a surviving turn persists byte-for-byte:
+   an assistant [ToolUse] block answered by a tool-role [ToolResult]
+   whose outcome is the deterministic validation failure. A missing
+   checkpoint means no replay exists to correct — skipped, not an
+   error. Rejects are recorded newest-first; the append restores call
+   order. *)
+let persist_pre_tool_rejects ~keeper_name ~session_dir ~session_id rejects =
+  match rejects with
+  | [] -> Ok 0
+  | rejects ->
+    (match
+       Keeper_checkpoint_store.load_agent_core_for_save ~keeper_name ~session_dir ~session_id
+     with
+     | Error Keeper_checkpoint_store.Not_found -> Ok 0
+     | Error
+         (( Keeper_checkpoint_store.Store_error _
+          | Keeper_checkpoint_store.Parse_error _
+          | Keeper_checkpoint_store.Superseded_version _
+          | Keeper_checkpoint_store.Newer_version _
+          | Keeper_checkpoint_store.Io_error _
+          | Keeper_checkpoint_store.Read_failed _
+          | Keeper_checkpoint_store.Agent_core_error _
+          | Keeper_checkpoint_store.Objects_invalid _ ) as error) ->
+       Error
+         (Printf.sprintf
+            "reject round-trip persistence could not load the checkpoint: %s"
+            (match error with
+             | Keeper_checkpoint_store.Not_found -> "not found"
+             | Keeper_checkpoint_store.Superseded_version { expected; got } ->
+               Printf.sprintf "version %d superseded by %d" got expected
+             | (Keeper_checkpoint_store.Newer_version _ | Keeper_checkpoint_store.Objects_invalid _)
+               as error ->
+               Keeper_checkpoint_store.checkpoint_load_error_to_string error
+             | Keeper_checkpoint_store.Store_error detail
+             | Keeper_checkpoint_store.Parse_error detail
+             | Keeper_checkpoint_store.Io_error detail
+             | Keeper_checkpoint_store.Read_failed { detail; _ }
+             | Keeper_checkpoint_store.Agent_core_error detail -> detail))
+     | Ok checkpoint ->
+       let roundtrip { call_id; tool_name; input; detail } =
+         [ { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
+           ; content =
+               [ Agent_core.Types.ToolUse { id = call_id; name = tool_name; input } ]
+           ; name = None
+           ; tool_call_id = None
+           ; metadata = []
+           }
+         ; { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Tool
+           ; content =
+               [ Agent_core.Types.ToolResult
+                   { tool_use_id = call_id
+                   ; content = detail
+                   ; outcome =
+                       Agent_core.Types.Tool_failed
+                         { failure_kind = Agent_core.Types.Validation_error
+                         ; error_class = Some Agent_core.Types.Deterministic
+                         }
+                   ; json = None
+                   ; content_blocks = None
+                   }
+               ]
+           ; name = None
+           ; tool_call_id = Some call_id
+           ; metadata = []
+           }
+         ]
+       in
+       let appended = List.concat_map roundtrip (List.rev rejects) in
+       let checkpoint =
+         { checkpoint with
+           Agent_core.Checkpoint.messages = checkpoint.messages @ appended
+         }
+       in
+       (match
+          Keeper_checkpoint_store.save_agent_core_for_keeper ~keeper_name ~session_dir
+            ~history_retained:
+              (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+            ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+            checkpoint
+        with
+        | Ok _ -> Ok (List.length rejects)
+        | Error detail -> Error detail))
+;;
+
+
+
+let admit_native_posture ~posture ~approval_mode ~none_supported ~client_label =
+  match (posture : Runtime_native_tools.posture), none_supported with
+  | Native_none, false ->
+    Error
+      (Printf.sprintf
+         "%s cannot disable its built-in tools; declare native = \"read\" or \
+          \"full\""
+         client_label)
+  | Native_full, _ ->
+    (match (approval_mode : Keeper_tool_approval_mode.mode) with
+     | Yolo -> Ok ()
+     | Auto ->
+       Error
+         (Printf.sprintf
+            "native = \"full\" runs %s built-in effects outside the approval \
+             gate; set the keeper's tool-approval mode to yolo first"
+            client_label))
+  | Native_none, true | Native_read, _ -> Ok ()
+;;
+
+(* RFC-0390 admission review (P0): an admission refusal must not kill the
+   runtime call — the keeper would lose every turn until an operator flips
+   an in-memory approval mode after each restart. [admit_native_posture]
+   stays a pure typed predicate (tests pin its refusals); the resolver
+   below is the policy point: a posture admission cannot honor degrades
+   to the safest weaker posture and the downgrade is recorded as a typed
+   event, never silent. Profile load failures remain fail-closed — that
+   is a declaration-time error, not an admission-time one. *)
+(* #30408 review: the two refusal branches of [admit_native_posture] have
+   different lifetimes and must not share one reporting cadence.
+
+   [full] under a non-yolo approval mode is TURN state — the mode lives in
+   process memory, reverts to Auto on restart, and can be flipped mid-run,
+   so every affected turn says so (that per-turn event is the P0 fix).
+
+   [none] on a client without a disable switch is a STATIC contradiction:
+   the profile TOML declares [none] while runtime.toml (the assignment
+   SSOT) put this keeper on a client that cannot honor it. Nothing about
+   it changes turn to turn, so repeating the event every turn is noise.
+   It is reported once per process per (keeper, client) pair, at the
+   first posture resolution after boot — the earliest moment both sides
+   of the contradiction coexist, since [keeper_turn_up_create] writes
+   the profile after the assignment exists. The gate clears when a later
+   resolution honors the declaration (operator fixed the profile or the
+   assignment), so a re-introduced contradiction is reported again. *)
+let native_posture_static_contradiction_gate : (string, unit) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+let resolve_native_posture ~posture_source ~base_path ~keeper_name ~client_label
+    ~default ~none_supported =
+  let approval_mode =
+    Keeper_tool_approval_mode.resolve
+      (Keeper_tool_approval_mode.shared ())
+      ~keeper_name
+  in
+  let static_contradiction_key = keeper_name ^ "\000" ^ client_label in
+  let honored declared =
+    (* The declaration is honored: any earlier static contradiction for
+       this pair is resolved, so a future re-contradiction reports
+       again instead of being swallowed by the gate. *)
+    Hashtbl.remove
+      native_posture_static_contradiction_gate
+      static_contradiction_key;
+    Ok declared
+  in
+  match (posture_source : Runtime_native_tools.posture_source) with
+  | Runtime_native_tools.Program_defined declared ->
+    (* The program that created this keeper stated its posture as a value.
+       There is no keepers/<name>.toml for it and none is looked for; a
+       stated posture is never degraded, so a refusal is a config error. *)
+    (match
+       admit_native_posture ~posture:declared ~approval_mode ~none_supported
+         ~client_label
+     with
+     | Ok () -> honored declared
+     | Error detail -> Error (config_error ~field:"required_native_posture" detail))
+  | Runtime_native_tools.Declared_on_disk ->
+    (match
+       Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+         ~base_path
+         keeper_name
+     with
+     | Error load_error ->
+       Error
+         (config_error
+            ~field:"keeper.tools.native"
+            (Keeper_types_profile.keeper_toml_load_error_to_string load_error))
+     | Ok defaults ->
+       let declared =
+         match defaults.native_tool_posture with
+         | Some declared -> declared
+         | None ->
+           (* The profile states no [keeper.tools.native]: the runtime's
+              own stance ([Runtime_native_tools.*_default]) is the
+              declared one. *)
+           default
+       in
+       (match
+          admit_native_posture ~posture:declared ~approval_mode ~none_supported
+            ~client_label
+        with
+        | Ok () -> honored declared
+        | Error detail ->
+          let effective =
+            Runtime_native_tools.degrade_on_admission
+              ~posture:declared
+              ~none_supported
+              ()
+          in
+          let static_contradiction =
+            (declared : Runtime_native_tools.posture) = Native_none
+            && not none_supported
+          in
+          if static_contradiction then (
+            if
+              not
+                (Hashtbl.mem
+                   native_posture_static_contradiction_gate
+                   static_contradiction_key)
+            then (
+              Hashtbl.replace
+                native_posture_static_contradiction_gate
+                static_contradiction_key
+                ();
+              Log.Keeper.warn
+                "%s: static native-posture contradiction (reported once per \
+                 boot, not per turn): profile declares native = \"none\" but %s \
+                 cannot disable its built-in tools; the lane runs at its \
+                 \"read\" floor until the profile or the runtime.toml \
+                 assignment changes"
+                keeper_name client_label;
+              Keeper_event_publisher.publish_native_posture_degraded
+                ~keeper_name
+                ~client_label
+                ~declared:(Runtime_native_tools.to_string declared)
+                ~effective:(Runtime_native_tools.to_string effective)
+                ~reason:detail))
+          else
+            (* Turn-scoped degradation ([full] under a non-yolo approval
+               mode): the condition can appear and disappear with the
+               approval mode, so it stays per-turn. *)
+            Keeper_event_publisher.publish_native_posture_degraded
+              ~keeper_name
+              ~client_label
+              ~declared:(Runtime_native_tools.to_string declared)
+              ~effective:(Runtime_native_tools.to_string effective)
+              ~reason:detail;
+          Ok effective))
+;;

@@ -1,0 +1,75 @@
+Testing `workspace_routes_keeper'.
+This run has ID `I7CTRFJZ'.
+
+  [OK]          classify_keeper_query             0   no param.
+  [OK]          classify_keeper_query             1   empty param.
+  [OK]          classify_keeper_query             2   whitespace param.
+  [OK]          classify_keeper_query             3   keeper unknown.
+  [OK]          classify_keeper_query             4   playground exists.
+  [OK]          classify_keeper_query             5   playground missing.
+  [OK]          classify_keeper_query             6   name trimmed.
+  [OK]          source_header                     0   project.
+  [OK]          source_header                     1   repository.
+  [OK]          source_header                     2   repository missing.
+  [OK]          source_header                     3   repository unknown.
+  [OK]          source_header                     4   playground.
+  [OK]          source_header                     5   playground missing.
+  [OK]          source_header                     6   keeper unknown.
+  [OK]          classify_workspace_query          0   repository takes preced...
+  [OK]          classify_workspace_query          1   repository param trimmed.
+  [OK]          classify_workspace_query          2   repository missing.
+  [OK]          classify_workspace_query          3   repository unknown.
+  [OK]          classify_workspace_query          4   blank repo falls throug...
+  [OK]          rel_under                         0   normal nested.
+  [OK]          rel_under                         1   root base.
+  [OK]          rel_under                         2   trailing slash.
+  [OK]          rel_under                         3   safe equals base.
+  [OK]          scan_dir                          0   respects max node cap.
+  [OK]          scan_dir                          1   attaches file diff badges.
+  [OK]          scan_dir                          2   limit default.
+  [OK]          scan_dir                          3   limit invalid falls back.
+  [OK]          scan_dir                          4   limit clamps low.
+  [OK]          scan_dir                          5   limit clamps high.
+  [OK]          scan_dir                          6   limit accepts valid.
+  [OK]          scan_dir                          7   limit overflow clamps t...
+  [OK]          scan_dir                          8   limit overflow with und...
+  [OK]          scan_dir                          9   limit negative overflow...
+  [OK]          scan_dir                         10   limit non-numeric falls...
+  [OK]          scan_dir                         11   limit lone underscore i...
+  [OK]          scan_dir                         12   limit trailing undersco...
+  [OK]          scan_dir                         13   limit leading underscor...
+  [OK]          scan_dir                         14   limit double underscore...
+  [OK]          scan_dir                         15   limit signed lone under...
+  [OK]          scan_dir                         16   failure observer increm...
+  [OK]          scan_dir                         17   failure observer counts...
+  [OK]          scan_dir                         18   log sanitizer bounds co...
+  [OK]          scan_dir                         19   failure observer bounds...
+  [OK]          scan_dir                         20   failure observer re-rai...
+  [OK]          git_numstat                       0   added and deleted.
+  [OK]          git_numstat                       1   deleted only.
+  [OK]          git_numstat                       2   binary.
+  [OK]          git_numstat                       3   zero change ignored.
+  [OK]          blame_porcelain                   0   header with group count.
+  [OK]          blame_porcelain                   1   header without group co...
+  [OK]          blame_porcelain                   2   rejects non-header lines.
+  [OK]          blame_porcelain                   3   attributes lines via sh...
+  [OK]          blame_porcelain                   4   repeated sha inherits i...
+  [OK]          blame_porcelain                   5   omits incomplete metadata.
+  [OK]          blame_porcelain                   6   groups adjacent same-au...
+  [OK]          valid_git_ref                     0   main.
+  [OK]          valid_git_ref                     1   40-char SHA.
+  [OK]          valid_git_ref                     2   origin/main.
+  [OK]          valid_git_ref                     3   HEAD^.
+  [OK]          valid_git_ref                     4   feature+v2.
+  [OK]          valid_git_ref                     5   @{upstream}.
+  [OK]          valid_git_ref                     6   HEAD@{1}.
+  [OK]          valid_git_ref                     7   rejects -L1,9999.
+  [OK]          valid_git_ref                     8   rejects empty.
+  [OK]          valid_git_ref                     9   rejects whitespace.
+  [OK]          valid_git_ref                    10   rejects semicolon.
+  [OK]          valid_git_ref                    11   rejects newline.
+  [OK]          valid_git_ref                    12   rejects oversize.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/workspace_routes_keeper'.
+Test Successful in 0.175s. 68 tests run.
+exit=0

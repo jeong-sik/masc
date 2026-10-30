@@ -1,0 +1,39 @@
+Testing `tui_keeper_portrait'.
+This run has ID `56O7L16Z'.
+
+  [OK]          band               0   a small pane keeps its rows for facts.
+  [OK]          band               1   no picture is no band.
+> [FAIL]        band               2   Item Mosaic selection changes accessor...
+  [OK]          band               3   the band is compact.
+  [OK]          band               4   the still portrait the name draws.
+  [FAIL]        band               5   observed Items remain visible in the I...
+  [OK]          band               6   facts stand beside the portrait.
+  [OK]          placement          0   pixels go only where the whole portrai...
+  [OK]          placement          1   the picture leaves with the detail.
+  [OK]          cache              0   the cache is bounded.
+  [OK]          cache              1   equipment replaces same Keeper pixels.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        band               2   Item Mosaic selection changes acces...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT Info draws the observed glasses with the accessory renderer
+ASSERT selecting shades changes the glasses preview
+ASSERT the projected Mosaic cells show the selection change
+File "test/test_tui_keeper_portrait.ml", line 280, character 4:
+FAIL the projected Mosaic cells show the selection change
+
+   Expected: `false'
+   Received: `true'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_tui_keeper_portrait.test_item_mosaic_preview_changes_with_select in file "test/test_tui_keeper_portrait.ml", lines 280-281, characters 4-36
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/_build/_tests/tui_keeper_portrait/band.002.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/tui-layout-identity-20261002/_build/_tests/tui_keeper_portrait'.
+2 failures! in 0.178s. 11 tests run.

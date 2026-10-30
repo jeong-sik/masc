@@ -1,0 +1,60 @@
+{
+  "raw_run": "artifacts/schedule-actual-repair-20261027/runs/f1-fixed-1",
+  "captures": [
+    {
+      "capture": "finding.json",
+      "retained": "original bytes",
+      "sha256": "53abe5e269007bd436fd533198cf243682b2a55fc0bc05d9dd5cd0df1c436f7e",
+      "bytes": 1084
+    },
+    {
+      "capture": "inventory-before.json",
+      "retained": "original bytes",
+      "sha256": "b4cc0e09603c28622b35f23a851ef92487dcd56d45ad48dedf195140dd909b23",
+      "bytes": 4953
+    },
+    {
+      "capture": "inventory-after.json",
+      "retained": "original bytes",
+      "sha256": "6c2c28ba4553875089094324f936f73191abc59427b9a130fd9e4335199eeb1f",
+      "bytes": 2246
+    },
+    {
+      "capture": "schedule-before.json",
+      "retained": "original bytes",
+      "sha256": "436411900ac61cf97b0e06f376c725ac495a0c3930609e60697bfccc80a7688b",
+      "bytes": 2646
+    },
+    {
+      "capture": "process-ended.json",
+      "retained": "original bytes",
+      "sha256": "12cd9fb1c23019daa9359b9dddc49a2abd3dbd479941bebc5a913ed5e17de52c",
+      "bytes": 81
+    }
+  ],
+  "other_captures": "Original raw API/status/server logs remain ignored; selected status/provenance explicitly marked derivatives.",
+  "previous_failure": "../2026-10-26-schedule-runtime-behavior/README.md",
+  "controller_captures": [
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/probe_retarget_cancel_fixed.py",
+      "retained": "probe_retarget_cancel_fixed.py.txt",
+      "sha256": "7e4647868f2da37aaabceb769c14f0ec1443ef41e19e5e9539ed6cedad6af3d1",
+      "bytes": 21924,
+      "semantics": "original controller source bytes; .txt extension only"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/probe_lane_scheduled_export.py",
+      "retained": "probe_lane_scheduled_export.py.txt",
+      "sha256": "071c3421de22f9e7ccb1078c16baf806b0fabdda2625fffdbfce3100df3a1f06",
+      "bytes": 22031,
+      "semantics": "original controller source bytes; .txt extension only"
+    },
+    {
+      "source": "artifacts/schedule-actual-repair-20261027/probe_lane_scheduled_export_v2.py",
+      "retained": "probe_lane_scheduled_export_v2.py.txt",
+      "sha256": "eb216ee3fad0debb6b1c6cd085f38ed2baa98152723c658ce764def4e730cca7",
+      "bytes": 22508,
+      "semantics": "original controller source bytes; .txt extension only"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+(** Server_dashboard_http_runtime_support — execution-mode and
+    optional offload-pool surface for dashboard compute.
+
+    Dashboard handlers may either run inline on the request fiber
+    (sharing the request switch and budget) or be offloaded to a
+    read-only [Eio.Executor_pool] so a slow batch query cannot
+    starve other dashboard tabs. The pool itself is owned by
+    {!Executor_pool_ref} (process-wide single-writer); this
+    module is a thin orchestration layer that picks the strategy
+    and falls back to inline compute when no pool is registered. *)
+
+type dashboard_compute_mode =
+  | Inline_shared
+      (** Run the compute on the caller's switch / budget. *)
+  | Offloaded_readonly
+      (** Submit the compute to the registered executor pool with
+          the weight of its declared {!Pool_work.kind}. Falls back to
+          inline when no pool is registered or when the submit raises
+          (logged at warn). *)
+
+type runtime = {
+  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
+  mono_clock : Eio.Time.Mono.ty Eio.Resource.t;
+}
+(** Runtime capabilities a compute may need beyond the request
+    switch. Currently passed through unused; the field is
+    captured so a future "pool-side network" use-case does not
+    have to thread the resource separately. *)
+
+val run_dashboard_compute :
+  ?mode:dashboard_compute_mode ->
+  ?runtime:runtime ->
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  config:Workspace.config ->
+  kind:Pool_work.kind ->
+  name:string ->
+  (config:Workspace.config -> sw:Eio.Switch.t -> 'a) ->
+  'a
+(** Dispatch [compute] under the chosen [mode] (defaults to
+    [Offloaded_readonly]).
+
+    [Inline_shared] forwards [sw] / [config] straight to
+    [compute]; [Offloaded_readonly] submits the compute through
+    {!Pool_work.submit} as work of [kind] and runs it under a nested
+    [Eio.Switch.run]. Nested dashboard cache submissions therefore stay on
+    the current worker instead of waiting on the same pool, and the outermost
+    submit's [kind] is the one that counts (RFC-0474 L4b).
+
+    [Eio.Cancel.Cancelled] is propagated from either path. Any
+    other exception during the offload is logged at
+    [Log.Dashboard.warn] and the call falls back to inline
+    compute so a transient pool failure cannot blank a dashboard
+    tab. *)

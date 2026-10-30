@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-10-24T17:24:47.915621+00:00",
+  "scope": "External private initial-owner freeze; no raw thinking or credentials",
+  "files": {
+    "README.md": {
+      "bytes": 3277,
+      "sha256": "e843956243b1075c14b1a1bf8781205ae7b4c030fc178599c71c8cbd0d79cdb4"
+    },
+    "artifact-interim-all-true-171912.json": {
+      "bytes": 53,
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+    },
+    "artifact.json": {
+      "bytes": 53,
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+    },
+    "binary-binding.json": {
+      "bytes": 631,
+      "sha256": "7bd3dcd26c29d055c14486fa596055891a4745bc7508100eec7fe7c8be4fde40"
+    },
+    "diagnosis.json": {
+      "bytes": 6591,
+      "sha256": "824311b801867ab39989c2b3389ed229be5e2a7326ad97de685a86b6615977a8"
+    },
+    "observe.py": {
+      "bytes": 7405,
+      "sha256": "7fcfb3ec80b959c450c1fab08e2138b2f33fb6872afa9f99b30dee19031cdc66"
+    },
+    "owner-terminal.json": {
+      "bytes": 5375,
+      "sha256": "59e4020b260476a12d2eed24be0f2cae0e69596cb9c270ccc8e0ec65abee91e0"
+    },
+    "prompt-delivery.json": {
+      "bytes": 1620,
+      "sha256": "ba14198a5953630f74f58dddcb74e5bcccb8e9b862421b656c44c8cddfd7c2fb"
+    },
+    "snapshot.json": {
+      "bytes": 34681,
+      "sha256": "8ca8b0a73c7d2fead78c240e4571a4857cc6996afcd201424848a3aa4dc2b4ed"
+    },
+    "snapshots/20261024T171912016846Z.json": {
+      "bytes": 21281,
+      "sha256": "ddc8470c22644be6938f081421f2f3297437f86e308107be090c5a00e81243cd"
+    },
+    "snapshots/20261024T172043814559Z.json": {
+      "bytes": 28556,
+      "sha256": "6d0c31c2fcae80a482509ee8a7eaa5bfaff7e903aa01ad36ec3c639ec9eed404"
+    },
+    "snapshots/20261024T172152801290Z.json": {
+      "bytes": 34681,
+      "sha256": "8ca8b0a73c7d2fead78c240e4571a4857cc6996afcd201424848a3aa4dc2b4ed"
+    },
+    "task-creation.json": {
+      "bytes": 5158,
+      "sha256": "e5e99bd5e18e1e3080cf46dd44d5dc106c12a1131da2aaafadb9095e39b1c4c7"
+    },
+    "verification-source.json": {
+      "bytes": 870,
+      "sha256": "a5207b8f3ad8db9b470ad87b99aee6c06af550ac2dfbfab68fc245e5d1d98e8c"
+    }
+  }
+}

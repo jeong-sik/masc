@@ -1,0 +1,207 @@
+type sandbox_profile = Keeper_sandbox_config.sandbox_profile =
+  | Docker
+    (** Containerized execution with hardened defaults: cap-drop,
+        no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
+        Network defaults to [Network_none]. *)
+  | Micro_vm
+    (** One lightweight virtual machine per container, through Apple's
+        [container] CLI on macOS 26+. The guest runs its own Linux kernel,
+        so an escape has to cross the hypervisor rather than a shared
+        kernel. Measured 2026-08-28 on an M3 Max: about 460 MB of host
+        memory per running guest, a 1.3-2.4s boot paid once per keeper
+        (#31340 adopts the guest across turns), and 0.06-0.10s per call
+        after that. Network defaults to [Network_none]. *)
+  | Remote_ssh
+    (** Execution on a remote host over SSH (Phase 1 lane,
+        docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md
+        {e 4.2}). Transport-only: the Docker container knobs are not
+        reproduced, [network_mode = "none"] is rejected at config load
+        ([remote_ssh_no_network_mode]), and the only accepted network
+        mode is [Network_inherit] (the default). Execute and read dispatch
+        run over the SSH runner; the Docker-shaped arms refuse this profile
+        rather than falling back to a host route. *)
+
+module Sandbox_profile_tla = struct
+  type t = sandbox_profile =
+    | Docker [@tla.symbol "Docker"]
+    | Micro_vm [@tla.symbol "Micro_vm"]
+    | Remote_ssh [@tla.symbol "Remote_ssh"]
+  [@@deriving tla]
+end
+(** TLA+ dispatch symbols for {!sandbox_profile}. Kept in a submodule
+    so the generated [to_tla_symbol] / [all_symbols] / [all_states]
+    names cannot be shadowed by the separate [network_mode] deriver
+    below. Matches [ProfileSet] in
+    [specs/boundary/SandboxDispatch.tla]. *)
+
+type network_mode =
+  | Network_none [@tla.symbol "Network_none"]
+  | Network_inherit [@tla.symbol "Network_inherit"]
+  | Network_policy [@tla.symbol "Network_policy"]
+      (** Outbound traffic reaches a proxy the MASC server owns and nothing
+          else, and the proxy judges each destination against the keeper's
+          allowlist (RFC-0415).
+
+          The enforcement point is the backend's own network boundary, not an
+          environment variable: [HTTPS_PROXY] is advice, and a subprocess
+          carrying its own socket ignores advice. Measured 2026-09-04 on
+          Apple [container] 1.3.1, a guest on an [--internal] network cannot
+          reach 1.1.1.1:443 or a public address by raw TCP, and can reach a
+          listener on the host gateway. *)
+[@@deriving tla]
+
+let sandbox_profile_to_string = Keeper_sandbox_config.sandbox_profile_to_string
+
+(** Parse a sandbox profile string. Canonical values are ["docker"],
+    ["microvm"] and ["remote_ssh"]. *)
+let sandbox_profile_of_string = Keeper_sandbox_config.sandbox_profile_of_string
+
+(* Issue #8467: Variant SSOT — adding a constructor to [sandbox_profile]
+   forces [sandbox_profile_to_string] exhaustiveness AND extends
+   [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
+   the mirror declared there. *)
+let all_sandbox_profiles = [ Docker; Micro_vm; Remote_ssh ]
+let valid_sandbox_profile_strings = Keeper_sandbox_config.valid_sandbox_profile_strings
+
+let network_mode_to_string = function
+  | Network_none -> "none"
+  | Network_inherit -> "inherit"
+  | Network_policy -> "policy"
+;;
+
+let network_mode_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "none" -> Some Network_none
+  | "inherit" -> Some Network_inherit
+  | "policy" -> Some Network_policy
+  | _ -> None
+;;
+
+(* Issue #8467: Variant SSOT for [network_mode]. *)
+let all_network_modes = [ Network_none; Network_inherit; Network_policy ]
+let valid_network_mode_strings = List.map network_mode_to_string all_network_modes
+
+let default_network_mode_for_profile = function
+  | Docker -> Network_none
+  (* Same default as Docker: the guest is a boundary, and opening it is a
+     separate decision the keeper TOML states outright. *)
+  | Micro_vm -> Network_none
+  | Remote_ssh -> Network_inherit
+;;
+
+(* ── the box (RFC-0422 §3.4) ─────────────────────────────────────────── *)
+
+type observation_run =
+  | Observe
+  | Guest_local
+
+let observation_run_to_string = function
+  | Observe -> "observe"
+  | Guest_local -> "guest_local"
+;;
+
+let observation_run_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "observe" -> Some Observe
+  | "guest_local" -> Some Guest_local
+  | _ -> None
+;;
+
+let all_observation_runs = [ Observe; Guest_local ]
+let valid_observation_run_strings = List.map observation_run_to_string all_observation_runs
+let default_observation_run = Observe
+
+(* Every pair written out, as for [network_mode_rejection]: a new profile or
+   a new box fails to compile here until someone decides its answer. *)
+let observation_run_rejection profile run =
+  match profile, run with
+  (* A Docker guest runs no masc-exec-shim, and the box is the shim's. The
+     key names a choice nothing would read, so it is refused rather than
+     carried. *)
+  | Docker, (Observe | Guest_local) ->
+    Some
+      "docker_no_observation_run: sandbox_profile \"docker\" runs no \
+       masc-exec-shim, so there is no box to choose; remove observation_run \
+       or move the keeper to \"microvm\" or \"remote_ssh\""
+  | Micro_vm, (Observe | Guest_local) -> None
+  | Remote_ssh, Observe -> None
+  (* Allowed by profile; whether this endpoint's account home is private is
+     the endpoint's declaration, read where the route is built. *)
+  | Remote_ssh, Guest_local -> None
+;;
+
+(* Which profile and network mode may be held together, and the refusal for
+   the pair that may not. One function because the rule had two homes and only
+   one of them ran before a write: the keeper TOML loader refused
+   [remote_ssh] with [network_mode = "none"], while the keeper_up resolver
+   never compared the two at all. A create could therefore write a keeper TOML
+   that the next load of the same file rejected, and the only way out was to
+   hand-edit that file.
+
+   Every pair is written out rather than closed with a wildcard: a new profile
+   or a new mode fails to compile here until someone decides its answer. *)
+let network_mode_rejection profile mode =
+  match profile, mode with
+  (* Phase 1 SSH lane, Docker-parity hardening table in
+     docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md section
+     4.2: [remote_ssh] is transport-only, so the container network knobs are
+     not reproduced and the guest cannot be cut off from the network. Refusing
+     is what says so; accepting the knob would ignore it silently. Per-VM
+     egress policy arrives with the Phase 2 microVM backend. *)
+  | Remote_ssh, Network_none ->
+    Some
+      "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does \
+       not support network_mode = \"none\" (only \"inherit\" is \
+       accepted in Phase 1; per-VM egress policy arrives with the \
+       microVM backend)"
+  | Remote_ssh, Network_inherit -> None
+  (* Same reason as [none], and it does not soften with RFC-0415: an
+     endpoint's network is its own host's policy, so masc has no boundary
+     there to point at a proxy. *)
+  | Remote_ssh, Network_policy ->
+    Some
+      "remote_ssh_no_network_mode: sandbox_profile \"remote_ssh\" does not \
+       support network_mode = \"policy\" (an endpoint's network is its host's \
+       policy, not something masc sets; only \"inherit\" is accepted)"
+  | Docker, (Network_none | Network_inherit) -> None
+  (* Refused at create as well as at boot. Docker can express an internal
+     network, so the shape is plausible and the boundary is unmeasured
+     (RFC-0415); saying so while the keeper TOML is being written beats
+     saying it when the keeper first tries to start. *)
+  | Docker, Network_policy ->
+    Some
+      "docker_no_network_policy: sandbox_profile \"docker\" does not support \
+       network_mode = \"policy\" because the Docker egress boundary is \
+       unmeasured (RFC-0415). Use \"microvm\" for a policy lane, or \"none\" / \
+       \"inherit\" here."
+  | Micro_vm, (Network_none | Network_inherit | Network_policy) -> None
+;;
+
+(* The observation-only gate fast path ({!Keeper_gate_readonly}) keys on this
+   predicate, so a new profile fails to compile here until a human decides
+   whether it is a disposable guest. *)
+let runs_in_disposable_guest = function
+  | Docker -> true
+  | Micro_vm -> true
+  | Remote_ssh -> false
+;;
+
+let backend_unimplemented_message profile =
+  Printf.sprintf
+    "sandbox_profile=%s has no runtime in this build; the call is refused \
+     rather than dispatched to another backend"
+    (sandbox_profile_to_string profile)
+;;
+
+type tree_location =
+  | Shared_mount
+  | Endpoint_owned
+
+(* A microvm guest's tree is on the named work volume (RFC-0400): the host
+   never mounts the playground into it, so every consumer that branches on
+   the location reaches that tree through the remote lane. *)
+let tree_location_of_profile = function
+  | Docker -> Shared_mount
+  | Micro_vm -> Endpoint_owned
+  | Remote_ssh -> Endpoint_owned
+;;

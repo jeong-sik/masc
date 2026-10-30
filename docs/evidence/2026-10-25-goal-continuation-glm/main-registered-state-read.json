@@ -1,0 +1,20 @@
+{
+  "at": "2026-10-25T00:19:55.213327+00:00",
+  "source_sha256": "25513cf9a8e80f804d2319f83338db875a5f2fcf0ec869788e2e47ab65733891",
+  "latest_registered_measurement": {
+    "id": "920e3f4e283091150f2f4a3a83c2f7b8",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "observed_value": "9/11 fixed acceptance cases; latest3014 Qwen G2FAIL/G3FAIL; A1–A7/G1/G4 retained within explicit earlier scopes; historical10/11 is not latest acceptance",
+    "evidence": "note:Canonical host measurement .masc/playground/codex-mcp-client/goal-outcomes-20261024/acceptance.json SHA256 d13ab0cbea8ef70983469b2349d8be2078b641ce014955b8a84711384b17e9d4; latest real3014 cohort terminal+persisted evidence. No production deployment or Goal proof inferred.",
+    "actor": "codex-goal-outcomes-20261024",
+    "recorded_at": "2026-10-24T16:47:40Z"
+  },
+  "task": {
+    "id": "task-2620",
+    "status": "in_progress",
+    "assignee": "codex-goal-outcomes-20261024",
+    "verification_id": null,
+    "started_at": "2026-10-24T15:02:28Z"
+  }
+}

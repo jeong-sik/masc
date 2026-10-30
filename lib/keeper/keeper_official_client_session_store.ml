@@ -1,0 +1,2046 @@
+type client_kind = Keeper_semantic_execution.official_client_kind =
+  | Codex
+  | Claude_code
+  | Antigravity
+  | Muse
+
+type settlement =
+  { session_id : string
+  ; turn_id : string
+  }
+
+(* RFC claude-code-context-overflow-bounded-restart §6. A same-runtime input
+   rejection stays held for explicit recovery. [Bootstrap_floor_exceeded]
+   means the provider rejected even the minimum bootstrap input.
+   [Effect_fenced] means an input-capacity retry was stopped after observed
+   response/tool activity; it does not assert that the minimum input was
+   rejected. *)
+type input_rejection_reason = Keeper_internal_error.official_client_input_rejection =
+  | Bootstrap_floor_exceeded
+  | Effect_fenced
+
+type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
+type recovery_failure =
+  | Pre_dispatch_failed
+  | Transient_spawn_failed
+  | Owner_stopped_turn
+  | Retryable_turn_failed
+  | Transport_interrupted
+  | Protocol_failed
+  | Provider_rejected
+  | Input_rejected of input_rejection_reason
+  | Host_hook_failed
+  | State_persistence_failed
+  | Process_restarted
+  | Vendor_session_full of vendor_session_activity
+
+type failure_disposition =
+  | Transient
+  | Ambiguous
+  | Fatal
+
+(* [Owner_stopped_turn] is transient because it is not an ambiguity: the owner
+   raised the stop itself and already classifies the operation as
+   Turn_cancelled. Recovery exists to get an operator's judgement on what a
+   crash left behind; a stop we made with a known reason has nothing to
+   adjudicate, and routing it to Recovery_required blocked every later turn for
+   that keeper until someone resolved it by hand (#28012). *)
+let failure_disposition = function
+  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed -> Transient
+  | Transport_interrupted
+  | Protocol_failed
+  | Host_hook_failed
+  | State_persistence_failed
+  | Process_restarted ->
+    Ambiguous
+  | Provider_rejected -> Fatal
+  | Input_rejected _ -> Fatal
+  | Vendor_session_full _ -> Fatal
+;;
+
+type recovery_required =
+  { recovery_id : string
+  ; previous_settlement : settlement option
+  ; observed_session_id : string option
+  ; observed_turn_id : string option
+  ; owner_epoch : string
+  ; failure : recovery_failure
+  ; detail : string
+  ; required_at : float
+  }
+
+type phase =
+  | Ready
+  | Start of
+      { owner_epoch : string
+      ; previous_settlement : settlement option
+      }
+  | Active of
+      { owner_epoch : string
+      ; session_id : string
+      ; previous_settlement : settlement option
+      }
+  | Turn_inflight of
+      { owner_epoch : string
+      ; session_id : string
+      ; turn_id : string option
+      ; previous_settlement : settlement option
+      }
+  | Recovery_required of recovery_required
+  | Settled of settlement
+
+type recovery_resolution =
+  | Retry_previous
+  | Restart_fresh
+
+type recovery_resolution_application =
+  | Applied
+  | Replayed
+
+type recovery_commit =
+  | Committed
+  | Recovery_already_resolved
+
+type recovery_resolution_error =
+  | Invalid_resolved_by
+  | Invalid_resolved_at
+  | Session_missing
+  | Session_changed
+  | Recovery_id_changed
+  | Recovery_not_required
+  | Retry_previous_unavailable
+  | Resolution_conflict
+  | Store_unavailable of string
+
+type recovery_resolution_record =
+  { recovery_id : string
+  ; failure : recovery_failure
+  ; resolution : recovery_resolution
+  ; resolved_by : string
+  ; resolved_at : float
+  }
+
+type transient_release_record =
+  { failure : recovery_failure
+  ; owner_epoch : string
+  ; released_at : float
+  }
+
+type context_delivery =
+  | Prepared_start_context
+  | Canonical_source_guard of { snapshot_sha256 : string }
+  | Held_by_vendor_session
+
+type carried_context =
+  | Context_block of Prompt_block_id.t
+  | Context_section of Keeper_context_layers.source
+  | Context_section_row of { section : Keeper_context_layers.source; row_sha256 : string }
+  | Context_carrier
+  | Librarian_working_state
+  | Librarian_unread
+  | Tool_result_receipts
+  | Historical_task_reference
+
+type held_context =
+  { context : carried_context
+  ; sha256 : string
+  }
+
+type context_frontier =
+  { message_count : int
+  ; delivery : context_delivery
+  ; acknowledged_turn : settlement option
+  ; held_context : held_context list
+  }
+
+type host_turns =
+  | Not_reported
+  | Reported of int
+  | Unobserved_after of int
+
+type t =
+  { client_kind : client_kind
+  ; runtime_id : string
+  ; phase : phase
+  ; turn_count : int
+  ; host_turns : host_turns
+  ; tool_surface_sha256 : string
+  ; context_frontier : context_frontier option
+  ; last_recovery_resolution : recovery_resolution_record option
+  ; last_transient_release : transient_release_record option
+  ; updated_at : float
+  }
+
+type context_admission_error = Context_frontier_missing | Canonical_context_changed
+
+type claim_plan =
+  { previous_settlement : settlement option
+  ; turn_count : int
+  ; required_tool_surface_sha256 : string option
+  }
+
+type claim_error =
+  | Invalid_runtime_id
+  | Input_recovery_required of Keeper_internal_error.official_client_recovery
+  | Turn_count_exhausted
+  | Start_incomplete
+  | Active_unsettled
+  | Turn_already_inflight
+
+open Result.Syntax
+let schema = "masc.keeper.official-client-session.v2"
+let filename = "session.json"
+let state_dirname = "official-client-runtime"
+let recovery_rng = Random.State.make_self_init ()
+let recovery_rng_mutex = Stdlib.Mutex.create ()
+
+let fresh_recovery_id () =
+  Stdlib.Mutex.protect recovery_rng_mutex (fun () ->
+    Uuidm.v4_gen recovery_rng () |> Uuidm.to_string)
+;;
+
+let process_epoch_value = lazy (fresh_recovery_id ())
+let process_epoch () = Lazy.force process_epoch_value
+
+let state_dir ~base_path ~keeper_name =
+  if not (Safe_identifier.is_portable_name keeper_name)
+  then Error (Printf.sprintf "invalid official-client Keeper name %S" keeper_name)
+  else
+    Ok
+      (Filename.concat
+         (Filename.concat
+            (Common.keepers_runtime_dir_of_base ~base_path)
+            keeper_name)
+         state_dirname)
+;;
+
+let path ~base_path ~keeper_name =
+  Result.map
+    (fun directory -> Filename.concat directory filename)
+    (state_dir ~base_path ~keeper_name)
+;;
+
+let rec canonical_json = function
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.map (fun (name, value) -> name, canonical_json value)
+       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | `List values -> `List (List.map canonical_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+    value
+;;
+
+let tool_surface_sha256 ?account_home ?account_revision ~native_posture tools =
+  let tool_json (tool : Agent_core.Tool.t) =
+    let input_schema =
+      match tool.schema.input_schema with
+      | Some schema -> schema
+      | None ->
+        tool.schema.parameters
+        |> List.sort
+          (fun (left : Agent_core.Types.tool_param) right ->
+             String.compare left.name right.name)
+        |> Agent_core.Types.params_to_input_schema
+    in
+    `Assoc
+      [ "description", `String tool.schema.description
+      ; "input_schema", input_schema
+      ; "name", `String tool.schema.name
+      ]
+    |> canonical_json
+  in
+  tools
+  |> List.sort (fun (left : Agent_core.Tool.t) right ->
+    String.compare left.schema.name right.schema.name)
+  |> List.map tool_json
+  |> fun tools ->
+  `Assoc
+    ([ ( "context_message_schema"
+      , `String Keeper_official_client_context_codec.schema )
+    ; ( "native_posture"
+      , `String (Runtime_native_tools.to_string native_posture) )
+    ; "tools", `List tools
+    ] @ (match account_home with
+         | None -> []
+         | Some home -> ["account_home", `String home])
+      @ (match account_revision with
+         | None -> []
+         | Some revision -> ["account_revision", `String revision]))
+  |> canonical_json
+  |> Yojson.Safe.to_string
+  |> Agent_core_sha256.digest_string
+  |> Agent_core_sha256.to_hex
+;;
+
+(* Shared with [Types_auth.is_sha256_hex] and the capability heads rather
+   than decided again here. *)
+let valid_sha256 = String_util.is_lowercase_sha256_hex
+;;
+
+let non_empty field value =
+  if String.equal (String.trim value) ""
+  then Error (Printf.sprintf "official-client session %s must not be empty" field)
+  else Ok ()
+;;
+
+let validate_uuid field value =
+  if Option.is_some (Uuidm.of_string value)
+  then Ok ()
+  else Error (Printf.sprintf "official-client session %s must be a UUID" field)
+;;
+
+let validate_settlement { session_id; turn_id } =
+  let* () = non_empty "session_id" session_id in
+  non_empty "turn_id" turn_id
+;;
+
+let validate_settlement_opt = function
+  | None -> Ok ()
+  | Some settlement -> validate_settlement settlement
+;;
+
+let validate_recovery (recovery : recovery_required) =
+  let* () = validate_uuid "recovery_id" recovery.recovery_id in
+  let* () = validate_uuid "owner_epoch" recovery.owner_epoch in
+  let* () = validate_settlement_opt recovery.previous_settlement in
+  let* () =
+    match recovery.observed_session_id with
+    | None -> Ok ()
+    | Some session_id -> non_empty "observed_session_id" session_id
+  in
+  let* () =
+    match recovery.observed_turn_id, recovery.observed_session_id with
+    | None, _ -> Ok ()
+    | Some turn_id, Some _ -> non_empty "observed_turn_id" turn_id
+    | Some _, None ->
+      Error "official-client recovery observed_turn_id requires observed_session_id"
+  in
+  let* () = non_empty "recovery detail" recovery.detail in
+  if Float.is_finite recovery.required_at
+  then Ok ()
+  else Error "official-client recovery required_at must be finite"
+;;
+
+let validate_recovery_resolution = function
+  | Retry_previous | Restart_fresh -> Ok ()
+;;
+
+let validate_recovery_resolution_record (record : recovery_resolution_record) =
+  let* () = validate_uuid "resolved recovery_id" record.recovery_id in
+  let* () = validate_recovery_resolution record.resolution in
+  let* () = non_empty "resolved_by" record.resolved_by in
+  if Float.is_finite record.resolved_at
+  then Ok ()
+  else Error "official-client recovery resolved_at must be finite"
+;;
+
+let validate_transient_release_record (record : transient_release_record) =
+  let* () =
+    match failure_disposition record.failure with
+    | Transient -> Ok ()
+    | Ambiguous | Fatal ->
+      Error "official-client transient release must contain a transient failure"
+  in
+  let* () = validate_uuid "transient owner_epoch" record.owner_epoch in
+  if Float.is_finite record.released_at
+  then Ok ()
+  else Error "official-client transient released_at must be finite"
+;;
+
+let validate_phase = function
+  | Ready -> Ok ()
+  | Start { owner_epoch; previous_settlement } ->
+    let* () = validate_uuid "owner_epoch" owner_epoch in
+    validate_settlement_opt previous_settlement
+  | Active { owner_epoch; session_id; previous_settlement }
+  | Turn_inflight
+      { owner_epoch; session_id; turn_id = None; previous_settlement } ->
+    let* () = validate_uuid "owner_epoch" owner_epoch in
+    let* () = non_empty "session_id" session_id in
+    validate_settlement_opt previous_settlement
+  | Turn_inflight
+      { owner_epoch
+      ; session_id
+      ; turn_id = Some turn_id
+      ; previous_settlement
+      } ->
+    let* () = validate_uuid "owner_epoch" owner_epoch in
+    let* () = non_empty "session_id" session_id in
+    let* () = non_empty "turn_id" turn_id in
+    validate_settlement_opt previous_settlement
+  | Recovery_required recovery -> validate_recovery recovery
+  | Settled settlement -> validate_settlement settlement
+;;
+
+(* Whether the client reports its own completed-turn count to this store. *)
+let reports_host_turns = function
+  | Muse -> true
+  | Codex | Claude_code | Antigravity -> false
+;;
+
+(* A Muse binding records the host's count exactly when its phase names a
+   session: a resume is admitted only against that count, and a count kept
+   for no session would describe one nobody resumes. An opened session holds
+   the count the host reported, and a dispatched turn's ending is unobserved
+   until a transition records it. *)
+let validate_host_turns binding =
+  let* () =
+    match binding.host_turns with
+    | Not_reported -> Ok ()
+    | Reported turns | Unobserved_after turns ->
+      if turns >= 0 then Ok ()
+      else Error "official-client host completed-turn count must be non-negative"
+  in
+  if not (reports_host_turns binding.client_kind)
+  then (
+    match binding.host_turns with
+    | Not_reported -> Ok ()
+    | Reported _ | Unobserved_after _ ->
+      Error "only a Muse binding records the host's completed-turn count")
+  else
+    match binding.phase, binding.host_turns with
+    | ( ( Ready
+        | Start { previous_settlement = None; _ }
+        | Recovery_required { previous_settlement = None; _ } )
+      , Not_reported ) -> Ok ()
+    | ( ( Ready
+        | Start { previous_settlement = None; _ }
+        | Recovery_required { previous_settlement = None; _ } )
+      , (Reported _ | Unobserved_after _) ) ->
+      Error "a Muse binding that names no session records no host turn count"
+    | Active _, Reported _ -> Ok ()
+    | Active _, (Not_reported | Unobserved_after _) ->
+      Error "an opened Muse session records the count its host reported"
+    | Turn_inflight _, Unobserved_after _ -> Ok ()
+    | Turn_inflight _, (Not_reported | Reported _) ->
+      Error "an in-flight Muse turn has an unobserved ending"
+    | ( ( Start { previous_settlement = Some _; _ }
+        | Recovery_required { previous_settlement = Some _; _ }
+        | Settled _ )
+      , (Reported _ | Unobserved_after _) ) -> Ok ()
+    | ( ( Start { previous_settlement = Some _; _ }
+        | Recovery_required { previous_settlement = Some _; _ }
+        | Settled _ )
+      , Not_reported ) ->
+      Error "a resumable Muse session must record its host's completed-turn count"
+;;
+
+let validate binding =
+  let* () = non_empty "runtime_id" binding.runtime_id in
+  let* () = validate_phase binding.phase in
+  let* () = validate_host_turns binding in
+  let* () =
+    match binding.last_recovery_resolution with
+    | None -> Ok ()
+    | Some record -> validate_recovery_resolution_record record
+  in
+  let* () =
+    match binding.last_transient_release with
+    | None -> Ok ()
+    | Some record -> validate_transient_release_record record
+  in
+  let* () = match binding.context_frontier with
+    | None -> Ok ()
+    | Some frontier ->
+      let held_contexts = List.map (fun held -> held.context) frontier.held_context in
+      let* () = match frontier.delivery with
+        | Canonical_source_guard { snapshot_sha256 } when not (valid_sha256 snapshot_sha256) ->
+          Error "invalid canonical context frontier"
+        | Canonical_source_guard _ | Prepared_start_context | Held_by_vendor_session -> Ok () in
+      if frontier.message_count < 0
+      then Error "invalid canonical context frontier"
+      else if List.exists (fun held -> not (valid_sha256 held.sha256)) frontier.held_context
+      then Error "invalid held context digest"
+      else if List.exists
+                (fun held -> match held.context with
+                   | Context_section_row { row_sha256; _ } ->
+                     not (String.equal row_sha256 held.sha256)
+                   | Context_block _ | Context_section _ | Context_carrier
+                   | Librarian_working_state | Librarian_unread
+                   | Historical_task_reference | Tool_result_receipts -> false)
+                frontier.held_context
+      then Error "held section row is not named by its own digest"
+      else if List.length (List.sort_uniq compare held_contexts) <> List.length held_contexts
+      then Error "held context names one carried context twice"
+      else (match frontier.acknowledged_turn with
+        | None -> Ok ()
+        | Some settlement ->
+          let* () = validate_settlement settlement in
+          match binding.phase with
+          | Settled current when current = settlement -> Ok ()
+          | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+            Error "context frontier acknowledgement is not the settled vendor turn")
+  in
+  if binding.turn_count < 0
+  then Error "official-client session turn_count must be non-negative"
+  else if binding.turn_count = 0 && binding.phase <> Ready
+  then Error "only a ready official-client session may have zero completed turns"
+  else if not (valid_sha256 binding.tool_surface_sha256)
+  then Error "official-client session tool_surface_sha256 must be lowercase SHA-256"
+  else if not (Float.is_finite binding.updated_at)
+  then Error "official-client session updated_at must be finite"
+  else Ok ()
+;;
+
+let settlement_to_yojson settlement =
+  `Assoc
+    [ "session_id", `String settlement.session_id
+    ; "turn_id", `String settlement.turn_id
+    ]
+;;
+
+let settlement_opt_to_yojson = function
+  | None -> `Null
+  | Some settlement -> settlement_to_yojson settlement
+;;
+
+let settlement_of_yojson = function
+  | `Assoc [ "session_id", `String session_id; "turn_id", `String turn_id ]
+  | `Assoc [ "turn_id", `String turn_id; "session_id", `String session_id ] ->
+    let settlement = { session_id; turn_id } in
+    let* () = validate_settlement settlement in
+    Ok settlement
+  | _ -> Error "official-client settlement fields are not exact"
+;;
+
+let settlement_opt_of_yojson = function
+  | `Null -> Ok None
+  | json -> Result.map Option.some (settlement_of_yojson json)
+;;
+
+let recovery_failure_to_string = function
+  | Pre_dispatch_failed -> "pre_dispatch_failed"
+  | Transient_spawn_failed -> "transient_spawn_failed"
+  | Owner_stopped_turn -> "owner_stopped_turn"
+  | Retryable_turn_failed -> "retryable_turn_failed"
+  | Transport_interrupted -> "transport_interrupted"
+  | Protocol_failed -> "protocol_failed"
+  | Provider_rejected -> "provider_rejected"
+  | Input_rejected Bootstrap_floor_exceeded ->
+    "input_rejected_bootstrap_floor_exceeded"
+  | Input_rejected Effect_fenced -> "input_rejected_effect_fenced"
+  | Host_hook_failed -> "host_hook_failed"
+  | State_persistence_failed -> "state_persistence_failed"
+  | Process_restarted -> "process_restarted"
+  | Vendor_session_full No_activity_observed -> "vendor_session_full_no_activity"
+  | Vendor_session_full Activity_observed -> "vendor_session_full_after_activity"
+;;
+
+let recovery_failure_of_string = function
+  | "pre_dispatch_failed" -> Ok Pre_dispatch_failed
+  | "transient_spawn_failed" -> Ok Transient_spawn_failed
+  | "owner_stopped_turn" -> Ok Owner_stopped_turn
+  | "retryable_turn_failed" -> Ok Retryable_turn_failed
+  | "transport_interrupted" -> Ok Transport_interrupted
+  | "protocol_failed" -> Ok Protocol_failed
+  | "provider_rejected" -> Ok Provider_rejected
+  | "input_rejected_bootstrap_floor_exceeded" ->
+    Ok (Input_rejected Bootstrap_floor_exceeded)
+  | "input_rejected_effect_fenced" -> Ok (Input_rejected Effect_fenced)
+  | "host_hook_failed" -> Ok Host_hook_failed
+  | "state_persistence_failed" -> Ok State_persistence_failed
+  | "process_restarted" -> Ok Process_restarted
+  | "vendor_session_full_no_activity" -> Ok (Vendor_session_full No_activity_observed)
+  | "vendor_session_full_after_activity" -> Ok (Vendor_session_full Activity_observed)
+  | _ -> Error "unknown official-client recovery failure"
+;;
+
+let recovery_resolution_to_yojson = function
+  | Retry_previous -> `Assoc [ "kind", `String "retry_previous" ]
+  | Restart_fresh -> `Assoc [ "kind", `String "restart_fresh" ]
+;;
+
+let recovery_resolution_of_yojson = function
+  | `Assoc [ "kind", `String "retry_previous" ] -> Ok Retry_previous
+  | `Assoc [ "kind", `String "restart_fresh" ] -> Ok Restart_fresh
+  | `Assoc _ -> Error "official-client recovery resolution fields are not exact"
+  | _ -> Error "official-client recovery resolution must be a JSON object"
+;;
+
+let recovery_resolution_record_to_yojson
+    (record : recovery_resolution_record) =
+  `Assoc
+    [ "failure", `String (recovery_failure_to_string record.failure)
+    ; "recovery_id", `String record.recovery_id
+    ; "resolution", recovery_resolution_to_yojson record.resolution
+    ; "resolved_at", `Float record.resolved_at
+    ; "resolved_by", `String record.resolved_by
+    ]
+;;
+
+let recovery_resolution_record_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "failure", `String failure; "recovery_id", `String recovery_id
+       ; "resolution", resolution_json; "resolved_at", `Float resolved_at
+       ; "resolved_by", `String resolved_by ] ->
+       let* failure = recovery_failure_of_string failure in
+       let* resolution = recovery_resolution_of_yojson resolution_json in
+       let record =
+         { recovery_id; failure; resolution; resolved_by; resolved_at }
+       in
+       let* () = validate_recovery_resolution_record record in
+       Ok record
+     | _ -> Error "official-client recovery resolution record fields are not exact")
+  | _ -> Error "official-client recovery resolution record must be a JSON object"
+;;
+
+let recovery_resolution_record_opt_to_yojson = function
+  | None -> `Null
+  | Some record -> recovery_resolution_record_to_yojson record
+;;
+
+let recovery_resolution_record_opt_of_yojson = function
+  | `Null -> Ok None
+  | json ->
+    Result.map Option.some (recovery_resolution_record_of_yojson json)
+;;
+
+let transient_release_record_to_yojson (record : transient_release_record) =
+  `Assoc
+    [ "failure", `String (recovery_failure_to_string record.failure)
+    ; "owner_epoch", `String record.owner_epoch
+    ; "released_at", `Float record.released_at
+    ]
+;;
+
+let transient_release_record_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "failure", `String failure; "owner_epoch", `String owner_epoch
+       ; "released_at", `Float released_at ] ->
+       let* failure = recovery_failure_of_string failure in
+       let record = { failure; owner_epoch; released_at } in
+       let* () = validate_transient_release_record record in
+       Ok record
+     | _ -> Error "official-client transient release fields are not exact")
+  | _ -> Error "official-client transient release must be a JSON object"
+;;
+
+let transient_release_record_opt_to_yojson = function
+  | None -> `Null
+  | Some record -> transient_release_record_to_yojson record
+;;
+
+let transient_release_record_opt_of_yojson = function
+  | `Null -> Ok None
+  | json -> Result.map Option.some (transient_release_record_of_yojson json)
+;;
+
+let string_opt_to_yojson = function
+  | None -> `Null
+  | Some value -> `String value
+;;
+
+let string_opt_of_yojson field = function
+  | `Null -> Ok None
+  | `String value ->
+    let* () = non_empty field value in
+    Ok (Some value)
+  | _ -> Error (Printf.sprintf "official-client recovery %s must be string or null" field)
+;;
+
+let phase_to_yojson = function
+  | Ready -> `Assoc [ "kind", `String "ready" ]
+  | Start { owner_epoch; previous_settlement } ->
+    `Assoc
+      [ "kind", `String "start"
+      ; "owner_epoch", `String owner_epoch
+      ; "previous_settlement", settlement_opt_to_yojson previous_settlement
+      ]
+  | Active { owner_epoch; session_id; previous_settlement } ->
+    `Assoc
+      [ "kind", `String "active"
+      ; "owner_epoch", `String owner_epoch
+      ; "previous_settlement", settlement_opt_to_yojson previous_settlement
+      ; "session_id", `String session_id
+      ]
+  | Turn_inflight { owner_epoch; session_id; turn_id; previous_settlement } ->
+    `Assoc
+      [ "kind", `String "turn_inflight"
+      ; "owner_epoch", `String owner_epoch
+      ; "previous_settlement", settlement_opt_to_yojson previous_settlement
+      ; "session_id", `String session_id
+      ; ( "turn_id"
+        , Option.fold ~none:`Null ~some:(fun turn_id -> `String turn_id) turn_id )
+      ]
+  | Recovery_required recovery ->
+    `Assoc
+      [ "detail", `String recovery.detail
+      ; "failure", `String (recovery_failure_to_string recovery.failure)
+      ; "kind", `String "recovery_required"
+      ; "observed_session_id", string_opt_to_yojson recovery.observed_session_id
+      ; "observed_turn_id", string_opt_to_yojson recovery.observed_turn_id
+      ; "owner_epoch", `String recovery.owner_epoch
+      ; ( "previous_settlement"
+        , settlement_opt_to_yojson recovery.previous_settlement )
+      ; "recovery_id", `String recovery.recovery_id
+      ; "required_at", `Float recovery.required_at
+      ]
+  | Settled { session_id; turn_id } ->
+    `Assoc
+      [ "kind", `String "settled"
+      ; "session_id", `String session_id
+      ; "turn_id", `String turn_id
+      ]
+;;
+
+let phase_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "kind", `String "ready" ] -> Ok Ready
+     | [ "kind", `String "start"; "owner_epoch", `String owner_epoch
+       ; "previous_settlement", previous ] ->
+       let* previous_settlement = settlement_opt_of_yojson previous in
+       Ok (Start { owner_epoch; previous_settlement })
+     | [ "kind", `String "active"; "owner_epoch", `String owner_epoch
+       ; "previous_settlement", previous
+       ; "session_id", `String session_id ] ->
+       let* previous_settlement = settlement_opt_of_yojson previous in
+       Ok (Active { owner_epoch; session_id; previous_settlement })
+     | [ "kind", `String "turn_inflight"; "owner_epoch", `String owner_epoch
+       ; "previous_settlement", previous
+       ; "session_id", `String session_id; "turn_id", turn_id_json ] ->
+       let* previous_settlement = settlement_opt_of_yojson previous in
+       let* turn_id = string_opt_of_yojson "observed_turn_id" turn_id_json in
+       Ok (Turn_inflight { owner_epoch; session_id; turn_id; previous_settlement })
+     | [ "detail", `String detail; "failure", `String failure
+       ; "kind", `String "recovery_required"
+       ; "observed_session_id", observed_session_json
+       ; "observed_turn_id", observed_turn_json
+       ; "owner_epoch", `String owner_epoch
+       ; "previous_settlement", previous_json
+       ; "recovery_id", `String recovery_id; "required_at", `Float required_at
+       ] ->
+       let* failure = recovery_failure_of_string failure in
+       let* observed_session_id =
+         string_opt_of_yojson "observed_session_id" observed_session_json
+       in
+       let* observed_turn_id =
+         string_opt_of_yojson "observed_turn_id" observed_turn_json
+       in
+       let* previous_settlement = settlement_opt_of_yojson previous_json in
+       let recovery =
+         { recovery_id
+         ; previous_settlement
+         ; observed_session_id
+         ; observed_turn_id
+         ; owner_epoch
+         ; failure
+         ; detail
+         ; required_at
+         }
+       in
+       let* () = validate_recovery recovery in
+       Ok (Recovery_required recovery)
+     | [ "kind", `String "settled"; "session_id", `String session_id
+       ; "turn_id", `String turn_id ] ->
+       Ok (Settled { session_id; turn_id })
+     | _ -> Error "official-client session phase fields are not exact")
+  | _ -> Error "official-client session phase must be a JSON object"
+;;
+
+let held_context_to_yojson { context; sha256 } =
+  let context_fields = match context with
+    | Context_block block ->
+      [ "context", `String "block"; "block", `String (Prompt_block_id.to_string block) ]
+    | Context_section section ->
+      [ "context", `String "section"
+      ; "section", `String (Keeper_context_layers.source_name section) ]
+    | Context_section_row { section; row_sha256 } ->
+      [ "context", `String "section_row"
+      ; "section", `String (Keeper_context_layers.source_name section)
+      ; "row_sha256", `String row_sha256 ]
+    | Context_carrier -> [ "context", `String "carrier" ]
+    | Librarian_working_state -> [ "context", `String "working_state" ]
+    | Librarian_unread -> [ "context", `String "librarian_unread" ]
+    | Tool_result_receipts -> [ "context", `String "tool_result_receipts" ]
+    | Historical_task_reference -> [ "context", `String "task_reference" ]
+  in
+  `Assoc (context_fields @ [ "sha256", `String sha256 ])
+
+let held_context_of_yojson = function
+  | `Assoc fields ->
+    let* context =
+      match List.sort compare fields with
+      | [ "block", `String block; "context", `String "block"; "sha256", _ ] ->
+        Prompt_block_id.of_string block |> Result.map (fun block -> Context_block block)
+      | [ "context", `String "section"; "section", `String section; "sha256", _ ] ->
+        (match Keeper_context_layers.source_of_name section with
+         | Some section -> Ok (Context_section section)
+         | None -> Error ("unknown held context section " ^ section))
+      | [ "context", `String "section_row"; "row_sha256", `String row_sha256
+        ; "section", `String section; "sha256", _ ] ->
+        (match Keeper_context_layers.source_of_name section with
+         | Some section when valid_sha256 row_sha256 ->
+           Ok (Context_section_row { section; row_sha256 })
+         | Some _ -> Error "invalid held section row digest"
+         | None -> Error ("unknown held context section " ^ section))
+      | [ "context", `String "carrier"; "sha256", _ ] -> Ok Context_carrier
+      | [ "context", `String "working_state"; "sha256", _ ] -> Ok Librarian_working_state
+      | [ "context", `String "librarian_unread"; "sha256", _ ] -> Ok Librarian_unread
+      | [ "context", `String "tool_result_receipts"; "sha256", _ ] -> Ok Tool_result_receipts
+      | [ "context", `String "task_reference"; "sha256", _ ] -> Ok Historical_task_reference
+      | _ -> Error "invalid held context fields"
+    in
+    (match List.assoc_opt "sha256" fields with
+     | Some (`String sha256) when valid_sha256 sha256 -> Ok { context; sha256 }
+     | Some _ | None -> Error "invalid held context digest")
+  | _ -> Error "invalid held context"
+
+let context_frontier_to_yojson = function
+  | None -> `Null
+  | Some frontier ->
+    let delivery = match frontier.delivery with
+      | Prepared_start_context -> [ "delivery", `String "prepared_start_context" ]
+      | Canonical_source_guard { snapshot_sha256 } ->
+        [ "delivery", `String "canonical_source_guard"
+        ; "snapshot_sha256", `String snapshot_sha256 ]
+      | Held_by_vendor_session -> [ "delivery", `String "held_by_vendor_session" ] in
+    `Assoc (delivery @
+      [ "message_count", `Int frontier.message_count
+      ; "acknowledged_turn", settlement_opt_to_yojson frontier.acknowledged_turn
+      ; "held_context", `List (List.map held_context_to_yojson frontier.held_context) ])
+
+let context_frontier_of_yojson json =
+  let decode delivery message_count acknowledged held_items =
+    let* held_context =
+      List.fold_right (fun item acc ->
+        let* held = held_context_of_yojson item in
+        let* rest = acc in
+        Ok (held :: rest)) held_items (Ok []) in
+    let* acknowledged_turn = settlement_opt_of_yojson acknowledged in
+    Ok (Some {message_count; delivery; acknowledged_turn; held_context}) in
+  match json with
+  | `Null -> Ok None
+  | `Assoc fields ->
+    (match List.sort compare fields with
+     | ["acknowledged_turn", acknowledged; "delivery", `String "canonical_source_guard";
+        "held_context", `List held_items;
+        "message_count", `Int message_count; "snapshot_sha256", `String snapshot_sha256]
+       when message_count >= 0 && valid_sha256 snapshot_sha256 ->
+       decode (Canonical_source_guard {snapshot_sha256}) message_count acknowledged held_items
+     | ["acknowledged_turn", acknowledged; "delivery", `String delivery;
+        "held_context", `List held_items; "message_count", `Int message_count]
+       when message_count >= 0 ->
+       let* delivery = match delivery with
+         | "prepared_start_context" -> Ok Prepared_start_context
+         | "held_by_vendor_session" -> Ok Held_by_vendor_session
+         | _ -> Error "invalid context frontier delivery" in
+       decode delivery message_count acknowledged held_items
+     | _ -> Error "invalid context frontier fields")
+  | _ -> Error "invalid context frontier"
+
+let host_turns_to_yojson = function
+  | Not_reported -> None
+  | Reported turns -> Some (`Assoc [ "kind", `String "reported"; "turns", `Int turns ])
+  | Unobserved_after turns ->
+    Some (`Assoc [ "kind", `String "unobserved_after"; "turns", `Int turns ])
+;;
+
+let host_turns_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "kind", `String "reported"; "turns", `Int turns ] -> Ok (Reported turns)
+     | [ "kind", `String "unobserved_after"; "turns", `Int turns ] ->
+       Ok (Unobserved_after turns)
+     | _ -> Error "official-client host turn count fields are not exact")
+  | _ -> Error "official-client host turn count must be a JSON object"
+;;
+
+let to_yojson binding =
+  let host_turns =
+    match host_turns_to_yojson binding.host_turns with
+    | None -> []
+    | Some json -> [ "host_turns", json ]
+  in
+  `Assoc
+    ([ ( "client_kind"
+       , `String
+           (Keeper_semantic_execution.official_client_kind_to_string binding.client_kind) )
+     ; "context_frontier", context_frontier_to_yojson binding.context_frontier
+     ; ( "last_recovery_resolution"
+       , recovery_resolution_record_opt_to_yojson
+           binding.last_recovery_resolution )
+     ; ( "last_transient_release"
+       , transient_release_record_opt_to_yojson binding.last_transient_release )
+     ; "runtime_id", `String binding.runtime_id
+     ; "phase", phase_to_yojson binding.phase
+     ; "schema", `String schema
+     ; "tool_surface_sha256", `String binding.tool_surface_sha256
+     ; "turn_count", `Int binding.turn_count
+     ; "updated_at", `Float binding.updated_at
+     ]
+     @ host_turns)
+;;
+
+let of_yojson = function
+  | `Assoc fields ->
+    (* Optional new evidence is independent of the existing session identity.
+       Absence is unrecorded provenance, never an acknowledged frontier. *)
+    let frontier_fields, fields = List.partition (fun (name, _) ->
+      String.equal name "context_frontier") fields in
+    let* context_frontier = match frontier_fields with
+      | [] -> Ok None
+      | [(_, json)] -> context_frontier_of_yojson json
+      | _ -> Error "duplicate context frontier proof" in
+    (* The host's count is written only when it was reported, so absence is
+       [Not_reported]. [validate] refuses a Muse binding that names a session
+       without it. *)
+    let host_turns_fields, fields = List.partition (fun (name, _) ->
+      String.equal name "host_turns") fields in
+    let* host_turns = match host_turns_fields with
+      | [] -> Ok Not_reported
+      | [(_, json)] -> host_turns_of_yojson json
+      | _ -> Error "duplicate host turn count" in
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "client_kind", `String client_kind_json
+       ; "last_recovery_resolution", last_resolution_json
+       ; "last_transient_release", last_transient_release_json
+       ; "phase", phase_json
+       ; "runtime_id", `String runtime_id
+       ; "schema", `String encoded_schema
+       ; "tool_surface_sha256", `String tool_surface_sha256
+       ; "turn_count", `Int turn_count
+       ; "updated_at", `Float updated_at
+       ] ->
+       if not (String.equal encoded_schema schema)
+       then Error "unsupported official-client session schema"
+       else
+         let* client_kind =
+           Keeper_semantic_execution.official_client_kind_of_string client_kind_json
+           |> Option.to_result ~none:"unknown official-client kind"
+         in
+         let* phase = phase_of_yojson phase_json in
+         let* last_recovery_resolution =
+           recovery_resolution_record_opt_of_yojson last_resolution_json
+         in
+         let* last_transient_release =
+           transient_release_record_opt_of_yojson last_transient_release_json
+         in
+         let binding =
+           { client_kind
+           ; runtime_id
+           ; phase
+           ; turn_count
+           ; host_turns
+           ; tool_surface_sha256
+           ; context_frontier
+           ; last_recovery_resolution
+           ; last_transient_release
+           ; updated_at
+           }
+         in
+         let* () = validate binding in
+         Ok binding
+     | _ -> Error "official-client session fields are not exact")
+  | _ -> Error "official-client session must be a JSON object"
+;;
+
+let equal left right =
+  left.client_kind = right.client_kind
+  && String.equal left.runtime_id right.runtime_id
+  && left.phase = right.phase
+  && Int.equal left.turn_count right.turn_count
+  && left.host_turns = right.host_turns
+  && String.equal left.tool_surface_sha256 right.tool_surface_sha256
+  && left.context_frontier = right.context_frontier
+  && left.last_recovery_resolution = right.last_recovery_resolution
+  && left.last_transient_release = right.last_transient_release
+  && Float.equal left.updated_at right.updated_at
+;;
+
+type read_failure = { path : string; detail : string }
+
+type read_error =
+  | Invalid_path of string
+  | Unreadable of read_failure
+  | Invalid_json of read_failure
+  | Not_current of read_failure
+
+let read_error_to_string = function
+  | Invalid_path detail -> detail
+  | Unreadable { path; detail } ->
+    Printf.sprintf "failed to read official-client session %s: %s" path detail
+  | Invalid_json { path; detail } ->
+    Printf.sprintf "official-client session JSON rejected path=%s: %s" path detail
+  | Not_current { path; detail } ->
+    Printf.sprintf "official-client session rejected path=%s: %s" path detail
+;;
+
+let load_path state_path =
+  match Fs_compat.load_file_opt state_path with
+  | exception Sys_error detail -> Error (Unreadable { path = state_path; detail })
+  | None -> Ok None
+  | Some contents ->
+    let* json =
+      Safe_ops.parse_json_off_fiber ~context:state_path contents
+      |> Result.map_error (fun detail -> Invalid_json { path = state_path; detail })
+    in
+    let* binding =
+      of_yojson json
+      |> Result.map_error (fun detail -> Not_current { path = state_path; detail })
+    in
+    Ok (Some binding)
+;;
+
+let load ~base_path ~keeper_name =
+  let* state_path =
+    path ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> Invalid_path detail)
+  in
+  load_path state_path
+;;
+
+let save_path ~state_dir binding =
+  let* () = validate binding in
+  let state_path = Filename.concat state_dir filename in
+  let* () =
+    match
+      Keeper_fs.save_json_durable_atomic
+        ~ownership_root:state_dir
+        ~pretty:false
+        state_path
+        (to_yojson binding)
+    with
+    | Ok () -> Ok ()
+    | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
+  in
+  let* persisted = load_path state_path |> Result.map_error read_error_to_string in
+  match persisted with
+  | Some persisted when equal persisted binding -> Ok ()
+  | Some _ -> Error "official-client session changed after durable write"
+  | None -> Error "official-client session missing after durable write"
+;;
+
+let prepare_state_dir ~base_path ~keeper_name =
+  let* directory = state_dir ~base_path ~keeper_name in
+  try
+    let (_ : string) = Keeper_fs.ensure_dir directory in
+    Ok directory
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let store_lock_path directory = directory ^ ".lock"
+
+let with_store_lock_in directory f =
+  match
+    File_lock_eio.with_durable_lock
+      ~lock_path:(store_lock_path directory)
+      (fun () -> f directory)
+  with
+  | Ok result -> result
+  | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
+;;
+
+let with_store_lock ~base_path ~keeper_name f =
+  let* directory = prepare_state_dir ~base_path ~keeper_name in
+  with_store_lock_in directory f
+;;
+
+let inspect_store_directory directory =
+  try
+    Fs_compat.inspect_owned_directory_chain
+      ~ownership_root:directory
+      directory
+    |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+type stored_binding =
+  { keeper_name : string
+  ; path : string
+  ; decoded : (t, read_error) result
+  }
+
+(* [state_dir] writes under [Common.keepers_runtime_dir_of_base], so that is
+   the directory listed here. Every entry [path] accepts is read with
+   [load_path], the reader every claim uses, so this reads exactly the files
+   a claim would read, a linked keeper
+   directory included. Ordinary metadata files are not Keeper directories.
+   A name [path] refuses is left out: [state_dir] refuses it too, so this
+   store never wrote there. Directory inspection failures refuse discovery
+   instead of treating a potentially hidden binding as absent. *)
+let stored_bindings ~base_path =
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let filesystem_error path operation cause =
+    Error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message cause))
+  in
+  let inspect_keeper keeper_name =
+    match path ~base_path ~keeper_name with
+    | Error _ -> Ok None
+    | Ok state_path ->
+      let keeper_dir = Filename.concat keepers_dir keeper_name in
+      (match Unix.lstat keeper_dir with
+       | exception Unix.Unix_error (cause, _, _) ->
+         filesystem_error keeper_dir "failed to inspect" cause
+       | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
+       | { Unix.st_kind = Unix.S_LNK; _ } ->
+         (match Unix.stat keeper_dir with
+          | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
+          | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+            Error ("linked Keeper entry is not a directory: " ^ keeper_dir)
+          | exception Unix.Unix_error (cause, _, _) ->
+            filesystem_error keeper_dir "failed to follow" cause)
+       | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+         Ok None)
+  in
+  let inspect_binding keeper_name state_path =
+    let state_dir = Filename.dirname state_path in
+    let* state_dir_exists =
+      match Unix.lstat state_dir with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+      | exception Unix.Unix_error (cause, _, _) ->
+        filesystem_error state_dir "failed to inspect" cause
+      | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
+      | { Unix.st_kind = Unix.S_LNK; _ } ->
+        (match Unix.stat state_dir with
+         | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
+         | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+           Error ("linked official-client session entry is not a directory: " ^ state_dir)
+         | exception Unix.Unix_error (cause, _, _) ->
+           filesystem_error state_dir "failed to follow" cause)
+      | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+        Error ("official-client session entry is not a directory: " ^ state_dir)
+    in
+    if not state_dir_exists
+    then Ok None
+    else
+      match Unix.lstat state_path with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+      | exception Unix.Unix_error (cause, _, _) ->
+        filesystem_error state_path "failed to inspect" cause
+      | _ ->
+        (match load_path state_path with
+         | Ok None ->
+           Error ("official-client session disappeared during discovery: " ^ state_path)
+         | Ok (Some binding) ->
+           Ok (Some { keeper_name; path = state_path; decoded = Ok binding })
+         | Error rejection ->
+           Ok (Some { keeper_name; path = state_path; decoded = Error rejection }))
+  in
+  match Unix.lstat keepers_dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Printf.sprintf "%s: %s" keepers_dir (Unix.error_message error))
+  | _ ->
+    (match Sys.readdir keepers_dir with
+     | exception Sys_error detail -> Error detail
+     | entries ->
+       Array.to_list entries
+       |> List.sort String.compare
+       |> List.fold_left
+            (fun collected keeper_name ->
+               let* collected = collected in
+               let* state_path = inspect_keeper keeper_name in
+               match state_path with
+               | None -> Ok collected
+               | Some state_path ->
+                 let* binding = inspect_binding keeper_name state_path in
+                 Ok (match binding with None -> collected | Some binding -> binding :: collected))
+            (Ok [])
+       |> Result.map List.rev)
+;;
+
+(* The lock is [store_lock_path] of [state_dir], the one [with_store_lock]
+   takes for every claim and transition. Under it the binding is read again:
+   one that decodes now, or is gone, is not moved. The observed form keeps a
+   completed rename when only the release fails, as [clear_then_with_lock]
+   does. *)
+type move_error =
+  | Move_read_failed of read_error
+  | Binding_readable of string
+  | Binding_missing of string
+  | Lock_failed of File_lock_eio.durable_lock_error
+  | Rename_failed of string
+
+let move_error_to_string = function
+  | Move_read_failed error -> read_error_to_string error
+  | Binding_readable path -> "the binding decodes now; it was left in place: " ^ path
+  | Binding_missing path -> "the binding is gone; nothing was moved: " ^ path
+  | Lock_failed error -> File_lock_eio.durable_lock_error_to_string error
+  | Rename_failed detail -> detail
+;;
+
+let move_aside ~base_path ~keeper_name ~rejected_path =
+  let* directory =
+    state_dir ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> Move_read_failed (Invalid_path detail))
+  in
+  let state_path = Filename.concat directory filename in
+  match
+    File_lock_eio.with_durable_lock_observed
+      ~lock_path:(store_lock_path directory)
+      (fun () ->
+         match load_path state_path with
+         | Ok (Some (_ : t)) -> Error (Binding_readable state_path)
+         | Ok None -> Error (Binding_missing state_path)
+         | Error ((Invalid_path _ | Unreadable _) as error) ->
+           Error (Move_read_failed error)
+         | Error (Invalid_json _ | Not_current _) ->
+           (match Fs_compat.rename state_path rejected_path with
+            | () -> Ok ()
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn -> Error (Rename_failed (Printexc.to_string exn))))
+  with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (Lock_failed error)
+  | File_lock_eio.Body_completed { value; release_error } ->
+    Option.iter
+      (fun error ->
+         Log.Keeper.error
+           ~keeper_name
+           "official-client session move-aside %s; releasing the claim lock failed: %s"
+           (match value with
+            | Ok () -> "completed"
+            | Error error -> "did not move the file (" ^ move_error_to_string error ^ ")")
+           (File_lock_eio.durable_lock_error_to_string error))
+      release_error;
+    value
+;;
+
+let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
+  let* directory = state_dir ~base_path ~keeper_name in
+  match inspect_store_directory directory with
+  | Error _ as error -> error
+  | Ok Fs_compat.Owned_directory_missing ->
+    (* The Owner maintenance slot excludes a same-process claim, and the
+       BasePath process lease excludes another process. Do not create a lock
+       artifact merely to confirm that this optional store is absent. *)
+    Ok (after_clear ())
+  | Ok (Fs_compat.Owned_directory _) ->
+    let body () =
+      match inspect_store_directory directory with
+      | Error _ as error -> error
+      | Ok Fs_compat.Owned_directory_missing -> Ok (after_clear ())
+      | Ok (Fs_compat.Owned_directory _) ->
+        let state_path = Filename.concat directory filename in
+        (match load_path state_path with
+         | Ok (_ : t option) -> ()
+         | Error detail ->
+           Log.Keeper.warn
+             ~keeper_name
+             "official-client session binding could not be read before clear; removing it under the claim lock: %s"
+             (read_error_to_string detail));
+        (match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
+         | Ok () -> Ok (after_clear ())
+         | Error error -> Error (Keeper_fs.durable_remove_error_to_string error))
+    in
+    (match with_lock ~lock_path:(store_lock_path directory) body with
+     | File_lock_eio.Lock_not_acquired error ->
+       Error (File_lock_eio.durable_lock_error_to_string error)
+     | File_lock_eio.Body_completed { value; release_error } ->
+       Option.iter
+         (fun error ->
+            Log.Keeper.error
+              ~keeper_name
+              "official-client session clear completed before claim-lock release failed: %s"
+              (File_lock_eio.durable_lock_error_to_string error))
+         release_error;
+       value)
+;;
+
+let clear_then ~base_path ~keeper_name after_clear =
+  clear_then_with_lock
+    ~with_lock:File_lock_eio.with_durable_lock_observed
+    ~base_path
+    ~keeper_name
+    after_clear
+;;
+
+module For_testing = struct
+  let clear_then_with_release_failure
+        ~release_failure
+        ~base_path
+        ~keeper_name
+        after_clear
+    =
+    clear_then_with_lock
+      ~with_lock:
+        (File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure
+           ~release_failure)
+      ~base_path
+      ~keeper_name
+      after_clear
+  ;;
+end
+
+let commit_if_input_recovery_current
+      ~base_path
+      ~keeper_name
+      ~(expected : Keeper_internal_error.official_client_recovery)
+      ~commit
+  =
+  with_store_lock ~base_path ~keeper_name (fun directory ->
+    let* current =
+      load_path (Filename.concat directory filename)
+      |> Result.map_error read_error_to_string
+    in
+    match current with
+    | Some
+        { runtime_id
+        ; phase = Recovery_required { recovery_id; failure = Input_rejected reason; _ }
+        ; _
+        }
+      when String.equal runtime_id expected.runtime_id
+           && String.equal recovery_id expected.recovery_id
+           && reason = expected.reason ->
+      commit ();
+      Ok Committed
+    | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ }
+    | Some
+        { phase =
+            Recovery_required
+              { failure =
+                  ( Pre_dispatch_failed | Transient_spawn_failed
+                  | Owner_stopped_turn | Retryable_turn_failed
+                  | Transport_interrupted | Protocol_failed | Provider_rejected
+                  | Input_rejected _ | Host_hook_failed | State_persistence_failed
+                  | Process_restarted | Vendor_session_full _ )
+              ; _
+              }
+        ; _
+        }
+    | None -> Ok Recovery_already_resolved)
+;;
+
+let transition ~base_path ~keeper_name ~expected next =
+  let* () = validate next in
+  with_store_lock ~base_path ~keeper_name (fun directory ->
+    let* current =
+      load_path (Filename.concat directory filename)
+      |> Result.map_error read_error_to_string
+    in
+    if Option.equal equal current expected
+    then save_path ~state_dir:directory next |> Result.map (fun () -> next)
+    else Error "official-client session changed before durable transition")
+;;
+
+let claim_error_to_string = function
+  | Invalid_runtime_id -> "official-client session runtime_id must not be empty"
+  | Input_recovery_required recovery ->
+    Keeper_internal_error.official_client_recovery_summary recovery
+  | Turn_count_exhausted ->
+    "settled official-client session turn count cannot be incremented"
+  | Start_incomplete ->
+    "official-client session has an incomplete start; refusing duplicate execution"
+  | Active_unsettled ->
+    "official-client session has an active unsettled attempt; refusing duplicate execution"
+  | Turn_already_inflight ->
+    "official-client session has an in-flight turn; refusing duplicate execution"
+;;
+
+let core_error_of_claim_error = function
+  | Input_recovery_required recovery ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Official_client_recovery_required recovery)
+  | (Invalid_runtime_id | Turn_count_exhausted | Start_incomplete
+    | Active_unsettled | Turn_already_inflight) as error ->
+    Agent_core.Error.Config
+      (Agent_core.Error.InvalidConfig
+         { field = "official_client_session.claim"
+         ; detail = claim_error_to_string error
+         })
+;;
+
+let plan_claim ~expected ~client_kind ~runtime_id =
+  let* () =
+    non_empty "runtime_id" runtime_id
+    |> Result.map_error (fun _ -> Invalid_runtime_id)
+  in
+  let* previous_settlement, turn_count, required_tool_surface_sha256 =
+    match expected with
+    | None -> Ok (None, 1, None)
+    | Some ({ phase = Ready; _ } as binding)
+      when binding.client_kind <> client_kind
+           || not (String.equal binding.runtime_id runtime_id) ->
+      Ok (None, 1, None)
+    | Some { phase = Ready; turn_count; _ } when turn_count < Int.max_int ->
+      Ok (None, turn_count + 1, None)
+    | Some ({ phase = Settled _; _ } as binding)
+      when binding.client_kind <> client_kind
+           || not (String.equal binding.runtime_id runtime_id) ->
+      Ok (None, 1, None)
+    | Some ({ phase = Recovery_required _; _ } as binding)
+      when binding.client_kind <> client_kind
+           || not (String.equal binding.runtime_id runtime_id) ->
+      Ok (None, 1, None)
+    (* A same-identity input rejection must keep its exact recovery cause.
+       Floor rejection and an effect-fenced retry both require explicit
+       resolution; neither is a generic provider rejection to supersede.
+       A changed client/runtime identity still follows the fresh plan above. *)
+    | Some
+        { phase =
+            Recovery_required
+              { failure = Input_rejected reason; recovery_id; _ }
+        ; _
+        } ->
+      Error (Input_recovery_required { runtime_id; recovery_id; reason })
+    | Some
+        { phase = Settled settlement
+        ; turn_count
+        ; tool_surface_sha256
+        ; _
+        }
+      when turn_count < Int.max_int ->
+      Ok (Some settlement, turn_count + 1, Some tool_surface_sha256)
+    | Some { phase = Ready | Settled _; _ } ->
+      Error Turn_count_exhausted
+    | Some { phase = Start _; _ } ->
+      Error Start_incomplete
+    | Some { phase = Active _; _ } ->
+      Error Active_unsettled
+    | Some { phase = Turn_inflight _; _ } ->
+      Error Turn_already_inflight
+    | Some
+        { phase =
+            Recovery_required
+              { failure =
+                  ( Pre_dispatch_failed | Transient_spawn_failed
+                  | Owner_stopped_turn | Retryable_turn_failed
+                  | Transport_interrupted | Protocol_failed | Provider_rejected
+                  | Host_hook_failed | State_persistence_failed
+                  | Process_restarted | Vendor_session_full _ )
+              ; _
+              }
+        ; _
+        } -> Ok (None, 1, None)
+  in
+  Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
+;;
+
+(* A settled session whose tool surface has moved is not resumable, and it was
+   not recoverable either: [Settled] is a healthy phase, so nothing marks it
+   [Recovery_required], and the resolve endpoint has no id to act on. Every
+   turn ended in config_error until an operator deleted the durable file.
+
+   [plan_claim] already treats a changed [client_kind] or [runtime_id] as a
+   fresh session rather than a refusal, on the same reasoning: what the prior
+   session settled against no longer describes this execution. A changed tool
+   surface is that same change, so it takes that same branch.
+
+   Deployments move this digest. Adding a tool, or editing a descriptor, is
+   enough -- which is why a refusal here strands every settled session on the
+   next release (#27992). *)
+let reconcile_tool_surface plan ~tool_surface_sha256 =
+  match plan.required_tool_surface_sha256 with
+  | None -> plan
+  | Some stored when String.equal stored tool_surface_sha256 -> plan
+  | Some _ ->
+    { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None }
+;;
+
+let validate_continuation ~(checkpoint : Keeper_semantic_execution.official_client_checkpoint)
+    ~expected ~client_kind ~runtime_id ~tool_surface_sha256 =
+  match expected with
+  | Some {phase=Settled settled; client_kind=stored_kind; runtime_id=stored_runtime;
+      tool_surface_sha256=stored_surface; _}
+    when client_kind = checkpoint.client_kind && stored_kind = checkpoint.client_kind
+      && runtime_id = checkpoint.runtime_id && stored_runtime = checkpoint.runtime_id
+      (* The turn is compared, not only the session. A per-Keeper session
+         outlives the turn that opened the Gate, so a queued operation running
+         meanwhile can settle the same session on a later turn. Matching on
+         session_id alone admitted that state and appended the resumed work
+         after turns it never saw. *)
+      && settled.session_id = checkpoint.session_id
+      && settled.turn_id = checkpoint.turn_id
+      && tool_surface_sha256 = checkpoint.tool_surface_sha256
+      && stored_surface = checkpoint.tool_surface_sha256 -> Ok ()
+  | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | None -> Error "original official-client Gate session is not resumable with this runtime and tool surface"
+
+
+let validate_completed_continuation
+    ~(checkpoint : Keeper_semantic_execution.official_client_checkpoint) ~expected =
+  match expected with
+  | Some {phase=Settled settled; client_kind; runtime_id; tool_surface_sha256; _}
+    when client_kind = checkpoint.client_kind
+      && runtime_id = checkpoint.runtime_id
+      && settled.session_id = checkpoint.session_id
+      && settled.turn_id <> checkpoint.turn_id
+      && tool_surface_sha256 = checkpoint.tool_surface_sha256 -> Ok ()
+  | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | None -> Error "official-client Gate input has not settled in a later turn of its original session"
+
+let validate_unchanged_context ~expected ~snapshot_sha256 =
+  match expected with
+  | Some {phase=Settled settled; context_frontier=Some frontier; _} ->
+    (match frontier.delivery, frontier.acknowledged_turn with
+     | Canonical_source_guard {snapshot_sha256=acknowledged_sha256}, Some receipt
+         when settled = receipt ->
+       if String.equal acknowledged_sha256 snapshot_sha256 then Ok ()
+       else Error Canonical_context_changed
+     | Canonical_source_guard _, (Some _ | None)
+     | (Prepared_start_context | Held_by_vendor_session), (Some _ | None) ->
+       Error Context_frontier_missing)
+  | Some {phase=Settled _; context_frontier=None; _}
+  | Some {phase=Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _; _}
+  | None -> Error Context_frontier_missing
+
+let held_context_for_resume plan ~expected =
+  match plan.previous_settlement, expected with
+  | Some resumed, Some {phase=Settled settled; context_frontier=Some ({acknowledged_turn=Some receipt; _} as frontier); _}
+      when resumed = settled && settled = receipt -> frontier.held_context
+  | Some _, Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | Some _, None | None, _ -> []
+
+let resume_host_turns plan ~expected =
+  match plan.previous_settlement, expected with
+  | Some resumed, Some { phase = Settled settled; host_turns; _ } when resumed = settled ->
+    host_turns
+  | Some _, Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ }
+  | Some _, None | None, _ -> Not_reported
+
+let reconcile_context plan ~expected ~snapshot_sha256 =
+  match plan.previous_settlement with
+  | None -> plan
+  | Some _ ->
+    (match validate_unchanged_context ~expected ~snapshot_sha256 with
+     | Ok () -> plan
+     | Error (Canonical_context_changed | Context_frontier_missing) ->
+       { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None })
+
+let context_admission_error_to_string = function
+  | Context_frontier_missing ->
+    "context_frontier_missing: retained vendor conversation has no canonical context provenance; unchanged history cannot be verified"
+  | Canonical_context_changed ->
+    "canonical_context_changed: retained vendor conversation cannot replace its canonical history or core instructions; original session and effects remain preserved"
+
+let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
+    ~tool_surface_sha256 ~updated_at =
+  let context_frontier = Option.map (fun frontier ->
+    {frontier with acknowledged_turn = None}) context_frontier in
+  let* () = validate_uuid "owner_epoch" owner_epoch in
+  let* plan =
+    plan_claim ~expected ~client_kind ~runtime_id
+    |> Result.map_error claim_error_to_string
+  in
+  let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
+  let plan = match context_frontier with
+    | Some {delivery=Canonical_source_guard {snapshot_sha256}; _} ->
+      reconcile_context plan ~expected ~snapshot_sha256
+    | Some {delivery=(Prepared_start_context | Held_by_vendor_session); _}
+    | None -> plan
+  in
+  let last_recovery_resolution =
+    Option.bind expected (fun binding -> binding.last_recovery_resolution)
+  in
+  let* claimed =
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected
+      { client_kind
+      ; runtime_id
+      ; phase = Start { owner_epoch; previous_settlement = plan.previous_settlement }
+      ; turn_count = plan.turn_count
+      ; host_turns = resume_host_turns plan ~expected
+      ; tool_surface_sha256
+      ; context_frontier
+      ; last_recovery_resolution
+      ; last_transient_release = Option.bind expected (fun binding -> binding.last_transient_release)
+      ; updated_at
+      }
+  in
+  (match expected with
+   | Some { phase = Recovery_required recovery; _ } ->
+     Log.Keeper.info
+       ~keeper_name
+       "auto-superseded official-client recovery=%s failure=%s with a fresh session owner_epoch=%s"
+       recovery.recovery_id
+       (recovery_failure_to_string recovery.failure)
+       owner_epoch
+   | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ }
+   | None -> ());
+  Ok claimed
+;;
+
+let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
+    ~tool_surface_sha256 ~updated_at =
+  claim_with_context_frontier ~context_frontier:None ~base_path ~keeper_name
+    ~expected ~client_kind ~owner_epoch ~runtime_id ~tool_surface_sha256 ~updated_at
+;;
+
+let open_session ~host_turns ~base_path ~keeper_name ~expected ~session_id ~updated_at =
+  match expected.phase with
+  | Start { owner_epoch; previous_settlement } ->
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected:(Some expected)
+      { expected with
+        phase = Active { owner_epoch; session_id; previous_settlement }
+      ; host_turns
+      ; updated_at
+      }
+  | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+    Error "official-client session can become active only from start"
+;;
+
+let mark_active ~base_path ~keeper_name ~expected ~session_id ~updated_at =
+  if reports_host_turns expected.client_kind
+  then Error "a Muse session becomes active only with the count its host reported"
+  else
+    open_session ~host_turns:expected.host_turns ~base_path ~keeper_name ~expected
+      ~session_id ~updated_at
+;;
+
+let mark_active_reported ~base_path ~keeper_name ~expected ~session_id ~reported_turns
+    ~updated_at =
+  open_session ~host_turns:(Reported reported_turns) ~base_path ~keeper_name ~expected
+    ~session_id ~updated_at
+;;
+
+let mark_turn_starting ~base_path ~keeper_name ~expected ~session_id ~updated_at =
+  match expected.phase with
+  | Active { owner_epoch; session_id = active_session_id; previous_settlement }
+    when String.equal active_session_id session_id ->
+    let* host_turns =
+      match expected.host_turns with
+      | Not_reported -> Ok Not_reported
+      | Reported turns -> Ok (Unobserved_after turns)
+      | Unobserved_after _ ->
+        Error "official-client turn cannot start before its host reported a count"
+    in
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected:(Some expected)
+      { expected with
+        phase =
+          Turn_inflight
+            { owner_epoch; session_id; turn_id = None; previous_settlement }
+      ; host_turns
+      ; updated_at
+      }
+  | Active _ -> Error "official-client session identity changed before turn start"
+  | Ready | Start _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+    Error "official-client turn can start only from an active session"
+;;
+
+let mark_turn_started ~base_path ~keeper_name ~expected ~session_id ~turn_id
+    ~turn_count ~updated_at =
+  match expected.phase with
+  | Turn_inflight
+      { owner_epoch
+      ; session_id = inflight_session_id
+      ; turn_id = None
+      ; previous_settlement
+      }
+    when String.equal inflight_session_id session_id ->
+    if turn_count < expected.turn_count
+    then Error "official-client observed turn count regressed after turn start"
+    else
+      transition
+        ~base_path
+        ~keeper_name
+        ~expected:(Some expected)
+        { expected with
+          phase =
+            Turn_inflight
+              { owner_epoch
+              ; session_id
+              ; turn_id = Some turn_id
+              ; previous_settlement
+              }
+        ; turn_count
+        ; updated_at
+        }
+  | Turn_inflight { turn_id = None; _ } ->
+    Error "official-client in-flight session identity changed after turn start"
+  | Turn_inflight { turn_id = Some _; _ } ->
+    Error "official-client in-flight turn already has an identity"
+  | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
+    Error "official-client turn identity can be recorded only for an in-flight turn"
+;;
+
+(* What a settlement records as held: the resumed frontier's set unchanged, or
+   the set this turn composed. *)
+type held_update =
+  | Keep_held
+  | Hold of held_context list
+
+(* Whether the host reported the settled turn's terminal as [completed]. *)
+type host_ending =
+  | Completed_reported
+  | Ending_unobserved
+
+let host_turns_after_settlement ~host_ending host_turns =
+  match host_ending, host_turns with
+  | Ending_unobserved, host_turns -> Ok host_turns
+  | Completed_reported, Not_reported -> Ok Not_reported
+  | Completed_reported, Unobserved_after turns when turns < Int.max_int ->
+    Ok (Reported (turns + 1))
+  | Completed_reported, Unobserved_after _ ->
+    Error "official-client host completed-turn count cannot be incremented"
+  | Completed_reported, Reported _ ->
+    Error "official-client turn completed without being dispatched"
+;;
+
+let settle_turn ~held_update ~host_ending ~base_path ~keeper_name ~expected ~session_id
+    ~turn_id ~updated_at =
+  match expected.phase with
+  | Turn_inflight
+      { session_id = inflight_session_id
+      ; turn_id = Some inflight_turn_id
+      ; previous_settlement = _
+      }
+    when String.equal inflight_session_id session_id
+         && String.equal inflight_turn_id turn_id ->
+    let* host_turns = host_turns_after_settlement ~host_ending expected.host_turns in
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected:(Some expected)
+      { expected with phase = Settled { session_id; turn_id }; host_turns; updated_at;
+        context_frontier = Option.map (fun frontier ->
+          { frontier with
+            acknowledged_turn = Some {session_id; turn_id}
+          ; held_context =
+              (match held_update with
+               | Keep_held -> frontier.held_context
+               | Hold held_context -> held_context) })
+          expected.context_frontier }
+  | Turn_inflight _ ->
+    Error "official-client terminal turn identity changed before settlement"
+  | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
+    Error "official-client session can settle only from an identified in-flight turn"
+;;
+
+let settle ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
+  settle_turn ~held_update:Keep_held ~host_ending:Ending_unobserved ~base_path ~keeper_name
+    ~expected ~session_id ~turn_id ~updated_at
+;;
+
+let settle_holding ~held_context ~base_path ~keeper_name ~expected ~session_id ~turn_id
+    ~updated_at =
+  settle_turn ~held_update:(Hold held_context) ~host_ending:Ending_unobserved ~base_path
+    ~keeper_name ~expected ~session_id ~turn_id ~updated_at
+;;
+
+let settle_completed_holding ~held_context ~base_path ~keeper_name ~expected ~session_id
+    ~turn_id ~updated_at =
+  settle_turn ~held_update:(Hold held_context) ~host_ending:Completed_reported ~base_path
+    ~keeper_name ~expected ~session_id ~turn_id ~updated_at
+;;
+
+let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
+    ~required_at =
+  let* () = non_empty "recovery detail" detail in
+  let* () =
+    match failure_disposition failure with
+    | Ambiguous | Fatal -> Ok ()
+    | Transient ->
+      Error "transient official-client failures must use release_transient"
+  in
+  let* owner_epoch, previous_settlement, observed_session_id, observed_turn_id =
+    match expected.phase with
+    | Start { owner_epoch; previous_settlement } ->
+      Ok (owner_epoch, previous_settlement, None, None)
+    | Active { owner_epoch; session_id; previous_settlement } ->
+      Ok (owner_epoch, previous_settlement, Some session_id, None)
+    | Turn_inflight { owner_epoch; session_id; turn_id; previous_settlement } ->
+      Ok (owner_epoch, previous_settlement, Some session_id, turn_id)
+    | Ready | Settled _ ->
+      Error "a settled official-client session cannot require claim recovery"
+    | Recovery_required _ ->
+      Error "official-client session already requires recovery"
+  in
+  let recovery =
+    { recovery_id = fresh_recovery_id ()
+    ; previous_settlement
+    ; observed_session_id
+    ; observed_turn_id
+    ; owner_epoch
+    ; failure
+    ; detail
+    ; required_at
+    }
+  in
+  let* () = validate_recovery recovery in
+  let host_turns =
+    match previous_settlement with
+    | None -> Not_reported
+    | Some _ -> expected.host_turns
+  in
+  transition
+    ~base_path
+    ~keeper_name
+    ~expected:(Some expected)
+    { expected with phase = Recovery_required recovery; host_turns; updated_at = required_at }
+;;
+
+let incomplete_claim = function
+  | Start { owner_epoch; previous_settlement } ->
+    Some (owner_epoch, previous_settlement)
+  | Active { owner_epoch; previous_settlement; _ }
+  | Turn_inflight { owner_epoch; previous_settlement; _ } ->
+    Some (owner_epoch, previous_settlement)
+  | Ready | Recovery_required _ | Settled _ -> None
+;;
+
+let restored_phase previous_settlement =
+  match previous_settlement with
+  | None -> Ready
+  | Some settlement -> Settled settlement
+;;
+
+(* The frontier to store when an incomplete claim goes back to
+   [previous_settlement]. A claim clears [acknowledged_turn] and only [settle]
+   sets it again, so a claim that ends without settling must restore it, or
+   the next [Canonical_source_guard] claim finds [Context_frontier_missing] and
+   opens a fresh conversation. The claim's frontier carries the digest
+   [previous_settlement] was acknowledged with: under [Canonical_source_guard]
+   a claim keeps a previous settlement only when [reconcile_context] found the
+   prepared snapshot equal to the acknowledged one. A guarded claim with
+   changed or unproven source plans [previous_settlement = None]. *)
+let frontier_restored_to previous_settlement frontier =
+  match frontier.delivery with
+  | Canonical_source_guard _ ->
+    (* The canonical snapshot was already held, but this claim's context
+       blocks may never have reached the client. Only a settled delivery can
+       certify those digests; the retry must be allowed to send them again. *)
+    { frontier with acknowledged_turn = previous_settlement; held_context = [] }
+  | Prepared_start_context | Held_by_vendor_session -> frontier
+;;
+
+(* The host's count once a claim ends unsettled with [failure]. Only a turn
+   this claim dispatched ([Turn_inflight]) changes it; before that the count
+   is the one the session opened with, or the one the claim inherited. A
+   retryable failed terminal is one the host reported, and Muse counts only
+   completed turns: [turnCount] is the completed-turn count of its session
+   view, and on 2026-10-19 and 2026-10-20 three resumes after a retryable
+   failure found the host one turn behind an ordinal that counted the failed
+   turn. A failure before dispatch reached no host turn. Any other release
+   keeps the ending unobserved: an owner stop can land after the host
+   finished the turn, as one did on 2026-10-20, whose resume reported one
+   turn more. *)
+let host_turns_after_release ~phase failure host_turns =
+  match phase with
+  | Ready | Start _ | Active _ | Recovery_required _ | Settled _ -> host_turns
+  | Turn_inflight _ ->
+    (match failure, host_turns with
+     | (Retryable_turn_failed | Pre_dispatch_failed | Transient_spawn_failed), Unobserved_after turns ->
+       Reported turns
+     | (Retryable_turn_failed | Pre_dispatch_failed | Transient_spawn_failed), (Not_reported | Reported _)
+     | ( ( Owner_stopped_turn | Transport_interrupted | Protocol_failed | Provider_rejected
+         | Input_rejected _ | Host_hook_failed | State_persistence_failed | Process_restarted
+         | Vendor_session_full _ )
+       , (Not_reported | Reported _ | Unobserved_after _) ) -> host_turns)
+;;
+
+let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
+  let* () =
+    match failure_disposition failure with
+    | Transient -> Ok ()
+    | Ambiguous | Fatal ->
+      Error "only transient official-client failures may release automatically"
+  in
+  let* owner_epoch, previous_settlement =
+    match incomplete_claim expected.phase with
+    | Some claim -> Ok claim
+    | None -> Error "official-client session has no incomplete claim to release"
+  in
+  let* previous_settlement, turn_count =
+    match failure, expected.phase with
+    | Retryable_turn_failed, Turn_inflight {session_id; turn_id=Some turn_id; _} ->
+      (* The host observed a terminal, reusable turn, not a successful answer.
+         Retain its durable history even when this was the first failed turn;
+         the release record preserves the failure while the caller returns it. *)
+      Ok (Some {session_id; turn_id}, expected.turn_count)
+    | Retryable_turn_failed,
+      ( Ready | Start _ | Active _ | Recovery_required _ | Settled _
+      | Turn_inflight { turn_id = None; _ } ) ->
+      Error "retryable official-client terminal requires an acknowledged turn identity"
+    | (Pre_dispatch_failed, _) | (Transient_spawn_failed, _) | (Owner_stopped_turn, _)
+    | (Transport_interrupted, _) | (Protocol_failed, _) | (Provider_rejected, _)
+    | (Input_rejected _, _) | (Host_hook_failed, _) | (State_persistence_failed, _)
+    | (Process_restarted, _) | (Vendor_session_full _, _) -> Ok (previous_settlement, max 0 (expected.turn_count - 1)) in
+  let* released =
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected:(Some expected)
+      { expected with
+        phase = restored_phase previous_settlement
+      ; context_frontier =
+          Option.map (frontier_restored_to previous_settlement) expected.context_frontier
+      ; turn_count
+      ; host_turns =
+          (match previous_settlement with
+           | None -> Not_reported
+           | Some _ ->
+             host_turns_after_release ~phase:expected.phase failure expected.host_turns)
+      ; last_transient_release = Some { failure; owner_epoch; released_at }
+      ; updated_at = released_at
+      }
+  in
+  Log.Keeper.info
+    ~keeper_name
+    "auto-released transient official-client claim owner_epoch=%s failure=%s"
+    owner_epoch
+    (recovery_failure_to_string failure);
+  Ok released
+;;
+
+let reconcile_process_restart ~base_path ~keeper_name ~expected
+    ~current_owner_epoch ~required_at =
+  let* () = validate_uuid "current_owner_epoch" current_owner_epoch in
+  match incomplete_claim expected.phase with
+  | None -> Ok expected
+  | Some (owner_epoch, _) when String.equal owner_epoch current_owner_epoch ->
+    Error "official-client claim is still owned by the current process epoch"
+  | Some (owner_epoch, _) ->
+    require_recovery
+      ~base_path
+      ~keeper_name
+      ~expected
+      ~failure:Process_restarted
+      ~detail:
+        (Printf.sprintf
+           "MASC process epoch changed while an official-client claim was incomplete: previous=%s current=%s"
+           owner_epoch
+           current_owner_epoch)
+      ~required_at
+;;
+
+let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
+    ~resolved_by ~resolved_at =
+  let open Result.Syntax in
+  let* () =
+    match non_empty "resolved_by" resolved_by with
+    | Ok () -> Ok ()
+    | Error _ -> Error Invalid_resolved_by
+  in
+  let* () =
+    if Float.is_finite resolved_at then Ok () else Error Invalid_resolved_at
+  in
+  let replay (current : t) =
+    match current.last_recovery_resolution with
+    | Some record when String.equal record.recovery_id recovery_id ->
+      if record.resolution = resolution
+      then Ok (current, Replayed)
+      else Error Resolution_conflict
+    | Some _ | None -> Error Recovery_not_required
+  in
+  let apply directory (current : t) (recovery : recovery_required) =
+    let* restored_settlement, turn_count =
+      match resolution with
+      | Retry_previous ->
+        (* The conversation is kept, so only the turn that failed is dropped and
+           the next claim re-attempts the same ordinal against it. *)
+        (* A full vendor session refuses the same resume again, so there is
+           no previous settlement worth returning to. *)
+        (match recovery.failure, recovery.previous_settlement with
+         | Vendor_session_full _, (Some _ | None) -> Error Retry_previous_unavailable
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
+             | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
+             | State_persistence_failed | Process_restarted )
+           , None ) -> Error Retry_previous_unavailable
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
+             | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
+             | State_persistence_failed | Process_restarted )
+           , Some settlement ) -> Ok (Some settlement, current.turn_count - 1))
+      | Restart_fresh ->
+        (* Restart abandons the conversation, so the ordinal restarts with it and
+           the next claim asks for ordinal 1 -- what a fresh provider conversation
+           reports. This is the same reset the automatic supersede already does
+           ([plan_claim]'s [Recovery_required] arm). Carrying
+           [current.turn_count - 1] across the discard left the operator's
+           explicit restart counting from a conversation that no longer exists,
+           and since the observed provider count became authoritative it also
+           made the next turn fail [mark_turn_started]'s regression guard. *)
+        Ok (None, 0)
+    in
+    (* A retry re-sends the failed turn's work, so it expects the host not to
+       have counted that turn: the count it reported when the failed claim
+       opened the session. A host that counted it already ran the work, and
+       the resume is refused rather than running it twice. A claim that opened
+       no session ([observed_session_id = None]) ran no turn, so the count it
+       inherited stands. *)
+    let host_turns =
+      match restored_settlement, recovery.observed_session_id, current.host_turns with
+      | None, (Some _ | None), (Not_reported | Reported _ | Unobserved_after _) ->
+        Not_reported
+      | Some _, Some _, Unobserved_after turns -> Reported turns
+      | Some _, Some _, ((Not_reported | Reported _) as host_turns)
+      | Some _, None, ((Not_reported | Reported _ | Unobserved_after _) as host_turns) ->
+        host_turns
+    in
+    let resolved =
+      { current with
+        phase = restored_phase restored_settlement
+        (* Retry_previous continues the settled conversation, so its frontier
+           acknowledgement comes back with it, as in [release_transient]. *)
+      ; context_frontier =
+          Option.map (frontier_restored_to restored_settlement) current.context_frontier
+      ; turn_count
+      ; host_turns
+      ; last_recovery_resolution =
+          Some
+            { recovery_id
+            ; failure = recovery.failure
+            ; resolution
+            ; resolved_by
+            ; resolved_at
+            }
+      ; updated_at = resolved_at
+      }
+    in
+    let* () =
+      match save_path ~state_dir:directory resolved with
+      | Ok () -> Ok ()
+      | Error detail -> Error (Store_unavailable detail)
+    in
+    Log.Keeper.info
+      ~keeper_name
+      "resolved official-client session recovery=%s actor=%s decision=%s"
+      recovery_id
+      resolved_by
+      (match resolution with
+       | Retry_previous -> "retry_previous"
+       | Restart_fresh -> "restart_fresh");
+    Ok (resolved, Applied)
+  in
+  match prepare_state_dir ~base_path ~keeper_name with
+  | Error detail -> Error (Store_unavailable detail)
+  | Ok directory ->
+    (match
+       File_lock_eio.with_durable_lock
+         ~lock_path:(store_lock_path directory)
+         (fun () ->
+      let* current =
+        match load_path (Filename.concat directory filename) with
+        | Ok current -> Ok current
+        | Error detail -> Error (Store_unavailable (read_error_to_string detail))
+      in
+      match current with
+      | None -> Error Session_missing
+      | Some current when not (equal current expected) ->
+        (match replay current with
+         | Ok replayed -> Ok replayed
+         | Error Recovery_not_required -> Error Session_changed
+         | Error
+             (( Invalid_resolved_by | Invalid_resolved_at | Session_missing
+              | Session_changed | Recovery_id_changed
+              | Retry_previous_unavailable | Resolution_conflict
+              | Store_unavailable _ ) as error) -> Error error)
+      | Some current ->
+        (match current.phase with
+         | Recovery_required recovery
+           when String.equal recovery.recovery_id recovery_id ->
+           apply directory current recovery
+         | Recovery_required _ -> Error Recovery_id_changed
+         | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ -> replay current))
+     with
+     | Ok result -> result
+     | Error detail ->
+       Error
+         (Store_unavailable
+            (File_lock_eio.durable_lock_error_to_string detail)))
+;;

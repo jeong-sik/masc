@@ -1,0 +1,291 @@
+{
+  "scope": "Actual controls and API serializers in Chromium; store projections and HTTP responses are fixtures. Not deployment evidence.",
+  "sourceHead": "89be7af1a92479ef58a86c1cec1c9f12d29d7c25",
+  "fixtureRole": "admin",
+  "fixtureSha256": "c52126978edae63959c11d166d5f64fa514ed45a891e8cb6ce0ea59405e9d0f5",
+  "originalSourceBase": "ae82a3b855cc5cb8c37a134ef01eebff35368bc3",
+  "mainSha256": "cd3540a90a3037f72aec5e6c6945449ee6a5bdef43e3f2a4532dbd73ff691759",
+  "fixedSha256": "b68cb5fec23ef834d8303040c26523c184648413eaa043135724ecc89053a756",
+  "sourceUnchanged": true,
+  "receipts": [
+    {
+      "variant": "main",
+      "paused": true,
+      "events": [
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "body": {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+              "name": "masc_resume",
+              "arguments": {},
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+              }
+            },
+            "id": "616ab0a7-65c4-47a3-b387-b8d07e987ab5"
+          },
+          "response": {
+            "jsonrpc": "2.0",
+            "id": "616ab0a7-65c4-47a3-b387-b8d07e987ab5",
+            "error": {
+              "code": -32601,
+              "message": "Unknown tool: masc_resume"
+            }
+          }
+        }
+      ],
+      "errors": [],
+      "toasts": [
+        {
+          "message": "Resume failed: Unknown tool: masc_resume",
+          "tone": "error"
+        }
+      ]
+    },
+    {
+      "variant": "fixed",
+      "paused": false,
+      "events": [
+        {
+          "method": "POST",
+          "path": "/api/v1/operator/action",
+          "body": {
+            "actor": "fixture-operator",
+            "action_type": "namespace_resume",
+            "target_type": "workspace",
+            "payload": {}
+          },
+          "response": {
+            "status": "pending_confirm",
+            "confirm_required": true,
+            "confirm_token": "fixture-confirm"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/operator/confirm",
+          "body": {
+            "actor": "fixture-operator",
+            "confirm_token": "fixture-confirm",
+            "decision": "confirm"
+          },
+          "response": {
+            "status": "ok"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/project-snapshot",
+          "body": null,
+          "response": {
+            "root": {
+              "status": {
+                "paused": false
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "body": {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+              "name": "masc_pause_status",
+              "arguments": {},
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+              }
+            },
+            "id": "9a980b74-3862-4ca7-8a30-2b629f36c6df"
+          },
+          "response": {
+            "jsonrpc": "2.0",
+            "id": "9a980b74-3862-4ca7-8a30-2b629f36c6df",
+            "result": {
+              "isError": false,
+              "content": [
+                {
+                  "type": "text",
+                  "text": "{\"ok\":true,\"initializing\":false,\"paused\":false}"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "errors": [],
+      "toasts": [
+        {
+          "message": "Namespace resumed.",
+          "tone": "success"
+        }
+      ]
+    },
+    {
+      "variant": "fixed-readback-error",
+      "paused": false,
+      "events": [
+        {
+          "method": "POST",
+          "path": "/api/v1/operator/action",
+          "body": {
+            "actor": "fixture-operator",
+            "action_type": "namespace_resume",
+            "target_type": "workspace",
+            "payload": {}
+          },
+          "response": {
+            "status": "pending_confirm",
+            "confirm_required": true,
+            "confirm_token": "fixture-confirm"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/operator/confirm",
+          "body": {
+            "actor": "fixture-operator",
+            "confirm_token": "fixture-confirm",
+            "decision": "confirm"
+          },
+          "response": {
+            "status": "ok"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/project-snapshot",
+          "body": null,
+          "response": {
+            "root": {
+              "status": {
+                "paused": false
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "body": {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+              "name": "masc_pause_status",
+              "arguments": {},
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+              }
+            },
+            "id": "f14be4c9-5ccb-4328-a959-d3fb724517ca"
+          },
+          "response": {
+            "jsonrpc": "2.0",
+            "id": "f14be4c9-5ccb-4328-a959-d3fb724517ca",
+            "error": {
+              "code": -32603,
+              "message": "Fixture pause status unavailable"
+            }
+          }
+        }
+      ],
+      "errors": [],
+      "toasts": [
+        {
+          "message": "Resume failed: Fixture pause status unavailable",
+          "tone": "error"
+        }
+      ]
+    },
+    {
+      "variant": "fixed-readback-mismatch",
+      "paused": true,
+      "events": [
+        {
+          "method": "POST",
+          "path": "/api/v1/operator/action",
+          "body": {
+            "actor": "fixture-operator",
+            "action_type": "namespace_resume",
+            "target_type": "workspace",
+            "payload": {}
+          },
+          "response": {
+            "status": "pending_confirm",
+            "confirm_required": true,
+            "confirm_token": "fixture-confirm"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/operator/confirm",
+          "body": {
+            "actor": "fixture-operator",
+            "confirm_token": "fixture-confirm",
+            "decision": "confirm"
+          },
+          "response": {
+            "status": "ok"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/project-snapshot",
+          "body": null,
+          "response": {
+            "root": {
+              "status": {
+                "paused": false
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "body": {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+              "name": "masc_pause_status",
+              "arguments": {},
+              "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {}
+              }
+            },
+            "id": "5f8de734-cacf-4817-a95c-87b3d634f077"
+          },
+          "response": {
+            "jsonrpc": "2.0",
+            "id": "5f8de734-cacf-4817-a95c-87b3d634f077",
+            "result": {
+              "isError": false,
+              "content": [
+                {
+                  "type": "text",
+                  "text": "{\"ok\":true,\"initializing\":false,\"paused\":true}"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "errors": [],
+      "toasts": [
+        {
+          "message": "Resume sent; namespace state is paused.",
+          "tone": "warning"
+        }
+      ]
+    }
+  ]
+}

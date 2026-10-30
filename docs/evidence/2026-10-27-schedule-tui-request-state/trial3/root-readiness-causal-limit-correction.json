@@ -1,0 +1,19 @@
+{
+  "recorded_unix": 1793056359.929596,
+  "correction_to": "root-observer-stop-reason.json",
+  "original_unchanged": true,
+  "scope": "Source/closed-log interpretation correction; not a new runtime execution or product verdict",
+  "reviewer": "schedule_multimodel_review source investigation",
+  "facts": {
+    "first_local_keeper_admission_observed_ns": "113381416",
+    "first_input_received_observed_ns": "113522958",
+    "http_refresh_finished_later": true
+  },
+  "correction": "Later HTTP roster/full refresh completion does not establish an empty palette when keyboard was sent: the matching-workspace local Keeper admission preceded the first input. Existing post-apply routine observation was not enabled, so exact apply completion and the cause of the absent target request remain unproven. No product input-loss or roster-empty diagnosis.",
+  "next_observation": "Use existing TUI-only routine level info for exact same-capture keepers requested/accepted/applied plus terminal decoder/capabilities ready, then retain actual target request as the outcome. No arbitrary delay or keyboard replay.",
+  "log_identity": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/workspace/.masc/logs/masc-tui-67598.log",
+    "bytes": 331411,
+    "sha256": "93f5183a8892530bebb3d949a32238140e83838f80571d9f886f2d267fedabbb"
+  }
+}

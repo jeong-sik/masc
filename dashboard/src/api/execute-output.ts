@@ -1,0 +1,132 @@
+import { authHeaders, fetchControlPlane } from './core'
+
+export interface ExecuteOutputLine {
+  /** This line's number in the keeper's output log. */
+  seq?: number
+  stream_id?: number | null
+  task_id?: string | null
+  ts_ms?: number
+  stream: 'stdout' | 'stderr' | 'cmd' | 'system' | string
+  text: string
+  ansi?: boolean
+}
+
+export interface ExecuteOutputActiveStream {
+  stream_id: number
+  task_id: string | null
+  command: string
+  started_at: number
+}
+
+export interface ExecuteOutputStreamEvent {
+  type: 'snapshot' | 'no_task' | 'line' | 'task_opened' | 'task_closed' | 'gap' | 'error' | string
+  kind?: string
+  keeper: string
+  keeper_id?: string
+  task_id?: string | null
+  task_count?: number
+  lines?: ExecuteOutputLine[]
+  /** Retained lines omitted from this snapshot by the view's line limit. */
+  lines_omitted?: number
+  line?: ExecuteOutputLine
+  /** Log number of a `line`, `task_opened` or `task_closed` event. */
+  seq?: number
+  /** `snapshot`: newest log number the snapshot covers; live events continue after it. */
+  last_seq?: number
+  /** Earlier events have already left the bounded server log when this exceeds 1. */
+  first_retained_seq?: number
+  active_count?: number
+  active_streams?: ExecuteOutputActiveStream[]
+  stream_id?: number | null
+  /** `gap`: log numbers this viewer missed because the server no longer keeps them. */
+  missing_from_seq?: number
+  missing_to_seq?: number
+  missing_count?: number
+  since_stdout?: number
+  since_stderr?: number
+  stdout_since?: string
+  stderr_since?: string
+  closed?: boolean
+  status?: unknown
+  bytes_dropped_stdout?: number
+  bytes_dropped_stderr?: number
+  message?: string
+  generated_at?: number
+}
+
+function parseSseFrames(chunk: string): { frames: string[]; rest: string } {
+  const normalized = chunk.replace(/\r\n/g, '\n')
+  const frames: string[] = []
+  let start = 0
+  for (;;) {
+    const split = normalized.indexOf('\n\n', start)
+    if (split < 0) return { frames, rest: normalized.slice(start) }
+    frames.push(normalized.slice(start, split))
+    start = split + 2
+  }
+}
+
+export function parseExecuteOutputSseFrame(frame: string): ExecuteOutputStreamEvent | null {
+  const dataLines = frame
+    .split('\n')
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trimStart())
+  if (dataLines.length === 0) return null
+  try {
+    return JSON.parse(dataLines.join('\n')) as ExecuteOutputStreamEvent
+  } catch {
+    return null
+  }
+}
+
+export async function streamExecuteOutput(
+  keeperName: string,
+  {
+    signal,
+    onEvent,
+  }: {
+    signal?: AbortSignal
+    onEvent: (event: ExecuteOutputStreamEvent) => void
+  },
+): Promise<void> {
+  const keeper = keeperName.trim()
+  if (!keeper) throw new Error('keeper name is required')
+  const res = await fetchControlPlane(`/api/dashboard/execute-output/${encodeURIComponent(keeper)}`, {
+    headers: {
+      ...authHeaders(),
+      Accept: 'text/event-stream',
+    },
+    signal,
+  })
+
+  if (!res.ok) {
+    const raw = await res.text()
+    throw new Error(raw || `Execute output stream failed (${res.status})`)
+  }
+  if (!res.body) throw new Error('Execute output stream response body unavailable')
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+      const { frames, rest } = parseSseFrames(buffer)
+      buffer = rest
+      for (const frame of frames) {
+        const event = parseExecuteOutputSseFrame(frame)
+        if (event) onEvent(event)
+      }
+      if (done) break
+    }
+    const tail = buffer.trim()
+    if (tail) {
+      const event = parseExecuteOutputSseFrame(tail)
+      if (event) onEvent(event)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}

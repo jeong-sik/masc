@@ -1,0 +1,517 @@
+{
+  "elapsed_report_start_s": 31.767281333,
+  "allocated_bytes_estimate_delta": 127685600000,
+  "major_bytes_estimate_delta": 109614400000,
+  "dropped_samples_delta": 0,
+  "same_runtime": true,
+  "top_site_deltas": {
+    "allocated": [
+      {
+        "bytes_delta": 15360799992,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.latest in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 315, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 12891200000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.latest in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 315, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 10656000000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 480, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 621, characters 19-54\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1632, characters 12-36\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1590, characters 25-42\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry in file \"lib/fs_compat/fs_compat.ml\", lines 1568-1593, characters 6-12\n"
+      },
+      {
+        "bytes_delta": 10414400000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 480, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.verify_record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 508, characters 16-49\nRaised by primitive operation at Masc__Lane_addon_store.settle_verified_record in file \"lib/lane_addon/lane_addon_store.ml\", line 518, characters 14-52\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 622, characters 18-92\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1632, characters 12-36\n"
+      },
+      {
+        "bytes_delta": 8232800000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 310, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 6931200000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 310, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 6758400000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 627, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_record.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 633, characters 11-101\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 593, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1273, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1347-1349, characters 2-71\n"
+      },
+      {
+        "bytes_delta": 6250400000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 308, characters 11-44\n"
+      },
+      {
+        "bytes_delta": 5442399992,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 308, characters 11-44\n"
+      },
+      {
+        "bytes_delta": 3109600000,
+        "callstack": "Raised by primitive operation at Dated_jsonl.recent_entry_of_line in file \"lib/dated_jsonl/dated_jsonl.ml\", line 611, characters 8-36\nRaised by primitive operation at Dated_jsonl.scan_step.decode_newest_first.(fun) in file \"lib/dated_jsonl/dated_jsonl.ml\", line 643, characters 54-65\nRaised by primitive operation at Dated_jsonl.scan_step in file \"lib/dated_jsonl/dated_jsonl.ml\", line 681, characters 10-52\nRaised by primitive operation at Dated_jsonl.off_fiber in file \"lib/dated_jsonl/dated_jsonl.ml\" (inlined), line 555, characters 18-55\nCalled from Dated_jsonl.find_latest_decoded_from_channel.drive in file \"lib/dated_jsonl/dated_jsonl.ml\", line 694, characters 6-69\nRaised by primitive operation at Dated_jsonl.find_latest_entry_in_file_result.(fun) in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 718-721, characters 11-14\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_days in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 1084-1086, characters 8-11\n"
+      },
+      {
+        "bytes_delta": 2897600008,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 177, characters 16-60\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 266, characters 13-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", lines 258-268, characters 18-56\n"
+      },
+      {
+        "bytes_delta": 2361600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 177, characters 16-60\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 266, characters 13-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", lines 258-268, characters 18-56\n"
+      },
+      {
+        "bytes_delta": 727200000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 177, characters 16-60\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 249, characters 11-67\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 392, characters 14-59\n"
+      },
+      {
+        "bytes_delta": 609600008,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 177, characters 16-60\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 249, characters 11-67\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 392, characters 14-59\n"
+      },
+      {
+        "bytes_delta": 540800000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.recover_retries in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 327, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 500800000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.recover_retries in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 327, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 452800000,
+        "callstack": "Raised by primitive operation at Dated_jsonl.scan_step in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 669-671, characters 10-85\nRaised by primitive operation at Dated_jsonl.off_fiber in file \"lib/dated_jsonl/dated_jsonl.ml\" (inlined), line 555, characters 18-55\nCalled from Dated_jsonl.find_latest_decoded_from_channel.drive in file \"lib/dated_jsonl/dated_jsonl.ml\", line 694, characters 6-69\nRaised by primitive operation at Dated_jsonl.find_latest_entry_in_file_result.(fun) in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 718-721, characters 11-14\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_days in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 1084-1086, characters 8-11\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_months in file \"lib/dated_jsonl/dated_jsonl.ml\", line 1097, characters 19-45\nRaised by primitive operation at Keeper_approval__Audit.read_recent.(fun) in file \"lib/keeper_approval/audit.ml\", line 569, characters 14-63\n"
+      },
+      {
+        "bytes_delta": 442400008,
+        "callstack": "Raised by primitive operation at Dated_jsonl.scan_step in file \"lib/dated_jsonl/dated_jsonl.ml\", line 671, characters 12-85\nRaised by primitive operation at Dated_jsonl.off_fiber in file \"lib/dated_jsonl/dated_jsonl.ml\" (inlined), line 555, characters 18-55\nCalled from Dated_jsonl.find_latest_decoded_from_channel.drive in file \"lib/dated_jsonl/dated_jsonl.ml\", line 694, characters 6-69\nRaised by primitive operation at Dated_jsonl.find_latest_entry_in_file_result.(fun) in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 718-721, characters 11-14\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_days in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 1084-1086, characters 8-11\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_months in file \"lib/dated_jsonl/dated_jsonl.ml\", line 1097, characters 19-45\nRaised by primitive operation at Keeper_approval__Audit.read_recent.(fun) in file \"lib/keeper_approval/audit.ml\", line 569, characters 14-63\n"
+      },
+      {
+        "bytes_delta": 426400000,
+        "callstack": "Raised by primitive operation at Dated_jsonl.scan_step in file \"lib/dated_jsonl/dated_jsonl.ml\", line 654, characters 16-50\nRaised by primitive operation at Dated_jsonl.off_fiber in file \"lib/dated_jsonl/dated_jsonl.ml\" (inlined), line 555, characters 18-55\nCalled from Dated_jsonl.find_latest_decoded_from_channel.drive in file \"lib/dated_jsonl/dated_jsonl.ml\", line 694, characters 6-69\nRaised by primitive operation at Dated_jsonl.find_latest_entry_in_file_result.(fun) in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 718-721, characters 11-14\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_days in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 1084-1086, characters 8-11\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_months in file \"lib/dated_jsonl/dated_jsonl.ml\", line 1097, characters 19-45\nRaised by primitive operation at Keeper_approval__Audit.read_recent.(fun) in file \"lib/keeper_approval/audit.ml\", line 569, characters 14-63\n"
+      },
+      {
+        "bytes_delta": 418400000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 382, characters 15-59\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 398, characters 9-48\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 209, characters 6-70\n"
+      },
+      {
+        "bytes_delta": 359199992,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 382, characters 15-59\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 398, characters 9-48\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 209, characters 6-70\n"
+      },
+      {
+        "bytes_delta": 324000000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 627, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_inventory_with.(fun).read in file \"lib/lane_addon/lane_addon_store.ml\", line 740, characters 24-92\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 593, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1273, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1347-1349, characters 2-71\n"
+      },
+      {
+        "bytes_delta": 268800000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 372, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 398, characters 9-48\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 209, characters 6-70\n"
+      },
+      {
+        "bytes_delta": 249600000,
+        "callstack": "Raised by primitive operation at Masc__Keeper_librarian_durable_request.of_json in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 253, characters 19-64\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.restore in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 260, characters 15-44\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 201, characters 16-45\n"
+      },
+      {
+        "bytes_delta": 136800000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n"
+      },
+      {
+        "bytes_delta": 125600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n"
+      },
+      {
+        "bytes_delta": 112000000,
+        "callstack": "Raised by primitive operation at Masc__Keeper_librarian_durable_request.parse in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 24, characters 25-56\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.of_json in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 251, characters 19-36\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.restore in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 260, characters 15-44\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n"
+      },
+      {
+        "bytes_delta": 104800000,
+        "callstack": "Raised by primitive operation at Masc__Keeper_librarian_durable_request.of_json in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 253, characters 19-64\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.restore in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 260, characters 15-44\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n"
+      },
+      {
+        "bytes_delta": 0,
+        "callstack": "Raised by primitive operation at Masc__Keeper_chat_store.provenance_of_line in file \"lib/keeper/keeper_chat_store.ml\", line 619, characters 10-38\nRaised by primitive operation at Masc__Keeper_chat_store.provenance_index_of_existing.(fun) in file \"lib/keeper/keeper_chat_store.ml\", line 830, characters 30-66\nRaised by primitive operation at Masc__Keeper_chat_store.provenance_index_of_existing in file \"lib/keeper/keeper_chat_store.ml\", lines 820-841, characters 2-14\nRaised by primitive operation at Masc__Keeper_chat_store.append_lines_once.(fun) in file \"lib/keeper/keeper_chat_store.ml\", line 1386, characters 20-59\nRaised by primitive operation at Fs_compat.update_private_file_durable_locked_with_io.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 4611, characters 32-47\nRaised by primitive operation at Fs_compat.private_jsonl_with_fd_outcome in file \"lib/fs_compat/fs_compat.ml\", line 3126, characters 8-12\n"
+      },
+      {
+        "bytes_delta": 0,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 627, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.fold_tool_request_owner_inventory_all.blocking.(fun).scop in file \"lib/lane_addon/lane_addon_store.ml\", line 779, characters 36-131\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1273, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1347-1349, characters 2-71\nRaised by primitive operation at Masc__Lane_addon_store.fold_tool_request_owner_inventory_all.blocking.(fun).scop in file \"lib/lane_addon/lane_addon_store.ml\", lines 767-782, characters 30-35\n"
+      }
+    ],
+    "major": [
+      {
+        "bytes_delta": 15344799992,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.latest in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 315, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 12888000000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.latest in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 315, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 10655200000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 480, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 621, characters 19-54\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1632, characters 12-36\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1590, characters 25-42\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry in file \"lib/fs_compat/fs_compat.ml\", lines 1568-1593, characters 6-12\n"
+      },
+      {
+        "bytes_delta": 10413600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 480, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.verify_record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 508, characters 16-49\nRaised by primitive operation at Masc__Lane_addon_store.settle_verified_record in file \"lib/lane_addon/lane_addon_store.ml\", line 518, characters 14-52\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 622, characters 18-92\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1632, characters 12-36\n"
+      },
+      {
+        "bytes_delta": 8223999992,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 310, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 6926400000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 310, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 6683200000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 627, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_record.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 633, characters 11-101\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 593, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1273, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1347-1349, characters 2-71\n"
+      },
+      {
+        "bytes_delta": 6245600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 308, characters 11-44\n"
+      },
+      {
+        "bytes_delta": 5441599992,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 308, characters 11-44\n"
+      },
+      {
+        "bytes_delta": 2896000008,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 177, characters 16-60\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 266, characters 13-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", lines 258-268, characters 18-56\n"
+      },
+      {
+        "bytes_delta": 2361600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 177, characters 16-60\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 266, characters 13-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", lines 258-268, characters 18-56\n"
+      },
+      {
+        "bytes_delta": 727200000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 177, characters 16-60\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 249, characters 11-67\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 392, characters 14-59\n"
+      },
+      {
+        "bytes_delta": 608800008,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 177, characters 16-60\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 249, characters 11-67\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 392, characters 14-59\n"
+      },
+      {
+        "bytes_delta": 537600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.recover_retries in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 327, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 498400000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 257, characters 23-69\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.recover_retries in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 327, characters 18-51\n"
+      },
+      {
+        "bytes_delta": 442400008,
+        "callstack": "Raised by primitive operation at Dated_jsonl.scan_step in file \"lib/dated_jsonl/dated_jsonl.ml\", line 671, characters 12-85\nRaised by primitive operation at Dated_jsonl.off_fiber in file \"lib/dated_jsonl/dated_jsonl.ml\" (inlined), line 555, characters 18-55\nCalled from Dated_jsonl.find_latest_decoded_from_channel.drive in file \"lib/dated_jsonl/dated_jsonl.ml\", line 694, characters 6-69\nRaised by primitive operation at Dated_jsonl.find_latest_entry_in_file_result.(fun) in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 718-721, characters 11-14\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_days in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 1084-1086, characters 8-11\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_months in file \"lib/dated_jsonl/dated_jsonl.ml\", line 1097, characters 19-45\nRaised by primitive operation at Keeper_approval__Audit.read_recent.(fun) in file \"lib/keeper_approval/audit.ml\", line 569, characters 14-63\n"
+      },
+      {
+        "bytes_delta": 426400000,
+        "callstack": "Raised by primitive operation at Dated_jsonl.scan_step in file \"lib/dated_jsonl/dated_jsonl.ml\", line 654, characters 16-50\nRaised by primitive operation at Dated_jsonl.off_fiber in file \"lib/dated_jsonl/dated_jsonl.ml\" (inlined), line 555, characters 18-55\nCalled from Dated_jsonl.find_latest_decoded_from_channel.drive in file \"lib/dated_jsonl/dated_jsonl.ml\", line 694, characters 6-69\nRaised by primitive operation at Dated_jsonl.find_latest_entry_in_file_result.(fun) in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 718-721, characters 11-14\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_days in file \"lib/dated_jsonl/dated_jsonl.ml\", lines 1084-1086, characters 8-11\nRaised by primitive operation at Dated_jsonl.find_latest_entry_result.visit_months in file \"lib/dated_jsonl/dated_jsonl.ml\", line 1097, characters 19-45\nRaised by primitive operation at Keeper_approval__Audit.read_recent.(fun) in file \"lib/keeper_approval/audit.ml\", line 569, characters 14-63\n"
+      },
+      {
+        "bytes_delta": 418400000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 382, characters 15-59\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 398, characters 9-48\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 209, characters 6-70\n"
+      },
+      {
+        "bytes_delta": 359199992,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 67, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 382, characters 15-59\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 398, characters 9-48\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 209, characters 6-70\n"
+      },
+      {
+        "bytes_delta": 299200000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 386, characters 19-91\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 398, characters 9-48\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 209, characters 6-70\n"
+      },
+      {
+        "bytes_delta": 281600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 627, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_inventory_with.(fun).read in file \"lib/lane_addon/lane_addon_store.ml\", line 740, characters 24-92\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 593, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1273, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1347-1349, characters 2-71\n"
+      },
+      {
+        "bytes_delta": 268800000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 372, characters 22-111\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 398, characters 9-48\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 209, characters 6-70\n"
+      },
+      {
+        "bytes_delta": 261600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 386, characters 19-91\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.validate_root_preparation in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 398, characters 9-48\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 209, characters 6-70\n"
+      },
+      {
+        "bytes_delta": 219200000,
+        "callstack": "Raised by primitive operation at Masc__Keeper_librarian_durable_request.parse in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 24, characters 25-56\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.of_json in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 251, characters 19-36\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.restore in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 260, characters 15-44\nRaised by primitive operation at Masc__Keeper_librarian_durable_commit.validate in file \"lib/keeper/keeper_librarian_durable_commit.ml\", line 201, characters 16-45\n"
+      },
+      {
+        "bytes_delta": 136800000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n"
+      },
+      {
+        "bytes_delta": 125600000,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 167, characters 22-47\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n"
+      },
+      {
+        "bytes_delta": 110400000,
+        "callstack": "Raised by primitive operation at Masc__Keeper_librarian_durable_request.parse in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 24, characters 25-56\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.of_json in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 251, characters 19-36\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.restore in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 260, characters 15-44\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n"
+      },
+      {
+        "bytes_delta": 99200000,
+        "callstack": "Raised by primitive operation at Masc__Keeper_librarian_durable_request.of_json in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 253, characters 19-64\nRaised by primitive operation at Masc__Keeper_librarian_durable_request.restore in file \"lib/keeper/keeper_librarian_durable_request.ml\", line 260, characters 15-44\nRaised by primitive operation at Thread.create.(fun) in file \"thread.ml\", line 48, characters 8-14\n"
+      },
+      {
+        "bytes_delta": 0,
+        "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 627, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 30, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.fold_tool_request_owner_inventory_all.blocking.(fun).scop in file \"lib/lane_addon/lane_addon_store.ml\", line 779, characters 36-131\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1273, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1347-1349, characters 2-71\nRaised by primitive operation at Masc__Lane_addon_store.fold_tool_request_owner_inventory_all.blocking.(fun).scop in file \"lib/lane_addon/lane_addon_store.ml\", lines 767-782, characters 30-35\n"
+      },
+      {
+        "bytes_delta": 0,
+        "callstack": "Raised by primitive operation at Masc__Keeper_chat_store.provenance_of_line in file \"lib/keeper/keeper_chat_store.ml\", line 619, characters 10-38\nRaised by primitive operation at Masc__Keeper_chat_store.provenance_index_of_existing.(fun) in file \"lib/keeper/keeper_chat_store.ml\", line 830, characters 30-66\nRaised by primitive operation at Masc__Keeper_chat_store.provenance_index_of_existing in file \"lib/keeper/keeper_chat_store.ml\", lines 820-841, characters 2-14\nRaised by primitive operation at Masc__Keeper_chat_store.append_lines_once.(fun) in file \"lib/keeper/keeper_chat_store.ml\", line 1386, characters 20-59\nRaised by primitive operation at Fs_compat.update_private_file_durable_locked_with_io.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 4611, characters 32-47\nRaised by primitive operation at Fs_compat.private_jsonl_with_fd_outcome in file \"lib/fs_compat/fs_compat.ml\", line 3126, characters 8-12\n"
+      }
+    ]
+  },
+  "capture_scope": "Same live runtime, read-only GETs; full private health retained locally; this health projection omits operational details. Allocations are Memprof estimates, not exclusive cause, retained memory or server speedup.",
+  "sampling_rate": 1e-05,
+  "historical_dropped_samples_before": 4270314,
+  "health_observations": [
+    {
+      "index": 0,
+      "started_perf_ns": 180025531148083,
+      "finished_perf_ns": 180025666449916,
+      "raw_health_sha256": "b27525be3fb83e7bac29095cd2d6e4d63632e8b1dd35bd0eb6c1009b3bd54bfa",
+      "build": {
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "runtime_instance_id": "01a1782b-4666-7000-9d6b-8409d8081e62"
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 95388,
+        "resident_bytes": 21362966528,
+        "source": "mach_task_info",
+        "approximate": false
+      },
+      "scheduler": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 600,
+          "p50_ms": 13.536041999999998,
+          "p95_ms": 296.485541,
+          "p99_ms": 710.082667,
+          "max_ms": 1115.090833,
+          "mean_ms": 65.97113918833337,
+          "stalls": 2,
+          "over_50ms_count": 176,
+          "over_200ms_count": 56
+        }
+      },
+      "keeper_fibers": 25
+    },
+    {
+      "index": 1,
+      "started_perf_ns": 180032362270916,
+      "finished_perf_ns": 180032374809083,
+      "raw_health_sha256": "df396f2cb89b3f992fc567fbf215acf29595e005c62b53ccdfe674a328f2c736",
+      "build": {
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "runtime_instance_id": "01a1782b-4666-7000-9d6b-8409d8081e62"
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 95388,
+        "resident_bytes": 18424840192,
+        "source": "mach_task_info",
+        "approximate": false
+      },
+      "scheduler": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 600,
+          "p50_ms": 12.78349999999999,
+          "p95_ms": 310.94470900000005,
+          "p99_ms": 814.8535410000001,
+          "max_ms": 1115.090833,
+          "mean_ms": 69.03620474000003,
+          "stalls": 3,
+          "over_50ms_count": 179,
+          "over_200ms_count": 59
+        }
+      },
+      "keeper_fibers": 25
+    },
+    {
+      "index": 2,
+      "started_perf_ns": 180037379975583,
+      "finished_perf_ns": 180037382629833,
+      "raw_health_sha256": "7cc59c9ffb4a55bfadcf78ecce9c305590f58aeffcbf5bb0c8cf9179c82acffb",
+      "build": {
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "runtime_instance_id": "01a1782b-4666-7000-9d6b-8409d8081e62"
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 95388,
+        "resident_bytes": 21260222464,
+        "source": "mach_task_info",
+        "approximate": false
+      },
+      "scheduler": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 600,
+          "p50_ms": 9.326792000000001,
+          "p95_ms": 316.14308300000005,
+          "p99_ms": 814.8535410000001,
+          "max_ms": 1115.090833,
+          "mean_ms": 68.54083488500004,
+          "stalls": 3,
+          "over_50ms_count": 176,
+          "over_200ms_count": 60
+        }
+      },
+      "keeper_fibers": 25
+    },
+    {
+      "index": 3,
+      "started_perf_ns": 180042389891208,
+      "finished_perf_ns": 180042392363083,
+      "raw_health_sha256": "732199547a279d4c30dcfe9f6665aa8fbfd723f20b08751af975e67ee6677646",
+      "build": {
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "runtime_instance_id": "01a1782b-4666-7000-9d6b-8409d8081e62"
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 95388,
+        "resident_bytes": 18501910528,
+        "source": "mach_task_info",
+        "approximate": false
+      },
+      "scheduler": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 600,
+          "p50_ms": 6.069958000000001,
+          "p95_ms": 310.94470900000005,
+          "p99_ms": 814.8535410000001,
+          "max_ms": 1115.090833,
+          "mean_ms": 64.85835530333338,
+          "stalls": 3,
+          "over_50ms_count": 163,
+          "over_200ms_count": 57
+        }
+      },
+      "keeper_fibers": 25
+    },
+    {
+      "index": 4,
+      "started_perf_ns": 180047398591791,
+      "finished_perf_ns": 180047416221083,
+      "raw_health_sha256": "ed93ed84625a94279e81982c83cd2d8101b44e3f743e2dfba64253c97ecfde81",
+      "build": {
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "runtime_instance_id": "01a1782b-4666-7000-9d6b-8409d8081e62"
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 95388,
+        "resident_bytes": 20029210624,
+        "source": "mach_task_info",
+        "approximate": false
+      },
+      "scheduler": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 600,
+          "p50_ms": 4.11199999999999,
+          "p95_ms": 296.677875,
+          "p99_ms": 710.082667,
+          "max_ms": 1115.090833,
+          "mean_ms": 62.2876644633334,
+          "stalls": 3,
+          "over_50ms_count": 157,
+          "over_200ms_count": 56
+        }
+      },
+      "keeper_fibers": 25
+    },
+    {
+      "index": 5,
+      "started_perf_ns": 180052420741541,
+      "finished_perf_ns": 180052423338750,
+      "raw_health_sha256": "56d144cc39c79a19914f5ee1fa8ab4bf5fe262c8e69e69bca00cfca4792c3868",
+      "build": {
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "runtime_instance_id": "01a1782b-4666-7000-9d6b-8409d8081e62"
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 95388,
+        "resident_bytes": 22770925568,
+        "source": "mach_task_info",
+        "approximate": false
+      },
+      "scheduler": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 600,
+          "p50_ms": 3.2316249999999878,
+          "p95_ms": 293.359292,
+          "p99_ms": 710.082667,
+          "max_ms": 1115.090833,
+          "mean_ms": 58.494606406666726,
+          "stalls": 3,
+          "over_50ms_count": 146,
+          "over_200ms_count": 51
+        }
+      },
+      "keeper_fibers": 25
+    },
+    {
+      "index": 6,
+      "started_perf_ns": 180057430032583,
+      "finished_perf_ns": 180057432589541,
+      "raw_health_sha256": "391e57be796200eb4fa67da0690f28ee175a9e71842ee7a4a984c92d1387c6ed",
+      "build": {
+        "binary_commit": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+        "executable_sha256": "b6a50b5e88c4730b029af14cd5a6b7a587f69f9535f90c7101caf9711e8c7312",
+        "runtime_instance_id": "01a1782b-4666-7000-9d6b-8409d8081e62"
+      },
+      "process_memory": {
+        "status": "measured",
+        "pid": 95388,
+        "resident_bytes": 21558771712,
+        "source": "mach_task_info",
+        "approximate": false
+      },
+      "scheduler": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 600,
+          "p50_ms": 1.9342919999999904,
+          "p95_ms": 271.091791,
+          "p99_ms": 710.082667,
+          "max_ms": 1115.090833,
+          "mean_ms": 48.80580182000003,
+          "stalls": 3,
+          "over_50ms_count": 122,
+          "over_200ms_count": 41
+        }
+      },
+      "keeper_fibers": 25
+    }
+  ]
+}

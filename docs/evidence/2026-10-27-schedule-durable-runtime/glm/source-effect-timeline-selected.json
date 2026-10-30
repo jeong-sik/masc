@@ -1,0 +1,64 @@
+{
+  "is_derivative": true,
+  "original_observer_verdict": "FAIL",
+  "A_source": "2f4d9ccc61659e0a1455112da4639edb2d7190fdd15f4f26d0da74ed956367aa",
+  "B_source": "f9db2ee7c04f33800fa0db0fa36017c9b1739e5b17d89c1b5e4ea05293b38b54",
+  "note_calls": [
+    {
+      "tool": "masc_schedule_note_add",
+      "ts": 1793048034.217586,
+      "trace_id": "trace-1793048013383-00000",
+      "keeper_turn_id": 1,
+      "turn": 1,
+      "execution_id": "execution-node-e2670fec6758d0bb60ee78a27c4d8fa6",
+      "tool_use_id": "call_89848c39810a43d680f7e1d5",
+      "input": {
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+        "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "ts": 1793048048.853037,
+      "trace_id": "trace-1793048013383-00000",
+      "keeper_turn_id": 2,
+      "turn": 3,
+      "execution_id": "execution-node-6d3477ffe12afb8fb244ef4b9b5ef896",
+      "tool_use_id": "call_097903ee2ddc4720a61412d2",
+      "input": {
+        "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+      }
+    },
+    {
+      "tool": "masc_schedule_note_add",
+      "ts": 1793048072.511824,
+      "trace_id": "trace-1793048013383-00000",
+      "keeper_turn_id": 3,
+      "turn": 7,
+      "execution_id": "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+      "tool_use_id": "call_7575f0bd4fad48d296939782",
+      "input": {
+        "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+        "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+      }
+    }
+  ],
+  "B_ACK": [
+    1793048059.462986
+  ],
+  "A_readmission_after_B_ACK": [
+    1793048059.467897
+  ],
+  "A2_keeper_turn_equals_B": false,
+  "A2_call_before_B_ACK": false,
+  "A2_call_before_A_readmission": false,
+  "third_turn_execution_ids": [
+    [
+      "execution-node-24da7d98da52fdfb2430c9394deb36be",
+      "execution-node-e3b53eb7b06b0c0a49fa3ba4faa4f5a2",
+      "execution-node-9432e4ba57a41710e0c896889d25adae"
+    ]
+  ],
+  "classification": "GLM original oracle FAIL plus separate canonical-read/lineage review"
+}

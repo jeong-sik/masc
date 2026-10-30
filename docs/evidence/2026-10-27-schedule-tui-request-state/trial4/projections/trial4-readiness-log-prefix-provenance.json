@@ -1,0 +1,17 @@
+{
+  "is_derivative": true,
+  "transformation": "Byte-exact observed live-log prefix selected from the closed append-only source; no decoding/reserialization. Not the complete closed log.",
+  "source_closed_identity": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc/logs/tui/session-99192-5dfa1e/system_log_2026-10-26.jsonl",
+    "bytes": 148983,
+    "sha256": "461c0638df4b92402f5713faa307164be0ccd01599551952c25d74bbff2fc9d6"
+  },
+  "observed_prefix_bytes": 25987,
+  "observed_prefix_sha256": "3f634ee02fc631a840d0c2cd28770ef748bd25e7b639fcb9bd1fedfbcfc3d1ff",
+  "source_receipt": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/first-input-readiness.json",
+    "bytes": 3657,
+    "sha256": "a455c03122169f7d3a0a1db3f84d5decf6c1886b9e2e37e6dbf3efbd14fd0a49"
+  },
+  "meaning": "Same-PID/source/capture state application and startup facts; not terminal output or paint."
+}

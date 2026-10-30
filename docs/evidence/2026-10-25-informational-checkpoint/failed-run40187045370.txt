@@ -1,0 +1,22 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40187045370
+Head: fc7a223d709164c55a7e5e896374a294e489609a
+Full log SHA256: ef6567444d1c8eecb4d508017cff7e47456cbaa1f228f1ec298678bfc6b889a8
+Excerpt (trailing whitespace normalized):
+test suite	Checkout	2026-10-25T11:02:30.6143509Z   ref: fc7a223d709164c55a7e5e896374a294e489609a
+test suite	Checkout	2026-10-25T11:02:30.7916923Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin fc7a223d709164c55a7e5e896374a294e489609a
+test suite	Checkout	2026-10-25T11:02:40.0272860Z  * branch              fc7a223d709164c55a7e5e896374a294e489609a -> FETCH_HEAD
+test suite	Checkout	2026-10-25T11:02:40.0280423Z [command]/usr/bin/git rev-parse --verify --quiet fc7a223d709164c55a7e5e896374a294e489609a^{object}
+test suite	Checkout	2026-10-25T11:02:40.0302179Z fc7a223d709164c55a7e5e896374a294e489609a
+test suite	Checkout	2026-10-25T11:02:40.0398840Z [command]/usr/bin/git checkout --progress --force fc7a223d709164c55a7e5e896374a294e489609a
+test suite	Checkout	2026-10-25T11:02:41.8312759Z Note: switching to 'fc7a223d709164c55a7e5e896374a294e489609a'.
+test suite	Checkout	2026-10-25T11:02:41.8317664Z HEAD is now at fc7a223d test(keeper): initialize native journal in checkpoint fixture
+test suite	Checkout	2026-10-25T11:02:41.8412762Z fc7a223d709164c55a7e5e896374a294e489609a
+test suite	Test	2026-10-25T11:04:53.8192087Z [targeted] dune build test/test_keeper_informational_checkpoint_ack.exe test/test_keeper_failed_selection_disposition.exe
+test suite	Test	2026-10-25T11:07:13.1587904Z [2026-10-25 11:07:13] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_assistant_collected turn_count=1 start_s=1792926433.155171 end_s=1792926433.158606 duration_ms=3.434 canonical_bytes=92109 outcome=saved
+test suite	Test	2026-10-25T11:07:13.1831539Z [2026-10-25 11:07:13] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_tool_results_appended turn_count=1 start_s=1792926433.179919 end_s=1792926433.182958 duration_ms=3.038 canonical_bytes=94288 outcome=saved
+test suite	Test	2026-10-25T11:07:13.1860353Z [2026-10-25 11:07:13] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_context_injection turn_count=1 start_s=1792926433.183003 end_s=1792926433.185842 duration_ms=2.838 canonical_bytes=94542 outcome=saved
+test suite	Test	2026-10-25T11:07:13.2383262Z [2026-10-25 11:07:13] [INFO] [Keeper] informational-checkpoint-probe: keeper cycle checkpoint runtime_lane=runtime tokens=12 latency=134ms mode=tool_use stop=yielded_to_operation_queued(1)
+test suite	Test	2026-10-25T11:07:13.2874947Z checkpoint not found
+test suite	Test	2026-10-25T11:07:13.2876137Z Called from Dune__exe__Test_keeper_informational_checkpoint_ack.check_checkpoint in file "test/test_keeper_informational_checkpoint_ack.ml", lines 92-95, characters 19-66
+test suite	Test	2026-10-25T11:07:13.2927545Z [targeted] test/test_keeper_informational_checkpoint_ack: FAIL exit 1 in 1s
+test suite	Test	2026-10-25T11:07:13.4098633Z Test Successful in 0.001s. 16 tests run.

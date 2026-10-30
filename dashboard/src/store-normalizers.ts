@@ -1,0 +1,869 @@
+import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
+import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import {
+  parseTaskStatus,
+  parseExecutionTone,
+  parseSignalTruth,
+  parseEvidenceSource,
+} from './lib/core-parsers'
+import { normalizeKeeperTrust } from './keeper-store-normalize'
+import { normalizeStopCause } from './lib/stop-cause'
+import { parseAgentStatus } from './lib/agent-status'
+import {
+  DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
+  KEEPER_RUNTIME_SOURCES,
+} from './types/dashboard-execution'
+import { MENTION_DELIVERY_STATUSES } from './types/core'
+import type {
+  Agent, Task, Message, ServerStatus,
+  DashboardExecutionSummary, DashboardExecutionHandoff,
+  DashboardExecutionQueueItem,
+  DashboardExecutionWorkerSupportBrief,
+  DashboardExecutionContinuityBrief,
+  DashboardConfigResolution,
+  DashboardConfigResolutionItem,
+  DashboardFleetPressureHealth,
+  DashboardFleetSafetyHealth,
+  DashboardKeeperReactionLedgerHealth,
+  DashboardKeeperReactionLedgerPendingKeeper,
+  DashboardPausedKeeperDetail,
+  DashboardPausedKeeperReadError,
+  DashboardPausedKeepersHealth,
+  DashboardRuntimeDiagnostic,
+  DashboardRuntimeResolution,
+  KeeperRuntimeResolved,
+  KeeperRuntimeField,
+  KeeperRuntimeSource,
+  OperatorAttentionItem, OperatorRecommendedAction,
+} from './types'
+
+// --- Data fetchers ---
+
+export function normalizeAgentStatus(value: unknown): Agent['status'] {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  // Backend aliases that normalize to canonical AgentStatus tokens.
+  if (raw === 'in_progress' || raw === 'claimed') return 'busy'
+  if (raw === 'left') return 'offline'
+  // Canonical tokens — validated by parseAgentStatus SSOT.
+  return parseAgentStatus(raw) ?? undefined
+}
+
+export function normalizeTaskStatus(value: unknown): Task['status'] {
+  return parseTaskStatus(value)
+}
+
+export function normalizeAgent(raw: unknown): Agent | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  if (!name) return null
+  return {
+    name,
+    agent_type: asString(raw.agent_type),
+    keeper_name: asString(raw.keeper_name) ?? null,
+    keeper_id: asString(raw.keeper_id) ?? null,
+    status: normalizeAgentStatus(raw.status),
+    current_task: asString(raw.current_task) ?? null,
+    session_bound_at: asString(raw.session_bound_at),
+    last_seen: asString(raw.last_seen),
+    capabilities: asStringArray(raw.capabilities),
+    emoji: asString(raw.emoji),
+    koreanName: asString(raw.koreanName) ?? asString(raw.korean_name),
+    model: asString(raw.model),
+  }
+}
+
+export function normalizeTask(raw: unknown): Task | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const title = asString(raw.title)
+  if (!id || !title) return null
+  if (raw.detail_level !== undefined && raw.detail_level !== 'summary' && raw.detail_level !== 'full') return null
+  const contract = isRecord(raw.contract)
+    ? {
+        strict: asBoolean(raw.contract.strict),
+        completion_contract: asStringArray(raw.contract.completion_contract),
+        required_evidence: asStringArray(raw.contract.required_evidence),
+        inspect_gate_evidence: asStringArray(raw.contract.inspect_gate_evidence),
+        verify_gate_evidence: asStringArray(raw.contract.verify_gate_evidence),
+      }
+    : null
+  const handoffContext = isRecord(raw.handoff_context)
+    ? {
+        summary: asString(raw.handoff_context.summary, ''),
+        reason: asString(raw.handoff_context.reason) ?? null,
+        next_step: asString(raw.handoff_context.next_step) ?? null,
+        failure_mode: asString(raw.handoff_context.failure_mode) ?? null,
+        evidence_refs: asStringArray(raw.handoff_context.evidence_refs),
+        updated_at: asString(raw.handoff_context.updated_at) ?? null,
+        updated_by: asString(raw.handoff_context.updated_by) ?? null,
+      }
+    : null
+  const executionLinks = isRecord(raw.execution_links)
+    ? {
+        operation_id: asString(raw.execution_links.operation_id) ?? null,
+        session_id: asString(raw.execution_links.session_id) ?? null,
+      }
+    : null
+  return {
+    id,
+    title,
+    goal_id: asString(raw.goal_id) ?? null,
+    detail_level: raw.detail_level as Task['detail_level'],
+    description_revision: asString(raw.description_revision),
+    status: normalizeTaskStatus(raw.status),
+    status_raw: asString(raw.status_raw) ?? null,
+    priority: asNumber(raw.priority),
+    assignee: asString(raw.assignee),
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    created_at: asString(raw.created_at),
+    updated_at: asString(raw.updated_at),
+    completed_at: asString(raw.completed_at),
+    cancelled_by: asString(raw.cancelled_by) ?? null,
+    reason: asString(raw.reason) ?? null,
+    // The backend has emitted this since RFC-0323 G-8 and PredecessorSection
+    // reads it, but it was never copied here, so every task reached the store
+    // with it undefined and the section returned null on its first guard.
+    predecessor_task_id: asString(raw.predecessor_task_id) ?? null,
+    contract,
+    handoff_context: handoffContext,
+    execution_links: executionLinks,
+  }
+}
+
+export function normalizeMessage(raw: unknown): Message | null {
+  if (!isRecord(raw)) return null
+  const from = asString(raw.from) ?? asString(raw.from_agent)
+  const content = asString(raw.content) ?? ''
+  const timestamp = asString(raw.timestamp)
+  const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel)
+  const rawMentionDelivery = asString(raw.mention_delivery)
+  const mentionDelivery =
+    rawMentionDelivery != null
+    && (MENTION_DELIVERY_STATUSES as readonly string[]).includes(rawMentionDelivery)
+      ? (rawMentionDelivery as Message['mentionDelivery'])
+      : undefined
+  return {
+    id: asString(raw.id),
+    requestId: asString(raw.request_id),
+    seq: asNumber(raw.seq),
+    from,
+    content,
+    timestamp,
+    type: asString(raw.type),
+    workspace,
+    mentionDelivery,
+    mentions: Array.isArray(raw.mentions) ? asStringArray(raw.mentions) : undefined,
+  }
+}
+
+export function normalizeExecutionTone(value: unknown): DashboardExecutionQueueItem['severity'] {
+  return parseExecutionTone(value)
+}
+
+export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
+  if (!isRecord(raw)) return null
+  return {
+    active_operations: asNumber(raw.active_operations),
+    blocked_operations: asNumber(raw.blocked_operations),
+    worker_alerts: asNumber(raw.worker_alerts),
+    continuity_alerts: asNumber(raw.continuity_alerts),
+    priority_items: asNumber(raw.priority_items),
+    done_tasks: asNumber(raw.done_tasks),
+    keepers: asNumber(raw.keepers),
+  }
+}
+
+export function normalizeExecutionHandoff(raw: unknown): DashboardExecutionHandoff | null {
+  if (!isRecord(raw)) return null
+  const surface = asString(raw.surface)
+  const label = asString(raw.label)
+  const targetType = asString(raw.target_type)
+  const targetId = asString(raw.target_id)
+  const focusKind = asString(raw.focus_kind)
+  if (!surface || !label || !targetType || !targetId || !focusKind) return null
+  return {
+    surface: surface === 'command' ? 'command' : 'intervene',
+    label,
+    target_type: targetType,
+    target_id: targetId,
+    focus_kind: focusKind,
+    operation_id: asString(raw.operation_id) ?? null,
+    command_surface: asString(raw.command_surface) ?? null,
+  }
+}
+
+export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQueueItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const kind = asString(raw.kind)
+  const summary = asString(raw.summary)
+  const targetType = asString(raw.target_type)
+  const targetId = asString(raw.target_id)
+  if (!id || !summary || !targetType || !targetId || (kind !== 'operation' && kind !== 'keeper')) {
+    return null
+  }
+  const runtimeTrust = normalizeKeeperTrust(raw.runtime_trust ?? raw.trust)
+  const terminalReason = runtimeTrust?.latest_terminal_reason ?? null
+  const terminalReasonCode =
+    asString(raw.terminal_reason_code) ?? terminalReason?.code ?? null
+  return {
+    id,
+    kind,
+    severity: normalizeExecutionTone(raw.severity),
+    status: asString(raw.status),
+    summary,
+    target_type: targetType,
+    target_id: targetId,
+    linked_operation_id: asString(raw.linked_operation_id) ?? null,
+    last_seen_at: asString(raw.last_seen_at) ?? null,
+    attention_reason: asString(raw.attention_reason) ?? null,
+    next_human_action: asString(raw.next_human_action) ?? null,
+    terminal_reason_code: terminalReasonCode,
+    stop_cause: normalizeStopCause({
+      runtime_blocker_class: asString(raw.runtime_blocker_class) ?? asString(raw.runtime_blocker) ?? null,
+      runtime_blocker_summary: asString(raw.runtime_blocker_summary) ?? null,
+      terminal_reason_code: terminalReasonCode,
+      terminal_reason_summary: terminalReason?.summary ?? null,
+      terminal_reason_severity: terminalReason?.severity ?? null,
+      terminal_reason_next_action: terminalReason?.next_action ?? null,
+      attention_reason: asString(raw.attention_reason) ?? null,
+      next_action: asString(raw.next_human_action) ?? runtimeTrust?.latest_next_action ?? null,
+    }),
+    runtime_trust: runtimeTrust,
+    top_handoff: normalizeExecutionHandoff(raw.top_handoff),
+    intervene_handoff: normalizeExecutionHandoff(raw.intervene_handoff),
+    command_handoff: normalizeExecutionHandoff(raw.command_handoff),
+  }
+}
+
+export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionWorkerSupportBrief | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  const note = asString(raw.note)
+  const focus = asString(raw.focus)
+  const state = asString(raw.state)
+  if (!name || !note || !focus || (state !== 'working' && state !== 'watching' && state !== 'quiet' && state !== 'offline')) {
+    return null
+  }
+  const signalTruth = parseSignalTruth(asString(raw.signal_truth))
+  const evidenceSource = parseEvidenceSource(asString(raw.evidence_source))
+  return {
+    name,
+    keeper_name: asString(raw.keeper_name) ?? null,
+    keeper_id: asString(raw.keeper_id) ?? null,
+    status: asString(raw.status),
+    tone: normalizeExecutionTone(raw.tone),
+    state,
+    note,
+    focus,
+    last_signal_at: asString(raw.last_signal_at) ?? null,
+    last_signal_age_sec: asNumber(raw.last_signal_age_sec) ?? null,
+    signal_truth: signalTruth,
+    evidence_source: evidenceSource,
+    active_task_count: asNumber(raw.active_task_count),
+    emoji: asString(raw.emoji),
+    korean_name: asString(raw.korean_name),
+    model: asString(raw.model) ?? null,
+    recent_output_preview: asString(raw.recent_output_preview) ?? null,
+    recent_event: asString(raw.recent_event) ?? null,
+  }
+}
+
+export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecutionContinuityBrief | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  const note = asString(raw.note)
+  const focus = asString(raw.focus)
+  const state = asString(raw.state)
+  if (!name || !note || !focus || (state !== 'healthy' && state !== 'warning' && state !== 'critical')) {
+    return null
+  }
+  return {
+    name,
+    keeper_id: asString(raw.keeper_id) ?? null,
+    status: asString(raw.status),
+    tone: normalizeExecutionTone(raw.tone),
+    state,
+    note,
+    focus,
+    last_signal_at: asString(raw.last_signal_at) ?? null,
+    turn_count: asNumber(raw.turn_count),
+    context_ratio: asNumber(raw.context_ratio) ?? null,
+    continuity: asString(raw.continuity) ?? null,
+    lifecycle: asString(raw.lifecycle) ?? null,
+    model: asString(raw.model) ?? null,
+    emoji: asString(raw.emoji),
+    korean_name: asString(raw.korean_name),
+    recent_input_preview: asString(raw.recent_input_preview) ?? null,
+    recent_output_preview: asString(raw.recent_output_preview) ?? null,
+    recent_tool_names: asStringArray(raw.recent_tool_names) ?? [],
+    latest_tool_names: asStringArray(raw.latest_tool_names) ?? [],
+    latest_tool_call_count: asNumber(raw.latest_tool_call_count) ?? null,
+    tool_audit_source: asString(raw.tool_audit_source) ?? null,
+    tool_audit_at: asString(raw.tool_audit_at) ?? null,
+    last_proactive_preview: asString(raw.last_proactive_preview) ?? null,
+  }
+}
+
+export function normalizeDashboardConfigResolutionItem(
+  raw: unknown,
+): DashboardConfigResolutionItem | null {
+  if (!isRecord(raw)) return null
+  const path = asString(raw.path)
+  const source = asString(raw.source)
+  const exists = asBoolean(raw.exists)
+  if (!path || !source || exists == null) return null
+  return { path, source, exists }
+}
+
+export function normalizeDashboardConfigResolution(
+  raw: unknown,
+): DashboardConfigResolution | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status)
+  const configRoot = normalizeDashboardConfigResolutionItem(raw.config_root)
+  const prompts = normalizeDashboardConfigResolutionItem(raw.prompts)
+  const keepers = normalizeDashboardConfigResolutionItem(raw.keepers)
+  if (!status || !configRoot || !prompts || !keepers) return null
+  return {
+    status: status as DashboardConfigResolution['status'],
+    warnings: asStringArray(raw.warnings),
+    config_root: configRoot,
+    prompts,
+    keepers,
+  }
+}
+
+export function normalizeDashboardRuntimeDiagnostic(
+  raw: unknown,
+): DashboardRuntimeDiagnostic | null {
+  if (!isRecord(raw)) return null
+  const ts = asString(raw.ts)
+  const kind = asString(raw.kind)
+  const message = asString(raw.message)
+  if (!ts || !kind || !message) return null
+  return {
+    ts,
+    kind,
+    signal: asString(raw.signal),
+    message,
+  }
+}
+
+const _MISSING = Symbol('missing')
+
+function normalizeKeeperRuntimeField<T>(
+  raw: unknown,
+  valueNormalize: (v: unknown) => T | typeof _MISSING,
+): KeeperRuntimeField<T> | null {
+  if (!isRecord(raw)) return null
+  const value = valueNormalize(raw.value)
+  if (value === _MISSING) return null
+  const source = asString(raw.source)
+  if (!source || !(KEEPER_RUNTIME_SOURCES as readonly string[]).includes(source)) return null
+  return {
+    value: value as T,
+    source: source as KeeperRuntimeSource,
+  }
+}
+
+function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | null {
+  if (!isRecord(raw)) return null
+  const finiteSeconds = (v: unknown): number | typeof _MISSING => {
+    const seconds = asNumber(v)
+    return seconds !== undefined ? seconds : _MISSING
+  }
+  const positiveSeconds = (v: unknown): number | typeof _MISSING => {
+    const seconds = finiteSeconds(v)
+    return seconds !== _MISSING && seconds > 0 ? seconds : _MISSING
+  }
+  const streamIdleTimeout = normalizeKeeperRuntimeField<number>(raw.stream_idle_timeout_sec, positiveSeconds)
+  const firstEventTimeout = normalizeKeeperRuntimeField<number>(raw.first_event_timeout_sec, positiveSeconds)
+  const bodyTimeoutOverride = normalizeKeeperRuntimeField<number | null>(
+    raw.body_timeout_override_sec,
+    v => v === null ? null : finiteSeconds(v),
+  )
+  const providerCallDeadline = normalizeKeeperRuntimeField<number>(raw.provider_call_deadline_sec, positiveSeconds)
+  if (!streamIdleTimeout || !firstEventTimeout || !bodyTimeoutOverride || !providerCallDeadline) return null
+  return {
+    stream_idle_timeout_sec: streamIdleTimeout,
+    first_event_timeout_sec: firstEventTimeout,
+    body_timeout_override_sec: bodyTimeoutOverride,
+    provider_call_deadline_sec: providerCallDeadline,
+  }
+}
+
+export function normalizeDashboardRuntimeResolution(
+  raw: unknown,
+  generatedAt?: string,
+): DashboardRuntimeResolution | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status)
+  const basePath = normalizeDashboardConfigResolutionItem(raw.base_path)
+  const workspacePath = normalizeDashboardConfigResolutionItem(raw.workspace_path)
+  const resolvedBasePath = normalizeDashboardConfigResolutionItem(raw.resolved_base_path)
+  const dataRoot = normalizeDashboardConfigResolutionItem(raw.data_root)
+  const promptMarkdownDir = normalizeDashboardConfigResolutionItem(raw.prompt_markdown_dir)
+  const build = normalizeBuildIdentity(raw.build)
+  if (!status || !basePath || !workspacePath || !resolvedBasePath || !dataRoot || !promptMarkdownDir || !build) {
+    return null
+  }
+  return {
+    generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? null,
+    status,
+    warnings: asStringArray(raw.warnings),
+    base_path: basePath,
+    workspace_path: workspacePath,
+    resolved_base_path: resolvedBasePath,
+    data_root: dataRoot,
+    prompt_markdown_dir: promptMarkdownDir,
+    server_repo_path: normalizeDashboardConfigResolutionItem(raw.server_repo_path),
+    server_repo_git_commit: asString(raw.server_repo_git_commit) ?? null,
+    workspace_git_commit: asString(raw.workspace_git_commit) ?? null,
+    resolved_base_git_commit: asString(raw.resolved_base_git_commit) ?? null,
+    source_mismatch: asBoolean(raw.source_mismatch) ?? false,
+    server_workspace_mismatch: asBoolean(raw.server_workspace_mismatch) ?? false,
+    diagnostics: (Array.isArray(raw.diagnostics) ? raw.diagnostics : [])
+      .map(normalizeDashboardRuntimeDiagnostic)
+      .filter((item): item is DashboardRuntimeDiagnostic => item !== null),
+    build,
+    keeper_runtime: normalizeKeeperRuntimeResolved(raw.keeper_runtime),
+    fleet_safety: normalizeDashboardFleetSafetyHealth(raw),
+    fd_accountant: normalizeDashboardFdAccountant(raw.fd_accountant),
+    disk_observation: normalizeDashboardDiskObservation(raw.disk_observation),
+  }
+}
+
+function normalizeDashboardFdAccountant(raw: unknown): DashboardRuntimeResolution['fd_accountant'] {
+  if (!isRecord(raw)) return null
+  const fdOpen = asNumber(raw.fd_open)
+  const fdLimit = asNumber(raw.fd_limit)
+  const perKind = (Array.isArray(raw.per_kind) ? raw.per_kind : [])
+    .map((row) => {
+      if (!isRecord(row)) return null
+      const kind = asString(row.kind)
+      const activeOperations = asNumber(row.active_operations)
+      return kind && activeOperations != null
+        ? { kind, active_operations: activeOperations }
+        : null
+    })
+    .filter((row): row is { kind: string; active_operations: number } => row !== null)
+  const resourceErrors = (Array.isArray(raw.resource_errors) ? raw.resource_errors : [])
+    .map((row) => {
+      if (!isRecord(row)) return null
+      const kind = asString(row.kind)
+      const error = asString(row.error)
+      const count = asNumber(row.count)
+      return kind && error && count != null ? { kind, error, count } : null
+    })
+    .filter((row): row is { kind: string; error: string; count: number } => row !== null)
+  if (fdOpen == null && fdLimit == null && perKind.length === 0 && resourceErrors.length === 0) return null
+  return {
+    fd_open: fdOpen ?? null,
+    fd_limit: fdLimit ?? null,
+    per_kind: perKind,
+    resource_errors: resourceErrors,
+  }
+}
+
+function normalizeDashboardDiskObservation(raw: unknown): DashboardRuntimeResolution['disk_observation'] {
+  if (!isRecord(raw)) return null
+  const filesystemRaw = isRecord(raw.filesystem) ? raw.filesystem : null
+  const filesystem = filesystemRaw
+    ? {
+        path: asString(filesystemRaw.path) ?? null,
+        filesystem: asString(filesystemRaw.filesystem) ?? null,
+        mounted_on: asString(filesystemRaw.mounted_on) ?? null,
+        total_bytes: asNumber(filesystemRaw.total_bytes) ?? null,
+        used_bytes: asNumber(filesystemRaw.used_bytes) ?? null,
+        available_bytes: asNumber(filesystemRaw.available_bytes) ?? null,
+        capacity_percent: asNumber(filesystemRaw.capacity_percent) ?? null,
+        available_percent: asNumber(filesystemRaw.available_percent) ?? null,
+        error: asString(filesystemRaw.error) ?? null,
+      }
+    : null
+  const mode = asString(raw.mode) ?? null
+  const mascRoot = asString(raw.masc_root) ?? null
+  const exhaustionTotal = asNumber(raw.storage_space_exhaustion_observations_total)
+  const lastExhaustion = asNumber(raw.last_storage_space_exhaustion_ts)
+  if (mode == null && mascRoot == null && exhaustionTotal == null
+    && lastExhaustion == null && filesystem == null) return null
+  return {
+    mode,
+    masc_root: mascRoot,
+    storage_space_exhaustion_observations_total: exhaustionTotal ?? null,
+    last_storage_space_exhaustion_ts: lastExhaustion ?? null,
+    filesystem,
+  }
+}
+
+function normalizeDashboardPausedKeeperDetail(raw: unknown): DashboardPausedKeeperDetail | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  if (!name) return null
+  return {
+    name,
+    activation_mode: parseKeeperActivationMode(raw.activation_mode),
+    pause_kind: asString(raw.pause_kind) ?? null,
+    paused_elapsed_sec: asNumber(raw.paused_elapsed_sec) ?? null,
+    missing_pause_root_cause: asBoolean(raw.missing_pause_root_cause) ?? null,
+  }
+}
+
+function normalizeDashboardPausedKeeperReadError(raw: unknown): DashboardPausedKeeperReadError | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const error = asString(raw.error)
+  if (!keeper || !error) return null
+  return { keeper, error }
+}
+
+function normalizeDashboardPausedKeepersHealth(raw: unknown): DashboardPausedKeepersHealth | null {
+  if (!isRecord(raw)) return null
+  const details = (Array.isArray(raw.details) ? raw.details : [])
+    .map(normalizeDashboardPausedKeeperDetail)
+    .filter((item): item is DashboardPausedKeeperDetail => item !== null)
+  const readErrors = (Array.isArray(raw.read_errors) ? raw.read_errors : [])
+    .map(normalizeDashboardPausedKeeperReadError)
+    .filter((item): item is DashboardPausedKeeperReadError => item !== null)
+  const names = asStringArray(raw.names)
+  const durableNames = asStringArray(raw.durable_names)
+  const autobootEnabledNames = asStringArray(raw.autoboot_enabled_names)
+  const count = asNumber(raw.count)
+  const durableCount = asNumber(raw.durable_count)
+  const autobootEnabledCount = asNumber(raw.autoboot_enabled_count)
+  const readErrorCount = asNumber(raw.read_error_count)
+  if (
+    count == null
+    && durableCount == null
+    && autobootEnabledCount == null
+    && readErrorCount == null
+    && names.length === 0
+    && durableNames.length === 0
+    && autobootEnabledNames.length === 0
+    && details.length === 0
+    && readErrors.length === 0
+  ) {
+    return null
+  }
+  return {
+    count: count ?? null,
+    names,
+    durable_count: durableCount ?? null,
+    durable_names: durableNames,
+    autoboot_enabled_count: autobootEnabledCount ?? null,
+    autoboot_enabled_names: autobootEnabledNames,
+    details,
+    read_error_count: readErrorCount ?? null,
+    read_errors: readErrors,
+  }
+}
+
+function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPressureHealth | null {
+  if (!isRecord(raw)) return null
+  const schema = asString(raw.schema)
+  const rawStatus = asString(raw.status)
+  const status =
+    rawStatus === 'ok' || rawStatus === 'degraded' || rawStatus === 'blocked'
+      ? rawStatus
+      : null
+  const reason = asString(raw.reason) ?? null
+  const blocker = raw.blocker === null ? null : asString(raw.blocker) ?? null
+  const bootableKeeperCount = asNumber(raw.bootable_keeper_count)
+  const autobootKeeperNames = asStringArray(raw.autoboot_enabled_keeper_names)
+  const executableKeeperNames = asStringArray(raw.executable_keeper_names)
+  const runningKeeperFiberCount = asNumber(raw.running_keeper_fiber_count)
+  const failingKeeperFiberCount = asNumber(raw.failing_keeper_fiber_count)
+  const recoveringKeeperFiberCount = asNumber(raw.recovering_keeper_fiber_count)
+  const sessionRecoveryRequiredCount = asNumber(raw.official_client_recovery_required_keeper_count)
+  const sessionRecoveryRequiredNames = asStringArray(raw.official_client_recovery_required_keeper_names)
+  const executableKeeperFiberCount = asNumber(raw.executable_keeper_fiber_count)
+  const noExecutableKeeperFibers = asBoolean(raw.no_executable_keeper_fibers)
+  const reactionCapacityBelowTarget = asBoolean(raw.reaction_capacity_below_target)
+  const reactionCapacityShortfallCount = asNumber(raw.reaction_capacity_shortfall_count)
+  const pausedKeeperCount = asNumber(raw.paused_keeper_count)
+  const autobootEnabledKeeperCount = asNumber(raw.autoboot_enabled_keeper_count)
+  const pausedAutobootEnabledKeeperCount = asNumber(raw.paused_autoboot_enabled_keeper_count)
+  const targetReactionCapacityCount = asNumber(raw.target_reaction_capacity_count)
+  const operatorActionRequired = asBoolean(raw.operator_action_required)
+  const currentShape =
+    schema === DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA
+    && status != null
+    && Object.prototype.hasOwnProperty.call(raw, 'blocker')
+    && operatorActionRequired != null
+    && operatorActionRequired === (status !== 'ok')
+  if (!currentShape) {
+    return {
+      schema: DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
+      status: 'blocked',
+      reason: 'current_fact_invalid',
+      blocker: 'current_fact_invalid',
+      bootable_keeper_count: bootableKeeperCount ?? null,
+      autoboot_enabled_keeper_names: autobootKeeperNames,
+      executable_keeper_names: executableKeeperNames,
+      running_keeper_fiber_count: runningKeeperFiberCount ?? null,
+      failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
+      recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,
+      official_client_recovery_required_keeper_count: sessionRecoveryRequiredCount ?? null,
+      official_client_recovery_required_keeper_names: sessionRecoveryRequiredNames,
+      executable_keeper_fiber_count: executableKeeperFiberCount ?? null,
+      no_executable_keeper_fibers: noExecutableKeeperFibers ?? null,
+      reaction_capacity_below_target: reactionCapacityBelowTarget ?? null,
+      reaction_capacity_shortfall_count: reactionCapacityShortfallCount ?? null,
+      paused_keeper_count: pausedKeeperCount ?? null,
+      autoboot_enabled_keeper_count: autobootEnabledKeeperCount ?? null,
+      paused_autoboot_enabled_keeper_count: pausedAutobootEnabledKeeperCount ?? null,
+      target_reaction_capacity_count: targetReactionCapacityCount ?? null,
+      operator_action_required: true,
+    }
+  }
+  return {
+    schema: DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
+    status,
+    reason,
+    blocker,
+    bootable_keeper_count: bootableKeeperCount ?? null,
+    autoboot_enabled_keeper_names: autobootKeeperNames,
+    executable_keeper_names: executableKeeperNames,
+    running_keeper_fiber_count: runningKeeperFiberCount ?? null,
+    failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
+    recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,
+    official_client_recovery_required_keeper_count: sessionRecoveryRequiredCount ?? null,
+    official_client_recovery_required_keeper_names: sessionRecoveryRequiredNames,
+    executable_keeper_fiber_count: executableKeeperFiberCount ?? null,
+    no_executable_keeper_fibers: noExecutableKeeperFibers ?? null,
+    reaction_capacity_below_target: reactionCapacityBelowTarget ?? null,
+    reaction_capacity_shortfall_count: reactionCapacityShortfallCount ?? null,
+    paused_keeper_count: pausedKeeperCount ?? null,
+    autoboot_enabled_keeper_count: autobootEnabledKeeperCount ?? null,
+    paused_autoboot_enabled_keeper_count: pausedAutobootEnabledKeeperCount ?? null,
+    target_reaction_capacity_count: targetReactionCapacityCount ?? null,
+    operator_action_required: operatorActionRequired,
+  }
+}
+
+function normalizeDashboardKeeperReactionLedgerPendingKeeper(
+  raw: unknown,
+): DashboardKeeperReactionLedgerPendingKeeper | null {
+  if (!isRecord(raw)) return null
+  const keeperName = asString(raw.keeper_name)
+  const pendingStimulusCount = asNumber(raw.pending_stimulus_count)
+  if (!keeperName || pendingStimulusCount == null) return null
+  return {
+    keeper_name: keeperName,
+    pending_stimulus_count: pendingStimulusCount,
+    pending_stimulus_ids: asStringArray(raw.pending_stimulus_ids),
+  }
+}
+
+function normalizeDashboardKeeperReactionLedgerHealth(
+  raw: unknown,
+): DashboardKeeperReactionLedgerHealth | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status) ?? null
+  const operatorActionRequired = asBoolean(raw.operator_action_required) ?? null
+  const keeperCount = asNumber(raw.keeper_count)
+  const rowCount = asNumber(raw.row_count)
+  const stimulusCount = asNumber(raw.stimulus_count)
+  const reactionCount = asNumber(raw.reaction_count)
+  const turnStartedCount = asNumber(raw.turn_started_count)
+  const quarantinedRowCount = asNumber(raw.quarantined_row_count)
+  const cursorSweptStimulusCount = asNumber(raw.cursor_swept_stimulus_count)
+  const pendingStimulusCount = asNumber(raw.pending_stimulus_count)
+  const readErrorCount = asNumber(raw.read_error_count)
+  const pendingByKeeper = (Array.isArray(raw.pending_by_keeper) ? raw.pending_by_keeper : [])
+    .map(normalizeDashboardKeeperReactionLedgerPendingKeeper)
+    .filter((item): item is DashboardKeeperReactionLedgerPendingKeeper => item !== null)
+  if (
+    status == null
+    && operatorActionRequired == null
+    && keeperCount == null
+    && rowCount == null
+    && stimulusCount == null
+    && reactionCount == null
+    && turnStartedCount == null
+    && quarantinedRowCount == null
+    && cursorSweptStimulusCount == null
+    && pendingStimulusCount == null
+    && readErrorCount == null
+    && pendingByKeeper.length === 0
+  ) {
+    return null
+  }
+  return {
+    status,
+    operator_action_required: operatorActionRequired,
+    keeper_count: keeperCount ?? null,
+    row_count: rowCount ?? null,
+    stimulus_count: stimulusCount ?? null,
+    reaction_count: reactionCount ?? null,
+    turn_started_count: turnStartedCount ?? null,
+    quarantined_row_count: quarantinedRowCount ?? null,
+    cursor_swept_stimulus_count: cursorSweptStimulusCount ?? null,
+    pending_stimulus_count: pendingStimulusCount ?? null,
+    read_error_count: readErrorCount ?? null,
+    pending_by_keeper: pendingByKeeper,
+  }
+}
+
+function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): DashboardFleetSafetyHealth | null {
+  const keeperFibers = asNumber(raw.keeper_fibers)
+  const pausedKeepers = asNumber(raw.paused_keepers)
+  const pausedKeepersHealth = normalizeDashboardPausedKeepersHealth(raw.paused_keepers_health)
+  const fleetSafety = normalizeDashboardFleetPressureHealth(raw.keeper_fleet_safety)
+  const reactionLedger = normalizeDashboardKeeperReactionLedgerHealth(raw.keeper_reaction_ledger)
+  if (
+    keeperFibers == null
+    && pausedKeepers == null
+    && pausedKeepersHealth == null
+    && fleetSafety == null
+    && reactionLedger == null
+  ) {
+    return null
+  }
+  return {
+    keeper_fibers: keeperFibers ?? null,
+    paused_keepers: pausedKeepers ?? null,
+    paused_keepers_health: pausedKeepersHealth,
+    keeper_fleet_safety: fleetSafety,
+    keeper_reaction_ledger: reactionLedger,
+  }
+}
+
+export function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const summary = asString(raw.summary)
+  const targetType = asString(raw.target_type)
+  if (!kind || !summary || !targetType) return null
+  return {
+    kind,
+    severity: asString(raw.severity) ?? 'unknown',
+    summary,
+    target_type: targetType,
+    target_id: asString(raw.target_id) ?? null,
+    actor: asString(raw.actor) ?? null,
+    evidence: raw.evidence,
+  }
+}
+
+export function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAction | null {
+  if (!isRecord(raw)) return null
+  const actionType = asString(raw.action_type)
+  const targetType = asString(raw.target_type)
+  const reason = asString(raw.reason)
+  if (!actionType || !targetType || !reason) return null
+  return {
+    action_type: actionType,
+    target_type: targetType,
+    target_id: asString(raw.target_id) ?? null,
+    severity: asString(raw.severity) ?? 'unknown',
+    reason,
+    confirm_required: asBoolean(raw.confirm_required),
+    suggested_payload: isRecord(raw.suggested_payload) ? raw.suggested_payload : undefined,
+    preview: raw.preview,
+  }
+}
+
+export function messageSortKey(message: Message): number {
+  if (typeof message.seq === 'number' && Number.isFinite(message.seq)) return message.seq
+  const parsed = Date.parse(message.timestamp ?? '')
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function messageIdentityKey(message: Message): string {
+  if (message.requestId) return JSON.stringify(['request_id', message.requestId])
+  if (typeof message.seq === 'number' && Number.isFinite(message.seq)) {
+    return JSON.stringify(['seq', message.seq])
+  }
+  if (message.id) return JSON.stringify(['id', message.id])
+  return JSON.stringify([
+    'fallback',
+    message.timestamp ?? '',
+    message.from ?? '',
+    message.content,
+    message.type ?? '',
+    message.workspace ?? '',
+  ])
+}
+
+function stableValueEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return false
+    if (left.length !== right.length) return false
+    return left.every((value, index) => stableValueEqual(value, right[index]))
+  }
+  if (isRecord(left) || isRecord(right)) {
+    if (!isRecord(left) || !isRecord(right)) return false
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)])
+    for (const key of keys) {
+      if (!stableValueEqual(left[key], right[key])) return false
+    }
+    return true
+  }
+  return false
+}
+
+function messageEqual(left: Message, right: Message): boolean {
+  return stableValueEqual(left, right)
+}
+
+export function mergeMessages(current: Message[], incoming: Message[]): Message[] {
+  if (incoming.length === 0) return current
+  const byKey = new Map<string, Message>()
+  for (const message of current) {
+    byKey.set(messageIdentityKey(message), message)
+  }
+  for (const message of incoming) {
+    const key = messageIdentityKey(message)
+    const previous = byKey.get(key)
+    byKey.set(key, previous && messageEqual(previous, message) ? previous : message)
+  }
+  const merged = [...byKey.values()]
+    .sort((a, b) => messageSortKey(a) - messageSortKey(b))
+    .slice(-500)
+  if (merged.length === current.length && merged.every((message, index) => message === current[index])) {
+    return current
+  }
+  return merged
+}
+
+export function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | undefined {
+  if (!isRecord(raw)) return undefined
+  const releaseVersion = asString(raw.release_version)
+  const startedAt = toIsoTimestamp(raw.started_at)
+  const uptimeSeconds = asNumber(raw.uptime_seconds)
+  if (!releaseVersion || !startedAt || uptimeSeconds == null) return undefined
+  return {
+    release_version: releaseVersion,
+    commit: asString(raw.commit) ?? null,
+    commit_source: asString(raw.commit_source) ?? null,
+    binary_commit: asString(raw.binary_commit) ?? null,
+    binary_commit_source: asString(raw.binary_commit_source) ?? null,
+    repo_head_commit: asString(raw.repo_head_commit) ?? null,
+    repo_head_commit_source: asString(raw.repo_head_commit_source) ?? null,
+    started_at: startedAt,
+    uptime_seconds: uptimeSeconds,
+  }
+}
+
+export function normalizeServerStatus(raw: unknown, generatedAt?: string): ServerStatus | null {
+  if (!isRecord(raw)) return null
+  return {
+    ...(raw as ServerStatus),
+    generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? undefined,
+    build: normalizeBuildIdentity(raw.build),
+  }
+}
+
+export function mergeServerStatus(previous: ServerStatus | null, next: ServerStatus | null): ServerStatus | null {
+  if (!next) return previous
+  if (!previous) return next
+  return {
+    ...previous,
+    ...next,
+    build: next.build ?? previous.build,
+    generated_at: next.generated_at ?? previous.generated_at,
+  }
+}

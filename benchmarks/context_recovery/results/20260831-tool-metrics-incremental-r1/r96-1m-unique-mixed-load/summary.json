@@ -1,0 +1,77 @@
+{
+  "schema": "masc.tool_metrics_incremental_percentiles.unique_mixed_load.v1",
+  "product_head": "cf9bda267f925e166576a061173e0d4aad66993e",
+  "image_id": "sha256:a71bd4beff99d0d37cad4fe6fac394dde0754394d234ba4232b7565efe55efa6",
+  "binary_sha256": "d0bf177faa94e67a7be76764250803c70e0090929d7592f061e0d808ec3540d5",
+  "input": {
+    "valid_unique_rows": 1000000,
+    "malformed_json_rows": 1000,
+    "invalid_format_rows": 1000,
+    "bytes": 93989003,
+    "sha256": "8a0df2e2675ce93d56274d670634f17f30cff52ea361434d7c648026cde9317b"
+  },
+  "first_runtime": {
+    "container_id": "c7ddfec3f220fbf15531167ddf2be77e589a94b31e70a3391657b01ca5e780c6",
+    "runtime_instance_id": "01a05490-048e-7000-a31c-8be3a5d21e0e",
+    "start_to_hydration_log_s": 1.944962,
+    "memory_before_api_mib": 147.1,
+    "api_time_s": [0.000400, 0.000399],
+    "percentiles": {
+      "p50_ms": 500.001,
+      "p95_ms": 950.0,
+      "p99_ms": 990.0,
+      "mean_ms": 500.00050000000005
+    },
+    "writer_calls": 20,
+    "writer_http_200": 20,
+    "writer_is_error_false": 20,
+    "reader_request_time_s": [
+      0.000469,
+      0.000355,
+      0.000352,
+      0.000332,
+      0.000337,
+      0.000362,
+      0.000389,
+      0.000273,
+      0.000286,
+      0.000414,
+      0.000393,
+      0.000353,
+      0.000341,
+      0.000293,
+      0.000261,
+      0.000322,
+      0.000295,
+      0.000307,
+      0.000318,
+      0.000298
+    ],
+    "reader_min_s": 0.000261,
+    "reader_mean_s": 0.000337,
+    "reader_max_s": 0.000469,
+    "final_total_calls": 1000020,
+    "peak_observed_cpu_percent": 4.62,
+    "peak_observed_memory_mib": 151.8,
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "replacement_runtime": {
+    "container_id": "e22836865feece389a17d54eef624d1993db976b3dffdb138e51e425de06b0da",
+    "runtime_instance_id": "01a05490-e14f-7000-a4b1-b4fb27110363",
+    "start_to_hydration_log_s": 1.978886,
+    "hydrated_records": 1000020,
+    "first_api_time_s": 0.000393,
+    "total_calls": 1000020,
+    "memory_mib": 147.4,
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "final_disk": {
+    "physical_rows": 1002020,
+    "bytes": 93991203,
+    "sha256": "0e63d6bdd2c5f497aca19ead6916800216913d13d90dc25c1a30c5d1e8a1b7fc"
+  },
+  "result": "pass",
+  "verified_at": "2026-08-31T06:26:28+09:00"
+}

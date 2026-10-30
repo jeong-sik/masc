@@ -1,0 +1,7 @@
+Testing `Package catalog manifest integration'.
+This run has ID `07APH9G1'.
+
+  [OK]          manifest          0   real parser controls selectable metadata.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41205-parent-integration-20261005/_build/default/test/_build/_tests/Package catalog manifest integration'.
+Test Successful in 0.001s. 1 test run.

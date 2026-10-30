@@ -1,0 +1,250 @@
+Skip to main content
+KEEPERS
+/
+EXHIBIT-EDITOR
+2 실행 가능
+⚑ 주의
+1
+◷ 예약
+Reconnecting...
+Client WS · disconnected
+Verified @admin · admin
+Chat
+⌘J
+v0.35.14 · aad94bbf3f
+Tweaks
+M
+Server data warming; this view will refresh automatically.
+전체
+2
+실행
+2
+주의
+1
+⊚
+최근순
+상태순
+이름순
+주의순
+실행 중
+2
+EE
+exhibit-editor
+실행 중
+·
+glm-coding.glm-5.3
+3분
+▲ 1
+ED
+exhibit-designer
+실행 중
+·
+codex_subscription.gpt-5.6-sol
+3분
+EE
+EXHIBIT-EDITOR
+실행 중
+↻
+⏸
+⏹
+⚙
+9월 10일
+9월 11일
+9월 12일
+SY
+System
+오후 11:11:46
+시스템
+턴 상세
+요청됨
+실행 권한을 요청했습니다
+
+이 호출만 기다리고 나머지 작업은 이어서 진행합니다.
+
+sh -c 'pdftoppm -png -r 60 adaptation/experience.pdf adaptation/pdf_p && ls adaptation/ | grep pdf_p'
+appr_01a095f5-c417-7000-bafc-a9503162fabf
+tool_execute
+SY
+System
+오후 11:12:14
+시스템
+턴 상세
+승인됨
+실행 권한이 승인되었습니다
+
+외부 효과는 아직 적용 확인 전입니다.
+
+sh -c 'pdftoppm -png -r 60 adaptation/experience.pdf adaptation/pdf_p && ls adaptation/ | grep pdf_p'
+appr_01a095f5-c417-7000-bafc-a9503162fabf
+tool_execute
+SY
+System
+오후 11:12:36
+시스템
+턴 상세
+이어감
+승인 후 후속 작업을 이어갔습니다
+
+replay 결과를 받은 Keeper 턴이 완료되거나 안전하게 checkpoint되었습니다.
+
+python3 adaptation/build_evidence_bundle.py
+appr_01a095f4-4cc3-7000-a3bb-1812ac99fc61
+tool_execute
+SY
+System
+오후 11:12:37
+시스템
+턴 상세
+적용 완료
+승인된 작업이 적용되었습니다
+
+호스트 replay 결과가 영속 기록되었습니다.
+
+sh -c 'pdftoppm -png -r 60 adaptation/experience.pdf adaptation/pdf_p && ls adaptation/ | grep pdf_p'
+appr_01a095f5-c417-7000-bafc-a9503162fabf
+tool_execute
+e85288df3bdf
+EX
+exhibit-editor
+오후 11:13:08
+사람
+턴 연결 없음
+턴 상세
+복사
+
+[task-004] 거절 4축 재준비 완료 — 검수 자료 전달 (exhibit-editor, 2026-09-12)
+
+축 1 (단일 원천): review.md §3에 '최종 산출 실측 단일 원천' 표(12파일 bytes·SHA256)를 신설했고, 낡은 "보류/완성품 제출은 뒤" 문장은 제거·역사 기록으로 격상했습니다. decision.md·evidence.json은 이 표를 인용합니다. 최종: PPTX 25,462B·4e0099d6…, MP4 345,612B·e9f26dde…, PDF 57,307B·d2c682cd….
+
+축 2 (검수 이미지 전부 기록): evidence.json에 inspection_images 9종(파일명·bytes·SHA256·검수 대상·판정) 추가 — cover·Q1·Q2·Q3·end·Q1c·Q2c·Q3c·pdf_p1.
+
+축 3 (바이너리 읽기 보완): 기계가독 증거 4종을 파일로 남기고 evidence.json에 실측 반영 — manifest.json 5,454B·d37fd1c5…(슬라이드 8의 제목·전체 텍스트·진행자 노트 원문), ffprobe_raw.json 2,600B·8c37ebbc…, ffmpeg_decode.log 3,199B·210dea26…, pptx_relmap.txt 2,729B·046e09e7….
+
+축 4 (운영자 시각 검수 자료): keeper_artifact_transfer export 객체 9종 — PPTX 렌더 5장(pdf_p-1 표지/허구 고지, pdf_p-3 질문1 카드, pdf_p-5 두 이름표 결과, pdf_p-7 성찰, pdf_p-8 종료·허구 고지) + MP4 프레임 4장(check_Q1c/Q2c/Q3c 선택카드, check_cover 표지). 각 export 매니페스트 sha256: pdf_p-1 47f23da0…, pdf_p-3 e947c45e…, pdf_p-5 8dc8babb…, pdf_p-7 621c8bdb…, pdf_p-8 244d1091…, check_Q1c c10982fd…, check_Q2c 596e0ba9…, check_Q3c 73862715…, check_cover 7bb2fcff….
+
+이 9개 export 객체를 materialize하시면 됩니다(파일명·용도는 purpose에 표기). 검수 후 Board에 기록해 주시면 재제출 evidence_refs에 반영하겠습니다. 재제출은 운영자 검수 결과를 반영한 뒤 진행합니다. serial/·완료 Goal은 무변경입니다.
+
+SY
+System
+오후 11:13:09
+시스템
+턴 상세
+이어감
+승인 후 후속 작업을 이어갔습니다
+
+replay 결과를 받은 Keeper 턴이 완료되거나 안전하게 checkpoint되었습니다.
+
+sh -c 'pdftoppm -png -r 60 adaptation/experience.pdf adaptation/pdf_p && ls adaptation/ | grep pdf_p'
+appr_01a095f5-c417-7000-bafc-a9503162fabf
+tool_execute
+▸
+자율턴
+1개
+board_list surface_read
+오후 11:13:09
+▸
+자율턴
+1개
+artifact_read board_list
+오후 11:17:30
+▸
+자율턴
+1개
+Edit Grep
+오후 11:23:40
+▸
+자율턴
+1개
+Edit×2
+오후 11:29:59
+▸
+자율턴
+1개
+memory_write
+오후 11:37:40
+채팅 작업 상세/제어
+Running
+Keeper 턴 실행 중
+현재 턴 중단
+⊕
+🔗
+전송
+주의
+approval_pending · resolve_approval
+작업 대기열
+3
+기술 상세
+처리 중
+외부 자극
+—
+→
+예약
+—
+→
+큐
+자율 이벤트
+1
+→
+운영자
+승인 대기
+2
+→
+KEEPER
+—
+오래 기다린 순서
+지금
+1시간
+1일
+승인 대기
+운영자 승인 대기 · tool_execute
+1시간 전
+승인 대기
+운영자 승인 대기 · tool_execute
+53분 전
+자율 이벤트
+작업 task-004 완료 증거 거절됨 (즉시)
+11.926초 전
+런타임
+glm-coding.glm-5.3
+▸
+heartbeat 300s
+·
+다음 wake ~0s
+poll
+컨텍스트
+46%
+마지막 턴 INPUT
+119.9k
+/
+262k
+마지막 턴 · 창 크기
+마지막 완료 요청:
+T429
+· 4분 전
+지금 쓰는 양
+알 수 없음
+마지막 턴 기준 · 재시작하면 초기화
+◈ 메모리 보기
+핀 · 스토어 · 회상
+작업 대기열
+3
+처리 중
+지금
+1시간
+1일+
+승인 대기
+운영자 승인 대기 · tool_execute
+1시간 전
+승인 대기
+운영자 승인 대기 · tool_execute
+53분 전
+자율 이벤트
+작업 task-004 완료 증거 거절됨 (즉시)
+0분 전
+소유 태스크
+task-004
+IN_PROGRESS
+연작의 선택과 반론을 관객 참여형 PPTX·MP4로 옮기기
+task-003
+DONE
+기억의 정원 세계에서 이어지는 세 편의 완결 소설과 동료 검토

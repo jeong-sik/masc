@@ -1,0 +1,11 @@
+Testing `Goal cancellation delivery'.
+This run has ID `WPCKW4LC'.
+
+  [OK]          durability          0   repeat repairs committed audit exactl...
+  [OK]          durability          1   fresh process drains audit after Goal...
+  [OK]          durability          2   failed commit creates no effects.
+  [OK]          durability          3   unavailable primary remains unchanged.
+  [OK]          durability          4   missing Goal remains missing.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-goal-drop-6ee5nwgc/_build/_tests/Goal cancellation delivery'.
+Test Successful in 0.042s. 5 tests run.

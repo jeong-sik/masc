@@ -1,0 +1,23 @@
+[
+  {
+    "case": "empty",
+    "canonical_bytes": "[]",
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "bytes": 2,
+    "origin": "hand-authored ASCII fixture bytes; SHA256 computed as static fixture metadata, not serializer execution"
+  },
+  {
+    "case": "singleton-builtin",
+    "canonical_bytes": "[{\"schema\":{\"description\":\"\",\"name\":\"noop\",\"parameters\":[]},\"source\":{\"kind\":\"builtin\"}}]",
+    "sha256": "11f42a0e73778149cc9fb0b5c9d6c7f768cf47c364da3d697b66b0f8a3ff67d3",
+    "bytes": 89,
+    "origin": "hand-authored ASCII fixture bytes; SHA256 computed as static fixture metadata, not serializer execution"
+  },
+  {
+    "case": "attached-full-identity",
+    "canonical_bytes": "[{\"schema\":{\"description\":\"\",\"input_schema\":{\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"},\"name\":\"remote.inspect\",\"parameters\":[],\"strict\":true},\"source\":{\"endpoint\":\"https://fixture.invalid/mcp\",\"kind\":\"attached\",\"provider_id\":\"provider-a\",\"remote_name\":\"inspect\"}}]",
+    "sha256": "60bb24bfdcb8814dec7cab1de724320708a887242a303f86f351178c77e6133b",
+    "bytes": 284,
+    "origin": "hand-authored ASCII fixture bytes; SHA256 computed as static fixture metadata, not serializer execution"
+  }
+]

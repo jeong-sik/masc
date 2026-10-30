@@ -1,0 +1,117 @@
+(** Shared actor-scoped projection caching for dashboard surfaces.
+
+    Execution and mission both derive top-level summaries from the same
+    operator snapshot. This module funnels them through a short-lived
+    actor-scoped cache so warm refresh loops and repeated navigation
+    do not recompute identical reads. *)
+
+val normalize_actor_name : string option -> string
+(** Trim and default a missing/empty actor to ["dashboard"]. *)
+
+val with_current_keeper_observations :
+  config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
+(** Refresh current effective Board addresses, Keeper equipment, wallet balances, Item-account revisions and currency supply together in
+    an operator/execution/briefing envelope.
+    Call after outer HTTP caches as well as the metadata snapshot cache.
+    [candle_observation_sequence] orders the combined fresh observations,
+    including address changes, independently of cached metadata generations.
+    Consecutive non-overlapping reads with identical inserted observations
+    retain that identity; internal ledger replay timestamps do not invalidate
+    prepared responses. Every request still rereads authority, so clock-driven
+    balance changes and changed account revisions advance the identity.
+    Board addresses are reread from effective metadata
+    once per Keeper per response, including on encoded-cache hits.
+    Consumers reject an older observation in the same
+    server incarnation. *)
+
+val with_current_gate_keeper_observations :
+  config:Workspace_utils.config -> Yojson.Safe.t -> Yojson.Safe.t
+(** Add operator-only Candle observations to a Gate roster after CanAdmin
+    authorization. Retain the Gate schema without execution sequence fields. *)
+
+val get_or_compute_snapshot_json :
+  config:Workspace_utils.config ->
+  actor:string option ->
+  (string -> Yojson.Safe.t Pool_work.t) ->
+  Yojson.Safe.t
+(** Cached metadata with fresh authoritative portrait equipment per response.
+    The callback receives the normalized actor name produced by
+    {!normalize_actor_name} and returns the work the cache submits. *)
+
+val invalidate_snapshot_json : config:Workspace_utils.config -> unit
+(** Drop every actor and HTTP operator-snapshot cache entry and advance the
+    publication generation so an in-flight older computation cannot republish
+    after this invalidation. *)
+
+val with_snapshot_publication_generation : (int -> 'a) -> 'a
+(** Run one short, non-yielding publication operation against the current
+    process-local generation. Invalidation uses the same guard. *)
+
+val register_snapshot_generation_observer : (int -> unit) -> unit
+
+val snapshot_invalidation_generation : unit -> int
+(** The generation [invalidate_snapshot_json] most recently installed. Readers
+    pair it with the publication owner's CAS rather than fabricating an
+    envelope from a later cache read. *)
+(** Register the transport observer for generation invalidations. The observer
+    runs after the publication guard is released and may therefore observe
+    callbacks out of order. It must ask the serialized publication owner for a
+    current generation tombstone rather than fabricating one from a later
+    read. *)
+
+val get_or_compute_digest_json :
+  config:Workspace_utils.config ->
+  actor:string option ->
+  (string -> Yojson.Safe.t Pool_work.t) ->
+  Yojson.Safe.t
+(** Cached read with TTL [5.0 s] for the heavier digest projection. *)
+
+type operator_snapshot_fn = {
+  snapshot : 'a.
+    ?actor:string ->
+    ?view:string ->
+    ?include_messages:bool ->
+    ?include_keepers:bool ->
+    ?include_summary_fields:bool ->
+    ?lightweight_summary:bool ->
+    'a Tool_operator.context ->
+    Yojson.Safe.t;
+}
+
+type operator_digest_fn = {
+  digest : 'a.
+    ?actor:string ->
+    ?target_type:string ->
+    ?target_id:string ->
+    ?include_workers:bool ->
+    'a Tool_operator.context ->
+    (Yojson.Safe.t, string) result;
+}
+
+val register_operator_snapshot_json : operator_snapshot_fn -> unit
+
+val register_operator_digest_json : operator_digest_fn -> unit
+
+val operator_snapshot_json :
+  ?actor:string ->
+  ?view:string ->
+  ?include_messages:bool ->
+  ?include_keepers:bool ->
+  ?include_summary_fields:bool ->
+  ?lightweight_summary:bool ->
+  'a Tool_operator.context ->
+  Yojson.Safe.t
+
+val operator_digest_json :
+  ?actor:string ->
+  ?target_type:string ->
+  ?target_id:string ->
+  ?include_workers:bool ->
+  'a Tool_operator.context ->
+  (Yojson.Safe.t, string) result
+
+module For_test : sig
+  val with_current_keeper_observations :
+    read:(unit -> Candle_observe.t) -> config:Workspace_utils.config ->
+    Yojson.Safe.t -> Yojson.Safe.t
+end

@@ -1,0 +1,61 @@
+(** Command-palette projections over loaded TUI state. *)
+
+type gate_lane = Workspace_gate | External_gate
+
+type palette_action =
+  | Palette_browser_lane
+  | Palette_hide_browser_lane
+  (* Connectors draws two screens: the transport list, and the Browser Lane
+     that [show_browser_lane] opens under the same view. A plain
+     [Palette_goto Connectors] lands on whichever the lane's visibility says,
+     so the list -- the half with no key of its own -- would still be
+     unreachable whenever the lane had been opened once. This one names the
+     list and closes the lane to get there. *)
+  | Palette_connectors
+  | Palette_collab
+  | Palette_msx
+  | Palette_dos
+  | Palette_lane_addons
+  | Palette_lane_history of Lane_run_identity.t
+      (** Retained logical observations, independent of current settings rows
+          and installed Addons. Selection does not grant read authority. *)
+  | Palette_addon_results of string
+      (** One installation's Results, by its declaration id. *)
+  | Palette_goto of Masc_tui_types.surface
+  | Palette_usage_scope of string option
+  | Palette_config of Masc_tui_types.config_pane
+  | Palette_ui_language of Masc_tui_types.ui_language
+  | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
+  | Palette_chat of string
+  | Palette_task of string
+  | Palette_task_creation of Masc_tui_types.task_dispatch_request
+      (** The exact completed creation retained by the selected composer Keeper.
+          Activation must recheck original membership and workspace. This opens
+          reading only; it does not consume or restore the composer draft. *)
+  | Palette_board_hearth of string option
+  | Palette_board_post of string
+  (* (question, symbol): a language-server question about a name on the
+     Code pane's cursor line — the K/D candidates ride the palette as
+     entries so one keypress can also be a choice among several names. *)
+  | Palette_lsp of string * string
+  | Palette_code_file of string
+  | Palette_code_location of Masc_tui_types.code_location_offer * Masc.Tui_decode.lsp_location
+
+val gate_lane_label : gate_lane -> string
+val gate_mode_label : Masc.Keeper_gate_mode.t -> string
+val code_cursor_line_symbols : Masc_tui_types.state -> string list
+val lsp_question_prefixes : (string * string) list
+val palette_entries : Masc_tui_types.state -> (string * palette_action) list
+val palette_matches : Masc_tui_types.state -> (string * palette_action) list
+(** Search the existing typed destinations and content. Canonical top-level
+    surface names come from [surface_ring], alongside explicit aliases, so a
+    destination name is a prefix candidate before unrelated substring matches.
+    Matching does not introduce another destination or execute an action. *)
+
+val selected_file : Masc_tui_types.state -> string option
+val selected_location : Masc_tui_types.state ->
+  (Masc_tui_types.code_location_offer * Masc.Tui_decode.lsp_location) option
+val palette_starts_with : needle:string -> string -> bool
+val palette_subsequence : needle:string -> string -> bool
+
+val palette_typed_question : string -> (string * string option) option

@@ -1,0 +1,4518 @@
+(* Per-keeper LLM runtime routing via runtime.toml [[runtime.assignments]].
+
+   runtime.toml is the sole SSOT for keeper→runtime
+   assignment, keyed by keeper name.  [Keeper_meta_contract.runtime_id_of_meta]
+   resolves a keeper's assignment via [Runtime.runtime_id_for_keeper] so it
+   reaches the turn driver; an unassigned keeper falls through to
+   [[runtime].default]; and the driver's [Runtime.get_runtime_by_id] returns
+   [None] for an id that does not materialize, so dispatch fails fast (no silent
+   substitution — RFC-0206 §2.1).
+
+   This is the SAME runtime source as
+   [Keeper_runtime.effective_declarative_runtime_id] (declare/status), which
+   delegates to [runtime_id_of_meta], so there is one surface — the dispatcher
+   and the reconcile change-detector cannot disagree by construction. *)
+
+open Alcotest
+open Masc
+
+let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
+    ~lane_id ~runtime_ids () =
+  Runtime.set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
+    ~lane_id ~runtime_ids ()
+  |> Result.map_error Runtime.lane_set_error_to_string
+;;
+
+(* These tests assert on the operator-facing wording, so the typed failure is
+   rendered once here instead of at every call below. *)
+let load_list_text ~config_path =
+  Runtime.load_list ~config_path
+  |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
+;;
+
+module J = Yojson.Safe.Util
+module KMC = Keeper_meta_contract
+
+(* ---- temp config-dir + keeper TOML fixtures
+   (helper shape mirrors test_keeper_runtime_denylist.ml) ---- *)
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then begin
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+;;
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+;;
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
+;;
+
+let read_file path = In_channel.with_open_text path In_channel.input_all
+
+let fixture_path rel = Masc_test_deps.source_path rel
+
+let parse_key_value_fixture path =
+  read_file path
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+    match String.split_on_char '=' line with
+    | [ key; value ] ->
+      let key = String.trim key in
+      if String.equal key "" then None else Some (key, String.trim value)
+    | _ -> None)
+
+let fixture_field fields key =
+  match List.assoc_opt key fields with
+  | Some value -> value
+  | None -> Alcotest.failf "fixture field %S missing" key
+
+let fixture_int_field fields key =
+  match int_of_string_opt (fixture_field fields key) with
+  | Some value -> value
+  | None -> Alcotest.failf "fixture field %S is not an int" key
+
+let restore_model_catalog = function
+  | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+  | None -> Llm_provider.Model_catalog.clear_global ()
+;;
+
+let with_model_catalog_content content f =
+  let path = Filename.temp_file "runtime-thinking-agent_core-models" ".toml" in
+  let previous = Llm_provider.Model_catalog.global () in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_model_catalog previous;
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+      write_file path content;
+      match Llm_provider.Model_catalog.load_file path with
+      | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
+      | Ok catalog ->
+        Llm_provider.Model_catalog.set_global catalog;
+        f ())
+;;
+
+let string_contains haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop index =
+      index + needle_len <= haystack_len
+      &&
+      (String.equal (String.sub haystack index needle_len) needle
+       || loop (index + 1))
+    in
+    loop 0
+;;
+
+(* Point MASC_CONFIG_DIR at an isolated temp dir and reset the resolver cache so
+   the new value takes effect; restore the prior value on exit. *)
+let with_config_dir f =
+  with_temp_dir "runtime-per-keeper-routing-config" @@ fun config_dir ->
+  let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match original with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      f config_dir)
+;;
+
+let make_meta name : KMC.keeper_meta =
+  let json =
+    `Assoc
+      [ "name", `String name
+      ; "trace_id", `String ("test-trace-" ^ name)
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok m -> m
+  | Error e -> failwith ("meta_of_json failed: " ^ e)
+;;
+
+(* Runtime config materializing two bindings: the default ["runpod_mtp.qwen"]
+   and ["openai.gpt"] (used to prove [get_runtime_by_id] resolution).
+
+   Per-keeper routing is declared in
+   [[runtime.assignments]] (runtime.toml SSOT), keyed by keeper name — NOT in
+   keeper TOML.  [routingtest]/[budgettest] route to the non-default
+   [openai.gpt]; an unassigned keeper falls to [runtime].default.
+
+   Both HTTP providers declare [exact-body-timeout-s]: the first-run and
+   exact-lane writers below put their runtimes in exact-output slots, and a
+   save adding a slot whose provider declares none is refused (#38779). *)
+let runtime_config =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.assignments]
+routingtest = "openai.gpt"
+budgettest = "openai.gpt"
+
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "openai-compatible-http"
+endpoint = "https://runpod.example/v1"
+exact-body-timeout-s = 120.0
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
+
+[models.qwen]
+api-name = "qwen"
+max-context = 128000
+temperature = 0.65
+tools-support = true
+streaming = true
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[models.small]
+api-name = "small"
+max-context = 32000
+tools-support = true
+streaming = true
+
+[models.gpt.capabilities]
+max-output-tokens = 32000
+supports-tool-choice = true
+supports-required-tool-choice = true
+supports-named-tool-choice = true
+supports-parallel-tool-calls = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-audio-input = true
+supports-video-input = true
+supports-system-prompt = true
+supports-prompt-caching = true
+supports-top-k = true
+supports-min-p = true
+supports-seed = true
+emits-usage-tokens = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+
+[openai.small]
+max-concurrent = 1
+|}
+;;
+
+let runtime_config_openai_default =
+  {|
+[runtime]
+default = "openai.gpt"
+
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "openai-compatible-http"
+endpoint = "https://runpod.example/v1"
+exact-body-timeout-s = 120.0
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
+
+[models.qwen]
+api-name = "qwen"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[models.gpt.capabilities]
+supports-tool-choice = true
+supports-required-tool-choice = true
+supports-named-tool-choice = true
+supports-parallel-tool-calls = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-system-prompt = true
+supports-seed = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+  |}
+;;
+
+let runtime_config_missing_openai_env_credential =
+  runtime_config
+  ^ {|
+
+[providers.openai.credentials]
+type = "env"
+key = "MASC_TEST_RUNTIME_RUNNER_MISSING_CREDENTIAL_9C8B1A72"
+|}
+;;
+
+let runtime_config_messages_http =
+  {|
+[runtime]
+default = "kimi.kimi-for-coding"
+
+[runtime.assignments]
+nu = "kimi.kimi-for-coding"
+
+[providers.kimi]
+display-name = "Kimi Code Plan"
+protocol = "messages-http"
+endpoint = "https://example.invalid/kimi"
+
+[providers.kimi.credentials]
+type = "inline"
+value = "test-kimi-key"
+
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 256000
+tools-support = true
+streaming = true
+
+[kimi.kimi-for-coding]
+|}
+;;
+
+let runtime_route_model_catalog =
+  {|
+[[models]]
+model_id = "qwen"
+provider_name = "runpod_mtp"
+base = "openai_chat"
+max_context_tokens = 128000
+supports_tools = true
+
+[[models]]
+model_id = "gpt"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 64000
+supports_tools = true
+supports_response_format_json = true
+supports_structured_output = true
+
+[[models]]
+model_id = "small"
+provider_name = "openai"
+base = "openai_chat"
+max_context_tokens = 32000
+supports_tools = true
+
+[[providers]]
+id = "kimi"
+kind = "kimi"
+identity_kinds = ["kimi", "openai_compat"]
+base_url = "https://api.kimi.com/coding"
+request_path = "/v1/messages"
+auth = "api-key"
+capabilities_base = "kimi"
+|}
+;;
+
+let with_runtime_file f =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+       with_temp_dir "runtime-per-keeper-routing-runtime" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path runtime_config;
+       (match Runtime.init_default ~config_path:path with
+        | Ok () -> ()
+        | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+       f path)
+;;
+
+let with_runtime_initialized f =
+  with_runtime_file (fun _path -> f ())
+;;
+
+let codex_runtime_config =
+  {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[codex.codex]
+
+[runtime]
+default = "codex.codex"
+|}
+;;
+
+(* A Muse Code runtime: an official client whose session protocol has no
+   output-schema channel ([Runtime_schema.api_format_output_schema_channel]). *)
+let muse_serve_bindings =
+  {|[providers.muse_code]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/synthetic/muse-home"
+is-non-interactive = true
+
+[models.muse-spark]
+api-name = "muse-spark-1.3"
+max-context = 1007997
+
+[muse_code.muse-spark]
+|}
+;;
+
+let muse_serve_runtime_id = "muse_code.muse-spark"
+
+let with_codex_runtime_initialized f =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_temp_dir "runtime-codex-dashboard" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path codex_runtime_config;
+       match Runtime.init_default ~config_path:path with
+       | Error msg -> Alcotest.failf "Codex runtime init failed: %s" msg
+       | Ok () -> f ())
+;;
+
+let test_messages_http_runtime_loads_and_assignment_resolves () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+       with_temp_dir "runtime-messages-http" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path runtime_config_messages_http;
+       match Runtime.init_default ~config_path:path with
+       | Error msg ->
+         Alcotest.failf "messages-http runtime init_default failed: %s" msg
+       | Ok () ->
+         Alcotest.(check string)
+           "nu assignment resolves to kimi.kimi-for-coding"
+           "kimi.kimi-for-coding"
+           (KMC.runtime_id_of_meta (make_meta "nu"));
+         Alcotest.(check bool)
+           "messages-http runtime is materialized"
+           true
+           (List.mem "kimi.kimi-for-coding" (Runtime.get_runtime_ids ())))
+;;
+
+(* ---- the per-keeper selection actually reaches the dispatcher ---- *)
+
+let test_assignment_drives_runtime_id_of_meta () =
+  with_runtime_initialized (fun () ->
+    (* [routingtest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
+    Alcotest.(check string)
+      "assigned keeper dispatches to its runtime.toml assignment, not the global default"
+      "openai.gpt"
+      (KMC.runtime_id_of_meta (make_meta "routingtest")))
+;;
+
+let test_runtime_assignment_writer_updates_runtime_toml () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.set_runtime_id_for_keeper
+         ~runtime_config_path:path
+         ~keeper_name:"routingtest"
+         ~runtime_id:"runpod_mtp.qwen"
+         ()
+     with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "set_runtime_id_for_keeper failed: %s" msg);
+    Alcotest.(check bool)
+      "runtime.toml assignment rewritten"
+      true
+      (string_contains
+         (Fs_compat.load_file path)
+         "\"routingtest\" = \"runpod_mtp.qwen\"");
+    Alcotest.(check (option string))
+      "in-process assignment cache refreshed"
+      (Some "runpod_mtp.qwen")
+      (Runtime.runtime_id_for_keeper "routingtest");
+    Alcotest.(check string)
+      "meta runtime resolver sees updated assignment"
+      "runpod_mtp.qwen"
+      (KMC.runtime_id_of_meta (make_meta "routingtest")))
+;;
+
+(* The inventory reports two kind fields per provider: [runtime_kind] is the
+   transport as classified, [kind] is the operator-facing bucket. A
+   non-loopback HTTP endpoint is "http" / "cloud". The mapping used to reach
+   "cloud" through a wildcard over the serialized name, so this pair was the
+   wildcard's only live input and nothing asserted it. *)
+let test_runtime_inventory_reports_transport_kind () =
+  with_runtime_initialized (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let field runtime_id key =
+      providers
+      |> List.find (fun p ->
+           String.equal runtime_id (p |> J.member "runtime_id" |> J.to_string))
+      |> J.member key
+      |> J.to_string
+    in
+    List.iter
+      (fun runtime_id ->
+         Alcotest.(check string)
+           (Printf.sprintf "%s runtime_kind" runtime_id)
+           "http"
+           (field runtime_id "runtime_kind");
+         Alcotest.(check string)
+           (Printf.sprintf "%s dashboard kind" runtime_id)
+           "cloud"
+           (field runtime_id "kind"))
+      [ "runpod_mtp.qwen"; "openai.gpt" ])
+;;
+
+let test_runtime_inventory_surfaces_assignment_status () =
+  with_runtime_initialized (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let assignment_status = J.member "assignment_status" json in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let provider_by_runtime_id runtime_id =
+      List.find
+        (fun provider ->
+           String.equal
+             runtime_id
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let qwen = provider_by_runtime_id "runpod_mtp.qwen" in
+    let gpt = provider_by_runtime_id "openai.gpt" in
+    Alcotest.(check string)
+      "schema"
+      "masc.runtime_assignment_status.v1"
+      (assignment_status |> J.member "schema" |> J.to_string);
+    Alcotest.(check string)
+      "status"
+      "degraded"
+      (assignment_status |> J.member "status" |> J.to_string);
+    Alcotest.(check int)
+      "assignment count"
+      2
+      (assignment_status |> J.member "assignment_count" |> J.to_int);
+    Alcotest.(check int)
+      "assigned runtime count"
+      1
+      (assignment_status |> J.member "assigned_runtime_count" |> J.to_int);
+    Alcotest.(check int)
+      "default assignment count"
+      0
+      (assignment_status |> J.member "default_assignment_count" |> J.to_int);
+    Alcotest.(check bool)
+      "operator action required"
+      true
+      (assignment_status |> J.member "operator_action_required" |> J.to_bool);
+    Alcotest.(check bool)
+      "single runtime warning"
+      true
+      (string_contains
+         (Yojson.Safe.to_string assignment_status)
+         "single_runtime_assignment_pin");
+    Alcotest.(check (float 0.0001))
+      "model temperature override"
+      0.65
+      (qwen |> J.member "temperature" |> J.to_float);
+    Alcotest.(check bool)
+      "absent model temperature is null"
+      true
+      (match gpt |> J.member "temperature" with
+       | `Null -> true
+       | _ -> false))
+;;
+
+let test_codex_runtime_inventory_is_unverified_until_measured () =
+  with_codex_runtime_initialized (fun () ->
+    let entry =
+      Server_dashboard_http_runtime_info.runtime_inventory_json ()
+      |> J.member "providers"
+      |> J.to_list
+      |> List.find (fun entry ->
+        String.equal
+          "codex.codex"
+          (entry |> J.member "runtime_id" |> J.to_string))
+    in
+    Alcotest.(check string)
+      "status"
+      "configured_unverified"
+      (entry |> J.member "status" |> J.to_string);
+    Alcotest.(check bool)
+      "not available without runtime evidence"
+      false
+      (entry |> J.member "available" |> J.to_bool);
+    let verification = entry |> J.member "verification" in
+    Alcotest.(check bool)
+      "not measured"
+      false
+      (verification |> J.member "measured" |> J.to_bool);
+    Alcotest.(check string)
+      "reason"
+      "no_successful_runtime_observation"
+      (verification |> J.member "reason" |> J.to_string))
+;;
+
+(* The inventory decides "official client" from the runtime's checkpoint
+   owner, so an Agent_core runtime is the other side of the Codex case above:
+   configured, available, and with nothing to verify. *)
+let test_agent_core_runtime_inventory_is_configured () =
+  with_runtime_initialized (fun () ->
+    let entry =
+      Server_dashboard_http_runtime_info.runtime_inventory_json ()
+      |> J.member "providers"
+      |> J.to_list
+      |> List.find (fun entry ->
+        String.equal
+          "openai.gpt"
+          (entry |> J.member "runtime_id" |> J.to_string))
+    in
+    Alcotest.(check string)
+      "status"
+      "configured"
+      (entry |> J.member "status" |> J.to_string);
+    Alcotest.(check bool)
+      "available"
+      true
+      (entry |> J.member "available" |> J.to_bool);
+    Alcotest.(check bool)
+      "nothing to verify"
+      true
+      (match entry |> J.member "verification" with
+       | `Null -> true
+       | _ -> false))
+;;
+
+let test_codex_runtime_cannot_enter_agent_core_runner () =
+  with_codex_runtime_initialized (fun () ->
+    match Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"codex.codex" () with
+    | Ok _ -> Alcotest.fail "Codex official-client runtime entered the AGENT_CORE runner"
+    | Error detail ->
+      Alcotest.(check bool)
+        "typed ownership diagnostic"
+          true
+          (* Matches provider_config_of_runtime's Codex_app_server arm verbatim
+             minus the runtime id, so the assertion pins both the ownership
+             claim and which owner is denied. *)
+          (string_contains detail "is owned by an official client, not Agent Core"))
+;;
+
+let test_codex_runtime_has_no_agent_core_thinking_seed () =
+  with_codex_runtime_initialized (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"codex.codex" in
+    Alcotest.(check (option bool))
+      "thinking enabled"
+      None
+      seed.Runtime_inference.thinking_enabled;
+    Alcotest.(check (option bool))
+      "preserve thinking"
+      None
+      seed.Runtime_inference.preserve_thinking)
+;;
+
+let test_runtime_inventory_surfaces_declared_model_capabilities () =
+  with_runtime_initialized (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let gpt =
+      List.find
+        (fun provider ->
+           String.equal
+             "openai.gpt"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let caps =
+      gpt
+      |> J.member "declared_spec"
+      |> J.member "model"
+      |> J.member "capabilities"
+    in
+    (match caps with
+     | `Assoc _ -> ()
+     | _ -> Alcotest.fail "declared model capabilities must be an object");
+    Alcotest.(check string)
+      "declared capability source"
+      "runtime.toml"
+      (caps |> J.member "source" |> J.to_string);
+    Alcotest.(check bool)
+      "declared required tool choice"
+      true
+      (caps |> J.member "supports_required_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared named tool choice"
+      true
+      (caps |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level audio input"
+      true
+      (gpt |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level video input"
+      true
+      (gpt |> J.member "supports_video_input" |> J.to_bool);
+    Alcotest.(check int)
+      "top-level max output tokens"
+      32000
+      (gpt |> J.member "max_output_tokens" |> J.to_int);
+    Alcotest.(check bool)
+      "top-level required tool choice"
+      true
+      (gpt |> J.member "supports_required_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level named tool choice"
+      true
+      (gpt |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level parallel tool calls"
+      true
+      (gpt |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level response format json"
+      true
+      (gpt |> J.member "supports_response_format_json" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level structured output"
+      true
+      (gpt |> J.member "supports_structured_output" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level streaming"
+      true
+      (gpt |> J.member "streaming" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level system prompt"
+      true
+      (gpt |> J.member "supports_system_prompt" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level prompt caching"
+      true
+      (gpt |> J.member "supports_prompt_caching" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level top_k"
+      true
+      (gpt |> J.member "supports_top_k" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level min_p"
+      true
+      (gpt |> J.member "supports_min_p" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level seed"
+      true
+      (gpt |> J.member "supports_seed" |> J.to_bool);
+    Alcotest.(check bool)
+      "top-level usage tokens"
+      true
+      (gpt |> J.member "emits_usage_tokens" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared audio input"
+      true
+      (caps |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared video input"
+      true
+      (caps |> J.member "supports_video_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared parallel tool calls"
+      true
+      (caps |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check bool)
+      "declared system prompt"
+      true
+      (caps |> J.member "supports_system_prompt" |> J.to_bool))
+;;
+
+let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match
+       Runtime.set_runtime_id_for_keeper
+         ~runtime_config_path:path
+         ~keeper_name:"routingtest"
+         ~runtime_id:"missing.runtime"
+         ()
+     with
+     | Ok _receipt -> Alcotest.fail "expected unknown runtime assignment to fail"
+     | Error msg ->
+       Alcotest.(check bool)
+         "error mentions unresolved assignment"
+         true
+         (string_contains msg "missing.runtime"));
+    Alcotest.(check string)
+      "runtime.toml unchanged after validation failure"
+      before
+      (Fs_compat.load_file path);
+    Alcotest.(check (option string))
+      "in-process assignment cache unchanged"
+      (Some "openai.gpt")
+      (Runtime.runtime_id_for_keeper "routingtest"))
+;;
+
+let test_runtime_assignment_writer_clears_assignment () =
+  with_runtime_file (fun path ->
+    (match Runtime.clear_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest" () with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "clear_runtime_id_for_keeper failed: %s" msg);
+    Alcotest.(check bool)
+      "runtime.toml assignment removed"
+      false
+      (string_contains (Fs_compat.load_file path) "routingtest");
+    Alcotest.(check (option string))
+      "in-process assignment cache cleared"
+      None
+      (Runtime.runtime_id_for_keeper "routingtest"))
+;;
+
+let test_runtime_and_egress_change_share_the_published_revision () =
+  with_runtime_file (fun path ->
+    let written = match Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
+      ~keeper_name:"routingtest" (fun transaction ->
+        Runtime.commit_keeper_assignment ~egress_allow:["example.com"] transaction
+          ~runtime_id:(Some "runpod_mtp.qwen")) with
+      | Ok {value=Ok (Runtime.Assignment_committed write); _} -> write.revision
+      | Ok {value=Ok (Runtime.Assignment_unchanged _); _} -> fail "changed settings were reported unchanged"
+      | Ok {value=Error error; _} | Error error -> fail error in
+    check (option string) "egress write did not undo runtime assignment"
+      (Some "runpod_mtp.qwen") (Runtime.runtime_id_for_keeper "routingtest");
+    let loaded = match Runtime_toml.parse_string (Fs_compat.load_file path) with
+      | Ok config -> config | Error _ -> fail "combined write produced invalid runtime configuration" in
+    let allow = Option.map Egress_allowlist.allow_strings
+      (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"routingtest") in
+    check (option (list string)) "runtime and egress both survived" (Some ["example.com"]) allow;
+    let observed = match Runtime.observe_keeper_assignment ~runtime_config_path:path
+      ~keeper_name:"routingtest" () with
+      | Ok observation -> observation.value | Error error -> fail error in
+    check string "returned revision is the final file revision"
+      (Yojson.Safe.to_string (Runtime.keeper_assignment_revision_to_yojson written))
+      (Yojson.Safe.to_string (Runtime.keeper_assignment_revision_to_yojson observed)))
+;;
+
+let test_deleted_keeper_loses_assignment_and_egress_together () =
+  with_runtime_file (fun path ->
+    let source = Fs_compat.load_file path
+      |> fun text -> Runtime_config_text.update_egress_allow_text text ~keeper_name:"routingtest" ~allow:["api.github.com"]
+      |> fun text -> Runtime_config_text.update_egress_allow_text text ~keeper_name:"other" ~allow:["example.com"] in
+    write_file path source;
+    (match Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
+       ~keeper_name:"routingtest" Runtime.commit_keeper_removal with
+     | Ok { value = Ok _; _ } -> ()
+     | Ok { value = Error detail; _ } | Error detail -> fail detail);
+    check (option string) "deleted Keeper is no longer assigned in the running process"
+      None (Runtime.runtime_id_for_keeper "routingtest");
+    let loaded = match Runtime_toml.parse_string (Fs_compat.load_file path) with
+      | Ok config -> config | Error _ -> fail "cleanup wrote invalid runtime configuration" in
+    check bool "deleted Keeper egress override is absent" true
+      (Option.is_none (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"routingtest"));
+    check bool "other Keeper egress override survives" true
+      (Option.is_some (Egress_allowlist.for_keeper loaded.egress_allowlists ~keeper_name:"other")))
+;;
+
+let test_runtime_assignment_cas_admits_exactly_one_concurrent_writer () =
+  with_runtime_file (fun path ->
+    (* Both writers must change the observed assignment. Otherwise the writer
+       reasserting the fixture's initial openai.gpt can legitimately finish as
+       Assignment_unchanged before the other writer commits, with no conflict. *)
+    (match Runtime.clear_runtime_id_for_keeper ~runtime_config_path:path
+             ~keeper_name:"routingtest" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.failf "clear initial assignment failed: %s" detail);
+    let expected =
+      match Runtime.observe_keeper_assignment ~runtime_config_path:path
+              ~keeper_name:"routingtest" () with
+      | Ok receipt -> receipt.value
+      | Error detail -> Alcotest.failf "assignment observation failed: %s" detail
+    in
+    let write runtime_id =
+      Runtime.set_keeper_assignment_if_revision
+        ~runtime_config_path:path
+        ~keeper_name:"routingtest"
+        ~runtime_id:(Some runtime_id)
+        ~expected
+        ()
+    in
+    let left = Domain.spawn (fun () -> write "runpod_mtp.qwen") in
+    let right = Domain.spawn (fun () -> write "openai.gpt") in
+    let outcomes = [ Domain.join left; Domain.join right ] in
+    let committed =
+      List.filter
+        (function
+          | Ok receipt ->
+            (match receipt.Runtime.value with
+             | Runtime.Assignment_committed _ -> true
+             | Runtime.Assignment_unchanged _ -> false)
+          | _ -> false)
+        outcomes
+      |> List.length
+    in
+    let conflicted =
+      List.filter
+        (function
+          | Error (Runtime.Assignment_revision_conflict _) -> true
+          | _ -> false)
+        outcomes
+      |> List.length
+    in
+    Alcotest.(check int) "one writer committed" 1 committed;
+    Alcotest.(check int) "one writer observed a typed conflict" 1 conflicted)
+;;
+
+let test_missing_runtime_config_is_typed_without_fabricated_revision () =
+  with_temp_dir "runtime-assignment-missing" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  match
+    Runtime.observe_keeper_assignment ~runtime_config_path:path
+      ~keeper_name:"routingtest" ()
+  with
+  | Error detail -> Alcotest.failf "missing observation failed: %s" detail
+  | Ok receipt ->
+    (match receipt.Runtime.value with
+     | Runtime.Runtime_config_missing ->
+       Alcotest.(check bool) "runtime.toml remains absent" false (Sys.file_exists path)
+     | Runtime.Runtime_config_present _ ->
+       Alcotest.fail "missing runtime config received a fabricated source revision")
+;;
+
+let test_runtime_assignment_release_warning_reaches_commit_receipt () =
+  with_runtime_file (fun path ->
+    let expected =
+      match Runtime.observe_keeper_assignment ~runtime_config_path:path
+              ~keeper_name:"routingtest" () with
+      | Ok receipt -> receipt.value
+      | Error detail -> Alcotest.fail detail
+    in
+    let lock_path = path ^ ".lock" in
+    let release_failure =
+      { File_lock_eio.lock_path
+      ; phase = File_lock_eio.Release_process_lock
+      ; cause =
+          { File_lock_eio.error = Unix.EIO
+          ; operation = "injected_runtime_release_after_commit"
+          ; argument = lock_path
+          }
+      ; cleanup_failure = None
+      }
+    in
+    match
+      Runtime.Assignment_for_testing.set_with_release_failure
+        ~release_failure
+        ~runtime_config_path:path
+        ~keeper_name:"routingtest"
+        ~runtime_id:(Some "runpod_mtp.qwen")
+        ~expected
+        ()
+    with
+    | Error _ -> Alcotest.fail "release uncertainty discarded the committed value"
+    | Ok locked ->
+      Alcotest.(check int) "transaction carries one release warning" 1
+        (List.length locked.warnings);
+      (match locked.value with
+       | Runtime.Assignment_unchanged _ ->
+         Alcotest.fail "assignment update unexpectedly became a no-op"
+       | Runtime.Assignment_committed { receipt; _ } ->
+         Alcotest.(check int) "commit receipt preserves one release warning" 1
+           (List.length receipt.lock_warnings)))
+;;
+
+let test_runtime_route_writer_updates_default () =
+  with_runtime_file (fun path ->
+    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "set_runtime_default failed: %s" msg);
+    Alcotest.(check bool)
+      "runtime.toml default rewritten"
+      true
+      (string_contains (Fs_compat.load_file path) "default = \"openai.gpt\"");
+    Alcotest.(check string)
+      "runtime cache default refreshed"
+      "openai.gpt"
+      (Runtime.get_default_runtime_id ()))
+;;
+
+(* [judges] is whether the selected runtime can judge a completion review.
+   verifier_exact dispatches each of its slots as a judge, so setup leaves that
+   lane alone when the selection cannot: writing it would provision a judge
+   that refuses every review, and a lane with neither transport is a
+   publication error (#37179). Every other lane still takes the selection. *)
+let check_first_run_lanes path runtime_id ~cli ~judges =
+  match Runtime_toml.parse_string (read_file path) with
+  | Error _ -> Alcotest.fail "first-run configuration must parse"
+  | Ok config ->
+    Alcotest.(check (option string)) "selected default" (Some runtime_id) config.default_runtime_id;
+    List.iter (fun exact_lane ->
+      let id = Standalone_lane.to_id exact_lane in
+      let is_verifier =
+        match exact_lane with
+        | Runtime.Verifier -> true
+        | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
+        | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
+      in
+      let expected =
+        if is_verifier && not judges
+        then None
+        else if cli
+        then
+          Some
+            ( []
+            , [ runtime_id ] )
+        else Some ([ runtime_id ], [])
+      in
+      match
+        List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal (Runtime_schema.exact_lane_key lane.owner) id)
+          config.exact_output_lane_decls,
+        expected
+      with
+      | None, None -> ()
+      | Some lane, None ->
+        Alcotest.failf
+          "%s must not be provisioned for a selection that cannot judge (slots=[%s] cli_slots=[%s])"
+          id (String.concat ", " lane.slot_ids) (String.concat ", " lane.cli_slot_ids)
+      | None, Some ([], []) -> ()
+      | None, Some _ -> Alcotest.failf "missing first-run lane %s" id
+      | Some lane, Some (expected_http, expected_cli) ->
+        Alcotest.(check (list string)) (id ^ " HTTP slots") expected_http lane.slot_ids;
+        Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
+      (List.filter
+         (function
+           | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
+           | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
+           | Runtime.Verifier -> true)
+         Standalone_lane.all);
+    Alcotest.(check bool) "Candle appraisal is explicitly configured" false
+      (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
+         config.exact_output_lane_decls)
+;;
+
+let test_first_run_runtime_binds_supporting_lanes () =
+  with_runtime_file (fun path ->
+    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    check_first_run_lanes path "openai.gpt" ~cli:false ~judges:true;
+    let before = read_file path in
+    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "unknown setup runtime must fail");
+    Alcotest.(check string) "failed setup does not change any lane" before (read_file path))
+;;
+
+(* A connection an older setup wrote declares no [exact-body-timeout-s], and
+   rendering it again yields the same id, so the setup batch keeps its table
+   as it is. Selecting it again points the exact lanes at it; setup writes the
+   key on that provider instead of leaving a file no save would accept
+   (#38779). *)
+let runtime_config_without_exact_deadline =
+  {|
+[runtime]
+default = "openai.gpt"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[openai.gpt]
+|}
+;;
+
+let test_first_run_writes_the_exact_deadline_on_a_provider_without_one () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
+  with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+  with_temp_dir "runtime-first-run-exact-deadline" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path runtime_config_without_exact_deadline;
+  (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "setup must add the missing key, got: %s" detail);
+  match Runtime_toml.parse_string (read_file path) with
+  | Error _ -> Alcotest.fail "the config setup wrote must parse"
+  | Ok config ->
+    Alcotest.(check (option (list string))) "setup pointed the Librarian lane at it"
+      (Some [ "openai.gpt" ])
+      (List.find_map
+         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+            if String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Runtime.Librarian)
+            then Some lane.slot_ids
+            else None)
+         config.exact_output_lane_decls);
+    (match
+       List.find_opt
+         (fun (provider : Runtime_schema.provider) -> String.equal provider.id "openai")
+         config.providers
+     with
+     | None -> Alcotest.fail "setup dropped the provider"
+     | Some provider ->
+       Alcotest.(check (option (float 0.0))) "setup declared the value a new connection gets"
+         (Some 1200.0) provider.exact_body_timeout_s)
+;;
+
+let test_first_run_cli_runtime_binds_supporting_lanes () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
+    with_temp_dir "runtime-cli-first-run" (fun dir ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path codex_runtime_config;
+      (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"codex.codex" () with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      check_first_run_lanes path "codex.codex" ~cli:true ~judges:false;
+      (* This is the offline first-run writer. The runtime registry is a
+         server-bootstrap publication, not a side effect of saving a file.
+         test_verifier_official_client exercises that publication through the
+         default selector and a real managed client process. *)
+      (match Runtime_exact_output_registry.current () with
+       | Error Runtime_exact_output_registry.Registry_not_published -> ()
+       | Error error -> Alcotest.fail
+           (Runtime_exact_output_registry.publication_error_to_string error)
+       | Ok _ -> Alcotest.fail "offline setup unexpectedly published a live registry")))
+;;
+
+(* Every exact-output call hands its client a JSON Schema, and Muse Code has
+   no channel for one. Setup makes it the default and its lane, and writes it
+   into no exact-output list. *)
+let test_first_run_writes_a_client_without_an_output_schema_channel_into_no_slot () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
+    with_temp_dir "runtime-muse-first-run" (fun dir ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path
+        (String.trim muse_serve_bindings
+         ^ Printf.sprintf "\n\n[runtime]\ndefault = \"%s\"\n" muse_serve_runtime_id);
+      (match
+         Runtime.set_first_run_runtime ~runtime_config_path:path
+           ~runtime_id:muse_serve_runtime_id ()
+       with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      match Runtime_toml.parse_string (read_file path) with
+      | Error _ -> Alcotest.fail "first-run configuration must parse"
+      | Ok config ->
+        Alcotest.(check (option string)) "selected default" (Some muse_serve_runtime_id)
+          config.default_runtime_id;
+        List.iter
+          (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+             Alcotest.(check bool) ((Runtime_schema.exact_lane_key lane.owner) ^ " does not list Muse Code") false
+               (List.mem muse_serve_runtime_id (lane.slot_ids @ lane.cli_slot_ids)))
+          config.exact_output_lane_decls))
+;;
+
+let test_first_run_fallback_order_and_preservation () =
+  with_runtime_file (fun path ->
+    let extra = {|
+[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[codex.codex]
+
+[models.disabled]
+api-name = "small"
+max-context = 32000
+
+[openai.disabled]
+enabled = false
+|} in
+    write_file path (read_file path ^ extra);
+    let select fallbacks = Runtime.set_first_run_runtime ~runtime_config_path:path
+      ~runtime_id:"openai.gpt" ~fallback_runtime_ids:fallbacks () in
+    let candidates = [ "openai.gpt"; "codex.codex"; "runpod_mtp.qwen" ] in
+    (match select [ "codex.codex"; "runpod_mtp.qwen" ] with
+     | Ok _ -> () | Error detail -> Alcotest.fail detail);
+    check_first_run_lanes path "openai.gpt" ~cli:false ~judges:true;
+    (match Runtime.resolve_assignment "openai.gpt" with
+     | `Lane lane -> Alcotest.(check (list string)) "mixed transport order" candidates
+         (Runtime_lane.ordered_candidates lane)
+     | `Missing | `Unavailable _ -> Alcotest.fail "primary lane must resolve");
+    Alcotest.(check (option string)) "other Keeper assignment preserved"
+      (Some "openai.gpt") (Runtime.runtime_id_for_keeper "routingtest");
+    let committed = read_file path in
+    List.iter (fun invalid ->
+      (match select invalid with
+       | Error _ -> () | Ok _ -> Alcotest.fail "invalid fallback accepted");
+      Alcotest.(check string) "invalid fallback leaves every config byte unchanged"
+        committed (read_file path))
+      [ [ "missing.runtime" ]; [ "openai.disabled" ]; [ "openai.gpt" ];
+        [ "codex.codex"; "codex.codex" ]; [ "" ]; [ "bad\nvalue" ] ];
+    (match select [] with
+     | Ok _ -> () | Error detail -> Alcotest.fail detail);
+    match Runtime.resolve_assignment "openai.gpt" with
+    | `Lane lane -> Alcotest.(check (list string)) "reselection removes stale fallbacks"
+        [ "openai.gpt" ] (Runtime_lane.ordered_candidates lane)
+    | `Missing | `Unavailable _ -> Alcotest.fail "reselected primary lane must resolve")
+;;
+
+let test_first_run_imp_binding_is_explicit () =
+  with_runtime_file (fun path ->
+    write_file path (Runtime_config_text.update_runtime_assignment_text (read_file path)
+      ~keeper_name:"imp" ~runtime_id:"runpod_mtp.qwen");
+    let select ?(bind_imp = false) () =
+      match Runtime.set_first_run_runtime ~runtime_config_path:path
+        ~runtime_id:"openai.gpt" ~fallback_runtime_ids:[ "runpod_mtp.qwen" ] ~bind_imp () with
+      | Ok _ -> () | Error detail -> Alcotest.fail detail in
+    select ();
+    Alcotest.(check (option string)) "existing imp preserved without explicit selection"
+      (Some "runpod_mtp.qwen") (Runtime.runtime_id_for_keeper "imp");
+    select ~bind_imp:true ();
+    Alcotest.(check (option string)) "explicit setup selects primary lane for imp"
+      (Some "openai.gpt") (Runtime.runtime_id_for_keeper "imp");
+    Alcotest.(check (option string)) "unrelated Keeper assignment preserved"
+      (Some "openai.gpt") (Runtime.runtime_id_for_keeper "routingtest"))
+;;
+
+let test_runtime_route_writer_rejects_unknown_default_without_write () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
+     | Ok _receipt -> Alcotest.fail "expected unknown default runtime to fail"
+     | Error msg ->
+       Alcotest.(check bool)
+         "error mentions unresolved default"
+         true
+         (string_contains msg "missing.runtime"));
+    Alcotest.(check string)
+      "runtime.toml unchanged after validation failure"
+      before
+      (Fs_compat.load_file path);
+    Alcotest.(check string)
+      "runtime cache unchanged"
+      "runpod_mtp.qwen"
+      (Runtime.get_default_runtime_id ()))
+;;
+
+(* The Runtime screen's failover picker names the lane under the cursor, and
+   those names are runtime ids. Before this writer existed the picker had
+   nowhere to post: the route parser admitted only "default" and
+   "media_failover", so every pick came back "unknown runtime routing lane". *)
+(* A lane created under a name of its own takes a keeper assignment, and while
+   one names it the lane cannot be removed: the assignment would otherwise point
+   at nothing and the next load would fail. Once no keeper names it, removal
+   takes the table out of the file and the resolver forgets it. *)
+let test_a_created_lane_is_assigned_then_removed () =
+  with_runtime_file (fun path ->
+    let ok label = function
+      | Ok _ -> ()
+      | Error msg -> Alcotest.failf "%s: %s" label msg
+    in
+    Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+      ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ] ()
+    |> ok "create";
+    (match Runtime.get_lane_by_id "coding" with
+     | None -> Alcotest.fail "the created lane does not resolve"
+     | Some lane ->
+       Alcotest.(check (list string)) "the created lane walks what it was given"
+         [ "openai.gpt"; "runpod_mtp.qwen" ] (Runtime_lane.ordered_candidates lane));
+    (match
+       Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+         ~runtime_ids:[ "openai.gpt" ] ()
+     with
+     | Ok _ -> Alcotest.fail "a second create replaced an existing lane"
+     | Error _ -> ());
+    Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest"
+      ~runtime_id:"coding" ()
+    |> ok "assign the lane";
+    Alcotest.(check (option string)) "the keeper is assigned the lane"
+      (Some "coding") (Runtime.runtime_id_for_keeper "routingtest");
+    (match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" () with
+     | Ok _ -> Alcotest.fail "an assigned lane was removed"
+     | Error msg ->
+       Alcotest.(check bool) "the refusal names the keeper" true
+         (string_contains msg "routingtest"));
+    Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest"
+      ~runtime_id:"openai.gpt" ()
+    |> ok "assign a runtime";
+    Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()
+    |> ok "remove";
+    Alcotest.(check bool) "the table left the file" false
+      (string_contains (Fs_compat.load_file path) "[runtime.lanes.coding]");
+    Alcotest.(check bool) "the resolver forgot the lane" true
+      (Option.is_none (Runtime.get_lane_by_id "coding"));
+    match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" () with
+    | Ok _ -> Alcotest.fail "removing an undeclared lane reported success"
+    | Error _ -> ())
+;;
+
+let lane_write_ok label = function
+  | Ok _ -> ()
+  | Error msg -> Alcotest.failf "%s: %s" label msg
+;;
+
+(* A refused write names what refused it, and leaves the file as it was. *)
+let lane_write_refused label ~path ~names result =
+  let before = Fs_compat.load_file path in
+  (match result () with
+   | Ok _ -> Alcotest.failf "%s: the write went through" label
+   | Error msg ->
+     List.iter
+       (fun needle ->
+          if not (string_contains msg needle)
+          then Alcotest.failf "%s: %S does not name %S" label msg needle)
+       names);
+  Alcotest.(check string) (label ^ ": the file is unchanged") before
+    (Fs_compat.load_file path)
+;;
+
+(* Every keeper without an assignment walks [runtime].default, and a lane of
+   that id is read before the runtime. Removing it would move all of them onto
+   the bare runtime with nothing in the refusal to say so. *)
+let test_a_lane_the_default_walks_is_not_removed () =
+  with_runtime_file (fun path ->
+    set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
+    |> lane_write_ok "write the default's lane";
+    lane_write_refused "remove" ~path ~names:[ "[runtime].default" ] (fun () ->
+      Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"runpod_mtp.qwen" ()))
+;;
+
+(* A lane named after a runtime takes that runtime over for every keeper that
+   names it, which is the shape [set_first_run_runtime] writes at install and
+   the one [set_runtime_lane_candidates] has always produced. [create] used to
+   be the only writer refusing it. *)
+let test_a_new_lane_under_a_runtime_id_is_declared () =
+  with_runtime_file (fun path ->
+    lane_write_ok "create under a runtime id"
+      (Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"openai.small"
+         ~runtime_ids:[ "openai.small"; "openai.gpt" ] ());
+    match Runtime.get_lane_by_id "openai.small" with
+    | None -> Alcotest.fail "the lane was not declared"
+    | Some lane -> (
+      Alcotest.(check (list string))
+        "the lane shadows the runtime with its own candidates"
+        [ "openai.small"; "openai.gpt" ]
+        (Runtime_lane.ordered_candidates lane);
+      (* The point of allowing it: a keeper that names the runtime now walks
+         the lane, which is what [resolve_assignment] reads first. *)
+      (match Runtime.resolve_assignment "openai.small" with
+       | `Lane resolved ->
+         Alcotest.(check (list string))
+           "the assignment resolves through the lane"
+           [ "openai.small"; "openai.gpt" ]
+           (Runtime_lane.ordered_candidates resolved)
+       | `Missing | `Unavailable _ ->
+         Alcotest.fail "the runtime id no longer resolves")))
+;;
+
+(* A lane written inline has no header for the line editor to remove. With no
+   final newline, comparing the edited text with the input used to call that a
+   removal, and the lane stayed. *)
+let test_an_inline_lane_is_not_reported_removed () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.trim runtime_config
+       ^ "\n\n[runtime.lanes]\ncoding = { candidates = [\"openai.gpt\"] }");
+    lane_write_refused "remove" ~path ~names:[ "not written as its own" ] (fun () ->
+      Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
+;;
+
+(* Judgement admits a verifier_exact slot as a direct runtime
+   ([Runtime.verifier_exact_slot_admission]) and dispatches that id alone. A
+   slot naming a lane that is no runtime used to load and then fail at every
+   judgement; the load refuses it now. *)
+let test_a_verifier_slot_naming_a_lane_is_refused () =
+  with_runtime_file (fun path ->
+    Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"judge"
+      ~runtime_ids:[ "openai.gpt" ] ()
+    |> lane_write_ok "create the lane";
+    lane_write_refused "name the lane in a verifier slot" ~path
+      ~names:[ {|[runtime.exact_output_lanes.verifier_exact].slots entry "judge"|} ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane:Runtime.Verifier ~slots:[ "judge" ] ()))
+;;
+
+let test_lane_candidates_create_the_lane_table () =
+  with_runtime_file (fun path ->
+    (match
+       set_runtime_lane_candidates
+         ~runtime_config_path:path
+         ~lane_id:"openai.gpt"
+         ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ]
+         ()
+     with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "set_runtime_lane_candidates failed: %s" msg);
+    let written = Fs_compat.load_file path in
+    Alcotest.(check bool)
+      "the dotted id is quoted, which is the header the file already uses"
+      true
+      (string_contains written {|[runtime.lanes."openai.gpt"]|});
+    Alcotest.(check bool)
+      "both candidates are written in order"
+      true
+      (string_contains written {|"openai.gpt"|}
+       && string_contains written {|"runpod_mtp.qwen"|});
+    match Runtime.resolve_assignment "openai.gpt" with
+    | `Missing | `Unavailable _ -> Alcotest.fail "the lane disappeared after being written"
+    | `Lane lane ->
+      Alcotest.(check (list string))
+        "the resolver reads back the failover order it was given"
+        [ "openai.gpt"; "runpod_mtp.qwen" ]
+        (Runtime_lane.ordered_candidates lane))
+;;
+
+let test_lane_candidates_replace_rather_than_append () =
+  with_runtime_file (fun path ->
+    let write ids =
+      match
+        set_runtime_lane_candidates
+          ~runtime_config_path:path
+          ~lane_id:"openai.gpt"
+          ~runtime_ids:ids
+          ()
+      with
+      | Ok _ -> ()
+      | Error msg -> Alcotest.failf "write failed: %s" msg
+    in
+    write [ "openai.gpt"; "runpod_mtp.qwen" ];
+    write [ "openai.gpt" ];
+    let written = Fs_compat.load_file path in
+    let headers =
+      String.split_on_char '\n' written
+      |> List.filter (fun l ->
+        String.equal (String.trim l) {|[runtime.lanes."openai.gpt"]|})
+    in
+    Alcotest.(check int) "one lane table, not two" 1 (List.length headers);
+    match Runtime.resolve_assignment "openai.gpt" with
+    | `Missing | `Unavailable _ -> Alcotest.fail "the lane disappeared"
+    | `Lane lane ->
+      Alcotest.(check (list string))
+        "the second write replaced the first"
+        [ "openai.gpt" ]
+        (Runtime_lane.ordered_candidates lane))
+;;
+
+let test_lane_set_revision_refuses_an_intervening_write () =
+  with_runtime_file (fun path ->
+    let revision () =
+      match Runtime.load_config_observation ~runtime_config_path:path () with
+      | Ok observed -> Runtime.config_source_revision_to_string observed.source_revision
+      | Error detail -> Alcotest.fail detail
+    in
+    let first_revision = revision () in
+    let write expected ids =
+      Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+        ~expected_source_revision:expected ~lane_id:"coding" ~runtime_ids:ids ()
+    in
+    (match write first_revision [ "openai.gpt" ] with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Runtime.lane_set_error_to_string error));
+    let after_first = Fs_compat.load_file path in
+    (match write first_revision [ "openai.small" ] with
+     | Ok _ -> Alcotest.fail "stale whole-order write overwrote another writer"
+     | Error (Runtime.Lane_set_revision_conflict { expected; observed }) ->
+       Alcotest.(check string) "expected revision" first_revision expected;
+       Alcotest.(check string) "observed revision" (revision ()) observed
+     | Error (Runtime.Lane_set_invalid detail) ->
+       Alcotest.failf "stale source revision was not a conflict: %s" detail);
+    Alcotest.(check string) "stale write leaves the file intact" after_first
+      (Fs_compat.load_file path);
+    (match write (revision ()) [ "openai.small" ] with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Runtime.lane_set_error_to_string error)))
+;;
+
+(* The routing API's exact/ prefix names [runtime.exact_output_lanes.<name>]
+   walk orders; the writer is the same SSOT path the conversation-lane picker
+   uses, so the Runtime screen can edit both lane kinds the same way. *)
+let test_exact_lane_slots_writer () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.set_exact_output_lane_slots
+         ~runtime_config_path:path
+         ~lane:Runtime.Verifier
+         ~slots:[ "openai.gpt"; "runpod_mtp.qwen" ]
+         ()
+     with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "set_exact_output_lane_slots failed: %s" msg);
+    let written = Fs_compat.load_file path in
+    Alcotest.(check bool)
+      "the exact-output lane table header is written"
+      true
+      (string_contains written {|[runtime.exact_output_lanes.verifier_exact]|});
+    Alcotest.(check bool)
+      "both slots are written in order"
+      true
+      (string_contains written {|"openai.gpt"|}
+       && string_contains written {|"runpod_mtp.qwen"|});
+    let headers =
+      String.split_on_char '\n' written
+      |> List.filter (fun l ->
+        String.equal (String.trim l) {|[runtime.exact_output_lanes.verifier_exact]|})
+    in
+    Alcotest.(check int) "one exact lane table, not two" 1 (List.length headers);
+    match
+      Runtime.set_exact_output_lane_slots
+        ~runtime_config_path:path
+        ~lane:Runtime.Verifier
+        ~slots:[]
+        ()
+    with
+    | Ok _ -> Alcotest.fail "empty slots must not be written"
+    | Error msg ->
+      Alcotest.(check bool)
+        "the refusal names the empty-slot rule"
+        true
+        (string_contains msg "at least one slot"))
+;;
+
+(* The slots the file declares for an exact lane, read by the parser the
+   server loads it with. *)
+let exact_lane_slots path lane =
+  match Runtime_toml.parse_string (Fs_compat.load_file path) with
+  | Error _ -> Alcotest.failf "the written %s does not parse" path
+  | Ok config ->
+    (match
+       List.find_opt
+         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal (Runtime_schema.exact_lane_key decl.owner) lane)
+         config.Runtime_schema.exact_output_lane_decls
+     with
+     | Some decl -> decl.slot_ids
+     | None -> Alcotest.failf "the file declares no exact lane %s" lane)
+;;
+
+(* An exact lane lists only the slots the registry admitted, so a pick that
+   rewrote the whole order from that list deleted every declared slot the
+   registry dropped. [append] reads the declaration under the write lock and
+   adds to its end. *)
+let test_an_exact_slot_append_keeps_the_declared_order () =
+  with_runtime_file (fun path ->
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slots:[ "catalog.only"; "openai.gpt" ] ()
+    |> lane_write_ok "declare the lane";
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ()
+    |> lane_write_ok "append a slot";
+    Alcotest.(check (list string)) "the declared slots stay in front, in order"
+      [ "catalog.only"; "openai.gpt"; "runpod_mtp.qwen" ]
+      (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "append a declared slot" ~path
+      ~names:[ "runpod_mtp.qwen is already a slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ());
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Hitl_auto_judge ~slot:"openai.gpt" ()
+    |> lane_write_ok "append to an undeclared lane";
+    Alcotest.(check (list string)) "an undeclared lane starts with the slot"
+      [ "openai.gpt" ] (exact_lane_slots path "hitl_auto_judge"))
+;;
+
+let test_an_exact_slot_append_reads_after_lock_admission () =
+  Eio_main.run @@ fun _env ->
+  with_runtime_file (fun path ->
+    let original = read_file path in
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slots:["catalog.original"; "openai.gpt"] ()
+    |> lane_write_ok "declare the original order";
+    Eio.Switch.run @@ fun sw ->
+    let completed, publish_completed = Eio.Promise.create () in
+    let lock_path = path ^ ".lock" in
+    let rec await_waiter () =
+      if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then ()
+      else match Eio.Promise.peek completed with
+        | Some _ -> Alcotest.fail "the append bypassed the held configuration lock"
+        | None -> Eio.Fiber.yield (); await_waiter ()
+    in
+    Runtime.with_config_lock ~runtime_config_path:path (fun () ->
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve publish_completed
+          (Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+             ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ()));
+      await_waiter ();
+      (* The prior writer changes the file after the append is waiting. The
+         published runtime view still holds the old order at this point. *)
+      let intervening = original
+          ^ "\n[runtime.exact_output_lanes.board_attention_exact]\n\
+             slots = [\"catalog.original\", \"catalog.intervening\", \"openai.gpt\"]\n" in
+      write_file path intervening;
+      Ok ())
+    |> lane_write_ok "the preceding writer releases its committed declaration";
+    Eio.Promise.await completed |> lane_write_ok "the waiting append commits";
+    Alcotest.(check (list string)) "the append preserves both unadmitted declarations and latest order"
+      ["catalog.original"; "catalog.intervening"; "openai.gpt"; "runpod_mtp.qwen"]
+      (exact_lane_slots path "board_attention_exact"))
+;;
+
+(* A lane's name is its routing key, so a rename is the table header and every
+   reference to it -- assignments, and [runtime].default when it names the lane
+   -- in the one write. A file written with a reference missed would route
+   those keepers to a lane that is no longer declared. *)
+let test_a_rename_carries_the_references_with_it () =
+  with_runtime_file (fun path ->
+    set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"coding" ~runtime_ids:[ "openai.gpt"; "openai.small" ] ()
+    |> lane_write_ok "declare the lane";
+    Runtime.set_runtime_id_for_keeper ~runtime_config_path:path
+      ~keeper_name:"routingtest" ~runtime_id:"coding" ()
+    |> lane_write_ok "route a keeper through it";
+    Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+      ~new_lane_id:"pairing" ()
+    |> lane_write_ok "rename it";
+    let text = Fs_compat.load_file path in
+    Alcotest.(check bool) "the table took the new name" true
+      (String_util.contains_substring text "[runtime.lanes.pairing]");
+    Alcotest.(check bool) "the old table is gone" false
+      (String_util.contains_substring text "[runtime.lanes.coding]");
+    Alcotest.(check bool) "no reference is left on the old name" false
+      (String_util.contains_substring text "\"coding\"");
+    Alcotest.(check (option (list string))) "the candidates came with it"
+      (Some [ "openai.gpt"; "openai.small" ])
+      (Option.map Runtime_lane.ordered_candidates (Runtime.get_lane_by_id "pairing"));
+    Alcotest.(check (option string)) "the keeper routes to the new name"
+      (Some "pairing") (Runtime.runtime_id_for_keeper "routingtest");
+    (* The reference the rename rewrote is the one [remove] refuses on, so
+       reading it back through that refusal proves both ends moved. *)
+    lane_write_refused "remove the renamed lane" ~path
+      ~names:[ "lane \"pairing\" is in use by" ]
+      (fun () ->
+         Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"pairing" ()))
+;;
+
+(* The name the rename takes has to be free, and the lane it renames has to be
+   a table this editor wrote. *)
+let test_a_rename_refuses_a_name_in_use_and_an_absent_table () =
+  with_runtime_file (fun path ->
+    set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"coding" ~runtime_ids:[ "openai.gpt" ] ()
+    |> lane_write_ok "declare one";
+    set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"pairing" ~runtime_ids:[ "openai.small" ] ()
+    |> lane_write_ok "declare another";
+    lane_write_refused "rename onto a declared lane" ~path
+      ~names:[ "lane \"pairing\" already exists" ]
+      (fun () ->
+         Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+           ~new_lane_id:"pairing" ());
+    lane_write_refused "rename a lane the file does not declare" ~path
+      ~names:[ "lane \"absent\" is not declared in [runtime.lanes]" ]
+      (fun () ->
+         Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"absent"
+           ~new_lane_id:"present" ());
+    lane_write_refused "rename to the name it has" ~path
+      ~names:[ "already has that name" ]
+      (fun () ->
+         Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+           ~new_lane_id:"coding" ());
+    ())
+;;
+
+(* [\[runtime\].default] holds a route, so the rename takes it with the rest.
+   While the entry resolved against runtimes alone, a lane the default reached
+   had to carry that runtime's own id and could not be renamed at all. *)
+let test_a_rename_carries_the_default_route_too () =
+  with_runtime_file (fun path ->
+    set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
+    |> lane_write_ok "declare the lane the default reaches";
+    Runtime.rename_runtime_lane ~runtime_config_path:path
+      ~lane_id:"runpod_mtp.qwen" ~new_lane_id:"primary" ()
+    |> lane_write_ok "rename it";
+    Alcotest.(check string) "the default follows the lane" "primary"
+      (Runtime.get_default_route ());
+    Alcotest.(check string) "and still enters on the lane's head" "runpod_mtp.qwen"
+      (Runtime.get_default_runtime_id ());
+    (* A keeper with no assignment walks the renamed lane, candidates and all. *)
+    match Runtime.resolve_assignment (Runtime.get_default_route ()) with
+    | `Lane lane ->
+      Alcotest.(check (list string)) "the default walks the lane"
+        [ "runpod_mtp.qwen"; "openai.gpt" ]
+        (Runtime_lane.ordered_candidates lane)
+    | `Missing | `Unavailable _ -> Alcotest.fail "the renamed default resolves to nothing")
+;;
+
+(* A default that names a lane with a name of its own, which the entry refused
+   before: it was resolved against runtimes alone. *)
+let test_the_default_may_name_a_lane () =
+  with_runtime_file (fun path ->
+    set_runtime_lane_candidates ~runtime_config_path:path
+      ~lane_id:"coding" ~runtime_ids:[ "openai.gpt"; "openai.small" ] ()
+    |> lane_write_ok "declare a lane with its own name";
+    Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"coding" ()
+    |> lane_write_ok "point the default at it";
+    Alcotest.(check string) "the route is the lane" "coding" (Runtime.get_default_route ());
+    Alcotest.(check string) "the runtime it enters on is the lane's head" "openai.gpt"
+      (Runtime.get_default_runtime_id ());
+    let projection = Server_dashboard_runtime_resolved_json.build
+        ~generated_at_iso:"2026-10-02T00:00:00Z"
+        ~config:(Workspace.default_config (Filename.dirname path)) in
+    Alcotest.(check string) "resolved document keeps the configured route"
+      "coding" (projection |> J.member "default_route" |> J.to_string);
+    Alcotest.(check string) "resolved document names its separate entry runtime"
+      "openai.gpt" (projection |> J.member "default_runtime" |> J.member "id" |> J.to_string);
+    (* Removing it is still refused, and for the same reason as before. *)
+    lane_write_refused "remove the lane the default names" ~path
+      ~names:[ "[runtime].default" ]
+      (fun () ->
+         Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
+;;
+
+(* [drop] and [move] read the same declaration under the same lock, for the
+   same reason: the caller sees the admitted slots and an order rebuilt from
+   them would delete the rest. Each names one slot and the file's order
+   decides where it goes. *)
+let test_exact_candidate_replacement_and_first_preserve_other_slots () =
+  with_runtime_file (fun path ->
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention
+      ~slots:["catalog.only"; "openai.gpt"; "runpod_mtp.qwen"] ()
+    |> lane_write_ok "declare candidates including an unadmitted slot";
+    Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:" openai.gpt " ~replacement:"openai.small" ()
+    |> lane_write_ok "replace at the existing position";
+    Alcotest.(check (list string)) "unadmitted and other candidates remain"
+      ["catalog.only"; "openai.small"; "runpod_mtp.qwen"]
+      (exact_lane_slots path "board_attention_exact");
+    Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ~move:Runtime.Move_slot_first ()
+    |> lane_write_ok "make the selected candidate first";
+    Alcotest.(check (list string)) "remaining candidates retain their relative order"
+      ["runpod_mtp.qwen"; "catalog.only"; "openai.small"]
+      (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "refuse promoting an already first candidate" ~path
+      ~names:["already first"]
+      (fun () -> Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+        ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ~move:Runtime.Move_slot_first ());
+    lane_write_refused "reject a duplicate replacement" ~path ~names:["already declared"]
+      (fun () -> Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+        ~lane:Runtime.Board_attention ~slot:"openai.small" ~replacement:"runpod_mtp.qwen" ()))
+;;
+
+let test_an_exact_slot_drop_and_move_read_the_declaration () =
+  with_runtime_file (fun path ->
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention
+      ~slots:[ "catalog.only"; "openai.gpt"; "runpod_mtp.qwen" ] ()
+    |> lane_write_ok "declare the lane";
+    Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen"
+      ~move:Runtime.Move_slot_up ()
+    |> lane_write_ok "move a slot up";
+    Alcotest.(check (list string)) "the slot swapped with the one above it"
+      [ "catalog.only"; "runpod_mtp.qwen"; "openai.gpt" ]
+      (exact_lane_slots path "board_attention_exact");
+    Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"catalog.only" ()
+    |> lane_write_ok "drop the head";
+    Alcotest.(check (list string)) "the rest keep their order"
+      [ "runpod_mtp.qwen"; "openai.gpt" ]
+      (exact_lane_slots path "board_attention_exact");
+    lane_write_refused "move past the head" ~path
+      ~names:[ "runpod_mtp.qwen is already first in board_attention_exact" ]
+      (fun () ->
+         Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen"
+           ~move:Runtime.Move_slot_up ());
+    lane_write_refused "drop a slot the lane does not declare" ~path
+      ~names:[ "is not a slot of board_attention_exact"; "runpod_mtp.qwen, openai.gpt" ]
+      (fun () ->
+         Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"catalog.only" ());
+    Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"openai.gpt" ()
+    |> lane_write_ok "drop down to one";
+    (* A lane that resolves to nothing fails the boot fail-closed, so the last
+       slot stays; removing the lane is the other edit. *)
+    lane_write_refused "drop the last slot" ~path
+      ~names:[ "is the last slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ()))
+;;
+
+(* A CLI slot is declared on the lane too. The registry refuses the same id as
+   a slot and a CLI slot only as a lane it cannot publish -- and before it is
+   published the file is written anyway -- so append and set name the
+   duplicate themselves. *)
+let test_an_exact_append_refuses_a_declared_cli_slot () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.trim runtime_config
+       ^ "\n\n[runtime.exact_output_lanes.board_attention_exact]\n\
+          slots = [\"catalog.only\"]\ncli_slots = [\"openai.gpt\"]\n");
+    lane_write_refused "append a declared CLI slot" ~path
+      ~names:[ "openai.gpt is already a CLI slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"openai.gpt" ());
+    lane_write_refused "set a declared CLI slot" ~path
+      ~names:[ "openai.gpt is already a CLI slot of board_attention_exact" ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slots:[ "catalog.only"; "openai.gpt" ] ()))
+;;
+
+(* The CLI slots the file declares for an exact lane, read by the same
+   parser as [exact_lane_slots]. *)
+let exact_lane_cli_slots path lane =
+  match Runtime_toml.parse_string (Fs_compat.load_file path) with
+  | Error _ -> Alcotest.failf "the written %s does not parse" path
+  | Ok config ->
+    (match
+       List.find_opt
+         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal (Runtime_schema.exact_lane_key decl.owner) lane)
+         config.Runtime_schema.exact_output_lane_decls
+     with
+     | Some decl -> decl.cli_slot_ids
+     | None -> Alcotest.failf "the file declares no exact lane %s" lane)
+;;
+
+(* Two official-client bindings beside the HTTP ones the base file declares. *)
+let official_client_bindings =
+  {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[models.mini]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[codex.codex]
+
+[codex.mini]
+|}
+;;
+
+let test_multiple_official_client_accounts_are_distinct_runtimes () =
+  let source = {|[providers.claude_one]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+account-home = "/tmp/claude-one"
+
+[providers.claude_two]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+account-home = "/tmp/claude-two"
+
+[providers.codex_one]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-one"
+
+[providers.codex_two]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-two"
+
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+
+[claude_one.shared]
+[claude_two.shared]
+[codex_one.shared]
+[codex_two.shared]
+|} in
+  let config = match Runtime_toml.parse_string source with
+    | Ok config -> config
+    | Error errors -> Alcotest.failf "multi-account TOML refused: %s"
+        (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors)) in
+  let homes = List.map (fun binding ->
+    match Runtime_adapter.binding_to_execution config binding with
+    | Ok (Runtime_execution.Claude_code execution) -> execution.account_home
+    | Ok (Runtime_execution.Codex_app_server execution) -> execution.account_home
+    | Ok _ -> Alcotest.fail "expected an official client"
+    | Error detail -> Alcotest.fail detail) config.Runtime_schema.bindings in
+  Alcotest.(check (list (option string))) "each binding keeps its login home"
+    [Some "/tmp/claude-one"; Some "/tmp/claude-two";
+     Some "/tmp/codex-one"; Some "/tmp/codex-two"]
+    (List.sort compare homes);
+  (match Runtime_toml.parse_string
+      {|[providers.bad]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "relative/codex-two"
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[bad.shared]
+|} with
+     | Error errors ->
+       Alcotest.(check bool) "the account path is refused" true
+         (List.exists (fun e -> e.Runtime_toml.path = "providers.bad.account-home") errors)
+     | Ok _ -> Alcotest.fail "relative account home was accepted");
+  Masc_test_deps.with_process_env "CLAUDE_CONFIG_DIR" (Some "relative-claude-account") (fun () ->
+    let source = {|[providers.claude]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[claude.shared]
+|} in
+    match Runtime_toml.parse_string source with
+    | Error errors -> Alcotest.failf "inherited CLI home config refused: %s"
+        (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
+    | Ok config ->
+      let binding = List.hd config.Runtime_schema.bindings in
+      (match Runtime_instance.of_binding config binding with
+       | Error reason -> Alcotest.failf "relative inherited home dropped runtime: %s"
+           (Runtime_config_error.string_of_drop_reason reason)
+       | Ok runtime ->
+         let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
+         Alcotest.(check string) "runtime quota uses the selected child home"
+           ("official:claude-code:home:" ^ expected)
+           (Runtime_quota_window.scope_to_string (Runtime_instance.quota_scope_of_runtime runtime))));
+  Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
+    Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
+      match Runtime_toml.parse_string
+        {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[providers.http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[codex.shared]
+[http.shared]
+|} with
+      | Error errors ->
+        Alcotest.failf "an unselected provider should still parse: %s"
+          (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
+      | Ok config ->
+        let binding id =
+          match List.find_opt
+                  (fun b -> String.equal b.Runtime_schema.provider_id id)
+                  config.Runtime_schema.bindings with
+          | Some b -> b
+          | None -> Alcotest.fail ("missing binding " ^ id)
+        in
+        (match Runtime_instance.of_binding config (binding "codex") with
+            | Error (Runtime_config_error.Execution_unbuildable reason) ->
+              Alcotest.(check bool) "selected account needs a real home" true
+                (String_util.contains_substring reason "account-home")
+            | Error _ | Ok _ ->
+              Alcotest.fail "selected official client without HOME gained a shared scope");
+        (match Runtime_instance.of_binding config (binding "http") with
+         | Ok _ -> ()
+         | Error reason ->
+           Alcotest.failf "unrelated HTTP binding was rejected: %s"
+             (Runtime_config_error.string_of_drop_reason reason))))
+;;
+
+(* The base file, loaded, with the official clients and [lane] written after
+   it, as [test_first_run_fallback_order_and_preservation] extends it: the lane
+   writers read the file and validate the whole text they commit. *)
+let with_official_client_runtime_file ?lane f =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.concat "\n\n"
+         ([ String.trim (read_file path); String.trim official_client_bindings ]
+          @ Option.to_list lane));
+    f path)
+;;
+
+(* An official client answers through its own CLI, so an append that names one
+   lands in cli_slots; an HTTP runtime or a catalog id lands in slots. The
+   operator names the runtime, not the list. A slot order that names one is
+   refused rather than written where the registry cannot walk it. *)
+let test_an_exact_append_places_an_official_client_in_cli_slots () =
+  with_official_client_runtime_file
+    ~lane:"[runtime.exact_output_lanes.board_attention_exact]\nslots = [\"catalog.only\"]"
+    (fun path ->
+       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"codex.codex" ()
+       |> lane_write_ok "append an official client";
+       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"openai.gpt" ()
+       |> lane_write_ok "append an HTTP runtime";
+       Alcotest.(check (list string)) "the HTTP runtime joins the slots"
+         [ "catalog.only"; "openai.gpt" ]
+         (exact_lane_slots path "board_attention_exact");
+       Alcotest.(check (list string)) "the official client is a CLI slot"
+         [ "codex.codex" ]
+         (exact_lane_cli_slots path "board_attention_exact");
+       lane_write_refused "set an official client as a slot" ~path
+         ~names:[ "codex.mini is an official client" ]
+         (fun () ->
+            Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+              ~lane:Runtime.Board_attention ~slots:[ "openai.gpt"; "codex.mini" ] ()))
+;;
+
+(* Muse Code is an official client, but every exact-output call hands its
+   client a JSON Schema and Muse Code has no channel for one: written into
+   cli_slots it failed every call. Both writers refuse it and leave the file
+   as it was, and the same lane still takes an official client that holds a
+   schema. *)
+let test_an_exact_lane_refuses_a_client_without_an_output_schema_channel () =
+  with_official_client_runtime_file
+    ~lane:
+      (String.trim muse_serve_bindings
+       ^ "\n\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [\"catalog.only\"]")
+    (fun path ->
+       lane_write_refused "append Muse Code" ~path
+         ~names:[ muse_serve_runtime_id; "no output-schema channel" ]
+         (fun () ->
+            Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+              ~lane:Runtime.Board_attention ~slot:muse_serve_runtime_id ());
+       lane_write_refused "set Muse Code as a slot" ~path
+         ~names:[ muse_serve_runtime_id; "no output-schema channel" ]
+         (fun () ->
+            Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+              ~lane:Runtime.Board_attention ~slots:[ "catalog.only"; muse_serve_runtime_id ] ());
+       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"codex.codex" ()
+       |> lane_write_ok "append an official client that holds a schema";
+       Alcotest.(check (list string)) "only that client is a CLI slot"
+         [ "codex.codex" ]
+         (exact_lane_cli_slots path "board_attention_exact"))
+;;
+
+let test_exact_cli_replacement_preserves_declared_groups () =
+  with_official_client_runtime_file
+    ~lane:(String.trim muse_serve_bindings
+      ^ "\n\n[runtime.exact_output_lanes.board_attention_exact]\n\
+         slots = [\"catalog.only\", \"openai.gpt\"]\n\
+         cli_slots = [\"codex.codex\"]\n\
+         enabled = true\nthinking = false\nmax_output_tokens = 512\n")
+    (fun path ->
+      let declaration () =
+        match Runtime_toml.parse_string (read_file path) with
+        | Error _ -> Alcotest.fail "replacement fixture must parse"
+        | Ok config ->
+          match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+              (Runtime_schema.exact_lane_key lane.owner) = "board_attention_exact") config.exact_output_lane_decls with
+          | Some lane -> lane
+          | None -> Alcotest.fail "replacement lost the declared exact lane"
+      in
+      let before = declaration () in
+      Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+        ~lane:Runtime.Board_attention ~slot:" codex.codex " ~replacement:" codex.mini " ()
+      |> lane_write_ok "replace a CLI candidate in its original group";
+      Alcotest.(check bool) "replacement keeps HTTP declarations and every other lane field" true
+        (declaration () = {before with cli_slot_ids = ["codex.mini"]});
+      lane_write_refused "a replacement cannot cross transport groups" ~path
+        ~names:["within its HTTP or CLI group"] (fun () ->
+          Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+            ~lane:Runtime.Board_attention ~slot:"codex.mini" ~replacement:"openai.small" ());
+      lane_write_refused "a replacement cannot duplicate its own declaration" ~path
+        ~names:["codex.mini is already declared"] (fun () ->
+          Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+            ~lane:Runtime.Board_attention ~slot:"codex.mini" ~replacement:"codex.mini" ());
+      lane_write_refused "schema refusal still precedes absent original-slot refusal" ~path
+        ~names:[muse_serve_runtime_id; "no output-schema channel"] (fun () ->
+          Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+            ~lane:Runtime.Board_attention ~slot:"absent" ~replacement:muse_serve_runtime_id ());
+      lane_write_refused "an absent original still refuses the group replacement" ~path
+        ~names:["within its HTTP or CLI group"] (fun () ->
+          Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+            ~lane:Runtime.Board_attention ~slot:"absent" ~replacement:"codex.codex" ()))
+;;
+
+let test_candle_appraiser_is_explicitly_configured_with_both_transports () =
+  with_official_client_runtime_file (fun path ->
+    let lane = Standalone_lane.Candle_appraiser in
+    let lane_id = Standalone_lane.to_id lane in
+    Alcotest.(check bool) "appraisal does not block startup when absent" true
+      (Standalone_lane.obligation lane = Standalone_lane.Optional);
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane ~slots:[ "openai.gpt" ] ()
+    |> lane_write_ok "configure Candle HTTP slot";
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane ~slot:"codex.codex" ()
+    |> lane_write_ok "append Candle CLI fallback";
+    Alcotest.(check (list string)) "appraisal HTTP order survives the save"
+      [ "openai.gpt" ] (exact_lane_slots path lane_id);
+    Alcotest.(check (list string)) "appraisal CLI fallback survives the save"
+      [ "codex.codex" ] (exact_lane_cli_slots path lane_id))
+;;
+
+(* A lane an official client's append creates declares [cli_slots] alone. The
+   parser reads an absent [slots] as empty, so there is no empty key to write,
+   and an operator reading the file cannot mistake one for an emptied list. *)
+let test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots () =
+  with_official_client_runtime_file (fun path ->
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"codex.codex" ()
+    |> lane_write_ok "append to an undeclared lane";
+    Alcotest.(check (list string)) "the new lane declares no slot"
+      [] (exact_lane_slots path "board_attention_exact");
+    Alcotest.(check (list string)) "and one CLI slot"
+      [ "codex.codex" ] (exact_lane_cli_slots path "board_attention_exact");
+    (* The base file declares no exact lane and no [slots] key of its own, and
+       ["cli_slots = ["] does not match a needle that starts at a line. *)
+    Alcotest.(check bool) "no slots key was written" false
+      (string_contains (read_file path) "\nslots = ["))
+;;
+
+(* [drop] and [move] find a slot in the list that declares it and edit only
+   that list; the floor is one slot across both lists, the parser's own. *)
+let test_an_exact_drop_and_move_edit_the_cli_slots () =
+  with_official_client_runtime_file
+    ~lane:
+      "[runtime.exact_output_lanes.board_attention_exact]\n\
+       slots = [\"openai.gpt\"]\n\
+       cli_slots = [\"codex.codex\", \"codex.mini\"]"
+    (fun path ->
+       Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"codex.mini"
+         ~move:Runtime.Move_slot_up ()
+       |> lane_write_ok "move a CLI slot up";
+       Alcotest.(check (list string)) "the CLI slots swapped"
+         [ "codex.mini"; "codex.codex" ]
+         (exact_lane_cli_slots path "board_attention_exact");
+       Alcotest.(check (list string)) "the slots did not move"
+         [ "openai.gpt" ] (exact_lane_slots path "board_attention_exact");
+       Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"openai.gpt" ()
+       |> lane_write_ok "drop the only HTTP slot while CLI slots remain";
+       Alcotest.(check (list string)) "the lane keeps no HTTP slot"
+         [] (exact_lane_slots path "board_attention_exact");
+       Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"codex.mini" ()
+       |> lane_write_ok "drop a CLI slot";
+       Alcotest.(check (list string)) "one CLI slot remains"
+         [ "codex.codex" ] (exact_lane_cli_slots path "board_attention_exact");
+       lane_write_refused "drop the lane's last slot" ~path
+         ~names:[ "codex.codex is the last slot of board_attention_exact" ]
+         (fun () ->
+            Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+              ~lane:Runtime.Board_attention ~slot:"codex.codex" ()))
+;;
+
+(* The editor writes an exact lane as its own table. A lane declared inline has
+   no header to write under, and a second table would declare it twice and fail
+   the file, so both writers refuse it. *)
+let test_an_inline_exact_lane_is_refused () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.trim runtime_config
+       ^ "\n\n[runtime.exact_output_lanes]\n\
+          board_attention_exact = { slots = [\"catalog.only\"] }");
+    lane_write_refused "append to an inline lane" ~path
+      ~names:[ "board_attention_exact is not written as its own" ]
+      (fun () ->
+         Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slot:"openai.gpt" ());
+    lane_write_refused "set an inline lane" ~path
+      ~names:[ "board_attention_exact is not written as its own" ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane:Runtime.Board_attention ~slots:[ "openai.gpt" ] ()))
+;;
+
+let test_lane_candidates_reject_an_empty_ladder () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match
+       set_runtime_lane_candidates
+         ~runtime_config_path:path
+         ~lane_id:"openai.gpt"
+         ~runtime_ids:[]
+         ()
+     with
+     | Ok _ -> Alcotest.fail "an empty candidate list must not be written"
+     | Error msg ->
+       Alcotest.(check bool)
+         "the refusal says a lane needs a candidate"
+         true
+         (string_contains msg "at least one candidate"));
+    Alcotest.(check string)
+      "runtime.toml is untouched by the refusal"
+      before
+      (Fs_compat.load_file path))
+;;
+
+let test_lane_candidates_reject_an_unknown_candidate () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match
+       set_runtime_lane_candidates
+         ~runtime_config_path:path
+         ~lane_id:"openai.gpt"
+         ~runtime_ids:[ "openai.gpt"; "missing.runtime" ]
+         ()
+     with
+     | Ok _ -> Alcotest.fail "a candidate that resolves to nothing must not be written"
+     | Error msg ->
+       Alcotest.(check bool)
+         "the refusal names the id it could not find"
+         true
+         (string_contains msg "missing.runtime"));
+    Alcotest.(check string)
+      "runtime.toml is untouched by the refusal"
+      before
+      (Fs_compat.load_file path))
+;;
+
+let test_runtime_route_writer_updates_media_failover () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.set_runtime_media_failover
+         ~runtime_config_path:path
+         ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ]
+         ()
+     with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "set_runtime_media_failover failed: %s" msg);
+    Alcotest.(check (list string))
+      "media failover cache"
+      [ "openai.gpt"; "runpod_mtp.qwen" ]
+      (Runtime.media_failover ());
+    Alcotest.(check bool)
+      "runtime.toml media_failover persisted"
+      true
+      (string_contains
+         (Fs_compat.load_file path)
+         "media_failover = [\"openai.gpt\", \"runpod_mtp.qwen\"]");
+    (match
+       Runtime.set_runtime_media_failover
+         ~runtime_config_path:path
+         ~runtime_ids:[]
+         ()
+     with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "clear runtime media_failover failed: %s" msg);
+    Alcotest.(check (list string))
+      "media failover cleared"
+      []
+      (Runtime.media_failover ());
+    Alcotest.(check bool)
+      "runtime.toml media_failover explicitly empty"
+      true
+      (string_contains (Fs_compat.load_file path) "media_failover = []"))
+;;
+
+let test_runtime_config_text_loads_runtime_toml () =
+  with_runtime_file (fun path ->
+    match Runtime.load_config_observation ~runtime_config_path:path () with
+    | Error msg -> Alcotest.failf "load_config_observation failed: %s" msg
+    | Ok observation ->
+      Alcotest.(check string) "loaded path" path observation.path;
+      Alcotest.(check string)
+        "loaded source text"
+        runtime_config
+        observation.source_text)
+;;
+
+let test_runtime_config_text_save_reloads_runtime_cache () =
+  with_runtime_file (fun path ->
+    let receipt =
+      match
+        Runtime.save_config_text
+          ~runtime_config_path:path
+          runtime_config_openai_default
+      with
+      | Ok receipt -> receipt
+      | Error msg -> Alcotest.failf "save_config_text failed: %s" msg
+    in
+    Alcotest.(check string) "receipt path" path receipt.observation.path;
+    Alcotest.(check string)
+      "receipt exact source"
+      runtime_config_openai_default
+      receipt.observation.source_text;
+    (match receipt.durability with
+     | Runtime.Durable -> ()
+     | Durability_unconfirmed _ ->
+       Alcotest.fail "ordinary save unexpectedly reported uncertain durability");
+    let loaded_observation =
+      match Runtime.load_config_observation ~runtime_config_path:path () with
+      | Ok observation -> observation
+      | Error msg -> Alcotest.failf "load_config_observation failed: %s" msg
+    in
+    Alcotest.(check string)
+      "receipt revision equals reloaded revision"
+      (Runtime.config_source_revision_to_string receipt.observation.source_revision)
+      (Runtime.config_source_revision_to_string loaded_observation.source_revision);
+    Alcotest.(check string)
+      "runtime.toml raw source saved exactly"
+      runtime_config_openai_default
+      (Fs_compat.load_file path);
+    Alcotest.(check string)
+      "runtime cache reloaded"
+      "openai.gpt"
+      (Runtime.get_default_runtime_id ()))
+;;
+
+let test_runtime_config_text_save_rejects_invalid_without_write () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match
+       Runtime.save_config_text
+         ~runtime_config_path:path
+         "[runtime]\ndefault = \"missing.runtime\"\n"
+     with
+     | Ok _receipt -> Alcotest.fail "expected invalid raw runtime.toml to fail"
+     | Error msg ->
+       Alcotest.(check bool)
+         "error mentions unresolved default"
+         true
+         (string_contains msg "missing.runtime"));
+    Alcotest.(check string)
+      "runtime.toml unchanged after raw validation failure"
+      before
+      (Fs_compat.load_file path);
+    Alcotest.(check string)
+      "runtime cache unchanged"
+      "runpod_mtp.qwen"
+      (Runtime.get_default_runtime_id ()))
+;;
+
+(* A save must not put a broken [fusion] on disk: a bad table refuses every
+   Fusion run until the file is fixed by hand. The same text with a valid
+   quorum saves, so the rejection is the fusion check and not something else in
+   the fixture. *)
+let fusion_section ~min_answered =
+  Printf.sprintf
+    {|
+[fusion]
+enabled = true
+default_preset = "pair"
+
+[fusion.presets.pair]
+panel = ["openai.gpt", "runpod_mtp.qwen"]
+judge = "openai.gpt"
+panel_system_prompt = "Answer."
+judge_system_prompt = "Judge."
+min_answered = %d
+|}
+    min_answered
+;;
+
+let test_runtime_config_text_save_rejects_invalid_fusion_without_write () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    let broken = runtime_config_openai_default ^ fusion_section ~min_answered:3 in
+    (match Runtime.validate_config_text ~runtime_config_path:path broken with
+     | Ok () -> Alcotest.fail "preview must refuse a quorum above the panel seat count"
+     | Error msg ->
+       Alcotest.(check bool) "preview names min_answered" true
+         (string_contains msg "min_answered"));
+    (match Runtime.save_config_text ~runtime_config_path:path broken with
+     | Ok _receipt -> Alcotest.fail "save must refuse a quorum above the panel seat count"
+     | Error msg ->
+       Alcotest.(check bool) "save names the preset" true (string_contains msg "pair"));
+    Alcotest.(check string)
+      "runtime.toml unchanged after fusion validation failure"
+      before
+      (Fs_compat.load_file path);
+    match
+      Runtime.save_config_text
+        ~runtime_config_path:path
+        (runtime_config_openai_default ^ fusion_section ~min_answered:2)
+    with
+    | Ok _receipt -> ()
+    | Error msg -> Alcotest.failf "a valid fusion section must save: %s" msg)
+;;
+
+(* A broken [fusion] can already be on disk: boot tolerates it and a hand edit
+   can write it. A save that leaves [fusion] as the file has it is not judged on
+   it, so an unrelated write such as a keeper purge still goes through. A save
+   that changes the table is judged, even from broken to still broken. *)
+let test_runtime_config_text_save_judges_fusion_only_when_changed () =
+  with_runtime_file (fun path ->
+    let broken = fusion_section ~min_answered:3 in
+    write_file path (runtime_config ^ broken);
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "boot must not refuse a broken [fusion]: %s" msg);
+    (match Runtime.save_config_text ~runtime_config_path:path (runtime_config_openai_default ^ broken) with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "a save that keeps [fusion] as it is must pass: %s" msg);
+    Alcotest.(check string) "the unrelated change is on disk" "openai.gpt"
+      (Runtime.get_default_runtime_id ());
+    let still_broken = runtime_config_openai_default ^ fusion_section ~min_answered:4 in
+    (match Runtime.validate_config_text ~runtime_config_path:path still_broken with
+     | Ok () -> Alcotest.fail "preview must judge a [fusion] the save changes"
+     | Error msg ->
+       Alcotest.(check bool) "preview names min_answered" true (string_contains msg "min_answered"));
+    match Runtime.save_config_text ~runtime_config_path:path still_broken with
+    | Ok _receipt -> Alcotest.fail "a save that changes [fusion] must leave it loadable"
+    | Error msg ->
+      Alcotest.(check bool) "save names min_answered" true (string_contains msg "min_answered"))
+;;
+
+let test_undeclared_keeper_falls_to_default () =
+  with_config_dir (fun _config_dir ->
+    with_runtime_initialized (fun () ->
+      (* no keepers/nobody.toml → runtime_id = None → [runtime].default *)
+      Alcotest.(check string)
+        "undeclared keeper dispatches to [runtime].default"
+        (Runtime.get_default_runtime_id ())
+        (KMC.runtime_id_of_meta (make_meta "nobody"))))
+;;
+
+(* ---- driver dispatch lookup: resolve, or fail fast ---- *)
+
+let test_get_runtime_by_id_resolves_and_fails_fast () =
+  with_runtime_initialized (fun () ->
+    Alcotest.(check (option string))
+      "known id resolves to its runtime"
+      (Some "openai.gpt")
+      (Option.map
+         (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id)
+         (Runtime.get_runtime_by_id "openai.gpt"));
+    Alcotest.(check (option string))
+      "unknown id resolves to None (driver fails fast, no default substitution)"
+      None
+      (Option.map
+         (fun (rt : Runtime_instance.t) -> rt.Runtime_instance.id)
+         (Runtime.get_runtime_by_id "bogus.binding")))
+;;
+
+(* ---- rerank resolver: resolve the requested runtime, or fail fast ----
+
+   Audit F8: [Runtime_agent_core_runner.resolve_runtime_providers] used to discard
+   [runtime_id] and always return the default runtime, silently substituting
+   an operator-selected runtime id.  It must resolve the requested id via the RFC-0207 catalog
+   and return [Error] on an unknown id — never the default runtime. *)
+
+let provider_base_url_of_runtime_id runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some { Runtime_instance.execution = Runtime_execution.Agent_core provider_config; _ } ->
+    provider_config.Llm_provider.Provider_config.base_url
+  | Some rt ->
+    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime_instance.id
+  | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
+;;
+
+let test_rerank_resolver_resolves_requested_runtime () =
+  with_runtime_initialized (fun () ->
+    (* Known non-default id resolves to that runtime's provider, not the
+       default's. *)
+    (match
+       Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
+     with
+     | Error msg -> Alcotest.failf "expected openai.gpt to resolve: %s" msg
+     | Ok [ provider ] ->
+       Alcotest.(check string)
+         "resolved provider belongs to the requested runtime"
+         (provider_base_url_of_runtime_id "openai.gpt")
+         provider.Llm_provider.Provider_config.base_url
+     | Ok providers ->
+       Alcotest.failf "expected exactly one provider, got %d" (List.length providers));
+    (* Empty id resolves the default runtime. *)
+    match Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"" () with
+    | Error msg -> Alcotest.failf "expected empty id to resolve default: %s" msg
+    | Ok [ provider ] ->
+      Alcotest.(check string)
+        "empty id resolves the default runtime's provider"
+        (provider_base_url_of_runtime_id (Runtime.get_default_runtime_id ()))
+        provider.Llm_provider.Provider_config.base_url
+    | Ok providers ->
+      Alcotest.failf "expected exactly one provider, got %d" (List.length providers))
+;;
+
+let test_rerank_resolver_errors_on_unknown_runtime_id () =
+  with_runtime_initialized (fun () ->
+    match
+      Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
+    with
+    | Ok _ ->
+      Alcotest.fail
+        "unknown runtime id must return Error, not the default runtime \
+         (silent substitution)"
+    | Error msg ->
+      Alcotest.(check bool)
+        "error names the unknown runtime id"
+        true
+      (string_contains msg "bogus.binding"))
+;;
+
+let test_rerank_resolver_rejects_missing_declared_env_credential () =
+  let env_key = "MASC_TEST_RUNTIME_RUNNER_MISSING_CREDENTIAL_9C8B1A72" in
+  let original = Sys.getenv_opt env_key in
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some value -> Unix.putenv env_key value
+      | None -> Unix.putenv env_key "")
+    (fun () ->
+      Unix.putenv env_key "";
+      with_runtime_file (fun path ->
+        (match
+           Runtime.save_config_text
+             ~runtime_config_path:path
+             runtime_config_missing_openai_env_credential
+         with
+         | Ok _ -> ()
+         | Error msg -> Alcotest.failf "credential fixture reload failed: %s" msg);
+        match
+          Runtime_agent_core_runner.For_testing.resolve_runtime_providers
+            ~runtime_id:"openai.gpt"
+            ()
+        with
+        | Ok _ -> Alcotest.fail "missing declared credential reached Agent Core runner"
+        | Error detail ->
+          Alcotest.(check bool)
+            "error names the required env credential"
+            true
+            (string_contains detail env_key)))
+;;
+
+let resolve_budget ~requested_override runtime_id =
+  match
+    Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+      ~requested_override
+      ~runtime_id
+  with
+  | Ok resolution -> resolution
+  | Error error ->
+    Alcotest.failf
+      "%s must resolve a context budget: %s"
+      runtime_id
+      (Keeper_context_runtime.max_context_resolution_error_to_string error)
+;;
+
+let test_context_budget_uses_selected_runtime () =
+  with_runtime_initialized (fun () ->
+    let default_budget =
+      resolve_budget ~requested_override:None "runpod_mtp.qwen"
+    in
+    let selected_budget = resolve_budget ~requested_override:None "openai.gpt" in
+    let small_budget = resolve_budget ~requested_override:None "openai.small" in
+    let oversized_override =
+      resolve_budget ~requested_override:(Some 128_001) "openai.small"
+    in
+    Alcotest.(check int)
+      "default runtime budget"
+      128000
+      default_budget.Keeper_context_runtime.effective_budget;
+    Alcotest.(check int)
+      "selected runtime budget"
+      64000
+      selected_budget.Keeper_context_runtime.effective_budget;
+    Alcotest.(check int)
+      "provider capacity below 64k is not enlarged"
+      32000
+      small_budget.Keeper_context_runtime.effective_budget;
+    Alcotest.(check int)
+      "override cannot enlarge provider capacity"
+      32000
+      oversized_override.Keeper_context_runtime.effective_budget)
+;;
+
+let test_strict_context_budget_rejects_unavailable_and_invalid_override () =
+  with_runtime_initialized (fun () ->
+    (match
+       Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+         ~requested_override:None
+         ~runtime_id:"missing.runtime"
+     with
+     | Error
+         (Keeper_context_runtime.Runtime_context_window_unavailable
+            { runtime_id }) ->
+       Alcotest.(check string)
+         "typed error retains the exact unresolved runtime id"
+         "missing.runtime"
+         runtime_id
+     | Error _ -> Alcotest.fail "unexpected strict context resolution error"
+     | Ok _ -> Alcotest.fail "unknown runtime must not receive a default capacity");
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:(Some 0)
+        ~runtime_id:"openai.gpt"
+    with
+    | Error (Keeper_context_runtime.Invalid_requested_context_override 0) -> ()
+    | Error _ -> Alcotest.fail "unexpected invalid override error"
+    | Ok _ -> Alcotest.fail "non-positive override must not be silently ignored")
+;;
+
+let test_context_budget_source_is_shared_ssot () =
+  with_runtime_initialized (fun () ->
+    let source requested_override =
+      resolve_budget ~requested_override "openai.gpt"
+      |> Keeper_context_runtime.context_budget_source_of_resolution
+      |> Keeper_context_runtime.context_budget_source_to_string
+    in
+    Alcotest.(check string)
+      "runtime cap source"
+      "runtime_provider_cap"
+      (source None);
+    Alcotest.(check string)
+      "requested override source"
+      "requested_override"
+      (source (Some 32_000));
+    Alcotest.(check string)
+      "provider-clamped requested override source"
+      "requested_override_clamped_to_provider"
+      (source (Some 1_000_000)))
+;;
+
+(* The runtime budget's own provenance must survive to the status surface.
+   Collapsing it rendered a runtime.toml [model.max-context] override as
+   budget_source=runtime_provider_cap under the provider_context_window JSON
+   key, which disguised the #25463 live config drift (deepseek-v4-flash
+   262144 vs catalog 1048576) as a provider fact. The fixture's [openai.gpt]
+   declares max-context in runtime.toml, so its budget is an override. *)
+let test_runtime_budget_source_survives_to_status_json () =
+  with_runtime_initialized (fun () ->
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:None
+        ~runtime_id:"openai.gpt"
+    with
+    | Error error ->
+      Alcotest.failf
+        "openai.gpt must resolve: %s"
+        (Keeper_context_runtime.max_context_resolution_error_to_string error)
+    | Ok resolution ->
+      (match resolution.Keeper_context_runtime.runtime_budget_source with
+       | Runtime_instance.Override -> ()
+       | (Runtime_instance.Capability | Runtime_instance.Override_clamped_by_capability
+         | Runtime_instance.Provider_override | Runtime_instance.Binding_override
+         | Runtime_instance.Provider_override_clamped_by_capability
+         | Runtime_instance.Binding_override_clamped_by_capability) as other ->
+         Alcotest.failf
+           "expected the runtime.toml override source, got %s"
+           (Runtime_instance.max_context_source_to_string other));
+      let json =
+        Keeper_context_runtime.context_budget_json_of_resolution
+          ~runtime_id:"openai.gpt"
+          resolution
+      in
+      (match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "runtime_budget_source" fields with
+          | Some (`String "override") -> ()
+          | Some other ->
+            Alcotest.failf
+              "runtime_budget_source rendered %s"
+              (Yojson.Safe.to_string other)
+          | None -> Alcotest.fail "runtime_budget_source missing from budget JSON")
+       | _ -> Alcotest.fail "context budget JSON must be an object"))
+;;
+
+(* The keeper's routed runtime (openai.gpt = 64000) must be preferred over
+   [runtime].default (runpod_mtp.qwen = 128000) through the strict runtime-ID
+   resolver, which is the only remaining capacity path. *)
+let test_of_meta_projection_budgets_against_routed_runtime () =
+  with_runtime_initialized (fun () ->
+    (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
+    let m = make_meta "budgettest" in
+    let runtime_id = KMC.runtime_id_of_meta m in
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:m.max_context_override
+        ~runtime_id
+    with
+    | Error error ->
+        Alcotest.failf
+          "budgettest routed runtime must resolve: %s"
+          (Keeper_context_runtime.max_context_resolution_error_to_string error)
+    | Ok res ->
+        Alcotest.(check int)
+          "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
+          64000
+          res.Keeper_context_runtime.effective_budget)
+;;
+
+(* ---- per-model thinking gate: runtime.toml [thinking-support] drives the
+   keeper thinking seed via [Runtime_inference.for_runtime] ----
+
+   The keeper turn loop ([Keeper_run_tools_hooks]) treats the seed's
+   [thinking_enabled] as the runtime model's explicit policy: [Some false]
+   forces thinking off, [Some true] enables thinking even when the global
+   default is off, and [None] leaves the caller policy unchanged. *)
+
+let runtime_config_thinking =
+  {|
+[runtime]
+default = "ollama_cloud.think"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.think]
+api-name = "think"
+max-context = 128000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.nothink]
+api-name = "nothink"
+max-context = 128000
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.thinkdefault]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 128000
+tools-support = true
+thinking-support = true
+top-p = 0.91
+top-k = 42
+min-p = 0.07
+streaming = true
+
+[models.thinkexplicitoff]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 128000
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[models.smallout]
+api-name = "reasoning-small-out"
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.bigout]
+api-name = "reasoning-big-out"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.stalecontext]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 524288
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama_cloud.think]
+is-default = true
+max-concurrent = 1
+
+[ollama_cloud.nothink]
+max-concurrent = 1
+
+[ollama_cloud.thinkdefault]
+max-concurrent = 1
+disable-parallel-tool-use = true
+
+[ollama_cloud.thinkexplicitoff]
+max-concurrent = 1
+
+[ollama_cloud.smallout]
+max-concurrent = 1
+
+[ollama_cloud.bigout]
+max-concurrent = 1
+
+[ollama_cloud.stalecontext]
+max-concurrent = 1
+|}
+;;
+
+let runtime_thinking_model_catalog =
+  {|
+# This isolated inventory fixture declares its own provider contract; the
+# shipped Ollama provider remains undeclared and refuses suppression.
+[[providers]]
+id = "ollama_cloud"
+kind = "openai_compat"
+base_url = "https://ollama.example/v1"
+request_path = "/chat/completions"
+auth = "none"
+supports_parallel_tool_suppression = true
+
+[[models]]
+model_id = "qwen36-35b-a3b-mtp"
+provider_name = "ollama_cloud"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 65536
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_parallel_tool_calls = true
+assistant_tool_content_format = "empty_string"
+supports_reasoning = true
+accepted_reasoning_efforts = ["low", "medium", "high"]
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "preserve_always"
+supports_response_format_json = true
+supports_structured_output = true
+modality_priority = "visual_first"
+task = "transcription"
+supports_audio_input = true
+supports_video_input = true
+supports_system_prompt = true
+supports_prompt_caching = true
+supports_top_k = true
+supports_min_p = true
+supports_seed = true
+ignored_sampling_parameters = ["temperature", "top_p", "presence_penalty", "frequency_penalty"]
+
+[[models]]
+model_id = "reasoning-small-out"
+provider_name = "ollama_cloud"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 4096
+supports_tools = true
+supports_reasoning = true
+
+[[models]]
+model_id = "reasoning-big-out"
+provider_name = "ollama_cloud"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 200000
+supports_tools = true
+supports_reasoning = true
+|}
+;;
+
+let with_runtime_thinking f =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  with_temp_dir "runtime-thinking-gate" @@ fun dir ->
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      with_model_catalog_content runtime_thinking_model_catalog @@ fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path runtime_config_thinking;
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      f ())
+;;
+
+let test_thinking_support_true_enables_thinking_and_preserves () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.think" in
+    Alcotest.(check (option bool))
+      "thinking-support true emits Some true"
+      (Some true)
+      seed.Runtime_inference.thinking_enabled;
+    Alcotest.(check (option bool))
+      "preserve-thinking true emits Some true"
+      (Some true)
+      seed.Runtime_inference.preserve_thinking)
+;;
+
+let test_thinking_support_true_leaves_preserve_unset () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.thinkdefault" in
+    Alcotest.(check (option bool))
+      "AGENT_CORE request-side preserve capability does not auto-enable preserve"
+      None
+      seed.Runtime_inference.preserve_thinking)
+;;
+
+let test_explicit_preserve_false_overrides_capability_default () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.thinkexplicitoff" in
+    Alcotest.(check (option bool))
+      "explicit preserve-thinking=false remains Some false"
+      (Some false)
+      seed.Runtime_inference.preserve_thinking)
+;;
+
+let test_thinking_support_false_forces_off () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.nothink" in
+    Alcotest.(check (option bool))
+      "non-thinking model emits Some false (capability gate forces thinking off)"
+      (Some false)
+      seed.Runtime_inference.thinking_enabled)
+;;
+
+let test_runtime_inventory_surfaces_parameter_policy () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let policy = thinkdefault |> J.member "parameter_policy" in
+    Alcotest.(check string)
+      "reasoning toggle wire"
+      "chat_template_kwargs"
+      (policy |> J.member "reasoning_toggle_wire" |> J.to_string);
+    Alcotest.(check string)
+      "reasoning replay policy"
+      "preserve_always"
+      (policy |> J.member "reasoning_replay_policy" |> J.to_string);
+    Alcotest.(check bool)
+      "no tool replay requirement"
+      false
+      (policy |> J.member "requires_reasoning_replay_on_tool_call" |> J.to_bool);
+    let json_string_list field =
+      policy |> J.member field |> J.to_list |> List.map J.to_string
+    in
+    let expected_ignored_sampling_params =
+      [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
+    in
+    Alcotest.(check (list string))
+      "ignored sampling params surface model-catalog policy"
+      expected_ignored_sampling_params
+      (json_string_list "ignored_sampling_params");
+    Alcotest.(check (list string))
+      "always ignored sampling params surface model-catalog policy"
+      expected_ignored_sampling_params
+      (json_string_list "always_ignored_sampling_params"))
+;;
+
+let test_runtime_inventory_surfaces_effective_capabilities () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let caps = thinkdefault |> J.member "effective_capabilities" in
+    Alcotest.(check string)
+      "effective capability source"
+      "agent_core-provider-config-model"
+      (caps |> J.member "source" |> J.to_string);
+    Alcotest.(check int)
+      "effective max output"
+      65536
+      (caps |> J.member "max_output_tokens" |> J.to_int);
+    Alcotest.(check bool)
+      "parallel tool calls"
+      true
+      (caps |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    Alcotest.(check bool)
+      "named tool choice"
+      true
+      (caps |> J.member "supports_named_tool_choice" |> J.to_bool);
+    Alcotest.(check string)
+      "assistant tool content format"
+      "empty-string"
+      (caps |> J.member "assistant_tool_content_format" |> J.to_string);
+    Alcotest.(check (list string))
+      "accepted reasoning efforts"
+      [ "low"; "medium"; "high" ]
+      (caps
+       |> J.member "accepted_reasoning_efforts"
+       |> J.to_list
+       |> List.map J.to_string);
+    Alcotest.(check string)
+      "reasoning streaming field"
+      "reasoning_content"
+      (caps |> J.member "reasoning_streaming_format" |> J.member "field" |> J.to_string);
+    Alcotest.(check string)
+      "reasoning replay override"
+      "preserve-always"
+      (caps |> J.member "reasoning_replay_override" |> J.to_string);
+    Alcotest.(check string)
+      "task"
+      "transcription"
+      (caps |> J.member "task" |> J.to_string);
+    Alcotest.(check bool)
+      "audio input"
+      true
+      (caps |> J.member "supports_audio_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "video input"
+      true
+      (caps |> J.member "supports_video_input" |> J.to_bool);
+    Alcotest.(check bool)
+      "system prompt"
+      true
+      (caps |> J.member "supports_system_prompt" |> J.to_bool);
+    Alcotest.(check bool)
+      "top_k"
+      true
+      (caps |> J.member "supports_top_k" |> J.to_bool);
+    Alcotest.(check (list string))
+      "ignored sampling parameters"
+      [ "temperature"; "top_p"; "presence_penalty"; "frequency_penalty" ]
+      (caps
+       |> J.member "ignored_sampling_parameters"
+       |> J.to_list
+       |> List.map J.to_string);
+    Alcotest.(check string)
+      "effective modality priority"
+      "visual-first"
+      (caps |> J.member "modality_priority" |> J.to_string))
+;;
+
+let test_runtime_inventory_surfaces_request_config () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let request = thinkdefault |> J.member "request_config" in
+    Alcotest.(check string)
+      "request config source"
+      "agent_core-provider-config"
+      (request |> J.member "source" |> J.to_string);
+    Alcotest.(check string)
+      "provider kind"
+      "openai_compat"
+      (request |> J.member "provider_kind" |> J.to_string);
+    Alcotest.(check string)
+      "request path"
+      "/chat/completions"
+      (request |> J.member "request_path" |> J.to_string);
+    Alcotest.(check bool)
+      "not responses api"
+      false
+      (request |> J.member "request_path_targets_responses_api" |> J.to_bool);
+    Alcotest.(check int)
+      "request max context"
+      128000
+      (request |> J.member "max_context" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "request top_p"
+      0.91
+      (request |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "request top_k"
+      42
+      (request |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "request min_p"
+      0.07
+      (request |> J.member "min_p" |> J.to_float);
+    Alcotest.(check string)
+      "response format kind"
+      "off"
+      (request |> J.member "response_format" |> J.member "kind" |> J.to_string);
+    Alcotest.(check bool)
+      "response format carries no schema"
+      false
+      (request |> J.member "response_format" |> J.member "has_schema" |> J.to_bool);
+    Alcotest.(check bool)
+      "no model capabilities override on provider_config"
+      false
+      (request |> J.member "has_model_capabilities_override" |> J.to_bool);
+    (match request with
+     | `Assoc fields ->
+       List.iter
+         (fun secret_key ->
+            Alcotest.(check bool)
+              ("secret key omitted: " ^ secret_key)
+              false
+              (List.mem_assoc secret_key fields))
+         [ "api_key"; "headers"; "system_prompt"; "previous_response_id" ]
+     | _ -> Alcotest.fail "request_config must be an object"))
+;;
+
+let test_runtime_inventory_surfaces_declared_spec () =
+  with_runtime_thinking (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let thinkdefault =
+      List.find
+        (fun provider ->
+           String.equal
+             "ollama_cloud.thinkdefault"
+             (provider |> J.member "runtime_id" |> J.to_string))
+        providers
+    in
+    let spec = thinkdefault |> J.member "declared_spec" in
+    let provider = spec |> J.member "provider" in
+    let model = spec |> J.member "model" in
+    let binding = spec |> J.member "binding" in
+    Alcotest.(check (float 0.0001))
+      "snapshot top_p"
+      0.91
+      (thinkdefault |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "snapshot top_k"
+      42
+      (thinkdefault |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "snapshot min_p"
+      0.07
+      (thinkdefault |> J.member "min_p" |> J.to_float);
+    Alcotest.(check string)
+      "declared spec source"
+      "runtime.toml"
+      (spec |> J.member "source" |> J.to_string);
+    Alcotest.(check string)
+      "provider id"
+      "ollama_cloud"
+      (provider |> J.member "id" |> J.to_string);
+    Alcotest.(check string)
+      "api format"
+      "chat-completions"
+      (provider |> J.member "api_format" |> J.to_string);
+    Alcotest.(check string)
+      "transport"
+      "http"
+      (provider |> J.member "transport" |> J.to_string);
+    Alcotest.(check bool)
+      "provider capabilities absent"
+      false
+      (provider |> J.member "has_capabilities" |> J.to_bool);
+    (match provider |> J.member "behavior_capabilities" with
+     | `Null -> ()
+     | _ -> Alcotest.fail "absent provider capabilities must remain null");
+    Alcotest.(check int)
+      "custom header count"
+      0
+      (provider |> J.member "custom_header_count" |> J.to_int);
+    Alcotest.(check string)
+      "model id"
+      "thinkdefault"
+      (model |> J.member "id" |> J.to_string);
+    Alcotest.(check string)
+      "model api name"
+      "qwen36-35b-a3b-mtp"
+      (model |> J.member "api_name" |> J.to_string);
+    Alcotest.(check int)
+      "declared max context"
+      128000
+      (model |> J.member "max_context" |> J.to_int);
+    Alcotest.(check bool)
+      "declared thinking support"
+      true
+      (model |> J.member "thinking_support" |> J.to_bool);
+    Alcotest.(check (float 0.0001))
+      "declared top_p"
+      0.91
+      (model |> J.member "top_p" |> J.to_float);
+    Alcotest.(check int)
+      "declared top_k"
+      42
+      (model |> J.member "top_k" |> J.to_int);
+    Alcotest.(check (float 0.0001))
+      "declared min_p"
+      0.07
+      (model |> J.member "min_p" |> J.to_float);
+    (match model |> J.member "capabilities" with
+     | `Null -> ()
+     | _ -> Alcotest.fail "absent model capabilities must remain null");
+    Alcotest.(check string)
+      "binding provider id"
+      "ollama_cloud"
+      (binding |> J.member "provider_id" |> J.to_string);
+    Alcotest.(check string)
+      "binding model id"
+      "thinkdefault"
+      (binding |> J.member "model_id" |> J.to_string);
+    Alcotest.(check int)
+      "binding max concurrency"
+      1
+      (binding |> J.member "max_concurrent" |> J.to_int);
+    Alcotest.(check bool) "declared parallel suppression" true
+      (binding |> J.member "disable_parallel_tool_use" |> J.to_bool);
+    Alcotest.(check bool) "effective request carries parallel suppression" true
+      (thinkdefault |> J.member "request_config"
+       |> J.member "disable_parallel_tool_use" |> J.to_bool);
+    Alcotest.(check bool) "model still supports parallel calls" true
+      (thinkdefault |> J.member "effective_capabilities"
+       |> J.member "supports_parallel_tool_calls" |> J.to_bool);
+    (match binding |> J.member "keep_alive", binding |> J.member "num_ctx" with
+     | `Null, `Null -> ()
+     | _ -> Alcotest.fail "unset binding keep_alive/num_ctx must remain null");
+    (match provider with
+     | `Assoc fields ->
+       List.iter
+         (fun secret_key ->
+            Alcotest.(check bool)
+              ("declared provider secret omitted: " ^ secret_key)
+              false
+              (List.mem_assoc secret_key fields))
+         [ "credentials"; "headers"; "endpoint_url" ]
+     | _ -> Alcotest.fail "declared_spec provider must be an object"))
+;;
+
+let test_thinking_unknown_runtime_defers () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"bogus.binding" in
+    Alcotest.(check (option bool))
+      "unknown runtime id emits None (no per-model signal)"
+      None
+      seed.Runtime_inference.thinking_enabled)
+;;
+
+let test_seed_of_thinking_support_gate_contract () =
+  Alcotest.(check (option bool))
+    "Some false -> force thinking off"
+    (Some false)
+    (Runtime_inference.seed_of_thinking_support (Some false)).Runtime_inference.thinking_enabled;
+  Alcotest.(check (option bool))
+    "Some true -> enable thinking"
+    (Some true)
+    (Runtime_inference.seed_of_thinking_support (Some true)).Runtime_inference.thinking_enabled;
+  Alcotest.(check (option bool))
+    "None -> leave caller policy unchanged"
+    None
+    (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
+;;
+
+let test_max_output_tokens_accessor_projects_catalog () =
+  let max_output_tokens id =
+    Option.bind (Runtime.get_runtime_by_id id) Runtime_instance.max_output_tokens_of_runtime
+  in
+  with_runtime_thinking (fun () ->
+    Alcotest.(check (option int))
+      "explicitly declared catalog ceiling is projected verbatim"
+      (Some 200000)
+      (max_output_tokens "ollama_cloud.bigout");
+    Alcotest.(check (option int))
+      "catalog row projects its declared max_output_tokens"
+      (Some 65536)
+      (max_output_tokens "ollama_cloud.thinkdefault");
+    Alcotest.(check (option int))
+      "reasoning runtime whose model is absent from the catalog projects None"
+      None
+      (max_output_tokens "ollama_cloud.think");
+    Alcotest.(check (option int))
+      "unknown runtime id projects None (no capability record)"
+      None
+      (max_output_tokens "bogus.binding"))
+;;
+
+(* Three bindings of the fixture catalog's provider that differ in output
+   ceiling and declared effort. The default declares both, so its row is
+   checked against values that are not null. *)
+let runtime_config_resolved_rows =
+  {|
+[runtime]
+default = "ollama_cloud.effortful"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.effortful]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 128000
+tools-support = true
+thinking-support = true
+reasoning-effort = "high"
+streaming = true
+
+[models.bigout]
+api-name = "reasoning-big-out"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.think]
+api-name = "think"
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama_cloud.effortful]
+is-default = true
+max-concurrent = 1
+
+[ollama_cloud.bigout]
+max-concurrent = 1
+
+[ollama_cloud.think]
+max-concurrent = 1
+|}
+;;
+
+let test_resolved_rows_carry_their_own_binding () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  with_temp_dir "runtime-resolved-rows" @@ fun dir ->
+  (* [Workspace.default_config] points the process at [dir], and the config
+     directory resolver keeps what it found there. Both go back after this
+     case, because [dir] is removed. *)
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some dir)
+  @@ fun () ->
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      with_model_catalog_content runtime_thinking_model_catalog @@ fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path runtime_config_resolved_rows;
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      let json =
+        Server_dashboard_runtime_resolved_json.build
+          ~generated_at_iso:"2026-09-30T00:00:00Z"
+          ~config:(Workspace.default_config dir)
+      in
+      let row id =
+        match
+          List.find_opt
+            (fun row -> String.equal (row |> J.member "id" |> J.to_string) id)
+            (json |> J.member "runtimes" |> J.to_list)
+        with
+        | Some row -> row
+        | None -> Alcotest.failf "no resolved row for %s" id
+      in
+      let fields row =
+        ( Yojson.Safe.to_string (J.member "max_output_tokens" row)
+        , Yojson.Safe.to_string (J.member "declared_reasoning_effort" row) )
+      in
+      Alcotest.(check (list (triple string string string)))
+        "each row's ceiling and declared effort come from its own binding"
+        [ "ollama_cloud.effortful", "65536", {|"high"|}
+        ; "ollama_cloud.bigout", "200000", "null"
+        ; "ollama_cloud.think", "null", "null"
+        ]
+        (List.map
+           (fun id ->
+              let ceiling, effort = fields (row id) in
+              id, ceiling, effort)
+           [ "ollama_cloud.effortful"; "ollama_cloud.bigout"; "ollama_cloud.think" ]);
+      Alcotest.(check (pair string string))
+        "the default runtime's row carries its own binding"
+        ("65536", {|"high"|})
+        (fields (J.member "default_runtime" json)))
+;;
+
+let test_max_context_accessor_clamps_to_provider_cap () =
+  with_runtime_thinking (fun () ->
+    Alcotest.(check (option int))
+      "runtime TOML 524288 is clamped to provider/AGENT_CORE qwen36 cap 131072"
+      (Some 131072)
+      (Runtime.max_context_of_runtime_id "ollama_cloud.stalecontext");
+    let resolution =
+      resolve_budget ~requested_override:None "ollama_cloud.stalecontext"
+    in
+    Alcotest.(check int)
+      "keeper context budget uses provider-effective cap"
+      131072
+      resolution.Keeper_context_runtime.effective_budget)
+;;
+
+(* #36540: the [Provider_config] handed to AGENT_CORE must carry the same
+   effective window the keeper budget uses. The adapter used to forward the
+   raw runtime.toml override, so AGENT_CORE's exact-fit admission and response
+   telemetry ([Provider_config.context_window]) sized against 524288 while the
+   keeper budget was 131072. *)
+let test_agent_core_provider_config_carries_effective_context_window () =
+  with_runtime_thinking (fun () ->
+    let provider_config_of runtime_id =
+      match Runtime.get_runtime_by_id runtime_id with
+      | Some (rt : Runtime_instance.t) ->
+        (match rt.execution with
+         | Runtime_execution.Agent_core config -> config
+         | Runtime_execution.Codex_app_server _
+         | Runtime_execution.Claude_code _
+         | Runtime_execution.Antigravity_cli _
+         | Runtime_execution.Muse_serve _ ->
+           Alcotest.failf "%s must materialize as an agent_core runtime" runtime_id)
+      | None -> Alcotest.failf "expected %s runtime" runtime_id
+    in
+    let stalecontext = provider_config_of "ollama_cloud.stalecontext" in
+    Alcotest.(check (option int))
+      "over-catalog override is clamped in the AGENT_CORE-facing config"
+      (Some 131072)
+      stalecontext.Llm_provider.Provider_config.max_context;
+    Alcotest.(check (option int))
+      "context_window (exact-fit admission, response telemetry) reads the clamped window"
+      (Some 131072)
+      (Llm_provider.Provider_config.context_window stalecontext);
+    let thinkdefault = provider_config_of "ollama_cloud.thinkdefault" in
+    Alcotest.(check (option int))
+      "in-catalog override passes through untouched"
+      (Some 128000)
+      thinkdefault.Llm_provider.Provider_config.max_context;
+    Alcotest.(check (option int))
+      "context_window reads the declared window under the cap"
+      (Some 128000)
+      (Llm_provider.Provider_config.context_window thinkdefault);
+    let think = provider_config_of "ollama_cloud.think" in
+    Alcotest.(check (option int))
+      "uncatalogued model keeps its runtime.toml window"
+      (Some 128000)
+      (Llm_provider.Provider_config.context_window think))
+;;
+
+(* A model the embedded catalog has no row for, served over ollama_cloud's
+   OpenAI-compatible wire. Its only window is the runtime.toml declaration, so
+   that value must stand: the provider preset has no window to clamp it with.
+   Live 2026-09-15: glm-5.3-flash declared 1048576 (ollama.com /api/show) was
+   clamped to a 128000 preset guess and pulled its lanes' turn budget down. *)
+let runtime_config_uncatalogued_wide_context =
+  {|
+[runtime]
+default = "ollama_cloud.wide"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.wide]
+api-name = "not-yet-catalogued-wide-model"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[ollama_cloud.wide]
+max-concurrent = 1
+|}
+;;
+
+let test_max_context_of_uncatalogued_model_keeps_runtime_declaration () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  with_temp_dir "runtime-uncatalogued-context" @@ fun dir ->
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path runtime_config_uncatalogued_wide_context;
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      match Runtime.resolve_max_context_of_runtime_id "ollama_cloud.wide" with
+      | None -> Alcotest.fail "ollama_cloud.wide must resolve a context window"
+      | Some (window, source) ->
+        Alcotest.(check int) "runtime.toml window stands" 1048576 window;
+        Alcotest.(check string)
+          "source is the runtime.toml override, not a preset clamp"
+          "override"
+          (Runtime_instance.max_context_source_to_string source))
+;;
+
+let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
+  let fields =
+    parse_key_value_fixture
+      (fixture_path "test/fixtures/context-overflow-qwen36-2026-06-29.env")
+  in
+  let runtime_id = fixture_field fields "runtime_id" in
+  let keeper_logged_max_context =
+    fixture_int_field fields "keeper_logged_max_context"
+  in
+  let agent_core_provider_limit = fixture_int_field fields "agent_core_provider_limit" in
+  Alcotest.(check string)
+    "fixture runtime id"
+    "ollama_cloud.stalecontext"
+    runtime_id;
+  Alcotest.(check int)
+    "fixture captures historical keeper-side oversized budget"
+    524288
+    keeper_logged_max_context;
+  Alcotest.(check int)
+    "fixture captures AGENT_CORE provider cap"
+    131072
+    agent_core_provider_limit;
+  with_runtime_thinking (fun () ->
+    Alcotest.(check (option int))
+      "current runtime accessor replays fixture through provider cap"
+      (Some agent_core_provider_limit)
+      (Runtime.max_context_of_runtime_id runtime_id);
+    let resolution = resolve_budget ~requested_override:None runtime_id in
+    Alcotest.(check int)
+      "current keeper budget no longer reproduces historical oversized value"
+      agent_core_provider_limit
+      resolution.Keeper_context_runtime.effective_budget;
+    Alcotest.(check bool)
+      "historical oversized keeper budget is not current effective budget"
+      false
+      (resolution.Keeper_context_runtime.effective_budget
+       = keeper_logged_max_context))
+;;
+
+(* ---- materialize-failure diagnostics ----
+
+   Regression guard for messages-http boot diagnostics (2026-07-03): an
+   unregistered [messages-http] provider binding cannot be materialized into a
+   provider_config, so it is dropped from the runtime list. An assignment
+   targeting it used to report the misleading "[runtime.assignments].nu =
+   ... not found among N runtimes" — pointing the operator at a typo that does
+   not exist — when the real cause is that the binding was defined but failed to
+   materialize. Behavior is unchanged (the binding is still excluded,
+   fail-closed); only the diagnostic must name the materialize failure. A
+   genuine typo (an id that is not a defined binding at all) must still report
+   "not found among N runtimes". Registered providers such as Kimi keep using
+   the provider registry SSOT to materialize their messages-compatible kind. *)
+
+(* [nu] is assigned [local.kimi-for-coding], a defined binding whose
+   provider uses protocol messages-http but has no provider-registry entry. The
+   default [openai.gpt] materializes so validation reaches the assignment. *)
+let runtime_config_messages_http_assignment =
+  {|
+[runtime]
+default = "openai.gpt"
+
+[runtime.assignments]
+nu = "local.kimi-for-coding"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+
+[providers.local]
+display-name = "Local Messages API"
+protocol = "messages-http"
+endpoint = "https://api.moonshot.example/anthropic"
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+
+[local.kimi-for-coding]
+max-concurrent = 1
+|}
+;;
+
+(* [nu] is assigned [bogus.binding], which names no declared binding at
+   all — the genuine operator-typo case whose "not found among N runtimes"
+   message must be preserved. *)
+let runtime_config_typo_assignment =
+  {|
+[runtime]
+default = "openai.gpt"
+
+[runtime.assignments]
+nu = "bogus.binding"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let load_list_error content =
+  with_temp_dir "runtime-materialize-diag" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path content;
+  match load_list_text ~config_path:path with
+  | Ok _ ->
+    Alcotest.fail "expected load_list to reject the assignment; got Ok"
+  | Error msg -> msg
+;;
+
+let test_assignment_materialize_failure_surfaces_reason () =
+  let msg = load_list_error runtime_config_messages_http_assignment in
+  Alcotest.(check bool)
+    "error names the assignment target binding"
+    true
+    (string_contains msg "local.kimi-for-coding");
+  Alcotest.(check bool)
+    "error states the binding was defined but not materialized"
+    true
+    (string_contains msg "could not be materialized as a runtime");
+  Alcotest.(check bool)
+    "error names the unmapped protocol (messages-http)"
+    true
+    (string_contains msg "messages-http");
+  Alcotest.(check bool)
+    "error explains that neither authority answered"
+    true
+    (string_contains msg "nor a declared kind exists");
+  Alcotest.(check bool)
+    "error names the key the operator can set"
+    true
+    (string_contains msg "kind = \"anthropic\"");
+  Alcotest.(check bool)
+    "error does NOT fall back to the misleading bare not-found wording"
+    false
+    (string_contains msg "not found among")
+;;
+
+(* An endpoint AGENT_CORE has no provider row for is exactly what the install
+   wizard builds — its provider id is a hash of the operator's answers. Nothing
+   can name the dialect for it, and messages-http has no safe default, so the
+   deployment says it. These three cases fix where that value is read: once
+   where it is the only answer, and twice where declaring it would be a second
+   authority the loader must refuse rather than quietly ignore. *)
+let with_declared_kind ~provider ~kind content =
+  let needle = Printf.sprintf "[providers.%s]\n" provider in
+  let width = String.length needle in
+  let rec insert_after index =
+    if index + width > String.length content
+    then Alcotest.fail ("fixture has no " ^ needle)
+    else if String.equal (String.sub content index width) needle
+    then
+      String.sub content 0 (index + width)
+      ^ Printf.sprintf "kind = %S\n" kind
+      ^ String.sub content (index + width) (String.length content - index - width)
+    else insert_after (index + 1)
+  in
+  insert_after 0
+;;
+
+let test_messages_http_materializes_on_a_declared_kind () =
+  let content =
+    with_declared_kind
+      ~provider:"local"
+      ~kind:"anthropic"
+      runtime_config_messages_http_assignment
+  in
+  with_temp_dir "runtime-declared-kind" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path content;
+  match load_list_text ~config_path:path with
+  | Ok _ -> ()
+  | Error msg -> Alcotest.fail ("declared kind should materialize the binding: " ^ msg)
+;;
+
+let test_declared_kind_is_refused_when_the_catalog_owns_the_fact () =
+  (* [openrouter] is a shipped catalog provider, so the catalog already states
+     its dialect; a deployment restating it would be a second authority. *)
+  let msg =
+    load_list_error
+      {|
+[runtime]
+default = "openrouter.model"
+
+[providers.openrouter]
+display-name = "OpenRouter"
+protocol = "openai-compatible-http"
+kind = "glm"
+endpoint = "https://openrouter.ai/api/v1"
+
+[models.model]
+api-name = "model"
+max-context = 8000
+tools-support = true
+streaming = true
+
+[openrouter.model]
+is-default = true
+max-concurrent = 1
+|}
+  in
+  Alcotest.(check bool)
+    "refusal names the provider that restated the dialect"
+    true
+    (string_contains msg "provider \"openrouter\" declares kind");
+  Alcotest.(check bool)
+    "refusal says the catalog owns that fact"
+    true
+    (string_contains msg "owns that fact")
+;;
+
+let test_declared_kind_is_refused_where_the_protocol_fixes_it () =
+  let msg =
+    load_list_error
+      {|
+[runtime]
+default = "local.model"
+
+[providers.local]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+kind = "ollama"
+endpoint = "https://ollama.example"
+
+[models.model]
+api-name = "model"
+max-context = 8000
+tools-support = true
+streaming = true
+
+[local.model]
+is-default = true
+max-concurrent = 1
+|}
+  in
+  Alcotest.(check bool)
+    "refusal explains that the protocol already fixes the dialect"
+    true
+    (string_contains msg "already fixes the dialect")
+;;
+
+let test_assignment_typo_keeps_not_found () =
+  let msg = load_list_error runtime_config_typo_assignment in
+  Alcotest.(check bool)
+    "genuine typo names the unresolved id"
+    true
+    (string_contains msg "bogus.binding");
+  Alcotest.(check bool)
+    "genuine typo keeps the original not-found-among-runtimes wording"
+    true
+    (string_contains msg "not found among");
+  Alcotest.(check bool)
+    "genuine typo is not mislabeled as a materialize failure"
+    false
+    (string_contains msg "could not be materialized")
+;;
+
+(* ---- a lane is reached by its name ----
+
+   [[runtime.assignments]] admits a declared lane name or a runtime id, and a
+   lane of that name is taken first. Before this, an assignment was validated as
+   a runtime id only, so a lane was reachable only by carrying the id of its own
+   head binding: lanes could not be named, two ladders could not start at the
+   same runtime, and deleting a lane left the assignment silently walking
+   [head; [runtime].default] with nothing reported. *)
+
+let lane_fixture_bindings =
+  {|
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "openai-compatible-http"
+endpoint = "https://runpod.example/v1"
+exact-body-timeout-s = 120.0
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
+
+[models.qwen]
+api-name = "qwen"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[models.small]
+api-name = "small"
+max-context = 32000
+tools-support = true
+streaming = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+
+[openai.small]
+max-concurrent = 1
+|}
+;;
+
+(* The lane name carries no runtime id. Nothing but the assignment reaches it. *)
+let runtime_config_lane_named_freely =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.lanes.coding]
+candidates = ["openai.gpt", "openai.small"]
+
+[runtime.assignments]
+nu = "coding"
+|}
+  ^ lane_fixture_bindings
+;;
+
+(* Two ladders start at the same runtime under names of their own and keep
+   their own tails. *)
+let runtime_config_two_lanes_one_head =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.lanes.fast]
+candidates = ["openai.gpt", "openai.small"]
+
+[runtime.lanes.careful]
+candidates = ["openai.gpt", "runpod_mtp.qwen"]
+
+[runtime.assignments]
+nu = "fast"
+mu = "careful"
+|}
+  ^ lane_fixture_bindings
+;;
+
+(* The lane the assignment names is not declared: the load must refuse instead
+   of walking [coding] as a runtime id or falling back to the default. *)
+let runtime_config_assignment_names_no_lane =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.assignments]
+nu = "coding"
+|}
+  ^ lane_fixture_bindings
+;;
+
+(* The pre-existing spelling — a lane carrying its head's runtime id — keeps
+   working, because the lane is still looked up before the runtime. *)
+let runtime_config_lane_named_after_its_head =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.lanes."openai.gpt"]
+candidates = ["openai.gpt", "openai.small"]
+
+[runtime.assignments]
+nu = "openai.gpt"
+|}
+  ^ lane_fixture_bindings
+;;
+
+let load_lane_config content =
+  with_temp_dir "runtime-lane-name" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path content;
+  match Runtime.load_list ~config_path:path with
+  | Ok loaded -> Ok loaded
+  | Error failure -> Error (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+;;
+
+let lane_named lanes name =
+  List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) name) lanes
+;;
+
+let candidates_of lanes name =
+  match lane_named lanes name with
+  | None -> Alcotest.failf "no lane named %S survived the load" name
+  | Some lane -> Runtime_lane.ordered_candidates lane
+;;
+
+(* [cli_slots] of verifier_exact go through the same direct-runtime admission
+   as its slots, and one unknown id fails the whole lane at every judgement,
+   so the load refuses a CLI slot that names a lane rather than a runtime. *)
+let test_a_verifier_cli_slot_naming_a_lane_is_refused () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.lanes.judge]\ncandidates = [\"openai.gpt\"]\n\
+       \n[runtime.exact_output_lanes.verifier_exact]\n\
+       slots = [\"openai.gpt\"]\ncli_slots = [\"judge\"]\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "a verifier CLI slot naming a lane loaded"
+  | Error msg ->
+    let needle = {|[runtime.exact_output_lanes.verifier_exact].cli_slots entry "judge"|} in
+    if not (string_contains msg needle)
+    then Alcotest.failf "the refusal %S does not name %S" msg needle
+;;
+
+(* Regression for the 2026-09-24 defect: only [verifier_exact]'s [cli_slots]
+   were reference-checked at load, so a typo'd id on any sibling lane
+   ([librarian_exact], [hitl_auto_judge], [board_attention_exact]) loaded
+   fine and then failed every [Keeper_lane_cli_oneshot] attempt at run time
+   with a misleading "is not an official-client runtime" message (192 times
+   in one server log, on [librarian_exact]). [exact_lane_cli_slot_references]
+   is one function over every declared lane, so the same refusal must reach
+   every sibling lane, not just the one this incident happened to hit. *)
+let test_a_sibling_lane_cli_slot_naming_an_unknown_id_is_refused () =
+  List.iter
+    (fun lane_id ->
+       let config =
+         String.trim runtime_config
+         ^ Printf.sprintf
+             "\n\n[runtime.exact_output_lanes.%s]\n\
+              slots = [\"openai.gpt\"]\ncli_slots = [\"codex_subscription.gpt-6-luna-xhigh\"]\n"
+             lane_id
+       in
+       match load_lane_config config with
+       | Ok _ -> Alcotest.failf "%s: an unknown cli_slots id loaded" lane_id
+       | Error msg ->
+         let needle =
+           Printf.sprintf
+             {|[runtime.exact_output_lanes.%s].cli_slots entry "codex_subscription.gpt-6-luna-xhigh"|}
+             lane_id
+         in
+         Alcotest.(check bool)
+           (lane_id ^ ": the refusal names the lane, the key and the id")
+           true
+           (string_contains msg needle);
+         Alcotest.(check bool)
+           (lane_id ^ ": the refusal keeps the not-found-among-runtimes wording")
+           true
+           (string_contains msg "not found among"))
+    [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact" ]
+;;
+
+(* [cli_slots] dispatches through [Keeper_lane_cli_oneshot.run] on every lane
+   alike, which requires an official-client runtime
+   ([Runtime_execution.Official_client]); a [cli_slots] entry that resolves to
+   a provider-dispatched (HTTP) runtime is a load error distinct from an
+   unresolved id, because the id is not missing. *)
+let test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.librarian_exact]\n\
+       slots = [\"runpod_mtp.qwen\"]\ncli_slots = [\"openai.gpt\"]\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "an HTTP runtime named in cli_slots loaded"
+  | Error msg ->
+    Alcotest.(check bool)
+      "the refusal names the lane and the offending cli_slots entry"
+      true
+      (string_contains msg {|[runtime.exact_output_lanes.librarian_exact].cli_slots entry "openai.gpt"|});
+    Alcotest.(check bool)
+      "the refusal says why, not just that the id is unknown"
+      true
+      (string_contains msg "dispatched over HTTP rather than an official-client CLI");
+    Alcotest.(check bool)
+      "the refusal does NOT fall back to the not-found wording (the id did resolve)"
+      false
+      (string_contains msg "not found among")
+;;
+
+(* Muse runtime IDs resolve, but neither exact-lane slot list can admit a
+   client without an output-schema channel. Existing HTTP and catalog-only
+   controls below keep their separate admission contracts. *)
+let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused () =
+  List.iter (fun field ->
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim muse_serve_bindings
+      ; Printf.sprintf
+          "[runtime.exact_output_lanes.librarian_exact]\n%s = [\"%s\"]"
+          field muse_serve_runtime_id
+      ]
+  in
+  with_temp_dir "runtime-muse-cli-slot" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path config;
+  match Runtime.load_list ~config_path:path with
+  | Error
+      (Runtime_config_error.Exact_lane_cli_slot_unservable
+        { owner = Runtime_schema.Builtin Standalone_lane.Librarian
+        ; slot_id
+        ; provider_id = "muse_code"
+        ; reason = Runtime_config_error.Client_without_output_schema
+        }) -> Alcotest.(check string) "the offending entry" muse_serve_runtime_id slot_id
+  | Error failure ->
+    Alcotest.failf "refused for another reason: %s"
+      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+  | Ok _ -> Alcotest.failf "a %s entry naming Muse Code loaded" field)
+    ["cli_slots"; "slots"]
+;;
+
+(* RFC operator-quiz §4.3 K1: an add-on lane's cli_slots dispatch through the
+   same one-shot CLI tail, so the same schema-channel rule refuses them, and
+   the refusal names the add-on table. *)
+let test_an_addon_lane_cli_slot_without_an_output_schema_channel_is_refused () =
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim muse_serve_bindings
+      ; Printf.sprintf "[runtime.addon_exact_lanes.operator-quiz.author]\ncli_slots = [\"%s\"]"
+          muse_serve_runtime_id
+      ]
+  in
+  with_temp_dir "runtime-addon-cli-slot" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path config;
+  match Runtime.load_list ~config_path:path with
+  | Error
+      (Runtime_config_error.Exact_lane_cli_slot_unservable
+         ({ owner = Runtime_schema.Addon { declaration_id = "operator-quiz"; output = "author" }
+          ; reason = Runtime_config_error.Client_without_output_schema
+          ; _ } as unservable)) ->
+    Alcotest.(check string) "the offending entry" muse_serve_runtime_id unservable.slot_id;
+    Alcotest.(check bool) "the refusal names the add-on table" true
+      (string_contains
+         (Runtime_config_error.to_diagnostic_text ~config_path:path
+            (Runtime_config_error.Exact_lane_cli_slot_unservable unservable))
+         "[runtime.addon_exact_lanes.operator-quiz.author]")
+  | Error failure ->
+    Alcotest.failf "refused for another reason: %s"
+      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+  | Ok _ -> Alcotest.fail "an add-on cli_slots entry naming Muse Code loaded"
+;;
+
+let test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted () =
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim official_client_bindings
+      ; "[runtime.exact_output_lanes.librarian_exact]\n\
+         slots = [\"openai.gpt\"]\ncli_slots = [\"codex.codex\"]"
+      ]
+  in
+  match load_lane_config config with
+  | Error msg -> Alcotest.failf "a librarian_exact cli_slots naming an official client must load: %s" msg
+  | Ok _ -> ()
+;;
+
+(* The design boundary [verifier_exact_slot_references]'s comment documents:
+   a sibling lane's [slots] (unlike its [cli_slots]) is consumed exclusively
+   through [Runtime_exact_output_registry], which admits an id against the
+   AGENT_CORE catalog rather than [runtime.toml]'s runtime list -- a
+   catalog-only id such as ["catalog.only"] (used the same way by other lane
+   writer tests in this file) is not a runtime.toml typo, and refusing it at
+   load would break a configuration dispatch already handles. This pins that
+   boundary so a future change to [exact_lane_cli_slot_references] cannot
+   silently widen to cover [slots] too. *)
+let test_a_sibling_lane_slots_entry_may_be_catalog_only () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.librarian_exact]\n\
+       slots = [\"catalog.only\"]\n"
+  in
+  match load_lane_config config with
+  | Error msg -> Alcotest.failf "a catalog-only slots id on a sibling lane must load: %s" msg
+  | Ok _ -> ()
+;;
+
+let test_an_assignment_names_a_lane_of_its_own_name () =
+  match load_lane_config runtime_config_lane_named_freely with
+  | Error msg -> Alcotest.failf "a freely named lane must load: %s" msg
+  | Ok (_runtimes, _default, assignments, _media_failover, lanes) ->
+    Alcotest.(check (option string))
+      "the assignment keeps the lane name it was written with"
+      (Some "coding")
+      (List.assoc_opt "nu" assignments);
+    Alcotest.(check (list string))
+      "the lane walks exactly its own candidates"
+      [ "openai.gpt"; "openai.small" ]
+      (candidates_of lanes "coding")
+    (* The dispatch-reachability projection this test also consulted was the
+       local request-cap validation's; #36828 removed both when body size
+       became the server's judgement. The candidate walk above is the
+       surviving surface: the assignment resolves to the lane, and the lane's
+       ordered candidates are the dispatch walk. *)
+;;
+
+let test_two_lanes_may_start_at_the_same_runtime () =
+  match load_lane_config runtime_config_two_lanes_one_head with
+  | Error msg -> Alcotest.failf "two lanes sharing a head must load: %s" msg
+  | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
+    Alcotest.(check (list string))
+      "[fast] keeps its own tail"
+      [ "openai.gpt"; "openai.small" ]
+      (candidates_of lanes "fast");
+    Alcotest.(check (list string))
+      "[careful] keeps a different tail from the same head"
+      [ "openai.gpt"; "runpod_mtp.qwen" ]
+      (candidates_of lanes "careful")
+;;
+
+let test_an_assignment_naming_no_lane_is_refused () =
+  match load_lane_config runtime_config_assignment_names_no_lane with
+  | Ok _ -> Alcotest.fail "an assignment naming neither a lane nor a runtime must be refused"
+  | Error msg ->
+    Alcotest.(check bool)
+      "the refusal names the unresolved assignment target"
+      true
+      (string_contains msg "coding");
+    Alcotest.(check bool)
+      "the refusal keeps the not-found-among-runtimes wording"
+      true
+      (string_contains msg "not found among")
+;;
+
+let test_a_lane_named_after_its_head_still_wins () =
+  match load_lane_config runtime_config_lane_named_after_its_head with
+  | Error msg -> Alcotest.failf "the pre-existing lane spelling must keep loading: %s" msg
+  | Ok (_runtimes, _default, _assignments, _media_failover, lanes) ->
+    Alcotest.(check (list string))
+      "the lane is taken over the same-named runtime"
+      [ "openai.gpt"; "openai.small" ]
+      (candidates_of lanes "openai.gpt")
+;;
+
+let () =
+  (match Llm_provider.Model_catalog.load_default () with
+   | Error msg -> Alcotest.failf "packaged AGENT_CORE models.toml should load: %s" msg
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+  Alcotest.run
+    "runtime_per_keeper_routing"
+    [ ( "runtime-assignment routing"
+      , [ Alcotest.test_case
+            "[runtime.assignments] drives runtime_id_of_meta"
+            `Quick
+            test_assignment_drives_runtime_id_of_meta
+        ; Alcotest.test_case
+            "unassigned keeper falls to [runtime].default"
+            `Quick
+            test_undeclared_keeper_falls_to_default
+        ; Alcotest.test_case
+            "dashboard runtime assignment writes runtime.toml and refreshes cache"
+            `Quick
+            test_runtime_assignment_writer_updates_runtime_toml
+        ; Alcotest.test_case
+            "dashboard runtime inventory exposes assignment status"
+            `Quick
+            test_runtime_inventory_surfaces_assignment_status
+        ; Alcotest.test_case
+            "dashboard Codex runtime stays unavailable until measured"
+            `Quick
+            test_codex_runtime_inventory_is_unverified_until_measured
+        ; Alcotest.test_case
+            "dashboard agent_core runtime is configured and available"
+            `Quick
+            test_agent_core_runtime_inventory_is_configured
+        ; Alcotest.test_case
+            "dashboard runtime inventory reports transport kind"
+            `Quick
+            test_runtime_inventory_reports_transport_kind
+        ; Alcotest.test_case
+            "unknown assignment is rejected before runtime.toml write"
+            `Quick
+            test_runtime_assignment_writer_rejects_unknown_runtime_without_write
+        ; Alcotest.test_case
+            "dashboard runtime assignment clear validates and refreshes cache"
+            `Quick
+            test_runtime_assignment_writer_clears_assignment
+        ; test_case "runtime and egress publish one final revision" `Quick
+            test_runtime_and_egress_change_share_the_published_revision
+        ; test_case "deleted Keeper loses assignment and egress together" `Quick
+            test_deleted_keeper_loses_assignment_and_egress_together
+        ; Alcotest.test_case
+            "concurrent assignment CAS admits exactly one writer"
+            `Quick
+            test_runtime_assignment_cas_admits_exactly_one_concurrent_writer
+        ; Alcotest.test_case
+            "missing runtime config has a typed revision state"
+            `Quick
+            test_missing_runtime_config_is_typed_without_fabricated_revision
+        ; Alcotest.test_case
+            "runtime assignment release warning reaches commit receipt"
+            `Quick
+            test_runtime_assignment_release_warning_reaches_commit_receipt
+        ; Alcotest.test_case
+            "dashboard runtime route writer updates default"
+            `Quick
+            test_runtime_route_writer_updates_default
+        ; Alcotest.test_case "first-run HTTP runtime owns supporting lanes" `Quick
+            test_first_run_runtime_binds_supporting_lanes
+        ; Alcotest.test_case "first run writes the exact deadline on a provider without one" `Quick
+            test_first_run_writes_the_exact_deadline_on_a_provider_without_one
+        ; Alcotest.test_case "first-run fallback ordering and atomic preservation" `Quick
+            test_first_run_fallback_order_and_preservation
+        ; Alcotest.test_case "first-run imp binding requires explicit selection" `Quick
+            test_first_run_imp_binding_is_explicit
+        ; Alcotest.test_case "first-run CLI runtime owns supporting lanes" `Quick
+            test_first_run_cli_runtime_binds_supporting_lanes
+        ; Alcotest.test_case
+            "first run writes a client without an output-schema channel into no slot" `Quick
+            test_first_run_writes_a_client_without_an_output_schema_channel_into_no_slot
+        ; Alcotest.test_case
+            "unknown default route is rejected before runtime.toml write"
+            `Quick
+            test_runtime_route_writer_rejects_unknown_default_without_write
+        ; Alcotest.test_case
+            "dashboard runtime route writer updates media_failover"
+            `Quick
+            test_runtime_route_writer_updates_media_failover
+        ; Alcotest.test_case
+            "dashboard raw runtime.toml load returns full source"
+            `Quick
+            test_runtime_config_text_loads_runtime_toml
+        ; Alcotest.test_case
+            "dashboard raw runtime.toml save validates and reloads cache"
+            `Quick
+            test_runtime_config_text_save_reloads_runtime_cache
+        ; Alcotest.test_case
+            "dashboard raw runtime.toml save rejects invalid source before write"
+            `Quick
+            test_runtime_config_text_save_rejects_invalid_without_write
+        ; Alcotest.test_case
+            "runtime.toml save rejects an invalid [fusion] before write"
+            `Quick
+            test_runtime_config_text_save_rejects_invalid_fusion_without_write
+        ; Alcotest.test_case
+            "runtime config save judges fusion only when changed"
+            `Quick
+            test_runtime_config_text_save_judges_fusion_only_when_changed
+        ; Alcotest.test_case
+            "messages-http provider loads and keeper assignment resolves"
+            `Quick
+            test_messages_http_runtime_loads_and_assignment_resolves
+        ] )
+    ; ( "driver lookup"
+      , [ Alcotest.test_case
+            "get_runtime_by_id resolves known / fails fast on unknown"
+            `Quick
+            test_get_runtime_by_id_resolves_and_fails_fast
+        ; Alcotest.test_case
+            "rerank resolver resolves the requested runtime (audit F8)"
+            `Quick
+            test_rerank_resolver_resolves_requested_runtime
+        ; Alcotest.test_case
+            "rerank resolver errors on unknown runtime id, no default substitution"
+            `Quick
+            test_rerank_resolver_errors_on_unknown_runtime_id
+        ; Alcotest.test_case
+            "rerank resolver rejects a missing declared env credential"
+            `Quick
+            test_rerank_resolver_rejects_missing_declared_env_credential
+        ; Alcotest.test_case
+            "context budget uses selected runtime max-context"
+            `Quick
+            test_context_budget_uses_selected_runtime
+        ; Alcotest.test_case
+            "context budget source uses shared SSOT"
+            `Quick
+            test_context_budget_source_is_shared_ssot
+        ; Alcotest.test_case
+            "runtime budget source survives to status JSON"
+            `Quick
+            test_runtime_budget_source_survives_to_status_json
+        ; Alcotest.test_case
+            "strict context budget rejects unavailable capacity and invalid override"
+            `Quick
+            test_strict_context_budget_rejects_unavailable_and_invalid_override
+        ; Alcotest.test_case
+            "of_meta projection prefers the routed runtime"
+            `Quick
+            test_of_meta_projection_budgets_against_routed_runtime
+        ; Alcotest.test_case
+            "Codex official-client runtime cannot enter AGENT_CORE runner"
+            `Quick
+            test_codex_runtime_cannot_enter_agent_core_runner
+        ; Alcotest.test_case
+            "Codex official-client runtime has no AGENT_CORE thinking seed"
+            `Quick
+            test_codex_runtime_has_no_agent_core_thinking_seed
+        ] )
+    ; ( "per-model thinking gate"
+      , [ Alcotest.test_case
+            "thinking-support=true enables thinking and preserve-thinking"
+            `Quick
+            test_thinking_support_true_enables_thinking_and_preserves
+        ; Alcotest.test_case
+            "request-side preserve capability stays policy-neutral"
+            `Quick
+            test_thinking_support_true_leaves_preserve_unset
+        ; Alcotest.test_case
+            "explicit preserve-thinking=false stays explicit"
+            `Quick
+            test_explicit_preserve_false_overrides_capability_default
+        ; Alcotest.test_case
+            "thinking-support=false forces thinking off (Some false)"
+            `Quick
+            test_thinking_support_false_forces_off
+        ; Alcotest.test_case
+            "runtime inventory surfaces AGENT_CORE parameter policy"
+            `Quick
+            test_runtime_inventory_surfaces_parameter_policy
+        ; Alcotest.test_case
+            "runtime inventory surfaces AGENT_CORE effective capabilities"
+            `Quick
+            test_runtime_inventory_surfaces_effective_capabilities
+        ; Alcotest.test_case
+            "runtime inventory surfaces AGENT_CORE request config"
+            `Quick
+            test_runtime_inventory_surfaces_request_config
+        ; Alcotest.test_case
+            "runtime inventory surfaces declared spec"
+            `Quick
+            test_runtime_inventory_surfaces_declared_spec
+        ; Alcotest.test_case
+            "runtime inventory surfaces declared model capabilities"
+            `Quick
+            test_runtime_inventory_surfaces_declared_model_capabilities
+        ; Alcotest.test_case
+            "unknown runtime id defers (None)"
+            `Quick
+            test_thinking_unknown_runtime_defers
+        ; Alcotest.test_case
+            "seed_of_thinking_support gate contract (pure)"
+            `Quick
+            test_seed_of_thinking_support_gate_contract
+        ] )
+    ; ( "runtime token capacity projection"
+      , [ Alcotest.test_case
+            "max_output_tokens_of_runtime projects catalog ceiling"
+            `Quick
+            test_max_output_tokens_accessor_projects_catalog
+        ; Alcotest.test_case
+            "resolved rows carry their own binding"
+            `Quick
+            test_resolved_rows_carry_their_own_binding
+        ; Alcotest.test_case
+            "max_context_of_runtime_id clamps runtime TOML to provider cap"
+            `Quick
+            test_max_context_accessor_clamps_to_provider_cap
+        ; Alcotest.test_case
+            "AGENT_CORE provider config carries the effective window"
+            `Quick
+            test_agent_core_provider_config_carries_effective_context_window
+        ; Alcotest.test_case
+            "uncatalogued model keeps its runtime.toml window"
+            `Quick
+            test_max_context_of_uncatalogued_model_keeps_runtime_declaration
+        ; Alcotest.test_case
+            "historical qwen36 overflow fixture replays provider cap"
+            `Quick
+            test_historical_qwen36_context_overflow_fixture_replays_provider_cap
+        ] )
+    ; ( "lane candidate writer"
+      , [ Alcotest.test_case
+            "a picked lane gets its own table"
+            `Quick
+            test_lane_candidates_create_the_lane_table
+        ; Alcotest.test_case
+            "a created lane is assigned, then removed once no keeper names it"
+            `Quick
+            test_a_created_lane_is_assigned_then_removed
+        ; Alcotest.test_case
+            "a lane the default walks is not removed"
+            `Quick
+            test_a_lane_the_default_walks_is_not_removed
+        ; Alcotest.test_case
+            "a new lane under a runtime id is refused"
+            `Quick
+            test_a_new_lane_under_a_runtime_id_is_declared
+        ; Alcotest.test_case
+            "an inline lane is not reported removed"
+            `Quick
+            test_an_inline_lane_is_not_reported_removed
+        ; Alcotest.test_case
+            "a verifier slot naming a lane is refused"
+            `Quick
+            test_a_verifier_slot_naming_a_lane_is_refused
+        ; Alcotest.test_case
+            "an exact slot append keeps the declared order"
+            `Quick
+            test_an_exact_slot_append_keeps_the_declared_order
+        ; Alcotest.test_case
+            "a waiting exact append reads the preceding writer's declaration"
+            `Quick
+            test_an_exact_slot_append_reads_after_lock_admission
+        ; Alcotest.test_case
+            "a rename carries the references with it"
+            `Quick
+            test_a_rename_carries_the_references_with_it
+        ; Alcotest.test_case
+            "a rename refuses a name in use and an absent table"
+            `Quick
+            test_a_rename_refuses_a_name_in_use_and_an_absent_table
+        ; Alcotest.test_case
+            "a rename carries the default route too"
+            `Quick
+            test_a_rename_carries_the_default_route_too
+        ; Alcotest.test_case
+            "the default may name a lane"
+            `Quick
+            test_the_default_may_name_a_lane
+        ; Alcotest.test_case
+            "an exact slot drop and move read the declaration"
+            `Quick
+            test_an_exact_slot_drop_and_move_read_the_declaration
+        ; Alcotest.test_case "replace and promote preserve other declared candidates"
+            `Quick test_exact_candidate_replacement_and_first_preserve_other_slots
+        ; Alcotest.test_case
+            "an exact append or set refuses a declared CLI slot"
+            `Quick
+            test_an_exact_append_refuses_a_declared_cli_slot
+        ; Alcotest.test_case
+            "an exact append places an official client in cli_slots"
+            `Quick
+            test_an_exact_append_places_an_official_client_in_cli_slots
+        ; Alcotest.test_case
+            "an exact lane refuses a client without an output-schema channel" `Quick
+            test_an_exact_lane_refuses_a_client_without_an_output_schema_channel
+        ; Alcotest.test_case
+            "CLI replacement preserves declared groups and refusal order" `Quick
+            test_exact_cli_replacement_preserves_declared_groups
+        ; Alcotest.test_case
+            "multiple official client accounts stay distinct"
+            `Quick
+            test_multiple_official_client_accounts_are_distinct_runtimes
+        ; Alcotest.test_case
+            "Candle appraisal is explicitly configured with both transports"
+            `Quick
+            test_candle_appraiser_is_explicitly_configured_with_both_transports
+        ; Alcotest.test_case
+            "a CLI append to an undeclared lane writes only cli_slots"
+            `Quick
+            test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots
+        ; Alcotest.test_case
+            "an exact drop and move edit the CLI slots"
+            `Quick
+            test_an_exact_drop_and_move_edit_the_cli_slots
+        ; Alcotest.test_case
+            "an inline exact lane is refused"
+            `Quick
+            test_an_inline_exact_lane_is_refused
+        ; Alcotest.test_case
+            "a verifier CLI slot naming a lane is refused"
+            `Quick
+            test_a_verifier_cli_slot_naming_a_lane_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an unknown id is refused"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_unknown_id_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an HTTP runtime is refused"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused
+        ; Alcotest.test_case
+            "a cli slot naming a client without an output-schema channel is refused" `Quick
+            test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused
+        ; Alcotest.test_case
+            "an add-on lane cli slot without an output-schema channel is refused" `Quick
+            test_an_addon_lane_cli_slot_without_an_output_schema_channel_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an official client is accepted"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted
+        ; Alcotest.test_case
+            "a sibling lane's slots entry may be catalog-only"
+            `Quick
+            test_a_sibling_lane_slots_entry_may_be_catalog_only
+        ; Alcotest.test_case
+            "a second write replaces the ladder"
+            `Quick
+            test_lane_candidates_replace_rather_than_append
+        ; Alcotest.test_case
+            "a stale lane source revision cannot replace another write"
+            `Quick
+            test_lane_set_revision_refuses_an_intervening_write
+        ; Alcotest.test_case
+            "an exact-output lane writes its walk order"
+            `Quick
+            test_exact_lane_slots_writer
+        ; Alcotest.test_case
+            "an empty ladder is refused"
+            `Quick
+            test_lane_candidates_reject_an_empty_ladder
+        ; Alcotest.test_case
+            "an unresolvable candidate is refused"
+            `Quick
+            test_lane_candidates_reject_an_unknown_candidate
+        ] )
+    ; ( "materialize-failure diagnostics"
+      , [ Alcotest.test_case
+            "assignment to an unmaterializable binding surfaces the reason"
+            `Quick
+            test_assignment_materialize_failure_surfaces_reason
+        ; Alcotest.test_case
+            "messages-http materializes once the deployment declares the dialect"
+            `Quick
+            test_messages_http_materializes_on_a_declared_kind
+        ; Alcotest.test_case
+            "a dialect the catalog already owns is refused, not ignored"
+            `Quick
+            test_declared_kind_is_refused_when_the_catalog_owns_the_fact
+        ; Alcotest.test_case
+            "a dialect the protocol already fixes is refused, not ignored"
+            `Quick
+            test_declared_kind_is_refused_where_the_protocol_fixes_it
+
+        ; Alcotest.test_case
+            "assignment typo keeps the not-found-among-runtimes message"
+            `Quick
+            test_assignment_typo_keeps_not_found
+        ] )
+    ; ( "lane names"
+      , [ Alcotest.test_case
+            "an assignment names a lane of its own name"
+            `Quick
+            test_an_assignment_names_a_lane_of_its_own_name
+        ; Alcotest.test_case
+            "two lanes may start at the same runtime"
+            `Quick
+            test_two_lanes_may_start_at_the_same_runtime
+        ; Alcotest.test_case
+            "an assignment naming no lane and no runtime is refused"
+            `Quick
+            test_an_assignment_naming_no_lane_is_refused
+        ; Alcotest.test_case
+            "a lane named after its head still wins over that runtime"
+            `Quick
+            test_a_lane_named_after_its_head_still_wins
+        ] )
+    ]
+;;

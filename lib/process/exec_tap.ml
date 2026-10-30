@@ -1,0 +1,349 @@
+(** Exec tap — see .mli for the contract.
+
+    Implementation notes:
+    - State is an [Atomic.t] so worker domains (Executor_pool) publish
+      writer changes without a memory-barrier issue.
+    - [record] uses [Unix.gettimeofday] directly to keep the tap usable
+      from the Unix fallback path, which may run before Eio.Time is
+      initialized.
+    - JSON encoding is hand-rolled (single line, trailing newline only).
+      Using Yojson would pull the dependency into every callsite.
+    - Writer exceptions are swallowed, except Eio.Cancel.Cancelled which
+      must always propagate.  Tap must not break production. *)
+
+type call_kind =
+  | Process_eio_run_argv
+  | Process_eio_run_argv_with_stdin
+  | Process_eio_run_argv_with_stdin_and_status
+  | Process_eio_run_argv_with_status
+
+let kind_to_string = function
+  | Process_eio_run_argv -> "Process_eio.run_argv"
+  | Process_eio_run_argv_with_stdin -> "Process_eio.run_argv_with_stdin"
+  | Process_eio_run_argv_with_stdin_and_status ->
+      "Process_eio.run_argv_with_stdin_and_status"
+  | Process_eio_run_argv_with_status -> "Process_eio.run_argv_with_status"
+
+type lifecycle_stage =
+  | Spawned of string list
+  | Waitpid_started
+  | Waitpid_returned
+  | Exit_published
+  | Stdout_closed
+  | Stderr_closed
+  | Awaiting_exit
+  | Exit_observed
+
+let lifecycle_stage_fields = function
+  | Spawned argv -> "spawned", argv
+  | Waitpid_started -> "waitpid_started", []
+  | Waitpid_returned -> "waitpid_returned", []
+  | Exit_published -> "exit_published", []
+  | Stdout_closed -> "stdout_closed", []
+  | Stderr_closed -> "stderr_closed", []
+  | Awaiting_exit -> "awaiting_exit", []
+  | Exit_observed -> "exit_observed", []
+
+type mode =
+  | Off
+  | On of { writer : string -> unit }
+
+let state : mode Atomic.t = Atomic.make Off
+
+let enabled () =
+  match Atomic.get state with
+  | Off -> false
+  | On _ -> true
+
+let enable ~writer = Atomic.set state (On { writer })
+
+let disable () = Atomic.set state Off
+
+(* ── JSON escape ─────────────────────────────────────────────── *)
+
+let add_json_escaped buf s =
+  String.iter
+    (fun c ->
+      match c with
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | c when Char.code c < 0x20 ->
+          Printf.bprintf buf "\\u%04x" (Char.code c)
+      | c -> Buffer.add_char buf c)
+    s
+
+let add_json_string buf s =
+  Buffer.add_char buf '"';
+  add_json_escaped buf s;
+  Buffer.add_char buf '"'
+
+let add_json_array_of_strings buf xs =
+  Buffer.add_char buf '[';
+  List.iteri
+    (fun i s ->
+      if i > 0 then Buffer.add_char buf ',';
+      add_json_string buf s)
+    xs;
+  Buffer.add_char buf ']'
+
+let add_json_bool buf value =
+  Buffer.add_string buf (if value then "true" else "false")
+
+(* ── argv secret redaction ─────────────────────────────────────── *)
+
+let token_prefixes = [ "sk-" ]
+
+let is_token_char c =
+  match c with
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '/' | '+' | '=' -> true
+  | _ -> false
+;;
+
+let rec skip_token s i =
+  if i < String.length s && is_token_char s.[i] then skip_token s (i + 1) else i
+;;
+
+(** [redact_url_credentials s i] is called when [s.[i-3..i-1] = "://"].
+    It returns [Some (replacement, end_of_authority)] if an embedded
+    [user:pass@] or [user@] authority is found, so it can be replaced with
+    [[REDACTED]@]; otherwise [None]. *)
+let redact_url_credentials s i =
+  let len = String.length s in
+  let end_of_auth =
+    let rec scan j =
+      if j >= len then j
+      else
+        match s.[j] with
+        | '/' | ' ' | '?' | '#' -> j
+        | _ -> scan (j + 1)
+    in
+    scan i
+  in
+  let authority = String.sub s i (end_of_auth - i) in
+  match String.index_opt authority '@' with
+  | None -> None
+  | Some at_idx ->
+    let host_port = String.sub authority (at_idx + 1) (String.length authority - at_idx - 1) in
+    Some ("[REDACTED]@" ^ host_port, end_of_auth)
+;;
+
+let redact_arg s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len
+    then Buffer.contents buf
+    else if i + 7 <= len && String.sub s i 7 = "Bearer "
+    then (
+      Buffer.add_string buf "Bearer ";
+      let j = skip_token s (i + 7) in
+      if j > i + 7
+      then (
+        Buffer.add_string buf "[REDACTED]";
+        loop j)
+      else loop (i + 1))
+    else if List.exists
+              (fun prefix ->
+                 let plen = String.length prefix in
+                 i + plen <= len && String.sub s i plen = prefix)
+              token_prefixes
+    then (
+      let prefix =
+        List.find
+          (fun prefix ->
+             let plen = String.length prefix in
+             i + plen <= len && String.sub s i plen = prefix)
+          token_prefixes
+      in
+      Buffer.add_string buf "[REDACTED]";
+      loop (skip_token s (i + String.length prefix)))
+    else if i + 3 <= len && String.sub s i 3 = "://"
+    then (
+      match redact_url_credentials s (i + 3) with
+      | Some (replacement, end_of_auth) ->
+        Buffer.add_string buf "://";
+        Buffer.add_string buf replacement;
+        loop end_of_auth
+      | None ->
+        Buffer.add_string buf "://";
+        loop (i + 3))
+    else (
+      Buffer.add_char buf s.[i];
+      loop (i + 1))
+  in
+  loop 0
+;;
+
+(* Header values are redacted by where they sit, not by what they look like.
+   [redact_arg] knows three shapes -- Bearer, sk-, credentials in a URL -- and
+   a key shaped like none of them travelled to the corpus as written:
+   [-H "xi-api-key: <key>"] was recorded in full. A redactor built on value
+   shapes lags every provider that spells its key differently, and the shape
+   list only grows after someone finds the next one in an audit file.
+
+   So the rule is positional. The argument after -H or --header is a header,
+   and a header not named below is treated as carrying a credential. Being
+   wrong that way costs a Content-Type in a debugging corpus; being wrong the
+   other way costs the key. *)
+let header_flags = [ "-H"; "--header" ]
+
+let descriptive_headers =
+  [ "accept"
+  ; "accept-encoding"
+  ; "accept-language"
+  ; "cache-control"
+  ; "connection"
+  ; "content-length"
+  ; "content-type"
+  ; "expect"
+  ; "user-agent"
+  ]
+
+let redact_header_arg arg =
+  match String.index_opt arg ':' with
+  (* Not [name: value] at all, so whatever it is goes through the shape rules
+     like any other argument. *)
+  | None -> redact_arg arg
+  | Some colon ->
+    let name = String.sub arg 0 colon in
+    if List.mem (String.lowercase_ascii (String.trim name)) descriptive_headers
+    then redact_arg arg
+    else (
+      let by_shape = redact_arg arg in
+      (* A shape the rules already know keeps the spelling they produce:
+         "Bearer [REDACTED]" says which scheme without saying the token, and
+         that is worth keeping for whoever reads the corpus. Only a value they
+         left untouched -- the case this arm exists for -- is blanked whole. *)
+      if not (String.equal by_shape arg) then by_shape else name ^ ": [REDACTED]")
+;;
+
+let redact_argv argv =
+  let rec loop = function
+    | [] -> []
+    | flag :: value :: rest when List.mem flag header_flags ->
+      flag :: redact_header_arg value :: loop rest
+    | arg :: rest -> redact_arg arg :: loop rest
+  in
+  loop argv
+;;
+
+let env_keys = function
+  | None -> None
+  | Some arr ->
+      let keys =
+        Array.to_list arr
+        |> List.map (fun s ->
+               match String.index_opt s '=' with
+               | Some i -> String.sub s 0 i
+               | None -> s)
+      in
+      Some keys
+
+let now_iso8601 () = Time_codec.rfc3339_of_unix_ms (Unix.gettimeofday ())
+
+(* ── record ─────────────────────────────────────────────── *)
+
+type extra_field =
+  [ `String of string * string
+  | `Bool of string * bool
+  | `Int of string * int
+  ]
+
+let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
+  match Atomic.get state with
+  | Off -> ()
+  | On { writer } ->
+      let buf = Buffer.create 256 in
+      Buffer.add_string buf "{\"ts\":";
+      add_json_string buf (now_iso8601 ());
+      Buffer.add_string buf ",\"kind\":";
+      add_json_string buf kind;
+      Buffer.add_string buf ",\"argv\":";
+      add_json_array_of_strings buf (redact_argv argv);
+      Buffer.add_string buf ",\"env_keys\":";
+      (match env_keys env with
+       | None -> Buffer.add_string buf "null"
+       | Some keys -> add_json_array_of_strings buf keys);
+      Buffer.add_string buf ",\"cwd\":";
+      (match cwd with
+       | None -> Buffer.add_string buf "null"
+       | Some s -> add_json_string buf s);
+      List.iter
+        (function
+          | `String (name, value) ->
+            Buffer.add_char buf ',';
+            add_json_string buf name;
+            Buffer.add_char buf ':';
+            add_json_string buf value
+          | `Int (name, value) ->
+            Buffer.add_char buf ',';
+            add_json_string buf name;
+            Buffer.add_char buf ':';
+            Buffer.add_string buf (string_of_int value)
+          | `Bool (name, value) ->
+            Buffer.add_char buf ',';
+            add_json_string buf name;
+            Buffer.add_char buf ':';
+            add_json_bool buf value)
+        extras;
+      Buffer.add_string buf "}\n";
+      let line = Buffer.contents buf in
+      (try writer line with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Exec_tap.error "exec_tap writer failed: %s" (Printexc.to_string exn))
+
+let record ~kind ~argv ?env ?cwd () =
+  write_line ~kind:(kind_to_string kind) ~argv ?env ?cwd []
+
+let record_lifecycle ~pid ~stage () =
+  if enabled () then (
+    let stage, argv = lifecycle_stage_fields stage in
+    write_line ~kind:"Process.lifecycle" ~argv [`Int ("pid",pid);`String ("stage",stage)])
+
+(* ── install_from_env ─────────────────────────────────────────────── *)
+
+let env_truthy = function
+  | "1" | "true" | "yes" | "TRUE" | "YES" -> true
+  | _ -> false
+
+let default_out_path = "audits/exec-corpus.jsonl"
+
+let open_append_fd path =
+  Unix.openfile path
+    [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+    0o600
+
+let install_from_env () =
+  match Sys.getenv_opt "MASC_EXEC_TAP" with
+  | Some v when env_truthy v ->
+      let out_path =
+        match Sys.getenv_opt "MASC_EXEC_TAP_OUT" with
+        | Some p when p <> "" -> p
+        | _ -> default_out_path
+      in
+      let result =
+        try Ok (open_append_fd out_path)
+        with Unix.Unix_error (e, fn, arg) ->
+          Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message e))
+      in
+      (match result with
+       | Ok fd ->
+           let mu = Mutex.create () in
+           let rec write_all fd buf off remaining =
+             if remaining <= 0 then ()
+             else match Unix.write_substring fd buf off remaining with
+               | 0 -> raise (Unix.Unix_error (Unix.EIO, "write_substring", ""))
+               | n -> write_all fd buf (off + n) (remaining - n)
+           in
+           let writer line =
+             Mutex.protect mu (fun () -> let len = String.length line in write_all fd line 0 len)
+           in
+           enable ~writer;
+           Log.Exec_tap.info "exec_tap enabled: %s" out_path
+       | Error msg ->
+           Log.Exec_tap.warn "exec_tap disabled: cannot open %s: %s" out_path msg)
+  | None | Some _ -> ()

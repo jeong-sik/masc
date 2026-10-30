@@ -1,0 +1,36 @@
+{
+  "base": "d3e765062a3f2621b3f4a5f0f2dddb61ac1c26be",
+  "binary_sha256": "a0675383351056731286b3a07df42dfe30167bcf409ac66194bccc4546e3e7e3",
+  "results": [
+    {
+      "case": 0,
+      "exit": 1,
+      "log": "/tmp/pr40960-canonical-root-final-red-0.log"
+    },
+    {
+      "case": 1,
+      "exit": 1,
+      "log": "/tmp/pr40960-canonical-root-final-red-1.log"
+    },
+    {
+      "case": 2,
+      "exit": 1,
+      "log": "/tmp/pr40960-canonical-root-final-red-2.log"
+    },
+    {
+      "case": 3,
+      "exit": 1,
+      "log": "/tmp/pr40960-canonical-root-final-red-3.log"
+    },
+    {
+      "case": 4,
+      "exit": 1,
+      "log": "/tmp/pr40960-canonical-root-final-red-4.log"
+    },
+    {
+      "case": 5,
+      "exit": 1,
+      "log": "/tmp/pr40960-canonical-root-final-red-5.log"
+    }
+  ]
+}

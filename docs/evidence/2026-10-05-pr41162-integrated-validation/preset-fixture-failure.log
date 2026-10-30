@@ -1,0 +1,42 @@
+Testing `Prompt_preset'.
+This run has ID `68FYKP6U'.
+
+  [OK]          presets          0   saved lane requires boolean activity.
+> [FAIL]        presets          1   activity restore and autosave roundtrip.
+  [OK]          presets          2   capture, save, load, list round trip.
+  [OK]          presets          3   an invalid name is refused.
+  [OK]          presets          4   a preset that does not load is listed as...
+  [OK]          presets          5   a manifest naming another preset does no...
+  [OK]          presets          6   saved-settings comparison ignores snapsh...
+  [OK]          presets          7   saved-settings comparison reports invali...
+  [OK]          presets          8   saved-settings comparison reads disk wit...
+  [OK]          presets          9   restore puts the saved state back and au...
+  [OK]          presets         10   restore preserves manifest while journal...
+  [OK]          presets         11   the runtime.toml text transform keeps ev...
+  [OK]          presets         12   an override written against an older def...
+  [OK]          presets         13   an override that cannot render is skippe...
+  [OK]          presets         14   two restores keep two autosaves.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        presets          1   activity restore and autosave roundtrip.  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-05 00:23:05] [WARN] [Misc] agent_core tool guidance templates missing (agent_core.unknown_tool.not_found, agent_core.unknown_tool.not_found_no_tools, agent_core.unknown_tool.closest_registered, agent_core.unknown_tool.extra_characters, agent_core.unknown_tool.not_bare_with_closest, agent_core.unknown_tool.not_bare, agent_core.handoff.description, agent_core.handoff.prompt_param_description, agent_core.agent_tool.prompt_param_description); keeping the agent_core defaults
+ASSERT saved activity survives preset JSON
+ASSERT same candidates with changed activity are a drift
+ASSERT /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc_prompt_presetd7c381/.masc/config/runtime.toml: [runtime].default = "runpod_mtp.qwen" not found among 0 runtimes, and no [runtime.lanes] table declares it
+FAIL /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc_prompt_presetd7c381/.masc/config/runtime.toml: [runtime].default = "runpod_mtp.qwen" not found among 0 runtimes, and no [runtime.lanes] table declares it
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_prompt_preset.test_restore_preserves_lane_activity_and_autosave. in file "test/test_prompt_preset.ml", line 563, characters 40-50
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build/_tests/Prompt_preset/presets.001.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41162-exact-activity-contracts-20261004/_build/_tests/Prompt_preset'.
+1 failure! in 0.067s. 15 tests run.

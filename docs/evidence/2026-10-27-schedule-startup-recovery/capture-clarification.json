@@ -1,0 +1,33 @@
+{
+  "source_manifest": "selection.json",
+  "digest_semantics": "Digest certifies the original captured gh-rendered bytes only; repeating gh run view is not required to return identical rendered bytes.",
+  "source_lines": 58,
+  "selected_source_ranges": [
+    [
+      52,
+      57
+    ]
+  ],
+  "selected_source_lines": 6,
+  "omitted_source_ranges": [
+    [
+      1,
+      51
+    ],
+    [
+      58,
+      58
+    ]
+  ],
+  "omitted_source_lines": 52,
+  "original_manifest_bytes_preserved": true,
+  "source_bytes": 31143,
+  "source_sha256": "c595d639263cc24926b55949aa01d7e5b5d2eff6a1868b9b3cea0ec78b974f43",
+  "review_report": {
+    "url": "https://github.com/jeong-sik/masc/pull/46234#pullrequestreview-5655713002",
+    "reported_source_bytes": 31097,
+    "raw_recollection_held_by_recorder": false,
+    "difference_from_original_bytes": 46,
+    "semantics": "Recollection size is reported by the reviewer; the 46-byte difference is computed from that report, not independently verified against its unheld raw bytes."
+  }
+}

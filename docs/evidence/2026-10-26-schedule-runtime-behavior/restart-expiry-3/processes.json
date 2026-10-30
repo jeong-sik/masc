@@ -1,0 +1,16 @@
+[
+  {
+    "stage": "before",
+    "started_at_unix": 1793018166.339935,
+    "pid": 20010,
+    "returncode": 124,
+    "stopped_at_unix": 1793018180.223604
+  },
+  {
+    "stage": "after",
+    "started_at_unix": 1793018198.414749,
+    "pid": 21238,
+    "returncode": 0,
+    "stopped_at_unix": 1793018230.765533
+  }
+]

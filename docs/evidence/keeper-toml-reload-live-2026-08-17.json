@@ -1,0 +1,25 @@
+{
+  "schema": "masc.toml_reload_receipt.v1",
+  "captured_at": "2026-08-17T11:35:00Z",
+  "intent": "TOML configuration 행의 request-class 핫리로드(runtime.toml RMW POST → 재시작 없이 effective) live 축을 실측으로 닫는다",
+  "proof_structure": "RMW POST는 서버 로그에 전용 라인을 남기지 않는다 (세 기동 로그 전수에서 config 매치는 부팅 클래스 'runtime.toml: applied 4 override(s)' 뿐). 따라서 로그가 아니라 효과 3종으로 증명한다",
+  "effect_chain": {
+    "1_write": "GET/POST /api/v1/runtime/config/raw (Bearer: dashboard.token) — keeper-feature-matrix-pr-merge 세션이 08-17 낮에 assignment 추가 RMW 5회+ 실행, 각 응답 {\"ok\":true,\"path\":\".../runtime.toml\"}",
+    "2_file": "runtime.toml mtime 2026-08-17 11:37:17 (4회차 부팅 11:36:49 직후 = 마지막 RMW), agy2 assignment 참조 10건 포함 — 이 세션이 독립 확인",
+    "3_route": "RMW로 추가된 assignment의 keeper가 재시작 없이 그 runtime으로 실제 라우팅: keepers/canary-10t-agy2-g36f-high-20260817/runtime-manifests/trace-1786934225273-00000.jsonl turn 1 — checkpoint_loaded→runtime_routed→runtime_completed→turn_finished 전 행의 decision.runtime_id=antigravity_subscription.gemini-3-6-flash-high (RMW 값 그대로) — 이 세션이 독립 확인"
+  },
+  "independent_reproduction": "이 세션이 dashboard.token으로 GET 재현 (source_text 78,485B, agy2 10건). POST 재실행은 하지 않음 — 24h run 진행 창에서 전 keeper 공유 config 변이를 피함",
+  "class_matrix": {
+    "request_class": "PASS (효과 증명) — runtime.toml API RMW는 핫리로드",
+    "boot_class": "PASS — 기동 로그 'runtime.toml: applied 4 override(s)' (01:59:00 / 11:36:49 / 19:21 각 기동)",
+    "overlay": "핫리로드 안 됨 — agent-core-models-overlay.toml은 재시작 필요 (구분 필수)",
+    "sweep_class": "미측정"
+  },
+  "limits": [
+    "RMW는 read-modify-write라 동시 쓰기 경합 시 last-write-wins — 측정 세션은 직렬화로 회피, 경합 보호는 미구현",
+    "admin.token은 만료(mismatch) 상태 — raw config API 자격은 dashboard.token",
+    "Dashboard UI 대조(browser 축)는 미실행"
+  ],
+  "verdict": "PASS — request-class(runtime.toml) 핫리로드가 재시작 없이 effective함을 write→file→route 3종 효과로 증명. sweep-class·browser 축은 남음",
+  "credit": "실측 실행: keeper-feature-matrix-pr-merge 세션 / 독립 확증·동결: 이 세션"
+}

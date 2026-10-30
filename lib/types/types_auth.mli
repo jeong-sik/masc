@@ -1,0 +1,196 @@
+(** Types_auth — authentication, authorization, and rate-limit
+    types.
+
+    {b Include runtime:} starts with [include Masc_error] so the
+    error type / serialisation surface flows through into
+    {!Types}.  Adds:
+
+    - {!agent_role} (Worker / Admin / Player) + serialisers.
+    - {!agent_credential} record + JSON round-trip.
+    - {!auth_config} record + JSON round-trip + default value.
+    - {!permission} variant + role->permissions table.
+    - Rate-limit role multipliers ({!multiplier_for_role},
+      {!effective_limit}). *)
+
+include module type of struct
+  include Masc_error
+end
+
+(** {1 Result type aliases} *)
+
+type rate_limit_config = Masc_error.rate_limit_config = {
+  per_minute : int;
+  burst_allowed : int;
+  priority_agents : string list;
+  worker_multiplier : float;
+  admin_multiplier : float;
+  broadcast_per_minute : int;
+  task_ops_per_minute : int;
+}
+(** Re-declared for record disambiguation in JSON serialisers.
+    Type identity is preserved with {!Masc_error.rate_limit_config}. *)
+
+type masc_error = t
+(** Alias to {!Masc_error.t}. *)
+
+val masc_error_to_string : masc_error -> string
+val show_masc_error : masc_error -> string
+
+type 'a masc_result = ('a, masc_error) result
+(** Standard MASC operation result type. *)
+
+(** {1 Agent role} *)
+
+(** Enforced permission level for an agent. *)
+type agent_role =
+  | Worker  (** Can claim tasks, lock files, broadcast. *)
+  | Admin   (** Full access: init, reset, manage agents. *)
+  | Player
+      (** An invited outsider. Holds [CanPlayMachine] and nothing else, so
+          it watches and plays the shared machine but reads no other state. *)
+[@@deriving show { with_path = false }]
+
+val agent_role_to_string : agent_role -> string
+(** ["worker"] / ["admin"] / ["player"]. *)
+
+val agent_role_of_string : string -> (agent_role, string) result
+(** Inverse of {!agent_role_to_string}; returns
+    [Error "Unknown agent role: <s>"] for unrecognised inputs. *)
+
+val agent_role_to_yojson : agent_role -> Yojson.Safe.t
+(** Serialises as [\`String "worker"] / [\`String "admin"] /
+    [\`String "player"]. *)
+
+val all_agent_roles : agent_role list
+(** Every role, in declaration order. *)
+
+val valid_agent_role_strings : string list
+(** [List.map agent_role_to_string all_agent_roles]. *)
+
+val agent_role_of_yojson : Yojson.Safe.t -> (agent_role, string) result
+(** Accepts only [\`String _].  Non-string inputs yield an [Error]
+    string that names both the contract (the set of accepted role
+    strings derived from {!valid_agent_role_strings}) and the
+    canonical {!Json_util.kind_name} of the value actually received
+    (e.g. ["int"] / ["object"] / ["null"]) so operators can
+    distinguish a wrong-type bug from a wrong-shape bug without
+    re-dumping the full payload. *)
+
+(** {1 Agent credential} *)
+
+module Credential_expiry : sig
+  type t = private No_expiry | At of float
+  type error = Invalid_timestamp of string
+
+  val parse : string option -> (t, error) result
+  (** [None] means no expiry. A present value must be RFC3339; offsets are
+      normalized and fractional seconds truncated before float conversion. *)
+
+  val normalize : string option -> (string option, error) result
+  (** The same parsed instant as canonical UTC whole seconds. Invalid input
+      returns [Error], never a non-expiring credential. *)
+
+  val is_expired : now:float -> t -> bool
+  (** Expired only when [floor now] exceeds the expiry second. The credential
+      remains live throughout that whole second. *)
+end
+
+type agent_credential = {
+  id : Ids.Credential_id.t option;  [@default None]
+  agent_id : Ids.Agent_id.t option;  [@default None]
+  agent_name : string;
+  token : string;  (** SHA-256 hash of the secret. *)
+  role : agent_role;
+  created_at : string;  (** ISO 8601 timestamp. *)
+  expires_at : string option;  [@default None]
+}
+(** Token-based authentication record. *)
+
+val agent_credential_to_yojson : agent_credential -> Yojson.Safe.t
+(** Emits the current credential schema. [role] is the sole role authority. *)
+
+val agent_credential_of_yojson :
+  Yojson.Safe.t -> (agent_credential, string) result
+(** Requires the exact current credential object. Unknown, duplicate, missing,
+    or mistyped fields are rejected; [role] is the sole role authority.
+    A present [expires_at] must parse and is normalized to UTC whole seconds. *)
+
+(** {1 Auth configuration} *)
+
+type auth_config = {
+  enabled : bool;
+  workspace_secret_hash : string option;  [@default None]
+  require_token : bool;  [@default true]
+  token_expiry_hours : int;  [@default 24]
+}
+[@@deriving show]
+
+val min_token_expiry_hours : int
+val max_token_expiry_hours : int
+(** The window a bearer credential may be issued for, in hours: an hour at the
+    shortest, a year at the longest. Shared by the config decoder and by callers
+    that name their own window instead of taking the config's, so the two cannot
+    disagree about what the credential store will accept. *)
+
+val default_auth_config : auth_config
+(** [enabled = true; workspace_secret_hash = None; require_token = true;
+       token_expiry_hours = 24]. Decoding accepts a workspace hash only as 64
+    lowercase hexadecimal characters and an expiry only in [1..8760]. *)
+
+val auth_config_to_yojson : auth_config -> Yojson.Safe.t
+val auth_config_of_yojson : Yojson.Safe.t -> (auth_config, string) result
+(** Decodes the exact auth configuration object. Missing optional fields use
+    {!default_auth_config}; present invalid, unknown, or duplicate fields are
+    rejected. *)
+
+(** {1 Permission matrix} *)
+
+(** What each role can do.  Each constructor maps to an HTTP /
+    tool action. *)
+type permission =
+  | CanInit
+  | CanReset
+  | CanReadState
+  | CanAddTask
+  | CanClaimTask
+  | CanCompleteTask
+  | CanBroadcast
+  | CanVote
+  | CanAdmin
+  | CanPlayMachine
+      (** Watch the shared machine and take a hotseat turn on it. The
+          machine's controller decides whose turn it is; this decides who
+          may sit down. *)
+[@@deriving show { with_path = false }]
+
+val permission_to_string : permission -> string
+(** Stable wire format for {!permission}.  Returns the same string
+    {!show_permission} does today (PascalCase constructor name) but
+    locks the contract against [@@deriving show] template drift and
+    accidental renames.  Public API/SSE/error output depends on these
+    exact strings — prefer this over [show_permission] at any
+    externally-observable boundary. *)
+
+val permissions_for_role : agent_role -> permission list
+(** [Worker] permissions exclude [CanInit] / [CanReset] / [CanAdmin].
+    [Admin] adds those three to the [Worker] set. Both hold
+    [CanPlayMachine]. [Player] holds only [CanPlayMachine]. *)
+
+val has_permission : agent_role -> permission -> bool
+(** [has_permission role p] is [List.mem p (permissions_for_role role)]. *)
+
+(** {1 Rate-limit role multipliers} *)
+
+val multiplier_for_role : rate_limit_config -> agent_role -> float
+(** [multiplier_for_role cfg role] returns
+    [cfg.worker_multiplier] for [Worker] and [Player] and
+    [cfg.admin_multiplier] for [Admin]. *)
+
+val effective_limit :
+  rate_limit_config ->
+  role:agent_role ->
+  category:rate_limit_category ->
+  int
+(** [effective_limit cfg ~role ~category] returns
+    [int_of_float (limit_for_category cfg category *
+       multiplier_for_role cfg role)]. *)

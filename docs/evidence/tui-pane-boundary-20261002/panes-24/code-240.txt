@@ -1,0 +1,24 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+   MASC Workspace / Code  17:08:07  HTTP [connected]                                                                                                                                    │[Recent] Changes · 2 keepers · feed closed: observer st
+┌────────────────────────────────┐                                                                                                                                                      │                   state     tool        calls  new tok
+│  ▸ / (2)                       │   lib/a.ml                                                                                                                                           │● alpha            no events
+├────────────────────────────────┤ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │· beta             no events
+│  ▸ lib                         │      1 let x = 1                                                                                                                                     │───────────────────────────────────────────────────────
+│  ≡ README.md                   │      2 (* hi *)                                                                                                                                      │alpha · no events on this feed yet
+│                                │      3 let y = x
+│                                │      4
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+│                                │
+└────────────────────────────────┘
+  j/k:move  h/l:pane  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:open  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit  | Port: 64197
+ › to alpha   (i to write)

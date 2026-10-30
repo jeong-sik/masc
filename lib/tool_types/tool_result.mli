@@ -1,0 +1,281 @@
+(** Structured tool result type for MASC.
+
+    The closed {!disposition} sum is the semantic SSOT for every MASC tool
+    execution.  Keeper dispatch and observation layers may attach different
+    payloads to it, but they must not introduce parallel success/failure
+    enums or boolean outcome authorities.
+
+    @since 2.95.0 *)
+
+(** {1 Failure classification} *)
+
+(** Closed sum type for tool failure classification.  Each constructor
+    maps to distinct diagnostic/log/telemetry evidence; the compiler enforces
+    exhaustive handling at every match site.
+
+    @since 2.96.0 *)
+type tool_failure_class =
+  | Dependency_unavailable (** A required external dependency was unavailable. *)
+  | Policy_rejection
+      (** Auth/permission/boundary or caller-argument validation. The same
+          rejected request remains invalid; corrected arguments may succeed. *)
+  | Runtime_failure (** Internal error/bug. *)
+  | Workflow_rejection (** Business rule violation. *)
+  | Operator_cancelled
+      (** An operator interrupted the work (#28810). *)
+
+type failure_effect_disposition =
+  | Proven_pre_effect
+      (** The producer proves that the requested effect did not begin. *)
+  | Proven_post_effect
+      (** The producer proves that the requested effect committed before failure. *)
+  | Effect_outcome_unknown
+      (** The producer cannot prove whether the requested effect committed. *)
+
+val failure_effect_disposition_to_string : failure_effect_disposition -> string
+val failure_effect_disposition_of_string : string -> failure_effect_disposition option
+
+(** The encoder emits only current constructor names.  The decoder also accepts
+    the historical derived-json constructor [["Transient_error"]] as
+    {!Dependency_unavailable}, so persisted telemetry remains readable after
+    the constructor rename. *)
+val tool_failure_class_to_yojson : tool_failure_class -> Yojson.Safe.t
+val tool_failure_class_of_yojson :
+  Yojson.Safe.t -> (tool_failure_class, string) result
+
+val pp_tool_failure_class : Format.formatter -> tool_failure_class -> unit
+val tool_failure_class_to_string : tool_failure_class -> string
+val tool_failure_class_of_string : string -> tool_failure_class option
+
+(** [Runtime_failure] maps to [Error]; all others to [Warn]. *)
+val log_level_of_failure_class : tool_failure_class -> Log.level
+
+(** {1 Tool call outcome (wire-level)} *)
+
+(** Lightweight observation of an MCP/AGENT_CORE wire response.  This external
+    projection cannot represent {!Deferred}; it is not an internal execution
+    outcome authority. *)
+type tool_call_outcome = Ok | Error | Unknown
+
+val string_of_tool_call_outcome : tool_call_outcome -> string
+
+(** Strict wire decoder for a persisted [wire_outcome]; the inverse of
+    {!string_of_tool_call_outcome}. *)
+val tool_call_outcome_of_string : string -> (tool_call_outcome, string) Stdlib.Result.t
+
+val log_level_of_tool_call_outcome : tool_call_outcome -> Log.level
+
+(** Classify a tool failure from an exception raised during execution.
+    Constructor-only fallback.  A bare [Eio.Time.Timeout] or the timeout reason
+    wrapped by [Eio.Cancel.Cancelled] is {!Dependency_unavailable}; other Eio
+    cancellation reasons are {!Operator_cancelled}.  Semantic classes from
+    exception messages must be passed explicitly at the catch boundary. *)
+val classify_from_exception : exn -> tool_failure_class
+
+(** {1 Structured result (SSOT)} *)
+
+(** One authoritative execution disposition.  The type parameters let each
+    execution layer attach its own payload without copying the semantic
+    state into another enum. *)
+type ('completed, 'deferred, 'failed) disposition =
+  | Completed of 'completed
+  | Deferred of 'deferred
+  | Failed of 'failed
+
+val string_of_disposition : ('completed, 'deferred, 'failed) disposition -> string
+
+(** Strict wire decoder for persisted observation records. *)
+val unit_disposition_of_string
+  : string -> ((unit, unit, unit) disposition, string) Stdlib.Result.t
+
+(** How a persisted tool-call record says the call ended. Every reader of the
+    tool-call log classifies a record through {!recorded_call_outcome}.
+
+    The record's execution [disposition] is the authority. [wire_outcome] is
+    read only when the record carries no disposition: a call that did not go
+    through the typed dispatch path records its response outcome alone. A
+    committed effect whose result then failed to reach the model is therefore
+    [Recorded_succeeded] -- the effect happened.
+
+    [Recorded_deferred] stays its own case: the call was accepted but its
+    effect has not happened, so it is neither a success nor a failure.
+
+    [Recorded_unsettled] is a record whose [wire_outcome] is [unknown] or that
+    names neither field: the call has no outcome yet. [Recorded_malformed] is a
+    field of the wrong JSON type or a spelling the strict decoders refuse, or a
+    record that is not an object: producer and reader disagree on the schema. *)
+type recorded_call_outcome =
+  | Recorded_succeeded
+  | Recorded_deferred
+  | Recorded_failed
+  | Recorded_unsettled
+  | Recorded_malformed
+
+val recorded_call_outcome : Yojson.Safe.t -> recorded_call_outcome
+val recorded_call_outcome_to_string : recorded_call_outcome -> string
+val recorded_call_outcome_of_string : string -> (recorded_call_outcome, string) Stdlib.Result.t
+(** Canonical observation tags; decoding an unknown tag is a protocol error.
+    These observations do not certify Task completion or useful work. *)
+
+(** Payload carried by a completed or deferred tool invocation.  [metadata]
+    is an opaque one-way boundary projection; MASC consumers must branch on
+    {!disposition}, never recover semantics by inspecting it. The keyed
+    entries owned by a typed codec with a total decoder are the exception:
+    the artifact manifest (Tool_bridge), the handler's
+    {!Tool_outcome_declaration}, and the position of a comment page a thread
+    read returned (Board_types.Comment_page.Position), which a caller
+    continuing the read decodes instead of parsing the page's text. Each is
+    read back through its own decoder, never by matching keys here. *)
+type output_payload =
+  { retained_artifacts : Tool_output.artifact_ref list
+    (** Durable observer roots. Intentionally omitted from [to_json] so nested
+        composition serialization does not force model artifact retrieval. *)
+  ; data : Yojson.Safe.t
+  ; content_blocks : Llm_provider.Types.content_block list option
+    (** Model-visible media, separate from the UTF-8 observation data.
+        [to_json] emits observations only; Tool_bridge preserves these blocks. *)
+  ; metadata : Yojson.Safe.t option
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+type failure_data = Message_as_data | Explicit_data of Yojson.Safe.t
+(** An opaque failure has one message source. [to_json] still emits both
+    [message] and [data] for the tool-result wire contract. Structured or
+    independent data is kept separately. *)
+
+(** Payload carried by a failed tool invocation.  [class_] is required
+    (not an [option]): callers must commit to a typed classification at
+    the catch boundary. *)
+type failure_payload =
+  { effect_disposition : failure_effect_disposition
+  ; class_ : tool_failure_class
+  ; message : string
+  ; data_source : failure_data
+  ; metadata : Yojson.Safe.t option
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+(** Typed result of a tool invocation. *)
+type result =
+  (output_payload, output_payload, failure_payload) disposition
+
+(** {2 Accessors} *)
+
+(** [Completed output] and [Deferred output] return the JSON-stringified
+    [output.data] (or the bare string if [data] is [`String]); [Failed err]
+    returns [err.message]. *)
+val message : result -> string
+
+(** [Completed _] and [Deferred _] return [None]; [Failed err] returns
+    [Some err.class_]. *)
+val failure_class : result -> tool_failure_class option
+
+val to_json : result -> Yojson.Safe.t
+val tool_name : result -> string
+val duration_ms : result -> float
+val data : result -> Yojson.Safe.t
+
+val retained_artifacts : result -> Tool_output.artifact_ref list
+(** Observer-owned durable artifacts, separate from model-facing [data]. *)
+val with_retained_artifacts : Tool_output.artifact_ref list -> result -> result
+(** Attach already-persisted artifacts to a completed/deferred result. A failed
+    result is unchanged. This does not rewrite model content or imply authority. *)
+
+val metadata : result -> Yojson.Safe.t option
+
+(** Attach an opaque one-way projection without changing the authoritative
+    disposition or payload. *)
+val with_metadata : Yojson.Safe.t -> result -> result
+
+(** Explicit predicates.  Use all three when recording or serializing an
+    outcome; do not collapse {!Deferred} into a success boolean inside MASC. *)
+(** [true] only for [Completed].  This is a derived query, not an outcome value;
+    registries and serializers must consume the full {!disposition}. *)
+val is_success : result -> bool
+val is_deferred : result -> bool
+val is_failed : result -> bool
+
+(** {1 Handler constructors}
+
+    Direct constructors for [Tool_*.dispatch] functions.  Callers provide
+    execution metadata at the boundary; zero-duration compatibility
+    constructors have been removed. *)
+
+(** Completed result with an opaque string body.  Producers with typed JSON
+    must use {!make_ok} and pass [~data] directly. *)
+val ok : tool_name:string -> start_time:Tool_timing.started -> string -> result
+
+(** Failure result with an opaque string body.  The producer must supply the
+    failure class explicitly; message contents never affect the class. *)
+val error
+  :  failure_class:tool_failure_class
+  -> tool_name:string
+  -> start_time:Tool_timing.started
+  -> string
+  -> result
+
+(** Build a failure result from a caught exception.  When [failure_class]
+    is provided it is trusted as the catch boundary's typed decision;
+    otherwise {!classify_from_exception} supplies a constructor-only
+    fallback. *)
+val of_exn
+  :  ?failure_class:tool_failure_class
+  -> tool_name:string
+  -> start_time:Tool_timing.started
+  -> exn
+  -> result
+
+(** {1 Typed constructors} *)
+
+(** Typed success constructor.  [data] defaults to [`Null]. *)
+val make_ok
+  :  tool_name:string
+  -> start_time:Tool_timing.started
+  -> ?data:Yojson.Safe.t
+  -> ?metadata:Yojson.Safe.t
+  -> ?content_blocks:Llm_provider.Types.content_block list
+  -> unit
+  -> result
+
+(** Typed deferred constructor.  [metadata] is forwarded opaquely at the AGENT_CORE
+    boundary; the constructor itself is the only semantic authority. *)
+val make_deferred
+  :  tool_name:string
+  -> start_time:Tool_timing.started
+  -> ?data:Yojson.Safe.t
+  -> ?metadata:Yojson.Safe.t
+  -> unit
+  -> result
+
+(** Typed failure constructor.  [~class_] is REQUIRED. *)
+val make_err
+  :  tool_name:string
+  -> class_:tool_failure_class
+  -> start_time:Tool_timing.started
+  -> ?data:Yojson.Safe.t
+  -> ?metadata:Yojson.Safe.t
+  -> ?effect_disposition:failure_effect_disposition
+  -> string
+  -> result
+
+(** Typed failure constructor from a caught exception.  When [~class_] is
+    not provided, {!classify_from_exception} supplies the
+    constructor-only fallback. *)
+val make_err_of_exn
+  :  ?class_:tool_failure_class
+  -> tool_name:string
+  -> start_time:Tool_timing.started
+  -> exn
+  -> result
+
+(** {1 Class-specialised constructors} *)
+
+(** {!make_err} with [~class_:Workflow_rejection] and the default [`Null]
+    data payload. *)
+val workflow_err : tool_name:string -> start_time:Tool_timing.started -> string -> result
+
+(** {!make_err} with [~class_:Runtime_failure] and the default [`Null]
+    data payload. *)
+val runtime_err : tool_name:string -> start_time:Tool_timing.started -> string -> result

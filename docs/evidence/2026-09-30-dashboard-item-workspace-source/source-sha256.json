@@ -1,0 +1,20 @@
+{
+  "dashboard/src/store.ts": "cfe7d1f2d831b27de168cbba8f4ebcf3a971e9bbb3d1f3152b9a669b1909b297",
+  "dashboard/src/components/keeper-items-panel.ts": "c6231a9b976b912f0ba107607ed4403abd354e30536f00c9e82c92955d089c3b",
+  "dashboard/src/components/keeper-items-panel.test.ts": "6f1f8f583083c936722ee2ea85cea88f527e9d6e879402b297e3f0689c2bb26e",
+  "docs/constitution.xml": "999dcb3cb0502239b41be1d1f10c7f8757b1467adfc817d2866d65064c5e212e",
+  "lib/dashboard/dashboard_execution.ml": "383fecb1a9d47294d43b2f091bd7f88544c957e83f579619de19d7b790bf9d40",
+  "lib/server/server_dashboard_http_execution_surfaces.ml": "b422d4b7428c4cbf2e1c2e672380b76a94675bd6dbb49b0d5828fbad9e32c7cb",
+  "dashboard/src/store-normalizers.ts": "58f4ba0703be5c5e464be20ae354f7abfd737a754af4d6d1d02715d4bc726db6",
+  "dashboard/src/api/keeper-items.ts": "a743e69c05b84ec834b6f7127d56df288bccb2246017b0a4af88fec14615cc23",
+  "dashboard/src/api/schemas/keeper-items.ts": "0058652902ff3579bad0099b5f6ea289c11957c2111d1e3f5d5df9c4c0de1937",
+  "dashboard/vitest.config.ts": "85f9b9788e6fd2b88264ec5c1f1c70f306ad512c4fa0b00c7f9563965eefdaeb",
+  "dashboard/src/demo/keeper-items-fixture.ts": "1bd0502335e0b8386652cc7dd054ddd2514a9e412ce4c0c45f763a7037ec4785",
+  "dashboard/e2e/keeper-items.mjs": "a0d5e3bdee58627dff2f9584ff7de6cda9ca5db3e48be90bd1fc76207ea12ca3",
+  "dashboard/vite.preview.config.ts": "89e47e24b788a4fbca82537d7a9296d98053bbd085b0d93a5d9d7a4211408b7f",
+  "dashboard/dev-fixtures/keeper-items-fixture.html": "46e45b1a07448b4165b598714cf6dd4de087a01723a601fb3992962a4bd44370",
+  "dashboard/e2e/keeper-items-workspace.mjs": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88",
+  "changelog.d/40190.md": "f61bcf2c57a9661046a84b16b5170b3605ced49044915e8a77bb8ade38857381",
+  ".github/workflows/dashboard-artifact.yml": "723263d634431bccf1628b001b3703007c794072276fee2a5bb02fdf1fb03576",
+  "docs/evidence/2026-09-30-dashboard-item-workspace-source/README.md": "fc288acef1f4e010fd0f10e15f358f62c8da150ee1e3c9ab2c0a51157e92b3ce"
+}

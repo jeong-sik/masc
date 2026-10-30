@@ -1,0 +1,11 @@
+{
+  "is_derivative": true,
+  "keeper": "audit-settle-a",
+  "activation_mode": "manual",
+  "meta": {
+    "paused": true,
+    "total_turns": 0,
+    "last_turn_ts": 0.0,
+    "last_runtime_attempt": null
+  }
+}

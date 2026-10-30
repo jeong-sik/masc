@@ -1,0 +1,25 @@
+Raw workflow log SHA256: 7839559b781760ddd965632ada97ba04401b52253da1e0a15a4e9d7bca37c1d5
+Source: https://github.com/jeong-sik/masc/actions/runs/40198051855
+
+test suite	Checkout	2026-10-25T13:32:31.8972329Z HEAD is now at 545d7f22 test(admission): verify mixed ordinary exact and Fusion HTTP isolation (#45884)
+test suite	Test	2026-10-25T13:33:42.6602555Z [targeted] FAIL - packages/agent_core/test/test_reasoning_replay names no suite: no test/packages/agent_core/test/test_reasoning_replay.ml, packages/agent_core/test/test_reasoning_replay.ml, test/packages/agent_core/test/test_reasoning_replay.py or packages/agent_core/test/test_reasoning_replay.py, and no (alias runtest-test_reasoning_replay)
+test suite	Test	2026-10-25T13:34:17.1858694Z ^[[33mASSERT^[[0m MiniMax-M2sync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.1887214Z ^[[33mASSERT^[[0m MiniMax-M2stream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2124752Z ^[[33mASSERT^[[0m MiniMax-M2.1sync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2157047Z ^[[33mASSERT^[[0m MiniMax-M2.1stream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2381381Z ^[[33mASSERT^[[0m MiniMax-M2.1-highspeedsync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2401479Z ^[[33mASSERT^[[0m MiniMax-M2.1-highspeedstream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2487917Z ^[[33mASSERT^[[0m MiniMax-M2.5sync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2497481Z ^[[33mASSERT^[[0m MiniMax-M2.5stream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2583053Z ^[[33mASSERT^[[0m MiniMax-M2.5-highspeedsync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2592800Z ^[[33mASSERT^[[0m MiniMax-M2.5-highspeedstream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2671787Z ^[[33mASSERT^[[0m MiniMax-M2.7sync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2681248Z ^[[33mASSERT^[[0m MiniMax-M2.7stream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2779551Z ^[[33mASSERT^[[0m MiniMax-M2.7-highspeedsync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2789095Z ^[[33mASSERT^[[0m MiniMax-M2.7-highspeedstream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2867128Z ^[[33mASSERT^[[0m MiniMax-M3sync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2876484Z ^[[33mASSERT^[[0m MiniMax-M3stream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.2991179Z ^[[33mASSERT^[[0m MiniMax-M3.1-Flashsync opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.3006190Z ^[[33mASSERT^[[0m MiniMax-M3.1-Flashstream opaque details survive without output control
+test suite	Test	2026-10-25T13:34:17.3006996Z   ^[[32m[OK]^[[0m          ^[[36mparse^[[0m             12   MiniMax native catalog parse/history/r...
+test suite	Test	2026-10-25T13:34:17.3050175Z ^[[32mTest Successful^[[0m in 0.097s. 64 tests run.

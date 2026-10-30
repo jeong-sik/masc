@@ -1,0 +1,19 @@
+COMMAND: ['git', 'diff', '--check']
+EXIT: 0
+
+COMMAND: ['python3', '-m', 'py_compile', 'test/test_tui_runtime_lane_editor.py']
+EXIT: 0
+
+COMMAND: ['/Users/dancer/.opam/5.5.1/bin/ocamlc', '-stop-after', 'parsing', '-c', 'bin/masc_tui_async_protocol.mli']
+EXIT: 0
+
+COMMAND: ['/Users/dancer/.opam/5.5.1/bin/ocamlc', '-stop-after', 'parsing', '-c', 'bin/masc_tui_async_protocol.ml']
+EXIT: 0
+
+COMMAND: ['/Users/dancer/.opam/5.5.1/bin/ocamlc', '-stop-after', 'parsing', '-c', 'bin/masc_tui_types.ml']
+EXIT: 0
+
+COMMAND: ['/Users/dancer/.opam/5.5.1/bin/ocamlc', '-stop-after', 'parsing', '-c', 'bin/masc_tui.ml']
+EXIT: 0
+
+Fixture discovery: 4 scenarios, TOML fixtures validated with tomllib; PTY not executed.

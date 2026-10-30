@@ -1,0 +1,21 @@
+{
+  "context": "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.",
+  "lane": "automation",
+  "clientId": null,
+  "tabId": 1,
+  "url": "http://127.0.0.1:55876/index.html",
+  "documentId": "b9fc1755273a7af47eb73a66c8dbf822",
+  "nodeId": "n3",
+  "view": "regions",
+  "scope": null,
+  "viewport": {
+    "width": 1366.0,
+    "height": 683.0,
+    "scrollX": 0.0,
+    "scrollY": 0.0
+  },
+  "truncated": false,
+  "tag": "article",
+  "text": "Alpha release",
+  "source": null
+}

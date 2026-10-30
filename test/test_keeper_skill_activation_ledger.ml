@@ -1,0 +1,1583 @@
+open Alcotest
+open Masc
+
+module Ledger = Masc.Keeper_skill_activation_ledger
+
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Sys.readdir path
+    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+    Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+  | Unix.S_SOCK -> Unix.unlink path
+;;
+
+let trace_id value =
+  match Keeper_id.Trace_id.of_string value with
+  | Ok value -> value
+  | Error detail -> fail detail
+;;
+
+let task_id value =
+  match Keeper_id.Task_id.of_string value with
+  | Ok value -> value
+  | Error detail -> fail detail
+;;
+
+let task_ids values =
+  let typed = List.map task_id values in
+  match Ledger.task_id_set_of_list typed with
+  | Ok value -> value
+  | Error _ -> fail "invalid task id set fixture"
+;;
+
+let with_session f =
+  let root = Filename.temp_file "skill-activation-ledger-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let config = Workspace.default_config root in
+  let trace_id = trace_id "trace-one" in
+  let session_dir = Keeper_fs.keeper_session_dir config "trace-one" in
+  Unix.mkdir session_dir 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree root)
+    (fun () -> f config trace_id session_dir)
+;;
+
+let events_file session_dir = Filename.concat session_dir "skill-activation-events.jsonl"
+
+let read_file path =
+  let input = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr input)
+    (fun () -> really_input_string input (in_channel_length input))
+;;
+
+let write_file path contents =
+  let output = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output contents)
+;;
+
+let copy_file ~source ~target =
+  let input = open_in_bin source in
+  let output = open_out_bin target in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr input; close_out_noerr output)
+    (fun () -> output_string output (really_input_string input (in_channel_length input)))
+;;
+
+let source_id value =
+  match Skill_source_config.source_id_of_string value with
+  | Ok value -> value
+  | Error detail -> fail detail
+;;
+
+let package_id value =
+  match Skill_catalog_snapshot.package_id_of_directory value with
+  | Ok value -> value
+  | Error _ -> fail "invalid package fixture"
+;;
+
+let content_revision character =
+  match
+    Skill_catalog_snapshot.content_revision_of_string (String.make 64 character)
+  with
+  | Ok value -> value
+  | Error _ -> fail "invalid content revision fixture"
+;;
+
+let snapshot_revision =
+  match Skill_catalog_snapshot.snapshot_revision_of_string (String.make 64 'f') with
+  | Ok value -> value
+  | Error _ -> fail "invalid snapshot revision fixture"
+;;
+
+let activation_result ?(trace = "trace-one") ?(source = "workspace")
+    ?(package = "review") ?(name = "review") ?(revision = 'a')
+    ?(runtime_id = "test.runtime") ?skill_tool_use_id ?(agent_core_turn = 0)
+    ?(body = "skill body")
+    ?(absolute_turn = 1) ?(activated_at = "2026-08-26T00:00:00Z")
+    ?(origin = Ledger.Task_instruction { task_ids = task_ids [ "task-001" ] })
+    ?invocation () =
+  let skill_tool_use_id =
+    Option.value
+      ~default:(Printf.sprintf "call-%s-%c" source revision)
+      skill_tool_use_id
+  in
+  let invocation =
+    Option.value
+      ~default:
+        (Ledger.Instruction_invocation
+           { origin
+           ; served_content =
+               Ledger.Skill_body
+                 { bytes = String.length body
+                 ; sha256 = Agent_core_sha256.(digest_string body |> to_hex)
+                 }
+           })
+      invocation
+  in
+  Ledger.make_activation
+    ~identity:
+      (Skill_catalog_snapshot.make_identity
+         ~source_id:(source_id source)
+         ~package_id:(package_id package)
+         ~name)
+    ~content_revision:(content_revision revision)
+    ~snapshot_revision
+    ~turn_ref:(Ids.Turn_ref.make ~trace_id:trace ~absolute_turn)
+    ~runtime_id
+    ~skill_tool_use_id
+    ~agent_core_turn
+    ~invocation
+    ~activated_at
+;;
+
+let activation ?trace ?source ?package ?name ?revision ?runtime_id ?skill_tool_use_id
+      ?agent_core_turn ?body ?absolute_turn ?activated_at ?origin ?invocation () =
+  match
+    activation_result
+      ?trace
+      ?source
+      ?package
+      ?name
+      ?revision
+      ?runtime_id
+      ?skill_tool_use_id
+      ?agent_core_turn
+      ?body
+      ?absolute_turn
+      ?activated_at
+      ?origin
+      ?invocation
+      ()
+  with
+  | Ok value -> value
+  | Error _ -> fail "activation fixture was rejected"
+;;
+
+let receipt ?(content = "skill body") tool_use_id =
+  Ledger.
+    { tool_use_id
+    ; content_bytes = String.length content
+    ; content_sha256 = Agent_core_sha256.(digest_string content |> to_hex)
+    }
+;;
+
+let test_empty_record_and_idempotent_readback () =
+  with_session @@ fun config trace_id _session_dir ->
+  let initial =
+    match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger
+    | Error error ->
+      fail ("empty ledger load failed: " ^ Ledger.store_error_to_string error)
+  in
+  check int "empty session" 0 (List.length (Ledger.activations initial));
+  let activation = activation () in
+  let first, first_outcome =
+    match Ledger.record ~config ~trace_id activation with
+    | Ok value -> value
+    | Error error ->
+      fail ("first activation record failed: " ^ Ledger.store_error_to_string error)
+  in
+  (match first_outcome with
+   | Ledger.Recorded _ -> ()
+   | Already_recorded _ -> fail "first activation was already present");
+  check int "one activation" 1 (List.length (Ledger.activations first));
+  let second, second_outcome =
+    match Ledger.record ~config ~trace_id activation with
+    | Ok value -> value
+    | Error _ -> fail "idempotent activation record failed"
+  in
+  (match second_outcome with
+   | Ledger.Already_recorded _ -> ()
+   | Recorded _ -> fail "same exact activation was recorded twice");
+  check string
+    "idempotent revision"
+    (Ledger.ledger_revision_to_string (Ledger.revision first))
+    (Ledger.ledger_revision_to_string (Ledger.revision second))
+;;
+
+let ok label = function
+  | Ok value -> value
+  | Error error -> fail (label ^ ": " ^ Ledger.store_error_to_string error)
+;;
+
+let first_turn = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1
+
+let deliver config trace_id ids =
+  Ledger.observe_delivery
+    ~config
+    ~trace_id
+    ~turn_ref:first_turn
+    ~tool_results:(List.map (fun id -> receipt id) ids)
+    ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+    ~runtime_id:"runtime-delivery"
+    ~delivered_at:"2026-08-26T00:00:01Z"
+;;
+
+let act config trace_id ~call ids =
+  Ledger.observe_action
+    ~config
+    ~trace_id
+    ~turn_ref:first_turn
+    ~active_skill_tool_use_ids:ids
+    ~action_identity:(Ledger.Call_id call)
+    ~tool_name:"keeper_lane_status"
+    ~runtime_id:"runtime-action"
+    ~agent_core_turn:2
+    ~observed_at:"2026-08-26T00:00:02Z"
+;;
+
+let replayed_from_file config trace_id =
+  match Ledger.load_existing ~config ~trace_id with
+  | Ok (Some ledger) -> ledger
+  | Ok None -> fail "the session's event log was not found"
+  | Error error -> fail ("replay failed: " ^ Ledger.store_error_to_string error)
+;;
+
+let ledger_json ledger = Yojson.Safe.to_string (Ledger.to_yojson ledger)
+
+(* What this process holds of a session and what a reader with no memory of
+   it rebuilds from the file must be the same ledger, revision and all. *)
+let check_the_file_replays_the_held_ledger config trace_id =
+  let held = ok "load" (Ledger.load ~config ~trace_id) in
+  check string "the file replays to the ledger this process holds"
+    (ledger_json held)
+    (ledger_json (replayed_from_file config trace_id))
+
+(* A mutation returns the ledger it appended to, and a reader with no memory
+   of the session rebuilds the ledger from the file's rows. After every kind
+   of event -- activations, deliveries, actions, a rejected transition --
+   the two must be the same ledger, revision and all. *)
+let test_the_held_ledger_is_the_one_the_file_replays () =
+  with_session @@ fun config trace_id _session_dir ->
+  List.iter
+    (fun candidate ->
+       match Ledger.record ~config ~trace_id candidate with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Ledger.Already_recorded _) -> fail "a distinct activation was a repeat"
+       | Error error -> fail ("record failed: " ^ Ledger.store_error_to_string error))
+    [ activation ()
+    ; activation ~source:"user" ()
+    ; activation ~revision:'b' ()
+    ; (* The default id spells call-<source>-<revision>, so a fixture that
+         varies only [name] must say its id: the record key compares
+         skill_tool_use_id alone, and two activations sharing one with
+         different identities are an Invocation_id_collision, not a
+         repeat. *)
+      activation ~name:"polish" ~skill_tool_use_id:"call-polish" ()
+    ; activation
+        ~skill_tool_use_id:"call-resource"
+        ~invocation:
+          (Ledger.Instruction_invocation
+             { origin = Ledger.Session_instruction
+             ; served_content =
+                 Ledger.Skill_resource
+                   { relative_path = "references/checklist.md"
+                   ; bytes = String.length "skill body"
+                   ; sha256 = Agent_core_sha256.(digest_string "skill body" |> to_hex)
+                   }
+             })
+        ()
+    ; activation ~skill_tool_use_id:"call-late" ~agent_core_turn:5 ()
+    ];
+  (match deliver config trace_id [ "call-late" ] with
+   | Error (Ledger.Invalid_delivery_order { skill_tool_use_id = "call-late"; _ }) -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "a delivery before its activation was accepted");
+  let _, delivered =
+    ok
+      "delivery"
+      (deliver config trace_id [ "call-workspace-a"; "call-user-a"; "call-resource" ])
+  in
+  check (list string) "the results delivered"
+    [ "call-workspace-a"; "call-user-a"; "call-resource" ]
+    delivered;
+  let _, acted =
+    ok "action" (act config trace_id ~call:"call-action" [ "call-workspace-a"; "call-user-a" ])
+  in
+  check int "one action on each delivered Skill" 2 acted;
+  (match act config trace_id ~call:"call-too-early" [ "call-workspace-b" ] with
+   | Error (Ledger.Action_before_delivery "call-workspace-b") -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "an action before delivery was accepted");
+  let held = ok "load" (Ledger.load ~config ~trace_id) in
+  let summary = Ledger.summarize held in
+  check int "every activation is held" 6 (List.length (Ledger.activations held));
+  check int "the deliveries are held" 3 summary.instruction_provider_deliveries;
+  check int "both rejections are held" 2 summary.invalid_transitions;
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+let line_count contents =
+  List.length (String.split_on_char '\n' contents) - 1
+;;
+
+(* A mutation adds one row to the end of the file and leaves what was there
+   untouched; a repeat that changes nothing adds nothing. *)
+let test_each_mutation_appends_one_row () =
+  with_session @@ fun config trace_id session_dir ->
+  let file = events_file session_dir in
+  let _ = ok "first record" (Ledger.record ~config ~trace_id (activation ())) in
+  let after_first = read_file file in
+  check int "the header and the first activation" 2 (line_count after_first);
+  let expect_one_more label previous =
+    let current = read_file file in
+    check int (label ^ " adds one row") (line_count previous + 1) (line_count current);
+    check bool (label ^ " keeps the earlier rows") true
+      (String.starts_with ~prefix:previous current);
+    current
+  in
+  let _ = ok "second record" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  let after_second = expect_one_more "an activation" after_first in
+  let _ = ok "repeat record" (Ledger.record ~config ~trace_id (activation ())) in
+  check string "an identical activation adds nothing" after_second (read_file file);
+  let _ = ok "delivery" (deliver config trace_id [ "call-workspace-a" ]) in
+  let after_delivery = expect_one_more "a delivery" after_second in
+  let _ = ok "action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
+  let after_action = expect_one_more "an action" after_delivery in
+  (* A repeated recording is judged on what the activation recorded when it
+     was made. The delivery and action that followed do not make it another
+     invocation, and the stored activation keeps them. *)
+  (match Ledger.record ~config ~trace_id (activation ()) with
+   | Ok (_, Ledger.Already_recorded (existing : Ledger.activation)) ->
+     check bool "the stored activation keeps its delivery" true
+       (Option.is_some existing.delivery);
+     check int "and its action" 1 (List.length existing.actions)
+   | Ok (_, Ledger.Recorded _) -> fail "a repeated recording was recorded again"
+   | Error error -> fail ("a repeated recording was refused: " ^ Ledger.store_error_to_string error));
+  check string "a repeat after evidence adds nothing" after_action (read_file file);
+  let _ = ok "repeat delivery" (deliver config trace_id [ "call-workspace-a" ]) in
+  let _ = ok "repeat action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
+  check string "repeats add nothing" after_action (read_file file)
+;;
+
+let header_row config trace_id =
+  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "schema", `String "masc.skill-activation-events/v2"
+        ; "kind", `String "opened"
+        ; ( "workspace_key"
+          , `String (Ledger.workspace_key (Ledger.empty ~workspace_root ~trace_id)) )
+        ; "session_id", `String (Keeper_id.Trace_id.to_string trace_id)
+        ])
+;;
+
+let activation_row value =
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "kind", `String "activation_recorded"
+        ; "activation", Ledger.activation_to_yojson value
+        ])
+;;
+
+let test_legacy_composition_reports_exact_row_without_appending () =
+  with_session @@ fun config trace_id session_dir ->
+  let original = activation ~skill_tool_use_id:"legacy-composition"
+      ~invocation:(Ledger.Composition_invocation
+        { origin = Ledger.Session_composition; tool_name = "keeper_compose_review"
+        ; execution_id = Ids.Execution_id.of_string "physical-execution" }) () in
+  let legacy = match Ledger.activation_to_yojson original with
+    | `Assoc fields ->
+      let invocation = match List.assoc "invocation" fields with
+        | `Assoc fields -> fields | _ -> fail "invocation object" in
+      `Assoc (("invocation", `Assoc (List.remove_assoc "execution_id" invocation))
+        :: List.remove_assoc "invocation" fields)
+    | _ -> fail "activation object" in
+  let row = Yojson.Safe.to_string
+      (`Assoc ["kind", `String "activation_recorded"; "activation", legacy]) in
+  let file = events_file session_dir in
+  let bytes = header_row config trace_id ^ "\n"
+      ^ activation_row (activation ()) ^ "\n" ^ row ^ "\n" in
+  write_file file bytes;
+  let check_error = function
+    | Error (Ledger.Decode_failed
+        (Ledger.Missing_string_in_event_row { field; row_in_batch; row_sha256 }) as error) ->
+      check string "the actual missing field is retained" "execution_id" field;
+      check int "second event in this replay batch" 2 row_in_batch;
+      check string "hash identifies the unchanged original JSON row"
+        Agent_core_sha256.(digest_string row |> to_hex) row_sha256;
+      check string "stable failure class" "decode_failed.missing_string"
+        (Ledger.store_error_code error)
+    | Error error -> fail (Ledger.store_error_to_string error)
+    | Ok _ -> fail "legacy composition was accepted without physical execution identity" in
+  check_error (Ledger.load ~config ~trace_id);
+  (* A later instruction is not appended past evidence the reader cannot decode. *)
+  (match Ledger.record ~config ~trace_id (activation ~revision:'b' ()) with
+   | Error error -> check_error (Error error)
+   | Ok _ -> fail "later instruction silently skipped the undecodable composition");
+  check string "diagnosis neither skips nor rewrites original evidence" bytes (read_file file)
+;;
+
+(* A log of the previous row generation is refused at its header. Its rows
+   are not decoded one by one, and nothing is appended after them. *)
+let test_previous_generation_log_is_refused_at_its_header () =
+  with_session @@ fun config trace_id session_dir ->
+  let previous = match Yojson.Safe.from_string (header_row config trace_id) with
+    | `Assoc fields ->
+      Yojson.Safe.to_string
+        (`Assoc (("schema", `String "masc.skill-activation-events/v1")
+                 :: List.remove_assoc "schema" fields))
+    | _ -> fail "header object" in
+  let file = events_file session_dir in
+  let bytes = previous ^ "\n" ^ activation_row (activation ()) ^ "\n" in
+  write_file file bytes;
+  let check_error = function
+    | Error (Ledger.Decode_failed (Ledger.Unsupported_schema observed) as error) ->
+      check string "the previous generation is named" "masc.skill-activation-events/v1" observed;
+      check string "stable failure class" "decode_failed.unsupported_schema"
+        (Ledger.store_error_code error)
+    | Error error -> fail (Ledger.store_error_to_string error)
+    | Ok _ -> fail "a previous-generation log was accepted" in
+  check_error (Ledger.load ~config ~trace_id);
+  (match Ledger.record ~config ~trace_id (activation ~revision:'b' ()) with
+   | Error error -> check_error (Error error)
+   | Ok _ -> fail "a record was appended to a previous-generation log");
+  check string "the previous-generation log is left as it was" bytes (read_file file)
+;;
+
+(* A crash while appending leaves the last row without its newline. A reader
+   without the lock leaves that row out; the first locked read in a process
+   cuts it off the file before replaying, and writing carries on after it. *)
+let test_a_torn_last_row_is_cut_on_first_read () =
+  with_session @@ fun config trace_id session_dir ->
+  let file = events_file session_dir in
+  let committed = header_row config trace_id ^ "\n" ^ activation_row (activation ()) ^ "\n" in
+  write_file file (committed ^ "{\"kind\":\"activation_rec");
+  let observed = replayed_from_file config trace_id in
+  check int "an unlocked read leaves the torn row out" 1
+    (List.length (Ledger.activations observed));
+  let loaded = ok "first locked read" (Ledger.load ~config ~trace_id) in
+  check int "the committed activation is kept" 1 (List.length (Ledger.activations loaded));
+  check string "the torn row is cut off the file" committed (read_file file);
+  let _ = ok "record after recovery" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  check int "writing carries on after the cut" 2
+    (List.length (Ledger.activations (replayed_from_file config trace_id)))
+;;
+
+(* An event that names an activation the log never recorded is a row this
+   store's writer cannot have produced. *)
+let test_an_event_for_an_unrecorded_activation_is_typed () =
+  with_session @@ fun config trace_id session_dir ->
+  let delivery_row =
+    Yojson.Safe.to_string
+      (`Assoc
+          [ "kind", `String "deliveries_observed"
+          ; ( "deliveries"
+            , `List
+                [ `Assoc
+                    [ "skill_tool_use_id", `String "call-missing"
+                    ; ( "delivery"
+                      , `Assoc
+                          [ ( "boundary"
+                            , `Assoc
+                                [ "kind", `String "model_response"
+                                ; "agent_core_turn", `Int 1
+                                ] )
+                          ; "runtime_id", `String "runtime-delivery"
+                          ; "delivered_at", `String "2026-08-26T00:00:01Z"
+                          ; "content_bytes", `Int 10
+                          ; "content_sha256", `String (String.make 64 'a')
+                          ] )
+                    ]
+                ] )
+          ])
+  in
+  write_file
+    (events_file session_dir)
+    (String.concat "\n" [ header_row config trace_id; activation_row (activation ()); delivery_row ]
+     ^ "\n");
+  match Ledger.load ~config ~trace_id with
+  | Error (Ledger.Decode_failed (Ledger.Unknown_event_activation "call-missing")) -> ()
+  | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+  | Ok _ -> fail "a delivery for an unrecorded activation was replayed"
+;;
+
+let append_to_file path contents =
+  let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output contents)
+;;
+
+let activation_count ledger = List.length (Ledger.activations ledger)
+
+(* A file whose very first row has no newline is not one this writer made: it
+   creates the file with its first rows in one atomic step. The locked read
+   refuses it and leaves it as it is, rather than cutting it as a crash would
+   have left it; the unlocked read refuses it too. *)
+let test_an_unterminated_first_row_is_refused_and_kept () =
+  with_session @@ fun config trace_id session_dir ->
+  let file = events_file session_dir in
+  write_file file "not-json";
+  (match Ledger.load ~config ~trace_id with
+   | Error (Ledger.Decode_failed Ledger.Unterminated_header_row) -> ()
+   | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+   | Ok _ -> fail "an unterminated first row was read as an empty session");
+  check string "the refused file is left as it was" "not-json" (read_file file);
+  match Ledger.load_existing ~config ~trace_id with
+  | Error (Ledger.Decode_failed Ledger.Unterminated_header_row) -> ()
+  | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+  | Ok _ -> fail "an unlocked read accepted an unterminated first row"
+;;
+
+(* Rows another writer appends after this process last read the store are
+   applied on the next read, after the cursor, and writing carries on after
+   them. *)
+let test_rows_another_writer_appends_are_read_after_the_cursor () =
+  with_session @@ fun config trace_id session_dir ->
+  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  append_to_file (events_file session_dir) (activation_row (activation ~revision:'b' ()) ^ "\n");
+  check int "the appended row is read" 2
+    (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
+  let _ = ok "record after" (Ledger.record ~config ~trace_id (activation ~revision:'c' ())) in
+  check int "writing carries on after it" 3
+    (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+(* A store replaced behind this process's cursor -- a different file at the
+   same path -- is replayed from its first byte. *)
+let test_a_replaced_store_is_replayed_from_its_first_byte () =
+  with_session @@ fun config trace_id session_dir ->
+  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let file = events_file session_dir in
+  let replacement = file ^ ".replacement" in
+  write_file
+    replacement
+    (read_file file ^ activation_row (activation ~revision:'b' ()) ^ "\n");
+  Unix.rename replacement file;
+  check int "the replaced store is read whole" 2
+    (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+(* A torn last row that appears after this process has read the store --
+   another writer died mid-append -- is cut on the next locked read, which
+   replays the store instead of failing until a restart. *)
+let test_a_torn_tail_after_a_warm_read_is_cut () =
+  with_session @@ fun config trace_id session_dir ->
+  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let file = events_file session_dir in
+  let committed = read_file file in
+  append_to_file file "{\"kind\":\"activation_rec";
+  check int "the committed activation is kept" 1
+    (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
+  check string "the torn row is cut off the file" committed (read_file file);
+  let _ = ok "record after" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+(* The replay holds each row to what the writer produces: an activation
+   recorded twice, or an event with a field the writer never writes, is a
+   typed decode failure. *)
+let test_the_replay_holds_rows_to_the_writers_shapes () =
+  with_session @@ fun config trace_id session_dir ->
+  let file = events_file session_dir in
+  let row = activation_row (activation ()) in
+  write_file file (String.concat "\n" [ header_row config trace_id; row; row ] ^ "\n");
+  (match Ledger.load ~config ~trace_id with
+   | Error (Ledger.Decode_failed Ledger.Duplicate_skill_tool_use_id) -> ()
+   | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+   | Ok _ -> fail "an activation recorded twice was replayed");
+  let extra =
+    Yojson.Safe.to_string
+      (`Assoc
+          [ "kind", `String "activation_recorded"
+          ; "activation", Ledger.activation_to_yojson (activation ())
+          ; "extra", `Int 1
+          ])
+  in
+  write_file file (header_row config trace_id ^ "\n" ^ extra ^ "\n");
+  match Ledger.load ~config ~trace_id with
+  | Error
+      (Ledger.Decode_failed
+         (Ledger.Unexpected_field { object_name = "event"; field = "extra" })) -> ()
+  | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+  | Ok _ -> fail "an event with an unknown field was replayed"
+;;
+
+(* A mutation whose row a replay could not read is refused before anything
+   is written. A delivery observed at a negative turn would record a
+   rejection the decoder refuses, which would fail every later replay of the
+   session. *)
+let test_a_row_the_replay_could_not_read_is_never_written () =
+  with_session @@ fun config trace_id session_dir ->
+  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let file = events_file session_dir in
+  let before = read_file file in
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref:first_turn
+       ~tool_results:[ receipt "call-workspace-a" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = -1 })
+       ~runtime_id:"runtime-delivery"
+       ~delivered_at:"2026-08-26T00:00:01Z"
+   with
+   | Error (Ledger.Decode_failed _) -> ()
+   | Error error -> fail ("wrong typed error: " ^ Ledger.store_error_to_string error)
+   | Ok _ -> fail "a delivery at a negative turn was accepted");
+  check string "nothing was written" before (read_file file);
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+let test_same_name_different_identity_or_revision_is_distinct () =
+  with_session @@ fun config trace_id _session_dir ->
+  let values =
+    [ activation (); activation ~source:"user" (); activation ~revision:'b' () ]
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Already_recorded _) -> fail "distinct activation was deduplicated"
+       | Error error ->
+         fail ("distinct activation record failed: " ^ Ledger.store_error_to_string error))
+    values;
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail ("ledger readback failed: " ^ Ledger.store_error_to_string error)
+  | Ok ledger -> check int "three exact activations" 3 (List.length (Ledger.activations ledger))
+;;
+
+let test_same_skill_different_invocations_are_distinct () =
+  with_session @@ fun config trace_id _session_dir ->
+  let values =
+    [ activation ~skill_tool_use_id:"call-first" ()
+    ; activation ~skill_tool_use_id:"call-second" ()
+    ]
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Already_recorded _) -> fail "distinct invocation was deduplicated"
+       | Error error -> fail (Ledger.store_error_to_string error))
+    values;
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    check int "two invocation activations" 2
+      (List.length (Ledger.activations ledger))
+;;
+
+let test_session_origins_roundtrip () =
+  with_session @@ fun config trace_id _session_dir ->
+  let values =
+    [ activation ~revision:'b' ~origin:Ledger.Session_instruction ()
+    ; activation
+        ~revision:'c'
+        ~invocation:
+          (Ledger.Composition_invocation
+             { origin = Ledger.Session_composition
+             ; tool_name = "keeper_compose_review"
+             ; execution_id = Ids.Execution_id.of_string "execution-review"
+             })
+        ()
+    ]
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Already_recorded _) -> fail "session origin was deduplicated"
+       | Error error -> fail (Ledger.store_error_to_string error))
+    values;
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    (match
+       List.map (fun (activation : Ledger.activation) -> activation.invocation)
+         (Ledger.activations ledger)
+     with
+     | [ Ledger.Instruction_invocation { origin = Ledger.Session_instruction; _ }
+       ; Ledger.Composition_invocation
+           { origin = Ledger.Session_composition; tool_name; _ }
+       ] ->
+       check string "composition tool" "keeper_compose_review" tool_name;
+       check_the_file_replays_the_held_ledger config trace_id
+     | _ -> fail "session origins did not survive durable roundtrip")
+;;
+
+let test_delivery_and_later_action_form_one_exact_chain () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-skill" ~agent_core_turn:0 () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let delivered, matching_ids =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~tool_results:[ receipt "unrelated"; receipt "call-skill" ]
+        ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+        ~runtime_id:"runtime-delivery"
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check (list string) "one matching Skill result" [ "call-skill" ] matching_ids;
+  let activation =
+    match Ledger.activations delivered with
+    | [ activation ] -> activation
+    | _ -> fail "delivery changed activation cardinality"
+  in
+  (match activation.delivery with
+   | Some delivery ->
+     check string "delivery runtime" "runtime-delivery" delivery.runtime_id;
+     check int "delivery content bytes" 10 delivery.content_bytes;
+     (match delivery.boundary with
+      | Ledger.Model_response { agent_core_turn } ->
+        check int "delivery round" 1 agent_core_turn
+      | Ledger.Official_client_result_handoff _ ->
+        fail "model response recorded as official-client handoff")
+   | None -> fail "matching provider input did not record delivery");
+  let with_action, added =
+    match
+      Ledger.observe_action
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~active_skill_tool_use_ids:[ "call-skill" ]
+        ~action_identity:(Ledger.Call_id "call-action")
+        ~tool_name:"keeper_lane_status"
+        ~runtime_id:"runtime-action"
+        ~agent_core_turn:1
+        ~observed_at:"2026-08-26T00:00:02Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "one Skill linked to the action" 1 added;
+  (match Ledger.activations with_action with
+   | [ { actions = [ action ]; _ } ] ->
+     check bool "later action id" true
+       (action.identity = Ledger.Call_id "call-action");
+     check string "later action tool" "keeper_lane_status" action.tool_name
+     ; check string "later action runtime" "runtime-action" action.runtime_id
+   | _ -> fail "later action was not attached to the exact Skill invocation");
+  let summary = Ledger.summarize with_action in
+  check int "one instruction invocation" 1 summary.instruction_invocations;
+  check int "one body served" 1 summary.skill_bodies_served;
+  check int "one provider delivery" 1 summary.instruction_provider_deliveries;
+  check int "zero official handoffs" 0
+    summary.instruction_official_client_handoffs;
+  check int "one later action" 1 summary.instruction_actions_observed;
+  check int "zero invalid transitions" 0 summary.invalid_transitions;
+  (match Ledger.summarize_by_scope with_action with
+   | [ scoped ] ->
+     check string "scope names invocation runtime" "test.runtime"
+       scoped.scope.invocation_runtime_id;
+     check
+       (list (pair string int))
+       "provider delivery runtime is separate"
+       [ "runtime-delivery", 1 ]
+       (List.map
+          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+          scoped.provider_delivery_runtime_counts);
+    check (list (pair string int)) "no official handoff runtime" []
+      (List.map
+         (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+         scoped.official_client_handoff_runtime_counts);
+     check
+       (list (pair string int))
+       "action runtime is separate"
+       [ "runtime-action", 1 ]
+       (List.map
+          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+          scoped.action_runtime_counts)
+   | _ -> fail "one invocation produced the wrong scoped summary count");
+  let _, repeated =
+    match
+      Ledger.observe_action
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~active_skill_tool_use_ids:[ "call-skill" ]
+        ~action_identity:(Ledger.Call_id "call-action")
+        ~tool_name:"keeper_lane_status"
+        ~runtime_id:"runtime-action"
+        ~agent_core_turn:1
+        ~observed_at:"2026-08-26T00:00:03Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "repeated action observation is idempotent" 0 repeated;
+  check_the_file_replays_the_held_ledger config trace_id
+;;
+
+let test_demoted_skill_result_is_not_delivery_or_invalid_transition () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-demoted" () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let ledger, matched =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~tool_results:[ receipt ~content:"[demoted]" "call-demoted" ]
+        ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+        ~runtime_id:"runtime-b"
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check (list string) "digest mismatch is not delivered" [] matched;
+  check int "demotion is not an invalid transition" 0
+    (Ledger.summarize ledger).invalid_transitions;
+  match Ledger.activations ledger with
+  | [ { delivery = None; _ } ] -> ()
+  | _ -> fail "demoted Skill result acquired a delivery receipt"
+;;
+
+let test_official_client_handoff_delivers_in_invocation_turn () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-official" ~agent_core_turn:0 () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let ledger, matched =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~tool_results:[ receipt "call-official" ]
+        ~boundary:
+          (Ledger.Official_client_result_handoff { agent_core_turn = 0 })
+        ~runtime_id:"codex-runtime"
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check (list string) "official handoff exact id" [ "call-official" ] matched;
+  (match Ledger.activations ledger with
+   | [ { delivery = Some { boundary = Ledger.Official_client_result_handoff _; runtime_id; _ }; _ } ] ->
+     check string "official handoff runtime" "codex-runtime" runtime_id
+   | _ -> fail "official-client result handoff was not typed");
+  let summary = Ledger.summarize ledger in
+  check int "handoff is not provider delivery" 0
+    summary.instruction_provider_deliveries;
+  check int "one official client handoff" 1
+    summary.instruction_official_client_handoffs;
+  check int "handoff without action is incomplete" 0
+    summary.instruction_actions_observed;
+  (match Ledger.summarize_by_scope ledger with
+   | [ scoped ] ->
+     check (list (pair string int)) "no provider delivery runtime" []
+       (List.map
+          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+          scoped.provider_delivery_runtime_counts);
+     check
+       (list (pair string int))
+       "official handoff runtime is separate"
+       [ "codex-runtime", 1 ]
+       (List.map
+          (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+          scoped.official_client_handoff_runtime_counts)
+   | _ -> fail "official handoff produced the wrong scoped summary")
+  ; let completed, added =
+      match
+        Ledger.observe_action
+          ~config
+          ~trace_id
+          ~turn_ref
+          ~active_skill_tool_use_ids:[ "call-official" ]
+          ~action_identity:
+            (Ledger.Provider_step
+               { conversation_id = "conversation-antigravity"; step_index = 7 })
+          ~tool_name:"keeper_lane_status"
+          ~runtime_id:"codex-runtime"
+          ~agent_core_turn:0
+          ~observed_at:"2026-08-26T00:00:02Z"
+      with
+      | Ok value -> value
+      | Error error -> fail (Ledger.store_error_to_string error)
+    in
+    check int "later action completes official handoff proof" 1 added;
+    check int "completed handoff has one action" 1
+      (Ledger.summarize completed).instruction_actions_observed;
+    (match Ledger.activations completed with
+     | [ { actions = [ { identity = Ledger.Provider_step step; _ } ]; _ } ] ->
+       check string "provider step conversation" "conversation-antigravity"
+         step.conversation_id;
+       check int "provider step index" 7 step.step_index
+     | _ -> fail "provider step action identity was not durable");
+    check_the_file_replays_the_held_ledger config trace_id
+;;
+
+let test_cross_turn_tool_result_replay_is_not_delivery_or_rejection () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-replayed" () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let replay_turn = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:2 in
+  let ledger, matched =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref:replay_turn
+        ~tool_results:[ receipt "call-replayed" ]
+        ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+        ~runtime_id:"runtime-next-turn"
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check (list string) "cross-turn replay has no matched ids" [] matched;
+  check int "cross-turn replay is not an invalid transition" 0
+    (Ledger.summarize ledger).invalid_transitions;
+  match Ledger.activations ledger with
+  | [ { delivery = None; _ } ] -> ()
+  | _ -> fail "cross-turn replay acquired a durable delivery"
+;;
+
+let test_conflicting_delivery_is_durable_transition_evidence () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-conflict" () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~tool_results:[ receipt "call-conflict" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+       ~runtime_id:"runtime-delivery"
+       ~delivered_at:"2026-08-26T00:00:01Z"
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~tool_results:[ receipt "call-conflict" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = 2 })
+       ~runtime_id:"runtime-delivery"
+       ~delivered_at:"2026-08-26T00:00:02Z"
+   with
+   | Error (Ledger.Conflicting_delivery "call-conflict") -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "conflicting delivery was accepted");
+  let persisted =
+    match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "persisted invalid transition" 1
+    (Ledger.summarize persisted).invalid_transitions;
+  check_the_file_replays_the_held_ledger config trace_id;
+  match Ledger.transition_rejections persisted with
+  | [ Ledger.Delivery_conflict_rejected
+        { skill_tool_use_id = "call-conflict"
+        ; observed_agent_core_turn = 2
+        ; _
+        } ] -> ()
+  | _ -> fail "conflicting delivery rejection did not survive readback"
+;;
+
+let test_action_before_delivery_is_durable_transition_evidence () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-undelivered" () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  (match
+     Ledger.observe_action
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~active_skill_tool_use_ids:[ "call-undelivered" ]
+       ~action_identity:(Ledger.Call_id "call-too-early")
+       ~tool_name:"keeper_lane_status"
+       ~runtime_id:"runtime-action"
+       ~agent_core_turn:1
+       ~observed_at:"2026-08-26T00:00:01Z"
+   with
+   | Error (Ledger.Action_before_delivery "call-undelivered") -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "action before delivery was accepted");
+  let persisted =
+    match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "persisted invalid transition" 1
+    (Ledger.summarize persisted).invalid_transitions;
+  check_the_file_replays_the_held_ledger config trace_id;
+  match Ledger.transition_rejections persisted with
+  | [ Ledger.Action_before_delivery_rejected
+        { skill_tool_use_id = "call-undelivered"
+        ; action_identity = Ledger.Call_id "call-too-early"
+        ; _
+        } ] -> ()
+  | _ -> fail "action-before-delivery rejection did not survive readback"
+;;
+
+let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
+  with_session @@ fun config trace_id _session_dir ->
+  let first =
+    activation
+      ~skill_tool_use_id:"call-scope-a"
+      ~runtime_id:"runtime-a"
+      ~revision:'a'
+      ()
+  in
+  let second =
+    activation
+      ~skill_tool_use_id:"call-scope-b"
+      ~runtime_id:"runtime-b"
+      ~revision:'b'
+      ()
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok _ -> ()
+       | Error error -> fail (Ledger.store_error_to_string error))
+    [ first; second ];
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~tool_results:[ receipt "call-scope-a" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+       ~runtime_id:"runtime-a"
+       ~delivered_at:"2026-08-26T00:00:01Z"
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~tool_results:[ receipt "call-scope-a" ]
+       ~boundary:(Ledger.Model_response { agent_core_turn = 2 })
+       ~runtime_id:"runtime-a"
+       ~delivered_at:"2026-08-26T00:00:02Z"
+   with
+   | Error (Ledger.Conflicting_delivery _) -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "scoped conflict was accepted");
+  let ledger =
+    match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  match Ledger.summarize_by_scope ledger with
+  | [ first_scope; second_scope ] ->
+    check string "first invocation runtime" "runtime-a"
+      first_scope.scope.invocation_runtime_id;
+    check int "first invocation" 1 first_scope.summary.instruction_invocations;
+    check int "first provider delivery" 1
+      first_scope.summary.instruction_provider_deliveries;
+    check int "first rejection" 1 first_scope.summary.invalid_transitions;
+    check
+      (list (pair string int))
+      "first delivery runtime counts"
+      [ "runtime-a", 1 ]
+      (List.map
+         (fun (count : Ledger.runtime_count) -> count.runtime_id, count.count)
+         first_scope.provider_delivery_runtime_counts);
+    check string "second invocation runtime" "runtime-b"
+      second_scope.scope.invocation_runtime_id;
+    check int "second invocation" 1 second_scope.summary.instruction_invocations;
+    check int "second provider delivery" 0
+      second_scope.summary.instruction_provider_deliveries;
+    check int "second rejection" 0 second_scope.summary.invalid_transitions;
+    let first_json = Ledger.scoped_summary_to_yojson first_scope in
+    check string "scope reference revision"
+      (String.make 64 'a')
+      Yojson.Safe.Util.(first_json |> member "scope" |> member "reference"
+                        |> member "content_revision" |> to_string)
+  | _ -> fail "scoped summaries did not preserve two exact scope tuples"
+;;
+
+let test_corrupt_ledger_is_typed () =
+  with_session @@ fun config trace_id session_dir ->
+  write_file (events_file session_dir) "not-json\n";
+  match Ledger.load ~config ~trace_id with
+  | Error (Ledger.Decode_failed _ as error) ->
+    check string "typed cause code" "decode_failed.expected_object"
+      (Ledger.store_error_code error)
+  | Error error ->
+    fail ("corrupt ledger returned the wrong typed error: " ^ Ledger.store_error_to_string error)
+  | Ok _ -> fail "corrupt ledger loaded"
+;;
+
+let test_copied_ledger_is_rejected_by_session_identity () =
+  with_session @@ fun config trace_one session_one ->
+  let value = activation () in
+  (match Ledger.record ~config ~trace_id:trace_one value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let trace_two = trace_id "trace-two" in
+  let session_two = Keeper_fs.keeper_session_dir config "trace-two" in
+  Unix.mkdir session_two 0o700;
+  copy_file ~source:(events_file session_one) ~target:(events_file session_two);
+  match Ledger.load ~config ~trace_id:trace_two with
+  | Error (Ledger.Decode_failed Ledger.Session_id_mismatch) -> ()
+  | Error error ->
+    fail ("copied ledger returned wrong error: " ^ Ledger.store_error_to_string error)
+  | Ok _ -> fail "ledger copied from another trace was accepted"
+;;
+
+let test_duplicate_exact_key_is_rejected_during_decode () =
+  with_session @@ fun config trace _session_dir ->
+  let activation_json, workspace_key =
+    match Ledger.record ~config ~trace_id:trace (activation ()) with
+    | Error error -> fail (Ledger.store_error_to_string error)
+    | Ok (stored, _) ->
+      (match Ledger.to_yojson stored with
+       | `Assoc fields ->
+         (match
+            List.assoc_opt "activations" fields, List.assoc_opt "workspace_key" fields
+          with
+          | Some (`List [ row ]), Some (`String workspace_key) -> row, workspace_key
+          | _ -> fail "stored activation projection missing")
+       | _ -> fail "stored ledger projection invalid")
+  in
+  let activations = `List [ activation_json; activation_json ] in
+  let session_id = Keeper_id.Trace_id.to_string trace in
+  let revision_input =
+    `Assoc
+      [ "workspace_key", `String workspace_key
+      ; "session_id", `String session_id
+      ; "activations", activations
+      ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
+      ]
+  in
+  let revision =
+    Agent_core_sha256.(digest_string (Yojson.Safe.to_string revision_input) |> to_hex)
+  in
+  let json =
+    `Assoc
+      [ "schema", `String "masc.skill-activations/v8"
+      ; "workspace_key", `String workspace_key
+      ; "session_id", `String session_id
+      ; "revision", `String revision
+      ; "activations", activations
+      ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
+      ]
+  in
+  match Ledger.of_projection_yojson json with
+  | Error Ledger.Duplicate_skill_tool_use_id -> ()
+  | Error _ -> fail "duplicate exact key returned wrong decoder error"
+  | Ok _ -> fail "duplicate exact key was accepted"
+;;
+
+let test_cross_workspace_copy_is_rejected () =
+  with_session @@ fun source_config trace source_session ->
+  (match Ledger.record ~config:source_config ~trace_id:trace (activation ()) with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let target_root = Filename.temp_file "skill-activation-target-" "" in
+  Sys.remove target_root;
+  Unix.mkdir target_root 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree target_root)
+    (fun () ->
+       let target_config = Workspace.default_config target_root in
+       let target_session = Keeper_fs.keeper_session_dir target_config "trace-one" in
+       Unix.mkdir target_session 0o700;
+       copy_file ~source:(events_file source_session) ~target:(events_file target_session);
+       match Ledger.load ~config:target_config ~trace_id:trace with
+       | Error (Ledger.Decode_failed Ledger.Workspace_key_mismatch) -> ()
+       | Error error ->
+         fail
+           ("cross-workspace copy returned wrong error: "
+            ^ Ledger.store_error_to_string error)
+       | Ok _ -> fail "same-trace ledger copied across workspaces was accepted")
+;;
+
+let test_official_unicode_skill_name_is_accepted () =
+  ignore (activation ~name:"검토" ())
+;;
+
+let test_duplicate_json_field_is_rejected () =
+  with_session @@ fun config trace _session_dir ->
+  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
+  let json = Ledger.empty ~workspace_root ~trace_id:trace |> Ledger.to_yojson in
+  let json =
+    match json with
+    | `Assoc fields ->
+      `Assoc (("session_id", `String (Keeper_id.Trace_id.to_string trace)) :: fields)
+    | _ -> fail "empty ledger projection invalid"
+  in
+  match Ledger.of_projection_yojson json with
+  | Error (Ledger.Duplicate_field { object_name = "ledger"; field = "session_id" }) ->
+    ()
+  | Error _ -> fail "duplicate JSON field returned wrong decoder error"
+  | Ok _ -> fail "duplicate JSON field was accepted"
+;;
+
+let test_activation_boundaries_are_typed () =
+  (match activation_result ~name:"Review_Name" () with
+   | Error (Ledger.Invalid_skill_name _) -> ()
+   | Error _ | Ok _ -> fail "non-canonical Skill name was not rejected");
+  (match activation_result ~absolute_turn:0 () with
+   | Error (Ledger.Invalid_turn_ref _) -> ()
+   | Error _ | Ok _ -> fail "non-positive Turn_ref was not rejected");
+  (match activation_result ~activated_at:"not-a-time" () with
+   | Error (Ledger.Invalid_activated_at _) -> ()
+   | Error _ | Ok _ -> fail "invalid activation time was not rejected");
+  let invalid_tool_invocation =
+    Ledger.Composition_invocation
+      { origin = Ledger.Task_composition { task_ids = task_ids [ "task-001" ] }
+      ; tool_name = "not/a/tool"
+      ; execution_id = Ids.Execution_id.of_string "execution-invalid"
+      }
+  in
+  match activation_result ~invocation:invalid_tool_invocation () with
+  | Error (Ledger.Invalid_tool_name _) -> ()
+  | Error _ | Ok _ -> fail "invalid composition tool name was not rejected"
+;;
+
+let test_task_id_sets_are_nonempty_and_unique () =
+  (match Ledger.task_id_set_of_list [] with
+   | Error Ledger.Empty_task_ids -> ()
+   | Error _ | Ok _ -> fail "empty Task id set was accepted");
+  let duplicate = task_id "task-001" in
+  match Ledger.task_id_set_of_list [ duplicate; duplicate ] with
+  | Error (Ledger.Duplicate_task_id "task-001") -> ()
+  | Error _ | Ok _ -> fail "duplicate Task id set was accepted"
+;;
+
+let test_record_rejects_another_trace () =
+  with_session @@ fun config trace _session_dir ->
+  match Ledger.record ~config ~trace_id:trace (activation ~trace:"trace-two" ()) with
+  | Error (Ledger.Decode_failed Ledger.Turn_ref_session_mismatch) -> ()
+  | Error _ -> fail "cross-trace record returned wrong store error"
+  | Ok _ -> fail "cross-trace activation was recorded"
+;;
+
+let test_revision_binds_workspace_and_trace () =
+  with_session @@ fun config trace _session_dir ->
+  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
+  let original = Ledger.empty ~workspace_root ~trace_id:trace |> Ledger.revision in
+  let another_trace =
+    Ledger.empty ~workspace_root ~trace_id:(trace_id "trace-two") |> Ledger.revision
+  in
+  check bool
+    "trace changes revision"
+    true
+    (not
+       (String.equal
+          (Ledger.ledger_revision_to_string original)
+          (Ledger.ledger_revision_to_string another_trace)));
+  let another_root = Filename.temp_file "skill-ledger-revision-root-" "" in
+  Sys.remove another_root;
+  Unix.mkdir another_root 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir another_root)
+    (fun () ->
+       let another_workspace =
+         Ledger.empty ~workspace_root:another_root ~trace_id:trace |> Ledger.revision
+       in
+       check bool
+         "workspace changes revision"
+         true
+         (not
+            (String.equal
+               (Ledger.ledger_revision_to_string original)
+               (Ledger.ledger_revision_to_string another_workspace))))
+;;
+
+let test_projection_decoder_reuses_all_ledger_invariants () =
+  with_session @@ fun config trace _session_dir ->
+  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
+  let ledger = Ledger.empty ~workspace_root ~trace_id:trace in
+  let json = Ledger.to_yojson ledger in
+  (match Ledger.of_projection_yojson json with
+   | Error error -> failf "canonical projection rejected: %s" (Ledger.decode_error_code error)
+   | Ok decoded ->
+     check string "workspace" (Ledger.workspace_key ledger)
+       (Ledger.workspace_key decoded);
+     check string "session"
+       (Keeper_id.Trace_id.to_string trace)
+       (Ledger.session_id decoded |> Keeper_id.Trace_id.to_string));
+  let invalid_workspace =
+    match json with
+    | `Assoc fields ->
+      `Assoc (("workspace_key", `String "not-a-digest")
+              :: List.remove_assoc "workspace_key" fields)
+    | other -> other
+  in
+  match Ledger.of_projection_yojson invalid_workspace with
+  | Error (Ledger.Invalid_workspace_key _) -> ()
+  | Error _ -> fail "invalid projection workspace returned wrong error"
+  | Ok _ -> fail "invalid projection workspace was accepted"
+;;
+
+let test_shared_python_revision_fixture () =
+  List.iter (fun path ->
+  let json = Yojson.Safe.from_file path in
+  let expected = Yojson.Safe.Util.(json |> member "revision" |> to_string) in
+  let rec reverse_objects = function
+    | `Assoc fields -> `Assoc (List.rev_map (fun (key, value) -> key, reverse_objects value) fields)
+    | `List values -> `List (List.map reverse_objects values)
+    | value -> value in
+  List.iter (fun value ->
+    match Ledger.of_projection_yojson value with
+    | Error error -> failf "shared projection rejected: %s" (Ledger.decode_error_code error)
+    | Ok ledger -> check string "server revision agrees with Python fixture" expected
+      (Ledger.revision ledger |> Ledger.ledger_revision_to_string))
+    [json; reverse_objects json];
+  if String.equal path "fixtures/skill-ledger-async-delivery.json" then (
+    let change_original mutate = match json with
+      | `Assoc fields ->
+        `Assoc (List.map (function
+          | "activations", `List [activation] -> "activations", `List [mutate activation]
+          | field -> field) fields)
+      | _ -> fail "shared async projection is not an object" in
+    let replace name value = function
+      | `Assoc fields -> `Assoc (List.map (fun (key,known) -> key, if String.equal key name then value else known) fields)
+      | _ -> fail "shared original activation is not an object" in
+    let task_changed = function
+      | `Assoc fields -> `Assoc (List.map (function
+          | "invocation", `Assoc invocation ->
+            "invocation", replace "origin" (`Assoc ["kind",`String "task_composition";"task_ids",`List [`String "task-B"]]) (`Assoc invocation)
+          | field -> field) fields)
+      | _ -> fail "shared original activation is not an object" in
+    List.iter (fun mutate -> match Ledger.of_projection_yojson (change_original mutate) with
+      | Error (Ledger.Invalid_async_result_evidence _) -> ()
+      | Error error -> failf "changed original frame returned wrong refusal: %s" (Ledger.decode_error_code error)
+      | Ok _ -> fail "an existing handoff was rebound to a changed original frame")
+      [replace "runtime_id" (`String "another-runtime");replace "content_revision" (`String (String.make 64 '1'));
+       replace "snapshot_revision" (`String (String.make 64 '2'));replace "activated_at" (`String "2026-10-14T12:00:03Z");task_changed]))
+    ["fixtures/skill-ledger-revision.json"; "fixtures/skill-ledger-async-delivery.json"; "fixtures/skill-ledger-async-actions.json"]
+;;
+
+let test_receipt_projection_revision_binds_full_unicode_id () =
+  let ledger =
+    Ledger.empty ~workspace_root:"/workspace" ~trace_id:(trace_id "trace-one")
+  in
+  (* The v7 empty ledger hashes the required async_actions array as well.
+     The receipt identifier below occupies 15 UTF-8 bytes. *)
+  check string "v7 receipt UTF-8 golden"
+    "006625c4a4ac38162139eb142a0929eda08121f37fcb5018357b2bb260560651"
+    (Ledger.receipt_projection_revision ledger ~skill_tool_use_id:"call-한한한A");
+  let shared = "call-" ^ String.concat "" (List.init 200 (fun _ -> "한")) in
+  let left = Ledger.receipt_projection_revision ledger ~skill_tool_use_id:(shared ^ "A") in
+  let right = Ledger.receipt_projection_revision ledger ~skill_tool_use_id:(shared ^ "B") in
+  check int "digest length" 64 (String.length left);
+  check bool "full identifier changes digest" true (not (String.equal left right))
+;;
+
+(* A write reads the session's rows before it appends: one undecodable row
+   fails every later write for the session, so the human string must name the
+   decode shape that poisoned it. *)
+let test_store_error_decode_detail_is_kept () =
+  check string "decode category is part of the message"
+    "decode failed: missing_string field=skill_name"
+    (Ledger.store_error_to_string
+       (Ledger.Decode_failed (Ledger.Missing_string { field = "skill_name" })))
+;;
+
+let nested_scope ~parent_tool_use_id ~composition_run_id ~alias =
+  match Ledger.nested_composition_scope ~parent_tool_use_id ~composition_run_id ~alias with
+  | Ok scope -> scope | Error error -> fail (Ledger.decode_error_code error)
+;;
+
+let test_nested_dispatch_identity_and_parent_delivery_survive_reload () =
+  with_session @@ fun config trace_id _session_dir ->
+  let composition_run_id = Keeper_tool_plan.Composition_run_id.(fresh () |> to_string) in
+  let make ~id ~parent ~alias =
+    let scope = nested_scope ~parent_tool_use_id:parent ~composition_run_id ~alias in
+    activation ~skill_tool_use_id:id ~invocation:(Ledger.Nested_composition_invocation
+        { origin = Ledger.Session_composition; tool_name = "keeper_compose_review"; scope }) () in
+  let values = [ make ~id:"child-left" ~parent:"outer-run" ~alias:"left/~name"
+               ; make ~id:"child-right" ~parent:"outer-run" ~alias:"right"
+               ; make ~id:"child-unrelated" ~parent:"different-outer-run" ~alias:"left/~name" ] in
+  List.iter (fun value -> match Ledger.record ~config ~trace_id value with
+    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) values;
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let deliver ?(turn_ref = turn_ref) ids = match Ledger.observe_delivery ~config ~trace_id ~turn_ref
+      ~tool_results:(List.map receipt ids) ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+      ~runtime_id:"runtime-delivery" ~delivered_at:"2026-08-26T00:00:01Z" with
+    | Ok value -> value | Error error -> fail (Ledger.store_error_to_string error) in
+  let _, ids = deliver [ "child-left"; "child-right"; "unrelated" ] in
+  check (list string) "child IDs are not independently delivered Tool results" [] ids;
+  let _, ids = deliver ~turn_ref:(Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:2) [ "outer-run" ] in
+  check (list string) "cross-turn parent replay is ignored" [] ids;
+  let delivered, ids = deliver [ "outer-run" ] in
+  check (list string) "one actual parent result delivers its two attempted children"
+    [ "child-left"; "child-right" ] (List.sort String.compare ids);
+  let _, repeated = deliver [ "outer-run" ] in
+  check (list string) "parent result delivery is idempotent"
+    [ "child-left"; "child-right" ] (List.sort String.compare repeated);
+  let reloaded = match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger | Error error -> fail (Ledger.store_error_to_string error) in
+  check bool "reload preserves canonical result-delivery chain" true
+    (Yojson.Safe.equal (Ledger.to_yojson delivered) (Ledger.to_yojson reloaded));
+  List.iter (fun (value : Ledger.activation) ->
+    match value.invocation with
+    | Ledger.Nested_composition_invocation { scope; _ } ->
+      check string "exact composition run retained" composition_run_id scope.composition_run_id;
+      check bool "unrelated parent has no delivery" true
+        (Option.is_some value.delivery = (scope.parent_tool_use_id = "outer-run"));
+      check bool "exact source identity survives restart" true
+        (Yojson.Safe.equal
+           (Skill_catalog_snapshot.identity_to_yojson value.identity)
+           (Skill_catalog_snapshot.identity_to_yojson (List.hd values).identity))
+    | Ledger.Instruction_invocation _ | Ledger.Composition_invocation _ -> fail "nested origin was erased")
+    (Ledger.activations reloaded);
+  let summary = Ledger.summarize reloaded in
+  check int "three actual invocation evidence rows" 3 summary.composition_invocations;
+  check int "two children delivered by one parent receipt" 2 summary.composition_provider_deliveries;
+  Printf.printf "composition_nested_activation_trial child_invocations=3 delivered_with_parent=2 unrelated_deliveries=0 ledger_reloaded=true model_latency_measured=false\n%!"
+;;
+
+let test_nested_scope_integrity_and_invocation_conflict () =
+  with_session @@ fun config trace_id _session_dir ->
+  let composition_run_id = Keeper_tool_plan.Composition_run_id.(fresh () |> to_string) in
+  List.iter (fun (parent_tool_use_id, run, alias) ->
+    match Ledger.nested_composition_scope ~parent_tool_use_id ~composition_run_id:run ~alias with
+    | Error (Ledger.Invalid_nested_composition_scope _) -> ()
+    | Error _ | Ok _ -> fail "invalid nested provenance accepted")
+    [ "", composition_run_id, "child"; "outer", "not-a-run", "child"; "outer", composition_run_id, "" ];
+  let scope = nested_scope ~parent_tool_use_id:"outer" ~composition_run_id ~alias:"child" in
+  let invocation scope = Ledger.Nested_composition_invocation
+      { origin = Ledger.Session_composition; tool_name = "keeper_compose_review"; scope } in
+  (match activation_result ~skill_tool_use_id:"outer" ~invocation:(invocation scope) () with
+   | Error (Ledger.Invalid_nested_composition_scope _) -> ()
+   | Error _ | Ok _ -> fail "child invocation was allowed to alias its parent");
+  let original = activation ~skill_tool_use_id:"child-call" ~invocation:(invocation scope) () in
+  (match Ledger.record ~config ~trace_id original with
+   | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error));
+  let changed_scope = nested_scope ~parent_tool_use_id:"another-parent" ~composition_run_id ~alias:"child" in
+  let changed = activation ~skill_tool_use_id:"child-call" ~invocation:(invocation changed_scope) () in
+  (match Ledger.record ~config ~trace_id changed with
+   | Error (Ledger.Invocation_id_collision "child-call") -> ()
+   | Error _ | Ok _ -> fail "changed nested scope was rebound to an existing invocation");
+  let encoded = Ledger.activation_to_yojson original in
+  let with_scope_field extra = match encoded with
+    | `Assoc fields ->
+      let invocation = match List.assoc "invocation" fields with
+        | `Assoc fields -> fields | _ -> fail "invocation object" in
+      let scope = match List.assoc "scope" invocation with
+        | `Assoc fields -> fields | _ -> fail "scope object" in
+      `Assoc (("invocation", `Assoc (("scope", `Assoc (extra :: scope)) :: List.remove_assoc "scope" invocation))
+        :: List.remove_assoc "invocation" fields)
+    | _ -> fail "activation object" in
+  List.iter (fun (extra, accepts) ->
+    match Ledger.activation_of_yojson ~expected_trace_id:trace_id (with_scope_field extra) with
+    | Error error when accepts error -> ()
+    | Error _ | Ok _ -> fail "nested scope decoder lost its closed contract")
+    [ (("alias", `String "another"), (function Ledger.Duplicate_field { object_name = "scope"; field = "alias" } -> true | _ -> false))
+    ; (("unknown", `Bool true), (function Ledger.Unexpected_field { object_name = "scope"; field = "unknown" } -> true | _ -> false)) ]
+;;
+
+let () =
+  run
+    "keeper skill activation ledger"
+    [ ( "session ledger"
+      , [ test_case "legacy composition identifies its row and refuses later append" `Quick
+            test_legacy_composition_reports_exact_row_without_appending
+        ; test_case "a previous-generation log is refused at its header" `Quick
+            test_previous_generation_log_is_refused_at_its_header
+        ; test_case "nested dispatch identities use exact parent result delivery" `Quick
+            test_nested_dispatch_identity_and_parent_delivery_survive_reload
+        ; test_case "nested provenance rejects tampering and invocation rebinding" `Quick
+            test_nested_scope_integrity_and_invocation_conflict
+        ; test_case "empty, durable record, idempotent readback" `Quick
+            test_empty_record_and_idempotent_readback
+        ; test_case "exact identities and revisions remain distinct" `Quick
+            test_same_name_different_identity_or_revision_is_distinct
+        ; test_case "same Skill keeps distinct invocation activations" `Quick
+            test_same_skill_different_invocations_are_distinct
+        ; test_case "session origins survive durable roundtrip" `Quick
+            test_session_origins_roundtrip
+        ; test_case "delivery and later action share one exact chain" `Quick
+            test_delivery_and_later_action_form_one_exact_chain
+        ; test_case "demoted result is not delivery" `Quick
+            test_demoted_skill_result_is_not_delivery_or_invalid_transition
+        ; test_case "official client handoff is typed" `Quick
+            test_official_client_handoff_delivers_in_invocation_turn
+        ; test_case "cross-turn ToolResult replay is ignored" `Quick
+            test_cross_turn_tool_result_replay_is_not_delivery_or_rejection
+        ; test_case "conflicting delivery is durable evidence" `Quick
+            test_conflicting_delivery_is_durable_transition_evidence
+        ; test_case "action before delivery is durable evidence" `Quick
+            test_action_before_delivery_is_durable_transition_evidence
+        ; test_case "scoped summaries preserve exact runtime and reference" `Quick
+            test_scoped_summaries_do_not_mix_runtime_or_exact_reference
+        ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed
+        ; test_case "copied ledger is bound to its trace" `Quick
+            test_copied_ledger_is_rejected_by_session_identity
+        ; test_case "duplicate exact key is rejected" `Quick
+            test_duplicate_exact_key_is_rejected_during_decode
+        ; test_case "same trace copied across workspaces is rejected" `Quick
+            test_cross_workspace_copy_is_rejected
+        ; test_case "official Unicode Skill name is accepted" `Quick
+            test_official_unicode_skill_name_is_accepted
+        ; test_case "duplicate JSON field is rejected" `Quick
+            test_duplicate_json_field_is_rejected
+        ; test_case "activation constructors enforce typed boundaries" `Quick
+            test_activation_boundaries_are_typed
+        ; test_case "Task id sets are nonempty and unique" `Quick
+            test_task_id_sets_are_nonempty_and_unique
+        ; test_case "record rejects another trace" `Quick
+            test_record_rejects_another_trace
+        ; test_case "revision binds workspace and trace" `Quick
+            test_revision_binds_workspace_and_trace
+        ; test_case "projection decoder reuses all ledger invariants" `Quick
+            test_projection_decoder_reuses_all_ledger_invariants
+        ; test_case "shared Python revision fixture" `Quick test_shared_python_revision_fixture
+        ; test_case "receipt projection binds the full Unicode id" `Quick
+            test_receipt_projection_revision_binds_full_unicode_id
+        ; test_case "store error string keeps decode detail" `Quick
+            test_store_error_decode_detail_is_kept
+        ; test_case "the held ledger is the one the file replays" `Quick
+            test_the_held_ledger_is_the_one_the_file_replays
+        ; test_case "each mutation appends one row" `Quick
+            test_each_mutation_appends_one_row
+        ; test_case "a torn last row is cut on the first read" `Quick
+            test_a_torn_last_row_is_cut_on_first_read
+        ; test_case "an event for an unrecorded activation is typed" `Quick
+            test_an_event_for_an_unrecorded_activation_is_typed
+        ; test_case "an unterminated first row is refused and kept" `Quick
+            test_an_unterminated_first_row_is_refused_and_kept
+        ; test_case "rows another writer appends are read after the cursor" `Quick
+            test_rows_another_writer_appends_are_read_after_the_cursor
+        ; test_case "a replaced store is replayed from its first byte" `Quick
+            test_a_replaced_store_is_replayed_from_its_first_byte
+        ; test_case "a torn tail after a warm read is cut" `Quick
+            test_a_torn_tail_after_a_warm_read_is_cut
+        ; test_case "the replay holds rows to the writer's shapes" `Quick
+            test_the_replay_holds_rows_to_the_writers_shapes
+        ; test_case "a row the replay could not read is never written" `Quick
+            test_a_row_the_replay_could_not_read_is_never_written
+        ] )
+    ]
+;;

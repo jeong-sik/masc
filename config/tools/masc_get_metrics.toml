@@ -1,0 +1,25 @@
+name = "masc_get_metrics"
+description = """
+Task success and fitness components measure recorded Task lifecycle outcomes only. Verifier approval does not establish external acceptance or Goal success; external acceptance coverage is explicitly unobserved in this stream and human Goal confirmation remains separate. Observed Task performance for one exact agent identity, grouped by Task ID within the Task start-time window. Counts distinguish raw records, conflicting, completed, successful and failed Tasks. The latest terminal timestamp wins; contradictory latest outcomes or start times leave only that Task unresolved. Missing duration or outcome denominators are null. Handoff Task success describes outcomes with observed references, not delivery receipts."""
+additional_properties = false
+
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 3 turns needed it across 6317 provider requests, and its
+# 446 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 3 turns and saves the 446 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
+defer_loading = true
+[[params]]
+name = "agent_name"
+type = "string"
+required = true
+description = "Agent name to get metrics for"
+
+[[params]]
+name = "days"
+type = "integer"
+description = "Task start-time window in days (default: 7)"
+default = 7
+minimum = 1
+maximum = 90

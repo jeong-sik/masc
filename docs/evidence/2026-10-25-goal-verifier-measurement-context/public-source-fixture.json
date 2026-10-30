@@ -1,0 +1,6 @@
+{
+  "schema": "masc.goal-measurement-context.fixture/v1",
+  "controlled_fixture": true,
+  "actual_value": 1,
+  "scope": "Immutable controlled document for Goal verifier lookup. This is fixture data, not production work completion or model reliability."
+}

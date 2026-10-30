@@ -1,0 +1,617 @@
+module Types = Masc_domain
+
+open Alcotest
+open Masc
+
+(* A failed substring assertion on the rendered shell must not print the shell:
+   it carries the token that was just minted. The needle and the size are what
+   the reader needs. *)
+let check_shell_contains ~name ~needle shell =
+  if not (String_util.contains_substring shell needle) then
+    Alcotest.failf "%s: %S is missing from a %d-byte shell" name needle
+      (String.length shell)
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else
+      Sys.remove path
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+(* With_expiry path: caller passes the default env var name, mint
+   honors it verbatim. Agent_name is just a free string — the server
+   no longer derives env names from it. *)
+let test_login_with_expiry_uses_caller_env_var () =
+  with_temp_dir "auth-login" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"test-agent" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.With_expiry ()
+  with
+  | Error err ->
+      failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+      let cfg = Auth.load_auth_config base_path in
+      check bool "auth enabled" true cfg.enabled;
+      check bool "require token" true cfg.require_token;
+      check string "agent" "test-agent" report.agent_name;
+      check string "role" "worker"
+        (Masc_domain.agent_role_to_string report.role);
+      check (option string) "worker login creates no bootstrap admin" None
+        (Auth.read_initial_admin base_path);
+      check string "client env passthrough" "MASC_TOKEN"
+        report.mcp_token_env_var;
+      check bool "raw token file exists" true
+        (Sys.file_exists report.raw_token_file);
+      (match
+         Auth.find_credential_by_token base_path
+           ~token:report.bearer_token
+       with
+       | Ok cred ->
+           check string "token owner" "test-agent" cred.agent_name
+       | Error err ->
+           failf "minted token did not verify: %s"
+             (Masc_domain.masc_error_to_string err));
+      (match
+         Auth.check_permission base_path ~agent_name:"test-agent"
+           ~token:(Some report.bearer_token)
+           ~permission:Masc_domain.CanInit
+       with
+       | Ok () -> fail "worker login token must not have admin permission"
+       | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+       | Error err ->
+           failf "expected forbidden for worker admin action: %s"
+             (Masc_domain.masc_error_to_string err));
+      (match
+         Auth.resolve_role base_path ~agent_name:"test-agent"
+           ~token:(Some report.bearer_token)
+       with
+       | Ok Masc_domain.Worker -> ()
+       | Ok role ->
+           failf "expected worker effective role, got %s"
+             (Masc_domain.agent_role_to_string role)
+       | Error err ->
+           failf "expected worker effective role: %s"
+             (Masc_domain.masc_error_to_string err));
+      let shell = Auth_login.render_shell report in
+      check_shell_contains ~name:"shell exports caller-named env var"
+        ~needle:"export MASC_TOKEN=" shell;
+      let json = Auth_login.to_yojson report in
+      check string "json status" "ok"
+        (Yojson.Safe.Util.member "status" json
+        |> Yojson.Safe.Util.to_string);
+      check (list string) "json login schema"
+        [ "agent_name"
+        ; "auth_change"
+        ; "auth_config_path"
+        ; "base_path"
+        ; "bearer_token"
+        ; "dashboard_url"
+        ; "mcp_client"
+        ; "mcp_url"
+        ; "raw_token_file"
+        ; "role"
+        ; "status"
+        ]
+        (json
+         |> Yojson.Safe.Util.to_assoc
+         |> List.map fst
+         |> List.sort String.compare);
+      check string "json raw token file" report.raw_token_file
+        (Yojson.Safe.Util.member "raw_token_file" json
+         |> Yojson.Safe.Util.to_string);
+      check string "json mcp url" report.mcp_url
+        (Yojson.Safe.Util.member "mcp_url" json
+         |> Yojson.Safe.Util.to_string)
+
+(* Long_lived path: caller passes an arbitrary env var name and
+   asks for a no-expiry credential. The server passes the name
+   through verbatim and stores a credential with expires_at=None.
+   The choice is the caller's — there is no agent-name match. *)
+let test_login_long_lived_passes_env_var_through () =
+  with_temp_dir "auth-login-long-lived" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"long-lived-daemon" ~role:Masc_domain.Worker
+      ~token_env_var:"CUSTOM_MCP_TOKEN"
+      ~token_lifetime:Auth_login.Long_lived ()
+  with
+  | Error err ->
+      failf "long-lived login mint failed: %s"
+        (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+      check string "agent" "long-lived-daemon" report.agent_name;
+      check string "client env passthrough" "CUSTOM_MCP_TOKEN"
+        report.mcp_token_env_var;
+      (match
+         Auth.find_credential_by_token base_path
+           ~token:report.bearer_token
+       with
+       | Ok cred ->
+           check (option string) "long-lived token has no expires_at"
+             None cred.expires_at
+       | Error err ->
+           failf "minted long-lived token did not verify: %s"
+             (Masc_domain.masc_error_to_string err));
+      let shell = Auth_login.render_shell report in
+      check_shell_contains ~name:"shell exports caller-named env var"
+        ~needle:"export CUSTOM_MCP_TOKEN=" shell;
+      let json = Auth_login.to_yojson report in
+      check string "json client env passthrough" "CUSTOM_MCP_TOKEN"
+        (Yojson.Safe.Util.member "mcp_client" json
+         |> Yojson.Safe.Util.member "token_env_var"
+         |> Yojson.Safe.Util.to_string)
+
+(* Expires_in_hours path: the caller names the window and the credential
+   carries it. The workspace default is a day, so a credential that outlives a
+   day is proof the caller's number won rather than the config's.
+
+   The bound is checked by bracketing rather than parsing: rfc3339 UTC strings
+   are fixed-width and zero-padded, so string order is time order, and a
+   two-day bracket around the target cannot flake on clock skew or on the test
+   running across a midnight. *)
+let test_login_expires_in_hours_outlives_the_config_window () =
+  with_temp_dir "auth-login-named-window" @@ fun base_path ->
+  let hours = 24 * 30 in
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"month-long-client" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:(Auth_login.Expires_in_hours hours) ()
+  with
+  | Error err ->
+      failf "named-window login mint failed: %s"
+        (Masc_domain.masc_error_to_string err)
+  | Ok report -> (
+      match
+        Auth.find_credential_by_token base_path ~token:report.bearer_token
+      with
+      | Error err ->
+          failf "minted named-window token did not verify: %s"
+            (Masc_domain.masc_error_to_string err)
+      | Ok cred -> (
+          match cred.expires_at with
+          | None ->
+              fail "a named window must still expire; this one never does"
+          | Some expires_at ->
+              let day = 24. *. 3600. in
+              let at offset_days =
+                Masc_domain.iso8601_of_unix_seconds
+                  (Unix.gettimeofday () +. (offset_days *. day))
+              in
+              check bool "later than twenty-nine days out" true
+                (String.compare expires_at (at 29.) > 0);
+              check bool "sooner than thirty-one days out" true
+                (String.compare expires_at (at 31.) < 0)))
+
+(* A window the auth config could never hold comes back as an error. The config
+   path answers the same question by raising, because a config that got past
+   decoding cannot be out of range; a number a caller computed can be, and the
+   caller is the one who can report it. *)
+let test_login_rejects_a_window_outside_the_bound () =
+  with_temp_dir "auth-login-impossible-window" @@ fun base_path ->
+  let mint hours =
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"impossible-window" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:(Auth_login.Expires_in_hours hours) ()
+  in
+  check bool "zero hours is not a window" true (Result.is_error (mint 0));
+  check bool "a negative window is not a window" true
+    (Result.is_error (mint (-1)));
+  check bool "beyond a year is not a window" true
+    (Result.is_error (mint 8_761));
+  check bool "a year exactly still is" true (Result.is_ok (mint 8_760))
+
+(* A Player credential is an invite (RFC play-link-for-the-shared-machine
+   §2.4), so login refuses the role before it enables auth or writes a file. *)
+let test_login_refuses_a_player () =
+  with_temp_dir "auth-login-player" @@ fun base_path ->
+  (match
+     Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+       ~agent_name:"invitee" ~role:Masc_domain.Player
+       ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry ()
+   with
+   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden { agent; _ })) ->
+       check string "the refusal names the login" "invitee" agent
+   | Error err -> failf "unexpected error: %s" (Masc_domain.masc_error_to_string err)
+   | Ok _ -> fail "a player login was minted");
+  check (array string) "nothing was written under the workspace" [||]
+    (Sys.readdir base_path)
+
+(* The two flags that can name a lifetime name different ones, so asking for
+   both is refused rather than resolved by precedence. A precedence rule would
+   quietly hand back the policy the operator did not ask for, and how long a
+   bearer lives is not something to pick for them. *)
+let test_lifetime_flags_refuse_to_pick_for_the_operator () =
+  let asked ~no_expiry ~expiry_hours =
+    Auth_login.lifetime_of_flags ~no_expiry ~expiry_hours
+  in
+  check bool "neither flag leaves the workspace's window" true
+    (asked ~no_expiry:false ~expiry_hours:None = Ok Auth_login.With_expiry);
+  check bool "--no-expiry alone means no expiry" true
+    (asked ~no_expiry:true ~expiry_hours:None = Ok Auth_login.Long_lived);
+  check bool "--expiry-hours alone names the window" true
+    (asked ~no_expiry:false ~expiry_hours:(Some 720)
+     = Ok (Auth_login.Expires_in_hours 720));
+  check bool "both together is refused, not resolved" true
+    (Result.is_error (asked ~no_expiry:true ~expiry_hours:(Some 720)))
+
+let test_login_url_uses_uri_components () =
+  with_temp_dir "auth-login-uri" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"2001:db8::1" ~port:8935
+      ~agent_name:"agent +&" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry ()
+  with
+  | Error err ->
+    failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+    let dashboard = Uri.of_string report.dashboard_url in
+    check (option string) "IPv6 host" (Some "2001:db8::1") (Uri.host dashboard);
+    check (option int) "port" (Some 8935) (Uri.port dashboard);
+    check string "dashboard path" "/dashboard" (Uri.path dashboard);
+    check (option string) "agent query round-trip" (Some "agent +&")
+      (Uri.get_query_param dashboard "agent");
+    let mcp = Uri.of_string report.mcp_url in
+    check (option string) "MCP IPv6 host" (Some "2001:db8::1") (Uri.host mcp);
+    check string "MCP path" "/mcp" (Uri.path mcp)
+
+(* --host is the flag for the address to *bind*, and its own help text offers
+   0.0.0.0. These two URLs are what the operator opens and pastes, so a
+   wildcard has to become something dialable before it is printed. Asserting
+   both because they are built separately and only one used to be checked. *)
+let test_login_urls_do_not_advertise_a_bind_wildcard () =
+  with_temp_dir "auth-login-wildcard" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"0.0.0.0" ~port:8935 ~agent_name:"agent"
+      ~role:Masc_domain.Worker ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.With_expiry ()
+  with
+  | Error err ->
+    failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+    check (option string) "dashboard URL names a reachable host"
+      (Some "127.0.0.1")
+      (Uri.host (Uri.of_string report.dashboard_url));
+    check (option string) "MCP URL names a reachable host" (Some "127.0.0.1")
+      (Uri.host (Uri.of_string report.mcp_url));
+    check (option string) "the token still rides the dashboard URL"
+      (Some report.bearer_token)
+      (Uri.get_query_param (Uri.of_string report.dashboard_url) "token")
+
+(* What login persists is what a local client can read back. Asserting the
+   round trip rather than the path keeps the two sides free to move together
+   and pinned to each other. *)
+let test_persisted_token_round_trips () =
+  with_temp_dir "auth-login-read" @@ fun base_path ->
+  check (option string) "absent agent has no persisted token" None
+    (Auth_login.read_persisted_token ~base_path ~agent_name:"masc-tui");
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"masc-tui" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.With_expiry ()
+  with
+  | Error err ->
+      failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+      check (option string) "the client reads back what login wrote"
+        (Some report.bearer_token)
+        (Auth_login.read_persisted_token ~base_path ~agent_name:"masc-tui");
+      check (option string) "another agent's file is not borrowed" None
+        (Auth_login.read_persisted_token ~base_path ~agent_name:"other-agent")
+
+let ensure_local_operator base_path agent_name =
+  Auth_login.ensure_local_operator ~base_path ~host:"127.0.0.1" ~port:8935
+    ~agent_name ~token_env_var:"MASC_TOKEN"
+    ~token_lifetime:Auth_login.With_expiry ()
+
+let local_operator_snapshot base_path agent_name =
+  [ Auth.raw_token_file base_path agent_name;
+    Auth.credential_file base_path agent_name;
+    Auth.auth_config_file base_path;
+    Auth.workspace_secret_file base_path ]
+  |> List.map (fun path ->
+      if Sys.file_exists path then
+        let stat = Unix.stat path in
+        let bytes = In_channel.with_open_bin path In_channel.input_all in
+        Some (bytes, stat.Unix.st_perm, stat.Unix.st_ino, stat.Unix.st_mtime)
+      else None)
+
+let test_local_operator_reuses_formatted_admin () =
+  List.iter (fun (prefix, suffix) ->
+    with_temp_dir "auth-operator-file" @@ fun base_path ->
+    let agent_name = "operator-fixture" in
+    match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+        ~agent_name ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+        ~token_lifetime:Auth_login.Long_lived () with
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+    | Ok report ->
+        let file_bytes = prefix ^ report.bearer_token ^ suffix in
+        Auth.save_private_text_file report.raw_token_file file_bytes;
+        check bool "raw reader retains exact file bytes" true
+          (Auth.load_raw_token base_path ~agent_name = Some file_bytes);
+        check bool "login reader retains exact file bytes" true
+          (Auth_login.read_persisted_token ~base_path ~agent_name = Some file_bytes);
+        if not (String.equal file_bytes report.bearer_token) then
+          check bool "old exact-byte decision would reject the formatted file" true
+            (Result.is_error (Auth.verify_token base_path ~agent_name ~token:file_bytes));
+        let before = local_operator_snapshot base_path agent_name in
+        (match ensure_local_operator base_path agent_name with
+         | Ok None -> ()
+         | Ok (Some _) -> fail "valid persisted Admin must not mint a replacement"
+         | Error error -> fail (Masc_domain.masc_error_to_string error));
+        check bool "reuse preserves token, metadata, modes and expiry" true
+          (local_operator_snapshot base_path agent_name = before);
+        let http_token = match Auth_login.read_persisted_http_token ~base_path ~agent_name with
+          | Some token -> token
+          | None -> fail "reused Admin has no HTTP bearer" in
+        check bool "HTTP consumer reads the unchanged canonical bearer" true
+          (String.equal http_token report.bearer_token);
+        (match Auth.verify_token base_path ~agent_name ~token:report.bearer_token with
+         | Ok credential -> check bool "same bearer remains Admin" true
+             (credential.role = Masc_domain.Admin)
+         | Error error -> fail (Masc_domain.masc_error_to_string error)))
+    [ ("", ""); ("", "\n"); ("", "\r\n"); (" \t", "\r\n ") ]
+
+let test_local_operator_preserves_exact_opaque_admin () =
+  with_temp_dir "auth-operator-opaque" @@ fun base_path ->
+  let agent_name = "opaque-operator" in
+  let token = " opaque-local-admin-fixture\t" in
+  (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.Long_lived () with
+   | Ok _ -> ()
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  (match Auth.save_raw_token_credential base_path ~agent_name
+      ~role:Masc_domain.Admin ~raw_token:token with
+   | Error error -> fail (Masc_domain.masc_error_to_string error)
+   | Ok _ -> ());
+  Auth.save_private_text_file (Auth.raw_token_file base_path agent_name) token;
+  Auth.disable_auth base_path;
+  let before = local_operator_snapshot base_path agent_name in
+  (match ensure_local_operator base_path agent_name with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "an exact opaque Admin must be verified before trimming"
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  check bool "opaque credential files are unchanged" true
+    (local_operator_snapshot base_path agent_name = before)
+
+let test_local_operator_refuses_corrupt_owner () =
+  with_temp_dir "auth-operator-corrupt" @@ fun base_path ->
+  let agent_name = "operator-corrupt" in
+  (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.Long_lived () with
+   | Ok report -> Auth.save_private_text_file report.raw_token_file (report.bearer_token ^ "\n")
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  Auth.save_private_text_file (Auth.credential_file base_path agent_name) "{";
+  let before = local_operator_snapshot base_path agent_name in
+  (match ensure_local_operator base_path agent_name with
+   | Error _ -> ()
+   | Ok None | Ok (Some _) -> fail "corrupt named ownership must refuse reuse and mint");
+  check bool "corrupt ownership and bearer are preserved" true
+    (local_operator_snapshot base_path agent_name = before)
+
+let test_local_operator_replaces_ineligible_credential () =
+  List.iter (fun reason ->
+    with_temp_dir "auth-operator-renew" @@ fun base_path ->
+    let agent_name = "operator-renew" in
+    let role = match reason with `Worker -> Masc_domain.Worker
+      | `Expired | `Mismatch | `Blank -> Masc_domain.Admin in
+    match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+        ~agent_name ~role ~token_env_var:"MASC_TOKEN"
+        ~token_lifetime:Auth_login.Long_lived () with
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+    | Ok first ->
+        (match reason with
+         | `Worker -> ()
+         | `Expired ->
+             (match Auth.load_credential base_path agent_name with
+              | None -> fail "missing minted credential"
+              | Some credential -> Auth.save_credential base_path
+                  { credential with expires_at = Some "2000-01-01T00:00:00Z" })
+         | `Mismatch -> Auth.save_private_text_file first.raw_token_file "wrong-fixture\n"
+         | `Blank -> Auth.save_private_text_file first.raw_token_file " \t\r\n");
+        (match ensure_local_operator base_path agent_name with
+         | Ok None -> fail "an ineligible credential must not be reused"
+         | Error error -> fail (Masc_domain.masc_error_to_string error)
+         | Ok (Some report) ->
+             check bool "replacement changes bearer" false
+               (String.equal first.bearer_token report.bearer_token);
+             check bool "replacement is the persisted bearer" true
+               (Auth_login.read_persisted_token ~base_path ~agent_name = Some report.bearer_token);
+             match Auth.verify_token base_path ~agent_name ~token:report.bearer_token with
+             | Ok credential -> check bool "replacement verifies as Admin" true
+                 (credential.role = Masc_domain.Admin)
+             | Error error -> fail (Masc_domain.masc_error_to_string error)))
+    [ `Worker; `Expired; `Mismatch; `Blank ]
+
+let test_local_operator_refuses_occupied_raw_path () =
+  with_temp_dir "auth-operator-occupied" @@ fun base_path ->
+  let agent_name = "operator-occupied" in
+  let path = Auth.raw_token_file base_path agent_name in
+  let _secret = Auth.init_workspace_secret base_path in
+  Unix.mkdir path 0o700;
+  (match ensure_local_operator base_path agent_name with
+   | Error _ -> ()
+   | Ok None | Ok (Some _) -> fail "an occupied raw-token path must not claim success");
+  check bool "nonregular raw path is preserved" true (Sys.is_directory path);
+  check bool "refused login publishes no credential" false
+    (Sys.file_exists (Auth.credential_file base_path agent_name))
+
+(* masc-tui decides whether to re-mint by asking [Auth.verify_token] about the
+   bearer login persisted, and acts only on [Token_expired]. Both halves of that
+   contract live here: an expired record is reported as expired rather than as
+   a mismatch, and a second mint replaces the file and the record together, so
+   the next start reads a bearer the server accepts. *)
+let test_an_expired_persisted_token_is_reported_and_replaced () =
+  with_temp_dir "auth-login-expired" @@ fun base_path ->
+  let agent_name = "masc-tui" in
+  let mint () =
+    match
+      Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935 ~agent_name
+        ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+        ~token_lifetime:(Auth_login.Expires_in_hours 720) ()
+    with
+    | Error err ->
+        failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+    | Ok report -> report
+  in
+  let first = mint () in
+  (match Auth.load_credential base_path agent_name with
+   | None -> fail "the mint wrote no credential record"
+   | Some cred ->
+       Auth.save_credential base_path
+         { cred with expires_at = Some "2000-01-01T00:00:00Z" });
+  (match Auth.verify_token base_path ~agent_name ~token:first.bearer_token with
+   | Ok _ -> fail "an expired record must not verify"
+   | Error err ->
+       check string "the refusal is expiry, not a mismatch" "token_expired"
+         (Auth_error_kind.to_string (Auth_error_kind.classify err)));
+  let second = mint () in
+  check (option string) "the replacement is what a client reads back"
+    (Some second.bearer_token)
+    (Auth_login.read_persisted_token ~base_path ~agent_name);
+  match Auth.verify_token base_path ~agent_name ~token:second.bearer_token with
+  | Ok _ -> ()
+  | Error err ->
+      failf "the replacement must verify: %s"
+        (Masc_domain.masc_error_to_string err)
+
+(* The bearer file is written after the record. When it cannot be written the
+   mint answers [Error] instead of raising past its caller, so a client that
+   mints for itself reports a failed mint rather than dying at startup. *)
+let test_a_bearer_file_that_cannot_be_written_is_an_error () =
+  with_temp_dir "auth-login-unwritable" @@ fun base_path ->
+  let agent_name = "masc-tui" in
+  let blocked = Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token") in
+  (* A directory where the file goes: no write can replace it. *)
+  let rec mkdir_p path =
+    if not (Sys.file_exists path) then (
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o700)
+  in
+  mkdir_p blocked;
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935 ~agent_name
+      ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:(Auth_login.Expires_in_hours 720) ()
+  with
+  | Ok _ -> fail "a mint whose bearer file cannot be written must not succeed"
+  | Error _ -> ()
+
+let string_contains haystack needle =
+  let nlen = String.length needle and hlen = String.length haystack in
+  if nlen = 0 then true
+  else if nlen > hlen then false
+  else begin
+    let found = ref false in
+    for i = 0 to hlen - nlen do
+      if not !found && String.sub haystack i nlen = needle then found := true
+    done;
+    !found
+  end
+
+let test_mcp_client_config_renders_each_client () =
+  with_temp_dir "auth-login-mcp" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"mcp-agent" ~role:Masc_domain.Worker
+      ~token_env_var:"CUSTOM_MCP_TOKEN" ~token_lifetime:Auth_login.Long_lived ()
+  with
+  | Error err -> failf "mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+      check bool "codex name parses" true
+        (Auth_login.mcp_client_of_string "codex" = Some Auth_login.Codex);
+      check bool "claude-desktop name parses" true
+        (Auth_login.mcp_client_of_string "claude-desktop"
+        = Some Auth_login.Claude_desktop);
+      check bool "env name parses" true
+        (Auth_login.mcp_client_of_string "env" = Some Auth_login.Env);
+      check bool "unknown client name is rejected" true
+        (Auth_login.mcp_client_of_string "cursor" = None);
+      let codex = Auth_login.render_mcp_client_config report Auth_login.Codex in
+      check bool "codex block carries the mcp url" true
+        (string_contains codex report.mcp_url);
+      check bool "codex block names the bearer env var" true
+        (string_contains codex "bearer_token_env_var");
+      check bool "codex block exports the minted token" true
+        (string_contains codex report.bearer_token);
+      let claude =
+        Auth_login.render_mcp_client_config report Auth_login.Claude_desktop
+      in
+      check bool "claude-desktop block bridges over mcp-remote" true
+        (string_contains claude "mcp-remote");
+      check bool "claude-desktop block carries the minted token" true
+        (string_contains claude report.bearer_token);
+      let json_start = String.index claude '\n' + 1 in
+      let config =
+        Yojson.Safe.from_string
+          (String.sub claude json_start (String.length claude - json_start))
+      in
+      let open Yojson.Safe.Util in
+      let server = config |> member "mcpServers" |> member "masc" in
+      check (list string) "bridge passes the bearer header explicitly"
+        [ "-y"; "mcp-remote"; report.mcp_url; "--header";
+          "Authorization: Bearer ${" ^ report.mcp_token_env_var ^ "}" ]
+        (server |> member "args" |> to_list |> List.map to_string);
+      check string "header variable resolves to the minted bearer"
+        report.bearer_token
+        (server |> member "env" |> member report.mcp_token_env_var |> to_string);
+      let env = Auth_login.render_mcp_client_config report Auth_login.Env in
+      check bool "env block equals the shell exports" true
+        (String.equal env (Auth_login.render_shell report))
+
+let () =
+  run "auth_login"
+    [
+      ( "login",
+        [
+          test_case "with-expiry honors caller env var" `Quick
+            test_login_with_expiry_uses_caller_env_var;
+          test_case "long-lived honors caller env var + no expires_at"
+            `Quick test_login_long_lived_passes_env_var_through;
+          test_case "naming both lifetimes is refused" `Quick
+            test_lifetime_flags_refuse_to_pick_for_the_operator;
+          test_case "a named window outlives the config window" `Quick
+            test_login_expires_in_hours_outlives_the_config_window;
+          test_case "a window outside the bound is refused, not raised" `Quick
+            test_login_rejects_a_window_outside_the_bound;
+          test_case "a player is invited, not logged in" `Quick
+            test_login_refuses_a_player;
+          test_case "URL uses URI components" `Quick
+            test_login_url_uses_uri_components;
+          test_case "URLs do not advertise a bind wildcard" `Quick
+            test_login_urls_do_not_advertise_a_bind_wildcard;
+          test_case "persisted token round-trips" `Quick
+            test_persisted_token_round_trips;
+          test_case "local operator reuses formatted Admin without rotation" `Quick
+            test_local_operator_reuses_formatted_admin;
+          test_case "local operator preserves exact opaque Admin" `Quick
+            test_local_operator_preserves_exact_opaque_admin;
+          test_case "local operator replaces ineligible credentials" `Quick
+            test_local_operator_replaces_ineligible_credential;
+          test_case "local operator refuses occupied raw-token path" `Quick
+            test_local_operator_refuses_occupied_raw_path;
+          test_case "local operator refuses corrupt ownership" `Quick
+            test_local_operator_refuses_corrupt_owner;
+          test_case "an expired persisted token is reported and replaced" `Quick
+            test_an_expired_persisted_token_is_reported_and_replaced;
+          test_case "a bearer file that cannot be written is an error" `Quick
+            test_a_bearer_file_that_cannot_be_written_is_an_error;
+          test_case "mcp-config renders each client block" `Quick
+            test_mcp_client_config_renders_each_client;
+        ] );
+    ]

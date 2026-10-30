@@ -1,0 +1,646 @@
+(* RFC-0107 Phase D.2d — Pool unit tests.
+
+   Tests the pure, transport-independent pieces of the connection pool:
+   Host_key normalization, default_config sanity, response/stats type
+   shapes.  Live piaf integration (acquire/release lifecycle,
+   keep-alive reuse) is exercised in the D.2e runtime-storm reproducer.
+
+   The Pool_no_double_close TLA+ spec
+   ([specs/keeper-switch-hierarchy/Pool_no_double_close.tla])
+   complements these unit tests by model-checking the
+   exactly-one-owner invariant on connection lifetime, motivated by
+   Eio #244. *)
+
+module Host_key = Masc_http_client.Pool.For_testing.Host_key
+
+(* ── Host_key.of_uri normalization ───────────────────────────── *)
+
+let test_default_port_http () =
+  let key = Host_key.of_uri (Uri.of_string "http://example.com/path") in
+  Alcotest.(check int) "default port 80 for http" 80 key.port;
+  Alcotest.(check string) "scheme" "http" key.scheme;
+  Alcotest.(check string) "host" "example.com" key.host
+
+let test_default_port_https () =
+  let key = Host_key.of_uri (Uri.of_string "https://api.example.com/v1") in
+  Alcotest.(check int) "default port 443 for https" 443 key.port;
+  Alcotest.(check string) "scheme" "https" key.scheme
+
+let test_explicit_port_preserved () =
+  let key = Host_key.of_uri (Uri.of_string "http://example.com:8080/x") in
+  Alcotest.(check int) "explicit port preserved" 8080 key.port
+
+let test_missing_scheme_falls_back_to_http () =
+  let key = Host_key.of_uri (Uri.of_string "//example.com/x") in
+  Alcotest.(check string) "missing scheme -> http" "http" key.scheme
+
+let test_missing_host_falls_back_to_localhost () =
+  let key = Host_key.of_uri (Uri.of_string "http:///path") in
+  Alcotest.(check string) "missing host -> localhost" "localhost" key.host
+
+(* ── Host_key.compare — pool key identity ──────────────────────── *)
+
+let test_compare_equal_same_uri () =
+  let a = Host_key.of_uri (Uri.of_string "https://api.com/v1") in
+  let b = Host_key.of_uri (Uri.of_string "https://api.com/v2") in
+  Alcotest.(check int) "same scheme+host+port equal regardless of path"
+    0 (Host_key.compare a b)
+
+let test_compare_differs_on_scheme () =
+  let a = Host_key.of_uri (Uri.of_string "http://api.com:443/") in
+  let b = Host_key.of_uri (Uri.of_string "https://api.com:443/") in
+  Alcotest.(check bool) "scheme differs -> keys differ"
+    true (Host_key.compare a b <> 0)
+
+let test_compare_differs_on_port () =
+  let a = Host_key.of_uri (Uri.of_string "http://api.com:8080/") in
+  let b = Host_key.of_uri (Uri.of_string "http://api.com:9090/") in
+  Alcotest.(check bool) "port differs -> keys differ"
+    true (Host_key.compare a b <> 0)
+
+let test_compare_differs_on_host () =
+  let a = Host_key.of_uri (Uri.of_string "http://a.com/") in
+  let b = Host_key.of_uri (Uri.of_string "http://b.com/") in
+  Alcotest.(check bool) "host differs -> keys differ"
+    true (Host_key.compare a b <> 0)
+
+let test_to_string_format () =
+  let key = Host_key.of_uri (Uri.of_string "https://api.example.com:8443/x") in
+  Alcotest.(check string) "to_string format"
+    "https://api.example.com:8443" (Host_key.to_string key)
+
+(* ── default_config sanity ───────────────────────────────────── *)
+
+let test_default_config_max_idle_bounded () =
+  let c = Masc_http_client.Pool.default_config in
+  (* RFC-0101 §2: nofile cap 10240. Pool consumption must be a small
+     fraction. 256 max_total_idle is ~2.5% of the cap. *)
+  Alcotest.(check bool) "max_total_idle <= 1024 (rfc-0101 §2 budget)"
+    true (c.max_total_idle <= 1024);
+  Alcotest.(check bool) "max_idle_per_host <= max_total_idle"
+    true (c.max_idle_per_host <= c.max_total_idle);
+  Alcotest.(check bool) "max_idle_per_host >= 1"
+    true (c.max_idle_per_host >= 1)
+
+let test_default_config_idle_ttl_reasonable () =
+  let c = Masc_http_client.Pool.default_config in
+  Alcotest.(check bool) "idle_ttl_seconds > 0"
+    true (c.idle_ttl_seconds > 0.0);
+  Alcotest.(check bool) "idle_ttl_seconds <= 300s (5 min)"
+    true (c.idle_ttl_seconds <= 300.0)
+
+let test_default_config_connect_timeout_reasonable () =
+  let c = Masc_http_client.Pool.default_config in
+  Alcotest.(check bool) "connect_timeout_seconds > 0"
+    true (c.connect_timeout_seconds > 0.0);
+  Alcotest.(check bool) "connect_timeout_seconds <= 30s"
+    true (c.connect_timeout_seconds <= 30.0);
+  Alcotest.(check bool) "connect_failure_cooldown_seconds > 0"
+    true (c.connect_failure_cooldown_seconds > 0.0);
+  Alcotest.(check bool) "connect_failure_cooldown_seconds <= 30s"
+    true (c.connect_failure_cooldown_seconds <= 30.0)
+
+(* ── http_method polymorphic variant exhaustiveness ──────────── *)
+
+let test_http_method_variants () =
+  (* Ensures the variant set hasn't drifted; if a new method is added
+     to the public mli, this test must be updated explicitly — making
+     drift visible at code review time. *)
+  let _exhaustive : Masc_http_client.Pool.http_method -> string = function
+    | `GET    -> "GET"
+    | `POST   -> "POST"
+    | `PUT    -> "PUT"
+    | `DELETE -> "DELETE"
+    | `HEAD   -> "HEAD"
+    | `PATCH  -> "PATCH"
+  in
+  Alcotest.(check string) "method variants stable" "GET"
+    (_exhaustive `GET)
+
+(* ── stats type shape — Otel_metric_store consumer schema ───────────── *)
+
+let test_stats_zero_state_shape () =
+  (* When the pool is fresh, all counters are zero and there are no
+     idle entries. This locks in the shape the Phase D.4 metrics
+     exporter will consume. *)
+  let zero : Masc_http_client.Pool.stats = {
+    idle_per_host = [];
+    total_idle = 0;
+    total_inflight = 0;
+    reuse_count_total = 0;
+    evict_count_total = 0;
+    evict_failure_count_total = 0;
+    create_count_total = 0;
+  } in
+  Alcotest.(check int) "zero total_idle" 0 zero.total_idle;
+  Alcotest.(check int) "zero total_inflight" 0 zero.total_inflight;
+  Alcotest.(check (list (pair string int))) "empty idle_per_host"
+    [] zero.idle_per_host
+
+(* ── Host-header port fix (masc, 2026-08-16, task-11) ───────────
+   Piaf 0.2.0's own default HTTP/1.1 Host header carries the bare
+   hostname only, dropping any explicit non-default port — confirmed
+   live against server_request_authority.ml's admit_http1_authority,
+   which then rejects the request as Untrusted. See
+   ensure_host_header's doc comment in pool.ml for the full trace. *)
+
+let ensure_host_header = Masc_http_client.Pool.For_testing.ensure_host_header
+
+let test_ensure_host_header_adds_port_when_missing () =
+  let uri = Uri.of_string "http://127.0.0.1:18935/api/v1/keepers/chat/stream" in
+  match ensure_host_header ~uri (Some [ ("content-type", "application/json") ]) with
+  | Some headers ->
+    Alcotest.(check (option string)) "host header carries the port"
+      (Some "127.0.0.1:18935") (List.assoc_opt "host" headers);
+    Alcotest.(check int) "existing headers preserved" 2 (List.length headers)
+  | None -> Alcotest.fail "expected Some headers"
+
+(* This used to expect a portless "example.com" header here. Adding it is what
+   the whole helper exists to avoid needing: Piaf writes that header itself and
+   writes it correctly when there is no port to add.
+
+   Sending it anyway broke HTTP/2. RFC 9113 §8.3.1 carries the authority in the
+   [:authority] pseudo-header and a request that also sends [Host] is
+   malformed, so the peer resets the stream. Observed 2026-08-25 against
+   https://ollama.com/v1/models: the same GET returns 200 without the header
+   and [Protocol Error (PROTOCOL_ERROR (0x1))] with it (#30474). *)
+let test_ensure_host_header_absent_when_uri_has_no_port () =
+  let uri = Uri.of_string "http://example.com/path" in
+  match ensure_host_header ~uri (Some []) with
+  | Some headers ->
+    Alcotest.(check (option string)) "no port to add, so no header to send"
+      None (List.assoc_opt "host" headers)
+  | None -> ()
+
+let test_ensure_host_header_leaves_caller_override_alone () =
+  let uri = Uri.of_string "http://127.0.0.1:18935/x" in
+  let caller_headers = [ ("Host", "override.example:9999") ] in
+  match ensure_host_header ~uri (Some caller_headers) with
+  | Some headers ->
+    Alcotest.(check (list (pair string string)))
+      "caller's Host header is untouched (case-insensitive match, no duplicate added)"
+      caller_headers headers
+  | None -> Alcotest.fail "expected Some headers"
+
+let test_ensure_host_header_on_none_headers_with_host () =
+  let uri = Uri.of_string "https://api.example.com:8443/v1" in
+  match ensure_host_header ~uri None with
+  | Some headers ->
+    Alcotest.(check (option string)) "host header added to an empty list"
+      (Some "api.example.com:8443") (List.assoc_opt "host" headers)
+  | None -> Alcotest.fail "expected Some headers"
+
+let test_ensure_host_header_on_none_headers_without_uri_host_stays_none () =
+  (* A URI with no host at all (malformed target) has nothing to add;
+     returning None here preserves ?headers's original "caller passed
+     nothing" shape instead of manufacturing a headers list from thin air. *)
+  let uri = Uri.of_string "not-a-uri" in
+  Alcotest.(check (option (list (pair string string))))
+    "no host to add, no headers supplied -> None"
+    None
+    (ensure_host_header ~uri None)
+
+(* ── RFC-0129 — read_body_with_idle ─────────────────────────── *)
+
+(* Build a mock [Piaf.Body.t] that the test fiber can feed chunks into
+   on its own schedule. The producer fiber pushes [Some chunk] for each
+   chunk and [None] to close; this matches the real Piaf body shape but
+   is driven by simulated time so the test runs deterministically. *)
+let mock_body_with_producer ~clock ~chunks =
+  let (stream, push) = Piaf.Stream.create 16 in
+  let body = Piaf.Body.of_string_stream stream in
+  let producer () =
+    List.iter
+      (fun (delay_sec, payload) ->
+         if delay_sec > 0.0 then Eio.Time.sleep clock delay_sec;
+         push (Some payload))
+      chunks;
+    push None
+  in
+  body, producer
+
+(* These cases use the real clock with sub-second delays so the suite
+   stays under ~1s wall-clock total; the scheduler-order case that needs a
+   mock clock is test_pool_watched_work. *)
+
+let test_idle_steady_stream_completes () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let body, producer =
+    mock_body_with_producer ~clock
+      ~chunks:[
+        (0.02, "first");
+        (0.05, " second");
+        (0.05, " third");
+      ]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw producer;
+  let result =
+    Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~retention:Masc_http_client.Pool.Keep_body
+      ~clock ~start_sec:(Eio.Time.now clock)
+      ~idle_timeout_sec:0.5
+      body
+  in
+  match result with
+  | Ok (body_str, p) ->
+    Alcotest.(check string) "body assembled" "first second third" body_str;
+    Alcotest.(check int) "bytes_received counted" 18 p.bytes_received;
+    (match p.first_byte_at_sec with
+     | Some _ -> ()
+     | None -> Alcotest.fail "expected first_byte_at_sec set")
+  | Error (msg, _) ->
+    Alcotest.fail (Printf.sprintf "expected Ok, got Error %s" msg)
+
+let test_stream_without_body_retention () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let chunk = String.make 4096 'x' in
+  let chunks = List.init 1024 (fun _ -> 0., chunk) in
+  let body, producer = mock_body_with_producer ~clock ~chunks in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw producer;
+  let delivered = ref 0 in
+  let result = Masc_http_client.Pool.For_testing.read_body_with_idle
+    ~retention:Masc_http_client.Pool.Discard_body
+    ~on_chunk:(fun text -> delivered := !delivered + String.length text)
+    ~clock ~start_sec:(Eio.Time.now clock) ~idle_timeout_sec:Float.infinity body in
+  match result with
+  | Ok ((), progress) ->
+    Alcotest.(check int) "all bytes still delivered" (4096 * 1024) !delivered;
+    Alcotest.(check int) "progress remains observable" !delivered progress.bytes_received
+  | Error (message, _) -> Alcotest.fail message
+
+let test_idle_silent_from_start_cancels () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let body, producer =
+    (* Producer delays first chunk well past the idle window. *)
+    mock_body_with_producer ~clock
+      ~chunks:[ (1.0, "late") ]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw producer;
+  let result =
+    Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~retention:Masc_http_client.Pool.Keep_body
+      ~clock ~start_sec:(Eio.Time.now clock)
+      ~idle_timeout_sec:0.2
+      body
+  in
+  match result with
+  | Error (msg, p) ->
+    Alcotest.(check bool) "idle-timeout message present"
+      true (Astring.String.is_prefix ~affix:"idle timeout" msg);
+    Alcotest.(check int) "zero bytes received" 0 p.bytes_received;
+    Alcotest.(check (option (float 0.001))) "no first_byte_at_sec"
+      None p.first_byte_at_sec
+  | Ok (_, _) ->
+    Alcotest.fail "expected idle timeout, got Ok"
+
+let test_idle_mid_stream_silence_cancels () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let body, producer =
+    mock_body_with_producer ~clock
+      ~chunks:[
+        (0.02, "early");
+        (1.0, "very-late");
+      ]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw producer;
+  let result =
+    Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~retention:Masc_http_client.Pool.Keep_body
+      ~clock ~start_sec:(Eio.Time.now clock)
+      ~idle_timeout_sec:0.2
+      body
+  in
+  match result with
+  | Error (msg, p) ->
+    Alcotest.(check bool) "idle-timeout message present"
+      true (Astring.String.is_prefix ~affix:"idle timeout" msg);
+    Alcotest.(check int) "early chunk bytes counted" 5 p.bytes_received;
+    (match p.first_byte_at_sec with
+     | Some _ -> ()
+     | None -> Alcotest.fail "expected first_byte_at_sec for early chunk")
+  | Ok (_, _) ->
+    Alcotest.fail "expected mid-stream idle timeout, got Ok"
+
+let test_total_timeout_reports_progress_snapshot () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let stream, push = Piaf.Stream.create 16 in
+  let body = Piaf.Body.of_string_stream stream in
+  push (Some "early");
+  let progress_ref = ref Masc_http_client.Pool.empty_body_progress in
+  let result =
+    Eio.Fiber.first
+      (fun () ->
+         Masc_http_client.Pool.For_testing.read_body_with_idle
+           ~retention:Masc_http_client.Pool.Keep_body
+           ~progress_ref
+           ~clock
+           ~start_sec:(Eio.Time.now clock)
+           ~idle_timeout_sec:5.0
+           body)
+      (fun () ->
+         Eio.Time.sleep clock 0.05;
+         Error ("total timeout after 0.1s", !progress_ref))
+  in
+  match result with
+  | Error (msg, p) ->
+    Alcotest.(check bool) "total-timeout message present"
+      true (Astring.String.is_prefix ~affix:"total timeout" msg);
+    Alcotest.(check int) "early bytes preserved" 5 p.bytes_received;
+    (match p.first_byte_at_sec with
+     | Some _ -> ()
+     | None -> Alcotest.fail "expected first_byte_at_sec for early chunk")
+  | Ok (_, _) ->
+    Alcotest.fail "expected total timeout, got Ok"
+
+module Lease = Masc_http_client.Pool.For_testing.Lease
+
+exception Request_failed
+
+let test_repeated_release_does_not_close_a_parked_client () =
+  Eio_main.run @@ fun _env ->
+  let parked = ref 0 and closed = ref 0 and releases = ref 0 in
+  Lease.with_client
+    ~release:(fun lease ~close_only ->
+      incr releases;
+      if close_only then Lease.close lease ~signal:(fun () -> incr closed)
+      else Lease.park lease ~publish:(fun () -> incr parked))
+    ~close:(fun () -> incr closed)
+    (fun ~release -> release ~close_only:false; release ~close_only:false);
+  Alcotest.(check int) "one real release" 1 !releases;
+  Alcotest.(check int) "client is in idle queue" 1 !parked;
+  Alcotest.(check int) "request never closes idle queue's client" 0 !closed
+
+let test_close_failure_preserves_request_failure () =
+  Eio_main.run @@ fun _env ->
+  let attempts = ref 0 in
+  (try
+     Lease.with_client
+       ~release:(fun _ ~close_only:_ -> Alcotest.fail "request never released")
+       ~close:(fun () -> incr attempts; failwith "synthetic close failure")
+       (fun ~release:_ -> raise Request_failed)
+   with Request_failed -> ());
+  Alcotest.(check int) "close signal attempted" 1 !attempts
+
+let test_release_failure_before_transfer_closes_client () =
+  Eio_main.run @@ fun _env ->
+  let closed = ref 0 in
+  (try
+     Lease.with_client
+       ~release:(fun _ ~close_only:_ -> raise Request_failed)
+       ~close:(fun () -> incr closed)
+       (fun ~release -> release ~close_only:false)
+   with Request_failed -> ());
+  Alcotest.(check int) "unsettled release retains cleanup obligation" 1 !closed
+
+let test_release_failure_after_transfer_keeps_pool_owner () =
+  Eio_main.run @@ fun _env ->
+  let parked = ref 0 and closed = ref 0 in
+  (try
+     Lease.with_client
+       ~release:(fun lease ~close_only:_ ->
+         Lease.park lease ~publish:(fun () -> incr parked);
+         raise Request_failed)
+       ~close:(fun () -> incr closed)
+       (fun ~release -> release ~close_only:false)
+   with Request_failed -> ());
+  Alcotest.(check int) "queue owns published client" 1 !parked;
+  Alcotest.(check int) "failure cannot reclaim pool-owned client" 0 !closed
+
+let test_cancel_while_waiting_to_park_closes_client () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let mutex = Eio.Mutex.create () in
+  let locked, publish_locked = Eio.Promise.create () in
+  let unlock, publish_unlock = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+      Eio.Promise.resolve publish_locked ();
+      Eio.Promise.await unlock));
+  Eio.Promise.await locked;
+  let parked = ref 0 and closed = ref 0 in
+  let cancellation, publish_cancellation = Eio.Promise.create () in
+  let releasing, publish_releasing = Eio.Promise.create () in
+  let finished, publish_finished = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let cancelled =
+      try
+        Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve publish_cancellation context;
+          Lease.with_client
+            ~release:(fun lease ~close_only:_ ->
+              Eio.Promise.resolve publish_releasing ();
+              (* No yield between the signal and this mutex acquisition:
+                 observing [releasing] means this request is waiting here. *)
+              Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+                Lease.park lease ~publish:(fun () -> incr parked)))
+            ~close:(fun () -> incr closed)
+            (fun ~release -> release ~close_only:false));
+        false
+      with Eio.Cancel.Cancelled _ -> true
+    in
+    Eio.Promise.resolve publish_finished cancelled);
+  let context = Eio.Promise.await cancellation in
+  Eio.Promise.await releasing;
+  Eio.Cancel.cancel context Request_failed;
+  let cancelled = Eio.Promise.await finished in
+  Eio.Promise.resolve publish_unlock ();
+  Alcotest.(check bool) "release caller remains cancelled" true cancelled;
+  Alcotest.(check int) "cancelled waiter never parks" 0 !parked;
+  Alcotest.(check int) "request closes its client before mutex becomes available" 1 !closed
+
+let test_cancel_after_parking_keeps_pool_owner () =
+  Eio_main.run @@ fun _env ->
+  let parked = ref 0 and closed = ref 0 in
+  let cancelled =
+    try
+      Eio.Cancel.sub (fun context ->
+        Lease.with_client
+          ~release:(fun lease ~close_only:_ ->
+            Lease.park lease ~publish:(fun () -> incr parked);
+            Eio.Cancel.cancel context Request_failed;
+            Eio.Fiber.check ())
+          ~close:(fun () -> incr closed)
+          (fun ~release -> release ~close_only:false));
+      false
+    with Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool) "release caller remains cancelled" true cancelled;
+  Alcotest.(check int) "queue owns published client" 1 !parked;
+  Alcotest.(check int) "cancelled request does not close pool-owned client" 0 !closed
+
+let test_request_timeout_bounds_never_returning_transport () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let started = Eio.Time.now clock in
+  let result =
+    Masc_http_client.For_testing.with_request_timeout ~clock ~timeout_sec:0.02
+      (fun () ->
+         Eio.Time.sleep clock 60.0;
+         Ok ())
+  in
+  let elapsed = Eio.Time.now clock -. started in
+  (match result with
+   | Error message ->
+     Alcotest.(check bool)
+       "timeout is explicit"
+       true
+       (Astring.String.is_prefix ~affix:"Pool.request: timeout after" message)
+   | Ok () -> Alcotest.fail "never-returning transport must time out");
+  Alcotest.(check bool) "deadline settles promptly" true (elapsed < 0.5)
+
+(* ── Idle queue: never hand out a connection past its TTL ────── *)
+
+module Take = Masc_http_client.Pool.For_testing
+
+let take ~now entries = Take.take_live ~now ~ttl:60.0 entries
+let ids = List.map fst
+
+let test_a_live_entry_is_taken () =
+  let taken, rest, expired = take ~now:100.0 [ ("a", 90.0); ("b", 80.0) ] in
+  Alcotest.(check (option string)) "the first still inside its TTL" (Some "a") taken;
+  Alcotest.(check (list string)) "the rest stays" [ "b" ] (ids rest);
+  Alcotest.(check (list string)) "nothing expired" [] expired
+
+let test_an_expired_entry_is_not_handed_out () =
+  (* The whole point. The eviction fiber may not have run -- a blocking
+     syscall on this domain, a cancellation, or the failure the pool already
+     counts -- and this used to hand out whatever was at the head. The peer
+     had closed it (#30831). *)
+  let taken, _, expired = take ~now:1000.0 [ ("stale", 100.0) ] in
+  Alcotest.(check (option string)) "nothing warm to take" None taken;
+  Alcotest.(check (list string)) "and the dead one is named" [ "stale" ] expired
+
+let test_expired_entries_are_dropped_not_skipped () =
+  (* Skipping would leave them in the queue until the fiber runs, and the
+     reason this function exists is that it may not. *)
+  let taken, rest, expired =
+    take ~now:1000.0 [ ("old", 100.0); ("older", 50.0); ("warm", 990.0) ]
+  in
+  Alcotest.(check (option string)) "the warm one" (Some "warm") taken;
+  Alcotest.(check (list string)) "queue holds nothing else" [] (ids rest);
+  Alcotest.(check (list string)) "both dead ones come back to be closed"
+    [ "old"; "older" ] expired
+
+let test_exactly_at_the_ttl_is_still_live () =
+  (* [>] not [>=], the same comparison the eviction fiber makes. Two rules
+     for one boundary is how a connection becomes live to one and dead to
+     the other. *)
+  let taken, _, _ = take ~now:160.0 [ ("edge", 100.0) ] in
+  Alcotest.(check (option string)) "still usable" (Some "edge") taken
+
+(* ── Runner ──────────────────────────────────────────────────── *)
+
+let () =
+  Alcotest.run "pool"
+    [
+      ( "idle queue",
+        [
+          Alcotest.test_case "a live entry is taken" `Quick
+            test_a_live_entry_is_taken;
+          Alcotest.test_case "an expired entry is not handed out" `Quick
+            test_an_expired_entry_is_not_handed_out;
+          Alcotest.test_case "expired entries are dropped, not skipped" `Quick
+            test_expired_entries_are_dropped_not_skipped;
+          Alcotest.test_case "exactly at the TTL is still live" `Quick
+            test_exactly_at_the_ttl_is_still_live;
+        ] );
+      ( "Host_key normalization",
+        [
+          Alcotest.test_case "default port 80 for http" `Quick
+            test_default_port_http;
+          Alcotest.test_case "default port 443 for https" `Quick
+            test_default_port_https;
+          Alcotest.test_case "explicit port preserved" `Quick
+            test_explicit_port_preserved;
+          Alcotest.test_case "missing scheme -> http" `Quick
+            test_missing_scheme_falls_back_to_http;
+          Alcotest.test_case "missing host -> localhost" `Quick
+            test_missing_host_falls_back_to_localhost;
+        ] );
+      ( "Host_key.compare",
+        [
+          Alcotest.test_case "same scheme+host+port equal" `Quick
+            test_compare_equal_same_uri;
+          Alcotest.test_case "scheme differs" `Quick
+            test_compare_differs_on_scheme;
+          Alcotest.test_case "port differs" `Quick
+            test_compare_differs_on_port;
+          Alcotest.test_case "host differs" `Quick
+            test_compare_differs_on_host;
+          Alcotest.test_case "to_string format" `Quick
+            test_to_string_format;
+        ] );
+      ( "default_config bounds (RFC-0101 §2)",
+        [
+          Alcotest.test_case "max_idle bounded" `Quick
+            test_default_config_max_idle_bounded;
+          Alcotest.test_case "idle_ttl reasonable" `Quick
+            test_default_config_idle_ttl_reasonable;
+          Alcotest.test_case "connect_timeout reasonable" `Quick
+            test_default_config_connect_timeout_reasonable;
+        ] );
+      ( "http_method exhaustiveness",
+        [
+          Alcotest.test_case "variants stable" `Quick
+            test_http_method_variants;
+        ] );
+      ( "stats type shape",
+        [
+          Alcotest.test_case "zero state" `Quick test_stats_zero_state_shape;
+        ] );
+      ( "ensure_host_header (Host-header port fix, task-11)",
+        [
+          Alcotest.test_case "a named port is written into the header" `Quick
+            test_ensure_host_header_adds_port_when_missing;
+          Alcotest.test_case "no header when the uri has no port" `Quick
+            test_ensure_host_header_absent_when_uri_has_no_port;
+          Alcotest.test_case "leaves caller override alone" `Quick
+            test_ensure_host_header_leaves_caller_override_alone;
+          Alcotest.test_case "adds header to None headers when the uri names a port" `Quick
+            test_ensure_host_header_on_none_headers_with_host;
+          Alcotest.test_case "None headers stays None when uri has no host" `Quick
+            test_ensure_host_header_on_none_headers_without_uri_host_stays_none;
+        ] );
+      ( "RFC-0129 read_body_with_idle",
+        [
+          Alcotest.test_case "Discard_body delivers every chunk and returns ()" `Quick
+            test_stream_without_body_retention;
+          Alcotest.test_case "steady stream completes" `Quick
+            test_idle_steady_stream_completes;
+          Alcotest.test_case "silent-from-start cancels" `Quick
+            test_idle_silent_from_start_cancels;
+          Alcotest.test_case "mid-stream silence cancels" `Quick
+            test_idle_mid_stream_silence_cancels;
+          Alcotest.test_case "total timeout reports progress snapshot" `Quick
+            test_total_timeout_reports_progress_snapshot;
+        ] );
+      ( "cancel-safe release finalizer",
+        [
+          Alcotest.test_case "repeated release preserves the idle client" `Quick
+            test_repeated_release_does_not_close_a_parked_client;
+          Alcotest.test_case "close failure preserves request failure" `Quick
+            test_close_failure_preserves_request_failure;
+          Alcotest.test_case "failure before handoff retains cleanup" `Quick
+            test_release_failure_before_transfer_closes_client;
+          Alcotest.test_case "failure after handoff keeps pool owner" `Quick
+            test_release_failure_after_transfer_keeps_pool_owner;
+          Alcotest.test_case "cancelled mutex waiter closes its client" `Quick
+            test_cancel_while_waiting_to_park_closes_client;
+          Alcotest.test_case "cancellation after handoff keeps pool owner" `Quick
+            test_cancel_after_parking_keeps_pool_owner;
+        ] );
+      ( "request deadline",
+        [
+          Alcotest.test_case "never-returning transport is bounded" `Quick
+            test_request_timeout_bounds_never_returning_transport;
+        ] );
+    ]

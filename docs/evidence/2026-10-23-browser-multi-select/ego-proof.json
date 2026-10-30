@@ -1,0 +1,261 @@
+{
+  "mode": "ego",
+  "script_sha256": "05d7c7fe978b949f38ef46d31d87041080f85d89535c75bf6f90618ac22d178b",
+  "observations": [
+    {
+      "args": {
+        "values": [
+          "c",
+          "a"
+        ]
+      },
+      "result": {
+        "action": "select_option",
+        "urlBefore": "http://127.0.0.1:60893/",
+        "url": "http://127.0.0.1:60893/",
+        "title": "Browser multi-select proof",
+        "scrollX": 0,
+        "scrollY": 0,
+        "selectedValues": [
+          "a",
+          "c"
+        ]
+      },
+      "observed": {
+        "values": [
+          "a",
+          "c"
+        ],
+        "events": [
+          "input",
+          "change"
+        ]
+      },
+      "elapsed_ms": 3.220958000048995
+    },
+    {
+      "args": {
+        "values": [
+          "b",
+          "missing"
+        ]
+      },
+      "result": {
+        "interactionFailure": {
+          "message": "option_not_found",
+          "effectStarted": false
+        }
+      },
+      "observed": {
+        "values": [
+          "a",
+          "c"
+        ],
+        "events": []
+      },
+      "elapsed_ms": 3.2999160001054406
+    },
+    {
+      "args": {
+        "values": [
+          "b",
+          "off"
+        ]
+      },
+      "result": {
+        "interactionFailure": {
+          "message": "option_disabled",
+          "effectStarted": false
+        }
+      },
+      "observed": {
+        "values": [
+          "a",
+          "c"
+        ],
+        "events": []
+      },
+      "elapsed_ms": 2.45658400002867
+    },
+    {
+      "args": {
+        "values": [
+          "b",
+          "group-off"
+        ]
+      },
+      "result": {
+        "interactionFailure": {
+          "message": "option_disabled",
+          "effectStarted": false
+        }
+      },
+      "observed": {
+        "values": [
+          "a",
+          "c"
+        ],
+        "events": []
+      },
+      "elapsed_ms": 2.6900829998776317
+    },
+    {
+      "args": {
+        "values": [
+          "b",
+          "dup"
+        ]
+      },
+      "result": {
+        "interactionFailure": {
+          "message": "option_is_ambiguous",
+          "effectStarted": false
+        }
+      },
+      "observed": {
+        "values": [
+          "a",
+          "c"
+        ],
+        "events": []
+      },
+      "elapsed_ms": 2.095541000366211
+    },
+    {
+      "args": {
+        "values": [
+          "b",
+          "b"
+        ]
+      },
+      "result": {
+        "interactionFailure": {
+          "message": "option_values_are_not_distinct",
+          "effectStarted": false
+        }
+      },
+      "observed": {
+        "values": [
+          "a",
+          "c"
+        ],
+        "events": []
+      },
+      "elapsed_ms": 2.0454170000739396
+    },
+    {
+      "args": {
+        "values": []
+      },
+      "result": {
+        "action": "select_option",
+        "urlBefore": "http://127.0.0.1:60893/",
+        "url": "http://127.0.0.1:60893/",
+        "title": "Browser multi-select proof",
+        "scrollX": 0,
+        "scrollY": 0,
+        "selectedValues": []
+      },
+      "observed": {
+        "values": [],
+        "events": [
+          "input",
+          "change"
+        ]
+      },
+      "elapsed_ms": 1.957375000230968
+    },
+    {
+      "args": {
+        "selector": "#one",
+        "value": "b"
+      },
+      "result": {
+        "action": "select_option",
+        "urlBefore": "http://127.0.0.1:60893/",
+        "url": "http://127.0.0.1:60893/",
+        "title": "Browser multi-select proof",
+        "scrollX": 0,
+        "scrollY": 0,
+        "selectedValues": [
+          "b"
+        ]
+      },
+      "observed": {
+        "values": [
+          "b"
+        ],
+        "events": [
+          "input",
+          "change"
+        ]
+      },
+      "elapsed_ms": 1.7898749997839332
+    },
+    {
+      "args": {
+        "selector": "#one",
+        "value": ""
+      },
+      "result": {
+        "action": "select_option",
+        "urlBefore": "http://127.0.0.1:60893/",
+        "url": "http://127.0.0.1:60893/",
+        "title": "Browser multi-select proof",
+        "scrollX": 0,
+        "scrollY": 0,
+        "selectedValues": [
+          ""
+        ]
+      },
+      "observed": {
+        "values": [
+          ""
+        ],
+        "events": [
+          "input",
+          "change"
+        ]
+      },
+      "elapsed_ms": 1.8369999998249114
+    },
+    {
+      "behavior": "reselect",
+      "result": {
+        "interactionFailure": {
+          "message": "select_changed_during_events",
+          "effectStarted": true
+        }
+      },
+      "observed": {
+        "values": [
+          "a",
+          "b"
+        ],
+        "events": [
+          "input",
+          "change"
+        ]
+      }
+    },
+    {
+      "behavior": "rewrite",
+      "result": {
+        "interactionFailure": {
+          "message": "select_changed_during_events",
+          "effectStarted": true
+        }
+      },
+      "observed": {
+        "values": [
+          "rewritten"
+        ],
+        "events": [
+          "input",
+          "change"
+        ]
+      }
+    }
+  ],
+  "scope": "Actual owned browser DOM executing extracted production JS. Not OCaml parse/wire, host/Add-on integration, installed change, or Keeper model benchmark."
+}

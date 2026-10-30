@@ -1,0 +1,50 @@
+type client = Codex | Claude | Antigravity | Muse
+val name : client -> string
+val source_url : client -> string
+
+(** {1 Where a client runs from}
+
+    One lookup for the official clients. The runtime spawns what it
+    answers ({!Runtime_adapter}), the vendor installer checks its result with
+    it, and the setup wizard shows and stores it ([masc runtime-client-path]),
+    so the list, the selection, the verification and the turn agree on
+    whether a client is there (masc #37747). *)
+
+(** Where [command] runs from for [client], or [None] when it is nowhere.
+    - [command] with a directory part is a path: a relative path is anchored
+      to the lookup cwd, preserving symlinks. An executable regular file is
+      answered with that absolute spelling.
+    - Otherwise the first absolute PATH directory holding it, the way the
+      shell finds it, so [masc] runs the same client the operator's terminal
+      runs. An empty or relative entry is skipped: a shell reads it against
+      the directory it is in, and what is found here is spawned from a
+      keeper's own working directory.
+    - Otherwise, when [command] is the client's own name ({!name}), the
+      directory the vendor installer writes to: [CODEX_INSTALL_DIR] for Codex
+      and [MUSE_INSTALL_DIR] for Muse Code when set, else [~/.local/bin].
+      Relative installer destinations are resolved against the lookup's working
+      directory so the returned spawn path remains valid in another workspace. A
+      shell whose PATH does not hold that
+      directory yet -- the one the installer was run from -- still finds the
+      client. A custom command name is not looked for there.
+    A link is answered as the link, never its target: the Claude Code
+    installer keeps [~/.local/bin/claude] as a link into a versioned
+    directory that an update replaces. Reads PATH, HOME and the client's
+    install directory variable from the process environment at the call. *)
+val locate : client -> command:string -> string option
+
+(** {!locate} for the client's own name. *)
+val executable : client -> string option
+
+(** What to spawn for a configured [command]: {!locate}'s answer, or
+    [command] when nothing is found, with explicit relative paths still
+    anchored to the lookup cwd so a later workspace cannot redirect them. *)
+val spawn_path : client -> command:string -> string
+
+val install : run:(string list -> (unit, string) result) -> client -> (unit, string) result
+(** Execute only after explicit selection. Downloads the documented vendor script
+    over HTTPS into a private temporary directory, runs it as the current user,
+    then checks the installed executable's version. This is not account/model
+    verification or an independently pinned binary publisher attestation. The
+    injected terminal runner must preserve interactive input and route stdout
+    away from any machine-readable receipt. *)

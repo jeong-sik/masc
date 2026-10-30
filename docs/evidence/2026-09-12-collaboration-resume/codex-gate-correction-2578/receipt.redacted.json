@@ -1,0 +1,337 @@
+{
+  "schema": "codex-gate-correction-audit.v1",
+  "captured_at": "2026-09-12T14:03:21.720416+00:00",
+  "scope": "Read-only live-base evidence; no model calls, messages, runtime mutations, or source edits. Writes only in this audit directory.",
+  "gate_observation_source": "operator-response-146.private.json",
+  "configured_judge_observation": {
+    "status": "available",
+    "lane_id": "hitl_auto_judge",
+    "slots": [
+      "codex_subscription.gpt-5.6-sol"
+    ]
+  },
+  "judge_and_effects": [
+    {
+      "approval": {
+        "id": "appr_01a095e3-9750-7000-97f9-b4d8688eef1c",
+        "decision": "approve",
+        "decision_source": "auto_judge",
+        "resolved_at": 1789221140.405587,
+        "keeper_name": "exhibit-editor",
+        "task_id": "task-004",
+        "turn_id": 420,
+        "exact_attempt": {
+          "state": "bound",
+          "approval_id": "appr_01a095e3-9750-7000-97f9-b4d8688eef1c",
+          "input_hash": "2940baeabc2e11a7a35814cabc27fd769c3ac59fa8cd5c5f2652b2c09b4ad715",
+          "sequence": 52,
+          "slot_id": "codex_subscription.gpt-5.6-sol",
+          "call_id": "cli-hitl-039c5c14aa872a2c7e6dcdc413917a0a",
+          "plan_fingerprint": "cli-oneshot:67dee54af1c6d694e3b45806e49e16bb4b9032f05fd8234689a7c6a48215d4bf",
+          "request_body_sha256": "67dee54af1c6d694e3b45806e49e16bb4b9032f05fd8234689a7c6a48215d4bf",
+          "status": "completed",
+          "quarantine_cause": null
+        }
+      },
+      "judge_run": {
+        "id": "exact-hitl-judge-f6a1073f2778cebfd3518724cabefb10",
+        "started_at": 1789221115.744174,
+        "outcome": "succeeded",
+        "elapsed_s": 24.685533046722412,
+        "selected_slot": "codex_subscription.gpt-5.6-sol",
+        "model_run_id": "cli-hitl-039c5c14aa872a2c7e6dcdc413917a0a",
+        "judgment": "approve"
+      },
+      "approved_operation": {
+        "tool_name": "tool_execute",
+        "argv": [
+          "sh",
+          "-c",
+          "python3 adaptation/build_pptx.py && python3 adaptation/verify_adaptation.py"
+        ],
+        "sandbox_profile": "docker"
+      },
+      "replay": {
+        "approval_id": "appr_01a095e3-9750-7000-97f9-b4d8688eef1c",
+        "outcome": {
+          "kind": "applied",
+          "output_ref": {
+            "_blob": {
+              "sha256": "2fe85e7804edd0b8ac9255a7658ec9aa76a46f93282e5a771b46919d47ebaa76",
+              "bytes": 2826,
+              "mime": "text/plain",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "actual_process_effect": {
+        "path": "effect-52.redacted.json",
+        "sha256": "291320ec058823be0c08705657efa6b0252c02c398ef8ece03caedfced026955"
+      },
+      "effect_summary": {
+        "ok": false,
+        "status": {
+          "kind": "exit",
+          "code": 1
+        },
+        "output_completeness": "complete"
+      }
+    },
+    {
+      "approval": {
+        "id": "appr_01a095e5-c285-7000-9af7-5f38b7df3000",
+        "decision": "approve",
+        "decision_source": "auto_judge",
+        "resolved_at": 1789221276.857918,
+        "keeper_name": "exhibit-editor",
+        "task_id": "task-004",
+        "turn_id": 420,
+        "exact_attempt": {
+          "state": "bound",
+          "approval_id": "appr_01a095e5-c285-7000-9af7-5f38b7df3000",
+          "input_hash": "2940baeabc2e11a7a35814cabc27fd769c3ac59fa8cd5c5f2652b2c09b4ad715",
+          "sequence": 53,
+          "slot_id": "codex_subscription.gpt-5.6-sol",
+          "call_id": "cli-hitl-d456c096597b84b12d17a2bae4578394",
+          "plan_fingerprint": "cli-oneshot:5f493ff2d901f3832b1cc33a1e66787de10ee3bdc52b2c197f88f35684ed0680",
+          "request_body_sha256": "5f493ff2d901f3832b1cc33a1e66787de10ee3bdc52b2c197f88f35684ed0680",
+          "status": "completed",
+          "quarantine_cause": null
+        }
+      },
+      "judge_run": {
+        "id": "exact-hitl-judge-8c119da1b7fae73ceb6b1b2cb1181aea",
+        "started_at": 1789221257.885333,
+        "outcome": "succeeded",
+        "elapsed_s": 18.984689950942993,
+        "selected_slot": "codex_subscription.gpt-5.6-sol",
+        "model_run_id": "cli-hitl-d456c096597b84b12d17a2bae4578394",
+        "judgment": "approve"
+      },
+      "approved_operation": {
+        "tool_name": "tool_execute",
+        "argv": [
+          "sh",
+          "-c",
+          "python3 adaptation/build_pptx.py && python3 adaptation/verify_adaptation.py"
+        ],
+        "sandbox_profile": "docker"
+      },
+      "replay": {
+        "approval_id": "appr_01a095e5-c285-7000-9af7-5f38b7df3000",
+        "outcome": {
+          "kind": "applied",
+          "output_ref": {
+            "_blob": {
+              "sha256": "5d46c7c96f69acaccc2323477575a00323fb8c5f4cb5222acd99d809167f4f77",
+              "bytes": 2812,
+              "mime": "text/plain",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "actual_process_effect": {
+        "path": "effect-53.redacted.json",
+        "sha256": "70e4112e1ac775bc3931b8ee917960dc27ed8db53afbaec30e616a9a53888b01"
+      },
+      "effect_summary": {
+        "ok": true,
+        "status": {
+          "kind": "exit",
+          "code": 0
+        },
+        "output_completeness": "complete"
+      }
+    },
+    {
+      "approval": {
+        "id": "appr_01a095e7-76ae-7000-adab-248000cbba31",
+        "decision": "approve",
+        "decision_source": "auto_judge",
+        "resolved_at": 1789221385.752969,
+        "keeper_name": "exhibit-editor",
+        "task_id": "task-004",
+        "turn_id": 420,
+        "exact_attempt": {
+          "state": "bound",
+          "approval_id": "appr_01a095e7-76ae-7000-adab-248000cbba31",
+          "input_hash": "39b43ac0b95e618de24b513a56491774821776dfe0ff167bc413ed0221ad0c16",
+          "sequence": 54,
+          "slot_id": "codex_subscription.gpt-5.6-sol",
+          "call_id": "cli-hitl-e66dcbfb4c238f829f2ab10fcbd5a4f7",
+          "plan_fingerprint": "cli-oneshot:d03b63feaa2677c7642c1d7f7879a6bd22bd72d4ac69902c2dd852e23838aa85",
+          "request_body_sha256": "d03b63feaa2677c7642c1d7f7879a6bd22bd72d4ac69902c2dd852e23838aa85",
+          "status": "completed",
+          "quarantine_cause": null
+        }
+      },
+      "judge_run": {
+        "id": "exact-hitl-judge-cf15c5e129ec6087cec730f30260c9f7",
+        "started_at": 1789221369.565157,
+        "outcome": "succeeded",
+        "elapsed_s": 16.24520516395569,
+        "selected_slot": "codex_subscription.gpt-5.6-sol",
+        "model_run_id": "cli-hitl-e66dcbfb4c238f829f2ab10fcbd5a4f7",
+        "judgment": "approve"
+      },
+      "approved_operation": {
+        "tool_name": "tool_execute",
+        "argv": [
+          "sh",
+          "-c",
+          "which soffice libreoffice 2>/dev/null; ffmpeg -y -loglevel error -ss 31 -i adaptation/experience.mp4 -frames:v 1 adaptation/check_Q1c.png && ffmpeg -y -loglevel error -ss 58 -i adaptation/experience.mp4 -frames:v 1 adaptation/check_Q2c.png && ffmpeg -y -loglevel error -ss 85 -i adaptation/experience.mp4 -frames:v 1 adaptation/check_Q3c.png && echo FRAMES_OK"
+        ],
+        "sandbox_profile": "docker"
+      },
+      "replay": {
+        "approval_id": "appr_01a095e7-76ae-7000-adab-248000cbba31",
+        "outcome": {
+          "kind": "applied",
+          "output_ref": {
+            "_blob": {
+              "sha256": "d8083c9c789d4354f8895cca5c01dc088ef5978369eaa1f56d889d4539c602bf",
+              "bytes": 598,
+              "mime": "text/plain",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "actual_process_effect": {
+        "path": "effect-54.redacted.json",
+        "sha256": "7a71296895a851084dd50eb837da3ce6a972c8f45b85d54dd2ece9aa2ed5fa5e"
+      },
+      "effect_summary": {
+        "ok": true,
+        "status": {
+          "kind": "exit",
+          "code": 0
+        },
+        "output_completeness": "complete"
+      }
+    },
+    {
+      "approval": {
+        "id": "appr_01a095e8-40ed-7000-8735-5f9902dcbcdb",
+        "decision": "approve",
+        "decision_source": "auto_judge",
+        "resolved_at": 1789221435.711443,
+        "keeper_name": "exhibit-editor",
+        "task_id": "task-004",
+        "turn_id": 420,
+        "exact_attempt": {
+          "state": "bound",
+          "approval_id": "appr_01a095e8-40ed-7000-8735-5f9902dcbcdb",
+          "input_hash": "e2f76625c13e317bc6026b602e9f96cbcaf8ed5417397a65aab0e649d02b8206",
+          "sequence": 55,
+          "slot_id": "codex_subscription.gpt-5.6-sol",
+          "call_id": "cli-hitl-fd70fd0d5e15163118b1395b5c9d66fc",
+          "plan_fingerprint": "cli-oneshot:24c520ef6de3919121435e32e3b656149006b34a7aec68a022983231b969a040",
+          "request_body_sha256": "24c520ef6de3919121435e32e3b656149006b34a7aec68a022983231b969a040",
+          "status": "completed",
+          "quarantine_cause": null
+        }
+      },
+      "judge_run": {
+        "id": "exact-hitl-judge-a955455201e0a413c9a60943c8f3ce78",
+        "started_at": 1789221421.314928,
+        "outcome": "succeeded",
+        "elapsed_s": 14.407140970230103,
+        "selected_slot": "codex_subscription.gpt-5.6-sol",
+        "model_run_id": "cli-hitl-fd70fd0d5e15163118b1395b5c9d66fc",
+        "judgment": "approve"
+      },
+      "approved_operation": {
+        "tool_name": "tool_execute",
+        "argv": [
+          "sh",
+          "-c",
+          "soffice --headless --convert-to pdf --outdir adaptation adaptation/experience.pptx 2>&1 | tail -2; ls -la adaptation/experience.pdf 2>/dev/null || echo PDF_FAIL"
+        ],
+        "sandbox_profile": "docker"
+      },
+      "replay": {
+        "approval_id": "appr_01a095e8-40ed-7000-8735-5f9902dcbcdb",
+        "outcome": {
+          "kind": "applied",
+          "output_ref": {
+            "_blob": {
+              "sha256": "11ea608f1bdfad81d8e0d527f1039728e40d5883bd74ce3c73b43c3ddfe1b1a9",
+              "bytes": 867,
+              "mime": "text/plain",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "actual_process_effect": {
+        "path": "effect-55.redacted.json",
+        "sha256": "542a04487c6b9caca32ac9bf2ef29926a12775d710ecdc7c433eea4229fcc62c"
+      },
+      "effect_summary": {
+        "ok": true,
+        "status": {
+          "kind": "exit",
+          "code": 0
+        },
+        "output_completeness": "complete"
+      }
+    }
+  ],
+  "corrected_consumption": {
+    "path": "corrected-read-edits.redacted.json",
+    "sha256": "ba854da30cb1daa07505fd3921e3259802e4b70fd6393951971b79bd1f97b060"
+  },
+  "current_file_observation": [
+    {
+      "path": "adaptation/decision.md",
+      "bytes": 11001,
+      "sha256": "e5eac06c7a7e75dedb0a20b2e0c07e6198123e3e7001d56a197567155752523d",
+      "mtime_ns": 1789221174286637525
+    },
+    {
+      "path": "adaptation/review.md",
+      "bytes": 10136,
+      "sha256": "ab38fbe8e069f2d1d4645af7b5161431acf38a87919eaef59f9df3cd0036ea57",
+      "mtime_ns": 1789221761620192681
+    },
+    {
+      "path": "adaptation/experience.pptx",
+      "bytes": 25462,
+      "sha256": "4e0099d695d4e0bce0f96e10f4c181ac049f641be70c6edfe2e21abd66cd1fae",
+      "mtime_ns": 1789221564330204901
+    },
+    {
+      "path": "adaptation/experience.mp4",
+      "bytes": 345612,
+      "sha256": "e9f26dde92b0b4120546d617c5cb89e420a3bc43943e5587b04c746bcd7f1283",
+      "mtime_ns": 1789221609044344865
+    },
+    {
+      "path": "adaptation/experience.pdf",
+      "bytes": 57307,
+      "sha256": "d2c682cd60dba9246478cf3ddfe4f4729c29f80d097e1da5770b0bb846bf407f",
+      "mtime_ns": 1789221610649017210
+    }
+  ],
+  "fusion_decision_events": [],
+  "limits": [
+    "52–55 judge completion and approval are separate from effect results. All four replay ledger rows say applied; process52 exited1 with PPTX missing causal anchor3,53 exited0 with script PASS,54 exited0 with frame extraction output,55 recorded actual LibreOffice conversion output and70992B PDF listing.",
+    "55 argv pipes soffice through tail and follows with ls/echo; recorded shell exit0 is not an independently captured soffice process exit code. Conversion output and PDF listing establish execution and an observed output artifact, not visual correctness.",
+    "53 output reports PPTX25462B SHA cf0c4fb9f14d4aa7519ca3cd99b9cdb2d7b55cbb4f70fc3898e1754f2da59b88. Later root snapshot13:59:35Z reports same length SHA4e0099d695d4e0bce0f96e10f4c181ac049f641be70c6edfe2e21abd66cd1fae; retain differing identities without attributing ZIP timestamp or content equivalence. Current files are separately observed above.",
+    "Correct Board read returned1302B body/judge recommendation, not full panel metadata. It corroborates the original post and recommendation, not full-panel read proof.",
+    "Decision/review edits explicitly correct invented panel3/3/verdict_insufficient/TTL loss and the misframed accessibility criterion. They separately state the Keeper choice and its difference from Fusion advice. A failed old_string patch is preserved alongside subsequent successful correction.",
+    "No full provider-input capture is asserted. No automatic product-completion or typed decision attribution is inferred from successful edits; actual typed decision calls/events are enumerated separately."
+  ],
+  "feedback_operation_saved_observation": {
+    "source": "operator-response-147.private.json",
+    "operation_id": "kmsg-dde4ba1ab7ab0e26456f6aa511e74704",
+    "state": "Running",
+    "sequence": "12",
+    "created_at": 1789220924.192893,
+    "started_at": 1789221403.883606,
+    "execution_digest": "ad41025c12c4651bc2688d403f79a93612e689a11fb6cdc7533f29edea72887b"
+  }
+}

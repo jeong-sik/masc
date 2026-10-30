@@ -1,0 +1,20 @@
+name = "papercolor-light"
+light = true
+
+[palette]
+base00 = "eeeeee"
+base01 = "c4c4c4"
+base02 = "9e9e9e"
+base03 = "858585"
+base04 = "6b6b6b"
+base05 = "5e5e5e"
+base06 = "525252"
+base07 = "444444"
+base08 = "d70000"
+base09 = "d75f00"
+base0a = "d75f00"
+base0b = "008700"
+base0c = "0087af"
+base0d = "005f87"
+base0e = "8700af"
+base0f = "af0000"

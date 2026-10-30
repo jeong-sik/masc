@@ -1,0 +1,112 @@
+(** Optional Lane Add-on views and asynchronous lifecycle operations.
+    Read handlers never wait for an observation worker. *)
+val add_routes : sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> Http_server_eio.Router.t -> Http_server_eio.Router.t
+
+val decode_body : string -> (Yojson.Safe.t, string) result
+type operator_command = Describe_operator | Invoke_operator of Yojson.Safe.t
+type operator_request = {
+  instance_id : string; expected_incarnation : string; command : operator_command;
+}
+val decode_operator_request : string -> (operator_request, unit) result
+(** Closed private request envelope. Parse errors carry no request text. *)
+
+(** {2 Installation questions}
+
+    The wire of [GET /api/v1/lane-addons/asks] and
+    [POST /api/v1/lane-addons/ask-answer], exposed so the TUI's decoders are
+    checked against what this server writes. *)
+
+val installation_ask_json :
+  declaration_id:string -> string * (Lane_addon_asks.ask * Keeper_ask.resolution) -> Yojson.Safe.t
+
+val decode_ask_answer :
+  string -> (string * string * (string * Keeper_ask.response) list * string option, string) result
+(** The answer body: exactly [declaration_id], [ask_id], [answers] and an
+    optional [session_id]; any other field is refused. *)
+
+val ask_answer_recorded_json : declaration_id:string -> ask_id:string -> answer_count:int -> Yojson.Safe.t
+
+val ask_answer_failure_response :
+  ask_id:string -> Lane_addon_asks.answer_failure ->
+  [> `Bad_request | `Conflict | `Internal_server_error | `Not_found ] * Yojson.Safe.t
+val decode_slice_query : (string * string) list -> (Yojson.Safe.t, string) result
+
+val decode_inspect_query : (string * string) list -> (Yojson.Safe.t, string) result
+
+val broadcast_principal_for_standing :
+  Server_auth.request_credential_standing -> string -> (string, string) result
+(** A Broadcast journal identity comes only from an authenticated credential's
+    canonical actor, never a caller-supplied header or a bearer fingerprint. *)
+
+(** A spectator's last mark: the change count it read and the incarnation it
+    read it under. *)
+type since = { count : int; incarnation : string }
+
+val decode_live_query :
+  (string * string) list -> (Machine_lane.t * since option, string) result
+(** [source_kind] (required), read as the machine whose screen it captures
+    ([msx_capture], [dos_capture]), and [since] with [incarnation] (optional, always
+    together: a nonnegative decimal change count and the incarnation it was
+    read under). A kind with no screen ([snapshot_file], [lane_output],
+    [browser_document]), an unknown kind, an unknown or repeated parameter, a
+    [since] that is not decimal digits, and [since] or [incarnation] alone are
+    errors. *)
+
+(** What a live read can say from the published mark alone. *)
+type live_answer =
+  | Answered of Yojson.Safe.t
+      (** No machine, or a [since] that still names the current mark
+          ([state] ["unchanged"]). *)
+  | Needs_locked_read
+      (** The mark moved, no [since] was given, or the machine is running:
+          the frame has to be copied under the machine lock. *)
+
+type screen_publication = since Machine_live_publication.t
+val answer_from_publication :
+  Machine_lane.t -> since:since option -> screen_publication -> live_answer
+(** Both machine kinds use the same rule: [Running] always needs a locked read,
+    even when its last published mark equals [since]. *)
+
+val live_json : config:Workspace.config -> Machine_lane.t -> since:since option ->
+  (Yojson.Safe.t, string) result
+(** Last completed shared-worker screen. No worker RPC is issued. Pending
+    observations carry [refreshing=true] and never claim an unchanged frame.
+    No attached shared worker returns [Error]; an attached worker may publish
+    a successful [no_machine] observation when no program is loaded. *)
+
+val query_fields : Httpun.Request.t -> (string * string) list
+(** Preserve repeated query values so both transports reject duplicates. *)
+
+val package_catalog_payload : Mcp_server.server_state -> (string * string) list ->
+  (Yojson.Safe.t, string) result
+val package_preview_payload : Mcp_server.server_state -> (string * string) list ->
+  (Yojson.Safe.t, string) result
+(** Shared H1/H2 payloads. The transport applies its read-auth gate before
+    calling these filesystem readers. *)
+
+val live_workspace_precondition :
+  config:Workspace.config -> (string * string) list ->
+  ((string * string) list, [ `Bad_request | `Conflict ] * string) result
+(** The optional [expected_base_path] and [expected_masc_root] pair of a live
+    read. Absent, the fields are returned unchanged. Present and equal to this
+    workspace, they are removed. A different workspace is a [`Conflict] and a
+    lone or malformed one a [`Bad_request]; the read is not served in either
+    case. *)
+
+val asks_payload :
+  config:Workspace.config -> include_resolved:bool -> (Yojson.Safe.t, string) result
+(** [GET /api/v1/lane-addons/asks]: every installation's questions, by
+    declaration id and then in the order asked, with the Keeper question and
+    resolution wire form. Only open questions unless [include_resolved]. *)
+
+val handle_asks : Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** The list route after its read gate. It takes [include_resolved] and the
+    {!live_workspace_precondition} pair, and refuses any other parameter. *)
+
+val handle_ask_answer :
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** [POST /api/v1/lane-addons/ask-answer] after its admin gate. The body is
+    [declaration_id], [ask_id], [answers] and an optional [session_id]; the
+    responder is the Dashboard surface with [actor]. A missing question is 404,
+    one already answered or withdrawn is 409 with the recorded state, answers
+    that do not fit the questions are 400 with every reason. *)

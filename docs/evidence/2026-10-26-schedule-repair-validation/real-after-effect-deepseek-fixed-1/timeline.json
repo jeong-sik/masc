@@ -1,0 +1,64 @@
+[
+  {
+    "event": "first_arrival",
+    "at": 1793026382.881975,
+    "source": "reaction-ledger stimulus.arrived_at_unix"
+  },
+  {
+    "event": "first_stimulus_recorded",
+    "at": 1793026382.898596,
+    "source_line": 1
+  },
+  {
+    "event": "first_turn_started",
+    "at": 1793026382.944305,
+    "source_line": 2
+  },
+  {
+    "event": "first_note_durable",
+    "at": 1793026417.467048,
+    "note_id": "6",
+    "source": "schedules.json notes; corresponding exact note_add receipt"
+  },
+  {
+    "event": "second_arrival",
+    "at": 1793026420.201364,
+    "source": "reaction-ledger stimulus.arrived_at_unix"
+  },
+  {
+    "event": "second_stimulus_recorded",
+    "at": 1793026420.22526,
+    "source_line": 3
+  },
+  {
+    "event": "first_turn_finished_completed",
+    "at": 1793026421.58955,
+    "source_line": 4
+  },
+  {
+    "event": "first_event_queue_ack",
+    "at": 1793026421.589584,
+    "source_line": 5
+  },
+  {
+    "event": "second_turn_started",
+    "at": 1793026421.598716,
+    "source_line": 6
+  },
+  {
+    "event": "second_note_durable",
+    "at": 1793026424.535058,
+    "note_id": "11",
+    "source": "schedules.json notes; corresponding exact note_add receipt"
+  },
+  {
+    "event": "second_turn_finished_completed",
+    "at": 1793026427.590824,
+    "source_line": 7
+  },
+  {
+    "event": "second_event_queue_ack",
+    "at": 1793026427.590862,
+    "source_line": 8
+  }
+]

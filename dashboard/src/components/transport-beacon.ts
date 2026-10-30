@@ -1,0 +1,133 @@
+// Transport beacon — operator-facing signal for the dashboard WebSocket.
+//
+// Renders a single chip for the browser's client channel only. Server-wide
+// transport truth lives in the hidden Diagnostics transport surface backed by
+// /api/v1/dashboard/transport-health.
+
+import { html } from 'htm/preact'
+import { computed } from '@preact/signals'
+import {
+  dashboardWsConnected,
+  dashboardWsEventCount60s,
+  dashboardWsLastEventAt,
+  dashboardWsLastPongAt,
+  dashboardWsLastPongLatencyMs,
+  dashboardWsLastDisconnectedAt,
+  dashboardWsReconnectCount,
+  dashboardWsReady,
+} from '../dashboard-ws-state'
+import {
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+} from '../config/constants'
+
+// 30s of silence on a client WS channel turns the beacon yellow.  This is
+// shorter than the typical heartbeat interval to flag truly idle
+// transports without nuisance-firing on quiet workloads.
+const SILENT_THRESHOLD_MS = 30_000
+const HEARTBEAT_FRESH_MS = DASHBOARD_WS_HEARTBEAT_INTERVAL_MS + DASHBOARD_WS_RPC_TIMEOUT_MS + 1_000
+
+type BeaconState = 'green' | 'yellow' | 'red'
+
+interface BeaconView {
+  state: BeaconState
+  label: string
+  title: string
+}
+
+export function computeBeaconView(args: {
+  connected: boolean
+  ready: boolean
+  lastEventAt: number
+  eventCount60s: number
+  lastPongAt: number
+  lastPongLatencyMs: number | null
+  now: number
+}): BeaconView {
+  if (!args.connected || !args.ready) {
+    if (args.connected && !args.ready) {
+      return {
+        state: 'yellow',
+        label: '연결 확인 중',
+        title: 'Client WS socket is open; waiting for dashboard/hello before route events resume.',
+      }
+    }
+    return {
+      state: 'red',
+      label: '재연결 중',
+      title: 'Client WS is closed. Events will pause until reconnect. Server transport truth is in Diagnostics > Transport.',
+    }
+  }
+  const silentMs = args.now - args.lastEventAt
+  const hasRouteEvent = args.lastEventAt > 0
+  if (!hasRouteEvent || silentMs > SILENT_THRESHOLD_MS) {
+    const pongAgeMs = args.lastPongAt === 0
+      ? Number.POSITIVE_INFINITY
+      : args.now - args.lastPongAt
+    if (pongAgeMs <= HEARTBEAT_FRESH_MS) {
+      const latency = args.lastPongLatencyMs == null
+        ? 'ok'
+        : `${args.lastPongLatencyMs}ms`
+      return {
+        state: 'green',
+        label: '연결됨',
+        title: `Client WS is active. No route events, but heartbeat pong arrived ${Math.floor(pongAgeMs / 1000)}s ago; latency ${latency}. ${args.eventCount60s} deltas / 60s.`,
+      }
+    }
+    if (!hasRouteEvent) {
+      return {
+        state: 'yellow',
+        label: '연결 확인 필요',
+        title:
+          'Client WS is ready but has not received route events yet, and no fresh heartbeat pong is available. The workload may be idle or WS fan-out may be stuck.',
+      }
+    }
+    return {
+      state: 'yellow',
+      label: '연결 확인 필요',
+      title: `Client WS has received no events for ${Math.floor(silentMs / 1000)}s and no fresh heartbeat pong. The workload may be idle or WS fan-out may be stuck.`,
+    }
+  }
+  return {
+    state: 'green',
+    label: '연결됨',
+    title: `Client WS is active. ${args.eventCount60s} deltas / 60s. Last applied route delta ${Math.floor(silentMs / 1000)}s ago. Heartbeats are shown separately when route deltas are idle.`,
+  }
+}
+
+// Tailwind classes per state.  Color tokens follow the existing
+// dashboard design-system aliases to stay consistent with neighbouring
+// status chips (ConnectionStatus, ErrorCounterBadge).
+const STATE_CLASS: Record<BeaconState, string> = {
+  green: 'text-[var(--color-status-ok)] bg-[var(--ok-soft)] border-[var(--color-status-ok)]',
+  yellow: 'text-[var(--color-status-warn)] bg-[var(--warn-soft)] border-[var(--color-status-warn)]',
+  red: 'text-[var(--color-status-err)] bg-[var(--bad-soft)] border-[var(--color-status-err)]',
+}
+
+const beaconView = computed<BeaconView>(() => computeBeaconView({
+  connected: dashboardWsConnected.value,
+  ready: dashboardWsReady.value,
+  lastEventAt: dashboardWsLastEventAt.value,
+  eventCount60s: dashboardWsEventCount60s.value,
+  lastPongAt: dashboardWsLastPongAt.value,
+  lastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
+  now: Date.now(),
+}))
+
+export function TransportBeacon() {
+  const view = beaconView.value
+  const details = [view.title, `Reconnect attempts ${dashboardWsReconnectCount.value}`]
+  if (dashboardWsLastDisconnectedAt.value > 0) {
+    details.push(`Last disconnected ${new Date(dashboardWsLastDisconnectedAt.value).toLocaleTimeString()}`)
+  }
+  return html`
+    <div
+      class="v2-shell-panel flex items-center gap-1.5 whitespace-nowrap rounded-[var(--r-1)] border border-solid px-2 py-0.5 text-xs ${STATE_CLASS[view.state]}"
+      title=${details.join(' · ')}
+      role="status"
+      data-beacon-state=${view.state}
+    >
+      <span class="status-text">${view.label}</span>
+    </div>
+  `
+}

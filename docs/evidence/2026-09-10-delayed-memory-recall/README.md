@@ -1,0 +1,3 @@
+# Delayed recall on the same Keeper
+
+The on-demand Keeper answered all five facts correctly without those values in the new question. The request began 3808.34 seconds after the initial input and 3480.66 seconds after the previous final recall. The prior final recall itself repeated all five facts. Therefore this is 63.47 minutes from initial admission but only 58.01 minutes since last exposure, not an hour of continuous work or an hour without exposure. No restart, compaction, autonomous activity or alternate runtime is established. Raw events remain local; the response and operation receipt are published.

@@ -1,0 +1,14 @@
+{
+  "schema": "masc.dashboard-artifact.v1",
+  "source_commit": "5cdf1aee64aa0942a9c390387ad284e5b6bc37b2",
+  "source_tree": "e3d39b5f0cf277b7d8dce9d2c4491ea952eaacc2",
+  "workflow_run_id": "34298781705",
+  "workflow_run_attempt": "1",
+  "built_at": "2026-09-09T01:22:00.031Z",
+  "archive": "masc-dashboard-5cdf1aee64aa0942a9c390387ad284e5b6bc37b2.tar.gz",
+  "archive_sha256": "e43e0e1c0e84d477b4a808a56e21097c7c1b825641c88dbaffc4ac7f0d15dbf1",
+  "index_sha256": "cc074fe741c8d6411cff3aab7727f8335a458d2711c37b6a7fa8f9ef8f530d62",
+  "lock_sha256": "7e20a6e5147cdcca8ae0dba98d44fee22ed55be3ad309923099080c6da004aa0",
+  "node_version": "v22.23.2",
+  "pnpm_version": "10.31.0"
+}

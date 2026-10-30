@@ -1,0 +1,112 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] @@test/runtest-test_keeper_owner: start 2026-10-26T14:02:09Z (dune alias)
+Warning: option "-j-std" is deprecated.
+File "test/test_keeper_owner.ml", line 5874, characters 51-63:
+5874 |     if Chat_operation.Operation_id.equal operation.operation_id first then (
+                                                          ^^^^^^^^^^^^
+Error: Unbound record field operation_id
+File "test/stanzas/test_keeper_owner.inc", lines 10-15, characters 0-237:
+10 | (test
+11 |  (name test_keeper_owner)
+12 |  (modules test_keeper_owner)
+13 |  (action
+14 |   (setenv MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false (run %{test})))
+15 |  (libraries uri masc_test_deps masc.keeper_checkpoint_ref masc.agent_core.llm_provider eio.mock))
+Command exited with code 2.
+[targeted] @@test/runtest-test_keeper_owner: FAIL exit 1 in 547s
+[targeted] test/test_keeper_connector_attention_batch: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_connector_attention_batch: start 2026-10-26T14:11:32Z
+::group::{keeper_connector_attention_batch}
+Testing `keeper_connector_attention_batch'.
+This run has ID `XFEIYCJE'.
+
+[2026-10-26 14:11:33] [INFO] [Board] JSONL backend initialized
+[2026-10-26 14:11:33] [INFO] [Workspace] MASC base: /tmp/masc-sse-test-29888-1793023893075 (no git root found)
+[2026-10-26 14:11:33] [INFO] [Workspace] MASC base: /tmp/masc-sse-test-29888-1793023893075 (MASC_BASE_PATH)
+[2026-10-26 14:11:33] [INFO] [Keeper] registry: registering keeper name=schedule-continuation base_path=/tmp/masc-sse-test-29888-1793023893075 phase=running
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: scheduled wake delivered schedule_id=schedule-batch due_at=1.000 (keeper=schedule-continuation)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=occurrence-1 urgency=immediate class=schedule_due (keeper=schedule-continuation)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: promoted scheduled work schedule_id=schedule-batch occurrence_id=occurrence-1 keeper=schedule-continuation
+ASSERT a newly arrived schedule receives the next slot
+ASSERT checkpoint leaves scheduled work unfinished
+ASSERT cold durable reload retains both exact requests
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: scheduled wake delivered schedule_id=schedule-batch due_at=2.000 (keeper=schedule-continuation)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=occurrence-2 urgency=immediate class=schedule_due (keeper=schedule-continuation)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: promoted scheduled work schedule_id=schedule-batch occurrence_id=occurrence-2 keeper=schedule-continuation
+ASSERT successor owns only its occurrence
+ASSERT suspended predecessor cannot preempt its successor
+ASSERT dispatch did not withdraw successor
+ASSERT dispatch validation retains the intake cohort
+ASSERT successor terminal leaves original work pending
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: scheduled wake delivered schedule_id=schedule-batch due_at=1.000 (keeper=schedule-continuation)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=occurrence-1 urgency=immediate class=schedule_due (keeper=schedule-continuation)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: promoted scheduled work schedule_id=schedule-batch occurrence_id=occurrence-1 keeper=schedule-continuation
+ASSERT next intake reprojects the original exact request
+ASSERT resumed request retains the exact schedule instance
+ASSERT resumed request retains its original body
+ASSERT completed successor is never reexecuted
+ASSERT checkpoint leaves scheduled work unfinished
+ASSERT another checkpoint cannot complete the original
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: scheduled wake delivered schedule_id=schedule-batch due_at=1.000 (keeper=schedule-continuation)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=occurrence-1 urgency=immediate class=schedule_due (keeper=schedule-continuation)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: promoted scheduled work schedule_id=schedule-batch occurrence_id=occurrence-1 keeper=schedule-continuation
+ASSERT only explicit completion consumes original work
+  [OK]          all-ready Event Queue intake                       0   schedu...
+[2026-10-26 14:11:33] [INFO] [Board] JSONL backend initialized
+[2026-10-26 14:11:33] [INFO] [Workspace] MASC base: /tmp/masc-sse-test-29888-1793023893091 (no git root found)
+[2026-10-26 14:11:33] [INFO] [Workspace] MASC base: /tmp/masc-sse-test-29888-1793023893091 (MASC_BASE_PATH)
+[2026-10-26 14:11:33] [INFO] [Keeper] registry: registering keeper name=schedule-continuation-withdraw base_path=/tmp/masc-sse-test-29888-1793023893091 phase=running
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: scheduled wake delivered schedule_id=schedule-batch due_at=1.000 (keeper=schedule-continuation-withdraw)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=occurrence-1 urgency=immediate class=schedule_due (keeper=schedule-continuation-withdraw)
+[2026-10-26 14:11:33] [INFO] [Keeper] turn entry: promoted scheduled work schedule_id=schedule-batch occurrence_id=occurrence-1 keeper=schedule-continuation-withdraw
+ASSERT checkpoint cannot invoke a terminal callback
+ASSERT cancellation withdraws the retained occurrence
+ASSERT cold intake does not resurrect cancelled work
+ASSERT reinserted occurrence is new work for the active turn
+ASSERT event queue pending selection incarnation changed
+  [FAIL]        all-ready Event Queue intake                       1   schedu...
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        all-ready Event Queue intake                       1   sch...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+FAIL event queue pending selection incarnation changed
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_keeper_connector_attention_batch.test_scheduled_continuation_withdrawal_and_reinsertion.(fun) in file "test/test_keeper_connector_attention_batch.ml", lines 471-473, characters 30-62
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Called from Eio_linux__Sched.run.(fun) in file "lib_eio_linux/sched.ml", line 468, characters 22-90
+Re-raised at Eio_linux__Sched.run in file "lib_eio_linux/sched.ml", line 479, characters 22-57
+Called from Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 506, characters 8-18
+Re-raised at Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 511, characters 4-39
+Called from Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", lines 543-545, characters 8-109
+Re-raised at Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", line 556, characters 8-43
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+ ──────────────────────────────────────────────────────────────────────────────
+
+1 failure! in 0.474s. 32 tests run.
+::endgroup::
+[targeted] test/test_keeper_connector_attention_batch: FAIL exit 1 in 1s
+ASSERT an acknowledged pending stimulus retains the existing wake
+ASSERT ordinary cadence keeps sleeping without a pending stimulus
+ASSERT ordinary cadence retains the existing wake
+  [OK]          next dispatch after a failed cycle                                 3   a serving deferred suffix starts without another stimulus....
+
+Test Successful in 0.002s. 16 tests run.
+::endgroup::
+[targeted] test/test_keeper_failed_selection_disposition: OK in 0s
+[2026-10-26 14:11:34] [INFO] [Keeper] turn entry: bootstrap stimulus consumed (keeper=informational-checkpoint-probe)
+[2026-10-26 14:11:34] [INFO] [Keeper] turn entry: consumed stimulus stimulus_id=later-work-26165 urgency=low class=bootstrap (keeper=informational-checkpoint-probe)
+{"phase":"new-process-reopen","pid":29977,"redelivered_completions":0,"later_work_admitted":true}
+  [OK]          production cycle          0   completion input checkpoints, A...
+
+Test Successful in 0.450s. 1 test run.
+::endgroup::
+[targeted] test/test_keeper_informational_checkpoint_ack: OK in 1s

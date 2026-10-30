@@ -1,0 +1,663 @@
+(* Turn boundary records (RFC librarian-lifecycle §4.6). See the interface for
+   the contract. *)
+
+module W = Keeper_memory_os_types
+module Window = Runtime_model_input_tail_window
+
+open Result.Syntax
+let path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat (Filename.concat keepers_dir keeper_id) "turn-boundaries.jsonl"
+;;
+
+type position =
+  | Atom_history of
+      { end_atom : int
+      ; last_atom_digest : string
+      }
+  | Empty_atom_history
+  | No_atom_history
+  | Stale_noop
+
+type history_at_start =
+  | Fresh_history
+  | Continued_history
+  | Continued_history_from of
+      { start_atom : int
+      ; start_atom_digest : string
+      }
+
+type event =
+  | Turn_ended of
+      { turn_ref : Ids.Turn_ref.t
+      ; task_context : Keeper_turn_task_context.t
+      ; history_at_start : history_at_start
+      ; position : position
+      }
+  | History_restarted of { trace_id : string }
+
+type record =
+  { recorded_at : float
+  ; event : event
+  }
+
+let history_at_start_of_messages messages =
+  let _labelled, atom_count = Window.annotate messages in
+  match atom_count with
+  | 0 -> Fresh_history
+  | start_atom ->
+    (* The start state is the position the turn began from, so a later line can
+       answer what an unreadable line before it was (RFC librarian-lifecycle
+       §4.6, masc#37061). The digest is the same one [position_of_messages]
+       takes; when the opening message is missing it is left out and the branch
+       degrades to the bare [Continued_history], which a reader does not treat
+       as a start state. *)
+    (match Window.atom_opening_digest messages (start_atom - 1) with
+     | Some start_atom_digest -> Continued_history_from { start_atom; start_atom_digest }
+     | None -> Continued_history)
+;;
+
+let position_of_messages messages =
+  let _labelled, atom_count = Window.annotate messages in
+  match atom_count with
+  | 0 -> Ok Empty_atom_history
+  | end_atom ->
+    let last_atom = end_atom - 1 in
+    (match Window.atom_opening_digest messages last_atom with
+     | Some last_atom_digest -> Ok (Atom_history { end_atom; last_atom_digest })
+     | None ->
+       Error
+         (Printf.sprintf
+            "history counts %d atoms but has no opening message for atom %d"
+            end_atom
+            last_atom))
+;;
+
+let field_kind = "kind"
+let field_recorded_at = "recorded_at"
+let field_turn_ref = "turn_ref"
+let field_history_at_start = "history_at_start"
+let field_position = "position"
+let field_task_context = "task_context"
+let field_end_atom = "end_atom"
+let field_last_atom_digest = "last_atom_digest"
+let field_start_atom = "start_atom"
+let field_start_atom_digest = "start_atom_digest"
+let field_trace_id = "trace_id"
+let kind_turn_ended = "turn_ended"
+let kind_history_restarted = "history_restarted"
+let kind_atom_history = "atom_history"
+let kind_empty_atom_history = "empty_atom_history"
+let kind_no_atom_history = "no_atom_history"
+let kind_stale_noop = "stale_noop"
+let kind_continued_from = "continued_from"
+let token_fresh_history = "fresh"
+let token_continued_history = "continued"
+
+let turn_ended_fields =
+  [ field_kind; field_recorded_at; field_turn_ref; field_history_at_start; field_position; field_task_context ]
+;;
+
+let history_restarted_fields = [ field_kind; field_recorded_at; field_trace_id ]
+let atom_history_fields = [ field_kind; field_end_atom; field_last_atom_digest ]
+let continued_from_fields = [ field_kind; field_start_atom; field_start_atom_digest ]
+let bare_position_fields = [ field_kind ]
+let non_blank s = not (String.equal (String.trim s) "")
+
+let validate_position = function
+  | Atom_history { end_atom; last_atom_digest } ->
+    let* () =
+      if end_atom >= 1
+      then Ok ()
+      else W.wire_fail [ W.Wire_field field_end_atom ] W.Not_positive
+    in
+    if non_blank last_atom_digest
+    then Ok ()
+    else W.wire_fail [ W.Wire_field field_last_atom_digest ] W.Blank_string
+  | Empty_atom_history | No_atom_history | Stale_noop -> Ok ()
+;;
+
+let validate_history_at_start = function
+  | Fresh_history | Continued_history -> Ok ()
+  | Continued_history_from { start_atom; start_atom_digest } ->
+    let* () =
+      if start_atom >= 1
+      then Ok ()
+      else W.wire_fail [ W.Wire_field field_start_atom ] W.Not_positive
+    in
+    if non_blank start_atom_digest
+    then Ok ()
+    else W.wire_fail [ W.Wire_field field_start_atom_digest ] W.Blank_string
+;;
+
+(* Shared by the decoder and [append], so a row this module wrote is a row this
+   module reads back. [Ids.Turn_ref.make] takes any trace id while
+   [Ids.Turn_ref.of_string] refuses an empty one, so the reference is checked
+   through the same round trip a reader makes. *)
+let validate (r : record) =
+  let* () =
+    if Float.is_finite r.recorded_at
+    then Ok ()
+    else W.wire_fail [ W.Wire_field field_recorded_at ] W.Not_finite
+  in
+  match r.event with
+  | Turn_ended { turn_ref; task_context; history_at_start; position } ->
+    let* () =
+      let printed = Ids.Turn_ref.to_string turn_ref in
+      match Ids.Turn_ref.of_string printed with
+      | Some read_back when Ids.Turn_ref.equal read_back turn_ref -> Ok ()
+      | Some _ | None ->
+        W.wire_fail [ W.Wire_field field_turn_ref ] (W.Not_a_turn_ref printed)
+    in
+    let* () =
+      W.wire_at
+        (W.Wire_field field_history_at_start)
+        (validate_history_at_start history_at_start)
+    in
+    let* () = W.wire_at (W.Wire_field field_position) (validate_position position) in
+    let* _ = W.wire_at (W.Wire_field field_task_context)
+      (Keeper_turn_task_context.of_json (Keeper_turn_task_context.to_json task_context)) in
+    Ok r
+  | History_restarted { trace_id } ->
+    if non_blank trace_id
+    then Ok r
+    else W.wire_fail [ W.Wire_field field_trace_id ] W.Blank_string
+;;
+
+let position_to_json = function
+  | Atom_history { end_atom; last_atom_digest } ->
+    `Assoc
+      [ field_kind, `String kind_atom_history
+      ; field_end_atom, `Int end_atom
+      ; field_last_atom_digest, `String last_atom_digest
+      ]
+  | Empty_atom_history -> `Assoc [ field_kind, `String kind_empty_atom_history ]
+  | No_atom_history -> `Assoc [ field_kind, `String kind_no_atom_history ]
+  | Stale_noop -> `Assoc [ field_kind, `String kind_stale_noop ]
+;;
+
+let history_at_start_to_json = function
+  | Fresh_history -> `String token_fresh_history
+  | Continued_history -> `String token_continued_history
+  | Continued_history_from { start_atom; start_atom_digest } ->
+    `Assoc
+      [ field_kind, `String kind_continued_from
+      ; field_start_atom, `Int start_atom
+      ; field_start_atom_digest, `String start_atom_digest
+      ]
+;;
+
+let record_to_json (r : record) =
+  match r.event with
+  | Turn_ended { turn_ref; task_context; history_at_start; position } ->
+    `Assoc
+      [ field_kind, `String kind_turn_ended
+      ; field_recorded_at, `Float r.recorded_at
+      ; field_turn_ref, `String (Ids.Turn_ref.to_string turn_ref)
+      ; field_history_at_start, history_at_start_to_json history_at_start
+      ; field_position, position_to_json position
+      ; field_task_context, Keeper_turn_task_context.to_json task_context
+      ]
+  | History_restarted { trace_id } ->
+    `Assoc
+      [ field_kind, `String kind_history_restarted
+      ; field_recorded_at, `Float r.recorded_at
+      ; field_trace_id, `String trace_id
+      ]
+;;
+
+(* The kind names the fields the object carries, so it is read first and the
+   exact-fields check is made against that kind's set. *)
+let position_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc assoc ->
+    let* kind = W.wire_string_field field_kind assoc in
+    if String.equal kind kind_atom_history
+    then (
+      let* () = W.exact_field_names_result atom_history_fields assoc in
+      let* end_atom = W.wire_int_field field_end_atom assoc in
+      let* last_atom_digest = W.wire_string_field field_last_atom_digest assoc in
+      Ok (Atom_history { end_atom; last_atom_digest }))
+    else if String.equal kind kind_empty_atom_history
+    then (
+      let* () = W.exact_field_names_result bare_position_fields assoc in
+      Ok Empty_atom_history)
+    else if String.equal kind kind_no_atom_history
+    then (
+      let* () = W.exact_field_names_result bare_position_fields assoc in
+      Ok No_atom_history)
+    else if String.equal kind kind_stale_noop
+    then (
+      let* () = W.exact_field_names_result bare_position_fields assoc in
+      Ok Stale_noop)
+    else W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token kind)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    W.wire_here W.Expected_object
+;;
+
+let history_at_start_of_string token =
+  if String.equal token token_fresh_history
+  then Ok Fresh_history
+  else if String.equal token token_continued_history
+  then Ok Continued_history
+  else W.wire_fail [ W.Wire_field field_history_at_start ] (W.Unknown_token token)
+;;
+
+(* A start state is an object; the two bare tokens stay strings, so a line
+   written before this branch existed still decodes. *)
+let history_at_start_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `String token -> history_at_start_of_string token
+  | `Assoc assoc ->
+    let* kind = W.wire_string_field field_kind assoc in
+    if String.equal kind kind_continued_from
+    then (
+      let* () = W.exact_field_names_result continued_from_fields assoc in
+      let* start_atom = W.wire_int_field field_start_atom assoc in
+      let* start_atom_digest = W.wire_string_field field_start_atom_digest assoc in
+      Ok (Continued_history_from { start_atom; start_atom_digest }))
+    else W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token kind)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null ->
+    W.wire_here W.Expected_object
+;;
+
+(* The line's kind names the fields it carries, so it is read first and the
+   exact-fields check is made against that kind's set. *)
+let record_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc assoc ->
+    let* kind = W.wire_string_field field_kind assoc in
+    if String.equal kind kind_turn_ended
+    then (
+      (* Position evidence and admission evidence are independent. An absent
+         admission observation must not erase a valid position witness; it
+         remains explicit, while malformed or unknown fields are rejected. *)
+      let* task_context, expected_fields =
+        match List.assoc_opt field_task_context assoc with
+        | None ->
+          Ok (Keeper_turn_task_context.Admission_not_recorded,
+              List.filter (fun field -> field <> field_task_context) turn_ended_fields)
+        | Some json ->
+          let* context = W.wire_at (W.Wire_field field_task_context)
+            (Keeper_turn_task_context.of_json json) in
+          Ok (context, turn_ended_fields)
+      in
+      let* () = W.exact_field_names_result expected_fields assoc in
+      let* recorded_at = W.wire_number_field field_recorded_at assoc in
+      let* turn_ref_text = W.wire_string_field field_turn_ref assoc in
+      let* turn_ref =
+        match Ids.Turn_ref.of_string turn_ref_text with
+        | Some turn_ref -> Ok turn_ref
+        | None ->
+          W.wire_fail [ W.Wire_field field_turn_ref ] (W.Not_a_turn_ref turn_ref_text)
+      in
+      let* history_at_start_json = W.wire_json_field field_history_at_start assoc in
+      let* history_at_start = history_at_start_of_json history_at_start_json in
+      let* position_json = W.wire_json_field field_position assoc in
+      let* position =
+        W.wire_at (W.Wire_field field_position) (position_of_json position_json)
+      in
+      validate { recorded_at; event = Turn_ended { turn_ref; task_context; history_at_start; position } })
+    else if String.equal kind kind_history_restarted
+    then (
+      let* () = W.exact_field_names_result history_restarted_fields assoc in
+      let* recorded_at = W.wire_number_field field_recorded_at assoc in
+      let* trace_id = W.wire_string_field field_trace_id assoc in
+      validate { recorded_at; event = History_restarted { trace_id } })
+    else W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token kind)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    W.wire_here W.Expected_object
+;;
+
+type append_error =
+  | Invalid_record of W.wire_error
+  | Write_failed of
+      { path : string
+      ; message : string
+      }
+
+let append_error_to_string = function
+  | Invalid_record error ->
+    "turn boundary record rejected: " ^ W.wire_error_to_string error
+  | Write_failed { path; message } ->
+    Printf.sprintf "turn boundary append failed path=%s: %s" path message
+;;
+
+let append ~keepers_dir ~keeper_id record =
+  match validate record with
+  | Error error -> Error (Invalid_record error)
+  | Ok record ->
+    let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let line = Yojson.Safe.to_string (record_to_json record) ^ "\n" in
+    let failed message = Error (Write_failed { path; message }) in
+    (match Fs_compat.append_private_jsonl_durable_locked_result path line with
+     | Fs_compat.Private_file_succeeded () -> Ok ()
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
+       Log.Keeper.warn
+         ~keeper_name:keeper_id
+         "turn boundary append committed; descriptor settlement failed path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+       Ok ()
+     | Fs_compat.Private_file_failed error ->
+       failed (Fs_compat.private_jsonl_append_error_to_string error)
+     | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+       failed
+         (Printf.sprintf
+            "%s; descriptor settlement also failed: %s"
+            (Fs_compat.private_jsonl_append_error_to_string error)
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception Sys_error message -> failed message
+     | exception Unix.Unix_error (code, fn, arg) ->
+       failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+;;
+
+type read_error =
+  | Not_json of string
+  | Malformed of W.wire_error
+  | Incomplete_line
+
+let read_error_to_string = function
+  | Not_json message -> "turn boundary line is not valid JSON: " ^ message
+  | Malformed error -> "turn boundary line rejected: " ^ W.wire_error_to_string error
+  | Incomplete_line -> "turn boundary line has no newline: an append never completed"
+;;
+
+let decode_line line =
+  match Yojson.Safe.from_string line with
+  | json -> Result.map_error (fun error -> Malformed error) (record_of_json json)
+  | exception Yojson.Json_error message -> Error (Not_json message)
+;;
+
+let numbered_lines ~rows ~rows_end ~end_offset =
+  (* [rows] is every newline-terminated line, so what follows its last newline
+     is the empty string and not a line. *)
+  let complete =
+    match List.rev (String.split_on_char '\n' rows) with
+    | [] -> []
+    | _after_last_newline :: reversed -> List.rev reversed
+  in
+  let decoded = List.mapi (fun index line -> index + 1, decode_line line) complete in
+  if rows_end < end_offset
+  then decoded @ [ List.length complete + 1, Error Incomplete_line ]
+  else decoded
+;;
+
+let read ~keepers_dir ~keeper_id =
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let of_rows = function
+    | Fs_compat.Private_jsonl_rows.Rows_missing -> Ok []
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
+      Ok (numbered_lines ~rows ~rows_end ~end_offset)
+  in
+  let settled cleanup_failure =
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "turn boundary read; descriptor settlement failed path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+  in
+  let unreadable error =
+    Error
+      (Printf.sprintf
+         "turn boundary store unreadable path=%s: %s"
+         path
+         (Fs_compat.Private_jsonl_rows.error_to_string error))
+  in
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Fs_compat.Private_file_succeeded rows -> of_rows rows
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    settled cleanup_failure;
+    of_rows value
+  | Fs_compat.Private_file_failed error ->
+    unreadable error
+  | Fs_compat.Private_file_failed_with_cleanup_failure
+      { error; cleanup_failure } ->
+    settled cleanup_failure;
+    unreadable error
+;;
+
+let atom_position_stated ~trace_id (record : record) =
+  match record.event with
+  | Turn_ended
+      { turn_ref; history_at_start = _; position = Atom_history { end_atom; last_atom_digest } }
+    ->
+    if String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+    then Some (turn_ref, end_atom, last_atom_digest)
+    else None
+  | Turn_ended
+      { turn_ref = _
+      ; history_at_start = _
+      ; position = Empty_atom_history | No_atom_history | Stale_noop
+      }
+  | History_restarted _ -> None
+;;
+
+let start_position_stated ~trace_id (record : record) =
+  match record.event with
+  | Turn_ended
+      { turn_ref
+      ; history_at_start = Continued_history_from { start_atom; start_atom_digest }
+      ; position = _
+      } ->
+    if String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+    then Some (turn_ref, start_atom, start_atom_digest)
+    else None
+  | Turn_ended
+      { turn_ref = _; history_at_start = Fresh_history | Continued_history; position = _ }
+  | History_restarted _ -> None
+;;
+
+let is_position ~end_atom ~last_atom_digest = function
+  | Some (turn_ref, stated_end, stated_digest)
+    when stated_end = end_atom && String.equal stated_digest last_atom_digest ->
+    Some turn_ref
+  | Some _ | None -> None
+;;
+
+let states_position ~trace_id ~end_atom ~last_atom_digest record =
+  match is_position ~end_atom ~last_atom_digest (atom_position_stated ~trace_id record) with
+  | Some _ as ended -> ended
+  | None ->
+    is_position ~end_atom ~last_atom_digest (start_position_stated ~trace_id record)
+;;
+
+(* The lines that number the atoms of [trace_id] from zero again. A start
+   line before one of them states a position of a history that is gone. *)
+let restarts_history ~trace_id (record : record) =
+  match record.event with
+  | History_restarted { trace_id = restarted } -> String.equal restarted trace_id
+  | Turn_ended { turn_ref; history_at_start = Fresh_history; position = _ } ->
+    String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+  | Turn_ended
+      { turn_ref = _
+      ; history_at_start = Continued_history | Continued_history_from _
+      ; position = _
+      } -> false
+;;
+
+type history_stated = History_may_hold_atoms | History_stated_empty
+
+(* Only an actually appended restart establishes the same generation
+   boundary [Keeper_carried_front.current_generation_floor] recognizes.
+   Empty turn-end records preserve that witness; they cannot replace it:
+   the restart append can fail while the later end append succeeds. Atoms,
+   a store no-op, or an unreadable line invalidate the empty witness until
+   another restart succeeds. *)
+let history_stated ~trace_id lines =
+  List.fold_left
+    (fun stated (_line, decoded) ->
+       match decoded with
+       | Error (_ : read_error) -> History_may_hold_atoms
+       | Ok record ->
+         (match record.event with
+          | History_restarted { trace_id = restarted } ->
+            if String.equal restarted trace_id then History_stated_empty else stated
+          | Turn_ended { turn_ref; history_at_start; position } ->
+            if not (String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id)
+            then stated
+            else (
+              match position, history_at_start with
+              | Empty_atom_history, (Fresh_history | Continued_history | Continued_history_from _)
+              | No_atom_history, Fresh_history -> stated
+              | No_atom_history, (Continued_history | Continued_history_from _)
+              | (Atom_history _ | Stale_noop), (Fresh_history | Continued_history | Continued_history_from _)
+                -> History_may_hold_atoms)))
+    History_may_hold_atoms
+    lines
+;;
+
+let record_of_trace ~trace_id (record : record) =
+  match record.event with
+  | Turn_ended { turn_ref; _ } -> String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+  | History_restarted { trace_id = restarted } -> String.equal restarted trace_id
+;;
+
+let complete_lines rows =
+  match List.rev (String.split_on_char '\n' rows) with
+  | [] -> []
+  | _after_last_newline :: reversed -> List.rev reversed
+;;
+
+(* A record that only preserves the state it found ([history_stated] returns
+   the running value for it) does not carry the answer by itself: the newest
+   deciding row has to set the state outright, or an older row inside the
+   window holds the answer the tail never reached. *)
+let preserves_stated (record : record) =
+  match record.event with
+  | History_restarted _ -> false
+  | Turn_ended { history_at_start; position; _ } ->
+    (match position, history_at_start with
+     | Empty_atom_history, (Fresh_history | Continued_history | Continued_history_from _)
+     | No_atom_history, Fresh_history -> true
+     | (No_atom_history, (Continued_history | Continued_history_from _))
+     | ((Stale_noop | Atom_history _), _) -> false)
+;;
+
+(* [history_stated] sets its state outright at a line that cannot be decoded,
+   at a restart of the trace, or at a record of the trace that does not only
+   preserve the running value; the last such line of the file carries the
+   whole answer. Rows of other traces never decide. *)
+let rec last_stated_by_rows ~trace_id = function
+  | [] -> None
+  | line :: older ->
+    let decoded = decode_line line in
+    (match decoded with
+     | Error (_ : read_error) -> Some History_may_hold_atoms
+     | Ok record ->
+       if record_of_trace ~trace_id record
+       then
+         if preserves_stated record
+         then last_stated_by_rows ~trace_id older
+         else Some (history_stated ~trace_id [ 1, decoded ])
+       else last_stated_by_rows ~trace_id older)
+;;
+
+let history_stated_of_tail ~trace_id ~full (tail : Fs_compat.Private_jsonl_tail.t) =
+  let open Fs_compat.Private_jsonl_tail in
+  match tail with
+  | Tail_missing -> Ok History_may_hold_atoms
+  | Tail_present { rows; prefix_omitted; incomplete_tail; end_offset = _ } ->
+    if incomplete_tail
+    then
+      (* The full reader reports a final fragment with no newline as a last
+         [Incomplete_line] error row, and that last row decides the fold. *)
+      Ok History_may_hold_atoms
+    else (
+      match last_stated_by_rows ~trace_id (List.rev (complete_lines rows)) with
+      | Some stated -> Ok stated
+      | None ->
+        if prefix_omitted
+        then
+          (* The window did not reach a deciding line; an older one may carry
+             the answer, so the whole store is read. *)
+          full ()
+        else Ok History_may_hold_atoms)
+;;
+
+(* The window is an I/O bound, not a decision threshold: an answer is always
+   built from the rows the window actually held, and a window that held no
+   deciding line falls back to the full read. Rows run a few hundred bytes
+   each (the header states the size), so this holds the recent rows a
+   keeper's own turns wrote and scans them in one locked pass. *)
+let history_stated_tail_window_bytes = 64 * 1024
+
+let history_stated_in_store ~keepers_dir ~keeper_id ~trace_id =
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let full () =
+    Result.map (fun lines -> history_stated ~trace_id lines) (read ~keepers_dir ~keeper_id)
+  in
+  let settled cleanup_failure =
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "turn boundary tail read; descriptor settlement failed path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+  in
+  let unreadable error =
+    Error
+      (Printf.sprintf
+         "turn boundary store unreadable path=%s: %s"
+         path
+         (Fs_compat.Private_jsonl_tail.error_to_string error))
+  in
+  match
+    Fs_compat.read_private_jsonl_tail_locked_result
+      path
+      ~max_bytes:history_stated_tail_window_bytes
+  with
+  | Fs_compat.Private_file_succeeded tail -> history_stated_of_tail ~trace_id ~full tail
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    settled cleanup_failure;
+    history_stated_of_tail ~trace_id ~full value
+  | Fs_compat.Private_file_failed error -> unreadable error
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    settled cleanup_failure;
+    unreadable error
+;;
+
+let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
+  let ended_at, started_at =
+    List.fold_left
+      (fun ((ended_at, started_at) as found) (line, decoded) ->
+         let counted =
+           match through with
+           | None -> true
+           | Some last_counted -> line <= last_counted
+         in
+         if not counted
+         then found
+         else (
+           match decoded with
+           | Error (_ : read_error) -> found
+           | Ok record ->
+             let witness turn_ref = Some (line, record.recorded_at, turn_ref) in
+             let ended_at, started_at =
+               if restarts_history ~trace_id record then None, None
+               else ended_at, started_at
+             in
+             let ended_at =
+               match
+                 is_position ~end_atom ~last_atom_digest
+                   (atom_position_stated ~trace_id record)
+               with
+               | Some turn_ref -> witness turn_ref
+               | None -> ended_at
+             in
+             let started_at =
+               match
+                 started_at,
+                 is_position ~end_atom ~last_atom_digest
+                   (start_position_stated ~trace_id record)
+               with
+               | None, Some turn_ref -> witness turn_ref
+               | Some _, (Some _ | None) | None, None -> started_at
+             in
+             ended_at, started_at))
+      (None, None)
+      lines
+  in
+  match ended_at with
+  | Some _ -> ended_at
+  | None -> started_at
+;;

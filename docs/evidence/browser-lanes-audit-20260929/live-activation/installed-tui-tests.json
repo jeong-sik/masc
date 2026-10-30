@@ -1,0 +1,25 @@
+{
+  "binary_commit": "1beabf795c64d5211714e4eed4850740fb9b6cce",
+  "binary_sha256": "f461e6457588d37c0295fb1ba3c664a108e7a4d88aa0d3f707d3381e100885f4",
+  "binary_path": "/Users/dancer/.local/bin/masc-tui",
+  "scope": "Isolated PTY with fixture HTTP; existing installed binary; not a local build or live backend connection",
+  "tests": [
+    {
+      "script": "test/test_tui_browser_action_navigation.py",
+      "result": "PASS",
+      "covers": [
+        "action selection",
+        "automation close/reopen",
+        "stagehand close/reopen"
+      ]
+    },
+    {
+      "script": "test/test_tui_lane_stale_failure.py",
+      "result": "PASS"
+    },
+    {
+      "script": "test/test_tui_lane_heading_keeps_its_reading.py",
+      "result": "PASS"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+Testing `[1mkeeper_tool_read_window[0m'.
+[2mThis run has ID `3MRUWYQF'.
+
+[0m  [33m[SKIP][0m        [36mread-line-window[0m          0   schema integer coordinates surv...
+  [33m[SKIP][0m        [36mread-line-window[0m          1   invalid coordinates do not beco...
+  [33m[SKIP][0m        [36mread-line-window[0m          2   non-object Read arguments are r...
+  [33m[SKIP][0m        [36mread-line-window[0m          3   wire limit means lines.
+  [33m[SKIP][0m        [36mread-line-window[0m          4   offset window mid file.
+  [33m[SKIP][0m        [36mread-line-window[0m          5   tail window reaches EOF.
+  [33m[SKIP][0m        [36mread-line-window[0m          6   byte budget cuts at line boundary.
+  [33m[SKIP][0m        [36mread-line-window[0m          7   single long line stays partial ...
+  [33m[SKIP][0m        [36mread-line-window[0m          8   complete lines survive scan bou...
+  [33m[SKIP][0m        [36mread-line-window[0m          9   a live read cannot outrun the e...
+  [33m[SKIP][0m        [36mread-line-window[0m         10   read ceiling and snapshot cap a...
+  [33m[SKIP][0m        [36mread-line-window[0m         11   zero limit is rejected.
+  [33m[SKIP][0m        [36mread-line-window[0m         12   offset past EOF returns empty.
+  [33m[SKIP][0m        [36mread-line-window[0m         13   legacy max_bytes args unchanged.
+  [33m[SKIP][0m        [36mread-line-window[0m         14   offset past the old prefix read...
+  [33m[SKIP][0m        [36mread-line-window[0m         15   window offsets follow the body'...
+[1m[31m>[0;1m[0m [31m[FAIL][0m        [36mread-line-window[0m         16   refusals of what the caller nam...
+
+[2m┌──────────────────────────────────────────────────────────────────────────────┐[0m
+[2m│ [0m[31m[FAIL][0m        [36mread-line-window[0m         16   refusals of what the caller ...[2m  │[0m
+[2m└──────────────────────────────────────────────────────────────────────────────┘[0m
+[2026-10-08 21:17:56] [INFO] [Workspace] MASC base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/keeper-read-window-0e4c10 (no git root found)
+[2026-10-08 21:17:56] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/Users/dancer/me for requested path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/keeper-read-window-0e4c10
+[2026-10-08 21:17:56] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/keeper-read-window-0e4c10 for test executable test_keeper_tool_read_window.exe
+[2026-10-08 21:17:56] [INFO] [Keeper] registry: registering keeper name=reader base_path=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/keeper-read-window-0e4c10 phase=running
+[33mASSERT[0m zero limit
+[33mASSERT[0m missing file
+[33mASSERT[0m path outside the sandbox
+[33mASSERT[0m empty path
+[33mASSERT[0m a readable file is refused: {"error":"docker_sh_failed: image_not_found: keeper sandbox image masc-sandbox-test:ci is not available locally: []\n\nError response from daemon: No such image: masc-sandbox-test:ci\n. Next: Inspect the configured Docker image and daemon using the exact command output above.","path":"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/keeper-read-window-0e4c10/.masc/playground/docker/reader/repos/masc/sample.ml"}
+[31mFAIL[0m a readable file is refused: {"error":"docker_sh_failed: image_not_found: keeper sandbox image masc-sandbox-test:ci is not available locally: []\n\nError response from daemon: No such image: masc-sandbox-test:ci\n. Next: Inspect the configured Docker image and daemon using the exact command output above.","path":"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/keeper-read-window-0e4c10/.masc/playground/docker/reader/repos/masc/sample.ml"}
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `[36m~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper_tool_read_window/read-line-window.016.output[0m'.
+ [2m──────────────────────────────────────────────────────────────────────────────[0m
+
+Full test results in `[36m~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper_tool_read_window[0m'.
+[31m1 failure![0m in 0.076s. 1 test run.

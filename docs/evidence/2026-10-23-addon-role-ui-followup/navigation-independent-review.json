@@ -1,0 +1,143 @@
+{
+  "verdict": "PASS",
+  "scope": "independent source review of frozen uncommitted eleven-file delta; not GitHub approval",
+  "reviewer": "feature_navigation_review",
+  "reviewed_at": "2026-10-23T06:11:15.372926+00:00",
+  "base": "70f438d054df3c0fe4eaf51853d4775cc42bab81",
+  "patch_sha256": "9e11b2d9b9ba10ce2793afb6b9a5cb43d0e98b2d674df464348ff62a421fd5ee",
+  "files": [
+    {
+      "path": "bin/masc_tui_keys.ml",
+      "sha256": "3ddb8cd25d52e5b90e5769c2993426b1a5043899521b33b754de9758624be6cb"
+    },
+    {
+      "path": "bin/masc_tui_lane_installer.ml",
+      "sha256": "26bc5b6e1a46978d1c54260cbbea21337240ea24e3dfa4aa9c50bcfee65e1984"
+    },
+    {
+      "path": "bin/masc_tui_palette.ml",
+      "sha256": "454c332d1f1677582b33e3a56b754b24cfde8f8ab5e13513920e8a9cddf1c991"
+    },
+    {
+      "path": "bin/masc_tui_render_lanes.ml",
+      "sha256": "ebe826e0038aed0f9b4d3ceee2c007041f8c9dffc140b0b9ff0677abe6553f76"
+    },
+    {
+      "path": "bin/masc_tui_render_overlays.ml",
+      "sha256": "c0793227d38f6cd31a34e66f9f97ea76c820723df5c305ad5279638abc4cd429"
+    },
+    {
+      "path": "bin/masc_tui_render_runtime.ml",
+      "sha256": "ffe028de182a3bdca5f4b092f351c1792386cc173d3a3990061bda3008755d60"
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "sha256": "fe3aef0fc552832b99b60bcfe1ff27b615e7291c9904143d4ec819dc2c2cd638"
+    },
+    {
+      "path": "docs/guides/TUI-KEYS.md",
+      "sha256": "763fe42684ccad39c8f36cb6cacf9f9565bacf4dbd9ef2fe6ba71b1cc91ca185"
+    },
+    {
+      "path": "docs/guides/lane-inventory.md",
+      "sha256": "5507060a7067ed3ff439b99dc1ae9813e645bddea450def9b53d8a1194761eb4"
+    },
+    {
+      "path": "test/test_tui_keys.ml",
+      "sha256": "2c3b79b2452334ba0a65db29e145936aad1e4c03b04f32b06f0caacbdf4ac3c2"
+    },
+    {
+      "path": "test/test_tui_palette_matching.ml",
+      "sha256": "fbd3a73ca0f0988def0a45f8b2556639244bb540c6b4786bd19fa8fb051d2a91"
+    }
+  ],
+  "p0_p1_p2": [],
+  "p3": [],
+  "resolved_p3": [
+    {
+      "path": "bin/masc_tui_render_runtime.ml",
+      "line": 566,
+      "title": "Features tab count previously read standalone lanes",
+      "resolution": "The final source reads the optional common state.lane_inventory snapshot.rows count. Missing inventory remains None; selection and runtime actions are unchanged."
+    }
+  ],
+  "checks": [
+    {
+      "name": "final frozen file hashes",
+      "result": "PASS",
+      "count": 11
+    },
+    {
+      "name": "full binary diff digest",
+      "result": "PASS"
+    },
+    {
+      "name": "git diff --check",
+      "result": "PASS",
+      "executed_by": "feature_navigation_review"
+    },
+    {
+      "name": "full original ten-file changed diff and direct consumer source read",
+      "result": "PASS"
+    },
+    {
+      "name": "final delta direct read",
+      "result": "PASS",
+      "changed": [
+        "bin/masc_tui_render_runtime.ml"
+      ],
+      "added": [
+        "docs/guides/TUI-KEYS.md"
+      ],
+      "unchanged_frozen_files": 9
+    }
+  ],
+  "evidence_limits": [
+    "No local Dune build, OCaml typing or OCaml behavior tests run by this reviewer.",
+    "Author receipt reports nine parser checks and a repeated runtime-file parser after the count change; source review does not promote that to type/build/runtime success.",
+    "No actual terminal, palette key-loop or installed runtime observation.",
+    "Verdict does not approve the previous two PRs or later Inspect/category-authority deltas."
+  ],
+  "source_observations": [
+    {
+      "path": "bin/masc_tui_keys.mli",
+      "line": 328,
+      "detail": "help_surfaces is (string * surface) list; revised test consumes that typed list rather than help_sections display rows."
+    },
+    {
+      "path": "bin/masc_tui_palette.ml",
+      "line": 194,
+      "detail": "Features and Plugins labels map to existing Palette_goto Lanes and Palette_lane_addons typed actions. Ranking searches labels directly."
+    },
+    {
+      "path": "bin/masc_tui.ml",
+      "line": 28291,
+      "detail": "Plugin palette action still calls launch_lane_addons Inspect; feature action uses goto_surface; existing o/O/A shortcut calls the same Inspect owner."
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "line": 17675,
+      "detail": "Read-only notice requires both inventory and original selection and a missing current find_identity match. It does not clear or replace the original target."
+    },
+    {
+      "path": "bin/masc_tui_types.ml",
+      "line": 17713,
+      "detail": "sc_chrome counts the same wrapped notice projection that render_lanes_overview draws."
+    },
+    {
+      "path": "bin/masc_tui_render_runtime.ml",
+      "line": 566,
+      "detail": "Features count now comes from the shared inventory rows with an explicit snapshot type; absent inventory stays unobserved."
+    },
+    {
+      "path": "docs/guides/TUI-KEYS.md",
+      "line": 437,
+      "detail": "Features heading and Plugins/Features references match current source labels without changing documented keys or actions."
+    },
+    {
+      "path": "test/test_tui_palette_matching.ml",
+      "line": 503,
+      "detail": "Regression checks query-to-typed-destination decisions with no Keeper. No new wording, layout, row order or PTY snapshot assertion."
+    }
+  ]
+}

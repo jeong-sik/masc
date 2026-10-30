@@ -1,0 +1,802 @@
+open Alcotest
+
+module Observer = Masc_tui_observer
+
+(* Frames as the live server wrote them on 2026-08-23 (observer-sample.sse),
+   trimmed to the fields the decoder reads plus a few it must ignore. *)
+let tool_called_frame =
+  "id: 26163\n\
+   event: message\n\
+   data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\
+   \"event_id\":\"evt-0c69\",\"ts_unix\":1787505641.288864,\
+   \"correlation_id\":\"trace-1787333553810-0001a\",\"run_id\":\"wr-1a02\",\
+   \"parent_event_id\":null,\"agent_name\":\"analyst\",\"task_id\":\"task-494\",\
+   \"tool_name\":\"read_file\",\"payload\":{\"agent_name\":\"analyst\",\
+   \"batch_index\":0,\"batch_size\":2,\"execution_mode\":\"concurrent\",\
+   \"tool_name\":\"read_file\",\"tool_use_id\":\"tu-1\",\"turn\":2086}}\n\n"
+
+let agent_completed_frame =
+  "data: {\"type\":\"agent_core:agent_completed\",\"event_type\":\"agent_completed\",\
+   \"event_id\":\"evt-completed\",\"ts_unix\":1787505650.0,\
+   \"correlation_id\":\"trace-1\",\"run_id\":\"run-1\",\
+   \"agent_name\":\"analyst\",\"task_id\":\"evt-f50d1cc0\",\
+   \"payload\":{\"agent_name\":\"analyst\",\"task_id\":\"evt-f50d1cc0\",\
+   \"elapsed_s\":1.25,\"success\":true,\"result\":\"ok\"}}\n\n"
+
+(* The payload the bridge writes for a failed run, from the contract's own
+   builder, so the fixture cannot drift from the shape on the wire. *)
+let agent_failed_frame =
+  let payload =
+    Sse_event.agent_failed_payload ~agent_name:"analyst" ~task_id:"evt-9565f12c"
+      ~elapsed_s:0.5 ~error:"rate limited" ~error_domain:"provider"
+      ~error_code:"provider_error" ~error_retryable:true ~error_detail:`Null
+  in
+  "data: "
+  ^ Yojson.Safe.to_string
+      (`Assoc
+        [ ("type", `String "agent_core:agent_failed")
+        ; ("event_type", `String "agent_failed")
+        ; ("event_id", `String "evt-failed")
+        ; ("ts_unix", `Float 1787505651.0)
+        ; ("correlation_id", `String "trace-2")
+        ; ("run_id", `String "run-2")
+        ; ("agent_name", `String "analyst")
+        ; ("task_id", `String "evt-9565f12c")
+        ; ("payload", payload)
+        ])
+  ^ "\n\n"
+
+let heartbeat_frame =
+  "data: {\"type\":\"keeper_heartbeat\",\"name\":\"bandleader\",\
+   \"ts_unix\":1787505649.446111,\"phase\":\"turn_running\",\"in_turn\":true,\
+   \"in_flight_elapsed_ms\":2189925.43,\"since_last_progress_ms\":13093.6}\n\n"
+
+let turn_complete_frame =
+  "data: {\"type\":\"keeper_turn_complete\",\"name\":\"largo\",\"turn\":2086,\
+   \"model_used\":null,\"input_tokens\":73877,\"output_tokens\":358,\
+   \"cost_usd\":0.02581816,\"tool_calls_made\":0,\"total_turns\":547,\
+   \"ts_unix\":1787505649.491379}\n\n"
+
+let decode_all chunks =
+  let reader = Observer.create () in
+  List.concat_map (Observer.feed reader) chunks
+  |> List.map (fun (delivery : Observer.delivery) -> delivery.decoded)
+
+let summary = function
+  | Observer.Event (Observer.Agent_core e) ->
+      Printf.sprintf "agent_core(%s,%s,%s,turn=%s,batch=%s)"
+        (Option.value ~default:"-" e.Observer.agent)
+        (match e.Observer.kind with
+         | Observer.Tool_called -> "tool_called"
+         | Observer.Tool_completed -> "tool_completed"
+         | Observer.Turn_started -> "turn_started"
+         | Observer.Turn_ready -> "turn_ready"
+         | Observer.Turn_completed -> "turn_completed"
+         | Observer.Agent_started -> "agent_started"
+         | Observer.Agent_completed _ -> "agent_completed"
+         | Observer.Agent_failed _ -> "agent_failed"
+         | Observer.Agent_yielded _ -> "agent_yielded"
+         | Observer.Agent_input_required _ -> "agent_input_required"
+         | Observer.Tool_approval_completed -> "tool_approval_completed"
+         | Observer.Telemetry -> "telemetry"
+         | Observer.Agent_core_other name -> "other:" ^ name)
+        (Option.value ~default:"-" e.Observer.tool)
+        (match e.Observer.turn with Some t -> string_of_int t | None -> "-")
+        (match e.Observer.batch with
+         | Some (i, n) -> Printf.sprintf "%d/%d" i n
+         | None -> "-")
+  | Observer.Event (Observer.Keeper_heartbeat h) ->
+      Printf.sprintf "heartbeat(%s,%s,in_turn=%s)" h.Observer.hb_keeper
+        (Option.value ~default:"-" h.Observer.hb_phase)
+        (match h.Observer.hb_in_turn with
+         | Some b -> string_of_bool b
+         | None -> "-")
+  | Observer.Event (Observer.Keeper_tool_call c) ->
+      Printf.sprintf "keeper_tool_call(%s,turn=%s,%s,%s,%s)" c.Observer.kt_keeper
+        (match c.Observer.kt_turn with Some n -> string_of_int n | None -> "-")
+        c.Observer.kt_tool
+        (match c.Observer.kt_duration_ms with
+         | Some ms -> Printf.sprintf "%.0fms" ms
+         | None -> "-")
+        (match c.Observer.kt_disposition with
+         | Some (Ok disposition) ->
+             Masc.Tui_decode.keeper_call_disposition_to_string disposition
+         | Some (Error error) -> "error:" ^ error
+         | None -> "-")
+  | Observer.Event (Observer.Keeper_turn_complete t) ->
+      Printf.sprintf "turn_complete(%s,turn=%s,cost=%s)" t.Observer.tc_keeper
+        (match t.Observer.tc_turn with Some n -> string_of_int n | None -> "-")
+        (match t.Observer.tc_cost_usd with
+         | Some c -> Printf.sprintf "%.4f" c
+         | None -> "-")
+  | Observer.Event (Observer.Keeper_turn_observation o) ->
+      Printf.sprintf "observation(%s,call=%s,completed=%s)" o.Observer.to_keeper
+        (match o.Observer.to_session_turn with Some n -> string_of_int n | None -> "-")
+        (match o.Observer.to_total_turns with Some n -> string_of_int n | None -> "-")
+  | Observer.Event (Observer.Keeper_composite_changed { keeper; _ }) ->
+      "composite(" ^ keeper ^ ")"
+  | Observer.Event (Observer.Keeper_chat_appended { keeper; connector; _ }) ->
+      Printf.sprintf "chat(%s,%s)" keeper (Option.value ~default:"-" connector)
+  | Observer.Event (Observer.Keeper_chat_stream_frame { keeper; frame; _ }) ->
+      Printf.sprintf "stream(%s,%s)" keeper (Option.value ~default:"-" frame)
+  | Observer.Event (Observer.Keeper_turn_stream_frame { keeper; turn_ref; _ }) ->
+      "turn_stream(" ^ keeper ^ "," ^ Ids.Turn_ref.to_string turn_ref ^ ")"
+  | Observer.Event (Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ })
+    ->
+      Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)
+  | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
+      Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
+  | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
+    ->
+      Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
+        (Option.value ~default:"-" lr_detail)
+  | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
+  | Observer.Event (Observer.Other name) -> "other:" ^ name
+  | Observer.Undecodable detail -> "undecodable:" ^ detail
+
+let test_the_session_id_is_read_off_the_initialize_answer () =
+  check (result string string) "matched without regard to case"
+    (Ok "mcp_VT8T6lg")
+    (Observer.session_id_of_headers
+       [ ("Content-Type", "application/json"); ("MCP-Session-ID", " mcp_VT8T6lg ") ]);
+  check bool "an answer without the header is an error, not an empty id" true
+    (Result.is_error
+       (Observer.session_id_of_headers [ ("Content-Type", "application/json") ]));
+  check bool "a blank header is an error too" true
+    (Result.is_error (Observer.session_id_of_headers [ ("Mcp-Session-Id", "") ]))
+
+let test_the_initialize_body_names_the_method_and_the_client () =
+  match Yojson.Safe.from_string (Observer.initialize_request_body ~client_version:"0.24.0") with
+  | `Assoc fields ->
+      let string_at key = function
+        | `Assoc inner -> (
+            match List.assoc_opt key inner with Some (`String v) -> Some v | _ -> None)
+        | _ -> None
+      in
+      check (option string) "method" (Some "initialize") (string_at "method" (`Assoc fields));
+      let params = Option.value ~default:`Null (List.assoc_opt "params" fields) in
+      check (option string) "protocolVersion" (Some "2025-06-18")
+        (string_at "protocolVersion" params);
+      let client =
+        match params with
+        | `Assoc inner -> Option.value ~default:`Null (List.assoc_opt "clientInfo" inner)
+        | _ -> `Null
+      in
+      check (option string) "client name" (Some "masc-tui") (string_at "name" client);
+      check (option string) "client version" (Some "0.24.0") (string_at "version" client)
+  | _ -> fail "initialize body is not an object"
+
+let test_a_tool_call_decodes_with_its_turn_and_batch () =
+  check (list string) "the frame becomes one typed event"
+    [ "agent_core(analyst,tool_called,read_file,turn=2086,batch=0/2)" ]
+    (List.map summary (decode_all [ tool_called_frame ]))
+
+let test_agent_terminal_frames_keep_their_distinct_kinds () =
+  check (list string) "success decodes as one completion"
+    [ "agent_core(analyst,agent_completed,-,turn=-,batch=-)" ]
+    (List.map summary (decode_all [ agent_completed_frame ]));
+  check (list string) "failure decodes as one failure"
+    [ "agent_core(analyst,agent_failed,-,turn=-,batch=-)" ]
+    (List.map summary (decode_all [ agent_failed_frame ]))
+
+let bare_heartbeat_frame =
+  "data: {\"type\":\"keeper_heartbeat\",\"name\":\"lane-smith\",\"ts_unix\":1787505653.07}\n\n"
+
+(* Field-for-field the shape the server sends, from an observer capture on
+   2026-09-07: every one of 19 [keeper_tool_call] frames carried "turn".
+   The fixture carried none until then, so nothing here could notice that
+   the decoder dropped it. *)
+let keeper_tool_call_frame =
+  "data: {\"type\":\"keeper_tool_call\",\"name\":\"largo\",\"tool_name\":\"tool_execute\",\
+   \"duration_ms\":14534,\"disposition\":\"completed\",\"ts_unix\":1787507566.14,\
+   \"turn\":1157,\
+   \"tool_args\":{\"argv\":[\"dune\",\"build\"]},\"tool_result\":{\"ok\":true}}\n\n"
+
+(* A server that reports a call outside any invocation sends no turn. *)
+let keeper_tool_call_frame_without_turn =
+  "data: {\"type\":\"keeper_tool_call\",\"name\":\"largo\",\"tool_name\":\"Read\",\
+   \"duration_ms\":8,\"disposition\":\"completed\",\"ts_unix\":1787507570.02}\n\n"
+
+(* Shape from keeper_hooks_agent_core.ml: the hook's per-call report names
+   the keeper, the agent session's ordinal for the call and the keeper turns
+   completed before it. *)
+let turn_observation_frame =
+  "data: {\"type\":\"keeper_turn_observation\",\"usage_projection\":\"raw_observation\",\
+   \"response_id\":null,\"name\":\"largo\",\"turn\":1157,\"model_used\":null,\
+   \"input_tokens\":73877,\"output_tokens\":358,\"cost_usd\":0.0258,\
+   \"tool_calls_made\":2,\"cache_read_tokens\":null,\"cache_n\":null,\
+   \"prompt_n\":null,\"total_turns\":718,\"ts_unix\":1787505649.0}\n\n"
+
+let test_a_turn_observation_names_the_call_and_the_completed_count () =
+  check (list string) "the keeper, the session ordinal and the completed count"
+    [ "observation(largo,call=1157,completed=718)" ]
+    (List.map summary (decode_all [ turn_observation_frame ]))
+
+(* The settle carries the cache counts beside the input they are part of.
+   Figures are e-masc-the-leader's turn 1853 (2026-09-25). A frame without
+   them, or with nulls, reads as not reported -- never as zero -- and a count
+   of the wrong shape is a frame this build cannot read. *)
+let cached_turn_complete_frame cache_fields =
+  "data: {\"type\":\"keeper_turn_complete\",\"name\":\"e-masc-the-leader\",\
+   \"turn\":1853,\"input_tokens\":3716155,\"output_tokens\":6622," ^ cache_fields
+  ^ "\"ts_unix\":1790000000.0}\n\n"
+
+let settle_cache_counts frame =
+  match decode_all [ frame ] with
+  | [ Observer.Event (Observer.Keeper_turn_complete t) ] ->
+    Ok (t.Observer.tc_cache_read_tokens, t.Observer.tc_cache_creation_tokens)
+  | [ Observer.Undecodable reason ] -> Error reason
+  | events -> failf "expected one event, got %d" (List.length events)
+
+let test_a_settle_keeps_its_cache_counts_apart_from_absent () =
+  let counts = result (pair (option int) (option int)) string in
+  check counts "both counts reported"
+    (Ok (Some 3_556_362, Some 159_783))
+    (settle_cache_counts
+       (cached_turn_complete_frame
+          "\"cache_read_tokens\":3556362,\"cache_creation_tokens\":159783,"));
+  check counts "absent is not reported" (Ok (None, None))
+    (settle_cache_counts (cached_turn_complete_frame ""));
+  check counts "null is not reported" (Ok (None, None))
+    (settle_cache_counts
+       (cached_turn_complete_frame
+          "\"cache_read_tokens\":null,\"cache_creation_tokens\":null,"));
+  check counts "a count of the wrong shape is unreadable"
+    (Error "keeper_turn_complete carries a non-integer cache_read_tokens")
+    (settle_cache_counts
+       (cached_turn_complete_frame "\"cache_read_tokens\":\"3556362\","))
+
+let test_keeper_events_decode_by_name () =
+  check (list string)
+    "heartbeat, bare heartbeat, settlement, keeper tool call with and without \
+     a turn"
+    [ "heartbeat(bandleader,turn_running,in_turn=true)"
+    ; "heartbeat(lane-smith,-,in_turn=-)"
+    ; "turn_complete(largo,turn=2086,cost=0.0258)"
+    ; "keeper_tool_call(largo,turn=1157,tool_execute,14534ms,completed)"
+    ; "keeper_tool_call(largo,turn=-,Read,8ms,completed)"
+    ]
+    (List.map summary
+       (decode_all
+          [ heartbeat_frame; bare_heartbeat_frame; turn_complete_frame
+          ; keeper_tool_call_frame; keeper_tool_call_frame_without_turn ]))
+
+(* Shapes taken from the server: keeper_chat_broadcast.ml names the keeper in
+   "name", keeper_waiting_inventory_broadcast.ml in "keeper_name". *)
+let chat_stream_delta_frame =
+  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"test-keeper\",\
+   \"operation_id\":\"op-1\",\"ts_unix\":1787507570.5,\"seq\":41,\
+   \"ag_ui_event\":{\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"hi\"}}\n\n"
+
+let chat_stream_custom_frame =
+  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"test-keeper\",\
+   \"operation_id\":\"op-1\",\"ts_unix\":1787507571.5,\
+   \"ag_ui_event\":{\"type\":\"CUSTOM\",\"name\":\"KEEPER_TOOL_RESULT_READY\"}}\n\n"
+
+(* A seq of the wrong shape is a frame this build cannot read, not the
+   seq-less settle terminal. *)
+let chat_stream_malformed_seq_frame =
+  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"test-keeper\",\
+   \"operation_id\":\"op-1\",\"ts_unix\":1787507572.0,\"seq\":\"41\",\
+   \"ag_ui_event\":{\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"hi\"}}\n\n"
+
+let waiting_inventory_frame =
+  "data: {\"type\":\"keeper_waiting_inventory_changed\",\
+   \"keeper_name\":\"lane-smith\",\"queue_kind\":\"board\",\
+   \"ts_unix\":1787507572.5}\n\n"
+
+(* These two arrived as Other before: the Acting screen drew them with no
+   time, no keeper and no detail, because Other keeps only the type name. The
+   keeper and the timestamp were in the frame the whole time. *)
+let test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock () =
+  check (list string) "stream frames and a queue change decode by their own fields"
+    [ "stream(test-keeper,TEXT_MESSAGE_CONTENT)"
+    ; "stream(test-keeper,CUSTOM KEEPER_TOOL_RESULT_READY)"
+    ; "waiting(lane-smith,board)"
+    ]
+    (List.map summary
+       (decode_all
+          [ chat_stream_delta_frame; chat_stream_custom_frame
+          ; waiting_inventory_frame ]));
+  check bool "the stream frame carries the server's clock, not zero" true
+    (match decode_all [ chat_stream_delta_frame ] with
+     | [ Observer.Event (Observer.Keeper_chat_stream_frame { at; _ }) ] ->
+         Float.equal at 1787507570.5
+     | _ -> false);
+  (* The operation and its journal seq are what the chat pane follows a
+     foreign turn by; the settle-time terminal carries no seq and decodes to
+     [None] rather than failing the frame. *)
+  check (list string) "the frame names its operation and journal seq"
+    [ "op-1@41"; "op-1@-" ]
+    (List.map
+       (function
+         | Observer.Event (Observer.Keeper_chat_stream_frame { operation_id; seq; _ }) ->
+             operation_id ^ "@"
+             ^ (match seq with Some seq -> string_of_int seq | None -> "-")
+         | _ -> "?")
+       (decode_all [ chat_stream_delta_frame; chat_stream_custom_frame ]));
+  check (list string) "a seq of the wrong shape fails the frame, not reads as absent"
+    [ "undecodable:keeper_chat_operation_event carries a non-integer seq" ]
+    (List.map summary (decode_all [ chat_stream_malformed_seq_frame ]))
+
+let operator_digest_frame =
+  "data: {\"type\":\"operator_digest\",\"ts_unix\":1787507573.0}\n\n"
+
+let transport_health_frame =
+  "data: {\"type\":\"transport_health_snapshot\",\"ts_unix\":1787507574.0}\n\n"
+
+let composite_frame =
+  "data: {\"type\":\"keeper_composite_changed\",\"name\":\"lane-smith\",\
+   \"ts_unix\":1787507575.0}\n\n"
+
+(* Third time in this decoder. The chat stream frame and the waiting-queue
+   change above arrived as Other until each was given an arm; the snapshot list
+   was left as it was and had drifted by two. Both of these were on the Acting
+   screen as untaught types, and an untaught type counts as an action -- so the
+   filter that exists to show what a keeper did was showing server pushes.
+
+   The list is gone. [Dashboard_event_slices] is the table the server routes
+   by, and this decoder reads the same one. *)
+let test_every_whole_projection_push_decodes_as_a_snapshot () =
+  check (list string) "the two that were untaught read as snapshots"
+    [ "snapshot:operator_digest"; "snapshot:transport_health_snapshot" ]
+    (List.map summary
+       (decode_all [ operator_digest_frame; transport_health_frame ]));
+  (* Not one at a time: every type the table calls a whole projection. A new
+     one added to the table is covered here without this test being touched. *)
+  List.iter
+    (fun (entry : Masc.Dashboard_event_slices.entry) ->
+      if entry.whole_projection then
+        let frame =
+          Printf.sprintf "data: {\"type\":\"%s\",\"ts_unix\":1.0}\n\n"
+            entry.event_type
+        in
+        check (list string)
+          (Printf.sprintf "%s is a snapshot, not an untaught type"
+             entry.event_type)
+          [ "snapshot:" ^ entry.event_type ]
+          (List.map summary (decode_all [ frame ])))
+    Masc.Dashboard_event_slices.entries
+
+(* A whole-projection push can run to megabytes after its type, and the feed
+   keeps only the name, so the frame is not read past the type: a body that
+   is not JSON still arrives as the snapshot it names. An event read from its
+   fields is still parsed whole and refused when it is not JSON, and a type
+   that is not the first member is found by the whole parse, even when the
+   first member is another string. *)
+let test_a_frame_its_type_decides_is_not_read_past_the_type () =
+  check (list string) "the snapshot is named without its body"
+    [ "snapshot:operator_snapshot" ]
+    (List.map summary
+       (decode_all [ "data: {\"type\":\"operator_snapshot\",\"payload\":not json\n\n" ]));
+  check (list string) "an untaught type is named the same way"
+    [ "other:some_new_push" ]
+    (List.map summary (decode_all [ "data: {\"type\":\"some_new_push\",oops\n\n" ]));
+  (match decode_all [ "data: {\"type\":\"keeper_heartbeat\",\"name\":oops}\n\n" ] with
+   | [ Observer.Undecodable _ ] -> ()
+   | decoded ->
+       fail
+         ("an event read from its fields was not parsed whole: "
+         ^ String.concat ", " (List.map summary decoded)));
+  check (list string) "a type that is not the first member is still found"
+    [ "snapshot:operator_snapshot" ]
+    (List.map summary
+       (decode_all [ "data: {\"ts_unix\":1.0,\"type\":\"operator_snapshot\"}\n\n" ]));
+  check (list string) "a first member that is another string is not the type"
+    [ "heartbeat(alpha,-,in_turn=-)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"name\":\"alpha\",\"type\":\"keeper_heartbeat\",\"ts_unix\":1.0}\n\n" ]))
+
+(* A delta has a slice too, and reading the table for "does this have one"
+   rather than "does it replace a projection" would swallow this one: the
+   screen would drop a keeper change into the quiet class. It has its own arm
+   above, and the table marks it as not a whole projection, so both halves
+   have to break before it can go wrong. *)
+let test_a_delta_with_a_slice_is_not_a_snapshot () =
+  check (list string) "a composite change stays a keeper event"
+    [ "composite(lane-smith)" ]
+    (List.map summary (decode_all [ composite_frame ]));
+  check bool "and the table does not call it a whole projection" false
+    (Masc.Dashboard_event_slices.carries_whole_projection
+       "keeper_composite_changed")
+
+(* Server shape: keeper_chat_broadcast.ml writes the keeper in "name" and
+   the connector when the turn came through one. *)
+let chat_appended_frame =
+  "data: {\"type\":\"keeper_chat_appended\",\"name\":\"lane-smith\",\
+   \"connector\":\"api\",\"ts_unix\":1787507576.0}\n\n"
+
+(* The chat pane reloads its history on exactly one event.  Quantified
+   over every sample frame in this file: only the appended frame names
+   a keeper, so a new variant cannot start reloading the pane by
+   arriving, and the appended frame cannot silently stop. *)
+(* The same run shape the HTTP list serves, and no ts_unix: the frame is a
+   trigger, and only its identity strings are read here. *)
+let fusion_run_status_frame =
+  {|data: {"type":"fusion_run_status","run":{"run_id":"kmsg-f04701e2","keeper":"polisher","preset":"quorum","topology":"judge_of_judges","started_at":1788516104.9,"status":"running","stage":"panel"}}
+
+|}
+
+let fusion_run_status_without_run_frame =
+  {|data: {"type":"fusion_run_status"}
+
+|}
+
+let test_only_a_chat_appended_event_names_a_reload_keeper () =
+  check (list string) "the appended frame decodes with keeper and connector"
+    [ "chat(lane-smith,api)" ]
+    (List.map summary (decode_all [ chat_appended_frame ]));
+  let reload_keepers frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.chat_appended_keeper event
+         | Observer.Undecodable _ -> None)
+  in
+  check (list string) "every other sample event answers no keeper" []
+    (reload_keepers
+       [ tool_called_frame; agent_completed_frame; agent_failed_frame
+       ; heartbeat_frame; turn_complete_frame; keeper_tool_call_frame
+       ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
+       ; waiting_inventory_frame; operator_digest_frame
+       ; transport_health_frame; fusion_run_status_frame
+       (* A turn observation numbers a provider call inside a keeper turn and
+          carries no transcript. It was absent from this list when the frame
+          was added, and the reader silently stopped being exhaustive. Every
+          frame this suite can build belongs here, so the next one cannot
+          skip the question. *)
+       ; turn_observation_frame
+       ]);
+  check (list string) "the appended frame answers its keeper" [ "lane-smith" ]
+    (reload_keepers [ chat_appended_frame ])
+
+let test_a_fusion_status_frame_decodes_its_identity_strings () =
+  check (list string) "the three identity strings survive the decode"
+    [ "fusion(polisher,running,kmsg-f04701e2)" ]
+    (List.map summary (decode_all [ fusion_run_status_frame ]));
+  check bool "a frame with no run object says why it was not read" true
+    (match decode_all [ fusion_run_status_without_run_frame ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"fusion_run_status" reason
+     | _ -> false)
+
+let test_a_line_cut_by_the_chunk_boundary_is_held () =
+  let at = String.index tool_called_frame '{' + 40 in
+  let head = String.sub tool_called_frame 0 at in
+  let tail =
+    String.sub tool_called_frame at (String.length tool_called_frame - at)
+  in
+  let reader = Observer.create () in
+  check (list string) "the cut line produces nothing yet" []
+    (List.map (fun (delivery : Observer.delivery) -> summary delivery.decoded) (Observer.feed reader head));
+  check (list string) "and decodes whole once the rest arrives"
+    [ "agent_core(analyst,tool_called,read_file,turn=2086,batch=0/2)" ]
+    (List.map (fun (delivery : Observer.delivery) -> summary delivery.decoded) (Observer.feed reader tail))
+
+let untaught_agent_core_frame =
+  "data: {\"type\":\"agent_core:relay_dropped\",\"event_type\":\"relay_dropped\",\
+   \"agent_name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
+
+(* The run registries' change push is read by the name the server broadcasts
+   it under, so the two cannot drift apart. *)
+let test_the_internal_runs_push_is_read_by_the_servers_name () =
+  check (list string) "the frame the server broadcasts decodes to the push"
+    [ "internal_runs" ]
+    (List.map summary
+       (decode_all
+          [ "data: "
+            ^ Yojson.Safe.to_string (Masc.Internal_agent_runs_event.to_json ())
+            ^ "\n\n"
+          ]))
+
+(* The frame the bridge makes of the event the lane runtime publishes, so the
+   test reads what the wire carries rather than a hand-built copy of it. *)
+module Lane_events = Masc.Lane_addon_resource_events
+
+let lane_resource_frame ?detail lifecycle =
+  let resource =
+    { Lane_events.instance_id = "inst-7"
+    ; run_id = "run-7"
+    ; package_id = "masc-dos"
+    ; package_revision = "rev-1"
+    ; resource = None
+    ; detail
+    }
+  in
+  match
+    Masc.Keeper_event_bridge.native_event_to_json
+      (Lane_events.event lifecycle resource)
+  with
+  | Some json -> "data: " ^ Yojson.Safe.to_string json ^ "\n\n"
+  | None -> fail "the bridge relays no frame for a lane resource event"
+
+(* Every lifecycle the lane runtime publishes is read as what it is, with the
+   package, the instance and the failure reason the payload carries. *)
+let test_every_lane_resource_lifecycle_is_read_with_its_payload () =
+  List.iter
+    (fun lifecycle ->
+      let name = Lane_events.wire_name lifecycle in
+      match decode_all [ lane_resource_frame ~detail:"image not found" lifecycle ] with
+      | [ Observer.Event (Observer.Lane_resource resource) ] ->
+          check bool (name ^ " keeps its lifecycle") true
+            (resource.Observer.lr_lifecycle = lifecycle);
+          check string (name ^ " names its package") "masc-dos"
+            resource.Observer.lr_package;
+          check string (name ^ " names its instance") "inst-7"
+            resource.Observer.lr_instance;
+          check (option string) (name ^ " keeps the reason") (Some "image not found")
+            resource.Observer.lr_detail
+      | decoded ->
+          failf "%s decoded as %s" name
+            (String.concat "; " (List.map summary decoded)))
+    Lane_events.all
+
+let test_a_lane_resource_without_a_reason_says_so () =
+  check (list string) "an acquisition carries no reason"
+    [ "lane_resource(masc-dos,inst-7,-)" ]
+    (List.map summary (decode_all [ lane_resource_frame Lane_events.Acquired ]))
+(* A run that ended says how long it ran, and a failed one why, read from
+   the payload the bridge writes. *)
+let test_an_ended_run_carries_its_elapsed_and_error () =
+  (match decode_all [ agent_completed_frame ] with
+   | [ Observer.Event
+         (Observer.Agent_core
+            { Observer.kind = Observer.Agent_completed { elapsed_s }; _ }) ] ->
+       check (float 0.) "a completed run's elapsed" 1.25 elapsed_s
+   | _ -> fail "expected one completed run");
+  match decode_all [ agent_failed_frame ] with
+  | [ Observer.Event
+        (Observer.Agent_core
+           { Observer.kind = Observer.Agent_failed { elapsed_s; error_code; error }; _ }) ] ->
+      check (float 0.) "a failed run's elapsed" 0.5 elapsed_s;
+      check string "its code" "provider_error" error_code;
+      check string "its error" "rate limited" error
+  | _ -> fail "expected one failed run"
+
+(* A failure whose payload does not satisfy the contract is a frame this
+   build cannot read, said with the reason, not a failure drawn without its
+   cause. *)
+let test_a_failed_run_without_its_error_is_undecodable () =
+  let frame =
+    "data: {\"type\":\"agent_core:agent_failed\",\"event_type\":\"agent_failed\",\
+     \"ts_unix\":1.0,\"agent_name\":\"analyst\",\
+     \"payload\":{\"agent_name\":\"analyst\",\"task_id\":\"evt-1\",\
+     \"elapsed_s\":0.5}}\n\n"
+  in
+  match decode_all [ frame ] with
+  | [ Observer.Undecodable reason ] ->
+      check bool
+        (Printf.sprintf "the reason names the payload: %s" reason)
+        true
+        (String.starts_with ~prefix:"agent_failed payload" reason)
+  | decoded ->
+      failf "expected an undecodable frame, got %s"
+        (String.concat "; " (List.map summary decoded))
+
+let test_what_this_build_was_not_taught_keeps_its_name () =
+  check (list string) "snapshots are named, not retained; unknown types are named"
+    [ "snapshot:execution_snapshot"
+    ; "other:brand_new_push"
+    ; "agent_core(lane-smith,other:relay_dropped,-,turn=-,batch=-)"
+    ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"execution_snapshot\",\"payload\":{\"keepers\":[]}}\n\n"
+          ; "data: {\"type\":\"brand_new_push\"}\n\n"
+          ; untaught_agent_core_frame
+          ]));
+  match decode_all [ untaught_agent_core_frame ] with
+  | [ Observer.Event
+        (Observer.Agent_core { Observer.kind = Observer.Agent_core_other name; _ }) ] ->
+      check string "the family keeps the untaught event_type" "relay_dropped" name
+  | _ -> fail "expected one agent_core event of an untaught kind"
+
+let test_streaming_telemetry_names_no_agent () =
+  (* Provider streaming telemetry: agent_name null, payload a tagged list. *)
+  check (list string) "it is still an event of the family, with no agent"
+    [ "agent_core(-,telemetry,-,turn=-,batch=-)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"agent_core:telemetry_event\",\"event_type\":\
+             \"telemetry_event\",\"agent_name\":null,\"ts_unix\":1.0,\
+             \"payload\":[\"Streaming_summary\",{\"ttft_ms\":19048.7}]}\n\n"
+          ]))
+
+let test_a_frame_this_cannot_read_says_why () =
+  let reasons =
+    decode_all
+      [ "data: nope\n\n"
+      ; "data: {\"ts_unix\":1.0}\n\n"
+      ; "data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"agent_name\":\"x\"}\n\n"
+      ; "data:{\"type\":\"keeper_heartbeat\"}\n\n"
+      ]
+    |> List.map (function
+         | Observer.Undecodable detail -> detail
+         | other -> "event:" ^ summary other)
+  in
+  match reasons with
+  | [ bad_json; no_type; no_agent; noncanonical ] ->
+      check bool "bad JSON is reported as such" true
+        (String.starts_with ~prefix:"invalid JSON" bad_json);
+      check string "a payload without a type" "event carries no type" no_type;
+      check string "an agent_core payload without its timestamp"
+        "agent_core:tool_called carries no ts_unix" no_agent;
+      check bool "a data line without the canonical prefix is reported" true
+        (String.starts_with ~prefix:"data line without" noncanonical)
+  | _ -> failf "expected four reasons, got %d" (List.length reasons)
+
+let test_exact_event_references_and_keeper_io () =
+  let core =
+    "data: {\"type\":\"agent_core:tool_completed\",\"event_type\":\"tool_completed\",\"ts_unix\":100,\"event_id\":\"event-exact\",\"run_id\":\"run-exact\",\"caused_by\":\"cause-exact\",\"parent_event_id\":\"parent-exact\",\"correlation_id\":\"trace-exact\",\"payload\":{\"tool_use_id\":\"call-exact\",\"execution_id\":\"exec-exact\"}}\n\n" in
+  (match decode_all [core] with
+   | [Observer.Event (Observer.Agent_core event)] ->
+       check (option string) "event ID" (Some "event-exact") event.event_id;
+       check (option string) "run ID" (Some "run-exact") event.run_id;
+       check (option string) "causation" (Some "cause-exact") event.caused_by;
+       check (option string) "parent" (Some "parent-exact") event.parent;
+       check (option string) "correlation" (Some "trace-exact") event.correlation;
+       check (option string) "execution" (Some "exec-exact") event.execution_id
+   | _ -> fail "exact runtime event references were lost");
+  let keeper =
+    "data: {\"type\":\"keeper_tool_call\",\"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":100,\"tool_use_id\":\"skill-call-exact\",\"tool_args\":{\"skill\":\"read-plan\"},\"tool_result\":null,\"tool_args_preview\":\"safe input\",\"tool_output_preview\":\"safe output\"}\n\n" in
+  (match decode_all [keeper] with
+   | [Observer.Event (Observer.Keeper_tool_call event)] ->
+       check (option string) "provider call identity" (Some "skill-call-exact") event.kt_tool_use_id;
+       check bool "provided JSON null survives" true (event.kt_tool_result = Some `Null);
+       check bool "structured input survives" true
+         (event.kt_tool_args = Some (`Assoc ["skill", `String "read-plan"]));
+       check (option string) "redacted input preview" (Some "safe input") event.kt_tool_args_preview;
+       check (option string) "redacted output preview" (Some "safe output") event.kt_tool_output_preview
+   | _ -> fail "Keeper I/O observations were lost");
+  match decode_all ["data: {\"type\":\"agent_core:tool_called\",\"event_type\":\"tool_called\",\"ts_unix\":100,\"event_id\":4}\n\n"] with
+  | [Observer.Undecodable _] -> ()
+  | _ -> fail "malformed identity became missing identity"
+
+(* The disposition arrives typed in the call log's vocabulary. A blank word
+   is no word, as the call log decoder reads it; a word outside the
+   vocabulary stays an error beside the call rather than a default. *)
+let test_keeper_disposition_is_typed_at_the_wire () =
+  let observe extra =
+    let json = `Assoc
+      ([ "type", `String "keeper_tool_call"; "name", `String "alpha"
+       ; "tool_name", `String "Read"; "ts_unix", `Int 100 ] @ extra)
+    in
+    match decode_all ["data: " ^ Yojson.Safe.to_string json ^ "\n\n"] with
+    | [Observer.Event (Observer.Keeper_tool_call event)] -> event.kt_disposition
+    | _ -> fail "the call was not decoded"
+  in
+  check bool "absent stays absent" true (observe [] = None);
+  check bool "blank is absent, as the call log reads it" true
+    (observe [ "disposition", `String "" ] = None);
+  check bool "the wire word becomes the variant" true
+    (observe [ "disposition", `String "deferred" ]
+     = Some (Ok Masc.Tui_decode.Keeper_call_deferred));
+  match observe [ "disposition", `String "delivered" ] with
+  | Some (Error reason) ->
+      check bool "an unknown word is kept as the error" true
+        (String.starts_with ~prefix:"keeper call has unknown disposition" reason)
+  | Some (Ok _) | None -> fail "an unknown word was folded into a default"
+
+let test_keeper_scheduling_keeps_io_when_metadata_is_invalid () =
+  let observe extra =
+    let json = `Assoc
+      ([ "type", `String "keeper_tool_call"; "name", `String "alpha"
+       ; "tool_name", `String "keeper_skill"; "ts_unix", `Int 100
+       ; "tool_result", `Assoc [ "receipt", `String "retained" ] ] @ extra)
+    in
+    match decode_all ["data: " ^ Yojson.Safe.to_string json ^ "\n\n"] with
+    | [Observer.Event (Observer.Keeper_tool_call event)] ->
+        check bool "call result survives scheduling metadata" true
+          (event.kt_tool_result = Some (`Assoc ["receipt", `String "retained"]));
+        event.kt_schedule
+    | _ -> fail "schedule metadata discarded the call evidence"
+  in
+  check bool "absent is not invented serial" true (observe [] = None);
+  List.iter
+    (fun mode ->
+      let schedule : Agent_core.Tool_contract.schedule =
+        { planned_index = 3; batch_index = 1; batch_size = 2; execution_mode = mode }
+      in
+      let fields = match Agent_core.Execution_tool_schedule.to_yojson schedule with
+        | `Assoc fields -> fields
+        | _ -> fail "schedule contract did not encode an object"
+      in
+      check bool "canonical schedule survives" true
+        (observe fields = Some (Ok schedule)))
+    [Agent_core.Tool_contract.Concurrent; Agent_core.Tool_contract.Serial];
+  List.iter
+    (fun fields ->
+      match observe fields with
+      | Some (Error _) -> ()
+      | Some (Ok _) | None -> fail "partial or invalid scheduling became missing or valid")
+    [ ["batch_index", `Int 0]
+    ; ["planned_index", `Int 0; "batch_index", `Int 0; "batch_size", `Int 1;
+       "execution_mode", `String "unknown"]
+    ]
+
+let test_cursor_commits_only_with_a_complete_event () =
+  let reader = Observer.create () in
+  check int "ID-only frame does not acknowledge an event" 0
+    (List.length (Observer.feed reader "id: 41\n\n"));
+  let partial =
+    "id: 42\ndata: {\"type\":\"keeper_tool_call\",\"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":1}\n"
+  in
+  check int "data line without frame terminator is not delivered" 0
+    (List.length (Observer.feed reader partial));
+  (match Observer.feed reader "\n" with
+   | [{ Observer.cursor = Some 42; decoded = Observer.Event (Observer.Keeper_tool_call call) }] ->
+       check string "complete frame retains exact call" "keeper_skill" call.kt_tool
+   | _ -> fail "expected one fully framed event with cursor 42");
+  check int "unfinished payload is not a delivered cursor" 0
+    (List.length (Observer.feed reader "id: 43\ndata: {"))
+
+let test_multiline_frame_preserves_payload_and_cursor () =
+  let reader = Observer.create () in
+  match Observer.feed reader
+    "id: 44\ndata: {\"type\":\"keeper_tool_call\",\ndata: \"name\":\"alpha\",\"tool_name\":\"keeper_skill\",\"ts_unix\":1}\n\n" with
+  | [{ Observer.cursor = Some 44; decoded = Observer.Event (Observer.Keeper_tool_call call) }] ->
+      check string "multiline canonical SSE data preserved" "alpha" call.kt_keeper
+  | _ -> fail "expected one multiline event with cursor 44"
+
+let () =
+  run "tui observer"
+    [ ( "session"
+      , [ test_case "the session id is read off the initialize answer" `Quick
+            test_the_session_id_is_read_off_the_initialize_answer
+        ; test_case "the initialize body names the method and the client" `Quick
+            test_the_initialize_body_names_the_method_and_the_client
+        ] )
+    ; ( "events"
+      , [ test_case "Keeper disposition is typed at the wire" `Quick
+            test_keeper_disposition_is_typed_at_the_wire
+        ; test_case "Keeper scheduling preserves call evidence" `Quick
+            test_keeper_scheduling_keeps_io_when_metadata_is_invalid
+        ; test_case "exact event references and redacted Keeper I/O survive" `Quick
+            test_exact_event_references_and_keeper_io
+        ; test_case "a tool call decodes with its turn and batch" `Quick
+            test_a_tool_call_decodes_with_its_turn_and_batch
+        ; test_case "agent terminal frames keep their distinct kinds" `Quick
+            test_agent_terminal_frames_keep_their_distinct_kinds
+        ; test_case "keeper events decode by name" `Quick
+            test_keeper_events_decode_by_name
+        ; test_case "the chat stream and waiting queue keep their keeper and clock"
+            `Quick test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock
+        ; test_case "every whole-projection push decodes as a snapshot" `Quick
+            test_every_whole_projection_push_decodes_as_a_snapshot
+        ; test_case "a frame its type decides is not read past the type" `Quick
+            test_a_frame_its_type_decides_is_not_read_past_the_type
+        ; test_case "a delta with a slice is not a snapshot" `Quick
+            test_a_delta_with_a_slice_is_not_a_snapshot
+        ; test_case "only a chat-appended event names a reload keeper" `Quick
+            test_only_a_chat_appended_event_names_a_reload_keeper
+        ; test_case "a fusion status frame decodes its identity strings" `Quick
+            test_a_fusion_status_frame_decodes_its_identity_strings
+        ; test_case "cursor commits only with a complete event" `Quick
+            test_cursor_commits_only_with_a_complete_event
+        ; test_case "multiline frame preserves payload and cursor" `Quick
+            test_multiline_frame_preserves_payload_and_cursor
+        ; test_case "a line cut by the chunk boundary is held" `Quick
+            test_a_line_cut_by_the_chunk_boundary_is_held
+        ; test_case "the internal runs push is read by the server's name" `Quick
+            test_the_internal_runs_push_is_read_by_the_servers_name
+        ; test_case "every lane resource lifecycle is read with its payload"
+            `Quick test_every_lane_resource_lifecycle_is_read_with_its_payload
+        ; test_case "a lane resource without a reason says so" `Quick
+            test_a_lane_resource_without_a_reason_says_so
+        ; test_case "an ended run carries its elapsed and error" `Quick
+            test_an_ended_run_carries_its_elapsed_and_error
+        ; test_case "a failed run without its error is undecodable" `Quick
+            test_a_failed_run_without_its_error_is_undecodable
+        ; test_case "what this build was not taught keeps its name" `Quick
+            test_what_this_build_was_not_taught_keeps_its_name
+        ; test_case "streaming telemetry names no agent" `Quick
+            test_streaming_telemetry_names_no_agent
+        ; test_case "a frame this cannot read says why" `Quick
+            test_a_frame_this_cannot_read_says_why
+        ; test_case "a turn observation names the call and the completed count"
+            `Quick test_a_turn_observation_names_the_call_and_the_completed_count
+        ; test_case "a settle keeps its cache counts apart from absent" `Quick
+            test_a_settle_keeps_its_cache_counts_apart_from_absent
+        ] )
+    ]

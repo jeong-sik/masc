@@ -1,0 +1,36 @@
+# Atlassian's remote MCP server (Jira, Confluence, Compass, Bitbucket).
+#
+# Only the server is named. Its endpoints, the scopes it publishes and
+# whether a client has to be registered by hand all come from the two
+# well-known documents it serves, so none of that can go stale in this file.
+#
+# https://www.atlassian.com/platform/remote-mcp-server
+
+id = "atlassian"
+label = "Atlassian"
+mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
+
+# Where the two halves of the answer land in the Keeper's own secret
+# projection. The access token is an env entry because that is what a tool
+# call reads; the refresh token is a file entry because it outlives the
+# access tokens it mints and an environment is read by everything a Keeper
+# runs.
+# The file entry is an absolute container path, because that is what the
+# secret projection accepts; a relative one is refused at write time.
+access_token_env = "ATLASSIAN_ACCESS_TOKEN"
+expires_at_env = "ATLASSIAN_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.atlassian/refresh_token"
+
+# Exchange again this long before the stated expiry. Measured against the
+# live server on 2026-08-26: an access token came back with expires_in of
+# 28800, so eight hours, and the refresh token alongside it. Ten minutes of
+# margin covers a turn that starts just under the wire. The server states
+# its own expiry on every exchange, so this is margin rather than a copy of
+# a lifetime that could change.
+renew_before_sec = 600
+
+# Parameters this server wants on the authorize call beyond what the OAuth
+# and MCP specs define. `resource` is not here: it is RFC 8707 and comes from
+# discovery, so every provider gets it without saying so.
+[authorize_params]
+audience = "api.atlassian.com"

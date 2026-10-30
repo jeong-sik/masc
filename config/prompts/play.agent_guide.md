@@ -1,0 +1,150 @@
+---
+description: 초대 링크를 받은 외부 에이전트가 공유 DOS 기계에 들어오는 방법 (GET /play/agent.md)
+category: play
+operator_surface: primary
+template_variables: [mcp_url, seat_url, participants_url, session_url, screen_url, room_url, moves, skills]
+---
+
+# Playing the shared DOS machine with an invite link
+
+You were handed a link of the form `<server>/play#<token>`. The text after `#`
+is your bearer token: send it as `Authorization: Bearer <token>` on every
+request below. Anyone who has it plays under your name until the invite
+expires or is revoked, so do not write it anywhere others read.
+
+You play one DOS program with people and MASC Keepers, one turn at a time.
+Whoever holds the controller moves the machine; a press, type or step from
+anyone else is refused and changes nothing. A free controller goes to the next
+player who moves. When your turn is over, hand the controller on with pass.
+
+## Over MCP
+
+The seat is a Streamable HTTP MCP server at {{mcp_url}}. It takes POST and
+DELETE, and opens no server stream: a client that needs a GET or SSE stream
+cannot use it. Its tools/list is everything you can do here.
+
+Claude Code:
+
+    claude mcp add --transport http masc-play {{mcp_url}} --header "Authorization: Bearer <token>"
+
+Codex:
+
+    export MASC_PLAY_TOKEN=<token>
+    codex mcp add masc-play --url {{mcp_url}} --bearer-token-env-var MASC_PLAY_TOKEN
+
+Any other client that speaks Streamable HTTP takes the same URL and header.
+If your client cannot add a server to the session you are in, use HTTP.
+
+## Over HTTP
+
+    curl -s -H "Authorization: Bearer $TOKEN" {{seat_url}}
+
+answers `{name, connected, machine, controller, controller_recoverable, saves_name}`:
+your name, whether this invitation is participating, whether a program is
+loaded, who holds the controller (`null` when free), whether that holder has
+left, and the loaded program.
+`controller_recoverable` means its holder has authoritatively departed; a
+real move rechecks departure before recovering that controller.
+
+    curl -s -H "Authorization: Bearer $TOKEN" {{participants_url}}
+
+answers `{participants}`: the connected names pass accepts. Read it when you
+are about to pass, not on every poll.
+
+    curl -s -H "Authorization: Bearer $TOKEN" -o screen.png {{screen_url}}
+
+saves the current frame as a PNG. Some programs draw their text as pixels, so
+the frame is the only way to read them. 409 means no program is loaded.
+
+Each move is a POST whose JSON body is the arguments of the MASC tool of the
+same name, checked against the schema shown. The answer is
+`{ok, message, data}`: 200 when the move ran, 400 when it was refused and
+nothing ran.
+
+    curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '<arguments>' <move URL>
+
+{{moves}}
+
+## Connecting and leaving
+
+A fresh invitation is already connected, including when used over MCP. If
+`connected` is false after an earlier disconnect, explicitly rejoin before
+moving or asking anyone to pass to you:
+
+    curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"connected":true}' {{session_url}}
+
+To leave, POST exactly `{"connected":false}` to the same URL. This excludes
+your current invitation from handoff targets and releases its controller in
+one serialized server operation. The bearer stays valid for later reconnect;
+reconnecting restores eligibility and does not take anyone's controller.
+Wait for `{ok:true, connected:false}` before forgetting your local bearer.
+A malformed or unavailable participation state is refused, never treated as
+a fresh connection. If a game write's outcome is unknown, do not replay it.
+
+## Taking turns
+
+Read the seat before you move. When `controller` names someone else and
+`controller_recoverable` is false, wait and read it again later. Otherwise,
+play, then pass to a name
+from `participants`. A departed holder can also be released by the next move.
+For text, `data.keys_pressed` is the number of UTF-8 bytes actually applied,
+which may be less than the submitted text. Keep the unpressed suffix and
+check the game before sending more; never automatically replay unknown input.
+
+## Game guides
+
+Keepers who play here read guides written from earlier runs: menus, key
+sequences and pitfalls of a program. They are the Skills the DOS machine
+add-on publishes, listed below. Read the screen, pick the guide whose
+description matches the program on it, and fetch its URL with your bearer:
+
+    curl -s -H "Authorization: Bearer $TOKEN" <guide URL>
+
+The answer is the guide's markdown. Its reference files are listed at its
+end with their URLs; a relative `references/...` link in the guide resolves
+against the guide's URL to the same file. Guides are written for Keepers, so
+a step that needs a tool you do not have, such as loading or saving, is
+theirs. 404 means no guide has that name; 503 means the guides cannot be read
+right now.
+
+{{skills}}
+
+## When no program is loaded
+
+`machine` is false when nothing is loaded: someone ejected the program, it
+exited or faulted, or the server could not resume its last save after a
+restart. Every move then answers 400 and the screen answers 409. An
+invitation cannot load or restore a program; Keepers and the operator can.
+Ask in the public room below, then read the seat again later. A refusal that
+names `masc_dos_load` or `masc_dos_restore` names their tools, not yours.
+
+## Public game conversation
+
+Keepers and invited players share one public room across MSX
+and DOS. It contains only messages deliberately sent here, never private
+Keeper conversations. The seat's `participants` are eligible handoff targets;
+the room's `members` are clients that recently joined or read the room.
+
+Operators watching a game in the TUI Collab spectator window read and write
+the same room.
+
+Use `masc_play_room` over MCP, or POST its arguments to {{room_url}}:
+
+```json
+{"action":"join","client_id":"my-game-client","machine":"dos"}
+{"action":"say","client_id":"my-game-client","machine":"dos","message_id":"unique-message-1","text":"Ready for the next turn?"}
+{"action":"read","client_id":"my-game-client","machine":"dos"}
+{"action":"leave","client_id":"my-game-client","machine":"dos"}
+```
+
+Keep `client_id` stable for this connection. Read again while participating:
+presence expires after 60 seconds without join/read/say. Multiple windows of
+the same identity use different client ids; leaving one does not evict the others.
+The controller is independent of conversation, so everyone can speak while watching.
+
+An uncertain send is retried with exactly the same `message_id`, machine and
+text. Reusing that id with different text returns 409. Messages persist across
+server restarts. Responses contain the most recent 100 messages, oldest first;
+`has_more` means `read` with `before` set to the first message's id can read older
+history. GET {{room_url}} reads without joining. Text is limited to 4096 UTF-8 bytes.
+Set `machine` to `msx` to identify that game's conversation; it is the same room.

@@ -1,0 +1,386 @@
+(** Unified error type for MASC MCP *)
+
+include Rate_limit_types
+
+let default_rate_limit = {
+  per_minute = 10;
+  burst_allowed = 5;
+  priority_agents = [];
+  worker_multiplier = 1.0;
+  admin_multiplier = 2.0;
+  broadcast_per_minute = 15;
+  task_ops_per_minute = 30;
+}
+
+let rate_limit_config_to_yojson c =
+  `Assoc [
+    ("per_minute", `Int c.per_minute);
+    ("burst_allowed", `Int c.burst_allowed);
+    ("priority_agents", `List (List.map (fun s -> `String s) c.priority_agents));
+    ("worker_multiplier", `Float c.worker_multiplier);
+    ("admin_multiplier", `Float c.admin_multiplier);
+    ("broadcast_per_minute", `Int c.broadcast_per_minute);
+    ("task_ops_per_minute", `Int c.task_ops_per_minute);
+  ]
+
+let rate_limit_config_of_yojson json =
+  let type_name = function
+    | `Assoc _ -> "object"
+    | `Bool _ -> "boolean"
+    | `Float _ | `Int _ | `Intlit _ -> "number"
+    | `List _ -> "array"
+    | `Null -> "null"
+    | `String _ -> "string"
+  in
+  let field fields name = List.assoc_opt name fields in
+  let int_field fields name default =
+    match field fields name with
+    | None -> Ok default
+    | Some (`Int value) -> Ok value
+    | Some (`Intlit value) ->
+      (match int_of_string_opt value with
+       | Some value -> Ok value
+       | None -> Error (Printf.sprintf "rate_limit.%s is outside integer range" name))
+    | Some value ->
+      Error
+        (Printf.sprintf
+           "rate_limit.%s must be integer, got %s"
+           name
+           (type_name value))
+  in
+  let float_field fields name default =
+    match field fields name with
+    | None -> Ok default
+    | Some (`Float value) -> Ok value
+    | Some (`Int value) -> Ok (Float.of_int value)
+    | Some value ->
+      Error
+        (Printf.sprintf
+           "rate_limit.%s must be number, got %s"
+           name
+           (type_name value))
+  in
+  let string_list_field fields name default =
+    match field fields name with
+    | None -> Ok default
+    | Some (`List values) ->
+      let rec collect index acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest -> collect (index + 1) (value :: acc) rest
+        | value :: _ ->
+          Error
+            (Printf.sprintf
+               "rate_limit.%s[%d] must be string, got %s"
+               name
+               index
+               (type_name value))
+      in
+      collect 0 [] values
+    | Some value ->
+      Error
+        (Printf.sprintf
+           "rate_limit.%s must be array, got %s"
+           name
+           (type_name value))
+  in
+  match json with
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* per_minute = int_field fields "per_minute" default_rate_limit.per_minute in
+    let* burst_allowed =
+      int_field fields "burst_allowed" default_rate_limit.burst_allowed
+    in
+    let* priority_agents =
+      string_list_field fields "priority_agents" default_rate_limit.priority_agents
+    in
+    let* worker_multiplier =
+      float_field fields "worker_multiplier" default_rate_limit.worker_multiplier
+    in
+    let* admin_multiplier =
+      float_field fields "admin_multiplier" default_rate_limit.admin_multiplier
+    in
+    let* broadcast_per_minute =
+      int_field fields "broadcast_per_minute" default_rate_limit.broadcast_per_minute
+    in
+    let* task_ops_per_minute =
+      int_field fields "task_ops_per_minute" default_rate_limit.task_ops_per_minute
+    in
+    Ok
+      { per_minute
+      ; burst_allowed
+      ; priority_agents
+      ; worker_multiplier
+      ; admin_multiplier
+      ; broadcast_per_minute
+      ; task_ops_per_minute
+      }
+  | value ->
+    Error (Printf.sprintf "rate_limit must be object, got %s" (type_name value))
+
+let limit_for_category config = function
+  | GeneralLimit -> config.per_minute
+  | BroadcastLimit -> config.broadcast_per_minute
+  | TaskOpsLimit -> config.task_ops_per_minute
+
+let category_for_tool_opt = function
+  | "masc_broadcast" -> Some BroadcastLimit
+  | "masc_add_task"
+  | "masc_update_priority"
+  | "masc_plan_set_task"
+  | "masc_plan_clear_task"
+  | "masc_transition" -> Some TaskOpsLimit
+  | _ -> None
+
+let category_for_tool tool =
+  match category_for_tool_opt tool with
+  | Some category -> category
+  | None -> GeneralLimit
+
+module Task_error = struct
+  type transition_rejection =
+    | Current_owner_required of { current_assignee : string }
+    | Claim_required
+
+  type transition_rejected =
+    { task_id : string
+    ; requested_agent : string
+    ; task_status : Types_core.task_status
+    ; action : Types_core.task_action
+    ; reason : transition_rejection
+    ; valid_next_actions : Types_core.task_action list
+    }
+
+  type t =
+    | NotFound of string
+    | AlreadyClaimed of { task_id: string; by: string }
+    | NotClaimed of string
+    | InvalidState of string
+    | InvalidId of string
+    | TransitionRejected of transition_rejected
+    | VerificationSuperseded of { task_id: string; requested: string; current: string }
+
+  let transition_rejection_message
+        { task_id; requested_agent; task_status; action; reason; valid_next_actions } =
+      (match reason with
+       | Current_owner_required { current_assignee } ->
+         let verb =
+           match action with
+           | Types_core.Claim -> "claim"
+           | Types_core.Start -> "start"
+           | Types_core.Done_action -> "complete"
+           | Types_core.Cancel -> "cancel"
+           | Types_core.Release -> "release"
+           | Types_core.Submit_for_verification -> "submit"
+         in
+         Printf.sprintf
+           "Task %s is %s and owned by %s; %s cannot %s it."
+           task_id
+           (Types_core.task_status_to_string task_status)
+           current_assignee
+           requested_agent
+           verb
+       | Claim_required ->
+         Printf.sprintf
+           "Invalid task state: Invalid transition: %s -> %s (%s, agent=%s, \
+            valid_next_actions=[%s])."
+           (Types_core.task_status_to_string task_status)
+           (Types_core.task_action_to_string action)
+           task_id requested_agent
+           (String.concat ";" (List.map Types_core.task_action_to_string valid_next_actions)))
+
+  let to_string = function
+    | NotFound id ->
+        Printf.sprintf
+          "[TaskError] Task not found: %s."
+          id
+    | AlreadyClaimed { task_id; by } ->
+        Printf.sprintf
+          "[TaskError] Task %s is currently owned by %s."
+          task_id by
+    | NotClaimed id ->
+        Printf.sprintf
+          "[TaskError] Task %s is still todo."
+          id
+    | InvalidState msg -> Printf.sprintf "[TaskError] Invalid task state: %s" msg
+    | InvalidId reason -> Printf.sprintf "[TaskError] Invalid task ID: %s" reason
+    | TransitionRejected rejection ->
+        "[TaskError] " ^ transition_rejection_message rejection
+    | VerificationSuperseded { task_id; requested; current } ->
+        Printf.sprintf
+          "[TaskError] Task %s verification %s is no longer the one awaiting a \
+           verdict; the current submission is %s."
+          task_id requested current
+end
+
+module Agent_error = struct
+  type t =
+    | NotFound of string
+    | InvalidName of string
+
+  let to_string = function
+    | NotFound name -> Printf.sprintf "[AgentError] Agent not found: %s" name
+    | InvalidName reason -> Printf.sprintf "[AgentError] Invalid agent name: %s" reason
+end
+
+module Auth_error = struct
+  (** Typed classification of [Unauthorized] reasons.  Replaces substring
+      matching in dashboard auth JSON rendering.  Each variant maps to a
+      stable dashboard error code string. *)
+  type unauthorized_reason =
+    | Actor_mismatch   (** Token owner ≠ requested agent *)
+    | Missing_token    (** No bearer token provided *)
+    | Generic          (** Catch-all for other unauthorized causes *)
+
+  type t =
+    | Unauthorized of { reason: unauthorized_reason; message: string }
+    | Forbidden of { agent: string; action: string }
+    | SameOriginBlocked
+    | TokenExpired of string
+    | InvalidToken of string
+
+  let to_string = function
+    | Unauthorized { message; _ } -> Printf.sprintf "[AuthError] Unauthorized: %s" message
+    | Forbidden { agent; action } -> Printf.sprintf "[AuthError] Forbidden: %s cannot %s" agent action
+    | SameOriginBlocked ->
+        "[AuthError] Forbidden: browser cannot perform a cross-origin HTTP mutation"
+    | TokenExpired agent ->
+        Printf.sprintf "[AuthError] Token expired for %s." agent
+    | InvalidToken reason -> Printf.sprintf "[AuthError] Invalid token: %s" reason
+end
+
+module System_error = struct
+  type t =
+    | NotInitialized
+    | IoError of string
+    | ValidationError of string
+    | LockContention of { key : string; attempts : int }
+      (** Distributed lock acquire budget exhausted under transient
+          fleet contention.  Carries the structured key + attempt count
+          so callers can dispatch on the typed variant instead of
+          substring-matching the IoError message (RFC-0088
+          "String/Substring 분류기" anti-pattern removal). *)
+
+  let to_string = function
+    | NotInitialized -> "[SystemError] MASC not initialized."
+    | IoError msg -> Printf.sprintf "[SystemError] IO error: %s" msg
+    | ValidationError msg -> Printf.sprintf "[SystemError] Validation error: %s" msg
+    | LockContention { key; attempts } ->
+        Printf.sprintf
+          "[SystemError] Failed to acquire distributed lock for key: %s \
+           (%d attempts exhausted; transient contention, retry later)"
+          key attempts
+end
+
+type t =
+  | Task of Task_error.t
+  | Agent of Agent_error.t
+  | Auth of Auth_error.t
+  | System of System_error.t
+
+let to_string = function
+  | Task e -> Task_error.to_string e
+  | Agent e -> Agent_error.to_string e
+  | Auth e -> Auth_error.to_string e
+  | System e -> System_error.to_string e
+
+let show = to_string
+
+let to_yojson err =
+  `String (to_string err)
+
+let code = function
+  | Auth (Auth_error.Forbidden _ | Auth_error.SameOriginBlocked) -> 403
+  | Auth (Auth_error.Unauthorized _
+         | Auth_error.TokenExpired _
+         | Auth_error.InvalidToken _) -> 401
+  | Task (Task_error.NotFound _) -> 404
+  | Agent (Agent_error.NotFound _) -> 404
+  | Task (Task_error.AlreadyClaimed _
+         | Task_error.NotClaimed _
+         | Task_error.InvalidState _
+         | Task_error.TransitionRejected _
+         | Task_error.InvalidId _) -> 400
+  | Task (Task_error.VerificationSuperseded _) -> 409
+  | Agent (Agent_error.InvalidName _) -> 400
+  | System (System_error.NotInitialized | System_error.ValidationError _) -> 400
+  (* A store that failed to answer is the server's failure, not the
+     request's: like [LockContention], [IoError] is transient and
+     retryable ([is_retryable]), so it answers 503. This keeps [code] the
+     SSOT [Server_auth.http_status_of_auth_error] mirrors. *)
+  | System (System_error.IoError _ | System_error.LockContention _) -> 503
+
+(* [dashboard_auth_error_code] is the SSOT mapping from a typed
+   [masc_error] to the stable dashboard auth-error-code string that the
+   dashboard's shell auth summary / keeper stream 401 retry gate
+   consume (TS enum in
+   dashboard/src/types/dashboard-execution.ts). Introduced in #21040
+   for the shell summary; this top-level home lets both
+   [server_dashboard_http_core] (shell JSON) and [server_auth]
+   (401 error body) emit the same typed code without a second copy of
+   the classifier or a backward dependency.
+
+   The match is exhaustive on the outer [t] so a new auth-relevant
+   variant trips Warning 8 here instead of silently falling through.
+   [SameOriginBlocked] is a distinct typed producer outcome; this mapping
+   therefore cannot drift when a human-readable error message changes. *)
+module Auth_error_code = struct
+  type t =
+    | Invalid_token
+    | Token_expired
+    | Same_origin_blocked
+    | Insufficient_role
+    | Actor_mismatch
+    | Missing_token
+    | Unknown
+
+  let to_string = function
+    | Invalid_token -> "invalid_token"
+    | Token_expired -> "token_expired"
+    | Same_origin_blocked -> "same_origin_blocked"
+    | Insufficient_role -> "insufficient_role"
+    | Actor_mismatch -> "actor_mismatch"
+    | Missing_token -> "missing_token"
+    | Unknown -> "unknown"
+
+  let of_string = function
+    | "invalid_token" -> Some Invalid_token
+    | "token_expired" -> Some Token_expired
+    | "same_origin_blocked" -> Some Same_origin_blocked
+    | "insufficient_role" -> Some Insufficient_role
+    | "actor_mismatch" -> Some Actor_mismatch
+    | "missing_token" -> Some Missing_token
+    | "unknown" -> Some Unknown
+    | _ -> None
+end
+
+let auth_error_code_of_error : t -> Auth_error_code.t = function
+  | Auth (Auth_error.InvalidToken _) -> Auth_error_code.Invalid_token
+  | Auth (Auth_error.TokenExpired _) -> Auth_error_code.Token_expired
+  | Auth Auth_error.SameOriginBlocked -> Auth_error_code.Same_origin_blocked
+  | Auth (Auth_error.Forbidden _) -> Auth_error_code.Insufficient_role
+  | Auth (Auth_error.Unauthorized { reason = Auth_error.Actor_mismatch; _ }) ->
+      Auth_error_code.Actor_mismatch
+  | Auth (Auth_error.Unauthorized { reason = Auth_error.Missing_token; _ }) ->
+      Auth_error_code.Missing_token
+  | Auth (Auth_error.Unauthorized { reason = Auth_error.Generic; _ })
+  | Task _ | Agent _ | System _ ->
+      Auth_error_code.Unknown
+
+let dashboard_auth_error_code (err : t) : string option =
+  Some (Auth_error_code.to_string (auth_error_code_of_error err))
+
+(* [is_retryable] mirrors [Error.is_retryable] in AGENT_CORE so MASC-side
+   callers don't have to fall back on an AGENT_CORE-only predicate when
+   reasoning about a [masc_error]. Conservative — when in doubt
+   return [false] so callers don't loop on deterministic
+   failures. Source for the audit-driven motivation:
+   2026-04-29 AGENT_CORE↔MASC Implementation Quality Audit
+   §"Re-tryability". *)
+let is_retryable = function
+  | Task _ | Agent _ -> false
+  | Auth (Auth_error.TokenExpired _) -> true
+  | Auth (Auth_error.Unauthorized _ | Auth_error.Forbidden _
+         | Auth_error.SameOriginBlocked
+         | Auth_error.InvalidToken _) -> false
+  | System (System_error.IoError _ | System_error.LockContention _) -> true
+  | System (System_error.NotInitialized | System_error.ValidationError _) -> false

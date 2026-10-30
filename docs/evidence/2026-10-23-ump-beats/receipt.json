@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "sourceHead": "8f9eb1e84450fb1cab94f73d89f0a0954a9887b6",
+  "sourceBase": "55fe8612167854e96938166d6e519701318fa44b",
+  "integratedExecutionHead": "0869ee0bd9d5835bda22db5829a2be7e44d4a668",
+  "postIntegratedDelta": "Test-only: exclude periodic status from the full pause/seek/resume control sequence; explicitly inject status in mixed fixture. All production blobs unchanged.",
+  "checks": {
+    "initialFocused": {
+      "passed": 107,
+      "note": "Before error-label-only change"
+    },
+    "initialIntegrated": {
+      "passed": 161,
+      "failed": 1,
+      "failure": "Existing mixed-controller assertion counted periodic status in first three controls"
+    },
+    "serialIntegrated": {
+      "passed": 162,
+      "failed": 0,
+      "testFileConcurrency": 1
+    },
+    "finalController": {
+      "passed": 90,
+      "failed": 0,
+      "head": "8f9eb1e84450fb1cab94f73d89f0a0954a9887b6"
+    },
+    "independentBeats": {
+      "cases": 6840,
+      "clocks": 6,
+      "binary64Tempos": 12,
+      "result": "PASS"
+    },
+    "independentSecondsRegression": {
+      "cases": 2496,
+      "result": "PASS"
+    },
+    "sourceTui": {
+      "result": "PASS",
+      "originalPackets": 5,
+      "derivedMessages": 9,
+      "originalAssetRetained": true,
+      "variantPlaced": true,
+      "authoredClockAndRecordedProvenance": true,
+      "reopenedExportSixFilesIdentical": true,
+      "exportSHA256": "41bfa00fa249b96b603ba00272436720e79a21f0c2e295d7e0317a9cc916c73a",
+      "limits": [
+        "Synthetic capture fixture; no TUI playback requested",
+        "No intermediate undo/redo snapshots in this journey",
+        "No screen wording/layout assertions",
+        "Source viewer only; default installation unchanged"
+      ]
+    }
+  },
+  "artifacts": {
+    "focused-tests.log": {
+      "sha256": "06a1d5267ed8eb55a0239701404e20ac80f85eb6b455f6d9269f86488dd38d8d",
+      "bytes": 12022
+    },
+    "integrated-tests.log": {
+      "sha256": "639262667f9ca0465fcae3d831644b0b23f26927c06d1a90effc754b46066d56",
+      "bytes": 20078
+    },
+    "integrated-tests-serial.log": {
+      "sha256": "9f33ff0540ee730444b0e7a8a980951480953a39bd944021c35553cb8716dd93",
+      "bytes": 18971
+    },
+    "controller-tests-fixed.log": {
+      "sha256": "c78743c4cdc423bfcc9be15ebce0a23a93e7476cb25edaf0e898577ca8814a57",
+      "bytes": 9960
+    },
+    "source/journey.json": {
+      "sha256": "0fcfbc507ef765f91d72fe6baad6fd17d838ef20ca5435d4c26fff85b5ee4b95",
+      "bytes": 4044
+    },
+    "source/verification.json": {
+      "sha256": "a5540ce45b76bf7eea1fd49d9d7f580a1b8fbda031649dea0077e3341bbdf221",
+      "bytes": 542
+    },
+    "independent-probe.json": {
+      "sha256": "a2dfb9ebc947793c3b8bb7903bf8ef1aaa84beaf34fcbaf78cbe7ef776b35800",
+      "bytes": 758
+    }
+  },
+  "goalComplete": false,
+  "limits": [
+    "Historical execution heads are separate from final metadata/restack heads",
+    "Synthetic source TUI; no playback/capture requested; no intermediate pre-roll/history snapshots",
+    "No installed beat launcher or new native/device test",
+    "No physical MIDI/audio latency, receive-time accuracy or sample alignment proof",
+    "No Dune/full build, CI dispatch/watch or terminal wording/layout assertions",
+    "Beat input uses opening project quarter-note tempo; does not add tempo maps or warp WAV",
+    "Full sequencer scope remains open in issue44748"
+  ]
+}

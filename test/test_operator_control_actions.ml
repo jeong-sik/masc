@@ -1,0 +1,636 @@
+module Types = Masc_domain
+
+open Masc
+open Test_operator_control_support
+
+let claim_and_start config ~agent_name ~task_id =
+  (match
+     Workspace.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Claim ()
+   with
+  | Ok _ -> ()
+  | Error err -> Alcotest.fail (Masc_domain.show_masc_error err));
+  match
+    Workspace.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Start ()
+  with
+  | Ok _ -> ()
+  | Error err -> Alcotest.fail (Masc_domain.show_masc_error err)
+
+let write_text path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let test_snapshot_preserves_backlog_failure_contract () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let backlog_path = Workspace.backlog_path config in
+      write_text backlog_path "{not-json";
+      write_text (backlog_path ^ ".last-good") "{not-json";
+      let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
+      let workspace = Yojson.Safe.Util.(snapshot |> member "workspace") in
+      let ownership = Yojson.Safe.Util.(workspace |> member "task_ownership") in
+      Alcotest.(check bool) "snapshot remains available" true
+        Yojson.Safe.Util.(workspace |> member "initialized" |> to_bool);
+      Alcotest.(check string) "unavailable task count is explicit" "null"
+        (Yojson.Safe.to_string (Yojson.Safe.Util.member "task_count" workspace));
+      Alcotest.(check bool) "task count availability is explicit" false
+        Yojson.Safe.Util.(workspace |> member "task_count_available" |> to_bool);
+      Alcotest.(check bool) "ownership availability is explicit" false
+        Yojson.Safe.Util.(ownership |> member "available" |> to_bool);
+      Alcotest.(check bool) "ownership authority is explicit" false
+        Yojson.Safe.Util.(ownership |> member "authoritative" |> to_bool))
+
+let test_snapshot_marks_recovery_as_non_authoritative () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      (* Recovery reads <backlog>.last-good, and only Workspace.write_backlog
+         writes that copy - Workspace.init writes the primary as raw JSON. Without
+         a committed backlog first, corrupting the primary leaves nothing to
+         recover from, so the snapshot reports the count unavailable instead of
+         recovered, and this test cannot reach what it is about. *)
+      Workspace.write_backlog
+        config
+        { Types.tasks = []; task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; delivered_completion_rejections = []; last_updated = "2026-06-26T00:00:00Z"; version = 1 };
+      write_text (Workspace.backlog_path config) "{not-json";
+      let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
+      let workspace = Yojson.Safe.Util.(snapshot |> member "workspace") in
+      let ownership = Yojson.Safe.Util.(workspace |> member "task_ownership") in
+      Alcotest.(check bool) "recovered task count is available" true
+        Yojson.Safe.Util.(workspace |> member "task_count_available" |> to_bool);
+      Alcotest.(check bool) "recovered task count is non-authoritative" false
+        Yojson.Safe.Util.(workspace |> member "task_count_authoritative" |> to_bool);
+      Alcotest.(check bool) "recovered ownership is non-authoritative" false
+        Yojson.Safe.Util.(ownership |> member "authoritative" |> to_bool);
+      Alcotest.(check bool) "recovery path is exposed" true
+        (Yojson.Safe.Util.member "recovery_path" ownership <> `Null))
+
+let test_task_inject_executes_after_confirmation () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      (* See test setup: workspace init side effect is the fixture under test. *)
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let action_json =
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "operator");
+              ("action_type", `String "task_inject");
+              ( "target_type"
+              , `String Operator_action_constants.workspace_target_type );
+              ( "payload",
+                `Assoc
+                  [
+                    ("title", `String "Injected task");
+                    ("description", `String "created by operator");
+                    ("priority", `Int 1);
+                  ] );
+            ])
+      in
+      let action_json =
+        match action_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check bool) "confirm required" true
+        Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
+      let confirm_token =
+        Yojson.Safe.Util.(action_json |> member "confirm_token" |> to_string)
+      in
+      let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
+      let pending_confirms =
+        snapshot |> Yojson.Safe.Util.member "pending_confirm_envelope"
+        |> Yojson.Safe.Util.member "items"
+        |> Yojson.Safe.Util.to_list
+      in
+      Alcotest.(check int) "pending confirm count" 1 (List.length pending_confirms);
+      Alcotest.(check bool) "result absent before confirmation" true
+        (Yojson.Safe.Util.member "result" action_json = `Null);
+      let tasks = Workspace.get_tasks_raw config in
+      Alcotest.(check int) "task not injected before confirmation" 0
+        (List.length tasks);
+      let confirm_json =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [
+              ("actor", `String "operator");
+              ("confirm_token", `String confirm_token);
+              ("decision", `String "confirm");
+            ])
+      in
+      let confirm_json =
+        match confirm_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "confirmation decision" "confirm"
+        Yojson.Safe.Util.(confirm_json |> member "decision" |> to_string);
+      Alcotest.(check bool) "result present after confirmation" true
+        (Yojson.Safe.Util.member "result" confirm_json <> `Null);
+      let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
+      let pending_confirms =
+        snapshot |> Yojson.Safe.Util.member "pending_confirm_envelope"
+        |> Yojson.Safe.Util.member "items"
+        |> Yojson.Safe.Util.to_list
+      in
+      Alcotest.(check int) "pending confirm removed" 0
+        (List.length pending_confirms);
+      let tasks = Workspace.get_tasks_raw config in
+      Alcotest.(check int) "task injected after confirmation" 1
+        (List.length tasks))
+
+let test_pending_confirmation_mutations_invalidate_snapshot_views () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let snapshot () =
+        Operator_control.snapshot_json ~actor:"operator" ~view:"summary"
+          ~include_messages:false ~include_keepers:false ctx
+      in
+      let pending snapshot =
+        snapshot |> Yojson.Safe.Util.member "pending_confirm_envelope"
+        |> Yojson.Safe.Util.member "items" |> Yojson.Safe.Util.to_list
+      in
+      let action payload =
+        Operator_control.action_json ctx
+          (`Assoc
+            [ "actor", `String "operator"
+            ; "action_type", `String "task_inject"
+            ; ( "target_type"
+              , `String Operator_action_constants.workspace_target_type )
+            ; "payload", payload
+            ])
+        |> Result.get_ok
+      in
+      let token json =
+        Yojson.Safe.Util.(json |> member "confirm_token" |> to_string)
+      in
+      let confirm token decision =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [ "actor", `String "operator"
+            ; "confirm_token", `String token
+            ; "decision", `String decision
+            ])
+      in
+      let projection_computes = ref 0 in
+      let projection () =
+        Dashboard_projection_cache.get_or_compute_snapshot_json ~config
+          ~actor:(Some "operator") (fun _ -> Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+            incr projection_computes;
+            `Int !projection_computes))
+      in
+      Alcotest.(check int) "prewarmed queue is empty" 0
+        (List.length (pending (snapshot ())));
+      ignore (projection ());
+      Alcotest.(check int) "projection prewarmed once" 1 !projection_computes;
+
+      let valid =
+        action
+          (`Assoc
+            [ "title", `String "Injected task"
+            ; "description", `String "created by operator"
+            ])
+      in
+      Alcotest.(check int) "preview appears after cached empty snapshot" 1
+        (List.length (pending (snapshot ())));
+      ignore (projection ());
+      Alcotest.(check int) "preview invalidates dashboard projection" 2
+        !projection_computes;
+      ignore (confirm (token valid) "deny" |> Result.get_ok);
+      Alcotest.(check int) "denied preview disappears immediately" 0
+        (List.length (pending (snapshot ())));
+      ignore (projection ());
+      Alcotest.(check int) "deny invalidates dashboard projection" 3
+        !projection_computes;
+
+      let invalid = action (`Assoc []) in
+      Alcotest.(check int) "invalid action preview is cached" 1
+        (List.length (pending (snapshot ())));
+      let result = confirm (token invalid) "confirm" in
+      Alcotest.(check bool) "execution fails after consuming preview" true
+        (Result.is_error result);
+      Alcotest.(check int) "failed execution cannot leave cached preview" 0
+        (List.length (pending (snapshot ()))))
+
+let test_digest_defaults_to_workspace_target () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let digest_json =
+        match Operator_control.digest_json ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string)
+        "default target_type"
+        Operator_action_constants.workspace_target_type
+        Yojson.Safe.Util.(digest_json |> member "target_type" |> to_string))
+
+let test_operator_action_rejects_legacy_action_aliases () =
+  let retired_actions =
+    [
+      "autonomy_tick";
+      "keeper_msg";
+      "team_note";
+      "team_broadcast";
+      "team_task_inject";
+      "team_worker_spawn_batch";
+      "team_stop";
+    ]
+  in
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      List.iter
+        (fun action_type ->
+          match
+            Operator_control.action_json ctx
+              (`Assoc
+                [
+                  ("actor", `String "operator");
+                  ("action_type", `String action_type);
+                  ("payload", `Assoc []);
+                ])
+          with
+          | Ok _ -> Alcotest.failf "%s should be rejected" action_type
+          | Error message ->
+              Alcotest.(check string)
+                (action_type ^ " rejection")
+                ("unsupported action_type: " ^ action_type)
+                message)
+        retired_actions)
+
+(* An action addresses one kind of target. A request may leave the target
+   type out; one that names another kind is refused where the request is
+   read, before anything is staged. *)
+let test_operator_action_target_type_follows_the_action () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let staged () =
+        List.length (Operator_pending_confirm.raw_pending_confirms config)
+      in
+      List.iter
+        (fun (action_type, target_type, expected) ->
+          match
+            Operator_control.action_json ctx
+              (`Assoc
+                [ "action_type", `String action_type
+                ; "target_type", `String target_type
+                ; "target_id", `String "some-keeper"
+                ; "payload", `Assoc [ "message", `String "hello" ]
+                ])
+          with
+          | Ok _ ->
+            Alcotest.failf "%s aimed at a %s should be refused" action_type target_type
+          | Error message ->
+            Alcotest.(check string)
+              (action_type ^ " aimed at a " ^ target_type)
+              (Printf.sprintf
+                 "invalid target_type for %s (expected %s)"
+                 action_type
+                 expected)
+              message)
+        [ "broadcast", "keeper", "workspace"
+        ; "broadcast", "goal", "workspace"
+        ; "keeper_probe", "workspace", "keeper"
+        ];
+      Alcotest.(check int) "a refused request stages nothing" 0 (staged ());
+      (match
+         Operator_control.action_json ctx
+           (`Assoc
+             [ "action_type", `String "broadcast"
+             ; "payload", `Assoc [ "message", `String "hello" ]
+             ])
+       with
+       | Error err -> Alcotest.fail err
+       | Ok json ->
+         Alcotest.(check string)
+           "an omitted target type is the action's own"
+           Operator_action_constants.workspace_target_type
+           Yojson.Safe.Util.(
+             json |> member "preview" |> member "target_type" |> to_string));
+      Alcotest.(check int) "the accepted request is staged" 1 (staged ()))
+
+let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> cleanup_dir base_dir);
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:(Some "claude"));
+  let claude =
+    match Workspace.get_agents_raw config with
+    | [ agent ] -> agent.Masc_domain.name
+    | agents ->
+      Alcotest.failf "expected one initialized agent, got %d" (List.length agents)
+  in
+  ignore
+    (Workspace.add_task
+       config
+       ~title:"Operator tool recovery"
+       ~priority:1
+       ~description:"");
+  let ctx : _ Operator_tool.context =
+    { config
+    ; agent_name = "operator"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+    ; net = Some (Eio.Stdenv.net env)
+    ; delegated_dispatch = None
+    ; mcp_session_id = None
+    }
+  in
+  (* Seed the snapshot cache before ownership changes. The explicit operator
+     snapshot below must invalidate this entry and observe the live claim. *)
+  ignore
+    (Operator_tool.dispatch
+       ctx
+       ~name:"masc_operator_snapshot"
+       ~args:(`Assoc []));
+  (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+   | Ok _ -> ()
+   | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+  let snapshot =
+    match
+      Operator_tool.dispatch
+        ctx
+        ~name:"masc_operator_snapshot"
+        ~args:(`Assoc [])
+    with
+    | Some result when Tool_result.is_success result -> Tool_result.data result
+    | Some result -> Alcotest.fail (Tool_result.message result)
+    | None -> Alcotest.fail "operator snapshot dispatch missing"
+  in
+  let task_ownership =
+    Yojson.Safe.Util.(snapshot |> member "workspace" |> member "task_ownership")
+  in
+  let observed_version =
+    Yojson.Safe.Util.(task_ownership |> member "backlog_version" |> to_int)
+  in
+  let observed_assignee =
+    match Yojson.Safe.Util.(task_ownership |> member "items" |> to_list) with
+    | [ item ] -> Yojson.Safe.Util.(item |> member "assignee" |> to_string)
+    | items ->
+      Alcotest.failf
+        "expected one operator-visible owned task, got %d"
+        (List.length items)
+  in
+  Alcotest.(check string) "snapshot exposes exact persisted owner" claude
+    observed_assignee;
+  let command extra_fields =
+    `Assoc
+      ([ "task_id", `String "task-001"
+       ; "expected_assignee", `String observed_assignee
+       ; "expected_version", `Int observed_version
+       ; "reason", `String "owner runtime cannot resume"
+       ]
+       @ extra_fields)
+  in
+  let invalid =
+    match
+      Operator_tool.dispatch
+        ctx
+        ~name:"masc_operator_task_recovery_resolve"
+        ~args:(command [ "heuristic_timeout_sec", `Int 300 ])
+    with
+    | Some result -> result
+    | None -> Alcotest.fail "operator task recovery dispatch missing"
+  in
+  Alcotest.(check bool) "unknown heuristic field rejected" true
+    (Tool_result.is_failed invalid);
+  let retired_schema =
+    match
+      Operator_tool.dispatch
+        ctx
+        ~name:"masc_operator_task_recovery_resolve"
+        ~args:
+          (command
+             [ "schema", `String "workspace.task.operator_recovery.command.v1" ])
+    with
+    | Some result -> result
+    | None -> Alcotest.fail "operator task recovery dispatch missing"
+  in
+  Alcotest.(check bool) "retired schema field rejected" true
+    (Tool_result.is_failed retired_schema);
+  let valid =
+    match
+      Operator_tool.dispatch
+        ctx
+        ~name:"masc_operator_task_recovery_resolve"
+        ~args:(command [])
+    with
+    | Some result -> result
+    | None -> Alcotest.fail "operator task recovery dispatch missing"
+  in
+  Alcotest.(check bool) "exact recovery succeeds" true
+    (Tool_result.is_success valid);
+  Alcotest.(check string) "tool reports todo" "todo"
+    Yojson.Safe.Util.(Tool_result.data valid |> member "status" |> to_string);
+  Alcotest.(check bool) "all projections observed" true
+    Yojson.Safe.Util.(Tool_result.data valid |> member "fully_observed" |> to_bool);
+  Alcotest.(check bool) "operator recovery audit recorded" true
+    Yojson.Safe.Util.
+      (Tool_result.data valid |> member "audit" |> member "recorded" |> to_bool);
+  let task =
+    match Workspace.get_tasks_raw config with
+    | [ task ] -> task
+    | tasks ->
+      Alcotest.failf "expected one task after recovery, got %d" (List.length tasks)
+  in
+  Alcotest.(check string) "task recovered to todo" "todo"
+    (Masc_domain.task_status_to_string task.task_status)
+
+let test_quarantine_tool_rejects_retired_schema_field () =
+  let module Command = Keeper_board_attention_quarantine_command in
+  let command extra_fields =
+    `Assoc
+      ([ "keeper_name", `String "keeper-a"
+       ; "partition_id", `String "partition-a"
+       ; "candidate_id", `String "candidate-a"
+       ; "expected_quarantine_id", `String "quarantine-a"
+       ; "decision", `String "acknowledge_and_requeue"
+       ]
+       @ extra_fields)
+  in
+  (match Command.parse_tool_command ~requested_by:"operator-test" (command []) with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Command.input_error_to_string error));
+  match
+    Command.parse_tool_command
+      ~requested_by:"operator-test"
+      (command
+         [ ( "schema"
+           , `String "keeper.board_attention.quarantine.recovery.command.v1" ) ])
+  with
+  | Error (Command.Unsupported_fields [ "schema" ]) -> ()
+  | Error error ->
+    Alcotest.failf
+      "retired schema field returned the wrong error: %s"
+      (Command.input_error_to_string error)
+  | Ok _ -> Alcotest.fail "retired schema field was accepted"
+
+(* review_queue / deferred_queue / review_summary fields were emitted for
+   a retired dashboard surface; the producers (split_review_items,
+   *_review_item) were also removed. Review decisions still reach the UI
+   via [recent_reviews]. *)
+
+(* A confirm acts as the caller it authenticated as. Naming the stager in the
+   request body used to pass the owner check, so a caller that read the token
+   from a digest could run an action another actor staged. *)
+let test_a_body_actor_cannot_confirm_another_actors_action () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let operator = operator_ctx env sw config "operator" in
+      let worker = operator_ctx env sw config "worker" in
+      let staged =
+        Operator_control.action_json operator
+          (`Assoc
+            [ "action_type", `String "task_inject"
+            ; ( "target_type"
+              , `String Operator_action_constants.workspace_target_type )
+            ; ( "payload"
+              , `Assoc
+                  [ "title", `String "Injected task"
+                  ; "description", `String "staged by operator"
+                  ] )
+            ])
+        |> Result.get_ok
+      in
+      let confirm_token =
+        Yojson.Safe.Util.(staged |> member "confirm_token" |> to_string)
+      in
+      let confirm ctx =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [ "actor", `String "operator"
+            ; "confirm_token", `String confirm_token
+            ; "decision", `String "confirm"
+            ])
+      in
+      Alcotest.(check bool) "the worker naming the operator is refused" true
+        (Result.is_error (confirm worker));
+      Alcotest.(check bool) "the operator still confirms its own action" true
+        (Result.is_ok (confirm operator)))
+
+let () =
+  Alcotest.run
+    "operator_control_actions"
+    [ ( "actions"
+      , [ Alcotest.test_case
+            "task inject executes after confirmation"
+            `Quick
+            test_task_inject_executes_after_confirmation
+        ; Alcotest.test_case
+            "a body actor cannot confirm another actor's action"
+            `Quick
+            test_a_body_actor_cannot_confirm_another_actors_action
+        ; Alcotest.test_case
+            "pending-confirm mutations invalidate snapshot views"
+            `Quick
+            test_pending_confirmation_mutations_invalidate_snapshot_views
+        ; Alcotest.test_case
+            "snapshot preserves backlog failure contract"
+            `Quick
+            test_snapshot_preserves_backlog_failure_contract
+        ; Alcotest.test_case
+            "snapshot marks recovery as non-authoritative"
+            `Quick
+            test_snapshot_marks_recovery_as_non_authoritative
+        ; Alcotest.test_case
+            "digest defaults to workspace target"
+            `Quick
+            test_digest_defaults_to_workspace_target
+        ; Alcotest.test_case
+            "legacy action aliases are rejected"
+            `Quick
+            test_operator_action_rejects_legacy_action_aliases
+        ; Alcotest.test_case
+            "a request's target type follows its action"
+            `Quick
+            test_operator_action_target_type_follows_the_action
+        ; Alcotest.test_case
+            "task recovery tool is strict and exact"
+            `Quick
+            test_operator_task_recovery_tool_is_strict_and_executes_exact_cas
+        ; Alcotest.test_case
+            "quarantine tool rejects retired schema field"
+            `Quick
+            test_quarantine_tool_rejects_retired_schema_field
+        ] )
+    ; ( "confirmation"
+      , [ Alcotest.test_case
+            "expired token is rejected"
+            `Quick
+            Test_operator_control_confirm.test_confirm_rejects_expired_token
+        ; Alcotest.test_case
+            "unknown decision value is rejected"
+            `Quick
+            Test_operator_control_confirm.test_confirm_rejects_unknown_decision
+        ] )
+    ]
+;;

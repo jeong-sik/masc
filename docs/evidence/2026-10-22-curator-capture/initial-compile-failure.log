@@ -1,0 +1,5 @@
+test suite	Test	2026-10-21T18:21:45.6139579Z File "lib/workspace_memory/workspace_memory_request.ml", line 141, characters 61-65:
+test suite	Test	2026-10-21T18:21:45.6141262Z 141 |         let* () = if Yojson.Safe.equal row (row_json ~ledger fact neighbors) then Ok ()
+test suite	Test	2026-10-21T18:21:45.6142041Z                                                                    ^^^^
+test suite	Test	2026-10-21T18:21:45.6142848Z Error: The value fact has type Ledger.assignment
+test suite	Test	2026-10-21T18:21:45.6143507Z        but an expression was expected of type Ledger.pending_fact

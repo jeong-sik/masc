@@ -1,0 +1,15 @@
+{
+  "run_id": 40101087040,
+  "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+  "conclusion": "success",
+  "suites": [
+    "test_keeper_direct_goal_provider_wire",
+    "test_keeper_prompt_capture",
+    "test_keeper_next_request_forecast",
+    "test_keeper_provider_input_snapshot",
+    "test_keeper_context_observation_projection",
+    "test_keeper_official_client_host"
+  ],
+  "log_sha256": "7952e1706583b617a22e44d64a688d22146b478c4f44a45186a3cbbe87a04485",
+  "scope": "six selected suites only; deterministic peers and fixture storage. Existing official-host tests do not cover found changed-Goal-on-Resume P2; source blocker remains until its specific repair. No full regression or live G2/G3."
+}

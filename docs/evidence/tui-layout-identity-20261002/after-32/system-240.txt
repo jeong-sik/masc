@@ -1,0 +1,32 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+                                                                                                                                                                                        │[Recent] Changes · 2 keepers · feed closed: MCP initial
+   MASC System  9:Runtime  p:next  ▸runtime.toml  models  params  prompts  presets  themes  voice  15:32:38  HTTP [connected]                                                           │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+    base /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-audit-fixture-xq4tdly_   masc <base>/.masc   binary age unknown                                                      │· beta             no events
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │───────────────────────────────────────────────────────
+    fetch: HTTP 503: runtime config load failed: fixture configuration unavailable                                                                                                      │alpha · no events on this feed yet
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:select / scroll  PgUp/PgDn:page  v:read status  e:edit  a:fragments / voice / account  p:next pane  A:activity  L:logs  9:Runtime  s:resources  t:tools  Esc:back  q:quit  …?
+ › to alpha   (i to write)

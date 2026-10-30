@@ -1,0 +1,9 @@
+{
+  "binary": "~/.local/bin/masc-tui",
+  "commit": "83d23c96c01f2505fe0bad39c699b330a3f9df93",
+  "sha256": "30e3877d5ae1c001ce7ea6d0c75496b3bb4906527bf34b706d63af20bc7d8530",
+  "base_path": "<workspace>",
+  "port": 8935,
+  "rows": 40,
+  "columns": 160
+}

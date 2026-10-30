@@ -1,0 +1,20 @@
+{
+  "schema": "masc.read-program.native-failure.v1",
+  "source_sha": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+  "run_id": 40189920561,
+  "job_id": 121158526765,
+  "conclusion": "failure",
+  "stage": "native_compilation",
+  "suites_executed": 0,
+  "error": {
+    "file": "test/test_keeper_sandbox_read_backend.ml",
+    "line": 2132,
+    "detail": "host_root_abs_of_meta receives meta positionally; the new fixture incorrectly used ~meta."
+  },
+  "raw_log": {
+    "bytes": 134143,
+    "sha256": "c8a7bce51399bad91cb3f3e8b924650ff942e534bcb525b80064fb92ebf70602"
+  },
+  "repair_source": "cdeb9e5af15677c22fc4be8b0cc0f82d42e5b351",
+  "repair_scope": "One fixture call, no product source change."
+}

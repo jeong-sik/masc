@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-audit-board-detail-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/board/board-state.test.ts src/api/board.test.ts src/components/board/post-detail.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-audit-board-detail-20261004/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  175 passed (175)
+   Start at  01:13:03
+   Duration  2.72s (transform 31%, import 23%, environment 19%, setup 15%, tests 11%)
+
+    Isolate  3 workers spawned · ~254ms startup each (spawn + environment, per file)
+             at least ~509ms faster with isolate: false — reuses workers across files instead of one per file
+

@@ -1,0 +1,455 @@
+(** The absorb gate of a librarian pass (RFC-librarian-absorb-gate).
+
+    A librarian answer names current memories a new claim absorbs. Before
+    the answer is applied, a judgment model (TypeSafe Jev) reads each complete
+    source memory against the proposed claim. It judges compatible context
+    and preservation of decision-relevant knowledge, not reproduction of every
+    historical detail. A source whose useful meaning or context is lost is taken
+    out of the answer's [absorbed] list and stays current; the new claim is
+    still applied. A positively judged source is absorbed as
+    the answer said; only such a verdict authorizes removing a memory.
+
+    The gate only ever narrows [absorbed]. When the gate is declared off, or
+    the Keeper is excluded, the answer is applied as it came. When the gate is
+    declared on but cannot be asked -- the lane is off, or no destination is
+    armed -- the runtime leaves the entire Memory range pending. When an
+    enabled judgment fails, only completed positive verdicts appear in the
+    gate's result; unconfirmed sources stay current. The runtime leaves the
+    entire Memory range pending on judgment failure, including the proposed
+    claims, so a later pass can retry it.
+
+    One exception to "new claims are applied" (RFC-0463 section 2.8): a new
+    claim that named memories in [absorbs] and had none of them absorbed is
+    asked the reverse question -- do the memories it named, which stay
+    current, convey each of its statements? When every statement is
+    conveyed the claim is a copy of what stays and is not applied. When a
+    statement is not conveyed, the claim is applied. A reverse request failure
+    leaves the entire range pending too: a failed duplicate check is not
+    evidence that a proposal adds knowledge. Deliberate reverse exemptions
+    and pre-dispatch size limitations retain their existing policy. *)
+
+(** {1 Statements} *)
+
+val statements : string -> string list
+(** Split candidate text for the reverse copy check: line breaks,
+    then sentence ends ([. ! ?] before whitespace, [다.], [;] before
+    whitespace, and [ — ]); nothing dropped; a piece
+    shorter than {!min_statement_chars} characters carried into the next;
+    every resulting statement is kept. Sentence boundaries match the scorer
+    in issue #37079; the gate evaluates the full memory rather than a sample.
+    Whitespace is ASCII whitespace only: a non-ASCII space is an ordinary
+    character, the same on both sides of the golden (the calibration corpus
+    held none; see the script). *)
+
+val min_statement_chars : int
+
+(** {1 Judgment} *)
+
+type evaluate =
+  state:Yojson.Safe.t
+  -> questions:(string * Typesafeai_types.question) list
+  -> (Typesafeai_types.eval_response, string) result
+(** One evaluation request. {!run} installs {!Typesafeai_client.evaluate};
+    a test installs a function that answers from a table. *)
+
+type consolidation = Mergeable | Different_context | Loses_knowledge | Uncertain
+
+type source_verdict =
+  { memory_id : string
+  ; into : string
+  ; decision : consolidation
+  }
+
+type judged =
+  { absorbed : Keeper_memory_os_types.absorbed_statement list
+        (** the answer's absorptions the gate lets through, in the answer's order *)
+  ; left : source_verdict list
+        (** sources whose consolidation was not established *)
+  ; conveyed : source_verdict list  (** context-preserving consolidations *)
+  ; unjudged : Keeper_memory_os_types.absorbed_statement list
+        (** absorptions the gate could not judge because the answer names a
+            claim or a memory the pass did not carry; the memory stays current *)
+  ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
+        (** absorptions the gate could not judge because the claim, or a
+            complete source memory, does not fit a request
+            ({!request_bytes_limit}); the memory stays current *)
+  ; requests : int  (** evaluation requests made *)
+  }
+
+type failure_kind = Evaluation_failed | Input_capacity_exceeded
+
+type outcome =
+  | Failed of
+      { reason : string
+      ; kind : failure_kind
+      ; absorbed : Keeper_memory_os_types.absorbed_statement list
+      ; left : source_verdict list
+      ; conveyed : source_verdict list
+      ; unjudged : Keeper_memory_os_types.absorbed_statement list
+      ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
+      }
+      (** Judgment failed. [absorbed] contains only [conveyed] sources for
+          which a complete positive judgment returned before the failure.
+          All other sources stay current. [left] records completed negative
+          evidence, [unjudgeable] records oversize inputs, and [unjudged]
+          records missing source/claim identities, including unvisited groups. *)
+  | Judged of judged
+
+val conveyed_boundary : float
+(** Boundary used only by the reverse copy check. Forward consolidation uses
+    a closed choice, not a numeric similarity or coverage threshold. *)
+
+val questions_per_request : int
+(** Reverse copy statements are asked in requests of at most this many questions. The
+    model evaluates a request's questions in parallel; the limit bounds one
+    request's size, not the number of statements judged. *)
+
+val state_bytes_limit : int
+(** The proposed claim, and each reverse source state, are at most this many bytes: half of
+    {!request_bytes_limit}, so the questions sharing the request with it
+    always have the other half. A claim over it cannot be asked about;
+    every memory it absorbs stays current. *)
+
+val request_bytes_limit : int
+(** A request carries at most this many bytes of claim and questions (each
+    source with the fixed instruction and criteria text sent beside it):
+    the smallest request bound among the routes the lane can use (32k
+    tokens on OpenRouter, 64k at TypeSafe) taken in bytes, so a request is
+    conservatively admitted for size. A complete source that does not fit a request
+    beside its claim cannot be judged, and its memory stays current rather
+    than being absorbed on a predictable refusal. *)
+
+val judge
+  :  evaluate:evaluate
+  -> new_observations:Yojson.Safe.t list
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> outcome
+(** [facts] are the current memories the pass read, before the answer removes
+    absorbed memories; [new_claims] the claims the answer adds; [absorbed] the
+    absorptions it states. An absorption whose [into] is a current memory the
+    answer restated is judged against that memory's text. Each complete source
+    and proposed claim are sent with nonempty [new_observations] in one judgment
+    request. Empty observations retain the original pair-only instruction and
+    two-field state; both paths budget the question actually dispatched.
+    The observations are source data from the selected pass, not the proposed
+    claim. Their serialized bytes count toward the provider request boundary;
+    an oversized request with new observations fails the pass before dispatch,
+    keeping the whole range pending without truncating evidence or adding a
+    partially grounded candidate beside its original. *)
+
+(** {1 The reverse question} *)
+
+type copy_not_judged =
+  | Gate_judgment_failed
+      (** the forward judgment failed, so the judge was not asked again *)
+  | Continues_a_dropped_memory
+      (** the claim is what a [supersedes] continues: leaving it out would
+          drop the memory it revises with nothing in its place *)
+  | No_source_fits_the_state
+      (** every memory it named is over {!state_bytes_limit} on its own *)
+  | Statement_too_large
+      (** a statement not conveyed so far never fit a request beside a state *)
+  | No_statement  (** the claim cuts into no statement, so nothing was asked *)
+  | Request_failed of string
+
+type copy_verdict =
+  | Copy of { statements : string list }
+      (** every statement conveyed by the memories it named: not applied *)
+  | Carries_new_statement of
+      { statements : int
+      ; not_conveyed : int
+      }  (** applied *)
+  | Not_judged of copy_not_judged  (** applied, as before the question existed *)
+
+type copy_check =
+  { claim_id : string
+  ; sources : string list  (** the memories the claim named, all still current *)
+  ; verdict : copy_verdict
+  ; requests : int
+  }
+
+val judge_copies
+  :  evaluate:evaluate
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> applied:Keeper_memory_os_types.absorbed_statement list
+  -> copy_check list
+(** The claims of [new_claims] that name memories in [absorbed] (the
+    answer's absorptions) and have none in [applied] (what the gate let
+    through), each asked the reverse question: the claim is cut by
+    {!statements}; the memories it named are joined, in the answer's order,
+    into states of at most {!state_bytes_limit} bytes (a memory over it alone
+    is left out); each state is asked about the statements no earlier state
+    conveyed, in requests of at most {!questions_per_request} questions. The
+    question names the memories, not a claim, as what is under review. A
+    statement is conveyed only above {!conveyed_boundary}: a tie, which
+    absorbs a source in the forward question, would here drop the claim, so
+    it counts as not conveyed. A claim whose id is in [superseding] is not
+    asked. *)
+
+(** {1 Entry point} *)
+
+type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
+
+type direction =
+  | Forward  (** the gate's question: does the claim convey a source's statement *)
+  | Reverse  (** the reverse question: do the sources convey a claim's statement *)
+
+type evaluation =
+  { direction : direction
+  ; destinations : Typesafeai_client.destination_id list
+  ; state : Yojson.Safe.t
+  ; questions : (string * Typesafeai_types.question) list
+  ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
+  }
+(** [destinations] are the armed destinations the request could be walked
+    through, in order and without their keys; [result] names the one that
+    answered and the ones passed over. *)
+
+type run_result =
+  | Skipped of
+      { reason : skip_reason
+      ; absorbed : Keeper_memory_os_types.absorbed_statement list
+      }
+  | Evaluated of
+      { outcome : outcome
+      ; copy_checks : copy_check list
+          (** the reverse question for the claims that absorbed nothing *)
+      ; evaluations : evaluation list  (** forward requests, then reverse ones *)
+      }
+
+type observation =
+  | Incomplete of evaluation list
+  | Complete of run_result
+(** [Incomplete] contains only requests that returned, in request order.
+    It carries no final absorption decision and cannot be passed to
+    {!absorbed_of_run}. *)
+
+val validate_evaluation_answer : evaluation -> (unit, string) result
+(** Validate requested consolidation choices or reverse Noul answers.
+    A transport response alone does not establish a completed judgment. *)
+
+val observation_to_yojson : observation -> Yojson.Safe.t
+
+val evaluation_request_to_yojson
+  :  direction:direction
+  -> destinations:Typesafeai_client.destination_id list
+  -> state:Yojson.Safe.t
+  -> questions:(string * Typesafeai_types.question) list
+  -> Yojson.Safe.t
+(** The exact request fields, without a provider response. This is persisted
+    before dispatch so an in-flight evaluation remains reconstructible after
+    a process restart. *)
+
+(** {1 Original evaluation replay}
+
+    These ports consume host-retained original inputs, not worker judgments
+    or {!observation_to_yojson}. The caller must first validate the physical
+    journal, original input identity and captured gate authority. This pure
+    port neither reads current configuration nor grants execution authority. *)
+
+type replay_authority =
+  | Gate_available of Typesafeai_client.destination_id * Typesafeai_client.destination_id list
+  | Gate_unavailable of Typesafeai_config.unavailable_reason
+(** Availability and ordered destinations captured by the host for the
+    original pass, including explicit disabled/excluded decisions. *)
+
+type live_authority
+(** An original Keeper identity and the once-resolved gate availability and
+    armed destinations. Credentials remain private in memory; this handle
+    has no decoder and cannot be reconstructed from replay evidence. *)
+
+val resolve : keeper_id:string -> live_authority
+(** Capture current gate configuration and credentials once, without any
+    provider call. Explicit disabled/excluded and unavailable states remain
+    distinct. Resolve before retaining the original pass and dispatching it. *)
+val keeper_of_authority : live_authority -> string
+(** The original Keeper bound to this live handle; exposes no credentials. *)
+
+val replay_authority : live_authority -> replay_authority
+(** Credential-free availability and ordered destination identities from the
+    same live snapshot used by {!run_captured}; no configuration is reread. *)
+
+val replay_authority_to_yojson : replay_authority -> Yojson.Safe.t
+val replay_authority_of_yojson : Yojson.Safe.t -> (replay_authority, string) result
+(** Strict versioned codec for original availability and destination identity.
+    Unknown/duplicate fields, empty available walks and credential-bearing
+    endpoint fields refuse. Decoding grants no live execution authority. *)
+
+type retained_evaluation =
+  { request : Yojson.Safe.t
+  ; returned : Yojson.Safe.t option
+  }
+(** [request] is the original {!evaluation_request_to_yojson} persisted by
+    [before_evaluate]; [returned] is {!evaluation_evidence_to_yojson} persisted
+    by [after_evaluate]. [None], an aborted record, and observer projections
+    are not completed evaluation evidence. *)
+
+type replay_error =
+  | Invalid_evidence of { index : int; detail : string }
+  | Incomplete_evaluation of int
+  | Missing_evaluation of int
+  | Extra_evaluations of int
+
+val replay_error_to_string : replay_error -> string
+
+val evaluation_evidence_to_yojson : evaluation -> Yojson.Safe.t
+(** Canonical original request plus typed response/refusal, without computed
+    absorption or copy decisions. Private evidence, not a secret-free view.
+    Pair it with the independently persisted pre-dispatch request. *)
+
+val restore
+  :  authority:replay_authority
+  -> new_observations:Yojson.Safe.t list
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> evaluations:retained_evaluation list
+  -> (run_result, replay_error) result
+(** Rederive the original forward and reverse decisions from complete,
+    strictly decoded returned evaluations, consuming the exact request
+    sequence and answer coverage. Every request is rederived from the original
+    inputs, including state, questions, direction and destinations; successful
+    request-body digests and destination walks are checked. Missing, pending,
+    relabelled or surplus evidence refuses without provider calls. Original
+    transport failures and typed but judgment-invalid answers (including an
+    originally missing requested answer) retain their unsuccessful/partial
+    policy; an unrequested answer identity is rejected. No filesystem or
+    model effects occur. This does not authenticate a caller-supplied input
+    snapshot: original fact IDs and availability must already be bound to the
+    host's immutable original pass, never reconstructed from worker data. *)
+
+val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
+
+val without_copies
+  :  run_result
+  -> Keeper_memory_os_types.fact list
+  -> Keeper_memory_os_types.fact list
+(** The claims to apply without the ones the run judged copies (the
+    [Copy] verdicts of its [copy_checks]); a skipped run judged none. *)
+val run_result_to_yojson : run_result -> Yojson.Safe.t
+(** Observed gate outcome and the actual evaluation responses, for the
+    Librarian run's existing output payload. Forward answers preserve closed
+    choices; reverse answers preserve Noul values without rounding, with
+    [conveyed_boundary] recorded as [reverse_copy_boundary]. The original
+    typed answers, including choice probabilities, are also retained;
+    rejected answers retain their decoder diagnostic.
+    Endpoint and model are captured once per run; a request failure has no
+    fabricated response model or request receipt. Endpoint observations remove
+    userinfo, query and fragment before constructing [evaluation]. HTTP failures
+    retain response bytes except configured credentials; invalid UTF-8 uses
+    the existing base64 representation. Invalid JSON and rejected typed
+    responses remain inspectable.
+    State, question wording and raw responses are private run evidence, like
+    the existing [actual_input]. The existing exact-run HTTP detail requires
+    CanAdmin; this payload is not a public or secret-free projection. *)
+
+val failure_kind : run_result -> failure_kind option
+(** The kind of a failed judgment, [None] when the run judged or skipped.
+    [Input_capacity_exceeded] is the typed pre-dispatch refusal the runtime
+    reads as input-capacity evidence for the admission batch and as its
+    source-range narrowing hint. *)
+
+val failure_detail
+  :  absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> run_result
+  -> string option
+(** For a failed judgment, one line with the reason, how many of [absorbed]
+    were confirmed and kept current, and the request body sha256s. The
+    runtime logs it once, with the lane and snapshot state, and records it
+    in the journal; {!run} does not log a failed judgment itself. [None]
+    for a completed judgment, a pass without absorptions, or an explicitly
+    disabled/excluded gate. An enabled but unavailable gate and a failed
+    reverse request also return a failure, so neither can commit candidates
+    or advance the durable consumer. A skipped evaluation is not necessarily
+    permission to commit. *)
+
+val run_captured
+  :  live_authority
+  -> ?observe:(observation -> unit)
+  -> ?before_evaluate:
+       (direction:direction
+        -> destinations:Typesafeai_client.destination_id list
+        -> state:Yojson.Safe.t
+        -> questions:(string * Typesafeai_types.question) list
+        -> 'evaluation_id)
+  -> ?after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
+  -> ?on_evaluation_aborted:
+       (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
+  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  -> new_observations:Yojson.Safe.t list
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> unit
+  -> run_result
+(** Execute only the captured live authority, using the original inputs.
+    Current configuration and credentials are not reread. The Keeper identity
+    used for logging is captured by {!resolve}. Hooks, observation ordering,
+    protected terminal recording and cancellation have the same contract as
+    {!run}. Persist {!replay_authority} before calling this port; after restart
+    use {!restore} with original transcripts rather than resolving a new live
+    authority to repeat an uncertain evaluation. *)
+
+val continue_captured
+  : keeper_id:string
+  -> authority:replay_authority
+  -> live_authority:live_authority option
+  -> evaluations:retained_evaluation list
+  -> before_evaluate:(direction:direction
+       -> destinations:Typesafeai_client.destination_id list -> state:Yojson.Safe.t
+       -> questions:(string * Typesafeai_types.question) list -> 'evaluation_id)
+  -> after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
+  -> on_evaluation_aborted:(evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
+  -> new_observations:Yojson.Safe.t list
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> unit -> (run_result, replay_error) result
+(** Replay the strict completed prefix through the same decision implementation
+    as restore, then execute only questions beyond that prefix. A retained
+    request without a returned answer refuses without another provider call.
+    Every new question requires the original Keeper and exactly matching
+    captured live/replay authority. With no needed new question, no live handle
+    or configuration is required. Hooks retain requests before dispatch and
+    protect terminal/aborted recording exactly as run_captured does. *)
+
+val run
+  :  ?observe:(observation -> unit)
+  -> ?before_evaluate:
+       (direction:direction
+        -> destinations:Typesafeai_client.destination_id list
+        -> state:Yojson.Safe.t
+        -> questions:(string * Typesafeai_types.question) list
+        -> 'evaluation_id)
+  -> ?after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
+  -> ?on_evaluation_aborted:
+       (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
+  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  -> keeper_id:string
+  -> new_observations:Yojson.Safe.t list
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> unit
+  -> run_result
+(** Reads {!Typesafeai_config} and judges with {!Typesafeai_client.evaluate}
+    when enabled. {!absorbed_of_run} is the unchanged application decision;
+    the result also retains skipped reasons and actual request observations
+    for the existing durable Librarian run detail. [observe] is called after
+    each returned evaluation, before another request can yield, then with
+    [Complete] on normal return. It must only update the caller's in-memory
+    observation without I/O or yielding. [before_evaluate] runs before each
+    provider dispatch and must durably record the exact request, returning its
+    opaque token (which may pair its identity with a monotonic start value).
+    [after_evaluate] receives that same token and closes the record after a provider result;
+    [on_evaluation_aborted] closes it when dispatch raises. Cancellation is
+    propagated unchanged. *)

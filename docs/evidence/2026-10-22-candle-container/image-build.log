@@ -1,0 +1,41 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 154B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.12-slim
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 DONE 0.0s
+
+#5 [1/3] FROM docker.io/library/python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+#5 resolve docker.io/library/python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 0.0s done
+#5 DONE 0.0s
+
+#4 [internal] load build context
+#4 transferring context: 21.06kB done
+#4 DONE 0.0s
+
+#6 [2/3] COPY protocol.py /protocol.py
+#6 CACHED
+
+#7 [3/3] WORKDIR /addon
+#7 CACHED
+
+#8 exporting to image
+#8 exporting layers done
+#8 exporting manifest sha256:a3f5f9c408fc256960349e1aca233a936bfb91f82d5f291b05e035800bc14645 0.0s done
+#8 exporting config sha256:555a7d61dbbb5a52ce482b5547260f18e05f104ee3c5ae69ed90004347ca61e9 done
+#8 exporting attestation manifest sha256:99ba5a70e3c5023fdd7de5f8058a93dde90277ce0d75176382d713700ffc9bd0 0.0s done
+#8 exporting manifest list sha256:dfa4491a3c5c6ffac467e2e2ac2aa58cd46109d38fafea0f2ec0b492ce6ee00a done
+#8 naming to docker.io/library/masc-candle-proof:d35d2559-0c67b092c532 done
+#8 unpacking to docker.io/library/masc-candle-proof:d35d2559-0c67b092c532 done
+#8 DONE 0.1s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/j5esyl5rgyu5yzzzb45wufknf

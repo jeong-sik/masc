@@ -1,0 +1,47 @@
+{
+  "schema": "masc.independent-source-delta-review.v3",
+  "reviewer": "/root/concurrent_probe_review",
+  "previous_report": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owned-concurrent-scale-source-review-v2",
+  "previous_full_diff_sha256": "edbc65cd679a6a5c3d57da12136635a0b42cec832ee5d0d51c046f46f1b0ddeb",
+  "parent_revision": "4ac6dce147d735d74440263ad79071da34d77878",
+  "app_api_authority": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "checkout_head": "4ac6dce147d735d74440263ad79071da34d77878",
+  "v2_source_reconstruction": "Applied frozen v2 reviewed.diff to git parent in memory; all four reconstructed file hashes equal frozen manifest. No target edits.",
+  "delta_sha256": "06c0ee130da45524d71e694253839124520755669a8c37a3b6eeca1443314699",
+  "full_diff_sha256": "d40158cb9438fab13b8ce23776ec05421f6129bb032a763134a796654abce584",
+  "files": [
+    {
+      "path": "scripts/harness/perf/README-keeper-scale-session.md",
+      "v2_frozen_sha256": "0ab3b926cde79ef7cd325733b489fc5d2cd2d7cddc18fd324367d6ff1ec8b36e",
+      "sha256": "0ab3b926cde79ef7cd325733b489fc5d2cd2d7cddc18fd324367d6ff1ec8b36e",
+      "bytes": 5494,
+      "lines": 94,
+      "changed": false
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_fault_probe.py",
+      "v2_frozen_sha256": "bb788cb70fe91301f922b5b8aedc257f039e92b5a87fefebe3b6beb0e34b5822",
+      "sha256": "d8d2bb4540bd888ea89b96d9bfc275b5733cba339aa95a0b06845f0c418d2f4b",
+      "bytes": 14526,
+      "lines": 245,
+      "changed": true
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_packet_audit.py",
+      "v2_frozen_sha256": "e355de804fbf64d9f52237f9ffdb3ba0e1c04fe424a1874f674fb6fad2b739f0",
+      "sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+      "bytes": 26578,
+      "lines": 410,
+      "changed": true
+    },
+    {
+      "path": "scripts/harness/perf/keeper_scale_session.py",
+      "v2_frozen_sha256": "c9e8f173d4e69b4c63d3472c15d8b7377501875d4b6f455028e899288662f9da",
+      "sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+      "bytes": 55341,
+      "lines": 1016,
+      "changed": true
+    }
+  ],
+  "scope": "delta-only source review; no Dune, MASC native, CI or network execution"
+}

@@ -1,0 +1,118 @@
+{
+  "workspace": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace",
+  "physical_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/volume",
+  "layout": ".masc symlink to sibling owned temporary directory; no actual mount needed",
+  "commands": [
+    {
+      "label": "candidate-identity",
+      "binary": "/tmp/skill-refresh-native-575/runtime/masc-macos-arm64",
+      "arguments": [
+        "build-commit"
+      ],
+      "exit": 0,
+      "stdout": "575fd0f948d4b1929ab88693c7f8587ef2677ae0\n",
+      "stderr": "[2026-09-12 22:03:03] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "before-mounted-deployment",
+      "binary": "/tmp/skill-refresh-native-39ab/runtime/masc-macos-arm64",
+      "arguments": [
+        "init",
+        "--skills-only",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace"
+      ],
+      "exit": 125,
+      "stdout": "",
+      "stderr": "[2026-09-12 22:03:03] [INFO] [MCP] Tag registry initialized: 163 tools registered\nmasc: internal error, uncaught exception:\n      Sys_error(\"Skill package path is not an owned regular tree: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace/.masc\")\n      \n"
+    },
+    {
+      "label": "candidate-mounted-deployment",
+      "binary": "/tmp/skill-refresh-native-575/runtime/masc-macos-arm64",
+      "arguments": [
+        "init",
+        "--skills-only",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace"
+      ],
+      "exit": 0,
+      "stdout": "init: 0 written, 0 skipped, 0 failed, 12 builtin Skill package(s) installed or updated (root=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace/.masc/config)\n",
+      "stderr": "[2026-09-12 22:03:03] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "inspect-linked-operator-tree",
+      "binary": "/tmp/skill-refresh-native-575/runtime/masc-macos-arm64",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace"
+      ],
+      "exit": 0,
+      "stdout": "package: browser-lanes\ninstalled revision: b50e10cc2106c2b03716faa89dbbf16c75d952ecb72745a8851c95fa53dbecf6\nbundled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\nownership: modified since installation; review operator changes before replacement\nReview the complete package, then use --apply --expected-revision b50e10cc2106c2b03716faa89dbbf16c75d952ecb72745a8851c95fa53dbecf6 --expected-bundle-revision 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c.\n",
+      "stderr": "[2026-09-12 22:03:03] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "export-candidate-bundle",
+      "binary": "/tmp/skill-refresh-native-575/runtime/masc-macos-arm64",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace",
+        "--export-to",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/reviewed-export"
+      ],
+      "exit": 0,
+      "stdout": "Bundled package exported to /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/reviewed-export\nbundled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\n",
+      "stderr": "[2026-09-12 22:03:03] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "apply-reviewed-tree-through-link",
+      "binary": "/tmp/skill-refresh-native-575/runtime/masc-macos-arm64",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace",
+        "--apply",
+        "--expected-revision",
+        "b50e10cc2106c2b03716faa89dbbf16c75d952ecb72745a8851c95fa53dbecf6",
+        "--expected-bundle-revision",
+        "6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c"
+      ],
+      "exit": 0,
+      "stdout": "Updated browser-lanes; previous package: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/volume/skill-packages/browser-lanes-cd332d\nRefresh the running Skill catalog before a new instruction invocation.\n",
+      "stderr": "[2026-09-12 22:03:03] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "inspect-recorded-physical-tree",
+      "binary": "/tmp/skill-refresh-native-575/runtime/masc-macos-arm64",
+      "arguments": [
+        "skills-refresh",
+        "browser-lanes",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-mounted-skill-probe-7v3ikida/workspace"
+      ],
+      "exit": 0,
+      "stdout": "package: browser-lanes\ninstalled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\nbundled revision: 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c\nownership: recorded, unchanged since installation\nReview the complete package, then use --apply --expected-revision 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c --expected-bundle-revision 6fbc51f16d2dceccde57330feddbb277c8dc7e7d065cf7913f094a6a93ce360c.\n",
+      "stderr": "[2026-09-12 22:03:03] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    }
+  ],
+  "checks": [
+    "39ab rejects supported deployment symlink; 575 installs through same link",
+    "physical root outside base contains package, receipt and complete backup",
+    "inspect and explicit reviewed replacement both follow the deployment root",
+    "published package matches actual reviewed export including paths, bytes and modes",
+    "operator deployment symlink remains unchanged"
+  ],
+  "binary_sha256": {
+    "before_39ab": "851155332616a581227dd35bcd7e17b151f6ebf7d21fd26889859502de30bb1c",
+    "candidate_575": "8ffc24e609b97316a16b6d95d5394540a060c769da6f8b9419759961c7f7f0a4"
+  },
+  "candidate_source_commit": "575fd0f948d4b1929ab88693c7f8587ef2677ae0",
+  "limitations": [
+    "Only isolated synthetic files; no live runtime or installed binary changed",
+    "No physical filesystem mount or concurrent external-editor race exercised"
+  ]
+}

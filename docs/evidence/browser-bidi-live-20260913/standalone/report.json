@@ -1,0 +1,250 @@
+{
+  "command": [
+    "/Applications/Firefox.app/Contents/MacOS/firefox",
+    "--headless",
+    "--no-remote",
+    "--profile",
+    "/tmp/masc-bidi-pointer-7zgpmcne/profile",
+    "--remote-debugging-port",
+    "61780"
+  ],
+  "pid": 26867,
+  "success": true,
+  "session": {
+    "sessionId": "30de35c4-b910-48ed-bedf-deaf2fb5c73d",
+    "capabilities": {
+      "acceptInsecureCerts": false,
+      "browserName": "firefox",
+      "browserVersion": "155.0.1",
+      "platformName": "mac",
+      "setWindowRect": true,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:155.0) Gecko/20100101 Firefox/155.0",
+      "moz:buildID": "20260903215306",
+      "moz:headless": true,
+      "moz:platformVersion": "25.6.0",
+      "moz:processID": 26867,
+      "moz:profile": "/tmp/masc-bidi-pointer-7zgpmcne/profile",
+      "moz:shutdownTimeout": 60000
+    }
+  },
+  "tree": {
+    "contexts": [
+      {
+        "children": [],
+        "context": "faa5d69e-018c-4a70-8c5c-45c6244e3fea",
+        "originalOpener": null,
+        "url": "about:home",
+        "userContext": "default",
+        "clientWindow": "e66626e7-bfb5-4389-b544-e85db319041c",
+        "parent": null
+      },
+      {
+        "children": [],
+        "context": "fd4b0b67-c86f-45c0-a16e-b59f93d8109d",
+        "originalOpener": null,
+        "url": "data:text/html,%3C%21doctype%20html%3E%3Ctitle%3EOwned%20BiDi%20drag%20fixture%3C/title%3E%3Cstyle%3E%23pad%7Bwidth%3A450px%3Bheight%3A250px%3Bbackground%3Alightblue%7Dbody%7Bmargin%3A0%7D%3C/style%3E%3Cdiv%20id%3D%22pad%22%3EDrag%20this%20area%3C/div%3E%3Cpre%20id%3D%22status%22%3Euntouched%3C/pre%3E%3Cscript%3Ewindow.events%3D%5B%5D%3Blet%20held%3Dfalse%3Bfor%28const%20type%20of%20%5B%27pointerdown%27%2C%27pointermove%27%2C%27pointerup%27%5D%29document.querySelector%28%27%23pad%27%29.addEventListener%28type%2Ce%3D%3E%7Bif%28type%3D%3D%3D%27pointerdown%27%29held%3Dtrue%3Bif%28held%29%7Bevents.push%28%7Btype%3Ae.type%2Ctrusted%3Ae.isTrusted%2Cx%3Ae.clientX%2Cy%3Ae.clientY%7D%29%3Bdocument.querySelector%28%27%23status%27%29.textContent%3DJSON.stringify%28events%29%7Dif%28type%3D%3D%3D%27pointerup%27%29held%3Dfalse%3B%7D%29%3B%3C/script%3E",
+        "userContext": "default",
+        "clientWindow": "e66626e7-bfb5-4389-b544-e85db319041c",
+        "parent": null
+      },
+      {
+        "children": [],
+        "context": "b480cc38-b853-4101-9420-2d108702eda9",
+        "originalOpener": null,
+        "url": "data:text/html,%3C%21doctype%20html%3E%3Ctitle%3EOwned%20BiDi%20drag%20fixture%3C/title%3E%3Cstyle%3E%23pad%7Bwidth%3A450px%3Bheight%3A250px%3Bbackground%3Alightblue%7Dbody%7Bmargin%3A0%7D%3C/style%3E%3Cdiv%20id%3D%22pad%22%3EDrag%20this%20area%3C/div%3E%3Cpre%20id%3D%22status%22%3Euntouched%3C/pre%3E%3Cscript%3Ewindow.events%3D%5B%5D%3Blet%20held%3Dfalse%3Bfor%28const%20type%20of%20%5B%27pointerdown%27%2C%27pointermove%27%2C%27pointerup%27%5D%29document.querySelector%28%27%23pad%27%29.addEventListener%28type%2Ce%3D%3E%7Bif%28type%3D%3D%3D%27pointerdown%27%29held%3Dtrue%3Bif%28held%29%7Bevents.push%28%7Btype%3Ae.type%2Ctrusted%3Ae.isTrusted%2Cx%3Ae.clientX%2Cy%3Ae.clientY%7D%29%3Bdocument.querySelector%28%27%23status%27%29.textContent%3DJSON.stringify%28events%29%7Dif%28type%3D%3D%3D%27pointerup%27%29held%3Dfalse%3B%7D%29%3B%3C/script%3E",
+        "userContext": "default",
+        "clientWindow": "e66626e7-bfb5-4389-b544-e85db319041c",
+        "parent": null
+      }
+    ]
+  },
+  "contexts": [
+    "fd4b0b67-c86f-45c0-a16e-b59f93d8109d",
+    "b480cc38-b853-4101-9420-2d108702eda9"
+  ],
+  "before": [
+    {
+      "url": "data:text/html,%3C%21doctype%20html%3E%3Ctitle%3EOwned%20BiDi%20drag%20fixture%3C/title%3E%3Cstyle%3E%23pad%7Bwidth%3A450px%3Bheight%3A250px%3Bbackground%3Alightblue%7Dbody%7Bmargin%3A0%7D%3C/style%3E%3Cdiv%20id%3D%22pad%22%3EDrag%20this%20area%3C/div%3E%3Cpre%20id%3D%22status%22%3Euntouched%3C/pre%3E%3Cscript%3Ewindow.events%3D%5B%5D%3Blet%20held%3Dfalse%3Bfor%28const%20type%20of%20%5B%27pointerdown%27%2C%27pointermove%27%2C%27pointerup%27%5D%29document.querySelector%28%27%23pad%27%29.addEventListener%28type%2Ce%3D%3E%7Bif%28type%3D%3D%3D%27pointerdown%27%29held%3Dtrue%3Bif%28held%29%7Bevents.push%28%7Btype%3Ae.type%2Ctrusted%3Ae.isTrusted%2Cx%3Ae.clientX%2Cy%3Ae.clientY%7D%29%3Bdocument.querySelector%28%27%23status%27%29.textContent%3DJSON.stringify%28events%29%7Dif%28type%3D%3D%3D%27pointerup%27%29held%3Dfalse%3B%7D%29%3B%3C/script%3E",
+      "text": "Drag this area\nuntouched",
+      "events": []
+    },
+    {
+      "url": "data:text/html,%3C%21doctype%20html%3E%3Ctitle%3EOwned%20BiDi%20drag%20fixture%3C/title%3E%3Cstyle%3E%23pad%7Bwidth%3A450px%3Bheight%3A250px%3Bbackground%3Alightblue%7Dbody%7Bmargin%3A0%7D%3C/style%3E%3Cdiv%20id%3D%22pad%22%3EDrag%20this%20area%3C/div%3E%3Cpre%20id%3D%22status%22%3Euntouched%3C/pre%3E%3Cscript%3Ewindow.events%3D%5B%5D%3Blet%20held%3Dfalse%3Bfor%28const%20type%20of%20%5B%27pointerdown%27%2C%27pointermove%27%2C%27pointerup%27%5D%29document.querySelector%28%27%23pad%27%29.addEventListener%28type%2Ce%3D%3E%7Bif%28type%3D%3D%3D%27pointerdown%27%29held%3Dtrue%3Bif%28held%29%7Bevents.push%28%7Btype%3Ae.type%2Ctrusted%3Ae.isTrusted%2Cx%3Ae.clientX%2Cy%3Ae.clientY%7D%29%3Bdocument.querySelector%28%27%23status%27%29.textContent%3DJSON.stringify%28events%29%7Dif%28type%3D%3D%3D%27pointerup%27%29held%3Dfalse%3B%7D%29%3B%3C/script%3E",
+      "text": "Drag this area\nuntouched",
+      "events": []
+    }
+  ],
+  "after_first": [
+    {
+      "url": "data:text/html,%3C%21doctype%20html%3E%3Ctitle%3EOwned%20BiDi%20drag%20fixture%3C/title%3E%3Cstyle%3E%23pad%7Bwidth%3A450px%3Bheight%3A250px%3Bbackground%3Alightblue%7Dbody%7Bmargin%3A0%7D%3C/style%3E%3Cdiv%20id%3D%22pad%22%3EDrag%20this%20area%3C/div%3E%3Cpre%20id%3D%22status%22%3Euntouched%3C/pre%3E%3Cscript%3Ewindow.events%3D%5B%5D%3Blet%20held%3Dfalse%3Bfor%28const%20type%20of%20%5B%27pointerdown%27%2C%27pointermove%27%2C%27pointerup%27%5D%29document.querySelector%28%27%23pad%27%29.addEventListener%28type%2Ce%3D%3E%7Bif%28type%3D%3D%3D%27pointerdown%27%29held%3Dtrue%3Bif%28held%29%7Bevents.push%28%7Btype%3Ae.type%2Ctrusted%3Ae.isTrusted%2Cx%3Ae.clientX%2Cy%3Ae.clientY%7D%29%3Bdocument.querySelector%28%27%23status%27%29.textContent%3DJSON.stringify%28events%29%7Dif%28type%3D%3D%3D%27pointerup%27%29held%3Dfalse%3B%7D%29%3B%3C/script%3E",
+      "text": "Drag this area\n[{\"type\":\"pointerdown\",\"trusted\":true,\"x\":40,\"y\":40},{\"type\":\"pointermove\",\"trusted\":true,\"x\":60,\"y\":51},{\"type\":\"pointermove\",\"trusted\":true,\"x\":84,\"y\":65},{\"type\":\"pointermove\",\"trusted\":true,\"x\":108,\"y\":78},{\"type\":\"pointermove\",\"trusted\":true,\"x\":135,\"y\":94},{\"type\":\"pointermove\",\"trusted\":true,\"x\":154,\"y\":105},{\"type\":\"pointermove\",\"trusted\":true,\"x\":180,\"y\":120},{\"type\":\"pointerup\",\"trusted\":true,\"x\":180,\"y\":120}]",
+      "events": [
+        {
+          "type": "pointerdown",
+          "trusted": true,
+          "x": 40,
+          "y": 40
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 60,
+          "y": 51
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 84,
+          "y": 65
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 108,
+          "y": 78
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 135,
+          "y": 94
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 154,
+          "y": 105
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 180,
+          "y": 120
+        },
+        {
+          "type": "pointerup",
+          "trusted": true,
+          "x": 180,
+          "y": 120
+        }
+      ]
+    },
+    {
+      "url": "data:text/html,%3C%21doctype%20html%3E%3Ctitle%3EOwned%20BiDi%20drag%20fixture%3C/title%3E%3Cstyle%3E%23pad%7Bwidth%3A450px%3Bheight%3A250px%3Bbackground%3Alightblue%7Dbody%7Bmargin%3A0%7D%3C/style%3E%3Cdiv%20id%3D%22pad%22%3EDrag%20this%20area%3C/div%3E%3Cpre%20id%3D%22status%22%3Euntouched%3C/pre%3E%3Cscript%3Ewindow.events%3D%5B%5D%3Blet%20held%3Dfalse%3Bfor%28const%20type%20of%20%5B%27pointerdown%27%2C%27pointermove%27%2C%27pointerup%27%5D%29document.querySelector%28%27%23pad%27%29.addEventListener%28type%2Ce%3D%3E%7Bif%28type%3D%3D%3D%27pointerdown%27%29held%3Dtrue%3Bif%28held%29%7Bevents.push%28%7Btype%3Ae.type%2Ctrusted%3Ae.isTrusted%2Cx%3Ae.clientX%2Cy%3Ae.clientY%7D%29%3Bdocument.querySelector%28%27%23status%27%29.textContent%3DJSON.stringify%28events%29%7Dif%28type%3D%3D%3D%27pointerup%27%29held%3Dfalse%3B%7D%29%3B%3C/script%3E",
+      "text": "Drag this area\nuntouched",
+      "events": []
+    }
+  ],
+  "after": [
+    {
+      "url": "data:text/html,%3C%21doctype%20html%3E%3Ctitle%3EOwned%20BiDi%20drag%20fixture%3C/title%3E%3Cstyle%3E%23pad%7Bwidth%3A450px%3Bheight%3A250px%3Bbackground%3Alightblue%7Dbody%7Bmargin%3A0%7D%3C/style%3E%3Cdiv%20id%3D%22pad%22%3EDrag%20this%20area%3C/div%3E%3Cpre%20id%3D%22status%22%3Euntouched%3C/pre%3E%3Cscript%3Ewindow.events%3D%5B%5D%3Blet%20held%3Dfalse%3Bfor%28const%20type%20of%20%5B%27pointerdown%27%2C%27pointermove%27%2C%27pointerup%27%5D%29document.querySelector%28%27%23pad%27%29.addEventListener%28type%2Ce%3D%3E%7Bif%28type%3D%3D%3D%27pointerdown%27%29held%3Dtrue%3Bif%28held%29%7Bevents.push%28%7Btype%3Ae.type%2Ctrusted%3Ae.isTrusted%2Cx%3Ae.clientX%2Cy%3Ae.clientY%7D%29%3Bdocument.querySelector%28%27%23status%27%29.textContent%3DJSON.stringify%28events%29%7Dif%28type%3D%3D%3D%27pointerup%27%29held%3Dfalse%3B%7D%29%3B%3C/script%3E",
+      "text": "Drag this area\n[{\"type\":\"pointerdown\",\"trusted\":true,\"x\":40,\"y\":40},{\"type\":\"pointermove\",\"trusted\":true,\"x\":60,\"y\":51},{\"type\":\"pointermove\",\"trusted\":true,\"x\":84,\"y\":65},{\"type\":\"pointermove\",\"trusted\":true,\"x\":108,\"y\":78},{\"type\":\"pointermove\",\"trusted\":true,\"x\":135,\"y\":94},{\"type\":\"pointermove\",\"trusted\":true,\"x\":154,\"y\":105},{\"type\":\"pointermove\",\"trusted\":true,\"x\":180,\"y\":120},{\"type\":\"pointerup\",\"trusted\":true,\"x\":180,\"y\":120}]",
+      "events": [
+        {
+          "type": "pointerdown",
+          "trusted": true,
+          "x": 40,
+          "y": 40
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 60,
+          "y": 51
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 84,
+          "y": 65
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 108,
+          "y": 78
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 135,
+          "y": 94
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 154,
+          "y": 105
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 180,
+          "y": 120
+        },
+        {
+          "type": "pointerup",
+          "trusted": true,
+          "x": 180,
+          "y": 120
+        }
+      ]
+    },
+    {
+      "url": "data:text/html,%3C%21doctype%20html%3E%3Ctitle%3EOwned%20BiDi%20drag%20fixture%3C/title%3E%3Cstyle%3E%23pad%7Bwidth%3A450px%3Bheight%3A250px%3Bbackground%3Alightblue%7Dbody%7Bmargin%3A0%7D%3C/style%3E%3Cdiv%20id%3D%22pad%22%3EDrag%20this%20area%3C/div%3E%3Cpre%20id%3D%22status%22%3Euntouched%3C/pre%3E%3Cscript%3Ewindow.events%3D%5B%5D%3Blet%20held%3Dfalse%3Bfor%28const%20type%20of%20%5B%27pointerdown%27%2C%27pointermove%27%2C%27pointerup%27%5D%29document.querySelector%28%27%23pad%27%29.addEventListener%28type%2Ce%3D%3E%7Bif%28type%3D%3D%3D%27pointerdown%27%29held%3Dtrue%3Bif%28held%29%7Bevents.push%28%7Btype%3Ae.type%2Ctrusted%3Ae.isTrusted%2Cx%3Ae.clientX%2Cy%3Ae.clientY%7D%29%3Bdocument.querySelector%28%27%23status%27%29.textContent%3DJSON.stringify%28events%29%7Dif%28type%3D%3D%3D%27pointerup%27%29held%3Dfalse%3B%7D%29%3B%3C/script%3E",
+      "text": "Drag this area\n[{\"type\":\"pointerdown\",\"trusted\":true,\"x\":40,\"y\":40},{\"type\":\"pointermove\",\"trusted\":true,\"x\":72,\"y\":55},{\"type\":\"pointermove\",\"trusted\":true,\"x\":97,\"y\":67},{\"type\":\"pointermove\",\"trusted\":true,\"x\":152,\"y\":92},{\"type\":\"pointermove\",\"trusted\":true,\"x\":177,\"y\":104},{\"type\":\"pointermove\",\"trusted\":true,\"x\":206,\"y\":118},{\"type\":\"pointermove\",\"trusted\":true,\"x\":210,\"y\":120},{\"type\":\"pointerup\",\"trusted\":true,\"x\":210,\"y\":120}]",
+      "events": [
+        {
+          "type": "pointerdown",
+          "trusted": true,
+          "x": 40,
+          "y": 40
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 72,
+          "y": 55
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 97,
+          "y": 67
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 152,
+          "y": 92
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 177,
+          "y": 104
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 206,
+          "y": 118
+        },
+        {
+          "type": "pointermove",
+          "trusted": true,
+          "x": 210,
+          "y": 120
+        },
+        {
+          "type": "pointerup",
+          "trusted": true,
+          "x": 210,
+          "y": 120
+        }
+      ]
+    }
+  ],
+  "process_returncode": -15,
+  "owned_process_exited": true
+}

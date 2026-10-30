@@ -1,0 +1,5 @@
+head: 4a08c8a2bee6862297cae4a2cc3db00d231b854b
+command: opam exec -- dune build -j 4 lib/masc.cmxa lib/dated_jsonl/dated_jsonl.cmxa
+
+exit_code: 0
+elapsed_seconds: 95.636

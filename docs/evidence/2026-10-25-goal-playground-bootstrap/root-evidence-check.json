@@ -1,0 +1,12 @@
+{
+  "schema": "masc.goal-bootstrap.root-evidence-check.v1",
+  "frozen_manifest_sha256": "35e24bd1ab9001ef25d143cc19aa61ea5c0a93e7d99cd75eac0cd4047e34050f",
+  "verified_hash_counts": {
+    "primary_copies": 16,
+    "retained_originals": 218
+  },
+  "actual_source_values_rechecked": true,
+  "three_tasks_done": true,
+  "two_goals_awaiting_confirmation": true,
+  "scope": "Root direct file/hash/state review. Does not replace independent whole-wire audit or establish new source/bootstrap runtime execution."
+}

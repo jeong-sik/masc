@@ -1,0 +1,2635 @@
+(** Optional observer lifecycle through the public dispatch surface. The fake
+    package supplies barriers; no model response or Docker daemon is involved. *)
+open Alcotest
+open Masc
+module Host_runtime = Runtime
+module Runtime = struct
+  include Lane_addon_runtime
+  let dispatch ?caller ?access ~config ~operation args =
+    let access = Option.value ~default:(match caller with
+      | None -> Lane_addon_sources.Operator_configuration
+      | Some keeper -> Lane_addon_sources.Keeper keeper) access in
+    Lane_addon_runtime.dispatch ?caller ~access ~config ~operation args
+    |> Result.map_error Lane_addon_runtime.error_to_string
+end
+module Types = Lane_addon_types
+module Store = Lane_addon_store
+module Fake = Lane_addon_fake_engine
+module Lifecycle = Lane_addon_lifecycle
+
+let ( let* ) = Result.bind
+let unwrap = function Ok value -> value | Error message -> fail message
+let member key json = Yojson.Safe.Util.member key json
+let text key json = member key json |> Yojson.Safe.Util.to_string
+let int key json = member key json |> Yojson.Safe.Util.to_int
+let write path bytes =
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel bytes)
+let rec remove_tree path =
+  if Sys.is_directory path then begin
+    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    Unix.rmdir path
+  end else Sys.remove path
+
+type fake = {
+  bindings : (string, Yojson.Safe.t) Hashtbl.t;
+  calls : (string, int) Hashtbl.t;
+  stops : (string, int) Hashtbl.t;
+  modes : (string, string) Hashtbl.t;
+  recovery : (string * string) list ref;
+  principals : Lane_addon_call_context.principal list ref;
+  export_arguments : Yojson.Safe.t list ref;
+  controller : string option ref;
+  admissions : Machine_controller_contract.admission option list ref;
+  call_hold : unit Eio.Promise.t option ref;
+  start_gate : unit Eio.Promise.t * unit Eio.Promise.u;
+  teardown_gate : unit Eio.Promise.t * unit Eio.Promise.u;
+  world : Fake.t;
+  home : Fake.engine;
+}
+
+let fake_output : Types.output = {
+  rows = [{ id = "raw-event"; lane_id = "fixture/observation"; kind = Types.Event;
+    title = "Actual source bytes retained"; observed_at = 1.; subject_id = "target";
+    clock = None; actor = None; fields = []; evidence = []; related_ids = [] }];
+  coverage = [{source_id="fixture"; incarnation="run-1"; cursor=Some "1";
+               complete=true; detail=None}];
+}
+
+(* What the fake worker declares on its private effect port, as the DOS worker
+   declares masc_dos_screen and masc_dos_step. [hinted_read] is shaped like
+   onepassword_status: MCP readOnlyHint true and no declaration. *)
+let declared_read = "fixture_read"
+let declared_write = "fixture_write"
+let hinted_read = "fixture_hinted"
+let declared_effects = [declared_read, Lane_addon_call_context.Reads_only;
+  declared_write, Lane_addon_call_context.May_change]
+let argument_set name arguments =
+  match arguments with
+  | `Assoc fields -> List.assoc_opt name fields = Some (`Bool true)
+  | _ -> false
+
+let make_backend ?observe_step () =
+  let home = Fake.docker "engine-a" in
+  let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
+                recovery=ref []; principals=ref []; export_arguments=ref []; controller=ref None; admissions=ref [];
+                call_hold=ref None;
+                start_gate = Eio.Promise.create (); teardown_gate = Eio.Promise.create ();
+                world = Fake.create home; home } in
+  let proven ~engine work =
+    Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
+  let backend : Runtime.For_testing.backend = {
+    start = (fun ~sw ~state_owner:_ ~instance_id ~installation_id:_ ~(package : Types.package) ~binding ~on_authority ~is_live_instance:_ ~on_created ->
+      let* container = Types.container package
+        |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
+      match (Fake.port state.world).read_engine () with
+      | Error (Lifecycle.Unreachable detail) -> Error (Lifecycle.Engine_unreachable detail)
+      | Error (Lifecycle.Identity_unreadable detail) -> Error (Lifecycle.Worker_failed detail)
+      | Ok engine ->
+      let released, release = Eio.Promise.create () in
+      let stopped = ref false in
+      Hashtbl.add state.modes instance_id package.id;
+      Hashtbl.add state.bindings instance_id binding;
+      (* Real workers retain the Tool objects from protocol initialization. *)
+      let input_schema = match package.id with
+        | "closed-export" -> `Assoc ["type",`String "object";"properties",`Assoc [];
+            "additionalProperties",`Bool false]
+        | _ -> `Assoc ["type",`String "object"] in
+      let exported_tools = List.map (fun name ->
+        let annotations = if name = hinted_read
+          then ["annotations", `Assoc ["readOnlyHint", `Bool true]] else [] in
+        match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc (["name",`String name;
+          "inputSchema",input_schema] @ annotations)) with
+        | Ok tool -> tool | Error message -> fail message) package.exported_tools in
+      let connection : Runtime.For_testing.connection = {browser=None;
+        await_exit = (fun () -> Eio.Fiber.await_cancel ());
+        resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
+          | Ok image -> Some image | Error detail -> Alcotest.fail detail);
+                resource = Lifecycle.Container_resource (Store.digest instance_id);
+        (* A package that waits on the host lists no requests; its host cycle
+           only ends with the observation every cycle ends with. *)
+        host = (if package.id = "declared-read-host" then
+            Some {list_requests=(fun () -> Ok (`Assoc ["requests", `List []]));
+              deliver=(fun ~arguments:_ -> Error "the fixture lists no request");
+              await_change=None}
+          else None);
+        exported_tools = (fun () -> exported_tools);
+        call_exported_tool = (fun ~companion:_ ~on_result:_ ~on_dispatch ~authorize ~principal ~name:_ ~arguments ->
+          state.principals := principal :: !(state.principals);
+          state.export_arguments := arguments :: !(state.export_arguments);
+          let invoke admission =
+            on_dispatch ();
+            state.admissions := admission :: !(state.admissions);
+            if package.id = "export-hang" then begin
+              Hashtbl.replace state.calls (instance_id ^ "/export") 1;
+              Eio.Promise.await released
+            end;
+            Option.iter Eio.Promise.await !(state.call_hold);
+            if package.id = "export-error" || argument_set "lose" arguments then
+              Error (Lane_addon_call_context.Transport_error "response lost after possible mutation")
+            else if argument_set "refuse" arguments then
+              Error (Lane_addon_call_context.Host_refusal (Lane_addon_call_context.Rejected "fixture refusal"))
+            else if argument_set "fail" arguments then
+              Ok {(Mcp_protocol.Mcp_types.tool_result_of_text instance_id) with
+                  Mcp_protocol.Mcp_types.is_error = Some true}
+            else Ok (Mcp_protocol.Mcp_types.tool_result_of_text instance_id) in
+          match authorize with
+          | None -> invoke None
+          | Some authorize -> authorize ~release_controller:(fun ~holder:_ ~reason:_ ->
+              Error (Lane_addon_call_context.Transport_error "release fixture unavailable"))
+              ~snapshot:(fun () -> on_dispatch (); Ok !(state.controller)) ~invoke);
+        operator_schema=(fun () -> None);
+      companion_tools=(fun () -> []);
+        observation_effect=(fun name -> match List.assoc_opt name declared_effects with
+          | Some declared -> declared
+          | None -> Lane_addon_call_context.May_change);
+        call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
+        action_schema = (fun () -> None);
+        act = (fun ~arguments:_ -> Error "read-only fixture");
+        observe = (fun ~binding:_ ~sources:_ ->
+          let call = 1 + Option.value ~default:0 (Hashtbl.find_opt state.calls instance_id) in
+          Hashtbl.replace state.calls instance_id call;
+          Option.iter (fun step -> step call) observe_step;
+          match package.id with
+          | "hang" -> Eio.Promise.await released; Error "observer stopped"
+          | "error" -> Error "observation unavailable"
+          | _ -> Ok fake_output);
+        stop = (fun () ->
+          let count = 1 + Option.value ~default:0 (Hashtbl.find_opt state.stops instance_id) in
+          Hashtbl.replace state.stops instance_id count;
+          if package.id = "stop-retry" && count = 1 then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "cleanup refused")
+          else if package.id = "stop-cut-short" && count = 1 then Eio.Fiber.await_cancel ()
+          else
+            proven ~engine (fun () -> Fake.remove state.world (Store.digest instance_id); Ok ())
+            |> Result.map (fun () ->
+              if not !stopped then (stopped := true; Eio.Promise.resolve release ());
+              Lifecycle.Released {engine;container_id=Some (Store.digest instance_id)}))
+      } in
+      if package.id = "start-error" then Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
+      else if package.id = "start-gated" then begin
+        (* The worker's own teardown outlives the failure it reports, as a real
+           worker's container cleanup does. *)
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.await (fst state.teardown_gate));
+        Eio.Promise.await (fst state.start_gate);
+        Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
+      end else begin
+        (match on_authority (Lifecycle.Container_authority {runtime=container.runtime;engine}) with
+         | Ok () -> ()
+         | Error detail -> fail ("engine persistence: " ^ detail));
+        ignore (Fake.add (Fake.current state.world) ~id:(Store.digest instance_id)
+          ~name:("masc-lane-" ^ Store.digest instance_id)
+          ~labels:["masc.lane.instance", instance_id] ());
+        on_created connection;
+        if package.id = "start-hang" then
+          (Eio.Promise.await released; Error (Masc.Lane_addon_lifecycle.Worker_failed "initialization stopped"))
+        else Ok connection
+      end);
+    package_ready = (fun ~package ->
+      if package.id = "image-missing" then Error "image fixture/image is not on this host" else Ok ());
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ ->
+      Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
+    recover_stop = (fun ~state_owner:_ ~instance_id ~authority ~resource ->
+      match authority,resource with
+      | Lifecycle.Native_admission _,_ | Lifecycle.Container_authority _,Some (Lifecycle.Native_resource _) ->
+          Error (Lifecycle.Cleanup_unconfirmed "container fixture requires container authority")
+      | Lifecycle.Container_authority {engine;runtime=_},(None | Some (Lifecycle.Container_resource _)) ->
+      let container_id = Option.bind resource Lifecycle.container_id in
+      match container_id with
+      | Some id when id = Store.digest instance_id ->
+          proven ~engine (fun () -> Fake.remove state.world id; Ok ())
+          |> Result.map (fun () -> state.recovery := (instance_id, id) :: !(state.recovery);
+              Lifecycle.Released {engine;container_id=Some id})
+      | Some _ | None -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "owner mismatch"));
+    condition_met = (fun ~runtime:_ condition -> Fake.condition_met state.world condition);
+    sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok [])
+  } in state, backend
+
+let manifest ?refresh_policy dir mode =
+  let path = Filename.concat dir (mode ^ ".toml") in
+  write path (Printf.sprintf {|id = %S
+revision = "fixture-1"
+title = "Lifecycle fixture"
+image = "fixture/image"
+command = ["observer"]
+contributions = ["observe"]
+[resources]
+cpus = 0.5
+memory_bytes = 67108864
+pids = 16
+max_reply_bytes = 4096
+|} mode ^ Option.fold ~none:"" ~some:(fun policy ->
+      "\n[interface]\nrefresh_policy = " ^ Printf.sprintf "%S" policy ^ "\n") refresh_policy);
+  path
+
+let dispatch config operation fields = Runtime.dispatch ~config ~operation (`Assoc fields)
+let inspect config = unwrap (dispatch config Runtime.Inspect [])
+let instance config id =
+  inspect config |> member "instances" |> Yojson.Safe.Util.to_list
+  |> List.find (fun value -> text "instance_id" value = id)
+let phase value = text "kind" (member "phase" value)
+let attach config dir mode =
+  unwrap (dispatch config Runtime.Attach ["manifest_path", `String (manifest dir mode);
+    "run_id", `String "world"; "binding", `Assoc ["sources", `List []]])
+  |> text "instance_id"
+let detach config id = ignore (unwrap (dispatch config Runtime.Detach ["instance_id", `String id]))
+let detach_refused config id = match dispatch config Runtime.Detach ["instance_id", `String id] with
+  | Error _ -> ()
+  | Ok _ -> fail "a Detach whose cleanup is refused must report the failure"
+let await clock predicate =
+  let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
+let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
+(* A detached installation that never started keeps no history record, so
+   Inspect stops listing it instead of reporting it "detached". *)
+let await_unlisted clock config id = await clock (fun () ->
+  not (List.exists (fun value -> text "instance_id" value = id)
+    (inspect config |> member "instances" |> Yojson.Safe.Util.to_list)))
+let machine_runtime_config ~enabled = Printf.sprintf {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+[machines.msx]
+enabled = %b
+[machines.dos]
+enabled = %b
+|} enabled enabled
+
+let with_fixture ?acquire ?observe_step ?(msx_worker=false) f =
+  let dir = Filename.temp_file "lane-runtime-" ".fixture" in
+  Sys.remove dir; Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () ->
+        Eio.Switch.run (fun sw ->
+          Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              Runtime.For_testing.reset ();
+              Runtime.register_fleet_backend {snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (Masc.Lane_addon_broadcast_delivery.External_sender,[]));
+                project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient:_ -> Error "empty fixture fleet has no recipient")};
+              let state, backend = make_backend ?observe_step () in
+              let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
+              Runtime.For_testing.with_backend backend (fun () ->
+                let saved_runtime = Host_runtime.For_testing.snapshot () in
+                Fun.protect ~finally:(fun () -> Host_runtime.For_testing.restore saved_runtime) (fun () ->
+                  let path = Filename.concat dir "runtime-fixture.toml" in
+                  write path (machine_runtime_config ~enabled:true);
+                  ignore (unwrap (Host_runtime.init_default ~config_path:path));
+                  let run () = f env sw (Workspace.default_config dir) dir state in
+                  if msx_worker then
+                    Machine_worker_fixture.with_msx ~other_backend:backend
+                      ~clock:(Eio.Stdenv.clock env) ~sw ~base_path:dir
+                      (fun ~invoke:_ ~detach -> run (); detach ())
+                  else run ())))))))
+
+let test_hang_error_coalescing_and_primary_progress () = with_fixture (fun env sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let blocked = attach config dir "hang" in
+  await clock (fun () -> Hashtbl.mem state.calls blocked);
+  let good = attach config dir "good" in
+  await clock (fun () -> int "observation_seq" (instance config good) = 1);
+  let failed = attach config dir "error" in
+  await_phase clock config failed "failed";
+  let primary = Eio.Fiber.fork_promise ~sw (fun () -> "primary action completed") in
+  check string "primary work completes before observer release"
+    "primary action completed" (Eio.Promise.await_exn primary);
+  check Alcotest.int "blocked observation has not been released" 0
+    (Option.value ~default:0 (Hashtbl.find_opt state.stops blocked));
+  List.iter (fun () -> ignore (unwrap (dispatch config Runtime.Observe
+    ["instance_id", `String blocked]))) [();();()];
+  check bool "coalesced notifications are visible" true
+    (int "coalesced_wakes" (instance config blocked) >= 2);
+  detach config blocked;
+  await_phase clock config blocked "detached";
+  ignore (unwrap (dispatch config Runtime.Observe ["instance_id", `String good]));
+  await clock (fun () -> int "observation_seq" (instance config good) >= 2);
+  detach config good; detach config failed;
+  await_phase clock config good "detached";
+  await_phase clock config failed "detached")
+
+let test_start_and_cleanup_failures_remain_optional () = with_fixture (fun env _ config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let initializing = attach config dir "start-hang" in
+  await clock (fun () -> Hashtbl.mem state.modes initializing);
+  detach config initializing;
+  await_phase clock config initializing "detached";
+  let startup_error = attach config dir "start-error" in
+  await_phase clock config startup_error "failed";
+  (* Its worker fiber may still be closing the independent switch. *)
+  await clock (fun () -> Result.is_error
+    (dispatch config Runtime.Observe ["instance_id", `String startup_error]));
+  let retry = attach config dir "stop-retry" in
+  await clock (fun () -> int "observation_seq" (instance config retry) = 1);
+  detach_refused config retry;
+  await_phase clock config retry "failed";
+  detach config retry;
+  await_phase clock config retry "detached")
+
+let attach_exporting config dir mode names =
+  let path = manifest dir mode in
+  let original = In_channel.with_open_bin path In_channel.input_all in
+  write path (original ^ "\n[world.tools]\nexport = "
+    ^ Yojson.Safe.to_string (`List (List.map (fun name -> `String name) names)) ^ "\n");
+  unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+    "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id"
+
+(* A failed installation exports nothing, and the same read names it with its
+   failure instead of leaving the callers to report that none exists. *)
+let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let observed name = Runtime.observation_for_export ~config ~access:Lane_addon_sources.Unauthenticated ~name in
+  let starting = attach_exporting config dir "start-hang" ["masc_msx_screen"] in
+  await clock (fun () -> Hashtbl.mem state.modes starting);
+  check bool "a starting installation's observation is refused as starting, not failed" true
+    (match observed "masc_msx_screen" with
+     | Error (Runtime.Unready_installations ({reason=Starting;_}, [])) -> true
+     | Error (Runtime.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _) | Ok _ -> false);
+  detach config starting;
+  await_phase clock config starting "detached";
+  let id = attach_exporting config dir "start-error" ["masc_msx_step"] in
+  await_phase clock config id "failed";
+  check bool "a failed installation's observation is refused with its failure" true
+    (match observed "masc_msx_step" with
+     | Error (Runtime.Unready_installations ({reason=Failed _;_}, [])) -> true
+     | Error (Runtime.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _) | Ok _ -> false);
+  let reading = unwrap (Runtime.tool_export_reading ~config
+    ~access:Lane_addon_sources.Unauthenticated ~reserved:[]) in
+  check Alcotest.int "a failed installation exports nothing" 0 (List.length reading.exports);
+  (match reading.unready with
+   | [unready] ->
+       check string "the unready installation is the failed one" id unready.installation;
+       check bool "its reason is the failure" true (match unready.reason with
+         | Lane_addon_unready.Failed _ -> true
+         | Starting | Stopping | Detaching -> false);
+       check bool "it is found by the tool it declares" true
+         (Lane_addon_unready.declaring ~name:"masc_msx_step" reading.unready = [unready])
+   | [] | _ :: _ :: _ -> fail "exactly the failed installation must be unready");
+  detach config id;
+  await_unlisted clock config id;
+  check bool "a detached installation is no longer unready" true
+    ((unwrap (Runtime.tool_export_reading ~config
+      ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready = []))
+
+(* A caller learns which installation failed, never the host facts of why:
+   its text is the same whatever the failure. The operator's text renders the
+   lifecycle failure, so two failures read apart there. *)
+let test_a_failure_is_explained_only_to_the_operator () =
+  let unready cause : Lane_addon_unready.t = {installation="work";instance_id="work-1";package_id="msx";
+    declared_tools=["masc_msx_step"];service=Types.Mcp_tools;
+    reason=Lane_addon_unready.Failed {Lifecycle.cause;first=None}} in
+  let exited = unready (Lifecycle.Worker_failed "worker exited with status 3")
+  and unconfirmed = unready (Lifecycle.Cleanup_unconfirmed "socket directory is not private") in
+  check string "a caller's text is the same whatever the failure"
+    (Lane_addon_unready.message exited) (Lane_addon_unready.message unconfirmed);
+  check bool "the operator's text tells the failures apart" false
+    (String.equal (Lane_addon_unready.operator_message exited) (Lane_addon_unready.operator_message unconfirmed));
+  let refusal unready = Runtime.Unready_installations (unready, []) in
+  check string "a caller's refusal is the same whatever the failure"
+    (Runtime.export_refusal_message (refusal exited)) (Runtime.export_refusal_message (refusal unconfirmed));
+  check bool "the operator's refusal tells the failures apart" false
+    (String.equal (Runtime.export_refusal_operator_message (refusal exited))
+       (Runtime.export_refusal_operator_message (refusal unconfirmed)))
+
+(* A browser document source reads only a browser whose readers include every
+   reader of the consumer's output, the rule lane_output follows, so an
+   operator-only browser's page never lands in output a Keeper can read. *)
+let test_a_document_source_reads_only_a_browser_that_covers_its_output () =
+  let module T = Runtime.For_testing in
+  let choose visibility candidates = T.choose_document_service ~visibility candidates in
+  check bool "a shared browser serves a shared consumer" true
+    (choose T.Shared ["browser", T.Shared] = T.Document_service "browser");
+  check bool "an operator-only browser does not serve a shared consumer" true
+    (choose T.Shared ["browser", T.Operator_only] = T.Browser_narrower_than_consumer);
+  check bool "a Keeper's browser does not serve a shared consumer" true
+    (choose T.Shared ["browser", T.Keeper_only "a"] = T.Browser_narrower_than_consumer);
+  check bool "an operator-only browser serves an operator-only consumer" true
+    (choose T.Operator_only ["browser", T.Operator_only] = T.Document_service "browser");
+  check bool "another Keeper's browser does not serve a Keeper's consumer" true
+    (choose (T.Keeper_only "a") ["browser", T.Keeper_only "b"] = T.Browser_narrower_than_consumer);
+  check bool "the one browser that covers the consumer is chosen" true
+    (choose T.Shared ["private", T.Operator_only; "public", T.Shared] = T.Document_service "public");
+  check bool "two browsers that cover the consumer cannot be chosen between" true
+    (choose T.Shared ["first", T.Shared; "second", T.Shared] = T.Several_browser_services);
+  check bool "no browser is no browser" true (choose T.Shared [] = T.No_browser_service)
+
+(* RFC browser-backends-end-alone S-L2: a document read goes to the service of
+   its route's source, and a client of a live source two services serve is not
+   read, since a client does not say which of them it came from. *)
+let test_a_document_read_goes_to_the_service_of_its_source () =
+  let module T = Runtime.For_testing in
+  let module B = Browser_lane in
+  let client n = match B.client_id_of_string (Printf.sprintf "0c000000-0000-4000-8000-%012d" n) with
+    | Ok id -> id | Error detail -> fail detail in
+  let ego = client 1 and extension = client 2 in
+  (* A service: its name, the sources it serves and the clients its last
+     observation lists. *)
+  let service name backend listed = name, backend, listed in
+  let read services route = T.document_route_services ~services ~backend:(fun (_, backend, _) -> backend)
+      ~lists:(fun (_, _, listed) client -> List.mem client listed) route
+    |> Result.map (List.map (fun (name, _, _) -> name)) in
+  let automation = service "automation" B.Backend.Automation []
+  and stagehand = service "stagehand" B.Backend.Stagehand []
+  and ego_worker = service "ego" B.Backend.Ego [ego]
+  and native = service "native" B.Backend.External_host [extension] in
+  let all = [automation; stagehand; ego_worker; native] in
+  let is_refused = function Error _ -> true | Ok _ -> false in
+  check bool "automation reads on its own service" true (read all B.Automation_route = Ok ["automation"]);
+  check bool "Stagehand reads on its own service" true (read all B.Stagehand_route = Ok ["stagehand"]);
+  check bool "a live client reads on the service that lists it" true
+    (read all (B.Live_route (Some ego)) = Ok ["ego"]);
+  check bool "and another on its own" true (read all (B.Live_route (Some extension)) = Ok ["native"]);
+  check bool "the one live service there is reads a client its observation does not list yet" true
+    (read [automation; service "ego" B.Backend.Ego []] (B.Live_route (Some ego)) = Ok ["ego"]);
+  let doubled = [ego_worker; service "second ego" B.Backend.Ego []; native] in
+  check bool "a client of a doubled live source is refused" true
+    (is_refused (read doubled (B.Live_route (Some ego))));
+  check bool "a client of another live source still reads" true
+    (read doubled (B.Live_route (Some extension)) = Ok ["native"]);
+  check bool "a client no doubled service lists yet is not sent to the other live service" true
+    (read [service "ego" B.Backend.Ego []; service "second ego" B.Backend.Ego []; native]
+       (B.Live_route (Some ego)) = Ok []);
+  check bool "a read that names no client is refused while a live source is doubled" true
+    (is_refused (read [ego_worker; service "second ego" B.Backend.Ego []] (B.Live_route None)))
+
+(* A failed DOS installation may still hold the controller in its state, so a
+   release is not reported as done, and a shared call names the installation. *)
+let test_a_failed_dos_installation_is_named_and_not_released () = with_fixture (fun env _ config dir _ ->
+  let clock = Eio.Stdenv.clock env in
+  let pass = Machine_controller_contract.(dos_tool_name Dos_pass) in
+  let id = attach_exporting config dir "start-error" [pass] in
+  await_phase clock config id "failed";
+  let unready = match (unwrap (Runtime.tool_export_reading ~config
+      ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready with
+    | [unready] -> unready
+    | [] | _ :: _ :: _ -> fail "exactly the failed installation must be unready" in
+  (match Machine_addon_host.call_shared ~principal:(Lane_addon_call_context.Host_actor "operator")
+      ~config ~name:pass ~arguments:(`Assoc []) with
+   | Error (Runtime.Unavailable detail) ->
+       check string "a shared call names the failed installation" (Lane_addon_unready.message unready) detail
+   | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
+       fail "a shared call to a failed installation must be unavailable");
+  let events = Machine_addon_host.dos_event_batch ~author:"operator" in
+  let released = Fun.protect ~finally:(fun () -> Machine_addon_events.ready events) (fun () ->
+    Machine_addon_host.release_shared_controller ~events ~config ~holder:"seat" ~by:"operator"
+      ~reason:Machine_controller_contract.No_credential) in
+  Machine_addon_events.drain ();
+  (match released with
+   | Error (Runtime.Unavailable detail) ->
+       check string "the release names the failed installation" (Lane_addon_unready.message unready) detail
+   | Ok None | Ok (Some _) -> fail "a failed DOS installation must not report a released controller"
+   | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
+       fail "a release refused before any call is unavailable");
+  detach config id;
+  await_unlisted clock config id;
+  let events = Machine_addon_host.dos_event_batch ~author:"operator" in
+  let released = Fun.protect ~finally:(fun () -> Machine_addon_events.ready events) (fun () ->
+    Machine_addon_host.release_shared_controller ~events ~config ~holder:"seat" ~by:"operator"
+      ~reason:Machine_controller_contract.No_credential) in
+  Machine_addon_events.drain ();
+  check bool "with no installation there is nothing to release" true
+    (match released with Ok None -> true | Ok (Some _) | Error _ -> false))
+
+(* A Detach that arrives while the start is still running must wait for the
+   cleanup the start's failure leaves behind. The start's state turns Failed
+   while its worker is still being torn down, and the Detach, woken at that
+   moment, used to report that failure as its own and leave the declaration to
+   be attached again. *)
+let test_detach_waits_for_a_start_that_fails_under_it () =
+  with_fixture (fun env sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "start-gated" in
+    await clock (fun () -> Hashtbl.mem state.modes id);
+    let outcome = Eio.Fiber.fork_promise ~sw (fun () ->
+      dispatch config Runtime.Detach ["instance_id", `String id]) in
+    Eio.Promise.resolve (snd state.start_gate) ();
+    await_phase clock config id "failed";
+    Eio.Time.sleep clock 0.05;
+    check bool "Detach is still waiting while the failed start winds down" true
+      (Option.is_none (Eio.Promise.peek outcome));
+    Eio.Promise.resolve (snd state.teardown_gate) ();
+    (match Eio.Promise.await_exn outcome with
+     | Ok _ -> ()
+     | Error message -> failf "Detach reported a failure although the cleanup then succeeded: %s" message);
+    (* The run fiber had already ended, so the released entry leaves the list. *)
+    await clock (fun () ->
+      List.for_all (fun value -> text "instance_id" value <> id)
+        (inspect config |> member "instances" |> Yojson.Safe.Util.to_list)))
+
+exception Cleanup_cut_short
+
+(* A cleanup fiber can end without reaching its last lines: a step in its tail
+   raises, or the switch it runs on is cancelled. Detach waits on the cleanup,
+   and the exception is swallowed where the fiber is forked, so the cleanup
+   must not stay marked as running. The test cuts the cleanup short at the one
+   point a caller can reach, the end of the switch it runs on. *)
+let test_a_cleanup_that_is_cut_short_can_run_again () =
+  with_fixture (fun env sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "stop-cut-short" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let cut = try
+      Eio.Switch.run (fun owner ->
+        Eio_context.set_switch owner;
+        Eio.Fiber.fork ~sw:owner (fun () ->
+          ignore (dispatch config Runtime.Detach ["instance_id", `String id]));
+        await clock (fun () -> Hashtbl.find_opt state.stops id = Some 1);
+        Eio.Switch.fail owner Cleanup_cut_short);
+      false
+    with Cleanup_cut_short -> true in
+    Eio_context.set_switch sw;
+    check bool "the first cleanup was cut short" true cut;
+    check Alcotest.int "it had started its stop" 1 (Hashtbl.find state.stops id);
+    detach config id;
+    await_phase clock config id "detached";
+    check Alcotest.int "the second Detach ran the cleanup again" 2 (Hashtbl.find state.stops id))
+
+let test_resolved_image_survives_detach_and_restart () =
+  with_fixture (fun env _ config dir _ ->
+    let clock = Eio.Stdenv.clock env in
+    let expected = `Assoc ["runtime", `String "docker";
+      "digest", `String ("sha256:" ^ String.make 64 'a')] in
+    List.iter (fun mode ->
+      let id = attach config dir mode in
+      await clock (fun () -> member "resolved_image" (instance config id) <> `Null);
+      if mode = "good" then
+        await clock (fun () -> int "observation_seq" (instance config id) = 1);
+      let captured = instance config id in
+      check bool "resolved immutable image belongs to this generation" true
+        (member "resolved_image" captured = expected);
+      check string "requested reference is retained separately" "fixture/image"
+        (text "image" (member "package" captured));
+      if mode = "start-hang" then
+        check Alcotest.int "resolution does not claim an observation or successful start" 0
+          (int "observation_seq" captured);
+      detach config id; await_phase clock config id "detached";
+      check bool "detach preserves the resolution" true
+        (member "resolved_image" (instance config id) = expected);
+      Runtime.For_testing.reset ();
+      check bool "retained record preserves the resolution after restart" true
+        (member "resolved_image" (instance config id) = expected)) ["good"; "start-hang"])
+
+let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
+  with_fixture (fun env _ config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd
+      |> text "id" in
+    let args = ["instance_id", `String id; "row_ids", `List [`String selected]] in
+    let frozen = unwrap (dispatch config Runtime.Evidence args) in
+    check string "preservation receipt identifies its worker" id (text "instance_id" frozen);
+    check bool "preservation receipt identifies its exact row selection" true
+      (member "row_ids" frozen = `List [`String selected]);
+    let evidence = member "evidence" frozen in
+    let bytes = In_channel.with_open_bin (text "path" evidence) In_channel.input_all in
+    check string "frozen bytes match evidence digest" (text "sha256" evidence) (Store.digest bytes);
+    let bundle = Yojson.Safe.from_string bytes in
+    check string "package revision pinned in bundle" "fixture-1"
+      (bundle |> member "binding" |> member "package" |> text "revision");
+    check bool "raw source bytes retained" true
+      (bundle |> member "observations" |> Yojson.Safe.Util.to_list <> []);
+    (* Merely selecting or ignoring evidence creates no confirmation gate. *)
+    ignore (unwrap (dispatch config Runtime.Observe ["instance_id", `String id]));
+    await clock (fun () -> int "observation_seq" (instance config id) = 2);
+    let unavailable = unwrap (Runtime.dispatch ~caller:"operator" ~config ~operation:Runtime.Evidence
+      (`Assoc (("keeper_name", `String "keeper") :: args))) in
+    check string "unavailable delivery stays explicit" "failed"
+      (unavailable |> member "delivery" |> text "status");
+    check string "failed delivery still identifies the requested Keeper" "keeper"
+      (unavailable |> member "delivery" |> text "keeper_name");
+    check bool "failed delivery retains evidence" true
+      (Sys.file_exists (unavailable |> member "evidence" |> text "path"));
+    let delivered = ref [] in
+    Runtime.register_delivery_handler (fun ~config:_ ~caller ~keeper_name ~prompt ->
+      delivered := (caller, keeper_name, prompt) :: !delivered;
+      Ok (`Assoc ["request_id", `String "keeper-request"; "status", `String "deferred"]));
+    let accepted = unwrap (Runtime.dispatch ~caller:"operator" ~config ~operation:Runtime.Evidence
+      (`Assoc (("keeper_name", `String "keeper") :: args))) in
+    check Alcotest.int "one explicitly requested delivery" 1 (List.length !delivered);
+    check string "accepted delivery identifies its actual destination" "keeper"
+      (accepted |> member "delivery" |> text "keeper_name");
+    check bool "published acceptance preserves the selected row coordinates" true
+      (member "instance_id" accepted = member "instance_id" frozen
+       && member "row_ids" accepted = member "row_ids" frozen);
+    check string "acceptance keeps deferred receipt" "deferred"
+      (accepted |> member "delivery" |> member "receipt" |> text "status");
+    let sender, keeper, prompt = List.hd !delivered in
+    check string "original authenticated sender preserved" "operator" sender;
+    check string "explicitly selected Keeper preserved" "keeper" keeper;
+    (match Tool_output.decode_from_agent_core prompt with
+     | Tool_output.Decoded reference ->
+         check string "message preserves the exact retention marker"
+           (Tool_output.encode_for_agent_core (Tool_output.Stored reference)) prompt;
+         check string "message names a traversable evidence manifest"
+           Tool_output.artifact_manifest_mime reference.mime;
+         check bool "result preserves the same normalized manifest reference" true
+           (member "keeper_artifact" accepted = Tool_output.normalized_artifact_ref_to_json reference)
+     | _ -> fail "Keeper evidence was not delivered as a readable artifact");
+    detach config id; await_phase clock config id "detached";
+    await clock (fun () ->
+      inspect config |> member "rows" |> Yojson.Safe.Util.to_list = []);
+    let historical_slice = unwrap (dispatch config Runtime.Slice []) in
+    check bool "detached rows leave active memory but remain queryable" true
+      (historical_slice |> member "rows" |> Yojson.Safe.Util.to_list
+       |> List.exists (fun row -> text "id" row = selected));
+    let captured = instance config id in
+    Runtime.For_testing.reset ();
+    check string "confirmed detach survives process restart" "detached" (phase (instance config id));
+    let retained = unwrap (dispatch config Runtime.Evidence args) in
+    check bool "historical evidence can still be opened" true
+      (Sys.file_exists (retained |> member "evidence" |> text "path"));
+    (* Replay a persisted running binding to model a host restart. No live
+       worker exists; recovery must use its persisted exact ownership. *)
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let fields = Yojson.Safe.Util.to_assoc captured in
+    unwrap (Store.save_binding store ~instance_id:id
+      (`Assoc (("phase", Types.phase_to_json Types.Attached)
+        :: ("lifecycle", Masc.Lane_addon_lifecycle.state_to_json Masc.Lane_addon_lifecycle.Attached)
+        :: List.remove_assoc "lifecycle" (List.remove_assoc "phase" fields))));
+    detach config id; await_phase clock config id "detached";
+    check Alcotest.int "one exact persisted-container recovery" 1 (List.length !(state.recovery)))
+
+(* A record left by an earlier process says a container exists. The container
+   is released only by the engine that holds it: asked through a context that
+   reaches another, empty engine, the record stays failed and the container
+   stays where it is. *)
+let test_retained_record_is_released_only_by_its_recorded_engine () =
+  with_fixture (fun env _sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let captured = instance config id in
+    let container = Store.digest id in
+    detach config id; await_phase clock config id "detached";
+    (* The earlier release is taken back: the container is on its engine again. *)
+    ignore (Fake.add (Fake.current state.world) ~id:container ~name:("masc-lane-" ^ container)
+      ~labels:["masc.lane.instance", id] ());
+    Runtime.For_testing.reset ();
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let fields = Yojson.Safe.Util.to_assoc captured in
+    unwrap (Store.save_binding store ~instance_id:id
+      (`Assoc (("phase", Types.phase_to_json Types.Attached)
+        :: ("lifecycle", Lifecycle.state_to_json Lifecycle.Attached)
+        :: List.remove_assoc "lifecycle" (List.remove_assoc "phase" fields))));
+    Fake.point_at state.world (Fake.docker "engine-b");
+    detach_refused config id;
+    await_phase clock config id "failed";
+    check string "another engine's silence is a mismatch, not a release" "engine_mismatch"
+      (instance config id |> member "lifecycle" |> member "failed" |> member "cause" |> text "kind");
+    check bool "the container is still on its engine" true (Fake.holds state.home container);
+    check Alcotest.int "no recovery was recorded" 0 (List.length !(state.recovery));
+    Fake.point_at state.world state.home;
+    detach config id;
+    await_phase clock config id "detached";
+    check bool "the recorded engine released the container" false (Fake.holds state.home container);
+    let release = instance config id |> member "lifecycle" |> member "release" in
+    check string "the release names the engine" "engine-a" (member "engine" release |> text "id");
+    check string "the release names the container" container (text "container_id" release))
+
+let test_request_refusals_preserve_runtime_failure_distinction () =
+  with_fixture (fun _env _sw config dir _state ->
+    let dispatch operation fields = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config ~operation (`Assoc fields) in
+    let rejected label = function
+      | Error (Lane_addon_runtime.Request_rejected _) -> ()
+      | Error (Runtime_failed detail) -> failf "%s became runtime failure: %s" label detail
+      | Ok _ -> failf "%s was accepted" label in
+    rejected "missing active instance" (dispatch Runtime.Observe ["instance_id", `String "absent"]);
+    rejected "missing retained instance" (dispatch Runtime.Detach ["instance_id", `String "absent"]);
+    rejected "missing evidence instance" (dispatch Runtime.Evidence
+      ["instance_id", `String "absent"; "row_ids", `List []]);
+    rejected "missing action request" (dispatch Runtime.Action_status
+      ["instance_id", `String "absent"; "request_id", `String "absent"]);
+    rejected "missing manifest" (dispatch Runtime.Attach
+      ["manifest_path", `String (Filename.concat dir "missing.toml");
+       "run_id", `String "fixture-run"; "binding", `Assoc []]);
+    rejected "missing action fields" (dispatch Runtime.Act []);
+    let action_fields = ["instance_id", `String "absent";
+      "expected_incarnation", `String "absent"; "request_id", `String "request";
+      "action", `Assoc []] in
+    rejected "missing action target" (Lane_addon_runtime.dispatch ~caller:"fixture-caller"
+      ~access:(Lane_addon_sources.Keeper "fixture-caller")
+      ~config ~operation:Runtime.Act (`Assoc action_fields));
+    rejected "invalid slice timestamp" (dispatch Runtime.Slice ["since", `String "bad"]);
+    rejected "reversed slice range" (dispatch Runtime.Slice ["since", `Int 2; "until", `Int 1]);
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    Fs_compat.mkdir_p root;
+    write (Filename.concat root "bindings") "a file cannot be a binding directory";
+    let runtime_failed = function
+      | Error (Lane_addon_runtime.Runtime_failed _) -> ()
+      | Error (Request_rejected detail) -> failf "unreadable store became input refusal: %s" detail
+      | Ok _ -> fail "unreadable store was accepted" in
+    runtime_failed (dispatch Runtime.Detach ["instance_id", `String "absent"]);
+    runtime_failed (dispatch Runtime.Slice []))
+
+let test_unreadable_retained_bindings_are_isolated () = with_fixture (fun env _ config dir _ ->
+  let id = attach config dir "good" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let current = instance config id |> Yojson.Safe.Util.to_assoc in
+  let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  (* One record names no reader at all, one names a reader kind that does not exist. *)
+  let unreadable_ids = List.mapi (fun index visibility ->
+    let retained_id = "unreadable-" ^ string_of_int index in
+    let fields = ("instance_id",`String retained_id) ::
+      List.remove_assoc "instance_id" (List.remove_assoc "visibility"
+        (List.remove_assoc "source_access" current)) in
+    let fields = match visibility with
+      | None -> fields
+      | Some value -> ("visibility",value)::("source_access",
+          Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated)::fields in
+    let fields = ("configuration",`Assoc ["id",`String ("invalid-producer-" ^ string_of_int index);
+      "source_path",`String (Filename.concat dir "invalid.toml");"revision",`String "fixture"])
+      :: List.remove_assoc "configuration" fields in
+    unwrap (Store.save_binding store ~instance_id:retained_id (`Assoc fields));
+    retained_id)
+    [None; Some (`Assoc ["kind",`String "unknown"])] in
+  let records = unwrap (Store.bindings store) in
+  let record wanted = List.find (fun json -> text "instance_id" json = wanted) records in
+  check Alcotest.int "unreadable retained records cannot hide a valid live installation" 1
+    (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+  List.iter (fun retained_id ->
+    check bool "an unreadable record authorizes no read, even the operator's" true
+      (Result.is_error (Runtime.authorize_retained_read ~bindings:records
+        ~access:Lane_addon_sources.Operator_configuration (record retained_id)));
+    check bool "an unreadable record cannot be requested directly" true
+      (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
+        (`Assoc ["instance_id",`String retained_id])))) unreadable_ids;
+  check bool "the live record keeps its own read authority" true
+    (Result.is_ok (Runtime.authorize_retained_read ~bindings:records
+      ~access:Lane_addon_sources.Unauthenticated (record id)));
+  let refusal access instance_id =
+    match Runtime.dispatch ~config ~access ~operation:Runtime.Inspect
+      (`Assoc ["instance_id", `String instance_id]) with
+    | Error message -> message
+    | Ok _ -> fail "an unreadable or absent instance is refused" in
+  List.iter (fun retained_id ->
+    List.iter (fun access ->
+      check string "a caller that cannot operate gets the refusal of an absent instance"
+        (refusal access "absent-instance") (refusal access retained_id))
+      [Lane_addon_sources.Keeper "someone"; Lane_addon_sources.Unauthenticated];
+    check bool "the operator is told why the record is unreadable" true
+      (refusal Lane_addon_sources.Operator_configuration retained_id
+       <> refusal Lane_addon_sources.Operator_configuration "absent-instance")) unreadable_ids;
+  let slice access = unwrap (Runtime.dispatch ~config ~access ~operation:Runtime.Slice (`Assoc [])) in
+  let coverage_sources access =
+    slice access |> member "coverage" |> Yojson.Safe.Util.to_list |> List.map (text "source_id") in
+  List.iter (fun retained_id ->
+    check bool "the operator's slice names each unreadable record" true
+      (List.mem retained_id (coverage_sources Lane_addon_sources.Operator_configuration));
+    List.iter (fun access ->
+      check bool "another caller's slice does not name an unreadable record" false
+        (List.mem retained_id (coverage_sources access))) 
+      [Lane_addon_sources.Keeper "someone"; Lane_addon_sources.Unauthenticated]) unreadable_ids;
+  List.iter (fun access ->
+    check bool "a slice that skipped unreadable records is incomplete for every caller" false
+      (member "complete" (slice access) = `Bool true))
+    [Lane_addon_sources.Operator_configuration; Lane_addon_sources.Keeper "someone";
+     Lane_addon_sources.Unauthenticated];
+  check Alcotest.int "unreadable records stay in place for operator repair" 3
+    (Store.bindings store |> unwrap |> List.length);
+  detach config id; await_phase clock config id "detached")
+
+let test_direct_attach_validates_package_binding () =
+  with_fixture (fun env _sw config dir state ->
+    let path = manifest dir "binding-contract" in
+    write path (Fs_compat.load_file path ^ {|
+[interface]
+binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","items":{"type":"object","properties":{},"additionalProperties":false}},"limit":{"type":"integer","minimum":1}},"required":["sources","limit"],"additionalProperties":false}'''
+|});
+    let attach_binding binding = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config
+      ~operation:Runtime.Attach (`Assoc ["manifest_path",`String path;
+        "run_id",`String "binding-run";"binding",`Assoc binding]) in
+    List.iter (fun binding ->
+      (match attach_binding binding with
+       | Error (Lane_addon_runtime.Request_rejected _) -> ()
+       | Error (Runtime_failed detail) -> failf "invalid binding became runtime failure: %s" detail
+       | Ok _ -> fail "direct attach bypassed the package binding schema");
+      check Alcotest.int "invalid binding starts no worker" 0 (Hashtbl.length state.modes);
+      check Alcotest.int "invalid binding creates no instance" 0
+        (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
+      [["sources",`List []]; ["sources",`List [];"limit",`Int 0];
+       ["sources",`List [];"limit",`String "2"]];
+    let accepted = attach_binding ["sources",`List [];"limit",`Int 2]
+      |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+    let id = text "instance_id" accepted in
+    let clock = Eio.Stdenv.clock env in
+    await clock (fun () -> Hashtbl.mem state.modes id);
+    check bool "worker startup receives the exact validated installation binding" true
+      (Hashtbl.find_opt state.bindings id=Some (`Assoc ["sources",`List [];"limit",`Int 2]));
+    detach config id;
+    await_phase clock config id "detached")
+
+let test_direct_attach_looks_for_the_image_first () =
+  with_fixture (fun env _sw config dir state ->
+    let attach_missing () = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Attach
+      (`Assoc ["manifest_path", `String (manifest dir "image-missing");
+               "run_id", `String "world"; "binding", `Assoc ["sources", `List []]]) in
+    (match attach_missing () with
+     | Error (Lane_addon_runtime.Runtime_failed _) -> ()
+     | Error (Request_rejected detail) -> failf "a missing image is not a rejected request: %s" detail
+     | Ok _ -> fail "direct attach created an instance although the image is missing");
+    check Alcotest.int "a missing image starts no worker" 0 (Hashtbl.length state.modes);
+    check Alcotest.int "a missing image leaves no instance behind" 0
+      (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+    (* The same refusal on every attempt: nothing accumulates between them. *)
+    ignore (attach_missing ());
+    check Alcotest.int "a repeated attempt still leaves no instance" 0
+      (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    detach config id;
+    await_phase clock config id "detached")
+
+let test_file_activity_preserves_explicit_observation () =
+  with_fixture ~acquire:Lane_addon_sources.acquire (fun env _sw config dir _state ->
+    let clock = Eio.Stdenv.clock env in
+    let source_path = Filename.concat dir "source.json" in
+    let snapshot cursor = `Assoc ["source_id",`String "file";"incarnation",`String "export";
+      "cursor",`String cursor;"complete",`Bool true;"detail",`Null;"observations",`List []] in
+    let replace cursor = write source_path (Yojson.Safe.to_string (snapshot cursor)) in
+    replace "first";
+    let file_id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest ~refresh_policy:"source_changes" dir "file-observer");"run_id",`String "files";
+       "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "file";
+         "kind",`String "snapshot_file";"path",`String source_path]]]]) |> text "instance_id" in
+    let owned_id = attach config dir "owned-observer" in
+    let stateful_id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest dir "stateful-file-observer");"run_id",`String "files";
+       "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "file";
+         "kind",`String "snapshot_file";"path",`String source_path]]]]) |> text "instance_id" in
+    let sequence id = int "observation_seq" (instance config id) in
+    await clock (fun () -> sequence file_id=1 && sequence owned_id=1 && sequence stateful_id=1);
+    let refresh () = Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed in
+    refresh ();
+    await clock (fun () -> int "unchanged_source_refreshes" (instance config file_id)=1 && sequence stateful_id=2);
+    check Alcotest.int "unchanged capture adds no retained output" 1 (sequence file_id);
+    check Alcotest.int "unrelated tool completion does not sample an owned environment" 1 (sequence owned_id);
+    check Alcotest.int "default file observer still receives equal captures" 2 (sequence stateful_id);
+    refresh ();
+    ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String file_id]));
+    await clock (fun () -> sequence file_id=2);
+    replace "second";
+    refresh ();
+    await clock (fun () -> sequence file_id=3);
+    write source_path "truncated source";
+    refresh ();
+    await clock (fun () -> sequence file_id=4);
+    replace "second";
+    refresh ();
+    await clock (fun () -> sequence file_id=5);
+    (* A recovered source must be observed even when its bytes equal those
+       before the intervening unavailable capture. *)
+    let retained = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let records = Store.observations retained ~instance_id:file_id ~through:5 |> unwrap in
+    check Alcotest.int "changed, failed and recovered captures are all retained" 5 (List.length records);
+    let sources,_ = List.nth records 3 in
+    check bool "capture failure reaches the worker as incomplete input" true
+      (match sources with `List [`Assoc fields] -> List.assoc_opt "complete" fields=Some (`Bool false) | _ -> false);
+    detach config file_id; detach config owned_id; detach config stateful_id;
+    await_phase clock config file_id "detached";
+    await_phase clock config owned_id "detached";
+    await_phase clock config stateful_id "detached")
+
+let test_capture_cannot_rewrite_detach_failure () =
+  let entered, enter = Eio.Promise.create () in
+  let released, release = Eio.Promise.create () in
+  let returned, return = Eio.Promise.create () in
+  let captures = ref 0 in
+  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~read_browser_document ~binding =
+    incr captures;
+    if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
+    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~read_browser_document ~binding in
+    if !captures=2 then Eio.Promise.resolve return ();
+    result in
+  with_fixture ~acquire (fun env _sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let source_path = Filename.concat dir "source.json" in
+    write source_path {|{"source_id":"file","incarnation":"export","cursor":"1","complete":true,"detail":null,"observations":[]}|};
+    let id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest ~refresh_policy:"source_changes" dir "stop-retry");
+       "run_id",`String "files";"binding",`Assoc ["sources",`List [`Assoc
+         ["source_id",`String "file";"kind",`String "snapshot_file";"path",`String source_path]]]])
+      |> text "instance_id" in
+    await clock (fun () -> int "observation_seq" (instance config id)=1);
+    Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed;
+    Eio.Promise.await entered;
+    detach_refused config id;
+    await_phase clock config id "failed";
+    Eio.Promise.resolve release ();
+    Eio.Promise.await returned;
+    check string "capture does not overwrite cleanup failure with attached" "failed" (phase (instance config id));
+    check Alcotest.int "retired worker receives no additional observation" 1 (Hashtbl.find state.calls id);
+    detach config id;
+    await_phase clock config id "detached")
+
+(* An observer bound to the workspace machine. The fake backend's capture
+   answers without reading the machine; only the wake path is under test. *)
+let attach_machine_watcher config dir =
+  unwrap (dispatch config Runtime.Attach
+    ["manifest_path",`String (manifest dir "machine-observer");"run_id",`String "machine";
+     "binding",`Assoc ["sources",`List [`Assoc
+       ["kind",`String "msx_capture";"source_id",`String "machine"]]]])
+  |> text "instance_id"
+
+(* Hold the next capture after a route wakes the watcher. A second route
+   notification must now remain visible as pending or coalesced, with no timing
+   guess about how long the worker needs to finish its capture. *)
+let with_held_machine_observation f =
+  let entered, enter = Eio.Promise.create () in
+  let released, release = Eio.Promise.create () in
+  let release_sent = ref false in
+  let hold_next = ref false in
+  let release_once () =
+    if not !release_sent then (release_sent := true; Eio.Promise.resolve release ())
+  in
+  let observe_step _call =
+    if !hold_next then begin
+      hold_next := false;
+      Eio.Promise.resolve enter (); Eio.Promise.await released
+    end
+  in
+  with_fixture ~observe_step ~msx_worker:true (fun env sw config dir state ->
+    Fun.protect ~finally:release_once (fun () ->
+      f env sw config dir state ~entered ~hold_next:(fun () -> hold_next := true)
+        ~release:release_once))
+
+let check_no_extra_machine_wake config id =
+  let current = instance config id in
+  check bool "no second observation is pending" false
+    (member "observation_pending" current |> Yojson.Safe.Util.to_bool);
+  check Alcotest.int "no second wake was coalesced" 0
+    (int "coalesced_wakes" current)
+
+let await_machine_publication clock config =
+  await clock (fun () ->
+    match Runtime.observation_for_export ~config
+        ~access:Lane_addon_sources.Operator_configuration ~name:"masc_msx_screen" with
+    | Ok (Some reading) -> not reading.refreshing
+    | Ok None | Error _ -> false)
+
+(* The load route boots an image, and an image needs a C-BIOS. These tests
+   stock the attached worker's volume with one blank cartridge and a zero-filled
+   BIOS in its bios/ inventory. A host that exports MSX_ROMS would hand the load
+   its own C-BIOS instead, and a host without it would have none, so the variable
+   is emptied for the run: the inventory is the only source. *)
+let stage_fixture_cart config =
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      Sys.mkdir dir 0o755
+    end in
+  let msx = Filename.concat (Workspace.masc_dir config) "msx" in
+  let write dir name size =
+    mkdir_p dir;
+    Out_channel.with_open_bin (Filename.concat dir name) (fun channel ->
+      output_string channel (String.make size '\000')) in
+  write (Filename.concat msx "carts") "fixture.rom" 0x4000;
+  let bios = Filename.concat msx "bios" in
+  write bios "cbios_main_msx2.rom" 32768;
+  write bios "cbios_logo_msx2.rom" 16384;
+  write bios "cbios_sub.rom" 16384
+
+let with_no_host_msx_roms f =
+  let host_roms = Sys.getenv_opt "MSX_ROMS" in
+  Unix.putenv "MSX_ROMS" "";
+  Fun.protect ~finally:(fun () -> Unix.putenv "MSX_ROMS" (Option.value host_roms ~default:"")) f
+
+let test_human_press_wakes_machine_watchers_once () =
+  with_no_host_msx_roms @@ fun () ->
+  with_held_machine_observation (fun env _sw config dir _state ~entered ~hold_next ~release ->
+    let clock = Eio.Stdenv.clock env in
+    let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
+    Fun.protect ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
+      ignore (Msx_lane.eject ())) (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      stage_fixture_cart config;
+      check bool "attached worker loads the fixture machine" true
+        (fst (Server_routes_http_routes_msx.load_response ~config
+          ~agent_name:"operator" ~body:{|{"roms_dir":"","cart":"fixture.rom"}|}) = `OK);
+      await_machine_publication clock config;
+      let id = attach_machine_watcher config dir in
+      let sequence () = int "observation_seq" (instance config id) in
+      await clock (fun () -> sequence () = 1);
+      let press body =
+        fst (Server_routes_http_routes_msx.press_response ~config ~who:"operator" ~body) in
+      let before = msx (Msx_lane.capture_with_identity ()) in
+      check bool "a key the machine lacks is refused" true
+        (press {|{"keys":["not-a-key"]}|} = `Bad_request);
+      check bool "refused key leaves frame, identity and input ledger unchanged" true
+        (msx (Msx_lane.capture_with_identity ()) = before);
+      (* A completed worker refusal refreshes the producer, then its watcher.
+         Settle that publication before measuring the accepted human action. *)
+      await clock (fun () -> sequence () > 1 && phase (instance config id) = "attached");
+      await_machine_publication clock config;
+      let baseline = sequence () in
+      hold_next ();
+      check bool "a human press is accepted" true (press {|{"keys":["space"]}|} = `OK);
+      Eio.Promise.await entered;
+      check_no_extra_machine_wake config id;
+      release ();
+      await clock (fun () -> sequence () = baseline + 1 && phase (instance config id) = "attached");
+      await_machine_publication clock config;
+      check_no_extra_machine_wake config id;
+      check Alcotest.int "one accepted press is one watcher publication" (baseline + 1) (sequence ());
+      detach config id;
+      await_phase clock config id "detached"))
+
+let test_human_load_wakes_machine_watchers_once () =
+  with_no_host_msx_roms @@ fun () ->
+  with_held_machine_observation (fun env _sw config dir _state ~entered ~hold_next ~release ->
+    let clock = Eio.Stdenv.clock env in
+    ignore (Msx_lane.eject ());
+    Fun.protect ~finally:(fun () ->
+      Msx_lane.install_activity_observer None;
+      ignore (Msx_lane.eject ())) (fun () ->
+      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      await_machine_publication clock config;
+      let id = attach_machine_watcher config dir in
+      let sequence () = int "observation_seq" (instance config id) in
+      await clock (fun () -> sequence () = 1);
+      let load body =
+        fst (Server_routes_http_routes_msx.load_response ~config
+          ~agent_name:"operator" ~body) in
+      check bool "a missing cartridge is refused" true
+        (load {|{"roms_dir":"","cart":"missing.rom"}|} = `Bad_request);
+      check bool "missing cartridge leaves the machine unloaded" true
+        (Msx_lane.live ~since:None = Msx_lane.Nothing_loaded);
+      check Alcotest.int "missing cartridge creates no input ledger" 0
+        (List.length (Msx_lane.ledger ()));
+      await clock (fun () -> sequence () > 1 && phase (instance config id) = "attached");
+      await_machine_publication clock config;
+      let baseline = sequence () in
+      hold_next ();
+      stage_fixture_cart config;
+      check bool "a human load is accepted" true
+        (load {|{"roms_dir":"","cart":"fixture.rom"}|} = `OK);
+      Eio.Promise.await entered;
+      check_no_extra_machine_wake config id;
+      release ();
+      await clock (fun () -> sequence () = baseline + 1 && phase (instance config id) = "attached");
+      await_machine_publication clock config;
+      check_no_extra_machine_wake config id;
+      check Alcotest.int "one accepted load is one watcher publication" (baseline + 1)
+        (sequence ());
+      detach config id;
+      await_phase clock config id "detached"))
+
+let test_activity_from_another_domain_reaches_the_owner () =
+  with_fixture (fun env _sw config dir _state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach_machine_watcher config dir in
+    let sequence () = int "observation_seq" (instance config id) in
+    await clock (fun () -> sequence () = 1);
+    let caller_owned_root =
+      Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+        let owned = Eio_context.root_switch_on_current_domain () in
+        Runtime.notify_activity ~config ~activity:(Lane_addon_sources.Machine_changed Masc.Machine_lane.Msx);
+        owned) in
+    check bool "the notification came from off the owner domain" false caller_owned_root;
+    await clock (fun () -> sequence () = 2);
+    detach config id;
+    await_phase clock config id "detached")
+
+let test_mcp_attribution_does_not_authorize_private_lane () =
+  with_fixture (fun env sw config dir _state ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    Auth.disable_auth config.base_path;
+    check bool "fixture has authentication disabled" false (Auth.is_auth_enabled config.base_path);
+    let owner = "lane-private-owner" in
+    let meta = unwrap (Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name",`String owner;"trace_id",`String "trace-lane-owner"])) in
+    let meta_path = Keeper_types_profile.keeper_meta_path config owner in
+    Fs_compat.mkdir_p (Filename.dirname meta_path);
+    Fs_compat.save_file meta_path (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json meta));
+    let run_id = "mcp-private-" ^ Store.digest dir in
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+      ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+      ~topology:Fusion_types.Simple ~started_at:1.;
+    let id = unwrap (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Attach
+      (`Assoc ["manifest_path",`String (manifest dir "good");"run_id",`String "world";
+        "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "fusion";
+          "kind",`String "fusion_run";"run_id",`String run_id]]]])) |> text "instance_id" in
+    let clock = Eio.Stdenv.clock env in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let owner_view = unwrap (Runtime.dispatch ~caller:owner ~config
+      ~operation:Runtime.Inspect (`Assoc ["instance_id",`String id])) in
+    let row_id = member "rows" owner_view |> Yojson.Safe.Util.to_list
+      |> List.hd |> text "id" in
+    let state = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+    let session_id = "untrusted-lane-" ^ Store.digest dir in
+    Fun.protect ~finally:(fun () -> Client_registry_eio.unregister_mcp_session session_id)
+      (fun () ->
+        let mcp ?auth_token name fields = Mcp_server_eio.execute_tool_eio
+          ~sw ~clock ~workspace_scope:(Mcp_server.workspace_scope state)
+          ~mcp_session_id:session_id ?auth_token state ~name ~arguments:(`Assoc fields) in
+        let failed = mcp "masc_lane_observe" ["_agent_name",`String owner] in
+        check bool "first attribution-only call fails" false (Tool_result.is_success failed);
+        check bool "failed first call cached attribution" true
+          (match Client_registry_eio.get_resolved_name session_id with
+           | Some (name, false) -> String.equal name owner
+           | Some _ | None -> false);
+        List.iter (fun (name, fields) ->
+          let result = mcp name fields in
+          check bool (name ^ " cannot promote cached attribution to authority") false
+            (Tool_result.is_success result))
+          ["masc_lane_inspect", ["instance_id",`String id];
+           "masc_lane_evidence", ["instance_id",`String id;
+             "row_ids",`List [`String row_id]];
+           "masc_lane_observe", ["instance_id",`String id];
+           "masc_lane_detach", ["instance_id",`String id]];
+        let token = match Auth.create_token config.base_path ~agent_name:owner ~role:Masc_domain.Worker with
+          | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let owned = mcp ~auth_token:token "masc_lane_inspect" ["instance_id",`String id] in
+        check bool ("verified owner reads private lane: " ^ Tool_result.message owned) true
+          (Tool_result.is_success owned);
+        let foreign = match Auth.create_token config.base_path ~agent_name:"foreign-lane-reader" ~role:Masc_domain.Worker with
+          | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let denied = mcp ~auth_token:foreign "masc_lane_inspect" ["instance_id",`String id] in
+        check bool "foreign bearer cannot borrow cached owner" false (Tool_result.is_success denied);
+        detach config id;
+        await_phase clock config id "detached"))
+
+let test_fusion_status_hint_wakes_only_its_bound_run () =
+  with_fixture (fun env _sw config dir _state ->
+    let watcher run_id =
+      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+        ~keeper:"fixture-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
+        ~topology:Fusion_types.Simple ~started_at:1.;
+      unwrap (Runtime.dispatch ~caller:"fixture-owner" ~config ~operation:Runtime.Attach (`Assoc [
+        "manifest_path",`String (manifest dir "good");"run_id",`String "world";
+        "binding",`Assoc ["sources",`List [`Assoc [
+          "source_id",`String "fusion";"kind",`String "fusion_run";
+          "run_id",`String run_id]]]])) |> text "instance_id" in
+    let one = watcher "fusion-one" and two = watcher "fusion-two" in
+    let clock = Eio.Stdenv.clock env in
+    let request caller operation fields = Runtime.dispatch ~caller ~config ~operation (`Assoc fields) in
+    let inspect_owned id = unwrap (request "fixture-owner" Runtime.Inspect ["instance_id",`String id])
+      |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+    let seq id = int "observation_seq" (inspect_owned id) in
+    await clock (fun () -> seq one=1 && seq two=1);
+    let foreign = unwrap (request "another-keeper" Runtime.Inspect []) in
+    check Alcotest.int "foreign inspect enumerates no private instances" 0
+      (member "instances" foreign |> Yojson.Safe.Util.to_list |> List.length);
+    check Alcotest.int "foreign inspect exposes no private rows" 0
+      (member "rows" foreign |> Yojson.Safe.Util.to_list |> List.length);
+    let foreign_slice = unwrap (request "another-keeper" Runtime.Slice ["run_id",`String "world"]) in
+    check Alcotest.int "foreign retained slice exposes no private rows" 0
+      (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length);
+    let denied operation fields =
+      match Lane_addon_runtime.dispatch ~caller:"another-keeper"
+          ~access:(Lane_addon_sources.Keeper "another-keeper") ~config ~operation
+          (`Assoc (("instance_id",`String one)::fields)) with
+      | Error (Runtime.Request_rejected detail) ->
+          check string "private instance is denied before read or mutation"
+            "Lane instance is unavailable to this caller" detail
+      | Error (Runtime_failed detail) -> failf "access denial became runtime failure: %s" detail
+      | Ok _ -> fail "another Keeper read or mutated private evidence" in
+    List.iter (fun (operation,fields) -> denied operation fields)
+      [Runtime.Evidence,["row_ids",`List []]; Runtime.Observe,[]; Runtime.Detach,[];
+       Runtime.Act,["expected_incarnation",`String one;"request_id",`String "foreign";"action",`Assoc []];
+       Runtime.Action_status,["request_id",`String "foreign"]];
+    Runtime.notify_fusion_run ~run_id:"fusion-one";
+    await clock (fun () -> seq one=2);
+    check Alcotest.int "another Fusion binding did not run" 1 (seq two);
+    List.iter (fun id -> ignore (unwrap (request "fixture-owner" Runtime.Detach ["instance_id",`String id]))) [one;two];
+    List.iter (fun id -> await clock (fun () -> phase (inspect_owned id) = "detached")) [one;two];
+    Runtime.For_testing.reset ();
+    let owner_slice = unwrap (request "fixture-owner" Runtime.Slice ["run_id",`String "world"]) in
+    check bool "owner can read durable evidence after restart" true
+      (member "rows" owner_slice |> Yojson.Safe.Util.to_list <> []);
+    let foreign_slice = unwrap (request "another-keeper" Runtime.Slice ["run_id",`String "world"]) in
+    check Alcotest.int "durable ownership still hides private rows after restart" 0
+      (member "rows" foreign_slice |> Yojson.Safe.Util.to_list |> List.length))
+
+let test_private_fusion_reads_survive_retirement () = with_fixture (fun env _sw config dir _state ->
+  let owner = "private-owner" and foreign = "private-reader" in
+  let run_id = "private-fusion-" ^ Store.digest dir in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.;
+  let call caller operation fields = Runtime.dispatch ~caller ~config ~operation (`Assoc fields) in
+  let id = unwrap (call owner Runtime.Attach ["manifest_path",`String (manifest dir "good");
+    "run_id",`String "private-world";"binding",`Assoc ["sources",`List [`Assoc [
+      "source_id",`String "fusion";"kind",`String "fusion_run";"run_id",`String run_id]]]])
+    |> text "instance_id" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let view = unwrap (call owner Runtime.Inspect ["instance_id",`String id]) in
+  let row_id = member "rows" view |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+  let unverified = Lane_addon_runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect (`Assoc [])
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check Alcotest.int "bare caller attribution never grants private access" 0
+    (member "instances" unverified |> Yojson.Safe.Util.to_list |> List.length);
+  let tool access name fields =
+    let ctx : Tool_misc.context = {config;agent_name=owner;help_schemas=[]} in
+    match Tool_misc.dispatch ~lane_access:access ctx ~name ~args:(`Assoc fields) with
+    | Some result -> result | None -> fail "Lane tool was not dispatched" in
+  let unverified_tool = tool Lane_addon_sources.Unauthenticated "masc_lane_inspect" [] in
+  check Alcotest.int "MCP claimed Keeper name does not reveal private instances" 0
+    (Tool_result.data unverified_tool |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "unverified tool cannot export private evidence" false
+    (Tool_result.is_success (tool Lane_addon_sources.Unauthenticated "masc_lane_evidence"
+      ["instance_id",`String id;"row_ids",`List [`String row_id]]));
+  check Alcotest.int "verified tool authority still sees its private instance" 1
+    (tool (Lane_addon_sources.Keeper owner) "masc_lane_inspect" [] |> Tool_result.data
+      |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+  let denied operation fields = match call foreign operation fields with
+    | Error detail -> check string "uniform exact-instance denial" "Lane instance is unavailable to this caller" detail
+    | Ok _ -> fail "foreign Keeper accessed private instance" in
+  List.iter (fun operation -> denied operation ["instance_id",`String id])
+    [Runtime.Inspect;Runtime.Observe;Runtime.Detach;Runtime.Act;Runtime.Action_status];
+  denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
+  let public = unwrap (call foreign Runtime.Inspect []) in
+  check Alcotest.int "unfiltered inspection exposes no private instances" 0
+    (member "instances" public |> Yojson.Safe.Util.to_list |> List.length);
+  check Alcotest.int "unfiltered inspection exposes no private rows" 0
+    (member "rows" public |> Yojson.Safe.Util.to_list |> List.length);
+  check Alcotest.int "foreign range query excludes private observations" 0
+    (unwrap (call foreign Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  check bool "claimed owner with unauthenticated HTTP access is refused" true
+    (Result.is_error (Lane_addon_runtime.dispatch ~caller:owner ~access:Lane_addon_sources.Unauthenticated
+      ~config ~operation:Runtime.Inspect (`Assoc ["instance_id",`String id])));
+  ignore (unwrap (call owner Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]]));
+  ignore (unwrap (call owner Runtime.Detach ["instance_id",`String id]));
+  await_phase clock config id "detached";
+  Runtime.For_testing.reset ();
+  check Alcotest.int "owner can read durable rows after host manager restart" 1
+    (unwrap (call owner Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
+  denied Runtime.Inspect ["instance_id",`String id];
+  denied Runtime.Evidence ["instance_id",`String id;"row_ids",`List [`String row_id]];
+  check Alcotest.int "historical inspection excludes private bindings" 0
+    (unwrap (call foreign Runtime.Inspect []) |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
+
+let test_mcp_attributed_name_is_not_private_lane_authority () =
+  with_fixture (fun env sw config dir _state ->
+    let owner = "mcp-private-owner" and foreign = "mcp-foreign-owner" in
+    ignore (Workspace.init config ~agent_name:(Some owner));
+    Auth.disable_auth dir;
+    let register name =
+      let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) with
+        | Ok meta -> meta | Error reason -> fail reason in
+      let path = Keeper_types_profile.keeper_meta_path config name in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Fs_compat.save_file path (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json meta)) in
+    register owner; register foreign;
+    let anonymous_session = "lane-anonymous-" ^ Store.digest dir in
+    let owner_session = "lane-owner-" ^ Store.digest dir in
+    let foreign_session = "lane-foreign-" ^ Store.digest dir in
+    let operator_session = "lane-operator-" ^ Store.digest dir in
+    Fun.protect ~finally:(fun () ->
+      List.iter Client_registry_eio.unregister_mcp_session
+        [anonymous_session; owner_session; foreign_session; operator_session]) (fun () ->
+      check bool "fixture runs with workspace auth disabled" false
+        (Auth.is_auth_enabled dir);
+      let run_id = "mcp-private-" ^ Store.digest dir in
+      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+        ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+        ~topology:Fusion_types.Simple ~started_at:1.;
+      let binding = `Assoc ["sources", `List [`Assoc [
+        "source_id", `String "fusion"; "kind", `String "fusion_run";
+        "run_id", `String run_id]]] in
+      let id = unwrap (Lane_addon_runtime.dispatch ~caller:owner
+        ~access:(Lane_addon_sources.Keeper owner) ~config ~operation:Runtime.Attach
+        (`Assoc ["manifest_path", `String (manifest dir "good");
+          "run_id", `String "mcp-private-world"; "binding", binding])
+        |> Result.map_error Lane_addon_runtime.error_to_string)
+        |> text "instance_id" in
+      let clock = Eio.Stdenv.clock env in
+      await clock (fun () -> int "observation_seq" (instance config id) = 1);
+      let state = Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      let execute ?auth_token ~session ~name arguments =
+        Mcp_server_eio_execute.execute_tool_eio ~sw ~clock
+          ~workspace_scope:(Mcp_server.workspace_scope state)
+          ~mcp_session_id:session ?auth_token state ~name ~arguments in
+      let inspect ?auth_token session arguments =
+        execute ?auth_token ~session ~name:"masc_lane_inspect" arguments in
+      let empty = `Assoc [] in
+      let first = inspect anonymous_session
+        (`Assoc ["_agent_name", `String owner]) in
+      (* The MCP pre-hook removes transport markers before schema validation;
+         attribution still must not authorize private Lane data. *)
+      check bool "first attributed call can inspect shared Lane state" true
+        (Tool_result.is_success first);
+      check Alcotest.int "first attributed call exposes no private instance" 0
+        (member "instances" (Tool_result.data first) |> Yojson.Safe.Util.to_list |> List.length);
+      check Alcotest.int "first attributed call exposes no private rows" 0
+        (member "rows" (Tool_result.data first) |> Yojson.Safe.Util.to_list |> List.length);
+      check bool "first call cached only an attributed name" true
+        (match Client_registry_eio.get_resolved_name anonymous_session with
+         | Some (name, false) -> String.equal name owner
+         | Some _ | None -> false);
+      let anonymous = inspect anonymous_session empty in
+      check bool "cached-name follow-up can inspect shared Lane state" true
+        (Tool_result.is_success anonymous);
+      check Alcotest.int "cached attribution exposes no private instance" 0
+        (member "instances" (Tool_result.data anonymous) |> Yojson.Safe.Util.to_list |> List.length);
+      check Alcotest.int "cached attribution exposes no private rows" 0
+        (member "rows" (Tool_result.data anonymous) |> Yojson.Safe.Util.to_list |> List.length);
+      let token name role = match Auth.create_token dir ~agent_name:name ~role with
+        | Ok (value, _) -> value | Error _ -> fail "credential fixture creation failed" in
+      let owner_token = token owner Masc_domain.Worker in
+      let foreign_token = token foreign Masc_domain.Worker in
+      let operator_token = token "lane-operator" Masc_domain.Admin in
+      check bool "credential issuance does not enable workspace auth" false
+        (Auth.is_auth_enabled dir);
+      let owned = inspect ~auth_token:owner_token owner_session empty in
+      check bool "valid Keeper credential reads its private instance" true
+        (Tool_result.is_success owned);
+      let owned_rows = member "rows" (Tool_result.data owned) |> Yojson.Safe.Util.to_list in
+      check Alcotest.int "valid owner sees its private instance" 1
+        (member "instances" (Tool_result.data owned) |> Yojson.Safe.Util.to_list |> List.length);
+      check Alcotest.int "valid owner sees its private row" 1 (List.length owned_rows);
+      let row_id = text "id" (List.hd owned_rows) in
+      let anonymous_evidence = execute ~session:anonymous_session
+        ~name:"masc_lane_evidence"
+        (`Assoc ["instance_id", `String id; "row_ids", `List [`String row_id]]) in
+      check bool "cached attribution cannot preserve private evidence" false
+        (Tool_result.is_success anonymous_evidence);
+      let foreign_view = inspect ~auth_token:foreign_token foreign_session empty in
+      check bool "foreign valid Keeper can inspect shared Lane state" true
+        (Tool_result.is_success foreign_view);
+      check Alcotest.int "foreign valid Keeper cannot see another Keeper's instance" 0
+        (member "instances" (Tool_result.data foreign_view)
+         |> Yojson.Safe.Util.to_list |> List.length);
+      let operator_view = inspect ~auth_token:operator_token operator_session empty in
+      check bool "valid operator credential retains configuration authority" true
+        (Tool_result.is_success operator_view);
+      check Alcotest.int "operator sees private instance" 1
+        (member "instances" (Tool_result.data operator_view)
+         |> Yojson.Safe.Util.to_list |> List.length);
+      detach config id;
+      await_phase clock config id "detached"))
+;;
+
+let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun env _ config dir _ ->
+  let owner = "private-broadcast-owner" in
+  ignore (Workspace.init config ~agent_name:(Some owner));
+  let run_id = "private-broadcast-" ^ Store.digest dir in
+  Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    ~keeper:owner ~preset:"default" ~roster:Fusion_types.preset_roster
+    ~topology:Fusion_types.Simple ~started_at:1.;
+  let id = Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Attach
+    (`Assoc ["manifest_path",`String (manifest dir "good");"run_id",`String "private-world";
+      "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "fusion";
+        "kind",`String "fusion_run";"run_id",`String run_id]]]]) |> unwrap |> text "instance_id" in
+  let clock = Eio.Stdenv.clock env in
+  await clock (fun () -> int "observation_seq" (instance config id) = 1);
+  let selected = Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Inspect
+    (`Assoc ["instance_id",`String id]) |> unwrap |> member "rows"
+    |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+  let args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+    "broadcast",`Bool true;"request_id",`String "private-send"] in
+  let send caller access = Lane_addon_runtime.dispatch ~caller ~access ~config
+    ~operation:Runtime.Evidence args in
+  let original = send owner (Lane_addon_sources.Keeper owner)
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check string "explicit private Broadcast commits" "committed"
+    (member "delivery" original |> text "status");
+  let alias_context : Tool_misc.context =
+    {config;agent_name="bound-session-alias";help_schemas=[]} in
+  let alias_args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+    "broadcast",`Bool true;"request_id",`String "verified-alias-send"] in
+  let alias_result = match Tool_misc.dispatch
+    ~lane_access:(Lane_addon_sources.Keeper owner) alias_context
+    ~name:"masc_lane_evidence" ~args:alias_args with
+    | Some result -> result | None -> fail "Lane evidence facade was not dispatched" in
+  check bool "verified Keeper alias can send as its canonical Lane owner" true
+    (Tool_result.is_success alias_result);
+  check string "alias Broadcast commits under the verified Keeper" "committed"
+    (Tool_result.data alias_result |> member "delivery" |> text "status");
+  let reference, presentation =
+    Tool_bridge.artifact_manifest_reference alias_result |> unwrap in
+  check bool "complete result is explicitly available inline" true
+    (presentation = Tool_output.Inline_with_reference);
+  let manifest = match Tool_blob_store.fetch
+    (Tool_blob_store.create ~base_path:config.base_path) ~sha256:reference.sha256 with
+    | Ok (Some bytes) ->
+        check Alcotest.int "complete manifest length is exact" reference.bytes (String.length bytes);
+        Yojson.Safe.from_string bytes
+    | Ok None -> fail "complete result manifest is absent"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+  check bool "durable outer manifest preserves the exact publication and delivery" true
+    (Yojson.Safe.equal (Tool_result.data alias_result) (member "structured_content" manifest));
+  let wire = match Tool_bridge.to_agent_core_typed_result
+    ~base_path:config.base_path alias_result with
+    | Ok output -> Yojson.Safe.from_string output.content
+    | Error error -> fail error.message in
+  check bool "Keeper model receives the original publication and committed receipt" true
+    (Yojson.Safe.equal (Tool_result.data alias_result) (member "structured_content" wire));
+  let blobs = Tool_blob_store.create ~base_path:config.base_path in
+  let read_artifact (artifact : Tool_output.artifact_ref) =
+    match Tool_blob_store.fetch blobs ~sha256:artifact.sha256 with
+    | Ok (Some bytes) -> bytes
+    | Ok None -> fail "recorded artifact is absent"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+  let inner_reference = match Tool_output.normalized_artifact_ref_of_json
+    (member "keeper_artifact" (Tool_result.data alias_result)) with
+    | Tool_output.Decoded_normalized_artifact_ref artifact -> artifact
+    | Tool_output.Not_normalized_artifact_ref
+    | Tool_output.Invalid_normalized_artifact_ref _ -> fail "published evidence root is invalid" in
+  check bool "inner publication differs from the complete result root" true
+    (inner_reference.sha256 <> reference.sha256);
+  let inner_bytes = read_artifact inner_reference in
+  let outer_bytes = read_artifact reference in
+  let outer_path = Filename.concat
+    (Filename.concat (Tool_blob_store.root_dir blobs) (String.sub reference.sha256 0 2))
+    reference.sha256 in
+  let saved_path = Filename.temp_file ~temp_dir:(Filename.dirname outer_path)
+    "lane-result-manifest-" ".saved" in
+  let moved = ref false in
+  Fun.protect ~finally:(fun () ->
+    if !moved then
+      Fun.protect ~finally:(fun () -> Unix.rename saved_path outer_path)
+        (fun () -> if Sys.file_exists outer_path then Unix.rmdir outer_path)
+    else Sys.remove saved_path) (fun () ->
+    Unix.rename outer_path saved_path;
+    moved := true;
+    Unix.mkdir outer_path 0o700;
+    let unavailable = match Tool_misc.dispatch
+      ~lane_access:(Lane_addon_sources.Keeper owner) alias_context
+      ~name:"masc_lane_evidence" ~args:alias_args with
+      | Some result -> result | None -> fail "completed Lane evidence retry was not dispatched" in
+    (match unavailable with
+     | Tool_result.Failed {class_=Tool_result.Runtime_failure;
+         effect_disposition=Tool_result.Effect_outcome_unknown;_} -> ()
+     | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+         fail "outer manifest obstruction did not preserve unknown runtime failure");
+    check bool "manifest failure retains the exact completed original result" true
+      (Yojson.Safe.equal (Tool_result.data alias_result) (Tool_result.data unavailable));
+    check bool "failed outer publication does not invent manifest metadata" true
+      (Tool_result.metadata unavailable = None);
+    check bool "outer address remains deterministically obstructed" true
+      (Sys.is_directory outer_path);
+    check string "published inner evidence remains accessible" inner_bytes
+      (read_artifact inner_reference);
+    (match Tool_bridge.to_agent_core_typed_result
+      ~base_path:config.base_path unavailable with
+     | Error error ->
+         check bool "unknown storage failure is not recoverable" false error.recoverable;
+         check bool "projection retains the generic storage error class" true
+           (error.error_class = Some Agent_core.Types.Unknown)
+     | Ok _ -> fail "failed result manifest became a successful model receipt"));
+  check string "protected cleanup restores the exact complete manifest" outer_bytes
+    (read_artifact reference);
+  let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let store = Store.create ~root:store_root in
+  let broadcast_id = member "delivery" original |> member "receipt" |> text "request_id" in
+  let prepared = Store.load_broadcast store ~instance_id:id ~request_id:broadcast_id |> unwrap
+    |> (function Some value -> value | None -> fail "prepared Broadcast record missing") in
+  check string "prepared operation retains authoritative exact owner" owner
+    (prepared |> member "visibility" |> text "keeper");
+  ignore (Runtime.dispatch ~caller:owner ~config ~operation:Runtime.Detach
+    (`Assoc ["instance_id",`String id]) |> unwrap);
+  await_phase clock config id "detached";
+  unwrap (Store.remove_binding store ~instance_id:id);
+  remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
+  Runtime.For_testing.reset ();
+  Runtime.register_fleet_backend {
+    snapshot=(fun ~config:_ ~caller:_ ~access:_ -> fail "cached private retry must retain its accepted audience");
+    project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient:_ -> Error "private retry does not inline projection")};
+  check bool "unverified claimed owner cannot retrieve cached private evidence" true
+    (Result.is_error (send owner Lane_addon_sources.Unauthenticated));
+  check bool "foreign caller cannot retrieve cached private evidence" true
+    (Result.is_error (send "foreign" (Lane_addon_sources.Keeper "foreign")));
+  check bool "access principal cannot impersonate saved caller" true
+    (Result.is_error (send owner (Lane_addon_sources.Keeper "foreign")));
+  let missing = `Assoc (List.remove_assoc "visibility" (Yojson.Safe.Util.to_assoc prepared)) in
+  unwrap (Store.save_broadcast store ~instance_id:id ~request_id:broadcast_id missing);
+  check bool "missing saved visibility fails closed without original binding" true
+    (Result.is_error (send owner (Lane_addon_sources.Keeper owner)));
+  unwrap (Store.save_broadcast store ~instance_id:id ~request_id:broadcast_id prepared);
+  let recovered = send owner (Lane_addon_sources.Keeper owner)
+    |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+  check bool "owner recovers exact committed receipt without original binding" true
+    (member "delivery" recovered = member "delivery" original);
+  check bool "owner recovers exact retained artifact" true
+    (member "keeper_artifact" recovered = member "keeper_artifact" original))
+
+let fleet_record config operation =
+  let module Ledger = Masc.Lane_addon_broadcast_delivery in
+  let ledger=Ledger.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons/fleet-delivery") in
+  let operation_id=Ledger.Request_id.of_string operation |> unwrap in
+  match Eio_unix.run_in_systhread (fun () -> Ledger.find ledger ~caller:"fixture-operator" ~operation_id) with
+  | Ok (Some receipt) -> receipt.record
+  | Ok None -> fail "Fleet intention absent"
+  | Error _ -> fail "Fleet intention lookup failed"
+
+let fleet_recipient config operation recipient =
+  List.assoc recipient (fleet_record config operation).recipients
+
+let fleet_complete config operation =
+  Masc.Lane_addon_broadcast_delivery.complete (fleet_record config operation)
+
+let test_broadcast_retry_reconciles_receipt_during_slow_fanout () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let args = `Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+      "broadcast",`Bool true;"request_id",`String "slow-send"] in
+    let entered, mark_entered = Eio.Promise.create () in
+    let release, mark_released = Eio.Promise.create () in
+    let before_commit, mark_before_commit = Eio.Promise.create () in
+    let allow_commit, mark_allow_commit = Eio.Promise.create () in
+    let retry_waiting, mark_retry_waiting = Eio.Promise.create () in
+    let cancelled_waiter, mark_cancelled_waiter = Eio.Promise.create () in
+    let waiter_context, mark_waiter_context = Eio.Promise.create () in
+    let waiters = ref 0 in
+    let writes = ref 0 in
+    let previous_write = Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun config path json ->
+        incr writes;
+        if !writes=1 then (
+          Eio.Promise.resolve mark_before_commit ();
+          Eio.Promise.await allow_commit);
+        Workspace_utils.write_json_commit_result config path json) in
+    let previous_wait = Workspace_broadcast.For_testing.replace_on_exact_request_wait
+      (fun _request_id ->
+        incr waiters;
+        if !waiters=1 then Eio.Promise.resolve mark_cancelled_waiter ()
+        else if !waiters=2 then Eio.Promise.resolve mark_retry_waiting ()) in
+    let failed = ref true and block = ref true in
+    let roster = ref ["keeper-a";"keeper-b"] in
+    let sender_authority=ref Masc.Lane_addon_broadcast_delivery.Keeper_sender in
+    let projected_authorities=ref [] in
+    let calls = ref [] and immediate_calls = ref 0 in
+    let install () = Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (!sender_authority,!roster));
+      project=(fun ~config:_ ~sender_authority ~delivery ~recipient ->
+        projected_authorities:=sender_authority::!projected_authorities;
+        calls := (recipient,delivery.Workspace_broadcast.request_id)::!calls;
+        if recipient="keeper-a" && !block then (
+          Eio.Promise.resolve mark_entered (); Eio.Promise.await release);
+        if recipient="keeper-b" && !failed then Error "fixture recipient store unavailable" else Ok ())} in
+    install ();
+    let previous=Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _ ->
+      incr immediate_calls; Workspace_broadcast.Passive) in
+    Fun.protect ~finally:(fun () ->
+      let (_ : Workspace_broadcast.broadcast_delivery -> Workspace_broadcast.mention_delivery) =
+        Workspace_broadcast.For_testing.replace_on_broadcast_mention previous in
+      let (_ : string -> unit) =
+        Workspace_broadcast.For_testing.replace_on_exact_request_wait previous_wait in
+      let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous_write in
+      if not (Eio.Promise.is_resolved allow_commit) then Eio.Promise.resolve mark_allow_commit ();
+      if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve mark_released ()) (fun () ->
+      let send () = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence args |> unwrap in
+      let first = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await before_commit;
+      let cancelled_retry = Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Cancel.sub (fun context ->
+          Eio.Promise.resolve mark_waiter_context context;
+          send ())) in
+      Eio.Promise.await cancelled_waiter;
+      Eio.Cancel.cancel (Eio.Promise.await waiter_context) Exit;
+      (match Eio.Promise.await cancelled_retry with
+       | Error (Eio.Cancel.Cancelled _) -> ()
+       | Error error -> raise error
+       | Ok _ -> Alcotest.fail "cancelled precommit retry must propagate cancellation");
+      check bool "cancelled waiter leaves the original owner waiting" false (Eio.Promise.is_resolved first);
+      let retry = Eio.Fiber.fork_promise ~sw send in
+      Eio.Promise.await retry_waiting;
+      check bool "retry arrived before the authoritative row" false (Eio.Promise.is_resolved retry);
+      Eio.Promise.resolve mark_allow_commit ();
+      let original=Eio.Promise.await_exn first in
+      let precommit_replay=Eio.Promise.await_exn retry in
+      check Alcotest.int "precommit retries create one authoritative message" 1 !writes;
+      check bool "precommit retry preserves the committed receipt" true
+        (member "delivery" original=member "delivery" precommit_replay);
+      check string "durable message receipt returns before any recipient projection" "committed"
+        (member "delivery" original |> text "status");
+      check string "committed receipt transfers recovery to the durable recipient ledger" "durable_admitted"
+        (member "delivery" original |> member "receipt" |> text "fanout_state");
+      check Alcotest.int "publication does not run synchronous fleet handler" 0 !immediate_calls;
+      check Alcotest.int "publication does not inline root recipient work" 0 (List.length !calls);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      Eio.Promise.await entered;
+      await clock (fun () -> match fleet_recipient config "slow-send" "keeper-b" with
+        | Masc.Lane_addon_broadcast_delivery.Pending (Some _) -> true
+        | Accepted | Pending None -> false);
+      ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String id]));
+      await clock (fun () -> int "observation_seq" (instance config id) = 2);
+      let replay=send () in
+      check bool "first recipient remains blocked after scheduling returns" false (Eio.Promise.is_resolved release);
+      check bool "same-key retry preserves exact committed receipt during drain" true
+        (member "delivery" original = member "delivery" replay);
+      check bool "retry preserves original artifact despite changed live metadata" true
+        (member "keeper_artifact" original = member "keeper_artifact" replay);
+      check Alcotest.int "both recipients progress independently without replay" 2 (List.length !calls);
+      check bool "ordinary Broadcast still uses its existing synchronous behavior" true
+        (Result.is_ok (Workspace_broadcast.broadcast_once config
+          ~request_id:("wmsg-" ^ String.make 32 'b') ~from_agent:"fixture-operator" ~content:"independent message"));
+      check Alcotest.int "ordinary caller still reaches existing handler" 1 !immediate_calls;
+      block:=false; Eio.Promise.resolve mark_released ();
+      await clock (fun () -> fleet_recipient config "slow-send" "keeper-a"
+        = Masc.Lane_addon_broadcast_delivery.Accepted);
+      check bool "partial recipient failure remains durably pending" true
+        (match fleet_recipient config "slow-send" "keeper-b" with
+         | Masc.Lane_addon_broadcast_delivery.Pending (Some _) -> true
+         | Accepted | Pending None -> false);
+      let receipt=member "delivery" original |> member "receipt" in
+      let request_id=text "request_id" receipt in
+      check bool "same identity cannot replace committed content" true
+        (Result.is_error (Workspace_broadcast.broadcast_once config
+          ~request_id ~from_agent:"fixture-operator" ~content:"different content"));
+      detach config id; await_phase clock config id "detached";
+      let store_root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
+      unwrap (Store.remove_binding (Store.create ~root:store_root) ~instance_id:id);
+      remove_tree (Filename.concat store_root (Filename.concat "observations" (Store.digest id)));
+      Runtime.For_testing.reset (); sender_authority:=Masc.Lane_addon_broadcast_delivery.External_sender; roster:=["keeper-a";"keeper-b";"new-keeper"]; failed:=false; install ();
+      let recovered=send () in
+      check bool "restart reconciles receipt after original source disappears" true
+        (member "delivery" recovered = member "delivery" original);
+      check bool "restart retains original artifact" true
+        (member "keeper_artifact" recovered = member "keeper_artifact" original);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "slow-send");
+      let count recipient=List.length (List.filter (fun (name,_) -> name=recipient) !calls) in
+      check Alcotest.int "accepted recipient is not projected again after restart" 1 (count "keeper-a");
+      check Alcotest.int "failed recipient is retried once using original identity" 2 (count "keeper-b");
+      check Alcotest.int "new roster member is outside accepted audience" 0 (count "new-keeper");
+      check bool "all recipient attempts share one authoritative message identity" true
+        (List.for_all (fun (_,id) -> id=request_id) !calls);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      check Alcotest.int "completed drain launches no further recipient work" 3 (List.length !calls);
+      check bool "sender authority survives restart and registry change" true
+        (List.for_all ((=) Masc.Lane_addon_broadcast_delivery.Keeper_sender) !projected_authorities)))
+
+let test_fleet_service_isolates_blocked_recipient_and_admissions () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock=Eio.Stdenv.clock env in
+    let id=attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected=inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let send operation=Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc ["instance_id",`String id;"row_ids",`List [`String selected];
+        "broadcast",`Bool true;"request_id",`String operation]) |> unwrap in
+    let first_request=ref None and blocked=ref true in
+    let entered,mark_entered=Eio.Promise.create () in
+    let release,_=Eio.Promise.create () in
+    let calls=ref [] in
+    Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> Ok (Masc.Lane_addon_broadcast_delivery.Keeper_sender,
+        ["keeper-a";"keeper-b"]));
+      project=(fun ~config:_ ~sender_authority:_ ~delivery ~recipient ->
+        calls:=(delivery.Workspace_broadcast.request_id,recipient)::!calls;
+        if Some delivery.request_id = !first_request && recipient="keeper-a" && !blocked then begin
+          ignore (Eio.Promise.try_resolve mark_entered ());
+          Eio.Promise.await release
+        end;
+        Ok ())};
+    let original=send "blocked-operation" in
+    let first_id=member "delivery" original |> member "receipt" |> text "request_id" in
+    first_request:=Some first_id;
+    let ready,mark_ready=Eio.Promise.create () in
+    let stay,_=Eio.Promise.create () in
+    let exception Stop_fixture_service in
+    let service=Eio.Fiber.fork_promise ~sw (fun () ->
+      try Eio.Cancel.sub (fun cancellation ->
+        Eio.Switch.run (fun service_sw ->
+          Runtime.start_fleet_service ~config ~sw:service_sw ~clock;
+          Eio.Promise.resolve mark_ready (service_sw,cancellation);
+          Eio.Promise.await stay))
+      with Eio.Cancel.Cancelled Stop_fixture_service -> ()) in
+    let service_sw,cancellation=Eio.Promise.await ready in
+    (* Kick the real service after it owns the root. The admitted replay's
+       nudge must dispatch a beat, not an awaited recipient drain. *)
+    ignore (send "blocked-operation");
+    Eio.Promise.await entered;
+    await clock (fun () -> fleet_recipient config "blocked-operation" "keeper-b"
+      = Masc.Lane_addon_broadcast_delivery.Accepted);
+    check bool "first recipient is still blocked while second settles" true !blocked;
+    let count request recipient=List.length (List.filter (fun pair -> pair=(request,recipient)) !calls) in
+    (* Overlapping authoritative scans must share a still-owned projection,
+       including when their snapshots were read before another acceptance. *)
+    unwrap (Runtime.recover_fleet ~config ~sw:service_sw);
+    unwrap (Runtime.recover_fleet ~config ~sw:service_sw);
+    let later=send "separately-admitted-operation" in
+    let later_id=member "delivery" later |> member "receipt" |> text "request_id" in
+    (* No manual drain after this send: its production admission nudge must
+       be handled even though the older recipient has not returned. *)
+    await clock (fun () -> fleet_complete config "separately-admitted-operation");
+    check Alcotest.int "duplicate scans launch blocked request/recipient once" 1 (count first_id "keeper-a");
+    check Alcotest.int "accepted second recipient is not reprojected" 1 (count first_id "keeper-b");
+    check Alcotest.int "separate admission delivers first recipient" 1 (count later_id "keeper-a");
+    check Alcotest.int "separate admission delivers second recipient" 1 (count later_id "keeper-b");
+    check bool "independent admission did not release blocked work" false (Eio.Promise.is_resolved release);
+    Eio.Cancel.cancel cancellation Stop_fixture_service;
+    Eio.Promise.await_exn service;
+    check bool "cancelled projection retains its pending obligation" true
+      (match fleet_recipient config "blocked-operation" "keeper-a" with
+       | Masc.Lane_addon_broadcast_delivery.Pending _ -> true | Accepted -> false);
+    check bool "independent completed message stays completed" true
+      (fleet_complete config "separately-admitted-operation");
+    blocked:=false;
+    unwrap (Runtime.recover_fleet ~config ~sw);
+    await clock (fun () -> fleet_complete config "blocked-operation");
+    check Alcotest.int "cancellation releases ownership for one retry" 2 (count first_id "keeper-a");
+    check Alcotest.int "retry does not repeat its accepted sibling" 1 (count first_id "keeper-b");
+    let replay=send "blocked-operation" in
+    check bool "cancellation and retry preserve the original workspace receipt" true
+      (member "delivery" original = member "delivery" replay);
+    detach config id; await_phase clock config id "detached")
+
+let test_fleet_recovery_isolates_locked_journal_and_concurrent_admission () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let send operation = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc ["instance_id", `String id; "row_ids", `List [`String selected];
+        "broadcast", `Bool true; "request_id", `String operation]) |> unwrap in
+    let calls = ref [] in
+    Runtime.register_fleet_backend {
+      snapshot = (fun ~config:_ ~caller:_ ~access:_ ->
+        Ok (Masc.Lane_addon_broadcast_delivery.Keeper_sender, ["keeper-a"; "keeper-b"]));
+      project = (fun ~config:_ ~sender_authority:_ ~delivery ~recipient ->
+        calls := (delivery.Workspace_broadcast.request_id, recipient) :: !calls;
+        Ok ())};
+    let _ = send "op-a" in
+    let ledger_root = Filename.concat (Workspace.masc_dir config) "lane-addons/fleet-delivery" in
+    let pending_dir = Filename.concat ledger_root "pending" in
+    let markers_a = Sys.readdir pending_dir |> Array.to_list in
+    check Alcotest.int "op-a creates one pending marker" 1 (List.length markers_a);
+    let marker_a = List.hd markers_a in
+    let journal_a = Filename.concat ledger_root marker_a in
+    let entered_lock = Atomic.make false in
+    let release_lock = Atomic.make false in
+    let hold_fiber = Eio.Fiber.fork_promise ~sw (fun () ->
+      Eio_unix.run_in_systhread (fun () ->
+        Fs_compat.update_existing_private_file_durable_locked_result journal_a (fun _bytes ->
+          Atomic.set entered_lock true;
+          while not (Atomic.get release_lock) do
+            Unix.sleepf 0.002
+          done;
+          (None, Ok ())))) in
+    let hold_finished = ref false in
+    let finish_hold () =
+      if not !hold_finished then begin
+        hold_finished := true;
+        Atomic.set release_lock true;
+        ignore (Eio.Promise.await_exn hold_fiber)
+      end in
+    Fun.protect ~finally:finish_hold (fun () ->
+      await clock (fun () -> Atomic.get entered_lock);
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      let _ = send "op-b" in
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "op-b");
+      check bool "op-b completes while op-a journal lock is held" true (fleet_complete config "op-b");
+      check bool "hold fiber is still holding op-a lock" false (Atomic.get release_lock);
+      finish_hold ();
+      unwrap (Runtime.recover_fleet ~config ~sw);
+      await clock (fun () -> fleet_complete config "op-a");
+      check bool "op-a completes after journal lock is released" true (fleet_complete config "op-a");
+      detach config id; await_phase clock config id "detached"))
+
+let test_broadcast_pending_commit_recovers_same_identity () =
+  with_fixture (fun env sw config dir _ ->
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let selected = inspect config |> member "rows" |> Yojson.Safe.Util.to_list |> List.hd |> text "id" in
+    let args = ["instance_id",`String id;"row_ids",`List [`String selected]] in
+    let send_id = ["request_id",`String "failed-send"] in
+    let attempts = ref 0 in
+    let previous = Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun _ _ _ -> incr attempts; Error "fixture authoritative write rejected") in
+    let result = Fun.protect ~finally:(fun () ->
+      let (_ : Workspace_utils_backend_setup.config -> string -> Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous in
+      ()) (fun () ->
+        check bool "two destinations are refused before publication" true
+          (Result.is_error (Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+            (`Assoc (args @ ["broadcast",`Bool true;"keeper_name",`String "someone"]))));
+        check bool "nonboolean Broadcast is refused" true
+          (Result.is_error (Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+            (`Assoc (args @ ["broadcast",`String "true"]))));
+        let unauthenticated = dispatch config Runtime.Evidence (args @ send_id @ ["broadcast",`Bool true]) |> unwrap in
+        check string "sharing requires an authenticated caller" "failed"
+          (member "delivery" unauthenticated |> text "status");
+        check Alcotest.int "invalid requests never reach Broadcast" 0 !attempts;
+        Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+          (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap) in
+    check string "admitted intention remains queued while authoritative commit is rejected" "pending_commit"
+      (member "delivery" result |> text "status");
+    check bool "Broadcast does not invent a single Keeper destination" true
+      (member "delivery" result |> member "keeper_name" = `Null);
+    check bool "rejected workspace commit cannot transfer client retry ownership" true
+      (member "delivery" result |> member "receipt" = `Null);
+    let evidence = member "evidence" result in
+    check bool "failed Broadcast retains the exact selected evidence" true
+      (Sys.file_exists (text "path" evidence));
+    check Alcotest.int "one explicit request attempts one message write" 1 !attempts;
+    ignore (unwrap (dispatch config Runtime.Inspect []));
+    ignore (unwrap (dispatch config Runtime.Evidence args));
+    check Alcotest.int "inspection and preservation never rebroadcast" 1 !attempts;
+    let projections = ref [] in
+    Runtime.register_fleet_backend {
+      snapshot=(fun ~config:_ ~caller:_ ~access:_ -> fail "recovery must retain the admitted empty audience");
+      project=(fun ~config:_ ~sender_authority:_ ~delivery:_ ~recipient -> projections:=recipient::!projections; Ok ())};
+    unwrap (Runtime.recover_fleet ~config ~sw);
+    await clock (fun () -> fleet_complete config "failed-send");
+    let recovered = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc (args @ send_id @ ["broadcast",`Bool true])) |> unwrap in
+    check string "queued intention becomes committed after storage recovers" "committed"
+      (member "delivery" recovered |> text "status");
+    check bool "commit recovery retains the exact published artifact" true
+      (member "keeper_artifact" recovered = member "keeper_artifact" result);
+    let receipt = member "delivery" recovered |> member "receipt" in
+    let found = Workspace_broadcast.find_broadcast ~request_id:(text "request_id" receipt)
+      config ~from_agent:"fixture-operator" ~content:(text "message" recovered) in
+    check bool "recovery finds the authoritative exact request without a new publication" true
+      (match found with Ok (Some delivery) -> delivery.seq = int "seq" receipt | _ -> false);
+    unwrap (Runtime.recover_fleet ~config ~sw);
+    check Alcotest.int "empty accepted audience stays empty despite the later backend" 0
+      (List.length !projections);
+    Runtime.register_delivery_handler (fun ~config:_ ~caller:_ ~keeper_name:_ ~prompt:_ ->
+      failwith "fixture recipient raised after accepting");
+    let uncertain = Runtime.dispatch ~caller:"fixture-operator" ~config ~operation:Runtime.Evidence
+      (`Assoc (args @ ["keeper_name",`String "fixture-recipient"])) |> unwrap in
+    check string "a recipient exception is uncertain, not a proven rejection" "outcome_unknown"
+      (member "delivery" uncertain |> text "status");
+    check string "uncertain receipt retains its intended Keeper" "fixture-recipient"
+      (member "delivery" uncertain |> text "keeper_name");
+    check bool "uncertain delivery preserves evidence" true
+      (Sys.file_exists (member "evidence" uncertain |> text "path"));
+    detach config id; await_phase clock config id "detached")
+
+let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let access = Lane_addon_sources.Operator_configuration in
+  let exports () = Runtime.tool_export_reading ~config ~access ~reserved:[]
+    |> Result.map (fun (reading : Runtime.export_reading) -> reading.exports) in
+  List.iter (fun name ->
+    check bool (name ^ " is absent from the static MCP inventory") false (Config.is_raw_tool_name name);
+    check bool (name ^ " has no static Keeper descriptor") true
+      (Keeper_tool_descriptor.find_public name = None)) ["masc_msx_step"; "masc_dos_step"];
+  check Alcotest.int "no installation exposes nothing" 0 (List.length (unwrap (exports ())));
+  let attach_export ?(names = ["masc_msx_step"]) mode =
+    let path = manifest dir mode in
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    write path (original ^ "\n[world.tools]\nexport = "
+      ^ Yojson.Safe.to_string (`List (List.map (fun name -> `String name) names)) ^ "\n");
+    unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+      "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id" in
+  ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+  Auth.disable_auth config.base_path;
+  let server = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let request ?auth_token ?(profile=Mcp_server_eio.Full) method_ params =
+    let fields = match params with `Assoc fields -> fields | _ -> assert false in
+    let metadata = `Assoc [
+      "io.modelcontextprotocol/protocolVersion", `String "2026-07-28";
+      "io.modelcontextprotocol/clientCapabilities", `Assoc [];
+      "io.modelcontextprotocol/clientInfo", `Assoc [
+        "name", `String "lane-addon-fixture"; "version", `String "1"]] in
+    Mcp_server_eio.handle_request ~profile ~clock ~sw ?auth_token server
+      (Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0"; "id",`Int 1;
+        "method",`String method_; "params",`Assoc (("_meta",metadata)::fields)])) in
+  let listed ?auth_token () =
+    let result = request ?auth_token "tools/list" (`Assoc ["names",`List [`String "masc_msx_step"]])
+      |> member "result" in
+    check string "2026 list result is complete" "complete" (text "resultType" result);
+    check string "caller-dependent list is private" "private" (text "cacheScope" result);
+    check bool "list carries a freshness duration" true
+      (match member "ttlMs" result with `Int n -> n >= 0 | _ -> false);
+    result |> member "tools" |> Yojson.Safe.Util.to_list in
+  let changes = ref [] in
+  let subscription = Mcp_subscriptions.register ~subscription_id:(`String "addon-tools")
+    ~filter:{ Mcp_transport_protocol.empty_subscription_filter with tools_list_changed = true }
+    ~send:(fun notification -> changes := notification :: !changes; true) in
+  Eio.Switch.on_release sw (fun () -> Mcp_subscriptions.unregister subscription);
+  let invoked () = request "tools/call" (`Assoc ["name",`String "masc_msx_step"; "arguments",`Assoc []]) in
+  check Alcotest.int "MCP has no tool before attach" 0 (List.length (listed ()));
+  check Alcotest.int "disabled auth ignores stale bearer before attach" 0
+    (List.length (listed ~auth_token:"unregistered-fixture-token" ()));
+  let first = attach_export "good" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config first) > 0);
+  let cached () = unwrap (Runtime.observation_for_export ~config ~access ~name:"masc_msx_step"
+    |> Result.map_error Runtime.export_refusal_message) in
+  let calls_before = Hashtbl.find state.calls first in
+  let snapshot = match cached () with Some snapshot -> snapshot | None -> fail "missing attached observation" in
+  check bool "completed observation is stable while worker remains alive" false snapshot.refreshing;
+  check string "cached observation belongs to selected installation" first snapshot.instance_id;
+  check Alcotest.int "cached read performs no worker observation" calls_before (Hashtbl.find state.calls first);
+  check Alcotest.int "MCP lists attached worker tool" 1 (List.length (listed ()));
+  check Alcotest.int "disabled auth ignores stale bearer with shared addon" 1
+    (List.length (listed ~auth_token:"unregistered-fixture-token" ()));
+  let stale_token_call = request ~auth_token:"unregistered-fixture-token" "tools/call"
+    (`Assoc ["name", `String "masc_msx_step"; "arguments", `Assoc []]) in
+  check bool "disabled auth allows shared addon call with stale bearer" true
+    (member "result" stale_token_call <> `Null
+      && member "isError" (member "result" stale_token_call) <> `Bool true);
+  check bool "unverified bearer supplies no worker identity" true
+    (List.hd !(state.principals) = Lane_addon_call_context.Anonymous);
+  check bool "attach notifies opted-in tool subscriptions" true (!changes <> []);
+  changes := [];
+  let invoked_result = invoked () |> member "result" in
+  check string "2026 call result is complete" "complete" (text "resultType" invoked_result);
+  check bool "MCP invokes attached worker tool" true
+    (member "isError" invoked_result <> `Bool true);
+  check string "MCP preserves worker result content" first
+    (invoked_result |> member "content" |> Yojson.Safe.Util.to_list |> List.hd |> text "text");
+  let handle = List.hd (unwrap (exports ())) in
+  let descriptor = Keeper_lane_addon_descriptor.create handle in
+  Gc.full_major ();
+  let observed_again = List.hd (unwrap (exports ())) in
+  check bool "repeated live inventories retain the same owned export" true (handle == observed_again);
+  check bool "repeated Keeper observations retain the same actual descriptor" true
+    (descriptor == Keeper_lane_addon_descriptor.create observed_again);
+  check bool "cached descriptor remains canonical and Serial" true
+    (Keeper_lane_addon_descriptor.is_canonical descriptor
+     && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial);
+  let call handle = Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle ~arguments:(`Assoc []) in
+  let unrelated_owner = Lane_addon_tool_export.create_owner ~instance_id:handle.instance_id in
+  let unrelated = Lane_addon_tool_export.create ~owner:unrelated_owner ~tool:handle.tool in
+  check bool "equal ids and Tool objects cannot substitute a worker start" false
+    (Lane_addon_tool_export.equal_owner handle.owner unrelated.owner);
+  check bool "unrelated generation does not reuse the old descriptor" false
+    (descriptor == Keeper_lane_addon_descriptor.create unrelated);
+  let before = List.length !(state.principals) in
+  check bool "an unowned generation cannot invoke a visible installation" true (Result.is_error (call unrelated));
+  check Alcotest.int "generation refusal happens before worker dispatch" before (List.length !(state.principals));
+  let changed_tool = {handle.tool with input_schema=`Assoc ["type",`String "string"]} in
+  let changed = Lane_addon_tool_export.create ~owner:handle.owner ~tool:changed_tool in
+  check bool "a different frozen Tool object does not reuse the descriptor" false
+    (descriptor == Keeper_lane_addon_descriptor.create changed);
+  check bool "same generation cannot bypass current live schema validation" true (Result.is_error (call changed));
+  check Alcotest.int "schema refusal happens before worker dispatch" before (List.length !(state.principals));
+  check bool "live installation is callable" true (Result.is_ok (call handle));
+  ignore (unwrap (Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle
+    ~arguments:(`Assoc ["caller", `Assoc ["kind", `String "keeper"; "name", `String "forged"]])
+    |> Result.map_error (function Runtime.Unavailable message | Runtime.Outcome_unknown message
+      | Runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message) -> message)));
+  check bool "model arguments cannot replace operator authority" true
+    (List.hd !(state.principals) = Lane_addon_call_context.Operator);
+  let keeper_call () = Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name:"fixture-keeper"
+      ~export:handle ~arguments:(`Assoc []) in
+  check bool "Keeper adapter calls a visible live installation" true
+    (match (keeper_call ()).disposition with Tool_result.Completed () -> true | _ -> false);
+  check bool "Keeper identity comes from verified access" true
+    (List.hd !(state.principals) = Lane_addon_call_context.Keeper "fixture-keeper");
+  (* An authenticated player keeps their actual identity and only the
+     package tools covered by the existing host permission catalog. *)
+  let invited_name = "fixture_player_export" in
+  let worker_name = "fixture_worker_export" in
+  Tool_catalog.For_testing.register_metadata invited_name (Tool_catalog.metadata "masc_dos_step");
+  Tool_catalog.For_testing.register_metadata worker_name (Tool_catalog.metadata "masc_lane_act");
+  let invited = attach_export ~names:[invited_name;worker_name] "invited" in
+  await clock (fun () -> int "observation_seq" (instance config invited) > 0);
+  Fun.protect ~finally:(fun () -> Auth.disable_auth config.base_path) (fun () ->
+    ignore (Auth.enable_auth config.base_path ~require_token:true ~agent_name:"fixture-admin");
+    let token = match Auth.create_token config.base_path ~agent_name:"fixture-player" ~role:Masc_domain.Player with
+      | Ok (token, _) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+    let seat = request ~profile:Mcp_server_eio.Seat ~auth_token:token "tools/list" (`Assoc [])
+      |> member "result" |> member "tools" |> Yojson.Safe.Util.to_list in
+    check bool "seat discovers authorized attached player tool" true
+      (List.exists (fun tool -> text "name" tool = invited_name) seat);
+    check bool "seat excludes worker-only addon" false
+      (List.exists (fun tool -> text "name" tool = worker_name) seat);
+    let result = request ~auth_token:token "tools/list" (`Assoc ["names", `List [`String invited_name; `String worker_name]])
+      |> member "result" |> member "tools" |> Yojson.Safe.Util.to_list in
+    check (list string) "player sees only the catalog-authorized export" [invited_name]
+      (List.map (text "name") result);
+    let result = request ~auth_token:token "tools/call" (`Assoc ["name", `String invited_name;
+      "arguments", `Assoc ["agent_name", `String "forged"]]) in
+    check bool "invited player can call the authorized export" true
+      (member "error" result = `Null && member "isError" (member "result" result) <> `Bool true);
+    check bool "credential owner reaches the private worker envelope" true
+      (List.hd !(state.principals) = Lane_addon_call_context.Authenticated_agent "fixture-player");
+    let denied = request ~auth_token:token "tools/call" (`Assoc ["name", `String worker_name; "arguments", `Assoc []]) in
+    check bool "player cannot invoke a worker-only export" true (member "error" denied <> `Null));
+  detach config invited;
+  await_phase clock config invited "detached";
+  check bool "reserved host name rejects publication" true
+    (Result.is_error (Runtime.tool_export_reading ~config ~access ~reserved:["masc_msx_step"]));
+  let second = attach_export "second" in
+  await clock (fun () -> int "observation_seq" (instance config second) > 0);
+  check bool "ambiguous name rejects publication" true (Result.is_error (exports ()));
+  check bool "ambiguous name rejects an old handle" true (Result.is_error (call handle));
+  let unrelated_name = "fixture_unrelated_export" in
+  let reserved_name = "masc_board_stats" in
+  check bool "fixture host tool exists" true (Config.is_raw_tool_name reserved_name);
+  let host_descriptors () = Keeper_tool_descriptor.descriptors_for_internal reserved_name
+    |> List.map (fun (descriptor : Keeper_tool_descriptor.t) -> descriptor.id) in
+  let host_before = host_descriptors () in
+  check bool "fixture owns an internal host descriptor" true (host_before <> []);
+  let third = attach_export ~names:[unrelated_name; reserved_name] "isolated" in
+  await clock (fun () -> int "observation_seq" (instance config third) > 0);
+  let isolated = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:"fixture-keeper" in
+  check (list string) "only conflicting names are quarantined" [unrelated_name]
+    (List.map (fun (export : Lane_addon_tool_export.t) -> export.tool.name) isolated.exports);
+  check bool "duplicate name retains both installation identities" true
+    (List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
+       conflict.name = "masc_msx_step"
+       && conflict.reason = Lane_addon_tool_export.Multiple_installations
+       && List.sort String.compare conflict.instances = List.sort String.compare [first; second])
+       isolated.conflicts);
+  check bool "host collision retains its typed diagnostic" true
+    (List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
+       conflict.name = reserved_name && conflict.instances = [third]
+       && conflict.reason = Lane_addon_tool_export.Reserved_host_name) isolated.conflicts);
+  check (list string) "static host descriptors remain available" host_before
+    (host_descriptors ());
+  (* Also retain the raw host catalog entry; descriptor availability above
+     and raw registration are distinct collision-isolation guarantees. *)
+  check bool "raw host catalog entry remains available" true
+    (List.exists (fun (schema : Masc_domain.tool_schema) -> schema.name = reserved_name)
+       Config.raw_all_tool_schemas);
+  let unaffected_call = Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name:"fixture-keeper"
+    ~export:(List.hd isolated.exports) ~arguments:(`Assoc []) in
+  check bool "unrelated Keeper export remains callable during collisions" true
+    (match unaffected_call.disposition with Tool_result.Completed () -> true | _ -> false);
+  check bool "conflicting frozen Keeper handle remains refused" true
+    ((keeper_call ()).disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+  detach config third;
+  await_phase clock config third "detached";
+  detach config second;
+  await_phase clock config second "detached";
+  detach config first;
+  check bool "detach immediately revokes old handle" true (Result.is_error (call handle));
+  check bool "detach immediately removes cached observation" true (cached () = None);
+  let detached_keeper_call = keeper_call () in
+  check bool "Keeper adapter rejects the detached frozen handle before effects" true
+    (detached_keeper_call.disposition = Tool_result.Failed Tool_result.Workflow_rejection
+      && detached_keeper_call.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  await_phase clock config first "detached";
+  check Alcotest.int "MCP removes detached tool" 0 (List.length (listed ()));
+  check bool "detach notifies opted-in tool subscriptions" true (!changes <> []);
+  check bool "MCP rejects detached tool call" true (member "error" (invoked ()) <> `Null);
+  let replacement = attach_export "replacement" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  check bool "same-name replacement cannot receive old call" true (Result.is_error (call handle));
+  check bool "new handle invokes replacement" true
+    (Result.is_ok (call (List.hd (unwrap (exports ())))));
+  detach config replacement;
+  await_phase clock config replacement "detached";
+  let uncertain = attach_export "export-error" in
+  await clock (fun () -> int "observation_seq" (instance config uncertain) > 0);
+  let uncertain_handle = List.hd (unwrap (exports ())) in
+  let previous_seq = int "observation_seq" (instance config uncertain) in
+  check bool "lost worker response preserves unknown outcome" true
+    (match call uncertain_handle with Error (Runtime.Outcome_unknown _) -> true | _ -> false);
+  check bool "unknown effect cannot certify the previous screen stable" true
+    (match Runtime.observation_for_export ~config ~access ~name:"masc_msx_step" with
+     | Error _ -> true
+     | Ok (Some snapshot) -> snapshot.refreshing || snapshot.observation_seq > previous_seq
+     | Ok None -> false);
+  await clock (fun () -> int "observation_seq" (instance config uncertain) > previous_seq);
+  detach config uncertain;
+  await_phase clock config uncertain "detached";
+  let cancelled = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config cancelled) > 0);
+  let cancelled_handle = List.hd (unwrap (exports ())) in
+  Eio.Fiber.first
+    (fun () -> ignore (call cancelled_handle))
+    (fun () ->
+      await clock (fun () -> Hashtbl.mem state.calls (cancelled ^ "/export"));
+      let snapshot = match cached () with Some snapshot -> snapshot | None -> fail "missing calling worker observation" in
+      check bool "in-flight machine call marks cached screen refreshing" true snapshot.refreshing);
+  await_phase clock config cancelled "detached";
+  check bool "caller cancellation retires the installation" true
+    (Hashtbl.mem state.stops cancelled);
+  check bool "cancelled handle stays revoked" true (Result.is_error (call cancelled_handle));
+  (* A call cancelled before it wrote anything to the worker, here held in its
+     mediation, changed nothing there: the installation keeps serving. *)
+  let unsent = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config unsent) > 0);
+  let unsent_handle = List.hd (unwrap (exports ())) in
+  let mediating, entered = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let held ~release_controller:_ ~snapshot:_ ~invoke =
+    Eio.Promise.resolve entered (); Eio.Promise.await never; invoke None in
+  Eio.Fiber.first
+    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+      ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
+      ~config ~access ~reserved:[] ~export:unsent_handle ~arguments:(`Assoc [])))
+    (fun () -> Eio.Promise.await mediating);
+  check bool "a call cancelled before it wrote reached nothing in the worker" false
+    (Hashtbl.mem state.calls (unsent ^ "/export"));
+  check bool "a call cancelled before it wrote leaves the installation serving" false
+    (Hashtbl.mem state.stops unsent);
+  check bool "and its export stays callable" true
+    (match exports () with
+     | Ok [handle] -> Lane_addon_tool_export.equal_owner handle.owner unsent_handle.owner
+     | Ok _ | Error _ -> false);
+  detach config unsent;
+  await_phase clock config unsent "detached";
+  (* A mediated call counts as written from its first RPC, the controller
+     snapshot, so one cancelled after it stops the installation even though
+     its tool call never went. *)
+  let snapped = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> int "observation_seq" (instance config snapped) > 0);
+  let snapped_handle = List.hd (unwrap (exports ())) in
+  let snapshotted, mark_snapshotted = Eio.Promise.create () in
+  let after_snapshot ~release_controller:_ ~snapshot ~invoke =
+    ignore (snapshot ()); Eio.Promise.resolve mark_snapshotted (); Eio.Promise.await never; invoke None in
+  Eio.Fiber.first
+    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+      ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some after_snapshot) ~principal:None
+      ~config ~access ~reserved:[] ~export:snapped_handle ~arguments:(`Assoc [])))
+    (fun () -> Eio.Promise.await snapshotted);
+  await_phase clock config snapped "detached";
+  check bool "its tool call never reached the worker" false
+    (Hashtbl.mem state.calls (snapped ^ "/export"));
+  check bool "a mediated call cancelled after its snapshot stops the installation" true
+    (Hashtbl.mem state.stops snapped);
+  let remote = attach_export "export-hang" in
+  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  let remote_handle = List.hd (unwrap (exports ())) in
+  let cancel_remote, release_remote = Eio.Promise.create () in
+  let cleanup_started, mark_cleanup_started = Eio.Promise.create () in
+  let cleanup_allowed, release_cleanup = Eio.Promise.create () in
+  let owner_complete = Atomic.make false in
+  let caller_returned = Atomic.make false in
+  let authorize ~release_controller:_ ~snapshot:_ ~invoke =
+    Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+      Eio.Promise.resolve mark_cleanup_started ();
+      Eio.Promise.await cleanup_allowed)) (fun () -> invoke None) in
+  let remote_call () = Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+    ~on_complete:(fun () -> Atomic.set owner_complete true) ~on_result:(fun _ -> ())
+    ~authorize:(Some authorize) ~principal:None ~config ~access ~reserved:[]
+    ~export:remote_handle ~arguments:(`Assoc []) in
+  let _, () = Eio.Fiber.pair
+    (fun () -> Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+      check bool "caller is on another domain" false (Eio_context.root_switch_on_current_domain ());
+      Eio.Fiber.first (fun () -> ignore (remote_call ()))
+        (fun () -> Eio.Promise.await cancel_remote);
+      Atomic.set caller_returned true))
+    (fun () ->
+      await clock (fun () -> Hashtbl.mem state.calls (remote ^ "/export"));
+      Eio.Promise.resolve release_remote ();
+      Eio.Promise.await cleanup_started;
+      await clock (fun () -> Atomic.get caller_returned);
+      check bool "caller cancellation cannot complete owner-held admission" false (Atomic.get owner_complete);
+      Eio.Promise.resolve release_cleanup ()) in
+  await_phase clock config remote "detached";
+  await clock (fun () -> Atomic.get owner_complete);
+  check bool "remote caller cancellation cleans owner worker" true (Hashtbl.mem state.stops remote))
+
+let test_http_caller_marker_stays_out_of_export_arguments () = with_fixture (fun env sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let access = Lane_addon_sources.Operator_configuration in
+  ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+  Auth.disable_auth config.base_path;
+  let path = manifest dir "closed-export" in
+  let original = In_channel.with_open_bin path In_channel.input_all in
+  write path (original ^ "\n[world.tools]\nexport = [\"masc_msx_step\"]\n");
+  let id = unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+    "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id" in
+  await clock (fun () ->
+    match Runtime.tool_export_reading ~config ~access ~reserved:[] with Ok {exports=[_];_} -> true | _ -> false);
+  let server = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let metadata = `Assoc [
+    "io.modelcontextprotocol/protocolVersion", `String "2026-07-28";
+    "io.modelcontextprotocol/clientCapabilities", `Assoc [];
+    "io.modelcontextprotocol/clientInfo", `Assoc [
+      "name", `String "lane-addon-fixture"; "version", `String "1"]] in
+  (* The body the HTTP transport forwards: it writes the caller into the
+     arguments of every tools/call, also when the client sent none. *)
+  let body = Server_mcp_actor_injection.inject_agent_name_into_body ~agent_name:"fixture-operator"
+    (Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0"; "id",`Int 1;
+      "method",`String "tools/call"; "params",`Assoc ["_meta",metadata;
+        "name",`String "masc_msx_step"; "arguments",`Assoc []]])) in
+  check bool "the forwarded arguments carry the caller marker" true
+    (Yojson.Safe.from_string body |> member "params" |> member "arguments"
+     = `Assoc ["_agent_name", `String "fixture-operator"]);
+  let result = Mcp_server_eio.handle_request ~profile:Mcp_server_eio.Full ~clock ~sw server body
+    |> member "result" in
+  check bool "a closed export schema accepts the call" true
+    (result <> `Null && member "isError" result <> `Bool true);
+  check bool "the worker receives the arguments without the caller marker" true
+    (!(state.export_arguments) = [`Assoc []]);
+  detach config id; await_phase clock config id "detached")
+
+let test_machine_dependencies_reject_cycles () = with_fixture (fun env _sw config dir state ->
+  let attach_machine ~id ~export ~source =
+    let path = manifest dir id in
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    write path (original ^ "\n[world.tools]\nexport = [" ^ Printf.sprintf "%S" export ^ "]\n");
+    dispatch config Runtime.Attach ["manifest_path",`String path;"run_id",`String id;
+      "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "input";"kind",`String source]]]] in
+  check bool "self-capture rejected before creating a worker" true
+    (Result.is_error (attach_machine ~id:"self-msx" ~export:"masc_msx_screen" ~source:"msx_capture"));
+  check Alcotest.int "self-cycle cannot launch a worker" 0 (Hashtbl.length state.bindings);
+  let first = unwrap (attach_machine ~id:"msx" ~export:"masc_msx_screen" ~source:"dos_capture") |> text "instance_id" in
+  await (Eio.Stdenv.clock env) (fun () -> int "observation_seq" (instance config first) > 0);
+  let before = Hashtbl.length state.bindings in
+  check bool "implicit machine cycle is rejected even across runs" true
+    (Result.is_error (attach_machine ~id:"dos" ~export:"masc_dos_screen" ~source:"msx_capture"));
+  check Alcotest.int "rejected cycle cannot launch its second worker" before (Hashtbl.length state.bindings);
+  detach config first;
+  await_phase (Eio.Stdenv.clock env) config first "detached";
+  let a,b = Eio.Fiber.pair
+    (fun () -> attach_machine ~id:"concurrent-msx" ~export:"masc_msx_screen" ~source:"dos_capture")
+    (fun () -> attach_machine ~id:"concurrent-dos" ~export:"masc_dos_screen" ~source:"msx_capture") in
+  let accepted = List.filter_map (function Ok value -> Some (text "instance_id" value) | Error _ -> None) [a;b] in
+  check Alcotest.int "concurrent admission cannot publish both sides of a cycle" 1 (List.length accepted);
+  List.iter (fun id -> detach config id; await_phase (Eio.Stdenv.clock env) config id "detached") accepted)
+
+let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw config dir state ->
+  let names = ["masc_msx_step";"masc_msx_press";"masc_msx_screen";"masc_msx_save";"masc_msx_eject";
+    "masc_dos_step";"masc_dos_screen";"masc_dos_save";"masc_dos_eject";"masc_dos_pass"] in
+  let path = manifest dir "machine-activity" in
+  let original = In_channel.with_open_bin path In_channel.input_all in
+  write path (original ^ "\n[world.tools]\nexport = [" ^ String.concat "," (List.map (Printf.sprintf "%S") names) ^ "]\n");
+  let attached = unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+    "run_id",`String "activity";"binding",`Assoc ["sources",`List []]]) in
+  let id = text "instance_id" attached in
+  let access = Lane_addon_sources.Unauthenticated in
+  let exports () = (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
+  await (Eio.Stdenv.clock env) (fun () -> List.length (exports ()) = List.length names);
+  let call name arguments =
+    let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name=name) (exports ()) in
+    Machine_addon_host.call ~continuation:None ~principal:(Lane_addon_call_context.Host_actor "fixture")
+      ~config ~access ~reserved:[] ~export ~arguments in
+  List.iter (fun name -> check bool "enabled machine can execute" true (Result.is_ok (call name (`Assoc []))))
+    ["masc_msx_step";"masc_dos_step"];
+  let runtime_path = Filename.concat dir "runtime-fixture.toml" in
+  write runtime_path (machine_runtime_config ~enabled:false);
+  ignore (unwrap (Host_runtime.init_default ~config_path:runtime_path));
+  List.iter (fun name ->
+    let before = List.length !(state.admissions) in
+    check bool "off is an explicit host refusal" true
+      (match call name (`Assoc []) with
+       | Error (Runtime.Host_refusal (Lane_addon_call_context.Activity_disabled _)) -> true | _ -> false);
+    check Alcotest.int "off cannot reach worker mutation" before (List.length !(state.admissions)))
+    ["masc_msx_step";"masc_dos_step"];
+  let module Route = Server_routes_http_routes_msx in
+  check bool "HTTP activity follows host Off configuration" true
+    (member "activity" (Route.activity_json ~config) = `String "off");
+  let before_http = List.length !(state.admissions) in
+  let tick_status,tick_body = Route.tick_response ~config ~body:"{}" in
+  check bool "HTTP tick preserves conflict and typed activity code" true
+    (tick_status=`Conflict && member "ok" tick_body=`Bool false
+     && member "code" tick_body=`String "activity_disabled");
+  let press_status,press_body = Route.press_response ~config ~who:"fixture" ~body:{|{"keys":["space"]}|} in
+  check bool "HTTP press preserves the same activity contract" true
+    (press_status=`Conflict && member "ok" press_body=`Bool false
+     && member "code" press_body=`String "activity_disabled");
+  check Alcotest.int "HTTP activity refusals never invoke a worker mutation" before_http (List.length !(state.admissions));
+  List.iter (fun name -> check bool "off retains observation, save and eject" true
+    (Result.is_ok (call name (`Assoc []))))
+    ["masc_msx_screen";"masc_msx_save";"masc_msx_eject";
+     "masc_dos_screen";"masc_dos_save";"masc_dos_eject"];
+  check bool "off still permits returning the controller" true
+    (Result.is_ok (call "masc_dos_pass" (`Assoc [])));
+  write runtime_path (machine_runtime_config ~enabled:true);
+  ignore (unwrap (Host_runtime.init_default ~config_path:runtime_path));
+  check bool "reenabling resumes the same attached worker" true (Result.is_ok (call "masc_msx_step" (`Assoc [])));
+  detach config id;
+  await_phase (Eio.Stdenv.clock env) config id "detached")
+
+let test_machine_export_host_admission () = with_fixture (fun env _sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+  ignore (Auth.enable_auth config.base_path ~agent_name:"fixture-operator" ~require_token:true);
+  Fun.protect ~finally:(fun () -> Auth.disable_auth config.base_path) (fun () ->
+    let path = manifest dir "dos-export" in
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    write path (original ^ "\n[world.tools]\nexport = [\"masc_dos_pass\", \"masc_dos_step\"]\n");
+    let id = unwrap (dispatch config Runtime.Attach ["manifest_path", `String path;
+      "run_id", `String "world"; "binding", `Assoc ["sources", `List []]]) |> text "instance_id" in
+    let access = Lane_addon_sources.Operator_configuration in
+    let exports () = (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
+    await clock (fun () -> List.length (exports ()) = 2);
+    let call ~principal name arguments =
+      let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
+      Machine_addon_host.call ~continuation:None ~principal ~config ~access ~reserved:[] ~export ~arguments in
+    let principal = Lane_addon_call_context.Authenticated_agent "fixture-operator" in
+    let denied = call ~principal "masc_dos_pass" (`Assoc ["to", `String "not-invited"]) in
+    check bool "unknown recipient is a typed pre-effect host refusal" true
+      (match denied with Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
+    check Alcotest.int "denied handoff never invokes worker" 0 (List.length !(state.admissions));
+    let unnamed = call ~principal:Lane_addon_call_context.Anonymous "masc_dos_step" (`Assoc []) in
+    check bool "anonymous controller call is a typed host refusal" true
+      (match unnamed with Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
+    check Alcotest.int "anonymous call never invokes worker" 0 (List.length !(state.admissions));
+    state.controller := Some "revoked-player";
+    check bool "admitted caller reaches worker" true
+      (Result.is_ok (call ~principal "masc_dos_step" (`Assoc [])));
+    check bool "host supplies verified departure of missing credential" true
+      (match !(state.admissions) with
+       | [Some {Machine_controller_contract.observed_holder=Some "revoked-player";
+                release=Some No_credential; handoff_target=None}] -> true
+       | _ -> false);
+    detach config id; await_phase clock config id "detached"))
+
+let test_machine_notices_keep_effect_order () =
+  Eio_main.run (fun _ ->
+    let published = ref [] in
+    let relay ~author content = published := !published @ [author,content] in
+    let first = Machine_addon_events.create ~author:"first-actor" ~relay in
+    let second = Machine_addon_events.create ~author:"second-actor" ~relay in
+    let reply content = { (Mcp_protocol.Mcp_types.tool_result_of_text "ok") with
+      _meta=Some (`Assoc ["io.github.jeong-sik/masc.machine.events", `List [
+        `Assoc ["author", `String "forged-worker-author"; "content", `String content]]]) } in
+    Machine_addon_events.record first (reply "first effect");
+    Machine_addon_events.record second (reply "second effect");
+    Machine_addon_events.ready second;
+    Machine_addon_events.drain ();
+    check Alcotest.int "later publication cannot overtake pending credential release" 0 (List.length !published);
+    Machine_addon_events.ready first;
+    Machine_addon_events.drain ();
+    check (list (pair string string)) "effect order and host authors are preserved"
+      ["first-actor","first effect"; "second-actor","second effect"] !published)
+
+(* Calls to one attached fake worker's exports, whether its observation reads
+   as refreshing, and a call held inside the worker while [inside] looks. *)
+type export_bench = {
+  call : string -> Yojson.Safe.t ->
+    (Mcp_protocol.Mcp_types.tool_result, Runtime.tool_call_error) result;
+  refreshing : unit -> bool;
+  settled : unit -> bool;
+  while_held : string -> Yojson.Safe.t -> (unit -> unit) ->
+    (Mcp_protocol.Mcp_types.tool_result, Runtime.tool_call_error) result;
+  await_exports : int -> unit;
+}
+
+let export_bench env sw config state ~id ~observed =
+  let clock = Eio.Stdenv.clock env in
+  let access = Lane_addon_sources.Operator_configuration in
+  let exports () = List.filter (fun (export : Runtime.tool_export) -> export.instance_id = id)
+    (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
+  let call name arguments =
+    let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
+    Runtime.call_exported_tool ~config ~access ~reserved:[] ~export ~arguments in
+  let refreshing () = match Runtime.observation_for_export ~config ~access ~name:observed with
+    | Ok (Some snapshot) -> snapshot.refreshing
+    | Ok None -> fail "the attached export has no observation"
+    | Error refusal -> fail (Runtime.export_refusal_message refusal) in
+  (* A failed or missing observation is not a settled one; poll this one. *)
+  let settled () = match Runtime.observation_for_export ~config ~access ~name:observed with
+    | Ok (Some snapshot) -> not snapshot.refreshing
+    | Ok None | Error _ -> false in
+  let while_held name arguments inside =
+    let hold, release = Eio.Promise.create () in
+    state.call_hold := Some hold;
+    let before = List.length !(state.export_arguments) in
+    let running = Eio.Fiber.fork_promise ~sw (fun () -> call name arguments) in
+    await clock (fun () -> List.length !(state.export_arguments) > before);
+    inside ();
+    state.call_hold := None;
+    Eio.Promise.resolve release ();
+    Eio.Promise.await_exn running in
+  let await_exports count = await clock (fun () -> List.length (exports ()) = count) in
+  {call; refreshing; settled; while_held; await_exports}
+
+let answered name = function
+  | Ok (reply : Mcp_protocol.Mcp_types.tool_result) -> reply
+  | Error _ -> fail (name ^ " was not answered")
+
+(* The next observation of [id] is held inside the fake worker until the
+   returned release runs; the number is the observe call it holds. *)
+let with_holdable_observation f =
+  let held_observation = ref None in
+  with_fixture ~observe_step:(fun call -> match !held_observation with
+      | Some (held, gate) when call = held -> Eio.Promise.await gate
+      | Some _ | None -> ())
+    (fun env sw config dir state ->
+      let hold_next config id =
+        let gate, open_gate = Eio.Promise.create () in
+        let held = Hashtbl.find state.calls id + 1 in
+        held_observation := Some (held, gate);
+        ignore (unwrap (dispatch config Runtime.Observe ["instance_id", `String id]));
+        await (Eio.Stdenv.clock env) (fun () -> Hashtbl.find state.calls id = held);
+        held, (fun () -> held_observation := None; Eio.Promise.resolve open_gate ()) in
+      f env sw config dir state ~hold_next)
+
+(* Only the worker's declaration on its private effect port covers its
+   observation. A declared read never marks the last observation refreshing,
+   and a successful one takes no new observation. An error from that read, a
+   tool hinted read-only over MCP but undeclared (as onepassword_status is),
+   and an explicit may_change each still take one. The wakes are counted while
+   the observer is held inside an earlier observation, so each one stays
+   visible as the pending observation or a coalesced wake. *)
+let test_a_declared_read_keeps_the_last_observation () =
+  with_holdable_observation (fun env sw config dir state ~hold_next ->
+  let clock = Eio.Stdenv.clock env in
+  let id = attach_exporting config dir "declared-read" [declared_read; declared_write; hinted_read] in
+  let bench = export_bench env sw config state ~id ~observed:declared_read in
+  bench.await_exports 3;
+  let seq () = int "observation_seq" (instance config id) in
+  let settled_at expected = await clock (fun () -> seq () = expected && bench.settled ()) in
+  settled_at 1;
+  ignore (answered declared_read (bench.while_held declared_read (`Assoc []) (fun () ->
+    check bool "a declared read in flight leaves the observation stable" false (bench.refreshing ()))));
+  ignore (answered declared_write (bench.while_held declared_write (`Assoc []) (fun () ->
+    check bool "a write in flight marks the observation refreshing" true (bench.refreshing ()))));
+  settled_at 2;
+  let held, release = hold_next config id in
+  let base = int "coalesced_wakes" (instance config id) in
+  let wakes () =
+    let current = instance config id in
+    (if member "observation_pending" current = `Bool true then 1 else 0)
+    + int "coalesced_wakes" current - base in
+  check Alcotest.int "the held observer owes nothing yet" 0 (wakes ());
+  let read = answered declared_read (bench.call declared_read (`Assoc [])) in
+  check bool "the declared read succeeds" true (read.Mcp_protocol.Mcp_types.is_error <> Some true);
+  check Alcotest.int "a successful declared read takes no new observation" 0 (wakes ());
+  let failed = answered declared_read (bench.call declared_read (`Assoc ["fail", `Bool true])) in
+  check bool "the declared read can answer with an error" true (failed.Mcp_protocol.Mcp_types.is_error = Some true);
+  check Alcotest.int "an error from a declared read still takes one" 1 (wakes ());
+  ignore (answered hinted_read (bench.call hinted_read (`Assoc [])));
+  check Alcotest.int "a read hinted only over MCP still takes one" 2 (wakes ());
+  ignore (answered declared_write (bench.call declared_write (`Assoc [])));
+  check Alcotest.int "an explicit may_change still takes one" 3 (wakes ());
+  release ();
+  settled_at 4;
+  check Alcotest.int "the owed wakes ran as one observation" (held + 1) (Hashtbl.find state.calls id);
+  detach config id;
+  await_phase clock config id "detached")
+
+(* A worker with a host port observes after every reply, declared read or
+   not: any reply may have admitted a durable host request, and the host cycle
+   that lists it ends with an observation. The read itself schedules none. *)
+let test_a_host_port_still_observes_after_a_declared_read () =
+  with_holdable_observation (fun env sw config dir state ~hold_next ->
+  let clock = Eio.Stdenv.clock env in
+  let id = attach_exporting config dir "declared-read-host" [declared_read] in
+  let bench = export_bench env sw config state ~id ~observed:declared_read in
+  bench.await_exports 1;
+  await clock (fun () -> int "observation_seq" (instance config id) >= 1 && bench.settled ());
+  let held, release = hold_next config id in
+  let read = answered declared_read (bench.call declared_read (`Assoc [])) in
+  check bool "the declared read succeeds" true (read.Mcp_protocol.Mcp_types.is_error <> Some true);
+  check bool "the read itself schedules no observation" false
+    (member "observation_pending" (instance config id) = `Bool true);
+  release ();
+  await clock (fun () -> Hashtbl.find state.calls id = held + 1 && bench.settled ());
+  detach config id;
+  await_phase clock config id "detached")
+
+(* A machine consumer refused as "refreshing" while a counted call runs is
+   woken again when that call ends, however it ends: a host refusal that
+   schedules nothing, or a lost reply that fails the producer and observes it
+   again. A declared read is not counted, so a capture during it is admitted,
+   and a declared read whose reply is lost still observes the producer again.
+   No later write is needed for the consumer to recover. *)
+let test_a_consumer_refused_during_a_call_captures_again () =
+  let captures = ref [] in
+  let acquire ~access:_ ~store:_ ~(package : Types.package) ~resolve_machine_output
+      ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ =
+    if package.id <> "machine-consumer" then
+      Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]])
+    else begin
+      let captured = resolve_machine_output Masc.Machine_lane.Dos |> Result.map (fun _ -> ()) in
+      captures := captured :: !captures;
+      Result.map (fun () -> `List []) captured
+    end in
+  with_fixture ~acquire (fun env sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let producer = attach_exporting config dir "machine-producer"
+    ["masc_dos_screen"; declared_read; declared_write] in
+  let bench = export_bench env sw config state ~id:producer ~observed:declared_read in
+  bench.await_exports 3;
+  let consumer = unwrap (dispatch config Runtime.Attach
+    ["manifest_path",`String (manifest dir "machine-consumer");"run_id",`String "machine";
+     "binding",`Assoc ["sources",`List [`Assoc ["kind",`String "dos_capture";"source_id",`String "machine"]]]])
+    |> text "instance_id" in
+  let producer_observes () = Hashtbl.find state.calls producer in
+  let recovered () = match !captures with
+    | Ok () :: _ -> phase (instance config consumer) = "attached" && bench.settled ()
+    | Error _ :: _ | [] -> false in
+  await clock recovered;
+  let capture_now () =
+    let before = List.length !captures in
+    ignore (unwrap (dispatch config Runtime.Observe ["instance_id", `String consumer]));
+    await clock (fun () -> List.length !captures > before);
+    List.hd !captures in
+  let observed = producer_observes () in
+  let lost_read = bench.while_held declared_read (`Assoc ["lose", `Bool true]) (fun () ->
+    check bool "a capture during a declared read is admitted" true (capture_now () = Ok ())) in
+  check bool "the declared read's lost reply is an unknown outcome" true
+    (match lost_read with Error (Runtime.Outcome_unknown _) -> true | _ -> false);
+  await clock (fun () -> producer_observes () > observed && recovered ());
+  let observed = producer_observes () in
+  let refused = bench.while_held declared_write (`Assoc ["refuse", `Bool true]) (fun () ->
+    check bool "a capture during a counted write is refused" true (Result.is_error (capture_now ()))) in
+  check bool "the write ends in a host refusal" true
+    (match refused with Error (Runtime.Host_refusal _) -> true | _ -> false);
+  await clock recovered;
+  check Alcotest.int "the refusal took no observation of the producer" observed (producer_observes ());
+  (* Cancel before the first worker RPC, after a consumer has already seen
+     the counted call as refreshing. No subsequent write or poll rescues it. *)
+  let observed = producer_observes () in
+  let exports = unwrap (Runtime.tool_export_reading ~config
+    ~access:Lane_addon_sources.Operator_configuration ~reserved:[]) in
+  let write = List.find (fun (export : Runtime.tool_export) ->
+    export.instance_id = producer && export.tool.name = declared_write) exports.exports in
+  let entered, signal_entered = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let admissions_before = List.length !(state.admissions) in
+  let held ~release_controller:_ ~snapshot:_ ~invoke =
+    Eio.Promise.resolve signal_entered ();
+    Eio.Promise.await never;
+    invoke None in
+  Eio.Fiber.first
+    (fun () ->
+      ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
+        ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
+        ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export:write ~arguments:(`Assoc []));
+      fail "a blocked call unexpectedly returned")
+    (fun () ->
+      Eio.Promise.await entered;
+      check bool "a capture during an unsent write is refused" true (Result.is_error (capture_now ())));
+  await clock recovered;
+  check Alcotest.int "cancellation never reached the worker" admissions_before (List.length !(state.admissions));
+  check Alcotest.int "unsent cancellation took no producer observation" observed (producer_observes ());
+  let observed = producer_observes () in
+  let lost_write = bench.while_held declared_write (`Assoc ["lose", `Bool true]) (fun () ->
+    check bool "a capture during the next counted write is refused" true (Result.is_error (capture_now ()))) in
+  check bool "the write's lost reply is an unknown outcome" true
+    (match lost_write with Error (Runtime.Outcome_unknown _) -> true | _ -> false);
+  await clock (fun () -> producer_observes () > observed && recovered ());
+  detach config consumer; detach config producer;
+  await_phase clock config consumer "detached";
+  await_phase clock config producer "detached")
+
+let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "a declared read keeps the last observation" `Quick test_a_declared_read_keeps_the_last_observation;
+  test_case "a host port still observes after a declared read" `Quick
+    test_a_host_port_still_observes_after_a_declared_read;
+  test_case "a consumer refused during a call captures again" `Quick
+    test_a_consumer_refused_during_a_call_captures_again;
+  test_case "machine notices keep effect order" `Quick test_machine_notices_keep_effect_order;
+  test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
+  test_case "machine activity applies to worker calls" `Quick test_machine_activity_applies_to_worker_calls;
+  test_case "machine export host admission" `Quick test_machine_export_host_admission;
+  test_case "a retained record is released only by its recorded engine" `Quick
+    test_retained_record_is_released_only_by_its_recorded_engine;
+  test_case "tool exports bind live incarnations" `Quick test_tool_exports_bind_live_incarnations;
+  test_case "HTTP caller marker stays out of export arguments" `Quick
+    test_http_caller_marker_stays_out_of_export_arguments;
+  test_case "unreadable retained bindings are isolated" `Quick test_unreadable_retained_bindings_are_isolated;
+  test_case "MCP attribution never authorizes private Lane reads" `Quick
+    test_mcp_attribution_does_not_authorize_private_lane;
+  test_case "Fleet service isolates blocked recipients, later admissions and cancellation" `Quick
+    test_fleet_service_isolates_blocked_recipient_and_admissions;
+  test_case "Fleet recovery isolates locked journal and concurrent admission" `Quick
+    test_fleet_recovery_isolates_locked_journal_and_concurrent_admission;
+  test_case "private Broadcast retry uses saved visibility after binding removal" `Quick
+    test_private_broadcast_retry_uses_saved_visibility;
+  test_case "Broadcast retry reconciles the committed receipt during slow fanout" `Quick
+    test_broadcast_retry_reconciles_receipt_during_slow_fanout;
+  test_case "Broadcast intention and failed commit retain exact evidence" `Quick
+    test_broadcast_pending_commit_recovers_same_identity;
+  test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
+  test_case "MCP attribution never grants private Lane authority" `Quick
+    test_mcp_attributed_name_is_not_private_lane_authority;
+  test_case "Fusion state hint wakes only the exact run binding" `Quick
+    test_fusion_status_hint_wakes_only_its_bound_run;
+  test_case "a human MSX press wakes machine watchers exactly once" `Quick
+    test_human_press_wakes_machine_watchers_once;
+  test_case "a human MSX load wakes machine watchers exactly once" `Quick
+    test_human_load_wakes_machine_watchers_once;
+  test_case "activity from another domain is delivered on the owner domain" `Quick
+    test_activity_from_another_domain_reaches_the_owner;
+  test_case "a capture yielding to detach preserves cleanup ownership" `Quick
+    test_capture_cannot_rewrite_detach_failure;
+  test_case "activity probes exact file captures while explicit observes remain stateful" `Quick
+    test_file_activity_preserves_explicit_observation;
+  test_case "direct attach enforces package binding before worker startup" `Quick
+    test_direct_attach_validates_package_binding;
+  test_case "direct attach looks for the image before it creates an instance" `Quick
+    test_direct_attach_looks_for_the_image_first;
+  test_case "missing targets refuse while storage failures remain faults" `Quick
+    test_request_refusals_preserve_runtime_failure_distinction;
+  test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;
+  test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
+  test_case "a failed installation is read as unready with its failure" `Quick
+    test_a_failed_installation_is_read_as_unready;
+  test_case "a failure is explained only to the operator" `Quick test_a_failure_is_explained_only_to_the_operator;
+  test_case "a document source reads only a browser that covers its output" `Quick
+    test_a_document_source_reads_only_a_browser_that_covers_its_output;
+  test_case "a document read goes to the service of its source" `Quick
+    test_a_document_read_goes_to_the_service_of_its_source;
+  test_case "a failed DOS installation is named and not released" `Quick
+    test_a_failed_dos_installation_is_named_and_not_released;
+  test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;
+  test_case "Detach waits for a start that fails under it" `Quick test_detach_waits_for_a_start_that_fails_under_it;
+  test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;
+  test_case "resolved image is retained independently of start and detach" `Quick
+    test_resolved_image_survives_detach_and_restart;
+]]

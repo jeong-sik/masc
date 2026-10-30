@@ -1,0 +1,19 @@
+{
+  "workflow": "Minimal manual checks",
+  "run_id": 40374265429,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40374265429",
+  "ref": "main",
+  "workflow_execution_head": "9377c7f3025d68e3856d2afd3762468dabc77813",
+  "status": "completed",
+  "conclusion": "success",
+  "source_input": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+  "scenario": "addon-lifecycle",
+  "artifact_id": 12674336813,
+  "artifact_zip_sha256": "d9e58a1ddf0c5941612ae706d76b5793dc4a0767c49c1d30fb047fdde12d630b",
+  "server_sha256": "373ced2eb4897f60d82a0c4b4b7340865e933f0e181a268906ddc595c9034af7",
+  "api_observed_at": "2026-10-26T18:29:09.063715+00:00",
+  "api_stdout_sha256": "f551f6b486c28452de5580a10b3c1e7f0c35a9ed5fd0e9e6e56e7a3e1921f9da",
+  "api_stdout_bytes": 13698,
+  "installed_runtime_verified": false,
+  "visible_ui_verified": false
+}

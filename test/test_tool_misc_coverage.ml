@@ -1,0 +1,1499 @@
+(** Coverage tests for Tool_misc *)
+
+open Masc
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let () = Random.self_init ()
+let () = Mirage_crypto_rng_unix.use_default ()
+let () =
+  Server_startup_state.mark_state_ready ()
+  |> Result.get_ok
+let () = ignore Dashboard.force_link
+let str_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  if len_sub > len_s then false
+  else
+    let rec loop i =
+      if i > len_s - len_sub then false
+      else if String.sub s i len_sub = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let parse_json s =
+  try Yojson.Safe.from_string s
+  with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
+
+let json_string_member key = function
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`String value) -> value
+       | Some _ -> failwith ("json field is not a string: " ^ key)
+       | None -> failwith ("missing json field: " ^ key))
+  | _ -> failwith "expected json object"
+
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+      | Some value -> Unix.putenv name value
+      | None -> Unix.putenv name "");
+      f ())
+
+let with_unset_env name f =
+  let original = Sys.getenv_opt name in
+  unsetenv name;
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some value -> Unix.putenv name value
+      | None -> unsetenv name)
+    f
+
+let with_boot_override name value_opt f =
+  let original = Config_boot_overrides.get_opt name in
+  (match value_opt with
+   | Some value -> Config_boot_overrides.set name value
+   | None -> Config_boot_overrides.clear name);
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some value -> Config_boot_overrides.set name value
+      | None -> Config_boot_overrides.clear name)
+    f
+
+let with_isolated_runtime_env f =
+  with_env "MASC_BASE_PATH" None f
+
+(* Test registry — each [test] call appends; final [let ()] dispatches
+   via Alcotest.run.  Per-test Eio scope for code paths that use Eio.Mutex. *)
+let test_cases : (string * (unit -> unit)) list ref = ref []
+
+let test name f =
+  test_cases := (name, fun () ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_isolated_runtime_env f)) :: !test_cases
+
+(* Create test context *)
+let test_counter = ref 0
+let make_test_ctx () =
+  incr test_counter;
+  let tmp = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc-misc-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
+  Unix.mkdir tmp 0o755;
+  let config = Workspace.default_config tmp in
+  let _ = Workspace.init config ~agent_name:(Some "test-agent") in
+  { Tool_misc.config
+  ; agent_name = "test-agent"
+  ; help_schemas = Config.raw_all_tool_schemas
+  }
+
+(* Test dispatch returns None for unknown tool *)
+let () = test "dispatch_unknown_tool" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [] in
+  assert (Tool_misc.dispatch ctx ~name:"unknown_tool" ~args = None)
+)
+
+let () = test "inventory_preserves_full_tool_description" (fun () ->
+  let ctx = make_test_ctx () in
+  let schema = List.find (fun (schema : Masc_domain.tool_schema) ->
+      String.equal schema.name "masc_board_list") Config.raw_all_tool_schemas in
+  let summary = (Tool_help_registry.entry_of_schema schema).short_description in
+  Alcotest.(check bool) "fixture has full content beyond its summary" true
+    (String.length schema.description > String.length summary);
+  let inventory = Tool_misc.tool_inventory_json ctx ~include_hidden:true in
+  let row = inventory |> Yojson.Safe.Util.member "tools" |> Yojson.Safe.Util.to_list
+    |> List.find (fun item -> json_string_member "name" item = schema.name) in
+  Alcotest.(check string) "inventory exposes the exact canonical description"
+    schema.description (json_string_member "description" row)
+)
+
+let tool_help_description dispatch ctx name =
+  match
+    dispatch
+      ctx
+      ~name:"masc_tool_help"
+      ~args:(`Assoc [ "tool_name", `String name ])
+  with
+  | Some result when Tool_result.is_success result ->
+    Json_util.get_string (Tool_result.data result) "short_description"
+    |> Option.value ~default:""
+  | Some result ->
+    Alcotest.failf "tool help failed: %s" (Tool_result.message result)
+  | None -> Alcotest.fail "masc_tool_help was not dispatched"
+
+(* [Tool_misc.dispatch] takes optional arguments. A partial application passed
+   as a value keeps the unapplied ones in its type, so apply it in full here. *)
+let unauthenticated_dispatch ctx ~name ~args =
+  Tool_misc.dispatch ~lane_access:Lane_addon_sources.Unauthenticated ctx ~name ~args
+
+let () = test "keeper_tool_help_uses_descriptor_projection" (fun () ->
+  let ctx = make_test_ctx () in
+  let public_description =
+    tool_help_description unauthenticated_dispatch ctx "masc_board_post"
+  in
+  let keeper_ctx =
+    { ctx with help_schemas = Keeper_tool_descriptor.model_visible_schemas () }
+  in
+  let keeper_description =
+    tool_help_description unauthenticated_dispatch keeper_ctx "masc_board_post"
+  in
+  assert (str_contains public_description "MASC internal board");
+  assert (String.equal keeper_description "Create a new board post.");
+  assert (not (str_contains keeper_description "`body`"))
+)
+
+(* Test dispatch dashboard — may require Eio runtime; skip gracefully if unavailable *)
+let () = test "dispatch_dashboard" (fun () ->
+  let ctx = make_test_ctx () in
+  ignore (Workspace.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
+  ignore (Workspace.init ctx.config ~agent_name:None);
+  let second_workspace = ctx.config in
+  ignore (Workspace.add_task second_workspace ~title:"second task" ~priority:1 ~description:"");
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
+  | Some result ->
+      assert (Tool_result.is_success result);
+      assert (str_contains (Tool_result.message result) "MASC Dashboard");
+      assert (not (str_contains (Tool_result.message result) "second-workspace"));
+  | None -> failwith "dispatch returned None"
+  | exception Effect.Unhandled _ ->
+      Printf.printf "  (skipped: Eio runtime not available)\n"
+)
+
+(* Test dispatch dashboard compact — may require Eio runtime *)
+let () = test "dispatch_dashboard_compact" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [("compact", `Bool true)] in
+  match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
+  | Some result ->
+      assert (Tool_result.is_success result);
+      assert (str_contains (Tool_result.message result) "MASC [");
+      assert (str_contains (Tool_result.message result) "ATTENTION:");
+  | None -> failwith "dispatch returned None"
+  | exception Effect.Unhandled _ ->
+      Printf.printf "  (skipped: Eio runtime not available)\n"
+)
+
+let () = test "dispatch_dashboard_current_scope" (fun () ->
+  let ctx = make_test_ctx () in
+  ignore (Workspace.init ctx.config ~agent_name:None);
+  let focused = ctx.config in
+  ignore (Workspace.add_task focused ~title:"focus task" ~priority:2 ~description:"");
+  let args = `Assoc [("scope", `String "current")] in
+  match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
+  | Some result ->
+      assert (Tool_result.is_success result);
+      assert (str_contains (Tool_result.message result) "MASC Dashboard");
+      assert (not (str_contains (Tool_result.message result) "focus-workspace"))
+  | None -> failwith "dispatch returned None"
+  | exception Effect.Unhandled _ ->
+      Printf.printf "  (skipped: Eio runtime not available)\n"
+)
+
+let () = test "dispatch_keeper_waiting_inventory" (fun () ->
+  let ctx = make_test_ctx () in
+  ignore (Workspace.init ctx.config ~agent_name:None);
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_keeper_waiting_inventory" ~args with
+  | Some result ->
+      assert (Tool_result.is_success result);
+      let data = Tool_result.data result in
+      assert
+        (String.equal
+           (json_string_member "schema" data)
+           "masc.dashboard.keeper_waiting_inventory.v4");
+      assert
+        (String.equal
+           (json_string_member "source" data)
+           "server_keeper_waiting_inventory")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_keeper_waiting_inventory_rejects_unexpected_args" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [ ("scope", `String "current") ] in
+  match Tool_misc.dispatch ctx ~name:"masc_keeper_waiting_inventory" ~args with
+  | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert
+        (Tool_result.message result
+         = "masc_keeper_waiting_inventory does not accept arguments: scope")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_dashboard_invalid_scope" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [("scope", `String "everywhere")] in
+  match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
+  | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (str_contains (Tool_result.message result) "Invalid dashboard scope")
+  | None -> failwith "dispatch returned None"
+)
+
+(* Test dispatch gc — Eio context provided by test helper *)
+let () = test "dispatch_gc" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [("days", `Int 7)] in
+  match Tool_misc.dispatch ctx ~name:"masc_gc" ~args with
+  | Some result ->
+      assert (Tool_result.is_success result);
+      assert (String.length (Tool_result.message result) > 0)
+  | None -> failwith "dispatch returned None"
+)
+
+(* GC has no implicit retention policy. *)
+let () = test "dispatch_gc_requires_days" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_gc" ~args with
+  | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (str_contains (Tool_result.message result) "days is required")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_web_search_requires_query" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+  | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert (Tool_result.message result = "query is required")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "validate_web_search_preserves_opaque_query" (fun () ->
+  match
+    Tool_misc_web_search.validate_query
+      "Authorization: Bearer example-token task-352"
+  with
+  | Ok query ->
+    assert (query = "Authorization: Bearer example-token task-352")
+  | Error message -> failwith message
+)
+
+let () = test "parse_searxng_json_basic" (fun () ->
+  let payload =
+    {|{"results": [
+        {"title": "OCaml Lang", "url": "https://ocaml.org/", "content": "OCaml programming."},
+        {"title": "Example", "url": "https://example.com/", "content": "A page."}
+      ]}|}
+  in
+  let items = Result.get_ok (Tool_misc.parse_searxng_json payload) in
+  assert (List.length items = 2);
+  match items with
+  | (title1, url1, _) :: (title2, url2, _) :: _ ->
+      assert (title1 = "OCaml Lang");
+      assert (url1 = "https://ocaml.org/");
+      assert (title2 = "Example");
+      assert (url2 = "https://example.com/")
+  | _ -> failwith "expected two parsed items"
+)
+
+let () = test "parse_searxng_json_empty_results" (fun () ->
+  let payload = {|{"results": []}|} in
+  assert (Tool_misc.parse_searxng_json payload = Ok [])
+)
+
+let () = test "parse_searxng_json_malformed" (fun () ->
+  assert (Result.is_error (Tool_misc.parse_searxng_json "not json"))
+)
+
+let () = test "web_search_provider_plan_includes_searxng_when_configured" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
+  with_env "MASC_SEARXNG_URL" (Some "http://localhost:8888") (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                    assert
+                      (Tool_misc.web_search_provider_plan ()
+                       = [ "searxng" ])))))))))))
+)
+
+let () = test "web_search_provider_plan_reads_toml_boot_override" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
+  with_unset_env "MASC_SEARXNG_URL" (fun () ->
+    with_boot_override "MASC_SEARXNG_URL" (Some "http://localhost:8888") (fun () ->
+      with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+        with_env "TAVILY_API_KEY" None (fun () ->
+          with_env "EXA_API_KEY" None (fun () ->
+            with_env "BING_SEARCH_API_KEY" None (fun () ->
+              with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                    with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                      assert
+                        (Tool_misc.web_search_provider_plan ()
+                         = [ "searxng" ]))))))))))))
+)
+
+(* Feature contract: with zero credentials the plan is empty and the
+   search boundary reports the configuration failure with its remedy —
+   never an empty success. *)
+let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                    assert (Tool_misc.web_search_provider_plan () = []);
+                    let result =
+                      Tool_misc.web_search_simulate_for_test
+                        ~query:"ocaml eio" ~limit:3 []
+                    in
+                    assert (not (Tool_result.is_success result));
+                    (* Nothing was called, so nothing crashed: what is
+                       missing is configuration. Reported as a fault, the
+                       bridge lowers it to [Unknown] and the model retries a
+                       call no retry can fix. *)
+                    assert
+                      (Tool_result.failure_class result
+                       = Some Tool_result.Dependency_unavailable);
+                    assert
+                      (str_contains
+                         (Tool_result.message result)
+                         "no web search provider is configured");
+                    (* Exercise the dispatch boundary as well as the shared
+                       provider chain. With an empty plan the chain ends
+                       before any HTTP call and failures are never cached. *)
+                    let ctx = make_test_ctx () in
+                    (match
+                       Tool_misc.dispatch ctx ~name:"masc_web_search"
+                         ~args:(`Assoc [ ("query", `String "empty chain probe") ])
+                     with
+                     | Some dispatched ->
+                         assert (not (Tool_result.is_success dispatched));
+                         assert
+                           (Tool_result.failure_class dispatched
+                            = Some Tool_result.Dependency_unavailable);
+                         assert
+                           (str_contains
+                              (Tool_result.message dispatched)
+                              "no web search provider is configured")
+                     | None -> failwith "masc_web_search was not dispatched")))))))))))
+)
+
+let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave") (fun () ->
+                with_env "MASC_WEB_SEARCH_FALLBACKS" (Some "tavily,exa") (fun () ->
+                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                    assert
+                      (Tool_misc.web_search_provider_plan ()
+                       = [ "brave"; "tavily"; "exa" ])))))))))))
+)
+
+let () = test "parse_brave_llm_context_json" (fun () ->
+  let payload =
+    {|{"grounding":{"generic":[
+        {"url":"https://example.com/effects",
+         "title":"Effect Handlers",
+         "snippets":["OCaml 5 introduces effect handlers.","| Table row | data |"]},
+        {"url":"javascript:alert(1)",
+         "title":"Invalid scheme",
+         "snippets":["dropped"]},
+        {"url":"https://example.com/untitled",
+         "snippets":["Title falls back to the url."]},
+        {"url":"https://example.com/empty","title":"No snippets","snippets":[]}
+      ],"map":[]},
+      "sources":{"https://example.com/effects":{"title":"Effect Handlers","hostname":"example.com"}}}|}
+  in
+  match Tool_misc.parse_brave_llm_context_json payload with
+  | Ok [ (url1, title1, snippets1); (url2, title2, snippets2) ] ->
+      assert (url1 = "https://example.com/effects");
+      assert (title1 = "Effect Handlers");
+      assert (snippets1 = [ "OCaml 5 introduces effect handlers."; "| Table row | data |" ]);
+      assert (url2 = "https://example.com/untitled");
+      assert (title2 = "https://example.com/untitled");
+      assert (snippets2 = [ "Title falls back to the url." ])
+  | _ -> failwith "expected two grounded entries"
+)
+
+let () = test "parse_ollama_search_json" (fun () ->
+  let payload =
+    {|{"results":[
+        {"title":"Effect Handlers","url":"https://example.com/effects","content":"OCaml 5 effects."},
+        {"title":"Bad scheme","url":"ftp://example.com/x","content":"dropped"}
+      ]}|}
+  in
+  assert
+    (Tool_misc.parse_ollama_search_json payload
+     = Ok [ ("Effect Handlers", "https://example.com/effects", "OCaml 5 effects.") ]);
+  assert (Result.is_error (Tool_misc.parse_ollama_search_json "not json"))
+)
+
+(* z.ai's web_search_prime answers with one text block that holds the result
+   array serialised twice. The first row is verbatim from a real answer
+   (2026-10-14); the second is abbreviated. *)
+let zai_nested_text =
+  {|"[{\"title\":\"Module Eio.Switch\",\"link\":\"https://ocaml-multicore.github.io/eio/eio/Eio/Switch/index.html\",\"content\":\"on_release t fn registers fn to be called once t 's main function has returned and all fibers have finished. If fn raises an exception, it is passed to fail . Read more\",\"refer\":\"ref_1\"},{\"title\":\"eio 1.6 (latest) · OCaml Package\",\"link\":\"https://ocaml.org/p/eio/latest/doc/index.html\",\"content\":\"Eio 1.6\",\"refer\":\"ref_2\"}]"|}
+
+let zai_first_row =
+  ( "Module Eio.Switch"
+  , "https://ocaml-multicore.github.io/eio/eio/Eio/Switch/index.html"
+  , "on_release t fn registers fn to be called once t 's main function has returned and all fibers have finished. If fn raises an exception, it is passed to fail . Read more" )
+
+let () = test "parse_zai_search_text reads the nested array and keeps link as url" (fun () ->
+  (match Tool_misc_web_search.parse_zai_search_text zai_nested_text with
+   | Ok [ first; (title2, url2, snippet2) ] ->
+     assert (first = zai_first_row);
+     assert (url2 = "https://ocaml.org/p/eio/latest/doc/index.html");
+     assert (snippet2 = "Eio 1.6");
+     assert (String.length title2 > 0)
+   | _ -> failwith "expected two rows");
+  (* The same array, not nested, is the same data. *)
+  assert
+    (Tool_misc_web_search.parse_zai_search_text
+       {|[{"title":"T","link":"https://example.com/a","content":"C","refer":"ref_1"}]|}
+     = Ok [ ("T", "https://example.com/a", "C") ])
+)
+
+let () = test "parse_zai_search_text refuses what is not a usable array" (fun () ->
+  let parse = Tool_misc_web_search.parse_zai_search_text in
+  assert (Result.is_error (parse "not json"));
+  assert (Result.is_error (parse {|{"results":[]}|}));
+  assert (Result.is_error (parse {|"not an array"|}));
+  (* A row under "url" is not a z.ai row: the field there is "link". *)
+  assert
+    (Result.is_error
+       (parse {|[{"title":"T","url":"https://example.com/a","content":"C"}]|}));
+  assert (Result.is_error (parse {|[{"title":"T","link":"ftp://example.com/a"}]|}));
+  (* A real empty answer is data. *)
+  assert (parse {|"[]"|} = Ok [])
+)
+
+let json_rpc_result id result =
+  Yojson.Safe.to_string
+    (`Assoc [ ("jsonrpc", `String "2.0"); ("id", `Int id); ("result", result) ])
+
+(* A scripted z.ai: [initialize] answers with a session id, the notification
+   with 202, and the call with [call_response]. Every request is recorded. *)
+let zai_fake_post ~call_response requests =
+  fun ~url ~headers ~body ->
+    let json = Yojson.Safe.from_string body in
+    let meth =
+      match json with
+      | `Assoc fields -> (match List.assoc_opt "method" fields with Some (`String m) -> m | _ -> "")
+      | _ -> ""
+    in
+    requests := (meth, url, headers, json) :: !requests;
+    match meth with
+    | "server/discover" ->
+      Ok
+        { Masc_http_client.status = 200
+        ; headers = [ ("content-type", "application/json") ]
+        ; body = {|{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}|}
+        }
+    | "initialize" ->
+      Ok
+        { Masc_http_client.status = 200
+        ; headers = [ ("content-type", "text/event-stream"); ("Mcp-Session-Id", "sess-1") ]
+        ; body =
+            "event: message\ndata: "
+            ^ json_rpc_result 1
+                (`Assoc
+                  [ ("protocolVersion", `String "2024-11-05")
+                  ; ("capabilities", `Assoc [])
+                  ; ("serverInfo", `Assoc [ ("name", `String "mcp-web-search-prime") ])
+                  ])
+            ^ "\n\n"
+        }
+    | "notifications/initialized" ->
+      Ok { Masc_http_client.status = 202; headers = []; body = "" }
+    | _ -> call_response ()
+
+let zai_call_ok text () =
+  Ok
+    { Masc_http_client.status = 200
+    ; headers = [ ("content-type", "text/event-stream") ]
+    ; body =
+        "event: message\ndata: "
+        ^ json_rpc_result 3
+            (`Assoc
+              [ ( "content"
+                , `List [ `Assoc [ ("type", `String "text"); ("text", `String text) ] ] )
+              ; ("isError", `Bool false)
+              ])
+        ^ "\n\n"
+    }
+
+let () = test "search_via_zai opens a session, calls the tool, and limits the rows" (fun () ->
+  let requests = ref [] in
+  let post = zai_fake_post ~call_response:(zai_call_ok zai_nested_text) requests in
+  assert
+    (Tool_misc_web_search.search_via_zai_for_test ~post ~api_key:"zai-test-key"
+       ~query:"eio switch" ~limit:1
+     = Ok [ zai_first_row ]);
+  let seen = List.rev !requests in
+  assert (List.map (fun (m, _, _, _) -> m) seen = [ "server/discover"; "initialize"; "notifications/initialized"; "tools/call" ]);
+  List.iter
+    (fun (_, url, headers, _) ->
+      assert (url = "https://api.z.ai/api/mcp/web_search_prime/mcp");
+      assert (List.assoc_opt "Authorization" headers = Some "Bearer zai-test-key"))
+    seen;
+  (* The session the server minted rides on the call. *)
+  (match List.rev seen with
+   | (_, _, headers, json) :: _ ->
+     assert (List.assoc_opt "Mcp-Session-Id" headers = Some "sess-1");
+     (match json with
+      | `Assoc fields ->
+        (match List.assoc_opt "params" fields with
+         | Some (`Assoc params) ->
+           assert (List.assoc_opt "name" params = Some (`String "web_search_prime"));
+           (match List.assoc_opt "arguments" params with
+            | Some (`Assoc args) ->
+              assert (List.assoc_opt "search_query" args = Some (`String "eio switch"));
+              assert (List.assoc_opt "location" args = Some (`String "us"))
+            | _ -> failwith "arguments missing")
+         | _ -> failwith "params missing")
+      | _ -> failwith "call is not an object")
+   | [] -> failwith "no requests")
+)
+
+let () = test "search_via_zai keeps text parseable when structured output is also present" (fun () ->
+  let requests = ref [] in
+  let call_response () =
+    Ok
+      { Masc_http_client.status = 200
+      ; headers = [ ("content-type", "application/json") ]
+      ; body = json_rpc_result 3
+          (`Assoc
+            [ "content", `List [ `Assoc [ "type", `String "text"; "text", `String zai_nested_text ] ]
+            ; "structuredContent", `Assoc [ "provider", `String "zai" ]
+            ])
+      }
+  in
+  let post = zai_fake_post ~call_response requests in
+  assert
+    (Tool_misc_web_search.search_via_zai_for_test ~post ~api_key:"zai-test-key"
+       ~query:"eio switch" ~limit:1 = Ok [ zai_first_row ])
+)
+
+let () = test "search_via_zai names each failure without echoing the answer" (fun () ->
+  let run call_response =
+    let requests = ref [] in
+    Tool_misc_web_search.search_via_zai_for_test
+      ~post:(zai_fake_post ~call_response requests)
+      ~api_key:"zai-test-key" ~query:"q" ~limit:5
+  in
+  let is_server detail = function
+    | Error (Tool_misc_web_search.Server message) -> String.equal message detail
+    | _ -> false
+  in
+  assert
+    (is_server "provider refused the key"
+       (run (fun () -> Ok { Masc_http_client.status = 401; headers = []; body = "bad key" })));
+  (* What z.ai answers an invalid key: HTTP 200 and an error body that is not
+     JSON-RPC. Measured 2026-10-14. *)
+  assert
+    (is_server "provider refused the key"
+       (run (fun () ->
+          Ok
+            { Masc_http_client.status = 200
+            ; headers = [ ("content-type", "application/json") ]
+            ; body = {|{"code":401,"msg":"token expired or incorrect","success":false}|}
+            })));
+  assert
+    (is_server "provider returned HTTP 429"
+       (run (fun () ->
+          Ok
+            { Masc_http_client.status = 200
+            ; headers = [ ("content-type", "application/json") ]
+            ; body = {|{"code":429,"msg":"quota used up","success":false}|}
+            })));
+  assert
+    (is_server "provider returned HTTP 500"
+       (run (fun () -> Ok { Masc_http_client.status = 500; headers = []; body = "secret detail" })));
+  assert
+    (is_server "provider refused the call (-32000)"
+       (run (fun () ->
+          Ok
+            { Masc_http_client.status = 200
+            ; headers = [ ("content-type", "application/json") ]
+            ; body =
+                {|{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"quota for q is used up"}}|}
+            })));
+  assert
+    (is_server "provider reported a failed search"
+       (run (fun () ->
+          Ok
+            { Masc_http_client.status = 200
+            ; headers = [ ("content-type", "application/json") ]
+            ; body =
+                json_rpc_result 3
+                  (`Assoc
+                    [ ( "content"
+                      , `List [ `Assoc [ ("type", `String "text"); ("text", `String "nope") ] ] )
+                    ; ("isError", `Bool true)
+                    ])
+            })));
+  (match run (fun () -> Error "curl exit code 6 for https://api.z.ai/api/mcp") with
+   | Error (Tool_misc_web_search.Transport message) ->
+     assert (not (str_contains message "https://api.z.ai"))
+   | _ -> failwith "expected a transport error");
+  (match run (zai_call_ok "not an array") with
+   | Error (Tool_misc_web_search.Parse _) -> ()
+   | _ -> failwith "expected a parse error")
+)
+
+(* A bad key is refused on the first request, not on the call: the failure has
+   to read as a refused key at initialize too. *)
+let () = test "search_via_zai reads a refusal at every stage" (fun () ->
+  let refusal ~code_json =
+    fun ~url:_ ~headers:_ ~body:_ ->
+      Ok
+        { Masc_http_client.status = 200
+        ; headers = [ ("content-type", "application/json") ]
+        ; body = Printf.sprintf {|{"code":%s,"msg":"nope","success":false}|} code_json
+        }
+  in
+  let run post =
+    Tool_misc_web_search.search_via_zai_for_test ~post ~api_key:"zai-test-key" ~query:"q"
+      ~limit:5
+  in
+  let is_server detail = function
+    | Error (Tool_misc_web_search.Server message) -> String.equal message detail
+    | _ -> false
+  in
+  (* At initialize, as the real server answers an invalid key. *)
+  assert (is_server "provider refused the key" (run (refusal ~code_json:"401")));
+  (* The code as a string. *)
+  assert (is_server "provider refused the key" (run (refusal ~code_json:{|"401"|})));
+  (* A business code is not an HTTP status: it is still a refusal, not an
+     answer nobody could read. *)
+  assert (is_server "provider refused the call (1113)" (run (refusal ~code_json:"1113")));
+  (* No success flag: nothing says this is z.ai's failure shape. *)
+  (match
+     run (fun ~url:_ ~headers:_ ~body:_ ->
+       Ok
+         { Masc_http_client.status = 200
+         ; headers = [ ("content-type", "application/json") ]
+         ; body = {|{"code":401}|}
+         })
+   with
+   | Error (Tool_misc_web_search.Parse _) -> ()
+   | _ -> failwith "expected a parse error without the success flag")
+)
+
+let () = test "the zai transport drops the content type and carries the answer" (fun () ->
+  let seen = ref [] in
+  let run ~timeout_sec ~headers ~url ~body_json () =
+    seen := (timeout_sec, headers, url, body_json) :: !seen;
+    Ok
+      { Tool_local_runtime_http.status = 202
+      ; headers = [ ("Mcp-Session-Id", "sess-1") ]
+      ; body = "ok"
+      }
+  in
+  let post = Tool_misc_web_search.curl_mcp_post_with_for_test ~run ~timeout_sec:9 in
+  (match
+     post ~url:"https://example.invalid/mcp"
+       ~headers:
+         [ ("Content-Type", "application/json")
+         ; ("content-type", "application/json")
+         ; ("Authorization", "Bearer k")
+         ]
+       ~body:"{}"
+   with
+   | Ok response ->
+     assert (response.Masc_http_client.status = 202);
+     assert (response.Masc_http_client.body = "ok");
+     assert (List.assoc_opt "Mcp-Session-Id" response.Masc_http_client.headers = Some "sess-1")
+   | Error detail -> failwith detail);
+  (match !seen with
+   | [ (9, headers, "https://example.invalid/mcp", "{}") ] ->
+     assert (headers = [ ("Authorization", "Bearer k") ])
+   | _ -> failwith "run was not given the request");
+  let failing ~timeout_sec:_ ~headers:_ ~url:_ ~body_json:_ () = Error "curl exit code 28" in
+  assert
+    (Tool_misc_web_search.curl_mcp_post_with_for_test ~run:failing ~timeout_sec:1
+       ~url:"https://example.invalid/mcp" ~headers:[] ~body:"{}"
+     = Error "curl exit code 28")
+)
+
+let () = test "dispatch names zai without a key and reaches no network" (fun () ->
+  with_env "ZAI_API_KEY" None (fun () ->
+    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
+      with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+        with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+          with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" (Some "0") (fun () ->
+            let ctx = make_test_ctx () in
+            let args = `Assoc [ ("query", `String "zai without a key") ] in
+            match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+            | Some result ->
+              assert (not (Tool_result.is_success result));
+              assert (str_contains (Tool_result.message result) "zai");
+              assert (str_contains (Tool_result.message result) "missing ZAI_API_KEY")
+            | None -> failwith "masc_web_search was not dispatched")))))
+)
+
+let () = test "zai is a provider only when it is named" (fun () ->
+  assert (Web_search_provider.of_label "ZAI" = Some Web_search_provider.Zai);
+  assert (Web_search_provider.of_label " z.ai " = Some Web_search_provider.Zai);
+  assert (not (List.mem Web_search_provider.Zai Web_search_provider.default_order));
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "OLLAMA_API_KEY" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                    with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                      with_env "ZAI_API_KEY" (Some "zai-key") (fun () ->
+                        (* The key is on every install that talks to GLM, so
+                           it must not make a search start spending the plan. *)
+                        assert (Tool_misc.web_search_provider_plan () = []);
+                        with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
+                          assert (Tool_misc.web_search_provider_plan () = [ "zai" ])))))))))))))
+)
+
+let () = test "web_search_provider_plan_admits_ollama_with_key" (fun () ->
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                    with_env "OLLAMA_API_KEY" (Some "ollama-key") (fun () ->
+                      assert
+                        (Tool_misc.web_search_provider_plan () = [ "ollama" ])))))))))))
+)
+
+let () = test "parse_brave_llm_context_json_malformed" (fun () ->
+  assert (Result.is_error (Tool_misc.parse_brave_llm_context_json "not json"));
+  assert (Result.is_error (Tool_misc.parse_brave_llm_context_json {|{"grounding":{}}|}))
+)
+
+let () = test "web_search_provider_plan_admits_brave_llm_context_only_explicitly" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                    (* Default order never contains the grounded provider. *)
+                    assert (Tool_misc.web_search_provider_plan () = [ "brave" ]));
+                  with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave_llm_context")
+                    (fun () ->
+                      assert
+                        (Tool_misc.web_search_provider_plan ()
+                         = [ "brave_llm_context"; "brave" ])))))))))))
+)
+
+(* Feature contract: a grounded provider answer flows through dispatch as
+   grounded=true + context_text + sources, with no results rows and no
+   client-side truncation of the request-budgeted content. *)
+let () = test "dispatch_web_search_grounded_envelope" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "grounded envelope contract" in
+  Tool_misc.with_web_search_simulation_for_test
+    ~outcomes:
+      [ ( "brave_llm_context"
+        , `Grounded
+            [ ( "https://example.com/effects"
+              , "Effect Handlers"
+              , [ "OCaml 5 introduces effect handlers."; "Second chunk." ] )
+            ] )
+      ]
+    (fun () ->
+      let args = `Assoc [ ("query", `String query); ("limit", `Int 3) ] in
+      match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+      | Some result ->
+          assert (Tool_result.is_success result);
+          let json = parse_json (Tool_result.message result) in
+          let open Yojson.Safe.Util in
+          let result_json = json |> member "result" in
+          assert (result_json |> member "grounded" |> to_bool);
+          assert (result_json |> member "engine" |> to_string = "brave_llm_context");
+          assert (result_json |> member "result_count" |> to_int = 1);
+          assert (result_json |> member "results" = `Null);
+          let context_text = result_json |> member "context_text" |> to_string in
+          assert (str_contains context_text "WebSearch grounded context");
+          assert (str_contains context_text ("Query: " ^ query));
+          assert (str_contains context_text "1. Effect Handlers");
+          assert (str_contains context_text "URL: https://example.com/effects");
+          assert (str_contains context_text "- OCaml 5 introduces effect handlers.");
+          assert (str_contains context_text "- Second chunk.");
+          (match result_json |> member "sources" with
+           | `List [ source ] ->
+               assert (source |> member "url" |> to_string = "https://example.com/effects");
+               assert (source |> member "title" |> to_string = "Effect Handlers");
+               assert (source |> member "snippet_count" |> to_int = 2)
+           | other ->
+               failwith ("expected one source, got: " ^ Yojson.Safe.to_string other))
+      | None -> failwith "dispatch returned None")
+)
+
+(* #27392: masc_web_search stamps its own start, so a result reports this
+   call's span. A caller-supplied 0.0 used to report the distance from the
+   Unix epoch (56 years) on both the success and the failure path. *)
+let assert_call_span result =
+  let duration_ms = Tool_result.duration_ms result in
+  assert (duration_ms >= 0.0 && duration_ms < 60_000.0)
+
+let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
+      [
+        ("brave", `Error "provider failed");
+        ("searxng", `Hits [ ("Eio", "https://example.com/eio", "Fiber runtime") ]);
+      ]
+  in
+  assert (Tool_result.is_success result);
+  let json = parse_json ((Tool_result.message result)) in
+  let result_json = Yojson.Safe.Util.member "result" json in
+  assert (Yojson.Safe.Util.member "engine" result_json = `String "searxng");
+  assert (Yojson.Safe.Util.member "result_count" result_json = `Int 1);
+  assert_call_span result
+)
+
+(* Ollama sends page text in the field read as a snippet. A snippet past
+   1,024 bytes is cut at a character boundary with the marker inside the
+   bound; one of exactly 1,024 bytes, or one an engine wrote as a snippet,
+   stays whole. *)
+let snippet_max_bytes = 1024
+
+let () = test "web_search_snippet_is_a_bounded_preview" (fun () ->
+  let page = String.concat " " (List.init 2000 (fun _ -> "한글")) in
+  let exact = String.make snippet_max_bytes 'a' in
+  let one_over = String.make (snippet_max_bytes + 1) 'b' in
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:5
+      [ ( "ollama",
+          `Hits
+            [ ("Page", "https://example.com/page", page);
+              ("Short", "https://example.com/short", "Fiber runtime");
+              ("Exact", "https://example.com/exact", exact);
+              ("One over", "https://example.com/over", one_over) ] ) ]
+  in
+  assert (Tool_result.is_success result);
+  let snippets =
+    parse_json (Tool_result.message result)
+    |> Yojson.Safe.Util.member "result"
+    |> Yojson.Safe.Util.member "results"
+    |> Yojson.Safe.Util.to_list
+    |> List.map (fun hit -> Yojson.Safe.Util.(member "snippet" hit |> to_string))
+  in
+  let marker = "…" in
+  match snippets with
+  | [ long_snippet; short_snippet; exact_snippet; over_snippet ] ->
+      assert (String.length long_snippet <= snippet_max_bytes);
+      (* Cut near the bound, not far below it: a Hangul syllable is 3 bytes. *)
+      assert (String.length long_snippet > snippet_max_bytes - 6);
+      assert (String.ends_with ~suffix:marker long_snippet);
+      assert (String.is_valid_utf_8 long_snippet);
+      assert (short_snippet = "Fiber runtime");
+      assert (exact_snippet = exact);
+      assert (String.length over_snippet = snippet_max_bytes);
+      assert (String.ends_with ~suffix:marker over_snippet)
+  | _ -> failwith "expected four hits"
+)
+
+let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
+      [ ("brave", `Error "invalid JSON"); ("exa", `Error "provider unavailable") ]
+  in
+  assert (not (Tool_result.is_success result));
+  assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+  assert
+    (str_contains (Tool_result.message result) "exa: provider unavailable");
+  assert_call_span result
+)
+
+(* Exercise the valid-empty case hidden by the observed no-results error
+   after a searxng transport failure. The shared production chain
+   must return an answer, retaining the failed provider as evidence. *)
+let () = test "web_search_empty_answer_survives_failed_fallbacks" (fun () ->
+  List.iter (fun outcomes ->
+    let result =
+      Tool_misc.web_search_simulate_for_test ~query:"rare exact phrase" ~limit:3 outcomes
+    in
+    assert (Tool_result.is_success result);
+    assert (Tool_result.failure_class result = None);
+    let data = Tool_result.data result in
+    let open Yojson.Safe.Util in
+    assert (data |> member "result" |> member "engine" |> to_string = "ollama");
+    assert (data |> member "result" |> member "result_count" |> to_int = 0);
+    assert (data |> member "result" |> member "results" |> to_list = []);
+    assert (data |> member "provider_errors" |> to_list = [`String "searxng: unavailable"]))
+    [ ["searxng", `Error "unavailable"; "ollama", `Empty]
+    ; ["ollama", `Empty; "searxng", `Error "unavailable"] ];
+  let empty = Tool_misc.web_search_simulate_for_test ~query:"none" ~limit:3
+      ["ollama", `Empty] in
+  assert (Tool_result.is_success empty)
+)
+
+let () = test "web_search_empty_answer_still_tries_next_provider" (fun () ->
+  let result = Tool_misc.web_search_simulate_for_test ~query:"ocaml" ~limit:3
+      ["brave", `Grounded []; "ollama", `Empty;
+       "exa", `Hits ["OCaml", "https://ocaml.org", "Language"]] in
+  assert (Tool_result.is_success result);
+  let open Yojson.Safe.Util in
+  assert (Tool_result.data result |> member "result" |> member "engine"
+          |> to_string = "exa")
+)
+
+(* A failed query can recover to a grounded empty answer. Repeating that
+   query retains both the empty envelope and failure evidence from cache,
+   even if the provider would now fail. Only the provider calls are replaced. *)
+let () = test "dispatch_web_search_grounded_empty_answer_is_cached" (fun () ->
+  with_boot_override "MASC_WEB_SEARCH_CACHE_TTL_SEC" None (fun () ->
+  with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" (Some "900") (fun () ->
+    let ctx = make_test_ctx () in
+    let args = `Assoc ["query", `String "grounded empty cache recovery contract"] in
+    let dispatch outcomes =
+      Tool_misc.with_web_search_simulation_for_test ~outcomes (fun () ->
+        match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+        | Some result -> result
+        | None -> failwith "masc_web_search was not dispatched")
+    in
+    let failure = dispatch ["searxng", `Error "search engines unavailable"] in
+    assert (Tool_result.failure_class failure = Some Tool_result.Runtime_failure);
+    let recovered = dispatch
+        ["searxng", `Error "search engines unavailable";
+         "brave_llm_context", `Grounded []] in
+    assert (Tool_result.is_success recovered);
+    let data = Tool_result.data recovered in
+    let open Yojson.Safe.Util in
+    let result = data |> member "result" in
+    assert (result |> member "grounded" |> to_bool);
+    assert (result |> member "engine" |> to_string = "brave_llm_context");
+    assert (result |> member "result_count" |> to_int = 0);
+    assert (result |> member "sources" |> to_list = []);
+    assert (result |> member "results" = `Null);
+    assert (data |> member "provider_errors" |> to_list
+            = [`String "searxng: search engines unavailable"]);
+    let cached = dispatch ["brave_llm_context", `Error "provider now unavailable"] in
+    assert (Tool_result.is_success cached);
+    assert (Tool_result.data cached = data))))
+
+let () = test "web_search_empty_array_is_distinct_from_invalid_response" (fun () ->
+  List.iter (fun (parse, empty) ->
+    assert (parse empty = Ok []);
+    List.iter (fun malformed ->
+      match parse malformed with
+      | Error (Tool_misc_web_search.Parse _) -> ()
+      | _ -> failwith "invalid provider response must not become an empty answer")
+      ["not json"; "{}"; "null"; {|{"results":null}|};
+       {|{"results":[{"title":"bad","url":"ftp://example.com"}]}|}])
+    [ Tool_misc.parse_searxng_json, {|{"results":[]}|}
+    ; Tool_misc.parse_ollama_search_json, {|{"results":[]}|}
+    ; Tool_misc.parse_tavily_json, {|{"results":[]}|}
+    ; Tool_misc.parse_exa_json, {|{"results":[]}|}
+    ; Tool_misc.parse_brave_json, {|{"web":{"results":[]}}|}
+    ; Tool_misc.parse_bing_search_json, {|{"webPages":{"value":[]}}|} ]
+)
+
+(* task-1823: Brave's 200 schema makes [web] a nullable object. A search
+   envelope with [web] null or absent is a real no-hit answer; an envelope we
+   cannot read stays a Parse failure (#39802 rule). *)
+let () = test "web_search_brave_null_or_absent_web_is_an_empty_answer" (fun () ->
+  List.iter (fun body -> assert (Tool_misc.parse_brave_json body = Ok []))
+    [ {|{"type":"search","query":{"original":"rare phrase"},"web":null}|}
+    ; {|{"type":"search","query":{"original":"rare phrase"}}|} ];
+  List.iter (fun body ->
+    match Tool_misc.parse_brave_json body with
+    | Error (Tool_misc_web_search.Parse _) -> ()
+    | _ -> failwith ("Brave body must stay a Parse failure: " ^ body))
+    [ {|{"type":"search","web":{}}|}
+    ; {|{"type":"search","web":{"results":null}}|}
+    ; {|{"type":"search","web":"x"}|}
+    ; {|{"type":"search","web":[]}|}
+    ; {|{"web":null}|}
+    ; {|{"type":"other","web":null}|}
+    ; {|[]|}
+    ; {|"search"|} ]
+)
+
+let () = test "web_search_brave_only_null_web_answers_with_zero_results" (fun () ->
+  let null_web = {|{"type":"search","query":{"original":"rare phrase"},"web":null}|} in
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"rare phrase" ~limit:3
+      [ ("brave", `Brave_body null_web) ]
+  in
+  assert (Tool_result.is_success result);
+  assert (Tool_result.failure_class result = None);
+  let open Yojson.Safe.Util in
+  let data = Tool_result.data result in
+  assert (data |> member "result" |> member "engine" |> to_string = "brave");
+  assert (data |> member "result" |> member "result_count" |> to_int = 0);
+  assert (data |> member "result" |> member "results" |> to_list = []);
+  assert (data |> member "provider_errors" = `Null);
+  let broken =
+    Tool_misc.web_search_simulate_for_test ~query:"rare phrase" ~limit:3
+      [ ("brave", `Brave_body {|{"type":"search","web":{}}|}) ]
+  in
+  assert (not (Tool_result.is_success broken));
+  assert (Tool_result.failure_class broken = Some Tool_result.Runtime_failure);
+  assert (str_contains (Tool_result.message broken) "brave: parse:")
+)
+
+let () = test "web_search_searxng_engine_outage_is_not_an_empty_answer" (fun () ->
+  assert (Tool_misc.parse_searxng_json
+      {|{"results":[],"unresponsive_engines":[["google","timeout"]]}|}
+      = Error (Tool_misc_web_search.Server "search engines unavailable"));
+  assert (Tool_misc.parse_searxng_json
+      {|{"results":[],"unresponsive_engines":[]}|} = Ok []);
+  assert (Result.is_error (Tool_misc.parse_searxng_json
+      {|{"results":[],"unresponsive_engines":false}|}))
+)
+
+let () = test "web_search_provider_error_to_string_renders_typed_variants" (fun () ->
+  assert
+    (Tool_misc.web_search_provider_error_to_string
+       (Masc.Tool_misc_web_search.Transport "connection reset")
+     = "transport: connection reset");
+  assert
+    (Tool_misc.web_search_provider_error_to_string
+       (Masc.Tool_misc_web_search.Server "HTTP 503")
+     = "server: HTTP 503");
+  assert
+    (Tool_misc.web_search_provider_error_to_string
+       (Masc.Tool_misc_web_search.Config "missing API key")
+     = "config: missing API key");
+  assert
+    (Tool_misc.web_search_provider_error_to_string
+       (Masc.Tool_misc_web_search.Parse "invalid JSON")
+     = "parse: invalid JSON")
+)
+
+let () = test "web_search_simulate_for_test_typed_error_renders_prefix" (fun () ->
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
+      [ ("brave", `Error "connection reset") ]
+  in
+  assert (not (Tool_result.is_success result));
+  assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+  assert
+    (str_contains (Tool_result.message result) "brave: connection reset")
+)
+
+let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "include content enrichment regression" in
+  let url = "https://example.com/masc-web-search-content" in
+  let html =
+    {|<!doctype html>
+<html>
+  <head><title>Result Page &amp; Proof</title></head>
+  <body>
+    <article>
+      <h1>Result Page</h1>
+      <p>Readable <b>page</b> content &amp; proof.</p>
+      <a title="1 > 0" href="https://example.com/standards">Standards &copy;</a>
+    </article>
+  </body>
+</html>|}
+  in
+  Tool_misc.with_web_search_simulation_for_test
+    ~outcomes:[ ("searxng", `Hits [ ("Result", url, "Snippet") ]) ]
+    (fun () ->
+      Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec ~headers:_ ~max_response_bytes url_arg ->
+           assert (timeout_sec = 9);
+           assert (max_response_bytes = 2_000_000);
+           assert (url_arg = url);
+           Ok (Some 200, html))
+        (fun () ->
+          let args =
+            `Assoc
+              [ ("query", `String query)
+              ; ("limit", `Int 1)
+              ; ("includeContent", `Bool true)
+              ; ("contentMaxChars", `Int 300)
+              ; ("contentTimeout", `Int 9)
+              ]
+          in
+          match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+          | Some result ->
+              assert (Tool_result.is_success result);
+              let json = parse_json (Tool_result.message result) in
+              let open Yojson.Safe.Util in
+              let result_json = json |> member "result" in
+              assert (result_json |> member "content_enriched" |> to_bool);
+              assert (result_json |> member "content_result_count" |> to_int = 1);
+              assert (result_json |> member "content_error_count" |> to_int = 0);
+              assert (result_json |> member "content_max_chars" |> to_int = 300);
+              assert (result_json |> member "content_timeout" |> to_int = 9);
+              let hits = result_json |> member "results" |> to_list in
+              assert (List.length hits = 1);
+              let hit = List.hd hits in
+              let content_text = result_json |> member "content_text" |> to_string in
+              assert (str_contains content_text "WebSearch readable results");
+              assert (str_contains content_text ("Query: " ^ query));
+              assert (str_contains content_text "1. Result");
+              assert (str_contains content_text ("URL: " ^ url));
+              assert (str_contains content_text "Snippet: Snippet");
+              assert (str_contains content_text "Content status: ok (http=200");
+              assert (str_contains content_text "Readable page content & proof.");
+              assert
+                (str_contains content_text
+                   "[Standards ©](https://example.com/standards)");
+              (* Single-carriage contract: fetched bodies ride only in
+                 content_text, never mirrored into per-hit fields. *)
+              assert (hit |> member "page_content" = `Null);
+              assert (hit |> member "page_content_status" = `Null);
+              assert (hit |> member "page_content_http_status" = `Null)
+          | None -> failwith "dispatch returned None"))
+)
+
+let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "include content fetch failure regression" in
+  let url = "https://example.com/masc-web-search-fetch-failure" in
+  Tool_misc.with_web_search_simulation_for_test
+    ~outcomes:[ ("searxng", `Hits [ ("Result", url, "Snippet") ]) ]
+    (fun () ->
+      Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url_arg ->
+           assert (url_arg = url);
+           Error (Masc.Tool_local_runtime_http.Curl_exited 6))
+        (fun () ->
+          let args =
+            `Assoc
+              [ ("query", `String query)
+              ; ("limit", `Int 1)
+              ; ("includeContent", `Bool true)
+              ]
+          in
+          match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+          | Some result ->
+              assert (Tool_result.is_success result);
+              let json = parse_json (Tool_result.message result) in
+              let open Yojson.Safe.Util in
+              let result_json = json |> member "result" in
+              assert (result_json |> member "content_enriched" |> to_bool);
+              assert (result_json |> member "content_result_count" |> to_int = 0);
+              assert (result_json |> member "content_error_count" |> to_int = 1);
+              let hit =
+                result_json |> member "results" |> to_list |> List.hd
+              in
+              let content_text = result_json |> member "content_text" |> to_string in
+              assert (str_contains content_text "WebSearch readable results");
+              assert (str_contains content_text ("Query: " ^ query));
+              assert (str_contains content_text ("URL: " ^ url));
+              assert (str_contains content_text "Content status: error");
+              assert (str_contains content_text "_Failed to retrieve page content:");
+              (* The model reads curl's cause, not the word "curl". *)
+              assert
+                (str_contains content_text
+                   "fetch failed: curl exit 6 (could not resolve host)");
+              assert (str_contains content_text ("Source: " ^ url));
+              (* Failure detail also rides only in content_text. *)
+              assert (hit |> member "page_content" = `Null);
+              assert (hit |> member "page_content_status" = `Null);
+              assert (hit |> member "page_content_error" = `Null)
+          | None -> failwith "dispatch returned None"))
+)
+
+(* Pins the named default (was inline 30.0): a keeper research loop must
+   be able to repeat a query inside one 15-minute window without paying
+   the provider again. *)
+let () = test "web_search_cache_ttl_default_is_fifteen_minutes" (fun () ->
+  with_boot_override "MASC_WEB_SEARCH_CACHE_TTL_SEC" None (fun () ->
+    with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" None (fun () ->
+      assert (Env_config.Tools.web_search_cache_ttl_sec () = 900.0)))
+)
+
+let () = test "parse_official_provider_json_payloads" (fun () ->
+  let brave =
+    Tool_misc.parse_brave_json
+      {|{"web":{"results":[{"title":"Brave title","url":"https://example.com/brave","description":"Brave snippet"}]}}|}
+  in
+  let tavily =
+    Tool_misc.parse_tavily_json
+      {|{"results":[{"title":"Tavily title","url":"https://example.com/tavily","content":"Tavily snippet"}]}|}
+  in
+  let exa =
+    Tool_misc.parse_exa_json
+      {|{"results":[{"title":"Exa title","url":"https://example.com/exa","text":"Exa snippet"}]}|}
+  in
+  let bing =
+    Tool_misc.parse_bing_search_json
+      {|{"webPages":{"value":[{"name":"Bing title","url":"https://example.com/bing","snippet":"Bing snippet"}]}}|}
+  in
+  assert (brave = Ok [ ("Brave title", "https://example.com/brave", "Brave snippet") ]);
+  assert (tavily = Ok [ ("Tavily title", "https://example.com/tavily", "Tavily snippet") ]);
+  assert (exa = Ok [ ("Exa title", "https://example.com/exa", "Exa snippet") ]);
+  assert (bing = Ok [ ("Bing title", "https://example.com/bing", "Bing snippet") ])
+)
+
+let () = test "parse_official_provider_json_payloads_tolerate_malformed_json" (fun () ->
+  assert (Result.is_error (Tool_misc.parse_brave_json {|{"web":|}));
+  assert (Result.is_error (Tool_misc.parse_tavily_json {|{"results": "oops"}|}));
+  assert (Result.is_error (Tool_misc.parse_exa_json {|{"results": [}|}));
+  assert (Result.is_error (Tool_misc.parse_bing_search_json {|{"webPages": "oops"}|}))
+)
+
+let () = test "redact_transport_error_detail" (fun () ->
+  assert
+    (Tool_misc.redact_transport_error_detail
+       "curl exit code 6 for https://example.com?q=test"
+     = "curl exit code 6");
+  assert
+    (Tool_misc.redact_transport_error_detail "provider request failed"
+     = "provider request failed");
+  assert (Tool_misc.redact_transport_error_detail "" = "");
+  assert
+    (Tool_misc.redact_transport_error_detail "forbidden response"
+     = "forbidden response")
+)
+
+(* Test helper functions *)
+let () = test "get_int_present" (fun () ->
+  let args = `Assoc [("key", `Int 42)] in
+  assert (Tool_args.get_int args "key" 0 = 42)
+)
+
+let () = test "get_int_missing" (fun () ->
+  let args = `Assoc [] in
+  assert (Tool_args.get_int args "key" 99 = 99)
+)
+
+let () = test "get_bool_true" (fun () ->
+  let args = `Assoc [("key", `Bool true)] in
+  assert (Tool_args.get_bool args "key" false = true)
+)
+
+let () = test "get_bool_false" (fun () ->
+  let args = `Assoc [("key", `Bool false)] in
+  assert (Tool_args.get_bool args "key" true = false)
+)
+
+let () = test "get_bool_missing" (fun () ->
+  let args = `Assoc [] in
+  assert (Tool_args.get_bool args "key" true = true)
+)
+
+let () = test "get_string_present" (fun () ->
+  let args = `Assoc [("key", `String "value")] in
+  assert (Tool_args.get_string args "key" "default" = "value")
+)
+
+let () = test "get_string_missing" (fun () ->
+  let args = `Assoc [] in
+  assert (Tool_args.get_string args "key" "default" = "default")
+)
+
+(* --- waiting-inventory grouping: a consumption-stalled keeper's pending wall
+   collapses per conversation/urgency instead of per message. RFC-0377 drains
+   a same-conversation backlog in one turn, so the aggregate loses no operator
+   decision: the oldest member keeps the row address ([source_ref],
+   [event_id]) and every member id rides in [detail]. --- *)
+
+let json_int_member key = function
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`Int value) -> value
+       | Some _ -> failwith ("json field is not an int: " ^ key)
+       | None -> failwith ("missing json field: " ^ key))
+  | _ -> failwith "expected json object"
+
+let connector_selection ~event_id ~arrived_at =
+  let channel =
+    Keeper_continuation_channel.discord
+      ~guild_id:(Some "guild-1")
+      ~channel_id:"chan-1"
+      ~parent_channel_id:None
+      ~thread_id:None
+      ~user_id:"user-1"
+      ()
+    |> Result.get_ok
+  in
+  { Keeper_event_queue_state.source =
+      { Keeper_event_queue.post_id = "post-" ^ event_id
+      ; urgency = Keeper_event_queue.Low
+      ; arrived_at
+      ; payload =
+          Keeper_event_queue.Connector_attention { event_id; channel }
+      }
+  ; admitted_revision = 1L
+  ; arrival = 1L
+  ; checkpoint_retentions = 0
+      ; repetition_scope = None
+  ; first_admitted_at = None
+  }
+
+let () =
+  test "waiting_inventory_groups_connector_attention_stimuli" (fun () ->
+    let bootstrap_selection =
+      { Keeper_event_queue_state.source =
+          { Keeper_event_queue.post_id = "post-boot"
+          ; urgency = Keeper_event_queue.Normal
+          ; arrived_at = 5.0
+          ; payload = Keeper_event_queue.Bootstrap
+          }
+      ; admitted_revision = 1L
+      ; arrival = 1L
+      ; checkpoint_retentions = 0
+      ; repetition_scope = None
+  ; first_admitted_at = None
+      }
+    in
+    let rows =
+      Server_keeper_waiting_inventory.For_testing.rows_for_queue_snapshot
+        ~keeper_name:"group-fixture"
+        ~source:Server_keeper_waiting_inventory.Event_queue_pending
+        ~next_action:"keeper_cycle"
+        (connector_selection ~event_id:"evt-b" ~arrived_at:20.0
+        :: connector_selection ~event_id:"evt-a" ~arrived_at:10.0
+        :: bootstrap_selection
+        :: connector_selection ~event_id:"evt-c" ~arrived_at:30.0
+        :: [])
+    in
+    assert (List.length rows = 2);
+    let grouped = List.hd rows in
+    assert (String.equal grouped.what "외부 메시지 도착 ×3 (낮은 우선순위)");
+    assert (grouped.since = Some 10.0);
+    assert (json_int_member "group_count" grouped.detail = 3);
+    (* Member event ids are sorted so the aggregate is stable across queue
+       order. *)
+    (match grouped.detail with
+     | `Assoc fields ->
+         (match List.assoc_opt "group_event_ids" fields with
+          | Some (`List ids) ->
+              assert (List.length ids = 3);
+              assert (
+                ids
+                = [ `String "evt-a"; `String "evt-b"; `String "evt-c" ])
+          | _ -> failwith "missing group_event_ids")
+     | _ -> failwith "expected json object");
+    (* The non-Connector stimulus keeps its own row. *)
+    let other = List.nth rows 1 in
+    assert (String.equal other.what "기동 직후 첫 턴"))
+
+let () =
+  test "waiting_inventory_single_connector_stays_individual" (fun () ->
+    let rows =
+      Server_keeper_waiting_inventory.For_testing.rows_for_queue_snapshot
+        ~keeper_name:"group-fixture"
+        ~source:Server_keeper_waiting_inventory.Event_queue_pending
+        ~next_action:"keeper_cycle"
+        [ connector_selection ~event_id:"evt-solo" ~arrived_at:10.0 ]
+    in
+    assert (List.length rows = 1);
+    let row = List.hd rows in
+    assert (String.equal row.what "외부 메시지 도착 (낮은 우선순위)");
+    (match row.detail with
+     | `Assoc fields -> assert (List.assoc_opt "group_count" fields = None)
+     | _ -> failwith "expected json object"))
+
+let schedule_selection ~schedule_id ~occurrence ~due_at ~arrived_at =
+  { Keeper_event_queue_state.source =
+      { Keeper_event_queue.post_id = "occ-" ^ occurrence
+      ; urgency = Keeper_event_queue.Normal
+      ; arrived_at
+      ; payload =
+          Keeper_event_queue.Schedule_due
+            { occurrence_id = "occ-" ^ occurrence
+            ; schedule_instance_id = "inst-" ^ schedule_id
+            ; schedule_id
+            ; due_at
+            ; payload_digest = "digest-" ^ occurrence
+            ; title = Some "삼국지 2 캠페인 플레이 이어가기"
+            ; message = "continue"
+            ; result_delivery = None
+            }
+      }
+  ; admitted_revision = Int64.of_string occurrence
+  ; arrival = Int64.of_string occurrence
+  ; checkpoint_retentions = 0
+  ; repetition_scope = None
+  ; first_admitted_at = None
+  }
+
+let () =
+  test "waiting_inventory_groups_pending_occurrences_of_one_schedule" (fun () ->
+    let rows =
+      Server_keeper_waiting_inventory.For_testing.rows_for_queue_snapshot
+        ~keeper_name:"group-fixture"
+        ~source:Server_keeper_waiting_inventory.Event_queue_pending
+        ~next_action:"keeper_cycle"
+        (schedule_selection ~schedule_id:"sched-a" ~occurrence:"2" ~due_at:400.0 ~arrived_at:405.0
+        :: schedule_selection ~schedule_id:"sched-b" ~occurrence:"9" ~due_at:150.0 ~arrived_at:155.0
+        :: schedule_selection ~schedule_id:"sched-a" ~occurrence:"1" ~due_at:100.0 ~arrived_at:105.0
+        :: schedule_selection ~schedule_id:"sched-a" ~occurrence:"3" ~due_at:700.0 ~arrived_at:705.0
+        :: [])
+    in
+    (* The aggregate takes the first member's position; the other schedule
+       keeps its own ungrouped row. *)
+    assert (List.length rows = 2);
+    let grouped = List.hd rows in
+    assert (String.equal grouped.what "예약 실행 시각 도래 · 삼국지 2 캠페인 플레이 이어가기 ×3");
+    assert (grouped.since = Some 105.0);
+    assert (json_int_member "group_count" grouped.detail = 3);
+    (match grouped.detail with
+     | `Assoc fields ->
+         assert (List.assoc_opt "group_first_due_unix" fields = Some (`Float 100.0));
+         assert (List.assoc_opt "group_last_due_unix" fields = Some (`Float 700.0));
+         (match List.assoc_opt "group_members" fields with
+          | Some (`List members) ->
+              assert (List.length members = 3);
+              (* Members ride in due order, each with the exact address the
+                 operator boundary resolves. *)
+              let incarnations =
+                List.map
+                  (function
+                    | `Assoc member -> List.assoc_opt "source_incarnation" member
+                    | _ -> None)
+                  members
+              in
+              assert (incarnations = [ Some (`String "1"); Some (`String "2"); Some (`String "3") ])
+          | _ -> failwith "missing group_members")
+     | _ -> failwith "expected json object");
+    let other = List.nth rows 1 in
+    assert (String.equal other.what "예약 실행 시각 도래 · 삼국지 2 캠페인 플레이 이어가기");
+    (match other.detail with
+     | `Assoc fields -> assert (List.assoc_opt "group_count" fields = None)
+     | _ -> failwith "expected json object"))
+
+let () =
+  Alcotest.run "Tool_misc"
+    [
+      ( "coverage",
+        List.rev !test_cases
+        |> List.map (fun (name, f) -> Alcotest.test_case name `Quick f) );
+    ]
+
+let () = exit 0

@@ -1,0 +1,12 @@
+{
+  "snapshot_sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70",
+  "snapshot_bytes": 2066,
+  "path": [
+    "pending",
+    0,
+    "source"
+  ],
+  "canonical_source_sha256": "94b1fca77be84d01b053e393aa357fdf9ccd343541b0f4d23df73f62bee4d907",
+  "canonical_source_bytes": 567,
+  "method": "Exact nested source lexical span, outside-string JSON whitespace removed; no number/order/escape reserialization. Frozen snapshot/ref use the same stimulus codec; controlled finite ASCII only."
+}

@@ -1,0 +1,5 @@
+# The repository files this recipe COPYs. Only these go into the build
+# context, and their contents are part of the image tag.
+masc.opam
+masc.opam.locked
+scripts/opam-pin-from-lock.sh

@@ -1,0 +1,408 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41121-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/lane-addons-panel.test.ts -t 'deeply nested valid JSON'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41121-parent-sync-20261004/dashboard
+
+ ❯ src/components/lane-addons-panel.test.ts (31 tests | 1 failed | 30 skipped) 5019ms
+   ❯ optional Lane Add-on surface (31)
+     × renders deeply nested valid JSON readings without recursive validation overflow 5017ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > renders deeply nested valid JSON readings without recursive validation overflow
+TestingLibraryElementError: Unable to find a label with the text of: Package readings for external-evidence-1
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Lane Add-ons"[39m
+      [33mclass[39m=[32m"space-y-4 p-4"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"flex items-center justify-between gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mclass[39m=[32m"text-lg font-semibold"[39m
+          [36m>[39m
+            [0mLane Add-ons[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0mOptional observations and relationships. Keeper work continues independently.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mNew TOML[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mRefresh[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0mReading retained observations…[0m
+      [36m</p>[39m
+      [36m<p>[39m
+        [0mNo Lane instances or retained observations.[0m
+      [36m</p>[39m
+      [36m<details>[39m
+        [36m<summary>[39m
+          [0mAttach a package[0m
+        [36m</summary>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"flex flex-wrap gap-2 py-2"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0mManifest path [0m
+            [36m<input[39m
+              [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+              [33mrequired[39m=[32m""[39m
+            [36m/>[39m
+          [36m</label>[39m
+          [36m<label>[39m
+            [0mRun ID [0m
+            [36m<input[39m
+              [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+              [33mrequired[39m=[32m""[39m
+            [36m/>[39m
+          [36m</label>[39m
+          [36m<label>[39m
+            [0mBinding JSON [0m
+            [36m<input[39m
+              [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+            [36m/>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+            [33mtype[39m=[32m"submit"[39m
+          [36m>[39m
+            [0mAttach[0m
+          [36m</button>[39m
+        [36m</form>[39m
+      [36m</details>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"overflow-x-auto"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"w-full text-left"[39m
+        [36m>[39m
+          [36m<thead>[39m
+            [36m<tr>[39m
+              [36m<th>[39m
+                [0mInstance / package[0m
+              [36m</th>[39m
+              [36m<th>[39m
+                [0mRun / revision[0m
+              [36m</th>[39m
+              [36m<th>[39m
+                [0mStatus[0m
+              [36m</th>[39m
+              [36m<th>[39m
+                [0mCursor / rows[0m
+              [36m</th>[39m
+              [36m<th>[39m
+                [0mActions[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody />[39m
+        [36m</table>[39m
+      [36m</div>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+      [36m>[39m
+        [36m<label>[39m
+          [0mRun filter [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<label>[39m
+          [0mLane filter [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<label>[39m
+          [0mSince (Unix seconds) [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<label>[39m
+          [0mUntil (Unix seconds) [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [33mtype[39m=[32m"submit"[39m
+        [36m>[39m
+          [0mSlice[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0mClear slice[0m
+        [36m</button>[39m
+      [36m</form>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"Source coverage"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"Cross-lane observations"[39m
+        [33mclass[39m=[32m"space-y-2"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+      [36m>[39m
+        [36m<label>[39m
+          [0mKeeper (optional) [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [33mdisabled[39m=[32m""[39m
+        [36m>[39m
+          [0mPreserve selected evidence[0m
+        [36m</button>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Lane Add-ons"[39m
+      [33mclass[39m=[32m"space-y-4 p-4"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"flex items-center justify-between gap-4"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mclass[39m=[32m"text-lg font-semibold"[39m
+          [36m>[39m
+            [0mLane Add-ons[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0mOptional observations and relationships. Keeper work continues independently.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mNew TOML[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [36m>[39m
+            [0mRefresh[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0mReading retained observations…[0m
+      [36m</p>[39m
+      [36m<p>[39m
+        [0mNo Lane instances or retained observations.[0m
+      [36m</p>[39m
+      [36m<details>[39m
+        [36m<summary>[39m
+          [0mAttach a package[0m
+        [36m</summary>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"flex flex-wrap gap-2 py-2"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0mManifest path [0m
+            [36m<input[39m
+              [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+              [33mrequired[39m=[32m""[39m
+            [36m/>[39m
+          [36m</label>[39m
+          [36m<label>[39m
+            [0mRun ID [0m
+            [36m<input[39m
+              [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+              [33mrequired[39m=[32m""[39m
+            [36m/>[39m
+          [36m</label>[39m
+          [36m<label>[39m
+            [0mBinding JSON [0m
+            [36m<input[39m
+              [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+            [36m/>[39m
+          [36m</label>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+            [33mtype[39m=[32m"submit"[39m
+          [36m>[39m
+            [0mAttach[0m
+          [36m</button>[39m
+        [36m</form>[39m
+      [36m</details>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"overflow-x-auto"[39m
+      [36m>[39m
+        [36m<table[39m
+          [33mclass[39m=[32m"w-full text-left"[39m
+        [36m>[39m
+          [36m<thead>[39m
+            [36m<tr>[39m
+              [36m<th>[39m
+                [0mInstance / package[0m
+              [36m</th>[39m
+              [36m<th>[39m
+                [0mRun / revision[0m
+              [36m</th>[39m
+              [36m<th>[39m
+                [0mStatus[0m
+              [36m</th>[39m
+              [36m<th>[39m
+                [0mCursor / rows[0m
+              [36m</th>[39m
+              [36m<th>[39m
+                [0mActions[0m
+              [36m</th>[39m
+            [36m</tr>[39m
+          [36m</thead>[39m
+          [36m<tbody />[39m
+        [36m</table>[39m
+      [36m</div>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+      [36m>[39m
+        [36m<label>[39m
+          [0mRun filter [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<label>[39m
+          [0mLane filter [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<label>[39m
+          [0mSince (Unix seconds) [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<label>[39m
+          [0mUntil (Unix seconds) [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [33mtype[39m=[32m"submit"[39m
+        [36m>[39m
+          [0mSlice[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0mClear slice[0m
+        [36m</button>[39m
+      [36m</form>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"Source coverage"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"Cross-lane observations"[39m
+        [33mclass[39m=[32m"space-y-2"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap gap-2"[39m
+      [36m>[39m
+        [36m<label>[39m
+          [0mKeeper (optional) [0m
+          [36m<input[39m
+            [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent"[39m
+          [36m/>[39m
+        [36m</label>[39m
+        [36m<button[39m
+          [33mclass[39m=[32m"border border-[var(--border)] rounded px-2 py-1 bg-transparent cursor-pointer disabled:opacity-50"[39m
+          [33mdisabled[39m=[32m""[39m
+        [36m>[39m
+          [0mPreserve selected evidence[0m
+        [36m</button>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:166:27
+ ❯ node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/lane-addons-panel.test.ts:163:32
+    161|     api.fetchLaneAddons.mockResolvedValue(decoded)
+    162|     const screen = render(html`<${LaneAddonsPanel} />`)
+    163|     const group = await screen.findByLabelText(`Package readings for $…
+       |                                ^
+    164|     expect(group.querySelector('dd')?.textContent).toBe(raw)
+    165|     expect(screen.getByText('Raw fields display unavailable: JSON nest…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+RangeError: Maximum call stack size exceeded
+ ❯ src/components/lane-addons-panel.ts:352:59
+    350|       <${LaneAddonReadings} row=${row} instances=${snapshot?.instances…
+    351|       <details><summary>Fields and original evidence · ${row.id}</summ…
+    352|         <pre class="whitespace-pre-wrap break-all">${JSON.stringify(ro…
+       |                                                           ^
+    353|         ${row.evidence.map(evidence => html`<p key=${evidence.uri} cla…
+    354|         ${row.related_ids.length > 0 && html`<p>Related: ${row.related…
+ ❯ C.LaneAddonsPanel [as constructor] src/components/lane-addons-panel.ts:345:72
+ ❯ C.Q [as render] node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:9150
+ ❯ q node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:6141
+ ❯ I node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:1059
+ ❯ H node_modules/.pnpm/preact@10.29.1/node_modules/preact/dist/preact.mjs:1:1575
+ ❯ processTicksAndRejections node:internal/process/task_queues:104:5
+
+This error originated in "src/components/lane-addons-panel.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The last test to run before this error was "renders deeply nested valid JSON readings without recursive validation overflow". This means either:
+- the error was thrown while Vitest was running this test, or
+- the error was thrown after the test completed, and this was the most recent test at that point.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 30 skipped (31)
+     Errors  1 error
+   Start at  02:25:02
+   Duration  5.80s (tests 88%, import 4%, environment 3%, setup 3%, transform 2%)
+
+ ELIFECYCLE  Test failed. See above for more details.

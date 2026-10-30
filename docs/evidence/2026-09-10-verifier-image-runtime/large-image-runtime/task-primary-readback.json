@@ -1,0 +1,13 @@
+{
+  "id": "task-001",
+  "title": "Three synthetic rendering attachments",
+  "description": "Transport three exact PNG artifact images to the independent verifier. Synthetic fixture, no visual quality requirement.",
+  "priority": 1,
+  "files": [],
+  "created_at": "2026-09-10T00:09:56Z",
+  "created_by": "admin",
+  "status": "done",
+  "assignee": "image-producer",
+  "completed_at": "2026-09-10T00:09:56Z",
+  "notes": "{\n  \"verification_request\": {\n    \"id\": \"vrf-788f11e65028f26a6e9faa094061d7b0\",\n    \"task_id\": \"task-001\",\n    \"worker\": \"image-producer\",\n    \"created_at\": 1788998996.548468\n  },\n  \"submitted_evidence_metadata\": {\n    \"access\": \"available\",\n    \"request_id\": \"vrf-788f11e65028f26a6e9faa094061d7b0\",\n    \"task_id\": \"task-001\",\n    \"worker\": \"image-producer\",\n    \"created_at\": 1788998996.548468,\n    \"items\": [\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:page1.png\",\n        \"bytes\": 165948,\n        \"sha256\": \"ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-788f11e65028f26a6e9faa094061d7b0/0.bin\"\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:page2.png\",\n        \"bytes\": 165948,\n        \"sha256\": \"ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-788f11e65028f26a6e9faa094061d7b0/1.bin\"\n      },\n      {\n        \"kind\": \"artifact_binary\",\n        \"reference\": \"artifact:page3.png\",\n        \"bytes\": 165948,\n        \"sha256\": \"ab93bd722e44681112edc97cf1f5d7b94524aa1b59b50cb9ced6a47ef21fe4b0\",\n        \"format\": \"png\",\n        \"body\": \"evidence/vrf-788f11e65028f26a6e9faa094061d7b0/2.bin\"\n      },\n      { \"kind\": \"note\", \"bytes\": 95 }\n    ]\n  },\n  \"review\": {\n    \"evaluator_runtime\": \"image_fixture.vision\",\n    \"generator_runtime\": null,\n    \"gate\": \"structured_tool\",\n    \"verdict\": \"approve\",\n    \"authority_kind\": \"system_llm_agent\",\n    \"authority_actor\": \"verifier_exact\"\n  }\n}"
+}

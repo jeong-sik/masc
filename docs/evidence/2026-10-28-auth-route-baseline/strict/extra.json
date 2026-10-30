@@ -1,0 +1,642 @@
+{
+ "rows": [
+  {
+   "case": "POST /mcp initialize",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp initialize",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp initialize",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp initialize",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp stream",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp stream",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp stream",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp stream",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/managed initialize",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/managed initialize",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/managed initialize",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/managed initialize",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/managed stream",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 405,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/managed stream",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 405,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/managed stream",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/managed stream",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/managed",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/managed",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/managed",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/managed",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/operator initialize",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/operator initialize",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/operator initialize",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/operator initialize",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/operator stream",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/operator stream",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/operator stream",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/operator stream",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/operator",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/operator",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/operator",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/operator",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/seat initialize",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/seat initialize",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/seat initialize",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp/seat initialize",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/seat stream",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/seat stream",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/seat stream",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp/seat stream",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/seat",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/seat",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/seat",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "DELETE /mcp/seat",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp observer stream",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp observer stream",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp observer stream",
+   "protocol": "http1",
+   "credential": "bad_query",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp observer stream",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp observer stream",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /mcp observer stream",
+   "protocol": "h2",
+   "credential": "bad_query",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /events/presence",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /events/presence",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /events/presence",
+   "protocol": "http1",
+   "credential": "bad_query",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /events/presence",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /events/presence",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /events/presence",
+   "protocol": "h2",
+   "credential": "bad_query",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /ws upgrade",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /ws upgrade",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /ws upgrade",
+   "protocol": "http1",
+   "credential": "bad_query",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/ide/lsp upgrade",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/ide/lsp upgrade",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/ide/lsp upgrade",
+   "protocol": "http1",
+   "credential": "bad_query",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/dashboard/namespace-truth",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/dashboard/namespace-truth",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 404,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/dashboard/namespace-truth",
+   "protocol": "h2",
+   "credential": "none",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/dashboard/namespace-truth",
+   "protocol": "h2",
+   "credential": "bad",
+   "status": 401,
+   "www_authenticate": "Bearer",
+   "body_head": ""
+  },
+  {
+   "case": "GET /health [Host: masc-a1-foreign.example]",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 400,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /health [Host: masc-a1-foreign.example]",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 400,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/dashboard/shell [Host: masc-a1-foreign.example]",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 400,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/dashboard/shell [Host: masc-a1-foreign.example]",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 400,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/board [Host: masc-a1-foreign.example]",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 400,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "GET /api/v1/board [Host: masc-a1-foreign.example]",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 400,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp initialize [Host: masc-a1-foreign.example]",
+   "protocol": "http1",
+   "credential": "none",
+   "status": 400,
+   "www_authenticate": null,
+   "body_head": ""
+  },
+  {
+   "case": "POST /mcp initialize [Host: masc-a1-foreign.example]",
+   "protocol": "http1",
+   "credential": "bad",
+   "status": 400,
+   "www_authenticate": null,
+   "body_head": ""
+  }
+ ],
+ "dev_token": {
+  "http1": {
+   "status": 404,
+   "json": true,
+   "keys": [
+    "error"
+   ],
+   "values": {}
+  },
+  "h2": {
+   "status": 404,
+   "json": false
+  }
+ }
+}

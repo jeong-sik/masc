@@ -1,0 +1,613 @@
+(* Fusion — out-of-band 심의 오케스트레이터 (구현).
+   계약/문서: fusion_orchestrator.mli, docs/rfc/RFC-0252 §4 *)
+
+type compute_outcome =
+  | Compute_denied of Fusion_types.deny_reason
+  | Computed of Fusion_types.deliberation_evidence
+
+module type Panel_effect = sig
+  val run
+    :  base_dir:string
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> groups:Fusion_policy.panel_group list
+    -> prompt:string
+    -> ?on_tool_trace:(Fusion_types.tool_trace -> unit)
+    -> ?on_seat_routes:(Fusion_types.seat_route list -> unit)
+    -> unit
+    -> Fusion_types.panel_outcome list
+end
+
+module type Judge_effect = sig
+  val run
+    :  base_dir:string
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> ?max_tokens:int
+    -> ?timeout_s:float
+    -> judge_system_prompt:string
+    -> judge_model:string
+    -> question:string
+    -> panel:Fusion_types.panel_outcome list
+    -> web_tools:bool
+    -> ?tool_trace:
+         (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+    -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
+    -> unit
+    -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+       , Fusion_types.judge_failure * Fusion_types.usage )
+       result
+
+  val run_refine
+    :  base_dir:string
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> ?max_tokens:int
+    -> ?timeout_s:float
+    -> judge_system_prompt:string
+    -> judge_model:string
+    -> question:string
+    -> panel:Fusion_types.panel_outcome list
+    -> prior:Fusion_types.judge_synthesis
+    -> web_tools:bool
+    -> ?tool_trace:
+         (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+    -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
+    -> unit
+    -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+       , Fusion_types.judge_failure * Fusion_types.usage )
+       result
+
+  val run_meta
+    :  base_dir:string
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> ?max_tokens:int
+    -> ?timeout_s:float
+    -> judge_system_prompt:string
+    -> judge_model:string
+    -> question:string
+    -> panel:Fusion_types.panel_outcome list
+    -> priors:(string * Fusion_types.judge_synthesis) list
+    -> web_tools:bool
+    -> ?tool_trace:
+         (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+    -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
+    -> unit
+    -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+       , Fusion_types.judge_failure * Fusion_types.usage )
+       result
+end
+
+module Compute_with (Panel : Panel_effect) (Judge : Judge_effect) = struct
+let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
+    compute_outcome =
+  let publish progress = Option.iter (fun send -> send progress) on_progress in
+  match Fusion_policy.decide ~policy request with
+  | Fusion_types.Deny reason ->
+    Fusion_metrics.record_denied ~topology;
+    Compute_denied reason
+  | Fusion_types.Allow req ->
+    (* 요청의 명단을 얹은 preset 을 이 실행의 모든 자리(panel, judge, 1차 judge)가
+       쓴다. masc_fusion 도구는 제출할 때 같은 함수로 검사하고, bin/fusion_run 처럼
+       이 함수를 바로 부르는 쪽은 여기서 처음 검사받는다. *)
+    (match
+       Fusion_policy.effective_preset ~policy ~preset:req.Fusion_types.preset
+         ~roster:req.Fusion_types.roster
+     with
+     | Error reason ->
+       Fusion_metrics.record_denied ~topology;
+       Compute_denied reason
+     | Ok vp ->
+          let preset = Fusion_policy.Validated_preset.preset vp in
+          let tool_trace_mutex = Stdlib.Mutex.create () in
+          let tool_traces = ref [] in
+          let record_tool_trace trace =
+            Stdlib.Mutex.protect tool_trace_mutex (fun () ->
+              tool_traces := trace :: !tool_traces)
+          in
+          (* 자리 경로 기록. panel 은 선언 순서대로 한 번에 오고, judge 는 자리마다 따로
+             온다(1차 judge 들은 동시에 돌아 도착 순서가 정해져 있지 않다). 증거에 싣는
+             순서는 끝에서 [judge_nodes] 순서로 다시 맞춘다. *)
+          let panel_seat_routes = ref [] in
+          let judge_seat_routes_mutex = Stdlib.Mutex.create () in
+          let judge_seat_routes = ref [] in
+          let record_judge_seat_route route =
+            Stdlib.Mutex.protect judge_seat_routes_mutex (fun () ->
+              judge_seat_routes := route :: !judge_seat_routes)
+          in
+          let judge_actor role label =
+            let identity =
+              Fusion_policy.panelist_id
+                ~label ~model:preset.Fusion_policy.judge
+            in
+            Fusion_types.Judge_actor { role; identity }
+          in
+          let groups = preset.Fusion_policy.panels in
+          let effective_groups =
+            List.map
+              (fun (g : Fusion_policy.panel_group) ->
+                { g with
+                  Fusion_policy.web_tools = req.Fusion_types.web_tools || g.web_tools
+                })
+              groups
+          in
+          let panel_expected =
+            List.fold_left
+              (fun total (group : Fusion_policy.panel_group) ->
+                 total + List.length group.models)
+              0 effective_groups
+          in
+          publish
+            (Fusion_run_registry.Progress_panel_running
+               { expected = panel_expected });
+          let panel =
+            Panel.run ~base_dir ~sw ~net
+              ~groups:effective_groups ~prompt:req.Fusion_types.prompt
+              ~on_tool_trace:record_tool_trace
+              ~on_seat_routes:(fun routes -> panel_seat_routes := routes)
+              ()
+          in
+          let panel_answered, panel_failed =
+            List.fold_left
+              (fun (answered, failed) -> function
+                 | Fusion_types.Answered _ -> answered + 1, failed
+                 | Fusion_types.Failed _ -> answered, failed + 1)
+              (0, 0) panel
+          in
+          publish
+            (Fusion_run_registry.Progress_judge_running
+               { expected = panel_expected
+               ; answered = panel_answered
+               ; failed = panel_failed
+               });
+          let judge_web_tools =
+            Fusion_policy.judge_web_tools_of ~req_web_tools:req.Fusion_types.web_tools
+              groups
+          in
+          let run_single_judge () =
+            Judge.run ~base_dir ~sw ~net
+              ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+              ?timeout_s:preset.Fusion_policy.judge_timeout_s
+              ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
+              ~judge_model:preset.Fusion_policy.judge
+              ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools
+              ~tool_trace:
+                (judge_actor Fusion_types.Single "single", record_tool_trace)
+              ~seat_route:(Fusion_types.Single, record_judge_seat_route)
+              ()
+          in
+          let refine_over (s1, u1) =
+            let single_node =
+              Fusion_types.Synthesized
+                { Fusion_types.role = Single; synthesis = s1; usage = u1 }
+            in
+            match
+              Judge.run_refine ~base_dir ~sw ~net
+                ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                ?timeout_s:preset.Fusion_policy.judge_timeout_s
+                ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
+                ~judge_model:preset.Fusion_policy.judge
+                ~question:req.Fusion_types.prompt ~panel ~prior:s1
+                ~web_tools:judge_web_tools
+                ~tool_trace:
+                  ( judge_actor Fusion_types.Refine_pass "refine"
+                  , record_tool_trace )
+                ~seat_route:(Fusion_types.Refine_pass, record_judge_seat_route)
+                ()
+            with
+            | Ok (s2, u2) ->
+              ( Ok (s2, Fusion_types.add_usage u1 u2)
+              , [ single_node
+                ; Fusion_types.Synthesized
+                    { Fusion_types.role = Refine_pass; synthesis = s2; usage = u2 }
+                ] )
+            | Error (failure, u2) ->
+              Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
+                "fusion run %s refine judge failed, keeping first synthesis: %s"
+                req.Fusion_types.run_id
+                (Fusion_types.judge_failure_text failure);
+              ( Ok (s1, Fusion_types.add_usage u1 u2)
+              , [ single_node
+                ; Fusion_types.Judge_failed
+                    { Fusion_types.failed_role = Refine_pass
+                    ; failure
+                    ; usage = u2
+                    ; elapsed_s = None
+                    }
+                ] )
+          in
+          let clock =
+            Fusion_orchestrator_judge_wave.make_runtime_clock ()
+          in
+          let elapsed_since_t0 () =
+            Fusion_orchestrator_judge_wave.elapsed_since_t0 clock
+          in
+          let run_first_judges judges =
+            Fusion_orchestrator_judge_wave.run_first_judges
+              ~base_dir
+              ~sw
+              ~net
+              ~preset
+              ~panel
+              ~question:req.Fusion_types.prompt
+              ~clock
+              ~judge_web_tools
+              ~on_tool_trace:record_tool_trace
+              ~on_seat_route:record_judge_seat_route
+              judges
+          in
+          let first_judge_nodes =
+            Fusion_orchestrator_judge_wave.first_judge_nodes
+          in
+          let successful_syntheses =
+            Fusion_orchestrator_judge_wave.successful_syntheses
+          in
+          let successful_pair_syntheses =
+            Fusion_orchestrator_judge_wave.successful_pair_syntheses
+          in
+          let firsts_usage = Fusion_orchestrator_judge_wave.firsts_usage in
+          let all_fail_error_of_runs =
+            Fusion_orchestrator_judge_wave.all_fail_error_of_runs
+          in
+          let run_judge_of_judges () =
+            match preset.Fusion_policy.judges with
+            | [] | [ _ ] ->
+              ( Error
+                  ( Fusion_types.Internal_error
+                      "judge_of_judges requires >= 2 judges configured in the preset ([[fusion.presets.<name>.judges]])"
+                  , Fusion_types.zero_usage )
+              , [] )
+            | judges ->
+              let firsts = run_first_judges judges in
+              let first_nodes = first_judge_nodes firsts in
+              let ok_priors = successful_syntheses firsts in
+              (match ok_priors with
+               | [] ->
+                 let err =
+                   all_fail_error_of_runs
+                     ~fallback:
+                       (Fusion_types.Internal_error "judge_of_judges: no judge produced a synthesis")
+                     firsts
+                 in
+                 (Error err, first_nodes)
+               | (_, first_s, _) :: _ ->
+                 let firsts_usage = firsts_usage firsts in
+                 let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
+                 (match
+                    Judge.run_meta ~base_dir ~sw ~net
+                      ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                      ?timeout_s:preset.Fusion_policy.judge_timeout_s
+                      ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
+                      ~judge_model:preset.Fusion_policy.judge
+                      ~question:req.Fusion_types.prompt ~panel ~priors
+                      ~web_tools:judge_web_tools
+                      ~tool_trace:
+                        (judge_actor Fusion_types.Meta "meta", record_tool_trace)
+                      ~seat_route:(Fusion_types.Meta, record_judge_seat_route)
+                      ()
+                  with
+                  | Ok (meta_s, meta_u) ->
+                    ( Ok (meta_s, Fusion_types.add_usage firsts_usage meta_u)
+                    , first_nodes
+                      @ [ Fusion_types.Synthesized
+                            { Fusion_types.role = Meta
+                            ; synthesis = meta_s
+                            ; usage = meta_u
+                            }
+                        ] )
+                  | Error (failure, meta_u) ->
+                    Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
+                      "fusion run %s meta judge failed, keeping first judge \
+                       synthesis: %s"
+                      req.Fusion_types.run_id
+                      (Fusion_types.judge_failure_text failure);
+                    let elapsed_s = elapsed_since_t0 () in
+                    ( Ok (first_s, Fusion_types.add_usage firsts_usage meta_u)
+                    , first_nodes
+                      @ [ Fusion_types.Judge_failed
+                            { Fusion_types.failed_role = Meta
+                            ; failure
+                            ; usage = meta_u
+                            ; elapsed_s
+                            }
+                        ] )))
+          in
+          let run_staged_judge_of_judges () =
+            let group_size = policy.Fusion_policy.staged_judge_group_size in
+            match
+              Fusion_policy.staged_judge_groups ~group_size preset.Fusion_policy.judges
+            with
+            | Error e ->
+              ( Error
+                  ( Fusion_types.Internal_error (Fusion_policy.staged_judge_group_error_message e)
+                  , Fusion_types.zero_usage )
+              , [] )
+            | Ok _groups ->
+              let firsts = run_first_judges preset.Fusion_policy.judges in
+              let rec take n acc rest =
+                if n = 0
+                then (List.rev acc, rest)
+                else
+                  match rest with
+                  | [] -> (List.rev acc, [])
+                  | x :: xs -> take (n - 1) (x :: acc) xs
+              in
+              let rec chunk_firsts acc rest =
+                match rest with
+                | [] -> List.rev acc
+                | _ ->
+                  let group, rest = take group_size [] rest in
+                  chunk_firsts (group :: acc) rest
+              in
+              let first_groups = chunk_firsts [] firsts in
+              let run_stage_meta (stage_num, stage_firsts) =
+                let stage_id = Printf.sprintf "stage-%d" stage_num in
+                let first_nodes = first_judge_nodes stage_firsts in
+                let ok_priors = successful_syntheses stage_firsts in
+                match ok_priors with
+                | [] ->
+                  let err =
+                    all_fail_error_of_runs
+                      ~fallback:
+                        (Fusion_types.Internal_error
+                           (Printf.sprintf
+                              "staged_judge_of_judges %s: no judge produced a synthesis"
+                              stage_id))
+                      stage_firsts
+                  in
+                  ((stage_id, Error err), first_nodes)
+                | (_, first_s, _) :: _ ->
+                  let firsts_usage = firsts_usage stage_firsts in
+                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
+                  (match
+                     Judge.run_meta ~base_dir ~sw ~net
+                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                       ?timeout_s:preset.Fusion_policy.judge_timeout_s
+                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
+                       ~judge_model:preset.Fusion_policy.judge
+                       ~question:req.Fusion_types.prompt ~panel ~priors
+                       ~web_tools:judge_web_tools
+                       ~tool_trace:
+                         ( judge_actor
+                             (Fusion_types.Stage_meta stage_num)
+                             stage_id
+                         , record_tool_trace )
+                       ~seat_route:
+                         (Fusion_types.Stage_meta stage_num, record_judge_seat_route)
+                       ()
+                   with
+                   | Ok (stage_s, stage_u) ->
+                     ( (stage_id, Ok (stage_s, Fusion_types.add_usage firsts_usage stage_u))
+                     , first_nodes
+                       @ [ Fusion_types.Synthesized
+                             { Fusion_types.role = Stage_meta stage_num
+                             ; synthesis = stage_s
+                             ; usage = stage_u
+                             }
+                         ] )
+                   | Error (failure, stage_u) ->
+                     Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
+                       "fusion run %s staged JOJ %s meta judge failed, keeping first judge synthesis: %s"
+                       req.Fusion_types.run_id stage_id
+                       (Fusion_types.judge_failure_text failure);
+                     let elapsed_s = elapsed_since_t0 () in
+                     ( (stage_id, Ok (first_s, Fusion_types.add_usage firsts_usage stage_u))
+                     , first_nodes
+                       @ [ Fusion_types.Judge_failed
+                             { Fusion_types.failed_role = Stage_meta stage_num
+                             ; failure
+                             ; usage = stage_u
+                             ; elapsed_s
+                             }
+                         ] ))
+              in
+              let indexed_groups = List.mapi (fun i group -> (i + 1, group)) first_groups in
+              let stage_runs =
+                Eio.Fiber.List.map run_stage_meta indexed_groups
+              in
+              let stage_results = List.map fst stage_runs in
+              let stage_nodes = List.concat_map snd stage_runs in
+              let ok_stages = successful_pair_syntheses stage_results in
+              (match ok_stages with
+               | [] ->
+                 let err =
+                   Fusion_types.all_fail_error
+                     ~fallback:
+                       (Fusion_types.Internal_error "staged_judge_of_judges: no stage produced a synthesis")
+                     stage_results
+                 in
+                 (Error err, stage_nodes)
+               | (_, first_stage_s, _) :: _ ->
+                 let stage_usage = Fusion_types.sum_all_usage stage_results in
+                 let priors = List.map (fun (id, s, _) -> (id, s)) ok_stages in
+                 (match
+                    Judge.run_meta ~base_dir ~sw ~net
+                      ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                      ?timeout_s:preset.Fusion_policy.judge_timeout_s
+                      ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
+                      ~judge_model:preset.Fusion_policy.judge
+                      ~question:req.Fusion_types.prompt ~panel ~priors
+                      ~web_tools:judge_web_tools
+                      ~tool_trace:
+                        ( judge_actor Fusion_types.Final_meta "final"
+                        , record_tool_trace )
+                      ~seat_route:(Fusion_types.Final_meta, record_judge_seat_route)
+                      ()
+                  with
+                  | Ok (final_s, final_u) ->
+                    ( Ok (final_s, Fusion_types.add_usage stage_usage final_u)
+                    , stage_nodes
+                      @ [ Fusion_types.Synthesized
+                            { Fusion_types.role = Final_meta
+                            ; synthesis = final_s
+                            ; usage = final_u
+                            }
+                        ] )
+                  | Error (failure, final_u) ->
+                    Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
+                      "fusion run %s staged JOJ final meta judge failed, keeping first stage synthesis: %s"
+                      req.Fusion_types.run_id
+                      (Fusion_types.judge_failure_text failure);
+                    let elapsed_s = elapsed_since_t0 () in
+                    ( Ok (first_stage_s, Fusion_types.add_usage stage_usage final_u)
+                    , stage_nodes
+                      @ [ Fusion_types.Judge_failed
+                            { Fusion_types.failed_role = Final_meta
+                            ; failure
+                            ; usage = final_u
+                            ; elapsed_s
+                            }
+                        ] )))
+          in
+          let judge_full, judge_nodes =
+            match
+              Fusion_types.judge_skip_reason ~panel
+                ~min_answered:preset.Fusion_policy.min_answered
+            with
+            | Some reason ->
+              (* typed 그대로 propagate — 문자열로 렌더해 [Internal_error]에 압축하면
+                 패널 전멸/정족수 미달이 "judge failed"/failure_code=internal_error로
+                 오귀속된다 (2026-07-01 사고: 8 run 전부 이 경로였는데 keeper 표면은
+                 judge 메커니즘 고장으로 보고했다). 렌더는 sink/텍스트 경계에서 한다. *)
+              (Error (Fusion_types.Panels_unavailable reason, Fusion_types.zero_usage), [])
+            | None ->
+            match topology with
+            | Fusion_types.Simple ->
+              (match run_single_judge () with
+               | Ok (s, u) ->
+                 ( Ok (s, u)
+                 , [ Fusion_types.Synthesized
+                       { Fusion_types.role = Single; synthesis = s; usage = u }
+                   ] )
+               | Error ((failure, u) as e) ->
+                 ( Error e
+                 , [ Fusion_types.Judge_failed
+                       { Fusion_types.failed_role = Single
+                       ; failure
+                       ; usage = u
+                       ; elapsed_s = None
+                       }
+                   ] ))
+            | Fusion_types.Refine ->
+              (match run_single_judge () with
+               | Error ((failure, u) as e) ->
+                 ( Error e
+                 , [ Fusion_types.Judge_failed
+                       { Fusion_types.failed_role = Single
+                       ; failure
+                       ; usage = u
+                       ; elapsed_s = None
+                       }
+                   ] )
+               | Ok pair -> refine_over pair)
+            | Fusion_types.Conditional ->
+              (match run_single_judge () with
+               | Error ((failure, u) as e) ->
+                 ( Error e
+                 , [ Fusion_types.Judge_failed
+                       { Fusion_types.failed_role = Single
+                       ; failure
+                       ; usage = u
+                       ; elapsed_s = None
+                       }
+                   ] )
+               | Ok ((s1, u1) as pair) ->
+                 if Fusion_types.decision_warrants_escalation s1.Fusion_types.decision
+                 then refine_over pair
+                 else
+                   ( Ok (s1, u1)
+                   , [ Fusion_types.Synthesized
+                         { Fusion_types.role = Single; synthesis = s1; usage = u1 }
+                     ] ))
+            | Fusion_types.Judge_of_judges -> run_judge_of_judges ()
+            | Fusion_types.Staged_judge_of_judges -> run_staged_judge_of_judges ()
+          in
+          let judge = judge_full |> Result.map fst |> Result.map_error fst in
+          let judge_usage =
+            match judge_full with
+            | Ok (_, u) -> u
+            | Error (_, u) -> u
+          in
+          List.iter (Fusion_metrics.record_judge_execution ~topology) judge_nodes;
+          publish
+            (Fusion_run_registry.Progress_computed
+               { expected = panel_expected
+               ; answered = panel_answered
+               ; failed = panel_failed
+               });
+          let tool_trace =
+            Stdlib.Mutex.protect tool_trace_mutex (fun () ->
+              Fusion_types.merge_tool_traces (List.rev !tool_traces))
+          in
+          let judge_seat_routes =
+            Stdlib.Mutex.protect judge_seat_routes_mutex (fun () -> !judge_seat_routes)
+          in
+          let judge_route_of_role role =
+            List.find_opt
+              (fun (route : Fusion_types.seat_route) ->
+                 Fusion_types.equal_seat route.seat (Fusion_types.Judge_seat role))
+              judge_seat_routes
+          in
+          let seat_routes =
+            !panel_seat_routes
+            @ List.filter_map
+                (function
+                  | Fusion_types.Synthesized { role; _ } -> judge_route_of_role role
+                  | Fusion_types.Judge_failed { failed_role; _ } ->
+                    judge_route_of_role failed_role)
+                judge_nodes
+          in
+          Computed
+            { Fusion_types.question = req.prompt
+            ; panel
+            ; judge
+            ; judges = judge_nodes
+            ; judge_usage
+            ; tool_trace
+            ; seat_routes
+            })
+
+end
+
+module Production = Compute_with (Fusion_panel) (Fusion_judge)
+let compute = Production.compute
+
+module For_testing = struct
+  module Make = Compute_with
+end
+
+let project
+    ?source_context
+    ~registry
+    ~base_dir
+    ~topology
+    ~channel
+    ~(request : Fusion_types.fusion_request)
+    (deliberation : Fusion_types.deliberation_evidence)
+  =
+  let expected, answered, failed =
+    List.fold_left
+      (fun (expected, answered, failed) -> function
+         | Fusion_types.Answered _ -> expected + 1, answered + 1, failed
+         | Fusion_types.Failed _ -> expected + 1, answered, failed + 1)
+      (0, 0, 0) deliberation.panel
+  in
+  Fusion_run_registry.mark_progress registry ~run_id:request.run_id
+    ~progress:
+      (Fusion_run_registry.Progress_recording_evidence
+         { expected; answered; failed });
+  Fusion_sink.broadcast_run_status ~registry ~run_id:request.run_id;
+  match
+    Fusion_sink.emit ~source_context ~registry ~base_dir ~keeper:request.keeper ~run_id:request.run_id
+      ~channel ~question:deliberation.question ~panel:deliberation.panel
+      ~judge:deliberation.judge ~judges:deliberation.judges
+      ~judge_usage:deliberation.judge_usage ~tool_trace:deliberation.tool_trace
+      ~seat_routes:deliberation.seat_routes
+  with
+  | Ok () ->
+    Fusion_metrics.record_projection ~topology ~delivery:Recorded deliberation;
+    Ok ()
+  | Error msg ->
+    Fusion_metrics.record_projection ~topology ~delivery:Sink_failed deliberation;
+    Error msg

@@ -1,0 +1,33 @@
+{
+  "recorded_at": "2026-10-21T23:35:24.104656+00:00",
+  "scope": "Local Dashboard contract/direct-consumer verification only. OCaml parser/source and later CI are separate. No rendered/installed UI or original receipt delivery proof.",
+  "base_head": "1a7d67fc6a538f320be3b5ff5cd43e6319a75084",
+  "source_sha256": {
+    "dashboard/src/api/dashboard-exact-lane-runs.ts": "25a453633e326842ddf35487903ee7e98674bbddfa34701376fcdfbb53397384",
+    "dashboard/src/api/dashboard-exact-lane-runs.test.ts": "578d81a6c83036e0849ad8111dec33478712178e38533ac34979c33964eb9ac5",
+    "dashboard/src/api/dashboard-standalone-lanes.ts": "9cdaad25c85d439628ef1a57f4943e6da27606ccdd9aaf2c7be17e3b096da729",
+    "dashboard/src/api/dashboard-standalone-lanes.test.ts": "40d8a5893c9f7bfcd1be06e7800e73aae48e91a316cbfc5ba48a4e794b19e67f",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "ea4ce9c044ffd9c833f53a8e00f97505ed76c16d26ab477875d30880c6853850"
+  },
+  "commands": [
+    {
+      "command": "pnpm --dir dashboard exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/dashboard-exact-lane-runs.test.ts src/api/dashboard-standalone-lanes.test.ts src/components/exact-lane-activity-panel.test.ts",
+      "exit_code": 0,
+      "files_passed": 3,
+      "tests_passed": 94,
+      "raw_log_sha256": "5f00af2e272a16aa56b9cb7df89004e4f92da7be4778d195d61be36f456489b5"
+    },
+    {
+      "command": "pnpm --dir dashboard exec tsc --noEmit",
+      "exit_code": 0,
+      "raw_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "not_verified": [
+    "OCaml compiled execution on this candidate",
+    "Original Curator receipt durable reconciliation and ACK",
+    "actual provider or Docker lifecycle",
+    "rendered Dashboard/TUI",
+    "integration and installation"
+  ]
+}

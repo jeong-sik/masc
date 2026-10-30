@@ -1,0 +1,231 @@
+/* ════════════════════════════════════════════════════════════════
+   FUSION — RFC-0252 panel+judge 심의 가시화
+   Master (run list) + detail (deliberation canvas). v2 tokens only.
+   ════════════════════════════════════════════════════════════════ */
+.fus { background: var(--bg-deep); }
+.fus-body { display: grid; grid-template-columns: 312px minmax(0, 1fr); flex: 1; min-height: 0; }
+
+/* ── run dot ── */
+.fus-rdot { flex: none; width: 9px; height: 9px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 7px; color: var(--bg-deep); }
+.fus-rdot.done { background: var(--status-ok); }
+.fus-rdot.deny { background: var(--status-bad); color: #fff; font-size: 8px; }
+.fus-rdot.run  { background: var(--volt); box-shadow: 0 0 0 0 var(--volt-glow); animation: fus-pulse 1.5s ease-out infinite; }
+@keyframes fus-pulse { 0% { box-shadow: 0 0 0 0 var(--volt-glow); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* ════ MASTER LIST ════ */
+.fus-list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border-main); background: var(--bg-panel); }
+.fus-list-h { display: flex; align-items: center; gap: 9px; padding: 16px 16px 12px; border-bottom: 1px solid var(--border-soft); }
+.fus-list-h h4 { font-family: var(--font-display); font-weight: 500; font-size: 14px; color: var(--text-bright); margin: 0; }
+.fus-list-sub { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; color: var(--text-dim); text-transform: uppercase; }
+.fus-list-live { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--volt-strong); }
+.fus-list-scroll { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 7px; }
+.fus-list-scroll::-webkit-scrollbar { width: 8px; }
+.fus-list-scroll::-webkit-scrollbar-thumb { background: var(--border-main); border-radius: var(--radius-md); border: 2px solid transparent; background-clip: padding-box; }
+
+.fus-row { text-align: left; background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 10px 11px; cursor: pointer; transition: border-color 0.14s, background 0.14s; display: flex; flex-direction: column; gap: 7px; }
+.fus-row:hover { border-color: var(--border-highlight); }
+.fus-row.sel { border-color: var(--volt-dim); background: var(--bg-card-hover); box-shadow: inset 2px 0 0 var(--volt); }
+.fus-row.st-running.sel { box-shadow: inset 2px 0 0 var(--volt); }
+.fus-row-h { display: flex; align-items: center; gap: 7px; }
+.fus-run-id { font-size: 11px; color: var(--text-mid); letter-spacing: 0.02em; }
+.fus-row-ts { margin-left: auto; font-size: 10px; color: var(--text-dim); }
+.fus-row-prompt { font-size: 12px; color: var(--text-primary); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fus-row-f { display: flex; align-items: center; gap: 8px; }
+.fus-trig { font-size: 9.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fus-row-f .spacer { flex: 1; }
+
+/* keeper identity */
+.fus-who { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; cursor: pointer; color: var(--text-mid); }
+.fus-who .nm { font-family: var(--font-display); font-weight: 500; font-size: 11px; color: var(--text-mid); }
+.fus-who:hover .nm { color: var(--volt-strong); }
+.fus-who.static { cursor: default; }
+
+/* decision badges */
+.fus-dec-badge { font-family: var(--font-ui); font-size: 9.5px; letter-spacing: 0.03em; padding: 2px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); color: var(--text-dim); white-space: nowrap; }
+.fus-dec-badge.ok   { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 45%, transparent); background: color-mix(in oklab, var(--status-ok) 9%, transparent); }
+.fus-dec-badge.volt { color: var(--volt-strong); border-color: var(--volt-dim); background: var(--volt-wash); }
+.fus-dec-badge.warn { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 45%, transparent); background: color-mix(in oklab, var(--status-warn) 8%, transparent); }
+.fus-dec-badge.bad  { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 45%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
+.fus-dec-badge.run  { color: var(--volt-strong); border-color: var(--volt-dim); }
+.fus-dec-badge.big { font-size: 12.5px; padding: 5px 13px; }
+
+/* ════ DETAIL CANVAS ════ */
+.fus-run-scroll { overflow-y: auto; padding: 22px 28px 48px; min-width: 0; }
+.fus-run-scroll::-webkit-scrollbar { width: 9px; }
+.fus-run-scroll::-webkit-scrollbar-thumb { background: var(--border-main); border-radius: var(--radius-md); border: 2px solid transparent; background-clip: padding-box; }
+
+.fus-run-head { margin-bottom: 16px; }
+.fus-run-id-row { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+.fus-run-id-row h1 { font-family: var(--font-mono); font-weight: 500; font-size: 21px; letter-spacing: 0.01em; color: var(--text-bright); margin: 0; }
+.fus-preset { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); border: 1px solid var(--border-main); border-radius: var(--radius-sm); padding: 2px 8px; }
+.fus-trig-chip { font-size: 10.5px; color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); border-radius: var(--radius-pill); padding: 2px 9px; }
+.fus-run-by { display: flex; align-items: center; gap: 11px; margin-top: 11px; }
+.fus-run-by .fus-who .nm { font-size: 13px; color: var(--text-primary); }
+.fus-run-meta { font-size: 11px; color: var(--text-dim); }
+
+/* pipeline strip */
+.fus-pipe { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 11px 14px; background: var(--bg-sunken); border: 1px solid var(--border-soft); border-radius: var(--radius-md); margin-bottom: 16px; }
+.fus-pipe-node { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-main); color: var(--text-mid); background: var(--bg-card); white-space: nowrap; }
+.fus-pipe-node.gate.ok { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 40%, transparent); }
+.fus-pipe-node.gate.deny { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 45%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
+.fus-pipe-node.panel { color: var(--volt-strong); border-color: var(--volt-dim); }
+.fus-pipe-node.judge { color: var(--text-bright); }
+.fus-pipe-node.off { color: var(--text-dim); opacity: 0.45; }
+.fus-pipe-arr { color: var(--text-dim); font-size: 12px; }
+
+/* kpi strip */
+.fus-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border-soft); border: 1px solid var(--border-main); border-radius: var(--radius-md); overflow: hidden; margin-bottom: 20px; }
+.fus-kpi { background: var(--bg-panel); padding: 12px 15px; }
+.fus-kpi .k { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); }
+.fus-kpi .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 21px; color: var(--text-bright); margin-top: 5px; }
+.fus-kpi .v small { font-size: 11px; color: var(--text-dim); }
+.fus-kpi .v.ok { color: var(--status-ok); } .fus-kpi .v.bad { color: var(--status-bad); }
+.fus-kpi .v.warn { color: var(--status-warn); } .fus-kpi .v.volt { color: var(--volt-strong); }
+
+/* generic block */
+.fus-block { margin-bottom: 20px; }
+.fus-block-lbl { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 9px; display: flex; align-items: center; gap: 9px; }
+.fus-sub-note { font-family: var(--font-body); letter-spacing: 0.02em; text-transform: none; color: var(--text-dim); opacity: 0.7; font-size: 10px; }
+.fus-judge-model { color: var(--volt-strong); letter-spacing: 0.01em; }
+
+.fus-prompt { font-size: 14px; color: var(--text-primary); line-height: 1.6; padding: 14px 16px; background: var(--bg-sunken); border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); text-wrap: pretty; }
+.fus-link { display: inline-block; margin-top: 8px; font-size: 11px; color: var(--text-dim); cursor: pointer; }
+.fus-link:hover { color: var(--volt-strong); }
+.fus-link.inline { display: inline; margin: 0; color: var(--volt-strong); }
+
+/* ── panel grid ── */
+.fus-panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 10px; }
+.fus-pcard { background: var(--bg-panel); border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 11px 13px; display: flex; flex-direction: column; gap: 9px; }
+.fus-pcard.failed { opacity: 0.7; border-style: dashed; }
+.fus-pcard.running { border-color: var(--volt-dim); }
+.fus-pcard-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fus-pmodel { font-size: 11.5px; color: var(--text-bright); font-weight: 500; }
+.fus-pstate { font-size: 9.5px; padding: 1px 7px; border-radius: var(--radius-pill); margin-left: auto; }
+.fus-pstate.run { color: var(--volt-strong); border: 1px solid var(--volt-dim); display: inline-flex; align-items: center; gap: 4px; }
+.fus-pstate.fail { color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 40%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); margin-left: auto; }
+.fus-pstate .dots { display: inline-flex; gap: 2px; }
+.fus-pstate .dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: fus-blink 1.2s infinite; }
+.fus-pstate .dots i:nth-child(2) { animation-delay: 0.2s; } .fus-pstate .dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes fus-blink { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+
+.fus-conf { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.fus-conf-bar { width: 42px; height: 4px; border-radius: 2px; background: var(--border-main); overflow: hidden; }
+.fus-conf-bar i { display: block; height: 100%; background: var(--volt); border-radius: 2px; }
+.fus-conf .mono { font-size: 9.5px; color: var(--text-dim); }
+.fus-ptok { font-size: 9.5px; color: var(--text-dim); }
+.fus-pcard-h .fus-conf + .fus-ptok { margin-left: 0; }
+
+.fus-pans { font-size: 12px; color: var(--text-mid); line-height: 1.55; cursor: pointer; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; position: relative; }
+.fus-pans.open { -webkit-line-clamp: unset; }
+.fus-pans:not(.open)::after { content: '… 더보기'; position: absolute; right: 0; bottom: 0; padding-left: 18px; font-size: 10px; color: var(--volt-strong); background: linear-gradient(90deg, transparent, var(--bg-panel) 40%); }
+.fus-pans.skeleton { display: flex; flex-direction: column; gap: 6px; cursor: default; }
+.fus-pans.skeleton span { height: 8px; border-radius: 3px; background: linear-gradient(90deg, var(--border-soft), var(--border-main), var(--border-soft)); background-size: 200% 100%; animation: fus-shim 1.4s infinite; }
+.fus-pans.skeleton span:nth-child(2) { width: 86%; } .fus-pans.skeleton span:nth-child(3) { width: 64%; }
+@keyframes fus-shim { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ── judge synthesis ── */
+.fus-judge { border: 1px solid var(--border-main); border-radius: var(--radius-md); background: var(--bg-panel); overflow: hidden; }
+.fus-judge-body { display: flex; flex-direction: column; }
+.fus-jsec { padding: 13px 16px; border-bottom: 1px solid var(--border-soft); }
+.fus-jsec:last-child { border-bottom: 0; }
+.fus-jsec h5 { font-family: var(--font-display); font-weight: 500; font-size: 12px; letter-spacing: 0.04em; color: var(--text-bright); margin: 0 0 9px; display: flex; align-items: center; gap: 8px; }
+.fus-jsec h5 .n { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); font-weight: 400; }
+.fus-jglyph { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-xs); font-size: 11px; }
+.fus-jsec.consensus .fus-jglyph { color: var(--status-ok); background: color-mix(in oklab, var(--status-ok) 12%, transparent); }
+.fus-jsec.contra .fus-jglyph { color: var(--status-warn); background: color-mix(in oklab, var(--status-warn) 12%, transparent); }
+.fus-jsec.coverage .fus-jglyph { color: var(--info, #8a6cf0); background: color-mix(in oklab, var(--info, #8a6cf0) 14%, transparent); }
+.fus-jsec.insight .fus-jglyph { color: var(--volt-strong); background: var(--volt-wash); }
+.fus-jsec.blind .fus-jglyph { color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 11%, transparent); }
+
+.fus-claim, .fus-insight { padding: 8px 0; border-top: 1px solid var(--border-soft); }
+.fus-claim:first-of-type, .fus-insight:first-of-type { border-top: 0; padding-top: 0; }
+.fus-claim p, .fus-insight p { margin: 0 0 6px; font-size: 12.5px; color: var(--text-primary); line-height: 1.5; }
+.fus-insight { display: flex; align-items: flex-start; gap: 10px; }
+.fus-insight p { flex: 1; margin: 0; }
+
+.fus-mchips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.fus-mchip { font-size: 9px; color: var(--text-dim); border: 1px solid var(--border-main); border-radius: var(--radius-xs); padding: 1px 6px; background: var(--bg-sunken); white-space: nowrap; }
+
+.fus-contra { padding: 8px 0; border-top: 1px solid var(--border-soft); }
+.fus-contra:first-of-type { border-top: 0; padding-top: 0; }
+.fus-contra-topic { font-size: 12px; color: var(--text-mid); margin-bottom: 6px; font-weight: 500; }
+.fus-pos { display: flex; gap: 9px; padding: 3px 0; align-items: baseline; }
+.fus-pos-m { font-size: 9.5px; color: var(--volt-strong); min-width: 110px; flex: none; }
+.fus-pos-s { font-size: 12px; color: var(--text-primary); line-height: 1.45; }
+
+.fus-gap { padding: 8px 0; border-top: 1px solid var(--border-soft); }
+.fus-gap:first-of-type { border-top: 0; padding-top: 0; }
+.fus-gap-topic { font-size: 12px; color: var(--text-mid); font-weight: 500; margin-bottom: 5px; }
+.fus-gap-row { display: flex; gap: 9px; align-items: baseline; padding: 2px 0; }
+.fus-gap-row .k { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); min-width: 36px; flex: none; }
+.fus-gap-miss { font-size: 12px; color: var(--text-primary); line-height: 1.45; }
+
+.fus-blind { margin: 0; padding-left: 18px; }
+.fus-blind li { font-size: 12px; color: var(--text-primary); line-height: 1.55; margin-bottom: 4px; }
+
+.fus-judge-wait { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--text-dim); padding: 14px 16px; background: var(--bg-panel); border: 1px dashed var(--border-main); border-radius: var(--radius-md); }
+
+/* ── resolved + decision ── */
+.fus-resolved { border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 16px 18px; margin-bottom: 20px; background: var(--bg-panel); }
+.fus-resolved.dec-ok   { border-color: color-mix(in oklab, var(--status-ok) 32%, var(--border-main)); background: linear-gradient(120deg, color-mix(in oklab, var(--status-ok) 6%, var(--bg-panel)), var(--bg-panel) 55%); }
+.fus-resolved.dec-volt { border-color: var(--volt-dim); background: linear-gradient(120deg, var(--volt-wash), var(--bg-panel) 55%); }
+.fus-resolved.dec-warn { border-color: color-mix(in oklab, var(--status-warn) 32%, var(--border-main)); background: linear-gradient(120deg, color-mix(in oklab, var(--status-warn) 6%, var(--bg-panel)), var(--bg-panel) 55%); }
+.fus-resolved-h { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.fus-rec-action { font-size: 12px; color: var(--text-mid); }
+.fus-resolved-lbl { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px; }
+.fus-resolved-body { font-size: 14.5px; color: var(--text-bright); line-height: 1.62; margin: 0; text-wrap: pretty; }
+.fus-rec-rationale { font-size: 12.5px; color: var(--text-mid); line-height: 1.55; margin: 11px 0 0; }
+.fus-rec-rationale .k, .fus-missing .k { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); margin-right: 8px; }
+.fus-missing { margin-top: 12px; }
+.fus-missing ul { margin: 7px 0 0; padding-left: 18px; }
+.fus-missing li { font-size: 12.5px; color: var(--text-primary); line-height: 1.5; margin-bottom: 3px; }
+
+/* ── sink ── */
+.fus-sink { font-size: 12px; color: var(--text-mid); line-height: 1.55; padding: 13px 15px; background: var(--bg-sunken); border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); }
+.fus-sink b { color: var(--text-bright); font-weight: 600; }
+.fus-sink-h { font-family: var(--font-ui); font-size: 11px; color: var(--text-bright); margin-bottom: 11px; display: flex; align-items: baseline; gap: 9px; }
+.fus-sink-tracks { display: flex; flex-direction: column; gap: 10px; }
+.fus-sink-track { display: flex; gap: 11px; align-items: flex-start; }
+.fus-sink-ico { flex: none; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-xs); border: 1px solid var(--border-main); font-size: 12px; }
+.fus-sink-ico.chat { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 32%, transparent); }
+.fus-sink-ico.board { color: var(--info); border-color: color-mix(in oklab, var(--info) 32%, transparent); }
+.fus-sink-ico.wake { color: var(--volt-strong); border-color: var(--volt-dim); }
+.fus-sink-tx { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fus-sink-to { align-self: flex-start; background: none; border: 0; padding: 0; cursor: pointer; font-size: 12.5px; color: var(--volt-strong); font-family: var(--font-ui); }
+.fus-sink-to:hover { text-decoration: underline; }
+.fus-sink-to.static { color: var(--text-bright); cursor: default; }
+.fus-sink-d { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.fus-sink-glyph { color: var(--volt-strong); flex: none; font-size: 13px; line-height: 1.4; }
+.fus-corr { display: block; margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--border-soft); font-size: 10px; color: var(--text-dim); }
+.fus-corr .mono { color: var(--text-mid); }
+
+/* ── denied ── */
+.fus-deny { border: 1px solid color-mix(in oklab, var(--status-bad) 32%, var(--border-main)); border-radius: var(--radius-md); padding: 16px 18px; margin-bottom: 20px; background: linear-gradient(120deg, color-mix(in oklab, var(--status-bad) 6%, var(--bg-panel)), var(--bg-panel) 55%); }
+.fus-deny-h { display: flex; align-items: center; gap: 9px; font-family: var(--font-display); font-weight: 500; font-size: 15px; color: var(--text-bright); }
+.fus-deny-h .mono { color: var(--status-bad); font-size: 13px; }
+.fus-deny-glyph { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 45%, transparent); font-size: 12px; }
+.fus-deny-lbl { font-size: 12.5px; color: var(--status-bad); margin: 10px 0 0; }
+.fus-deny-detail { font-size: 12.5px; color: var(--text-primary); line-height: 1.6; margin: 8px 0 12px; text-wrap: pretty; }
+.fus-sink.denied { background: var(--bg-sunken); }
+
+/* mobile */
+@media (max-width: 760px) {
+  .fus-body { grid-template-columns: 1fr; }
+  .fus-list { max-height: 240px; }
+  .fus-kpis { grid-template-columns: repeat(2, 1fr); }
+  .fus-run-scroll { padding: 16px 16px 40px; }
+}
+
+/* ── Fusion conclusion card inside a keeper chat lane (RFC §8.1) ── */
+.msg-fusion { border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 12px 14px; margin: 4px 0; background: var(--bg-sunken); }
+.msg-fusion.dec-ok   { border-color: color-mix(in oklab, var(--status-ok) 30%, var(--border-main)); }
+.msg-fusion.dec-volt { border-color: var(--volt-dim); }
+.msg-fusion.dec-warn { border-color: color-mix(in oklab, var(--status-warn) 30%, var(--border-main)); }
+.msg-fusion-h { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 9px; }
+.msg-fusion-tag { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--volt-strong); }
+.msg-fusion-run { font-size: 10px; color: var(--text-dim); }
+.msg-fusion-h .fus-dec-badge { margin-left: auto; }
+.msg-fusion-ans { font-size: 13px; color: var(--text-primary); line-height: 1.6; margin: 0; text-wrap: pretty; }
+.msg-fusion-foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border-soft); font-size: 11px; color: var(--text-dim); }
+.msg-fusion-link { margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--font-ui); font-size: 11px; color: var(--volt-strong); }
+.msg-fusion-link:hover { text-decoration: underline; }

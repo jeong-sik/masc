@@ -1,0 +1,101 @@
+(** Effects the Keeper handed to the Gate and is not waiting on.
+
+    A deferral returns successfully -- the call is done, the effect is not --
+    so the tool row draws as an ordinary return and the Keeper carries on.
+    Measured over 2026-09-01..03: 2,067 of 35,658 recorded calls were deferred,
+    and in 872 of them the Keeper made further calls in the same turn. Nothing
+    on the chat pane said an effect was still out.
+
+    Two things have to hold together: the pane draws the row, and the row
+    budget reserves it. A drawn row that nothing reserved pushes the composer
+    past the bottom of the frame; a reserved row nothing draws leaves a blank
+    line where history should be. *)
+
+open Alcotest
+module Tui_types = Masc_tui_types
+(* Through the state module rather than the library: the field's type is what
+   this test builds, and one path to it is one answer about what it is. *)
+module Decode = Masc_tui_types.Tui_decode
+
+let state () =
+  Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+;;
+
+let pending ?(waiting_s = Some 90.) ?(phase = Decode.Gate_judging) ~keeper ~tool
+    id : Decode.gate_pending =
+  { gp_id = id
+  ; gp_keeper = keeper
+  ; gp_operation = "tool_execute"
+  ; gp_display_tool = tool
+  ; gp_input_preview = None
+  ; gp_input_rows = Decode.Flattened None
+  ; gp_execution_cwd = None
+  ; gp_execution_sandbox = None
+  ; gp_waiting_s = waiting_s
+  ; gp_phase = phase
+  ; gp_judge_advice = None
+  ; gp_auto_judge_detail = None
+  ; gp_retry_request = None
+  }
+;;
+
+(* The queue is the Gate's, not this keeper's. Counting another keeper's row
+   would reserve a line the pane never draws, and the composer would sit one
+   row below the caret. *)
+let test_only_this_keepers_effects_count () =
+  let state = state () in
+  state.msg_target_keeper_name <- Some "polisher";
+  (* Unfolded: the queue has a row of its own. Folded it is a count on the
+     progress line, which [test_a_folded_turn_gives_the_queue_no_row] pins. *)
+  state.msg_turn_folded <- false;
+  let empty = Tui_types.keeper_message_status_rows state in
+  state.gate_pending <-
+    [ pending ~keeper:"archivist" ~tool:"Execute" "appr-1" ];
+  check int "another keeper's effect reserves nothing" empty
+    (Tui_types.keeper_message_status_rows state);
+  check int "and is not this keeper's" 0
+    (List.length
+       (Tui_types.keeper_effects_at_the_gate state ~keeper_name:"polisher"));
+  state.gate_pending <-
+    [ pending ~keeper:"archivist" ~tool:"Execute" "appr-1"
+    ; pending ~keeper:"polisher" ~tool:"WebFetch" "appr-2"
+    ];
+  check int "this keeper's effect reserves one row" (empty + 1)
+    (Tui_types.keeper_message_status_rows state);
+  check int "and only its own" 1
+    (List.length
+       (Tui_types.keeper_effects_at_the_gate state ~keeper_name:"polisher"))
+;;
+
+let test_a_folded_turn_gives_the_queue_no_row () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui_types.Tools_full;
+  state.msg_target_keeper_name <- Some "polisher";
+  state.msg_turn_folded <- true;
+  let empty = Tui_types.keeper_message_status_rows state in
+  state.gate_pending <-
+    [ pending ~keeper:"polisher" ~tool:"WebFetch" "appr-1"
+    ; pending ~keeper:"polisher" ~tool:"Execute" "appr-2"
+    ];
+  check int "a folded turn reserves no queue row" empty
+    (Tui_types.keeper_message_status_rows state);
+  check int "and the count the line reports is the queue's own" 2
+    (List.length
+       (Tui_types.keeper_effects_at_the_gate state ~keeper_name:"polisher"));
+  state.msg_turn_folded <- false;
+  check int "unfolded it takes its row back" (empty + 1)
+    (Tui_types.keeper_message_status_rows state)
+;;
+
+let () =
+  run "tui chat gate row"
+    [ ( "attribution"
+      , [ test_case "only this keeper's effects count" `Quick
+            test_only_this_keepers_effects_count
+        ;] )
+    ; ( "row budget"
+      , [ test_case "a folded turn gives the queue no row" `Quick
+            test_a_folded_turn_gives_the_queue_no_row
+        ] )
+    ]
+;;

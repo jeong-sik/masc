@@ -1,0 +1,9 @@
+{
+  "id": "l1-py-reverse",
+  "level": "L1",
+  "lang": "python",
+  "timeout_sec": 600,
+  "verify": "verify.sh",
+  "prompt": "check.sh fails because reverse.py's reverse(s) is not implemented. Implement it so the check passes: return the input string with its characters in reverse order. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Small feature: implement reverse(s) in reverse.py to satisfy the cases in check.sh."
+}

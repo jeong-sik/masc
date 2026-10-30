@@ -1,0 +1,7 @@
+{
+  "baseline": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+  "file": "test/test_endpoint_mixed_admission.ml",
+  "sha256": "d835c8767aded0abde0137b7085b5c4379beb46241b21389d30429f6470b06a4",
+  "ocaml_parse_exit": 0,
+  "scope": "Parsing only, not typecheck or execution"
+}

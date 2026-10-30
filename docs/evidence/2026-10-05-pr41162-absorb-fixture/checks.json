@@ -1,0 +1,17 @@
+{
+  "head": "f7e9ae5ae9dc6be772f6a3dd2b9d044569384682",
+  "merge_parent": "c2e74cc3318a666d461164d23fcbec9089854069",
+  "tests": 45,
+  "build_exit": 0,
+  "native_exit": 0,
+  "binary_sha256": "00d873997d2df105eee4a3b770f12e10972818979edf21aaba7d9bb6fa749d56",
+  "test_sha256": "bcd5421dc3838ce8d2fece5632bdec68345c2a07d2f1dfee0912f17254750d04",
+  "files": {
+    "green.log": "c476e48ed6f900f20df61b5e44a50c29266f9496e92be9fd68cff3b155f458cf",
+    "README.md": "3ac87e44f05c31250c3875d7352f2ee9a43528eb8adf73faff2b8ffd2eb9c64b",
+    "unconditional-fields-red.log": "3fce05a9e1e57dc4d20a384fa35d1fdcdb6cbcf3e61e20e0543cd4dff53c08d4",
+    "diagnostic-red.log": "f07b2bca728bfb15fc4d1cbb3c0f306ca0f91984e1bd916f033ac3d06ccb7108",
+    "first-field-red.log": "dfb6361ff441d51458fd8fc6b4feb35743012637ae63f34693d21b8c2706c77b",
+    "build.log": "70b76e4f817d2ffd8590ca3cc6c6566c16e2e1f02ebe4a3efa497fc52c6afa20"
+  }
+}

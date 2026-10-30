@@ -1,0 +1,14 @@
+(test
+ (name test_keeper_event_queue)
+ (modules test_keeper_event_queue)
+ (libraries masc masc.keeper_runtime unix))
+
+(test
+ (name test_schema_boundary)
+ (modules test_schema_boundary)
+ (libraries masc masc.keeper_runtime))
+
+(test
+ (name test_fleet_projection)
+ (modules test_fleet_projection)
+ (libraries alcotest masc.masc_core masc.keeper_runtime unix yojson))

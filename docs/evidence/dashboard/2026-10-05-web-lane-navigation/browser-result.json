@@ -1,0 +1,163 @@
+{
+  "passed": true,
+  "scope": "Actual styled Status + inventory links + router + receiver components/decoders with synthetic HTTP. No real backend, worker, native, deployment or full SPA bootstrap.",
+  "browser": "149.0.7827.55",
+  "checks": [
+    "actual inventory link → real router → lazy Status Runtime editor focuses selected Exact Lane",
+    "same Runtime surface Exact→Browser→same Exact restores focus and retains raw draft",
+    "MSX and DOS generated links select their actual inline TOML nodes without insertion",
+    "missing Browser config is explained without selecting another backend or inserting text",
+    "declaration link preserves Unicode/space/hash path, focuses editor, rereads identity and retains dirty draft without spurious revision conflict",
+    "changed file identity blocks replacement; Retry rereads restored identity and preserves draft/original CAS basis",
+    "workspace A→B→A blocks target reads in B and restores the retained A draft after fresh read",
+    "explicit New TOML releases the previous URL target while retaining the previous declaration draft",
+    "manual worker ID+incarnation is selected; replaced incarnation cannot inherit its controls and can be reread",
+    "diagnostics focuses selected Lane; choosing a different run filter clears target without resetting the chosen filter",
+    "Show all Lane runs clears the target and the previously selected filter together",
+    "malformed direct target is reported explicitly",
+    "fresh page direct URL retains its target across initial inventory failure and Retry focuses the selected declaration"
+  ],
+  "reads": [
+    {
+      "p": "/api/v1/lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/dev-token",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/params",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/config/raw",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/standalone-lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/resolved",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/exact-lane-runs",
+      "query": "?run_kind=exact_output"
+    },
+    {
+      "p": "/api/v1/dashboard/verification-runs",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/fusion-runs",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/standalone-lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/standalone-lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/resolved",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/params",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/config/raw",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/dashboard/standalone-lanes",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/runtime/resolved",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons",
+      "query": ""
+    },
+    {
+      "p": "/api/v1/lane-addons/declaration",
+      "query": "?source_path=%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml"
+    }
+  ],
+  "writes": [],
+  "errors": [],
+  "unexpected": [],
+  "hrefs": {
+    "exact": "#monitoring?section=runtime&view=config&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2FA%22%2C%22kind%22%3A%22exact%22%2C%22lane%22%3A%22librarian_exact%22%7D",
+    "live": "#monitoring?section=runtime&view=config&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2FA%22%2C%22kind%22%3A%22browser%22%2C%22lane%22%3A%22live%22%7D",
+    "automation": "#monitoring?section=runtime&view=config&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2FA%22%2C%22kind%22%3A%22browser%22%2C%22lane%22%3A%22automation%22%7D",
+    "msx": "#monitoring?section=runtime&view=config&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2FA%22%2C%22kind%22%3A%22machine%22%2C%22machine%22%3A%22msx%22%7D",
+    "dos": "#monitoring?section=runtime&view=config&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2FA%22%2C%22kind%22%3A%22machine%22%2C%22machine%22%3A%22dos%22%7D",
+    "package": "#monitoring?section=lane-addons&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2FA%22%2C%22kind%22%3A%22declaration%22%2C%22path%22%3A%22%2Ffixture%2FA%2F.masc%2Fconfig%2Flane-addons%2F%ED%95%9C%EA%B8%80+%23+package.toml%22%2C%22installation%22%3A%22pkg%22%7D",
+    "worker": "#monitoring?section=lane-addons&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2FA%22%2C%22kind%22%3A%22instance%22%2C%22instance%22%3A%22worker%22%2C%22incarnation%22%3A%22i1%22%7D",
+    "diagnostics": "#monitoring?section=internal-agents&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2FA%22%2C%22kind%22%3A%22exact%22%2C%22lane%22%3A%22librarian_exact%22%7D"
+  }
+}

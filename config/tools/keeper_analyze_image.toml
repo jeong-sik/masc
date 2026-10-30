@@ -1,0 +1,35 @@
+defer_loading = true
+name = "keeper_analyze_image"
+description = "Delegate analysis of a stored artifact or sandbox image to a separate vision model. Returns text or a typed failure. Prefer keeper_image_read to inspect pixels directly when the current runtime accepts images. Provide exactly one of artifact or path."
+additional_properties = false
+
+[[params]]
+name = "artifact"
+type = "string"
+description = "Stored image handle returned by an image tool. A file hash alone does not ingest the file."
+
+[[params]]
+name = "path"
+type = "string"
+description = "Image in your own sandbox, resolved like Read. Reads and stores the bytes, then analyzes them; success includes a reusable artifact handle."
+
+[[params]]
+name = "query"
+type = "string"
+required = true
+description = """
+What to ask about the image, e.g. \"describe the chart\" or \"transcribe the \
+text\"."""
+
+[[params]]
+name = "media_type"
+type = "string"
+enum = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+description = """
+Optional image MIME type override (e.g. image/png, image/jpeg). Sniffed from \
+the bytes when omitted."""
+
+[[params]]
+name = "runtime_id"
+type = "string"
+description = "Exact configured vision runtime. Omit for automatic selection/failover; an explicit selection never falls back."

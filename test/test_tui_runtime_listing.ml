@@ -1,0 +1,1478 @@
+open Masc_tui_types
+
+let expect label wanted actual = Alcotest.(check int) label wanted actual
+
+module Receipt = Masc_tui_runtime_config_receipt
+
+let committed_receipt =
+  { Receipt.source_revision = "source-7"; order = "7"; durability = Receipt.Durable;
+    lock_warnings = []; ignored_legacy_keys = [];
+    application =
+      { Receipt.operation = "routing"; routing_status = Receipt.Routing_applied;
+        routing_requires_restart = false; routing_applied_at = Receipt.Applied_at_int 7;
+        keeper_status = Receipt.Keeper_not_configured; keeper_requires_restart = false;
+        keeper_applied_at = Receipt.Not_applied; keeper_configured_count = 0;
+        keeper_pending_keys = []; keeper_applied_keys = []; keeper_preempted_keys = [];
+        skills = Receipt.Skill_unchanged { input_source_revision = "source-7";
+          snapshot_revision = "snapshot-7"; catalog_revision = "catalog-7";
+          config_state = Receipt.Configured };
+        exact_output_registry = Receipt.Exact_output_registry_applied Receipt.Targets_runtime_bindings } }
+
+let runtime id : Masc.Tui_decode.runtime_option =
+  { ro_id = id; ro_provider = "provider"; ro_provider_id = "provider"; ro_model = "model";
+    ro_exact_slot_group = Exact_http_slots; ro_exact_body_deadline_missing = false;
+    ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
+    ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
+    ro_is_default = false;
+    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_quota_scope_id = None;
+    ro_rate_limited = false; ro_rate_limit_resets_at = None;
+    ro_failed_attempt = None }
+
+let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+
+(* A Keeper outcome names the runtime that answered by exact id. The join to
+   the catalog is an equality on that id; an id the catalog lacks is kept raw
+   rather than matched by prefix or split into a guessed provider. *)
+let test_a_last_runtime_id_joins_the_catalog_by_equality () =
+  let catalog = [ runtime "glm.glm-5"; runtime "codex_subscription.gpt-5.6-luna" ] in
+  (match
+     Masc.Tui_decode.resolve_last_runtime catalog "codex_subscription.gpt-5.6-luna"
+   with
+   | Masc.Tui_decode.Last_runtime_cataloged ro ->
+       Alcotest.(check string) "joined id" "codex_subscription.gpt-5.6-luna" ro.ro_id
+   | Last_runtime_uncataloged _ -> Alcotest.fail "a listed runtime was not joined");
+  List.iter
+    (fun unlisted ->
+      match Masc.Tui_decode.resolve_last_runtime catalog unlisted with
+      | Last_runtime_uncataloged raw ->
+          Alcotest.(check string) "raw id kept" unlisted raw
+      | Last_runtime_cataloged ro ->
+          Alcotest.failf "%S joined to %S" unlisted ro.ro_id)
+    [ "codex_subscription"; "glm.glm-5.1"; "GLM.GLM-5"; "" ]
+
+(* The width these checks read at. Wide enough that the authority row -- two
+   clauses while no runtime surface has loaded -- stays one row, so the counts
+   below are about the rows each check is named for. *)
+let check_cols = 140
+
+let press state keys =
+  match state.runtime_lane_pick with
+  | None -> Alcotest.fail "no picker is open"
+  | Some (pick, list) ->
+      let _, _, catalog = runtime_picker_rows state pick in
+      let moved =
+      List.fold_left
+        (fun list key ->
+          match
+            Masc_tui_pick_list.action_of_key ~close_keys:[] list key
+          with
+          | None -> Alcotest.failf "key %S is not the picker's" key
+          | Some action -> (
+              match
+                Masc_tui_pick_list.apply ~page:runtime_picker_page
+                  ~label:(runtime_picker_label_for pick) catalog list action
+              with
+              | Masc_tui_pick_list.Stay list -> list
+              | Masc_tui_pick_list.Chosen _ | Masc_tui_pick_list.Dismissed ->
+                  Alcotest.failf "key %S left the picker" key))
+        list keys
+      in
+      state.runtime_lane_pick <- Some (pick, moved)
+
+let test_schema_less_client_is_refused_only_for_exact_lane () =
+  let muse = { (runtime "muse.fixture") with
+    ro_exact_slot_group = Masc.Tui_decode.Exact_output_unsupported } in
+  (match runtime_pick_availability (Pick_exact_lane Standalone_lane.Verifier) muse with
+   | Pick_refused _ -> ()
+   | Pick_available -> Alcotest.fail "schema-less Muse client was offered to an exact lane");
+  (match runtime_pick_availability (Pick_conversation_lane "primary") muse with
+   | Pick_available -> ()
+   | Pick_refused _ -> Alcotest.fail "normal Keeper routing must remain available")
+
+(* Rule 3 (#38779): the server's listing marks an HTTP runtime whose
+   provider declares no exact-body-timeout-s. An exact lane refuses it before
+   anything is sent and names the provider table to fix; every other route
+   still offers it. *)
+let test_http_slot_without_body_deadline_is_refused_for_exact_lane () =
+  let gap = { (runtime "openrouter.deepseek") with
+    ro_provider_id = "openrouter"; ro_exact_body_deadline_missing = true } in
+  (match runtime_pick_availability (Pick_exact_lane Standalone_lane.Librarian) gap with
+   | Pick_refused No_exact_body_deadline -> ()
+   | Pick_refused _ | Pick_available ->
+     Alcotest.fail "a slot the save would refuse was offered to an exact lane");
+  let contains affix text =
+    let n = String.length affix in
+    let rec scan i = i + n <= String.length text && (String.sub text i n = affix || scan (i + 1)) in
+    scan 0 in
+  Alcotest.(check bool) "the reason names the provider table and the key" true
+    (let text = runtime_pick_refusal_text No_exact_body_deadline gap in
+     contains "[providers.openrouter]" text && contains "exact-body-timeout-s" text);
+  (match runtime_pick_availability (Pick_conversation_lane "primary") gap with
+   | Pick_available -> ()
+   | Pick_refused _ -> Alcotest.fail "normal Keeper routing must remain available");
+  (match runtime_pick_availability (Pick_exact_lane Standalone_lane.Librarian) (runtime "keyed.model") with
+   | Pick_available -> ()
+   | Pick_refused _ -> Alcotest.fail "a keyed HTTP slot must remain available")
+
+let test_a_move_past_either_end_is_no_move () =
+  let order = [ "a"; "b"; "c" ] in
+  Alcotest.(check (option (list string))) "down" (Some [ "b"; "a"; "c" ])
+    (swap_candidates order 0 1);
+  Alcotest.(check (option (list string))) "up" (Some [ "a"; "c"; "b" ])
+    (swap_candidates order 2 1);
+  Alcotest.(check (option (list string))) "past the head" None (swap_candidates order 0 (-1));
+  Alcotest.(check (option (list string))) "past the tail" None (swap_candidates order 2 3)
+
+(* Two lanes on the lanes reading: primary is rows 0 and 1, solo is row 2. *)
+let lane_state () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_route = Some "a"; rrs_default_runtime_id = Some "a";
+      rrs_media_failover = []; rrs_media_failover_declared = [];
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes =
+        [{rrl_id = "primary"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
+         {rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  state.runtime_mode <- Runtime_lanes;
+  state
+
+let test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order () =
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let exhausted = { (runtime "b") with ro_quota_exhausted = true } in
+  let limited = { (runtime "c") with ro_rate_limited = true } in
+  let resolved = { snapshot.rss_resolved with
+    rrs_runtimes = [runtime "a"; exhausted; limited] } in
+  state.runtime_surface <- Some (match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  let runtime_ids () =
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot -> List.map (fun (runtime : Masc.Tui_decode.runtime_option) -> runtime.ro_id)
+        snapshot.rss_resolved.rrs_runtimes in
+  let original_order = ["a"; "b"; "c"] in
+  Alcotest.(check (list string)) "default view preserves configured order"
+    original_order (runtime_ids ());
+  Alcotest.(check bool) "ordinary runtime remains prominent" false
+    (runtime_row_deemphasized state (runtime "a"));
+  Alcotest.(check bool) "quota exhausted runtime is de-emphasized" true
+    (runtime_row_deemphasized state exhausted);
+  Alcotest.(check bool) "rate limited runtime is de-emphasized" true
+    (runtime_row_deemphasized state limited);
+  Alcotest.(check bool) "dimming is on by default" true state.runtime_dim_refusals;
+  toggle_runtime_dim_refusals state;
+  Alcotest.(check bool) "toggle restores normal emphasis" false
+    (runtime_row_deemphasized state exhausted);
+  Alcotest.(check (list string)) "toggle never changes configured order"
+    original_order (runtime_ids ());
+  toggle_runtime_dim_refusals state;
+  Alcotest.(check bool) "second toggle restores dimming" true state.runtime_dim_refusals;
+  Alcotest.(check bool) "refusing row is dimmed again" true
+    (runtime_row_deemphasized state exhausted)
+
+let notice_text = function
+  | None -> "no line"
+  | Some (Lane_write_refused reason) -> "refuse: " ^ reason
+  | Some Lane_write_pending -> "pending"
+  | Some (Lane_write_committed _) -> "commit receipt retained"
+
+let stale_text state =
+  match runtime_lane_stale_lines state with
+  | [] -> "fresh"
+  | lines -> String.concat " | " lines
+
+let plan_text = function
+  | Open_lane_name_field -> "open the name field"
+  | Open_lane_rename_field lane -> "rename " ^ lane
+  | Arm_lane_removal lane -> "arm " ^ lane
+  | Send_lane_write { lane; request; cursor_after } ->
+    Printf.sprintf "write %s %s, cursor %s" lane
+      (match request with
+       | Write_lane_order ids -> "[" ^ String.concat "; " ids ^ "]"
+       | Write_lane_removal -> "removal")
+      (match cursor_after with Some row -> string_of_int row | None -> "stays")
+  | Refuse_lane_edit notice -> notice_text (Some notice)
+
+let expect_plan label state edit expected =
+  Alcotest.(check string) label expected (plan_text (plan_runtime_lane_edit state edit))
+
+let drop = Row_edit Drop_candidate
+let down = Row_edit (Move_candidate Move_down)
+let up = Row_edit (Move_candidate Move_up)
+let remove = Row_edit Remove_lane
+
+let test_a_lane_edit_sends_the_whole_order () =
+  let state = lane_state () in
+  expect_plan "a needs no row" state New_lane "open the name field";
+  expect_plan "J on the head" state down "write primary [b; a], cursor 1";
+  expect_plan "K on the head" state up "refuse: a is already first in primary";
+  state.runtime_cursor <- 1;
+  expect_plan "x on the tail" state drop "write primary [a], cursor 0";
+  expect_plan "J on the tail" state down "refuse: b is already last in primary";
+  state.runtime_cursor <- 2;
+  expect_plan "the first D arms" state remove "arm solo";
+  state.runtime_lane_remove_armed <- Some "solo";
+  expect_plan "the second D removes" state remove "write solo removal, cursor 1";
+  state.runtime_lane_remove_armed <- Some "primary";
+  expect_plan "a D armed for another lane arms this one" state remove "arm solo";
+  state.runtime_cursor <- 3;
+  expect_plan "no row under the cursor" state drop
+    "refuse: no lane row is under the cursor"
+
+(* Each write is built from the surface's last reading. Until the previous
+   write is read back, a write would be built from the order it replaced. *)
+let test_a_lane_edit_waits_for_the_previous_write () =
+  let busy = "pending" in
+  List.iter (fun (phase, write) ->
+    let state = lane_state () in
+    state.runtime_lane_write <- write;
+    expect_plan (phase ^ ": J") state down busy;
+    expect_plan (phase ^ ": K on the head is pending, not 'already first'") state up busy;
+    expect_plan (phase ^ ": x") state drop busy;
+    expect_plan (phase ^ ": R cannot open a rename field") state
+      (Row_edit Rename_lane) busy;
+    expect_plan (phase ^ ": the first D still arms") state remove "arm primary";
+    state.runtime_lane_remove_armed <- Some "primary";
+    expect_plan (phase ^ ": the second D") state remove busy;
+    expect_plan (phase ^ ": a still opens the name field") state New_lane
+      "open the name field")
+    [ "posting", Lane_write_posting;
+      "rereading", Lane_write_rereading (Runtime_surface_list, 3, committed_receipt) ];
+  let state = lane_state () in
+  state.runtime_lane_write <- Lane_write_idle;
+  expect_plan "idle: J" state down "write primary [b; a], cursor 1"
+
+(* The transitions the async handler makes: [settle_runtime_lane_write] when
+   a write answers, [runtime_lane_list_reread] when a list load lands. *)
+let test_a_written_list_holds_edits_until_its_reread () =
+  let state = lane_state () in
+  state.runtime_surface_generation <- 4;
+  state.runtime_lane_write <- Lane_write_posting;
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
+  expect_plan "the write answered" state down "pending";
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:4 (Ok ());
+  expect_plan "a load that left before the answer" state down "pending";
+  runtime_lane_list_reread state ~list:Standalone_lanes_list ~generation:9 (Ok ());
+  expect_plan "a load of the other list" state down "pending";
+  state.runtime_lane_notice <- Some Lane_write_pending;
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:5 (Ok ());
+  expect_plan "the re-read landed" state down "write primary [b; a], cursor 1";
+  Alcotest.(check string) "reread retains the application receipt" "commit receipt retained"
+    (notice_text state.runtime_lane_notice)
+
+(* A standalone lane's slots are read back from the standalone lanes list;
+   the Runtime surface landing says nothing about them. *)
+let test_a_standalone_write_waits_for_the_standalone_list () =
+  let state = lane_state () in
+  state.standalone_lanes_generation <- 2;
+  state.runtime_surface_generation <- 7;
+  state.runtime_lane_write <- Lane_write_posting;
+  settle_runtime_lane_write state ~written:Standalone_lanes_list (Ok committed_receipt);
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:8 (Ok ());
+  expect_plan "the Runtime surface landed" state down "pending";
+  runtime_lane_list_reread state ~list:Standalone_lanes_list ~generation:3 (Ok ());
+  expect_plan "the standalone list landed" state down "write primary [b; a], cursor 1"
+
+let test_a_refused_write_opens_edits_at_once () =
+  let state = lane_state () in
+  state.runtime_lane_write <- Lane_write_posting;
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Error "HTTP 400: no");
+  expect_plan "after the refusal" state down "write primary [b; a], cursor 1";
+  Alcotest.(check string) "the refusal is drawn" "refuse: HTTP 400: no"
+    (notice_text state.runtime_lane_notice)
+
+let test_a_failed_reread_refuses_candidate_edits_with_a_line () =
+  let state = lane_state () in
+  state.runtime_surface_generation <- 1;
+  state.runtime_lane_write <- Lane_write_posting;
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
+    (Error "HTTP 503: down");
+  expect_plan "move is refused" state down
+    "refuse: the lane list may be stale; reload it before changing candidates";
+  expect_plan "drop is refused" state drop
+    "refuse: the lane list may be stale; reload it before changing candidates";
+  Alcotest.(check string) "the list is said to be stale"
+    "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
+    (stale_text state);
+  Alcotest.(check string) "failed reread retains the commit evidence" "commit receipt retained"
+    (notice_text state.runtime_lane_notice)
+
+let test_commit_application_survives_reread () =
+  List.iter (fun (application, durability, warning) ->
+    List.iter (fun reread ->
+      let state = lane_state () in
+      let receipt = { committed_receipt with
+        Receipt.durability;
+        lock_warnings = [{ Receipt.code = "lock-observation"; detail = warning }];
+        application = { committed_receipt.application with exact_output_registry = application } } in
+      state.standalone_lanes_generation <- 2;
+      state.runtime_lane_write <- Lane_write_posting;
+      settle_runtime_lane_write state ~written:Standalone_lanes_list (Ok receipt);
+      let check_receipt label =
+        match state.runtime_lane_notice with
+        | Some (Lane_write_committed actual) ->
+          Alcotest.(check bool) label true (actual = receipt);
+          Alcotest.(check bool) "application warning remains visible" true
+            (Receipt.lane_needs_attention actual)
+        | _ -> Alcotest.fail "commit evidence was replaced by a generic notice" in
+      check_receipt "receipt available before GET";
+      state.runtime_lane_notice <- Some Lane_write_pending;
+      runtime_lane_list_reread state ~list:Standalone_lanes_list ~generation:3 reread;
+      check_receipt "GET cannot upgrade or erase receipt";
+      let notice = Lane_write_committed receipt in
+      Alcotest.(check bool) "long reason wraps" true
+        (runtime_lane_notice_lines ~cols:40 (Some notice) > 1);
+      state.runtime_lane_notice <- Some notice;
+      state.runtime_mode <- Runtime_lanes;
+      Alcotest.(check bool) "narrow chrome accounts for wrapped receipt" true
+        (runtime_surface_listing_chrome ~rows:100 ~cols:40 state > runtime_surface_listing_chrome ~rows:100 ~cols:140 state))
+      [Ok (); Error "HTTP 503: read unavailable"])
+    [Receipt.Exact_output_registry_kept {reason = "catalog read failed; prior model order remains"},
+       Receipt.Durable, "configuration lock observation changed";
+     Receipt.Exact_output_registry_unpublished, Receipt.Durability_unconfirmed "fixture fsync uncertainty",
+       "file synchronization was not confirmed"]
+
+let test_dismissed_commit_stays_dismissed_after_reread () =
+  List.iter (fun reread ->
+    let state = lane_state () in
+    state.runtime_surface_generation <- 4;
+    settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
+    dismiss_runtime_lane_notice state;
+    runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:5 reread;
+    Alcotest.(check bool) "late reread cannot restore a dismissed receipt" true
+      (state.runtime_lane_notice = None);
+    Alcotest.(check bool) "late reread settles the write" true
+      (state.runtime_lane_write = Lane_write_idle);
+    Alcotest.(check bool) "failed reread still marks the independent list stale"
+      (Result.is_error reread) (runtime_lane_stale_lines state <> []))
+    [Ok (); Error "HTTP 503: read unavailable"]
+
+let stale_after_503 =
+  "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
+
+let test_a_refusal_and_a_dismissal_leave_the_stale_line () =
+  let state = lane_state () in
+  state.runtime_surface_generation <- 1;
+  state.runtime_lane_write <- Lane_write_posting;
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
+  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
+    (Error "HTTP 503: down");
+  (match plan_runtime_lane_edit state up with
+   | Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
+   | plan -> Alcotest.failf "K on the head: %s" (plan_text plan));
+  Alcotest.(check string) "the refusal is drawn"
+    "refuse: the lane list may be stale; reload it before changing candidates"
+    (notice_text state.runtime_lane_notice);
+  Alcotest.(check string) "beside the stale line" stale_after_503 (stale_text state);
+  dismiss_runtime_lane_notice state;
+  Alcotest.(check string) "the dismissal ended the refusal" "no line"
+    (notice_text state.runtime_lane_notice);
+  state.runtime_cursor <- 1;
+  expect_plan "x cannot write from the stale list" state drop
+    "refuse: the lane list may be stale; reload it before changing candidates";
+  Alcotest.(check string) "and the stale line is still drawn" stale_after_503
+    (stale_text state)
+
+let test_a_new_view_ends_what_a_key_said () =
+  let state = lane_state () in
+  List.iter (fun notice ->
+    state.runtime_lane_notice <- Some notice;
+    dismiss_runtime_lane_notice state;
+    Alcotest.(check string) (notice_text (Some notice)) "no line"
+      (notice_text state.runtime_lane_notice))
+    [ Lane_write_refused "HTTP 400: no"; Lane_write_pending ]
+
+(* [R] opens the field on the name the lane has now, so the common edit --
+   changing part of it -- starts from what is there rather than from empty. *)
+let test_a_rename_opens_the_field_on_the_current_name () =
+  let state = lane_state () in
+  expect_plan "the lane under the cursor" state (Row_edit Rename_lane) "rename primary";
+  state.runtime_cursor <- 2;
+  expect_plan "the next lane" state (Row_edit Rename_lane) "rename solo"
+
+let test_lane_keys_parse_to_edits () =
+  let parsed key = Option.map (fun edit -> plan_text (plan_runtime_lane_edit (lane_state ()) edit))
+      (runtime_lane_edit_of_key key) in
+  Alcotest.(check (option string)) "a" (Some "open the name field") (parsed "a");
+  Alcotest.(check (option string)) "J" (Some "write primary [b; a], cursor 1") (parsed "J");
+  Alcotest.(check (option string)) "D" (Some "arm primary") (parsed "D");
+  Alcotest.(check (option string)) "j is the cursor's, not an edit" None (parsed "j")
+
+let test_cli_probe_is_a_note () =
+  let detail = "CLI runtimes do not expose an HTTP reachability endpoint" in
+  Alcotest.(check bool) "typed CLI exclusion remains informational" true
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_cli (Some detail)
+     = Some (Runtime_probe_note detail));
+  Alcotest.(check string) "human-readable excluded probe status" "CLI not probed"
+    (runtime_probe_status_label Runtime_provider_skipped_cli);
+  List.iter (fun status ->
+    Alcotest.(check bool) "the same words cannot disguise a real failure" true
+      (runtime_probe_annotation ~status (Some detail) = Some (Runtime_probe_failure detail)))
+    [Runtime_provider_network_error; Runtime_provider_endpoint_not_found;
+     Runtime_provider_auth_failed; Runtime_provider_invalid_execution_transport];
+  Alcotest.(check bool) "no diagnostic is invented" true
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_cli None = None);
+  let adc = "Vertex Gemini authenticates with Google Application Default Credentials" in
+  Alcotest.(check bool) "a native-auth skip is informational too" true
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_native_auth (Some adc)
+     = Some (Runtime_probe_note adc));
+  Alcotest.(check string) "human-readable native-auth skip" "ADC not probed"
+    (runtime_probe_status_label Runtime_provider_skipped_native_auth)
+
+let test_search_follows_the_runtime_mode () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_route = Some "assigned"; rrs_default_runtime_id = Some "assigned";
+      rrs_media_failover = []; rrs_media_failover_declared = [];
+      rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
+      rrs_lanes =
+        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
+  let snapshot = match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
+  state.runtime_surface <- Some snapshot;
+  let expect_rows expected =
+    Alcotest.(check (option (list string))) "search uses the visible cursor order"
+      (Some expected) (Masc_tui_surface_search.surface_row_texts ~cols:120 state Runtime);
+    match runtime_scrolled ~rows:100 ~cols:check_cols state with
+    | Some layout -> expect "scroll and search have the same rows" (List.length expected) layout.sc_count
+    | None -> Alcotest.fail "runtime list lost its scroll geometry" in
+  state.runtime_mode <- Runtime_lanes;
+  expect_rows ["lane-only assigned"];
+  state.runtime_mode <- Runtime_all;
+  expect_rows ["unassigned"; "assigned"];
+  Alcotest.(check (option int)) "unassigned runtime is searchable" (Some 1)
+    (Masc_tui_surface_search.surface_search_count ~cols:120 state Runtime ~query:"unassigned");
+  Alcotest.(check (option int)) "hidden lane does not contribute" (Some 0)
+    (Masc_tui_surface_search.surface_search_count ~cols:120 state Runtime ~query:"lane-only");
+  state.runtime_detail_target <- Some (Runtime_catalog_entry {runtime_id = "assigned"});
+  Alcotest.(check (option (list string))) "runtime detail has no list cursor" None
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Runtime)
+
+(* Opening a detail, then receiving a reordered listing, must not turn an
+   Enter/Right press in the reader into a selection of the hidden cursor. *)
+let test_runtime_detail_keeps_its_owner () =
+  let snapshot ids =
+    let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+      { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+        rrs_default_route = None; rrs_default_runtime_id = None;
+        rrs_media_failover = []; rrs_media_failover_declared = [];
+        rrs_runtimes = List.map runtime ids;
+        rrs_lanes =
+          (match ids with
+           | [] -> []
+           | _ -> [{rrl_id = "lane"; rrl_runtime_ids = ids; rrl_declared = true}]) }
+    in
+    match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot
+    | Error detail -> Alcotest.fail detail
+  in
+  List.iter
+    (fun mode ->
+      let state = state () in
+      state.view <- Runtime;
+      state.runtime_mode <- mode;
+      state.runtime_surface <- Some (snapshot ["first"; "second"]);
+      state.runtime_cursor <- 1;
+      open_runtime_row_detail state;
+      let expected =
+        match mode with
+        | Runtime_lanes ->
+            Runtime_lane_candidate {lane_id = "lane"; runtime_id = "second"}
+        | Runtime_all -> Runtime_catalog_entry {runtime_id = "second"}
+      in
+      Alcotest.(check bool) "open captures the selected identity" true
+        (state.runtime_detail_target = Some expected);
+      state.runtime_detail_scroll <- 7;
+      state.runtime_surface <- Some (snapshot ["second"; "first"]);
+      open_runtime_row_detail state;
+      Alcotest.(check bool) "reordered hidden cursor cannot retarget a reader" true
+        (state.runtime_detail_target = Some expected);
+      expect "repeated open preserves reading position" 7 state.runtime_detail_scroll;
+      state.runtime_detail_target <- Some Runtime_routes;
+      open_runtime_row_detail state;
+      Alcotest.(check bool) "route document remains the active reading" true
+        (state.runtime_detail_target = Some Runtime_routes);
+      expect "route document preserves reading position" 7 state.runtime_detail_scroll;
+      state.runtime_detail_target <- None;
+      state.runtime_surface <- Some (snapshot []);
+      open_runtime_row_detail state;
+      Alcotest.(check bool) "empty listing does not invent a target" true
+        (state.runtime_detail_target = None);
+      state.runtime_surface <- Some (snapshot ["second"; "first"]);
+      open_runtime_row_detail state;
+      let expected =
+        match mode with
+        | Runtime_lanes -> Runtime_lane_candidate {lane_id = "lane"; runtime_id = "first"}
+        | Runtime_all -> Runtime_catalog_entry {runtime_id = "first"}
+      in
+      Alcotest.(check bool) "after returning to list the new selection opens" true
+        (state.runtime_detail_target = Some expected);
+      expect "new reading starts at top" 0 state.runtime_detail_scroll)
+    [Runtime_lanes; Runtime_all]
+
+let standalone_lane ?(declared_cli = []) ?(admitted_cli = [])
+    ~(lane : Standalone_lane.t) ~declared ~admitted () : Masc.Tui_decode.standalone_lane =
+  { Masc.Tui_decode.sl_lane = lane
+  ; sl_label = Standalone_lane.to_id lane
+  ; sl_purpose = None
+  ; sl_required = false
+  ; sl_status = Masc.Tui_decode.Standalone_idle
+  ; sl_configuration_state = Masc.Tui_decode.Lane_ready
+  ; sl_jev = None
+  ; sl_admitted_slots = admitted
+  ; sl_cli_slots = admitted_cli
+  ; sl_dropped_slots =
+      List.filter (fun slot -> not (List.mem slot admitted)) declared
+  ; sl_declared_slots = declared
+  ; sl_declared_cli_slots = declared_cli
+  ; sl_admission_error = None
+  ; sl_retained_run_count = 0
+  ; sl_running_count = 0
+  ; sl_succeeded_count = 0
+  ; sl_failed_count = 0
+  ; sl_cancelled_count = 0
+  ; sl_last_started_at = None
+  ; sl_last_terminal_at = None
+  ; sl_last_outcome = None
+  ; sl_p50_elapsed_s = None
+  ; sl_selected_slots = []
+  ; sl_runs_without_slot =
+      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
+  }
+
+let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
+      ?(admitted = [ "a"; "b" ]) ?(declared_cli = []) ?(admitted_cli = []) () =
+  let state = state () in
+  state.standalone_lanes <-
+    Some
+      { Masc.Tui_decode.sls_observed_at_unix = 0.
+      ; sls_exact_run_projection_count = 0
+      ; sls_exact_run_source_total = 0
+      ; sls_exact_run_projection_truncated = false
+      ; sls_lanes =
+          [ standalone_lane ~lane:Standalone_lane.Librarian ~declared ~admitted
+              ~declared_cli ~admitted_cli () ]
+      };
+  open_slot_editor state (Exact_lane_slots Standalone_lane.Librarian);
+  select_slot_editor_row state cursor;
+  state
+
+let slot_plan_text = function
+  | Send_slot_write { target; slot; request } ->
+    Printf.sprintf "%s %s %s" (slot_editor_target_name target)
+      (match request with
+       | Drop_declared_slot -> "drop"
+       | First_declared_slot -> "first in group"
+       | Move_declared_slot Move_up -> "up"
+       | Move_declared_slot Move_down -> "down"
+       | Write_route_order order -> "order [" ^ String.concat "; " order ^ "]")
+      slot
+  | Refuse_slot_edit notice -> notice_text (Some notice)
+
+let test_history_replaces_the_editor_without_replacing_its_work () =
+  List.iter (fun write ->
+    let state = slot_editor_state ~cursor:1 () in
+    state.view <- Lanes;
+    (match plan_slot_edit state Drop_slot with
+     | Send_slot_write _ -> ()
+     | Refuse_slot_edit _ -> Alcotest.fail "the original editor cannot edit its slot");
+    open_runtime_lane_pick state (Pick_exact_lane Standalone_lane.Librarian);
+    state.runtime_lane_notice <- Some (Lane_write_committed committed_receipt);
+    state.runtime_lane_write <- write;
+    let draft = Masc_tui_runtime_config_edit.open_document
+      { path = "runtime.toml"; source_text = "original"; source_revision = "source-7" }
+      |> Masc_tui_runtime_config_edit.edit "unsaved draft" in
+    state.runtime_config_edits <-
+      [{ rce_workspace = ("workspace", "workspace/.masc"); rce_session = draft;
+         rce_rows = []; rce_view = Config_edit_draft }];
+    let original_configuration = state.standalone_lanes in
+    let original_drafts = state.runtime_config_edits in
+    let original_generation = state.lane_runs_generation in
+    begin_lane_run_list state Lane_run_identity.Workspace_curator;
+    Alcotest.(check bool) "the requested original observation owns history" true
+      (state.lanes_mode = Lanes_run_list Lane_run_identity.Workspace_curator);
+    Alcotest.(check bool) "no hidden editor or picker can intercept history keys" true
+      (Option.is_none state.slot_editor && Option.is_none state.runtime_lane_pick);
+    (match plan_slot_edit state Drop_slot with
+     | Refuse_slot_edit _ -> ()
+     | Send_slot_write _ -> Alcotest.fail "history can still mutate the hidden editor");
+    Alcotest.(check bool) "the previous editor notice is dismissed" true
+      (Option.is_none state.runtime_lane_notice);
+    Alcotest.(check bool) "the original model reading and draft are preserved" true
+      (state.standalone_lanes == original_configuration
+       && state.runtime_config_edits == original_drafts);
+    Alcotest.(check bool) "the original write and its receipt still settle" true
+      (state.runtime_lane_write = write);
+    Alcotest.(check int) "navigation does not grant or dispatch a read"
+      original_generation state.lane_runs_generation)
+    [ Lane_write_idle; Lane_write_posting;
+      Lane_write_rereading (Standalone_lanes_list, 7, committed_receipt) ]
+
+let test_the_slot_editor_edits_the_declared_order () =
+  let state = slot_editor_state () in
+  Alcotest.(check (list string)) "a rejected slot keeps its place"
+    [ "a (admitted)"; "rejected (declared)"; "b (admitted)" ]
+    (List.map
+       (fun row ->
+          Printf.sprintf "%s (%s)" row.sr_slot
+            (if row.sr_admitted then "admitted" else "declared"))
+       (slot_editor_rows state));
+  Alcotest.(check string) "the head cannot move up"
+    "refuse: a is already first in librarian_exact"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
+  Alcotest.(check string) "the head moves down"
+    "librarian_exact down a"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  let state = slot_editor_state ~cursor:1 () in
+  Alcotest.(check string) "a rejected slot is dropped like any other"
+    "librarian_exact drop rejected"
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  let state = slot_editor_state ~cursor:2 () in
+  Alcotest.(check string) "dropping the last row addresses its identity"
+    "librarian_exact drop b"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
+
+let test_the_slot_editor_keeps_the_last_slot () =
+  let state = slot_editor_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
+  Alcotest.(check string) "the lane needs one slot"
+    "refuse: only is the last slot of librarian_exact; an exact-output lane needs at least one"
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  (* A write already out is the other refusal both editors share: the writer
+     reads the declaration, but a second write sent before the first is read
+     back would be planned against rows the first replaced. *)
+  state.runtime_lane_write <- Lane_write_posting;
+  Alcotest.(check string) "a write already out holds the next edit"
+    "pending"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
+
+let test_the_slot_editor_edits_cli_slots_after_http () =
+  let state = slot_editor_state ~cursor:1 ~declared:[ "http" ]
+      ~admitted:[ "http" ] ~declared_cli:[ "cli-a"; "cli-rejected"; "cli-b" ]
+      ~admitted_cli:[ "cli-a"; "cli-b" ] () in
+  Alcotest.(check (list string)) "both source arrays are visible in execution order"
+    [ "http HTTP"; "cli-a CLI"; "cli-rejected CLI"; "cli-b CLI" ]
+    (List.map (fun row ->
+       row.sr_slot ^ " " ^
+       (match row.sr_kind with Catalog_slot -> "HTTP"
+        | Official_client_slot -> "CLI" | Media_route_slot -> "route"))
+       (slot_editor_rows state));
+  Alcotest.(check bool) "rejected CLI stays in its declared position" false
+    (List.nth (slot_editor_rows state) 2).sr_admitted;
+  Alcotest.(check string) "CLI row moves within CLI array"
+    "librarian_exact down cli-a"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  Alcotest.(check string) "HTTP/CLI boundary explains execution order"
+    "refuse: HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
+  select_slot_editor_row state 2;
+  Alcotest.(check string) "rejected CLI can be dropped"
+    "librarian_exact drop cli-rejected"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
+
+(* The same snapshot replacement and reconciliation used by async read-back.
+   Test selected destinations, not only the ordinal rendered beside them. *)
+let test_slot_selection_survives_refresh () =
+  let cases =
+    [ Catalog_slot, true; Catalog_slot, false;
+      Official_client_slot, true; Official_client_slot, false ]
+  in
+  List.iter (fun (kind, admitted) ->
+    let http, cli =
+      match kind with
+      | Catalog_slot -> ["before"; "selected"; "after"], ["selected"]
+      | Official_client_slot -> ["selected"], ["before"; "selected"; "after"]
+      | Media_route_slot -> assert false
+    in
+    let state = slot_editor_state ~declared:http ~declared_cli:cli
+        ~admitted:(if admitted then http else [])
+        ~admitted_cli:(if admitted then cli else [])
+        ~cursor:(if kind = Catalog_slot then 1 else 2) () in
+    let refresh http cli =
+      state.standalone_lanes <- Some
+        { sls_observed_at_unix = 1.; sls_exact_run_projection_count = 0;
+          sls_exact_run_source_total = 0; sls_exact_run_projection_truncated = false;
+          sls_lanes = [standalone_lane ~lane:Standalone_lane.Librarian
+            ~declared:http ~declared_cli:cli
+            ~admitted:(if admitted then http else [])
+            ~admitted_cli:(if admitted then cli else []) ()] };
+      reconcile_slot_editor_selection state
+    in
+    let check_selected index =
+      Alcotest.(check (option int)) "render position follows identity" (Some index)
+        (slot_editor_cursor_index state);
+      (match slot_editor_cursor_row state with
+       | None -> Alcotest.fail "config action lost selected slot"
+       | Some row ->
+         Alcotest.(check string) "config slot" "selected" row.sr_slot;
+         Alcotest.(check bool) "config kind" true (row.sr_kind = kind);
+         Alcotest.(check bool) "admission is independent of identity" admitted row.sr_admitted);
+      List.iter (fun edit ->
+        match plan_slot_edit state edit with
+        | Send_slot_write { slot; target; _ } ->
+          Alcotest.(check string) "write still names selection" "selected" slot;
+          Alcotest.(check bool) "write stays on original lane" true
+            (target = Exact_lane_slots Standalone_lane.Librarian)
+        | Refuse_slot_edit _ -> Alcotest.fail "selected middle row should be editable")
+        [Drop_slot; Move_slot Move_up; Move_slot Move_down]
+    in
+    (* Insert before, then reorder within the selected group. An identical
+       spelling in the other group must never become the selected row. *)
+    (match kind with
+     | Catalog_slot -> refresh ["inserted"; "before"; "selected"; "after"] cli; check_selected 2;
+       refresh ["after"; "selected"; "before"; "inserted"] cli; check_selected 1;
+       refresh ["after"; "before"] cli
+     | Official_client_slot -> refresh ["inserted"; "selected"] ["before"; "selected"; "after"]; check_selected 3;
+       refresh ["selected"] ["after"; "selected"; "before"]; check_selected 2;
+       refresh ["selected"] ["after"; "before"]
+     | Media_route_slot -> assert false);
+    Alcotest.(check bool) "removal disables config" true
+      (Option.is_none (slot_editor_cursor_row state));
+    List.iter (fun edit ->
+      match plan_slot_edit state edit with
+      | Refuse_slot_edit _ -> ()
+      | Send_slot_write _ -> Alcotest.fail "removed selection wrote a neighbour")
+      [Drop_slot; Move_slot Move_up; Move_slot Move_down];
+    refresh http cli;
+    Alcotest.(check bool) "reappearance does not silently reselect" true
+      (Option.is_none (slot_editor_cursor_row state));
+    navigate_slot_editor state Move_down;
+    Alcotest.(check (option int)) "explicit navigation restores selection" (Some 0)
+      (slot_editor_cursor_index state);
+    state.standalone_lanes <- Some
+      { sls_observed_at_unix = 2.; sls_exact_run_projection_count = 0;
+        sls_exact_run_source_total = 0; sls_exact_run_projection_truncated = false;
+        sls_lanes = [standalone_lane ~lane:Standalone_lane.Verifier
+          ~declared:http ~admitted:http ~declared_cli:cli ()] };
+    reconcile_slot_editor_selection state;
+    Alcotest.(check bool) "another lane's same IDs cannot substitute" true
+      (Option.is_none (slot_editor_cursor_row state))) cases
+
+let test_slot_editor_keys_parse () =
+  Alcotest.(check (list string)) "the editor's own keys"
+    [ "drop"; "down"; "up"; "first"; "none" ]
+    (List.map
+       (fun key ->
+          match slot_edit_of_key key with
+          | Some Drop_slot -> "drop"
+          | Some First_slot -> "first"
+          | Some (Move_slot Move_down) -> "down"
+          | Some (Move_slot Move_up) -> "up"
+          | None -> "none")
+       [ "x"; "J"; "K"; "1"; "a" ])
+
+let test_exact_replacement_search_exposes_model_effort_and_same_group () =
+  let state = slot_editor_state ~declared:[] ~admitted:[]
+      ~declared_cli:["account.current"] ~admitted_cli:["account.current"] () in
+  let selected = { (runtime "account.luna-medium") with
+    ro_model = "gpt-6-luna"; ro_provider_id = "account";
+    ro_exact_slot_group = Tui_decode.Exact_cli_slots;
+    ro_effective_max_context = 750000;
+    ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.Medium } in
+  state.runtime_catalog <- [runtime "http.other"; selected;
+    { selected with ro_id = "account.current" }];
+  let pick = Pick_exact_lane_replacement
+      (Standalone_lane.Librarian, "account.current", Tui_decode.Exact_cli_slots) in
+  List.iter (fun reading ->
+    state.runtime_catalog_reading <- reading;
+    open_runtime_lane_pick state pick;
+    let _, _, rows = runtime_picker_rows state pick in
+    Alcotest.(check int) "cached replacement choices cannot be submitted" 0 (List.length rows);
+    match state.runtime_lane_pick with
+    | Some (_, list) ->
+        (match Masc_tui_pick_list.apply ~page:runtime_picker_page
+           ~label:(runtime_picker_label_for pick) rows list Masc_tui_pick_list.Choose with
+         | Masc_tui_pick_list.Stay _ -> ()
+         | _ -> Alcotest.fail "Enter acted on an unconfirmed replacement catalogue")
+    | None -> Alcotest.fail "replacement picker is closed")
+    [Runtime_catalog_unread; Runtime_catalog_loading; Runtime_catalog_failed "offline"];
+  state.runtime_catalog_reading <- Runtime_catalog_read;
+  open_runtime_lane_pick state pick;
+  press state (List.init (String.length "luna medium")
+    (fun index -> String.make 1 "luna medium".[index]));
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check (list string)) "search chooses a configured model with declared effort"
+       ["account.luna-medium"] (List.map runtime_picker_choice_id picker.rlp_choices)
+   | None -> Alcotest.fail "replacement picker is closed");
+  open_runtime_lane_pick state pick;
+  press state (List.init (String.length "750k context")
+    (fun index -> String.make 1 "750k context".[index]));
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check (list string)) "search matches the visible formatted context"
+       ["account.luna-medium"] (List.map runtime_picker_choice_id picker.rlp_choices)
+   | None -> Alcotest.fail "replacement picker is closed");
+  state.runtime_catalog <- [{ selected with ro_id = "account.current" }];
+  state.runtime_catalog_reading <- Runtime_catalog_read;
+  open_runtime_lane_pick state pick;
+  (match runtime_picker_projection state with
+   | Some picker ->
+     Alcotest.(check string) "loaded catalogue has no eligible replacement"
+       "  (no eligible replacement in this candidate group)" (runtime_picker_empty_note picker)
+   | None -> Alcotest.fail "replacement picker is closed");
+  List.iter (fun (reading, expected) ->
+    state.runtime_catalog_reading <- reading;
+    match runtime_picker_projection state with
+    | Some picker -> Alcotest.(check string) "cached rows do not imply a fresh read"
+        expected (runtime_picker_empty_note picker)
+    | None -> Alcotest.fail "replacement picker is closed")
+    [ Runtime_catalog_loading, "  (runtime catalogue loading)"
+    ; Runtime_catalog_failed "offline", "  (runtime catalogue read failed: offline)" ];
+  Alcotest.(check string) "first means first within the declared group"
+    "librarian_exact first in group account.current"
+    (slot_plan_text (plan_slot_edit state First_slot));
+  Alcotest.(check bool) "replacement sends one operation rather than replacing a stale list"
+    false (runtime_lane_pick_sends_whole_order pick)
+
+(* A lane no [runtime.lanes.<id>] table declares reaches this surface as one
+   candidate in first position -- the same shape a declared lane holding one
+   candidate has. The row fact is the only thing that separates them. *)
+let fact_text = function
+  | Lane_undeclared -> "runtime, not a declared lane"
+  | Lane_single_candidate -> "single candidate"
+  | Lane_head -> "head"
+  | Lane_fallback position -> Printf.sprintf "fallback #%d" position
+
+let test_an_undeclared_lane_is_not_read_as_a_single_candidate () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_route = Some "a"; rrs_default_runtime_id = Some "a";
+      rrs_media_failover = []; rrs_media_failover_declared = [];
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes =
+        [{rrl_id = "solo"; rrl_runtime_ids = ["a"]; rrl_declared = true};
+         {rrl_id = "b"; rrl_runtime_ids = ["b"]; rrl_declared = false};
+         {rrl_id = "pair"; rrl_runtime_ids = ["c"; "a"]; rrl_declared = true}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "the surface did not join"
+   | Some snapshot ->
+     Alcotest.(check (list string)) "one fact per row"
+       ["single candidate"; "runtime, not a declared lane"; "head"; "fallback #1"]
+       (List.map (fun row -> fact_text (runtime_lane_fact_of_row row))
+          snapshot.Masc.Tui_decode.rss_candidates));
+  state.runtime_cursor <- 1;
+  expect_plan "D refuses the runtime row before arming" state remove
+    "refuse: b is a runtime, not a declared lane; there is no table to remove"
+
+(* An undeclared lane carries the id of the runtime it rests on, so offering
+   it as a lane put the same assignment in the picker twice -- once labelled a
+   lane that walks, once the runtime it actually is. *)
+let test_the_picker_offers_only_declared_lanes () =
+  let state = state () in
+  state.runtime_lanes <-
+    [{rrl_id = "coding"; rrl_runtime_ids = ["a"; "b"]; rrl_declared = true};
+     {rrl_id = "b"; rrl_runtime_ids = ["b"]; rrl_declared = false}];
+  state.runtime_catalog <- [runtime "a"; runtime "b"];
+  Alcotest.(check (list string)) "what the picker offers"
+    ["lane coding"; "model a"; "model b"]
+    (List.map
+       (function
+         | Pick_lane (lane, _) -> "lane " ^ lane.Masc.Tui_decode.rrl_id
+         | Pick_model model -> "model " ^ model.Masc.Tui_decode.ro_id)
+        (runtime_picker_items state))
+
+(* [runtime].media_failover is written as a whole list -- the routing endpoint
+   has no per-entry action for it -- so the editor shows the file's
+   declaration rather than the shorter admitted fleet. An entry boot could not
+   resolve keeps its position and is marked, exactly like a rejected
+   exact-lane slot, so moving or dropping a neighbour cannot erase it. *)
+let media_failover_state ?(cursor = 0) ?(declared = [ "a"; "b" ]) ?(admitted = [ "a"; "b" ]) () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_route = Some "a"; rrs_default_runtime_id = Some "a";
+      rrs_media_failover = admitted; rrs_media_failover_declared = declared;
+      rrs_runtimes = [runtime "a"; runtime "b"; runtime "c"];
+      rrs_lanes = [{rrl_id = "solo"; rrl_runtime_ids = ["c"]; rrl_declared = true}] } in
+  (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+   | Ok snapshot -> state.runtime_surface <- Some snapshot
+   | Error detail -> Alcotest.fail detail);
+  open_slot_editor state Media_failover_slots;
+  select_slot_editor_row state cursor;
+  state
+
+let test_media_slot_selection_survives_refresh () =
+  let state = media_failover_state ~cursor:1 () in
+  let refresh declared =
+    let replacement = media_failover_state ~declared () in
+    state.runtime_surface <- replacement.runtime_surface;
+    reconcile_slot_editor_selection state
+  in
+  refresh ["inserted"; "b"; "a"];
+  Alcotest.(check string) "route reorder still acts on b"
+    "[runtime].media_failover order [b; inserted; a] b"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
+  refresh ["b"; "a"; "inserted"];
+  Alcotest.(check (option int)) "render follows moved route identity" (Some 0)
+    (slot_editor_cursor_index state);
+  refresh ["a"; "inserted"];
+  Alcotest.(check bool) "removed route has no config target" true
+    (Option.is_none (slot_editor_cursor_row state));
+  Alcotest.(check string) "removed route cannot drop a neighbour"
+    "refuse: no slot is under the cursor"
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  refresh ["b"; "a"; "inserted"];
+  Alcotest.(check bool) "reappearing route stays deselected" true
+    (Option.is_none (slot_editor_cursor_row state));
+  navigate_slot_editor state Move_up;
+  Alcotest.(check (option int)) "explicit up selects the final current row" (Some 2)
+    (slot_editor_cursor_index state)
+
+(* The route editor sends the order it read, in full, and it reads that order
+   off the same list the candidate guard watches. After a failed read-back
+   that order is evidence of the state before the last write, so sending it
+   restores whatever that write removed.
+
+   The conversation-lane editor has refused this since the guard was written.
+   The route editor did not: its plan asked only whether a write was in
+   flight, and the pick list put [Pick_media_failover] on the unguarded side
+   of a match whose comment said only the conversation-lane arm sends the
+   order in full. *)
+let test_the_route_editor_will_not_write_from_a_stale_list () =
+  let stale state =
+    state.runtime_surface_generation <- 1;
+    state.runtime_lane_write <- Lane_write_posting;
+    settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
+    runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
+      (Error "HTTP 503: down")
+  in
+  let refusal =
+    "refuse: the lane list may be stale; reload it before changing candidates"
+  in
+  let state = media_failover_state () in
+  stale state;
+  Alcotest.(check string) "a move is refused" refusal
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  Alcotest.(check string) "so is a drop" refusal
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  Alcotest.(check string) "and the stale line says why" stale_after_503
+    (stale_text state);
+  (* An exact lane names the one slot it changes and the writer reads the
+     declared order under its lock, so a stale reading here cannot undo
+     anything and the edit still lands. *)
+  let exact = slot_editor_state () in
+  stale exact;
+  Alcotest.(check string) "an exact lane's drop is untouched"
+    "librarian_exact drop a"
+    (slot_plan_text (plan_slot_edit exact Drop_slot))
+
+(* Which writes a stale list can undo is one question, asked of the value
+   rather than of a list of constructors written at each dispatch. Both
+   vocabularies answer it exhaustively, so a pick or a slot target added later
+   has to choose a side instead of inheriting the unguarded one. *)
+let test_the_writes_a_stale_list_can_undo_are_named_once () =
+  let pick name expected value =
+    Alcotest.(check bool) name expected
+      (runtime_lane_pick_sends_whole_order value)
+  in
+  pick "a conversation lane sends its whole order" true
+    (Pick_conversation_lane "coding");
+  pick "so does the media failover route" true Pick_media_failover;
+  pick "an exact lane appends one slot" false (Pick_exact_lane Standalone_lane.Verifier);
+  pick "a new lane sends only the pick" false (Pick_new_lane "fresh");
+  pick "the default is one entry, replaced" false Pick_route_default;
+  Alcotest.(check bool) "the route editor sends its whole order" true
+    (slot_editor_target_sends_whole_order Media_failover_slots);
+  Alcotest.(check bool) "the exact-lane editor names one slot" false
+    (slot_editor_target_sends_whole_order (Exact_lane_slots Standalone_lane.Verifier))
+
+let test_the_route_editor_writes_the_whole_order () =
+  let state = media_failover_state () in
+  Alcotest.(check (list string)) "the route's entries, in call order"
+    [ "a"; "b" ]
+    (List.map (fun row -> row.sr_slot) (slot_editor_rows state));
+  Alcotest.(check string) "a move sends the reordered list"
+    "[runtime].media_failover order [b; a] a"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  Alcotest.(check string) "a drop sends what is left"
+    "[runtime].media_failover order [b] a"
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  (* An empty route is a configuration, not a broken one: no vision runtimes. The
+     exact-lane editor refuses its last slot; this one does not. *)
+  let state = media_failover_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
+  Alcotest.(check string) "the last entry may go"
+    "[runtime].media_failover order [] only"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
+
+(* An entry boot could not resolve is still the file's, so it is listed where
+   the file puts it and edited there. Writing the admitted list alone would
+   have deleted it. *)
+let test_the_route_editor_keeps_an_unresolved_entry_in_place () =
+  let state =
+    media_failover_state ~declared:[ "a"; "gone.model"; "b" ] ~admitted:[ "a"; "b" ] ()
+  in
+  Alcotest.(check (list string)) "the declaration is what the editor lists"
+    [ "a (admitted)"; "gone.model (declared)"; "b (admitted)" ]
+    (List.map
+       (fun row ->
+          Printf.sprintf "%s (%s)" row.sr_slot
+            (if row.sr_admitted then "admitted" else "declared"))
+       (slot_editor_rows state));
+  Alcotest.(check string) "a move past it carries it along"
+    "[runtime].media_failover order [gone.model; a; b] a"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  let state =
+    media_failover_state ~cursor:1 ~declared:[ "a"; "gone.model"; "b" ]
+      ~admitted:[ "a"; "b" ] ()
+  in
+  Alcotest.(check string) "and it can be dropped from where it sits"
+    "[runtime].media_failover order [a; b] gone.model"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
+
+let catalogue_state () =
+  let state = state () in
+  state.runtime_catalog_reading <- Runtime_catalog_read;
+  state.runtime_catalog <-
+    [ runtime "anthropic.claude"; runtime "openai.gpt"; runtime "ollama.qwen";
+      runtime "zai.glm"; runtime "kimi.k2" ];
+  open_runtime_lane_pick state (Pick_conversation_lane "primary");
+  state.view <- Runtime;
+  state
+
+let drawn state =
+  match runtime_picker_projection state with
+  | None -> Alcotest.fail "the picker is not drawn"
+  | Some picker ->
+      ( List.map runtime_picker_choice_id picker.rlp_choices,
+        Option.bind picker.rlp_selected_row (fun row ->
+          Option.map runtime_picker_choice_id
+            (List.nth_opt picker.rlp_choices row)),
+        picker )
+
+let test_default_route_picker_keeps_the_lane_name () =
+  let state = lane_state () in
+  state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "resolved routes are unread"
+   | Some snapshot ->
+       apply_runtime_catalog state
+         (state.runtime_catalog, snapshot.rss_resolved.rrs_lanes, [], Some "primary");
+       state.runtime_surface <- Some { snapshot with
+         rss_resolved = { snapshot.rss_resolved with rrs_default_route = Some "primary" } });
+  open_runtime_lane_pick state Pick_route_default;
+  let already, _, choices = runtime_picker_rows state Pick_route_default in
+  Alcotest.(check (list string)) "the configured route stays a lane"
+    ["primary"] already;
+  Alcotest.(check (list string)) "declared lanes and runtimes share the picker"
+    ["primary"; "solo"; "a"; "b"; "c"]
+    (List.map runtime_picker_choice_id choices);
+  (* A second client changes the route before the picker catalog refresh.
+     The Runtime surface still holds primary, but the fresh picker must not. *)
+  apply_runtime_catalog state
+    (state.runtime_catalog, state.runtime_lanes, [], Some "solo");
+  let already, _, choices = runtime_picker_rows state Pick_route_default in
+  Alcotest.(check (list string)) "fresh picker route supersedes the older surface"
+    ["solo"] already;
+  Alcotest.(check (list string)) "fresh route shares its catalog choices"
+    ["primary"; "solo"; "a"; "b"; "c"]
+    (List.map runtime_picker_choice_id choices);
+  press state ["/"; "p"; "r"; "i"];
+  let rows, selected, _ = drawn state in
+  Alcotest.(check (list string)) "filter finds the route name" ["primary"] rows;
+  Alcotest.(check (option string)) "the lane is the selectable row"
+    (Some "primary") selected;
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "resolved routes are unread"
+   | Some snapshot ->
+     let lanes = List.map (fun lane ->
+       if lane.Tui_decode.rrl_id = "primary" then
+         { lane with rrl_id = "a"; rrl_runtime_ids = ["b"; "a"] }
+       else lane) state.runtime_lanes in
+     state.runtime_lanes <- lanes;
+     state.runtime_surface <- Some {snapshot with rss_resolved =
+       {snapshot.rss_resolved with rrs_lanes = lanes}});
+  let _, _, collision_choices = runtime_picker_rows state Pick_route_default in
+  Alcotest.(check int) "a colliding route has one selectable row" 1
+    (List.length (List.filter (fun choice -> runtime_picker_choice_id choice = "a") collision_choices));
+  Alcotest.(check bool) "the colliding route preserves lane precedence" true
+    (match List.find_opt (fun choice -> runtime_picker_choice_id choice = "a") collision_choices with
+     | Some (Lane_choice lane) -> lane.rrl_runtime_ids = ["b"; "a"]
+     | Some (Runtime_choice _) | None -> false)
+
+let test_default_route_picker_uses_refreshed_lanes () =
+  let state = lane_state () in
+  open_runtime_lane_pick state Pick_route_default;
+  (* The catalogue read finishes after the picker opens; the surface still
+     carries primary and solo, while the fresh inventory has a colliding a. *)
+  state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
+  state.runtime_lanes <-
+    [{rrl_id = "a"; rrl_runtime_ids = ["b"; "a"]; rrl_declared = true}];
+  let check label =
+    let _, _, choices = runtime_picker_rows state Pick_route_default in
+    Alcotest.(check (list string)) label ["a"; "b"; "c"]
+      (List.map runtime_picker_choice_id choices);
+    Alcotest.(check bool) "the fresh lane shadows runtime a" true
+      (match choices with
+       | Lane_choice lane :: _ -> lane.rrl_runtime_ids = ["b"; "a"]
+       | Runtime_choice _ :: _ | [] -> false)
+  in
+  check "stale surface does not replace fresh lanes";
+  state.runtime_surface <- None;
+  check "fresh lanes are offered without a surface"
+
+(* The operator types part of a runtime id and the drawn choices are the ones
+   that carry it; the header says how many of the catalogue those are. *)
+let test_a_typed_filter_narrows_the_drawn_choices () =
+  let state = catalogue_state () in
+  press state [ "/"; "o"; "l" ];
+  let rows, selected, picker = drawn state in
+  Alcotest.(check (list string)) "only the ids with ol" [ "ollama.qwen" ] rows;
+  Alcotest.(check (option string)) "and it is under the cursor" (Some "ollama.qwen") selected;
+  Alcotest.(check string) "the header counts the catalogue"
+    "filter: ol\xe2\x96\x8f 1 of 5" picker.rlp_summary;
+  Alcotest.(check bool) "the filter holds typed keys" true
+    (text_input_target state ~compact_viewport:false = Some Text_runtime_picker_filter);
+  Alcotest.(check bool) "and so holds q" false
+    (quit_key_allowed_for (text_input_target state ~compact_viewport:false))
+
+(* A filter nothing matches draws one row that says so, and not the row an
+   unread catalogue draws: the fix for one is typing, for the other waiting. *)
+let test_an_empty_match_is_not_an_unread_catalogue () =
+  let filtered = catalogue_state () in
+  press filtered [ "/"; "x"; "y" ];
+  let rows, selected, picker = drawn filtered in
+  Alcotest.(check (list string)) "nothing is drawn" [] rows;
+  Alcotest.(check (option string)) "nothing is selected" None selected;
+  Alcotest.(check string) "the note says the filter kept nothing"
+    "  (no runtime among 5 matches the filter)" (runtime_picker_empty_note picker);
+  let unread = state () in
+  open_runtime_lane_pick unread (Pick_conversation_lane "primary");
+  let _, _, picker = drawn unread in
+  Alcotest.(check string) "an unread catalogue still says unread"
+    "  (runtime catalogue unread)" (runtime_picker_empty_note picker)
+
+(* The filter matches the text the row draws. A model id carrying a control
+   byte is drawn with it escaped, and typing what is drawn finds it. *)
+let test_the_filter_matches_the_drawn_text () =
+  let state = catalogue_state () in
+  let odd = { (runtime "odd.id") with ro_model = "mod\nel" } in
+  state.runtime_catalog <- odd :: state.runtime_catalog;
+  (match state.runtime_lane_pick with
+   | None -> Alcotest.fail "no picker"
+   | Some (pick, list) ->
+       state.runtime_lane_pick <-
+         Some (pick, Masc_tui_pick_list.type_text list "mod\\x0Ael"));
+  let rows, _, _ = drawn state in
+  Alcotest.(check (list string)) "the escaped text finds it" [ "odd.id" ] rows;
+  Alcotest.(check string) "the label is the drawn, escaped text"
+    "odd.id   provider / mod\\x0Ael" (runtime_picker_label (Runtime_choice odd))
+
+(* A reload that shortens the catalogue under a cursor on its last row draws
+   the new last row selected, never a cursor past the end. *)
+let test_the_drawn_cursor_clamps_to_a_shorter_catalogue () =
+  let state = catalogue_state () in
+  press state [ "end" ];
+  state.runtime_catalog <- [ runtime "anthropic.claude"; runtime "openai.gpt" ];
+  let rows, selected, _ = drawn state in
+  Alcotest.(check (list string)) "both are drawn" [ "anthropic.claude"; "openai.gpt" ] rows;
+  Alcotest.(check (option string)) "the last is selected" (Some "openai.gpt") selected
+
+(* The Keeper runtime picker (Keepers, [U]): the declared lanes first, then
+   the whole catalogue, one list the filter reads across. *)
+let keeper_picker_rows = 40
+
+let keeper_picker_state () =
+  let state = state () in
+  state.runtime_lanes <-
+    [ { rrl_id = "coding"; rrl_runtime_ids = [ "anthropic.claude"; "zai.glm" ];
+        rrl_declared = true };
+      { rrl_id = "vision"; rrl_runtime_ids = [ "openai.gpt" ]; rrl_declared = true } ];
+  state.runtime_catalog <-
+    [ runtime "anthropic.claude"; runtime "openai.gpt"; runtime "ollama.qwen";
+      runtime "zai.glm" ];
+  state.runtime_pick_keeper <- Some "alpha";
+  state.view <- Keepers Keeper_runtime_pick;
+  state
+
+(* The picker's list after these keys, through the list, label and page the
+   key handler reads. A key that closes or picks fails the check. *)
+let keeper_pick_after state keys =
+  List.fold_left
+    (fun list key ->
+      match Masc_tui_pick_list.action_of_key ~close_keys:[] list key with
+      | None -> Alcotest.failf "key %S is not the picker's" key
+      | Some action -> (
+          match
+            Masc_tui_pick_list.apply
+              ~page:(keeper_runtime_picker_page state ~terminal_rows:keeper_picker_rows)
+              ~label:runtime_pick_label (runtime_picker_items state) list action
+          with
+          | Masc_tui_pick_list.Stay list -> list
+          | Masc_tui_pick_list.Chosen _ | Masc_tui_pick_list.Dismissed ->
+              Alcotest.failf "key %S left the picker" key))
+    state.runtime_pick_list keys
+
+let keeper_drawn ?(terminal_rows = keeper_picker_rows) state =
+  let view = keeper_runtime_picker_view state ~terminal_rows in
+  ( List.map runtime_pick_item_id view.Masc_tui_pick_list.rows,
+    Option.bind view.Masc_tui_pick_list.selected_row (fun row ->
+      Option.map runtime_pick_item_id (List.nth_opt view.Masc_tui_pick_list.rows row)),
+    view )
+
+let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
+  let state = keeper_picker_state () in
+  let rows, selected, view = keeper_drawn state in
+  Alcotest.(check (list string)) "lanes first, then the catalogue"
+    [ "coding"; "vision"; "anthropic.claude"; "openai.gpt"; "ollama.qwen"; "zai.glm" ] rows;
+  Alcotest.(check (option string)) "the head is selected" (Some "coding") selected;
+  Alcotest.(check string) "the header counts both groups" "6 of 6 \xc2\xb7 / filter"
+    (keeper_runtime_picker_summary view);
+  (* "gl" is in the coding lane's route and in zai.glm's id: both stay, lane
+     first, so the order across the two groups is kept. *)
+  state.runtime_pick_list <- keeper_pick_after state [ "/"; "g"; "l" ];
+  let rows, selected, view = keeper_drawn state in
+  Alcotest.(check (list string)) "the filter reads the lane route and the id"
+    [ "coding"; "zai.glm" ] rows;
+  Alcotest.(check (option string)) "the first match is under the cursor" (Some "coding") selected;
+  Alcotest.(check string) "the header names the filter"
+    "filter: gl\xe2\x96\x8f 2 of 6 \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter"
+    (keeper_runtime_picker_summary view);
+  (* The badge is drawn, so it is filtered on: "lane" keeps the lanes. *)
+  state.runtime_pick_list <- keeper_pick_after state [ "\127"; "\127"; "l"; "a"; "n"; "e" ];
+  let rows, _, _ = keeper_drawn state in
+  Alcotest.(check (list string)) "the drawn [LANE] badge narrows to lanes"
+    [ "coding"; "vision" ] rows;
+  Alcotest.(check bool) "the filter holds typed keys" true
+    (text_input_target state ~compact_viewport:false = Some Text_keeper_runtime_picker_filter);
+  Alcotest.(check bool) "and so holds q" false
+    (quit_key_allowed_for (text_input_target state ~compact_viewport:false))
+
+(* A reload that shortens the list under a cursor on its last row draws the
+   new last row selected. *)
+let test_the_keeper_picker_cursor_clamps_to_a_shorter_list () =
+  let state = keeper_picker_state () in
+  state.runtime_pick_list <- keeper_pick_after state [ "end" ];
+  state.runtime_lanes <- [];
+  state.runtime_catalog <- [ runtime "anthropic.claude"; runtime "openai.gpt" ];
+  let rows, selected, _ = keeper_drawn state in
+  Alcotest.(check (list string)) "both are drawn" [ "anthropic.claude"; "openai.gpt" ] rows;
+  Alcotest.(check (option string)) "the last is selected" (Some "openai.gpt") selected
+
+(* The picker fills the screen, so the window stays on the first page while
+   the cursor walks it, and a page key moves by the rows drawn. *)
+let test_the_keeper_picker_window_follows_the_cursor () =
+  let state = keeper_picker_state () in
+  state.runtime_catalog <- List.init 60 (fun i -> runtime (Printf.sprintf "r%02d" i));
+  let page = keeper_runtime_picker_page state ~terminal_rows:keeper_picker_rows in
+  Alcotest.(check bool) "a page is shorter than the list" true (page < 62);
+  state.runtime_pick_list <- keeper_pick_after state [ "j"; "j" ];
+  let rows, selected, _ = keeper_drawn state in
+  Alcotest.(check (option string)) "the head stays drawn" (Some "coding") (List.nth_opt rows 0);
+  Alcotest.(check (option string)) "the cursor moved down" (Some "r00") selected;
+  Alcotest.(check int) "a whole page is drawn" page (List.length rows);
+  state.runtime_pick_list <- keeper_pick_after state [ "pagedown" ];
+  let rows, selected, view = keeper_drawn state in
+  Alcotest.(check (option string)) "PgDn moves a page"
+    (Some (Printf.sprintf "r%02d" page)) selected;
+  Alcotest.(check (option int)) "and the cursor rides the last drawn row"
+    (Some (page - 1)) view.Masc_tui_pick_list.selected_row;
+  Alcotest.(check int) "still a whole page" page (List.length rows)
+
+let test_account_usage_stays_spent_until_new_report () =
+  let open Masc.Tui_decode_usage in
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
+    | Some snapshot -> snapshot
+    | None -> Alcotest.fail "missing fixture" in
+  let window = { puw_limit_id = Some "account-bucket";
+    puw_kind = Window_seven_day; puw_role = Role_gates_model_calls;
+    puw_utilization = Utilization_percent 100; puw_resets_at = Some 1.;
+    puw_observed_at = 0. } in
+  let account window = { pua_scope = "account:1"; pua_scope_id = "fixture";
+    pua_providers = []; pua_state = Account_reported (window, []) } in
+  let resolved window = { snapshot.rss_resolved with
+    rrs_usage = Ok { puws_since = 0.; puws_accounts = [account window] } } in
+  let rt = { (runtime "a") with ro_quota_scope = Some "account:1" } in
+  state.runtime_surface <- Some {snapshot with rss_resolved = resolved window};
+  Alcotest.(check bool) "observed spent usage de-emphasizes the runtime" true
+    (runtime_row_deemphasized state rt);
+  let count resolved rt = match runtime_spent_usage resolved rt with
+    | Ok windows -> List.length windows
+    | Error detail -> Alcotest.fail detail in
+  expect "past reset and no refusal do not clear observed spending" 1
+    (count (resolved window) rt);
+  expect "new report below limit clears warning" 0
+    (count (resolved {window with puw_utilization = Utilization_percent 99}) rt);
+  expect "rounded display100 is not actual exhaustion" 0
+    (count (resolved {window with puw_utilization = Utilization_fraction 0.999}) rt);
+  expect "non-model-call bucket does not warn" 0
+    (count (resolved {window with puw_role = Role_counts_other_use}) rt);
+  expect "unclassified bucket does not assert model-call exhaustion" 0
+    (count (resolved {window with puw_role = Role_unclassified_limit}) rt);
+  Alcotest.(check bool) "another account does not inherit evidence" true
+    (Result.is_error (runtime_spent_usage (resolved window)
+       {rt with ro_quota_scope = Some "account:2"}));
+  Alcotest.(check bool) "failed usage decode stays unknown" true
+    (Result.is_error (runtime_spent_usage
+       {snapshot.rss_resolved with rrs_usage = Error "bad report"} rt))
+
+let test_credit_cap_removal_clears_spent_warning () =
+  let module Usage = Runtime_provider_usage_window in
+  let open Masc.Tui_decode_usage in
+  let scope = Runtime_quota_window.scope_of_credential
+      ~provider_id:"usage_cap_removal_runtime_fixture" None in
+  let snapshot = match (lane_state ()).runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let record at body =
+    match Usage.decode_openrouter_key (Yojson.Safe.from_string body) with
+    | Error detail -> Alcotest.fail (Usage.decode_error_to_string detail)
+    | Ok report -> Usage.record ~scope ~observed_at:at report in
+  let reading () =
+    let json = Server_dashboard_runtime_resolved_json.build
+        ~generated_at_iso:"2026-10-04T00:00:00Z"
+        ~config:(Masc.Workspace.default_config (Filename.get_temp_dir_name ())) in
+    let usage = match decode_provider_usage_windows json with
+      | Ok usage -> usage | Error detail -> Alcotest.fail detail in
+    let account = List.find (fun account -> account.pua_scope_id =
+      Server_provider_usage_history.scope_id scope) usage.puws_accounts in
+    let rt = { (runtime "credit") with ro_quota_scope = Some account.pua_scope } in
+    let windows = match runtime_spent_usage
+        { snapshot.rss_resolved with rrs_usage = Ok usage } rt with
+      | Ok windows -> windows | Error detail -> Alcotest.fail detail in
+    account, List.length windows in
+  record 100. {|{"data":{"limit":20,"limit_remaining":0}}|};
+  expect "spent credit cap warns" 1 (snd (reading ()));
+  record 101. {|{"data":{"limit":null,"usage":21.5}}|};
+  let account, warnings = reading () in
+  expect "removing the cap removes the old spent warning" 0 warnings;
+  (match account.pua_state with
+   | Account_reported ({ puw_utilization = Utilization_usd { used; limit = None }; _ }, []) ->
+       Alcotest.(check (float 0.0001)) "only current uncapped USD remains" 21.5 used
+   | _ -> Alcotest.fail "stale credit-cap window survived the complete report");
+  record 102. {|{"data":{"limit":null}}|};
+  let account, warnings = reading () in
+  expect "empty complete report has no spent warning" 0 warnings;
+  (match account.pua_state with
+   | Account_reported_no_windows { observed_at; _ } ->
+       Alcotest.(check (float 0.0)) "empty report keeps its observation time" 102. observed_at
+   | _ -> Alcotest.fail "empty report became a missing report");
+  record 100.5 {|{"data":{"limit":20,"limit_remaining":0}}|};
+  expect "late older snapshot cannot resurrect the removed cap" 0 (snd (reading ()))
+
+let test_default_lane_route_counts_unassigned_keepers () =
+  let keeper name : Masc.Tui_decode.keeper =
+    { k_origin = Masc.Tui_decode.Persisted_keeper
+    ; k_name = name
+    ; k_paused = false
+    ; k_identity =
+        Ok
+          { k_trace_id = name
+          ; k_created_at = "2026-10-01T00:00:00Z"
+          ; k_updated_at = "2026-10-01T00:00:00Z"
+          }
+    ; k_activity = None
+    }
+  in
+  let names ks = List.map (fun (k : Masc.Tui_decode.keeper) -> k.k_name) ks in
+  let state = lane_state () in
+  state.keepers <- [ keeper "unassigned-imp"; keeper "explicit-solo" ];
+  state.runtime_assignments <-
+    [ { ra_keeper = "explicit-solo"
+      ; ra_source = Explicit_runtime
+      ; ra_resolution = Runtime_assignment_lane "solo"
+      }
+    ];
+  (match state.runtime_surface with
+   | None -> Alcotest.fail "missing runtime surface"
+   | Some snapshot ->
+     let resolved =
+       { snapshot.rss_resolved with
+         rrs_default_route = Some "primary"
+       ; rrs_default_runtime_id = Some "a"
+       }
+     in
+     match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
+     | Ok joined -> state.runtime_surface <- Some joined
+     | Error detail -> Alcotest.fail detail);
+  Alcotest.(check (list string))
+    "unassigned keeper is counted on the default lane"
+    [ "unassigned-imp" ]
+    (names (keepers_for_lane state "primary"));
+  Alcotest.(check (list string))
+    "explicitly assigned keeper remains on its own lane"
+    [ "explicit-solo" ]
+    (names (keepers_for_lane state "solo"));
+  Alcotest.(check (list string))
+    "entry runtime has no direct keeper when default route is a lane"
+    []
+    (names (keepers_for_runtime state "a"));
+  Alcotest.(check (list string))
+    "both candidates of the default lane include the unassigned keeper via lanes"
+    [ "unassigned-imp" ]
+    (names (keepers_for_runtime_with_lanes state ~lanes:[ "primary" ] "a"));
+  Alcotest.(check (list string))
+    "fallback candidate of the default lane also includes the unassigned keeper"
+    [ "unassigned-imp" ]
+    (names (keepers_for_runtime_with_lanes state ~lanes:[ "primary" ] "b"))
+
+let () = Alcotest.run "runtime list geometry"
+  ["operator states", [ Alcotest.test_case "history replaces an editor and preserves its work" `Quick
+        test_history_replaces_the_editor_without_replacing_its_work;
+       Alcotest.test_case "dismissed commit stays dismissed after reread" `Quick test_dismissed_commit_stays_dismissed_after_reread;
+       Alcotest.test_case "commit application survives successful and failed rereads" `Quick test_commit_application_survives_reread;
+      Alcotest.test_case "refusing runtimes are de-emphasized without changing order" `Quick
+        test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order;
+      Alcotest.test_case "account usage survives reset until new report" `Quick
+        test_account_usage_stays_spent_until_new_report;
+        Alcotest.test_case "credit cap removal reaches runtime warning" `Quick
+          test_credit_cap_removal_clears_spent_warning;
+        Alcotest.test_case "a move past either end is no move" `Quick test_a_move_past_either_end_is_no_move;
+        Alcotest.test_case "a lane edit sends the whole order" `Quick test_a_lane_edit_sends_the_whole_order;
+        Alcotest.test_case "a lane edit waits for the previous write" `Quick test_a_lane_edit_waits_for_the_previous_write;
+        Alcotest.test_case "lane keys parse to edits" `Quick test_lane_keys_parse_to_edits;
+        Alcotest.test_case "a rename opens the field on the current name" `Quick
+        test_a_rename_opens_the_field_on_the_current_name;
+        Alcotest.test_case "a written list holds edits until its re-read" `Quick test_a_written_list_holds_edits_until_its_reread;
+        Alcotest.test_case "a standalone write waits for the standalone list" `Quick test_a_standalone_write_waits_for_the_standalone_list;
+        Alcotest.test_case "a refused write opens edits at once" `Quick test_a_refused_write_opens_edits_at_once;
+        Alcotest.test_case "a failed re-read refuses candidate edits with a line" `Quick test_a_failed_reread_refuses_candidate_edits_with_a_line;
+        Alcotest.test_case "a refusal and a dismissal leave the stale line" `Quick test_a_refusal_and_a_dismissal_leave_the_stale_line;
+        Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;
+        Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
+        Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode; Alcotest.test_case "runtime readers retain their owner after list refresh" `Quick
+        test_runtime_detail_keeps_its_owner; Alcotest.test_case "the slot editor edits the declared order" `Quick
+        test_the_slot_editor_edits_the_declared_order; Alcotest.test_case "the slot editor keeps the last slot" `Quick
+        test_the_slot_editor_keeps_the_last_slot; Alcotest.test_case "the slot editor includes CLI fallback slots" `Quick
+        test_the_slot_editor_edits_cli_slots_after_http; Alcotest.test_case "slot editor keys parse" `Quick
+        test_slot_editor_keys_parse;
+        Alcotest.test_case "exact replacement searches model and effort within its group" `Quick
+        test_exact_replacement_search_exposes_model_effort_and_same_group;
+        Alcotest.test_case "slot selection survives refreshed declarations" `Quick
+        test_slot_selection_survives_refresh; Alcotest.test_case "media slot selection survives refreshed declarations" `Quick
+        test_media_slot_selection_survives_refresh; Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
+        test_an_undeclared_lane_is_not_read_as_a_single_candidate; Alcotest.test_case "the picker offers only declared lanes" `Quick
+        test_the_picker_offers_only_declared_lanes; Alcotest.test_case "the route editor writes the whole order" `Quick
+        test_the_route_editor_writes_the_whole_order; Alcotest.test_case "the route editor will not write from a stale list"
+        `Quick test_the_route_editor_will_not_write_from_a_stale_list; Alcotest.test_case "the writes a stale list can undo are named once"
+        `Quick test_the_writes_a_stale_list_can_undo_are_named_once; Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
+        test_the_route_editor_keeps_an_unresolved_entry_in_place; Alcotest.test_case "default route picker keeps the lane name" `Quick
+         test_default_route_picker_keeps_the_lane_name; Alcotest.test_case "default route picker uses refreshed lanes" `Quick
+         test_default_route_picker_uses_refreshed_lanes; Alcotest.test_case "a typed filter narrows the drawn choices" `Quick
+        test_a_typed_filter_narrows_the_drawn_choices; Alcotest.test_case "an empty match is not an unread catalogue" `Quick
+        test_an_empty_match_is_not_an_unread_catalogue; Alcotest.test_case "the filter matches the drawn text" `Quick
+        test_the_filter_matches_the_drawn_text; Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick
+        test_the_drawn_cursor_clamps_to_a_shorter_catalogue; Alcotest.test_case "keeper picker filters across lanes and runtimes" `Quick
+        test_the_keeper_picker_filters_across_lanes_and_runtimes; Alcotest.test_case "keeper picker cursor clamps to a shorter list" `Quick
+        test_the_keeper_picker_cursor_clamps_to_a_shorter_list; Alcotest.test_case "keeper picker window follows the cursor" `Quick
+        test_the_keeper_picker_window_follows_the_cursor; Alcotest.test_case "schema-less client only refuses exact lanes" `Quick
+        test_schema_less_client_is_refused_only_for_exact_lane
+        ;Alcotest.test_case "HTTP slot without a body deadline is refused for an exact lane" `Quick
+          test_http_slot_without_body_deadline_is_refused_for_exact_lane
+        ;Alcotest.test_case "default lane route counts unassigned keepers" `Quick
+          test_default_lane_route_counts_unassigned_keepers
+        ;Alcotest.test_case "a last runtime id joins the catalog by equality" `Quick
+          test_a_last_runtime_id_joins_the_catalog_by_equality
+        ;]]

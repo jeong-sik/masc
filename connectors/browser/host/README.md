@@ -1,0 +1,230 @@
+# Firefox native messaging host
+
+`masc-browser-host` is an OCaml/Eio executable. Firefox starts it through
+`runtime.connectNative("masc_browser_host")`. It reads the lane token from a
+file, long-polls `/browser-lane/poll`, and forwards `browser.info`, `tabs.list`,
+`page.read`, `page.elements`, `page.capture`, and `page.interact` as native
+frames. It posts correlated replies to `/browser-lane/result`. These cover
+browser metadata, tab listing, page text/elements, screenshots, and page interactions.
+
+After installing MASC, register its native host with one command. The installed
+`masc` carries the extension and finds the `masc-browser-host` installed beside
+it. An install puts the two there from one build, so they match unless `--binary`
+names another host. No source checkout, download or local build is required:
+
+```sh
+masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
+```
+
+Without `--mode` the command writes nothing and prints what is installed. It
+starts no browser.
+
+After updating MASC and running extension setup, reload the browser-lane add-on
+in the connected Firefox/Zen browser as well. Reconnecting the native host does
+not reload the extension's already-running background script. If a filtered
+read reports that the browser did not confirm `within` or `selector`, refresh
+the extension before retrying; the unfiltered response is deliberately withheld.
+
+`--mode bidi` is the other route. It installs the host and the launcher, with no
+extension and no native messaging manifest, and writes `[browser.live.bidi]` into
+the workspace's `runtime.toml`, so the MASC server starts a Firefox of its own
+and attaches the host to it when the server starts
+(`docs/design/browser-bidi-live-host.md`):
+
+```sh
+masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
+```
+
+`--firefox FILE`, `--profile DIR` and `--port N` name the table's values; without
+them the command uses the first Firefox that answers `--version`, the profile
+`masc-keeper-firefox-profile` in the home directory, and the default port. A
+table that is already there keeps its values, because its profile holds the
+logins the Keepers use, and a table written inline or with dotted keys is not
+edited. The table goes into the `runtime.toml` the server reads, which
+`MASC_CONFIG_DIR` overrides. Give `--mode` twice to connect both routes. An option
+the chosen modes do not use is refused.
+
+`--mode ego` connects an ego lite task space, on macOS where ego lite runs. It
+writes `[browser.live.ego]` into the `runtime.toml` the server reads and installs
+no host, extension or manifest; the attached browser Add-on runs `ego-browser`
+for each command (`docs/rfc/RFC-browser-live-ego.md`):
+
+```sh
+masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
+```
+
+It names the first `ego-browser` that answers `--version`, on `PATH` and then in
+`~/.local/bin` where ego lite's onboarding links it, unless `--ego-command` names
+one, and the task space `masc-keepers` unless `--ego-space` names another. A
+space name that a task space you made in ego lite already has is refused, and so
+is one that cannot be checked because ego lite does not list its spaces. The
+`ego-browser` it writes must answer with ego lite's and Chromium's versions, as one
+whose onboarding is finished does: a configured ego that cannot start stops the
+browser Add-on, and with it the other routes it serves. A table that is already
+there keeps its values unless they are named.
+
+`--mode host` installs the host and the launcher and nothing else: no extension,
+no manifest, no `runtime.toml` (the workspace needs none yet). It connects no
+browser. It is for a browser you attach by hand, and for bringing an installed
+lane's host up to the build you are running; running it again keeps the token.
+
+`--mode automation` writes the automation lane's geckodriver into the
+`runtime.toml` the server reads and installs no host, extension or manifest:
+
+```sh
+masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+```
+
+It names the `geckodriver` that `PATH` finds first, when it answers `--version`,
+unless `--geckodriver` names one; `--browser` writes the `binary` key and is written only
+when named. Keys already in `runtime.toml` keep their values and are edited where
+they are, in `[browser.automation]` or directly in `[browser]`. A table written
+inline or with dotted keys is not edited. The server reads the table when it
+starts. Each session opens a fresh profile, so no login is kept.
+
+From a source checkout, `scripts/install-local-build.sh` builds `masc`,
+`masc-tui` and `masc-browser-host`, installs them into `~/.local/bin`, and
+reinstalls every host registered under a workspace's
+`.masc/browser-lane/host` from the new binary under its own host name, with the
+`masc` it just installed. That also rewrites the extension files in each of those
+workspaces. It also brings the host of the workspace it works with (`--base-path`,
+or the one `masc` would use) up to the new build when that workspace's lane is
+installed and no manifest is registered for it, which is how a lane set up with
+`--mode bidi` or `--mode host` is found; that refresh writes the host and the
+launcher only. It then stops the running hosts from those workspaces; the
+extension reconnects after five seconds and starts the new copy. A workspace
+that cannot be refreshed is named on stderr and the script exits with status 1
+after the others have been refreshed.
+
+Pass `--binary` to install a `masc-browser-host` other than the one beside `masc`
+(the one beside `masc` is used first, then the first one on `PATH`). The command
+prints which executable it copied. Start the MASC server with the same base
+path. In Firefox, open `about:debugging#/runtime/this-firefox`, choose **Load
+Temporary Add-on**, and select `manifest.json` in
+`<base-path>/.masc/browser-lane/extension/`. Firefox removes temporary add-ons on
+restart; load it again for a later browser session. Running the command again
+after upgrading `masc` replaces the extension files with the upgraded ones.
+
+The command copies the executable into
+`<base-path>/.masc/browser-lane/host/` and registers the launcher there.
+Deleting or moving the source checkout therefore cannot break the installed
+host. Rerun installation to promote another built executable. The token is
+created with mode `0600` if absent and an existing token is preserved. A token
+file that is not a lane token (at least 16 visible ASCII characters, no space
+inside) stops the command with a message: the host and the server refuse such a
+token too. The launcher carries file paths, never the token value.
+
+`--base-path` is resolved as it is for every `masc` command: the flag, then
+`MASC_BASE_PATH`, then the current directory when it holds `.masc/config`, then
+the recorded default workspace. A trailing `.masc` is dropped and surrounding
+whitespace is trimmed. The launcher
+names no server address. The host reads the port from
+`<base-path>/.masc/config/connection.toml`, which the MASC server rewrites each
+time it starts listening and `masc workspace-connection --save` also writes.
+The file is the desired port, not proof that a server is there. When a poll
+fails, the host reads the file again and moves to the port it names only when
+its current server no longer answers `/browser-lane/ping` and the new port
+does; otherwise it retries where it is. `MASC_HTTP_PORT` in the browser's
+environment fixes the port instead, as `masc-browser-host --server URL` fixes
+the origin for a manual run; neither is re-read. `MASC_HTTP_BASE_URL` is the
+server's advertised address and does not select the host's local connection.
+An older installed host may still use that variable: rerun browser lane setup
+for the workspace and reload the extension to install and start the current host.
+If a loopback `MASC_HTTP_BASE_URL` previously pinned the host, verify both the
+local host from `MASC_HOST` and the port from `MASC_HTTP_PORT`, the workspace,
+or the default `8935` before updating: the lane token is sent there. If
+`MASC_HOST` is unset, the host is `127.0.0.1`. A later candidate
+port also receives the token in the ping before it has answered the lane.
+The positive ping response does not authenticate the peer; that remaining
+boundary is tracked in [issue #36534](https://github.com/jeong-sik/masc/issues/36534).
+The workspace-derived host maps
+`localhost`, `::1` and wildcard binds to `127.0.0.1`; an IPv6-only listener
+therefore needs an explicit `--server` on a manually started host.
+A result is sent again only when its request may not have reached the server;
+a result the server answered with any status is logged and the host returns to
+polling. The command also writes `launch.json` beside the launcher with the
+launcher's SHA-256, which the onboarding check reads to say where the host
+takes its address from; a launcher edited afterwards no longer matches it. If a host was installed before `launch.json` existed, its
+launcher may fix a port: run the command again for that workspace and reload
+the extension. To point a running host at a server on another port, save that
+port with `masc workspace-connection --port PORT --save` and reload the
+extension; a host that is still connected to a server answering on its old
+address stays there.
+`--token-file` defaults to `<base-path>/.masc/browser-lane/token`; relative
+paths resolve against the base path. For a browser launched by the desktop,
+use explicit arguments so its shell environment is unnecessary.
+The command requires a custom `--token-file` to exist already. It must
+match the canonical server token; if the canonical file does not exist yet,
+the command initializes it from that provisioned token.
+An isolated Firefox profile may pass `--host-name` with a unique lowercase
+name. The command writes that exact name to both the manifest filename and
+the manifest name; the matching extension must use the same host name.
+Remove only that exact manifest after the owned profile and native host stop.
+The host accepts only HTTP origins at `127.0.0.1`, `localhost`, or `::1`.
+Remote destinations and URL credentials, paths, queries, and fragments are
+rejected before the token is read or sent.
+
+## Attaching a BiDi connection
+
+The same executable attaches to a Firefox started with
+`--remote-debugging-port` when it is run with `--bidi-url`. Firefox does not
+start it in that mode: the operator does, or the MASC server for a workspace
+whose `runtime.toml` has `[browser.live.bidi]`. Given `--firefox-profile PATH`
+as well, as the server gives it, the host keeps a session only with a Firefox
+that reports running that profile and ends any other. A BiDi connection serves the trusted
+pointer work the extension cannot (`hover_at`, `drag`). The steps, what the
+port exposes, when the host ends and what attaching again takes are in
+[Attached Firefox BiDi peer](../../../docs/design/browser-bidi-live-host.md#attaching-a-connection).
+
+## Connecting an ordinary Firefox / Zen profile
+
+A `live` Browser Lane uses the extension in the browser profile you are currently
+using. A separate WebDriver `automation` session does not register a live browser.
+Installing MASC's built-in browser Skill does not install a browser extension.
+
+After registering the native host above, open
+`about:debugging#/runtime/this-firefox` in the intended Firefox / Zen profile,
+choose **Load Temporary Add-on**, and select `manifest.json` in
+`<base-path>/.masc/browser-lane/extension/`. Then refresh the Browser Lane
+connections with `r` and choose that browser.
+
+This is a development installation: Firefox removes a temporary extension on
+browser restart, so it must be loaded again. See
+[Mozilla's extension installation instructions](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Your_first_WebExtension#installing).
+
+`coordinator HTTP [connected]` together with an empty browser list means the MASC
+server is reachable but has no active native browser connection. Check extension
+loading in the intended profile, then its native host registration and server
+configuration. Opening the browser alone is insufficient. The TUI now distinguishes
+this empty state from a failed HTTP request; an older installed TUI may still label
+it `HTTP failed`.
+
+The native protocol uses a 4-byte little-endian length followed by UTF-8 JSON.
+Mozilla specifies native byte order and a 1 MiB host-to-browser limit; the
+supported macOS/Linux release architectures are little-endian. This host
+caps browser-to-host replies at 8 MiB to admit a 5 MiB PNG after base64/JSON
+encoding, below
+Mozilla's 4 GiB incoming protocol limit. Oversized or truncated frames fail
+explicitly. stdout is reserved for frames; diagnostics go to stderr without
+tokens or page content. An independent stdin fiber detects browser closure
+even while HTTP is waiting and cancels the host immediately.
+The extension deadline also covers writing the command. A timeout during a
+partial write terminates the host so reconnection starts with a fresh frame
+stream; a reply timeout after a complete write posts a failed result.
+
+Source: [Mozilla native messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging#app_side).
+
+The executable integration test runs a local fake lane HTTP server and a
+framed extension peer. It requires an already-built host:
+
+```sh
+python3 test/test_browser_native_host.py /path/to/masc-browser-host
+```
+
+The host marks its stdout pipe nonblocking before starting Eio. On the POSIX
+backend, a blocking descriptor can enter a blocking `writev` even after it was
+reported writable; a large native frame can then stop the entire domain,
+including the timeout and stdin EOF fibers. Nonblocking writes return control to
+Eio when the pipe fills, keeping both cancellation paths effective. The executable
+tests retain the unread-output timeout case and also close stdin during a partial
+frame write. See the [Eio POSIX I/O implementation](https://github.com/ocaml-multicore/eio/blob/main/lib_eio_posix/low_level.ml).

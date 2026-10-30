@@ -1,0 +1,62 @@
+{
+  "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+  "runtime_port": 62470,
+  "provenance": "operator_proxy",
+  "claims": [
+    "Task approval is lifecycle success",
+    "external acceptance unobserved in this metric stream",
+    "Goal not human confirmed"
+  ],
+  "not_claimed": [
+    "independent LLM verdict",
+    "Keeper inference",
+    "production deployment",
+    "UI rendering"
+  ],
+  "files": {
+    "a7-create.json": {
+      "bytes": 2225,
+      "sha256": "0d2d14b539728c40472697bb4572ba4ca15e244287921fca638ceaa78554c87e"
+    },
+    "a7-claim.json": {
+      "bytes": 803,
+      "sha256": "260d886234cd42c48bf8f3dba821100446ecfec524d6ad761abe35d1b9121953"
+    },
+    "a7-start.json": {
+      "bytes": 817,
+      "sha256": "9e94a7903d68947de852a9833bd2e7290865baadc5ca3b05450b524be3080749"
+    },
+    "a7-execution.json": {
+      "bytes": 247,
+      "sha256": "143cb5cebafc3bfec928a2b24544e9c8fd6599a9648050b430ef0995a04165de"
+    },
+    "a7-submit.json": {
+      "bytes": 1314,
+      "sha256": "dc20b71ae7cbbbd493b5a38b8cb3e9f19eb044a1e23850c2a4d3d3c49f033019"
+    },
+    "a7-operator-evidence.json": {
+      "bytes": 1216,
+      "sha256": "dad2dac130fd2830fd700dd52be4b8063d7457f2d3f456242c3523efc7c61224"
+    },
+    "a7-approval.json": {
+      "bytes": 121,
+      "sha256": "801681d8ae775700997306c0dcc639ae7f863a5d1908740c400a456ac204ab13"
+    },
+    "a7-fitness.json": {
+      "bytes": 1165,
+      "sha256": "032a86ca7fbdf1031d0292ce4d76416de8b503935d1bf562dc5e76bc384eb98f"
+    },
+    "a7-fitness-reread.json": {
+      "bytes": 2920,
+      "sha256": "fd765483471c471fc3868e1ccfe1382b6c84dd28d65afde3f0ed904c8f5647cf"
+    },
+    "a7-task-readback.json": {
+      "bytes": 999,
+      "sha256": "2e626db5819af5f3192288ac5ab99977935a19bcc1deac48de914397f40b3055"
+    },
+    "a7-goal-readback.json": {
+      "bytes": 5063,
+      "sha256": "90c42f9359b03096742c84387846247027103ea4e9d2185ba7df137a7d1be79c"
+    }
+  }
+}

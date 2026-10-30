@@ -1,0 +1,27 @@
+{
+  "workflow_run": 36256591061,
+  "workflow_conclusion": "failure",
+  "artifact": 10910717257,
+  "observer": "304f5f6f67edcb38e3b2ad5da6759d64f73a4983",
+  "completed_sessions": 4,
+  "completed_acknowledgements": 400,
+  "failure": {
+    "status": "failed",
+    "stage": "startup",
+    "cycles": 10,
+    "binary_sha256": "7ff18ff61078459de4bcb13a6510b85b87e91e1a5d02b0e6d3442416cd58e581",
+    "script_sha256": "2b12d51f3fb64d0a32924804c601a2f9e489729962da303a6049cada1114af55",
+    "preflight": {
+      "metadata_sha256": "5ee56d0c08a735b95330e4d4b7b1f9d8201925600c61e4c02933702fe5a3a2c1",
+      "visible_keepers": [],
+      "retained_channels": null
+    },
+    "samples": []
+  },
+  "failed_role": "baseline",
+  "failed_repetition": 3,
+  "expected_needle": "Health: ",
+  "failed_candidate_repetition_3": "not run",
+  "repeat_run": 36257181447,
+  "scope": "Incomplete comparison: no overall performance aggregate, no candidate regression attribution, no inferred network/root cause."
+}

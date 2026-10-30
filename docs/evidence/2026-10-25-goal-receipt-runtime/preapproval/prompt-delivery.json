@@ -1,0 +1,8 @@
+{
+  "scope": "Actual issued first System prompt; boolean delivery checks only, not model compliance.",
+  "request_sha256": "e282b493389e1174854c76be66d6827048f25e92b97cc82156dbc938dccf5ba9",
+  "reporting_instruction_delivered": true,
+  "current_goal_revision_delivered": true,
+  "new_model_measurement_calls": [],
+  "model_goal_link_calls": []
+}

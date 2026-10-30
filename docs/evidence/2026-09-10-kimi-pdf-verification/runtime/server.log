@@ -1,0 +1,206 @@
+[2026-09-10 09:19:41] [INFO] [MCP] Tag registry initialized: 151 tools registered
+[2026-09-10 09:19:42] [WARN] [Dashboard] dashboard source identity unavailable — inspect /health dashboard_surface.recovery
+[2026-09-10 09:19:42] [INFO] [Server] [auto 127.0.0.1:18946] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-09-10 09:19:42] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-09-10 09:19:42] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-09-10 09:19:42] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-09-10 09:19:42] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-09-10 09:19:42] [INFO] [Server] preserved existing base-path config root without refilling operator-owned entries: /private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/config
+[2026-09-10 09:19:42] [INFO] [Server] installed 10 builtin Skill package(s)
+[2026-09-10 09:19:42] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-09-10 09:19:42] [INFO] [Misc] model_catalog: deployment overlay /private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/config/agent-core-models-overlay.toml installed onto embedded catalog
+[2026-09-10 09:19:42] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":null,"source":"default"}}
+[2026-09-10 09:19:42] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-10 09:19:42] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-10 09:19:42] [INFO] [Backend] Board: JSONL default backend
+[2026-09-10 09:19:42] [INFO] [Board] Board flusher actor started
+[2026-09-10 09:19:42] [INFO] [Board] JSONL backend initialized
+[2026-09-10 09:19:42] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4-flash
+[2026-09-10 09:19:42] [INFO] [Server] Skill snapshot ready at boot: snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d skills=0 rejections=0
+[2026-09-10 09:19:42] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published with deployment overlay /private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/config/agent-core-models-overlay.toml
+[2026-09-10 09:19:42] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-09-10 09:19:42] [INFO] [Server] State created (runtime state) in 0.1s
+[2026-09-10 09:19:42] [INFO] [Server] publication recovery owner discovery settled
+[2026-09-10 09:19:42] [WARN] [Server] startup admin token drift repaired for admin via MASC_ADMIN_TOKEN
+[2026-09-10 09:19:42] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-09-10 09:19:42] [INFO] [Keeper] keeper_owner: installed 0 single-owner actor(s) before persistence recovery
+[2026-09-10 09:19:42] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000042 examined=0 failures=0
+[2026-09-10 09:19:42] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.000218 examined=0 failures=0
+[2026-09-10 09:19:42] [INFO] [Keeper] boot reconcile: examined=0 readable=0 quarantined=0 failed=0
+[2026-09-10 09:19:42] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.000075 examined=0 failures=0
+[2026-09-10 09:19:42] [INFO] [Server] Runtime_params restored from /private/tmp/masc-pdf-kimi-runtime-4a/base
+[2026-09-10 09:19:42] [INFO] [Server] Bootstrap completed in 0.0s
+[2026-09-10 09:19:42] [INFO] [Server] Domain_pool created (14 domains) for dashboard/keeper compute
+[2026-09-10 09:19:42] [INFO] [ServerBootstrap] resolved: source=local_masc path=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/config
+[2026-09-10 09:19:42] [INFO] [Misc] prompt assets synced from binary: 25 copied, 0 overwritten
+[2026-09-10 09:19:42] [INFO] [Misc] tool assets synced from binary: 167 copied, 0 overwritten
+[2026-09-10 09:19:42] [INFO] [Misc] mcp assets synced from binary: 2 copied, 0 overwritten
+[2026-09-10 09:19:42] [INFO] [Server] keeper_gate: installed durable queue base_path=/private/tmp/masc-pdf-kimi-runtime-4a/base pending=0 replayed=0 replay_failed=0
+[2026-09-10 09:19:42] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-09-10 09:19:42] [INFO] [Server] lazy_task_group: starting initialize (parallel, 1 tasks)
+[2026-09-10 09:19:42] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-09-10 09:19:42] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-09-10 09:19:42] [INFO] [Server] lazy_task_group: finished initialize
+[2026-09-10 09:19:42] [INFO] [Server] lazy_task_group: starting cleanup (parallel, 1 tasks)
+[2026-09-10 09:19:42] [INFO] [Server] lazy_task: starting jsonl_prune
+[2026-09-10 09:19:42] [INFO] [Server] lazy_task: finished jsonl_prune
+[2026-09-10 09:19:42] [INFO] [Server] lazy_task_group: finished cleanup
+[2026-09-10 09:19:42] [INFO] [Keeper] autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false
+[2026-09-10 09:19:42] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-09-10 09:19:42] [INFO] [startup] subsystems: keeper loops started
+[2026-09-10 09:19:42] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-09-10 09:19:42] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-09-10 09:19:42] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-09-10 09:19:42] [INFO] [Server] host_fd_pressure_poller: started path=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-09-10 09:19:42] [INFO] [Metrics] tool_metrics_persist: hydrated 0 record(s), pruned=0 record(s)
+[2026-09-10 09:19:42] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-10 09:19:42] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-09-10 09:19:42] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-09-10 09:19:42] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-09-10 09:19:42] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-09-10 09:19:42] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-09-10 09:19:42] [INFO] [Server] keeper transition outbox startup discovered=0 processed=0 deferred=0 converged=0 no_pending=0 claim_busy=0 shutdown_reserved=0 failures=0
+[2026-09-10 09:19:42] [INFO] [Server] browser-lane: automation has no browser.webdriver_url
+[2026-09-10 09:19:42] [WARN] [Server] imessage: in-process gateway not started (chat.db at /Users/dancer/Library/Messages/chat.db is not readable: grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access)
+MASC MCP Server listening on http://127.0.0.1:18946
+   Base path: /private/tmp/masc-pdf-kimi-runtime-4a/base
+   MASC dir: /private/tmp/masc-pdf-kimi-runtime-4a/base/.masc
+   Process cwd: /private/tmp/masc-pdf-kimi-runtime-4a/base
+   MASC_BASE_PATH(env): /private/tmp/masc-pdf-kimi-runtime-4a/base
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+[2026-09-10 09:19:42] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)
+[2026-09-10 09:19:42] [INFO] [Dashboard] starting execution refresh loop
+[2026-09-10 09:19:42] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-09-10 09:19:42] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-09-10 09:19:42] [INFO] [Dashboard] starting mission refresh loop
+[2026-09-10 09:19:42] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-09-10 09:19:42] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-09-10 09:19:42] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-09-10 09:19:42] [INFO] [Dashboard] board surface pre-warmed (3.0ms)
+[2026-09-10 09:19:42] [INFO] [Dashboard] execution_trust warm cache done (0.0s)
+[2026-09-10 09:19:42] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (3.1ms)
+[2026-09-10 09:19:42] [INFO] [Dashboard] config surface pre-warmed (3.1ms)
+[2026-09-10 09:19:42] [INFO] [Dashboard] planning surface pre-warmed (3.2ms)
+[2026-09-10 09:19:42] [INFO] [Dashboard] execution warm cache done (0.0s)
+[2026-09-10 09:19:42] [INFO] [Dashboard] light shell cache pre-warmed (13.2ms)
+[2026-09-10 09:19:42] [INFO] [Dashboard] shell cache pre-warmed (19.7ms)
+[2026-09-10 09:19:42] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (19.8ms total)
+[2026-09-10 09:19:42] [INFO] [MCP] tools/call: masc_keeper_up (id=7, session=mcp_VUlvvpM_5jw_3L0l)
+[2026-09-10 09:19:42] [INFO] [Session] [AgentRegistry] New identity: admin (session=7faa70c8, mcp=mcp_VUlvvpM_5jw_3L0l)
+[2026-09-10 09:19:42] [INFO] [Session] Session registered: admin (total: 1)
+[2026-09-10 09:19:42] [INFO] [Server] startup maintenance: finished microvm_guest_sweep elapsed_s=0.081
+[2026-09-10 09:19:43] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-09-10 09:19:43] [INFO] [Keeper] create_keeper: starting for name=pdf-proof-producer
+[2026-09-10 09:19:43] [INFO] [Keeper] create_keeper: starting keepalive for name=pdf-proof-producer
+[2026-09-10 09:19:43] [INFO] [Keeper] registry: registering keeper name=pdf-proof-producer base_path=/private/tmp/masc-pdf-kimi-runtime-4a/base phase=offline
+[2026-09-10 09:19:43] [INFO] [Keeper] registry: phase transition name=pdf-proof-producer old=offline new=running event=fiber_started
+[2026-09-10 09:19:43] [INFO] [Keeper] board_attention_worker_start keeper=pdf-proof-producer epoch=board-attention-worker-c89f5f02-d5e8-4c95-bb7f-a87b7396a5cc
+[2026-09-10 09:19:43] [INFO] [Keeper] create_keeper: completed for name=pdf-proof-producer trace_id=trace-1788999583922-00000
+[2026-09-10 09:19:43] [INFO] [Keeper] board cursor initialized at empty current head for pdf-proof-producer: (1788999583.940533, no post)
+[2026-09-10 09:19:43] [INFO] [Keeper] board_attention_worker_drain keeper=pdf-proof-producer outcome=drained judgments=0 steps=0
+[2026-09-10 09:19:43] [INFO] [MCP] masc_keeper_up -> {"runtime_class":"keeper","name":"pdf-proof-producer","agent_name":"pdf-proof-pr...
+[2026-09-10 09:19:43] [INFO] [MCP] tools/call completed: masc_keeper_up (outcome=ok)
+[2026-09-10 09:19:43] [INFO] [MCP] tools/call: masc_add_task (id=8, session=mcp_VUlvvpM_5jw_3L0l)
+[2026-09-10 09:19:43] [INFO] [Misc] workspace broadcast committed from=admin mention=none request_id=wmsg-d804e37209c74cc7546cb01557e7ec1b seq=1 bytes=71
+[2026-09-10 09:19:43] [INFO] [MCP] masc_add_task -> {"ok":true,"task_id":"task-001","summary":"Added task-001: Independent review of...
+[2026-09-10 09:19:43] [INFO] [MCP] tools/call completed: masc_add_task (outcome=ok)
+[2026-09-10 09:19:43] [INFO] [MCP] tools/call: masc_keeper_msg (id=9, session=mcp_VUlvvpM_5jw_3L0l)
+[2026-09-10 09:19:43] [INFO] [MCP] masc_keeper_msg -> {"operation_id":"kmsg-d88421644c25a0079fceb3f3b3e0cd0c","state":"queued","queued...
+[2026-09-10 09:19:43] [INFO] [MCP] tools/call completed: masc_keeper_msg (outcome=ok)
+[2026-09-10 09:19:43] [INFO] [Keeper] pdf-proof-producer: pre_dispatch: lane image_fixture.producer turn budget bound by a smaller sibling window: entry effective=131072 lane-min effective=32768
+[2026-09-10 09:19:44] [INFO] [runtime_agent] agent_core-image_fixture.producer: resume checkpoint_turn_count=0
+[2026-09-10 09:19:44] [INFO] [Keeper/pdf-proof-producer] turn=0 total_turns=0 runtime_lane=runtime tokens=20 context_window=131072 wall_tok_s=3086.3 latency_ms=7 thinking_kind=none
+[2026-09-10 09:19:44] [INFO] [Dashboard] patched keeper-dependent dashboard caches (1 lifecycle event(s))
+[2026-09-10 09:19:44] [INFO] [Misc] workspace broadcast committed from=pdf-proof-producer mention=none request_id=wmsg-25f7871f74dcfe4071c35c45d0e1ff49 seq=2 bytes=16
+[2026-09-10 09:19:44] [INFO] [Task] task task-001 claim by pdf-proof-producer
+[2026-09-10 09:19:44] [INFO] [Misc] workspace broadcast committed from=pdf-proof-producer mention=none request_id=wmsg-46423dbd567aa2681345d0ef33d4d15c seq=3 bytes=16
+[2026-09-10 09:19:44] [INFO] [Task] task task-001 start by pdf-proof-producer
+[2026-09-10 09:19:44] [INFO] [Keeper] keeper:pdf-proof-producer tool_call tool=keeper_task_claim source=tools/keeper_task_claim.toml params=[task_id] input_shape=[task_id=string:8] outcome=ok out_len=630
+[2026-09-10 09:19:44] [INFO] [agent_core:agent] turn completed turn=1 elapsed_run_sec=0.054 turn_duration_sec=0.054 model=image-producer stop=tools_executed
+[2026-09-10 09:19:44] [INFO] [Keeper/pdf-proof-producer] turn=1 total_turns=0 runtime_lane=runtime tokens=20 context_window=131072 wall_tok_s=3129.9 latency_ms=6 thinking_kind=none
+[2026-09-10 09:19:44] [INFO] [Misc] system LLM completion authority scheduled task_id=task-001 verification_id=vrf-e98a49e8b919f2e8d0b3b7d180861d83 producer=pdf-proof-producer
+[2026-09-10 09:19:44] [INFO] [Task] task task-001 submit_for_verification by pdf-proof-producer
+[2026-09-10 09:19:44] [INFO] [Keeper] keeper:pdf-proof-producer tool_call tool=keeper_task_done source=tools/keeper_task_done.toml params=[task_id,result,evidence_refs] input_shape=[evidence_refs=array:6,result=string:166,task_id=string:8] outcome=ok out_len=121
+[2026-09-10 09:19:44] [INFO] [agent_core:agent] turn completed turn=2 elapsed_run_sec=0.111 turn_duration_sec=0.057 model=image-producer stop=tools_executed
+[2026-09-10 09:19:44] [INFO] [Keeper/pdf-proof-producer] turn=2 total_turns=0 runtime_lane=runtime tokens=20 context_window=131072 wall_tok_s=2887.6 latency_ms=7 thinking_kind=none
+[2026-09-10 09:19:44] [INFO] [agent_core:agent] turn completed turn=3 elapsed_run_sec=0.127 turn_duration_sec=0.015 model=image-producer stop=end_turn
+[2026-09-10 09:19:44] [INFO] [Telemetry] runtime candidate terminal: model=runtime outcome=success latency_ms=127
+[2026-09-10 09:19:44] [ERROR] [Keeper/pdf-proof-producer] memory os librarian failed lane=librarian_exact: exact-output lane "librarian_exact" is not configured current_snapshot=absent
+[2026-09-10 09:19:44] [INFO] [Keeper] pdf-proof-producer: keeper cycle OK runtime_lane=runtime tokens=20 latency=227ms mode=tool_use stop=completed
+[2026-09-10 09:19:44] [INFO] [Keeper] start_keepalive: skipped pdf-proof-producer (already registered)
+[2026-09-10 09:19:44] [INFO] [Keeper] keeper_stream: request terminal keeper=pdf-proof-producer request_id=kmsg-d88421644c25a0079fceb3f3b3e0cd0c status=done
+[2026-09-10 09:19:44] [INFO] [agent_core:event] agent started agent=agent_core-image_fixture.producer task_id=evt-80659b57c9a0e275d3a2d98308b3469a
+[2026-09-10 09:19:44] [INFO] [agent_core:event] agent completed agent=agent_core-image_fixture.producer task_id=evt-80659b57c9a0e275d3a2d98308b3469a elapsed_s=0.127
+[2026-09-10 09:20:03] [WARN] [Task] [verification-lookup] tool=tool_read_file root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"file_path":"verify_summary.txt"} outcome=rejected
+[2026-09-10 09:20:03] [WARN] [Task] [verification-lookup] tool=tool_read_file root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"file_path":"source-receipt.json"} outcome=rejected
+[2026-09-10 09:20:04] [WARN] [Task] [verification-lookup] tool=tool_search_files root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"pattern":".","path":"renders"} outcome=rejected
+[2026-09-10 09:20:04] [INFO] [agent_core:agent] turn completed turn=1 elapsed_run_sec=20.104 turn_duration_sec=20.104 model=kimi-for-coding stop=tools_executed tool_rounds=1 tool_round_ceiling=none
+[2026-09-10 09:20:04] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":1,"replay_policy_excluded":1,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:04] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":1,"replay_policy_excluded":1,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:17] [WARN] [Task] [verification-lookup] tool=tool_read_file root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"file_path":"memory-guide-proof/verify_summary.txt"} outcome=rejected
+[2026-09-10 09:20:17] [WARN] [Task] [verification-lookup] tool=tool_read_file root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"file_path":"memory-guide-proof/source-receipt.json"} outcome=rejected
+[2026-09-10 09:20:17] [WARN] [Task] [verification-lookup] tool=tool_search_files root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"pattern":".","path":"memory-guide-proof/renders"} outcome=rejected
+[2026-09-10 09:20:17] [INFO] [agent_core:agent] turn completed turn=2 elapsed_run_sec=33.301 turn_duration_sec=13.197 model=kimi-for-coding stop=tools_executed tool_rounds=2 tool_round_ceiling=none
+[2026-09-10 09:20:17] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":2,"replay_policy_excluded":2,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:17] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":2,"replay_policy_excluded":2,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:31] [WARN] [Task] [verification-lookup] tool=tool_search_files root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"pattern":""} outcome=rejected
+[2026-09-10 09:20:31] [INFO] [agent_core:agent] turn completed turn=3 elapsed_run_sec=47.213 turn_duration_sec=13.912 model=kimi-for-coding stop=tools_executed tool_rounds=3 tool_round_ceiling=none
+[2026-09-10 09:20:31] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":3,"replay_policy_excluded":3,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:31] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":3,"replay_policy_excluded":3,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:35] [INFO] [Task] [verification-lookup] tool=tool_search_files root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"path":".","pattern":"x^"} outcome=resolved
+[2026-09-10 09:20:35] [INFO] [agent_core:agent] turn completed turn=4 elapsed_run_sec=50.929 turn_duration_sec=3.717 model=kimi-for-coding stop=tools_executed tool_rounds=4 tool_round_ceiling=none
+[2026-09-10 09:20:35] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":3,"replay_policy_excluded":3,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:35] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":3,"replay_policy_excluded":3,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:39] [WARN] [Task] [verification-lookup] tool=tool_read_file root=/private/tmp/masc-pdf-kimi-runtime-4a/base/.masc/playground/docker/pdf-proof-producer argument={"file_path":"memory_proposal_guide.pdf"} outcome=rejected
+[2026-09-10 09:20:39] [INFO] [agent_core:agent] turn completed turn=5 elapsed_run_sec=55.797 turn_duration_sec=4.868 model=kimi-for-coding stop=tools_executed tool_rounds=5 tool_round_ceiling=none
+[2026-09-10 09:20:39] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":4,"replay_policy_excluded":4,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:39] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":4,"replay_policy_excluded":4,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:20:42] [INFO] [Server] session grace: 1 sessions kept (inactive but within 300s grace)
+[2026-09-10 09:21:12] [INFO] [Dashboard] mission warm cache done (0.0s)
+[2026-09-10 09:21:23] [INFO] [agent_core:agent] turn completed turn=6 elapsed_run_sec=99.441 turn_duration_sec=43.644 model=kimi-for-coding stop=tools_executed tool_rounds=6 tool_round_ceiling=none
+[2026-09-10 09:21:23] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":5,"replay_policy_excluded":5,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:21:23] [INFO] [Runtime] [agent_core:backend_openai] {"event":"reasoning_replay_dropped","component":"backend_openai","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"535cc1c5025ac773ee2a1bcd736fa7ef882cdffc79bdfa315a77ed16a053c18d","canonical_model_id":"kimi-for-coding","replay_contract":{"replay_policy":["No_replay"],"streaming":["No_streaming_reasoning"],"output_wire":["No_output_control"]}},"drop_count":5,"replay_policy_excluded":5,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+[2026-09-10 09:21:38] [INFO] [agent_core:agent] turn completed turn=7 elapsed_run_sec=114.742 turn_duration_sec=15.300 model=kimi-for-coding stop=end_turn
+[2026-09-10 09:21:38] [INFO] [Telemetry] runtime candidate terminal: model=runtime outcome=success latency_ms=114742
+[2026-09-10 09:21:38] [INFO] [Task] task_id=task-001 [task-completion-review] LLM approved runtime=kimi_coding.kimi-for-coding reason=제출 스냅샷의 typed 증거로 계약 4항 모두 확인: (1) verify_summary의 pdfinfo가 Pages: 3, 세 렌더링에 페이지 번호 1/2/3; (2) pdffonts에서 NanumGothic 계열 embedded/subset/uni=yes, 첨부된 세 페이지 렌더링(본문·표·페이지 3 흐름도 포함)에서 한글 결측 glyph 없음; (3) 렌더링에서 텍스트 겹침·잘림 없음, 페이지 2/3에 여백 존재; (4) 문서 전체가 synthetic-scenario 데이터임을 명시하고 검증 상태를 not_performed/미수행으로 표기, 권장 결론을 보류로 유지해 저장된 주장과 검증된 사실을 구분. 참고: live lookup 도구는 live_lookup이 존재한다고 명시한 경로들을 모두 'No such file or directory'로 읽지 못해 런타임 실패 상태였으나, 이는 조회 표면의 오류이며 제출 시점 스냅샷 증거만으로 계약이 충족됨.
+[2026-09-10 09:21:38] [INFO] [Task] task task-001 done by pdf-proof-producer
+[2026-09-10 09:21:38] [INFO] [Misc] system LLM completion authority committed task_id=task-001 verification_id=vrf-e98a49e8b919f2e8d0b3b7d180861d83 authority=verifier_exact verdict=APPROVE
+[2026-09-10 09:21:42] [INFO] [Server] session grace: 1 sessions kept (inactive but within 300s grace)
+[2026-09-10 09:21:42] [INFO] [Dashboard] operator_snapshot warm cache done (0.0s)
+[2026-09-10 09:22:12] [INFO] [Dashboard] operator_digest warm cache done (0.0s)
+[2026-09-10 09:22:42] [INFO] [Server] session grace: 1 sessions kept (inactive but within 300s grace)
+[2026-09-10 09:23:42] [INFO] [Server] session grace: 1 sessions kept (inactive but within 300s grace)
+[2026-09-10 09:24:42] [INFO] [Server] session grace: 1 sessions kept (inactive but within 300s grace)
+[2026-09-10 09:25:03] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-09-10 09:25:03] [INFO] [Server] [Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)
+[2026-09-10 09:25:03] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-09-10 09:25:04] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-09-10 09:25:04] [INFO] [Server] Cancelling orchestrator...
+[2026-09-10 09:25:04] [INFO] [Server] [Shutdown] orchestrator cancelled (0.00s)
+[2026-09-10 09:25:04] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-09-10 09:25:04] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-09-10 09:25:04] [INFO] [Pulse] stopped after 3 beats
+[2026-09-10 09:25:04] [INFO] [Pulse] stopped after 7 beats
+[2026-09-10 09:25:04] [INFO] [Server] [Shutdown] registered hooks completed (0.01s)
+[2026-09-10 09:25:04] [INFO] [Server] [Shutdown] hooks total: 0.01s
+[2026-09-10 09:25:04] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.01s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 09:25:04] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-09-10 09:25:04] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 09:25:04] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-09-10 09:25:04] [INFO] [Server] [auto 127.0.0.1:18946] stats: h2=0 h1=410
+[2026-09-10 09:25:04] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-09-10 09:25:04] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-09-10 09:25:04] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-09-10 09:25:04] [INFO] [Keeper] registry: phase transition name=pdf-proof-producer old=running new=draining event=stop_requested
+[2026-09-10 09:25:04] [INFO] [Keeper] registry: lifecycle name=pdf-proof-producer phase=draining event=draining detail=
+[2026-09-10 09:25:04] [INFO] [Keeper] registry: phase transition name=pdf-proof-producer old=draining new=stopped event=drain_complete
+[2026-09-10 09:25:04] [INFO] [Keeper] registry: lifecycle name=pdf-proof-producer phase=stopped event=stopped detail=drain_complete
+[2026-09-10 09:25:04] [INFO] [Server] MASC MCP: Background fibers finished, shutdown complete.
+[2026-09-10 09:25:04] [INFO] [Server] MASC MCP: Shutdown complete.

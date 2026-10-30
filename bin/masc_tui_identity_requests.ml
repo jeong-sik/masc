@@ -1,0 +1,237 @@
+(** Identity requests preserve workspace cancellation and per-provider login generations. *)
+
+open Masc_tui_types
+open Masc_tui_async_protocol
+open Masc_tui_identity_model
+
+let launch_github_view state ~host ~deliver keeper_name =
+  if server_authority_ready state then
+  let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name
+    ~now_ns:(Mtime_clock.elapsed_ns ()) in
+  let port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result -> deliver (Github_identity_view_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_keeper_github_identity_view ~host ~port ~keeper_name)
+;;
+
+let launch_view state ~host ~deliver keeper_name =
+  if server_authority_ready state then
+  let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name
+    ~now_ns:(Mtime_clock.elapsed_ns ()) in
+  let port = state.port in
+  let expectations = identity_expectations_for_keeper state keeper_name in
+  Masc_tui_async_read.launch
+    ~deliver:(function
+      | Ok (providers, attempts) -> deliver (Identity_providers_loaded (request, providers, attempts))
+      | Error detail -> deliver (Identity_providers_loaded (request, Error detail, [])))
+    (fun () ->
+      (* Read completion first: a completed publication must precede the
+         catalog snapshot that is installed before this attempt retires. *)
+      let attempts = List.map (fun expectation ->
+        let result = Masc_tui_http.fetch_identity_login_status ~host ~port
+          ~keeper_name ~provider_id:expectation.ile_provider ~attempt_id:expectation.ile_attempt_id
+          |> fun result -> Result.bind result Masc_tui_identity_model.decode_identity_login_status in
+        expectation,result) expectations in
+      let providers = Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name in
+      Ok (providers, attempts))
+;;
+
+(* Throw or clear one attached service's switch. Off keeps the token and
+   catalog; the keeper's turns stop being handed that provider's tools. *)
+
+let launch_switch state ~host ~deliver ~fork ~keeper_name ~provider_id ~enabled =
+  let authority = state.workspace_authority in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        match write_authority_refusal state authority with
+        | Some reason -> Error reason
+        | None ->
+          Masc_tui_http.post_identity_switch
+            ~host
+            ~port
+            ~keeper_name
+            ~provider_id
+            ~enabled
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    deliver (Identity_switch_set (keeper_name, provider_id, enabled, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> fork ~sw run
+  | None ->
+    deliver
+      (Identity_switch_set
+         (keeper_name, provider_id, enabled, Error "Eio switch is unavailable"))
+;;
+
+(* Recording an app the operator made. Answers on the same notice line a
+   failed attempt uses -- what an operator wants after pressing save is one
+   sentence saying whether it took, in the place they are already reading. *)
+
+let launch_app_save
+      state
+      ~host
+      ~deliver
+      ~fork
+      ~(form : Masc_tui_identity_model.identity_app_form)
+  =
+  let authority = state.workspace_authority in
+  let keeper_name =
+    Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+  in
+  let port = state.port in
+  let provider_id = form.Masc_tui_identity_model.iaf_provider in
+  let client_id = form.Masc_tui_identity_model.iaf_client_id in
+  let client_secret = form.Masc_tui_identity_model.iaf_client_secret in
+  let scopes = form.Masc_tui_identity_model.iaf_scopes in
+  let run () =
+    let result =
+      try
+        match
+          match write_authority_refusal state authority with
+          | Some reason -> Error reason
+          | None ->
+            Masc_tui_http.post_keeper_oauth_client
+              ~host
+              ~port
+              ~provider_id
+              ~client_id
+              ~client_secret
+              ~scopes
+        with
+        | Error err -> Error err
+        | Ok json ->
+          Masc.Tui_decode.decode_oauth_client_saved json
+          |> Result.map_error (fun detail ->
+            "app recorded, but the reply could not be read: " ^ detail)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    deliver (Identity_app_saved (keeper_name, provider_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> fork ~sw run
+  | None ->
+    deliver
+      (Identity_app_saved (keeper_name, provider_id, Error "Eio switch is unavailable"))
+;;
+
+(* Begin a login. The answer is a URL the operator has to open; nothing is
+   written to the keeper until the browser comes back to the server. *)
+let launch_login state ~host ~deliver ~fork ~keeper_name ~provider_id ~label =
+  let authority = state.workspace_authority in
+  let request = start_identity_login_request state ~keeper_name ~provider_id in
+  let request_current () =
+    authority = state.workspace_authority
+    && List.exists (( = ) request) state.identity_login_requests
+  in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        match
+          match write_authority_refusal state authority with
+          | Some reason -> Error reason
+          | None when not (request_current ()) -> Error "login request retired"
+          | None -> Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name ~provider_id
+        with
+        | Error err -> Login_failed err
+        | Ok json ->
+          let result = decode_identity_login ~provider_id ~label
+            ~now:(Unix.gettimeofday ()) json in
+          (match result with
+           | Login_attached _ ->
+               if request_current () then deliver (Identity_refreshed (keeper_name, Ok ()))
+           | Login_started { url; expires_at; _ } ->
+               (* Keep the wrapped URL on screen as well: a machine may not
+                  have a browser opener. Retired requests cannot open it. *)
+               if request_current () && expires_at > Unix.gettimeofday ()
+               then (match Masc_tui_browser.open_url url with
+                     | Ok _ | Error _ -> ())
+           | Login_failed _ -> ());
+          result
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Login_failed (Printexc.to_string exn)
+    in
+    deliver (Identity_login_started (request, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> fork ~sw run
+  | None ->
+    deliver (Identity_login_started (request, Login_failed "Eio switch is unavailable"))
+;;
+
+(* Ask every attached service again what tools it has. An operator action
+   rather than a timer: a stale catalog is visible and fixable, while a timer
+   is a network call nobody asked for. *)
+
+let launch_refresh state ~host ~deliver ~fork ~keeper_name ~provider_ids =
+  let authority = state.workspace_authority in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        List.fold_left
+          (fun acc provider_id ->
+             match acc with
+             | Error _ as err -> err
+             | Ok () ->
+               (match
+                  match write_authority_refusal state authority with
+                  | Some reason -> Error reason
+                  | None ->
+                    Masc_tui_http.post_keeper_identity_refresh
+                      ~host
+                      ~port
+                      ~keeper_name
+                      ~provider_id
+                with
+                | Ok _ -> Ok ()
+                | Error err -> Error (provider_id ^ ": " ^ err)))
+          (Ok ())
+          provider_ids
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    deliver (Identity_refreshed (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> fork ~sw run
+  | None -> deliver (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
+;;
+
+(* Detach one attached service: forget the stored token, drop the catalog,
+   and ask the provider to revoke what it still holds. Unlike the switch,
+   this is not reversible from here -- the operator would have to consent
+   again -- so the key that calls it is armed on the first press. *)
+
+let launch_disconnect state ~host ~deliver ~fork ~keeper_name ~provider_id =
+  let authority = state.workspace_authority in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        match write_authority_refusal state authority with
+        | Some reason -> Error reason
+        | None ->
+          Masc_tui_http.post_identity_disconnect ~host ~port ~keeper_name ~provider_id
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    deliver (Identity_disconnected (keeper_name, provider_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> fork ~sw run
+  | None ->
+    deliver
+      (Identity_disconnected
+         (keeper_name, provider_id, Error "Eio switch is unavailable"))
+;;

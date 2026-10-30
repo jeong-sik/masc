@@ -1,0 +1,819 @@
+open Result.Syntax
+
+let config_error ~field detail =
+  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
+;;
+
+type image_block =
+  { media_type : string
+  ; base64_data : string
+  }
+
+(* Split a goal into the text the CLI receives and the images that ride with it.
+   [text_of_blocks] rejects every non-text block; this admits [Image] for the
+   transports that carry one, and keeps rejecting the rest so a block nobody
+   projects cannot slip through as silence. Only [Stored] images are carried,
+   read back from the store here, at the CLI boundary: a [Url] or [File_id]
+   source names bytes this process never read, and the CLI has no way to fetch
+   them. *)
+let text_and_images_of_blocks ~media_store ~runtime_label ~field blocks =
+  let rec loop texts images = function
+    | [] -> Ok (String.concat "\n" (List.rev texts), List.rev images)
+    | Agent_core.Types.Text text :: rest -> loop (text :: texts) images rest
+    | Agent_core.Types.Image { media_type; source } :: rest ->
+      (match source with
+       | Agent_core.Types.Stored stored ->
+         (match media_store.Agent_core.History.get stored with
+          | Ok raw ->
+            loop texts ({ media_type; base64_data = Base64.encode_string raw } :: images) rest
+          | Error error -> Error (Agent_core.Error.Media error))
+       | Agent_core.Types.Url _ | Agent_core.Types.File_id _ ->
+         Error
+           (config_error
+              ~field
+              (runtime_label ^ " image projection admits stored sources only")))
+    | Agent_core.Types.(
+        Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Document _ | Audio _)
+      :: _ ->
+      Error
+        (config_error
+           ~field
+           (runtime_label ^ " projection admits text and image blocks only"))
+  in
+  loop [] [] blocks
+;;
+
+let text_of_blocks ~runtime_label ~field blocks =
+  let rec loop texts = function
+    | [] -> Ok (String.concat "\n" (List.rev texts))
+    | Agent_core.Types.Text text :: rest -> loop (text :: texts) rest
+    | Agent_core.Types.(
+        Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Document _ | Image _ | Audio _)
+      :: _ ->
+      Error
+        (config_error
+           ~field
+           (runtime_label ^ " official-client projection admits text blocks only"))
+  in
+  loop [] blocks
+;;
+
+let encode_history_message = Keeper_official_client_context_codec.encode
+
+let user_message text : Agent_core.Types.message =
+  { origin = Llm_provider.Types.Conversation;  role = User
+  ; content = [ Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+(* Official-client adapters own their provider instruction projection. Keep
+   dynamic context on that System path rather than copying Agent Core's
+   synthetic User-message encoding, while retaining the shared typed identity
+   used by prompt attribution and input-window projection.
+
+   The Librarian's working state rides the same System path, so it reaches
+   the client the way each adapter delivers System text: Claude Code joins it
+   into [--system-prompt] on every turn, a resume included
+   ([Keeper_claude_code_runtime]); Antigravity renders it as a [SYSTEM:]
+   section ahead of the history ([Keeper_antigravity_runtime]). The Agent
+   Core lane sends the same text as a [User] message, which only that lane's
+   wire has. The text names itself a summary to use as context, not as new
+   instructions ([Keeper_turn_driver_try_provider.working_state_text]).
+
+   The two carry different tags. The composition check over a request expects
+   exactly one per-turn carrier; a working state stamped with the carrier's
+   tag made every request that carried both fail it as a repeated carrier.
+   The working state carries {!Runtime_model_input_tail_window.working_state_metadata},
+   as on the Agent Core lane, and the adapters select both through
+   [is_composed_system_context]. *)
+let system_context_message ~origin ~metadata text : Agent_core.Types.message =
+  { origin; role = System
+  ; content = [ Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata
+  }
+;;
+
+let extra_system_context_message text =
+  system_context_message
+    ~origin:Agent_core.Types.System_context ~metadata:[]
+    text
+;;
+
+let working_state_message text =
+  system_context_message
+    ~origin:Agent_core.Types.Agent_instruction ~metadata:Runtime_model_input_tail_window.working_state_metadata
+    text
+;;
+
+let is_composed_system_context (message : Agent_core.Types.message) =
+  (message.origin = Agent_core.Types.System_context)
+  || Runtime_model_input_tail_window.is_working_state message
+  || Runtime_model_input_tail_window.is_unread_context message
+  || Keeper_client_tool_outbox.is_context_message message
+;;
+
+let history_role_label = function
+  | Agent_core.Types.System -> "SYSTEM:\n"
+  | Agent_core.Types.User -> "USER:\n"
+  | Agent_core.Types.Assistant -> "ASSISTANT:\n"
+  | Agent_core.Types.Tool -> "TOOL:\n"
+;;
+
+(* A vendor may keep its first System for the whole session. Keep Goal's
+   existing Start/held policy, but deliver a current Completion Authority event
+   or identified historical admission fact in User only. Select the closed observation from the exact issuer; never
+   search the selected text or borrow a receipt from another composition. *)
+let project_start_system ~system_prompt ~composed_context =
+  match Option.bind composed_context (fun assembly ->
+      Option.map (fun issued -> assembly, issued)
+        assembly.Keeper_context_assembly.system_prompt) with
+  | Some (assembly, issued) when String.equal issued.text system_prompt ->
+    let standing = List.filter (function
+      | Keeper_context_assembly.Active_goals _ -> true
+      | Completion_authority _ | Admitted_scheduled_input _ -> false) issued.observations in
+    let system_prompt = Keeper_context_assembly.with_system_observations
+        ~base_text:issued.base_text ~observations:standing assembly
+      |> Keeper_context_assembly.effective_system_prompt ~base_text:issued.base_text in
+    let observations = List.filter_map (function
+      | Keeper_context_assembly.Active_goals _ -> None
+      | (Completion_authority text | Admitted_scheduled_input text) as observation ->
+        let block, _ = Keeper_context_assembly.observation_block observation in
+        let message = user_message text in
+        Some (Keeper_context_submission_link.concat ~separator:""
+          [Keeper_context_submission_link.literal (history_role_label message.role);
+           Keeper_context_submission_link.encoded_system_observation
+             ~target:Official_start_user ~block
+             ~assembly:(Some assembly) message])) issued.observations in
+    system_prompt, Keeper_context_submission_link.concat ~separator:"\n\n" observations,
+    Some assembly
+  | Some _ -> system_prompt, Keeper_context_submission_link.literal "", None
+  | None -> system_prompt, Keeper_context_submission_link.literal "", composed_context
+;;
+
+(* A blank line between rendered messages and before the goal. *)
+let resume_section_separator = "\n\n"
+
+let is_carried_on_resume message =
+  is_composed_system_context message || Keeper_official_task_reference.is_reference message
+;;
+
+module Session_store = Keeper_official_client_session_store
+
+type composed_context = Keeper_context_assembly.t
+
+type resume_delivery =
+  { prompt : string
+  ; context_projection : Keeper_context_submission_link.t
+  ; held_context : Session_store.held_context list
+  ; unchanged_sections : Keeper_context_layers.source list
+  ; partly_held_sections : Keeper_context_layers.source list
+  }
+
+let sha256_hex text = Agent_core_sha256.(digest_string text |> to_hex)
+
+(* One row of a World State section with rows, and the name and digest a
+   session holds it under. *)
+type world_state_row =
+  { row_text : string
+  ; row_held : Session_store.held_context
+  }
+
+(* How a resume compares one section: as one text, or as its head and tail and
+   each row between them ({!Keeper_context_layers.Head_and_rows}). *)
+type world_state_division =
+  | One_text
+  | Rows of { head : string; rows : world_state_row list; tail : string }
+
+(* One World State section of a [Dynamic_context] block whose renderer
+   partition the assembly kept: what rendered it, its exact text, the name and
+   digest a session holds it under -- for a section with rows, its head and
+   tail -- and how a resume compares it. *)
+type world_state_section =
+  { section : Keeper_context_layers.source
+  ; section_text : string
+  ; section_held : Session_store.held_context
+  ; division : world_state_division
+  }
+
+(* What a resume compares with what the session holds: the carried context as
+   one text, or the World State sections of its [Dynamic_context] block. *)
+type carried_body =
+  | Whole_text
+  | World_state_sections of world_state_section list
+
+type carried_source = Message_context | Issued_system_observation of Prompt_block_id.t
+
+(* One carried context a turn composes: its name and digest, whether a resume
+   sends it again when the session holds the same bytes, the message a
+   resume renders for it, and what a resume compares. *)
+type carried =
+  { held : Session_store.held_context
+  ; resent_when_held : bool
+  ; message : Agent_core.Types.message
+  ; body : carried_body
+  ; source : carried_source
+  }
+
+let carried_message context message =
+  { held = { Session_store.context; sha256 = sha256_hex (encode_history_message message) }
+  ; resent_when_held = false
+  ; message
+  ; body = Whole_text
+  ; source = Message_context
+  }
+;;
+
+let held_section section sha256 =
+  { Session_store.context = Session_store.Context_section section; sha256 }
+;;
+
+let world_state_row section row_text =
+  let sha256 = sha256_hex row_text in
+  { row_text
+  ; row_held =
+      { Session_store.context = Session_store.Context_section_row { section; row_sha256 = sha256 }
+      ; sha256
+      }
+  }
+;;
+
+(* Rows that repeat one text cannot be named apart, so such a section is
+   compared as one text. *)
+let world_state_section
+      { Keeper_context_layers.section_source = section; section_text; section_rows }
+  =
+  let one_text =
+    { section; section_text; section_held = held_section section (sha256_hex section_text)
+    ; division = One_text }
+  in
+  match section_rows with
+  | Keeper_context_layers.Whole_section -> one_text
+  | Keeper_context_layers.Head_and_rows { head; rows; tail } ->
+    let rows = List.map (world_state_row section) rows in
+    let digests = List.map (fun row -> row.row_held.Session_store.sha256) rows in
+    if List.compare_lengths (List.sort_uniq String.compare digests) digests <> 0
+    then one_text
+    else
+      { section; section_text; section_held = held_section section (sha256_hex (head ^ tail))
+      ; division = Rows { head; rows; tail } }
+;;
+
+let held_rows_of section =
+  match section.division with
+  | One_text -> []
+  | Rows { rows; _ } -> List.map (fun row -> row.row_held) rows
+;;
+
+(* A block is compared section by section only when it is the
+   [Dynamic_context] block and the assembly kept the renderer's partition of
+   its exact text with every section named apart. Fleet messages and recent
+   actions change on nearly every turn, so compared as one block the World
+   State went out whole on every resume, and the unchanged wiki contents,
+   memory ledger and own Board posts piled up in the session with it. *)
+let block_body assembly = function
+  | Prompt_block_id.Dynamic_context ->
+    (match Keeper_context_assembly.dynamic_context_sections assembly with
+     | Some sections -> World_state_sections (List.map world_state_section sections)
+     | None -> Whole_text)
+  | Prompt_block_id.(
+      Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
+      | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions) -> Whole_text
+;;
+
+(* The context carrier splits into its typed blocks only when it is the exact
+   renderer-issued assembly [composed_context] names, without an existing
+   prefix. Otherwise the whole carrier is one carried context.
+   A block's digest is the one its turn record keeps, the sha256 of its raw
+   text. *)
+let carried_of_message ~composed_context (message : Agent_core.Types.message) =
+  if Keeper_official_task_reference.is_reference message
+  then [ carried_message Session_store.Historical_task_reference message ]
+  else if Runtime_model_input_tail_window.is_unread_context message
+  then [ carried_message Session_store.Librarian_unread message ]
+  else if Keeper_client_tool_outbox.is_context_message message
+  then [ carried_message Session_store.Tool_result_receipts message ]
+  else if Runtime_model_input_tail_window.is_working_state message
+  then [ carried_message Session_store.Librarian_working_state message ]
+  else if is_composed_system_context message
+  then (
+    let blocks =
+      match composed_context, message.content with
+      | Some assembly, [ Agent_core.Types.Text text ] ->
+        Keeper_context_assembly.blocks_for_carrier assembly text
+        |> Option.map (fun blocks -> assembly, blocks)
+      | Some _,
+        ( []
+        | [ Agent_core.Types.(
+              Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+              | ToolResult _ | Document _ | Image _ | Audio _) ]
+        | _ :: _ :: _ )
+      | None, _ -> None
+    in
+    match blocks with
+    | Some (assembly, blocks) ->
+      List.map
+        (fun (block, text) ->
+           { held =
+               { Session_store.context = Session_store.Context_block block
+               ; sha256 = sha256_hex text
+               }
+           ; resent_when_held = Prompt_block_id.resent_when_held block
+           ; message = extra_system_context_message text
+           ; body = block_body assembly block
+           ; source = Message_context
+           })
+        blocks
+    | None -> [ carried_message Session_store.Context_carrier message ])
+  else []
+;;
+
+let carried_context ~composed_context messages =
+  let observations = match Option.bind composed_context (fun assembly ->
+      assembly.Keeper_context_assembly.system_prompt) with
+    | None -> []
+    | Some issued -> List.map (fun observation ->
+        let block, text = Keeper_context_assembly.observation_block observation in
+        { held = { Session_store.context = Session_store.Context_block block
+                 ; sha256 = sha256_hex text }
+        ; resent_when_held = Prompt_block_id.resent_when_held block
+        ; message = user_message text
+        ; body = Whole_text
+        ; source = Issued_system_observation block }) issued.observations in
+  observations @ List.concat_map (carried_of_message ~composed_context) messages
+;;
+
+(* What the session holds once it has this carried context: the context under
+   its name, or each World State section a resume may leave out. What is sent
+   on every resume is never left out, so it is not recorded. *)
+let held_of_item item =
+  match item.body with
+  | Whole_text -> if item.resent_when_held then [] else [ item.held ]
+  | World_state_sections sections ->
+    List.concat_map
+      (fun section ->
+         match Keeper_context_layers.resend_on_resume section.section with
+         | Keeper_context_layers.Sent_every_resume -> []
+         | Keeper_context_layers.(Sent_when_changed | Sent_with_other_sections) ->
+           section.section_held :: held_rows_of section)
+      sections
+;;
+
+let held_of_carried carried = List.concat_map held_of_item carried
+
+type carried_summary =
+  { label : string
+  ; bytes : int
+  ; sha256_prefix : string
+  ; resent_every_resume : bool
+  }
+
+let carried_label = function
+  | Session_store.Context_block block -> "block:" ^ Prompt_block_id.to_string block
+  | Session_store.Context_section section ->
+    "section:" ^ Keeper_context_layers.source_name section
+  | Session_store.Context_section_row { section; _ } ->
+    "section_row:" ^ Keeper_context_layers.source_name section
+  | Session_store.Context_carrier -> "carrier"
+  | Session_store.Librarian_working_state -> "librarian_working_state"
+  | Session_store.Librarian_unread -> "librarian_unread"
+  | Session_store.Historical_task_reference -> "historical_task_reference"
+  | Session_store.Tool_result_receipts -> "tool_result_receipts"
+;;
+
+let carried_sha256_prefix_length = 12
+
+let carried_summaries ?composed_context messages =
+  carried_context ~composed_context messages
+  |> List.map (fun item ->
+    { label = carried_label item.held.Session_store.context
+    ; bytes = String.length (encode_history_message item.message)
+    ; sha256_prefix =
+        String.sub item.held.Session_store.sha256 0 carried_sha256_prefix_length
+    ; resent_every_resume = item.resent_when_held
+    })
+;;
+
+let start_held_context ?composed_context messages =
+  held_of_carried (carried_context ~composed_context messages)
+;;
+
+(* Blocks sent together read as one carrier, as they do on a start. *)
+let is_block item =
+  match item.source with
+  | Issued_system_observation _ -> false
+  | Message_context ->
+    (match item.held.Session_store.context with
+     | Session_store.Context_block _ -> true
+     | Session_store.Context_section _
+     | Session_store.Context_section_row _
+     | Session_store.Context_carrier
+     | Session_store.Librarian_working_state
+     | Session_store.Librarian_unread
+     | Session_store.Historical_task_reference | Session_store.Tool_result_receipts -> false)
+;;
+
+let block_text item =
+  match item.message.Agent_core.Types.content with
+  | [ Agent_core.Types.Text text ] -> Some text
+  | []
+  | [ Agent_core.Types.(
+        Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Document _ | Image _ | Audio _) ]
+  | _ :: _ :: _ -> None
+;;
+
+let block_id item = match item.held.Session_store.context with
+  | Session_store.Context_block id -> Some id
+  | Session_store.Context_section _ | Session_store.Context_section_row _
+  | Session_store.Context_carrier
+  | Session_store.Librarian_working_state | Session_store.Librarian_unread
+  | Session_store.Historical_task_reference | Session_store.Tool_result_receipts -> None
+
+let sections_notice key sections =
+  Prompt_registry.render_prompt_template
+    key
+    [ "sections", String.concat ", " (List.map Keeper_context_layers.source_name sections) ]
+;;
+
+let unchanged_sections_notice =
+  sections_notice Prompt_names.keeper_world_frame_unchanged_sections
+;;
+
+let held_rows_notice = sections_notice Prompt_names.keeper_world_frame_held_rows_sections
+
+(* One World State section a resume sends: whole, or for a section with rows
+   the session holds in part, its head, the rows the session lacks and its
+   tail. [held_rows] is never empty. *)
+type section_out =
+  | Section_whole of world_state_section
+  | Section_new_rows of
+      { section : world_state_section
+      ; head : string
+      ; tail : string
+      ; sent_rows : world_state_row list
+      ; held_rows : world_state_row list
+      }
+
+(* What a resume sends for one carried context: all of it, or the World State
+   sections the session does not hold unchanged with the lines naming the ones
+   it holds unchanged and the ones it holds in part. [notices] is never
+   empty. *)
+type sent =
+  | Sent_whole of carried
+  | Sent_changed_sections of
+      { item : carried
+      ; sections : section_out list
+      ; unchanged : world_state_section list
+      ; notices : string list
+      }
+
+type carried_delivery =
+  | Already_held
+  | Sent of sent
+
+(* How much of one World State section the session holds. A section sent on
+   every resume is never held. Of a section with rows, the session holds part
+   when the rows it holds run on into this window ({!held_run}) and it lacks a
+   later row or the head; otherwise it is sent the section whole. *)
+type section_holding =
+  | Holds_none
+  | Holds_all
+  | Holds_rows of
+      { head : string
+      ; tail : string
+      ; sent_rows : world_state_row list
+      ; held_rows : world_state_row list
+      }
+
+(* The digests of the rows of [section] the session holds, in the order it was
+   sent them: [held_of_item] names rows in render order and the store keeps the
+   list as written. *)
+let held_row_digests ~held section =
+  List.filter_map
+    (fun (entry : Session_store.held_context) ->
+       match entry.context with
+       | Session_store.Context_section_row { section = held_in; row_sha256 }
+         when held_in = section -> Some row_sha256
+       | Session_store.(
+           Context_section_row _ | Context_block _ | Context_section _ | Context_carrier
+           | Librarian_working_state | Librarian_unread | Historical_task_reference
+           | Tool_result_receipts) -> None)
+    held
+;;
+
+(* How many rows at the start of [rows] continue the rows the session holds:
+   the length of the longest run that ends what it holds and starts [rows].
+   That is how the window moves, one turn at a time at its end. A row the
+   renderer wrote again in place -- its task relation changes when the keeper
+   selects another task -- breaks the run, and the session's copy of that
+   turn would contradict the new one, so the run is then 0 and the section
+   goes out whole. *)
+let held_run ~held_digests rows =
+  let digests = List.map (fun row -> row.row_held.Session_store.sha256) rows in
+  let rec starts prefix list =
+    match prefix, list with
+    | [], _ -> true
+    | digest :: prefix, next :: list -> String.equal digest next && starts prefix list
+    | _ :: _, [] -> false
+  in
+  let rec longest = function
+    | [] -> 0
+    | _ :: shorter as suffix ->
+      if starts suffix digests then List.length suffix else longest shorter
+  in
+  longest held_digests
+;;
+
+let section_holding ~held section =
+  let holds entry = List.mem entry held in
+  let holds_every_row =
+    match section.division with
+    | One_text -> true
+    | Rows { rows; _ } -> List.for_all (fun row -> holds row.row_held) rows
+  in
+  match Keeper_context_layers.resend_on_resume section.section with
+  | Keeper_context_layers.Sent_every_resume -> Holds_none
+  | Keeper_context_layers.Sent_with_other_sections ->
+    if holds section.section_held && holds_every_row then Holds_all else Holds_none
+  | Keeper_context_layers.Sent_when_changed ->
+    (match section.division with
+     | One_text -> if holds section.section_held then Holds_all else Holds_none
+     | Rows { head; rows; tail } ->
+       (match held_run ~held_digests:(held_row_digests ~held section.section) rows with
+        | 0 -> Holds_none
+        | run ->
+          let held_rows = List.filteri (fun index _ -> index < run) rows in
+          let sent_rows = List.filteri (fun index _ -> index >= run) rows in
+          (match sent_rows with
+           | [] when holds section.section_held -> Holds_all
+           | [] | _ :: _ -> Holds_rows { head; tail; sent_rows; held_rows })))
+;;
+
+let carried_delivery ~held item =
+  let holds entry = List.mem entry held in
+  match item.body with
+  | Whole_text ->
+    if (not item.resent_when_held) && holds item.held then Already_held
+    else Sent (Sent_whole item)
+  | World_state_sections sections ->
+    let holdings = List.map (fun section -> section, section_holding ~held section) sections in
+    let holds_all = function
+      | Holds_all -> true
+      | Holds_none | Holds_rows _ -> false
+    in
+    if List.for_all (fun (_, holding) -> holds_all holding) holdings
+    then Already_held
+    else (
+      (* The frame and the sections sent on every resume go out whenever any
+         section does; only a section sent when changed is ever left out. *)
+      let out, unchanged =
+        List.fold_right
+          (fun (section, holding) (out, unchanged) ->
+             match holding with
+             | Holds_rows { head; tail; sent_rows; held_rows } ->
+               Section_new_rows { section; head; tail; sent_rows; held_rows } :: out, unchanged
+             | Holds_all ->
+               (match Keeper_context_layers.resend_on_resume section.section with
+                | Keeper_context_layers.Sent_when_changed -> out, section :: unchanged
+                | Keeper_context_layers.(Sent_every_resume | Sent_with_other_sections) ->
+                  Section_whole section :: out, unchanged)
+             | Holds_none -> Section_whole section :: out, unchanged)
+          holdings
+          ([], [])
+      in
+      let partly =
+        List.filter_map
+          (function
+            | Section_new_rows { section; _ } -> Some section.section
+            | Section_whole _ -> None)
+          out
+      in
+      let notices =
+        List.filter_map
+          (fun (render, sources) ->
+             match sources with
+             | [] -> None
+             | _ :: _ -> Some (render sources))
+          [ unchanged_sections_notice, List.map (fun section -> section.section) unchanged
+          ; held_rows_notice, partly
+          ]
+      in
+      match notices with
+      | [] -> Sent (Sent_whole item)
+      | _ :: _ ->
+        (match List.find_map (function Error detail -> Some detail | Ok _ -> None) notices with
+         | Some detail ->
+           (* Leaving a section or a row out is sound only beside the line that
+              names it, so without that line every section goes out whole. *)
+           Log.Keeper.warn
+             "World State resume line did not render; sending every section: %s"
+             detail;
+           Sent (Sent_whole item)
+         | None ->
+           Sent
+             (Sent_changed_sections
+                { item; sections = out; unchanged
+                ; notices = List.filter_map Result.to_option notices })))
+;;
+
+let sent_item = function
+  | Sent_whole item | Sent_changed_sections { item; _ } -> item
+;;
+
+let section_out_text = function
+  | Section_whole section -> section.section_text
+  | Section_new_rows { head; tail; sent_rows; _ } ->
+    head ^ String.concat "" (List.map (fun row -> row.row_text) sent_rows) ^ tail
+;;
+
+let sent_text = function
+  | Sent_whole item -> block_text item
+  | Sent_changed_sections { sections; _ } ->
+    Some (String.concat "" (List.map section_out_text sections))
+;;
+
+let sent_unchanged = function
+  | Sent_whole _ -> []
+  | Sent_changed_sections { unchanged; _ } ->
+    List.map (fun section -> section.section) unchanged
+;;
+
+(* The rows each section sent in part left out, by digest. *)
+let sent_held_rows = function
+  | Sent_whole _ -> []
+  | Sent_changed_sections { sections; _ } ->
+    List.filter_map
+      (function
+        | Section_whole _ -> None
+        | Section_new_rows { section; held_rows; _ } ->
+          Some
+            ( section.section
+            , List.map (fun row -> row.row_held.Session_store.sha256) held_rows ))
+      sections
+;;
+
+let sent_notices = function
+  | Sent_whole _ -> []
+  | Sent_changed_sections { notices; _ } -> notices
+;;
+
+(* The line goes out as its own System message after the carrier it speaks
+   for. It is host text, not issuer bytes, so it claims no context
+   provenance. *)
+let unchanged_sections_message notice =
+  extra_system_context_message notice
+;;
+
+let rec rendered_messages = function
+  | [] -> []
+  | sent :: rest when is_block (sent_item sent) ->
+    let rec take_blocks texts ids unchanged held_rows notices = function
+      | next :: rest when is_block (sent_item next) ->
+        (match sent_text next, block_id (sent_item next) with
+         | Some text, Some id ->
+           take_blocks (text :: texts) (id :: ids)
+             (List.rev_append (sent_unchanged next) unchanged)
+             (List.rev_append (sent_held_rows next) held_rows)
+             (List.rev_append (sent_notices next) notices)
+             rest
+         | _ -> (texts, ids, unchanged, held_rows, notices), next :: rest)
+      | rest -> (texts, ids, unchanged, held_rows, notices), rest in
+    (match sent_text sent, block_id (sent_item sent) with
+     | Some text, Some id ->
+       let (texts, ids, unchanged, held_rows, notices), rest =
+         take_blocks [text] [id] (List.rev (sent_unchanged sent))
+           (List.rev (sent_held_rows sent)) (List.rev (sent_notices sent)) rest in
+       (extra_system_context_message (String.concat resume_section_separator (List.rev texts)),
+        Some (List.rev ids, List.rev unchanged, List.rev held_rows), Message_context)
+       :: List.rev_map (fun notice -> unchanged_sections_message notice, None, Message_context) notices
+       @ rendered_messages rest
+     | _ -> ((sent_item sent).message,None,(sent_item sent).source) :: rendered_messages rest)
+  | sent :: rest -> ((sent_item sent).message,None,(sent_item sent).source) :: rendered_messages rest
+;;
+
+let resume_prompt ~goal ~held ?composed_context messages =
+  let carried = carried_context ~composed_context messages in
+  let deliveries = List.map (fun item -> item, carried_delivery ~held item) carried in
+  let sent = List.filter_map (fun (_, delivery) -> match delivery with
+    | Sent sent -> Some sent
+    | Already_held -> None) deliveries in
+  let omitted = List.filter_map (fun (item, delivery) -> match delivery with
+    | Already_held -> Some item
+    | Sent _ -> None) deliveries in
+  let context_projection =
+    sent |> rendered_messages
+    |> List.map (fun ((message : Agent_core.Types.message),selection,source) ->
+      Keeper_context_submission_link.concat ~separator:""
+        [Keeper_context_submission_link.literal (history_role_label message.role);
+         (match source with
+          | Issued_system_observation block -> Keeper_context_submission_link.encoded_system_observation
+              ~target:Official_resume_user ~block ~assembly:composed_context message
+          | Message_context -> Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
+              ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
+              ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)
+              ?omitted_rows:(Option.map (fun (_, _, held_rows) -> held_rows) selection) message)])
+    |> Keeper_context_submission_link.concat ~separator:resume_section_separator
+    |> Keeper_context_submission_link.trim in
+  let composed = held_of_carried carried in
+  (* A context composed this turn supersedes what the session held under the
+     same name. A whole carrier and the typed blocks name the same text, so
+     each supersedes the other: after a turn that sent the whole carrier, the
+     session's latest copy of every block is inside that carrier, not in an
+     earlier block digest. World State sections and their whole
+     [Dynamic_context] block stand in for each other the same way. A World
+     State also replaces the previous one as a whole: after a turn that
+     composed its sections, the sections the session holds as current are
+     exactly those, so a section absent this turn goes out again when it
+     returns, and a row that left a section's window is no longer named. *)
+  let supersedes item (previous : Session_store.held_context) =
+    match item.body, previous.context with
+    | World_state_sections _,
+      ( Session_store.Context_section _
+      | Session_store.Context_section_row _
+      | Session_store.Context_block Prompt_block_id.Dynamic_context
+      | Session_store.Context_carrier ) -> true
+    | World_state_sections _,
+      ( Session_store.Context_block
+          Prompt_block_id.(
+            Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
+            | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions)
+      | Session_store.Librarian_working_state
+      | Session_store.Librarian_unread
+      | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) -> false
+    | Whole_text, previous_context ->
+      (not item.resent_when_held)
+      && (match item.held.context, previous_context with
+          | Session_store.Context_carrier,
+            ( Session_store.Context_block _ | Session_store.Context_section _
+            | Session_store.Context_section_row _ )
+          | Session_store.Context_block _, Session_store.Context_carrier -> true
+          | Session_store.Context_block block,
+            (Session_store.Context_section _ | Session_store.Context_section_row _) ->
+            Prompt_block_id.equal block Prompt_block_id.Dynamic_context
+          | ( (( Session_store.Context_block _
+               | Session_store.Context_section _
+               | Session_store.Context_section_row _
+               | Session_store.Context_carrier
+               | Session_store.Librarian_working_state
+               | Session_store.Librarian_unread
+               | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) as current_context)
+            , (( Session_store.Context_block _
+               | Session_store.Context_section _
+               | Session_store.Context_section_row _
+               | Session_store.Context_carrier
+               | Session_store.Librarian_working_state
+               | Session_store.Librarian_unread
+               | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) as previous_context) ) ->
+            current_context = previous_context)
+  in
+  let held_context =
+    composed
+    @ List.filter
+        (fun previous ->
+           not (List.exists (fun item -> supersedes item previous) carried))
+        held
+  in
+  let context_projection =
+    if Keeper_context_submission_link.text context_projection = "" then
+      Keeper_context_submission_link.literal goal
+    else Keeper_context_submission_link.concat ~separator:resume_section_separator
+      [context_projection;Keeper_context_submission_link.literal goal] in
+  let context_projection = List.fold_left (fun projection item ->
+    match item.source with
+    | Issued_system_observation block -> Keeper_context_submission_link.omit_held_system_observation
+        ~block ~assembly:composed_context item.message projection
+    | Message_context -> Keeper_context_submission_link.omit_held ~assembly:composed_context
+        ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
+    context_projection omitted in
+  { prompt = Keeper_context_submission_link.text context_projection; held_context; context_projection
+  ; unchanged_sections = List.concat_map sent_unchanged sent
+  ; partly_held_sections = List.concat_map (fun sent -> List.map fst (sent_held_rows sent)) sent }
+
+;;
+
+let last_tool_results messages =
+  messages
+  |> List.rev
+  |> List.find_map (fun (message : Agent_core.Types.message) ->
+    match message.role with
+    | Tool ->
+      Some
+        (List.filter_map
+           (function
+             | Agent_core.Types.ToolResult { tool_use_id; content; content_blocks; outcome; json = _ } ->
+               Some { Agent_core.Hooks.tool_use_id; content; outcome; content_blocks }
+             | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+             | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+             | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+             | Agent_core.Types.Audio _ -> None)
+           message.content)
+    | System | User | Assistant -> None)
+  |> Option.value ~default:[]
+;;

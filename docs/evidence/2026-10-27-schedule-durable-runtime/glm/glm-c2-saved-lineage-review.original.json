@@ -1,0 +1,310 @@
+{
+  "schema": "masc.schedule-glm-c2-saved-lineage-review.v1",
+  "is_derivative": true,
+  "scope": "Remaining post-dependency lineage/input/final-state predicates evaluated on saved observations; no top-level controller, model, network, process, replay, or original-file mutation.",
+  "checks": {
+    "original_FAIL_preserved": true,
+    "early_selected_checkpoint_has_A1_before_B_start": true,
+    "late_selected_checkpoint_has_A1_and_B_before_A2": true,
+    "all_three_effects_share_trace": true,
+    "latest_selected_post_discovery_input_has_both_exact_requests": true,
+    "fresh_root_observation_both_exact_sources_completed": true,
+    "fresh_root_observation_idle_and_no_pending": true,
+    "fresh_root_observation_exactly_three_notes": true
+  },
+  "early_checkpoint_count": 2,
+  "late_checkpoint_count": 4,
+  "selected_checkpoints": {
+    "early": [
+      {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048034227.json",
+        "sha256": "5aaeab894f681765e0f9f7823e0d8156647f9cdbfb27a7bb081df59559629335",
+        "bytes": 108526,
+        "observed_at_unix": 1793048034.232748,
+        "session_id": "trace-1793048013383-00000",
+        "turn_count": 2,
+        "created_at": 1793048034.227289,
+        "selected_note_tool_results": [
+          {
+            "tool_use_id": "call_89848c39810a43d680f7e1d5",
+            "input": {
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            },
+            "note": {
+              "note_id": "6",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048034.209748,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            }
+          }
+        ],
+        "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+      },
+      {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048034221.json",
+        "sha256": "12017ca4c7e3fe6b0c660919bf8ffb8aecc33e233aa85a92e1ff62cb4f775ae7",
+        "bytes": 108522,
+        "observed_at_unix": 1793048034.233336,
+        "session_id": "trace-1793048013383-00000",
+        "turn_count": 2,
+        "created_at": 1793048034.221623,
+        "selected_note_tool_results": [
+          {
+            "tool_use_id": "call_89848c39810a43d680f7e1d5",
+            "input": {
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            },
+            "note": {
+              "note_id": "6",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048034.209748,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            }
+          }
+        ],
+        "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+      }
+    ],
+    "late": [
+      {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048059434.json",
+        "sha256": "4b2089d7d8df1394f4fc768da0a81e59e9eedc4d87a1e4fcb143144bc0d0e407",
+        "bytes": 116175,
+        "observed_at_unix": 1793048059.639068,
+        "session_id": "trace-1793048013383-00000",
+        "turn_count": 6,
+        "created_at": 1793048059.434298,
+        "selected_note_tool_results": [
+          {
+            "tool_use_id": "call_89848c39810a43d680f7e1d5",
+            "input": {
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            },
+            "note": {
+              "note_id": "6",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048034.209748,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            }
+          },
+          {
+            "tool_use_id": "call_097903ee2ddc4720a61412d2",
+            "input": {
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+            },
+            "note": {
+              "note_id": "11",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048048.849434,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+            }
+          }
+        ],
+        "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+      },
+      {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048067701.json",
+        "sha256": "9313199d52d7d8ba05cd113a4bb8c8bd12882171cd29bec523ef907f9d1c1313",
+        "bytes": 121328,
+        "observed_at_unix": 1793048067.7302232,
+        "session_id": "trace-1793048013383-00000",
+        "turn_count": 7,
+        "created_at": 1793048067.701244,
+        "selected_note_tool_results": [
+          {
+            "tool_use_id": "call_89848c39810a43d680f7e1d5",
+            "input": {
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            },
+            "note": {
+              "note_id": "6",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048034.209748,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            }
+          },
+          {
+            "tool_use_id": "call_097903ee2ddc4720a61412d2",
+            "input": {
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+            },
+            "note": {
+              "note_id": "11",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048048.849434,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+            }
+          }
+        ],
+        "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+      },
+      {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048067698.json",
+        "sha256": "13e4fc9df982d7f33ba722137ac0816099e3810282d709f6c00efbb8e563bf6a",
+        "bytes": 121332,
+        "observed_at_unix": 1793048067.7310941,
+        "session_id": "trace-1793048013383-00000",
+        "turn_count": 7,
+        "created_at": 1793048067.698534,
+        "selected_note_tool_results": [
+          {
+            "tool_use_id": "call_89848c39810a43d680f7e1d5",
+            "input": {
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            },
+            "note": {
+              "note_id": "6",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048034.209748,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            }
+          },
+          {
+            "tool_use_id": "call_097903ee2ddc4720a61412d2",
+            "input": {
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+            },
+            "note": {
+              "note_id": "11",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048048.849434,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+            }
+          }
+        ],
+        "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+      },
+      {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048067671.json",
+        "sha256": "fc1e4b085d0b215a19b2d27d5536bc048c975476ecbf735c8f75082605f485e0",
+        "bytes": 120523,
+        "observed_at_unix": 1793048067.732903,
+        "session_id": "trace-1793048013383-00000",
+        "turn_count": 7,
+        "created_at": 1793048067.67155,
+        "selected_note_tool_results": [
+          {
+            "tool_use_id": "call_89848c39810a43d680f7e1d5",
+            "input": {
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            },
+            "note": {
+              "note_id": "6",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048034.209748,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+            }
+          },
+          {
+            "tool_use_id": "call_097903ee2ddc4720a61412d2",
+            "input": {
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+            },
+            "note": {
+              "note_id": "11",
+              "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+              "author_id": "audit-live-glm",
+              "author_kind": "automated_actor",
+              "created_at": 1793048048.849434,
+              "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+            }
+          }
+        ],
+        "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+      }
+    ]
+  },
+  "source_bindings": [
+    {
+      "path": "runs/after-effect-glm-c2-1/provenance.json",
+      "sha256": "b51e029a990e279f26af7c87ba2590da9c222971050f72ca5fa3c188ba17add5",
+      "bytes": 6044
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/created.json",
+      "sha256": "8d87a250ca31ce65303e8cf94ab6e016d51497c83bf2113dbe49adb383105509",
+      "bytes": 4825
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/tool-call-selection.json",
+      "sha256": "a63d38b791cfa2d50fe76b1a6d00d9511e800cd8c857442de74db50065f6aa14",
+      "bytes": 35373
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/checkpoint-lineage-selected.json",
+      "sha256": "92b9d57e92f5f97ad8c53dd2006517caff2c670685fed507f2b638bded598ea1",
+      "bytes": 40812
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/provider-input-selected.json",
+      "sha256": "f174aed74f98dc129e6d101eabab8e80329335eac50a9029edf6ace277299b2a",
+      "bytes": 99011
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/root-final-readonly-observation.json",
+      "sha256": "d6e4c108618cb697a028ee0fd0d941ab50822d0c9abfbcbee3116aadf714b764",
+      "bytes": 7696
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/result.json",
+      "sha256": "659d2157fece97b6273a74a8c25e67034a7fb26c8ff74f29d35ac66bb7e630b7",
+      "bytes": 301
+    },
+    {
+      "path": "glm-c2-canonical-result-read-review.json",
+      "sha256": "dcf70079fa52a5753bd350d49b0adf3f5238af21eef98e4ce15811e36b019e17",
+      "bytes": 17813
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/queue-observations.json",
+      "sha256": "7f14a6cf2bb955b6b7cfe1e4f0c67eb49ed32cd29264112830a0beda68c83c71",
+      "bytes": 518780
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/root-owned-server-stop.json",
+      "sha256": "d06c25936b4d65f5f16daceb8f49fdefa56f54ebb960f8cf64641df0e7997106",
+      "bytes": 1037
+    },
+    {
+      "path": "runs/after-effect-glm-c2-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+      "sha256": "83c786c1a095d2fe91ebdf0df5ebb8946eddd7b5d55dc336b9ec6c3140f66cc2",
+      "bytes": 10007
+    }
+  ],
+  "verdict": "bounded saved-observation predicates PASS; original controller FAIL remains",
+  "limits": [
+    "Early/late checkpoints are original controller selected captures with historical hashes; overwritten full original checkpoint bytes are not reconstructed or independently rehashed.",
+    "Canonical B-result-read chain is separately independently reviewed, not a new model run.",
+    "No producer exit status: root stopped a non-child owned process after final observation; no claim of controller normal-exit PASS.",
+    "Full original/intermediate provider HTTP bodies and provider acceptance are not proved.",
+    "No whole-feature, arbitrary-model, multi-account, operating primary, or installation claim."
+  ]
+}

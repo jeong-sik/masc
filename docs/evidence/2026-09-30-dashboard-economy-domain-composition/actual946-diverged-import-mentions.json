@@ -1,0 +1,159 @@
+{
+  "scope": "All22 changed dashboard/src blobs versus local a215; other1571 source blobs match nontruncated actual946 tree",
+  "pattern": "candle-observation|keeper-portrait|Candle.*Schema|KeeperEquipmentSchema|KeeperPortraitSchema",
+  "receipts": [
+    {
+      "path": "dashboard/src/api/board.test.ts",
+      "local": "bb990f673253041e10fd69f0bafb0bb1d694b2e3",
+      "remote": "ebf96016045e54cb5e41f1fc98a11c3ac35029cf",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/api/board.ts",
+      "local": "faa8364eb7757e456a4424ff37e860f183ea0592",
+      "remote": "3359872254045cc785318022e9dd2dccef9e1fdd",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/api/dashboard-keeper-cost.ts",
+      "local": "ec21ece32b6e180d1d87215971f12b2673ecae9a",
+      "remote": "b321620bd3e0551ce8ef2553963fc98d40a3c9c5",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/api/dashboard-skills.test.ts",
+      "local": "a609278d0841b7df0f9d45219b445ec8faa928bb",
+      "remote": "805969cff14c0d661d757c6ca32c15a951b47936",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/api/dashboard-skills.ts",
+      "local": "90ac6fb61050cfc4ffd596d22c62be64cda9cdc9",
+      "remote": "ab8ac82281f642d277d58216d0477730c420fd88",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/api/dashboard.test.ts",
+      "local": "4f2c5a5023e3db609575faab1f629507e5a4f42f",
+      "remote": "8f96e8d2278d22bf1c722e0d7bf71c2ed3079094",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.test.ts",
+      "local": "9d99c0aea94e926b82781d62b085d53363daf204",
+      "remote": "71b4144e42a891f026a77f3557972adec8c0f23c",
+      "mentions": [
+        "import { candleAmountText, readCandleAccountRevision, readCandleBalance, readCandleObservation } from './candle-observation'"
+      ]
+    },
+    {
+      "path": "dashboard/src/api/schemas/candle-observation.ts",
+      "local": "63332b2ddf68250f2288a3c8fe9693600d6f40d3",
+      "remote": "ece29d4c1a22d69894890d9df250f9e75510b82b",
+      "mentions": [
+        "export const CandleAmountSchema = Schema.String.pipe(",
+        "export const CandleBalanceSchema = Schema.NullOr(CandleAmountSchema)",
+        "export const CandleAccountRevisionSchema = Schema.NullOr(Schema.String.pipe(",
+        "export const CandleObservationSchema = Schema.Union(",
+        "    issued_milli: CandleAmountSchema,",
+        "    burned_milli: CandleAmountSchema,",
+        "    circulating_milli: CandleAmountSchema,",
+        "export type CandleObservation = Schema.Schema.Type<typeof CandleObservationSchema>",
+        "  const parsed = Schema.decodeUnknownEither(CandleObservationSchema, { onExcessProperty: 'error' })(value)",
+        "  const parsed = Schema.decodeUnknownEither(CandleBalanceSchema)(value)",
+        "  const parsed = Schema.decodeUnknownEither(CandleAccountRevisionSchema)(value)",
+        "const CandleRosterRowsSchema = Schema.Array(Schema.Struct({ candle_balance_milli: CandleBalanceSchema }))",
+        "  const parsed = Schema.decodeUnknownEither(CandleRosterRowsSchema)(rows)"
+      ]
+    },
+    {
+      "path": "dashboard/src/api/schemas/keeper-chat-delivery-provenance.ts",
+      "local": "8c39fb93ae08f5560792c1657d4b7f41e8cdd469",
+      "remote": "df574c97a0c044ea64c05ee4c94bb5d0cb21a467",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/api/schemas/runtime-probe.ts",
+      "local": "e1d7bed7310645004d00d9bc80b660e4fdf43dce",
+      "remote": "00402d36f49753edee122468dbb14ea5d03ed01a",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/components/approvals/approvals-surface.ts",
+      "local": "3e0a93e2f877ce4b6087632e8a8a7d894921d1fe",
+      "remote": "ea4fb15bc494e9e31e6a9505019cf13a0f3b048f",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/components/cost-dashboard.render.test.ts",
+      "local": "e97c1d4782e170dc09c4dae9812a65de6b33d4e0",
+      "remote": "4a6ad89e65c22e5d1a944189c722fff98df588dc",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/components/cost-dashboard.ts",
+      "local": "a1c6e4a6b9a8d947453f0464eeabb72bcb7a6dad",
+      "remote": "6354ae283f74cfe061451baff373754462bf3e9d",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/components/cost/cost-store.ts",
+      "local": "5904fa9a96617aec47575d5b435a370e54518d4f",
+      "remote": "61cbd5ab9a1da1b0246294d124c162c63c190308",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/components/dashboard-shell.test.ts",
+      "local": "4e95acc14f27b70e825dcd3ffe2d6757b1f92ba5",
+      "remote": "3f96c4cfe494edcba39b708d1fc0df36d8455bb7",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/components/tools/config-resolution-panel.test.ts",
+      "local": "88375baf3d48a5b9f31cde2d65d00a061b924fb5",
+      "remote": "6a49a6f6da36aacf193d8e98421409eff79641f8",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/keeper-delivery-provenance.test.ts",
+      "local": "d25425bf30d09f6e5727ad7b369678e3f5c01326",
+      "remote": "b92e8b7d8ebb2562b7423920aed166c9d560d2d8",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/keeper-delivery-provenance.ts",
+      "local": "df8eb216518efad2025e19ad9d2a15ee1696de4d",
+      "remote": "14c0221f437579507bdd81b69af502787d87125b",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/keeper-store-normalize.test.ts",
+      "local": "67d6928cdda9dead234f61a8eba8ba11f6487477",
+      "remote": "0f9c710af2abd14f90c374564a4ba517907a95c8",
+      "mentions": []
+    },
+    {
+      "path": "dashboard/src/keeper-store-normalize.ts",
+      "local": "a8e4cbeddab05b06679dd7edda94d098f01791ad",
+      "remote": "0d5525a70d1e2682ea9cff6c070c8bd6525eb99e",
+      "mentions": [
+        "import { readKeeperPortrait } from './api/schemas/keeper-portrait'",
+        "import { readCandleAccountRevision, readCandleBalance } from './api/schemas/candle-observation'"
+      ]
+    },
+    {
+      "path": "dashboard/src/types/core.ts",
+      "local": "9220637300d150008ce871703cde5ab015345599",
+      "remote": "d0582f728f11bcbeef91b8961f0e6b5b54e10b68",
+      "mentions": [
+        "import type { KeeperPortraitReading } from '../api/schemas/keeper-portrait'"
+      ]
+    },
+    {
+      "path": "dashboard/src/types/gate.ts",
+      "local": "4d8fd8fa88ecd1e71e8014ec92bcf0c3b7ceae92",
+      "remote": "9753276cdbbf7de37a4173c4b0f7f396a04718c8",
+      "mentions": []
+    }
+  ]
+}

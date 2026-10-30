@@ -1,0 +1,30 @@
+[runtime]
+default = "glm-coding.glm-5-3"
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["glm-coding.glm-5-3"]
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["glm-coding.glm-5-3"]
+[providers.glm-coding]
+display-name = "GLM Coding Plan"
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+connect-timeout-s = 1200.0
+exact-body-timeout-s = 1200.0
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+[models.glm-5-3]
+api-name = "glm-5.3"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+[models.glm-5-3.capabilities]
+max-output-tokens = 128000
+
+[glm-coding.glm-5-3]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+wizard-default = true

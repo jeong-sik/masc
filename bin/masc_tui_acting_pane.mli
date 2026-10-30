@@ -1,0 +1,409 @@
+(** The Activity pane: recent observed keeper activity, beside whatever
+    surface is up.
+
+    The observer feed already reaches the TUI for the whole session, and the
+    Activity surface draws it full-screen. This pane projects the same held
+    events into a column on the right of any surface, so a reader in a keeper
+    chat or on the board sees the fleet move without leaving.
+
+    Two tabs. [Tab_fleet] is the feed: one row per keeper ordered by who acted
+    last, then the keeper the cursor is on with the calls of its newest feed
+    record and the records before it. [Tab_changes] is the files that keeper changed
+    in its workspace, newest first, as the Changes surface lists them, kept
+    current from the feed.
+
+    Nothing here performs I/O or reads TUI state. The caller hands in the
+    facts as it holds them and gets back rows of toned spans; the renderer
+    paints tones through the theme. Width and visibility follow the roster
+    pane's contract: the terminal measures, the reader decides, and a
+    decision survives a resize. *)
+
+val pane_cols : int
+(** The columns the narrow pane takes. *)
+
+val wide_pane_cols : int
+(** The columns the wide pane takes: the narrow pane's, plus eighteen that
+    go to the fleet row's name column and the call row's age. *)
+
+val wide_name_extra_cells : int
+(** How many of the wide pane's extra cells go to the keeper column; the
+    rest go to the tool column beside it. *)
+
+val reading_cells : int
+(** The cells a fleet row's reading gets, after the mark, the name and the gap.
+    Every reading fills it exactly -- the state, tool, calls and token columns
+    add up to this and blank columns are spaces -- so the figures line up down
+    the list. Exported so a test can hold that sum without restating it. *)
+
+val threshold_cols : int
+(** The width from which a surface can afford the pane beside it: the pane
+    plus what every surface keeps beside it -- the frame around the inner
+    width the Keepers list needs for its flag columns
+    ({!Masc_tui_render_schedule.keeper_flags_minimum_inner_width}). The floor
+    is the same on every surface, so moving between surfaces never opens or
+    closes the pane. *)
+
+val wide_threshold_cols : int
+(** The width from which a surface can afford the wide pane: the wide pane
+    plus the same floor {!threshold_cols} leaves. *)
+
+(** The reader's answer to how the pane should sit beside a surface. *)
+type layout =
+  | Narrow
+  | Wide
+  | Hidden
+
+val drawn_cols : layout:layout -> cols:int -> int
+(** The columns the pane takes beside a terminal [cols] wide: the layout the
+    reader chose when the terminal holds it, the narrow pane when a wide
+    choice meets a terminal that holds only the narrow one, and none when
+    hidden or when not even the narrow pane fits. The choice survives the
+    resize; a wider terminal draws it again. *)
+
+val next_layout : layout:layout -> cols:int -> layout option
+(** Ctrl-L: narrow, wide, hidden, in turn. A terminal that holds the narrow
+    pane but not the wide one goes narrow to hidden. [None] below
+    {!threshold_cols} leaves the choice untouched, so a key with no visible
+    effect cannot surprise the reader after a later resize. *)
+
+val layout_label : layout -> string
+
+val content_cols : layout:layout -> cols:int -> int
+(** What the surface beside the pane lays out against. *)
+
+(** Which of the pane's two readings is up. *)
+type tab =
+  | Tab_fleet
+  | Tab_changes
+
+val tab_label : tab -> string
+val next_tab : tab -> tab
+
+(** The feed's state as the header states it. *)
+type feed =
+  | Feed_off  (** no server has answered yet *)
+  | Feed_opening
+  | Feed_live of int  (** frames received; only transport state is displayed *)
+  | Feed_closed of string  (** why *)
+
+(** One keeper as the fleet block draws it. [mark] is the one-cell health
+    glyph the roster draws ({!Masc_tui_keeper_mark}); [mark_tone] is the
+    colour the caller reads out of the same health. [health] is that same
+    reading. A gone process marks an open feed record with [!]; every
+    other open record wears [~], without asserting a current turn. *)
+type keeper = {
+  name : string;
+  mark : string;
+  mark_tone : tone;
+  health : Masc.Tui_decode.keeper_health_reading option;
+}
+
+(** A colour the renderer resolves through the theme. Names a reading, never
+    an SGR code. *)
+and tone =
+  | Plain
+  | Dim
+  | Accent
+  | Ok
+  | Warn
+  | Bad
+  | Info
+
+type approval = {
+  approval_keeper : string;
+  approval_tool : string;
+}
+
+(** One file the selected keeper changed, as the Changes tab draws it. The
+    caller reads it out of the server's file-change record: the address the
+    Changes surface shows, what kind of write it was, whether it landed, and
+    the line range the record carries when it carries one. *)
+type file_kind =
+  | File_edited
+  | File_written
+
+type file_row = {
+  file_path : string;
+  file_kind : file_kind;
+  file_succeeded : bool;
+  file_at : float;
+  file_where : string option;  (** the range label, [L12-40], when known *)
+}
+
+(** What is known about the selected keeper's changes right now. The four
+    states are the fetch helper's four, named here so the pane answers each
+    without knowing the helper. *)
+type changes_authority =
+  | Changes_current
+  | Changes_workspace_unconfirmed
+  | Changes_revalidating
+  | Changes_needs_revalidation
+
+type changes =
+  | Changes_absent  (** no keeper selected, or never asked *)
+  | Changes_loading
+  | Changes_failed of string
+  | Changes_ready of {
+      keeper : string;
+      files : file_row list;  (** newest first *)
+      fetched_at : float;
+      window_hours : float;
+      calls : int;  (** tool calls the window held, changes or not *)
+      over_budget : int;  (** changes the log kept no text for *)
+      malformed : int;
+      authority : changes_authority;
+        (** Whether these retained rows can open a file in the current workspace. *)
+      refresh_failed : string option;
+        (** Why the refresh after this answer failed: the files are the last
+            good read, and the status row says so above them. *)
+    }
+
+(** How much of the fleet the Recent tab draws. Beside the Keepers roster
+    every fleet row would be a roster row said twice, so there only the
+    selected keeper's record draws, under the rows of keepers waiting on an
+    approval, which the roster does not name; beside any other surface the
+    whole fleet does. *)
+type scope =
+  | Whole_fleet
+  | Selected_only
+
+(** The order the focus block lists the newest record's calls in. The two
+    receipt orders are what the fold holds, forwards and backwards; the other
+    two are stable sorts over receipt order, so ties keep it. A call still
+    out has no duration and sorts after every call that has one. The heading
+    over the calls names the order that is up. *)
+type call_order =
+  | Oldest_first
+  | Newest_first
+  | Longest_first
+  | By_tool
+
+val call_order_label : call_order -> string
+val next_call_order : call_order -> call_order
+
+type task_source = Task_source_unread | Task_source_read | Task_source_failed
+type keeper_task =
+  | Task_unavailable
+  | Task_not_observed
+  | Task_refresh_failed
+  | Task_observed of { id : string; refresh_failed : bool }
+
+val summarize_keeper_task :
+  workspace_ready:bool -> source:task_source -> metadata_failed:bool ->
+  task_id:string option -> keeper_task
+(** A failed refresh may retain an older task; unread or foreign workspace
+    metadata must not be described as an observed task. *)
+
+type keeper_context = {
+  keeper_name : string;
+  task : keeper_task;
+  waiting : Masc_tui_keeper_list_model.waiting_reading;
+  waiting_stale : bool;
+}
+(** Facts already held by the roster for its selected Keeper. A waiting
+    inventory is not a complete schedule or active delegation inventory. *)
+
+type keeper_waiting_summary =
+  | Waiting_not_observed
+  | Waiting_read_unavailable
+  | Waiting_items of {
+      schedules : Masc.Tui_decode.waiting_item list;
+      delegate_result_waiting : bool;
+      read_error : bool;
+    }
+
+val summarize_keeper_waiting : keeper_context -> keeper_waiting_summary
+(** Classify the exact Keeper's typed waiting inventory. A different Keeper's
+    row or a failed read is unavailable, not a known empty observation.
+    [read_error] says at least one source of that inventory was incomplete. *)
+
+type input = {
+  now : float;
+  tab : tab;
+  scope : scope;
+  feed : feed;
+  keepers : keeper list option;
+      (** [None] until this workspace's keeper files have been read: the header
+          says the roster is not loaded rather than counting no keepers *)
+  trace_unavailable : (string * string) list;
+      (** Named identity failures in event attribution, independent of roster
+          completeness and lifecycle state. Fleet rows remain navigable. *)
+  keepers_error : string option;
+      (** A failed read makes the count unavailable. Retained rows remain
+          usable for navigation; their presence does not prove a full count. *)
+  selected : string option;
+      (** the keeper the cursor is on; on the Recent tab the most recently
+          observed keeper stands in when there is none *)
+  keeper_context : keeper_context option;
+      (** Present beside the roster for the selected Keeper only. *)
+  approvals : approval list;  (** pending, any keeper *)
+  chunks : Masc_tui_acting.chunk list;
+      (** Event-derived projection, newest first; all presentation inputs above
+          remain live independently of chunk reuse. Ignored on Changes. *)
+  changes : changes;  (** the selected keeper's, for the changes tab *)
+  call_order : call_order;
+  expanded : (string * Masc_tui_acting.call_key) list;
+      (** The calls whose detail is open, by keeper and call key. An open
+          call draws three rows under its own: its disposition, receipt age
+          and schedule in words, then the input and output previews the
+          producer sent, one row each. *)
+}
+
+type span = {
+  text : string;
+  tone : tone;
+}
+
+type line = span list
+
+(** What a mouse press on a drawn row can act on. The renderer keeps the
+    targets of the last frame beside its rows, so a click answers what was
+    on screen, not what a later frame would draw. *)
+type row_target =
+  | Target_none  (** legend, rule, indicators, padding, focus rows, status rows *)
+  | Target_next_tab  (** the header row: a press shows the other tab *)
+  | Target_keeper of string  (** a fleet row: the keeper it names *)
+  | Target_more
+      (** the fold line: the fleet rows the overview layout left out; a press
+          scrolls into the full list *)
+  | Target_file of int
+      (** a changes row: the index of the file in [Changes_ready.files] *)
+  | Target_calls of string
+      (** an earlier-turn row in the focus block: the keeper whose calls it
+          draws; a press opens that keeper's calls surface *)
+  | Target_call of string * Masc_tui_acting.call_key
+      (** a call row, or one of an open call's detail rows: the keeper and
+          the call; a press opens the call's detail or closes it *)
+  | Target_call_order  (** the heading over the calls: a press turns the order *)
+
+type rendering = {
+  rows : line list;
+  targets : row_target list;  (** one per row, in the same order *)
+  scroll_max : int;
+  context_rows : int;
+      (** the largest [scroll] that still shows content: zero when everything
+          fits, so a wheel over a short pane moves nothing *)
+}
+
+val reconcile_context_cursor : previous_rows:int -> current_rows:int -> int option -> int option
+(** A context entering or leaving shifts Activity targets. Keep keyboard
+    focus in the pane and move it to its stable tab header. *)
+
+(** Input authority produced by one draw. The source is the original data
+    used by that draw; it is not a lookup into the next asynchronous read. *)
+type 'source frame = {
+  frame_columns : int;
+  frame_targets : row_target list;
+  frame_scroll_max : int;
+  frame_source : 'source option;
+}
+
+val empty_frame : 'source frame
+val target_at : 'source frame -> line:int -> row_target
+
+val next_target_row : targets:row_target array -> row:int -> step:int -> int option
+(** The row a keyboard cursor rests on next: from [row], stepping [step]
+    (1 down, -1 up) through the frame's [targets], the first row a press
+    would act on -- any target but {!Target_none}. [None] when no such row
+    lies that way, or when [step] is zero. [row = -1] with [step = 1] finds
+    the first; the caller then scrolls the pane, since the rows are the
+    frame's and the next call may be below it. *)
+
+val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
+(** Exactly [rows] lines, each exactly [cols] display cells once its spans
+    are joined: a line that would overflow is cut at the right edge, a short
+    one is padded, and rows the content does not need are blank. The header
+    row carries the two tabs and the feed's transport state on both tabs.
+    The Recent tab reserves a second header row for {!legend}. Changes keeps
+    its single header row.
+
+    A row states less before it clips a figure: an earlier-turn row gives up
+    its cost, then the token parts; the focus header gives up the long form
+    of its state word.
+
+    The focus block, under either scope, is the keeper's header, then --
+    when the record names calls -- a heading naming their order, the calls
+    in that order with an open call's three detail rows under it, then the
+    earlier turns. A call row wears the record glyph, or the failure glyph
+    when the ledger said the call failed, then two dispatch cells: [&] when
+    it ran in a batch with others, [>] when it returned a deferral. At
+    {!wide_pane_cols} and wider the call row ends with the call's age since
+    receipt in {!age_text}'s wording, padded to six cells, and the fleet
+    row's name column holds eighteen more cells.
+
+    Under either receipt order, a record whose calls came from more than one
+    model response says how many in the heading ([calls \xc2\xb7 newest first
+    \xc2\xb7 4 responses]) and brackets each response of two or more calls
+    in the call rows' border cell: [\xe2\x94\x8c] beside its first call,
+    [\xe2\x94\x82] beside the calls between, [\xe2\x94\x94] beside its
+    last, plain over the dim edge. A response of one call keeps the edge;
+    the heading's count is what says the record is split. No row is added.
+    A
+    composition's calls sit with the response that asked for the
+    composition. The response is the call's session ordinal, not its
+    planned index. No count and no bracket draw under the two sorts, which
+    interleave responses, for a single response, and when any call states
+    no ordinal.
+
+    Recent tab under [Selected_only]: the fleet rows of keepers waiting on
+    an approval, then the selected keeper's focus block, windowed like the
+    Changes tab. The focus header says what the keeper is doing now when the
+    record carries it -- [running <tool> 4s] while a wire call is out,
+    [waiting on model 12s] while a provider call is in flight, [idle 3m] on
+    a done record -- each with its own clock and, on a done record, the
+    turn number after it. A record that says none of the three (between a
+    tool's return and the next provider call, or a CLI lane, which sends no
+    turn markers) keeps the older reading: a done turn by its number alone,
+    every other record spelling its state ([open], [no end, process gone]),
+    and the age of the newest event. Under [Whole_fleet], two layouts.
+    At [scroll = 0] the overview: the fleet takes at
+    most half the rows below the header when the focus block has something to
+    show, a fold line counts the keepers left out, and the focus block takes
+    the rest. Any other [scroll] (clamped to [scroll_max]) is the full list --
+    every fleet row, the rule, every focus row -- windowed from that offset,
+    with an [↑ N more] row where content is above and a [↓ N more] row where
+    it is below, when indicators leave room for content. A single available
+    body row shows the selected content directly. When everything fits the two layouts are the same list and
+    no fold or indicator draws.
+
+    Changes tab: a status row for the keeper and the fetch, then one row per
+    file, windowed the same way. *)
+
+val keeper_state_text :
+  cols:int ->
+  health:Masc.Tui_decode.keeper_health_reading option ->
+  approval:string option ->
+  Masc_tui_acting.chunk option ->
+  span list
+(** The fleet row's recent observation in four fixed columns: the state
+    word ([approval] with the tool, [no events], [open] with the newest
+    tool, [done]), then the call figure ([-] or [2+] observed so far on an
+    open record, [3] or [?] from the end event on a done one) and the token
+    sum on a done one. [no end] would be the word for a gone process, but
+    {!lines} draws no fleet row for an offline keeper, so only a direct
+    caller sees it. No glyph: the row's one-cell mark is the keeper's
+    health, not the record. No clock: the age of the newest event is on the
+    focus header. [cols] decides the tool column's width: the wide pane
+    gives it cells a tool name needs, and a name past the column is cut with
+    a mark rather than silently. *)
+
+val tokens_text : Masc_tui_acting.turn_input option * int option -> string
+(** Input and output tokens as labelled parts when both are known
+    ([in 73.9k · out 358], or [in 160.4k new · 3.56M cached · out 6.6k] when
+    the input carries a cache split), a split input alone as its parts, one
+    figure otherwise ([412 tok]); empty when neither is known. *)
+
+val tokens_sum_text : Masc_tui_acting.turn_input option * int option -> string
+(** The same tokens summed, cache reads included ([74.2k tok]), for a row
+    that cannot afford the parts. *)
+
+val legend : cols:int -> string
+(** The legend row, as drawn at that width: the column names sit over the
+    fleet row's columns, which start after the name column the width gives. *)
+
+val age_text : now:float -> float -> string
+(** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)
+
+val trace_unavailable_summary : (string * string) list -> string option
+(** One summary row; complete reasons remain in each Keeper's scrollable
+    Info / Metadata reading and in the pane's scrollable failure rows. *)

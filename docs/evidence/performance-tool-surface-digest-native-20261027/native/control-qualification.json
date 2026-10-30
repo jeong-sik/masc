@@ -1,0 +1,46 @@
+{
+  "schema": "masc.qualified-native-owner-index.v1",
+  "qualified_utc": "2026-10-26T19:30:27.595120+00:00",
+  "workflow": "Minimal manual checks",
+  "run_id": 40381214979,
+  "workflow_conclusion": "success",
+  "artifact_id": 12679676114,
+  "builder_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "application_source": "8e61fa43fbf93f0e1edf06f07420fde6c79ccbc0",
+  "archive_sha256": "e93838bf56e784deb34277df2cc6276426be30fc0f845b6b62330725c7fc84de",
+  "server_sha256": "2e09b44a26232dceb73182e5aa01fb67f054adccdd2e59238114312a35aa9f21",
+  "tui_sha256": "ed61ed3a92721971eeb9b2364d0a8a655af0b3734f83f203621c712c20b5b9ed",
+  "native_suites": [
+    {
+      "suite": "test_tui_published_reports",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_document_search",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_image_admission",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_images",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "actual_build_commit_commands_match": true,
+  "primary_installed": false,
+  "visible_ui": false,
+  "separate_owner_suite": {
+    "run": 40381210182,
+    "conclusion": "failure",
+    "stage": "inherited test callback record typing; no Owner cases executed",
+    "later_repair_head": "e6cd5474de4add4593d50d590bcdafa1a21c900c",
+    "later_delta": "test/docs only; does not relabel this8e binary"
+  },
+  "scope": "Actual bytes/embedded source and four selected resource suites; no native Map workload or performance result yet"
+}

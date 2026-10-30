@@ -1,0 +1,9 @@
+{
+  "fixtures": [
+    {"file": "verified_replacement.json", "expected_outcome": "capture_not_current"},
+    {"file": "repeated_30.json", "expected_outcome": "committed_and_acknowledged"},
+    {"file": "repeated_200.json", "expected_outcome": "committed_and_acknowledged"},
+    {"file": "independent_200.json", "expected_outcome": "committed_and_acknowledged"},
+    {"file": "independent_200_followup.json", "expected_outcome": "committed_and_acknowledged"}
+  ]
+}

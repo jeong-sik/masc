@@ -1,0 +1,42 @@
+[
+  {
+    "file": "lib/config/env_config_keeper.ml",
+    "candidate_and_cache_source_sha256": "2ec9fedc428a929adb43c48479a1667f04b8b45d28974f29faaeda18ea651743"
+  },
+  {
+    "file": "lib/config/env_config_keeper.mli",
+    "candidate_and_cache_source_sha256": "c026c636f4df30991e2d20a74476648008e5ba2b4fe07a36cd1efc1a4212e98d"
+  },
+  {
+    "file": "lib/config/env_config_keeper_supervisor.ml",
+    "candidate_and_cache_source_sha256": "6d23921b11685737fd5c6041796be69d68fe74048ac299875beb656be6e4bec0"
+  },
+  {
+    "file": "lib/config/keeper_runtime_setting_registry.ml",
+    "candidate_and_cache_source_sha256": "9d5c9cd8634504943a41a962b06e2577df04090942799cbacbb6947a32f44ea6"
+  },
+  {
+    "file": "lib/keeper_runtime/keeper_runtime_config.ml",
+    "candidate_and_cache_source_sha256": "4e3e7cfc36509ed536979eb80071d3344cdcce2e1a9d08a1c9e22fa72807b36a"
+  },
+  {
+    "file": "lib/keeper/keeper_runtime_resolved.ml",
+    "candidate_and_cache_source_sha256": "063ff191853a9bcd9bf8dff228583f08daeae9312425a6339ac8f8f894bb1677"
+  },
+  {
+    "file": "lib/runtime_settings.ml",
+    "candidate_and_cache_source_sha256": "fb2317c5d2bd26714525cdf29a6e90cb374a1761fe0bb50512e1c2b6700408f3"
+  },
+  {
+    "file": "lib/keeper/keeper_types_support.ml",
+    "candidate_and_cache_source_sha256": "26c60e2b42d714940e144f92bfef76369dac0c2bf7630310116ed8b86922eb7e"
+  },
+  {
+    "file": "lib/keeper/keeper_heartbeat_snapshot.ml",
+    "candidate_and_cache_source_sha256": "fda9c437217cef08cb0b9096d234faea8b9bb8ff6774d2e3e4a9d1e2d42b186c"
+  },
+  {
+    "file": "lib/runtime/runtime.ml",
+    "candidate_and_provider_cache_source_sha256": "7705254b1daf98750f0b980ab21963f21d0b4832c4f53744419f9070d2619f9c"
+  }
+]

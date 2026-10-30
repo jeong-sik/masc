@@ -1,0 +1,8 @@
+{
+  "lib/dated_jsonl/dated_jsonl.ml": "8f71fcc904ef9b1ce6310401dfac494853ace6fb864fa9ea7dfa371b1f948d6f",
+  "lib/dated_jsonl/dated_jsonl.mli": "b7df123f7c65089681adb888ebdbbabfabd60c172d6c90c6a32191eff3914ba4",
+  "lib/keeper/keeper_metrics_storage.ml": "a5822bc04176a21cfee4daaf86240240956db16140d585c2676c4ae2c0528d72",
+  "lib/keeper/keeper_wire_capture.ml": "62908b00c0bacf169ebdc13bd2cfbc1f4f59f26991c11b366b08434c3cf75e90",
+  "test/test_keeper_metrics_storage.ml": "f9267b4e24b02844de7beb0a8aaa0d9e1f821b27ca3a7abb2d2d67c6b1d4eb29",
+  "test/test_dated_jsonl.ml": "9534e1a0ddbcf12a610b658e2fd65bf51d7179ba19afb14b42e0d77c9413cf09"
+}

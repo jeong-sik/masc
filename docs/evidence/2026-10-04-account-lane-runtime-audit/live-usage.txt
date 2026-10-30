@@ -1,0 +1,43 @@
+Installed TUI 83d23c96, 160x40 PTY text replay; main pane cropped to 103 cells.
+This is the existing binary after live configuration repair, not the new UI.
+
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+
+   MASC Usage  14:07:45  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────
+   Plan    Trend    Keepers    v:next view
+
+   Plan usage
+  ┌ Claude Code Max Subscription · bfcd238a                                                          ┐
+  │ 5h                   ▕                        ▏ Used 0%                                          │
+  │ Model call limit                                                                                 │
+  │ Reset ↻ 19:00 in 4h52m · heard 2m50s ago                                                         │
+  │ Catalogue · exhausted (observed) · catalogue reopens 10-05 02:00 in 11h52m                       │
+  │ 7d                   ▕████████████████████████▏ Used 100%                                        │
+  │ Model call limit                                                                                 │
+  │ Reset ↻ 10-05 02:00 in 11h52m                                                                    │
+  └──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌ Kimi For Coding Subscription · 4abced36                                                          ┐
+  │ 5h                   ▕                        ▏ Used 0%                                          │
+  │ Model call limit                                                                                 │
+  │ Reset ↻ 14:10 in 2m30s · heard 8m25s ago                                                         │
+  │ Catalogue · exhausted (observed) · catalogue reopens 10-07 19:10 in 3d05h                        │
+  │ usage (provider resetTime)                                                                       │
+  │ ▕████████████████████████▏ Used 100%                                                             │
+  │ Model call limit                                                                                 │
+  │ Reset ↻ 10-07 19:10 in 3d05h                                                                     │
+  └──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌ OpenRouter · e27ec63d                                                                            ┐
+  │ credit limit         ▕████████████████████████▏ Used 100%                                        │
+  │ Model call limit                                                                                 │
+  │ Reset — · heard 8m27s ago                                                                        │
+  │ Catalogue · exhausted (observed) · catalogue reopen time not stated                              │
+  │ free model requests, daily                                                                       │
+  │ ▕                        ▏ Used 0%                                                               │
+   [rows 1-29/103 · j/k to scroll]
+
+  j/k:scroll  p:Usage / Telemetry  v:Plan / Trend / Keepers  w:1d / 7d / 14d  Esc:Dashboard  q:quit  …?
+
+  [Composer recipient omitted from public capture]

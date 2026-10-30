@@ -1,0 +1,15 @@
+=== K3 e2e tool pipeline (Cycle 27 — tool author seam) ===
+── Phase 1: tool surface emits 6 results ──
+  6 results in, 4 emitted (2 untagged ignored)
+── Phase 2: K1 wirein consumes ──
+  4 raws extracted, key drained
+── Phase 3: hydrate + workspace_holder ──
+  4 typed artifacts in workspace_holder
+── Phase 4: D1 HTTP envelope ──
+  dashboard sees 4 artifacts
+── Phase 5: payload_json reserved-key strip ──
+  no reserved keys leak into hydrated payload
+=== K3 e2e: 5/5 phases passed ===
+    Tool authors only need to set 2 reserved keys —
+    Tool_emission converts to typed artifacts deterministically.
+exit=0

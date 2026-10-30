@@ -1,0 +1,205 @@
+[
+  {
+    "path": "lib/core/common.ml",
+    "start_line": 214,
+    "end_line": 216,
+    "sha256": "a5e6e570134014c881d40e52fde3b96fca94a01748bbbd4f6732f6e058561385",
+    "source_sha256": "8a896bd42039eca13aff99e5e554abca4f16ff4d9f35e07249592f4fb43154fb"
+  },
+  {
+    "path": "lib/core/common.ml",
+    "start_line": 232,
+    "end_line": 234,
+    "sha256": "a9d46dcf60de269414399510c5a10881ac04616a5d8b518ad98790e13f3f33d7",
+    "source_sha256": "8a896bd42039eca13aff99e5e554abca4f16ff4d9f35e07249592f4fb43154fb"
+  },
+  {
+    "path": "lib/tool_blob_store/tool_output.ml",
+    "start_line": 5,
+    "end_line": 293,
+    "sha256": "5d8741ec1b1fd1dcb2ffbe6c5bfe8a6692fd68b058a108bdeef95843aaa41bcd",
+    "source_sha256": "7fb9199383eb8744586ecc0bf4d7d6dec6e188d6b1fb0ec6dff2dfff8a1b5d07"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "start_line": 44,
+    "end_line": 50,
+    "sha256": "9f3a6ffd224e550f695dd1ddc703e850354cb5c201f8c6c75c8b29de761654dd",
+    "source_sha256": "df4627969e180764cbaceb334398c9cc4aec0c1b3d8ac8e876f43662c4df9d63"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "start_line": 79,
+    "end_line": 86,
+    "sha256": "b9e470f680dac0f4e74d7fae7765274ec211e640fa2064063337f8f9a50fc08a",
+    "source_sha256": "df4627969e180764cbaceb334398c9cc4aec0c1b3d8ac8e876f43662c4df9d63"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "start_line": 205,
+    "end_line": 216,
+    "sha256": "225ffff5d0a8524829fb2b5ea45aea4f68fa9b65bdc4049354945f991f8ff02e",
+    "source_sha256": "df4627969e180764cbaceb334398c9cc4aec0c1b3d8ac8e876f43662c4df9d63"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 3,
+    "end_line": 14,
+    "sha256": "89ea6a007cf5916005a7de72aa7e97f38e957a9c2b3a612a33208c91c34dda42",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 21,
+    "end_line": 32,
+    "sha256": "d433583726d599d0e246af179c17d0884b42b1d2fd4881a6d30f40802d989151",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 39,
+    "end_line": 47,
+    "sha256": "42dd44e8461074d1a08822bc3373b4ae550174c29cf1995c93a4d907a2eef8a2",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 102,
+    "end_line": 113,
+    "sha256": "4d89446437ccb42b3be6769d33951fe1d093656ffa020e90ed2c254db12ac2fc",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 167,
+    "end_line": 199,
+    "sha256": "e7ff8ab8f2dcacd30038648b527a0ba1454e5abd7555e5b57e813ba13fbcb2ef",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 209,
+    "end_line": 217,
+    "sha256": "99a4fe6eca9eacb597943aebbb9f8a0a3a9c8de2632bed2c6a57390b7c4e0b17",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 222,
+    "end_line": 254,
+    "sha256": "4da558630fda06847ffe95f61d5d8f5d0c61b5d7437a16f06f329499c81b3659",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 266,
+    "end_line": 271,
+    "sha256": "8bd882002d3ab5cdae73b5d20ce6fccec082593cbbb5f910f179bcf58dde6549",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_types/tool_result.ml",
+    "start_line": 282,
+    "end_line": 288,
+    "sha256": "582971ac585c36530867985b4b244ebe20b45e2e174c6f68ae231a5cf82446c3",
+    "source_sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b"
+  },
+  {
+    "path": "lib/tool_bridge.ml",
+    "start_line": 32,
+    "end_line": 39,
+    "sha256": "f4b254ef8121276bb3bb7a54398cf04a266974ccf28123df9f3a713f3fbd6830",
+    "source_sha256": "62de844c216f56c185f03d850060a3ae085a0a42e14dda624906a420b6803e2e"
+  },
+  {
+    "path": "lib/tool_bridge.ml",
+    "start_line": 39,
+    "end_line": 115,
+    "sha256": "ee5789d0d02c825fb844bb2fdab7e77d15079bcc92d0798b46c946aef21230a0",
+    "source_sha256": "62de844c216f56c185f03d850060a3ae085a0a42e14dda624906a420b6803e2e"
+  },
+  {
+    "path": "lib/tool_bridge.ml",
+    "start_line": 191,
+    "end_line": 245,
+    "sha256": "b6e1f2e7cb8030b3a9a0204113d0bd279dde10fbe77c470bf5375031dcfd5cf5",
+    "source_sha256": "62de844c216f56c185f03d850060a3ae085a0a42e14dda624906a420b6803e2e"
+  },
+  {
+    "path": "lib/tool_bridge.ml",
+    "start_line": 254,
+    "end_line": 284,
+    "sha256": "0582e771422e2b6851ee746adfbc724f7b0310455e27dd2a9fec9177a1400f1c",
+    "source_sha256": "62de844c216f56c185f03d850060a3ae085a0a42e14dda624906a420b6803e2e"
+  },
+  {
+    "path": "lib/tool_bridge.ml",
+    "start_line": 327,
+    "end_line": 582,
+    "sha256": "b8267579b939b94b4e7a7ceb52d0cef1c7a740af75f61e26b6f0046054eccbdc",
+    "source_sha256": "62de844c216f56c185f03d850060a3ae085a0a42e14dda624906a420b6803e2e"
+  },
+  {
+    "path": "lib/tool_types/tool_shard_limits.ml",
+    "start_line": 7,
+    "end_line": 17,
+    "sha256": "0399250b7fb51b2179b70a77d0515bcbbd739a9afccecab39f4975c26f06b582",
+    "source_sha256": "207bcc2173ebf586b5b59dee0dd509a763413b7a194c0ab61b23f2689da93a2c"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "start_line": 40,
+    "end_line": 45,
+    "sha256": "4387d6913fe263577403bde977187427f00c66d803bf13e141db1269ebc25a3b",
+    "source_sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "start_line": 57,
+    "end_line": 66,
+    "sha256": "723b0c10bb874f43f0934390b1ca25a262ecb46f9e2a90704707501bc1ecb518",
+    "source_sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "start_line": 66,
+    "end_line": 90,
+    "sha256": "3aedb540ea69201f025d1d754c6e062e4b49319db8e039421a0c6d27b824083c",
+    "source_sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "start_line": 103,
+    "end_line": 108,
+    "sha256": "b1e5117cf6ee589ca97a397778b0eab6ded8594806dbdc08814c3df9670acbcc",
+    "source_sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "start_line": 114,
+    "end_line": 134,
+    "sha256": "79546abb92bc7aeb2641cb8e56324b645a4c7a723da7beb6e2491a313b5e871f",
+    "source_sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "start_line": 529,
+    "end_line": 533,
+    "sha256": "8b74ac7608558f8d17b111aafaed31e9fd116fd422083cf846ad4c63b4cb1e5c",
+    "source_sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "start_line": 565,
+    "end_line": 581,
+    "sha256": "8838f1f069b885fa97709d76a585136976efb60a89a10e6d46441faf25a212ed",
+    "source_sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  },
+  {
+    "path": "lib/task/anti_rationalization.ml",
+    "start_line": 581,
+    "end_line": 901,
+    "sha256": "d4e0a21f054e5ddede71f8fa93d50ba4a38f29f182b93a6841def3584033fde7",
+    "source_sha256": "bd366c919f323dd75b0ca0a9aba08b2546cd9822a8c6d3c9a877aa2904c6d7e5"
+  }
+]

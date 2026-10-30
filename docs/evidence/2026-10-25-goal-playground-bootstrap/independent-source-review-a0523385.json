@@ -1,0 +1,240 @@
+{
+  "verdict": "PASS_SOURCE_ONLY",
+  "first_line": "verdict: PASS head: a0523385b9a5475fcb3998795d09307f262daf32 by: codex-repair-eval-metrics",
+  "reviewer": "codex-repair-eval-metrics",
+  "independent": true,
+  "head": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "base": "00af8ebcf387964fc7f0d67801b392e935f7d103",
+  "direct_parent_verified": true,
+  "canonical_complete_diff_sha256": "127c9a25e113a82ed4d9b677588a974387fbb6bf566d94d634548f412f878629",
+  "full_binary_patch_sha256": "b177fb156801e4d32c10b7c8344881d62208ea8ca000d36f93040183380d02b6",
+  "reviewed_at_utc": "2026-10-25T10:59:48.395578+00:00",
+  "scope": "All3 changed files plus direct production/root/config/test-library consumers. No source edits, native/API/provider execution or GitHub approval.",
+  "findings_P0_P1_P2": [],
+  "functionality": [
+    {
+      "verdict": "PASS",
+      "finding": "Workspace.init creates canonical shared playground before fresh/existing initialized branching.",
+      "source": "lib/workspace/workspace_init.ml:25–45",
+      "reason": "One SSOT-derived path joins the existing mkdir_p list; it applies equally to first bootstrap and deliberate re-init. No second root owner or verifier-side directory creation is added."
+    },
+    {
+      "verdict": "PASS",
+      "finding": "The created root matches normalized production Goal proof ownership root.",
+      "sources": [
+        "lib/config/playground_paths.ml:17–20",
+        "lib/workspace/workspace_verification_store.ml:16–20",
+        "lib/verification_authority_tools.ml:164–175",
+        "lib/config/env_config_core.ml:266–274",
+        "lib/workspace/workspace_utils_backend_setup.ml:88–94"
+      ],
+      "reason": "default_config normalizes workspace inputs, including a supplied .masc suffix. The SSOT shared prefix is relative to that base_path. For a supported normalized Workspace config, init and Goal lookup designate the same directory."
+    },
+    {
+      "verdict": "PASS",
+      "finding": "Actual server bootstrap and public workspace initialization reach this implementation.",
+      "sources": [
+        "lib/workspace/workspace_core.ml:19–31",
+        "lib/server/server_runtime_bootstrap.ml:583",
+        "lib/mcp_tool_runtime_workspace.ml:116"
+      ],
+      "reason": "Workspace.init wrapper delegates to Workspace_init.init; production startup and MCP workspace initialization call that wrapper."
+    }
+  ],
+  "logic_and_failure_boundaries": [
+    {
+      "verdict": "PASS",
+      "finding": "Read-only Goal authority remains read-only with respect to missing shared root.",
+      "sources": [
+        "lib/verification_authority_tools.ml:202–209",
+        "lib/verification_authority_tools.ml:296–300",
+        "lib/verification_authority_tools.ml:366",
+        "test/test_goal_verifier_original.ml:77–96"
+      ],
+      "reason": "Layout read failure propagates Error. Only explicit Workspace.init repairs a missing root; no mkdir was added to authority or prompt preparation."
+    },
+    {
+      "verdict": "PASS",
+      "finding": "No Goal phase/criterion/request or existing producer evidence rewrite is introduced.",
+      "sources": [
+        "lib/workspace/workspace_init.ml:25–50",
+        "test/test_workspace_bootstrap.ml:179–197",
+        "test/test_goal_verifier_original.ml:82–100"
+      ],
+      "reason": "The product delta only ensures directory existence through existing Fs_compat.mkdir_p. Fixture checks preserve existing evidence/state and exact pending proof/request/criterion authority after re-init. Existing message-counter reconciliation behavior remains its existing boot contract."
+    }
+  ],
+  "module_access": [
+    {
+      "verdict": "PASS_SOURCE_TRACE",
+      "finding": "Workspace_init can reach Playground_paths directly.",
+      "reason": "lib/config/dune declares playground_paths in unwrapped(false) masc_config public masc.config; lib/workspace/dune directly lists masc_config. No dependency edge/cycle is added."
+    },
+    {
+      "verdict": "PASS_SOURCE_TRACE",
+      "finding": "Both native test modules can reach Playground_paths despite implicit_transitive_deps=false.",
+      "sources": [
+        "test/stanzas/test_workspace_bootstrap.inc",
+        "test/stanzas/test_goal_verifier_original.inc",
+        "test/deps/dune:134",
+        "lib/config/dune"
+      ],
+      "reason": "Both tests link masc_test_deps, which explicitly re_exports masc.config. Playground_paths is not private. Goal_verifier_original already referenced it in the parent fixture."
+    }
+  ],
+  "fixture_review": [
+    {
+      "verdict": "PASS_SOURCE_ONLY",
+      "finding": "Fresh Goal-only path has no manual producer/shared-root setup.",
+      "sources": [
+        "test/test_goal_verifier_original.ml:14–37",
+        "test/test_goal_verifier_original.ml:54–100"
+      ],
+      "reason": "New with_initialized_workspace stops after actual Workspace.init and prompt registry setup. The new case directly invokes Goal_store.upsert_goal → Workspace_goals.request_current_proof → A.create_goal_review → V.prepare before any helper-created producer root. It asserts empty layout and exact Goal/request/criterion."
+    },
+    {
+      "verdict": "PASS_SOURCE_ONLY",
+      "finding": "Missing-root refusal/re-init recovery and state preservation are materially checked.",
+      "reason": "The case removes the empty root, requires authority Error and absence after that read, explicitly re-initializes, compares restored authority to the same Original, and requires Verifying with the same typed serialized pending record. Workspace bootstrap fixture additionally preserves producer evidence bytes and state bytes."
+    },
+    {
+      "verdict": "PASS_SOURCE_ONLY",
+      "finding": "Assertions are direct and not swallowed by isolated callbacks.",
+      "reason": "Alcotest checks are in the test body; the workspace-bootstrap assertions execute directly. The cleanup catches cleanup errors only. There is no synthetic verifier response or provider/model call in these fixtures."
+    }
+  ],
+  "cleanliness": {
+    "verdict": "PASS",
+    "reason": "One product line uses existing SSOT and existing filesystem edge. No new setting/store/facade/lookup root expansion/policy gate/budget/API shape. Fixture helper split removes manual setup only for the fresh path while preserving prior producer-specific tests."
+  },
+  "checks": {
+    "git_diff_check_exit": 0,
+    "git_diff_check_output": "",
+    "native_execution": "NOT_RUN by reviewer",
+    "typing_or_local_Dune": "NOT_RUN",
+    "API_provider_or_real_Goal_execution": "NOT_RUN",
+    "GitHub_approval": "NOT_POSTED"
+  },
+  "limits": [
+    "This local source verdict is not native fixture execution, exact built/installed runtime evidence, actual fresh-provider Goal proof, or whole-stack approval.",
+    "The fresh fixture creates the normal planner Workspace agent through init. Its empty-root assertion establishes absence of Keeper/producer playgrounds, not literal absence of all workspace agents.",
+    "Pending record equivalence is checked through the existing typed JSON codec; source review also confirms Workspace.init does not access Goal/verification storage.",
+    "Malformed manually constructed config records and pre-existing shared-root file/symlink corruption are not new tested cases; normalized Workspace.default_config is the supported path reviewed here."
+  ],
+  "constitution": {
+    "sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682",
+    "read_basis": "Byte-identical to source3228 constitution read in full earlier this session; execution protocol applied."
+  },
+  "changed_files": [
+    {
+      "path": "lib/workspace/workspace_init.ml",
+      "bytes": 3465,
+      "sha256": "80e8d786de3f45ac5585187142f5d2ba82c33039e793ae08f60c8f8bf3d1d7f1",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "test/test_goal_verifier_original.ml",
+      "bytes": 18432,
+      "sha256": "05d2183e873d790bdd22ca236e9c613147297a73e5c47cf30354fbdb74c42726",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "test/test_workspace_bootstrap.ml",
+      "bytes": 8827,
+      "sha256": "fe16f233efa397113c3c54ac1e156b72acfbec8b2205a3090949ed99fae87737",
+      "reviewed_worktree_bytes_match": true
+    }
+  ],
+  "direct_context_files": [
+    {
+      "path": "lib/config/playground_paths.mli",
+      "sha256": "442321f9a6f9f53b58ca163b7cb25e2ddc2597b26dbe8811154110e175198c7f",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/config/playground_paths.ml",
+      "sha256": "13d5927af8bb69b6e29899bfd3d165e26c0c76c201ac6375e33bfecdaa67a1a6",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/config/dune",
+      "sha256": "1a00119c963188de665c84f2cfec2b90e4da7f8671753bf61eba2762c7253988",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/workspace/dune",
+      "sha256": "09d0e5fbcf841b3f1c77bfc7132b7f25920615d64637c88c2786f46ce697e4da",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/workspace/workspace_init.mli",
+      "sha256": "594254618c244b6f086349e558506287337bf5169969bca537edb11c1fa22ee6",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/workspace/workspace_core.ml",
+      "sha256": "ef7dbd3d3276a93e3e7835351080a45de6821be1ead3cc9cf267a8658e50834a",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/workspace/workspace_utils_ops.ml",
+      "sha256": "b00257c7ce608b6cb0993ea4702b5cb9e5c0a1a4e1df8123277f751b8c9fd6bd",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/workspace/workspace_utils_backend_setup.ml",
+      "sha256": "47bda65f3a0b7757fd83635480049b76840a34332fc14b9550b5584b7257f213",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.ml",
+      "sha256": "be43bfd6f180b78f1238088e1583800d12ce5ece7105eb50545b45cf62384473",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/config/env_config_core.ml",
+      "sha256": "550081ed2f0279101b53faf2740afd2435f5b333c556bccda9dd3a51dfa28026",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/fs_compat/fs_compat.ml",
+      "sha256": "d3472bda1ddba3a8b44709fdf4378a2490a8a689969ebe5ae408190bf6df833e",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/verification_authority_tools.ml",
+      "sha256": "1a64f7820f88f90d00215e3373e0d017ec9befc9d12c40c85d5aed12e57492cc",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/server/server_runtime_bootstrap.ml",
+      "sha256": "52e93c41abaf2ef2a6f5c82b3c3d3c149fc254b6edd384ce60d8e264800852ae",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "lib/mcp_tool_runtime_workspace.ml",
+      "sha256": "9cec62f72154590c092d7f92eb189d62946d818e223ee0ce3b0fcc5c8a4d7319",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "test/deps/dune",
+      "sha256": "dbddff10b0260de01df18feb0b2bc0e1c59ccdd0bda49d3c409b604dd3960c61",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "test/stanzas/test_workspace_bootstrap.inc",
+      "sha256": "b4030e416bdfeb79a8e26ad0392a68efed097db30bb703e8f5a1b772ca66fe70",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "test/stanzas/test_goal_verifier_original.inc",
+      "sha256": "d405078af371775e6a372136d7e01a742728259456826ae87f28be747e530056",
+      "reviewed_worktree_bytes_match": true
+    },
+    {
+      "path": "docs/constitution.xml",
+      "sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682",
+      "reviewed_worktree_bytes_match": true
+    }
+  ]
+}

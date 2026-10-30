@@ -1,0 +1,10 @@
+{
+  "base_path": "/Users/dancer/me",
+  "runtime_version": "0.34.0",
+  "key": "keeper",
+  "before_bytes": 9893,
+  "after_bytes": 4200,
+  "sha256": "efb476e71b57c193e9e79ae9aa95f90535ef2244ea4c70ff15b65016e8c76272",
+  "source": "override",
+  "verified": "POST succeeded; fresh GET exact body; model turns not measured"
+}

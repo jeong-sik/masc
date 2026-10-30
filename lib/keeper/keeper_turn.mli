@@ -1,0 +1,100 @@
+(** Keeper_turn — keeper lifecycle and message-turn handlers.
+
+    Provides MCP tool handlers for keeper agent management:
+    start/stop and message dispatch.
+    Internal helpers (planner/executor spawn,
+    JSON serialization) are hidden.
+*)
+
+(** Tool handler return type: (success, message). *)
+type tool_result = Keeper_types_profile.tool_result
+
+(** What an admitted chat turn answers with: the tool result its caller
+    carries, and — when the turn failed — the typed cause beside it
+    (RFC-0454 D2). The cause crosses this boundary as the value it is; the
+    tool result's [data] is dropped downstream, so encoding it there and
+    decoding it back would be a JSON round trip inside one process. *)
+type dispatch =
+  | Turn_settled of tool_result
+  | Turn_failed of
+      { result : tool_result
+      ; failure : Keeper_request_failure.t
+      }
+
+(** Start or reconfigure a keeper agent. *)
+val handle_keeper_up : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
+
+(** Send a message to a running keeper agent.
+
+    When [on_text_delta] is provided, the initial MODEL call uses streaming
+    and forwards text deltas through the callback in real time. Follow-up
+    calls (tool loops, corrections, prompt fallback) run in batch mode.
+    If streaming fails, the function falls back to batch automatically.
+
+    @since 2.110.0 *)
+val preflight_keeper_msg_resolved :
+  base_path:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  Keeper_invocation_contract.direct_message ->
+  (Keeper_invocation_contract.direct_message, string) result
+(** Run synchronous validation for [handle_keeper_msg] before an async wrapper
+    accepts the turn for later execution. Requires a current registry entry and
+    takes the effective meta the resolution step already read, so no second
+    store read happens here. A missing entry may mean autoboot has not registered
+    the Keeper yet or that it is stopped; callers receive a retry-or-start
+    message rather than a permanent-state claim. *)
+
+val preflight_keeper_delegate :
+  _ Keeper_types_profile.context ->
+  Keeper_invocation_contract.request ->
+  (Keeper_invocation_contract.request, string) result
+(** Validate one typed delegated invocation before durable submission. *)
+
+module For_testing : sig
+  val resolve_direct_turn_runtime_id : meta:Keeper_meta_contract.keeper_meta ->
+    resume_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    gate_resume:Keeper_direct_gate_continuation.admission option -> (string, string) result
+  val direct_owner_conversation_context :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    direct_reply:bool ->
+    channel:string ->
+    string
+
+  val surface_context_to_instructions : Yojson.Safe.t -> string option
+  (** Format a dashboard co-view context object ({ label, route, scene, fields })
+      into turn instructions when no explicit [turn_instructions] is supplied. *)
+
+end
+
+(** Format a dashboard co-view context object ({ label, route, scene, fields })
+    into turn instructions. Accepts [fields] as both a [`List] of {k,v} objects
+    (dashboard wire shape) and a plain [`Assoc] map. This is the single SSOT
+    formatter shared by the HTTP copilot route
+    ([Server_routes_http_keeper_stream]) and the masc_keeper_msg MCP tool path,
+    so the two surfaces cannot drift. Returns [None] when there is nothing to
+    render. *)
+val surface_context_to_instructions : Yojson.Safe.t -> string option
+
+val handle_keeper_msg_admitted :
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  admission_token:Keeper_turn_dispatch_authority.token ->
+  input_speaker:Keeper_input_speaker.t ->
+  ?on_text_delta:(string -> unit) ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
+  ?on_tool_stream_observation:
+    (Keeper_hooks_agent_core.tool_stream_observation -> unit) ->
+  ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) ->
+  ?approval_gate:Keeper_tool_approval_gate.t ->
+  ?event_bus:Agent_core.Event_bus.t ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  _ Keeper_types_profile.context ->
+  Keeper_invocation_contract.direct_message ->
+  dispatch
+(** Execute a direct message under an already-held chat admission token. Only
+    the Owner operation child uses this path, after atomically claiming the
+    latest durable operation body. [input_speaker] is who sent it, decided by
+    the route from the typed request (RFC-0468 §3.2). *)
+
+(** Stop a running keeper agent. *)
+val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

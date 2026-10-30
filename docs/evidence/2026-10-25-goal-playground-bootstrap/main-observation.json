@@ -1,0 +1,38 @@
+{
+  "schema": "masc.goal-playground-bootstrap.main-observation.v1",
+  "observed_at": "2026-10-25T11:11:43.194412+00:00",
+  "main_runtime": {
+    "binary_commit": "2e36766f4364d37d2525df1d30f452ae48a2ee93",
+    "executable_sha256": "08177b9d710f864ebd06b4d6df0aeb4abf4c68e664e802a87e76ab0ae66b1f61",
+    "runtime_instance_id": "01a172bb-7498-7000-b018-49767844a8dd",
+    "started_at": "2026-10-25T11:04:10Z"
+  },
+  "original_goal": {
+    "id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "phase": "executing",
+    "updated_at": "2026-10-25T08:58:22Z"
+  },
+  "canonical_acceptance_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+  "source_sha": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "controlled_cohort_source_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "production_installed_by_this_work": false,
+  "main_goal_mutated": false,
+  "human_confirmation_performed": false,
+  "overall_objective_complete": false,
+  "previous_observation": {
+    "observed_at": "2026-10-25T10:56:55.325465+00:00",
+    "main_runtime": {
+      "binary_commit": "d98835aec86ae8c302b4cc43474c249ef1425d29",
+      "executable_sha256": "8ea247894bc801bf68907294479e641fde3c4e3813dec42b625a4dc179ca8f4d",
+      "runtime_instance_id": "01a1727d-c326-7000-a9a8-13dad8142d5f",
+      "started_at": "2026-10-25T09:56:47Z"
+    },
+    "original_goal": {
+      "id": "goal-outcome-driven-work-20261024",
+      "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+      "phase": "executing",
+      "updated_at": "2026-10-25T08:58:22Z"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "role": "sleep",
+    "transitions": 300,
+    "session_worst_flush_ms": [
+      25.416,
+      25.373,
+      25.395
+    ],
+    "median_session_worst_flush_ms": 25.395,
+    "all_inputs_median_ms": 17.455937,
+    "all_inputs_max_ms": 20.623166
+  },
+  {
+    "role": "readable",
+    "transitions": 300,
+    "session_worst_flush_ms": [
+      0.292,
+      0.302,
+      0.279
+    ],
+    "median_session_worst_flush_ms": 0.292,
+    "all_inputs_median_ms": 17.3927915,
+    "all_inputs_max_ms": 18.3185
+  }
+]

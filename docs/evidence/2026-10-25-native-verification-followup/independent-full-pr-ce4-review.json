@@ -1,0 +1,351 @@
+{
+  "verdict": "PASS_SOURCE",
+  "verdict_line": "verdict: PASS head: ce4a458e1ef5703a5bd7b0ac97f2b2f828a2b297 by: repair_eval_metrics (independent source review)",
+  "reviewed_at_utc": "2026-10-25T01:25:31.520220+00:00",
+  "head": "ce4a458e1ef5703a5bd7b0ac97f2b2f828a2b297",
+  "base": "b31260ebda2134c3c4b2527ee5f9455ddfd600f1",
+  "pr": 45874,
+  "review_diff_identity": "3d03a78ee97ea04b2143bd3230a07f9479b3970d8a9ecb97791562afaf232452",
+  "review_diff_command": [
+    "python3",
+    "scripts/review/review-diff.py",
+    "--repo",
+    "jeong-sik/masc",
+    "--base",
+    "b31260ebda2134c3c4b2527ee5f9455ddfd600f1",
+    "--head",
+    "ce4a458e1ef5703a5bd7b0ac97f2b2f828a2b297"
+  ],
+  "full_patch_sha256": "5e5d465b0148096b794fbe35d62484480d714e2ac88b0edb896ec951a7f132d6",
+  "docs_delta_patch_sha256": "b5e6dc901b78c1ab0e47a5dfec3e85161693871c16526ee9fbcb7d89f8494854",
+  "scope": "Complete frozen PR45874 diff at ce4/baseb312: prior independent3-file CODE175 review carried by identical test/lib/config/.github tree IDs, plus all30 later documentation/changelog/evidence files and actual direct receipts. No whole parent/19-layer Stack approval, merge, installation, runtime/model or human completion inference.",
+  "p0_p1_p2_findings": [],
+  "nonblocking_findings": [],
+  "code_binding": {
+    "source_head": "17583b006eaf0823587ba07a27ad50889ef8d498",
+    "test_lib_config_github_changed_after_code": [],
+    "tree_identities": [
+      {
+        "path": "test",
+        "code_oid": "8d83dde505321a06bba661db52360fb514a68a2d",
+        "final_oid": "8d83dde505321a06bba661db52360fb514a68a2d"
+      },
+      {
+        "path": "lib",
+        "code_oid": "b2b75a993e106b9615b9c14c4f297dd54233ac90",
+        "final_oid": "b2b75a993e106b9615b9c14c4f297dd54233ac90"
+      },
+      {
+        "path": "config",
+        "code_oid": "c5ff65b75235a275ff7ab91fb882b9270630ceb3",
+        "final_oid": "c5ff65b75235a275ff7ab91fb882b9270630ceb3"
+      },
+      {
+        "path": ".github",
+        "code_oid": "8451020e87b12309bfa598d873b0a03ec7147339",
+        "final_oid": "8451020e87b12309bfa598d873b0a03ec7147339"
+      }
+    ],
+    "prior_review_path": "/tmp/masc-independent-native19-code-review-20261025/review.json",
+    "prior_review_sha256": "bec7eb93e2799d9f368525c4b2c48b32f884d83c0257fea51351453f03e26da9",
+    "published_review_byte_equal": true
+  },
+  "documentation_factual_review": [
+    "Main8935 real API receipt accepts reported_only11/11 observation ff5d3c4d17dd26b6393a97b4d942e201 on unchanged306 criterion; canonical acceptance snapshotSHA4fdd remains frozen and explicitly mixed scopes. No newer installed receipt/API implementation inferred.",
+    "Task2620 capture diagnostics empty and verification id vrf6267 confirmed against later sequential primary records. Main Goal request b079 accepted verifying/proof_pending with submitted_evidence=[]; no independent proof, Task approval or human confirmation claimed. Later ConnectionRefused is retained; no persistent API availability claim.",
+    "GLM source328 is one ordinary-HTTP controlled cohort. Re-read full frozen response29/30 safe public tool selection: request29 creates Task2 alongside Read; request30 claim index1 and measure index2. Artifact Edit31 follows measurement feedback. README now scopes ordering to remaining artifact edits/completion reporting rather than all planning. Prior failed Qwen/control/Gate timing evidence is retained.",
+    "Original be9a run40147287888 remains5suites251tests247PASS/4FAIL with no suite timeout; actual first-retry fixture PASS is explicitly case-level. Original result bytes equal original external receipt, all70 published excerpt lines exactly match numbered raw log.",
+    "Current CODE175 followup40149490208 document statement is dated pending at last recorded read, selects only3 changed suites and leaves full regression unrun. During final review Root supplied subsequent SUCCESS evidence; this JSON preserves ce4 scope and requires that new result to be independently bound in the next docs-only delta rather than silently treating these historical pending records as current status."
+  ],
+  "independent_artifact_checks": {
+    "manifest_hash_size_entries": 75,
+    "all_manifest_entries_match": true,
+    "published_original_review_result_copies": [
+      {
+        "path": "docs/evidence/2026-10-25-native-verification-followup/independent-code-17583b00-review.json",
+        "local": "/tmp/masc-independent-native19-code-review-20261025/review.json",
+        "sha256": "bec7eb93e2799d9f368525c4b2c48b32f884d83c0257fea51351453f03e26da9",
+        "original_sha256": "bec7eb93e2799d9f368525c4b2c48b32f884d83c0257fea51351453f03e26da9",
+        "byte_equal": true
+      },
+      {
+        "path": "docs/evidence/2026-10-25-native-verification-followup/parent-be9a-native-result.json",
+        "local": "/tmp/masc-native-integrity-be9a9d9d-result.json",
+        "sha256": "85b861053f34f05fee83b49818ba245db2e7858a2bf38db8d323de564858741f",
+        "original_sha256": "85b861053f34f05fee83b49818ba245db2e7858a2bf38db8d323de564858741f",
+        "byte_equal": true
+      }
+    ],
+    "selected_native_log_lines": {
+      "matched": 70,
+      "total": 70
+    },
+    "dispatch_inputs_bound_to175": [
+      {
+        "path": ".github/workflows/test.yml",
+        "sha256": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191",
+        "matches": true
+      },
+      {
+        "path": "scripts/ci-run-targeted-tests.sh",
+        "sha256": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+        "matches": true
+      }
+    ],
+    "local_document_links_checked": 53,
+    "all_local_links_exist": true,
+    "full_diff_check_exit": 0,
+    "main_receipt_text_structured_content_match": true,
+    "main_later_primary_record_match": true
+  },
+  "archived_review_scope": {
+    "peer_source_head": "e3ca42d75f9376fef30d322ad87417c4f9f8edff",
+    "bindings": [
+      {
+        "path": "docs/audits/2026-10-25-agentic-verification-adversarial-audit.md",
+        "matches_archived_review": true,
+        "current_sha256": "4b2ec74f2eb30d0496a9d448fac9ff28a335d5a176094147f1101119faa73981",
+        "review_sha256": "4b2ec74f2eb30d0496a9d448fac9ff28a335d5a176094147f1101119faa73981"
+      },
+      {
+        "path": "docs/evidence/2026-10-24-goal-outcome-campaign/README.md",
+        "matches_archived_review": true,
+        "current_sha256": "a1ce5be994a3ba4dbcead07cc0f7df8997562238d6221df9268a1f632393b60d",
+        "review_sha256": "a1ce5be994a3ba4dbcead07cc0f7df8997562238d6221df9268a1f632393b60d"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/README.md",
+        "matches_archived_review": true,
+        "current_sha256": "235cf9e6203aa231dfa1163e42a1c50f35876ee128e478b416fcd98fdb37e573",
+        "review_sha256": "235cf9e6203aa231dfa1163e42a1c50f35876ee128e478b416fcd98fdb37e573"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-main-registration/README.md",
+        "matches_archived_review": true,
+        "current_sha256": "a20dc63be185abc3936c1ba65b5fea50f631b3a424ddfea49e289024daa6069c",
+        "review_sha256": "a20dc63be185abc3936c1ba65b5fea50f631b3a424ddfea49e289024daa6069c"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-native-verification-followup/README.md",
+        "matches_archived_review": false,
+        "current_sha256": "aec047f6bc942dd5d246f17ed55d5e23992bd321fd58f6060bec2176d8222a8e",
+        "review_sha256": "d54a778b2cd49a16e04a7bc79f02291cdfa4ce1bd00b5484670e87b6cfc2038b"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/experiment-intent.json",
+        "matches_archived_review": true,
+        "current_sha256": "f8a814c291b30b4201e0618712f6e8d722e948cdec0bf4086d135d69cf559ee9",
+        "review_sha256": "f8a814c291b30b4201e0618712f6e8d722e948cdec0bf4086d135d69cf559ee9"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/alpha-request-input.json",
+        "matches_archived_review": true,
+        "current_sha256": "2e743234a3834c010b3e20c09d5f261bb0910780c7d003e336e522b4c4aff418",
+        "review_sha256": "2e743234a3834c010b3e20c09d5f261bb0910780c7d003e336e522b4c4aff418"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/acceptance-11of11-snapshot.json",
+        "matches_archived_review": true,
+        "current_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+        "review_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/preapproval/g2-alpha-checkpoint.json",
+        "matches_archived_review": true,
+        "current_sha256": "274853f11422b41e1d34fbff7c3d532f8ac80f3e7d62c99339484eee49d17ae1",
+        "review_sha256": "274853f11422b41e1d34fbff7c3d532f8ac80f3e7d62c99339484eee49d17ae1"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/preapproval/current-artifact-at-checkpoint.json",
+        "matches_archived_review": true,
+        "current_sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+        "review_sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/preapproval/submitted-artifact-at-checkpoint.json",
+        "matches_archived_review": true,
+        "current_sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+        "review_sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/20261024T182033823891Z.json",
+        "matches_archived_review": true,
+        "current_sha256": "2bc096ff79c7e35363c8afe9102e2670ce88dd8ab3d8af17b4795ad8e369d5cb",
+        "review_sha256": "2bc096ff79c7e35363c8afe9102e2670ce88dd8ab3d8af17b4795ad8e369d5cb"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/diagnosis.json",
+        "matches_archived_review": true,
+        "current_sha256": "bcac55d465afdfe99e3c6e87ee9201890792ca01d542975f922e34ceb217eb0b",
+        "review_sha256": "bcac55d465afdfe99e3c6e87ee9201890792ca01d542975f922e34ceb217eb0b"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json",
+        "matches_archived_review": true,
+        "current_sha256": "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b",
+        "review_sha256": "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/artifact-current-final.json",
+        "matches_archived_review": true,
+        "current_sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+        "review_sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/artifact-task2-immutable.json",
+        "matches_archived_review": true,
+        "current_sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+        "review_sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/source-terminal-state.json",
+        "matches_archived_review": true,
+        "current_sha256": "a51b6bf35788ea841ef07db088e34e6e2f0a525f9448f8cf5d99a2082724682d",
+        "review_sha256": "a51b6bf35788ea841ef07db088e34e6e2f0a525f9448f8cf5d99a2082724682d"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/operator/partial-inspection.json",
+        "matches_archived_review": true,
+        "current_sha256": "3c8bbef3ce306e81fafcd9c16094ceb9f9c49b0b96839a2437223fdd4ff261e5",
+        "review_sha256": "3c8bbef3ce306e81fafcd9c16094ceb9f9c49b0b96839a2437223fdd4ff261e5"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-continuation-glm/operator/approval-receipt.json",
+        "matches_archived_review": true,
+        "current_sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112",
+        "review_sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-main-registration/measurement11/receipt.json",
+        "matches_archived_review": true,
+        "current_sha256": "b07743c04704205c1a2eeea9319252730715c47a422299dde85afcf10316579c",
+        "review_sha256": "b07743c04704205c1a2eeea9319252730715c47a422299dde85afcf10316579c"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-main-registration/task2620-submission/receipt.json",
+        "matches_archived_review": true,
+        "current_sha256": "0682a5c27d3ab537f40f07dd8a89b95e934f4866fee60ae0351f6c85998e80fc",
+        "review_sha256": "0682a5c27d3ab537f40f07dd8a89b95e934f4866fee60ae0351f6c85998e80fc"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-main-registration/goal-proof-request/receipt.json",
+        "matches_archived_review": true,
+        "current_sha256": "71b010616347d5936a310e36ce1759418edcec760351734e0a600774e9fc0d10",
+        "review_sha256": "71b010616347d5936a310e36ce1759418edcec760351734e0a600774e9fc0d10"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-main-registration/primary-state-010145.json",
+        "matches_archived_review": true,
+        "current_sha256": "febcba3ab4a2bee1f0deea738190fc4993e197bda78f872b6dc16adb62456611",
+        "review_sha256": "febcba3ab4a2bee1f0deea738190fc4993e197bda78f872b6dc16adb62456611"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-main-registration/primary-state-011046.json",
+        "matches_archived_review": true,
+        "current_sha256": "da2ef3ffdc8cd6cbd8681e934a2bfde7a4c331d39e8257fb647e7e50aa305122",
+        "review_sha256": "da2ef3ffdc8cd6cbd8681e934a2bfde7a4c331d39e8257fb647e7e50aa305122"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-goal-main-registration/health-read-011038.json",
+        "matches_archived_review": true,
+        "current_sha256": "771c45caeb6343790e413926c8bea274960a1cbecac130d16d9ec3b43e16a789",
+        "review_sha256": "771c45caeb6343790e413926c8bea274960a1cbecac130d16d9ec3b43e16a789"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-native-verification-followup/parent-be9a-native-result.json",
+        "matches_archived_review": true,
+        "current_sha256": "85b861053f34f05fee83b49818ba245db2e7858a2bf38db8d323de564858741f",
+        "review_sha256": "85b861053f34f05fee83b49818ba245db2e7858a2bf38db8d323de564858741f"
+      },
+      {
+        "path": "docs/evidence/2026-10-25-native-verification-followup/followup-17583b00-dispatch.json",
+        "matches_archived_review": true,
+        "current_sha256": "ec4fc2e331ae33c2a8282c2123b26b78e903b1290e6c0efef1ec5dc6d28095ee",
+        "review_sha256": "ec4fc2e331ae33c2a8282c2123b26b78e903b1290e6c0efef1ec5dc6d28095ee"
+      }
+    ],
+    "later_delta": "4 named docs and all22 evidence entries match archived review. Native-followup README later gained602 bytes; I directly read its full4202-byte current content. No archived PASS automatically certifies unreviewed bytes or current GitHub head."
+  },
+  "github_identity_and_eligibility": {
+    "snapshot": {
+      "observed_at_utc": "2026-10-25T01:23:39.823463+00:00",
+      "number": 45874,
+      "state": "open",
+      "draft": false,
+      "head": "ce4a458e1ef5703a5bd7b0ac97f2b2f828a2b297",
+      "base": "b31260ebda2134c3c4b2527ee5f9455ddfd600f1",
+      "head_ref": "codex/verification-native-followup-20261025",
+      "base_ref": "codex/native-lifecycle-integration-20261025",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": "90cb0ca40011d36a28b2d4583ce11561e01c993d"
+        },
+        "id": 2561944,
+        "number": 45750,
+        "position": 19,
+        "size": 19
+      },
+      "body_sha256": "d7f5dda4709d2659d1fbb44315dede89e1edcec61827a729031b328e8f7a7e67"
+    },
+    "native_stack_api_read": "Stack45750 endpoint returned19 ordered members ending45874; own PR is19/19 with direct parent45867. Lower member reviews/approvals not assessed here.",
+    "initial_check": "Draft-ready requirement refused; author subsequently marked this same head ready.",
+    "ready_check": {
+      "command": [
+        "bash",
+        "scripts/review/approve-guard.sh",
+        "--check",
+        "--repo",
+        "jeong-sik/masc",
+        "--pr",
+        "45874",
+        "--head",
+        "ce4a458e1ef5703a5bd7b0ac97f2b2f828a2b297"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "REFUSED #45874 head ce4a458e1ef5703a5bd7b0ac97f2b2f828a2b297: the PR author cannot approve their own change\n",
+      "scope": "Eligibility --check only. No GitHub review posted; no approval override."
+    },
+    "interpretation": "Read-only eligibility REFUSED because authenticated GitHub account is PR author. No review was posted or approval override attempted. Independent session source verdict is not an official GitHub APPROVE or whole-stack approval."
+  },
+  "not_performed": [
+    "No local Dune, repeated tests, CI status/watch/query, model or canary/API mutation",
+    "No whole-stack review, merge, deployment, installation or Goal proof/human confirmation",
+    "No current followup native completion inferred from dispatch; new delivered result awaits separate raw-log verification/docs delta"
+  ],
+  "artifacts": [
+    {
+      "path": "/tmp/masc-independent-native19-final-review-20261025/identity.json",
+      "sha256": "1dacd8ba2cf3b1287b14e05ebbbbd90f9c7b9b34ff2b694a1a85657f1b4297b0"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-final-review-20261025/review.diff",
+      "sha256": "5e5d465b0148096b794fbe35d62484480d714e2ac88b0edb896ec951a7f132d6"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-final-review-20261025/docs-after-code.diff",
+      "sha256": "b5e6dc901b78c1ab0e47a5dfec3e85161693871c16526ee9fbcb7d89f8494854"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-final-review-20261025/artifact-binding.json",
+      "sha256": "8432110787f47afc25ae308d18d5127f17b0c1a8b9962f7cb272a3539edc9605"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-final-review-20261025/claim-checks.json",
+      "sha256": "362c33427f4a5e929a7e03aea1810bbd2218fff38462b9f3c9c657045f381264"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-final-review-20261025/local-doc-checks.json",
+      "sha256": "198a24101ff7661fa56068ec9ddc8ee3dd8aceb88d5287367ae385487bfecb6e"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-final-review-20261025/pr-snapshot-ready.json",
+      "sha256": "16c66a2751298178cf8a94b3603b7906c8a69643fa68c3d2bbd34d32b1a8cc55"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-final-review-20261025/approve-guard-ready-check.json",
+      "sha256": "d11434d4d94b25376a24d83c3591d3d846bd2d00926af69c58e63ca0d168588b"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "pid": 27126,
+  "ps_returncode": 1,
+  "stdout": "",
+  "stderr": "",
+  "claim": "PID absent at later observation; original exit status remains unknown"
+}

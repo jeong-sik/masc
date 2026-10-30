@@ -1,0 +1,43 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41187-config-path-cas-20261005/dashboard
+
+ ❯ src/components/runtime-toml-editor.test.ts (84 tests | 1 failed) 1845ms
+   ❯ RuntimeTomlEditor (84)
+     × allows correcting and retrying an actual raw-save validation refusal without adopting a file 68ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/runtime-toml-editor.test.ts > RuntimeTomlEditor > allows correcting and retrying an actual raw-save validation refusal without adopting a file
+AssertionError: expected { …(3) } to deeply equal { …(2) }
+
+- Expected
++ Received
+
+@@ -1,6 +1,7 @@
+  {
++   "expected_source_path": "/tmp/.masc/config/runtime.toml",
+    "expected_source_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_text": "[runtime]
+  default = \"runpod_mtp.qwen\"
+  # corrected declaration
+  ",
+
+ ❯ src/components/runtime-toml-editor.test.ts:1368:70
+    1366|       await waitFor(() => expect(coreApi.postControlPlane).toHaveBeenC…
+    1367|       expect(fetchMock).toHaveBeenCalledTimes(2)
+    1368|       expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).t…
+       |                                                                      ^
+    1369|       expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    1370|     } finally { vi.unstubAllGlobals() }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 405 passed (406)
+   Start at  06:48:05
+   Duration  5.78s (tests 54%, import 16%, transform 13%, environment 9%, setup 6%)
+
+    Isolate  4 workers spawned · ~216ms startup each (spawn + environment, per file)
+             at least ~647ms faster with isolate: false — reuses workers across files instead of one per file
+

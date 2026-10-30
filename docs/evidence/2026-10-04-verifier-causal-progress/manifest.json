@@ -1,0 +1,52 @@
+[
+  {
+    "file": "focused-build.log",
+    "bytes": 4953,
+    "sha256": "52e75f89c36ad93a74dbefd7f25c2b468a91cc62aa87ef70ab06f30a6a5289c6"
+  },
+  {
+    "file": "focused-build2.log",
+    "bytes": 654,
+    "sha256": "2250f1ab453986fcae6462c8009b56d845995572dd2077e8a1f6c5b90db8a269"
+  },
+  {
+    "file": "focused-build3.log",
+    "bytes": 502,
+    "sha256": "9dea45418e855696a6caa2a1eb2481780d0b04ab9b1a54a8162971be10aa7449"
+  },
+  {
+    "file": "test_verifier_exact_lane.log",
+    "bytes": 1939,
+    "sha256": "0ba592ac2e4718bd536d1c63897b09644ce4da4a2e3b09969f4243a85dc280bd"
+  },
+  {
+    "file": "test_verification.log",
+    "bytes": 8015,
+    "sha256": "f93bf65fe096f92025450dd1651c5921ac98e7a56fae2b07a6877795f6681fc6"
+  },
+  {
+    "file": "test_goal_verification_agent.log",
+    "bytes": 8248,
+    "sha256": "65d5f1085494b2bb7846a9c6e927618f07141674d95bb4dc96a6e52d7f828ec1"
+  },
+  {
+    "file": "test_goal_verification_agent-rerun.log",
+    "bytes": 3163,
+    "sha256": "02ed7e71573a8c2a18a4649672cfc1f9cd3baad3fbb78d2b76dab8dfeed6f400"
+  },
+  {
+    "file": "test_completion_repair_delivery.log",
+    "bytes": 2436,
+    "sha256": "76ee1d76f91f833b7b8e3330b2cc7de3d93632924efff212efc2fb5454906c4b"
+  },
+  {
+    "file": "test_keeper_unified_verification_surface.log",
+    "bytes": 5477,
+    "sha256": "0bf919dc8c21426778f7bbdde9e259f729e4ae31febc5ef950c61fe396a5a3f1"
+  },
+  {
+    "file": "test_keeper_unified_verification_surface-rerun.log",
+    "bytes": 3753,
+    "sha256": "354278b425899fa0ec8a1cdecc1b1ef350c9283099d800ecb89396ff0ebb1a8c"
+  }
+]

@@ -1,0 +1,367 @@
+// @vitest-environment jsdom
+import { webcrypto } from 'node:crypto'
+import { html } from 'htm/preact'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { get, ApiRequestError, clearStoredToken, setStoredToken } from '../../api/core'
+import { fetchToolBlob } from '../../api/tool-blob'
+import { ChatTranscript, _resetTraceCardOpenChoicesForTests } from './primitives'
+import { chatHistoryEntriesFromRest } from '../../keeper-state'
+import { lookupToolCallOutput, markToolCallOutputsHydrated, recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
+vi.mock('../../api/core', async importOriginal => ({ ...await importOriginal<typeof import('../../api/core')>(), get: vi.fn() }))
+vi.mock('../../api/tool-blob', () => ({ fetchToolBlob: vi.fn() }))
+const id = 'old-execution/with+symbols'
+const entries = chatHistoryEntriesFromRest('display-label-is-not-owner', [{
+  id: 'autonomous:trace-writer#428', role: 'assistant', ts: 1789223399, content: null,
+  autonomous_turn: { turn_id: 'trace-writer#428' },
+  blocks: [{ t: 'trace', trace: [{ kind: 'tool', name: 'Edit', status: 'ok', execution_id: id }] }],
+}])
+function response(keeper = 'writer') { return { keeper, execution_id: id, entry: {
+  keeper, execution_id: id, ts: 1, tool: 'Edit', wire_outcome: 'ok' as const, duration_ms: 3,
+  input: { old_string: 'old', new_string: 'new' },
+  output: JSON.stringify({ ok: true, mode: 'patch', path: `${keeper}.md`, occurrences: 1 }),
+  route_evidence: { descriptor_id: 'agent.edit_file' },
+} } }
+const transcript = (keeper = 'writer') => html`<${ChatTranscript} keeperName=${keeper} entries=${entries} emptyText="empty" />`
+async function artifact(content: string) {
+  const bytes = new TextEncoder().encode(content)
+  const sha256 = Buffer.from(await webcrypto.subtle.digest('SHA-256', bytes)).toString('hex')
+  return { content, bytes: bytes.length, sha256, mime: 'application/vnd.masc.tool-result-manifest+json' }
+}
+const openTurn = (view: { container: Element }) => fireEvent.click(view.container.querySelector<HTMLButtonElement>('.chat-block-trace-hd')!)
+beforeEach(() => { vi.stubGlobal('crypto', webcrypto); clearStoredToken(); resetToolCallOutputs(); _resetTraceCardOpenChoicesForTests() })
+afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.unstubAllGlobals(); resetToolCallOutputs() })
+describe('historical autonomous tool outputs', () => {
+  it.each([409, 403])('withholds linked ordinary trace output and success after HTTP %i', async status => {
+    const stale = 'UNVERIFIED ordinary trace result'
+    const ordinary = entries.map(entry => ({ ...entry, source: 'direct_assistant' as const,
+      turnRef: 'trace-writer#428',
+      traceSteps: [{ kind: 'tool' as const, name: 'Edit', status: 'ok' as const,
+        executionId: id, result: stale }],
+    }))
+    recordToolCallOutputs([response().entry])
+    vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status }))
+    const view = render(html`<${ChatTranscript} keeperName="writer" entries=${ordinary} emptyText="empty" groupToolCalls=${true} variant="messenger" />`)
+    if (!view.container.querySelector('[data-chat-trace-step="tool"]')) openTurn(view)
+    const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
+    expect(step.getAttribute('data-chat-trace-output-state')).not.toBe('ok')
+    fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+    expect(view.container.textContent).not.toContain(stale)
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
+    if (status === 409) expect(view.getByRole('alert').textContent).toContain('중복')
+    else expect(view.getByRole('alert').getAttribute('data-access-state')).toBe('admin-required')
+    expect(step.getAttribute('data-chat-trace-output-state')).not.toBe('ok')
+    expect(step.getAttribute('data-chat-trace-execution-status')).toBe('ok')
+    expect(step.querySelector('.chat-block-tstep-status')?.getAttribute('aria-label'))
+      .toBe('실행 보고: 성공 · 결과 확인 불가')
+    expect(view.container.textContent).not.toContain(stale)
+    expect(view.queryByLabelText('편집 변경 기록')).toBeNull()
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it.each([404, 409, 503, 401, 403])(
+    'uses exact HTTP %i for both row state and completed-turn counts despite bulk output', async status => {
+      const bulk = response().entry
+      recordToolCallOutputs([{ ...bulk, wire_outcome: 'error', duration_ms: 9000 }])
+      markToolCallOutputsHydrated('writer', Date.now())
+      vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status }))
+      const view = render(transcript()); openTurn(view)
+      await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
+      const step = view.container.querySelector('[data-chat-trace-step="tool"]')!
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe(status === 404 ? 'missing' : 'unavailable')
+      const header = view.container.querySelector('[data-chat-work-trace] .chat-block-trace-meta')!
+      expect(header.textContent).toContain(status === 404 ? '결과 누락 1' : '결과 확인 불가 1')
+      expect(header.textContent).not.toContain('실패 1')
+      expect(header.querySelector('.tnum')).toBeNull()
+      if (status !== 404) expect(header.textContent).not.toContain('결과 누락')
+      expect(get).toHaveBeenCalledTimes(1)
+    },
+  )
+  it('retains exact completion and duration when a later bulk row disagrees', async () => {
+    vi.mocked(get).mockResolvedValue(response())
+    const reportedFailure = entries.map(entry => ({ ...entry,
+      traceSteps: [{ kind: 'tool' as const, name: 'Edit', executionId: id, status: 'err' as const, dur: '9s' }],
+    }))
+    const view = render(html`<${ChatTranscript} keeperName="writer" entries=${reportedFailure} emptyText="empty" />`); openTurn(view)
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy())
+    await act(async () => {
+      recordToolCallOutputs([{ ...response().entry, wire_outcome: 'error', duration_ms: 9000 }])
+    })
+    const step = view.container.querySelector('[data-chat-trace-step="tool"]')!
+    expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    const header = view.container.querySelector('[data-chat-work-trace] .chat-block-trace-meta')!
+    expect(header.textContent).not.toContain('실패 1')
+    expect(header.querySelector('.tnum')?.textContent).toBe('3ms')
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it('counts an exact 404 as missing only after the owning turn finishes', async () => {
+    vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 404 }))
+    const ongoing = entries.map(entry => ({ ...entry, source: 'direct_assistant' as const, turnRef: 'trace-writer#428', streamState: 'streaming' as const }))
+    const finished = ongoing.map(entry => ({ ...entry, streamState: null }))
+    const show = (messages: typeof finished | typeof ongoing) => html`<${ChatTranscript} keeperName="writer" entries=${messages} emptyText="empty" groupToolCalls=${true} variant="messenger" />`
+    const view = render(show(ongoing))
+    if (!view.container.querySelector('[data-chat-trace-step="tool"]')) openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
+    expect(view.container.querySelector('[data-chat-trace-step="tool"]')?.getAttribute('data-chat-trace-output-state')).toBe('pending')
+    expect(view.container.querySelector('[data-chat-work-trace]')?.textContent).not.toContain('결과 누락')
+    view.rerender(show(finished))
+    await waitFor(() => expect(view.container.querySelector('[data-chat-trace-step="tool"]')?.getAttribute('data-chat-trace-output-state')).toBe('missing'))
+    expect(view.container.querySelector('[data-chat-work-trace] .chat-block-trace-meta')?.textContent).toContain('결과 누락 1')
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it('shares an in-flight exact lookup and keeps it alive when one subscriber unmounts', async () => {
+    let finish!: (value: unknown) => void
+    let requestSignal: AbortSignal | undefined
+    vi.mocked(get).mockImplementation((_path, options) => {
+      requestSignal = options?.signal
+      return new Promise(resolve => { finish = resolve })
+    })
+    const panels = (first: boolean) => html`<div>
+      ${first ? html`<section key="first" data-testid="first">${transcript()}</section>` : null}
+      <section key="second" data-testid="second">${transcript()}</section>
+    </div>`
+    const view = render(panels(true))
+    for (const section of [view.getByTestId('first'), view.getByTestId('second')]) {
+      if (!section.querySelector('[data-chat-trace-step="tool"]')) openTurn({ container: section })
+    }
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    view.rerender(panels(false))
+    expect(requestSignal?.aborted).toBe(false)
+    await act(async () => { finish(response()); await Promise.resolve() })
+    await waitFor(() => expect(within(view.getByTestId('second')).getByText('writer.md · 1곳 편집')).toBeTruthy())
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it('rejects a late response after an explicit store reset in the same credential session', async () => {
+    let finishOld!: (value: unknown) => void
+    vi.mocked(get).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValueOnce(response())
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    await act(async () => { resetToolCallOutputs() })
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy())
+    const late = response()
+    await act(async () => {
+      finishOld({ ...late, entry: { ...late.entry, wire_outcome: 'error', duration_ms: 9000 } })
+      await Promise.resolve()
+    })
+    expect(view.container.querySelector('[data-chat-trace-step="tool"]')?.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+  it('keeps ordinary activity without an execution ID readable without a lookup', () => {
+    const text = 'Unlinked activity result'
+    const ordinary = entries.map(entry => ({ ...entry, source: 'direct_assistant' as const,
+      turnRef: 'trace-writer#428',
+      traceSteps: [{ kind: 'tool' as const, name: 'Read', status: 'ok' as const, result: text }],
+    }))
+    const view = render(html`<${ChatTranscript} keeperName="writer" entries=${ordinary} emptyText="empty" groupToolCalls=${true} variant="messenger" />`)
+    if (!view.container.querySelector('[data-chat-trace-step="tool"]')) openTurn(view)
+    const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
+    fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+    expect(view.getByText(text)).toBeTruthy()
+    expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    expect(get).not.toHaveBeenCalled()
+  })
+  it('does not trust a hydrated row when exact lookup reports duplicate evidence', async () => {
+    recordToolCallOutputs([response().entry])
+    vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 409 }))
+    const view = render(transcript()); openTurn(view)
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull()
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('중복'))
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull()
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it('rechecks denied historical output after the operator changes credentials', async () => {
+    vi.mocked(get).mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 403 }))
+      .mockResolvedValue(response())
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+    act(() => setStoredToken('fixture-admin'))
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy())
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+  it('removes already loaded privileged rows when the token is cleared', async () => {
+    setStoredToken('fixture-admin')
+    vi.mocked(get).mockResolvedValueOnce(response())
+      .mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 401 }))
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy())
+    act(() => clearStoredToken())
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull()
+    expect(lookupToolCallOutput('writer', id)).toBeNull()
+  })
+  it('cannot repopulate a new credential session with a late Admin response', async () => {
+    setStoredToken('fixture-admin')
+    let finish!: (value: unknown) => void
+    vi.mocked(get).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 403 }))
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    act(() => setStoredToken('fixture-worker'))
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+    await act(async () => { finish(response()); await Promise.resolve() })
+    expect(lookupToolCallOutput('writer', id)).toBeNull()
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull()
+  })
+  it.each([401, 403])('requires administrator access for HTTP %i without a futile lookup retry', async status => {
+    vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status }))
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+    expect(view.queryByRole('button', { name: '다시 조회' })).toBeNull()
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it.each([401, 403])('reports administrator-only manifests on HTTP %i without retry', async status => {
+    const payload = response()
+    vi.mocked(get).mockResolvedValue({ ...payload, entry: { ...payload.entry,
+      output: { _blob: { sha256: 'a'.repeat(64), bytes: 3, mime: 'application/vnd.masc.tool-result-manifest+json', preview: '' } } } })
+    vi.mocked(fetchToolBlob).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/artifacts/sha', status }))
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+    expect(view.queryByRole('button', { name: '편집 결과 다시 조회' })).toBeNull()
+    expect(fetchToolBlob).toHaveBeenCalledTimes(1)
+  })
+  it('keeps same-execution timeline status and duration scoped to each Keeper', async () => {
+    vi.mocked(get).mockImplementation(async path => {
+      const keeper = new URL(path, 'http://localhost').pathname.includes('/writer/') ? 'writer' : 'peer'
+      const payload = response(keeper)
+      return { ...payload, entry: { ...payload.entry, wire_outcome: keeper === 'writer' ? 'ok' : 'error', duration_ms: keeper === 'writer' ? 12 : 9000 } }
+    })
+    const view = render(html`<div>
+      <section data-testid="writer">${transcript('writer')}</section>
+      <section data-testid="peer">${transcript('peer')}</section>
+    </div>`)
+    const writer = view.getByTestId('writer'), peer = view.getByTestId('peer')
+    openTurn({ container: writer }); openTurn({ container: peer })
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+    const header = '[data-chat-work-trace] .chat-block-trace-meta'
+    await waitFor(() => expect(peer.querySelector(header)?.textContent).toContain('실패 1'))
+    expect(writer.querySelector(header)?.textContent).not.toContain('실패')
+    expect(writer.querySelector(`${header} .tnum`)?.textContent).toBe('12ms')
+    expect(peer.querySelector(`${header} .tnum`)?.textContent).not.toBe('12ms')
+  })
+  it.each(['Read', 'Shell'].flatMap(tool => ['tail', 'historical'].map(source => ({ tool, source }))))(
+    'withholds $tool raw results from $source while retaining execution provenance', async ({ tool, source }) => {
+      const secret = `private-${tool}-result-must-not-render`
+      const payload = response()
+      const entry = { ...payload.entry, tool, input: {}, output: secret,
+        route_evidence: { descriptor_id: tool === 'Read' ? 'agent.read_file' : 'agent.shell' } }
+      vi.mocked(get).mockResolvedValue({ ...payload, entry })
+      if (source === 'tail') recordToolCallOutputs([entry])
+      const activity = chatHistoryEntriesFromRest('writer', [{
+        id: 'autonomous:trace-writer#429', role: 'assistant', ts: 1789223400, content: null,
+        autonomous_turn: { turn_id: 'trace-writer#429' },
+        blocks: [{ t: 'trace', trace: [{ kind: 'tool', name: tool, status: 'ok', execution_id: id }] }],
+      }])
+      const view = render(html`<${ChatTranscript} keeperName="writer" entries=${activity} emptyText="empty" />`)
+      openTurn(view)
+      await waitFor(() => expect(lookupToolCallOutput('writer', id)?.output).toBe(secret))
+      const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
+      expect(step.getAttribute('data-chat-trace-execution-id')).toBe(id)
+      expect(step.getAttribute('data-chat-trace-provenance')).toBe('execution_id')
+      fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+      expect(step.querySelector('.chat-block-tool-body')).toBeNull()
+      expect(view.container.textContent).not.toContain(secret)
+      expect(view.queryByLabelText('편집 변경 기록')).toBeNull()
+      expect(get).toHaveBeenCalledTimes(1)
+    },
+  )
+  it('opens a retained Edit outside the recent tail and resolves its verified manifest', async () => {
+    const before = { _blob: { sha256: 'a'.repeat(64), bytes: 9, mime: 'application/octet-stream', preview: '' } }
+    const after = { _blob: { sha256: 'b'.repeat(64), bytes: 12, mime: 'application/octet-stream', preview: '' } }
+    const result = { ok: true, mode: 'patch', path: 'old-story.md', occurrences: 1, edit_snapshots: { status: 'stored', before, after } }
+    const manifest = await artifact(JSON.stringify({ schema: 'masc.tool-result-artifact-manifest.v1', content: JSON.stringify(result), structured_content: result }))
+    const payload = response()
+    vi.mocked(get).mockResolvedValue({ ...payload, entry: { ...payload.entry, output: { _blob: { ...manifest, preview: '' } }, artifact_refs: [after, before] } })
+    vi.mocked(fetchToolBlob).mockResolvedValue(manifest)
+    const view = render(transcript()); expect(get).not.toHaveBeenCalled(); openTurn(view)
+    await waitFor(() => expect(view.getByRole('button', { name: '편집 전후 원본 보기' })).toBeTruthy())
+    const firstCall = vi.mocked(get).mock.calls[0]
+    if (!firstCall) throw new Error('Expected a historical tool-output request')
+    const requested = new URL(firstCall[0] as string, 'http://localhost')
+    expect(requested.pathname).toBe('/api/v1/keepers/writer/tool-calls')
+    expect(requested.searchParams.get('execution_id')).toBe(id)
+    expect(requested.searchParams.has('limit')).toBe(false)
+    expect(fetchToolBlob).toHaveBeenCalledWith(manifest.sha256, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(view.getByText('old-story.md · 1곳 편집')).toBeTruthy()
+    const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
+    expect(step.getAttribute('data-chat-trace-provenance')).toBe('execution_id')
+    fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+    expect(step.querySelector('.chat-block-tool-body')).toBeNull()
+    expect(view.container.textContent).not.toContain('masc.tool-result-artifact-manifest.v1')
+    expect(lookupToolCallOutput('writer', id)?.keeper).toBe('writer'); expect(get).toHaveBeenCalledTimes(1)
+  })
+  it.each([[404, '저장된 실행 기록을 찾지 못했습니다.'], [409, '실행 기록이 중복되어'], [503, '저장된 실행 기록을 불러오지 못했습니다.']])('shows HTTP %i and retries only on operator action', async (status, message) => {
+    vi.mocked(get).mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: status as number })).mockResolvedValueOnce(response())
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain(message))
+    expect(view.queryByLabelText('편집 변경 기록')).toBeNull(); expect(get).toHaveBeenCalledTimes(1)
+    fireEvent.click(view.getByRole('button', { name: '다시 조회' }))
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy()); expect(get).toHaveBeenCalledTimes(2)
+  })
+  it.each(['keeper', 'execution'])('rejects a mismatched %s response identity', async axis => {
+    const payload = response()
+    vi.mocked(get).mockResolvedValue({ ...payload, entry: { ...payload.entry, ...(axis === 'keeper' ? { keeper: 'peer' } : { execution_id: 'other' }) } })
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('불러오지 못했습니다'))
+    expect(view.queryByLabelText('편집 변경 기록')).toBeNull(); expect(lookupToolCallOutput('writer', id)).toBeNull()
+  })
+  it('does not display an old response after switching Keeper', async () => {
+    let resolveOld!: (value: unknown) => void
+    vi.mocked(get).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve })).mockResolvedValueOnce(response('peer'))
+    const view = render(transcript()); openTurn(view); await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    view.rerender(transcript('peer')); await waitFor(() => expect(view.getByText('peer.md · 1곳 편집')).toBeTruthy())
+    resolveOld(response()); await Promise.resolve()
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull(); expect(lookupToolCallOutput('peer', id)?.keeper).toBe('peer')
+  })
+  it('keeps concurrent Keeper results isolated without refetching after peer hydration', async () => {
+    vi.mocked(get).mockImplementation(async path => response(
+      new URL(path, 'http://localhost').pathname === '/api/v1/keepers/writer/tool-calls' ? 'writer' : 'peer'))
+    const view = render(html`<div>
+      <section data-testid="writer">${transcript('writer')}</section>
+      <section data-testid="peer">${transcript('peer')}</section>
+    </div>`)
+    const writer = view.getByTestId('writer'), peer = view.getByTestId('peer')
+    openTurn({ container: writer }); openTurn({ container: peer })
+    await waitFor(() => {
+      expect(within(writer).getByText('writer.md · 1곳 편집')).toBeTruthy()
+      expect(within(peer).getByText('peer.md · 1곳 편집')).toBeTruthy()
+    })
+    expect(get).toHaveBeenCalledTimes(2)
+    // Both mounted views observe the same store replacement, then retain their
+    // own validated result while a third Keeper hydrates the colliding ID.
+    for (const keeper of ['writer', 'peer', 'third']) {
+      await act(async () => { recordToolCallOutputs([response(keeper).entry]) })
+      expect(within(writer).getByText('writer.md · 1곳 편집')).toBeTruthy()
+      expect(within(peer).getByText('peer.md · 1곳 편집')).toBeTruthy()
+      expect(within(writer).queryByText('peer.md · 1곳 편집')).toBeNull()
+      expect(within(peer).queryByText('writer.md · 1곳 편집')).toBeNull()
+      expect(view.queryByText('third.md · 1곳 편집')).toBeNull()
+      expect(get).toHaveBeenCalledTimes(2)
+    }
+  })
+  it.each([[404, '찾지 못했습니다'], [503, '불러오지 못했습니다']])(
+    'asks once per successful hydration after HTTP %i, never in a loop', async (status, message) => {
+      // The row re-asks on new ledger evidence only. The effect writes `loading`
+      // itself, so a dependency value that reads the row's own state flips on
+      // every attempt and re-runs the effect without end; this counts requests
+      // across a real settling window so that loop cannot come back unseen.
+      const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
+      vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: status as number }))
+      const view = render(transcript()); openTurn(view)
+      await waitFor(() => expect(view.getByRole('alert').textContent).toContain(message as string))
+      await settle()
+      expect(get).toHaveBeenCalledTimes(1)
+      await act(async () => { markToolCallOutputsHydrated('writer', 2_000) })
+      await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+      await settle()
+      expect(get).toHaveBeenCalledTimes(2)
+    },
+  )
+  it('rejects altered manifest bytes before presenting original-file controls', async () => {
+    const manifest = await artifact('{"schema":"masc.tool-result-artifact-manifest.v1"}')
+    const payload = response(); vi.mocked(get).mockResolvedValue({ ...payload, entry: { ...payload.entry, output: { _blob: { ...manifest, preview: '' } } } })
+    vi.mocked(fetchToolBlob).mockResolvedValue({ ...manifest, content: 'altered' })
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('바이트 검증'))
+    expect(view.queryByRole('button', { name: '편집 전후 원본 보기' })).toBeNull()
+  })
+})

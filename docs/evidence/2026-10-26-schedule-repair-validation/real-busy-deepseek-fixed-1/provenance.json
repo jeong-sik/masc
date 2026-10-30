@@ -1,0 +1,112 @@
+{
+  "review_type": "independent static raw-artifact review; no process or API actions",
+  "runtime_product_head": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "runtime_executable_sha256": "a0bd5c3903ef6425024e47b9dc92a7615f4efbb941357ea36e74ac5a18284668",
+  "observer_checkout_head": "e883ccc0ad91ff0ab8dcab60837aee6290eb7a88",
+  "observer_script": "artifacts/scheduled-job-runtime-audit-20261026/probe_real_busy_notes_v2.py",
+  "observer_script_sha256": "3a178cf646413ba667f4fc67143ff6e7c9012478a2c4bf827c0e5559e79f9960",
+  "runtime_id": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+  "provider_endpoint": "https://ollama.com/v1",
+  "raw_sources": [
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/provenance.json",
+      "sha256": "6dd39fbbb949108b620729514f0e18fff3fdac2a0355e4b70d7e326619e14eec"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/checks.json",
+      "sha256": "53a8d1cff74f8a4a15dc6d8bda2325d4e7824ffe8c97b0eaa4da41d8845efd35"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/process.json",
+      "sha256": "4e47b6e96283d1802b3fb4c3f6cdd68e8238a2c4b419612134d62c2345522be5"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/observation-error-process.json",
+      "sha256": "71c2e7f74e21852b54b988c55b8ab01c795a3a25d8fb0d749b544591fcd1750e"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/first-busy.json",
+      "sha256": "96bcb37b05ad68043d837b41f0db67e9d2e6b8fe97fae40403f5326ecc0f741b"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/last-observation.json",
+      "sha256": "f1a4b30ebeb4350e8d4cc9cfb14a152fee52799fbfc95312acca6a744e38c594"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/api-records.json",
+      "sha256": "155337ddbccb42cf8f18b6965aa92ac1a2f98dda58ab1bef72be633f8e17e8bc"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/shutdown-requested.json",
+      "sha256": "584ec34d67b4c460f9e4b7a6a9d3d80bb281f50cc3a64443b048cca75b465aee"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/server.log",
+      "sha256": "1f10d2eeb8d2b68cc00e622de4b5b5f6a4fa75f59e0fc765fc75b10cc2842382"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+      "sha256": "6b9cc5a93407923c1c13fb866dbf90ba4a19f685df52319652a19e710daa62b8"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+      "sha256": "4d675285d772bbc2bc0d06e78fbb6fd6d987da5b81cd3dca22c89fa6ee413cc2"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/workspace/.masc/schedules.json",
+      "sha256": "e17bfab781302b4f738770a7e365c53e4e3ed0e318abaa012814b2d34b5fc3de"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-fixed-1/workspace/.masc/keepers/audit-live-deepseek/event-queue-v19.json",
+      "sha256": "b91e8fe735b92d48ae911a8b825cf43ea88fcc2a029d43c3763bf1e624162e88"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/probe_real_busy_notes_v2.py",
+      "sha256": "3a178cf646413ba667f4fc67143ff6e7c9012478a2c4bf827c0e5559e79f9960"
+    }
+  ],
+  "binary_path": "artifacts/scheduled-job-runtime-audit-20261026/native40339887803/runtime/masc",
+  "original_inputs_unchanged_during_review": true,
+  "transformations": [
+    "Reaction rows: select identity/time/kind/disposition; retain exact ACK identity/incarnation/digest/receipt fields, omit payload message. Preserve every raw ledger row and original row order.",
+    "Tool receipts: select all note-add/notes-list records with exact input/output and execution/trace/turn fields; exclude all other tool calls.",
+    "Final state: select exact schedule/source identities, durable notes and zero pending/outbox, idle and shutdown facts.",
+    "Checks: derived from immutable raw artifact reads; do not replace or repair original failing checks.",
+    "Server log: select only checkpoint/yield/resume/SIGTERM/shutdown-complete lines.",
+    "No model thinking, credentials, chat/interrupt/control tokens or auth files copied."
+  ],
+  "derived_files": [
+    {
+      "path": "selected-reactions.json",
+      "sha256": "7fdb903265e6d8f90e88ca1ad05e1309ed57de50b4f7febe6d4288df7653338e"
+    },
+    {
+      "path": "selected-note-receipts.json",
+      "sha256": "1be8eb16d90332a075d52b4268172fd44ff9655a45b14a47353f9786787e08a3"
+    },
+    {
+      "path": "selected-final-state.json",
+      "sha256": "b5ef134bf72c93950fa7025e184d2c4602ed270160d57d7e47fd697dfe00a494"
+    },
+    {
+      "path": "timeline.json",
+      "sha256": "bab81bcc7490c2fdd74901804a1e7b1e6597c191d5b5b6514d91f864bab2ca40"
+    },
+    {
+      "path": "review-checks.json",
+      "sha256": "000aed82e5ff3dd3d83efa92a0d44397c7ad1069ff3c051d6a6094548525f73f"
+    },
+    {
+      "path": "selected-server-log.json",
+      "sha256": "c303a5889c6b0014a62c02246e86e8bbaaab22f551a1412ebd463b59a9d9735b"
+    },
+    {
+      "path": "README.md",
+      "sha256": "2a1acef506861ff9ce3f52c03a0c74457e386fcad3f545594b13a010cf740a7d"
+    },
+    {
+      "path": "finding.json",
+      "sha256": "c9b1319e90ade76f9304030890e2c0726bd20b4f172fa949e61f581bf7b21b25"
+    }
+  ]
+}

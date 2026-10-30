@@ -1,0 +1,645 @@
+{
+  "at": "2026-10-22T05:03:34.665344+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/lane-addons",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "configuration": {
+      "directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/config/lane-addons",
+      "complete": true,
+      "issues": [],
+      "declarations": [
+        {
+          "id": "curator-qual-1196",
+          "source_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/config/lane-addons/curator-qualification.toml",
+          "enabled": false,
+          "source_revision": "490caf4eb7484c0831479bd5da7283ad508d5ce0e33ea003c6176a0a8d7425ec",
+          "desired_revision": "5d89cd3fcf651a9bdf6725377f3d2ff83d2e4fd748590f0b41f24d085176d12d",
+          "applied_revision": null,
+          "instance_id": null,
+          "application": {
+            "kind": "inactive"
+          }
+        }
+      ]
+    },
+    "instances": [
+      {
+        "runtime_presence": "retained",
+        "phase": {
+          "kind": "detached"
+        },
+        "lifecycle": {
+          "kind": "detached",
+          "release": {
+            "kind": "released",
+            "engine": {
+              "kind": "docker",
+              "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+            },
+            "container_id": "5a9824730cc61c28fee118ee664712bfa20d320160b77b50c508fe8437db5c88"
+          }
+        },
+        "configuration": {
+          "id": "curator-qual-1196",
+          "source_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/config/lane-addons/curator-qualification.toml",
+          "revision": "5d89cd3fcf651a9bdf6725377f3d2ff83d2e4fd748590f0b41f24d085176d12d"
+        },
+        "observation_seq": 1,
+        "instance_id": "01a161d1-adf6-7000-a5bb-d068f198269c",
+        "incarnation": "01a161d1-adf6-7000-a5bb-d068f198269c",
+        "action_schema": null,
+        "run_id": "curator-qualification-scope",
+        "addon_id": "workspace-curator",
+        "title": "Workspace Curator worker",
+        "revision": "0.1.0",
+        "execution_authority": {
+          "kind": "container",
+          "runtime": "docker",
+          "engine": {
+            "kind": "docker",
+            "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+          }
+        },
+        "resolved_image": {
+          "runtime": "docker",
+          "digest": "sha256:8df21ee67174a57544597abf3ba16174f107508e9f523e2e1709b091da39d258"
+        },
+        "rows_count": 1,
+        "observation_pending": true,
+        "coalesced_wakes": 0,
+        "unchanged_source_refreshes": 0,
+        "binding": {
+          "sources": []
+        },
+        "source_access": {
+          "kind": "operator_configuration"
+        },
+        "package": {
+          "tool_hooks": [
+            "validate_input",
+            "validate_output"
+          ],
+          "exact_outputs": {
+            "briefing": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "briefing": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "briefing"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            },
+            "classification": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decisions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fact_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "join_claim",
+                            "create_claim",
+                            "join_conflict",
+                            "create_conflict",
+                            "exclude"
+                          ]
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "fact_id",
+                        "kind",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "decisions"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            }
+          },
+          "id": "workspace-curator",
+          "revision": "0.1.0",
+          "title": "Workspace Curator worker",
+          "contributions": [
+            "derive"
+          ],
+          "image": "masc-curator-proof:1196e280",
+          "command": [
+            "python3",
+            "server.py",
+            "--state",
+            "/state"
+          ],
+          "directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/package/addons/workspace-curator",
+          "action_tool": null,
+          "state_storage": "persistent",
+          "tool_invocation": "host_context",
+          "exported_tools": [
+            "curate"
+          ],
+          "outputs": {
+            "requests": {
+              "lanes": [
+                "workspace/curator"
+              ]
+            }
+          },
+          "refresh_policy": "every_hint",
+          "model_access": "disabled",
+          "binding_schema": {
+            "type": "object",
+            "properties": {
+              "sources": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "sources"
+            ],
+            "additionalProperties": false
+          },
+          "presentation": {
+            "description": "Original Curator executions; ledger and briefing commits remain host-owned",
+            "readings": [
+              {
+                "lane_id": "workspace/curator",
+                "path": [
+                  "pending"
+                ],
+                "label": "Pending requests",
+                "unit": "requests",
+                "format": "number"
+              },
+              {
+                "lane_id": "workspace/curator",
+                "path": [
+                  "finished"
+                ],
+                "label": "Retained results",
+                "unit": "requests",
+                "format": "number"
+              }
+            ]
+          },
+          "skills_directory": null,
+          "resources": {
+            "cpus": 0.5,
+            "memory_bytes": 134217728,
+            "pids": 16,
+            "max_reply_bytes": 4194304
+          }
+        },
+        "visibility": {
+          "kind": "shared"
+        },
+        "resource": {
+          "kind": "container",
+          "id": "5a9824730cc61c28fee118ee664712bfa20d320160b77b50c508fe8437db5c88"
+        }
+      },
+      {
+        "runtime_presence": "retained",
+        "phase": {
+          "kind": "detached"
+        },
+        "lifecycle": {
+          "kind": "detached",
+          "release": {
+            "kind": "released",
+            "engine": {
+              "kind": "docker",
+              "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+            },
+            "container_id": "caaf39adb8f7462828528e113fde79bb10752ac7aa9cc05b455ba3fa43dd577d"
+          }
+        },
+        "configuration": {
+          "id": "curator-qual-1196",
+          "source_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/config/lane-addons/curator-qualification.toml",
+          "revision": "5d89cd3fcf651a9bdf6725377f3d2ff83d2e4fd748590f0b41f24d085176d12d"
+        },
+        "observation_seq": 5,
+        "instance_id": "01a161e3-ecdc-7000-b95c-29f1b5976ace",
+        "incarnation": "01a161e3-ecdc-7000-b95c-29f1b5976ace",
+        "action_schema": null,
+        "run_id": "curator-qualification-scope",
+        "addon_id": "workspace-curator",
+        "title": "Workspace Curator worker",
+        "revision": "0.1.0",
+        "execution_authority": {
+          "kind": "container",
+          "runtime": "docker",
+          "engine": {
+            "kind": "docker",
+            "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+          }
+        },
+        "resolved_image": {
+          "runtime": "docker",
+          "digest": "sha256:8df21ee67174a57544597abf3ba16174f107508e9f523e2e1709b091da39d258"
+        },
+        "rows_count": 1,
+        "observation_pending": true,
+        "coalesced_wakes": 2,
+        "unchanged_source_refreshes": 0,
+        "binding": {
+          "sources": []
+        },
+        "source_access": {
+          "kind": "operator_configuration"
+        },
+        "package": {
+          "tool_hooks": [
+            "validate_input",
+            "validate_output"
+          ],
+          "exact_outputs": {
+            "briefing": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "briefing": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "briefing"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            },
+            "classification": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decisions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fact_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "join_claim",
+                            "create_claim",
+                            "join_conflict",
+                            "create_conflict",
+                            "exclude"
+                          ]
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "fact_id",
+                        "kind",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "decisions"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            }
+          },
+          "id": "workspace-curator",
+          "revision": "0.1.0",
+          "title": "Workspace Curator worker",
+          "contributions": [
+            "derive"
+          ],
+          "image": "masc-curator-proof:1196e280",
+          "command": [
+            "python3",
+            "server.py",
+            "--state",
+            "/state"
+          ],
+          "directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/package/addons/workspace-curator",
+          "action_tool": null,
+          "state_storage": "persistent",
+          "tool_invocation": "host_context",
+          "exported_tools": [
+            "curate"
+          ],
+          "outputs": {
+            "requests": {
+              "lanes": [
+                "workspace/curator"
+              ]
+            }
+          },
+          "refresh_policy": "every_hint",
+          "model_access": "disabled",
+          "binding_schema": {
+            "type": "object",
+            "properties": {
+              "sources": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "sources"
+            ],
+            "additionalProperties": false
+          },
+          "presentation": {
+            "description": "Original Curator executions; ledger and briefing commits remain host-owned",
+            "readings": [
+              {
+                "lane_id": "workspace/curator",
+                "path": [
+                  "pending"
+                ],
+                "label": "Pending requests",
+                "unit": "requests",
+                "format": "number"
+              },
+              {
+                "lane_id": "workspace/curator",
+                "path": [
+                  "finished"
+                ],
+                "label": "Retained results",
+                "unit": "requests",
+                "format": "number"
+              }
+            ]
+          },
+          "skills_directory": null,
+          "resources": {
+            "cpus": 0.5,
+            "memory_bytes": 134217728,
+            "pids": 16,
+            "max_reply_bytes": 4194304
+          }
+        },
+        "visibility": {
+          "kind": "shared"
+        },
+        "resource": {
+          "kind": "container",
+          "id": "caaf39adb8f7462828528e113fde79bb10752ac7aa9cc05b455ba3fa43dd577d"
+        }
+      },
+      {
+        "runtime_presence": "retained",
+        "phase": {
+          "kind": "detached"
+        },
+        "lifecycle": {
+          "kind": "detached",
+          "release": {
+            "kind": "released",
+            "engine": {
+              "kind": "docker",
+              "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+            },
+            "container_id": "93e4f725eee87cd4739f0b7d98f7be45fbd172ef5671aed2d2f60a1f403718ce"
+          }
+        },
+        "configuration": {
+          "id": "curator-qual-1196",
+          "source_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/config/lane-addons/curator-qualification.toml",
+          "revision": "5d89cd3fcf651a9bdf6725377f3d2ff83d2e4fd748590f0b41f24d085176d12d"
+        },
+        "observation_seq": 1,
+        "instance_id": "01a161d4-4188-7000-b79c-17a3edec7769",
+        "incarnation": "01a161d4-4188-7000-b79c-17a3edec7769",
+        "action_schema": null,
+        "run_id": "curator-qualification-scope",
+        "addon_id": "workspace-curator",
+        "title": "Workspace Curator worker",
+        "revision": "0.1.0",
+        "execution_authority": {
+          "kind": "container",
+          "runtime": "docker",
+          "engine": {
+            "kind": "docker",
+            "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+          }
+        },
+        "resolved_image": {
+          "runtime": "docker",
+          "digest": "sha256:8df21ee67174a57544597abf3ba16174f107508e9f523e2e1709b091da39d258"
+        },
+        "rows_count": 1,
+        "observation_pending": true,
+        "coalesced_wakes": 0,
+        "unchanged_source_refreshes": 0,
+        "binding": {
+          "sources": []
+        },
+        "source_access": {
+          "kind": "operator_configuration"
+        },
+        "package": {
+          "tool_hooks": [
+            "validate_input",
+            "validate_output"
+          ],
+          "exact_outputs": {
+            "briefing": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "briefing": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "briefing"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            },
+            "classification": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decisions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fact_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "join_claim",
+                            "create_claim",
+                            "join_conflict",
+                            "create_conflict",
+                            "exclude"
+                          ]
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "fact_id",
+                        "kind",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "decisions"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            }
+          },
+          "id": "workspace-curator",
+          "revision": "0.1.0",
+          "title": "Workspace Curator worker",
+          "contributions": [
+            "derive"
+          ],
+          "image": "masc-curator-proof:1196e280",
+          "command": [
+            "python3",
+            "server.py",
+            "--state",
+            "/state"
+          ],
+          "directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/package/addons/workspace-curator",
+          "action_tool": null,
+          "state_storage": "persistent",
+          "tool_invocation": "host_context",
+          "exported_tools": [
+            "curate"
+          ],
+          "outputs": {
+            "requests": {
+              "lanes": [
+                "workspace/curator"
+              ]
+            }
+          },
+          "refresh_policy": "every_hint",
+          "model_access": "disabled",
+          "binding_schema": {
+            "type": "object",
+            "properties": {
+              "sources": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "sources"
+            ],
+            "additionalProperties": false
+          },
+          "presentation": {
+            "description": "Original Curator executions; ledger and briefing commits remain host-owned",
+            "readings": [
+              {
+                "lane_id": "workspace/curator",
+                "path": [
+                  "pending"
+                ],
+                "label": "Pending requests",
+                "unit": "requests",
+                "format": "number"
+              },
+              {
+                "lane_id": "workspace/curator",
+                "path": [
+                  "finished"
+                ],
+                "label": "Retained results",
+                "unit": "requests",
+                "format": "number"
+              }
+            ]
+          },
+          "skills_directory": null,
+          "resources": {
+            "cpus": 0.5,
+            "memory_bytes": 134217728,
+            "pids": 16,
+            "max_reply_bytes": 4194304
+          }
+        },
+        "visibility": {
+          "kind": "shared"
+        },
+        "resource": {
+          "kind": "container",
+          "id": "93e4f725eee87cd4739f0b7d98f7be45fbd172ef5671aed2d2f60a1f403718ce"
+        }
+      }
+    ],
+    "rows": [],
+    "coverage": []
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "workflow": "Test",
+  "workflow_path": ".github/workflows/test.yml",
+  "run_id": 40358821346,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40358821346",
+  "head": "b07769be553f54d14873c72f9ccd161d4085799e",
+  "ref": "fix/schedule-ledger-commit-result-20261027",
+  "event": "workflow_dispatch",
+  "status": "completed",
+  "conclusion": "success",
+  "created_at": "2026-10-26T16:24:31Z",
+  "updated_at": "2026-10-26T16:37:50Z",
+  "suites": [
+    {
+      "actual_name": "Schedule_store",
+      "actual_cases": 59
+    },
+    {
+      "actual_name": "Schedule_consumer_dispatch",
+      "actual_cases": 58
+    }
+  ],
+  "counts": {
+    "OK": 117,
+    "FAIL": 0,
+    "SKIP": 0
+  },
+  "source": {
+    "archive_sha256": "f08e5a8e0f017ae663ec43dada4201ed895dc1cac66dbe4e282f5a2e7ba1fbe3",
+    "entry": "ci-run-tests.log",
+    "entry_sha256": "83709f5d2708c969a3008b8b5a7ad187f3c16194ba94c7d6fe34b48144a0a3ad",
+    "entry_bytes": 197861,
+    "source_lines": 1418
+  },
+  "selection": {
+    "path": "selected.json",
+    "sha256": "6fe45e153e3ac36a61e54066be1f148d5511bb3bb457641072eae1a00b1551a6",
+    "bytes": 15225,
+    "rows": 121,
+    "method": "Python splitlines 1-based original source line numbers. Only ANSI SGR sequences removed. Every suite header, case verdict and final summary retained; other output omitted.",
+    "is_derivative": true
+  },
+  "scope": "Selected aliases only. Not full regression, model execution, installed server restart, or production installation. No execution result is transferred to a later head.",
+  "api_source": {
+    "command": [
+      "gh",
+      "api",
+      "repos/jeong-sik/masc/actions/runs/40358821346"
+    ],
+    "observed_at": "2026-10-26T17:47:01.646564+00:00",
+    "stdout_sha256": "8c7715b7600f5ef444d02789d3b602a3a8d5f854f39967e45fc752555c0d6c8d",
+    "stdout_bytes": 12160,
+    "semantics": "New terminal REST read during evidence retention; not metadata extracted from the older captured suite log. Full gh stdout retained in ignored evidence work output."
+  }
+}

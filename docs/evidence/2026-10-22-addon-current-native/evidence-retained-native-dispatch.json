@@ -1,0 +1,9 @@
+{
+  "source_sha": "d06fc9229f2d46597933526d06863e0473c87874",
+  "workflow_ref": "main",
+  "scenario": "addon-lifecycle",
+  "exit_code": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/39631388009\n",
+  "stderr": "",
+  "supersedes_invalid_source_run": 39631235633
+}

@@ -1,0 +1,11 @@
+{
+  "server_returncode": 0,
+  "reaped": true,
+  "model_requests": [
+    {
+      "method": "GET",
+      "path": "/v1/models"
+    }
+  ],
+  "stub_stopped": true
+}

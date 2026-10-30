@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "last_updated": "2026-10-24T15:30:17Z",
+  "links": [
+    { "goal_id": "goal-canary-three-results", "task_ids": [ "task-001" ] }
+  ]
+}

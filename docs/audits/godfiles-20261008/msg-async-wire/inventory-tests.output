@@ -1,0 +1,14 @@
+[2026-10-09 19:32:48] [INFO] [MCP] Tag registry initialized: 195 tools registered
+Testing `keeper_msg_async durable active inventory'.
+This run has ID `LHSD50ZA'.
+
+  [OK]          read          0   reads disk-only exact entry.
+  [OK]          read          1   reports terminal residue.
+  [OK]          read          2   reports malformed and non-regular children.
+  [OK]          read          3   conflicting partition context is unreadable.
+  [OK]          read          4   duplicate context rejects submit and durabl...
+  [OK]          read          5   non-JSON numbers reject submit and durable ...
+  [OK]          read          6   missing active partition is empty.
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper_msg_async durable active inventory'.
+Test Successful in 0.042s. 7 tests run.

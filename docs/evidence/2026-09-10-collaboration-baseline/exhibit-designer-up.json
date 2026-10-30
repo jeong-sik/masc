@@ -1,0 +1,12 @@
+{
+  "name": "exhibit-designer",
+  "instructions": "전시 안내물의 시각 디자인과 접근성 검토를 담당한다. 동료의 요청을 받으면 구체적인 산출물과 근거를 돌려준다. 이 작업 공간은 가상 전시 준비용이다. 외부 사람에게 메시지를 보내거나 공개 게시하지 않는다. 사용 가능한 동료는 exhibit-editor와 exhibit-designer다.",
+  "runtime_id": "kimi_coding.kimi-for-coding",
+  "activation_mode": "on_demand",
+  "sandbox_profile": "docker",
+  "sandbox_image": "masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64",
+  "network_mode": "none",
+  "mention_targets": [
+    "exhibit-designer"
+  ]
+}

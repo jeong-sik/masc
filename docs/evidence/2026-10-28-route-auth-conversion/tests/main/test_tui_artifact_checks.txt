@@ -1,0 +1,18 @@
+Testing `Shared artifact confirmation reads'.
+This run has ID `1WMARYAL'.
+
+  [OK]          state          0   exact revision and explicit uncheck.
+  [OK]          state          1   uncertain and partial inventories.
+  [OK]          state          2   superseded and withdrawn read replies.
+  [OK]          state          3   independent source completeness.
+  [OK]          state          4   strict shared inventory.
+  [OK]          state          5   explicit pinned toggle and receipt validat...
+  [OK]          state          6   write ownership and required reread.
+  [OK]          state          7   request-owned workspace write precondition.
+  [OK]          state          8   next unchecked exact revision and wrap.
+  [OK]          state          9   unknown inventories cannot navigate.
+  [OK]          state         10   scoped navigation preserves caller read ow...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/Shared artifact confirmation reads'.
+Test Successful in 0.025s. 11 tests run.
+exit=0

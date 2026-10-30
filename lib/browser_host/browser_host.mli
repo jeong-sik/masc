@@ -1,0 +1,171 @@
+(** Firefox native messaging host. stdout belongs exclusively to the framed
+    protocol; operational diagnostics must never include tokens or page data.
+
+    The host polls the server for commands, forwards each to the extension
+    as one native frame, and posts the reply back. Its waits are bounded --
+    the HTTP round trip, the extension's reply, a BiDi command -- and each
+    bound keeps what arrived as it closed: the extension aborts a command at
+    the very [deadlineMs] the host sent it, so its reply and the host's own
+    timer land together by design, and a reply that lands so must stand as
+    the reply. *)
+
+(** The verbs the server may forward; the BiDi peer's own. *)
+type verb = Masc.Browser_bidi_peer.verb =
+  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
+  | Page_goto
+  | Page_context
+  | Page_snapshot
+  | Page_downloads
+  | Page_native_workflow
+
+type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
+
+(** How one exchange with the extension ended. [Replied] carries the reply
+    envelope, the extension's own or the host's failure for it; a frame the
+    host could not write within the window is [Write_timed_out], and ends
+    the host. *)
+type exchange = Replied of Yojson.Safe.t | Write_timed_out
+
+(** The window the host gives the extension for one command, in seconds; the
+    command carries it as [deadlineMs]. *)
+val extension_timeout_sec : float
+
+(** The one pending exchange of the serial host: at most one command awaits
+    a reply at a time. *)
+type pending
+
+val no_pending : unit -> pending
+
+(** [forward ~clock ~stdout pending command] writes [command] as one native
+    frame to [stdout] and waits for its reply, delivered through {!settle},
+    for at most {!extension_timeout_sec}. A reply that lands as the window
+    closes is the reply; a window that closes with no reply is
+    [Replied (failure "extension reply timed out")]; a window that closes
+    while the frame is still being written is [Write_timed_out]. *)
+val forward
+  :  clock:_ Eio.Time.clock
+  -> stdout:_ Eio.Flow.sink
+  -> pending
+  -> command
+  -> exchange
+
+(** [settle pending reply] decodes a reply frame from the extension and,
+    when its id is the pending command's, resolves that exchange with the
+    reply envelope; a reply for any other id is dropped. [Error] is a frame
+    this protocol cannot read as a reply: no id, no boolean [ok], or a
+    successful reply with no [data]. *)
+val settle : pending -> Yojson.Safe.t -> (unit, string) result
+
+type config
+
+(** Resolves the server origin, the lane token file and a fresh client id.
+    [--server], then an exported [MASC_HTTP_PORT] fixes the origin. Otherwise
+    the workspace connection file names the port and stays the source {!run}
+    consults after a failed request. [MASC_HTTP_BASE_URL] is an advertised
+    public address and does not select the host's local connection. *)
+val resolve_config
+  :  base_path:string option
+  -> server:string option
+  -> token_file:string option
+  -> (config, string) result
+
+(** The native-messaging host: polls the server, forwards commands to the
+    extension over stdout, reads replies from stdin. Returns when stdin
+    reaches EOF or the poll loop stops; the string is why. Every refused
+    registration stops it: the extension starts the next host, which has a
+    new client ID.
+
+    When a poll or result request to the server fails and the origin came
+    from the workspace connection file, the host reads that file again. The
+    file is the desired port, not proof of a server, so the host moves only
+    when its current address no longer answers [/browser-lane/ping] and the
+    address the file names does; otherwise it retries where it is.
+
+    A result is sent again only when the request may not have reached the
+    server: no connection, a broken exchange, a connection that closed
+    without a response, or no answer in time. A result the server answered,
+    with any status or a body the host cannot accept, is logged as
+    undelivered and the host returns to polling. A result whose server moved
+    is not sent to the new address either: its request belonged to the server
+    that issued it. *)
+val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
+
+(** The BiDi host: commands are dispatched to a loopback Firefox BiDi endpoint
+    at [url] instead of the extension. Its link to the server is {!run}'s: a
+    failed poll is asked again, the workspace connection file is followed,
+    and a result that may not have arrived is sent again, so a MASC server
+    that restarts finds this host still attached, as the same client.
+
+    It returns, with why, when:
+    - the BiDi connection ended, also while the host waits for work. A
+      command it ended under is answered first, once;
+    - a command's outcome is unknown. That answer too is offered once;
+    - the server refuses the client's registration for a reason that asking
+      again would not change.
+
+    A server that ended this connection is not such a reason. It does so
+    after two minutes without a poll, as after the machine slept, and serves
+    that client ID no more. Nothing starts another BiDi host, so this one
+    registers again under a new client ID and keeps its BiDi session. The
+    server registers an ID when its poll arrives, so this holds for any ID
+    that had sent a poll before, answered or not. It ends only when the
+    server calls an ID ended on the first poll that ID ever sent: such an ID
+    did not fall silent, and a further new one would be told the same.
+
+    It keeps {!Masc.Browser_bidi_host_record} for its workspace: who it is
+    from the start, when Firefox gave it its session, each result it holds
+    no acknowledgement for, and, on every way out named here, why it ended
+    and whether its session is still in Firefox. A workspace has one BiDi
+    host; a second returns an error naming the first before it connects to
+    Firefox, and so does a host that cannot write its first record. An
+    exception leaves the record without an ending, which its readers take
+    for a host that died. The workspace is given up when this returns or
+    raises.
+
+    With [firefox_profile] [Some path], the host keeps a session only with a
+    Firefox that reports running that profile
+    ({!Masc.Browser_bidi_peer.runs_profile}); with any other it ends the
+    session and returns the error, which its record keeps as why it ended.
+    A port the operator's everyday Firefox listens on would otherwise give a
+    Keeper that profile and its logins.
+
+    [stop] blocks until the operator asked the host to stop and answers what
+    asked. From then on the host takes no further command: one in flight is
+    finished and its answer offered once, the server is told, and the host
+    returns [Ok ()]. Asked before the BiDi connection is up, it abandons the
+    attempt and returns [Ok ()]; asked while its session request is
+    unanswered, it waits for that answer first.
+
+    On each of these ways out, and when an exception raised while it serves
+    leaves it, the host first ends the BiDi session it asked for, so the same
+    Firefox takes the next host. Firefox keeps a session whose socket closed
+    and takes one session at a time; ending it closes no tab and leaves the
+    browser running. A session that could not be ended is logged with what
+    the operator does about it, and a stop that left one returns an error
+    instead of [Ok ()]. That includes a host cancelled from outside: its
+    connection is taken down before the session can be ended over it. A
+    result that stayed undelivered is logged and does not change what the
+    host returns. *)
+val run_bidi
+  :  Eio_unix.Stdenv.base
+  -> config
+  -> string
+  -> firefox_profile:string option
+  -> stop:(unit -> string)
+  -> (unit, string) result
+
+(** Whether this host keeps a lane's refusal reason (the [error] field of a
+    non-200 body) in its log: lower-case letters, digits and underscores, at
+    most 64 characters. Anything else is prose, and the host logs only the
+    status. A server that names its refusals must send a code this accepts. *)
+val is_refusal_code : string -> bool
+
+module For_testing : sig
+  (** A transport step under its deadline: the step's outcome when it
+      finished, even as the deadline passed; [None] only when it had not. *)
+  val within : clock:_ Eio.Time.clock -> float -> (unit -> 'a) -> 'a option
+end
+
+(** Whether another command may use the same BiDi connection. Confirmed
+    partial failures retain their created tab IDs; unknown outcomes retire it. *)
+val bidi_connection_can_continue : ('a, Masc.Browser_bidi_peer.failure) result -> bool

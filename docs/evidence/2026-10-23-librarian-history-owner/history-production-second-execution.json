@@ -1,0 +1,36 @@
+{
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/39895924935",
+  "exact_head": "0bf669df54940552aeed51a941b67cede120c3a1",
+  "conclusion": "failure",
+  "compilation": "passed for the three selected suites",
+  "tests": 43,
+  "passed": 32,
+  "failed": 11,
+  "suites": [
+    {
+      "name": "test_keeper_librarian_durable_execution",
+      "tests": 11,
+      "failed": 11,
+      "seconds": 0.173
+    },
+    {
+      "name": "test_keeper_librarian_durable_capture",
+      "tests": 7,
+      "failed": 0,
+      "seconds": 0.142
+    },
+    {
+      "name": "test_keeper_librarian_capacity_callback",
+      "tests": 25,
+      "failed": 0,
+      "seconds": 0.387
+    }
+  ],
+  "failure": "New nonempty external admission fixture called record_with_clock in systhread; it requires Keeper_fs.ensure_dir Eio mutex on fiber. All eleven execution cases failed during setup.",
+  "repair": "Keep actual record_with_clock API on Eio fiber, matching the passing source-capture fixture. Preserve real external item, original range receipts and final ACK offset one.",
+  "raw_failed_log_sha256": "fd5dad437fcabc0a1e61d89e5133f080d64dbb485272b1047e10e471de98b9df",
+  "limits": [
+    "Totals are per run; overlapping cases across previous runs are not summed.",
+    "No new integration success or installed runtime claim."
+  ]
+}

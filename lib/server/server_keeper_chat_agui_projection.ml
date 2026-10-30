@@ -1,0 +1,379 @@
+type t =
+  { thread_id : string
+  ; run_id : string option
+  ; message_id : string option
+  }
+
+type custom_event_name =
+  | Connected
+  | Runtime_attempt_started
+  | Provider_retry
+  | Stream_message_start
+  | Stream_message_delta
+  | Stream_message_stop
+  | Stream_ping
+  | Content_block_start
+  | Content_block_stop
+  | Model_content_activity
+  | Thinking_delta
+  | Thinking_snapshot
+  | Thinking_signature_delta
+  | Media_delta
+  | Stream_protocol_error
+  | Batch_bound
+  | Continuation_checkpoint
+  | External_effect_completed
+  | Reply_details
+  | Tool_approval_requested
+  | Tool_approval_settled
+  | Tool_call_admitted
+  | Tool_result_ready
+  | Tool_transcript_committed
+  | Native_tool_start
+  | Native_tool_end
+  | Native_tool_progress
+
+let initial =
+  { thread_id = Ag_ui.default_thread_id
+  ; run_id = None
+  ; message_id = None
+  }
+
+let json_opt key value =
+  match value with
+  | None -> []
+  | Some value -> [ key, value ]
+
+let ag_role (role : Keeper_chat_events.role) =
+  match role with
+  | Keeper_chat_events.User -> Ag_ui.User
+  | Keeper_chat_events.Assistant -> Ag_ui.Assistant
+
+let custom_event_name_to_string = function
+  | Connected -> "KEEPER_CONNECTED"
+  | Runtime_attempt_started -> "KEEPER_RUNTIME_ATTEMPT_STARTED"
+  | Provider_retry -> "KEEPER_PROVIDER_RETRY"
+  | Stream_message_start -> "KEEPER_STREAM_MESSAGE_START"
+  | Stream_message_delta -> "KEEPER_STREAM_MESSAGE_DELTA"
+  | Stream_message_stop -> "KEEPER_STREAM_MESSAGE_STOP"
+  | Stream_ping -> "KEEPER_STREAM_PING"
+  | Content_block_start -> "KEEPER_CONTENT_BLOCK_START"
+  | Content_block_stop -> "KEEPER_CONTENT_BLOCK_STOP"
+  | Model_content_activity -> "KEEPER_MODEL_CONTENT_ACTIVITY"
+  | Thinking_delta -> "KEEPER_THINKING_DELTA"
+  | Thinking_snapshot -> "KEEPER_THINKING_SNAPSHOT"
+  | Thinking_signature_delta -> "KEEPER_THINKING_SIGNATURE_DELTA"
+  | Media_delta -> "KEEPER_MEDIA_DELTA"
+  | Stream_protocol_error -> "KEEPER_STREAM_PROTOCOL_ERROR"
+  | Batch_bound -> "KEEPER_CHAT_BATCH_BOUND"
+  | Continuation_checkpoint -> "KEEPER_CONTINUATION_CHECKPOINT"
+  | External_effect_completed -> "KEEPER_EXTERNAL_EFFECT_COMPLETED"
+  | Reply_details -> "KEEPER_REPLY_DETAILS"
+  | Tool_approval_requested -> "KEEPER_TOOL_APPROVAL_REQUESTED"
+  | Tool_approval_settled -> "KEEPER_TOOL_APPROVAL_SETTLED"
+  | Tool_call_admitted -> "KEEPER_TOOL_CALL_ADMITTED"
+  | Tool_result_ready -> "KEEPER_TOOL_RESULT_READY"
+  | Tool_transcript_committed -> "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
+  | Native_tool_start -> "KEEPER_NATIVE_TOOL_START"
+  | Native_tool_end -> "KEEPER_NATIVE_TOOL_END"
+  | Native_tool_progress -> "KEEPER_NATIVE_TOOL_PROGRESS"
+
+let custom ~timestamp state name value =
+  Ag_ui.make_event ~timestamp ~thread_id:state.thread_id ~run_id:state.run_id
+    ~custom_name:(Some (custom_event_name_to_string name))
+    ~custom_value:(Some value) Ag_ui.Custom
+
+let reply_details_to_json
+    (event : Keeper_chat_events.reply_details) =
+  `Assoc
+    ([ "reply", `String event.reply
+    ; "turn_outcome", `String (Keeper_turn_outcome.to_label event.turn_outcome)
+    ; "turn_ref", `String (Ids.Turn_ref.to_string event.turn_ref)
+    ] @ json_opt "terminal_stream_scope" (Option.map (fun scope -> `Int scope) event.terminal_stream_scope))
+
+let continuation_checkpoint_to_json
+    (event : Keeper_chat_events.continuation_checkpoint) =
+  `Assoc
+    ([ "message", `String event.message ]
+     @ json_opt "request_id"
+         (Option.map (fun value -> `String value) event.request_id))
+
+let native_tool_to_json ?progress ?completion (tool : Keeper_chat_events.native_tool) =
+  `Assoc
+    ([ "toolStreamScope", `Int tool.occurrence.stream_scope
+     ; "toolCallBlockIndex", `Int tool.occurrence.block_index
+     ]
+     @ json_opt "providerMessageId"
+         (Option.map (fun value -> `String value) tool.occurrence.provider_message_id)
+     @ json_opt "toolCallId"
+         (Option.map (fun value -> `String value) tool.tool_call_id)
+     @ json_opt "toolCallName"
+         (Option.map (fun value -> `String value) tool.tool_call_name)
+     @ json_opt "completion" (Option.map Runtime_native_tools.completion_to_json completion)
+     @ json_opt "progress" (Option.map Runtime_native_tools.progress_to_json progress))
+
+let project ~timestamp ~redact_text state event =
+  let open Keeper_chat_events in
+  match public_content ~redact_text event with
+  | Run_started { run_id; thread_id } ->
+      let state = { state with thread_id; run_id = Some run_id } in
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id ~run_id:(Some run_id)
+             Ag_ui.Run_started) )
+  | Text_message_start { message_id; role } ->
+      let state = { state with message_id = Some message_id } in
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:state.run_id ~message_id:(Some message_id)
+             ~role:(Some (ag_role role)) Ag_ui.Text_message_start) )
+  | Text_delta {text; response} ->
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:state.run_id ~message_id:state.message_id
+             ~delta:(Some text) ~text_response:response Ag_ui.Text_message_content) )
+  | Text_message_end ->
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:state.run_id ~message_id:state.message_id
+             Ag_ui.Text_message_end) )
+  | External_effect_completed { target } ->
+      (* A typed target names the real destination so the dashboard stops
+         assuming an external connector (#28374). *)
+      let value =
+        `Assoc [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
+      in
+      state, Some (custom ~timestamp state External_effect_completed value)
+  | Agent_core_stream_connected ->
+      state, Some (custom ~timestamp state Connected `Null)
+  | Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
+      let value =
+        match runtime_id with
+        | None -> `Null
+        | Some rid when String.trim rid = "" -> `Null
+        | Some rid ->
+            `Assoc
+              ([ "runtime_id", `String rid ]
+               @ json_opt "attempt_index"
+                   (Option.map (fun i -> `Int i) attempt_index))
+      in
+      state, Some (custom ~timestamp state Runtime_attempt_started value)
+  | Provider_retry_observed { attempt; retry } ->
+      state, Some (custom ~timestamp state Provider_retry
+        (`Assoc ["attempt", Runtime_native_tasks.attempt_to_json attempt;
+                 "retry", Runtime_claude_api_retry.to_json retry]))
+  | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
+      let value =
+        `Assoc
+          ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id
+           ; "model", `String model
+           ]
+           @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
+       @ json_opt "usage" (Option.map api_usage_to_json usage))
+      in
+      state, Some (custom ~timestamp state Stream_message_start value)
+  | Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
+      let value =
+        `Assoc
+          (["stream_scope", `Int stream_scope]
+       @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
+           @ json_opt "stop_reason"
+             (Option.map
+                (fun reason ->
+                   `String (Agent_core.Types.stop_reason_to_string reason))
+                stop_reason)
+           @ json_opt "usage" (Option.map delta_usage_to_json usage))
+      in
+      state, Some (custom ~timestamp state Stream_message_delta value)
+  | Agent_core_stream_message_stop owner ->
+      state, Some (custom ~timestamp state Stream_message_stop
+        (match owner with None -> `Null | Some owner -> response_identity_to_json owner))
+  | Agent_core_stream_ping ->
+      state, Some (custom ~timestamp state Stream_ping `Null)
+  | Agent_core_content_block_start
+      { index; content_type; tool_call_id; tool_call_name } ->
+      let value =
+        `Assoc
+          ([ "index", `Int index
+           ; "content_type", `String content_type
+           ]
+           @ json_opt "tool_call_id"
+               (Option.map (fun value -> `String value) tool_call_id)
+           @ json_opt "tool_call_name"
+               (Option.map (fun value -> `String value) tool_call_name))
+      in
+      state, Some (custom ~timestamp state Content_block_start value)
+  | Model_content_activity activity ->
+      state, Some (custom ~timestamp state Model_content_activity
+                     (model_content_activity_to_json activity))
+  | Agent_core_content_block_stop { index } ->
+      state, Some (custom ~timestamp state Content_block_stop
+                     (`Assoc [ "index", `Int index ]))
+  | Agent_core_thinking_snapshot {index;snapshot;response} ->
+      state,Some(custom ~timestamp state Thinking_snapshot
+        (`Assoc(["index",`Int index;"snapshot",`String snapshot
+           ;"response",response_identity_to_json response])))
+  | Agent_core_thinking_delta { index; delta; response } ->
+      state, Some (custom ~timestamp state Thinking_delta
+                     (`Assoc ([ "index", `Int index; "delta", `String delta ]
+                       @ json_opt "response" (Option.map response_identity_to_json response))))
+  | Agent_core_thinking_signature_delta { index; signature_bytes } ->
+      state, Some (custom ~timestamp state Thinking_signature_delta
+                     (`Assoc
+                        [ "index", `Int index
+                        ; "signature_bytes", `Int signature_bytes
+                        ]))
+  | Agent_core_media_delta media ->
+      state, Some (custom ~timestamp state Media_delta (generated_media_to_json media))
+  | Agent_core_stream_protocol_error error ->
+      state, Some (custom ~timestamp state Stream_protocol_error
+                     (stream_protocol_error_to_json error))
+  | Reply_details event ->
+      state, Some (custom ~timestamp state Reply_details
+                     (reply_details_to_json event))
+  | Batch_bound {operation_id; execution_id} ->
+      state, Some (custom ~timestamp state Batch_bound
+        (`Assoc ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string operation_id);
+          "execution_id", `String (Keeper_chat_operation.Operation_id.to_string execution_id)]))
+  | Continuation_checkpoint event ->
+      state, Some (custom ~timestamp state Continuation_checkpoint
+                     (continuation_checkpoint_to_json event))
+  | Native_tool_start tool ->
+      state, Some (custom ~timestamp state Native_tool_start (native_tool_to_json tool))
+  | Native_tool_progress (tool, progress) ->
+      state, Some (custom ~timestamp state Native_tool_progress
+        (native_tool_to_json ~progress tool))
+  | Native_tool_end (tool, completion) ->
+      let value = native_tool_to_json ~completion tool in
+      state, Some (custom ~timestamp state Native_tool_end value)
+  | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:state.run_id ~tool_call_id
+             ~tool_call_name:(Some tool_call_name)
+             ~tool_stream_scope:(Some occurrence.stream_scope)
+             ~provider_message_id:occurrence.provider_message_id
+             ~tool_call_block_index:(Some occurrence.block_index)
+             Ag_ui.Tool_call_start) )
+  | Tool_call_admitted { occurrence; tool_call_id; provider_tool_name; tool_call_name } ->
+      state, Some (custom ~timestamp state Tool_call_admitted
+        (`Assoc ([ "toolStreamScope", `Int occurrence.stream_scope
+                 ; "toolCallBlockIndex", `Int occurrence.block_index
+                 ; "providerToolName", `String provider_tool_name
+                 ; "toolCallName", `String tool_call_name ]
+                 @ json_opt "providerMessageId" (Option.map (fun value -> `String value) occurrence.provider_message_id)
+                 @ json_opt "toolCallId" (Option.map (fun value -> `String value) tool_call_id))))
+  | Tool_call_args { occurrence; tool_call_id; delta } ->
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:state.run_id ~tool_call_id
+             ~tool_stream_scope:(Some occurrence.stream_scope)
+             ~provider_message_id:occurrence.provider_message_id
+             ~tool_call_block_index:(Some occurrence.block_index)
+             ~delta:(Some delta) Ag_ui.Tool_call_args) )
+  | Tool_call_args_snapshot { occurrence; tool_call_id; snapshot } ->
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:state.run_id ~tool_call_id
+             ~tool_stream_scope:(Some occurrence.stream_scope)
+             ~provider_message_id:occurrence.provider_message_id
+             ~tool_call_block_index:(Some occurrence.block_index)
+             ~snapshot:(Some (`String snapshot)) Ag_ui.Tool_call_args) )
+  | Tool_call_end { occurrence; tool_call_id } ->
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:state.run_id ~tool_call_id
+             ~tool_stream_scope:(Some occurrence.stream_scope)
+             ~provider_message_id:occurrence.provider_message_id
+             ~tool_call_block_index:(Some occurrence.block_index)
+             Ag_ui.Tool_call_end) )
+  | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
+      ( state
+      , Some
+          (custom ~timestamp state Tool_approval_requested
+             (`Assoc
+                [ ("tool_call_id", `String tool_call_id)
+                ; ("tool_call_name", `String tool_call_name)
+                ; ("args", `String args)
+                ; ("question", `String question)
+                ; ("because", `String because)
+                ])) )
+  | Tool_approval_settled { tool_call_id; outcome } ->
+      ( state
+      , Some
+          (custom ~timestamp state Tool_approval_settled
+             (`Assoc
+                [ "tool_call_id", `String tool_call_id
+                ; "outcome", `String outcome
+                ])) )
+  | Tool_result_ready { occurrence; tool_call_id; execution_id } ->
+      ( state
+      , Some
+          (custom ~timestamp state Tool_result_ready
+             (`Assoc
+                ([ "toolStreamScope", `Int occurrence.stream_scope
+                 ; "toolCallBlockIndex", `Int occurrence.block_index
+                 ; "executionId", `String (Ids.Execution_id.to_string execution_id)
+                 ]
+                 @ json_opt "providerMessageId"
+                     (Option.map (fun value -> `String value) occurrence.provider_message_id)
+                 @ json_opt "toolCallId"
+                     (Option.map (fun value -> `String value) tool_call_id)))) )
+  | Tool_transcript_committed { delivery_key; execution_id; ordinal } ->
+      (state, Some (custom ~timestamp state Tool_transcript_committed
+        (`Assoc [ "deliveryKey", Keeper_chat_delivery_identity.delivery_key_to_yojson delivery_key
+                ; "executionId", `String (Ids.Execution_id.to_string execution_id)
+                ; "ordinal", `Int ordinal ])))
+  | Link_block _
+  | Image_block _
+  | Status_block _
+  | Audio_block _
+  | Tool_context_block _ -> state, None
+  | Event_error { message } ->
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:state.run_id ~message:(Some message)
+             ~code:(Some public_error_code)
+             Ag_ui.Run_error) )
+  | Run_finished { run_id } ->
+      let state = { state with run_id = Some run_id } in
+      ( state
+      , Some
+          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
+             ~run_id:(Some run_id) Ag_ui.Run_finished) )
+
+let is_terminal = function
+  | Keeper_chat_events.Event_error _
+  | Keeper_chat_events.Run_finished _ -> true
+  | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
+  | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
+  | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
+  | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
+  | Keeper_chat_events.Reply_details _ | Keeper_chat_events.Continuation_checkpoint _
+  | Keeper_chat_events.Provider_retry_observed _
+  | Keeper_chat_events.Agent_core_runtime_attempt_started _
+  | Keeper_chat_events.Agent_core_stream_message_start _
+  | Keeper_chat_events.Agent_core_stream_message_delta _
+  | Keeper_chat_events.Agent_core_stream_message_stop _
+  | Keeper_chat_events.Agent_core_content_block_start _
+  | Keeper_chat_events.Agent_core_content_block_stop _ | Keeper_chat_events.Model_content_activity _
+  | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
+  | Keeper_chat_events.Agent_core_thinking_signature_delta _
+  | Keeper_chat_events.Agent_core_media_delta _
+  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
+  | Keeper_chat_events.Tool_call_args _ | Keeper_chat_events.Tool_call_args_snapshot _
+  | Keeper_chat_events.Tool_call_end _ | Keeper_chat_events.Native_tool_start _
+  | Keeper_chat_events.Native_tool_end (_, _) | Keeper_chat_events.Native_tool_progress (_, _)
+  | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
+  | Keeper_chat_events.Tool_result_ready _ | Keeper_chat_events.Tool_transcript_committed _
+  | Keeper_chat_events.Link_block _ | Keeper_chat_events.Image_block _
+  | Keeper_chat_events.Status_block _ | Keeper_chat_events.Audio_block _
+  | Keeper_chat_events.Tool_context_block _ -> false

@@ -1,0 +1,94 @@
+diff --git a/test/test_tui_keyboard_input.py b/test/test_tui_keyboard_input.py
+index 266787216e..8216c5ee0f 100644
+--- a/test/test_tui_keyboard_input.py
++++ b/test/test_tui_keyboard_input.py
+@@ -2876,11 +2876,12 @@ def pressing_a_row_chooses_then_opens_it(
+     # Wait for both fixture results before capturing a pointer coordinate;
+     # otherwise the second press can land on the row above the first one.
+     wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
+-    wait_for_output(
++    assert wait_for_fixture_state(
+         process, master_fd, output,
+-        b"live keeper status unavailable: fixture endpoint unavailable",
+-        start=0, timeout=3.0,
+-    )
++        lambda: b"1 healthy" in screen_text(bytes(output))
++        and b"1 idle" in screen_text(bytes(output)),
++        timeout=3.0,
++    ), f"the live pointer-test roster did not load: {screen_text(bytes(output))!r}"
+     select_keeper_row(process, master_fd, output, b"alpha")
+     beta_row = screen_row_of(screen_rows(bytes(output)), b"beta")
+     if beta_row < 0:
+@@ -2928,11 +2929,12 @@ def pressing_a_row_of_a_scrolled_list_opens_it(
+     # Wait for both fixture results before capturing a pointer coordinate;
+     # otherwise the second press can land on the row above the first one.
+     wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
+-    wait_for_output(
++    assert wait_for_fixture_state(
+         process, master_fd, output,
+-        b"live keeper status unavailable: fixture endpoint unavailable",
+-        start=0, timeout=3.0,
+-    )
++        lambda: b"1 healthy" in screen_text(bytes(output))
++        and b"1 idle" in screen_text(bytes(output)),
++        timeout=3.0,
++    ), f"the live pointer-test roster did not load: {screen_text(bytes(output))!r}"
+     select_keeper_row(process, master_fd, output, b"alpha")
+     last = LONG_ROSTER_CREW[-1].encode()
+     notches = b"\x1b[<65;5;5M" * (len(LONG_ROSTER_CREW) + 2)
+@@ -16378,17 +16380,21 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
+             description="pressing a tab opens it",
+             interact=pressing_a_tab_opens_it,
+         )
++        pointer_fixtures = compact_input_gate_http_fixtures()
++        pointer_fixtures["/api/v1/gate/keepers?detailed=true"] = (
++            keeper_runtime_http_fixtures()["/api/v1/gate/keepers?detailed=true"]
++        )
+         run_terminal_scenario(
+             executable,
+             description="pressing a row chooses, then opens it",
+             interact=pressing_a_row_chooses_then_opens_it,
+-            http_fixtures=compact_input_gate_http_fixtures(),
++            http_fixtures=pointer_fixtures,
+         )
+         run_terminal_scenario(
+             executable,
+             description="pressing a row of a scrolled list opens it",
+             interact=pressing_a_row_of_a_scrolled_list_opens_it,
+-            http_fixtures=compact_input_gate_http_fixtures(),
++            http_fixtures=pointer_fixtures,
+             prepare_workspace=seed_long_roster,
+         )
+         run_terminal_scenario(
+diff --git a/test/test_tui_remote_workspace_history_pty.py b/test/test_tui_remote_workspace_history_pty.py
+index c0453baf84..b61caad5da 100644
+--- a/test/test_tui_remote_workspace_history_pty.py
++++ b/test/test_tui_remote_workspace_history_pty.py
+@@ -35,6 +35,9 @@ LATE = b"workspace-a-late-history-must-not-return"
+ RECOVERED = b"workspace-a-current-history-after-return"
+ DRAFT = b"unsent-draft-owned-by-workspace-a"
+ WAIT_SECONDS = 8.0  # Fixture failure deadline, not a product refresh policy.
++# Runtime identities are the response-generation barrier below. Keep the
++# lifecycle/runtime column visible instead of waiting for a hidden cell.
++TERMINAL_COLUMNS = h.KEEPER_RUNTIME_COLUMN_COLUMNS
+ 
+ 
+ def screen(output: bytearray) -> bytes:
+@@ -183,7 +186,7 @@ def run(binary: str, captures: Path | None) -> None:
+             wire.publish("b-after-late")
+             await_screen(lambda text: b"b.settled" in text and b"MISMATCH local " in text,
+                          "fresh B roster after the late response was not applied")
+-            h.resize_and_wait(process, fd, output, rows=35, columns=120,
++            h.resize_and_wait(process, fd, output, rows=35, columns=TERMINAL_COLUMNS,
+                              needle=b"b.settled", controls=(h.FULL_REDRAW,))
+             assert BEFORE not in screen(output) and LATE not in screen(output)
+             assert DRAFT not in screen(output), "A's input was relabelled as a remote draft"
+@@ -220,7 +223,7 @@ def run(binary: str, captures: Path | None) -> None:
+     h.run_terminal_scenario(binary,
+         description="workspace change withdraws held chat history and retains its unsent draft",
+         interact=interact, prepare_workspace=wire.prepare, http_fixtures=fixtures,
+-        http_requests=posts, refresh=0.5, terminal_rows=34, terminal_cols=120)
++        http_requests=posts, refresh=0.5, terminal_rows=34, terminal_cols=TERMINAL_COLUMNS)
+ 
+ 
+ if __name__ == "__main__":

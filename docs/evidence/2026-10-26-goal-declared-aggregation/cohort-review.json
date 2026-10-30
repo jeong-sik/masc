@@ -1,0 +1,363 @@
+{
+  "schema": "masc.goal.declared-aggregate.actual-control-independent-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T17:28:23.309493+00:00",
+  "reviewer": "measurement_publication_review",
+  "task_id": "task-2680",
+  "verdict": "PASS_BOUNDED_SINGLE_DECLARED_AGGREGATION_CONTROL",
+  "assessment": "One fresh Goal proof run read the declared index and both exact original execution records, preserved their run-a/run-b identities, ignored reported99 and approved the declared sum4+6=10 against target exactly10. The actual provider context, tool-call/results, structured verdict, native reviewed/committed records and persisted Proof_proven/Awaiting_confirmation are independently bound. This is a single controlled observation on prompt529f, not a pooled extension of the earlier35b cohort.",
+  "identity": {
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "server_binary_readback_SHA_verified": true,
+    "same_embedded_binary_and_runtime_instance_in_two_frozen_health_observations": true,
+    "candidate_prompt_bytes": 7672,
+    "candidate_prompt_file_sha256": "529f84a6a36146eca2821e02ade8a9467b166b5d1ed25eea4b37493cc5579539",
+    "current_source_prompt_bytes_equal_frozen_candidate_at_review": true,
+    "source_path_label": "config/prompts/goal_verification.md",
+    "single_admitted_slot": [
+      "glm-coding.glm-5.3-flash"
+    ],
+    "requested_models": [
+      "glm-5.3-flash"
+    ],
+    "reported_models": [
+      "glm-5.3-flash"
+    ],
+    "unknown_reported_models": 0,
+    "model_name_not_weight_identity": true
+  },
+  "runtime_prompt_application": {
+    "mechanism": "Two normal authenticated persisted isolated-runtime prompt overrides, on the existing3e binary.",
+    "keys": [
+      {
+        "key": "goal_verification.proof",
+        "effective_bytes": 3691,
+        "effective_sha256": "c753437dc9cae1373e8ccd909d1b33fb86dc5a8be02076e828b5c7225e5b1997",
+        "normal_API_response_ok": true,
+        "candidate_section_equal": true,
+        "before_source": "file",
+        "after_source": "override",
+        "managed_file_value_unchanged": true
+      },
+      {
+        "key": "goal_verification.lookup",
+        "effective_bytes": 3575,
+        "effective_sha256": "25a7a2ee1a052c9ed6dd0d4eb7378f60b637524a8b479745e903f4fba0768648",
+        "normal_API_response_ok": true,
+        "candidate_section_equal": true,
+        "before_source": "file",
+        "after_source": "override",
+        "managed_file_value_unchanged": true
+      }
+    ],
+    "only_proof_and_lookup_effective_values_changed": true,
+    "managed_baseline_file_values_unchanged": true,
+    "actual_provider_first_user_byte_equal_retained_prompt": true,
+    "actual_provider_first_system_byte_equal_retained_system": true,
+    "candidate_template_literal_segments_present_in_order_after_rendering": true,
+    "retained_prompt_bytes": 8232,
+    "retained_prompt_sha256": "a6f05a67491bcb46f1500a50dd0d4bd1d37dab3ef6d2a104e5f2c99c6fef0066",
+    "current_revision_and_measurement_in_actual_input": true,
+    "operator_expected_result_labels_not_rendered_into_prompt": true,
+    "operator_prepared_unblinded_fixture": true
+  },
+  "declared_contract": {
+    "goal_id": "goal-proof-provenance-declared-aggregate-20261026",
+    "criterion_revision": "e0534d15effb0e62e52cb04dd466809e",
+    "request_id": "427492fbf97c6dc4b41c6876ddaba52d",
+    "run_id": "01a17412-3eea-7000-aac4-f3265d72a09a",
+    "measurement_id": "2fc01ef43447f9cf9b78021135f604c0",
+    "metric": "공유 Goal playground 상대 aggregate-data/index.json의 executions에 선언된 run-a와 run-b 기록을 각각 직접 읽는다. 각 기록의 execution_id를 보존하여 stdout 정수 두 개의 합을 측정한다. 선언된 두 실행이 집계 범위이며 다른 실행을 섞지 않는다. index의 reported_value는 보고자 주장으로 합계 대신 쓰지 않는다. 명령 재실행은 요구하지 않는다.",
+    "target_value": "정확히 10",
+    "report_observed_value": "99",
+    "predeclared_control_equal_plan_and_dispatch": true,
+    "candidate_lookup_policy": "When the metric declares multi-execution aggregation, preserve every execution identity/scope and aggregate only as declared. Results outside that scope cannot be mixed or attributed to another execution.",
+    "no_unconditional_aggregation_ban_in_this_candidate": true
+  },
+  "original_record_checks": {
+    "index_bytes": 477,
+    "index_sha256": "126de5871cf6cd0ef1e91355f1451c7d50b1770cace09943318da69c10ac05dd",
+    "index_reported_value": 99,
+    "execution_ids": [
+      "run-a",
+      "run-b"
+    ],
+    "index_reference_SHA_values_match_actual_raw_record_bytes": true,
+    "records": [
+      {
+        "execution_id": "run-a",
+        "source_bytes": 262,
+        "source_sha256": "de8631ab118c84d9d6c60178206314a6420667bfd1e9d658ea857f5835449210",
+        "exit_code": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      },
+      {
+        "execution_id": "run-b",
+        "source_bytes": 262,
+        "source_sha256": "cad5add269b3260ec105c5c3b2f3c2c04495f53cd6b30022374c3538ee6bc0be",
+        "exit_code": 0,
+        "stdout": "6\n",
+        "stderr": ""
+      }
+    ],
+    "actual_sum": 10,
+    "model_command_reexecution_calls": 0,
+    "scope": "Two captured successful command records are reused as the declared operands. Reviewer did not execute these commands. This is not a global audit of all host command executions."
+  },
+  "actual_protocol": {
+    "Goal_runs": 1,
+    "model_POSTs": 4,
+    "GET_models": 1,
+    "unique_tool_calls": 4,
+    "unique_Tool_results": 4,
+    "sequence": "index Read; run-a and run-b Reads emitted together; structured APPROVE; final model response after verdict acknowledgment.",
+    "steps": [
+      {
+        "call_id": "call_-7138127653294308866",
+        "name": "tool_read_file",
+        "arguments": {
+          "file_path": "aggregate-data/index.json"
+        },
+        "wire_response_id": "request-000002",
+        "disposition": "completed",
+        "finished_at": 1792948722.358584,
+        "Tool_result_bytes": 912,
+        "Tool_result_sha256": "bb08572fcbe9a2d932329e9978793809d790db380e93f56b7c08eae89a785c34",
+        "source_bytes": 477,
+        "source_sha256": "126de5871cf6cd0ef1e91355f1451c7d50b1770cace09943318da69c10ac05dd"
+      },
+      {
+        "call_id": "call_-7138127928172216315",
+        "name": "tool_read_file",
+        "arguments": {
+          "file_path": "aggregate-data/run-a.json"
+        },
+        "wire_response_id": "request-000003",
+        "disposition": "completed",
+        "finished_at": 1792948725.945372,
+        "Tool_result_bytes": 674,
+        "Tool_result_sha256": "ef4fb8c5b86663f9689124764296fe8f5ae95605959e09bf0773fe4d88294335",
+        "execution_id": "run-a",
+        "stdout": "4\n",
+        "source_bytes": 262,
+        "source_sha256": "de8631ab118c84d9d6c60178206314a6420667bfd1e9d658ea857f5835449210"
+      },
+      {
+        "call_id": "call_-7138127928172216314",
+        "name": "tool_read_file",
+        "arguments": {
+          "file_path": "aggregate-data/run-b.json"
+        },
+        "wire_response_id": "request-000003",
+        "disposition": "completed",
+        "finished_at": 1792948725.946557,
+        "Tool_result_bytes": 674,
+        "Tool_result_sha256": "cb6637ee5891e4bffe42363ee86630bee6e97e93222d4da2fc7093ecb9817ad2",
+        "execution_id": "run-b",
+        "stdout": "6\n",
+        "source_bytes": 262,
+        "source_sha256": "cad5add269b3260ec105c5c3b2f3c2c04495f53cd6b30022374c3538ee6bc0be"
+      },
+      {
+        "call_id": "call_-7138125729148955142",
+        "name": "report_review_verdict",
+        "arguments": {
+          "verdict": "APPROVE",
+          "reason_sha256": "3b082213ceebead066ee4c3991ce625d1110974adf87722d04087e2231ad9664"
+        },
+        "wire_response_id": "request-000004",
+        "disposition": "completed",
+        "finished_at": 1792948740.36955,
+        "Tool_result_bytes": 489,
+        "Tool_result_sha256": "22011244cbe8457b1232708e9107e08865d3434a0069e05fd28ef628f4cc8bb7"
+      }
+    ],
+    "model_wire_metadata": [
+      {
+        "wire_id": "request-000002",
+        "request_sha256": "61929e603e71c1f03e42f64863d445b561f8b236b19e6c12753beb29a0c4c485",
+        "response_sha256": "fd28ad5d9cdf9fef4bedd272ec601e78347bcc8926acaf11961aaab1128493d9",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000003",
+        "request_sha256": "c03f263a41ce4268462527ffce8c0989832be9012c8421e5d9d4fbe00bf743c4",
+        "response_sha256": "f363a2301207f752adb8c9aef8967135da7e99b41aea16fce9781dc0a21d9ecd",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000004",
+        "request_sha256": "5fe91eebda0023f503bcb5b1a43213e65b3ab0d7acb43488f1832e610b20484f",
+        "response_sha256": "a5b142fcf96834e0cd654755425d9f7444301da41704b88e5affc3258555ce79",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000005",
+        "request_sha256": "8aa944e13a7e8ed1a155186e3f099ca2c73ea2d7857eafabaa202c249fdc6396",
+        "response_sha256": "bcb4f28e5767597771e5e01c8c5cc93c84d9acbfcdf5a9f8054f2e3f882eb9f7",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      }
+    ],
+    "all_tool_result_bytes_and_sha256_match_actual_next_provider_requests": true,
+    "all_three_full_lookup_content_bodies_byte_equal_frozen_index_or_raw_records": true,
+    "both_named_execution_ids_preserved": true,
+    "native_tool_names_arguments_or_reason_summaries_dispositions_match_wire_calls": true,
+    "verdict_execution_receipt_binds_provider_response_ID_and_tool_use_ID": true,
+    "POSTs_and_reviewed_committed_events_not_independent_samples": true
+  },
+  "verdict_and_persisted_state": {
+    "structured_verdict": "APPROVE",
+    "reason_sha256": "3b082213ceebead066ee4c3991ce625d1110974adf87722d04087e2231ad9664",
+    "reason_assessment": "The reason explicitly derives4+6 from run-a/run-b, excludes index/report99 and compares to declared exactly10. No unexpected reason or verdict defect was found in this control.",
+    "elapsed_s": 31.70969796180725,
+    "native_stages": [
+      "reviewed",
+      "committed"
+    ],
+    "same_registration_run_request_revision_and_full_verdict_reason": true,
+    "completion_state": "proof_proven",
+    "Goal_phase": "awaiting_confirmation",
+    "full_wire_reason_equal_retained_native_and_persisted_verdict_evidence": true,
+    "persisted_projection_exact_equal_frozen_stores": true,
+    "authority": {
+      "kind": "system_llm_agent",
+      "actor": "verifier_exact"
+    },
+    "owner_progress_events": [
+      "dispatch_intended",
+      "judgment_retained",
+      "commit_intended",
+      "commit_unknown",
+      "commit_retry_observed",
+      "commit_observed",
+      "observer_registration_intended",
+      "observer_completion_intended",
+      "observer_registration_recorded",
+      "observer_completion_recorded"
+    ],
+    "same_judgment_commit_observation_retry_not_new_model_run": true,
+    "human_final_confirmation": false
+  },
+  "startup_recovery_bound": {
+    "recorded_failure": "Initial read-only prompt catalog GET was connection-refused during startup.",
+    "receipt_records_earlier_prompt_POSTs": 0,
+    "receipt_records_earlier_Goal_submissions": 0,
+    "health_readback_before_continuation_reported": true,
+    "expected_outcomes_unchanged": true,
+    "evidence_scope": "The frozen recovery receipt records the failure and zero earlier effects. The later continuation source asserts any preexisting application directory is empty, then reuses it. That directory now contains successful before/after/API records. No separate immutable empty-directory snapshot or original connection-refused stderr is claimed.",
+    "initial_launch_driver_sha256": "a688a62154eb92153f0c798c80b0941fc4421a3e8ba53a5640d33f868518d160",
+    "continuation_driver_observed_bytes": 8191,
+    "continuation_driver_observed_sha256": "f169f09d39825acca30f7179d8dab8d1fb17cc87fc1dae35e6e1d66ef2d44b21",
+    "different_driver_hashes_not_silently_equated": true,
+    "initial_failure_not_a_model_control_sample": true
+  },
+  "cleanup": {
+    "operator_recorded_owned_PIDs": [
+      94523,
+      94525
+    ],
+    "spawn_and_pre_signal_exact_identity_checks_recorded": true,
+    "signal": "SIGTERM",
+    "receipt_reports_owned_two_absent": true,
+    "process_groups_or_other_PIDs_signalled": false,
+    "bounds": "Two tracked proxy/server PIDs only. Reviewer did not replay live ps or stop, and does not claim descendant/fleet/global absence.",
+    "stop_receipt_sha256": "2f8517e7d9230f944467e7bc13b5b48fd17fd6d4985766b876d25149bdc4119e"
+  },
+  "separation_from_prior_work": {
+    "prior_35b653_three_control_results_counted_here": 0,
+    "current529f_Goal_runs": 1,
+    "pooled_reliability_estimate": false,
+    "matched_baseline_causal_A_B": false,
+    "old_blanket_aggregation_ban_history": "The parent reported a source P2 FAIL on the prior6373 wording. That source finding is not relabeled as an observed baseline model failure. This review judges the frozen529f actual run and its explicit aggregation metric.",
+    "prior35b_N_P_R_controls_reexecuted_on529f": false,
+    "full_source_current_PR_or_whole_stack_approval": false
+  },
+  "original_main_Goal": {
+    "id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "selected_current_local_phase": "executing",
+    "selected_current_local_completion": "idle",
+    "original11_case_proof_reverified": false,
+    "original_Goal_completed": false,
+    "human_final_confirmation": false,
+    "local_observation_limit": "Selected local Goal and verification records were read sequentially, without an atomic cross-store snapshot claim."
+  },
+  "integrity_and_public_safety": {
+    "manifest_label": "terminal-originals-private/manifest.json",
+    "manifest_bytes": 9713,
+    "manifest_sha256": "e567d1fb0015b6657029071236bf90f9e9f5a549370be6b18ec44ceb3ecc0138",
+    "files_excluding_manifest": 55,
+    "total_leaf_bytes": 2216726,
+    "all55_bytes_and_sha256_verified": true,
+    "inventory_exact": true,
+    "safe_projection_input_bindings": [
+      {
+        "label": "safe-results/result.json",
+        "bytes": 3265,
+        "sha256": "3af0a222667bcd3ddb29b80fa012a2d191803c9bc51bed09d7db402b83e6e840"
+      },
+      {
+        "label": "safe-results/actual-tool-sequence.json",
+        "bytes": 5593,
+        "sha256": "30453a48baf42e3b02c3d8732a3a42656b33ddb01f1021d8909989d37c8bb028"
+      },
+      {
+        "label": "safe-results/persisted-outcome.json",
+        "bytes": 3197,
+        "sha256": "2cc87ce404abf02e7df2c97457afe37622b8ae936d2deeb96e657bf20172c737"
+      },
+      {
+        "label": "safe-results/owned-stop.json",
+        "bytes": 273,
+        "sha256": "2f8517e7d9230f944467e7bc13b5b48fd17fd6d4985766b876d25149bdc4119e"
+      }
+    ],
+    "safe_content_field_projections_equal_actual_raw_JSON_fields": true,
+    "absolute_executable_argv_omitted_from_run_record_projection": true,
+    "index_projection_contains_all_actual_index_fields": "The generic omission label also appears on the index step, which has no executable argv field; it is not evidence of a removed index field.",
+    "raw_model_reasoning_credentials_auth_headers_full_prompts_and_absolute_private_paths_exported": false
+  },
+  "remaining_limits": [
+    "One unblinded operator-controlled Goal run, not reliability or model independence.",
+    "No matched baseline run on old6373; no causal improvement rate.",
+    "Earlier35b controls are historical at their own prompt and are not current529f regression coverage.",
+    "Original eleven linked behavior cases, production application, new-head native/build and whole-stack approval remain unproved by this control.",
+    "Conditional contract/injection separation remains model judgment, not a deterministic security guarantee."
+  ],
+  "new_P0_P1_P2_integrity_or_scoped_outcome_blockers": [],
+  "actions": {
+    "new_reviewer_API_model_provider_build_native_CI_Docker_calls": 0,
+    "source_Goal_Task_Board_ledger_runtime_or_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "formal_GitHub_approval_or_merge": false,
+    "review_outputs": "External review.json and private review derivation helper outside Git; the helper is not a public artifact."
+  },
+  "driver_source_binding_boundary": {
+    "normal_driver_source_checkout_head": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "canonical_managed_baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "purpose": "Normal source_binding identifies the untouched3e checkout and managed baseline. It does not claim candidate529f is compiled into or installed with that binary. The candidate is separately bound through its exact source bytes and two normal isolated persisted override API requests/responses/effective values."
+  },
+  "separate_source_response": {
+    "label": "declared-aggregate-source-response/response.json",
+    "bytes": 6915,
+    "sha256": "ac36c95309628659b5b437727b9f525a2f3e5c6c424c40a2b52998edf4d1ca70",
+    "verdict": "AGREES_PRIOR_SOURCE_P2_FAIL_AND_SCOPED_SOURCE_REPAIR_PASS_UNEXECUTED_AGGREGATE_OUTCOME",
+    "scope": "Source/design response only. Its pending aggregate-outcome boundary is preserved; this actual cohort review separately evaluates the later execution and does not count the source response as an extra run.",
+    "prior_source_fail_label": "previous-source-fail.json",
+    "prior_source_fail_bytes": 15046,
+    "prior_source_fail_sha256": "9076a581cd507522be3493765bc3bb4714aecea464477162f45af1526a3c8e8f",
+    "prior_source_fail_preserved": true,
+    "prior_fail_is_source_restriction_not_observed_baseline_model_failure": true,
+    "whole_new_publication_directory_reviewed": false
+  }
+}

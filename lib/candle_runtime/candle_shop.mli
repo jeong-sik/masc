@@ -1,0 +1,88 @@
+(** The live Candle account and purchase boundary. The ledger owns money and
+    inventory; no wallet or inventory file is maintained. *)
+
+type account =
+  { keeper : string
+  ; balance_milli : int
+  ; decayed_milli : Z.t
+  ; half_life : Candle_decay.half_life
+  ; last_event_at : Candle_time.t option
+  ; owned_items : Keeper_portrait_item.t list
+  }
+
+type catalog_entry =
+  { item : Keeper_portrait_item.t
+  ; price : Candle_config.price
+  }
+
+val catalog_entry_to_yojson : catalog_entry -> Yojson.Safe.t
+(** One catalog row as the Keeper tool and the dashboard both send it:
+    [id], [slot], [price_status], and [price_milli] when priced. *)
+
+val effective_price_for_balance
+  :  Candle_config.policy
+  -> Candle_balance.t
+  -> Keeper_portrait_item.t
+  -> Candle_config.price
+(** Effective item price under [policy.pricing] using the circulating supply
+    and active keeper count of [balance]. *)
+
+val catalog_for_balance : Candle_config.policy -> Candle_balance.t -> catalog_entry list
+(** Canonical catalog priced at the effective prices for [balance]. *)
+
+type receipt =
+  { account : account
+  ; item : Keeper_portrait_item.t
+  ; amount_milli : int
+  ; purchased_at : Candle_time.t
+  }
+
+type error =
+  | Off
+  | Disabled of string
+  | Unpriced of Keeper_portrait_item.t
+  | Price_changed of
+      { item : Keeper_portrait_item.t
+      ; expected_milli : int
+      ; actual_milli : int
+      }
+  | Account_invalid of Candle_balance.error
+  | Purchase_refused of Candle_balance.error
+  | Ledger_unavailable of string
+  | Invalid_time of string
+
+val error_to_string : error -> string
+
+val account
+  :  now:(unit -> float)
+  -> base_path:string
+  -> keeper:Keeper_id.Keeper_name.t
+  -> (account, error) result
+(** The keeper's account through {!Candle_status.current_view}, which publishes
+    a changed half-life before answering. Read-only surfaces read
+    {!Candle_status.observed_view} instead. *)
+
+val catalog : now:(unit -> float) -> base_path:string -> (catalog_entry list, error) result
+
+(** The caller supplies its trusted Keeper identity. A single cursor-checked
+    ledger update recomputes funds and ownership before appending one purchase.
+    A competing append reruns that decision with the new ledger. The price
+    recorded is the explicit policy re-read within each cursor attempt; an
+    item that becomes unpriced is refused before any debit. When
+    [expected_price_milli] is [Some expected] and the effective price at the
+    purchase instant exceeds [expected], the purchase is refused with
+    [Price_changed]. *)
+val purchase_with_expected_price
+  :  expected_price_milli:int option
+  -> now:(unit -> float)
+  -> base_path:string
+  -> keeper:Keeper_id.Keeper_name.t
+  -> item:Keeper_portrait_item.t
+  -> (receipt, error) result
+
+val purchase
+  :  now:(unit -> float)
+  -> base_path:string
+  -> keeper:Keeper_id.Keeper_name.t
+  -> item:Keeper_portrait_item.t
+  -> (receipt, error) result

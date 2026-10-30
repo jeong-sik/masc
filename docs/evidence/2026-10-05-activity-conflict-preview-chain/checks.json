@@ -1,0 +1,25 @@
+{
+  "tested_head": "e10b8d5438b03668536c330510185631fc94b3c0",
+  "source_sha256": {
+    "dashboard/src/lib/exact-lane-activity-session.ts": "cb81ff08fc65ae2794f2407d7636beba99b012dfdb3a6ea5010340a5d124ff8e",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "ea8bf4743f8e7b7d757558751c2d1462a0502661aeaa532067f7d7b9d07c52ed",
+    "dashboard/src/lib/browser-lane-activity-session.ts": "dd4f94eccacb0b5219fe4a2ec7b721c4fba74bb2392081addd917ae9c80b978e",
+    "dashboard/src/components/browser-lane-activity-panel.test.ts": "1566fe964fec8e5d4567c0a73b09b2d24ee87802312ec7f4534488091d9af842",
+    "dashboard/src/lib/machine-lane-activity-session.ts": "e229b3a30936a39cb02ad1509a831119079e9126476041795eecb90286e9c2ac",
+    "dashboard/src/components/machine-lane-activity-panel.test.ts": "801a902fd480b425f537a5681f091a7ec6a0d011fba50452a6e9002952b3e5f2"
+  },
+  "raw_logs_sha256": {
+    "web.log": "3c8f9868ed3c0ca0f5f702ece2bf890b6273ad64c36f7f6834b49bc82a682d4e",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "results": {
+    "web_tests": 391,
+    "web_suites": 7,
+    "web_exit": 0,
+    "tsc_exit": 0,
+    "eslint_exit": 0
+  },
+  "native_unchanged_all_twelve": true,
+  "scope": "One combined Web leaf execution; introducing owner RED/GREEN evidence separate; no native/PTY/server/provider/fullsuite/release execution."
+}

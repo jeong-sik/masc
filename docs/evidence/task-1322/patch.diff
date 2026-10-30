@@ -1,0 +1,221 @@
+diff --git a/docs/rfc/RFC-0415-cancel-verdicts-belong-to-the-operator.md b/docs/rfc/RFC-0415-cancel-verdicts-belong-to-the-operator.md
+index e09145d0..b16734e2 100644
+--- a/docs/rfc/RFC-0415-cancel-verdicts-belong-to-the-operator.md
++++ b/docs/rfc/RFC-0415-cancel-verdicts-belong-to-the-operator.md
+@@ -16,7 +16,9 @@ Completion 심사는 시스템 LLM 레인의 일이지만, Cancel 요청은 일
+ 도구 서술의 산문에서 **값으로 옮긴다**: 순수 게이트가 계약을 정의하고(§4.1),
+ 런타임이 게이트를 심사 개시 전에 물어보아 거절을 기록한다(§4.1), 운영자 증거
+ 카드는 자기가 답하는 질문을 스스로 이름 짓고(§4.2), 동일한 커밋 경로의 승인
+-클릭 하나가 `Cancelled` 로 내린다(§4.2). 거절은 재시도도 자동 확정도 아니다(§5).
++클릭 하나가 `Cancelled` 로 내린다(§4.2). 커밋 깔때기는 취소 청구의 승인에
++운영자 서명을 다시 요구해 기각을 값으로 돌려준다(§4.3). 거절은 재시도도
++자동 확정도 아니다(§5).
+ 
+ ## 1. 문제 — 실측
+ 
+@@ -66,6 +68,19 @@ let system_review_allowed = function
+   `Cancelled` 로 내린다. 권한 주체는 `Human_operator` — 시스템 레인은 사이에
+   없다.
+ 
++### 4.3 커밋 깔때기의 이중 잠금
++
++- 심사 입구의 게이트(§4.1)만으로는 부족하다 — 판정 기록의 최종 수령인은
++  커밋 깔때기이고, 거기서 권한을 **다시** 물어본다. `decide_verdict` 는
++  intent=Cancel_task 인 청구에 대한 시스템 서명의 `Verdict_approved` 를
++  `Verdict_cancel_requires_operator` 로 기각한다. 입구를 우회한 호출이
++  있어도 출구가 문을 지킨다.
++- 두 직렬화 맵(`workspace_task_transitions.ml`)은 그 기각을
++  `Task InvalidState` 로 번역한다 — 도구 표면의 호출자도 같은 문장을 본다.
++- §4.2 의 원클릭과 같은 경로에서 권한 주체를 재확인하는 것 — 입구와 출구의
++  권한 판정이 갈라질 여지를 형(type)으로 제거한다. 거절된 기각은
++  `InvalidState` 이지 세탁도 재시도도 아니다(§5).
++
+ ## 5. stay_pending
+ 
+ 거절을 받은 취소 청원의 Task 는 `AwaitingVerification` 에 머문다 — 그 뒤에서
+@@ -75,12 +90,14 @@ let system_review_allowed = function
+ ## 6. 증명
+ 
+ §6.2 = §4.2 원클릭 계약의 증명(증거 카드 intent + 승인 → Cancelled).
+-§6.3 = §4.1 게이트 계약의 증명(순수 함수 단언). 이 문서의 테스트 인용 규약이다.
++§6.3 = §4.1 게이트 계약의 증명(순수 함수 단언). §6.4 = §4.3 깔때기 계약의
++증명(시스템 서명 기각 + 운영자 회귀). 이 문서의 테스트 인용 규약이다.
+ 
+ | 무엇을 | 어디서 | 결과 |
+ |---|---|---|
+ | §4.1 게이트 계약 | `test_verification.ml` `test_cancel_intent_is_refused_by_system_review` | Complete=true, Cancel=false |
+ | §4.2 원클릭 폐쇄 | `test_workspace.ml` `test_operator_one_click_cancels_a_cancel_claim` | 카드 intent=cancellation + approve 1클릭 → `Cancelled` 착지 |
++| §4.3 깔때기 이중 잠금 | `test_workspace_task_lifecycle.ml` `test_system_approval_of_cancel_claim_is_refused` · `test_operator_approval_still_cancels_a_cancel_claim` | 시스템 서명 × 취소 청구 = `Verdict_cancel_requires_operator`, 운영자 서명 = `Cancelled` (슈트 녹색) |
+ | 클린룸 전체 | `evidence/cleanroom_rebuild.log` (2026-09-04) | `rm -rf _build` 후 `-j1` 재건: test_verification 60검사·test_workspace 86검사, 직접 exe·별칭 양 경로 전부 녹색 |
+ 
+ 교훈 각주: 이 증명 chain 의 첫 판독에서 별칭 경로 EXIT=1 이 "테스트 실패"로
+diff --git a/lib/workspace/workspace_task_lifecycle.ml b/lib/workspace/workspace_task_lifecycle.ml
+index 23d12f0d..a56acd59 100644
+--- a/lib/workspace/workspace_task_lifecycle.ml
++++ b/lib/workspace/workspace_task_lifecycle.ml
+@@ -3,6 +3,7 @@ type invalid =
+   | Verification_pending_verdict
+   | Verdict_authority_identity_required
+   | Verdict_rejection_reason_required
++  | Verdict_cancel_requires_operator
+   | Verification_id_mismatch of { expected : string; actual : string }
+   | Invalid_transition
+ 
+@@ -261,18 +262,32 @@ let decide_verdict
+       (match verdict with
+        (* One verdict, two terminals. The obligation records which question
+           was asked, so an approval ends the Task the way the producer asked
+-          rather than the way this branch used to assume. *)
++          rather than the way this branch used to assume. RFC-0415 §4.3: a
++          cancellation is a permission, not a judgment — the terminal
++          [Cancelled] record of a cancel claim may carry only an operator's
++          signature, so the system lane's approval of a cancel claim is
++          refused here at the commit funnel, where every caller converges. *)
+        | Masc_domain.Verdict_approved ->
+-         let new_status =
+-           match intent with
+-           | Masc_domain.Complete_task -> done_status ~assignee ~now ~notes
+-           | Masc_domain.Cancel_task ->
+-             cancelled_status ~agent_name:assignee ~now ~reason:notes
+-         in
+-         provenance
+-           ~producer:assignee
+-           ~verification_id:actual_verification_id
+-           { new_status; set_current = None }
++         (match intent with
++          | Masc_domain.Complete_task ->
++            provenance
++              ~producer:assignee
++              ~verification_id:actual_verification_id
++              { new_status = done_status ~assignee ~now ~notes
++              ; set_current = None
++              }
++          | Masc_domain.Cancel_task ->
++            (match authority with
++             | Masc_domain.Human_operator _ ->
++               provenance
++                 ~producer:assignee
++                 ~verification_id:actual_verification_id
++                 { new_status =
++                     cancelled_status ~agent_name:assignee ~now ~reason:notes
++                 ; set_current = None
++                 }
++             | Masc_domain.System_llm_agent _ ->
++               Error Verdict_cancel_requires_operator))
+        | Masc_domain.Verdict_rejected { reason } ->
+          if String.equal (String.trim reason) ""
+          then Error Verdict_rejection_reason_required
+diff --git a/lib/workspace/workspace_task_lifecycle.mli b/lib/workspace/workspace_task_lifecycle.mli
+index 6bedfc80..f30aa475 100644
+--- a/lib/workspace/workspace_task_lifecycle.mli
++++ b/lib/workspace/workspace_task_lifecycle.mli
+@@ -10,6 +10,11 @@ type invalid =
+           the completion-authority entry point owns its verdict. *)
+   | Verdict_authority_identity_required
+   | Verdict_rejection_reason_required
++  | Verdict_cancel_requires_operator
++      (** RFC-0415 §4.3: the terminal [Cancelled] record of a cancel claim may
++          carry only an operator's signature. A system-lane approval of a
++          cancel claim is refused at the commit funnel, where every verdict
++          caller converges. *)
+   | Verification_id_mismatch of { expected : string; actual : string }
+   | Invalid_transition
+ 
+diff --git a/lib/workspace/workspace_task_transitions.ml b/lib/workspace/workspace_task_transitions.ml
+index 48ad6ace..95e30fb8 100644
+--- a/lib/workspace/workspace_task_transitions.ml
++++ b/lib/workspace/workspace_task_transitions.ml
+@@ -249,6 +249,12 @@ let transition_task_outcome_r
+                  (Masc_domain.Task_error.InvalidState
+                     "a completion verdict requires a non-empty authenticated \
+                      authority identity"))
++          | Error Workspace_task_lifecycle.Verdict_cancel_requires_operator ->
++            Error
++              (Masc_domain.Task
++                 (Masc_domain.Task_error.InvalidState
++                    "a cancellation verdict requires an operator's signature \
++                     (RFC-0415 §4.3)"))
+           | Error
+               (Workspace_task_lifecycle.Verification_id_mismatch
+                  { expected; actual }) ->
+@@ -842,6 +848,12 @@ let commit_verdict_r
+                     (Masc_domain.Task_error.InvalidState
+                         "a completion verdict requires a non-empty authenticated \
+                         authority identity"))
++             | Error Workspace_task_lifecycle.Verdict_cancel_requires_operator ->
++               Error
++                 (Masc_domain.Task
++                    (Masc_domain.Task_error.InvalidState
++                        "a cancellation verdict requires an operator's signature \
++                        (RFC-0415 §4.3)"))
+              | Error
+                  (Workspace_task_lifecycle.Verification_id_mismatch
+                     { expected; actual }) ->
+diff --git a/test/test_workspace_task_lifecycle.ml b/test/test_workspace_task_lifecycle.ml
+index 0817dbfe..2ca0c58e 100644
+--- a/test/test_workspace_task_lifecycle.ml
++++ b/test/test_workspace_task_lifecycle.ml
+@@ -257,6 +257,56 @@ let test_verdict_is_not_an_agent_action () =
+     [ "approve"; "reject" ]
+ ;;
+ 
++(* RFC-0415 §4.3: a cancel claim's terminal [Cancelled] record may carry only
++   an operator's signature. The system lane's approval of a cancel claim is
++   refused at the commit funnel itself, not merely at the review entrance. *)
++let awaiting_cancel =
++  D.AwaitingVerification
++    { assignee = owner
++    ; started_at = now
++    ; submitted_at = now
++    ; intent = Cancel_task
++    ; verification_id = "vrf-1"
++    }
++;;
++
++let test_system_approval_of_cancel_claim_is_refused () =
++  match
++    L.decide_verdict
++      ~authority:(D.System_llm_agent { agent_run_id = "fusion-run-9" })
++      ~verdict:D.Verdict_approved
++      ~task_id:"task-1"
++      ~verification_id:"vrf-1"
++      ~task_status:awaiting_cancel
++      ~now
++      ~notes:"the upstream schema landed instead"
++  with
++  | Error L.Verdict_cancel_requires_operator -> ()
++  | Ok _ | Error _ ->
++    failwith "a system signature must not end a cancel claim as Cancelled"
++;;
++
++let test_operator_approval_still_cancels_a_cancel_claim () =
++  match
++    L.decide_verdict
++      ~authority:(D.Human_operator { operator_id = "op-1" })
++      ~verdict:D.Verdict_approved
++      ~task_id:"task-1"
++      ~verification_id:"vrf-1"
++      ~task_status:awaiting_cancel
++      ~now
++      ~notes:"the upstream schema landed instead"
++  with
++  | Ok
++      { decision = { new_status = D.Cancelled { cancelled_by; _ }; _ }
++      ; authority = D.Human_operator { operator_id }
++      ; _ }
++    when String.equal cancelled_by owner && String.equal operator_id "op-1" ->
++    ()
++  | Ok _ | Error _ ->
++    failwith "operator approval must still end a cancel claim as Cancelled"
++;;
++
+ (* The verdict path is separate from agent actions. The producer boundary owns
+    authentication; the leaf still refuses empty provenance so audit identity
+    cannot disappear. *)
+@@ -405,4 +455,6 @@ let () =
+   test_cancel_cannot_undo_a_finished_task ();
+   test_approval_ends_the_task_the_way_it_was_asked ();
+   test_a_rejected_cancellation_returns_to_its_producer ();
++  test_system_approval_of_cancel_claim_is_refused ();
++  test_operator_approval_still_cancels_a_cancel_claim ();
+   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

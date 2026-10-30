@@ -1,0 +1,59 @@
+name = "keeper_memory_search"
+description = """
+Search durable Memory OS facts or raw conversation history, \
+case-insensitively. Short ASCII alphanumeric terms (1-2 characters) match \
+ASCII word boundaries (Korean suffixes remain searchable); other terms \
+retain substring matching. \
+Facts: whole-query matches first in store order, then \
+claims holding any whitespace-separated term (3+ characters match inside \
+words) by BM25. History needs a non-empty query, matched whole or by every \
+term, newest first. The default reads only current facts; source='all' \
+adds absorbed originals, dropped history and conversation history. Source-bound files are revalidated \
+only for query-matching candidates; unrelated claims remain stored and \
+unverified. source_verification.status='incomplete' means matching claims \
+were withheld because their sources could not be verified; it is not proof \
+of no relevant memory. total_candidates counts stored claims, not verified results. \
+Current results are paged: when truncated=true, pass next_cursor as cursor \
+with the same query and source=current to read the rest. A changed current \
+corpus or query rejects the cursor; restart without it. Historical scopes \
+do not accept cursors. Fact results name their store and \
+original basis; current facts include exact memory_id, category and origin \
+(authored is yours to supersede). Use a memory_id as a derived \
+conclusion's premise_id only for store='current_memory_snapshot'. \
+source='absorbed' finds facts merged into a newer claim: into is the claim \
+now holding it; into_current=false if not current. source='dropped' retrieves \
+historical removed claims with reasons from the journal; these are not current \
+facts. Check the reason and original evidence before using or writing a new \
+current claim. Search never restores memory. Pending removal finalization is \
+reported as a read failure until a writer recovers it; older journal gaps may remain."""
+additional_properties = false
+
+[[params]]
+name = "query"
+type = "string"
+required = true
+description = "case-insensitive text; terms split on ASCII whitespace"
+
+[[params]]
+name = "limit"
+type = "integer"
+description = """
+max results (1-10, default 5). Must be a bare integer (e.g. 5); a quoted \
+value is rejected."""
+
+[[params]]
+name = "source"
+type = "string"
+enum = ["current", "absorbed", "dropped", "history", "all"]
+description = """
+Search scope: current (default, ordinary and source-bound current facts), \
+absorbed (facts \
+merged into a newer claim), dropped (historical removed claims), history (raw messages), or all"""
+
+[[params]]
+name = "cursor"
+type = "string"
+description = """
+Opaque next_cursor from a truncated source=current response. Continue with \
+the same query. If current memory changed, restart without cursor. \
+Historical scopes do not accept cursors."""

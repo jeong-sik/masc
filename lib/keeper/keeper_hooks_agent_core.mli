@@ -1,0 +1,297 @@
+(** Keeper Hooks (AGENT_CORE bridge) — runtime telemetry, cost ledger, and
+    pre-/post-tool observation factory.
+
+    Bridges AGENT_CORE [Agent_core.Hooks] callbacks with MASC's keeper accounting:
+    records AGENT_CORE-reported usage/cost with explicit unknowns, records
+    Otel_metric_store metrics, and records tool timing without making an
+    execution decision.
+    Concrete provider/model identity remains AGENT_CORE-owned; keeper-facing
+    projections use neutral runtime lanes.  The [make_hooks] entry point
+    wires every callback used by the keeper runtime turn loop. *)
+
+(** usage_has_tokens / current_keeper_model
+    moved to Keeper_hooks_agent_core_types (intra-library file split, 2026-05-16). *)
+
+(** {1 Tool-failure metrics} *)
+
+val tool_use_failure_metric : string
+(** Otel_metric_store metric name for tool-use failures. *)
+
+val record_tool_use_failure : keeper_name:string -> tool_name:string -> unit
+(** Increment [tool_use_failure_metric] for [(keeper, tool)]. *)
+
+(** {1 Runtime-lane normalisation} *)
+
+val resolve_after_turn_model :
+  keeper_name:string -> response:Agent_core.Types.api_response -> string
+(** Return the neutral runtime lane after a turn completes; emits quality
+    metrics when AGENT_CORE omits [response.model] or returns a selector alias,
+    without exposing concrete model identity. *)
+
+(** context_max_of_telemetry, redact_inference_telemetry_json,
+    inference_telemetry_to_runtime_json moved to Keeper_hooks_agent_core_types
+    (intra-library file split, 2026-05-16). Re-exported via include below. *)
+
+(** {1 Usage-trust classification}
+
+    Cost ledger trusts a usage record only when the provider, telemetry
+    and counters are mutually consistent.  Anomalies (impossible token
+    counts, missing fields) are demoted so downstream pricing and
+    accounting can opt out of mis-reported numbers. *)
+
+val classify_usage_trust :
+  ?usage:Agent_core.Types.api_usage ->
+  unit -> Keeper_usage_trust.t
+(** Validate objective non-negative usage-counter invariants.  A usage
+    record without any token evidence (e.g. cost-only) is [Usage_missing],
+    matching [usage_missing_of_usage], never [Usage_trusted]. *)
+
+(** {1 Cost ledger}
+
+    The cost_status ADT and its pure converters live in
+    Keeper_hooks_agent_core_types (intra-library file split, 2026-05-16).
+    Re-exported here so existing callers continue to use
+    [Keeper_hooks_agent_core.cost_status] etc. unchanged. *)
+include module type of Keeper_hooks_agent_core_types
+
+(** {1 Tool execution summary}
+
+    tool_execution_summary type + builder live in Keeper_hooks_agent_core_types
+    (intra-library file split, 2026-05-16). Re-exported via include. *)
+
+val record_keeper_tool_duration_metric :
+  keeper_name:string -> tool_execution_summary -> unit
+(** Emit the per-tool duration histogram for the summary. *)
+
+(** {1 Throughput metrics} *)
+
+(** {1 Cost emit source} *)
+
+val cost_emit_source_metric : string
+(** Otel_metric_store metric for the cost-emit source label. *)
+
+val classify_cost_usd_source :
+  usage_missing:bool ->
+  runtime_unmetered:bool -> cost_usd:float -> string
+(** Classify the source of the emitted cost number for telemetry. *)
+
+val record_cost_emit_source : String.t -> unit
+(** Bump the [cost_emit_source_metric] for the given source label. *)
+
+val cache_miss_input_tokens :
+  input_tokens:int ->
+  cache_creation_input_tokens:int -> cache_read_input_tokens:int -> int
+(** Input excluding cache reads and cache creation. Invalid negative counts
+    remain observable; this is not total non-cached input. *)
+
+val cost_event_payload :
+  agent_name:string ->
+  task_id:string option ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  agent_core_turn_ordinal:int ->
+  model:string ->
+  input_tokens:int ->
+  output_tokens:int ->
+  cost_usd:float ->
+  usage_projection:Cost_ledger.usage_projection ->
+  ?response_id:string ->
+  ?runtime_attempt:(string * string * int) ->
+  ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?spend_observation:Keeper_spend_observation.t ->
+  ?vendor_total_tokens:int ->
+  ?resolution_status:Keeper_usage_resolution.status ->
+  ?cache_creation_input_tokens:int ->
+  ?cache_read_input_tokens:int ->
+  ?usage_missing:bool ->
+  ?usage_trust:Keeper_usage_trust.t ->
+  ?telemetry:Agent_core.Types.inference_telemetry -> unit -> Yojson.Safe.t
+(** Assemble the structured cost-ledger event without writing it.
+    [response_id] is the opaque AGENT_CORE/CLI response identity, not necessarily
+    a vendor request ID. [runtime_attempt] is (routing_run_id, runtime_id,
+    lane_attempt_index), captured from the materialized candidate. Both identities
+    are emitted for raw observations and for an attempt's resolved reading
+    ([Resolved_attempt_delta]); a turn's settlement may aggregate multiple
+    responses and carries null. [resolution_status] says how a resolved
+    row's delta came out. [non_cached_input_tokens]
+    includes cache creation and is null for missing/invalid input partitions. *)
+
+val emit_cost_event :
+  masc_root:string ->
+  agent_name:string ->
+  task_id:string option ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  agent_core_turn_ordinal:int ->
+  model:string ->
+  input_tokens:int ->
+  output_tokens:int ->
+  cost_usd:float ->
+  usage_projection:Cost_ledger.usage_projection ->
+  ?response_id:string ->
+  ?runtime_attempt:(string * string * int) ->
+  ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?spend_observation:Keeper_spend_observation.t ->
+  ?vendor_total_tokens:int ->
+  ?resolution_status:Keeper_usage_resolution.status ->
+  ?cache_creation_input_tokens:int ->
+  ?cache_read_input_tokens:int ->
+  ?usage_missing:bool ->
+  ?usage_trust:Keeper_usage_trust.t ->
+  ?telemetry:Agent_core.Types.inference_telemetry -> unit -> unit
+(** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
+
+type attempt_usage =
+  | Agent_core_attempt
+      (** AGENT_CORE hands [AfterTurn] every provider response. *)
+  | Client_stream_attempt of { reported : bool }
+      (** An official client reports usage on its own stream; [reported] is
+          whether a report of this attempt reached
+          [emit_client_usage_report]. *)
+(** How the dispatched attempt's usage becomes visible, read by [AfterTurn]
+    to decide whether its response still needs a raw row. *)
+
+val emit_client_usage_report :
+  trajectory_acc:Trajectory.accumulator option ->
+  agent_name:string ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  ?runtime_attempt:(string * string * int) ->
+  Keeper_client_usage_report.t ->
+  unit
+(** Append one raw cost-ledger row for a usage report an official client
+    sent on its own stream, under the scope the client reports in, keyed by
+    the client turn and conversation it names. Writes nothing without a
+    trajectory accumulator, as [AfterTurn] does. *)
+
+val broadcast_resolved_turn_complete :
+  keeper_name:string ->
+  turn:int ->
+  tool_calls_made:int ->
+  total_turns:int ->
+  usage_resolution:Keeper_usage_resolution.t ->
+  wire_prompt_tokens:(int * int) option ->
+  unit
+(** [wire_prompt_tokens] is the turn's summed wire [(cache_n, prompt_n)]
+    (llama-server, Ollama), [None] when no response reported both. It fills
+    the event's [cache_n] / [prompt_n], so the turn line is whole even for a
+    reader that joined mid-turn. *)
+
+
+(** PR-review / PR-work metric event types live in Keeper_hooks_agent_core_types
+    (intra-library file split, 2026-05-16). Re-exported via include below. *)
+
+(** {1 Hook factory} *)
+
+type tool_stream_observation =
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt; retry : Runtime_claude_api_retry.t }
+      (** Exact dispatched attempt and session-owned API retry; neither a
+          native tool occurrence nor model content. *)
+  | Runtime_attempt_started of
+      { runtime_id : string
+      ; lane_attempt_index : int
+      ; checkpoint_owner : Runtime_execution.checkpoint_owner
+      }
+      (** The turn driver resolved this exact lane candidate and is about to
+          dispatch it. This is the attempt boundary for streamed occurrences;
+          assignment ids and provider message ids are not substitutes. *)
+  | Turn_collected of
+      { turn : int
+      ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
+      }
+      (** Agent Core retained the exact pre-admission mapping before tools run. *)
+  | Child_content_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; observation : Keeper_claude_task_binding.child_observation }
+      (** Actual private body/binding fact and original dispatch. Durable sinks
+          handle this without root content/lifecycle or network-cutoff authority. *)
+  | Native_task_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; bound : Keeper_claude_task_binding.bound }
+      (** Original invocation/input/native owner, with its frozen dispatch.
+          Task metadata is not a native block progress event or tool receipt. *)
+  | Native_tool_progress of
+      { block_index : int; tool_call_id : string option; progress : Runtime_native_tools.progress }
+  | Native_tool_completion of
+      { block_index : int
+      ; tool_call_id : string option
+      ; completion : Runtime_native_tools.completion
+      }
+      (** Native provider report at its original stream block. Does not name
+          a MASC execution; consumers stamp the current scope on receipt. *)
+  | Official_tool_result of
+      { block_index : int
+      ; tool_call_id : string
+      ; execution_id : Ids.Execution_id.t
+      }
+      (** The producer bound this active block to its host invocation before
+          execution; its tool log is committed. Independent of whole-turn sealing. *)
+  | Turn_closed_without_sources of { turn : int }
+      (** A producer without a pre-admission sidecar completed the turn. Its
+          calls without an explicit producer receipt stay delivery-only;
+          no ordinal or provider-id guess may attach a canonical execution. *)
+
+type tool_result_commit_policy = Require_commit | Observe_commit
+(** A chat delivery requires its tool receipt. Autonomous visibility observes
+    committed receipts without making a failed observation stop execution. *)
+
+(** [observation_token] is captured for registry callbacks. Omission disables
+    registry turn observation; it never adopts a currently active turn. *)
+val make_hooks :
+  ?preview:Keeper_turn_preview.writer ->
+  ?observation_token:Keeper_turn_observation_token.t ->
+  config:Workspace.config ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
+  turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  ?on_tool_stream_observation:(tool_stream_observation -> unit) ->
+  ?current_runtime_attempt:(unit -> (string * string * int) option) ->
+  ?current_attempt_usage:(unit -> attempt_usage option) ->
+  ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
+  ?on_agent_core_response_usage:(response_id:string -> ordinal:int -> model:string ->
+                                 Agent_core.Types.api_usage option -> unit) ->
+  ?attribute_tool_input:(Yojson.Safe.t -> Agent_observation.attribution) ->
+  ?on_tool_executed:(tool_name:string ->
+                     input:Yojson.Safe.t ->
+                     output_text:string ->
+                     execution_evidence:Yojson.Safe.t option ->
+                     observation:Tool_observation.t option ->
+                     success:bool ->
+                     duration_ms:float -> provider:string ->
+                     typed_outcome:Keeper_tool_outcome.t option -> unit) ->
+  ?tool_result_commit_required:(unit -> bool) ->
+  ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) ->
+  ?trajectory_acc:Trajectory.accumulator ->
+  unit -> Agent_core.Hooks.hooks
+(** Build the [Agent_core.Hooks.hooks] record used by the keeper turn loop:
+    passive pre-tool timing, post-tool accounting, idle detection, and
+    trajectory hooks wired together. [on_tool_stream_observation] reports an
+    exact Agent Core admission mapping or an unavailable-sidecar turn close
+    without conflating those states.
+    [attribute_tool_input] captures attribution once before the canonical tool
+    row commits. Its presence makes that commit required; failure is propagated.
+    The later observer receives the identical immutable observation. Omission
+    means this factory caller has no attribution producer, not a pathless fact.
+    [on_after_turn_response] observes each provider turn's assistant
+    response right after the turn ordinal is recorded. [on_tool_result_ready]
+    runs only after the exact tool-call log
+    row is synchronously committed and carries the provider call id, Agent
+    Core occurrence coordinates, and canonical execution id written to that
+    row. [tool_result_commit_required] makes log-commit failure strict only for
+    the active producer contract; official-client delivery-only attempts remain
+    best effort. Cost remains part of post-turn observation. *)
+
+val hook_introspection_json : unit -> Yojson.Safe.t
+(** JSON snapshot describing which hooks are active for the dashboard
+    diagnostics surface. *)
+
+module For_testing : sig
+  val tool_input_shape_for_log : Yojson.Safe.t -> string
+  val tool_input_keys_for_log : Yojson.Safe.t -> string
+  val cost_usd_json : float option -> Yojson.Safe.t
+  (** Exact projection used by the turn-complete SSE payload. *)
+  val usage_missing_of_usage : Agent_core.Types.api_usage option -> bool
+  (** Hook usage-evidence decision delegated to {!usage_has_tokens}. *)
+end

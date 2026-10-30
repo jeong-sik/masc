@@ -1,0 +1,1099 @@
+(** Keeper_registry — Single source of truth for keeper state.
+
+    Core registry ops, atoms, entry management — extracted to
+    [Keeper_registry_setup] (godfile decomp). *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+(* The failure-reason / turn-phase clusters live in Keeper_registry_types;
+   keeper_registry.mli re-exports them with [include module type of], so the
+   values and types must come through this structure. *)
+include Keeper_registry_types
+include Keeper_registry_setup
+
+let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let install_state_change_observer observer = Atomic.set state_change_observer observer
+
+let notify_state_change_observer () =
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "registry state-change observer failed: %s"
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ())
+;;
+
+let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_phase) =
+  (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
+     (PR #14912) instead of the [validate_turn_phase_transition] call.
+     Mirrors the runtime-side wiring (PR #14908) — idempotent self-loops no
+     longer flip [changed] or emit a broadcast, and forbidden transitions
+     raise the typed [Turn_phase_transition_violation] (Phase 5) carrying
+     the [turn_phase_transition_spec_violation] payload directly.  The
+     violation branch stays wrapped by [Keeper_fsm_guard_runtime.wrap_unit]
+     (PR #14926 pattern) so direct setter rejections keep incrementing
+     [masc_fsm_guard_violation_total] — see the [Resolved_turn_violation]
+     arm below. *)
+  let now = Time_compat.now () in
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      let e', changed =
+        update_current_turn ~observation_token e (fun obs ->
+          match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
+          | Resolved_turn_idempotent -> obs
+          | Resolved_turn_transition _ ->
+            { (stamp_turn_progress ~now ~event_kind:"turn_phase" obs) with
+              turn_phase
+            }
+          | Resolved_turn_violation violation ->
+            (* #14926: route the violation raise through [wrap_unit] so the
+               guard's Otel_metric_store counter [metric_fsm_guard_violation]
+               (action=turn_phase_transition, stage=guard) keeps firing for
+               forbidden transitions reached via this setter — prior to
+               RFC-0072 Phase 4b (#14918) the instrumentation was transitive
+               through [validate_turn_phase_transition], and the resolver swap
+               dropped it.  Phase 5: the inner raise is now the typed
+               [Turn_phase_transition_violation]; [wrap_unit]'s catch was
+               widened to all exceptions so it still bumps the counter.  The
+               trailing [obs] is unreachable (a no-op transition is the
+               correct fallback should [wrap_unit] ever return). *)
+            Keeper_fsm_guard_runtime.wrap_unit
+              ~action:"turn_phase_transition"
+              ~stage:"guard"
+              (fun () ->
+                 raise_turn_phase_transition_violation
+                   ~where:"set_turn_phase"
+                   ~from:obs.turn_phase
+                   ~to_:turn_phase
+                   ~violation);
+            obs)
+      in
+      e', changed)
+  in
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
+;;
+
+let mark_turn_provider_attempt_started ~observation_token ~base_path name =
+  match get ~base_path name with
+  | None | Some { current_turn_observation = None; _ } -> ()
+  | Some _ ->
+    set_turn_decision_stage
+      ~observation_token ~base_path
+      name
+      Decision_active_tool_policy_selected;
+    set_turn_phase ~observation_token ~base_path name (Packed Turn_executing)
+;;
+
+let set_turn_selected_runtime ~observation_token ~base_path name selected_runtime =
+  let now = Time_compat.now () in
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      let e', changed =
+        update_current_turn ~observation_token e (fun obs ->
+          { (stamp_turn_progress ~now ~event_kind:"selected_runtime" obs) with
+            selected_runtime
+          })
+      in
+      e', changed)
+  in
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
+;;
+
+
+let mark_turn_finished ~observation_token ~base_path name =
+  (* Terminal turn lifecycle step: freeze [current_turn_observation] into
+     [last_completed_turn] and clear the live observation.  This is
+     intentionally NOT routed through [set_turn_phase_with]: it mutates the
+     turn container (Some -> None) rather than transitioning the turn_phase
+     sub-FSM.  It remains a separate, justified channel; the drift audit
+     concern is the phase-transition setters that were duplicating resolver
+     logic. *)
+  let completed_turn_to_record = ref None in
+  let now = Time_compat.now () in
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      match e.current_turn_observation with
+      | None -> e, false
+      | Some obs when not (Keeper_turn_observation_token.equal
+                            observation_token obs.observation_token) -> e, false
+      | Some obs ->
+        completed_turn_to_record := Some
+          { Keeper_transition_audit.turn_id = obs.turn_id
+          ; started_at = obs.started_at
+          ; ended_at = now
+          ; outcome = completed_turn_outcome_of_observation obs
+          };
+        let last_completed_turn = Some
+          { ct_turn_id = obs.turn_id
+          ; ct_started_at = obs.started_at
+          ; ct_ended_at = now
+          ; ct_decision_stage = obs.decision_stage
+          ; ct_selected_runtime = obs.selected_runtime
+          ; ct_wake = obs.wake
+          }
+        in
+        let meta =
+          { e.meta with runtime =
+              { e.meta.runtime with usage =
+                  { e.meta.runtime.usage with last_turn_ts = now } } }
+        in
+        (* Reset only the finishing owner's wakeup under the keeper key lock.
+           A stale cleanup must not clear a successor's signal. *)
+        Atomic.set e.fiber_wakeup false;
+        { e with meta; current_turn_observation = None; last_completed_turn }, true)
+  in
+  if changed then
+    Option.iter
+      (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
+      !completed_turn_to_record;
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
+;;
+
+let record_skip_reasons ~base_path name ~reasons =
+  (* Only stamp when there's at least one reason — empty lists from a
+     [Run] verdict path would otherwise overwrite the last legitimate
+     skip stamp with a no-op. *)
+  if reasons <> []
+  then (
+    let now = Time_compat.now () in
+    match
+      update_entry ~base_path name (fun e ->
+        { e with last_skip_observation = Some (now, reasons) })
+    with
+    | Ok () -> ()
+    | Error err ->
+      Log.Keeper.warn
+        "%s: failed to record skip reasons: %s"
+        name
+        (registry_entry_validation_error_to_string err))
+;;
+
+let touch_last_turn_ts ~base_path name =
+  let now = Time_compat.now () in
+  match
+    update_entry ~base_path name (fun e ->
+      let runtime = e.meta.runtime in
+      let usage = runtime.usage in
+      { e with
+        meta =
+          { e.meta with
+            runtime = { runtime with usage = { usage with last_turn_ts = now } }
+          }
+      })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to touch last_turn_ts: %s"
+      name
+      (registry_entry_validation_error_to_string err)
+;;
+
+let increment_turn_failures ~base_path name =
+  match
+    update_entry ~base_path name (fun e ->
+      { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to increment turn failures: %s"
+      name
+      (registry_entry_validation_error_to_string err)
+;;
+
+let reset_turn_failures ~base_path name =
+  match update_entry ~base_path name (fun e -> { e with turn_consecutive_failures = 0 }) with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to reset turn failures: %s"
+      name
+      (registry_entry_validation_error_to_string err)
+;;
+
+let get_turn_failures ~base_path name =
+  match get ~base_path name with
+  | Some e -> e.turn_consecutive_failures
+  | None -> 0
+;;
+
+let is_running ~base_path name =
+  (* Enumerate every [Keeper_state_machine.phase] variant so the
+     compiler flags any new phase added to the FSM.
+
+     This predicate is intentionally narrower than
+     [Keeper_state_machine.can_execute_turn] (defined alongside the
+     phase type): [can_execute_turn] returns [true] for both [Running]
+     and [Failing] because a keeper in [Failing] may still complete
+     its in-flight turn before the recovery transition; [is_running]
+     answers the operator-facing question "is this keeper currently
+     running?" and treats only [Running] as such. The other phases
+     (Offline, Failing, Draining, Paused, Stopped, Crashed,
+     Restarting) yield [false]
+     here. A future phase variant (e.g. a hypothetical [Migrating] or
+     [Healing]) would silently inherit [false] under the previous
+     [Some _ -> false] catch-all without a review point on whether
+     the new phase should count as "running" for any downstream
+     consumer.
+
+     Same FSM Sparse Match anti-pattern fix as PRs #14716, #14790,
+     #14806, #14810, #14816, #14823, #14829, #14842, #14849. *)
+  match get ~base_path name with
+  | Some { phase = Running; _ } -> true
+  | Some
+      { phase =
+          ( Offline
+          | Failing
+          | Draining
+          | Paused
+          | Stopped
+          | Crashed
+          | Restarting )
+      ; _
+      } -> false
+  | None -> false
+;;
+
+(** True if the keeper has ANY registry entry (regardless of state).
+    Used by reconcile to avoid re-launching Crashed keepers. *)
+let is_registered ~base_path name = Option.is_some (get ~base_path name)
+
+let count_running ?base_path () =
+  match base_path with
+  | None -> Atomic.get running_count_atomic
+  | Some expected ->
+    let expected = canonical_base_path_exn expected in
+    StringMap.fold
+      (fun _k v acc ->
+         if String.equal expected v.base_path && v.phase = Running then acc + 1 else acc)
+      (Atomic.get registry)
+      0
+;;
+
+let record_crash ~base_path name ts msg =
+  let update_entry_unit ~base_path name f =
+    ignore (update_entry ~base_path name f)
+  in
+  Error_tracking.record_crash ~base_path name ts msg ~update_entry:update_entry_unit
+;;
+
+let set_last_error_exact entry err =
+  update_entry_exact entry (fun current -> { current with last_error = Some err })
+;;
+
+let exact_update_succeeded entry ~site = function
+  | Exact_updated -> true
+  | Exact_update_missing ->
+    Log.Keeper.warn
+      "%s: exact registry update skipped because lane is no longer registered site=%s"
+      entry.name
+      site;
+    false
+  | Exact_update_replaced ->
+    Log.Keeper.warn
+      "%s: exact registry update retained newer same-name lane site=%s"
+      entry.name
+      site;
+    false
+  | Exact_update_invalid validation_error ->
+    Log.Keeper.warn
+      "%s: exact registry update validation failed site=%s error=%s"
+      entry.name
+      site
+      (registry_entry_validation_error_to_string validation_error);
+    false
+;;
+
+let replace_heartbeat_failure_reason expected replacement =
+  let replaced = ref false in
+  let result =
+    update_entry_exact expected (fun latest ->
+      match latest.last_failure_reason with
+      | Some (Heartbeat_consecutive_failures _) ->
+        replaced := true;
+        { latest with
+          last_failure_reason = replacement
+        ; last_failure_at = Option.map (fun _ -> Time_compat.now ()) replacement
+        }
+      | None | Some (Turn_consecutive_failures _) | Some (Provider_runtime_error _)
+      | Some (Turn_configuration_error _) | Some (Official_client_recovery_required _)
+      | Some (Fiber_unresolved _) | Some (Exception _) | Some (Operator_interrupt) ->
+        replaced := false;
+        latest)
+  in
+  exact_update_succeeded
+    expected
+    ~site:"heartbeat_failure_reason_recovery"
+    result
+  && !replaced
+;;
+
+let started_at ~base_path name =
+  match get ~base_path name with
+  | Some entry -> Some entry.started_at
+  | None -> None
+;;
+
+let set_started_at_for_test ~base_path name started_at =
+  match update_entry ~base_path name (fun entry -> { entry with started_at }) with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to set started_at test fixture: %s"
+      name
+      (registry_entry_validation_error_to_string err)
+;;
+
+type wakeup_intent =
+  | Reactive_signal
+  | Scheduled_signal
+  | Hitl_resolution
+  | Broadcast_signal
+  | Attention_result
+  | Runtime_parameter_change
+  | Turn_slot_released
+
+let wakeup_intent_to_wire = function
+  | Reactive_signal -> "reactive_signal"
+  | Scheduled_signal -> "scheduled_signal"
+  | Hitl_resolution -> "hitl_resolution"
+  | Broadcast_signal -> "broadcast_signal"
+  | Attention_result -> "attention_result"
+  | Runtime_parameter_change -> "runtime_parameter_change"
+  | Turn_slot_released -> "turn_slot_released"
+;;
+
+type wakeup_outcome =
+  | Signaled
+  | Deferred_unregistered
+  | Deferred_not_running of Keeper_state_machine.phase
+  | Deferred_lifecycle of Keeper_lifecycle_admission.autonomous_denial
+
+let record_lifecycle_wakeup_denial ~intent (entry : registry_entry) denial =
+  let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+  let intent = wakeup_intent_to_wire intent in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:
+      [ "keeper", entry.name
+      ; "event", "registry_wakeup"
+      ; "reason", reason
+      ; "intent", intent
+      ]
+    ();
+  Log.Keeper.info
+    "%s: registry wake deferred by lifecycle admission intent=%s reason=%s"
+    entry.name
+    intent
+    reason
+;;
+
+let wakeup_running_entry ~intent (entry : registry_entry) =
+  let lifecycle_state =
+    Keeper_lifecycle_admission.state
+      ~paused:entry.meta.paused
+      ~latched_reason:entry.meta.latched_reason
+  in
+  match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+  | Keeper_lifecycle_admission.Autonomous_denied denial ->
+    record_lifecycle_wakeup_denial ~intent entry denial;
+    Deferred_lifecycle denial
+  | Keeper_lifecycle_admission.Autonomous_admitted ->
+    (* Exhaustive on purpose: a new phase must state whether a wake reaches it.
+       [Running] and [Failing] are the two phases [derive_phase] can produce
+       while [fiber_alive] holds, so they are the two that can receive the
+       hint. Every other phase either has no fiber to signal or is mid-operation.
+
+       [Failing] is derived from [turn_healthy = false] — the record of a turn
+       that already ended. Refusing the wake on it deadlocks the keeper: only a
+       turn can set [turn_healthy] back, and only a wake starts a turn. Measured
+       2026-08-28: one upstream 500 left a keeper refusing 181 wakes over 18
+       hours, recoverable only by an operator calling keeper_up. *)
+    (match entry.phase with
+     | Keeper_state_machine.Running | Keeper_state_machine.Failing ->
+       (* tla-lint: allow-mutation: lifecycle-admitted fiber hint signal *)
+       Atomic.set entry.fiber_wakeup true;
+       Signaled
+     | Keeper_state_machine.Offline
+     | Keeper_state_machine.Crashed
+     | Keeper_state_machine.Restarting
+     (* no live fiber to receive the hint *)
+     | Keeper_state_machine.Draining
+     (* a fiber is mid-operation; waking races it *)
+     | Keeper_state_machine.Paused
+     | Keeper_state_machine.Stopped ->
+       (* operator authority, and the terminal phase *)
+       Deferred_not_running entry.phase)
+;;
+
+let wakeup_running ~intent ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Deferred_unregistered
+  | Some entry -> wakeup_running_entry ~intent entry
+;;
+
+type exact_wakeup_outcome =
+  | Exact_wake_signaled
+  | Exact_wake_missing
+  | Exact_wake_replaced
+  | Exact_wake_not_running of Keeper_state_machine.phase
+  | Exact_wake_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Exact_wake_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+let wakeup_running_exact ~intent (expected : registry_entry) =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    | Error owner -> Exact_wake_lifecycle_reserved owner
+    | Ok () ->
+      let key = registry_key ~base_path name in
+      (match StringMap.find_opt key (Atomic.get registry) with
+       | None -> Exact_wake_missing
+       | Some current
+         when not
+                (Keeper_lane.Id.equal
+                   (Keeper_lane.id current.lane)
+                   (Keeper_lane.id expected.lane)) ->
+         Exact_wake_replaced
+       | Some current ->
+         (match wakeup_running_entry ~intent current with
+          | Signaled -> Exact_wake_signaled
+          | Deferred_unregistered -> Exact_wake_missing
+          | Deferred_not_running phase -> Exact_wake_not_running phase
+          | Deferred_lifecycle denial -> Exact_wake_lifecycle_denied denial)))
+;;
+
+type cadence_sleeper_wakeup_outcome =
+  | Cadence_sleeper_signaled
+  | Cadence_sleeper_missing
+  | Cadence_sleeper_replaced
+  | Cadence_sleeper_in_flight
+  | Cadence_sleeper_awake
+  | Cadence_sleeper_inactive of Keeper_state_machine.phase
+  | Cadence_sleeper_lifecycle_denied of
+      Keeper_lifecycle_admission.autonomous_denial
+  | Cadence_sleeper_lifecycle_reserved of
+      Keeper_lifecycle_reservation.snapshot
+
+let wakeup_cadence_sleeper_exact (expected : registry_entry) =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    | Error owner -> Cadence_sleeper_lifecycle_reserved owner
+    | Ok () ->
+      let key = registry_key ~base_path name in
+      (match StringMap.find_opt key (Atomic.get registry) with
+       | None -> Cadence_sleeper_missing
+       | Some current
+         when not
+                (Keeper_lane.Id.equal
+                   (Keeper_lane.id current.lane)
+                   (Keeper_lane.id expected.lane)) ->
+         Cadence_sleeper_replaced
+       | Some current ->
+         let lifecycle_state =
+           Keeper_lifecycle_admission.state
+             ~paused:current.meta.paused
+             ~latched_reason:current.meta.latched_reason
+         in
+         (match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+          | Keeper_lifecycle_admission.Autonomous_denied denial ->
+            record_lifecycle_wakeup_denial
+              ~intent:Runtime_parameter_change
+              current
+              denial;
+            Cadence_sleeper_lifecycle_denied denial
+          | Keeper_lifecycle_admission.Autonomous_admitted ->
+            (match current.phase with
+             | Keeper_state_machine.Running | Keeper_state_machine.Failing ->
+               (match current.current_turn_observation with
+                | Some _ -> Cadence_sleeper_in_flight
+                | None ->
+                  (* tla-lint: allow-mutation: cadence sleep handshake — CAS
+                     consumes only an active inter-cycle sleeper. *)
+                  if Atomic.compare_and_set current.cadence_sleeping true false
+                  then Cadence_sleeper_signaled
+                  else Cadence_sleeper_awake)
+             | (Keeper_state_machine.Offline | Keeper_state_machine.Draining | Keeper_state_machine.Paused | Keeper_state_machine.Stopped | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting) as phase -> Cadence_sleeper_inactive phase))))
+;;
+
+let fiber_health_of ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Fiber_unknown
+  | Some entry ->
+    (match entry.phase with
+     | Crashed | Restarting -> Fiber_zombie
+     | Stopped ->
+       if lane_has_exited entry then Fiber_unknown else Fiber_alive
+     | Offline -> Fiber_unknown
+     | Running | Paused | Failing | Draining ->
+       (match Eio.Promise.peek entry.done_p with
+        | None -> Fiber_alive
+        | Some `Stopped ->
+          if lane_has_exited entry then Fiber_unknown else Fiber_alive
+        | Some (`Crashed _) ->
+          if not (lane_has_exited entry) then Fiber_alive else Fiber_zombie))
+;;
+
+let crash_log_of ~base_path name =
+  match get ~base_path name with
+  | Some entry -> entry.crash_log
+  | None -> []
+;;
+
+let restore_supervisor_state ~base_path name ~restart_count ~crash_log =
+  Error_tracking.restore_supervisor_state
+    ~base_path
+    name
+    ~restart_count
+    ~crash_log
+    ~update_entry:update_entry_unit
+;;
+
+let cleanup_tracking ~base_path name =
+  let key = registry_key ~base_path name in
+  match StringMap.find_opt key (Atomic.get registry) with
+  | Some entry ->
+    (match
+       put_entry
+         ~base_path
+         name
+         { entry with
+           tool_usage = StringMap.empty
+         ; board_cursor_ts = 0.0
+         ; board_cursor_post_id = None
+         }
+     with
+     | Ok () -> ()
+     | Error err ->
+       Log.Keeper.warn
+         "%s: failed to cleanup registry tracking: %s"
+         name
+         (registry_entry_validation_error_to_string err))
+  | None -> ()
+;;
+
+let cleanup_tracking_entry current =
+  { current with
+    tool_usage = StringMap.empty
+  ; board_cursor_ts = 0.0
+  ; board_cursor_post_id = None
+  }
+;;
+
+let cleanup_tracking_exact_for_lifecycle token (entry : registry_entry) =
+  update_entry_exact_for_lifecycle token entry cleanup_tracking_entry
+;;
+
+let clear () =
+  Atomic.set registry StringMap.empty;
+  Atomic.set running_count_atomic 0
+;;
+
+(* -- Board cursor -------------------------------------------------- *)
+
+let get_board_cursor ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | Some entry -> entry.board_cursor_ts, entry.board_cursor_post_id
+  | None -> 0.0, None
+;;
+
+let set_board_cursor ~base_path name ts post_id =
+  match
+    update_entry ~base_path name (fun e ->
+      { e with board_cursor_ts = ts; board_cursor_post_id = post_id })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to set board cursor: %s"
+      name
+      (registry_entry_validation_error_to_string err)
+;;
+
+(* -- Tool usage tracking ------------------------------------------- *)
+
+(* Safe without a mutex: updates go through [update_entry]'s CAS loop, so
+   keeper-turn AGENT_CORE callbacks and runtime MCP server callbacks can both
+   record usage for the same keeper without clobbering each other. *)
+let record_tool_use ~base_path name ~tool_name ~disposition =
+  match
+    update_entry ~base_path name (fun entry ->
+      let e =
+        match StringMap.find_opt tool_name entry.tool_usage with
+        | Some e -> e
+        | None ->
+          { count = 0; successes = 0; deferred = 0; failures = 0; last_used_at = 0.0 }
+      in
+      let updated =
+        { count = e.count + 1
+        ; successes =
+            (match disposition with
+             | Tool_result.Completed _ -> e.successes + 1
+             | Tool_result.Deferred _ | Tool_result.Failed _ -> e.successes)
+        ; deferred =
+            (match disposition with
+             | Tool_result.Deferred _ -> e.deferred + 1
+             | Tool_result.Completed _ | Tool_result.Failed _ -> e.deferred)
+        ; failures =
+            (match disposition with
+             | Tool_result.Failed _ -> e.failures + 1
+             | Tool_result.Completed _ | Tool_result.Deferred _ -> e.failures)
+        ; last_used_at = Time_compat.now ()
+        }
+      in
+      { entry with tool_usage = StringMap.add tool_name updated entry.tool_usage })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to record tool use for %s: %s"
+      name
+      tool_name
+      (registry_entry_validation_error_to_string err)
+;;
+
+let tool_usage_of ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> []
+  | Some entry ->
+    StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
+    |> List.sort (fun (_, a) (_, b) -> Int.compare b.Keeper_types.count a.Keeper_types.count)
+;;
+
+(* Lookup API (find_by_name / find_by_agent_name / find_by_id /
+   tool_usage_of_by_name) moved to Keeper_registry_lookup.
+
+   Tool usage persistence (tool_usage_path / flush_tool_usage /
+   restore_tool_usage) moved to Keeper_registry_tool_usage_persistence;
+   the CAS-bound write path is exposed below as
+   [set_tool_usage_entry]. *)
+
+let set_tool_usage_entry ~base_path ~name ~tool_name (e : tool_call_entry) =
+  match
+    update_entry ~base_path name (fun ent ->
+      { ent with tool_usage = StringMap.add tool_name e ent.tool_usage })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to restore tool usage for %s: %s"
+      name
+      tool_name
+      (registry_entry_validation_error_to_string err)
+;;
+
+(* ── RFC-0002 Event Dispatch ───────────────────────────── *)
+
+
+let execute_entry_action_observability =
+  Keeper_registry_entry_action_dispatch.execute_observability
+;;
+
+
+(** Registry mutation is still non-yielding (StringMap lookup + CAS).
+    Entry actions run only after [install_entry_if_current], so their
+    observability side effects happen after the registry state is
+    consistent. *)
+let rec dispatch_event_with_audit_internal
+          ~base_path
+          ?lifecycle_token
+          ?expected_lane
+          ?events_fired
+          ?selected_event
+          name
+          (event : Keeper_state_machine.event)
+  =
+  let key = registry_key ~base_path name in
+  match StringMap.find_opt key (Atomic.get registry) with
+  | None ->
+    Error
+      (Keeper_state_machine.Invalid_transition
+         { from_phase = Keeper_state_machine.Offline
+         ; to_phase = Keeper_state_machine.Offline
+         ; reason = Printf.sprintf "keeper %s not registered" name
+         })
+  | Some entry
+    when (match expected_lane with
+          | None -> false
+          | Some lane_id ->
+            not (Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane))) ->
+    Error
+      (Keeper_state_machine.Invalid_transition
+         { from_phase = entry.phase
+         ; to_phase = entry.phase
+         ; reason = Printf.sprintf "keeper %s lane ownership changed" name
+         })
+  | Some entry ->
+    let now = Time_compat.now () in
+    let pending_turn_measurement = pending_measurement_after_event now entry event in
+    let result =
+        Keeper_state_machine.apply_event
+          ~current_phase:entry.phase
+          ~conditions:entry.conditions
+          ~event
+          ~now
+    in
+    let record_transition_attribution tr =
+      Dashboard_attribution.record
+        (Keeper_state_machine.attribution_of_transition ~event (Ok tr))
+    in
+    let registry_write_error ~from_phase ~to_phase err =
+      Keeper_state_machine.Invalid_transition
+        { from_phase
+        ; to_phase
+        ; reason =
+            Printf.sprintf
+              "registry write validation failed for event=%s: %s"
+              (Keeper_state_machine.event_to_string event)
+              (registry_entry_validation_error_to_string err)
+        }
+    in
+    let reject_dispatch e =
+      Dashboard_attribution.record
+        (Keeper_state_machine.attribution_of_transition ~event (Error e));
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string LifecycleDispatchRejections)
+        ~labels:[ "event", Keeper_state_machine.event_to_string event ]
+        ();
+      let event_str = Keeper_state_machine.event_to_string event in
+      let error_str = Keeper_state_machine.transition_error_to_string e in
+      Log.Keeper.emit
+        Log.Warn
+        ~category:Log.Fsm
+        ~details:
+          (`Assoc
+            [ "event", `String event_str
+            ; "error", `String error_str
+            ])
+        (Printf.sprintf "registry: dispatch_event rejected name=%s error=%s" name error_str);
+      Error e
+    in
+    (match result with
+     | Ok tr when tr.new_phase <> tr.prev_phase ->
+       let from_phase_str = Keeper_state_machine.phase_to_string tr.prev_phase in
+       let to_phase_str = Keeper_state_machine.phase_to_string tr.new_phase in
+       let event_str = Keeper_state_machine.event_to_string event in
+       let new_seq = entry.transition_seq + 1 in
+       (match
+          install_entry_if_current_internal
+            ?lifecycle_token
+            ~observed:entry
+            { entry with
+              phase = tr.new_phase
+            ; conditions = tr.updated_conditions
+            ; transition_seq = new_seq
+            ; pending_turn_measurement
+            }
+        with
+        | Entry_install_invalid err ->
+          reject_dispatch
+            (registry_write_error
+               ~from_phase:tr.prev_phase
+               ~to_phase:tr.new_phase
+               err)
+        | Entry_install_conflict ->
+          dispatch_event_with_audit_internal
+            ~base_path
+            ?lifecycle_token
+            ?expected_lane
+            ?events_fired
+            ?selected_event
+            name
+            event
+        | Entry_install_missing ->
+          reject_dispatch
+            (Keeper_state_machine.Invalid_transition
+               { from_phase = tr.prev_phase
+               ; to_phase = tr.prev_phase
+               ; reason = Printf.sprintf "keeper %s was unregistered during dispatch" name
+               })
+        | Entry_install_replaced ->
+          reject_dispatch
+            (Keeper_state_machine.Invalid_transition
+               { from_phase = tr.prev_phase
+               ; to_phase = tr.prev_phase
+               ; reason = Printf.sprintf "keeper %s lane ownership changed during dispatch" name
+               })
+        | Entry_installed ->
+          record_transition_attribution tr;
+          Log.Keeper.emit
+            Log.Info
+            ~category:Log.Fsm
+            ~details:
+              (`Assoc
+                [ "from_phase", `String from_phase_str
+                ; "to_phase", `String to_phase_str
+                ; "event", `String event_str
+                ])
+            (Printf.sprintf
+               "registry: phase transition name=%s old=%s new=%s event=%s"
+               name
+               from_phase_str
+               to_phase_str
+               event_str);
+          (* Record transition in audit ring buffer for dashboard API. *)
+          (* DET-OK: absent audit selection falls back to this dispatch event. *)
+          let audit_events_fired = Option.value events_fired ~default:[ event ] in
+          let audit_selected_event = Option.value selected_event ~default:event in
+          Keeper_transition_audit.record_transition
+            ~keeper_name:name
+            { events_fired = audit_events_fired
+            ; selected_event = audit_selected_event
+            ; prev_phase = tr.prev_phase
+            ; new_phase = tr.new_phase
+            ; transition_outcome = "applied"
+            ; wall_clock_at_decision = now
+            };
+          Keeper_lifecycle_hooks.run
+            ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+            ~meta:entry.meta
+            ~keeper_id:name
+            (Keeper_lifecycle_hooks.Phase_transition
+               { from_phase = tr.prev_phase; to_phase = tr.new_phase });
+          (* Broadcast phase transition to SSE subscribers *)
+          (try
+             Sse.broadcast
+               (`Assoc
+                   [ "type", `String "keeper_phase_changed"
+                   ; "name", `String name
+                   ; ( "prev_phase"
+                     , `String (Keeper_state_machine.phase_to_string tr.prev_phase) )
+                   ; "new_phase", `String (Keeper_state_machine.phase_to_string tr.new_phase)
+                   ; "event", `String (Keeper_state_machine.event_to_string event)
+                   ; "ts_unix", `Float now
+                   ])
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn -> record_phase_broadcast_failure ~name exn);
+          (* Update running count based on phase transition *)
+          (match tr.prev_phase, tr.new_phase with
+           | ( Running
+             , (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting) ) ->
+             decr_running_count_clamped ()
+           | ( (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting)
+             , Running ) -> Atomic.incr running_count_atomic
+           | Running, Running -> ()
+           | ( (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting)
+             , (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting) )
+             -> ());
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string LifecycleTransitions)
+            ~labels:
+              [ "keeper", name
+              ; "from_phase", Keeper_state_machine.phase_to_string tr.prev_phase
+              ; "to_phase", Keeper_state_machine.phase_to_string tr.new_phase
+              ]
+            ();
+          (* TLA+ trace emission (MASC_TLA_TRACE=1) *)
+          if Keeper_trace_emit.enabled ()
+          then
+            Keeper_trace_emit.emit_transition
+              ~keeper_name:name
+              ~base_path
+              ~seq:new_seq
+              ~event
+              ~prev_phase:tr.prev_phase
+              ~new_phase:tr.new_phase
+              ~conditions_after:tr.updated_conditions
+              ~restart_count:entry.restart_count;
+          List.iter
+            (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
+            tr.entry_actions;
+          (* Composite-lifecycle SSE envelope — RFC-0003 §6.
+             The body carries only the keeper name and observation timestamp;
+             subscribers re-fetch [/api/v1/keepers/:name/composite] for the
+             full snapshot so the spec's "single writer, pull observers"
+             invariant is preserved. *)
+          broadcast_composite_changed ~name ~ts_unix:now;
+          notify_state_change_observer ();
+          Ok tr)
+     | Ok tr ->
+       (* No phase change — still update conditions *)
+       let new_seq = entry.transition_seq + 1 in
+       (match
+          install_entry_if_current_internal
+            ?lifecycle_token
+            ~observed:entry
+            { entry with
+              conditions = tr.updated_conditions
+            ; transition_seq = new_seq
+            ; pending_turn_measurement
+            }
+        with
+        | Entry_install_invalid err ->
+          reject_dispatch
+            (registry_write_error
+               ~from_phase:tr.prev_phase
+               ~to_phase:tr.new_phase
+               err)
+        | Entry_install_conflict ->
+          dispatch_event_with_audit_internal
+            ~base_path
+            ?lifecycle_token
+            ?expected_lane
+            ?events_fired
+            ?selected_event
+            name
+            event
+        | Entry_install_missing ->
+          reject_dispatch
+            (Keeper_state_machine.Invalid_transition
+               { from_phase = tr.prev_phase
+               ; to_phase = tr.prev_phase
+               ; reason = Printf.sprintf "keeper %s was unregistered during dispatch" name
+               })
+        | Entry_install_replaced ->
+          reject_dispatch
+            (Keeper_state_machine.Invalid_transition
+               { from_phase = tr.prev_phase
+               ; to_phase = tr.prev_phase
+               ; reason = Printf.sprintf "keeper %s lane ownership changed during dispatch" name
+               })
+        | Entry_installed ->
+          record_transition_attribution tr;
+          if Keeper_trace_emit.enabled ()
+          then
+            Keeper_trace_emit.emit_transition
+              ~keeper_name:name
+              ~base_path
+              ~seq:new_seq
+              ~event
+              ~prev_phase:tr.prev_phase
+              ~new_phase:tr.new_phase
+              ~conditions_after:tr.updated_conditions
+              ~restart_count:entry.restart_count;
+          broadcast_composite_changed ~name ~ts_unix:now;
+          Ok tr)
+     | Error e -> reject_dispatch e)
+;;
+
+let dispatch_event_with_audit
+      ~base_path
+      ?events_fired
+      ?selected_event
+      name
+      event
+  =
+  dispatch_event_with_audit_internal
+    ~base_path
+    ?events_fired
+    ?selected_event
+    name
+    event
+;;
+
+let dispatch_event_exact (entry : registry_entry) event =
+  dispatch_event_with_audit_internal
+    ~base_path:entry.base_path
+    ~expected_lane:(Keeper_lane.id entry.lane)
+    entry.name
+    event
+;;
+
+let dispatch_event_exact_for_lifecycle token (entry : registry_entry) event =
+  dispatch_event_with_audit_internal
+    ~base_path:entry.base_path
+    ~lifecycle_token:token
+    ~expected_lane:(Keeper_lane.id entry.lane)
+    entry.name
+    event
+;;
+
+let dispatch_event ~base_path name event =
+  dispatch_event_with_audit ~base_path name event
+;;
+
+let dispatch_event_and_log ~base_path name event =
+  match dispatch_event ~base_path name event with
+  | Ok tr -> Ok tr
+  | Error e ->
+    let reason_label =
+      match e with
+      | Keeper_state_machine.Terminal_state _ -> "terminal_state"
+      | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
+      | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
+    in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string DispatchEventFailures)
+      ~labels:[ "keeper", name; "reason", reason_label ]
+      ();
+    Error e
+;;
+
+let dispatch_event_unit ~base_path name event =
+  match dispatch_event_and_log ~base_path name event with
+  | Ok _ -> ()
+  | Error e ->
+    let error_str = Keeper_state_machine.transition_error_to_string e in
+    Log.Keeper.emit
+      Log.Warn
+      ~category:Log.Fsm
+      ~details:
+        (`Assoc
+          [ "event", `String (Keeper_state_machine.event_to_string event)
+          ; "error", `String error_str
+          ])
+      (Printf.sprintf "%s: dispatch_event failed: %s" name error_str)
+;;
+
+let prepare_fiber_launch ~base_path name =
+  (match get ~base_path name with
+   | Some entry ->
+     (* tla-lint: allow-mutation: fiber signal — initialise per-fiber Atomic flags before keeper launch *)
+     Atomic.set entry.fiber_stop false;
+     Atomic.set entry.fiber_wakeup false;
+     Atomic.set entry.cadence_sleeping false;
+     Atomic.set entry.waiting_for_inference false
+   | None ->
+     (* P3 cleanup: previously this was a silent no-op when the
+          keeper was not yet registered.  The dispatch_event call
+          below still fires even in this case, which can leave a
+          Fiber_started event with no corresponding atomic-flag
+          reset.  Log so the race is at least visible — caller
+          (server_runtime_bootstrap.ml) is responsible for ensuring
+          register_with_state has happened before this point. *)
+     Log.Keeper.emit
+       Log.Warn
+       ~category:Log.Fsm
+       ~details:(`Assoc [ "keeper", `String name; "base_path", `String base_path ])
+       (Printf.sprintf
+          "registry: prepare_fiber_launch name=%s base_path=%s: entry not registered, \
+           skipping flag reset"
+          name
+          base_path));
+  dispatch_event ~base_path name Keeper_state_machine.Fiber_started
+;;
+
+let prepare_fiber_launch_for_lifecycle token (entry : registry_entry) =
+  Atomic.set entry.fiber_stop false;
+  Atomic.set entry.fiber_wakeup false;
+  Atomic.set entry.cadence_sleeping false;
+  Atomic.set entry.waiting_for_inference false;
+  dispatch_event_exact_for_lifecycle token entry Keeper_state_machine.Fiber_started
+;;
+
+let get_phase ~base_path name =
+  match get ~base_path name with
+  | Some entry -> Some entry.phase
+  | None -> None
+;;
+
+(* Event-queue access (enqueue_event / event_queue_snapshot / dequeue_event /
+   drain_board_events) moved to Keeper_registry_event_queue. *)
+
+module For_testing = struct
+  let unsafe_put_entry = unsafe_put_entry
+  let register = register
+  let unregister = unregister
+  let clear = clear
+  let record_restart = record_restart
+  let set_started_at_for_test = set_started_at_for_test
+  let crash_log_of = crash_log_of
+  let restore_supervisor_state = restore_supervisor_state
+end

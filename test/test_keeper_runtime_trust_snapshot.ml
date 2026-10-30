@@ -1,0 +1,1438 @@
+module K = Masc.Keeper_runtime_trust_snapshot
+module O = Masc.Keeper_status_detail_observability
+module P = Masc.Otel_metric_store
+module Receipt = Masc.Keeper_execution_receipt
+
+let receipt_disposition =
+  Alcotest.(
+    option
+      (pair
+         (testable
+            (fun ppf kind ->
+               Format.pp_print_string ppf (Receipt.operator_disposition_kind_to_string kind))
+            ( = ))
+         (testable
+            (fun ppf reason ->
+               Format.pp_print_string ppf (Receipt.operator_disposition_reason_to_string reason))
+            ( = ))))
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/"
+  then ()
+  else if Sys.file_exists dir
+  then ()
+  else (
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755)
+;;
+
+let temp_dir () =
+  let dir = Filename.temp_file "runtime_trust_decision_drop_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+let write_file path content =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
+;;
+
+let runtime_toml =
+  {|
+version = 1
+
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "runtime_trust_snapshot_runtime_" ".toml" in
+  write_file path runtime_toml;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+;;
+
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+;;
+
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+          [ "name", `String name
+          ; "trace_id", `String ("trace-" ^ name)
+          ])
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
+;;
+
+(* Receipt disposition is tested with a live keeper. Without an entry the
+   status bridge correctly reports keepalive_stopped even for a Pass receipt. *)
+let snapshot_with_running_keeper ~(config : Masc.Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
+  (* Observe both phases immediately; the public snapshot has a short-lived
+     cache keyed to turn and approval state, not registry transitions. *)
+  let snapshot () = K.For_testing.snapshot_json_inner_with_pending_reader
+    ~read_pending:Masc.Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+    ~config ~meta in
+  let stopped = snapshot () in
+  Alcotest.(check bool) "a stopped keeper still requires attention" true
+    Yojson.Safe.Util.(stopped |> member "needs_attention" |> to_bool);
+  Alcotest.(check string) "stopped attention has its own cause" "keepalive_stopped"
+    Yojson.Safe.Util.(stopped |> member "attention_reason" |> to_string);
+  let entry =
+    Masc.Keeper_registry.For_testing.register
+      ~base_path:config.base_path meta.name meta
+  in
+  Fun.protect
+    ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+    (fun () ->
+      Alcotest.(check bool) "fixture keeper is Running" true
+        (Masc.Keeper_registry.is_running ~base_path:config.base_path meta.name);
+      snapshot ())
+;;
+
+let test_trust_blocker_uses_structured_state () =
+  let module Core = Masc.Keeper_runtime_trust_snapshot_core in
+  let decide blocker =
+    Core.decide
+      { approval_queue = Core.Approval_queue_available 0
+      ; runtime_blocker_class = blocker
+      ; receipt_operator_disposition = None
+      ; status_attention = None
+      ; terminal_next_human_action = None
+      }
+  in
+  let healthy = decide None in
+  Alcotest.(check string) "no blocker is healthy" "healthy"
+    (Core.disposition_reason_to_wire healthy.disposition_reason);
+  let exhausted =
+    decide (Some Masc.Keeper_status_bridge.Blocked_by_runtime_exhaustion)
+  in
+  Alcotest.(check string) "runtime exhaustion is named" "runtime_exhausted"
+    (Core.disposition_reason_to_wire exhausted.disposition_reason);
+  let blocked = decide (Some Masc.Keeper_status_bridge.Blocked_by_unresolved_fiber) in
+  Alcotest.(check string) "an unresolved fiber is a critical block"
+    "critical_block" (Core.disposition_reason_to_wire blocked.disposition_reason);
+  Alcotest.(check bool) "blocker requires attention" true blocked.needs_attention;
+  let unnamed = decide (Some Masc.Keeper_status_bridge.Blocked_by_turn_failures) in
+  Alcotest.(check string) "a class with no reason of its own still shows as a blocker"
+    "unknown_runtime_blocker" (Core.disposition_reason_to_wire unnamed.disposition_reason);
+  Alcotest.(check bool) "that blocker requires attention" true unnamed.needs_attention;
+  (* No receipt is shown in any of these, so there is no operator
+     disposition to relay. A kind derived from the blocker would be a guess. *)
+  List.iter
+    (fun (label, (model : Core.t)) ->
+       Alcotest.check receipt_disposition
+         (label ^ " relays no operator disposition")
+         None
+         model.receipt_operator_disposition)
+    [ "no blocker", healthy
+    ; "exhausted", exhausted
+    ; "named blocker", blocked
+    ; "unnamed blocker", unnamed
+    ]
+;;
+
+let test_trust_relays_only_a_shown_receipt_operator_disposition () =
+  let module Core = Masc.Keeper_runtime_trust_snapshot_core in
+  let fenced_receipt =
+    Receipt.Disp_effect_review_required, Receipt.Reason_provider_attempt_effect_fenced
+  in
+  let decide approval_queue =
+    Core.decide
+      { approval_queue
+      ; runtime_blocker_class = None
+      ; receipt_operator_disposition = Some fenced_receipt
+      ; status_attention = None
+      ; terminal_next_human_action = None
+      }
+  in
+  let shown = decide (Core.Approval_queue_available 0) in
+  Alcotest.check receipt_disposition
+    "a shown receipt's operator disposition is relayed as written"
+    (Some fenced_receipt) shown.receipt_operator_disposition;
+  Alcotest.(check string) "an effect review shows as an alert" "Alert"
+    (Masc.Keeper_trust_disposition.to_wire shown.disposition);
+  Alcotest.(check bool) "an effect review needs attention" true shown.needs_attention;
+  let pending = decide (Core.Approval_queue_available 2) in
+  Alcotest.(check string) "a pending approval takes the display"
+    "pending_operator_decision" (Core.disposition_reason_to_wire pending.disposition_reason);
+  Alcotest.check receipt_disposition
+    "a receipt the snapshot does not show is not relayed"
+    None pending.receipt_operator_disposition
+;;
+
+let test_active_blocker_overrides_success_until_cleared () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
+  let base_dir = temp_dir () in
+  let config = Masc.Workspace.default_config base_dir in
+  let initial = make_meta "runtime-trust-receipt-scope" in
+  let meta =
+    { initial with runtime =
+        { initial.runtime with usage =
+            { initial.runtime.usage with total_turns = 7; last_turn_ts = 1000.5 } } }
+  in
+  let entry = Masc.Keeper_registry.register_offline ~base_path:base_dir meta.name meta in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Masc.Keeper_registry.unregister_exact entry);
+      remove_tree base_dir)
+    (fun () ->
+      Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name
+        (Some (Masc.Keeper_registry.Exception "scope fixture failure"));
+      let store = Masc.Keeper_types_support.keeper_execution_receipt_store config meta.name in
+      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let observe receipt_trace turn =
+        Dated_jsonl.append store
+          (`Assoc
+            [ "trace_id", `String receipt_trace; "turn_count", `Int turn
+            ; "ended_at", `String "1970-01-01T00:16:40Z"
+            ; "operator_disposition", `String "pass"
+            ; "operator_disposition_reason", `String "healthy"
+            ; "terminal_reason_code", `String "success" ]);
+        K.For_testing.snapshot_json_inner_with_pending_reader
+          ~read_pending:(fun ~base_path:_ -> Ok []) ~config ~meta
+      in
+      let open Yojson.Safe.Util in
+      List.iter (fun (label, receipt_trace, turn, expected) ->
+        let snapshot = observe receipt_trace turn in
+        Alcotest.(check string) (label ^ " disposition") expected
+          (snapshot |> member "disposition" |> to_string);
+        Alcotest.(check string) (label ^ " history retained") receipt_trace
+          (snapshot |> member "latest_receipt" |> member "trace_id" |> to_string))
+        [ "previous turn in same second", trace_id, 6, "Alert"
+        ; "different trace with same turn", "previous-trace", 7, "Alert"
+        ; "same turn before later failure", trace_id, 7, "Alert" ];
+      Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name None;
+      let recovered = observe trace_id 7 in
+      Alcotest.(check string) "registry recovery restores receipt disposition" "Pass"
+        (recovered |> member "disposition" |> to_string))
+;;
+
+let test_historical_runtime_observation_projections () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
+  let base_dir = temp_dir () in
+  let config = Masc.Workspace.default_config base_dir in
+  let meta = make_meta "runtime-walk-history" in
+  let entry = Masc.Keeper_registry.register_offline ~base_path:base_dir meta.name meta in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Masc.Keeper_registry.unregister_exact entry);
+      remove_tree base_dir)
+    (fun () -> with_env "MASC_BASE_PATH" base_dir @@ fun () ->
+      Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name
+        (Some (Masc.Keeper_registry.Exception "current failure"));
+      let store = Masc.Keeper_types_support.keeper_execution_receipt_store config meta.name in
+      let project () =
+        let trust = K.summary_json ~config ~meta in
+        let compact = Server_dashboard_http_composite_claims.composite_execution_receipt_json
+          ~config ~claim_window:(Server_dashboard_http_composite_claims.read_claim_window ())
+          ~keeper_name:meta.name in
+        let open Yojson.Safe.Util in
+        let trust_observation = trust |> member "execution" |> member "runtime_lane_observation" in
+        let compact_observation = compact |> member "runtime_lane_observation" in
+        Alcotest.(check bool) "trust and compact relay the same historical observation"
+          true (trust_observation = compact_observation);
+        Alcotest.(check string) "historical evidence cannot clear the current blocker"
+          "Alert" (trust |> member "disposition" |> to_string);
+        trust_observation
+      in
+      Alcotest.(check bool) "no stored receipt is not an observed empty walk"
+        true (project () = `Null);
+      let module Evidence = Keeper_runtime_walk_evidence in
+      let failure = Evidence.observe_failure ~runtime_id:"previous.runtime" ~attempt:0
+        ~dispatch:Runtime_attempt_dispatch.Dispatched
+        (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
+           { message="Prompt exceeds max length"; reason=Agent_core.Retry.Unknown_invalid_request })) in
+      let evidence = Evidence.to_yojson
+        { Evidence.failures=[failure]; terminal=Evidence.Terminal_not_observed } in
+      let identity =
+        [ "trace_id", `String "previous-trace"; "turn_count", `Int 2
+        ; "ended_at", `String "2026-06-01T00:00:00Z" ] in
+      let row identity runtime = `Assoc
+        (identity @ [ "terminal_reason_code", `String "success"
+                    ; "operator_disposition", `String "pass"
+                    ; "operator_disposition_reason", `String "healthy" ] @ runtime) in
+      let cases =
+        [ "explicit no capture", identity, ["runtime", `Assoc ["lane_evidence", `Null]], "not_observed", true
+        ; "observed empty", identity,
+          ["runtime", `Assoc ["lane_evidence", Evidence.to_yojson Evidence.empty]], "observed", true
+        ; "previous failure", identity, ["runtime", `Assoc ["lane_evidence", evidence]], "observed", true
+        ; "missing runtime", identity, [], "unreadable", true
+        ; "corrupt runtime", identity, ["runtime", `Bool false], "unreadable", true
+        ; "missing evidence", identity, ["runtime", `Assoc []], "unreadable", true
+        ; "corrupt evidence", identity, ["runtime", `Assoc ["lane_evidence", `List []]], "unreadable", true
+        ; "duplicate evidence", identity,
+          ["runtime", `Assoc ["lane_evidence", evidence; "lane_evidence", evidence]], "unreadable", true
+        ; "duplicate runtime", identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]; "runtime", `Null], "unreadable", true
+        ; "missing identity", List.remove_assoc "trace_id" identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]], "unreadable", false
+        ; "duplicate identity", ("trace_id", `String "another-trace")::identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]], "unreadable", false
+        ; "missing turn", List.remove_assoc "turn_count" identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]], "unreadable", false
+        ; "explicit unknown turn", ("turn_count", `Null)::List.remove_assoc "turn_count" identity,
+          ["runtime", `Assoc ["lane_evidence", evidence]], "observed", true ] in
+      List.iter (fun (label, identity, runtime, state, has_turn) ->
+        Dated_jsonl.append store (row identity runtime);
+        let observation = project () in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) (label ^ " state") state
+          (observation |> member "state" |> to_string);
+        let turn = member "turn" observation in
+        if has_turn then (
+          Alcotest.(check string) (label ^ " binds the source trace, not current meta")
+            "previous-trace" (turn |> member "trace_id" |> to_string);
+          Alcotest.(check bool) (label ^ " preserves the source turn, including explicit null")
+            true (member "turn_count" turn = List.assoc "turn_count" identity))
+        else Alcotest.(check bool) (label ^ " does not invent turn identity") true (turn = `Null);
+        if String.equal label "previous failure" then
+          Alcotest.(check bool) "earlier unclassified refusal survives both projections"
+            true (member "evidence" observation = Evidence.to_observation_yojson
+              { Evidence.failures=[failure]; terminal=Evidence.Terminal_not_observed })) cases)
+;;
+
+let test_active_model_missing_attempt_is_unknown () =
+  let meta = make_meta "status-runtime-missing-attempt" in
+  let unknown_model_label =
+    Boundary_redaction.to_string Boundary_redaction.unknown_model_label
+  in
+  Alcotest.(check string)
+    "missing runtime attempt is explicit unknown"
+    unknown_model_label
+    (Masc.Keeper_status_runtime.active_model_of_meta meta);
+  Alcotest.(check string)
+    "missing runtime attempt label is explicit unknown"
+    unknown_model_label
+    (Masc.Keeper_status_runtime.active_model_label_of_meta meta)
+;;
+
+let drop_value reason =
+  P.metric_value_or_zero
+    P.metric_persistence_read_drops
+    ~labels:[ "surface", "keeper_runtime_trust_decision_log"; "reason", reason ]
+    ()
+;;
+
+let test_snapshot_counts_malformed_decision_rows () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-decision-drop" in
+       let meta = make_meta keeper_name in
+       let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
+       let entry_error = Read_drop_reason.to_wire Read_drop_reason.Entry_load_error in
+       let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
+       let before_entry_error = drop_value entry_error in
+       let before_invalid_payload = drop_value invalid_payload in
+       write_file
+         path
+         (String.concat
+            "\n"
+            [ Yojson.Safe.to_string
+                (`Assoc
+                    [ "turn_id", `Int 11
+                    ; "turn_verdict", `String "run"
+                    ; "telemetry", `Assoc [ "selected_model", `String "test-model" ]
+                    ])
+            ; Yojson.Safe.to_string (`List [])
+            ; "{not-json"
+            ]
+          ^ "\n");
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "falls back to older valid decision"
+         11
+         (snapshot |> member "latest_decision" |> member "turn_id" |> to_int);
+       Alcotest.(check string)
+         "selected model survives fallback"
+         "test-model"
+         (snapshot |> member "selected_model" |> to_string);
+       Alcotest.(check (float 0.001))
+         "malformed json increments entry error"
+         1.0
+       (drop_value entry_error -. before_entry_error);
+       Alcotest.(check (float 0.001))
+         "non-object row increments invalid payload"
+         1.0
+         (drop_value invalid_payload -. before_invalid_payload))
+;;
+
+(* Same shape as the test above with one byte of difference: no trailing
+   newline. That is what an append caught in flight looks like on disk, and it
+   is the only thing separating it from the malformed-row case, which ends
+   with "\n" and must keep counting as entry_load_error. Classifying by line
+   position alone cannot tell them apart; an earlier attempt that did was
+   caught by the test above. *)
+let test_snapshot_counts_unterminated_tail_separately () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-decision-tail" in
+       let meta = make_meta keeper_name in
+       let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
+       let entry_error = Read_drop_reason.to_wire Read_drop_reason.Entry_load_error in
+       let tail_partial = Read_drop_reason.to_wire Read_drop_reason.Tail_partial_write in
+       let before_entry_error = drop_value entry_error in
+       let before_tail_partial = drop_value tail_partial in
+       write_file
+         path
+         (String.concat
+            "\n"
+            [ Yojson.Safe.to_string
+                (`Assoc
+                    [ "turn_id", `Int 21
+                    ; "turn_verdict", `String "run"
+                    ; "telemetry", `Assoc [ "selected_model", `String "tail-model" ]
+                    ])
+            ; {|{"turn_id": 22, "turn_verdict": "ru|}
+            ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "falls back past the in-flight append"
+         21
+         (snapshot |> member "latest_decision" |> member "turn_id" |> to_int);
+       Alcotest.(check (float 0.001))
+         "unterminated tail counts as tail_partial_write"
+         1.0
+         (drop_value tail_partial -. before_tail_partial);
+       Alcotest.(check (float 0.001))
+         "and stays off the data-integrity reason"
+         0.0
+         (drop_value entry_error -. before_entry_error))
+;;
+
+let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-receipt-model" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "turn_count", `Int 7
+             ; "ended_at", `String "2026-06-01T00:00:00Z"
+             ; ( "runtime"
+               , `Assoc
+                   [ "name", `String "runtime-test"
+                   ; "selected_model", `String "receipt-model"
+                   ; "attempt_count", `Int 1
+                   ; "fallback_applied", `Bool false
+                   ; "outcome", `String "completed"
+                   ] )
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "selected model falls back to receipt"
+         "receipt-model"
+         (snapshot |> member "selected_model" |> to_string);
+       Alcotest.(check string)
+         "active model falls back to receipt"
+         "receipt-model"
+         (snapshot |> member "active_model" |> to_string);
+       Alcotest.(check string)
+         "execution provider selected model follows receipt"
+         "receipt-model"
+         (snapshot |> member "execution" |> member "provider_selected_model" |> to_string))
+;;
+
+let test_observation_not_dispatched_receipt_remains_non_blocking () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-observation-not-dispatched" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+               (* Typed execution-limit observations project to receipt
+                  success. They do not create a Keeper blocker or terminal
+                  lifecycle decision. *)
+             ; "terminal_reason_code", `String "success"
+             ; "completion_contract_result", `String "not_dispatched"
+             ]);
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "display disposition"
+         "Pass"
+         (snapshot |> member "disposition" |> to_string);
+       Alcotest.(check string)
+         "display reason"
+         "healthy"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check bool)
+         "needs attention"
+         false
+         (snapshot |> member "needs_attention" |> to_bool);
+       Alcotest.(check string)
+         "operator disposition remains receipt truth"
+         "pass"
+         (snapshot |> member "operator_disposition" |> to_string);
+       Alcotest.(check string)
+         "operator disposition reason remains receipt truth"
+         "healthy"
+         (snapshot |> member "operator_disposition_reason" |> to_string))
+;;
+
+let test_summary_and_snapshot_share_trust_projection () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-shared-projection" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "success"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let summary = K.summary_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       List.iter
+         (fun field ->
+            Alcotest.(check bool)
+              (field ^ " uses the shared trust projection")
+              true
+              (snapshot |> member field = (summary |> member field)))
+         [ "disposition"
+         ; "disposition_reason"
+         ; "operator_disposition"
+         ; "operator_disposition_reason"
+         ; "needs_attention"
+         ; "attention_reason"
+         ; "next_human_action"
+         ])
+;;
+
+let test_unknown_completion_contract_result_stays_visible () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-unknown-contract" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "completion_contract_result", `String "future_state"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "raw completion contract result remains on execution summary"
+         "future_state"
+         (snapshot |> member "execution" |> member "completion_contract_result"
+          |> to_string);
+       Alcotest.(check string)
+         "unknown result is visible instead of collapsed to not observed"
+         "unknown_completion_contract_result:future_state"
+         (snapshot |> member "execution" |> member "completion_observation_summary"
+         |> to_string))
+;;
+
+let test_completion_observation_rejects_drifted_label_before_parser () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-typed-contract-label" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "success"
+             ; "completion_contract_result", `String " Future_State "
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "raw drifted result remains visible"
+         " Future_State "
+         (snapshot |> member "execution" |> member "completion_contract_result"
+          |> to_string);
+       Alcotest.(check string)
+         "does not normalize drifted label before the exact parser"
+         "unknown_completion_contract_result: Future_State "
+         (snapshot
+          |> member "execution"
+          |> member "completion_observation_summary"
+          |> to_string))
+;;
+
+let test_unknown_completion_observation_label_is_explicit () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-legacy-satisfied-contract-label" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "success"
+             ; "completion_contract_result", `String "future_state_v2"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "unknown observation label stays explicit"
+         "unknown_completion_contract_result:future_state_v2"
+         (snapshot
+          |> member "execution"
+          |> member "completion_observation_summary"
+          |> to_string))
+;;
+
+let test_no_visible_output_no_work_receipt_does_not_mark_attention () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       init_runtime_default_for_tests ();
+       let keeper_name = "runtime-trust-no-visible-output-no-work" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "success"
+             ; "completion_contract_result", `String "no_visible_output"
+             ; "current_task_id", `Null
+             ; "goal_ids", `List []
+             ]);
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "display disposition"
+         "Pass"
+         (snapshot |> member "disposition" |> to_string);
+       Alcotest.(check string)
+         "display reason"
+         "healthy"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check bool)
+         "needs attention"
+         false
+         (snapshot |> member "needs_attention" |> to_bool);
+       Alcotest.(check bool)
+         "attention reason omitted"
+         true
+         (match snapshot |> member "attention_reason" with
+          | `Null -> true
+          | _ -> false))
+;;
+
+let test_no_visible_output_active_receipt_does_not_mark_attention () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       init_runtime_default_for_tests ();
+       let keeper_name = "runtime-trust-no-visible-output-active-task" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "success"
+             ; "completion_contract_result", `String "no_visible_output"
+             ; "current_task_id", `String "task-1844"
+             ; "goal_ids", `List [ `String "goal-pm-flow" ]
+             ]);
+       let snapshot = snapshot_with_running_keeper ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "display disposition"
+         "Pass"
+         (snapshot |> member "disposition" |> to_string);
+       Alcotest.(check string)
+         "display reason"
+         "healthy"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check bool)
+         "needs attention"
+         false
+         (snapshot |> member "needs_attention" |> to_bool);
+       Alcotest.(check bool)
+         "attention reason omitted"
+         true
+         (match snapshot |> member "attention_reason" with
+          | `Null -> true
+          | _ -> false))
+;;
+
+let test_unknown_completion_observation_is_explicit () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-unknown-contract-label" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "success"
+             ; "completion_contract_result", `String "future-state"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "raw result remains visible"
+         "future-state"
+         (snapshot |> member "execution" |> member "completion_contract_result" |> to_string);
+       Alcotest.(check string)
+         "unknown result uses explicit sentinel"
+         "unknown_completion_contract_result:future-state"
+         (snapshot
+          |> member "execution"
+          |> member "completion_observation_summary"
+          |> to_string))
+;;
+
+(* The receipt writer puts a kind and its reason on every row together, so a
+   row whose kind the parser does not know, or a kind with no reason, is
+   damaged. The snapshot relays neither and shows its own verdict. A row
+   written the way the writer writes it is relayed. *)
+let test_a_damaged_receipt_disposition_relays_nothing () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-damaged-receipt-disposition" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       let append ~ended_at disposition_fields =
+         Dated_jsonl.append
+           receipt_store
+           (`Assoc
+               ([ "ended_at", `String ended_at
+                ; "terminal_reason_code", `String "success"
+                ; "completion_contract_result", `String "not_dispatched"
+                ]
+                @ disposition_fields))
+       in
+       let relayed () =
+         let snapshot = snapshot_with_running_keeper ~config ~meta in
+         let open Yojson.Safe.Util in
+         snapshot |> member "operator_disposition", snapshot |> member "disposition_reason"
+       in
+       append
+         ~ended_at:"2026-06-01T00:00:00Z"
+         [ "operator_disposition", `String "blocked_runtime"
+         ; "operator_disposition_reason", `String "runtime_blocked"
+         ];
+       let disposition, reason = relayed () in
+       Alcotest.(check bool) "an unknown kind is not relayed" true (disposition = `Null);
+       Alcotest.(check string)
+         "the snapshot shows its own verdict"
+         "healthy"
+         (Yojson.Safe.Util.to_string reason);
+       append
+         ~ended_at:"2026-06-01T00:01:00Z"
+         [ "operator_disposition", `String "effect_review_required" ];
+       let disposition, _ = relayed () in
+       Alcotest.(check bool)
+         "a kind without its reason is not relayed"
+         true
+         (disposition = `Null);
+       append
+         ~ended_at:"2026-06-01T00:02:00Z"
+         [ "operator_disposition", `String "effect_review_required"
+         ; "operator_disposition_reason", `String "manual_review"
+         ];
+       let disposition, _ = relayed () in
+       Alcotest.(check bool)
+         "a reason the writer never writes is not relayed"
+         true
+         (disposition = `Null);
+       append
+         ~ended_at:"2026-06-01T00:03:00Z"
+         [ "operator_disposition", `String "effect_review_required"
+         ; "operator_disposition_reason", `String "provider_attempt_effect_fenced"
+         ];
+       let disposition, reason = relayed () in
+       Alcotest.(check string)
+         "a whole pair is relayed"
+         "effect_review_required"
+         (Yojson.Safe.Util.to_string disposition);
+       Alcotest.(check string)
+         "its reason is the display reason"
+         "provider_attempt_effect_fenced"
+         (Yojson.Safe.Util.to_string reason))
+;;
+
+(* The dashboard's per-Keeper trust object writes the receipt's operator
+   disposition as the trust snapshot parsed it. With no receipt, or with a
+   receipt whose kind the receipt module does not write, both fields are
+   null. A whole pair is relayed as the snapshot relays it. *)
+let test_dashboard_trust_relays_the_snapshot_operator_disposition () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "dashboard-trust-operator-disposition" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       let append ~ended_at disposition_fields =
+         Dated_jsonl.append
+           receipt_store
+           (`Assoc
+               ([ "ended_at", `String ended_at
+                ; "terminal_reason_code", `String "success"
+                ; "completion_contract_result", `String "not_dispatched"
+                ]
+                @ disposition_fields))
+       in
+       let operator_fields json =
+         let open Yojson.Safe.Util in
+         member "operator_disposition" json, member "operator_disposition_reason" json
+       in
+       let dashboard_and_snapshot () =
+         ( operator_fields (Dashboard_http_keeper_trust.keeper_trust_json config meta)
+         , operator_fields (K.summary_json ~config ~meta) )
+       in
+       let entry =
+         Masc.Keeper_registry.For_testing.register
+           ~base_path:config.base_path meta.name meta
+       in
+       Fun.protect
+         ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+         (fun () ->
+            let dashboard, snapshot = dashboard_and_snapshot () in
+            Alcotest.(check bool)
+              "no receipt: no operator disposition"
+              true
+              (dashboard = (`Null, `Null));
+            Alcotest.(check bool) "no receipt: same as the snapshot" true (dashboard = snapshot);
+            Alcotest.(check bool)
+              "no receipt: the full row with its receipt says the same"
+              true
+              (operator_fields
+                 (Dashboard_http_keeper_trust.keeper_trust_json
+                    ~include_receipt:true
+                    config
+                    meta)
+               = (`Null, `Null));
+            append
+              ~ended_at:"2026-06-01T00:00:00Z"
+              [ "operator_disposition", `String "blocked_runtime"
+              ; "operator_disposition_reason", `String "runtime_blocked"
+              ];
+            let dashboard, snapshot = dashboard_and_snapshot () in
+            Alcotest.(check bool)
+              "an unknown kind is not relayed"
+              true
+              (dashboard = (`Null, `Null));
+            Alcotest.(check bool) "unknown kind: same as the snapshot" true (dashboard = snapshot);
+            append
+              ~ended_at:"2026-06-01T00:01:00Z"
+              [ "operator_disposition", `String "effect_review_required"
+              ; "operator_disposition_reason", `String "provider_attempt_effect_fenced"
+              ];
+            let dashboard, snapshot = dashboard_and_snapshot () in
+            Alcotest.(check bool)
+              "a whole pair is relayed"
+              true
+              (dashboard
+               = (`String "effect_review_required", `String "provider_attempt_effect_fenced"));
+            Alcotest.(check bool) "whole pair: same as the snapshot" true (dashboard = snapshot)))
+;;
+
+(* The row shown when a Keeper's dashboard row could not be built read no
+   receipt, so it reports no operator disposition. *)
+let test_degraded_dashboard_trust_reports_no_operator_disposition () =
+  let trust =
+    Dashboard_http_keeper_trust.degraded_keeper_trust_json ~error:"worker raised"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "no operator disposition"
+    true
+    (member "operator_disposition" trust = `Null);
+  Alcotest.(check bool)
+    "no operator disposition reason"
+    true
+    (member "operator_disposition_reason" trust = `Null);
+  Alcotest.(check string)
+    "a worker exception is the reason"
+    "keeper_dashboard_worker_exception"
+    (member "disposition_reason" trust |> to_string);
+  Alcotest.(check string)
+    "the caught error is the attention reason"
+    "worker raised"
+    (member "attention_reason" trust |> to_string);
+  Alcotest.(check bool) "a person looks at it" true (member "needs_attention" trust |> to_bool)
+;;
+
+let test_model_observability_uses_runtime_trust_selected_model () =
+  let runtime_trust =
+    `Assoc
+      [ "selected_model", `String "receipt-model"
+      ; ( "execution"
+        , `Assoc [ "provider_selected_model", `String "execution-model" ] )
+      ]
+  in
+  let json =
+    O.model_observability_json
+      ~current_runtime_id:"runtime-test"
+      ~runtime_blocker_class:None
+      ~runtime_trust
+      None
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "runtime-trust model alone is not a scoped runtime observation"
+    false
+    (json |> member "recent_turn_observation" |> to_bool);
+  Alcotest.(check string)
+    "selected model falls through to model_observability"
+    "receipt-model"
+    (json |> member "selected_model" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract does not verify weak selected-model hint"
+    false
+    (json |> member "runtime_contract" |> member "verified" |> to_bool);
+  Alcotest.(check string)
+    "runtime contract source records trust field"
+    "runtime_trust.selected_model"
+    (json |> member "runtime_contract" |> member "source" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract does not expose selected model as actual model"
+    true
+    (json |> member "runtime_contract" |> member "actual_model_id" = `Null)
+;;
+
+let test_model_observability_uses_runtime_trust_execution_selected_model () =
+  let runtime_trust =
+    `Assoc
+      [ ( "execution"
+        , `Assoc [ "provider_selected_model", `String "execution-model" ] )
+      ]
+  in
+  let json =
+    O.model_observability_json
+      ~current_runtime_id:"runtime-test"
+      ~runtime_blocker_class:None
+      ~runtime_trust
+      None
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "runtime-trust execution model alone is not a scoped runtime observation"
+    false
+    (json |> member "recent_turn_observation" |> to_bool);
+  Alcotest.(check string)
+    "execution selected model falls through to model_observability"
+    "execution-model"
+    (json |> member "selected_model" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract does not verify weak execution selected-model hint"
+    false
+    (json |> member "runtime_contract" |> member "verified" |> to_bool);
+  Alcotest.(check string)
+    "runtime contract source records execution trust field"
+    "runtime_trust.execution.provider_selected_model"
+    (json |> member "runtime_contract" |> member "source" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract does not expose execution hint as actual model"
+    true
+    (json |> member "runtime_contract" |> member "actual_model_id" = `Null)
+;;
+
+let test_model_observability_missing_runtime_id_is_unscoped () =
+  let latest_metrics =
+    Some
+      (`Assoc
+        [ ( "runtime"
+          , `Assoc
+              [ "attempts", `List [ `Assoc [ "status", `String "ok" ] ]
+              ] )
+        ])
+  in
+  let json =
+    O.model_observability_json
+      ~current_runtime_id:"runtime-test"
+      ~runtime_blocker_class:None
+      ~runtime_trust:(`Assoc [])
+      latest_metrics
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "missing runtime_id is not current-runtime observation"
+    false
+    (json |> member "recent_turn_observation" |> to_bool);
+  Alcotest.(check string)
+    "runtime observation scope is explicit"
+    "missing_runtime_id"
+    (json |> member "runtime_observation_scope" |> to_string);
+  Alcotest.(check bool)
+    "missing runtime_id does not verify runtime contract"
+    false
+    (json |> member "runtime_contract" |> member "verified" |> to_bool)
+;;
+
+let test_model_observability_runtime_match_does_not_promote_model_hint () =
+  let latest_metrics =
+    Some
+      (`Assoc
+        [ ( "runtime"
+          , `Assoc
+              [ "runtime_id", `String "runtime-test"
+              ; "attempts", `List [ `Assoc [ "status", `String "ok" ] ]
+              ] )
+        ])
+  in
+  let runtime_trust = `Assoc [ "selected_model", `String "receipt-model" ] in
+  let json =
+    O.model_observability_json
+      ~current_runtime_id:"runtime-test"
+      ~runtime_blocker_class:None
+      ~runtime_trust
+      latest_metrics
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "matched runtime row is a scoped runtime observation"
+    true
+    (json |> member "recent_turn_observation" |> to_bool);
+  Alcotest.(check string)
+    "runtime observation scope is matched"
+    "matched"
+    (json |> member "runtime_observation_scope" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract scope is verified"
+    true
+    (json |> member "runtime_contract" |> member "verified" |> to_bool);
+  Alcotest.(check bool)
+    "weak selected-model hint is not promoted to actual model"
+    true
+    (json |> member "runtime_contract" |> member "actual_model_id" = `Null)
+;;
+
+let test_pending_approval_overrides_previous_success_until_resolved () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let config = Masc.Workspace.default_config base_dir in
+    let meta = make_meta "runtime-trust-pending-approval" in
+    let store =
+      Masc.Keeper_types_support.keeper_execution_receipt_store config meta.name
+    in
+    Dated_jsonl.append store
+      (`Assoc
+        [ "ended_at", `String "2026-06-01T00:00:00Z"
+        ; "operator_disposition", `String "pass"
+        ; "operator_disposition_reason", `String "healthy"
+        ; "terminal_reason_code", `String "success"
+        ]);
+    let snapshot entries =
+      K.For_testing.snapshot_json_inner_with_pending_reader
+        ~read_pending:(fun ~base_path:_ -> Ok entries) ~config ~meta
+    in
+    let open Yojson.Safe.Util in
+    let pending = snapshot
+      [ `Assoc
+          [ "keeper_name", `String meta.name
+          ; "requested_at", `Float 1.0
+          ; "id", `String "pending-approval"
+          ] ]
+    in
+    Alcotest.(check string) "prior success receipt is actually loaded" "pass"
+      (pending |> member "latest_receipt" |> member "operator_disposition" |> to_string);
+    Alcotest.(check int) "pending request remains visible" 1
+      (pending |> member "pending_approval_count" |> to_int);
+    Alcotest.(check string) "previous success cannot hide pending approval" "Alert"
+      (pending |> member "disposition" |> to_string);
+    Alcotest.(check string) "current reason explains pending decision"
+      "pending_operator_decision"
+      (pending |> member "disposition_reason" |> to_string);
+    Alcotest.(check string) "current action resolves approval" "resolve_approval"
+      (pending |> member "next_human_action" |> to_string);
+    let resolved = snapshot [] in
+    Alcotest.(check string) "cleared queue restores receipt disposition" "Pass"
+      (resolved |> member "disposition" |> to_string))
+;;
+
+let test_approval_queue_failure_remains_typed_unavailable () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let meta = make_meta "runtime-trust-approval-unavailable" in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store
+           config
+           meta.name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+            [ "ended_at", `String "2026-06-01T00:00:00Z"
+            ; "operator_disposition", `String "pass"
+            ; "operator_disposition_reason", `String "healthy"
+            ; "terminal_reason_code", `String "success"
+            ]);
+       let read_pending ~base_path =
+         let error : Masc.Keeper_approval_queue_result.storage_error =
+           {
+             path =
+               Filename.concat base_path
+                 ".masc/keeper_approval_queue.json";
+             reason = "injected queue read failure";
+           }
+         in
+         Error error
+       in
+       let snapshot =
+         K.For_testing.snapshot_json_inner_with_pending_reader
+           ~read_pending ~config ~meta
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "queue state remains unavailable"
+         "unavailable"
+         (snapshot
+          |> member "approval_queue_state"
+          |> member "state"
+          |> to_string);
+       Alcotest.(check string)
+         "queue state uses backend severity"
+         "bad"
+         (snapshot
+          |> member "approval_queue_state"
+          |> member "severity"
+          |> to_string);
+       Alcotest.(check bool)
+         "pending count is not synthesized"
+         true
+         (snapshot |> member "pending_approval_count" = `Null);
+       Alcotest.(check bool)
+         "pending entries are not synthesized"
+         true
+         (snapshot |> member "pending_approvals" = `Null);
+       Alcotest.(check string)
+         "unavailable queue blocks healthy disposition"
+         "Alert"
+         (snapshot |> member "disposition" |> to_string);
+       Alcotest.(check string)
+         "unavailable queue keeps typed reason"
+         "approval_queue_unavailable"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check bool)
+         "unavailable queue overrides stale receipt disposition"
+         true
+         (snapshot |> member "operator_disposition" = `Null);
+       Alcotest.(check bool)
+         "unavailable queue relays no stale receipt reason"
+         true
+         (snapshot |> member "operator_disposition_reason" = `Null);
+       Alcotest.(check bool)
+         "unavailable queue needs attention"
+         true
+         (snapshot |> member "needs_attention" |> to_bool);
+       Alcotest.(check string)
+         "approval substate is unavailable"
+         "unavailable"
+         (snapshot |> member "approval" |> member "state" |> to_string);
+       Alcotest.(check string)
+         "causal event records queue unavailability"
+         "approval_queue_unavailable"
+         (snapshot
+          |> member "latest_causal_event"
+          |> member "kind"
+          |> to_string))
+;;
+
+let () =
+  Alcotest.run
+    "keeper_runtime_trust_snapshot"
+    [ ( "status_runtime_provenance"
+      , [ Alcotest.test_case "active blocker survives historical success" `Quick
+            test_active_blocker_overrides_success_until_cleared
+        ; Alcotest.test_case "historical candidate evidence survives trust and compact projections"
+            `Quick test_historical_runtime_observation_projections
+        ; Alcotest.test_case "trust follows structured blocker state" `Quick
+            test_trust_blocker_uses_structured_state
+        ; Alcotest.test_case "trust relays only a shown receipt's operator disposition"
+            `Quick
+            test_trust_relays_only_a_shown_receipt_operator_disposition
+        ; Alcotest.test_case "a damaged receipt disposition relays nothing" `Quick
+            test_a_damaged_receipt_disposition_relays_nothing
+        ; Alcotest.test_case
+            "dashboard trust relays the snapshot's operator disposition"
+            `Quick
+            test_dashboard_trust_relays_the_snapshot_operator_disposition
+        ; Alcotest.test_case
+            "degraded dashboard trust reports no operator disposition"
+            `Quick
+            test_degraded_dashboard_trust_reports_no_operator_disposition
+        ; Alcotest.test_case
+            "missing runtime attempt does not fabricate active_model"
+            `Quick
+            test_active_model_missing_attempt_is_unknown
+        ] )
+    ; ( "decision_log_read_drops"
+      , [ Alcotest.test_case
+            "malformed decision rows increment drop metrics"
+            `Quick
+            test_snapshot_counts_malformed_decision_rows
+        ; Alcotest.test_case
+            "unterminated tail is not a data-integrity drop"
+            `Quick
+            test_snapshot_counts_unterminated_tail_separately
+        ] )
+    ; ( "receipt_runtime_model"
+      , [ Alcotest.test_case
+            "receipt runtime model feeds trust snapshot when decision is absent"
+            `Quick
+            test_snapshot_uses_receipt_runtime_model_when_decision_absent
+        ; Alcotest.test_case
+            "status model observability reuses runtime-trust selected model"
+            `Quick
+            test_model_observability_uses_runtime_trust_selected_model
+        ; Alcotest.test_case
+            "not-dispatched observation remains non-blocking"
+            `Quick
+            test_observation_not_dispatched_receipt_remains_non_blocking
+        ; Alcotest.test_case
+            "summary and snapshot share one trust projection"
+            `Quick
+            test_summary_and_snapshot_share_trust_projection
+        ; Alcotest.test_case
+            "unknown completion-contract result remains visible"
+            `Quick
+            test_unknown_completion_contract_result_stays_visible
+        ; Alcotest.test_case
+            "no-visible-output no-work receipt does not mark attention"
+            `Quick
+            test_no_visible_output_no_work_receipt_does_not_mark_attention
+        ; Alcotest.test_case
+            "no-visible-output active receipt does not mark attention"
+            `Quick
+            test_no_visible_output_active_receipt_does_not_mark_attention
+        ; Alcotest.test_case
+            "completion-observation labels reject drift before typed parser"
+            `Quick
+            test_completion_observation_rejects_drifted_label_before_parser
+        ; Alcotest.test_case
+            "unknown completion-observation label is explicit"
+            `Quick
+            test_unknown_completion_observation_label_is_explicit
+        ; Alcotest.test_case
+            "unknown completion-contract label uses explicit sentinel"
+            `Quick
+            test_unknown_completion_observation_is_explicit
+        ; Alcotest.test_case
+            "status model observability reuses runtime-trust execution selected model"
+            `Quick
+            test_model_observability_uses_runtime_trust_execution_selected_model
+        ; Alcotest.test_case
+            "status model observability treats missing runtime_id as unscoped"
+            `Quick
+            test_model_observability_missing_runtime_id_is_unscoped
+        ; Alcotest.test_case
+            "status model observability keeps matched weak model hint non-actual"
+            `Quick
+            test_model_observability_runtime_match_does_not_promote_model_hint
+        ] )
+    ; ( "approval_queue_projection"
+      , [ Alcotest.test_case
+            "pending approval overrides success until resolved"
+            `Quick
+            test_pending_approval_overrides_previous_success_until_resolved
+        ; Alcotest.test_case
+            "queue failure remains typed unavailable"
+            `Quick
+            test_approval_queue_failure_remains_typed_unavailable
+        ] )
+    ]
+;;

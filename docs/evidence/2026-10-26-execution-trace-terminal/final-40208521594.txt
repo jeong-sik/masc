@@ -1,0 +1,63 @@
+run: https://github.com/jeong-sik/masc/actions/runs/40208521594
+raw_sha256: 8a79c5209af76d2551510cf324322da5fd5293fef397f3885d6ef6866db83ff9
+raw_bytes: 189969
+selected_lines: 56
+Only changed-scenario assertions and suite/checkout summaries retained.
+ANSI and trailing whitespace removed from selected lines.
+
+test suite	Checkout	2026-10-25T15:46:39.8895186Z HEAD is now at 8f6e942e fix(agent): isolate completion observer diagnostics
+test suite	Test	2026-10-25T15:47:33.0982639Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-25T15:47:33.1008750Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: start 2026-10-25T15:47:33Z (dune alias)
+test suite	Test	2026-10-25T15:48:12.7285305Z ^[[33mASSERT^[[0m canonical success committed before trace fault
+test suite	Test	2026-10-25T15:48:12.7315225Z ^[[33mASSERT^[[0m external effect executed once
+test suite	Test	2026-10-25T15:48:12.7316036Z ^[[33mASSERT^[[0m fault occurs after canonical terminal observation
+test suite	Test	2026-10-25T15:48:12.7316555Z ^[[33mASSERT^[[0m committed answer survives observer failure
+test suite	Test	2026-10-25T15:48:12.7317363Z ^[[33mASSERT^[[0m completion callback observes execution success
+test suite	Test	2026-10-25T15:48:12.7318078Z ^[[33mASSERT^[[0m trace failure diagnostic attempted once
+test suite	Test	2026-10-25T15:48:12.7318966Z ^[[33mASSERT^[[0m callback diagnostic only follows a callback failure
+test suite	Test	2026-10-25T15:48:12.7319709Z ^[[33mASSERT^[[0m lifecycle retains committed success
+test suite	Test	2026-10-25T15:48:12.7340835Z ^[[33mASSERT^[[0m fresh reader sees same canonical terminal
+test suite	Test	2026-10-25T15:48:12.7343125Z ^[[33mASSERT^[[0m same occurrence identities and sequence after observer failure
+test suite	Test	2026-10-25T15:48:12.7345806Z ^[[33mASSERT^[[0m observer failure appends no compensating execution failure
+test suite	Test	2026-10-25T15:48:12.7625133Z ^[[33mASSERT^[[0m canonical success committed before trace fault
+test suite	Test	2026-10-25T15:48:12.7654343Z ^[[33mASSERT^[[0m external effect executed once
+test suite	Test	2026-10-25T15:48:12.7655363Z ^[[33mASSERT^[[0m fault occurs after canonical terminal observation
+test suite	Test	2026-10-25T15:48:12.7656268Z ^[[33mASSERT^[[0m committed answer survives observer failure
+test suite	Test	2026-10-25T15:48:12.7656877Z ^[[33mASSERT^[[0m completion callback observes execution success
+test suite	Test	2026-10-25T15:48:12.7657728Z ^[[33mASSERT^[[0m trace failure diagnostic attempted once
+test suite	Test	2026-10-25T15:48:12.7658326Z ^[[33mASSERT^[[0m callback diagnostic only follows a callback failure
+test suite	Test	2026-10-25T15:48:12.7658879Z ^[[33mASSERT^[[0m lifecycle retains committed success
+test suite	Test	2026-10-25T15:48:12.7682306Z ^[[33mASSERT^[[0m fresh reader sees same canonical terminal
+test suite	Test	2026-10-25T15:48:12.7684836Z ^[[33mASSERT^[[0m same occurrence identities and sequence after observer failure
+test suite	Test	2026-10-25T15:48:12.7686528Z ^[[33mASSERT^[[0m observer failure appends no compensating execution failure
+test suite	Test	2026-10-25T15:48:12.7957318Z ^[[33mASSERT^[[0m canonical success committed before trace fault
+test suite	Test	2026-10-25T15:48:12.7986310Z ^[[33mASSERT^[[0m external effect executed once
+test suite	Test	2026-10-25T15:48:12.7987248Z ^[[33mASSERT^[[0m fault occurs after canonical terminal observation
+test suite	Test	2026-10-25T15:48:12.7988172Z ^[[33mASSERT^[[0m reserved diagnostic preempts completion callback
+test suite	Test	2026-10-25T15:48:12.7988797Z ^[[33mASSERT^[[0m trace failure diagnostic attempted once
+test suite	Test	2026-10-25T15:48:12.7989614Z ^[[33mASSERT^[[0m callback diagnostic only follows a callback failure
+test suite	Test	2026-10-25T15:48:12.7990284Z ^[[33mASSERT^[[0m lifecycle retains committed success
+test suite	Test	2026-10-25T15:48:12.8010543Z ^[[33mASSERT^[[0m fresh reader sees same canonical terminal
+test suite	Test	2026-10-25T15:48:12.8012687Z ^[[33mASSERT^[[0m same occurrence identities and sequence after observer failure
+test suite	Test	2026-10-25T15:48:12.8014775Z ^[[33mASSERT^[[0m observer failure appends no compensating execution failure
+test suite	Test	2026-10-25T15:48:12.8310337Z ^[[33mASSERT^[[0m canonical success committed before trace fault
+test suite	Test	2026-10-25T15:48:12.8339052Z ^[[33mASSERT^[[0m external effect executed once
+test suite	Test	2026-10-25T15:48:12.8339758Z ^[[33mASSERT^[[0m fault occurs after canonical terminal observation
+test suite	Test	2026-10-25T15:48:12.8340261Z ^[[33mASSERT^[[0m committed answer survives observer failure
+test suite	Test	2026-10-25T15:48:12.8341149Z ^[[33mASSERT^[[0m completion callback observes execution success
+test suite	Test	2026-10-25T15:48:12.8341627Z ^[[33mASSERT^[[0m trace failure diagnostic attempted once
+test suite	Test	2026-10-25T15:48:12.8342420Z ^[[33mASSERT^[[0m callback diagnostic only follows a callback failure
+test suite	Test	2026-10-25T15:48:12.8343219Z ^[[33mASSERT^[[0m lifecycle retains committed success
+test suite	Test	2026-10-25T15:48:12.8363524Z ^[[33mASSERT^[[0m fresh reader sees same canonical terminal
+test suite	Test	2026-10-25T15:48:12.8365820Z ^[[33mASSERT^[[0m same occurrence identities and sequence after observer failure
+test suite	Test	2026-10-25T15:48:12.8367666Z ^[[33mASSERT^[[0m observer failure appends no compensating execution failure
+test suite	Test	2026-10-25T15:48:12.9276124Z ^[[32mTest Successful^[[0m in 0.803s. 72 tests run.
+test suite	Test	2026-10-25T15:48:12.9555877Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: OK in 39s
+test suite	Test	2026-10-25T15:48:12.9582164Z [targeted] @@packages/agent_core/test/runtest-test_agent_periodic_cleanup: start 2026-10-25T15:48:12Z (dune alias)
+test suite	Test	2026-10-25T15:48:14.7956195Z ^[[32mTest Successful^[[0m in 0.346s. 9 tests run.
+test suite	Test	2026-10-25T15:48:14.8158622Z [targeted] @@packages/agent_core/test/runtest-test_agent_periodic_cleanup: OK in 2s
+test suite	Test	2026-10-25T15:48:14.8507045Z [targeted] dune build packages/agent_core/test/test_agent_advanced.exe
+test suite	Test	2026-10-25T15:48:16.5541487Z [targeted] packages/agent_core/test/test_agent_advanced: stanza env
+test suite	Test	2026-10-25T15:48:16.5567668Z [targeted] packages/agent_core/test/test_agent_advanced: start 2026-10-25T15:48:16Z
+test suite	Test	2026-10-25T15:48:16.6218730Z Test Successful in 0.052s. 21 tests run.
+test suite	Test	2026-10-25T15:48:16.6259329Z [targeted] packages/agent_core/test/test_agent_advanced: OK in 0s

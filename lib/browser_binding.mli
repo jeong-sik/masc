@@ -1,0 +1,17 @@
+(** Authoritative connection in a browser command receipt. Page JSON cannot
+    supply or overwrite this identity. An executed live receipt always names
+    one concrete client and its transport. *)
+type t
+val of_browser : Browser_selection.selected -> Browser_selection.browser -> t
+(** The identity of the browser the host chose from a worker snapshot. *)
+val to_json : t -> Yojson.Safe.t
+val selected : t -> Browser_selection.selected
+val connection_fields : t -> (string * Yojson.Safe.t) list
+val backend : t -> Browser_capabilities.backend
+(** The implemented capability catalog for the admitted connection. *)
+val same_connection : t -> t -> bool
+(** Route, transport and bound Space ID agree; a name change alone does not
+    replace the connection. *)
+val annotate : t -> Yojson.Safe.t -> Yojson.Safe.t
+(** Replace every page-supplied source/lane/selection/connection field with the
+    verified receipt values. Non-object payloads are left intact. *)

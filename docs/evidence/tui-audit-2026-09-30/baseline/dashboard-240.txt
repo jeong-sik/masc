@@ -1,0 +1,41 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+                                                                                                                                                                                          │[Recent] Changes · 2 keepers · feed closed: MCP initial
+   MASC Dashboard  [tui-audit-fixture]  09:56:58  HTTP [connected]                                                                                                                        │                   state     tool        calls  new tok
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+   Health: ok · Keepers: 0 listed · individual state in Keepers                                                                                                                           │· beta             no events
+                                                                                                                                                                                          │───────────────────────────────────────────────────────
+   Start here (2 steps)                                                                                                                                                                   │alpha · no events on this feed yet
+     1. New Keeper: masc keeper-create --edit --host 127.0.0.1 --port 56339
+     2. Open Keepers with 3, select it, and press Enter.
+
+   Goals · 0 active · metric and linked tasks are separate
+     No active Goal
+
+   Work  · 24h: 0 created · 0 currently done · 0 currently cancelled
+     Open: 0 working · 0 awaiting verification · 0 claimed · 5 todo
+     Currently done by UTC day (14 days): ▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+
+   Usage · 0/0 quota scopes reported since server start
+     0 runtime quota blocks observed · scope windows in Usage
+
+   Needs you · 6 attention items · 0? approvals (p in Work)
+     [warn] attention-1
+     [warn] attention-2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  m:Usage  r:refresh  Tab:next  q:quit  | Refresh: 60s | Base: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-audit-fixture-5knklaw2 | Port: 56339
+ › to alpha   (i to write)

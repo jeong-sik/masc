@@ -1,0 +1,93 @@
+{
+  "schema": "masc.memory_roster_repair_evidence.v1",
+  "issue": 46142,
+  "task_id": "task-2716",
+  "code_pr": 46146,
+  "evidence_pr": 46147,
+  "native_stack": 46148,
+  "code_head": "03128e8b222b35d70ccb7be33550e24a42c017f2",
+  "observed_server_commit": "bc3038a22374705db648bebd7f556223b3e84727",
+  "observation": {
+    "date": "2026-10-26",
+    "reported_error": "memory health snapshot fields mismatch (unknown=[execution])",
+    "response_schema": "keeper.memory_os.current_health.v8",
+    "root_fields": [
+      "schema",
+      "generated_at",
+      "execution",
+      "keepers",
+      "totals",
+      "alert_summary"
+    ],
+    "keeper_rows": 40,
+    "execution_schema": "keeper.memory_execution_availability.v1",
+    "execution_status": "ok",
+    "private_rows_retained": false
+  },
+  "source_review": {
+    "by": "memory_contract_review",
+    "kind": "independent_agent_source_review",
+    "verdict": "PASS",
+    "head": "03128e8b222b35d70ccb7be33550e24a42c017f2",
+    "review_base": "13635d158569f8827853f7027a22b89ee3eae3d5",
+    "canonical_diff_sha256": "4be7b2f770d7905a69558b6d6d7368097adacb9efa0fd9779bbb77854966b9e9"
+  },
+  "native_check": {
+    "workflow": "Test",
+    "run_id": 40318190019,
+    "event": "workflow_dispatch",
+    "head": "03128e8b222b35d70ccb7be33550e24a42c017f2",
+    "ref": "fix/tui-memory-execution-contract-20261026",
+    "suites": [
+      "test_server_dashboard_http_keeper_memory_health",
+      "test_tui_decode"
+    ],
+    "minimal": true,
+    "observed_status": "completed",
+    "observed_conclusion": "success",
+    "run_attempt": 1,
+    "job_id": 121556012059,
+    "completed_at": "2026-10-26T11:58:59Z",
+    "initial_observation": {
+      "status": "in_progress",
+      "conclusion": null
+    },
+    "results": [
+      {
+        "suite": "test_server_dashboard_http_keeper_memory_health",
+        "passed": 24,
+        "failed": 0,
+        "elapsed_seconds": 0.126
+      },
+      {
+        "suite": "test_tui_decode",
+        "passed": 378,
+        "failed": 0,
+        "elapsed_seconds": 0.033
+      }
+    ],
+    "total_passed": 402
+  },
+  "limitations": [
+    "Parser checks are not compilation or behavioral verification.",
+    "Only the two selected suites executed; 402 passes are not a full-regression result.",
+    "The source review is not a formal GitHub approval.",
+    "Execution availability is not provider success, source consumption or a Memory commit.",
+    "No installed-TUI recovery, visible UI proof or full regression is established."
+  ],
+  "selected_source_sha256": {
+    "lib/tui_decode_memory_health.ml": "207aee54b4f40ab8f001a575bc701347ca288c9277c5a62a2088dd5cadffd255",
+    "lib/tui_decode_memory_health.mli": "e22bf362a893275ed90377a3170f1faab1103e73f9cde8688342b367eb96f683",
+    "lib/tui_decode_fields.ml": "dd0d05b7b4ce251cf0c99ba17cc08bd46b76dc72360fe1cf153509344c03045c",
+    "lib/server/server_dashboard_http_keeper_memory_health.ml": "f14f8a8d188cd5ee6642b297621dba3758bf96cb61756aa64176554eaa629111",
+    "lib/keeper/keeper_memory_execution_availability.ml": "5614daafd3f64d051ee4632e0af001b868dd4ded4e37487d6988a38c03b49f21",
+    "test/test_server_dashboard_http_keeper_memory_health.ml": "ccdad6c70d7390bb3df85e2de6f329e37db65673548ec7b985c1ac8fd4dfa622",
+    "test/test_tui_decode.ml": "0ca5e2c18aa68a60a9b2717926cb279bf3e0dc556f7c0f433e58f59492aadcd4",
+    ".github/workflows/test.yml": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+  },
+  "native_log_excerpt": [
+    "2026-10-26T11:58:54.9300546Z Test Successful in 0.126s. 24 tests run.",
+    "2026-10-26T11:58:55.1820753Z Test Successful in 0.033s. 378 tests run."
+  ]
+}

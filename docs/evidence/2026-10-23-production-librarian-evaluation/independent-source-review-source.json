@@ -1,0 +1,110 @@
+{
+  "head": "9ed280ba2a16b5f82e58b3201eaddb9b77560a6a",
+  "review_base": "fd17c54260d8a5b4e0e6d58479ac93ffdb7f5a54",
+  "local_source_verdict": "PASS; no unresolved P0/P1/P2 found after exact unread selection repair",
+  "github_approval_published": false,
+  "scope": "committed own delta source review; no model/Dune/CI/native fixture execution",
+  "delta_sha256": "9ce3dd5390118aca9653e1c43e13f66a41ceead0bc9a549e491dfb7136493cfd",
+  "source": [
+    {
+      "file": "benchmarks/data/librarian_production_synthetic.json",
+      "git_blob": "41812bf02ca2e4cb95bca2306e6b2e551543c1ee",
+      "sha256": "27deae8d25833f70698424b31dd28b35f103317101f38a9aa6c75466e00bee33",
+      "bytes": 4831,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "bin/masc_librarian_continuity.ml",
+      "git_blob": "ddc4bebfaf05acdcd6847c94891bd4c1aee70f80",
+      "sha256": "80d1c57700382dd8be1b89665a892a8255234ca2c6771a47bbd089a6b56a31cf",
+      "bytes": 28749,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "docs/librarian-continuity-snapshot.md",
+      "git_blob": "5058709432ea8a4e6b7db2e5355a611b286949ab",
+      "sha256": "1579e1748ecc6c81d248afc103921407ce8171d3bb657b98916cb1c988d6fd3a",
+      "bytes": 16488,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "docs/librarian-production-evaluation.md",
+      "git_blob": "b88d393e592a46c82d4a8bf87e8e4c587486f1d5",
+      "sha256": "9d492ee1afefebec07bb69d76494cf4a83475de08d122bb7a82234a6ebd4c1fb",
+      "bytes": 5867,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "lib/keeper/keeper_librarian_queue_refresh.ml",
+      "git_blob": "fcfd32e18d16ff8a1d0adc156352f8d4aaa3d346",
+      "sha256": "7f0902f98ce9d04501c355a24aba19e16d247bd053cb0faf6840636dbea98904",
+      "bytes": 53535,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "lib/keeper/keeper_librarian_runtime.ml",
+      "git_blob": "44696d5c78b6121d95f325e78efc1fb88f091885",
+      "sha256": "140bd8b48b4e5c0638b55f1912fe765a55c8452d73466ddff43c62398e9a0053",
+      "bytes": 113198,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "lib/keeper/keeper_librarian_runtime.mli",
+      "git_blob": "d04a8d63921d2a535a7a5a4abde9a995f953e11b",
+      "sha256": "a836694ac38dcc645491cb2df77f7f18ce147b109381dbe4507a027b8e304377",
+      "bytes": 22435,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "lib/librarian_production_evaluation.ml",
+      "git_blob": "3d7a4e87201ca9b862d392ffa7a9da79ad46f4b0",
+      "sha256": "8a7f6f7d49bc0ba66e8c109770f0c5fc7d06cbd3e12509a06ee9fde2d8ab4636",
+      "bytes": 13419,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "lib/librarian_production_evaluation.mli",
+      "git_blob": "8591751162485b073defbf382e27774f0baf15b4",
+      "sha256": "06cb052457bb0416127e5e160fe602785f9489caabac6b09e83ccebd3d9598b8",
+      "bytes": 2899,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "lib/server/server_runtime_bootstrap.ml",
+      "git_blob": "114c634c9219fa61061f5b9051ba7707267ba6c7",
+      "sha256": "b6bed043803e3fa7e35d10fd224f545154823bd17fd74c27ff6e583620660389",
+      "bytes": 95708,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "lib/server/server_runtime_bootstrap.mli",
+      "git_blob": "b0a7209f608c2f8be35a2c819df3638915612260",
+      "sha256": "f82cb6cd29a6c68e66f6cc855bcb8888d5f581c004a49eb251d3d7e8ebc51447",
+      "bytes": 13825,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "test/dune",
+      "git_blob": "99b531e83a376e125e6681351ef0a2f6de74d825",
+      "sha256": "189b4bf3e958247e2ea9c7c501a3213718bc16c940a95f5977024aec14090f86",
+      "bytes": 210055,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "test/stanzas/test_librarian_production_evaluation.inc",
+      "git_blob": "298441a97a234714083a68c60da9a120a72a3f9f",
+      "sha256": "953e2e0bc31ea86e0667e179e4e58d957069432208e34e068b5e9ea339ad48df",
+      "bytes": 149,
+      "read_worktree_matches_git_blob": true
+    },
+    {
+      "file": "test/test_librarian_production_evaluation.ml",
+      "git_blob": "c1d72c9514b6dff47fd3f8eba46331d28b8f0d01",
+      "sha256": "2fdb73385694bb913ea677ce251f1fa224e66a7e880f379761776f9aac79ed30",
+      "bytes": 13527,
+      "read_worktree_matches_git_blob": true
+    }
+  ],
+  "report_sha256": "88825513e0dd6701be1e9ae9e35a8eeb7f385b7491122e7848f1c35b7c580033",
+  "earlier_review": "Initial WIP findings retained in report; this addendum supersedes their unresolved status"
+}

@@ -1,0 +1,703 @@
+(** Dos_lane — the one DOS machine the workspace plays on.
+
+    The attached worker owns the DOS core, so its callers put keys into the
+    same {!Dos_machine.t}. Time advances through explicit execution calls;
+    each call is capped at {!max_steps_per_call}.
+
+    {b Time is machine steps, not frames.} Each step executes a guest
+    instruction or advances an idle wait clock. The input ledger retains
+    this execution clock; run results separately count guest instructions.
+    The default stopping observation
+    combines an empty keyboard poll with unchanged screen memory between
+    samples. It avoids some mid-repaint returns, but can also occur during a
+    timed transition. Neither this observation nor an instruction count
+    proves a game's final prompt. [until_ready=false] executes an explicit
+    machine-step allowance; callers inspect the resulting screen before
+    choosing another input.
+
+    {b Keys are a queue, not a matrix.} DOS reads the keyboard through a
+    BIOS ring buffer, so there is no hold or release — a key is put in the
+    ring and the guest takes it out. {!press} therefore names no hold time.
+
+    Every key is appended to a ledger as (step, who, key). The execution
+    clock retains idle intervals between inputs. The guest reads the emulated
+    clock advanced through execution calls, rather than the host wall clock. *)
+
+type observation = {
+  steps : int;  (** machine execution steps since load, including idle waits *)
+  video_mode : int;  (** BIOS mode number: 3 is 80x25 text, 0x13 is VGA *)
+  width : int;
+  height : int;  (** the frame this mode would draw *)
+  cs : int;
+  ip : int;
+  psp : int;
+      (** the program's PSP segment. Only a COM image starts with [cs] equal
+          to it; an EXE begins in its own code segment, so a caller reading
+          the PSP through {!peek} has to be told where it is. *)
+  exited : bool;  (** the program called INT 21h AH=4Ch or fell into INT 20h *)
+  exit_code : int;
+  halted : bool;  (** HLT — waiting for an interrupt, not finished *)
+  waiting_for_key : bool;
+      (** Latched observation that a keyboard read or poll found the ring
+          empty. Nonblocking polls and direct BIOS ring reads also set it;
+          this does not mean the guest is blocked or ready for another key. *)
+  ticks : int;  (** BIOS timer ticks, 18.2/s by default *)
+  screen_text : string;
+      (** the 80x25 (or 40x25) text page as UTF-8, code page 437 kept — box
+          drawing and game glyphs survive. Rows are newline-separated. Text
+          modes only; a graphics mode leaves whatever the text page held. *)
+  frame_nonblack : int;
+      (** graphics-mode reading of the same frame: the number of 8x16 cells
+          holding any pixel brighter than near-black. A text mode has a value
+          here too — its frame is the text page rendered — so a caller can
+          fingerprint either kind of screen with one field. Two different
+          screens can share a count; use it to notice change, not to read. *)
+  frame_ascii : string;
+      (** the whole frame as a coarse luminance map: 8x16 pixel cells, each
+          one character of " .:-=+*#%@", rows newline-separated. This is the
+          only field that shows what a graphics mode drew. A VGA game's
+          title screen, map and menus read here the way text programs read
+          in [screen_text]. *)
+  program : string option;  (** the loaded program's name *)
+  saves_name : string option;
+      (** the name the program's saves are kept under: the inventory name
+          [masc_dos_load] was given, where [program] is the file it booted.
+          Several games can boot the same launcher file. *)
+  controller : string option;
+      (** who may move this machine's time now; [None] until someone does.
+          See {!pass}. *)
+  files : string list;  (** file names the guest can open, sorted *)
+}
+
+type entry = { at_step : int; who : string; key_name : string }
+
+type autosave_status = { program : string; steps : int; saved_by : string; mtime : float }
+(** [mtime] is the checkpoint file's modification time: meta records who saved
+    it, not when. *)
+
+type autosave_lookup =
+  | No_autosave
+  | Autosave of autosave_status
+  | Autosave_unreadable of string
+      (** a file is there but this server will not read it, with the reason:
+          another checkpoint format, a damaged file, a meta that does not
+          parse. Not the same as {!No_autosave}: the next call that runs the
+          guest replaces it. *)
+
+(** What a slot holds, as far as it can be said: its status, or that the file
+    is there and will not read. *)
+type held_autosave =
+  | Held of autosave_status
+  | Held_unreadable of string
+
+(** What a caller of {!load} or {!restore} agrees to. The first autosave of a
+    new machine copies [autosave_slot] to [autosave_prev_slot], replacing what
+    that slot held; so starting a machine is the act that discards the
+    previous autosave, and this is the consent for it. With no previous
+    autosave nothing is discarded: the autosave moves into the slot and
+    survives there, and no consent is asked. A restore of [autosave_slot] or
+    [autosave_prev_slot] continues that file's history and discards nothing,
+    so it is never asked either. *)
+type previous_autosave_consent =
+  | Keep_previous_autosave
+      (** Refuse with {!error.Would_discard_previous_autosave} when starting
+          would discard the previous autosave: both files are there, readable
+          or not. *)
+  | Discard_previous_autosave
+      (** The caller was told what the previous autosave holds and lets the
+          start replace it. *)
+
+(** The two files a start would touch: [previous] is what it would discard,
+    [current] is the autosave that moves into its place. *)
+type discard =
+  { previous : held_autosave
+  ; current : held_autosave
+  }
+
+type error =
+  | Activity_disabled
+  | Activity_unobserved
+  | No_machine
+      (** nothing is loaded. With no machine the lane holds no checkpoint
+          directory, so it cannot say whether an autosave could be restored;
+          the tool layer looks that up ({!lookup_autosave}) and leads with
+          [masc_dos_restore] when one exists. *)
+  | Invalid_request of string  (** the caller's arguments *)
+  | Unreadable of string
+      (** a file that is there and will not read. A path that does not exist
+          is [Invalid_request] — the caller named it. *)
+  | Held_by of string
+      (** another caller holds the controller; nothing was done. *)
+  | Guest_fault of string
+      (** the program ran an instruction the emulator does not implement.
+          The machine stays loaded, stopped at that instruction. *)
+  | Unsaveable of string
+      (** {!save} found the machine in a state a checkpoint cannot carry
+          (a value outside the snapshot's ranges, or two fields that
+          disagree). Nothing was written. *)
+  | Checkpoint_refused of Machine_checkpoint.error
+      (** {!restore} found no checkpoint by that name, or one it will not
+          read: another machine's, another format's, or corrupt. Nothing
+          changed. *)
+  | Other_program of { expected : string; loaded : string }
+      (** {!press_into} was asked for the program kept under [expected], and
+          the one loaded is kept under [loaded]; nothing was pressed. *)
+  | Would_discard_previous_autosave of discard
+      (** {!load} or {!restore} was called with {!Keep_previous_autosave} and
+          starting the machine would replace the previous autosave. Nothing
+          was done and both files are as they were. *)
+
+val error_to_string : error -> string
+
+val install_activity_observer : (unit -> Machine_configuration.activity) option -> unit
+(** Install the published Runtime observer. [None] means unobserved, so new
+    execution is refused. Installation never changes the machine itself. *)
+val activity : unit -> Machine_configuration.activity
+(** Lock-free activity reading. New execution is admitted once at entry; already
+    admitted work finishes even if activity changes while it waits/runs.
+    Inspection, checkpoint saving, eject and controller release remain available. *)
+
+val max_steps_per_call : int
+(** 4,000,000 machine steps per call. Idle wait clocks also consume this
+    resource budget; elapsed host time depends on the workload. *)
+
+val boot_steps : int
+(** Machine-step allowance at {!load} before the first observation, stopping early
+    if the program asks for a key. A DOS program reaches its title screen in
+    its own time; this is the budget for getting there. *)
+
+type core = {
+  source_digest : string;
+      (** the linked ocaml-dos core's own identity: a digest of its [lib/]
+          sources, computed by its build ([Dos_core_identity]). Not a
+          commit — an opam install has no history to ask. *)
+  pinned_source_digest : string;
+      (** the digest of the core at the CI pin, [OCAML_DOS_SHA] in
+          [scripts/opam-pin-external-deps.sh]. *)
+  matches_pin : bool;
+      (** the two digests are equal. [false] means this server runs a
+          different core from the one CI builds against — an older opam
+          copy, or a vendored checkout on another branch. *)
+}
+[@@deriving yojson]
+(** Which DOS core this server was built with. A server built without its
+    vendored copy links whatever opam installed, which can lack a fix the
+    games depend on while every masc build field stays the same. *)
+
+val core : core
+
+type autosave =
+  | Not_attempted
+      (** nothing was written: the program has exited, so there is nothing to
+          resume *)
+  | Autosaved  (** the machine is in the {!autosave_slot} checkpoint *)
+  | Autosave_failed of string
+      (** the write did not reach disk, or {!resume_mark_path} could not be
+          written or removed to match, with the reason. The call itself
+          happened: the guest moved either way. *)
+
+type ran = {
+  steps_run : int;  (** machine-step budget consumed, including idle waits *)
+  instructions_run : int;  (** guest instructions executed; idle waits excluded *)
+  elapsed_cycles : int;  (** emulated CPU clocks, including idle waits *)
+  settled : bool;
+      (** An empty keyboard poll occurred in the last sampling interval and
+          its two screen-memory digests matched. This does not prove that a
+          game finished a transition or reached its next prompt. Always false
+          with [until_ready=false]; otherwise false means no such observation
+          was reached before the machine-step allowance or program exit. *)
+  input_requests : int;
+      (** Empty-ring reads during this call, including nonblocking polls and
+          direct BIOS ring reads. This count does not prove input readiness. *)
+  keys_pressed : int;
+      (** keys this call delivered. {!step} and {!load} press nothing, so it
+          is zero there. Below the number {!press} or {!type_text} was given,
+          the sequence stopped without a settling observation, ran in
+          [until_ready=false] mode, or reached its step ceiling. The remaining
+          suffix was not recorded and never entered the ring. Read the screen
+          before deciding whether to send it; delivery is not guest acceptance. *)
+  unsaved : string list;
+      (** files the program wrote during this call that did not reach the
+          saves directory, one line each with the reason. Empty when every
+          save is on disk. The call itself happened: the guest moved either
+          way, so this is not a reason to send the same keys again. *)
+  autosave : autosave;
+      (** what the checkpoint written at the end of this call did. Only a call
+          that ran to an answer writes one: a fault, a refusal and an
+          unreadable ledger leave the previous autosave as it was, because the
+          machine they leave is not one worth resuming. *)
+}
+
+type boot_fault =
+  | Unimplemented_instruction of string
+      (** the program ran something the core does not implement, with the
+          core's message *)
+  | Core_exception of string
+      (** the core raised while the program ran (a malformed EXEC child, for
+          one), with the exception *)
+
+type boot =
+  | Booted of ran
+  | Boot_faulted of boot_fault
+      (** the boot stopped on a fault. The machine is installed, stopped
+          where it was, and the loader holds the controller; the screen shows
+          how far it got. No autosave was written, so the previous one stays.
+          {!load} announces and returns [Ok] whichever way the boot ends. *)
+
+val settle_chunk : int
+(** Instructions between two screen readings while waiting for {!ran.settled}. *)
+
+val escapes : string -> bool
+(** A name that is a path or a drive rather than one plain file name: a
+    separator, a colon, [..] or a leading dot. The program inventory refuses
+    such names, and a file the guest creates under one is never written to
+    the saves directory. *)
+
+type image
+(** A program image the loaders can place: an MZ signature makes it an EXE,
+    anything else a COM, by the image's own bytes and not the file name. *)
+
+val image_of_bytes : program_name:string -> string -> (image, error) result
+(** Checks what the core's loaders would otherwise meet as an exception: an
+    empty image, an MZ header or relocation table that runs past the file, a
+    payload that does not fit in memory. For an MZ image that is exactly when
+    the loader raises. It also refuses two images the loader would accept and
+    damage: a COM longer than {!max_com_bytes}, whose tail the loader
+    overwrites with a return word, and the signature ZM, which the loader
+    would run as a COM. Anything refused is [Invalid_request] naming
+    [program_name]. *)
+
+val max_com_bytes : int
+(** 65,278: the largest COM image that leaves the return word the loader
+    plants at PSP:FFFE outside it. The loader itself accepts more and
+    overwrites the tail. *)
+
+val max_exe_payload_bytes : int
+(** The most program an MZ image may carry after its header: the memory above
+    the lowest place the loader puts an image. *)
+
+type prepared_load
+(** In-memory validated guest and save snapshot. No open file handles; discarded
+    preparations are reclaimed normally. An admitted commit attempt consumes the guest. *)
+val prepare_load :
+  ledger_dir:string -> saves_dir:string -> checkpoint_dir:string ->
+  previous_autosave:previous_autosave_consent ->
+  program_name:string -> program_bytes:string -> files:(string * string) list ->
+  (prepared_load, error) result
+val commit_load :
+  who:string -> prepared_load -> announce:(unit -> unit) ->
+  (observation * boot, error) result
+(** Rechecks activity, current controller and the save snapshot's lane counter
+    under the lane lock before changing the ledger or installing the guest. *)
+
+val load :
+  who:string ->
+  ledger_dir:string ->
+  saves_dir:string ->
+  checkpoint_dir:string ->
+  previous_autosave:previous_autosave_consent ->
+  program_name:string ->
+  program_bytes:string ->
+  files:(string * string) list ->
+  announce:(unit -> unit) ->
+  (observation * boot, error) result
+(** Creates the workspace machine, replacing any previous one. The new
+    machine's first autosave replaces the previous autosave in
+    [checkpoint_dir], so when both that and the autosave are there the load is
+    {!Would_discard_previous_autosave} unless [previous_autosave] is
+    {!Discard_previous_autosave}, and nothing changes. The check happens in
+    {!prepare_load}, before the machine is built. The loader is
+    chosen by the image's own bytes — an MZ signature is an EXE, anything
+    else is a COM — not by the file name, so a misnamed image still boots the
+    way DOS would boot it.
+
+    [files] are (name, contents) the guest can open by name, case-insensitively.
+    The ledger is [ledger_dir/ledger.jsonl], truncated: a new machine starts a
+    new ledger. Loading is not evidence that the program reaches a screen —
+    read the observation.
+
+    Two names that differ only in case are refused: DOS folds filenames, so
+    the guest would see one of them and the observation would list both.
+
+    [saves_dir] holds what this program wrote on earlier machines. Its files
+    are mounted over [files] of the same DOS name, and every call that runs
+    the guest writes a file whose contents changed back to it, so a game's
+    own save survives an eject and a server restart. A save that cannot be
+    written is listed in {!ran.unsaved}. A file the program deletes is not
+    carried: the next load mounts the inventory copy again. A save directory
+    that will not read is [Unreadable].
+
+    [announce] runs while the machine's lock is still held, once this machine
+    is the workspace's and has booted. Announcements therefore reach whoever
+    reads them in the order the machines actually changed. It must not call
+    back into this module — the lock is not reentrant. *)
+
+val eject : who:string -> announce:(unit -> unit) -> unit -> (unit, error) result
+(** Drops the workspace machine. Its autosave stays restorable with {!restore},
+    but {!resume_mark_path} is removed first, so a restart does not bring it
+    back; a mark that cannot be removed refuses the eject with [Unreadable].
+    [announce] runs under the same lock as {!load}'s, with the same
+    restriction. *)
+val release_left : holder:string -> announce:(unit -> unit) -> (bool, error) result
+(** Frees the controller if [holder] still has it, and says whether it did.
+    For a holder whose Keeper stopped and so can never pass: the caller
+    decides that from Keeper state, which this module does not read.
+    [announce] runs under the machine's lock, as {!load}'s does. *)
+
+val screen : unit -> (observation, error) result
+
+val check_key_name : string -> (unit, string) result
+(** Whether {!press} knows [name] ({!Dos_machine.key_of_string}), without a
+    machine: a layout that names keys is checked when it is read. *)
+
+type frame = { width : int; height : int; rgb : string }
+(** The frame as the display would show it: [width * height] pixels, three
+    bytes each, rows top to bottom. *)
+
+val capture : unit -> (observation * frame, error) result
+(** {!screen} and the frame it describes, read under one lock, so the two
+    cannot come from different moments. The frame is what a Keeper with
+    vision reads: a VGA game's Korean menus are glyphs in pixels, which
+    [frame_ascii]'s luminance cells cannot spell. *)
+
+type identified_capture = {
+  incarnation : string;
+      (** Fresh on every load. Reads and time leave it alone. *)
+  observation : observation;
+  frame : frame;
+  input_count : int;
+  input_ledger : entry list;
+      (** Newest first, every input through [input_count], read with the
+          frame under the same lock. *)
+}
+
+val capture_with_identity : unit -> (identified_capture, error) result
+(** {!capture} with the machine's identity and input history, for a Lane
+    Add-on source ([dos_capture]). Never advances the machine. *)
+
+(** {1 Spectating} — one read a watcher can repeat cheaply. *)
+
+type change_mark = {
+  count : int;
+      (** The machine change counter. A completed run raises it even when
+          the guest faults before [steps] moves. {!load} also raises it when
+          installing a new machine, and {!eject} when removing it. Refused
+          calls and {!pass} leave it alone. Nothing resets it in this process;
+          after a restart {!live} also compares the incarnation. *)
+  incarnation : string;  (** as in {!identified_capture} *)
+}
+
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+
+val current_publication : unit -> published_state
+(** An atomic, lock-free read. [Running] is published before a run can mutate
+    the guest; a spectator must then use {!live} on a systhread and wait for
+    the final frame. [Stable mark] permits an immediate unchanged answer for
+    the same mark. A refused call restores [Stable] without raising the count. *)
+
+type live =
+  | Nothing_loaded  (** no machine: nothing to watch *)
+  | Unchanged of change_mark
+      (** [since] names the current count and the current incarnation *)
+  | Changed of change_mark * frame
+      (** [since] was absent, or its count or incarnation differs *)
+
+val live : since:change_mark option -> live
+(** Reads the count, the incarnation and, when either differs from [since],
+    the frame under one hold of the machine lock, so a [Changed] mark always
+    names its pixels. Never runs the guest or writes anything. A run can hold
+    the lock for a whole call (up to {!max_steps_per_call} machine steps), so
+    an Eio caller uses {!current_publication} first and runs this in
+    [Eio_unix.run_in_systhread] when it sees [Running] or a different mark. *)
+
+val entry_json : entry -> Yojson.Safe.t
+(** One ledger line: [{"step", "who", "key"}], the shape written to
+    [ledger.jsonl]. *)
+
+(** {1 The controller}
+
+    One machine, several players: a hotseat game such as 삼국지3 asks each
+    human ruler in turn at the same keyboard. The controller says whose hands
+    are on it. {!load}, {!eject}, {!step}, {!press}, {!click} and
+    {!type_text} from anyone but the holder are refused with [Held_by] before
+    anything happens; reading ({!screen}, {!capture}, {!peek}) needs no
+    controller. A free controller goes to whoever next moves the machine
+    successfully, and {!load} gives the new machine's to its loader. *)
+
+val pass :
+  who:string -> to_:string option -> announce:(unit -> unit) ->
+  (observation, error) result
+(** The holder (or anyone, while it is free) hands the controller to [to_],
+    or frees it with [None]. [announce] runs under the machine's lock, as
+    {!load}'s does. *)
+
+val step :
+  who:string -> steps:int -> until_ready:bool -> (observation * ran, error) result
+(** Advances up to [steps] (1..{!max_steps_per_call}) with no key pressed.
+    With [until_ready], stops at the empty-poll/unchanged-screen observation
+    described by {!ran.settled}. Without it, runs the machine-step allowance
+    unless the program exits. Neither mode proves a game's next prompt. *)
+
+val press :
+  who:string -> keys:string list -> steps:int -> until_ready:bool ->
+  (observation * ran, error) result
+(** With [until_ready=true], puts keys in the BIOS ring in turn and advances
+    after each until {!ran.settled} or [steps] is spent. Only a settling
+    observation admits the next key; it does not guarantee the game's prompt.
+    With [until_ready=false], injects only the first key and runs [steps]
+    unless the program exits. Remaining keys are unsent, even if keyboard
+    polling and a stable screen are observed. Key names
+    are {!Dos_machine.key_of_string}'s: the arrows, home and page keys,
+    insert, delete, enter, esc, space, tab, backspace, F1-F10, or one
+    character. A name the machine has no key for is refused before anything
+    is pressed. *)
+
+val press_into :
+  saves_name:string -> who:string -> keys:string list -> steps:int -> until_ready:bool ->
+  (observation * ran, error) result
+(** {!press}, only while the loaded program is the one kept under
+    [saves_name] ({!observation.saves_name}); another is [Other_program] and
+    nothing is pressed. The check is made under the machine's lock, where
+    the keys go in, so a program loaded after the caller read the screen is
+    refused rather than handed keys meant for the one before it. *)
+
+val click :
+  who:string -> x:int -> y:int -> buttons:int -> steps:int ->
+  (observation * ran, error) result
+(** Sets the mouse and runs. The mouse is state, not a queue: the cursor and
+    buttons stay where they are put until the next call moves them. A click
+    ([buttons] a mask of 1 left, 2 right and 4 middle, so 3 presses left and
+    right together) is button down, run, button up, run, in one
+    call — the up half always runs so the button is never left held. A move
+    ([buttons = 0]) sets the position and runs once. Coordinates are frame
+    pixels and must land inside the frame; [steps] is the shared ceiling of
+    the whole call, as in {!press}. A program that polls the mouse rather
+    than asking the BIOS for keys never reaches {!settled}; its clicks read
+    as [settled = false] with the budget spent, which is the expected shape
+    for a game driven this way. The action is appended to the ledger like a
+    key, so a replay reproduces it. *)
+
+val type_text :
+  who:string -> text:string -> steps:int -> until_ready:bool ->
+  (observation * ran, error) result
+(** Types the characters of [text] in turn, as {!press} does with one-character
+    keys. With [until_ready=false], only its first character is injected.
+    For a name a program is asking for, not for menu navigation. *)
+
+type address
+(** A physical address the machine has: 0x00000 to 0xFFFFF. *)
+
+val address_of_int : int -> (address, error) result
+(** [Invalid_request] outside the range. *)
+
+val address_to_int : address -> int
+
+val peek : address:address -> length:int -> (string, error) result
+(** Reads [length] (1..{!peek_max_bytes}) bytes from a physical address as hex
+    pairs. Read-only: writing is the cheat the lane refuses. *)
+
+val peek_max_bytes : int
+
+(** {1 Checkpoints}
+
+    The whole machine under a name, kept in [dir] by {!Machine_checkpoint}:
+    the core's state (CPU, memory, devices, mounted files and open handles,
+    from [Dos_snapshot]), the program's name, the step count and the input
+    ledger. A checkpoint survives a server restart. *)
+
+val checkpoint_format : int
+(** The lane's checkpoint format, compared on {!restore}; the machine bytes
+    carry the core's own. The core identity is written beside both, to be
+    shown and never compared. *)
+
+type named_slot
+(** A slot name a caller chose: never one the lane writes itself. *)
+
+type slot =
+  | Named of named_slot
+  | Current_autosave  (** {!autosave_slot}, in any letter case *)
+  | Previous_autosave  (** {!autosave_prev_slot}, in any letter case *)
+
+val classify_slot : Machine_checkpoint.slot -> slot
+val named_slot_to_string : named_slot -> string
+
+type replaced =
+  | Fresh_slot
+  | Replaced of autosave_status
+      (** the slot held a checkpoint: its program, steps, saver and time,
+          read just before the write replaced it *)
+  | Replaced_unreadable of string
+      (** a file was there that this server could not read, with the reason *)
+
+val save :
+  who:string -> dir:string -> slot:named_slot -> (observation * replaced, error) result
+(** Writes the machine to [slot], replacing what was there, and says what
+    that was. Needs no controller and does not move the machine: anyone
+    watching may save. The type keeps a manual save off the two slots the lane
+    writes itself. *)
+
+type prepared_restore
+(** Validated guest snapshot owning one uniquely named staged ledger file.
+    The caller must scope it with {!discard_prepared_restore}, including when
+    controller admission refuses. Commit and discard claim ownership atomically. *)
+val prepare_restore :
+  dir:string -> slot:Machine_checkpoint.slot ->
+  previous_autosave:previous_autosave_consent -> ledger_dir:string ->
+  saves_dir_of:(string -> string) -> (prepared_restore, error) result
+val discard_prepared_restore : prepared_restore -> unit
+(** Discard an unconsumed preparation. Idempotent after commit/discard; only its
+    temporary path is removed, never the installed ledger. IO cleanup failures
+    propagate to the owner, which must report them without masking cancellation. *)
+val commit_restore :
+  who:string -> prepared_restore -> announce:(unit -> unit) -> (observation, error) result
+(** Rechecks activity and the current controller under the lane lock, consumes
+    the prepared guest once, then renames the already-written ledger and replaces
+    lane state. No ledger serialization or full-file write occurs under admission.
+    A controller/activity refusal leaves ownership with the scoped caller. *)
+
+val restore :
+  who:string ->
+  dir:string ->
+  slot:Machine_checkpoint.slot ->
+  previous_autosave:previous_autosave_consent ->
+  ledger_dir:string ->
+  saves_dir_of:(string -> string) ->
+  announce:(unit -> unit) ->
+  (observation, error) result
+(** Replaces the workspace machine with the one saved in [slot], with or
+    without a machine loaded. Allowed when the controller is free or held by
+    [who], as {!load} is, and [who] holds the restored machine's. The
+    restored machine is a new incarnation and raises the change count. The
+    ledger file is rewritten to the checkpoint's ledger, so the next key
+    continues it.
+
+    The program's saves directory, [saves_dir_of] the saved program's saves
+    name, is left as it is: the restored machine's files count as already
+    kept, so nothing is written there until the guest writes again. A newer
+    save a game wrote after the checkpoint is not overwritten by restoring an
+    older one.
+
+    A machine restored from a named slot is a new incarnation: its first
+    autosave copies the autosave to {!autosave_prev_slot}, replacing the
+    previous autosave, as a loaded machine's does. So the same consent is
+    asked: with both the autosave and the previous autosave on disk, restoring
+    a named slot is {!Would_discard_previous_autosave} under
+    {!Keep_previous_autosave}. A restore of either lane-owned slot is never
+    asked, because it continues the history whose last save is that file and
+    discards nothing. The machine restored from {!autosave_slot} writes its
+    autosaves there and leaves {!autosave_prev_slot} as it is, as an
+    uninterrupted machine does. The machine restored from
+    {!autosave_prev_slot} already holds what its first autosave replaces. A
+    slot that does not exist is not asked about; the read reports it. A
+    commit refuses when the previous autosave was replaced since
+    {!prepare_restore}. The slot is classified once ({!classify_slot}, without
+    case): a lane-owned slot reads and counts its own file however it was
+    spelled, so [AUTOSAVE] restores {!autosave_slot}'s file and never a file
+    by that spelling.
+
+    Everything is read and checked first; on any error the current machine,
+    its ledger and its controller are untouched. [announce] runs under the
+    machine's lock, as {!load}'s does. *)
+
+val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
+
+(** {2 Autosave}
+
+    A fixed slot. A worker resumes it as it starts when {!resume_mark_path}
+    says it holds the machine that was running ({!resume_autosave}); with no
+    machine loaded after that, the tool layer offers it back
+    ({!lookup_autosave}). *)
+
+val autosave_slot : Machine_checkpoint.slot
+(** The one name autosave writes to. Parsed once from a literal that always
+    validates, so every caller shares this value instead of the string. *)
+
+val autosave_prev_slot : Machine_checkpoint.slot
+(** Where an incarnation's first autosave copies whatever {!autosave_slot}
+    already held, before writing its own state there. That file is the
+    previous incarnation's own last save -- a {!load}'s or a named
+    {!restore}'s first autosave must not erase it silently. The copy replaces
+    what this slot held, which is why such a start asks for
+    {!previous_autosave_consent} when both files exist. A machine restored
+    from {!autosave_slot} makes no copy. Listed and restorable
+    like any other slot ({!checkpoints}, {!restore}); nothing offers it back
+    on its own the way {!lookup_autosave} offers {!autosave_slot}, and
+    {!resume_autosave} never falls back to it. *)
+
+val lookup_autosave : dir:string -> autosave_lookup
+(** What the autosave slot holds, read through {!Machine_checkpoint}'s header,
+    meta and the snapshot header -- never through {!restore}, which would
+    reconstruct the whole guest machine just to say who saved it last. This is
+    an offer to resume, never a fact anything depends on. *)
+
+val lookup_previous_autosave : dir:string -> autosave_lookup
+(** {!lookup_autosave} for {!autosave_prev_slot}. After a restart this can be
+    all that is left of a campaign. *)
+
+val resume_mark_path : dir:string -> string
+(** The file beside the autosave in [dir] that records one durable fact: the
+    autosave holds the running machine's latest state. It is a record, not a
+    gate: no call is refused because of it. A machine writes it after a
+    successful autosave. It is removed when the autosave stops holding what
+    the machine is: a {!load}, a {!restore} of any slot but {!autosave_slot},
+    an exited program, a failed autosave, a run that ends without an autosave
+    (a guest fault, a ledger that will not take a line, an exception), and
+    {!eject}. A load, such a restore and an eject that cannot remove it are
+    refused with [Unreadable] and change nothing; the other removals that
+    fail are reported in the call's answer ({!ran.autosave}, the error) or,
+    for an exception, on {!recent_activity}. No checkpoint listing shows it. *)
+
+(** What {!resume_autosave} found and did. *)
+type resume =
+  | Nothing_to_resume
+      (** no {!resume_mark_path}, or no file at {!autosave_slot}: the machine
+          that wrote the autosave was not running when the worker stopped.
+          Nothing is loaded and nothing is reported. *)
+  | Machine_loaded  (** a machine is already loaded; it is left as it is *)
+  | Resumed of observation  (** the autosave is the workspace machine; the controller is free *)
+  | Not_resumed of error
+      (** the mark and the autosave are there, and the restore was refused,
+          with the reason: machine activity is off or unobserved, or the file
+          will not read. Nothing is loaded, both autosave files are left as
+          they were, and {!autosave_prev_slot} is not tried. *)
+  | Resume_raised of string
+      (** the mark and the autosave are there, and the restore raised, with
+          the exception. As with [Not_resumed], nothing is loaded and both
+          autosave files are left as they were. *)
+
+val resume_autosave :
+  dir:string -> ledger_dir:string -> saves_dir_of:(string -> string) -> resume
+(** {!restore} of {!autosave_slot} that nobody asked for: a worker does this
+    once as it starts, so a restart does not leave the shared machine
+    unloaded. It is tried only when {!resume_mark_path} is there. It is the
+    same preparation and commit as {!restore}, admitted only while no machine
+    is loaded, and the restored machine's controller is free, as after
+    {!pass} with [None]: whoever next moves the machine takes it. [dir],
+    [ledger_dir] and [saves_dir_of] are as in {!restore}.
+
+    As every restore of the autosave does, the resumed machine continues the
+    history whose last save is that file: its autosaves replace
+    {!autosave_slot}, {!autosave_prev_slot} stays as uninterrupted play
+    leaves it, and the mark stays. Nothing is asked.
+
+    A resume, and a restore that was refused or raised with the reason, each
+    put a line on {!recent_activity}. An exception from the restore, other
+    than cancellation, is [Resume_raised] and does not escape. Nothing is
+    announced. *)
+
+val ledger : unit -> entry list
+(** Oldest first. Empty when no machine is loaded. *)
+
+val recent_activity : unit -> Machine_action_feed.entry list
+(** The last {!Machine_action_feed.cap} things a Keeper did to this Lane -- load,
+    step, press, click, type, save, restore, pass and eject, newest first --
+    for a spectator, not for replay: unlike {!ledger} this is not scoped to
+    the current machine. It spans a [load] or [restore] (one more line on the
+    same feed, not a fresh one) and outlives an [eject] (the ejection itself
+    is on it), so it can be non-empty with no machine loaded. Lock-free:
+    unlike {!ledger} it may be called from a fiber that must not block on a
+    press or step in flight. *)

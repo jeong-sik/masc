@@ -1,0 +1,37 @@
+{
+  "qualified_commit": "4846525c6b38155b8cf50f3df3de33fac128fd13",
+  "parent": "b1570fb55f866976006c77864d152779fdb9dcdf",
+  "native_cases": 38,
+  "pty_flows": 5,
+  "results": [
+    {
+      "target": "_build/default/test/test_lane_addon_catalog.exe",
+      "exit": 0,
+      "log": "/tmp/pr41205-final-parent-test_lane_addon_catalog.log"
+    },
+    {
+      "target": "_build/default/test/test_tui_package_browser.exe",
+      "exit": 0,
+      "log": "/tmp/pr41205-final-parent-test_tui_package_browser.log"
+    },
+    {
+      "target": "_build/default/test/test_tui_lane_addons.exe",
+      "exit": 0,
+      "log": "/tmp/pr41205-final-parent-test_tui_lane_addons.log"
+    },
+    {
+      "target": "_build/default/test/test_tui_machine_activity.exe",
+      "exit": 0,
+      "log": "/tmp/pr41205-final-parent-test_tui_machine_activity.log"
+    }
+  ],
+  "binary_sha256": "628c7e433c28dfc91045fdc024534e2d2625a6b1c43c16112fec423290454d19",
+  "raw_logs_sha256": {
+    "build.log": "8cc315c89f379da3b624e9d10bf927ba5dca782c54aacf156a23c3ddaf7d2f2e",
+    "pty.log": "6e66a44f793128d3e852f8b2cd327b233880c06e6b347d85430c4e351e2492fa",
+    "pr41205-final-parent-test_lane_addon_catalog.log": "93dbfa54780eddf3303046860680b9e65e0e3e73749099e87c94ef910f07c40b",
+    "pr41205-final-parent-test_tui_package_browser.log": "54aecf95a0edf06cf504a28d8ee17b89e304a119d0e2e19adbaf67a52d87a1f5",
+    "pr41205-final-parent-test_tui_lane_addons.log": "9dc8be49b8a7b670f329d7072fae9e1e5f3f88c8f82b7462ae6e87d5c458893d",
+    "pr41205-final-parent-test_tui_machine_activity.log": "eda027800b98496a97de933c3a3aa936f678b43431cdfd972ccd1273a61aa936"
+  }
+}

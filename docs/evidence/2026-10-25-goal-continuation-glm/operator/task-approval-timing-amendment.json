@@ -1,0 +1,14 @@
+{
+  "recorded_at": "2026-10-24T18:16:01.078021+00:00",
+  "original_intent": "../experiment-intent.json",
+  "change": "Allow one controlled partial-Task approval while its original semantic operation is still running, after current and immutable alpha-only bytes and latest verification equality are independently checked.",
+  "reason": "The model has submitted the requested artifact and is using the same operation to investigate an intentionally unavailable automated judge. Waiting for terminal is an experimenter condition, not the owner request or the Goal/Task contract.",
+  "preserved": [
+    "Original intent retained unchanged.",
+    "Original preapproval G2/alpha-only checkpoint retained.",
+    "The sleep20 Gate permission is a separate controlled operator-proxy event.",
+    "No extra Keeper request, Goal link, model/tool cap, Goal proof or human Goal confirmation.",
+    "No comparison attributing differences solely to model or source.",
+    "Report timing and semantic continuation checkpoint separately from provider stop."
+  ]
+}

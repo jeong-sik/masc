@@ -1,0 +1,4 @@
+opam exec -- ocamlfind ocamlopt -thread -package alcotest,re,digestif.ocaml,unix -linkpkg string_util.mli string_util.ml supervisor_fixture.ml -o probe.exe
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif
+
+exit=0

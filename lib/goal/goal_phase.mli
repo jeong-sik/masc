@@ -1,0 +1,141 @@
+(** Goal_phase — state machine SSOT for goal lifecycle.
+
+    Encodes the lifecycle states a goal can be in, the operator/system
+    actions that drive transitions, and the deterministic decision
+    function {!decide_transition}. Used by the goal subsystem to keep
+    transition logic out of caller code.
+
+    RFC-0387 stage 2: [Verifying] sits between [Executing] and
+    [Completed] — [Request_complete] enters it, and the verifier's
+    [Record_proof_proven] leaves it for [Awaiting_confirmation]. The
+    operator can leave it without a verdict: [Drop] to [Dropped], [Reopen]
+    to [Executing]. *)
+
+(** Only these live states can be suspended. *)
+type resumable = Resume_executing | Resume_verifying | Resume_awaiting_confirmation
+
+(** Goal lifecycle phases. Suspensions always retain their restore target. *)
+type t =
+  | Executing
+  | Verifying
+      (** Completion requested; the proof verdict is pending out-of-band
+          (RFC-0387 B3). *)
+  | Awaiting_confirmation
+  | Completed
+  | Dropped
+  | Paused of resumable
+  | Blocked of resumable
+
+val to_string : t -> string
+(** Lowercase canonical name ([Executing -> "executing"], …). *)
+
+val of_string : string -> t option
+(** Parses unsuspended states only. Suspensions require a restore target;
+    use {!of_fields} for a Goal row or {!of_yojson} for a lifecycle value. *)
+
+val parse : string -> t option
+(** Like {!of_string} but trims whitespace and lowercases first. *)
+
+val to_yojson : t -> Yojson.Safe.t
+
+val of_yojson : Yojson.Safe.t -> (t, string) result
+
+val all : t list
+(** All eleven lifecycle values, including each suspension restore target. *)
+
+module Kind : sig
+  type t = Executing | Verifying | Awaiting_confirmation | Completed | Dropped | Paused | Blocked
+  val all : t list
+  val to_string : t -> string
+  val parse : string -> t option
+end
+val kind : t -> Kind.t
+val resume_phase : t -> t option
+(** [None] for an unsuspended Goal. *)
+val resume_phase_to_yojson : t -> Yojson.Safe.t
+(** Canonical restore-state string, or null when unsuspended. *)
+val of_fields : Yojson.Safe.t -> (t, string) result
+(** Decode string [phase] and optional [resume_phase] from a Goal row.
+    Reject missing/invalid suspension targets and targets on live/terminal rows. *)
+val criterion_changed : t -> t
+(** Invalidate proof progress while preserving suspension or abandonment. *)
+
+val admits_self_directed_progress : t -> bool
+(** Whether a keeper waking on this goal can make progress on it. [Verifying]
+    admits continued progress on the linked tasks while the completion proof
+    is judged out-of-band: the gate holds the phase, not the work. *)
+
+(** Operator / system actions that may drive a transition. *)
+type action =
+  | Request_complete
+  | Drop
+  | Reopen
+  | Pause
+  | Resume
+  | Block
+  | Unblock
+  | Record_proof_proven
+      (** Verifier commit: the completion proof held. [Verifying ->
+          Awaiting_confirmation]. Requires non-blank evidence at the tool boundary. *)
+  | Confirm_completion
+  | Record_proof_refuted
+      (** Verifier commit: the completion proof failed. [Verifying ->
+          Executing]; the refutation reason stays in the ledger and
+          goal_events. *)
+
+val action_to_string : action -> string
+val action_of_string : string -> action option
+val all_actions : action list
+(** Every internal action in declaration order. Includes verifier-only ledger
+    commits and is the SSOT for the exhaustive transition matrix. *)
+
+module Public_action : sig
+  (** Lifecycle requests exposed by [masc_goal_transition]. Verifier verdicts
+      are deliberately absent: they enter through the application-owned typed
+      authority boundary, never through an MCP caller. *)
+  type t =
+    | Request_complete
+    | Drop
+    | Reopen
+    | Pause
+    | Resume
+    | Block
+    | Unblock
+
+  val to_action : t -> action
+  val to_string : t -> string
+  val of_string : string -> t option
+  val parse : string -> t option
+  val all : t list
+end
+
+(** What a transition request resolves to.
+
+    [Move_to] is a phase change: the caller writes the new phase and records
+    the event. [Already] is the same request made against a goal that is
+    already in the phase the action targets — satisfied, with nothing to write.
+    A caller that treats the two alike turns a repeated report into repeated
+    history. *)
+type outcome =
+  | Move_to of t
+  | Already of t
+
+val decide_transition :
+  phase:t ->
+  action:action ->
+  (outcome, string) result
+(** Pure transition decider: what the request resolves to, or [Error msg] for a
+    pair that names no reachable phase.
+
+    The diagonal — an action whose target phase the goal already occupies —
+    answers [Already] rather than an error, which is what the Task FSM already
+    says for the same shape (Cancel on Cancelled, Done_action on Done). Not
+    every terminal pair is on it: [Dropped, Request_complete] is still an
+    error, because completion is not the phase a dropped goal is in. *)
+
+val moves_goal : phase:t -> action:action -> bool
+(** Whether [action] changes the phase of a goal in [phase]: a [Move_to].
+    [Already] is accepted and writes nothing, and [Error] is refused, so
+    neither is a step the goal can take from where it is. The dashboard's next
+    actions and the TUI goal detail's lit keys both ask this, so the two cannot
+    offer different steps for the same goal. *)

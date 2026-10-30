@@ -1,0 +1,75 @@
+{
+  "observed_at": "2026-09-12T10:19:58.952974+00:00",
+  "build": {
+    "release_version": "0.35.13",
+    "binary_version": "0.35.13",
+    "commit": "35be4eaa6b060c04b2d25233b0fe96aebe9f5440",
+    "commit_source": "embedded",
+    "binary_commit": "35be4eaa6b060c04b2d25233b0fe96aebe9f5440",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "3641119af84b51bcbe921ac62b92f9dbcc2317b48cba8a7c8c34b94ebfbb1b2d",
+    "binary_commit_unix_ts": 1789206951.0,
+    "binary_commit_age_seconds": 1232,
+    "executable_path": "/private/tmp/masc-runtime-35be4/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-runtime-35be4",
+    "runtime_instance_id": "01a09512-bc3d-7000-82c1-8b9338cb9fe3",
+    "started_at": "2026-09-12T10:03:48Z",
+    "uptime_seconds": 755
+  },
+  "startup_phase": "ready",
+  "base_path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668",
+  "candidate_release_validated": false,
+  "config_preview": {
+    "ok": true,
+    "can_save": true
+  },
+  "save_application": {
+    "operation": "raw_save",
+    "routing": {
+      "status": "applied",
+      "requires_restart": false,
+      "applied_at": "2026-09-12T10:05:11Z"
+    },
+    "keeper_overlay": {
+      "status": "not_configured",
+      "configured_count": 0,
+      "requires_restart": false,
+      "pending_keys": [],
+      "applied_keys": [],
+      "preempted_keys": [],
+      "applied_at": null
+    },
+    "skills": {
+      "state": "unchanged",
+      "input_source_revision": "87b54161178aec2eb3f42efe82a775421c014b4625e693f56f36dc6ec5bf69b9",
+      "snapshot_revision": "8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2",
+      "catalog_revision": "fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d",
+      "config_state": "configured"
+    }
+  },
+  "verifier_exact": {
+    "slots": [],
+    "cli_slots": [
+      "codex_subscription.gpt-5.6-sol"
+    ]
+  },
+  "media_failover": [],
+  "prompt_hash": {
+    "bytes": 10878,
+    "sha256": "a24a827be9c535af8d957dfd9a61effb86f754b45d227960bdf2d8a82861b6eb"
+  },
+  "manual_routing_change": true,
+  "automatic_failover_proven": false,
+  "ci": {
+    "test_run": 34687125248,
+    "test_conclusion": "success",
+    "pr_check_run": 34687175476,
+    "build_check": "success",
+    "release_build_check": "success",
+    "dashboard_typecheck": "success",
+    "lint": "failure: deterministic-boundary ratchet on optional content_blocks text projection",
+    "target_suites": 13,
+    "target_tests": 433
+  }
+}

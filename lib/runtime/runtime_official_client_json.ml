@@ -1,0 +1,141 @@
+module type Error = sig
+  type t
+
+  val protocol : stage:string -> detail:string -> t
+end
+
+module Make (E : Error) = struct
+  let protocol_error stage detail = Error (E.protocol ~stage ~detail)
+  let ( let* ) result f = Result.bind result f
+  exception Idle_timeout of float
+
+  (* A wire line that arrived as the idle window passed is the line, not an
+     idle timeout: [Eio.Time.with_timeout] keeps whichever arm finished
+     first and would have ended the turn on a line already in hand. *)
+  let with_idle_timeout clock seconds f =
+    match
+      Watched_work.run
+        (fun () -> `Finished (f ()))
+        ~watcher:(fun () ->
+          Eio.Time.sleep clock seconds;
+          `Expired)
+    with
+    | `Finished value -> value
+    | `Expired -> raise (Idle_timeout seconds)
+  ;;
+
+  let with_optional_idle_timeout clock seconds f =
+    match seconds with
+    | None -> f ()
+    | Some seconds -> with_idle_timeout clock seconds f
+  ;;
+
+  let rec validate_unique_object_keys ~stage ~path = function
+    | `Assoc fields ->
+      let rec loop seen = function
+        | [] -> Ok ()
+        | (name, value) :: rest ->
+          if List.mem name seen
+          then
+            protocol_error
+              stage
+              (Printf.sprintf "duplicate object key %S at %s" name path)
+          else
+            let* () =
+              validate_unique_object_keys
+                ~stage
+                ~path:(path ^ "." ^ name)
+                value
+            in
+            loop (name :: seen) rest
+      in
+      loop [] fields
+    | `List values ->
+      let rec loop index = function
+        | [] -> Ok ()
+        | value :: rest ->
+          let* () =
+            validate_unique_object_keys
+              ~stage
+              ~path:(Printf.sprintf "%s[%d]" path index)
+              value
+          in
+          loop (index + 1) rest
+      in
+      loop 0 values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
+  ;;
+
+  let assoc_at stage = function
+    | `Assoc fields -> Ok fields
+    | _ -> protocol_error stage "expected a JSON object"
+  ;;
+
+  let required_member stage name fields =
+    match List.assoc_opt name fields with
+    | Some value -> Ok value
+    | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
+  ;;
+
+  let required_string stage name fields =
+    match List.assoc_opt name fields with
+    | Some (`String value) when String.trim value <> "" -> Ok value
+    | Some _ ->
+      protocol_error stage (Printf.sprintf "field %S must be a non-empty string" name)
+    | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
+  ;;
+
+  let optional_string stage name fields =
+    match List.assoc_opt name fields with
+    | None | Some `Null -> Ok None
+    | Some (`String value) -> Ok (Some value)
+    | Some _ ->
+      protocol_error stage (Printf.sprintf "field %S must be a string or null" name)
+  ;;
+
+  let required_bool stage name fields =
+    match List.assoc_opt name fields with
+    | Some (`Bool value) -> Ok value
+    | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a boolean" name)
+    | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
+  ;;
+
+  let invoke_state_callback ~stage callback =
+    try
+      match callback () with
+      | Ok () -> Ok ()
+      | Error detail -> protocol_error stage detail
+    with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Idle_timeout _ as exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
+    | exn -> protocol_error stage (Printexc.to_string exn)
+  ;;
+
+end
+
+module Stderr = struct
+  type capture = Collecting of string | Omitted
+  type t = { limit : int; mutable capture : capture }
+
+  let create ~limit =
+    if limit <= 0 then invalid_arg "stderr diagnostic limit must be positive";
+    { limit; capture = Collecting "" }
+
+  let append t chunk =
+    match t.capture with
+    | Omitted -> ()
+    | Collecting bytes ->
+      if String.length chunk > t.limit - String.length bytes
+      then t.capture <- Omitted
+      else t.capture <- Collecting (bytes ^ chunk)
+
+  let contents t =
+    let text =
+      match t.capture with
+      | Omitted -> "[stderr omitted: byte limit]"
+      | Collecting bytes -> Secret_patterns.redact_text bytes
+    in
+    String_util.utf8_suffix ~max_bytes:t.limit text
+end

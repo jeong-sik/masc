@@ -1,0 +1,9 @@
+
+ RUN  v5.0.2 /private/tmp/masc-goal-integration-20261024/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  25 passed (25)
+   Start at  23:51:34
+   Duration  999ms (environment 36%, setup 27%, transform 25%, tests 6%, import 5%, worker 1%)
+

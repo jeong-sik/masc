@@ -1,0 +1,68 @@
+{
+  "scope": "Independent format/decode verification; no subjective listening verdict",
+  "files": [
+    {
+      "path": "garden.gif",
+      "bytes": 588811,
+      "sha256": "da21aa4e6c7f80e88481f49c0c77e864b64e5f7f0ebe7536256b699b35396307",
+      "declared_match": true
+    },
+    {
+      "path": "garden.wav",
+      "bytes": 2116844,
+      "sha256": "2471dc1e9805570267b668e05e05b7138a1e1cac489cebd6f4a2252dad8e96e0",
+      "declared_match": true
+    },
+    {
+      "path": "garden.mp3",
+      "bytes": 289689,
+      "sha256": "1c2eaa4f20e51fdba0534a6fe71c1558c94d6a6dafc50194ab5bc88e397c6f7d",
+      "declared_match": true
+    },
+    {
+      "path": "creative-note.md",
+      "bytes": 2140,
+      "sha256": "a0e91419cdcf453cc39d3a8febb01566fbcd2797fce3c11488b466a2345b02de",
+      "declared_match": true
+    }
+  ],
+  "gif": {
+    "format": "GIF",
+    "size": [
+      640,
+      900
+    ],
+    "frames": 24,
+    "distinct_frames": 24,
+    "duration_ms": 3840,
+    "loop": 0
+  },
+  "audio": {
+    "garden.wav": {
+      "codec": "pcm_s16le",
+      "sample_rate": 44100,
+      "channels": 2,
+      "container_duration_s": 12.0,
+      "decoded_duration_s": 12.0,
+      "samples": 1058400,
+      "peak": 0.679962158203125,
+      "rms": 0.15593262454949225,
+      "clipped_samples": 0,
+      "decode_exit": 0,
+      "decode_stderr": ""
+    },
+    "garden.mp3": {
+      "codec": "mp3",
+      "sample_rate": 44100,
+      "channels": 2,
+      "container_duration_s": 12.0,
+      "decoded_duration_s": 12.0,
+      "samples": 1058400,
+      "peak": 0.6628407835960388,
+      "rms": 0.15125430348016983,
+      "clipped_samples": 0,
+      "decode_exit": 0,
+      "decode_stderr": ""
+    }
+  }
+}

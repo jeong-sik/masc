@@ -1,0 +1,13 @@
+{
+  "mode": "interpreter",
+  "state": "passed",
+  "returncode": 0,
+  "timed_out": false,
+  "probe_sha256": null,
+  "driver_pgid": 40237,
+  "probe_pgid": 40238,
+  "screenshot": {
+    "width": 1366,
+    "height": 683
+  }
+}

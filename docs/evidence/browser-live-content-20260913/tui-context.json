@@ -1,0 +1,21 @@
+{
+  "context": "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.",
+  "lane": "live",
+  "clientId": "a93a5385-6faa-44ea-8bfc-e576f2cfadf4",
+  "tabId": 1,
+  "url": "http://127.0.0.1:53404/index.html",
+  "documentId": "7f5d10a92e901baa5ace12d3ab48d099",
+  "nodeId": "n1",
+  "view": "regions",
+  "scope": null,
+  "viewport": {
+    "width": 1366.0,
+    "height": 683.0,
+    "scrollX": 0.0,
+    "scrollY": 0.0
+  },
+  "truncated": false,
+  "tag": "nav",
+  "text": "Channels",
+  "source": null
+}

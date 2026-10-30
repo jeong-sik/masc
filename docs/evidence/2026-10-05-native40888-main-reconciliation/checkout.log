@@ -1,0 +1,6 @@
+✓ Pulled branch fix/tui-runtime-default-route-20261002
+✓ Pulled branch fix/pr-40824-route-snapshot-20261003
+✓ Imported stack with 2 branches from GitHub (stack #40888)
+✓ Switched to fix/pr-40824-route-snapshot-20261003
+Stack: (main) <- fix/tui-runtime-default-route-20261002 <- fix/pr-40824-route-snapshot-20261003
+Run `gh stack view` to see the full stack

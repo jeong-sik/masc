@@ -1,0 +1,12 @@
+Testing `process file redirects'.
+This run has ID `BWWXI677'.
+
+  [OK]          redirects          0   stdout_reaches_the_file.
+  [OK]          redirects          1   truncate_replaces_what_was_there.
+  [OK]          redirects          2   append_keeps_what_was_there.
+  [OK]          redirects          3   streams_are_chosen_independently.
+  [OK]          redirects          4   stdin_reads_the_file.
+  [OK]          redirects          5   unopenable_target_is_an_error_not_an_e...
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/process file redirects'.
+Test Successful in 0.023s. 6 tests run.

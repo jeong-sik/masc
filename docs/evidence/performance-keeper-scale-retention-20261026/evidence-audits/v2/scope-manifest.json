@@ -1,0 +1,69 @@
+{
+  "review_date_local": "2026-10-27",
+  "reviewer": "/root/concurrent_probe_review",
+  "scope": "new baseline 2/30/300 and candidate 2x3 plus four current public evidence documents; candidate v1 verdict retained",
+  "worktree_head": "a8183cfa901dcdb9bf8bfa1e8bbdf953b058c387",
+  "public_documents": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/docs/evidence/performance-keeper-scale-retention-20261026/README.md",
+      "snapshot": "reviewed-documents/README.md",
+      "sha256": "f0a342ea9fe5c114c50d43e9e532ebf56e1384e32c40c4afffa00394327f19cf",
+      "bytes": 6478,
+      "lines": 106
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/docs/evidence/performance-keeper-scale-retention-20261026/native-cohorts-derivative.json",
+      "snapshot": "reviewed-documents/native-cohorts-derivative.json",
+      "sha256": "9caadf6c5028e9cff2b83f1fa90a502e282b3912205f0bc90faf1d41a89507e3",
+      "bytes": 24681,
+      "lines": 753
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/docs/evidence/performance-keeper-scale-retention-20261026/native-cohort-before-after-observations.json",
+      "snapshot": "reviewed-documents/native-cohort-before-after-observations.json",
+      "sha256": "2e090a0dda2c13572ea6ea8236fc493fa077a39df0e96e4a8fe1d04b8ffe8983",
+      "bytes": 5612,
+      "lines": 217
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/docs/evidence/performance-keeper-scale-retention-20261026/native-batch-qualification.json",
+      "snapshot": "reviewed-documents/native-batch-qualification.json",
+      "sha256": "1ec0cab805abf0f6aab4167b8fdcfb18e096153ed0dd7e2e29a1d289025addc6",
+      "bytes": 3180,
+      "lines": 69
+    }
+  ],
+  "source_files": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/scripts/harness/perf/keeper_scale_session.py",
+      "sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/scripts/harness/perf/keeper_scale_packet_audit.py",
+      "sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/scripts/harness/perf/keeper_scale_fault_probe.py",
+      "sha256": "d8d2bb4540bd888ea89b96d9bfc275b5733cba339aa95a0b06845f0c418d2f4b"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/scripts/harness/perf/README-keeper-scale-session.md",
+      "sha256": "0ab3b926cde79ef7cd325733b489fc5d2cd2d7cddc18fd324367d6ff1ec8b36e"
+    }
+  ],
+  "fixture_git_authority": {
+    "path": "scripts/fixtures/release-evidence/runtime.toml",
+    "sha256_by_source": {
+      "1ce158d50d3eb48648e6deea7f668172f914fea3": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+      "c3cb3715e3a36b56ae17c23820b6b7c83914a602": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd"
+    },
+    "exact_bytes_equal": true
+  },
+  "worktree_documents_status_at_review": [
+    " M docs/evidence/performance-keeper-scale-retention-20261026/README.md",
+    "?? docs/evidence/performance-keeper-scale-retention-20261026/native-batch-qualification.json",
+    "?? docs/evidence/performance-keeper-scale-retention-20261026/native-cohort-before-after-observations.json"
+  ],
+  "public_documents_unchanged_since_freeze": true,
+  "head_at_document_audit_completion": "a8183cfa901dcdb9bf8bfa1e8bbdf953b058c387"
+}

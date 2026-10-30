@@ -1,0 +1,135 @@
+{
+  "at": "2026-10-22T04:07:29.279467+00:00",
+  "identity": "local-admin",
+  "method": "POST",
+  "path": "/mcp",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "a8981fad05b94abdad0ff32f637ce2f2",
+    "method": "tools/call",
+    "params": {
+      "name": "masc_keeper_delegate_status",
+      "arguments": {
+        "target": {
+          "kind": "keeper",
+          "name": "curator-source-1196"
+        },
+        "operation_id": "kmsg-b4f7c34992a3e1db62fb536ad32e98a0"
+      }
+    }
+  },
+  "http_status": 200,
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "a8981fad05b94abdad0ff32f637ce2f2",
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.61.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"schema\":\"masc.keeper_chat_operation.v1\",\"operation_id\":\"kmsg-b4f7c34992a3e1db62fb536ad32e98a0\",\"sequence\":\"1\",\"created_at\":1792641983.310733,\"admission_digest\":\"9d9eb0bb43e38a4d35f71ef639b8603d94bb26c4ef1977389047089a27c0c614\",\"execution_digest\":\"4f2da4b64749181f984d83ba8f422ad130d6141a838e1a39acbcb37087044432\",\"source\":{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:curator-source-1196\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"local-admin\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:curator-source-1196\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null},\"input\":null,\"state\":\"Succeeded\",\"completed_at\":1792642015.776267,\"outcome_ref\":\"trace-1792641821776-00000#2\",\"completed_reply\":{\"status\":\"available\",\"turn_ref\":\"trace-1792641821776-00000#2\",\"replies\":[{\"message_id\":\"msg-1792642015733045-3\",\"text\":\"\uc4f0\uae30\uac00 \uc815\ud655\ud788 \ud55c \ubc88 \uc131\uacf5\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ub798 \uc2e4\ud328\ud588\ub358 kmsg-9339ae5f45ec1903a8fb5142fd074d1b \uc694\uccad\uc744 \ub300\uc2e0\ud574 \ud6c4\ubcf4\uac00 \uc811\uc218\ub418\uc5c8\uace0, \uc7ac\uc2dc\ub3c4\ub098 \ucd94\uac00 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\\n\\n**\uae30\ub85d \uacb0\uacfc**\\n- **outcome**: `persisted_pending_admission` \u2014 Librarian \uc2ec\uc0ac \ub300\uae30 \ud6c4\ubcf4\ub85c \uc800\uc7a5\ub428 (rows_written: 1)\\n- **request_id**: `memory-admission-4b846287b1db9d8e4b0251c0ee400ce5`\\n- **sequence**: 1\\n- **recorded_at**: 2026-10-22T04:06:37Z\\n\\n**\uacc4\uc57d \ub0b4\uc6a9**: title \\\"Curator authority boundary\\\" \u2014 Workspace Curator Addon\uc740 \ubd84\ub958\uc640 \ube0c\ub9ac\ud551\uc744 \uacc4\uc0b0\ud558\uace0, MASC host\ub294 durable fact intake, \uc6d0\ub798 \uc694\uccad \uc2dd\ubcc4\uc790, memory ledger \ucee4\ubc0b, observer \uc2b9\uc778, effect authority\ub97c \ubcf4\uc720\ud558\uba70, \uc124\uce58 \ube44\ud65c\uc131\ud654 \uc2dc \uc7ac\ubd80\ucc29\uc744 \uc704\ud574 \ub300\uae30 \uc911 \uc6d0\ub798 \uc791\uc5c5\uc744 \ubcf4\uc874\ud574\uc57c \ud568.\\n\\n**\ucc38\uace0**: \uc601\uc218\uc99d\uc0c1 \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. admission \uc5ec\ubd80\ub294 \ud604\uc7ac Memory \uac80\uc0c9\uc73c\ub85c \ud655\uc778\ud574\uc57c \ud558\uc9c0\ub9cc, \uc9c0\uce68\uc5d0 \ub530\ub77c pending \ud6c4\ubcf4\uac00 \uac80\uc0c9\uc5d0 \uc548 \ubcf4\uc778\ub2e4\ub294 \uc774\uc720\ub85c \uc7ac\uc2dc\ub3c4\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4.\",\"blocks\":[{\"t\":\"p\",\"html\":\"\uc4f0\uae30\uac00 \uc815\ud655\ud788 \ud55c \ubc88 \uc131\uacf5\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ub798 \uc2e4\ud328\ud588\ub358 kmsg-9339ae5f45ec1903a8fb5142fd074d1b \uc694\uccad\uc744 \ub300\uc2e0\ud574 \ud6c4\ubcf4\uac00 \uc811\uc218\ub418\uc5c8\uace0, \uc7ac\uc2dc\ub3c4\ub098 \ucd94\uac00 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\"},{\"t\":\"p\",\"html\":\"**\uae30\ub85d \uacb0\uacfc**\"},{\"t\":\"p\",\"html\":\"- **outcome**: `persisted_pending_admission` \u2014 Librarian \uc2ec\uc0ac \ub300\uae30 \ud6c4\ubcf4\ub85c \uc800\uc7a5\ub428 (rows_written: 1)\"},{\"t\":\"p\",\"html\":\"- **request_id**: `memory-admission-4b846287b1db9d8e4b0251c0ee400ce5`\"},{\"t\":\"p\",\"html\":\"- **sequence**: 1\"},{\"t\":\"p\",\"html\":\"- **recorded_at**: 2026-10-22T04:06:37Z\"},{\"t\":\"p\",\"html\":\"**\uacc4\uc57d \ub0b4\uc6a9**: title &quot;Curator authority boundary&quot; \u2014 Workspace Curator Addon\uc740 \ubd84\ub958\uc640 \ube0c\ub9ac\ud551\uc744 \uacc4\uc0b0\ud558\uace0, MASC host\ub294 durable fact intake, \uc6d0\ub798 \uc694\uccad \uc2dd\ubcc4\uc790, memory ledger \ucee4\ubc0b, observer \uc2b9\uc778, effect authority\ub97c \ubcf4\uc720\ud558\uba70, \uc124\uce58 \ube44\ud65c\uc131\ud654 \uc2dc \uc7ac\ubd80\ucc29\uc744 \uc704\ud574 \ub300\uae30 \uc911 \uc6d0\ub798 \uc791\uc5c5\uc744 \ubcf4\uc874\ud574\uc57c \ud568.\"},{\"t\":\"p\",\"html\":\"**\ucc38\uace0**: \uc601\uc218\uc99d\uc0c1 \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. admission \uc5ec\ubd80\ub294 \ud604\uc7ac Memory \uac80\uc0c9\uc73c\ub85c \ud655\uc778\ud574\uc57c \ud558\uc9c0\ub9cc, \uc9c0\uce68\uc5d0 \ub530\ub77c pending \ud6c4\ubcf4\uac00 \uac80\uc0c9\uc5d0 \uc548 \ubcf4\uc778\ub2e4\ub294 \uc774\uc720\ub85c \uc7ac\uc2dc\ub3c4\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4.\"}]}]}}",
+            "status": "ok",
+            "tool": "masc_keeper_delegate_status"
+          },
+          "trace_id": "\"a8981fad05b94abdad0ff32f637ce2f2\"",
+          "agent_id": "local-admin",
+          "tool": "masc_keeper_delegate_status",
+          "duration_ms": 3,
+          "attempts": 1,
+          "timestamp": "2026-10-22T04:07:29Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"schema\":\"masc.keeper_chat_operation.v1\",\"operation_id\":\"kmsg-b4f7c34992a3e1db62fb536ad32e98a0\",\"sequence\":\"1\",\"created_at\":1792641983.310733,\"admission_digest\":\"9d9eb0bb43e38a4d35f71ef639b8603d94bb26c4ef1977389047089a27c0c614\",\"execution_digest\":\"4f2da4b64749181f984d83ba8f422ad130d6141a838e1a39acbcb37087044432\",\"source\":{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:curator-source-1196\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"local-admin\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:curator-source-1196\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null},\"input\":null,\"state\":\"Succeeded\",\"completed_at\":1792642015.776267,\"outcome_ref\":\"trace-1792641821776-00000#2\",\"completed_reply\":{\"status\":\"available\",\"turn_ref\":\"trace-1792641821776-00000#2\",\"replies\":[{\"message_id\":\"msg-1792642015733045-3\",\"text\":\"\uc4f0\uae30\uac00 \uc815\ud655\ud788 \ud55c \ubc88 \uc131\uacf5\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ub798 \uc2e4\ud328\ud588\ub358 kmsg-9339ae5f45ec1903a8fb5142fd074d1b \uc694\uccad\uc744 \ub300\uc2e0\ud574 \ud6c4\ubcf4\uac00 \uc811\uc218\ub418\uc5c8\uace0, \uc7ac\uc2dc\ub3c4\ub098 \ucd94\uac00 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\\n\\n**\uae30\ub85d \uacb0\uacfc**\\n- **outcome**: `persisted_pending_admission` \u2014 Librarian \uc2ec\uc0ac \ub300\uae30 \ud6c4\ubcf4\ub85c \uc800\uc7a5\ub428 (rows_written: 1)\\n- **request_id**: `memory-admission-4b846287b1db9d8e4b0251c0ee400ce5`\\n- **sequence**: 1\\n- **recorded_at**: 2026-10-22T04:06:37Z\\n\\n**\uacc4\uc57d \ub0b4\uc6a9**: title \\\"Curator authority boundary\\\" \u2014 Workspace Curator Addon\uc740 \ubd84\ub958\uc640 \ube0c\ub9ac\ud551\uc744 \uacc4\uc0b0\ud558\uace0, MASC host\ub294 durable fact intake, \uc6d0\ub798 \uc694\uccad \uc2dd\ubcc4\uc790, memory ledger \ucee4\ubc0b, observer \uc2b9\uc778, effect authority\ub97c \ubcf4\uc720\ud558\uba70, \uc124\uce58 \ube44\ud65c\uc131\ud654 \uc2dc \uc7ac\ubd80\ucc29\uc744 \uc704\ud574 \ub300\uae30 \uc911 \uc6d0\ub798 \uc791\uc5c5\uc744 \ubcf4\uc874\ud574\uc57c \ud568.\\n\\n**\ucc38\uace0**: \uc601\uc218\uc99d\uc0c1 \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. admission \uc5ec\ubd80\ub294 \ud604\uc7ac Memory \uac80\uc0c9\uc73c\ub85c \ud655\uc778\ud574\uc57c \ud558\uc9c0\ub9cc, \uc9c0\uce68\uc5d0 \ub530\ub77c pending \ud6c4\ubcf4\uac00 \uac80\uc0c9\uc5d0 \uc548 \ubcf4\uc778\ub2e4\ub294 \uc774\uc720\ub85c \uc7ac\uc2dc\ub3c4\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4.\",\"blocks\":[{\"t\":\"p\",\"html\":\"\uc4f0\uae30\uac00 \uc815\ud655\ud788 \ud55c \ubc88 \uc131\uacf5\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ub798 \uc2e4\ud328\ud588\ub358 kmsg-9339ae5f45ec1903a8fb5142fd074d1b \uc694\uccad\uc744 \ub300\uc2e0\ud574 \ud6c4\ubcf4\uac00 \uc811\uc218\ub418\uc5c8\uace0, \uc7ac\uc2dc\ub3c4\ub098 \ucd94\uac00 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\"},{\"t\":\"p\",\"html\":\"**\uae30\ub85d \uacb0\uacfc**\"},{\"t\":\"p\",\"html\":\"- **outcome**: `persisted_pending_admission` \u2014 Librarian \uc2ec\uc0ac \ub300\uae30 \ud6c4\ubcf4\ub85c \uc800\uc7a5\ub428 (rows_written: 1)\"},{\"t\":\"p\",\"html\":\"- **request_id**: `memory-admission-4b846287b1db9d8e4b0251c0ee400ce5`\"},{\"t\":\"p\",\"html\":\"- **sequence**: 1\"},{\"t\":\"p\",\"html\":\"- **recorded_at**: 2026-10-22T04:06:37Z\"},{\"t\":\"p\",\"html\":\"**\uacc4\uc57d \ub0b4\uc6a9**: title &quot;Curator authority boundary&quot; \u2014 Workspace Curator Addon\uc740 \ubd84\ub958\uc640 \ube0c\ub9ac\ud551\uc744 \uacc4\uc0b0\ud558\uace0, MASC host\ub294 durable fact intake, \uc6d0\ub798 \uc694\uccad \uc2dd\ubcc4\uc790, memory ledger \ucee4\ubc0b, observer \uc2b9\uc778, effect authority\ub97c \ubcf4\uc720\ud558\uba70, \uc124\uce58 \ube44\ud65c\uc131\ud654 \uc2dc \uc7ac\ubd80\ucc29\uc744 \uc704\ud574 \ub300\uae30 \uc911 \uc6d0\ub798 \uc791\uc5c5\uc744 \ubcf4\uc874\ud574\uc57c \ud568.\"},{\"t\":\"p\",\"html\":\"**\ucc38\uace0**: \uc601\uc218\uc99d\uc0c1 \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. admission \uc5ec\ubd80\ub294 \ud604\uc7ac Memory \uac80\uc0c9\uc73c\ub85c \ud655\uc778\ud574\uc57c \ud558\uc9c0\ub9cc, \uc9c0\uce68\uc5d0 \ub530\ub77c pending \ud6c4\ubcf4\uac00 \uac80\uc0c9\uc5d0 \uc548 \ubcf4\uc778\ub2e4\ub294 \uc774\uc720\ub85c \uc7ac\uc2dc\ub3c4\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4.\"}]}]}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "schema": "masc.keeper_chat_operation.v1",
+        "operation_id": "kmsg-b4f7c34992a3e1db62fb536ad32e98a0",
+        "sequence": "1",
+        "created_at": 1792641983.310733,
+        "admission_digest": "9d9eb0bb43e38a4d35f71ef639b8603d94bb26c4ef1977389047089a27c0c614",
+        "execution_digest": "4f2da4b64749181f984d83ba8f422ad130d6141a838e1a39acbcb37087044432",
+        "source": {
+          "channel": "agent",
+          "channel_user_id": "",
+          "channel_user_name": "",
+          "channel_workspace_id": "",
+          "continuation_channel": {
+            "kind": "dashboard",
+            "thread_id": "keeper:curator-source-1196"
+          },
+          "conversation_id": null,
+          "external_message_id": null,
+          "extra_mentions": [],
+          "schema": "masc.keeper_chat_operation.source.v2",
+          "sender_keeper": null,
+          "submitted_by": "local-admin",
+          "surface": {
+            "kind": "agent"
+          },
+          "thread_id": "keeper:curator-source-1196",
+          "user_row_origin": "needs_append",
+          "workspace_id": null
+        },
+        "input": null,
+        "state": "Succeeded",
+        "completed_at": 1792642015.776267,
+        "outcome_ref": "trace-1792641821776-00000#2",
+        "completed_reply": {
+          "status": "available",
+          "turn_ref": "trace-1792641821776-00000#2",
+          "replies": [
+            {
+              "message_id": "msg-1792642015733045-3",
+              "text": "\uc4f0\uae30\uac00 \uc815\ud655\ud788 \ud55c \ubc88 \uc131\uacf5\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ub798 \uc2e4\ud328\ud588\ub358 kmsg-9339ae5f45ec1903a8fb5142fd074d1b \uc694\uccad\uc744 \ub300\uc2e0\ud574 \ud6c4\ubcf4\uac00 \uc811\uc218\ub418\uc5c8\uace0, \uc7ac\uc2dc\ub3c4\ub098 \ucd94\uac00 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\n\n**\uae30\ub85d \uacb0\uacfc**\n- **outcome**: `persisted_pending_admission` \u2014 Librarian \uc2ec\uc0ac \ub300\uae30 \ud6c4\ubcf4\ub85c \uc800\uc7a5\ub428 (rows_written: 1)\n- **request_id**: `memory-admission-4b846287b1db9d8e4b0251c0ee400ce5`\n- **sequence**: 1\n- **recorded_at**: 2026-10-22T04:06:37Z\n\n**\uacc4\uc57d \ub0b4\uc6a9**: title \"Curator authority boundary\" \u2014 Workspace Curator Addon\uc740 \ubd84\ub958\uc640 \ube0c\ub9ac\ud551\uc744 \uacc4\uc0b0\ud558\uace0, MASC host\ub294 durable fact intake, \uc6d0\ub798 \uc694\uccad \uc2dd\ubcc4\uc790, memory ledger \ucee4\ubc0b, observer \uc2b9\uc778, effect authority\ub97c \ubcf4\uc720\ud558\uba70, \uc124\uce58 \ube44\ud65c\uc131\ud654 \uc2dc \uc7ac\ubd80\ucc29\uc744 \uc704\ud574 \ub300\uae30 \uc911 \uc6d0\ub798 \uc791\uc5c5\uc744 \ubcf4\uc874\ud574\uc57c \ud568.\n\n**\ucc38\uace0**: \uc601\uc218\uc99d\uc0c1 \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. admission \uc5ec\ubd80\ub294 \ud604\uc7ac Memory \uac80\uc0c9\uc73c\ub85c \ud655\uc778\ud574\uc57c \ud558\uc9c0\ub9cc, \uc9c0\uce68\uc5d0 \ub530\ub77c pending \ud6c4\ubcf4\uac00 \uac80\uc0c9\uc5d0 \uc548 \ubcf4\uc778\ub2e4\ub294 \uc774\uc720\ub85c \uc7ac\uc2dc\ub3c4\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4.",
+              "blocks": [
+                {
+                  "t": "p",
+                  "html": "\uc4f0\uae30\uac00 \uc815\ud655\ud788 \ud55c \ubc88 \uc131\uacf5\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ub798 \uc2e4\ud328\ud588\ub358 kmsg-9339ae5f45ec1903a8fb5142fd074d1b \uc694\uccad\uc744 \ub300\uc2e0\ud574 \ud6c4\ubcf4\uac00 \uc811\uc218\ub418\uc5c8\uace0, \uc7ac\uc2dc\ub3c4\ub098 \ucd94\uac00 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4."
+                },
+                {
+                  "t": "p",
+                  "html": "**\uae30\ub85d \uacb0\uacfc**"
+                },
+                {
+                  "t": "p",
+                  "html": "- **outcome**: `persisted_pending_admission` \u2014 Librarian \uc2ec\uc0ac \ub300\uae30 \ud6c4\ubcf4\ub85c \uc800\uc7a5\ub428 (rows_written: 1)"
+                },
+                {
+                  "t": "p",
+                  "html": "- **request_id**: `memory-admission-4b846287b1db9d8e4b0251c0ee400ce5`"
+                },
+                {
+                  "t": "p",
+                  "html": "- **sequence**: 1"
+                },
+                {
+                  "t": "p",
+                  "html": "- **recorded_at**: 2026-10-22T04:06:37Z"
+                },
+                {
+                  "t": "p",
+                  "html": "**\uacc4\uc57d \ub0b4\uc6a9**: title &quot;Curator authority boundary&quot; \u2014 Workspace Curator Addon\uc740 \ubd84\ub958\uc640 \ube0c\ub9ac\ud551\uc744 \uacc4\uc0b0\ud558\uace0, MASC host\ub294 durable fact intake, \uc6d0\ub798 \uc694\uccad \uc2dd\ubcc4\uc790, memory ledger \ucee4\ubc0b, observer \uc2b9\uc778, effect authority\ub97c \ubcf4\uc720\ud558\uba70, \uc124\uce58 \ube44\ud65c\uc131\ud654 \uc2dc \uc7ac\ubd80\ucc29\uc744 \uc704\ud574 \ub300\uae30 \uc911 \uc6d0\ub798 \uc791\uc5c5\uc744 \ubcf4\uc874\ud574\uc57c \ud568."
+                },
+                {
+                  "t": "p",
+                  "html": "**\ucc38\uace0**: \uc601\uc218\uc99d\uc0c1 \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. admission \uc5ec\ubd80\ub294 \ud604\uc7ac Memory \uac80\uc0c9\uc73c\ub85c \ud655\uc778\ud574\uc57c \ud558\uc9c0\ub9cc, \uc9c0\uce68\uc5d0 \ub530\ub77c pending \ud6c4\ubcf4\uac00 \uac80\uc0c9\uc5d0 \uc548 \ubcf4\uc778\ub2e4\ub294 \uc774\uc720\ub85c \uc7ac\uc2dc\ub3c4\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

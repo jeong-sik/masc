@@ -1,0 +1,24 @@
+ Dashboard  Work  Keepers  ▸Usage  Board  Workspace  System
+                                                                                                                                                                                        │[Recent] Changes · 2 keepers · feed closed: MCP initial
+   MASC Usage  16:44:12  HTTP [connected]                                                                                                                                               │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+   Plan    Trend    Keepers    v:next view                                                                                                                                              │· beta             no events
+                                                                                                                                                                                        │───────────────────────────────────────────────────────
+   Candle · workspace supply                                                                                                                                                            │alpha · no events on this feed yet
+     Candle issued: 100.000
+     Candle burned: 10.000
+     Candle circulating: 90.000
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Keeper usage (24h) · unavailable: keeper usage load failed: HTTP 503: fixture endpoint unavailable
+
+
+
+
+
+
+
+
+
+
+  j/k:scroll  p:Usage / Telemetry  v:Plan / Trend / Keepers  w:1d / 7d / 14d  Esc:Dashboard  r:refresh  Tab:next  q:quit  | Port: 49176
+ › to alpha   (i to write)

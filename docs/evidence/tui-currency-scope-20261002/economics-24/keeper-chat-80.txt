@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   Keepers ▸ alpha ▸ chat
+ ──────────────────────────────────────────────────────────────────────────────
+    (no messages yet -- type below and press Enter)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────
+    >
+
+ alpha · ● healthy AUTO · gate: not loaded · runn…  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:NL  /:commands  Esc:list  PgUp:history  …?

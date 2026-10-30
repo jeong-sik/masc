@@ -1,0 +1,148 @@
+import { keeperCostSummary } from '../lib/keeper-cost-coverage'
+import { html } from 'htm/preact'
+import { formatTokens, formatTokPerSec, isFiniteMetricValue } from '../lib/format-number'
+import { StatTile } from './common/stat-tile'
+import type { Keeper, KeeperMetricPoint } from '../types'
+import {
+  CTX_CRITICAL_PCT,
+  CTX_WARN_PCT,
+} from './keeper-detail-ctx-utils'
+import { OutcomesLedger } from './keeper-detail-outcomes'
+
+export function MutedSpan({ children }: { children: unknown }) {
+  return html`<span class="text-3xs text-[var(--color-fg-disabled)]">${children}</span>`
+}
+
+export function DetailRow({ children }: { children: unknown }) {
+  return html`<div class="flex items-center justify-between mb-1.5 v2-monitoring-row">${children}</div>`
+}
+
+// ── KPI Card ─────────────────────────────────────────────
+
+type KpiTone = 'default' | 'ok' | 'warn' | 'bad'
+
+function kpiToneToStatus(tone: KpiTone): 'ok' | 'warn' | 'crit' | undefined {
+  if (tone === 'default') return undefined
+  if (tone === 'bad') return 'crit'
+  return tone
+}
+
+// ── Detail Card (shared container) ───────────────────────
+
+export function DetailCard({ class: cx, children }: {
+  class?: string
+  children: unknown
+}) {
+  return html`
+    <div class="p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''} v2-monitoring-card">${children}</div>
+  `
+}
+
+// ── KPI Grid ─────────────────────────────────────────────
+// 4-section layout mirrors the keeper's 3-layer state model
+// (Events -> Phase+Conditions -> Counters): identity / memory / autonomy / outcomes.
+
+export function KpiSection({ title, children }: {
+  title: string
+  children: unknown
+}) {
+  return html`
+    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 v2-monitoring-panel" aria-label=${title}>
+      <header class="mb-2">
+        <h3 class="text-2xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">${title}</h3>
+      </header>
+      ${children}
+    </section>
+  `
+}
+
+export function KpiGrid({ keeper }: { keeper: Keeper }) {
+  const series = keeper.metrics_series ?? []
+  const lastPt = series[series.length - 1] as KeeperMetricPoint | undefined
+  const latestWallTokPerSec = latestFiniteMetric(series, point => point.wall_tokens_per_second)
+  const latestHwTokPerSec = latestFiniteMetric(
+    series,
+    point => point.inference_telemetry?.timings?.predicted_per_second,
+  )
+  const latestCost =
+    lastPt && Number.isFinite(lastPt.cost_usd)
+      ? `$${lastPt.cost_usd.toFixed(4)}`
+      : null
+
+  const ctxPct = keeper.context_ratio != null ? Math.round(keeper.context_ratio * 100) : null
+  const ctxTone: KpiTone = ctxPct == null ? 'default' : ctxPct > CTX_CRITICAL_PCT ? 'bad' : ctxPct > CTX_WARN_PCT ? 'warn' : ctxPct > 0 ? 'ok' : 'default'
+  const ctxHint = ctxPct != null && ctxPct > CTX_WARN_PCT ? '한계 접근 중' : undefined
+
+  const outcomes = keeper.outcomes
+
+  return html`
+    <div class="flex flex-col gap-3 mb-5 v2-monitoring-surface">
+      <${KpiSection} title="정체성">
+        <div class="grid grid-cols-1 gap-2">
+          <${StatTile}
+            label="턴"
+            value=${String(keeper.turn_count ?? '-')}
+          />
+          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3">
+            <span class="kpi-label">누적 비용 (USD)</span>
+            <p class="text-sm text-[var(--color-fg-primary)] whitespace-normal break-words mt-1">${keeperCostSummary(keeper.cost_coverage)}</p>
+          </div>
+        </div>
+      <//>
+
+      <${KpiSection} title="메모리 압력">
+        <div class="flex flex-col gap-3">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <${StatTile}
+              label="컨텍스트"
+              value=${ctxPct != null ? `${ctxPct}%` : '-'}
+              status=${kpiToneToStatus(ctxTone)}
+              delta=${ctxHint ? { direction: ctxPct != null && ctxPct > CTX_WARN_PCT ? 'down' as const : 'flat' as const, text: ctxHint } : undefined}
+            />
+            <${StatTile}
+              label="토큰"
+              value=${formatTokens(keeper.context_tokens)}
+            />
+            ${latestCost
+              ? html`<${StatTile} label="비용 (USD)" value=${latestCost} />`
+              : null}
+            ${latestWallTokPerSec != null
+              ? html`<${StatTile}
+                  label="wall tok/s"
+                  value=${formatTokPerSec(latestWallTokPerSec)}
+                  delta=${{ direction: 'flat' as const, text: 'output/latency' }}
+                />`
+              : null}
+            ${latestHwTokPerSec != null
+              ? html`<${StatTile}
+                  label="hw tok/s"
+                  value=${formatTokPerSec(latestHwTokPerSec)}
+                  delta=${{ direction: 'flat' as const, text: 'decode' }}
+                />`
+              : null}
+          </div>
+        </div>
+      <//>
+
+
+      <${KpiSection} title="결과">
+        ${outcomes ? html`<${OutcomesLedger} keeper=${keeper} outcomes=${outcomes} />` : html`
+          <div class="text-2xs text-[var(--color-fg-disabled)] leading-snug">
+            outcomes 집계를 불러오는 중이거나, 이 키퍼는 아직 관찰된 전이가 없습니다.
+          </div>
+        `}
+      <//>
+    </div>
+  `
+}
+
+function latestFiniteMetric(
+  series: KeeperMetricPoint[],
+  select: (point: KeeperMetricPoint) => number | null | undefined,
+): number | null {
+  for (let i = series.length - 1; i >= 0; i -= 1) {
+    const value = select(series[i]!)
+    if (isFiniteMetricValue(value)) return value
+  }
+  return null
+}

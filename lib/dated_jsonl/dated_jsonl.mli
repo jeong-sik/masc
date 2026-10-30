@@ -1,0 +1,495 @@
+(** Date-split JSONL storage.
+
+    Organises JSONL records into [base_dir/YYYY-MM/DD.jsonl] files.
+    Stores rooted at the same [base_dir] share one {!Eio.Mutex.t} for
+    concurrent-safe appends. *)
+
+type t
+(** Opaque handle.  Holds [base_dir] and the append mutex. *)
+
+type read_operation =
+  | Inspect
+  | List_directory
+  | Open_file
+  | Read_file
+
+type layout_entry_kind =
+  | Month_directory
+  | Day_file
+
+type non_regular_file_kind =
+  | Directory
+  | Symbolic_link
+  | Character_device
+  | Block_device
+  | Fifo
+  | Socket
+
+type read_error =
+  | Invalid_offset of { offset : int }
+  | Invalid_date_range of
+      { since : string
+      ; until : string
+      }
+  | Not_a_directory of { path : string }
+  | Invalid_layout_entry of
+      { parent : string
+      ; entry : string
+      ; expected : layout_entry_kind
+      }
+  | Non_regular_file of
+      { path : string
+      ; kind : non_regular_file_kind
+      }
+  | Io_error of
+      { operation : read_operation
+      ; path : string
+      ; detail : string
+      }
+
+type recent_entry =
+  | Parsed of Yojson.Safe.t
+  | Malformed_json of
+      { path : string
+      ; line_number : int option
+      ; detail : string
+      }
+
+val read_error_to_string : read_error -> string
+(** Render a typed storage read failure for operator-facing diagnostics. *)
+
+module Store = Dated_jsonl_store
+(** The closed list of stores and where each one lives. *)
+module Layout = Dated_jsonl_layout
+(** Shared calendar and numeric rotation ordering for read continuations. *)
+
+val open_store :
+  ?mutex:Eio.Mutex.t ->
+  ?max_bytes:int ->
+  Store.location ->
+  t
+(** Open the store at a listed location. A store can be opened only where
+    {!Store} puts it.
+
+    An optional [mutex] can be injected to bypass the shared registry
+    (useful for testing). When [?max_bytes] is positive, [append] prunes
+    oldest completed day-files until the store is at or below the cap, while
+    preserving the current day-file. Day files are removed by age only by
+    {!prune_listed_stores}. *)
+
+val base_dir : t -> string
+(** Return the base directory of this store. *)
+
+val prepare_for_directory_removal : t -> unit
+(** Close the current append writer and forget its memoized month directory
+    and row count before application-owned code removes [base_dir t]. A later
+    append can then recreate the directory and observe the new file identity. *)
+
+val append : t -> Yojson.Safe.t -> unit
+(** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
+    Creates directories as needed.  Thread-safe via internal mutex. *)
+
+exception Append_guard_skipped
+(** The append guard returned without allowing a commit-aware append. *)
+
+val append_notifying_commit : t -> Yojson.Safe.t -> on_committed:(unit -> unit) -> unit
+(** Same as {!append}, and calls [on_committed] once the row is in the file,
+    before retention and byte-budget pruning run. An exception raised after
+    [on_committed] returned leaves the row durable; one raised before it
+    leaves nothing written. A caller that retries a failed append uses this to
+    tell the two apart, so it does not write the same row twice.
+    Raises [Append_guard_skipped] when the guard declines the callback. *)
+
+type append_outcome =
+  | Appended_to_current
+      (** The row landed in today's current [DD.jsonl]. *)
+  | Appended_after_rotation of { segment : string }
+      (** Today's file reached the cap and was renamed to the completed
+          segment [DD.SEQUENCE.jsonl] named here; the row landed in a fresh
+          current file. *)
+  | Skipped_rotation_exhausted of { sequence_limit : int }
+      (** The highest segment sequence has reached [sequence_limit] ([max_int]);
+          another integer identity cannot be represented. No file is replaced. *)
+  | Skipped_by_append_guard
+      (** The installed {!set_append_guard} declined to run the append. *)
+
+val append_rotating :
+  t -> max_current_file_bytes:int -> Yojson.Safe.t -> append_outcome
+(** Append [json] to today's current [DD.jsonl], rotating the file to a
+    completed [DD.SEQUENCE.jsonl] segment first when the row would push it
+    over [max_current_file_bytes] (a non-positive cap never rotates).
+    Rotated segments are ordinary completed files: readers include them
+    in day and numeric sequence order (sequences have at least three digits,
+    and grow past 999), and the [?max_bytes] byte-budget prune from {!open_store}
+    removes the oldest of them first while the current file survives —
+    so a capped store keeps the newest records and sheds the oldest,
+    instead of dropping new rows for the rest of the day.
+
+    A single row larger than the cap lands in an empty current file
+    anyway (the segment runs oversized once) — rotating an empty file
+    out would spin without ever accepting the row. The size check,
+    rename, and append share the same internal mutex as {!append};
+    retention and byte-budget pruning still run after a successful
+    append. *)
+
+val set_append_guard : ((unit -> unit) -> unit) -> unit
+(** [set_append_guard guard] installs a process-wide wrapper around
+    {!append}.  The default guard runs the callback immediately.  Higher-level
+    runtimes can install resource accounting/backpressure without making this
+    low-level storage library depend on those policy modules. *)
+
+val collect_matching :
+  ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
+(** [collect_matching ?offset t n ~f] returns the newest [n] values [f]
+    produced. Where {!filter_map_recent} counts rows read, this counts values
+    selected, so [n] means what a filtering caller intended by it.
+
+    Use it whenever [f] rejects rows. With {!filter_map_recent} such a caller
+    has no value of [n] that means "the newest [n] matches": the budget fills
+    with whatever was written last, and unrelated writes can consume all of it.
+    Multiplying [n] to compensate only moves the write rate at which the answer
+    goes empty.
+
+    Day files are walked newest-first and scanned backwards in fixed-size
+    chunks. The scan stops at the [n]-th match and never materialises a whole
+    day file; memory is bounded by the current chunk/line fragment plus the
+    selected values. A day file removed by concurrent retention after the
+    directory snapshot is skipped; other open failures still reach the
+    caller.
+
+    [offset] skips selected values, not rows. Ordering and malformed-row
+    skipping match {!filter_map_recent}, including that {b [f] is called
+    newest-first}. *)
+
+val collect_matching_range :
+  ?offset:int ->
+  t ->
+  since:string ->
+  until:string ->
+  int ->
+  f:(Yojson.Safe.t -> 'a option) ->
+  'a list
+(** Range-bounded {!collect_matching}. Only day files in the inclusive
+    [[since, until]] UTC date range are opened. Invalid or reversed dates
+    return [[]], matching {!filter_map_range_recent}; row-level [f] remains
+    responsible for exact timestamp boundaries within the edge days. *)
+
+val filter_map_recent :
+  ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
+(** [filter_map_recent ?offset t n ~f] is [List.filter_map f (read_recent
+    ?offset t n)] without ever holding the intermediate [Yojson.Safe.t list].
+    [f] is applied to each parsed row as it is read, so a row's tree is
+    unreachable before the next row is parsed; the result list is the only
+    thing that accumulates.
+
+    [n] and [offset] count parsed rows, not selected ones: [f] returning [None]
+    does not make the reader consume an extra row. The returned list, the
+    offset semantics, and malformed-row skipping match {!read_recent} exactly.
+
+    {b [f] is called newest-first.} The scan walks months, day-files, and rows
+    in descending order and prepends, which is what makes the {e result}
+    chronological. So for a pure [f] this is exactly [List.filter_map f
+    (read_recent ?offset t n)], but for an [f] whose side effects depend on
+    call order — rate-limited error logging, "report the first N drops",
+    anything that stops after a quota — it is not: those effects see the
+    newest rows first. Convert such a call site with a test that pins the
+    effect, not by substitution.
+
+    Callers that decode rows into their own record type should prefer this over
+    [read_recent |> List.filter_map]: a [`Assoc] holds one cons cell, one tuple,
+    and one boxed value per field, so the tree is roughly 25x the source bytes
+    and a 100k-row window materialises gigabytes that the decoder immediately
+    discards. *)
+
+val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
+(** [read_recent ?offset t n] returns the newest [n] entries in chronological
+    order (oldest first), skipping the first [offset] newest entries.
+    Scans day-files from newest to oldest, stops early.
+
+    Holds every row's parsed tree at once. Use {!filter_map_recent} when the
+    rows are being decoded into something smaller. *)
+
+val read_recent_result :
+  ?offset:int -> t -> int -> (recent_entry list, read_error) result
+(** Strict bounded recent-row read. The limit and offset count physical,
+    non-empty JSONL rows, including {!Malformed_json} rows. Missing stores are
+    [Ok []]. The reader accepts only [YYYY-MM/DD.jsonl] layout entries and
+    regular day files; symbolic links, other file kinds, and I/O failures are
+    returned explicitly. Results are chronological (oldest first). *)
+
+val find_latest_entry_result :
+  t -> (recent_entry -> 'a option) -> ('a option, read_error) result
+(** Scan physical rows from newest to oldest and return the first value
+    selected by the callback. The scan reads each visited byte at most once,
+    keeps only one reverse-I/O chunk in memory, and stops immediately after a
+    match. Malformed rows are delivered to the callback. Missing stores return
+    [Ok None]; layout and I/O failures remain explicit. *)
+
+val month_dir_paths_newest_first_result : t -> (string list, read_error) result
+(** The store's month directories, newest first, listed and validated as
+    {!find_latest_entry_result} lists them. A missing store is empty. *)
+
+val day_file_paths_newest_first_result : string -> (string list, read_error) result
+(** The day files of one month directory from
+    {!month_dir_paths_newest_first_result}, newest first, listed and validated
+    as {!find_latest_entry_result} lists them. *)
+
+val compare_day_file_names : string -> string -> int
+(** The order of two day file names within one month, oldest first: the order
+    {!day_file_paths_newest_first_result} lists them in, reversed. *)
+
+val entry_of_physical_line : path:string -> string -> recent_entry option
+(** One physical line of a day file of [path], without its newline, as
+    {!find_latest_entry_result} reads it: [None] when it holds only whitespace,
+    which no reader counts as a row, and the decoded row otherwise. *)
+
+val find_latest_entry_in_file_result :
+  string -> (recent_entry -> 'a option) -> ('a option, read_error) result
+(** Single-file reverse scan using the same chunked reader as
+    {!find_latest_entry_result}. Calls the callback newest-first until it
+    selects a value or the file ends. Malformed rows reach the callback;
+    missing or non-regular files and I/O failures are errors. *)
+
+val read_recent_lines : ?offset:int -> t -> int -> string list
+(** Like {!read_recent} but returns raw JSONL strings (no parse).
+    Useful for tail-readers that do their own parsing. *)
+
+val range_day_file_paths_result :
+  t -> since:string -> until:string -> (string list, read_error) result
+(** Enumerate the complete selected dated paths, oldest first. A missing
+    store is empty; invalid ranges and failures to inspect or list the store
+    or a selected month are errors. Foreign names are ignored, as with
+    {!iter_range_entries_result}. Day files are not opened. *)
+
+val range_day_file_paths : t -> since:string -> until:string -> string list
+(** The day files the inclusive [[since, until]] range covers, oldest first,
+    without opening any of them. Same day-selection rule as {!iter_range}, so a
+    path returned here is a file that call would have read. Invalid dates give
+    the empty list. *)
+
+val fold_range_appended_raw
+  :  t
+  -> since:string
+  -> until:string
+  -> cursors:(string * int) list
+  -> init:'acc
+  -> f:('acc -> string -> 'acc)
+  -> 'acc * (string * int) list
+(** Fold only the raw lines a range gained since [cursors] said each file was
+    read to, and return the accumulator with the cursors advanced.
+    Unlike {!fold_range_appended}, lines are passed unparsed so callers can
+    pre-filter or decode selectively. *)
+
+val fold_range_appended
+  :  t
+  -> since:string
+  -> until:string
+  -> cursors:(string * int) list
+  -> init:'acc
+  -> f:('acc -> Yojson.Safe.t -> 'acc)
+  -> 'acc * (string * int) list
+(** Fold only the rows a range gained since [cursors] said each file was read
+    to, and return the accumulator with the cursors advanced.
+
+    A day file is append-only, so a caller holding a trailing-window answer can
+    keep its accumulator and pass the cursors back rather than reading the
+    window again. A path absent from [cursors] is read whole; malformed rows
+    are skipped as {!iter_range} skips them.
+
+    A file that shrank below its cursor (rotation, rewrite) is re-read from
+    zero, so such a caller double-counts rather than under-counts. Compare the
+    returned cursor against the one passed to detect it. *)
+
+type append_cursor
+(** File identities, observed sizes and complete-line boundaries from one
+    successful strict incremental read. Owned by this module. *)
+
+type 'a appended_read =
+  | Appended of 'a * append_cursor
+  | Cursor_invalidated
+
+val fold_range_appended_result :
+  t -> since:string -> until:string -> cursor:append_cursor option ->
+  init:'a -> f:('a -> Yojson.Safe.t -> 'a) ->
+  ('a appended_read, read_error) result
+(** Strict incremental read using the same complete range as
+    {!range_day_file_paths_result}. Missing previous files, replacement,
+    shrinkage or a same-size metadata change invalidate the cursor before
+    invoking [f]. The caller must discard its accumulator and read with
+    [cursor:None]. New files and appended bytes are read without replaying
+    retained files. In-place prefix edits combined with growth are outside
+    the append-only file contract.
+
+    Reads use verified regular-file handles and stop at captured sizes;
+    incomplete trailing lines are retried on the next call. A file or layout
+    change observed during the read is an error, as are inspection/open/read
+    failures. [f] may already have run before an error or exception, so a
+    mutable accumulator must be discarded in either case. Only [Appended]
+    authorizes retaining the returned cursor. Malformed JSON rows are skipped
+    as in {!fold_range_appended}; callback exceptions propagate unchanged. *)
+
+val fold_file_appended_entries_result :
+  string -> cursor:append_cursor option -> init:'a ->
+  f:('a -> recent_entry -> 'a) -> ('a appended_read, read_error) result
+(** Strict single-file counterpart to {!fold_range_appended_result}. It reports
+    malformed complete lines to [f] instead of skipping them. An incomplete final
+    row is an error. A removed file is
+    an error; rotation, shrinkage and same-size edits invalidate the cursor.
+    Appended bytes are read only once. The same append-only contract applies:
+    in-place prefix edits combined with growth are outside that contract. *)
+
+val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
+(** [read_range t ~since ~until] returns entries whose day-file falls
+    within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).
+    Result is in chronological order. *)
+
+val filter_map_range_recent
+  :  ?offset:int
+  -> t
+  -> since:string
+  -> until:string
+  -> int
+  -> f:(Yojson.Safe.t -> 'a option)
+  -> 'a list
+(** Range counterpart to {!filter_map_recent}: [List.filter_map f
+    (read_range_recent ?offset t ~since ~until n)] without ever holding the
+    intermediate [Yojson.Safe.t list].
+
+    Same contract as {!filter_map_recent} in every respect that matters —
+    [n] and [offset] count parsed rows rather than selected ones, the returned
+    list is chronological, and {b [f] is called newest-first}, so a projection
+    whose side effects depend on call order is not interchangeable with the
+    [read_range_recent |> List.filter_map] form. *)
+
+val read_range_recent
+  :  ?offset:int
+  -> t
+  -> since:string
+  -> until:string
+  -> int
+  -> Yojson.Safe.t list
+(** [read_range_recent ?offset t ~since ~until n] returns at most the newest
+    [n] entries whose day-file falls within [[since, until]] (inclusive). Reads
+    newest day-file first and only the tail of each file, so it parses ~[n]
+    entries instead of the whole window — use it instead of {!read_range} when
+    a result bound exists and the window may span large stores. Result is
+    chronological (oldest-first) within the collected set, matching
+    {!read_recent}. *)
+
+val iter_all : t -> (Yojson.Safe.t -> unit) -> unit
+(** [iter_all t f] calls [f] for every parseable JSONL entry in chronological
+    order without loading a whole day-file into memory. Malformed rows are
+    skipped, matching {!read_recent} and {!read_range}. *)
+
+val iter_all_entries_result :
+  t -> (recent_entry -> unit) -> (unit, read_error) result
+(** Stream every physical, non-empty JSONL row in chronological order. JSON
+    syntax failures are delivered as {!Malformed_json} entries and do not stop
+    iteration. The same closed layout and regular-file boundary as
+    {!read_recent_result} applies; storage failures are returned explicitly.
+    Missing stores are empty. *)
+
+val iter_range_entries_result :
+  t ->
+  since:string ->
+  until:string ->
+  (recent_entry -> unit) ->
+  (unit, read_error) result
+(** Strict chronological iteration over day files in the inclusive
+    [[since, until]] range. JSON syntax failures are delivered as
+    {!Malformed_json}; invalid ranges and selected-path storage failures are
+    returned explicitly. Entries that are not valid dated paths are outside
+    the requested range and do not gate the read. Files outside the requested
+    day range are not opened. *)
+
+val iter_range : t -> since:string -> until:string -> (Yojson.Safe.t -> unit) -> unit
+(** Streaming variant of {!read_range}. Invalid dates iterate zero rows. *)
+
+val prune : t -> days:int -> int
+(** [prune t ~days] deletes day-files older than [days] days ago.
+    Returns the number of files deleted.  Removes empty month directories. *)
+
+val prune_listed_stores : Store.root -> operator_window_days:int -> int
+(** Prune every store in {!Store.all} by its {!Store.retention}, through
+    descriptor-owned traversal of the declared geometry. [operator_window_days] is
+    the workspace's window for [Operator_window] stores. Returns the number
+    of day files deleted. *)
+
+val prune_listed_stores_bound :
+  Store.root -> Fs_compat.Retention_directory.t -> operator_window_days:int -> int
+(** Same declared stores/windows through the caller's already bound runtime
+    root, so a shared flat/dated pass never reopens its root by pathname. *)
+
+(* OCaml 5.3 emits warning 32 on this exported signature item under
+   [warn-error=+a] even though the implementation and internal call sites are
+   present. Keep the suppression scoped to this declaration only. *)
+[@@@warning "-32"]
+val count_entries : t -> int
+[@@@warning "+32"]
+(* [count_entries t] returns the total number of non-empty,
+   newline-terminated lines across all day-files. Scans bytes without
+   JSON parsing, backed by a per-file (boundary, count) cache: closed
+   day-files are never re-read and the growing current-day file only
+   re-reads the bytes appended since the previous call, so a call is
+   O(appended bytes) — exact, no TTL staleness window (the RFC-0162
+   §3.2 TTL layer this replaced traded 10 s of staleness for a bound
+   the incremental cache now provides structurally). A trailing line
+   not yet terminated by '\n' is not counted until its newline lands;
+   audit callers that must include it use [count_entries_uncached]. *)
+
+val count_entries_uncached : t -> int
+(** Like [count_entries] but bypasses the per-file cache and counts a
+    trailing unterminated line. Use in tests or rare audit paths that
+    must observe the live filesystem byte-for-byte. *)
+
+val save_count_cache : path:string -> (unit, string) result
+(** Writes the per-file (path, boundary, count) cache to [path] via a
+    temp-file rename. The cache is never an authority: every entry is still
+    validated against the file's current size when it is used, so a stale or
+    absent file only costs the full count it costs today. An empty cache
+    writes nothing. *)
+
+val load_count_cache : path:string -> (int, string) result
+(** Loads a cache written by {!save_count_cache}, returning how many rows were
+    read. Rows merge into the in-memory table and never overwrite an entry
+    this process has already advanced further. A missing file is [Ok 0]:
+    counting from scratch is correct, just slower. *)
+
+val reset_count_cache_for_testing : unit -> unit
+(** Reset the per-file incremental count cache. Test-only. *)
+
+val load_tail_lines : string -> max_lines:int -> string list
+(** [load_tail_lines file ~max_lines] efficiently reads the last [max_lines]
+    from a large file without loading the whole file into memory.
+    The read, the scan and the split run on the process domain pool when
+    one is installed, so the calling fiber's scheduler is not held for them.
+    Reads backwards in chunks. Returns chronologically (oldest first). A
+    missing file is an empty tail; other open and read errors are exceptions. *)
+
+(** One non-blank line of a tail and the byte offset in the file where it
+    starts. In a file that is only appended to, the offset names the line for
+    as long as the file exists, whatever the window it was read in. *)
+type tail_row =
+  { offset : int
+  ; line : string
+  }
+
+val load_tail_rows : string -> max_lines:int -> tail_row list
+(** {!load_tail_lines} with each line's starting offset. Same read, same
+    order, same errors. *)
+
+val map_tail_rows : string -> max_lines:int -> f:(tail_row -> 'a) -> 'a list
+(** {!load_tail_rows} with [f] applied to each row in the same pool job as the
+    read, so a caller that parses the rows does not come back to its own
+    domain between the read and the parse. [f] must not touch state owned by
+    the calling fiber. *)
+
+module For_testing : sig
+  val mutex : t -> Eio.Mutex.t
+  (** Expose the internal mutex so tests can verify sharing. *)
+
+  val mutex_for_base_dir : string -> Eio.Mutex.t
+  (** Lookup or insert the registry entry for [base_dir].
+      Equivalent to the default-mutex path of {!open_store}. *)
+
+end

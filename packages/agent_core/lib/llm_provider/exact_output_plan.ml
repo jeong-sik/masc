@@ -1,0 +1,903 @@
+module Sha256 = Agent_core_sha256
+
+open Result.Syntax
+
+type fingerprint = Fingerprint of string
+
+type output_admission_error =
+  | Explicit_capability_snapshot_required
+  | Unsupported_output_contract of
+      { provider_kind : Provider_config.provider_kind
+      ; model_id : string
+      ; response_format : Types.response_format
+      }
+  | Unsupported_exact_cross_feature
+  | Global_admission_not_allowed
+  | Invalid_connect_timeout of float
+  | Invalid_body_timeout of float
+  | Missing_deadline of { provider_id : string option }
+      (** No body timeout is declared. The body timeout is the only budget
+          that bounds the whole request; the connect timeout ends when the
+          response headers arrive. Without it a provider that sends headers
+          and then stalls the body hangs the request for the life of the
+          connection -- measured at 13.3h on an exact-output lane (#36979).
+          A connect timeout alone does not satisfy this rule. [provider_id]
+          is the config's own, carried so the refusal can name the provider
+          whose declaration is missing; [None] when the config names none. *)
+  | Caller_supplied_header_not_allowed of string
+  | Unsupported_image_input
+  | Unsupported_document_input
+  | Unsupported_audio_input
+  | Unsupported_system_prompt
+  | Provider_request_rejected of Http_client.http_error
+  | Request_serialization_rejected of Http_client.http_error
+
+type json_validation_provenance =
+  | Json_syntax_validated
+  | Provider_schema_requested_client_validation_required
+
+type normalized_output =
+  { value : Yojson.Safe.t
+  ; validation : json_validation_provenance
+  }
+
+type output_normalization_error =
+  | Incomplete_structured_response of Types.stop_reason
+  | Missing_structured_text
+  | Ambiguous_structured_text of int
+  | Unexpected_structured_content
+  | Invalid_json of string
+
+type frozen_wire_request =
+  { response_codec : Provider_http_codec.t
+  ; provider_kind : Provider_config.provider_kind
+  ; url : string
+  ; headers : (string * string) list
+  ; body : string
+  ; body_sha256 : string
+  ; connect_timeout_s : float option
+  ; body_timeout_s : float option
+  }
+
+type t =
+  { response_format : Types.response_format
+  ; wire : frozen_wire_request
+  ; dispatch_request : Http_client.validated_sync_request
+  ; fingerprint : fingerprint
+  }
+
+type preflight =
+  { prepared : Prepared_completion_request.t
+  ; exact_completion_artifact : Exact_output_count_tokens.exact_completion_artifact option
+  ; config : Provider_config.t
+  ; capabilities : Capabilities.capabilities
+  ; response_format : Types.response_format
+  ; wire : frozen_wire_request
+  ; dispatch_request : Http_client.validated_sync_request
+  }
+
+type admission_basis =
+  | Measured_context_fit of Prepared_completion_request.context_fit
+  | Token_measurement_not_required
+
+type finalization_error =
+  | Token_measurement_required of Serving_constraint.t
+  | Measured_request_mismatch
+
+(* Test support. Nothing in production reads a fingerprint as text -- the
+   plan compares fingerprints -- but the inline pin below has to name the
+   value it freezes, and the frozen material domain is the point of that pin.
+   Annotated so the release build, which drops inline tests, does not read it
+   as an unused value. *)
+let[@warning "-32"] fingerprint_to_string (Fingerprint value) = value
+let sha256 value = Sha256.(to_hex (digest_string value))
+
+let rec canonical_json = function
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.map (fun (name, value) -> name, canonical_json value)
+       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | `List values -> `List (List.map canonical_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as scalar -> scalar
+;;
+
+let canonical_response_format = function
+  | Types.JsonSchema schema -> Types.JsonSchema (canonical_json schema)
+  | (Types.Off | Types.JsonMode) as response_format -> response_format
+;;
+
+let contract_is_supported
+      (config : Provider_config.t)
+      (capabilities : Capabilities.capabilities)
+  =
+  match config.response_format with
+  | Types.Off -> true
+  | Types.JsonMode ->
+    capabilities.supports_response_format_json
+    && Provider_http_codec.supports_json_mode (Provider_http_codec.of_config config)
+  | Types.JsonSchema _ -> capabilities.supports_structured_output
+;;
+
+let validate_timeout ~invalid = function
+  | None -> Ok ()
+  | Some seconds when Float.is_finite seconds && seconds > 0.0 -> Ok ()
+  | Some seconds -> Error (invalid seconds)
+;;
+
+let%test "timeout validation preserves the invalid value" =
+  match validate_timeout ~invalid:Fun.id (Some (-1.5)) with
+  | Error seconds -> Float.equal seconds (-1.5)
+  | Ok () -> false
+;;
+
+(* Each [validate_timeout] accepts [None] on its own; this rule decides which
+   absence is refused. The connect deadline ends when the response headers
+   arrive, so a connect-only wire still reads the body with no deadline. The
+   body deadline is a total request ceiling, so it is the one budget every
+   exact wire must carry. *)
+let require_body_deadline ~body_timeout_s : (unit, [ `Missing_deadline ]) result =
+  match body_timeout_s with
+  | Some (_ : float) -> Ok ()
+  | None -> Error `Missing_deadline
+;;
+
+let%test "body deadline rule admits a declared body budget" =
+  match require_body_deadline ~body_timeout_s:(Some 1.0) with
+  | Ok () -> true
+  | Error `Missing_deadline -> false
+;;
+
+let%test "body deadline rule refuses a missing body budget" =
+  match require_body_deadline ~body_timeout_s:None with
+  | Error `Missing_deadline -> true
+  | Ok () -> false
+;;
+
+(* Inline %tests that match on [error] must surface the constructor they hit
+   instead of folding it into [false]: an unlabeled rejection reads as "the
+   happy path failed", which is what hid the caller-supplied-header gate
+   defect in "freezes refreshed credentials" for its whole lifetime on main. *)
+let[@warning "-32"] rejection_name = function
+  | Explicit_capability_snapshot_required -> "explicit_capability_snapshot_required"
+  | Unsupported_output_contract _ -> "unsupported_output_contract"
+  | Unsupported_exact_cross_feature -> "unsupported_exact_cross_feature"
+  | Global_admission_not_allowed -> "global_admission_not_allowed"
+  | Invalid_connect_timeout _ -> "invalid_connect_timeout"
+  | Invalid_body_timeout _ -> "invalid_body_timeout"
+  | Missing_deadline _ -> "missing_deadline"
+  | Caller_supplied_header_not_allowed name ->
+    "caller_supplied_header_not_allowed:" ^ name
+  | Unsupported_image_input -> "unsupported_image_input"
+  | Unsupported_document_input -> "unsupported_document_input"
+  | Unsupported_audio_input -> "unsupported_audio_input"
+  | Unsupported_system_prompt -> "unsupported_system_prompt"
+  | Provider_request_rejected _ -> "provider_request_rejected"
+  | Request_serialization_rejected _ -> "request_serialization_rejected"
+;;
+
+(* Same treatment for [output_normalization_error]: the JsonMode provenance
+   test's arms must name which constructor fired. *)
+let[@warning "-32"] normalization_error_name = function
+  | Incomplete_structured_response stop_reason ->
+    "incomplete_structured_response:" ^ Types.stop_reason_to_string stop_reason
+  | Missing_structured_text -> "missing_structured_text"
+  | Ambiguous_structured_text count -> "ambiguous_structured_text:" ^ string_of_int count
+  | Unexpected_structured_content -> "unexpected_structured_content"
+  | Invalid_json detail -> "invalid_json:" ^ detail
+;;
+
+let content_uses_exact_cross_feature = function
+  | Types.ToolUse _
+  | Types.ToolResult _
+  | Types.Thinking _
+  | Types.ReasoningDetails _
+  | Types.RedactedThinking _ -> true
+  | Types.Text _ | Types.Image _ | Types.Document _ | Types.Audio _ -> false
+;;
+
+let contains_reserved_response_phase_metadata metadata =
+  List.exists
+    (fun (key, _) ->
+       String.equal key Backend_openai_responses.response_phase_metadata_key)
+    metadata
+;;
+
+let uses_anthropic_schema_prefill (config : Provider_config.t) messages =
+  match config.kind, config.response_format, List.rev messages with
+  | ( Provider_config.Anthropic
+    , Types.JsonSchema _
+    , ({ role = Types.Assistant; _ } : Types.message) :: _ ) -> true
+  | ( Provider_config.Anthropic
+    , Types.JsonSchema _
+    , ([] | ({ role = Types.System | Types.User | Types.Tool; _ } : Types.message) :: _) )
+    -> false
+  | Provider_config.Anthropic, (Types.Off | Types.JsonMode), _
+  | ( ( Provider_config.Kimi
+      | Provider_config.OpenAI_compat
+      | Provider_config.Ollama
+      | Provider_config.Gemini
+      | Provider_config.Glm )
+    , _
+    , _ ) -> false
+;;
+
+let request_uses_exact_cross_feature (request : Llm_transport.completion_request) =
+  let config = request.config in
+  (* A binding's explicit effort is a validated request control, like
+     [enable_thinking]; it does not add tools or reasoning history. *)
+  request.tools <> []
+  || config.tool_stream
+  || config.disable_parallel_tool_use
+  || (match config.tool_choice with
+      | None | Some Types.None_ -> false
+      | Some (Types.Auto) | Some (Types.Any) | Some (Types.Tool _) -> true)
+  || Option.is_some config.preserve_thinking
+  || Option.is_some config.clear_thinking
+  || uses_anthropic_schema_prefill config request.messages
+  || List.exists
+       (fun (message : Types.message) ->
+          message.role = Types.Tool
+          || contains_reserved_response_phase_metadata message.metadata
+          || List.exists content_uses_exact_cross_feature message.content)
+       request.messages
+;;
+
+let is_wire_default_header (name, value) =
+  String.lowercase_ascii (String.trim name) = "content-type"
+  && String.lowercase_ascii (String.trim value) = "application/json"
+;;
+
+let caller_supplied_header_name headers =
+  (* The default header list [Provider_config.make] injects when the caller
+     passes no ~headers is configuration, not caller supply: it is the wire-owned
+     application/json pair (matched case-insensitively) and carries no caller
+     identity. Treating it as caller-supplied rejects every exact preflight,
+     including the credential-freeze preflight #35091 added.
+     We filter out wire-default headers so that any genuinely caller-supplied
+     header (including custom Content-Type values or extra headers alongside
+     defaults) is accurately identified and blamed regardless of list order. *)
+  match List.find_opt (fun h -> not (is_wire_default_header h)) headers with
+  | None -> None
+  | Some (name, _) -> Some name
+;;
+
+let rec content_capability_rejection capabilities = function
+  | [] -> None
+  | Types.Image _ :: _ when not capabilities.Capabilities.supports_image_input ->
+    Some Unsupported_image_input
+  | Types.Document _ :: _ when not capabilities.Capabilities.supports_document_input ->
+    Some Unsupported_document_input
+  | Types.Audio _ :: _ ->
+    (* No provider-neutral audio representability contract is frozen into an
+       exact plan yet. Generic audio capability alone is insufficient. *)
+    Some Unsupported_audio_input
+  | Types.ToolResult { content_blocks = Some blocks; _ } :: rest ->
+    (match content_capability_rejection capabilities blocks with
+     | Some _ as rejection -> rejection
+     | None -> content_capability_rejection capabilities rest)
+  | ( Types.Text _
+    | Types.Thinking _
+    | Types.ReasoningDetails _
+    | Types.RedactedThinking _
+    | Types.ToolUse _
+    | Types.ToolResult _
+    | Types.Image _
+    | Types.Document _ )
+    :: rest -> content_capability_rejection capabilities rest
+;;
+
+let request_capability_rejection
+      (config : Provider_config.t)
+      (capabilities : Capabilities.capabilities)
+      messages
+  =
+  let has_system_prompt =
+    match config.system_prompt with
+    | Some value -> not (Api_common.string_is_blank value)
+    | None -> false
+  in
+  if
+    (not capabilities.supports_system_prompt)
+    && (has_system_prompt
+        || List.exists
+             (fun (message : Types.message) -> message.role = Types.System)
+             messages)
+  then Some Unsupported_system_prompt
+  else
+    List.find_map
+      (fun (message : Types.message) ->
+         content_capability_rejection capabilities message.content)
+      messages
+;;
+
+let add_part buffer value =
+  Buffer.add_string buffer (string_of_int (String.length value));
+  Buffer.add_char buffer ':';
+  Buffer.add_string buffer value
+;;
+
+let option_float = function
+  | None -> "none"
+  | Some value -> Printf.sprintf "some:%.17g" value
+;;
+
+let credential_header name =
+  List.mem
+    (String.lowercase_ascii name)
+    [ "authorization"
+    ; "proxy-authorization"
+    ; "x-api-key"
+    ; "x-goog-api-key"
+    ; "cookie"
+    ; "set-cookie"
+    ]
+;;
+
+let plan_fingerprint
+      ~(config : Provider_config.t)
+      ~(capabilities : Capabilities.capabilities)
+      ~(wire : frozen_wire_request)
+      ~admission_basis
+  =
+  let material = Buffer.create 512 in
+  let version, admission_material =
+    match admission_basis with
+    | Measured_context_fit fit ->
+      ( "agent_core-exact-output-plan-v2"
+      , [ string_of_int fit.input_tokens
+        ; string_of_int fit.reserved_output_tokens
+        ; string_of_int fit.max_context_tokens
+        ] )
+    | Token_measurement_not_required -> "agent_core-exact-output-plan-unmeasured-v1", []
+  in
+  List.iter
+    (add_part material)
+    ([ version
+     ; Provider_http_codec.fingerprint_tag wire.response_codec
+     ; Provider_config.string_of_provider_kind wire.provider_kind
+     ; Option.value config.provider_id ~default:""
+     ; config.model_id
+     ; wire.url
+     ; wire.body_sha256
+     ; Yojson.Safe.to_string (Types.response_format_to_json config.response_format)
+     ; (if capabilities.supports_response_format_json then "1" else "0")
+     ; (if capabilities.supports_structured_output then "1" else "0")
+     ; Capability_vocab.json_schema_dialect_to_string capabilities.json_schema_dialect
+     ]
+     @ admission_material
+     @ [ option_float wire.connect_timeout_s
+       ; option_float wire.body_timeout_s
+       ; string_of_int (List.length wire.headers)
+       ]);
+  List.iter
+    (fun (name, value) ->
+       add_part material name;
+       add_part material (if credential_header name then "<redacted>" else value))
+    wire.headers;
+  Fingerprint (sha256 (Buffer.contents material))
+;;
+
+let freeze_config_response_format (config : Provider_config.t) response_format =
+  { config with response_format }
+;;
+
+let request_url (config : Provider_config.t) =
+  match config.kind with
+  | Provider_config.Gemini -> Complete_sampling.gemini_url ~config ~stream:false
+  | Provider_config.Anthropic
+  | Provider_config.Kimi
+  | Provider_config.OpenAI_compat
+  | Provider_config.Ollama
+  | Provider_config.Glm -> config.base_url ^ config.request_path
+;;
+
+type frozen_serialization =
+  { response_codec : Provider_http_codec.t
+  ; body : string
+  ; exact_completion_artifact : Exact_output_count_tokens.exact_completion_artifact option
+  }
+
+let exact_artifact_error (config : Provider_config.t) = function
+  | Exact_output_count_tokens.Output_token_resolution_failed error ->
+    Provider_request_rejected
+      (Http_client.AcceptRejected
+         { reason = Backend_anthropic.required_output_token_error_message config error })
+  | Exact_output_count_tokens.Invalid_completion_request reason ->
+    Request_serialization_rejected (Http_client.AcceptRejected { reason })
+  | Exact_output_count_tokens.Input_count_failed _ ->
+    Request_serialization_rejected
+      (Http_client.AcceptRejected
+         { reason = "exact completion artifact rejected a supported measurement wire" })
+;;
+
+let freeze_serialization
+      ~anthropic_thinking_control
+      ~(config : Provider_config.t)
+      (request : Llm_transport.completion_request)
+  =
+  if Exact_output_count_tokens.supports_completion_request_measurement config
+  then (
+    match
+      Exact_output_count_tokens.freeze_exact_completion_artifact
+        ~anthropic_thinking_control
+        request
+    with
+    | Error error -> Error (exact_artifact_error config error)
+    | Ok exact_completion_artifact ->
+      let body =
+        Exact_output_count_tokens.exact_completion_generation_body
+          exact_completion_artifact
+      in
+      Ok
+        { response_codec = Provider_http_codec.of_config config
+        ; body
+        ; exact_completion_artifact = Some exact_completion_artifact
+        })
+  else (
+    match
+      Complete_common.serialize_http_request_with_thinking_control
+        ~stream:false
+        ~anthropic_thinking_control
+        ~config
+        ~messages:request.messages
+        ~tools:request.tools
+    with
+    | Error error -> Error (Request_serialization_rejected error)
+    | Ok serialized ->
+      Ok { response_codec = serialized.Complete_common.http_codec
+         ; body = serialized.body; exact_completion_artifact = None })
+;;
+
+let preflight
+      ~config:(original_config : Provider_config.t)
+      ~messages
+      ~body_timeout_s
+      ~anthropic_thinking_control
+  =
+  match original_config.model_capabilities_override with
+  | None -> Error Explicit_capability_snapshot_required
+  | Some capabilities ->
+    let response_format = canonical_response_format original_config.response_format in
+    let config = freeze_config_response_format original_config response_format in
+    let prepared =
+      Prepared_completion_request.prepare ~config ~messages ?body_timeout_s ()
+    in
+    let request = Prepared_completion_request.request prepared in
+    let* auth_headers = Provider_config.resolve_auth_headers config
+      |> Result.map_error (fun reason -> Provider_request_rejected (Http_client.AcceptRejected { reason })) in
+    if request_uses_exact_cross_feature request
+    then Error Unsupported_exact_cross_feature
+    else if Option.is_some config.max_concurrent_requests
+    then Error Global_admission_not_allowed
+    else
+      let* () =
+        validate_timeout
+          ~invalid:(fun seconds -> Invalid_connect_timeout seconds)
+          config.connect_timeout_s
+      in
+      let* () =
+        validate_timeout
+          ~invalid:(fun seconds -> Invalid_body_timeout seconds)
+          request.body_timeout_s
+      in
+      let* () =
+        require_body_deadline ~body_timeout_s:request.body_timeout_s
+        |> Result.map_error (fun `Missing_deadline ->
+          Missing_deadline { provider_id = config.provider_id })
+      in
+      if not (contract_is_supported config capabilities)
+    then
+      Error
+        (Unsupported_output_contract
+           { provider_kind = config.kind; model_id = config.model_id; response_format })
+    else (
+      match request_capability_rejection config capabilities request.messages with
+      | Some rejection -> Error rejection
+      | None ->
+        (match caller_supplied_header_name config.headers with
+         | Some name -> Error (Caller_supplied_header_not_allowed name)
+         | None ->
+           (match
+              Complete_common.validate_all_with_thinking_control
+                ~anthropic_thinking_control
+                config
+            with
+            | Error error -> Error (Provider_request_rejected error)
+            | Ok () ->
+              (match freeze_serialization ~anthropic_thinking_control ~config request with
+               | Error error -> Error error
+               | Ok { response_codec; body; exact_completion_artifact } ->
+                 let body_sha256 = sha256 body in
+                 let headers =
+                   auth_headers
+                   @ [ "Content-Type", "application/json"
+                     ; "Content-Length", string_of_int (String.length body)
+                     ]
+                 in
+                 let headers =
+                   match config.kind with
+                   | Provider_config.Anthropic ->
+                     Backend_anthropic.request_headers ~body headers
+                   | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> headers
+                 in
+                 let url = request_url config in
+                 (* The URL and headers are parsed here, once, so a binding
+                    whose endpoint or header cannot be sent is refused before
+                    it is admitted rather than when its turn to dispatch
+                    comes. *)
+                 (match Http_client.prepare_sync_request ~url ~headers ~body with
+                  | Error error -> Error (Provider_request_rejected error)
+                  | Ok dispatch_request ->
+                    let wire =
+                      { response_codec
+                      ; provider_kind = config.kind
+                      ; url
+                      ; headers
+                      ; body
+                      ; body_sha256
+                      ; connect_timeout_s = config.connect_timeout_s
+                      ; body_timeout_s = request.body_timeout_s
+                      }
+                    in
+                    Ok
+                      { prepared
+                      ; exact_completion_artifact
+                      ; config
+                      ; capabilities
+                      ; response_format
+                      ; wire
+                      ; dispatch_request
+                      })))))
+;;
+
+let prepared_request (preflight : preflight) = preflight.prepared
+
+let measurement_request (preflight : preflight) =
+  match preflight.exact_completion_artifact with
+  | Some artifact ->
+    Ok (Exact_output_count_tokens.exact_completion_measurement_request artifact)
+  | None ->
+    Error
+      (Exact_output_count_tokens.Input_count_failed
+         (Input_token_count.Unsupported
+            { protocol = Input_token_count.Anthropic_messages_count_tokens
+            ; model_id = preflight.config.model_id
+            }))
+;;
+
+let serving_constraint (preflight : preflight) =
+  Prepared_completion_request.serving_constraint preflight.prepared
+;;
+
+let preflight_connect_timeout_s (preflight : preflight) = preflight.wire.connect_timeout_s
+let preflight_body_timeout_s (preflight : preflight) = preflight.wire.body_timeout_s
+let preflight_request_body_sha256 (preflight : preflight) = preflight.wire.body_sha256
+
+let preflight_request_body_bytes (preflight : preflight) =
+  String.length preflight.wire.body
+;;
+
+let resolve_context_limit (preflight : preflight) =
+  Prepared_completion_request.resolve_context_limit preflight.prepared
+;;
+
+let finalize preflight admission_basis =
+  let fingerprint =
+    plan_fingerprint
+      ~config:preflight.config
+      ~capabilities:preflight.capabilities
+      ~wire:preflight.wire
+      ~admission_basis
+  in
+  { response_format = preflight.response_format
+  ; wire = preflight.wire
+  ; dispatch_request = preflight.dispatch_request
+  ; fingerprint
+  }
+;;
+
+let finalize_unmeasured preflight =
+  match serving_constraint preflight with
+  | Some constraint_ -> Error (Token_measurement_required constraint_)
+  | None -> Ok (finalize preflight Token_measurement_not_required)
+;;
+
+let finalize_measured preflight admitted =
+  let admitted_request = Prepared_completion_request.admitted_request admitted in
+  if admitted_request != preflight.prepared
+  then Error Measured_request_mismatch
+  else
+    Ok
+      (finalize
+         preflight
+         (Measured_context_fit (Prepared_completion_request.admitted_fit admitted)))
+;;
+
+let fingerprint (plan : t) = plan.fingerprint
+let response_format (plan : t) = plan.response_format
+let request_body_sha256 (plan : t) = plan.wire.body_sha256
+let dispatch_request (plan : t) = plan.dispatch_request
+let request_body (plan : t) = plan.wire.body
+let response_codec (plan : t) = plan.wire.response_codec
+let provider_kind (plan : t) = plan.wire.provider_kind
+let connect_timeout_s (plan : t) = plan.wire.connect_timeout_s
+let body_timeout_s (plan : t) = plan.wire.body_timeout_s
+
+let structured_text content =
+  let rec loop texts = function
+    | [] ->
+      (match List.rev texts with
+       | [] -> Error Missing_structured_text
+       | [ text ] -> Ok text
+       | values -> Error (Ambiguous_structured_text (List.length values)))
+    | Types.Text text :: rest -> loop (text :: texts) rest
+    | (Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _) :: rest ->
+      loop texts rest
+    | ( Types.ToolUse _
+      | Types.ToolResult _
+      | Types.Image _
+      | Types.Document _
+      | Types.Audio _ )
+      :: _ -> Error Unexpected_structured_content
+  in
+  loop [] content
+;;
+
+let normalize_json validation text =
+  try
+    let value = Yojson.Safe.from_string text in
+    Ok { value; validation }
+  with
+  | Yojson.Json_error detail -> Error (Invalid_json detail)
+;;
+
+(* Every exact plan asks for JSON. Under [Off] the prompt asks for it and the
+   answer is read here, the same way [JsonMode] answers are: the provider
+   enforced nothing more than the prompt did. *)
+let normalize_text response_format text =
+  match response_format with
+  | Types.Off | Types.JsonMode -> normalize_json Json_syntax_validated text
+  | Types.JsonSchema _ ->
+    normalize_json Provider_schema_requested_client_validation_required text
+;;
+
+let normalize_response response_format (response : Types.api_response) =
+  match response.stop_reason with
+  | Types.EndTurn | Types.StopSequence ->
+    (match structured_text response.content with
+     | Error _ as error -> error
+     | Ok text -> normalize_text response_format text)
+  | Types.StopToolUse ->
+    (match structured_text response.content with
+     | Error Unexpected_structured_content as error -> error
+     | Ok _
+     | Error Missing_structured_text
+     | Error (Ambiguous_structured_text _)
+     | Error (Incomplete_structured_response _)
+     | Error (Invalid_json _) ->
+       Error (Incomplete_structured_response response.stop_reason))
+  | Types.MaxTokens
+  | Types.Refusal
+  | Types.ContentFilter
+  | Types.RepetitionTruncation
+  | Types.PauseTurn
+  | Types.Compaction
+  | Types.ContextWindowExceeded
+  | Types.UnmatchedToolCalls
+  | Types.Unknown _ -> Error (Incomplete_structured_response response.stop_reason)
+;;
+
+let normalize (plan : t) response = normalize_response plan.response_format response
+
+let%test "JsonMode records syntax-only validation provenance" =
+  let fail fmt = Printf.ksprintf failwith ("JsonMode provenance test: " ^^ fmt) in
+  let response : Types.api_response =
+    { id = "json-mode"
+    ; model = "fixture"
+    ; stop_reason = Types.EndTurn
+    ; content = [ Types.Text {|{"accepted":true}|} ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  match normalize_response Types.JsonMode response with
+  | Ok { value = `Assoc [ ("accepted", `Bool true) ]; validation = Json_syntax_validated }
+    -> true
+  | Ok { value = _; validation = Json_syntax_validated | Provider_schema_requested_client_validation_required }
+    -> fail "returned a different value or provenance than expected"
+  | Error e ->
+    fail "normalize_response unexpectedly failed: %s" (normalization_error_name e)
+;;
+
+let%test "Off reads the prompt-requested JSON locally and refuses other text" =
+  let response text : Types.api_response =
+    { id = "off"
+    ; model = "fixture"
+    ; stop_reason = Types.EndTurn
+    ; content = [ Types.Text text ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  (match normalize_response Types.Off (response {|{"accepted":true}|}) with
+   | Ok { value = `Assoc [ ("accepted", `Bool true) ]; validation = Json_syntax_validated }
+     -> true
+   | Ok { value = _; validation = Json_syntax_validated | Provider_schema_requested_client_validation_required }
+   | Error _ -> false)
+  &&
+  match normalize_response Types.Off (response "not json") with
+  | Error (Invalid_json _) -> true
+  | Ok _ | Error (Incomplete_structured_response _) | Error (Missing_structured_text)
+  | Error (Ambiguous_structured_text _) | Error (Unexpected_structured_content) -> false
+;;
+
+let%test "canonical fingerprint is sensitive to the frozen response codec" =
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Anthropic
+      ~model_id:"fingerprint-fixture"
+      ~base_url:"https://example.test"
+      ~request_path:"/v1/messages"
+      ~max_tokens:16
+      ~response_format:Types.Off
+      ()
+  in
+  let capabilities = Capabilities.anthropic_capabilities in
+  let fit : Prepared_completion_request.context_fit =
+    { input_tokens = 1; reserved_output_tokens = 16; max_context_tokens = 128 }
+  in
+  let wire response_codec =
+    { response_codec
+    ; provider_kind = Provider_config.Anthropic
+    ; url = "https://example.test/v1/messages"
+    ; headers = [ "Content-Length", "2" ]
+    ; body = "{}"
+    ; body_sha256 = sha256 "{}"
+    ; connect_timeout_s = None
+    ; body_timeout_s = None
+    }
+  in
+  let fingerprint response_codec =
+    plan_fingerprint
+      ~config
+      ~capabilities
+      ~wire:(wire response_codec)
+      ~admission_basis:(Measured_context_fit fit)
+    |> fingerprint_to_string
+  in
+  (* Frozen over the [agent_core-exact-output-plan-v2] material domain. The
+     previous pin ([d59eee4e...], labeled v0.220) hashed the same material
+     under the previous domain string; #27945 hard-cut the old name out of
+     the fingerprint domain, which intentionally changed
+     every plan fingerprint. Any further mismatch here means the fingerprint
+     material drifted again — update this pin only for a deliberate,
+     commit-documented material change. *)
+  let agent_core_plan_v2_anthropic_fingerprint =
+    "a823aaf450989799c6af800e78fecb1fbc1a3a8f395315271776dd2225081b6f"
+  in
+  let anthropic_codec = Provider_http_codec.of_config config in
+  let openai_codec =
+    Provider_http_codec.of_config
+      { config with
+        kind = Provider_config.OpenAI_compat
+      ; request_path = "/v1/chat/completions"
+      }
+  in
+  fingerprint anthropic_codec <> fingerprint openai_codec
+  && String.equal
+       (fingerprint anthropic_codec)
+       agent_core_plan_v2_anthropic_fingerprint
+;;
+
+(* Fixture budgets for the inline preflight tests. No request is sent, so the
+   values only need to be positive and finite. *)
+let[@warning "-32"] fixture_connect_timeout_s = 30.0
+let[@warning "-32"] fixture_body_timeout_s = 60.0
+
+let[@warning "-32"] deadline_fixture_config () =
+  Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
+    ~base_url:"https://example.test" ~max_tokens:16
+    ~connect_timeout_s:fixture_connect_timeout_s
+    ~model_capabilities_override:Capabilities.default_capabilities
+    ~auth_scheme:Bearer_token ()
+;;
+
+let%test "exact preflight refuses a connect-only wire" =
+  match
+    preflight ~config:(deadline_fixture_config ()) ~messages:[Types.user_msg "Hello"]
+      ~body_timeout_s:None ~anthropic_thinking_control:None
+  with
+  | Error (Missing_deadline _) -> true
+  | Error
+      (( Explicit_capability_snapshot_required
+       | Unsupported_output_contract _
+       | Unsupported_exact_cross_feature
+       | Global_admission_not_allowed
+       | Invalid_connect_timeout _
+       | Invalid_body_timeout _
+       | Caller_supplied_header_not_allowed _
+       | Unsupported_image_input
+       | Unsupported_document_input
+       | Unsupported_audio_input
+       | Unsupported_system_prompt
+       | Provider_request_rejected _
+       | Request_serialization_rejected _ ) as e) ->
+    failwith ("connect-only preflight hit another rejection: " ^ rejection_name e)
+  | Ok _ -> false
+;;
+
+let%test "exact preflight admits a connect and body wire" =
+  match
+    preflight ~config:(deadline_fixture_config ()) ~messages:[Types.user_msg "Hello"]
+      ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None
+  with
+  | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
+  | Ok admitted ->
+    preflight_connect_timeout_s admitted = Some fixture_connect_timeout_s
+    && preflight_body_timeout_s admitted = Some fixture_body_timeout_s
+;;
+
+let%test "exact preflight freezes refreshed credentials until a new plan is prepared" =
+  let token = ref "first-fixture-token" in
+  let calls = ref 0 in
+  let config = Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
+    ~base_url:"https://example.test" ~max_tokens:16
+    ~connect_timeout_s:fixture_connect_timeout_s
+    ~model_capabilities_override:Capabilities.default_capabilities
+    ~auth_scheme:Bearer_token
+    ~credential_source:(Refreshable_credential (fun () ->
+      incr calls; Ok (Secret.of_string !token))) () in
+  let prepare () = preflight ~config ~messages:[Types.user_msg "Hello"]
+    ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None in
+  match prepare () with
+  | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
+  | Ok first ->
+    token := "second-fixture-token";
+    let frozen = List.assoc_opt "Authorization" first.wire.headers in
+    let unchanged_without_new_preflight = !calls = 1 in
+    match prepare () with
+    | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
+    | Ok second ->
+      unchanged_without_new_preflight && !calls = 2
+      && frozen = Some "Bearer first-fixture-token"
+      && List.assoc_opt "Authorization" second.wire.headers = Some "Bearer second-fixture-token"
+;;
+
+let%test "exact preflight still rejects genuinely caller-supplied headers" =
+  let test_headers expected_err headers =
+    let config =
+      Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
+        ~base_url:"https://example.test" ~max_tokens:16
+        ~connect_timeout_s:fixture_connect_timeout_s
+        ~model_capabilities_override:Capabilities.default_capabilities
+        ~auth_scheme:Bearer_token ~headers () in
+    match
+      preflight ~config ~messages:[Types.user_msg "Hello"]
+        ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None
+    with
+    | Error (Caller_supplied_header_not_allowed reported) ->
+      expected_err = Some reported
+    | Error (Explicit_capability_snapshot_required) | Error (Unsupported_output_contract _)
+    | Error (Unsupported_exact_cross_feature) | Error (Global_admission_not_allowed)
+    | Error (Invalid_connect_timeout _) | Error (Invalid_body_timeout _)
+    | Error (Missing_deadline _) | Error (Unsupported_image_input)
+    | Error (Unsupported_document_input) | Error (Unsupported_audio_input)
+    | Error (Unsupported_system_prompt) | Error (Provider_request_rejected _)
+    | Error (Request_serialization_rejected _) -> false
+    | Ok _ -> expected_err = None in
+  test_headers None []
+  && test_headers None [ ("Content-Type", "application/json") ]
+  && test_headers None [ ("content-type", "application/json") ]
+  && test_headers None [ ("CONTENT-TYPE", "application/json") ]
+  && test_headers (Some "X-Custom") [ ("X-Custom", "v") ]
+  && test_headers (Some "Content-Type") [ ("Content-Type", "text/event-stream") ]
+  && test_headers (Some "X-Custom")
+       [ ("Content-Type", "application/json"); ("X-Custom", "v") ]
+  && test_headers (Some "X-Custom")
+       [ ("X-Custom", "v"); ("Content-Type", "application/json") ]
+  && test_headers (Some "X-Custom")
+       [ ("content-type", "application/json"); ("X-Custom", "v") ]
+  && test_headers (Some "X-First")
+       [ ("Content-Type", "application/json"); ("X-First", "1"); ("X-Second", "2") ]
+;;

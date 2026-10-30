@@ -1,0 +1,105 @@
+(** Host registry and telemetry boundary for shared input validation. *)
+include Tool_input_contract
+
+let emit_validation_telemetry ~tool ~result ~reason =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_tool_input_validation
+    ~labels:[ "tool", tool; "result", result; "reason", reason ]
+    ();
+  Otel_spans.add_event
+    ~name:"tool.param.validation"
+    ~attrs:
+      [ "tool.name", `String tool
+      ; "tool.param.validation.result", `String result
+      ; "tool.param.validation.reason", `String reason
+      ]
+    ()
+;;
+
+let validate_with_contract ~contract ?schema ~name ~args () =
+  let checked =
+    try
+      let schema =
+        match schema with
+        | Some _ as schema -> schema
+        | None -> Tool_dispatch.lookup_schema name
+      in
+      check_arguments ~contract ~schema ~name ~args
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let exception_text = Printexc.to_string exn in
+      Error
+        { tool_name = name
+        ; schema = None
+        ; violation = Validation_raised { exception_text }
+        ; message =
+            Printf.sprintf
+              "Tool '%s' parameter validation failed before dispatch: %s"
+              name
+              exception_text
+        }
+  in
+  match checked with
+  | Ok (prepared_args, accepted) ->
+    emit_validation_telemetry ~tool:name ~result:"pass" ~reason:(accepted_reason accepted);
+    (match accepted with
+     | Accepted_normalized ->
+       Log.Tool_validation.debug "tool_input_validation normalized args for %s" name
+     | Accepted_empty_schema | Accepted_valid | Accepted_external_subset -> ());
+    Ok prepared_args
+  | Error rejection ->
+    emit_validation_telemetry
+      ~tool:name
+      ~result:"fail"
+      ~reason:(violation_reason rejection.violation);
+    (match rejection.violation with
+     | Validation_raised _ -> Log.Tool_validation.error "%s" rejection.message
+     | Schema_declares_required_without_properties
+     | Schema_unusable _
+     | Schema_bound_malformed _ ->
+       Log.Tool_validation.error
+         "tool_input_validation rejected %s (server schema defect): %s"
+         name
+         rejection.message
+     | Schema_not_registered
+     | Retired_transition_alias _ ->
+       Log.Tool_validation.warn
+         "tool_input_validation rejected %s (unknown or retired schema): %s"
+         name
+         rejection.message
+     | Arguments_for_fieldless_schema
+     | Arguments_did_not_arrive
+     | Unsupported_fields _
+     | No_one_of_branch_matches
+     | Several_one_of_branches_match
+     | Field_errors _
+     | Argument_out_of_range _ ->
+       Log.Tool_validation.info
+         "tool_input_validation rejected %s: %s"
+         name
+         rejection.message);
+    Error rejection
+;;
+
+let validate ?schema ~name ~args () =
+  validate_with_contract ~contract:Host_tool ?schema ~name ~args ()
+;;
+
+let validate_args ?schema ~name ~args () =
+  match validate ?schema ~name ~args () with
+  | Ok prepared_args -> Ok prepared_args
+  | Error rejection -> Error (rejection_result rejection)
+;;
+
+let validation_action ~schema ~name ~args : Tool_dispatch.pre_hook_action =
+  let contract = match schema with None -> Host_tool | Some _ -> External_export in
+  match validate_with_contract ~contract ?schema ~name ~args () with
+  | Ok prepared_args when Yojson.Safe.equal prepared_args args -> Tool_dispatch.Pass
+  | Ok prepared_args -> Tool_dispatch.Proceed prepared_args
+  | Error rejection -> Tool_dispatch.Reject (rejection_result rejection)
+;;
+
+let register_pre_hook () =
+  Tool_dispatch.register_pre_hook validation_action
+;;

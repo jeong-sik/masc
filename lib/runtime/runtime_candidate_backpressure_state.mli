@@ -1,0 +1,75 @@
+(** Pure state for one runtime candidate's observed backpressure.
+
+    Two observations are held side by side because they answer different
+    questions: a rate limit can carry the provider's own time, which decides
+    when a resting path is waited for, and a failed attempt carries none and
+    only moves the candidate back in the walk (RFC-0458 §3.4). One does not
+    replace the other. *)
+
+type rate_limit =
+  | Unknown_scope_rate_limit of { noted_at : float; retry_after : float option }
+(** The attempted candidate was rate-limited; no model/account/provider
+    ownership was reported. This never describes a credential quota. *)
+
+type attempt_failure =
+  | Server_error
+  | Provider_capacity
+  | Network_transient
+  | Provider_timeout
+(** The failure routes that say the candidate did not answer, and that are
+    neither the candidate's rate limit nor MASC's own capacity. *)
+
+val attempt_failure_to_wire_name : attempt_failure -> string
+(** The name [/api/v1/runtime/resolved] carries. *)
+
+val attempt_failure_of_wire_name : string -> attempt_failure option
+(** The inverse of {!attempt_failure_to_wire_name}; [None] for a name this
+    build does not know. *)
+
+type recorder
+(** The Keeper whose walk recorded a failed attempt. Compared only for
+    identity: the recorder's next cycle walks the head again, every other
+    walk keeps it behind (RFC-0458 §3.4, 2026-09-23). *)
+
+val keeper_recorder : keeper_name:string -> recorder
+
+val recorder_keeper_name : recorder -> string
+
+val same_recorder : recorder -> recorder -> bool
+
+type failed_attempt =
+  | Failed_attempt of { noted_at : float; failure : attempt_failure; recorded_by : recorder }
+(** The attempted candidate failed without answering. There is no time at
+    which this stops being true; only an answer from the candidate ends it.
+    [recorded_by] names the Keeper whose walk saw it; that Keeper's next
+    attempt on the candidate renews or clears it. *)
+
+type candidate_backpressure =
+  { rate_limit : rate_limit option
+  ; failed_attempt : failed_attempt option
+  }
+
+val empty : candidate_backpressure
+
+val is_empty : candidate_backpressure -> bool
+
+val note_rate_limit :
+  noted_at:float -> retry_after:float option ->
+  candidate_backpressure -> candidate_backpressure
+(** Record the rate limit unless a newer one is already held. The delay is
+    read by {!Keeper_runtime_failure_route.usable_retry_after}: one that names
+    no wait, zero included, is kept as no hint, so only an observed success
+    ends that rate limit. The failed attempt, if any, is kept. *)
+
+val note_failed_attempt :
+  noted_at:float -> failure:attempt_failure -> recorded_by:recorder ->
+  candidate_backpressure -> candidate_backpressure
+(** Record the failed attempt unless a newer one is already held. A newer
+    failure replaces the recorder too: the Keeper that saw the candidate fail
+    last is the one whose next cycle tries it again. The rate limit, if any,
+    is kept. *)
+
+val observe : now:float -> candidate_backpressure -> candidate_backpressure
+(** A usable provider hint ends the rate limit after that delay. Without one,
+    only an observed success clears it; no timer supplies a duration. A failed
+    attempt is never ended by time. *)

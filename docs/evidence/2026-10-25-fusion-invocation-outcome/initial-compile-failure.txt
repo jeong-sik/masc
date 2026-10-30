@@ -1,0 +1,14 @@
+test suite	Checkout	2026-10-25T04:23:21.5720470Z   ref: 3d64d9d0327df2d360b444745f3acd381053dbe7
+test suite	Checkout	2026-10-25T04:23:21.7754429Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 3d64d9d0327df2d360b444745f3acd381053dbe7
+test suite	Checkout	2026-10-25T04:23:31.7098835Z  * branch              3d64d9d0327df2d360b444745f3acd381053dbe7 -> FETCH_HEAD
+test suite	Checkout	2026-10-25T04:23:31.7106407Z [command]/usr/bin/git rev-parse --verify --quiet 3d64d9d0327df2d360b444745f3acd381053dbe7^{object}
+test suite	Checkout	2026-10-25T04:23:31.7129528Z 3d64d9d0327df2d360b444745f3acd381053dbe7
+test suite	Checkout	2026-10-25T04:23:31.7211185Z [command]/usr/bin/git checkout --progress --force 3d64d9d0327df2d360b444745f3acd381053dbe7
+test suite	Checkout	2026-10-25T04:23:33.7772639Z Note: switching to '3d64d9d0327df2d360b444745f3acd381053dbe7'.
+test suite	Checkout	2026-10-25T04:23:33.7892564Z 3d64d9d0327df2d360b444745f3acd381053dbe7
+test suite	Test	2026-10-25T04:27:56.5619126Z File "test/test_fusion_wake.ml", line 451, characters 62-78:
+test suite	Test	2026-10-25T04:27:56.5619847Z 451 |     ; "not_attempted", Error (Fusion_types.Panels_unavailable "quorum not met"), []
+test suite	Test	2026-10-25T04:27:56.5620587Z                                                                     ^^^^^^^^^^^^^^^^
+test suite	Test	2026-10-25T04:27:56.5621206Z Error: This constant has type string but an expression was expected of type
+test suite	Test	2026-10-25T04:27:56.5621719Z          Fusion_types.skip_reason
+test suite	Test	2026-10-25T04:27:58.7333339Z ##[error]Process completed with exit code 1.

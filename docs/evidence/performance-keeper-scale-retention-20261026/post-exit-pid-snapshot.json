@@ -1,0 +1,125 @@
+{
+  "schema": "masc.owned-cohort-post-exit-pids.v1",
+  "scope": "Read-only snapshot after seven terminal native runners; no signals sent. Historical reaping/drain comes from each actual cleanup receipt.",
+  "rows": [
+    {
+      "packet": "owned-concurrent-c3cb371-2-v3",
+      "owned_pid": 62214,
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "pid_snapshot_exit": 1,
+      "pid_snapshot_output": ""
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-30-v3",
+      "owned_pid": 64078,
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "pid_snapshot_exit": 1,
+      "pid_snapshot_output": ""
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-300-v3",
+      "owned_pid": 64970,
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "pid_snapshot_exit": 1,
+      "pid_snapshot_output": ""
+    },
+    {
+      "packet": "owned-concurrent-1ce158-2-v3",
+      "owned_pid": 73968,
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "pid_snapshot_exit": 1,
+      "pid_snapshot_output": ""
+    },
+    {
+      "packet": "owned-concurrent-1ce158-30-v3",
+      "owned_pid": 75948,
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "pid_snapshot_exit": 1,
+      "pid_snapshot_output": ""
+    },
+    {
+      "packet": "owned-concurrent-1ce158-300-v3",
+      "owned_pid": 83066,
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "pid_snapshot_exit": 1,
+      "pid_snapshot_output": ""
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-2x3-v3",
+      "owned_pid": 88405,
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "pid_snapshot_exit": 1,
+      "pid_snapshot_output": ""
+    }
+  ]
+}

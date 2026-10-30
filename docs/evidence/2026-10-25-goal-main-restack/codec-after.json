@@ -1,0 +1,82 @@
+{
+  "scope": "Compile actual frozen-original and retained-result codecs with explicit pure ports.\n\nThis does not execute the owner store, worker dispatch, prompts, native Host,\nprovider/SDK, or filesystem locks. --baseline uses main's exact result codec\nagainst the Goal review-result type to expose the missing consumer field.\n",
+  "baseline": false,
+  "source_inputs": [
+    {
+      "path": "lib/task/anti_rationalization.ml",
+      "sha256": "8c17413e6d952ec176bcd4f3c998fa6d02396a0e9ffdd0265be8f4ff8aa14dd9"
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.ml",
+      "sha256": "4d4769457e38ecb36d6593274b13a161097f243ff3779e748b2491cdd2caee65"
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.mli",
+      "sha256": "088184e356f8952912eb38ff58f82c4832fa4a515a82edfdddf9631521fd5be4"
+    },
+    {
+      "path": "lib/keeper/verifier_review_owner.ml",
+      "sha256": "af69f40b40288005b1eedd18888926ae757e8ae9601677c687002bd390f88256"
+    },
+    {
+      "path": "lib/types/runtime_response_identity.mli",
+      "sha256": "409ee065a57a41d139e2f5952b09597d66e1d174d53faa6aa8c8fa0dfc016750"
+    },
+    {
+      "path": "lib/types/runtime_response_identity.ml",
+      "sha256": "e008f7c6b24d543c7d6f0b5aaca8c52459d79640bd6ab915fef38f89072f4c3e"
+    }
+  ],
+  "ports": [
+    "types_core.ml",
+    "tool_result.ml",
+    "tool_timing.ml",
+    "prompt_names.ml",
+    "prompt_registry.ml",
+    "json_util.ml",
+    "string_util.ml",
+    "lane_addon_action.ml",
+    "lane_addon_store.ml",
+    "AR.build_prompt",
+    "Types_core/Tool_result types"
+  ],
+  "digest_port": "nonproduction digest port; no crypto/owner-store claim",
+  "compile": {
+    "command": [
+      "ocamlfind",
+      "ocamlc",
+      "-w",
+      "+4+8+9",
+      "-warn-error",
+      "+4+8+9",
+      "-package",
+      "yojson",
+      "-linkpkg",
+      "runtime_response_identity.mli",
+      "runtime_response_identity.ml",
+      "types_core.ml",
+      "tool_result.ml",
+      "tool_timing.ml",
+      "prompt_names.ml",
+      "prompt_registry.ml",
+      "json_util.ml",
+      "string_util.ml",
+      "lane_addon_action.ml",
+      "lane_addon_store.ml",
+      "ar.ml",
+      "task.ml",
+      "verifier_review_original.mli",
+      "verifier_review_original.ml",
+      "result_codec.ml",
+      "probe.ml",
+      "-o",
+      "probe"
+    ],
+    "exit": 0,
+    "output": ""
+  },
+  "execution": {
+    "exit": 0,
+    "output": "PASS producer runtime survives exact original codec\nPASS original round trip is byte-equivalent canonical data\nPASS successor preserves producer evidence and prompt\nPASS unobserved producer remains explicit None\nPASS blank producer cannot be captured\nPASS missing producer field is refused\nPASS blank producer field is refused\nPASS nontext producer field is refused\nPASS duplicate producer field is refused\nPASS previous original schema is explicitly refused\nPASS retained result restores exact accepted provider identity\nPASS retained result restores producer and complete verdict\nPASS unobserved evaluator remains None\nPASS missing evaluator identity field is refused\nPASS duplicate evaluator identity field is refused\nPASS previous retained-result schema is refused\nPASS malformed accepted response identity is refused\nPASS duplicate nested identity key is refused\nPASS existing decision/gate refusal is preserved\n19 actual-source codec checks passed\n"
+  }
+}

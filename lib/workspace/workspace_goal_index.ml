@@ -1,0 +1,600 @@
+(** Workspace_goal_index — Reverse index from goal_id to linked tasks.
+
+    Eliminates repeated O(n) linear scans in Goal/task projections and
+    observations by building a Hashtbl-based reverse index on demand from
+    explicit goal-task link mappings.
+
+    The index is rebuilt from the current task list and a small persistent
+    goal-task link registry. *)
+
+open Masc_domain
+open Workspace_utils
+
+type goal_task_links_write_error = string
+
+type link_goalless_task_to_goal_error =
+  | Already_linked_to_goals of string list
+  | Link_write_failed of goal_task_links_write_error
+
+let goal_task_links_path config =
+  Filename.concat (tasks_dir config) "goal_task_links.json"
+;;
+
+let goal_task_links_recovery_path config =
+  goal_task_links_path config ^ ".last-good"
+;;
+
+let normalize_link_set links =
+  let tbl = Hashtbl.create 16 in
+  List.iter
+    (fun (goal_id, task_ids) ->
+       let goal_id = String.trim goal_id in
+       if not (String.equal goal_id "") then (
+         (* DET-OK: an absent bucket means no accumulated links; this is the
+            same [] returned by the replaced [Not_found] handler. *)
+         let existing = Option.value (Hashtbl.find_opt tbl goal_id) ~default:[] in
+         let merged =
+           List.fold_left
+             (fun acc task_id ->
+                let task_id = String.trim task_id in
+                if String.equal task_id "" || List.mem task_id acc then acc
+                else task_id :: acc)
+             existing
+             task_ids
+         in
+         Hashtbl.replace tbl goal_id merged))
+    links;
+  Hashtbl.fold
+    (fun goal_id task_ids acc -> (goal_id, List.rev task_ids) :: acc)
+    tbl
+    []
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+;;
+
+let link_to_yojson (goal_id, task_ids) =
+  `Assoc
+    [ "goal_id", `String goal_id
+    ; "task_ids", `List (List.map (fun task_id -> `String task_id) task_ids)
+    ]
+;;
+
+let links_to_yojson links =
+  `Assoc
+    [ "version", `Int 1
+    ; "last_updated", `String (now_iso ())
+    ; "links", `List (List.map link_to_yojson (normalize_link_set links))
+    ]
+;;
+
+let link_of_yojson = function
+  | `Assoc fields ->
+    (match List.assoc_opt "goal_id" fields, List.assoc_opt "task_ids" fields with
+     | Some (`String goal_id), Some (`List values) ->
+       let goal_id = String.trim goal_id in
+       let rec collect acc = function
+         | [] -> Some (goal_id, List.rev acc)
+         | `String value :: rest ->
+           let task_id = String.trim value in
+           if String.equal task_id "" then None
+           else collect (task_id :: acc) rest
+         | _ -> None
+       in
+       if String.equal goal_id "" then None else collect [] values
+     | _ -> None)
+  | _ -> None
+;;
+
+let links_of_yojson = function
+  | `Assoc fields ->
+    (match List.assoc_opt "links" fields with
+     | Some (`List values) ->
+       (* [filter_map] used to drop a row [link_of_yojson] refused, so a
+          damaged row read as one fewer link instead of a damaged file — the
+          same fold this guard exists to stop, one element in. *)
+       let rec collect acc = function
+         | [] -> Ok (normalize_link_set (List.rev acc))
+         | value :: rest ->
+           (match link_of_yojson value with
+            | Some link -> collect (link :: acc) rest
+            | None -> Error "goal_task_links: a link row does not decode")
+       in
+       collect [] values
+     | Some _ -> Error "goal_task_links: \"links\" is present but not a list"
+     | None -> Error "goal_task_links: missing links collection")
+  | _ -> Error "goal_task_links: top level is not an object"
+;;
+
+let read_link_json config path =
+  match key_of_path config path with
+  | None -> Error (Printf.sprintf "goal_task_links: path is outside backend root: %s" path)
+  | Some key ->
+    (match backend_get config ~key with
+     | Error error -> Error (Backend_types.show_error error)
+     | Ok None -> Ok None
+     | Ok (Some content) ->
+       Safe_ops.parse_json_safe ~context:path content |> Result.map Option.some)
+;;
+
+let read_link_registry config path =
+  match read_link_json config path with
+  | Error detail -> Error detail
+  | Ok None -> Ok None
+  | Ok (Some json) -> links_of_yojson json |> Result.map Option.some
+;;
+
+let read_goal_task_links_authoritative_r config =
+  match read_link_registry config (goal_task_links_path config) with
+  | Error _ as error -> error
+  | Ok (Some links) -> Ok links
+  | Ok None ->
+    (match read_link_registry config (goal_task_links_recovery_path config) with
+     | Error _ as error -> error
+     | Ok (Some _) ->
+       Error "goal_task_links: primary registry is missing; recovery is non-authoritative"
+     | Ok None -> Ok [])
+;;
+
+let read_goal_task_links_r config =
+  match read_link_json config (goal_task_links_path config) with
+  | Ok (Some json) -> links_of_yojson json
+  | Ok None -> read_goal_task_links_authoritative_r config
+  | Error primary_msg ->
+    let recovery_path = goal_task_links_recovery_path config in
+    (match read_link_registry config recovery_path with
+     | Ok (Some links) ->
+       Log.Misc.warn
+         "read_goal_task_links: primary unreadable, recovered from %s (%s)"
+         recovery_path primary_msg;
+       Ok links
+     | Ok None -> Error primary_msg
+     | Error recovery_msg -> Error (primary_msg ^ "; " ^ recovery_msg))
+;;
+
+let read_goal_task_links config =
+  match read_goal_task_links_r config with
+  | Ok links -> links
+  | Error msg ->
+    Log.Misc.warn "read_goal_task_links failed: %s" msg;
+    []
+;;
+
+let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
+  try
+    write_json config path json;
+    match read_json_doc config path with
+    | Ok (Some written) when links_of_yojson written = Ok expected_links -> Ok ()
+    | Ok (Some _) ->
+      Error
+        (Printf.sprintf
+           "write_goal_task_links: %s readback mismatch for %s"
+           label
+           path)
+    | Ok None ->
+      Error
+        (Printf.sprintf
+           "write_goal_task_links: %s readback found no document at %s"
+           label
+           path)
+    | Error error ->
+      Error
+        (Printf.sprintf
+           "write_goal_task_links: %s write/readback failed for %s: %s"
+           label
+           path
+           (json_doc_error_to_string error))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Error
+      (Printf.sprintf
+         "write_goal_task_links: %s write failed for %s: %s"
+         label
+         path
+         (Printexc.to_string exn))
+;;
+
+type task_mutation_notification =
+  | Notify_on_failure
+  | Notify_always
+
+let protect_goal_link_settlement f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+  | Eio_guard.Non_eio -> f ()
+;;
+
+let notify_task_mutation () =
+  try (Atomic.get Workspace_hooks.on_task_mutation_fn) () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "goal-task link settlement observer failed: %s"
+      (Printexc.to_string exn)
+;;
+
+let write_goal_task_links_result_internal
+      ?(rollback_on_recovery_failure = true)
+      ?previous_links
+      ~task_mutation_notification
+      config
+      links
+  =
+  let json = links_to_yojson links in
+  let primary_path = goal_task_links_path config in
+  let recovery_path = goal_task_links_recovery_path config in
+  let expected_links = normalize_link_set links in
+  let write_primary () =
+    verify_goal_task_links_write
+      config
+      ~path:primary_path
+      ~json
+      ~expected_links
+      ~label:"primary"
+  in
+  let write_recovery () =
+    verify_goal_task_links_write
+      config
+      ~path:recovery_path
+      ~json
+      ~expected_links
+      ~label:"recovery"
+  in
+  let rollback () =
+    match previous_links with
+    | None -> ()
+    | Some previous_links ->
+      let previous_json = links_to_yojson previous_links in
+      let previous_expected = normalize_link_set previous_links in
+      (match
+         verify_goal_task_links_write
+           config
+           ~path:primary_path
+           ~json:previous_json
+           ~expected_links:previous_expected
+           ~label:"primary-rollback"
+       with
+       | Ok () -> ()
+       | Error rollback_msg ->
+         Log.Misc.warn
+           "write_goal_task_links_result: primary rollback failed after write failure: %s"
+           rollback_msg);
+      (match
+         verify_goal_task_links_write
+           config
+           ~path:recovery_path
+           ~json:previous_json
+           ~expected_links:previous_expected
+           ~label:"recovery-rollback"
+       with
+       | Ok () -> ()
+       | Error rollback_msg ->
+         Log.Misc.warn
+           "write_goal_task_links_result: recovery rollback failed after write failure: %s"
+           rollback_msg)
+  in
+  let notify_after_settlement ~failed =
+    match task_mutation_notification, failed with
+    | Notify_on_failure, false -> ()
+    | Notify_on_failure, true | Notify_always, _ -> notify_task_mutation ()
+  in
+  protect_goal_link_settlement (fun () ->
+    match write_primary () with
+    | Error _ as error ->
+      rollback ();
+      notify_after_settlement ~failed:true;
+      error
+    | Ok () ->
+      let recovery_result = write_recovery () in
+      (match recovery_result with
+       | Ok () ->
+         notify_after_settlement ~failed:false;
+         Ok ()
+       | Error _ as error ->
+         if rollback_on_recovery_failure then rollback ();
+         notify_after_settlement ~failed:true;
+         error))
+;;
+
+let write_goal_task_links_result
+      ?rollback_on_recovery_failure
+      ?previous_links
+      config
+      links
+  =
+  write_goal_task_links_result_internal
+    ?rollback_on_recovery_failure
+    ?previous_links
+    ~task_mutation_notification:Notify_always
+    config
+    links
+;;
+
+let write_goal_task_links config links =
+  match write_goal_task_links_result config links with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.warn "%s" msg
+;;
+
+let goal_task_links_lock_path config =
+  Filename.concat (tasks_dir config) ".goal-task-links"
+;;
+
+let goal_ids_for_task links ~task_id =
+  List.fold_left
+    (fun acc (goal_id, task_ids) ->
+       if List.mem task_id task_ids then goal_id :: acc else acc)
+    []
+    links
+  |> List.sort_uniq String.compare
+;;
+
+let add_link_to_links links ~goal_id ~task_id =
+  let updated = ref false in
+  let links =
+    List.map
+      (fun (candidate_goal_id, task_ids) ->
+         if String.equal candidate_goal_id goal_id then (
+           updated := true;
+           if List.mem task_id task_ids then candidate_goal_id, task_ids
+           else candidate_goal_id, task_ids @ [ task_id ])
+         else candidate_goal_id, task_ids)
+      links
+  in
+  if !updated then links else links @ [ goal_id, [ task_id ] ]
+;;
+
+let remove_link_from_links links ~goal_id ~task_id =
+  List.filter_map
+    (fun (candidate_goal_id, task_ids) ->
+       if String.equal candidate_goal_id goal_id then
+         let filtered = List.filter (fun id -> not (String.equal id task_id)) task_ids in
+         if filtered = [] then None else Some (candidate_goal_id, filtered)
+       else Some (candidate_goal_id, task_ids))
+    links
+;;
+
+let read_goal_task_links_for_mutation config =
+  match read_goal_task_links_authoritative_r config with
+  | Ok links -> Ok links
+  | Error msg ->
+    Error (Printf.sprintf "goal_task_links read failed before mutation: %s" msg)
+;;
+
+let prune_links_for_goal_result config ~goal_id =
+  let goal_id = String.trim goal_id in
+  if String.equal goal_id "" then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok links ->
+        let new_links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
+        write_goal_task_links_result
+          config
+          ~rollback_on_recovery_failure:false
+          ~previous_links:links
+          new_links)
+;;
+
+let prune_links_for_task_result config ~task_id =
+  match with_file_lock_r config (goal_task_links_lock_path config) (fun () ->
+    match read_goal_task_links_for_mutation config with
+    | Error _ as error -> error
+    | Ok links ->
+      let remaining = List.filter_map (fun (goal_id, task_ids) ->
+        let ids = List.filter (fun id -> not (String.equal id task_id)) task_ids in
+        if ids = [] then None else Some (goal_id, ids)) links in
+      write_goal_task_links_result config ~rollback_on_recovery_failure:false
+        ~previous_links:links remaining) with
+  | Ok result -> result
+  | Error error -> Error (Masc_domain.masc_error_to_string error)
+;;
+
+let link_task_to_goal_result config ~goal_id ~task_id =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  if String.equal goal_id "" || String.equal task_id "" then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok links ->
+        let new_links = add_link_to_links links ~goal_id ~task_id in
+        write_goal_task_links_result_internal
+          config
+          ~previous_links:links
+          ~task_mutation_notification:Notify_on_failure
+          new_links)
+;;
+
+let before_unlink_task_from_goal_for_testing = Atomic.make None
+
+let unlink_task_from_goal_result_impl config ~goal_id ~task_id =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  if String.equal goal_id "" || String.equal task_id "" then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok links ->
+        let new_links = remove_link_from_links links ~goal_id ~task_id in
+        write_goal_task_links_result_internal
+          config
+          ~rollback_on_recovery_failure:false
+          ~previous_links:links
+          ~task_mutation_notification:Notify_always
+          new_links)
+;;
+
+let unlink_task_from_goal_result config ~goal_id ~task_id =
+  (match Atomic.get before_unlink_task_from_goal_for_testing with
+   | None -> ()
+   | Some before_unlink -> before_unlink config ~goal_id ~task_id);
+  unlink_task_from_goal_result_impl config ~goal_id ~task_id
+;;
+
+module For_testing = struct
+  let with_before_unlink_task_from_goal before_unlink f =
+    let previous = Atomic.get before_unlink_task_from_goal_for_testing in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set before_unlink_task_from_goal_for_testing previous)
+      (fun () ->
+         Atomic.set before_unlink_task_from_goal_for_testing (Some before_unlink);
+         f ())
+  ;;
+end
+
+let link_goalless_task_to_goal config ~goal_id ~task_id =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  if String.equal goal_id "" || String.equal task_id "" then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match read_goal_task_links_for_mutation config with
+      | Error msg -> Error (Link_write_failed msg)
+      | Ok links ->
+        (match goal_ids_for_task links ~task_id with
+         | [] ->
+           (match
+              write_goal_task_links_result
+                config
+                ~previous_links:links
+                (add_link_to_links links ~goal_id ~task_id)
+            with
+            | Ok () -> Ok ()
+            | Error msg -> Error (Link_write_failed msg))
+         | existing_goal_ids -> Error (Already_linked_to_goals existing_goal_ids)))
+;;
+
+let link_tasks_to_goals_result config links =
+  let trimmed_links =
+    List.filter_map
+      (fun (task_id, goal_id_opt) ->
+         let task_id = String.trim task_id in
+         match goal_id_opt with
+         | None -> None
+         | Some goal_id ->
+           let goal_id = String.trim goal_id in
+           if String.equal goal_id "" || String.equal task_id ""
+           then None
+           else Some (task_id, goal_id))
+      links
+  in
+  if trimmed_links = [] then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok existing_links ->
+        let updated_links =
+          List.fold_left
+            (fun acc (task_id, goal_id) -> add_link_to_links acc ~goal_id ~task_id)
+            existing_links
+            trimmed_links
+        in
+        write_goal_task_links_result_internal
+          config
+          ~previous_links:existing_links
+          ~task_mutation_notification:Notify_on_failure
+          updated_links)
+;;
+
+(** Build a reverse index from goal_id to its linked tasks.
+
+    [goal_task_links] is the authoritative source of goal-task
+    associations. Each entry is [(goal_id, [task_id; ...])]. Task IDs
+    are resolved against the supplied [tasks] list.
+
+    When [goal_task_links] is omitted, the index is empty. The old
+    fallback of deriving links from [task.goal_id] was removed as part
+    of the task↔goal boundary refactor. *)
+let build_goal_task_index
+      ?(goal_task_links : (string * string list) list = [])
+      (tasks : task list)
+      : (string, task list) Hashtbl.t
+  =
+  let tbl = Hashtbl.create 16 in
+  let task_by_id = Hashtbl.create (List.length tasks) in
+  List.iter (fun (task : task) -> Hashtbl.replace task_by_id task.id task) tasks;
+  List.iter
+    (fun (goal_id, task_ids) ->
+       let linked_tasks =
+         List.filter_map
+           (fun task_id ->
+              Hashtbl.find_opt task_by_id task_id)
+           task_ids
+       in
+       Hashtbl.replace tbl goal_id linked_tasks)
+    goal_task_links;
+  tbl
+;;
+
+(** Find all tasks linked to a specific goal.
+    Returns [[]] when no tasks are linked to the given [goal_id]. *)
+let tasks_for_goal (index : (string, task list) Hashtbl.t) ~goal_id : task list =
+  (* DET-OK: an absent bucket is the documented no-linked-tasks result; this
+     is the same [] returned by the replaced [Not_found] handler. *)
+  Option.value (Hashtbl.find_opt index goal_id) ~default:[]
+;;
+
+(** Find all goals linked to a specific task — the reverse of
+    {!tasks_for_goal}, over the index {!build_task_goal_index_for_config}
+    builds. Returns [[]] when no goals are linked to the given [task_id]. *)
+let goals_for_task (index : (string, string list) Hashtbl.t) ~task_id :
+  string list =
+  (* DET-OK: an absent bucket is the documented no-linked-goals result, the
+     mirror of [tasks_for_goal] over the same registry. *)
+  Option.value (Hashtbl.find_opt index task_id) ~default:[]
+;;
+
+(** Count open (non-terminal) tasks for a goal using a pre-built index.
+    O(k) where k = tasks linked to the goal, instead of O(n) full scan. *)
+let open_task_count_for_goal_indexed
+      (index : (string, task list) Hashtbl.t)
+      ~goal_id
+      : int
+  =
+  let linked = tasks_for_goal index ~goal_id in
+  List.fold_left
+    (fun count (task : task) ->
+       if not (task_status_is_terminal task.task_status)
+       then count + 1
+       else count)
+    0
+    linked
+;;
+
+(** Build a reverse-reverse index from task_id to the list of goal_ids it is
+    linked to. This is the complement of [build_goal_task_index] and is
+    useful for keeper-side lookups that need to answer “which goals does this
+    task belong to?” without storing [goal_id] on the task record. *)
+let build_task_goal_index
+      ?(goal_task_links : (string * string list) list = [])
+      ()
+      : (string, string list) Hashtbl.t
+  =
+  let tbl = Hashtbl.create 16 in
+  List.iter
+    (fun (goal_id, task_ids) ->
+       List.iter
+         (fun task_id ->
+            (* DET-OK: absent means no accumulated goal ids, the prior [] result. *)
+            let existing = Option.value (Hashtbl.find_opt tbl task_id) ~default:[] in
+            (* Preserve registry order for consumers that need a canonical
+               first-linked goal for a task. Multi-goal task links are legacy
+               invariant violations, but the projection must still be stable
+               and match the persisted link order. *)
+            Hashtbl.replace tbl task_id (existing @ [ goal_id ]))
+         task_ids)
+    goal_task_links;
+  tbl
+;;
+
+let build_goal_task_index_for_config config tasks =
+  build_goal_task_index tasks ~goal_task_links:(read_goal_task_links config)
+;;
+
+let build_task_goal_index_for_config config =
+  build_task_goal_index ~goal_task_links:(read_goal_task_links config) ()
+;;

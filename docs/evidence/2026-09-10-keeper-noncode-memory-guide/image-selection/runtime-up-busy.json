@@ -1,0 +1,21 @@
+{
+  "isError": true,
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"error\":\"keeper_turn_in_flight\",\"keeper\":\"memory-guide-proof\",\"block\":{\"kind\":\"turn_busy\",\"holder\":{\"lane\":\"autonomous\",\"started_at\":1788988664.89317}},\"message\":\"keeper metadata was updated but the keepalive lane was not restarted: a turn holds this keeper's slot. A keeper's own turn always holds the slot, so masc_keeper_up cannot restart its caller from inside that turn. Retry masc_keeper_up when the keeper is idle to restart the lane.\"}"
+    }
+  ],
+  "structuredContent": {
+    "error": "keeper_turn_in_flight",
+    "keeper": "memory-guide-proof",
+    "block": {
+      "kind": "turn_busy",
+      "holder": {
+        "lane": "autonomous",
+        "started_at": 1788988664.89317
+      }
+    },
+    "message": "keeper metadata was updated but the keepalive lane was not restarted: a turn holds this keeper's slot. A keeper's own turn always holds the slot, so masc_keeper_up cannot restart its caller from inside that turn. Retry masc_keeper_up when the keeper is idle to restart the lane."
+  }
+}

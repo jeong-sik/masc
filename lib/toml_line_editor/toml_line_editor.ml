@@ -1,0 +1,1144 @@
+(* Comment-preserving, line-based TOML editing.
+
+   TOML round-tripping through a parser drops comments (Otoml discards them at the
+   lexer and has no comment AST node), so any edit that regenerates the file from
+   a parsed value destroys operator documentation. This module edits the original
+   text at line granularity: it locates a target table by header, replaces or
+   appends exactly the key line(s) being changed, and passes every other line —
+   comments, blanks, other keys, other tables — through unchanged.
+
+   The primitives originate from the runtime.toml routing/assignment editor in
+   [Runtime]; they are hoisted here as the single home for comment-preserving TOML
+   editing (RFC-0306 §3.2) so the fusion settings writer can reuse them without
+   depending on the runtime library. [Runtime] delegates to these. *)
+
+(* ── string / line helpers ─────────────────────────────────────────────── *)
+
+let escape_string s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (function
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | c when Char.code c < 0x20 || Char.code c = 0x7f ->
+        (* TOML refuses a raw control character inside a basic string, so a
+           value carrying one would kill the line it lands on. *)
+        Buffer.add_string buf (Printf.sprintf "\\u%04X" (Char.code c))
+      | c -> Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+;;
+
+(* A TOML bare key is letters, digits, underscore and dash. Anything else has
+   to be quoted, and a dot most of all: [edgar.a.poe = "Yuna"] is not one key
+   with dots in it, it is a path into nested tables, so the mapping written is
+   not the mapping meant and the read-back refuses it.
+
+   {!key_of_line} has always understood a quoted key. Only the writing side
+   never produced one, so a key that needed quotes could not round-trip. *)
+let render_key key =
+  let bare_char = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true
+    | _ -> false
+  in
+  if key <> "" && String.for_all bare_char key
+  then key
+  else Printf.sprintf "\"%s\"" (escape_string key)
+;;
+
+let scalar_line ~key ~value =
+  Printf.sprintf "%s = \"%s\"" (render_key key) (escape_string value)
+;;
+
+(* Single-line array rendering (used by the runtime string-array editor). Fusion
+   multi-line arrays are rendered by [multiline_array_lines]. *)
+let string_array_line ~key ~values =
+  let rendered =
+    values
+    |> List.map (fun value -> Printf.sprintf "\"%s\"" (escape_string value))
+    |> String.concat ", "
+  in
+  Printf.sprintf "%s = [%s]" (render_key key) rendered
+;;
+
+(* Multi-line array block: [key = \[], one indented quoted element per line, then
+   a closing []]. Mirrors the checked-in runtime.toml panel layout. *)
+let multiline_array_lines ~key ~values =
+  let elements =
+    List.map (fun value -> Printf.sprintf "  \"%s\"," (escape_string value)) values
+  in
+  (Printf.sprintf "%s = [" (render_key key) :: elements) @ [ "]" ]
+;;
+
+let split_lines content =
+  if String.equal content "" then [], false
+  else (
+    let len = String.length content in
+    let trailing_newline = Char.equal content.[len - 1] '\n' in
+    let parts = String.split_on_char '\n' content in
+    let lines =
+      if trailing_newline
+      then (
+        match List.rev parts with
+        | "" :: rest -> List.rev rest
+        | _ -> parts)
+      else parts
+    in
+    lines, trailing_newline)
+;;
+
+let join_lines lines ~trailing_newline =
+  match lines with
+  | [] -> if trailing_newline then "\n" else ""
+  | _ ->
+    let body = String.concat "\n" lines in
+    if trailing_newline then body ^ "\n" else body
+;;
+
+(* ── table headers ─────────────────────────────────────────────────────── *)
+
+(* A table header by the key path the TOML grammar reads out of it. [\[a.b\]]
+   and [\[\[a.b\]\]] carry the same path and mean different things to a
+   loader, so they are kept apart. *)
+type header =
+  | Table of string list
+  | Table_array of string list
+
+let equal_header a b =
+  match a, b with
+  | Table x, Table y | Table_array x, Table_array y -> List.equal String.equal x y
+  | Table _, Table_array _ | Table_array _, Table _ -> false
+;;
+
+(* A line is a table header when it parses on its own as a TOML document
+   whose only content is one empty table. [\[egress.keepers.alder\]],
+   [\[ egress . keepers . "alder" \]] and [\[egress.keepers.'alder'\] # note]
+   all read as the path egress, keepers, alder and nothing else; the spelling
+   (whitespace inside the brackets or around the dots, quoted or bare keys, a
+   trailing comment) is the grammar's to decide, which is what keeps this
+   editor and the loader agreeing on which table a line opens.
+
+   A line that does not parse alone is not a header. Headers are one line in
+   TOML, so a continuation line of a multi-line array or string cannot be one,
+   and the parser's message has nothing to add to that. *)
+let header_of_line line =
+  (* A CRLF file leaves a \r on every line, and the parser reads that as part
+     of the header rather than as the line ending it is. *)
+  let line = String.trim line in
+  let rec walk acc = function
+    | Otoml.TomlTable [ (key, child) ] ->
+      (match child with
+       | Otoml.TomlTable [] -> Some (Table (List.rev (key :: acc)))
+       | Otoml.TomlTableArray [] -> Some (Table_array (List.rev (key :: acc)))
+       | Otoml.TomlTable (_ :: _) -> walk (key :: acc) child
+       | Otoml.TomlTableArray (_ :: _)
+       | Otoml.TomlInlineTable _
+       | Otoml.TomlArray _
+       | Otoml.TomlString _
+       | Otoml.TomlInteger _
+       | Otoml.TomlFloat _
+       | Otoml.TomlBoolean _
+       | Otoml.TomlOffsetDateTime _
+       | Otoml.TomlLocalDateTime _
+       | Otoml.TomlLocalDate _
+       | Otoml.TomlLocalTime _ -> None)
+    | Otoml.TomlTable ([] | _ :: _ :: _)
+    | Otoml.TomlInlineTable _
+    | Otoml.TomlTableArray _
+    | Otoml.TomlArray _
+    | Otoml.TomlString _
+    | Otoml.TomlInteger _
+    | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _
+    | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ -> None
+  in
+  match Otoml.Parser.from_string_result line with
+  | Ok document -> walk [] document
+  | Error _not_a_document_on_its_own -> None
+;;
+
+let is_table_header line =
+  match header_of_line line with
+  | Some (Table _ | Table_array _) -> true
+  | None -> false
+;;
+
+(* The comment after a header is found by the grammar, not by the first [#]: a
+   quoted key may hold one. The comment starts at the first [#] whose prefix
+   still reads as the same header, and the spaces before it come along. *)
+let header_trailing_comment line =
+  match header_of_line line with
+  | None -> None
+  | Some header ->
+    let length = String.length line in
+    let rec find from =
+      match String.index_from_opt line from '#' with
+      | None -> None
+      | Some at ->
+        (match header_of_line (String.sub line 0 at) with
+         | Some prefix when equal_header prefix header ->
+           let rec header_end index =
+             if index > 0 && (Char.equal line.[index - 1] ' ' || Char.equal line.[index - 1] '\t')
+             then header_end (index - 1)
+             else index
+           in
+           let start = header_end at in
+           Some (String.sub line start (length - start))
+         | Some _ | None -> find (at + 1))
+    in
+    find 0
+;;
+
+(* [is_table ~path line]: [line] opens the standard table [\[path\]]. [path] is
+   the text between the brackets as a writer emits it, so the grammar reads it
+   the way it reads the line: a quoted segment is one key and a bare dotted
+   one is a nested path, in both. A [path] that is not itself a header opens
+   no line, and the table a writer then appends carries that same text. *)
+let is_table ~path line =
+  match header_of_line (Printf.sprintf "[%s]" path), header_of_line line with
+  | Some expected, Some found -> equal_header expected found
+  | Some _, None | None, Some _ | None, None -> false
+;;
+
+let rec split_at n xs =
+  if n <= 0 then [], xs
+  else
+    match xs with
+    | [] -> [], []
+    | x :: rest ->
+      let before, after = split_at (n - 1) rest in
+      x :: before, after
+;;
+
+let find_index pred xs =
+  let rec loop index = function
+    | [] -> None
+    | x :: rest -> if pred x then Some index else loop (index + 1) rest
+  in
+  loop 0 xs
+;;
+
+let parse_quoted_key raw =
+  let len = String.length raw in
+  if len < 2 || not (Char.equal raw.[0] '"') then None
+  else (
+    let buf = Buffer.create len in
+    let rec loop index =
+      if index >= len then None
+      else
+        match raw.[index] with
+        | '"' -> Some (Buffer.contents buf)
+        | '\\' when index + 1 < len ->
+          let escaped =
+            match raw.[index + 1] with
+            | '"' -> '"'
+            | '\\' -> '\\'
+            | 'n' -> '\n'
+            | 'r' -> '\r'
+            | 't' -> '\t'
+            | c -> c
+          in
+          Buffer.add_char buf escaped;
+          loop (index + 2)
+        | c ->
+          Buffer.add_char buf c;
+          loop (index + 1)
+    in
+    loop 1)
+;;
+
+let parse_literal_key raw =
+  let len = String.length raw in
+  if len < 2 || not (Char.equal raw.[0] '\'') then None
+  else (
+    match String.index_from_opt raw 1 '\'' with
+    | None -> None
+    | Some end_index -> Some (String.sub raw 1 (end_index - 1)))
+;;
+
+(* [key_of_line line] is the bare key of a [key = value] line, or [None] for
+   comments, blanks, and non-assignment lines. Quoted/literal keys are unescaped.
+   Comment and blank lines return [None], so editors never match them. *)
+let key_of_line line =
+  let trimmed = String.trim line in
+  if String.equal trimmed "" || Char.equal trimmed.[0] '#'
+  then None
+  else (
+    match String.index_opt trimmed '=' with
+    | None -> None
+    | Some eq_index ->
+      let key_part = String.sub trimmed 0 eq_index |> String.trim in
+      if String.equal key_part ""
+      then None
+      else if Char.equal key_part.[0] '"'
+      then parse_quoted_key key_part
+      else if Char.equal key_part.[0] '\''
+      then parse_literal_key key_part
+      else Some key_part)
+;;
+
+(* ── section-scoped edits ───────────────────────────────────────────────── *)
+
+(* [with_table content ~path ~on_missing ~edit] locates the [\[path\]] table,
+   splits it into (before, header, section_lines, after), runs [edit] on the
+   section body (the lines up to the next table header of any kind, including
+   array-of-tables), and reassembles. [on_missing] produces the whole updated
+   line list when the table is absent. Trailing newline is normalized to true,
+   matching the runtime editor. *)
+(* ── which lines carry structure ───────────────────────────────────────── *)
+
+(* A line-based editor has to know which lines it may read as structure. A TOML
+   value can span lines in three shapes -- a triple-double-quoted string, a
+   triple-single-quoted string, and a bracketed array -- and a line inside one
+   of them looks exactly like a header or an assignment. A multi-line string
+   carrying the text [voice.stt.fallback] on a line of its own reads as a table
+   header to anything that looks at lines alone.
+
+   Ending a section at such a line ends it in the wrong place. Reading an
+   assignment inside such a string as a key is worse: the edit lands inside the
+   string literal, the file still parses, and the loader keeps the old value,
+   so the setting reads as saved and does not take. Both were measured against
+   this module before this scanner existed.
+
+   The scanner tracks only what it takes to answer one question: may this line
+   be read as structure. It is not a TOML parser and does not try to be one. *)
+
+type quote =
+  | Basic (* inside a triple-double-quoted string *)
+  | Literal (* inside a triple-single-quoted string *)
+
+type scan =
+  { quote : quote option
+  ; depth : int (* open brackets of an array whose value continues *)
+  }
+
+let outside = { quote = None; depth = 0 }
+
+(* A line may be read as structure when no value from an earlier line is still
+   open across it. *)
+let is_structural state = Option.is_none state.quote && state.depth = 0
+
+let skip_basic_string line index =
+  let length = String.length line in
+  let rec loop index =
+    if index >= length
+    then index
+    else (
+      match line.[index] with
+      | '\\' -> loop (index + 2)
+      | '"' -> index + 1
+      | _ -> loop (index + 1))
+  in
+  loop index
+;;
+
+let skip_literal_string line index =
+  let length = String.length line in
+  let rec loop index =
+    if index >= length
+    then index
+    else if Char.equal line.[index] '\''
+    then index + 1
+    else loop (index + 1)
+  in
+  loop index
+;;
+
+(* The state [line] leaves behind, given the state it started in. A header line
+   is returned unchanged: its brackets open a table, not an array, and counting
+   them as array depth would swallow the rest of the file. *)
+let scan_line state line =
+  if is_structural state && is_table_header line
+  then state
+  else (
+    let length = String.length line in
+    let at index needle =
+      index + String.length needle <= length
+      && String.equal (String.sub line index (String.length needle)) needle
+    in
+    let rec walk index state =
+      if index >= length
+      then state
+      else (
+        match state.quote with
+        | Some Basic ->
+          if at index {|"""|}
+          then walk (index + 3) { state with quote = None }
+          else if Char.equal line.[index] '\\'
+          then walk (index + 2) state
+          else walk (index + 1) state
+        | Some Literal ->
+          if at index "'''"
+          then walk (index + 3) { state with quote = None }
+          else walk (index + 1) state
+        | None ->
+          (match line.[index] with
+           (* A comment runs to the end of the line, inside an array too. *)
+           | '#' -> state
+           | '"' when at index {|"""|} -> walk (index + 3) { state with quote = Some Basic }
+           | '\'' when at index "'''" -> walk (index + 3) { state with quote = Some Literal }
+           | '"' -> walk (skip_basic_string line (index + 1)) state
+           | '\'' -> walk (skip_literal_string line (index + 1)) state
+           | '[' -> walk (index + 1) { state with depth = state.depth + 1 }
+           | ']' -> walk (index + 1) { state with depth = max 0 (state.depth - 1) }
+           | _ -> walk (index + 1) state))
+    in
+    walk 0 state)
+;;
+
+let structural_lines lines =
+  let rec loop state acc = function
+    | [] -> List.rev acc
+    | line :: rest -> loop (scan_line state line) (is_structural state :: acc) rest
+  in
+  loop outside [] lines
+;;
+
+(* [find_structural_index pred lines] is {!find_index} restricted to lines that
+   carry structure, so a match inside a multi-line value is not one. *)
+let find_structural_index pred lines =
+  let rec loop index state = function
+    | [] -> None
+    | line :: rest ->
+      if is_structural state && pred line
+      then Some index
+      else loop (index + 1) (scan_line state line) rest
+  in
+  loop 0 outside lines
+;;
+
+
+
+(* ── typed values ─────────────────────────────────────────────────────── *)
+
+type value =
+  | String of string
+  | Int of int
+  | Float of float
+  | Bool of bool
+
+(* The shortest spelling that reads back as the same float. [%.17g] round-trips
+   every double but renders 0.1 as 0.10000000000000001, so precision climbs
+   until the rendering parses back equal. [nan] never compares equal to itself
+   and falls through to the 17-digit form, which is spelled [nan] either way. *)
+let exact_integer_bound = Float.pow 2. 53.
+
+let float_text v =
+  let rec shortest precision =
+    if precision > 17
+    then Printf.sprintf "%.17g" v
+    else (
+      let rendered = Printf.sprintf "%.*g" precision v in
+      match float_of_string_opt rendered with
+      | Some parsed when Float.equal parsed v -> rendered
+      | Some _ | None -> shortest (precision + 1))
+  in
+  (* [%g] switches to an exponent once the exponent reaches the precision, so
+     the shortest round-trip form of 120 is [1.2e+02]. A whole number below
+     2^53 is an exact integer, and [%.1f] spells it digit for digit. *)
+  let rendered =
+    if Float.is_integer v && Float.abs v < exact_integer_bound
+    then Printf.sprintf "%.1f" v
+    else shortest 1
+  in
+  let has character = String.exists (Char.equal character) rendered in
+  (* A float rendered without a point or exponent reads back as an integer, and
+     a field declared float is then refused by type. [nan] and [inf] carry no
+     point and must not gain one. *)
+  if has '.' || has 'e' || has 'E' || has 'n' || has 'i' then rendered else rendered ^ ".0"
+;;
+
+let value_line ~key ~value =
+  match value with
+  | String v -> scalar_line ~key ~value:v
+  | Int v -> Printf.sprintf "%s = %d" (render_key key) v
+  | Float v -> Printf.sprintf "%s = %s" (render_key key) (float_text v)
+  | Bool v -> Printf.sprintf "%s = %b" (render_key key) v
+;;
+
+(* ── section-scoped edits ───────────────────────────────────────────────── *)
+
+(* [with_table content ~path ~on_missing ~edit] locates the [\[path\]] table,
+   splits it into (before, header, section_lines, after), runs [edit] on the
+   section body (the lines up to the next table header of any kind, including
+   array-of-tables), and reassembles. [on_missing] produces the whole updated
+   line list when the table is absent. Trailing newline is normalized to true,
+   matching the runtime editor. *)
+let with_table content ~path ~on_missing ~edit =
+  let lines, _trailing = split_lines content in
+  let updated =
+    match find_structural_index (is_table ~path) lines with
+    | None -> on_missing lines
+    | Some header_index ->
+      let before, from_header = split_at header_index lines in
+      (match from_header with
+       | [] -> on_missing lines
+       | header :: after_header ->
+         let section_lines, after_section =
+           match find_structural_index is_table_header after_header with
+           | None -> after_header, []
+           | Some next -> split_at next after_header
+         in
+         before @ (header :: edit section_lines) @ after_section)
+  in
+  join_lines updated ~trailing_newline:true
+;;
+
+let has_key ~key line =
+  match key_of_line line with
+  | Some found -> String.equal found key
+  | None -> false
+;;
+
+(* The lines left after the value opening on [opening] finishes. A value can run
+   past its own line -- a bracketed array, a triple-quoted string -- and a
+   replacement that took only the first line would leave the rest of the old
+   value behind as loose text the loader cannot read. *)
+let skip_value ~opening rest =
+  let state = scan_line outside opening in
+  if is_structural state
+  then rest
+  else (
+    let rec consume state = function
+      | [] -> []
+      | line :: tail ->
+        let next = scan_line state line in
+        if is_structural next then tail else consume next tail
+    in
+    consume state rest)
+;;
+
+let boolean_assignment ~key line =
+  match Otoml.Parser.from_string_result (String.trim line) with
+  | Ok (Otoml.TomlTable [(name, Otoml.TomlBoolean _)]) -> String.equal name key
+  | Ok (Otoml.TomlString _) | Error _ | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+  | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+  | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+  | Ok (Otoml.TomlTable _) | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> false
+;;
+
+let boolean_trailing_comment ~key opening =
+  (* A # in a quoted key is data. Only a prefix that the grammar reads as
+     the complete boolean assignment can end the value. *)
+  let rec comment from =
+    match String.index_from_opt opening from '#' with
+    | None -> if String.ends_with ~suffix:"\r" opening then "\r" else ""
+    | Some at when boolean_assignment ~key (String.sub opening 0 at) ->
+      let rec start index =
+        if index > 0 && (opening.[index - 1] = ' ' || opening.[index - 1] = '\t')
+        then start (index - 1)
+        else index
+      in
+      let index = start at in
+      String.sub opening index (String.length opening - index)
+    | Some at -> comment (at + 1)
+  in
+  comment 0
+;;
+
+let replace_or_append_value section_lines ~key ~value =
+  let line = value_line ~key ~value in
+  match find_structural_index (has_key ~key) section_lines with
+  | None -> section_lines @ [ line ]
+  | Some index ->
+    let before, from_key = split_at index section_lines in
+    (match from_key with
+     | [] -> before @ [ line ]
+     | opening :: rest ->
+       let line = match value with
+         | Bool _ -> line ^ boolean_trailing_comment ~key opening
+         | String _ | Int _ | Float _ -> line
+       in
+       before @ (line :: skip_value ~opening rest))
+;;
+
+let remove_key section_lines ~key =
+  match find_structural_index (has_key ~key) section_lines with
+  | None -> section_lines
+  | Some index ->
+    let before, from_key = split_at index section_lines in
+    (match from_key with
+     | [] -> before
+     | opening :: rest -> before @ skip_value ~opening rest)
+;;
+
+let edit_table_value content ~path ~key ~value =
+  let append_table lines =
+    match value with
+    | None -> lines
+    | Some value ->
+      let section = [ Printf.sprintf "[%s]" path; value_line ~key ~value ] in
+      (match List.rev lines with
+       | [] -> section
+       | last :: _ when String.equal (String.trim last) "" -> lines @ section
+       | _ :: _ -> lines @ ("" :: section))
+  in
+  with_table content ~path ~on_missing:append_table ~edit:(fun section ->
+    match value with
+    | None -> remove_key section ~key
+    | Some value -> replace_or_append_value section ~key ~value)
+;;
+
+let edit_table_scalar content ~path ~key ~value =
+  edit_table_value content ~path ~key ~value:(Option.map (fun text -> String text) value)
+;;
+
+let edit_table_int content ~path ~key ~value =
+  edit_table_value content ~path ~key ~value:(Some (Int value))
+;;
+
+let edit_table_bool content ~path ~key ~value =
+  edit_table_value content ~path ~key ~value:(Some (Bool value))
+;;
+
+let edit_root_bool content ~key ~value =
+  let lines, trailing_newline = split_lines content in
+  let root, rest = match find_structural_index is_table_header lines with
+    | None -> lines, [] | Some index -> split_at index lines in
+  let line = value_line ~key ~value:(Bool value) in
+  let root = match find_structural_index (boolean_assignment ~key) root with
+    | None -> line :: root
+    | Some index ->
+        let before, found = split_at index root in
+        match found with
+        | [] -> line :: root
+        | opening :: after ->
+            before @ ((line ^ boolean_trailing_comment ~key opening) :: after) in
+  join_lines (root @ rest) ~trailing_newline
+;;
+
+type nested_edit_error = Invalid_document | Unreachable_table
+
+module Exact_number = struct
+  include Otoml.Base.OCamlNumber
+  let float_to_string = float_text
+end
+module Exact_toml = Otoml.Base.Make (Exact_number) (Otoml.Base.StringDate)
+
+let edit_nested_bool content ~path ~key ~value =
+  let module T = Exact_toml in
+  let rec relative prefix path = match prefix, path with
+    | [], rest -> Some rest
+    | first :: prefix, next :: path when first = next -> relative prefix path
+    | _ -> None in
+  let rec set ~create ~inline path node =
+    let fields, rebuild, inline = match node with
+      | T.TomlTable fields -> fields, (fun fields -> T.TomlTable fields), inline
+      | T.TomlInlineTable fields -> fields, (fun fields -> T.TomlInlineTable fields), true
+      | T.TomlString _ | T.TomlInteger _ | T.TomlFloat _ | T.TomlBoolean _ | T.TomlOffsetDateTime _
+      | T.TomlLocalDateTime _ | T.TomlLocalDate _ | T.TomlLocalTime _ | T.TomlArray _
+      | T.TomlTableArray _ -> [], (fun _ -> node), inline in
+    match node with
+    | T.TomlTable _ | T.TomlInlineTable _ ->
+      (match path with
+       | [] -> Some (rebuild ((key, T.TomlBoolean value) :: List.remove_assoc key fields), inline)
+       | name :: rest ->
+         let child = match List.assoc_opt name fields with
+           | Some child -> Some child
+           (* Once an existing inline ancestor is reached, its missing
+              descendants must be created inside that same sealed value. *)
+           | None when inline -> Some (T.TomlInlineTable [])
+           | None when create -> Some (T.TomlTable [])
+           | None -> None in
+         Option.bind child (fun child ->
+           Option.map (fun (child, inline) ->
+             rebuild ((name, child) :: List.remove_assoc name fields), inline)
+             (set ~create ~inline rest child)))
+    | T.TomlString _ | T.TomlInteger _ | T.TomlFloat _ | T.TomlBoolean _ | T.TomlOffsetDateTime _
+    | T.TomlLocalDateTime _ | T.TomlLocalDate _ | T.TomlLocalTime _ | T.TomlArray _
+    | T.TomlTableArray _ -> None in
+  (* Compare maps without depending on the printer's field order. *)
+  let rec ordered = function
+    | T.TomlTable fields -> T.TomlTable (order_fields fields)
+    | T.TomlInlineTable fields -> T.TomlInlineTable (order_fields fields)
+    | T.TomlArray values -> T.TomlArray (List.map ordered values)
+    | T.TomlTableArray values -> T.TomlTableArray (List.map ordered values)
+    | (T.TomlString _ | T.TomlInteger _ | T.TomlFloat _ | T.TomlBoolean _ | T.TomlOffsetDateTime _ | T.TomlLocalDateTime _ | T.TomlLocalDate _ | T.TomlLocalTime _) as value -> value
+  and order_fields fields = List.map (fun (key, value) -> key, ordered value) fields
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right) in
+  let parse = T.Parser.from_string_result in
+  let path_text path = String.concat "." (List.map render_key path) in
+  match parse content with
+  | Error _ -> Error Invalid_document
+  | Ok original ->
+    match set ~create:true ~inline:false path original with
+    | None -> Error Unreachable_table
+    | Some (expected, _) ->
+    let confirms candidate = match parse candidate with
+      | Ok actual -> compare (ordered actual) (ordered expected) = 0
+      | Error _ -> false in
+    let lines, trailing_newline = split_lines content in
+    let rec inline_ancestor path = function
+      | T.TomlInlineTable _ -> true
+      | T.TomlTable fields -> (match path with
+          | [] -> false
+          | name :: rest -> Option.fold ~none:false ~some:(inline_ancestor rest)
+              (List.assoc_opt name fields))
+      | T.TomlString _ | T.TomlInteger _ | T.TomlFloat _ | T.TomlBoolean _
+      | T.TomlOffsetDateTime _ | T.TomlLocalDateTime _ | T.TomlLocalDate _
+      | T.TomlLocalTime _ | T.TomlArray _ | T.TomlTableArray _ -> false in
+    (* Dotted keys already declare their table: Otoml accepts a later header
+       for it, but TOML does not. Only a real header or an absent path may use
+       the ordinary section editor. *)
+    let header_exists = Option.is_some
+      (find_structural_index (is_table ~path:(path_text path)) lines) in
+    let simple_allowed = header_exists ||
+      (T.find_opt original Fun.id path = None && not (inline_ancestor path original)) in
+    let simple = edit_table_bool content ~path:(path_text path) ~key ~value in
+    if simple_allowed && confirms simple then Ok simple else
+    let comment statement parsed =
+      let rec find from = match String.index_from_opt statement from '#' with
+        | None -> ""
+        | Some at -> (match parse (String.sub statement 0 at) with
+          | Ok prefix when compare prefix parsed = 0 ->
+              " " ^ String.sub statement at (String.length statement - at)
+          | Ok _ | Error _ -> find (at + 1)) in
+      find 0 in
+    (* Read whole assignments through the grammar, including multiline values.
+       An inline ancestor is rewritten as that one assignment, never as a
+       second header that would redefine its sealed table. *)
+    let rec assignments context state before = function
+      | [] -> None
+      | line :: rest ->
+        if not (is_structural state) then
+          assignments context (scan_line state line) (line :: before) rest
+        else match header_of_line line with
+        | Some (Table context) -> assignments context outside (line :: before) rest
+        | Some (Table_array _) -> assignments [] outside (line :: before) rest
+        | None ->
+          let tail = skip_value ~opening:line rest in
+          let count = List.length rest - List.length tail in
+          let continuation, _ = split_at count rest in
+          let block = line :: continuation in
+          let statement = String.concat "\n" block in
+          let changed = match relative context path, parse statement with
+            | Some remaining, Ok document ->
+              (match set ~create:false ~inline:false remaining document with
+               | Some (updated, true) ->
+                   Some (String.trim (T.Printer.to_string ~indent_width:0 ~collapse_tables:true updated)
+                     ^ comment statement document)
+               | Some (_, false) | None ->
+                 (match T.find_opt document Fun.id (remaining @ [key]) with
+                  | Some (T.TomlBoolean _) -> Some
+                      (path_text (remaining @ [key]) ^ " = " ^ string_of_bool value
+                        ^ comment statement document)
+                  | Some (T.TomlString _) | None | Some (T.TomlInteger _) | Some (T.TomlFloat _)
+                  | Some (T.TomlOffsetDateTime _) | Some (T.TomlLocalDateTime _)
+                  | Some (T.TomlLocalDate _) | Some (T.TomlLocalTime _) | Some (T.TomlArray _)
+                  | Some (T.TomlTable _) | Some (T.TomlInlineTable _) | Some (T.TomlTableArray _) -> None))
+            | Some _, Error _ | None, _ -> None in
+          (match changed with
+           | Some replacement ->
+             let candidate = join_lines (List.rev before @ [replacement] @ tail) ~trailing_newline in
+             if confirms candidate then Some candidate
+             else assignments context outside (List.rev_append block before) tail
+           | None -> assignments context outside (List.rev_append block before) tail) in
+    match assignments [] outside [] lines with
+    | Some candidate -> Ok candidate
+    | None ->
+      (* Dotted declarations extend from their existing ancestor section. *)
+      let ancestor = List.fold_left2 (fun best line structural ->
+        match structural, header_of_line line with
+        | true, Some (Table candidate) when List.length candidate > List.length best
+            && Option.is_some (relative candidate path) -> candidate
+        | (true, Some (Table_array _)) | (true, None) | (false, _) | (true, Some (Table _)) -> best) [] lines (structural_lines lines) in
+      let remaining = match relative ancestor path with Some path -> path | None -> path in
+      let assignment = path_text (remaining @ [key]) ^ " = " ^ string_of_bool value in
+      let candidate = if ancestor = [] then
+          join_lines (assignment :: lines) ~trailing_newline
+        else with_table content ~path:(path_text ancestor) ~on_missing:Fun.id
+          ~edit:(fun body -> body @ [assignment]) in
+      if confirms candidate then Ok candidate else Error Unreachable_table
+;;
+
+let edit_table_float content ~path ~key ~value =
+  edit_table_value content ~path ~key ~value:(Some (Float value))
+;;
+
+(* Replace (or append) a multi-line array inside a section. An existing
+   single-line array collapses to the multi-line form; comments between array
+   elements are not preserved (elements are data, RFC-0306 §7.1). Comments
+   outside the value are untouched.
+
+   The span ends where the scanner says the value closes, rather than at the
+   first closing bracket outside a comment: a bracket can also sit inside a
+   string element. *)
+let replace_or_append_multiline_array section_lines ~key ~values =
+  let block = multiline_array_lines ~key ~values in
+  match find_structural_index (has_key ~key) section_lines with
+  | None -> section_lines @ block
+  | Some index ->
+    let before, from_key = split_at index section_lines in
+    (match from_key with
+     | [] -> before @ block
+     | opening :: rest -> before @ block @ skip_value ~opening rest)
+;;
+
+let edit_table_multiline_array content ~path ~key ~values =
+  let append_table lines =
+    let section = Printf.sprintf "[%s]" path :: multiline_array_lines ~key ~values in
+    match List.rev lines with
+    | [] -> section
+    | last :: _ when String.equal (String.trim last) "" -> lines @ section
+    | _ :: _ -> lines @ ("" :: section)
+  in
+  with_table content ~path ~on_missing:append_table ~edit:(fun section ->
+    replace_or_append_multiline_array section ~key ~values)
+;;
+
+(* ── array-of-tables entries ───────────────────────────────────────────── *)
+
+(* Endpoint lists are array-of-tables: [\[\[voice.tts.endpoints\]\]] repeated,
+   each entry naming itself with an [id]. The scalar editors above address a
+   table by path, which cannot separate one repeated entry from the next, so
+   entries are addressed by the value of an identifying key instead. *)
+
+type entry_error =
+  | Inline_key_at_path of string
+  | Standard_table_at_path of string
+
+let entry_error_message = function
+  | Inline_key_at_path path ->
+    Printf.sprintf
+      "%s is already assigned as a key in its parent table, so an entry cannot be \
+       added under it: the file would refuse to load with \"table is duplicated by an \
+       array of tables\""
+      path
+  | Standard_table_at_path path ->
+    Printf.sprintf
+      "%s already exists as a standard table, so an entry cannot be added under it: \
+       the two spellings cannot both describe one path"
+      path
+;;
+
+let is_table_array ~path line =
+  match header_of_line (Printf.sprintf "[[%s]]" path), header_of_line line with
+  | Some expected, Some found -> equal_header expected found
+  | Some _, None | None, Some _ | None, None -> false
+;;
+
+let path_segments path =
+  match header_of_line (Printf.sprintf "[%s]" path) with
+  | Some (Table segments) | Some (Table_array segments) -> segments
+  | None -> []
+;;
+
+let rec is_prefix prefix segments =
+  match prefix, segments with
+  | [], _ -> true
+  | left :: rest_prefix, right :: rest_segments ->
+    String.equal left right && is_prefix rest_prefix rest_segments
+  | _ :: _, [] -> false
+;;
+
+(* A table opened below an entry and named under its path belongs to that entry:
+   [\[a.b.headers\]] after [\[\[a.b\]\]] is that entry's headers table. Ending
+   the entry at it costs both ways -- removing the entry would leave the
+   sub-table behind, which the loader refuses outright, and appending a new
+   entry would slot it above the sub-table, which loads cleanly and silently
+   hands one entry's sub-table to another. *)
+let is_entry_sub_table ~segments line =
+  match header_of_line line with
+  | Some (Table found) | Some (Table_array found) ->
+    List.length found > List.length segments && is_prefix segments found
+  | None -> false
+;;
+
+(* An entry body runs from just after its header to the next table header that
+   is not one of its own sub-tables. *)
+let split_entry_body ~segments lines =
+  let ends line = is_table_header line && not (is_entry_sub_table ~segments line) in
+  match find_structural_index ends lines with
+  | None -> lines, []
+  | Some next -> split_at next lines
+;;
+
+(* The value of a [key = value] line when it is a string, read by the same
+   grammar as the headers so a quoted key, an escape, or a trailing comment is
+   read here the way the loader reads it. *)
+let string_value_of_line line =
+  match Otoml.Parser.from_string_result (String.trim line) with
+  | Ok (Otoml.TomlTable [ (_key, Otoml.TomlString value) ]) -> Some value
+  | Ok (Otoml.TomlString _) | Error _ | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+  | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+  | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+  | Ok (Otoml.TomlTable _) | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> None
+;;
+
+let entry_id ~id_key body =
+  match find_structural_index (has_key ~key:id_key) body with
+  | None -> None
+  | Some index ->
+    (match snd (split_at index body) with
+     | line :: _ -> string_value_of_line line
+     | [] -> None)
+;;
+
+let entry_has_id ~id_key ~id body =
+  match entry_id ~id_key body with
+  | Some found -> String.equal found id
+  | None -> false
+;;
+
+let table_array_entry_ids content ~path ~id_key =
+  let lines, _trailing = split_lines content in
+  let segments = path_segments path in
+  let rec loop acc state = function
+    | [] -> List.rev acc
+    | line :: rest when is_structural state && is_table_array ~path line ->
+      let body, after = split_entry_body ~segments rest in
+      let acc =
+        match entry_id ~id_key body with
+        | Some id -> id :: acc
+        | None -> acc
+      in
+      loop acc outside after
+    | line :: rest -> loop acc (scan_line state line) rest
+  in
+  loop [] outside lines
+;;
+
+let trailing_blank_count lines =
+  let rec loop count = function
+    | line :: rest when String.equal (String.trim line) "" -> loop (count + 1) rest
+    | _ :: _ | [] -> count
+  in
+  loop 0 (List.rev lines)
+;;
+
+(* The tail of an entry body that documents what comes after it: a comment block
+   sitting just above the next header, plus the blanks between it and this
+   entry. A comment directly above a header describes that header, so an entry
+   appended below it would inherit a description written for something else, and
+   removing an entry would take that description with it.
+
+   Counted only when a comment is actually there. Trailing blanks alone belong
+   to the entry -- they are what separates it from the next -- and treating them
+   as detached would leave one behind on every add/remove round trip. *)
+let trailing_documentation_count lines =
+  let rec scan count saw_comment = function
+    | line :: rest ->
+      let trimmed = String.trim line in
+      if String.equal trimmed ""
+      then scan (count + 1) saw_comment rest
+      else if Char.equal trimmed.[0] '#'
+      then scan (count + 1) true rest
+      else if saw_comment
+      then count
+      else 0
+    | [] -> if saw_comment then count else 0
+  in
+  scan 0 false (List.rev lines)
+;;
+
+(* Insert [block] after the last [\[\[path\]\]] entry: past the blank lines that
+   trail it, but before any comment block documenting the next header. Then
+   repeat the trailing blanks below the new entry.
+
+   The separator goes below rather than above so that adding an entry and
+   removing it again restores the file byte-for-byte:
+   {!remove_table_array_entry} takes an entry's trailing blanks with it, so an
+   entry whose blanks sat above it would leave one behind on every round trip.
+
+   With no entry present the block goes at the end of the file, separated by one
+   blank line. *)
+let append_table_array_entry lines ~segments ~path ~block =
+  let rec last_entry_end index best state = function
+    | [] -> best
+    | line :: rest when is_structural state && is_table_array ~path line ->
+      let body, after = split_entry_body ~segments rest in
+      let after_index = index + 1 + List.length body in
+      let insert_at = after_index - trailing_documentation_count body in
+      last_entry_end after_index (Some (insert_at, trailing_blank_count body)) outside after
+    | line :: rest -> last_entry_end (index + 1) best (scan_line state line) rest
+  in
+  match last_entry_end 0 None outside lines with
+  | Some (insert_at, blanks) ->
+    let before, after = split_at insert_at lines in
+    before @ block @ List.init blanks (fun _ -> "") @ after
+  | None ->
+    (match List.rev lines with
+     | [] -> block
+     | last :: _ when String.equal (String.trim last) "" -> lines @ block
+     | _ :: _ -> lines @ ("" :: block))
+;;
+
+(* The path a new [\[\[a.b\]\]] would open must not already exist in another
+   shape. A key [b] in table [a] -- which is how an empty endpoint list is
+   spelled today -- or a standard table [\[a.b\]] both make the file refuse to
+   load, and a line editor cannot merge two shapes into one. *)
+let path_conflict lines ~path =
+  let segments = path_segments path in
+  let standard_table line =
+    match header_of_line line with
+    | Some (Table found) -> List.equal String.equal found segments
+    | Some (Table_array _) | None -> false
+  in
+  if Option.is_some (find_structural_index standard_table lines)
+  then Some (Standard_table_at_path path)
+  else (
+    match List.rev segments with
+    | [] | [ _ ] -> None
+    | key :: reversed_parent ->
+      let parent = List.rev reversed_parent in
+      let parent_header line =
+        match header_of_line line with
+        | Some (Table found) -> List.equal String.equal found parent
+        | Some (Table_array _) | None -> false
+      in
+      (match find_structural_index parent_header lines with
+       | None -> None
+       | Some index ->
+         (match snd (split_at index lines) with
+          | [] -> None
+          | _header :: after ->
+            let body =
+              match find_structural_index is_table_header after with
+              | None -> after
+              | Some next -> fst (split_at next after)
+            in
+            if Option.is_some (find_structural_index (has_key ~key) body)
+            then Some (Inline_key_at_path path)
+            else None)))
+;;
+
+let upsert_table_array_entry content ~path ~id_key ~id ~fields =
+  let lines, _trailing = split_lines content in
+  match path_conflict lines ~path with
+  | Some error -> Error error
+  | None ->
+    let segments = path_segments path in
+    (* [id] is the entry's identity; a second spelling of it in [fields] could
+       disagree with the entry this call just addressed. *)
+    let fields = List.filter (fun (key, _) -> not (String.equal key id_key)) fields in
+    let set_fields body =
+      (* Nested tables belong to this entry for removal and insertion, but
+         their keys do not belong to the entry's direct fields. Inserting a
+         missing endpoint model after its agent_voices header changes the
+         agent map; removing model there deletes a keeper named model. *)
+      let direct, nested =
+        match find_structural_index is_table_header body with
+        | None -> body, []
+        | Some first_header -> split_at first_header body
+      in
+      let updated = List.fold_left
+        (fun body (key, value) ->
+          match value with
+          | Some value -> replace_or_append_value body ~key ~value
+          | None -> remove_key body ~key)
+        direct
+        fields
+      in
+      updated @ nested
+    in
+    let rec edit acc found state = function
+      | [] -> List.rev acc, found
+      | line :: rest when is_structural state && is_table_array ~path line ->
+        let body, after = split_entry_body ~segments rest in
+        let body, found =
+          if entry_has_id ~id_key ~id body then set_fields body, true else body, found
+        in
+        edit (List.rev_append body (line :: acc)) found outside after
+      | line :: rest -> edit (line :: acc) found (scan_line state line) rest
+    in
+    let edited, found = edit [] false outside lines in
+    let updated =
+      if found
+      then edited
+      else (
+        let block =
+          Printf.sprintf "[[%s]]" path
+          :: value_line ~key:id_key ~value:(String id)
+          :: List.filter_map
+               (fun (key, value) -> Option.map (fun value -> value_line ~key ~value) value)
+               fields
+        in
+        append_table_array_entry edited ~segments ~path ~block)
+    in
+    Ok (join_lines updated ~trailing_newline:true)
+;;
+
+(* The lines of a removed body that stay: a comment block documenting the next
+   header is not the removed table's to take. *)
+let documentation_of_next_header body =
+  let documented = trailing_documentation_count body in
+  snd (split_at (List.length body - documented) body)
+;;
+
+let remove_table_array_entry content ~path ~id_key ~id =
+  let lines, _trailing = split_lines content in
+  let segments = path_segments path in
+  let rec loop acc state = function
+    | [] -> List.rev acc
+    | line :: rest when is_structural state && is_table_array ~path line ->
+      let body, after = split_entry_body ~segments rest in
+      if entry_has_id ~id_key ~id body
+      then
+        loop (List.rev_append (documentation_of_next_header body) acc) outside after
+      else loop (List.rev_append body (line :: acc)) outside after
+    | line :: rest -> loop (line :: acc) (scan_line state line) rest
+  in
+  join_lines (loop [] outside lines) ~trailing_newline:true
+;;
+
+type table_removal =
+  | Table_removed of string
+  | Table_absent
+
+(* Whether a header was matched is decided while walking the lines, not by
+   comparing the result with the input: the join adds a final newline the input
+   may not have had, so a file without one would read as edited when nothing
+   was removed. *)
+let remove_table content ~path =
+  let lines, _trailing = split_lines content in
+  let segments = path_segments path in
+  let rec loop acc ~removed state = function
+    | [] -> List.rev acc, removed
+    | line :: rest when is_structural state && is_table ~path line ->
+      let body, after = split_entry_body ~segments rest in
+      loop
+        (List.rev_append (documentation_of_next_header body) acc)
+        ~removed:true outside after
+    | line :: rest -> loop (line :: acc) ~removed (scan_line state line) rest
+  in
+  match loop [] ~removed:false outside lines with
+  | kept, true -> Table_removed (join_lines kept ~trailing_newline:true)
+  | _, false -> Table_absent
+;;
+
+type table_rename =
+  | Table_renamed of string
+  | Table_rename_absent
+  | Table_rename_conflict
+
+(* Rename one standard table's header, leaving its body and the comments
+   around it where they are. Only the header line changes, so a rename cannot
+   reorder or reformat what the table holds -- which is what makes it safe to
+   apply beside other edits of the same file in one write.
+
+   The walk is the one {!remove_table} does, for the same reason: a header
+   inside a multi-line string is not a header, and [is_structural] is what
+   tells them apart. A file that already declares [to_path] is refused rather
+   than left with the name twice, which would fail the whole load. *)
+let rename_table content ~path ~to_path =
+  let lines, _trailing = split_lines content in
+  if List.exists (fun line -> is_table ~path:to_path line) lines
+  then Table_rename_conflict
+  else (
+    let renamed_header = Printf.sprintf "[%s]" to_path in
+    let rec loop acc ~renamed state = function
+      | [] -> List.rev acc, renamed
+      | line :: rest when is_structural state && is_table ~path line ->
+        loop (renamed_header :: acc) ~renamed:true (scan_line state line) rest
+      | line :: rest -> loop (line :: acc) ~renamed (scan_line state line) rest
+    in
+    match loop [] ~renamed:false outside lines with
+    | kept, true -> Table_renamed (join_lines kept ~trailing_newline:true)
+    | _, false -> Table_rename_absent)
+;;

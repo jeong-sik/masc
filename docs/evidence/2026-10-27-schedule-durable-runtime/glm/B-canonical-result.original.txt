@@ -1,0 +1,1 @@
+{"status":"ok","schedule_id":"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second","limit":50,"notes":[{"note_id":"11","schedule_id":"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second","author_id":"audit-live-glm","author_kind":"automated_actor","created_at":1793048048.849434,"body":"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"}]}

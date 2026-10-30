@@ -1,0 +1,1 @@
+Initial typecheck reported TS2532 (Object is possibly undefined) at lane-addons-panel.test.ts:64,66,95,114,373. Direct fixture package dereferences were replaced with one explicit packageContract fixture value. The command originally chained ESLint after tsc, so its final shell exit 0 was not a TypeScript pass. The final command records the individual subprocess exits.

@@ -1,0 +1,97 @@
+{
+  "spaceId": 4,
+  "finished": false,
+  "observations": [
+    {
+      "selector": "loc=css:#file",
+      "result": {
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "selector": "loc=css:#label",
+      "result": {
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "selector": "loc=css:#wrapper",
+      "result": {
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "selector": "loc=css:#shadowfile",
+      "result": {
+        "receipt": {},
+        "error": null
+      }
+    },
+    {
+      "selector": "@54",
+      "result": {
+        "receipt": {},
+        "error": null
+      }
+    }
+  ],
+  "drag": {
+    "urlBefore": "http://localhost:64412/",
+    "receipt": {},
+    "error": null,
+    "pointerReleased": true
+  },
+  "state": {
+    "events": [
+      {
+        "id": "file",
+        "files": [
+          {
+            "name": "note.txt",
+            "size": 19
+          }
+        ]
+      },
+      {
+        "id": "child",
+        "files": [
+          {
+            "name": "note.txt",
+            "size": 19
+          }
+        ]
+      },
+      {
+        "drop": true,
+        "trusted": true
+      }
+    ],
+    "files": [
+      [
+        {
+          "name": "note.txt",
+          "size": 19
+        }
+      ],
+      [
+        {
+          "name": "note.txt",
+          "size": 19
+        }
+      ]
+    ],
+    "shadow": [
+      {
+        "name": "note.txt",
+        "size": 19
+      }
+    ]
+  },
+  "snapshot": "[p1 \"Native transfers\" | space \"masc-ego-native-sdk-20261024\"(4): 1 managed, 0 untracked — p1* \"Native transfers\"]\nroot\n  container\n    text \"Attach note\"\n    textbox [ref=54]\n      button [ref=55]\n        text \"파일 선택\"\n      text \"note.txt\"\n  textbox [ref=56]\n    button [ref=57]\n      text \"파일 선택\"\n    text \"note.txt\"\n  textbox [ref=58]\n    button [ref=59]\n      text \"파일 선택\"\n    text \"note.txt\"\n  text \"Drag source\"\n  text \"Drop target\"\n  text \"Native drop completed\"\n",
+  "upload_sha256": "d5ac2e21ff041c75a7082025a271e66d8ee5a17dd4cf217019044acd3011e96a",
+  "target_sha256": "308019b72c1f090c8c59095d7e4b573773ce53f82d89ad54698278009615e77d",
+  "scope": "Production native upload and target-input JavaScript on installed Ego; not host/Keeper dispatch or deployment proof."
+}

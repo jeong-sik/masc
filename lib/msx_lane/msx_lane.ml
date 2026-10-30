@@ -1,0 +1,1352 @@
+(* The workspace MSX machine and its input ledger. See msx_lane.mli. *)
+
+(* 순수 판별 코어를 lane 의 namespace 로 올린다 (mli 재노출용). *)
+module Screen_change = Screen_change
+
+type key = Msx.key
+
+type sprite = { index : int; x : int; y : int; pattern : int; color : int }
+
+type observation = {
+  frame : int;
+  mode : string;
+  pc : int;
+  halted : bool;
+  screen_text : string;
+  screen_view : string;
+  tiles : string list;
+  sprites : sprite list;
+  cartridge : string option;
+  disk : string option;
+}
+
+type entry = { at_frame : int; who : string; key_name : string; down : bool }
+
+type error =
+  | Activity_disabled
+  | Activity_unobserved
+  | No_machine
+  | Invalid_request of string
+  | Effect_unknown of string
+  | Unreadable of string
+  | Dependency_unavailable of string
+
+let error_to_string = function
+  | Activity_disabled -> "machines.msx is off; enable it before new machine work"
+  | Activity_unobserved -> "Machine activity configuration is unavailable"
+  | No_machine -> "no MSX machine is loaded: call masc_msx_load first"
+  | Invalid_request message -> message
+  | Unreadable message | Effect_unknown message | Dependency_unavailable message -> message
+;;
+
+open Result.Syntax
+let activity_observer : (unit -> Machine_configuration.activity) option Atomic.t = Atomic.make None
+let install_activity_observer observer = Atomic.set activity_observer observer
+let activity () = match Atomic.get activity_observer with
+  | None -> Machine_configuration.Unobserved
+  | Some observe -> observe ()
+let require_activity () = match activity () with
+  | Machine_configuration.Enabled -> Ok ()
+  | Disabled -> Error Activity_disabled
+  | Unobserved -> Error Activity_unobserved
+
+(* NTSC: the VDP runs 262 lines a frame at 60 Hz, the machine [load] boots.
+   Every "seconds" figure over frames in the lane and its routes divides by
+   this one number. *)
+let frames_per_second = 60
+let max_frames_per_call = 300
+let boot_frames = 45
+
+(* A disk boots through the warm-up replay: this much C-BIOS runs first so the
+   F380 inter-slot primitives sit in RAM, then [Msx.boot_disk] replays the Disk
+   ROM's second-stage call onto the machine. The cart-INIT path the core also
+   wires reboots mid-boot on a game's first stage (ocaml-msx #10), so the lane
+   takes the replay -- the path a loader runs to its title screen on. *)
+let disk_boot_frames = 720
+
+(* C-BIOS file names, in the order Msx.create wants them: main, logo, sub. *)
+let bios_files = [ "cbios_main_msx2.rom"; "cbios_logo_msx2.rom"; "cbios_sub.rom" ]
+
+let key_of_string s : (key, string) result =
+  match String.lowercase_ascii s with
+  | "up" -> Ok Msx.Up
+  | "down" -> Ok Msx.Down
+  | "left" -> Ok Msx.Left
+  | "right" -> Ok Msx.Right
+  | "space" -> Ok Msx.Space
+  | "esc" | "escape" -> Ok Msx.Esc
+  | "return" | "enter" -> Ok Msx.Return
+  | "backspace" -> Ok Msx.Backspace
+  | "trigger_a" -> Ok Msx.Trigger_a
+  | "trigger_b" -> Ok Msx.Trigger_b
+  | "shift" -> Ok Msx.Shift
+  | "ctrl" -> Ok Msx.Ctrl
+  | "graph" -> Ok Msx.Graph
+  | "select" -> Ok Msx.Select
+  | "f1" -> Ok (Msx.Function 1)
+  | "f2" -> Ok (Msx.Function 2)
+  | "f3" -> Ok (Msx.Function 3)
+  | "f4" -> Ok (Msx.Function 4)
+  | "f5" -> Ok (Msx.Function 5)
+  | k when String.length k = 1 && Char.code k.[0] > 32 && Char.code k.[0] < 127 ->
+    Ok (Msx.Char k.[0])
+  | k ->
+    Error
+      (Printf.sprintf
+         "unknown key %S: use up, down, left, right, space, esc, return, backspace, \
+          trigger_a, trigger_b, shift, ctrl, graph, select, f1-f5, or one character"
+         k)
+;;
+
+let key_to_string : key -> string = function
+  | Msx.Up -> "up"
+  | Msx.Down -> "down"
+  | Msx.Left -> "left"
+  | Msx.Right -> "right"
+  | Msx.Space -> "space"
+  | Msx.Esc -> "esc"
+  | Msx.Return -> "return"
+  | Msx.Backspace -> "backspace"
+  | Msx.Trigger_a -> "trigger_a"
+  | Msx.Trigger_b -> "trigger_b"
+  | Msx.Shift -> "shift"
+  | Msx.Ctrl -> "ctrl"
+  | Msx.Graph -> "graph"
+  | Msx.Select -> "select"
+  | Msx.Function n -> Printf.sprintf "f%d" n
+  | Msx.Char c -> String.make 1 c
+;;
+
+type machine = {
+  m : Msx.t;
+  incarnation : string;
+  mutable frame : int;
+  mutable pixels : (int * int * string) option;
+  (* Immutable RGB snapshot for this machine state, guarded by [lock]. *)
+  cart : string option;
+  disk : string option;
+  disk_id : string option;
+  media : (string * string) list;
+  ledger_path : string;
+  mutable entries : entry list;  (* newest first *)
+  mutable input_count : int;
+}
+
+let state : machine option ref = ref None
+let lock = Mutex.create ()
+let locked f = Mutex.protect lock f
+
+type change_mark = { count : int; incarnation : string }
+
+(* The machine change counter a spectator compares against. Process-wide and
+   written only while holding [lock]. Nothing resets it: an eject and the
+   next load keep counting, so one value never names two different screens
+   while the server runs. [advance] publishes Running before the first frame;
+   the enclosing operation raises the count on completion, including when it
+   raises after partial progress. A call that replaces the machine marks
+   right after installing the new one.
+
+   [published] carries the same count and incarnation, plus whether frames
+   are still running. A matching Stable mark may answer without the lock;
+   Running always waits for the final frame. Both transitions are published
+   under [lock], including when a step raises after partial progress. *)
+let change_count = ref 0
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+let published : published_state Atomic.t = Atomic.make No_screen
+
+let publish make =
+  Atomic.set published
+    (match !state with
+     | None -> No_screen
+     | Some st -> make { count = !change_count; incarnation = st.incarnation })
+;;
+
+let publish_stable () = publish (fun mark -> Stable mark)
+let publish_running () = publish (fun mark -> Running mark)
+let mark_change () = incr change_count; publish_stable ()
+let current_publication () = Atomic.get published
+(* Used only while holding [lock]. An incarnation names a newly installed
+   history, including a restore of the exact same checkpoint. *)
+let fresh_incarnation () = Random_id.uuid_v7 ()
+
+let with_machine f =
+  locked (fun () ->
+    match !state with
+    | None -> Error No_machine
+    | Some st ->
+      Fun.protect
+        ~finally:(fun () ->
+          match Atomic.get published with
+          | Running _ -> mark_change ()
+          | Stable _ | No_screen -> ())
+        (fun () -> f st))
+;;
+
+let hex2 = Printf.sprintf "%02x"
+
+(* Name table rows for the tile modes: 32 names a row, 24 rows, from R#2. *)
+let tiles_of m (mode : Msx.display_mode) =
+  match mode with
+  | Msx.Graphic1 | Msx.Graphic2 | Msx.Graphic3 | Msx.Multicolor ->
+    let regs = Msx.vdp_regs m in
+    let nt = (regs.(2) land 0x7f) lsl 10 in
+    List.init 24 (fun row ->
+      String.concat ""
+        (List.init 32 (fun col ->
+           let b = Msx.vram_read m (nt + (row * 32) + col) in
+           if b = 0 then ".." else hex2 b)))
+  | Msx.Text1 | Msx.Text2 | Msx.Graphic4 | Msx.Graphic5 | Msx.Graphic6 | Msx.Graphic7
+  | Msx.Undefined _ -> []
+;;
+
+(* Sprite attribute table: R#11 A16-A15, R#5 A14-A7; four bytes a slot,
+   Y = 0xD0 ends the list. Text modes have no sprites. *)
+let sprites_of m (mode : Msx.display_mode) =
+  match mode with
+  | Msx.Text1 | Msx.Text2 | Msx.Undefined _ -> []
+  | Msx.Graphic1 | Msx.Graphic2 | Msx.Graphic3 | Msx.Multicolor | Msx.Graphic4
+  | Msx.Graphic5 | Msx.Graphic6 | Msx.Graphic7 ->
+    let regs = Msx.vdp_regs m in
+    let sat = ((regs.(11) land 3) lsl 15) lor ((regs.(5) land 0xff) lsl 7) in
+    let rec go i acc =
+      if i >= 32 then List.rev acc
+      else begin
+        let base = sat + (4 * i) in
+        let y = Msx.vram_read m base in
+        if y = 0xd0 then List.rev acc
+        else
+          go (i + 1)
+            ({ index = i
+             ; y
+             ; x = Msx.vram_read m (base + 1)
+             ; pattern = Msx.vram_read m (base + 2)
+             ; color = Msx.vram_read m (base + 3)
+             }
+            :: acc)
+      end
+    in
+    go 0 []
+;;
+
+(* A coarse text picture of the frame, so a keeper with no vision runtime can
+   still recognise the screen (a title, a menu, a map) in any mode. Each cell is
+   the average luminance of the pixels under it, mapped to a ramp. Not a
+   replacement for [screen_text] -- that reads a text-mode name table and is
+   exact when the pattern set is a font; [screen_view] works in every mode,
+   including the bitmap modes where the name table is not characters. *)
+let screen_view_cols = 64
+let screen_view_rows = 24
+let screen_view_ramp = " .:-=+*#%@"
+
+let ascii_view rgb ~w ~h =
+  if w <= 0 || h <= 0 || String.length rgb < w * h * 3 then ""
+  else begin
+    let ramp = screen_view_ramp in
+    let levels = String.length ramp in
+    let cols = screen_view_cols and rows = screen_view_rows in
+    let buf = Buffer.create (rows * (cols + 1)) in
+    for ry = 0 to rows - 1 do
+      let y0 = ry * h / rows and y1 = (ry + 1) * h / rows in
+      for cx = 0 to cols - 1 do
+        let x0 = cx * w / cols and x1 = (cx + 1) * w / cols in
+        let sum = ref 0 and n = ref 0 in
+        for y = y0 to max y0 (y1 - 1) do
+          for x = x0 to max x0 (x1 - 1) do
+            let i = ((y * w) + x) * 3 in
+            let r = Char.code rgb.[i]
+            and g = Char.code rgb.[i + 1]
+            and b = Char.code rgb.[i + 2] in
+            sum := !sum + (((r * 30) + (g * 59) + (b * 11)) / 100);
+            incr n
+          done
+        done;
+        let lum = if !n = 0 then 0 else !sum / !n in
+        Buffer.add_char buf ramp.[lum * (levels - 1) / 255]
+      done;
+      Buffer.add_char buf '\n'
+    done;
+    Buffer.contents buf
+  end
+;;
+
+let rendered_pixels st =
+  match st.pixels with
+  | Some pixels -> pixels
+  | None ->
+      let width, height = Msx.frame_dims st.m in
+      let pixels = width, height, Msx.frame_rgb st.m in
+      st.pixels <- Some pixels;
+      pixels
+
+(* Bitmap modes draw their screens into pixels; the name table underneath is
+   leftover noise, not what the game drew. Sending it anyway cost ~2 KB per
+   observation (measured: 315 keeper screens averaged 3.7 KB), which is what
+   drowns the useful fields in a playing keeper's context. Text and tile
+   modes keep the name table — there it is the game's text. *)
+let is_bitmap_mode (mode : Msx.display_mode) =
+  match mode with
+  | Msx.Graphic4 | Msx.Graphic5 | Msx.Graphic6 | Msx.Graphic7 | Msx.Undefined _ -> true
+  | Msx.Text1 | Msx.Text2 | Msx.Multicolor | Msx.Graphic1 | Msx.Graphic2 | Msx.Graphic3
+    -> false
+;;
+
+let observe st =
+  let mode = Msx.display_mode st.m in
+  { frame = st.frame
+  ; mode = Msx.display_mode_to_string mode
+  ; pc = Msx.dump_pc st.m
+  ; halted = Msx.cpu_halted st.m
+  ; screen_text = (if is_bitmap_mode mode then "" else Msx.screen_text st.m)
+  ; tiles = tiles_of st.m mode
+  ; sprites = sprites_of st.m mode
+  ; cartridge = st.cart
+  ; disk = st.disk
+  ; screen_view =
+      (let w, h, rgb = rendered_pixels st in
+       ascii_view rgb ~w ~h)
+  }
+;;
+
+let entry_json (e : entry) : Yojson.Safe.t =
+  `Assoc
+    [ ("frame", `Int e.at_frame)
+    ; ("who", `String e.who)
+    ; ("key", `String e.key_name)
+    ; ("edge", `String (if e.down then "down" else "up"))
+    ]
+;;
+
+(* The file first: an edge the ledger file did not take is not an input the
+   machine's history records, so a checkpoint never carries it. The line sits
+   in the channel buffer until it is flushed, and [with_open_gen] closes with
+   [close_out_noerr], which drops a failed write (ENOSPC, EIO) without a word.
+   Flushing inside makes that failure raise here, before the edge is kept. *)
+let append_entry st e =
+  Out_channel.with_open_gen
+    [ Open_append; Open_creat; Open_wronly ]
+    0o644
+    st.ledger_path
+    (fun oc ->
+      output_string oc (Yojson.Safe.to_string (entry_json e));
+      output_char oc '\n';
+      flush oc);
+  st.entries <- e :: st.entries;
+  st.input_count <- st.input_count + 1
+;;
+
+let read_file path = In_channel.with_open_bin path In_channel.input_all
+
+(* A file that is there and will not read (a directory, a permission, a short
+   read) is a typed refusal. It happens before the machine is replaced, so the
+   previous machine and its ledger are untouched. *)
+let read_file_result path =
+  try Ok (read_file path)
+  with Sys_error message -> Error (Unreadable message)
+;;
+
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_p (Filename.dirname dir);
+    Sys.mkdir dir 0o755
+  end
+;;
+
+type bios_triple = { main : string; logo : string; sub : string }
+
+type bios =
+  | Present of bios_triple
+  | Absent
+
+type image =
+  | Cartridge_file of string
+  | Disk_file of string
+
+(* A directory must hold the whole C-BIOS triple -- a missing logo or sub ROM
+   used to board as an empty string and the machine booted with a hole in it,
+   which is no evidence of anything. The first file that is not there names
+   the refusal. *)
+let read_bios ~dir =
+  match List.find_opt (fun f -> not (Sys.file_exists (Filename.concat dir f))) bios_files with
+  | Some missing -> Error (Unreadable (Printf.sprintf "no %s in %s" missing dir))
+  | None ->
+    let read f = read_file_result (Filename.concat dir f) in
+    let* main = read "cbios_main_msx2.rom" in
+    let* logo = read "cbios_logo_msx2.rom" in
+    let* sub = read "cbios_sub.rom" in
+    Ok { main; logo; sub }
+;;
+
+let load_cart = function
+  | None -> Ok None
+  | Some path ->
+    if Sys.file_exists path then
+      let* bytes = read_file_result path in
+      Ok (Some (path, bytes))
+    else Error (Unreadable (Printf.sprintf "cartridge not found: %s" path))
+;;
+
+let load_disk = function
+  | None -> Ok None
+  | Some path ->
+    if Sys.file_exists path then
+      let* bytes = read_file_result path in
+      Ok (Some (path, bytes))
+    else Error (Unreadable (Printf.sprintf "disk not found: %s" path))
+;;
+
+let media_id bytes = Agent_core_sha256.(to_hex (digest_string bytes))
+
+let media_json media =
+  `List (List.map (fun (id, bytes) -> `Assoc
+    ["id", `String id; "sha256", `String (media_id bytes);
+     "bytes", `String (Base64.encode_string bytes)]) media)
+;;
+
+type medium =
+  | Cartridge of string
+  | Disk of string
+
+type transition = {
+  before : medium option;
+  after : medium option;
+}
+
+type loaded = {
+  observation : observation;
+  transition : transition;
+}
+
+(* [load] empties the slot when a disk is in the drive, so the drive is asked
+   first and the two never both answer. *)
+let medium_of (st : machine option) =
+  match st with
+  | None -> None
+  | Some st ->
+    (match st.disk, st.cart with
+     | Some name, _ -> Some (Disk name)
+     | None, Some name -> Some (Cartridge name)
+     | None, None -> None)
+;;
+
+(* A new machine starts a new ledger: create its directory and truncate the
+   file. Both fail at the open, before the ledger changes, and the previous
+   machine is still installed, so a failure here is a refusal. *)
+let fresh_ledger ledger_dir =
+  let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+  try
+    mkdir_p ledger_dir;
+    Out_channel.with_open_bin ledger_path (fun _ -> ());
+    Ok ledger_path
+  with Sys_error message -> Error (Unreadable message)
+;;
+
+(* The machine installs from a BIOS (three ROMs, or none for a bare machine)
+   and at most one image. A disk wins over a cartridge in the old call shape;
+   the image type carries only one, so that rule is gone. *)
+let install ~ledger_dir ~roms ~cart_path ~disk_path =
+  locked (fun () ->
+    (* Read under the lock the load commits under: two loads that serialise
+       here see the machine each one replaced, not the one both started
+       from. *)
+    let before = medium_of !state in
+    match load_cart cart_path, load_disk disk_path with
+    | Error e, _ | _, Error e -> Error e
+    | Ok cart, Ok disk ->
+      let m = Msx.create ~machine:{ Msx.ram_kb = 512; vram_kb = 128; roms } in
+      (* A disk wins over a cartridge: the image boots through the warm-up
+         replay, which wants the cartridge slot empty -- a C-BIOS boot that
+         finds the interface ROM re-enters the sector boot every cycle. *)
+      let boot_result =
+        match disk with
+        | Some (_, bytes) ->
+          Msx.load_disk ~interface_rom:false m bytes;
+          Msx.step m ~frames:disk_boot_frames;
+          (match Msx.boot_disk m with
+           | Ok () -> Ok (disk_boot_frames + boot_frames)
+           | Error message -> Error (Invalid_request ("disk boot failed: " ^ message)))
+        | None ->
+          Option.iter (fun (_, bytes) -> Msx.load_cartridge m bytes) cart;
+          Ok boot_frames
+      in
+      match boot_result with
+      | Error e -> Error e
+      | Ok pre_frames ->
+        Msx.step m ~frames:boot_frames;
+        match fresh_ledger ledger_dir with
+        | Error e -> Error e
+        | Ok ledger_path ->
+        let st =
+          { m
+          ; incarnation = fresh_incarnation ()
+          ; pixels = None
+          ; frame = pre_frames
+          ; cart =
+              (if Option.is_some disk then None
+               else Option.map (fun (path, _) -> Filename.basename path) cart)
+          ; disk = Option.map (fun (path, _) -> Filename.basename path) disk
+          ; disk_id = Option.map (fun (_, bytes) -> media_id bytes) disk
+          ; media = []
+          ; ledger_path
+          ; entries = []
+          ; input_count = 0
+          }
+        in
+        state := Some st;
+        mark_change ();
+        Ok { observation = observe st
+           ; transition = { before; after = medium_of (Some st) } })
+;;
+
+let bios_missing_message image =
+  let name = match image with Cartridge_file path | Disk_file path -> Filename.basename path in
+  Printf.sprintf
+    "no C-BIOS is available, so %s cannot boot: it needs %s"
+    name (String.concat ", " bios_files)
+;;
+
+let load ~ledger_dir ~bios ~image =
+  let* () = require_activity () in
+  match bios with
+  | Absent -> Error (Dependency_unavailable (bios_missing_message image))
+  | Present { main; logo; sub } ->
+    let roms = [ main; logo; sub ] in
+    (match image with
+     | Cartridge_file path -> install ~ledger_dir ~roms ~cart_path:(Some path) ~disk_path:None
+     | Disk_file path -> install ~ledger_dir ~roms ~cart_path:None ~disk_path:(Some path))
+;;
+
+module For_testing = struct
+  let load_bare_machine ~ledger_dir =
+    let* () = require_activity () in
+    install ~ledger_dir ~roms:[] ~cart_path:None ~disk_path:None
+  ;;
+end
+
+let eject () =
+  locked (fun () ->
+    match !state with
+    | None -> Error No_machine
+    | Some _ ->
+      state := None;
+      mark_change ();
+      Ok ())
+;;
+
+let screen () = with_machine (fun st -> Ok (observe st))
+
+let check_frames ~what n =
+  if n < 1 || n > max_frames_per_call then
+    Error
+      (Invalid_request
+         (Printf.sprintf "%s must be 1..%d, got %d" what max_frames_per_call n))
+  else Ok ()
+;;
+
+(* The only place frames run on the installed machine. [Running] is published
+   before mutation; [with_machine] raises the mark and publishes Stable after
+   all frames finish or an exception leaves. A call refused before this point
+   leaves the mark alone. [st] is [!state]'s machine, from [with_machine]. *)
+let advance st n =
+  publish_running ();
+  (* Invalidate before mutating even if stepping raises after partial progress. *)
+  st.pixels <- None;
+  Msx.step st.m ~frames:n;
+  st.frame <- st.frame + n
+;;
+
+let step ~frames =
+  let* () = require_activity () in
+  with_machine (fun st ->
+    match check_frames ~what:"frames" frames with
+    | Error e -> Error e
+    | Ok () ->
+      advance st frames;
+      Ok (observe st))
+;;
+
+type until_change = {
+  frames_run : int;
+      (** frames actually advanced — less than the budget when it settled early *)
+  changed : bool;
+      (** the screen ended up different from the start; false with a settled
+          screen is the "this scene waits for a key" signal *)
+  stable : bool;
+      (** stopped because the screen settled; false means the budget ran out *)
+}
+
+(* 화면이 스스로 멈출 때까지 논다 — "n 프레임" 대신 "장면이 안착할 때까지"를
+   한 번의 호출로. 지문은 screen_view 그대로고 판정은 순수 코어(Screen_change)
+   가 한다: 키퍼는 큰 관찰 없이도 변화·정지·키 대기 후보를 알 수 있다. *)
+let step_until_change ~max_frames =
+  let* () = require_activity () in
+  with_machine (fun st ->
+    match check_frames ~what:"max_frames" max_frames with
+    | Error e -> Error e
+    | Ok () ->
+      let cfg = Screen_change.default in
+      let start = observe st in
+      let base = start.screen_view in
+      let state = ref (Screen_change.initial base) in
+      let frames_run = ref 0 in
+      let stopped = ref false in
+      while not !stopped && !frames_run < max_frames do
+        let chunk = min cfg.interval (max_frames - !frames_run) in
+        advance st chunk;
+        frames_run := !frames_run + chunk;
+        let view = (observe st).screen_view in
+        state := Screen_change.feed cfg !state view;
+        stopped := Screen_change.settled cfg !state
+      done;
+      Ok
+        ( observe st
+        , { frames_run = !frames_run
+          ; changed = Screen_change.changed cfg base !state
+          ; stable = !stopped
+          } ))
+;;
+
+(* Press everything or nothing: a key without a matrix place is refused
+   before any key goes down, and a refusal releases whatever went down. *)
+let press_all st keys =
+  let rec go pressed = function
+    | [] -> Ok ()
+    | k :: rest ->
+      if Msx.set_key st.m k ~pressed:true then go (k :: pressed) rest
+      else begin
+        (* See Msx.set_key: a key that went down has a matrix place, so its release cannot miss. *)
+        List.iter (fun p -> ignore (Msx.set_key st.m p ~pressed:false : bool)) pressed;
+        Error
+          (Invalid_request
+             (Printf.sprintf "the keyboard matrix has no key for %S" (key_to_string k)))
+      end
+  in
+  go [] keys
+;;
+
+let tap_one st ~who ~hold_frames ~step_frames k =
+  (* Tap [k] in its own frame window: down, hold, up, then the rest idle. *)
+  (* See Msx.set_key: press_all checked [k]'s matrix place, so this edge cannot miss. *)
+  ignore (Msx.set_key st.m k ~pressed:true : bool);
+  append_entry st { at_frame = st.frame; who; key_name = key_to_string k; down = true };
+  advance st hold_frames;
+  (* See Msx.set_key: the key just went down, so its release cannot miss. *)
+  ignore (Msx.set_key st.m k ~pressed:false : bool);
+  append_entry st { at_frame = st.frame; who; key_name = key_to_string k; down = false };
+  advance st (step_frames - hold_frames)
+;;
+
+(* Keys go down only inside a press. When recording an edge raises, the keys
+   still go up before the exception leaves: a key left held would be in the
+   next checkpoint, and the next refusal that releases its own keys would
+   release this one too while reporting that nothing changed. The body runs no
+   Eio operation, so nothing can cancel it between the press and this release. *)
+let releasing_on_raise st keys body =
+  match body () with
+  | result -> result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (* Releasing a key that is already up changes nothing. *)
+    (* See Msx.set_key: press_all placed every key, so no release can miss. *)
+    List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+(* An edge the ledger file would not take (ENOSPC, EIO, a replaced path). The
+   call may already have run frames and written earlier edges, so the effect
+   is unknown rather than refused: the ledger can then hold a key-down with no
+   key-up. The keys are already released when this runs. *)
+let ledger_write_failed detail =
+  Error (Effect_unknown ("input ledger write failed after the press began: " ^ detail))
+;;
+
+let recording_ledger body =
+  try body () with
+  | Sys_error message -> ledger_write_failed message
+  | Unix.Unix_error (error, fn, arg) ->
+    ledger_write_failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+;;
+
+let press ~who ~keys ~hold_frames ~step_frames ~sequence =
+  let* () = require_activity () in
+  with_machine (fun st ->
+    if keys = [] then Error (Invalid_request "keys must name at least one key")
+    else
+      match check_frames ~what:"hold_frames" hold_frames, check_frames ~what:"frames" step_frames with
+      | Error e, _ | _, Error e -> Error e
+      | Ok (), Ok () when hold_frames > step_frames ->
+        Error
+          (Invalid_request
+             (Printf.sprintf "hold_frames (%d) cannot exceed frames (%d)" hold_frames step_frames))
+      | Ok (), Ok () -> (
+        (* [press_all] validates every key against the matrix up front, so a
+           bad key in a sequence is refused before any tap advances time. *)
+        match press_all st keys with
+        | Error e -> Error e
+        | Ok () when sequence ->
+          (* [press_all] left the keys down with no frame advanced; release them
+             and tap each in turn, so ["down"; "return"] is a menu sequence, not
+             a chord held together. *)
+          (* See Msx.set_key: press_all just checked every key, so these cannot miss. *)
+          List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
+          recording_ledger (fun () ->
+            releasing_on_raise st keys (fun () ->
+              List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
+              Ok (observe st)))
+        | Ok () ->
+          recording_ledger (fun () ->
+            releasing_on_raise st keys (fun () ->
+              List.iter
+                (fun k ->
+                  append_entry st
+                    { at_frame = st.frame; who; key_name = key_to_string k; down = true })
+                keys;
+              advance st hold_frames;
+              List.iter
+                (fun k ->
+                  (* See Msx.set_key: the key went down a moment ago, so its release cannot miss. *)
+                  ignore (Msx.set_key st.m k ~pressed:false : bool);
+                  append_entry st
+                    { at_frame = st.frame; who; key_name = key_to_string k; down = false })
+                keys;
+              advance st (step_frames - hold_frames);
+              Ok (observe st)))))
+;;
+
+let ledger () =
+  locked (fun () ->
+    match !state with
+    | None -> []
+    | Some st -> List.rev st.entries)
+;;
+
+type frame = {
+  number : int;
+  width : int;
+  height : int;
+  rgb : string;
+  mode : string;
+  cartridge : string option;
+  disk : string option;
+}
+
+let frame_of (st : machine) =
+      let width, height, rgb = rendered_pixels st in
+        { number = st.frame
+        ; width
+        ; height
+        ; rgb
+        ; mode = Msx.display_mode_to_string (Msx.display_mode st.m)
+        ; cartridge = st.cart
+        ; disk = st.disk
+        }
+;;
+
+let frame () = locked (fun () -> Option.map frame_of !state)
+;;
+
+let step_frame ~frames =
+  let* () = require_activity () in
+  with_machine (fun st ->
+    match check_frames ~what:"frames" frames with
+    | Error _ as error -> error
+    | Ok () ->
+        advance st frames;
+        (* Close the run here, not in [with_machine]'s finally, so the mark
+           returned with these pixels is the one a spectator reads next.
+           The publication is then [Stable], and the finally leaves it. *)
+        mark_change ();
+        let mark = { count = !change_count; incarnation = st.incarnation } in
+        Ok (frame_of st, List.rev st.entries, mark))
+;;
+
+let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
+;;
+
+type identified_capture = {
+  incarnation : string;
+  observation : observation;
+  frame : frame;
+  input_count : int;
+  input_ledger : entry list;
+}
+
+let capture_with_identity () =
+  with_machine (fun st ->
+    Ok { incarnation = st.incarnation; observation = observe st;
+         frame = frame_of st; input_count = st.input_count;
+         input_ledger = st.entries })
+;;
+
+type live =
+  | Nothing_loaded
+  | Unchanged of change_mark
+  | Changed of change_mark * frame
+
+(* Compare and copy under one lock hold, so the count, the incarnation and the
+   pixels always describe the same machine state. An unchanged answer renders
+   nothing. *)
+let live ~since =
+  locked (fun () ->
+    match !state with
+    | None -> Nothing_loaded
+    | Some st ->
+      let mark = { count = !change_count; incarnation = st.incarnation } in
+      (match since with
+       | Some seen when seen.count = mark.count
+                        && String.equal seen.incarnation mark.incarnation -> Unchanged mark
+       | Some _ | None -> Changed (mark, frame_of st)))
+;;
+
+(* --- RAM 인트로스펙션 — 상태 센서 ---------------------------------------
+   화면 판독은 "인간의 눈"으로 상태를 다시 읽는 비싼 우회다. 게임의 진실은
+   메모리에 있고, 코어는 그 전체를 이미 들고 있다. peek은 논리 주소의 바이트를
+   hex로 읽으며 내부 64K 스냅샷을 갱신하고, ram_diff는 직전 peek 이후 달라진
+   바이트를 변화 구간으로 돌려준다 — "이 조작이 무엇을 바꿨나"를 큰 덤프 없이
+   파악한다. 읽기만 한다: 쓰기는 치트 계약(RFC-0439) 위반이다. *)
+
+let peek_max_bytes = 256
+let ram_diff_max_runs = 64
+let address_space = 0x10000
+
+(* A logical address is 16 bits. The type holds only values in that range, so
+   [address + length] cannot wrap and the 64K snapshot cannot be indexed out
+   of bounds. *)
+module Address = struct
+  type t = int
+
+  let max_value = address_space - 1
+  let to_int address = address
+
+  (* Four lowercase hex digits, the spelling [parse] reads back. *)
+  let to_hex address = Printf.sprintf "%04x" address
+
+  let hex_digit_value = function
+    | '0' .. '9' as c -> Some (Char.code c - Char.code '0')
+    | 'a' .. 'f' as c -> Some (Char.code c - Char.code 'a' + 10)
+    | _ -> None
+  ;;
+
+  (* Hex only, as memory is talked about and as the DOS lane reads it: an
+     optional "0x", then hex digits, so "4096" is 0x4096. The value is bounded
+     while it is read, so no spelling can wrap an int. *)
+  let parse input =
+    let text = String.lowercase_ascii (String.trim input) in
+    let digits =
+      if String.starts_with ~prefix:"0x" text then String.sub text 2 (String.length text - 2)
+      else text
+    in
+    let not_hex () =
+      Error
+        (Printf.sprintf
+           "address %S is not hex: write hex digits with or without 0x (e000, 0xE000); \
+            digits alone are hex too, so 4096 is 0x4096"
+           input)
+    in
+    let rec accumulate value i =
+      if i = String.length digits then Ok value
+      else
+        match hex_digit_value digits.[i] with
+        | None -> not_hex ()
+        | Some digit ->
+          let value = (value * 16) + digit in
+          if value > max_value then
+            Error (Printf.sprintf "address %S is outside 0x0000-0xFFFF" input)
+          else accumulate value (i + 1)
+    in
+    if digits = "" then not_hex () else accumulate 0 0
+  ;;
+end
+
+(* 스냅샷은 머신이 아니라 레인이 든다: peek을 부른 시점의 세계 그 자체가
+   기준이고, 머신 교체(load/restore) 후의 diff도 "달라졌다"로 옳다. *)
+let last_peek : Bytes.t option ref = ref None
+
+type ram_change = { address : Address.t; length : int; from_hex : string; to_hex : string }
+
+let hex_pairs bytes lo hi =
+  String.concat ""
+    (List.init (hi - lo) (fun i -> Printf.sprintf "%02x" (Char.code (Bytes.get bytes (lo + i)))))
+;;
+
+let peek ~address ~length =
+  let address = Address.to_int address in
+  if length < 1 || length > peek_max_bytes || address + length > address_space then
+    Error
+      (Invalid_request
+         (Printf.sprintf "peek needs 1..%d bytes inside 0x0000-0xFFFF, got %d bytes at %d"
+            peek_max_bytes length address))
+  else
+    with_machine (fun st ->
+      let snap = Bytes.create address_space in
+      for a = 0 to address_space - 1 do
+        Bytes.set snap a (Char.chr (Msx.mem_read st.m a))
+      done;
+      last_peek := Some snap;
+      Ok (hex_pairs snap address (address + length)))
+;;
+
+type ram_diff = { changes : ram_change list; truncated : bool; changed_bytes : int }
+
+let ram_diff () =
+  match !last_peek with
+  | None -> Error (Invalid_request "no snapshot yet: call masc_msx_peek first")
+  | Some snap ->
+    with_machine (fun st ->
+      let rec go a changes total =
+        if a >= address_space || List.length changes >= ram_diff_max_runs then
+          { changes = List.rev changes
+          ; truncated = a < address_space
+          ; changed_bytes = total }
+        else if Char.code (Bytes.get snap a) = Msx.mem_read st.m a then go (a + 1) changes total
+        else begin
+          (* 하나의 변화 구간: 연속해서 달라진 바이트를 묶는다. *)
+          let rec run b =
+            if b >= address_space
+               || Char.code (Bytes.get snap b) = Msx.mem_read st.m b
+            then b
+            else run (b + 1)
+          in
+          let hi = run a in
+          let change =
+            { address = a
+            ; length = hi - a
+            ; from_hex = hex_pairs snap a hi
+            ; to_hex =
+                String.concat ""
+                  (List.init (hi - a) (fun i ->
+                       Printf.sprintf "%02x" (Msx.mem_read st.m (a + i))))
+            }
+          in
+          go hi (change :: changes) (total + (hi - a))
+        end
+      in
+      Ok (go 0 [] 0))
+;;
+
+let sync_checkpoint_directory path =
+  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+
+let rec mkdir_checkpoint_directory dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_checkpoint_directory (Filename.dirname dir);
+    Unix.mkdir dir 0o755;
+    sync_checkpoint_directory (Filename.dirname dir)
+  end
+
+let atomic_write path contents =
+  let replaced = ref false in
+  let failure message = Error (if !replaced then Effect_unknown message else Unreadable message) in
+  try
+    mkdir_checkpoint_directory (Filename.dirname path);
+    let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
+      (fun () ->
+        output_string oc contents;
+        flush oc;
+        Unix.fsync (Unix.descr_of_out_channel oc);
+        close_out oc;
+        Sys.rename tmp path;
+        replaced := true;
+        sync_checkpoint_directory (Filename.dirname path);
+        Ok ())
+  with
+  | Sys_error message -> failure message
+  | Unix.Unix_error (error, operation, path) ->
+      failure (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)
+;;
+
+let checkpoint_json (st : machine) =
+  let named = function None -> `Null | Some name -> `String name in
+  `Assoc
+    [ "version", `Int 1
+    ; "core_sha", `String Msx_core_identity.source_digest
+    ; "machine", `String (Base64.encode_string (Msx.serialize st.m))
+    ; "cartridge", named st.cart
+    ; "disk", named st.disk
+    ; "disk_id", named st.disk_id
+    ; "media", media_json st.media
+    ; "ledger", `List (List.map entry_json (List.rev st.entries))
+    ]
+;;
+
+type checkpoint_effect = {
+  observation : observation;
+  mark : change_mark;
+  checkpoint_sha256 : string;
+}
+
+let save ~path =
+  locked (fun () ->
+    match !state with
+    | None -> Error No_machine
+    | Some st ->
+      try
+        let contents = Yojson.Safe.to_string (checkpoint_json st) in
+        let checkpoint_sha256 = Agent_core_sha256.(to_hex (digest_string contents)) in
+        let* () = atomic_write path contents in
+        Ok { observation = observe st;
+             mark = { count = !change_count; incarnation = st.incarnation };
+             checkpoint_sha256 }
+      with
+      | Sys_error message -> Error (Unreadable message)
+      | Unix.Unix_error (error, operation, path) ->
+          Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)))
+;;
+
+let decode_checkpoint json =
+  let open Yojson.Safe.Util in
+  let invalid message = Error (Invalid_request ("invalid MSX checkpoint: " ^ message)) in
+  let named = function `Null -> None | `String s -> Some s
+    | value -> raise (Type_error ("expected media name or null", value)) in
+  try
+    if member "version" json <> `Int 1 then invalid "unsupported version"
+    else
+      match Base64.decode (member "machine" json |> to_string) with
+      | Error (`Msg message) -> invalid message
+      | Ok bytes -> (
+        match Msx.restore ~state:bytes with
+        | Error message -> invalid message
+        | Ok m ->
+          let cart = named (member "cartridge" json) and disk = named (member "disk" json) in
+          let disk_id = named (member "disk_id" json) in
+          let valid_id id = String.length id = 64 && String.for_all (function
+            | '0'..'9' | 'a'..'f' -> true | _ -> false) id in
+          let media = member "media" json |> to_list |> List.map (fun item ->
+            let id = member "id" item |> to_string in
+            let hash = member "sha256" item |> to_string in
+            let encoded = member "bytes" item |> to_string in
+            match Base64.decode encoded with
+            | Error (`Msg message) -> raise (Type_error (message, item))
+            | Ok bytes ->
+              if not (valid_id id) || media_id bytes <> hash then
+                raise (Type_error ("invalid saved disk identity or checksum", item));
+              id, bytes) in
+          if List.length (List.sort_uniq String.compare (List.map fst media)) <> List.length media then
+            raise (Type_error ("duplicate saved disk identity", json));
+          if (Option.is_some disk <> Option.is_some disk_id)
+             || not (Option.fold ~none:true ~some:valid_id disk_id) then
+            raise (Type_error ("saved disk has no valid original identity", json));
+          let frame = Msx.frame_number m in
+          let entries = member "ledger" json |> to_list |> List.map (fun e ->
+            let at_frame = member "frame" e |> to_int in
+            let who = member "who" e |> to_string in
+            let key_name = member "key" e |> to_string in
+            let down = match member "edge" e with
+              | `String "down" -> true | `String "up" -> false
+              | value -> raise (Type_error ("expected down or up edge", value)) in
+            {at_frame; who; key_name; down}) in
+          let rec valid_edges previous = function
+            | [] -> true
+            | e :: rest -> e.at_frame >= previous && e.at_frame <= frame
+                && Result.is_ok (key_of_string e.key_name) && valid_edges e.at_frame rest in
+          if not (valid_edges 0 entries) then invalid "ledger does not match saved frame"
+          else Ok (m, frame, cart, disk, disk_id, media, entries))
+  with Type_error (message, _) -> invalid message
+;;
+
+let restore ~path ~ledger_dir =
+  let* () = require_activity () in
+  (* A slot that was never saved is the caller naming one that does not
+     exist, which is an argument problem and refusable. Reaching the read
+     first turned it into [Unreadable], and the tool answered with a runtime
+     failure -- the caller cannot tell from that whether the machine changed.
+     [Unreadable] keeps its meaning: a file that is there and will not read. *)
+  if not (Sys.file_exists path)
+  then Error (Invalid_request ("no MSX checkpoint at " ^ path))
+  else
+  let decoded =
+    try
+      let contents = read_file path in
+      let checkpoint_sha256 = Agent_core_sha256.(to_hex (digest_string contents)) in
+      Result.map (fun decoded -> decoded, checkpoint_sha256)
+        (decode_checkpoint (Yojson.Safe.from_string contents))
+    with
+    | Sys_error message -> Error (Unreadable message)
+    | Yojson.Json_error message -> Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
+  match decoded with
+  | Error e -> Error e
+  | Ok ((m, frame, cart, disk, disk_id, media, entries), checkpoint_sha256) ->
+    locked (fun () ->
+      let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+      try
+        let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
+        let* () = atomic_write ledger_path ledger_bytes in
+        let st = {m; incarnation = fresh_incarnation (); pixels = None; frame;
+                  cart; disk; disk_id; media; ledger_path; entries = List.rev entries;
+                  input_count = List.length entries} in
+        state := Some st;
+        mark_change ();
+        Ok { observation = observe st;
+             mark = { count = !change_count; incarnation = st.incarnation };
+             checkpoint_sha256 }
+      with
+      | Sys_error message -> Error (Unreadable message)
+      | Unix.Unix_error (error, operation, path) ->
+          Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)))
+;;
+
+let change_disk ~path ~backup_path =
+  let* () = require_activity () in
+  try
+    let original = read_file path in
+    let target_id = media_id original in
+    with_machine (fun st ->
+      match st.disk_id, Msx.disk_image st.m with
+      | Some current_id, Some current_bytes -> (
+        let media = (current_id, current_bytes) :: List.remove_assoc current_id st.media in
+        let target_bytes = match List.assoc_opt target_id media with
+          | Some retained -> retained | None -> original in
+        match Msx.restore ~state:(Msx.serialize st.m) with
+        | Error message -> Error (Unreadable ("cannot checkpoint current machine: " ^ message))
+        | Ok m -> (
+          match Msx.change_disk m target_bytes with
+          | Error message -> Error (Invalid_request message)
+          | Ok () ->
+            let* () = atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st)) in
+            let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
+            state := Some next;
+            mark_change ();
+            Ok (observe next)))
+      | _ -> Error (Invalid_request "load a disk game before changing disks"))
+  with
+  | Sys_error message -> Error (Unreadable message)
+  | Unix.Unix_error (error, operation, path) ->
+      Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
+;;
+
+(* The digest ocaml-msx reports for the sources at OCAML_MSX_SHA in
+   scripts/opam-pin-external-deps.sh. Bump the two together: CI links the
+   pinned core, and test_msx_tools checks that the linked digest equals this
+   one, so a SHA bumped alone turns that test red with the new digest in its
+   message. Read the digest of a commit from its build:
+   _build/default/lib/identity/msx_core_identity.ml. The digest covers only
+   lib/ top-level (dune plus *.ml/*.mli, by base name), so an additive-only
+   core change in a subdirectory keeps the value. *)
+let pinned_core_source_digest = "78f5ad93c70d726594517af5e0f4c57b"
+
+(* The Git commit [scripts/opam-pin-external-deps.sh] pins as OCAML_MSX_SHA.
+   This is the build-time identity of the core a pinned build links, recorded
+   so a vendor/pin build — which has no [.git] for [Msx_core_identity] to ask —
+   still names the exact commit. Bump together with the script and with
+   [pinned_core_source_digest]; a SHA bumped alone turns the provenance test
+   red naming the new digest. *)
+let pinned_core_commit = "cec423387a7335f7d095e3a3489ec3e7272581fa"
+
+(* The exact commit of the linked core, when this build can establish it:
+   the pinned commit when the running core's digest matches the pin, else
+   the core's own recorded commit; [None] when neither is known. *)
+let linked_core_commit =
+  if String.equal Msx_core_identity.source_digest pinned_core_source_digest
+  then Some pinned_core_commit
+  else Msx_core_identity.source_commit
+
+type core = {
+  source_commit : string option;
+  source_digest : string;
+  pinned_source_digest : string;
+  matches_pin : bool;
+  pinned_commit : string;
+  linked_commit : string option;
+}
+[@@deriving yojson]
+
+let core =
+  { source_commit = Msx_core_identity.source_commit
+  ; source_digest = Msx_core_identity.source_digest
+  ; pinned_source_digest = pinned_core_source_digest
+  ; matches_pin = String.equal Msx_core_identity.source_digest pinned_core_source_digest
+  ; pinned_commit = pinned_core_commit
+  ; linked_commit = linked_core_commit
+  }
+
+type checkpoint_info = {
+  exists : bool;
+  version : int;
+  mtime_unix : float option;
+  mtime_utc : string option;
+  core_sha : string option;
+  cartridge : string option;
+  disk : string option;
+  ledger_entries : int;
+  byte_length : int;
+  sha256 : string;
+}
+
+let checkpoint_info ~path =
+  (* Inspection stays available when execution is disabled, so this is the
+     one call in the lane without [require_activity]: it reads a file the
+     caller names and touches no machine state. *)
+  if not (Sys.file_exists path)
+  then Error (Invalid_request ("no MSX checkpoint at " ^ path))
+  else
+    let contents =
+      try Ok (read_file path) with
+      | Sys_error message -> Error (Unreadable message) in
+    match contents with
+    | Error e -> Error e
+    | Ok contents ->
+      let byte_length = String.length contents in
+      let sha256 = Agent_core_sha256.(to_hex (digest_string contents)) in
+      let json =
+        try Ok (Yojson.Safe.from_string contents) with
+        | Yojson.Json_error message ->
+          Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
+      match json with
+      | Error e -> Error e
+    | Ok json ->
+      let invalid message = Error (Invalid_request ("invalid MSX checkpoint: " ^ message)) in
+      let fields =
+        match json with
+        | `Assoc fields -> Ok fields
+        | _ -> invalid "the envelope must be a JSON object" in
+      let open Result.Syntax in
+      let* fields = fields in
+      let find name = List.assoc_opt name fields in
+      let required_int name =
+        match find name with
+        | Some (`Int value) -> Ok value
+        | Some _ -> invalid (name ^ " must be an integer")
+        | None -> invalid (name ^ " is required") in
+      let required_string name =
+        match find name with
+        | Some (`String value) when value <> "" -> Ok value
+        | Some (`String _) -> invalid (name ^ " must not be empty")
+        | Some _ -> invalid (name ^ " must be a string")
+        | None -> invalid (name ^ " is required") in
+      let required_list name =
+        match find name with
+        | Some (`List values) -> Ok values
+        | Some _ -> invalid (name ^ " must be an array")
+        | None -> invalid (name ^ " is required") in
+      let valid_ledger_entry = function
+        | `Assoc entry ->
+          (match List.assoc_opt "frame" entry, List.assoc_opt "who" entry,
+                 List.assoc_opt "key" entry, List.assoc_opt "edge" entry with
+           | Some (`Int frame), Some (`String who), Some (`String key),
+             Some (`String ("down" | "up")) ->
+             frame >= 0 && who <> "" && key <> ""
+           | _ -> false)
+        | _ -> false in
+      let optional_string name =
+        match find name with
+        | None | Some `Null -> Ok None
+        | Some (`String value) when value <> "" -> Ok (Some value)
+        | Some (`String _) -> invalid (name ^ " must not be empty")
+        | Some _ -> invalid (name ^ " must be a string or null") in
+      let* version = required_int "version" in
+      let* machine = required_string "machine" in
+      let* ledger = required_list "ledger" in
+      let machine_is_encoded =
+        match Base64.decode machine with
+        | Ok bytes -> bytes <> ""
+        | Error _ -> false in
+      if not machine_is_encoded
+      then invalid "machine must be nonempty base64"
+      else if not (List.for_all valid_ledger_entry ledger)
+      then invalid "ledger contains a malformed entry"
+      else if version <> 1
+      then invalid (Printf.sprintf "unsupported version %d" version)
+      else
+        let* core_sha = optional_string "core_sha" in
+        let* cartridge = optional_string "cartridge" in
+        let* disk = optional_string "disk" in
+        let mtime_unix, mtime_utc =
+          match Unix.stat path with
+          | exception _ -> None, None
+          | stats ->
+            let tm = Unix.gmtime stats.st_mtime in
+            let utc =
+              Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+                (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+                tm.tm_hour tm.tm_min tm.tm_sec in
+            Some stats.st_mtime, Some utc in
+        Ok
+          { exists = true
+          ; version
+          ; mtime_unix
+          ; mtime_utc
+          ; core_sha
+          ; cartridge
+          ; disk
+          ; ledger_entries = List.length ledger
+          ; byte_length
+          ; sha256
+          }
+;;
+
+type disk_export = {
+  filename : string;
+  byte_length : int;
+  sha256 : string;
+  source_disk : string option;
+  frame : int;
+}
+
+let export_disk ~catalog_dir ~filename =
+  let extension = Filename.extension filename in
+  let stem = Filename.remove_extension filename in
+  let valid_name = extension = ".dsk"
+    && String.length stem >= 1 && String.length stem <= 64
+    && String.for_all (function
+      | 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' -> true
+      | _ -> false) stem in
+  let rec real_directories path =
+    if (Unix.lstat path).Unix.st_kind <> Unix.S_DIR then
+      Error (Invalid_request "disk catalog ancestors must be real directories")
+    else let parent = Filename.dirname path in
+      if parent = path then Ok () else real_directories parent in
+  if not valid_name then
+    Error (Invalid_request "filename must be 1..64 letters, digits, underscores or hyphens plus .dsk")
+  else if Filename.is_relative catalog_dir then
+    Error (Invalid_request "disk catalog must be absolute")
+  else locked (fun () ->
+    match !state with
+    | None -> Error No_machine
+    | Some st ->
+      match Msx.disk_image st.m with
+      | None -> Error (Invalid_request "no floppy is mounted")
+      | Some bytes ->
+        let receipt = {filename; byte_length = String.length bytes;
+          sha256 = media_id bytes; source_disk = st.disk; frame = st.frame} in
+        (* Keep the cleanup outside the refusal handler. An exception after
+           link has published the destination is an unknown outcome, not a
+           claim that the operation left no effect. *)
+        let prepared =
+          try
+            (* A fresh volume has no carts/ yet, and this export is what fills
+               it. The directory is made here, before the ancestor check, so
+               that check still sees every component as a real directory. *)
+            if not (Sys.file_exists catalog_dir) then mkdir_checkpoint_directory catalog_dir;
+            match real_directories catalog_dir with
+            | Error _ as e -> e
+            | Ok () -> Ok (Filename.open_temp_file ~temp_dir:catalog_dir ".msx-export-" ".tmp")
+          with
+          | Sys_error message -> Error (Unreadable message)
+          | Unix.Unix_error (error, fn, arg) ->
+            Error (Unreadable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))) in
+        match prepared with
+        | Error _ as e -> e
+        | Ok (temporary, channel) ->
+          Fun.protect
+            ~finally:(fun () -> close_out_noerr channel; Sys.remove temporary)
+            (fun () ->
+              try
+                output_string channel bytes;
+                flush channel;
+                Unix.fsync (Unix.descr_of_out_channel channel);
+                close_out channel;
+                Unix.link temporary (Filename.concat catalog_dir filename);
+                Ok receipt
+              with
+              | Unix.Unix_error (Unix.EEXIST, _, _) ->
+                Error (Invalid_request "export destination already exists; choose a new filename")
+              | Sys_error message -> Error (Unreadable message)
+              | Unix.Unix_error (error, fn, arg) ->
+                Error (Unreadable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error)))))
+;;

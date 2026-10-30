@@ -1,0 +1,29 @@
+{
+  "all_sources_match": true,
+  "files": {
+    "dashboard/src/api/dashboard-runtime.ts": {
+      "measured": "241c9c7e4076162efb1ffa920a26502320fefa1673e2839275ab2d64271a5f60",
+      "integrated": "241c9c7e4076162efb1ffa920a26502320fefa1673e2839275ab2d64271a5f60"
+    },
+    "dashboard/src/api/dashboard.ts": {
+      "measured": "1f64fbaeccab930204f195070d55a733af015363321cb9853f207d47de9c6e60",
+      "integrated": "1f64fbaeccab930204f195070d55a733af015363321cb9853f207d47de9c6e60"
+    },
+    "dashboard/src/api/dashboard.test.ts": {
+      "measured": "79a0132577d984bddf45d563da877b5219667bf1b12fb722ac90073c0d808033",
+      "integrated": "79a0132577d984bddf45d563da877b5219667bf1b12fb722ac90073c0d808033"
+    },
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": {
+      "measured": "049f5c67b0c6dc706ce59af5cb78a79041e67777f8f88ed383f296754519ab4f",
+      "integrated": "049f5c67b0c6dc706ce59af5cb78a79041e67777f8f88ed383f296754519ab4f"
+    },
+    "dashboard/src/components/runtime-toml-editor.ts": {
+      "measured": "42e23909c5e9a9426a85150793c7d83109cfd2f693d78162b4b2408cb0f4d699",
+      "integrated": "42e23909c5e9a9426a85150793c7d83109cfd2f693d78162b4b2408cb0f4d699"
+    },
+    "dashboard/src/components/runtime-toml-editor.test.ts": {
+      "measured": "ced6b976869a52312016cf8daa9ee87b3ecda9f97f6bd43c5d012e49fb81b6f3",
+      "integrated": "ced6b976869a52312016cf8daa9ee87b3ecda9f97f6bd43c5d012e49fb81b6f3"
+    }
+  }
+}

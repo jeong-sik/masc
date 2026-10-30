@@ -1,0 +1,98 @@
+{
+  "verdict": "PASS",
+  "head": "63c4b772166e3f064e09ab2d12d293005e8c368a",
+  "base": "e4476abcd9397fef20aca008b968d1688e20e919",
+  "reviewer": "audit_week_ui",
+  "review_type": "independent adversarial source review",
+  "diff_identity": {
+    "command": "git diff --binary --full-index e4476abcd9397fef20aca008b968d1688e20e919 63c4b772166e3f064e09ab2d12d293005e8c368a",
+    "sha256": "7320fafc1d9fbf88055a50f518c9aa0dcee3a2dae73b1e69fc6fba464f9cac11"
+  },
+  "findings": [],
+  "checks": [
+    "전체 diff가 ide-lsp-client.ts와 대응 test.ts 두 파일임을 확인했다.",
+    "constitution과 contributor workflow가 직전 읽은 버전과 동일함을 확인했다.",
+    "response는 null/array 분기 후 모든 position/label/tooltip/kind를 typed predicate로 검사하며 음수/소수/빈 label/잘못된 tooltip을 decorator로 보내지 않는다.",
+    "textContent와 title 사용으로 HTML 해석을 피하고 eq는 전체 tooltip text와 part별 label/tooltip text를 모두 비교한다.",
+    "visitedLines는 분할 visibleRanges에서 같은 줄의 hint 중복 삽입을 방지한다. 정상 위치 hint는 line별 정렬과 viewport 순회 순서로 RangeSetBuilder의 정렬 요건을 만족한다.",
+    "isLspPosition 공유에 따른 diagnostics parser 영향은 기존 numeric position 계약과 동일하다.",
+    "git diff --check 통과.",
+    "정렬 comparator의 clamped offset과 builder.add의 최종 위치가 같은 ordering을 가지므로 기존 IU1이 해소됐다.",
+    "같은 문서로 WebSocket을 다시 연결하는 동안 inlayHintField가 유지되는지 소스 확인했다. 새로운 tooltip 테스트는 old title 유지→새 서버 응답→new title을 확인해 widget equality 회귀 경로를 실제로 통과한다.",
+    "base부터 head까지 전체 제품 diff와 직전 FAIL 이후 delta를 함께 검토했고 다른 P0/P1/P2 문제 없음."
+  ],
+  "notes": [],
+  "test_evidence": {
+    "reported_by_root": "수정 이후 전체 LSPclient43/43 통과",
+    "independent_execution": false
+  },
+  "limits": [
+    "로컬 빌드/CI/제품 테스트/브라우저를 실행하지 않았다.",
+    "실제 language-server/provider integration은 미검증.",
+    "제품 코드 또는 외부 리뷰를 변경하지 않았다."
+  ],
+  "previous_reviews": [
+    {
+      "verdict": "FAIL",
+      "head": "0a70bb7ce26e702af7bef595f2c0879e824d0875",
+      "base": "e4476abcd9397fef20aca008b968d1688e20e919",
+      "reviewer": "audit_week_ui",
+      "review_type": "independent adversarial source review",
+      "diff_identity": {
+        "command": "git diff --binary --full-index e4476abcd9397fef20aca008b968d1688e20e919 0a70bb7ce26e702af7bef595f2c0879e824d0875",
+        "sha256": "bdd430527b01929ee8070834943c8c10d9408241f7dd65cf9acced2c2817b47d"
+      },
+      "findings": [
+        {
+          "id": "IU1",
+          "severity": "P2",
+          "title": "행 끝으로 clamp되는 hint의 응답 순서가 뒤집힌다",
+          "path": "dashboard/src/components/ide/ide-lsp-client.ts",
+          "start": 379,
+          "end": 382,
+          "trigger": "같은 줄 길이를 넘는 서로 다른 character 값을 가진 hint 둘 이상이 내림차순 응답으로 도착한다. 예: 길이14, [{character:999,label:A},{character:998,label:B}].",
+          "flow": "원시 character로 stable sort하면 B,A가 된다. 그 뒤 두 값을 line.to로 clamp하므로 최종 동일 위치에 B,A를 표시한다.",
+          "impact": "LSP에서 행 길이를 초과한 character는 행 길이로 해석되므로 같은 표시 위치의 label은 응답 순서 A,B를 유지해야 한다. 현재 구현은 렌더링할 문자열 조각/힌트 순서를 바꾼다.",
+          "fix": "각 hint의 effective/clamped offset을 먼저 계산한 뒤 그 offset 기준으로 stable sort한다.",
+          "verification": "미실행 source-confirmed. 기존 own-position 테스트에 행 끝으로 collapse되는 999/998 두 hint를 역순으로 추가해 모두 line.to 위치에서 A,B 순서를 유지하는지 확인한다.",
+          "specifications": [
+            "https://raw.githubusercontent.com/microsoft/language-server-protocol/gh-pages/_specifications/lsp/3.17/types/position.md",
+            "https://raw.githubusercontent.com/microsoft/language-server-protocol/gh-pages/_specifications/lsp/3.17/language/inlayHint.md"
+          ]
+        }
+      ],
+      "checks": [
+        "전체 diff가 ide-lsp-client.ts와 대응 test.ts 두 파일임을 확인했다.",
+        "constitution과 contributor workflow가 직전 읽은 버전과 동일함을 확인했다.",
+        "response는 null/array 분기 후 모든 position/label/tooltip/kind를 typed predicate로 검사하며 음수/소수/빈 label/잘못된 tooltip을 decorator로 보내지 않는다.",
+        "textContent와 title 사용으로 HTML 해석을 피하고 eq는 전체 tooltip text와 part별 label/tooltip text를 모두 비교한다.",
+        "visitedLines는 분할 visibleRanges에서 같은 줄의 hint 중복 삽입을 방지한다. 정상 위치 hint는 line별 정렬과 viewport 순회 순서로 RangeSetBuilder의 정렬 요건을 만족한다.",
+        "isLspPosition 공유에 따른 diagnostics parser 영향은 기존 numeric position 계약과 동일하다.",
+        "git diff --check 통과."
+      ],
+      "notes": [
+        "tooltip 변경 테스트는 docChanged로 기존 hint field를 비운 뒤 새 응답을 렌더하므로 Widget.eq의 회귀를 직접 겨냥하는 증거로는 약하다. eq 구현 자체에는 문제를 찾지 못했고 추가 blocking finding으로 계산하지 않는다."
+      ],
+      "test_evidence": {
+        "reported_by_root": "신규7 regression 모두 패치전 실패, 전체 LSPclient43/43 패치후 통과",
+        "independent_execution": false
+      },
+      "limits": [
+        "로컬 빌드/CI/제품 테스트/브라우저를 실행하지 않았다.",
+        "실제 language-server/provider integration은 미검증.",
+        "제품 코드 또는 외부 리뷰를 변경하지 않았다."
+      ]
+    }
+  ],
+  "resolved_findings": [
+    {
+      "id": "IU1",
+      "previous_head": "0a70bb7ce26e702af7bef595f2c0879e824d0875",
+      "resolution": "sort comparator가 Math.min(character,line.length)로 바뀌어 둘 다 행끝으로 collapse되는 999/998 hint의 응답 순서를 보존한다. 대응 테스트는 label 순서와 실제 DOM 문서 위치를 모두 확인한다.",
+      "refs": [
+        "dashboard/src/components/ide/ide-lsp-client.ts:379-383",
+        "dashboard/src/components/ide/ide-lsp-client.test.ts:621-631"
+      ]
+    }
+  ]
+}

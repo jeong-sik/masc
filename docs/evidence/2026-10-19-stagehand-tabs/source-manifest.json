@@ -1,0 +1,42 @@
+{
+  "observed_head": "7f24d85b405f1fd0b962304a254ec32776578e3f",
+  "proof": "actual Action.parse and Executor/Wire through unchanged JSON callback transport to isolated Chromium and installed Stagehand4.1 runtime; not full server or installed binary",
+  "source_files": [
+    {
+      "path": "lib/browser_lane/browser_action.ml",
+      "sha256": "3267f0dc1bc35e9aac12bfd197b7857825a5823d4262534a12c257823dbc8237"
+    },
+    {
+      "path": "lib/browser_lane/browser_action.mli",
+      "sha256": "ea68d58e1e901cd3c0d3378d0710e33bc15f23edf56f4c3543bd9c8b8633095b"
+    },
+    {
+      "path": "lib/browser_lane/browser_lane.ml",
+      "sha256": "7cea3b7e6fedc3dc2f875dead266c400d7e1960c420771da352353df191bb59d"
+    },
+    {
+      "path": "lib/browser_stagehand_wire.ml",
+      "sha256": "5236605ffb88a1fe49fb9bd7ac25d0a6279623accf58e00ee1daf8da1ddc3191"
+    },
+    {
+      "path": "lib/browser_stagehand_wire.mli",
+      "sha256": "b0cf6eec85888ed9d117d45cebf9ed3dcc09bcbf588e88eda3f792877ea41a27"
+    },
+    {
+      "path": "lib/browser_stagehand_executor.ml",
+      "sha256": "e62c5118fb1ef8357fc8cddf9684894d9366a29487733de2dee141adf4bff9aa"
+    },
+    {
+      "path": "lib/browser_stagehand_executor.mli",
+      "sha256": "03b6b3bd35f327c284250930c4fb31f9c9ec61548f3cce9e47feaa6c4a5f303b"
+    },
+    {
+      "path": "lib/browser_stagehand_backend.ml",
+      "sha256": "9bb0f203376d5107d4af764efc866784e4cdc7196f5f84448144e5f08b4ff85b"
+    },
+    {
+      "path": "lib/browser_stagehand_backend.mli",
+      "sha256": "48ec54a338fc38bd44a1f64125fe7fa62e5cf0965428c778459cd931917e67d5"
+    }
+  ]
+}

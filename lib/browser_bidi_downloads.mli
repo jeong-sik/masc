@@ -1,0 +1,25 @@
+(** Native BiDi connection for the Classic session's returned loopback URL.
+    Requires Firefox's download events and setDownloadBehavior (149+; the
+    complete download-ID contract is exercised against Firefox 155 in CI).
+    [root] is the resolved runtime's staging parent. Files survive close. *)
+val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> root:string -> publish:(string -> (Yojson.Safe.t, string) result) -> Browser_downloads.start
+val verify_file : root:string -> string -> (string * int, string) result
+
+(** Validate a loopback WebSocket endpoint without connecting. Any string is
+    answered: one that is no address is an [Error], not an exception. *)
+val endpoint : string -> (string * int * string, string) result
+
+(** {!endpoint}, with the address as it was parsed. *)
+val endpoint_uri : string -> (Uri.t * (string * int * string), string) result
+
+module For_testing : sig
+  (** The window a BiDi command's reply is awaited under: the reply whenever
+      it arrived, even in the scheduler pass the window closed; [`Timeout]
+      only when none had. *)
+  val reply_within :
+    clock:_ Eio.Time.clock -> timeout_s:float -> 'a Eio.Promise.t -> ('a, [ `Timeout ]) result
+
+  (** The request id a network event's params say an intercept holds, which
+      the connection fails; [None] for a request that is not held. *)
+  val held_request : Yojson.Safe.t -> string option
+end

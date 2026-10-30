@@ -1,0 +1,12 @@
+# receipt: task-1538 FINAL head c5e1165 (post-fix) — full suite + dual-profile @check
+branch=polish/task-1538-g1-field-ambiguity head=c5e1165
+utc=2026-09-11T23:30:20Z
+
+% dune build test/test_reliable_change_g1.exe && exe run
+Full test results in `/masc-work/polisher/masc-t1491/_build/_tests/Reliable_change_g1'.
+Test Successful in 0.001s. 11 tests run.
+
+% dune build @check
+check_exit=0
+% dune build --profile release @check
+release_check_exit=0

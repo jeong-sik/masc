@@ -1,0 +1,23 @@
+{
+  "README.md": "ff58a77ec12a4a9abd6c35d2dcae6b9a0a74ebbbfb399581fb0073391c087260",
+  "baseline-artifact.json": "1b66ac2e55ef293e2042b738869fb96bf8f4124f9c43d71399b976db0fb2517c",
+  "baseline-manifest.json": "02572f6d234e9e40402de51cc747f52d99d67d116a3b43d4b2eca124a6c236a1",
+  "candidate-artifact.json": "7b6d1934bbb726159aceae350498ae5996408e58e34f2f1c9c88c84f859a5866",
+  "candidate-manifest.json": "073dd92a6e971ba93ac711d87a26480b23dad5815ac10b4dcf5d7bf6198aa03f",
+  "compare.py": "93e50466f380fe8eb1e1e469f98a32aa5fc658057bc11f6efdb5011de9b2b06a",
+  "corrected/plan.json": "12100a4fea3819da2d063305e314754c86b3fb880dd07265575291da12e9c719",
+  "corrected/receipt-files.json": "0350f70c004d2eac47314d08c547bbf1cdec221e2af354c3e4baf3c4af4dbf96",
+  "corrected/receipts.tar.xz": "45eb12973340d2f144c9e22720ac41dcfc206326fe8c23b491cf6134f59c70fa",
+  "corrected/summary.json": "f26edc9924f370f05c8c41974526fc06c8c9430d65fedfc064cf9c9034dcfe14",
+  "initial/plan.json": "0261bdc4c0f4470e2edcefd2e9a4e254f207ff0d2897f6ce6aa2323a01edcd35",
+  "initial/receipt-files.json": "4e01056ff97862cdcab4858e5ed74487d7a5a9d27bdac9b9419c2f2ced343a33",
+  "initial/receipts.tar.xz": "01c9026e5f7c8d23b593f89f11a921cbd4959e8527dc64142a9ffbd4bd3e3bbc",
+  "initial/summary.json": "32ebd3087bbf5f60d56984d2b8cfa450037e435053a40113e2081dc43d5a6d23",
+  "interrupt-identity.json": "98d45a492f0331b93bc47db2d2cb8f6f97c07ded08ff95f549297ec113e27ca8",
+  "interrupt-result.json": "a03323af32755f53fad9722099d6401629dd322ccc2f82f4a72f1fc29e5fae6c",
+  "restore.py": "1f5388873e650e68977f4096ae9ff77d0a4ab1b498025d8139cda079f5d00228",
+  "runtime-fixture.toml": "3cc6877c5057c6148927e24b8951958a0859e7fd5bbf1ed48d5c22a5c056f2ed",
+  "session.py": "1b12139f6d8625e0802c2cea24dfe7ee52c7a1286b6529b6e8ca2d19178e92cd",
+  "source-scope.json": "bcfd6fc8599c66c3c970522526cb103206b774f6baa5577397d334954b0a4b31",
+  "summarize.py": "e7d27271b3a46f03a4a7dc687b4ab27317d474b141ae9adc51ad6d5b3a5a8f45"
+}

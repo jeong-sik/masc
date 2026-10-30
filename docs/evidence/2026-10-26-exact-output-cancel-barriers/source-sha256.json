@@ -1,0 +1,8 @@
+{
+  "packages/agent_core/test/test_exact_output_flow.ml": "b1c1da3742895df1e9b89ef7a9703f36aa0a9bdacf8c9ee3a2b0ebea30573702",
+  "packages/agent_core/lib/llm_provider/exact_output.ml": "654638865ef45bfc173c122125d7a2c193871cdda580ac5b50345359d1bd233f",
+  "packages/agent_core/lib/llm_provider/exact_output.mli": "1a128bd51d0e5f6dc8567fb984eeb971b98a397c56b8e3d9309b70ce8a8f0caf",
+  "packages/agent_core/lib/llm_provider/exact_output_flow.ml": "e9e2ff5355945db951afc6d8729d8a3dcd19293d95a87d8856822c862364dc74",
+  "packages/agent_core/lib/llm_provider/exact_output_flow.mli": "a454b2b9e66550113ff24a9bbd97d8c7e76b2d716e2e27ea356668a55b54de0b",
+  "packages/agent_core/lib/llm_provider/exact_output_generation_receipt.ml": "eb526739b532c9d10a3fa1be154ce7512c61b997cd1ad8e9b93281b4d934aba7"
+}

@@ -1,0 +1,29 @@
+{
+  "scope": "actual Keeper task_done and production verifier runtime; synthetic providers, no visual semantic acceptance",
+  "status": "verified",
+  "harness_sha256": "a1a2f6eb3e6c3929ea79c79bdb312ae63d2f3e4c7b9fa784dcffe21890d6e519",
+  "expected_commit": "1ef7ce2ec709b8b719e9687e774ea5258d87dee8",
+  "expected_outcome": "image_delivery",
+  "base_path": "/private/tmp/masc-verifier-image-runtime-small-capable-1ef7/base",
+  "port": 18945,
+  "server_pid": 56359,
+  "manifest": {
+    "commit": "1ef7ce2ec709b8b719e9687e774ea5258d87dee8",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "a877debb97967b2209f006fc3178efe0fc41285707a2b5c3888733dfd15c03bc",
+      "masc_tui.exe": "093c88c9705b6f9fdf6d7ee13efe9644b2d8868f0a83f6a21d3fee0fedab59a2",
+      "masc_browser_host.exe": "9c082ed7c0f7babfba36f61e4412bf578630f0c63d3b9e06fac1d1f2ce46ce37"
+    }
+  },
+  "image_bytes": 69,
+  "image_sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640",
+  "artifact_total_bytes": 207,
+  "operation_id": "kmsg-77f45c20a232fb22636391f348376215",
+  "verification_id": "vrf-f6d6abf55bf11a14f0c45026db305558",
+  "producer_requests": 3,
+  "verifier_requests": 2,
+  "delivered_images": 3
+}

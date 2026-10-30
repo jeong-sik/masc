@@ -1,0 +1,1261 @@
+(* Tokenizers for source code, shared by the chat's fenced code blocks and
+   the Code surface. Moved from masc_tui_markdown so a file view can colour
+   content without the markdown chrome; the design notes moved with them. *)
+
+type segment = string * string
+
+let starts_at text index marker =
+  let length = String.length marker in
+  index + length <= String.length text
+  && String.equal (String.sub text index length) marker
+
+let kind_code = "code"
+let kind_keyword = "code_keyword"
+let kind_string = "code_string"
+let kind_comment = "code_comment"
+let kind_number = "code_number"
+let kind_type = "code_type"
+
+(* A diff's two answers. They are line-shaped rather than token-shaped, which
+   is why they are their own kinds: no lexer run can end mid-line and mean
+   something. *)
+let kind_diff_added = "code_diff_added"
+let kind_diff_removed = "code_diff_removed"
+
+(* {1 Fenced-code lexers}
+
+   Each lexer reads one whole fence body, newlines included, and returns the
+   same (text, kind) segments the inline pass produces, so the styling and the
+   row splitting share one vocabulary. The whole body rather than a row at a
+   time because the state that decides a token's kind -- an OCaml comment
+   opened three rows up, a string still open across a line break -- does not
+   exist inside a single row.
+
+   The lexers are tokenizers, not parsers: a keyword is the identifier the
+   OCaml manual reserves, a comment is the marker pair and everything it
+   encloses, and nothing needs the grammar to be valid to be coloured. A fence
+   whose language nobody lexes keeps the single code span. *)
+
+(* OCaml reserved words, as the manual lists them. A word not in this set is
+   not a keyword however keyword-shaped it looks -- [dune] and [Option] colour
+   as themselves. *)
+let ocaml_reserved =
+  [ "and"; "as"; "assert"; "asr"; "begin"; "class"; "constraint"; "do"; "done"
+  ; "downto"; "else"; "end"; "exception"; "external"; "false"; "for"; "fun"
+  ; "function"; "functor"; "if"; "in"; "include"; "inherit"; "initializer"
+  ; "land"; "lazy"; "let"; "lor"; "lsl"; "lsr"; "lxor"; "match"; "method"; "mod"
+  ; "module"; "mutable"; "new"; "nonrec"; "object"; "of"; "open"; "or"
+  ; "private"; "rec"; "sig"; "struct"; "then"; "to"; "true"; "try"; "type"
+  ; "val"; "virtual"; "when"; "while"; "with" ]
+
+let is_reserved word =
+  List.exists (fun reserved -> String.equal word reserved) ocaml_reserved
+
+let is_identifier_start char =
+  (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char = '_'
+
+let is_identifier_char char =
+  is_identifier_start char
+  || (char >= '0' && char <= '9')
+  || char = '\''
+
+let is_digit char = char >= '0' && char <= '9'
+
+let is_hex char =
+  is_digit char || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')
+
+(* Segments accumulate kind-runs: adjacent characters of one kind become one
+   segment, so a row's styling is a handful of spans, not one per character. *)
+type runs =
+  { mutable rev_segments : (string * string) list
+  ; current : Buffer.t
+  ; mutable kind : string }
+
+let new_runs kind = { rev_segments = []; current = Buffer.create 64; kind }
+
+let runs_push (runs : runs) kind char = Buffer.add_char runs.current char
+
+(* Adding a character under a possibly-new kind: a kind change closes the run
+   in progress and takes over -- including when the buffer is empty, which is
+   how the very first token of a body inherits the right kind instead of the
+   initial one. *)
+let runs_add (runs : runs) kind char =
+  if not (String.equal runs.kind kind) then begin
+    if Buffer.length runs.current > 0 then
+      runs.rev_segments <-
+        (Buffer.contents runs.current, runs.kind) :: runs.rev_segments;
+    Buffer.reset runs.current;
+    runs.kind <- kind
+  end;
+  runs_push runs kind char
+
+let runs_flush (runs : runs) =
+  if Buffer.length runs.current > 0 then
+    runs.rev_segments <-
+      (Buffer.contents runs.current, runs.kind) :: runs.rev_segments
+
+let runs_segments (runs : runs) =
+  runs_flush runs;
+  List.rev runs.rev_segments
+
+(* Read forward from an index while a predicate holds, emitting into the runs
+   under one kind. Returns the index one past the last consumed character. *)
+let take_while text index pred kind (runs : runs) =
+  let limit = String.length text in
+  let rec advance index =
+    if index < limit && pred text.[index] then begin
+      runs_add runs kind text.[index];
+      advance (index + 1)
+    end
+    else index
+  in
+  advance index
+
+(* OCaml string literal from an opening quote: backslash escapes one
+   character, the next bare quote closes, and a newline inside is part of the
+   literal rather than a row break the caller owns. The opening quote itself
+   is not a close -- the close test applies only past it, or ["x"] lexes as
+   two empty strings with the body spilling out plain. *)
+let take_ocaml_string text index (runs : runs) =
+  let limit = String.length text in
+  let opening = index in
+  let rec advance index =
+    if index >= limit then index
+    else begin
+      let char = text.[index] in
+      runs_add runs kind_string char;
+      if char = '\\' && index + 1 < limit then begin
+        runs_add runs kind_string text.[index + 1];
+        advance (index + 2)
+      end
+      else if char = '"' && index > opening then index + 1
+      else advance (index + 1)
+    end
+  in
+  advance index
+
+(* OCaml character literal: a quote, then one scalar or one escape, then a
+   closing quote. Type variables ('a) are also quoted but never close, so a
+   quote whose closing quote is not within the literal shapes is plain text. *)
+let take_ocaml_char text index (runs : runs) =
+  let limit = String.length text in
+  let closing =
+    if index + 1 < limit && text.[index + 1] = '\\' then
+      (if index + 3 < limit && text.[index + 3] = '\'' then Some (index + 4)
+       else None)
+    else if index + 2 < limit && text.[index + 2] = '\'' then Some (index + 3)
+    else if index + 2 < limit && text.[index + 1] = '\'' && text.[index + 2] = '\'' then
+      Some (index + 3)
+    else None
+  in
+  match closing with
+  | None -> runs_add runs kind_code text.[index]; index + 1
+  | Some stop ->
+      for i = index to stop - 1 do
+        runs_add runs kind_string text.[i]
+      done;
+      stop
+
+(* OCaml comment, nesting included: depth counts (* against *) so a comment
+   holding a comment ends at its real close. Depth starts at 0 -- the opening
+   pair itself raises it to 1, so the pair is counted exactly once. Returns
+   the index one past the final close, or the end of the body when the
+   comment never closes. *)
+let take_ocaml_comment text index (runs : runs) =
+  let limit = String.length text in
+  let rec advance index depth =
+    if index >= limit then index
+    else if index + 1 < limit && text.[index] = '(' && text.[index + 1] = '*' then
+      ( runs_add runs kind_comment text.[index]
+      ; runs_add runs kind_comment text.[index + 1]
+      ; advance (index + 2) (depth + 1) )
+    else if index + 1 < limit && text.[index] = '*' && text.[index + 1] = ')' then
+      ( runs_add runs kind_comment text.[index]
+      ; runs_add runs kind_comment text.[index + 1]
+      ; if depth = 1 then index + 2 else advance (index + 2) (depth - 1) )
+    else begin
+      runs_add runs kind_comment text.[index];
+      advance (index + 1) depth
+    end
+  in
+  advance index 0
+
+let ocaml_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if index + 1 < limit && char = '(' && text.[index + 1] = '*' then
+        advance (take_ocaml_comment text index runs)
+      else if char = '"' then advance (take_ocaml_string text index runs)
+      else if char = '\'' then advance (take_ocaml_char text index runs)
+      else if is_identifier_start char then begin
+        (* One identifier: reserved words colour as keywords, a capitalised
+           start reads as a constructor or module and colours as a type,
+           anything else stays the fence's plain code span. *)
+        let word = Buffer.create 16 in
+        Buffer.add_char word char;
+        let stop =
+          let rec scan i =
+            if i < limit && is_identifier_char text.[i] then begin
+              Buffer.add_char word text.[i];
+              scan (i + 1)
+            end
+            else i
+          in
+          scan (index + 1)
+        in
+        let as_string = Buffer.contents word in
+        let kind =
+          if is_reserved as_string then kind_keyword
+          else if
+            as_string.[0] >= 'A' && as_string.[0] <= 'Z'
+          then kind_type
+          else kind_code
+        in
+        String.iter (fun c -> runs_add runs kind c) as_string;
+        advance stop
+      end
+      else if is_digit char then begin
+        (* Numbers only: 0x hex, decimal digits, underscores, and one
+           decimal-point run. A trailing sign stays outside -- colouring the
+           [+] of [1 + 2] as a number is a lie about the token. *)
+        let stop =
+          if index + 1 < limit && char = '0' && (text.[index + 1] = 'x' || text.[index + 1] = 'X') then begin
+            runs_add runs kind_number char;
+            runs_add runs kind_number text.[index + 1];
+            take_while text (index + 2)
+              (fun c -> is_hex c || c = '_')
+              kind_number runs
+          end
+          else
+            let after_digits =
+              take_while text index (fun c -> is_digit c || c = '_') kind_number runs
+            in
+            if after_digits < limit && text.[after_digits] = '.' then begin
+              runs_add runs kind_number '.';
+              take_while text (after_digits + 1)
+                (fun c -> is_digit c || c = '_')
+                kind_number runs
+            end
+            else after_digits
+        in
+        advance stop
+      end
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
+(* A bash row comment: [#] to the row's end, but only where it starts a word
+   -- colouring the [#] inside [#tag] or [a#b] recolours text mid-token. *)
+let bash_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if char = '"' then advance (take_ocaml_string text index runs)
+      else if char = '\'' then begin
+        (* Single quotes in bash have no escapes: everything to the next
+           quote is literal, backslash included. *)
+        runs_add runs kind_string char;
+        let rec literal i =
+          if i >= limit then i
+          else begin
+            runs_add runs kind_string text.[i];
+            if text.[i] = '\'' then i + 1 else literal (i + 1)
+          end
+        in
+        advance (literal (index + 1))
+      end
+      else if
+        char = '#'
+        && (index = 0
+           || text.[index - 1] = ' '
+           || text.[index - 1] = '\t'
+           || text.[index - 1] = '\n'
+           || text.[index - 1] = ';')
+      then begin
+        let stop =
+          take_while text index (fun c -> c <> '\n') kind_comment runs
+        in
+        advance stop
+      end
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
+(* JSON: a string followed (after spaces) by a colon is an object key; the
+   others are values; numbers and the literals true/false/null read as
+   numbers. The colon test is lookahead only -- it never emits, so the
+   punctuation keeps the plain span. *)
+let json_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if char = '"' then begin
+        let stop = take_ocaml_string text index runs in
+        let rec peek i =
+          if i >= limit then false
+          else if text.[i] = ' ' || text.[i] = '\t' then peek (i + 1)
+          else text.[i] = ':'
+        in
+        (* A key is a differently-coloured string. The string just read is
+           still the run in progress -- retagging the run colours the whole
+           literal without rewriting any segment list. *)
+        if peek stop then runs.kind <- kind_type;
+        advance stop
+      end
+      else if is_digit char || ((char = '-') && index + 1 < limit && is_digit text.[index + 1]) then begin
+        (* Digits and one decimal shape. An exponent's [e] stays plain rather
+           than colouring one token wider than the set: [-] inside [3 - 1]
+           must not join the number that follows it.
+
+           A leading sign is emitted here instead of being left to
+           [take_while]. The predicate is false at a [-], so scanning from
+           [index] returns [index] unchanged and [advance] re-enters at the
+           same place: a .json file holding a negative number never finished
+           lexing, and the TUI stopped drawing. *)
+        let digits_from =
+          if char = '-'
+          then begin
+            runs_add runs kind_number char;
+            index + 1
+          end
+          else index
+        in
+        let stop =
+          take_while text digits_from (fun c -> is_digit c || c = '.')
+            kind_number runs
+        in
+        advance stop
+      end
+      else if starts_at text index "true" then begin
+        String.iter (fun c -> runs_add runs kind_number c) "true";
+        advance (index + 4)
+      end
+      else if starts_at text index "false" then begin
+        String.iter (fun c -> runs_add runs kind_number c) "false";
+        advance (index + 5)
+      end
+      else if starts_at text index "null" then begin
+        String.iter (fun c -> runs_add runs kind_number c) "null";
+        advance (index + 4)
+      end
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
+(* The fence tag decides who lexes. Untagged and unknown tags answer None and
+   the fence keeps the single code span -- a guess at the grammar from the
+   text alone is exactly the colouring-as-pretence the palette avoids. *)
+(* A cell of [Masc_tui_diff.numbered_gutter], read strictly: what
+   [line_number_cell] emits is four spaces and a dash for absence, else
+   blanks then digits to the column's end. A looser read — any mix of
+   blanks, digits, and dashes — would let source text shaped like
+   coordinates borrow a row's colour. *)
+let is_strict_gutter_cell offset line =
+  let cell = String.sub line offset 5 in
+  if String.equal cell "    -" then true
+  else
+    (* Blanks, then digits to the column's end, at least one digit: exactly
+       what a right-aligned [%5d] emits. Only the space counts as blank —
+       a tab-indented number is source text, not a coordinate. *)
+    let blanks = ref 0 in
+    while !blanks < 5 && cell.[!blanks] = ' ' do incr blanks done;
+    let digits = 5 - !blanks in
+    digits >= 1
+    && (let ok = ref true in
+        for i = !blanks to 4 do
+          let c = cell.[i] in
+          if c < '0' || c > '9' then ok := false
+        done;
+        !ok)
+
+(* The kind of a numbered diff row, when the line wears the gutter the chat
+   preview emits: two five-cell coordinate columns, the marker, their three
+   separating spaces, and the trailing space the fourteen-cell gutter ends
+   with. The marker sits at offset twelve and is one of the three the
+   preview emits; a hunk marker never wears a gutter. A six-digit line
+   overflows its column and the offsets miss, which falls back to the
+   first cell below instead — the marker stays in the text, only the
+   colour is lost. *)
+let numbered_gutter_kind line =
+  if
+    String.length line >= 14 && line.[5] = ' ' && line.[11] = ' '
+    && line.[13] = ' '
+  then
+    if is_strict_gutter_cell 0 line && is_strict_gutter_cell 6 line then
+      match line.[12] with
+      | '+' -> Some kind_diff_added
+      | '-' -> Some kind_diff_removed
+      | ' ' -> Some kind_code
+      | _ -> None
+    else None
+  else None
+
+(* A diff line is read whole: its first cell decides the whole line, so this
+   emits one run per line instead of scanning for tokens. A hunk header reads
+   as a comment because it locates the change rather than being part of it,
+   and "---"/"+++" file headers are left plain so they are not mistaken for
+   the removal and addition directly under them. A numbered gutter's marker
+   is read before the first cell because the gutter, not the old line number,
+   says which side of the change the row is on. *)
+let diff_line_kind line =
+  if String.length line = 0 then kind_code
+  else if
+    String.length line >= 3
+    && (String.sub line 0 3 = "+++" || String.sub line 0 3 = "---")
+  then
+    (* A file header, not the change under it. Colouring it would put a green
+       "+++" directly above the first added line and read as part of it. *)
+    kind_code
+  else
+    match numbered_gutter_kind line with
+    | Some kind -> kind
+    | None -> (
+        match line.[0] with
+        | '+' -> kind_diff_added
+        | '-' -> kind_diff_removed
+        | '@' -> kind_comment
+        | _ -> kind_code)
+
+let diff_lexer text =
+  let runs = new_runs kind_code in
+  let add kind s = String.iter (fun c -> runs_add runs kind c) s in
+  let lines = String.split_on_char '\n' text in
+  let count = List.length lines in
+  List.iteri
+    (fun index line ->
+      add (diff_line_kind line) line;
+      (* The newline belongs to no line's colour: [rows_of_segments] cuts rows
+         on it, and a coloured one would carry the run past the cut. *)
+      if index < count - 1 then add kind_code "\n")
+    lines;
+  runs_segments runs
+
+(* A diff line that adds or removes, split into its marker and its content:
+   the marker is the fourteen-cell gutter when the line wears one, else the
+   line's own first cell, and the kind is the row's diff side. [None] is
+   every other line — context, hunk and file headers, and the six-digit
+   overflow whose gutter the offsets miss — read whole by [diff_line_kind]. *)
+let diff_changed_split line =
+  let length = String.length line in
+  if length = 0 then None
+  else if
+    length >= 3
+    && (String.sub line 0 3 = "+++" || String.sub line 0 3 = "---")
+  then None
+  else
+    match numbered_gutter_kind line with
+    | Some kind
+      when String.equal kind kind_diff_added
+           || String.equal kind kind_diff_removed ->
+        Some
+          ( String.sub line 0 14
+          , String.sub line 14 (length - 14)
+          , kind )
+    | Some _ | None -> (
+        match line.[0] with
+        | '+' -> Some ("+", String.sub line 1 (length - 1), kind_diff_added)
+        | '-' -> Some ("-", String.sub line 1 (length - 1), kind_diff_removed)
+        | _ -> None)
+
+(* {1 C-family and Python lexers}
+
+   These share the shape of [ocaml_lexer] but read the punctuation the curly-
+   brace family and Python use. They are tokenizers, not parsers, so the
+   keyword sets are broad on purpose: an identifier that matches a keyword in a
+   sibling dialect is coloured, the same trade the fence lexers already make. *)
+
+(* A string opened by [quote] and closed by the next unescaped [quote].
+   Mirrors [take_ocaml_string] for any quote, so single quotes (char and string
+   literals) and JS backticks read too. *)
+let take_quoted ~quote text index (runs : runs) =
+  let limit = String.length text in
+  let opening = index in
+  let rec advance index =
+    if index >= limit then index
+    else begin
+      let char = text.[index] in
+      runs_add runs kind_string char;
+      if char = '\\' && index + 1 < limit then begin
+        runs_add runs kind_string text.[index + 1];
+        advance (index + 2)
+      end
+      else if Char.equal char quote && index > opening then index + 1
+      else advance (index + 1)
+    end
+  in
+  advance index
+
+(* A [/* ... */] block comment, not nested: C, JS, Rust and CSS all end at the
+   first close. [index] points at the opening slash. *)
+let take_c_block_comment text index (runs : runs) =
+  let limit = String.length text in
+  runs_add runs kind_comment '/';
+  runs_add runs kind_comment '*';
+  let rec advance i =
+    if i >= limit then i
+    else if i + 1 < limit && text.[i] = '*' && text.[i + 1] = '/' then begin
+      runs_add runs kind_comment '*';
+      runs_add runs kind_comment '/';
+      i + 2
+    end
+    else begin
+      runs_add runs kind_comment text.[i];
+      advance (i + 1)
+    end
+  in
+  advance (index + 2)
+
+(* A Python triple-quoted string ["""..."""] or ['''...''']. [index] points at
+   the first quote of the opening triple. *)
+let take_triple ~quote text index (runs : runs) =
+  let limit = String.length text in
+  runs_add runs kind_string quote;
+  runs_add runs kind_string quote;
+  runs_add runs kind_string quote;
+  let rec advance i =
+    if i >= limit then i
+    else if
+      i + 3 <= limit
+      && Char.equal text.[i] quote
+      && Char.equal text.[i + 1] quote
+      && Char.equal text.[i + 2] quote
+    then begin
+      runs_add runs kind_string quote;
+      runs_add runs kind_string quote;
+      runs_add runs kind_string quote;
+      i + 3
+    end
+    else begin
+      runs_add runs kind_string text.[i];
+      advance (i + 1)
+    end
+  in
+  advance (index + 3)
+
+(* A number: 0x hex, or decimal digits with underscores and one decimal point.
+   Mirrors [ocaml_lexer] so a literal reads the same colour in every language.
+   [index] points at the first digit. *)
+let take_number text index (runs : runs) =
+  let limit = String.length text in
+  let char = text.[index] in
+  if
+    index + 1 < limit && char = '0'
+    && (text.[index + 1] = 'x' || text.[index + 1] = 'X')
+  then begin
+    runs_add runs kind_number char;
+    runs_add runs kind_number text.[index + 1];
+    take_while text (index + 2) (fun c -> is_hex c || c = '_') kind_number runs
+  end
+  else
+    let after =
+      take_while text index (fun c -> is_digit c || c = '_') kind_number runs
+    in
+    if after < limit && text.[after] = '.' then begin
+      runs_add runs kind_number '.';
+      take_while text (after + 1)
+        (fun c -> is_digit c || c = '_')
+        kind_number runs
+    end
+    else after
+
+(* One identifier: a reserved word is a keyword, a capitalised start is a type
+   (the class/type convention these languages share), the rest plain code.
+   [index] points at the identifier's first character. *)
+let take_identifier ~is_reserved text index (runs : runs) =
+  let limit = String.length text in
+  let word = Buffer.create 16 in
+  Buffer.add_char word text.[index];
+  let rec scan i =
+    if i < limit && is_identifier_char text.[i] then begin
+      Buffer.add_char word text.[i];
+      scan (i + 1)
+    end
+    else i
+  in
+  let stop = scan (index + 1) in
+  let as_string = Buffer.contents word in
+  let kind =
+    if is_reserved as_string then kind_keyword
+    else if as_string.[0] >= 'A' && as_string.[0] <= 'Z' then kind_type
+    else kind_code
+  in
+  String.iter (fun c -> runs_add runs kind c) as_string;
+  stop
+
+let c_like_reserved =
+  [ "abstract"; "as"; "async"; "await"; "break"; "case"; "catch"; "class"
+  ; "const"; "continue"; "debugger"; "default"; "defer"; "delete"; "do"
+  ; "else"; "enum"; "export"; "extends"; "extern"; "final"; "finally"; "fn"
+  ; "for"; "func"; "function"; "go"; "goto"; "if"; "impl"; "implements"
+  ; "import"; "in"; "instanceof"; "interface"; "let"; "loop"; "match"; "mod"
+  ; "module"; "mut"; "namespace"; "new"; "package"; "private"; "protected"
+  ; "pub"; "public"; "readonly"; "return"; "select"; "static"; "struct"
+  ; "super"; "switch"; "throw"; "trait"; "try"; "type"; "typeof"; "union"
+  ; "unsafe"; "use"; "var"; "void"; "where"; "while"; "with"; "yield" ]
+
+let is_c_like_reserved word = List.mem word c_like_reserved
+
+let python_reserved =
+  [ "and"; "as"; "assert"; "async"; "await"; "break"; "case"; "class"
+  ; "continue"; "def"; "del"; "elif"; "else"; "except"; "False"; "finally"
+  ; "for"; "from"; "global"; "if"; "import"; "in"; "is"; "lambda"; "match"
+  ; "None"; "nonlocal"; "not"; "or"; "pass"; "raise"; "return"; "True"; "try"
+  ; "while"; "with"; "yield" ]
+
+let is_python_reserved word = List.mem word python_reserved
+
+let c_like_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if index + 1 < limit && char = '/' && text.[index + 1] = '/' then
+        advance (take_while text index (fun c -> c <> '\n') kind_comment runs)
+      else if index + 1 < limit && char = '/' && text.[index + 1] = '*' then
+        advance (take_c_block_comment text index runs)
+      else if char = '"' then advance (take_quoted ~quote:'"' text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if char = '`' then advance (take_quoted ~quote:'`' text index runs)
+      else if is_identifier_start char then
+        advance (take_identifier ~is_reserved:is_c_like_reserved text index runs)
+      else if is_digit char then advance (take_number text index runs)
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
+let python_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let is_triple index quote =
+    index + 3 <= limit
+    && Char.equal text.[index] quote
+    && Char.equal text.[index + 1] quote
+    && Char.equal text.[index + 2] quote
+  in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if char = '#' then
+        advance (take_while text index (fun c -> c <> '\n') kind_comment runs)
+      else if is_triple index '"' then
+        advance (take_triple ~quote:'"' text index runs)
+      else if is_triple index '\'' then
+        advance (take_triple ~quote:'\'' text index runs)
+      else if char = '"' then advance (take_quoted ~quote:'"' text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if is_identifier_start char then
+        advance (take_identifier ~is_reserved:is_python_reserved text index runs)
+      else if is_digit char then advance (take_number text index runs)
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
+(* {1 Configuration and query lexers}
+
+   The three shapes masc's own surfaces show most and none of them had a
+   lexer: the workflows are YAML, the keeper and repository files are TOML,
+   and a query pasted into a pane is SQL. *)
+
+(* Everything from [index] to the end of the line. Shared by the three below
+   because [#] and [--] differ only in where a comment starts. *)
+let take_line_comment text index (runs : runs) =
+  take_while text index (fun c -> c <> '\n') kind_comment runs
+
+(* Where a line's content begins: past the indent, and for YAML past one list
+   marker, since the word after "- " is still a key. TOML has no list marker,
+   so a leading dash there is content and stays one. *)
+let line_content_start ~list_marker text line_start =
+  let limit = String.length text in
+  let rec skip i =
+    if i >= limit then i
+    else
+      match text.[i] with
+      | ' ' | '\t' -> skip (i + 1)
+      | '-'
+        when list_marker && i + 1 < limit
+             && (text.[i + 1] = ' ' || text.[i + 1] = '\t') ->
+          skip (i + 2)
+      | _ -> i
+  in
+  skip line_start
+
+(* A key only where its delimiter closes it before the line does. A word at
+   the head of a line that never reaches [delimiter] is a value -- a bare list
+   item, a wrapped string, a line of prose in a comment-free file -- and
+   colouring it as a key would be reading a grammar that is not there.
+
+   Trailing spaces are crossed but not coloured: TOML writes [name = "masc"],
+   and the key is [name], not [name ]. *)
+let key_end ~delimiter text index =
+  let limit = String.length text in
+  let rec word i =
+    if
+      i < limit
+      && (is_identifier_char text.[i] || text.[i] = '-' || text.[i] = '.')
+    then word (i + 1)
+    else i
+  in
+  let stop = word index in
+  let rec spaces i =
+    if i < limit && (text.[i] = ' ' || text.[i] = '\t') then spaces (i + 1)
+    else i
+  in
+  let after = spaces stop in
+  if stop > index && after < limit && Char.equal text.[after] delimiter then
+    Some stop
+  else None
+
+let paint ~kind text start stop (runs : runs) =
+  for i = start to stop - 1 do
+    runs_add runs kind text.[i]
+  done
+
+(* Whether a scalar is still running at this character. A digit inside one is
+   part of it, not a value of its own: [actions/checkout@v4] is a name, and
+   colouring its [4] as a number picks one character out of a word and says it
+   means something. Asked of the character before a digit, so a number is a
+   number only where a scalar was not already under way.
+
+   These formats have no identifier rule to lean on -- an unquoted scalar is
+   whatever is not punctuation -- so the set is the characters those scalars
+   are actually written with. *)
+let scalar_continues = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
+  | '_' | '.' | '-' | '/' | '@' | '+' | '%' | '~' -> true
+  | _ -> false
+
+let number_begins_at text index =
+  is_digit text.[index]
+  && (index = 0 || not (scalar_continues text.[index - 1]))
+
+(* The words both config formats spell as values rather than as text. Matched
+   on word boundaries: [nullable] is not [null], and a key called [true] is
+   still a key because the key branch runs first. *)
+let config_literals = [ "true"; "false"; "null" ]
+
+let literal_at text index =
+  let limit = String.length text in
+  (* The same boundary a number is held to: [x-true] and [true-ish] are one
+     scalar each, and the word inside one is not the value [true]. *)
+  if index > 0 && scalar_continues text.[index - 1] then None
+  else
+    List.find_opt
+      (fun word ->
+        starts_at text index word
+        &&
+        let after = index + String.length word in
+        after >= limit || not (scalar_continues text.[after]))
+      config_literals
+
+(* YAML as far as a tokenizer can honestly go: comments, keys, quoted text and
+   numbers. Anchors, block scalars and flow collections are grammar, and a
+   tokenizer that guessed at them would colour text it had not read. *)
+let yaml_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let line_start = ref 0 in
+  let rec advance index =
+    if index >= limit then ()
+    else
+      let char = text.[index] in
+      if char = '\n' then begin
+        runs_add runs kind_code char;
+        line_start := index + 1;
+        advance (index + 1)
+      end
+      else if
+        char = '#'
+        && (index = !line_start || text.[index - 1] = ' '
+           || text.[index - 1] = '\t')
+      then advance (take_line_comment text index runs)
+      else if char = '"' then advance (take_ocaml_string text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if index = line_content_start ~list_marker:true text !line_start then begin
+        match key_end ~delimiter:':' text index with
+        | Some stop ->
+            paint ~kind:kind_type text index stop runs;
+            advance stop
+        | None ->
+            runs_add runs kind_code char;
+            advance (index + 1)
+      end
+      else if number_begins_at text index then
+        advance (take_number text index runs)
+      else
+        match literal_at text index with
+        | Some word ->
+            String.iter (fun c -> runs_add runs kind_number c) word;
+            advance (index + String.length word)
+        | None ->
+            runs_add runs kind_code char;
+            advance (index + 1)
+  in
+  advance 0;
+  runs_segments runs
+
+(* TOML. A table header owns its whole line -- [[repository]] and [tui] are
+   the file's structure, and the brackets are part of the name, so the line is
+   taken whole rather than the brackets coloured apart from what they hold. *)
+let toml_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let line_start = ref 0 in
+  let rec advance index =
+    if index >= limit then ()
+    else
+      let char = text.[index] in
+      if char = '\n' then begin
+        runs_add runs kind_code char;
+        line_start := index + 1;
+        advance (index + 1)
+      end
+      else if char = '#' then advance (take_line_comment text index runs)
+      else if char = '"' then advance (take_ocaml_string text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if
+        char = '[' && index = line_content_start ~list_marker:false text !line_start
+      then
+        advance (take_while text index (fun c -> c <> '\n') kind_keyword runs)
+      else if index = line_content_start ~list_marker:false text !line_start then begin
+        match key_end ~delimiter:'=' text index with
+        | Some stop ->
+            paint ~kind:kind_type text index stop runs;
+            advance stop
+        | None ->
+            runs_add runs kind_code char;
+            advance (index + 1)
+      end
+      else if number_begins_at text index then
+        advance (take_number text index runs)
+      else
+        match literal_at text index with
+        | Some word ->
+            String.iter (fun c -> runs_add runs kind_number c) word;
+            advance (index + String.length word)
+        | None ->
+            runs_add runs kind_code char;
+            advance (index + 1)
+  in
+  advance 0;
+  runs_segments runs
+
+(* SQL keywords, lowercased for the comparison because the same query arrives
+   shouted, whispered and mixed. The set is the one a reader needs to see the
+   shape of a statement, not the standard's full reserved list -- a word this
+   does not know stays plain rather than being coloured on a guess. *)
+let sql_reserved =
+  [ "add"; "all"; "alter"; "and"; "as"; "asc"; "begin"; "between"; "by"
+  ; "case"; "cast"; "commit"; "constraint"; "create"; "cross"; "delete"
+  ; "desc"; "distinct"; "drop"; "else"; "end"; "except"; "exists"; "from"
+  ; "full"; "group"; "having"; "in"; "index"; "inner"; "insert"; "intersect"
+  ; "into"; "is"; "join"; "left"; "like"; "limit"; "not"; "null"; "offset"
+  ; "on"; "or"; "order"; "outer"; "primary"; "references"; "returning"
+  ; "right"; "rollback"; "select"; "set"; "table"; "then"; "union"; "unique"
+  ; "update"; "using"; "values"; "view"; "when"; "where"; "with" ]
+
+let is_sql_reserved word =
+  List.mem (String.lowercase_ascii word) sql_reserved
+
+let sql_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let rec advance index =
+    if index >= limit then ()
+    else
+      let char = text.[index] in
+      if starts_at text index "--" then
+        advance (take_line_comment text index runs)
+      else if starts_at text index "/*" then
+        advance (take_c_block_comment text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if char = '"' then begin
+        (* Double quotes name a column here, they do not hold text: SQL's
+           string is the single quote. Coloured as an identifier so a quoted
+           name does not read as a value. *)
+        runs_add runs kind_type char;
+        let stop =
+          take_while text (index + 1)
+            (fun c -> c <> '"' && c <> '\n')
+            kind_type runs
+        in
+        if stop < limit && text.[stop] = '"' then begin
+          runs_add runs kind_type '"';
+          advance (stop + 1)
+        end
+        else advance stop
+      end
+      else if is_digit char then advance (take_number text index runs)
+      else if is_identifier_start char then
+        advance (take_identifier ~is_reserved:is_sql_reserved text index runs)
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+  in
+  advance 0;
+  runs_segments runs
+
+(* {1 alphaTex}
+
+   The score markup a board post shares when it shares music. The shapes a
+   reader recognises at a glance: a directive is a backslash and the word it
+   names ([\title], [\tempo], [\ts], [\tuning]), a note is fret.string
+   ([3.6]), a chord is its bracketed span with the duration the closing
+   bracket carries ([(0.4 2.4).2]), a duration is the [:4] a beat holds, and
+   the comments are the C family's two forms. A tokenizer like the rest: the
+   chord is one span whether or not the notes inside it would parse, and a
+   backslash with no word after it is plain text rather than a directive of
+   no name. *)
+
+(* The chord from its opening bracket: through the close, then the [.2]
+   suffix. One span of one kind -- the reader takes the chord as one event.
+   An unclosed bracket holds the rest of the body, the way an unclosed
+   string does. *)
+let take_alphatex_chord text index (runs : runs) =
+  let limit = String.length text in
+  let rec scan i =
+    if i >= limit then i
+    else begin
+      let char = text.[i] in
+      runs_add runs kind_string char;
+      if char = ')' then i + 1 else scan (i + 1)
+    end
+  in
+  let stop = scan index in
+  if stop + 1 < limit && text.[stop] = '.' && is_digit text.[stop + 1] then begin
+    runs_add runs kind_string '.';
+    take_while text (stop + 1) is_digit kind_string runs
+  end
+  else stop
+
+let alphatex_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let is_letter char =
+    (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
+  in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if index + 1 < limit && char = '/' && text.[index + 1] = '/' then
+        advance (take_line_comment text index runs)
+      else if index + 1 < limit && char = '/' && text.[index + 1] = '*' then
+        advance (take_c_block_comment text index runs)
+      else if char = '\\' && index + 1 < limit && is_letter text.[index + 1] then begin
+        runs_add runs kind_keyword char;
+        advance (take_while text (index + 1) is_letter kind_keyword runs)
+      end
+      else if char = '"' then advance (take_quoted ~quote:'"' text index runs)
+      else if char = '(' then advance (take_alphatex_chord text index runs)
+      else if char = ':' && index + 1 < limit && is_digit text.[index + 1] then begin
+        runs_add runs kind_type char;
+        advance (take_while text (index + 1) is_digit kind_type runs)
+      end
+      else if is_digit char then advance (take_number text index runs)
+      else if is_letter char then
+        (* A word of the markup -- the note names a [\tuning] lists, an
+           effect name after a note -- stays plain, its digits included:
+           the [4] of [E4] is an octave, not a value of its own. *)
+        advance (take_while text index is_identifier_char kind_code runs)
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
+(* Segments of a lexed fence body, cut into rows at the newlines the lexer
+   carried as plain text. Piece order inside a row is the lexer's order, so
+   the styling reads left to right as the code does. *)
+let rows_of_segments segments =
+  let rev_rows : (string * string) list list ref = ref [ [] ] in
+  List.iter
+    (fun (text, kind) ->
+       List.iteri
+         (fun index piece ->
+            if index > 0 then rev_rows := [] :: !rev_rows;
+            rev_rows :=
+              ((piece, kind) :: List.hd !rev_rows) :: List.tl !rev_rows)
+         (String.split_on_char '\n' text))
+    segments;
+  List.rev_map List.rev !rev_rows
+
+(* Which version of the file a changed line belongs to. The two sides lex
+   apart: a string the removed lines leave open says nothing about the
+   added lines, which are the file after the change. *)
+type diff_side = Before | After
+
+(* One line of a diff fence, read for the sub-lexer: a changed line
+   carries its split marker and content, a context line carries the
+   source text it contributes to both versions' bodies, and a boundary
+   line — a hunk or file header, or the trailers around them — carries
+   nothing and ends the hunk in progress. *)
+type diff_row =
+  | Changed of
+      { marker : string; content : string; kind : string; side : diff_side }
+  | Context of string
+  | Boundary
+
+let diff_row_of_line line =
+  match diff_changed_split line with
+  | Some (marker, content, kind) ->
+      let side = if String.equal kind kind_diff_added then After else Before in
+      Changed { marker; content; kind; side }
+  | None -> (
+      match numbered_gutter_kind line with
+      | Some _ -> Context (String.sub line 14 (String.length line - 14))
+      | None ->
+          if String.length line = 0 then Context ""
+          else if Char.equal line.[0] ' ' then
+            Context (String.sub line 1 (String.length line - 1))
+          else Boundary)
+
+(* How a changed line's content was read: sub-lexed rows when its side's
+   body aligned with its lines, else the plain span. Context and
+   boundary lines always read whole, as [diff_lexer] reads them. *)
+type content_read =
+  | Whole_line
+  | Sub_row of segment list
+  | Plain_content
+
+(* One hunk's two bodies, lexed apart and written into [reads] at their
+   lines' positions. Context lines join both bodies — the text the
+   versions share is what resolves the state the changed lines sit in —
+   while each side's changed lines join only their own. A side whose
+   rows do not align with its lines falls its changed lines back to
+   plain rather than hanging one line's colours on another. *)
+let lex_diff_hunk ~sub ~reads hunk =
+  let before_rev = ref [] in
+  let after_rev = ref [] in
+  let push side index content =
+    match side with
+    | Before -> before_rev := (index, content) :: !before_rev
+    | After -> after_rev := (index, content) :: !after_rev
+  in
+  List.iter
+    (fun (index, row) ->
+      match row with
+      | Context content ->
+          push Before None content;
+          push After None content
+      | Changed { content; side; _ } -> push side (Some index) content
+      | Boundary -> ())
+    hunk;
+  let lex_side entries =
+    let changed =
+      List.filter_map
+        (fun (index, _) ->
+          match index with Some i -> Some i | None -> None)
+        entries
+    in
+    match changed with
+    | [] -> ()
+    | changed ->
+        let body = String.concat "\n" (List.map snd entries) in
+        let rows = rows_of_segments (sub body) in
+        if List.length rows = List.length entries then
+          List.iter2
+            (fun (index, _) row ->
+              match index with
+              | Some i -> reads.(i) <- Sub_row row
+              | None -> ())
+            entries rows
+        else List.iter (fun i -> reads.(i) <- Plain_content) changed
+  in
+  lex_side (List.rev !before_rev);
+  lex_side (List.rev !after_rev)
+
+(* A diff fence with a grammar for its content: ["```diff:ocaml"]. Added and
+   removed rows keep their marker's diff kind and gain token colours
+   underneath; every other row reads exactly as [diff_lexer] reads it.
+   Each hunk lexes its before and after versions apart, context lines
+   included, because the state that decides a token — a string the
+   context closes — lives in the version, not in the changed lines
+   alone. State never crosses a hunk boundary or the two sides: what
+   cannot be verified from the hunk reads from a fresh start. *)
+let diff_lexer_with ~sub text =
+  let runs = new_runs kind_code in
+  let add kind s = String.iter (fun c -> runs_add runs kind c) s in
+  let lines = String.split_on_char '\n' text in
+  let rows = List.map diff_row_of_line lines in
+  let count = List.length lines in
+  let reads =
+    Array.of_list
+      (List.map
+         (fun row ->
+           match row with
+           | Changed _ -> Plain_content
+           | Context _ | Boundary -> Whole_line)
+         rows)
+  in
+  let hunk = ref [] in
+  let flush () =
+    (match List.rev !hunk with
+     | [] -> ()
+     | ordered -> lex_diff_hunk ~sub ~reads ordered);
+    hunk := []
+  in
+  List.iteri
+    (fun index row ->
+      match row with
+      | Boundary -> flush ()
+      | Changed _ | Context _ -> hunk := (index, row) :: !hunk)
+    rows;
+  flush ();
+  List.iteri
+    (fun index (line, row) ->
+      (match row with
+       | Changed { marker; content; kind; _ } -> (
+           add kind marker;
+           match reads.(index) with
+           | Sub_row pieces ->
+               List.iter (fun (text, kind) -> add kind text) pieces
+           | Plain_content | Whole_line -> add kind_code content)
+       | Context _ | Boundary -> add (diff_line_kind line) line);
+      (* The newline belongs to no line's colour, as in [diff_lexer]. *)
+      if index < count - 1 then add kind_code "\n")
+    (List.combine lines rows);
+  runs_segments runs
+
+let rec lexer_of_language (tag : string) =
+  let tag = String.lowercase_ascii (String.trim tag) in
+  match String.index_opt tag ':' with
+  | Some colon
+    when String.equal (String.trim (String.sub tag 0 colon)) "diff" -> (
+      let sub =
+        String.trim
+          (String.sub tag (colon + 1) (String.length tag - colon - 1))
+      in
+      (* A diff of a diff is still read by line: the sub-lexer must name a
+         token grammar, and an unknown one leaves the whole-line read rather
+         than guessing. Recursion terminates on strictly shorter tags. *)
+      match sub with
+      | "" | "diff" | "patch" -> Some diff_lexer
+      | sub -> (
+          match lexer_of_language sub with
+          | Some sub_lexer -> Some (diff_lexer_with ~sub:sub_lexer)
+          | None -> Some diff_lexer))
+  | Some _ | None -> (
+      match tag with
+      | "ocaml" | "ml" | "mli" -> Some ocaml_lexer
+      | "bash" | "sh" | "shell" | "zsh" -> Some bash_lexer
+      | "json" -> Some json_lexer
+      | "diff" | "patch" -> Some diff_lexer
+      | "yaml" | "yml" -> Some yaml_lexer
+      | "toml" -> Some toml_lexer
+      | "sql" -> Some sql_lexer
+      | "c_like" | "typescript" | "ts" | "javascript" | "js" | "tsx" | "jsx"
+      | "go" | "rust" | "rs" | "c" | "cpp" | "java" | "kotlin" | "swift"
+      | "scala" | "php" | "dart" ->
+          Some c_like_lexer
+      | "python" | "py" -> Some python_lexer
+      | "alphatex" | "atex" -> Some alphatex_lexer
+      | _ -> None)
+
+
+(* The extension decides the language. Only extensions whose language has a
+   lexer here answer; the rest are None, and the caller keeps the plain span
+   -- a guess at the grammar is the colouring-as-pretence the fence lexers
+   already refuse.
+
+   Not the server's [Lsp_process_manager] table, which this used to say it
+   mirrored. That one lists the languages with a language server behind them
+   and is the smaller set: it has never held .json or .sh, which have been
+   coloured here for as long as the lexers existed. Two tables answering two
+   questions -- what can be analysed, and what can be coloured. *)
+let language_of_path path =
+  let lower = String.lowercase_ascii path in
+  let has suffix = Filename.check_suffix lower suffix in
+  if has ".ml" || has ".mli" then Some "ocaml"
+  else if has ".sh" || has ".bash" || has ".zsh" then Some "bash"
+  else if has ".json" then Some "json"
+  else if
+    has ".ts" || has ".tsx" || has ".js" || has ".jsx" || has ".mjs"
+    || has ".cjs" || has ".c" || has ".h" || has ".cpp" || has ".cc"
+    || has ".hpp" || has ".go" || has ".rs" || has ".java" || has ".kt"
+    || has ".swift" || has ".scala" || has ".php" || has ".dart"
+  then Some "c_like"
+  else if has ".py" then Some "python"
+  else if has ".yaml" || has ".yml" then Some "yaml"
+  else if has ".toml" then Some "toml"
+  else if has ".sql" then Some "sql"
+  (* The lexer was already here; only the extension was missing, so a patch
+     opened as a file read as prose while the same text inside a fence read as
+     a diff. *)
+  else if has ".patch" || has ".diff" then Some "diff"
+  else None
+
+(* A whole file as rows of (text, kind) segments. Lexing reads the whole
+   text at once -- an OCaml comment opened three rows up is state no single
+   row holds -- and the rows split at the newlines the lexer carried. *)
+let rows_of_source ~language text =
+  (* Treat the two bytes of a CRLF as one line separator for reading. Keep
+     standalone CR (and every other control) for the terminal sanitizer.
+     The caller retains the original source separately for byte operations. *)
+  let text =
+    if not (String.contains text '\r') then text
+    else
+      let length = String.length text in
+      let reading = Buffer.create length in
+      for index = 0 to length - 1 do
+        if not (text.[index] = '\r' && index + 1 < length
+                && text.[index + 1] = '\n') then
+          Buffer.add_char reading text.[index]
+      done;
+      Buffer.contents reading
+  in
+  let segments =
+    match Option.bind language lexer_of_language with
+    | Some lexer -> lexer text
+    | None -> [ (text, kind_code) ]
+  in
+  rows_of_segments segments
+
+(* Strings and comments are already separate runs, so examples such as
+   [note = "a=b"] and [# example = false] do not create phantom fields. *)
+let row_has_assignment row =
+  List.exists
+    (fun (text, kind) ->
+       String.equal kind kind_code && String.contains text '=')
+    row

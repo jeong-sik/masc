@@ -1,0 +1,874 @@
+(** Tests for Runtime_params — typed runtime parameter store. *)
+
+open Masc
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      (try Unix.rmdir path with Unix.Unix_error _ -> ())
+    end else
+      (try Sys.remove path with Sys_error _ -> ())
+
+let () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+
+  let test_register_and_get () =
+    (* Registration creates a param with default *)
+    let p =
+      Runtime_params.register
+        ~key:"test.float_param"
+        ~default:(fun () -> 42.0)
+        ~validate:(fun v ->
+          if v >= 0.0 && v <= 100.0 then Ok ()
+          else Error "out of range")
+        ~serialize:(fun v -> `Float v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Float f -> Ok f
+          | `Int i -> Ok (float_of_int i)
+          | _ -> Error "expected number")
+        ()
+    in
+    let v = Runtime_params.get p in
+    Alcotest.(check (float 0.01)) "default value" 42.0 v
+  in
+
+  let test_set_and_get () =
+    let p =
+      Runtime_params.register
+        ~key:"test.int_param"
+        ~default:(fun () -> 10)
+        ~validate:(fun v ->
+          if v >= 1 && v <= 50 then Ok ()
+          else Error "out of range")
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    (match Runtime_params.set p 25 with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    let v = Runtime_params.get p in
+    Alcotest.(check int) "override value" 25 v
+  in
+
+  let test_validation_rejects () =
+    let p =
+      Runtime_params.register
+        ~key:"test.validated_param"
+        ~default:(fun () -> 5)
+        ~validate:(fun v ->
+          if v >= 1 && v <= 10 then Ok ()
+          else Error "must be 1-10")
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    (match Runtime_params.set p 99 with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "should have rejected out-of-range value");
+    let v = Runtime_params.get p in
+    Alcotest.(check int) "unchanged after rejection" 5 v
+  in
+
+  let test_set_by_key () =
+    let _p =
+      Runtime_params.register
+        ~key:"test.keyed_param"
+        ~default:(fun () -> "hello")
+        ~validate:(fun v ->
+          if String.length v <= 20 then Ok ()
+          else Error "too long")
+        ~serialize:(fun v -> `String v)
+        ~deserialize:(fun json ->
+          match json with
+          | `String s -> Ok s
+          | _ -> Error "expected string")
+        ()
+    in
+    (match Runtime_params.set_by_key "test.keyed_param" (`String "world") with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    (* Verify via registry *)
+    let entries = Runtime_params.registry () in
+    let entry =
+      List.find_opt (fun (k, _, _, _, _) -> k = "test.keyed_param") entries
+    in
+    (match entry with
+     | Some (_, current, _, has_override, _meta) ->
+         Alcotest.(check bool) "has override" true has_override;
+         Alcotest.(check string) "current value"
+           "\"world\"" (Yojson.Safe.to_string current)
+     | None -> Alcotest.fail "keyed param not in registry")
+  in
+
+  let test_set_by_key_unknown () =
+    match Runtime_params.set_by_key "nonexistent.param" (`Int 1) with
+    | Error msg ->
+        Alcotest.(check bool) "error mentions unknown"
+          true (String.length msg > 0)
+    | Ok () -> Alcotest.fail "should have rejected unknown key"
+  in
+
+  let test_keyed_mutation_returns_atomic_change () =
+    let _p =
+      Runtime_params.register
+        ~key:"test.atomic_change_param"
+        ~default:(fun () -> 300)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun value -> `Int value)
+        ~deserialize:(function
+          | `Int value -> Ok value
+          | _ -> Error "expected int")
+        ()
+    in
+    let first =
+      match
+        Runtime_params.set_by_key_with_change
+          "test.atomic_change_param"
+          (`Int 30)
+      with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "first prior value" "300"
+      (Yojson.Safe.to_string first.old_value);
+    Alcotest.(check string) "first committed value" "30"
+      (Yojson.Safe.to_string first.new_value);
+    let second =
+      match
+        Runtime_params.set_by_key_with_change
+          "test.atomic_change_param"
+          (`Int 60)
+      with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "second observes first commit" "30"
+      (Yojson.Safe.to_string second.old_value);
+    Alcotest.(check string) "second committed value" "60"
+      (Yojson.Safe.to_string second.new_value);
+    let cleared =
+      match Runtime_params.clear_by_key_with_change "test.atomic_change_param" with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "clear prior value" "60"
+      (Yojson.Safe.to_string cleared.old_value);
+    Alcotest.(check string) "clear committed default" "300"
+      (Yojson.Safe.to_string cleared.new_value)
+  in
+
+  let test_clear () =
+    let p =
+      Runtime_params.register
+        ~key:"test.clearable_param"
+        ~default:(fun () -> 100)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    ignore (Runtime_params.set p 200);
+    Alcotest.(check int) "overridden" 200 (Runtime_params.get p);
+    Runtime_params.clear p;
+    Alcotest.(check int) "cleared to default" 100 (Runtime_params.get p)
+  in
+
+  (* A file written by an older build can name a param this build no longer
+     registers. Restore applies the registered keys and skips that one; the
+     next persist writes only registered params, so the key leaves the file. *)
+  let test_restore_skips_unregistered_key () =
+    let tmp_dir = Filename.temp_dir "masc_test_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let p =
+      Runtime_params.register
+        ~key:"test.restore_known_param"
+        ~default:(fun () -> 1)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    let file = Filename.concat masc_dir "runtime_params.json" in
+    Fs_compat.save_file file
+      {|{ "test.no_longer_registered": 15, "test.restore_known_param": 7 }|};
+    Runtime_params.restore ~base_path:tmp_dir;
+    Alcotest.(check int) "registered key restored" 7 (Runtime_params.get p);
+    Runtime_params.persist ~base_path:tmp_dir;
+    let keys =
+      match Yojson.Safe.from_file file with
+      | `Assoc pairs -> List.map fst pairs
+      | _ -> []
+    in
+    Alcotest.(check bool) "persist drops the unregistered key" false
+      (List.mem "test.no_longer_registered" keys);
+    Runtime_params.clear p;
+    (try Sys.remove file with Sys_error _ -> ());
+    (try Sys.rmdir masc_dir with Sys_error _ -> ());
+    (try Sys.rmdir tmp_dir with Sys_error _ -> ())
+  in
+
+  let test_persist_restore () =
+    let tmp_dir = Filename.temp_dir "masc_test_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let p =
+      Runtime_params.register
+        ~key:"test.persist_param"
+        ~default:(fun () -> 1)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    ignore (Runtime_params.set p 42);
+    Runtime_params.persist ~base_path:tmp_dir;
+    (* Clear and restore *)
+    Runtime_params.clear p;
+    Alcotest.(check int) "after clear" 1 (Runtime_params.get p);
+    Runtime_params.restore ~base_path:tmp_dir;
+    Alcotest.(check int) "after restore" 42 (Runtime_params.get p);
+    (* Cleanup *)
+    (try
+       Sys.remove (Filename.concat masc_dir "runtime_params.json");
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
+  let test_audit () =
+    let tmp_dir = Filename.temp_dir "masc_audit_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    Runtime_params.record_audit ~base_path:tmp_dir
+      ~key:"test.key" ~old_value:(`Int 1) ~new_value:(`Int 2)
+      ~correlation_id:"change-001" ~actor:"system" ();
+    Runtime_params.record_audit ~base_path:tmp_dir
+      ~key:"test.key2" ~old_value:(`String "a") ~new_value:(`String "b")
+      ~actor:"human" ();
+    let entries = Runtime_params.recent_audit ~base_path:tmp_dir 10 in
+    Alcotest.(check int) "audit entry count" 2 (List.length entries);
+    (* Cleanup *)
+    (try
+       Sys.remove (Filename.concat masc_dir "param_audit.jsonl");
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
+  let test_set_persists_to_disk () =
+    let tmp_dir = Filename.temp_dir "masc_auto_persist_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let p =
+      Runtime_params.register
+        ~key:"test.auto_persist_param"
+        ~default:(fun () -> 1)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    (match Runtime_params.set p 42 ~base_path:tmp_dir with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    let path = Filename.concat masc_dir "runtime_params.json" in
+    Alcotest.(check bool) "runtime_params.json exists" true (Sys.file_exists path);
+    let content = Fs_compat.load_file path in
+    (match Yojson.Safe.from_string content with
+    | `Assoc pairs ->
+        (match List.assoc_opt "test.auto_persist_param" pairs with
+         | Some (`Int 42) -> ()
+         | Some other ->
+             Alcotest.fail
+               (Printf.sprintf "expected int 42, got %s" (Yojson.Safe.to_string other))
+         | None -> Alcotest.fail "param not found in persisted file")
+    | _ -> Alcotest.fail "expected JSON object");
+    (* Clear should remove the override from disk *)
+    Runtime_params.clear p ~base_path:tmp_dir;
+    let content_after_clear = Fs_compat.load_file path in
+    (match Yojson.Safe.from_string content_after_clear with
+    | `Assoc pairs ->
+        Alcotest.(check bool) "param removed from disk after clear"
+          true (List.assoc_opt "test.auto_persist_param" pairs = None)
+    | _ -> Alcotest.fail "expected JSON object after clear");
+    (try
+       Sys.remove path;
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
+  let test_set_by_key_logs_audit () =
+    let tmp_dir = Filename.temp_dir "masc_auto_audit_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let _p =
+      Runtime_params.register
+        ~key:"test.auto_audit_param"
+        ~default:(fun () -> "hello")
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `String v)
+        ~deserialize:(fun json ->
+          match json with
+          | `String s -> Ok s
+          | _ -> Error "expected string")
+        ()
+    in
+    (match
+       Runtime_params.set_by_key "test.auto_audit_param" (`String "world")
+         ~base_path:tmp_dir ~actor:"test-actor"
+     with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    let audit_path = Filename.concat masc_dir "param_audit.jsonl" in
+    Alcotest.(check bool) "audit file exists" true (Sys.file_exists audit_path);
+    let entries = Runtime_params.recent_audit ~base_path:tmp_dir 10 in
+    Alcotest.(check int) "audit entry count" 1 (List.length entries);
+    let entry = List.hd entries in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "audit key" "test.auto_audit_param"
+      (member "key" entry |> to_string);
+    Alcotest.(check string) "audit actor" "test-actor"
+      (member "actor" entry |> to_string);
+    (try
+       Sys.remove audit_path;
+       Sys.remove (Filename.concat masc_dir "runtime_params.json");
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
+  let test_runtime_settings () =
+    (* ensure_init forces both this module's registrations and
+       Keeper_config's; the surfaces below pin keys from each. *)
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let has key =
+      List.exists (fun (k, _, _, _, _) -> k = key) entries
+    in
+    (* Every surface must name keys that are actually registered. A surface
+       pinning a key nothing registers puts a control in the settings UI with
+       nothing behind it. *)
+    let surfaces = Runtime_settings.surfaces in
+    Alcotest.(check bool) "has surfaces" true (List.length surfaces > 0);
+    List.iter
+      (fun (surface : Runtime_settings.surface) ->
+        List.iter
+          (fun key ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%s pins registered key %s" surface.id key)
+              true (has key))
+          surface.param_keys)
+      surfaces
+  in
+
+  (* The other direction, and the one the screen depends on: every registered
+     param is named by some surface. The Config -> params screen groups by
+     surface, so a param nothing claims renders under an "(unfiled)" heading --
+     visible, but filed nowhere the reader can reason about. This turns that
+     into a red test at registration time instead. *)
+  let test_every_registered_param_has_a_surface () =
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let surfaced =
+      List.concat_map
+        (fun (surface : Runtime_settings.surface) -> surface.param_keys)
+        Runtime_settings.surfaces
+    in
+    let unfiled =
+      List.filter_map
+        (fun (key, _, _, _, _) ->
+          (* This suite registers its own "test." params to exercise the store;
+             they are not product surface and never reach the screen. *)
+          if String.starts_with ~prefix:"test." key then None
+          else if List.exists (String.equal key) surfaced then None
+          else Some key)
+        entries
+    in
+    Alcotest.(check (list string))
+      "every registered param is named by a surface"
+      [] (List.sort compare unfiled)
+  in
+
+  (* A key claimed twice would draw the same param under two headings. *)
+  let test_no_param_is_claimed_twice () =
+    let surfaced =
+      List.concat_map
+        (fun (surface : Runtime_settings.surface) -> surface.param_keys)
+        Runtime_settings.surfaces
+    in
+    let duplicated =
+      List.filter
+        (fun key -> List.length (List.filter (String.equal key) surfaced) > 1)
+        (List.sort_uniq compare surfaced)
+    in
+    Alcotest.(check (list string)) "no key is claimed by two surfaces" []
+      duplicated
+  in
+
+  let test_dashboard_params_registered () =
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let has key = List.exists (fun (k, _, _, _, _) -> k = key) entries in
+    Alcotest.(check bool) "dashboard.agent_quiet_threshold_sec"
+      true (has "dashboard.agent_quiet_threshold_sec");
+    Alcotest.(check bool) "dashboard.agent_stuck_threshold_sec"
+      true (has "dashboard.agent_stuck_threshold_sec")
+  in
+
+  let test_dashboard_surface () =
+    let surfaces = Runtime_settings.surfaces in
+    let dashboard_surface =
+      List.find_opt
+        (fun (s : Runtime_settings.surface) -> s.id = "dashboard")
+        surfaces
+    in
+    match dashboard_surface with
+    | None -> Alcotest.fail "dashboard surface not found"
+    | Some s ->
+        Alcotest.(check int) "param count" 7 (List.length s.param_keys);
+        Alcotest.(check bool) "has quiet threshold"
+          true (List.mem "dashboard.agent_quiet_threshold_sec" s.param_keys);
+        Alcotest.(check bool) "has stuck threshold"
+          true (List.mem "dashboard.agent_stuck_threshold_sec" s.param_keys)
+  in
+
+  (* ── clear_by_key ────────────────────────────────────────── *)
+
+  let test_clear_by_key () =
+    let _p =
+      Runtime_params.register
+        ~key:"test.clear_by_key_param"
+        ~default:(fun () -> 50)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    (match Runtime_params.set_by_key "test.clear_by_key_param" (`Int 99) with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail ("set_by_key failed: " ^ msg));
+    (match Runtime_params.clear_by_key "test.clear_by_key_param" with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    let entries = Runtime_params.registry () in
+    let entry =
+      List.find_opt (fun (k, _, _, _, _) -> k = "test.clear_by_key_param") entries
+    in
+    (match entry with
+     | Some (_, current, _, has_override, _) ->
+         Alcotest.(check bool) "no override after clear" false has_override;
+         Alcotest.(check string) "back to default" "50"
+           (Yojson.Safe.to_string current)
+     | None -> Alcotest.fail "param not in registry")
+  in
+
+  let test_clear_by_key_unknown () =
+    match Runtime_params.clear_by_key "nonexistent.clear" with
+    | Error _ -> ()
+    | Ok () -> Alcotest.fail "should reject unknown key"
+  in
+
+  (* ── keeper lifecycle params ─────────────────────────────── *)
+
+  let test_keeper_params_registered () =
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let has key = List.exists (fun (k, _, _, _, _) -> k = key) entries in
+    Alcotest.(check bool) "keeper.keepalive_interval_sec"
+      true (has "keeper.keepalive_interval_sec")
+  in
+
+  let test_keeper_lifecycle_surface () =
+    let surfaces = Runtime_settings.surfaces in
+    let keeper_surface =
+      List.find_opt
+        (fun (s : Runtime_settings.surface) -> s.id = "keeper_lifecycle")
+        surfaces
+    in
+    match keeper_surface with
+    | None -> Alcotest.fail "keeper_lifecycle surface not found"
+    | Some s ->
+        Alcotest.(check int) "param count" 2 (List.length s.param_keys);
+        Alcotest.(check bool) "has supervisor_sweep_sec"
+          true (List.mem "keeper.supervisor_sweep_sec" s.param_keys)
+  in
+
+  let test_keeper_diagnostics_surface () =
+    Runtime_settings.ensure_init ();
+    let surfaces = Runtime_settings.surfaces in
+    let diag_surface =
+      List.find_opt
+        (fun (s : Runtime_settings.surface) -> s.id = "keeper_diagnostics")
+        surfaces
+    in
+    match diag_surface with
+    | None -> Alcotest.fail "keeper_diagnostics surface not found"
+    | Some s ->
+        Alcotest.(check int) "param count" 3 (List.length s.param_keys);
+        Alcotest.(check bool) "has snapshot_sec"
+          true (List.mem "keeper.snapshot_sec" s.param_keys);
+        Alcotest.(check bool) "has work_as_hb_enabled"
+          true (List.mem "keeper.work_as_hb_enabled" s.param_keys);
+        Alcotest.(check bool) "has stage_timing_ring_size"
+          true (List.mem "keeper.stage_timing_ring_size" s.param_keys)
+  in
+
+  (* A picker can only offer what the registry declares. If the connector params
+     lost their choices the TUI would fall back to asking the operator to type
+     one of three spellings, and nothing else would notice. *)
+  let test_connector_trigger_params_declare_their_choices () =
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let choices_of key =
+      match List.find_opt (fun (k, _, _, _, _) -> k = key) entries with
+      | Some (_, _, _, _, Some meta) ->
+          Some (meta.Runtime_params.value_type, meta.Runtime_params.choices)
+      | Some (_, _, _, _, None) -> None
+      | None -> None
+    in
+    List.iter
+      (fun key ->
+        match choices_of key with
+        | None -> Alcotest.fail (key ^ " is not in the registry with metadata")
+        | Some (value_type, choices) ->
+            Alcotest.(check string) (key ^ " value_type") "enum" value_type;
+            Alcotest.(check (list string))
+              (key ^ " choices")
+              [ "mention_only"; "mention_or_thread"; "all" ]
+              choices)
+      [ "discord.trigger_policy"; "slack.trigger_policy" ]
+  in
+
+  let test_keeper_params_meta_shape () =
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let keepalive_entry =
+      List.find_opt
+        (fun (k, _, _, _, _) -> k = "keeper.keepalive_interval_sec")
+        entries
+    in
+    match keepalive_entry with
+    | Some (_, _, _, _, Some meta) ->
+        Alcotest.(check bool) "has description"
+          true (String.length meta.Runtime_params.description > 0);
+        Alcotest.(check string) "value_type" "int" meta.value_type;
+        Alcotest.(check (option int))
+          "positive integer minimum"
+          (Some 1)
+          (Option.bind meta.min_value (function
+             | `Int value -> Some value
+             | _ -> None));
+        Alcotest.(check bool) "has no implicit maximum" true (meta.max_value = None)
+    | Some (_, _, _, _, None) -> Alcotest.fail "meta is None"
+    | None -> Alcotest.fail "keeper keepalive param not found"
+  in
+
+  let test_keeper_param_override_persist_restore () =
+    let tmp_dir = Filename.temp_dir "masc_keeper_restore_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    (match Runtime_params.set Runtime_settings.keeper_keepalive_interval_sec 0 with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "non-positive heartbeat interval was accepted");
+    (* Preserve a valid operator cadence beyond the removed 300-second cap. *)
+    (match Runtime_params.set Runtime_settings.keeper_keepalive_interval_sec 3600 with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    Alcotest.(check int) "overridden without upper clamp" 3600
+      (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec);
+    (* Persist, clear, restore *)
+    Runtime_params.persist ~base_path:tmp_dir;
+    Runtime_params.clear Runtime_settings.keeper_keepalive_interval_sec;
+    Alcotest.(check bool) "cleared to default" true
+      (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec <> 3600);
+    Runtime_params.restore ~base_path:tmp_dir;
+    Alcotest.(check int) "restored from disk" 3600
+      (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec);
+    (* Restore default for other tests *)
+    Runtime_params.clear Runtime_settings.keeper_keepalive_interval_sec;
+    (try
+       Sys.remove (Filename.concat masc_dir "runtime_params.json");
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
+  (* ── crash persistence ───────────────────────────────────── *)
+
+  (* The crash store reaches [store_mu] through [Eio_guard], and the guard
+     runs the body with no lock at all until [enable] is called
+     ([lib/core/eio_guard.ml] takes the [false, _] branch). Without it these
+     cases exercise a path the server never takes: in production the flush
+     holds an [Eio.Mutex] inside [Eio.Cancel.protect] inside a
+     [Switch.on_release] hook, which is the arrangement the tail case exists
+     to prove. [disable] runs outside the switch rather than from a release
+     hook of its own, because hooks are LIFO and one registered here would
+     turn the guard off before the flush it is meant to cover. *)
+  let with_eio_guard f =
+    Eio_guard.enable ();
+    Fun.protect ~finally:Eio_guard.disable f
+  in
+
+  (* A read works from any execution context: with the guard ready, a raw
+     Domain gets the default, the override and the default again after
+     [clear]. *)
+  let test_get_from_raw_domain_with_ready_runtime () =
+    let p =
+      Runtime_params.register
+        ~key:"test.raw_domain_read"
+        ~default:(fun () -> 7)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(function `Int i -> Ok i | _ -> Error "expected int")
+        ()
+    in
+    let read_in_raw_domain () = Domain.join (Domain.spawn (fun () -> Runtime_params.get p)) in
+    with_eio_guard (fun () ->
+      Alcotest.(check int) "default from a raw Domain" 7 (read_in_raw_domain ());
+      (match Runtime_params.set p 9 with
+       | Ok () -> ()
+       | Error msg -> Alcotest.fail msg);
+      Alcotest.(check int) "override from a raw Domain" 9 (read_in_raw_domain ());
+      Runtime_params.clear p;
+      Alcotest.(check int) "default again after clear" 7 (read_in_raw_domain ()))
+  in
+
+  (* The bounds are written twice -- [register_int]'s ~min/~max validate, and
+     the [meta] a settings screen draws its picker from -- so a test that reads
+     one of them would not notice the other moving. These assert the behaviour:
+     what a fresh process answers, and which values [set] takes. *)
+  let schedule_retention_default_days = 7 in
+  let schedule_retention_shortest_days = 1 in
+  let schedule_retention_longest_days = 365 in
+
+  let test_schedule_retention_default_and_bounds () =
+    (* An assertion that fails inside this case would otherwise leave its
+       override standing for the rest of the executable. *)
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime_params.clear Runtime_settings.schedule_terminal_retention_days)
+    @@ fun () ->
+    Alcotest.(check int) "a process with no override keeps a finished schedule this long"
+      schedule_retention_default_days
+      (Runtime_params.get Runtime_settings.schedule_terminal_retention_days);
+    let refuses days =
+      match Runtime_params.set Runtime_settings.schedule_terminal_retention_days days with
+      | Error _ -> ()
+      | Ok () ->
+        Runtime_params.clear Runtime_settings.schedule_terminal_retention_days;
+        Alcotest.fail
+          (Printf.sprintf "%d days was accepted as a retention window" days)
+    in
+    let accepts days =
+      match Runtime_params.set Runtime_settings.schedule_terminal_retention_days days with
+      | Ok () ->
+        Alcotest.(check int) "reads back what was set" days
+          (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
+      | Error detail -> Alcotest.fail detail
+    in
+    (* Zero would forget a schedule the moment its wake finished. *)
+    refuses (schedule_retention_shortest_days - 1);
+    refuses (schedule_retention_longest_days + 1);
+    accepts schedule_retention_shortest_days;
+    accepts schedule_retention_longest_days;
+    Runtime_params.clear Runtime_settings.schedule_terminal_retention_days;
+    Alcotest.(check int) "clearing puts the default back"
+      schedule_retention_default_days
+      (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
+  in
+
+  (* The bounds are written twice -- [register_int]'s ~min/~max validate, and
+     the [meta] a settings screen draws its picker from -- so a test that read
+     one of them would not notice the other moving. These assert the
+     behaviour: what a fresh process answers, and which values [set] takes. *)
+  let checkpoint_history_default = 3 in
+  let checkpoint_history_smallest = 0 in
+  let checkpoint_history_largest = 12 in
+
+  let test_checkpoint_history_default_and_bounds () =
+    (* An assertion that fails inside this case would otherwise leave its
+       override standing for the rest of the executable. *)
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained)
+    @@ fun () ->
+    Alcotest.(check int) "a process with no override keeps this many past checkpoints"
+      checkpoint_history_default
+      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained);
+    let refuses count =
+      match
+        Runtime_params.set Runtime_settings.keeper_checkpoint_history_retained count
+      with
+      | Error _ -> ()
+      | Ok () ->
+        Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained;
+        Alcotest.fail (Printf.sprintf "%d was accepted as a history window" count)
+    in
+    let accepts count =
+      match
+        Runtime_params.set Runtime_settings.keeper_checkpoint_history_retained count
+      with
+      | Ok () ->
+        Alcotest.(check int) "reads back what was set" count
+          (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+      | Error detail -> Alcotest.fail detail
+    in
+    refuses (checkpoint_history_smallest - 1);
+    (* One dashboard request decodes every retained entry beyond the newest. *)
+    refuses (checkpoint_history_largest + 1);
+    accepts checkpoint_history_smallest;
+    accepts checkpoint_history_largest;
+    Runtime_params.clear Runtime_settings.keeper_checkpoint_history_retained;
+    Alcotest.(check int) "clearing puts the default back"
+      checkpoint_history_default
+      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+  in
+
+  let test_crash_persistence_enqueue_read () =
+    with_eio_guard @@ fun () ->
+    let tmp_dir = Filename.temp_dir "masc_crash_" "" in
+    let clock = Eio.Stdenv.clock env in
+    Eio.Switch.run @@ fun sw ->
+    Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+    let store_root = Dated_jsonl.Store.root_of_masc_dir tmp_dir in
+    Keeper_crash_persistence.enqueue_record
+      ~store_root ~name:"test-keeper"
+      ~ts:1000.0 ~reason:"heartbeat_failures" ~restart_count:1;
+    Keeper_crash_persistence.enqueue_record
+      ~store_root ~name:"test-keeper"
+      ~ts:1010.0 ~reason:"exception" ~restart_count:2;
+    (* Wait for drain fiber to flush (drain interval = 2s) *)
+    Eio.Time.sleep clock 3.0;
+    let crashes =
+      Keeper_crash_persistence.recent_crashes
+        ~store_root ~name:"test-keeper" ~max_entries:10
+    in
+    Alcotest.(check bool) "has crash events" true (List.length crashes >= 2);
+    Alcotest.(check bool) "rows are under the keeper's crash-events folder" true
+      (Sys.is_directory (Filename.concat tmp_dir "keepers/test-keeper/crash-events"));
+    (match crashes with
+     | first :: _ ->
+         let open Yojson.Safe.Util in
+         let reason = member "reason" first |> to_string in
+         Alcotest.(check bool) "reason is string" true (String.length reason > 0);
+         let rc = member "restart_count" first |> to_int in
+         Alcotest.(check bool) "restart_count >= 1" true (rc >= 1)
+     | [] -> Alcotest.fail "no crashes read back");
+    rm_rf tmp_dir
+  in
+
+  let test_crash_tail_is_written_when_the_switch_closes () =
+    with_eio_guard @@ fun () ->
+    let tmp_dir = Filename.temp_dir "masc_crash_tail_" "" in
+    let clock = Eio.Stdenv.clock env in
+    let store_root = Dated_jsonl.Store.root_of_masc_dir tmp_dir in
+    (* No sleep. The record is enqueued inside the drain interval and the
+       switch closes before the fiber's next wake -- which is what a server
+       shutdown looks like from here, and when a crash record is most likely
+       to be waiting. *)
+    Eio.Switch.run (fun sw ->
+      Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+      Keeper_crash_persistence.enqueue_record
+        ~store_root ~name:"tail-keeper"
+        ~ts:2000.0 ~reason:"shutdown" ~restart_count:7);
+    let crashes =
+      Keeper_crash_persistence.recent_crashes
+        ~store_root ~name:"tail-keeper" ~max_entries:10
+    in
+    Alcotest.(check int) "the queued tail reached the store" 1 (List.length crashes);
+    rm_rf tmp_dir
+  in
+
+  Alcotest.run "runtime_params"
+    [
+      ( "core",
+        [
+          Alcotest.test_case "register_and_get" `Quick test_register_and_get;
+          Alcotest.test_case "set_and_get" `Quick test_set_and_get;
+          Alcotest.test_case "validation_rejects" `Quick test_validation_rejects;
+          Alcotest.test_case "set_by_key" `Quick test_set_by_key;
+          Alcotest.test_case "keyed mutation returns atomic change" `Quick
+            test_keyed_mutation_returns_atomic_change;
+          Alcotest.test_case "set_by_key_unknown" `Quick test_set_by_key_unknown;
+          Alcotest.test_case "clear" `Quick test_clear;
+          Alcotest.test_case "clear_by_key" `Quick test_clear_by_key;
+          Alcotest.test_case "clear_by_key_unknown" `Quick test_clear_by_key_unknown;
+          Alcotest.test_case "get from a raw Domain with a ready runtime" `Quick
+            test_get_from_raw_domain_with_ready_runtime;
+        ] );
+      ( "persistence",
+        [
+          Alcotest.test_case "persist_restore" `Quick test_persist_restore;
+          Alcotest.test_case "restore_skips_unregistered_key" `Quick
+            test_restore_skips_unregistered_key;
+          Alcotest.test_case "audit" `Quick test_audit;
+          Alcotest.test_case "set_persists_to_disk" `Quick test_set_persists_to_disk;
+          Alcotest.test_case "set_by_key_logs_audit" `Quick
+            test_set_by_key_logs_audit;
+        ] );
+      ( "runtime_settings",
+        [
+          Alcotest.test_case "registration" `Quick test_runtime_settings;
+          Alcotest.test_case "dashboard params registered" `Quick
+            test_dashboard_params_registered;
+          Alcotest.test_case "dashboard surface" `Quick test_dashboard_surface;
+          Alcotest.test_case "every registered param has a surface" `Quick
+            test_every_registered_param_has_a_surface;
+          Alcotest.test_case "no param is claimed by two surfaces" `Quick
+            test_no_param_is_claimed_twice;
+        ] );
+      ( "keeper_lifecycle",
+        [
+          Alcotest.test_case "keeper params registered" `Quick
+            test_keeper_params_registered;
+          Alcotest.test_case "keeper_lifecycle surface" `Quick
+            test_keeper_lifecycle_surface;
+          Alcotest.test_case "keeper params meta shape" `Quick
+            test_keeper_params_meta_shape;
+          Alcotest.test_case "connector trigger params declare choices" `Quick
+            test_connector_trigger_params_declare_their_choices;
+          Alcotest.test_case "keeper param override persist/restore" `Quick
+            test_keeper_param_override_persist_restore;
+          Alcotest.test_case "keeper_diagnostics surface" `Quick
+            test_keeper_diagnostics_surface;
+          Alcotest.test_case "schedule retention default and bounds" `Quick
+            test_schedule_retention_default_and_bounds;
+          Alcotest.test_case "checkpoint history default and bounds" `Quick
+            test_checkpoint_history_default_and_bounds;
+        ] );
+      ( "crash_persistence",
+        [
+          Alcotest.test_case "enqueue and read" `Slow
+            test_crash_persistence_enqueue_read;
+          Alcotest.test_case "crash tail is written when the switch closes" `Quick
+            test_crash_tail_is_written_when_the_switch_closes;
+        ] );
+    ]

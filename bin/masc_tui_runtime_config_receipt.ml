@@ -1,0 +1,573 @@
+type durability =
+  | Durable
+  | Durability_unconfirmed of string
+
+type config_state =
+  | Configured
+  | Rejected
+  | Unreadable
+
+type skill_application =
+  | Skill_published of
+      { input_source_revision : string
+      ; snapshot_revision : string
+      ; catalog_revision : string
+      ; config_state : config_state
+      }
+  | Skill_unchanged of
+      { input_source_revision : string
+      ; snapshot_revision : string
+      ; catalog_revision : string
+      ; config_state : config_state
+      }
+  | Skill_superseded of
+      { commit_order : string
+      ; applied_order : string
+      }
+  | Skill_workspace_retired of { input_source_revision : string }
+  | Skill_invalid_workspace
+
+type routing_status =
+  | Routing_active
+  | Routing_applied
+
+type keeper_overlay_status =
+  | Keeper_not_configured
+  | Keeper_pending_restart
+  | Keeper_applied
+  | Keeper_preempted_by_env
+  | Keeper_mixed
+
+type exact_output_targets =
+  | Targets_runtime_bindings
+  | Targets_replacement_catalog
+
+type exact_output_registry_status =
+  | Exact_output_registry_applied of exact_output_targets
+  | Exact_output_registry_unpublished
+  | Exact_output_registry_kept of { reason : string }
+
+type applied_at =
+  | Not_applied
+  | Applied_at_string of string
+  | Applied_at_int of int
+  | Applied_at_float of float
+
+type application =
+  { operation : string
+  ; routing_status : routing_status
+  ; routing_requires_restart : bool
+  ; routing_applied_at : applied_at
+  ; keeper_status : keeper_overlay_status
+  ; keeper_requires_restart : bool
+  ; keeper_applied_at : applied_at
+  ; keeper_configured_count : int
+  ; keeper_pending_keys : string list
+  ; keeper_applied_keys : string list
+  ; keeper_preempted_keys : string list
+  ; skills : skill_application
+  ; exact_output_registry : exact_output_registry_status
+  }
+
+type lock_warning =
+  { code : string
+  ; detail : string
+  }
+
+type t =
+  { source_revision : string
+  ; order : string
+  ; durability : durability
+  ; lock_warnings : lock_warning list
+  ; ignored_legacy_keys : string list
+  ; application : application
+  }
+
+let exact_fields expected fields =
+  let actual = List.map fst fields |> List.sort String.compare in
+  let expected = List.sort String.compare expected in
+  if actual = expected then Ok () else Error "runtime config receipt fields are invalid"
+;;
+
+let field key fields =
+  match List.filter (fun (name, _) -> String.equal name key) fields with
+  | [ (_, value) ] -> Ok value
+  | [] -> Error (Printf.sprintf "missing field %s" key)
+  | _ -> Error (Printf.sprintf "duplicate field %s" key)
+;;
+
+let string_field key fields =
+  match field key fields with
+  | Ok (`String value) when not (String.equal value "") -> Ok value
+  | Ok _ | Error _ -> Error (Printf.sprintf "invalid string field %s" key)
+;;
+
+let bool_field key fields =
+  match field key fields with
+  | Ok (`Bool value) -> Ok value
+  | Ok _ | Error _ -> Error (Printf.sprintf "invalid boolean field %s" key)
+;;
+
+let nonnegative_int_field key fields =
+  match field key fields with
+  | Ok (`Int value) when value >= 0 -> Ok value
+  | Ok _ | Error _ -> Error (Printf.sprintf "invalid non-negative integer field %s" key)
+;;
+
+let string_list_field key fields =
+  match field key fields with
+  | Ok (`List values) ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> decode (value :: acc) rest
+      | _ :: _ -> Error (Printf.sprintf "invalid string-list field %s" key)
+    in
+    decode [] values
+  | Ok _ | Error _ -> Error (Printf.sprintf "invalid string-list field %s" key)
+;;
+
+let timestamp_field key fields =
+  match field key fields with
+  | Ok `Null -> Ok Not_applied
+  | Ok (`String value) when not (String.equal value "") -> Ok (Applied_at_string value)
+  | Ok (`Int value) -> Ok (Applied_at_int value)
+  | Ok (`Float value) when Float.is_finite value -> Ok (Applied_at_float value)
+  | Ok _ | Error _ -> Error (Printf.sprintf "invalid timestamp field %s" key)
+;;
+
+let config_state_of_string = function
+  | "configured" -> Ok Configured
+  | "rejected" -> Ok Rejected
+  | "unreadable" -> Ok Unreadable
+  | _ -> Error "invalid Skill config_state"
+;;
+
+let decode_ready fields =
+  let open Result.Syntax in
+  let* () =
+    exact_fields
+      [ "state"
+      ; "input_source_revision"
+      ; "snapshot_revision"
+      ; "catalog_revision"
+      ; "config_state"
+      ]
+      fields
+  in
+  let* input_source_revision = string_field "input_source_revision" fields in
+  let* snapshot_revision = string_field "snapshot_revision" fields in
+  let* catalog_revision = string_field "catalog_revision" fields in
+  let* config_state_label = string_field "config_state" fields in
+  let* config_state = config_state_of_string config_state_label in
+  Ok (input_source_revision, snapshot_revision, catalog_revision, config_state)
+;;
+
+let decode_skill_application ~source_revision ~order = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* state = string_field "state" fields in
+    (match state with
+     | "published" | "unchanged" ->
+       let* input, snapshot_revision, catalog_revision, config_state =
+         decode_ready fields
+       in
+       if not (String.equal input source_revision)
+       then Error "Skill input revision does not match runtime commit"
+       else if String.equal state "published"
+       then
+         Ok
+           (Skill_published
+              { input_source_revision = input
+              ; snapshot_revision
+              ; catalog_revision
+              ; config_state
+              })
+       else
+         Ok
+           (Skill_unchanged
+              { input_source_revision = input
+              ; snapshot_revision
+              ; catalog_revision
+              ; config_state
+              })
+     | "superseded" ->
+       let* () = exact_fields [ "state"; "commit_order"; "applied_order" ] fields in
+       let* commit_order = string_field "commit_order" fields in
+       let* applied_order = string_field "applied_order" fields in
+       if String.equal commit_order order
+       then Ok (Skill_superseded { commit_order; applied_order })
+       else Error "Skill commit order does not match runtime commit"
+     | "workspace_retired" ->
+       let* () = exact_fields [ "state"; "input_source_revision" ] fields in
+       let* input_source_revision = string_field "input_source_revision" fields in
+       if String.equal input_source_revision source_revision
+       then Ok (Skill_workspace_retired { input_source_revision })
+       else Error "retired Skill input revision does not match runtime commit"
+     | "invalid_workspace" ->
+       let* () = exact_fields [ "state" ] fields in
+       Ok Skill_invalid_workspace
+     | _ -> Error "unknown Skill application state")
+  | _ -> Error "Skill application receipt must be an object"
+;;
+
+let routing_status_of_string = function
+  | "active" -> Ok Routing_active
+  | "applied" -> Ok Routing_applied
+  | _ -> Error "invalid routing application status"
+;;
+
+let keeper_status_of_string = function
+  | "not_configured" -> Ok Keeper_not_configured
+  | "pending_restart" -> Ok Keeper_pending_restart
+  | "applied" -> Ok Keeper_applied
+  | "preempted_by_env" -> Ok Keeper_preempted_by_env
+  | "mixed" -> Ok Keeper_mixed
+  | _ -> Error "invalid Keeper overlay application status"
+;;
+
+let decode_exact_output_registry = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* status = string_field "status" fields in
+    let* requires_restart = bool_field "requires_restart" fields in
+    (match status, requires_restart with
+     | "applied", false ->
+       let* () = exact_fields [ "status"; "requires_restart"; "targets" ] fields in
+       (match string_field "targets" fields with
+        | Ok "runtime_bindings" -> Ok (Exact_output_registry_applied Targets_runtime_bindings)
+        | Ok "replacement_catalog" ->
+          Ok (Exact_output_registry_applied Targets_replacement_catalog)
+        | Ok _ | Error _ -> Error "invalid exact-output registry targets")
+     | "unpublished", true ->
+       let* () = exact_fields [ "status"; "requires_restart" ] fields in
+       Ok Exact_output_registry_unpublished
+     | "kept", false ->
+       let* () =
+         exact_fields
+           [ "status"; "requires_restart"; "next_boot_publishes"; "reason" ]
+           fields
+       in
+       let* next_boot_publishes = bool_field "next_boot_publishes" fields in
+       let* reason = string_field "reason" fields in
+       if next_boot_publishes
+       then Error "a kept exact-output registry cannot be published at the next boot"
+       else Ok (Exact_output_registry_kept { reason })
+     | ("applied" | "unpublished" | "kept"), _ ->
+       Error "exact-output registry status disagrees with requires_restart"
+     | _ -> Error "invalid exact-output registry application status")
+  | _ -> Error "exact-output registry application receipt must be an object"
+;;
+
+let decode_lock_warnings json =
+  let open Result.Syntax in
+  match json with
+  | `List warnings ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | `Assoc fields :: rest ->
+        let* () = exact_fields [ "code"; "detail" ] fields in
+        let* code = string_field "code" fields in
+        let* detail = string_field "detail" fields in
+        decode ({ code; detail } :: acc) rest
+      | _ :: _ -> Error "runtime config lock warning must be an object"
+    in
+    decode [] warnings
+  | _ -> Error "runtime config lock warnings must be a list"
+;;
+
+let decode_application ~source_revision ~order = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* () =
+      exact_fields
+        [ "operation"; "routing"; "keeper_overlay"; "skills"; "exact_output_registry" ]
+        fields
+    in
+    let* exact_output_registry_json = field "exact_output_registry" fields in
+    let* exact_output_registry = decode_exact_output_registry exact_output_registry_json in
+    let* operation = string_field "operation" fields in
+    let* routing = field "routing" fields in
+    let* keeper = field "keeper_overlay" fields in
+    let* skills_json = field "skills" fields in
+    let* routing_status, routing_requires_restart, routing_applied_at =
+      match routing with
+      | `Assoc routing_fields ->
+        let* () = exact_fields [ "status"; "requires_restart"; "applied_at" ] routing_fields in
+        let* status_label = string_field "status" routing_fields in
+        let* status = routing_status_of_string status_label in
+        let* requires_restart = bool_field "requires_restart" routing_fields in
+        let* applied_at = timestamp_field "applied_at" routing_fields in
+        Ok (status, requires_restart, applied_at)
+      | _ -> Error "routing application receipt must be an object"
+    in
+    let* ( keeper_status
+         , keeper_requires_restart
+         , keeper_applied_at
+         , keeper_configured_count
+         , keeper_pending_keys
+         , keeper_applied_keys
+         , keeper_preempted_keys ) =
+      match keeper with
+      | `Assoc keeper_fields ->
+        let* () =
+          exact_fields
+            [ "status"
+            ; "configured_count"
+            ; "requires_restart"
+            ; "pending_keys"
+            ; "applied_keys"
+            ; "preempted_keys"
+            ; "applied_at"
+            ]
+            keeper_fields
+        in
+        let* status_label = string_field "status" keeper_fields in
+        let* status = keeper_status_of_string status_label in
+        let* requires_restart = bool_field "requires_restart" keeper_fields in
+        let* configured_count = nonnegative_int_field "configured_count" keeper_fields in
+        let* pending_keys = string_list_field "pending_keys" keeper_fields in
+        let* applied_keys = string_list_field "applied_keys" keeper_fields in
+        let* preempted_keys = string_list_field "preempted_keys" keeper_fields in
+        let* applied_at = timestamp_field "applied_at" keeper_fields in
+        Ok
+          ( status
+          , requires_restart
+          , applied_at
+          , configured_count
+          , pending_keys
+          , applied_keys
+          , preempted_keys )
+      | _ -> Error "Keeper overlay application receipt must be an object"
+    in
+    let* skills = decode_skill_application ~source_revision ~order skills_json in
+    Ok
+      { operation
+      ; routing_status
+      ; routing_requires_restart
+      ; routing_applied_at
+      ; keeper_status
+      ; keeper_requires_restart
+      ; keeper_applied_at
+      ; keeper_configured_count
+      ; keeper_pending_keys
+      ; keeper_applied_keys
+      ; keeper_preempted_keys
+      ; skills
+      ; exact_output_registry
+      }
+  | _ -> Error "runtime config application receipt must be an object"
+;;
+
+let decode = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* ok = bool_field "ok" fields in
+    let* state = string_field "state" fields in
+    if not ok
+    then Error "runtime config response is not successful"
+    else if not (String.equal state "committed")
+    then Error "runtime config response is not committed"
+    else
+      let* commit = field "commit" fields in
+      let* application = field "application" fields in
+      (match commit with
+       | `Assoc commit_fields ->
+         let* () =
+           exact_fields
+             [ "source_revision"; "order"; "durability"; "durability_detail"
+             ; "warnings"; "ignored_legacy_keys" ] commit_fields
+         in
+         let* lock_warnings = field "warnings" commit_fields in
+         let* lock_warnings = decode_lock_warnings lock_warnings in
+         let* ignored_legacy_keys =
+           string_list_field "ignored_legacy_keys" commit_fields
+         in
+         let* source_revision = string_field "source_revision" commit_fields in
+         let* order = string_field "order" commit_fields in
+         let* durability_detail = field "durability_detail" commit_fields in
+         let* durability =
+           match string_field "durability" commit_fields, durability_detail with
+           | Ok "durable", `Null -> Ok Durable
+           | Ok "unconfirmed", `String detail when String.trim detail <> "" ->
+             Ok (Durability_unconfirmed detail)
+           | (Ok _ | Error _), _ -> Error "runtime config durability or detail is invalid"
+         in
+         let* application = decode_application ~source_revision ~order application in
+         Ok
+           { source_revision; order; durability; lock_warnings
+           ; ignored_legacy_keys; application }
+       | _ -> Error "runtime config commit receipt is missing")
+  | _ -> Error "runtime config commit response must be an object"
+;;
+
+let config_state_to_string = function
+  | Configured -> "configured"
+  | Rejected -> "rejected"
+  | Unreadable -> "unreadable"
+;;
+
+let summary receipt =
+  let durability =
+    match receipt.durability with
+    | Durable -> "durable"
+    | Durability_unconfirmed detail -> "durability-unconfirmed: " ^ detail
+  in
+  let routing =
+    match receipt.application.routing_status with
+    | Routing_active -> "routing-active"
+    | Routing_applied -> "routing-applied"
+  in
+  let keeper =
+    match receipt.application.keeper_status with
+    | Keeper_not_configured -> "keeper-not-configured"
+    | Keeper_pending_restart -> "keeper-pending-restart"
+    | Keeper_applied -> "keeper-applied"
+    | Keeper_preempted_by_env -> "keeper-preempted-by-env"
+    | Keeper_mixed -> "keeper-mixed"
+  in
+  let skills =
+    match receipt.application.skills with
+    | Skill_published { config_state; _ } ->
+      "skills-published/" ^ config_state_to_string config_state
+    | Skill_unchanged { config_state; _ } ->
+      "skills-unchanged/" ^ config_state_to_string config_state
+    | Skill_superseded { applied_order; _ } ->
+      "skills-superseded-by/" ^ applied_order
+    | Skill_workspace_retired _ -> "skills-workspace-retired"
+    | Skill_invalid_workspace -> "skills-invalid-workspace"
+  in
+  let lock_warnings =
+    match receipt.lock_warnings with
+    | [] -> ""
+    | warnings ->
+      Printf.sprintf
+        " lock-warnings=%s"
+        (String.concat "," (List.map (fun warning -> warning.code) warnings))
+  in
+  let exact_output_registry =
+    match receipt.application.exact_output_registry with
+    | Exact_output_registry_applied Targets_runtime_bindings -> "exact-registry-applied"
+    | Exact_output_registry_applied Targets_replacement_catalog ->
+      "exact-registry-applied/replacement-catalog"
+    | Exact_output_registry_unpublished -> "exact-registry-unpublished"
+    | Exact_output_registry_kept _ -> "exact-registry-kept/next-boot-unpublished"
+  in
+  Printf.sprintf
+    "commit=%s %s %s %s %s%s %s"
+    receipt.order
+    durability
+    routing
+    keeper
+    skills
+    lock_warnings
+    exact_output_registry
+;;
+
+let keeper_lane_warning application =
+  let keys = String.concat ", " application.keeper_preempted_keys in
+  match application.keeper_status, application.keeper_preempted_keys with
+  | Keeper_mixed, _ ->
+      Some ("Keeper settings partially applied"
+            ^ (if keys = "" then "" else "; overridden by environment: " ^ keys))
+  | Keeper_preempted_by_env, _ | _, _ :: _ ->
+      Some ("Keeper settings overridden by environment"
+            ^ (if keys = "" then "" else ": " ^ keys))
+  | (Keeper_not_configured | Keeper_pending_restart | Keeper_applied), [] -> None
+;;
+
+let skill_lane_warning = function
+  | Skill_published { config_state = Configured; _ }
+  | Skill_unchanged { config_state = Configured; _ } -> None
+  | Skill_published { config_state = Rejected; _ }
+  | Skill_unchanged { config_state = Rejected; _ } ->
+      Some "Skill configuration rejected; catalog not applied"
+  | Skill_published { config_state = Unreadable; _ }
+  | Skill_unchanged { config_state = Unreadable; _ } ->
+      Some "Skill configuration unreadable; catalog not applied"
+  | Skill_superseded { applied_order; _ } ->
+      Some ("Skill catalog superseded by commit " ^ applied_order)
+  | Skill_workspace_retired _ ->
+      Some "Skill catalog not applied; workspace retired"
+  | Skill_invalid_workspace ->
+      Some "Skill catalog not applied; invalid workspace"
+;;
+
+let lane_needs_attention receipt =
+  (match receipt.durability with Durable -> false | Durability_unconfirmed _ -> true)
+  || receipt.lock_warnings <> []
+  || receipt.application.routing_requires_restart
+  || receipt.application.keeper_requires_restart
+  || Option.is_some (keeper_lane_warning receipt.application)
+  || Option.is_some (skill_lane_warning receipt.application.skills)
+  || (match receipt.application.exact_output_registry with
+      | Exact_output_registry_applied _ -> false
+      | Exact_output_registry_unpublished | Exact_output_registry_kept _ -> true)
+;;
+
+let lane_summary receipt =
+  let file = match receipt.durability with
+    | Durable -> "File saved"
+    | Durability_unconfirmed detail -> "File written; durability unconfirmed — " ^ detail in
+  let exact = match receipt.application.exact_output_registry with
+    | Exact_output_registry_applied _ -> "exact lanes applied"
+    | Exact_output_registry_unpublished -> "exact lanes unavailable; restart required"
+    | Exact_output_registry_kept { reason } ->
+      "exact lanes unchanged: " ^ reason ^ "; correct configuration before restart" in
+  let routing = match receipt.application.routing_status with
+    | Routing_active -> "routing active"
+    | Routing_applied -> "routing applied" in
+  String.concat " · "
+    ([file; exact; routing]
+     @ (if receipt.application.routing_requires_restart then ["routing restart required"] else [])
+     @ (if receipt.application.keeper_requires_restart then
+          ["Keeper settings await restart: " ^ String.concat ", " receipt.application.keeper_pending_keys]
+        else [])
+     @ Option.to_list (keeper_lane_warning receipt.application)
+     @ Option.to_list (skill_lane_warning receipt.application.skills)
+     @ List.map (fun warning -> warning.detail) receipt.lock_warnings)
+;;
+
+type preview =
+  | Can_save
+  | Cannot_save of string
+
+(* Why the preview refused: the runtime parser's reason when it ran, else the
+   schema issues. The route answers can_save false only for one of the two,
+   so a refusal with neither is an answer this reader does not understand. *)
+let preview_refusal fields =
+  let open Result.Syntax in
+  match field "runtime_validation" fields with
+  | Ok (`String reason) when not (String.equal reason "") -> Ok reason
+  | Ok _ | Error _ ->
+    let* validation = field "validation" fields in
+    let* issues =
+      match validation with
+      | `Assoc validation -> field "issues" validation
+      | _ -> Error "invalid object field validation"
+    in
+    let detail = function
+      | `Assoc issue ->
+        (match field "detail" issue with
+         | Ok (`String detail) when not (String.equal detail "") -> Some detail
+         | Ok _ | Error _ -> None)
+      | _ -> None
+    in
+    (match issues with
+     | `List issues ->
+       (match List.filter_map detail issues with
+        | [] -> Error "runtime config preview refused without a reason"
+        | details -> Ok (String.concat "; " details))
+     | _ -> Error "invalid list field issues")
+;;
+
+let decode_preview = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* can_save = bool_field "can_save" fields in
+    if can_save
+    then Ok Can_save
+    else
+      let* reason = preview_refusal fields in
+      Ok (Cannot_save reason)
+  | _ -> Error "runtime config preview is not an object"
+;;

@@ -1,0 +1,71 @@
+(** [masc_web_search] and [masc_web_fetch], read from
+    [config/tools/masc_web_*.toml] (RFC
+    prompts-and-tool-definitions-outside-ocaml §2.2).
+
+    Decoded once at module initialization; a missing or undecodable file
+    refuses the boot rather than advertising a partial web surface.
+    [Keeper_tool_descriptor] names each value directly rather than reaching
+    them through a list. *)
+
+let schema_of_name name : Masc_domain.tool_schema =
+  let rel = "tools/" ^ name ^ ".toml" in
+  match Embedded_config.read rel with
+  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
+  | Some contents ->
+    (match Tool_definition_toml.load ~name ~contents with
+     | Ok { Tool_definition_toml.schema; _ } -> schema
+     | Error message -> failwith message)
+;;
+
+let web_search = schema_of_name "masc_web_search"
+let web_fetch = schema_of_name "masc_web_fetch"
+let browser_tabs = schema_of_name "masc_browser_tabs"
+let browser_read = schema_of_name "masc_browser_read"
+let browser_session = schema_of_name "masc_browser_session"
+let browser_goto = schema_of_name "masc_browser_goto"
+let browser_act = schema_of_name "masc_browser_act"
+let browser_interact = schema_of_name "masc_browser_interact"
+let browser_instruct = schema_of_name "masc_browser_instruct"
+(* Every MSX tool's definition is read here, at module initialization, so a
+   tool added to [Msx_tool] without its TOML refuses the boot. The table holds
+   every tool by construction, so [List.assoc] finds each one. *)
+let msx_schema =
+  let table = List.map (fun tool -> tool, schema_of_name (Msx_tool.name tool)) Msx_tool.all in
+  fun tool -> List.assoc tool table
+;;
+
+let portrait_read = schema_of_name "keeper_portrait_read"
+let candle_balance = schema_of_name "keeper_candle_balance"
+let candle_catalog = schema_of_name "keeper_candle_catalog"
+let candle_purchase = schema_of_name "keeper_candle_purchase"
+let candle_equip = schema_of_name "keeper_candle_equip"
+let candle_gift = schema_of_name "keeper_candle_gift"
+
+let dos_load = schema_of_name "masc_dos_load"
+let dos_meta = schema_of_name "masc_dos_meta"
+let dos_inventory = schema_of_name "masc_dos_inventory"
+let dos_eject = schema_of_name "masc_dos_eject"
+let dos_screen = schema_of_name "masc_dos_screen"
+let dos_step = schema_of_name "masc_dos_step"
+let dos_press = schema_of_name "masc_dos_press"
+let dos_click = schema_of_name "masc_dos_click"
+let dos_type = schema_of_name "masc_dos_type"
+let dos_peek = schema_of_name "masc_dos_peek"
+let play_room = schema_of_name "masc_play_room"
+let dos_pass = schema_of_name "masc_dos_pass"
+let dos_save = schema_of_name "masc_dos_save"
+let dos_restore = schema_of_name "masc_dos_restore"
+
+let lane_attach = schema_of_name "masc_lane_attach"
+let lane_declaration_read = schema_of_name "masc_lane_declaration_read"
+let lane_declaration_save = schema_of_name "masc_lane_declaration_save"
+let lane_inspect = schema_of_name "masc_lane_inspect"
+let lane_observe = schema_of_name "masc_lane_observe"
+let lane_slice = schema_of_name "masc_lane_slice"
+let lane_detach = schema_of_name "masc_lane_detach"
+let lane_evidence = schema_of_name "masc_lane_evidence"
+
+let lane_act = schema_of_name "masc_lane_act"
+let lane_action_status = schema_of_name "masc_lane_action_status"
+
+let lane_updates = schema_of_name "masc_lane_updates"

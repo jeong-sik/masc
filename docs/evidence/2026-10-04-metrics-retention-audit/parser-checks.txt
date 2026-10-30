@@ -1,0 +1,9 @@
+Parser-only checks; no typecheck, native test, Dune build or CI.
+PASS lib/config/env_config_keeper.ml
+PASS lib/config/env_config_keeper.mli
+PASS lib/fs_compat/fs_compat.ml
+PASS lib/fs_compat/fs_compat.mli
+PASS lib/keeper/keeper_types_support.ml
+PASS lib/keeper/keeper_types_support.mli
+PASS test/test_metrics_rotation.ml
+PASS test/test_runtime_toml_overrides.ml

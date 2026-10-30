@@ -1,0 +1,16 @@
+Testing `keeper delegate completion wake'.
+This run has ID `HNV97B24'.
+
+  [OK]          delivery             0   the reply reaches the asker.
+  [OK]          delivery             1   a failure reaches the asker.
+  [OK]          delivery             2   the same answer arrives once.
+  [OK]          readability          0   the turn can read the answer.
+  [OK]          readability          1   a cut reply names the read path.
+  [OK]          readability          2   a padded short reply is not cut.
+  [OK]          readability          3   the full reply rides lossless throug...
+  [OK]          readability          4   the answer survives a round trip.
+  [OK]          routing              0   only a Keeper is answered on its queue.
+  [OK]          routing              1   only a registered Keeper is the sender.
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper delegate completion wake'.
+Test Successful in 0.353s. 10 tests run.

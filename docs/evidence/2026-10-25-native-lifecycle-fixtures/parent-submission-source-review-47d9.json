@@ -1,0 +1,282 @@
+{
+  "verdict": "PASS_SOURCE",
+  "verdict_line": "verdict: PASS head: 47d9f1c8346062650464c48915c8485a4b9b6e1f by: repair_eval_metrics (independent read-only source review)",
+  "reviewed_at_utc": "2026-10-25T00:26:24.233681+00:00",
+  "head": "47d9f1c8346062650464c48915c8485a4b9b6e1f",
+  "base": "ab763974086124c723a7c8d84a8f205f93cb39c1",
+  "merge_base": "ab763974086124c723a7c8d84a8f205f93cb39c1",
+  "immediate_parent": "88ccd6a2c79a419a9636bb09946e021e516e5447",
+  "full_diff_sha256": "b350c18e13f960d2edba22d67618ec5ab58e07516156bce99ad2183c8ca5c346",
+  "product_test_diff_sha256": "a7bdc3b28421d2bf469af49b2307d2716d70fed9a0ddcc1803f9373c49b22b71",
+  "scope": {
+    "reviewed": "Frozen full diff over ab7639, changed product/interfaces and direct consumers, bounded actual-source checks, authored native fixture source, evidence provenance and claims. No source edits/push/approval/model invocation performed.",
+    "not_reviewed": "The884 upstream changes as an independent whole, entire Native Stack, current remote PR full diff after moving base, native execution, real resubmission on this candidate, GLM328 as runtime proof of this repair."
+  },
+  "p0_p1_p2_findings": [],
+  "current_api_and_dataflow": [
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.mli:10",
+      "finding": "Reviewed interface before implementation: returns transitioned_task, exact immutable Task installed in backlog; production caller passes authoritative selected member."
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml:329",
+      "finding": "Current handoff/status constructed before claim and prepare. Claim, prepare at394, commit at470, submission at482, scheduling at643 and notification at806 share that transitioned Task; sibling Task and original input remain immutable."
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml:334",
+      "finding": "Operator cancellation preserves owner handoff in returned Task and backlog; authored handoff metadata retains its previous meaning."
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.ml:29",
+      "finding": "Submission references derive from only the current transitioned Task handoff plus explicit narrative notes. No old optional handoff channel."
+    },
+    {
+      "path": "lib/task/tool_task_completion_review.mli:46",
+      "finding": "Required claim argument is sole submitted-evidence authority; Task contract requirements remain separately projected. Old optional notes/handoff APIs and callers are removed."
+    },
+    {
+      "path": "lib/verification_protocol.ml:29",
+      "finding": "Actual request spec consumes explicit claim; full snapshot codecs, grammar and receipt function used in bounded probe. Artifact acquisition/ownership/native identity/lock remain ports, not executed here."
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml:973",
+      "finding": "Reject handoff keeps reason/actor while evidence_refs is empty; typed pending rejection and event/activity verification identity remain. Unroutable release similarly removes bare verification ID."
+    }
+  ],
+  "direct_consumers_checked": [
+    "git grep exact head: build_backlog_update production transition + test_workspace_handoff_boundary; no residual task_id API calls.",
+    "verification_submission_evidence_refs production transition + all6 phase_e fixture calls use the new Task+notes API.",
+    "concrete_verification_evidence only production caller is Verification_protocol with required submitted_evidence_refs.",
+    "Workspace_metric_hooks at500/513 installs actual protocol preparation/notification. Tool_task255 preparation forwards Task/claim and captures scoped immutable receipt.",
+    "Completion_authority_agent.install_callback at1633 consumes scheduling Task id and verification id, keys actual review; changed snapshot preserves id/status semantics.",
+    "Current Anti_rationalization.mli327 requires optional system_prompt and required attempt_continuation. Changed parent test stub signatures conform at all modified stubs, without changing their existing purpose."
+  ],
+  "prior_p3_resolved": [
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml:643",
+      "resolution": "Scheduling hook now receives backlog_update.transitioned_task instead of a status-only copy of the old Task."
+    },
+    {
+      "path": "lib/completion_authority_wakeup.mli:74",
+      "resolution": "Comment now states typed verdict/rejection/delivery records carry verification identity; handoff carries correction reason."
+    }
+  ],
+  "nonblocking_findings": [
+    {
+      "severity": "P3",
+      "path": "test/test_verification.ml:2775",
+      "finding": "New capture/schedule/commit assertions run inside verification_submitted_fn. Actual production guard at transitions640-654 catches Alcotest assertion exceptions and logs degradation. No outer scheduling count/record assertion currently fails the fixture when a stale Task is supplied or the hook is not invoked. Product call itself is correct at this head.",
+      "reproduction": "Exact production exception guard plus exact fixture callback, real Alcotest/eio and named DTO/log ports: correct Task returns with0 logs; deliberately stale Task also returns normally with1 degraded log. Two controls executed, not full native transaction proof.",
+      "recommendation": "Collect verification_id/Task/committed_Task in callback; after submit returns assert count/lookup/physical and structural identity outside the guarded hook. Parent acknowledged and assigned separate layer18 repair; no unreviewed fix inferred."
+    }
+  ],
+  "independent_checks": {
+    "exact_git_objects": true,
+    "original_probe": {
+      "baseline_checks": 14,
+      "candidate_checks": 19,
+      "compile_and_execution_exit": 0,
+      "base": "ab763974086124c723a7c8d84a8f205f93cb39c1",
+      "candidate": "47d9f1c8346062650464c48915c8485a4b9b6e1f"
+    },
+    "extended_probe": {
+      "baseline_checks": 14,
+      "candidate_checks": 27,
+      "additional_controls": 8,
+      "compile_and_execution_exit": 0
+    },
+    "parse": {
+      "passed": 17,
+      "total": 17
+    },
+    "full_diff_check_exit": 0,
+    "scheduling_guard_probe_exit": 0,
+    "compiler_warning": "Retains warning23 from explicit minimal backlog DTO; not full MASC typechecking."
+  },
+  "native_fixture_review": {
+    "status": "AUTHORED_UNRUN",
+    "assessment": "Actual Workspace submit/reject/change-file/first-retry fixture, immutable old/current evidence, actor/model/tool identity, diagnostics, original Task, stale-verdict refusal, notification count. New scheduling assertion has the P3 blind spot above. Four minimum hosted native targets and existing operator cancellation suite remain unrun by this reviewer."
+  },
+  "evidence_scope": {
+    "publication_and_ui_manifest_hash_size_checks": 65,
+    "manifest_matches": true,
+    "own_frozen_diagnosis_tools_events_ui_review_bindings": 4,
+    "all_byte_equal": true,
+    "interpretation": "GLM evidence remains source328 ordinary-HTTP one-cohort scoped G2/G3 observation with controlled Gate/Task approval. README preserves failed Qwen and unavailable judge evidence, actual approval timing correction, no Goal Completed/human confirmation, mixed-source11 cases, and native Claude failures. UI remains isolated328 backend/2bc frontend proof. No new candidate runtime/browser execution inferred. Historical62e/328 source manifests are supplemented by exact current-parent reassembly; not treated as current-head native proof."
+  },
+  "reassembly": {
+    "source_test_paths_checked": 17,
+    "bindings": [
+      {
+        "path": "lib/task/tool_task_completion_review.ml",
+        "sha256": "d9f940fe5898ec6aef33c99259637e6ac168fe0b39ad88167203bb94b4a5d6c2",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/task/tool_task_completion_review.mli",
+        "sha256": "17848ac47c9ebb79b514b826b3739d4b0f83de8bcc653cb8e92ea7872da42ab3",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/types/types_core.mli",
+        "sha256": "8fa008eeebea9c2f19e243041a692e3af5aede047ab8c0cc50fab08d9685291e",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/verification_protocol.ml",
+        "sha256": "ac5e8ac491e1b8985aa9dbb9e14b03ed88615bba4bd183716842246af59c316c",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/verification_protocol.mli",
+        "sha256": "65c5ff70322dae63aef7956ed41e7f6a0b345608ca11dc6ab66ae41229fdd159",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/workspace/workspace_hooks.mli",
+        "sha256": "556ad3e4d1964d7d4964621691ae72a393bd3b9e353ddaae400fcc5f0b907dfc",
+        "matches_reassembly": true,
+        "equals_author_62e4": false
+      },
+      {
+        "path": "lib/workspace/workspace_task.ml",
+        "sha256": "704302e7f31064cc2260c25d7c00f6871bdf4fb66a80168b4b942e75ce107ae5",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_transition_executor.ml",
+        "sha256": "be41c69eed480e5fb49b180325129d4f89bc9a5fd67c57a429a146d8f0f0fb87",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_transition_executor.mli",
+        "sha256": "a299bd6988eb5cce73f20a5de9e6df2ec35cf5250e99c0de676f594cfdae794a",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_transitions.ml",
+        "sha256": "4f66ec9447b4d5aacebe01281d5e6cf01a6d7962bd0b7988cedaacead210ddaa",
+        "matches_reassembly": true,
+        "equals_author_62e4": false
+      },
+      {
+        "path": "lib/workspace/workspace_task_verification.ml",
+        "sha256": "6e1b4ba489590b24a1cdd7ad3e82c455563aa380c23a1626aa25af21a33906a6",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_verification.mli",
+        "sha256": "a2166a2071d83fa8bba94736d57406a3e19cf4caece3e5edcbb30bd049c424e3",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "test/test_completion_repair_delivery.ml",
+        "sha256": "d54353f9ab7e8bc912feca468291d5386df1cdd801cffd704ac89a518ed96aad",
+        "matches_reassembly": true,
+        "equals_author_62e4": false
+      },
+      {
+        "path": "test/test_verification.ml",
+        "sha256": "08e7d7d05680d6cd6b07d3cc3e1086a9dc15615e2904af7d159b75f8d05ad704",
+        "matches_reassembly": true,
+        "equals_author_62e4": false
+      },
+      {
+        "path": "test/test_workspace_handoff_boundary.ml",
+        "sha256": "b2d38e77ae61ad986e532e20ea160e31ce7d28f61d7d9da21be23931c6e5e701",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "test/test_workspace_task_verification_phase_e.ml",
+        "sha256": "1ab83b7f4c8bc48e160fadf900aef7f77042ce99dbae74020722d0d62ec895b3",
+        "matches_reassembly": true,
+        "equals_author_62e4": true
+      },
+      {
+        "path": "lib/completion_authority_wakeup.mli",
+        "sha256": "cf46d862d1ef72deb50227052b163f25e4ccb92b9943378c9ce9a93a90687c2c",
+        "matches_reassembly": true,
+        "equals_author_62e4": false
+      }
+    ],
+    "paths_different_from_author62e": [
+      "lib/completion_authority_wakeup.mli",
+      "lib/workspace/workspace_hooks.mli",
+      "lib/workspace/workspace_task_transitions.ml",
+      "test/test_completion_repair_delivery.ml",
+      "test/test_verification.ml"
+    ],
+    "interpretation": "Differences directly read: P3 production/comment fix, hook documentation, scheduling fixture observation, and2 parent callback signature adaptations. Remaining author source unchanged; all changed interfaces and relevant current callers traced afresh."
+  },
+  "remote_identity_observation": {
+    "pr": 45861,
+    "observed_head": "47d9f1c8346062650464c48915c8485a4b9b6e1f",
+    "observed_base": "6501178bf5df7a125096bbf6c2f1240c48654593",
+    "observed_base_ref": "codex/completion-authority-round-integration-20261025",
+    "observed_stack": null,
+    "interpretation": "Parent concurrently moved outside this session; Root acknowledged. This verdict remains head47d/baseab frozen source scope, not current remote full-diff/Native Stack approval. Membership must be freshly established by integrator."
+  },
+  "remaining_unproven": [
+    "Full native typing/linking/transaction suite at47d or later",
+    "Actual first retry under real lock/sandbox/transport/model on this source",
+    "Layer18 scheduling test correction execution",
+    "Production installation/deployment/merge/whole-stack acceptance"
+  ],
+  "artifacts": [
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/identity.json",
+      "sha256": "ae434d5357498556892c48fd0ecc46e2e79227bb3f8dcb2cab068602e56a1a45"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/review.diff",
+      "sha256": "b350c18e13f960d2edba22d67618ec5ab58e07516156bce99ad2183c8ca5c346"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/product.diff",
+      "sha256": "a7bdc3b28421d2bf469af49b2307d2716d70fed9a0ddcc1803f9373c49b22b71"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/independent-check.json",
+      "sha256": "e5bb63d94abe8796176ed3b137ecde12d5ac5fd89cd38f7309704c6bcb6ce85d"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/source-check.json",
+      "sha256": "04f5910846a7897e02a7b063717bad44c6db61c0eb0f81986fa70b4bfb6a0c62"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/run_probe.py",
+      "sha256": "14999351dcc94c8b9fe6be1d372bf8a4ae8d9405bf5b54bfe3a8f138af1673db"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/extra/source-check.json",
+      "sha256": "c4112fac1b52901ba59f5448c77066887ada814fb17f5be67f6bcb113c6df2a2"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/extra/run.py",
+      "sha256": "ca4b99f08e0b53f4d51ef9d9826884398bddad5e26b24ae5582f8817f633328c"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/scheduling-guard-probe.json",
+      "sha256": "10d0e356cc74c64d2e8a5d54b0d88ae9940e93081d6bd966ae940788eea40d6d"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/scheduling-guard-probe.ml",
+      "sha256": "b311e15f953df7584db402ba9f489b0f0e28a607506b197686d55396413952ea"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-47d9-20261025/evidence-binding.json",
+      "sha256": "505e0e5fa207c679a3b70afbdf433ab1b29398040168a6cafa349fbba8255b07"
+    }
+  ]
+}

@@ -1,0 +1,1002 @@
+#!/usr/bin/env bash
+# Coding-outcome eval runner (RFC-0396 W2).
+#
+# For every selected case x model x repeat: boot nothing new per run — one
+# isolated MASC server serves the whole invocation — copy the case workspace
+# fresh, create one keeper, send it the task, wait for the episode to finish,
+# then run the case's verify script. The verify exit code is the entire pass
+# verdict (RFC-0396 D2); this script records evidence and never re-judges.
+#
+# Evidence: one JSON file per run plus runs.jsonl rebuilt before reporting, then
+# test/coding_eval_report_cli.exe turns rows into pass@k / buckets. A run
+# is resumed only when its receipt matches the frozen experiment inputs.
+# This driver supports Docker Keepers and Docker grading; it does not select
+# microVM or SSH backends.
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CASES_DIR="${CODING_EVAL_CASES_DIR:-${ROOT_DIR}/benchmarks/coding/cases}"
+OUT_DIR="${CODING_EVAL_OUT_DIR:-}"
+MODELS="${CODING_EVAL_MODELS:-}"
+CASE_IDS="${CODING_EVAL_CASE_IDS:-}"
+REPEATS="${CODING_EVAL_REPEATS:-2}"
+PASS_AT_K="${CODING_EVAL_K:-1}"
+MEMORY_MODE="${CODING_EVAL_MEMORY_MODE:-seeded}"
+EXECUTION_MODE="${CODING_EVAL_EXECUTION_MODE:-live}"
+MANIFEST="${CODING_EVAL_MANIFEST:-}"
+PORT="${CODING_EVAL_PORT:-}"
+POLL_INTERVAL_SEC="${CODING_EVAL_POLL_INTERVAL_SEC:-2}"
+TIMEOUT_SEC="${CODING_EVAL_MCP_TIMEOUT_SEC:-30}"
+CLI_EXE="${ROOT_DIR}/_build/default/test/coding_eval_report_cli.exe"
+CHECKER_EXE="${ROOT_DIR}/_build/default/bin/masc_reliable_change_g1_check.exe"
+
+SERVER_PID=""
+LIVE_RUN_DIR=""
+TARGET_DIR=""
+CONFIG_DIR=""
+SERVER_LOG=""
+GRADER_IMAGE_ID=""
+EXPERIMENT_DIGEST=""
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  scripts/harness_coding_eval.sh --models provider:model[,provider:model]
+                                 [--cases DIR] [--case-ids CSV] [--repeats N]
+                                 [--out DIR] [--k N] [--port N]
+                                 [--memory-mode seeded|verified|filtered|source-bound|off]
+                                 [--execution-mode live|matrix]
+                                 [--manifest FILE]
+
+Runs each selected coding case against each model, records one evidence row
+per run into <out>/runs.jsonl, and summarizes with coding_eval_report_cli.
+Docker is the supported execution and grading backend. Re-running the same
+--out resumes only the same frozen corpus, prompts, runtime config, binaries
+and image. Changed inputs require a new --out directory.
+EOF
+}
+
+# shellcheck source=scripts/harness/lib/test_framework.sh
+source "${ROOT_DIR}/scripts/harness/lib/test_framework.sh"
+# shellcheck source=scripts/harness/lib/server_bootstrap.sh
+source "${ROOT_DIR}/scripts/harness/lib/server_bootstrap.sh"
+# shellcheck source=scripts/harness/lib/mcp_call.sh
+source "${ROOT_DIR}/scripts/harness/lib/mcp_call.sh"
+# shellcheck source=scripts/harness/lib/coding_eval_evidence.sh
+source "${ROOT_DIR}/scripts/harness/lib/coding_eval_evidence.sh"
+
+cleanup() {
+  harness_stop_server "${SERVER_PID}" 10
+}
+trap cleanup EXIT
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cases) CASES_DIR="$2"; shift 2 ;;
+    --out) OUT_DIR="$2"; shift 2 ;;
+    --models) MODELS="$2"; shift 2 ;;
+    --case-ids) CASE_IDS="$2"; shift 2 ;;
+    --repeats) REPEATS="$2"; shift 2 ;;
+    --k) PASS_AT_K="$2"; shift 2 ;;
+    --memory-mode) MEMORY_MODE="$2"; shift 2 ;;
+    --execution-mode) EXECUTION_MODE="$2"; shift 2 ;;
+    --manifest) MANIFEST="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+if [[ "${MEMORY_MODE}" != "seeded" && "${MEMORY_MODE}" != "verified" && "${MEMORY_MODE}" != "filtered" && "${MEMORY_MODE}" != "source-bound" && "${MEMORY_MODE}" != "off" ]]; then
+  echo "--memory-mode must be seeded, verified, filtered, source-bound, or off, got: ${MEMORY_MODE}" >&2
+  exit 2
+fi
+
+if [[ "${EXECUTION_MODE}" != "live" && "${EXECUTION_MODE}" != "matrix" ]]; then
+  echo "--execution-mode must be live or matrix, got: ${EXECUTION_MODE}" >&2
+  exit 2
+fi
+
+require_cmd jq
+require_cmd curl
+require_cmd python3
+
+if [[ -z "${MODELS}" ]]; then
+  echo "--models is required (example: --models ollama:qwen3-coder)" >&2
+  usage
+  exit 2
+fi
+if [[ ! -d "${CASES_DIR}" ]]; then
+  echo "case corpus not found: ${CASES_DIR}" >&2
+  exit 2
+fi
+if [[ -z "${OUT_DIR}" ]]; then
+  OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/coding-eval.XXXXXX")"
+fi
+mkdir -p "${OUT_DIR}/runs"
+RUNS_JSONL="${OUT_DIR}/runs.jsonl"
+
+ensure_cli_built() {
+  (
+    cd "${ROOT_DIR}"
+    local targets=(./test/coding_eval_report_cli.exe ./bin/main_eio.exe)
+    if [[ -n "${MANIFEST}" || -x "${CHECKER_EXE}" ]]; then
+      targets+=(./bin/masc_reliable_change_g1_check.exe)
+    fi
+    if [[ "${CODING_EVAL_SKIP_BUILD:-0}" != "1" || ! -x "${CLI_EXE}" || ( -n "${MANIFEST}" && ! -x "${CHECKER_EXE}" ) ]]; then
+      scripts/dune-local.sh build "${targets[@]}" >/dev/null
+    fi
+  )
+}
+
+selected_case_dirs() {
+  local dir case_id
+  for dir in "${CASES_DIR}"/*/; do
+    [[ -f "${dir}/case.json" ]] || continue
+    case_id="$(jq -r '.id' "${dir}/case.json")"
+    if [[ -n "${CASE_IDS}" ]]; then
+      case ",${CASE_IDS}," in
+        *",${case_id},"*) printf '%s\n' "${dir%/}" ;;
+        *) ;;
+      esac
+    else
+      printf '%s\n' "${dir%/}"
+    fi
+  done
+}
+
+context_recovery_cases_selected() {
+  local case_dir
+  while IFS= read -r case_dir; do
+    if [[ -f "${case_dir}/memory.json" || -f "${case_dir}/source-memory.json" ]]; then
+      return 0
+    fi
+  done < <(selected_case_dirs)
+  return 1
+}
+
+# The complete original identity owns the binding. Replacing punctuation would
+# merge distinct provider/model names into one runtime or run directory.
+model_alias_of() {
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" model-alias \
+    --provider "$1" --model "$2"
+}
+
+run_id_of() {
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" run-id \
+    --provider "$1" --model "$2" --case-id "$3" --run-index "$4" \
+    --experiment-digest "${EXPERIMENT_DIGEST}" --memory-mode "${MEMORY_MODE}"
+}
+
+# The server dispatches only runtimes declared in runtime.toml, so a model
+# asked for on the command line must exist there as a binding. The
+# declaration goes into this invocation's isolated config copy only; the repo
+# config is not touched.
+declare_requested_runtimes() {
+  local runtime_toml="${CONFIG_DIR}/runtime.toml"
+  local entry provider model alias
+  local -a entries
+  IFS=',' read -r -a entries <<< "${MODELS}"
+  for entry in "${entries[@]}"; do
+    provider="${entry%%:*}"
+    model="${entry#*:}"
+    alias="$(model_alias_of "${provider}" "${model}")"
+    if grep -qF "[${provider}.${alias}]" "${runtime_toml}" \
+      || grep -qF "[${provider}.\"${alias}\"]" "${runtime_toml}"; then
+      continue
+    fi
+    if ! grep -qF "[models.${alias}]" "${runtime_toml}" \
+      && ! grep -qF "[models.\"${alias}\"]" "${runtime_toml}"; then
+      printf '\n[models."%s"]\napi-name = "%s"\nmax-context = 32768\ntools-support = true\nstreaming = true\n' \
+        "${alias}" "${model}" >> "${runtime_toml}"
+    fi
+    printf '\n[%s."%s"]\nmax-concurrent = 1\n' \
+      "${provider}" "${alias}" >> "${runtime_toml}"
+    echo "[coding-eval] declared runtime ${provider}.${alias} (api-name ${model}) in the isolated config copy" >&2
+  done
+}
+
+prepare_live_environment() {
+  require_cmd docker
+  local run_suffix
+  run_suffix="$(date +%Y%m%d_%H%M%S)-$$"
+  LIVE_RUN_DIR="${OUT_DIR}/live-${run_suffix}"
+  TARGET_DIR="${LIVE_RUN_DIR}/target"
+  CONFIG_DIR="${LIVE_RUN_DIR}/config"
+  SERVER_LOG="${LIVE_RUN_DIR}/server.log"
+  mkdir -p "${TARGET_DIR}" "${CONFIG_DIR}"
+  cp -R "${ROOT_DIR}/config/." "${CONFIG_DIR}"
+  # The eval Keeper names `base`, which the copied catalog lists with no build.
+  # Promote the fixture image CI builds into Docker. The host file holds
+  # builds only: the binary ships the names, `ocaml` included.
+  local base_image="masc-sandbox-test:ci"
+  if ! GRADER_IMAGE_ID="$(docker image inspect "${base_image}" --format '{{.Id}}')"; then
+    echo "coding eval failed: ${base_image} is not in Docker's image store; build it with \`masc sandbox-image --tag ${base_image}\`" >&2
+    exit 1
+  fi
+  printf '[images.base.docker]\nreference = "%s"\n' \
+    "${GRADER_IMAGE_ID}" > "${CONFIG_DIR}/sandbox-image-builds.toml"
+  declare_requested_runtimes
+  if [[ -z "${PORT}" ]]; then
+    PORT="$(harness_pick_free_port)"
+  fi
+}
+
+# The experiment owns input identity. A runtime limit or model name alone is
+# not enough to reuse a receipt produced by another corpus/configuration.
+experiment_inputs() {
+  local -a arguments=(capture --root "${ROOT_DIR}" --cases "${CASES_DIR}"
+    --runtime-config "${CONFIG_DIR}/runtime.toml"
+    --binary "${ROOT_DIR}/_build/default/bin/main_eio.exe"
+    --report-binary "${CLI_EXE}" --models "${MODELS}"
+    --memory-mode "${MEMORY_MODE}" --execution-mode "${EXECUTION_MODE}"
+    --image "${GRADER_IMAGE_ID}" --out "${OUT_DIR}/experiment.json")
+  if [[ -n "${MANIFEST}" ]]; then
+    arguments+=(--acceptance-manifest "${MANIFEST}")
+  fi
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" "${arguments[@]}" "$@"
+}
+
+assert_experiment_inputs() {
+  local observed
+  observed="$(experiment_inputs --check)" || return 1
+  [[ "${observed}" == "${EXPERIMENT_DIGEST}" ]]
+}
+
+# All stages use one captured candidate and fresh isolated Docker graders.
+# Host code handles bytes only; no candidate verifier/import/build runs here.
+grade_case_stages() {
+  local case_dir="$1" workspace="$2" run_dir="$3"
+  assert_experiment_inputs >/dev/null || return 125
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_sandbox.py" \
+    --case "${case_dir}" --workspace "${workspace}" \
+    --image "${GRADER_IMAGE_ID}" --stage all --output "${run_dir}"
+}
+
+start_live_server() {
+  local launch_log="${LIVE_RUN_DIR}/launch.log"
+  local bootstrap_log="${LIVE_RUN_DIR}/bootstrap.log"
+
+  # Mint the workspace-local bearer BEFORE the server starts: the login CLI
+  # writes the credential into the base path's auth store for the server to
+  # read at boot, and running it against a base path a live server owns makes
+  # that server yield ownership and shut down (transport/common.sh carries the
+  # same ordering note).
+  local minted_token
+  if ! minted_token="$(harness_mint_admin_token \
+    "${ROOT_DIR}/_build/default/bin/main_eio.exe" "${PORT}" "${TARGET_DIR}" \
+    "coding-eval-harness")"; then
+    echo "coding eval failed: could not mint a harness bearer" >&2
+    exit 1
+  fi
+  MCP_TOKEN="${minted_token}"
+  export MCP_TOKEN
+
+  (
+    # The ambient shell may carry tokens for a different live server; the
+    # eval server must not adopt them as its own identity.
+    unset MCP_TOKEN MCP_AUTH_TOKEN MASC_ADMIN_TOKEN MASC_TOKEN
+    # Connector credentials stay out too: an eval server joining the real
+    # Slack/Discord workspaces is an isolation hole, not a feature.
+    unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
+    # No cloud-provider fallback: if the requested local runtime cannot
+    # serve, the eval must fail loudly, not silently measure another model.
+    unset OLLAMA_CLOUD_API_KEY
+    export MASC_CONFIG_DIR="${CONFIG_DIR}"
+    export MASC_LOG_FILE="${SERVER_LOG}"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
+    if context_recovery_cases_selected; then
+      export MASC_KEEPER_MEMORY_OS_RECALL="1"
+      export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
+    fi
+    export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
+    exec "${ROOT_DIR}/scripts/run-local.sh" \
+      --target-dir "${TARGET_DIR}" \
+      --port "${PORT}" \
+      --bootstrap-only
+  ) >"${bootstrap_log}" 2>&1
+  (
+    unset MCP_TOKEN MCP_AUTH_TOKEN MASC_ADMIN_TOKEN MASC_TOKEN
+    # Connector credentials stay out too: an eval server joining the real
+    # Slack/Discord workspaces is an isolation hole, not a feature.
+    unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
+    # No cloud-provider fallback: if the requested local runtime cannot
+    # serve, the eval must fail loudly, not silently measure another model.
+    unset OLLAMA_CLOUD_API_KEY
+    export MASC_CONFIG_DIR="${CONFIG_DIR}"
+    export MASC_LOG_FILE="${SERVER_LOG}"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
+    if context_recovery_cases_selected; then
+      export MASC_KEEPER_MEMORY_OS_RECALL="1"
+      export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
+    fi
+    export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
+    exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
+  ) >"${launch_log}" 2>&1 &
+  SERVER_PID="$!"
+
+  # Three sequential boots precede readiness (login mini-stack, bootstrap-only,
+  # the server itself), so the health budget is generous on purpose.
+  if ! harness_wait_for_health "${PORT}" 180; then
+    harness_print_log_tail "${bootstrap_log}" 120
+    harness_print_log_tail "${launch_log}" 120
+    harness_print_log_tail "${SERVER_LOG}" 120
+    echo "coding eval failed: server did not become healthy on port ${PORT}" >&2
+    exit 1
+  fi
+
+  MCP_URL="http://127.0.0.1:${PORT}/mcp"
+  export MCP_URL
+  # /health can answer while the MCP session layer is still in its lazy-init
+  # phase, so a single initialize can land in that window under load.
+  local init_attempt initialized=0
+  for init_attempt in 1 2 3 4 5 6; do
+    if initialize_mcp_session; then
+      initialized=1
+      break
+    fi
+    sleep 5
+  done
+  if [[ "${initialized}" != "1" ]]; then
+    harness_print_log_tail "${SERVER_LOG}" 120
+    echo "coding eval failed: MCP initialize did not return a session id" >&2
+    exit 1
+  fi
+}
+
+harness_prompt_asset() {
+  local name="$1"
+  local path="${ROOT_DIR}/scripts/harness/prompts/${name}.txt"
+  if [[ ! -r "${path}" ]]; then
+    echo "missing required harness prompt asset: ${path}" >&2
+    return 1
+  fi
+  cat "${path}"
+}
+
+coding_keeper_instructions() {
+  harness_prompt_asset "coding_keeper"
+}
+
+keeper_tool_call_names() {
+  local keeper_name="$1"
+  local log_dir="${TARGET_DIR}/.masc/tool_calls"
+  if [[ ! -d "${log_dir}" ]]; then
+    printf '[]'
+    return 0
+  fi
+  find "${log_dir}" -type f -name '*.jsonl' | LC_ALL=C sort \
+    | while IFS= read -r path; do
+        cat "${path}"
+      done \
+    | jq -cs --arg keeper "${keeper_name}" '
+        [ .[] | select(.keeper == $keeper) | .tool ] | map(select(type == "string"))
+      '
+}
+
+stop_keeper_best_effort() {
+  local keeper_name="$1"
+  call_mcp_tool 9000 "masc_keeper_down" \
+    "$(jq -cn --arg name "${keeper_name}" '{name:$name}')" 20 >/dev/null 2>&1 || true
+}
+
+# A case-local memory.json lets the same real workspace run with and without a
+# stale Memory OS fact.  The file is harness input, not part of case.json, so
+# the coding case contract and pass authority stay unchanged.  The generated
+# snapshot is the production current-only wire shape and is copied into the run
+# directory before the keeper assembles its first task prompt.
+seed_case_memory() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3"
+  local declaration="${case_dir}/memory.json"
+  if [[ "${MEMORY_MODE}" == "off" || ! -f "${declaration}" ]]; then
+    return 1
+  fi
+  if ! jq -e '
+      (.age_sec | type == "number" and . >= 0)
+      and (.claims | type == "array" and length > 0)
+      and all(.claims[]; type == "string" and length > 0)
+    ' "${declaration}" >/dev/null; then
+    echo "invalid context-recovery memory declaration: ${declaration}" >&2
+    return 2
+  fi
+
+  local age_sec observed_at facts snapshot_path
+  age_sec="$(jq -r '.age_sec | floor' "${declaration}")"
+  observed_at=$(( $(date +%s) - age_sec ))
+  facts="$(jq -c --argjson observed_at "${observed_at}" '
+    [.claims[] | {claim: ., category: "fact", first_seen: $observed_at}]
+  ' "${declaration}")"
+  # This harness sets MASC_CONFIG_DIR, and Config_dir_resolver deliberately
+  # resolves Keeper Memory OS beside the keeper profiles in that directory.
+  # Writing under TARGET_DIR/.masc/keepers would create a valid but unread
+  # shadow snapshot.
+  snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-current.json"
+  mkdir -p "$(dirname "${snapshot_path}")"
+  jq -n \
+    --argjson observed_at "${observed_at}" \
+    --argjson facts "${facts}" \
+    '{
+      revision: 1,
+      updated_at: $observed_at,
+      source: {kind: "explicit_write", trace_id: "context-recovery-seed"},
+      facts: $facts,
+      change: {added: $facts, removed: [], retained: 0}
+    }' > "${snapshot_path}"
+  cp "${snapshot_path}" "${run_dir}/memory-seed.json"
+  return 0
+}
+
+seed_case_source_memory() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3"
+  local declaration="${case_dir}/source-memory.json"
+  [[ "${MEMORY_MODE}" == "source-bound" && -f "${declaration}" ]] || return 1
+  if ! jq -e '
+      (.age_sec | type == "number" and . >= 0)
+      and (.source_path | type == "string" and length > 0)
+      and (.stale_source | type == "string")
+      and (.claim | type == "string" and length > 0)
+    ' "${declaration}" >/dev/null; then
+    echo "invalid source-bound memory declaration: ${declaration}" >&2
+    return 2
+  fi
+
+  local age_sec observed_at source_path claim digest snapshot_path
+  age_sec="$(jq -r '.age_sec | floor' "${declaration}")"
+  observed_at=$(( $(date +%s) - age_sec ))
+  source_path="$(jq -r '.source_path' "${declaration}")"
+  claim="$(jq -r '.claim' "${declaration}")"
+  # Keep the declared bytes exact. Command substitution strips trailing
+  # newlines, so only the digest output may cross that boundary; the source
+  # bytes stream directly from jq into shasum.
+  digest="sha256:$(jq -rj '.stale_source' "${declaration}" | shasum -a 256 | awk '{print $1}')"
+  snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-source-current.json"
+  mkdir -p "$(dirname "${snapshot_path}")"
+  jq -n \
+    --argjson observed_at "${observed_at}" \
+    --arg source_path "${source_path}" \
+    --arg digest "${digest}" \
+    --arg claim "${claim}" \
+    '{
+      revision: 1,
+      updated_at: $observed_at,
+      trace_id: "context-recovery-source-seed",
+      facts: [{
+        claim: $claim,
+        first_seen: $observed_at,
+        source: {kind: "file", path: $source_path, sha256: $digest}
+      }],
+      invalidations: []
+    }' > "${snapshot_path}"
+  cp "${snapshot_path}" "${run_dir}/memory-source-seed.json"
+}
+
+capture_last_prompt() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3"
+  local declaration="${case_dir}/memory.json"
+  local capture_path="${run_dir}/last-prompt.json"
+  if ! curl -fsS -m 20 \
+    "http://127.0.0.1:${PORT}/api/v1/keepers/${keeper_name}/last-prompt" \
+    -H "Authorization: Bearer ${MCP_TOKEN}" > "${capture_path}"; then
+    return 1
+  fi
+  if [[ "${MEMORY_MODE}" == "source-bound" ]]; then
+    declaration="${case_dir}/source-memory.json"
+    local stale_claim source_path
+    stale_claim="$(jq -r '.claim' "${declaration}")"
+    source_path="$(jq -r '.source_path' "${declaration}")"
+    jq -e --arg claim "${stale_claim}" --arg source_path "${source_path}" '
+      ([.. | strings | select(contains($claim))] | length) == 0
+      and ([.. | strings | select(contains("reason=source_changed"))] | length) > 0
+      and ([.. | strings | select(contains($source_path))] | length) > 0
+    ' "${capture_path}" >/dev/null
+    return
+  fi
+  while IFS= read -r claim; do
+    local matches
+    matches="$(jq --arg claim "${claim}" '
+      [.. | strings | select(contains($claim))] | length
+    ' "${capture_path}")"
+    if [[ "${MEMORY_MODE}" == "filtered" ]]; then
+      [[ "${matches}" == "0" ]] || return 1
+    else
+      [[ "${matches}" -gt 0 ]] || return 1
+    fi
+  done < <(jq -r '.claims[]' "${declaration}")
+  if [[ "${MEMORY_MODE}" == "verified" || "${MEMORY_MODE}" == "filtered" ]]; then
+    local probe_output="${run_dir}/live-probe.txt"
+    [[ -s "${probe_output}" ]] || return 1
+    if ! jq -e --rawfile probe "${probe_output}" '
+      [.. | strings | select(contains($probe | rtrimstr("\n")))] | length > 0
+    ' "${capture_path}" >/dev/null; then
+      return 1
+    fi
+  fi
+}
+
+capture_recreated_source_memory() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3" workspace="$4"
+  local declaration="${case_dir}/source-memory.json"
+  local snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-source-current.json"
+  local source_path host_source_path digest
+  source_path="$(jq -r '.source_path' "${declaration}")"
+  host_source_path="${workspace}/${source_path#workspace/}"
+  [[ -f "${snapshot_path}" && -f "${host_source_path}" ]] || return 1
+  digest="sha256:$(shasum -a 256 "${host_source_path}" | awk '{print $1}')"
+  cp "${snapshot_path}" "${run_dir}/memory-source-final.json"
+  jq -e --arg source_path "${source_path}" --arg digest "${digest}" '
+    (.invalidations | length) == 0
+    and (.facts | length) == 1
+    and .facts[0].source.path == $source_path
+    and .facts[0].source.sha256 == $digest
+  ' "${snapshot_path}" >/dev/null
+}
+
+apply_live_probe() {
+  local case_dir="$1" keeper_name="$2" run_dir="$3" workspace="$4"
+  local probe="${case_dir}/probe.sh"
+  if [[ ! -f "${probe}" ]]; then
+    echo "live-probe memory mode requires ${probe}" >&2
+    return 1
+  fi
+  local note
+  if ! note="$(bash "${probe}" "${workspace}")" || [[ -z "${note}" ]]; then
+    echo "live context probe failed for ${case_dir}" >&2
+    return 1
+  fi
+  printf '%s\n' "${note}" > "${run_dir}/live-probe.txt"
+  if [[ "${MEMORY_MODE}" == "verified" ]]; then
+    curl -fsS -m 20 -X POST \
+      "http://127.0.0.1:${PORT}/api/v1/keepers/${keeper_name}/operator-note" \
+      -H "Authorization: Bearer ${MCP_TOKEN}" \
+      -H 'Content-Type: application/json' \
+      -d "$(jq -cn --arg text "${note}" '{text:$text}')" \
+      > "${run_dir}/operator-note-response.json"
+  else
+    local now old_facts refreshed_fact snapshot_path journal_path
+    now="$(date +%s)"
+    old_facts="$(jq -c '.facts' "${run_dir}/memory-seed.json")"
+    refreshed_fact="$(jq -cn --arg claim "${note}" --argjson now "${now}" \
+      '{claim:$claim, category:"fact", first_seen:$now}')"
+    snapshot_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-current.json"
+    journal_path="${CONFIG_DIR}/keepers/${keeper_name}.memory-journal.jsonl"
+    jq -n \
+      --argjson now "${now}" \
+      --argjson old_facts "${old_facts}" \
+      --argjson refreshed_fact "${refreshed_fact}" \
+      '{
+        revision: 2,
+        updated_at: $now,
+        source: {kind: "explicit_write", trace_id: "context-recovery-filtered"},
+        facts: [$refreshed_fact],
+        change: {added: [$refreshed_fact], removed: $old_facts, retained: 0}
+      }' > "${snapshot_path}"
+    jq -cn \
+      --argjson now "${now}" \
+      --argjson old_facts "${old_facts}" \
+      --argjson refreshed_fact "${refreshed_fact}" \
+      '{
+        outcome:"committed",
+        recorded_at:$now,
+        revision:2,
+        source:{kind:"explicit_write", trace_id:"context-recovery-filtered"},
+        change:{added:[$refreshed_fact], removed:$old_facts, retained:0}
+      }' >> "${journal_path}"
+    cp "${snapshot_path}" "${run_dir}/memory-refreshed.json"
+    cp "${journal_path}" "${run_dir}/memory-journal.jsonl"
+  fi
+}
+
+append_row() {
+  local row="$1"
+  local evidence_path="$2"
+  printf '%s\n' "${row}" > "${evidence_path}"
+  printf '%s\n' "${row}" >> "${RUNS_JSONL}"
+}
+
+json_string_or_null() {
+  local value="$1"
+  if [[ -z "${value}" ]]; then
+    printf 'null'
+  else
+    jq -cn --arg v "${value}" '$v'
+  fi
+}
+
+json_number_or_null() {
+  local value="$1"
+  if [[ "${value}" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+    printf '%s' "${value}"
+  else
+    printf 'null'
+  fi
+}
+
+# Count how many of the reference-solution target files the candidate actually
+# changed, comparing the graded workspace against the case's pristine copy by
+# content (cmp, never output parsing). A target file the candidate created that
+# the pristine tree lacks, or one whose bytes differ, counts as edited; one it
+# left untouched or never wrote does not. The solution overlay is the case
+# author's fix, so its file set is the ground-truth "files that needed editing".
+count_edited_target_files() {
+  local case_dir="$1" workspace="$2"
+  local solution_dir="${case_dir}/solution"
+  local pristine_dir="${case_dir}/workspace"
+  local count=0 rel
+  while IFS= read -r target_path; do
+    rel="${target_path#"${solution_dir}/"}"
+    if [[ -f "${workspace}/${rel}" ]] \
+      && ! cmp -s "${pristine_dir}/${rel}" "${workspace}/${rel}"; then
+      count=$(( count + 1 ))
+    fi
+  done < <(find "${solution_dir}" -type f)
+  printf '%s' "${count}"
+}
+
+# Count the pristine source files (everything in the canonical workspace except
+# the protected test oracles) whose bytes the candidate changed. Only files that
+# exist in the pristine tree are compared, so artifacts a check run drops
+# (e.g. __pycache__) never read as candidate edits. Zero here means the run
+# touched no source at all -- it gave up rather than edited the wrong file.
+count_edited_source_files() {
+  local case_dir="$1" workspace="$2" test_files="$3"
+  local pristine_dir="${case_dir}/workspace"
+  local count=0 rel is_test test_file
+  while IFS= read -r pristine_path; do
+    rel="${pristine_path#"${pristine_dir}/"}"
+    is_test=0
+    while IFS= read -r test_file; do
+      [[ -z "${test_file}" ]] && continue
+      if [[ "${rel}" == "${test_file}" ]]; then
+        is_test=1
+        break
+      fi
+    done <<< "${test_files}"
+    [[ "${is_test}" == "1" ]] && continue
+    if [[ ! -f "${workspace}/${rel}" ]] \
+      || ! cmp -s "${pristine_path}" "${workspace}/${rel}"; then
+      count=$(( count + 1 ))
+    fi
+  done < <(find "${pristine_dir}" -type f)
+  printf '%s' "${count}"
+}
+
+run_one() {
+  local provider="$1"
+  local model="$2"
+  local case_dir="$3"
+  local repeat_index="$4"
+
+  local case_id timeout_sec prompt test_files
+  case_id="$(jq -r '.id' "${case_dir}/case.json")"
+  timeout_sec="$(jq -r '.timeout_sec' "${case_dir}/case.json")"
+  prompt="$(jq -r '.prompt' "${case_dir}/case.json")"
+  # Protected test oracle files (one per line), restored pristine before
+  # grading. Defaults to check.sh when the key is absent — the corpus
+  # convention Coding_eval_case also defaults to.
+  test_files="$(jq -r '(.test_files // ["check.sh"])[]' "${case_dir}/case.json")"
+
+  local run_id run_dir workspace evidence_path
+  run_id="$(run_id_of "${provider}" "${model}" "${case_id}" "${repeat_index}")"
+  run_dir="${OUT_DIR}/runs/${run_id}"
+  evidence_path="${run_dir}/evidence.json"
+  assert_experiment_inputs >/dev/null || return 1
+  if [[ -f "${evidence_path}" ]]; then
+    if ! python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" check-receipt \
+      --receipt "${evidence_path}" --run-id "${run_id}" --provider "${provider}" \
+      --model "${model}" --case-id "${case_id}" --run-index "${repeat_index}" \
+      --experiment-digest "${EXPERIMENT_DIGEST}" --memory-mode "${MEMORY_MODE}"; then
+      echo "[coding-eval] refusing stale receipt ${run_id}" >&2
+      return 1
+    fi
+    echo "[coding-eval] skip ${run_id} (same experiment receipt)" >&2
+    return 0
+  fi
+  mkdir -p "${run_dir}"
+
+  local keeper_name="coding-eval-${run_id}"
+  workspace="${TARGET_DIR}/.masc/playground/docker/${keeper_name}/workspace"
+  local workspace_prepared=false
+  # Effectful tools (Execute/Edit/Write) are operator-gated by default, and an
+  # eval run has no operator: every call sat in elicitation until its ~180s
+  # expiry and the episode starved (#31640 measured exactly this). The
+  # product's own per-keeper trust knob answers it — a keeper profile TOML
+  # read at creation time. MASC_CONFIG_DIR (which this harness sets) shadows
+  # the <base_path>/.masc/config overlay, so the profile goes into the
+  # isolated config copy, not the base path.
+  local profile_dir="${CONFIG_DIR}/keepers"
+  mkdir -p "${profile_dir}"
+  {
+    printf '[keeper]\nalways_allow = true\nsandbox_profile = "docker"\nsandbox_image = "base"\ninstructions = """\n'
+    coding_keeper_instructions
+    printf '"""\n'
+  } > "${profile_dir}/${keeper_name}.toml"
+  local runtime_id="${provider}.$(model_alias_of "${provider}" "${model}")"
+  local start_epoch end_epoch duration_ms recorded_at
+  start_epoch="$(date +%s)"
+
+  local finish_status="ok" error_text="" verify_exit_json="null" regression_exit_json="null"
+  local build_exit_json="null" edited_source_json="null" edited_target_json="null"
+  local operation_id_json="null"
+  local tool_calls_json='[]' input_tokens_json="null" output_tokens_json="null"
+  local cost_usd_json="null"
+  local memory_seeded=0
+
+  local create_args
+  create_args="$(jq -cn \
+    --arg name "${keeper_name}" \
+    --arg instructions "$(coding_keeper_instructions)" \
+    --arg runtime_id "${runtime_id}" \
+    '{
+      name: $name,
+      instructions: $instructions,
+      runtime_id: $runtime_id,
+      activation_mode: "manual"
+    }')"
+
+  if ! call_mcp_tool 4000 "masc_keeper_up" "${create_args}" 45; then
+    finish_status="transport_error"
+    error_text="keeper_up: $(tool_error_text)"
+  else
+    # The chat-stream approval hook asks an operator per effectful call and
+    # expires unanswered asks (#31640 measured ~180s per round). Yolo is the
+    # product's explicit per-keeper, process-lifetime "stop asking in this
+    # chat" stance; the durable Keeper_gate still decides external effects,
+    # where the profile's always_allow answers.
+    if ! curl -fsS -m 20 -X POST       "http://127.0.0.1:${PORT}/api/v1/keepers/tool-approval-mode"       -H "Authorization: Bearer ${MCP_TOKEN}" -H 'Content-Type: application/json'       -d "$(jq -cn --arg name "${keeper_name}" '{name:$name, mode:"yolo"}')"       >/dev/null 2>&1; then
+      finish_status="transport_error"
+      error_text="tool-approval-mode yolo set failed for ${keeper_name}"
+    fi
+    if [[ "${finish_status}" == "ok" && -f "${case_dir}/memory.json" && "${MEMORY_MODE}" != "off" && "${MEMORY_MODE}" != "source-bound" ]]; then
+      if seed_case_memory "${case_dir}" "${keeper_name}" "${run_dir}"; then
+        memory_seeded=1
+      else
+        finish_status="transport_error"
+        error_text="failed to seed stale Memory OS fact for ${keeper_name}"
+      fi
+    fi
+    if [[ "${finish_status}" == "ok" && -f "${case_dir}/source-memory.json" && "${MEMORY_MODE}" == "source-bound" ]]; then
+      if seed_case_source_memory "${case_dir}" "${keeper_name}" "${run_dir}"; then
+        memory_seeded=1
+      else
+        finish_status="transport_error"
+        error_text="failed to seed source-bound Memory OS fact for ${keeper_name}"
+      fi
+    fi
+  fi
+
+  if [[ "${finish_status}" == "ok" ]]; then
+    # The local profile writes inside the keeper playground and the model
+    # addresses paths relative to it, so the case workspace lives there —
+    # an external absolute directory produced playground-confined
+    # cwd_not_directory / File-not-found on every call.
+    # Docker keepers mount <playgrounds>/docker/<name>/ as their working
+    # root (keeper_sandbox_config.host_root_rel_of_profile) — the profile
+    # segment keeps lanes from finding each other's trees. The profile is
+    # pinned to docker in the keeper TOML above.
+    rm -rf "${workspace}"
+    mkdir -p "${workspace}"
+    cp -R "${case_dir}/workspace/." "${workspace}"
+    workspace_prepared=true
+    if [[ "${MEMORY_MODE}" == "verified" || "${MEMORY_MODE}" == "filtered" ]]; then
+      if ! apply_live_probe "${case_dir}" "${keeper_name}" "${run_dir}" "${workspace}"; then
+        finish_status="transport_error"
+        error_text="failed to inject live context probe for ${keeper_name}"
+      fi
+    fi
+    local message request_json
+    message="$(printf '%s\n\nWorkspace directory (relative to your working root): workspace\nRun the check inside that directory.' \
+      "${prompt}")"
+    if [[ "${finish_status}" == "ok" ]]; then
+      if ! call_mcp_tool 4100 "masc_keeper_msg" \
+        "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" \
+          '{name:$name, message:$message}')" 30; then
+        finish_status="transport_error"
+        error_text="keeper_msg: $(tool_error_text)"
+      else
+        request_json="$(tool_result_json)"
+        printf '%s' "${request_json}" > "${run_dir}/msg-submit.json"
+      # masc_keeper_msg submits an async chat operation; the settle signal is
+      # masc_keeper_delegate_status with the same operation_id (the tool's own
+      # description names this contract). Terminal states are Succeeded /
+      # Failed / Cancelled.
+        local operation_id
+        if ! operation_id_json="$(printf '%s' "${request_json}" | coding_eval_operation_id)"; then
+          operation_id_json="null"
+          finish_status="transport_error"
+          error_text="keeper_msg returned no operation_id string"
+        else
+          operation_id="$(printf '%s' "${operation_id_json}" | jq -r '.')"
+          local poll_deadline result_json op_state
+          poll_deadline=$(( start_epoch + timeout_sec ))
+          result_json=""
+          while [[ "$(date +%s)" -lt "${poll_deadline}" ]]; do
+            if call_mcp_tool 4200 "masc_keeper_delegate_status" \
+              "$(jq -cn --arg name "${keeper_name}" --arg op "${operation_id}" \
+                '{target:{kind:"keeper", name:$name}, operation_id:$op}')" 20; then
+              local status_payload
+              if ! status_payload="$(tool_result_json)" \
+                || ! printf '%s' "${status_payload}" | jq -es --argjson expected "${operation_id_json}" \
+                'length == 1 and (.[0] | type == "object" and .operation_id == $expected)' >/dev/null; then
+                printf '%s' "${LAST_TOOL_RAW}" > "${run_dir}/operation-invalid.json"
+                finish_status="transport_error"
+                error_text="keeper_delegate_status returned no matching operation_id"
+                break
+              fi
+              op_state="$(printf '%s' "${status_payload}" | jq -r '.state // empty')"
+              case "${op_state}" in
+                Succeeded|Failed|Cancelled)
+                  result_json="${status_payload}"
+                  break
+                  ;;
+              esac
+            fi
+            sleep "${POLL_INTERVAL_SEC}"
+          done
+          if [[ "${finish_status}" == "ok" ]]; then
+            if [[ -z "${result_json}" ]]; then
+              finish_status="timeout"
+              error_text="episode did not finish within ${timeout_sec}s"
+            else
+              printf '%s' "${result_json}" > "${run_dir}/operation-final.json"
+              case "$(printf '%s' "${result_json}" | jq -r '.state')" in
+                Succeeded)
+                  finish_status="ok"
+                  ;;
+                *)
+                  finish_status="provider_error"
+                  error_text="$(printf '%s' "${result_json}" | jq -r \
+                    '[.state, (.failure_kind // empty), (.failure_detail // empty)] | map(select(. != "")) | join(": ")')"
+                  ;;
+              esac
+            fi
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # Prompt capture exists only after the first turn has been assembled.  Keep
+  # this after the async operation settles; checking it before keeper_msg would
+  # turn the expected pre-turn 404 into a false transport failure.
+  if [[ "${memory_seeded}" == "1" ]]; then
+    if ! capture_last_prompt "${case_dir}" "${keeper_name}" "${run_dir}"; then
+      if [[ "${finish_status}" == "ok" ]]; then
+        finish_status="transport_error"
+        error_text="seeded Memory OS fact was absent from last-prompt evidence"
+      fi
+    fi
+  fi
+
+  if [[ "${finish_status}" == "ok" && "${MEMORY_MODE}" == "source-bound" && -f "${case_dir}/source-memory.json" ]]; then
+    if ! capture_recreated_source_memory "${case_dir}" "${keeper_name}" "${run_dir}" "${workspace}"; then
+      finish_status="provider_error"
+      error_text="source-bound memory was not recreated from the live source"
+    fi
+  fi
+
+  # verify runs for every episode that prepared its workspace, timeouts included:
+  # the artifact state is diagnostic even when the episode never settled.
+  # The pass verdict stays status=ok AND verify_exit=0 (an unsettled episode
+  # is not a completed task), and the report CLI enforces that equation.
+  if [[ "${workspace_prepared}" == true ]]; then
+    # Deterministic trajectory signals for the D5 failure taxonomy: how many
+    # pristine source files the candidate changed, and how many of them were the
+    # reference-solution targets. Computed before the oracle restore below so a
+    # candidate's edit to a test file is not what these count -- only real source
+    # edits are. The report splits a verify-red run by these without guessing.
+    edited_source_json="$(count_edited_source_files "${case_dir}" "${workspace}" "${test_files}")"
+    edited_target_json="$(count_edited_target_files "${case_dir}" "${workspace}")"
+
+    # Restore the complete declared oracle only inside the grader's private
+    # snapshot. Candidate links cannot redirect a host-side restoration. Every
+    # stage measures the same captured bytes in its own fresh container.
+    set +e
+    grade_case_stages "${case_dir}" "${workspace}" "${run_dir}" \
+      >"${run_dir}/grading.log" 2>&1
+    local grading_code=$?
+    set -e
+    if [[ "${grading_code}" == "0" ]]; then
+      verify_exit_json="$(jq -r '.verify' "${run_dir}/grading.json")"
+      regression_exit_json="$(jq -r '.regression' "${run_dir}/grading.json")"
+      build_exit_json="$(jq -r '.build' "${run_dir}/grading.json")"
+    else
+      # A refused snapshot or grader launch is a failed verification, never an
+      # absent/green stage. The reason remains in grading.log.
+      verify_exit_json="${grading_code}"
+    fi
+  fi
+
+  tool_calls_json="$(keeper_tool_call_names "${keeper_name}")"
+
+  local config_resp
+  config_resp="$(curl -fsS -m 10 "http://127.0.0.1:${PORT}/api/v1/keepers/${keeper_name}/config" \
+    -H "Authorization: Bearer ${MCP_TOKEN}" 2>/dev/null || true)"
+  if [[ -n "${config_resp}" ]]; then
+    local has_usage
+    has_usage="$(jq -r '.metrics.last_usage_reported_at // empty' <<< "${config_resp}")"
+    if [[ -n "${has_usage}" && "${has_usage}" != "null" ]]; then
+      input_tokens_json="$(jq -r '.metrics.total_input_tokens // null' <<< "${config_resp}")"
+      output_tokens_json="$(jq -r '.metrics.total_output_tokens // null' <<< "${config_resp}")"
+      cost_usd_json="$(jq -c '
+        def amount: type == "number" and isfinite and . >= 0;
+        # jq uses IEEE-754 numbers: counts outside the exact-integer range
+        # cannot supply trustworthy coverage to this numeric-only result.
+        def count: amount and floor == . and . <= 9007199254740991;
+        .metrics.total_cost_usd
+        | if type == "object"
+          and keys == ["history", "known_cost_usd", "priced_readings", "unobserved_attempts", "unpriced_readings", "unresolved_readings"]
+          and (.known_cost_usd | amount)
+          and ([.priced_readings, .unpriced_readings, .unresolved_readings, .unobserved_attempts] | all(count))
+          and .history == "complete" and .priced_readings > 0
+          and .unpriced_readings == 0 and .unresolved_readings == 0
+          and .unobserved_attempts == 0
+          then .known_cost_usd else null end
+      ' <<< "${config_resp}")"
+    fi
+  fi
+
+  stop_keeper_best_effort "${keeper_name}"
+
+  end_epoch="$(date +%s)"
+  duration_ms=$(( (end_epoch - start_epoch) * 1000 ))
+  recorded_at="${end_epoch}"
+
+  local row
+  row="$(evidence_row \
+    "${case_id}" "${repeat_index}" "${run_id}" "${provider}" "${model}" \
+    "${finish_status}" "${verify_exit_json}" "${duration_ms}" "${recorded_at}" \
+    "${tool_calls_json}" "${input_tokens_json}" "${output_tokens_json}" \
+    "${cost_usd_json}" "$(json_string_or_null "${error_text}")" \
+    "${regression_exit_json}" "${edited_source_json}" "${edited_target_json}" \
+    "${build_exit_json}" "${operation_id_json}" "${EXPERIMENT_DIGEST}" "${MEMORY_MODE}")"
+  append_row "${row}" "${evidence_path}"
+  echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json} regression_exit=${regression_exit_json} edited_target=${edited_target_json} build=${build_exit_json}" >&2
+}
+
+main() {
+  ensure_cli_built
+  prepare_live_environment
+  EXPERIMENT_DIGEST="$(experiment_inputs)" || exit 1
+  start_live_server
+  assert_experiment_inputs >/dev/null || exit 1
+
+  local case_dirs
+  case_dirs="$(selected_case_dirs)"
+  if [[ -z "${case_dirs}" ]]; then
+    echo "no cases selected under ${CASES_DIR}" >&2
+    exit 2
+  fi
+
+  local model_entry provider model case_dir repeat_index
+  IFS=',' read -r -a model_entries <<< "${MODELS}"
+  for model_entry in "${model_entries[@]}"; do
+    provider="${model_entry%%:*}"
+    model="${model_entry#*:}"
+    if [[ -z "${provider}" || -z "${model}" || "${provider}" == "${model_entry}" ]]; then
+      echo "model entries must look like provider:model, got: ${model_entry}" >&2
+      exit 2
+    fi
+    while IFS= read -r case_dir; do
+      for (( repeat_index = 1; repeat_index <= REPEATS; repeat_index++ )); do
+        run_one "${provider}" "${model}" "${case_dir}" "${repeat_index}"
+      done
+    done <<< "${case_dirs}"
+  done
+
+  assert_experiment_inputs >/dev/null || exit 1
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" collect \
+    --experiment "${OUT_DIR}/experiment.json" --runs "${OUT_DIR}/runs" --out "${RUNS_JSONL}"
+  "${CLI_EXE}" --cases "${CASES_DIR}" --runs "${RUNS_JSONL}" --out "${OUT_DIR}" \
+    --k "${PASS_AT_K}"
+  echo "[coding-eval] report: ${OUT_DIR}/REPORT.md" >&2
+  if [[ -n "${MANIFEST}" && -f "${MANIFEST}" ]]; then
+    "${CHECKER_EXE}" --manifest "${MANIFEST}" --runs "${RUNS_JSONL}" --out "${OUT_DIR}"
+    echo "[coding-eval] checker: ${OUT_DIR}/checker.json" >&2
+  fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main
+fi

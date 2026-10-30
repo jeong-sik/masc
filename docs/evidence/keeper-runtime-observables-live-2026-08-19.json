@@ -1,0 +1,43 @@
+{
+  "captured_at": "2026-08-19T08:23:00Z",
+  "purpose": "runtime observables 읽기 표면의 라이브 실측 — #29047(endpoint)·#29048(패널) 배포 후 첫 확인",
+  "endpoint": "GET /api/v1/dashboard/runtime-observables",
+  "http_status": 200,
+  "freshness": {
+    "age_seconds": 19.3,
+    "last_write_unixtime": 1787127773.23,
+    "reading": "#29047이 추가한 last_write 셀이 살아 있다. 응답 시점 기준 19초 전 쓰기라 writer가 계속 돌고 있음을 보여준다."
+  },
+  "served_blocks": {
+    "console_sink": { "queue_depth": 0, "dropped_total": 0 },
+    "transition_audit": { "queue_depth": 0 },
+    "fd": {
+      "open": 356,
+      "limit": 245760,
+      "active_operations": { "provider_http": 2, "docker_spawn": 0, "log_writer": 0, "provider_cli": 0, "sandbox_exec": 0 }
+    },
+    "pool": { "idle": 8, "inflight": 0, "reuse_total": 1074, "evict_total": 76, "evict_failure_total": 0, "create_total": 1874 },
+    "event_bus": [
+      { "bus": "agent_core_runtime", "subscribers": 4, "contracts": ["keeper_turn cap 256 depth 0 dropped 0", "sse_bridge cap 256 depth 0 dropped 0", "telemetry_consumer cap 256 depth 0 dropped 0"] },
+      { "bus": "masc_domain", "subscribers": 2, "contracts": ["lifecycle_listener cap 256 depth 0 dropped 0", "sse_bridge cap 256 depth 0 dropped 0"] }
+    ],
+    "stores": {
+      "total_bytes": 2552698589,
+      "total_files": 371,
+      "largest": [
+        { "store": "tool_calls", "mb": 607, "files": 19 },
+        { "store": "logs", "mb": 596, "files": 139 },
+        { "store": "trajectories", "mb": 487, "files": 131 },
+        { "store": "agent-core-events", "mb": 397, "files": 10 },
+        { "store": "transition-audit", "mb": 330, "files": 24 }
+      ]
+    }
+  },
+  "verdict": "endpoint가 200으로 응답하고 여섯 가족(console_sink·transition_audit·fd·pool·event_bus·stores)이 모두 실값을 낸다. 배포 전 404였던 것이 해소됐고, 신선도 셀이 19초를 보고해 writer 생존까지 같은 응답에서 확인된다.",
+  "operational_reading": {
+    "backpressure": "버스 5개 계약 전부 depth 0·dropped 0으로 적체 없음. fd는 356/245,760으로 여유가 크다.",
+    "pool_churn": "create_total 1874에 reuse_total 1074, evict_total 76이라 재사용이 절반 수준이다. evict_failure는 0.",
+    "store_growth": "총 2.4GB인데 tool_calls 607MB가 19파일에 몰려 있어 파일당 32MB다. logs는 139파일에 596MB로 분산돼 있어 회전 정책이 스토어마다 다르다는 것이 드러난다."
+  },
+  "not_measured": "대시보드 패널(#29048)의 browser 렌더는 이 캡처에 포함되지 않았다 — 브라우저 확장이 연결되지 않아 별도 실측이 남는다."
+}

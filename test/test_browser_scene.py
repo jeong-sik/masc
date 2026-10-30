@@ -1,0 +1,497 @@
+#!/usr/bin/env python3
+"""Real Gecko scene contract probe; needs existing geckodriver/browser binaries."""
+import argparse,base64,hashlib,http.server,json,re,socket,subprocess,threading,time,urllib.request,urllib.error
+from pathlib import Path
+p=argparse.ArgumentParser();p.add_argument('--driver',required=True);p.add_argument('--browser',required=True);p.add_argument('--out',type=Path,required=True);a=p.parse_args();a.out.mkdir(parents=True,exist_ok=True)
+root=Path(__file__).resolve().parents[1]
+scene=(root/'lib/browser_scene_script.ml').read_text().split('let runtime = {js|',1)[1].split('|js}',1)[0]
+interaction=(root/'lib/browser_interaction.ml').read_text().split('let script = {js|',1)[1].split('|js}',1)[0]
+guard=(root/'lib/browser_interaction.ml').read_text().split('let pointer_guard_script = {js|',1)[1].split('|js}',1)[0]
+html='''<!doctype html><meta charset="utf-8"><title>Semantic Zen fixture</title><style>body{font:22px sans-serif;margin:28px;background:#101d2c;color:#d8f4ee}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}section{padding:24px;border:1px solid #55958c;border-radius:16px}button,textarea{font:inherit;padding:10px}canvas{background:linear-gradient(45deg,#3baaa0,#662db1)}.hidden{display:none}</style><h1>한글과 실제 DOM</h1><h2><span>Nested post title</span></h2><div role="heading" aria-level="3"><span>ARIA section title</span></div><div role="heading"><span>Invalid heading level</span></div><div role="heading" aria-level="3.0"><span>Decimal heading level</span></div><p>Copy exact text: 별빛🙂 café</p><div style="visibility:hidden">HIDDEN_PARENT<span style="visibility:visible">VISIBLE_CHILD</span></div><div class="grid"><section><button id="increment" onclick="document.querySelector('#count').textContent=String(+document.querySelector('#count').textContent+1)">Increase</button><p id="count">0</p><label>Message<textarea id="message" aria-label="Message"></textarea></label><input type="password" value="SECRET_VALUE_MUST_NOT_APPEAR"></section><section><canvas width="180" height="100" style="font-size:0" aria-label="Gradient canvas"></canvas><p class="hidden">HIDDEN_MUST_NOT_APPEAR</p></section></div>'''
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self):
+  if self.path == '/redirect':
+   self.send_response(302);self.send_header('Location','/canonical');self.send_header('Content-Length','0');self.end_headers();return
+  b=html.encode();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
+ def log_message(self,*args):pass
+server=http.server.ThreadingHTTPServer(('127.0.0.1',0),H);threading.Thread(target=server.serve_forever,daemon=True).start()
+with socket.socket() as sock:sock.bind(('127.0.0.1',0));driver_port=sock.getsockname()[1]
+log=(a.out/'driver.log').open('wb');driver=subprocess.Popen([a.driver,'--host','127.0.0.1','--port',str(driver_port),'--websocket-port','0'],stdout=log,stderr=log)
+base=f'http://127.0.0.1:{driver_port}';sid=None;checks=[]
+# How long a wait for browser state lasts, and how often it looks again.
+SETTLE_S=10;POLL_S=.05
+def call(method,path,body=None):
+ req=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),method=method,headers={'Content-Type':'application/json'})
+ try:
+  with urllib.request.urlopen(req,timeout=30) as res:raw=res.read()
+ except urllib.error.HTTPError as e:raw=e.read()
+ value=json.loads(raw)['value']
+ if isinstance(value,dict) and 'error' in value:raise RuntimeError(value['error']+': '+value.get('message',''))
+ return value
+
+def js(script,args=[]):
+ value=call('POST','/session/'+sid+'/execute/sync',{'script':script,'args':args})
+ if isinstance(value,dict) and 'interactionFailure' in value:raise RuntimeError(value['interactionFailure']['message'])
+ return value
+def observe():return js(scene+'\nreturn browserScene(arguments[0]);',[{'mode':'read','maxChars':50000}])
+def control(s,label):return next(n for n in s['nodes'] if n['kind']=='control' and n['text']==label)
+def act(s,n,**kw):return js(scene+interaction,[{'documentId':s['documentId'],'nodeId':n['nodeId'],'expectedUrl':s['url'],**kw}])
+def check(name,condition,seen=None):
+ # A failure that says only its own sentence sends the next reader back to
+ # the browser to ask what the page actually returned. [seen] carries that
+ # answer into the message, so the run that fails is also the run that says
+ # why.
+ assert condition,(name if seen is None else f"{name} -- saw {seen!r}");checks.append(name)
+try:
+ deadline=time.monotonic()+SETTLE_S
+ while True:
+  try:call('GET','/status');break
+  except (urllib.error.URLError,ConnectionError):
+   if time.monotonic()>deadline:raise
+   time.sleep(POLL_S)
+ caps=call('POST','/session',{'capabilities':{'alwaysMatch':{'browserName':'firefox','moz:firefoxOptions':{'binary':a.browser,'args':['-headless']}}}});sid=caps['sessionId']
+ call('POST','/session/'+sid+'/url',{'url':f'http://127.0.0.1:{server.server_port}/'})
+ before=js('return document.documentElement.outerHTML;');start=time.monotonic();s=observe();elapsed=(time.monotonic()-start)*1000
+ (a.out/'scene.json').write_text(json.dumps(s,ensure_ascii=False,indent=2))
+ check('scene does not mutate page DOM/CSS',before==js('return document.documentElement.outerHTML;'))
+ text=''.join(n['text'] for n in s['nodes']);check('Unicode survives as real text','별빛🙂 café' in text)
+ check('nested HTML heading ancestry is typed',any(n['text']=='Nested post title' and n.get('headingLevel')==2 for n in s['nodes']))
+ check('explicit ARIA heading level is typed',any(n['text']=='ARIA section title' and n.get('headingLevel')==3 for n in s['nodes']))
+ check('missing ARIA heading level stays plain',any(n['text']=='Invalid heading level' and n.get('headingLevel') is None for n in s['nodes']))
+ check('non-integer ARIA heading level stays plain',any(n['text']=='Decimal heading level' and n.get('headingLevel') is None for n in s['nodes']))
+ check('hidden text and password value absent','HIDDEN_MUST_NOT_APPEAR' not in text and 'SECRET_VALUE_MUST_NOT_APPEAR' not in json.dumps(s))
+ check('visibility override preserves visible descendant','VISIBLE_CHILD' in text and 'HIDDEN_PARENT' not in text)
+ check('raster fallback includes zero-font-size canvas',any(n['kind']=='raster' and n['fontSize']==0 for n in s['nodes']))
+ button=control(s,'Increase');s2=observe();check('stable identity between reads',button['nodeId']==control(s2,'Increase')['nodeId'] and s['documentId']==s2['documentId'])
+ js("document.querySelector('#increment').parentElement.append(document.querySelector('#increment'));")
+ act(s,button,action='click');check('reordering does not retarget click',js("return document.querySelector('#count').textContent;")=='1')
+ message=control(s,'Message');payload='별빛🙂 café\nexact final LF\n';act(s,message,action='fill',text=payload)
+ check('reference fill preserves exact Unicode and final LF',js("return document.querySelector('#message').value;")==payload)
+ js("const old=document.querySelector('#increment');old.replaceWith(old.cloneNode(true));")
+ try:act(s,button,action='click');raise AssertionError('replaced element accepted')
+ except RuntimeError as e:check('replaced node fails rather than clicking replacement','scene_node_detached' in str(e))
+ s3=observe();check('replacement gets a new reference',control(s3,'Increase')['nodeId']!=button['nodeId'])
+ call('POST','/session/'+sid+'/refresh',{})
+ try:act(s3,control(s3,'Increase'),action='click');raise AssertionError('reload accepted old reference')
+ except RuntimeError as e:check('same-URL reload rejects old document','scene_document_changed' in str(e))
+ latest=observe();check('same-URL reload gets new document ID',latest['documentId']!=s['documentId'])
+ # Screenshot positions are normalized CSS viewport coordinates, independent of PNG scale.
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ point=js("const r=document.querySelector('#increment').getBoundingClientRect();return {x:(r.x+r.width/2)/innerWidth,y:(r.y+r.height/2)/innerHeight};")
+ args={'action':'click_at','point':point,'viewport':viewport,'expectedUrl':latest['url']}
+ js(scene+interaction,[args]);check('screenshot point clicks observed button',js("return document.querySelector('#count').textContent;")=='1')
+ js("window.pointerEvents=[];document.addEventListener('pointerdown',e=>pointerEvents.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY}));document.addEventListener('pointerup',e=>pointerEvents.push({type:e.type,trusted:e.isTrusted,x:e.clientX,y:e.clientY}));")
+ js(scene+guard,[args])
+ def move(p):return {'type':'pointerMove','duration':0,'origin':'viewport','x':int(p['x']*viewport['width']),'y':int(p['y']*viewport['height'])}
+ destination={'x':point['x']+.15,'y':point['y']+.1}
+ call('POST','/session/'+sid+'/actions',{'actions':[{'type':'pointer','id':'masc-browser-pointer','parameters':{'pointerType':'mouse'},'actions':[move(point),{'type':'pointerDown','button':0},move(destination),{'type':'pointerUp','button':0}]}]})
+ call('DELETE','/session/'+sid+'/actions')
+ events=js('return pointerEvents;')
+ check('native drag produces trusted press and release at distinct coordinates',len(events)==2 and all(e['trusted'] for e in events) and events[0]['x']!=events[1]['x'] and events[0]['y']!=events[1]['y'])
+ js("document.body.style.minHeight='3000px';window.scrollTo(0,200);")
+ try:js(scene+interaction,[args]);raise AssertionError('stale viewport accepted')
+ except RuntimeError as e:check('scroll invalidates screenshot point','observed_viewport_changed' in str(e))
+ js('window.scrollTo(0,0);')
+ call('POST','/session/'+sid+'/refresh',{})
+ try:js(scene+guard,[args]);raise AssertionError('reloaded screenshot accepted')
+ except RuntimeError as e:check('reload invalidates native pointer gesture','observed_viewport_changed' in str(e))
+
+ js("document.body.innerHTML='<h1>Nested browser panes</h1><section id=messages style=\"position:absolute;left:20px;top:100px;width:350px;height:220px;overflow:auto\"></section><section id=sidebar style=\"position:absolute;left:450px;top:100px;width:350px;height:220px;overflow:auto\"></section>';for(const id of ['messages','sidebar'])document.getElementById(id).innerHTML=Array.from({length:80},(_,i)=>'<p>'+id+' message '+i+'</p>').join('');")
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ point=js("const r=document.querySelector('#messages').getBoundingClientRect();return {x:(r.x+r.width/2)/innerWidth,y:(r.y+r.height/2)/innerHeight};")
+ args={'action':'scroll_at','point':point,'viewport':viewport,'expectedUrl':latest['url'],'x':0,'y':120}
+ js(scene+interaction,[args])
+ positions=js("return {messages:document.querySelector('#messages').scrollTop,sidebar:document.querySelector('#sidebar').scrollTop,root:scrollY};")
+ check('live point scroll moves only the selected nested pane',positions=={'messages':120,'sidebar':0,'root':0})
+ js("document.querySelector('#messages').scrollTop=0;window.wheelTrusted=false;document.addEventListener('wheel',e=>window.wheelTrusted=e.isTrusted);")
+ js(scene+guard,[args])
+ call('POST','/session/'+sid+'/actions',{'actions':[{'type':'wheel','id':'masc-browser-wheel','actions':[{'type':'scroll','duration':0,'origin':'viewport','x':int(point['x']*viewport['width']),'y':int(point['y']*viewport['height']),'deltaX':0,'deltaY':160}]}]})
+ # Match production: guard, wheel, page metadata, capture, metadata.
+ # A wheel does not enter pressed-pointer release cleanup.
+ js('return {url:location.href,title:document.title};')
+ js(scene+"\nreturn browserScene({mode:'viewport'});")
+ wheel_png=call('GET','/session/'+sid+'/screenshot')
+ js('return {url:location.href,title:document.title};')
+ js(scene+"\nreturn browserScene({mode:'viewport'});")
+ # A native wheel can land after its action returns (#36399): read the panes
+ # again until the targeted one moves or the wait runs out.
+ wheel_positions="return {messages:document.querySelector('#messages').scrollTop,sidebar:document.querySelector('#sidebar').scrollTop,root:scrollY,trusted:wheelTrusted};"
+ wheel_deadline=time.monotonic()+SETTLE_S;positions=js(wheel_positions)
+ while positions['messages']==0 and time.monotonic()<wheel_deadline:time.sleep(POLL_S);positions=js(wheel_positions)
+ check('native wheel scroll is trusted and targets the nested pane',positions['messages']>0 and positions['sidebar']==0 and positions['root']==0 and positions['trusted'],positions)
+ # Exercise negative scroll positions used by reverse-flow chat timelines.
+ js("const p=document.querySelector('#messages');p.style.display='flex';p.style.flexDirection='column-reverse';for(const n of p.children)n.style.flexShrink='0';p.scrollTop=0;")
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ args.update(viewport=viewport,y=-120)
+ js(scene+interaction,[args])
+ reverse=js("return {pane:document.querySelector('#messages').scrollTop,root:scrollY};")
+ check('reverse-flow chat scroll consumes negative position in its own pane',reverse['pane']==-120 and reverse['root']==0)
+ js("const pane=document.querySelector('#messages');pane.style.display='block';pane.scrollTop=0;pane.setAttribute('aria-label','채널 메시지');document.querySelector('#sidebar').setAttribute('aria-label','채널 목록');pane.insertAdjacentHTML('afterbegin','<a href=\"#thread\">Observed thread</a>');")
+ regions=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ region=next(n for n in regions['nodes'] if n['text']=='채널 메시지')
+ scope={'documentId':regions['documentId'],'nodeId':region['nodeId']}
+ scoped=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}])
+ whole=observe()
+ check('semantic outline identifies actual page regions',len(regions['nodes'])==2 and all(n['kind']=='region' for n in regions['nodes']))
+ check('scoped read excludes the sidebar',all('sidebar' not in n['text'] for n in scoped['nodes']))
+ check('overflow-clipped messages are excluded from scene',not any('messages message 5' in n['text'] for n in scoped['nodes']))
+ check('scoped read returns fewer bytes than whole visible scene',len(json.dumps(scoped))<len(json.dumps(whole)))
+ link=control(scoped,'Observed thread');act(scoped,link,action='click')
+ check('scoped link retains usable observed click reference',js('return location.hash;')=='#thread')
+ refreshed=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}])
+ check('same-document link refresh preserves region scope',refreshed['scope']==scope and all('sidebar' not in n['text'] for n in refreshed['nodes']))
+ region_measurement={'whole_scene_bytes':len(json.dumps(whole,ensure_ascii=False).encode()),'scoped_scene_bytes':len(json.dumps(scoped,ensure_ascii=False).encode()),'regions_bytes':len(json.dumps(regions,ensure_ascii=False).encode())}
+ (a.out/'regions.json').write_text(json.dumps({'outline':regions,'scoped':scoped,'measurement':region_measurement},ensure_ascii=False,indent=2))
+ js("const pane=document.querySelector('#messages');pane.replaceWith(pane.cloneNode(true));")
+ try:js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}]);raise AssertionError('detached scope accepted')
+ except RuntimeError as e:check('replaced region rejects old scope','scene_node_detached' in str(e))
+ js("document.body.innerHTML='<main aria-label=Timeline><article aria-label=\"Post A\">Post A</article><article aria-label=\"Post B\">Post B</article><article aria-label=\" \"><h2><span style=\"display:none\">SECRET HIDDEN HEADING</span><span>Post C</span></h2>Post C</article></main>';" )
+ social_regions=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ article_nodes=[n for n in social_regions['nodes'] if n['kind']=='region' and n['role']=='article']
+ check('social feed outline exposes typed article regions',len(article_nodes)==3 and [n['text'] for n in article_nodes]==['Post A','Post B','Post C'])
+ check('social article regions retain one document identity',all(n['nodeId'] and social_regions['documentId']==regions['documentId'] for n in article_nodes))
+ social_content=observe()
+ check('social content carries its nearest observed article context',
+       any((n.get('ancestorRegion') or {}).get('role')=='article'
+           and (n.get('ancestorRegion') or {}).get('label') in ['Post A','Post B','Post C']
+           for n in social_content['nodes']))
+ check('hidden heading descendants do not pollute the observed article label',
+       all('SECRET HIDDEN HEADING' not in (n.get('ancestorRegion') or {}).get('label','')
+           for n in social_content['nodes']))
+ # Landmark-free chat layout: only actual visible overflow panes are scopes.
+ js("document.body.innerHTML='<div id=chat aria-label=Messages style=\"height:100px;overflow:auto\"><div style=\"height:500px\">Channel body</div></div><div style=\"display:none;height:10px;overflow:auto\"><div style=\"height:500px\">Hidden</div></div><div style=\"height:100px;overflow:auto\"><div style=\"height:500px\">Unnamed body</div></div>';")
+ fallback=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ check('landmark-free outline names visible overflowing panes',
+       len(fallback['nodes'])==2
+       and [n['text'] for n in fallback['nodes']]==['Messages','Vertical scroll area'])
+ fallback_scope={'documentId':fallback['documentId'],'nodeId':fallback['nodes'][0]['nodeId']}
+ selected=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':fallback_scope,'maxChars':5000}])
+ check('scroll-area reference resolves to channel body',any(n['text']=='Channel body' for n in selected['nodes']))
+ js("document.body.insertAdjacentHTML('afterbegin','<main>Semantic body</main>');")
+ preferred=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ # The landmark is added to the outline; neither scroll scope leaves it.
+ # browser_scene_script.ml says so where it collects them -- "Landmarks and
+ # scrollable panes are independent observed properties ... a header must not
+ # hide an unrelated message pane" -- and the inserted <main> contains
+ # neither pane, so the count is the landmark plus the two the check above
+ # just pinned. It read ==2 until CI first ran this probe (#36059), which is
+ # the one outcome the check's own name forbids.
+ check('landmarks do not suppress separate scroll scopes',len(preferred['nodes'])==3 and any(n['tag']=='main' for n in preferred['nodes']) and [n['text'] for n in preferred['nodes'] if n['tag']!='main']==['Messages','Vertical scroll area'],[(n['tag'],n['text']) for n in preferred['nodes']])
+ js("document.body.innerHTML='<header>Site banner</header><div role=banner>ARIA banner</div><footer>Site footer</footer><div role=contentinfo>ARIA footer</div><search>Native search</search><div role=search>ARIA search</div><form aria-label=Filters>Form body</form><div role=form aria-label=Preferences>Preferences body</div>';")
+ landmarks=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ check('outline includes native and ARIA standard landmarks',len(landmarks['nodes'])==8)
+ for landmark in landmarks['nodes']:
+  selected={'documentId':landmarks['documentId'],'nodeId':landmark['nodeId']}
+  read=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':selected,'maxChars':5000}])
+  check('landmark scope reads '+landmark['text'],read['scope']==selected and len(read['nodes'])==1)
+ js("document.body.innerHTML='<div style=\"overflow:hidden;width:50px;height:50px\"><div style=\"position:fixed;left:400px;top:120px\"><button id=popup>Visible fixed popup</button></div></div>';")
+ popup_scene=observe()
+ popup=control(popup_scene,'Visible fixed popup')
+ check('fixed popup escapes overflow ancestor and remains observable',bool(popup['rects']))
+ js("document.querySelector('#popup').onclick=()=>document.body.dataset.popupClicked='yes';")
+ act(popup_scene,popup,action='click')
+ check('escaped fixed popup observed reference remains clickable',js('return document.body.dataset.popupClicked;')=='yes')
+ js("document.body.innerHTML='<a id=follow href=\"#destination\" target=\"_blank\">Follow observed link</a><p>Previous channel content</p>';window.followHandlerRan=false;document.querySelector('#follow').onclick=()=>{window.followHandlerRan=true;};")
+ follow_scene=observe();follow_node=control(follow_scene,'Follow observed link')
+ try:act(follow_scene,follow_node,action='follow_link');raise AssertionError('new-tab follow accepted')
+ except RuntimeError as e:check('observed new-tab anchor rejects before follow','follow_link_requires_same_tab' in str(e))
+ check('rejected follow keeps original URL',js('return location.href;')==follow_scene['url'])
+ js("document.querySelector('#follow').target='_self';")
+ js("document.querySelector('#follow').href='#recycled-channel';")
+ try:act(follow_scene,follow_node,action='follow_link');raise AssertionError('recycled anchor followed')
+ except RuntimeError as e:check('recycled anchor href rejects before navigation','scene_link_destination_changed' in str(e) and js('return location.href;')==follow_scene['url'])
+ recycled_scene=observe();recycled_node=control(recycled_scene,'Follow observed link')
+ check('new observation exposes changed href under a new reference',recycled_node['nodeId']!=follow_node['nodeId'] and recycled_node['href'].endswith('#recycled-channel'))
+ try:act(follow_scene,follow_node,action='follow_link');raise AssertionError('new observation repinned old reference')
+ except RuntimeError as e:check('new observation retires old destination reference','scene_node_detached' in str(e))
+ js("document.querySelector('#follow').href='#destination';")
+ follow_scene=observe();follow_node=control(follow_scene,'Follow observed link')
+ receipt=act(follow_scene,follow_node,action='follow_link')
+ after_follow=observe()
+ check('observed same-tab href reaches destination URL',after_follow['url']==receipt['destinationUrl'])
+ check('follow bypasses application click handler',not js('return window.followHandlerRan;'))
+ check('SPA URL acknowledgement does not imply destination content readiness',after_follow['documentId']==follow_scene['documentId'] and any(n['text']=='Previous channel content' for n in after_follow['nodes']))
+ js("document.body.innerHTML='<div id=host></div>';const outer=document.querySelector('#host').attachShadow({mode:'open'});outer.innerHTML='<div id=inner></div>';const inner=outer.querySelector('#inner').attachShadow({mode:'open'});inner.innerHTML='<div id=pane style=\"height:180px;width:400px;overflow:auto\"><div style=\"height:1600px\">Shadow channel context</div></div>';window.shadowPane=inner.querySelector('#pane');window.scrollTo(0,0);")
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ point=js("const r=shadowPane.getBoundingClientRect();return {x:(r.x+30)/innerWidth,y:(r.y+30)/innerHeight};")
+ js(scene+interaction,[{'action':'scroll_at','point':point,'viewport':viewport,'expectedUrl':js('return location.href;'),'x':0,'y':120}])
+ positions=js('return {pane:shadowPane.scrollTop,root:scrollY};')
+ check('nested open shadow roots scroll the internal pane without moving the page',positions=={'pane':120,'root':0})
+ # Same-origin frame inside an open shadow tree, with another frame nested inside.
+ js("""document.body.innerHTML='<div id=host></div><div style=height:3000px>Outer document</div>';const r=document.querySelector('#host').attachShadow({mode:'open'});r.innerHTML='<iframe style="width:500px;height:300px;border:7px solid"></iframe>';window.frame=r.querySelector('iframe');const d=frame.contentDocument;d.open();d.write('<body style=margin:0><iframe id=nested style="width:400px;height:220px;border:5px solid"></iframe>');d.close();window.nested=frame.contentDocument.querySelector('#nested');const n=nested.contentDocument;n.open();n.write('<body style=margin:0><div id=pane style="overflow:auto;height:150px"><div style=height:1600px>Frame channel</div></div><div style=height:2000px>Frame root</div>');n.close();window.scrollTo(0,0);""")
+ viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
+ point=js("const a=frame.getBoundingClientRect(),b=nested.getBoundingClientRect();return {x:(a.left+frame.clientLeft+b.left+nested.clientLeft+30)/innerWidth,y:(a.top+frame.clientTop+b.top+nested.clientTop+30)/innerHeight};")
+ frame_args={'action':'scroll_at','point':point,'viewport':viewport,'expectedUrl':js('return location.href;'),'x':0,'y':120}
+ js(scene+interaction,[frame_args])
+ check('nested same-origin frames inside shadow root scroll only the pointed pane',js("return {pane:nested.contentDocument.querySelector('#pane').scrollTop,inner:nested.contentWindow.scrollY,frame:frame.contentWindow.scrollY,outer:scrollY};")=={'pane':120,'inner':0,'frame':0,'outer':0})
+ js("nested.contentDocument.querySelector('#pane').style.overflow='hidden';")
+ js(scene+interaction,[frame_args])
+ check('frame fallback scrolls deepest document only',js('return {inner:nested.contentWindow.scrollY,frame:frame.contentWindow.scrollY,outer:scrollY};')=={'inner':120,'frame':0,'outer':0})
+ js("frame.style.transform='rotate(5deg)';")
+ try:js(scene+interaction,[frame_args]);raise AssertionError('transformed frame accepted')
+ except RuntimeError as e:check('transformed frame rejects without outer scroll','scroll_frame_geometry_unsupported' in str(e) and js('return scrollY;')==0)
+ js("frame.style.transform='none';frame.setAttribute('sandbox','');frame.srcdoc='<div style=height:3000px>Opaque frame</div>';")
+ # WebDriver's async callback follows the frame load; no guessed settling sleep.
+ call('POST','/session/'+sid+'/execute/async',{'script':"const done=arguments[arguments.length-1];if(!frame.contentDocument)done();else frame.addEventListener('load',()=>done(),{once:true});",'args':[]})
+ try:js(scene+interaction,[frame_args]);raise AssertionError('opaque frame accepted')
+ except RuntimeError as e:check('inaccessible frame rejects without outer scroll','scroll_frame_inaccessible' in str(e) and js('return scrollY;')==0)
+ js("document.body.innerHTML='<a href=\"/redirect\">Canonical channel link</a>';")
+ redirect_source=observe();redirect_link=control(redirect_source,'Canonical channel link')
+ redirect_receipt=act(redirect_source,redirect_link,action='follow_link')
+ # Test-only bounded observation: never replay the navigation or use a
+ # screenshot as a loading barrier. Keep the first pending result/error.
+ redirect_deadline=time.monotonic()+SETTLE_S
+ first_redirect_observation=None;redirect_attempts=0;redirect_errors=[]
+ while True:
+  redirect_attempts+=1
+  try:
+   redirected=observe()
+   if first_redirect_observation is None:first_redirect_observation=redirected
+   if (redirected['url']==f'http://127.0.0.1:{server.server_port}/canonical'
+       and redirected['documentId']!=redirect_source['documentId']
+       and any(n['text']=='Copy exact text: 별빛🙂 café' for n in redirected['nodes'])):break
+  except RuntimeError as error:
+   redirect_errors.append(str(error))
+  if time.monotonic()>=redirect_deadline:
+   raise AssertionError({'redirect_wait_exhausted':True,'attempts':redirect_attempts,'first_observation':first_redirect_observation,'errors':redirect_errors})
+  time.sleep(POLL_S)
+ (a.out/'redirect-stable.png').write_bytes(base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True))
+ check('HTTP302 final observation differs from original href',redirect_receipt['destinationUrl'].endswith('/redirect') and redirected['url'].endswith('/canonical'))
+ check('redirect recovery reads actual destination content',any(n['text']=='Copy exact text: 별빛🙂 café' for n in redirected['nodes']))
+ (a.out/'redirect.json').write_text(json.dumps({'follow':redirect_receipt,'first_observed_url':first_redirect_observation['url'],'observation_attempts':redirect_attempts,'observation_errors':redirect_errors,'new_document_observed':redirected['documentId']!=redirect_source['documentId'],'observed_url':redirected['url'],'title':redirected['title'],'application_verified':False},ensure_ascii=False,indent=2))
+ js("""document.body.innerHTML='<a id=policy href="#policy" rel=noreferrer>Policy link</a><svg width=300 height=80><a id=vector href="#vector"><text x=10 y=40>Vector link<tspan style="display:none">HIDDEN_LABEL</tspan><tspan style="visibility:hidden">INVISIBLE_LABEL</tspan></text></a></svg>';""")
+ policy_scene=observe();policy_node=control(policy_scene,'Policy link')
+ for attribute,value in [('rel','noreferrer'),('referrerpolicy','no-referrer')]:
+  js("const a=document.querySelector('#policy');a.removeAttribute('rel');a.removeAttribute('referrerpolicy');a.setAttribute(arguments[0],arguments[1]);",[attribute,value])
+  try:act(policy_scene,policy_node,action='follow_link');raise AssertionError('link policy ignored')
+  except RuntimeError as e:check('explicit '+attribute+' rejects before follow','follow_link_referrer_policy_unsupported' in str(e) and js('return location.href;')==policy_scene['url'])
+ vector_scene=observe();vector=control(vector_scene,'Vector link')
+ check('natural SVG link label includes visible text only',vector['text']=='Vector link')
+ check('SVG anchor exposes normalized observed absolute href',isinstance(vector['href'],str) and vector['href'].endswith('#vector'))
+ js("document.querySelector('#vector').setAttribute('href','#recycled-vector');")
+ try:act(vector_scene,vector,action='follow_link');raise AssertionError('SVG animated href repointed')
+ except RuntimeError as e:check('SVG animated href mutation rejects against string pin','scene_link_destination_changed' in str(e))
+ for target in ['_top','_parent']:
+  js("document.querySelector('#vector').setAttribute('target',arguments[0]);",[target])
+  vector_scene=observe();vector=control(vector_scene,'Vector link')
+  receipt=act(vector_scene,vector,action='follow_link')
+  check('SVG '+target+' in top document follows same tab',js('return location.href;')==receipt['destinationUrl'])
+ # Native labels remain activation targets even when a radio has no geometry.
+ js("document.body.innerHTML=arguments[0];",[(root/'test/fixtures/browser-form-controls.html').read_text()])
+ forms=observe()
+ card=control(forms,'Card B')
+ check('hidden radio is exposed through its associated label',card['tag']=='label' and card['checked'] is False)
+ act(forms,card,action='click')
+ selected=observe()
+ check('observed label activates the correct hidden radio',control(selected,'Card B')['checked'] is True and control(selected,'Card A')['checked'] is False)
+ check('textarea inside ordinary label remains editable',control(selected,'Notes')['editable'])
+ check('onclick container retains independently editable input',control(selected,'Amount')['editable'])
+ check('onclick container retains nested button once',len([n for n in selected['nodes'] if n['kind']=='control' and n['tag']=='button' and n['text']=='Submit amount'])==1)
+ check('combobox retains nested editable input',control(selected,'Search card')['editable'])
+ act(selected,control(selected,'Amount'),action='fill',text='42')
+ check('nested input can be filled through its observed reference',js("return document.querySelector('[aria-label=Amount]').value;")=='42')
+ check('unassociated label remains text',not any(n['kind']=='control' and n['text']=='Unassociated text' for n in selected['nodes']))
+ check('ARIA radio and mixed checkbox are observed controls',control(selected,'Custom card')['ariaChecked']=='false' and control(selected,'Mixed selection')['ariaChecked']=='mixed')
+ act(selected,control(selected,'Custom card'),action='click')
+ check('ARIA radio click updates the observed selection',control(observe(),'Custom card')['ariaChecked']=='true')
+ for name in ['Locked card','Locked action','Locked external label']:
+  locked=control(observe(),name)
+  check(name+' is visibly disabled',locked['disabled'] and not locked['clickable'])
+  try:
+   act(observe(),locked,action='click')
+   raise AssertionError('disabled activation accepted')
+  except RuntimeError as e:
+   check(name+' rejects before activation','element_disabled' in str(e))
+ check('disabled controls do not run handlers',js("return document.querySelector('#result').textContent;")=='No action')
+ menu=observe()
+ act(menu,control(menu,'Expense menu'),action='click')
+ check('declared menuitem activates from its observed reference',js("return document.querySelector('#result').textContent;")=='Menu opened')
+ menu=observe()
+ act(menu,control(menu,'Inline menu'),action='click')
+ check('explicit inline handler is an observed control',js("return document.querySelector('#result').textContent;")=='Inline opened')
+ menu=observe()
+ act(menu,control(menu,'More'),action='click')
+ check('native summary activates its details',js("return document.querySelector('details').open;") is True)
+ elements_script=(root/'lib/browser_page_script.ml').read_text().split('let elements = {|',1)[1].split('|}',1)[0]
+ form_elements=js(elements_script)
+ check('elements exposes selected native label and ARIA state',any(n['tag']=='label' and n['text']=='Card B' and n.get('checked') is True for n in form_elements['elements']) and any(n['text']=='Custom card' and n.get('ariaChecked')=='true' for n in form_elements['elements']))
+ # Review regressions: references preserve activation targets and declared semantics.
+ js("""document.body.innerHTML=`<style>body{font:16px sans-serif;margin:8px}label{display:inline-block}input[type=radio]{display:none}</style>\n <input id="card-a" type="radio" name="review-card"><label for="card-a">Card A</label>\n <input id="card-b" type="radio" name="review-card"><label for="card-b">Card B</label>\n <button id="separated">Save<br>draft<span style="display:none">HIDDEN_LABEL</span></button>
+ <button id="blocks"><span style="display:block">Store</span><span style="display:block">draft</span></button>
+ <div role="button" id="cells"><span style="display:table-cell">Left</span><span style="display:table-cell">Right</span></div>
+ <label><input id="visible-check" type="checkbox">Visible agree</label>
+ <label><input id="visible-radio" type="radio" style="display:inline-block">Visible choice</label>
+ <main id="delegated" onclick="this.dataset.clicked='yes'"><h2>Delegated heading</h2><p>Delegated paragraph</p><img alt="Delegated raster" style="width:40px;height:40px" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="></main>
+ <label id="explicit-label" onclick="this.dataset.clicked='yes'">Explicit label action</label>
+ <input id="visible-explicit" type="checkbox"><label id="associated-action" for="visible-explicit" onclick="this.dataset.clicked='yes'">Associated label action</label>
+ <button id="collapsed">Save   the
+ draft</button><button id="transformed" style="text-transform:uppercase">Save draft</button>
+ <button id="preserved" style="white-space:pre">Save   the
+ draft</button>
+ <button id="transparent">Visible opacity<span style="opacity:0">OPACITY_SECRET</span></button>
+ <button id="clipped" style="overflow:hidden;width:180px">Visible clipped<span style="display:block;margin-left:10000px">CLIPPED_SECRET</span></button>
+ <div role="checkbox" aria-checked="mixed">Mixed checkbox</div>
+ <div role="menuitemcheckbox" aria-checked="mixed">Mixed menu checkbox</div>
+ <div role="radio" aria-checked="mixed">Mixed radio</div>
+ <div role="menuitemradio" aria-checked="mixed">Mixed menu radio</div>
+ <div role="switch" aria-checked="mixed">Mixed switch</div>
+ <button aria-checked="mixed">Unsupported checked button</button>
+ <input id="native-mixed" type="checkbox" style="display:none"><label for="native-mixed">Native mixed</label>
+ <div role="tab" aria-selected="false" onclick="this.setAttribute('aria-selected','true')">Selectable tab</div>
+ <div role="option" aria-selected="true">Selected option</div>
+ <div role="heading button" aria-level="2">First role heading</div>
+ <div role="future-role button">Fallback button</div>`;
+ document.querySelector('#native-mixed').indeterminate=true;""")
+ semantics=observe()
+ for element_id in ['collapsed','transformed','preserved']:
+  expected=js("return document.getElementById(arguments[0]).innerText.trim();",[element_id])
+  check('scene uses browser rendered whitespace/transform: '+element_id,control(semantics,expected)['text']==expected)
+ check('opacity-zero control descendants remain excluded','OPACITY_SECRET' not in json.dumps(semantics))
+ check('clipped control descendants remain excluded','CLIPPED_SECRET' not in json.dumps(semantics))
+ for label in ['Mixed checkbox','Mixed menu checkbox']:
+  check('mixed checkbox role retained: '+label,control(semantics,label)['ariaChecked']=='mixed')
+ for label in ['Mixed radio','Mixed menu radio','Mixed switch']:
+  check('binary role mixed normalizes false: '+label,control(semantics,label)['ariaChecked']=='false')
+ check('unsupported role does not report checked','ariaChecked' not in control(semantics,'Unsupported checked button'))
+ for label,element_id in [('Explicit label action','explicit-label'),('Associated label action','associated-action')]:
+  targets=[node for node in semantics['nodes'] if node['kind']=='control' and node['tag']=='label' and node['text']==label]
+  check('explicit label has one observed activation target: '+label,len(targets)==1)
+  act(semantics,targets[0],action='click')
+  check('explicit label onclick remains actionable: '+label,js("return document.getElementById(arguments[0]).dataset.clicked;",[element_id])=='yes')
+ check('control labels preserve br separators and filter hidden descendants',control(semantics,'Save\ndraft')['text']=='Save\ndraft')
+ check('adjacent blocks insert one rendered newline',control(semantics,'Store\ndraft')['text']==js("return document.querySelector('#blocks').innerText;"))
+ check('adjacent table cells insert one rendered tab',control(semantics,'Left\tRight')['text']==js("return document.querySelector('#cells').innerText;"))
+ for label in ['Visible agree','Visible choice']:
+  observed=[n for n in semantics['nodes'] if n['kind']=='control' and n['text']==label]
+  check('visible native choice has exactly one scene target: '+label,len(observed)==1 and observed[0]['tag']=='input')
+ act(semantics,control(semantics,'Visible agree'),action='click')
+ check('visible checkbox remains selectable through its input',control(observe(),'Visible agree')['checked'] is True)
+ check('delegated onclick retains heading geometry',any(n['kind']=='text' and n['text']=='Delegated heading' and n['headingLevel']==2 and n['rects'] for n in semantics['nodes']))
+ check('delegated onclick retains paragraphs',any(n['kind']=='text' and n['text']=='Delegated paragraph' for n in semantics['nodes']))
+ check('delegated onclick retains raster descendants',any(n['kind']=='raster' and n['text']=='Delegated raster' for n in semantics['nodes']))
+ check('hidden native checkbox mixed state survives label projection',control(semantics,'Native mixed')['indeterminate'] is True and control(semantics,'Native mixed')['checked'] is False)
+ check('selected tab and option state are observed',control(semantics,'Selectable tab')['ariaSelected']=='false' and control(semantics,'Selected option')['ariaSelected']=='true')
+ act(semantics,control(semantics,'Selectable tab'),action='click')
+ check('tab selection can be verified after activation',control(observe(),'Selectable tab')['ariaSelected']=='true')
+ check('effective heading role is not a fallback button',any(n['kind']=='text' and n['text']=='First role heading' and n['headingLevel']==2 for n in semantics['nodes']) and not any(n['kind']=='control' and n['text']=='First role heading' for n in semantics['nodes']))
+ check('unknown leading role permits supported button fallback',control(semantics,'Fallback button')['role']=='button')
+ form_elements=js(elements_script)
+ for label in ['Explicit label action','Associated label action']:
+  check('elements preserves explicit label action: '+label,any(n['tag']=='label' and n['text']==label for n in form_elements['elements']))
+ for label,expected in [('Mixed checkbox','mixed'),('Mixed menu checkbox','mixed'),('Mixed radio','false'),('Mixed menu radio','false'),('Mixed switch','false')]:
+  check('elements role-specific checked state: '+label,next(n for n in form_elements['elements'] if n['text']==label)['ariaChecked']==expected)
+ check('elements omits unsupported checked state','ariaChecked' not in next(n for n in form_elements['elements'] if n['text']=='Unsupported checked button'))
+ for label in ['Visible agree','Visible choice']:
+  observed=[n for n in form_elements['elements'] if n.get('tag')=='input' and n.get('name')==label]
+  check('visible native choice has exactly one elements target: '+label,len(observed)==1 and observed[0]['tag']=='input')
+  check('elements omits duplicate visible input label: '+label,not any(n.get('tag')=='label' and n.get('text')==label for n in form_elements['elements']))
+ check('elements and scene agree on block separators',any(n['text']=='Store\ndraft' for n in form_elements['elements']))
+ check('elements and scene agree on table separators',any(n['text']=='Left\tRight' for n in form_elements['elements']))
+ check('elements and scene agree on separators',next(n for n in form_elements['elements'] if n['text']=='Save\ndraft')['text']==control(semantics,'Save\ndraft')['text'])
+ check('elements exposes mixed labels and selected controls',any(n['text']=='Native mixed' and n.get('indeterminate') is True for n in form_elements['elements']) and any(n['text']=='Selectable tab' and n.get('ariaSelected')=='true' for n in form_elements['elements']))
+ check('elements omits a non-actionable first role',not any(n['text']=='First role heading' for n in form_elements['elements']))
+ js("document.querySelector('[role=option]').setAttribute('aria-selected','mixed');")
+ check('invalid aria-selected is not advertised as a boolean state','ariaSelected' not in control(observe(),'Selected option') and not any(n['text']=='Selected option' and 'ariaSelected' in n for n in js(elements_script)['elements']))
+ before_retarget=observe();old_label=control(before_retarget,'Card B')
+ js("document.querySelector('label[for=card-b]').htmlFor='card-a'; document.querySelector('#card-b').checked=true;")
+ try:act(before_retarget,old_label,action='click');raise AssertionError('changed label association accepted')
+ except RuntimeError as e:check('label association mutation rejects before activation','scene_label_control_changed' in str(e))
+ check('refused old label did not select its new input',js("return document.querySelector('#card-b').checked;") is True)
+ after_retarget=observe();new_label=control(after_retarget,'Card B')
+ check('reread assigns a fresh label identity',new_label['nodeId']!=old_label['nodeId'])
+ try:act(before_retarget,old_label,action='click');raise AssertionError('retired label reference accepted')
+ except RuntimeError as e:check('reread retires previous label references','scene_node_detached' in str(e))
+ act(after_retarget,new_label,action='click')
+ check('fresh label observation activates the newly observed input',js("return document.querySelector('#card-a').checked;") is True)
+ # All native label associations, including null and non-choice controls,
+ # belong to the exact observed reference before any inline/native effect.
+ js("""document.body.innerHTML=`<label id="none-label" onclick="this.dataset.clicked='yes'">Initially unassociated</label>
+ <label id="button-label" for="button-a" onclick="this.dataset.clicked='yes'">Button association</label>
+ <button id="button-a" onclick="this.dataset.clicked='yes'">Button A</button>
+ <button id="button-b" onclick="this.dataset.clicked='yes'">Button B</button>
+ <label id="boxless-native" style="display:contents"><input id="boxless-check" type="checkbox" style="display:none">Boxless agree</label>
+ <label id="boxless-aria" role="checkbox" aria-checked="false" style="display:contents" onclick="this.setAttribute('aria-checked','true')">Boxless ARIA agree</label>
+ <label role="checkbox" style="display:contents"><span style="visibility:hidden">BOXLESS_HIDDEN</span></label>`;""")
+ pinned=observe()
+ for label,element_id in [('Initially unassociated','none-label'),('Button association','button-label')]:
+  old=control(pinned,label)
+  js("document.getElementById(arguments[0]).htmlFor='button-b';",[element_id])
+  args={'documentId':pinned['documentId'],'nodeId':old['nodeId'],'expectedUrl':pinned['url'],'action':'click'}
+  result=js(scene+interaction.replace('return interactInPage(arguments[0]);','return {outcome:interactInPage(arguments[0])};'),[args])['outcome']
+  check('complete label association rejects before effects: '+label,result.get('interactionFailure')=={'message':'scene_label_control_changed','effectStarted':False},result)
+  check('refused association has no label or button effects: '+label,js("return ['none-label','button-label','button-a','button-b'].every(id=>!document.getElementById(id).dataset.clicked);"))
+  fresh=observe();new=control(fresh,label)
+  check('nullable/button association change gets a fresh reference: '+label,new['nodeId']!=old['nodeId'])
+ # Native and ARIA labels with no principal box use their painted text geometry.
+ boxless=observe()
+ native=control(boxless,'Boxless agree');aria=control(boxless,'Boxless ARIA agree')
+ check('boxless native and ARIA labels retain admitted rectangles',bool(native['rects']) and bool(aria['rects']))
+ check('boxless hidden text remains excluded','BOXLESS_HIDDEN' not in json.dumps(boxless))
+ inventory=js(elements_script)['elements']
+ check('elements retains both boxless label targets',all(any(n['tag']=='label' and n['text']==label for n in inventory) for label in ['Boxless agree','Boxless ARIA agree']))
+ act(boxless,native,action='click')
+ check('boxless native label activates its hidden checkbox',js("return document.querySelector('#boxless-check').checked;") is True)
+ act(boxless,aria,action='click')
+ check('boxless ARIA label activates and reports its checked state',control(observe(),'Boxless ARIA agree')['ariaChecked']=='true')
+ check('boxless checkbox state is re-observed after activation',control(observe(),'Boxless agree')['checked'] is True)
+ # End review regressions.
+ (a.out/'form-controls.json').write_text(json.dumps({'scene':observe(),'elements':form_elements},ensure_ascii=False,indent=2))
+ form_png=call('GET','/session/'+sid+'/screenshot')
+ assert isinstance(form_png,str)
+ (a.out/'form-controls.png').write_bytes(base64.b64decode(form_png,validate=True))
+ # A screenshot guard must work even when a whole-page text read cannot.
+ peer=(root/'lib/browser_bidi_peer.ml').read_text()
+ capture=re.search(r'let capture_state t context = script t context\s*("(?:[^"\\]|\\.)*")',peer)
+ assert capture,'capture guard source missing'
+ capture_body=json.loads(capture.group(1))
+ js("document.body.style.minHeight='2000px';scrollTo(0,0);Object.defineProperty(document.body,'innerText',{configurable:true,get(){throw new Error('whole-page text must not be read for capture')}});")
+ try:
+  capture_before=js(scene+'\n'+capture_body)
+  capture_png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True)
+  capture_after=js(scene+'\n'+capture_body)
+  check('screenshot guards never read whole-page text',capture_before==capture_after and capture_png.startswith(b'\x89PNG'))
+  receipt=re.search(r'let pointer_receipt_script = ("(?:[^"\\]|\\.)*")',
+   (root/'lib/browser_interaction.ml').read_text())
+  assert receipt,'pointer receipt source missing'
+  pointer_after=js(json.loads(receipt.group(1)))
+  check('pointer receipt never reads whole-page text',pointer_after['url']==capture_after['url']
+   and pointer_after['scrollY']==capture_after['viewport']['scrollY'])
+  js('scrollBy(0,100);')
+  capture_scrolled=js(scene+'\n'+capture_body)
+  check('capture guard detects a scroll',capture_before['viewport']!=capture_scrolled['viewport'])
+  (a.out/'capture-without-text.png').write_bytes(capture_png)
+ finally:
+  js("delete document.body.innerText;")
+ # A hover toolbar can occur late in DOM order even while its message is
+ # visible. Short text rows must not consume a separate hidden node quota.
+ js("scrollTo(0,0);document.body.innerHTML='<section id=history style=\"display:grid;grid-template-columns:repeat(25,30px);font:8px sans-serif\">'+Array.from({length:240},(_,i)=>'<span>row '+i+'</span>').join('')+'</section><button id=late-reaction>Add reaction after history</button>';")
+ late_scene=observe()
+ (a.out/'late-toolbar-scene.json').write_text(json.dumps(late_scene,ensure_ascii=False,indent=2))
+ late_controls=[node for node in late_scene['nodes'] if node['kind']=='control' and node['text']=='Add reaction after history']
+ check('late toolbar follows more than 200 observed nodes without truncation',
+  len(late_scene['nodes'])>200 and not late_scene['truncated'] and len(late_controls)==1,
+  {'nodes':len(late_scene['nodes']),'truncated':late_scene['truncated'],'lateControls':len(late_controls)})
+ (a.out/'late-toolbar.png').write_bytes(base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True))
+ # Dense visible short controls reach the JSON byte ceiling before the text budget.
+ js("scrollTo(0,0);document.body.innerHTML='<div id=dense>'+Array.from({length:6000},()=>'<button style=\"position:absolute;left:0;top:0;width:20px;height:20px;font:8px sans-serif;padding:0\">X</button>').join('')+'</div>';document.title='Dense node budget';")
+ dense_scene=observe()
+ dense_bytes=len(json.dumps(dense_scene,ensure_ascii=False,separators=(',',':')).encode())
+ dense_count=js("return document.querySelectorAll('#dense button').length;")
+ check('dense short nodes return usable partial JSON within one MiB',
+  dense_scene['truncated'] and 0<len(dense_scene['nodes'])<dense_count and dense_bytes<=1024*1024,
+  {'nodes':len(dense_scene['nodes']),'available':dense_count,'bytes':dense_bytes})
+ check('dense partial read retains complete page identity',
+  dense_scene['url']==js('return location.href;') and dense_scene['title']=='Dense node budget'
+  and dense_scene['documentId']==observe()['documentId'])
+ first_dense=dense_scene['nodes'][0]
+ check('dense partial scene keeps its observed node reference usable',
+  act(dense_scene,first_dense,action='click')['action']=='click')
+ (a.out/'dense-byte-budget-scene.json').write_text(json.dumps(dense_scene,ensure_ascii=False,indent=2))
+ png=base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True);(a.out/'fixture.png').write_bytes(png)
+ report={'checks':checks,'scene_elapsed_ms':elapsed,'scene_json_utf8_bytes':len(json.dumps(s,ensure_ascii=False,separators=(',',':')).encode()),'png_bytes':len(png),'png_sha256':hashlib.sha256(png).hexdigest(),'scene_runtime_sha256':hashlib.sha256(scene.encode()).hexdigest(),'browser_capabilities':caps['capabilities'],'scope':'real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe'}
+ (a.out/'proof.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k!='browser_capabilities'}))
+finally:
+ if sid:
+  try:call('DELETE','/session/'+sid)
+  except (urllib.error.URLError,RuntimeError):pass
+ driver.terminate();driver.wait(timeout=5);log.close();server.shutdown();server.server_close()

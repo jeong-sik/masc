@@ -1,0 +1,12 @@
+{
+  "closed_at": "2026-10-30T00:26:53.405654+00:00",
+  "fixture_pid": 6891,
+  "ttyd_pid": 6906,
+  "tmux_socket": "masc-queue-pixels-20261030",
+  "scope": "only verified owned synthetic observation processes",
+  "browser_finish": {
+    "task_space": 124,
+    "kept_pages": [],
+    "finished_at": "2026-10-30T00:25:50.899Z"
+  }
+}

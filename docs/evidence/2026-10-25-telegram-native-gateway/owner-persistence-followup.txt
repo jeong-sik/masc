@@ -1,0 +1,8 @@
+Excerpt from failed overall run 40110391139: actual Keeper Owner suite itself passed.
+Source 9a9109d9c5c34dbfbe457f2e0a0e8ebfb092051c; later native fixture build failed separately.
+test suite	Test	2026-10-24T16:21:18.7078150Z ASSERT actual owner receipt advances cursor
+test suite	Test	2026-10-24T16:21:18.7086204Z ASSERT confirmed frontier prevents reaccept
+test suite	Test	2026-10-24T16:21:18.7091295Z ASSERT SQLite stores original event operation
+test suite	Test	2026-10-24T16:21:18.7092061Z ASSERT owner remains queued without running a model
+test suite	Test	2026-10-24T16:21:18.7101717Z   [OK]          actor                        78   Telegram poll receipt is a ...
+test suite	Test	2026-10-24T16:21:18.7945682Z Test Successful in 2.228s. 92 tests run.

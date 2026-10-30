@@ -1,0 +1,6 @@
+{
+  "path": "scripts/verify-installed-workspace-memory-discovery.py",
+  "sha256": "a873b5df05bc8fdc8c9ee5ec9abe71dea0a62ff3be3243d19b38f31e99ca9660",
+  "scope": "probe source at baseline invocation; uncommitted at invocation",
+  "python_syntax": "ast.parse passed"
+}

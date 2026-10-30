@@ -1,0 +1,25 @@
+{
+  "schema": "masc.first_keeper_turn.v1",
+  "result": "PASS",
+  "binary_sha256": "0e6ad43e61ad7d1d1f924932e6cc63509e97b694f666d9860b52b97842974ac2",
+  "binary_commit": "585db68fd9253fd36a89066ddf1f92fddf361f92",
+  "keeper": "first-turn-d2359ab9d07f",
+  "model": "scripted loopback fixture",
+  "model_requests": 2,
+  "image": "masc-sandbox:release-proof-585db68",
+  "container_id": "83deb598f06dd2f63923f8df350db23af377d04131d70ff0ab15489e058ab8fd",
+  "checkpoint_relative_path": ".masc/traces/trace-1788841516154-00000/trace-1788841516154-00000.json",
+  "claims": [
+    "actual Docker Execute",
+    "ToolResult returned to model",
+    "host file matched",
+    "canonical checkpoint contains final answer"
+  ],
+  "not_measured": [
+    "model quality",
+    "long-running Keeper continuity"
+  ],
+  "release_run": "https://github.com/jeong-sik/masc/actions/runs/34185036819",
+  "artifact_id": 10040419569,
+  "image_id": "sha256:4ae547d96dc9d653c78eba02b9d6bd77647612f33f36b67f86bc2da0f4d3bd38"
+}

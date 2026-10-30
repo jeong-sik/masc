@@ -1,0 +1,189 @@
+name: Setup OCaml Toolchain
+description: Shared OCaml toolchain bootstrap, one opam switch per runner OS, cached from main.
+
+inputs:
+  ocaml-compiler:
+    description: OCaml compiler version (MASC supports exactly 5.5.1)
+    required: false
+    default: "5.5.1"
+  cache-prefix:
+    description: Prefix for the OCaml toolchain cache key
+    required: false
+    default: agent_core-otel-02
+
+runs:
+  using: composite
+  steps:
+    - name: Validate OCaml compiler contract
+      shell: bash
+      env:
+        OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
+      run: |
+        if [[ "${OCAML_COMPILER_INPUT}" != "5.5.1" ]]; then
+          echo "Unsupported ocaml-compiler input: ${OCAML_COMPILER_INPUT}; MASC requires exactly 5.5.1" >&2
+          exit 1
+        fi
+
+    # One key, computed once, for the two cache steps below.
+    #
+    # runner.arch is in the key because an arm64 runner restoring an x86_64
+    # ~/.opam gets a switch whose ocamlc does not run (run 32332266041).
+    # masc.opam.locked is in the key because it does not match the *.opam
+    # glob, and a lock bump used to restore a switch built from the previous
+    # one (#28543). The OS is spelled out because the two switches are built
+    # for different kernels and must never restore across; "linux" keeps the
+    # key every Linux entry already has. ImageOS and ImageVersion keep a switch
+    # from being restored onto a different hosted runner image revision.
+    - name: Name the toolchain cache
+      id: opam-toolchain-key
+      shell: bash
+      env:
+        CACHE_DEPENDENCY_HASH: ${{ hashFiles('*.opam', 'masc.opam.locked', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}
+        CACHE_PREFIX: opam-${{ runner.os == 'Linux' && 'linux' || 'macos' }}-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+      run: |
+        : "${ImageOS:?GitHub-hosted ImageOS is required for cache isolation}"
+        : "${ImageVersion:?GitHub-hosted ImageVersion is required for cache isolation}"
+        {
+          echo "key=${CACHE_PREFIX}${ImageOS}-${ImageVersion}-${CACHE_DEPENDENCY_HASH}-v4"
+          echo "prefix=${CACHE_PREFIX}${ImageOS}-${ImageVersion}-"
+        } >> "${GITHUB_OUTPUT}"
+
+    # The switch is cached after the whole job, so the pins and the opam
+    # install that later steps run are inside it and become no-ops on a hit.
+    #
+    # Only a run whose ref is the repository default branch may save this
+    # cache. Feature-branch dispatches, tags and pull requests restore from
+    # their own scope or the default branch but never create another copy.
+    # This also keeps tag/release and workflow_call runs restore-only unless
+    # they actually run on the default branch.
+    - name: Restore OCaml toolchain (non-default ref, restore only)
+      id: opam-toolchain-cache
+      if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.opam
+          ~/.local/share/opam
+        key: ${{ steps.opam-toolchain-key.outputs.key }}
+        restore-keys: |
+          ${{ steps.opam-toolchain-key.outputs.prefix }}
+
+    - name: Restore and save OCaml toolchain (default branch only)
+      id: opam-toolchain-store
+      if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.opam
+          ~/.local/share/opam
+        key: ${{ steps.opam-toolchain-key.outputs.key }}
+        restore-keys: |
+          ${{ steps.opam-toolchain-key.outputs.prefix }}
+
+    # One bootstrap for both runner kinds: the opam release binary for this
+    # OS and architecture, a bare root, one switch. macOS used to go through
+    # ocaml/setup-ocaml instead, which builds the compiler into a switch that
+    # nothing cached, so every macOS run paid the compiler, the pins, and the
+    # dependencies again: 971 s of a 1,221 s job (run 34160247731).
+    - name: Bootstrap local opam switch
+      shell: bash
+      env:
+        OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
+        OPAM_CACHE_EXACT_HIT: ${{ steps.opam-toolchain-cache.outputs.cache-hit }}
+        OPAM_CACHE_EXACT_HIT_STORE: ${{ steps.opam-toolchain-store.outputs.cache-hit }}
+      run: |
+        set -euo pipefail
+
+        # Whichever of the two cache steps ran is the one whose exact-hit
+        # answer the repository refresh below reads; the other was skipped
+        # and its output is empty.
+        OPAM_CACHE_EXACT_HIT="${OPAM_CACHE_EXACT_HIT:-${OPAM_CACHE_EXACT_HIT_STORE:-}}"
+
+        compiler_pkg="ocaml-base-compiler.5.5.1"
+
+        switch_name="ci-${OCAML_COMPILER_INPUT//[^A-Za-z0-9]/-}"
+
+        # Export non-interactive opam settings for this step and later steps
+        export OPAMCOLOR=always
+        export OPAMCONFIRMLEVEL=unsafe-yes
+        export OPAMERRLOGLEN=0
+        export OPAMEXTERNALSOLVER=builtin-0install
+        export OPAMRETRIES=10
+        export OPAMSOLVERTIMEOUT=600
+        export OPAMYES=1
+        {
+          echo "OPAMCOLOR=always"
+          echo "OPAMCONFIRMLEVEL=unsafe-yes"
+          echo "OPAMERRLOGLEN=0"
+          echo "OPAMEXTERNALSOLVER=builtin-0install"
+          echo "OPAMRETRIES=10"
+          echo "OPAMSOLVERTIMEOUT=600"
+          echo "OPAMYES=1"
+        } >> "${GITHUB_ENV}"
+
+        # Download opam binary first — it's small (~10MB) and always needed
+        case "$(uname -m)" in
+          x86_64|amd64)
+            opam_arch="x86_64"
+            ;;
+          aarch64|arm64)
+            opam_arch="arm64"
+            ;;
+          *)
+            echo "Unsupported runner architecture: $(uname -m)" >&2
+            exit 1
+            ;;
+        esac
+        case "$(uname -s)" in
+          Linux)
+            opam_os="linux"
+            ;;
+          Darwin)
+            opam_os="macos"
+            ;;
+          *)
+            echo "Unsupported runner OS: $(uname -s)" >&2
+            exit 1
+            ;;
+        esac
+
+        opam_version="2.5.0"
+        opam_dir="${RUNNER_TEMP}/opam-bin"
+        opam_url="https://github.com/ocaml/opam/releases/download/${opam_version}/opam-${opam_version}-${opam_arch}-${opam_os}"
+
+        mkdir -p "${opam_dir}"
+        curl -L --fail --retry 3 --retry-delay 5 --retry-all-errors "${opam_url}" -o "${opam_dir}/opam"
+        chmod +x "${opam_dir}/opam"
+        export PATH="${opam_dir}:${PATH}"
+        echo "${opam_dir}" >> "${GITHUB_PATH}"
+
+        # Cache hit: reuse existing switch, skip init + switch create.
+        # `opam switch list` is the authoritative check — it covers both the
+        # default `~/.opam` root and an XDG root under `~/.local/share/opam`,
+        # so don't pre-gate on a single directory path (that produced a false
+        # cache miss when opam used the XDG layout).
+        if opam switch list --short 2>/dev/null | grep -q "^${switch_name}$"; then
+          echo "::notice::Cache hit — reusing opam switch ${switch_name}"
+          bash scripts/ci/opam-cache-freshness.sh \
+            --refresh "${OPAM_CACHE_EXACT_HIT:-}"
+          switch_prefix="$(opam var prefix --switch="${switch_name}")"
+          echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"
+          echo "${switch_prefix}/bin" >> "${GITHUB_PATH}"
+          exit 0
+        fi
+
+        echo "::notice::Cache miss — bootstrapping opam switch ${switch_name}"
+
+        opam init --auto-setup --bare --disable-sandboxing --yes
+        opam switch create "${switch_name}" "${compiler_pkg}" --yes
+
+        switch_prefix="$(opam var prefix --switch="${switch_name}")"
+        echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"
+        echo "${switch_prefix}/bin" >> "${GITHUB_PATH}"
+
+    - name: Reject unsupported runner OS
+      if: runner.os != 'Linux' && runner.os != 'macOS'
+      shell: bash
+      run: |
+        echo "setup-ocaml-toolchain supports Linux and macOS runners only" >&2
+        exit 1

@@ -1,0 +1,2036 @@
+open Alcotest
+open Llm_provider
+open Types
+module Count = Input_token_count
+
+let msg role content : message =
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
+;;
+
+let tool =
+  `Assoc
+    [ "name", `String "inspect"
+    ; "description", `String "Inspect one artifact"
+    ; ( "input_schema"
+      , `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc [ "path", `Assoc [ "type", `String "string" ] ]
+          ] )
+    ]
+;;
+
+let messages =
+  [ msg
+      User
+      [ Text "Inspect this image"
+      ; Image { media_type = "image/png"; source = Base64 "AAAA" }
+      ]
+  ; msg
+      Assistant
+      [ ToolUse
+          { id = "tool-1"
+          ; name = "inspect"
+          ; input = `Assoc [ "path", `String "artifact.png" ]
+          }
+      ]
+  ; msg
+      User
+      [ ToolResult
+          { tool_use_id = "tool-1"
+          ; content = "inspection complete"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks =
+              Some
+                [ Text "inspection complete"
+                ; Image { media_type = "image/png"; source = Base64 "BBBB" }
+                ]
+          }
+      ]
+  ]
+;;
+
+let config
+      ?(kind = Provider_config.Anthropic)
+      ?(request_path = "/proxy/messages")
+      ?max_context
+      ?max_concurrent_requests
+      ?model_capabilities_override
+      base_url
+  =
+  Provider_config.make
+    ~kind
+    ~model_id:"input-count-fixture"
+    ~base_url
+    ~api_key:"test-key"
+    ~headers:[ "Content-Type", "application/json"; "anthropic-version", "2023-06-01" ]
+    ~request_path
+    ~max_tokens:64
+    ?max_context
+    ~temperature:0.2
+    ~top_p:0.8
+    ~top_k:40
+    ~system_prompt:"Count the exact projected input."
+    ~cache_system_prompt:true
+    (* Advisory, not forced. No catalog row names "input-count-fixture", so
+       nothing declares it can take a forced choice and build_request refuses
+       one before it serializes anything. [Any] reached the wire here only
+       because supports_tool_choice_override asserted the capability from the
+       config; that channel is gone. Both builders project this through the
+       same [tool_choice_to_json], so the shared-field comparison below is
+       unchanged, and [disable_parallel_tool_use] still nests in the object. *)
+    ~tool_choice:Auto
+    ~disable_parallel_tool_use:true
+    ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+    ?max_concurrent_requests
+    ?model_capabilities_override
+    ()
+;;
+
+(* The resolver is the only door onto a deadline, here as on the call path.
+   Its rejection carries the operation, the parameter and the value it
+   refused, so a fixture budget the resolver will not take says which suite
+   and which number. *)
+let deadline_of ~clock ~timeout_s =
+  match
+    Http_client.resolve_explicit_deadline
+      ~operation:"test_anthropic_input_token_count"
+      ~parameter:"timeout_s"
+      ~clock
+      ~timeout_s
+  with
+  | Ok deadline -> deadline
+  | Error (Http_client.AcceptRejected { reason }) -> failwith reason
+  | Error _ ->
+    failwith "test_anthropic_input_token_count: the fixture deadline was refused for another reason"
+;;
+
+(* A window with no bound on it: the cases that use it are about what is
+   measured and sent, not when the wait ends. *)
+
+let unbounded_window : float Eio.Time.clock_ty Eio.Resource.t Deadline_window.t =
+  Deadline_window.open_ (deadline_of ~clock:None ~timeout_s:None)
+;;
+
+(* The stage these measurements are ahead of, with no bound on it. *)
+let unbounded_completion = Complete.Completion { call_window = unbounded_window }
+
+let serialize_sync prepared =
+  match Complete.admit_request_body ~stream:false prepared with
+  | Ok serialized -> serialized
+  | Error _ -> fail "request serialization admission failed"
+;;
+
+let kimi_config ?max_context base_url =
+  { (config ~kind:Provider_config.Kimi ?max_context base_url) with response_format = Off }
+;;
+
+let response =
+  { id = "prepared-response"
+  ; model = "input-count-fixture"
+  ; stop_reason = EndTurn
+  ; content = [ Text "accepted" ]
+  ; usage = None
+  ; telemetry = None
+  }
+;;
+
+let build_admission_agent
+      ?(media_store = Agent_core.History.Memory_store.create ())
+      ?model_input_projection
+      ?body_timeout_s
+      ?pre_dispatch_serialization_observer
+      ~net
+      ~provider_config
+      ?transport
+      ()
+  =
+  let builder =
+    Agent_core.Builder.create ~media_store ~net ~model:provider_config.Provider_config.model_id
+    |> Agent_core.Builder.with_provider_config provider_config
+    |> Agent_core.Builder.with_context_fit_admission Agent_core.Agent.Require_exact_fit
+    |> Agent_core.Builder.without_event_bus
+  in
+  let builder =
+    match transport with
+    | None -> builder
+    | Some transport -> Agent_core.Builder.with_transport transport builder
+  in
+  let builder =
+    match model_input_projection with
+    | None -> builder
+    | Some project -> Agent_core.Builder.with_model_input_projection project builder
+  in
+  let builder =
+    match body_timeout_s with
+    | None -> builder
+    | Some timeout_s -> Agent_core.Builder.with_body_timeout timeout_s builder
+  in
+  let builder =
+    match pre_dispatch_serialization_observer with
+    | None -> builder
+    | Some observer ->
+      Agent_core.Builder.with_pre_dispatch_serialization_observer observer builder
+  in
+  builder
+  |> Agent_core.Builder.build_safe
+  |> function
+  | Ok agent -> agent
+  | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+let completion_request config : Llm_transport.completion_request =
+  { config
+  ; messages
+  ; tools = [ tool ]
+  ; capture_id = Some "request-count-fixture"
+  ; observe_http_status = None
+  ; observe_wire_chunk = None
+  ; request_wire_observer = None
+  ; stream_idle_timeout_s = None
+  ; first_event_timeout_s = None
+  ; body_timeout_s = None
+  }
+;;
+
+let assoc body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> fields
+  | _ -> fail "request body must be an object"
+;;
+
+let field_json name fields =
+  match List.assoc_opt name fields with
+  | Some json -> Yojson.Safe.to_string json
+  | None -> fail ("missing request field: " ^ name)
+;;
+
+let test_binding_controls_completion_only () =
+  let cfg = Provider_config.make ~kind:Anthropic ~model_id:"claude-sonnet-5-5"
+      ~base_url:"https://api.anthropic.com" ~api_key:"fixture" ~max_tokens:64
+      ~enable_thinking:true () in
+  let build cfg =
+    Backend_anthropic.build_request_artifact_with_thinking_control
+      ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_between_tools)
+      ~config:cfg ~messages:[msg User [Text "hello"]] ()
+    |> Result.get_ok |> Backend_anthropic.request_payload
+  in
+  let body = build cfg in
+  let open Yojson.Safe.Util in
+  check string "adaptive requests recover only invalid thinking" "drop_block"
+    (Yojson.Safe.from_string body |> member "thinking" |> member "block_binding"
+     |> member "prefix_mismatch_behavior" |> to_string);
+  let headers = Backend_anthropic.request_headers ~body
+      ["Anthropic-Beta", "existing-beta"; "x-test", "retained"] in
+  check (option string) "existing beta retained with required beta"
+    (Some "existing-beta,thinking-binding-controls-2026-08-01")
+    (List.assoc_opt "anthropic-beta" headers);
+  let without_switch =
+    Env_parse.with_env Backend_anthropic.drop_block_env_var "false" (fun () ->
+      build cfg)
+  in
+  check bool "measurement switch withholds block_binding" false
+    (List.mem_assoc "block_binding"
+       (Yojson.Safe.from_string without_switch |> member "thinking" |> to_assoc));
+  check (option string) "no binding beta without block_binding"
+    (Some "existing-beta")
+    (List.assoc_opt "Anthropic-Beta"
+       (Backend_anthropic.request_headers ~body:without_switch
+          ["Anthropic-Beta", "existing-beta"]));
+  let disabled = build {cfg with enable_thinking = Some false; reasoning_effort = None} in
+  check bool "between_tools does not send forbidden binding" false
+    (List.mem_assoc "block_binding"
+       (Yojson.Safe.from_string disabled |> member "thinking" |> to_assoc));
+  let count = Backend_anthropic.build_count_tokens_request
+      ~config:{cfg with enable_thinking = None} ~messages:[msg User [Text "hello"]] () in
+  check (list (pair string string)) "count request adds no beta" []
+    (Backend_anthropic.request_headers ~body:count [])
+;;
+
+let test_shared_projection () =
+  let cfg = config "https://api.anthropic.com" in
+  let completion =
+    Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] () |> assoc
+  in
+  let count =
+    Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
+    |> assoc
+  in
+  List.iter
+    (fun name ->
+       check
+         string
+         ("shared field " ^ name)
+         (field_json name completion)
+         (field_json name count))
+    [ "model"; "messages"; "system"; "tools"; "tool_choice"; "output_config" ];
+  List.iter
+    (fun name -> check bool ("count omits " ^ name) false (List.mem_assoc name count))
+    [ "max_tokens"; "stream"; "temperature"; "top_p"; "top_k" ]
+;;
+
+let test_kimi_shared_projection () =
+  let cfg = kimi_config "https://api.kimi.com/coding" in
+  let completion =
+    Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] () |> assoc
+  in
+  let count =
+    Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
+    |> assoc
+  in
+  List.iter
+    (fun name ->
+       check
+         string
+         ("Kimi shared field " ^ name)
+         (field_json name completion)
+         (field_json name count))
+    [ "model"; "messages"; "system"; "tools"; "tool_choice" ];
+  List.iter
+    (fun name ->
+       check bool ("Kimi count omits " ^ name) false (List.mem_assoc name count))
+    [ "max_tokens"; "stream"; "temperature"; "top_p"; "top_k" ]
+;;
+
+let tool_result_projection_cases =
+  [ "signed thinking", Thinking { content = "signed tool data"; signature = Some "fixture-signature" }
+  ; "unsigned thinking", Thinking { content = "unsigned tool data"; signature = None }
+  ; "redacted thinking", RedactedThinking "opaque-redacted-tool-data"
+  ; "foreign opaque reasoning",
+    ReasoningDetails
+      { reasoning_content = Some "foreign tool data"
+      ; details =
+          [ { raw = `Assoc [ "type", `String "reasoning.encrypted"
+                          ; "data", `String "foreign-opaque-tool-data" ]
+            ; text = None
+            } ]
+      }
+  ; "nested tool call",
+    ToolUse { id = "nested-call"; name = "inspect"; input = `Assoc [ "path", `String "nested" ] }
+  ; "nested tool result",
+    ToolResult
+      { tool_use_id = "nested-call"; content = "nested fallback"
+      ; outcome = Tool_succeeded; json = None
+      ; content_blocks = Some [ Text "nested result"
+                              ; Thinking { content = "nested signed data"; signature = Some "nested-signature" } ]
+      }
+  ; "audio", Audio { media_type = "audio/wav"; source = Base64 "YXVkaW8=" }
+  ]
+;;
+
+let messages_with_tool_result_data block =
+  [ msg User [ Text "Inspect the artifact" ]
+  ; msg Assistant [ ToolUse { id = "tool-1"; name = "inspect"; input = `Assoc [] } ]
+  ; msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"; content = "fallback"
+          ; outcome = Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+          ; json = None
+          ; content_blocks = Some
+              [ Text "before"
+              ; Image { media_type = "image/png"; source = Base64 "AAAA" }
+              ; Image { media_type = "image/png"; source = Url "https://example.test/tool.png" }
+              ; Image { media_type = "image/png"; source = File_id "file_tool_image" }
+              ; block
+              ; Document { media_type = "application/pdf"; source = Base64 "UERG" }
+              ; Text "after"
+              ]
+          }
+      ]
+  ]
+;;
+
+let test_anthropic_tool_result_content_projection () =
+  let open Yojson.Safe.Util in
+  let cfg = config "https://api.anthropic.com" in
+  List.iter (fun (label, block) ->
+    let messages = messages_with_tool_result_data block in
+    let canonical_before = List.map Api_common.message_to_json messages in
+    List.iter (fun body ->
+      let tool_result = Yojson.Safe.from_string body |> member "messages" |> to_list
+        |> List.rev |> List.hd |> member "content" |> to_list |> List.hd in
+      check string (label ^ " result still answers its tool call") "tool-1"
+        (tool_result |> member "tool_use_id" |> to_string);
+      check bool (label ^ " result keeps its failure outcome") true
+        (tool_result |> member "is_error" |> to_bool);
+      let content = tool_result |> member "content" |> to_list in
+      check (list string) (label ^ " uses only legal nested blocks in original order")
+        [ "text"; "image"; "image"; "image"; "text"; "document"; "text" ]
+        (List.map (fun item -> item |> member "type" |> to_string) content);
+      check string (label ^ " keeps leading text") "before"
+        (List.nth content 0 |> member "text" |> to_string);
+      check bool (label ^ " keeps base64 image") true
+        (List.nth content 1 |> member "source"
+         = `Assoc [ "type", `String "base64"; "media_type", `String "image/png"; "data", `String "AAAA" ]);
+      check bool (label ^ " keeps URL image") true
+        (List.nth content 2 |> member "source"
+         = `Assoc [ "type", `String "url"; "url", `String "https://example.test/tool.png" ]);
+      check bool (label ^ " keeps file image") true
+        (List.nth content 3 |> member "source"
+         = `Assoc [ "type", `String "file"; "file_id", `String "file_tool_image" ]);
+      check bool (label ^ " survives as exact canonical JSON inside text") true
+        (List.nth content 4 |> member "text" |> to_string |> Yojson.Safe.from_string
+         = Api_common.content_block_to_json block);
+      check bool (label ^ " keeps document source") true
+        (List.nth content 5 |> member "source"
+         = `Assoc [ "type", `String "base64"; "media_type", `String "application/pdf"; "data", `String "UERG" ]);
+      check string (label ^ " keeps trailing text") "after"
+        (List.nth content 6 |> member "text" |> to_string))
+      [ Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ; Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ];
+    check bool (label ^ " leaves canonical history unchanged") true
+      (canonical_before = List.map Api_common.message_to_json messages))
+    tool_result_projection_cases
+;;
+
+let test_kimi_tool_result_content_unchanged () =
+  let open Yojson.Safe.Util in
+  let cfg = kimi_config "https://api.kimi.com/coding" in
+  List.iter (fun (label, block) ->
+    let messages = messages_with_tool_result_data block in
+    let expected = `List (List.map Api_common.kimi_message_to_json messages) in
+    List.iter (fun body ->
+      check bool (label ^ " keeps the existing Kimi message wire") true
+        (Yojson.Safe.from_string body |> member "messages" = expected))
+      [ Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ; Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ]) tool_result_projection_cases
+;;
+
+let combinator_tool =
+  `Assoc
+    [ "name", `String "tool_execute"
+    ; "description", `String "Run one command"
+    ; ( "input_schema"
+      , `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ "argv", `Assoc [ "type", `String "array" ]
+                ; "command", `Assoc [ "type", `String "string" ]
+                ; ( "shell"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "oneOf"
+                        , `List
+                            [ `Assoc [ "const", `String "sh" ]
+                            ; `Assoc [ "const", `String "bash" ]
+                            ] )
+                      ] )
+                ] )
+          ; ( "oneOf"
+            , `List
+                [ `Assoc [ "required", `List [ `String "argv" ] ]
+                ; `Assoc [ "required", `List [ `String "command" ] ]
+                ] )
+          ] )
+    ]
+;;
+
+let tool_input_schema_fields body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> (
+    match List.assoc_opt "tools" fields with
+    | Some (`List (`Assoc tool_fields :: _)) -> (
+      match List.assoc_opt "input_schema" tool_fields with
+      | Some (`Assoc schema_fields) -> schema_fields
+      | _ -> fail "tool missing input_schema object")
+    | _ -> fail "request missing tools list")
+  | _ -> fail "request body must be an object"
+;;
+
+let test_anthropic_strips_top_level_combinators () =
+  let cfg = config "https://api.anthropic.com" in
+  let schema =
+    Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ combinator_tool ] ()
+    |> tool_input_schema_fields
+  in
+  check bool "top-level oneOf stripped" false (List.mem_assoc "oneOf" schema);
+  check bool "type kept" true (List.mem_assoc "type" schema);
+  check bool "properties kept" true (List.mem_assoc "properties" schema);
+  match List.assoc_opt "properties" schema with
+  | Some (`Assoc properties) -> (
+    check bool "command property kept" true (List.mem_assoc "command" properties);
+    match List.assoc_opt "shell" properties with
+    | Some (`Assoc shell) ->
+      check bool "nested oneOf kept" true (List.mem_assoc "oneOf" shell)
+    | _ -> fail "properties missing shell")
+  | _ -> fail "schema missing properties"
+;;
+
+let test_kimi_keeps_top_level_combinators () =
+  let cfg = kimi_config "https://api.kimi.com/coding" in
+  let schema =
+    Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ combinator_tool ] ()
+    |> tool_input_schema_fields
+  in
+  check bool "Kimi top-level oneOf kept" true (List.mem_assoc "oneOf" schema)
+;;
+
+let test_anthropic_synthesizes_type_for_combinator_only_schema () =
+  let tool =
+    `Assoc
+      [ "name", `String "combinator_only"
+      ; "description", `String "Schema that is only a combinator"
+      ; ( "input_schema"
+        , `Assoc
+            [ "oneOf", `List [ `Assoc [ "type", `String "object" ] ] ] )
+      ]
+  in
+  let cfg = config "https://api.anthropic.com" in
+  let schema =
+    Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
+    |> tool_input_schema_fields
+  in
+  check
+    bool
+    "type object synthesized"
+    true
+    (List.assoc_opt "type" schema = Some (`String "object"))
+;;
+
+(* Nothing listens on loopback port 1, so a request sent there never reaches
+   a server. *)
+let unreachable_base_url = "http://127.0.0.1:1"
+
+let fresh_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port =
+    match Unix.getsockname socket with
+    | Unix.ADDR_INET (_, port) -> port
+    | _ -> fail "loopback socket did not expose a TCP port"
+  in
+  Unix.close socket;
+  port
+;;
+
+let with_mock_env ?response_delay_s ~status ~response f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let port = fresh_port () in
+  let captured, resolve_captured = Eio.Promise.create () in
+  let handler _conn request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    Eio.Promise.resolve
+      resolve_captured
+      (Cohttp.Request.uri request |> Uri.path, Cohttp.Request.headers request, body);
+    Option.iter (Eio.Time.sleep clock) response_delay_s;
+    Cohttp_eio.Server.respond_string ~status ~body:response ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~clock ~base_url in
+  result, Eio.Promise.await captured
+;;
+
+let with_mock ~status ~response f =
+  with_mock_env ~status ~response (fun ~sw ~net ~clock:_ ~base_url ->
+    f ~sw ~net ~base_url)
+;;
+
+let admitted_anthropic_stream_response =
+  "event: message_start\n\
+   data: \
+   {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"input-count-fixture\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n\
+   event: content_block_start\n\
+   data: \
+   {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+   event: content_block_delta\n\
+   data: \
+   {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"accepted\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+   event: message_delta\n\
+   data: \
+   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n\
+   event: message_stop\n\
+   data: {\"type\":\"message_stop\"}\n\n"
+;;
+
+let admitted_anthropic_sync_response =
+  {|{"id":"msg-1","type":"message","role":"assistant","model":"input-count-fixture","content":[{"type":"text","text":"accepted"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":1}}|}
+;;
+
+let with_admitted_http_mock ?(input_tokens = 10) ?(on_count = fun _ -> ()) ~stream f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_port () in
+  let completion_body = ref None in
+  let handler _conn request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    if String.ends_with ~suffix:"/count_tokens" path
+    then (
+      on_count body;
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:(Printf.sprintf {|{"input_tokens":%d}|} input_tokens) ())
+    else (
+      completion_body := Some body;
+      let headers =
+        if stream
+        then Cohttp.Header.of_list [ "content-type", "text/event-stream" ]
+        else Cohttp.Header.init ()
+      in
+      let response =
+        if stream
+        then admitted_anthropic_stream_response
+        else admitted_anthropic_sync_response
+      in
+      Cohttp_eio.Server.respond_string ~status:`OK ~headers ~body:response ())
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, !completion_body
+;;
+
+let check_pre_dispatch_serialization ~label ~body observations =
+  match List.rev observations with
+  | [ observation ] ->
+    check
+      bool
+      (label ^ " phase")
+      true
+      (observation.Request_wire_observer.phase
+       = Request_wire_observer.Pre_dispatch_serialization);
+    check int (label ^ " body bytes") (String.length body) observation.body_bytes;
+    check
+      string
+      (label ^ " body digest")
+      Agent_core_sha256.(to_hex (digest_string body))
+      observation.body_sha256
+  | observations -> failf "%s observer called %d times" label (List.length observations)
+;;
+
+let thinking_catalog anthropic_thinking_control =
+  let contents =
+    Printf.sprintf
+      {|
+[[models]]
+model_id = "frozen-catalog-model"
+base = "anthropic"
+anthropic_thinking_control = "%s"
+max_context_tokens = 512
+max_output_tokens = 64
+|}
+      anthropic_thinking_control
+  in
+  match Model_catalog.of_toml_string ~source:"frozen admitted body test" contents with
+  | Ok catalog -> catalog
+  | Error detail -> fail detail
+;;
+
+let with_preserved_catalog f =
+  let previous = Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    match previous with
+    | Some catalog -> Model_catalog.set_global catalog
+    | None -> Model_catalog.clear_global ()) f
+;;
+
+let request_policy_catalog ~model_id ~base ~max_output_tokens ~replay ~thinking =
+  let contents = Printf.sprintf
+      {|[[models]]
+model_id = "%s"
+base = "%s"
+max_context_tokens = 512
+max_output_tokens = %d
+reasoning_replay = "%s"
+%s
+|} model_id base max_output_tokens replay thinking in
+  match Model_catalog.of_toml_string ~source:"request policy freeze test" contents with
+  | Ok catalog -> catalog
+  | Error detail -> fail detail
+;;
+
+let test_policy_is_frozen_before_measurement ~stream () =
+  with_preserved_catalog @@ fun () ->
+  let catalog_a = request_policy_catalog ~model_id:"frozen-catalog-model" ~base:"anthropic"
+      ~max_output_tokens:64 ~replay:"preserve_always"
+      ~thinking:{|anthropic_thinking_control = "adaptive_default"|} in
+  let catalog_b = request_policy_catalog ~model_id:"frozen-catalog-model" ~base:"anthropic"
+      ~max_output_tokens:16 ~replay:"no_replay"
+      ~thinking:{|anthropic_thinking_control = "always_adaptive"|} in
+  Model_catalog.set_global catalog_a;
+  let counted = ref None in
+  let (result, expected_source), dispatched =
+    with_admitted_http_mock ~stream ~on_count:(fun body -> counted := Some body)
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = { (config ~max_context:512 base_url) with model_id = "frozen-catalog-model"
+      ; enable_thinking = Some true; response_format = Off } in
+    let expected_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
+    let prepared = Complete.prepare_request ~config:cfg ~messages () in
+    let serialized = Complete.admit_request_body ~stream prepared |> Result.get_ok in
+    Model_catalog.set_global catalog_b;
+    let fresh_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
+    check bool "catalog change really changes the unfrozen replay contract" false
+      (Types.Reasoning_source.equal expected_source fresh_source);
+    let next_stage = if stream then Complete.Stream
+        { admission_window = unbounded_window; first_event_timeout_s = None }
+      else unbounded_completion in
+    let measured = Complete.measure_request ~sw ~net ~next_stage serialized |> Result.get_ok in
+    let admitted = Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured |> Result.get_ok in
+    check int "count reserves the generation's original output ceiling" 64
+      (Complete.admitted_fit admitted).reserved_output_tokens;
+    let result = if stream then
+        (Complete.complete_stream_admitted ~sw ~net admitted ~admission_window:unbounded_window
+          ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+      else (Complete.complete_admitted ~sw ~net admitted ~call_window:unbounded_window ()).Llm_provider.Completion_outcome.result in
+    result, expected_source
+  in
+  let response = match result with Ok response -> response | Error _ -> fail "frozen request failed" in
+  let actual_source = Option.bind response.telemetry (fun telemetry -> telemetry.reasoning_source) in
+  check bool "response carries the request's original reasoning source" true
+    (match actual_source with Some source -> Types.Reasoning_source.equal source expected_source | None -> false);
+  let open Yojson.Safe.Util in
+  let counted = Option.get !counted |> Yojson.Safe.from_string in
+  let dispatched = Option.get dispatched |> Yojson.Safe.from_string in
+  check bool "count and generation keep the same original thinking policy" true
+    (member "thinking" counted = `Assoc [ "type", `String "adaptive" ]
+     && member "thinking" counted = member "thinking" dispatched);
+  check int "frozen generation keeps its original max_tokens" 64
+    (member "max_tokens" dispatched |> to_int)
+;;
+
+let test_catalog_reload_cannot_underreserve_output () =
+  with_preserved_catalog @@ fun () ->
+  let catalog ceiling = request_policy_catalog ~model_id:"frozen-catalog-model" ~base:"anthropic"
+      ~max_output_tokens:ceiling ~replay:"preserve_always" ~thinking:"" in
+  Model_catalog.set_global (catalog 64);
+  let (), dispatched = with_admitted_http_mock ~stream:false ~input_tokens:480
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = { (config ~max_context:512 base_url) with model_id = "frozen-catalog-model"; response_format = Off } in
+    let serialized = Complete.prepare_request ~config:cfg ~messages () |> serialize_sync in
+    Model_catalog.set_global (catalog 16);
+    let measured = Complete.measure_request ~sw ~net ~next_stage:unbounded_completion serialized |> Result.get_ok in
+    match Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured with
+    | Error (Complete.Context_window_exceeded fit) ->
+      check int "input count" 480 fit.input_tokens;
+      check int "the output reservation remains 64, not the new 16" 64 fit.reserved_output_tokens
+    | Error _ -> fail "unexpected admission rejection"
+    | Ok _ -> fail "480 input plus frozen 64 output exceeds 512" in
+  check bool "the oversized request is never dispatched" true (dispatched = None)
+;;
+
+let test_response_policy_survives_catalog_reload ~stream () =
+  with_preserved_catalog @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  List.iter (fun kind ->
+    List.iter (fun known ->
+      List.iter (fun override ->
+        let base = match kind with
+          | Provider_config.Anthropic -> "anthropic" | Kimi -> "kimi"
+          | OpenAI_compat -> "openai_chat" | Ollama -> "ollama"
+          | Gemini -> "gemini" | Glm -> "glm" in
+        let catalog ~known ~replay ~context =
+          let model = if known then "policy-response-model" else "unrelated-model" in
+          let thinking = match kind with
+            | Provider_config.Anthropic -> {|anthropic_thinking_control = "adaptive_default"|}
+            | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> "" in
+          let contents = Printf.sprintf {|[[models]]
+model_id = "%s"
+provider_name = "policy-response-provider"
+base = "%s"
+max_context_tokens = %d
+max_output_tokens = 64
+reasoning_replay = "%s"
+%s
+|} model base context replay thinking in
+          match Model_catalog.of_toml_string ~source:"response policy freeze test" contents with
+          | Ok catalog -> catalog | Error detail -> fail detail in
+        let original = catalog ~known ~replay:"preserve_always" ~context:512 in
+        let replacement = catalog ~known:(not known) ~replay:"no_replay" ~context:1024 in
+        Model_catalog.set_global original;
+        let declared = { (Capabilities.capabilities_of_kind kind) with
+          max_context_tokens = Some 256; max_output_tokens = Some 48 } in
+        let cfg = Provider_config.make ~kind ~provider_id:"policy-response-provider"
+            ~model_id:"policy-response-model" ~base_url:"https://provider.invalid"
+            ~max_tokens:48 ~reasoning_uncontrolled:true
+            ?model_capabilities_override:(if override then Some declared else None) () in
+        let expected_capabilities = Provider_config.capabilities_for_config_model cfg in
+        let expected_thinking = Provider_config.anthropic_thinking_control cfg in
+        let expected_context = Option.bind expected_capabilities (fun caps -> caps.Capabilities.max_context_tokens) in
+        let expected_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
+        let invoke (request : Llm_transport.completion_request) =
+          Model_catalog.set_global replacement;
+          check bool "prepared lookup preserves presence and absence" true
+            (Provider_config.capabilities_for_config_model request.config = expected_capabilities);
+          check bool "prepared thinking policy preserves presence and absence" true
+            (Provider_config.anthropic_thinking_control request.config = expected_thinking);
+          check bool "caller override stays explicit" true
+            (request.config.model_capabilities_override = cfg.model_capabilities_override);
+          check bool "freezing a matching request is idempotent" true
+            (Provider_config.freeze_for_request request.config == request.config);
+          let other_kind = match kind with
+            | Provider_config.Anthropic -> Provider_config.Kimi
+            | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> Provider_config.Anthropic in
+          List.iter (fun (rebound, fresh) ->
+            check bool "a different kind, provider or model does not inherit the old lookup" true
+              (Provider_config.capabilities_for_config_model rebound
+               = Provider_config.capabilities_for_config_model fresh))
+            [ ({ request.config with model_id = "other-model" }, { cfg with model_id = "other-model" })
+            ; ({ request.config with provider_id = Some "other-provider" }, { cfg with provider_id = Some "other-provider" })
+            ; ({ request.config with kind = other_kind }, { cfg with kind = other_kind }) ];
+          Ok response
+        in
+        let transport : Llm_transport.t =
+          Llm_provider.Llm_transport.custom ({ complete_sync = (fun request -> { response = invoke request; latency_ms = None })
+          ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> invoke request) }) in
+        let result = if stream then
+            (Complete.complete_stream ~sw ~net ~transport ~config:cfg
+              ~messages:[msg User [Text "hello"]] ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+          else (Complete.complete ~sw ~net ~transport ~config:cfg ~messages:[msg User [Text "hello"]] ()).Llm_provider.Completion_outcome.result in
+        let result = match result with Ok result -> result | Error _ -> fail "injected completion failed" in
+        let telemetry = match result.telemetry with Some telemetry -> telemetry | None -> fail "response has no telemetry" in
+        check (option int) "response retains the prepared context declaration"
+          expected_context telemetry.effective_context_window;
+        check bool "response reasoning source belongs to the prepared policy" true
+          (match telemetry.reasoning_source with
+           | Some source -> Types.Reasoning_source.equal expected_source source
+           | None -> false)) [false;true]) [false;true])
+    Provider_config.all_provider_kinds
+;;
+
+let test_admitted_body_is_frozen_across_catalog_mutation () =
+  let previous_catalog = Model_catalog.global () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_catalog with
+      | Some catalog -> Model_catalog.set_global catalog
+      | None -> Model_catalog.clear_global ())
+    (fun () ->
+       Model_catalog.set_global (thinking_catalog "adaptive_default");
+       let observations = ref [] in
+       let (result, admitted_evidence, fresh_serialization), completion_body =
+         with_admitted_http_mock ~stream:false
+         @@ fun ~sw ~net ~base_url ->
+         let cfg =
+           { (config ~max_context:512 base_url) with
+             model_id = "frozen-catalog-model"
+           ; enable_thinking = Some true
+           ; tool_choice = Some Auto
+           ; response_format = Off
+           }
+         in
+         let prepared = Complete.prepare_request ~config:cfg ~messages () in
+         let admitted_evidence =
+           match
+             Complete.inspect_serialized_request ~stream:false ~config:cfg ~messages ()
+           with
+           | Ok evidence -> evidence
+           | Error (Http_client.AcceptRejected { reason }) -> fail reason
+           | Error _ -> fail "initial frozen-body serialization failed"
+         in
+         let serialized =
+           match Complete.admit_request_body ~stream:false prepared with
+           | Ok serialized -> serialized
+           | Error (Http_client.AcceptRejected { reason }) -> fail reason
+           | Error _ -> fail "initial frozen-body admission failed"
+         in
+         let measured = Complete.measure_request ~sw ~net ~next_stage:unbounded_completion serialized |> Result.get_ok in
+         let admitted =
+           Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured
+           |> Result.get_ok
+         in
+         Model_catalog.set_global (thinking_catalog "always_adaptive");
+         let fresh_serialization =
+           Complete.inspect_serialized_request ~stream:false ~config:cfg ~messages ()
+         in
+         let result =
+           (Complete.complete_admitted
+             ~sw
+             ~net
+             ~request_wire_observer:(fun observation ->
+               observations := observation :: !observations;
+               Ok ())
+             admitted
+             ~call_window:unbounded_window
+             ()).Llm_provider.Completion_outcome.result
+         in
+         result, admitted_evidence, fresh_serialization
+       in
+       (* The mutation has to change something, or freezing the body proves
+          nothing. It used to change validity: a manual_budget row carrying a
+          thinking_budget became an error under always_adaptive. #34801 removed
+          budgets, so the mutation now changes the body instead --
+          always_adaptive omits the thinking field adaptive_default emits. That
+          difference is what makes the digest check below meaningful. *)
+       (match fresh_serialization with
+        | Error _ ->
+          fail "catalog mutation broke fresh serialization instead of changing it"
+        | Ok fresh ->
+          check
+            bool
+            "catalog mutation changes what a fresh serialization would send"
+            false
+            (String.equal
+               fresh.Request_wire_observer.body_sha256
+               admitted_evidence.Request_wire_observer.body_sha256));
+       (match result with
+        | Ok _ -> ()
+        | Error _ -> fail "frozen admitted body was reserialized before dispatch");
+       match completion_body with
+       | None -> fail "frozen admitted body did not reach completion dispatch"
+       | Some body ->
+         check
+           int
+           "frozen admission bytes"
+           admitted_evidence.Request_wire_observer.body_bytes
+           (String.length body);
+         check
+           string
+           "frozen admission digest"
+           admitted_evidence.body_sha256
+           Agent_core_sha256.(to_hex (digest_string body));
+         check_pre_dispatch_serialization
+           ~label:"frozen admitted body"
+           ~body
+           !observations)
+;;
+
+let test_transport_success () =
+  let result, (path, headers, body) =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    Count_tokens_sync.measure_completion_request
+      ~sw
+      ~net
+      (completion_request (config base_url))
+  in
+  (match result with
+   | Ok measurement ->
+     let count = measurement.input_count in
+     check int "input tokens" 321 count.input_tokens;
+     check string "model id" "input-count-fixture" count.model_id;
+     check
+       bool
+       "protocol"
+       true
+       (Count.equal_protocol count.protocol Count.Anthropic_messages_count_tokens);
+     check
+       (option int)
+       "exact requested output"
+       (Some 64)
+       (Types.output_token_receipt_requested measurement.output_token_receipt);
+     check
+       (option int)
+       "exact effective output"
+       (Some 64)
+       (Types.output_token_receipt_effective measurement.output_token_receipt)
+   | Error _ -> fail "expected native Anthropic count success");
+  check string "custom proxy path" "/proxy/messages/count_tokens" path;
+  let check_header name value =
+    check (option string) name (Some value) (Cohttp.Header.get headers name)
+  in
+  check_header "x-api-key" "test-key";
+  check_header "anthropic-version" "2023-06-01";
+  check
+    string
+    "canonical request body"
+    (Backend_anthropic.build_count_tokens_request
+       ~config:(config "unused")
+       ~messages
+       ~tools:[ tool ]
+       ())
+    body
+;;
+
+let test_kimi_transport_success () =
+  let result, (path, headers, body) =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = kimi_config base_url in
+    Count_tokens_sync.measure_completion_request ~sw ~net (completion_request cfg)
+  in
+  (match result with
+   | Ok measurement ->
+     check int "Kimi input tokens" 321 measurement.input_count.input_tokens
+   | Error _ -> fail "expected native Kimi count success");
+  check string "Kimi count path" "/proxy/messages/count_tokens" path;
+  check
+    (option string)
+    "Kimi x-api-key"
+    (Some "test-key")
+    (Cohttp.Header.get headers "x-api-key");
+  check
+    string
+    "Kimi canonical request body"
+    (Backend_anthropic.build_count_tokens_request
+       ~config:(kimi_config "unused")
+       ~messages
+       ~tools:[ tool ]
+       ())
+    body
+;;
+
+let test_prepared_measure_admit_dispatch () =
+  let (result, fit, dispatched), _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = config ~max_context:512 base_url in
+    let prepared =
+      Complete.prepare_request
+        ~config:cfg
+        ~messages
+        ~tools:[ tool ]
+        ~trace_context:[ "x-agent-core-trace", "prepared-ssot" ]
+        ()
+    in
+    let measured =
+      match Complete.measure_request ~sw ~net ~next_stage:unbounded_completion (serialize_sync prepared) with
+      | Ok measured -> measured
+      | Error _ -> fail "expected prepared request measurement"
+    in
+    let max_context_tokens =
+      match Complete.resolve_context_limit prepared with
+      | Ok limit -> limit
+      | Error _ -> fail "expected resolved context limit"
+    in
+    let admitted =
+      match Complete.admit_request ~now_unix_s:0 ~max_context_tokens measured with
+      | Ok admitted -> admitted
+      | Error _ -> fail "expected prepared request admission"
+    in
+    let fit = Complete.admitted_fit admitted in
+    let dispatched = ref None in
+    let transport =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+          (fun request ->
+            dispatched := Some request;
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
+      })
+    in
+    let result =
+      (Complete.complete_admitted ~sw ~net ~transport admitted ~call_window:unbounded_window ()).Llm_provider.Completion_outcome.result
+    in
+    result, fit, !dispatched
+  in
+  (match result with
+   | Ok actual ->
+     check string "response" "accepted" (Types.visible_text_of_response actual)
+   | Error _ -> fail "expected admitted dispatch success");
+  check int "measured input" 321 fit.Complete.input_tokens;
+  check int "reserved output" 64 fit.reserved_output_tokens;
+  check int "declared context" 512 fit.max_context_tokens;
+  match dispatched with
+  | None -> fail "admitted request was not dispatched"
+  | Some request ->
+    check string "same model" "input-count-fixture" request.config.model_id;
+    check int "same messages" (List.length messages) (List.length request.messages);
+    check int "same tools" 1 (List.length request.tools);
+    check
+      (option string)
+      "same trace projection"
+      (Some "prepared-ssot")
+      (List.assoc_opt "x-agent-core-trace" request.config.headers)
+;;
+
+let test_prepared_context_overflow_is_typed () =
+  let result, _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":500}|}
+    @@ fun ~sw ~net ~base_url ->
+    let prepared =
+      Complete.prepare_request
+        ~config:(config ~max_context:512 base_url)
+        ~messages
+        ~tools:[ tool ]
+        ()
+    in
+    match Complete.measure_request ~sw ~net ~next_stage:unbounded_completion (serialize_sync prepared) with
+    | Error _ -> fail "expected prepared request measurement"
+    | Ok measured ->
+      (match Complete.resolve_context_limit prepared with
+       | Error _ -> fail "expected resolved context limit"
+       | Ok max_context_tokens ->
+         Complete.admit_request ~now_unix_s:0 ~max_context_tokens measured)
+  in
+  match result with
+  | Error
+      (Complete.Context_window_exceeded
+         { input_tokens = 500; reserved_output_tokens = 64; max_context_tokens = 512 }) ->
+    ()
+  | Ok _ | Error _ -> fail "expected typed prepared context overflow"
+;;
+
+let test_prepared_admission_resolves_catalog_context_limit () =
+  let result, _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = { (config base_url) with model_id = "claude-sonnet-5" } in
+    let expected =
+      Option.bind (Provider_config.capabilities_for_config_model cfg) (fun capabilities ->
+        capabilities.Capabilities.max_context_tokens)
+      |> Option.get
+    in
+    let prepared = Complete.prepare_request ~config:cfg ~messages ~tools:[ tool ] () in
+    let measured =
+      Complete.measure_request ~sw ~net ~next_stage:unbounded_completion (serialize_sync prepared) |> Result.get_ok
+    in
+    let max_context_tokens = Complete.resolve_context_limit prepared |> Result.get_ok in
+    Complete.admit_request ~now_unix_s:0 ~max_context_tokens measured, expected
+  in
+  match result with
+  | Error _, _ -> fail "catalog-backed context admission unexpectedly failed"
+  | Ok admitted, expected ->
+    check
+      int
+      "catalog context is the admission limit"
+      expected
+      (Complete.admitted_fit admitted).max_context_tokens
+;;
+
+(* Loopback server that counts every request it receives into [posts] and,
+   unlike [with_mock], never awaits a captured promise. That makes it safe to
+   drive code that is expected to issue no request at all: a zero-request run
+   cannot block on an unresolved promise. In these fixtures the only server-bound
+   request the code under test can make is the [/count_tokens] measurement (the
+   completion itself uses the injected [transport], not the network), so [posts]
+   observes the number of [/count_tokens] round-trips. *)
+let with_post_counter f =
+  let posts = Atomic.make 0 in
+  let result =
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let port = fresh_port () in
+    let handler _conn _request body =
+      ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
+      Atomic.incr posts;
+      Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":321}|} ()
+    in
+    let socket =
+      Eio.Net.listen
+        net
+        ~sw
+        ~backlog:4
+        ~reuse_addr:true
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+    in
+    let server = Cohttp_eio.Server.make ~callback:handler () in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+    let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+    f ~sw ~net ~base_url
+  in
+  result, Atomic.get posts
+;;
+
+(* Transport that flips [dispatched] if the completion is ever dispatched. An
+   unknown context limit must fail admission before either path runs. *)
+let dispatch_tripwire dispatched =
+  Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+      (fun _ ->
+        dispatched := true;
+        { Llm_transport.response = Ok response; latency_ms = None })
+  ; complete_stream =
+      (fun ?on_telemetry:_ ~on_event:_ _ ->
+        dispatched := true;
+        Ok response)
+  })
+;;
+
+let serving_constraint ?expires_at_unix_s () =
+  let source_kind =
+    match expires_at_unix_s with
+    | Some _ -> Serving_constraint.Probe
+    | None -> Serving_constraint.Declaration
+  in
+  Serving_constraint.make
+    ~source_kind
+    ~source_ref:"probe://incident/2793"
+    ~checked_at_unix_s:0
+    ~confidence:Serving_constraint.High
+    ?expires_at_unix_s
+    ~accepted_through:524298
+    ~rejected_from:524299
+    ()
+  |> Result.get_ok
+;;
+
+let constrained_capabilities base constraint_ =
+  { base with Capabilities.serving_constraint = Some constraint_ }
+;;
+
+let run_constrained_anthropic_count input_tokens =
+  let response = Printf.sprintf {|{"input_tokens":%d}|} input_tokens in
+  with_mock ~status:`OK ~response
+  @@ fun ~sw ~net ~base_url ->
+  let provider_config =
+    config
+      ~max_context:1048576
+      ~model_capabilities_override:
+        (constrained_capabilities
+           Capabilities.anthropic_capabilities
+           (serving_constraint ()))
+      base_url
+  in
+  let dispatched = ref false in
+  let transport = dispatch_tripwire dispatched in
+  let result =
+    Agent_core.Agent.run
+      ~sw
+      (build_admission_agent ~net ~provider_config ~transport ())
+      "same exact provider request"
+  in
+  result, !dispatched
+;;
+
+let test_serving_constraint_uses_exact_provider_count () =
+  let (accepted, accepted_dispatched), (_, _, accepted_body) =
+    run_constrained_anthropic_count 524298
+  in
+  let (rejected, rejected_dispatched), (_, _, rejected_body) =
+    run_constrained_anthropic_count 524299
+  in
+  check
+    string
+    "the measured provider request is byte-identical"
+    accepted_body
+    rejected_body;
+  (match accepted with
+   | Ok _ -> check bool "accepted observation dispatches" true accepted_dispatched
+   | Error error -> fail (Agent_core.Error.to_string error));
+  match rejected with
+  | Error
+      (Agent_core.Error.Api
+         (Retry.InputCapacity
+            { reason =
+                Retry.Serving_constraint_rejected
+                  (Serving_constraint.Input_rejected
+                     { input_tokens = 524299
+                     ; accepted_through = 524298
+                     ; rejected_from = 524299
+                     })
+            ; _
+            })) ->
+    check bool "rejected observation is zero-dispatch" false rejected_dispatched
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "rejected exact token observation was dispatched"
+;;
+
+let test_stale_serving_constraint_fails_before_measurement () =
+  let dispatched = ref false in
+  let result, posts =
+    with_post_counter
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config =
+      config
+        ~max_context:1048576
+        ~model_capabilities_override:
+          (constrained_capabilities
+             Capabilities.anthropic_capabilities
+             (serving_constraint ~expires_at_unix_s:1 ()))
+        base_url
+    in
+    Agent_core.Agent.run
+      ~sw
+      (build_admission_agent
+         ~net
+         ~provider_config
+         ~transport:(dispatch_tripwire dispatched)
+         ())
+      "stale evidence"
+  in
+  (match result with
+   | Error
+       (Agent_core.Error.Api
+          (Retry.InputCapacity
+             { reason =
+                 Retry.Serving_constraint_rejected (Serving_constraint.Evidence_expired _)
+             ; _
+             })) -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "stale serving evidence was admitted");
+  check int "stale evidence makes no count request" 0 posts;
+  check bool "stale evidence makes no completion request" false !dispatched
+;;
+
+let test_unmeasurable_constraint_fails_typed_without_dispatch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let dispatched = ref false in
+  let provider_config =
+    { (config
+         ~kind:Provider_config.OpenAI_compat
+         ~max_context:1048576
+         ~model_capabilities_override:
+           (constrained_capabilities
+              Capabilities.openai_compat_chat_capabilities
+              (serving_constraint ()))
+         "not-used")
+      with
+      response_format = Off
+    }
+  in
+  let result =
+    Agent_core.Agent.run
+      ~sw
+      (build_admission_agent
+         ~net:(Eio.Stdenv.net env)
+         ~provider_config
+         ~transport:(dispatch_tripwire dispatched)
+         ())
+      "provider-native measurement is unavailable"
+  in
+  (match result with
+   | Error
+       (Agent_core.Error.Api
+          (Retry.InputCapacity { reason = Retry.Token_measurement_unavailable _; _ })) ->
+     ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "unmeasurable constrained request was dispatched");
+  check bool "unmeasurable constraint is zero-dispatch" false !dispatched
+;;
+
+(* Regression for #2678: [Pipeline_stage_route.dispatch_sync] /
+   [dispatch_stream] resolve the context limit (pure, no network) before they
+   [measure_request] (the [/count_tokens] POST), so a pre-knowable
+   [Context_limit_unknown] surfaces without a wasted round-trip.
+
+   These two tests drive the REAL production dispatch path via
+   [Agent_core.Agent.run] / [Agent_core.Agent.run_stream] (both route through
+   [Pipeline_stage_route]); they do NOT reconstruct the resolve/measure/admit
+   sequence inline. That is what makes them guard the production ordering: the
+   model has no catalog row and the config carries no [~max_context], so resolve
+   fails, and with the shipped order no request reaches the server ([posts] = 0)
+   and the tripwire transport never dispatches.
+
+   Counterfactual: revert the order in [Pipeline_stage_route] so [measure_request]
+   runs before [resolve_context_limit]. The measurement then POSTs to
+   [/count_tokens] before the (still failing) resolve, [posts] reaches 1, and the
+   [posts = 0] assertion goes red. The typed error is identical in both orders
+   (resolve fails either way), so [posts] is the discriminating observation for
+   the reorder. The sync and stream cases guard the two independent call sites
+   the production fix touched. *)
+let expect_unknown_limit_failure label result =
+  match result with
+  | Error
+      (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "max_context"; _ }))
+    -> ()
+  | Error error -> fail (label ^ ": " ^ Agent_core.Error.to_string error)
+  | Ok _ -> fail (label ^ ": expected unknown-context-limit failure before measurement")
+;;
+
+let test_resolve_before_measure_skips_count_roundtrip () =
+  let dispatched = ref false in
+  let result, posts =
+    with_post_counter
+    @@ fun ~sw ~net ~base_url ->
+    let agent =
+      build_admission_agent
+        ~net
+        ~provider_config:(config base_url)
+        ~transport:(dispatch_tripwire dispatched)
+        ()
+    in
+    Agent_core.Agent.run ~sw agent "resolve before measuring"
+  in
+  expect_unknown_limit_failure "sync" result;
+  check bool "unknown limit must not dispatch (sync)" false !dispatched;
+  check int "no /count_tokens round-trip for an unknown limit (sync)" 0 posts
+;;
+
+let test_resolve_before_measure_skips_count_roundtrip_stream () =
+  let dispatched = ref false in
+  let result, posts =
+    with_post_counter
+    @@ fun ~sw ~net ~base_url ->
+    let agent =
+      build_admission_agent
+        ~net
+        ~provider_config:(config base_url)
+        ~transport:(dispatch_tripwire dispatched)
+        ()
+    in
+    Agent_core.Agent.run_stream
+      ~sw
+      ~on_event:(fun _ -> ())
+      agent
+      "resolve before measuring"
+  in
+  expect_unknown_limit_failure "stream" result;
+  check bool "unknown limit must not dispatch (stream)" false !dispatched;
+  check int "no /count_tokens round-trip for an unknown limit (stream)" 0 posts
+;;
+
+let test_serialization_admission_validates_before_io () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let cfg =
+    config ~request_path:"/v1/responses" ~max_concurrent_requests:0 unreachable_base_url
+  in
+  let prepared = Complete.prepare_request ~config:cfg ~messages ~tools:[ tool ] () in
+  match Complete.admit_request_body ~stream:false prepared with
+  | Error (Http_client.AcceptRejected { reason = detail }) ->
+    check bool "validation identifies local config" true (String.length detail > 0);
+    check
+      bool
+      "invalid request never creates an admission lane"
+      true
+      (Option.is_none (Provider_admission.snapshot_for ~config:cfg))
+  | Ok _ | Error _ -> fail "invalid prepared request must fail before provider I/O"
+;;
+
+let test_measurement_uses_provider_admission () =
+  let result, _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = config ~max_context:512 ~max_concurrent_requests:1 base_url in
+    let prepared = Complete.prepare_request ~config:cfg ~messages ~tools:[ tool ] () in
+    let result = Complete.measure_request ~sw ~net ~next_stage:unbounded_completion (serialize_sync prepared) in
+    result, Provider_admission.snapshot_for ~config:cfg
+  in
+  match result with
+  | Error _, _ -> fail "admitted measurement unexpectedly failed"
+  | Ok _, None -> fail "measurement bypassed provider admission"
+  | Ok _, Some snapshot ->
+    check int "declared measurement bound" 1 snapshot.Slot_scheduler.max_slots;
+    check int "measurement permit returned" 0 snapshot.active
+;;
+
+let test_agent_route_uses_prepared_admission () =
+  let result, _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let dispatched = ref None in
+    let transport =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+          (fun request ->
+            dispatched := Some request;
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ request ->
+            dispatched := Some request;
+            Ok response)
+      })
+    in
+    let agent = build_admission_agent ~net ~provider_config ~transport () in
+    let result = Agent_core.Agent.run ~sw agent "measure this exact turn" in
+    result, !dispatched
+  in
+  match result with
+  | Error error, _ -> fail (Agent_core.Error.to_string error)
+  | Ok actual, None ->
+    check string "response" "accepted" (Types.visible_text_of_response actual);
+    fail "Agent route did not dispatch the admitted request"
+  | Ok actual, Some request ->
+    check string "response" "accepted" (Types.visible_text_of_response actual);
+    check string "agent dispatch model" "input-count-fixture" request.config.model_id;
+    check int "agent dispatch messages" 1 (List.length request.messages)
+;;
+
+let test_agent_stream_route_uses_prepared_admission () =
+  let result, _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let dispatched = ref None in
+    let transport =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ request ->
+            dispatched := Some request;
+            Ok response)
+      })
+    in
+    let agent = build_admission_agent ~net ~provider_config ~transport () in
+    let result = Agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "stream" in
+    result, !dispatched
+  in
+  match result with
+  | Error error, _ -> fail (Agent_core.Error.to_string error)
+  | Ok _, None -> fail "Agent stream route did not dispatch the admitted request"
+  | Ok actual, Some request ->
+    check string "stream response" "accepted" (Types.visible_text_of_response actual);
+    check string "stream dispatch model" "input-count-fixture" request.config.model_id;
+    check int "stream dispatch messages" 1 (List.length request.messages)
+;;
+
+let run_admitted_agent_observer ~stream =
+  let observations = ref [] in
+  let (result, observations), completion_body =
+    with_admitted_http_mock ~stream
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let agent =
+      build_admission_agent
+        ~net
+        ~provider_config
+        ~pre_dispatch_serialization_observer:(fun observation ->
+          observations := observation :: !observations;
+          Ok ())
+        ()
+    in
+    let result =
+      if stream
+      then
+        Agent_core.Agent.run_stream
+          ~sw
+          ~on_event:(fun _ -> ())
+          agent
+          "observe admitted stream serialization"
+      else Agent_core.Agent.run ~sw agent "observe admitted sync serialization"
+    in
+    result, !observations
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  match completion_body with
+  | None -> fail "admitted Agent path did not reach completion dispatch"
+  | Some body -> body, observations
+;;
+
+let test_agent_admitted_sync_observer_sees_dispatched_body () =
+  let body, observations = run_admitted_agent_observer ~stream:false in
+  check_pre_dispatch_serialization ~label:"Agent.run admitted" ~body observations
+;;
+
+let test_agent_admitted_stream_observer_sees_dispatched_body () =
+  let body, observations = run_admitted_agent_observer ~stream:true in
+  check_pre_dispatch_serialization ~label:"Agent.run_stream admitted" ~body observations
+;;
+
+let test_agent_projection_is_shared_by_measurement_and_dispatch () =
+  let projection_calls = ref 0 in
+  let (result, dispatched), (_, _, measured_body) =
+    with_mock ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let dispatched = ref None in
+    let transport =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+          (fun request ->
+            dispatched := Some request;
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
+      })
+    in
+    let hydrated = msg User [ Text "hydrated artifact payload" ] in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let agent =
+      build_admission_agent
+        ~media_store
+        ~net
+        ~provider_config
+        ~transport
+        ~model_input_projection:(fun history ->
+          incr projection_calls;
+          match Agent_core.History.to_wire_messages media_store history with
+          | Ok provider_messages -> Ok (provider_messages @ [ hydrated ])
+          | Error error -> Error (Agent_core.Error.Media error))
+        ()
+    in
+    let result = Agent_core.Agent.run ~sw agent "canonical input" in
+    result, !dispatched
+  in
+  match result, dispatched with
+  | Error error, _ -> fail (Agent_core.Error.to_string error)
+  | Ok _, None -> fail "projected request was not dispatched"
+  | Ok _, Some request ->
+    check int "projection is applied exactly once" 1 !projection_calls;
+    check int "dispatch receives projected messages" 2 (List.length request.messages);
+    check
+      string
+      "measurement and dispatch share exact request"
+      (Backend_anthropic.build_count_tokens_request
+         ~config:request.config
+         ~messages:request.messages
+         ~tools:request.tools
+         ())
+      measured_body
+;;
+
+let run_failing_projection projection =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let provider_config = config ~max_context:512 unreachable_base_url in
+  let transport =
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
+    ; complete_stream =
+        (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
+    })
+  in
+  let agent =
+    build_admission_agent
+      ~net:(Eio.Stdenv.net env)
+      ~provider_config
+      ~transport
+      ~model_input_projection:projection
+      ()
+  in
+  Agent_core.Agent.run ~sw agent "canonical input"
+;;
+
+(* The projection's own error reaches the caller unchanged. It used to be
+   rewrapped as [HookExecutionFailed { hook_name = "model_input_projection" }],
+   which renamed whatever the projection had decided -- a per-candidate
+   capacity bound became a hook defect -- and nothing ever read the hook name
+   back. *)
+let check_projection_failure expected = function
+  | Error error ->
+    check string "the projection's own error survives" expected
+      (Agent_core.Error.to_string error)
+  | Ok _ -> fail "failed projection must abort the turn"
+;;
+
+let test_agent_projection_failure_passes_its_own_error_through () =
+  let refusal =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow
+         { message = "artifact unavailable"; limit = None })
+  in
+  run_failing_projection (fun _ -> Error refusal)
+  |> check_projection_failure (Agent_core.Error.to_string refusal)
+;;
+
+let test_agent_projection_exception_is_typed () =
+  let exception_ = Failure "projection exploded" in
+  run_failing_projection (fun _ -> raise exception_)
+  |> check_projection_failure
+       (Agent_core.Error.to_string
+          (Agent_core.Error.Internal (Printexc.to_string exception_)))
+;;
+
+let test_agent_count_preflight_uses_completion_timeout () =
+  let (result, dispatched), _captured =
+    with_mock_env ~response_delay_s:1.0 ~status:`OK ~response:{|{"input_tokens":321}|}
+    @@ fun ~sw ~net ~clock ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let dispatched = ref false in
+    let transport =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+          (fun _ ->
+            dispatched := true;
+            { Llm_transport.response = Ok response; latency_ms = Some 1 })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
+      })
+    in
+    let agent =
+      build_admission_agent ~body_timeout_s:0.02 ~net ~provider_config ~transport ()
+    in
+    let result = Agent_core.Agent.run ~sw ~clock agent "bounded count preflight" in
+    result, !dispatched
+  in
+  match result, dispatched with
+  (* The phase this pins is Wall_clock, not Http_operation. What the test is about is
+     unchanged — the preflight is bounded by the completion timeout and no completion
+     dispatch happens — but the label for a body_timeout_s breach moved, and the
+     codebase's own definitions say the new one is the accurate label:
+     http_client.mli:64-65 documents Wall_clock as the "whole operation wall-clock
+     deadline", http_client.ml:895-897 documents Http_operation as the connect/headers
+     phase and contrasts it explicitly with the body phase, and the breach reports
+     "body_timeout_s total deadline exceeded". Http_operation for a body deadline was
+     the older, contradictory labelling. *)
+  | ( Error
+        (Agent_core.Error.Provider
+           (Llm_provider.Error.Timeout
+              { timeout_phase = Some Llm_provider.Http_client.Wall_clock; _ }))
+    , false ) -> ()
+  | Error error, _ -> fail (Agent_core.Error.to_string error)
+  | Ok _, _ -> fail "stalled count preflight must time out before completion dispatch"
+;;
+
+let test_agent_overflow_blocks_dispatch () =
+  let result, _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":500}|}
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let dispatched = ref false in
+    let transport =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+          (fun _ ->
+            dispatched := true;
+            { Llm_transport.response = Ok response; latency_ms = None })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected stream dispatch")
+      })
+    in
+    let agent = build_admission_agent ~net ~provider_config ~transport () in
+    let result = Agent_core.Agent.run ~sw agent "overflow" in
+    result, !dispatched
+  in
+  match result with
+  | Error (Agent_core.Error.Api (Retry.ContextOverflow { limit = Some 512; _ })), false ->
+    ()
+  | Error error, _ -> fail (Agent_core.Error.to_string error)
+  | Ok _, _ -> fail "overflowed prepared request must not dispatch"
+;;
+
+let test_kimi_agent_overflow_blocks_dispatch () =
+  let result, _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":500}|}
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = kimi_config ~max_context:512 base_url in
+    let dispatched = ref false in
+    let transport =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+          (fun _ ->
+            dispatched := true;
+            { Llm_transport.response = Ok response; latency_ms = None })
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected stream dispatch")
+      })
+    in
+    let agent = build_admission_agent ~net ~provider_config ~transport () in
+    let result = Agent_core.Agent.run ~sw agent "overflow" in
+    result, !dispatched
+  in
+  match result with
+  | Error (Agent_core.Error.Api (Retry.ContextOverflow { limit = Some 512; _ })), false ->
+    ()
+  | Error error, _ -> fail (Agent_core.Error.to_string error)
+  | Ok _, _ -> fail "overflowed Kimi request must not dispatch"
+;;
+
+let test_invalid_count_response_is_provider_parse_failure () =
+  let result, _captured =
+    with_mock ~status:`OK ~response:{|{"unexpected":true}|}
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let transport =
+      Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+          (fun _ -> fail "malformed count response must block completion dispatch")
+      ; complete_stream =
+          (fun ?on_telemetry:_ ~on_event:_ _ ->
+            fail "malformed count response must block streaming dispatch")
+      })
+    in
+    let agent = build_admission_agent ~net ~provider_config ~transport () in
+    Agent_core.Agent.run_detailed ~sw agent "malformed count response"
+  in
+  match result with
+  | Error
+      { Agent_core.Agent.error =
+          Agent_core.Error.Api
+            (Retry.InvalidRequest { reason = Retry.Json_parse_error; _ })
+      ; provider_failure =
+          Some
+            { Agent_core.Provider_failure_attribution.evidence = Response_parse
+            ; ownership = Agent_core.Provider_failure_attribution.Unclassified
+            ; binding = Some _
+            }
+      } -> ()
+  | Error detailed -> fail (Agent_core.Error.to_string detailed.error)
+  | Ok _ -> fail "malformed provider count response must fail"
+;;
+
+let test_unsupported_provider_blocks_sync_dispatch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let provider_config =
+    { (config ~kind:Provider_config.OpenAI_compat ~max_context:512 "not-used") with
+      response_format = Types.Off
+    }
+  in
+  let dispatched = ref false in
+  let transport =
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
+        (fun _ ->
+          dispatched := true;
+          { Llm_transport.response = Ok response; latency_ms = None })
+    ; complete_stream =
+        (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected stream dispatch")
+    })
+  in
+  let agent = build_admission_agent ~net ~provider_config ~transport () in
+  match Agent_core.Agent.run ~sw agent "require exact fit" with
+  | Error (Agent_core.Error.Api (Retry.InvalidRequest _)) ->
+    check bool "unsupported measurement blocks sync dispatch" false !dispatched
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "unsupported measurement must fail before sync dispatch"
+;;
+
+let test_unsupported_provider_blocks_stream_dispatch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let provider_config =
+    { (config ~kind:Provider_config.OpenAI_compat ~max_context:512 "not-used") with
+      response_format = Types.Off
+    }
+  in
+  let dispatched = ref false in
+  let transport =
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
+    ; complete_stream =
+        (fun ?on_telemetry:_ ~on_event:_ _ ->
+          dispatched := true;
+          Ok response)
+    })
+  in
+  let agent = build_admission_agent ~net ~provider_config ~transport () in
+  match Agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "require exact fit" with
+  | Error (Agent_core.Error.Api (Retry.InvalidRequest _)) ->
+    check bool "unsupported measurement blocks stream dispatch" false !dispatched
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "unsupported measurement must fail before stream dispatch"
+;;
+
+let test_transport_error () =
+  let result, _captured =
+    with_mock ~status:`Too_many_requests ~response:"rate limited"
+    @@ fun ~sw ~net ~base_url ->
+    Count_tokens_sync.count_anthropic ~sw ~net ~config:(config base_url) ~messages ()
+  in
+  match result with
+  | Error
+      (Count.Transport
+         (Http_client.HttpError { code = 429; body = Http_client.Received body; _ })) ->
+    check string "provider body" "rate limited" body
+  | Ok _ | Error _ -> fail "expected typed HTTP 429"
+;;
+
+let test_unsupported () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  match
+    Count_tokens_sync.measure_completion_request
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      (completion_request (config ~kind:Provider_config.OpenAI_compat "not a URL"))
+  with
+  | Error
+      (Count_tokens_sync.Input_count_failed
+         (Count.Unsupported { protocol = Count.Anthropic_messages_count_tokens; model_id }))
+    -> check string "model id" "input-count-fixture" model_id
+  | Ok _ | Error _ -> fail "expected typed Unsupported before transport"
+;;
+
+let test_missing_output_ceiling_precedes_io () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let cfg =
+    { (config "not a URL") with
+      model_id = "request-measurement-missing-output-ceiling"
+    ; max_tokens = None
+    }
+  in
+  match
+    Count_tokens_sync.measure_completion_request
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      (completion_request cfg)
+  with
+  | Error
+      (Count_tokens_sync.Output_token_resolution_failed
+         Types.Required_output_token_ceiling_missing) -> ()
+  | Ok _ | Error _ -> fail "expected typed output-token failure before count I/O"
+;;
+
+let test_count_tokens_url () =
+  check
+    string
+    "plain path"
+    "https://api.anthropic.com/proxy/messages/count_tokens"
+    (Count_tokens_sync.count_tokens_url (config "https://api.anthropic.com"));
+  check
+    string
+    "query string preserved after inserted segment"
+    "https://proxy.example/proxy/messages/count_tokens?api-version=2024-06"
+    (Count_tokens_sync.count_tokens_url
+       (config
+          ~request_path:"/proxy/messages?api-version=2024-06"
+          "https://proxy.example"))
+;;
+
+let () =
+  run
+    "anthropic-input-token-count"
+    [ ( "request"
+      , [ test_case "shared canonical projection" `Quick test_shared_projection
+        ; test_case "Kimi shared canonical projection" `Quick test_kimi_shared_projection
+        ; test_case "Anthropic tool result data stays inside legal nested blocks" `Quick
+            test_anthropic_tool_result_content_projection
+        ; test_case "Kimi tool result content remains unchanged" `Quick
+            test_kimi_tool_result_content_unchanged
+        ; test_case
+            "anthropic strips top-level schema combinators"
+            `Quick
+            test_anthropic_strips_top_level_combinators
+        ; test_case
+            "Kimi keeps top-level schema combinators"
+            `Quick
+            test_kimi_keeps_top_level_combinators
+        ; test_case
+            "anthropic synthesizes type for combinator-only schema"
+            `Quick
+            test_anthropic_synthesizes_type_for_combinator_only_schema
+        ] )
+    ; ( "transport"
+      , [ test_case "native success" `Quick test_transport_success
+        ; test_case "Kimi native success" `Quick test_kimi_transport_success
+        ; test_case
+            "prepared measure admit dispatch"
+            `Quick
+            test_prepared_measure_admit_dispatch
+        ; test_case
+            "prepared context overflow is typed"
+            `Quick
+            test_prepared_context_overflow_is_typed
+        ; test_case
+            "prepared admission resolves catalog context limit"
+            `Quick
+            test_prepared_admission_resolves_catalog_context_limit
+        ; test_case
+            "resolve before measure skips count round-trip"
+            `Quick
+            test_resolve_before_measure_skips_count_roundtrip
+        ; test_case
+            "resolve before measure skips count round-trip (stream)"
+            `Quick
+            test_resolve_before_measure_skips_count_roundtrip_stream
+        ; test_case
+            "serving boundary uses exact provider count"
+            `Quick
+            test_serving_constraint_uses_exact_provider_count
+        ; test_case
+            "stale serving evidence is zero-I/O"
+            `Quick
+            test_stale_serving_constraint_fails_before_measurement
+        ; test_case
+            "unmeasurable serving constraint is typed zero-dispatch"
+            `Quick
+            test_unmeasurable_constraint_fails_typed_without_dispatch
+        ; test_case
+            "serialization admission validates before I/O"
+            `Quick
+            test_serialization_admission_validates_before_io
+        ; test_case
+            "measurement uses provider admission"
+            `Quick
+            test_measurement_uses_provider_admission
+        ; test_case
+            "binding controls use the adaptive completion wire only"
+            `Quick
+            test_binding_controls_completion_only
+        ; test_case
+            "Agent route uses prepared admission"
+            `Quick
+            test_agent_route_uses_prepared_admission
+        ; test_case
+            "Agent stream route uses prepared admission"
+            `Quick
+            test_agent_stream_route_uses_prepared_admission
+        ; test_case
+            "Agent admitted sync observes dispatched serialization"
+            `Quick
+            test_agent_admitted_sync_observer_sees_dispatched_body
+        ; test_case
+            "Agent admitted stream observes dispatched serialization"
+            `Quick
+            test_agent_admitted_stream_observer_sees_dispatched_body
+        ; test_case
+            "admitted body is frozen across catalog mutation"
+            `Quick
+            test_admitted_body_is_frozen_across_catalog_mutation
+        ; test_case "sync policy is frozen before token measurement" `Quick
+            (test_policy_is_frozen_before_measurement ~stream:false)
+        ; test_case "stream policy is frozen before token measurement" `Quick
+            (test_policy_is_frozen_before_measurement ~stream:true)
+        ; test_case "catalog reload cannot underreserve frozen output" `Quick
+            test_catalog_reload_cannot_underreserve_output
+        ; test_case "sync responses retain provider policy including absent lookups" `Quick
+            (test_response_policy_survives_catalog_reload ~stream:false)
+        ; test_case "stream responses retain provider policy including absent lookups" `Quick
+            (test_response_policy_survives_catalog_reload ~stream:true)
+        ; test_case
+            "Agent projection is shared by measurement and dispatch"
+            `Quick
+            test_agent_projection_is_shared_by_measurement_and_dispatch
+        ; test_case
+            "Agent projection failure is typed"
+            `Quick
+            test_agent_projection_failure_passes_its_own_error_through
+        ; test_case
+            "Agent projection exception is typed"
+            `Quick
+            test_agent_projection_exception_is_typed
+        ; test_case
+            "Agent count preflight uses completion timeout"
+            `Quick
+            test_agent_count_preflight_uses_completion_timeout
+        ; test_case
+            "Agent overflow blocks dispatch"
+            `Quick
+            test_agent_overflow_blocks_dispatch
+        ; test_case
+            "Kimi Agent overflow blocks dispatch"
+            `Quick
+            test_kimi_agent_overflow_blocks_dispatch
+        ; test_case
+            "invalid count response is provider parse failure"
+            `Quick
+            test_invalid_count_response_is_provider_parse_failure
+        ; test_case
+            "unsupported provider blocks sync dispatch"
+            `Quick
+            test_unsupported_provider_blocks_sync_dispatch
+        ; test_case
+            "unsupported provider blocks stream dispatch"
+            `Quick
+            test_unsupported_provider_blocks_stream_dispatch
+        ; test_case "typed HTTP error" `Quick test_transport_error
+        ; test_case "non-Anthropic unsupported" `Quick test_unsupported
+        ; test_case
+            "missing output ceiling precedes I/O"
+            `Quick
+            test_missing_output_ceiling_precedes_io
+        ; test_case "count-tokens URL insertion" `Quick test_count_tokens_url
+        ] )
+    ]
+;;

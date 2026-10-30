@@ -1,0 +1,127 @@
+{
+  "scope": "actual pure Start/Resume projection, codec, receipt, Host.start_prompt and selected Host issuer/blank guard statements; not full Host.prepare_turn, hooks, SDK, client, transport or remote retention proof",
+  "public_source_head": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "candidate_head": "87fa841b50a97de996778cff5a511ac6bbe6224d",
+  "sources": [
+    {
+      "compiled": "llm_provider.ml",
+      "source": "exact current role/content/metadata/message_origin/message fragments; unrelated schemas excluded",
+      "sha256": "865f88b627fead6df3091e8fbf15166c98dac4fc1ce9b91f8718f586ee2bdfac"
+    },
+    {
+      "compiled": "agent_core.ml",
+      "source": "nominal alias port matching actual Agent Core re-export identity",
+      "sha256": "5da9c4a35d0055a93b61db478c2a6c960ae6de741345f2d39abc9c97634125e6"
+    },
+    {
+      "compiled": "prompt_block_id.mli",
+      "source": "lib/types/prompt_block_id.mli",
+      "sha256": "2f4094a70f64f63b852a32b6ce0fdf402f34bf3f3345de343bf17c14bee67eda"
+    },
+    {
+      "compiled": "prompt_block_id.ml",
+      "source": "lib/types/prompt_block_id.ml",
+      "sha256": "29d4f8d8ce8bbf3bf53fd304a4ed95e48ee609d83de2ea2f8946c78d3255268e"
+    },
+    {
+      "compiled": "keeper_context_layers.mli",
+      "source": "lib/keeper/keeper_context_layers.mli",
+      "sha256": "e1c4e1e44e1ccf629c7709424880a91af6d3c7552709523e1af5ff43fee85741"
+    },
+    {
+      "compiled": "keeper_context_layers.ml",
+      "source": "lib/keeper/keeper_context_layers.ml",
+      "sha256": "2fbefab7ec5f8686eb1a0b936646e28569191f1799608b590f9eb14a62db9259"
+    },
+    {
+      "compiled": "keeper_context_assembly.mli",
+      "source": "lib/keeper/keeper_context_assembly.mli",
+      "sha256": "3c1e58f3fd6930146c0a219038fe37287023885dea6a9884d450d26b8896b782"
+    },
+    {
+      "compiled": "keeper_context_assembly.ml",
+      "source": "lib/keeper/keeper_context_assembly.ml",
+      "sha256": "2452346ee72de6c3e6ca29dacc316ee401bcfa152e36ed96846c1e0cde8cf336"
+    },
+    {
+      "compiled": "keeper_official_client_context_codec.mli",
+      "source": "lib/keeper/keeper_official_client_context_codec.mli",
+      "sha256": "d03b9cfacd9f99ae4cb4057934cca0671277ae91bd5de997ec23964c0e1ccfea"
+    },
+    {
+      "compiled": "keeper_official_client_context_codec.ml",
+      "source": "lib/keeper/keeper_official_client_context_codec.ml",
+      "sha256": "90beed66f9f5bb9dcaf61ab1280babc2a3f457792fc4949bedf3f90f8845c5b7"
+    },
+    {
+      "compiled": "runtime_official_client_write.ml",
+      "source": "exact pure write-receipt prefix, excludes effectful report",
+      "sha256": "31cb279cb69f5add1bf94ef8e13654d67d6b244b1a8444f4add2bc4540e88c2c"
+    },
+    {
+      "compiled": "keeper_official_client_session_store.ml",
+      "source": "exact carried/held type fragment",
+      "sha256": "d2cba73f2a512dc82a7f41dacd3093a274f818fe43afe88c623060cb930dcd9c"
+    },
+    {
+      "compiled": "runtime_model_input_tail_window.ml",
+      "source": "exact metadata classifiers fragment",
+      "sha256": "477a6124f39b83637eeea8a96cc7f13ebf17f00096b5f0aebb46f82cab36de5a"
+    },
+    {
+      "compiled": "keeper_official_task_reference.ml",
+      "source": "exact task-reference classifier fragment",
+      "sha256": "86cc1cb56ae63e2a20be9772a93b4deea29a8b886575b835772df2c53271d2fd"
+    },
+    {
+      "compiled": "prompt_names.ml",
+      "source": "unexecuted notice key placeholders",
+      "sha256": "4b6b45c1525704639006683b2e809e32047b534822adbc28d59d3ccc69016713"
+    },
+    {
+      "compiled": "prompt_registry.ml",
+      "source": "unreachable notice dependency",
+      "sha256": "fff69dc9a7b2701f5ab7abbac05d633cd1bd237d277d95062c6b77b8774df63d"
+    },
+    {
+      "compiled": "log.ml",
+      "source": "unreachable log dependency",
+      "sha256": "b98152fd5caf2112adc0df44de52367c23393543fa4deea61bee2d6b92727227"
+    },
+    {
+      "compiled": "keeper_context_submission_link.mli",
+      "source": "lib/keeper/keeper_context_submission_link.mli",
+      "sha256": "2b94dd37de68f913fe074e40f517ce23b84049b244bd8198650eb9e5b59e8be0"
+    },
+    {
+      "compiled": "keeper_context_submission_link.ml",
+      "source": "lib/keeper/keeper_context_submission_link.ml",
+      "sha256": "b195b59f10318cf0b034240d89b83b3759cf13efe326f9e4ca4e2a020087c37e"
+    },
+    {
+      "compiled": "host_start.ml",
+      "source": "exact Host.start_prompt; minimal record port, not full Host",
+      "sha256": "b557c1477240ff1b84b8c86446377025c7c973472db292aa2ff7d0ab4a494961"
+    },
+    {
+      "compiled": "string_util.ml",
+      "source": "exact trim_nonempty fragment",
+      "sha256": "dbcbe98b04d4c154e5ffad727c903673ad7d4f86da6137e2517086b14bb38439"
+    },
+    {
+      "compiled": "guard.ml",
+      "source": "exact Host selected-System/snapshot/blank-base guard statements; minimal typed ports",
+      "sha256": "e8672db5c0b4358535f41901459322fdd71e07e49d8149280e750df3a2ddc05e"
+    }
+  ],
+  "results": [
+    {
+      "variant": "repair",
+      "projection_sha256": "b3615429a286a961ddcb943efc3c2e8372c66c95314cb86f68fa2fa734dd232e",
+      "compile_exit": 0,
+      "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
+      "run_exit": 0,
+      "output": "PASS changed Goal reaches a separate Resume User message\nPASS Start names the Goal it sent through System\nPASS same Goal does not accumulate in Resume history\nPASS existing non-Goal world stays held\nPASS a new Goal after session Start is delivered\nPASS Goal never becomes an extra-context source block\nPASS actual projected text matches its receipt slot\nPASS source proof names System\nPASS target proof names official Resume User\nPASS source proof hashes the actual System partition\nPASS selected raw System span is exactly the delivered Goal\nPASS local held omission retains System-derived evidence\nPASS stale System issuer cannot prove new observation\nPASS Completion Authority remains Sent_every_resume\nPASS held authority is actually resent\nPASS authority repeats exact bytes instead of accumulating\nPASS authority receipt selects the physical System carrier\nPASS authority source selects its own unique block\nPASS authority source bytes equal the delivered row\nPASS missing authority issuer remains unknown\nPASS stale authority issuer remains unknown\nPASS Goal receipt cannot attest an absent authority observation\nPASS duplicate authority kinds are rejected before issuing a System carrier\nPASS JSON turn-text slot binds the actual projection\nPASS fixed Start System preserves Goal and excludes the authority event\nPASS complete first User packet contains authority once and no Goal copy\nPASS initial proof names actual Start User target\nPASS initial proof distinguishes canonical issuer from submitted System\nPASS same event Resume sends one authority and omits held Goal\nPASS later owner with no event adds no observation to Start or Resume\nPASS changed event and verification keys replace old keys at Start\nPASS changed event and verification keys reach held Resume\nPASS four Goal/authority combinations preserve exact standing base and Goal\nPASS authority is the only initial User observation\nPASS four Goal/authority combinations preserve exact standing base and Goal\nPASS authority is the only initial User observation\nPASS four Goal/authority combinations preserve exact standing base and Goal\nPASS authority is the only initial User observation\nPASS four Goal/authority combinations preserve exact standing base and Goal\nPASS authority is the only initial User observation\nPASS missing/stale issuer cannot rewrite or attest selected System\nPASS missing/stale issuer cannot lend an old event to Resume\nPASS missing/stale initial event proof remains unavailable\nPASS missing/stale issuer cannot rewrite or attest selected System\nPASS missing/stale issuer cannot lend an old event to Resume\nPASS missing/stale initial event proof remains unavailable\nPASS actual Host guard rejects blank base beneath Goal or authority\nPASS actual Host guard acquires issuer only once\nPASS actual Host guard rejects blank base beneath Goal or authority\nPASS actual Host guard acquires issuer only once\nPASS actual Host guard rejects blank base beneath Goal or authority\nPASS actual Host guard acquires issuer only once\nPASS actual Host guard rejects blank base beneath Goal or authority\nPASS actual Host guard acquires issuer only once\nPASS complete actual Start User slot binds the exact source\nPACKET {\"canonical_issued_system\":\"BASE\\n\\nGOAL \ud604\uc7ac criterion\\n\\nApproved task-first vrf-first operator-\uccab\ubc88\uc9f8\",\"submitted_start_system\":\"BASE\\n\\nGOAL \ud604\uc7ac criterion\",\"submitted_start_user\":\"USER:\\n{\\\"schema\\\":\\\"masc.official-client-context-message.v3\\\",\\\"message\\\":{\\\"role\\\":\\\"user\\\",\\\"origin\\\":\\\"conversation\\\",\\\"content_blocks\\\":[{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"Approved task-first vrf-first operator-\uccab\ubc88\uc9f8\\\"}],\\\"name\\\":null,\\\"tool_call_id\\\":null,\\\"metadata\\\":{}}}\\n\\nFIRST OWNER\",\"submitted_same_event_resume\":\"USER:\\n{\\\"schema\\\":\\\"masc.official-client-context-message.v3\\\",\\\"message\\\":{\\\"role\\\":\\\"user\\\",\\\"origin\\\":\\\"conversation\\\",\\\"content_blocks\\\":[{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"Approved task-first vrf-first operator-\uccab\ubc88\uc9f8\\\"}],\\\"name\\\":null,\\\"tool_call_id\\\":null,\\\"metadata\\\":{}}}\\n\\nOWNER\",\"submitted_next_absent_resume\":\"NEXT OWNER\",\"submitted_changed_event_start\":\"USER:\\n{\\\"schema\\\":\\\"masc.official-client-context-message.v3\\\",\\\"message\\\":{\\\"role\\\":\\\"user\\\",\\\"origin\\\":\\\"conversation\\\",\\\"content_blocks\\\":[{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"Rejected task-other vrf-new operator-second\\\"}],\\\"name\\\":null,\\\"tool_call_id\\\":null,\\\"metadata\\\":{}}}\\n\\nNEXT OWNER\",\"start_source_binding\":{\"schema\":\"masc.client-assembly-slot-binding.v1\",\"status\":\"matched_completed_slot\",\"scope\":\"issuer_carrier_only_not_tool_history_or_remote_retention\",\"slot\":\"whole_write\",\"index\":null,\"matched_slot\":{\"bytes\":260,\"sha256\":\"933ad62c43e1257973d7a7fb2bf1355b81547e2f7bca153f4aa2000d4e3db3e1\",\"offset\":0},\"expected_slot_sha256\":\"933ad62c43e1257973d7a7fb2bf1355b81547e2f7bca153f4aa2000d4e3db3e1\",\"issuer_attribution\":{\"status\":\"verified\",\"verified_carrier_count\":1,\"unavailable\":[],\"scope\":\"source_acquisition_and_local_filter_not_transport_or_remote_retention\"},\"occurrences\":[{\"attributed_occurrence_index\":0,\"encoded_message_offset_in_decoded_slot\":6,\"encoded_message_bytes\":241,\"encoded_message_sha256\":\"2cb7f4fe5bdeabd036a5f608193f991b6c051ad951371297326e4b2820558340\",\"source\":{\"assembly\":{\"schema\":\"masc.logical-context-partition.v2\",\"scope\":\"assembled_raw_utf8_before_message_or_ipc_encoding\",\"bytes\":77,\"sha256\":\"656695b5bcd093c2e36424082542375d99909f81fbdc8bec5c9b7ee3012da2f5\",\"spans\":[{\"source\":{\"kind\":\"unattributed\",\"reason\":\"existing_prefix\"},\"offset\":0,\"bytes\":4,\"sha256\":\"cbf36a964ba8c0894fcc9ec491b4d1dd94d221a7dc88308e9c6b892445a8574b\",\"subpartition\":{\"status\":\"not_applicable\"}},{\"source\":{\"kind\":\"unattributed\",\"reason\":\"separator\"},\"offset\":4,\"bytes\":2,\"sha256\":\"75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070\",\"subpartition\":{\"status\":\"not_applicable\"}},{\"source\":{\"kind\":\"block\",\"block\":\"active_goals\"},\"offset\":6,\"bytes\":21,\"sha256\":\"9a92b0d82cefed7f0670aa68aae57a67777af8b346da8f2756b485c59d414f1f\",\"subpartition\":{\"status\":\"not_applicable\"}},{\"source\":{\"kind\":\"unattributed\",\"reason\":\"separator\"},\"offset\":27,\"bytes\":2,\"sha256\":\"75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070\",\"subpartition\":{\"status\":\"not_applicable\"}},{\"source\":{\"kind\":\"block\",\"block\":\"completion_authority\"},\"offset\":29,\"bytes\":48,\"sha256\":\"7ae1b22b369cd4082932dedcdd96de27a0e57e415be33de11fed202be36014a0\",\"subpartition\":{\"status\":\"not_applicable\"}}]},\"source_carrier\":\"system_prompt\",\"source_scope\":\"canonical_issued_system_prompt\",\"source_span_indices\":[4],\"rendered_text_bytes\":48,\"rendered_text_sha256\":\"7ae1b22b369cd4082932dedcdd96de27a0e57e415be33de11fed202be36014a0\",\"rendering\":\"system_observation_to_official_start_user\",\"target_carrier\":\"official_start_user_prompt\",\"codec_schema\":\"masc.official-client-context-message.v3\",\"codec_text_path\":\"/message/content_blocks/0/text\"}}],\"omission_scope\":\"local_resume_filter_decision_not_remote_retention\",\"omitted_held\":[]}}\n55 exact-source official Start/Resume checks passed\n"
+    }
+  ]
+}

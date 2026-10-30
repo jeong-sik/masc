@@ -1,0 +1,46 @@
+{
+  "revision": 3,
+  "updated_at": 1792645727.68295,
+  "source": { "kind": "librarian", "trace_id": "trace-1792641821776-00000" },
+  "facts": [
+    {
+      "claim": "Curator authority boundary. The Workspace Curator Addon computes classification and briefing, while the MASC host retains durable fact intake, original request identity, memory ledger commits, observer acknowledgements, and effect authority. Disabling the installation must preserve pending original work for reattachment.",
+      "category": "fact",
+      "first_seen": 1792642095.557319,
+      "last_seen": 1792642095.557319,
+      "origin": { "kind": "injected", "trace_id": "" },
+      "basis": { "kind": "observed" }
+    },
+    {
+      "claim": "The repaired isolated Curator host completed the original retained Briefing while the installation was Off, preserved the classification receipt and Keeper memory, and published the matching observer acknowledgement without recreating the worker; re-enabling the installation must keep these original results immutable and process newly admitted facts separately.",
+      "category": "fact",
+      "first_seen": 1792645646.193259,
+      "last_seen": 1792645646.193259,
+      "origin": { "kind": "injected", "trace_id": "" },
+      "basis": { "kind": "observed" }
+    },
+    {
+      "claim": "keeper_memory_write receipts report a memory-admission request_id and sequence and persist to the pending_memory_admission store; Librarian review decides admission, the request_id is not a memory_id and must not be used as a premise or supersedes target, and a pending candidate must not be rewritten merely because it is not yet visible in search.",
+      "category": "constraint",
+      "first_seen": 1792645727.679077,
+      "last_seen": 1792645727.679077,
+      "origin": { "kind": "injected", "trace_id": "" },
+      "basis": { "kind": "observed" }
+    }
+  ],
+  "change": {
+    "added": [
+      {
+        "claim": "keeper_memory_write receipts report a memory-admission request_id and sequence and persist to the pending_memory_admission store; Librarian review decides admission, the request_id is not a memory_id and must not be used as a premise or supersedes target, and a pending candidate must not be rewritten merely because it is not yet visible in search.",
+        "category": "constraint",
+        "first_seen": 1792645727.679077,
+        "last_seen": 1792645727.679077,
+        "origin": { "kind": "injected", "trace_id": "" },
+        "basis": { "kind": "observed" }
+      }
+    ],
+    "removed": [],
+    "retained": 2,
+    "invalidated": []
+  }
+}

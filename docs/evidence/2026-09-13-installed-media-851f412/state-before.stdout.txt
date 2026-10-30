@@ -1,0 +1,1 @@
+{"receipt": "/private/tmp/masc-installed-media-851f412-20260913/state-before.json", "files": 352, "required_paths": ["config/keepers/exhibit-designer.toml", "config/keepers/exhibit-editor.toml", "config/runtime.toml", "goals.json", "tasks/backlog.json"], "comparison_counts": {}}

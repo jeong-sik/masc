@@ -1,0 +1,30 @@
+[
+  {
+    "source_line": 212,
+    "text": "[2026-10-26 23:53:34] [INFO] [runtime_agent] agent_core-glm-coding.glm-5-3: resume checkpoint_turn_count=0"
+  },
+  {
+    "source_line": 310,
+    "text": "[2026-10-26 23:53:46] [INFO] [Keeper] audit-live-glm: keeper cycle checkpoint runtime_lane=runtime tokens=20615 latency=12747ms mode=tool_use stop=yielded_to_durable_stimulus(1)"
+  },
+  {
+    "source_line": 311,
+    "text": "[2026-10-26 23:53:46] [INFO] [Keeper/audit-live-glm] yielded autonomous run for a pending durable stimulus after 1 turn(s), checkpoint saved — will resume next cycle"
+  },
+  {
+    "source_line": 318,
+    "text": "[2026-10-26 23:53:46] [INFO] [runtime_agent] agent_core-glm-coding.glm-5-3: resume checkpoint_turn_count=1"
+  },
+  {
+    "source_line": 808,
+    "text": "[2026-10-26 23:55:04] [INFO] [runtime_agent] agent_core-glm-coding.glm-5-3: resume checkpoint_turn_count=8"
+  },
+  {
+    "source_line": 1117,
+    "text": "[2026-10-26 23:55:51] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)..."
+  },
+  {
+    "source_line": 1141,
+    "text": "[2026-10-26 23:55:51] [INFO] [Server] MASC MCP: Shutdown complete."
+  }
+]

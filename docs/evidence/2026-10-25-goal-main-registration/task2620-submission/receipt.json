@@ -1,0 +1,42 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.64.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"result\":\"task-2620 in_progress → awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-6267bb77e2da35dc33f8991eddf2a446\",\"diagnostics\":[]}}",
+          "status": "ok",
+          "tool": "masc_transition"
+        },
+        "trace_id": "2",
+        "agent_id": "codex-goal-outcomes-20261024",
+        "tool": "masc_transition",
+        "duration_ms": 263,
+        "attempts": 1,
+        "timestamp": "2026-10-25T00:44:50Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"result\":\"task-2620 in_progress → awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-6267bb77e2da35dc33f8991eddf2a446\",\"diagnostics\":[]}}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "result": "task-2620 in_progress → awaiting_verification",
+      "evidence_capture": {
+        "verification_id": "vrf-6267bb77e2da35dc33f8991eddf2a446",
+        "diagnostics": []
+      }
+    }
+  }
+}

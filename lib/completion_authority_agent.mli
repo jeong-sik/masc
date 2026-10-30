@@ -1,0 +1,308 @@
+(** System LLM completion-authority lane.
+
+    This lane is an application-owned LLM agent. It is not a Keeper, does not
+    register a Keeper, and does not enter the Keeper task-action FSM. It reads
+    an immutable verification request/evidence snapshot and commits a typed
+    completion verdict through the workspace authority boundary. *)
+
+val start :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  config:Workspace_utils_backend_setup.config ->
+  unit
+
+module For_testing : sig
+  val unless_original_publication :
+    store:Verifier_review_owner.store -> verification_id:string -> task_id:string ->
+    producer:string -> otherwise:(unit -> unit) -> bool
+  (** The actual caller's canonical-owner guard for returned failures and
+      cancellation. [false] preserves a possibly retained publication. *)
+
+  type commit_apply_error =
+    | Invalid_commit_intent of string
+    | Workspace_commit_refused of Masc_domain.masc_error
+  val observe_original :
+    config:Workspace_utils_backend_setup.config -> original:Verifier_review_original.t ->
+    judgment:Yojson.Safe.t -> authority:Masc_domain.completion_authority ->
+    Lane_addon_request_progress.change -> (Yojson.Safe.t, string) result
+  val apply_original :
+    config:Workspace_utils_backend_setup.config -> original:Verifier_review_original.t ->
+    judgment:Yojson.Safe.t -> authority:Masc_domain.completion_authority ->
+    Lane_addon_request_progress.change ->
+    (unit, commit_apply_error Verifier_review_worker.apply_failure) result
+  (** The actual host observation/application boundaries, for deterministic
+      operator races between the worker's authoritative before-read and apply. *)
+
+  val recover_original_publications :
+    registry:Verification_run_registry.t -> config:Workspace_utils_backend_setup.config ->
+    sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> (int * string list, string) result
+  (** Actual production terminal-publication discovery and consumption, without
+      relying on a current Task row or dispatching another reviewer. *)
+
+  val process_original_once : registry:Verification_run_registry.t -> config:Workspace_utils_backend_setup.config -> sw:Eio.Switch.t ->
+    clock:float Eio.Time.clock_ty Eio.Resource.t -> task:Masc_domain.task ->
+    assignee:string -> verification_id:string -> (unit, string) result
+  (** Actual production preparation/recovery ordering. An already retained host
+      judgment commits without rebuilding evidence or lookup authority. *)
+
+  val commit_original : config:Workspace_utils_backend_setup.config -> task:Masc_domain.task ->
+    store:Verifier_review_owner.store -> attempt:int -> installation_id:string -> package_id:string ->
+    verification_id:string -> notes:string -> (unit, string) result
+  (** The actual host commitment adapter, including original-intent validation,
+      authoritative Task readback and the domain verdict boundary. *)
+
+  val commit_original_with_effects :
+    observe:(config:Workspace_utils_backend_setup.config -> original:Verifier_review_original.t ->
+      judgment:Yojson.Safe.t -> authority:Masc_domain.completion_authority ->
+      Lane_addon_request_progress.change -> (Yojson.Safe.t, string) result) ->
+    apply:(config:Workspace_utils_backend_setup.config -> original:Verifier_review_original.t ->
+      judgment:Yojson.Safe.t -> authority:Masc_domain.completion_authority ->
+      Lane_addon_request_progress.change ->
+      (unit, commit_apply_error Verifier_review_worker.apply_failure) result) ->
+    config:Workspace_utils_backend_setup.config -> task:Masc_domain.task ->
+    store:Verifier_review_owner.store -> attempt:int -> installation_id:string -> package_id:string ->
+    verification_id:string -> notes:string -> (unit, string) result
+  (** The same private production commitment runner, with scoped effect wrappers
+      for measuring calls that delegate to [observe_original]/[apply_original].
+      Production is fixed to those real effects; no global hook is installed. *)
+
+  val authority_actor : string
+  (** The fixed authority identity (RFC-0361 D7(b)): the [verifier_exact]
+      lane id, shared by every judgement so verdicts aggregate by actor. *)
+
+  val retry_delay_of_paths :
+    retry_interval_sec:float -> now:float -> Keeper_turn_driver.path_rest list -> float
+  (** How long a retryable review waits: the maintenance pulse, or until the
+      first retryable candidate can serve again. *)
+
+  val evidence_refs_of_output :
+    Yojson.Safe.t -> (string list, string) result
+
+  val verdict_question_of_request :
+    Verification.verification_request ->
+    (Task.Anti_rationalization.verdict_question, string) result
+  (** The request-to-question mapping: pure, reads no store. *)
+
+  val completion_verdict_of_review :
+    Task.Anti_rationalization.verdict -> Masc_domain.completion_verdict
+
+  (** RFC-0436 §4.3/§4.4: what the judge receives of the binary image
+      artifacts in one snapshot. [images] were attached as image blocks;
+      [unread] are the image-format artifacts whose filed body did not come
+      back, each with the store's typed reason. A non-image binary is in
+      neither list. *)
+  type evidence_images =
+    { images : Task.Anti_rationalization.evidence_image list
+    ; unread : (string * Workspace_verification_store.read_binary_error) list
+    }
+
+  val evidence_images_of_snapshot :
+    base_path:string ->
+    Workspace_verification_store.submitted_evidence_access ->
+    evidence_images
+  (** Reads every image-format binary artifact's filed body. An unavailable
+      snapshot yields two empty lists. Item order is preserved in both. *)
+
+  val review_notes :
+    request:Verification.verification_request ->
+    evidence_access:Workspace_verification_store.submitted_evidence_access ->
+    unread_images:(string * Workspace_verification_store.read_binary_error) list ->
+    result:Task.Anti_rationalization.review_result ->
+    authority:Masc_domain.completion_authority ->
+    string
+  (** The notes the verdict commits with. [unread_images] lands under
+      [review.unread_images] as [{reference; reason = {kind; ...}}] so the
+      record names each image the judge did not see and why. *)
+
+  (** What one review attempt asks of the retry scheduler. A request, not an
+      outcome: whether a retry is armed is known only once the scheduler
+      answers with a [retry_admission]. [Observe_original_requested] schedules
+      observation of the retained execution; it grants no provider replay. *)
+  type retry_request =
+    | Retry_requested
+    | Observe_original_requested
+    | No_retry_requested
+
+  (** The scheduler's answer to one request. [Armed_timer]: this request
+      forked the timer, which fires after the lane's full interval.
+      [Joined_running_timer]: the request added keys to a batch whose timer
+      was already running. [Already_pending]: the pending batch already
+      covered every key. *)
+  type retry_admission =
+    | Armed_timer
+    | Joined_running_timer
+    | Already_pending
+
+  (** What happened to the retry after the attempt was recorded; the Board
+      post is projected from this. *)
+  type retry_scheduling =
+    | Retry_not_requested
+    | Retry_admitted of retry_admission
+
+  (** Why a review stopped without a verdict. The registry row, the WARN
+      line and the Board notice are all read off this sum. Only
+      [Not_reviewed] can request a retry: the evaluator's typed candidate
+      failures are the only automatic-retry authority, so no other stop can
+      ask for one. [retryable_runtimes] names the candidates whose failure
+      passes with time (a transient error, or a provider rest whose end is
+      known); a non-empty list is the request, and their recorded path rests
+      date it. *)
+  type stop_cause =
+    | Infrastructure_unavailable of
+        { stage : Verification_run_registry.infrastructure_stage
+        ; detail : string
+        }
+    | Commit_failed of { detail : string }
+    | Not_reviewed of
+        { gate : string
+        ; detail : string
+        ; evaluator_runtime : string
+        ; retryable_runtimes : string list
+        ; model_absent_runtimes : string list
+        }
+    | Execution_pending of { detail : string }
+    | Execution_repair_required of { detail : string }
+    | Raised of { detail : string }
+
+  (** How one review attempt ended. [Superseded_by] records the observed
+      terminal authority without scheduling a retry or publishing a stall.
+      [Stalled] names why no verdict was
+      committed: the run row is recorded, the caller schedules the retry the
+      cause asks for, and then writes the WARN and projects the stall to the
+      Board from the scheduler's answer. *)
+  type process_outcome =
+    | Committed
+    | Superseded_by of { authority : string }
+    | Stalled of stop_cause
+
+  val process_active_task :
+    task:Masc_domain.task -> assignee:string -> verification_id:string -> bool
+  (** Synchronously exercise the actual active runtime's review and outcome
+      consumer. [false] means no runtime is active. Tests suppress the submit
+      wake before using this entrypoint, so the same review cannot race it. *)
+
+  val retry_pending : task_id:string -> verification_id:string -> bool
+  (** Observe whether the active runtime's shared retry batch names this
+      review. Does not schedule, wait or dispatch. *)
+
+  val not_reviewed_of_result : Task.Anti_rationalization.review_result -> stop_cause
+  (** The stop a verdict-less review records: [Not_reviewed] with the
+      evaluator's gate, its fallback reason (the gate name when it gave
+      none), its terminal runtime and its per-candidate outcomes. *)
+
+  val retry_request_of_stop_cause : stop_cause -> retry_request
+  (** [Retry_requested] for a [Not_reviewed] that names at least one
+      candidate whose failure passes with time; [No_retry_requested] for an
+      empty list and for every other constructor, preserving the
+      producer/operator contract. *)
+
+  val retry_delay_sec : retry_interval_sec:float -> now:float -> stop_cause -> float
+  (** How long the retry a stop requests waits: for [Not_reviewed],
+      [Verification_retry.delay] over its [retryable_runtimes] — the
+      [retry_interval_sec] pulse while one of them serves, otherwise until
+      the earliest of their recorded path rests ends; [retry_interval_sec]
+      for every other stop. Reads the runtime table and the rest stores at
+      [now]. *)
+
+  val stop_cause_label : stop_cause -> string
+  (** The constructor name with the payload an operator filters on, e.g.
+      [Infrastructure_unavailable{stage=review_preparation}] or
+      [Not_reviewed{gate=evaluator_unavailable,slot=ollama_cloud.deepseek}]. *)
+
+  val stalled_gate : stop_cause -> string
+  (** The [gate] the Board notice keys its repeat check on: the evaluator's
+      gate for [Not_reviewed], [stop_cause_label] for every other stop. *)
+
+  val stall_log_line
+    :  task_id:string
+    -> verification_id:string
+    -> cause:stop_cause
+    -> disposition:Verification_protocol.stall_disposition
+    -> string
+  (** The one WARN a review without a verdict writes, chosen by the same
+      disposition the Board sentence is rendered from. [Retry_scheduled]
+      says "will retry" and how soon ([in_sec=<seconds>] for a timer this
+      stall armed, [in=shared_timer] for one it joined); [No_retry_armed]
+      says "stopped: <label>; producer or operator must act". Neither says
+      "deferred" alone. *)
+
+  val announce_stall
+    :  notify:
+         (task_id:string
+          -> verification_id:string
+          -> gate:string
+          -> detail:string
+          -> disposition:Verification_protocol.stall_disposition
+          -> unit)
+    -> task_id:string
+    -> verification_id:string
+    -> cause:stop_cause
+    -> disposition:Verification_protocol.stall_disposition
+    -> unit
+  (** Writes [stall_log_line] at WARN, then calls [notify] with
+      [stalled_gate cause], the cause's detail and the same disposition. The
+      WARN is written before [notify] runs. An ordinary exception out of
+      [notify] is recorded as an ERROR line carrying the exception and does
+      not escape; [Eio.Cancel.Cancelled] is re-raised. Production passes
+      [Verification_protocol.notify_stalled_verification] with the lane's
+      authority applied, the review and its disposition named as
+      [Verification_protocol.Task_review { task_id; verification_id;
+      disposition }]. *)
+
+  val stall_disposition_of_scheduling
+    :  retry_interval_sec:float
+    -> retry_scheduling
+    -> Verification_protocol.stall_disposition
+  (** The Board disposition for one stall, from what the scheduler reported.
+      [Retry_not_requested] is [No_retry_armed]; [Armed_timer] is
+      [Retry_scheduled] after the full [retry_interval_sec];
+      [Joined_running_timer] and [Already_pending] are [Retry_scheduled] on
+      the [Shared_timer], since the delay that timer holds is not this
+      request's to name. *)
+
+  type review_key =
+    { task_id : string
+    ; verification_id : string
+    }
+
+  type scan_scope =
+    | Whole_backlog
+    | Targets of review_key list
+
+  val entries_in_scope
+    :  scope:scan_scope
+    -> (review_key * 'a) list
+    -> (review_key * 'a) list
+  (** The awaiting entries one wake is allowed to review. The submission hook
+      receives [task], [assignee] and [verification_id]; forwarding that identity
+      as [Targets] is what keeps one submission from re-reviewing every other
+      awaiting Task. The level read over the whole backlog re-ran a settled
+      review on identical input until a producer acted (task-443, 2026-08-23: 45
+      attempts in 5h against the same 1,012,551-byte atom).
+
+      [Whole_backlog] stays for boot recovery and for a failed backlog read,
+      which have no key to name. Pure, so the scope rule is checkable without a
+      backlog or an Eio runtime. *)
+
+  val make_retry_scheduler
+    :  sw:Eio.Switch.t
+    -> wait:(unit -> unit)
+    -> dispatch:(scan_scope -> unit)
+    -> scan_scope
+    -> retry_admission
+  (** The production retry scheduler with a caller-controlled interval and
+      dispatch sink. [Armed_timer] means the request forked the timer;
+      [Joined_running_timer] means new keys entered a batch whose timer was
+      already running; [Already_pending] means the batch already covered every
+      key. A whole-backlog request shares the batch and timer with named
+      retries. The switch owns the timer and its cancellation. *)
+
+  (** What the system lane does with one Task, read off its status. A
+      submission is reviewed; any other status is not an obligation. Pure, so
+      the routing is pinned without a runtime. *)
+  type admission =
+    | Review_completion
+    | Not_awaiting
+
+  val admission_of_status : Masc_domain.task_status -> admission
+end

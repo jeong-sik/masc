@@ -1,0 +1,10 @@
+RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-settings-runtime-workspace-20261005/dashboard
+
+
+ Test Files  5 passed (5)
+      Tests  232 passed (232)
+   Start at  01:49:22
+   Duration  7.89s (tests 44%, import 23%, transform 16%, environment 10%, setup 7%)
+
+    Isolate  5 workers spawned · ~244ms startup each (spawn + environment, per file)
+             at least ~975ms faster with isolate: false — reuses workers across files instead of one per file

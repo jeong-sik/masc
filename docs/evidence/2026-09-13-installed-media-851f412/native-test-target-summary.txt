@@ -1,0 +1,71 @@
+2026-09-12T18:22:28.6344898Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-09-12T18:22:28.6366782Z [targeted] test_operator_media_inspection: start 2026-09-12T18:22:28Z (dune alias)
+2026-09-12T18:22:35.7689522Z Ran 6 tests in 2.398s
+2026-09-12T18:22:35.8197624Z [targeted] test_operator_media_inspection: OK in 7s
+2026-09-12T18:22:35.8218081Z [targeted] test_install_runtime_setup: start 2026-09-12T18:22:35Z (dune alias)
+2026-09-12T18:22:48.7540449Z Ran 68 tests in 8.111s
+2026-09-12T18:22:48.8102871Z [targeted] test_install_runtime_setup: OK in 13s
+2026-09-12T18:22:48.8125833Z [targeted] test_presentation_fixture_contract: start 2026-09-12T18:22:48Z (dune alias)
+2026-09-12T18:22:51.6460595Z Ran 5 tests in 0.038s
+2026-09-12T18:22:51.6888611Z [targeted] test_presentation_fixture_contract: OK in 3s
+2026-09-12T18:22:52.2034003Z [targeted] dune build test/test_verification_presentation.exe test/test_verification_authority_tools.exe test/test_verification_collaboration_evidence.exe test/test_board_persistence_load_contract.exe test/test_board_persistence_schema.exe test/test_keeper_tool_plan.exe test/test_sandbox_prerequisites.exe test/test_fusion_decision.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/test_server_ide_lsp_proxy.exe test/test_lsp_process_manager.exe test/test_lsp_message_router.exe test/fixtures/verifier-image-lookup.png test/fixtures/verifier-video.mp4 docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf
+2026-09-12T18:23:06.0757545Z [targeted] test/test_verification_presentation: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:06.0780722Z [targeted] test/test_verification_presentation: start 2026-09-12T18:23:06Z
+2026-09-12T18:23:06.1200180Z Testing `independent presentation verification'.
+2026-09-12T18:23:08.8362635Z Test Successful in 2.716s. 1 test run.
+2026-09-12T18:23:08.8398964Z [targeted] test/test_verification_presentation: OK in 2s
+2026-09-12T18:23:08.8833130Z [targeted] test/test_verification_authority_tools: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:08.8854948Z [targeted] test/test_verification_authority_tools: start 2026-09-12T18:23:08Z
+2026-09-12T18:23:08.9272132Z Testing `verification authority tools'.
+2026-09-12T18:23:10.7088763Z Test Successful in 1.781s. 19 tests run.
+2026-09-12T18:23:10.7130861Z [targeted] test/test_verification_authority_tools: OK in 2s
+2026-09-12T18:23:10.7557819Z [targeted] test/test_verification_collaboration_evidence: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:10.7581252Z [targeted] test/test_verification_collaboration_evidence: start 2026-09-12T18:23:10Z
+2026-09-12T18:23:10.7986660Z Testing `Verifier collaboration sources'.
+2026-09-12T18:23:10.8759455Z Test Successful in 0.076s. 6 tests run.
+2026-09-12T18:23:10.8790171Z [targeted] test/test_verification_collaboration_evidence: OK in 0s
+2026-09-12T18:23:10.9229532Z [targeted] test/test_board_persistence_load_contract: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:10.9251894Z [targeted] test/test_board_persistence_load_contract: start 2026-09-12T18:23:10Z
+2026-09-12T18:23:10.9342523Z Testing `board_persistence_load_contract'.
+2026-09-12T18:23:10.9365279Z Test Successful in 0.002s. 3 tests run.
+2026-09-12T18:23:10.9394830Z [targeted] test/test_board_persistence_load_contract: OK in 0s
+2026-09-12T18:23:10.9836541Z [targeted] test/test_board_persistence_schema: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:10.9859311Z [targeted] test/test_board_persistence_schema: start 2026-09-12T18:23:10Z
+2026-09-12T18:23:10.9948355Z Testing `board_persistence_schema'.
+2026-09-12T18:23:11.0081776Z Test Successful in 0.013s. 13 tests run.
+2026-09-12T18:23:11.0109487Z [targeted] test/test_board_persistence_schema: OK in 1s
+2026-09-12T18:23:11.0788052Z [targeted] test/test_keeper_tool_plan: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:11.0809947Z [targeted] test/test_keeper_tool_plan: start 2026-09-12T18:23:11Z
+2026-09-12T18:23:11.1243204Z Testing `keeper_tool_plan'.
+2026-09-12T18:23:11.1417792Z Test Successful in 0.018s. 56 tests run.
+2026-09-12T18:23:11.1458543Z [targeted] test/test_keeper_tool_plan: OK in 0s
+2026-09-12T18:23:11.1878574Z [targeted] test/test_sandbox_prerequisites: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:11.1900426Z [targeted] test/test_sandbox_prerequisites: start 2026-09-12T18:23:11Z
+2026-09-12T18:23:11.1957029Z Testing `prerequisite actions'.
+2026-09-12T18:23:11.1989029Z Test Successful in 0.001s. 10 tests run.
+2026-09-12T18:23:11.1990203Z [targeted] test/test_sandbox_prerequisites: OK in 0s
+2026-09-12T18:23:11.2651100Z [targeted] test/test_fusion_decision: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:11.2673430Z [targeted] test/test_fusion_decision: start 2026-09-12T18:23:11Z
+2026-09-12T18:23:11.3093622Z Testing `Fusion decision attribution'.
+2026-09-12T18:23:11.3784958Z Test Successful in 0.069s. 5 tests run.
+2026-09-12T18:23:11.3828766Z [targeted] test/test_fusion_decision: OK in 0s
+2026-09-12T18:23:11.4492008Z [targeted] test/test_server_dashboard_http_keeper_tool_lookup: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:11.4513162Z [targeted] test/test_server_dashboard_http_keeper_tool_lookup: start 2026-09-12T18:23:11Z
+2026-09-12T18:23:11.5001935Z Testing `keeper_exact_tool_output_http'.
+2026-09-12T18:23:11.5238175Z Test Successful in 0.024s. 3 tests run.
+2026-09-12T18:23:11.5284582Z [targeted] test/test_server_dashboard_http_keeper_tool_lookup: OK in 0s
+2026-09-12T18:23:11.5960459Z [targeted] test/test_server_ide_lsp_proxy: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:11.5982238Z [targeted] test/test_server_ide_lsp_proxy: start 2026-09-12T18:23:11Z
+2026-09-12T18:23:11.6444179Z Testing `server_ide_lsp_proxy'.
+2026-09-12T18:23:11.6493055Z Test Successful in 0.001s. 19 tests run.
+2026-09-12T18:23:11.6509054Z [targeted] test/test_server_ide_lsp_proxy: OK in 0s
+2026-09-12T18:23:11.7179762Z [targeted] test/test_lsp_process_manager: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:11.7202138Z [targeted] test/test_lsp_process_manager: start 2026-09-12T18:23:11Z
+2026-09-12T18:23:11.7261136Z Testing `lsp_process_manager'.
+2026-09-12T18:23:11.7379208Z Test Successful in 0.003s. 11 tests run.
+2026-09-12T18:23:11.7380403Z [targeted] test/test_lsp_process_manager: OK in 0s
+2026-09-12T18:23:11.7990322Z [targeted] test/test_lsp_message_router: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-09-12T18:23:11.8012014Z [targeted] test/test_lsp_message_router: start 2026-09-12T18:23:11Z
+2026-09-12T18:23:11.8067259Z Testing `lsp-message-router'.
+2026-09-12T18:23:11.8072313Z Test Successful in 0.000s. 3 tests run.
+2026-09-12T18:23:11.8094480Z [targeted] test/test_lsp_message_router: OK in 0s

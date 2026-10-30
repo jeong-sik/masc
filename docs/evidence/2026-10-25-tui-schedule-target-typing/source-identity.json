@@ -1,0 +1,11 @@
+{
+  "candidate": "84bea1cd3257fa7e94411586348dffd86728e0d8",
+  "base": "6505bd4fedb7e78121fda9a2195ced0a03f2c629",
+  "executed_after": "ed1f4b12ea1ceff9d644b8aee8991aa307072934",
+  "source_path": "bin/masc_tui_types.ml",
+  "source_sha256": "4eb170fc52302dcd76cc82f046aa28092c94b5e17a92bbfaf6f5cf88ed3c7159",
+  "source_unchanged_since_typing": true,
+  "added_after_execution": [
+    "changelog.d/45941.md"
+  ]
+}

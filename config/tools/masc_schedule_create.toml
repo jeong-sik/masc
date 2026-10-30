@@ -1,0 +1,178 @@
+name = "masc_schedule_create"
+description = """
+Wake a Keeper at a later time. due_in_sec counts seconds from this call.
+Create a durable Keeper wake request. Give exactly one of due_in_sec, \
+due_at_iso or due_at_unix; a daily or cron recurrence may give none and \
+derive its first due time. A Keeper sees the current time only on its turn's \
+first request, not after a tool round, so prefer due_in_sec to an absolute \
+time computed from that reading. For 'every day at 09:00 KST', use \
+recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, \
+recurrence_timezone=Asia/Seoul. For compact calendar rules, use \
+recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. \
+The due request wakes its Keeper; it does not authorize later effects. When \
+the creating turn has a routable continuation, the runtime records that \
+exact route as the result destination; otherwise it records an explicit \
+no-delivery policy. A due time before the current second is refused with \
+error_kind due_already_past. You are recorded as the requester and the \
+scheduler.
+A Lane action gives installation_id and action instead of keeper_name and \
+message: at each due time the installation's live worker receives the action \
+with the occurrence id as its request id, under your own access."""
+additional_properties = false
+
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 244 times in 43 turns, 4093 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 43 extra requests over the same week.
+defer_loading = true
+
+[[params]]
+name = "due_in_sec"
+type = "integer"
+minimum = 1
+description = "Seconds after the server runs this call."
+
+[[params]]
+name = "due_at_unix"
+type = "number"
+description = "Unix timestamp in seconds."
+
+[[params]]
+name = "due_at_iso"
+type = "string"
+description = """
+RFC 3339 timestamp with Z or an explicit numeric offset, for example \
+2026-08-02T09:00:00+09:00. It is normalized to whole-second UTC; fractional \
+seconds are accepted and truncated."""
+
+[[params]]
+name = "keeper_name"
+type = "string"
+description = "The Keeper to wake. A Keeper wake needs it and message."
+
+[[params]]
+name = "message"
+type = "string"
+description = """
+What the Keeper is being woken to do. Write the work itself. A recurring
+wake sends this text unchanged: ask the Keeper to read current state each time,
+rather than rely on a copied status or an unintentionally fixed current head.
+Keep immutable run IDs, commit SHAs, or other exact identifiers when they
+deliberately define the recurring target or baseline. Notes are not included
+in the wake. If execution depends on notes, include an instruction here to
+call masc_schedule_notes_list with the schedule ID before acting."""
+
+[[params]]
+name = "title"
+type = "string"
+description = "Short label for this wake in listings. Falls back to message."
+
+[[params]]
+name = "urgency"
+type = "string"
+enum = ["immediate", "normal", "low"]
+description = """
+Where the wake sits in the Keeper's queue when it lands. Defaults to \
+normal."""
+
+[[params]]
+name = "schedule_id"
+type = "string"
+description = "Optional stable schedule id."
+
+[[params]]
+name = "requested_at_unix"
+type = "number"
+description = """
+Optional request timestamp for replay/tests. Recorded only; no due time \
+counts from it."""
+
+[[params]]
+name = "expires_at_unix"
+type = "number"
+description = "Optional expiry timestamp."
+
+[[params]]
+name = "recurrence_kind"
+type = "string"
+description = "Recurrence kind. Defaults to one_shot."
+enum = ["one_shot", "interval", "daily", "cron"]
+
+[[params]]
+name = "recurrence_interval_sec"
+type = "integer"
+description = """
+Required when recurrence_kind is interval; seconds between runs."""
+
+[[params]]
+name = "recurrence_hour"
+type = "integer"
+description = "Required when recurrence_kind is daily; local hour in 0..23."
+
+[[params]]
+name = "recurrence_minute"
+type = "integer"
+description = """
+Required when recurrence_kind is daily; local minute in 0..59."""
+
+[[params]]
+name = "recurrence_second"
+type = "integer"
+description = """
+Optional when recurrence_kind is daily; local second in 0..59."""
+
+[[params]]
+name = "recurrence_cron"
+type = "string"
+description = """
+Required when recurrence_kind is cron. Standard 5-field cron expression: \
+minute hour day-of-month month day-of-week. Supports wildcards, comma lists, \
+numeric ranges, and steps such as */15 or 1-5/2."""
+
+[[params]]
+name = "recurrence_timezone"
+type = "string"
+description = """
+Required when recurrence_kind is daily or cron. Fixed-offset only: UTC, \
+Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. \
+DST-aware IANA zones are not supported."""
+
+[[params]]
+name = "allow_unregistered_keeper"
+type = "boolean"
+description = """
+Allow a masc.keeper_wake schedule whose target keeper has no durable \
+metadata yet. Default false: creation is rejected because such a wake can \
+never be settled until the keeper exists."""
+
+[[params]]
+name = "source"
+type = "string"
+enum = ["operator_request", "automated_request", "system_request"]
+
+[[params]]
+name = "installation_id"
+type = "string"
+description = """
+For a Lane action instead of a Keeper wake: the declared Lane Add-on \
+installation (its declaration id) whose live worker runs action at each due \
+time. Give it with action, and without keeper_name, message, title, urgency \
+or allow_unregistered_keeper."""
+
+[[params]]
+name = "action"
+type = "object"
+description = """
+For a Lane action: the action object the installation's package schema \
+accepts, such as {"kind": "compose", "questions": 5}. It is checked against the worker that \
+runs it, at each due time."""
+
+[[one_of]]
+required = ["keeper_name", "message"]
+forbidden = ["installation_id", "action"]
+description = "Wake a Keeper with this message."
+
+[[one_of]]
+required = ["installation_id", "action"]
+forbidden = ["keeper_name", "message", "title", "urgency", "allow_unregistered_keeper"]
+description = "Hand this action to a declared Lane installation's live worker."

@@ -1,0 +1,199 @@
+{
+  "scope": "immutable local Reader parent plus own index authority source; no network/native/typecheck",
+  "local_parent": "f510f860016d50e792a7b71865a7e9d66ded3b14",
+  "local_parent_tree": "1cd93a0ce54979756a329bef9945fc6ef61c84d2",
+  "source_commit": "73b0f50f1d5fa457adcfad65b4ea3d6dd7635248",
+  "own_manifest": [
+    "changelog.d/40259.md",
+    "docs/evidence/2026-09-30-credential-index-authority-source/README.md",
+    "docs/evidence/2026-09-30-credential-index-authority-source/composition.json",
+    "docs/evidence/2026-09-30-credential-index-authority-source/source-checks.json",
+    "docs/evidence/2026-09-30-credential-index-authority-source/source-sha256.json",
+    "lib/auth/auth.mli",
+    "lib/auth/auth_credential_base.ml",
+    "lib/auth/auth_credential_token.ml",
+    "lib/auth/auth_credential_token.mli",
+    "test/dune",
+    "test/stanzas/test_auth_credential_index_authority.inc",
+    "test/test_auth_credential_index_authority.ml"
+  ],
+  "source_sha256_manifest": "source-sha256.json",
+  "critical_parent_preservation": [
+    {
+      "path": "lib/auth/auth.ml",
+      "sha256": "7120e74999aa53287b8b8ab7509840fa08bd0fcf2e23d7dd9962f74cc36e2f57",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/auth/auth_login.ml",
+      "sha256": "5456acdd9b175bcb0f94259fce16ff688d1e6950527f41d1a6baccb52e6380d5",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/auth/auth_login.mli",
+      "sha256": "e6142ad25b3558b9f4e5356143938a4a783622b9a9563605ae69018d3f4a883f",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/auth/auth_oauth.ml",
+      "sha256": "06b8a3adbeee81d79ec7f50f2ae66257815ca0e8daefc5b97376f43c3bf02634",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/auth/auth_oauth.mli",
+      "sha256": "0fd7917ee870d82ae2018303388d1c35bcc94ba5088fdfdd0298ba040f949695",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/auth/dune",
+      "sha256": "4e657a92c2d445933c4d51eccd9dbfd28196bb9e146ef65cc005753a4679dc63",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_auth_file_backed_transaction.ml",
+      "sha256": "72b0216770ae5783e1d938209dc9226d6c6b2d00d4264fb30b6a185d05df3a0b",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_auth_regular_read_boundary.ml",
+      "sha256": "09f5a628b9443f192bf1a16e6bc25b6daea8cd23ed69dc6445569b5b63609029",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_auth_credential_index_cache.ml",
+      "sha256": "afac6658adba73a22808b1d48870473d1d1c235add2da3efea481646e1ce13ea",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_auth.ml",
+      "sha256": "f4155e5679c577a77dbe0c2640bc89dce67999a85ad1b1b97cc7ae579cd4a2db",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_auth_login.ml",
+      "sha256": "7a0113dfa45554afde14c9a1216c4b1a6c58c681cf97aba3d25722c3fa65145c",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_auth_token_rotation_transaction.ml",
+      "sha256": "805857b223ae3245055ff6e9108797822f6102299367b5f2ecdd08092501af1e",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_auth_rotate_shared_tokens_10304.ml",
+      "sha256": "352b240f495aa617e63fdc54d585d1d7db7015b1069dd3113cbf1a971542b62a",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_auth_token_prune_transaction.ml",
+      "sha256": "4cad0bcd4ff86af07b78b4e4a5f1b0a85169186c1d03fcd3c976d9aaeaf1c3a6",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_credential_expiry.ml",
+      "sha256": "4b11b9ebbdabd77b6a0a69f95e835ab908a0910c659044624e47e60f1bb41a39",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_dos_controller.ml",
+      "sha256": "f976a45b9e7df32e90023cbc0984e71253e8585e9acb6e3875eefdb8e3465281",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/keeper/keeper_dos_controller.mli",
+      "sha256": "810ad58ba0beac49cdf26a47619c24bc6354d317002c740f1bc9088fb27743c7",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_dos_tools.ml",
+      "sha256": "410c151a926a6374063b3ad80de135aff65a5960b882f0b09ee2459a5f3a32a3",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "test/test_dos_input_routes.ml",
+      "sha256": "d9370ac207f6e84211238d63f6fcbf60a4a6bf9b326a0e2f0aa205015aa8c865",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/server/server_auth.ml",
+      "sha256": "d4ad18f512f16e8941e4301d980614cdcbc9a0ab5bdf2348a89ffd2be96a0d93",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/server/server_auth.mli",
+      "sha256": "0b6a731ef8ca6ad95e8f1b742bc9110e87257bc0edf275d4e1d7cecbc4045101",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_play.ml",
+      "sha256": "65c109a6f9acf8b400bc6ec9763cb927b3056062e2ecea0a97ff07b8d2e39c71",
+      "byte_identical_to_parent": true
+    },
+    {
+      "path": "lib/server/server_routes_http_routes_play.mli",
+      "sha256": "a8a11a4f27b0527598292eab878f469da6b21694113dd09e799f815d13e67b18",
+      "byte_identical_to_parent": true
+    }
+  ],
+  "test_dune_one_additive_include": true,
+  "public_api_references": {
+    "Auth": {
+      "interface": "lib/auth/auth.mli",
+      "referenced_functions": [
+        "credential_file",
+        "ensure_credential_alias",
+        "ensure_keeper_credential",
+        "find_credential_by_token",
+        "find_static_credential_by_token",
+        "load_credential",
+        "save_auth_config",
+        "save_credential",
+        "save_private_text_file",
+        "sha256_hash",
+        "verify_token"
+      ],
+      "missing_functions": []
+    },
+    "Server_auth": {
+      "interface": "lib/server/server_auth.mli",
+      "referenced_functions": [
+        "authorize_token_bound_permission_request",
+        "verify_mcp_auth_for_authority"
+      ],
+      "missing_functions": []
+    },
+    "Server_request_authority": {
+      "interface": "lib/server/server_request_authority.mli",
+      "referenced_functions": [
+        "of_host_port"
+      ],
+      "missing_functions": []
+    }
+  },
+  "prepared_suite": "test_auth_credential_index_authority",
+  "registered_cases": [
+    "cold index rejects intact UUID with missing name",
+    "warm index rejects intact UUID with missing name",
+    "cold index rejects intact UUID with malformed name",
+    "warm index rejects intact UUID with malformed name",
+    "cold index uses current Worker over old Admin UUID",
+    "warm index uses current Worker over old Admin UUID",
+    "current UUID owner and supported aliases keep authority"
+  ],
+  "prepared_case_count": 7,
+  "native_execution": "not_run_locally",
+  "publication": {
+    "coordinates_source": "root supplied publication coordinates; child performed no API/network publication",
+    "parent_pr": 40256,
+    "parent_head": "46fb0eec8680e1dd0ded7ff341144972178320d2",
+    "parent_tree": "1cd93a0ce54979756a329bef9945fc6ef61c84d2",
+    "child_pr": 40259,
+    "initial_head": "25a83f6eaf87818b094f2f1e2ea373c1cdd9caa2",
+    "initial_tree": "74bafec231551e111deb7db099717fb0bc55bbca",
+    "assigned_fragment": "changelog.d/40259.md",
+    "native_and_ci_evidence": "not observed by this child; no repaired-head success claimed"
+  },
+  "original_source_parent": "af47f73fa32b5815cfc98346cc39c2d1213aba7d",
+  "original_source_parent_tree": "af0d0b59812c5c529d0c8174abac51d5f6b5f544",
+  "source_commit_scope": "Initial implementation/test commit. Final Reader parent and assignment updates change documentation/fragments only; production/test/registration bytes are preserved."
+}

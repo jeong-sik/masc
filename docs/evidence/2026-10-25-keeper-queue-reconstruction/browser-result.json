@@ -1,0 +1,29 @@
+{
+  "count": 101,
+  "last": "#101 · seq 101 · kmsg-proof-1012026. 10. 25. 오후 12:46:40Pending request 101수정맨 뒤로취소",
+  "buttons": [
+    {
+      "text": "수정",
+      "disabled": false
+    },
+    {
+      "text": "맨 뒤로",
+      "disabled": true
+    },
+    {
+      "text": "취소",
+      "disabled": false
+    }
+  ],
+  "requests": [
+    "/api/v1/dashboard/dev-token",
+    "/api/v1/keepers/proof/chat/history/page",
+    "/api/v1/keepers/proof/chat/history",
+    "/api/v1/keepers/proof/waiting-inventory",
+    "/api/v1/keepers/proof/tool-calls?limit=200",
+    "/api/v1/keepers/proof/waiting-inventory",
+    "/api/v1/keepers/proof/chat/operations?state=queued",
+    "/api/v1/keepers/proof/chat/operations?state=queued&after_sequence=100",
+    "/api/v1/keepers/proof/chat/operations?state=queued&after_sequence=101"
+  ]
+}

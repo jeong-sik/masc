@@ -1,0 +1,11 @@
+{
+  "verdict": "PASS",
+  "head": "0596143ca7393557f072662e11d7e8359d23743b",
+  "incremental_base": "cf60643a1680b6c1cfa678feb5c97034b3bd8d22",
+  "direct_pr_base": "6f2d9cda69307a2ab58f5943412a9ab49b8b0c43",
+  "reviewer": "repair_evidence_integrity",
+  "raw_binary_delta_sha256": "6f7da738b676d9ae8c4f06d9446972536e619cb33d165790e0c85df8c0e19f15",
+  "files_in_delta": 46,
+  "scope": "Two panel strings + existing locator; published-baseline equality;31/31 manifest entries; G3 observation hash, API/persisted capture and actual wire19 System equality, screenshot hash/visual review. No new P0-P2. Source/evidence verdict, not all-stack approval/CI/merge. Later Qwen cohort, Task lookup repair and filename correction excluded.",
+  "p3": "g3-README diagnosis.json filename should be g3-diagnosis.json; corrected in subsequent evidence delta."
+}

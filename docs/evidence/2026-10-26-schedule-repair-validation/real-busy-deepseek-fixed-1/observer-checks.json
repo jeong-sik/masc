@@ -1,0 +1,42 @@
+[
+  {
+    "name": "server serves the owned base",
+    "passed": true
+  },
+  {
+    "name": "binary identity is measured",
+    "passed": true
+  },
+  {
+    "name": "owned workspace gate accepts setting",
+    "passed": true
+  },
+  {
+    "name": "owned Keeper tool approval accepts setting",
+    "passed": true
+  },
+  {
+    "name": "first exact scheduled source is in a live unfinished turn",
+    "passed": true
+  },
+  {
+    "name": "second effect appears once with correct Keeper author",
+    "passed": true
+  },
+  {
+    "name": "first effect appears once with correct Keeper author",
+    "passed": true
+  },
+  {
+    "name": "both completed exact sources have their required effects exactly once",
+    "passed": true
+  },
+  {
+    "name": "both exact sources finish with durable completion",
+    "passed": true
+  },
+  {
+    "name": "busy-overlap precondition was observed",
+    "passed": false
+  }
+]

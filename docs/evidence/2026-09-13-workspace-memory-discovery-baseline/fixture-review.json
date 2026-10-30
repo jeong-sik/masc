@@ -1,0 +1,217 @@
+{
+  "scope": "local HTTP fixtures only; no installed runtime or model acceptance",
+  "script_sha256": "857382403ef10d57c8c1f40ed1dca41e39702e38b39c057ca996f94152274e7a",
+  "results": [
+    {
+      "case": "valid",
+      "exit_code": 0,
+      "status": "passed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback",
+        "keeper_previews_share_exact_discovery_without_persisted_message_injection",
+        "same_instance_and_publication_at_observation_boundaries"
+      ],
+      "error": null,
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config",
+        "/api/v1/keepers/fixture-designer/config",
+        "/health?full=1",
+        "/api/v1/prompts"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/valid/evidence"
+    },
+    {
+      "case": "valid_override",
+      "exit_code": 0,
+      "status": "passed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback",
+        "keeper_previews_share_exact_discovery_without_persisted_message_injection",
+        "same_instance_and_publication_at_observation_boundaries"
+      ],
+      "error": null,
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config",
+        "/api/v1/keepers/fixture-designer/config",
+        "/health?full=1",
+        "/api/v1/prompts"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/valid_override/evidence"
+    },
+    {
+      "case": "scattered_markers",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback"
+      ],
+      "error": "Preview does not contain exactly one complete resolved discovery fragment",
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/scattered_markers/evidence"
+    },
+    {
+      "case": "null_instance",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [],
+      "error": "Runtime instance identity is missing",
+      "requests": [
+        "/health?full=1"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/null_instance/evidence"
+    },
+    {
+      "case": "degraded_health",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback",
+        "keeper_previews_share_exact_discovery_without_persisted_message_injection"
+      ],
+      "error": "Installed health degraded during observation",
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config",
+        "/api/v1/keepers/fixture-designer/config",
+        "/health?full=1"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/degraded_health/evidence"
+    },
+    {
+      "case": "base_changed",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback",
+        "keeper_previews_share_exact_discovery_without_persisted_message_injection"
+      ],
+      "error": "Runtime base or memory root changed during observation",
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config",
+        "/api/v1/keepers/fixture-designer/config",
+        "/health?full=1"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/base_changed/evidence"
+    },
+    {
+      "case": "persistent_leak",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback"
+      ],
+      "error": "Publication discovery leaked into the persisted-message preview",
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/persistent_leak/evidence"
+    },
+    {
+      "case": "identity_changed",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback",
+        "keeper_previews_share_exact_discovery_without_persisted_message_injection"
+      ],
+      "error": "Runtime identity changed during observation",
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config",
+        "/api/v1/keepers/fixture-designer/config",
+        "/health?full=1"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/identity_changed/evidence"
+    },
+    {
+      "case": "missing_publication",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [
+        "expected_runtime_identity"
+      ],
+      "error": "[Errno 2] No such file or directory: '/private/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/missing_publication/.masc/workspace-memory/publication.json'",
+      "requests": [
+        "/health?full=1"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/missing_publication/evidence"
+    },
+    {
+      "case": "credential_echo",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [],
+      "error": "Credential echo withheld from evidence",
+      "requests": [
+        "/health?full=1"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/credential_echo/evidence"
+    },
+    {
+      "case": "prompt_changed",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback",
+        "keeper_previews_share_exact_discovery_without_persisted_message_injection"
+      ],
+      "error": "Resolved discovery prompt changed during observation",
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config",
+        "/api/v1/keepers/fixture-designer/config",
+        "/health?full=1",
+        "/api/v1/prompts"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/prompt_changed/evidence"
+    },
+    {
+      "case": "duplicate_fragment",
+      "exit_code": 1,
+      "status": "failed",
+      "checks": [
+        "expected_runtime_identity",
+        "exact_native_proposal_and_http_readback"
+      ],
+      "error": "Preview does not contain exactly one complete resolved discovery fragment",
+      "requests": [
+        "/health?full=1",
+        "/api/v1/dashboard/workspace-memory-proposals?id=494b19ddc0c74d6dbe43eb0f562ea31b199092ebf48f357160e1e0e28baae1fb",
+        "/api/v1/prompts",
+        "/api/v1/keepers/fixture-editor/config"
+      ],
+      "output": "/tmp/masc-discovery-verifier-fixtures-v2-tjqsxqth/duplicate_fragment/evidence"
+    }
+  ]
+}

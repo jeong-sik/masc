@@ -1,0 +1,705 @@
+open Alcotest
+
+(* The fixtures are MSP golden transcripts copied verbatim from
+   github.com/meta-models/muse-code-sdk schema/msp/transcripts at 22a8a56
+   (MIT; see fixtures/muse_msp/README.md). Each line is
+   {"dir":"client"|"server","raw":"<one wire frame>"}. *)
+
+module Msp = Runtime_muse_msp
+
+type direction =
+  | Client
+  | Server
+
+let transcript name =
+  let path = Printf.sprintf "fixtures/muse_msp/%s.ndjson" name in
+  In_channel.with_open_bin path In_channel.input_all
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+  |> List.map (fun line ->
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      let dir =
+        match List.assoc_opt "dir" fields with
+        | Some (`String "client") -> Client
+        | Some (`String "server") -> Server
+        | _ -> failwith ("transcript line without a direction: " ^ line)
+      in
+      let raw =
+        match List.assoc_opt "raw" fields with
+        | Some (`String raw) -> raw
+        | _ -> failwith ("transcript line without a frame: " ^ line)
+      in
+      dir, raw
+    | _ -> failwith ("transcript line is not an object: " ^ line))
+;;
+
+let ok_or_fail = function
+  | Ok value -> value
+  | Error error -> fail (Msp.error_to_string error)
+;;
+
+let server_frames name =
+  transcript name
+  |> List.filter_map (function
+    | Server, raw -> Some (ok_or_fail (Msp.parse_wire_line raw))
+    | Client, _ -> None)
+;;
+
+let client_frames name =
+  transcript name
+  |> List.filter_map (function
+    | Client, raw -> Some (Yojson.Safe.from_string raw)
+    | Server, _ -> None)
+;;
+
+let notifications name =
+  server_frames name
+  |> List.filter_map (function
+    | Msp.Notification { method_; params } ->
+      Some (ok_or_fail (Msp.parse_notification ~method_ params))
+    | _ -> None)
+;;
+
+let json = testable Yojson.Safe.pp (fun a b -> Yojson.Safe.equal (Yojson.Safe.sort a) (Yojson.Safe.sort b))
+
+let client_frame_with_method name method_ =
+  match
+    List.find_opt
+      (function
+        | `Assoc fields -> List.assoc_opt "method" fields = Some (`String method_)
+        | _ -> false)
+      (client_frames name)
+  with
+  | Some frame -> frame
+  | None -> failf "transcript %s has no client %s frame" name method_
+;;
+
+let response_result id frames =
+  match
+    List.find_map
+      (function
+        | Msp.Response { id = response_id; result } when response_id = id -> Some result
+        | _ -> None)
+      frames
+  with
+  | Some result -> result
+  | None -> fail "response not found"
+;;
+
+(* A whole turn as MASC reads it: the reply the deltas stream, the reply the
+   completed item states, and the terminal. The two replies must agree —
+   MSP's own delta contract (spec 14653 INV-005). *)
+let test_text_run_single_turn () =
+  let frames = server_frames "text-run-single-turn" in
+  let init = ok_or_fail (Msp.parse_initialize_result (response_result (Msp.Int_id 1) frames)) in
+  check string "muse home" "/home/fixture/.muse" init.muse_home;
+  let session =
+    ok_or_fail
+      (Msp.parse_session_result ~stage:"session/start" (response_result (Msp.Int_id 2) frames))
+  in
+  check string "session id" "0198f0aa-1111-7000-8000-0000000000aa" session.session_id;
+  check (option string) "model" (Some "muse-large-2") session.model_id;
+  check bool "corpus effective approval mode" true
+    (session.approval_mode = Some Msp.Prompt_unmatched);
+  let ack = ok_or_fail (Msp.parse_turn_start_result (response_result (Msp.Int_id 3) frames)) in
+  check bool "turn started" true (ack.disposition = Msp.Started);
+  let streamed = Buffer.create 64 in
+  let completed_reply = ref None in
+  let terminal = ref None in
+  List.iter
+    (function
+      | Msp.Item_delta { field = Msp.Delta_text; delta; _ } -> Buffer.add_string streamed delta
+      | Msp.Item_completed { item = { kind = Msp.Agent_message; text; _ }; _ } ->
+        completed_reply := text
+      | Msp.Turn_completed { turn_id; terminal = t; usage; _ } ->
+        check string "terminal turn" ack.turn_id turn_id;
+        terminal := Some (t, usage)
+      | _ -> ())
+    (notifications "text-run-single-turn");
+  check
+    (option string)
+    "completed reply equals streamed reply"
+    (Some (Buffer.contents streamed))
+    !completed_reply;
+  match !terminal with
+  | Some (Msp.Terminal_completed, Some usage) ->
+    check int "input" 48210 usage.input_tokens;
+    check int "output" 1211 usage.output_tokens;
+    check int "cached" 40100 usage.cached_tokens;
+    check int "reasoning" 384 usage.reasoning_tokens
+  | _ -> fail "expected a completed terminal carrying usage"
+;;
+
+(* The frames MASC writes must be the frames the conformance corpus writes. *)
+let test_client_frames_match_corpus () =
+  let name = "text-run-single-turn" in
+  check json "initialized" (client_frame_with_method name "initialized") Msp.initialized_notification;
+  check
+    json
+    "session/start"
+    (client_frame_with_method name "session/start")
+    (Msp.session_start_request
+       ~id:2
+       ~command_id:"0198f0ab-9999-7000-8000-0000000000c1"
+       ~workspace_root:"/home/me/src/proj"
+       ~model_id:None
+       ~approval_mode:None
+       ~config:{ mcp_servers = [] });
+  check
+    json
+    "turn/start"
+    (client_frame_with_method name "turn/start")
+    (Msp.turn_start_request
+       ~id:3
+       ~session_id:"0198f0aa-1111-7000-8000-0000000000aa"
+       ~command_id:"018f6a1e-9b3c-7c21-a54a-2f30bd3c9f10"
+       ~input:[ Msp.Text "Run the agent test suite and summarize failures" ]
+       ~reasoning_effort:None)
+;;
+
+(* MASC asks for [sessionMcp] so a session may carry the MCP bridge; the
+   corpus shows the same handshake shape with another capability. *)
+let test_capability_handshake () =
+  let name = "handshake-liststream-granted" in
+  check
+    json
+    "initialize"
+    (client_frame_with_method name "initialize")
+    (Msp.initialize_request
+       ~id:1
+       { name = "conformance"; version = "0.0.0" }
+       ~requested_capabilities:[ Msp.Session_list_stream ]
+       ~user_input_dialogs:true);
+  let init =
+    ok_or_fail
+      (Msp.parse_initialize_result (response_result (Msp.Int_id 1) (server_frames name)))
+  in
+  check
+    bool
+    "granted"
+    true
+    (init.granted_capabilities = [ Msp.Session_list_stream ]);
+  let other_version =
+    Yojson.Safe.from_string
+      {|{"serverInfo":{"name":"m","version":"9"},"userAgent":"m","museHome":"/h","sessionDurability":"durable","schema":{"version":2,"fingerprint":"sha256:x"},"grantedCapabilities":[]}|}
+  in
+  (match Msp.parse_initialize_result other_version with
+   | Ok _ -> fail "a schema version other than 1 must be refused"
+   | Error _ -> ());
+  let frame =
+    Msp.initialize_request
+      ~id:1
+      { name = "masc"; version = "0" }
+      ~requested_capabilities:[ Msp.Session_mcp ]
+      ~user_input_dialogs:false
+  in
+  check
+    json
+    "masc capabilities"
+    (Yojson.Safe.from_string
+       {|{"requestedCapabilities":["sessionMcp"],"userInputDialogs":false}|})
+    (match frame with
+     | `Assoc fields ->
+       (match List.assoc "params" fields with
+        | `Assoc params -> List.assoc "capabilities" params
+        | _ -> fail "params is not an object")
+     | _ -> fail "frame is not an object")
+;;
+
+(* A host reports its stable bundle's fingerprint, which the corpus commit
+   publishes in stable/manifest.json; the transcripts' own initialize frames
+   carry a hand-authored placeholder. The handshake compares the host's value
+   with the codec's, so the codec's must be the manifest's. *)
+let test_codec_fingerprint_is_the_corpus_stable_bundle () =
+  let manifest =
+    In_channel.with_open_bin "fixtures/muse_msp/stable-manifest.json" In_channel.input_all
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  check int "manifest schema version" 1 (manifest |> member "schemaVersion" |> to_int);
+  check bool "stable surface" false (manifest |> member "experimental" |> to_bool);
+  check
+    string
+    "codec fingerprint"
+    (manifest |> member "fingerprint" |> to_string)
+    Msp.corpus_schema_fingerprint;
+  let result = response_result (Msp.Int_id 1) (server_frames "handshake-liststream-granted") in
+  let init = ok_or_fail (Msp.parse_initialize_result result) in
+  check
+    string
+    "host fingerprint kept verbatim"
+    (result |> member "schema" |> member "fingerprint" |> to_string)
+    init.schema_fingerprint
+;;
+
+let test_approval_round_trip () =
+  let name = "approval-round-trip" in
+  let approval =
+    match
+      List.find_map
+        (function
+          | Msp.Server_request { method_; params; _ } ->
+            (match ok_or_fail (Msp.parse_server_request ~method_ params) with
+             | Msp.Approval_request approval -> Some approval
+             | _ -> None)
+          | _ -> None)
+        (server_frames name)
+    with
+    | Some approval -> approval
+    | None -> fail "no approval/request in transcript"
+  in
+  check string "tool" "write_file" approval.tool_name;
+  check bool "subject" true (approval.subject_kind = Msp.Subject_file_access);
+  check
+    (list string)
+    "choices"
+    [ "allow_once"; "allow_session"; "abort" ]
+    (List.map (fun (c : Msp.approval_choice) -> c.choice_id) approval.choices);
+  let decide = client_frame_with_method name "approval/decide" in
+  let params = function
+    | `Assoc fields -> List.assoc "params" fields
+    | _ -> fail "frame is not an object"
+  in
+  check
+    json
+    "approval/decide params"
+    (params decide)
+    (params
+       (Msp.approval_decide_request
+          ~id:9
+          ~command_id:"018f6a2a-3333-7abc-8def-00000000d001"
+          approval
+          (List.find
+             (fun (c : Msp.approval_choice) -> c.choice_id = "allow_session")
+             approval.choices)));
+  (* The corpus answers a string request id; the codec reads it as one. *)
+  check
+    bool
+    "string response id"
+    true
+    (List.exists
+       (function
+         | Msp.Response { id = Msp.String_id "b9"; _ } -> true
+         | _ -> false)
+       (server_frames name))
+;;
+
+let test_provider_failure_turn () =
+  let terminals =
+    List.filter_map
+      (function
+        | Msp.Turn_completed { terminal; _ } -> Some terminal
+        | _ -> None)
+      (notifications "provider-failure-turn")
+  in
+  match terminals with
+  | [ Msp.Terminal_failed { kind = Msp.Model_error; retryable = true; _ }; Msp.Terminal_completed ] ->
+    ()
+  | _ -> fail "expected a retryable model failure, then a completed turn"
+;;
+
+let test_unknown_item_kind_is_kept () =
+  let kinds =
+    List.filter_map
+      (function
+        | Msp.Item_completed { item; _ } -> Some item.kind
+        | _ -> None)
+      (notifications "tolerance-unknown-item-kind")
+  in
+  check
+    bool
+    "unknown kind carries its wire name"
+    true
+    (List.mem (Msp.Unrecognized_item_kind "hologramPreview") kinds)
+;;
+
+(* Captured from Muse Code 1.4.0 on 2026-09-28 against a local synthetic
+   model endpoint: a 7 MB input under a declared 10M-token window reached the
+   model as a summary. Session, turn and item ids are shortened. *)
+let compaction_completed =
+  {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:6","item":{"itemId":"c-1","kind":"compaction","turnId":"t-1","revision":2,"status":"completed","fallbackText":"Context compaction","outcome":"compacted","trigger":"auto","strategyId":"summary-preserved-suffix/v1","tokensBefore":1761964,"tokensAfter":12941}}}|}
+;;
+
+let test_compaction_members_are_decoded () =
+  match Msp.parse_wire_line compaction_completed with
+  | Ok (Msp.Notification { method_; params }) ->
+    (match Msp.parse_notification ~method_ params with
+     | Ok (Msp.Item_completed { item = { kind = Msp.Compaction; compaction = Some c; _ }; _ }) ->
+       check bool "automatic trigger" true (c.trigger = Some Msp.Compaction_auto);
+       check bool "compacted outcome" true (c.outcome = Some Msp.Compaction_compacted);
+       check (option string) "strategy" (Some "summary-preserved-suffix/v1") c.strategy_id;
+       check (option int) "tokens before" (Some 1761964) c.tokens_before;
+       check (option int) "tokens after" (Some 12941) c.tokens_after
+     | Ok _ -> fail "a compaction item decoded without its members"
+     | Error error -> fail (Msp.error_to_string error))
+  | Ok _ -> fail "a notification decoded as another frame"
+  | Error error -> fail (Msp.error_to_string error)
+;;
+
+let message_phase =
+  testable
+    (fun ppf -> function
+       | Msp.Commentary -> Format.pp_print_string ppf "commentary"
+       | Msp.Final_answer -> Format.pp_print_string ppf "finalAnswer"
+       | Msp.Unrecognized_message_phase wire -> Format.fprintf ppf "unrecognized %S" wire)
+    ( = )
+;;
+
+let agent_message_completed members =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:6","item":{"itemId":"m-1","kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":"done"%s}}}|}
+    members
+;;
+
+let decoded_notification line =
+  match Msp.parse_wire_line line with
+  | Ok (Msp.Notification { method_; params }) -> Msp.parse_notification ~method_ params
+  | Ok _ -> fail "a notification decoded as another frame"
+  | Error error -> fail (Msp.error_to_string error)
+;;
+
+let completed_agent_phases notifications =
+  List.filter_map
+    (function
+      | Msp.Item_completed { item = { kind = Msp.Agent_message; message_phase; _ }; _ } ->
+        Some message_phase
+      | _ -> None)
+    notifications
+;;
+
+(* The 1.4.11 host labels the message it answers with; the single-turn
+   transcript was recorded before the member existed and carries none. *)
+let test_corpus_message_phases () =
+  check
+    (list (option message_phase))
+    "a 1.4.11 answer"
+    [ Some Msp.Final_answer ]
+    (completed_agent_phases (notifications "provider-failure-turn"));
+  check
+    (list (option message_phase))
+    "a message recorded before the member"
+    [ None ]
+    (completed_agent_phases (notifications "text-run-single-turn"))
+;;
+
+let test_message_phase_is_decoded () =
+  List.iter
+    (fun (members, expected) ->
+       match decoded_notification (agent_message_completed members) with
+       | Ok notification ->
+         check
+           (list (option message_phase))
+           members
+           [ expected ]
+           (completed_agent_phases [ notification ])
+       | Error error -> fail (Msp.error_to_string error))
+    [ {|,"messagePhase":"commentary"|}, Some Msp.Commentary
+    ; {|,"messagePhase":"finalAnswer"|}, Some Msp.Final_answer
+    ; {|,"messagePhase":"recap"|}, Some (Msp.Unrecognized_message_phase "recap")
+    ; "", None
+    ];
+  match decoded_notification (agent_message_completed {|,"messagePhase":5|}) with
+  | Ok _ -> fail "a non-string messagePhase was decoded"
+  | Error _ -> ()
+;;
+
+let parse_error line =
+  match Msp.parse_wire_line line with
+  | Ok _ -> failf "expected %s to be refused" line
+  | Error _ -> ()
+;;
+
+let test_wire_refusals () =
+  parse_error {|{"jsonrpc":"2.0","id":1,"id":2,"result":{}}|};
+  parse_error {|{"jsonrpc":"2.0","id":1.5,"result":{}}|};
+  parse_error {|{"jsonrpc":"2.0"}|};
+  parse_error "not json";
+  parse_error {|{"jsonrpc":"2.0","id":null,"result":{}}|};
+  (match
+     Msp.parse_wire_line
+       {|{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error","data":null}}|}
+   with
+   | Ok (Msp.Response_error { id = None; code = -32700; data = None; _ }) -> ()
+   | _ -> fail "a null-id error response must be read, with null data as absent");
+  let failed_without_error =
+    `Assoc
+      [ "sessionId", `String "s"
+      ; "turnId", `String "t"
+      ; "terminal", `String "failed"
+      ; "viewCursor", `String "v"
+      ]
+  in
+  match Msp.parse_notification ~method_:"turn/completed" failed_without_error with
+  | Ok _ -> fail "a failed terminal without an error must be refused"
+  | Error _ -> ()
+;;
+
+(* The host synthesizes a "failed" terminal with [reason] and no [error] when it
+   died mid-turn (ADR 36635 D2). It is read as that terminal, with the host's
+   text kept as written, not refused as a broken contract. *)
+let test_host_death_terminal () =
+  let terminal_of reason =
+    let fields =
+      [ "sessionId", `String "s"
+      ; "turnId", `String "t"
+      ; "terminal", `String "failed"
+      ; "viewCursor", `String "v"
+      ]
+      @ (match reason with
+         | None -> []
+         | Some reason -> [ "reason", `String reason ])
+    in
+    Msp.parse_notification ~method_:"turn/completed" (`Assoc fields)
+  in
+  List.iter
+    (fun reason ->
+       match terminal_of (Some reason) with
+       | Ok (Msp.Turn_completed { terminal = Msp.Terminal_host_died { reason = kept }; _ })
+         -> check string "the host's reason is kept as written" reason kept
+       | Ok _ -> fail ("a host-death terminal was read as another terminal: " ^ reason)
+       | Error error -> fail (Msp.error_to_string error))
+    [ "crash"; "crash_inferred"; "incomplete"; "a reason this build has never seen" ];
+  (match terminal_of None with
+   | Ok _ -> fail "a failed terminal with neither an error nor a reason must be refused"
+   | Error _ -> ())
+;;
+
+let test_delta_fields () =
+  let delta ?field () =
+    let fields =
+      [ "sessionId", `String "s"; "itemId", `String "i"; "delta", `String "x" ]
+      @ (match field with
+         | None -> []
+         | Some f -> [ "field", `String f ])
+    in
+    match ok_or_fail (Msp.parse_notification ~method_:"item/delta" (`Assoc fields)) with
+    | Msp.Item_delta { field; _ } -> field
+    | _ -> fail "expected an item delta"
+  in
+  check bool "absent is text" true (delta () = Msp.Delta_text);
+  check bool "output" true (delta ~field:"output" () = Msp.Delta_output);
+  check bool "summary part" true (delta ~field:"summary.2" () = Msp.Delta_summary 2);
+  check
+    bool
+    "unknown path kept"
+    true
+    (delta ~field:"summary.x" () = Msp.Unrecognized_delta_field "summary.x")
+;;
+
+let test_usage_read () =
+  check
+    bool
+    "nothing observed"
+    true
+    (ok_or_fail (Msp.parse_usage_read_result (`Assoc [])) = None);
+  let observed =
+    Yojson.Safe.from_string
+      {|{"usage":{"observedAtMs":1758800000000,"tier":"power","window":{"usedPercent":112,"resetsAtMs":1758810000000,"windowDurationMins":300},"weekly":{"usedPercent":40,"resetsAtMs":1759300000000}}}|}
+  in
+  match ok_or_fail (Msp.parse_usage_read_result observed) with
+  | Some usage ->
+    check int "over-quota percent is verbatim" 112 usage.window.used_percent;
+    check int "window length" 300 usage.window.window_duration_mins;
+    check int "weekly" 40 usage.weekly.weekly_used_percent
+  | None -> fail "expected an observed usage"
+;;
+
+let test_session_config_carries_bridge () =
+  let frame =
+    Msp.session_resume_request
+      ~id:4
+      ~command_id:"c"
+      ~session_id:"s"
+      ~config:
+        { mcp_servers =
+            [ ( "masc"
+              , Msp.Streamable_http
+                  { url = "http://127.0.0.1:4100/mcp"
+                  ; headers = [ "Authorization", "Bearer t" ]
+                  ; required = true
+                  } )
+            ]
+        }
+  in
+  check
+    json
+    "resume params"
+    (Yojson.Safe.from_string
+       {|{"commandId":"c","sessionId":"s","excludeItems":true,"config":{"mcpServers":{"masc":{"transport":"streamableHttp","url":"http://127.0.0.1:4100/mcp","headers":{"Authorization":"Bearer t"},"mode":"required"}}}}|})
+    (match frame with
+     | `Assoc fields -> List.assoc "params" fields
+     | _ -> fail "frame is not an object")
+;;
+
+let test_reasoning_effort_round_trip () =
+  List.iter
+    (fun effort ->
+      check
+        bool
+        (Msp.reasoning_effort_to_string effort)
+        true
+        (Msp.reasoning_effort_of_string (Msp.reasoning_effort_to_string effort) = Some effort))
+    Msp.
+      [ Effort_none
+      ; Effort_minimal
+      ; Effort_low
+      ; Effort_medium
+      ; Effort_high
+      ; Effort_xhigh
+      ; Effort_max
+      ; Effort_ultra
+      ];
+  check bool "unknown tier" true (Msp.reasoning_effort_of_string "turbo" = None)
+;;
+
+let test_session_durability_follows_v1_wire_contract () =
+  let initial = response_result (Msp.Int_id 1) (server_frames "text-run-single-turn") in
+  let fields = Yojson.Safe.Util.to_assoc initial in
+  let with_durability value =
+    let fields = List.remove_assoc "sessionDurability" fields in
+    `Assoc (match value with None -> fields | Some value -> ("sessionDurability", value) :: fields)
+  in
+  List.iter
+    (fun (wire, expected) ->
+       let parsed = ok_or_fail (Msp.parse_initialize_result (with_durability (Some (`String wire)))) in
+       check bool wire true (parsed.session_durability = expected))
+    [ "durable", Msp.Durable; "ephemeral", Msp.Ephemeral ];
+  List.iter
+    (fun value ->
+       match Msp.parse_initialize_result (with_durability value) with
+       | Error _ -> ()
+       | Ok _ -> fail "malformed or unknown durability was accepted")
+    [ Some `Null; Some (`Bool true); Some (`String "unknown") ];
+  let absent = ok_or_fail (Msp.parse_initialize_result (with_durability None)) in
+  check bool "v1 defines absent as durable" true (absent.session_durability = Msp.Durable);
+  let extended = `Assoc (("futureField", `Bool true) :: fields) in
+  let parsed = ok_or_fail (Msp.parse_initialize_result extended) in
+  check bool "unrelated extension preserves known durability" true (parsed.session_durability = Msp.Durable)
+;;
+
+let test_effective_approval_mode_wire_contract () =
+  let parse value = Msp.parse_session_result ~stage:"session/start"
+      (`Assoc ["session", `Assoc (["sessionId", `String "s"; "turnCount", `Int 0] @
+        (match value with None -> [] | Some value -> ["approvalMode", value]))]) in
+  List.iter (fun mode ->
+    let value = `Assoc ["mode", `String (Msp.approval_mode_to_string mode);
+      "source", `String "startup"; "lastCommandId", `Null; "futureField", `Bool true] in
+    let session = ok_or_fail (parse (Some value)) in
+    check bool "known effective session mode" true (session.approval_mode = Some mode);
+    let changed = ok_or_fail (Msp.parse_set_approval_mode_result
+      (`Assoc ["status", `String "accepted"; "effectiveMode", value])) in
+    check bool "known effective changed mode" true (changed = mode))
+    [Msp.Allow_all; Msp.Prompt_unmatched; Msp.On_request; Msp.Deny_unmatched];
+  check bool "missing session mode is no assertion" true
+    ((ok_or_fail (parse None)).approval_mode = None);
+  List.iter (fun value -> match parse (Some value) with
+    | Error _ -> () | Ok _ -> fail "malformed effective mode accepted")
+    [`Null; `String "allowAll"; `Assoc []; `Assoc ["mode", `String "future"];
+     `Assoc ["mode", `Int 1]]
+;;
+
+(* Frames Muse Code 1.4.0 exchanged on 2026-09-28. The ack carries no
+   model. *)
+let test_session_model_selection_wire_contract () =
+  let open Yojson.Safe.Util in
+  let set_model = Msp.session_set_model_request ~id:3 ~command_id:"c-model"
+      ~session_id:"s-1" ~model_id:"muse-spark-1.3" in
+  check string "setModel method" "session/setModel" (set_model |> member "method" |> to_string);
+  check int "setModel id" 3 (set_model |> member "id" |> to_int);
+  let params = member "params" set_model in
+  check string "setModel command" "c-model" (params |> member "commandId" |> to_string);
+  check string "setModel session" "s-1" (params |> member "sessionId" |> to_string);
+  check string "setModel selection" "muse-spark-1.3"
+    (params |> member "model" |> member "modelId" |> to_string);
+  let ack = Yojson.Safe.from_string
+      {|{"commandId":"01a0e77a-eaac-73f7-b3f6-4aa845e85360","status":"accepted"}|} in
+  ok_or_fail (Msp.parse_set_model_result ack);
+  List.iter (fun result -> match Msp.parse_set_model_result result with
+    | Error _ -> () | Ok () -> fail "unaccepted model selection was accepted")
+    [`Assoc ["commandId", `String "c"; "status", `String "rejected"];
+     `Assoc ["commandId", `String "c"]; `Null]
+;;
+
+(* The params of the session/tokenUsage frame Muse Code 1.4.0 sent for one
+   model call on 2026-09-28, cut to the members this codec reads. *)
+let test_model_usage_names_the_call_model () =
+  let params model = `Assoc (
+    [ "sessionId", `String "01a0e77a-e43c-73a0-965a-3d73185c4d38"
+    ; "turnId", `String "01a0e77a-ec2e-7efc-9421-03ec75fd1ca8"
+    ; "usage", `Assoc [ "inputTokens", `Int 18248; "outputTokens", `Int 27;
+                         "cachedTokens", `Int 10000; "reasoningTokens", `Int 5;
+                         "cacheReadTokens", `Int 10000 ]
+    ; "viewCursor", `String "v:5"
+    ; "promptTokens", `Int 18248
+    ; "totalTokens", `Int 18275
+    ] @ match model with None -> [] | Some model -> [ "modelId", model ]) in
+  let parse params = Msp.parse_notification ~method_:"session/tokenUsage" params in
+  (match ok_or_fail (parse (params (Some (`String "muse-spark-1.3")))) with
+   | Msp.Model_usage_reported { session_id; turn_id; model_id; usage; view_cursor } ->
+     check string "session" "01a0e77a-e43c-73a0-965a-3d73185c4d38" session_id;
+     check string "turn" "01a0e77a-ec2e-7efc-9421-03ec75fd1ca8" turn_id;
+     check (option string) "model" (Some "muse-spark-1.3") model_id;
+     check string "replay identity" "v:5" view_cursor;
+     check (option int) "counted-once prompt" (Some 18248) usage.prompt_tokens;
+     check (option int) "explicit cache reads" (Some 10000) usage.cache_read_tokens;
+     check (option int) "missing cache writes stay unknown" None usage.cache_write_tokens
+   | _ -> fail "session/tokenUsage was not read as model usage");
+  List.iter (fun model -> match ok_or_fail (parse (params model)) with
+    | Msp.Model_usage_reported { model_id = None; _ } -> ()
+    | _ -> fail "an unnamed model was not None")
+    [ None; Some `Null ];
+  match parse (`Assoc [ "sessionId", `String "s-1" ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "a usage frame without its turn was accepted"
+;;
+
+let test_view_gap_preserves_subscription_identity () =
+  List.iter (fun session ->
+    let params = `Assoc (["after", `String "opaque-before"; "next", `String "opaque-after"]
+      @ match session with None -> [] | Some value -> ["sessionId", value]) in
+    match ok_or_fail (Msp.parse_notification ~method_:"view/gap" params) with
+    | Msp.View_gap { session_id; after; next } ->
+      check (option string) "gap session" (match session with
+        | Some (`String value) -> Some value | _ -> None) session_id;
+      check string "lower cursor stays opaque" "opaque-before" after;
+      check string "upper cursor stays opaque" "opaque-after" next
+    | _ -> fail "view/gap was ignored") [ Some (`String "s-1"); None; Some `Null ];
+  check bool "malformed gap is refused" true
+    (Result.is_error (Msp.parse_notification ~method_:"view/gap"
+       (`Assoc ["sessionId", `String "s-1"; "after", `String "v:1"])))
+;;
+
+let () =
+  run
+    "runtime_muse_msp"
+    [ ( "corpus"
+      , [ test_case "text run single turn" `Quick test_text_run_single_turn
+        ; test_case "client frames match corpus" `Quick test_client_frames_match_corpus
+        ; test_case "capability handshake" `Quick test_capability_handshake
+        ; test_case "codec fingerprint is the corpus stable bundle" `Quick
+            test_codec_fingerprint_is_the_corpus_stable_bundle
+        ; test_case "host session durability follows v1 wire contract" `Quick
+            test_session_durability_follows_v1_wire_contract
+        ; test_case "approval round trip" `Quick test_approval_round_trip
+        ; test_case "provider failure turn" `Quick test_provider_failure_turn
+        ; test_case "unknown item kind is kept" `Quick test_unknown_item_kind_is_kept
+        ; test_case "compaction members are decoded" `Quick
+            test_compaction_members_are_decoded
+        ; test_case "corpus message phases" `Quick test_corpus_message_phases
+        ] )
+    ; ( "codec"
+      , [ test_case "wire refusals" `Quick test_wire_refusals
+        ; test_case "host death terminal" `Quick test_host_death_terminal
+        ; test_case "delta fields" `Quick test_delta_fields
+        ; test_case "message phase is decoded" `Quick test_message_phase_is_decoded
+        ; test_case "usage read" `Quick test_usage_read
+        ; test_case "session config carries bridge" `Quick test_session_config_carries_bridge
+        ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip
+        ; test_case "effective approval mode wire contract" `Quick test_effective_approval_mode_wire_contract
+        ; test_case "session model selection wire contract" `Quick test_session_model_selection_wire_contract
+        ; test_case "model usage names the call model" `Quick test_model_usage_names_the_call_model
+        ; test_case "view gap preserves subscription identity" `Quick test_view_gap_preserves_subscription_identity
+        ] )
+    ]
+;;

@@ -1,0 +1,71 @@
+{
+  "schema": "masc.public_sites.combined_metadata_audit.v1",
+  "cases": 8,
+  "tool_calls": 128,
+  "successful_tool_calls": 116,
+  "failure_counts": {
+    "initial_closed_session_guard": 8,
+    "session_close_timeout": 2,
+    "invalid_session_after_close": 2
+  },
+  "coverage": {
+    "tools": {
+      "BrowserSession": 18,
+      "BrowserTabs": 22,
+      "BrowserGoto": 8,
+      "BrowserRead": 44,
+      "BrowserInteract": 4,
+      "BrowserAct": 20,
+      "keeper_analyze_image": 6
+    },
+    "read_modes": {
+      "text": 26,
+      "elements": 6,
+      "screenshot": 12,
+      "frames": 0,
+      "dialog": 0
+    },
+    "interact_actions": {
+      "click": 0,
+      "fill": 2,
+      "scroll": 2
+    },
+    "act_actions": {
+      "open_tab": 2,
+      "close_tab": 2,
+      "click": 2,
+      "fill": 0,
+      "press": 2,
+      "select": 2,
+      "scroll": 2,
+      "back": 2,
+      "forward": 2,
+      "reload": 4,
+      "upload": 0,
+      "accept_dialog": 0,
+      "dismiss_dialog": 0
+    }
+  },
+  "linked_browser_artifact_reads": 6,
+  "original_mdn_status": "partial; supplemental cases do not overwrite originals",
+  "supplement_checks": [
+    {
+      "case": "mdn-supplement-1",
+      "audit": "supplement_verified",
+      "scroll_position": {
+        "x": 0,
+        "y": 500
+      },
+      "tui_measured": true
+    },
+    {
+      "case": "mdn-supplement-2",
+      "audit": "supplement_verified",
+      "scroll_position": {
+        "x": 0,
+        "y": 500
+      },
+      "tui_measured": false
+    }
+  ]
+}

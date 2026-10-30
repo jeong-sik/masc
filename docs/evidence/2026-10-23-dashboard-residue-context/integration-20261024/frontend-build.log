@@ -1,0 +1,38 @@
+
+> masc-dashboard@1.0.0 build /private/tmp/masc-dashboard-stack-45588-20261024/dashboard
+> vite build
+
+vite v7.3.7 building client environment for production...
+(node:7191) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+transforming...
+
+/dashboard/assets/fonts/Cinzel-Regular.ttf referenced in /dashboard/assets/fonts/Cinzel-Regular.ttf didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/dashboard/assets/fonts/EBGaramond-400i-latinext.woff2 referenced in /dashboard/assets/fonts/EBGaramond-400i-latinext.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/dashboard/assets/fonts/EBGaramond-400i-latin.woff2 referenced in /dashboard/assets/fonts/EBGaramond-400i-latin.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/dashboard/assets/fonts/EBGaramond-400-latinext.woff2 referenced in /dashboard/assets/fonts/EBGaramond-400-latinext.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/dashboard/assets/fonts/EBGaramond-400-latin.woff2 referenced in /dashboard/assets/fonts/EBGaramond-400-latin.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/dashboard/assets/fonts/JetBrainsMono-400-latinext.woff2 referenced in /dashboard/assets/fonts/JetBrainsMono-400-latinext.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+[asset listing omitted; SHA-256 below covers full original log]
+
+../assets/dashboard/assets/settings-surface-Cng_xTpg.js                        189.06 kB │ gzip:  51.50 kB │ map:   468.41 kB
+../assets/dashboard/assets/mermaid-chunk-I66GZJ75-Cm_wX8GY.js                  197.94 kB │ gzip:  21.51 kB │ map:   428.87 kB
+../assets/dashboard/assets/keeper-detail-body-D3iRukvB.js                      200.99 kB │ gzip:  50.52 kB │ map:   514.38 kB
+../assets/dashboard/assets/katex-HP8lGamR.js                                   261.31 kB │ gzip:  77.25 kB │ map:   975.43 kB
+../assets/dashboard/assets/keeper-detail-page-AnIs2w2l.js                      272.95 kB │ gzip:  74.29 kB │ map:   782.28 kB
+../assets/dashboard/assets/cytoscape-CQT7hIPL.js                               441.81 kB │ gzip: 140.93 kB │ map: 1,865.89 kB
+../assets/dashboard/assets/ide-shell-BgXJfvoC.js                               502.71 kB │ gzip: 155.75 kB │ map: 2,144.08 kB
+../assets/dashboard/assets/mermaid-parser-B_cVgLWe.js                          687.90 kB │ gzip: 153.56 kB │ map: 2,178.98 kB
+../assets/dashboard/assets/index-CluZcspr.js                                   874.62 kB │ gzip: 249.20 kB │ map: 3,605.24 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 9.86s

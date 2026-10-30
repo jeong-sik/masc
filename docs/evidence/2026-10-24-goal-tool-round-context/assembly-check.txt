@@ -1,0 +1,18 @@
+PASS first request retains Goal
+PASS first request retains other world
+PASS Goal has exactly one issued block
+PASS Goal is absent from remaining Dynamic block
+PASS second request retains GOAL-ID
+PASS second request retains CURRENT-REV
+PASS second request retains MEASUREMENT-ID
+PASS second request omits GATE
+PASS second request omits TASK
+PASS second request omits LANE
+PASS second request omits OWNER
+PASS second request omits CLOCK
+PASS second request omits FOREIGN-REV
+PASS later request keeps exact issued Goal
+PASS another turn borrows no Goal snapshot
+PASS mismatched renderer evidence never promotes a Goal block
+PASS unmatched source bytes remain intact
+17 exact-source assembly checks passed

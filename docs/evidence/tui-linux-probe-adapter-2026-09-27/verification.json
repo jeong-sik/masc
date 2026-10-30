@@ -1,0 +1,26 @@
+{
+  "run": 36265260527,
+  "head": "91905edec1b431446b3b268c4aca609b11dc6e7c",
+  "conclusion": "success",
+  "artifact": 10913378337,
+  "zip_sha256": "0f8a65286029d02d806d80809f43aff93bc21e7acb4744de8c68c231e9d3184d",
+  "members": 11,
+  "sessions": 2,
+  "acknowledged_frames": 40,
+  "draft_checks": 2,
+  "retained_channels": 250,
+  "scenario_environment_keys": [
+    "LANG",
+    "PATH"
+  ],
+  "binary_product_diff": [
+    "changelog.d/39412.md",
+    "lib/dashboard/dashboard_execution_builders.ml",
+    "lib/dashboard/dashboard_execution_builders.mli",
+    "test/test_dashboard_briefing.ml"
+  ],
+  "scenario_sha256": "2b12d51f3fb64d0a32924804c601a2f9e489729962da303a6049cada1114af55",
+  "helper_sha256": "0aae96ef81f3c33db4a9c79648888e29d9770421dbcdef11faf918cbd0f30ebb",
+  "all_observations_above_0_1ms": true,
+  "scope": "Linux adapter plumbing smoke with no TUI source optimization; no causal latency, deployed runtime, physical display or broad Keeper continuity proof"
+}

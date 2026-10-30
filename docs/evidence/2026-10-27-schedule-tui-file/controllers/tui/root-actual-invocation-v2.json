@@ -1,0 +1,21 @@
+{
+  "recorded_unix": 1793054361.2940302,
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v2.py",
+    "--source-root",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+    "--native-dir",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-1",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--observation-deadline-unix",
+    "1793054961.293945"
+  ],
+  "controller_sha256": "8c7712038a331fbcc3dedb8e9e8e7b89442e6dda1d218a49ae16e8dbbe4ffe29",
+  "review": "root full delta + combined_independent_review source-only PASS no P0-P2",
+  "scope": "One owned actual PTY request/state trial, no visible UI/paint/F9 proof or real model invocation",
+  "deadline_policy": "finite observation only, no automatic retry or forcekill"
+}

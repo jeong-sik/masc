@@ -1,0 +1,69 @@
+{
+  "operation": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "kmsg-fd3e8e9699487a4aaa9e3864b35c6731",
+    "sequence": "0",
+    "created_at": 1788998571.413589,
+    "execution_digest": "e34f1ab1407067d137bebccbc2d787d829e8bceb0f0810a89e1460d4f9dc72bc",
+    "source": {
+      "channel": "agent",
+      "channel_user_id": "",
+      "channel_user_name": "",
+      "channel_workspace_id": "",
+      "continuation_channel": {
+        "kind": "dashboard",
+        "thread_id": "keeper:image-producer"
+      },
+      "conversation_id": null,
+      "external_message_id": null,
+      "extra_mentions": [],
+      "schema": "masc.keeper_chat_operation.source.v1",
+      "submitted_by": "admin",
+      "surface": {
+        "kind": "agent"
+      },
+      "thread_id": "keeper:image-producer",
+      "user_row_origin": "needs_append",
+      "workspace_id": null
+    },
+    "input": null,
+    "state": "Succeeded",
+    "completed_at": 1788998571.656696,
+    "outcome_ref": "trace-1788998571356-00000#1"
+  },
+  "task": {
+    "id": "task-001",
+    "title": "Three synthetic rendering attachments",
+    "description": "Transport three exact PNG artifact images to the independent verifier. Synthetic fixture, no visual quality requirement.",
+    "priority": 1,
+    "files": [],
+    "created_at": "2026-09-10T00:02:51Z",
+    "created_by": "admin",
+    "handoff_context": {
+      "summary": "Synthetic image delivery mismatch.",
+      "reason": "Synthetic image delivery mismatch.",
+      "evidence_refs": [
+        "vrf-bead32b7fc6f2b0bfb0960e136b4d239"
+      ],
+      "updated_at": "2026-09-10T00:02:51Z",
+      "updated_by": "verifier_exact"
+    },
+    "status": "in_progress",
+    "assignee": "image-producer",
+    "started_at": "2026-09-10T00:02:51Z"
+  },
+  "verdict": {
+    "type": "task_completion_verdict",
+    "from_status": "awaiting_verification",
+    "to_status": "in_progress",
+    "ts": "2026-09-10T00:02:51Z",
+    "task_id": "task-001",
+    "authority_kind": "system_llm_agent",
+    "authority_actor": "verifier_exact",
+    "producer": "image-producer",
+    "verification_id": "vrf-bead32b7fc6f2b0bfb0960e136b4d239",
+    "evaluator_runtime": "image_fixture.vision",
+    "verdict": "rejected",
+    "reason": "Synthetic image delivery mismatch."
+  }
+}

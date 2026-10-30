@@ -1,0 +1,29 @@
+{
+  "preview_head": "4c082dac16d3a5c36bcc99b76676b83539f2c312",
+  "checkout": "0cd3823ddeffe7ce0a543b50f211532e844bf822",
+  "backend_build": {
+    "release_version": "0.35.12",
+    "binary_version": "0.35.12",
+    "commit": "703ce088c8548e5c2e74a4f682a5ccf6a9a586c4",
+    "commit_source": "embedded",
+    "binary_commit": "703ce088c8548e5c2e74a4f682a5ccf6a9a586c4",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "67ccd4bba372202ba5f2ec30757158fdecb6cb3ae27fb1edeaf374d985460b05",
+    "binary_commit_unix_ts": 1789182311,
+    "binary_commit_age_seconds": 23229,
+    "executable_path": "/private/tmp/masc-collaboration-release-03512/runtime/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-collaboration-release-03512/runtime",
+    "runtime_instance_id": "01a094e2-9242-7000-b4f9-3ed5aeb2788f",
+    "started_at": "2026-09-12T09:11:11Z",
+    "uptime_seconds": 1268
+  },
+  "render_errors": [
+    "[ErrorBoundary:lab:tools] TypeError: Cannot read properties of null (reading 'replace')\n    at y (http://127.0.0.1:18951/dashboard/assets/config-resolution-panel-BmBkgHyX.js:5:1137)\n    at q (http://127.0.0.1:18951/dashboard/assets/config-resolution-panel-BmBkgHyX.js:5:1182)\n    at N.p [as constructor] (http://127.0.0.1:18951/dashboard/assets/config-resolution-panel-BmBkgHyX.js:5:1593)\n    at N.Te [as render] (http://127.0.0.1:18951/dashboard/assets/vendor-Dd31PCZi.js:1:9244)\n    at xt (http://127.0.0.1:18951/dashboard/assets/vendor-Dd31PCZi.js:1:6206)\n    at re (http://127.0.0.1:18951/dashboard/assets/vendor-Dd31PCZi.js:1:1821)\n    at He (http://127.0.0.1:18951/dashboard/assets/vendor-Dd31PCZi.js:1:8356)\n    at xt (http://127.0.0.1:18951/dashboard/assets/vendor-Dd31PCZi.js:1:6894)\n    at re (http://127.0.0.1:18951/dashboard/assets/vendor-Dd31PCZi.js:1:1821)\n    at He (http://127.0.0.1:18951/dashboard/assets/vendor-Dd31PCZi.js:1:8356)"
+  ],
+  "server_repo_path": {
+    "path": null,
+    "exists": false,
+    "source": "server_binary"
+  }
+}

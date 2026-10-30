@@ -1,0 +1,247 @@
+(** Pure domain model for scheduled internal automation.
+
+    A schedule request records when to dispatch an opaque, typed payload and
+    who requested it. Authorization of any external effect belongs to the
+    payload consumer's leaf gate, not to the scheduler. *)
+
+type actor_kind = Schedule_contract_values.actor_kind =
+  | Human_operator
+  | Automated_actor
+  | System
+
+type actor =
+  { id : string
+  ; kind : actor_kind
+  ; display_name : string option
+  }
+
+type schedule_status = Schedule_contract_values.schedule_status =
+  | Scheduled
+  | Due
+  | Running
+  | Succeeded
+  | Failed
+  | Cancelled
+  | Expired
+
+val all_schedule_statuses : schedule_status list
+
+type schedule_source = Schedule_contract_values.schedule_source =
+  | Operator_request
+  | Automated_request
+  | System_request
+
+(** Recurrence contract.
+
+    [Daily.timezone] is a fixed-offset selector, not full civil-timezone
+    support. It accepts UTC aliases, Asia/Seoul/KST as +09:00 aliases, and
+    explicit fixed offsets such as [+09:00] or [UTC+09:00]. It never consults
+    host local time or DST rules.
+
+    [Cron.expression] is a standard 5-field expression
+    [minute hour day-of-month month day-of-week]. It supports wildcards,
+    comma lists, numeric ranges, and step syntax such as [*/15] and [1-5/2].
+    Single-value steps such as [5/10] are rejected; spell out the range.
+    Day-of-week accepts [0] or [7] for Sunday. Following Vixie cron semantics,
+    if either day field starts with a wildcard (including [*/s] or a leading
+    wildcard in a list), both fields must match their selected values.
+    Otherwise either day-of-month or day-of-week may match. *)
+type recurrence =
+  | One_shot
+  | Interval of { interval_sec : int }
+  | Daily of
+      { hour : int
+      ; minute : int
+      ; second : int
+      ; timezone : string
+      }
+  | Cron of
+      { expression : string
+      ; timezone : string
+      }
+
+(** Opaque consumer payload.
+
+    The schedule domain does not interpret payload kind or body fields, but it
+    does require a typed envelope so producers cannot persist an ambiguous raw
+    string/null/list as future intent. Serialized shape:
+    [{ kind: string; body: object }]. *)
+type payload
+
+(** Who cancelled a schedule through [masc_schedule_cancel], and why, as the
+    caller gave it. The actor is the caller the dispatch boundary resolved,
+    never an argument. Private so that only {!make_cancellation} builds one:
+    a blank reason written to the ledger would fail the next load of every
+    row. *)
+type cancellation = private
+  { cancelled_by : actor
+  ; reason : string
+  }
+
+type schedule_request =
+  { schedule_instance_id : string
+  ; schedule_id : string
+  ; requested_by : actor
+  ; scheduled_by : actor
+  ; requested_at : float
+  ; due_at : float
+  ; expires_at : float option
+  ; payload : payload
+  ; status : schedule_status
+  ; source : schedule_source
+  ; recurrence : recurrence
+  ; cancellation : cancellation option
+      (** [Some] only on a row [Schedule_store.cancel_request] cancelled. A
+          row cancelled because its consumer retired
+          ([Schedule_store.cancel_matching]) carries [None]. *)
+  }
+
+type wake_status = Schedule_contract_values.wake_status =
+  | Wake_running
+  | Wake_succeeded
+  | Wake_failed
+
+type wake_attempt_id = private string
+
+val fresh_wake_attempt_id : unit -> wake_attempt_id
+val wake_attempt_id_of_string : string -> (wake_attempt_id, string) result
+(** Requires the complete canonical lowercase UUIDv7 spelling. *)
+val wake_attempt_id_to_string : wake_attempt_id -> string
+
+type wake_attempt_identity = Unidentified | Identified of wake_attempt_id
+(** Only historical rows without [attempt_id] are unidentified. Reading never
+    invents an identity; an explicitly malformed identity refuses decoding. *)
+
+type wake_settlement_kind =
+  | Accepted
+  | Schedule_rejected
+  | Occurrence_rejected
+  | Retryable_failure
+  | Process_interrupted
+  | Unsupported_payload
+  | Cancelled_schedule
+  | Orphaned_attempt
+
+type wake_record =
+  { schedule_instance_id : string
+  ; schedule_id : string
+  ; attempt_identity : wake_attempt_identity
+  ; settlement_kind : wake_settlement_kind option
+      (** Absent only for unsettled or historical records; absence is preserved
+          by the codec and is never sufficient fenced-settlement evidence. *)
+  ; started_at : float
+  ; finished_at : float option
+  ; due_at : float
+  ; payload_digest : string
+  ; status : wake_status
+  ; detail : Yojson.Safe.t option
+  ; error : string option
+  }
+
+type schedule_note =
+  { note_id : string
+  ; schedule_id : string
+  ; author_id : string
+  ; author_kind : actor_kind
+  ; created_at : float
+  ; body : string
+  }
+
+val schedule_note_to_yojson : schedule_note -> Yojson.Safe.t
+
+val schedule_note_of_yojson : Yojson.Safe.t -> (schedule_note, string) result
+
+val create_request :
+  schedule_id:string ->
+  requested_by:actor ->
+  scheduled_by:actor ->
+  requested_at:float ->
+  due_at:float ->
+  ?expires_at:float ->
+  payload:Yojson.Safe.t ->
+  source:schedule_source ->
+  ?recurrence:recurrence ->
+  unit ->
+  (schedule_request, string) result
+
+val make_cancellation :
+  cancelled_by:actor -> reason:string -> (cancellation, string) result
+(** Refuses a blank [cancelled_by.id] or [reason]. The decoder applies the
+    same rule to a stored cancellation. *)
+
+val is_terminal : schedule_status -> bool
+
+val modify_allowed : schedule_status -> bool
+(** Whether a schedule in this status accepts a modify. [Schedule_store]
+    refuses [update_request] with [Transition_refused] exactly when this is
+    [false], and the TUI asks the same function before it opens the editor,
+    so the rule is written once. *)
+val validate_recurrence : recurrence -> (recurrence, string) result
+
+type interval_below_runner_tick =
+  { interval_sec : int
+  ; runner_tick_sec : float
+  }
+
+val interval_fires_as_declared :
+  runner_tick_sec:float ->
+  recurrence ->
+  (unit, interval_below_runner_tick) result
+(** Whether the schedule runner, which looks once every [runner_tick_sec],
+    fires [recurrence] as often as it declares. Refuses an [Interval] shorter
+    than the tick. Create and modify ask it; [validate_recurrence] does not,
+    so loading accepts any positive interval. *)
+val first_due_after : now:float -> recurrence -> float option
+(** Compute the first due time for calendar recurrences that do not need an
+    explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)
+
+val next_due_after : now:float -> schedule_request -> float option
+val reschedule_after_due_signal : now:float -> schedule_request -> schedule_request option
+
+val payload_of_yojson : Yojson.Safe.t -> (payload, string) result
+val payload_to_yojson : payload -> Yojson.Safe.t
+val payload_digest : payload -> string
+(** SHA-256 of the payload's canonical JSON, taken when {!payload_of_yojson}
+    decoded it, so reading it costs nothing. *)
+
+val mark_due : now:float -> schedule_request -> schedule_request
+(** Observes time for active requests. [Scheduled] and [Due] requests whose
+    [expires_at <= now] become [Expired]; otherwise
+    [Scheduled] requests whose [due_at <= now] become [Due]. *)
+
+val actor_kind_to_string : actor_kind -> string
+val actor_kind_of_string : string -> (actor_kind, string) result
+val schedule_status_to_string : schedule_status -> string
+val schedule_status_of_string : string -> (schedule_status, string) result
+val schedule_source_to_string : schedule_source -> string
+val schedule_source_of_string : string -> (schedule_source, string) result
+val recurrence_kind : recurrence -> Schedule_contract_values.recurrence_kind
+val recurrence_kind_to_string : recurrence -> string
+val recurrence_summary : recurrence -> string
+(** Stable, human-readable recurrence summary for dashboard and keeper tool
+    outputs. This is presentation-only; schedule eligibility still uses the
+    typed [recurrence] value. *)
+val wake_status_to_string : wake_status -> string
+
+val actor_to_yojson : actor -> Yojson.Safe.t
+val recurrence_to_yojson : recurrence -> Yojson.Safe.t
+val wake_record_to_yojson : wake_record -> Yojson.Safe.t
+val wake_record_of_yojson :
+  Yojson.Safe.t -> (wake_record, string) result
+val schedule_request_to_yojson : schedule_request -> Yojson.Safe.t
+val schedule_request_of_yojson : Yojson.Safe.t -> (schedule_request, string) result
+
+(* JSON field accessors. Exported because the schedule store, runner, and the
+   server-side payload consumers decode the same object shapes and previously
+   each carried a private copy. *)
+
+val assoc_field :
+  string -> (string * Yojson.Safe.t) list -> (Yojson.Safe.t, string) result
+(** [assoc_field name fields] returns the value bound to [name], or
+    [Error ("missing field: " ^ name)] when [name] is absent. *)
+
+val float_field : string -> (string * Yojson.Safe.t) list -> (float, string) result
+(** [float_field name fields] reads [name] as a float. A [`Int] value is
+    widened with [float_of_int]. Returns [Error ("missing field: " ^ name)]
+    when [name] is absent, and [Error (name ^ ": expected float")] for any
+    other JSON value. *)

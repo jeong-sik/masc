@@ -1,0 +1,11 @@
+(test
+ (name test_ttrace_parser)
+ (libraries tlc_test_gen)
+ (deps
+  (glob_files fixtures/*.tla)))
+
+; Test assertions match the one case they check; see warning 4 in the root dune.
+(env
+ (_
+  (flags
+   (:standard -w -4))))
